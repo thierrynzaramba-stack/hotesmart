@@ -82,7 +82,7 @@ test('la liste annonce combien d’evaluations attendent', async () => {
     EVAL({ id: 'a', status: 'a_valider' }),
     EVAL({ id: 'b', status: 'publiee' }),
   ])
-  assert.match(conteneur.textContent, /1 evaluation\(s\) vous attendent/)
+  assert.match(conteneur.textContent, /1 évaluation\(s\) vous attendent/)
 })
 
 test('rien a faire se dit, plutot que de laisser croire a une panne', async () => {
@@ -92,7 +92,7 @@ test('rien a faire se dit, plutot que de laisser croire a une panne', async () =
 
 test('une liste vide explique QUAND les evaluations apparaissent', async () => {
   const { conteneur } = await ouvrirListe([])
-  assert.match(conteneur.textContent, /jour du depart/)
+  assert.match(conteneur.textContent, /jour du départ/)
   assert.match(conteneur.textContent, /Airbnb seulement/)
 })
 
@@ -101,7 +101,7 @@ test('LE TEST QUI COMPTE : un delai passe sur un statut NON terminal dit « dela
   // Une evaluation que personne n'a touchee reste `a_remplir` indefiniment, et
   // affichait « dernier jour » trois semaines apres l'echeance.
   const { conteneur } = await ouvrirListe([EVAL({ status: 'a_remplir', echeance: jour(-21) })])
-  assert.match(conteneur.textContent, /delai depasse/)
+  assert.match(conteneur.textContent, /délai dépassé/)
   assert.ok(!/dernier jour/.test(conteneur.textContent), conteneur.textContent)
 })
 
@@ -115,8 +115,8 @@ test('une evaluation hors delai ne compte pas dans « n vous attendent »', asyn
     EVAL({ id: 'a', status: 'a_remplir', echeance: jour(-2) }),
     EVAL({ id: 'b', status: 'a_valider', echeance: jour(4) }),
   ])
-  assert.match(conteneur.textContent, /1 evaluation\(s\) vous attendent/)
-  assert.match(conteneur.textContent, /1 hors delai/)
+  assert.match(conteneur.textContent, /1 évaluation\(s\) vous attendent/)
+  assert.match(conteneur.textContent, /1 hors délai/)
 })
 
 test('le dernier jour, lui, reste « dernier jour » et garde son bouton', async () => {
@@ -142,7 +142,7 @@ test('LE TEST QUI COMPTE : une evaluation dont le delai est passe n’affiche AU
   assert.ok(!/-\d+ jour/.test(conteneur.textContent), conteneur.textContent)
   assert.ok(!/dernier jour/.test(conteneur.textContent), conteneur.textContent)
   assert.strictEqual(conteneur.querySelector('.hs-eval-urgent'), null)
-  assert.match(conteneur.textContent, /Delai depasse/)
+  assert.match(conteneur.textContent, /Délai dépassé/)
 })
 
 test('une evaluation deja publiee n’affiche pas de compte a rebours non plus', async () => {
@@ -181,7 +181,7 @@ test('si le bus repond indisponible, la liste le DIT au lieu de ne rien faire', 
   const { conteneur } = await ouvrirListe([EVAL({ status: 'a_valider' })], { bus })
   conteneur.querySelector('[data-evaluer]').click()
   await new Promise(r => setTimeout(r, 0))
-  assert.match(conteneur.textContent, /n est pas disponible/)
+  assert.match(conteneur.textContent, /n’est pas disponible/)
 })
 
 test('au retour de la fenetre, la liste se relit', async () => {

@@ -19,12 +19,12 @@
 import { appel as appelParDefaut } from './appel.js'
 
 const CATEGORIE_LISIBLE = {
-  cleanliness: 'Proprete',
+  cleanliness: 'Propreté',
   communication: 'Communication',
-  respect_house_rules: 'Respect du reglement',
+  respect_house_rules: 'Respect du règlement',
   recommandation: 'Recommandation',
 }
-const REMPLI_LISIBLE = { prestataire: 'La prestataire', hote: 'Moi', les_deux: 'Les deux' }
+const REMPLI_LISIBLE = { prestataire: 'La prestataire', hote: 'L’hôte', les_deux: 'Les deux' }
 
 const echapper = (t) => String(t == null ? '' : t)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -47,7 +47,7 @@ export async function monter (conteneur, options = {}) {
 
   const etat = { criteres: [], config: null, tons: ['chaleureux', 'sobre'], defaut: [], occupe: false, message: null, erreur: null }
 
-  conteneur.innerHTML = '<p class="hs-avis-attente">Chargement des reglages…</p>'
+  conteneur.innerHTML = '<p class="hs-avis-attente">Chargement des réglages…</p>'
   try {
     const [grille, config] = await Promise.all([appel('avis?action=grille'), appel('avis?action=config')])
     etat.defaut = grille.defaut || []
@@ -68,7 +68,7 @@ export async function monter (conteneur, options = {}) {
     // « sur tous vos biens » fausse.
     etat.biensAvecGrille = grille.biens_avec_grille || 0
   } catch (err) {
-    conteneur.innerHTML = `<p class="hs-avis-erreur">${echapper(err.message || 'Reglages illisibles')}</p>`
+    conteneur.innerHTML = `<p class="hs-avis-erreur">${echapper(err.message || 'Réglages illisibles')}</p>`
     return { charge: false }
   }
 
@@ -166,7 +166,7 @@ export async function monter (conteneur, options = {}) {
         },
       })
       etat.surDefaut = false
-      etat.message = 'Reglages enregistres.'
+      etat.message = 'Réglages enregistrés.'
       avertir('Réglages des avis enregistrés.', 'ok')
     } catch (err) {
       etat.erreur = err.message || 'Enregistrement impossible'
@@ -225,9 +225,9 @@ export function rendre (etat) {
   const tons = (etat.tons || []).map(t =>
     `<option value="${echapper(t)}"${config.tone === t ? ' selected' : ''}>${t === 'sobre' ? 'Sobre et factuel' : 'Chaleureux'}</option>`).join('')
 
-  const bloquesConfig = `<div class="card"><div class="card-title">Comment l IA ecrit vos avis</div>`
-    + `<div class="card-sub">Ces reglages orientent la redaction. Ils ne changent jamais les notes, qui viennent de vos boutons.</div>`
-    + `<label class="hs-reglage"><span>Mots que vous aimez employer (separes par des virgules)</span>`
+  const bloquesConfig = `<div class="card"><div class="card-title">Comment l’IA écrit vos avis</div>`
+    + `<div class="card-sub">Ces réglages orientent la rédaction. Ils ne changent jamais les notes, qui viennent de vos boutons.</div>`
+    + `<label class="hs-reglage"><span>Mots que vous aimez employer (séparés par des virgules)</span>`
     + `<input type="text" data-reglage="mots" value="${echapper((config.keywords || []).join(', '))}" placeholder="soigneux, discret, ponctuel"></label>`
     + `<label class="hs-reglage"><span>Ton</span><select data-reglage="ton">${tons}</select></label>`
     + `<label class="hs-reglage"><span>Signature en fin de texte (facultative)</span>`
@@ -235,31 +235,31 @@ export function rendre (etat) {
 
   const criteres = (etat.criteres || []).map((c, i) => rendreCritere(c, i)).join('')
 
-  const entete = `<div class="card"><div class="card-title">Votre grille d evaluation</div>`
+  const entete = `<div class="card"><div class="card-title">Votre grille d’évaluation</div>`
     // ⚠ UNE GRILLE INACTIVE SE DIT, ET EN PREMIER. C'est le seul cas ou aucune
     // evaluation ne peut se remplir, et il ne se voyait nulle part.
     + (etat.inactifs
-      ? `<div class="card-sub hs-avis-erreur">Votre grille est enregistree mais N EST PAS ACTIVE : `
-        + `aucune evaluation ne peut etre remplie. Enregistrez-la de nouveau pour la remettre en service.</div>`
+      ? `<div class="card-sub hs-avis-erreur">Votre grille est enregistrée mais N’EST PAS ACTIVE : `
+        + `aucune évaluation ne peut être remplie. Enregistrez-la de nouveau pour la remettre en service.</div>`
       : '')
     + `<div class="card-sub">`
     + (etat.surDefaut
-      ? 'Vous utilisez la grille par defaut. Modifiez-la et enregistrez pour en faire la votre.'
+      ? 'Vous utilisez la grille par défaut. Modifiez-la et enregistrez pour en faire la vôtre.'
       : etat.biensAvecGrille
         // ⚠ La phrase d'avant disait « sur tous vos biens », ce qui est FAUX des
         // qu'un bien a sa propre grille : `grilleDe` fait primer le bien.
-        ? `Votre grille remplace la grille par defaut, sauf sur ${etat.biensAvecGrille} bien(s) qui ont la leur.`
-        : 'Votre grille remplace la grille par defaut sur vos biens.')
-    + ` Deux regles ne se defont pas : une note 1 est toujours negative, et un refus de recommander aussi. `
-    + `Un avis negatif repasse toujours par vous.</div></div>`
+        ? `Votre grille remplace la grille par défaut, sauf sur ${etat.biensAvecGrille} bien(s) qui ont la leur.`
+        : 'Votre grille remplace la grille par défaut sur vos biens.')
+    + ` Deux règles ne se défont pas : une note 1 est toujours négative, et un refus de recommander aussi. `
+    + `Un avis négatif repasse toujours par vous.</div></div>`
 
   return `<div class="hs-avis-reglages">`
     + (etat.erreur ? `<p class="hs-avis-erreur">${echapper(etat.erreur)}</p>` : '')
     + (etat.message ? `<p class="hs-avis-message">${echapper(etat.message)}</p>` : '')
     + entete + criteres
     + `<div class="hs-avis-actions">`
-    + `<button type="button" data-action="ajouter-critere">Ajouter un critere</button>`
-    + `<button type="button" data-action="revenir-defaut">Revenir a la grille par defaut</button>`
+    + `<button type="button" data-action="ajouter-critere">Ajouter un critère</button>`
+    + `<button type="button" data-action="revenir-defaut">Revenir à la grille par défaut</button>`
     + `</div>`
     + bloquesConfig
     + `<div class="hs-avis-actions"><button type="button" class="hs-avis-principal" data-action="enregistrer"${etat.occupe ? ' disabled' : ''}>Enregistrer</button></div>`
@@ -285,10 +285,10 @@ function rendreCritere (c, i) {
       + `<input type="text" data-niveau="${i}:${j}" data-champ="libelle" value="${echapper(n.libelle || '')}" placeholder="Ce que vous cochez">`
       + champNote
       + `<label class="hs-niveau-negatif"><input type="checkbox" data-niveau="${i}:${j}" data-champ="negatif"`
-      + `${(force || n.negatif) ? ' checked' : ''}${force ? ' disabled' : ''}> Negatif`
+      + `${(force || n.negatif) ? ' checked' : ''}${force ? ' disabled' : ''}> Négatif`
       // ⚠ LA RAISON EST ECRITE A COTE DE LA CASE. Un hote ne doit pas decouvrir
       // la regle par un refus du serveur.
-      + (force ? `<span class="hs-niveau-force"> — force : ${c.categorie === 'recommandation' ? 'un refus de recommander' : 'une note 1'} est toujours negatif</span>` : '')
+      + (force ? `<span class="hs-niveau-force"> — forcé : ${c.categorie === 'recommandation' ? 'un refus de recommander' : 'une note 1'} est toujours négatif</span>` : '')
       + `</label>`
       + `<button type="button" data-action="retirer-niveau" data-index="${i}:${j}" aria-label="Retirer ce niveau">×</button>`
       + `</div>`
@@ -299,7 +299,7 @@ function rendreCritere (c, i) {
     + `<input type="text" data-critere="${i}" data-champ="libelle" value="${echapper(c.libelle || '')}" placeholder="La question, telle que vous la lirez">`
     + `<select data-critere="${i}" data-champ="categorie">${categories}</select>`
     + `<select data-critere="${i}" data-champ="rempli_par">${remplis}</select>`
-    + `<button type="button" data-action="retirer-critere" data-index="${i}" aria-label="Retirer ce critere">Retirer</button>`
+    + `<button type="button" data-action="retirer-critere" data-index="${i}" aria-label="Retirer ce critère">Retirer</button>`
     + `</div>`
     + `<div class="hs-niveaux">${niveaux}</div>`
     + `<button type="button" data-action="ajouter-niveau" data-index="${i}">Ajouter un niveau</button>`

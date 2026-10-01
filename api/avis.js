@@ -104,7 +104,7 @@ async function lister (req, res, garde) {
   // passant simplement sa reference dans l'URL.
   const bienDemande = req.query?.bien ? String(req.query.bien) : null
   if (bienDemande && refs !== null && !refs.map(String).includes(bienDemande)) {
-    return res.status(403).json({ error: 'Bien hors de votre perimetre' })
+    return res.status(403).json({ error: 'Bien hors de votre périmètre' })
   }
 
   // Filtres d'abord, tri et borne ensuite : appliquer un filtre APRES .limit()
@@ -189,7 +189,7 @@ async function sejours (req, res, garde) {
 
   const refs = refsDuPerimetre(garde.contexte)
   if (refs !== null && !refs.map(String).includes(bien)) {
-    return res.status(403).json({ error: 'Bien hors de votre perimetre' })
+    return res.status(403).json({ error: 'Bien hors de votre périmètre' })
   }
 
   const { data, error } = await supabase.from('bookings_snapshot')
@@ -227,7 +227,7 @@ async function creer (req, res, garde) {
   if (!bienRef) return res.status(400).json({ error: 'Choisissez un bien' })
   if (!texte)   return res.status(400).json({ error: 'Le texte de l\'avis est vide' })
   if (texte.length > MAX_TEXTE) return res.status(400).json({ error: 'Texte trop long' })
-  if (!SOURCES.has(source)) return res.status(400).json({ error: 'Canal de reception invalide' })
+  if (!SOURCES.has(source)) return res.status(400).json({ error: 'Canal de réception invalide' })
   // ⚠ La FORME ne suffit pas : '2026-13-45' passe le regex, puis new Date()
   // rend Invalid Date et .toISOString() leve un RangeError — 500 au lieu de 400,
   // et l'appelant croit a une panne serveur alors que c'est sa saisie.
@@ -250,7 +250,7 @@ async function creer (req, res, garde) {
   // n'a pas ete confrontee (REVIEW.md regle 11).
   const refs = refsDuPerimetre(garde.contexte)
   if (refs !== null && !refs.map(String).includes(bienRef)) {
-    return res.status(403).json({ error: 'Bien hors de votre perimetre' })
+    return res.status(403).json({ error: 'Bien hors de votre périmètre' })
   }
   const { data: bien, error: errBien } = await supabase.from('properties')
     .select('id, user_id, provider_property_id')
@@ -338,14 +338,14 @@ async function valider (req, res, garde) {
 
   const refs = refsDuPerimetre(garde.contexte)
   if (refs !== null && !refs.map(String).includes(String(ligne.property_id_ref))) {
-    return res.status(403).json({ error: 'Bien hors de votre perimetre' })
+    return res.status(403).json({ error: 'Bien hors de votre périmètre' })
   }
 
   // On ne valide QUE ce qui est en attente. Reconfirmer un avis OTA n'a pas de
   // sens, et rouvrir une decision deja prise doit etre un geste explicite, pas
   // un effet de bord d'un double clic.
   if (ligne.statut !== 'detecte') {
-    return res.status(409).json({ error: 'Cette entree n\'est pas en attente de validation' })
+    return res.status(409).json({ error: 'Cette entrée n\'est pas en attente de validation' })
   }
 
   const { error } = await supabase.from('ota_reviews')
@@ -379,7 +379,7 @@ async function requalifier (req, res, garde) {
 
   const refs = refsDuPerimetre(garde.contexte)
   if (refs !== null && !refs.map(String).includes(String(ligne.property_id_ref))) {
-    return res.status(403).json({ error: 'Bien hors de votre perimetre' })
+    return res.status(403).json({ error: 'Bien hors de votre périmètre' })
   }
 
   // Seule une ligne RETENUE se requalifie. Une detection en attente se tranche
@@ -389,7 +389,7 @@ async function requalifier (req, res, garde) {
   // gelerait en `humain`.
   if (ligne.statut !== 'confirme') {
     return res.status(409).json({
-      error: 'Seul un avis retenu se requalifie ; une detection se confirme ou s\'ignore' })
+      error: 'Seul un avis retenu se requalifie ; une détection se confirme ou s\'ignore' })
   }
 
   // ⚠ L'AVIS N'EST JAMAIS SUPPRIME, ni son texte modifie. Seul le verdict
@@ -437,7 +437,7 @@ async function evaluationsLister (req, res, garde) {
   if (filtre === '') return res.status(200).json({ evaluations: [], biens: [], etats: ETATS_LISTE })
 
   const etat = String(req.query?.etat || '').trim()
-  if (etat && !ETATS_LISTE.includes(etat)) return res.status(400).json({ error: 'Etat inconnu' })
+  if (etat && !ETATS_LISTE.includes(etat)) return res.status(400).json({ error: 'État inconnu' })
 
   // ⚠ TROIS VALEURS, PAS DEUX. `filtrePerimetreSql` rend `null` pour « tout le
   // compte » (titulaire, ou membre au perimetre complet), `''` pour « aucun
@@ -453,7 +453,7 @@ async function evaluationsLister (req, res, garde) {
   if (etat) requete = requete.eq('status', etat)
 
   const { data, error } = await requete
-  if (error) return res.status(503).json({ error: 'Evaluations illisibles', detail: error.message })
+  if (error) return res.status(503).json({ error: 'Évaluations illisibles', detail: error.message })
 
   // Les noms de biens, pour que l'ecran n'affiche pas des references provider.
   const { data: biens, error: eBiens } = await supabase.from('properties')
@@ -515,7 +515,7 @@ async function configEcrire (req, res, garde) {
   if (bien && !(await bienAutorise(req, res, garde, bien, true))) return
   if (!bien && !peutEcrireAuNiveauCompte(garde)) {
     return res.status(403).json({
-      error: 'Les reglages de tout le compte se modifient depuis un perimetre complet. Reglez ceux d un bien de votre perimetre.',
+      error: 'Les réglages de tout le compte se modifient depuis un périmètre complet. Réglez ceux d’un bien de votre périmètre.',
       motif: 'perimetre_partiel',
     })
   }
@@ -543,7 +543,7 @@ async function configEcrire (req, res, garde) {
   const { error: eE } = deja
     ? await supabase.from('avis_config').update(valeurs).eq('id', deja.id).eq('user_id', userId)
     : await supabase.from('avis_config').insert(valeurs)
-  if (eE) return res.status(503).json({ error: 'Configuration non enregistree', detail: eE.message })
+  if (eE) return res.status(503).json({ error: 'Configuration non enregistrée', detail: eE.message })
 
   return res.status(200).json({ ok: true, niveau: bien ? 'bien' : 'compte', mots: keywords.length })
 }
@@ -557,7 +557,7 @@ async function bienAutorise (req, res, garde, bienId, ecriture) {
   if (!bien) { res.status(404).json({ error: 'Bien introuvable' }); return false }
   const cible = { id: bien.id, ref: bien.provider_property_id }
   const ok = ecriture ? peutEcrire(garde.contexte, 'avis', cible) : peutLire(garde.contexte, 'avis', cible)
-  if (!ok) { res.status(403).json({ error: 'Ce bien n est pas dans votre perimetre' }); return false }
+  if (!ok) { res.status(403).json({ error: 'Ce bien n’est pas dans votre périmètre' }); return false }
   return true
 }
 
@@ -648,19 +648,19 @@ async function grilleEcrire (req, res, garde) {
   const userId = garde.accountUserId
   const brut = req.body?.criteres
   const bienDemande = req.body?.property_id ? String(req.body.property_id).trim() : null
-  if (!Array.isArray(brut)) return res.status(400).json({ error: 'La grille attendue est une liste de criteres' })
-  if (brut.length > 40) return res.status(400).json({ error: 'Une grille de plus de 40 criteres n est pas raisonnable' })
+  if (!Array.isArray(brut)) return res.status(400).json({ error: 'La grille attendue est une liste de critères' })
+  if (brut.length > 40) return res.status(400).json({ error: 'Une grille de plus de 40 critères n’est pas raisonnable' })
   // ⚠ LES NIVEAUX SE BORNENT AUSSI. Constat de review : seuls les criteres
   // l'etaient, donc un seul critere pouvait demander une insertion de taille
   // arbitraire dans `avis_criteres_niveaux`.
   const trop = brut.findIndex(c => Array.isArray(c?.niveaux) && c.niveaux.length > 12)
-  if (trop >= 0) return res.status(400).json({ error: `Le critere n°${trop + 1} a plus de 12 niveaux : une question a niveaux n en demande pas tant` })
+  if (trop >= 0) return res.status(400).json({ error: `Le critère n°${trop + 1} a plus de 12 niveaux : une question à niveaux n’en demande pas tant` })
   if (bienDemande && !UUID_RE.test(bienDemande)) return res.status(400).json({ error: 'Identifiant de bien invalide' })
 
   if (bienDemande && !(await bienAutorise(req, res, garde, bienDemande, true))) return
   if (!bienDemande && !peutEcrireAuNiveauCompte(garde)) {
     return res.status(403).json({
-      error: 'La grille de tout le compte se regle depuis un perimetre complet. Reglez la grille d un bien de votre perimetre.',
+      error: 'La grille de tout le compte se règle depuis un périmètre complet. Réglez la grille d’un bien de votre périmètre.',
       motif: 'perimetre_partiel',
     })
   }
@@ -707,7 +707,7 @@ async function grilleEcrire (req, res, garde) {
     }).select().single()
     if (eC) {
       await nettoyerCriteres(crees)
-      return res.status(400).json({ error: `« ${c.libelle} » refuse : ${eC.message}`, motif: 'critere_refuse' })
+      return res.status(400).json({ error: `« ${c.libelle} » refusé : ${eC.message}`, motif: 'critere_refuse' })
     }
     crees.push(critere.id)
 
@@ -715,7 +715,7 @@ async function grilleEcrire (req, res, garde) {
     const { error: eN } = await supabase.from('avis_criteres_niveaux').insert(lignes)
     if (eN) {
       await nettoyerCriteres(crees)
-      return res.status(400).json({ error: `Les niveaux de « ${c.libelle} » sont refuses : ${eN.message}`, motif: 'niveaux_refuses' })
+      return res.status(400).json({ error: `Les niveaux de « ${c.libelle} » sont refusés : ${eN.message}`, motif: 'niveaux_refuses' })
     }
   }
 
@@ -742,7 +742,7 @@ async function grilleEcrire (req, res, garde) {
   })()
   if (eLectureAnciens) {
     await nettoyerCriteres(crees)
-    return res.status(503).json({ error: 'L ancienne grille n a pas pu etre lue', detail: eLectureAnciens.message })
+    return res.status(503).json({ error: 'L’ancienne grille n’a pas pu être lue', detail: eLectureAnciens.message })
   }
   const idsAnciens = (anciens || []).map(a => a.id)
 
@@ -750,7 +750,7 @@ async function grilleEcrire (req, res, garde) {
   if (eEteindre) {
     // Rien n'a bouge pour l'hote : les nouveaux sont inactifs, on les retire.
     await nettoyerCriteres(crees)
-    return res.status(503).json({ error: 'L ancienne grille n a pas pu etre retiree', detail: eEteindre.message })
+    return res.status(503).json({ error: 'L’ancienne grille n’a pas pu être retirée', detail: eEteindre.message })
   }
 
   // ─── 3. Les nouveaux entrent en service ─────────────────────────────────
@@ -828,14 +828,14 @@ async function chargerEvaluation (req, res, garde, ecriture = false) {
   // donc, et l'unicite (user_id, booking_uid) garantit qu'elles designent la
   // meme ligne.
   const sejour = String(req.body?.booking_uid || req.query?.booking_uid || '').trim()
-  if (!id && !sejour) { res.status(400).json({ error: 'Identifiant ou sejour requis' }); return null }
+  if (!id && !sejour) { res.status(400).json({ error: 'Identifiant ou séjour requis' }); return null }
   if (id && !UUID_RE.test(id)) { res.status(400).json({ error: 'Identifiant invalide' }); return null }
-  if (!id && sejour.length > 200) { res.status(400).json({ error: 'Sejour invalide' }); return null }
+  if (!id && sejour.length > 200) { res.status(400).json({ error: 'Séjour invalide' }); return null }
 
   const requete = supabase.from('guest_evaluations').select('*').eq('user_id', userId)
   const { data, error } = await (id ? requete.eq('id', id) : requete.eq('booking_uid', sejour)).maybeSingle()
   if (error) { res.status(500).json({ error: 'Lecture impossible' }); return null }
-  if (!data) { res.status(404).json({ error: 'Evaluation introuvable' }); return null }
+  if (!data) { res.status(404).json({ error: 'Évaluation introuvable' }); return null }
 
   // ⚠ LE PERIMETRE PAR BIEN, APRES la lecture du compte. Sans lui, un membre
   // limite a un bien evaluerait les voyageurs d'un autre en passant son id.
@@ -856,7 +856,7 @@ async function chargerEvaluation (req, res, garde, ecriture = false) {
     ? peutEcrire(garde.contexte, 'avis', cible)
     : peutLire(garde.contexte, 'avis', cible)
   if (!autorise) {
-    res.status(403).json({ error: 'Ce bien n est pas dans votre perimetre' }); return null
+    res.status(403).json({ error: 'Ce bien n’est pas dans votre périmètre' }); return null
   }
   return data
 }
@@ -994,7 +994,7 @@ async function evaluationRepondre (req, res, garde) {
   const { role, evalScope, evalPower, profilId } = roleEtReglages(garde)
   const reponses = req.body?.reponses
   if (!reponses || typeof reponses !== 'object' || Array.isArray(reponses)) {
-    return res.status(400).json({ error: 'Reponses manquantes' })
+    return res.status(400).json({ error: 'Réponses manquantes' })
   }
 
   let r
@@ -1127,7 +1127,7 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null } = {})
       : Promise.resolve({ data: null, error: null }),
   ])
   if (rConfig.error) {
-    return { ok: false, panne: { code: 503, body: { error: 'Reglages de redaction illisibles', detail: rConfig.error.message } } }
+    return { ok: false, panne: { code: 503, body: { error: 'Réglages de rédaction illisibles', detail: rConfig.error.message } } }
   }
   if (rPresta.error) {
     return { ok: false, panne: { code: 503, body: { error: 'Profil du remplisseur illisible', detail: rPresta.error.message } } }
@@ -1196,7 +1196,7 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null } = {})
     .update({ public_text: r.public_text, private_note: r.private_note })
     .eq('id', e.id).eq('user_id', e.user_id)
   if (eTexte) {
-    return { ok: false, panne: { code: 503, body: { error: 'Texte genere mais non enregistre', detail: eTexte.message } } }
+    return { ok: false, panne: { code: 503, body: { error: 'Texte généré mais non enregistré', detail: eTexte.message } } }
   }
 
   return { ok: true, public_text: r.public_text, private_note: r.private_note, negatif: r.negatif }
@@ -1207,16 +1207,16 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null } = {})
 async function evaluationTexte (req, res, garde) {
   const e = await chargerEvaluation(req, res, garde, true)
   if (!e) return
-  if (e.status === 'publiee') return res.status(409).json({ error: 'Evaluation deja publiee' })
+  if (e.status === 'publiee') return res.status(409).json({ error: 'Évaluation déjà publiée' })
 
   const { role } = roleEtReglages(garde)
   // Une prestataire RELIT, elle ne redige pas : le serveur redige pour elle au
   // moment ou elle termine son formulaire (voir `eval-reponses`).
-  if (role !== 'hote') return res.status(403).json({ error: 'La redaction revient a l hote' })
+  if (role !== 'hote') return res.status(403).json({ error: 'La rédaction revient à l’hôte' })
 
   const r = await redigerEtEnregistrer(e, { remarque: req.body?.remarque, prenom: req.body?.prenom })
   if (r.panne) return res.status(r.panne.code).json(r.panne.body)
-  if (!r.ok) return res.status(422).json({ error: 'Texte non genere', motif: r.motif, detail: r.detail })
+  if (!r.ok) return res.status(422).json({ error: 'Texte non généré', motif: r.motif, detail: r.detail })
 
   return res.status(200).json({ ok: true, public_text: r.public_text, private_note: r.private_note, negatif: r.negatif })
 }
@@ -1312,14 +1312,14 @@ async function evaluationPublier (req, res, garde) {
   // primaire dans ota_reviews ; le provider ne connait que
   // `external_review_id`. Envoyer la premiere faisait un 404 a chaque essai.
   if (!e.ota_review_id) {
-    return res.status(409).json({ error: 'L OTA n a pas encore cree l objet review de ce sejour', motif: 'sans_objet_ota' })
+    return res.status(409).json({ error: 'La plateforme n’a pas encore ouvert d’avis pour ce séjour', motif: 'sans_objet_ota' })
   }
   const { data: objetOta, error: eOta } = await supabase
     .from('ota_reviews').select('external_review_id')
     .eq('id', e.ota_review_id).eq('user_id', e.user_id).maybeSingle()
-  if (eOta) return res.status(503).json({ error: 'Reference OTA illisible', detail: eOta.message })
+  if (eOta) return res.status(503).json({ error: 'Référence de la plateforme illisible', detail: eOta.message })
   if (!objetOta?.external_review_id) {
-    return res.status(409).json({ error: 'La reference de l avis chez le provider est introuvable', motif: 'reference_ota_absente' })
+    return res.status(409).json({ error: 'La référence de l’avis chez la plateforme est introuvable', motif: 'reference_ota_absente' })
   }
 
   // Le texte modifie par l'hote arrive ici : c'est LUI qui part, pas celui de
@@ -1347,7 +1347,7 @@ async function evaluationPublier (req, res, garde) {
   })
   if (eVerrou) {
     if (eVerrou.code === PG_UNICITE) {
-      return res.status(409).json({ error: 'Une publication est deja en cours pour cette evaluation', motif: 'deja_en_cours' })
+      return res.status(409).json({ error: 'Une publication est déjà en cours pour cette évaluation', motif: 'deja_en_cours' })
     }
     return res.status(503).json({ error: 'Verrou de publication indisponible', detail: eVerrou.message })
   }
@@ -1369,7 +1369,7 @@ async function evaluationPublier (req, res, garde) {
     canal = simulationActive() ? providerSimule() : getProvider(e.provider)
   } catch (err) {
     await relacher()
-    return res.status(409).json({ error: `Provider inconnu pour ce sejour : ${e.provider}`, motif: 'provider_inconnu' })
+    return res.status(409).json({ error: `Plateforme inconnue pour ce séjour : ${e.provider}`, motif: 'provider_inconnu' })
   }
   // ⚠ ET IL DOIT SAVOIR PUBLIER UN AVIS. Beds24 n'expose pas l'evaluation du
   // voyageur : un canal sans ces deux methodes doit se dire, pas echouer en
@@ -1377,7 +1377,7 @@ async function evaluationPublier (req, res, garde) {
   if (typeof canal.publierAvisVoyageur !== 'function' || typeof canal.lireAvis !== 'function') {
     await relacher()
     return res.status(409).json({
-      error: `Le canal ${e.provider} ne publie pas d evaluation du voyageur`,
+      error: `Le canal ${e.provider} ne publie pas d’évaluation du voyageur`,
       motif: 'canal_sans_evaluation',
     })
   }
@@ -1464,7 +1464,7 @@ async function evaluationAbandonner (req, res, garde) {
   const e = await chargerEvaluation(req, res, garde, true)
   if (!e) return
   const { role, profilId } = roleEtReglages(garde)
-  if (role !== 'hote') return res.status(403).json({ error: 'Seul l hote abandonne une evaluation' })
+  if (role !== 'hote') return res.status(403).json({ error: 'Seul l’hôte abandonne une évaluation' })
   try {
     const d = await abandonner(supabase, { evaluation: e, parProfil: profilId })
     return res.status(200).json({ ok: true, status: d.status })
@@ -1491,7 +1491,7 @@ async function router (req, res) {
 
   // `requalifier` corrige un verdict de proprete : ecriture.
   if (action === 'requalifier') {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' })
     const garde = await requirePermission(req, res, {
       domaine: 'avis', niveau: 'write', compteDelegue: true })
     if (!garde.ok) return
@@ -1500,7 +1500,7 @@ async function router (req, res) {
 
   // `valider` change l'etat d'une detection : ecriture.
   if (action === 'valider') {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' })
     const garde = await requirePermission(req, res, {
       domaine: 'avis', niveau: 'write', compteDelegue: true })
     if (!garde.ok) return
@@ -1525,7 +1525,7 @@ async function router (req, res) {
   // qu'au formulaire de saisie, deja reserve a `write` : rien n'est perdu.
   if (action === 'create' || action === 'sejours') {
     if (action === 'create' && req.method !== 'POST') {
-      return res.status(405).json({ error: 'Methode non autorisee' })
+      return res.status(405).json({ error: 'Méthode non autorisée' })
     }
     const garde = await requirePermission(req, res, {
       domaine: 'avis', niveau: 'write', compteDelegue: true })
@@ -1544,7 +1544,7 @@ async function router (req, res) {
     'eval-abandon': evaluationAbandonner,
   }
   if (ECRITURES_EVAL[action]) {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
+    if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' })
     const g = await requirePermission(req, res, {
       domaine: 'avis', niveau: 'write', compteDelegue: true })
     if (!g.ok) return

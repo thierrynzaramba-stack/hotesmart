@@ -15,13 +15,13 @@
 import { appel as appelParDefaut } from './appel.js'
 
 const ETAT_LISIBLE = {
-  a_remplir: 'A remplir',
+  a_remplir: 'À remplir',
   soumise_prestataire: 'Remplie par la prestataire',
-  a_valider: 'A valider',
-  publiee: 'Publiee',
-  echec_publication: 'Echec de publication',
-  expiree: 'Delai depasse',
-  abandonnee: 'Abandonnee',
+  a_valider: 'À valider',
+  publiee: 'Publiée',
+  echec_publication: 'Échec de publication',
+  expiree: 'Délai dépassé',
+  abandonnee: 'Abandonnée',
 }
 
 // Ce qui demande une action de l'hote, et dans quel ordre d'urgence.
@@ -75,14 +75,14 @@ export async function monter (conteneur, options = {}) {
   const etat = { evaluations: [], filtre: '', message: null }
 
   async function charger () {
-    conteneur.innerHTML = '<p class="hs-avis-attente">Chargement des evaluations…</p>'
+    conteneur.innerHTML = '<p class="hs-avis-attente">Chargement des évaluations…</p>'
     try {
       const data = await appel(`avis?action=evaluations${etat.filtre ? `&etat=${encodeURIComponent(etat.filtre)}` : ''}`)
       etat.evaluations = data.evaluations || []
     } catch (err) {
       // ⚠ UN ECHEC SE DIT. Une section vide laisserait croire qu'il n'y a rien
       // a evaluer — le contraire de ce qu'on sait.
-      conteneur.innerHTML = `<p class="hs-avis-erreur">${echapper(err.message || 'Evaluations illisibles')}</p>`
+      conteneur.innerHTML = `<p class="hs-avis-erreur">${echapper(err.message || 'Évaluations illisibles')}</p>`
       return false
     }
     afficher()
@@ -97,7 +97,7 @@ export async function monter (conteneur, options = {}) {
       if (!bus) return
       const r = await bus.ouvrir('avis.evaluer', { booking_uid: b.dataset.evaluer })
       if (!r || r.ok !== true) {
-        etat.message = 'L evaluation n est pas disponible pour ce sejour.'
+        etat.message = 'L’évaluation n’est pas disponible pour ce séjour.'
         afficher()
         return
       }
@@ -136,20 +136,20 @@ export function rendre (etat, maintenant = Date.now()) {
       + (v === '' ? 'Toutes' : echapper(ETAT_LISIBLE[v] || v)) + '</option>').join('')
 
   const entete = `<div class="hs-eval-entete">`
-    + `<h2>Evaluations du voyageur</h2>`
+    + `<h2>Évaluations du voyageur</h2>`
     + `<label class="hs-eval-filtre"><span>Afficher</span><select data-filtre>${filtres}</select></label>`
     + `</div>`
     + `<p class="hs-eval-resume">`
     + (aFaire.length
-      ? `${aFaire.length} evaluation(s) vous attendent.`
-      : liste.length ? 'Rien ne vous attend.' : 'Aucune evaluation pour le moment.')
-    + (horsDelai ? ` ${horsDelai} hors delai, plus publiable(s).` : '')
+      ? `${aFaire.length} évaluation(s) vous attendent.`
+      : liste.length ? 'Rien ne vous attend.' : 'Aucune évaluation pour le moment.')
+    + (horsDelai ? ` ${horsDelai} hors délai, plus publiable(s).` : '')
     + `</p>`
 
   if (!liste.length) {
     return `<div class="hs-eval">${entete}`
-      + `<p class="hs-eval-vide">Les evaluations apparaissent le jour du depart du voyageur, `
-      + `quand la plateforme ouvre l avis. Airbnb seulement pour l instant.</p></div>`
+      + `<p class="hs-eval-vide">Les évaluations apparaissent le jour du départ du voyageur, `
+      + `quand la plateforme ouvre l’avis. Airbnb seulement pour l’instant.</p></div>`
   }
 
   const lignes = liste.map(e => {
@@ -165,7 +165,7 @@ export function rendre (etat, maintenant = Date.now()) {
     const depasse = j !== null && j < 0
     const delai = termine ? ''
       : j === null ? ''
-        : depasse ? `<span class="hs-eval-urgent">delai depasse</span>`
+        : depasse ? `<span class="hs-eval-urgent">délai dépassé</span>`
           : j === 0 ? `<span class="hs-eval-urgent">dernier jour</span>`
             : j <= 3 ? `<span class="hs-eval-urgent">${j} jour${j > 1 ? 's' : ''}</span>`
               : `<span class="hs-eval-delai">${j} jours</span>`

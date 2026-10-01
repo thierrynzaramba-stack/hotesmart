@@ -62,7 +62,7 @@ test('LE TEST QUI COMPTE : sans critere en base, la grille par defaut est MONTRE
   // Decision du 30 septembre 2026 : pas de seed sur 30 000 comptes.
   const { conteneur, appels, resultat } = await ouvrirEcran()
   assert.strictEqual(resultat.surDefaut, true)
-  assert.match(conteneur.textContent, /grille par defaut/)
+  assert.match(conteneur.textContent, /grille par défaut/)
   // ⚠ Le libelle vit dans la VALEUR d'un champ, pas dans le texte du document :
   // `textContent` ne voit pas l'attribut `value`. Une assertion sur le texte
   // serait restee muette meme si la grille ne s'affichait pas.
@@ -91,8 +91,8 @@ test('LE TEST QUI COMPTE : la case « negatif » d’une note 1 est cochee ET de
 
 test('LE TEST QUI COMPTE : la RAISON est ecrite a cote de la case, pas laissee a deviner', async () => {
   const { conteneur } = await ouvrirEcran()
-  assert.match(conteneur.textContent, /force : une note 1 est toujours negatif/)
-  assert.match(conteneur.textContent, /force : un refus de recommander est toujours negatif/)
+  assert.match(conteneur.textContent, /forcé : une note 1 est toujours négatif/)
+  assert.match(conteneur.textContent, /forcé : un refus de recommander est toujours négatif/)
 })
 
 test('la regle vaut aussi pour un refus de recommander', () => {
@@ -238,15 +238,15 @@ test('LE TEST QUI COMPTE : une grille enregistree mais NON ACTIVE se dit, et en 
   const inactive = [{ id: 'c1', libelle: 'Couvre-feu', categorie: 'respect_house_rules', rempli_par: 'hote', rang: 1, actif: false,
                       niveaux: [{ cle: 'ok', libelle: 'Respecte', rang: 1, note: 5, negatif: false }] }]
   const { conteneur } = await ouvrirEcran({ grilleCompte: inactive })
-  assert.match(conteneur.textContent, /N EST PAS ACTIVE/)
-  assert.match(conteneur.textContent, /aucune evaluation ne peut etre remplie/)
+  assert.match(conteneur.textContent, /N’EST PAS ACTIVE/)
+  assert.match(conteneur.textContent, /aucune évaluation ne peut être remplie/)
 })
 
 test('une grille active ne porte pas cet avertissement', async () => {
   const active = [{ id: 'c1', libelle: 'Couvre-feu', categorie: 'respect_house_rules', rempli_par: 'hote', rang: 1, actif: true,
                     niveaux: [{ cle: 'ok', libelle: 'Respecte', rang: 1, note: 5, negatif: false }] }]
   const { conteneur } = await ouvrirEcran({ grilleCompte: active })
-  assert.ok(!conteneur.textContent.includes('N EST PAS ACTIVE'))
+  assert.ok(!conteneur.textContent.includes('N’EST PAS ACTIVE'))
 })
 
 test('LE TEST QUI COMPTE : l’ecran ne dit plus « sur tous vos biens » quand un bien a sa propre grille', async () => {

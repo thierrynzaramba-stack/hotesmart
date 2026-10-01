@@ -94,7 +94,7 @@ test('LE TEST QUI COMPTE : un sejour hors perimetre le DIT, il ne laisse pas une
     deps: { appel: async () => { throw err } },
   })
   assert.strictEqual(r.charge, false)
-  assert.match(conteneur.textContent, /perimetre/)
+  assert.match(conteneur.textContent, /périmètre/)
   assert.ok(conteneur.querySelector('[data-avis="fermer"]'), 'un bouton pour sortir')
 })
 
@@ -144,7 +144,7 @@ test('LE TEST QUI COMPTE : publier un avis negatif demande une confirmation', as
   conteneur.querySelector('[data-avis="publier"]').click()
   await new Promise(r => setTimeout(r, 0))
   assert.ok(demande, 'la confirmation doit etre demandee')
-  assert.match(demande, /NEGATIF/)
+  assert.match(demande, /NÉGATIF/)
   assert.ok(!a.appels.some(x => x.chemin.includes('eval-publier')), 'refus = rien ne part')
 })
 
@@ -168,7 +168,7 @@ test('un avis non negatif publie sans confirmation', async () => {
 
 test('le compte rendu annonce un avis negatif avant tout clic', () => {
   const etat = { criteres: CRITERES, reponses: { etat: 'sale', regles: 'oui' } }
-  assert.match(compteRendu(etat), /NEGATIF/)
+  assert.match(compteRendu(etat), /NÉGATIF/)
   assert.strictEqual(estNegatifAffiche(etat), true)
 })
 
@@ -217,7 +217,7 @@ test('LE TEST QUI COMPTE : un refus de redaction est AFFICHE, avec sa raison', a
   await ouvrir({ conteneur, params: { booking_uid: 'BK-1' }, fermer: () => {}, deps: { appel: a.fn, confirmer: () => true } })
   conteneur.querySelector('[data-avis="enregistrer"]').click()
   await new Promise(r => setTimeout(r, 0))
-  assert.match(conteneur.textContent, /citait le prenom de la prestataire/)
+  assert.match(conteneur.textContent, /citait le prénom de la prestataire/)
 })
 
 test('un refus de publication nomme est traduit, pas masque', async () => {
@@ -228,7 +228,7 @@ test('un refus de publication nomme est traduit, pas masque', async () => {
   await ouvrir({ conteneur, params: { booking_uid: 'BK-1' }, fermer: () => {}, deps: { appel: a.fn, confirmer: () => true } })
   conteneur.querySelector('[data-avis="publier"]').click()
   await new Promise(r => setTimeout(r, 0))
-  assert.match(conteneur.textContent, /seul l hote peut le publier/)
+  assert.match(conteneur.textContent, /seul l’hôte peut le publier/)
 })
 
 test('un motif INCONNU est affiche tel quel plutot que passe sous silence', () => {
@@ -242,13 +242,13 @@ test('une evaluation publiee ne propose plus de publier ni de modifier', async (
   assert.strictEqual(conteneur.querySelector('[data-avis="publier"]'), null)
   assert.strictEqual(conteneur.querySelector('[data-avis="enregistrer"]'), null)
   assert.ok(conteneur.querySelector('[data-avis="texte"]').hasAttribute('readonly'))
-  assert.match(conteneur.textContent, /publiee le/)
+  assert.match(conteneur.textContent, /publiée le/)
 })
 
 test('une evaluation expiree ne propose plus rien non plus', async () => {
   const { conteneur } = await monter({ evaluation: { status: 'expiree' } })
   assert.strictEqual(conteneur.querySelector('[data-avis="publier"]'), null)
-  assert.match(conteneur.textContent, /Delai depasse/)
+  assert.match(conteneur.textContent, /Délai dépassé/)
 })
 
 test('le bouton Fermer appelle la fermeture du bus', async () => {
@@ -301,7 +301,7 @@ test('un texte modifie annonce qu’il n’est pas encore enregistre', async () 
   const t = conteneur.querySelector('[data-avis="texte"]')
   t.value = 'Texte modifie'
   t.dispatchEvent(new document.defaultView.Event('input'))
-  assert.match(conteneur.textContent, /ne sera enregistre qu a la publication/)
+  assert.match(conteneur.textContent, /ne sera enregistré qu’à la publication/)
 })
 
 test('LE TEST QUI COMPTE : « je ne sais pas » sur la recommandation compte comme negatif a l’ecran aussi', () => {
