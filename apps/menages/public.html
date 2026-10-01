@@ -148,6 +148,17 @@
                     background: var(--green); color: #fff; font-size: 10.5px;
                     font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
     .dispo-case.a-moi { background: var(--green-bg); border-color: transparent; }
+    /* ⚠ UNE PROPOSITION N'EST PAS UN MENAGE PRIS (bug du 1er octobre 2026).
+       Le menage qu'on lui propose s'affichait en vert, comme un menage acquis :
+       Lena Lou voyait « a moi » un 4 octobre qu'elle n'avait pas accepte. Ambre,
+       la couleur de « a confirmer » partout ailleurs (`badge-offre`). Le vert,
+       s'il y a aussi un menage acquis ce jour-la, l'emporte sur le fond — la
+       pastille ambre reste. */
+    .dispo-case.a-confirmer:not(.a-moi) { background: var(--amber-bg); }
+    /* ⚠ Le pointille du conge reste : sans ce `:not`, la proposition effacait
+       la seule marque qui dit « conge » en plus du ✕ (constat de review). */
+    .dispo-case.a-confirmer:not(.a-moi):not(.conge) { border-color: transparent; }
+    .dispo-compte.confirmer { background: var(--amber); }
     /* ⚠ SEULEMENT QUAND LE JOUR N'EST PAS ETEINT. Declaree apres le bloc du
        numero barre a specificite egale, cette regle le rallumait en plein noir
        gras sur les cases `conge.a-moi` et `a-moi.passe` — celles qui portent
@@ -292,6 +303,8 @@
     }
     .agenda-item + .agenda-item { margin-top: 6px; }
     .agenda-item.offre { border: 1px dashed var(--primary); }
+    /* Une proposition faite A ELLE : ni « a prendre », ni acquise. */
+    .agenda-item.a-confirmer { border-color: var(--amber); background: var(--amber-bg); }
     .agenda-item.fait .agenda-bien { color: var(--text3); text-decoration: line-through; }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
        c'est justement la qu'on va lire ce qui a change (meme regle que
@@ -1173,7 +1186,7 @@ if ("serviceWorker" in navigator) {
   // Les menages ENRICHIS d'un jour, sans le filtre de biens : la feuille d'une
   // journee montre ce qui s'y passe (lot B).
   function menagesEnrichisDu (j) {
-    return mesMenagesTousBiens(j).map(enrichirMenage).filter(Boolean)
+    return mesMenagesTousBiens(j).concat(mesOffresTousBiens(j)).map(enrichirMenage).filter(Boolean)
   }
 
   // ⚠ TOUS SES MENAGES, SANS LE FILTRE DE BIENS. `getMenages()` honore
@@ -1480,8 +1493,9 @@ if ("serviceWorker" in navigator) {
     // Un jour passe ne s'ouvre donc que pour CONSULTER ce qu'elle y a fait.
     // ⚠ SUR LES LISTES NON FILTREES, COMME LA FEUILLE ELLE-MEME — sinon les deux
     // divergent et la feuille s'ouvre vide (voir `ouvrirJour`).
-    if (j < AUJ()) return mesMenagesTousBiens(j).length > 0
-    if (aPrendreTousBiens(j).length || mesMenagesTousBiens(j).length) return true
+    if (j < AUJ()) return mesMenagesTousBiens(j).length > 0 || mesOffresTousBiens(j).length > 0
+    if (aPrendreTousBiens(j).length || mesMenagesTousBiens(j).length ||
+        mesOffresTousBiens(j).length) return true
     // Sinon il reste la disponibilite — y compris pour LIRE pourquoi le jour est
     // barre (conge, absence posee par l'hote).
     return !!(mesJours && mesJours.modifiable)
@@ -1506,7 +1520,11 @@ if ("serviceWorker" in navigator) {
     const miensTous = mesMenagesTousBiens(j)
     const miens = miensTous
     // Les memes menages, enrichis : c'est ce que la fiche attend.
-    const enrichis = menagesEnrichisDu(j)
+    // ⚠ LES PROPOSITIONS QU'ON LUI FAIT A PART (bug du 1er octobre 2026) : elles
+    // sortaient sous « Votre ménage », comme si elle les avait acceptees.
+    const toutEnrichi = menagesEnrichisDu(j)
+    const enrichis = toutEnrichi.filter(m => !estUneOffre(m))
+    const aConfirmer = toutEnrichi.filter(estUneOffre)
     const tousEnrichis = tousMesMenagesEnrichis()
     const passe = j < AUJ()
     const e = mesJours ? exceptionDuJour(j) : null
@@ -1527,6 +1545,16 @@ if ("serviceWorker" in navigator) {
           `<span class="jligne-bien">${echapper(m.property_name || '—')}</span>` +
           '<span style="color:var(--primary);font-weight:700;font-size:11px">À PRENDRE</span>' +
           '</button>').join('') + '</div>'
+    }
+
+    // 1 bis — CE QU'ON LUI PROPOSE A ELLE, ET QU'ELLE DOIT CONFIRMER.
+    // Un bouton vers la fiche : c'est la qu'elle accepte ou refuse, avec le
+    // delai qui court (`badgeOffre`).
+    if (aConfirmer.length) {
+      html += '<div class="jsect"><div class="jsect-t">À confirmer</div>' +
+        aConfirmer.map(m => `<button class="jligne" data-mien="${echapper(m.id)}">` +
+          `<span class="jligne-bien">${echapper(m.propName || '—')}</span>` +
+          marquesDuMenage(m, false, '') + '</button>').join('') + '</div>'
     }
 
     // 2 — CE QU'ELLE PORTE DEJA.
@@ -1566,7 +1594,11 @@ if ("serviceWorker" in navigator) {
     // ⚠ NI QUAND ELLE NE REGLE RIEN. Chez une prestataire dont l'hote tient le
     // planning, montrer un segment fige ferait chercher un droit qu'on ne lui
     // promet pas.
-    if (!miensTous.length && !passe && mesJours && mesJours.modifiable) {
+    // ⚠ NI SOUS UNE PROPOSITION QU'ON LUI FAIT (constat de review du
+    // 1er octobre 2026) : le bouton « Je ne suis pas disponible » y tombait sur
+    // la garde « refusez-le d'abord » — un bouton qui echoue, ce que cet ecran
+    // s'interdit. C'est le refus, dans la fiche, qui la libere.
+    if (!miensTous.length && !aConfirmer.length && !passe && mesJours && mesJours.modifiable) {
       // ⚠ FIGE AUSSI SUR UN JOUR DE REPOS, et c'est une limite ASSUMEE.
       // La maquette ouvrait le segment sur un jour habituellement chome : se
       // rendre disponible « pour ce jour-la » y etait une exception positive.
@@ -1605,7 +1637,7 @@ if ("serviceWorker" in navigator) {
     }
 
     document.getElementById('modal-title').textContent = jourLisible(j)
-    document.getElementById('modal-sub').textContent = resumeDuJour(libres.length, miens.length, dispo, passe)
+    document.getElementById('modal-sub').textContent = resumeDuJour(libres.length, miens.length, dispo, passe, aConfirmer.length)
     document.getElementById('modal-body').innerHTML = html
     document.getElementById('modal-note').innerHTML = ''
     hideModalMessages()
@@ -1687,8 +1719,9 @@ if ("serviceWorker" in navigator) {
     if (ancre && document.body.contains(ancre)) ancre.focus()
   }
 
-  function resumeDuJour (nLibres, nMiens, dispo, passe) {
+  function resumeDuJour (nLibres, nMiens, dispo, passe, nAConfirmer = 0) {
     const p = []
+    if (nAConfirmer) p.push(nAConfirmer + ' à confirmer')
     if (nLibres) p.push(nLibres + (nLibres > 1 ? ' propositions' : ' proposition'))
     if (nMiens) p.push(nMiens + (nMiens > 1 ? ' ménages à vous' : ' ménage à vous'))
     if (!p.length) p.push(passe ? 'Aucun ménage' : (dispo ? 'Rien de prévu' : 'Vous n’êtes pas disponible'))
@@ -2392,7 +2425,27 @@ if ("serviceWorker" in navigator) {
   // Une regle ne se lit jamais a travers un reglage d'affichage.
   function mesMenagesTousBiens (j) {
     if (!Array.isArray(bookings)) return []
-    return bookings.filter(b => b.departure === j)
+    return bookings.filter(b => b.departure === j && !offreAMoi(b))
+  }
+  // ⚠ UNE PROPOSITION QU'ON LUI FAIT N'EST PAS UN MENAGE A ELLE (bug du
+  // 1er octobre 2026). Le serveur rend dans `bookings` ce qu'elle porte ET ce
+  // qu'on lui propose (`role: 'propose'`) : les compter ensemble peignait en
+  // vert, « 1 menage a moi », un menage `offered` que personne ne porte — le
+  // 4 octobre de Lena Lou, le 6 de Lola. `estUneOffre` savait les distinguer
+  // sur la fiche ; le calendrier ne le lui demandait pas.
+  // ⚠ `assignations` vaut `null` avant le chargement : rien n'est alors une
+  // offre, ce qui est le comportement d'avant — pas un etat invente.
+  function offreAMoi (b) {
+    const a = assignations && b
+      ? assignations[`${b.propId}|${String(b.id)}|${b.departure}`] : null
+    return !!(a && a.role === 'propose')
+  }
+  function mesOffresTousBiens (j) {
+    if (!Array.isArray(bookings)) return []
+    return bookings.filter(b => b.departure === j && offreAMoi(b))
+  }
+  function mesOffresDu (j) {
+    return mesOffresTousBiens(j).filter(b => activeProps.has(b.propId))
   }
   // Idem pour les propositions : la feuille d'un jour montre ce qui S'Y PASSE,
   // que le filtre d'affichage les montre au calendrier ou non.
@@ -2403,7 +2456,7 @@ if ("serviceWorker" in navigator) {
 
   function mesMenagesDu (j) {
     if (!Array.isArray(bookings)) return []
-    return bookings.filter(b => b.departure === j && activeProps.has(b.propId))
+    return bookings.filter(b => b.departure === j && activeProps.has(b.propId) && !offreAMoi(b))
   }
   // ⚠ `null` (pas encore charge) et `[]` (rien a prendre) ne se confondent pas :
   // le premier ne doit dessiner aucune bulle, pas une bulle a zero.
@@ -2771,6 +2824,9 @@ if ("serviceWorker" in navigator) {
         // travaille (le fond), ce qu'elle a a faire (les points), et ce que
         // personne ne fait (la bulle).
         const miens = mesMenagesDu(j)
+        // ⚠ CE QU'ON LUI PROPOSE, A PART : ni vert, ni « a moi » (bug du
+        // 1er octobre 2026). Ambre, comme le badge « A CONFIRMER » de la fiche.
+        const aConfirmer = mesOffresDu(j)
         const libres = aPrendreDu(j)
         // ⚠ LE CONGE AUSSI CEDE AU MENAGE (decision 1, 18 septembre). La branche
         // `c ? ' conge' : …` etait choisie AVANT toute consultation de
@@ -2782,12 +2838,14 @@ if ("serviceWorker" in navigator) {
         const cls = 'dispo-case' + (congeVisible ? ' conge' : (libre ? '' : ' off')) +
                     (j < auj ? ' passe' : '') + (j === auj ? ' auj' : '') +
                     (miens.length ? ' a-moi' : '') +
+                    (aConfirmer.length ? ' a-confirmer' : '') +
                     (exc && exc.source === 'prestataire' ? ' manuel' : '') +
                     (libres.length ? ' a-prendre' : '')
         const titre = [
           congeVisible ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
             : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là')),
           miens.length ? `${miens.length} ménage${miens.length > 1 ? 's' : ''} à moi` : '',
+          aConfirmer.length ? `${aConfirmer.length} ménage${aConfirmer.length > 1 ? 's' : ''} à confirmer` : '',
           libres.length ? `${libres.length} ménage${libres.length > 1 ? 's' : ''} à prendre` : ''
         ].filter(Boolean).join(' · ')
         // ⚠ LA BULLE EST POSEE MEME SUR UN JOUR ETEINT, et c'est une decision :
@@ -2799,8 +2857,10 @@ if ("serviceWorker" in navigator) {
         // ⚠ UNE PASTILLE CHIFFREE, PLUS DES POINTS (lot A). Le chiffre porte la
         // charge du jour — « 2 menages mardi » se lit sans reflechir, la ou des
         // points se recomptent des trois.
-        const points = miens.length
-          ? `<span class="dispo-compte">${miens.length}</span>` : ''
+        const points = (miens.length
+          ? `<span class="dispo-compte">${miens.length}</span>` : '') +
+          (aConfirmer.length
+            ? `<span class="dispo-compte confirmer">${aConfirmer.length}</span>` : '')
         // ⚠ UNE CASE QUI PORTE UNE OFFRE RESTE TOUCHABLE MEME PASSEE... non :
         // un menage passe n'est pas recuperable (decision du 17 septembre), et
         // le serveur le refuse. On ne l'ouvre donc pas non plus ici.
@@ -2953,6 +3013,7 @@ if ("serviceWorker" in navigator) {
                // Deux fiches du meme menage finiraient par dire deux choses
                // differentes.
                ? `<button type="button" class="agenda-item${l.fait ? ' fait' : ''}` +
+                 `${estUneOffre(l.menage) ? ' a-confirmer' : ''}` +
                  `${l.obsolete ? ' obsolete' : ''}" data-mien="${echapper(l.menage.id)}">` +
                  `<span class="agenda-bien">${echapper(l.bien)}</span>` +
                  '<span class="agenda-marques">' +
@@ -3457,6 +3518,13 @@ if ("serviceWorker" in navigator) {
     // jamais d'en retirer une.
     if (!exc && mesMenagesTousBiens(j).length) {
       direIci('Vous avez un ménage ce jour-là. Pour vous libérer, retirez-le d’abord.')
+      return
+    }
+    // ⚠ LA GARDE TENAIT AUSSI LES PROPOSITIONS, tant qu'elles comptaient comme
+    // ses menages : on la garde, avec la phrase juste. Se dire absente sous une
+    // proposition en cours la laisserait courir — c'est le refus qui la libere.
+    if (!exc && mesOffresTousBiens(j).length) {
+      direIci('On vous propose un ménage ce jour-là. Pour vous libérer, refusez-le d’abord.')
       return
     }
     if (!exc && !jourTravaille(j)) {

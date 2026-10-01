@@ -2971,3 +2971,69 @@ refus qui arrive après la fermeture de la feuille, seul chemin qui y écrit.
 lisaient prouvaient encore — supprimer la phrase a suffi à vider une assertion
 sans la faire rougir.**
 
+
+## Une proposition n'est pas un ménage pris (1er octobre 2026)
+
+**Le constat, en prod.** Le ménage du 4 octobre à Ofuro Futari s'affichait en
+**vert** dans le calendrier de Lena Lou — « 1 ménage à moi » — alors qu'elle ne
+l'avait pas accepté. En base il était `offered`, `provider_id` vide,
+`offered_to` = Lena Lou : le cron le lui avait proposé le 1er octobre à 07:45,
+à l'expiration de la proposition faite à Lola. Même défaut le 6 octobre chez
+Lola. Ce sont les deux seules propositions en cours ce jour-là : **toutes**
+étaient touchées.
+
+**La cause : une règle d'affichage, pas la base.** `api/menages-public.js` rend
+dans `bookings` les deux familles — ce qu'elle **porte** et ce qu'on lui
+**propose** — et les distingue par `menages[].role` (`porteur` / `propose`).
+La PWA savait les séparer sur la fiche (`estUneOffre`, badge « À CONFIRMER »),
+mais le calendrier, la feuille du jour et `jourTravaille` comptaient toute
+réservation reçue comme la sienne. Le planning de garde de l'hôte, lui, disait
+juste (« proposé à »).
+
+**Le correctif** (`apps/menages/public.html`) :
+- `offreAMoi(b)` lit le rôle ; `mesMenagesDu` / `mesMenagesTousBiens` ne rendent
+  plus que ce qu'elle porte, `mesOffresDu` / `mesOffresTousBiens` ce qu'on lui
+  propose.
+- La case porte `.a-confirmer` : fond **ambre** (la couleur du badge « À
+  CONFIRMER »), pastille ambre, infobulle « N ménage(s) à confirmer ». Si un
+  ménage acquis tombe le même jour, le vert garde le fond et la pastille ambre
+  s'ajoute.
+- La feuille du jour range la proposition sous **« À confirmer »**, jamais sous
+  « Votre ménage » ; la ligne ouvre la fiche, où elle accepte ou refuse. Le
+  résumé dit « 1 à confirmer ».
+- ⚠️ **Une proposition ne rend pas le jour travaillé** (`jourTravaille`) : elle
+  n'a rien accepté. Mais **la garde d'absence la tient toujours** — se dire
+  absente sous une proposition en cours la laisserait courir ; c'est le
+  **refus** qui la libère, et la phrase le dit.
+- ⚠️ **`role: 'porteur'` + `propose` reste vert** : le ménage est à elle, une
+  collègue est sollicitée en parallèle, rien ne lui est demandé. Un test le
+  tient, sans quoi le correctif aurait pu « réparer » dans le mauvais sens.
+
+**Ce qui se passe à l'expiration d'une proposition sans porteuse** (lu dans le
+code et vérifié en prod le 1er octobre) : `expirerPropositions` efface l'offre,
+passe le ménage `orphaned`, journalise `expired` (qui vaut refus : on ne la
+resollicite pas) et lève `menage_non_assigne` — **e-mail fondateur seul**, le
+SMS de ce type étant en pause depuis le 17 septembre, et étouffé si une autre
+alerte du même bien est partie dans l'heure. `poserPropositionsDues`, au même
+cycle, sollicite la suivante disponible ; s'il n'en reste aucune, le ménage
+reste `orphaned`, sans relance, « à prendre » dans la PWA de chacune.
+
+**Ce que la review a trouvé** (aucun constat de sécurité, trois mineurs, corrigés
+sans seconde review selon la règle) :
+- ⚠️ **Sortir les propositions de « mes ménages » a rouvert un bouton qui
+  échoue.** La section « Disponibilité » de la feuille était masquée par
+  `miensTous`, qui comptait les propositions ; sans elles, « Je ne suis pas
+  disponible » réapparaissait et tombait sur la garde « refusez-le d'abord ».
+  Elle est maintenant masquée aussi sous `aConfirmer`. **Règle : changer ce
+  qu'une liste contient, c'est relire tout ce que sa longueur gardait.**
+- La liste des 30 jours marque la ligne `.a-confirmer` (ambre) : elle était la
+  seule surface que le premier jet n'avait pas séparée.
+- Sur un congé, le fond ambre n'efface plus la bordure pointillée du congé.
+- ✓ Effet voulu et désormais testé : une proposition sur un jour de repos ne
+  l'allume pas (`.off` reste) — elle n'a rien accepté — et la liste peut donc
+  dire « vous êtes absente » au-dessus d'une proposition.
+
+Tests : `tests/pwa-mes-jours-dom.test.js`, section « UNE PROPOSITION N'EST PAS
+UN MÉNAGE PRIS » — six tests. Contre-épreuve par `git archive` : quatre rouges
+contre le code d'avant le correctif, deux rouges contre son premier jet ; la
+contre-épreuve `porteur` est verte partout.
