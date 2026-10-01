@@ -66,6 +66,10 @@
     /* Vue conversation */
     .conv-view { display:flex; flex-direction:column; overflow:hidden; }
     .conv-view-header { padding:14px 18px; border-bottom:0.5px solid var(--border); background:var(--bg2); display:flex; align-items:center; gap:8px; }
+    /* Le bandeau de l'évaluation du voyageur, sous l'en-tête du fil. */
+    #bandeau-avis:empty { display:none; }
+    .bandeau-avis { display:block; width:100%; text-align:left; padding:10px 18px; border:0; border-bottom:0.5px solid var(--border); background:#fff8e6; color:#7a5200; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit; }
+    .bandeau-avis.publiee { background:#eef8f0; color:#1E7B34; cursor:default; font-weight:500; }
     .conv-view-header-content { flex:1; min-width:0; }
     .conv-view-title { font-size:14px; font-weight:500; }
     .conv-view-meta { font-size:11px; color:var(--text2); margin-top:2px; }
@@ -185,6 +189,8 @@
   import { supabase }         from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
   import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.js'
+  // Le cœur parle aux apps par le bus, et par lui seul (docs/kb/protocole-coeur.md).
+  import { hsBus }            from '/shared/hs-bus.js'
 
   initErrorHandler()
   const session = await requireAuth()
@@ -202,6 +208,12 @@
   window.compteCourant = compteCourant
   window.peutEcrire    = peutEcrire
   window.enteteCompte  = enteteCompte
+  // Le bus aussi, pour le bandeau « Évaluer ce voyageur » du script classique.
+  window.hsBus         = hsBus
+  // Une évaluation publiée depuis la fenêtre du cœur met le bandeau à jour.
+  if (hsBus) hsBus.ecouter('avis.evaluation_publiee', (d) => {
+    if (d && typeof window.rafraichirBandeauAvis === 'function') window.rafraichirBandeauAvis(String(d.booking_uid))
+  })
 
   // Liste FUSIONNEE beds24 + channex. Le POST /api/beds24 getProperties ne
   // renvoyait que les biens Beds24 -> biens channex absents du filtre.
@@ -774,6 +786,7 @@
           ${peutEcrire('messages') ? `<button class="btn-mini ${isPinned ? 'active' : ''}" onclick="togglePin('${bookId}')">${isPinned ? '📌 Épinglé' : '📌 Épingler'}</button>` : ''}
         </div>
       </div>
+      <div id="bandeau-avis"></div>
       <div class="conv-messages" id="conv-messages">
         ${allMessages.length ? allMessages.map(m => renderBubble(m)).join('') : '<div class="empty-conv"><p>Aucun message</p></div>'}
         ${convTasks.map(t => renderTaskBubble(t)).join('')}
@@ -796,6 +809,52 @@
     `
     const mc = document.getElementById('conv-messages')
     if (mc) mc.scrollTop = mc.scrollHeight
+    peindreBandeauAvis(conv)
+  }
+
+  // ─── Le bandeau « Évaluer ce voyageur » (lot 5 du chantier avis) ─────────
+  // Après le départ, le cœur dit où en est l'évaluation du séjour — PAR LE BUS :
+  // la messagerie ne lit ni les tables ni l'endpoint des avis. Rien à dire
+  // (Booking, réservation directe, pas encore d'évaluation, droit absent) :
+  // le bandeau reste vide.
+  // ⚠ UNE RÉPONSE TARDIVE NE PEINT PAS LA CONVERSATION SUIVANTE : on vérifie
+  // qu'elle est toujours affichée avant d'écrire.
+  function departPasse (conv) {
+    const d = conv && conv.lastNight ? String(conv.lastNight).slice(0, 10) : ''
+    return Boolean(d) && d < new Date().toISOString().slice(0, 10)
+  }
+
+  async function peindreBandeauAvis (conv) {
+    const zone = document.getElementById('bandeau-avis')
+    if (!zone) return
+    zone.innerHTML = ''
+    const bus = window.hsBus
+    if (!bus || !conv || !departPasse(conv)) return
+    const bookId = String(conv.bookId)
+    const r = await bus.demander('avis.statut', { booking_uid: bookId })
+    if (currentConvId !== bookId || !r || !r.ok || !r.data) return
+    const d = r.data
+    const z = document.getElementById('bandeau-avis')
+    if (!z) return
+    if (d.etat === 'publiee') {
+      z.innerHTML = '<div class="bandeau-avis publiee">⭐ Évaluation publiée ✓</div>'
+      return
+    }
+    if (!d.evaluable) return
+    // Le bouton n'apparaît qu'avec le droit d'écriture sur les avis.
+    if (!(await bus.disponible('avis.evaluer'))) return
+    if (currentConvId !== bookId) return
+    z.innerHTML = '<button class="bandeau-avis" type="button" onclick="evaluerVoyageur(\'' + escHtml(bookId) + '\')">⭐ Évaluer ce voyageur →</button>'
+  }
+
+  window.evaluerVoyageur = async (bookId) => {
+    if (!window.hsBus) return
+    await window.hsBus.ouvrir('avis.evaluer', { booking_uid: String(bookId) })
+  }
+  window.rafraichirBandeauAvis = (bookId) => {
+    if (currentConvId !== bookId) return
+    const conv = conversations.find(c => String(c.bookId) === bookId)
+    if (conv) peindreBandeauAvis(conv)
   }
 
   // ── Bulle d'action : une tâche IA à traiter, dans le fil ───────────────────
