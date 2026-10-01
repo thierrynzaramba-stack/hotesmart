@@ -3120,3 +3120,103 @@ test('une relecture silencieuse PÉRIMÉE n\'écrase pas un chargement plus frai
   assert.ok(caseDu(w, j).classList.contains('off'),
     'et la relecture PÉRIMÉE ne l\'a pas effacée')
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UNE PROPOSITION N'EST PAS UN MÉNAGE PRIS (bug du 1er octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Constat en prod : le ménage du 4 octobre à Ofuro Futari, `offered` à Lena Lou
+// (personne ne le porte), s'affichait en VERT dans son calendrier — « 1 ménage à
+// moi ». Le serveur rend bien `role: 'propose'`, mais le calendrier comptait
+// toute réservation reçue comme la sienne. Même défaut le 6 octobre chez Lola.
+
+const reservation = (j, id = 'b1') =>
+  ({ id, propId: 'p1', propName: 'Colomiers', departure: j, arrival: dans(0) })
+const propositionAMoi = (j, id = 'b1') =>
+  ({ property_id: 'p1', booking_id: id, departure_date: j, role: 'propose', propose: true,
+     status: 'offered', expire_le: new Date(Date.now() + 2 * 86400000).toISOString() })
+
+test('un ménage qu\'on lui PROPOSE n\'est pas vert : la case dit « à confirmer », en ambre', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(!el.classList.contains('a-moi'), 'une proposition ne prend pas le fond vert du ménage acquis')
+  assert.ok(el.classList.contains('a-confirmer'), 'elle porte sa propre marque')
+  assert.doesNotMatch(el.getAttribute('title'), /à moi/, 'l\'infobulle ne dit pas qu\'il est à elle')
+  assert.match(el.getAttribute('title'), /1 ménage à confirmer/)
+  assert.ok(el.querySelector('.dispo-compte.confirmer'), 'la pastille est celle de la proposition')
+})
+
+test('le ménage qu\'elle PORTE reste vert, même quand il est proposé à quelqu\'un d\'autre', async () => {
+  // Contre-épreuve : `role: 'porteur'` + `propose` = il est à elle, une collègue
+  // est sollicitée en parallèle. Rien ne lui est demandé, rien ne change.
+  const j = dans(3)
+  const { w, t } = monter({
+    bookings: [reservation(j)],
+    menages: [{ property_id: 'p1', booking_id: 'b1', departure_date: j, role: 'porteur', propose: true,
+                status: 'accepted', expire_le: new Date(Date.now() + 86400000).toISOString() }]
+  })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(el.classList.contains('a-moi'))
+  assert.ok(!el.classList.contains('a-confirmer'))
+})
+
+test('la feuille du jour range la proposition sous « À confirmer », pas sous « Votre ménage »', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  assert.match(feuille(w), /À confirmer/, 'une section dit ce qu\'il faut confirmer')
+  assert.doesNotMatch(feuille(w), /Votre ménage/, 'elle ne la présente pas comme acquise')
+  assert.ok(w.document.querySelector('#modal-body [data-mien="b1-' + j + '"]'),
+    'la ligne ouvre toujours la fiche, où elle accepte ou refuse')
+  assert.match(w.document.getElementById('modal-sub').textContent, /1 à confirmer/)
+})
+
+test('sous une proposition, la feuille ne propose pas « Je ne suis pas disponible » — un bouton qui échouerait', async () => {
+  // Constat de review : la section Disponibilité réapparaissait, et son bouton
+  // tombait sur la garde « refusez-le d'abord ». C'est le refus qui la libère.
+  const j = dans(3)
+  const { w, t } = monter({ bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  assert.strictEqual(segments(w).length, 0, 'aucun segment de disponibilité sous une proposition')
+})
+
+test('la garde d\'absence tient sous une proposition, avec la phrase juste et sans rien écrire', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  await t.basculerMonJour(j)
+  await souffler()
+  assert.match(message(w), /refusez-le d’abord/)
+  assert.strictEqual(ecritures(t).length, 0, 'aucune absence n\'est partie')
+})
+
+test('une proposition sur un jour de repos ne l\'allume pas, et la liste la marque « à confirmer »', async () => {
+  // Elle travaille le lundi seulement ; on lui propose un ménage un autre jour.
+  // Elle n'a rien accepté : le jour reste éteint, la proposition se voit en ambre.
+  let j = dans(3)
+  while (new Date(j + 'T12:00:00Z').getUTCDay() === 1) j = dans(4)
+  const { w, t } = monter({ regles: [regle('r1', 'Tous les lundis', [1])],
+                            bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  assert.ok(caseDu(w, j).classList.contains('off'), 'le jour reste éteint')
+  assert.ok(caseDu(w, j).classList.contains('a-confirmer'))
+  const item = agenda(w).querySelector('.agenda-item[data-mien]')
+  assert.ok(item && item.classList.contains('a-confirmer'), 'la ligne des 30 jours est marquée')
+})
