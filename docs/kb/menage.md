@@ -425,9 +425,10 @@ jusqu'au 15 septembre 2026) :
   de droits absente n'ouvre donc pas l'écriture. **Mais un profil `lien` naît à `write`**
   (`api/membres.js`) — sans quoi l'onglet n'existait pour personne et le lot était inatteignable ;
   la fiche porte la case qui le coupe ;
-- ⚠️ **elle déclare une ABSENCE, jamais une présence** : `available` n'est pas un paramètre.
-  Se rendre disponible un jour que l'hôte ne lui a pas confié n'aurait aucun effet et lui ferait
-  croire le contraire ;
+- ~~elle déclare une ABSENCE, jamais une présence~~ — **RÈGLE TOMBÉE LE 1er OCTOBRE 2026**
+  (voir « Une exception prime sur la récurrence, dans les deux sens », en fin de fichier). Une
+  exception d'un jour se pose dans les deux sens ; `available` est un booléen, absent = absence,
+  toute autre valeur = 400 ;
 - ⚠️ **elle ne touche jamais ses jours attitrés** — décision de l'hôte (§12.9d) : pouvoir s'en
   retirer lui permettrait de quitter un bien sans qu'il l'apprenne ;
 - ⚠️ **« rien à supprimer » n'est pas « ce n'est pas à vous »** : un double tap sur « Annuler »
@@ -956,14 +957,15 @@ humain), mais l'écran ne l'explique pas encore.
   ligne simple : le bouton paraissait mort. C'est le parcours de **tous** les profils aujourd'hui.
 - ⚠️ **La légende explique le point** (« le point = choisi à la main »). La maquette portait quatre
   entrées, l'écran n'en avait que trois : le point était dessiné et jamais expliqué.
-- ⚠️ **Une tape, pas un glissé.** L'écran hôte sélectionne une plage au glissé ; sur un téléphone,
-  ce geste se bat avec le défilement. Ici un jour se touche (`click`, jamais `pointerdown`), et
-  une plage passe par le **formulaire de congé** — qui est justement l'objet fait pour ça.
-  Cibles tactiles de 44 px minimum.
+- ~~Une tape, pas un glissé~~ — **le glissé existe depuis le 1er octobre 2026, derrière un appui
+  long** (voir « Glisser sur le calendrier », en fin de fichier). Une tape courte ouvre toujours
+  la feuille du jour ; le défilement n'est retenu que pendant une sélection. Cibles tactiles de
+  44 px minimum.
 - ⚠️ **Elle ne défait que ce qu'elle a déclaré.** Une absence de `source: 'hote'` ne se retire
   pas : l'écran refuse le geste et **dit pourquoi** plutôt que de partir chercher un 409. Un jour
-  de congé est verrouillé (`tabindex="-1"`), et un jour qu'elle ne travaille déjà pas n'appelle
-  personne — elle déclare une **absence**, jamais une présence.
+  de congé est verrouillé (`tabindex="-1"`). ~~Un jour qu'elle ne travaille déjà pas n'appelle
+  personne~~ — **tombé le 1er octobre 2026** : un jour de repos se rend disponible pour ce
+  jour-là (fin de fichier).
 - ⚠️ **Hors ligne, rien ne part, et l'écran le dit.** Le planning a une file d'attente ; une
   absence, non. La rejouer plus tard porterait sur un planning qui a bougé, et on ne peut pas
   annoncer « c'est enregistré » quand rien n'est parti.
@@ -2994,10 +2996,15 @@ juste (« proposé à »).
 - `offreAMoi(b)` lit le rôle ; `mesMenagesDu` / `mesMenagesTousBiens` ne rendent
   plus que ce qu'elle porte, `mesOffresDu` / `mesOffresTousBiens` ce qu'on lui
   propose.
-- La case porte `.a-confirmer` : fond **ambre** (la couleur du badge « À
-  CONFIRMER »), pastille ambre, infobulle « N ménage(s) à confirmer ». Si un
-  ménage acquis tombe le même jour, le vert garde le fond et la pastille ambre
-  s'ajoute.
+- ⚠️ **Une proposition va dans la BULLE, sans couleur propre** (décision de
+  Thierry, 1er octobre 2026, le soir même). Le premier correctif, mis en prod,
+  la peignait en **ambre** « à confirmer » ; Thierry l'a vu sur le 4 octobre de
+  Lena Lou et a tranché : **ce que personne ne porte se dit par la bulle**,
+  comme les ménages non attribués (le 13 et le 15 à Ofuro Futari). La règle de
+  couleur est supprimée. La bulle compte les ménages à prendre **et** ce qu'on
+  lui propose à elle ; l'infobulle dit « N ménage(s) à confirmer ». **Tant
+  qu'elle n'a pas accepté, bulle ; à l'acceptation, le ménage devient le sien
+  et passe au vert.**
 - La feuille du jour range la proposition sous **« À confirmer »**, jamais sous
   « Votre ménage » ; la ligne ouvre la fiche, où elle accepte ou refuse. Le
   résumé dit « 1 à confirmer ».
@@ -3026,9 +3033,8 @@ sans seconde review selon la règle) :
   disponible » réapparaissait et tombait sur la garde « refusez-le d'abord ».
   Elle est maintenant masquée aussi sous `aConfirmer`. **Règle : changer ce
   qu'une liste contient, c'est relire tout ce que sa longueur gardait.**
-- La liste des 30 jours marque la ligne `.a-confirmer` (ambre) : elle était la
-  seule surface que le premier jet n'avait pas séparée.
-- Sur un congé, le fond ambre n'efface plus la bordure pointillée du congé.
+- La liste des 30 jours : la ligne garde le badge « À CONFIRMER » (et plus de
+  couleur propre depuis la décision de la bulle).
 - ✓ Effet voulu et désormais testé : une proposition sur un jour de repos ne
   l'allume pas (`.off` reste) — elle n'a rien accepté — et la liste peut donc
   dire « vous êtes absente » au-dessus d'une proposition.
@@ -3037,3 +3043,139 @@ Tests : `tests/pwa-mes-jours-dom.test.js`, section « UNE PROPOSITION N'EST PAS
 UN MÉNAGE PRIS » — six tests. Contre-épreuve par `git archive` : quatre rouges
 contre le code d'avant le correctif, deux rouges contre son premier jet ; la
 contre-épreuve `porteur` est verte partout.
+
+## Une exception prime sur la récurrence, dans les deux sens (1er octobre 2026)
+
+**Le constat.** Tiphaine a des jours d'absence réglés en récurrence (une semaine
+sur deux). La rendre disponible exceptionnellement sur UN jour ne marchait pas.
+En prod, ses 14 exceptions étaient **toutes des absences** : aucune
+disponibilité exceptionnelle n'avait jamais été enregistrée.
+
+**Où ça cassait : l'exception n'était pas enregistrée, et seulement par la PWA.**
+Reproduit sur staging : depuis la fiche hôte (`api/disponibilites.js`) les deux
+sens s'enregistrent et le moteur les applique (`estDisponible` : congé >
+exception > règle). Depuis la PWA :
+- l'écran **figeait** le segment sur un jour de repos (« Ce jour n'est pas dans
+  vos jours habituels ») et la tape disait « Vous ne travaillez déjà pas ce
+  jour-là » ;
+- ⚠️ **et le serveur répondait 200 à `available: true` en écrivant `false`.** Un
+  succès sur l'inverse de la demande. Un test l'épinglait comme une règle
+  (« elle déclare une ABSENCE, jamais une présence ») : REVIEW.md règle 17, un
+  test peut figer un bug.
+
+**Pourquoi la raison du lot 2b tombe.** Elle disait : se rendre disponible un
+jour que l'hôte ne lui a pas confié la rendrait candidate sans son accord. Mais
+**depuis le 15 septembre elle règle elle-même ses jours habituels**
+(`reglerMesJours`) : elle pouvait se rendre disponible *tous* les mercredis, pas
+*un* mercredi. La garde n'empêchait rien ; elle obligeait à toucher la récurrence
+pour un seul jour. Et ce que l'hôte lui **confie** vit ailleurs : ses jours
+attitrés (`weekdays`, sur la liaison) filtrent toujours la garde.
+⚠️ **Nuance trouvée en review** : `weekdays` **vide = attitrée tous les jours**
+(cas de Tiphaine). Là, une disponibilité exceptionnelle la rend bien
+**candidate** ce jour-là — et **d'office** si sa liaison est `requires_ack =
+false`. C'est exactement ce qu'elle obtenait déjà en réglant ses jours
+habituels, donc pas d'élévation de droit ; la seule différence est que
+`reglerMesJours` prévient l'hôte (`alertReglesModifiees`) et que l'exception
+d'un jour est **silencieuse** — comme l'étaient déjà ses absences. Prévenir
+l'hôte d'une exception : question ouverte, posée à Thierry.
+
+**La règle, désormais, des deux côtés** : une exception sur un jour précis prime
+toujours sur la récurrence, dans les deux sens.
+
+**Le correctif :**
+- `api/menages-public.js` (`declarerIndisponibilite`) : `available` booléen ;
+  **absent = absence** (la PWA déjà installée sur un téléphone n'envoie que la
+  date) ; **toute autre valeur = 400**, rien n'est écrit. La mise à jour de SA
+  ligne porte le sens demandé ; une ligne de l'hôte n'est jamais écrasée (409,
+  inchangé).
+- `apps/menages/public.html` : `basculerMonJour` calcule le SENS (l'inverse de ce
+  que dit la journée) et la CIBLE (`jourParSesRegles`, la récurrence seule) :
+  si la récurrence dit déjà le sens voulu, on **retire** son exception plutôt
+  que d'en empiler une redondante ; sinon on pose l'exception du sens voulu,
+  en toutes lettres (`available`). Le segment n'est plus figé sur un jour de
+  repos.
+- ⚠️ **Une absence posée par elle sur un jour que sa récurrence ne couvre plus
+  se RETOURNE en disponibilité**, elle ne se retire pas : la retirer laisserait
+  le jour éteint, l'inverse de la demande. C'est le cas réel de Tiphaine, dont
+  les absences de septembre tombent sur des jours que sa récurrence d'octobre
+  ne couvre plus.
+
+**Tests** : `tests/menages-public-disponibilites.test.js` (les deux sens, la
+mise à jour du sens, absent = absence, **400 sur valeur invalide** — `'true'`,
+`1`, `null`, `{}`… — et la ligne de l'hôte jamais appropriée) ;
+`tests/pwa-mes-jours-dom.test.js` (jour de repos rendu disponible, jour
+travaillé déclaré absent en toutes lettres, retour à la récurrence, absence
+retournée). Six rouges contre le code d'avant (`git archive`). Le double du
+harnais écrivait lui aussi toujours `false` : il imitait fidèlement le défaut,
+il suit maintenant le serveur.
+
+## Glisser sur le calendrier : appui long, puis glisser (1er octobre 2026)
+
+**La demande de Thierry.** « Je suis disponible » doit pouvoir ouvrir des jours
+**en masse**, y compris des jours de repos. Le geste retenu : **glisser sur le
+calendrier**, lancé par un **appui long**.
+
+**Pourquoi l'appui long.** Le glissé avait été écarté de la PWA parce qu'il se
+bat avec le défilement de la page. Il ne démarre donc qu'après **400 ms
+immobile** sur un jour (tolérance 8 px) : un doigt qui bouge avant fait défiler,
+exactement comme avant. Une tape courte ouvre la feuille du jour, inchangée.
+
+⚠️ **Le défilement n'est retenu QUE pendant la sélection.** `touch-action` se
+décide au toucher — trop tôt pour savoir si l'appui sera long. On retient donc
+le `touchmove` (écouteur **non passif**) seulement une fois la sélection lancée ;
+avant et après, la page défile. Un test vérifie les trois moments.
+
+⚠️ **Le doigt se suit par sa position** (`elementFromPoint`), pas par la cible
+de l'événement : au toucher, le navigateur capture implicitement le pointeur sur
+la case de départ. Et **aucun `setPointerCapture`**, pour la raison déjà gravée
+côté hôte.
+
+**Ce que fait la plage** (`basculerPlageMesJours`) :
+- le **sens** est celui du **premier jour** touché — partir d'un jour fermé
+  ouvre, partir d'un jour ouvert ferme (comme l'écran hôte) ;
+- chaque jour passe par `basculerMonJour` (option `plage`) : mêmes gardes, même
+  rendu immédiat, même retour arrière qu'une tape, et la règle « une exception
+  prime sur la récurrence » ; un jour déjà dans le bon sens est sauté ;
+- **ne bougent jamais** : le passé, un congé, une exception posée par l'hôte, un
+  jour qui porte un ménage à elle ou une proposition qu'on lui fait ;
+- ⚠️ **une offre « à prendre » sur la plage n'ouvre pas la prise** : la tape
+  directe sur un jour à bulle ouvre la prise (`basculerMonJour` hors feuille) ;
+  le glissé, lui, ne règle que la disponibilité ;
+- **le premier échec arrête** et le dit (« N jours enregistrés, puis arrêt au
+  … ») — même règle que la plage côté hôte ;
+- le relâcher est suivi d'un `click` : il est ignoré, sinon la feuille du
+  dernier jour s'ouvrirait par-dessus le résultat.
+
+`basculerMonJour` rend désormais `true` / `false` : c'est ce que la plage lit
+pour s'arrêter.
+
+**Ce que la review a trouvé** (aucun constat de sécurité ; deux moyens, cinq
+faibles, tous corrigés avec un test chacun) :
+- ⚠️ **Une plage longue défaisait un jour réglé entre-temps.** `basculerMonJour`
+  inversait l'état du jour *au moment où il l'écrivait* : un jour ouvert par un
+  autre geste pendant l'envoi était refermé par la plage, sous un « ✓ N jours
+  ouverts ». La plage **impose désormais son sens** (`sens`), un jour déjà dans
+  ce sens est un succès ; et **une seule plage à la fois** (« un réglage est
+  déjà en cours d'envoi »).
+- ⚠️ **Un repeint pendant la sélection relâchait le défilement.** Le repeint
+  reconstruit les cases ; le `touchmove` d'un vrai doigt reste dirigé vers la
+  case de départ, détachée, et ne remontait plus jusqu'à la zone. Il est
+  écouté sur **`document`**.
+- **L'ancre doit être réglable** (`jourReglable`, la même règle que la plage) :
+  un appui long sur un congé ou un jour à ménage ne lance plus de sélection —
+  son sens aurait contredit ce que montre la case.
+- Le message d'arrêt ne recopie plus le « ✓ » du jour précédent.
+- Le `click` ignoré après un glissé ne vaut **que pour le dernier jour** : au
+  doigt, le navigateur n'envoie souvent aucun click, et la tape suivante sur un
+  autre jour était avalée.
+- Un **second doigt** ne relance ni ne termine la sélection (`pointerId`).
+- Le **menu contextuel** de l'appui long (Chrome Android) est retenu pendant la
+  sélection. ⚠️ À confirmer sur un vrai téléphone : jsdom ne le prouve pas.
+
+**Tests** (`tests/pwa-mes-jours-dom.test.js`, section « GLISSER ») : trois jours
+de repos ouverts sans ouvrir la feuille ; le doigt qui bouge avant l'appui long
+fait défiler et rien ne part ; le défilement retenu pendant la sélection
+seulement ; le sens du premier jour ; congé, absence de l'hôte, jour à ménage et
+offre intouchés ; arrêt au premier échec ; tape courte inchangée. Cinq rouges
+contre le code d'avant (`git archive`), verts aux dates décalées de 27 à 30 jours
+(`tests/outils/horloge-decalee.js`).

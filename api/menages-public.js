@@ -2165,13 +2165,24 @@ async function mesConges (req, res, token, { retirer }) {
   return res.status(200).json({ success: true, conge: data })
 }
 
-// Elle pose ou retire une INDISPONIBILITE. Une seule forme : un jour, absente.
+// Elle pose ou retire une EXCEPTION sur un jour precis : absente un jour
+// habituellement travaille, ou DISPONIBLE un jour habituellement chome.
 //
-// ⚠ ELLE NE PEUT PAS SE DECLARER DISPONIBLE UN JOUR QU'ELLE NE PREND PAS.
-// `available` n'est pas un parametre : une exception posee ici vaut TOUJOURS
-// `false`. Ouvrir le sens inverse lui permettrait de se rendre candidate un jour
-// que l'hote ne lui a pas confie — et l'ecran de l'hote, lui, garde les deux
-// sens (c'est lui qui peut dire « viens exceptionnellement ce samedi »).
+// ⚠ LES DEUX SENS, DEPUIS LE 1er OCTOBRE 2026 — LA RAISON ECRITE AU LOT 2b EST
+// TOMBEE. Ce chemin ne posait que des absences, « pour qu'elle ne se rende pas
+// candidate un jour que l'hote ne lui a pas confie ». Mais depuis le
+// 15 septembre elle regle elle-meme ses jours HABITUELS (`reglerMesJours`) :
+// elle pouvait donc se rendre disponible tous les mercredis, pas UN mercredi.
+// La garde n'empechait rien, elle obligeait seulement a toucher la recurrence
+// pour un seul jour. Et ce que l'hote lui CONFIE vit ailleurs : ses jours
+// attitres (`weekdays`, sur la liaison) filtrent toujours, ce chemin n'y
+// touche pas. Une exception prime sur la recurrence dans les deux sens, cote
+// prestataire comme cote hote.
+//
+// ⚠ ET LE SERVEUR ECRIT CE QU'ON LUI DEMANDE, OU REFUSE. L'ancien code
+// repondait 200 a `available: true` en ecrivant `false` : un succes sur
+// l'inverse de la demande. Un booleen, ou rien (= absence : la PWA deja
+// installee n'envoie que la date) ; toute autre valeur -> 400.
 async function mesIndisponibilites (req, res, token, { retirer }) {
   const qui = await celleQuiDeclare(token, { ecriture: true })
   if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
@@ -2183,6 +2194,11 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
   const { date } = req.body || {}
   const jour = jourValide(date)
   if (!jour) return res.status(400).json({ error: 'Date invalide' })
+  const brut = (req.body || {}).available
+  if (!retirer && brut !== undefined && typeof brut !== 'boolean') {
+    return res.status(400).json({ error: 'Disponibilité invalide' })
+  }
+  const available = brut === true
 
   // ⚠ PAS DE DECLARATION DANS LE PASSE. Se retirer d'un jour deja passe ne veut
   // rien dire — le menage a eu lieu ou non — et cela reecrirait l'historique sur
@@ -2240,10 +2256,10 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
   //   2. sinon inserer — et si la contrainte d'unicite refuse, c'est qu'une ligne
   //      de l'HOTE occupe ce jour. On le DIT plutot que de la remplacer.
   const ligne = { user_id: qui.userId, provider_id: qui.profil.id, date: jour,
-                  available: false, source: 'prestataire' }
+                  available, source: 'prestataire' }
 
   const { data: maj, error: errMaj } = await supabase.from('provider_availability_exceptions')
-    .update({ available: false })
+    .update({ available })
     .eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
     .eq('date', jour).eq('source', 'prestataire')
     .select('id, date, available, source')
