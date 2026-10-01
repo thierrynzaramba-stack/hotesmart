@@ -3591,9 +3591,9 @@ test('un glisser envoie chaque jour en `plage`, puis UNE annonce qui résume ce 
   assert.ok(d.every(x => x.corps.plage === true), 'aucun jour n\'envoie son propre SMS')
   const ann = t.appels.filter(x => x.corps && x.corps.action === 'annoncerPlage')
   assert.strictEqual(ann.length, 1, 'une seule annonce pour la plage')
-  assert.deepStrictEqual({ du: ann[0].corps.du, au: ann[0].corps.au, jours: ann[0].corps.jours,
-                           available: ann[0].corps.available },
-                         { du: a, au: c, jours: 3, available: true })
+  // ⚠ ELLE NE DICTE RIEN : le serveur resume ce qu'il a lui-meme enregistre
+  // (constat de securite de la review du 2 octobre 2026).
+  assert.deepStrictEqual(ann[0].corps, { action: 'annoncerPlage' })
 })
 
 test('une plage ARRÊTÉE en route n\'annonce rien si rien n\'a été fait', async () => {

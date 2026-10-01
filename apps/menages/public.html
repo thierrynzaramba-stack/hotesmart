@@ -3780,14 +3780,14 @@ if ("serviceWorker" in navigator) {
   }
 
   // ⚠ UN GLISSER = UN SEUL SMS A L'HOTE (decision de Thierry, 2 octobre 2026),
-  // qui resume ce qui a ete REELLEMENT enregistre — y compris quand la plage
-  // s'arrete en route. Best-effort : la tache de l'hote porte deja le detail
+  // que le SERVEUR compose depuis ce qu'il a enregistre — y compris quand la
+  // plage s'arrete en route. Best-effort : la tache de l'hote porte deja le detail
   // jour par jour ; un echec ici ne change rien a ce qu'elle voit.
   async function annoncerLaPlage (faitsJours, voulu) {
     if (!faitsJours.length) return
     try {
-      await envoyer({ action: 'annoncerPlage', du: faitsJours[0], au: faitsJours[faitsJours.length - 1],
-                      jours: faitsJours.length, available: voulu })
+      // Le serveur resume ce qu'IL a enregistre : on ne lui dicte rien.
+      await envoyer({ action: 'annoncerPlage' })
     } catch (_) { /* la tache garde le detail */ }
   }
 

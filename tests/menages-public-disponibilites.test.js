@@ -58,7 +58,10 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      // Ce qui occupe déjà ce jour-là : rien, sa déclaration, ou
                      // une absence posée par l'hôte.
                      ligneExistante = null } = {}) {
-  const etat = { ecritures: [], lectures: [], sms: [] }
+  // ⚠ LA TACHE DU JOUR GARDE SON ETAT d'une ecriture a l'autre (constat de
+  // review) : figee d'avance, elle laissait passer un test « 10 jours = 1 SMS »
+  // meme si les jours n'ecrivaient rien dans la tache.
+  const etat = { ecritures: [], lectures: [], sms: [], tache: tacheDuJour ? { ...tacheDuJour } : null }
   const client = {
     from (table) {
       const a = { table, f: {} }
@@ -120,7 +123,7 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
             return Promise.resolve({ data: liaisons, error: null })
           }
           if (table === 'agent_tasks') {
-            return Promise.resolve({ data: tacheDuJour ? [tacheDuJour] : [], error: null })
+            return Promise.resolve({ data: etat.tache ? [{ ...etat.tache }] : [], error: null })
           }
           return Promise.resolve({ data: [], error: null })
         },
@@ -144,6 +147,10 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
         // l'hôte. Un double qui répondrait « OK » à tout la rendrait indétectable.
         insert (row) {
           etat.ecritures.push({ table, op: 'insert', row })
+          if (table === 'agent_tasks') {
+            etat.tache = { id: 't-nouvelle', ...row }
+            return Promise.resolve({ data: null, error: null })
+          }
           // ⚠ UN INSERT DE TABLEAU N'A PAS DE `.select().maybeSingle()` derriere
           // lui dans ce code : il est attendu directement. Sans `then`, `await`
           // rendait l'objet, donc `error === undefined`, donc la panne
@@ -165,6 +172,9 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
             // l'hote) s'enregistre aussi : sans ce `then`, elle passait inapercue
             // et le detail jour par jour etait invisible au test.
             then (res, rej) { etat.ecritures.push(q)
+              if (table === 'agent_tasks' && etat.tache && q.f.id === etat.tache.id) {
+                etat.tache = { ...etat.tache, ...row }
+              }
               return Promise.resolve({ data: null, error: null }).then(res, rej) },
             eq (c, v) { q.f[c] = v; return c2 },
             in (c, v) {
@@ -1094,63 +1104,94 @@ test('un RETRAIT refusé (absence de l\'hôte) ou sans objet n\'annonce rien', a
 // (détail dans la tâche, pas de SMS), puis la PWA envoie `annoncerPlage`.
 
 const jourDans = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
-const recente = () => ({ id: 't1', summary: 'Marie s\'est déclarée disponible le …', updated_at: new Date().toISOString() })
-const annoncer = body => ({ method: 'POST', query: { token: TOKEN }, headers: {},
-                            body: { action: 'annoncerPlage', ...body } })
+const annoncer = (body = {}) => ({ method: 'POST', query: { token: TOKEN }, headers: {},
+                                   body: { action: 'annoncerPlage', ...body } })
+const jm = d => `${d.slice(8, 10)}/${d.slice(5, 7)}`
+const bornes = (a, b) => a.slice(0, 7) === b.slice(0, 7) ? `du ${Number(a.slice(8, 10))} au ${jm(b)}` : `du ${jm(a)} au ${jm(b)}`
+const AVEC_ENVOI = { liaisons: [{ property_id: 'B1' }], alertesConfigurees: true }
+async function glisserServeur (handler, jours, available = true) {
+  for (const j of jours) {
+    const res = reponse()
+    await handler(ecrire({ date: j, available, plage: true }), res)
+    assert.strictEqual(res.code, 200, j)
+  }
+}
 
 test('un glisser sur 10 jours donne UN SMS, qui résume la plage', async () => {
   const jours = Array.from({ length: 10 }, (_, i) => jourDans(i + 2))
-  const { handler, etat } = preparer({ liaisons: [{ property_id: 'B1' }], alertesConfigurees: true,
-                                        tacheDuJour: recente() })
-  for (const j of jours) {
-    const res = reponse()
-    await handler(ecrire({ date: j, available: true, plage: true }), res)
-    assert.strictEqual(res.code, 200, j)
-  }
+  const { handler, etat } = preparer(AVEC_ENVOI)
+  await glisserServeur(handler, jours)
+  assert.strictEqual(etat.sms.length, 0, 'aucun jour du glisser n\'envoie son propre SMS')
   const res = reponse()
-  await handler(annoncer({ du: jours[0], au: jours[9], jours: 10, available: true }), res)
+  await handler(annoncer(), res)
   assert.strictEqual(res.code, 200)
   assert.strictEqual(etat.sms.length, 1, 'un seul SMS pour dix jours')
-  assert.match(etat.sms[0], /Marie dispo du \d{1,2}(\/\d{2})? au \d{1,2}\/\d{2}/)
-  assert.match(etat.sms[0], /10 jours/)
-  const detail = etat.ecritures.filter(x => x.table === 'agent_tasks' && (x.op === 'update' || x.op === 'insert'))
-  assert.strictEqual(detail.length, 10, 'la tâche reçoit le détail jour par jour')
+  assert.match(etat.sms[0], new RegExp(`Marie dispo ${bornes(jours[0], jours[9]).replace(/\//g, '\\/')} \\(10 jours\\)`))
+  const detail = (etat.tache.summary.match(/\(glisser\)/g) || []).length
+  assert.strictEqual(detail, 10, 'la tâche garde le détail jour par jour')
+})
+
+test('REJOUER l\'annonce n\'envoie rien de plus : la fenêtre est consommée', async () => {
+  const { handler, etat } = preparer(AVEC_ENVOI)
+  await glisserServeur(handler, [jourDans(2), jourDans(3)])
+  await handler(annoncer(), reponse())
+  await handler(annoncer(), reponse())
+  await handler(annoncer(), reponse())
+  assert.strictEqual(etat.sms.length, 1)
+  assert.match(etat.tache.summary, /Résumé envoyé par SMS/)
+})
+
+test('le CORPS de l\'annonce est ignoré : le SMS dit ce que le serveur a écrit', async () => {
+  const { handler, etat } = preparer(AVEC_ENVOI)
+  await glisserServeur(handler, [jourDans(2), jourDans(3)], true)
+  await handler(annoncer({ du: jourDans(40), au: jourDans(70), jours: 30, available: false }), reponse())
+  assert.strictEqual(etat.sms.length, 1)
+  assert.match(etat.sms[0], /Marie dispo .*\(2 jours\)/)
+  assert.doesNotMatch(etat.sms[0], /absente|30 jours/)
+})
+
+test('SANS glisser récent, l\'annonce n\'envoie rien — pas un porte-voix', async () => {
+  const { handler, etat } = preparer(AVEC_ENVOI)
+  await handler(ecrire({ date: DEMAIN, available: false }), reponse())   // une tape : son SMS part
+  assert.strictEqual(etat.sms.length, 1)
+  await handler(annoncer(), reponse())
+  assert.strictEqual(etat.sms.length, 1, 'la tape n\'est pas ré-annoncée')
+  const { handler: h2, etat: e2 } = preparer(AVEC_ENVOI)
+  await h2(annoncer(), reponse())
+  assert.strictEqual(e2.sms.length, 0, 'rien du tout sans activité')
+})
+
+test('des jours NON CONTIGUS ne se disent pas « du … au … »', async () => {
+  const { handler, etat } = preparer(AVEC_ENVOI)
+  await glisserServeur(handler, [jourDans(2), jourDans(5)])
+  await handler(annoncer(), reponse())
+  assert.match(etat.sms[0], /Marie dispo 2 jours entre le /)
+})
+
+test('un seul jour se dit « le JJ/MM (1 jour) » ; des sens mêlés se comptent', async () => {
+  const j = jourDans(3)
+  const { handler, etat } = preparer(AVEC_ENVOI)
+  await glisserServeur(handler, [j], false)
+  await handler(annoncer(), reponse())
+  assert.match(etat.sms[0], new RegExp(`Marie absente le ${jm(j).replace('/', '\\/')} \\(1 jour\\)`))
+  const { handler: h2, etat: e2 } = preparer(AVEC_ENVOI)
+  await glisserServeur(h2, [jourDans(2)], true)
+  await glisserServeur(h2, [jourDans(3)], false)
+  await h2(annoncer(), reponse())
+  assert.match(e2.sms[0], /Marie : dispo 1 jour, absente 1 jour, entre le /)
 })
 
 test('une exception d\'UN jour hors glisser envoie toujours son SMS', async () => {
-  const { handler, etat } = preparer({ liaisons: [{ property_id: 'B1' }], alertesConfigurees: true })
+  const { handler, etat } = preparer(AVEC_ENVOI)
   await handler(ecrire({ date: DEMAIN, available: false }), reponse())
   assert.strictEqual(etat.sms.length, 1)
   assert.match(etat.sms[0], /absente le/)
 })
 
-test('annoncerPlage SANS activité récente de sa part n\'envoie rien — pas un porte-voix', async () => {
-  for (const tache of [null, { id: 't1', summary: 'x', updated_at: new Date(Date.now() - 3600000).toISOString() }]) {
-    const { handler, etat } = preparer({ liaisons: [{ property_id: 'B1' }], alertesConfigurees: true,
-                                          tacheDuJour: tache })
-    const res = reponse()
-    await handler(annoncer({ du: jourDans(2), au: jourDans(4), jours: 3, available: true }), res)
-    assert.strictEqual(res.code, 200)
-    assert.strictEqual(etat.sms.length, 0)
-  }
-})
-
-test('annoncerPlage refuse des bornes ou un sens invalides (400), et passe par la double garde', async () => {
-  for (const body of [{ du: 'x', au: jourDans(3), jours: 2, available: true },
-                      { du: jourDans(5), au: jourDans(3), jours: 2, available: true },
-                      { du: jourDans(2), au: jourDans(3), jours: 0, available: true },
-                      { du: jourDans(2), au: jourDans(3), jours: 2, available: 'oui' }]) {
-    const { handler, etat } = preparer({ liaisons: [{ property_id: 'B1' }], alertesConfigurees: true,
-                                          tacheDuJour: recente() })
-    const res = reponse()
-    await handler(annoncer(body), res)
-    assert.strictEqual(res.code, 400, JSON.stringify(body))
-    assert.strictEqual(etat.sms.length, 0)
-  }
-  const { handler, etat } = preparer({ droits: { self_availability: 'read' }, liaisons: [{ property_id: 'B1' }],
-                                        alertesConfigurees: true, tacheDuJour: recente() })
+test('annoncerPlage passe par la double garde (droit `read` = 403, rien ne part)', async () => {
+  const { handler, etat } = preparer({ ...AVEC_ENVOI, droits: { self_availability: 'read' } })
   const res = reponse()
-  await handler(annoncer({ du: jourDans(2), au: jourDans(3), jours: 2, available: true }), res)
+  await handler(annoncer(), res)
   assert.strictEqual(res.code, 403)
   assert.strictEqual(etat.sms.length, 0)
 })

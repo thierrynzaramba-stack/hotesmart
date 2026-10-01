@@ -3242,23 +3242,35 @@ par jour ; la **tâche garde le détail jour par jour**. Une tape sur un seul jo
 garde son SMS, comme avant.
 
 **Comment** : chaque jour du glisser part avec `plage: true` — le serveur l'écrit
-dans la tâche du jour **sans envoi** (`alertReglesModifiees({ envoyer: false })`).
-À la fin, la PWA appelle **`annoncerPlage`** avec ce qui a été **réellement**
-enregistré (premier et dernier jour, nombre, sens) — y compris quand la plage
-s'arrête en route ; rien n'est annoncé si rien n'a été fait. Format :
-« le 12/10 », « du 12 au 21/10 », « du 28/10 au 03/11 ».
+dans la tâche du jour **sans envoi**, marqué « **(glisser)** ». À la fin, la PWA
+appelle **`annoncerPlage`**, sans rien d'autre : le serveur relit la tâche,
+prend les jours « (glisser) » écrits **après le dernier résumé**, compose le SMS
+et inscrit « Résumé envoyé par SMS : « … » » à la fin de la tâche.
 
-⚠️ **`annoncerPlage` n'est pas un porte-voix** (choix tranché seul, cette nuit) :
-appelé par la PWA, il pourrait sinon envoyer des SMS à l'hôte sans qu'elle ait
-rien changé. Il passe par la **même double garde** que l'écriture (jeton +
-`self_availability: 'write'`), refuse des bornes ou un sens invalides (400), et
-**n'envoie que si la tâche du jour de cette prestataire a bougé dans les
-10 dernières minutes** (`alertPlageModifiee`).
+⚠️ **Constat de SÉCURITÉ de la review, corrigé** : la première version laissait
+la PWA dicter le résumé (bornes, nombre, sens) et ne consommait pas la fenêtre
+de 10 minutes — un appel forgé pouvait faire dire à l'hôte « absente du 1er au
+30/11 » sans que rien n'ait changé, ou rejouer l'annonce en boucle (SMS
+facturés). Désormais **le corps de la requête est ignoré** (le serveur ne se
+fie qu'à ce qu'il a lui-même écrit) et **la fenêtre se consomme** (le résumé
+inscrit à la fin de la tâche ; un second appel ne trouve plus rien de neuf). Le
+résumé est inscrit **avant** l'envoi : un appel concurrent trouve la fenêtre
+déjà soldée.
 
-⚠️ **Limite connue, assumée** : `plage: true` est fourni par le client. Une
-prestataire qui forgerait ses appels pourrait poser des exceptions sans SMS —
-**mais jamais sans trace** : la tâche de l'hôte reçoit le détail dans tous les
-cas, avec le jour en clair. Le SMS est une commodité de plus, pas la garde.
+**Formats** (tranchés seul) : jours contigus d'un même sens → « Tiphaine dispo
+du 12 au 21/10 (10 jours) », « du 28/10 au 03/11 », « le 12/10 (1 jour) » ; jours
+**non contigus** (congé, ménage, jour déjà dans le bon sens sautés) → « Tiphaine
+dispo 7 jours entre le 12 et le 21/10 » — ne pas prétendre à une plage
+continue ; sens mêlés → « Tiphaine : dispo 5 jours, absente 2 jours, entre le …
+». Le dernier changement d'un jour l'emporte.
+
+⚠️ **Limites connues, assumées** :
+- `plage: true` vient du client : forgé, il évite le SMS de ce jour, **jamais la
+  trace** — la tâche reçoit le détail dans tous les cas.
+- Si l'annonce n'arrive pas (téléphone verrouillé, réseau, ou glisser fini
+  avant minuit et annoncé après — la tâche est datée en heure de Paris), l'hôte
+  n'a **pas de SMS** pour ce glisser ; la tâche, elle, porte tout. Les jours non
+  annoncés partent avec le résumé du glisser suivant du même jour.
 
 **Le harnais** sait maintenant faire partir un vrai SMS (doubles de `sendSms` /
 `sendPlatformEmail`, liaison de routage, configuration d'alerte) et enregistre
@@ -3266,7 +3278,9 @@ une mise à jour attendue sans `.select()` — sans quoi le détail jour par jou
 était invisible au test.
 
 Tests : « un glisser sur 10 jours donne UN SMS » (rouge contre le code d'avant :
-dix SMS), une tape seule garde son SMS, `annoncerPlage` sans activité récente
-n'envoie rien, bornes invalides = 400, droit `read` = 403 ; côté PWA, chaque
-jour part en `plage` et une seule annonce suit, rien n'est annoncé si rien n'a
-été fait.
+dix SMS), rejouer l'annonce n'envoie rien de plus, le corps forgé est ignoré,
+jours non contigus, un seul jour, sens mêlés, une tape seule garde son SMS et
+n'est pas ré-annoncée, droit `read` = 403 ; côté PWA, chaque jour part en
+`plage` et une seule annonce suit, sans aucune donnée. Le double de la tâche du
+jour garde son état d'une écriture à l'autre (sinon le test des 10 jours passait
+même si les jours n'écrivaient rien).
