@@ -3321,3 +3321,258 @@ test('un ÉCHEC en se rendant disponible rend le jour à son état d\'avant, et 
   assert.ok(caseDu(w, j).classList.contains('off'), 'le jour de repos est rétabli')
   assert.match(message(w), /indisponible|Pas enregistré/)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GLISSER SUR LE CALENDRIER : APPUI LONG, PUIS GLISSER (1er octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Décision de Thierry : « Je suis disponible » doit pouvoir ouvrir des jours en
+// masse, y compris des jours de repos. Le glisser avait été écarté de la PWA
+// parce qu'il se bat avec le défilement : il ne démarre donc qu'après un APPUI
+// LONG immobile. Un doigt qui bouge avant fait défiler la page, comme avant.
+// ⚠ jsdom n'a ni `PointerEvent` ni `elementFromPoint` : on envoie l'événement
+// par son TYPE (ce que la page écoute), sur la case visée.
+
+const APPUI_LONG = 450
+const pointeur = (w, el, type, { x = 0, y = 0 } = {}) =>
+  el.dispatchEvent(new w.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 }))
+const glisser = async (w, de, a) => {
+  pointeur(w, caseDu(w, de), 'pointerdown')
+  await souffler(APPUI_LONG)
+  pointeur(w, caseDu(w, a), 'pointermove')
+  pointeur(w, caseDu(w, a), 'pointerup')
+  caseDu(w, a).dispatchEvent(new w.Event('click', { bubbles: true }))   // le clic qui suit le relâcher
+  await souffler(120)
+}
+// Trois jours consécutifs à venir, dont aucun n'est un lundi.
+const troisJoursDeRepos = () => {
+  let n = 1
+  const lundi = k => new Date(dans(k) + 'T12:00:00Z').getUTCDay() === 1
+  while (lundi(n) || lundi(n + 1) || lundi(n + 2)) n++
+  return [dans(n), dans(n + 1), dans(n + 2)]
+}
+const modalOuverte = w => w.document.getElementById('modal').style.display === 'flex'
+
+test('appui long puis glisser sur trois jours de repos : les trois s\'ouvrent, sans ouvrir la feuille', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  for (const j of [a, b, c]) assert.ok(caseDu(w, j).classList.contains('off'))
+  await glisser(w, a, c)
+  const d = declarations(t)
+  assert.deepStrictEqual(d.map(x => [x.corps.date, x.corps.available]).sort(),
+    [[a, true], [b, true], [c, true]])
+  for (const j of [a, b, c]) assert.ok(!caseDu(w, j).classList.contains('off'), j + ' ouvert')
+  assert.ok(!modalOuverte(w), 'le relâcher n\'ouvre pas la feuille du jour')
+  assert.match(message(w), /3 jours/)
+})
+
+test('un doigt qui BOUGE avant l\'appui long fait défiler : rien n\'est sélectionné, rien ne part', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown', { x: 10, y: 10 })
+  pointeur(w, caseDu(w, a), 'pointermove', { x: 10, y: 40 })     // il défile
+  const tm = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(tm)
+  assert.strictEqual(tm.defaultPrevented, false, 'le défilement n\'est pas bloqué')
+  await souffler(APPUI_LONG)
+  pointeur(w, caseDu(w, c), 'pointermove', { x: 10, y: 200 })
+  pointeur(w, caseDu(w, c), 'pointerup')
+  await souffler(80)
+  assert.strictEqual(declarations(t).length, 0)
+  assert.strictEqual(w.document.querySelectorAll('#dispo-months .dispo-case.sel').length, 0)
+})
+
+test('PENDANT la sélection seulement, le défilement est retenu', async () => {
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  const avant = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(avant)
+  assert.strictEqual(avant.defaultPrevented, false, 'avant l\'appui long : la page défile')
+  await souffler(APPUI_LONG)
+  assert.ok(caseDu(w, a).classList.contains('sel'), 'la sélection démarre, et se voit')
+  const pendant = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(pendant)
+  assert.strictEqual(pendant.defaultPrevented, true, 'pendant : le doigt sélectionne au lieu de défiler')
+  pointeur(w, caseDu(w, a), 'pointerup')
+  await souffler(80)
+  const apres = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(apres)
+  assert.strictEqual(apres.defaultPrevented, false, 'après : la page défile de nouveau')
+})
+
+test('le sens vient du PREMIER jour : partir d\'un jour travaillé ferme la plage', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('tous', 'tous les jours', [0, 1, 2, 3, 4, 5, 6])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  assert.deepStrictEqual(declarations(t).map(x => [x.corps.date, x.corps.available]).sort(),
+    [[a, false], [b, false], [c, false]])
+})
+
+test('la plage NE TOUCHE PAS un congé, une absence de l\'hôte, un jour à ménage — ni n\'ouvre la prise', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const d4 = dans(Number((Date.parse(c) - Date.parse(dans(0))) / 86400000) + 1)
+  const fin = new Date(d4 + 'T12:00:00Z').getUTCDay() === 1 ? dans(Number((Date.parse(d4) - Date.parse(dans(0))) / 86400000) + 1) : d4
+  const { w, t } = monter({
+    regles: [regle('r1', 'lundis', [1])],
+    conges: [{ id: 'c1', debut: b, fin: b, source: 'prestataire' }],
+    exceptions: [{ id: 'h1', date: c, available: false, source: 'hote' }],
+    bookings: [reservation(fin)],
+    aPrendre: [offre(a)]
+  })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  await glisser(w, a, fin)
+  const dates = declarations(t).map(x => x.corps.date)
+  assert.ok(dates.includes(a), 'le jour de repos s\'ouvre')
+  assert.ok(!dates.includes(b), 'le congé reste un congé')
+  assert.ok(!dates.includes(c), 'l\'absence posée par l\'hôte n\'est pas à elle')
+  assert.ok(!dates.includes(fin), 'un jour à ménage n\'est pas un jour à régler')
+  assert.ok(!modalOuverte(w), 'une offre sur la plage n\'ouvre pas la prise')
+})
+
+test('un ÉCHEC au milieu de la plage ARRÊTE et le dit', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    echecEcriture: { status: 503, message: 'Service temporairement indisponible' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  assert.strictEqual(declarations(t).length, 1, 'on ne continue pas après un refus')
+  assert.ok(caseDu(w, a).classList.contains('off'), 'le jour refusé est rétabli')
+  assert.match(message(w), /arrêt|Arrêt|interromp/)
+})
+
+test('une tape courte ouvre toujours la feuille du jour (non-régression)', async () => {
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  pointeur(w, caseDu(w, a), 'pointerup')
+  caseDu(w, a).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(50)
+  assert.ok(modalOuverte(w))
+  assert.strictEqual(declarations(t).length, 0)
+})
+
+// ─── Ce que la review du glisser a trouvé (1er octobre 2026) ────────────────
+
+const pointeurId = (w, el, type, id) => {
+  const ev = new w.MouseEvent(type, { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 })
+  Object.defineProperty(ev, 'pointerId', { value: id })
+  el.dispatchEvent(ev)
+}
+
+test('une SECONDE plage pendant que la première s\'écrit est refusée, et le dit — rien ne s\'écrit deux fois', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  // 400 ms par écriture : la première plage (trois jours) dure ~1,2 s, la
+  // seconde est lâchée ~0,6 s après — elles se chevauchent vraiment.
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])], retardEcriture: 400 })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)                 // la première plage écrit encore
+  await glisser(w, a, c)
+  assert.match(message(w), /déjà en cours/)
+  await souffler(1500)
+  assert.strictEqual(declarations(t).length, 3, 'trois écritures, pas six')
+})
+
+test('un REPEINT pendant la sélection ne relâche pas le défilement retenu', async () => {
+  // Le repeint reconstruit les cases : le `touchmove` d'un vrai doigt reste
+  // dirigé vers la case DÉTACHÉE. Il est donc écouté sur `document`.
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  const depart = caseDu(w, a)
+  pointeur(w, depart, 'pointerdown')
+  await souffler(APPUI_LONG)
+  await t.chargerDisponibilites()        // repeint complet
+  assert.ok(!depart.isConnected, 'la case de départ a bien été remplacée')
+  const tm = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  w.document.dispatchEvent(tm)
+  assert.strictEqual(tm.defaultPrevented, true)
+  assert.ok(caseDu(w, a).classList.contains('sel'), 'la sélection se repeint aussi')
+  pointeur(w, caseDu(w, a), 'pointerup')
+  await souffler(120)
+})
+
+test('un appui long sur un CONGÉ ne lance pas de sélection (le sens contredirait l\'écran)', async () => {
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('tous', 'tous les jours', [0, 1, 2, 3, 4, 5, 6])],
+    conges: [{ id: 'c1', debut: a, fin: a, source: 'prestataire' }] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  await souffler(APPUI_LONG)
+  assert.strictEqual(w.document.querySelectorAll('#dispo-months .dispo-case.sel').length, 0)
+  pointeur(w, caseDu(w, a), 'pointerup')
+  await souffler(80)
+  assert.strictEqual(declarations(t).length, 0)
+})
+
+test('une tape sur un AUTRE jour juste après un glisser ouvre sa feuille', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  await souffler(APPUI_LONG)
+  pointeur(w, caseDu(w, b), 'pointermove')
+  pointeur(w, caseDu(w, b), 'pointerup')       // au doigt : souvent AUCUN click ne suit
+  caseDu(w, c).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(60)
+  assert.ok(modalOuverte(w), 'la tape suivante n\'est pas avalée')
+})
+
+test('pendant la sélection, le menu contextuel de l\'appui long est retenu', async () => {
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  await souffler(APPUI_LONG)
+  const cm = new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(cm)
+  assert.strictEqual(cm.defaultPrevented, true)
+  pointeur(w, caseDu(w, a), 'pointerup')
+  await souffler(120)
+})
+
+test('un SECOND doigt ne relance ni ne termine la sélection du premier', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeurId(w, caseDu(w, a), 'pointerdown', 1)
+  await souffler(APPUI_LONG)
+  pointeurId(w, caseDu(w, c), 'pointerdown', 2)
+  pointeurId(w, caseDu(w, c), 'pointerup', 2)
+  assert.ok(caseDu(w, a).classList.contains('sel'), 'la sélection du premier doigt tient')
+  assert.strictEqual(declarations(t).length, 0)
+  pointeurId(w, caseDu(w, c), 'pointermove', 1)
+  pointeurId(w, caseDu(w, c), 'pointerup', 1)
+  await souffler(150)
+  assert.strictEqual(declarations(t).length, 3)
+})
+
+test('une PROPOSITION qu\'on lui fait, dans la plage, n\'est pas touchée', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    bookings: [reservation(b)], menages: [propositionAMoi(b)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  assert.deepStrictEqual(declarations(t).map(x => x.corps.date).sort(), [a, c])
+})

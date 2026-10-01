@@ -957,10 +957,10 @@ humain), mais l'écran ne l'explique pas encore.
   ligne simple : le bouton paraissait mort. C'est le parcours de **tous** les profils aujourd'hui.
 - ⚠️ **La légende explique le point** (« le point = choisi à la main »). La maquette portait quatre
   entrées, l'écran n'en avait que trois : le point était dessiné et jamais expliqué.
-- ⚠️ **Une tape, pas un glissé.** L'écran hôte sélectionne une plage au glissé ; sur un téléphone,
-  ce geste se bat avec le défilement. Ici un jour se touche (`click`, jamais `pointerdown`), et
-  une plage passe par le **formulaire de congé** — qui est justement l'objet fait pour ça.
-  Cibles tactiles de 44 px minimum.
+- ~~Une tape, pas un glissé~~ — **le glissé existe depuis le 1er octobre 2026, derrière un appui
+  long** (voir « Glisser sur le calendrier », en fin de fichier). Une tape courte ouvre toujours
+  la feuille du jour ; le défilement n'est retenu que pendant une sélection. Cibles tactiles de
+  44 px minimum.
 - ⚠️ **Elle ne défait que ce qu'elle a déclaré.** Une absence de `source: 'hote'` ne se retire
   pas : l'écran refuse le geste et **dit pourquoi** plutôt que de partir chercher un 409. Un jour
   de congé est verrouillé (`tabindex="-1"`). ~~Un jour qu'elle ne travaille déjà pas n'appelle
@@ -3108,3 +3108,74 @@ travaillé déclaré absent en toutes lettres, retour à la récurrence, absence
 retournée). Six rouges contre le code d'avant (`git archive`). Le double du
 harnais écrivait lui aussi toujours `false` : il imitait fidèlement le défaut,
 il suit maintenant le serveur.
+
+## Glisser sur le calendrier : appui long, puis glisser (1er octobre 2026)
+
+**La demande de Thierry.** « Je suis disponible » doit pouvoir ouvrir des jours
+**en masse**, y compris des jours de repos. Le geste retenu : **glisser sur le
+calendrier**, lancé par un **appui long**.
+
+**Pourquoi l'appui long.** Le glissé avait été écarté de la PWA parce qu'il se
+bat avec le défilement de la page. Il ne démarre donc qu'après **400 ms
+immobile** sur un jour (tolérance 8 px) : un doigt qui bouge avant fait défiler,
+exactement comme avant. Une tape courte ouvre la feuille du jour, inchangée.
+
+⚠️ **Le défilement n'est retenu QUE pendant la sélection.** `touch-action` se
+décide au toucher — trop tôt pour savoir si l'appui sera long. On retient donc
+le `touchmove` (écouteur **non passif**) seulement une fois la sélection lancée ;
+avant et après, la page défile. Un test vérifie les trois moments.
+
+⚠️ **Le doigt se suit par sa position** (`elementFromPoint`), pas par la cible
+de l'événement : au toucher, le navigateur capture implicitement le pointeur sur
+la case de départ. Et **aucun `setPointerCapture`**, pour la raison déjà gravée
+côté hôte.
+
+**Ce que fait la plage** (`basculerPlageMesJours`) :
+- le **sens** est celui du **premier jour** touché — partir d'un jour fermé
+  ouvre, partir d'un jour ouvert ferme (comme l'écran hôte) ;
+- chaque jour passe par `basculerMonJour` (option `plage`) : mêmes gardes, même
+  rendu immédiat, même retour arrière qu'une tape, et la règle « une exception
+  prime sur la récurrence » ; un jour déjà dans le bon sens est sauté ;
+- **ne bougent jamais** : le passé, un congé, une exception posée par l'hôte, un
+  jour qui porte un ménage à elle ou une proposition qu'on lui fait ;
+- ⚠️ **une offre « à prendre » sur la plage n'ouvre pas la prise** : la tape
+  directe sur un jour à bulle ouvre la prise (`basculerMonJour` hors feuille) ;
+  le glissé, lui, ne règle que la disponibilité ;
+- **le premier échec arrête** et le dit (« N jours enregistrés, puis arrêt au
+  … ») — même règle que la plage côté hôte ;
+- le relâcher est suivi d'un `click` : il est ignoré, sinon la feuille du
+  dernier jour s'ouvrirait par-dessus le résultat.
+
+`basculerMonJour` rend désormais `true` / `false` : c'est ce que la plage lit
+pour s'arrêter.
+
+**Ce que la review a trouvé** (aucun constat de sécurité ; deux moyens, cinq
+faibles, tous corrigés avec un test chacun) :
+- ⚠️ **Une plage longue défaisait un jour réglé entre-temps.** `basculerMonJour`
+  inversait l'état du jour *au moment où il l'écrivait* : un jour ouvert par un
+  autre geste pendant l'envoi était refermé par la plage, sous un « ✓ N jours
+  ouverts ». La plage **impose désormais son sens** (`sens`), un jour déjà dans
+  ce sens est un succès ; et **une seule plage à la fois** (« un réglage est
+  déjà en cours d'envoi »).
+- ⚠️ **Un repeint pendant la sélection relâchait le défilement.** Le repeint
+  reconstruit les cases ; le `touchmove` d'un vrai doigt reste dirigé vers la
+  case de départ, détachée, et ne remontait plus jusqu'à la zone. Il est
+  écouté sur **`document`**.
+- **L'ancre doit être réglable** (`jourReglable`, la même règle que la plage) :
+  un appui long sur un congé ou un jour à ménage ne lance plus de sélection —
+  son sens aurait contredit ce que montre la case.
+- Le message d'arrêt ne recopie plus le « ✓ » du jour précédent.
+- Le `click` ignoré après un glissé ne vaut **que pour le dernier jour** : au
+  doigt, le navigateur n'envoie souvent aucun click, et la tape suivante sur un
+  autre jour était avalée.
+- Un **second doigt** ne relance ni ne termine la sélection (`pointerId`).
+- Le **menu contextuel** de l'appui long (Chrome Android) est retenu pendant la
+  sélection. ⚠️ À confirmer sur un vrai téléphone : jsdom ne le prouve pas.
+
+**Tests** (`tests/pwa-mes-jours-dom.test.js`, section « GLISSER ») : trois jours
+de repos ouverts sans ouvrir la feuille ; le doigt qui bouge avant l'appui long
+fait défiler et rien ne part ; le défilement retenu pendant la sélection
+seulement ; le sens du premier jour ; congé, absence de l'hôte, jour à ménage et
+offre intouchés ; arrêt au premier échec ; tape courte inchangée. Cinq rouges
+contre le code d'avant (`git archive`), verts aux dates décalées de 27 à 30 jours
+(`tests/outils/horloge-decalee.js`).

@@ -80,7 +80,11 @@
                   align-items: center; justify-content: center; font-size: 14px;
                   font-variant-numeric: tabular-nums; font-weight: 600; position: relative;
                   background: var(--bg); color: var(--text); cursor: pointer;
-                  -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+                  -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+                  -webkit-touch-callout: none; }
+    /* La plage en cours de selection (appui long puis glisser, 1er octobre 2026).
+       Un contour, pas un fond : le fond dit deja ce qu'est le jour. */
+    .dispo-case.sel { outline: 2px solid var(--primary); outline-offset: -2px; }
     /* ⚠ INDISPONIBLE = LE NUMERO EST BARRE. Absence, repos, conge : une seule
        marque pour les trois, parce qu'elles disent la meme chose a qui regarde —
        « pas ce jour-la ». La nuance (qui l'a posee, pourquoi) vit dans la feuille
@@ -2643,6 +2647,7 @@ if ("serviceWorker" in navigator) {
       // quelque chose qu'elle ne peut PAS deduire de l'ecran.
       msg.textContent = ''
     }
+    if (glisse && glisse.actif) peindreSelectionMesJours()
   }
 
   function ligneLecture (jours, tag, classe, fige) {
@@ -3445,7 +3450,14 @@ if ("serviceWorker" in navigator) {
   // « une offre passe avant tout » ne doit pas rejouer — la feuille montre deja
   // les propositions dans leur propre section, et y renvoyer ferait sauter la
   // feuille sous le doigt de qui touchait le segment de disponibilite.
-  async function basculerMonJour (j, { depuisFeuille = false } = {}) {
+  // Rend `true` si l'ecriture a abouti, `false` sinon (garde, refus, panne) :
+  // la plage (glisser) s'arrete au premier `false`.
+  // `plage` : appele par le glisser — ni raccourci vers la prise d'un menage.
+  // `sens` : impose par la plage (`true` ouvrir, `false` fermer). Sans lui, le
+  // geste INVERSE l'etat du jour au moment ou il l'ecrit — ce qui, dans une
+  // plage longue, defaisait un jour regle entre-temps par un autre geste
+  // (constat de review). Avec lui, un jour deja dans ce sens est un succes.
+  async function basculerMonJour (j, { depuisFeuille = false, plage = false, sens = null } = {}) {
     const msg = document.getElementById('dispo-message')
     // ⚠ LE MESSAGE DOIT ATTERRIR LA OU ELLE REGARDE. Depuis le lot B, ce chemin
     // n'est plus appele QUE depuis la feuille — et `dire()` ecrit dans le bandeau
@@ -3470,7 +3482,7 @@ if ("serviceWorker" in navigator) {
       // Au niveau du JOUR (la case ne nomme aucun bien), c'est la premiere offre
       // qui s'ouvre — explicitement, pas par un repli. Le choix entre plusieurs
       // offres d'un meme jour se fait par la feuille du jour ou par la liste.
-      if (!depuisFeuille && libres.length) { ouvrirPriseDeMenage(j, libres, cleOffre(libres[0])); return }
+      if (!depuisFeuille && !plage && libres.length) { ouvrirPriseDeMenage(j, libres, cleOffre(libres[0])); return false }
     }
     if (!mesJours.modifiable) return
     if (j < AUJ() || congeDuJour(j)) return
@@ -3534,7 +3546,9 @@ if ("serviceWorker" in navigator) {
     //     sienne : empiler une exception redondante laisserait, le jour ou ses
     //     jours habituels changent, un jour fige que plus rien n'explique) ;
     //   - sinon -> une exception portant le sens voulu.
-    const voulu = exc ? exc.available !== true : !jourParSesRegles(j)
+    const actuel = exc ? exc.available === true : jourParSesRegles(j)
+    if (typeof sens === 'boolean' && actuel === sens) return true
+    const voulu = typeof sens === 'boolean' ? sens : !actuel
     const cible = voulu === jourParSesRegles(j) ? null : voulu
     // Rien a faire : pas d'exception, et la recurrence dit deja le sens voulu.
     // (Ne se produit pas depuis le segment, qui ne bascule que vers l'autre
@@ -3640,7 +3654,8 @@ if ("serviceWorker" in navigator) {
         : { action: 'declarerIndisponibilite', date: j, available: cible })
       enVolParJour.delete(j)
       // Le serveur a REPONDU non : l'issue est connue, on peut l'affirmer.
-      if (!ok) rattraperCeJour((data && data.error) || 'Pas enregistré. Votre journée n\'a pas changé.')
+      if (!ok) { rattraperCeJour((data && data.error) || 'Pas enregistré. Votre journée n\'a pas changé.'); return false }
+      return true
     } catch (err) {
       enVolParJour.delete(j)
       // ⚠ ON NE SAIT PAS SI L'ECRITURE A ABOUTI. `fetch` leve aussi bien quand la
@@ -3655,7 +3670,106 @@ if ("serviceWorker" in navigator) {
       if (relu && depuisFeuille && feuilleOuverteSur(j)) ouvrirJour(j)
       if (relu) direIci('Envoi interrompu — votre journée a été rechargée.')
       else rattraperCeJour('Connexion impossible. Réessayez dans un instant.')
+      return false
     }
+  }
+
+  // ─── GLISSER : APPUI LONG, PUIS GLISSER (1er octobre 2026) ───────────────
+  //
+  // Decision de Thierry : « Je suis disponible » doit ouvrir des jours EN MASSE,
+  // jours de repos compris. Le glisser avait ete ecarte de la PWA parce qu'il se
+  // bat avec le defilement de la page. Il ne demarre donc qu'apres un APPUI LONG
+  // IMMOBILE : un doigt qui bouge avant fait defiler, exactement comme avant.
+  //
+  // ⚠ LE DEFILEMENT N'EST RETENU QUE PENDANT LA SELECTION. `touch-action` se
+  // decide au toucher, trop tot pour savoir si l'appui sera long : on retient
+  // donc le `touchmove` (ecouteur NON passif) seulement une fois la selection
+  // lancee. Avant, et apres, la page defile librement.
+  // ⚠ LE DOIGT EST SUIVI PAR SA POSITION (`elementFromPoint`), pas par la cible
+  // de l'evenement : au toucher, le navigateur capture implicitement le
+  // pointeur sur la case de depart, et `e.target` ne bougerait jamais.
+  // ⚠ PAS DE `setPointerCapture`, pour la meme raison que l'ecran hote.
+  const APPUI_LONG_MS = 400
+  const TOLERANCE_PX = 8
+  let glisse = null
+  let clicIgnore = null
+
+  // ⚠ L'ANCRE DOIT ETRE UN JOUR REGLABLE (constat de review). Le sens vient du
+  // premier jour ; partir d'un conge (barre a l'ecran) ou d'un jour a menage
+  // (allume a l'ecran) donnait un sens contraire a ce qu'elle voyait. Un tel
+  // jour ne lance pas de selection : l'appui long y reste une tape.
+  function jourReglable (j) {
+    if (!j || j < AUJ() || congeDuJour(j)) return false
+    const e = exceptionDuJour(j)
+    if (e && e.source !== 'prestataire') return false
+    return !(mesMenagesTousBiens(j).length || mesOffresTousBiens(j).length)
+  }
+  function etatDeclare (j) {
+    const e = exceptionDuJour(j)
+    return e ? e.available === true : jourParSesRegles(j)
+  }
+  function annulerGlisse () {
+    if (glisse && glisse.minuteur) clearTimeout(glisse.minuteur)
+    glisse = null
+    peindreSelectionMesJours()
+  }
+  function peindreSelectionMesJours () {
+    let a = glisse && glisse.actif ? glisse.ancre : null
+    let b = glisse && glisse.actif ? glisse.cible : null
+    if (a && b && a > b) { const t = a; a = b; b = t }
+    document.querySelectorAll('#dispo-months .dispo-case[data-jour]').forEach(el => {
+      const j = el.dataset.jour
+      el.classList.toggle('sel', !!(a && j >= a && j <= b))
+    })
+  }
+  function caseSousLeDoigt (e) {
+    const sous = (typeof document.elementFromPoint === 'function' && Number.isFinite(e.clientX))
+      ? document.elementFromPoint(e.clientX, e.clientY) : null
+    const el = sous || e.target
+    return el && el.closest ? el.closest('#dispo-months .dispo-case[data-jour]') : null
+  }
+
+  // Le sens est celui du PREMIER jour touche, comme sur l'ecran hote : partir
+  // d'un jour ferme ouvre la plage, partir d'un jour ouvert la ferme.
+  // Ne bougent JAMAIS : le passe, un conge, une exception posee par l'hote, un
+  // jour qui porte un menage a elle ou une proposition qu'on lui fait.
+  let plageEnCours = false
+  async function basculerPlageMesJours (ancre, autre) {
+    if (!mesJours || !mesJours.modifiable) return
+    const msg = document.getElementById('dispo-message')
+    // ⚠ UNE PLAGE A LA FOIS. Deux plages qui se chevauchent s'ecriraient l'une
+    // par-dessus l'autre, jour par jour, dans un ordre que personne ne voit.
+    if (plageEnCours) { dire(msg, 'Un réglage est déjà en cours d’envoi — attendez qu’il se termine.'); return }
+    const voulu = !etatDeclare(ancre)
+    let a = ancre, b = autre
+    if (a > b) { const t = a; a = b; b = t }
+    const jours = []
+    for (let d = dJour(a); isoJ(d) <= b; d = new Date(d.getTime() + 86400000)) {
+      const j = isoJ(d)
+      // Une seule regle pour l'ancre et pour la plage : `jourReglable`.
+      if (!jourReglable(j)) continue
+      if (etatDeclare(j) === voulu) continue
+      jours.push(j)
+    }
+    if (!jours.length) { dire(msg, 'Rien à changer sur ces jours.'); return }
+    let faits = 0
+    plageEnCours = true
+    try {
+      for (const j of jours) {
+        // ⚠ ON VIDE LE BANDEAU AVANT CHAQUE JOUR : une garde muette laissait
+        // sinon le « ✓ » du jour precedent dans le message d'arret.
+        msg.textContent = ''
+        const ok = await basculerMonJour(j, { plage: true, sens: voulu })
+        if (!ok) {
+          const deja = faits ? `${faits} jour${faits > 1 ? 's' : ''} enregistré${faits > 1 ? 's' : ''}, puis ` : ''
+          dire(msg, `⚠️ ${deja}arrêt au ${jourLisible(j)}` +
+                    (msg.textContent ? ` : ${msg.textContent}` : ' : pas enregistré.'))
+          return
+        }
+        faits++
+      }
+    } finally { plageEnCours = false }
+    dire(msg, `✓ ${faits} jour${faits > 1 ? 's' : ''} ${voulu ? 'ouvert' : 'fermé'}${faits > 1 ? 's' : ''}.`)
   }
 
   // Pose ou retire l'absence d'UN jour dans l'etat courant. Un seul endroit
@@ -3844,11 +3958,74 @@ if ("serviceWorker" in navigator) {
     enregistrerMesJours()
   })
 
-  // ⚠ UNE TAPE, PAS UN GLISSE — et `click`, pas `pointerdown`. Sur un telephone,
-  // un glisse de selection se bat avec le defilement de la page : on ne peut pas
-  // avoir les deux, et c'est le defilement qui gagne dans l'usage reel. Pour
-  // plusieurs jours d'affilee, le conge est fait pour ca.
+  // ⚠ UNE TAPE OUVRE LA FEUILLE (`click`). Le glisse existe depuis le
+  // 1er octobre 2026, mais SEULEMENT apres un appui long immobile : c'est ce qui
+  // le reconcilie avec le defilement (voir « GLISSER », plus haut). Le conge
+  // reste le geste des plages longues.
+  ;(() => {
+    const zone = document.getElementById('dispo-months')
+    zone.addEventListener('pointerdown', e => {
+      if (e.button > 0 || !mesJours || !mesJours.modifiable) return
+      // ⚠ UN SECOND DOIGT NE RELANCE RIEN : il ne termine pas non plus la
+      // selection du premier (filtre par `pointerId` plus bas).
+      if (glisse) return
+      const el = e.target.closest && e.target.closest('.dispo-case[data-jour]')
+      if (!el || !jourReglable(el.dataset.jour)) return
+      const g = { ancre: el.dataset.jour, cible: el.dataset.jour, actif: false,
+                  id: e.pointerId, x0: e.clientX || 0, y0: e.clientY || 0 }
+      g.minuteur = setTimeout(() => {
+        if (glisse !== g) return
+        g.actif = true
+        peindreSelectionMesJours()
+        try { if (navigator.vibrate) navigator.vibrate(15) } catch (_) {}
+      }, APPUI_LONG_MS)
+      glisse = g
+    })
+    zone.addEventListener('pointermove', e => {
+      if (!glisse || e.pointerId !== glisse.id) return
+      if (!glisse.actif) {
+        // Le doigt bouge avant l'appui long : c'est un defilement, on s'efface.
+        if (Math.abs((e.clientX || 0) - glisse.x0) > TOLERANCE_PX ||
+            Math.abs((e.clientY || 0) - glisse.y0) > TOLERANCE_PX) annulerGlisse()
+        return
+      }
+      const el = caseSousLeDoigt(e)
+      if (el && el.dataset.jour >= AUJ() && el.dataset.jour !== glisse.cible) {
+        glisse.cible = el.dataset.jour
+        peindreSelectionMesJours()
+      }
+    })
+    // ⚠ SUR `document`, PAS SUR LA ZONE (constat de review). Un repeint pendant
+    // la selection reconstruit les cases : le `touchmove` reste dirige vers la
+    // case du toucher initial, DETACHEE, et ne remonte plus jusqu'a la zone. La
+    // page se mettait alors a defiler et la selection s'eteignait sans un mot.
+    document.addEventListener('touchmove', e => {
+      if (glisse && glisse.actif && e.cancelable) e.preventDefault()
+    }, { passive: false })
+    // Le menu contextuel de l'appui long (Chrome Android) ne doit pas couper le geste.
+    zone.addEventListener('contextmenu', e => { if (glisse) e.preventDefault() })
+    document.addEventListener('pointerup', e => {
+      if (!glisse || e.pointerId !== glisse.id) return
+      const g = glisse
+      annulerGlisse()
+      if (!g.actif) return
+      // Le relacher PEUT etre suivi d'un `click` sur la derniere case : il ne
+      // doit pas ouvrir sa feuille. ⚠ Seulement ce jour-la : une tape rapide sur
+      // un AUTRE jour juste apres reste une tape (le navigateur n'envoie souvent
+      // aucun click apres un glisser au doigt).
+      clicIgnore = { jour: g.cible, jusqua: Date.now() + 600 }
+      basculerPlageMesJours(g.ancre, g.cible)
+    })
+    document.addEventListener('pointercancel', e => { if (glisse && e.pointerId === glisse.id) annulerGlisse() })
+  })()
+
   document.getElementById('dispo-months').addEventListener('click', e => {
+    {
+      const c = e.target.closest && e.target.closest('.dispo-case[data-jour]')
+      const ignore = clicIgnore && Date.now() < clicIgnore.jusqua && c && c.dataset.jour === clicIgnore.jour
+      clicIgnore = null
+      if (ignore) return
+    }
     if (e.target.closest('#btn-reglages')) { ouvrirReglages(); return }
     const el = e.target.closest('.dispo-case')
     if (!el || !el.dataset.jour) return
