@@ -94,16 +94,31 @@ n'est pas une preuve.
 2. **`request_params` est vide des deux côtés** : le jeton de bypass n'est pas
    chez le gestionnaire. Le défaut grave trouvé en review était un risque latent,
    pas une fuite en cours.
-3. **La pagination n'est pas honorée par ce point d'appel.** `/webhooks?page=2`
-   rend exactement la même chose que `/webhooks` ; `meta` annonce `total` et
-   `limit: 10`. Paginer ne réparerait donc rien — le code **refuse** désormais
-   quand `meta.total` dépasse ce que `data` contient.
+3. **Le code refuse désormais quand `meta.total` dépasse ce que `data`
+   contient** (`meta` annonce `total` et `limit: 10`).
+
+   ⚠ **Corrigé le 1er octobre 2026, à la revue de `c13113c` : la pagination n'a
+   PAS été mesurée.** J'avais écrit « la pagination n'est pas honorée par ce
+   point d'appel ». Le relevé a interrogé `/webhooks?page=2` — or Channex pagine
+   par `pagination[page]` et `pagination[limit]`, comme tous les autres appels du
+   dépôt (`lib/channels/channex.js`). On a seulement prouvé que `page` est
+   ignoré. La vraie réparation est de demander `/webhooks?pagination[limit]=100`
+   et de vérifier que `meta.limit` l'a honoré ; elle est au registre des dettes.
+   Le refus reste juste en attendant : il ne crée rien.
+4. **`request_params` vide aujourd'hui ne disait rien de l'étape 4.**
+   `api/channel-events.js` envoyait `VERCEL_BYPASS_TOKEN` dès que la variable
+   existait — et elle existe sur le projet de production. L'étape 4 l'aurait
+   déposé chez le gestionnaire. Corrigé avant la rotation : le jeton suit la
+   cible, comme dans `channel-webhook.js`, et une cible de production n'en
+   reçoit jamais.
 
 ⚠ **ET J'AI RATÉ CE RELEVÉ À MON PREMIER ESSAI.** Ma boucle additionnait
 `?page=1..20` sans dédupliquer par identifiant : elle a compté **40 webhooks là
 où il y en a 2**, et j'ai annoncé des doublons qui n'existent pas. La leçon est
 celle de la règle 20 appliquée à une mesure : une boucle de pagination qui ne
-vérifie pas que la pagination est honorée ne mesure rien, elle recopie.
+vérifie pas que la pagination est honorée ne mesure rien, elle recopie. Et le
+correctif a répété l'erreur un cran plus loin : il a conclu que la pagination
+n'existait pas, sur un paramètre que le gestionnaire ne connaît pas.
 
 ---
 

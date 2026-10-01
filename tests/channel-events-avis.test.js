@@ -527,3 +527,49 @@ test('register : à la création aussi, la réponse est nettoyée', async () => 
   assert.strictEqual(res.code, 201)
   assert.ok(!JSON.stringify(res.body).includes(SECRET))
 })
+
+// ─── Le jeton de bypass ne part jamais vers un domaine de production ────────
+// Constat du 1er octobre 2026 : `VERCEL_BYPASS_TOKEN` existe sur le projet de
+// production, et ce fichier l'envoyait au gestionnaire des que la variable
+// existait. La cible est toujours un domaine de production, qui n'est pas
+// derriere le mur : le jeton n'y servait a rien, et il ouvre toutes les
+// previews. L'etape 4 de la rotation 2 l'aurait depose chez le gestionnaire.
+// La variable est lue au CHARGEMENT du module : elle se pose avant `require`.
+
+for (const [chemin, webhooks, methode] of [
+  ['mise a jour', webhooksExistants(), 'PUT'],
+  ['creation', { data: [] }, 'POST']
+]) {
+  test(`register (${chemin}) : jeton de bypass present, request_params reste vide`, async () => {
+    const avant = process.env.VERCEL_BYPASS_TOKEN
+    process.env.VERCEL_BYPASS_TOKEN = 'jeton-bypass-de-test'
+    try {
+      let corps = null
+      preparer({ fetchStub: async (url, opts) => {
+        const m = opts?.method || 'GET'
+        if (url.endsWith('/webhooks') && m === 'GET') {
+          return { ok: true, status: 200, text: async () => JSON.stringify(webhooks) }
+        }
+        if (m === methode) {
+          corps = JSON.parse(opts.body)
+          return { ok: true, status: m === 'POST' ? 201 : 200, text: async () => '{"data":{"id":"x"}}' }
+        }
+        return null
+      } })
+      const handler = require('../api/channel-events')
+      const res = reponse()
+      await handler(requeteRegister(URL_MOI), res)
+
+      assert.ok(corps, `le ${methode} doit etre parti`)
+      assert.deepStrictEqual(corps.webhook.request_params, {},
+        'aucun parametre de bypass vers un domaine de production')
+      assert.ok(!JSON.stringify(corps).includes('jeton-bypass-de-test'),
+        'le jeton ne doit figurer nulle part dans le corps envoye')
+      // Le secret partage, lui, doit toujours partir : sans lui, 401 en boucle.
+      assert.ok(corps.webhook.headers['X-Channel-Webhook-Secret'])
+    } finally {
+      if (avant === undefined) delete process.env.VERCEL_BYPASS_TOKEN
+      else process.env.VERCEL_BYPASS_TOKEN = avant
+    }
+  })
+}

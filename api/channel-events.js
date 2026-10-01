@@ -79,6 +79,23 @@ function urlWebhookDeCeFichier (req) {
   return `https://${domaine}/api/channel-events`
 }
 
+// ⚠ LE JETON DE BYPASS SUIT LA CIBLE, JAMAIS L'ENVIRONNEMENT D'EXECUTION.
+// Il etait envoye des que `VERCEL_BYPASS_TOKEN` existait. Or la variable existe
+// sur le projet de production (constat du 1er octobre 2026), et la cible est
+// TOUJOURS un domaine de production, qui n'est pas derriere le mur : chaque
+// enregistrement deposait donc chez le gestionnaire un jeton qui ouvre toutes
+// les previews, sans aucun usage. Le releve du meme jour montrait `{}` chez lui ;
+// l'etape 4 de la rotation l'aurait rempli. Meme regle que `channel-webhook.js`.
+function parametresDeRequete (cible) {
+  const hote = (() => { try { return new URL(cible).host } catch { return '' } })()
+  // Un domaine applicatif n'est pas protege par le mur : aucun parametre.
+  if (DOMAINES_APP.includes(hote)) return {}
+  // Tout autre hote serait une preview. Inatteignable aujourd'hui —
+  // `urlWebhookDeCeFichier` ne rend qu'un domaine de DOMAINES_APP — mais si la
+  // liste s'ouvre un jour, le bypass suivra la cible, pas l'appelant.
+  return VERCEL_BYPASS ? { 'x-vercel-protection-bypass': VERCEL_BYPASS } : {}
+}
+
 // Events canal ecoutes par ce 2e webhook.
 // ⚠ Elargir ce masque ne suffit PAS sur un webhook deja enregistre : il faut le
 // mettre a jour cote Channex (PUT), ce que fait l'action 'register' ci-dessous.
@@ -379,7 +396,7 @@ module.exports = async function handler(req, res) {
           is_active: true,
           send_data: true,
           headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
-          request_params: VERCEL_BYPASS ? { 'x-vercel-protection-bypass': VERCEL_BYPASS } : {}
+          request_params: parametresDeRequete(callbackUrl)
         }
       })
       // Meme reserve que pour la creation : un refus doit etre lisible, pas un
@@ -411,7 +428,7 @@ module.exports = async function handler(req, res) {
         is_active: true,
         send_data: true,
         headers: { 'X-Channel-Webhook-Secret': WEBHOOK_SECRET },
-        request_params: VERCEL_BYPASS ? { 'x-vercel-protection-bypass': VERCEL_BYPASS } : {}
+        request_params: parametresDeRequete(callbackUrl)
       }
     })
 

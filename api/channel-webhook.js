@@ -494,19 +494,22 @@ module.exports = async function handler(req, res) {
     // que dix — et le notre peut n'y etre pas, ce qui ferait CREER un doublon
     // alors qu'il existe deja.
     //
-    // ⚠ ET LE PARAMETRE `page` N'EST PAS HONORE PAR CE POINT D'APPEL. Mesure du
-    // 1er octobre 2026 : `/webhooks?page=2` rend exactement la meme chose que
-    // `/webhooks`. Boucler sur les pages ne reparerait donc RIEN — c'est l'erreur
-    // que j'ai faite en relevant le compte, ou j'ai additionne la meme page vingt
-    // fois et annonce quarante webhooks la ou il y en a deux. On ne pagine pas :
-    // on REFUSE quand la liste est incomplete, parce qu'on ne peut pas conclure.
+    // ⚠ LA PAGINATION N'A PAS ETE MESUREE, CONTRAIREMENT A CE QUE CE COMMENTAIRE
+    // DISAIT. Le releve du 1er octobre 2026 a interroge `/webhooks?page=2`, qui
+    // rend la meme chose que `/webhooks` — mais Channex pagine par
+    // `pagination[page]` et `pagination[limit]`, comme tous les autres appels du
+    // depot (`lib/channels/channex.js`). On a donc prouve que `page` est ignore,
+    // rien de plus. La vraie reparation, non faite ici, est de demander
+    // `/webhooks?pagination[limit]=100` et de verifier que `meta.limit` l'a honore.
+    // En attendant, on REFUSE quand la liste est incomplete : on ne peut pas
+    // conclure, et refuser ne cree rien.
     const total = Number(liste.json?.meta?.total)
     if (Number.isFinite(total) && total > tous.length) {
       console.error(`[channel-webhook] liste tronquee : ${tous.length} rendu(s) sur ${total} — on ne cree rien`)
       return res.status(200).json({
         ok: false, registered: false, updated: false,
         reason: `Le gestionnaire annonce ${total} webhooks mais n'en rend que ${tous.length} :`
-          + " la liste est tronquee et le parametre « page » n'est pas honore par ce point d'appel."
+          + ' la liste est tronquee.'
           + ' Inscription refusee pour ne pas creer un doublon de ce qui existe peut-etre deja.',
         annonces: total, rendus: tous.length,
       })

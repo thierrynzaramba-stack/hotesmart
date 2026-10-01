@@ -751,8 +751,8 @@ test('le succes porte `ok` et `registered`, comme le fichier voisin', async () =
 test('LE TEST QUI COMPTE : une liste TRONQUEE ne declenche aucune creation', async () => {
   // Le gestionnaire pagine par dix et annonce le total dans `meta`. Au-dela de
   // dix webhooks, le notre peut n'etre pas dans `data` : creer serait doubler ce
-  // qui existe deja. Et `?page=2` n'est PAS honore par ce point d'appel (mesure
-  // du 1er octobre 2026), donc paginer ne reparerait rien — on refuse.
+  // qui existe deja. On refuse plutot que de conclure sur une liste partielle
+  // (la pagination `pagination[limit]` n'est pas encore demandee : dette).
   const etat = preparer({
     webhooks: [{ id: 'un-autre', attributes: { callback_url: 'https://ailleurs.example/x', event_mask: 'booking' } }],
     metaTotal: 14,
