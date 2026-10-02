@@ -15,14 +15,15 @@ const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
-const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser } = require('../lib/avis/evaluations')
+const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu } = require('../lib/avis/evaluations')
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
 // Naissance 1 : la prestataire ouvre ses questions apres « Menage fait » (decision D2).
-const { assurerEvaluation } = require('../lib/avis/naissance')
+const { assurerEvaluation, echeanceDuDepart } = require('../lib/avis/naissance')
 // Lot 6 : l'hote est prevenu quand la prestataire a rempli sa part (spec §10).
 const { prevenirHote } = require('../lib/avis/notifications')
+const { normaliserHeures, lireHeures, HEURES_MIN, HEURES_MAX } = require('../lib/avis/auto-validation')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -506,7 +507,7 @@ async function configLire (req, res, garde) {
   if (bien && !(await bienAutorise(req, res, garde, bien, false))) return
 
   const requete = supabase.from('avis_config')
-    .select('id, property_id, keywords, tone, signature').eq('user_id', userId)
+    .select('id, property_id, keywords, tone, signature, auto_validation_heures').eq('user_id', userId)
   const { data, error } = await (bien
     ? requete.or(`property_id.eq.${bien},property_id.is.null`)
     : requete.is('property_id', null))
@@ -517,6 +518,7 @@ async function configLire (req, res, garde) {
     compte: liste.find(c => !c.property_id) || null,
     bien: bien ? (liste.find(c => c.property_id === bien) || null) : null,
     tons: [...TONS],
+    auto_validation: { min: HEURES_MIN, max: HEURES_MAX },
   })
 }
 
@@ -541,6 +543,17 @@ async function configEcrire (req, res, garde) {
   const keywords = brut.map(k => String(k || '').trim()).filter(Boolean).slice(0, 20).map(k => k.slice(0, 40))
   const signature = req.body?.signature ? String(req.body.signature).trim().slice(0, 120) : null
 
+  // L'auto-validation (§10 bis) : nul = desactivee. Un ecran qui ne l'envoie pas
+  // ne la touche pas — elle n'est ecrite que si le champ est present.
+  let auto = {}
+  if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'auto_validation_heures')) {
+    const h = normaliserHeures(req.body.auto_validation_heures)
+    if (h === undefined) {
+      return res.status(400).json({ error: `Délai d’auto-validation invalide : un nombre entier d’heures entre ${HEURES_MIN} et ${HEURES_MAX}, ou vide pour la désactiver` })
+    }
+    auto = { auto_validation_heures: h }
+  }
+
   // ⚠ L'UNICITE EST PARTIELLE : (user_id) quand property_id est nul,
   // (user_id, property_id) sinon. `upsert` ne sait pas viser un index partiel,
   // donc on lit puis on ecrit — et le conflit reste impossible, ces deux index
@@ -551,7 +564,7 @@ async function configEcrire (req, res, garde) {
     : lecture.is('property_id', null).maybeSingle())
   if (eL) return res.status(503).json({ error: 'Configuration illisible', detail: eL.message })
 
-  const valeurs = { user_id: userId, property_id: bien, keywords, tone: ton, signature }
+  const valeurs = { user_id: userId, property_id: bien, keywords, tone: ton, signature, ...auto }
   const { error: eE } = deja
     ? await supabase.from('avis_config').update(valeurs).eq('id', deja.id).eq('user_id', userId)
     : await supabase.from('avis_config').insert(valeurs)
@@ -819,6 +832,8 @@ async function routePwa (req, res, action) {
     const n = await assurerEvaluation(supabase, {
       userId, propertyId: sejour.bien.id, propertyRef: sejour.bien.ref,
       bookingUid: sejour.bookingUid, provider: sejour.provider, ota: sejour.ota,
+      // L'echeance d'Airbnb : depart + 14 jours (§9 bis).
+      echeance: echeanceDuDepart(departureDate),
     })
     // Le message de la base reste dans les journaux : un porteur de lien n'a pas a le lire.
     if (n.erreur) { console.error('[avis] pwa : naissance echouee', n.erreur); return res.status(503).json({ error: 'Évaluation indisponible' }) }
@@ -1221,6 +1236,8 @@ async function evaluationLire (req, res, garde) {
         public_text: e.public_text, private_note: e.private_note,
         answers_cleaner: e.answers_cleaner, answers_host: e.answers_host,
         published_at: e.published_at,
+        // La publication automatique programmee (§10 bis), nul sinon.
+        auto_publier_le: e.auto_publier_le || null,
       }
     : {
         ...commun,
@@ -1246,6 +1263,7 @@ async function evaluationLire (req, res, garde) {
     role, evalPower, negatif,
     completRole: ouverts.length > 0 && ouverts.every(repondu),
     completTotal: (grille.criteres || []).length > 0 && (grille.criteres || []).every(repondu),
+    hoteARepondu: hoteARepondu(e),
   })
 
   return res.status(200).json({
@@ -1268,10 +1286,24 @@ async function evaluationRepondre (req, res, garde) {
     return res.status(400).json({ error: 'Réponses manquantes' })
   }
 
+  // L'hote qui repond reagit : il prend la main, ou il est refuse si une
+  // publication automatique est en cours.
+  if (role === 'hote' && !(await laMainALHote(e, res))) return
+
+  // L'auto-validation de l'hote (§10 bis) : son horloge part quand la
+  // prestataire finit sa part. Un reglage illisible ne programme RIEN — le sens
+  // prudent : on publie moins, jamais plus.
+  let autoValidationHeures = null
+  if (role === 'prestataire') {
+    const cfg = await lireHeures(supabase, { userId: e.user_id, propertyId: e.property_id })
+    if (cfg.erreur) console.error('[avis] auto-validation : reglage illisible', e.id, cfg.erreur)
+    else autoValidationHeures = cfg.heures
+  }
+
   let r
   try {
     r = await enregistrerReponses(supabase, {
-      evaluation: e, reponses, role, evalScope, evalPower, parProfil: profilId,
+      evaluation: e, reponses, role, evalScope, evalPower, parProfil: profilId, autoValidationHeures,
     })
   } catch (err) {
     // Une saisie refusee est un 400 nomme, pas un 500 muet.
@@ -1405,7 +1437,7 @@ async function evaluationRepondre (req, res, garde) {
 // Rend { ok: true, public_text, private_note, negatif }
 //   ou { ok: false, motif, detail }            — l'IA refuse, la raison est dite
 //   ou { ok: false, panne: { code, body } }    — une lecture a echoue
-async function redigerEtEnregistrer (e, { remarque = null, prenom = null } = {}) {
+async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAutoPublierLe = null } = {}) {
   // ⚠ LES ERREURS DE LECTURE SE LISENT. Constat de review : un `Promise.all`
   // destructure sans `error` faisait disparaitre EN SILENCE les mots-cles, le
   // ton et la signature de l'hote — le texte partait avec les reglages par
@@ -1488,14 +1520,66 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null } = {})
   // lecture, l'ecran affichait un texte que la base n'avait pas, on cliquait
   // « Publier » et on s'entendait dire qu'il n'y avait pas de texte — avec un
   // appel au modele paye a chaque nouvelle tentative.
-  const { error: eTexte } = await supabase.from('guest_evaluations')
+  //
+  // ⚠ POUR L'AUTO-VALIDATION, LE TEXTE NE S'ECRIT QUE SI L'HORLOGE N'A PAS BOUGE
+  // (S3, revue de 59243cb) : un hote qui a demande le sien entre-temps l'a
+  // arretee, et son texte n'est pas ecrase par celui des « meilleurs niveaux ».
+  // ⚠ JAMAIS SUR UNE EVALUATION TERMINEE (re-revue de 74ec434) : un texte
+  // demande par l'hote pendant une publication arrivait apres elle et
+  // remplacait en base le texte reellement parti chez la plateforme.
+  let ecriture = supabase.from('guest_evaluations')
     .update({ public_text: r.public_text, private_note: r.private_note })
     .eq('id', e.id).eq('user_id', e.user_id)
+    .in('status', ['a_remplir', 'soumise_prestataire', 'a_valider', 'echec_publication'])
+  if (siAutoPublierLe) ecriture = ecriture.eq('auto_publier_le', siAutoPublierLe).select('id')
+  const { data: ecrit, error: eTexte } = await ecriture
   if (eTexte) {
     return { ok: false, panne: { code: 503, body: { error: 'Texte généré mais non enregistré', detail: eTexte.message } } }
   }
+  if (siAutoPublierLe && (!Array.isArray(ecrit) || !ecrit.length)) {
+    return { ok: false, motif: 'auto_reprise', detail: 'l hote a repris l evaluation pendant la redaction' }
+  }
 
   return { ok: true, public_text: r.public_text, private_note: r.private_note, negatif: r.negatif }
+}
+
+// ⚠ UNE REACTION DE L'HOTE ARRETE L'AUTO-VALIDATION (§10 bis) : une reponse,
+// un texte, une publication, un abandon. Ne leve jamais : l'auto-validation
+// relit de toute facon les reponses de l'hote avant de publier.
+//
+// ⚠ ET ELLE NE PASSE PLUS PENDANT UNE PUBLICATION AUTOMATIQUE (constat de
+// securite S1 de la revue de 59243cb). Une reaction ecrite APRES la prise du
+// cron (reponse « je ne recommande pas », abandon) passait, et l'avis partait
+// quand meme — negatif ou abandonne. Deux portes, avant toute ecriture de l'hote :
+//   1. l'horloge chargee est arretee de facon CONDITIONNELLE : si le cron l'a
+//      prise entre-temps, rien ne correspond, et l'hote est refuse ;
+//   2. une publication en cours (verrou `avis-publier:<id>` vivant) refuse aussi.
+// En face, la publication automatique relit la ligne sous son verrou et renonce
+// si quoi que ce soit a bouge depuis sa prise. Le residu : une ecriture de
+// l'hote qui passerait la porte 2 dans les millisecondes ou le cron pose son
+// verrou et relit — note au registre (dette 48).
+//
+// Rend true si l'hote a la main, false APRES avoir repondu 409.
+async function laMainALHote (e, res) {
+  if (e.auto_publier_le) {
+    const { data, error } = await supabase.from('guest_evaluations')
+      .update({ auto_publier_le: null })
+      .eq('id', e.id).eq('user_id', e.user_id).eq('auto_publier_le', e.auto_publier_le)
+      .select('id')
+    if (error) { res.status(503).json({ error: 'Évaluation indisponible', detail: error.message }); return false }
+    if (!Array.isArray(data) || !data.length) {
+      res.status(409).json({ error: 'Une publication automatique est en cours pour cette évaluation : rechargez la page.', motif: 'auto_en_cours' })
+      return false
+    }
+  }
+  const { data: verrou, error: eV } = await supabase.from('write_locks').select('key')
+    .eq('key', `avis-publier:${e.id}`).gt('expire_at', new Date().toISOString()).maybeSingle()
+  if (eV) { res.status(503).json({ error: 'Verrou de publication illisible', detail: eV.message }); return false }
+  if (verrou) {
+    res.status(409).json({ error: 'Une publication est en cours pour cette évaluation : rechargez la page.', motif: 'deja_en_cours' })
+    return false
+  }
+  return true
 }
 
 // POST eval-texte — l'IA redige. Elle ne decide de rien, et son texte reste
@@ -1509,6 +1593,7 @@ async function evaluationTexte (req, res, garde) {
   // Une prestataire RELIT, elle ne redige pas : le serveur redige pour elle au
   // moment ou elle termine son formulaire (voir `eval-reponses`).
   if (role !== 'hote') return res.status(403).json({ error: 'La rédaction revient à l’hôte' })
+  if (!(await laMainALHote(e, res))) return
 
   const r = await redigerEtEnregistrer(e, { remarque: req.body?.remarque, prenom: req.body?.prenom })
   if (r.panne) return res.status(r.panne.code).json(r.panne.body)
@@ -1599,10 +1684,24 @@ function providerSimule () {
 const VERROU_TTL_MS = 3 * 60 * 1000
 const PG_UNICITE = '23505'
 
-async function evaluationPublier (req, res, garde) {
+// `options.auto` : appel INTERNE de l'auto-validation (jamais depuis la requete
+// HTTP) — { answers_host } tels que la prise du cron les a ecrits.
+async function evaluationPublier (req, res, garde, options = {}) {
   const e = await chargerEvaluation(req, res, garde, true)
   if (!e) return
   const { parProfil, profilId } = roleEtReglages(garde)
+  // Publier, c'est reagir : l'horloge de l'auto-validation s'arrete — sauf si
+  // c'est l'auto-validation elle-meme qui publie (elle l'a deja prise).
+  if (!parProfil && !options.auto && e.auto_publier_le) {
+    const { data, error } = await supabase.from('guest_evaluations')
+      .update({ auto_publier_le: null })
+      .eq('id', e.id).eq('user_id', e.user_id).eq('auto_publier_le', e.auto_publier_le)
+      .select('id')
+    if (error) return res.status(503).json({ error: 'Évaluation indisponible', detail: error.message })
+    if (!Array.isArray(data) || !data.length) {
+      return res.status(409).json({ error: 'Une publication automatique est en cours pour cette évaluation : rechargez la page.', motif: 'auto_en_cours' })
+    }
+  }
 
   // ⚠ LA REFERENCE DU PROVIDER SE RESOUT ICI. `ota_review_id` est NOTRE cle
   // primaire dans ota_reviews ; le provider ne connait que
@@ -1620,7 +1719,7 @@ async function evaluationPublier (req, res, garde) {
 
   // Le texte modifie par l'hote arrive ici : c'est LUI qui part, pas celui de
   // l'IA. La spec veut que la version publiee soit stockee telle quelle.
-  const evaluation = {
+  let evaluation = {
     ...e,
     ota_review_ref: objetOta.external_review_id,
     // ⚠ SEUL L'HOTE REMPLACE LE TEXTE. Constat de re-revue : n'importe quel role
@@ -1686,6 +1785,41 @@ async function evaluationPublier (req, res, garde) {
   // `publier` LEVE un RefusPublication quand rien n'est parti, et RETOURNE un
   // resultat quand l'appel a eu lieu — y compris pour un echec. Confondre les
   // deux ecrirait `status: undefined` sur la ligne.
+  // ⚠ LES REPONSES DE L'HOTE SE RELISENT SOUS LE VERROU (option B, revue de
+  // 0c0483b). L'evaluation a ete chargee avant : un hote qui enregistre ses
+  // reponses pendant ce temps verrait l'avis partir sur la seule part de la
+  // prestataire. La relecture referme cette fenetre ; celle qui reste (entre
+  // la relecture et le POST) est de l'ordre de l'appel provider.
+  // ⚠ ET L'AUTO-VALIDATION RELIT TOUTE LA LIGNE SOUS LE VERROU (S1, revue de
+  // 59243cb) : un statut termine, des reponses de l'hote qui ne sont plus celles
+  // de la prise, ou un avis devenu negatif — elle renonce. Le verrou pose, plus
+  // aucune reaction de l'hote ne passe (`laMainALHote`).
+  if (options.auto) {
+    const { data: frais, error: eFrais } = await supabase.from('guest_evaluations')
+      .select('status, answers_host, answers_cleaner, auto_publier_le').eq('id', e.id).eq('user_id', e.user_id).maybeSingle()
+    if (eFrais || !frais) {
+      await relacher()
+      return res.status(503).json({ error: 'Évaluation illisible', detail: eFrais ? eFrais.message : 'introuvable' })
+    }
+    const memes = JSON.stringify(trier(frais.answers_host)) === JSON.stringify(trier(options.auto.answers_host))
+    let negatif = true
+    try { negatif = estNegatif({ ...(frais.answers_cleaner || {}), ...(frais.answers_host || {}) }, e.grille_figee) } catch { negatif = true }
+    if (!memes || negatif || frais.auto_publier_le || ['publiee', 'abandonnee', 'expiree'].includes(frais.status)) {
+      await relacher()
+      return res.status(409).json({ error: 'L’hôte a repris l’évaluation : la publication automatique renonce.', motif: 'auto_annulee' })
+    }
+    evaluation = { ...evaluation, answers_host: frais.answers_host, answers_cleaner: frais.answers_cleaner }
+  }
+  if (parProfil) {
+    const { data: frais, error: eFrais } = await supabase.from('guest_evaluations')
+      .select('answers_host').eq('id', e.id).eq('user_id', e.user_id).maybeSingle()
+    if (eFrais || !frais) {
+      await relacher()
+      return res.status(503).json({ error: 'Évaluation illisible', detail: eFrais ? eFrais.message : 'introuvable' })
+    }
+    evaluation = { ...evaluation, answers_host: frais.answers_host }
+  }
+
   let r
   try {
     r = await publier({ evaluation, parProfil, provider: canal })
@@ -1765,12 +1899,39 @@ async function evaluationAbandonner (req, res, garde) {
   if (!e) return
   const { role, profilId } = roleEtReglages(garde)
   if (role !== 'hote') return res.status(403).json({ error: 'Seul l’hôte abandonne une évaluation' })
+  if (!(await laMainALHote(e, res))) return
   try {
     const d = await abandonner(supabase, { evaluation: e, parProfil: profilId })
     return res.status(200).json({ ok: true, status: d.status })
   } catch (err) {
     return res.status(409).json({ error: pourLEcran(err.message) })
   }
+}
+
+// ─── Pour l'auto-validation du cron (lib/avis/auto-validation.js) ───────────
+// Le MEME chemin que l'hote, avec la garde du TITULAIRE du compte : verrou,
+// idempotence, relecture chez le provider, simulation hors production. Il n'y a
+// pas de second chemin de publication.
+// Un objet de reponses, cles triees : deux ecritures identiques se comparent egales.
+function trier (o) {
+  return o && typeof o === 'object' ? Object.fromEntries(Object.keys(o).sort().map(k => [k, o[k]])) : o
+}
+function gardeDuTitulaire (userId) {
+  return { ok: true, accountUserId: userId, userId, contexte: { userId, accountUserId: userId, profil: null, permissions: null } }
+}
+const outilsAutoValidation = {
+  rediger: (e, { siAutoPublierLe } = {}) => redigerEtEnregistrer(e, { siAutoPublierLe }),
+  publier: async (e) => {
+    const sortie = { code: 200, body: null }
+    const res = {
+      headersSent: false,
+      status (c) { sortie.code = c; return res },
+      json (b) { sortie.body = b; res.headersSent = true; return res },
+    }
+    await evaluationPublier({ method: 'POST', query: {}, body: { id: e.id } }, res, gardeDuTitulaire(e.user_id),
+      { auto: { answers_host: e.answers_host } })
+    return sortie
+  },
 }
 
 module.exports = async function handler (req, res) {
@@ -1878,3 +2039,5 @@ async function router (req, res) {
   if (action === 'list') return await lister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })
 }
+
+module.exports.outilsAutoValidation = outilsAutoValidation

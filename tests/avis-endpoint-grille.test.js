@@ -515,3 +515,29 @@ test('un critere avec trop de niveaux est refuse, en nommant lequel', async () =
   assert.strictEqual(res.code, 400)
   assert.match(res.body.error, /n°1/)
 })
+
+// ─── L'auto-validation (spec §10 bis, 2 octobre 2026) ───────────────────────
+test('config-maj : le delai d’auto-validation est un entier de 1 a 336, refuse sinon sans rien ecrire', async () => {
+  for (const v of [0, 337, 'abc', 2.5]) {
+    const etat = preparer({})
+    const handler = require('../api/avis')
+    const res = reponse()
+    await handler(req({ action: 'config-maj' }, { action: 'config-maj', tone: 'sobre', auto_validation_heures: v }), res)
+    assert.strictEqual(res.code, 400, String(v))
+    assert.strictEqual(etat.insertions.filter(i => i.table === 'avis_config').length, 0)
+  }
+})
+
+test('config-maj : 48 h s’ecrit, nul desactive, et un ecran qui ne l’envoie pas ne le touche pas', async () => {
+  const ecrit = async (corps) => {
+    const etat = preparer({})
+    const handler = require('../api/avis')
+    const res = reponse()
+    await handler(req({ action: 'config-maj' }, { action: 'config-maj', tone: 'sobre', ...corps }), res)
+    assert.strictEqual(res.code, 200)
+    return etat.insertions.find(i => i.table === 'avis_config').row
+  }
+  assert.strictEqual((await ecrit({ auto_validation_heures: 48 })).auto_validation_heures, 48)
+  assert.strictEqual((await ecrit({ auto_validation_heures: null })).auto_validation_heures, null)
+  assert.ok(!('auto_validation_heures' in (await ecrit({}))), 'absent : la colonne n est pas ecrite')
+})

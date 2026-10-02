@@ -124,7 +124,8 @@ test('ouvrir apres « Menage fait » fait NAITRE l’evaluation et rend SES ques
   const nee = etat.tables.guest_evaluations[0]
   assert.strictEqual(nee.booking_uid, 'BK-1')
   assert.strictEqual(nee.property_id, BIEN.id)
-  assert.strictEqual(nee.deadline_at, undefined, 'aucune echeance inventee')
+  // Decision D2 revisee (2 octobre 2026) : l'echeance d'Airbnb, depart + 14 jours.
+  assert.strictEqual(nee.deadline_at, new Date(Date.parse(HIER + 'T12:00:00Z') + 14 * 86400000).toISOString())
 })
 
 test('repondre ecrit SES reponses sur l’evaluation du sejour', async () => {
@@ -285,7 +286,8 @@ test('LE TEST QUI COMPTE : par son jeton, une prestataire « soumettre » ne pub
   const prete = {
     id: 'e7e7e7e7-7777-4777-8777-777777777777', user_id: COMPTE, booking_uid: 'BK-1', property_id: BIEN.id, property_id_ref: REF,
     status: 'a_valider', provider: 'channex', ota: 'airbnb', ota_review_id: 'o1o1o1o1-1111-4111-8111-111111111111',
-    answers_host: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait', communication: 'excellente', regles: 'oui', recommande: 'oui' },
+    // Ses reponses a ELLE : une reponse de l'hote lui rendrait la publication (option B).
+    answers_cleaner: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait', communication: 'excellente', regles: 'oui', recommande: 'oui' },
     public_text: 'Merci.', deadline_at: new Date(Date.now() + 5 * 86400000).toISOString(),
   }
   const etat = preparer(base({

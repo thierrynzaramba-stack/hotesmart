@@ -55,6 +55,23 @@ const evalA = (a = {}) => ({
   filled_by_profile: null, published_at: null,
   ...a,
 })
+// Une grille d'un seul critere, ENTIEREMENT a la prestataire.
+const CRITERE_UNIQUE = () => ({
+  id: 'c-unique', libelle: 'Etat du logement', categorie: 'cleanliness',
+  rempli_par: 'prestataire', rang: 1, property_id: 'aa11bb22-cc33-4dd4-8ee5-ff6677889900',
+  avis_criteres_niveaux: [
+    { cle: 'nickel', libelle: 'Nickel', rang: 1, note: 5, negatif: false },
+    { cle: 'sale', libelle: 'Sale', rang: 2, note: 1, negatif: true },
+  ],
+})
+// Sa grille FIGEE, telle que `chargerGrille` la pose au premier remplissage :
+// la publication lit la grille figee, pas la table.
+async function grilleUniqueFigee () {
+  const { chargerGrille } = require('../lib/avis/evaluations')
+  const fin = Promise.resolve({ data: [CRITERE_UNIQUE()], error: null })
+  const q = { select: () => q, eq: () => q, or: () => q, order: () => q, then: (a, b) => fin.then(a, b) }
+  return chargerGrille({ from: () => q }, { userId: PROD, propertyId: BIEN_A.id })
+}
 // La meme, sur le bien B.
 const evalB = (a = {}) => evalA({ id: 'e2e2e2e2-2222-4222-8222-222222222222',
   property_id: BIEN_B.id, property_id_ref: REF_B, booking_uid: 'BK-2', ...a })
@@ -62,7 +79,7 @@ const evalB = (a = {}) => evalA({ id: 'e2e2e2e2-2222-4222-8222-222222222222',
 function preparer ({
   user = PROD, profil = null, permissions = null,
   evaluations = [], otaReviews = [{ id: '99999999-9999-4999-8999-999999999999', user_id: PROD, external_review_id: 'channex-abc-123' }],
-  verrous = [], erreurMaj = null, criteres = [], erreurLectureCriteres = null,
+  verrous = [], erreurMaj = null, criteres = [], erreurLectureCriteres = null, configs = [],
   texteIA = JSON.stringify({ public: 'Voyageur soigneux, logement rendu nickel.', prive: '' }),
 } = {}) {
   const etat = { ecritures: [], insertions: [], requetes: [] }
@@ -78,6 +95,7 @@ function preparer ({
         eq (c, v) { q._f[c] = v; return chain },
         or (e) { q._or = e; return chain },
         lt (c, v) { q._lt = { c, v }; return chain },
+        gt (c, v) { q._gt = { c, v }; return chain },
         order () { return chain }, limit () { return chain },
         in () { return chain }, is () { return chain }, not () { return chain },
         neq () { return chain },
@@ -135,6 +153,9 @@ function preparer ({
             (q._f.id == null || e.id === q._f.id))
           return Promise.resolve({ data: c, error: null })
         }
+        if (nom === 'write_locks') {
+          return Promise.resolve({ data: verrous.filter(k => q._f.key == null || k === q._f.key).map(key => ({ key })), error: null })
+        }
         if (nom === 'ota_reviews') {
           const c = otaReviews.filter(o =>
             (q._f.user_id == null || o.user_id === q._f.user_id) &&
@@ -142,7 +163,7 @@ function preparer ({
           return Promise.resolve({ data: c, error: null })
         }
         if (nom === 'avis_criteres') return Promise.resolve({ data: erreurLectureCriteres ? null : criteres, error: erreurLectureCriteres })
-        if (nom === 'avis_config') return Promise.resolve({ data: [], error: null })
+        if (nom === 'avis_config') return Promise.resolve({ data: configs, error: null })
         if (nom === 'profiles') {
           if (q._f.id != null) {
             return Promise.resolve({ data: profil && profil.id === q._f.id ? [profil] : [], error: null })
@@ -267,10 +288,12 @@ test('et il valide lui-meme un avis NEGATIF, le garde-fou ne visant que les pres
 })
 
 test('une PRESTATAIRE « soumettre », elle, ne publie pas', async () => {
-  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [evalA()] })
+  // Ses reponses a ELLE (option B : une reponse de l'hote lui rendrait la publication).
+  const siennes = evalA({ answers_host: null, answers_cleaner: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait', communication: 'excellente', regles: 'oui', recommande: 'oui' } })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [siennes] })
   const handler = require('../api/avis')
   const res = reponse()
-  await handler(reqMembre({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+  await handler(reqMembre({ action: 'eval-publier' }, { id: siennes.id, action: 'eval-publier' }), res)
   assert.strictEqual(res.code, 409)
   assert.strictEqual(res.body.motif, 'pouvoir_insuffisant')
   assert.strictEqual(etat.provider.appels.length, 0)
@@ -581,8 +604,9 @@ test('une panne du modele ne fait pas passer l’evaluation a l’hote', async (
 test('LE TEST QUI COMPTE : `action=evaluation` rend `peut_publier` des l’ouverture', async () => {
   // Sans lui, une prestataire « valider » devait re-enregistrer ses reponses pour
   // faire apparaitre son bouton de publication.
-  const complete = evalA({ status: 'a_valider' })
-  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [complete] })
+  // Une grille entierement a elle, remplie par elle (option B du 2 octobre 2026).
+  const complete = evalA({ status: 'a_valider', answers_host: null, answers_cleaner: { 'c-unique': 'nickel' } })
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [complete], criteres: [CRITERE_UNIQUE()] })
   const handler = require('../api/avis')
   const res = reponse()
   await handler(reqMembre({ action: 'evaluation', id: complete.id }, null, 'GET'), res)
@@ -823,10 +847,11 @@ test('une valeur HERITEE (`proprete`) n’ouvre aucune question : seule `selon_g
 })
 
 test('LE TEST QUI COMPTE : une prestataire « valider » ne publie pas un texte LIBRE, seulement celui qu’elle a relu', async () => {
-  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [evalA()] })
+  const siennes = evalA({ answers_host: null, answers_cleaner: { 'c-unique': 'nickel' }, grille_figee: await grilleUniqueFigee() })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [siennes], criteres: [CRITERE_UNIQUE()] })
   const handler = require('../api/avis')
   const res = reponse()
-  await handler(reqMembre({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier', public_text: 'Texte invente par la prestataire.' }), res)
+  await handler(reqMembre({ action: 'eval-publier' }, { id: siennes.id, action: 'eval-publier', public_text: 'Texte invente par la prestataire.' }), res)
   assert.strictEqual(res.code, 200)
   const maj = etat.ecritures.filter(e => e.table === 'guest_evaluations' && e.row.public_text !== undefined)
   assert.ok(maj.every(e => e.row.public_text !== 'Texte invente par la prestataire.'), 'le texte libre n est jamais enregistre')
@@ -869,4 +894,147 @@ test('l’hôte qui répond lui-même ne se notifie pas', async () => {
   await handler(req({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: { etat: 'impeccable' } }), res)
   assert.strictEqual(res.code, 200)
   assert.strictEqual(etat.insertions.filter(i => i.table === 'agent_tasks').length, 0)
+})
+
+// ─── Option B (decision de Thierry du 2 octobre 2026) ───────────────────────
+test('LE TEST QUI COMPTE : grille entierement a elle, mais l’hote a repondu — elle ne publie PAS', async () => {
+  const ev = evalA({ status: 'a_valider', answers_cleaner: { 'c-unique': 'nickel' }, answers_host: { 'c-unique': 'nickel' }, grille_figee: await grilleUniqueFigee() })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [ev], criteres: [CRITERE_UNIQUE()] })
+  const handler = require('../api/avis')
+  const lu = reponse()
+  await handler(reqMembre({ action: 'evaluation', id: ev.id }, null, 'GET'), lu)
+  assert.strictEqual(lu.body.peut_publier, false)
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'reponses_de_l_hote')
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
+test('deciderStatut : l’hote a repondu → a_valider, la prestataire ne publie pas', () => {
+  const { deciderStatut } = require('../lib/avis/evaluations')
+  const d = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: false, completRole: true, completTotal: true, hoteARepondu: true })
+  assert.deepStrictEqual([d.statut, d.peutPublier], ['a_valider', false])
+  const seule = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: false, completRole: true, completTotal: true, hoteARepondu: false })
+  assert.strictEqual(seule.peutPublier, true)
+})
+
+// ─── Revue de 0c0483b ───────────────────────────────────────────────────────
+test('LE TEST QUI COMPTE : l’hote repond PENDANT la publication de la prestataire — rien ne part', async () => {
+  // L'evaluation est chargee sans reponse de l'hote ; l'hote enregistre la
+  // sienne en base pendant que la publication pose son verrou.
+  const ev = evalA({ status: 'a_valider', answers_host: null, answers_cleaner: { 'c-unique': 'nickel' }, grille_figee: await grilleUniqueFigee() })
+  const verrous = []
+  verrous.push = (cle) => { ev.answers_host = { 'c-unique': 'nickel' }; return Array.prototype.push.call(verrous, cle) }
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [ev], criteres: [CRITERE_UNIQUE()], verrous })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'reponses_de_l_hote')
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
+test('une prestataire « soumettre » dont l’hote a repondu : son motif reste « elle soumet »', async () => {
+  const { deciderStatut } = require('../lib/avis/evaluations')
+  const d = deciderStatut({ role: 'prestataire', evalPower: 'soumettre', negatif: false, completRole: true, completTotal: true, hoteARepondu: true })
+  assert.strictEqual(d.statut, 'soumise_prestataire')
+  const ev = evalA({ answers_cleaner: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait' } })
+  preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [ev] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'pouvoir_insuffisant')
+})
+
+// ─── L'auto-validation (spec §10 bis, 2 octobre 2026) ───────────────────────
+const AUTO_24 = [{ property_id: null, auto_validation_heures: 24, keywords: [], tone: 'sobre', signature: null }]
+
+test('LE TEST QUI COMPTE : la prestataire finit sa part — l’horloge part a maintenant + X h', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null, deadline_at: new Date(Date.now() + 3 * 86400000).toISOString() })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], configs: AUTO_24 })
+  const handler = require('../api/avis')
+  const res = reponse()
+  const avant = Date.now()
+  await handler(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.answers_cleaner)
+  const quand = Date.parse(maj.row.auto_publier_le)
+  assert.ok(quand >= avant + 24 * 3600000 - 1000 && quand <= Date.now() + 24 * 3600000, 'maintenant + 24 h')
+})
+
+test('sans reglage, rien ne se programme', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], configs: null })
+  const handler = require('../api/avis')
+  await handler(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), reponse())
+  const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.answers_cleaner)
+  assert.strictEqual(maj.row.auto_publier_le, undefined)
+})
+
+test('LE TEST QUI COMPTE : l’hote demande un texte ou publie — l’horloge s’arrete', async () => {
+  for (const action of ['eval-texte', 'eval-publier']) {
+    const ev = evalA({ auto_publier_le: new Date(Date.now() + 3600000).toISOString() })
+    const etat = preparer({ evaluations: [ev] })
+    const handler = require('../api/avis')
+    await handler(req({ action }, { id: ev.id, action }), reponse())
+    assert.ok(etat.ecritures.some(e => e.table === 'guest_evaluations' && e.row.auto_publier_le === null), action)
+  }
+})
+
+test('l’hote lit la publication programmee ; la prestataire, non', async () => {
+  const quand = new Date(Date.now() + 3600000).toISOString()
+  preparer({ evaluations: [evalA({ auto_publier_le: quand })] })
+  const handler = require('../api/avis')
+  const h = reponse()
+  await handler(req({ action: 'evaluation', id: evalA().id }, null, 'GET'), h)
+  assert.strictEqual(h.body.evaluation.auto_publier_le, quand)
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [evalA({ auto_publier_le: quand })] })
+  const p = reponse()
+  await require('../api/avis')(reqMembre({ action: 'evaluation', id: evalA().id }, null, 'GET'), p)
+  assert.strictEqual(p.body.evaluation.auto_publier_le, undefined)
+})
+
+test('LE TEST QUI COMPTE : l’auto-validation publie par le chemin de l’HOTE — verrou, simulation, aucun profil', async () => {
+  const ev = evalA()
+  const etat = preparer({ evaluations: [ev] })
+  const { outilsAutoValidation } = require('../api/avis')
+  const r = await outilsAutoValidation.publier(ev)
+  assert.strictEqual(r.code, 200)
+  assert.ok(etat.insertions.some(i => i.table === 'write_locks'), 'le verrou est pose')
+  const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.status)
+  assert.strictEqual(maj.row.validated_by_profile, null)
+})
+
+// ─── Revue de 59243cb (S1) : la reaction de l'hote APRES la prise ───────────
+test('LE TEST QUI COMPTE : l’hote a change ses reponses apres la prise — la publication automatique renonce', async () => {
+  const ev = evalA({ answers_host: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait', communication: 'excellente', regles: 'oui', recommande: 'non' } })
+  const etat = preparer({ evaluations: [ev] })
+  const { outilsAutoValidation } = require('../api/avis')
+  // La prise avait ecrit « je recommande » ; la base dit maintenant « non ».
+  const r = await outilsAutoValidation.publier({ ...ev, answers_host: { ...ev.answers_host, recommande: 'oui' } })
+  assert.strictEqual(r.code, 409)
+  assert.strictEqual(r.body.motif, 'auto_annulee')
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
+test('LE TEST QUI COMPTE : une evaluation abandonnee apres la prise ne part pas', async () => {
+  const ev = evalA({ status: 'abandonnee' })
+  const etat = preparer({ evaluations: [ev] })
+  const r = await require('../api/avis').outilsAutoValidation.publier(ev)
+  assert.notStrictEqual(r.code, 200)
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
+test('LE TEST QUI COMPTE : pendant une publication (verrou pose), l’hote ne repond ni n’abandonne', async () => {
+  for (const [action, corps] of [['eval-reponses', { reponses: { communication: 'difficile' } }], ['eval-abandon', {}], ['eval-texte', {}]]) {
+    const ev = evalA({ status: 'a_valider' })
+    const etat = preparer({ evaluations: [ev], verrous: [`avis-publier:${ev.id}`] })
+    const res = reponse()
+    await require('../api/avis')(req({ action }, { id: ev.id, action, ...corps }), res)
+    assert.strictEqual(res.code, 409, action)
+    assert.strictEqual(res.body.motif, 'deja_en_cours', action)
+    assert.ok(!etat.ecritures.some(e => e.table === 'guest_evaluations'), action + ' : rien n est ecrit')
+  }
 })

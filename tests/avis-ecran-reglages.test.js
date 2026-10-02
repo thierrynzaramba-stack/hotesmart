@@ -258,3 +258,41 @@ test('LE TEST QUI COMPTE : l’ecran ne dit plus « sur tous vos biens » quand 
   assert.match(conteneur.textContent, /sauf sur 2 bien\(s\) qui ont la leur/)
   assert.ok(!conteneur.textContent.includes('sur tous vos biens'))
 })
+
+// ─── La publication automatique (spec §10 bis, 2 octobre 2026) ──────────────
+test('LE TEST QUI COMPTE : cocher la publication automatique propose 48 h, et le delai part au serveur', async () => {
+  const { window, conteneur, appels } = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '', auto_validation_heures: null } })
+  const champ = () => conteneur.querySelector('[data-reglage="auto-heures"]')
+  assert.strictEqual(champ().disabled, true, 'desactivee : le champ est grise')
+  const caseAuto = conteneur.querySelector('[data-reglage="auto-active"]')
+  caseAuto.checked = true
+  caseAuto.dispatchEvent(new window.Event('change'))
+  assert.strictEqual(champ().disabled, false)
+  assert.strictEqual(champ().value, '48')
+  champ().value = '24'
+  champ().dispatchEvent(new window.Event('input'))
+  conteneur.querySelector('[data-action="enregistrer"]').click()
+  await new Promise(r => setTimeout(r, 0))
+  const config = appels.find(a => a.chemin.includes('config-maj'))
+  assert.strictEqual(config.corps.auto_validation_heures, 24)
+})
+
+test('decocher l’envoie nul ; un delai hors bornes est refuse AVANT tout envoi', async () => {
+  const a = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '', auto_validation_heures: 12 } })
+  const caseAuto = a.conteneur.querySelector('[data-reglage="auto-active"]')
+  assert.strictEqual(caseAuto.checked, true)
+  caseAuto.checked = false
+  caseAuto.dispatchEvent(new a.window.Event('change'))
+  a.conteneur.querySelector('[data-action="enregistrer"]').click()
+  await new Promise(r => setTimeout(r, 0))
+  assert.strictEqual(a.appels.find(x => x.chemin.includes('config-maj')).corps.auto_validation_heures, null)
+
+  const b = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '', auto_validation_heures: 12 } })
+  const champ = b.conteneur.querySelector('[data-reglage="auto-heures"]')
+  champ.value = '400'
+  champ.dispatchEvent(new b.window.Event('input'))
+  b.conteneur.querySelector('[data-action="enregistrer"]').click()
+  await new Promise(r => setTimeout(r, 0))
+  assert.ok(!b.appels.some(x => x.chemin.includes('maj')), 'ni grille ni config envoyees')
+  assert.match(b.conteneur.textContent, /entre 1 et 336/)
+})
