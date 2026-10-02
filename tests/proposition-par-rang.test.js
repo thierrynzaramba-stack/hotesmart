@@ -151,3 +151,23 @@ test('proposeesDe lit la liste, et une ligne d\'avant la bascule par son ancienn
   assert.deepStrictEqual(proposeesDe({ proposee_a: [], offered_to: null }), [])
   assert.deepStrictEqual(proposeesDe(null), [])
 })
+
+test('DÉPART À J+1, par le MOTEUR : le nombre de rangs restants baisse d\'un tour à l\'autre', () => {
+  // Le test ci-dessus donne 3, 2, 1 à la main ; celui-ci vérifie que
+  // `deciderParGarde` les rend bien, tour après tour, avec trois rangs réels.
+  const liaisons = [lien(LENA, 1), lien(TIPHAINE, 1), lien(LOLA, 2), lien(REGINA, 3)]
+  const depart = '2026-10-08'
+  const limite = veille18h(depart)
+  let t = Date.parse('2026-10-07T08:00:00Z')
+  const exclus = new Set()
+  const vus = []
+  for (;;) {
+    const c = deciderParGarde(ofuro({ liaisons }), depart, { maintenant: t, exclus })
+    if (!c.proposees.length) break
+    vus.push([c.rang, c.rangsRestants])
+    t = Date.parse(echeanceOffre(depart, t, c.rangsRestants))
+    assert.ok(t <= limite, `le rang ${c.rang} finit avant la veille 18 h`)
+    c.proposees.forEach(id => exclus.add(id))          // silence = refus
+  }
+  assert.deepStrictEqual(vus, [[1, 3], [2, 2], [3, 1]])
+})

@@ -688,3 +688,21 @@ test('refuser un tour où l\'on N\'EST PAS : 409, rien d\'écrit', async () => {
   assert.strictEqual(res.code, 409)
   assert.strictEqual(etat.majs.length, 0)
 })
+
+test('course perdue contre l\'HÔTE, pas contre une collègue : « plus disponible », pas « collègue »', async () => {
+  // Constat de review : l'hôte a assigné directement quelqu'un HORS du tour.
+  preparer({ menage: { ...TOUR_DE_DEUX }, majTouche: false, relu: { provider_id: REGINA } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('accepterMenage'), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.error, 'Cette offre n\'est plus disponible')
+})
+
+test('un refus partiel efface aussi l\'ancienne colonne : rien de périmé ne reste derrière', async () => {
+  const etat = preparer({ menage: { ...TOUR_DE_DEUX, offered_to: MARIE }, liaisons: LIAISONS_RANG })
+  const handler = require('../api/menages-public')
+  await handler(post('refuserMenage'), reponse())
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.strictEqual(maj.row.offered_to, null)
+})

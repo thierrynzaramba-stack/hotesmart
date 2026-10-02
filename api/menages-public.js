@@ -1120,7 +1120,11 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
       // Seulement si elle ETAIT dans le tour et que le menage a change de main :
       // une offre qui ne lui etait pas adressee n'a pas ete « prise par une
       // collegue », elle n'etait simplement pas pour elle.
+      // ⚠ Et seulement si la nouvelle porteuse ETAIT du tour : une personne
+      // assignee directement par l'hote n'est pas « une collegue qui l'a pris »
+      // (constat de review).
       if (tourLu.includes(moi) && apres && apres.provider_id && String(apres.provider_id) !== moi &&
+          tourLu.includes(String(apres.provider_id)) &&
           String(apres.provider_id) !== String(menage.provider_id || '')) {
         return res.status(409).json({ error: 'Déjà pris par une collègue.' })
       }
@@ -1166,7 +1170,7 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   const resteDuTour = tourLu.filter(id => id !== moi)
   if (resteDuTour.length) {
     const { data: majTour, error: errTour } = await supabase.from('menages')
-      .update({ proposee_a: resteDuTour, updated_at: new Date().toISOString() })
+      .update({ proposee_a: resteDuTour, offered_to: null, updated_at: new Date().toISOString() })
       .eq('id', menage.id)
       .contains('proposee_a', tourLu).containedBy('proposee_a', tourLu)
       .neq('status', 'cancelled')

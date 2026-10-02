@@ -51,6 +51,49 @@ alter table public.menages
 create index if not exists menages_proposee_a_gin
   on public.menages using gin (proposee_a);
 
+-- L'ANCIEN CODE, PENDANT LA BASCULE (constat de
+-- review) : il ecrit `offered_to` sans connaitre la
+-- liste, qui divergeait (le refuse revoyait l'offre,
+-- l'acceptation violait `pas_a_soi`). Ce declencheur
+-- reporte SES ecritures dans la liste :
+--  - offered_to pose (non nul) -> [offered_to] ;
+--    le nouveau code n'ecrit jamais offered_to non nul;
+--  - offered_to efface AVEC l'echeance -> liste nulle
+--    (sans echeance, la liste doit etre nulle de
+--    toute facon : `menages_offre_datee`).
+-- Rien d'autre : une ecriture du nouveau code qui
+-- efface offered_to en gardant une offre datee ne
+-- touche pas la liste. A retirer avec offered_to.
+create or replace function
+  public.menages_offered_to_vers_liste()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.offered_to is not null and (
+       tg_op = 'INSERT'
+       or new.offered_to is distinct from
+          old.offered_to) then
+    new.proposee_a := array[new.offered_to];
+  elsif tg_op = 'UPDATE'
+    and new.offered_to is null
+    and old.offered_to is not null
+    and new.offer_expires_at is null then
+    new.proposee_a := null;
+  end if;
+  return new;
+end
+$$;
+
+drop trigger if exists menages_offered_to_vers_liste
+  on public.menages;
+create trigger menages_offered_to_vers_liste
+  before insert or update on public.menages
+  for each row
+  execute function
+    public.menages_offered_to_vers_liste();
+
 -- Recopie des propositions en cours (sans vider).
 update public.menages
    set proposee_a = array[offered_to]
@@ -72,3 +115,8 @@ select conname
                    'menages_proposee_pas_a_soi',
                    'menages_offre_datee')
  order by conname;
+
+select tgname
+  from pg_trigger
+ where tgrelid = 'public.menages'::regclass
+   and tgname = 'menages_offered_to_vers_liste';

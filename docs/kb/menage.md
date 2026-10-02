@@ -3479,3 +3479,34 @@ veille passée, alerte au dernier rang). Mutation : retirer la garde
 fusion — le nouveau code lit `proposee_a`, une colonne absente fait échouer
 planning PWA et cron. Les rangs de la prod se règlent ensuite par Thierry, sur
 les fiches (aucune écriture de rang en base par le lot).
+
+### Ce que la review a trouvé (2 octobre 2026) — aucun constat de sécurité
+
+- **Bloquant 1, corrigé** — un ménage ACCEPTÉ par une personne du rang était
+  reproposé à sa collègue au cycle suivant (le filtre retirait la porteuse du
+  tour au lieu de constater que le tour était gagné), puis renvoyé de l'une à
+  l'autre toutes les 5 minutes. `poserPropositionsDues` saute désormais un
+  ménage dont la porteuse est dans le rang sollicité.
+- **Bloquant 2, corrigé** — entre migration et déploiement, l'ANCIEN code
+  écrit `offered_to` sans connaître la liste : acceptation refusée par
+  `pas_a_soi`, offre revue par celle qui venait de refuser, expiration en lot
+  qui échoue. La migration pose un **déclencheur**
+  `menages_offered_to_vers_liste` : `offered_to` posé (non nul) → liste
+  `[offered_to]` ; `offered_to` effacé AVEC l'échéance → liste nulle ; rien
+  d'autre (une écriture du nouveau code qui efface `offered_to` en gardant une
+  offre datée ne touche pas la liste). Il couvre aussi les offres posées par
+  l'ancien code invisibles jusqu'au cycle suivant. Pas de serveur Postgres
+  local : il s'éprouve sur staging par un bloc `begin … rollback`.
+  À retirer avec `offered_to`.
+- **Corrigés** : alerte supprimée à tort quand une porteuse d'office est de
+  garde mais que personne ne reprend le `orphaned` ; « Déjà pris par une
+  collègue » affiché quand c'est l'hôte qui a assigné hors du tour ;
+  `offered_to` périmé laissé par un refus partiel.
+- **Dette 48** — deux refus SIMULTANÉS dans un tour de deux : les deux
+  écritures sont conditionnées sur le même tour exact, la seconde reçoit 409 et
+  son refus n'est pas enregistré ; elle reste dans le tour jusqu'à l'échéance.
+  Escalade retardée, aucune perte.
+- **Dette 49** (antérieure au lot) — `expirerPropositions` met à jour par `id`
+  seul : une acceptation commise juste avant l'échéance, entre la lecture du
+  cron et son écriture, est écrasée (`orphaned` avec l'acceptante en
+  porteuse). Le tour à plusieurs rend la course un peu plus probable.
