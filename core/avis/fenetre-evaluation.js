@@ -287,7 +287,9 @@ export async function ouvrir (ctx = {}) {
   // L'hote l'a deja ecrite dans l'application Airbnb (spec §6) : elle sort de
   // la liste, sans relance ni publication.
   const ailleurs = avecOccupe(async () => {
-    if (!confirmer('Vous avez déjà évalué ce voyageur dans l’application Airbnb ? L’évaluation sortira de la liste, et rien ne sera publié d’ici.')) return
+    const echec = etat.evaluation.status === 'echec_publication'
+    if (!confirmer('Vous avez déjà évalué ce voyageur dans l’application Airbnb ? L’évaluation sortira de la liste, et rien ne sera publié d’ici.'
+      + (echec ? ' Vérifiez sur Airbnb que l’évaluation y figure bien : l’envoi précédent a échoué.' : ''))) return
     try {
       const r = await appel('avis?action=eval-ailleurs', {
         methode: 'POST',
