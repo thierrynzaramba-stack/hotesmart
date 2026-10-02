@@ -11,7 +11,7 @@ const { extraitVerifie } = require('../lib/extrait-verifie')
 // « rang 2 » lu en dur — un rang 2 en conge ou non attitre ce jour-la n'est pas
 // la remplacante de ce jour.
 const { chargerLiaisons, chargerDisponibilites, chargerRefus,
-        deciderParGarde, echeanceOffre } = require('../lib/cleaning/assign')
+        deciderParGarde, echeanceOffre, proposeesDe } = require('../lib/cleaning/assign')
 const { notifierProposition } = require('../lib/cleaning/notifier-prestataire')
 // ⚠ `cleJour` normalise une date de calendrier a midi UTC. A minuit, le moindre
 // decalage de fuseau la fait basculer d'un jour — piege deja corrige deux fois
@@ -671,7 +671,7 @@ module.exports = async function handler(req, res) {
     // Desormais : pas de profil actif, pas d'acces. La garde elle-meme est posee
     // PLUS HAUT, avant les lectures lourdes — voir `profilActifDuJeton`.
     let requete = supabase.from('menages')
-      .select('booking_id, property_id, departure_date, status, provider_id, offered_to, offer_expires_at')
+      .select('booking_id, property_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at')
       .eq('user_id', userId)
       .neq('status', 'cancelled')
       .gte('departure_date', dateFrom)
@@ -680,10 +680,13 @@ module.exports = async function handler(req, res) {
     //   - ceux qu'elle PORTE (`provider_id`), y compris ceux qu'on est en train
     //     de proposer a quelqu'un d'autre — ils restent les siens tant que
     //     personne n'a accepte ;
-    //   - ceux qu'on lui PROPOSE (`offered_to`), qu'elle ne porte pas encore.
+    //   - ceux qu'on lui PROPOSE (elle est dans `proposee_a`), qu'elle ne porte pas encore.
     // Les confondre, c'etait soit lui retirer un menage dont elle reste
     // responsable, soit lui en attribuer un qu'elle n'a pas accepte.
-    requete = requete.or(`provider_id.eq.${profilPresta.id},offered_to.eq.${profilPresta.id}`)
+    // ⚠ « ON LE LUI PROPOSE » = elle est DANS le tour (`proposee_a` contient
+    // son identifiant, spec proposition-par-rang) — ses collegues du meme rang
+    // aussi, et chacune ne voit que SA proposition.
+    requete = requete.or(`provider_id.eq.${profilPresta.id},proposee_a.cs.{${profilPresta.id}}`)
     const { data: mn, error: errMen } = await requete
     // ⚠ Une liste vide par panne serait indiscernable d'« aucun menage », et la
     // prestataire conclurait qu'elle n'a rien a faire aujourd'hui.
@@ -774,7 +777,7 @@ module.exports = async function handler(req, res) {
     // l'autre laisse un logement sale. Le vrai correctif est un marqueur distinct
     // en base — `assigned_by` melange « decision de l'hote » et « refus ».
     //
-    // ⚠ `provider_id` ET `offered_to` DOIVENT ETRE NULS. Un menage propose a
+    // ⚠ `provider_id` ET `proposee_a` DOIVENT ETRE NULS. Un menage propose a
     // quelqu'un d'autre n'est pas libre : l'afficher « a prendre » lancerait une
     // course avec une collegue qui s'apprete peut-etre a repondre.
     //
@@ -790,7 +793,7 @@ module.exports = async function handler(req, res) {
         .in('property_id', propIds)
         .in('status', ['orphaned', 'unassigned'])
         .is('provider_id', null)
-        .is('offered_to', null)
+        .is('proposee_a', null)
         // ⚠ ON N'ECARTE QUE LE COUPLE `unassigned` + `manual` : la desassignation
         // par l'hote. `orphaned` passe quel que soit `assigned_by` — un REFUS pose
         // lui aussi ce verrou, et c'est precisement le cas qu'on veut proposer.
@@ -896,8 +899,11 @@ module.exports = async function handler(req, res) {
         booking_id: m.booking_id, property_id: m.property_id,
         departure_date: m.departure_date, status: m.status,
         role: m.provider_id === profilPresta.id ? 'porteur' : 'propose',
-        propose: !!m.offered_to,
-        expire_le: m.offered_to ? m.offer_expires_at : null
+        // ⚠ AUCUN NOM NI IDENTIFIANT DES AUTRES PERSONNES DU TOUR : elle sait
+        // seulement qu'une proposition est en cours (porteuse) ou qu'on la lui
+        // fait (proposee) — jamais a qui d'autre.
+        propose: proposeesDe(m).length > 0,
+        expire_le: proposeesDe(m).length ? m.offer_expires_at : null
       })),
       prenom: profilPresta.first_name,
       // ⚠ UNE LISTE A PART, JAMAIS MELEE A `bookings` NI A `menages` : c'est ce
@@ -983,7 +989,7 @@ async function menageDeCePorteur (userId, token, { propertyId, bookingId, depart
   const profil = porteur.profil
 
   const { data: menage, error: errMen } = await supabase.from('menages')
-    .select('provider_id, status, offered_to')
+    .select('provider_id, status, offered_to, proposee_a')
     .eq('user_id', userId).eq('property_id', String(propertyId))
     .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
     .maybeSingle()
@@ -1007,9 +1013,9 @@ async function menageDeCePorteur (userId, token, { propertyId, bookingId, depart
   // menage sous proposition redevenait donc « a personne » — n'importe quelle
   // prestataire identifiee du compte pouvait le marquer fait, ou le DEFAIRE,
   // avec le seul triplet (bien, reservation, date) qu'elle lit dans sa PWA.
-  // C'est desormais `offered_to` qui tranche, comme partout ailleurs.
-  if (menage.offered_to) {
-    return menage.offered_to === profil.id
+  // C'est desormais le tour (`proposee_a`) qui tranche, comme partout ailleurs.
+  if (proposeesDe(menage).length) {
+    return proposeesDe(menage).includes(String(profil.id))
       ? { autorise: false, motif: 'offre' }   // a elle, mais pas encore acceptee
       : { autorise: false }
   }
@@ -1057,7 +1063,7 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   const profil = porteur.profil
 
   const { data: menage, error: errMen } = await supabase.from('menages')
-    .select('id, provider_id, status, offered_to')
+    .select('id, provider_id, status, offered_to, proposee_a')
     .eq('user_id', userId).eq('property_id', String(propertyId))
     .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
     .maybeSingle()
@@ -1066,25 +1072,32 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
   if (!menage) return res.status(404).json({ error: 'Ménage introuvable' })
+  // Le tour en cours, tel qu'il etait a la lecture : c'est sur cette liste
+  // EXACTE que portent les ecritures conditionnelles ci-dessous.
+  const tourLu = proposeesDe(menage)
+  const moi = String(profil.id)
 
   if (accepte) {
     // ⚠ C'EST ICI, ET SEULEMENT ICI, QUE LA RESPONSABILITE SE TRANSFERE.
     // Jusqu'a cet instant le menage etait porte par la referente ; il bascule
     // maintenant chez celle qui accepte, et la proposition s'efface.
     //
-    // La condition reste ATOMIQUE, et elle porte desormais sur `offered_to` (a
+    // La condition reste ATOMIQUE, et elle porte desormais sur `proposee_a` (a
     // qui on l'a propose) et sur l'echeance. La tester avant d'ecrire laisserait
     // une fenetre ou l'hote reassigne, ou l'offre expire, entre les deux.
     const { data: maj, error: errMaj } = await supabase.from('menages')
+      // ⚠ LA PREMIERE QUI ACCEPTE L'A (spec proposition-par-rang). La condition
+      // porte sur « je suis encore dans le tour » : si une collegue a accepte
+      // juste avant, le tour a ete vide et cette ecriture ne touche rien.
       .update({ provider_id: profil.id, status: 'accepted',
-                offered_to: null, offered_at: null, offer_expires_at: null,
+                proposee_a: null, offered_to: null, offered_at: null, offer_expires_at: null,
                 // ⚠ PAS de `assigned_by: 'auto'` : ecraser un verrou pose par
                 // l'hote le ferait disparaitre, et une resurrection ulterieure
                 // recalculerait l'assignation contre sa decision.
                 assignment_reason: `Accepte par ${profil.first_name}.`,
                 accepted_at: new Date().toISOString(),
                 updated_at: new Date().toISOString() })
-      .eq('id', menage.id).eq('offered_to', profil.id)
+      .eq('id', menage.id).contains('proposee_a', [moi])
       .gt('offer_expires_at', new Date().toISOString())
       // ⚠ Une PWA restee ouverte sur un menage dont la reservation a disparu
       // pouvait le repasser en `accepted` avec un porteur — un menage vivant
@@ -1099,6 +1112,22 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
     // On le DIT plutot que de rendre un succes : elle doit savoir que ce menage
     // ne lui revient plus, sinon elle s'organisera autour.
     if (!maj || !maj.length) {
+      // ⚠ LE MOT JUSTE (decision 2 de Thierry) : si une collegue l'a pris entre
+      // la lecture et l'ecriture, on le DIT, au lieu d'un « plus disponible »
+      // qui laisse croire a une panne.
+      const { data: apres } = await supabase.from('menages')
+        .select('provider_id').eq('id', menage.id).maybeSingle()
+      // Seulement si elle ETAIT dans le tour et que le menage a change de main :
+      // une offre qui ne lui etait pas adressee n'a pas ete « prise par une
+      // collegue », elle n'etait simplement pas pour elle.
+      // ⚠ Et seulement si la nouvelle porteuse ETAIT du tour : une personne
+      // assignee directement par l'hote n'est pas « une collegue qui l'a pris »
+      // (constat de review).
+      if (tourLu.includes(moi) && apres && apres.provider_id && String(apres.provider_id) !== moi &&
+          tourLu.includes(String(apres.provider_id)) &&
+          String(apres.provider_id) !== String(menage.provider_id || '')) {
+        return res.status(409).json({ error: 'Déjà pris par une collègue.' })
+      }
       return res.status(409).json({ error: 'Cette offre n\'est plus disponible' })
     }
     await supabase.from('menage_assignment_log').insert({
@@ -1131,6 +1160,37 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   // en sautant celles que le journal connait deja comme ayant refuse ou laisse
   // expirer : sans cette memoire, on reproposerait a qui vient de dire non.
   const porte = !!menage.provider_id
+  if (!tourLu.includes(moi)) {
+    return res.status(409).json({ error: 'Cette offre n\'est plus disponible' })
+  }
+
+  // ⚠ UN REFUS NE CLOT PAS LE TOUR (spec proposition-par-rang) : s'il reste des
+  // collegues du meme rang qui n'ont pas repondu, on la retire, elle seule, et
+  // le tour continue. Pas d'escalade, pas d'alerte (decision 3 de Thierry).
+  const resteDuTour = tourLu.filter(id => id !== moi)
+  if (resteDuTour.length) {
+    const { data: majTour, error: errTour } = await supabase.from('menages')
+      .update({ proposee_a: resteDuTour, offered_to: null, updated_at: new Date().toISOString() })
+      .eq('id', menage.id)
+      .contains('proposee_a', tourLu).containedBy('proposee_a', tourLu)
+      .neq('status', 'cancelled')
+      .select('id')
+    if (errTour) {
+      console.error('[menages-public] refus echec:', errTour.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    if (!majTour || !majTour.length) {
+      return res.status(409).json({ error: 'Cette offre n\'est plus disponible' })
+    }
+    await supabase.from('menage_assignment_log').insert({
+      user_id: userId, menage_id: menage.id, event: 'declined',
+      from_provider_id: profil.id, actor: 'provider',
+      reason: 'Refus depuis la PWA ; le tour continue avec ses collegues du meme rang.'
+    })
+    return res.json({ success: true, porte, escalade: false })
+  }
+
+  // Elle etait la DERNIERE du tour : on passe au rang suivant, en entier.
   const suivante = await remplacanteApresRefus({
     userId, propertyId, departureDate, menageId: menage.id,
     refusee: profil.id, porteurId: menage.provider_id
@@ -1141,11 +1201,11 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
       ...(suivante
         ? { // La proposition n'est ecrite QUE s'il y a quelqu'un a solliciter :
             // une releve peut n'etre qu'une porteuse posee.
-            ...(suivante.providerId
-              ? { offered_to: suivante.providerId,
+            ...(suivante.proposees.length
+              ? { proposee_a: suivante.proposees, offered_to: null,
                   offered_at: new Date().toISOString(),
                   offer_expires_at: suivante.echeance }
-              : { offered_to: null, offered_at: null, offer_expires_at: null }),
+              : { proposee_a: null, offered_to: null, offered_at: null, offer_expires_at: null }),
             // ⚠ Trois etats possibles, et un seul est faux :
             //   - quelqu'un porte deja : son statut ne bouge pas, la proposition
             //     vit A COTE ;
@@ -1156,17 +1216,18 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
                   ? { provider_id: suivante.porteuse, status: 'accepted',
                       accepted_at: new Date().toISOString() }
                   : { status: 'offered' })),
-            assignment_reason: suivante.providerId
-              ? `Refuse par ${profil.first_name} : propose a la candidate suivante.`
+            assignment_reason: suivante.proposees.length
+              ? `Refuse par ${profil.first_name} : propose au rang suivant.`
               : `Refuse par ${profil.first_name} : repris par la personne de garde ce jour-la.` }
-        : { offered_to: null, offered_at: null, offer_expires_at: null,
+        : { proposee_a: null, offered_to: null, offered_at: null, offer_expires_at: null,
             ...(porte
               ? { assignment_reason: `Propose a ${profil.first_name}, qui a refuse : reste chez son porteur.` }
               : { status: 'orphaned', assigned_by: 'manual',
                   assignment_reason: `Refuse par ${profil.first_name}, et personne ne porte ce menage.` }) }),
       updated_at: new Date().toISOString()
     })
-    .eq('id', menage.id).eq('offered_to', profil.id)
+    .eq('id', menage.id)
+    .contains('proposee_a', tourLu).containedBy('proposee_a', tourLu)
     .select('id')
   if (errMaj) {
     console.error('[menages-public] refus echec:', errMaj.message)
@@ -1187,25 +1248,30 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
       actor: 'cron', reason: 'Refus : le menage revient a la personne de garde ce jour-la.'
     })
   }
-  if (suivante && suivante.providerId) {
+  if (suivante && suivante.proposees.length) {
     // ⚠ L'ESCALADE EST TRACEE COMME UNE PROPOSITION DE L'AUTOMATE (`actor:'cron'`) :
-    // ce n'est pas la personne qui refuse qui a choisi sa remplacante.
-    await supabase.from('menage_assignment_log').insert({
+    // ce n'est pas la personne qui refuse qui a choisi sa remplacante. Une ligne
+    // PAR PERSONNE du rang suivant (memoire des refus, personne par personne).
+    await supabase.from('menage_assignment_log').insert(suivante.proposees.map(qui => ({
       user_id: userId, menage_id: menage.id, event: 'offered',
-      from_provider_id: menage.provider_id || null, to_provider_id: suivante.providerId,
-      actor: 'cron', reason: 'Escalade automatique apres refus : candidate suivante du jour.'
-    })
+      from_provider_id: menage.provider_id || null, to_provider_id: qui,
+      actor: 'cron', reason: `Escalade automatique apres refus : rang ${suivante.rang}.`
+    })))
     // ⚠ BEST-EFFORT, ET APRES L'ECRITURE. Une proposition muette expirerait sans
-    // que la personne ait su qu'on lui demandait quelque chose.
-    try {
-      await notifierProposition({
-        userId, providerId: suivante.providerId,
-        propertyName: await nomDuBien(userId, propertyId),
-        propertyId: String(propertyId),
-        departureDate, expireLe: suivante.echeance,
-        lien: `${(process.env.PUBLIC_BASE_URL || 'https://hotesmart.vercel.app').replace(/\/+$/, '')}/apps/menages/public`
-      })
-    } catch (e) { console.error('[menages-public] notification escalade echec:', e.message) }
+    // que la personne ait su qu'on lui demandait quelque chose. Un message par
+    // personne du rang.
+    const nomBien = await nomDuBien(userId, propertyId)
+    for (const qui of suivante.proposees) {
+      try {
+        await notifierProposition({
+          userId, providerId: qui,
+          propertyName: nomBien,
+          propertyId: String(propertyId),
+          departureDate, expireLe: suivante.echeance,
+          lien: `${(process.env.PUBLIC_BASE_URL || 'https://hotesmart.vercel.app').replace(/\/+$/, '')}/apps/menages/public`
+        })
+      } catch (e) { console.error('[menages-public] notification escalade echec:', e.message) }
+    }
   }
   // ⚠ ALERTE SEULEMENT SI PLUS PERSONNE NE PORTE CE MENAGE.
   // Alerter sur un refus dont la referente garde la charge serait du bruit :
@@ -1221,7 +1287,7 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   // ⚠ UNE ESCALADE REUSSIE N'ALERTE PAS NON PLUS : quelqu'un vient d'etre
   // sollicite, rien n'est decouvert. Si elle ne repond pas, l'expiration
   // reprendra la main — et alertera alors, puisque la file sera epuisee.
-  if (!porte && !(suivante && (suivante.providerId || suivante.porteuse))) {
+  if (!porte && !(suivante && (suivante.proposees.length || suivante.porteuse))) {
     try {
       await alertMenageRefuse({
         userId, propertyId: String(propertyId), bookingId,
@@ -1242,7 +1308,7 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
   return res.json({
     success: true,
     porte: porte || !!(suivante && suivante.porteuse),
-    escalade: !!(suivante && suivante.providerId)
+    escalade: !!(suivante && suivante.proposees.length)
   })
 }
 
@@ -1303,14 +1369,17 @@ async function remplacanteApresRefus ({ userId, propertyId, departureDate, menag
     // porte deja le menage. Lui proposer ce qu'elle a deja ferait echouer
     // l'update — donc le refus lui-meme. Idem si c'est la porteuse qu'on
     // s'apprete a poser.
-    let proposeeA = choix.offeredTo || null
+    // ⚠ LE RANG SUIVANT EN ENTIER (spec proposition-par-rang), jamais la
+    // personne qui porte deja. Son echeance partage le temps restant entre les
+    // rangs qui restent (derniere minute).
     const dejaLa = porteurId || porteuse
-    if (proposeeA && dejaLa && String(proposeeA) === String(dejaLa)) proposeeA = null
+    const proposees = (choix.proposees || []).filter(id => !dejaLa || String(id) !== String(dejaLa))
 
-    if (!proposeeA && !porteuse) return null
+    if (!proposees.length && !porteuse) return null
     return {
-      providerId: proposeeA,
-      echeance: proposeeA ? echeanceOffre(departureDate) : null,
+      proposees,
+      rang: choix.rang,
+      echeance: proposees.length ? echeanceOffre(departureDate, Date.now(), choix.rangsRestants) : null,
       porteuse
     }
   } catch (e) {
@@ -1617,7 +1686,7 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
   }
 
   const { data: menage, error: errMen } = await supabase.from('menages')
-    .select('id, provider_id, status, offered_to, assigned_by')
+    .select('id, provider_id, status, offered_to, proposee_a, assigned_by')
     .eq('user_id', pt.user_id).eq('property_id', String(propertyId))
     .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
     .maybeSingle()
@@ -1639,7 +1708,7 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
     return res.status(403).json({ error: 'Votre hôte gère ce ménage lui-même.' })
   }
   if (menage.provider_id) return res.status(409).json({ error: 'Quelqu\'un s\'occupe déjà de ce ménage.' })
-  if (menage.offered_to)  return res.status(409).json({ error: 'Ce ménage est proposé à quelqu\'un d\'autre.' })
+  if (proposeesDe(menage).length) return res.status(409).json({ error: 'Ce ménage est proposé à quelqu\'un d\'autre.' })
   if (menage.status !== 'orphaned' && menage.status !== 'unassigned') {
     return res.status(409).json({ error: 'Ce ménage n\'est plus disponible.' })
   }
@@ -1650,7 +1719,7 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
   // `.is(...)` garantissent qu'on n'ecrit que si personne n'a pris la place.
   const { data: maj, error: errMaj } = await supabase.from('menages')
     .update({ provider_id: profil.id, status: 'accepted',
-              offered_to: null, offered_at: null, offer_expires_at: null,
+              proposee_a: null, offered_to: null, offered_at: null, offer_expires_at: null,
               // ⚠ `manual` = DECISION HUMAINE, et c'en est une.
               // Ne rien ecrire laissait `assigned_by` a 'auto' sur les orphelins
               // par epuisement — or `poserPropositionsDues` selectionne
@@ -1667,6 +1736,7 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
               updated_at: new Date().toISOString() })
     .eq('id', menage.id)
     .is('provider_id', null)
+    .is('proposee_a', null)
     .is('offered_to', null)
     .in('status', ['orphaned', 'unassigned'])
     .select('id')
@@ -1776,7 +1846,7 @@ async function retirerMonMenage (req, res, token, { propertyId, bookingId, depar
   }
 
   const { data: menage, error: errMen } = await supabase.from('menages')
-    .select('id, provider_id, status, offered_to')
+    .select('id, provider_id, status, offered_to, proposee_a')
     .eq('user_id', pt.user_id).eq('property_id', String(propertyId))
     .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
     .maybeSingle()
@@ -1861,7 +1931,7 @@ async function retirerMonMenage (req, res, token, { propertyId, bookingId, depar
   // decision humaine, et c'en est une.
   const { data: maj, error: errMaj } = await supabase.from('menages')
     .update({ provider_id: null, status: 'orphaned',
-              offered_to: null, offered_at: null, offer_expires_at: null,
+              proposee_a: null, offered_to: null, offered_at: null, offer_expires_at: null,
               accepted_at: null,
               assigned_by: 'manual',
               assignment_reason: `Retire par ${profil.first_name} depuis son application.`,

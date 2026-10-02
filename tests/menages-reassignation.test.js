@@ -230,7 +230,7 @@ test('proposer à un SUPPLÉANT ne retire RIEN à la porteuse', async () => {
   })
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: NOUVELLE }), res)
-  assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE, 'la proposition est posée')
+  assert.deepStrictEqual(etat.majs[0].row.proposee_a, [NOUVELLE], 'la proposition est posée')
   assert.ok(etat.majs[0].row.offer_expires_at, 'avec son échéance')
   assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'le porteur n\'est PAS touché')
   assert.strictEqual(etat.majs[0].row.status, undefined, 'ni le statut')
@@ -247,7 +247,7 @@ test('proposer À LA DERNIÈRE MINUTE reste possible', async () => {
   const res = reponse()
   await handler(post({ ...CORPS, provider_id: NOUVELLE, departure_date: demain }), res)
   assert.strictEqual(res.code, 200)
-  assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE)
+  assert.deepStrictEqual(etat.majs[0].row.proposee_a, [NOUVELLE])
   // L'échéance existe toujours : une proposition sans terme resterait en suspens.
   assert.ok(etat.majs[0].row.offer_expires_at)
   assert.ok(Date.parse(etat.majs[0].row.offer_expires_at) > Date.now())
@@ -259,7 +259,7 @@ test('un prestataire sans liaison sur ce bien reçoit une PROPOSITION', async ()
   const { handler, etat } = preparer({ liaison: null })
   const res = reponse()
   await handler(post(CORPS), res)
-  assert.strictEqual(etat.majs[0].row.offered_to, REGINA)
+  assert.deepStrictEqual(etat.majs[0].row.proposee_a, [REGINA])
   assert.strictEqual(etat.majs[0].row.provider_id, undefined)
 })
 
@@ -267,7 +267,7 @@ test('réassigner vers la PORTEUSE efface une proposition en cours', async () =>
   // L'hôte a tranché : la sollicitation n'a plus lieu d'être.
   const { handler, etat } = preparer({ liaison: { rang: 1, requires_ack: false } })
   await handler(post(CORPS), reponse())
-  assert.strictEqual(etat.majs[0].row.offered_to, null)
+  assert.strictEqual(etat.majs[0].row.proposee_a ?? null, null)
   assert.strictEqual(etat.majs[0].row.offer_expires_at, null)
 })
 
@@ -371,15 +371,15 @@ test('re-choisir la PORTEUSE retire la proposition, sans la déloger', async () 
   // proposition en gardant la porteuse : « — personne — » retirait AUSSI la
   // porteuse, l'inverse de l'intention. Et si elle n'était pas rang 1, la
   // resélectionner partait sur la branche « proposer » et écrivait
-  // `offered_to = provider_id` — ce que la base refuse (500).
+  // `proposee_a` contenant `provider_id` — ce que la base refuse (500).
   const { handler, etat } = preparer({
-    menage: { id: 'm1', provider_id: REGINA, offered_to: NOUVELLE, status: 'accepted' }
+    menage: { id: 'm1', provider_id: REGINA, proposee_a: [NOUVELLE], status: 'accepted' }
   })
   const res = reponse()
   await handler(post(CORPS), res)   // CORPS vise REGINA, déjà porteuse
   assert.strictEqual(res.code, 200)
   assert.strictEqual(res.body.retiree, true)
-  assert.strictEqual(etat.majs[0].row.offered_to, null, 'la proposition tombe')
+  assert.strictEqual(etat.majs[0].row.proposee_a ?? null, null, 'la proposition tombe')
   assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'la porteuse ne bouge pas')
   assert.strictEqual(etat.journal[0].event, 'offer_withdrawn')
 })
@@ -398,7 +398,7 @@ test('mode `assigner` : transfert IMMÉDIAT, même vers une suppléante', async 
   await handler(post({ ...CORPS, provider_id: NOUVELLE, mode: 'assigner' }), res)
   assert.strictEqual(res.body.status, 'accepted')
   assert.strictEqual(etat.majs[0].row.provider_id, NOUVELLE, 'elle porte le ménage tout de suite')
-  assert.strictEqual(etat.majs[0].row.offered_to, null, 'aucune proposition en attente')
+  assert.strictEqual(etat.majs[0].row.proposee_a ?? null, null, 'aucune proposition en attente')
   assert.ok(etat.majs[0].row.accepted_at)
 })
 
@@ -417,7 +417,7 @@ test('le DÉFAUT reste `proposer` : on n\'engage personne par accident', async (
   // accord doit rester un choix explicite.
   const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true } })
   await handler(post({ ...CORPS, provider_id: NOUVELLE }), reponse())
-  assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE)
+  assert.deepStrictEqual(etat.majs[0].row.proposee_a, [NOUVELLE])
   assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'le porteur ne bouge pas')
 })
 
@@ -426,7 +426,7 @@ test('un mode inconnu retombe sur `proposer`, jamais sur `assigner`', async () =
   for (const mode of ['ASSIGNER', 'forcer', 42, null]) {
     const { handler, etat } = preparer({ liaison: { rang: 2, requires_ack: true } })
     await handler(post({ ...CORPS, provider_id: NOUVELLE, mode }), reponse())
-    assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE, String(mode))
+    assert.deepStrictEqual(etat.majs[0].row.proposee_a, [NOUVELLE], String(mode))
   }
 })
 
@@ -436,7 +436,7 @@ test('`requires_ack = false` est assignée d\'office même en mode `proposer`', 
   const { handler, etat } = preparer({ liaison: { rang: 1, requires_ack: false } })
   await handler(post({ ...CORPS, mode: 'proposer' }), reponse())
   assert.strictEqual(etat.majs[0].row.provider_id, REGINA)
-  assert.strictEqual(etat.majs[0].row.offered_to, null)
+  assert.strictEqual(etat.majs[0].row.proposee_a ?? null, null)
 })
 
 test('une assignation directe est NOTIFIÉE, et la réponse dit ce qui est parti', async () => {

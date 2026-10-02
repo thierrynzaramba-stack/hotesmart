@@ -514,7 +514,7 @@ test('le rattrapage ne touche NI le passé, NI ce qui est déjà assigné', asyn
   const maj = etat.majs.find(m => m.row && m.row.status === 'accepted')
   assert.strictEqual(maj.f.status, 'unassigned', 'seuls les ménages sans personne')
   assert.strictEqual(maj.f.provider_id_is, null, 'qui n\'ont vraiment personne')
-  assert.strictEqual(maj.f.offered_to_is, null, 'et sur lesquels rien n\'est proposé')
+  assert.strictEqual(maj.f.proposee_a_is, null, 'et sur lesquels rien n\'est proposé')
 })
 
 test('un ménage REFUSÉ ou VERROUILLÉ n\'est pas rattrapé', async () => {
@@ -549,7 +549,7 @@ test('quelqu\'un qui DOIT CONFIRMER rattrape en « offered », pas en « accepte
   await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] }), reponse())
   const maj = etat.majs.find(m => m.row && (m.row.status === 'offered' || m.row.status === 'accepted'))
   assert.strictEqual(maj.row.status, 'offered')
-  assert.strictEqual(maj.row.offered_to, MARIE)
+  assert.deepStrictEqual(maj.row.proposee_a, [MARIE])
   assert.ok(maj.row.offer_expires_at, 'une proposition sans échéance est refusée par la base')
   assert.strictEqual(maj.row.accepted_at, null)
 })

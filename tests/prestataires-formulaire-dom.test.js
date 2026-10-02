@@ -366,3 +366,48 @@ test('CONTRE-ÉPREUVE : le sélecteur d\'avril ramasse bien les jours, sur ce DO
   ], 'le sélecteur d\'avril reproduit exactement la ligne trouvée en production')
   assert.strictEqual(ancien.length, 23)
 })
+
+// ─── LE RANG SE CHOISIT (spec proposition-par-rang, 2 octobre 2026) ─────────
+//
+// ⚠ Il était DÉDUIT de l'engagement (d'office = 1, à confirmer = 2) : toutes les
+// personnes « à confirmer » d'un bien tombaient au même rang. L'hôte le règle
+// désormais par bien, et c'est CE choix qui doit partir au serveur.
+
+test('le rang lu en base s\'affiche, et le rang choisi part tel quel dans les liaisons', async () => {
+  const { w, envois } = monterPage()
+  const t = w.__t
+  t.seed(BIENS, [
+    { property_id: BIENS[0].id, provider_id: PROFIL, rang: 3, requires_ack: true, weekdays: [0, 1, 2, 3, 4, 5, 6], active: true },
+    { property_id: BIENS[1].id, provider_id: PROFIL, rang: 2, requires_ack: true, weekdays: [0, 1, 2, 3, 4, 5, 6], active: true }
+  ], [LIGNE_TOKEN])
+  t.renderPrestataires()
+  t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE_TOKEN.id)
+
+  const d = w.document
+  assert.strictEqual(d.getElementById(`rang-${BIENS[0].id}`).value, '3', 'le rang de la base, pas une déduction')
+  assert.strictEqual(d.getElementById(`rang-${BIENS[1].id}`).value, '2')
+
+  d.getElementById(`rang-${BIENS[0].id}`).value = '1'   // l'hôte la remonte au rang 1
+  await t.saveEdit(LIGNE_TOKEN.id)
+
+  const envoi = envois.find(e => e.corps && e.corps.action === 'liaisons')
+  assert.ok(envoi, 'les liaisons doivent être enregistrées')
+  const parBien = Object.fromEntries(envoi.corps.liaisons.map(l => [l.property_id, l.rang]))
+  assert.strictEqual(parBien[BIENS[0].id], 1, 'à confirmer ET rang 1 : l\'ancienne déduction aurait mis 2')
+  assert.strictEqual(parBien[BIENS[1].id], 2)
+})
+
+test('un bien décoché grise aussi son rang', async () => {
+  const { w } = monterPage()
+  const t = w.__t
+  t.seed(BIENS, [], [LIGNE_TOKEN])
+  t.renderPrestataires()
+  t.renderPropCheckboxes()
+  t.editPrestataire(LIGNE_TOKEN.id)
+  const d = w.document
+  const cb = d.getElementById(`prop-${BIENS[2].id}`)
+  assert.strictEqual(cb.checked, false, 'Colomiers est hors du périmètre de la fixture')
+  assert.strictEqual(d.getElementById(`rang-${BIENS[2].id}`).disabled, true)
+  assert.strictEqual(d.getElementById(`rang-${BIENS[0].id}`).disabled, false)
+})

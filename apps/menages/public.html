@@ -2072,7 +2072,10 @@ if ("serviceWorker" in navigator) {
       if (res.status === 409) {
         // ⚠ Course perdue, PAS une panne : on le dit clairement, sinon elle
         // s'organiserait autour d'un menage qui ne lui revient plus.
-        showModalWarning('Ce ménage ne vous est plus proposé.')
+        // ⚠ LE MOT JUSTE (decision 2 de Thierry, spec proposition-par-rang) :
+        // une collegue du meme rang l'a accepte avant elle — on le dit.
+        showModalWarning(data && /collègue/.test(String(data.error || ''))
+          ? 'Déjà pris par une collègue.' : 'Ce ménage ne vous est plus proposé.')
         await rechargerAssignations()
         // La fiche porte un menage qui n'est plus le sien : la laisser ouverte
         // avec ses deux boutons invitait a recliquer, pour un 404.

@@ -35,6 +35,7 @@ function preparer ({ menages = [], erreurLecture = null, alerte = () => true } =
         select () { return chain },
         eq (c, v) { f[c] = v; return chain },
         is (c, v) { f[c + '_is'] = v; return chain },
+        contains (c, v) { f[c + '_contient'] = v; return chain },
         gte (c, v) { f[c + '_gte'] = v; return chain },
         lte (c, v) { f[c + '_lte'] = v; return chain },
         order (c, o) { f.ordre = c + ':' + (o && o.ascending ? 'asc' : 'desc'); return chain },
@@ -54,11 +55,18 @@ function preparer ({ menages = [], erreurLecture = null, alerte = () => true } =
           const c2 = {
             eq (c, v) { q.f[c] = v; return c2 },
             is (c, v) { q.f[c + '_is'] = v; return c2 },
+            contains (c, v) { q.f[c + '_contient'] = v; return c2 },
+            containedBy (c, v) { q.f[c + '_contenue'] = v; return c2 },
             select () {
               etat.ordreDesGestes.push('reprise')
               etat.maj.push(q)
               const cible = menages.find(m => m.id === q.f.id)
-              const touche = cible && cible.offered_to === q.f.offered_to && !cible.provider_id
+              // ⚠ L'EGALITE D'ENSEMBLES : la liste en base doit etre exactement
+              // celle lue (contient ET est contenue), comme le fait PostgREST.
+              const liste = (cible && cible.proposee_a) || []
+              const memeListe = (q.f.proposee_a_contient || []).every(x => liste.includes(x)) &&
+                                liste.every(x => (q.f.proposee_a_contenue || []).includes(x))
+              const touche = cible && memeListe && !cible.provider_id
               return Promise.resolve({ data: touche ? [{ id: q.f.id }] : [], error: null })
             },
             then (res, rej) { etat.maj.push(q)
@@ -93,7 +101,7 @@ function preparer ({ menages = [], erreurLecture = null, alerte = () => true } =
 // fixtures de ce fichier disaient donc l'inverse de ce qu'elles croyaient.
 const r = (jours, cadence = 1) => ({ jours, cadence })
 const propose = (o = {}) => ({ id: 'm1', property_id: '209413', departure_date: SAMEDI,
-                               status: 'offered', provider_id: null, offered_to: LOLA,
+                               status: 'offered', provider_id: null, offered_to: null, proposee_a: [LOLA],
                                assigned_by: 'auto', ...o })
 const BASE = { userId: U, providerId: LOLA, prenom: 'Lola' }
 
@@ -105,7 +113,7 @@ test('une PROPOSITION sur un jour retiré revient au moteur', async () => {
   assert.strictEqual(b.repris, 1)
   assert.strictEqual(b.menages.length, 1, 'et le bilan ne compte QUE ce qui a bougé')
   const maj = etat.maj[0]
-  assert.strictEqual(maj.row.offered_to, null, 'la proposition est retirée')
+  assert.strictEqual(maj.row.proposee_a, null, 'la proposition est retirée')
   assert.strictEqual(maj.row.status, 'unassigned', 'et le ménage redevient à attribuer')
   assert.match(maj.row.assignment_reason, /ne travaille plus/)
 })
@@ -117,8 +125,29 @@ test('la reprise est CONDITIONNELLE : elle a pu accepter entre-temps', async () 
   const { etat, mod } = preparer({ menages: [propose()] })
   await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   const maj = etat.maj[0]
-  assert.strictEqual(maj.f.offered_to, LOLA, 'l\'offre doit être encore la sienne')
+  assert.deepStrictEqual(maj.f.proposee_a_contient, [LOLA], 'l\'offre doit être encore la sienne')
+  assert.deepStrictEqual(maj.f.proposee_a_contenue, [LOLA], 'et le tour, exactement le même')
   assert.strictEqual(maj.f.provider_id_is, null, 'et personne ne doit porter le ménage')
+})
+
+test('dans un TOUR DE DEUX, seule elle est retirée — sa collègue garde la proposition', async () => {
+  // Spec proposition-par-rang : Lola et Lena sont sollicitées en même temps.
+  // Lola ne travaille plus le samedi : on la retire, Lena garde le ménage
+  // proposé, et rien ne revient au moteur.
+  const LENA = 'p-lena'
+  const { etat, mod } = preparer({ menages: [propose({ proposee_a: [LOLA, LENA] })] })
+  const b = await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
+  assert.strictEqual(b.repris, 1)
+  const maj = etat.maj[0]
+  assert.deepStrictEqual(maj.row.proposee_a, [LENA], 'Lena reste sollicitée')
+  assert.strictEqual(maj.row.status, undefined, 'le statut ne bouge pas : le tour continue')
+  assert.strictEqual(maj.row.offer_expires_at, undefined, 'ni son échéance')
+})
+
+test('la lecture cherche les ménages dont elle est DANS le tour', async () => {
+  const { etat, mod } = preparer({ menages: [] })
+  await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
+  assert.deepStrictEqual(etat.filtres.proposee_a_contient, [LOLA])
 })
 
 // ─── Ce qu'on ne touche JAMAIS ─────────────────────────────────────────────
@@ -174,7 +203,7 @@ test('la lecture est CLOISONNÉE et BORNÉE', async () => {
   const { etat, mod } = preparer({ menages: [] })
   await mod.apresChangementDeRegles({ ...BASE, avant: [r([1, 6])], apres: [r([1])] })
   assert.strictEqual(etat.filtres.user_id, U)
-  assert.strictEqual(etat.filtres.offered_to, LOLA)
+  assert.deepStrictEqual(etat.filtres.proposee_a_contient, [LOLA])
   assert.ok(etat.filtres.departure_date_gte, 'bornée au futur')
   assert.ok(etat.filtres.departure_date_lte, 'et bornée devant')
   // ⚠ Sans ordre, la troncature à 500 serait arbitraire et muette : on

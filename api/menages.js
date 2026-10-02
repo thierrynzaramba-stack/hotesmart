@@ -206,7 +206,7 @@ module.exports = async function handler(req, res) {
       // `assignment_reason` porte « Refuse par X. » : sans elle, un refus est
       // indiscernable d'un menage jamais assigne, et l'hote ne sait pas qu'il
       // doit agir.
-      .select('booking_id, property_id, departure_date, provider_id, status, assigned_by, assignment_reason, offered_to, offer_expires_at')
+      .select('booking_id, property_id, departure_date, provider_id, status, assigned_by, assignment_reason, offered_to, proposee_a, offer_expires_at')
       .eq('user_id', userId)
       .in('property_id', properties.map(p => p.id))
       .neq('status', 'cancelled')
@@ -416,7 +416,7 @@ async function reassigner (req, res) {
   }
 
   const { data: avant, error: errLire } = await supabase.from('menages')
-    .select('id, provider_id, status, offered_to')
+    .select('id, provider_id, status, offered_to, proposee_a')
     .eq('user_id', userId).eq('property_id', String(property_id))
     .eq('booking_id', String(booking_id)).eq('departure_date', departure_date)
     .maybeSingle()
@@ -452,7 +452,7 @@ async function reassigner (req, res) {
   if (!choisi) {
     // Desassigner : plus de porteur, et la proposition en cours tombe avec.
     maj = { ...maj, provider_id: null, status: 'unassigned', assigned_by: 'manual',
-            offered_to: null, offered_at: null, offer_expires_at: null,
+            proposee_a: null, offered_to: null, offered_at: null, offer_expires_at: null,
             accepted_at: null,
             assignment_reason: 'Desassigne a la main par l\'hote.' }
     reponse = { status: 'unassigned', provider_id: null, prenom: null }
@@ -462,8 +462,8 @@ async function reassigner (req, res) {
     // proposition en gardant la porteuse. « — personne — » retirait AUSSI la
     // porteuse, l'inverse de l'intention. Et si elle n'etait pas rang 1, la
     // resélectionner partait sur la branche « proposer » et ecrivait
-    // `offered_to = provider_id` — viole `menages_offre_pas_a_soi`, donc 500.
-    maj = { ...maj, offered_to: null, offered_at: null, offer_expires_at: null,
+    // `proposee_a` contenant `provider_id` — viole `menages_proposee_pas_a_soi`, donc 500.
+    maj = { ...maj, proposee_a: null, offered_to: null, offered_at: null, offer_expires_at: null,
             assignment_reason: `Proposition retiree par l'hote : reste chez ${choisi.first_name}.` }
     reponse = { status: avant.status, provider_id: avant.provider_id,
                 offered_to: null, prenom: choisi.first_name, retiree: true }
@@ -490,7 +490,7 @@ async function reassigner (req, res) {
     // qui tranche.
     if (dOffice || geste === 'assigner') {
       maj = { ...maj, provider_id: choisi.id, status: 'accepted', assigned_by: 'manual',
-              offered_to: null, offered_at: null, offer_expires_at: null,
+              proposee_a: null, offered_to: null, offered_at: null, offer_expires_at: null,
               accepted_at: new Date().toISOString(),
               assignment_reason: dOffice
                 ? `Assignee d'office sur ce bien, posee a la main par l'hote.`
@@ -512,11 +512,13 @@ async function reassigner (req, res) {
         console.error('[menages] echeance introuvable — proposition refusee')
         return res.status(500).json({ error: 'Proposition impossible' })
       }
-      maj = { ...maj, offered_to: choisi.id, offered_at: new Date().toISOString(),
+      // ⚠ LA PROPOSITION DE L'HOTE RESTE A UNE PERSONNE (spec
+      // proposition-par-rang) : elle s'ecrit dans le tour, comme une liste d'un.
+      maj = { ...maj, proposee_a: [String(choisi.id)], offered_to: null, offered_at: new Date().toISOString(),
               offer_expires_at: echeance,
               assignment_reason: `Propose a ${choisi.first_name} par l'hote.` }
       reponse = { status: avant.status, provider_id: avant.provider_id,
-                  offered_to: choisi.id, prenom: choisi.first_name, expire_le: echeance }
+                  offered_to: choisi.id, proposee_a: [String(choisi.id)], prenom: choisi.first_name, expire_le: echeance }
     }
   }
 
@@ -528,13 +530,13 @@ async function reassigner (req, res) {
 
   await supabase.from('menage_assignment_log').insert({
     user_id: userId, menage_id: avant.id,
-    event: reponse.retiree ? 'offer_withdrawn' : (maj.offered_to ? 'offered' : 'manual_assign'),
+    event: reponse.retiree ? 'offer_withdrawn' : (maj.proposee_a ? 'offered' : 'manual_assign'),
     from_provider_id: avant.provider_id,
-    to_provider_id: maj.offered_to || maj.provider_id || null,
+    to_provider_id: (maj.proposee_a && maj.proposee_a[0]) || maj.provider_id || null,
     actor: 'host',
     reason: reponse.retiree
       ? 'Proposition retiree : le menage reste chez son porteur.'
-      : (maj.offered_to
+      : (maj.proposee_a
           ? `Propose a ${choisi.first_name} : le menage reste chez son porteur jusqu'a acceptation.`
           : (choisi ? `Vers ${choisi.first_name}.` : 'Menage laisse sans prestataire.'))
   })
@@ -845,7 +847,7 @@ async function rattraperMenagesSansPersonne (userId, refs) {
     const { data: menages, error: errLire } = await supabase.from('menages')
       .select('id, user_id, property_id, departure_date')
       .eq('user_id', userId).in('property_id', biens)
-      .eq('status', 'unassigned').is('provider_id', null).is('offered_to', null)
+      .eq('status', 'unassigned').is('provider_id', null).is('proposee_a', null)
       .or('assigned_by.is.null,assigned_by.neq.manual')
       .gte('departure_date', aujourdhui)
       .order('departure_date', { ascending: true })
@@ -870,9 +872,13 @@ async function rattraperMenagesSansPersonne (userId, refs) {
         regles: dispos.regles, exceptions: dispos.exceptions, conges: dispos.conges
       }
       const choix = deciderParGarde(bien, m.departure_date, { maintenant })
-      if (!choix.providerId && !choix.offeredTo) continue
-      const echeance = choix.offeredTo ? echeanceOffre(m.departure_date, maintenant) : null
-      const k = `${choix.providerId}|${choix.offeredTo}|${echeance}`
+      // ⚠ LE TOUR ENTIER (spec proposition-par-rang) : toutes les candidates du
+      // plus petit rang, avec une echeance qui partage le temps restant entre
+      // les rangs a venir.
+      const tour = choix.proposees || []
+      if (!choix.providerId && !tour.length) continue
+      const echeance = tour.length ? echeanceOffre(m.departure_date, maintenant, choix.rangsRestants) : null
+      const k = `${choix.providerId}|${JSON.stringify(tour)}|${echeance}`
       if (!groupes.has(k)) groupes.set(k, { choix, echeance, menages: [] })
       groupes.get(k).menages.push(m)
     }
@@ -884,21 +890,22 @@ async function rattraperMenagesSansPersonne (userId, refs) {
       const { data: maj, error: errRat } = await supabase.from('menages')
         .update({
           provider_id: choix.providerId,
-          offered_to: choix.offeredTo || null,
-          offer_expires_at: choix.offeredTo ? echeance : null,
-          status: choix.providerId ? 'accepted' : (choix.offeredTo ? 'offered' : 'unassigned'),
+          proposee_a: (choix.proposees || []).length ? choix.proposees : null,
+          offered_to: null,
+          offer_expires_at: (choix.proposees || []).length ? echeance : null,
+          status: choix.providerId ? 'accepted' : ((choix.proposees || []).length ? 'offered' : 'unassigned'),
           assigned_by: 'auto',
           assignment_reason: choix.raison,
           assignment_mode: 'garde',
           accepted_at: choix.providerId ? iso : null,
-          offered_at: choix.offeredTo ? iso : null,
+          offered_at: (choix.proposees || []).length ? iso : null,
           updated_at: iso
         })
         // ⚠ Les memes conditions que la lecture, POSEES DANS L'UPDATE : entre les
         // deux, le cron a pu assigner ces menages. Zero ligne = il a ete plus
         // rapide, et c'est un resultat normal.
         .in('id', lot.map(m => m.id))
-        .eq('status', 'unassigned').is('provider_id', null).is('offered_to', null)
+        .eq('status', 'unassigned').is('provider_id', null).is('proposee_a', null)
         // ⚠ `property_id` EST RELU. Le groupe est indexe par (destination,
         // echeance) et PAS par bien : deux biens differents tombent dans le meme
         // groupe des que la meme personne est retenue avec la meme echeance —
@@ -910,14 +917,17 @@ async function rattraperMenagesSansPersonne (userId, refs) {
       if (errRat) { bilan.erreur = errRat.message; continue }
       bilan.rattrapes += (maj || []).length
       for (const m of (maj || [])) {
-        journal.push({
-          user_id: m.user_id, menage_id: m.id,
-          event: choix.offeredTo ? 'offered' : 'assigned',
-          to_provider_id: choix.offeredTo || choix.providerId, actor: 'host',
-          reason: 'Prestataire liee au bien : menages a venir rattrapes, garde du jour.'
-        })
-        if (choix.offeredTo) {
-          aNotifier.push({ providerId: choix.offeredTo, propertyId: m.property_id,
+        const tour = choix.proposees || []
+        for (const qui of (tour.length ? tour : [choix.providerId])) {
+          journal.push({
+            user_id: m.user_id, menage_id: m.id,
+            event: tour.length ? 'offered' : 'assigned',
+            to_provider_id: qui, actor: 'host',
+            reason: 'Prestataire liee au bien : menages a venir rattrapes, garde du jour.'
+          })
+        }
+        for (const qui of tour) {
+          aNotifier.push({ providerId: qui, propertyId: m.property_id,
                            departureDate: m.departure_date, expireLe: echeance })
         }
       }

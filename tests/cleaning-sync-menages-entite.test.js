@@ -127,7 +127,15 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
         }
         if (table === 'provider_availability_rules') return { data: regles, error: erreurDispos }
         if (table === 'provider_availability_exceptions') return { data: exceptions, error: null }
-        if (table === 'menage_assignment_log') return { data: refus, error: null }
+        // ⚠ LE JOURNAL RELU REND AUSSI CE QUE LE CYCLE VIENT D'ÉCRIRE, comme la
+        // vraie base : `expirerPropositions` journalise les `expired` PUIS relit
+        // la mémoire des refus pour savoir s'il reste quelqu'un (spec
+        // proposition-par-rang). Un double figé laissait croire qu'il restait
+        // toujours le tour qui venait d'expirer.
+        if (table === 'menage_assignment_log') {
+          return { data: [...refus, ...etat.journal.filter(l => l.event === 'declined' || l.event === 'expired')],
+                   error: null }
+        }
         if (table === 'property_cleaning_providers') return { data: liaisons, error: null }
         if (table === 'properties') return { data: biens, error: erreurBiens }
         return { data: [], error: null }
@@ -705,7 +713,7 @@ test('une proposition expirée s\'efface, et le porteur ne bouge pas', async () 
   assert.strictEqual(bilan.expirees, 1)
   assert.strictEqual(bilan.orphelins, 0)
   const maj = etat.majs[0]
-  assert.strictEqual(maj.row.offered_to, null)
+  assert.strictEqual(maj.row.proposee_a ?? null, null)
   assert.strictEqual(maj.row.offer_expires_at, null)
   assert.strictEqual(maj.row.provider_id, undefined, 'le porteur n\'est pas touché')
   assert.strictEqual(maj.row.status, undefined, 'ni le statut')
@@ -789,7 +797,7 @@ test('le rattrapage PROPOSE quand le bien n\'a qu\'un suppléant', async () => {
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await synchroniserMenages()
   assert.strictEqual(bilan.assignes_apres_coup, 1)
-  assert.strictEqual(etat.majs[0].row.offered_to, NOUVELLE)
+  assert.deepStrictEqual(etat.majs[0].row.proposee_a, [NOUVELLE])
   assert.strictEqual(etat.majs[0].row.provider_id, null, 'personne ne le porte encore')
 })
 
@@ -833,7 +841,7 @@ test('SAMEDI « on » : Régina porte, et le ménage est proposé à la seconde'
   await synchroniserMenages(null, { maintenant: T0 })
   const m = etat.inseres[0]
   assert.strictEqual(m.provider_id, REGINA)
-  assert.strictEqual(m.offered_to, NOUVELLE)
+  assert.deepStrictEqual(m.proposee_a, [NOUVELLE])
   assert.strictEqual(m.status, 'accepted')
   assert.ok(m.offer_expires_at, 'une proposition sans échéance est refusée par la base')
   assert.ok(m.accepted_at && m.offered_at, 'porté ET proposé : les deux dates')
@@ -849,7 +857,7 @@ test('SAMEDI « off » : la seconde n\'est pas candidate, rien ne lui est propos
   await synchroniserMenages(null, { maintenant: Date.parse('2026-09-08T08:00:00Z') })
   const m = etat.inseres[0]
   assert.strictEqual(m.provider_id, REGINA)
-  assert.strictEqual(m.offered_to, null)
+  assert.strictEqual(m.proposee_a ?? null, null)
   assert.strictEqual(m.status, 'accepted')
 })
 
@@ -861,7 +869,7 @@ test('MARDI : la seconde n\'est pas attitrée ce jour-là', async () => {
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   await synchroniserMenages(null, { maintenant: Date.parse('2026-09-02T08:00:00Z') })
   assert.strictEqual(etat.inseres[0].provider_id, REGINA)
-  assert.strictEqual(etat.inseres[0].offered_to, null)
+  assert.strictEqual(etat.inseres[0].proposee_a ?? null, null)
 })
 
 test('un CONGÉ de Régina ce jour-là : personne ne porte, la seconde est sollicitée', async () => {
@@ -872,7 +880,7 @@ test('un CONGÉ de Régina ce jour-là : personne ne porte, la seconde est solli
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   await synchroniserMenages(null, { maintenant: T0 })
   assert.strictEqual(etat.inseres[0].provider_id, null)
-  assert.strictEqual(etat.inseres[0].offered_to, NOUVELLE)
+  assert.deepStrictEqual(etat.inseres[0].proposee_a, [NOUVELLE])
   assert.strictEqual(etat.inseres[0].status, 'offered')
 })
 
@@ -887,7 +895,7 @@ test('un départ LOINTAIN n\'est pas proposé, mais il est PORTÉ', async () => 
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   await synchroniserMenages(null, { maintenant: T0 })
   assert.strictEqual(etat.inseres[0].provider_id, REGINA, 'personne n\'est découvert')
-  assert.strictEqual(etat.inseres[0].offered_to, null)
+  assert.strictEqual(etat.inseres[0].proposee_a ?? null, null)
   assert.strictEqual(etat.inseres[0].offer_expires_at, null)
 })
 
@@ -968,8 +976,8 @@ test('la proposition est posée à l\'approche du départ, et NOTIFIÉE', async 
   const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await poserPropositionsDues(null, { maintenant: T0 })
   assert.strictEqual(bilan.proposees, 1)
-  const maj = etat.majs.find(m => m.row.offered_to)
-  assert.strictEqual(maj.row.offered_to, NOUVELLE)
+  const maj = etat.majs.find(m => m.row.proposee_a)
+  assert.deepStrictEqual(maj.row.proposee_a, [NOUVELLE])
   assert.ok(maj.row.offer_expires_at)
   assert.strictEqual(maj.row.status, undefined, 'quelqu\'un porte : son statut ne bouge pas')
   assert.strictEqual(etat.notifs.length, 1)
@@ -994,7 +1002,7 @@ test('ESCALADE : qui a refusé ou laissé expirer n\'est jamais resollicité', a
   assert.strictEqual(etat.notifs.length, 0)
 })
 
-test('la pose de proposition est ATOMIQUE : elle exige `offered_to` vide', async () => {
+test('la pose de proposition est ATOMIQUE : elle exige `proposee_a` vide', async () => {
   // Entre la lecture et l'écriture, l'hôte a pu proposer le ménage depuis son
   // planning. Zéro ligne = quelqu'un a été plus rapide, et c'est normal.
   const etat = preparer({
@@ -1007,7 +1015,7 @@ test('la pose de proposition est ATOMIQUE : elle exige `offered_to` vide', async
   const req = etat.requetes.filter(r => r.table === 'menages').pop()
   const source = require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', 'lib/cleaning/sync-menages-entite.js'), 'utf8')
-  assert.ok(source.includes(".eq('id', m.id).is('offered_to', null)"),
+  assert.ok(source.includes(".eq('id', m.id).is('proposee_a', null)"),
     'la condition doit être POSÉE DANS l\'update, pas testée avant')
   assert.ok(req)
 })
@@ -1068,8 +1076,8 @@ test('un ménage ORPHELIN par EXPIRATION est bien escaladé', async () => {
   const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await poserPropositionsDues(null, { maintenant: T0 })
   assert.strictEqual(bilan.proposees, 1, 'la candidate suivante DOIT être sollicitée')
-  const maj = etat.majs.find(m => m.row.offered_to)
-  assert.strictEqual(maj.row.offered_to, REGINA)
+  const maj = etat.majs.find(m => m.row.proposee_a)
+  assert.deepStrictEqual(maj.row.proposee_a, [REGINA])
   assert.strictEqual(maj.row.status, 'offered', 'le ménage sort de `orphaned`')
 })
 
@@ -1144,7 +1152,7 @@ test('personne d\'office et aucun jour réglé : le ménage n\'est pas SILENCIEU
   const { synchroniserMenages } = require('../lib/cleaning/sync-menages-entite')
   const bilan = await synchroniserMenages(null, { maintenant: T0 })
   assert.strictEqual(etat.inseres[0].provider_id, null)
-  assert.strictEqual(etat.inseres[0].offered_to, null)
+  assert.strictEqual(etat.inseres[0].proposee_a ?? null, null)
   assert.strictEqual(etat.inseres[0].status, 'unassigned')
   assert.strictEqual(bilan.alertes, 1)
   assert.match(etat.incidents[0].detail.message, /jours attitres regles/)
@@ -1205,4 +1213,121 @@ test('un ménage sans personne LOINTAIN n\'alerte pas à chaque cycle', async ()
   const bilan = await synchroniserMenages(null, { maintenant: T0 })
   assert.strictEqual(bilan.alertes, 0, 'le départ est loin : rien à signaler encore')
   assert.strictEqual(etat.incidents.length, 0)
+})
+
+// ─── LE TOUR D'UN RANG, CÔTÉ CRON (spec proposition-par-rang) ──────────────
+// Les dates sont figées et `maintenant` est injecté.
+const LENA = 'p-lena', TIPHAINE = 'p-tiphaine', LOLA = 'p-lola'
+const OFURO = (rang3 = true) => [
+  { user_id: U, property_id: '209413', provider_id: LENA, rang: 1, weekdays: [0, 1, 2, 3, 4, 5, 6], requires_ack: true, active: true },
+  { user_id: U, property_id: '209413', provider_id: TIPHAINE, rang: 1, weekdays: [0, 1, 2, 3, 4, 5, 6], requires_ack: true, active: true },
+  ...(rang3 ? [{ user_id: U, property_id: '209413', provider_id: LOLA, rang: 2, weekdays: [0, 1, 2, 3, 4, 5, 6], requires_ack: true, active: true }] : [])
+]
+
+test('RANG : la proposition part au rang 1 ENTIER, une écriture, un SMS par personne', async () => {
+  const etat = preparer({
+    liaisons: OFURO(),
+    propositions: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                     departure_date: '2026-09-05', provider_id: null, status: 'unassigned' }]
+  })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await poserPropositionsDues(null, { maintenant: T0 })
+  assert.strictEqual(bilan.proposees, 1, 'UN ménage proposé, à deux personnes')
+  const maj = etat.majs.find(m => m.row.proposee_a)
+  assert.deepStrictEqual([...maj.row.proposee_a].sort(), [LENA, TIPHAINE].sort())
+  assert.strictEqual(maj.row.offered_to, null, 'l\'ancienne colonne n\'est plus écrite')
+  assert.strictEqual(maj.row.status, 'offered')
+  assert.deepStrictEqual(etat.notifs.map(n => n.providerId).sort(), [LENA, TIPHAINE].sort())
+  assert.ok(!etat.notifs.some(n => n.providerId === LOLA), 'le rang 2 attend')
+  assert.strictEqual(etat.journal.filter(l => l.event === 'offered').length, 2)
+})
+
+test('RANG : un tour EXPIRÉ dont un rang reste à solliciter N\'ALERTE PAS l\'hôte', async () => {
+  // Décision 3 de Thierry : l'hôte n'est prévenu que quand plus personne ne
+  // reste. Lola (rang 2) sera sollicitée par `poserPropositionsDues` au même cycle.
+  const etat = preparer({ liaisons: OFURO(), expirees: [
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-05',
+      provider_id: null, proposee_a: [LENA, TIPHAINE] }
+  ] })
+  const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
+  await expirerPropositions(null, { maintenant: T0 })
+  assert.deepStrictEqual(etat.journal.filter(l => l.event === 'expired').map(l => l.from_provider_id).sort(),
+    [LENA, TIPHAINE].sort(), 'une ligne `expired` par personne du tour : aucune ne sera resollicitée')
+  assert.strictEqual(etat.incidents.length, 0)
+})
+
+test('RANG : le DERNIER rang expire sans réponse — là, l\'hôte est alerté', async () => {
+  const etat = preparer({ liaisons: OFURO(false), expirees: [
+    { id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-05',
+      provider_id: null, proposee_a: [LENA, TIPHAINE] }
+  ] })
+  const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
+  await expirerPropositions(null, { maintenant: T0 })
+  assert.strictEqual(etat.incidents.length, 1)
+  assert.strictEqual(etat.incidents[0].type, 'menage_non_assigne')
+})
+
+test('BASCULE : une proposition posée par l\'ancien code entre dans la liste, échéance intacte', async () => {
+  // Entre la migration et le déploiement, l'ancien code écrit encore `offered_to`.
+  const etat = preparer({
+    menages: [{ id: 'm9', offered_to: LENA }],
+    expirees: []
+  })
+  const { rattraperBascule } = require('../lib/cleaning/sync-menages-entite')
+  const n = await rattraperBascule(T0)
+  assert.strictEqual(n, 1)
+  const maj = etat.majs.find(m => m.ids[0] === 'm9')
+  assert.deepStrictEqual(maj.row.proposee_a, [LENA])
+  assert.strictEqual(maj.row.offered_to, null)
+  assert.strictEqual(maj.row.offer_expires_at, undefined, 'l\'échéance n\'est pas touchée')
+  assert.strictEqual(maj.f.offered_to, LENA, 'conditionnelle : la ligne n\'a pas bougé depuis la lecture')
+  assert.strictEqual(maj.f.proposee_a_is, null)
+})
+
+test('RANG : un ménage ACCEPTÉ par une du rang n\'est PAS reproposé à sa collègue (constat de review)', async () => {
+  // Lena a accepté le tour [Lena, Tiphaine] : la ligne repasse `accepted`,
+  // `assigned_by` reste 'auto', `proposee_a` est vide. Le cycle suivant la relit.
+  // Retirer seulement Lena du tour proposait le ménage à Tiphaine — puis, si
+  // elle acceptait, le renvoyait à Lena au cycle d'après.
+  const etat = preparer({
+    liaisons: OFURO(),
+    propositions: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                     departure_date: '2026-09-05', provider_id: LENA, status: 'accepted' }]
+  })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await poserPropositionsDues(null, { maintenant: T0 })
+  assert.strictEqual(bilan.proposees, 0)
+  assert.strictEqual(etat.majs.length, 0, 'le ménage reste chez Lena, intact')
+  assert.strictEqual(etat.notifs.length, 0, 'aucun SMS à Tiphaine')
+})
+
+test('RANG : porteuse d\'office SEULE, le modèle parallèle propose toujours au rang (non-régression)', async () => {
+  // Le correctif ci-dessus ne doit pas éteindre la proposition à côté d'une
+  // porteuse d'office qui n'est pas du rang sollicité.
+  const etat = preparer({
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, weekdays: null, requires_ack: false, active: true },
+               ...OFURO(false)],
+    propositions: [{ id: 'm1', user_id: U, property_id: '209413', booking_id: 'b1',
+                     departure_date: '2026-09-05', provider_id: REGINA, status: 'accepted' }]
+  })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  await poserPropositionsDues(null, { maintenant: T0 })
+  const maj = etat.majs.find(m => m.row.proposee_a)
+  assert.deepStrictEqual([...maj.row.proposee_a].sort(), [LENA, TIPHAINE].sort())
+})
+
+test('RANG : expiré SANS porteur alors qu\'une porteuse d\'office est de garde — l\'hôte est ALERTÉ', async () => {
+  // Constat de review : rien ne reprend ce ménage (le cron de proposition saute
+  // « personne ne porte mais une d'office existe », le writer ne reprend pas un
+  // `orphaned`). Le compter comme « il reste quelqu'un » le laissait sans
+  // personne ET sans alerte.
+  const etat = preparer({
+    liaisons: [{ user_id: U, property_id: '209413', provider_id: REGINA, rang: 1, weekdays: null, requires_ack: false, active: true },
+               ...OFURO()],
+    expirees: [{ id: 'm1', user_id: U, property_id: '209413', departure_date: '2026-09-05',
+                 provider_id: null, proposee_a: [LENA, TIPHAINE] }]
+  })
+  const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
+  await expirerPropositions(null, { maintenant: T0 })
+  assert.strictEqual(etat.incidents.length, 1)
 })
