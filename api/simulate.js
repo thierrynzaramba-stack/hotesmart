@@ -1,14 +1,12 @@
 // api/simulate.js — Simule le traitement d'un message exactement comme le cron
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
-const Anthropic = require('@anthropic-ai/sdk')
 const { sendAlertNotifications } = require('../lib/alert-notify')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 )
-const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY })
 
 module.exports = async function handler(req, res) {
   // Endpoint appele uniquement par les pages HoteSmart.
@@ -58,55 +56,46 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'Bien non connecté au PMS' })
   }
 
-  // Charger base de connaissance
+  // ⚠ LE SIMULATEUR PASSE PAR LE MEME CODE QUE L'AGENT REEL (lot 3 de l'audit
+  // GuestFlow, 2 octobre 2026). Il avait son propre prompt, Haiku ecrit en dur,
+  // ni historique, ni consignes de l'hote, ni regles d'escalade : Thierry a teste
+  // « je veux arriver à 16h » et obtenu « nous pouvons vous transmettre le code
+  // pour une arrivée plus tôt » — une promesse que l'agent reel, lui, ne fait
+  // pas (arrivee anticipee = decision de l'hote). Un simulateur qui ne simule
+  // pas rassure ou inquiete a tort.
+  // Desormais : `preparerLot` + `classifierLot` de lib/cron-classify.js, le
+  // modele de GUESTFLOW_MODEL, les consignes de l'hote, l'historique de la
+  // simulation. Seul l'etat des envois differe : il n'y a pas de reservation.
+  const { preparerLot, classifierLot, buildKnowledgeText, modeleConfigure } = require('../lib/cron-classify')
+
   const { data: knowledge } = await supabase
     .from('knowledge').select('*')
     .eq('user_id', user.id)
     .eq('property_id', String(refBien))
-
   const knowledgeText = buildKnowledgeText(knowledge || [])
 
-  const classificationPrompt = `Tu es un assistant de conciergerie pour location courte durée.
-Analyse ce message d'un voyageur et classe-le PRÉCISÉMENT dans une catégorie.
+  // L'historique vient du client : on n'en garde que la forme attendue, borne.
+  const maintenant = new Date().toISOString()
+  const historique = (Array.isArray(req.body?.historique) ? req.body.historique : [])
+    .filter(m => m && ['guest', 'ai'].includes(m.source) && typeof m.message === 'string' && m.message.trim())
+    .slice(-30)
+    .map(m => ({ source: m.source, message: m.message.slice(0, 4000), time: m.time || maintenant }))
+  const fil = [...historique, { source: 'guest', message: String(message), time: maintenant }]
 
-BASE DE CONNAISSANCE DU LOGEMENT (LIS ATTENTIVEMENT) :
-${knowledgeText || 'Aucune information disponible'}
-
-MESSAGE DU VOYAGEUR (${guestName || 'Voyageur Test'}) :
-"${message}"
-
-INSTRUCTIONS DE CLASSIFICATION (dans cet ordre de priorité) :
-1. "sympathy" : message de remerciement, bonjour, au revoir, avis positif, confirmation simple sans question.
-   → auto_reply : réponse chaleureuse courte (2-3 phrases) en français.
-2. "info_known" : le message contient des questions ET toutes les réponses se trouvent dans la base de connaissance.
-   → auto_reply : réponse complète basée UNIQUEMENT sur la base de connaissance, en français, chaleureuse.
-3. "info_unknown" : questions dont les réponses NE SONT PAS dans la base de connaissance.
-   → sub_tasks : une entrée par question distincte avec suggested_reply null.
-4. "intervention" : problème physique, incident, réclamation, demande d'action concrète de l'hôte.
-   → sub_tasks : une entrée par problème avec suggested_reply suggérant une action.
-
-Réponds UNIQUEMENT en JSON valide :
-{
-  "type": "sympathy" | "info_known" | "info_unknown" | "intervention",
-  "reason": "explication courte en français",
-  "auto_reply": "réponse si sympathy ou info_known, sinon null",
-  "sub_tasks": [{"question": "...", "summary": "...", "suggested_reply": "..."}]
-}`
-
-  const response = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 1000,
-    messages: [{ role: 'user', content: classificationPrompt }]
+  const nomVoyageur = guestName || 'Voyageur Test'
+  const lot = preparerLot(fil, nomVoyageur)
+  const results = { errors: [] }
+  const heure = new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'short', timeStyle: 'short' })
+  const blocEtat = `- Date et heure actuelles : ${heure} (heure de Paris)\n`
+    + '- Simulation : aucune réservation réelle, AUCUN message automatique (confirmation, code d\'accès, consignes) n\'a été envoyé.'
+  const classification = await classifierLot({
+    userId: user.id, property: { id: refBien, name: garde.bien.name || '' }, bookingId: 'simulation',
+    guestName: nomVoyageur, guestPhone: '', arrival: '', departure: '',
+    knowledgeText, results, lot, blocEtat
   })
-
-  let classification
-  try {
-    const text  = response.content[0]?.text || ''
-    const clean = text.replace(/```json|```/g, '').trim()
-    classification = JSON.parse(clean)
-  } catch (err) {
-    return res.status(500).json({ error: 'Erreur parsing classification', detail: err.message })
-  }
+  // Le modele qui a REELLEMENT repondu : celui de la variable, sauf repli.
+  const modeleVoulu = modeleConfigure()
+  const modele = (results.modelesRefuses || []).includes(modeleVoulu) ? 'claude-haiku-4-5-20251001 (repli)' : modeleVoulu
 
   const bookId    = `SIM_${Date.now()}`
   const guestN    = guestName || 'Voyageur Test'
@@ -119,21 +108,21 @@ Réponds UNIQUEMENT en JSON valide :
         user_id:       user.id,
         property_id:   String(refBien),
         guest_name:    guestN,
-        guest_message: message,
+        guest_message: lot.message,
         agent_reply:   classification.auto_reply,
         book_id:       bookId
       }).select('id').single()
       savedConvId = conv?.id
     }
   } else {
-    const subTasks = classification.sub_tasks || [{ question: message, summary: classification.reason, suggested_reply: null }]
+    const subTasks = classification.sub_tasks || [{ question: lot.message, summary: classification.reason, suggested_reply: null }]
 
     const { data: newTask, error: taskError } = await supabase.from('agent_tasks').insert({
       user_id:         user.id,
       property_id:     String(refBien),
       book_id:         bookId,
       guest_name:      guestN,
-      guest_message:   message,
+      guest_message:   lot.message,
       task_type:       classification.type,
       summary:         classification.reason,
       suggested_reply: subTasks[0]?.suggested_reply || null,
@@ -161,25 +150,9 @@ Réponds UNIQUEMENT en JSON valide :
   return res.status(200).json({
     success:        true,
     classification,
+    modele,
     book_id:        bookId,
     saved_conv_id:  savedConvId,
     saved_task_id:  savedTaskId
   })
-}
-
-function buildKnowledgeText(knowledge) {
-  if (!knowledge.length) return ''
-  const faqs  = knowledge.filter(k => k.type === 'faq')
-  const fixed = knowledge.filter(k => k.type === 'fixed' && k.value)
-  let text = ''
-  if (fixed.length) {
-    text += 'Informations fixes :\n'
-    fixed.forEach(f => { text += `- ${f.key} : ${f.value}\n` })
-    text += '\n'
-  }
-  if (faqs.length) {
-    text += 'FAQ :\n'
-    faqs.forEach(f => { text += `Q: ${f.key}\nR: ${f.value}\n\n` })
-  }
-  return text
 }

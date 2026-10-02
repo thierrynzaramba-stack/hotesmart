@@ -1003,7 +1003,12 @@
     try {
       const res = await fetch('/api/simulate', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${window._session.access_token}`, ...enteteCompte() },
-        body: JSON.stringify({ message, guestName: 'Voyageur Test', propertyId: simPropId })
+        // L'historique de la simulation (hors message courant, deja pousse) : le
+        // serveur classe comme l'agent reel, qui voit tout le fil.
+        body: JSON.stringify({ message, guestName: 'Voyageur Test', propertyId: simPropId,
+          historique: simMessages.slice(0, -1)
+            .filter(m => m.type === 'guest' || m.type === 'ai')
+            .map(m => ({ source: m.type, message: m.content, time: m.time })) })
       })
       const data = await res.json()
       if (!data.success) {
@@ -1012,11 +1017,11 @@
       }
       const c = data.classification || {}
       if (c.auto_reply) {
-        simMessages.push({ type: 'ai', content: c.auto_reply, label: `→ ${c.type}`, time: new Date().toISOString() })
+        simMessages.push({ type: 'ai', content: c.auto_reply, label: `→ ${c.type}${data.modele ? ' · ' + data.modele : ''}`, time: new Date().toISOString() })
       } else if (c.sub_tasks?.length) {
         const lines = c.sub_tasks.map((st, i) => `${i+1}. ${st.question || st.summary || ''}`).join('\n')
         const label = c.type === 'intervention' ? '🚨 Intervention → To-do' : '❓ Info manquante → To-do'
-        simMessages.push({ type: 'auto', content: `${label}\n\n${lines}`, label: 'Aucune réponse auto — créerait une tâche', time: new Date().toISOString() })
+        simMessages.push({ type: 'auto', content: `${label}\n\n${lines}`, label: `Aucune réponse auto — créerait une tâche${data.modele ? ' · ' + data.modele : ''}`, time: new Date().toISOString() })
       } else {
         simMessages.push({ type: 'auto', content: `Classé : ${c.type || 'inconnu'} — aucune réponse générée`, time: new Date().toISOString() })
       }
