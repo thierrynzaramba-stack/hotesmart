@@ -155,7 +155,12 @@ test('LE TEST QUI COMPTE : un bien Beds24 est NON CALCULABLE, pas ferme', async 
   // fermes. Un TO calcule la-dessus serait faux ET credible.
   let lu = false
   const sb = { from () { lu = true; throw new Error('ne doit pas etre interroge') } }
-  const r = await joursOuverts(sb, { id: 'b-2', provider: 'beds24' }, '2026-10-01', '2026-10-31')
+  // ⚠ HORLOGE INJECTEE, comme les tests voisins (2 octobre 2026). Sans elle, ce
+  // test lisait l'horloge reelle avec une periode figee en octobre 2026 : le
+  // 1er novembre, la periode devenait PASSEE, la fonction prenait le chemin
+  // d'estimation et repondait `base_price_non_selectionne` — un rouge purement
+  // calendaire. Regle du depot : dates figees si le temps est injecte.
+  const r = await joursOuverts(sb, { id: 'b-2', provider: 'beds24' }, '2026-10-01', '2026-10-31', opts())
   assert.equal(r.calculable, false)
   assert.equal(r.raison, NON_CALCULABLE.PROVIDER)
   assert.equal(lu, false, 'et on n interroge meme pas le calendrier : la reponse est dans le provider')

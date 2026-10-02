@@ -3286,3 +3286,12 @@ n'est pas ré-annoncée, droit `read` = 403 ; côté PWA, chaque jour part en
 `plage` et une seule annonce suit, sans aucune donnée. Le double de la tâche du
 jour garde son état d'une écriture à l'autre (sinon le test des 10 jours passait
 même si les jours n'écrivaient rien).
+
+## Un test de congé à dates figées (2 octobre 2026)
+
+« poserConge enregistre la plage » (`tests/disponibilites-endpoint.test.js`)
+posait un congé figé au 5-12 octobre 2026 ; `poserConge` refuse une fin
+antérieure à J-30 en lisant l'horloge réelle : rouge le 12 novembre (J+41),
+sans changement de code. Dates rendues relatives (J+3 à J+10), assertions
+inchangées ; vert de J à J+365, et la mutation « source du congé » rougit
+toujours.

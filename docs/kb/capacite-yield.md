@@ -247,3 +247,14 @@ l'interface pour déclarer des périodes déjà connues. Il écrit par la servic
 donc **hors de la garde de l'endpoint** : c'est assumé pour un script lancé à la
 main par le titulaire, et c'est pourquoi il affiche le compte propriétaire du
 bien avant d'écrire.
+
+## Un test lisait l'horloge avec une période figée (2 octobre 2026)
+
+« Un bien Beds24 est NON CALCULABLE, pas fermé » (`tests/capacite-yield.test.js`)
+passait une période figée en octobre 2026 **sans** horloge injectée : le
+1er novembre, la période devenait passée, `joursOuverts` prenait le chemin
+d'estimation et répondait `base_price_non_selectionne` — un rouge purement
+calendaire (constaté en balayant la suite à horloge décalée, J+30). Corrigé en
+injectant l'horloge comme les tests voisins (`opts()`), dates figées conservées :
+règle du dépôt, *dates figées si le temps est injecté*. Mutation de la garde
+provider : 2 rouges avec le nouveau test comme avec l'ancien.
