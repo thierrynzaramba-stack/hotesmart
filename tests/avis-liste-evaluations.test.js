@@ -221,3 +221,27 @@ test('un bien sans nom ne laisse pas une ligne muette', async () => {
   const { conteneur } = await ouvrirListe([EVAL({ bien: null })])
   assert.match(conteneur.textContent, /Bien inconnu/)
 })
+
+// ─── Une carte par sejour (demande de Thierry du 2 octobre 2026 au soir) ────
+test('LE TEST QUI COMPTE : la carte dit le voyageur, le sejour, le bien, le menage, son avis, et invite a evaluer', async () => {
+  const { rendre } = await import('../core/avis/liste-evaluations.js')
+  const h = rendre({ evaluations: [{
+    id: '1', booking_uid: 'b1', status: 'a_remplir', bien: 'Ofuro Futari', echeance: new Date(Date.now() + 5 * 86400000).toISOString(),
+    voyageur: { prenom: 'Camille', nom: 'Martin' }, arrivee: '2026-09-21', depart: '2026-09-22', menage_par: 'Régina',
+    avis_voyageur: { visible: true, texte: 'Super séjour', note: 10 },
+  }], filtre: '' }).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+  for (const attendu of ['Camille Martin', 'Ofuro Futari', 'ménage : Régina', '10/10', '« Super séjour »', 'Évaluer Camille', 'Laissez votre avis sur Camille']) {
+    assert.ok(h.includes(attendu), `${attendu} dans « ${h} »`)
+  }
+})
+
+test('publiee : notre avis s’affiche ; un avis du voyageur cache le dit sans rien montrer', async () => {
+  const { rendre } = await import('../core/avis/liste-evaluations.js')
+  const h = rendre({ evaluations: [{
+    id: '2', booking_uid: 'b2', status: 'publiee', bien: 'La bulle', publie_le: '2026-10-02T10:00:00Z',
+    notre_avis: 'Voyageur parfait', avis_voyageur: { visible: false }, voyageur: { prenom: 'Léo' },
+  }], filtre: '' }).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+  assert.ok(h.includes('« Voyageur parfait »'))
+  assert.ok(h.includes('Pas encore visible'))
+  assert.ok(!h.includes('Évaluer Léo'), 'publiee : plus d invitation')
+})
