@@ -3286,3 +3286,105 @@ n'est pas ré-annoncée, droit `read` = 403 ; côté PWA, chaque jour part en
 `plage` et une seule annonce suit, sans aucune donnée. Le double de la tâche du
 jour garde son état d'une écriture à l'autre (sinon le test des 10 jours passait
 même si les jours n'écrivaient rien).
+
+## Voir les ménages pris par d'autres (2 octobre 2026)
+
+Spec : `docs/specs/spec-visibilite-menages-autrui.md` (décisions de Thierry :
+portées cumulées, heure de départ du bien, pas de légende, mobile limité à la
+carte). **Par défaut, rien ne change** : sans ligne `menage_visibilite`, elle ne
+voit que ses ménages.
+
+**Stockage** : table `menage_visibilite` (`user_id`, `profile_id`, `par_bien`,
+`profils_vus uuid[]`, `updated_at`, `updated_by`), RLS `prestataires`.
+⚠️ **Migration `migrations/2026-10-02-menage-visibilite.sql` NON APPLIQUÉE** :
+ni staging ni prod (consigne de la nuit). Tant qu'elle ne l'est pas, ce code ne
+peut pas partir sur staging : la lecture du réglage coupe (503) sur une table
+absente — c'est voulu (une panne ne doit ni vider ni remplir la vue), mais ça
+couperait la PWA de toutes les prestataires.
+
+**Writer** (`api/disponibilites.js`, action `reglerVisibilite`) : domaine
+`prestataires`, délégué compris ; chaque prestataire désignée est un profil
+`lien` de ce compte ; jamais elle-même ; 20 au plus. **Lecture** (même endpoint,
+GET) : `visibilite` dans la réponse, panne = 503.
+
+**Serveur PWA** (`api/menages-public.js`, `menagesDAutrui`) : relu à chaque
+lecture du planning ; union des deux portées ; seulement `accepted` / `started`
+/ `completed`, par une personne **active** du compte, sur le **périmètre du
+lien** ; jamais un ménage déjà dans les siens (porté ou proposé à elle). Liste
+**à part** (`autrui`), jamais mêlée à `bookings` ni à `menages` : c'est ce qui
+empêche, par construction, qu'elle compte comme « à moi ». **Liste blanche**
+construite champ par champ : `{ bien, date, heure, prestataire }`, et un test
+d'ÉGALITÉ des clés rougit si un champ s'ajoute.
+
+**Écran PWA** : une pastille **blanche** sur la case, à côté du reste ; le fond,
+le vert, la bulle et « jour travaillé » n'en tiennent aucun compte. Au toucher,
+une section « Pris par une autre » : bien, heure (« heure non précisée » sinon),
+prestataire — en `<div>`, aucun bouton. **Pas de légende** (décision du
+18 septembre maintenue par Thierry).
+
+**Fiche hôte** : carte « Ce qu'elle voit des autres » dans le bloc des jours,
+écrite au changement de case, verrou du bloc, état dit en clair (« Elle ne voit
+que ses propres ménages »), date du dernier réglage. Règles mobiles pour cette
+carte seule ; la fiche entière est la **dette 40**.
+
+**Choix tranchés seul, cette nuit, et pourquoi** :
+- **Pas de filtre de biens sur les ménages d'autrui dans la PWA** : la liste
+  blanche ne porte que le *nom* du bien, pas son identifiant ; ajouter
+  l'identifiant pour honorer un filtre d'affichage aurait fait sortir un champ
+  de plus que la spec.
+- **Pas de ligne dans « Mes 30 jours »** : cette liste dit ce qu'elle a à faire ;
+  le travail des autres reste au calendrier et à la feuille.
+- **Une personne désactivée** reste désignable et affichée « (désactivée) » si
+  elle l'était déjà — sinon une case invisible garderait un réglage qu'on ne
+  peut plus défaire ; ses ménages ne sortent plus côté PWA.
+- **`updated_by`** = l'identifiant de session de qui a réglé (hôte ou délégué) ;
+  la fiche n'affiche que la date (afficher le nom demanderait une lecture de
+  plus).
+- **Ménages proposés à une autre** (non acceptés) : invisibles aux collègues,
+  comme le dit la spec (§11) — seul le PRIS est montré.
+
+Tests (rouges contre `main`) : `tests/menages-public-visibilite.test.js` (sans
+réglage zéro partout ; même requête avec/sans : ses ménages et compteurs
+identiques ; liste blanche exacte ; par bien, par personne, union ; autre compte
+et elle-même ignorées ; panne = 503 ; relu sur ce compte et ce profil — le double
+applique vraiment les filtres), `tests/disponibilites-visibilite.test.js` (hôte,
+délégué `write`, délégué `read` = 403, autre compte / membre à compte / elle-même
+/ plus de 20 / mal formé = 400, lecture et panne), DOM PWA (jamais « à moi »,
+détail en lecture seule, heure non précisée, rien sans autorisation) et DOM fiche
+(défaut, liste, désactivée cochée, écriture immédiate, refus, règles mobiles).
+
+**Ce que la review a trouvé** (aucun constat de sécurité ; les quatre garde-fous
+de la spec — champs sensibles, aucune action, filtrage serveur, délégation et
+cloisonnement — vérifiés un par un et tenus). Corrigé sans seconde review :
+- les lectures d'autrui partent **en promesse** et en **parallèle** (en série,
+  elles rallongeaient tout le planning — ce que `f90874f` avait retiré) ; triées,
+  et une troncature au plafond **se dit** dans les journaux ;
+- la migration est **rejouable** (`drop policy if exists`) et ne donne plus au
+  client que la **lecture** : le writer unique écrit en clé de service, aucune
+  autre voie d'écriture n'existe ;
+- le vérificateur **dit** qu'une table vide ne prouve pas la RLS (règle 16) ;
+- tests ajoutés : un ménage d'un **autre compte** sur le même identifiant de bien
+  ne sort jamais ; **aucune action** (prise, fait, défait, retrait) sur le ménage
+  d'une autre, même avec ses identifiants devinés — avec un contrôle positif sur
+  son propre ménage, sans lequel le test pourrait passer à vide ;
+- sous « par bien », les biens concernés sont rappelés.
+
+**Écarts restants, notés et non traités** (à trancher par Thierry) :
+- ✓ **« Réglé le … par [nom] »** (décision de Thierry, 2 octobre) : le GET
+  rend `regle_par`, résolu par le profil de ce compte dont `member_user_id` est
+  `updated_by` — le titulaire a un tel profil comme le délégué. Une panne de
+  cette lecture ne coupe rien : la date reste, sans le nom ;
+- ✓ **deux mêmes prénoms** se distinguent par l'**initiale du nom**
+  (« Marie D. », « Marie P. ») ; un prénom unique reste seul. Le nom vient de
+  `/api/menages?contacts=1`, déjà appelé par la fiche ;
+- ⚠️ **un délégué n'atteint PAS cette carte** : toute la page Prestataires est
+  « non délégable » (`exigerCompteProprePage`, posée parce qu'en mode basculé
+  elle montrait les données de la mauvaise personne). Le serveur accepte déjà le
+  délégué `prestataires: write` ; l'écran, non. **Décision de Thierry
+  (2 octobre)** : la visibilité part en recette ainsi, et l'ouverture de la page
+  aux délégués — avec cases grisées « lecture seule » pour qui n'a que la
+  lecture — est un **lot séparé** (**dette 47**) ;
+- ⚠️ **ORDRE DE DÉPLOIEMENT** : migration appliquée et prouvée
+  (`scripts/verifier-migration-menage-visibilite.js` + `select pg_policies`)
+  **avant** toute fusion vers staging ou main, sinon la PWA de toutes les
+  prestataires répond 503.

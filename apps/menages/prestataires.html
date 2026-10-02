@@ -112,6 +112,21 @@
                    color: var(--text2); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
     .dispo-champ .form-input { font-size: 12px; padding: 5px 8px; width: auto; }
     .dispo-occupe { opacity: .55; pointer-events: none; }
+    /* « CE QU'ELLE VOIT DES AUTRES » (spec visibilite, 2 octobre 2026). */
+    .vis-ligne { display: flex; align-items: flex-start; gap: 8px; font-size: 13px;
+                 padding: 6px 0; cursor: pointer; line-height: 1.35; }
+    .vis-ligne input { margin-top: 2px; flex: none; }
+    .vis-profils { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 2px 0 4px 24px; }
+    .vis-sous { font-size: 12px; color: var(--text2); margin: 8px 0 2px; }
+    /* ⚠ LE MOBILE SUIT L'ORDINATEUR (CLAUDE.md) : cette carte, et elle seule
+       dans ce lot (decision de Thierry ; la fiche entiere est au registre des
+       dettes). Lignes de 44 px, prestataires en colonne, aucun defilement
+       horizontal a 375 px. */
+    @media (max-width: 600px) {
+      .vis-ligne { min-height: 44px; align-items: center; padding: 4px 0; }
+      .vis-ligne input { margin-top: 0; width: 20px; height: 20px; }
+      .vis-profils { flex-direction: column; gap: 0; margin-left: 0; }
+    }
     .btn-mini { background: none; border: 0.5px solid var(--border); border-radius: 12px;
                 font-size: 11px; color: var(--text2); padding: 2px 10px; cursor: pointer; }
     .avert-rang { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E;
@@ -325,6 +340,21 @@
                 <button type="button" class="btn-mini" id="btn-conge">Poser le congé</button>
               </div>
               <div id="dispo-conges" style="margin-top:8px"><div class="dispo-vide">Chargement…</div></div>
+
+              <!-- ⚠ CE QU'ELLE VOIT DES MÉNAGES DES AUTRES (spec visibilite,
+                   2 octobre 2026). Par défaut, rien : elle ne voit que les
+                   siens. Les deux portées se CUMULENT. Écrit tout de suite, comme
+                   le reste de ce bloc. Le serveur vérifie le réglage à chaque
+                   lecture de sa PWA : l'écran n'est jamais la garde. -->
+              <div id="vis-carte">
+                <div style="font-size:12px;margin:16px 0 6px">Ce qu'elle voit des autres</div>
+                <label class="vis-ligne"><input type="checkbox" id="vis-par-bien">
+                  <span>Les ménages pris par d'autres sur les biens dont elle reçoit les propositions
+                    <span class="dispo-hint" id="vis-biens"></span></span></label>
+                <div class="vis-sous">Les ménages pris par :</div>
+                <div class="vis-profils" id="vis-profils"></div>
+                <p class="dispo-hint" id="vis-etat"></p>
+              </div>
 
               <!-- ⚠ SANS CE DROIT, L'ONGLET « Mes absences » N'EXISTE PAS dans sa
                    PWA. Il vaut « oui » pour toute personne créée depuis cet écran :
@@ -1911,6 +1941,7 @@
     dispo.regles = data.regles || []
     dispo.exceptions = data.exceptions || []
     dispo.conges = data.conges || []
+    dispo.visibilite = data.visibilite || { par_bien: false, profils_vus: [], regle_le: null }
     peindreDispo()
     return true
   }
@@ -1920,6 +1951,68 @@
     peindreRecurrence()
     peindreMois()
     peindreConges()
+    peindreVisibilite()
+  }
+
+  // ─── CE QU'ELLE VOIT DES AUTRES (spec visibilite, 2 octobre 2026) ─────────
+  // Les autres prestataires du compte, ACTIVES — plus celles deja designees et
+  // desactivees depuis, pour qu'on puisse les decocher (sinon une case
+  // invisible garderait un reglage qu'on ne peut plus voir).
+  function peindreVisibilite() {
+    const v = (dispo && dispo.visibilite) || { par_bien: false, profils_vus: [], regle_le: null }
+    const vus = new Set((v.profils_vus || []).map(String))
+    document.getElementById('vis-par-bien').checked = v.par_bien === true
+    // La spec rappelle les biens concernes sous la case (constat de review) :
+    // ses liaisons ACTIVES, celles dont elle recoit les propositions.
+    const sesBiens = (liaisons || [])
+      .filter(l => String(l.provider_id) === String(dispo.profilId) && l.active !== false)
+      .map(l => ((properties || []).find(p => String(p.id) === String(l.property_id)) || {}).name)
+      .filter(Boolean)
+    document.getElementById('vis-biens').textContent = sesBiens.length
+      ? ` — aujourd'hui : ${sesBiens.join(', ')}` : ' — elle ne reçoit aujourd\'hui les propositions d\'aucun bien'
+    const autres = (prestatairesProfils || [])
+      .filter(p => String(p.id) !== String(dispo.profilId) && (p.actif !== false || vus.has(String(p.id))))
+    // ⚠ DEUX MEMES PRENOMS SE DISTINGUENT (demande de Thierry) : prenom + initiale
+    // du nom, seulement quand le prenom est partage — sinon le prenom seul.
+    const parPrenom = new Map()
+    for (const p of autres) parPrenom.set(p.prenom || '', (parPrenom.get(p.prenom || '') || 0) + 1)
+    const nomAffiche = p => (parPrenom.get(p.prenom || '') > 1 && p.nom)
+      ? `${p.prenom || '—'} ${String(p.nom).trim().charAt(0).toUpperCase()}.` : (p.prenom || '—')
+    document.getElementById('vis-profils').innerHTML = autres.length
+      ? autres.map(p => `<label class="vis-ligne"><input type="checkbox" data-vis="${echapper(p.id)}"` +
+          `${vus.has(String(p.id)) ? ' checked' : ''}><span>${echapper(nomAffiche(p))}` +
+          `${p.actif === false ? ' (désactivée)' : ''}</span></label>`).join('')
+      : '<div class="dispo-vide">Aucune autre prestataire sur ce compte.</div>'
+    // ⚠ L'ETAT PAR DEFAUT EST DIT EN CLAIR : sans phrase, un bloc tout decoche
+    // ne dit pas si c'est voulu ou si rien n'a encore ete regle.
+    const noms = autres.filter(p => vus.has(String(p.id))).map(nomAffiche)
+    const parts = []
+    if (v.par_bien === true) parts.push('les ménages de ses biens')
+    if (noms.length) parts.push('ceux de ' + noms.join(', '))
+    let etat = parts.length ? 'Elle voit aussi ' + parts.join(', et ') + ' — le bien, la date, l\'heure et le nom, rien d\'autre.'
+                            : 'Elle ne voit que ses propres ménages.'
+    if (v.regle_le) etat += ` Réglé le ${new Date(v.regle_le).toLocaleDateString('fr-FR')}` +
+                           (v.regle_par ? ` par ${v.regle_par}.` : '.')
+    document.getElementById('vis-etat').textContent = etat
+  }
+
+  async function reglerVisibilite() {
+    await geste(async () => {
+      const parBien = document.getElementById('vis-par-bien').checked
+      const profils = [...document.querySelectorAll('#vis-profils input[data-vis]:checked')]
+        .map(c => c.dataset.vis)
+      const { ok, data } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'reglerVisibilite',
+        par_bien: parBien, profils_vus: profils })
+      if (!ok) {
+        alert((data && data.error) || 'Le réglage n\'a pas pu être enregistré.')
+        // On repeint l'etat CONNU : les cases ne doivent pas mentir apres un refus.
+        peindreVisibilite()
+        return
+      }
+      dispo.visibilite = data.visibilite || dispo.visibilite
+      peindreVisibilite()
+      showToast('✓ Réglage enregistré')
+    })
   }
 
   function ligneJours(cle, jours, tag, classe) {
@@ -2331,6 +2424,9 @@
   document.getElementById('dispo-auj').addEventListener('click', () => {
     if (dispo) { dispo.mois = 0; peindreMois() } })
   document.getElementById('btn-conge').addEventListener('click', poserConge)
+  document.getElementById('vis-carte').addEventListener('change', e => {
+    if (e.target && e.target.matches('#vis-par-bien, #vis-profils input[data-vis]')) reglerVisibilite()
+  })
 
   const zoneMois = document.getElementById('dispo-months')
   // ⚠ PAS DE `setPointerCapture` — ET C'EST LE CONTRAIRE D'UN OUBLI.

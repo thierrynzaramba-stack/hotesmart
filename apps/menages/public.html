@@ -168,6 +168,13 @@
        tombe sous 2 % de luminance. Un mois ecoule ne disait plus rien de ce
        qu'elle y avait fait. */
     .dispo-case.passe .dispo-compte { background: var(--bg3); color: var(--text3); }
+    /* PRIS PAR UNE AUTRE (spec visibilite, 2 octobre 2026) : une pastille sur
+       fond BLANC, a cote du reste. Elle ne touche ni le fond du jour, ni le vert
+       de « a moi », ni la bulle. Pas de legende (decision de Thierry) : le detail
+       au toucher suffit a la comprendre. */
+    .dispo-compte.autrui { background: #fff; color: var(--text2); border: 1px solid var(--border2); }
+    .dispo-case.passe .dispo-compte.autrui { background: #fff; color: var(--text3); }
+    .jligne.autrui { cursor: default; background: var(--bg); }
 
     /* A PRENDRE : bulle de dialogue posee AU-DESSUS de la case, avec une pointe
        qui designe la date — forme retenue le 17 septembre 2026. Elle dit « ce
@@ -777,6 +784,11 @@ if ("serviceWorker" in navigator) {
   // menage a prendre », qui est un tableau vide. Sans cette distinction, un
   // ecran encore vide se lit « il n'y a rien », ce qui est faux.
   let aPrendre = null
+  // ⚠ LES MENAGES PRIS PAR D'AUTRES — une liste A PART, jamais melee a
+  // `bookings` (spec visibilite) : rien ici ne compte comme « a moi », par
+  // construction. Le serveur ne la remplit que si l'hote l'a autorise.
+  // Chaque ligne : { bien, date, heure, prestataire }, et rien d'autre.
+  let autrui = []
   // Delai de retrait regle par l'hote, servi par le GET. `null` = non lisible :
   // l'ecran grise alors le retrait plutot que de deviner un defaut qui n'est
   // peut-etre pas le sien.
@@ -1111,6 +1123,7 @@ if ("serviceWorker" in navigator) {
     // Les menages sans responsable, tels que le serveur les a filtres (profil
     // actif, ses biens, statuts `orphaned`/`unassigned`, hors verrou de l'hote).
     aPrendre = Array.isArray(data.a_prendre) ? data.a_prendre : null
+    autrui = Array.isArray(data.autrui) ? data.autrui : []
     // ⚠ MEME PIEGE QU'AU SERVEUR : `Number(null)` vaut 0, et 0 est fini. Le GET
     // envoie `null` EXPRES quand il n'a pas pu lire le delai, pour que l'ecran
     // grise le bouton ; le convertir en 0 le rendait au contraire toujours
@@ -1488,9 +1501,10 @@ if ("serviceWorker" in navigator) {
     // Un jour passe ne s'ouvre donc que pour CONSULTER ce qu'elle y a fait.
     // ⚠ SUR LES LISTES NON FILTREES, COMME LA FEUILLE ELLE-MEME — sinon les deux
     // divergent et la feuille s'ouvre vide (voir `ouvrirJour`).
-    if (j < AUJ()) return mesMenagesTousBiens(j).length > 0 || mesOffresTousBiens(j).length > 0
+    if (j < AUJ()) return mesMenagesTousBiens(j).length > 0 || mesOffresTousBiens(j).length > 0 ||
+                          autruiDu(j).length > 0
     if (aPrendreTousBiens(j).length || mesMenagesTousBiens(j).length ||
-        mesOffresTousBiens(j).length) return true
+        mesOffresTousBiens(j).length || autruiDu(j).length) return true
     // Sinon il reste la disponibilite — y compris pour LIRE pourquoi le jour est
     // barre (conge, absence posee par l'hote).
     return !!(mesJours && mesJours.modifiable)
@@ -1550,6 +1564,18 @@ if ("serviceWorker" in navigator) {
         aConfirmer.map(m => `<button class="jligne" data-mien="${echapper(m.id)}">` +
           `<span class="jligne-bien">${echapper(m.propName || '—')}</span>` +
           marquesDuMenage(m, false, '') + '</button>').join('') + '</div>'
+    }
+
+    // 1 ter — CE QUE D'AUTRES ONT PRIS (spec visibilite) : en lecture seule. Le
+    // bien, l'heure et la prestataire — la date est celle de la feuille. Pas un
+    // bouton : aucune action n'existe sur ces menages, et l'ecran n'en promet pas.
+    const prisAutrui = autruiDu(j)
+    if (prisAutrui.length) {
+      html += '<div class="jsect"><div class="jsect-t">Pris par une autre</div>' +
+        prisAutrui.map(m => '<div class="jligne autrui">' +
+          `<span class="jligne-bien">${echapper(m.bien || '—')}</span>` +
+          `<span class="jmarque">${echapper(m.heure || 'heure non précisée')} · ${echapper(m.prestataire || '')}</span>` +
+          '</div>').join('') + '</div>'
     }
 
     // 2 — CE QU'ELLE PORTE DEJA.
@@ -2471,6 +2497,12 @@ if ("serviceWorker" in navigator) {
     if (!Array.isArray(bookings)) return []
     return bookings.filter(b => b.departure === j && offreAMoi(b))
   }
+  // Les menages pris par d'autres ce jour-la. ⚠ SANS LE FILTRE DE BIENS : la
+  // liste blanche ne porte que le NOM du bien, pas son identifiant — choix
+  // assume (menage.md) plutot que de faire sortir un identifiant de plus.
+  function autruiDu (j) {
+    return Array.isArray(autrui) ? autrui.filter(m => m && m.date === j) : []
+  }
   function mesOffresDu (j) {
     return mesOffresTousBiens(j).filter(b => activeProps.has(b.propId))
   }
@@ -2861,6 +2893,7 @@ if ("serviceWorker" in navigator) {
         // ⚠ CE QU'ON LUI PROPOSE, A PART : ni vert, ni « a moi » (bug du
         // 1er octobre 2026). Il rejoint la bulle des menages non attribues.
         const aConfirmer = mesOffresDu(j)
+        const pris = autruiDu(j)
         const libres = aPrendreDu(j)
         // ⚠ LE CONGE AUSSI CEDE AU MENAGE (decision 1, 18 septembre). La branche
         // `c ? ' conge' : …` etait choisie AVANT toute consultation de
@@ -2879,7 +2912,8 @@ if ("serviceWorker" in navigator) {
             : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là')),
           miens.length ? `${miens.length} ménage${miens.length > 1 ? 's' : ''} à moi` : '',
           aConfirmer.length ? `${aConfirmer.length} ménage${aConfirmer.length > 1 ? 's' : ''} à confirmer` : '',
-          libres.length ? `${libres.length} ménage${libres.length > 1 ? 's' : ''} à prendre` : ''
+          libres.length ? `${libres.length} ménage${libres.length > 1 ? 's' : ''} à prendre` : '',
+          pris.length ? `${pris.length} ménage${pris.length > 1 ? 's' : ''} pris par une autre` : ''
         ].filter(Boolean).join(' · ')
         // ⚠ LA BULLE EST POSEE MEME SUR UN JOUR ETEINT, et c'est une decision :
         // une offre reste saisissable un jour ou elle s'est dite absente — la
@@ -2894,8 +2928,9 @@ if ("serviceWorker" in navigator) {
         // ⚠ UNE PASTILLE CHIFFREE, PLUS DES POINTS (lot A). Le chiffre porte la
         // charge du jour — « 2 menages mardi » se lit sans reflechir, la ou des
         // points se recomptent des trois.
-        const points = miens.length
-          ? `<span class="dispo-compte">${miens.length}</span>` : ''
+        const points = (miens.length
+          ? `<span class="dispo-compte">${miens.length}</span>` : '') +
+          (pris.length ? `<span class="dispo-compte autrui">${pris.length}</span>` : '')
         // ⚠ UNE CASE QUI PORTE UNE OFFRE RESTE TOUCHABLE MEME PASSEE... non :
         // un menage passe n'est pas recuperable (decision du 17 septembre), et
         // le serveur le refuse. On ne l'ouvre donc pas non plus ici.

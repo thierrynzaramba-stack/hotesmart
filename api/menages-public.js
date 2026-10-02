@@ -56,6 +56,99 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 )
 
+// ─── CE QU'ELLE VOIT DES MENAGES DES AUTRES ───────────────────────────────
+// Spec : docs/specs/spec-visibilite-menages-autrui.md. Deux portees CUMULEES :
+//   - `par_bien`    : les biens dont elle recoit les propositions = ses liaisons
+//                     ACTIVES, intersectees avec le perimetre de son lien ;
+//   - `profils_vus` : les prestataires designees, sur le perimetre de son lien.
+// Seulement ce qui est PRIS (accepte, commence, fait) par une AUTRE personne
+// active. Un menage qu'on lui propose, ou qu'elle porte, est deja dans les
+// siens : il n'est jamais repete ici.
+//
+// ⚠ LISTE BLANCHE, CONSTRUITE CHAMP PAR CHAMP : le bien, la date, l'heure de
+// depart du bien, le nom de la prestataire. RIEN d'autre — ni voyageur, ni code
+// d'acces, ni reservation, ni identifiant, ni commentaire, ni photo, ni statut.
+// Aucun identifiant ne sort : aucune action de l'ecran ne peut donc viser l'un
+// de ces menages.
+const STATUTS_PRIS = ['accepted', 'started', 'completed']
+const PLAFOND_AUTRUI = 500
+async function menagesDAutrui ({ userId, profilId, properties, dateFrom, dateTo, siens }) {
+  const { data: vis, error } = await supabase.from('menage_visibilite')
+    .select('par_bien, profils_vus')
+    .eq('user_id', userId).eq('profile_id', profilId).maybeSingle()
+  if (error) {
+    console.error('[menages-public] lecture visibilite echec:', error.message)
+    return { erreur: true }
+  }
+  if (!vis) return { lignes: [] }
+  const perimetre = properties.map(p => String(p.id))
+  const profils = [...new Set((vis.profils_vus || []).map(String))].filter(id => id !== String(profilId))
+  if (!perimetre.length || (vis.par_bien !== true && !profils.length)) return { lignes: [] }
+
+  let biensParBien = []
+  if (vis.par_bien === true) {
+    const { data: liens, error: eL } = await supabase.from('property_cleaning_providers')
+      .select('property_id')
+      .eq('user_id', userId).eq('provider_id', profilId).eq('active', true)
+    if (eL) { console.error('[menages-public] lecture liaisons echec:', eL.message); return { erreur: true } }
+    biensParBien = [...new Set((liens || []).map(l => String(l.property_id)))]
+      .filter(id => perimetre.includes(id))
+  }
+
+  const lecture = () => supabase.from('menages')
+    .select('property_id, booking_id, departure_date, provider_id')
+    .eq('user_id', userId)
+    .in('status', STATUTS_PRIS)
+    .not('provider_id', 'is', null)
+    .neq('provider_id', profilId)
+    .gte('departure_date', dateFrom)
+    .lte('departure_date', dateTo)
+  // Les deux portees se lisent EN PARALLELE (constat de review : en serie, elles
+  // retardaient tout le planning). Triees, et une troncature se DIT : au-dela du
+  // plafond, les lignes rendues seraient sinon arbitraires, sans un mot.
+  const requetes = [biensParBien.length ? lecture().in('property_id', biensParBien) : null,
+                    profils.length ? lecture().in('provider_id', profils).in('property_id', perimetre) : null]
+    .filter(Boolean)
+    .map(q => q.order('departure_date', { ascending: true }).limit(PLAFOND_AUTRUI))
+  const lus = []
+  for (const { data, error: eM } of await Promise.all(requetes)) {
+    if (eM) { console.error('[menages-public] lecture menages d autrui echec:', eM.message); return { erreur: true } }
+    if ((data || []).length >= PLAFOND_AUTRUI) {
+      console.warn(`[menages-public] menages d autrui au plafond de ${PLAFOND_AUTRUI} : liste tronquee`)
+    }
+    lus.push(...(data || []))
+  }
+
+  const vus = new Set()
+  const uniques = lus.filter(m => {
+    const cle = `${String(m.property_id)}|${String(m.booking_id)}|${m.departure_date}`
+    if (vus.has(cle) || siens.has(cle) || String(m.provider_id) === String(profilId)) return false
+    vus.add(cle); return true
+  })
+  if (!uniques.length) return { lignes: [] }
+
+  // Le nom de la prestataire — une personne ACTIVE de CE compte, sinon rien.
+  const ids = [...new Set(uniques.map(m => String(m.provider_id)))]
+  const { data: pfs, error: eP } = await supabase.from('profiles')
+    .select('id, first_name, last_name, active')
+    .in('id', ids).eq('account_user_id', userId)
+  if (eP) { console.error('[menages-public] lecture prestataires echec:', eP.message); return { erreur: true } }
+  const nomDe = new Map((pfs || []).filter(p => p.active !== false)
+    .map(p => [String(p.id), [p.first_name, p.last_name].filter(Boolean).join(' ').trim()]))
+  const bienDe = new Map(properties.map(p => [String(p.id), p]))
+
+  const lignes = uniques
+    .filter(m => nomDe.has(String(m.provider_id)) && bienDe.has(String(m.property_id)))
+    .map(m => {
+      const b = bienDe.get(String(m.property_id))
+      const heure = typeof b.checkout_time === 'string' && b.checkout_time.trim() ? b.checkout_time.trim() : null
+      return { bien: b.name || '', date: m.departure_date, heure, prestataire: nomDe.get(String(m.provider_id)) }
+    })
+    .sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.bien < b.bien ? -1 : a.bien > b.bien ? 1 : 0)
+  return { lignes }
+}
+
+
 // ─── QUI PORTE CE LIEN — GARDE UNIQUE DE TOUT L'ENDPOINT ────────────────────
 //
 // ⚠ LA GARDE PAR PROFIL PRIME, ELLE NE COEXISTE PLUS AVEC CELLE PAR BIEN.
@@ -464,7 +557,7 @@ module.exports = async function handler(req, res) {
     // ('black') retomberait sur le fallback 'confirmed' -> menage fantome.
     const { data: propRows, error: errProps } = await supabase
       .from('properties')
-      .select('provider_property_id, name, provider')
+      .select('provider_property_id, name, provider, checkout_time')
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null)
     // ⚠ L'ERREUR ETAIT AVALEE, trois instructions avant la garde `errSnaps`.
@@ -481,7 +574,8 @@ module.exports = async function handler(req, res) {
     const allowedIds = (tokenData.property_ids || []).map(String)
     const properties = (propRows || [])
       .filter(p => !allowedIds.length || allowedIds.includes(String(p.provider_property_id)))
-      .map(p => ({ id: String(p.provider_property_id), name: p.name, provider: p.provider }))
+      .map(p => ({ id: String(p.provider_property_id), name: p.name, provider: p.provider,
+                   checkout_time: p.checkout_time }))
     const propNameById = {}
     const propProviderById = {}
     properties.forEach(p => { propNameById[p.id] = p.name; propProviderById[p.id] = p.provider })
@@ -739,6 +833,15 @@ module.exports = async function handler(req, res) {
     // promesse part avant la lecture des menages faits et se recupere apres.
     const promesseDelai = delaiDeRetrait(userId)
 
+    // ─── LES MENAGES PRIS PAR D'AUTRES (spec visibilite, 2 octobre 2026) ───
+    // Rien sans autorisation explicite de l'hote sur sa fiche ; le reglage est
+    // relu a CHAQUE lecture, ici, cote serveur. Une panne coupe (503) : une vue
+    // vide ferait croire qu'aucune collegue ne travaille, une vue pleine
+    // montrerait ce qu'on n'a pas autorise.
+    // ⚠ LANCEE EN PROMESSE, comme le delai : attendue juste avant la reponse.
+    const promesseAutrui = menagesDAutrui({ userId, profilId: profilPresta.id, properties,
+                                            dateFrom, dateTo, siens })
+
     const propIdsForDone = (allowedIds.length ? allowedIds : properties.map(p => String(p.id)))
     let doneList = []
     if (propIdsForDone.length) {
@@ -760,6 +863,8 @@ module.exports = async function handler(req, res) {
     // ne pas connaitre le delai grise un bouton de retrait, ce qui est prudent.
     // Faire tomber tout l'ecran pour cela cacherait ses menages du jour.
     const lu = await promesseDelai
+    const autrui = await promesseAutrui
+    if (autrui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
     const delaiRetrait = lu.erreur ? null : lu.heures
 
     return res.json({
@@ -794,7 +899,11 @@ module.exports = async function handler(req, res) {
         propose: !!m.offered_to,
         expire_le: m.offered_to ? m.offer_expires_at : null
       })),
-      prenom: profilPresta.first_name
+      prenom: profilPresta.first_name,
+      // ⚠ UNE LISTE A PART, JAMAIS MELEE A `bookings` NI A `menages` : c'est ce
+      // qui empeche STRUCTURELLEMENT qu'un menage d'autrui compte comme « a
+      // moi ». Toujours un tableau, vide sans autorisation.
+      autrui: autrui.lignes
     })
 
   } catch (err) {
