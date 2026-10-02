@@ -79,7 +79,7 @@ const evalB = (a = {}) => evalA({ id: 'e2e2e2e2-2222-4222-8222-222222222222',
 function preparer ({
   user = PROD, profil = null, permissions = null,
   evaluations = [], otaReviews = [{ id: '99999999-9999-4999-8999-999999999999', user_id: PROD, external_review_id: 'channex-abc-123' }],
-  verrous = [], erreurMaj = null, criteres = [], erreurLectureCriteres = null,
+  verrous = [], erreurMaj = null, criteres = [], erreurLectureCriteres = null, configs = [],
   texteIA = JSON.stringify({ public: 'Voyageur soigneux, logement rendu nickel.', prive: '' }),
 } = {}) {
   const etat = { ecritures: [], insertions: [], requetes: [] }
@@ -159,7 +159,7 @@ function preparer ({
           return Promise.resolve({ data: c, error: null })
         }
         if (nom === 'avis_criteres') return Promise.resolve({ data: erreurLectureCriteres ? null : criteres, error: erreurLectureCriteres })
-        if (nom === 'avis_config') return Promise.resolve({ data: [], error: null })
+        if (nom === 'avis_config') return Promise.resolve({ data: configs, error: null })
         if (nom === 'profiles') {
           if (q._f.id != null) {
             return Promise.resolve({ data: profil && profil.id === q._f.id ? [profil] : [], error: null })
@@ -942,4 +942,63 @@ test('une prestataire « soumettre » dont l’hote a repondu : son motif reste 
   await handler(reqMembre({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), res)
   assert.strictEqual(res.code, 409)
   assert.strictEqual(res.body.motif, 'pouvoir_insuffisant')
+})
+
+// ─── L'auto-validation (spec §10 bis, 2 octobre 2026) ───────────────────────
+const AUTO_24 = [{ property_id: null, auto_validation_heures: 24, keywords: [], tone: 'sobre', signature: null }]
+
+test('LE TEST QUI COMPTE : la prestataire finit sa part — l’horloge part a maintenant + X h', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null, deadline_at: new Date(Date.now() + 3 * 86400000).toISOString() })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], configs: AUTO_24 })
+  const handler = require('../api/avis')
+  const res = reponse()
+  const avant = Date.now()
+  await handler(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), res)
+  assert.strictEqual(res.code, 200)
+  const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.answers_cleaner)
+  const quand = Date.parse(maj.row.auto_publier_le)
+  assert.ok(quand >= avant + 24 * 3600000 - 1000 && quand <= Date.now() + 24 * 3600000, 'maintenant + 24 h')
+})
+
+test('sans reglage, rien ne se programme', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], configs: null })
+  const handler = require('../api/avis')
+  await handler(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), reponse())
+  const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.answers_cleaner)
+  assert.strictEqual(maj.row.auto_publier_le, undefined)
+})
+
+test('LE TEST QUI COMPTE : l’hote demande un texte ou publie — l’horloge s’arrete', async () => {
+  for (const action of ['eval-texte', 'eval-publier']) {
+    const ev = evalA({ auto_publier_le: new Date(Date.now() + 3600000).toISOString() })
+    const etat = preparer({ evaluations: [ev] })
+    const handler = require('../api/avis')
+    await handler(req({ action }, { id: ev.id, action }), reponse())
+    assert.ok(etat.ecritures.some(e => e.table === 'guest_evaluations' && e.row.auto_publier_le === null), action)
+  }
+})
+
+test('l’hote lit la publication programmee ; la prestataire, non', async () => {
+  const quand = new Date(Date.now() + 3600000).toISOString()
+  preparer({ evaluations: [evalA({ auto_publier_le: quand })] })
+  const handler = require('../api/avis')
+  const h = reponse()
+  await handler(req({ action: 'evaluation', id: evalA().id }, null, 'GET'), h)
+  assert.strictEqual(h.body.evaluation.auto_publier_le, quand)
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [evalA({ auto_publier_le: quand })] })
+  const p = reponse()
+  await require('../api/avis')(reqMembre({ action: 'evaluation', id: evalA().id }, null, 'GET'), p)
+  assert.strictEqual(p.body.evaluation.auto_publier_le, undefined)
+})
+
+test('LE TEST QUI COMPTE : l’auto-validation publie par le chemin de l’HOTE — verrou, simulation, aucun profil', async () => {
+  const ev = evalA()
+  const etat = preparer({ evaluations: [ev] })
+  const { outilsAutoValidation } = require('../api/avis')
+  const r = await outilsAutoValidation.publier(ev)
+  assert.strictEqual(r.code, 200)
+  assert.ok(etat.insertions.some(i => i.table === 'write_locks'), 'le verrou est pose')
+  const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.status)
+  assert.strictEqual(maj.row.validated_by_profile, null)
 })

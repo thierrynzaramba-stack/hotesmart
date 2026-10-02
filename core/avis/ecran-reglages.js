@@ -53,6 +53,7 @@ export async function monter (conteneur, options = {}) {
     etat.defaut = grille.defaut || []
     etat.config = config.compte || { keywords: [], tone: 'chaleureux', signature: '' }
     etat.tons = config.tons || etat.tons
+    etat.autoBornes = config.auto_validation || { min: 1, max: 336 }
     // ⚠ SANS CRITERE EN BASE, ON PART DE LA GRILLE PAR DEFAUT — affichee, pas
     // enregistree. L'hote voit ce qui s'applique aujourd'hui, et peut le
     // modifier ; s'il n'enregistre pas, rien ne change.
@@ -84,6 +85,17 @@ export async function monter (conteneur, options = {}) {
     lier('signature', (v) => { etat.config.signature = v })
     const ton = conteneur.querySelector('[data-reglage="ton"]')
     if (ton) ton.addEventListener('change', () => { etat.config.tone = ton.value })
+
+    // L'auto-validation (§10 bis) : la case l'active, le champ dit le delai.
+    const autoCase = conteneur.querySelector('[data-reglage="auto-active"]')
+    if (autoCase) autoCase.addEventListener('change', () => {
+      etat.config.auto_validation_heures = autoCase.checked ? (etat.dernierDelai || 48) : null
+      afficher()
+    })
+    lier('auto-heures', (v) => {
+      etat.config.auto_validation_heures = v === '' ? '' : Number(v)
+      if (Number.isInteger(etat.config.auto_validation_heures)) etat.dernierDelai = etat.config.auto_validation_heures
+    })
 
     // Les critères.
     conteneur.querySelectorAll('[data-critere]').forEach(el => {
@@ -138,6 +150,14 @@ export async function monter (conteneur, options = {}) {
 
   async function enregistrer () {
     if (etat.occupe) return
+    // Le delai se verifie AVANT tout envoi : une grille enregistree et un delai
+    // refuse laisseraient l'hote avec la moitie de ses reglages.
+    const h = etat.config.auto_validation_heures
+    const b = etat.autoBornes || { min: 1, max: 336 }
+    if (h !== null && h !== undefined && !(Number.isInteger(h) && h >= b.min && h <= b.max)) {
+      etat.erreur = `Délai de publication automatique : un nombre entier d’heures entre ${b.min} et ${b.max}.`
+      avertir(etat.erreur, 'err'); afficher(); return
+    }
     etat.occupe = true; etat.erreur = null; etat.message = null; afficher()
     try {
       // ⚠ LES CLES DE NIVEAUX SE DERIVENT DU LIBELLE, et restent uniques par
@@ -163,6 +183,7 @@ export async function monter (conteneur, options = {}) {
           keywords: etat.config.keywords || [],
           tone: etat.config.tone || 'chaleureux',
           signature: etat.config.signature || null,
+          auto_validation_heures: h === undefined ? null : h,
         },
       })
       etat.surDefaut = false
@@ -235,6 +256,20 @@ export function rendre (etat) {
 
   const criteres = (etat.criteres || []).map((c, i) => rendreCritere(c, i)).join('')
 
+  const heures = config.auto_validation_heures
+  const autoActive = heures !== null && heures !== undefined
+  const bornes = etat.autoBornes || { min: 1, max: 336 }
+  const blocAuto = `<div class="card"><div class="card-title">Publication automatique</div>`
+    + `<div class="card-sub">Quand votre prestataire a rempli sa part et que vous ne réagissez pas, l’évaluation part seule : `
+    + `vos questions restées sans réponse prennent le meilleur niveau, et le texte de l’IA est conservé. `
+    + `Vous êtes prévenu quelques heures avant. Un avis négatif n’est jamais publié automatiquement : il vous attend toujours. `
+    + `La publication tombe dans tous les cas au moins 12 heures avant la fin du délai d’Airbnb.</div>`
+    + `<label class="hs-reglage"><span><input type="checkbox" data-reglage="auto-active"${autoActive ? ' checked' : ''}> `
+    + `Valider automatiquement au bout d’un délai sans réaction de ma part</span></label>`
+    + `<label class="hs-reglage"><span>Délai, en heures (de ${bornes.min} à ${bornes.max})</span>`
+    + `<input type="number" min="${bornes.min}" max="${bornes.max}" step="1" data-reglage="auto-heures" `
+    + `value="${autoActive ? echapper(String(heures)) : ''}"${autoActive ? '' : ' disabled'} placeholder="48"></label></div>`
+
   const entete = `<div class="card"><div class="card-title">Votre grille d’évaluation</div>`
     // ⚠ UNE GRILLE INACTIVE SE DIT, ET EN PREMIER. C'est le seul cas ou aucune
     // evaluation ne peut se remplir, et il ne se voyait nulle part.
@@ -262,6 +297,7 @@ export function rendre (etat) {
     + `<button type="button" data-action="revenir-defaut">Revenir à la grille par défaut</button>`
     + `</div>`
     + bloquesConfig
+    + blocAuto
     + `<div class="hs-avis-actions"><button type="button" class="hs-avis-principal" data-action="enregistrer"${etat.occupe ? ' disabled' : ''}>Enregistrer</button></div>`
     + `</div>`
 }

@@ -87,6 +87,12 @@
 //   DU DEPART (spec §9 bis). Les departs du jour et des deux precedents, lus
 //   dans `menages` par l'index `menages_depart_idx` — pas un balayage —, font
 //   naitre l'evaluation de chaque sejour Airbnb (echeance depart + 14 jours).
+// Session #41 (demande de Thierry du 2 octobre 2026) : L'AUTO-VALIDATION DE
+//   L'EVALUATION (lib/avis/auto-validation.js, spec §10 bis). Rappel six heures
+//   avant, puis, a l'echeance choisie par l'hote, publication par le chemin de
+//   l'hote (api/avis.js). Jamais un avis negatif. ⚠ Pas de balayage : l'index
+//   partiel `guest_evaluations_auto_publier_idx`, 20 lectures et 5 publications
+//   par passage au plus.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -116,6 +122,7 @@ const { piloterLesBiens } = require('../lib/pilote-quotidien')
 const { channelCall } = require('../lib/channel-fullsync')
 const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
+const { executerAutoValidations } = require('../lib/avis/auto-validation')
 
 // ─── Chrono d'etape ──────────────────────────────────────────────────────────
 // Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
@@ -196,6 +203,7 @@ module.exports = async function handler(req, res) {
     totalPrixChanges: 0,
     totalAvisRelances: 0,
     totalAvisNes: 0,
+    totalAvisAutoPubliees: 0,
     circuitBreakerTriggered: 0,
     errors: []
   }
@@ -516,6 +524,22 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur relances avis:', err.message)
       results.errors.push({ context: 'relances_avis', error: err.message })
+    }
+
+    // 4quaterdecies ter. AUTO-VALIDATION DE L'ÉVALUATION (spec §10 bis).
+    // Les rappels six heures avant, puis les publications échues, par le chemin
+    // de l'hôte (verrou, simulation hors production). ⚠ Requêtes sur l'index
+    // partiel de `auto_publier_le`, 20 lectures et 5 publications par passage.
+    // Placée APRÈS les relances : une rédaction peut coûter un appel au modèle.
+    try {
+      const { outilsAutoValidation } = require('./avis')
+      const bilanAuto = await chrono.mesure('auto_validation_avis', () => executerAutoValidations(supabase, { outils: outilsAutoValidation }))
+      results.totalAvisAutoPubliees = bilanAuto?.publiees || 0
+      if (bilanAuto?.erreurs) results.errors.push({ context: 'auto_validation_avis', error: bilanAuto.erreurs + ' erreur(s)' })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur auto-validation avis:', err.message)
+      results.errors.push({ context: 'auto_validation_avis', error: err.message })
     }
 
     // 5. DISTRIBUTION des changements de réservation, tous providers confondus.

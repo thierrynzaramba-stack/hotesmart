@@ -131,6 +131,9 @@
       <div>
         <div class="page-title">⭐ Avis voyageurs</div>
         <div class="page-sub" id="sous-titre">Chargement…</div>
+        <!-- L'auto-validation de l'evaluation (spec §10 bis) : activee ou non,
+             et son delai. Lue sur la config du compte. -->
+        <div class="page-sub" id="etat-auto" hidden></div>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <!-- ⚠ Réglages refuse un compte délégué : le lien n'apparaît qu'au
@@ -376,6 +379,23 @@
       throw err
     }
     return data
+  }
+
+  // ⚠ L'ETAT DE LA PUBLICATION AUTOMATIQUE SE DIT EN HAUT DE LA PAGE (demande de
+  // Thierry du 2 octobre 2026), avec le lien vers son reglage. Un echec de
+  // lecture se tait : ce n'est qu'une information, la page ne depend pas d'elle.
+  async function afficherEtatAuto () {
+    const el = $('etat-auto')
+    try {
+      const cfg = await appelAPI('avis?action=config')
+      const h = cfg && cfg.compte ? cfg.compte.auto_validation_heures : null
+      const lien = $('lien-configuration').hidden ? ''
+        : ' · <a href="/settings?onglet=avis">⚙ Configuration</a>'
+      el.innerHTML = (h
+        ? `Publication automatique des évaluations : <strong>activée</strong>, après ${echapper(h)} h sans réaction de votre part (jamais pour un avis négatif).`
+        : 'Publication automatique des évaluations : <strong>désactivée</strong>.') + lien
+      el.hidden = false
+    } catch { el.hidden = true }
   }
 
   const echapper = t => String(t == null ? '' : t)
@@ -654,6 +674,7 @@
     // il faut le droit d'écriture ET travailler sur son propre compte. Sinon un
     // membre délégué cliquerait vers une page qui le renvoie.
     $('lien-configuration').hidden = !(peut && window.estTitulaire && window.estTitulaire())
+    afficherEtatAuto()
 
     $('s-date').value = new Date().toISOString().slice(0, 10)
 

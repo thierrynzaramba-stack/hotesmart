@@ -23,6 +23,7 @@ const { publier, RefusPublication } = require('../lib/avis/publication')
 const { assurerEvaluation, echeanceDuDepart } = require('../lib/avis/naissance')
 // Lot 6 : l'hote est prevenu quand la prestataire a rempli sa part (spec §10).
 const { prevenirHote } = require('../lib/avis/notifications')
+const { normaliserHeures, lireHeures, HEURES_MIN, HEURES_MAX } = require('../lib/avis/auto-validation')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -506,7 +507,7 @@ async function configLire (req, res, garde) {
   if (bien && !(await bienAutorise(req, res, garde, bien, false))) return
 
   const requete = supabase.from('avis_config')
-    .select('id, property_id, keywords, tone, signature').eq('user_id', userId)
+    .select('id, property_id, keywords, tone, signature, auto_validation_heures').eq('user_id', userId)
   const { data, error } = await (bien
     ? requete.or(`property_id.eq.${bien},property_id.is.null`)
     : requete.is('property_id', null))
@@ -517,6 +518,7 @@ async function configLire (req, res, garde) {
     compte: liste.find(c => !c.property_id) || null,
     bien: bien ? (liste.find(c => c.property_id === bien) || null) : null,
     tons: [...TONS],
+    auto_validation: { min: HEURES_MIN, max: HEURES_MAX },
   })
 }
 
@@ -541,6 +543,17 @@ async function configEcrire (req, res, garde) {
   const keywords = brut.map(k => String(k || '').trim()).filter(Boolean).slice(0, 20).map(k => k.slice(0, 40))
   const signature = req.body?.signature ? String(req.body.signature).trim().slice(0, 120) : null
 
+  // L'auto-validation (§10 bis) : nul = desactivee. Un ecran qui ne l'envoie pas
+  // ne la touche pas — elle n'est ecrite que si le champ est present.
+  let auto = {}
+  if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'auto_validation_heures')) {
+    const h = normaliserHeures(req.body.auto_validation_heures)
+    if (h === undefined) {
+      return res.status(400).json({ error: `Délai d’auto-validation invalide : un nombre entier d’heures entre ${HEURES_MIN} et ${HEURES_MAX}, ou vide pour la désactiver` })
+    }
+    auto = { auto_validation_heures: h }
+  }
+
   // ⚠ L'UNICITE EST PARTIELLE : (user_id) quand property_id est nul,
   // (user_id, property_id) sinon. `upsert` ne sait pas viser un index partiel,
   // donc on lit puis on ecrit — et le conflit reste impossible, ces deux index
@@ -551,7 +564,7 @@ async function configEcrire (req, res, garde) {
     : lecture.is('property_id', null).maybeSingle())
   if (eL) return res.status(503).json({ error: 'Configuration illisible', detail: eL.message })
 
-  const valeurs = { user_id: userId, property_id: bien, keywords, tone: ton, signature }
+  const valeurs = { user_id: userId, property_id: bien, keywords, tone: ton, signature, ...auto }
   const { error: eE } = deja
     ? await supabase.from('avis_config').update(valeurs).eq('id', deja.id).eq('user_id', userId)
     : await supabase.from('avis_config').insert(valeurs)
@@ -1223,6 +1236,8 @@ async function evaluationLire (req, res, garde) {
         public_text: e.public_text, private_note: e.private_note,
         answers_cleaner: e.answers_cleaner, answers_host: e.answers_host,
         published_at: e.published_at,
+        // La publication automatique programmee (§10 bis), nul sinon.
+        auto_publier_le: e.auto_publier_le || null,
       }
     : {
         ...commun,
@@ -1271,10 +1286,20 @@ async function evaluationRepondre (req, res, garde) {
     return res.status(400).json({ error: 'Réponses manquantes' })
   }
 
+  // L'auto-validation de l'hote (§10 bis) : son horloge part quand la
+  // prestataire finit sa part. Un reglage illisible ne programme RIEN — le sens
+  // prudent : on publie moins, jamais plus.
+  let autoValidationHeures = null
+  if (role === 'prestataire') {
+    const cfg = await lireHeures(supabase, { userId: e.user_id, propertyId: e.property_id })
+    if (cfg.erreur) console.error('[avis] auto-validation : reglage illisible', e.id, cfg.erreur)
+    else autoValidationHeures = cfg.heures
+  }
+
   let r
   try {
     r = await enregistrerReponses(supabase, {
-      evaluation: e, reponses, role, evalScope, evalPower, parProfil: profilId,
+      evaluation: e, reponses, role, evalScope, evalPower, parProfil: profilId, autoValidationHeures,
     })
   } catch (err) {
     // Une saisie refusee est un 400 nomme, pas un 500 muet.
@@ -1501,6 +1526,16 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null } = {})
   return { ok: true, public_text: r.public_text, private_note: r.private_note, negatif: r.negatif }
 }
 
+// ⚠ UNE REACTION DE L'HOTE ARRETE L'AUTO-VALIDATION (§10 bis) : une reponse,
+// un texte, une publication, un abandon. Ne leve jamais : l'auto-validation
+// relit de toute facon les reponses de l'hote avant de publier.
+async function arreterHorloge (e) {
+  if (!e || !e.auto_publier_le) return
+  const { error } = await supabase.from('guest_evaluations')
+    .update({ auto_publier_le: null }).eq('id', e.id).eq('user_id', e.user_id)
+  if (error) console.error('[avis] auto-validation : horloge non arretee', e.id, error.message)
+}
+
 // POST eval-texte — l'IA redige. Elle ne decide de rien, et son texte reste
 // modifiable : on l'enregistre en brouillon, la publication lira le champ.
 async function evaluationTexte (req, res, garde) {
@@ -1512,6 +1547,7 @@ async function evaluationTexte (req, res, garde) {
   // Une prestataire RELIT, elle ne redige pas : le serveur redige pour elle au
   // moment ou elle termine son formulaire (voir `eval-reponses`).
   if (role !== 'hote') return res.status(403).json({ error: 'La rédaction revient à l’hôte' })
+  await arreterHorloge(e)
 
   const r = await redigerEtEnregistrer(e, { remarque: req.body?.remarque, prenom: req.body?.prenom })
   if (r.panne) return res.status(r.panne.code).json(r.panne.body)
@@ -1606,6 +1642,8 @@ async function evaluationPublier (req, res, garde) {
   const e = await chargerEvaluation(req, res, garde, true)
   if (!e) return
   const { parProfil, profilId } = roleEtReglages(garde)
+  // Publier, c'est reagir : l'horloge de l'auto-validation s'arrete.
+  if (!parProfil) await arreterHorloge(e)
 
   // ⚠ LA REFERENCE DU PROVIDER SE RESOUT ICI. `ota_review_id` est NOTRE cle
   // primaire dans ota_reviews ; le provider ne connait que
@@ -1791,6 +1829,27 @@ async function evaluationAbandonner (req, res, garde) {
   }
 }
 
+// ─── Pour l'auto-validation du cron (lib/avis/auto-validation.js) ───────────
+// Le MEME chemin que l'hote, avec la garde du TITULAIRE du compte : verrou,
+// idempotence, relecture chez le provider, simulation hors production. Il n'y a
+// pas de second chemin de publication.
+function gardeDuTitulaire (userId) {
+  return { ok: true, accountUserId: userId, userId, contexte: { userId, accountUserId: userId, profil: null, permissions: null } }
+}
+const outilsAutoValidation = {
+  rediger: (e) => redigerEtEnregistrer(e),
+  publier: async (e) => {
+    const sortie = { code: 200, body: null }
+    const res = {
+      headersSent: false,
+      status (c) { sortie.code = c; return res },
+      json (b) { sortie.body = b; res.headersSent = true; return res },
+    }
+    await evaluationPublier({ method: 'POST', query: {}, body: { id: e.id } }, res, gardeDuTitulaire(e.user_id))
+    return sortie
+  },
+}
+
 module.exports = async function handler (req, res) {
   try {
     return await router(req, res)
@@ -1896,3 +1955,5 @@ async function router (req, res) {
   if (action === 'list') return await lister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })
 }
+
+module.exports.outilsAutoValidation = outilsAutoValidation

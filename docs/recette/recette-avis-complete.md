@@ -9,11 +9,12 @@
 ## Avant de commencer — trois gestes, dans l'ordre
 
 1. **Coller sur staging** — AVANT de publier le code, comme en production — les
-   deux migrations du 2 octobre, dans l'ordre :
-   `2026-10-02-avis-eval-scope-sur-autorisation.sql`, puis
-   `2026-10-02-avis-index-relances.sql`. Puis :
-   `node --env-file=/home/thierry/hotesmart/.env.staging scripts/verifier-eval-scope.js`
-   → `OK`, et **0 prestataire autorisée** (la migration remet tout le monde à `aucun`).
+   migrations du 2 octobre, dans l'ordre :
+   `2026-10-02-avis-eval-scope-sur-autorisation.sql`,
+   `2026-10-02-avis-index-relances.sql` (ces deux-là sont déjà collées), puis
+   `2026-10-02-avis-auto-validation.sql`. Puis :
+   `node --env-file=/home/thierry/hotesmart/.env.staging scripts/verifier-auto-validation.js`
+   → `OK`.
 2. **Publier la branche sur staging** : section 1 de `mise-en-prod-avis.md`.
    Rien n'a pu être poussé cette nuit (arrêt A1).
 3. **Les preuves automatiques**, sur staging (toutes doivent dire `OK`) :
@@ -60,6 +61,10 @@ clair, lien « Configuration ». **Reste à faire :**
    « Réglages enregistrés. » ; la phrase du haut devient « Votre grille remplace
    la grille par défaut sur vos biens. »
 5. **Recharge** : la grille revient telle quelle.
+6. **Publication automatique** (bloc en bas) : la case est **décochée**, le champ
+   grisé. Coche-la : le champ propose **48**. Mets **400** → Enregistrer :
+   refus « entre 1 et 336 », **rien** n'est enregistré. Mets **24** → Enregistrer
+   → recharge : la case est cochée, 24.
 
 ## B. Page Avis (hôte)
 
@@ -67,6 +72,9 @@ clair, lien « Configuration ». **Reste à faire :**
    (1 avant la PWA, 2 après la section D),
    une ligne « À remplir », un délai, « Ouvrir ».
 2. En haut à droite, **« ⚙ Configuration »** → Réglages, onglet Avis directement.
+   Sous le titre : **« Publication automatique des évaluations : activée, après
+   24 h sans réaction de votre part (jamais pour un avis négatif). »**, avec son
+   lien ⚙ Configuration.
 3. **Le lien direct** : ouvre `https://hotesmart-staging.vercel.app/avis?evaluer=` suivi
    du séjour de recette (affiché par `scripts/recette-avis-staging.js` sans
    option) → la page s'ouvre **avec la fenêtre d'évaluation**, et l'adresse perd
@@ -172,6 +180,19 @@ Calendrier du bien de recette → clique la réservation **terminée hier**.
    (Réglages refuse un compte délégué).
 3. Fiche prestataire : la section d'évaluation dit « Les réglages d'une
    prestataire engagent tous les biens… » — cases grisées.
+
+## J. La publication automatique (spec §10 bis)
+
+Staging n'a pas de cron : l'horloge se voit en base, la publication se prouve par
+les tests (22 cas, dont « jamais un avis négatif » et « l'hôte réagit pendant la
+prise »).
+
+1. Après la section D (prestataire « Ménage fait », part remplie, avec 24 h
+   réglés en A.6) : l'évaluation porte une publication programmée — je la lis
+   en base pour toi (lecture seule).
+2. En hôte, ouvre-la et **réponds à une question** : la programmation
+   disparaît (je relis).
+3. Ce qu'un passage du cron ferait : je te le dirai à blanc, rien ne part.
 
 ## À la fin
 

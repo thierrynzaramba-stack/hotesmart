@@ -384,8 +384,9 @@ l'avis du voyageur, invisible chez Airbnb avant le nôtre.
   Channex** et non annulée ; l'évaluation naît `a_remplir`, échéance =
   **départ + 14 jours** (la fenêtre d'Airbnb). Idempotent : une évaluation déjà
   née n'est jamais réécrite.
-- **L'objet review Channex** se rattache quand il arrive (poll, webhook), sans
-  toucher à l'échéance. **La publication l'exige** : sans objet, elle est
+- **L'objet review Channex** se rattache quand il arrive (poll, webhook). Il ne
+  fait qu'**avancer** l'échéance — s'il ferme plus tôt que départ + 14 jours, ou
+  s'il n'y en avait pas —, jamais la reculer (revue de 94f9a43). **La publication l'exige** : sans objet, elle est
   refusée (« la plateforme n'a pas encore ouvert d'avis pour ce séjour »), et
   l'auto-validation attend.
 - La naissance par la PWA (ouverture des questions) et par l'objet review
@@ -426,8 +427,28 @@ plafonnée, jamais de balayage) :
 5. publication par le même chemin que l'hôte (verrou, idempotence, simulation
    hors production), événement `avis.auto_publiee` au journal du cœur.
 
-**Rappel** — **6 heures avant** : une tâche « l'évaluation de … sera publiée
-automatiquement à HH h », une seule fois (marqueur), par la même requête indexée.
+**Rappel** — **6 heures avant** : une tâche « l'évaluation … sera publiée
+automatiquement à partir du … », une seule fois (marqueur), par la même requête
+indexée.
+
+**Précisions tranchées au code** (`lib/avis/auto-validation.js`) :
+- **Sans objet review Channex** à l'échéance, rien ne peut partir : report d'une
+  heure, jusqu'au plafond (échéance − 12 h) ; au-delà, l'horloge s'arrête et
+  l'hôte est prévenu. D'où « à partir du » dans le rappel.
+- **L'horloge ne part qu'une fois** : à la transition « part de la prestataire
+  incomplète → complète ». Re-enregistrer ne la relance pas ; une évaluation
+  reprise par l'hôte ne se reprogramme pas seule.
+- **Réglage par bien** : une ligne `avis_config` du bien prévaut, même nulle
+  (elle désactive). Le sens prudent : publier moins, jamais plus. L'écran ne
+  règle aujourd'hui que le compte.
+- **La prise** : les réponses complétées s'écrivent et l'horloge s'arrête en une
+  écriture conditionnée à la valeur lue de `auto_publier_le` — une réaction de
+  l'hôte entre-temps gagne, deux passages concurrents ne publient pas deux fois.
+- **Coût borné** : 20 lectures et **5 publications** (rédaction comprise) par
+  passage du cron, le reste au passage suivant.
+- **Un échec se dit** : avis négatif, rédaction refusée, plateforme qui refuse,
+  objet jamais ouvert — une tâche « n'a pas été publiée automatiquement », une
+  fois par séjour.
 
 ## 11. Lots
 

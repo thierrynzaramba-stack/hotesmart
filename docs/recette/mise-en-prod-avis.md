@@ -11,18 +11,20 @@
 page Avis, onglet Réglages, fiche prestataire, PWA, messagerie (bandeau,
 archivage), planning, notifications et relances. Détail : spec §8 bis et §8 ter.
 
-**À trancher avant** (`decisions-nuit.md`) :
-- D1 — une prestataire ne participe que si l'hôte l'autorise ; tous les profils
-  existants repartent à « non ».
-- D2 — quand une évaluation naît (PWA, ou objet review Channex ouvert).
-- D3, S2 — une prestataire « publie elle-même » dont **toute** la grille est à
-  elle peut publier une évaluation complétée par l'hôte.
-- D4 — le filet `?legacy=1` de la messagerie reste (dette 43).
+**Tranché par Thierry le 2 octobre 2026** : D1 (autorisation explicite, tout
+le monde à « non »), D2 révisé (naissance le jour du départ, spec §9 bis), D3,
+S2 option B (dès que l'hôte a répondu, la publication lui revient), et
+l'**auto-validation** (spec §10 bis). **Reste à trancher** : D4 — le filet
+`?legacy=1` de la messagerie reste (dette 43).
 
 **Écritures de masse annoncées (mesurées en production, lecture seule, nuit du
 2 octobre)** :
-- au premier poll quotidien des avis : **24 évaluations naissent**, toutes sur ton
-  compte, des avis Airbnb encore ouverts (échéances du 4 au 31 octobre) ;
+- au premier passage du cron : naissent les évaluations des **départs Airbnb du
+  jour et des deux précédents** (quelques-unes) ; au premier poll quotidien des
+  avis, celles des objets Airbnb encore ouverts (24 mesurés la nuit du 2 octobre,
+  échéances du 4 au 31 octobre) ;
+- l'**auto-validation** ne publie rien tant qu'aucun hôte ne l'a activée
+  (désactivée par défaut, colonne nulle) ;
 - dans les cycles suivants, **les relances** de celles dont l'échéance tombe dans
   les cinq jours : quelques-unes, **20 envois par passage au plus** (comptés
   après avoir écarté les déjà relancées), chacune = une tâche
@@ -72,6 +74,7 @@ sont autorisées par défaut). Puis la recette (`recette-avis-complete.md`).
 | `2026-09-30-avis-grille-note-obligatoire.sql` | **absent**, à coller (sans danger s'il est déjà correct) |
 | `2026-10-02-avis-eval-scope-sur-autorisation.sql` | **absent** |
 | `2026-10-02-avis-index-relances.sql` | **absent** |
+| `2026-10-02-avis-auto-validation.sql` | **absent** (écrit après la nuit) |
 
 Profils de production aujourd'hui : `eval_scope = proprete` pour les 12 (la valeur
 du 25 septembre). L'ordre ci-dessous les convertit en `selon_grille` (30 sept.),
@@ -84,6 +87,9 @@ puis en `aucun` (2 oct.).
 3. `2026-09-30-avis-grille-note-obligatoire.sql`
 4. `2026-10-02-avis-eval-scope-sur-autorisation.sql`
 5. `2026-10-02-avis-index-relances.sql`
+6. `2026-10-02-avis-auto-validation.sql` (réglage, `auto_publier_le`, index de la
+   file et des départs du jour) — vérifié par
+   `scripts/verifier-auto-validation.js`
 
 **Avant le déploiement du code**, pas après : le code des lots 3 à 7 lit
 `avis_criteres` (grille illisible sinon), et sans la migration 4 toute
@@ -126,7 +132,8 @@ s'il tourne contre la production.
    ```
 4. **Aligner `channex-phase1`** sur `main` (je le fais si tu me le demandes).
 5. **Attendre que le Deployment ID change**, puis je vérifie :
-   - un cycle du cron, `results.errors` lu (`relances_avis`, `avis_naissance`) ;
+   - un cycle du cron, `results.errors` lu (`naissances_avis`, `relances_avis`,
+     `auto_validation_avis`) ;
    - `/avis`, Réglages → Avis, la messagerie (liste, onglets), une fiche du
      calendrier, une fiche prestataire — en lecture ;
    - le lendemain matin, après le poll quotidien : les **24 naissances** (compte en
