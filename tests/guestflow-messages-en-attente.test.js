@@ -16,7 +16,7 @@ process.env.CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || 'cle-test'
 const test = require('node:test')
 const assert = require('node:assert')
 
-function fakeSupabase (tables) {
+function fakeSupabase (tables, tablesEnPanne = []) {
   const filtre = (rows, f) => rows.filter(r => {
     switch (f.op) {
       case 'eq': return String(r[f.col]) === String(f.val)
@@ -44,6 +44,7 @@ function fakeSupabase (tables) {
         maybeSingle () { q.single = true; return b },
         then (res, rej) {
           try {
+            if (tablesEnPanne.includes(table)) return res({ data: null, error: { message: 'panne simulee' } })
             if (q.mode === 'insert') {
               (tables[table] = tables[table] || []).push({ created_at: new Date().toISOString(), ...q.charge })
               return res({ data: null, error: null })
@@ -66,12 +67,12 @@ function fakeSupabase (tables) {
 }
 
 // `contenuIA` : le tableau `content` que rend l'API (permet un bloc thinking).
-function charger ({ tables, messagesChannex, contenuIA, mode = 'test', messagesBeds24 = [] }) {
+function charger ({ tables, messagesChannex, contenuIA, mode = 'test', messagesBeds24 = [], tablesEnPanne = [] }) {
   const appelsIA = []; const alertes = []
   const anthropic = { messages: { create: async (req) => { appelsIA.push(req); return { content: contenuIA } } } }
   const stubs = {
     '../lib/cron-shared': {
-      supabase: fakeSupabase(tables), anthropic,
+      supabase: fakeSupabase(tables, tablesEnPanne), anthropic,
       getPropertyMode: async () => mode, isAutomationPaused: async () => false,
       getSignatureForKey: () => '', SENDVIABEDS24_ENABLED: false
     },
@@ -375,4 +376,54 @@ test('une vraie reponse enregistree en conversation fait toujours taire le fil',
   const { mod, appelsIA } = charger({ tables, messagesChannex: messages, contenuIA: [] })
   await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
   assert.strictEqual(appelsIA.length, 0)
+})
+
+// ─── Lot 2a : l'etat REEL des envois, pas une deduction ─────────────────────
+const promptPour = async (tables, opts = {}) => {
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Dois-je comprendre que l\'appartement est disponible ?', time: t(1) }]
+  const { mod, appelsIA } = charger({ tables, messagesChannex: messages, ...opts,
+    contenuIA: json({ type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  return appelsIA[0].messages[0].content.split("ÉTAT DES ENVOIS AUTOMATIQUES (journal d'envoi")[1].split('HISTORIQUE COMPLET')[0]
+}
+
+test('LE TEST QUI COMPTE : le code d\'acces NON parti est dit « PAS ENCORE ENVOYÉ » au modele', async () => {
+  // Vecu : « Oui, vous pouvez y accéder immédiatement avec les codes reçus » —
+  // aucun code n'etait parti. Le modele devinait depuis l'historique.
+  const tables = tablesVides()
+  tables.message_templates = [{ id: 'tpl-code', user_id: U, property_id: P, event_type: 'menage_done', active: true }]
+  tables.message_sent_log = []
+  const bloc = await promptPour(tables)
+  assert.ok(/Code d'accès[^\n]*: PAS ENCORE ENVOYÉ/.test(bloc), bloc)
+  assert.ok(/Date et heure actuelles : \d\d\/\d\d\/\d{4}/.test(bloc), 'le modele a la date pour parler d\'aujourd\'hui / demain')
+})
+
+test('un envoi journalise est dit ENVOYÉ, avec son heure de Paris', async () => {
+  const tables = tablesVides()
+  tables.message_templates = [
+    { id: 'tpl-code', user_id: U, property_id: P, event_type: 'menage_done', active: true },
+    { id: 'tpl-arr', user_id: U, property_id: P, event_type: 'arrival', active: true }
+  ]
+  tables.message_sent_log = [{ user_id: U, booking_id: B, template_id: 'tpl-code', sent_at: '2026-10-01T13:02:00Z' }]
+  const bloc = await promptPour(tables)
+  assert.ok(/Code d'accès[^\n]*: ENVOYÉ le 01\/10\/2026 (à )?15:02/.test(bloc), bloc)
+  assert.ok(/avant l'arrivée : PAS ENCORE ENVOYÉ/.test(bloc))
+})
+
+test('un envoi d\'une AUTRE reservation ou d\'un autre compte ne compte pas', async () => {
+  const tables = tablesVides()
+  tables.message_templates = [{ id: 'tpl-code', user_id: U, property_id: P, event_type: 'menage_done', active: true }]
+  tables.message_sent_log = [
+    { user_id: U, booking_id: 'autre-resa', template_id: 'tpl-code', sent_at: '2026-10-01T13:02:00Z' },
+    { user_id: 'autre-compte', booking_id: B, template_id: 'tpl-code', sent_at: '2026-10-01T13:02:00Z' }
+  ]
+  const bloc = await promptPour(tables)
+  assert.ok(/Code d'accès[^\n]*: PAS ENCORE ENVOYÉ/.test(bloc), bloc)
+})
+
+test('journal illisible : le modele est prevenu de ne rien presumer', async () => {
+  const tables = tablesVides()
+  const bloc = await promptPour(tables, { tablesEnPanne: ['message_sent_log'] })
+  assert.ok(/INDISPONIBLE/.test(bloc) && /Ne présume/.test(bloc), bloc)
+  assert.ok(!/ENVOYÉ le/.test(bloc))
 })
