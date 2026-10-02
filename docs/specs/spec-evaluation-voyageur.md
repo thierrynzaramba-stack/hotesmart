@@ -229,6 +229,16 @@ Règles de passage :
 - prestataire `valider` + négatif → `a_valider` (garde-fou §3) ;
 - hôte qui remplit lui-même → publication à sa validation.
 
+**Amendements de Thierry du 2 octobre 2026** (décisions de la nuit, tranchées) :
+- **D1** — une prestataire ne remplit que si sa fiche l'y autorise ; tous les
+  profils existants repartent à « non », production comprise.
+- **S2, option B** — **dès que l'hôte a ajouté une réponse, la publication
+  revient à l'hôte.** La prestataire ne publie seule que ce qu'elle a
+  entièrement rempli. Le serveur refuse sinon (`reponses_de_l_hote`).
+- **Auto-validation** (§10 bis) — à l'échéance du délai choisi par l'hôte, ses
+  questions restées sans réponse prennent le meilleur niveau, le texte de l'IA
+  est conservé, et l'évaluation est publiée. Jamais un avis négatif.
+
 ## 7. Modèle de données — tables du cœur (proposition, à confirmer en étape 0)
 
 Clé des nouvelles tables : `properties.id` (UUID), décision E6.
@@ -360,11 +370,64 @@ Principes :
 - Onglet « Archivées » consultable et cherchable ; rien n'est supprimé.
 - **Pas de cron** : on stocke `archive_after = max(départ, dernier message) + 10 j` recalculé à chaque événement (nouveau message, changement de réservation, évaluation publiée) ; la liste filtre `archive_after < now()` avec index. Colonnes indicatives : `pinned`, `archived_manual`, `unarchived_manual_at`, `archive_after`, `archived_reason`.
 
+## 9 bis. Quand une évaluation naît (amendement D2 du 2 octobre 2026)
+
+**Le jour du départ, pour chaque séjour Airbnb terminé** — et non à l'arrivée de
+l'avis du voyageur, invisible chez Airbnb avant le nôtre.
+
+- **Déclenchement par événement, pas de balayage global** : une étape du cron lit
+  les **départs du jour** — et des deux jours précédents, en rattrapage d'un
+  cycle manqué — dans `menages`, la table qui porte un départ par réservation
+  pour tous les comptes, par un **index sur `departure_date`**. Elle ne relit pas
+  les réservations : seulement celles qui partent.
+- Pour chacune : la réservation (`bookings_snapshot`) doit être **Airbnb par
+  Channex** et non annulée ; l'évaluation naît `a_remplir`, échéance =
+  **départ + 14 jours** (la fenêtre d'Airbnb). Idempotent : une évaluation déjà
+  née n'est jamais réécrite.
+- **L'objet review Channex** se rattache quand il arrive (poll, webhook), sans
+  toucher à l'échéance. **La publication l'exige** : sans objet, elle est
+  refusée (« la plateforme n'a pas encore ouvert d'avis pour ce séjour »), et
+  l'auto-validation attend.
+- La naissance par la PWA (ouverture des questions) et par l'objet review
+  restent, en rattrapage : la première qui passe crée, les autres complètent.
+
 ## 10. Notifications & relances
 
 - Prestataire : à « Ménage fait », invitation à remplir (dans la PWA).
 - Hôte : « [Prestataire] a rempli l'état du logement — évaluez [prénom] » → lien qui ouvre `/avis` avec la fenêtre affichée.
 - Relances avant échéance (ex. J-5 et J-1 du délai OTA) : requête indexée sur `(status, deadline_at)` bornée et paginée, **pas** de balayage de toutes les réservations.
+
+## 10 bis. Auto-validation (demande de Thierry du 2 octobre 2026)
+
+**Réglage** — Réglages → Avis : « Valider automatiquement après **X heures** sans
+réaction », désactivable (`avis_config.auto_validation_heures`, nul =
+désactivé ; niveau compte, surchargeable par bien comme le reste de la config).
+**État affiché** en haut de la page Avis (activée ou non, délai) avec le lien
+« ⚙ Configuration ».
+
+**Quand l'horloge démarre** — quand la **prestataire a fini sa part** et que
+rien n'est négatif : `guest_evaluations.auto_publier_le` = maintenant + X h,
+**plafonné à l'échéance − 12 h** pour tomber avant celle d'Airbnb. Jamais avant :
+une évaluation où personne n'a rien coché ne part pas « au meilleur niveau »
+(choix prudent de la nuit, à défaire si Thierry veut l'horloge dès la naissance).
+
+**Ce qui l'arrête** — toute **réaction de l'hôte** : une réponse, un texte, un
+abandon. `auto_publier_le` repasse à nul ; l'évaluation est alors à lui (S2).
+
+**À l'échéance** (étape du cron, **requête indexée** sur `auto_publier_le`,
+plafonnée, jamais de balayage) :
+1. la config est relue : désactivée entre-temps → rien ;
+2. les questions de l'hôte sans réponse prennent le **meilleur niveau** de leur
+   grille (le premier, « je recommande » pour la recommandation) ;
+3. **jamais un avis négatif** : si les réponses le rendent négatif, rien ne part,
+   il attend l'hôte ;
+4. **le texte de l'IA est conservé** ; s'il n'y en a pas, il est rédigé ; si l'IA
+   refuse, rien ne part et l'hôte est prévenu ;
+5. publication par le même chemin que l'hôte (verrou, idempotence, simulation
+   hors production), événement `avis.auto_publiee` au journal du cœur.
+
+**Rappel** — **6 heures avant** : une tâche « l'évaluation de … sera publiée
+automatiquement à HH h », une seule fois (marqueur), par la même requête indexée.
 
 ## 11. Lots
 
