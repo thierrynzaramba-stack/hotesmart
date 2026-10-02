@@ -399,3 +399,15 @@ test('re-revue : le budget se relit juste avant la prise — une redaction longu
   assert.strictEqual(o.appels.publier.length, 0)
   assert.ok(etat.evaluations[0].auto_publier_le, 'rien n est pris')
 })
+
+test('recette : une part deja complete mais NEGATIVE, corrigee en positif, arme l’horloge', async () => {
+  const { sb, ecritures } = baseReponses()
+  await enregistrer(sb, EV({ answers_cleaner: { ...PART_PRESTA, degats: 'importants' } }), { degats: 'aucun' }, 'prestataire')
+  assert.strictEqual(ecritures[0].auto_publier_le, iso(MAINTENANT + 24 * H))
+})
+
+test('SECURITE : un negatif corrige ne rearme PAS l’horloge si l’hote a deja demande un texte', async () => {
+  const { sb, ecritures } = baseReponses()
+  await enregistrer(sb, EV({ answers_cleaner: { ...PART_PRESTA, degats: 'importants' }, public_text: 'Texte demande par l hote.' }), { degats: 'aucun' }, 'prestataire')
+  assert.strictEqual(ecritures[0].auto_publier_le, undefined)
+})
