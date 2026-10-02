@@ -216,6 +216,12 @@
 </div><!-- .main -->
 </div><!-- .layout -->
 
+<script>
+  // ⚠ AVANT TOUT : l'ancienne adresse des réglages des avis renvoie vers l'app
+  // Avis (décision du 2 octobre 2026 au soir), y compris pour un compte délégué
+  // que la garde de cette page refuserait.
+  if (new URLSearchParams(location.search).get('onglet') === 'avis') location.replace('/avis?reglages=1')
+</script>
 <script type="module">
   // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
   // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
@@ -613,10 +619,8 @@ $('liste').onclick = e => {
 // DANS l'app (règle du dépôt). Les réglages des avis — grille, rédaction,
 // publication automatique par bien — s'ouvrent depuis « ⚙ Configuration » de la
 // page Avis. L'ancienne adresse y renvoie.
-if (new URLSearchParams(location.search).get('onglet') === 'avis') {
-  location.replace('/avis?reglages=1')
-}
-$('tab-equipe').onclick = () => {}
+// (Le renvoi de l'ancienne adresse se fait en tête de script, avant la garde
+// de compte propre : un membre délégué doit arriver aux réglages de l'app.)
 
 const { data: { session } } = await supabase.auth.getSession()
 if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings' + location.search)

@@ -1,4 +1,4 @@
--- migrations/2026-10-02-avis-auto-validation-par-bien.sql
+-- 2026-10-02-avis-auto-validation-par-bien.sql
 -- Decision de Thierry du 2 octobre 2026 au soir (option A) :
 -- la publication automatique se regle BIEN PAR BIEN.
 -- Spec : docs/specs/spec-evaluation-voyageur.md §10 bis.

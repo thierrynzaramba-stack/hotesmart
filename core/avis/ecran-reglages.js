@@ -149,8 +149,10 @@ export async function monter (conteneur, options = {}) {
     conteneur.querySelectorAll('[data-auto-heures]').forEach(el => el.addEventListener('change', () => {
       const id = el.dataset.autoHeures
       const b = etat.autoBiens.find(x => x.property_id === id)
-      if (b) b.heuresSaisies = el.value === '' ? null : Number(el.value)
-      ecrireAuto(id, el.value === '' ? '' : Number(el.value))
+      const v = el.value === '' ? '' : Number(el.value)
+      // Seul un delai valide est retenu pour une prochaine activation.
+      if (b && Number.isInteger(v) && v >= etat.autoBornes.min && v <= etat.autoBornes.max) b.heuresSaisies = v
+      ecrireAuto(id, v)
     }))
 
     // Les critères.
@@ -209,11 +211,14 @@ export async function monter (conteneur, options = {}) {
   async function ecrireAuto (id, heures) {
     const b = etat.autoBornes || { min: 1, max: 336 }
     const bien = etat.autoBiens.find(x => x.property_id === id)
-    if (!bien) return
+    if (!bien || bien.enCours) return
     if (heures !== null && !(Number.isInteger(heures) && heures >= b.min && heures <= b.max)) {
       etat.autoMessages[id] = { texte: `Un nombre entier d’heures entre ${b.min} et ${b.max}.`, ton: 'erreur' }
       afficher(); return
     }
+    // Un geste a la fois par bien : deux reponses dans le desordre feraient
+    // afficher un etat que le serveur n'a pas.
+    bien.enCours = true
     try {
       const r = await appel('avis?action=auto-validation-maj', {
         methode: 'POST', corps: { action: 'auto-validation-maj', property_id: id, heures },
@@ -222,6 +227,8 @@ export async function monter (conteneur, options = {}) {
       etat.autoMessages[id] = { texte: r.heures ? `Activée : publication ${r.heures} h après la part de la prestataire.` : 'Désactivée.', ton: 'ok' }
     } catch (err) {
       etat.autoMessages[id] = { texte: err.message || 'Réglage non enregistré.', ton: 'erreur' }
+    } finally {
+      bien.enCours = false
     }
     afficher()
   }
@@ -329,7 +336,7 @@ export function rendre (etat) {
   const lignesAuto = (etat.autoBiens || []).map(b => {
     const actif = b.heures !== null && b.heures !== undefined
     const m = (etat.autoMessages || {})[b.property_id]
-    const verrou = b.modifiable ? '' : ' disabled'
+    const verrou = b.modifiable && !b.enCours ? '' : ' disabled'
     return `<div class="hs-auto-bien">`
       + `<label class="hs-auto-nom"><input type="checkbox" data-auto-case="${echapper(b.property_id)}"${actif ? ' checked' : ''}${verrou}> ${echapper(b.nom || 'Bien')}</label>`
       + `<label class="hs-auto-delai"><input type="number" min="${bornes.min}" max="${bornes.max}" step="1" data-auto-heures="${echapper(b.property_id)}" `

@@ -149,7 +149,7 @@
            voyageurs sont une lecture ; les evaluations, une action a faire dans
            un delai. Les mettre en dessous les aurait fait manquer.
            Le contenu vit dans un module du coeur, /core/avis/liste-evaluations.js. -->
-      <section id="zone-reglages" class="card" style="display:none"></section>
+      <section id="zone-reglages" style="display:none;margin-bottom:18px"></section>
       <section id="zone-evaluations" class="card" style="display:none"></section>
 
       <div class="avis-stats" id="stats" hidden></div>
@@ -416,8 +416,16 @@
     zone.style.display = ''
     if (!reglagesMontes) {
       reglagesMontes = true
-      const { monter } = await import('/core/avis/ecran-reglages.js')
-      await monter(zone, { avertir: (m) => console.log('[avis] réglages :', m) })
+      try {
+        const { monter } = await import('/core/avis/ecran-reglages.js')
+        await monter(zone, { avertir: (m) => console.log('[avis] réglages :', m) })
+      } catch (e) {
+        // ⚠ UN ÉCHEC DE CHARGEMENT SE DIT, et le prochain clic réessaie.
+        console.error('[avis] réglages', e)
+        reglagesMontes = false
+        zone.innerHTML = '<div class="card"><div class="card-title">Réglages des avis indisponibles</div>'
+          + '<div class="card-sub">Rechargez la page. Si cela persiste, contactez le support.</div></div>'
+      }
     }
     zone.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -698,7 +706,9 @@
     // d'écriture y règle les biens de son périmètre ; le serveur refuse le
     // niveau compte (grille, rédaction) à un périmètre partiel, et le dit.
     $('lien-configuration').hidden = !peut
-    $('lien-configuration').addEventListener('click', ouvrirReglages)
+    // `onclick`, pas addEventListener : une seconde initialisation ne double pas
+    // l'écouteur (deux bascules s'annuleraient).
+    $('lien-configuration').onclick = ouvrirReglages
     afficherEtatAuto()
     // L'ancien chemin /settings?onglet=avis renvoie ici avec ?reglages=1.
     try {
