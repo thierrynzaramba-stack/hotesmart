@@ -13,10 +13,6 @@
 // ⚠ LES DEPENDANCES SONT INJECTABLES. Sans cela, ces modules ne se testent
 // qu'avec un navigateur, un serveur et une session — autant dire jamais.
 
-/**
- * Fabrique un appelant. `deps` sert aux tests ; en production tout vient de la
- * page (window._supabase, window.enteteCompte, fetch).
- */
 // Le client de session partage, charge a la demande (un import statique
 // casserait les tests sous Node, ou /shared n'est pas un chemin).
 async function clientParDefaut () {
@@ -24,6 +20,19 @@ async function clientParDefaut () {
   return m.supabase
 }
 
+// Le compte courant (membre delegue), meme repli que shared/api-client.js :
+// une page qui ne publie pas `window.enteteCompte` envoie quand meme X-Compte.
+async function compteCourantParDefaut () {
+  const m = await import('/shared/compte-courant.js')
+  return m.compteCourant()
+}
+
+/**
+ * Fabrique un appelant. `deps` sert aux tests. En production, la session et le
+ * compte viennent de la page si elle les publie (window._supabase,
+ * window.enteteCompte), sinon des modules partages /shared/supabase.js et
+ * /shared/compte-courant.js.
+ */
 export function creerAppel (deps = {}) {
   const fenetreGlobale = deps.global || (typeof window !== 'undefined' ? window : {})
   const requete = deps.fetch || (typeof fetch !== 'undefined' ? fetch : null)
@@ -41,10 +50,11 @@ export function creerAppel (deps = {}) {
     // la case « Elle remplit les questions » ne s'enregistrait jamais. Le client
     // de session est un module partage : on le prend la, la page n'a rien a faire.
     let jeton = null
+    let moi = null
     try {
       const client = fenetreGlobale._supabase || (deps.supabase !== undefined ? deps.supabase : await clientParDefaut())
       const { data } = await client.auth.getSession()
-      if (data && data.session) jeton = data.session.access_token
+      if (data && data.session) { jeton = data.session.access_token; moi = data.session.user && data.session.user.id }
     } catch { /* pas de session : le serveur repondra 401, et c'est sa reponse */ }
 
     const entetes = { 'Content-Type': 'application/json' }
@@ -52,6 +62,13 @@ export function creerAppel (deps = {}) {
     // ⚠ L'EN-TETE DE COMPTE DELEGUE. Un membre travaille sur le compte de
     // l'hote : sans elle, le serveur resoudrait le compte de l'appelant.
     if (typeof fenetreGlobale.enteteCompte === 'function') Object.assign(entetes, fenetreGlobale.enteteCompte() || {})
+    else {
+      // Sans en-tete publie par la page : le compte courant, envoye seulement
+      // s'il differe de l'appelant (un hote seul n'emet jamais X-Compte).
+      let compte = null
+      try { compte = deps.compteCourant !== undefined ? deps.compteCourant : await compteCourantParDefaut() } catch { compte = null }
+      if (compte && moi && compte !== moi) entetes['X-Compte'] = compte
+    }
 
     const options = { method: methode, headers: entetes }
     if (corps) options.body = JSON.stringify(corps)
