@@ -80,7 +80,7 @@ const evalB = (a = {}) => evalA({ id: 'e2e2e2e2-2222-4222-8222-222222222222',
 function preparer ({
   user = PROD, profil = null, permissions = null,
   evaluations = [], otaReviews = [{ id: '99999999-9999-4999-8999-999999999999', user_id: PROD, external_review_id: 'channex-abc-123' }],
-  verrous = [], erreurMaj = null, criteres = [], erreurLectureCriteres = null, configs = [], snapshots = [],
+  verrous = [], erreurMaj = null, criteres = [], erreurLectureCriteres = null, configs = [], snapshots = [], autoParBien = [],
   texteIA = JSON.stringify({ public: 'Voyageur soigneux, logement rendu nickel.', prive: '' }),
 } = {}) {
   const etat = { ecritures: [], insertions: [], requetes: [] }
@@ -168,6 +168,9 @@ function preparer ({
         }
         if (nom === 'avis_criteres') return Promise.resolve({ data: erreurLectureCriteres ? null : criteres, error: erreurLectureCriteres })
         if (nom === 'avis_config') return Promise.resolve({ data: configs, error: null })
+        if (nom === 'avis_auto_validation') {
+          return Promise.resolve({ data: autoParBien.filter(x => (q._f.property_id == null || x.property_id === q._f.property_id) && (q._f.user_id == null || x.user_id === q._f.user_id)), error: null })
+        }
         if (nom === 'profiles') {
           if (q._f.id != null) {
             return Promise.resolve({ data: profil && profil.id === q._f.id ? [profil] : [], error: null })
@@ -953,11 +956,12 @@ test('une prestataire « soumettre » dont l’hote a repondu : son motif reste 
 })
 
 // ─── L'auto-validation (spec §10 bis, 2 octobre 2026) ───────────────────────
-const AUTO_24 = [{ property_id: null, auto_validation_heures: 24, keywords: [], tone: 'sobre', signature: null }]
+// Le reglage PAR BIEN (option A) : 24 h sur le bien A.
+const AUTO_24 = [{ user_id: PROD, property_id: BIEN_A.id, heures: 24 }]
 
 test('LE TEST QUI COMPTE : la prestataire finit sa part — l’horloge part a maintenant + X h', async () => {
   const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null, deadline_at: new Date(Date.now() + 3 * 86400000).toISOString() })
-  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], configs: AUTO_24 })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], autoParBien: AUTO_24 })
   const handler = require('../api/avis')
   const res = reponse()
   const avant = Date.now()
@@ -970,7 +974,7 @@ test('LE TEST QUI COMPTE : la prestataire finit sa part — l’horloge part a m
 
 test('sans reglage, rien ne se programme', async () => {
   const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
-  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], configs: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], autoParBien: [] })
   const handler = require('../api/avis')
   await handler(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), reponse())
   const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.answers_cleaner)

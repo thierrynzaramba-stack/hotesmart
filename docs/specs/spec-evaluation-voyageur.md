@@ -20,7 +20,7 @@ Une fois l'évaluation publiée, la conversation du séjour est archivée dans l
    - **Périmètre** : `proprete` (questions propreté seulement) | `complet` (toute l'évaluation) ;
    - **Pouvoir** : `soumettre` (l'hôte valide) | `valider` (publication directe).
    L'app ménage lit et écrit ces réglages via le protocole ; ils sont stockés dans le cœur.
-6. **Configuration des avis** (cœur, donc dans `/settings`, onglet « Avis » — test « ce réglage a-t-il un sens sans aucune app ? » : oui) : mots-clés utilisés par l'IA (par compte, surchargeables par bien), ton, signature.
+6. **Configuration des avis** — **dans l'app Avis** depuis le 2 octobre 2026 au soir (décision de Thierry : la configuration d'une app vit dans l'app ; l'onglet Avis de `/settings` est retiré) : mots-clés utilisés par l'IA (par compte, surchargeables par bien), ton, signature, grille, publication automatique par bien.
 7. **Archivage automatique des conversations** (messagerie) — voir §9.
 8. Les demandes d'information (fils sans réservation) sont **hors périmètre**.
 
@@ -400,11 +400,26 @@ l'avis du voyageur, invisible chez Airbnb avant le nôtre.
 
 ## 10 bis. Auto-validation (demande de Thierry du 2 octobre 2026)
 
-**Réglage** — Réglages → Avis : « Valider automatiquement après **X heures** sans
-réaction », désactivable (`avis_config.auto_validation_heures`, nul =
-désactivé ; niveau compte, surchargeable par bien comme le reste de la config).
-**État affiché** en haut de la page Avis (activée ou non, délai) avec le lien
-« ⚙ Configuration ».
+**Réglage — PAR BIEN** (décision de Thierry du 2 octobre 2026, au soir, option A) :
+dans les réglages de l'app Avis, **une ligne par bien** : un interrupteur
+« publication automatique » et son délai en heures (1 à 336). Pas de réglage
+global : ce qu'on lit sur la ligne du bien est ce qui s'applique.
+
+- **Stockage** : table `avis_auto_validation` (`user_id`, `property_id` uuid,
+  `heures`), une ligne par bien activé ; **pas de ligne = désactivée**. Writer
+  unique : `api/avis.js` (`auto-validation-maj`). Pas dans `avis_config` : une
+  ligne de bien y surchargerait le ton et les mots-clés du compte à la rédaction.
+- `avis_config.auto_validation_heures` (réglage de compte du matin) **n'est plus
+  lu** ; colonne conservée, nulle en production.
+- Un membre restreint règle les biens de **son** périmètre (droit `avis: write`).
+
+**Les réglages vivent DANS L'APP AVIS** (décision du même soir, règle du dépôt
+« la configuration d'une app vit dans l'app ») : grille, rédaction et publication
+automatique s'ouvrent depuis « ⚙ Configuration » de la page Avis, sur place ;
+l'onglet Avis de `/settings` disparaît.
+
+**État affiché** en haut de la page Avis : nombre de biens où la publication
+automatique est active, avec le lien « ⚙ Configuration ».
 
 **Quand l'horloge démarre** — quand la **prestataire a fini sa part** et que
 rien n'est négatif : `guest_evaluations.auto_publier_le` = maintenant + X h,

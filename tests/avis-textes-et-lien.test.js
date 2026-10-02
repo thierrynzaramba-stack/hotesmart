@@ -78,21 +78,21 @@ test('« Moi » devient « L’hôte » dans le choix de qui remplit', async () 
   assert.ok(!Object.values(REMPLI_LISIBLE).includes('Moi'))
 })
 
-test('la page Avis porte le lien « Configuration » vers Réglages > Avis', () => {
+test('la page Avis ouvre ses réglages SUR PLACE (la configuration d’une app vit dans l’app)', () => {
   const page = lire('pages/avis.html')
-  assert.match(page, /<a [^>]*id="lien-configuration"[^>]*href="\/settings\?onglet=avis"[^>]*hidden/,
-    'le lien existe, vise l’onglet Avis et naît caché')
-  // ⚠ Réglages refuse un compte délégué : le lien exige le droit d'écriture ET
-  // le compte propre, sinon un membre délégué cliquerait vers un refus.
-  assert.match(page, /\$\('lien-configuration'\)\.hidden = !\(peut && window\.estTitulaire && window\.estTitulaire\(\)\)/)
-  assert.match(page, /window\.estTitulaire = estTitulaire/)
+  assert.match(page, /<button [^>]*id="lien-configuration"[^>]*hidden/, 'un bouton, né caché')
+  assert.ok(!/href="\/settings\?onglet=avis"/.test(page), 'plus de renvoi vers Réglages')
+  assert.match(page, /import\('\/core\/avis\/ecran-reglages\.js'\)/)
+  assert.match(page, /id="zone-reglages"/)
+  // Le droit d'écriture suffit : un membre règle les biens de son périmètre.
+  assert.match(page, /\$\('lien-configuration'\)\.hidden = !peut/)
 })
 
-test('Réglages ouvre l’onglet Avis quand l’adresse le demande, après le chargement de l’équipe', () => {
+test('Réglages n’a plus d’onglet Avis, et l’ancienne adresse renvoie vers l’app', () => {
   const page = lire('pages/settings.html')
-  assert.match(page, /get\('onglet'\)/)
-  // La bascule vient APRÈS charger() : charger rallume la zone d'équipe.
-  assert.match(page, /charger\(\)\.finally\(\(\) => \{ if \(ongletDemande === 'avis' && !\$\('tab-avis'\)\.hidden\) basculer\('avis'\) \}\)/)
+  assert.ok(!/id="tab-avis"/.test(page))
+  assert.ok(!/ecran-reglages/.test(page))
+  assert.match(page, /location\.replace\('\/avis\?reglages=1'\)/)
 })
 
 test('chaque motif de refus de publication a sa phrase à l’écran', async () => {
