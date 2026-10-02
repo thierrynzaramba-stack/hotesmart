@@ -124,7 +124,8 @@ test('ouvrir apres « Menage fait » fait NAITRE l’evaluation et rend SES ques
   const nee = etat.tables.guest_evaluations[0]
   assert.strictEqual(nee.booking_uid, 'BK-1')
   assert.strictEqual(nee.property_id, BIEN.id)
-  assert.strictEqual(nee.deadline_at, undefined, 'aucune echeance inventee')
+  // Decision D2 revisee (2 octobre 2026) : l'echeance d'Airbnb, depart + 14 jours.
+  assert.strictEqual(nee.deadline_at, new Date(Date.parse(HIER + 'T12:00:00Z') + 14 * 86400000).toISOString())
 })
 
 test('repondre ecrit SES reponses sur l’evaluation du sejour', async () => {

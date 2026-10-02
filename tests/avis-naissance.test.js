@@ -221,3 +221,99 @@ test('le poll passe son horloge a la naissance', () => {
   const poll = fs.readFileSync(path.join(__dirname, '..', 'lib', 'cron-channel-reviews.js'), 'utf8')
   assert.match(poll, /rattacherObjetsRecus\(sb, lot, \{ maintenant: maintenant\(\) \}\)/)
 })
+
+// ─── Naissance au jour du depart (§9 bis, 2 octobre 2026) ───────────────────
+const { naitreAuDepart, echeanceDuDepart } = require('../lib/avis/naissance')
+
+function baseDepart ({ menages = [], snaps = [], biens = [], evaluations = [] } = {}) {
+  const etat = { evaluations: evaluations.map(e => ({ ...e })), requetes: [] }
+  const from = (table) => {
+    const q = { table, f: {}, dans: {}, neq: null, op: 'select' }
+    etat.requetes.push(q)
+    const executer = () => {
+      if (table === 'menages') return { data: menages.filter(m => q.dans.departure_date.includes(m.departure_date) && m.status !== q.neq), error: null }
+      if (table === 'bookings_snapshot') return { data: snaps.filter(s => s.user_id === q.f.user_id && q.dans.booking_id.includes(s.booking_id)), error: null }
+      if (table === 'properties') return { data: biens.filter(b => b.user_id === q.f.user_id && q.dans.provider_property_id.includes(b.provider_property_id)), error: null }
+      if (table === 'guest_evaluations' && q.op === 'upsert') {
+        if (etat.evaluations.some(e => e.user_id === q.ligne.user_id && e.booking_uid === q.ligne.booking_uid)) return { data: [], error: null }
+        etat.evaluations.push({ ...q.ligne }); return { data: [{ id: 'n' }], error: null }
+      }
+      return { data: [], error: null }
+    }
+    const c = {
+      select () { return c }, eq (k, v) { q.f[k] = v; return c }, in (k, v) { q.dans[k] = v; return c },
+      neq (k, v) { q.neq = v; return c }, limit () { return c }, is () { return c },
+      upsert (ligne) { q.op = 'upsert'; q.ligne = ligne; return c },
+      then (ok, ko) { return Promise.resolve(executer()).then(ok, ko) },
+    }
+    return c
+  }
+  return { etat, sb: { from } }
+}
+const AUJ = Date.parse('2026-10-02T09:00:00Z')
+const DEP = (booking_id, departure_date = '2026-10-02', status = 'accepted', property_id = 'ref-1') => ({ user_id: 'compte-1', booking_id, property_id, departure_date, status })
+const SNAP = (booking_id, source = 'AirBNB', provider = 'channex', status = 'confirmed') => ({ user_id: 'compte-1', booking_id, property_id: 'ref-1', snapshot: { provider, source, status } })
+const BIEN = { id: 'bien-uuid', user_id: 'compte-1', provider_property_id: 'ref-1' }
+
+test('LE TEST QUI COMPTE : le jour du départ, chaque séjour Airbnb terminé fait naître son évaluation, échéance départ + 14 jours', async () => {
+  const { etat, sb } = baseDepart({ menages: [DEP('A')], snaps: [SNAP('A')], biens: [BIEN] })
+  const bilan = await naitreAuDepart(sb, { maintenant: AUJ })
+  assert.deepStrictEqual(bilan, { departs: 1, evaluables: 1, crees: 1, erreurs: 0 })
+  const e = etat.evaluations[0]
+  assert.strictEqual(e.booking_uid, 'A')
+  assert.strictEqual(e.property_id, 'bien-uuid')
+  assert.strictEqual(e.status, 'a_remplir')
+  assert.strictEqual(e.deadline_at, echeanceDuDepart('2026-10-02'))
+  assert.strictEqual(e.deadline_at, '2026-10-16T12:00:00.000Z')
+})
+
+test('la requête ne lit QUE les départs du jour et des deux précédents (pas un balayage)', async () => {
+  const { etat, sb } = baseDepart()
+  await naitreAuDepart(sb, { maintenant: AUJ })
+  const q = etat.requetes.find(r => r.table === 'menages')
+  assert.deepStrictEqual(q.dans.departure_date, ['2026-09-30', '2026-10-01', '2026-10-02'])
+  assert.strictEqual(q.neq, 'cancelled')
+})
+
+test('Booking, Beds24, une réservation annulée, un bien ambigu : rien ne naît', async () => {
+  const { etat, sb } = baseDepart({
+    menages: [DEP('B'), DEP('C'), DEP('D'), DEP('E', '2026-10-02', 'accepted', 'ref-2')],
+    snaps: [SNAP('B', 'BookingCom'), SNAP('C', 'airbnb', 'beds24'), SNAP('D', 'AirBNB', 'channex', 'cancelled'), { ...SNAP('E'), property_id: 'ref-2' }],
+    biens: [BIEN, { id: 'x1', user_id: 'compte-1', provider_property_id: 'ref-2' }, { id: 'x2', user_id: 'compte-1', provider_property_id: 'ref-2' }],
+  })
+  const bilan = await naitreAuDepart(sb, { maintenant: AUJ })
+  assert.strictEqual(bilan.crees, 0)
+  assert.strictEqual(etat.evaluations.length, 0)
+})
+
+test('une évaluation déjà née (par la PWA) n’est jamais réécrite au départ', async () => {
+  const { etat, sb } = baseDepart({ menages: [DEP('A')], snaps: [SNAP('A')], biens: [BIEN],
+    evaluations: [{ user_id: 'compte-1', booking_uid: 'A', status: 'soumise_prestataire', answers_cleaner: { etat: 'ok' } }] })
+  const bilan = await naitreAuDepart(sb, { maintenant: AUJ })
+  assert.strictEqual(bilan.crees, 0)
+  assert.strictEqual(etat.evaluations[0].status, 'soumise_prestataire')
+})
+
+test('une panne ne lève pas', async () => {
+  const sb = { from: () => { throw new Error('panne') } }
+  const bilan = await naitreAuDepart(sb, { maintenant: AUJ })
+  assert.strictEqual(bilan.erreurs, 1)
+})
+
+test('LE TEST QUI COMPTE : le rattachement de l’objet Channex ne déplace PAS l’échéance d’Airbnb', async () => {
+  const { etat, sb } = base({
+    evaluations: [{ id: 'ev-1', user_id: 'compte-1', booking_uid: 'resa-1', status: 'a_remplir', ota_review_id: null, deadline_at: '2026-10-16T12:00:00.000Z' }],
+    objets: [{ id: 'objet-1', external_review_id: 'rev-1', expired_at: DANS(29) }],
+  })
+  await rattacherObjetsRecus(sb, [ligneAvis()], { maintenant: MAINTENANT })
+  assert.strictEqual(etat.evaluations[0].ota_review_id, 'objet-1')
+  assert.strictEqual(etat.evaluations[0].deadline_at, '2026-10-16T12:00:00.000Z')
+})
+
+test('le cron fait naître au départ, avant les relances', () => {
+  const fs = require('node:fs'); const path = require('node:path')
+  const cron = fs.readFileSync(path.join(__dirname, '..', 'api', 'cron.js'), 'utf8')
+  const n = cron.indexOf("chrono.mesure('naissances_avis', () => naitreAuDepart(supabase))")
+  const r = cron.indexOf("chrono.mesure('relances_avis'")
+  assert.ok(n > 0 && n < r)
+})

@@ -20,7 +20,7 @@ const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = req
 const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
 // Naissance 1 : la prestataire ouvre ses questions apres « Menage fait » (decision D2).
-const { assurerEvaluation } = require('../lib/avis/naissance')
+const { assurerEvaluation, echeanceDuDepart } = require('../lib/avis/naissance')
 // Lot 6 : l'hote est prevenu quand la prestataire a rempli sa part (spec §10).
 const { prevenirHote } = require('../lib/avis/notifications')
 
@@ -819,6 +819,8 @@ async function routePwa (req, res, action) {
     const n = await assurerEvaluation(supabase, {
       userId, propertyId: sejour.bien.id, propertyRef: sejour.bien.ref,
       bookingUid: sejour.bookingUid, provider: sejour.provider, ota: sejour.ota,
+      // L'echeance d'Airbnb : depart + 14 jours (§9 bis).
+      echeance: echeanceDuDepart(departureDate),
     })
     // Le message de la base reste dans les journaux : un porteur de lien n'a pas a le lire.
     if (n.erreur) { console.error('[avis] pwa : naissance echouee', n.erreur); return res.status(503).json({ error: 'Évaluation indisponible' }) }

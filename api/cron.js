@@ -83,6 +83,10 @@
 //   l'envoi qu'il a configure, une seule fois par evaluation et par palier
 //   (marqueur de tache). ⚠ Pas de balayage : `guest_evaluations` est lue par
 //   (status, deadline_at) dans une fenetre de cinq jours, plafonnee a 200.
+// Session #40 (decision de Thierry du 2 octobre 2026) : L'EVALUATION NAIT LE JOUR
+//   DU DEPART (spec §9 bis). Les departs du jour et des deux precedents, lus
+//   dans `menages` par l'index `menages_depart_idx` — pas un balayage —, font
+//   naitre l'evaluation de chaque sejour Airbnb (echeance depart + 14 jours).
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -111,6 +115,7 @@ const { rattraperBloquees } = require('../lib/moteur-creation')
 const { piloterLesBiens } = require('../lib/pilote-quotidien')
 const { channelCall } = require('../lib/channel-fullsync')
 const { relancerEvaluations } = require('../lib/avis/notifications')
+const { naitreAuDepart } = require('../lib/avis/naissance')
 
 // ─── Chrono d'etape ──────────────────────────────────────────────────────────
 // Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
@@ -190,6 +195,7 @@ module.exports = async function handler(req, res) {
     totalNuitsOuvertes: 0,
     totalPrixChanges: 0,
     totalAvisRelances: 0,
+    totalAvisNes: 0,
     circuitBreakerTriggered: 0,
     errors: []
   }
@@ -480,6 +486,20 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur pilote YieldFlow:', err.message)
       results.errors.push({ context: 'pilote_yieldflow', error: err.message })
+    }
+
+    // 4quaterdecies bis. NAISSANCE DES ÉVALUATIONS AU JOUR DU DÉPART (spec §9 bis).
+    // ⚠ Les départs du jour et des deux précédents seulement, par l'index sur
+    // `menages.departure_date` : pas un balayage. Idempotente — une évaluation
+    // née n'est jamais réécrite. Placée AVANT les relances, qui la suivent.
+    try {
+      const bilanNes = await chrono.mesure('naissances_avis', () => naitreAuDepart(supabase))
+      results.totalAvisNes = bilanNes?.crees || 0
+      if (bilanNes?.erreurs) results.errors.push({ context: 'naissances_avis', error: bilanNes.erreurs + ' erreur(s)' })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur naissances avis:', err.message)
+      results.errors.push({ context: 'naissances_avis', error: err.message })
     }
 
     // 4quaterdecies. RELANCES DE L'ÉVALUATION DU VOYAGEUR (lot 6 avis, spec §10).
