@@ -41,7 +41,10 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
                      // Lot 3.3 : la garde du jour, la mémoire de l'escalade, et
                      // les ménages que la pose différée doit examiner.
                      regles = [], exceptions = [], erreurDispos = null,
-                     refus = [], propositions = null } = {}) {
+                     refus = [], propositions = null,
+                     // Les menages dont un TOUR est en cours (`elargirToursEnCours`),
+                     // et le journal des propositions (qui les a posees).
+                     toursEnCours = [], offresJournal = [] } = {}) {
   const etat = { inseres: [], majs: [], journal: [], incidents: [], requetes: [],
                  notifs: [] }
 
@@ -56,7 +59,8 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
         in (c, v) { a.ins = { c, v }; return chain },
         gte (c, v) { a.gte = { c, v }; return chain },
         lte (c, v) { a.lte = { c, v }; return chain },
-        not () { return chain },
+        not (c) { a.not = c; return chain },
+        gt (c, v) { a.gt = { c, v }; return chain },
         lt (c, v) { a.lt = { c, v }; return chain },
         is (c, v) { a.is = { c, v }; return chain },
         // ⚠ Chainable, comme le vrai builder : `.order()` est suivi d'un
@@ -90,6 +94,10 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
           const suite = {
             is (c, v) { q.f[c + '_is'] = v; return suite },
             eq (c, v) { q.f[c] = v; return suite },
+            contains (c, v) { q.cs = v; return suite },
+            containedBy (c, v) { q.cd = v; return suite },
+            gt (c, v) { q.gt = v; return suite },
+            neq (c, v) { q.neq = v; return suite },
             select () { return Promise.resolve({ data: [{ id: q.ids[0] }], error: null }) },
             then (ok, ko) { return Promise.resolve({ data: null, error: null }).then(ok, ko) }
           }
@@ -119,6 +127,8 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
           // `expirerPropositions` lit les propositions echues : un jeu distinct
           // des menages du writer, sinon les deux tests se marcheraient dessus.
           if (expirees !== null && a.lt) return { data: expirees, error: null }
+          // `elargirToursEnCours` lit les menages SOUS proposition non echue.
+          if (a.not === 'proposee_a' && a.gt) return { data: toursEnCours, error: null }
           // `poserPropositionsDues` se reconnait a son filtre `assignment_mode`.
           if (propositions !== null && a.f.assignment_mode === 'garde') {
             return { data: propositions, error: null }
@@ -132,6 +142,10 @@ function preparer ({ snaps = [], menages = [], liaisons = [], erreurSnaps = null
         // la mémoire des refus pour savoir s'il reste quelqu'un (spec
         // proposition-par-rang). Un double figé laissait croire qu'il restait
         // toujours le tour qui venait d'expirer.
+        if (table === 'menage_assignment_log' && a.f.event === 'offered') {
+          return offresJournal === null ? { data: null, error: { message: 'panne du journal' } }
+                                        : { data: offresJournal, error: null }
+        }
         if (table === 'menage_assignment_log') {
           return { data: [...refus, ...etat.journal.filter(l => l.event === 'declined' || l.event === 'expired')],
                    error: null }
@@ -1330,4 +1344,74 @@ test('RANG : expiré SANS porteur alors qu\'une porteuse d\'office est de garde 
   const { expirerPropositions } = require('../lib/cleaning/sync-menages-entite')
   await expirerPropositions(null, { maintenant: T0 })
   assert.strictEqual(etat.incidents.length, 1)
+})
+
+// ─── UN TOUR EN COURS S'ÉLARGIT À QUI DEVIENT DISPONIBLE (2 octobre 2026) ──
+// Le cas réel : Ofuro Futari, mercredi 7 octobre. Proposé à 13 h 20 à Lena
+// seule ; Tiphaine, rang 1 aussi, s'ouvre le 7 à 18 h 09.
+const TOUR_LENA = (o = {}) => ({ id: 'm7', user_id: U, property_id: '209413', departure_date: '2026-09-05',
+  provider_id: null, proposee_a: [LENA], offer_expires_at: '2026-09-03T11:20:38.628Z', ...o })
+
+test('ÉLARGIR : Tiphaine devenue disponible rejoint le tour de Lena, même échéance, et est prévenue', async () => {
+  const etat = preparer({ liaisons: OFURO(), propositions: [], toursEnCours: [TOUR_LENA()] })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  const bilan = await poserPropositionsDues(null, { maintenant: T0 })
+  assert.strictEqual(bilan.elargis, 1)
+  const maj = etat.majs.find(m => m.ids[0] === 'm7')
+  assert.ok(maj, 'le tour en cours est élargi')
+  assert.deepStrictEqual(maj.row.proposee_a, [LENA, TIPHAINE], 'on AJOUTE, Lena garde sa place')
+  assert.strictEqual(maj.row.offer_expires_at, undefined, 'l\'échéance ne bouge pas')
+  assert.deepStrictEqual(maj.cs, [LENA], 'condition sur le tour EXACT lu')
+  assert.deepStrictEqual(maj.cd, [LENA])
+  assert.strictEqual(maj.f.user_id, U)
+  assert.deepStrictEqual(etat.notifs.map(n => n.providerId), [TIPHAINE], 'seule la nouvelle est prévenue')
+  assert.strictEqual(etat.notifs[0].expireLe, '2026-09-03T11:20:38.628Z', 'avec le temps qui RESTE')
+  const l = etat.journal.find(x => x.event === 'offered' && x.to_provider_id === TIPHAINE)
+  assert.ok(l && l.actor === 'cron')
+  assert.ok(!etat.notifs.some(n => n.providerId === LOLA), 'le rang 2 attend toujours')
+})
+
+test('ÉLARGIR : qui a déjà refusé ou laissé expirer ce ménage n\'y revient pas', async () => {
+  const etat = preparer({ liaisons: OFURO(), propositions: [], toursEnCours: [TOUR_LENA()],
+                          refus: [{ menage_id: 'm7', from_provider_id: TIPHAINE, event: 'declined' }] })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  await poserPropositionsDues(null, { maintenant: T0 })
+  assert.strictEqual(etat.majs.length, 0)
+  assert.strictEqual(etat.notifs.length, 0)
+})
+
+test('ÉLARGIR : une proposition faite par l\'HÔTE à une personne n\'est jamais élargie', async () => {
+  const etat = preparer({ liaisons: OFURO(), propositions: [], toursEnCours: [TOUR_LENA()],
+                          offresJournal: [{ menage_id: 'm7', actor: 'host', created_at: '2026-09-01T07:00:00Z' }] })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  await poserPropositionsDues(null, { maintenant: T0 })
+  assert.strictEqual(etat.majs.length, 0, 'le choix de l\'hôte est respecté')
+})
+
+test('ÉLARGIR : un tour complet ne bouge pas — rien n\'est écrit, aucun SMS', async () => {
+  const etat = preparer({ liaisons: OFURO(), propositions: [],
+                          toursEnCours: [TOUR_LENA({ proposee_a: [LENA, TIPHAINE] })] })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  await poserPropositionsDues(null, { maintenant: T0 })
+  assert.strictEqual(etat.majs.length, 0)
+  assert.strictEqual(etat.notifs.length, 0)
+})
+
+test('ÉLARGIR : une PANNE du journal n\'élargit rien (on ne devine pas un choix de l\'hôte)', async () => {
+  const etat = preparer({ liaisons: OFURO(), propositions: [], toursEnCours: [TOUR_LENA()],
+                          offresJournal: null })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  await poserPropositionsDues(null, { maintenant: T0 })
+  assert.strictEqual(etat.majs.length, 0)
+})
+
+test('ÉLARGIR : jamais vers la porteuse, et rien si la porteuse est du rang sollicité', async () => {
+  // Lena porte (elle a accepté un tour précédent) et une proposition subsiste
+  // à côté : le rang 1 est déjà gagné, on n'y ajoute pas Tiphaine.
+  const etat = preparer({ liaisons: OFURO(), propositions: [],
+                          toursEnCours: [TOUR_LENA({ provider_id: LENA, proposee_a: [LOLA] })] })
+  const { poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+  await poserPropositionsDues(null, { maintenant: T0 })
+  assert.strictEqual(etat.majs.length, 0)
+  assert.strictEqual(etat.notifs.length, 0)
 })

@@ -3525,3 +3525,35 @@ rangs restants sollicités en même temps ». Ce n'est PAS la règle livrée (sp
 §2 bis : 1 h minimum par rang, l'un après l'autre). Choix de Thierry : prod tel
 quel, cette règle viendra avec sa spec, son test rouge contre main, sa review
 et sa recette.
+
+## Un tour en cours s'élargit à qui devient disponible (2 octobre 2026)
+
+**Cas réel** : Ofuro Futari, ménage du mercredi 7 octobre. Posé à 13 h 20 à Lena
+seule (Tiphaine, rang 1 aussi, n'était pas de garde ce mercredi-là : semaine
+sans mercredi dans sa récurrence). À 18 h 09, Tiphaine s'ouvre le 7 depuis sa
+PWA — et rien ne l'ajoutait : le tour était calculé une fois pour toutes à la
+pose. Le cas inverse (devenir indisponible → retirée du tour) existait déjà
+(`apres-changement-regles`).
+
+**Correctif** : `elargirToursEnCours` (`lib/cleaning/sync-menages-entite.js`),
+appelé à la fin de `poserPropositionsDues` — donc dans l'étape cron existante,
+**`api/cron.js` inchangé**. À chaque cycle, chaque tour en cours (garde, auto,
+non échu, dans la fenêtre de proposition) est recalculé par le MÊME moteur
+(`deciderParGarde` + mémoire des refus) ; les candidates qu'il solliciterait et
+qui ne sont pas dans la liste y sont **ajoutées** :
+- on ajoute, on ne retire jamais ; **l'échéance ne bouge pas** (la nouvelle
+  venue a le temps qui reste, les autres ne voient pas leur tour prolongé) ;
+- un point unique couvre tous les chemins (exception de la prestataire ou de
+  l'hôte, absence retirée, règle, congé supprimé, rang changé) : l'ajout arrive
+  au plus 5 minutes après le geste ;
+- **jamais une proposition de l'hôte** : elle ne pose pas de verrou `manual`
+  sur la ligne ; seul le journal la distingue (dernière ligne `offered`
+  d'acteur `host`). Panne de lecture du journal → on n'élargit rien ;
+- jamais vers la porteuse, et rien si la porteuse est du rang sollicité (tour
+  déjà gagné) ;
+- écriture conditionnelle sur le tour exact lu ; une ligne `offered` (acteur
+  `cron`) par nouvelle ; SMS sous le plafond par cycle, **partagé** avec la pose.
+
+Tests : section « ÉLARGIR » de `tests/cleaning-sync-menages-entite.test.js`.
+Contre `main` : le cas réel rougit. Mutations : retirer la garde « hôte » fait
+rougir son test ; retirer la mémoire des refus fait rougir le sien.
