@@ -519,10 +519,10 @@ test('un modele ecarte par l\'hote est NON ENVOYÉ ; un modele traite le dit san
   ]
   tables.agent_tasks.push(
     tache({ task_type: 'auto_message', status: 'ignored', guest_message: '[AUTO: arrival]', created_at: '2026-10-01T09:00:00Z' }),
-    tache({ task_type: 'auto_message', status: 'done', guest_message: '[AUTO: departure]', created_at: '2026-10-01T09:00:00Z', updated_at: '2026-10-01T10:00:00Z' }))
+    tache({ task_type: 'auto_message', status: 'done', guest_message: '[AUTO: departure]', created_at: '2026-10-01T09:00:00Z' }))
   const bloc = await promptPour(tables)
   assert.ok(/avant l'arrivée : NON ENVOYÉ — écarté par l'hôte/.test(bloc), bloc)
-  assert.ok(/Message de départ : traité par l'hôte le 01\/10\/2026 (à )?12:00 \(envoi non garanti\)/.test(bloc), bloc)
+  assert.ok(/Message de départ : traité par l'hôte \(envoi non garanti\)/.test(bloc), bloc)
 })
 
 test('le prompt demande de croire le voyageur qui dit ne pas avoir recu', async () => {
@@ -556,4 +556,34 @@ test('un modele refuse n\'est re-tente qu\'une fois par invocation', () => avecV
   await mod.processChannelPropertyMessages(U, bien, bilan)
   assert.deepStrictEqual(appelsIA.map(r => r.model), ['claude-inconnu-9', 'claude-haiku-4-5-20251001', 'claude-haiku-4-5-20251001'])
   assert.strictEqual(bilan.errors.filter(e => e.context === 'guestflow_model_refuse').length, 1)
+}))
+
+test('deux modeles du meme type : une tache en attente l\'emporte sur une tache traitee', async () => {
+  const tables = tablesVides()
+  tables.message_templates = [{ id: 'tpl-code', user_id: U, property_id: P, event_type: 'menage_done', active: true }]
+  tables.message_sent_log = [{ user_id: U, booking_id: B, template_id: 'tpl-code', sent_at: '2026-10-01T12:00:00Z' }]
+  tables.agent_tasks.push(
+    tache({ task_type: 'auto_message', status: 'pending_validation', guest_message: '[AUTO: arrival_code]', created_at: '2026-10-01T11:00:00Z' }),
+    tache({ task_type: 'auto_message', status: 'done', guest_message: '[AUTO: arrival_code]', created_at: '2026-10-01T12:00:00Z' }))
+  const bloc = await promptPour(tables)
+  assert.ok(/Code d'accès[^\n]*: NON ENVOYÉ — en attente/.test(bloc), bloc)
+})
+
+test('un refus de modele ne survit pas au cycle : le cycle suivant re-tente le modele configure', () => avecVariable('claude-sonnet-5-5', async () => {
+  // Constat de review : memorise en variable de module, un 400 isole abandonnait
+  // Sonnet pour toute la vie de l'instance chaude. Meme module, deux cycles.
+  let refuser = true
+  const fil = [{ bookingId: 'b1', sender: 'guest', message: 'Merci !', time: t(1) }]
+  const { mod, appelsIA } = charger({ tables: tablesVides(), messagesChannex: fil, creer: (req) => {
+    if (refuser && req.model !== 'claude-haiku-4-5-20251001') { const e = new Error('invalid character'); e.status = 400; throw e }
+    return { content: sympathie }
+  } })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.deepStrictEqual(appelsIA.map(r => r.model), ['claude-sonnet-5-5', 'claude-haiku-4-5-20251001'])
+  refuser = false
+  fil.push({ bookingId: 'b2', sender: 'guest', message: 'Merci beaucoup !', time: t(2) })
+  appelsIA.length = 0
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 1, 'un nouveau fil, un appel')
+  assert.strictEqual(appelsIA[0].model, 'claude-sonnet-5-5', 'le nouveau cycle repart du modele configure')
 }))
