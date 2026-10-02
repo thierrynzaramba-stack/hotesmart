@@ -57,14 +57,15 @@ test('un avis negatif part quand c’est l’HOTE qui valide', async () => {
 
 test('un avis NON negatif part sur le pouvoir de la prestataire', async () => {
   const p = provider()
-  const r = await publier({ evaluation: evaluation(), parProfil: { eval_power: 'valider', eval_scope: 'selon_grille' }, provider: p })
+  // Ses reponses a ELLE : depuis l'option B, une reponse de l'hote lui rend la publication.
+  const r = await publier({ evaluation: evaluation({ answers_host: null, answers_cleaner: REPONSES }), parProfil: { eval_power: 'valider', eval_scope: 'selon_grille' }, provider: p })
   assert.strictEqual(r.statut, 'publiee')
 })
 
 test('la prestataire sans pouvoir ne publie pas, meme un avis flatteur', async () => {
   const p = provider()
   await assert.rejects(
-    () => publier({ evaluation: evaluation(), parProfil: { eval_power: 'soumettre', eval_scope: 'selon_grille' }, provider: p }),
+    () => publier({ evaluation: evaluation({ answers_host: null, answers_cleaner: REPONSES }), parProfil: { eval_power: 'soumettre', eval_scope: 'selon_grille' }, provider: p }),
     (e) => e.motif === 'pouvoir_insuffisant')
   assert.deepStrictEqual(p.appels, [])
 })
@@ -391,3 +392,19 @@ for (const evalScope of ['aucun', undefined, null]) {
     assert.deepStrictEqual(p.appels, [], 'rien ne part chez le provider')
   })
 }
+
+// ─── Option B (decision de Thierry du 2 octobre 2026) ───────────────────────
+test('LE TEST QUI COMPTE : des que l’hote a repondu, la prestataire ne publie plus — meme « valider »', async () => {
+  const p = provider()
+  await assert.rejects(
+    () => publier({ evaluation: evaluation({ answers_cleaner: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait' }, answers_host: { communication: 'excellente', regles: 'oui', recommande: 'oui' } }),
+      parProfil: { eval_power: 'valider', eval_scope: 'selon_grille' }, provider: p }),
+    (e) => e.motif === 'reponses_de_l_hote')
+  assert.deepStrictEqual(p.appels, [], 'rien ne part')
+})
+
+test('l’hote, lui, publie son evaluation complete', async () => {
+  const p = provider()
+  const r = await publier({ evaluation: evaluation(), parProfil: null, provider: p })
+  assert.strictEqual(r.statut, 'publiee')
+})

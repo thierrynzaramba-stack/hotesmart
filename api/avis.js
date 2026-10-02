@@ -15,7 +15,7 @@ const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
-const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser } = require('../lib/avis/evaluations')
+const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu } = require('../lib/avis/evaluations')
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
@@ -1248,6 +1248,7 @@ async function evaluationLire (req, res, garde) {
     role, evalPower, negatif,
     completRole: ouverts.length > 0 && ouverts.every(repondu),
     completTotal: (grille.criteres || []).length > 0 && (grille.criteres || []).every(repondu),
+    hoteARepondu: hoteARepondu(e),
   })
 
   return res.status(200).json({
