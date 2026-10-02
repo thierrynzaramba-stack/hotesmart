@@ -289,6 +289,16 @@
     // quand les evaluations apparaissent.
     await monter(zone, { bus: hsBus })
     zone.style.display = ''
+    // ⚠ `?evaluer=<booking_uid>` OUVRE LA FENÊTRE D'ÉVALUATION (spec §10 : le
+    // lien de la notification « évaluez le voyageur » mène ici, fenêtre ouverte).
+    // Par le bus, comme le bouton de la liste : droit absent ou séjour inconnu =
+    // « indisponible », et rien ne s'ouvre. On retire le paramètre ensuite, pour
+    // qu'un rechargement ne rouvre pas la fenêtre.
+    const aEvaluer = new URLSearchParams(location.search).get('evaluer')
+    if (aEvaluer && aEvaluer.length <= 200 && hsBus) {
+      try { history.replaceState(null, '', location.pathname) } catch { /* sans historique */ }
+      await hsBus.ouvrir('avis.evaluer', { booking_uid: aEvaluer })
+    }
   } catch (e) {
     console.error('[avis] evaluations du voyageur', e)
   }

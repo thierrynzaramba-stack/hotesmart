@@ -17,6 +17,11 @@
 // Usage :
 //   node --env-file=.env.staging scripts/recette-avis-staging.js            (etat)
 //   node --env-file=.env.staging scripts/recette-avis-staging.js --decor    (cree une evaluation a remplir)
+//   node --env-file=.env.staging scripts/recette-avis-staging.js --decor-pwa
+//        (lots 5 a 7 : une prestataire PAR LIEN, NON autorisee, un sejour
+//         Airbnb termine hier et un menage a elle PAS ENCORE FAIT — c'est la
+//         recette qui clique « Menage fait ». Le lien de sa PWA porte un JETON :
+//         il est ecrit dans ~/recette-avis-lien-pwa.txt, jamais affiche.)
 //   node --env-file=.env.staging scripts/recette-avis-staging.js --role=membre
 //   node --env-file=.env.staging scripts/recette-avis-staging.js --role=prestataire
 //   node --env-file=.env.staging scripts/recette-avis-staging.js --nettoyer
@@ -70,11 +75,67 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
     }
     // Les criteres de recette aussi.
     await sb.from('avis_criteres').delete().eq('user_id', compte).like('libelle', `${MARQUE}%`)
+    // Le decor PWA (--decor-pwa) : taches, etat du fil, menage, sejour, lien,
+    // personne. ⚠ Chaque suppression est LUE, et ce qui reste est COMPTE
+    // (constat de revue : un reste passait sans bruit).
+    const pwa = [
+      ...['agent_tasks', 'conversation_flags'].map(t => [t, 'user_id', 'book_id', `${MARQUE}%`]),
+      ...['menage_done', 'menages', 'bookings_snapshot'].map(t => [t, 'user_id', 'booking_id', `${MARQUE}%`]),
+      ['public_tokens', 'user_id', 'label', `${MARQUE}%`],
+      ['profiles', 'account_user_id', 'pwa_token', `${MARQUE.toLowerCase()}%`],
+    ]
+    for (const [t, cCompte, c, motif] of pwa) {
+      const { error } = await sb.from(t).delete().eq(cCompte, compte).like(c, motif)
+      if (error) ko(`nettoyage ${t} : ${error.message}`)
+      const { count } = await sb.from(t).select('*', { count: 'exact', head: true }).eq(cCompte, compte).like(c, motif)
+      if (count) ko(`${t} : ${count} ligne(s) de decor restante(s)`)
+    }
     const { count: reste } = await sb.from('guest_evaluations')
       .select('*', { count: 'exact', head: true }).eq('user_id', compte).like('booking_uid', `${MARQUE}%`)
     console.log(`Nettoyage : ${(evals || []).length} evaluation(s) retiree(s), ${reste || 0} restante(s)`)
     if (reste) { ko('le decor de recette n a pas ete entierement retire'); process.exit(1) }
     ok('decor de recette retire')
+    return
+  }
+
+  // ─── Le decor de la PWA (lots 5 a 7) ─────────────────────────────────────
+  if (a('decor-pwa')) {
+    const os = require('node:os')
+    const fs = require('node:fs')
+    const path = require('node:path')
+    const suffixe = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')
+    const BK = `${MARQUE}-PWA-${suffixe}`
+    const jeton = `${MARQUE.toLowerCase()}-pwa-${crypto.randomBytes(12).toString('hex')}`
+    const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+    // Une nuit au moins : un sejour de zero nuit ne se dessine pas au calendrier.
+    const avantHier = new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10)
+    const REF = String(bienA.provider_property_id)
+    const { data: profil, error: eP } = await sb.from('profiles').insert({
+      account_user_id: compte, first_name: 'Recette', last_name: 'PWA',
+      access_mode: 'lien', active: true, accepted_at: new Date().toISOString(),
+      // ⚠ NON AUTORISEE : la recette l'autorise elle-meme depuis la fiche.
+      pwa_token: jeton, eval_scope: 'aucun', eval_power: 'soumettre',
+    }).select().single()
+    if (eP) { ko(`prestataire impossible : ${eP.message}`); process.exit(1) }
+    const etapes = [
+      ['public_tokens', { user_id: compte, token: jeton, label: `${MARQUE} PWA`, property_ids: [REF] }],
+      ['bookings_snapshot', { user_id: compte, booking_id: BK, property_id: REF,
+        snapshot: { provider: 'channex', source: 'AirBNB', arrival: avantHier, departure: hier, firstName: 'Voyageur', lastName: 'Recette', status: 'confirmed' } }],
+      ['menages', { user_id: compte, property_id: REF, booking_id: BK, departure_date: hier, provider_id: profil.id, status: 'accepted', assigned_by: 'manual' }],
+    ]
+    for (const [table, ligne] of etapes) {
+      const { error } = await sb.from(table).insert(ligne)
+      if (error) { ko(`${table} : ${error.message} — relance --nettoyer`); process.exit(1) }
+    }
+    // ⚠ LE LIEN PORTE UN JETON : il s'ecrit dans un fichier hors du depot, que
+    // Thierry ouvre lui-meme. Le terminal ne dit que son nom et sa longueur.
+    const lien = `https://hotesmart-staging.vercel.app/apps/menages/public?token=${jeton}`
+    const fichier = path.join(os.homedir(), 'recette-avis-lien-pwa.txt')
+    fs.writeFileSync(fichier, lien + '\n', { mode: 0o600 })
+    ok(`prestataire « Recette PWA » creee, PAR LIEN, NON autorisee (a autoriser depuis sa fiche)`)
+    ok(`sejour Airbnb termine hier sur « ${bienA.name} », menage a elle, PAS encore fait`)
+    console.log(`        lien de sa PWA : ecrit dans ${fichier} (${lien.length} caracteres)`)
+    console.log('        a la fin : --nettoyer retire tout ce decor')
     return
   }
 

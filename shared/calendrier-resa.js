@@ -116,3 +116,57 @@ export function messageCapacite (adultes, enfants, capacite) {
     ? 'Ce bien accueille ' + capacite + ' personne' + (capacite > 1 ? 's' : '') + ' au maximum — vous en avez saisi ' + total + '.'
     : null
 }
+
+// ─── L'évaluation du voyageur, sur la fiche (lot 5 du chantier avis) ────────
+// UNE fonction pour l'ordinateur et le téléphone (la règle « le mobile suit
+// l'ordinateur ») : après le départ, le cœur dit où en est l'évaluation du
+// séjour — PAR LE BUS, jamais par ses tables ni son endpoint.
+//   - publiée          → « Évaluation publiée ✓ » ;
+//   - à faire + droit  → un bouton « Évaluer ce voyageur » qui ouvre la
+//                        fenêtre du cœur (`avis.evaluer`) ;
+//   - rien à dire      → la zone reste vide (Booking, réservation directe,
+//                        pas encore d'évaluation, droit absent, bus absent).
+// ⚠ LE BUS SE CHARGE À LA DEMANDE : un import statique qui échouerait ferait
+// tomber le calendrier entier. ⚠ `encoreAffichee` : une réponse tardive ne
+// peint pas la fiche suivante.
+function aujourdhuiLocal () {
+  const d = new Date()
+  const p = (n) => String(n).padStart(2, '0')
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+}
+
+export async function brancherEvaluation ({ resa, cible, encoreAffichee = () => true, bus = undefined, aujourdhui = aujourdhuiLocal() } = {}) {
+  if (!resa || !cible) return 'rien'
+  cible.innerHTML = ''
+  // Une réservation sans identifiant n'a pas d'évaluation : pas d'appel inutile.
+  if (resa.id == null || resa.id === '') return 'rien'
+  const depart = String(resa.checkout || '').slice(0, 10)
+  if (!depart || depart > aujourdhui) return 'avant_depart'
+  let b = bus
+  if (b === undefined) {
+    try { b = (await import('./hs-bus.js')).hsBus } catch { b = null }
+  }
+  if (!b) return 'sans_bus'
+  const bookingUid = String(resa.id)
+  const r = await b.demander('avis.statut', { booking_uid: bookingUid })
+  if (!encoreAffichee() || !r || !r.ok || !r.data) return 'rien'
+  const peindrePubliee = () => {
+    cible.innerHTML = '<div style="margin:0 0 12px;padding:8px 12px;border-radius:8px;background:#eef8f0;color:#1E7B34;font-size:13px">⭐ Évaluation publiée ✓</div>'
+  }
+  if (r.data.etat === 'publiee') { peindrePubliee(); return 'publiee' }
+  if (!r.data.evaluable) return 'rien'
+  if (!(await b.disponible('avis.evaluer')) || !encoreAffichee()) return 'sans_droit'
+  // 44 px de haut au moins : la cible tactile d'un doigt, dans la feuille du téléphone.
+  cible.innerHTML = '<button type="button" style="width:100%;min-height:44px;margin:0 0 12px;padding:12px;border:0;border-radius:8px;background:#fff8e6;color:#7a5200;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit">⭐ Évaluer ce voyageur</button>'
+  cible.querySelector('button').addEventListener('click', () => b.ouvrir('avis.evaluer', { booking_uid: bookingUid }))
+  // ⚠ PUBLIÉE PENDANT QUE LA FICHE EST OUVERTE : elle le dit tout de suite,
+  // au lieu de garder un bouton qui mènerait à « déjà publiée ».
+  if (typeof b.ecouter === 'function') {
+    const stop = b.ecouter('avis.evaluation_publiee', (d) => {
+      if (!d || String(d.booking_uid) !== bookingUid) return
+      if (encoreAffichee()) peindrePubliee()
+      if (typeof stop === 'function') stop()
+    })
+  }
+  return 'bouton'
+}

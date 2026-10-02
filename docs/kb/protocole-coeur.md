@@ -83,8 +83,8 @@ indisponible : les apps peuvent écrire leur bouton avant que le cœur ne livre.
 |---|---|---|---|---|
 | `avis.evaluer` | fenêtre | `avis: write` | `booking_uid` | **livrée** (lot 4) |
 | `avis.statut` | requête | `avis: read` | `booking_uid` | **livrée** (lot 4) |
-| `avis.questions_prestataire` | fenêtre | jeton | `menage_event_id` | à venir (lot 5) |
-| `avis.reglages_prestataire` | requête | `avis: write` | `profile_id` | à venir |
+| `avis.questions_prestataire` | fenêtre | jeton | `property_id`, `booking_id`, `departure_date` | **livrée** (lot 5) |
+| `avis.reglages_prestataire` | requête | `avis: write` | `profile_id` (+ `eval_scope`, `eval_power` pour écrire) | **livrée** (lot 5) |
 
 **Ce que rend `avis.statut`** : `{ etat, libelle, evaluable, publie_le, echeance,
 role }`. `etat` vaut un statut de la spec §6, ou `absente` (aucune évaluation pour
@@ -97,6 +97,26 @@ enregistre, rédige (hôte seulement), publie, abandonne. Elle **ne décide rien
 les notes, le garde-fou du négatif et le périmètre par bien sont tranchés au
 serveur. Elle demande une **confirmation explicite** avant de publier un avis
 négatif (spec §3), en plus du refus serveur.
+
+**Ce que fait `avis.questions_prestataire`** (contrat changé au lot 5, le
+2 octobre 2026 : `menage_event_id` → le triplet du ménage, que la PWA connaît
+au moment de « Ménage fait » — la même clé que `markDone`). C'est la fenêtre de
+l'hôte avec un autre transport : ses appels partent **par le jeton** vers
+`pwa-evaluation` / `pwa-reponses` / `pwa-publier` de `api/avis.js`, qui
+vérifient que le lien désigne une prestataire active, que le ménage est **le
+sien** et **fait**, que le séjour est Airbnb par Channex, et que l'hôte l'a
+**autorisée** — puis appliquent les mêmes gardes que la session. La première
+lecture fait **naître** l'évaluation (décision D2). Rien à faire (non
+autorisée, séjour non évaluable, ménage pas à elle, grille sans question pour
+elle) : la fenêtre se **referme sans rien dire**.
+
+**Ce que fait `avis.reglages_prestataire`** : sans `eval_scope` ni `eval_power`,
+elle LIT `{ ok, profile_id, eval_scope, eval_power }` ; avec l'un d'eux, elle
+l'ÉCRIT et rend la même forme. Un refus du serveur revient comme une donnée,
+`{ ok: false, statut, motif, erreur }` — par exemple `perimetre_partiel` pour un
+membre qui ne voit pas tout le compte, ou `prestataire_appelante` pour une
+prestataire qui voudrait régler ses propres pouvoirs. `eval_scope` vaut
+`aucun` tant que l'hôte n'a pas autorisé (décision D1 du 2 octobre 2026).
 
 Un module d'action **ne lève pas** sur un refus attendu : il l'affiche. Si un
 module lève, le bus ferme la fenêtre et répond `indisponible`, et l'utilisateur

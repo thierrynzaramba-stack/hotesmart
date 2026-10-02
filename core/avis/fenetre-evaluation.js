@@ -20,6 +20,7 @@
 // formulaire rempli sans comprendre pourquoi il l'a sur les bras.
 
 import { appel as appelParDefaut } from './appel.js'
+import { hsBus } from '../../shared/hs-bus.js'
 
 const ETAT_LISIBLE = {
   a_remplir: 'À remplir',
@@ -58,6 +59,7 @@ const MOTIF_LISIBLE = {
   deja_chez_le_provider: 'L’avis était déjà parti chez la plateforme : il est maintenant marqué publié.',
   grille_sans_jugement: 'La grille ne produit ni note ni recommandation : complétez-la dans Réglages.',
   provider_inconnu: 'La plateforme de ce séjour est inconnue : contactez le support.',
+  prestataire_non_autorisee: 'L’hôte ne vous a pas autorisée à participer aux évaluations.',
 }
 
 const echapper = (t) => String(t == null ? '' : t)
@@ -189,6 +191,12 @@ export async function ouvrir (ctx = {}) {
       })
       etat.evaluation.status = r.status
       etat.evaluation.published_at = r.published_at
+      // ⚠ L'EVENEMENT DU COEUR, pour que l'app qui a ouvert la fenetre se mette
+      // a jour (le bandeau de la messagerie, la fiche du calendrier). Sans bus
+      // (tests, page sans lui), rien ne part : ce n'est pas une erreur.
+      if (r.status === 'publiee' && hsBus && (etat.evaluation.booking_uid || params.booking_uid)) {
+        try { hsBus.emettre('avis.evaluation_publiee', { booking_uid: etat.evaluation.booking_uid || params.booking_uid, published_at: r.published_at }) } catch { /* sans auditeur, sans effet */ }
+      }
       // ⚠ LA SIMULATION SE DIT. Un « Avis publie » identique dans les deux modes
       // ferait croire a une recette qu'elle vient d'envoyer un avis reel.
       etat.message = r.simulation

@@ -19,6 +19,10 @@ const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandon
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
+// Naissance 1 : la prestataire ouvre ses questions apres « Menage fait » (decision D2).
+const { assurerEvaluation } = require('../lib/avis/naissance')
+// Lot 6 : l'hote est prevenu quand la prestataire a rempli sa part (spec §10).
+const { prevenirHote } = require('../lib/avis/notifications')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -586,6 +590,258 @@ function peutEcrireAuNiveauCompte (garde) {
   return refsDuPerimetre(garde.contexte) === null
 }
 
+// ─── Les reglages d'une prestataire (action `avis.reglages_prestataire`) ────
+// Lot 5, 2 octobre 2026. La fiche prestataire de l'app menage lit et ecrit,
+// PAR LE BUS, les deux reglages que la spec §2.5 lui donne :
+//   - `eval_scope` : participe-t-elle aux evaluations ? (`aucun` | `selon_grille`)
+//     — « seulement si l'hote l'y autorise » (decision D1) ;
+//   - `eval_power` : soumet-elle a l'hote, ou publie-t-elle (`soumettre` | `valider`) ?
+//     Un avis negatif repasse TOUJOURS par l'hote, quel que soit ce pouvoir (§3).
+//
+// ⚠ TROIS GARDES, toutes avant la moindre lecture :
+//   1. l'appelant n'est pas une prestataire — sinon une prestataire munie d'une
+//      session s'accorderait elle-meme le pouvoir de publier ;
+//   2. il voit TOUT le compte (meme regle que la grille de niveau compte) : une
+//      prestataire travaille sur plusieurs biens, son pouvoir les engage tous ;
+//   3. le profil vise appartient au compte de la GARDE, et c'est une prestataire
+//      (`access_mode = 'lien'`). Un profil d'un autre compte et un profil
+//      inexistant rendent le meme 404 : on n'apprend pas qu'il existe ailleurs.
+const EVAL_SCOPES = new Set(['aucun', 'selon_grille'])
+const EVAL_POWERS = new Set(['soumettre', 'valider'])
+
+function refusReglagesPrestataire (res, garde) {
+  if (roleEtReglages(garde).role === 'prestataire') {
+    res.status(403).json({ error: 'Une prestataire ne règle pas ses propres pouvoirs.', motif: 'prestataire_appelante' })
+    return true
+  }
+  if (!peutEcrireAuNiveauCompte(garde)) {
+    res.status(403).json({
+      error: 'Les réglages d’une prestataire engagent tous les biens : ils se modifient depuis un périmètre complet.',
+      motif: 'perimetre_partiel',
+    })
+    return true
+  }
+  return false
+}
+
+async function profilPrestataire (res, garde, profileId) {
+  if (!UUID_RE.test(String(profileId || ''))) {
+    res.status(400).json({ error: 'Identifiant de prestataire invalide' }); return null
+  }
+  const { data, error } = await supabase.from('profiles')
+    .select('id, first_name, access_mode, eval_scope, eval_power')
+    .eq('id', profileId).eq('account_user_id', garde.accountUserId).maybeSingle()
+  if (error) { res.status(503).json({ error: 'Profil illisible', detail: error.message }); return null }
+  if (!data) { res.status(404).json({ error: 'Prestataire introuvable' }); return null }
+  if (data.access_mode !== 'lien') {
+    res.status(409).json({
+      error: 'Ce profil n’est pas une prestataire : ses droits se règlent dans Équipe et droits.',
+      motif: 'pas_une_prestataire',
+    })
+    return null
+  }
+  return data
+}
+
+const vueReglages = (p) => ({
+  profile_id: p.id,
+  // Une valeur absente se lit comme le serveur la juge : `aucun`, `soumettre`.
+  eval_scope: EVAL_SCOPES.has(p.eval_scope) ? p.eval_scope : 'aucun',
+  eval_power: EVAL_POWERS.has(p.eval_power) ? p.eval_power : 'soumettre',
+})
+
+// GET prestataire-reglages
+async function prestataireReglagesLire (req, res, garde) {
+  if (refusReglagesPrestataire(res, garde)) return
+  const p = await profilPrestataire(res, garde, req.query?.profile_id)
+  if (!p) return
+  return res.status(200).json({ ok: true, ...vueReglages(p) })
+}
+
+// POST prestataire-reglages-maj { profile_id, eval_scope?, eval_power? }
+async function prestataireReglagesEcrire (req, res, garde) {
+  if (refusReglagesPrestataire(res, garde)) return
+  const corps = req.body || {}
+  const maj = {}
+  if (corps.eval_scope !== undefined) {
+    if (!EVAL_SCOPES.has(corps.eval_scope)) return res.status(400).json({ error: `Participation inconnue : « ${corps.eval_scope} »` })
+    maj.eval_scope = corps.eval_scope
+  }
+  if (corps.eval_power !== undefined) {
+    if (!EVAL_POWERS.has(corps.eval_power)) return res.status(400).json({ error: `Pouvoir inconnu : « ${corps.eval_power} »` })
+    maj.eval_power = corps.eval_power
+  }
+  if (!Object.keys(maj).length) return res.status(400).json({ error: 'Aucun réglage à modifier' })
+
+  const p = await profilPrestataire(res, garde, corps.profile_id)
+  if (!p) return
+  // ⚠ LES MEMES CONDITIONS DANS L'UPDATE que dans la lecture : compte de la
+  // garde et acces par lien. Entre les deux requetes, le profil ne peut pas
+  // changer de compte ni devenir un membre sans que l'ecriture echoue.
+  const { data, error } = await supabase.from('profiles').update(maj)
+    .eq('id', p.id).eq('account_user_id', garde.accountUserId).eq('access_mode', 'lien')
+    .select('id, eval_scope, eval_power')
+  if (error) return res.status(503).json({ error: 'Réglages non enregistrés', detail: error.message })
+  if (!Array.isArray(data) || data.length !== 1) return res.status(409).json({ error: 'Le profil a changé pendant l’enregistrement : rechargez la fiche.' })
+  return res.status(200).json({ ok: true, ...vueReglages(data[0]) })
+}
+
+// ─── La PWA prestataire : identite par JETON (`avis.questions_prestataire`) ─
+// Lot 5, 2 octobre 2026. Une prestataire n'a pas de compte : elle entre par le
+// lien de sa PWA. Le jeton ne vaut rien par lui-meme — il DESIGNE une personne,
+// et c'est elle qui porte le droit (meme regle que api/menages-public.js).
+//
+// Cinq gardes, toutes avant la moindre ecriture, puis les MEMES fonctions que
+// la session (lecture, reponses, publication) avec une garde BORNEE :
+//   1. le jeton designe un profil ACTIF en acces par lien, sur le compte de la
+//      ligne `public_tokens` ;
+//   2. le menage (bien, reservation, date de depart) est LE SIEN —
+//      `menages.provider_id` est elle. Pas de repli « dans le perimetre du
+//      lien » : evaluer un sejour engage plus qu'un menage marque fait ;
+//   3. le menage est MARQUE FAIT (`menage_done`) : les questions viennent
+//      apres, jamais avant (spec §8.6) ;
+//   4. le sejour est Airbnb par Channex, le seul evaluable en V1 ;
+//   5. l'hote l'a AUTORISEE (`eval_scope = selon_grille`, decision D1). Sans
+//      autorisation, rien ne nait : une evaluation qu'elle ne pourrait pas
+//      remplir n'a rien a faire en base.
+//
+// ⚠ UNE PANNE COUPE EN 503, ELLE NE SE FAIT PAS PASSER POUR UN LIEN INVALIDE —
+// comme dans api/menages-public.js.
+const JOUR_RE = /^\d{4}-\d{2}-\d{2}$/
+const JOURS_EVALUABLES = 30
+
+async function porteurDuJeton (token) {
+  const { data: pt, error } = await supabase.from('public_tokens')
+    .select('user_id').eq('token', token).maybeSingle()
+  if (error) return { statut: 503 }
+  if (!pt) return { statut: 401 }
+  const { data: profil, error: eP } = await supabase.from('profiles')
+    .select('id, first_name, active, accepted_at, eval_scope, eval_power')
+    .eq('account_user_id', pt.user_id).eq('pwa_token', token)
+    .eq('access_mode', 'lien').maybeSingle()
+  if (eP) return { statut: 503 }
+  if (!profil || profil.active === false) return { statut: 401 }
+  return { userId: pt.user_id, profil }
+}
+
+// Le sejour de CE menage, s'il est a elle, fait, et evaluable.
+async function sejourDuMenage (userId, profil, { propertyRef, bookingId, departureDate }) {
+  const { data: menage, error } = await supabase.from('menages')
+    .select('provider_id').eq('user_id', userId).eq('property_id', propertyRef)
+    .eq('booking_id', bookingId).eq('departure_date', departureDate).maybeSingle()
+  if (error) return { statut: 503 }
+  if (!menage || menage.provider_id !== profil.id) {
+    return { statut: 403, corps: { error: 'Ce ménage ne vous est pas attribué', motif: 'menage_pas_a_elle' } }
+  }
+  const { data: fait, error: eF } = await supabase.from('menage_done')
+    .select('booking_id').eq('user_id', userId).eq('property_id', propertyRef)
+    .eq('booking_id', bookingId).eq('departure_date', departureDate).maybeSingle()
+  if (eF) return { statut: 503 }
+  if (!fait) return { statut: 409, corps: { error: 'Marquez d’abord le ménage comme fait.', motif: 'menage_pas_fait' } }
+
+  const { data: biens, error: eB } = await supabase.from('properties')
+    .select('id, provider_property_id').eq('user_id', userId).eq('provider_property_id', propertyRef)
+  if (eB) return { statut: 503 }
+  if (!Array.isArray(biens) || biens.length !== 1) {
+    return { statut: 409, corps: { error: 'Bien introuvable ou ambigu : contactez votre hôte.', motif: 'bien_ambigu' } }
+  }
+  const { data: snap, error: eS } = await supabase.from('bookings_snapshot')
+    .select('booking_id, snapshot').eq('user_id', userId).eq('property_id', propertyRef)
+    .eq('booking_id', bookingId).maybeSingle()
+  if (eS) return { statut: 503 }
+  const sp = (snap && snap.snapshot) || {}
+  const provider = String(sp.provider || '').toLowerCase()
+  const ota = /airbnb/i.test(String(sp.source || '')) ? 'airbnb' : String(sp.source || '').toLowerCase()
+  if (!snap || provider !== 'channex' || ota !== 'airbnb') {
+    return { statut: 409, corps: { error: 'Ce séjour ne s’évalue pas ici : seuls les séjours Airbnb le sont.', motif: 'non_evaluable' } }
+  }
+  return { bien: { id: biens[0].id, ref: String(propertyRef) }, bookingUid: String(snap.booking_id), provider, ota }
+}
+
+// La garde d'une prestataire entrée par son lien : role prestataire, `avis:
+// write` sur CE SEUL bien. Elle a la forme d'une garde de session pour que la
+// lecture, les reponses et la publication s'appliquent sans copie — avec leurs
+// gardes (negatif, pouvoir, couverture de la grille, autorisation).
+function gardeDuJeton (userId, profil, bien) {
+  const pseudo = 'jeton:' + profil.id
+  const p = {
+    ...profil, access_mode: 'lien', active: true,
+    accepted_at: profil.accepted_at || 'lien',
+    member_user_id: pseudo, account_user_id: userId,
+  }
+  return {
+    ok: true, accountUserId: userId, userId: pseudo,
+    contexte: {
+      userId: pseudo, accountUserId: userId, profil: p,
+      permissions: { avis: 'write', property_scope: 'selected', property_ids: [bien.id], property_refs: [bien.ref] },
+    },
+  }
+}
+
+async function routePwa (req, res, action) {
+  const attendue = action === 'pwa-evaluation' ? 'GET' : 'POST'
+  if (req.method !== attendue) return res.status(405).json({ error: 'Méthode non autorisée' })
+  const src = attendue === 'GET' ? (req.query || {}) : (req.body || {})
+  const token = String((req.query && req.query.token) || src.token || '')
+  if (!token || token.length > 200) return res.status(401).json({ error: 'Lien invalide' })
+
+  const propertyRef = String(src.property_id || '').trim()
+  const bookingId = String(src.booking_id || '').trim()
+  const departureDate = String(src.departure_date || '').trim()
+  if (!propertyRef || !bookingId || propertyRef.length > 100 || bookingId.length > 200 || !JOUR_RE.test(departureDate)) {
+    return res.status(400).json({ error: 'Ménage non identifié (bien, réservation, date de départ)' })
+  }
+  // ⚠ UN DEPART RECENT SEULEMENT. Constat de revue : un menage ancien, a elle et
+  // fait, faisait naitre une evaluation sans echeance qui restait pour toujours
+  // dans la liste de l'hote. La fenetre est celle de Channex (`expired_at =
+  // received_at + 30 jours`, mesure du 24 septembre 2026).
+  const ageJours = (Date.now() - Date.parse(departureDate + 'T00:00:00Z')) / 86400000
+  if (!(ageJours >= -1 && ageJours <= JOURS_EVALUABLES)) {
+    return res.status(409).json({ error: 'Ce séjour n’est plus évaluable.', motif: 'non_evaluable' })
+  }
+
+  const porteur = await porteurDuJeton(token)
+  if (porteur.statut === 503) return res.status(503).json({ error: 'Service temporairement indisponible' })
+  if (porteur.statut) return res.status(401).json({ error: 'Lien invalide' })
+  const { userId, profil } = porteur
+
+  if (profil.eval_scope !== 'selon_grille') {
+    return res.status(403).json({ error: 'L’hôte ne vous a pas autorisée à participer aux évaluations.', motif: 'prestataire_non_autorisee' })
+  }
+
+  const sejour = await sejourDuMenage(userId, profil, { propertyRef, bookingId, departureDate })
+  if (sejour.statut === 503) return res.status(503).json({ error: 'Service temporairement indisponible' })
+  if (sejour.statut) return res.status(sejour.statut).json(sejour.corps)
+
+  // ⚠ LA NAISSANCE N'A LIEU QU'A L'OUVERTURE. Repondre ou publier suppose une
+  // evaluation deja nee : on ne la cree pas sur un POST.
+  if (action === 'pwa-evaluation') {
+    const n = await assurerEvaluation(supabase, {
+      userId, propertyId: sejour.bien.id, propertyRef: sejour.bien.ref,
+      bookingUid: sejour.bookingUid, provider: sejour.provider, ota: sejour.ota,
+    })
+    // Le message de la base reste dans les journaux : un porteur de lien n'a pas a le lire.
+    if (n.erreur) { console.error('[avis] pwa : naissance echouee', n.erreur); return res.status(503).json({ error: 'Évaluation indisponible' }) }
+  }
+
+  const { data: ev, error } = await supabase.from('guest_evaluations')
+    .select('id').eq('user_id', userId).eq('booking_uid', sejour.bookingUid).maybeSingle()
+  if (error) return res.status(503).json({ error: 'Évaluation illisible' })
+  if (!ev) return res.status(404).json({ error: 'Évaluation introuvable' })
+
+  const garde = gardeDuJeton(userId, profil, sejour.bien)
+  // ⚠ L'IDENTIFIANT DE L'EVALUATION VIENT DU SERVEUR, jamais du client : on
+  // ecrase tout `id` ou `booking_uid` que la requete porterait.
+  const requete = {
+    ...req,
+    query: { ...(req.query || {}), id: ev.id, booking_uid: undefined },
+    body: { ...(req.body || {}), id: ev.id, booking_uid: undefined },
+  }
+  if (action === 'pwa-evaluation') return await evaluationLire(requete, res, garde)
+  if (action === 'pwa-reponses') return await evaluationRepondre(requete, res, garde)
+  return await evaluationPublier(requete, res, garde)
+}
+
 // GET grille — les criteres du compte et, si un bien est demande, les siens.
 async function grilleLire (req, res, garde) {
   const userId = garde.accountUserId
@@ -889,7 +1145,10 @@ function roleEtReglages (garde) {
   const estPrestataire = Boolean(p && p.access_mode === 'lien')
   return {
     role: estPrestataire ? 'prestataire' : 'hote',
-    evalScope: (estPrestataire && p.eval_scope) || 'selon_grille',
+    // ⚠ UNE VALEUR ABSENTE VAUT `aucun` : une prestataire ne remplit que si
+    // l'hote l'y autorise (decision D1 du 2 octobre 2026, migration
+    // 2026-10-02-avis-eval-scope-sur-autorisation.sql).
+    evalScope: (estPrestataire && p.eval_scope) || 'aucun',
     evalPower: (estPrestataire && p.eval_power) || 'soumettre',
     profilId: (p && p.id) || null,
     // ⚠ `parProfil` N'EST RENSEIGNE QUE POUR UNE PRESTATAIRE, et c'est l'OBJET,
@@ -934,7 +1193,8 @@ async function evaluationLire (req, res, garde) {
         peut_publier: false,
         grille_figee: Boolean(e.grille_figee),
         grille_indisponible: true,
-        detail: err.message,
+        // Le detail technique pour l'hote seulement (constat de revue du lot 5).
+        ...(roleEtReglages(garde).role === 'hote' ? { detail: err.message } : {}),
       })
     }
   }
@@ -965,7 +1225,10 @@ async function evaluationLire (req, res, garde) {
     : {
         ...commun,
         answers_cleaner: e.answers_cleaner,
-        ...(evalPower === 'valider' ? { public_text: e.public_text } : {}),
+        // ⚠ ET SEULEMENT SI L'HOTE L'A AUTORISEE : une prestataire `aucun` ne
+        // participe a rien, elle ne lit donc pas le texte (constat de securite
+        // du 2 octobre 2026, avec la garde de lib/avis/publication.js).
+        ...(evalPower === 'valider' && evalScope === 'selon_grille' ? { public_text: e.public_text } : {}),
       }
 
   // ⚠ `peut_publier` SE REND DES L'OUVERTURE. Constat de review : la fenetre ne
@@ -1020,6 +1283,22 @@ async function evaluationRepondre (req, res, garde) {
     motif: r.decision.motif, complet: r.complet, negatif: r.negatif,
   }
 
+  // ⚠ L'HOTE EST PREVENU QUAND LA PRESTATAIRE A FINI SA PART et que
+  // l'evaluation lui revient (spec §10, lot 6). Une seule fois par sejour : le
+  // marqueur de la tache le garantit. Jamais quand elle publie elle-meme — il
+  // n'y a alors rien a lui demander. Ne leve jamais.
+  const avertirHote = async () => {
+    if (role !== 'prestataire') return
+    const { data: bien } = await supabase.from('properties').select('name')
+      .eq('id', e.property_id).eq('user_id', e.user_id).maybeSingle()
+    await prevenirHote(supabase, {
+      evaluation: e,
+      prenomPrestataire: garde.contexte?.profil?.first_name || null,
+      nomBien: bien?.name || null,
+    })
+  }
+  if (role === 'prestataire' && r.completRole && !r.decision.peutPublier) await avertirHote()
+
   // ⚠ UNE PRESTATAIRE « VALIDER » NE DOIT JAMAIS TOMBER SUR « TEXTE ABSENT »,
   // ET L'HOTE NON PLUS NE DOIT PAS HERITER D'UNE PAGE BLANCHE.
   // Decision de Thierry du 30 septembre 2026. Des que la prestataire a fini SA
@@ -1040,7 +1319,14 @@ async function evaluationRepondre (req, res, garde) {
   // ne fait que soumettre ne publiera pas : l'hote redigera quand il reprendra
   // la main, et rediger ici paierait un appel au modele pour un texte qu'il
   // regenererait sans doute apres avoir rempli sa part.
-  if (role === 'prestataire' && evalPower === 'valider' && r.completRole && !r.negatif && !aDejaUnTexte) {
+  // ⚠ ET SEULEMENT SI SES REPONSES ONT CHANGE. Constat de revue : une
+  // redaction refusee (langue non couverte, modele indisponible) laisse
+  // l'evaluation sans texte ; chaque nouvel envoi des MEMES reponses relancait
+  // un appel paye — rejouable par quiconque porte le lien de la PWA.
+  const avant = e.answers_cleaner || {}
+  const apres = { ...avant, ...reponses }
+  const reponsesChangees = Object.keys(apres).some(k => apres[k] !== avant[k])
+  if (role === 'prestataire' && evalPower === 'valider' && r.completRole && !r.negatif && !aDejaUnTexte && reponsesChangees) {
     // ⚠ ON NE DEPEND PAS DE CE QUE L'ECRITURE RENVOIE. `enregistrerReponses`
     // rend la ligne relue, mais si ce retour arrivait vide ou partiel on
     // redigerait sur l'evaluation D'AVANT — donc sans les reponses qu'on vient
@@ -1092,6 +1378,8 @@ async function evaluationRepondre (req, res, garde) {
         charge: { motif: redige.motif, detail: redige.detail, par_profil: profilId, booking_uid: e.booking_uid },
       })
       if (!j.ok) console.error('[avis] refus de redaction non journalise:', j.erreur)
+      // L'evaluation revient a l'hote : il est prevenu (idempotent).
+      await avertirHote()
 
       return res.status(200).json({
         ...reponse,
@@ -1335,7 +1623,11 @@ async function evaluationPublier (req, res, garde) {
   const evaluation = {
     ...e,
     ota_review_ref: objetOta.external_review_id,
-    ...(req.body?.public_text ? { public_text: String(req.body.public_text).slice(0, MAX_TEXTE) } : {}),
+    // ⚠ SEUL L'HOTE REMPLACE LE TEXTE. Constat de re-revue : n'importe quel role
+    // pouvait envoyer le sien, donc une prestataire `valider` publiait un texte
+    // libre au lieu de celui qu'elle a relu.
+    ...(req.body?.public_text && roleEtReglages(garde).role === 'hote'
+      ? { public_text: String(req.body.public_text).slice(0, MAX_TEXTE) } : {}),
   }
 
   // ⚠ ON RESERVE LA LIGNE AVANT LE POST, PAR L'UNICITE DE `write_locks.key`.
@@ -1497,6 +1789,12 @@ module.exports = async function handler (req, res) {
 async function router (req, res) {
   const action = String(req.query?.action || req.body?.action || 'list')
 
+  // La PWA prestataire n'a pas de session : son identite est son jeton, valide
+  // par `routePwa` et jamais crue sur parole. Avant toute garde de session.
+  if (action === 'pwa-evaluation' || action === 'pwa-reponses' || action === 'pwa-publier') {
+    return await routePwa(req, res, action)
+  }
+
   // `requalifier` corrige un verdict de proprete : ecriture.
   if (action === 'requalifier') {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' })
@@ -1550,6 +1848,7 @@ async function router (req, res) {
     'eval-texte': evaluationTexte,
     'eval-publier': evaluationPublier,
     'eval-abandon': evaluationAbandonner,
+    'prestataire-reglages-maj': prestataireReglagesEcrire,
   }
   if (ECRITURES_EVAL[action]) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'Méthode non autorisée' })
@@ -1557,6 +1856,15 @@ async function router (req, res) {
       domaine: 'avis', niveau: 'write', compteDelegue: true })
     if (!g.ok) return
     return await ECRITURES_EVAL[action](req, res, g)
+  }
+
+  // Lire les reglages d'une prestataire exige l'ECRITURE, comme l'action du
+  // manifeste : seul celui qui peut les changer a besoin de les voir.
+  if (action === 'prestataire-reglages') {
+    const g = await requirePermission(req, res, {
+      domaine: 'avis', niveau: 'write', compteDelegue: true })
+    if (!g.ok) return
+    return await prestataireReglagesLire(req, res, g)
   }
 
   const garde = await requirePermission(req, res, {
