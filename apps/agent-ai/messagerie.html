@@ -960,7 +960,7 @@
         <button class="btn-back-mobile" onclick="backToList()" aria-label="Retour">←</button>
         <div class="conv-view-header-content">
           <div class="conv-view-title">🧪 Simulateur</div>
-          <div class="conv-view-meta">Test : vous écrivez en voyageur, l'IA répond comme l'hôte</div>
+          <div class="conv-view-meta">Test : vous écrivez en voyageur, l'IA répond comme l'hôte — même prompt et même modèle que l'agent réel, mais sans réservation (aucun code envoyé), sans Mode Test ni pause</div>
         </div>
         <div class="conv-view-actions">
           <select id="sim-prop" style="font-size:12px;padding:4px 8px;border:0.5px solid var(--border);border-radius:var(--radius);background:var(--bg);color:var(--text)">
@@ -989,11 +989,15 @@
 
   window.clearSim = () => { simMessages = []; renderSimView() }
 
+  let simEnCours = false
   window.runSim = async () => {
     const input = document.getElementById('sim-input')
     const message = input?.value?.trim()
     if (!message) return
+    // Un double clic enverrait deux requetes aux historiques qui se chevauchent.
+    if (simEnCours) return
     if (!simPropId) { document.getElementById('sim-status').textContent = '❌ Choisissez un bien'; return }
+    simEnCours = true
 
     simMessages.push({ type: 'guest', content: message, time: new Date().toISOString() })
     renderSimView()
@@ -1029,6 +1033,8 @@
     } catch (err) {
       simMessages.push({ type: 'system', content: '❌ ' + err.message, time: new Date().toISOString() })
       renderSimView()
+    } finally {
+      simEnCours = false
     }
   }
 

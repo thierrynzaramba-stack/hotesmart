@@ -27,8 +27,12 @@ module.exports = async function handler(req, res) {
     if (!gardeDel.ok) return
     const user = { id: gardeDel.accountUserId }
     const { task_id, conv_id } = req.body || {}
-    if (task_id) await supabase.from('agent_tasks').delete().eq('id', task_id).eq('user_id', user.id)
-    if (conv_id) await supabase.from('conversations').delete().eq('id', conv_id).eq('user_id', user.id)
+    // ⚠ SEULEMENT les lignes de SIMULATION (book_id `SIM_…`). Avant, n'importe
+    // quelle tache ou conversation du compte s'effacait par son id : un membre
+    // limite a un bien pouvait supprimer des taches reelles d'autres biens
+    // (constat de review du lot 3 GuestFlow, preexistant).
+    if (task_id) await supabase.from('agent_tasks').delete().eq('id', task_id).eq('user_id', user.id).like('book_id', 'SIM_%')
+    if (conv_id) await supabase.from('conversations').delete().eq('id', conv_id).eq('user_id', user.id).like('book_id', 'SIM_%')
     return res.status(200).json({ success: true })
   }
 
@@ -66,7 +70,7 @@ module.exports = async function handler(req, res) {
   // Desormais : `preparerLot` + `classifierLot` de lib/cron-classify.js, le
   // modele de GUESTFLOW_MODEL, les consignes de l'hote, l'historique de la
   // simulation. Seul l'etat des envois differe : il n'y a pas de reservation.
-  const { preparerLot, classifierLot, buildKnowledgeText, modeleConfigure } = require('../lib/cron-classify')
+  const { preparerLot, classifierLot, buildKnowledgeText, modeleConfigure, MODELE_PAR_DEFAUT } = require('../lib/cron-classify')
 
   const { data: knowledge } = await supabase
     .from('knowledge').select('*')
@@ -75,27 +79,43 @@ module.exports = async function handler(req, res) {
   const knowledgeText = buildKnowledgeText(knowledge || [])
 
   // L'historique vient du client : on n'en garde que la forme attendue, borne.
-  const maintenant = new Date().toISOString()
+  // ⚠ LES HEURES SONT ATTRIBUEES ICI, DANS L'ORDRE RECU. Melanger l'horloge du
+  // navigateur (historique) et celle du serveur (message courant) pouvait trier
+  // le message courant AVANT la reponse precedente : le simulateur classait
+  // alors l'ancienne question (constat de review).
+  const LIMITE = 4000
   const historique = (Array.isArray(req.body?.historique) ? req.body.historique : [])
     .filter(m => m && ['guest', 'ai'].includes(m.source) && typeof m.message === 'string' && m.message.trim())
     .slice(-30)
-    .map(m => ({ source: m.source, message: m.message.slice(0, 4000), time: m.time || maintenant }))
-  const fil = [...historique, { source: 'guest', message: String(message), time: maintenant }]
+    .map(m => ({ source: m.source, message: m.message.slice(0, LIMITE) }))
+  const base = Date.now() - (historique.length + 1) * 1000
+  const fil = [...historique, { source: 'guest', message: String(message).slice(0, LIMITE) }]
+    .map((m, i) => ({ ...m, time: new Date(base + i * 1000).toISOString() }))
 
   const nomVoyageur = guestName || 'Voyageur Test'
   const lot = preparerLot(fil, nomVoyageur)
+  // Meme regle que l'agent : rien en attente, rien a classer.
+  if (!lot.enAttente.length) return res.status(400).json({ error: 'Aucun message du voyageur en attente' })
   const results = { errors: [] }
   const heure = new Date().toLocaleString('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'short', timeStyle: 'short' })
   const blocEtat = `- Date et heure actuelles : ${heure} (heure de Paris)\n`
     + '- Simulation : aucune réservation réelle, AUCUN message automatique (confirmation, code d\'accès, consignes) n\'a été envoyé.'
-  const classification = await classifierLot({
-    userId: user.id, property: { id: refBien, name: garde.bien.name || '' }, bookingId: 'simulation',
-    guestName: nomVoyageur, guestPhone: '', arrival: '', departure: '',
-    knowledgeText, results, lot, blocEtat
-  })
+  let classification
+  try {
+    classification = await classifierLot({
+      userId: user.id, property: { id: refBien, name: garde.bien.name || '' }, bookingId: 'simulation',
+      guestName: nomVoyageur, guestPhone: '', arrival: '', departure: '',
+      knowledgeText, results, lot, blocEtat
+    })
+  } catch (e) {
+    // Credit epuise, prompt trop long, panne reseau : une erreur LISIBLE pour
+    // l'interface, au lieu d'un 500 non-JSON.
+    console.error('[Simulate] modele indisponible :', e.message)
+    return res.status(502).json({ error: 'Le modèle IA ne répond pas : ' + String(e.message).slice(0, 200) })
+  }
   // Le modele qui a REELLEMENT repondu : celui de la variable, sauf repli.
   const modeleVoulu = modeleConfigure()
-  const modele = (results.modelesRefuses || []).includes(modeleVoulu) ? 'claude-haiku-4-5-20251001 (repli)' : modeleVoulu
+  const modele = (results.modelesRefuses || []).includes(modeleVoulu) ? `${MODELE_PAR_DEFAUT} (repli)` : modeleVoulu
 
   const bookId    = `SIM_${Date.now()}`
   const guestN    = guestName || 'Voyageur Test'
@@ -127,7 +147,7 @@ module.exports = async function handler(req, res) {
       summary:         classification.reason,
       suggested_reply: subTasks[0]?.suggested_reply || null,
       status:          'pending',
-      source_thread:   [{ source: 'guest', message, time: new Date().toISOString() }],
+      source_thread:   lot.sortedThread.map(m => ({ source: m.source, message: m.message, time: m.time })),
       sub_tasks:       subTasks
     }).select().single()
 

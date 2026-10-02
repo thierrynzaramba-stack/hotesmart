@@ -123,3 +123,40 @@ test('une reponse simulee de l\'IA clot l\'attente ; un historique non conforme 
   assert.ok(attente.includes('Merci beaucoup') && !attente.includes('linge'), 'la question deja repondue n\'est plus en attente')
   assert.ok(!prompt.includes('injecte'), 'seules les sources guest et ai sont acceptees')
 })
+
+test('l\'ordre du fil ne depend plus de l\'horloge du navigateur', async () => {
+  // Constat de review : heures du navigateur pour l'historique, du serveur pour
+  // le message courant ; un navigateur en avance triait le message courant
+  // AVANT la reponse precedente et le simulateur classait l'ancienne question.
+  const { handler, appelsIA } = charger({ sortieIA: { type: 'sympathy', reason: 'x', auto_reply: '😊', sub_tasks: [] } })
+  const futur = new Date(Date.now() + 3600e3).toISOString()
+  await poster(handler, { message: 'Merci beaucoup', propertyId: REF, historique: [
+    { source: 'guest', message: 'Le linge est fourni ?', time: futur },
+    { source: 'ai', message: 'Oui, tout est fourni.', time: futur }
+  ] })
+  const attente = appelsIA[0].messages[0].content.split('MESSAGES EN ATTENTE (à traiter ensemble) :')[1]
+  assert.ok(attente.includes('Merci beaucoup') && !attente.includes('linge'))
+})
+
+test('un message demesure est borne avant d\'atteindre le modele', async () => {
+  const { handler, appelsIA } = charger({ sortieIA: { type: 'sympathy', reason: 'x', auto_reply: '😊', sub_tasks: [] } })
+  await poster(handler, { message: 'a'.repeat(500000), propertyId: REF })
+  assert.ok(appelsIA[0].messages[0].content.length < 60000, 'la taille du prompt reste bornee')
+})
+
+test('une panne du modele rend une erreur lisible, pas un 500 non-JSON', async () => {
+  const { handler } = charger({ sortieIA: null })
+  // On remplace l'appel par une panne.
+  const shared = require.cache[require.resolve('../lib/cron-shared')].exports
+  shared.anthropic.messages.create = async () => { const e = new Error('Your credit balance is too low'); e.status = 400; throw e }
+  const res = await poster(handler, { message: 'Bonjour', propertyId: REF })
+  assert.strictEqual(res.code, 502)
+  assert.ok(/ne répond pas/.test(res.corps.error))
+})
+
+test('DELETE ne supprime que des lignes de simulation', () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'api/simulate.js'), 'utf8')
+  const bloc = src.split("if (req.method === 'DELETE')")[1].split('return res.status(200)')[0]
+  assert.strictEqual((bloc.match(/\.like\('book_id', 'SIM_%'\)/g) || []).length, 2,
+    'tache ET conversation : un membre ne doit pas effacer une tache reelle par son id')
+})
