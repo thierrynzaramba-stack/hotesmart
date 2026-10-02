@@ -3397,3 +3397,25 @@ cloisonnement — vérifiés un par un et tenus). Corrigé sans seconde review :
   (`scripts/verifier-migration-menage-visibilite.js` + `select pg_policies`)
   **avant** toute fusion vers staging ou main, sinon la PWA de toutes les
   prestataires répond 503.
+
+### ⚠️ Règle gravée : seule une personne CONNECTÉE modifie les droits d'une prestataire (2 octobre 2026)
+
+**Demande de Thierry.** Les droits et réglages d'une prestataire — ce qu'elle
+voit des autres, ses biens, son droit de régler ses absences — ne se modifient
+que par une **session HôteSmart** (le titulaire, ou un délégué qui en a le droit).
+**Jamais par un lien PWA**, ni le sien ni celui d'une autre : un jeton de
+prestataire désigne une personne, il ne l'authentifie pas.
+
+- Le writer de visibilité (`api/disponibilites.js`) commence par
+  `verifierSession` : un jeton de prestataire, en `Authorization` comme en
+  paramètre, reçoit **401** et rien ne s'écrit.
+- La PWA (`api/menages-public.js`) n'a **aucune** action qui touche
+  `menage_visibilite` : `reglerVisibilite` y est une action inconnue.
+- La base n'offre au client que la **lecture** (`menage_visibilite_select`) :
+  aucune autre voie d'écriture.
+
+Tests : `tests/disponibilites-visibilite.test.js` — « un JETON DE PRESTATAIRE
+est refusé par le writer de visibilité » (contre-épreuve : garde de session
+retirée dans une copie hors de l'arbre → le test rougit) ;
+`tests/menages-public-visibilite.test.js` — « la PWA n'a AUCUNE action pour
+régler ce qu'elle voit ».

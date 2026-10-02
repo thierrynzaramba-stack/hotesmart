@@ -47,7 +47,12 @@ function preparer ({ appelant = COMPTE, droitsMembre = 'write', visibilite = nul
     menage_visibilite: visibilite ? [{ user_id: COMPTE, profile_id: MARIE, ...visibilite }] : []
   }
   const client = {
-    auth: { getUser: async () => ({ data: { user: { id: appelant } }, error: null }) },
+    // ⚠ UN JETON DE PRESTATAIRE (lien PWA) N'EST PAS UNE SESSION : Supabase Auth
+    // le refuse. Le double fait de meme pour tout porteur qui n'est pas une
+    // session (`jeton-pwa-…`).
+    auth: { getUser: async (jeton) => String(jeton || '').startsWith('jeton-pwa-')
+      ? { data: { user: null }, error: { message: 'invalid JWT' } }
+      : { data: { user: { id: appelant } }, error: null } },
     from (table) {
       const conds = []
       const filtrer = () => (tables[table] || []).filter(l => conds.every(c =>
@@ -180,4 +185,27 @@ test('« Réglé le … PAR [nom] » : le titulaire comme le délégué sont nom
       .handler(lire(), r)
     assert.strictEqual(r.body.visibilite.regle_par, attendu)
   }
+})
+
+// ─── SEULE UNE PERSONNE CONNECTÉE RÈGLE LES DROITS D'UNE PRESTATAIRE ────────
+// Règle gravée le 2 octobre 2026 (demande de Thierry) : le lien PWA d'une
+// prestataire ne règle jamais ce qu'elle voit — ni le sien, ni celui d'une
+// autre. Le writer exige une SESSION (verifierSession), puis le droit
+// `prestataires: write`.
+
+test('un JETON DE PRESTATAIRE est refusé par le writer de visibilité (401), et rien ne s\'écrit', async () => {
+  for (const enTete of ['Bearer jeton-pwa-marie', 'jeton-pwa-marie']) {
+    const { handler, etat } = preparer()
+    const res = reponse()
+    await handler({ method: 'POST', query: {}, headers: { authorization: enTete },
+                    body: { provider_id: MARIE, action: 'reglerVisibilite', par_bien: true, profils_vus: [LOLA] } }, res)
+    assert.strictEqual(res.code, 401, enTete)
+    assert.strictEqual(upserts(etat).length, 0, 'aucune écriture')
+  }
+  const { handler, etat } = preparer()
+  const res = reponse()
+  await handler({ method: 'POST', query: { token: 'jeton-pwa-marie' }, headers: {},
+                  body: { provider_id: MARIE, action: 'reglerVisibilite', par_bien: true, profils_vus: [LOLA] } }, res)
+  assert.strictEqual(res.code, 401, 'un jeton en paramètre n\'est pas une session non plus')
+  assert.strictEqual(upserts(etat).length, 0)
 })

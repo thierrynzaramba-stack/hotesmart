@@ -1109,3 +1109,12 @@ comme l'hôte** (exigence de Thierry), un membre en lecture reçoit 403. Il ne p
 **pas** par `/api/membres` (domaine `equipe`) : il vit dans sa propre table,
 `menage_visibilite`, writer unique, et `profile_permissions` garde le sien. Chaque
 prestataire désignée est vérifiée (profil `lien` de ce compte).
+
+**⚠️ Règle gravée le 2 octobre 2026 (demande de Thierry) : seule une personne
+CONNECTÉE modifie les droits d'une prestataire.** Un lien PWA (`public_tokens`)
+désigne une prestataire, il ne l'authentifie pas : aucun writer de ses droits
+n'accepte un tel jeton. Le writer de visibilité exige `verifierSession` (401
+sinon), la PWA n'a aucune action sur ces réglages, et la table n'a qu'une
+policy de lecture. Test : « un JETON DE PRESTATAIRE est refusé par le writer de
+visibilité » (`tests/disponibilites-visibilite.test.js`), qui rougit si la
+garde de session est retirée.
