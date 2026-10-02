@@ -1316,9 +1316,13 @@ async function evaluationRepondre (req, res, garde) {
     return res.status(400).json({ error: pourLEcran(err.message) })
   }
 
+  // ⚠ UN TEXTE DE L'HOTE (ou de l'auto-validation) DEJA LA : elle ne le
+  // publiera pas (re-revue de 0d29f03) — l'ecran ne lui montre pas un bouton
+  // qui finirait en refus, et l'evaluation revient a l'hote.
+  const texteDeLHote = role === 'prestataire' && Boolean(String(e.public_text || '').trim()) && e.texte_sans_voyageur !== true
   const reponse = {
-    ok: true, status: r.decision.statut, peut_publier: r.decision.peutPublier,
-    motif: r.decision.motif, complet: r.complet, negatif: r.negatif,
+    ok: true, status: r.decision.statut, peut_publier: r.decision.peutPublier && !texteDeLHote,
+    motif: texteDeLHote ? 'un texte de l hote existe : il publie' : r.decision.motif, complet: r.complet, negatif: r.negatif,
   }
 
   // ⚠ L'HOTE EST PREVENU QUAND LA PRESTATAIRE A FINI SA PART et que

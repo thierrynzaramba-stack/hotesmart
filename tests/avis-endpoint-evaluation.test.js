@@ -1108,3 +1108,13 @@ test('le texte redige pour la prestataire porte le repere « sans voyageur »', 
   const ecrit = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.public_text)
   assert.strictEqual(ecrit.row.texte_sans_voyageur, true)
 })
+
+test('re-revue : elle finit sa part alors qu’un texte de l’hote existe — pas de bouton « Publier » sans issue', async () => {
+  const ev = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: 'Camille, parfait.', texte_sans_voyageur: false, grille_figee: await grilleUniqueFigee() })
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [ev], criteres: [CRITERE_UNIQUE()] })
+  const res = reponse()
+  await require('../api/avis')(reqMembre({ action: 'eval-reponses' }, { id: ev.id, action: 'eval-reponses', reponses: { 'c-unique': 'nickel' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.peut_publier, false)
+  assert.ok(!JSON.stringify(res.body).includes('Camille'))
+})
