@@ -78,6 +78,13 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
     // Le decor PWA (--decor-pwa) : taches, etat du fil, menage, sejour, lien,
     // personne. ⚠ Chaque suppression est LUE, et ce qui reste est COMPTE
     // (constat de revue : un reste passait sans bruit).
+    // Les lignes de droits des profils de decor, AVANT les profils eux-memes.
+    const { data: decor } = await sb.from('profiles').select('id')
+      .eq('account_user_id', compte).like('pwa_token', `${MARQUE.toLowerCase()}%`)
+    for (const p of decor || []) {
+      const { error } = await sb.from('profile_permissions').delete().eq('profile_id', p.id)
+      if (error) ko(`nettoyage profile_permissions : ${error.message}`)
+    }
     const pwa = [
       ...['agent_tasks', 'conversation_flags'].map(t => [t, 'user_id', 'book_id', `${MARQUE}%`]),
       ...['menage_done', 'menages', 'bookings_snapshot'].map(t => [t, 'user_id', 'booking_id', `${MARQUE}%`]),
@@ -117,6 +124,16 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
       pwa_token: jeton, eval_scope: 'aucun', eval_power: 'soumettre',
     }).select().single()
     if (eP) { ko(`prestataire impossible : ${eP.message}`); process.exit(1) }
+    // ⚠ SA LIGNE DE DROITS, COMME L'ECRAN LA CREE (recette du 2 octobre 2026) :
+    // sans elle, « Enregistrer » sur sa fiche repondait « droits introuvables »
+    // (api/membres.js refuse un profil sans ligne). Le preset `prestataire`,
+    // limite au bien de recette.
+    const { PRESETS } = require('../lib/permissions')
+    const { error: eDroits } = await sb.from('profile_permissions').insert({
+      profile_id: profil.id, account_user_id: compte, ...PRESETS.prestataire,
+      property_scope: 'selected', property_ids: [bienA.id], property_refs: [REF],
+    })
+    if (eDroits) { ko(`droits de la prestataire : ${eDroits.message} — relance --nettoyer`); process.exit(1) }
     const etapes = [
       ['public_tokens', { user_id: compte, token: jeton, label: `${MARQUE} PWA`, property_ids: [REF] }],
       ['bookings_snapshot', { user_id: compte, booking_id: BK, property_id: REF,
