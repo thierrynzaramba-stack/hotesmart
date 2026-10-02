@@ -28,6 +28,9 @@
     .prop-ligne { justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 6px 0; }
     .prop-ligne-nom { display: flex; align-items: center; gap: 8px; }
     .rang-select { width: auto; min-width: 210px; font-size: 12px; padding: 5px 8px; }
+    /* LE RANG (spec proposition-par-rang, 2 octobre 2026) : la proposition part
+       en meme temps a toutes les personnes du meme rang. */
+    .rang-num { width: auto; min-width: 92px; font-size: 12px; padding: 5px 8px; margin-left: 6px; }
     .prop-bloc { border-bottom: 0.5px solid var(--border); padding-bottom: 8px; }
     .prop-bloc:last-child { border-bottom: none; }
     .jours-ligne { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 0 0 26px; }
@@ -126,6 +129,9 @@
       .vis-ligne { min-height: 44px; align-items: center; padding: 4px 0; }
       .vis-ligne input { margin-top: 0; width: 20px; height: 20px; }
       .vis-profils { flex-direction: column; gap: 0; margin-left: 0; }
+      /* Le rang et l'engagement, au pouce (spec proposition-par-rang). */
+      .rang-select, .rang-num { min-height: 44px; }
+      .rang-num { margin-left: 0; margin-top: 6px; }
     }
     .btn-mini { background: none; border: 0.5px solid var(--border); border-radius: 12px;
                 font-size: 11px; color: var(--text2); padding: 2px 10px; cursor: pointer; }
@@ -652,6 +658,12 @@
             <option value="1" selected>Elle confirme</option>
             <option value="0">D'office — elle reçoit sans confirmer</option>
           </select>
+          <select class="form-input rang-num" id="rang-${p.id}" data-bien="${p.id}"
+                  aria-label="Rang sur ce bien" title="Les personnes du même rang reçoivent la proposition en même temps ; le rang 2 n'est sollicité que si personne du rang 1 n'a accepté.">
+            <option value="1" selected>Rang 1</option>
+            <option value="2">Rang 2</option>
+            <option value="3">Rang 3</option>
+          </select>
         </div>
         <div class="jours-ligne" id="jours-${p.id}">
           <span class="jours-titre">Jours confiés</span>
@@ -707,6 +719,8 @@
       if (!cb || !sel) return
       sel.disabled = !cb.checked
       sel.style.opacity = cb.checked ? '' : '0.45'
+      const selRang = document.getElementById(`rang-${p.id}`)
+      if (selRang) { selRang.disabled = !cb.checked; selRang.style.opacity = cb.checked ? '' : '0.45' }
       if (zone) {
         zone.style.opacity = cb.checked ? '' : '0.45'
         zone.querySelectorAll('input, button').forEach(e => { e.disabled = !cb.checked })
@@ -830,10 +844,14 @@
         const dOffice = document.getElementById(`ack-${p.id}`)?.value === '0'
         return {
           ref: p.id, uuid: p.uuid,
-          // ⚠ LE RANG SUIT L'ENGAGEMENT, il ne le décide plus. Il ne sert qu'à
-          // départager et à remplacer (§12.1) : une personne d'office passe
-          // devant, c'est tout ce que ce chiffre veut dire ici.
-          rang: dOffice ? 1 : 2,
+          // ⚠ LE RANG SE RÈGLE ICI (spec proposition-par-rang, 2 octobre 2026).
+          // Il était déduit de l'engagement (d'office = 1, à confirmer = 2) :
+          // toutes les personnes « à confirmer » d'un bien étaient donc au même
+          // rang, et départagées par un identifiant technique. Désormais
+          // l'hôte le choisit, et un même rang reçoit la proposition en même
+          // temps.
+          rang: [1, 2, 3].includes(Number(document.getElementById(`rang-${p.id}`)?.value))
+            ? Number(document.getElementById(`rang-${p.id}`).value) : 1,
           requires_ack: !dOffice,
           // ⚠ TOUJOURS ENVOYÉ, même vide : `[]` veut dire « aucun jour confié »,
           // un choix explicite, et le serveur le distingue d'un champ absent
@@ -1165,6 +1183,12 @@
                                    x.provider_id === editionEnCours)
       const sel = document.getElementById(`ack-${prop.id}`)
       if (sel) sel.value = l && l.requires_ack === false ? '0' : '1'
+      // Le rang LU EN BASE, borné à ce que l'écran propose (1 à 3).
+      const selRang = document.getElementById(`rang-${prop.id}`)
+      if (selRang) {
+        const r = Number(l && l.rang)
+        selRang.value = String(Number.isInteger(r) ? Math.min(3, Math.max(1, r)) : 1)
+      }
       // ⚠ `weekdays` NULL VEUT DIRE « TOUS LES JOURS » (§12.1), et c'est l'état
       // de toutes les liaisons d'avant ce lot. L'afficher avec zéro case cochée
       // se lisait « aucun jour » : le premier enregistrement de la fiche envoyait

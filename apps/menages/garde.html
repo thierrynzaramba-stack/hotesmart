@@ -300,6 +300,16 @@
     return p.prenom
   }
 
+  // ⚠ TOUT LE TOUR (spec proposition-par-rang) : un menage peut etre propose a
+  // plusieurs personnes du meme rang en meme temps — « proposé à Lena et
+  // Tiphaine ». Sans les noms (droit), « 2 personnes ».
+  function nomsDuTour (m, avecNoms) {
+    const tour = Array.isArray(m.proposeesA) && m.proposeesA.length ? m.proposeesA : [m.proposeA]
+    if (tour.length > 1 && !avecNoms) return `${tour.length} personnes`
+    const noms = tour.map(p => nomOu(p, avecNoms))
+    return noms.length > 1 ? noms.slice(0, -1).join(', ') + ' et ' + noms[noms.length - 1] : noms[0]
+  }
+
   // ─── Chargement ───────────────────────────────────────────────────────────
   let chargementCourant = 0
   async function charger () {
@@ -559,7 +569,7 @@
     if (!gere) return 'Ménage — bien non confié à un prestataire'
     if (m.proposeA) {
       const chez = m.porteur ? ` (porté par ${nomOu(m.porteur, avecNoms)})` : ''
-      return `Ménage proposé à ${nomOu(m.proposeA, avecNoms)}${chez}${delaiTexte(m)}`
+      return `Ménage proposé à ${nomsDuTour(m, avecNoms)}${chez}${delaiTexte(m)}`
     }
     // ⚠ Même ordre que `etatMenage` : `orphaned` avant `differe`.
     if (m.status === 'orphaned') return `Ménage refusé — décision attendue${m.raison ? ' · ' + m.raison : ''}`
@@ -661,7 +671,7 @@
     if (!gere) return '<span class="pastille">bien non confié</span>'
     if (m.proposeA) {
       const chez = m.porteur ? ` — porté par ${echapper(nomOu(m.porteur, avecNoms))} en attendant` : ''
-      return `<span class="pastille attente">⏳ proposé à ${echapper(nomOu(m.proposeA, avecNoms))}</span>${chez}${echapper(delaiTexte(m))}`
+      return `<span class="pastille attente">⏳ proposé à ${echapper(nomsDuTour(m, avecNoms))}</span>${chez}${echapper(delaiTexte(m))}`
     }
     // ⚠ Même ordre que la grille : `orphaned` avant `differe`.
     if (m.status === 'orphaned') {

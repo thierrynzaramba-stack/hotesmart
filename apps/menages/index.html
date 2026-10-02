@@ -611,13 +611,27 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
   //     n'a pas repondu n'est PAS un menage couvert, et le planning doit le dire.
   //   - assignation vide          -> « personne », en clair. C'est une alerte
   //     visuelle, pas un blanc qu'on prend pour un chargement en cours.
+  // ⚠ LE TOUR ENTIER (spec proposition-par-rang) : un menage peut etre propose
+  // a plusieurs personnes du meme rang en meme temps. `proposee_a` fait foi ;
+  // `offered_to` n'est lu que pour une ligne d'avant la bascule.
+  function tourDe (assign) {
+    if (!assign) return []
+    if (Array.isArray(assign.proposee_a) && assign.proposee_a.length) return assign.proposee_a
+    return assign.offered_to ? [assign.offered_to] : []
+  }
+  function prenomsDuTour (assign) {
+    const noms = tourDe(assign).map(prenomDe).filter(Boolean)
+    if (!noms.length) return null
+    return noms.length > 1 ? noms.slice(0, -1).join(', ') + ' et ' + noms[noms.length - 1] : noms[0]
+  }
+
   function pastillePrestataire(m) {
     if (!m.assign) return ''
     const prenom = prenomDe(m.assign.provider_id)
     // ⚠ UN REFUS N'EST PAS UN « PERSONNE » ORDINAIRE : quelqu'un a dit non, et
     // rien ne le reprendra tout seul. Les confondre laissait l'hote sans savoir
     // qu'il doit agir.
-    const proposeAOrph = m.assign.offered_to ? prenomDe(m.assign.offered_to) : null
+    const proposeAOrph = prenomsDuTour(m.assign)
     if (m.assign.status === 'orphaned' && !proposeAOrph) {
       // ⚠ « refusé » n'est plus exact : un `orphaned` peut aussi venir d'une
       // proposition EXPIREE. Et s'il est re-propose, la pastille masquait la
@@ -630,7 +644,7 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
     // cote, en pointilles. Afficher la sollicitee a la place de la porteuse
     // laissait croire que le menage avait change de mains alors que personne
     // n'avait accepte.
-    const proposeA = m.assign.offered_to ? prenomDe(m.assign.offered_to) : null
+    const proposeA = prenomsDuTour(m.assign)
     const mention = proposeA
       ? `<div class="presta-pastille offert">⏳ proposé à ${echapper(proposeA)}</div>`
       : ''
@@ -676,7 +690,7 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
     const options = ['<option value="">— personne —</option>'].concat(
       actifs.map(p => `<option value="${echapper(p.id)}"${p.id === m.assign.provider_id ? ' selected' : ''}>${echapper(p.prenom)}</option>`)
     ).join('')
-    const proposeA = m.assign.offered_to ? prenomDe(m.assign.offered_to) : null
+    const proposeA = prenomsDuTour(m.assign)
     const verrou = proposeA
       ? `Proposé à ${proposeA} — le ménage reste chez son porteur tant que personne n'a accepté.`
       : (m.assign.assigned_by === 'manual'
@@ -712,7 +726,7 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
       const memeQuePorteur = sel.value && sel.value === (m.assign.provider_id || '')
       if (bProp) {
         bProp.disabled = !sel.value || memeQuePorteur
-        bProp.style.display = memeQuePorteur && m.assign.offered_to ? 'none' : ''
+        bProp.style.display = memeQuePorteur && tourDe(m.assign).length ? 'none' : ''
       }
       if (bAff) {
         // ⚠ REACTIVER, sinon le bouton reste grise apres la premiere action.
@@ -722,7 +736,7 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
         // refus de droits ou une panne reseau.
         bAff.disabled = false
         bAff.textContent = ''
-        bAff.insertAdjacentHTML('afterbegin', memeQuePorteur && m.assign.offered_to
+        bAff.insertAdjacentHTML('afterbegin', memeQuePorteur && tourDe(m.assign).length
           ? 'Retirer la proposition<small>le ménage lui reste</small>'
           : (sel.value ? 'Assigner<small>(immédiat)</small>' : 'Retirer<small>(personne)</small>'))
       }
@@ -765,8 +779,10 @@ import { compteCourant, peutEcrire, enteteCompte } from '/shared/compte-courant.
         // PORTE le menage ou si elle est seulement sollicitee.
         m.assign.provider_id = data.provider_id
         m.assign.status = data.status
-        m.assign.offered_to = data.offered_to || null
-        m.assign.assigned_by = data.offered_to ? m.assign.assigned_by : (data.provider_id ? 'manual' : null)
+        m.assign.offered_to = null
+        m.assign.proposee_a = Array.isArray(data.proposee_a) && data.proposee_a.length ? data.proposee_a
+          : (data.offered_to ? [data.offered_to] : null)
+        m.assign.assigned_by = m.assign.proposee_a ? m.assign.assigned_by : (data.provider_id ? 'manual' : null)
         assignations[`${m.propId}|${m.bookId}|${m.departure}`] = m.assign
         if (etat) {
           // ⚠ On dit ce qui est REELLEMENT parti, pas ce qu'on esperait envoyer.

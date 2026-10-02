@@ -18,7 +18,13 @@ Exemple à Ofuro Futari : rang 1 = Tiphaine et Lena, rang 2 = Lola.
 ## 2. La règle
 
 1. **On ne change rien quand quelqu'un porte d'office** (`requires_ack = false`) :
-   le ménage est à elle, il n'y a pas de proposition.
+   le ménage est à elle, et il le reste tant que personne n'a accepté.
+   ⚠ *Précisé au codage (2 octobre 2026)* : « rien ne change » veut dire le
+   modèle **parallèle** en place depuis le 4 septembre — si des personnes « à
+   confirmer » sont aussi de garde ce jour-là, une proposition part **à côté**
+   de la porteuse, et celle qui accepte prend le ménage. Seule nouveauté : cette
+   proposition-là part, elle aussi, au **rang entier**. Une porteuse d'office
+   seule sur le bien : aucune proposition, comme avant.
 2. Sinon, le **tour** commence par le **plus petit rang** qui a au moins une
    candidate (de garde ce jour-là, disponible, pas déjà sollicitée pour ce
    ménage). **Toutes les candidates de ce rang** reçoivent la proposition **en

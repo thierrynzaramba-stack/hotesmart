@@ -27,11 +27,14 @@ const TOUS_LES_JOURS = [0, 1, 2, 3, 4, 5, 6]
 
 
 function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
-                     menage = { id: 'm1', provider_id: REGINA, offered_to: MARIE, status: 'accepted' },
+                     menage = { id: 'm1', provider_id: REGINA, proposee_a: [MARIE], status: 'accepted' },
                      majTouche = true, erreurMaj = null, erreurMenage = null,
                      // Lot 3.3 : de quoi calculer la remplaçante du jour.
                      liaisons = [], regles = [], exceptions = [], refus = [],
-                     erreurLiaisons = null } = {}) {
+                     erreurLiaisons = null,
+                     // Ce que rend la relecture d'après une course perdue
+                     // (`.eq('id', …)`) : la ligne telle qu'une collègue l'a laissée.
+                     relu = null } = {}) {
   const etat = { majs: [], journal: [], incidents: [], requetes: [], notifs: [] }
   const client = {
     from (table) {
@@ -66,6 +69,8 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
             eq (c, v) { q.f[c] = v; return c2 },
             gt (c, v) { q.gt = { c, v }; return c2 },
             neq (c, v) { q.neq = { c, v }; return c2 },
+            contains (c, v) { q.cs = v; return c2 },
+            containedBy (c, v) { q.cd = v; return c2 },
             select () {
               etat.majs.push({ table, ...q })
               // ⚠ L'update est CONDITIONNEL : le double le simule. Sans cela,
@@ -75,8 +80,12 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
               // laissait passer le retrait de `.eq('offered_to', …)` ou de la
               // garde d'expiration — c'est pourtant tout ce qui empêche une
               // double affectation. Vérifié : la mutation fait tomber ce test.
-              const viseSonOffre = q.f.offered_to === undefined ||
-                                   q.f.offered_to === (menage && menage.offered_to)
+              // ⚠ LA CONDITION PORTE SUR LE TOUR (spec proposition-par-rang) :
+              // `contains` = elle y est encore ; `containedBy` en plus = le tour
+              // est exactement celui lu. Le double la rejoue comme PostgREST.
+              const tour = (menage && menage.proposee_a) || []
+              const viseSonOffre = (!q.cs || q.cs.every(x => tour.includes(x))) &&
+                                   (!q.cd || tour.every(x => q.cd.includes(x)))
               // ⚠ `.neq('status','cancelled')` est HONORE : une PWA restée
               // ouverte sur un ménage dont la réservation a disparu ne doit pas
               // pouvoir le ressusciter avec un porteur.
@@ -104,6 +113,7 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
           }
           if (table === 'menages') {
             if (erreurMenage) return Promise.resolve({ data: null, error: erreurMenage })
+            if (a.f.id) return Promise.resolve({ data: a.f.id === 'm1' ? relu : null, error: null })
             const bon = a.f.user_id === U &&
                         String(a.f.property_id) === '209413' &&
                         String(a.f.booking_id) === 'b1' &&
@@ -197,10 +207,10 @@ test('l\'acceptation est ATOMIQUE, et elle TRANSFÈRE', async () => {
   const handler = require('../api/menages-public')
   await handler(post('accepterMenage'), reponse())
   const maj = etat.majs[0]
-  assert.strictEqual(maj.f.offered_to, MARIE, 'l\'update exige que l\'offre lui soit adressée')
+  assert.deepStrictEqual(maj.cs, [MARIE], 'l\'update exige qu\'elle soit encore dans le tour')
   assert.ok(maj.gt && maj.gt.c === 'offer_expires_at', 'et qu\'elle ne soit pas expirée')
   assert.strictEqual(maj.row.provider_id, MARIE, 'le porteur devient elle')
-  assert.strictEqual(maj.row.offered_to, null, 'et la proposition s\'efface')
+  assert.strictEqual(maj.row.proposee_a, null, 'et la proposition s\'efface')
 })
 
 test('offre déjà prise : 409, et surtout PAS un succès', async () => {
@@ -237,7 +247,7 @@ test('refuser un ménage PORTÉ par la référente : il reste chez elle', async 
   const res = reponse()
   await handler(post('refuserMenage'), res)
   assert.strictEqual(res.body.porte, true)
-  assert.strictEqual(etat.majs[0].row.offered_to, null, 'la proposition s\'efface')
+  assert.strictEqual(etat.majs[0].row.proposee_a, null, 'la proposition s\'efface')
   assert.strictEqual(etat.majs[0].row.provider_id, undefined, 'le porteur n\'est pas touché')
   assert.strictEqual(etat.majs[0].row.status, undefined, 'le statut non plus')
 })
@@ -254,7 +264,7 @@ test('un refus sur un ménage porté n\'ALERTE PAS', async () => {
 test('refuser un ménage que PERSONNE ne porte : orphaned, et l\'hôte est alerté', async () => {
   // Le seul cas grave : un bien sans référente. Là, un logement ne sera pas
   // préparé, et c'est à l'hôte de trancher.
-  const etat = preparer({ menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' } })
+  const etat = preparer({ menage: { id: 'm1', provider_id: null, proposee_a: [MARIE], status: 'offered' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('refuserMenage'), res)
@@ -271,7 +281,8 @@ test('le refus est atomique : il ne touche que SA proposition', async () => {
   const etat = preparer({})
   const handler = require('../api/menages-public')
   await handler(post('refuserMenage'), reponse())
-  assert.strictEqual(etat.majs[0].f.offered_to, MARIE)
+  assert.deepStrictEqual(etat.majs[0].cs, [MARIE])
+  assert.deepStrictEqual(etat.majs[0].cd, [MARIE], 'et sur le tour exact lu')
 })
 
 // ─── L'ESCALADE APRÈS UN REFUS (lot 3.3, §12.4) ────────────────────────────
@@ -293,9 +304,9 @@ test('refuser : la REMPLAÇANTE du jour prend le relais, dans le même écrit', 
   await handler(post('refuserMenage'), res)
   assert.strictEqual(res.body.escalade, true)
   const maj = etat.majs.find(m => m.table === 'menages')
-  assert.strictEqual(maj.row.offered_to, TROISIEME)
+  assert.deepStrictEqual(maj.row.proposee_a, [TROISIEME])
   assert.ok(maj.row.offer_expires_at, 'une proposition sans échéance est refusée par la base')
-  assert.strictEqual(maj.f.offered_to, MARIE, 'la condition reste atomique sur SA proposition')
+  assert.deepStrictEqual(maj.cs, [MARIE], 'la condition reste atomique sur SA proposition')
   assert.strictEqual(etat.notifs.length, 1, 'une proposition muette expire sans que personne ne sache')
   assert.strictEqual(etat.notifs[0].providerId, TROISIEME)
 })
@@ -314,7 +325,7 @@ test('une escalade réussie N\'ALERTE PAS l\'hôte', async () => {
   // Quelqu'un vient d'être sollicité : rien n'est découvert. Si elle ne répond
   // pas, l'expiration reprendra la main — et alertera, la file étant épuisée.
   const etat = preparer({
-    menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
+    menage: { id: 'm1', provider_id: null, proposee_a: [MARIE], status: 'offered' },
     liaisons: [
       { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
       { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
@@ -327,7 +338,7 @@ test('une escalade réussie N\'ALERTE PAS l\'hôte', async () => {
   assert.strictEqual(etat.incidents.length, 0)
   const maj = etat.majs.find(m => m.table === 'menages')
   assert.strictEqual(maj.row.status, 'offered', 'personne ne porte : le statut le dit')
-  assert.strictEqual(maj.row.offered_to, TROISIEME)
+  assert.deepStrictEqual(maj.row.proposee_a, [TROISIEME])
 })
 
 test('personne d\'AUTRE : on retombe sur le modèle parallèle, sans boucle', async () => {
@@ -343,7 +354,7 @@ test('personne d\'AUTRE : on retombe sur le modèle parallèle, sans boucle', as
   assert.strictEqual(res.body.escalade, false)
   assert.strictEqual(res.body.porte, true)
   const maj = etat.majs.find(m => m.table === 'menages')
-  assert.strictEqual(maj.row.offered_to, null)
+  assert.strictEqual(maj.row.proposee_a, null)
   assert.strictEqual(etat.notifs.length, 0)
 })
 
@@ -357,7 +368,7 @@ test('qui a DÉJÀ refusé ce ménage n\'est pas resollicité', async () => {
   const res = reponse()
   await handler(post('refuserMenage'), res)
   assert.strictEqual(res.body.escalade, false, 'la file est épuisée')
-  assert.strictEqual(etat.majs.find(m => m.table === 'menages').row.offered_to, null)
+  assert.strictEqual(etat.majs.find(m => m.table === 'menages').row.proposee_a, null)
 })
 
 test('une PANNE du calcul de la remplaçante n\'empêche PAS le refus', async () => {
@@ -370,14 +381,14 @@ test('une PANNE du calcul de la remplaçante n\'empêche PAS le refus', async ()
   await handler(post('refuserMenage'), res)
   assert.strictEqual(res.body.success, true)
   assert.strictEqual(res.body.escalade, false)
-  assert.strictEqual(etat.majs.find(m => m.table === 'menages').row.offered_to, null)
+  assert.strictEqual(etat.majs.find(m => m.table === 'menages').row.proposee_a, null)
 })
 
 test('la remplaçante n\'est JAMAIS la porteuse (contrainte `offre_pas_a_soi`)', async () => {
   // Si la garde du jour désignait la porteuse elle-même, l'update violerait
   // `menages_offre_pas_a_soi` — et le refus échouerait avec elle.
   const etat = preparer({
-    menage: { id: 'm1', provider_id: TROISIEME, offered_to: MARIE, status: 'accepted' },
+    menage: { id: 'm1', provider_id: TROISIEME, proposee_a: [MARIE], status: 'accepted' },
     liaisons: [
       { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
       { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
@@ -387,7 +398,7 @@ test('la remplaçante n\'est JAMAIS la porteuse (contrainte `offre_pas_a_soi`)',
   const res = reponse()
   await handler(post('refuserMenage'), res)
   assert.strictEqual(res.body.escalade, false)
-  assert.strictEqual(etat.majs.find(m => m.table === 'menages').row.offered_to, null)
+  assert.strictEqual(etat.majs.find(m => m.table === 'menages').row.proposee_a, null)
 })
 
 test('escalade sur un ménage SANS porteur : la candidate d\'office est posée', async () => {
@@ -398,7 +409,7 @@ test('escalade sur un ménage SANS porteur : la candidate d\'office est posée',
   // candidate d'office ne le recevait jamais, et le writer sautait la ligne
   // puisqu'une proposition y est posée.
   const etat = preparer({
-    menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
+    menage: { id: 'm1', provider_id: null, proposee_a: [MARIE], status: 'offered' },
     liaisons: [
       { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
       { user_id: U, property_id: '209413', provider_id: REGINA, rang: 2, requires_ack: false, active: true },
@@ -412,7 +423,7 @@ test('escalade sur un ménage SANS porteur : la candidate d\'office est posée',
   assert.strictEqual(maj.row.provider_id, REGINA, 'la porteuse d\'office prend la charge')
   assert.strictEqual(maj.row.status, 'accepted')
   assert.ok(maj.row.accepted_at)
-  assert.strictEqual(maj.row.offered_to, TROISIEME, 'et la suivante est sollicitée à côté')
+  assert.deepStrictEqual(maj.row.proposee_a, [TROISIEME], 'et la suivante est sollicitée à côté')
 })
 
 test('SANS aucun jour réglé — l\'état réel de la prod — la porteuse est quand même posée', async () => {
@@ -425,7 +436,7 @@ test('SANS aucun jour réglé — l\'état réel de la prod — la porteuse est 
   // le logement reste sans personne pour toujours, avec une candidate d'office
   // juste à côté.
   const etat = preparer({
-    menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
+    menage: { id: 'm1', provider_id: null, proposee_a: [MARIE], status: 'offered' },
     liaisons: [
       { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, weekdays: null, requires_ack: true, active: true },
       { user_id: U, property_id: '209413', provider_id: REGINA, rang: 2, weekdays: null, requires_ack: false, active: true }
@@ -437,7 +448,7 @@ test('SANS aucun jour réglé — l\'état réel de la prod — la porteuse est 
   const maj = etat.majs.find(m => m.table === 'menages')
   assert.strictEqual(maj.row.provider_id, REGINA, 'la personne de garde reprend le ménage')
   assert.strictEqual(maj.row.status, 'accepted')
-  assert.strictEqual(maj.row.offered_to, null, 'personne à solliciter : aucune offre posée')
+  assert.strictEqual(maj.row.proposee_a, null, 'personne à solliciter : aucune offre posée')
   assert.notStrictEqual(maj.row.assigned_by, 'manual', 'et surtout : AUCUN verrou')
   assert.strictEqual(res.body.porte, true, 'quelqu\'un a la charge du ménage')
   assert.strictEqual(res.body.escalade, false, 'mais personne n\'a été sollicité')
@@ -447,7 +458,7 @@ test('SANS aucun jour réglé — l\'état réel de la prod — la porteuse est 
 
 test('ni porteuse ni personne à solliciter : là, le verrou et l\'alerte', async () => {
   const etat = preparer({
-    menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'offered' },
+    menage: { id: 'm1', provider_id: null, proposee_a: [MARIE], status: 'offered' },
     liaisons: [
       { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, weekdays: null, requires_ack: true, active: true }
     ]
@@ -510,12 +521,12 @@ test('un profil DÉSACTIVÉ non plus', async () => {
 
 test('on ne répond pas à l\'offre de quelqu\'un d\'autre', async () => {
   // La condition atomique s'en charge : l'update ne touche rien.
-  const etat = preparer({ menage: { id: 'm1', provider_id: REGINA, offered_to: 'p-tiers', status: 'accepted' } })
+  const etat = preparer({ menage: { id: 'm1', provider_id: REGINA, proposee_a: ['p-tiers'], status: 'accepted' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('accepterMenage'), res)
   assert.strictEqual(res.code, 409)
-  assert.strictEqual(etat.majs[0].f.offered_to, MARIE, 'la condition porte SON identifiant')
+  assert.deepStrictEqual(etat.majs[0].cs, [MARIE], 'la condition porte SON identifiant')
 })
 
 // ─── Les entrées et les pannes ─────────────────────────────────────────────
@@ -587,10 +598,93 @@ test('accepter un ménage ANNULÉ est refusé', async () => {
   // Une PWA restée ouverte sur un ménage dont la réservation a disparu pouvait
   // le repasser en `accepted` avec un porteur — un ménage vivant pour une
   // réservation qui ne l'est plus.
-  const etat = preparer({ menage: { id: 'm1', provider_id: null, offered_to: MARIE, status: 'cancelled' } })
+  const etat = preparer({ menage: { id: 'm1', provider_id: null, proposee_a: [MARIE], status: 'cancelled' } })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(post('accepterMenage'), res)
   assert.strictEqual(res.code, 409)
   assert.strictEqual(etat.journal.length, 0)
+})
+
+// ─── LE TOUR D'UN RANG (spec proposition-par-rang, 2 octobre 2026) ─────────
+// Marie et Lena sont au rang 1 et sollicitées EN MÊME TEMPS ; la troisième au
+// rang 2 attend que tout le rang 1 ait répondu ou laissé expirer.
+const LENA = 'p-lena'
+const LIAISONS_RANG = [
+  { user_id: U, property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
+  { user_id: U, property_id: '209413', provider_id: LENA, rang: 1, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
+  { user_id: U, property_id: '209413', provider_id: TROISIEME, rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true },
+  { user_id: U, property_id: '209413', provider_id: 'p-quatrieme', rang: 2, requires_ack: true, weekdays: TOUS_LES_JOURS, active: true }
+]
+const TOUR_DE_DEUX = { id: 'm1', provider_id: null, proposee_a: [MARIE, LENA], status: 'offered' }
+
+test('rang de deux : la PREMIÈRE qui accepte l\'a, et les autres ne reçoivent aucun SMS', async () => {
+  const etat = preparer({ menage: { ...TOUR_DE_DEUX }, liaisons: LIAISONS_RANG })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('accepterMenage'), res)
+  assert.strictEqual(res.body.status, 'accepted')
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.strictEqual(maj.row.provider_id, MARIE)
+  assert.strictEqual(maj.row.proposee_a, null, 'le tour entier s\'efface : Lena ne voit plus la proposition')
+  assert.deepStrictEqual(maj.cs, [MARIE], 'la condition : « je suis encore dans le tour »')
+  assert.strictEqual(etat.notifs.length, 0, 'décision 4 : aucun SMS aux autres quand l\'une accepte')
+})
+
+test('rang de deux : la SECONDE qui accepte lit « Déjà pris par une collègue »', async () => {
+  // Lena a accepté entre la lecture et l'écriture : le tour a été vidé, la
+  // condition ne touche rien, et la relecture montre Lena en porteuse.
+  const etat = preparer({ menage: { ...TOUR_DE_DEUX }, majTouche: false,
+                          relu: { provider_id: LENA } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('accepterMenage'), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.error, 'Déjà pris par une collègue.')
+  assert.ok(!etat.journal.some(l => l.event === 'accepted'), 'une course perdue n\'écrit rien au journal')
+})
+
+test('un refus dans un rang de deux NE CLÔT PAS le tour : la collègue reste sollicitée', async () => {
+  const etat = preparer({ menage: { ...TOUR_DE_DEUX }, liaisons: LIAISONS_RANG })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.body.escalade, false)
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.deepStrictEqual(maj.row.proposee_a, [LENA], 'elle seule est retirée')
+  assert.strictEqual(maj.row.status, undefined, 'le statut ne bouge pas : le tour continue')
+  assert.deepStrictEqual([...maj.cs].sort(), [LENA, MARIE].sort(), 'condition sur le tour EXACT lu')
+  assert.deepStrictEqual([...maj.cd].sort(), [LENA, MARIE].sort())
+  assert.strictEqual(etat.notifs.length, 0, 'le rang 2 n\'est pas sollicité')
+  assert.strictEqual(etat.incidents.length, 0, 'décision 3 : un refus isolé n\'alerte pas l\'hôte')
+  assert.ok(etat.journal.find(l => l.event === 'declined' && l.from_provider_id === MARIE))
+})
+
+test('la DERNIÈRE du tour refuse : le rang suivant est sollicité EN ENTIER', async () => {
+  // Lena a déjà refusé (journal) : Marie est seule restante du rang 1.
+  const etat = preparer({
+    menage: { id: 'm1', provider_id: null, proposee_a: [MARIE], status: 'offered' },
+    liaisons: LIAISONS_RANG,
+    refus: [{ menage_id: 'm1', from_provider_id: LENA, event: 'declined' }]
+  })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.body.escalade, true)
+  const maj = etat.majs.find(m => m.table === 'menages')
+  assert.deepStrictEqual([...maj.row.proposee_a].sort(), [TROISIEME, 'p-quatrieme'].sort())
+  assert.ok(!maj.row.proposee_a.includes(LENA), 'qui a déjà refusé n\'est jamais resollicitée')
+  assert.deepStrictEqual(etat.notifs.map(n => n.providerId).sort(), [TROISIEME, 'p-quatrieme'].sort(),
+    'chacune du rang 2 est prévenue')
+  assert.strictEqual(etat.journal.filter(l => l.event === 'offered').length, 2, 'une ligne de journal par personne')
+  assert.strictEqual(etat.incidents.length, 0)
+})
+
+test('refuser un tour où l\'on N\'EST PAS : 409, rien d\'écrit', async () => {
+  const etat = preparer({ menage: { id: 'm1', provider_id: null, proposee_a: [LENA], status: 'offered' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(post('refuserMenage'), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(etat.majs.length, 0)
 })

@@ -48,19 +48,19 @@ const BIENS = [
 ]
 const M = (booking, bien, provider, n, over = {}) => ({
   user_id: U, booking_id: booking, property_id: bien, departure_date: jour(n),
-  provider_id: provider, status: 'accepted', offered_to: null, offer_expires_at: null,
+  provider_id: provider, status: 'accepted', offered_to: null, proposee_a: null, offer_expires_at: null,
   assigned_by: 'auto', ...over
 })
 const MENAGES = [
   M('bk-lola-1', B1, LOLA, 3),                                    // pris par Lola, sur un bien d'elle
   M('bk-marc-2', B2, MARC, 4),                                    // pris par Marc, bien sans liaison active
   M('bk-lola-3', B2, LOLA, -2, { status: 'completed' }),          // fait par Lola, bien sans liaison active
-  M('bk-prop-4', B1, null, 5, { status: 'offered', offered_to: LOLA }), // seulement PROPOSÉ à Lola
+  M('bk-prop-4', B1, null, 5, { status: 'offered', proposee_a: [LOLA] }), // seulement PROPOSÉ à Lola
   M('bk-lola-5', B3, LOLA, 6),                                    // hors périmètre du lien
   M('bk-vieille-6', B1, VIEILLE, 7),                              // personne désactivée
   M('bk-lena-7', B1, LENA, 8),                                    // le sien
   M('bk-lena-7', B1, LENA, -1),                                   // le sien, passé (marquable fait)
-  M('bk-lola-8', B1, LOLA, 9, { offered_to: LENA }),              // porté par Lola, proposé à Lena
+  M('bk-lola-8', B1, LOLA, 9, { proposee_a: [LENA] }),            // porté par Lola, proposé à Lena
   M('bk-annule-9', B1, LOLA, 10, { status: 'cancelled' }),
   // UN AUTRE COMPTE, sur le MEME identifiant de bien (cle provider TEXT) et
   // avec une prestataire de ce compte-la : ne doit jamais sortir.
@@ -106,6 +106,8 @@ function preparer ({ visibilite = null, erreurs = {} } = {}) {
         if (c.op === 'eq') return String(v) === String(c.val)
         if (c.op === 'neq') return String(v) !== String(c.val)
         if (c.op === 'in') return c.val.map(String).includes(String(v))
+        if (c.op === 'cs') return Array.isArray(v) && c.val.every(x => v.map(String).includes(String(x)))
+        if (c.op === 'cd') return !Array.isArray(v) || v.every(x => c.val.map(String).includes(String(x)))
         if (c.op === 'is') return c.val === null ? v == null : v === c.val
         if (c.op === 'notis') return v != null
         if (c.op === 'gte') return v != null && String(v) >= String(c.val)
@@ -118,6 +120,7 @@ function preparer ({ visibilite = null, erreurs = {} } = {}) {
             if (op === 'eq') return String(x) === val
             if (op === 'neq') return String(x) !== val
             if (op === 'is' && val === 'null') return x == null
+            if (op === 'cs') return Array.isArray(x) && val.replace(/[{}]/g, '').split(',').every(y => x.map(String).includes(y))
             return true
           })
         }
@@ -134,6 +137,8 @@ function preparer ({ visibilite = null, erreurs = {} } = {}) {
         eq (col, val) { conds.push({ op: 'eq', col, val }); return chain },
         neq (col, val) { conds.push({ op: 'neq', col, val }); return chain },
         in (col, val) { conds.push({ op: 'in', col, val }); return chain },
+        contains (col, val) { conds.push({ op: 'cs', col, val }); return chain },
+        containedBy (col, val) { conds.push({ op: 'cd', col, val }); return chain },
         is (col, val) { conds.push({ op: 'is', col, val }); return chain },
         not (col, op, val) { if (op === 'is' && val === null) conds.push({ op: 'notis', col }); return chain },
         gte (col, val) { conds.push({ op: 'gte', col, val }); return chain },

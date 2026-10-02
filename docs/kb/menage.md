@@ -3419,3 +3419,63 @@ est refusé par le writer de visibilité » (contre-épreuve : garde de session
 retirée dans une copie hors de l'arbre → le test rougit) ;
 `tests/menages-public-visibilite.test.js` — « la PWA n'a AUCUNE action pour
 régler ce qu'elle voit ».
+
+## Proposer à tout un rang (2 octobre 2026)
+
+Spec : `docs/specs/spec-proposition-par-rang.md` (décisions de Thierry : 3 rangs,
+la première qui accepte l'a, « Déjà pris par une collègue », pas de SMS aux
+autres, l'hôte alerté seulement quand il ne reste personne, délai partagé en
+dernière minute). Cas réel qui l'a motivé : Ofuro Futari, dimanche 4 octobre —
+Lena et Tiphaine voulues au rang 1, Lola au rang 2.
+
+**Stockage** : `menages.proposee_a uuid[]` (choix de Thierry : une colonne
+liste). `null` = pas de proposition ; jamais vide (`menages_proposee_non_vide`),
+jamais la porteuse (`menages_proposee_pas_a_soi`), toujours avec une échéance
+(`menages_offre_datee`, tolérante aux deux colonnes pendant la bascule). Index
+GIN pour « ce qu'on me propose ». ⚠️ **Migration
+`migrations/2026-10-02-menages-proposee-a.sql` préparée, NON APPLIQUÉE** ;
+preuve par `scripts/verifier-migration-menages-proposee-a.js`.
+
+**`offered_to` n'est plus écrit**, seulement lu en repli par `proposeesDe()`
+(`lib/cleaning/assign.js`) — l'unique lecture du tour, partout. La migration
+COPIE sans vider ; `rattraperBascule` (début de `expirerPropositions`) reprend à
+chaque cycle ce que l'ancien code a pu poser entre migration et déploiement.
+Colonne `offered_to` à supprimer dans un lot ultérieur, avec `rattraperBascule`.
+
+**Moteur** (`deciderParGarde`) : `proposees` = toutes les candidates du plus
+petit rang de la file (à confirmer, jours réglés, pas dans `exclus`) ; `rang` ;
+`rangsRestants`. `offeredTo` reste un alias en lecture du premier.
+
+**Choix faits au codage** :
+- **rang par défaut = 1** sur la fiche (il était déduit : d'office = 1, à
+  confirmer = 2). Le rang lu en base est borné à 1-3 à l'affichage ;
+- **le modèle parallèle est gardé** : porteuse d'office + rang à confirmer →
+  la proposition part à côté, au rang entier (spec §2 règle 1, précisée) ;
+- **échéance** : `echeanceOffre(depart, maintenant, rangsRestants)` = temps
+  jusqu'à la veille 18 h ÷ rangs restants, borné entre 1 h et 48 h ;
+- **une ligne de journal par personne** (`offered`, `expired`) : c'est la
+  mémoire qui empêche de resolliciter celle qui n'a pas répondu ;
+- **acceptation** conditionnelle sur `.contains('proposee_a', [moi])` : la
+  première vide le tour, la seconde ne touche rien et relit — porteuse changée
+  → 409 « Déjà pris par une collègue. » ;
+- **refus partiel** : elle seule est retirée, conditionnel sur le tour EXACT lu
+  (`contains` + `containedBy`) ; pas d'escalade, pas d'alerte. La dernière du
+  tour → `remplacanteApresRefus` sollicite le rang suivant entier ;
+- **expiration** : l'hôte n'est alerté que si `quiResteASolliciter` ne trouve
+  plus personne (panne de lecture = on suppose qu'il reste quelqu'un : l'alerte
+  attend un cycle plutôt que de partir à tort) ;
+- **`rendreAuMoteur`** (changement des règles d'une prestataire) ne retire
+  qu'elle du tour.
+
+Tests : `tests/proposition-par-rang.test.js` (moteur, dernière minute J+1 :
+trois rangs avant la veille 18 h), et les sections « tour d'un rang » de
+`menages-public-offre`, `cleaning-sync-menages-entite`,
+`prestataires-formulaire-dom`. Contre-épreuve contre `main` par `git archive` :
+tous rougissent, sauf les quatre de non-régression (48 h au loin, plancher 1 h,
+veille passée, alerte au dernier rang). Mutation : retirer la garde
+`restants.has` fait rougir « un tour EXPIRÉ dont un rang reste… N'ALERTE PAS ».
+
+⚠️ **Ordre de déploiement** : migration appliquée et prouvée **avant** toute
+fusion — le nouveau code lit `proposee_a`, une colonne absente fait échouer
+planning PWA et cron. Les rangs de la prod se règlent ensuite par Thierry, sur
+les fiches (aucune écriture de rang en base par le lot).
