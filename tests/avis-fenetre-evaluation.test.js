@@ -366,3 +366,14 @@ test('une part encore INCOMPLETE ne ferme pas la fenetre', async () => {
   await new Promise(r => setTimeout(r, 10))
   assert.strictEqual(ferme.length, 0)
 })
+
+// ─── Constat de production du 2 octobre 2026 : « 0 css et mise en page » ────
+test('LE TEST QUI COMPTE : la fenetre pose SA mise en page, une seule fois par document', async () => {
+  const { document } = await monter()
+  const { poserStyle } = await import('../core/avis/fenetre-evaluation.js')
+  poserStyle(document)   // une seconde ouverture sur le MEME document
+  const styles = document.querySelectorAll('#hs-avis-style')
+  assert.strictEqual(styles.length, 1)
+  assert.match(styles[0].textContent, /\.hs-avis-critere/)
+  assert.match(styles[0].textContent, /\.hs-avis-principal/)
+})

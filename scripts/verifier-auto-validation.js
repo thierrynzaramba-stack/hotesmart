@@ -63,6 +63,11 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++ }
   if (eP) ko(`comptage des programmees impossible : ${eP.message}`)
   else console.log(`        evaluations programmees : ${programmees}`)
 
+  // 2 bis. Le repere de vie privee (2026-10-02-avis-texte-sans-voyageur.sql).
+  const { error: eT } = await sb.from('guest_evaluations').select('texte_sans_voyageur').limit(1)
+  if (eT) ko(`guest_evaluations.texte_sans_voyageur illisible : ${eT.message}`)
+  else ok('guest_evaluations.texte_sans_voyageur lisible')
+
   // 3. Les departs du jour (naissance, §9 bis), avec le filtre du cron.
   const jour = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date())
   const { data: departs, error: eD } = await sb.from('menages')

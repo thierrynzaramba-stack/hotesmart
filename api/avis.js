@@ -1245,7 +1245,11 @@ async function evaluationLire (req, res, garde) {
         // ⚠ ET SEULEMENT SI L'HOTE L'A AUTORISEE : une prestataire `aucun` ne
         // participe a rien, elle ne lit donc pas le texte (constat de securite
         // du 2 octobre 2026, avec la garde de lib/avis/publication.js).
-        ...(evalPower === 'valider' && evalScope === 'selon_grille' ? { public_text: e.public_text } : {}),
+        //
+        // ⚠ ET SEULEMENT UN TEXTE REDIGE POUR ELLE (revue de 57a79d6, vie
+        // privee) : celui de l'hote ou de l'auto-validation cite le prenom du
+        // voyageur, qu'elle ne voit jamais (spec prestataires §6).
+        ...(evalPower === 'valider' && evalScope === 'selon_grille' && e.texte_sans_voyageur === true ? { public_text: e.public_text } : {}),
       }
 
   // ⚠ `peut_publier` SE REND DES L'OUVERTURE. Constat de review : la fenetre ne
@@ -1266,11 +1270,13 @@ async function evaluationLire (req, res, garde) {
     hoteARepondu: hoteARepondu(e),
   })
 
+  // Un texte qui n'est pas le sien ne se publie pas par elle : l'hote tranche.
+  const texteDeLHote = role === 'prestataire' && e.public_text && e.texte_sans_voyageur !== true
   return res.status(200).json({
     evaluation: vue,
     role,
     criteres: ouverts,
-    peut_publier: decision.peutPublier,
+    peut_publier: decision.peutPublier && !texteDeLHote,
     negatif,
     grille_figee: Boolean(e.grille_figee),
   })
@@ -1310,9 +1316,13 @@ async function evaluationRepondre (req, res, garde) {
     return res.status(400).json({ error: pourLEcran(err.message) })
   }
 
+  // ⚠ UN TEXTE DE L'HOTE (ou de l'auto-validation) DEJA LA : elle ne le
+  // publiera pas (re-revue de 0d29f03) — l'ecran ne lui montre pas un bouton
+  // qui finirait en refus, et l'evaluation revient a l'hote.
+  const texteDeLHote = role === 'prestataire' && Boolean(String(e.public_text || '').trim()) && e.texte_sans_voyageur !== true
   const reponse = {
-    ok: true, status: r.decision.statut, peut_publier: r.decision.peutPublier,
-    motif: r.decision.motif, complet: r.complet, negatif: r.negatif,
+    ok: true, status: r.decision.statut, peut_publier: r.decision.peutPublier && !texteDeLHote,
+    motif: texteDeLHote ? 'un texte de l hote existe : il publie' : r.decision.motif, complet: r.complet, negatif: r.negatif,
   }
 
   // ⚠ L'HOTE EST PREVENU QUAND LA PRESTATAIRE A FINI SA PART et que
@@ -1372,7 +1382,8 @@ async function evaluationRepondre (req, res, garde) {
       answers_host: { ...(e.answers_host || {}), ...(role === 'hote' ? reponses : {}) },
       grille_figee: (r.evaluation && r.evaluation.grille_figee) || e.grille_figee || r.grille,
     }
-    const redige = await redigerEtEnregistrer(aJour)
+    // La prestataire relit ce texte : jamais le prenom du voyageur dedans.
+    const redige = await redigerEtEnregistrer(aJour, { avecPrenom: false })
 
     if (redige.panne) {
       // Une panne de lecture n'est pas un refus de l'IA : les reponses SONT
@@ -1437,7 +1448,39 @@ async function evaluationRepondre (req, res, garde) {
 // Rend { ok: true, public_text, private_note, negatif }
 //   ou { ok: false, motif, detail }            — l'IA refuse, la raison est dite
 //   ou { ok: false, panne: { code, body } }    — une lecture a echoue
-async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAutoPublierLe = null } = {}) {
+// La langue et le prenom du voyageur, lus dans SA reservation (le coeur).
+// ⚠ Constat de production du 2 octobre 2026 : `language` etait nul sur toutes
+// les evaluations nees au depart, et la redaction partait en anglais pour un
+// voyageur francais (la reservation Airbnb dit `customer.language = fr`). Le
+// prenom, connu de la reservation, n'etait utilise que s'il etait saisi a la main.
+async function voyageurDeLaReservation (e) {
+  const { data, error } = await supabase.from('bookings_snapshot').select('snapshot, raw')
+    .eq('user_id', e.user_id).eq('booking_id', String(e.booking_uid)).maybeSingle()
+  if (error) console.error('[avis] reservation illisible pour la redaction', e.id, error.message)
+  if (!data) return { langue: null, prenom: null }
+  const sp = data.snapshot || {}
+  const raw = data.raw || {}
+  const attributs = raw.attributes || raw
+  const client = attributs.customer || raw.customer || {}
+  const brute = String(client.language || client.locale || sp.language || raw.lang || '').trim().toLowerCase()
+  // Un code de langue (« fr », « fr-FR », « pt_BR »), jamais un nom en toutes lettres.
+  const langue = /^[a-z]{2}($|[-_])/.test(brute) ? brute.slice(0, 2) : null
+  const prenom = String(sp.firstName || client.name || '').trim().split(/\s+/)[0] || null
+  return { langue, prenom }
+}
+
+// `avecPrenom` : faux quand c'est la PRESTATAIRE qui declenche la redaction —
+// elle relit le texte, et le nom du voyageur ne lui est jamais montre
+// (docs/specs/spec-prestataires-menage.md §6).
+async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAutoPublierLe = null, avecPrenom = true } = {}) {
+  const voyageur = await voyageurDeLaReservation(e)
+  if (!e.language && voyageur.langue) {
+    e = { ...e, language: voyageur.langue }
+    const { error: eL } = await supabase.from('guest_evaluations')
+      .update({ language: voyageur.langue }).eq('id', e.id).eq('user_id', e.user_id).is('language', null)
+    if (eL) console.error('[avis] langue non enregistree', e.id, eL.message)
+  }
+  const prenomVoyageur = avecPrenom ? (prenom || voyageur.prenom) : null
   // ⚠ LES ERREURS DE LECTURE SE LISENT. Constat de review : un `Promise.all`
   // destructure sans `error` faisait disparaitre EN SILENCE les mots-cles, le
   // ton et la signature de l'hote — le texte partait avec les reglages par
@@ -1495,7 +1538,7 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAuto
   const r = await redigerAvis({
     reponses,
     remarque: remarque ? String(remarque).slice(0, MAX_TEXTE) : null,
-    prenom: prenom ? String(prenom).slice(0, 80) : null,
+    prenom: prenomVoyageur ? String(prenomVoyageur).slice(0, 80) : null,
     langue: e.language || 'en',
     prestataire: rPresta.data?.first_name || null,
     config: fusion,
@@ -1528,7 +1571,8 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAuto
   // demande par l'hote pendant une publication arrivait apres elle et
   // remplacait en base le texte reellement parti chez la plateforme.
   let ecriture = supabase.from('guest_evaluations')
-    .update({ public_text: r.public_text, private_note: r.private_note })
+    // Le repere de vie privee : vrai seulement pour un texte redige SANS le voyageur.
+    .update({ public_text: r.public_text, private_note: r.private_note, texte_sans_voyageur: !avecPrenom })
     .eq('id', e.id).eq('user_id', e.user_id)
     .in('status', ['a_remplir', 'soumise_prestataire', 'a_valider', 'echec_publication'])
   if (siAutoPublierLe) ecriture = ecriture.eq('auto_publier_le', siAutoPublierLe).select('id')
@@ -1844,6 +1888,8 @@ async function evaluationPublier (req, res, garde, options = {}) {
   const maj = {
     status: r.statut,
     public_text: evaluation.public_text,
+    // Un texte remplace par l'hote peut citer le voyageur : il n'est plus « sans voyageur ».
+    ...(req.body?.public_text && roleEtReglages(garde).role === 'hote' ? { texte_sans_voyageur: false } : {}),
     provider_response: r.provider_response || null,
     validated_by_profile: profilId,
   }

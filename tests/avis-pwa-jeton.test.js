@@ -288,7 +288,7 @@ test('LE TEST QUI COMPTE : par son jeton, une prestataire « soumettre » ne pub
     status: 'a_valider', provider: 'channex', ota: 'airbnb', ota_review_id: 'o1o1o1o1-1111-4111-8111-111111111111',
     // Ses reponses a ELLE : une reponse de l'hote lui rendrait la publication (option B).
     answers_cleaner: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait', communication: 'excellente', regles: 'oui', recommande: 'oui' },
-    public_text: 'Merci.', deadline_at: new Date(Date.now() + 5 * 86400000).toISOString(),
+    public_text: 'Merci.', texte_sans_voyageur: true, deadline_at: new Date(Date.now() + 5 * 86400000).toISOString(),
   }
   const etat = preparer(base({
     guest_evaluations: [prete],
