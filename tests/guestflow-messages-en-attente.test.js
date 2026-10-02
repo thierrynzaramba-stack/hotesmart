@@ -587,3 +587,19 @@ test('un refus de modele ne survit pas au cycle : le cycle suivant re-tente le m
   assert.strictEqual(appelsIA.length, 1, 'un nouveau fil, un appel')
   assert.strictEqual(appelsIA[0].model, 'claude-sonnet-5-5', 'le nouveau cycle repart du modele configure')
 }))
+
+// ─── Arrivee anticipee : la base repond (decision de Thierry du 2 octobre 2026) ─
+test('LE TEST QUI COMPTE : arrivee anticipee — la regle de la base repond ; l\'arrivee tardive ne vaut pas accord ; sans regle, l\'hote decide', async () => {
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Je veux arriver à 16h', time: t(1) }]
+  const { mod, appelsIA } = charger({ tables: tablesVides(), messagesChannex: messages,
+    contenuIA: json({ type: 'info_known', reason: 'x', auto_reply: 'x', sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  const prompt = appelsIA[0].messages[0].content
+  const toujours = prompt.split('TOUJOURS intervention')[1].split('EXACTITUDE')[0]
+  assert.ok(!/arrivée avant/.test(toujours.split('ARRIVÉE ANTICIPÉE')[0]), 'l\'arrivee anticipee ne figure plus parmi les escalades obligatoires')
+  const regle = prompt.split('ARRIVÉE ANTICIPÉE')[1].split('EXACTITUDE')[0]
+  assert.ok(/reprenant CETTE règle fidèlement : info_known/.test(regle), 'la base repond')
+  assert.ok(/ne vaut PAS accord pour arriver plus tôt/.test(regle), 'l\'arrivee tardive n\'est pas une arrivee anticipee')
+  assert.ok(/ne dit rien de l'arrivée anticipée : info_unknown/.test(regle), 'sans regle, l\'hote decide')
+  assert.ok(/départ tardif/.test(toujours), 'le depart tardif reste a l\'hote')
+})

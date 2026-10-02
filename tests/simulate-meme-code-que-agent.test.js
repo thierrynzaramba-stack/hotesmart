@@ -82,7 +82,7 @@ test('LE TEST QUI COMPTE : le simulateur envoie le prompt de l\'agent reel, avec
   const prompt = appelsIA[0].messages[0].content
   const attente = prompt.split('MESSAGES EN ATTENTE (à traiter ensemble) :')[1]
   assert.ok(attente.includes('je veux arrivé a 16h') && attente.includes('donc ok pour 16h?'), 'les deux messages sans reponse sont traites ensemble')
-  assert.ok(/arrivée avant l'heure prévue par la base/.test(prompt), 'les escalades obligatoires de l\'agent reel')
+  assert.ok(/TOUJOURS intervention/.test(prompt) && /prolongation/.test(prompt), 'les escalades obligatoires de l\'agent reel')
   assert.ok(/Vouvoiement systématique/.test(prompt), 'les consignes de l\'hote')
   assert.ok(/Simulation : aucune réservation réelle/.test(prompt), 'l\'etat des envois dit qu\'aucun code n\'est parti')
   assert.strictEqual(res.corps.classification.type, 'intervention')
