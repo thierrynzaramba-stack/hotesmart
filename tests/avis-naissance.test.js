@@ -394,7 +394,7 @@ function baseRangement (evaluations) {
 }
 
 // Un objet Airbnb dont l'avis du voyageur est VISIBLE : non cache, et noté.
-const VISIBLE = (a = {}) => ligneAvis({ is_hidden: false, ...a, raw: { attributes: { is_hidden: false, overall_score: 10, ...(a.attrs || {}) } } })
+const VISIBLE = (a = {}) => ligneAvis({ is_hidden: false, received_at: DANS(-3), ...a, raw: { attributes: { is_hidden: false, overall_score: 10, ...(a.attrs || {}) } } })
 const CACHE = (a = {}) => ligneAvis({ is_hidden: true, ...a, raw: { attributes: { is_hidden: true, overall_score: 0 } } })
 const EV = (id, uid, status = 'a_remplir', a = {}) => ({ id, user_id: 'compte-1', booking_uid: uid, status, deadline_at: DANS(5), ...a })
 
@@ -408,7 +408,7 @@ test('LE TEST QUI COMPTE : un avis du voyageur VISIBLE avant l’echeance range 
   assert.strictEqual(etat.evaluations[0].status, 'evaluee_ailleurs')
   assert.strictEqual(etat.evaluations[0].auto_publier_le, null, 'la publication automatique s arrete')
   assert.strictEqual(etat.evaluations[1].status, 'a_remplir', 'cache : on ne sait pas, on ne range pas')
-  assert.strictEqual(etat.journal[0].type, 'avis.evaluee_ailleurs', 'le rangement automatique laisse une trace')
+  assert.strictEqual([].concat(etat.journal[0])[0].type, 'avis.evaluee_ailleurs', 'le rangement automatique laisse une trace')
 })
 
 test('SECURITE (revue de 9f76ae2) : un « is_hidden » absent du brut n’est PAS visible', async () => {
@@ -452,4 +452,14 @@ test('le rattachement range aussi, dans le meme passage', async () => {
 test('« deja partie » se lit dans reply.guest_review (la ou Channex la range)', () => {
   assert.strictEqual(evaluationDejaPartie({ raw: { attributes: { reply: { guest_review: { public_review: 'x' } } } } }), true)
   assert.strictEqual(evaluationDejaPartie({ raw: { attributes: { reply: null } } }), false)
+})
+
+test('SECURITE (re-revue de 5c59a7b) : entre J+14 et J+30, l’avis public ne prouve rien — l’echeance d’Airbnb se lit sur l’objet', async () => {
+  // Evaluation nee de l'objet : son echeance est celle de Channex, encore loin.
+  const { etat, sb } = baseRangement([EV('a', 'resa-1', 'a_remplir', { deadline_at: DANS(10) })])
+  await rangerEvalueesAilleurs(sb, [VISIBLE({ booking_uid: 'resa-1', received_at: DANS(-20) })], { maintenant: MAINTENANT })
+  assert.strictEqual(etat.evaluations[0].status, 'a_remplir')
+  const b = baseRangement([EV('b', 'resa-1')])
+  await rangerEvalueesAilleurs(b.sb, [VISIBLE({ booking_uid: 'resa-1', received_at: null })], { maintenant: MAINTENANT })
+  assert.strictEqual(b.etat.evaluations[0].status, 'a_remplir', 'sans date de reception : rien')
 })
