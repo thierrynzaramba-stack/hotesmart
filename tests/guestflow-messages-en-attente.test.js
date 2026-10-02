@@ -384,7 +384,7 @@ const promptPour = async (tables, opts = {}) => {
   const { mod, appelsIA } = charger({ tables, messagesChannex: messages, ...opts,
     contenuIA: json({ type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] }) })
   await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
-  return appelsIA[0].messages[0].content.split("ÉTAT DES ENVOIS AUTOMATIQUES (journal d'envoi")[1].split('HISTORIQUE COMPLET')[0]
+  return appelsIA[0].messages[0].content.split('ÉTAT DES ENVOIS AUTOMATIQUES (selon le système')[1].split('HISTORIQUE COMPLET')[0]
 }
 
 test('LE TEST QUI COMPTE : le code d\'acces NON parti est dit « PAS ENCORE ENVOYÉ » au modele', async () => {
@@ -406,7 +406,7 @@ test('un envoi journalise est dit ENVOYÉ, avec son heure de Paris', async () =>
   ]
   tables.message_sent_log = [{ user_id: U, booking_id: B, template_id: 'tpl-code', sent_at: '2026-10-01T13:02:00Z' }]
   const bloc = await promptPour(tables)
-  assert.ok(/Code d'accès[^\n]*: ENVOYÉ le 01\/10\/2026 (à )?15:02/.test(bloc), bloc)
+  assert.ok(/Code d'accès[^\n]*: marqué envoyé par le système le 01\/10\/2026 (à )?15:02/.test(bloc), bloc)
   assert.ok(/avant l'arrivée : PAS ENCORE ENVOYÉ/.test(bloc))
 })
 
@@ -425,7 +425,7 @@ test('journal illisible : le modele est prevenu de ne rien presumer', async () =
   const tables = tablesVides()
   const bloc = await promptPour(tables, { tablesEnPanne: ['message_sent_log'] })
   assert.ok(/INDISPONIBLE/.test(bloc) && /Ne présume/.test(bloc), bloc)
-  assert.ok(!/ENVOYÉ le/.test(bloc))
+  assert.ok(!/envoyé par le système/.test(bloc))
 })
 
 // ─── Lot 2b : GUESTFLOW_MODEL ───────────────────────────────────────────────
@@ -484,4 +484,76 @@ test('une panne de credit ne declenche PAS de repli : meme compte, meme panne', 
   await mod.processChannelPropertyMessages(U, bien, bilan)
   assert.strictEqual(appelsIA.length, 1)
   assert.ok(bilan.errors.some(e => /credit balance/.test(e.error)), 'l\'erreur remonte telle quelle')
+}))
+
+test('LE TEST QUI COMPTE : Mode Test — journal ecrit, tache a valider : le code est dit NON ENVOYÉ', async () => {
+  // Constat de review : message_sent_log est ecrit des la creation de la tache
+  // « a valider ». Le lire seul disait ENVOYÉ pour un code jamais parti.
+  const tables = tablesVides()
+  tables.message_templates = [{ id: 'tpl-code', user_id: U, property_id: P, event_type: 'menage_done', active: true }]
+  tables.message_sent_log = [{ user_id: U, booking_id: B, template_id: 'tpl-code', sent_at: '2026-10-01T12:00:00Z' }]
+  tables.agent_tasks.push(tache({ task_type: 'auto_message', status: 'pending_validation', guest_message: '[AUTO: arrival_code]', created_at: '2026-10-01T12:00:00Z' }))
+  const bloc = await promptPour(tables)
+  assert.ok(/Code d'accès[^\n]*: NON ENVOYÉ — en attente de validation/.test(bloc), bloc)
+  assert.ok(!/envoyé par le système/.test(bloc))
+})
+
+test('LE TEST QUI COMPTE : envoi impossible — journal ecrit, le code est dit NON ENVOYÉ, a transmettre par l\'hote', async () => {
+  const tables = tablesVides()
+  tables.message_templates = [{ id: 'tpl-code', user_id: U, property_id: P, event_type: 'menage_done', active: true }]
+  tables.message_sent_log = [{ user_id: U, booking_id: B, template_id: 'tpl-code', sent_at: '2026-10-01T12:00:00Z' }]
+  tables.agent_tasks.push(tache({ task_type: 'auto_message', status: 'pending_validation', guest_message: '[AUTO: arrival_code — envoi impossible]', created_at: '2026-10-01T12:00:00Z' }))
+  const bloc = await promptPour(tables)
+  assert.ok(/Code d'accès[^\n]*: NON ENVOYÉ — envoi automatique impossible/.test(bloc), bloc)
+})
+
+test('un modele ecarte par l\'hote est NON ENVOYÉ ; un modele traite le dit sans garantir l\'envoi', async () => {
+  const tables = tablesVides()
+  tables.message_templates = [
+    { id: 'tpl-arr', user_id: U, property_id: P, event_type: 'arrival', active: true },
+    { id: 'tpl-dep', user_id: U, property_id: P, event_type: 'departure', active: true }
+  ]
+  tables.message_sent_log = [
+    { user_id: U, booking_id: B, template_id: 'tpl-arr', sent_at: '2026-10-01T09:00:00Z' },
+    { user_id: U, booking_id: B, template_id: 'tpl-dep', sent_at: '2026-10-01T09:00:00Z' }
+  ]
+  tables.agent_tasks.push(
+    tache({ task_type: 'auto_message', status: 'ignored', guest_message: '[AUTO: arrival]', created_at: '2026-10-01T09:00:00Z' }),
+    tache({ task_type: 'auto_message', status: 'done', guest_message: '[AUTO: departure]', created_at: '2026-10-01T09:00:00Z', updated_at: '2026-10-01T10:00:00Z' }))
+  const bloc = await promptPour(tables)
+  assert.ok(/avant l'arrivée : NON ENVOYÉ — écarté par l'hôte/.test(bloc), bloc)
+  assert.ok(/Message de départ : traité par l'hôte le 01\/10\/2026 (à )?12:00 \(envoi non garanti\)/.test(bloc), bloc)
+})
+
+test('le prompt demande de croire le voyageur qui dit ne pas avoir recu', async () => {
+  const tables = tablesVides()
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Je n\'ai pas reçu le code', time: t(1) }]
+  const { mod, appelsIA } = charger({ tables, messagesChannex: messages,
+    contenuIA: json({ type: 'intervention', reason: 'x', auto_reply: null, sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.ok(/crois le voyageur/.test(appelsIA[0].messages[0].content))
+  assert.ok(!/fait foi/.test(appelsIA[0].messages[0].content))
+})
+
+test('prompt trop long : pas de repli, une seule tentative', () => avecVariable('claude-sonnet-5-5', async () => {
+  const { mod, appelsIA } = charger({ tables: tablesVides(), messagesChannex: unFil, creer: () => {
+    const e = new Error('prompt is too long: 250000 tokens > 200000 maximum'); e.status = 400; throw e
+  } })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 1)
+}))
+
+test('un modele refuse n\'est re-tente qu\'une fois par invocation', () => avecVariable('claude-inconnu-9', async () => {
+  const fils = [
+    { bookingId: 'b1', sender: 'guest', message: 'Merci !', time: t(1) },
+    { bookingId: 'b2', sender: 'guest', message: 'Merci !', time: t(1) }
+  ]
+  const { mod, appelsIA } = charger({ tables: tablesVides(), messagesChannex: fils, creer: (req) => {
+    if (req.model !== 'claude-haiku-4-5-20251001') { const e = new Error('not found'); e.status = 404; throw e }
+    return { content: sympathie }
+  } })
+  const bilan = nouveauBilan()
+  await mod.processChannelPropertyMessages(U, bien, bilan)
+  assert.deepStrictEqual(appelsIA.map(r => r.model), ['claude-inconnu-9', 'claude-haiku-4-5-20251001', 'claude-haiku-4-5-20251001'])
+  assert.strictEqual(bilan.errors.filter(e => e.context === 'guestflow_model_refuse').length, 1)
 }))
