@@ -50,7 +50,8 @@ const evalA = (a = {}) => ({
   ota_review_id: '99999999-9999-4999-8999-999999999999',
   answers_host: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait',
                   communication: 'excellente', regles: 'oui', recommande: 'oui' },
-  public_text: 'Merci pour votre sejour.', private_note: null,
+  // Un texte redige POUR la prestataire, sans le voyageur (repere de vie privee).
+  public_text: 'Merci pour votre sejour.', private_note: null, texte_sans_voyageur: true,
   language: 'fr', deadline_at: DEMAIN, grille_figee: null,
   filled_by_profile: null, published_at: null,
   ...a,
@@ -1071,4 +1072,39 @@ test('LE TEST QUI COMPTE : la redaction declenchee par la prestataire ne recoit 
   assert.strictEqual(etat.ia.appels.length, 1)
   assert.match(etat.ia.appels[0], /Prenom du voyageur : inconnu/)
   assert.ok(!/Camille/.test(etat.ia.appels[0]))
+})
+
+// ─── Revue de 57a79d6 (vie privee) : le texte de l'hote reste ferme a la prestataire ─
+test('LE TEST QUI COMPTE : l’hote redige (texte au prenom du voyageur) — la prestataire ne le LIT pas', async () => {
+  const ev = evalA({ public_text: null, answers_host: null, answers_cleaner: { 'c-unique': 'nickel' }, grille_figee: await grilleUniqueFigee() })
+  const etat = preparer({ evaluations: [ev], snapshots: [RESA()], criteres: [CRITERE_UNIQUE()],
+    texteIA: JSON.stringify({ public: 'Camille a ete un voyageur parfait.', prive: '' }) })
+  await require('../api/avis')(req({ action: 'eval-texte' }, { id: ev.id, action: 'eval-texte' }), reponse())
+  const ecrit = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.public_text)
+  assert.strictEqual(ecrit.row.texte_sans_voyageur, false, 'le texte de l hote n est pas « sans voyageur »')
+  // La ligne telle que la base la garde, relue par la prestataire « valider ».
+  const apres = { ...ev, public_text: 'Camille a ete un voyageur parfait.', texte_sans_voyageur: false }
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [apres], criteres: [CRITERE_UNIQUE()] })
+  const lu = reponse()
+  await require('../api/avis')(reqMembre({ action: 'evaluation', id: apres.id }, null, 'GET'), lu)
+  assert.ok(!JSON.stringify(lu.body).includes('Camille'), 'jamais le prenom du voyageur')
+  assert.strictEqual(lu.body.peut_publier, false)
+})
+
+test('LE TEST QUI COMPTE : et elle ne peut pas PUBLIER ce texte', async () => {
+  const ev = evalA({ public_text: 'Camille a ete un voyageur parfait.', texte_sans_voyageur: false, answers_host: null, answers_cleaner: { 'c-unique': 'nickel' }, grille_figee: await grilleUniqueFigee() })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [ev], criteres: [CRITERE_UNIQUE()] })
+  const res = reponse()
+  await require('../api/avis')(reqMembre({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'texte_de_l_hote')
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
+test('le texte redige pour la prestataire porte le repere « sans voyageur »', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null, texte_sans_voyageur: false, grille_figee: await grilleUniqueFigee() })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge], criteres: [CRITERE_UNIQUE()], snapshots: [RESA()] })
+  await require('../api/avis')(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: { 'c-unique': 'nickel' } }), reponse())
+  const ecrit = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.public_text)
+  assert.strictEqual(ecrit.row.texte_sans_voyageur, true)
 })

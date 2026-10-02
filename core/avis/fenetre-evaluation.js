@@ -46,9 +46,9 @@ const STYLE = `
 .hs-avis textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid #d9d4ce; border-radius: 8px; background: var(--bg, #fff); color: inherit; resize: vertical; }
 .hs-avis textarea[readonly] { background: var(--bg2, #f5f5f3); }
 .hs-avis-note { display: block; font-size: 12px; color: var(--text2, #6b6b6b); margin-top: 4px; }
-.hs-avis-message { background: #eef5ee; color: #2e5e3a; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; font-size: 13px; }
-.hs-avis-erreur { background: #fbeceb; color: #b3261e; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; font-size: 13px; }
-.hs-avis-vide, .hs-avis-attente { color: var(--text2, #6b6b6b); font-size: 13px; }
+.hs-avis .hs-avis-message { background: #eef5ee; color: #2e5e3a; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; font-size: 13px; }
+.hs-avis .hs-avis-erreur { background: #fbeceb; color: #b3261e; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; font-size: 13px; }
+.hs-avis .hs-avis-vide, .hs-avis .hs-avis-attente { color: var(--text2, #6b6b6b); font-size: 13px; }
 .hs-avis-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .hs-avis-actions button { font: inherit; font-size: 13.5px; padding: 9px 14px; min-height: 40px; border-radius: 10px; border: 1px solid #d9d4ce; background: var(--bg, #fff); color: inherit; cursor: pointer; }
 .hs-avis-actions button:disabled { opacity: .5; cursor: default; }
@@ -111,6 +111,7 @@ const MOTIF_LISIBLE = {
   provider_inconnu: 'La plateforme de ce séjour est inconnue : contactez le support.',
   prestataire_non_autorisee: 'L’hôte ne vous a pas autorisée à participer aux évaluations.',
   reponses_de_l_hote: 'L’hôte a répondu à cette évaluation : c’est lui qui la publie.',
+  texte_de_l_hote: 'Ce texte a été rédigé pour l’hôte : c’est lui qui le publie.',
 }
 
 const echapper = (t) => String(t == null ? '' : t)

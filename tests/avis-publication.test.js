@@ -24,7 +24,7 @@ const NEGATIF = { ...REPONSES, recommande: 'non' }
 const evaluation = (a = {}) => ({
   id: 'ev-1', user_id: 'u1', property_id_ref: 'p1', booking_uid: 'b1',
   ota_review_id: 'rev-1', ota_review_ref: 'channex-abc-123', status: 'a_valider',
-  answers_host: REPONSES, public_text: 'Merci pour votre sejour.',
+  answers_host: REPONSES, public_text: 'Merci pour votre sejour.', texte_sans_voyageur: true,
   private_note: null, deadline_at: new Date(Date.now() + 86400000).toISOString(),
   ...a,
 })

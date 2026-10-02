@@ -90,6 +90,10 @@ puis en `aucun` (2 oct.).
 6. `2026-10-02-avis-auto-validation.sql` (réglage, `auto_publier_le`, index de la
    file et des départs du jour) — vérifié par
    `scripts/verifier-auto-validation.js`
+7. `2026-10-02-avis-texte-sans-voyageur.sql` (repère de vie privée : la
+   prestataire ne lit ni ne publie un texte qui cite le voyageur) — même
+   vérificateur. **1 à 6 collées en production le 2 octobre 2026 ; la 7 avant le
+   déploiement du correctif de la revue de 57a79d6.**
 
 **Avant le déploiement du code**, pas après : le code des lots 3 à 7 lit
 `avis_criteres` (grille illisible sinon), et sans la migration 4 toute
