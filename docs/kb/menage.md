@@ -3510,3 +3510,18 @@ les fiches (aucune écriture de rang en base par le lot).
   seul : une acceptation commise juste avant l'échéance, entre la lecture du
   cron et son écriture, est écrasée (`orphaned` avec l'acceptante en
   porteuse). Le tour à plusieurs rend la course un peu plus probable.
+
+### Recette staging du 2 octobre 2026 — cinq cas conformes
+
+Validée par Thierry (Anna, Berthe au rang 1, Carla au rang 2) : la première qui
+accepte l'a, la seconde lit « Déjà pris par une collègue » ; deux refus du rang
+1 → Carla sollicitée dans la même requête ; Carla ne voit rien tant que le rang
+1 n'a pas fini ; planning hôte conforme avant et après ; rang changé sur la
+fiche et conservé. Échéances réelles conformes au partage (54 h 17 ÷ 2 rangs).
+Nettoyage fait sur go (8 lignes de journal, 2 ménages, 3 profils).
+
+**Lot à part, décidé le 2 octobre 2026** : « moins de 3 h par rang → tous les
+rangs restants sollicités en même temps ». Ce n'est PAS la règle livrée (spec
+§2 bis : 1 h minimum par rang, l'un après l'autre). Choix de Thierry : prod tel
+quel, cette règle viendra avec sa spec, son test rouge contre main, sa review
+et sa recette.
