@@ -3502,11 +3502,11 @@ les fiches (aucune écriture de rang en base par le lot).
   garde mais que personne ne reprend le `orphaned` ; « Déjà pris par une
   collègue » affiché quand c'est l'hôte qui a assigné hors du tour ;
   `offered_to` périmé laissé par un refus partiel.
-- **Dette 48** — deux refus SIMULTANÉS dans un tour de deux : les deux
+- **Dette 49** — deux refus SIMULTANÉS dans un tour de deux : les deux
   écritures sont conditionnées sur le même tour exact, la seconde reçoit 409 et
   son refus n'est pas enregistré ; elle reste dans le tour jusqu'à l'échéance.
   Escalade retardée, aucune perte.
-- **Dette 49** (antérieure au lot) — `expirerPropositions` met à jour par `id`
+- **Dette 50** (antérieure au lot) — `expirerPropositions` met à jour par `id`
   seul : une acceptation commise juste avant l'échéance, entre la lecture du
   cron et son écriture, est écrasée (`orphaned` avec l'acceptante en
   porteuse). Le tour à plusieurs rend la course un peu plus probable.
