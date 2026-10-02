@@ -3546,14 +3546,34 @@ qui ne sont pas dans la liste y sont **ajoutées** :
 - un point unique couvre tous les chemins (exception de la prestataire ou de
   l'hôte, absence retirée, règle, congé supprimé, rang changé) : l'ajout arrive
   au plus 5 minutes après le geste ;
-- **jamais une proposition de l'hôte** : elle ne pose pas de verrou `manual`
-  sur la ligne ; seul le journal la distingue (dernière ligne `offered`
-  d'acteur `host`). Panne de lecture du journal → on n'élargit rien ;
+- **on n'élargit que ce que le journal PROUVE être un tour du moteur** (règle
+  renversée après la review, qui y a trouvé un contournement du choix de
+  l'hôte) : chaque personne du tour a sa ligne `offered`/`created` d'acteur
+  `cron` depuis `offered_at`, et aucune ligne d'un autre acteur. Une proposition
+  de l'hôte (qui ne pose pas de verrou `manual`) ou une ligne de journal
+  manquante → on n'élargit pas. Vérifié sur les trois tours réels de la prod le
+  2 octobre : tous prouvés, dont celui du 7 ;
+- **qui a déjà été sollicitée dans ce tour ne revient pas** (sa ligne existe,
+  elle n'est plus dans la liste : refus, même non journalisé, ou jour perdu) ;
+- **jamais au-delà du rang du tour** (une membre absente par exception datée
+  n'est pas retirée : sans cette garde, le moteur aurait ajouté le rang 2 avant
+  l'épuisement) ; un rang plus prioritaire, lui, est ajouté ;
+- **pas dans la dernière heure** avant l'échéance (elle expirerait avec le tour
+  et perdrait le ménage ; à l'expiration, la pose lui donne un tour entier) ;
+- plafond de SMS vérifié **avant** d'écrire (jamais ajoutée sans être prévenue) ;
+- même garde que la pose : personne ne porte mais la garde désigne une porteuse
+  d'office → on ne sollicite pas ;
 - jamais vers la porteuse, et rien si la porteuse est du rang sollicité (tour
   déjà gagné) ;
-- écriture conditionnelle sur le tour exact lu ; une ligne `offered` (acteur
-  `cron`) par nouvelle ; SMS sous le plafond par cycle, **partagé** avec la pose.
+- écriture conditionnelle sur le tour exact lu et le plancher ; une ligne
+  `offered` (acteur `cron`) par nouvelle ; plafond **partagé** avec la pose.
 
-Tests : section « ÉLARGIR » de `tests/cleaning-sync-menages-entite.test.js`.
-Contre `main` : le cas réel rougit. Mutations : retirer la garde « hôte » fait
-rougir son test ; retirer la mémoire des refus fait rougir le sien.
+**Limite connue** : les tours posés par le rattrapage de l'hôte (`api/menages.js`,
+liaison ajoutée) sont journalisés `actor: 'host'` : ils ne sont jamais élargis.
+Sens prudent, assumé.
+
+Tests : section « ÉLARGIR » de `tests/cleaning-sync-menages-entite.test.js`
+(14 tests ; le double applique les filtres de lecture et l'heure des lignes).
+Contre `main` : les deux cas positifs rougissent. Mutations, une par garde
+(preuve d'acteur, preuve des membres, déjà sollicitée, plancher, rang,
+plafond, porteuse d'office, filtre `auto`) : chacune fait rougir son test.
