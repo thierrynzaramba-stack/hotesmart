@@ -148,8 +148,10 @@ export function rendre (etat, maintenant = Date.now()) {
 
   if (!liste.length) {
     return `<div class="hs-eval">${entete}`
-      + `<p class="hs-eval-vide">Les évaluations apparaissent le jour du départ du voyageur, `
-      + `quand la plateforme ouvre l’avis. Airbnb seulement pour l’instant.</p></div>`
+      // Decision D2 du 2 octobre 2026 : elle nait au depart, sans attendre la
+      // plateforme — qui n'ouvre l'avis qu'apres celui du voyageur.
+      + `<p class="hs-eval-vide">Une évaluation apparaît le jour du départ de chaque voyageur Airbnb. `
+      + `Airbnb seulement pour l’instant.</p></div>`
   }
 
   const lignes = liste.map(e => {

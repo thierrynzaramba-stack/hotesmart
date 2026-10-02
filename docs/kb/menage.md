@@ -3510,3 +3510,70 @@ les fiches (aucune écriture de rang en base par le lot).
   seul : une acceptation commise juste avant l'échéance, entre la lecture du
   cron et son écriture, est écrasée (`orphaned` avec l'acceptante en
   porteuse). Le tour à plusieurs rend la course un peu plus probable.
+
+### Recette staging du 2 octobre 2026 — cinq cas conformes
+
+Validée par Thierry (Anna, Berthe au rang 1, Carla au rang 2) : la première qui
+accepte l'a, la seconde lit « Déjà pris par une collègue » ; deux refus du rang
+1 → Carla sollicitée dans la même requête ; Carla ne voit rien tant que le rang
+1 n'a pas fini ; planning hôte conforme avant et après ; rang changé sur la
+fiche et conservé. Échéances réelles conformes au partage (54 h 17 ÷ 2 rangs).
+Nettoyage fait sur go (8 lignes de journal, 2 ménages, 3 profils).
+
+**Lot à part, décidé le 2 octobre 2026** : « moins de 3 h par rang → tous les
+rangs restants sollicités en même temps ». Ce n'est PAS la règle livrée (spec
+§2 bis : 1 h minimum par rang, l'un après l'autre). Choix de Thierry : prod tel
+quel, cette règle viendra avec sa spec, son test rouge contre main, sa review
+et sa recette.
+
+## Un tour en cours s'élargit à qui devient disponible (2 octobre 2026)
+
+**Cas réel** : Ofuro Futari, ménage du mercredi 7 octobre. Posé à 13 h 20 à Lena
+seule (Tiphaine, rang 1 aussi, n'était pas de garde ce mercredi-là : semaine
+sans mercredi dans sa récurrence). À 18 h 09, Tiphaine s'ouvre le 7 depuis sa
+PWA — et rien ne l'ajoutait : le tour était calculé une fois pour toutes à la
+pose. Le cas inverse (devenir indisponible → retirée du tour) existait déjà
+(`apres-changement-regles`).
+
+**Correctif** : `elargirToursEnCours` (`lib/cleaning/sync-menages-entite.js`),
+appelé à la fin de `poserPropositionsDues` — donc dans l'étape cron existante,
+**`api/cron.js` inchangé**. À chaque cycle, chaque tour en cours (garde, auto,
+non échu, dans la fenêtre de proposition) est recalculé par le MÊME moteur
+(`deciderParGarde` + mémoire des refus) ; les candidates qu'il solliciterait et
+qui ne sont pas dans la liste y sont **ajoutées** :
+- on ajoute, on ne retire jamais ; **l'échéance ne bouge pas** (la nouvelle
+  venue a le temps qui reste, les autres ne voient pas leur tour prolongé) ;
+- un point unique couvre tous les chemins (exception de la prestataire ou de
+  l'hôte, absence retirée, règle, congé supprimé, rang changé) : l'ajout arrive
+  au plus 5 minutes après le geste ;
+- **on n'élargit que ce que le journal PROUVE être un tour du moteur** (règle
+  renversée après la review, qui y a trouvé un contournement du choix de
+  l'hôte) : chaque personne du tour a sa ligne `offered`/`created` d'acteur
+  `cron` depuis `offered_at`, et aucune ligne d'un autre acteur. Une proposition
+  de l'hôte (qui ne pose pas de verrou `manual`) ou une ligne de journal
+  manquante → on n'élargit pas. Vérifié sur les trois tours réels de la prod le
+  2 octobre : tous prouvés, dont celui du 7 ;
+- **qui a déjà été sollicitée dans ce tour ne revient pas** (sa ligne existe,
+  elle n'est plus dans la liste : refus, même non journalisé, ou jour perdu) ;
+- **jamais au-delà du rang du tour** (une membre absente par exception datée
+  n'est pas retirée : sans cette garde, le moteur aurait ajouté le rang 2 avant
+  l'épuisement) ; un rang plus prioritaire, lui, est ajouté ;
+- **pas dans la dernière heure** avant l'échéance (elle expirerait avec le tour
+  et perdrait le ménage ; à l'expiration, la pose lui donne un tour entier) ;
+- plafond de SMS vérifié **avant** d'écrire (jamais ajoutée sans être prévenue) ;
+- même garde que la pose : personne ne porte mais la garde désigne une porteuse
+  d'office → on ne sollicite pas ;
+- jamais vers la porteuse, et rien si la porteuse est du rang sollicité (tour
+  déjà gagné) ;
+- écriture conditionnelle sur le tour exact lu et le plancher ; une ligne
+  `offered` (acteur `cron`) par nouvelle ; plafond **partagé** avec la pose.
+
+**Limite connue** : les tours posés par le rattrapage de l'hôte (`api/menages.js`,
+liaison ajoutée) sont journalisés `actor: 'host'` : ils ne sont jamais élargis.
+Sens prudent, assumé.
+
+Tests : section « ÉLARGIR » de `tests/cleaning-sync-menages-entite.test.js`
+(14 tests ; le double applique les filtres de lecture et l'heure des lignes).
+Contre `main` : les deux cas positifs rougissent. Mutations, une par garde
+(preuve d'acteur, preuve des membres, déjà sollicitée, plancher, rang,
+plafond, porteuse d'office, filtre `auto`) : chacune fait rougir son test.

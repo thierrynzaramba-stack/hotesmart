@@ -194,6 +194,25 @@ prise »).
    disparaît (je relis).
 3. Ce qu'un passage du cron ferait : je te le dirai à blanc, rien ne part.
 
+## Résultat de la recette du 2 octobre 2026 (staging)
+
+| Section | Résultat |
+|---|---|
+| A — Réglages, grille, publication automatique | **conforme** (renommages refaits et vérifiés en base) |
+| B — Page Avis, état de la publication automatique, lien direct | **conforme** |
+| C — Fiche prestataire | **conforme après correctif** : la case partait sans session (« Non autorisé »), `274a4ac` |
+| D — PWA de la prestataire | **conforme après correctifs** : fenêtre qui restait ouverte, réarmement de l'horloge (`5f6a82f`, `fee5c82`) ; D.4 (prestataire non autorisée → aucune fenêtre) vérifié en base |
+| E — Tâche de l'hôte, relances | **conforme** (une seule tâche ; relances à blanc : 0, juste) |
+| F — Fenêtre d'évaluation, publication simulée, confirmation du négatif | **conforme** — la rédaction IA est **indisponible sur staging** (clé `CLAUDE_API_KEY` de staging à vérifier dans Vercel ; la clé de prod répond) |
+| G — Messagerie (bandeau, archivage) | **non faite** : staging n'a aucune conversation de voyageur. À vérifier en production, en lecture |
+| H — Planning ordinateur et téléphone | **conforme** (une réservation Booking.com n'a pas de bouton) |
+| I — Membre restreint | **conforme** sur son bien ; « ne voit pas les autres » couvert par les tests seulement (aucune évaluation sur les autres biens) |
+| J — Publication automatique | **non faite en réel** (décision de Thierry) : couverte par les tests ; à observer en production à l'activation |
+
+Hors chantier, relevé en recette : le décor PWA créait la prestataire sans ligne de
+droits (`341aecd`) ; l'en-tête « 🚨 Intervention requise » des tâches d'évaluation
+(dette 44).
+
 ## À la fin
 
 ```bash
