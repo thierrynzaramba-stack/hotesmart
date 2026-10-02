@@ -598,8 +598,10 @@ const SEJOURS = {
   menages: [{ user_id: PROD, booking_id: 'BK-1', provider_id: 'p-regina', status: 'done' }],
   profiles: [{ id: 'p-regina', account_user_id: PROD, first_name: 'Régina', last_name: null }],
   ota_reviews: [
-    { id: 'o-1', user_id: PROD, content_public: 'Super séjour', overall_score: 10, is_hidden: false, guest_name: 'Camille' },
-    { id: 'o-2', user_id: PROD, content_public: 'TEXTE-CACHE', overall_score: 9, is_hidden: true, guest_name: 'Léo' },
+    { id: 'o-1', user_id: PROD, content_public: 'Super séjour', overall_score: 10, cache: false, guest_name: 'Camille' },
+    { id: 'o-2', user_id: PROD, content_public: 'TEXTE-CACHE', overall_score: 9, cache: true, guest_name: 'Léo' },
+    // Un payload partiel : la colonne dirait « visible », le brut ne dit rien.
+    { id: 'o-3', user_id: PROD, content_public: 'TEXTE-SANS-PREUVE', overall_score: 9, is_hidden: false, cache: null, guest_name: 'Zoé Dupont' },
   ],
 }
 const EVAL = (a = {}) => ({ id: 'e1', booking_uid: 'BK-1', property_id: BIEN_A.id, property_id_ref: 'REF-A', ota: 'airbnb',
@@ -624,4 +626,13 @@ test('LE TEST QUI COMPTE : un avis du voyageur CACHE chez Airbnb ne se montre pa
   await require('../api/avis')(req({ action: 'evaluations' }, null, 'GET'), res)
   assert.deepStrictEqual(res.body.evaluations[0].avis_voyageur, { visible: false })
   assert.ok(!JSON.stringify(res.body).includes('TEXTE-CACHE'))
+})
+
+test('SECURITE (revue de 5497a67) : sans preuve dans le brut, l’avis reste cache — meme si la colonne dit le contraire', async () => {
+  preparer({ evaluations: [EVAL({ booking_uid: 'BK-9', ota_review_id: 'o-3' })], sejours: SEJOURS })
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'evaluations' }, null, 'GET'), res)
+  assert.deepStrictEqual(res.body.evaluations[0].avis_voyageur, { visible: false })
+  assert.ok(!JSON.stringify(res.body).includes('TEXTE-SANS-PREUVE'))
+  assert.deepStrictEqual(res.body.evaluations[0].voyageur, { prenom: 'Zoé', nom: 'Dupont' }, 'le nom de l avis, coupe en prenom et nom')
 })

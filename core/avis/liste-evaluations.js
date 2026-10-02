@@ -33,9 +33,12 @@ const echapper = (t) => String(t == null ? '' : t)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 
+// ⚠ UNE DATE DE SEJOUR (« 2026-09-21 ») SE LIT EN JOUR LOCAL : `new Date` la
+// lirait en UTC, et un hote a l'ouest de l'UTC verrait la veille.
 const dateFr = (d) => {
   if (!d) return ''
-  const x = new Date(d)
+  const jour = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d))
+  const x = jour ? new Date(Number(jour[1]), Number(jour[2]) - 1, Number(jour[3])) : new Date(d)
   return isNaN(x) ? '' : x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })
 }
 

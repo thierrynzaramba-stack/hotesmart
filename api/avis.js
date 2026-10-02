@@ -474,7 +474,7 @@ async function evaluationsLister (req, res, garde) {
   if (eBiens) return res.status(503).json({ error: 'Biens illisibles', detail: eBiens.message })
   const nomDe = new Map((biens || []).map(b => [b.id, b.name]))
 
-  const contexte = await contexteDesSejours(userId, data || [])
+  const { sejours: contexte, avis: avisDe } = await contexteDesSejours(userId, data || [])
 
   return res.status(200).json({
     // ⚠ CHAQUE LIGNE DIT LE SEJOUR (demande de Thierry du 2 octobre 2026 au
@@ -493,7 +493,7 @@ async function evaluationsLister (req, res, garde) {
         voyageur: c.voyageur || null,
         arrivee: c.arrivee || null, depart: c.depart || null,
         menage_par: c.menagePar || null,
-        avis_voyageur: (e.ota_review_id && contexte.avis.get(e.ota_review_id)) || null,
+        avis_voyageur: (e.ota_review_id && avisDe.get(e.ota_review_id)) || null,
         notre_avis: e.status === 'publiee' ? (e.public_text || null) : null,
       }
     }),
@@ -508,15 +508,21 @@ async function evaluationsLister (req, res, garde) {
 // manquent, l'hote voit ses evaluations — la raison va au journal.
 async function contexteDesSejours (userId, evaluations) {
   const parSejour = new Map()
-  parSejour.avis = new Map()
+  const avisDe = new Map()
   const uids = [...new Set(evaluations.map(e => String(e.booking_uid)))]
-  if (!uids.length) return parSejour
+  if (!uids.length) return { sejours: parSejour, avis: avisDe }
   const objets = [...new Set(evaluations.map(e => e.ota_review_id).filter(Boolean))]
   const [snaps, menages, avis] = await Promise.all([
     supabase.from('bookings_snapshot').select('booking_id, snapshot').eq('user_id', userId).in('booking_id', uids),
-    supabase.from('menages').select('booking_id, provider_id, status').eq('user_id', userId).in('booking_id', uids).neq('status', 'cancelled'),
+    // Le menage le plus RECENT d'un depart donne le nom (un ordre, pour que ce
+    // soit le meme a chaque lecture).
+    supabase.from('menages').select('booking_id, provider_id, status').eq('user_id', userId).in('booking_id', uids).neq('status', 'cancelled')
+      .order('created_at', { ascending: true }),
+    // ⚠ LA VISIBILITE SE LIT DANS LE BRUT, STRICTEMENT (revue de 5497a67, vie
+    // privee) : la colonne `is_hidden` est normalisee par le writer, un champ
+    // absent y devient « visible ». Meme regle que le rangement automatique.
     objets.length
-      ? supabase.from('ota_reviews').select('id, content_public, overall_score, is_hidden, guest_name').eq('user_id', userId).in('id', objets)
+      ? supabase.from('ota_reviews').select('id, content_public, overall_score, guest_name, cache:raw->attributes->is_hidden').eq('user_id', userId).in('id', objets)
       : Promise.resolve({ data: [], error: null }),
   ])
   for (const [nom, r] of [['reservations', snaps], ['menages', menages], ['avis', avis]]) {
@@ -547,20 +553,23 @@ async function contexteDesSejours (userId, evaluations) {
   // L'avis du voyageur, SEULEMENT s'il est visible : un avis cache chez Airbnb
   // ne se montre pas ici non plus.
   for (const a of avis.data || []) {
-    parSejour.avis.set(a.id, a.is_hidden
-      ? { visible: false }
-      : { visible: true, texte: a.content_public || null, note: a.overall_score ?? null })
-    // Le nom porte par l'avis complete un sejour sans reservation dans le coeur.
+    avisDe.set(a.id, a.cache === false
+      ? { visible: true, texte: a.content_public || null, note: a.overall_score ?? null }
+      : { visible: false })
   }
   for (const e of evaluations) {
     const c = parSejour.get(String(e.booking_uid)) || {}
     if (!c.voyageur && e.ota_review_id) {
       const g = (avis.data || []).find(a => a.id === e.ota_review_id)
-      if (g && g.guest_name) c.voyageur = { prenom: String(g.guest_name).trim(), nom: null }
+      // Le nom porte par l'avis complete un sejour sans reservation dans le coeur.
+      if (g && g.guest_name) {
+        const [prenom, ...reste] = String(g.guest_name).trim().split(/\s+/)
+        c.voyageur = { prenom: prenom || null, nom: reste.join(' ') || null }
+      }
     }
     parSejour.set(String(e.booking_uid), c)
   }
-  return parSejour
+  return { sejours: parSejour, avis: avisDe }
 }
 
 const ETATS_LISTE = ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
