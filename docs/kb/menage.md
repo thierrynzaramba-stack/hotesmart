@@ -3287,6 +3287,15 @@ n'est pas ré-annoncée, droit `read` = 403 ; côté PWA, chaque jour part en
 jour garde son état d'une écriture à l'autre (sinon le test des 10 jours passait
 même si les jours n'écrivaient rien).
 
+## Un test de congé à dates figées (2 octobre 2026)
+
+« poserConge enregistre la plage » (`tests/disponibilites-endpoint.test.js`)
+posait un congé figé au 5-12 octobre 2026 ; `poserConge` refuse une fin
+antérieure à J-30 en lisant l'horloge réelle : rouge le 12 novembre (J+41),
+sans changement de code. Dates rendues relatives (J+3 à J+10), assertions
+inchangées ; vert de J à J+365, et la mutation « source du congé » rougit
+toujours.
+
 ## Voir les ménages pris par d'autres (2 octobre 2026)
 
 Spec : `docs/specs/spec-visibilite-menages-autrui.md` (décisions de Thierry :
@@ -3388,3 +3397,25 @@ cloisonnement — vérifiés un par un et tenus). Corrigé sans seconde review :
   (`scripts/verifier-migration-menage-visibilite.js` + `select pg_policies`)
   **avant** toute fusion vers staging ou main, sinon la PWA de toutes les
   prestataires répond 503.
+
+### ⚠️ Règle gravée : seule une personne CONNECTÉE modifie les droits d'une prestataire (2 octobre 2026)
+
+**Demande de Thierry.** Les droits et réglages d'une prestataire — ce qu'elle
+voit des autres, ses biens, son droit de régler ses absences — ne se modifient
+que par une **session HôteSmart** (le titulaire, ou un délégué qui en a le droit).
+**Jamais par un lien PWA**, ni le sien ni celui d'une autre : un jeton de
+prestataire désigne une personne, il ne l'authentifie pas.
+
+- Le writer de visibilité (`api/disponibilites.js`) commence par
+  `verifierSession` : un jeton de prestataire, en `Authorization` comme en
+  paramètre, reçoit **401** et rien ne s'écrit.
+- La PWA (`api/menages-public.js`) n'a **aucune** action qui touche
+  `menage_visibilite` : `reglerVisibilite` y est une action inconnue.
+- La base n'offre au client que la **lecture** (`menage_visibilite_select`) :
+  aucune autre voie d'écriture.
+
+Tests : `tests/disponibilites-visibilite.test.js` — « un JETON DE PRESTATAIRE
+est refusé par le writer de visibilité » (contre-épreuve : garde de session
+retirée dans une copie hors de l'arbre → le test rougit) ;
+`tests/menages-public-visibilite.test.js` — « la PWA n'a AUCUNE action pour
+régler ce qu'elle voit ».

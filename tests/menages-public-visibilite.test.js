@@ -289,3 +289,14 @@ test('AUCUNE ACTION sur le ménage d\'une autre : ni prise, ni « fait », ni re
                   body: { action: 'markDone', booking_id: 'bk-lena-7', property_id: B1, departure_date: jour(-1) } }, res)
   assert.ok(res.code === null || res.code < 400, `son propre ménage, lui, se marque fait (${res.code} ${JSON.stringify(res.body)})`)
 })
+
+test('la PWA de la prestataire n\'a AUCUNE action pour régler ce qu\'elle voit — refus, rien ne s\'écrit', async () => {
+  for (const action of ['reglerVisibilite', 'visibilite']) {
+    const { handler, ecritures } = preparer()
+    const res = reponse()
+    await handler({ method: 'POST', query: { token: TOKEN }, headers: {},
+                    body: { action, provider_id: LENA, par_bien: true, profils_vus: [LOLA] } }, res)
+    assert.ok(res.code >= 400, `${action} refusé (${res.code})`)
+    assert.strictEqual(ecritures.filter(e => e.table === 'menage_visibilite').length, 0)
+  }
+})
