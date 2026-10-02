@@ -507,7 +507,7 @@ async function configLire (req, res, garde) {
   if (bien && !(await bienAutorise(req, res, garde, bien, false))) return
 
   const requete = supabase.from('avis_config')
-    .select('id, property_id, keywords, tone, signature, auto_validation_heures').eq('user_id', userId)
+    .select('id, property_id, keywords, tone, signature').eq('user_id', userId)
   const { data, error } = await (bien
     ? requete.or(`property_id.eq.${bien},property_id.is.null`)
     : requete.is('property_id', null))
@@ -518,8 +518,52 @@ async function configLire (req, res, garde) {
     compte: liste.find(c => !c.property_id) || null,
     bien: bien ? (liste.find(c => c.property_id === bien) || null) : null,
     tons: [...TONS],
-    auto_validation: { min: HEURES_MIN, max: HEURES_MAX },
   })
+}
+
+// ─── LA PUBLICATION AUTOMATIQUE, BIEN PAR BIEN (spec §10 bis) ───────────────
+// Decision de Thierry du 2 octobre 2026 au soir (option A) : une ligne par
+// bien, un interrupteur et un delai. `avis_auto_validation`, writer unique ici.
+//
+// GET auto-validation — les biens du PERIMETRE, chacun avec son reglage et le
+// droit de le changer.
+async function autoValidationLire (req, res, garde) {
+  const userId = garde.accountUserId
+  const { data: biens, error } = await supabase.from('properties')
+    .select('id, name, provider_property_id').eq('user_id', userId).order('name', { ascending: true })
+  if (error) return res.status(503).json({ error: 'Biens illisibles', detail: error.message })
+  const visibles = (biens || []).filter(b => peutLire(garde.contexte, 'avis', { id: b.id, ref: b.provider_property_id }))
+  const { data: lignes, error: eL } = visibles.length
+    ? await supabase.from('avis_auto_validation').select('property_id, heures')
+      .eq('user_id', userId).in('property_id', visibles.map(b => b.id))
+    : { data: [], error: null }
+  if (eL) return res.status(503).json({ error: 'Réglages illisibles', detail: eL.message })
+  const heuresDe = new Map((lignes || []).map(l => [l.property_id, l.heures]))
+  return res.status(200).json({
+    bornes: { min: HEURES_MIN, max: HEURES_MAX },
+    biens: visibles.map(b => ({
+      property_id: b.id, nom: b.name,
+      heures: heuresDe.has(b.id) ? heuresDe.get(b.id) : null,
+      modifiable: peutEcrire(garde.contexte, 'avis', { id: b.id, ref: b.provider_property_id }),
+    })),
+  })
+}
+
+// POST auto-validation-maj { property_id, heures } — heures nulles = desactivee.
+async function autoValidationEcrire (req, res, garde) {
+  const userId = garde.accountUserId
+  const bien = String(req.body?.property_id || '').trim()
+  if (!UUID_RE.test(bien)) return res.status(400).json({ error: 'Identifiant de bien invalide' })
+  const h = normaliserHeures(req.body?.heures)
+  if (h === undefined) {
+    return res.status(400).json({ error: `Délai invalide : un nombre entier d’heures entre ${HEURES_MIN} et ${HEURES_MAX}` })
+  }
+  if (!(await bienAutorise(req, res, garde, bien, true))) return
+  const { error } = h === null
+    ? await supabase.from('avis_auto_validation').delete().eq('user_id', userId).eq('property_id', bien)
+    : await supabase.from('avis_auto_validation').upsert({ user_id: userId, property_id: bien, heures: h }, { onConflict: 'user_id,property_id' })
+  if (error) return res.status(503).json({ error: 'Réglage non enregistré', detail: error.message })
+  return res.status(200).json({ ok: true, property_id: bien, heures: h })
 }
 
 async function configEcrire (req, res, garde) {
@@ -543,16 +587,6 @@ async function configEcrire (req, res, garde) {
   const keywords = brut.map(k => String(k || '').trim()).filter(Boolean).slice(0, 20).map(k => k.slice(0, 40))
   const signature = req.body?.signature ? String(req.body.signature).trim().slice(0, 120) : null
 
-  // L'auto-validation (§10 bis) : nul = desactivee. Un ecran qui ne l'envoie pas
-  // ne la touche pas — elle n'est ecrite que si le champ est present.
-  let auto = {}
-  if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'auto_validation_heures')) {
-    const h = normaliserHeures(req.body.auto_validation_heures)
-    if (h === undefined) {
-      return res.status(400).json({ error: `Délai d’auto-validation invalide : un nombre entier d’heures entre ${HEURES_MIN} et ${HEURES_MAX}, ou vide pour la désactiver` })
-    }
-    auto = { auto_validation_heures: h }
-  }
 
   // ⚠ L'UNICITE EST PARTIELLE : (user_id) quand property_id est nul,
   // (user_id, property_id) sinon. `upsert` ne sait pas viser un index partiel,
@@ -564,7 +598,9 @@ async function configEcrire (req, res, garde) {
     : lecture.is('property_id', null).maybeSingle())
   if (eL) return res.status(503).json({ error: 'Configuration illisible', detail: eL.message })
 
-  const valeurs = { user_id: userId, property_id: bien, keywords, tone: ton, signature, ...auto }
+  // ⚠ La publication automatique ne s'ecrit plus ici : elle a son writer
+  // unique, `auto-validation-maj`, bien par bien (spec §10 bis).
+  const valeurs = { user_id: userId, property_id: bien, keywords, tone: ton, signature }
   const { error: eE } = deja
     ? await supabase.from('avis_config').update(valeurs).eq('id', deja.id).eq('user_id', userId)
     : await supabase.from('avis_config').insert(valeurs)
@@ -2051,6 +2087,7 @@ async function router (req, res) {
   const ECRITURES_EVAL = {
     'grille-maj': grilleEcrire,
     'config-maj': configEcrire,
+    'auto-validation-maj': autoValidationEcrire,
     'eval-reponses': evaluationRepondre,
     'eval-texte': evaluationTexte,
     'eval-publier': evaluationPublier,
@@ -2082,6 +2119,7 @@ async function router (req, res) {
   if (action === 'grille') return await grilleLire(req, res, garde)
   if (action === 'evaluations') return await evaluationsLister(req, res, garde)
   if (action === 'config') return await configLire(req, res, garde)
+  if (action === 'auto-validation') return await autoValidationLire(req, res, garde)
   if (action === 'list') return await lister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })
 }

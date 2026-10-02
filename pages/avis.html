@@ -138,7 +138,9 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <!-- ⚠ Réglages refuse un compte délégué : le lien n'apparaît qu'au
              titulaire qui a le droit d'écriture sur les avis (voir initAvis). -->
-        <a class="btn" id="lien-configuration" href="/settings?onglet=avis" style="text-decoration:none" hidden>⚙ Configuration</a>
+        <!-- Les réglages des avis vivent DANS l'app (décision de Thierry du
+             2 octobre 2026 au soir) : le bouton les ouvre sur place. -->
+        <button class="btn" id="lien-configuration" type="button" hidden>⚙ Configuration</button>
         <button class="btn btn-primary" id="btn-saisir" hidden>+ Saisir un avis reçu</button>
       </div>
     </div>
@@ -147,6 +149,7 @@
            voyageurs sont une lecture ; les evaluations, une action a faire dans
            un delai. Les mettre en dessous les aurait fait manquer.
            Le contenu vit dans un module du coeur, /core/avis/liste-evaluations.js. -->
+      <section id="zone-reglages" style="display:none;margin-bottom:18px"></section>
       <section id="zone-evaluations" class="card" style="display:none"></section>
 
       <div class="avis-stats" id="stats" hidden></div>
@@ -384,18 +387,47 @@
   // ⚠ L'ETAT DE LA PUBLICATION AUTOMATIQUE SE DIT EN HAUT DE LA PAGE (demande de
   // Thierry du 2 octobre 2026), avec le lien vers son reglage. Un echec de
   // lecture se tait : ce n'est qu'une information, la page ne depend pas d'elle.
+  // Bien par bien depuis le 2 octobre au soir : la ligne compte les biens.
   async function afficherEtatAuto () {
     const el = $('etat-auto')
     try {
-      const cfg = await appelAPI('avis?action=config')
-      const h = cfg && cfg.compte ? cfg.compte.auto_validation_heures : null
+      const auto = await appelAPI('avis?action=auto-validation')
+      const biens = (auto && auto.biens) || []
+      const actifs = biens.filter(b => b.heures)
       const lien = $('lien-configuration').hidden ? ''
-        : ' · <a href="/settings?onglet=avis">⚙ Configuration</a>'
-      el.innerHTML = (h
-        ? `Publication automatique des évaluations : <strong>activée</strong>, après ${echapper(h)} h sans réaction de votre part (jamais pour un avis négatif).`
-        : 'Publication automatique des évaluations : <strong>désactivée</strong>.') + lien
+        : ' · <a href="#" data-ouvrir-reglages>⚙ Configuration</a>'
+      el.innerHTML = (actifs.length
+        ? `Publication automatique des évaluations : <strong>activée sur ${actifs.length} bien(s)</strong> sur ${biens.length} (jamais pour un avis négatif).`
+        : 'Publication automatique des évaluations : <strong>désactivée</strong> sur tous vos biens.') + lien
       el.hidden = false
+      const a = el.querySelector('[data-ouvrir-reglages]')
+      if (a) a.addEventListener('click', (ev) => { ev.preventDefault(); ouvrirReglages() })
     } catch { el.hidden = true }
+  }
+
+  // ─── Les réglages, dans l'app ────────────────────────────────────────────
+  // Montés à la demande, une fois ; refermés, ils relisent l'état de la ligne
+  // du haut (un bien vient peut-être d'être activé).
+  let reglagesMontes = false
+  async function ouvrirReglages () {
+    const zone = $('zone-reglages')
+    const ouvert = zone.style.display !== 'none'
+    if (ouvert) { zone.style.display = 'none'; afficherEtatAuto(); return }
+    zone.style.display = ''
+    if (!reglagesMontes) {
+      reglagesMontes = true
+      try {
+        const { monter } = await import('/core/avis/ecran-reglages.js')
+        await monter(zone, { avertir: (m) => console.log('[avis] réglages :', m) })
+      } catch (e) {
+        // ⚠ UN ÉCHEC DE CHARGEMENT SE DIT, et le prochain clic réessaie.
+        console.error('[avis] réglages', e)
+        reglagesMontes = false
+        zone.innerHTML = '<div class="card"><div class="card-title">Réglages des avis indisponibles</div>'
+          + '<div class="card-sub">Rechargez la page. Si cela persiste, contactez le support.</div></div>'
+      }
+    }
+    zone.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   const echapper = t => String(t == null ? '' : t)
@@ -670,11 +702,22 @@
     // Le serveur le revalide : ce masquage est un confort, pas la garde.
     const peut = window.peutEcrire ? window.peutEcrire('avis') : false
     $('btn-saisir').hidden = !peut
-    // Le lien « Configuration » mène à Réglages, qui refuse un compte délégué :
-    // il faut le droit d'écriture ET travailler sur son propre compte. Sinon un
-    // membre délégué cliquerait vers une page qui le renvoie.
-    $('lien-configuration').hidden = !(peut && window.estTitulaire && window.estTitulaire())
+    // « ⚙ Configuration » ouvre les réglages DANS la page. Un membre au droit
+    // d'écriture y règle les biens de son périmètre ; le serveur refuse le
+    // niveau compte (grille, rédaction) à un périmètre partiel, et le dit.
+    $('lien-configuration').hidden = !peut
+    // `onclick`, pas addEventListener : une seconde initialisation ne double pas
+    // l'écouteur (deux bascules s'annuleraient).
+    $('lien-configuration').onclick = ouvrirReglages
     afficherEtatAuto()
+    // L'ancien chemin /settings?onglet=avis renvoie ici avec ?reglages=1.
+    try {
+      const u = new URL(location.href)
+      if (u.searchParams.get('reglages') === '1' && peut) {
+        u.searchParams.delete('reglages'); history.replaceState(null, '', u.pathname + u.search)
+        ouvrirReglages()
+      }
+    } catch { /* adresse illisible : rien */ }
 
     $('s-date').value = new Date().toISOString().slice(0, 10)
 

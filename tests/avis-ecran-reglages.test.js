@@ -32,7 +32,7 @@ const DEFAUT = [
   ] },
 ]
 
-function faussAppel ({ grilleCompte = [], config = null, erreurs = {}, biensAvecGrille = 0 } = {}) {
+function faussAppel ({ grilleCompte = [], config = null, erreurs = {}, biensAvecGrille = 0, autoBiens = [] } = {}) {
   const appels = []
   return {
     appels,
@@ -42,6 +42,8 @@ function faussAppel ({ grilleCompte = [], config = null, erreurs = {}, biensAvec
       if (chemin.includes('action=grille&') || chemin.endsWith('action=grille')) {
         return { compte: grilleCompte, bien: [], defaut: DEFAUT, biens_avec_grille: biensAvecGrille, categories: ['cleanliness', 'communication', 'respect_house_rules', 'recommandation'], rempli_par: ['prestataire', 'hote', 'les_deux'] }
       }
+      if (chemin.includes('action=auto-validation-maj')) return { ok: true, property_id: opts.corps.property_id, heures: opts.corps.heures }
+      if (chemin.includes('action=auto-validation')) return { bornes: { min: 1, max: 336 }, biens: autoBiens }
       if (chemin.includes('action=config')) return { compte: config, bien: null, tons: ['chaleureux', 'sobre'] }
       return { ok: true }
     },
@@ -259,40 +261,54 @@ test('LE TEST QUI COMPTE : l’ecran ne dit plus « sur tous vos biens » quand 
   assert.ok(!conteneur.textContent.includes('sur tous vos biens'))
 })
 
-// ─── La publication automatique (spec §10 bis, 2 octobre 2026) ──────────────
-test('LE TEST QUI COMPTE : cocher la publication automatique propose 48 h, et le delai part au serveur', async () => {
-  const { window, conteneur, appels } = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '', auto_validation_heures: null } })
-  const champ = () => conteneur.querySelector('[data-reglage="auto-heures"]')
-  assert.strictEqual(champ().disabled, true, 'desactivee : le champ est grise')
-  const caseAuto = conteneur.querySelector('[data-reglage="auto-active"]')
-  caseAuto.checked = true
-  caseAuto.dispatchEvent(new window.Event('change'))
-  assert.strictEqual(champ().disabled, false)
-  assert.strictEqual(champ().value, '48')
-  champ().value = '24'
-  champ().dispatchEvent(new window.Event('input'))
-  conteneur.querySelector('[data-action="enregistrer"]').click()
-  await new Promise(r => setTimeout(r, 0))
-  const config = appels.find(a => a.chemin.includes('config-maj'))
-  assert.strictEqual(config.corps.auto_validation_heures, 24)
+// ─── La publication automatique, BIEN PAR BIEN (spec §10 bis, option A) ─────
+const DEUX_BIENS = [
+  { property_id: 'b1', nom: 'La bulle', heures: null, modifiable: true },
+  { property_id: 'b2', nom: 'Cœur de vie 23', heures: 24, modifiable: true },
+]
+
+test('LE TEST QUI COMPTE : une ligne par bien, son interrupteur et son délai', async () => {
+  const { conteneur } = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '' }, autoBiens: DEUX_BIENS })
+  assert.match(conteneur.textContent, /La bulle/)
+  assert.match(conteneur.textContent, /Cœur de vie 23/)
+  assert.strictEqual(conteneur.querySelector('[data-auto-case="b1"]').checked, false)
+  assert.strictEqual(conteneur.querySelector('[data-auto-heures="b1"]').disabled, true)
+  assert.strictEqual(conteneur.querySelector('[data-auto-case="b2"]').checked, true)
+  assert.strictEqual(conteneur.querySelector('[data-auto-heures="b2"]').value, '24')
 })
 
-test('decocher l’envoie nul ; un delai hors bornes est refuse AVANT tout envoi', async () => {
-  const a = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '', auto_validation_heures: 12 } })
-  const caseAuto = a.conteneur.querySelector('[data-reglage="auto-active"]')
-  assert.strictEqual(caseAuto.checked, true)
-  caseAuto.checked = false
-  caseAuto.dispatchEvent(new a.window.Event('change'))
-  a.conteneur.querySelector('[data-action="enregistrer"]').click()
+test('cocher un bien l’active à 48 h, AU GESTE, pour ce bien seulement', async () => {
+  const { window, conteneur, appels } = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '' }, autoBiens: DEUX_BIENS.map(b => ({ ...b })) })
+  const c = conteneur.querySelector('[data-auto-case="b1"]')
+  c.checked = true
+  c.dispatchEvent(new window.Event('change'))
   await new Promise(r => setTimeout(r, 0))
-  assert.strictEqual(a.appels.find(x => x.chemin.includes('config-maj')).corps.auto_validation_heures, null)
+  const envoi = appels.find(a => a.chemin.includes('auto-validation-maj'))
+  assert.deepStrictEqual(envoi.corps, { action: 'auto-validation-maj', property_id: 'b1', heures: 48 })
+  assert.ok(!appels.some(a => a.chemin.includes('config-maj')), 'rien d autre n est enregistre')
+  assert.match(conteneur.textContent, /Activée/)
+})
 
-  const b = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '', auto_validation_heures: 12 } })
-  const champ = b.conteneur.querySelector('[data-reglage="auto-heures"]')
-  champ.value = '400'
-  champ.dispatchEvent(new b.window.Event('input'))
-  b.conteneur.querySelector('[data-action="enregistrer"]').click()
+test('décocher envoie nul ; un délai hors bornes est refusé AVANT tout envoi', async () => {
+  const a = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '' }, autoBiens: DEUX_BIENS.map(b => ({ ...b })) })
+  const c = a.conteneur.querySelector('[data-auto-case="b2"]')
+  c.checked = false
+  c.dispatchEvent(new a.window.Event('change'))
   await new Promise(r => setTimeout(r, 0))
-  assert.ok(!b.appels.some(x => x.chemin.includes('maj')), 'ni grille ni config envoyees')
+  assert.strictEqual(a.appels.find(x => x.chemin.includes('auto-validation-maj')).corps.heures, null)
+
+  const b = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '' }, autoBiens: DEUX_BIENS.map(x => ({ ...x })) })
+  const champ = b.conteneur.querySelector('[data-auto-heures="b2"]')
+  champ.value = '400'
+  champ.dispatchEvent(new b.window.Event('change'))
+  await new Promise(r => setTimeout(r, 0))
+  assert.ok(!b.appels.some(x => x.chemin.includes('auto-validation-maj')), 'rien n est envoye')
   assert.match(b.conteneur.textContent, /entre 1 et 336/)
+})
+
+test('un bien hors de son périmètre d’écriture est grisé', async () => {
+  const { conteneur } = await ouvrirEcran({ config: { keywords: [], tone: 'sobre', signature: '' },
+    autoBiens: [{ property_id: 'b9', nom: 'Autre', heures: 12, modifiable: false }] })
+  assert.strictEqual(conteneur.querySelector('[data-auto-case="b9"]').disabled, true)
+  assert.strictEqual(conteneur.querySelector('[data-auto-heures="b9"]').disabled, true)
 })

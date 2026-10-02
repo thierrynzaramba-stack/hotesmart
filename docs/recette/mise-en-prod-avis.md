@@ -94,6 +94,9 @@ puis en `aucun` (2 oct.).
    prestataire ne lit ni ne publie un texte qui cite le voyageur) — même
    vérificateur. **1 à 6 collées en production le 2 octobre 2026 ; la 7 avant le
    déploiement du correctif de la revue de 57a79d6.**
+8. `2026-10-02-avis-auto-validation-par-bien.sql` (décision du soir, option A :
+   un réglage par bien, table `avis_auto_validation`) — même vérificateur, à
+   coller AVANT le déploiement des réglages dans l'app Avis.
 
 **Avant le déploiement du code**, pas après : le code des lots 3 à 7 lit
 `avis_criteres` (grille illisible sinon), et sans la migration 4 toute

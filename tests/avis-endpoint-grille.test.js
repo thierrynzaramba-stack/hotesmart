@@ -65,6 +65,7 @@ function preparer ({
           return { select: () => ({ single: async () => ({ data: cree, error: null }) }) }
         },
         update (row) { q._mode = 'update'; q._row = row; return chain },
+        upsert (row, opts) { etat.insertions.push({ table: nom, row, upsert: opts }); return Promise.resolve({ error: null }) },
         delete () { q._mode = 'delete'; return chain },
         maybeSingle: async () => { const r = await rep(); return { data: Array.isArray(r.data) ? (r.data[0] || null) : r.data, error: r.error } },
         single: async () => { const r = await rep(); return { data: Array.isArray(r.data) ? (r.data[0] || null) : r.data, error: r.error } },
@@ -99,6 +100,7 @@ function preparer ({
         },
       }
       function rep () {
+        if (nom === 'avis_auto_validation') return Promise.resolve({ data: [{ property_id: BIEN_A.id, heures: 24 }], error: null })
         if (nom === 'properties') {
           const c = [BIEN_A, BIEN_B].filter(b =>
             (q._f.user_id == null || b.user_id === q._f.user_id) &&
@@ -516,28 +518,56 @@ test('un critere avec trop de niveaux est refuse, en nommant lequel', async () =
   assert.match(res.body.error, /n°1/)
 })
 
-// ─── L'auto-validation (spec §10 bis, 2 octobre 2026) ───────────────────────
-test('config-maj : le delai d’auto-validation est un entier de 1 a 336, refuse sinon sans rien ecrire', async () => {
-  for (const v of [0, 337, 'abc', 2.5]) {
-    const etat = preparer({})
-    const handler = require('../api/avis')
-    const res = reponse()
-    await handler(req({ action: 'config-maj' }, { action: 'config-maj', tone: 'sobre', auto_validation_heures: v }), res)
+// ─── La publication automatique, BIEN PAR BIEN (spec §10 bis, option A) ─────
+test('auto-validation : chaque bien du perimetre avec son reglage', async () => {
+  preparer({})
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'auto-validation' }, null, 'GET'), res)
+  assert.strictEqual(res.code, 200)
+  const parId = Object.fromEntries(res.body.biens.map(b => [b.property_id, b]))
+  assert.strictEqual(parId[BIEN_A.id].heures, 24)
+  assert.strictEqual(parId[BIEN_B.id].heures, null, 'pas de ligne = desactivee')
+  assert.strictEqual(parId[BIEN_A.id].modifiable, true)
+})
+
+test('LE TEST QUI COMPTE : un membre ne voit ni ne regle que les biens de SON perimetre', async () => {
+  preparer({ user: MEMBRE, ...MEMBRE_B })
+  const lu = reponse()
+  await require('../api/avis')(reqMembre({ action: 'auto-validation' }, null, 'GET'), lu)
+  assert.deepStrictEqual(lu.body.biens.map(b => b.property_id), [BIEN_B.id])
+  const etat = preparer({ user: MEMBRE, ...MEMBRE_B })
+  const res = reponse()
+  await require('../api/avis')(reqMembre({ action: 'auto-validation-maj' }, { action: 'auto-validation-maj', property_id: BIEN_A.id, heures: 12 }), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.insertions.filter(i => i.table === 'avis_auto_validation').length, 0)
+})
+
+test('auto-validation-maj : 48 h s’ecrit sur le bien, nul supprime la ligne, hors bornes refuse sans rien ecrire', async () => {
+  let etat = preparer({})
+  let res = reponse()
+  await require('../api/avis')(req({ action: 'auto-validation-maj' }, { action: 'auto-validation-maj', property_id: BIEN_A.id, heures: 48 }), res)
+  assert.strictEqual(res.code, 200)
+  const ecrit = etat.insertions.find(i => i.table === 'avis_auto_validation')
+  assert.deepStrictEqual(ecrit.row, { user_id: PROD, property_id: BIEN_A.id, heures: 48 })
+  etat = preparer({})
+  res = reponse()
+  await require('../api/avis')(req({ action: 'auto-validation-maj' }, { action: 'auto-validation-maj', property_id: BIEN_A.id, heures: null }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(etat.suppressions.some(x => x.table === 'avis_auto_validation' && x.filtres.property_id === BIEN_A.id && x.filtres.user_id === PROD))
+  for (const v of [0, 337, 'abc']) {
+    etat = preparer({})
+    res = reponse()
+    await require('../api/avis')(req({ action: 'auto-validation-maj' }, { action: 'auto-validation-maj', property_id: BIEN_A.id, heures: v }), res)
     assert.strictEqual(res.code, 400, String(v))
-    assert.strictEqual(etat.insertions.filter(i => i.table === 'avis_config').length, 0)
+    assert.strictEqual(etat.insertions.filter(i => i.table === 'avis_auto_validation').length, 0)
   }
 })
 
-test('config-maj : 48 h s’ecrit, nul desactive, et un ecran qui ne l’envoie pas ne le touche pas', async () => {
-  const ecrit = async (corps) => {
-    const etat = preparer({})
-    const handler = require('../api/avis')
-    const res = reponse()
-    await handler(req({ action: 'config-maj' }, { action: 'config-maj', tone: 'sobre', ...corps }), res)
-    assert.strictEqual(res.code, 200)
-    return etat.insertions.find(i => i.table === 'avis_config').row
-  }
-  assert.strictEqual((await ecrit({ auto_validation_heures: 48 })).auto_validation_heures, 48)
-  assert.strictEqual((await ecrit({ auto_validation_heures: null })).auto_validation_heures, null)
-  assert.ok(!('auto_validation_heures' in (await ecrit({}))), 'absent : la colonne n est pas ecrite')
+test('config-maj n’ecrit plus la publication automatique (writer unique : auto-validation-maj)', async () => {
+  const etat = preparer({})
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'config-maj' }, { action: 'config-maj', tone: 'sobre', auto_validation_heures: 48 }), res)
+  assert.strictEqual(res.code, 200)
+  const row = etat.insertions.find(i => i.table === 'avis_config').row
+  assert.ok(!('auto_validation_heures' in row))
 })

@@ -40,20 +40,72 @@ export function negatifForce (niveau, categorie) {
  * Monte l'ecran dans un conteneur.
  * @returns {Promise<{ charge: boolean }>}
  */
+// ─── La mise en page, embarquee (comme la fenetre d'evaluation) ─────────────
+// L'ecran vit desormais dans l'app Avis (decision de Thierry du 2 octobre 2026
+// au soir) : ses styles voyagent avec lui, au lieu de rester dans /settings.
+const STYLE_ID = 'hs-avis-reglages-style'
+const STYLE = `
+.hs-avis-reglages .card-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
+.hs-avis-reglages .card-sub { font-size: 12.5px; color: var(--text2, #6b6b6b); margin-bottom: 14px; line-height: 1.5; }
+.hs-avis-reglages .hs-critere { margin-bottom: 12px; }
+.hs-avis-reglages .hs-critere-entete { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 10px; }
+.hs-avis-reglages .hs-critere-entete input[type=text] { flex: 1 1 240px; min-width: 0; }
+.hs-avis-reglages .hs-niveaux { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.hs-avis-reglages .hs-niveau { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.hs-avis-reglages .hs-niveau input[type=text] { flex: 1 1 180px; min-width: 0; }
+.hs-avis-reglages .hs-niveau-negatif { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text2, #6b6b6b); }
+.hs-avis-reglages .hs-niveau-force { font-size: 11px; color: var(--text2, #6b6b6b); }
+.hs-avis-reglages .hs-reglage { display: block; margin-bottom: 10px; font-size: 13px; }
+.hs-avis-reglages .hs-reglage span { display: block; margin-bottom: 4px; color: var(--text2, #6b6b6b); }
+.hs-avis-reglages .hs-reglage input, .hs-avis-reglages .hs-reglage select { width: 100%; box-sizing: border-box; }
+.hs-avis-reglages input[type=text], .hs-avis-reglages input[type=number], .hs-avis-reglages select { font: inherit; font-size: 13.5px; padding: 6px 8px; border: 1px solid #d9d4ce; border-radius: 8px; background: var(--bg, #fff); color: inherit; }
+.hs-avis-reglages .hs-avis-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+.hs-avis-reglages .hs-avis-actions button, .hs-avis-reglages .hs-critere button { font: inherit; font-size: 13px; padding: 7px 12px; border-radius: 8px; border: 1px solid #d9d4ce; background: var(--bg, #fff); color: inherit; cursor: pointer; }
+.hs-avis-reglages .hs-avis-principal { background: #C97B5C !important; border-color: #C97B5C !important; color: #fff !important; font-weight: 600; }
+.hs-avis-reglages .hs-avis-erreur { color: #b3261e; font-size: 13px; }
+.hs-avis-reglages .hs-avis-message { color: #1b5e20; font-size: 13px; }
+.hs-avis-reglages .hs-auto-bien { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 9px 0; border-top: 0.5px solid #e6e2dd; }
+.hs-avis-reglages .hs-auto-bien:first-of-type { border-top: 0; }
+.hs-avis-reglages .hs-auto-nom { flex: 1 1 200px; display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.hs-avis-reglages .hs-auto-delai { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.hs-avis-reglages .hs-auto-delai input { width: 80px; }
+.hs-avis-reglages .hs-auto-message { flex: 1 1 100%; font-size: 12px; }
+@media (max-width: 560px) {
+  .hs-avis-reglages .hs-niveau, .hs-avis-reglages .hs-critere-entete { flex-direction: column; align-items: stretch; }
+  .hs-avis-reglages .hs-niveau input[type=text], .hs-avis-reglages .hs-critere-entete input[type=text] { flex: 1 1 auto; }
+}
+`
+export function poserStyle (doc = typeof document !== 'undefined' ? document : null) {
+  if (!doc || !doc.head || doc.getElementById(STYLE_ID)) return
+  const s = doc.createElement('style')
+  s.id = STYLE_ID
+  s.textContent = STYLE
+  doc.head.appendChild(s)
+}
+
 export async function monter (conteneur, options = {}) {
   const appel = options.appel || appelParDefaut
   const avertir = options.avertir || (() => {})
   if (!conteneur) throw new Error('[avis] l ecran de reglages exige un conteneur')
+  poserStyle(conteneur.ownerDocument)
 
   const etat = { criteres: [], config: null, tons: ['chaleureux', 'sobre'], defaut: [], occupe: false, message: null, erreur: null }
 
   conteneur.innerHTML = '<p class="hs-avis-attente">Chargement des réglages…</p>'
   try {
-    const [grille, config] = await Promise.all([appel('avis?action=grille'), appel('avis?action=config')])
+    const [grille, config, auto] = await Promise.all([
+      appel('avis?action=grille'), appel('avis?action=config'),
+      // La publication automatique, bien par bien : une panne ne prive pas
+      // l'hote de sa grille, le bloc dira qu'il est illisible.
+      appel('avis?action=auto-validation').catch(err => ({ erreur: err.message || 'Réglages illisibles' })),
+    ])
     etat.defaut = grille.defaut || []
     etat.config = config.compte || { keywords: [], tone: 'chaleureux', signature: '' }
     etat.tons = config.tons || etat.tons
-    etat.autoBornes = config.auto_validation || { min: 1, max: 336 }
+    etat.autoBornes = (auto && auto.bornes) || { min: 1, max: 336 }
+    etat.autoBiens = (auto && auto.biens) || []
+    etat.autoErreur = (auto && auto.erreur) || null
+    etat.autoMessages = {}
     // ⚠ SANS CRITERE EN BASE, ON PART DE LA GRILLE PAR DEFAUT — affichee, pas
     // enregistree. L'hote voit ce qui s'applique aujourd'hui, et peut le
     // modifier ; s'il n'enregistre pas, rien ne change.
@@ -86,16 +138,22 @@ export async function monter (conteneur, options = {}) {
     const ton = conteneur.querySelector('[data-reglage="ton"]')
     if (ton) ton.addEventListener('change', () => { etat.config.tone = ton.value })
 
-    // L'auto-validation (§10 bis) : la case l'active, le champ dit le delai.
-    const autoCase = conteneur.querySelector('[data-reglage="auto-active"]')
-    if (autoCase) autoCase.addEventListener('change', () => {
-      etat.config.auto_validation_heures = autoCase.checked ? (etat.dernierDelai || 48) : null
-      afficher()
-    })
-    lier('auto-heures', (v) => {
-      etat.config.auto_validation_heures = v === '' ? '' : Number(v)
-      if (Number.isInteger(etat.config.auto_validation_heures)) etat.dernierDelai = etat.config.auto_validation_heures
-    })
+    // La publication automatique, BIEN PAR BIEN (§10 bis, option A) : chaque
+    // ligne s'enregistre seule, au geste — la case l'active ou la coupe, le
+    // delai part quand on quitte le champ.
+    conteneur.querySelectorAll('[data-auto-case]').forEach(el => el.addEventListener('change', () => {
+      const id = el.dataset.autoCase
+      const b = etat.autoBiens.find(x => x.property_id === id)
+      ecrireAuto(id, el.checked ? ((b && b.heuresSaisies) || (b && b.heures) || 48) : null)
+    }))
+    conteneur.querySelectorAll('[data-auto-heures]').forEach(el => el.addEventListener('change', () => {
+      const id = el.dataset.autoHeures
+      const b = etat.autoBiens.find(x => x.property_id === id)
+      const v = el.value === '' ? '' : Number(el.value)
+      // Seul un delai valide est retenu pour une prochaine activation.
+      if (b && Number.isInteger(v) && v >= etat.autoBornes.min && v <= etat.autoBornes.max) b.heuresSaisies = v
+      ecrireAuto(id, v)
+    }))
 
     // Les critères.
     conteneur.querySelectorAll('[data-critere]').forEach(el => {
@@ -148,16 +206,35 @@ export async function monter (conteneur, options = {}) {
     bouton('enregistrer', enregistrer)
   }
 
+  // Le reglage d'UN bien. Le delai se verifie avant l'envoi ; l'ecran ne garde
+  // jamais une valeur que le serveur n'a pas prise.
+  async function ecrireAuto (id, heures) {
+    const b = etat.autoBornes || { min: 1, max: 336 }
+    const bien = etat.autoBiens.find(x => x.property_id === id)
+    if (!bien || bien.enCours) return
+    if (heures !== null && !(Number.isInteger(heures) && heures >= b.min && heures <= b.max)) {
+      etat.autoMessages[id] = { texte: `Un nombre entier d’heures entre ${b.min} et ${b.max}.`, ton: 'erreur' }
+      afficher(); return
+    }
+    // Un geste a la fois par bien : deux reponses dans le desordre feraient
+    // afficher un etat que le serveur n'a pas.
+    bien.enCours = true
+    try {
+      const r = await appel('avis?action=auto-validation-maj', {
+        methode: 'POST', corps: { action: 'auto-validation-maj', property_id: id, heures },
+      })
+      bien.heures = r.heures
+      etat.autoMessages[id] = { texte: r.heures ? `Activée : publication ${r.heures} h après la part de la prestataire.` : 'Désactivée.', ton: 'ok' }
+    } catch (err) {
+      etat.autoMessages[id] = { texte: err.message || 'Réglage non enregistré.', ton: 'erreur' }
+    } finally {
+      bien.enCours = false
+    }
+    afficher()
+  }
+
   async function enregistrer () {
     if (etat.occupe) return
-    // Le delai se verifie AVANT tout envoi : une grille enregistree et un delai
-    // refuse laisseraient l'hote avec la moitie de ses reglages.
-    const h = etat.config.auto_validation_heures
-    const b = etat.autoBornes || { min: 1, max: 336 }
-    if (h !== null && h !== undefined && !(Number.isInteger(h) && h >= b.min && h <= b.max)) {
-      etat.erreur = `Délai de publication automatique : un nombre entier d’heures entre ${b.min} et ${b.max}.`
-      avertir(etat.erreur, 'err'); afficher(); return
-    }
     etat.occupe = true; etat.erreur = null; etat.message = null; afficher()
     try {
       // ⚠ LES CLES DE NIVEAUX SE DERIVENT DU LIBELLE, et restent uniques par
@@ -183,7 +260,6 @@ export async function monter (conteneur, options = {}) {
           keywords: etat.config.keywords || [],
           tone: etat.config.tone || 'chaleureux',
           signature: etat.config.signature || null,
-          auto_validation_heures: h === undefined ? null : h,
         },
       })
       etat.surDefaut = false
@@ -256,19 +332,27 @@ export function rendre (etat) {
 
   const criteres = (etat.criteres || []).map((c, i) => rendreCritere(c, i)).join('')
 
-  const heures = config.auto_validation_heures
-  const autoActive = heures !== null && heures !== undefined
   const bornes = etat.autoBornes || { min: 1, max: 336 }
+  const lignesAuto = (etat.autoBiens || []).map(b => {
+    const actif = b.heures !== null && b.heures !== undefined
+    const m = (etat.autoMessages || {})[b.property_id]
+    const verrou = b.modifiable && !b.enCours ? '' : ' disabled'
+    return `<div class="hs-auto-bien">`
+      + `<label class="hs-auto-nom"><input type="checkbox" data-auto-case="${echapper(b.property_id)}"${actif ? ' checked' : ''}${verrou}> ${echapper(b.nom || 'Bien')}</label>`
+      + `<label class="hs-auto-delai"><input type="number" min="${bornes.min}" max="${bornes.max}" step="1" data-auto-heures="${echapper(b.property_id)}" `
+      + `value="${actif ? echapper(String(b.heures)) : ''}"${actif && b.modifiable ? '' : ' disabled'} placeholder="48"> h</label>`
+      + (m ? `<small class="hs-auto-message" style="color:${m.ton === 'erreur' ? '#b3261e' : '#2e5e3a'}">${echapper(m.texte)}</small>` : '')
+      + `</div>`
+  }).join('')
   const blocAuto = `<div class="card"><div class="card-title">Publication automatique</div>`
     + `<div class="card-sub">Quand votre prestataire a rempli sa part et que vous ne réagissez pas, l’évaluation part seule : `
     + `vos questions restées sans réponse prennent le meilleur niveau, et le texte de l’IA est conservé. `
     + `Vous êtes prévenu quelques heures avant. Un avis négatif n’est jamais publié automatiquement : il vous attend toujours. `
-    + `La publication tombe dans tous les cas au moins 12 heures avant la fin du délai d’Airbnb.</div>`
-    + `<label class="hs-reglage"><span><input type="checkbox" data-reglage="auto-active"${autoActive ? ' checked' : ''}> `
-    + `Valider automatiquement au bout d’un délai sans réaction de ma part</span></label>`
-    + `<label class="hs-reglage"><span>Délai, en heures (de ${bornes.min} à ${bornes.max})</span>`
-    + `<input type="number" min="${bornes.min}" max="${bornes.max}" step="1" data-reglage="auto-heures" `
-    + `value="${autoActive ? echapper(String(heures)) : ''}"${autoActive ? '' : ' disabled'} placeholder="48"></label></div>`
+    + `La publication tombe dans tous les cas au moins 12 heures avant la fin du délai d’Airbnb. `
+    + `Elle se règle bien par bien, et chaque ligne est prise en compte aussitôt.</div>`
+    + (etat.autoErreur ? `<p class="hs-avis-erreur">${echapper(etat.autoErreur)}</p>` : '')
+    + (lignesAuto || (etat.autoErreur ? '' : '<p class="card-sub">Aucun bien dans votre périmètre.</p>'))
+    + `</div>`
 
   const entete = `<div class="card"><div class="card-title">Votre grille d’évaluation</div>`
     // ⚠ UNE GRILLE INACTIVE SE DIT, ET EN PREMIER. C'est le seul cas ou aucune
