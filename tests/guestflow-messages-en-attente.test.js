@@ -23,6 +23,7 @@ function fakeSupabase (tables) {
       case 'in': return f.val.map(String).includes(String(r[f.col]))
       case 'is': return f.val === null ? r[f.col] == null : r[f.col] === f.val
       case 'not': return !(f.val === null ? r[f.col] == null : r[f.col] === f.val)
+      case 'gte': return String(r[f.col]) >= String(f.val)
       default: throw new Error('filtre inconnu ' + f.op)
     }
   })
@@ -35,6 +36,8 @@ function fakeSupabase (tables) {
         in (col, val) { q.filtres.push({ op: 'in', col, val }); return b },
         is (col, val) { q.filtres.push({ op: 'is', col, val }); return b },
         not (col, op, val) { q.filtres.push({ op: 'not', col, val }); return b },
+        gte (col, val) { q.filtres.push({ op: 'gte', col, val }); return b },
+        update (row) { q.mode = 'update'; q.charge = row; return b },
         order (col, o) { q.ordre = { col, asc: !o || o.ascending !== false }; return b },
         limit (n) { q.limite = n; return b },
         insert (row) { q.mode = 'insert'; q.charge = row; return b },
@@ -43,6 +46,10 @@ function fakeSupabase (tables) {
           try {
             if (q.mode === 'insert') {
               (tables[table] = tables[table] || []).push({ created_at: new Date().toISOString(), ...q.charge })
+              return res({ data: null, error: null })
+            }
+            if (q.mode === 'update') {
+              q.filtres.reduce(filtre, tables[table] || []).forEach(r => Object.assign(r, q.charge))
               return res({ data: null, error: null })
             }
             let rows = q.filtres.reduce(filtre, (tables[table] || []).slice())
@@ -59,8 +66,8 @@ function fakeSupabase (tables) {
 }
 
 // `contenuIA` : le tableau `content` que rend l'API (permet un bloc thinking).
-function charger ({ tables, messagesChannex, contenuIA, mode = 'test' }) {
-  const appelsIA = []
+function charger ({ tables, messagesChannex, contenuIA, mode = 'test', messagesBeds24 = [] }) {
+  const appelsIA = []; const alertes = []
   const anthropic = { messages: { create: async (req) => { appelsIA.push(req); return { content: contenuIA } } } }
   const stubs = {
     '../lib/cron-shared': {
@@ -68,11 +75,12 @@ function charger ({ tables, messagesChannex, contenuIA, mode = 'test' }) {
       getPropertyMode: async () => mode, isAutomationPaused: async () => false,
       getSignatureForKey: () => '', SENDVIABEDS24_ENABLED: false
     },
-    '../lib/cron-beds24': { fetchMessages: async () => [], fetchBookingsHistory: async () => [] },
-    '../lib/alert-notify': { sendAlertNotifications: async () => {} },
+    '../lib/cron-beds24': { fetchMessages: async () => messagesBeds24, fetchBookingsHistory: async () => [] },
+    '../lib/alert-notify': { sendAlertNotifications: async (a) => { alertes.push(a) } },
     '../lib/record-message': { recordMessage: async () => ({ ok: true }) },
     '../lib/cles-migrees': { estCleMigree: async () => false },
-    '../lib/channels': { getProvider: () => ({ getPropertyMessages: async () => messagesChannex }) }
+    '../lib/channels': { getProvider: () => ({ getPropertyMessages: async () => messagesChannex,
+      syncMessages: async () => {}, syncBookings: async () => {} }) }
   }
   const cible = require.resolve('../lib/cron-classify')
   delete require.cache[cible]
@@ -82,7 +90,7 @@ function charger ({ tables, messagesChannex, contenuIA, mode = 'test' }) {
   }
   const mod = require('../lib/cron-classify')
   delete require.cache[cible]
-  return { mod, appelsIA }
+  return { mod, appelsIA, alertes }
 }
 
 const U = 'user-1', P = 'prop-uuid-1', B = 'booking-1'
@@ -211,4 +219,160 @@ test('un message system Beds24 ne clot pas l\'attente', async () => {
   await mod.classifyAndHandle(U, 'cle', bien, B, 'Alex', '', '', '', fil, '', nouveauBilan())
   const bloc = appelsIA[0].messages[0].content.split('MESSAGES EN ATTENTE (à traiter ensemble) :')[1]
   assert.ok(bloc.includes('14h') && bloc.includes('Merci'))
+})
+
+// ─── M1 : anti-rejeu ────────────────────────────────────────────────────────
+const tache = (o) => ({ id: 'T' + Math.random(), user_id: U, property_id: P, book_id: B, sub_tasks: [], ...o })
+
+test('LE TEST QUI COMPTE : escalade en attente + nouveau message → UN appel, puis plus aucun ; l\'hote lit tout et est realerte', async () => {
+  const tables = tablesVides()
+  tables.agent_tasks.push(tache({ task_type: 'info_unknown', status: 'pending', guest_message: 'Le linge est fourni ?', created_at: t(2) }))
+  const messages = [
+    { bookingId: B, sender: 'guest', message: 'Le linge est fourni ?', time: t(1) },
+    { bookingId: B, sender: 'guest', message: 'Et les serviettes ?', time: t(10) }
+  ]
+  const { mod, appelsIA, alertes } = charger({ tables, messagesChannex: messages,
+    contenuIA: json({ type: 'info_unknown', reason: 'linge et serviettes', auto_reply: null, sub_tasks: [] }) })
+  for (let i = 0; i < 3; i++) await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 1, 'un appel pour le nouveau message, pas un par tick')
+  assert.strictEqual(tables.agent_tasks.length, 1, 'meme type : la tache est completee, pas doublee')
+  assert.ok(tables.agent_tasks[0].guest_message.includes('serviettes'), 'le nouveau message est visible de l\'hote')
+  assert.ok(tables.agent_tasks[0].guest_message.includes('linge'), 'sans perdre l\'ancien')
+  assert.strictEqual(alertes.length, 1, 'l\'hote est realerte une fois')
+})
+
+test('LE TEST QUI COMPTE : un signalement urgent apres une escalade ouverte est classe, a sa tache, et alerte', async () => {
+  // Constat de review : la premiere version de l'anti-rejeu ecrasait le nouveau
+  // message dans l'ancienne tache, sans IA ni alerte — la fuite d'eau etait noyee.
+  const tables = tablesVides()
+  tables.agent_tasks.push(tache({ task_type: 'info_unknown', status: 'pending', guest_message: 'Le linge est fourni ?', created_at: t(2) }))
+  const messages = [
+    { bookingId: B, sender: 'guest', message: 'Le linge est fourni ?', time: t(1) },
+    { bookingId: B, sender: 'guest', message: 'Fuite d\'eau sous l\'évier !', time: t(2000) }
+  ]
+  const { mod, appelsIA, alertes } = charger({ tables, messagesChannex: messages,
+    contenuIA: json({ type: 'intervention', reason: 'fuite', auto_reply: null, sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 1)
+  const inter = tables.agent_tasks.filter(x => x.task_type === 'intervention')
+  assert.strictEqual(inter.length, 1, 'le signalement a sa propre tache')
+  assert.ok(inter[0].guest_message.includes('Fuite'))
+  assert.strictEqual(alertes.length, 1)
+  assert.strictEqual(alertes[0].type, 'intervention')
+})
+
+test('une proposition Mode Test perimee est ecartee, remplacee par UN seul appel', async () => {
+  const tables = tablesVides()
+  tables.agent_tasks.push(tache({ task_type: 'sympathy', status: 'pending_validation', suggested_reply: '👍', guest_message: 'Merci !', created_at: t(2) }))
+  const messages = [
+    { bookingId: B, sender: 'guest', message: 'Merci !', time: t(1) },
+    { bookingId: B, sender: 'guest', message: 'Où est la télécommande ?', time: t(10) }
+  ]
+  const { mod, appelsIA } = charger({ tables, messagesChannex: messages,
+    contenuIA: json({ type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 1, 'un appel pour le nouveau message, pas un par tick')
+  assert.strictEqual(tables.agent_tasks[0].status, 'ignored', 'le 👍 perime ne peut plus etre valide')
+  const actives = tables.agent_tasks.filter(x => ['pending', 'pending_validation'].includes(x.status))
+  assert.strictEqual(actives.length, 1)
+  assert.strictEqual(actives[0].task_type, 'info_unknown')
+})
+
+test('une escalade d\'un lot DEJA repondu par l\'hote ne bloque pas la tache du nouveau lot', async () => {
+  const tables = tablesVides()
+  tables.agent_tasks.push(tache({ task_type: 'info_unknown', status: 'pending', guest_message: 'Le linge ?', created_at: t(2) }))
+  const messages = [
+    { bookingId: B, sender: 'guest', message: 'Le linge ?', time: t(1) },
+    { bookingId: B, sender: 'host', message: 'Oui, fourni.', time: t(5) },
+    { bookingId: B, sender: 'guest', message: 'Peut-on partir à 14h ?', time: t(10) }
+  ]
+  const { mod, appelsIA } = charger({ tables, messagesChannex: messages,
+    contenuIA: json({ type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 1, 'un appel, puis la nouvelle tache ferme la garde')
+  assert.strictEqual(tables.agent_tasks.length, 2, 'la nouvelle question a sa tache')
+  assert.ok(tables.agent_tasks[1].guest_message.includes('14h'))
+  assert.strictEqual(tables.agent_tasks[0].guest_message, 'Le linge ?', 'l\'ancienne tache n\'est pas touchee')
+})
+
+// ─── M2 : un modele automatique n'est pas une reponse ───────────────────────
+test('LE TEST QUI COMPTE : une question suivie d\'un modele automatique reste en attente et est traitee', async () => {
+  const messages = [
+    { bookingId: B, sender: 'guest', message: 'Peut-on arriver à 15h ?', time: t(1) },
+    { bookingId: B, sender: 'auto', message: 'Rappel : arrivée à partir de 18h.', time: t(2) }
+  ]
+  const { mod, appelsIA } = charger({ tables: tablesVides(), messagesChannex: messages,
+    contenuIA: json({ type: 'intervention', reason: 'x', auto_reply: null, sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 1, 'avant : le dernier message `host` (le modele) faisait taire le fil')
+  const bloc = appelsIA[0].messages[0].content.split('MESSAGES EN ATTENTE (à traiter ensemble) :')[1]
+  assert.ok(bloc.includes('15h'), 'la question est en attente')
+})
+
+test('une reponse de l\'agent (`ai`) vaut reponse : le fil se tait', async () => {
+  const messages = [
+    { bookingId: B, sender: 'guest', message: 'Merci !', time: t(1) },
+    { bookingId: B, sender: 'ai', message: '👍', time: t(2) }
+  ]
+  const { mod, appelsIA } = charger({ tables: tablesVides(), messagesChannex: messages, contenuIA: [] })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 0)
+})
+
+test('LE TEST QUI COMPTE : Beds24 — un modele parti de chez nous (signe GuestFlow) n\'est pas une reponse de l\'hote', async () => {
+  // L'API Beds24 rend tout message sortant en `host`. Le cœur sait qu'il
+  // vient d'un modele : on rapproche par reservation et par texte, signature otee.
+  const tables = tablesVides()
+  tables.messages = [{ user_id: U, property_id: '209', booking_id: '777', direction: 'outbound', sender: 'auto',
+    body: 'Rappel : arrivée à partir de 18h.', created_at: t(2) }]
+  const messagesBeds24 = [
+    { bookingId: '777', source: 'guest', message: 'Peut-on arriver à 15h ?', time: t(1) },
+    { bookingId: '777', source: 'host', message: 'Rappel :  arrivée à partir de 18h.\n\n— propulsé par GuestFlow', time: t(2) }
+  ]
+  const { mod, appelsIA } = charger({ tables, messagesChannex: [], messagesBeds24,
+    contenuIA: json({ type: 'intervention', reason: 'x', auto_reply: null, sub_tasks: [] }) })
+  await mod.processProperty(U, 'cle', { id: '209', name: 'Bien Beds24' }, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 1, 'la question n\'est pas tue par le modele')
+  assert.ok(appelsIA[0].messages[0].content.includes('Message automatique (modèle)'))
+})
+
+test('Beds24 — une vraie reponse de l\'hote (absente du cœur) fait toujours taire le fil', async () => {
+  const tables = tablesVides(); tables.messages = []
+  const messagesBeds24 = [
+    { bookingId: '777', source: 'guest', message: 'Peut-on arriver à 15h ?', time: t(1) },
+    { bookingId: '777', source: 'host', message: 'Oui, sans souci.', time: t(2) }
+  ]
+  const { mod, appelsIA } = charger({ tables, messagesChannex: [], messagesBeds24, contenuIA: [] })
+  await mod.processProperty(U, 'cle', { id: '209', name: 'Bien Beds24' }, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 0)
+})
+
+test('LE TEST QUI COMPTE : Mode Auto — la conversation [AUTO:] ecrite par le modele ne fait pas taire la question', async () => {
+  // Constat de review (bloquant) : en Mode Auto, chaque modele envoye ecrit une
+  // ligne `conversations` [AUTO: …] AVEC agent_reply. `hasNewerTaskOrConv` la
+  // prenait pour une reponse : le correctif M2 ne servait a rien en auto.
+  const tables = tablesVides()
+  tables.conversations.push({ id: 'c1', user_id: U, property_id: P, book_id: B,
+    guest_message: '[AUTO: j-1]', agent_reply: 'Rappel : arrivée à partir de 18h.', created_at: t(2) })
+  const messages = [
+    { bookingId: B, sender: 'guest', message: 'Peut-on arriver à 15h ?', time: t(1) },
+    { bookingId: B, sender: 'auto', message: 'Rappel : arrivée à partir de 18h.', time: t(2) }
+  ]
+  const { mod, appelsIA } = charger({ tables, messagesChannex: messages,
+    contenuIA: json({ type: 'intervention', reason: 'x', auto_reply: null, sub_tasks: [] }) })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 1)
+})
+
+test('une vraie reponse enregistree en conversation fait toujours taire le fil', async () => {
+  const tables = tablesVides()
+  tables.conversations.push({ id: 'c1', user_id: U, property_id: P, book_id: B,
+    guest_message: 'Peut-on arriver à 15h ?', agent_reply: 'Oui !', created_at: t(3) })
+  const messages = [{ bookingId: B, sender: 'guest', message: 'Peut-on arriver à 15h ?', time: t(1) }]
+  const { mod, appelsIA } = charger({ tables, messagesChannex: messages, contenuIA: [] })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA.length, 0)
 })
