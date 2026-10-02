@@ -601,5 +601,6 @@ test('LE TEST QUI COMPTE : arrivee anticipee — la regle de la base repond ; l\
   assert.ok(/reprenant CETTE règle fidèlement : info_known/.test(regle), 'la base repond')
   assert.ok(/ne vaut PAS accord pour arriver plus tôt/.test(regle), 'l\'arrivee tardive n\'est pas une arrivee anticipee')
   assert.ok(/ne dit rien de l'arrivée anticipée : info_unknown/.test(regle), 'sans regle, l\'hote decide')
+  assert.ok(/insiste ou redemande après avoir reçu la règle[^\n]*: intervention/.test(regle), 'l\'insistance revient a l\'hote')
   assert.ok(/départ tardif/.test(toujours), 'le depart tardif reste a l\'hote')
 })
