@@ -13,27 +13,30 @@ do $$
 declare
   mid uuid;
   pid uuid;
+  uid uuid;
   liste uuid[];
   r1 boolean;
   r2 boolean;
   r3 boolean;
 begin
-  -- Un menage sans proposition, et une prestataire
-  -- du meme compte qui n'en est pas la porteuse.
-  select m.id, p.id into mid, pid
-    from public.menages m
-    join public.profiles p
-      on p.account_user_id = m.user_id
-     and p.access_mode = 'lien'
-   where m.proposee_a is null
-     and m.offered_to is null
-     and m.status <> 'cancelled'
-     and (m.provider_id is null
-          or m.provider_id <> p.id)
+  -- Un menage D'ESSAI, cree ici et annule avec le
+  -- reste : staging n'a parfois aucun menage libre
+  -- (2 octobre 2026 : un seul, deja porte). Personne
+  -- ne le porte, et une prestataire du compte.
+  select p.id, p.account_user_id into pid, uid
+    from public.profiles p
+   where p.access_mode = 'lien'
    limit 1;
-  if mid is null then
-    raise exception 'PREUVE : aucun menage candidat';
+  if pid is null then
+    raise exception 'PREUVE : aucune prestataire';
   end if;
+  insert into public.menages
+    (user_id, property_id, booking_id,
+     departure_date, status)
+  values
+    (uid, 'PREUVE', 'PREUVE-' || gen_random_uuid(),
+     current_date + 3, 'unassigned')
+  returning id into mid;
 
   -- 1. L'ancien code POSE une proposition.
   update public.menages
