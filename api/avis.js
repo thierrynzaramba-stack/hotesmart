@@ -1557,7 +1557,7 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAuto
 // En face, la publication automatique relit la ligne sous son verrou et renonce
 // si quoi que ce soit a bouge depuis sa prise. Le residu : une ecriture de
 // l'hote qui passerait la porte 2 dans les millisecondes ou le cron pose son
-// verrou et relit — note au registre (dette 47).
+// verrou et relit — note au registre (dette 48).
 //
 // Rend true si l'hote a la main, false APRES avoir repondu 409.
 async function laMainALHote (e, res) {

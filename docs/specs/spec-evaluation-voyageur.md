@@ -449,7 +449,7 @@ indexée.
   « publication automatique en cours ») et respectent le verrou de publication ;
   en face, la publication relit la ligne sous son verrou et renonce si les
   réponses, le statut ou le négatif ont bougé. La rédaction n'écrit son texte que
-  si l'horloge n'a pas bougé. Résidus : dette 47.
+  si l'horloge n'a pas bougé. Résidus : dette 48.
 - **Pas de publication en fin de cycle** : sous 20 s de reste (maxDuration 60 s),
   plus rien ne commence ; une publication interrompue après la prise prévient
   l'hôte.
