@@ -30,6 +30,8 @@ const billing = require('../lib/billing')
 // Writer commun avec le poll quotidien : un seul endroit ecrit ota_reviews, et
 // un seul connait la contrainte d'idempotence.
 const { preparerAvis, upsertAvis } = require('../lib/cron-channel-reviews')
+// Naissance des evaluations du voyageur : meme chemin que le poll (decision D2).
+const { rattacherObjetsRecus } = require('../lib/avis/naissance')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -331,6 +333,8 @@ async function traiterAvis(payload, res) {
 
   console.log('[channel-events] avis ecrit', prep.ligne.external_review_id,
               '| resolu:', prep.resolu === true)
+  // Meme naissance que le poll, et elle ne peut pas faire echouer la reception.
+  await rattacherObjetsRecus(supabase, prep.ligne)
   return res.status(200).json({ ok: true, written: 1, resolved: prep.resolu === true })
 }
 

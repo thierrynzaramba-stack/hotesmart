@@ -222,7 +222,7 @@
     import { renderOnboardingBanner } from '/components/onboarding-banner.js'
     // Les reservations : la MEME regle que l'ordinateur (chantier calendrier
     // mobile, 30 septembre 2026). La couleur etait tiree au sort ici.
-    import { mapResa, droitsResa, libelleCanal, badgeSansEmailVisible, TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, libelleStatut } from '/shared/calendrier-resa.js'
+    import { mapResa, droitsResa, libelleCanal, badgeSansEmailVisible, TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, libelleStatut, brancherEvaluation } from '/shared/calendrier-resa.js'
     const session = await requireAuth()
     if (!session) throw new Error('Non authentifie')
     renderSidebar('biens-calendrier').catch(() => {})
@@ -769,7 +769,8 @@
       const voyageurs=[resa.numAdult?resa.numAdult+' adulte'+(resa.numAdult>1?'s':''):null, resa.numChild?resa.numChild+' enfant'+(resa.numChild>1?'s':''):null].filter(Boolean).join(', ')
       const devise=symbole(resa.currency)
       const conv='<button class="btn-conv" id="fiche-conv" disabled>&#128172; Écrire au voyageur</button><div class="fiche-note" id="fiche-conv-note" style="margin-top:2px">Recherche du fil…</div>'
-      let corps=conv
+      // L'évaluation du voyageur, après le départ — remplie par le cœur, par le bus.
+      let corps=conv+'<div id="fiche-avis"></div>'
       if(droits.modifiable){
         // ⚠ PRIX INCONNU : champ VIDE, jamais le prix de base (il partirait
         // comme prix de vente et repricerait le sejour chez Channex).
@@ -797,6 +798,8 @@
         document.getElementById('fm-enregistrer').addEventListener('click', enregistrerResaM)
       }
       resoudreConv(bien, resa)
+      brancherEvaluation({ resa, cible: document.getElementById('fiche-avis'),
+        encoreAffichee: () => !!(ficheCourante && ficheCourante.resa === resa) })
     }
     // Le bouton nait eteint et s'allume s'il y a un fil — un bouton actif vers
     // une messagerie vide ferait croire a une panne.

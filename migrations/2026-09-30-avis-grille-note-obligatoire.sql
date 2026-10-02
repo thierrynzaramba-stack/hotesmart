@@ -1,0 +1,87 @@
+-- migrations/2026-09-30-avis-grille-note-obligatoire.sql
+--
+-- DEUX CORRECTIFS, TROUVES PAR LA MEME REVUE :
+--   1. une categorie notee pouvait n'avoir AUCUNE note ;
+--   2. `avis_criteres.updated_at` n'avait pas de declencheur.
+--
+-- La contrainte avis_niveaux_forme_par_categorie disait, pour toute
+-- categorie autre que « recommandation » :
+--
+--     note between 1 and 5 and recommande is null
+--
+-- Quand `note` est nul, « note between 1 and 5 » ne vaut pas faux : il
+-- vaut NULL. Et un CHECK qui vaut NULL est ACCEPTE par Postgres. La
+-- contrainte laissait donc passer un niveau « proprete » sans note, que
+-- noter() aurait envoye a Airbnb en « rating: null ».
+--
+-- Trouve par scripts/prouver-grille-avis.js, qui ecrit une grille
+-- invalide et exige que la base la refuse. Les six autres regles
+-- tenaient ; celle-ci non.
+--
+-- ORDRE : a coller APRES les deux fichiers de grille.
+-- OU : staging ET production. Sans danger la ou la contrainte est deja
+-- correcte (elle est refaite a l'identique).
+-- VERIFICATION : node scripts/prouver-grille-avis.js (staging seul :
+-- il ecrit). Aucun SELECT a coller dans l'editeur.
+
+alter table public.avis_criteres_niveaux
+  drop constraint if exists
+    avis_niveaux_forme_par_categorie;
+
+alter table public.avis_criteres_niveaux
+  add constraint avis_niveaux_forme_par_categorie
+  check (
+    case when categorie = 'recommandation'
+      then note is null
+        and recommande is not null
+      else note is not null
+        and note between 1 and 5
+        and recommande is null
+    end
+  );
+
+comment on column public.avis_criteres_niveaux.note is
+  'Note 1-5 envoyee a Airbnb. OBLIGATOIRE hors '
+  '« recommandation », nulle dedans : c''est la contrainte '
+  'avis_niveaux_forme_par_categorie qui le tient, et elle '
+  'exige `note is not null` explicitement — « between » '
+  'seul vaut NULL sur une note nulle, donc passe.';
+
+-- ─── Le declencheur qui tient `updated_at` ──────────────
+--
+-- ⚠ `updated_at` SE MAINTIENT, SINON IL MENT. Regle posee
+-- par la migration du 25 septembre 2026, qui cree le meme
+-- declencheur sur guest_evaluations et avis_config. La
+-- table des criteres portait la colonne SANS le
+-- declencheur : une grille modifiee trois fois aurait
+-- annonce n'avoir jamais change. Constat de review.
+--
+-- Et personne ne l'aurait vu : le verificateur annonce
+-- lui-meme qu'il ne voit pas les declencheurs, PostgREST
+-- n'exposant pas pg_catalog.
+drop trigger if exists avis_criteres_touch_trg
+  on public.avis_criteres;
+create trigger avis_criteres_touch_trg
+  before update on public.avis_criteres
+  for each row execute function public.set_updated_at();
+
+-- ─── Un commentaire de colonne qui induisait en erreur ──
+--
+-- ⚠ `ota_review_id` N'EST PAS LA CLE DU POST. La colonne
+-- porte une cle etrangere vers `ota_reviews(id)`, donc
+-- NOTRE cle primaire, tiree au sort par Postgres. Le
+-- provider, lui, ne connait que
+-- `ota_reviews.external_review_id`.
+--
+-- Le commentaire disait « la cle du POST de publication »,
+-- et le code avait suivi le commentaire : chaque
+-- publication partait sur « POST /reviews/<uuid-a-nous>/
+-- guest_review », soit un 404 a tous les coups, puis un
+-- refus definitif au second essai. Constat de review.
+comment on column public.guest_evaluations.ota_review_id is
+  'Lien vers NOTRE ligne ota_reviews (cle primaire '
+  'interne). ⚠ CE N''EST PAS l''identifiant du provider : '
+  'le POST de publication se fait sur '
+  'ota_reviews.external_review_id, que api/avis.js resout '
+  'avant l''appel. Cree par l''OTA le jour du depart, '
+  'cache et vide.';

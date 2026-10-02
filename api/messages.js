@@ -13,6 +13,8 @@ const { refsDuPerimetre, filtrePerimetreSql } = require('../lib/permissions')
 // le dernier menage du bien est posterieur au depart precedent. Ne pas la
 // recopier, elle a deja ete corrigee deux fois.
 const { etatMenage } = require('../lib/cron-arrival-code')
+// Lot 7 du chantier avis : l'archivage des fils (spec §9), une fonction pure.
+const { etatArchivage } = require('../lib/archivage-conversations')
 
 // Jour de Paris (celui des biens), YYYY-MM-DD, a un decalage de jours pres.
 const jourParis = (decalage = 0) =>
@@ -100,9 +102,132 @@ function displayLabel(provider, raw) {
   return provider === 'beds24' ? `Beds24 · ${label}` : label
 }
 
+// ─── L'archivage des fils (lot 7 du chantier avis, spec §9) ─────────────────
+// ⚠ CET ENDPOINT EST LE SEUL WRITER des colonnes d'archivage de
+// `conversation_flags` (migration 2026-09-25-conversation-flags-archivage.sql).
+// L'epingle, elle, reste ecrite par la messagerie : on ne la touche jamais ici,
+// on la RECOPIE telle quelle (sinon un upsert creerait une ligne epinglee par
+// defaut — la colonne naît `true`).
+//
+// ⚠ `archive_after` DESIGNE, pour un archivage manuel, L'INSTANT de
+// l'archivage : un message posterieur ramene le fil en boite principale. Les
+// regles automatiques, elles, ne se stockent pas — elles se calculent a la
+// lecture (lib/archivage-conversations.js), sans cron ni writer de plus.
+async function appliquerArchivage(userId, conversations, depuis) {
+  // ⚠ BORNEE AUX FILS LUS, PAR PAQUETS (constat de revue) : la table grossit
+  // desormais (desepingler met a jour, archiver cree une ligne), et au-dela de
+  // 1000 lignes PostgREST tronque SANS ERREUR — des epingles et des archivages
+  // auraient ete ignores. Meme famille que la troncature de bookings_snapshot.
+  const ids = conversations.map(c => String(c.bookId))
+  const flags = []
+  let error = null
+  for (let i = 0; i < ids.length && !error; i += 100) {
+    const r = await supabase
+      .from('conversation_flags')
+      .select('book_id, pinned, archived_manual, archive_after, unarchived_manual_at')
+      .eq('user_id', userId)
+      .in('book_id', ids.slice(i, i + 100))
+    if (r.error) error = r.error
+    else flags.push(...(r.data || []))
+  }
+  if (error) {
+    // Colonnes absentes (migration du 25 septembre non appliquee) : pas
+    // d'archivage, et l'ecran le sait — il ne montre ni l'onglet ni les boutons.
+    console.error('[messages] archivage indisponible :', error.message)
+    return false
+  }
+  // La publication arrive par le JOURNAL DU COEUR, jamais par les tables des
+  // avis (spec §2 bis). Sans evenements lisibles, la regle « publiee » ne joue
+  // pas — les autres, si.
+  const { data: evts, error: eE } = await supabase
+    .from('core_events')
+    .select('payload, created_at')
+    .eq('user_id', userId)
+    .eq('type', 'avis.evaluation_publiee')
+    .gte('created_at', depuis)
+    .order('created_at', { ascending: false })
+    .limit(1000)
+  if (eE) console.error('[messages] evenements de publication illisibles', eE.message)
+  const publiee = new Map()
+  for (const ev of evts || []) {
+    const b = ev && ev.payload && ev.payload.booking_uid
+    if (b && !publiee.has(String(b))) publiee.set(String(b), ev.created_at)
+  }
+  const parFil = new Map(flags.map(f => [String(f.book_id), f]))
+  const maintenant = Date.now()
+  for (const c of conversations) {
+    const f = parFil.get(String(c.bookId)) || {}
+    const e = etatArchivage({
+      depart: c.lastNight, dernierMessage: c.lastTime,
+      epinglee: f.pinned === true,
+      archiveeManuellement: f.archived_manual === true, archiveeLe: f.archive_after || null,
+      desarchiveeLe: f.unarchived_manual_at || null,
+      publieeLe: publiee.get(String(c.bookId)) || null,
+      maintenant,
+    })
+    c.archivee = e.archivee
+    c.raisonArchivage = e.raison
+  }
+  return true
+}
+
+async function archiverFil(req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const archiver = req.body.action === 'archiver'
+  const bookingId = String(req.body.booking_id || '').trim()
+  // La ligne du simulateur vit dans la meme table : elle n'est pas un sejour.
+  if (!bookingId || bookingId.length > 200 || bookingId === '__SIM_ENABLED__') {
+    return res.status(400).json({ error: 'Conversation invalide' })
+  }
+  // ⚠ LE PERIMETRE PAR BIEN : un membre limite au bien A n'archive pas un fil
+  // du bien B. Le bien se lit sur le fil (messages), sinon sur la reservation.
+  const [m, sn] = await Promise.all([
+    supabase.from('messages').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+    supabase.from('bookings_snapshot').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+  ])
+  if (m.error || sn.error) return res.status(503).json({ error: 'Lecture impossible' })
+  const bien = (m.data && m.data[0] && m.data[0].property_id) || (sn.data && sn.data[0] && sn.data[0].property_id) || null
+  if (bien == null) return res.status(404).json({ error: 'Conversation introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  // ⚠ 404, PAS 403 (constat de revue) : un 403 apprenait a un membre limite au
+  // bien A qu'un fil existe sur le bien B — ce que le GET d'existence, plus
+  // haut, s'interdit deja.
+  if (refs !== null && !refs.map(String).includes(String(bien))) {
+    return res.status(404).json({ error: 'Conversation introuvable' })
+  }
+  const { data: flag, error: eF } = await supabase.from('conversation_flags')
+    .select('pinned').eq('user_id', userId).eq('book_id', bookingId).maybeSingle()
+  if (eF) return res.status(503).json({ error: 'Lecture impossible' })
+  const pinned = Boolean(flag && flag.pinned)
+  // Spec §9 : une conversation epinglee n'est jamais archivee. On le dit.
+  if (archiver && pinned) {
+    return res.status(409).json({ error: 'Désépinglez la conversation avant de l’archiver.', motif: 'epinglee' })
+  }
+  const maintenant = new Date().toISOString()
+  const etat = archiver
+    ? { archived_manual: true, archive_after: maintenant, archived_reason: 'manuel', unarchived_manual_at: null }
+    : { archived_manual: false, archive_after: null, archived_reason: null, unarchived_manual_at: maintenant }
+  const { error: eU } = await supabase.from('conversation_flags').upsert(
+    { user_id: userId, book_id: bookingId, pinned, property_id_ref: String(bien), ...etat },
+    { onConflict: 'user_id,book_id' })
+  if (eU) {
+    console.error('[messages] archivage non enregistre', eU.message)
+    return res.status(503).json({ error: 'Archivage non enregistré' })
+  }
+  return res.status(200).json({ ok: true, booking_id: bookingId, archivee: archiver })
+}
+
 module.exports = async function handler(req, res) {
   if (req.method !== 'GET' && req.method !== 'POST') {
     return res.status(405).json({ error: 'Methode non autorisee' })
+  }
+
+  // L'archivage manuel est une ECRITURE : sa propre garde, avant la lecture.
+  if (req.method === 'POST' && req.body && (req.body.action === 'archiver' || req.body.action === 'desarchiver')) {
+    return await archiverFil(req, res)
   }
 
   // ── Droits ──
@@ -285,12 +410,18 @@ module.exports = async function handler(req, res) {
     // Tri conversations par lastTime desc (plus recentes d'abord).
     conversations.sort((a, b) => new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
 
+    // Archivage (lot 7). Un echec ne prive personne de sa messagerie : les fils
+    // restent tous en boite principale, et l'ecran ne propose pas l'archivage.
+    let archivage = false
+    try { archivage = await appliquerArchivage(userId, conversations, since) }
+    catch (e) { console.error('[messages] archivage echec', e.message) }
+
     // Menage fait ? code transmis ? — pour les arrivees du jour et de demain.
     // Un echec ici ne prive personne de sa messagerie : les marques manquent, c'est tout.
     try { await etatsDArrivee(userId, conversations, snapByBooking) }
     catch (e) { console.error('[messages] etats d\'arrivee echec', e.message) }
 
-    return res.status(200).json({ conversations })
+    return res.status(200).json({ conversations, archivage })
 
   } catch (e) {
     console.error('[messages] exception', e.message)

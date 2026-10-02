@@ -27,21 +27,74 @@ const supabase = createClient(
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
 
+// ⚠ UN DIAGNOSTIC QUI PLANTE N'EST PAS UN DIAGNOSTIC.
+// Vecu du 30 septembre 2026 : `CHANNEL_BASE_URL` venait d'etre reecrite sur le
+// projet staging, `fetch` a leve — URL mal formee, ou hote injoignable — et
+// comme rien n'attrapait, Vercel a rendu « FUNCTION_INVOCATION_FAILED » avec un
+// corps vide. La seule page censee dire ce qui ne va pas ne disait RIEN, et
+// c'etait precisement ce qu'on venait de changer.
+//
+// L'erreur est donc rendue, nommee, et sans jamais reveler la cle.
 async function channelCall(method, path) {
-  const res = await fetch(`${CHANNEL_API}${path}`, {
-    method,
-    headers: {
-      'user-api-key': CHANNEL_KEY,
-      'Content-Type': 'application/json'
-    }
-  })
+  let res
+  try {
+    res = await fetch(`${CHANNEL_API}${path}`, {
+      method,
+      headers: {
+        'user-api-key': CHANNEL_KEY,
+        'Content-Type': 'application/json'
+      }
+    })
+  } catch (e) {
+    const cause = e?.cause?.code || e?.code || e?.name || 'inconnue'
+    return { ok: false, status: 0, reseau: { cause, message: String(e.message || '').slice(0, 200) }, json: null }
+  }
   const text = await res.text()
   let json
   try { json = JSON.parse(text) } catch { json = { raw: text } }
   return { ok: res.ok, status: res.status, json }
 }
 
+// Ce qu'on peut dire de `CHANNEL_BASE_URL` sans en reveler le contenu utile :
+// sa FORME. C'est ce qui se trompe le plus souvent — un schema manquant, un
+// espace colle par un copier-coller, un `/api/v1` en trop ou en moins.
+function formeDeLUrl (brut) {
+  if (!brut) return { present: false }
+  const forme = {
+    present: true,
+    longueur: brut.length,
+    espaces_ou_sauts: /\s/.test(brut),
+    guillemets: /["']/.test(brut),
+    barre_finale: /\/$/.test(brut),
+  }
+  try {
+    const u = new URL(brut.trim())
+    forme.schema = u.protocol.replace(':', '')
+    forme.hote = u.host
+    forme.chemin = u.pathname
+    forme.termine_par_api_v1 = /\/api\/v1\/?$/.test(u.pathname)
+    forme.analysable = true
+  } catch (e) {
+    forme.analysable = false
+    forme.pourquoi = String(e.message || '').slice(0, 120)
+  }
+  return forme
+}
+
 module.exports = async function handler(req, res) {
+  try {
+    return await router(req, res)
+  } catch (e) {
+    // ⚠ MEME FILET QUE api/avis.js ET api/menages.js. Sans lui, une exception
+    // imprevue sortait en « FUNCTION_INVOCATION_FAILED », corps vide : le
+    // diagnostic ne diagnostiquait plus rien, et c'est arrive le jour ou on en
+    // avait le plus besoin.
+    console.error('[diagnostic] exception:', e && e.message)
+    if (!res.headersSent) return res.status(500).json({ error: 'Erreur serveur', detail: String(e && e.message || '').slice(0, 200) })
+  }
+}
+
+async function router(req, res) {
   const check = req.query.check || 'channel'
 
   // ?check=channel_detail&property_id=<providerPropertyId>
@@ -111,17 +164,30 @@ module.exports = async function handler(req, res) {
     }
     const r = await channelCall('GET', '/properties?pagination[page]=1&pagination[limit]=5')
     const ids = Array.isArray(r.json?.data) ? r.json.data : []
-    let host = null
-    try { host = new URL(CHANNEL_API).host } catch { host = null }  // host public, pas un secret
-    // property_ids VOLONTAIREMENT RETIRE : ces identifiants sont ceux du compte
-    // channel global et designent des biens d'autres clients. Le compteur suffit
-    // a diagnostiquer la connectivite.
+    // ⚠ property_ids ET TITRES VOLONTAIREMENT RETIRES : le compte channel est
+    // GLOBAL (marque blanche), il porte les biens de TOUS les clients. Le
+    // compteur suffit a diagnostiquer la connectivite.
+    //
+    // ⚠ `property_total` EST UN AGREGAT, et c'est la seule facon de savoir A QUEL
+    // COMPTE la cle appartient sans reveler le bien de personne : un compte de
+    // test en porte une poignee, le compte de production des dizaines. La
+    // question s'est posee le 30 septembre 2026, en verifiant que staging ne
+    // parlait pas au Channex de production.
+    const total = r.json?.meta?.total ?? null
     return res.status(r.ok ? 200 : 502).json({
       ok: r.ok,
       channel_status: r.status,
-      base_url_host: host,
+      // La FORME de l'URL, jamais la cle. C'est ce qui se trompe le plus souvent.
+      base_url: formeDeLUrl(CHANNEL_API),
+      base_url_host: formeDeLUrl(CHANNEL_API).hote || null,
+      cle_presente: Boolean(CHANNEL_KEY),
+      cle_longueur: CHANNEL_KEY ? String(CHANNEL_KEY).length : 0,
       property_count: ids.length,
-      error: r.ok ? undefined : (r.json?.errors || r.json)
+      property_total: total,
+      // ⚠ Une erreur RESEAU se distingue d'un refus du provider : la premiere dit
+      // que l'URL ou l'hote est en cause, la seconde que la cle l'est.
+      reseau: r.reseau || undefined,
+      error: r.ok ? undefined : (r.json?.errors || r.json || undefined)
     })
   }
 

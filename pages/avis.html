@@ -97,6 +97,31 @@
                            padding:10px; border:0.5px solid var(--border); border-radius:8px;
                            resize:vertical; margin-top: 4px; }
   </style>
+  <style>
+    /* ─── Les evaluations du voyageur (core/avis/liste-evaluations.js) ────── */
+    #zone-evaluations { margin-bottom: 18px; }
+    .hs-eval-entete { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+    .hs-eval-entete h2 { font-size: 15px; margin: 0; }
+    .hs-eval-filtre { font-size: 12px; color: #6b6b6b; display: flex; gap: 6px; align-items: center; }
+    .hs-eval-resume { font-size: 13px; color: #6b6b6b; margin: 6px 0 10px; }
+    .hs-eval-liste { list-style: none; margin: 0; padding: 0; }
+    .hs-eval-ligne { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 0.5px solid #e6e2dd; font-size: 13px; flex-wrap: wrap; }
+    .hs-eval-ligne:first-child { border-top: 0; }
+    .hs-eval-bien { flex: 1 1 140px; min-width: 0; font-weight: 500; }
+    .hs-eval-etat { color: #6b6b6b; }
+    .hs-eval-a-faire .hs-eval-etat { color: #C97B5C; font-weight: 500; }
+    .hs-eval-delai { color: #6b6b6b; font-size: 12px; }
+    /* ⚠ L'urgence se voit SANS la couleur : « dernier jour » est un mot, pas
+       seulement un rouge — une page lue en niveaux de gris doit rester claire. */
+    .hs-eval-urgent { color: #b3261e; font-size: 12px; font-weight: 600; }
+    .hs-eval-date { color: #6b6b6b; font-size: 12px; }
+    .hs-eval-vide, .hs-avis-attente { font-size: 13px; color: #6b6b6b; }
+    .hs-avis-erreur { font-size: 13px; color: #b3261e; }
+    @media (max-width: 560px) {
+      .hs-eval-ligne { align-items: flex-start; }
+      .hs-eval-bien { flex: 1 1 100%; }
+    }
+  </style>
 </head>
 <body>
 <div class="layout">
@@ -106,10 +131,24 @@
       <div>
         <div class="page-title">⭐ Avis voyageurs</div>
         <div class="page-sub" id="sous-titre">Chargement…</div>
+        <!-- L'auto-validation de l'evaluation (spec §10 bis) : activee ou non,
+             et son delai. Lue sur la config du compte. -->
+        <div class="page-sub" id="etat-auto" hidden></div>
       </div>
-      <button class="btn btn-primary" id="btn-saisir" hidden>+ Saisir un avis reçu</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <!-- ⚠ Réglages refuse un compte délégué : le lien n'apparaît qu'au
+             titulaire qui a le droit d'écriture sur les avis (voir initAvis). -->
+        <a class="btn" id="lien-configuration" href="/settings?onglet=avis" style="text-decoration:none" hidden>⚙ Configuration</a>
+        <button class="btn btn-primary" id="btn-saisir" hidden>+ Saisir un avis reçu</button>
+      </div>
     </div>
     <div class="content">
+      <!-- ⚠ CE QUI ATTEND L'HOTE PASSE AVANT CE QU'IL A RECU. Les avis des
+           voyageurs sont une lecture ; les evaluations, une action a faire dans
+           un delai. Les mettre en dessous les aurait fait manquer.
+           Le contenu vit dans un module du coeur, /core/avis/liste-evaluations.js. -->
+      <section id="zone-evaluations" class="card" style="display:none"></section>
+
       <div class="avis-stats" id="stats" hidden></div>
 
       <div class="avis-barre">
@@ -173,7 +212,7 @@
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
-  import { peutEcrire, enteteCompte } from '/shared/compte-courant.js'
+  import { peutEcrire, enteteCompte, estTitulaire } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
 
   // ⚠ LE MODULE PILOTE L'INITIALISATION. Il ne suffit PAS de poser les helpers
@@ -192,6 +231,7 @@
   // motif de apps/agent-ai/messagerie.html : fetch direct, jeton de session et
   // `enteteCompte()` pour la delegation de compte.
   window.peutEcrire = peutEcrire
+  window.estTitulaire = estTitulaire
   window.enteteCompte = enteteCompte
   window._supabase = supabase
 
@@ -231,6 +271,41 @@
     if (titre) titre.textContent = 'Chargement impossible'
     if (msg) msg.textContent = 'La page n\'a pas pu se charger. Rechargez pour réessayer.'
   }
+// ─── Les evaluations du voyageur (lot 4) ────────────────────────────────────
+// ⚠ MONTEES A PART, ET UN ECHEC ICI NE CASSE PAS LA PAGE. Les avis recus et les
+// evaluations a faire sont deux choses : si le module du coeur tombe, l'hote doit
+// quand meme voir ses avis.
+;(async () => {
+  try {
+    const [{ monter }, { hsBus }] = await Promise.all([
+      import('/core/avis/liste-evaluations.js'),
+      import('/shared/hs-bus.js'),
+    ])
+    const zone = document.getElementById('zone-evaluations')
+    // ⚠ LA SECTION S'AFFICHE, QUOI QU'IL ARRIVE. Constat de review : la masquer
+    // quand `charge` valait false annulait la garantie du module — il vient
+    // d'ecrire « evaluations illisibles » dans ce conteneur, et la page le
+    // cachait aussitot. L'hote retombait sur une section vide, c'est-a-dire
+    // exactement sur l'idee qu'il n'a rien a evaluer.
+    //
+    // Une liste vide n'est pas une carte vide non plus : le module explique
+    // quand les evaluations apparaissent.
+    await monter(zone, { bus: hsBus })
+    zone.style.display = ''
+    // ⚠ `?evaluer=<booking_uid>` OUVRE LA FENÊTRE D'ÉVALUATION (spec §10 : le
+    // lien de la notification « évaluez le voyageur » mène ici, fenêtre ouverte).
+    // Par le bus, comme le bouton de la liste : droit absent ou séjour inconnu =
+    // « indisponible », et rien ne s'ouvre. On retire le paramètre ensuite, pour
+    // qu'un rechargement ne rouvre pas la fenêtre.
+    const aEvaluer = new URLSearchParams(location.search).get('evaluer')
+    if (aEvaluer && aEvaluer.length <= 200 && hsBus) {
+      try { history.replaceState(null, '', location.pathname) } catch { /* sans historique */ }
+      await hsBus.ouvrir('avis.evaluer', { booking_uid: aEvaluer })
+    }
+  } catch (e) {
+    console.error('[avis] evaluations du voyageur', e)
+  }
+})()
 </script>
 
 <script>
@@ -304,6 +379,23 @@
       throw err
     }
     return data
+  }
+
+  // ⚠ L'ETAT DE LA PUBLICATION AUTOMATIQUE SE DIT EN HAUT DE LA PAGE (demande de
+  // Thierry du 2 octobre 2026), avec le lien vers son reglage. Un echec de
+  // lecture se tait : ce n'est qu'une information, la page ne depend pas d'elle.
+  async function afficherEtatAuto () {
+    const el = $('etat-auto')
+    try {
+      const cfg = await appelAPI('avis?action=config')
+      const h = cfg && cfg.compte ? cfg.compte.auto_validation_heures : null
+      const lien = $('lien-configuration').hidden ? ''
+        : ' · <a href="/settings?onglet=avis">⚙ Configuration</a>'
+      el.innerHTML = (h
+        ? `Publication automatique des évaluations : <strong>activée</strong>, après ${echapper(h)} h sans réaction de votre part (jamais pour un avis négatif).`
+        : 'Publication automatique des évaluations : <strong>désactivée</strong>.') + lien
+      el.hidden = false
+    } catch { el.hidden = true }
   }
 
   const echapper = t => String(t == null ? '' : t)
@@ -578,6 +670,11 @@
     // Le serveur le revalide : ce masquage est un confort, pas la garde.
     const peut = window.peutEcrire ? window.peutEcrire('avis') : false
     $('btn-saisir').hidden = !peut
+    // Le lien « Configuration » mène à Réglages, qui refuse un compte délégué :
+    // il faut le droit d'écriture ET travailler sur son propre compte. Sinon un
+    // membre délégué cliquerait vers une page qui le renvoie.
+    $('lien-configuration').hidden = !(peut && window.estTitulaire && window.estTitulaire())
+    afficherEtatAuto()
 
     $('s-date').value = new Date().toISOString().slice(0, 10)
 

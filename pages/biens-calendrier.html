@@ -451,7 +451,7 @@
     // Les reservations : UNE regle pour l'ordinateur et le telephone (chantier
     // calendrier mobile, 30 septembre 2026) — famille de source, transformation,
     // droit de modifier, messagerie. Voir shared/calendrier-resa.js.
-    import { familleSource, estOffline, mapResa, libelleCanal, droitsResa, sansMessagerieOta, TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre } from '/shared/calendrier-resa.js'
+    import { familleSource, estOffline, mapResa, libelleCanal, droitsResa, sansMessagerieOta, TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, brancherEvaluation } from '/shared/calendrier-resa.js'
 
     // Sur mobile : bascule vers la version tactile (PWA), en conservant l'ID du bien.
     if (window.innerWidth <= 768) {
@@ -1537,6 +1537,8 @@
       document.getElementById('resa-sous-titre').textContent = bien.name
       document.getElementById('resa-corps').innerHTML =
           blocConversation(bien, resa)
+        // L'évaluation du voyageur, après le départ — remplie par le cœur, par le bus.
+        + '<div id="resa-avis"></div>'
         + (modifiable ? champsModifiables(bien, resa, nuits) : (
             ligneFiche('Arrivée', resa.startISO + (resa.arrivalHour?' à '+resa.arrivalHour:''))
           + ligneFiche('Départ', resa.checkout)
@@ -1566,6 +1568,8 @@
       const btnEnr = document.getElementById('resa-enregistrer')
       if(btnEnr) btnEnr.addEventListener('click', enregistrerResaCourante)
       resoudreConversation(bien, resa)
+      brancherEvaluation({ resa, cible: document.getElementById('resa-avis'),
+        encoreAffichee: () => !!(resaCourante && resaCourante.resa === resa) })
       if(modifiable) ['fiche-arrivee','fiche-depart','fiche-prix','fiche-adultes','fiche-enfants']
         .forEach(id=>{ const el=document.getElementById(id); if(el) el.addEventListener('input', rafraichirFiche) })
       if(modifiable) rafraichirFiche()
