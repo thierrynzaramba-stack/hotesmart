@@ -175,14 +175,39 @@ export function rendre (etat, maintenant = Date.now()) {
     // ⚠ ET LE BOUTON DISPARAIT QUAND LE DELAI EST PASSE (spec §6 : « au-dela,
     // bouton desactive »). Le proposer enverrait l'hote remplir un formulaire
     // dont la publication sera refusee.
-    const bouton = A_FAIRE.has(e.status) && !depasse
-      ? `<button type="button" data-evaluer="${echapper(e.booking_uid)}">Ouvrir</button>`
-      : ''
-    return `<li class="hs-eval-ligne${A_FAIRE.has(e.status) ? ' hs-eval-a-faire' : ''}">`
-      + `<span class="hs-eval-bien">${echapper(e.bien || 'Bien inconnu')}</span>`
-      + `<span class="hs-eval-etat">${echapper(ETAT_LISIBLE[e.status] || e.status)}</span>`
-      + (e.publie_le ? `<span class="hs-eval-date">${echapper(dateFr(e.publie_le))}</span>` : '')
-      + delai + bouton
+    // ⚠ CHAQUE CARTE DIT LE SEJOUR (demande de Thierry du 2 octobre 2026 au
+    // soir) : le voyageur, ses dates, le bien, qui a fait le menage, son avis,
+    // et le notre — ou l'invitation a l'ecrire, tant que le delai le permet.
+    const v = e.voyageur || {}
+    const qui = [v.prenom, v.nom].filter(Boolean).join(' ') || 'Voyageur'
+    const sejour = e.arrivee && e.depart ? `du ${dateFr(e.arrivee)} au ${dateFr(e.depart)}` : (e.depart ? `départ le ${dateFr(e.depart)}` : '')
+    const av = e.avis_voyageur
+    const avisVoyageur = av && av.visible
+      ? `<div class="hs-eval-avis"><span class="hs-eval-libelle">Son avis</span>`
+        + (av.note != null ? `<span class="hs-eval-note">${echapper(av.note)}/10</span>` : '')
+        + (av.texte ? `<p>« ${echapper(av.texte)} »</p>` : '<p class="hs-eval-gris">Sans commentaire écrit.</p>')
+        + `</div>`
+      : `<div class="hs-eval-avis"><span class="hs-eval-libelle">Son avis</span>`
+        + `<p class="hs-eval-gris">${!av ? 'Pas encore reçu.'
+          : ['publiee', 'evaluee_ailleurs'].includes(e.status) ? 'Pas encore visible : le voyageur n’a peut-être pas encore écrit le sien.'
+            : 'Pas encore visible : Airbnb le révèle quand vous aurez tous deux écrit le vôtre.'}</p></div>`
+    const peutEvaluer = A_FAIRE.has(e.status) && !depasse
+    const notre = e.notre_avis
+      ? `<div class="hs-eval-avis hs-eval-notre"><span class="hs-eval-libelle">Notre avis</span>`
+        + (e.publie_le ? `<span class="hs-eval-date">publié le ${echapper(dateFr(e.publie_le))}</span>` : '')
+        + `<p>« ${echapper(e.notre_avis)} »</p></div>`
+      : `<div class="hs-eval-avis hs-eval-notre"><span class="hs-eval-libelle">Notre avis</span>`
+        + (peutEvaluer
+          ? `<p class="hs-eval-invite">Laissez votre avis sur ${echapper(v.prenom || 'ce voyageur')}${delai ? ` · ${delai}` : ''}</p>`
+            + `<button type="button" class="hs-eval-bouton" data-evaluer="${echapper(e.booking_uid)}">Évaluer ${echapper(v.prenom || 'ce voyageur')}</button>`
+          : `<p class="hs-eval-gris">${echapper(ETAT_LISIBLE[e.status] || e.status)}${depasse && !termine ? ' — délai dépassé' : ''}.</p>`)
+        + `</div>`
+    return `<li class="hs-eval-carte${A_FAIRE.has(e.status) ? ' hs-eval-a-faire' : ''}">`
+      + `<div class="hs-eval-tete"><span class="hs-eval-qui">${echapper(qui)}</span>`
+      + `<span class="hs-eval-etat">${echapper(ETAT_LISIBLE[e.status] || e.status)}</span></div>`
+      + `<div class="hs-eval-infos">${echapper(e.bien || 'Bien inconnu')}${sejour ? ` · ${echapper(sejour)}` : ''}`
+      + (e.menage_par ? ` · ménage : ${echapper(e.menage_par)}` : '') + `</div>`
+      + avisVoyageur + notre
       + `</li>`
   }).join('')
 

@@ -459,7 +459,7 @@ async function evaluationsLister (req, res, garde) {
   // n'a droit a rien.
   let requete = supabase.from('guest_evaluations')
     .select('id, booking_uid, property_id, property_id_ref, ota, status, language, '
-      + 'deadline_at, published_at, public_text, created_at, updated_at')
+      + 'deadline_at, published_at, public_text, ota_review_id, created_at, updated_at')
     .eq('user_id', userId)
   if (filtre !== null) requete = requete.or(filtre)
   requete = requete.order('created_at', { ascending: false }).limit(MAX_LIGNES)
@@ -474,21 +474,93 @@ async function evaluationsLister (req, res, garde) {
   if (eBiens) return res.status(503).json({ error: 'Biens illisibles', detail: eBiens.message })
   const nomDe = new Map((biens || []).map(b => [b.id, b.name]))
 
+  const contexte = await contexteDesSejours(userId, data || [])
+
   return res.status(200).json({
-    // ⚠ LE TEXTE PUBLIC N'EST PAS SERVI DANS UNE LISTE. Il n'y sert a rien, et
-    // une liste est ce qui fuite le plus facilement dans une capture d'ecran.
-    // Il se lit sur l'evaluation elle-meme, par `action=evaluation`.
-    evaluations: (data || []).map(e => ({
-      id: e.id, booking_uid: e.booking_uid, ota: e.ota, status: e.status,
-      property_id: e.property_id, bien: nomDe.get(e.property_id) || null,
-      langue: e.language, echeance: e.deadline_at, publie_le: e.published_at,
-      a_un_texte: Boolean(String(e.public_text || '').trim()),
-      creee_le: e.created_at,
-    })),
+    // ⚠ CHAQUE LIGNE DIT LE SEJOUR (demande de Thierry du 2 octobre 2026 au
+    // soir) : le voyageur, les dates, le bien, qui a fait le menage, son avis
+    // s'il est visible, et le notre s'il est publie. Notre texte n'est servi
+    // qu'une fois PUBLIE — il est alors public chez Airbnb ; un brouillon reste
+    // dans la fenetre d'evaluation, par `action=evaluation`.
+    evaluations: (data || []).map(e => {
+      const c = contexte.get(String(e.booking_uid)) || {}
+      return {
+        id: e.id, booking_uid: e.booking_uid, ota: e.ota, status: e.status,
+        property_id: e.property_id, bien: nomDe.get(e.property_id) || null,
+        langue: e.language, echeance: e.deadline_at, publie_le: e.published_at,
+        a_un_texte: Boolean(String(e.public_text || '').trim()),
+        creee_le: e.created_at,
+        voyageur: c.voyageur || null,
+        arrivee: c.arrivee || null, depart: c.depart || null,
+        menage_par: c.menagePar || null,
+        avis_voyageur: (e.ota_review_id && contexte.avis.get(e.ota_review_id)) || null,
+        notre_avis: e.status === 'publiee' ? (e.public_text || null) : null,
+      }
+    }),
     biens: (biens || []).filter(b => refs === null || refs.includes(String(b.provider_property_id)))
       .map(b => ({ id: b.id, nom: b.name })),
     etats: ETATS_LISTE,
   })
+}
+
+// Le contexte des sejours d'une liste, en QUATRE lectures groupees, toutes
+// cloisonnees au compte. ⚠ UNE PANNE ICI N'EMPECHE PAS LA LISTE : les champs
+// manquent, l'hote voit ses evaluations — la raison va au journal.
+async function contexteDesSejours (userId, evaluations) {
+  const parSejour = new Map()
+  parSejour.avis = new Map()
+  const uids = [...new Set(evaluations.map(e => String(e.booking_uid)))]
+  if (!uids.length) return parSejour
+  const objets = [...new Set(evaluations.map(e => e.ota_review_id).filter(Boolean))]
+  const [snaps, menages, avis] = await Promise.all([
+    supabase.from('bookings_snapshot').select('booking_id, snapshot').eq('user_id', userId).in('booking_id', uids),
+    supabase.from('menages').select('booking_id, provider_id, status').eq('user_id', userId).in('booking_id', uids).neq('status', 'cancelled'),
+    objets.length
+      ? supabase.from('ota_reviews').select('id, content_public, overall_score, is_hidden, guest_name').eq('user_id', userId).in('id', objets)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+  for (const [nom, r] of [['reservations', snaps], ['menages', menages], ['avis', avis]]) {
+    if (r.error) console.error(`[avis] liste : ${nom} illisibles`, r.error.message)
+  }
+  for (const s of snaps.data || []) {
+    const sp = s.snapshot || {}
+    const prenom = String(sp.firstName || '').trim()
+    const nom = String(sp.lastName || '').trim()
+    parSejour.set(String(s.booking_id), {
+      voyageur: (prenom || nom) ? { prenom: prenom || null, nom: nom || null } : null,
+      arrivee: sp.arrival ? String(sp.arrival).slice(0, 10) : null,
+      depart: sp.departure ? String(sp.departure).slice(0, 10) : null,
+    })
+  }
+  // Qui a fait le menage : la prestataire du menage de ce depart.
+  const prov = [...new Set((menages.data || []).map(m => m.provider_id).filter(Boolean))]
+  const { data: personnes, error: eP } = prov.length
+    ? await supabase.from('profiles').select('id, first_name, last_name').eq('account_user_id', userId).in('id', prov)
+    : { data: [], error: null }
+  if (eP) console.error('[avis] liste : prestataires illisibles', eP.message)
+  const nomDePersonne = new Map((personnes || []).map(p => [p.id, [p.first_name, p.last_name].filter(Boolean).join(' ')]))
+  for (const m of menages.data || []) {
+    const c = parSejour.get(String(m.booking_id)) || {}
+    if (m.provider_id && nomDePersonne.get(m.provider_id)) c.menagePar = nomDePersonne.get(m.provider_id)
+    parSejour.set(String(m.booking_id), c)
+  }
+  // L'avis du voyageur, SEULEMENT s'il est visible : un avis cache chez Airbnb
+  // ne se montre pas ici non plus.
+  for (const a of avis.data || []) {
+    parSejour.avis.set(a.id, a.is_hidden
+      ? { visible: false }
+      : { visible: true, texte: a.content_public || null, note: a.overall_score ?? null })
+    // Le nom porte par l'avis complete un sejour sans reservation dans le coeur.
+  }
+  for (const e of evaluations) {
+    const c = parSejour.get(String(e.booking_uid)) || {}
+    if (!c.voyageur && e.ota_review_id) {
+      const g = (avis.data || []).find(a => a.id === e.ota_review_id)
+      if (g && g.guest_name) c.voyageur = { prenom: String(g.guest_name).trim(), nom: null }
+    }
+    parSejour.set(String(e.booking_uid), c)
+  }
+  return parSejour
 }
 
 const ETATS_LISTE = ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
