@@ -355,3 +355,14 @@ test('une prestataire qui PEUT publier garde la fenetre pour relire', async () =
   assert.strictEqual(ferme.length, 0)
   assert.match(conteneur.textContent, /texte a été rédigé/)
 })
+
+test('une part encore INCOMPLETE ne ferme pas la fenetre', async () => {
+  const { conteneur, ferme } = await monter({
+    role: 'prestataire', criteres: CRITERES,
+    evaluation: { answers_cleaner: { etat: 'impeccable' } },
+    autres: { 'action=eval-reponses': { ok: true, status: 'a_remplir', peut_publier: false, negatif: false } },
+  }, { delaiFermeture: 0 })
+  conteneur.querySelector('[data-avis="enregistrer"]').click()
+  await new Promise(r => setTimeout(r, 10))
+  assert.strictEqual(ferme.length, 0)
+})

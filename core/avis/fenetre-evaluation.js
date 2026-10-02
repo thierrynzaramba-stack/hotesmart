@@ -156,7 +156,7 @@ export async function ouvrir (ctx = {}) {
       // (« avis negatif : l hote tranche… ») — un jugement qui ne la regarde
       // pas. Un merci, puis la fenetre se ferme. Elle ne reste ouverte que si
       // elle a elle-meme un texte a relire et a publier.
-      if (etat.role === 'prestataire' && !etat.peutPublier) {
+      if (etat.role === 'prestataire' && r.peut_publier === false && r.status !== 'a_remplir') {
         etat.message = 'Merci, vos réponses sont enregistrées. L’hôte prend la suite.'
         setTimeout(() => fermer(), delaiFermeture)
         return
