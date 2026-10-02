@@ -388,3 +388,14 @@ test('M2 : une echeance passee avant la publication se DIT a l’hote', async ()
   await lancer(sb, outils())
   assert.ok(etat.taches.some(t => t.guest_message === marqueurEchecAuto('BK-1')))
 })
+
+test('re-revue : le budget se relit juste avant la prise — une redaction longue ne lance pas de publication', async () => {
+  const { etat, sb } = base({ evaluations: [ECHUE({ public_text: null })] })
+  const o = outils()
+  let reste = 30000
+  const rediger = o.rediger
+  o.rediger = async (e, opt) => { reste = 5000; return rediger(e, opt) }
+  await lancer(sb, o, { resteMs: () => reste })
+  assert.strictEqual(o.appels.publier.length, 0)
+  assert.ok(etat.evaluations[0].auto_publier_le, 'rien n est pris')
+})

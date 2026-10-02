@@ -1524,9 +1524,13 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAuto
   // ⚠ POUR L'AUTO-VALIDATION, LE TEXTE NE S'ECRIT QUE SI L'HORLOGE N'A PAS BOUGE
   // (S3, revue de 59243cb) : un hote qui a demande le sien entre-temps l'a
   // arretee, et son texte n'est pas ecrase par celui des « meilleurs niveaux ».
+  // ⚠ JAMAIS SUR UNE EVALUATION TERMINEE (re-revue de 74ec434) : un texte
+  // demande par l'hote pendant une publication arrivait apres elle et
+  // remplacait en base le texte reellement parti chez la plateforme.
   let ecriture = supabase.from('guest_evaluations')
     .update({ public_text: r.public_text, private_note: r.private_note })
     .eq('id', e.id).eq('user_id', e.user_id)
+    .in('status', ['a_remplir', 'soumise_prestataire', 'a_valider', 'echec_publication'])
   if (siAutoPublierLe) ecriture = ecriture.eq('auto_publier_le', siAutoPublierLe).select('id')
   const { data: ecrit, error: eTexte } = await ecriture
   if (eTexte) {
