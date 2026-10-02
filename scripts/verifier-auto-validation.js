@@ -54,7 +54,7 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++ }
   // 2. La file de l'auto-validation, avec le filtre du cron.
   const maintenant = new Date().toISOString()
   const { data: file, error: eF } = await sb.from('guest_evaluations')
-    .select('id, status, auto_publier_le').lte('auto_publier_le', maintenant)
+    .select('id, status, auto_publier_le, auto_rappel_le').lte('auto_publier_le', maintenant)
     .order('auto_publier_le', { ascending: true }).limit(20)
   if (eF) ko(`guest_evaluations.auto_publier_le illisible : ${eF.message}`)
   else ok(`file de l'auto-validation lisible (${file.length} echue(s) maintenant)`)

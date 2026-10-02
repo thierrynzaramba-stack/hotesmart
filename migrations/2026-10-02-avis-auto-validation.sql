@@ -40,6 +40,12 @@ alter table public.guest_evaluations
   add column if not exists auto_publier_le
   timestamptz;
 
+-- Le rappel six heures avant : pose une fois envoye.
+-- La requete des rappels ne relit que les nulles.
+alter table public.guest_evaluations
+  add column if not exists auto_rappel_le
+  timestamptz;
+
 -- La file de l'auto-validation : tous les comptes,
 -- depuis le cron. Partiel : seules les evaluations
 -- programmees y sont. Meme exception a la regle du

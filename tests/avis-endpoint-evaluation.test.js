@@ -95,6 +95,7 @@ function preparer ({
         eq (c, v) { q._f[c] = v; return chain },
         or (e) { q._or = e; return chain },
         lt (c, v) { q._lt = { c, v }; return chain },
+        gt (c, v) { q._gt = { c, v }; return chain },
         order () { return chain }, limit () { return chain },
         in () { return chain }, is () { return chain }, not () { return chain },
         neq () { return chain },
@@ -151,6 +152,9 @@ function preparer ({
             (q._f.user_id == null || e.user_id === q._f.user_id) &&
             (q._f.id == null || e.id === q._f.id))
           return Promise.resolve({ data: c, error: null })
+        }
+        if (nom === 'write_locks') {
+          return Promise.resolve({ data: verrous.filter(k => q._f.key == null || k === q._f.key).map(key => ({ key })), error: null })
         }
         if (nom === 'ota_reviews') {
           const c = otaReviews.filter(o =>
@@ -1001,4 +1005,36 @@ test('LE TEST QUI COMPTE : l’auto-validation publie par le chemin de l’HOTE 
   assert.ok(etat.insertions.some(i => i.table === 'write_locks'), 'le verrou est pose')
   const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.status)
   assert.strictEqual(maj.row.validated_by_profile, null)
+})
+
+// ─── Revue de 59243cb (S1) : la reaction de l'hote APRES la prise ───────────
+test('LE TEST QUI COMPTE : l’hote a change ses reponses apres la prise — la publication automatique renonce', async () => {
+  const ev = evalA({ answers_host: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait', communication: 'excellente', regles: 'oui', recommande: 'non' } })
+  const etat = preparer({ evaluations: [ev] })
+  const { outilsAutoValidation } = require('../api/avis')
+  // La prise avait ecrit « je recommande » ; la base dit maintenant « non ».
+  const r = await outilsAutoValidation.publier({ ...ev, answers_host: { ...ev.answers_host, recommande: 'oui' } })
+  assert.strictEqual(r.code, 409)
+  assert.strictEqual(r.body.motif, 'auto_annulee')
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
+test('LE TEST QUI COMPTE : une evaluation abandonnee apres la prise ne part pas', async () => {
+  const ev = evalA({ status: 'abandonnee' })
+  const etat = preparer({ evaluations: [ev] })
+  const r = await require('../api/avis').outilsAutoValidation.publier(ev)
+  assert.notStrictEqual(r.code, 200)
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
+test('LE TEST QUI COMPTE : pendant une publication (verrou pose), l’hote ne repond ni n’abandonne', async () => {
+  for (const [action, corps] of [['eval-reponses', { reponses: { communication: 'difficile' } }], ['eval-abandon', {}], ['eval-texte', {}]]) {
+    const ev = evalA({ status: 'a_valider' })
+    const etat = preparer({ evaluations: [ev], verrous: [`avis-publier:${ev.id}`] })
+    const res = reponse()
+    await require('../api/avis')(req({ action }, { id: ev.id, action, ...corps }), res)
+    assert.strictEqual(res.code, 409, action)
+    assert.strictEqual(res.body.motif, 'deja_en_cours', action)
+    assert.ok(!etat.ecritures.some(e => e.table === 'guest_evaluations'), action + ' : rien n est ecrit')
+  }
 })

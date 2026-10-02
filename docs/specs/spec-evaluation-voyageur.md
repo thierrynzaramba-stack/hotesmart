@@ -438,9 +438,23 @@ indexée.
 - **L'horloge ne part qu'une fois** : à la transition « part de la prestataire
   incomplète → complète ». Re-enregistrer ne la relance pas ; une évaluation
   reprise par l'hôte ne se reprogramme pas seule.
-- **Réglage par bien** : une ligne `avis_config` du bien prévaut, même nulle
-  (elle désactive). Le sens prudent : publier moins, jamais plus. L'écran ne
-  règle aujourd'hui que le compte.
+- **Réglage par bien** : une valeur de bien prime ; une ligne de bien **nulle
+  hérite** du compte (revue de 59243cb : une surcharge de mots-clés coupait
+  l'auto-validation en silence pendant que la page disait « activée »). L'écran
+  ne règle aujourd'hui que le compte.
+- **Le « meilleur niveau »** est la **meilleure note** non négative, pas le
+  premier rang (rien n'impose de ranger les niveaux du meilleur au pire).
+- **Aucune réaction de l'hôte ne passe pendant une publication automatique** :
+  ses écritures arrêtent l'horloge de façon conditionnelle (prise faite → 409
+  « publication automatique en cours ») et respectent le verrou de publication ;
+  en face, la publication relit la ligne sous son verrou et renonce si les
+  réponses, le statut ou le négatif ont bougé. La rédaction n'écrit son texte que
+  si l'horloge n'a pas bougé. Résidus : dette 47.
+- **Pas de publication en fin de cycle** : sous 20 s de reste (maxDuration 60 s),
+  plus rien ne commence ; une publication interrompue après la prise prévient
+  l'hôte.
+- **Le rappel se marque** (`auto_rappel_le`) : la requête ne relit que les non
+  rappelées.
 - **La prise** : les réponses complétées s'écrivent et l'horloge s'arrête en une
   écriture conditionnée à la valeur lue de `auto_publier_le` — une réaction de
   l'hôte entre-temps gagne, deux passages concurrents ne publient pas deux fois.

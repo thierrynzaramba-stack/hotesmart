@@ -109,13 +109,13 @@ test('un point negatif coche par la prestataire : l’horloge ne part pas, et s�
 // ─── Le moteur ──────────────────────────────────────────────────────────────
 // Un double de base : guest_evaluations (lecture par filtres, ecriture
 // conditionnee), avis_config, agent_tasks, properties, core_events.
-function base ({ evaluations = [], heures = 24, configEnPanne = false } = {}) {
+function base ({ evaluations = [], heures = 24, configEnPanne = false, configs = null } = {}) {
   const etat = { evaluations: evaluations.map(e => ({ ...e })), taches: [], evenements: [], requetes: [] }
   const from = (table) => {
     const q = { table, f: [], op: 'select' }
     etat.requetes.push(q)
     const executer = () => {
-      if (table === 'avis_config') return configEnPanne ? { data: null, error: { message: 'panne' } } : { data: [{ property_id: null, auto_validation_heures: heures }], error: null }
+      if (table === 'avis_config') return configEnPanne ? { data: null, error: { message: 'panne' } } : { data: configs || [{ property_id: null, auto_validation_heures: heures }], error: null }
       if (table === 'properties') return { data: { name: 'Studio' }, error: null }
       if (table === 'core_events') { etat.evenements.push(q.ligne); return { data: null, error: null } }
       if (table === 'agent_tasks') {
@@ -127,7 +127,8 @@ function base ({ evaluations = [], heures = 24, configEnPanne = false } = {}) {
         op === 'eq' ? e[c] === v
           : op === 'lte' ? e[c] != null && e[c] <= v
             : op === 'gt' ? e[c] != null && e[c] > v
-              : op === 'in' ? v.includes(e[c]) : true)
+              : op === 'is' ? (e[c] == null) === (v === null)
+                : op === 'in' ? v.includes(e[c]) : true)
       if (q.op === 'update') {
         const cibles = etat.evaluations.filter(garde)
         for (const e of cibles) Object.assign(e, q.maj)
@@ -143,6 +144,7 @@ function base ({ evaluations = [], heures = 24, configEnPanne = false } = {}) {
       lte (k, v) { q.f.push(['lte', k, v]); return c },
       gt (k, v) { q.f.push(['gt', k, v]); return c },
       in (k, v) { q.f.push(['in', k, v]); return c },
+      is (k, v) { q.f.push(['is', k, v]); return c },
       or () { return c }, not () { return c },
       order (k) { q.ordre = k; return c },
       limit (n) { q.limite = n; return c },
@@ -307,9 +309,82 @@ test('le cron l’execute apres les relances, avec les outils de api/avis.js', (
   const fs = require('node:fs'); const path = require('node:path')
   const cron = fs.readFileSync(path.join(__dirname, '..', 'api', 'cron.js'), 'utf8')
   const r = cron.indexOf("chrono.mesure('relances_avis'")
-  const a = cron.indexOf("chrono.mesure('auto_validation_avis', () => executerAutoValidations(supabase, { outils: outilsAutoValidation }))")
+  const a = cron.indexOf("chrono.mesure('auto_validation_avis', () => executerAutoValidations(supabase, {")
+  assert.match(cron, /outils: outilsAutoValidation, resteMs: \(\) => 55000 - chrono.total\(\)/)
   assert.ok(r > 0 && a > r)
   const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'avis.js'), 'utf8')
   assert.match(api, /module\.exports\.outilsAutoValidation = outilsAutoValidation/)
 })
 
+
+// ─── Revue de 59243cb ───────────────────────────────────────────────────────
+test('M1 : le meilleur niveau est la meilleure NOTE, pas le premier rang', () => {
+  const { meilleurNiveau } = require('../lib/avis/auto-validation')
+  const c = { cle: 'communication', categorie: 'communication', rempli_par: 'hote', niveaux: [
+    { cle: 'difficile', rang: 1, note: 2, negatif: false },
+    { cle: 'correcte', rang: 2, note: 4, negatif: false },
+    { cle: 'excellente', rang: 3, note: 5, negatif: false },
+    { cle: 'odieuse', rang: 4, note: 1, negatif: true },
+  ] }
+  assert.strictEqual(meilleurNiveau(c), 'excellente')
+})
+
+test('M3 : une ligne de bien NULLE herite du compte ; une valeur de bien prime', async () => {
+  const { lireHeures } = require('../lib/avis/auto-validation')
+  const sb = (configs) => base({ configs }).sb
+  assert.deepStrictEqual(await lireHeures(sb([{ property_id: 'b1', auto_validation_heures: null }, { property_id: null, auto_validation_heures: 24 }]), { userId: 'u1', propertyId: 'b1' }), { heures: 24 })
+  assert.deepStrictEqual(await lireHeures(sb([{ property_id: 'b1', auto_validation_heures: 6 }, { property_id: null, auto_validation_heures: 24 }]), { userId: 'u1', propertyId: 'b1' }), { heures: 6 })
+})
+
+test('S2 : sous 20 s de reste au cycle, aucune publication ne commence', async () => {
+  const { etat, sb } = base({ evaluations: [ECHUE()] })
+  const o = outils()
+  await lancer(sb, o, { resteMs: () => 10000 })
+  assert.strictEqual(o.appels.publier.length, 0)
+  assert.ok(etat.evaluations[0].auto_publier_le, 'rien n est pris : le passage suivant reprend')
+})
+
+test('S2 : une publication interrompue APRES la prise previent l’hote', async () => {
+  const { etat, sb } = base({ evaluations: [ECHUE()] })
+  const o = outils()
+  o.publier = async () => { throw new Error('coupure') }
+  await lancer(sb, o)
+  assert.ok(etat.taches.some(t => t.guest_message === marqueurEchecAuto('BK-1') && /interrompue/.test(t.summary)))
+})
+
+test('S3 : la redaction est passee avec l’horloge lue ; « auto_reprise » ne publie rien et ne previent personne', async () => {
+  const { etat, sb } = base({ evaluations: [ECHUE({ public_text: null })] })
+  const o = outils({ redaction: { ok: false, motif: 'auto_reprise' } })
+  let option
+  const rediger = o.rediger
+  o.rediger = async (e, opt) => { option = opt; return rediger(e, opt) }
+  await lancer(sb, o)
+  assert.deepStrictEqual(option, { siAutoPublierLe: ECHUE().auto_publier_le })
+  assert.strictEqual(o.appels.publier.length, 0)
+  assert.strictEqual(etat.taches.length, 0)
+})
+
+test('l’hote qui publie ou reprend pendant ce temps : ce n’est pas un echec, rien n’est signale', async () => {
+  for (const motif of ['deja_en_cours', 'auto_annulee']) {
+    const { etat, sb } = base({ evaluations: [ECHUE()] })
+    const o = outils()
+    o.publier = async () => ({ code: 409, body: { motif, error: 'x' } })
+    const bilan = await lancer(sb, o)
+    assert.strictEqual(bilan.echecs, 0, motif)
+    assert.strictEqual(etat.taches.length, 0, motif)
+  }
+})
+
+test('M2 : le rappel est MARQUE, et la requete des rappels ne relit que les non rappelees', async () => {
+  const { etat, sb } = base({ evaluations: [ECHUE({ auto_publier_le: iso(MAINTENANT + 3 * H) })] })
+  await lancer(sb, outils())
+  assert.strictEqual(etat.evaluations[0].auto_rappel_le, iso(MAINTENANT))
+  const q = etat.requetes.find(x => x.table === 'guest_evaluations' && x.f.some(([op, c]) => op === 'gt'))
+  assert.ok(q.f.some(([op, c, v]) => op === 'is' && c === 'auto_rappel_le' && v === null))
+})
+
+test('M2 : une echeance passee avant la publication se DIT a l’hote', async () => {
+  const { etat, sb } = base({ evaluations: [ECHUE({ deadline_at: iso(MAINTENANT - H) })] })
+  await lancer(sb, outils())
+  assert.ok(etat.taches.some(t => t.guest_message === marqueurEchecAuto('BK-1')))
+})

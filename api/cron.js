@@ -92,7 +92,7 @@
 //   avant, puis, a l'echeance choisie par l'hote, publication par le chemin de
 //   l'hote (api/avis.js). Jamais un avis negatif. ⚠ Pas de balayage : l'index
 //   partiel `guest_evaluations_auto_publier_idx`, 20 lectures et 5 publications
-//   par passage au plus.
+//   par passage au plus, aucune quand il reste moins de 20 s au cycle.
 // ═══════════════════════════════════════════════════════════════════════════
 const { supabase } = require('../lib/cron-shared')
 const { refreshBeds24Tokens, fetchProperties } = require('../lib/cron-beds24')
@@ -533,7 +533,12 @@ module.exports = async function handler(req, res) {
     // Placée APRÈS les relances : une rédaction peut coûter un appel au modèle.
     try {
       const { outilsAutoValidation } = require('./avis')
-      const bilanAuto = await chrono.mesure('auto_validation_avis', () => executerAutoValidations(supabase, { outils: outilsAutoValidation }))
+      // ⚠ Le temps restant du cycle (maxDuration 60 s) : sous 20 s, plus aucune
+      // publication ne commence — tuée entre la prise et le statut, elle
+      // laisserait un avis parti sans trace (revue de 59243cb, S2).
+      const bilanAuto = await chrono.mesure('auto_validation_avis', () => executerAutoValidations(supabase, {
+        outils: outilsAutoValidation, resteMs: () => 55000 - chrono.total(),
+      }))
       results.totalAvisAutoPubliees = bilanAuto?.publiees || 0
       if (bilanAuto?.erreurs) results.errors.push({ context: 'auto_validation_avis', error: bilanAuto.erreurs + ' erreur(s)' })
     }

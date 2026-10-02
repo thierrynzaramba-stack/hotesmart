@@ -41,6 +41,8 @@ const MOTIF_LISIBLE = {
   deja_publiee: 'Cette évaluation est déjà publiée.',
   expiree: 'Le délai de la plateforme est passé : cette évaluation ne peut plus être publiée.',
   deja_en_cours: 'Une publication est déjà en cours pour cette évaluation.',
+  auto_en_cours: 'Une publication automatique est en cours pour cette évaluation : rechargez la page.',
+  auto_annulee: 'Vous avez repris l’évaluation : la publication automatique a renoncé.',
   reponses_hors_grille: 'Des réponses manquent, ou ne correspondent plus à la grille.',
   grille_figee_illisible: 'La grille enregistrée avec cette évaluation est illisible : contactez le support.',
   reference_ota_absente: 'La plateforme n’a pas encore ouvert d’avis pour ce séjour.',
