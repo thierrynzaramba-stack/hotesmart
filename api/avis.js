@@ -1623,7 +1623,7 @@ async function evaluationPublier (req, res, garde) {
 
   // Le texte modifie par l'hote arrive ici : c'est LUI qui part, pas celui de
   // l'IA. La spec veut que la version publiee soit stockee telle quelle.
-  const evaluation = {
+  let evaluation = {
     ...e,
     ota_review_ref: objetOta.external_review_id,
     // ⚠ SEUL L'HOTE REMPLACE LE TEXTE. Constat de re-revue : n'importe quel role
@@ -1689,6 +1689,21 @@ async function evaluationPublier (req, res, garde) {
   // `publier` LEVE un RefusPublication quand rien n'est parti, et RETOURNE un
   // resultat quand l'appel a eu lieu — y compris pour un echec. Confondre les
   // deux ecrirait `status: undefined` sur la ligne.
+  // ⚠ LES REPONSES DE L'HOTE SE RELISENT SOUS LE VERROU (option B, revue de
+  // 0c0483b). L'evaluation a ete chargee avant : un hote qui enregistre ses
+  // reponses pendant ce temps verrait l'avis partir sur la seule part de la
+  // prestataire. La relecture referme cette fenetre ; celle qui reste (entre
+  // la relecture et le POST) est de l'ordre de l'appel provider.
+  if (parProfil) {
+    const { data: frais, error: eFrais } = await supabase.from('guest_evaluations')
+      .select('answers_host').eq('id', e.id).eq('user_id', e.user_id).maybeSingle()
+    if (eFrais || !frais) {
+      await relacher()
+      return res.status(503).json({ error: 'Évaluation illisible', detail: eFrais ? eFrais.message : 'introuvable' })
+    }
+    evaluation = { ...evaluation, answers_host: frais.answers_host }
+  }
+
   let r
   try {
     r = await publier({ evaluation, parProfil, provider: canal })

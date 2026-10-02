@@ -914,3 +914,32 @@ test('deciderStatut : l’hote a repondu → a_valider, la prestataire ne publie
   const seule = deciderStatut({ role: 'prestataire', evalPower: 'valider', negatif: false, completRole: true, completTotal: true, hoteARepondu: false })
   assert.strictEqual(seule.peutPublier, true)
 })
+
+// ─── Revue de 0c0483b ───────────────────────────────────────────────────────
+test('LE TEST QUI COMPTE : l’hote repond PENDANT la publication de la prestataire — rien ne part', async () => {
+  // L'evaluation est chargee sans reponse de l'hote ; l'hote enregistre la
+  // sienne en base pendant que la publication pose son verrou.
+  const ev = evalA({ status: 'a_valider', answers_host: null, answers_cleaner: { 'c-unique': 'nickel' }, grille_figee: await grilleUniqueFigee() })
+  const verrous = []
+  verrous.push = (cle) => { ev.answers_host = { 'c-unique': 'nickel' }; return Array.prototype.push.call(verrous, cle) }
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [ev], criteres: [CRITERE_UNIQUE()], verrous })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'reponses_de_l_hote')
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
+test('une prestataire « soumettre » dont l’hote a repondu : son motif reste « elle soumet »', async () => {
+  const { deciderStatut } = require('../lib/avis/evaluations')
+  const d = deciderStatut({ role: 'prestataire', evalPower: 'soumettre', negatif: false, completRole: true, completTotal: true, hoteARepondu: true })
+  assert.strictEqual(d.statut, 'soumise_prestataire')
+  const ev = evalA({ answers_cleaner: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait' } })
+  preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [ev] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(reqMembre({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'pouvoir_insuffisant')
+})
