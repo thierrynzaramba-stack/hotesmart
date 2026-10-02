@@ -69,7 +69,7 @@ async function monter (extra = {}, deps = {}) {
   const ferme = []
   const r = await ouvrir({
     conteneur, params: { booking_uid: 'BK-1' }, fermer: () => ferme.push(true),
-    deps: { appel: a.fn, confirmer: deps.confirmer || (() => true) },
+    deps: { appel: a.fn, confirmer: deps.confirmer || (() => true), ...(deps.delaiFermeture !== undefined ? { delaiFermeture: deps.delaiFermeture } : {}) },
   })
   return { document, conteneur, appels: a.appels, resultat: r, ferme }
 }
@@ -328,4 +328,30 @@ test('une grille indisponible n’empeche pas de savoir OU EN EST l’evaluation
   const r = await ouvrir({ conteneur, params: { booking_uid: 'BK-1' }, fermer: () => {}, deps: { appel: a.fn } })
   assert.strictEqual(r.charge, true)
   assert.strictEqual(r.statut, 'a_valider')
+})
+
+// ─── Recette du 2 octobre 2026 : la prestataire a fini, la fenetre se ferme ─
+test('LE TEST QUI COMPTE : la prestataire qui n’a rien a publier lit un merci, et la fenetre se ferme', async () => {
+  const { conteneur, ferme } = await monter({
+    role: 'prestataire', criteres: [CRITERES[0]],
+    evaluation: { answers_cleaner: { etat: 'sale' } },
+    autres: { 'action=eval-reponses': { ok: true, status: 'a_valider', peut_publier: false, negatif: true, motif: 'avis negatif : l hote tranche, quel que soit le pouvoir' } },
+  }, { delaiFermeture: 0 })
+  conteneur.querySelector('[data-avis="enregistrer"]').click()
+  await new Promise(r => setTimeout(r, 10))
+  assert.match(conteneur.textContent, /Merci, vos réponses sont enregistrées/)
+  assert.ok(!/l hote tranche/.test(conteneur.textContent), 'le motif brut ne lui est pas montre')
+  assert.strictEqual(ferme.length, 1, 'la fenetre se ferme')
+})
+
+test('une prestataire qui PEUT publier garde la fenetre pour relire', async () => {
+  const { conteneur, ferme } = await monter({
+    role: 'prestataire', criteres: [CRITERES[0]],
+    evaluation: { answers_cleaner: { etat: 'impeccable' } },
+    autres: { 'action=eval-reponses': { ok: true, status: 'a_valider', peut_publier: true, negatif: false, redaction: { ok: true, public_text: 'Merci.' } } },
+  }, { delaiFermeture: 0 })
+  conteneur.querySelector('[data-avis="enregistrer"]').click()
+  await new Promise(r => setTimeout(r, 10))
+  assert.strictEqual(ferme.length, 0)
+  assert.match(conteneur.textContent, /texte a été rédigé/)
 })

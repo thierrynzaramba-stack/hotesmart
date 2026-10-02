@@ -82,6 +82,8 @@ const dateFr = (d) => {
 export async function ouvrir (ctx = {}) {
   const { conteneur, params = {}, fermer = () => {} } = ctx
   const appel = (ctx.deps && ctx.deps.appel) || appelParDefaut
+  // Le delai avant fermeture apres un enregistrement de la prestataire (tests : 0).
+  const delaiFermeture = (ctx.deps && ctx.deps.delaiFermeture !== undefined) ? ctx.deps.delaiFermeture : 1500
   const confirmer = (ctx.deps && ctx.deps.confirmer) || ((m) => (typeof window !== 'undefined' ? window.confirm(m) : false))
   if (!conteneur) throw new Error('[avis] la fenetre d evaluation exige un conteneur')
 
@@ -149,6 +151,16 @@ export async function ouvrir (ctx = {}) {
       etat.evaluation.status = r.status
       etat.peutPublier = r.peut_publier
       etat.negatif = r.negatif
+      // ⚠ LA PRESTATAIRE QUI N'A RIEN A PUBLIER A FINI (recette du 2 octobre
+      // 2026) : la fenetre restait ouverte, avec le motif brut du serveur
+      // (« avis negatif : l hote tranche… ») — un jugement qui ne la regarde
+      // pas. Un merci, puis la fenetre se ferme. Elle ne reste ouverte que si
+      // elle a elle-meme un texte a relire et a publier.
+      if (etat.role === 'prestataire' && !etat.peutPublier) {
+        etat.message = 'Merci, vos réponses sont enregistrées. L’hôte prend la suite.'
+        setTimeout(() => fermer(), delaiFermeture)
+        return
+      }
       if (r.redaction && r.redaction.ok) {
         etat.evaluation.public_text = r.redaction.public_text
         etat.message = 'Réponses enregistrées, et le texte a été rédigé.'
