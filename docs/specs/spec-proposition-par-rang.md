@@ -1,6 +1,6 @@
 # Spec — Proposer un ménage à tout un rang à la fois
 
-**Statut : PROPOSÉE, en attente du go de Thierry. Aucun code avant.**
+**Statut : VALIDÉE par Thierry le 2 octobre 2026 (quatre réponses ci-dessous, cas de dernière minute ajouté) — go code.**
 Rédigée le 2 octobre 2026, branche `spec-proposition-par-rang`.
 
 ## 1. Le besoin
@@ -41,6 +41,45 @@ est absente ce jour-là, donc le rang 1 ne compte que Lena → proposée seule. 
 Lena ne répond pas, le rang 2 (Lola) est sollicité. Un ménage sans absence au
 rang 1 partirait à Tiphaine **et** Lena en même temps.
 
+## 2 bis. Les réservations de dernière minute — le délai se partage entre les rangs
+
+**Demande de Thierry.** Avec 3 rangs à 48 h chacun, il faut 6 jours. Une
+réservation de dernière minute (départ dans 2 jours, ou demain) doit laisser
+**tous les rangs** passer avant le ménage.
+
+**La règle** : à chaque tour, le délai est le temps qui reste jusqu'à la limite,
+**partagé entre les rangs qui restent à solliciter** (celui-ci compris) :
+
+```
+limite        = veille du départ à 18 h (Paris) — inchangée
+rangs_restants = nombre de rangs qui ont encore au moins une candidate
+                 (de garde, disponible, jamais sollicitée pour ce ménage)
+délai du tour = temps_restant_avant_limite / rangs_restants
+                borné à 48 h au plus, et à 1 h au moins
+```
+
+- **Le minimum : 1 heure** (proposition). C'est déjà la règle quand la veille à
+  18 h est passée ; un délai plus court ne laisse pas le temps de lire un SMS.
+  Trois rangs tiennent alors en 3 heures.
+- Le délai est **recalculé à chaque tour** avec ce qu'il reste réellement : un
+  rang qui répond vite rend du temps aux suivants, une relance du cron (toutes
+  les 5 minutes) qui arrive un peu tard est rattrapée au tour d'après.
+- **Une réservation lointaine ne change pas** : 3 rangs pour 7 jours → 48 h
+  chacun, comme aujourd'hui.
+
+**Exemples** (3 rangs ayant chacun une candidate) :
+
+| Moment de la première proposition | Limite (veille 18 h) | Délai par rang |
+|---|---|---|
+| départ dans 7 jours | J+6 18 h | 48 h (plafond) |
+| départ dans 2 jours, 10 h | J+1 18 h | ≈ 10 h 40 |
+| départ demain, 10 h | aujourd'hui 18 h | 2 h 40 |
+| départ demain, 17 h | aujourd'hui 18 h | 1 h (minimum) — le dernier rang finit à 20 h |
+| veille 18 h déjà passée | — | 1 h par rang |
+
+**Test** : départ à J+1, première proposition à 10 h — les 3 rangs sont
+sollicités et leurs délais expirent tous avant la limite.
+
 ## 3. Le réglage du rang (fiche de la prestataire)
 
 Sur la fiche (`apps/menages/prestataires.html`), pour chaque bien coché, à côté
@@ -49,8 +88,7 @@ existe déjà en base (`property_cleaning_providers.rang`) mais **aucun écran n
 règle** aujourd'hui. Writer : celui des liaisons (inchangé). Portage mobile :
 cette ligne de la fiche suit la règle de la carte visibilité (44 px).
 
-> **Question 1** — Combien de rangs proposer : 3 (ta demande) ou plus ?
-> Proposition : 3.
+**Décision 1 (Thierry) : 3 rangs.**
 
 ## 4. Données — une table des propositions
 
@@ -102,15 +140,12 @@ Thierry, prouvée par un vérificateur — comme `menage_visibilite`.
 | `lib/cleaning/apres-changement-regles.js` | reprise des propositions d'une personne qui change ses jours : sa ligne seulement |
 | `api/cron.js` | fichier COMPLET si touché (règle du dépôt) |
 
-> **Question 2** — Quand l'une accepte, les autres du rang **voient la
-> proposition disparaître**. Faut-il en plus leur envoyer un SMS « pris par une
-> collègue » ? Proposition : **non** (bruit) — la bulle s'efface à leur prochaine
-> ouverture, et si elles tentent d'accepter, l'écran le dit.
+**Décision 2 (Thierry) : pas de SMS aux autres quand l'une accepte.** La
+proposition disparaît de leur PWA ; si l'une tente d'accepter, l'écran affiche
+« **déjà pris par une collègue** ».
 
-> **Question 3** — Une personne **refuse** pendant que les autres du rang n'ont
-> pas répondu : l'hôte reçoit-il quelque chose ? Proposition : **non**, l'alerte
-> ne part qu'à l'épuisement de tous les rangs (comme aujourd'hui) ; le refus se
-> lit sur l'écran de garde.
+**Décision 3 (Thierry) : pas d'alerte sur un refus isolé.** L'hôte n'est
+alerté que quand plus personne ne reste ; le refus se lit sur l'écran de garde.
 
 ## 6. Garde-fous
 
@@ -139,12 +174,39 @@ Thierry, prouvée par un vérificateur — comme `menage_visibilite`.
 7. Épuisement → « sans prestataire » + alerte (non-régression).
 8. D'office (`requires_ack = false`) → aucune proposition (non-régression).
 9. Le réglage du rang sur la fiche s'écrit et se relit.
+11. **Dernière minute** : départ à J+1, première proposition à 10 h → les 3 rangs
+    sont sollicités tour à tour et tous leurs délais expirent avant la veille
+    18 h ; départ dans 7 jours → 48 h par rang (non-régression).
 10. La migration reprend une proposition en cours sans la perdre.
 
 ## 8. Documentation
 
 `docs/kb/menage.md` (nouvelle section, et la section « Qui fait le ménage »
 mise à jour), `pages/guide.html` (le rang expliqué à l'hôte).
+
+## 4 bis. Choix technique à confirmer : une colonne plutôt qu'une table
+
+En mesurant le lot (78 lectures de `offered_to` dans 8 fichiers, 107 dans
+12 fichiers de tests), une forme plus simple que la table du §4 tient la même
+règle :
+
+- **`menages.proposee_a uuid[]`** — les personnes sollicitées au tour en cours
+  (vide = pas de proposition). L'échéance du tour reste `offer_expires_at`.
+- La **mémoire des refus et des expirations** est déjà, personne par personne,
+  dans `menage_assignment_log` (`declined`, `expired`) : elle continue de servir,
+  inchangée.
+- Chaque lecteur change une condition (`offered_to = moi` → `moi ∈ proposee_a`)
+  au lieu de passer par une jointure : le lot est plus petit, donc plus sûr.
+- **La bascule sans trou** : la migration ajoute la colonne et recopie les
+  propositions en cours ; une contrainte tolérante accepte l'ancien et le nouveau
+  code pendant les minutes entre la migration et le déploiement ; un rattrapage
+  du cron reprend toute proposition posée par l'ancien code dans cet
+  intervalle. `offered_to` n'est plus écrit, puis sera supprimé dans un lot
+  ultérieur.
+
+Ce qu'on perd par rapport à la table : l'état « refusée / expirée » n'est pas
+sur la proposition elle-même mais dans le journal — c'est déjà le cas
+aujourd'hui.
 
 ## 9. En attendant le code
 
@@ -153,6 +215,4 @@ Rien n'empêche de régler les rangs voulus dès maintenant… sauf qu'**aucun
 Tiphaine et Lena au rang 1 seraient sollicitées **l'une après l'autre** (par
 identifiant), pas en même temps.
 
-> **Question 4** — Poser les rangs en prod tout de suite (écriture en base sur
-> ton go) pour profiter au moins de l'ordre voulu, ou attendre le lot ?
-> Proposition : **attendre** — le sélecteur de rang arrive avec le lot.
+**Décision 4 (Thierry) : pas d'écriture des rangs en prod avant le lot.**
