@@ -22,6 +22,7 @@ const ETAT_LISIBLE = {
   echec_publication: 'Échec de publication',
   expiree: 'Délai dépassé',
   abandonnee: 'Abandonnée',
+  evaluee_ailleurs: 'Évaluée sur Airbnb',
 }
 
 // Ce qui demande une action de l'hote, et dans quel ordre d'urgence.
@@ -131,7 +132,7 @@ export function rendre (etat, maintenant = Date.now()) {
   // omettait deux (`soumise_prestataire`, `abandonnee`), donc on ne pouvait pas
   // demander a les voir seuls.
   const filtres = ['', 'a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
-                   'echec_publication', 'expiree', 'abandonnee']
+                   'echec_publication', 'expiree', 'abandonnee', 'evaluee_ailleurs']
     .map(v => `<option value="${v}"${etat.filtre === v ? ' selected' : ''}>`
       + (v === '' ? 'Toutes' : echapper(ETAT_LISIBLE[v] || v)) + '</option>').join('')
 
@@ -163,7 +164,7 @@ export function rendre (etat, maintenant = Date.now()) {
     // reste donc `a_remplir` indefiniment, et affichait « dernier jour » trois
     // semaines apres l'echeance. C'est le mensonge exact que ce garde existe
     // pour eviter.
-    const termine = ['publiee', 'expiree', 'abandonnee'].includes(e.status)
+    const termine = ['publiee', 'expiree', 'abandonnee', 'evaluee_ailleurs'].includes(e.status)
     const depasse = j !== null && j < 0
     const delai = termine ? ''
       : j === null ? ''

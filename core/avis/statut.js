@@ -28,6 +28,7 @@ const LISIBLE = {
   echec_publication: 'Échec de publication',
   expiree: 'Délai dépassé',
   abandonnee: 'Abandonnée',
+  evaluee_ailleurs: 'Évaluée sur Airbnb',
 }
 
 export async function demander ({ booking_uid } = {}, ctx = {}) {

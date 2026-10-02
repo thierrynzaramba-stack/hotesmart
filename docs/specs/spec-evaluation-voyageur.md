@@ -223,6 +223,21 @@ bien.
 `a_remplir` → `soumise_prestataire` → `a_valider` → `publiee`
 Branches : `echec_publication` (alarme, pas de rejeu auto), `expiree`, `abandonnee` (hôte choisit de ne pas évaluer).
 
+**`evaluee_ailleurs` — « Évaluée sur Airbnb »** (constat de production et règle de
+Thierry du 2 octobre 2026, au soir). Une évaluation écrite dans l'application
+Airbnb **n'arrive jamais chez Channex** (vérifié en direct : l'objet n'en porte
+aucune trace). Mais Airbnb garde l'avis du voyageur **caché** tant que les deux
+parties n'ont pas écrit le leur, ou jusqu'à la fin des 14 jours : un avis du
+voyageur **visible avant l'échéance** prouve que l'hôte a déjà évalué. Deux
+entrées :
+1. **automatique**, au relevé des avis : objet ouvert (non expiré) et visible
+   (`is_hidden` faux) → l'évaluation en attente passe `evaluee_ailleurs` ;
+   jamais une évaluation `publiee`, `expiree` ou `abandonnee` ;
+2. **à la main**, bouton « Déjà évaluée sur Airbnb » (l'hôte) : le cas que le
+   signal ne voit pas — l'hôte a évalué, le voyageur pas encore.
+
+État terminal : plus de relance, plus de publication, ni manuelle ni automatique.
+
 Règles de passage :
 - prestataire `soumettre` → `a_valider` ;
 - prestataire `valider` + non négatif → publication directe ;

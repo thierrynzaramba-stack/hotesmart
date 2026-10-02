@@ -222,7 +222,7 @@ function preparer ({
   etat.provider = { appels: [] }
   globalThis.fetch = async (url, opts) => {
     etat.provider.appels.push({ url: String(url), methode: opts?.method || 'GET' })
-    return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: { attributes: { guest_review: null } } }) }
+    return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: { attributes: { reply: null } } }) }
   }
   return etat
 }
@@ -1121,4 +1121,42 @@ test('re-revue : elle finit sa part alors qu’un texte de l’hote existe — p
   assert.strictEqual(res.code, 200)
   assert.strictEqual(res.body.peut_publier, false)
   assert.ok(!JSON.stringify(res.body).includes('Camille'))
+})
+
+// ─── « Deja evaluee sur Airbnb » (spec §6) ──────────────────────────────────
+test('LE TEST QUI COMPTE : l’hote range une evaluation faite dans Airbnb — elle sort, rien ne part', async () => {
+  const ev = evalA({ status: 'a_remplir', auto_publier_le: null })
+  const etat = preparer({ evaluations: [ev] })
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'eval-ailleurs' }, { id: ev.id, action: 'eval-ailleurs' }), res)
+  assert.strictEqual(res.code, 200)
+  // (Le double rend la ligne d'avant sur update().eq().select() : on lit l'ecriture.)
+  const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.status === 'evaluee_ailleurs')
+  assert.ok(maj, 'le statut est ecrit')
+  assert.strictEqual(maj.row.auto_publier_le, null)
+  assert.ok(etat.insertions.some(i => i.table === 'core_events' && i.row.type === 'avis.evaluee_ailleurs'))
+  assert.strictEqual(etat.provider.appels.length, 0)
+})
+
+test('une prestataire ne range pas, et une evaluation publiee ne se range pas', async () => {
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [evalA({ status: 'a_remplir' })] })
+  const p = reponse()
+  await require('../api/avis')(reqMembre({ action: 'eval-ailleurs' }, { id: evalA().id, action: 'eval-ailleurs' }), p)
+  assert.strictEqual(p.code, 403)
+  preparer({ evaluations: [evalA({ status: 'publiee' })] })
+  const h = reponse()
+  await require('../api/avis')(req({ action: 'eval-ailleurs' }, { id: evalA().id, action: 'eval-ailleurs' }), h)
+  assert.strictEqual(h.code, 409)
+})
+
+test('une evaluation « Evaluee sur Airbnb » ne se remplit plus et ne se publie plus', async () => {
+  const ev = evalA({ status: 'evaluee_ailleurs' })
+  const etat = preparer({ evaluations: [ev] })
+  const r1 = reponse()
+  await require('../api/avis')(req({ action: 'eval-reponses' }, { id: ev.id, action: 'eval-reponses', reponses: { communication: 'excellente' } }), r1)
+  assert.strictEqual(r1.code, 400)
+  const r2 = reponse()
+  await require('../api/avis')(req({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), r2)
+  assert.strictEqual(r2.code, 409)
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
 })

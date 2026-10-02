@@ -97,6 +97,9 @@ puis en `aucun` (2 oct.).
 8. `2026-10-02-avis-auto-validation-par-bien.sql` (décision du soir, option A :
    un réglage par bien, table `avis_auto_validation`) — même vérificateur, à
    coller AVANT le déploiement des réglages dans l'app Avis.
+9. `2026-10-02-avis-evaluee-ailleurs.sql` (l'état « Évaluée sur Airbnb ») —
+   à coller AVANT le déploiement : sans lui, le rangement est refusé par la base
+   (le code le journalise, ne casse rien d'autre).
 
 **Avant le déploiement du code**, pas après : le code des lots 3 à 7 lit
 `avis_criteres` (grille illisible sinon), et sans la migration 4 toute

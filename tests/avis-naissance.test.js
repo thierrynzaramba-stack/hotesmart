@@ -363,3 +363,103 @@ test('LE TEST QUI COMPTE : un objet rattache SANS echeance (ecriture ratee) est 
   assert.strictEqual(etat.evaluations[0].deadline_at, DANS(10))
   assert.strictEqual(etat.evaluations[0].ota_review_id, 'objet-1')
 })
+
+// ─── « Evaluee sur Airbnb » (spec §6, regle de Thierry du 2 octobre au soir) ──
+const { rangerEvalueesAilleurs, evaluationDejaPartie } = require('../lib/avis/naissance')
+
+function baseRangement (evaluations) {
+  const etat = { evaluations: evaluations.map(e => ({ ...e })), requetes: [] }
+  const from = (table) => {
+    const q = { table, f: {}, dans: {} }
+    etat.requetes.push(q)
+    const c = {
+      update (maj) { q.maj = maj; return c },
+      insert (ligne) { (etat.journal = etat.journal || []).push(ligne); q.insert = true; return c },
+      eq (k, v) { q.f[k] = v; return c },
+      in (k, v) { q.dans[k] = v; return c },
+      gt (k, v) { q.gt = [k, v]; return c },
+      select () { return c },
+      then (ok, ko) {
+        if (q.insert) return Promise.resolve({ error: null }).then(ok, ko)
+        const cibles = etat.evaluations.filter(e => e.user_id === q.f.user_id
+          && q.dans.booking_uid.includes(e.booking_uid) && q.dans.status.includes(e.status)
+          && (!q.gt || (e[q.gt[0]] != null && e[q.gt[0]] > q.gt[1])))
+        for (const e of cibles) Object.assign(e, q.maj)
+        return Promise.resolve({ data: cibles.map(e => ({ id: e.id, booking_uid: e.booking_uid })), error: null }).then(ok, ko)
+      },
+    }
+    return c
+  }
+  return { etat, sb: { from } }
+}
+
+// Un objet Airbnb dont l'avis du voyageur est VISIBLE : non cache, et noté.
+const VISIBLE = (a = {}) => ligneAvis({ is_hidden: false, received_at: DANS(-3), ...a, raw: { attributes: { is_hidden: false, overall_score: 10, ...(a.attrs || {}) } } })
+const CACHE = (a = {}) => ligneAvis({ is_hidden: true, ...a, raw: { attributes: { is_hidden: true, overall_score: 0 } } })
+const EV = (id, uid, status = 'a_remplir', a = {}) => ({ id, user_id: 'compte-1', booking_uid: uid, status, deadline_at: DANS(5), ...a })
+
+test('LE TEST QUI COMPTE : un avis du voyageur VISIBLE avant l’echeance range l’evaluation « Evaluee sur Airbnb »', async () => {
+  const { etat, sb } = baseRangement([EV('a', 'resa-1'), EV('b', 'resa-2')])
+  const bilan = await rangerEvalueesAilleurs(sb, [
+    VISIBLE({ booking_uid: 'resa-1' }),
+    CACHE({ external_review_id: 'rev-2', booking_uid: 'resa-2' }),
+  ], { maintenant: MAINTENANT })
+  assert.strictEqual(bilan.rangees, 1)
+  assert.strictEqual(etat.evaluations[0].status, 'evaluee_ailleurs')
+  assert.strictEqual(etat.evaluations[0].auto_publier_le, null, 'la publication automatique s arrete')
+  assert.strictEqual(etat.evaluations[1].status, 'a_remplir', 'cache : on ne sait pas, on ne range pas')
+  assert.strictEqual([].concat(etat.journal[0])[0].type, 'avis.evaluee_ailleurs', 'le rangement automatique laisse une trace')
+})
+
+test('SECURITE (revue de 9f76ae2) : un « is_hidden » absent du brut n’est PAS visible', async () => {
+  const { etat, sb } = baseRangement([EV('a', 'resa-1')])
+  await rangerEvalueesAilleurs(sb, [ligneAvis({ booking_uid: 'resa-1', is_hidden: false, raw: { attributes: { overall_score: 10 } } })], { maintenant: MAINTENANT })
+  assert.strictEqual(etat.evaluations[0].status, 'a_remplir')
+})
+
+test('SECURITE : apres l’echeance d’Airbnb (depart + 14 j), un avis visible ne prouve plus rien', async () => {
+  const { etat, sb } = baseRangement([EV('a', 'resa-1', 'a_remplir', { deadline_at: DANS(-1) }), EV('b', 'resa-1b', 'a_remplir', { deadline_at: null })])
+  await rangerEvalueesAilleurs(sb, [VISIBLE({ booking_uid: 'resa-1' }), VISIBLE({ external_review_id: 'rev-1b', booking_uid: 'resa-1b' })], { maintenant: MAINTENANT })
+  assert.deepStrictEqual(etat.evaluations.map(e => e.status), ['a_remplir', 'a_remplir'])
+})
+
+test('SECURITE : un objet visible mais SANS avis (ni note ni texte) ne prouve rien', async () => {
+  const { etat, sb } = baseRangement([EV('a', 'resa-1')])
+  await rangerEvalueesAilleurs(sb, [ligneAvis({ booking_uid: 'resa-1', raw: { attributes: { is_hidden: false, overall_score: 0, content: null } } })], { maintenant: MAINTENANT })
+  assert.strictEqual(etat.evaluations[0].status, 'a_remplir')
+})
+
+test('jamais une evaluation publiee, expiree, abandonnee ou en echec ; jamais un objet expire', async () => {
+  const { etat, sb } = baseRangement(['publiee', 'expiree', 'abandonnee', 'echec_publication']
+    .map((s, i) => EV('e' + i, 'resa-1', s)))
+  await rangerEvalueesAilleurs(sb, [VISIBLE({ booking_uid: 'resa-1' })], { maintenant: MAINTENANT })
+  assert.deepStrictEqual(etat.evaluations.map(e => e.status), ['publiee', 'expiree', 'abandonnee', 'echec_publication'])
+  const b = baseRangement([EV('x', 'resa-1')])
+  await rangerEvalueesAilleurs(b.sb, [VISIBLE({ booking_uid: 'resa-1', expired_at: DANS(-1) })], { maintenant: MAINTENANT })
+  assert.strictEqual(b.etat.evaluations[0].status, 'a_remplir', 'apres 14 jours, l avis devient public de toute facon : aucun signal')
+})
+
+test('le rattachement range aussi, dans le meme passage', async () => {
+  const { etat, sb } = base({
+    evaluations: [{ id: 'ev-1', user_id: 'compte-1', booking_uid: 'resa-1', status: 'a_remplir', ota_review_id: 'objet-1', deadline_at: DANS(10) }],
+    objets: [{ id: 'objet-1', external_review_id: 'rev-1', expired_at: DANS(10) }],
+  })
+  const bilan = await rattacherObjetsRecus(sb, [VISIBLE()], { maintenant: MAINTENANT })
+  assert.strictEqual(bilan.rangees, 1)
+  assert.ok(etat.ecritures.some(e => e.op === 'update' && e.champs.status === 'evaluee_ailleurs'))
+})
+
+test('« deja partie » se lit dans reply.guest_review (la ou Channex la range)', () => {
+  assert.strictEqual(evaluationDejaPartie({ raw: { attributes: { reply: { guest_review: { public_review: 'x' } } } } }), true)
+  assert.strictEqual(evaluationDejaPartie({ raw: { attributes: { reply: null } } }), false)
+})
+
+test('SECURITE (re-revue de 5c59a7b) : entre J+14 et J+30, l’avis public ne prouve rien — l’echeance d’Airbnb se lit sur l’objet', async () => {
+  // Evaluation nee de l'objet : son echeance est celle de Channex, encore loin.
+  const { etat, sb } = baseRangement([EV('a', 'resa-1', 'a_remplir', { deadline_at: DANS(10) })])
+  await rangerEvalueesAilleurs(sb, [VISIBLE({ booking_uid: 'resa-1', received_at: DANS(-20) })], { maintenant: MAINTENANT })
+  assert.strictEqual(etat.evaluations[0].status, 'a_remplir')
+  const b = baseRangement([EV('b', 'resa-1')])
+  await rangerEvalueesAilleurs(b.sb, [VISIBLE({ booking_uid: 'resa-1', received_at: null })], { maintenant: MAINTENANT })
+  assert.strictEqual(b.etat.evaluations[0].status, 'a_remplir', 'sans date de reception : rien')
+})

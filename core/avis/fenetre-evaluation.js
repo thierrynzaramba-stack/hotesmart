@@ -78,6 +78,7 @@ const ETAT_LISIBLE = {
   echec_publication: 'Échec de publication',
   expiree: 'Délai dépassé',
   abandonnee: 'Abandonnée',
+  evaluee_ailleurs: 'Évaluée sur Airbnb',
 }
 
 // Les motifs que le serveur peut rendre, en francais. Un motif inconnu est
@@ -103,6 +104,7 @@ const MOTIF_LISIBLE = {
   langue_non_verifiable: 'Cet avis est négatif et le texte doit être écrit dans une langue que nous ne savons pas relire automatiquement. Écrivez-le vous-même.',
   aucune_reponse: 'Aucun critère n’est rempli : il n’y a rien à rédiger.',
   abandonnee: 'Cette évaluation a été abandonnée : elle ne se publie plus.',
+  evaluee_ailleurs: 'Cette évaluation a déjà été faite sur Airbnb : elle ne se publie plus d’ici.',
   statut_incompatible: 'Cette évaluation n’est pas dans un état qui permet de la publier.',
   sans_reponses: 'Aucune réponse n’est enregistrée : il n’y a rien à publier.',
   etat_provider_inconnu: 'La plateforme ne dit pas si l’avis est déjà parti. Réessayez dans quelques minutes.',
@@ -282,6 +284,22 @@ export async function ouvrir (ctx = {}) {
     } catch (err) { etat.erreur = messageDErreur(err) }
   })
 
+  // L'hote l'a deja ecrite dans l'application Airbnb (spec §6) : elle sort de
+  // la liste, sans relance ni publication.
+  const ailleurs = avecOccupe(async () => {
+    const echec = etat.evaluation.status === 'echec_publication'
+    if (!confirmer('Vous avez déjà évalué ce voyageur dans l’application Airbnb ? L’évaluation sortira de la liste, et rien ne sera publié d’ici.'
+      + (echec ? ' Vérifiez sur Airbnb que l’évaluation y figure bien : l’envoi précédent a échoué.' : ''))) return
+    try {
+      const r = await appel('avis?action=eval-ailleurs', {
+        methode: 'POST',
+        corps: { action: 'eval-ailleurs', booking_uid: etat.evaluation.booking_uid || params.booking_uid },
+      })
+      etat.evaluation.status = r.status
+      etat.message = 'Rangée : déjà évaluée sur Airbnb.'
+    } catch (err) { etat.erreur = messageDErreur(err) }
+  })
+
   function brancher () {
     conteneur.querySelectorAll('[data-avis-critere]').forEach(el => {
       el.addEventListener('change', () => {
@@ -315,6 +333,7 @@ export async function ouvrir (ctx = {}) {
     brancherBouton('rediger', redigerTexte)
     brancherBouton('publier', publier)
     brancherBouton('abandonner', abandonner)
+    brancherBouton('ailleurs', ailleurs)
     brancherBouton('fermer', () => fermer())
   }
 
@@ -360,7 +379,7 @@ function compteRendu (etat) {
 function rendre (etat) {
   const e = etat.evaluation || {}
   const publiee = e.status === 'publiee'
-  const fige = ['publiee', 'expiree', 'abandonnee'].includes(e.status)
+  const fige = ['publiee', 'expiree', 'abandonnee', 'evaluee_ailleurs'].includes(e.status)
   const peutRediger = etat.role === 'hote' && !fige
   const peutPublier = !fige && (etat.role === 'hote' || etat.peutPublier === true)
 
@@ -408,6 +427,7 @@ function rendre (etat) {
     !fige && (etat.criteres || []).length ? `<button type="button" data-avis="enregistrer"${etat.occupe ? ' disabled' : ''}>Enregistrer mes réponses</button>` : '',
     peutRediger ? `<button type="button" data-avis="rediger"${etat.occupe ? ' disabled' : ''}>Rédiger le texte</button>` : '',
     peutPublier ? `<button type="button" data-avis="publier" class="hs-avis-principal"${etat.occupe ? ' disabled' : ''}>Publier l’avis</button>` : '',
+    etat.role === 'hote' && !fige ? `<button type="button" data-avis="ailleurs"${etat.occupe ? ' disabled' : ''}>Déjà évaluée sur Airbnb</button>` : '',
     etat.role === 'hote' && !fige ? `<button type="button" data-avis="abandonner"${etat.occupe ? ' disabled' : ''}>Ne pas évaluer</button>` : '',
     `<button type="button" data-avis="fermer">Fermer</button>`,
   ].filter(Boolean).join('')
