@@ -1372,7 +1372,8 @@ async function evaluationRepondre (req, res, garde) {
       answers_host: { ...(e.answers_host || {}), ...(role === 'hote' ? reponses : {}) },
       grille_figee: (r.evaluation && r.evaluation.grille_figee) || e.grille_figee || r.grille,
     }
-    const redige = await redigerEtEnregistrer(aJour)
+    // La prestataire relit ce texte : jamais le prenom du voyageur dedans.
+    const redige = await redigerEtEnregistrer(aJour, { avecPrenom: false })
 
     if (redige.panne) {
       // Une panne de lecture n'est pas un refus de l'IA : les reponses SONT
@@ -1437,7 +1438,37 @@ async function evaluationRepondre (req, res, garde) {
 // Rend { ok: true, public_text, private_note, negatif }
 //   ou { ok: false, motif, detail }            — l'IA refuse, la raison est dite
 //   ou { ok: false, panne: { code, body } }    — une lecture a echoue
-async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAutoPublierLe = null } = {}) {
+// La langue et le prenom du voyageur, lus dans SA reservation (le coeur).
+// ⚠ Constat de production du 2 octobre 2026 : `language` etait nul sur toutes
+// les evaluations nees au depart, et la redaction partait en anglais pour un
+// voyageur francais (la reservation Airbnb dit `customer.language = fr`). Le
+// prenom, connu de la reservation, n'etait utilise que s'il etait saisi a la main.
+async function voyageurDeLaReservation (e) {
+  const { data } = await supabase.from('bookings_snapshot').select('snapshot, raw')
+    .eq('user_id', e.user_id).eq('booking_id', String(e.booking_uid)).maybeSingle()
+  if (!data) return { langue: null, prenom: null }
+  const sp = data.snapshot || {}
+  const raw = data.raw || {}
+  const attributs = raw.attributes || raw
+  const client = attributs.customer || raw.customer || {}
+  const brute = String(client.language || client.locale || sp.language || raw.lang || '').trim().toLowerCase()
+  const langue = /^[a-z]{2}/.test(brute) ? brute.slice(0, 2) : null
+  const prenom = String(sp.firstName || client.name || '').trim().split(/\s+/)[0] || null
+  return { langue, prenom }
+}
+
+// `avecPrenom` : faux quand c'est la PRESTATAIRE qui declenche la redaction —
+// elle relit le texte, et le nom du voyageur ne lui est jamais montre
+// (docs/specs/spec-prestataires-menage.md §6).
+async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAutoPublierLe = null, avecPrenom = true } = {}) {
+  const voyageur = await voyageurDeLaReservation(e)
+  if (!e.language && voyageur.langue) {
+    e = { ...e, language: voyageur.langue }
+    const { error: eL } = await supabase.from('guest_evaluations')
+      .update({ language: voyageur.langue }).eq('id', e.id).eq('user_id', e.user_id).is('language', null)
+    if (eL) console.error('[avis] langue non enregistree', e.id, eL.message)
+  }
+  const prenomVoyageur = avecPrenom ? (prenom || voyageur.prenom) : null
   // ⚠ LES ERREURS DE LECTURE SE LISENT. Constat de review : un `Promise.all`
   // destructure sans `error` faisait disparaitre EN SILENCE les mots-cles, le
   // ton et la signature de l'hote — le texte partait avec les reglages par
@@ -1495,7 +1526,7 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAuto
   const r = await redigerAvis({
     reponses,
     remarque: remarque ? String(remarque).slice(0, MAX_TEXTE) : null,
-    prenom: prenom ? String(prenom).slice(0, 80) : null,
+    prenom: prenomVoyageur ? String(prenomVoyageur).slice(0, 80) : null,
     langue: e.language || 'en',
     prestataire: rPresta.data?.first_name || null,
     config: fusion,

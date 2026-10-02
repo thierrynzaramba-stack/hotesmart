@@ -22,6 +22,54 @@
 import { appel as appelParDefaut } from './appel.js'
 import { hsBus } from '../../shared/hs-bus.js'
 
+// ─── La mise en page, embarquee ─────────────────────────────────────────────
+// ⚠ LE STYLE VIT AVEC LE MODULE (constat de Thierry en production, 2 octobre
+// 2026 : « 0 css et mise en page »). La fenetre s'ouvre depuis quatre ecrans
+// (page Avis, messagerie, deux calendriers) et la PWA de la prestataire ; une
+// feuille par page, c'est quatre copies qui divergent — ou, comme ici, aucune.
+// Injecte une seule fois par document, sur les couleurs du site quand elles
+// existent (variables de /public/style.css), avec un repli sinon (PWA).
+const STYLE_ID = 'hs-avis-style'
+const STYLE = `
+.hs-avis { font-size: 14px; line-height: 1.45; color: var(--text, #1a1a1a); }
+.hs-avis h2 { font-size: 17px; font-weight: 600; margin: 0 28px 2px 0; }
+.hs-avis-etat { margin: 0 0 14px; font-size: 12.5px; color: var(--text2, #6b6b6b); }
+.hs-avis-questions { border: 0; margin: 0 0 6px; padding: 0; min-width: 0; }
+.hs-avis-questions legend { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text2, #6b6b6b); padding: 0; margin-bottom: 6px; }
+.hs-avis-critere { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 0.5px solid #e6e2dd; }
+.hs-avis-critere:first-of-type { border-top: 0; }
+.hs-avis-critere span { flex: 1 1 auto; min-width: 0; }
+.hs-avis-critere select { flex: 0 0 auto; max-width: 55%; font: inherit; font-size: 13.5px; padding: 6px 8px; border: 1px solid #d9d4ce; border-radius: 8px; background: var(--bg, #fff); color: inherit; }
+.hs-avis-compte-rendu { font-size: 12.5px; color: var(--text2, #6b6b6b); margin: 4px 0 14px; }
+.hs-avis-remarque, .hs-avis-texte, .hs-avis-prive { display: block; margin: 0 0 12px; }
+.hs-avis-remarque span, .hs-avis-texte span, .hs-avis-prive span { display: block; font-size: 12.5px; font-weight: 500; margin-bottom: 4px; }
+.hs-avis textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid #d9d4ce; border-radius: 8px; background: var(--bg, #fff); color: inherit; resize: vertical; }
+.hs-avis textarea[readonly] { background: var(--bg2, #f5f5f3); }
+.hs-avis-note { display: block; font-size: 12px; color: var(--text2, #6b6b6b); margin-top: 4px; }
+.hs-avis-message { background: #eef5ee; color: #2e5e3a; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; font-size: 13px; }
+.hs-avis-erreur { background: #fbeceb; color: #b3261e; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; font-size: 13px; }
+.hs-avis-vide, .hs-avis-attente { color: var(--text2, #6b6b6b); font-size: 13px; }
+.hs-avis-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.hs-avis-actions button { font: inherit; font-size: 13.5px; padding: 9px 14px; min-height: 40px; border-radius: 10px; border: 1px solid #d9d4ce; background: var(--bg, #fff); color: inherit; cursor: pointer; }
+.hs-avis-actions button:disabled { opacity: .5; cursor: default; }
+.hs-avis-actions .hs-avis-principal { background: #C97B5C; border-color: #C97B5C; color: #fff; font-weight: 600; }
+.hs-avis-actions [data-avis="abandonner"] { color: #b3261e; }
+.hs-avis-actions [data-avis="fermer"] { margin-left: auto; }
+@media (max-width: 480px) {
+  .hs-avis-critere { flex-wrap: wrap; }
+  .hs-avis-critere select { max-width: 100%; width: 100%; }
+  .hs-avis-actions button { flex: 1 1 auto; }
+  .hs-avis-actions [data-avis="fermer"] { margin-left: 0; }
+}
+`
+export function poserStyle (doc = typeof document !== 'undefined' ? document : null) {
+  if (!doc || !doc.head || doc.getElementById(STYLE_ID)) return
+  const s = doc.createElement('style')
+  s.id = STYLE_ID
+  s.textContent = STYLE
+  doc.head.appendChild(s)
+}
+
 const ETAT_LISIBLE = {
   a_remplir: 'À remplir',
   soumise_prestataire: 'Remplie par la prestataire',
@@ -91,6 +139,7 @@ export async function ouvrir (ctx = {}) {
   // deux ouvertures successives se marcheraient dessus.
   const etat = { evaluation: null, criteres: [], role: null, reponses: {}, message: null, erreur: null, occupe: false }
 
+  poserStyle(conteneur.ownerDocument)
   const afficher = () => { conteneur.innerHTML = rendre(etat); brancher() }
 
   // ─── Chargement ─────────────────────────────────────────────────────────
