@@ -15,7 +15,7 @@ const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
-const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu } = require('../lib/avis/evaluations')
+const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
@@ -492,7 +492,7 @@ async function evaluationsLister (req, res, garde) {
 }
 
 const ETATS_LISTE = ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
-                     'echec_publication', 'expiree', 'abandonnee']
+                     'echec_publication', 'expiree', 'abandonnee', 'evaluee_ailleurs']
 
 // ─── La configuration de redaction (mots-cles, ton, signature) ──────────────
 // Spec §4.7 : elle vit dans /settings, onglet « Avis ». Deux niveaux, comme la
@@ -1884,7 +1884,7 @@ async function evaluationPublier (req, res, garde, options = {}) {
     const memes = JSON.stringify(trier(frais.answers_host)) === JSON.stringify(trier(options.auto.answers_host))
     let negatif = true
     try { negatif = estNegatif({ ...(frais.answers_cleaner || {}), ...(frais.answers_host || {}) }, e.grille_figee) } catch { negatif = true }
-    if (!memes || negatif || frais.auto_publier_le || ['publiee', 'abandonnee', 'expiree'].includes(frais.status)) {
+    if (!memes || negatif || frais.auto_publier_le || ['publiee', 'abandonnee', 'expiree', 'evaluee_ailleurs'].includes(frais.status)) {
       await relacher()
       return res.status(409).json({ error: 'L’hôte a repris l’évaluation : la publication automatique renonce.', motif: 'auto_annulee' })
     }
@@ -2016,6 +2016,26 @@ const outilsAutoValidation = {
   },
 }
 
+// POST eval-ailleurs — l'hote l'a deja faite dans l'application Airbnb (spec §6).
+async function evaluationAilleurs (req, res, garde) {
+  const e = await chargerEvaluation(req, res, garde, true)
+  if (!e) return
+  const { role, profilId } = roleEtReglages(garde)
+  if (role !== 'hote') return res.status(403).json({ error: 'Seul l’hôte range une évaluation' })
+  if (!(await laMainALHote(e, res))) return
+  try {
+    const d = await marquerEvalueeAilleurs(supabase, { evaluation: e, parProfil: profilId })
+    const j = await journaliser(supabase, {
+      userId: e.user_id, type: 'avis.evaluee_ailleurs', sujet: e.id,
+      charge: { booking_uid: e.booking_uid, par: 'hote', par_profil: profilId },
+    })
+    if (!j.ok) console.error('[avis] rangement non journalise:', j.erreur)
+    return res.status(200).json({ ok: true, status: d.status })
+  } catch (err) {
+    return res.status(409).json({ error: pourLEcran(err.message) })
+  }
+}
+
 module.exports = async function handler (req, res) {
   try {
     return await router(req, res)
@@ -2092,6 +2112,7 @@ async function router (req, res) {
     'eval-texte': evaluationTexte,
     'eval-publier': evaluationPublier,
     'eval-abandon': evaluationAbandonner,
+    'eval-ailleurs': evaluationAilleurs,
     'prestataire-reglages-maj': prestataireReglagesEcrire,
   }
   if (ECRITURES_EVAL[action]) {

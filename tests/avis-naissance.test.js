@@ -363,3 +363,68 @@ test('LE TEST QUI COMPTE : un objet rattache SANS echeance (ecriture ratee) est 
   assert.strictEqual(etat.evaluations[0].deadline_at, DANS(10))
   assert.strictEqual(etat.evaluations[0].ota_review_id, 'objet-1')
 })
+
+// ─── « Evaluee sur Airbnb » (spec §6, regle de Thierry du 2 octobre au soir) ──
+const { rangerEvalueesAilleurs, evaluationDejaPartie } = require('../lib/avis/naissance')
+
+function baseRangement (evaluations) {
+  const etat = { evaluations: evaluations.map(e => ({ ...e })), requetes: [] }
+  const from = (table) => {
+    const q = { table, f: {}, dans: {} }
+    etat.requetes.push(q)
+    const c = {
+      update (maj) { q.maj = maj; return c },
+      eq (k, v) { q.f[k] = v; return c },
+      in (k, v) { q.dans[k] = v; return c },
+      select () { return c },
+      then (ok, ko) {
+        const cibles = etat.evaluations.filter(e => e.user_id === q.f.user_id
+          && q.dans.booking_uid.includes(e.booking_uid) && q.dans.status.includes(e.status))
+        for (const e of cibles) Object.assign(e, q.maj)
+        return Promise.resolve({ data: cibles.map(e => ({ id: e.id })), error: null }).then(ok, ko)
+      },
+    }
+    return c
+  }
+  return { etat, sb: { from } }
+}
+
+test('LE TEST QUI COMPTE : un avis du voyageur VISIBLE avant l’echeance range l’evaluation « Evaluee sur Airbnb »', async () => {
+  const { etat, sb } = baseRangement([
+    { id: 'a', user_id: 'compte-1', booking_uid: 'resa-1', status: 'a_remplir' },
+    { id: 'b', user_id: 'compte-1', booking_uid: 'resa-2', status: 'a_remplir' },
+  ])
+  const bilan = await rangerEvalueesAilleurs(sb, [
+    ligneAvis({ booking_uid: 'resa-1', is_hidden: false }),
+    ligneAvis({ external_review_id: 'rev-2', booking_uid: 'resa-2', is_hidden: true }),
+  ], { maintenant: MAINTENANT })
+  assert.strictEqual(bilan.rangees, 1)
+  assert.strictEqual(etat.evaluations[0].status, 'evaluee_ailleurs')
+  assert.strictEqual(etat.evaluations[0].auto_publier_le, null, 'la publication automatique s arrete')
+  assert.strictEqual(etat.evaluations[1].status, 'a_remplir', 'cache : on ne sait pas, on ne range pas')
+})
+
+test('jamais une evaluation publiee, expiree, abandonnee ou en echec ; jamais un objet expire', async () => {
+  const { etat, sb } = baseRangement(['publiee', 'expiree', 'abandonnee', 'echec_publication']
+    .map((s, i) => ({ id: 'e' + i, user_id: 'compte-1', booking_uid: 'resa-1', status: s })))
+  await rangerEvalueesAilleurs(sb, [ligneAvis({ booking_uid: 'resa-1', is_hidden: false })], { maintenant: MAINTENANT })
+  assert.deepStrictEqual(etat.evaluations.map(e => e.status), ['publiee', 'expiree', 'abandonnee', 'echec_publication'])
+  const b = baseRangement([{ id: 'x', user_id: 'compte-1', booking_uid: 'resa-1', status: 'a_remplir' }])
+  await rangerEvalueesAilleurs(b.sb, [ligneAvis({ booking_uid: 'resa-1', is_hidden: false, expired_at: DANS(-1) })], { maintenant: MAINTENANT })
+  assert.strictEqual(b.etat.evaluations[0].status, 'a_remplir', 'apres 14 jours, l avis devient public de toute facon : aucun signal')
+})
+
+test('le rattachement range aussi, dans le meme passage', async () => {
+  const { etat, sb } = base({
+    evaluations: [{ id: 'ev-1', user_id: 'compte-1', booking_uid: 'resa-1', status: 'a_remplir', ota_review_id: 'objet-1', deadline_at: DANS(10) }],
+    objets: [{ id: 'objet-1', external_review_id: 'rev-1', expired_at: DANS(10) }],
+  })
+  const bilan = await rattacherObjetsRecus(sb, [ligneAvis({ is_hidden: false })], { maintenant: MAINTENANT })
+  assert.strictEqual(bilan.rangees, 1)
+  assert.ok(etat.ecritures.some(e => e.op === 'update' && e.champs.status === 'evaluee_ailleurs'))
+})
+
+test('« deja partie » se lit dans reply.guest_review (la ou Channex la range)', () => {
+  assert.strictEqual(evaluationDejaPartie({ raw: { attributes: { reply: { guest_review: { public_review: 'x' } } } } }), true)
+  assert.strictEqual(evaluationDejaPartie({ raw: { attributes: { reply: null } } }), false)
+})
