@@ -17,6 +17,13 @@
  * Fabrique un appelant. `deps` sert aux tests ; en production tout vient de la
  * page (window._supabase, window.enteteCompte, fetch).
  */
+// Le client de session partage, charge a la demande (un import statique
+// casserait les tests sous Node, ou /shared n'est pas un chemin).
+async function clientParDefaut () {
+  const m = await import('/shared/supabase.js')
+  return m.supabase
+}
+
 export function creerAppel (deps = {}) {
   const fenetreGlobale = deps.global || (typeof window !== 'undefined' ? window : {})
   const requete = deps.fetch || (typeof fetch !== 'undefined' ? fetch : null)
@@ -27,9 +34,16 @@ export function creerAppel (deps = {}) {
     // ⚠ LE JETON SE RELIT A CHAQUE APPEL. Une fenetre d'evaluation peut rester
     // ouverte longtemps ; un jeton capture a l'ouverture aurait expire au
     // moment de publier — exactement l'appel qu'on ne veut pas voir echouer.
+    //
+    // ⚠ ET IL NE DEPEND PAS DE LA PAGE. Recette du 2 octobre 2026 : la fiche
+    // prestataire et les deux calendriers ne publient pas `window._supabase` —
+    // chaque appel partait SANS jeton, le serveur repondait « Non autorise », et
+    // la case « Elle remplit les questions » ne s'enregistrait jamais. Le client
+    // de session est un module partage : on le prend la, la page n'a rien a faire.
     let jeton = null
     try {
-      const { data } = await fenetreGlobale._supabase.auth.getSession()
+      const client = fenetreGlobale._supabase || (deps.supabase !== undefined ? deps.supabase : await clientParDefaut())
+      const { data } = await client.auth.getSession()
       if (data && data.session) jeton = data.session.access_token
     } catch { /* pas de session : le serveur repondra 401, et c'est sa reponse */ }
 
