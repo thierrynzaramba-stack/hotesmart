@@ -67,9 +67,9 @@ function fakeSupabase (tables, tablesEnPanne = []) {
 }
 
 // `contenuIA` : le tableau `content` que rend l'API (permet un bloc thinking).
-function charger ({ tables, messagesChannex, contenuIA, mode = 'test', messagesBeds24 = [], tablesEnPanne = [] }) {
+function charger ({ tables, messagesChannex, contenuIA, mode = 'test', messagesBeds24 = [], tablesEnPanne = [], creer = null }) {
   const appelsIA = []; const alertes = []
-  const anthropic = { messages: { create: async (req) => { appelsIA.push(req); return { content: contenuIA } } } }
+  const anthropic = { messages: { create: async (req) => { appelsIA.push(req); return creer ? creer(req) : { content: contenuIA } } } }
   const stubs = {
     '../lib/cron-shared': {
       supabase: fakeSupabase(tables, tablesEnPanne), anthropic,
@@ -427,3 +427,61 @@ test('journal illisible : le modele est prevenu de ne rien presumer', async () =
   assert.ok(/INDISPONIBLE/.test(bloc) && /Ne présume/.test(bloc), bloc)
   assert.ok(!/ENVOYÉ le/.test(bloc))
 })
+
+// ─── Lot 2b : GUESTFLOW_MODEL ───────────────────────────────────────────────
+function avecVariable (valeur, fn) {
+  const avant = process.env.GUESTFLOW_MODEL
+  if (valeur === undefined) delete process.env.GUESTFLOW_MODEL; else process.env.GUESTFLOW_MODEL = valeur
+  return Promise.resolve().then(fn).finally(() => {
+    if (avant === undefined) delete process.env.GUESTFLOW_MODEL; else process.env.GUESTFLOW_MODEL = avant
+  })
+}
+const unFil = [{ bookingId: B, sender: 'guest', message: 'Bien arrivés !', time: t(1) }]
+const sympathie = json({ type: 'sympathy', reason: 'x', auto_reply: '😊', sub_tasks: [] })
+
+test('LE TEST QUI COMPTE : sans variable, l\'appel est celui d\'avant — Haiku, 1000 tokens, aucun effort', () => avecVariable(undefined, async () => {
+  const { mod, appelsIA } = charger({ tables: tablesVides(), messagesChannex: unFil, contenuIA: sympathie })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA[0].model, 'claude-haiku-4-5-20251001')
+  assert.strictEqual(appelsIA[0].max_tokens, 1000)
+  assert.strictEqual(appelsIA[0].output_config, undefined, 'Haiku 4.5 rend 400 sur effort')
+}))
+
+test('une variable vide vaut absence', () => avecVariable('  ', async () => {
+  const { mod } = charger({ tables: {}, messagesChannex: [], contenuIA: [] })
+  assert.strictEqual(mod.requeteClassification('p').model, 'claude-haiku-4-5-20251001')
+}))
+
+test('LE TEST QUI COMPTE : GUESTFLOW_MODEL=claude-sonnet-5-5 → Sonnet, effort low, marge de tokens, et le texte lu apres le thinking', () => avecVariable('claude-sonnet-5-5', async () => {
+  const tables = tablesVides()
+  const { mod, appelsIA } = charger({ tables, messagesChannex: unFil, contenuIA: [{ type: 'thinking', thinking: '' }, ...sympathie] })
+  await mod.processChannelPropertyMessages(U, bien, nouveauBilan())
+  assert.strictEqual(appelsIA[0].model, 'claude-sonnet-5-5')
+  assert.deepStrictEqual(appelsIA[0].output_config, { effort: 'low' })
+  assert.ok(appelsIA[0].max_tokens >= 2000, 'le raisonnement ne doit pas couper le JSON')
+  assert.strictEqual(tables.agent_tasks[0].suggested_reply, '😊')
+}))
+
+test('LE TEST QUI COMPTE : un modele refuse (faute de frappe) → repli Haiku pour l\'appel, et le cycle le dit', () => avecVariable('claude-sonet-5-5', async () => {
+  const tables = tablesVides()
+  const { mod, appelsIA } = charger({ tables, messagesChannex: unFil, creer: (req) => {
+    if (req.model !== 'claude-haiku-4-5-20251001') { const e = new Error('model: not found'); e.status = 404; throw e }
+    return { content: sympathie }
+  } })
+  const bilan = nouveauBilan()
+  await mod.processChannelPropertyMessages(U, bien, bilan)
+  assert.deepStrictEqual(appelsIA.map(r => r.model), ['claude-sonet-5-5', 'claude-haiku-4-5-20251001'])
+  assert.strictEqual(appelsIA[1].output_config, undefined, 'le repli porte les parametres de Haiku')
+  assert.ok(bilan.errors.some(e => e.context === 'guestflow_model_refuse'))
+  assert.strictEqual(tables.agent_tasks.length, 1, 'le voyageur est traite quand meme')
+}))
+
+test('une panne de credit ne declenche PAS de repli : meme compte, meme panne', () => avecVariable('claude-sonnet-5-5', async () => {
+  const { mod, appelsIA } = charger({ tables: tablesVides(), messagesChannex: unFil, creer: () => {
+    const e = new Error('Your credit balance is too low to access the Anthropic API.'); e.status = 400; throw e
+  } })
+  const bilan = nouveauBilan()
+  await mod.processChannelPropertyMessages(U, bien, bilan)
+  assert.strictEqual(appelsIA.length, 1)
+  assert.ok(bilan.errors.some(e => /credit balance/.test(e.error)), 'l\'erreur remonte telle quelle')
+}))
