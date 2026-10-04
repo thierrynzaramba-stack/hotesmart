@@ -87,6 +87,14 @@ const STYLES = `
   .tc-case { font: inherit; font-size: 11px; line-height: normal; text-align: center; padding: 4px 0; border: 0; border-radius: 3px; cursor: pointer; }
   .tc-case:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
   .tc-vide { font-size: 11px; text-align: center; padding: 4px 0; color: var(--text2); }
+  /* Telephone (demande de Thierry, 4 octobre 2026) : un mois occupe toute la
+     largeur, et chaque case devient une cible de 44 px de haut, au doigt. */
+  @media (max-width: 640px) {
+    .tc-annee { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    .tc-mini { gap: 3px; }
+    .tc-mjsem { font-size: 12px; }
+    .tc-case, .tc-vide { min-height: 44px; font-size: 14px; border-radius: 6px; display: flex; align-items: center; justify-content: center; padding: 0; }
+  }
   /* La fenetre de detail d'un jour. */
   .tc-fond { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 1000; }
   .tc-popup { background: var(--bg); color: var(--text); border: 0.5px solid var(--border2); border-radius: 12px; width: 100%; max-width: 380px;
