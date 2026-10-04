@@ -2078,3 +2078,102 @@ partout, y compris décembre et janvier, pourtant forts par le prix (ADR p50
 réponse définitive sur l'existence d'une série quotidienne. En attente. Sa
 réponse tranche avant l'essai `num_months: 0` : si elle est claire, l'essai
 n'a plus lieu d'être.
+
+## 15. Pipeline AirROI — le calendrier de température (4 octobre 2026) — SPEC
+
+### 15.1 Le principe : des pipelines étanches (décision de Thierry)
+
+Les sources du marché sont des **pipelines étanches**. L'historique des ventes
+produit SA projection (la page « le marché global », §14 : RevPAR des années
+passées et poids posés). AirROI produit SA projection. **Chaque source calcule
+seule ses 4 niveaux.** Des modules d'**assemblage en aval** les combineront plus
+tard, selon des paramètres — jamais de mélange dans le calcul d'une source.
+
+Pourquoi : l'historique n'existe pas pour un nouveau bien (il arrive en N+1) ;
+AirROI fonctionne seul dès le premier jour.
+
+Ce qu'on code maintenant : **le pipeline AirROI seul**. La page §14 ne bouge pas.
+
+### 15.2 La source
+
+`POST /price-recommendation/calendar-prices`, base 100, devise EUR
+(`lib/airroi/client.js` → `reliefCalendrier`), sur les coordonnées du bien.
+729 jours vers l'avant. Chaque jour : `price` (base 100) et quatre composantes
+(`seasonality`, `day_of_week`, `known_holiday_event` avec son nom, `market_demand`).
+Première capture : `tests/fixtures/airroi/relief-bagneres-2026-09-30.json`
+(0,10 $, déjà payée). **Aucun nouvel appel payant pour développer.**
+
+### 15.3 Le cœur : `marche_temperature_airroi`
+
+Une ligne par **marché, capture et jour** : `pays, region, localite, capture_le,
+jour, prix_base100, saison, semaine, fete, fete_nom, demande, ecart, niveau,
+methode`. Unicité `(pays, region, localite, capture_le, jour, methode)`. Ajout
+seul (une capture ne réécrit jamais la précédente). RLS : lecture serveur
+seulement, comme `marche_calendrier`.
+
+**Writer unique** : `lib/marche/temperature-airroi.js` (`enregistrerTemperature`),
+lancé par `scripts/enregistrer-temperature-airroi.js --relief=<capture>
+[--go --biens=N]` (empreinte 3 = staging, 5 = production ; sans `--go`, rien
+n'est écrit). Aucun appel AirROI dans ce script : il lit une capture.
+
+⚠ **Aucun prix n'est stocké en euros.** Les valeurs sont des facteurs en base 100.
+
+### 15.4 Les 4 niveaux
+
+`ecart = saison + jour de semaine + événement` (points de pourcentage autour de
+la base 100). C'est `prix_base100 − 100 − demande` : AirROI rend un prix qui vaut
+exactement 100 plus ses quatre composantes, et la lecture le vérifie jour par jour
+(un écart de plus de 0,02 point refuse la capture : format changé).
+
+| Niveau | Écart |
+|---|---|
+| Creux | moins de −3 |
+| Modéré | −3 à moins de +2 |
+| Favorable | +2 à moins de +7 |
+| Pic | +7 et plus |
+
+**Choix pris (à défaire si Thierry le veut) :** `market_demand` est **exclu** de
+l'écart. Elle regarde devant elle depuis le jour de la capture et fausse les jours
+lointains (précaution 2 du §14). Elle reste lisible dans le détail d'un jour.
+
+### 15.5 Les analyses (module pur, testé)
+
+1. **Diagnostic mensuel** : pour chaque mois, le niveau de la moyenne des écarts —
+   tous les jours, les nuits de week-end, les nuits de semaine — l'avantage
+   (« week-end » si la moyenne week-end dépasse celle de semaine de plus d'un point,
+   « semaine » à l'inverse, « égal » sinon), et les événements nommés du mois.
+2. **Week-end ou semaine** : moyenne par jour de semaine, meilleur et pire jour,
+   et un verdict calculé (jamais un texte écrit à l'avance).
+   **Choix pris : le week-end, ce sont les nuits du vendredi et du samedi** (la
+   règle de la page §14 et de la location courte).
+3. **Événements** : les jours consécutifs portant le même nom d'événement forment
+   une occurrence (début, fin, nuits) ; par nom, le niveau moyen.
+4. **Suggestions pour YieldFlow** : les **saisons** (mois consécutifs de même
+   niveau, hors « Modéré ») et les **événements ponctuels** nommés. **Choix pris :
+   affichées seulement**, sans écriture dans les événements YieldFlow — l'hôte les
+   crée lui-même. Un bouton « Créer » serait un lot à part, avec revue.
+5. **Courbe** : la moyenne mensuelle des écarts sur 24 mois, avec les bandes des
+   4 niveaux.
+
+### 15.6 L'API et l'écran
+
+- `GET /api/marche-temperature?property_id=` : garde du bien, `marche_biens`,
+  dernière capture du marché dans `marche_temperature_airroi`, puis les jours
+  (date, niveau, nom d'événement, sens de chaque composante) et les analyses.
+  **Jamais un prix, ni en euros, ni en base 100, dans la réponse** — ni
+  `prix_base100`, ni les composantes chiffrées. Seuls sortent des niveaux, des
+  sens (« vers le haut / neutre / vers le bas »), des noms d'événements, et, pour
+  la courbe, l'**écart mensuel en points** : un pourcentage autour de la base,
+  pas un prix.
+- `apps/yield/marche-temperature.html` : grille mensuelle sur 24 mois, 4 couleurs ;
+  au clic sur un jour, le niveau, et pour la saison, le jour de semaine et la
+  demande, un sens (« tire vers le haut », « neutre », « tire vers le bas ») ; le
+  nom de l'événement. Puis les analyses. Thème sombre. Téléphone d'emblée.
+
+### 15.7 Les lots
+
+- **T1** : migration, module pur (niveaux et analyses), writer, script, tests.
+- **T2** : l'API, ses gardes et ses tests.
+- **T3** : la page, puis la recette sur staging.
+
+Chaque lot : revue, re-revue sur constat de sécurité, contre-épreuve des tests.

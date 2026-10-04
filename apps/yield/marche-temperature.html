@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — La température du marché</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    [hidden] { display: none !important; }
+    /* ⚠ PAGE NEUVE, LECTURE SEULE (pipeline AirROI, spec §15 de
+       docs/kb/chantier-nouveau-bien.md). Elle n'ecrit rien, ne pilote rien,
+       n'affiche AUCUN prix, et n'est reliee a aucun menu (acces par l'adresse
+       directe), comme « le marche global ». PIPELINE ETANCHE : rien de
+       l'historique des ventes n'entre ici. */
+    :root {
+      /* Une seule teinte, quatre paliers : Creux, Modere, Favorable, Pic. */
+      --t-creux: #f6ebe4; --t-modere: #e2b9a0; --t-favorable: #b8603a; --t-pic: #6b2412;
+      --t-creux-txt: #4a2a1c; --t-modere-txt: #3d1a0c; --t-favorable-txt: #ffffff; --t-pic-txt: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --t-creux: #2c2320; --t-modere: #6a3f2c; --t-favorable: #b8603a; --t-pic: #f0a27c;
+        --t-creux-txt: #e9d8cf; --t-modere-txt: #f6e3d9; --t-favorable-txt: #ffffff; --t-pic-txt: #2a0e04;
+      }
+    }
+    :root[data-theme="dark"] {
+      --t-creux: #2c2320; --t-modere: #6a3f2c; --t-favorable: #b8603a; --t-pic: #f0a27c;
+      --t-creux-txt: #e9d8cf; --t-modere-txt: #f6e3d9; --t-favorable-txt: #ffffff; --t-pic-txt: #2a0e04;
+    }
+    .mt-avertir { background: var(--amber-bg); border: 0.5px solid var(--amber); border-radius: var(--radius);
+                  padding: 12px 14px; margin-bottom: 16px; font-size: 13.5px; line-height: 1.5; }
+    .mt-meta { font-size: 12.5px; color: var(--text2); margin: 6px 0 16px; }
+    .mt-carte { border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px;
+                margin-bottom: 16px; background: var(--bg); }
+    .mt-carte h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+    .mt-carte .sous { font-size: 12.5px; color: var(--text2); margin: 0 0 10px; line-height: 1.45; }
+    .non-calc { color: var(--text2); font-style: italic; }
+    .mt-legende { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+    .mt-niv { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 3px 10px 3px 3px;
+              border: 0.5px solid var(--border); border-radius: 999px; }
+    .mt-pastille { width: 18px; height: 18px; border-radius: 50%; display: inline-block; }
+    .mt-badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+    .mt-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .mt-nav button { font: inherit; border: 0.5px solid var(--border2); background: var(--bg); color: var(--text);
+                     border-radius: 8px; padding: 6px 12px; cursor: pointer; min-width: 44px; min-height: 44px; }
+    .mt-nav button:disabled { opacity: .4; cursor: default; }
+    .mt-nav h3 { margin: 0; font-size: 16px; text-transform: capitalize; }
+    .mt-grille { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; max-width: 560px; }
+    .mt-jsem { font-size: 11px; color: var(--text2); text-align: center; padding-bottom: 2px; }
+    .mt-jour { aspect-ratio: 1; border: 0; border-radius: 8px; font: inherit; font-size: 13px; cursor: pointer;
+               display: flex; align-items: center; justify-content: center; position: relative; padding: 0; }
+    .mt-jour.evt::after { content: ''; position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .mt-jour[aria-pressed="true"] { outline: 2px solid var(--text); outline-offset: 1px; }
+    .mt-jour:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+    .mt-detail { margin-top: 12px; border-top: 0.5px solid var(--border); padding-top: 10px; font-size: 13.5px; line-height: 1.6; }
+    .mt-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 6px 0 0; }
+    .mt-detail dt { color: var(--text2); }
+    .mt-detail dd { margin: 0; }
+    .mt-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .mt-table th { text-align: left; font-weight: 600; color: var(--text2); font-size: 12px; padding: 6px 8px; border-bottom: 0.5px solid var(--border2); }
+    .mt-table td { padding: 6px 8px; border-bottom: 0.5px solid var(--border); vertical-align: top; }
+    .mt-defile { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .mt-semaine { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+    .mt-semaine div { text-align: center; font-size: 12px; }
+    .mt-semaine .mt-badge { display: block; margin-top: 3px; }
+    .mt-evt { padding: 8px 0; border-top: 0.5px solid var(--border); font-size: 13px; }
+    .mt-evt:first-child { border-top: 0; }
+    svg.mt { width: 100%; height: auto; display: block; }
+    svg.mt text { font-size: 11px; fill: var(--text2); font-family: inherit; }
+    svg.mt .axe { stroke: var(--border2); stroke-width: 1; }
+    @media (max-width: 640px) {
+      .content { padding-left: 12px; padding-right: 12px; } .mt-carte { padding: 12px; }
+      .mt-defile svg.mt { min-width: 600px; }
+      .mt-defile .mt-table { min-width: 560px; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+<div class="sidebar" id="sidebar"></div>
+<div class="main">
+<div class="content">
+  <div class="header"><h1>La température du marché</h1></div>
+
+  <div class="mt-avertir" id="mt-avertir">
+    <b>Une estimation du marché selon le modèle d’AirROI, pas un prix.</b> Cette page dit, jour par jour, si le
+    marché de votre commune est plutôt en creux, modéré, favorable ou en pic, d’après le modèle de prix d’AirROI
+    seul — sans votre historique de ventes. Elle n’affiche aucun prix, n’en pousse aucun, et <b>ne pilote rien</b> :
+    vos prix et votre calendrier ne changent pas.
+  </div>
+
+  <div><label class="mt-meta">Logement <select id="mt-bien"></select></label></div>
+  <div class="mt-meta" id="mt-meta"></div>
+  <div id="mt-corps"><p class="mt-meta">Lecture du marché…</p></div>
+</div>
+</div>
+</div>
+
+<script type="module">
+  // ⚠ LECTURE SEULE : la liste des logements du compte, puis un GET sur
+  // /api/marche-temperature. Aucune ecriture, aucun appel AirROI, aucun prix.
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { supabase } from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+  const el = id => document.getElementById(id)
+  const ech = s => String(s ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  const MOIS_LONGS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  const moisFr = m => `${MOIS_LONGS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`
+  const moisCourt = m => `${MOIS_LONGS[Number(m.slice(5, 7)) - 1].slice(0, 4)}. ${m.slice(2, 4)}`
+  const jourFr = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || '')) ? `${Number(iso.slice(8, 10))} ${MOIS_LONGS[Number(iso.slice(5, 7)) - 1]} ${iso.slice(0, 4)}` : '—'
+  const JOURS_SEM = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim']
+  const NIVEAUX = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
+  const DESCRIPTION = { creux: 'marché faible', modere: 'marché normal', favorable: 'bon moment', pic: 'très forte demande' }
+  const SENS = { haut: 'tire vers le haut', neutre: 'neutre', bas: 'tire vers le bas' }
+  // ⚠ UN NIVEAU INCONNU N'ENTRE JAMAIS DANS UN STYLE (revue de 675ed3b) : seuls
+  // les quatre niveaux connus sont interpoles.
+  const niv = n => (Object.prototype.hasOwnProperty.call(NIVEAUX, n) ? n : null)
+  const badge = n => niv(n) ? `<span class="mt-badge" style="background:var(--t-${niv(n)});color:var(--t-${niv(n)}-txt)">${NIVEAUX[niv(n)]}</span>` : '<span class="non-calc">—</span>'
+
+  let session = null
+  let jeton = 0
+  let donnees = null
+  let moisCourant = 0
+  let jourChoisi = null
+
+  async function init () {
+    session = await requireAuth()
+    if (!session) return
+    renderSidebar('yield-marche-temperature').catch(e => console.error('[marche-temperature] sidebar', e))
+    const compte = compteCourant()
+    let q = supabase.from('properties').select('id, name').order('name')
+    if (compte) q = q.eq('user_id', compte)
+    const { data, error } = await q
+    if (error) return corps('<p class="non-calc">Impossible de lire la liste des logements.</p>')
+    if (!data || !data.length) return corps('<p class="non-calc">Aucun logement accessible sur ce compte.</p>')
+    el('mt-bien').innerHTML = data.map(b => `<option value="${ech(b.id)}">${ech(b.name)}</option>`).join('')
+    el('mt-bien').addEventListener('change', charger)
+    charger()
+  }
+
+  function corps (html) { el('mt-corps').innerHTML = html }
+
+  async function charger () {
+    const j = ++jeton
+    corps('<p class="mt-meta">Lecture du marché…</p>'); el('mt-meta').innerHTML = ''
+    let r
+    try {
+      r = await fetch(`/api/marche-temperature?property_id=${encodeURIComponent(el('mt-bien').value)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
+    } catch (e) { if (j === jeton) corps('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>'); return }
+    if (j !== jeton) return
+    if (!r.ok) return corps(`<p class="non-calc">Lecture impossible (${r.status}).</p>`)
+    let d
+    try { d = await r.json() } catch (e) { if (j === jeton) corps('<p class="non-calc">Réponse illisible.</p>'); return }
+    if (j !== jeton) return
+    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
+    if (d.etat === 'capture_absente') return corps(`<p class="non-calc">Marché ${ech(d.marche && d.marche.localite)} : ${ech(d.motif)}.</p>`)
+    if (d.etat !== 'calcule' || !Array.isArray(d.jours) || !d.jours.length) return corps('<p class="non-calc">Aucun jour à afficher pour ce marché.</p>')
+    donnees = d
+    moisCourant = 0
+    jourChoisi = null
+    el('mt-meta').innerHTML = `Marché : <b>${ech(d.marche.localite)}</b> (${ech(d.marche.region)}, ${ech(d.marche.pays)}) · modèle AirROI calculé le ${jourFr(d.capture_le)} · ${d.jours.length} jours`
+    peindre()
+  }
+
+  const moisDisponibles = () => [...new Set(donnees.jours.map(x => x.jour.slice(0, 7)))]
+
+  function peindre () {
+    corps(blocCalendrier() + blocMois() + blocSemaine() + blocEvenements() + blocSuggestions() + blocCourbe())
+    brancher()
+  }
+
+  // ─── 1. Le calendrier, mois par mois ──────────────────────────────────────
+  function blocCalendrier () {
+    const mois = moisDisponibles()
+    const m = mois[moisCourant]
+    const [a, mm] = m.split('-').map(Number)
+    const decalage = (new Date(Date.UTC(a, mm - 1, 1)).getUTCDay() + 6) % 7
+    const parJour = new Map(donnees.jours.map(x => [x.jour, x]))
+    const nb = new Date(Date.UTC(a, mm, 0)).getUTCDate()
+    let cases = JOURS_SEM.map(x => `<div class="mt-jsem">${x}</div>`).join('') + '<div></div>'.repeat(decalage)
+    for (let d = 1; d <= nb; d++) {
+      const cle = `${m}-${String(d).padStart(2, '0')}`
+      const x = parJour.get(cle)
+      const n = x && niv(x.niveau)
+      cases += n
+        ? `<button type="button" id="j-${cle}" class="mt-jour${x.evenement ? ' evt' : ''}" data-jour="${cle}" aria-pressed="${cle === jourChoisi}" style="background:var(--t-${n});color:var(--t-${n}-txt)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}">${d}</button>`
+        : '<div></div>'
+    }
+    const legende = Object.keys(NIVEAUX).map(n => `<span class="mt-niv"><span class="mt-pastille" style="background:var(--t-${n})"></span><b>${NIVEAUX[n]}</b> ${DESCRIPTION[n]}</span>`).join('')
+    return `<div class="mt-carte"><h2>Jour par jour</h2>`
+      + `<p class="sous">La couleur dit le niveau du marché ce jour-là. Un point signale un férié ou un événement. Touchez un jour pour le détail.</p>`
+      + `<div class="mt-legende">${legende}</div>`
+      + `<div class="mt-nav"><button type="button" id="mt-prec" aria-label="Mois précédent"${moisCourant === 0 ? ' disabled' : ''}>‹</button>`
+      + `<h3>${ech(moisFr(m))}</h3>`
+      + `<button type="button" id="mt-suiv" aria-label="Mois suivant"${moisCourant === mois.length - 1 ? ' disabled' : ''}>›</button></div>`
+      + `<div class="mt-grille">${cases}</div>`
+      + `<div class="mt-detail" id="mt-detail" aria-live="polite">${detail()}</div></div>`
+  }
+
+  function detail () {
+    if (!jourChoisi) return '<span class="non-calc">Touchez un jour pour voir son détail.</span>'
+    const x = donnees.jours.find(y => y.jour === jourChoisi)
+    if (!x) return ''
+    return `<b>${ech(jourFr(x.jour))}</b> · ${badge(x.niveau)} <span class="non-calc">${DESCRIPTION[niv(x.niveau)] || ''}</span>`
+      + `<dl><dt>Saison</dt><dd>${SENS[x.sens.saison]}</dd>`
+      + `<dt>Jour de semaine</dt><dd>${SENS[x.sens.semaine]}${x.week_end ? ' (nuit de week-end)' : ''}</dd>`
+      + `<dt>Férié ou événement</dt><dd>${x.evenement ? `${ech(x.evenement)} — ${SENS[x.sens.evenement]}` : 'aucun'}</dd>`
+      + `<dt>Demande du marché</dt><dd>${SENS[x.sens.demande]} <span class="non-calc">(non comptée dans le niveau : elle date du calcul)</span></dd></dl>`
+  }
+
+  // ─── 2. Le diagnostic mensuel ─────────────────────────────────────────────
+  const AVANTAGE = { week_end: 'week-end', semaine: 'semaine', egal: 'équivalent' }
+  function blocMois () {
+    const lignes = donnees.mois.map(m => `<tr><td>${ech(moisFr(m.mois))}</td><td>${badge(m.niveau)}</td>`
+      + `<td>${badge(m.niveau_week_end)}</td><td>${badge(m.niveau_semaine)}</td><td>${AVANTAGE[m.avantage]}</td>`
+      + `<td>${m.evenements.length ? ech(m.evenements.join(', ')) : '—'}</td></tr>`).join('')
+    return `<div class="mt-carte"><h2>Mois par mois</h2>`
+      + `<p class="sous">Le niveau de chaque mois, de ses nuits de week-end (vendredi et samedi) et de ses nuits de semaine.</p>`
+      + `<div class="mt-defile"><table class="mt-table"><thead><tr><th>Mois</th><th>Niveau</th><th>Week-end</th><th>Semaine</th><th>Avantage</th><th>Événements</th></tr></thead>`
+      + `<tbody>${lignes}</tbody></table></div></div>`
+  }
+
+  // ─── 3. Week-end ou semaine ───────────────────────────────────────────────
+  function blocSemaine () {
+    const w = donnees.week_end_ou_semaine
+    const verdict = w.verdict === 'week_end' ? 'Le marché est plus favorable le <b>week-end</b>.'
+      : w.verdict === 'semaine' ? 'Le marché est plus favorable en <b>semaine</b>.'
+        : 'Week-end et semaine se valent.'
+    const jours = w.par_jour.map(p => `<div>${ech(p.jour_semaine)}${badge(p.niveau)}</div>`).join('')
+    return `<div class="mt-carte"><h2>Week-end ou semaine</h2>`
+      + `<p class="sous">${verdict} Sur ${donnees.mois.length} mois : ${w.mois_week_end} favorisent le week-end, ${w.mois_semaine} la semaine, ${w.mois_egaux} sont équivalents.</p>`
+      + `<div class="mt-semaine">${jours}</div>`
+      + `<p class="sous">Meilleur jour : <b>${ech(w.meilleur)}</b> · jour le plus faible : <b>${ech(w.pire)}</b>.</p></div>`
+  }
+
+  // ─── 4. Les événements ────────────────────────────────────────────────────
+  function blocEvenements () {
+    if (!donnees.evenements.length) return ''
+    const lignes = donnees.evenements.map(e => `<div class="mt-evt"><b>${ech(e.nom)}</b> ${badge(e.niveau)}<br>`
+      + e.occurrences.map(o => `${ech(jourFr(o.debut))}${o.fin !== o.debut ? ` → ${ech(jourFr(o.fin))}` : ''} (${o.nuits} nuit${o.nuits > 1 ? 's' : ''})`).join(' · ')
+      + `</div>`).join('')
+    return `<div class="mt-carte"><h2>Fériés et événements</h2>`
+      + `<p class="sous">Les jours que le modèle d’AirROI rattache à un férié ou à un événement, regroupés, avec leur niveau.</p>${lignes}</div>`
+  }
+
+  // ─── 5. Les événements à créer dans YieldFlow ─────────────────────────────
+  function blocSuggestions () {
+    const lignes = donnees.suggestions.map(s => {
+      const periode = s.type === 'saisonnier'
+        ? (s.debut === s.fin ? ech(moisFr(s.debut)) : `${ech(moisFr(s.debut))} → ${ech(moisFr(s.fin))}`)
+        : (s.debut === s.fin ? ech(jourFr(s.debut)) : `${ech(jourFr(s.debut))} → ${ech(jourFr(s.fin))}`)
+      return `<tr><td>${ech(s.nom)}</td><td>${s.type === 'saisonnier' ? 'Saison' : 'Événement'}</td><td>${periode}</td><td>${badge(s.niveau)}</td><td>${s.recurrent ? 'oui' : 'non'}</td></tr>`
+    }).join('')
+    return `<div class="mt-carte"><h2>Événements à créer dans YieldFlow</h2>`
+      + `<p class="sous">Des suggestions à lire : rien n’est créé d’ici. Si l’une vous paraît juste, créez-la vous-même dans YieldFlow.</p>`
+      + `<div class="mt-defile"><table class="mt-table"><thead><tr><th>Nom</th><th>Type</th><th>Période</th><th>Niveau</th><th>Récurrent</th></tr></thead>`
+      + `<tbody>${lignes}</tbody></table></div></div>`
+  }
+
+  // ─── 6. La courbe mensuelle, avec les bandes des 4 niveaux ────────────────
+  function blocCourbe () {
+    const pts = donnees.courbe
+    if (!pts.length) return ''
+    const s = donnees.seuils
+    const L = 640, H = 220, g = 36, d = 10, h = 16, b = 46
+    const vals = pts.map(p => p.ecart)
+    const min = Math.min(-6, Math.floor(Math.min(...vals)) - 1)
+    const max = Math.max(10, Math.ceil(Math.max(...vals)) + 1)
+    const y = v => h + (max - v) / (max - min) * (H - h - b)
+    const x = i => g + i * (L - g - d) / Math.max(1, pts.length - 1)
+    const bande = (de, a, n) => `<rect x="${g}" width="${L - g - d}" y="${y(Math.min(a, max))}" height="${Math.max(0, y(Math.max(de, min)) - y(Math.min(a, max)))}" fill="var(--t-${n})" opacity="0.35"></rect>`
+    const bandes = bande(min, s.creux, 'creux') + bande(s.creux, s.favorable, 'modere') + bande(s.favorable, s.pic, 'favorable') + bande(s.pic, max, 'pic')
+    const ligne = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.ecart).toFixed(1)}`).join(' ')
+    const graduations = [s.creux, 0, s.favorable, s.pic].map(v => `<text x="${g - 6}" y="${y(v) + 4}" text-anchor="end">${v > 0 ? '+' : ''}${v}</text>`).join('')
+    const mois = pts.map((p, i) => i % 3 === 0 ? `<text x="${x(i)}" y="${H - b + 16}" text-anchor="middle">${ech(moisCourt(p.mois))}</text>` : '').join('')
+    return `<div class="mt-carte"><h2>La saison sur deux ans</h2>`
+      + `<p class="sous">L’écart moyen de chaque mois à la base du modèle, en points (pas en euros), sur les bandes des quatre niveaux.</p>`
+      + `<div class="mt-defile"><svg class="mt" viewBox="0 0 ${L} ${H}" role="img" aria-label="Écart moyen mensuel du marché sur deux ans">`
+      + bandes + `<line class="axe" x1="${g}" x2="${L - d}" y1="${y(0)}" y2="${y(0)}" stroke-dasharray="3 3"></line>`
+      + `<path d="${ligne}" fill="none" stroke="var(--text)" stroke-width="2"></path>`
+      + pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ecart).toFixed(1)}" r="2.5" fill="var(--text)"></circle>`).join('')
+      + graduations + mois + `</svg></div></div>`
+  }
+
+  function brancher () {
+    const mois = moisDisponibles()
+    const prec = el('mt-prec'), suiv = el('mt-suiv')
+    if (prec) prec.addEventListener('click', () => { if (moisCourant > 0) { moisCourant--; jourChoisi = null; peindre() } })
+    if (suiv) suiv.addEventListener('click', () => { if (moisCourant < mois.length - 1) { moisCourant++; jourChoisi = null; peindre() } })
+    document.querySelectorAll('.mt-jour').forEach(b => b.addEventListener('click', () => {
+      jourChoisi = b.dataset.jour
+      document.querySelectorAll('.mt-jour').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.jour === jourChoisi)))
+      el('mt-detail').innerHTML = detail()
+    }))
+  }
+
+  init()
+</script>
+</body>
+</html>
