@@ -2667,7 +2667,11 @@ comparables vaut **déclaration du positionnement** : il n'y a pas d'étape
   - ceux qui sont hors de la liste sont comptés sous la liste (« N comparables
     retenus par l'équipe HôteSmart… restent pris en compte »).
 
-  *Décision à confirmer par Thierry : l'hôte doit-il pouvoir les retirer ?*
+  **Décision de Thierry du 5 octobre 2026 : l'hôte ne peut PAS retirer un
+  comparable retenu par l'équipe.** Il est verrouillé, et la mention « Retenu
+  par l'équipe HôteSmart » est la bonne. L'hôte ajoute les siens par-dessus,
+  il ne retire pas les nôtres. Les 3 comparables minimum s'entendent hors de
+  ceux de l'équipe.
 - **Une liste en cache périmée** (plus de 90 jours) n'est plus proposée et ne
   valide plus un choix.
 - **La photo n'est acceptée qu'en https, sur `muscache.com`** (le domaine des
