@@ -342,7 +342,12 @@ test('LE TEST QUI COMPTE (telephone) : le nombre de biens tient aussi dans l ecr
   for (let i = 1; i < xs.length; i++) assert.ok(xs[i] - xs[i - 1] > l, 'les barres ne se chevauchent pas')
   assert.ok(xs[35] + l <= 317, 'la derniere barre reste dans le dessin')
   assert.deepEqual([...carte.querySelectorAll('text.initiale')].map(t => t.textContent).join(''), 'OJAJOJAJOJAJ')
-  assert.deepEqual([...carte.querySelectorAll('text.annee')].map(x => x.textContent), ['2023', '2024', '2025', '2026'])
+  // La serie commence en septembre 2023 : janvier 2024 n'est qu'a 4 barres,
+  // « 2023 » le chevaucherait (review de 24e3d9d) — il n'est pas ecrit.
+  const annees = [...carte.querySelectorAll('text.annee')]
+  assert.deepEqual(annees.map(x => x.textContent), ['2024', '2025', '2026'])
+  const ax = annees.map(a => Number(a.getAttribute('x')))
+  for (let i = 1; i < ax.length; i++) assert.ok(ax[i] - ax[i - 1] > 30, 'les annees ne se chevauchent pas')
 })
 
 test('bureau : la largeur de dessin plafonne a 900', async () => {
