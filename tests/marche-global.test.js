@@ -257,7 +257,7 @@ test('LE TEST QUI COMPTE (page, §17) : occupation du marche jamais mise en rega
   assert.match(PAGE, /elle ne se compare pas à l’occupation d’un logement/)
   // Regle 13 : la page ne lit du logement que son nom.
   assert.deepEqual([...PAGE.matchAll(/supabase\.from\('properties'\)\.select\('([^']*)'\)/g)].map(m => m[1]), ['id, name'])
-  assert.match(PAGE, /corps\(sectionRevpar\(d\.progression, d\.recupere_le\) \+ sectionRemplissage\(d\.progression, d\.recupere_le\) \+ sectionBiens\(d\.revpar\)\)/)
+  assert.match(PAGE, /corps\(sectionRevpar\(dernier\.progression, dernier\.recupere_le\) \+ sectionRemplissage\(dernier\.progression, dernier\.recupere_le\) \+ sectionBiens\(dernier\.revpar\)\)/)
 })
 
 test('la vue rend les trois blocs ; des vacances illisibles laissent les blocs 1 et 2 et disent le calendrier non calculable', async () => {

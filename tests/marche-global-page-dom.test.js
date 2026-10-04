@@ -47,13 +47,15 @@ const TEMPERATURE = { source: 'airroi', etat: 'calcule', marche: MARCHE, ...t.po
 const reponse = (corps, status = 200) => ({ ok: status < 400, status, json: async () => corps })
 const attendre = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)) }
 
-async function monter (routes, maintenant = MAINTENANT) {
+async function monter (routes, maintenant = MAINTENANT, largeur = 0) {
   const dom = new JSDOM(HTML.replace(/<script type="module">[\s\S]*?<\/script>/, ''), { runScripts: 'outside-only', url: 'https://staging.example/apps/yield/marche-global' })
   const w = dom.window
   // L'horloge de la FENETRE (autre realm que Node) : figee au 4 octobre 2026.
   w.eval(`(() => { const D = Date; const T = ${maintenant};
     class Fige extends D { constructor (...a) { if (a.length) super(...a); else super(T) } static now () { return T } }
     window.Date = Fige })()`)
+  // jsdom ne mesure rien : la largeur de la carte est simulee quand le test la donne.
+  if (largeur) Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { configurable: true, get () { return this.id === 'mg-corps' ? largeur : 0 } })
   const appels = []
   w.fetch = async (url) => {
     appels.push(url)
@@ -314,4 +316,53 @@ test('REVIEW : une barre grise de couverture partielle est expliquee', async () 
   const carte = [...doc.querySelectorAll('#mg-corps .mg-carte')][2]
   assert.match(carte.textContent, /Une barre grise : mois où la couverture d’AirROI était encore partielle/)
   assert.ok([...carte.querySelectorAll('rect title')].some(t => /couverture AirROI partielle/.test(t.textContent)))
+})
+
+// ─── Telephone : les courbes de douze mois tiennent dans l'ecran ────────────
+test('LE TEST QUI COMPTE (telephone) : les courbes de 12 mois sont dessinees a la largeur de l ecran, sans defilement', async () => {
+  const { doc } = await monter(OK, MAINTENANT, 351)
+  const cartes = [...doc.querySelectorAll('#mg-corps .mg-carte')]
+  for (const carte of cartes.slice(0, 2)) {
+    assert.equal(carte.querySelector('svg').getAttribute('viewBox'), '0 0 317 220', 'largeur de la carte, texte a sa taille')
+    assert.ok(!carte.querySelector('.mg-large'), 'aucune largeur minimale')
+    assert.equal(carte.querySelectorAll('text.initiale').length, 12)
+  }
+  assert.ok(!/min-width: 600px/.test(HTML), 'aucun graphique n impose de largeur minimale')
+})
+
+test('LE TEST QUI COMPTE (telephone) : le nombre de biens tient aussi dans l ecran — 36 barres fines, une initiale par trimestre', async () => {
+  const { doc } = await monter(OK, MAINTENANT, 351)
+  const carte = [...doc.querySelectorAll('#mg-corps .mg-carte')][2]
+  assert.equal(carte.querySelector('svg').getAttribute('viewBox'), '0 0 317 130')
+  const barres = [...carte.querySelectorAll('rect')]
+  assert.equal(barres.length, 36)
+  const xs = barres.map(b => Number(b.getAttribute('x')))
+  const l = Number(barres[0].getAttribute('width'))
+  assert.ok(l < 10 && l >= 3, `barre affinee : ${l}`)
+  for (let i = 1; i < xs.length; i++) assert.ok(xs[i] - xs[i - 1] > l, 'les barres ne se chevauchent pas')
+  assert.ok(xs[35] + l <= 317, 'la derniere barre reste dans le dessin')
+  assert.deepEqual([...carte.querySelectorAll('text.initiale')].map(t => t.textContent).join(''), 'OJAJOJAJOJAJ')
+  // La serie commence en septembre 2023 : janvier 2024 n'est qu'a 4 barres,
+  // « 2023 » le chevaucherait (review de 24e3d9d) — il n'est pas ecrit.
+  const annees = [...carte.querySelectorAll('text.annee')]
+  assert.deepEqual(annees.map(x => x.textContent), ['2024', '2025', '2026'])
+  const ax = annees.map(a => Number(a.getAttribute('x')))
+  for (let i = 1; i < ax.length; i++) assert.ok(ax[i] - ax[i - 1] > 30, 'les annees ne se chevauchent pas')
+})
+
+test('bureau : la largeur de dessin plafonne a 900', async () => {
+  const { doc } = await monter(OK, MAINTENANT, 1400)
+  assert.equal(doc.querySelector('#mg-corps svg').getAttribute('viewBox'), '0 0 900 260')
+})
+
+test('une rotation du telephone redessine les courbes a la nouvelle largeur, sans relire le serveur', async () => {
+  let largeur = 351
+  const { w, doc, appels } = await monter(OK, MAINTENANT, 351)
+  Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { configurable: true, get () { return this.id === 'mg-corps' ? largeur : 0 } })
+  largeur = 700
+  const avant = appels.length
+  w.dispatchEvent(new w.Event('resize'))
+  await new Promise(r => setTimeout(r, 260))
+  assert.equal(doc.querySelector('#mg-corps svg').getAttribute('viewBox'), '0 0 666 260')
+  assert.equal(appels.length, avant, 'aucune nouvelle lecture')
 })
