@@ -2233,3 +2233,89 @@ aucun mois n'est concerné : les annonces vont de 432 à 1 021.
 - **G2** : le module commun du calendrier AirROI, branché dans les deux pages.
 - **G3** : la page, avec les courbes superposées, la progression et le bloc
   AirROI ; puis la recette sur staging.
+
+## 17. La page « le marché global », refonte en quatre sections (4 octobre 2026) — SPEC
+
+Décision de Thierry du 4 octobre 2026, après la recette de §16 : la page est
+**remplacée** par une version simplifiée. Staging uniquement. Elle **remplace
+§16 pour la page** ; les calculs de §16.2 (`lib/marche/progression-marche.js`)
+restent dans leur pipeline, et la page n'en lit plus que les années.
+
+**Pipelines étanches (règle gravée).** La page montre deux sources côte à
+côte, l'historique (sections 1 à 3) et AirROI (section 4), sans jamais les
+croiser. L'assemblage viendra plus tard, en aval.
+
+**Données.** Aucun nouvel appel payant. Ce sont les mêmes données que les
+fixtures : les 60 mois (`markets/metrics/all`, `marche-60.json`) lus dans
+`airroi_cache` par `/api/marche-global`, et le relief (`relief-bagneres-
+2026-09-30.json`) lu dans `marche_temperature_airroi` par
+`/api/marche-temperature`. Les deux routes ne changent pas.
+
+**Introduction** : « Une estimation du marché, pas un prix. Cette page montre le
+marché de votre commune d'après les annonces Airbnb. Elle ne calcule aucun prix
+pour votre logement, n'en pousse aucun, et ne pilote rien. »
+
+### 17.1 Les quatre sections, dans cet ordre
+
+1. **RevPAR mois par mois, années superposées.**
+   - Trois courbes : N, N-1 et N-2. La légende est **relative** (« N », « N-1 »,
+     « N-2 »), sans année en dur ; l'année réelle n'apparaît qu'en info-bulle.
+   - Axe X : janvier → décembre. Axe Y : RevPAR médian (p50), en euros.
+   - N est l'année de la lecture de l'historique (`recupere_le`). Une année
+     partielle (moins de 12 mois mesurés) est en **pointillés**. C'est le cas de
+     N, et de N-1 ou N-2 s'il leur manque des mois.
+   - Mention conservée : « pas un prix pour votre logement ».
+2. **Remplissage mois par mois** : même format, axe Y = occupation médiane (%).
+   Mention conservée (règle 13) : l'occupation du marché ne se compare pas à
+   celle d'un logement.
+3. **Nombre de biens sur le marché** : les barres de la couverture réelle
+   (annonces actives), **format existant** : les 36 derniers mois, une barre par
+   mois, une barre grise pour une couverture partielle. On y ajoute les
+   initiales des mois et les années pour qu'elles se lisent seules.
+4. **Calendrier AirROI, jour par jour, 12 mois d'un coup.**
+   - Les 12 mois visibles ensemble, **sans navigation**, à partir du mois en
+     cours (heure de Paris) dans la capture.
+   - La présentation et les couleurs reprennent **exactement** l'ancien
+     calendrier de l'historique (« Le calendrier du marché, jour par jour ») :
+     même grille de 12 mois, mêmes petites cases, les quatre bleus. Ils ont une
+     version sombre.
+   - Quatre niveaux : Creux (marché faible), Modéré (marché normal), Favorable
+     (bon moment), Pic (très forte demande).
+   - Seuils sur l'écart à la base 100 : Creux < −3, Modéré de −3 à +2,
+     Favorable de +2 à +7, Pic ≥ +7. Ce sont ceux de §15 (`SEUILS`), qui ne
+     changent pas.
+   - **Un clic sur un jour ouvre une fenêtre de détail** : niveau, saison, jour
+     de semaine, événement détecté et demande. Elle se ferme par son bouton, la
+     touche Échap ou un clic à côté, et le focus revient au jour cliqué.
+   - **Aucun prix, jamais.**
+   - Sous le calendrier : « Deux sources, deux calendriers. Le modèle AirROI ne
+     tient pas compte de l'historique des ventes. »
+
+**La palette du calendrier AirROI devient ces quatre bleus partout**, y compris
+sur la page « La température du marché » : un même calendrier a une seule
+palette, et il vit dans un seul module (`shared/temperature-calendrier.js`).
+La règle de §16.1 « deux palettes sur une page » n'a plus d'objet : le
+calendrier de l'historique quitte cette page.
+
+### 17.2 Ce qui disparaît de la page
+
+- le graphique ADR et le graphique double axe ADR + occupation ;
+- le RevPAR en quatre quantiles sur 36 mois (remplacé par la section 1) ;
+- la progression (les tuiles) et le détail mois par mois ;
+- le calendrier de l'historique, qui reste calculé dans son pipeline
+  (`calendrierAttendu`, `/api/marche-global`) mais n'est plus affiché ici.
+
+### 17.3 Plus tard (lot séparé, pas maintenant)
+
+Sous le calendrier AirROI : le diagnostic mensuel, le week-end contre la
+semaine, l'impact des événements et les suggestions YieldFlow.
+
+### 17.4 Le lot
+
+**R1** :
+- la page réécrite ;
+- dans `shared/temperature-calendrier.js` : la vue « 12 mois », la fenêtre de
+  détail et la palette bleue ;
+- les tests : la page dans un vrai DOM, le module, et les bornes des seuils
+  (−3, +2 et +7 exactement) ;
+- la review, puis la recette sur staging.
