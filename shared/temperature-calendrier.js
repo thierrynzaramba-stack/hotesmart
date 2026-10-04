@@ -87,13 +87,16 @@ const STYLES = `
   .tc-case { font: inherit; font-size: 11px; line-height: normal; text-align: center; padding: 4px 0; border: 0; border-radius: 3px; cursor: pointer; }
   .tc-case:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
   .tc-vide { font-size: 11px; text-align: center; padding: 4px 0; color: var(--text2); }
-  /* Telephone (demande de Thierry, 4 octobre 2026) : un mois occupe toute la
-     largeur, et chaque case devient une cible de 44 px de haut, au doigt. */
+  /* Telephone (demandes de Thierry, 4 octobre 2026) : deux mois par ligne,
+     pour ne pas defiler trois metres ; chaque case reste plus haute qu'au
+     bureau (32 px) pour le doigt. A 375 px, une case fait ~21 x 32 px. */
   @media (max-width: 640px) {
-    .tc-annee { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-    .tc-mini { gap: 3px; }
-    .tc-mjsem { font-size: 12px; }
-    .tc-case, .tc-vide { min-height: 44px; font-size: 14px; border-radius: 6px; display: flex; align-items: center; justify-content: center; padding: 0; }
+    .tc-annee { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; }
+    .tc-mois h3 { font-size: 12.5px; margin-bottom: 4px; }
+    .tc-mini { gap: 2px; }
+    .tc-mjsem { font-size: 10px; }
+    .tc-case, .tc-vide { min-height: 32px; font-size: 12px; display: flex; align-items: center; justify-content: center; padding: 0; }
+    .tc-case { border-radius: 4px; }
   }
   /* La fenetre de detail d'un jour. */
   .tc-fond { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 1000; }
