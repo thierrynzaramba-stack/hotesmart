@@ -2498,3 +2498,184 @@ Le niveau et la flèche disent deux choses différentes :
 
 À Bagnères, l'hiver est Modéré et ↑ : février est creux, et ses vacances le
 relèvent. Le printemps est Creux et → : avril est faible, vacances comprises.
+
+## 20. « Choisir vos comparables » : décrire son bien, puis choisir (5 octobre 2026) — SPEC
+
+Décisions de Thierry du 5 octobre 2026, étape 2 du flux « nouveau bien ».
+Après le marché global, l'hôte **décrit son bien** (étape A), puis **coche au
+moins 3 comparables** parmi les 25 que propose AirROI (étape B). Les deux étapes
+sont sur la même page : B apparaît après la validation de A. Le choix des
+comparables vaut **déclaration du positionnement** : il n'y a pas d'étape
+« gamme » (décision du 23 septembre). Staging uniquement.
+
+### 20.1 Ce qu'AirROI donne, et ce qu'on lui prend
+
+- **Source** : `GET /listings/comparables`, à 0,10 $. Il renvoie les 25 voisins
+  les plus ressemblants pour une position, un nombre de chambres, de salles de
+  bain et de voyageurs. **Pas toute la commune** : 432 à 1 021 annonces actives à
+  Bagnères, soit 20 à 50 $ par `search/radius`. *Validé par Thierry.*
+- **Ce qu'on prend** :
+  - photo de couverture : un lien Airbnb, affiché à la volée et **jamais
+    stocké** ;
+  - nom, voyageurs, chambres, position ;
+  - jours bloqués sur 12 mois, d'où l'ouverture annuelle
+    `(365 − ttm_blocked_days) / 365` ;
+  - équipements.
+- **Jamais un prix, un revenu ou une occupation**, ni à l'écran ni dans le tri.
+  Le critère « prix variable » est **retiré** : sans prix, rien ne le mesure.
+  *Validé par Thierry.*
+- La clé AirROI reste un secret serveur. Tout passe par `lib/airroi/client.js` :
+  - cache ;
+  - journal des appels ;
+  - plafonds de 10 $ par mois, 4 $ par compte sur 30 jours et 3 $ par bien sur
+    90 jours.
+- **Coût** : au plus 0,10 $ par profil de bien. Un profil inchangé relit le
+  cache ; la clé du cache inclut la position et la taille.
+
+### 20.2 Étape A — le profil du bien
+
+- **Adresse**, convertie en position par l'**API Adresse de l'État**
+  (`api-adresse.data.gouv.fr/search/`, gratuite, sans clé), **appelée par le
+  serveur** :
+  - le résultat le mieux classé est retenu, avec son libellé, qui est montré à
+    l'hôte ;
+  - sous un score de 0,5, l'adresse est refusée (« adresse introuvable,
+    précisez-la »).
+- **Nombre de voyageurs** : de 1 à 30.
+- **Nombre de VRAIES chambres**, de 0 à 20. Une chambre est **une pièce séparée
+  avec une porte** ; un canapé-lit dans le salon n'en est pas une. Le formulaire
+  le dit en toutes lettres, avec l'exemple « 1 chambre + 1 salon avec couchage =
+  1 chambre ».
+- **Nombre de pièces au total** : de 1 à 30, et au moins le nombre de chambres.
+- **Nombre de salles de bain** : de 0 à 10.
+- **Équipements qui impactent le prix**, en cases à cocher : terrasse,
+  jacuzzi ou spa, jardin, piscine, parking, vue exceptionnelle, climatisation.
+- **Stockage** : table V2 neuve `bien_profil`, une ligne par bien. Son seul
+  writer est `lib/marche/profil-bien.js`. On n'écrit **jamais** dans
+  `properties` (décision du 25 septembre).
+
+### 20.3 Étape B — les 25 comparables et le tri
+
+- La recherche AirROI utilise la position géocodée, les vraies chambres, les
+  salles de bain et les voyageurs du profil.
+- **Pertinence**, en pourcentage de ressemblance. Quatre composantes de 0 à 1,
+  pondérées dans l'ordre d'importance donné par Thierry :
+
+  | Composante | Poids | Calcul |
+  |---|---|---|
+  | Zone proche | 40 % | 1 à 0 km, puis décroissance linéaire jusqu'à 0 à 10 km (distance à vol d'oiseau) |
+  | Ouverture annuelle | 25 % | la part de l'année où le bien est ouvert |
+  | Équipements partagés | 20 % | sur les 7 équipements : partagés ÷ présents chez l'un ou l'autre ; 1 si aucun des deux n'en a |
+  | Capacité similaire | 15 % | 1 − la moyenne des écarts relatifs de voyageurs et de chambres, bornée à 0 |
+
+  - La position d'environ la moitié des annonces est décalée de quelques
+    centaines de mètres (`exact_location` faux) : la distance est approchée, et
+    la carte le dit.
+  - À égalité de score, on garde l'ordre d'AirROI.
+- **Correspondance des équipements** vers les libellés Airbnb, en anglais :
+
+  | Équipement | Libellés Airbnb |
+  |---|---|
+  | Terrasse | « Patio or balcony » |
+  | Jacuzzi ou spa | « Hot tub », « Sauna » |
+  | Jardin | « Backyard », « Garden » |
+  | Piscine | tout libellé contenant « pool » |
+  | Parking | « … parking on premises », « Garage » |
+  | Vue exceptionnelle | vue sur la montagne, la mer, l'océan, un lac, une rivière, une plage ou une vallée |
+  | Climatisation | « … air conditioning » |
+
+  Une fiche Airbnb est parfois courte (6 équipements) : **l'absence d'un
+  équipement ne prouve rien**, et c'est assumé.
+- **Chaque carte** porte :
+  - la photo, le nom, le nombre de voyageurs et de chambres ;
+  - les équipements clés en badges ;
+  - « ouvert toute l'année » à partir de 90 % d'ouverture, sinon « saisonnier » ;
+  - « N % de ressemblance », discret ;
+  - la case à cocher.
+- **Au moins 3 comparables cochés** : le bouton « Valider mes comparables » reste
+  grisé en dessous.
+- **Stockage** : la table existante `comparables_retenus`, avec
+  `retenu_par = 'proprietaire'`. Valider rend actifs les biens cochés et
+  désactive les autres (`actif = false`) ; on ne supprime pas, l'historique du
+  choix reste. **Le serveur refuse un identifiant qui n'est pas dans la
+  dernière liste AirROI du profil.**
+- **Pipeline** : les comparables alimentent le pipeline du « marché emprunté »
+  (`lib/marche/etude.js`), **jamais** le pipeline historique.
+
+### 20.4 La route `/api/marche-comparables`
+
+| Appel | Garde | Effet |
+|---|---|---|
+| `GET ?property_id=` | `reservations` en lecture, bien requis | le profil et les comparables retenus ; aucun appel payant |
+| `POST { action: 'profil' }` | `reglages` en écriture, bien requis | géocode l'adresse et enregistre le profil |
+| `POST { action: 'chercher' }` | `reglages` en écriture, bien requis | lit la liste AirROI (cache, sinon 0,10 $) et rend les cartes triées, **sans prix** |
+| `POST { action: 'retenir', listing_ids }` | `reglages` en écriture, bien requis | au moins 3, tous dans la liste ; enregistre |
+
+- L'appel payant est en **POST** : un GET ne paie jamais, même rejoué par un
+  navigateur ou un robot.
+- Les messages destinés à l'hôte ne parlent ni de coût ni de jargon.
+
+### 20.5 Les lots
+
+- **C1** :
+  - la migration `bien_profil` ;
+  - `lib/marche/profil-bien.js` : validation, géocodage injectable, writer ;
+  - `lib/marche/pertinence.js` : cartes sans prix et tri, en fonction pure ;
+  - leurs tests, dont le tri par pertinence.
+- **C2** : la route et ses tests (garde, aucun prix, identifiant hors liste
+  refusé, au moins 3).
+- **C3** : la page `apps/yield/comparables.html` (deux étapes, cartes en colonne
+  sur téléphone, mode sombre), ses tests dans un vrai DOM, puis la recette sur
+  staging.
+
+### 20.6 Règles posées par les reviews de C1 et C2 (5 octobre 2026)
+
+- **Quota des recherches nouvelles** (sécurité). Une recherche que le cache ne
+  sert pas coûte 0,10 $. Sans quota, un hôte qui change son profil à chaque
+  recherche pourrait vider le budget AirROI global de 10 $ par mois, et couper
+  AirROI pour tous les comptes.
+  - **Le quota est ATOMIQUE.** La fonction SQL
+    `reserver_recherche_comparables` (migration
+    `2026-10-05-comparables-recherches.sql`) compte puis réserve dans une même
+    transaction, sous `pg_advisory_xact_lock`. La première version lisait le
+    journal, puis payait : 60 requêtes parallèles passaient toutes (review de
+    7ace057).
+  - Plafonds :
+    - **3 par bien** sur 24 heures ;
+    - **5 par compte** sur 24 heures ;
+    - **10 par compte** sur 30 jours ;
+    - **50 pour tous les comptes** sur le mois civil.
+  - Le compteur, `comparables_recherches`, est distinct du journal AirROI : les
+    études du fondateur n'y entrent pas.
+  - Une liste fraîche en cache ne réserve rien. Une réponse illisible de la
+    fonction est un refus, jamais un paiement.
+  - Quand un plafond est atteint, le message dit lequel, sans coût ni jargon.
+- **Aucune recherche ne part seule à l'ouverture de la page.** Pour un profil
+  sans liste en cache, un bouton « Chercher les biens du marché » la lance. Après
+  la validation de l'étape A, la recherche part, puisque c'est le geste de
+  l'hôte.
+- **Les choix du fondateur sont préservés.** Valider :
+  - ajoute les biens nouveaux au nom du propriétaire, sans toucher une ligne
+    existante ;
+  - réactive les biens cochés, sans changer leur provenance ;
+  - **ne désactive que les anciens choix du propriétaire**.
+
+  Une ligne du fondateur absente des 25 proposés reste active. **La page le
+  dit** :
+  - un retenu du fondateur présent dans la liste est coché, verrouillé, et
+    marqué « Retenu par l'équipe HôteSmart » ;
+  - ceux qui sont hors de la liste sont comptés sous la liste (« N comparables
+    retenus par l'équipe HôteSmart… restent pris en compte »).
+
+  *Décision à confirmer par Thierry : l'hôte doit-il pouvoir les retirer ?*
+- **Une liste en cache périmée** (plus de 90 jours) n'est plus proposée et ne
+  valide plus un choix.
+- **La photo n'est acceptée qu'en https, sur `muscache.com`** (le domaine des
+  photos Airbnb), et l'URL est re-sérialisée. La page l'affiche par
+  `setAttribute`, avec `referrerpolicy="no-referrer"`. Tout champ venu d'AirROI
+  est du texte (`textContent`).
+- **Dette** : les trois écritures d'une validation (ajout, réactivation,
+  désactivation) ne forment pas une transaction. Deux validations simultanées du
+  même bien, depuis deux onglets ou par le titulaire et un membre, peuvent
+  s'entrelacer. Correctif prévu : une fonction SQL transactionnelle, avec sa
+  migration.
