@@ -2120,7 +2120,10 @@ n'est écrit). Aucun appel AirROI dans ce script : il lit une capture.
 
 ### 15.4 Les 4 niveaux
 
-`ecart = prix_base100 − 100` (points de pourcentage autour de la base).
+`ecart = saison + jour de semaine + événement` (points de pourcentage autour de
+la base 100). C'est `prix_base100 − 100 − demande` : AirROI rend un prix qui vaut
+exactement 100 plus ses quatre composantes, et la lecture le vérifie jour par jour
+(un écart de plus de 0,02 point refuse la capture : format changé).
 
 | Niveau | Écart |
 |---|---|
@@ -2157,7 +2160,11 @@ lointains (précaution 2 du §14). Elle reste lisible dans le détail d'un jour.
 - `GET /api/marche-temperature?property_id=` : garde du bien, `marche_biens`,
   dernière capture du marché dans `marche_temperature_airroi`, puis les jours
   (date, niveau, nom d'événement, sens de chaque composante) et les analyses.
-  **Jamais un prix, ni en euros, ni en base 100, dans la réponse.**
+  **Jamais un prix, ni en euros, ni en base 100, dans la réponse** — ni
+  `prix_base100`, ni les composantes chiffrées. Seuls sortent des niveaux, des
+  sens (« vers le haut / neutre / vers le bas »), des noms d'événements, et, pour
+  la courbe, l'**écart mensuel en points** : un pourcentage autour de la base,
+  pas un prix.
 - `apps/yield/marche-temperature.html` : grille mensuelle sur 24 mois, 4 couleurs ;
   au clic sur un jour, le niveau, et pour la saison, le jour de semaine et la
   demande, un sens (« tire vers le haut », « neutre », « tire vers le bas ») ; le

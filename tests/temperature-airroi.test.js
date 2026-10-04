@@ -1,7 +1,7 @@
 // tests/temperature-airroi.test.js — le pipeline AirROI, calendrier de
 // temperature (spec §15 de docs/kb/chantier-nouveau-bien.md).
 const test = require('node:test')
-const assert = require('node:assert')
+const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 const t = require('../lib/marche/temperature-airroi')
@@ -107,7 +107,7 @@ test('week-end ou semaine : meilleur et pire jour, verdict CALCULE (jamais ecrit
   assert.strictEqual(r.meilleur, 'mardi')
   assert.strictEqual(r.pire, 'samedi')
   assert.strictEqual(r.par_jour[0].jour_semaine, 'lundi', 'lundi en tete')
-  assert.ok(['semaine', 'equilibre'].includes(r.verdict), 'un samedi faible ne donne jamais « week-end »')
+  assert.strictEqual(r.verdict, 'semaine', 'un samedi faible et un mardi fort : la semaine l emporte')
   assert.ok(!('moyenne' in r.par_jour[0]), 'aucune valeur chiffree ne sort')
 })
 
@@ -158,4 +158,46 @@ test('LE TEST QUI COMPTE : le pipeline AirROI ne lit rien de l’historique et n
   const tables = [...src.matchAll(/\.from\(['"]([a-z_]+)['"]\)/g)].map(m => m[1])
   assert.deepStrictEqual([...new Set(tables)], ['marche_temperature_airroi'])
   assert.ok(!/yield_events/.test(src), 'les suggestions ne s’ecrivent jamais dans YieldFlow')
+})
+
+// ─── Revue de 7bde148 ───────────────────────────────────────────────────────
+test('un montant ou un prix ABSENT leve — il ne devient pas un zero', () => {
+  const sansMontant = reco('2026-10-01'); sansMontant.explanation.find(e => e.code === 'seasonality').amount = null
+  assert.throws(() => t.lireRelief(reponse([sansMontant])), /seasonality/)
+  const sansPrix = reco('2026-10-01'); sansPrix.price = null
+  assert.throws(() => t.lireRelief(reponse([sansPrix])), /prix illisible/)
+})
+
+test('une date impossible (30 fevrier) est refusee', () => {
+  assert.throws(() => t.lireRelief(reponse([reco('2026-02-30')])), /jour illisible/)
+})
+
+test('LE TEST QUI COMPTE : si le prix ne vaut plus 100 + ses composantes, la capture est refusee (format change)', () => {
+  const faux = reco('2026-10-01', { saison: 2 }); faux.price = 120
+  assert.throws(() => t.lireRelief(reponse([faux])), /format AirROI change/)
+})
+
+test('l’identite du modele tient sur les 729 jours de la capture reelle', () => {
+  const r = lireJson(fs.readFileSync(FIXTURE, 'utf8'))
+  assert.doesNotThrow(() => t.lireRelief(r))
+})
+
+test('un week-end fort donne le verdict « week-end »', () => {
+  const js = []
+  for (let d = 1; d <= 28; d++) { const j = `2026-10-${String(d).padStart(2, '0')}`; js.push(jour(j, t.estWeekEnd(j) ? 6 : 0)) }
+  assert.strictEqual(t.weekEndOuSemaine(js).verdict, 'week_end')
+})
+
+test('la courbe : un point par mois, l’ecart moyen en points', () => {
+  const c = t.courbe([jour('2026-10-01', 2), jour('2026-10-02', 4), jour('2026-11-01', -1)])
+  assert.deepStrictEqual(c, [{ mois: '2026-10', ecart: 3 }, { mois: '2026-11', ecart: -1 }])
+})
+
+test('WRITER UNIQUE : seul lib/marche/temperature-airroi.js nomme sa table dans lib/ et api/', () => {
+  const racine = path.join(__dirname, '..')
+  const fichiers = []
+  const parcourir = d => { for (const x of fs.readdirSync(path.join(racine, d), { withFileTypes: true })) { const p = `${d}/${x.name}`; if (x.isDirectory()) parcourir(p); else if (p.endsWith('.js')) fichiers.push(p) } }
+  parcourir('lib'); parcourir('api')
+  const nommant = fichiers.filter(f => /\.from\(\s*['"`]marche_temperature_airroi/.test(fs.readFileSync(path.join(racine, f), 'utf8')))
+  assert.deepStrictEqual(nommant, ['lib/marche/temperature-airroi.js'])
 })

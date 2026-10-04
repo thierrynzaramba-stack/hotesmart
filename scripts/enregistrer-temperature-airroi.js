@@ -33,6 +33,10 @@ const go = args.includes('--go')
   const compte = {}
   for (const l of lignes) compte[l.niveau] = (compte[l.niveau] || 0) + 1
   console.log(`${lignes[0].localite} · capture du ${lignes[0].capture_le} · ${lignes.length} jours (${lignes[0].jour} → ${lignes[lignes.length - 1].jour}) · methode ${METHODE}`)
+  // Le marche vient de --marche60 : la capture ne porte que des coordonnees. On
+  // les montre, pour qu'un relief ne se range pas sous le mauvais marche.
+  const loc = relief.location || {}
+  console.log(`  capture faite aux coordonnees ${loc.latitude}, ${loc.longitude} · marche nomme par --marche60 : ${marche60.market.locality} (${marche60.market.region})`)
   console.log(`  creux ${compte.creux || 0} · modere ${compte.modere || 0} · favorable ${compte.favorable || 0} · pic ${compte.pic || 0}`)
   if (!go) { console.log('Sans --go : AUCUNE ecriture.'); return }
 
