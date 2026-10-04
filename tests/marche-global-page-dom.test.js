@@ -235,8 +235,11 @@ test('changer de logement pendant la lecture : la reponse du logement precedent 
 })
 
 test('le calendrier AirROI part du mois en cours (heure de Paris), pas du premier mois de la capture', async () => {
-  // 31 decembre 2026 a 23 h 30 UTC : deja janvier 2027 a Paris.
-  const { doc } = await monter(OK, Date.parse('2026-12-31T23:30:00Z'))
+  // 31 decembre 2026 a 23 h 30 UTC : deja janvier 2027 a Paris. La reponse
+  // n'a pas de resume : le calendrier se repere sur l'heure de Paris du navigateur.
+  const sansResume = { ...TEMPERATURE }
+  delete sansResume.resume
+  const { doc } = await monter({ ...OK, '/api/marche-temperature': () => reponse(sansResume) }, Date.parse('2026-12-31T23:30:00Z'))
   const mois = [...doc.querySelectorAll('#mg-airroi-zone .tc-mois h3')].map(h => h.textContent)
   assert.equal(mois[0], 'janvier 2027')
   assert.equal(mois[11], 'décembre 2027')
@@ -456,4 +459,48 @@ test('PIPELINE ETANCHE (§18) : sans AirROI, la tendance reste ; sans historique
   const b = await monter({ ...OK, '/api/marche-global': () => reponse({}, 500) })
   assert.match(blocs(b.doc)[0].textContent, /Non calculable/)
   assert.match(resume(b.doc).textContent, /plutôt favorable en week-end/)
+})
+
+// ─── Constats de la review de f229258 ───────────────────────────────────────
+test('REVIEW : le calendrier part du MEME mois que le resume calcule par l API', async () => {
+  // Navigateur au 4 octobre 2026, resume de l'API calcule a partir de novembre.
+  const r = t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-11')
+  const { doc } = await monter({ ...OK, '/api/marche-temperature': () => reponse({ source: 'airroi', etat: 'calcule', marche: MARCHE, ...r }) })
+  assert.equal(doc.querySelector('#mg-airroi-zone .tc-mois h3').textContent, 'novembre 2026')
+})
+
+test('REVIEW : une capture partielle se dit dans le resume', async () => {
+  const peu = lignes.filter(l => l.jour < '2027-03-01')
+  const r = t.pourLEcran({ capture_le: '2026-09-30', jours: peu }, '2026-10')
+  const { doc } = await monter({ ...OK, '/api/marche-temperature': () => reponse({ source: 'airroi', etat: 'calcule', marche: MARCHE, ...r }) })
+  assert.match(resume(doc).textContent, /Le modèle AirROI ne couvre que 151 jours sur 365/)
+})
+
+test('REVIEW : course — le resume du logement precedent ne s affiche pas', async () => {
+  let premier = true
+  let liberer
+  const lent = new Promise(r => { liberer = r })
+  const ancien = t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-10')
+  ancien.resume.evenements[0].nom = 'ANCIEN-LOGEMENT'
+  const { w, doc } = await monter({ ...OK, '/api/marche-temperature': async () => {
+    if (premier) { premier = false; await lent; return reponse({ source: 'airroi', etat: 'calcule', marche: MARCHE, ...ancien }) }
+    return reponse(TEMPERATURE)
+  } })
+  doc.getElementById('mg-bien').value = 'B2'
+  doc.getElementById('mg-bien').dispatchEvent(new w.Event('change'))
+  await attendre()
+  liberer()
+  await attendre()
+  assert.ok(!/ANCIEN-LOGEMENT/.test(resume(doc).textContent))
+  assert.equal(blocs(doc)[3].querySelectorAll('.mg-ev-l').length, 6)
+})
+
+test('REVIEW : sans logement, la carte « En resume » reste cachee', async () => {
+  const dom = new JSDOM(HTML.replace(/<script type="module">[\s\S]*?<\/script>/, ''))
+  assert.equal(dom.window.document.getElementById('mg-resume').hidden, true)
+})
+
+test('REVIEW : un separateur entre chaque bloc, sauf le premier', async () => {
+  assert.match(HTML, /#mg-resume-tendance \{ border-top: 0; padding-top: 4px; \}/)
+  assert.ok(!/\.mg-bloc:first-of-type/.test(HTML))
 })

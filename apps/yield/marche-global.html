@@ -50,14 +50,14 @@
     }
     :root[data-theme="dark"] { --yf-base: #1d2a36; --yf-moyen: #1f2d24; --yf-haut: #352d17; --yf-tres-haut: #3a2717; }
     .mg-bloc { padding: 12px 0; border-top: 0.5px solid var(--border); }
-    .mg-bloc:first-of-type { border-top: 0; padding-top: 4px; }
+    #mg-resume-tendance { border-top: 0; padding-top: 4px; }
     .mg-bloc h3 { font-size: 14px; font-weight: 600; margin: 0 0 2px; }
     .mg-source { font-size: 11.5px; color: var(--text2); margin: 0 0 8px; }
     .mg-verdict { font-size: 14px; font-weight: 600; margin: 4px 0 8px; }
     .mg-sens { display: grid; grid-template-columns: 26px 1fr; gap: 4px 6px; font-size: 13.5px; align-items: center; }
     .mg-sens b { font-size: 17px; text-align: center; }
     .mg-niv-l { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px; margin-bottom: 4px;
-                border-radius: 4px; background: var(--niv-fond); box-shadow: inset 3px 0 0 var(--niv-liseré); font-size: 13.5px; color: var(--text); }
+                border-radius: 4px; background: var(--niv-fond); box-shadow: inset 3px 0 0 var(--niv-lisere); font-size: 13.5px; color: var(--text); }
     .mg-niv-l small { color: var(--text2); }
     .mg-ev-liste { display: flex; flex-direction: column; gap: 6px; }
     .mg-ev-l { background: var(--bg2); border-left: 4px solid var(--ev); border-radius: 4px; padding: 7px 10px; font-size: 13px;
@@ -100,7 +100,7 @@
   <div id="mg-airroi-zone"></div>
   <!-- « En resume » (§18) : la tendance vient de l'historique, le reste
        d'AirROI ; chaque bloc nomme sa source, rien n'est croise. -->
-  <div class="mg-carte" id="mg-resume"><h2>En résumé</h2>
+  <div class="mg-carte" id="mg-resume" hidden><h2>En résumé</h2>
     <div class="mg-bloc" id="mg-resume-tendance"></div>
     <div id="mg-resume-airroi"></div>
   </div>
@@ -179,6 +179,7 @@
     const j = ++jeton
     // La fenetre de detail d'un jour appartient au logement precedent (review de 39d9d81).
     fermerDetail()
+    el('mg-resume').hidden = false
     el('mg-resume-tendance').innerHTML = '<p class="mg-meta">Lecture…</p>'
     el('mg-resume-airroi').innerHTML = ''
     chargerHistorique(j)
@@ -355,7 +356,10 @@
     if (d.etat === 'capture_absente') return ici(`<p class="non-calc">${ech(d.motif)}.</p>`)
     if (d.etat !== 'calcule' || !Array.isArray(d.jours) || !d.jours.length) return ici('<p class="non-calc">Aucun jour à afficher pour ce marché.</p>')
     el('mg-airroi-meta').innerHTML = `Modèle AirROI calculé le ${jourFr(d.capture_le)}.`
-    monterAnneeTemperature(el('mg-airroi'), d.jours, { premierMois: moisDeParis(), nbMois: 12 })
+    // Le calendrier part du MEME mois que le resume calcule par l'API ; a
+    // defaut, du mois de Paris lu ici (review de f229258).
+    const depart = d.resume && d.resume.periode && /^\d{4}-\d{2}$/.test(String(d.resume.periode.debut)) ? d.resume.periode.debut : moisDeParis()
+    monterAnneeTemperature(el('mg-airroi'), d.jours, { premierMois: depart, nbMois: 12 })
     el('mg-resume-airroi').innerHTML = blocsAirroi(d.resume)
   }
 
@@ -387,7 +391,7 @@
   const YF = { Base: ['--yf-base', '--yf-base-l'], Moyen: ['--yf-moyen', '--yf-moyen-l'], Haut: ['--yf-haut', '--yf-haut-l'],
     'Très haut ou Exceptionnel': ['--yf-tres-haut', '--yf-exceptionnel-l'] }
   function blocsAirroi (r) {
-    if (!r || r.statut !== 'calcule') {
+    if (!r || r.statut !== 'calcule' || !r.semaine || !Array.isArray(r.niveaux) || !Array.isArray(r.evenements)) {
       return `<div class="mg-bloc"><h3>Le marché selon AirROI</h3>${SOURCE_AIRROI}<p class="non-calc">Non calculable : ${ech((r && r.motif) || 'résumé absent')}.</p></div>`
     }
     const s = r.semaine
@@ -401,7 +405,7 @@
     const niveaux = `<div class="mg-bloc"><h3>Les niveaux du marché</h3>${SOURCE_AIRROI}`
       + r.niveaux.map(n => {
         const [fond, lisere] = YF[n.yieldflow] || ['--bg2', '--border2']
-        return `<div class="mg-niv-l" style="--niv-fond:var(${fond});--niv-liseré:var(${lisere})"><span><b>${ech(n.yieldflow)}</b> <small>(${ech(NOM_AIRROI[niv(n.niveau)] || '—')})</small></span><span>${ech(n.jours)} jour${n.jours > 1 ? 's' : ''}</span></div>`
+        return `<div class="mg-niv-l" style="--niv-fond:var(${fond});--niv-lisere:var(${lisere})"><span><b>${ech(n.yieldflow)}</b> <small>(${ech(NOM_AIRROI[niv(n.niveau)] || '—')})</small></span><span>${ech(n.jours)} jour${n.jours > 1 ? 's' : ''}</span></div>`
       }).join('')
       + '<p class="mg-mention">Les niveaux d’AirROI lus dans les noms de votre grille YieldFlow : une lecture, pas un calcul de vos prix. Pic correspond à Très haut ou Exceptionnel.</p></div>'
     const evts = r.evenements.map(e => {
@@ -413,7 +417,11 @@
     const evenements = `<div class="mg-bloc"><h3>Les événements détectés</h3>${SOURCE_AIRROI}`
       + '<p class="mg-mention" style="margin-bottom:8px">Ces événements sont détectés par le modèle AirROI. Pour qu’ils influencent vos prix, créez-les dans vos événements.</p>'
       + (evts ? `<div class="mg-ev-liste">${evts}</div>` : '<p class="non-calc">Aucun événement détecté sur ces 12 mois.</p>') + '</div>'
-    return semaine + niveaux + evenements
+    // Une capture qui ne couvre pas toute la fenetre le dit.
+    const p = r.periode || {}
+    const partiel = p.jours && p.jours_fenetre && p.jours < p.jours_fenetre
+      ? `<p class="mg-mention" style="margin-top:8px">Le modèle AirROI ne couvre que ${ech(p.jours)} jours sur ${ech(p.jours_fenetre)} : ce résumé ne porte que sur eux.</p>` : ''
+    return partiel + semaine + niveaux + evenements
   }
   const NOM_AIRROI = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
 
