@@ -141,3 +141,10 @@ test('SECURITE : un guillemet dans un evenement ne sort pas des attributs title 
   assert.match(c.getAttribute('title'), /Fête" onmouseover/)
   assert.match(c.getAttribute('aria-label'), /Fête" onmouseover/)
 })
+
+test('telephone : les cases du calendrier 12 mois font au moins 44 px de haut, un mois par ligne', () => {
+  const media = /@media \(max-width: 640px\) \{([\s\S]*?)\n  \}/.exec(SOURCE)
+  assert.ok(media, 'une regle telephone existe')
+  assert.match(media[1], /\.tc-case, \.tc-vide \{[^}]*min-height: 44px/)
+  assert.match(media[1], /\.tc-annee \{ grid-template-columns: minmax\(0, 1fr\)/)
+})
