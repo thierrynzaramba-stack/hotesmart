@@ -47,12 +47,12 @@ const STYLES = `
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --tc-creux: #1d2735; --tc-modere: #2c4466; --tc-favorable: #4f7bbd; --tc-pic: #a9c4ef;
+      --tc-creux: #1d2735; --tc-modere: #2c4466; --tc-favorable: #446eae; --tc-pic: #a9c4ef;
       --tc-creux-txt: #c9d6ea; --tc-modere-txt: #e3ecf8; --tc-favorable-txt: #ffffff; --tc-pic-txt: #0f1d33;
     }
   }
   :root[data-theme="dark"] {
-    --tc-creux: #1d2735; --tc-modere: #2c4466; --tc-favorable: #4f7bbd; --tc-pic: #a9c4ef;
+    --tc-creux: #1d2735; --tc-modere: #2c4466; --tc-favorable: #446eae; --tc-pic: #a9c4ef;
     --tc-creux-txt: #c9d6ea; --tc-modere-txt: #e3ecf8; --tc-favorable-txt: #ffffff; --tc-pic-txt: #0f1d33;
   }
   .tc-legende { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
@@ -172,11 +172,16 @@ export function ouvrirDetailDuJour (x, retour) {
     + `<button type="button" class="tc-fermer" aria-label="Fermer">×</button></div>`
     + `<div>${badge(x.niveau)} <span class="non-calc">${DESCRIPTION[niv(x.niveau)] || ''}</span></div>`
     + listeDuJour(x) + `</div>`
-  const touche = e => { if (e.key === 'Escape') fermer() }
+  // Echap ferme ; Tab reste dans la fenetre (son seul bouton) — review de 39d9d81.
+  const touche = e => {
+    if (e.key === 'Escape') fermer()
+    else if (e.key === 'Tab') { e.preventDefault(); fond.querySelector('.tc-fermer').focus() }
+  }
   function fermer () {
     document.removeEventListener('keydown', touche)
     fond.remove()
-    if (retour && typeof retour.focus === 'function') retour.focus()
+    // Le jour clique peut avoir quitte la page (calendrier re-rendu) : rien a viser.
+    if (retour && typeof retour.focus === 'function' && retour.isConnected) retour.focus()
   }
   fond._fermer = fermer
   fond.addEventListener('click', e => { if (e.target === fond) fermer() })
@@ -196,11 +201,21 @@ export function fermerDetail () {
 // (AAAA-MM). Un clic sur un jour ouvre sa fenetre de detail.
 export function monterAnneeTemperature (conteneur, jours, { premierMois = null, nbMois = 12 } = {}) {
   injecterStyles()
+  // Un calendrier re-rendu ferme la fenetre de detail de l'ancien (review de 39d9d81).
+  fermerDetail()
   const valides = joursValides(jours)
   const parJour = new Map(valides.map(x => [x.jour, x]))
-  const debut = /^\d{4}-\d{2}$/.test(String(premierMois || '')) ? premierMois : ''
-  const mois = [...new Set(valides.map(x => x.jour.slice(0, 7)))].sort().filter(m => m >= debut).slice(0, nbMois)
-  if (!mois.length) { conteneur.innerHTML = '<p class="non-calc">Aucun jour à afficher pour ce marché.</p>'; return }
+  const presents = new Set(valides.map(x => x.jour.slice(0, 7)))
+  if (!presents.size) { conteneur.innerHTML = '<p class="non-calc">Aucun jour à afficher pour ce marché.</p>'; return }
+  // nbMois mois CALENDAIRES a partir de premierMois (a defaut, le premier mois
+  // de la capture) : un mois absent de la capture se dit, il ne decale pas la
+  // fenetre (review de 39d9d81).
+  const debut = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(premierMois || '')) ? premierMois : [...presents].sort()[0]
+  const mois = Array.from({ length: nbMois }, (_, i) => {
+    const [a0, m0] = debut.split('-').map(Number)
+    const d = new Date(Date.UTC(a0, m0 - 1 + i, 1))
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+  })
   const legende = `<div class="tc-legende-simple">${Object.keys(NIVEAUX).map(n => `<span><i style="background:var(--tc-${n})"></i>${NIVEAUX[n]} (${DESCRIPTION[n]})</span>`).join('')}</div>`
   const entete = JOURS_COURTS.map(j => `<span class="tc-mjsem">${j}</span>`).join('')
   const blocs = mois.map(m => {
@@ -216,7 +231,8 @@ export function monterAnneeTemperature (conteneur, jours, { premierMois = null, 
         ? `<button type="button" class="tc-case" data-jour="${cle}" style="background:var(--tc-${n});color:var(--tc-${n}-txt)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}" title="${ech(jourFr(cle))} · ${NIVEAUX[n]}${x.evenement ? ' · ' + ech(x.evenement) : ''}">${d}</button>`
         : `<span class="tc-vide">${d}</span>`
     }
-    return `<div class="tc-mois"><h3>${ech(moisFr(m))}</h3><div class="tc-mini">${entete}${cases}</div></div>`
+    const absent = presents.has(m) ? '' : '<p class="non-calc" style="font-size:11.5px;margin:4px 0 0">Non couvert par le modèle AirROI.</p>'
+    return `<div class="tc-mois"><h3>${ech(moisFr(m))}</h3><div class="tc-mini">${entete}${cases}</div>${absent}</div>`
   }).join('')
   conteneur.innerHTML = `${legende}<div class="tc-annee">${blocs}</div>`
   conteneur.querySelectorAll('.tc-case').forEach(b => b.addEventListener('click', () => {

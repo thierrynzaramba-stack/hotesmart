@@ -85,7 +85,7 @@
   import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
-  import { monterAnneeTemperature } from '/shared/temperature-calendrier.js'
+  import { monterAnneeTemperature, fermerDetail } from '/shared/temperature-calendrier.js'
 
   initErrorHandler()
   const el = id => document.getElementById(id)
@@ -124,6 +124,8 @@
 
   function charger () {
     const j = ++jeton
+    // La fenetre de detail d'un jour appartient au logement precedent (review de 39d9d81).
+    fermerDetail()
     chargerHistorique(j)
     chargerAirroi(j)
   }
@@ -156,8 +158,8 @@
 
   function troisAnnees (prog, recupereLe) {
     const annees = (prog && prog.annees) || []
-    const lue = /^\d{4}/.test(String(recupereLe || '')) ? Number(String(recupereLe).slice(0, 4)) : null
-    const n = lue || (annees.length ? Number(annees[annees.length - 1].annee) : null)
+    // Sans date de lecture lisible, pas de N : on ne devine pas l'annee (review de 39d9d81).
+    const n = /^\d{4}/.test(String(recupereLe || '')) ? Number(String(recupereLe).slice(0, 4)) : null
     if (!n) return []
     return RANGS.map(([nom, ecart, couleur, epaisseur]) => ({
       nom, couleur: `var(${couleur})`, epaisseur, donnee: annees.find(a => Number(a.annee) === n - ecart) || null,
@@ -169,7 +171,8 @@
     const series = troisAnnees(prog, recupereLe)
     const vals = series.flatMap(s => (s.donnee ? s.donnee.mois.map(m => m[cle]) : [])).filter(v => typeof v === 'number')
     if (!prog || prog.statut !== 'calcule' || !vals.length) {
-      return `<div class="mg-carte">${entete}<p class="non-calc">Non calculable : ${ech((prog && prog.motif) || 'historique absent')}.</p></div>`
+      const motif = prog && prog.statut === 'calcule' && !series.length ? 'la date de lecture de l’historique est illisible' : (prog && prog.motif) || 'historique absent'
+      return `<div class="mg-carte">${entete}<p class="non-calc">Non calculable : ${ech(motif)}.</p></div>`
     }
     const L = 900, H = 260, G = 50, D = 12, HAUT = 12, BAS = 26
     const max = Math.max(...vals) * 1.08
@@ -179,7 +182,7 @@
     const abscisse = INITIALES.map((n, k) => `<line class="repere-mois" x1="${x(k)}" x2="${x(k)}" y1="${HAUT}" y2="${H - BAS}"/><text class="initiale" x="${x(k)}" y="${H - BAS + 15}" text-anchor="middle">${n}</text>`).join('')
     const courbes = series.filter(s => s.donnee).map(s => {
       const a = s.donnee
-      const mesure = k => k >= 0 && k < 12 && typeof a.mois[k][cle] === 'number'
+      const mesure = k => k >= 0 && k < a.mois.length && typeof a.mois[k][cle] === 'number'
       let dd = ''; let dedans = false
       a.mois.forEach((m, k) => {
         if (typeof m[cle] !== 'number') { dedans = false; return }
@@ -189,24 +192,26 @@
       const points = a.mois.map((m, k) => {
         if (typeof m[cle] !== 'number') return ''
         const isole = !mesure(k - 1) && !mesure(k + 1)
+        // Un mois de trop peu d'annonces reste trace, mais le dit : point creux.
+        if (m.peu_annonces) return `<circle class="peu" cx="${x(k).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="3.5" fill="var(--bg)" stroke="${s.couleur}" stroke-width="1.5"><title>${ech(moisFr(m.mois))} (${s.nom}) · ${bulle(m[cle])} · trop peu d’annonces pour être représentatif</title></circle>`
         return `<circle cx="${x(k).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="${isole ? 3.5 : 6}" fill="${isole ? s.couleur : 'transparent'}"${isole ? ' class="isole"' : ''}><title>${ech(moisFr(m.mois))} (${s.nom}) · ${bulle(m[cle])}</title></circle>`
       }).join('')
       return `<path data-rang="${s.nom}" d="${dd}" fill="none" stroke="${s.couleur}" stroke-width="${s.epaisseur}"${a.partielle ? ' stroke-dasharray="6 4"' : ''}/>${points}`
     }).join('')
     const legende = `<div class="mg-legende">${series.slice().reverse().map(s => {
-      const note = !s.donnee ? ' : non mesurée' : s.donnee.partielle ? (s.nom === 'N' ? ' : année en cours, partielle' : ' : partielle') : ''
+      const note = !s.donnee ? ' : non mesurée' : s.donnee.partielle ? ' : partielle' : ''
       const trait = s.donnee && s.donnee.partielle ? `border-top:${s.epaisseur}px dashed ${s.couleur}` : `border-top:${s.epaisseur}px solid ${s.couleur}`
       return `<span><i style="${trait}"></i>${s.nom}${note}</span>`
     }).join('')}</div>`
     return `<div class="mg-carte">${entete}${legende}<div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${H}" role="img" aria-label="${titre}, années N, N-1 et N-2 superposées">
       ${abscisse}${grille}<line class="axe" x1="${G}" x2="${L - D}" y1="${H - BAS}" y2="${H - BAS}"/>${courbes}</svg></div>
-      <p class="mg-mention">${mention}</p></div>`
+      <p class="mg-mention">${mention}${series.some(s => s.donnee && s.donnee.mois.some(m => m.peu_annonces)) ? ` Un point creux marque un mois de moins de ${ech(prog.seuil_annonces)} annonces actives : trop peu pour être représentatif.` : ''}</p></div>`
   }
 
   function sectionRevpar (prog, recupereLe) {
     return superposees(prog, recupereLe, 'revpar', {
       titre: 'Le RevPAR du marché, mois par mois',
-      sous: 'Revenu par nuit disponible, médiane de l’ensemble des annonces du marché, de janvier à décembre. Une courbe par année : N (l’année en cours), N-1 et N-2.',
+      sous: 'Revenu par nuit disponible, médiane de l’ensemble des annonces du marché, de janvier à décembre. Une courbe par année : N (l’année de la dernière lecture de l’historique), N-1 et N-2.',
       bulle: v => `RevPAR médian : ${euros(v)}`,
       graduation: v => `${Math.round(v)} €`,
       mention: 'RevPAR du marché, en euros par nuit disponible — <b>pas un prix pour votre logement</b>. Une année en pointillés est partielle : elle se lit mois par mois, jamais comme un total.',
@@ -239,7 +244,7 @@
     const barres = mois.map((m, i) => {
       const h = m.annonces ? (HC - BAS - 10) * m.annonces / maxA : 0
       return m.annonces
-        ? `<rect x="${(x(i) - 5).toFixed(1)}" y="${(HC - BAS - h).toFixed(1)}" width="10" height="${h.toFixed(1)}" fill="var(${m.couverture_partielle ? '--mg-barre-partielle' : '--mg-barre'})"><title>${ech(moisFr(m.mois))} : ${ech(m.annonces)} annonces actives</title></rect>`
+        ? `<rect x="${(x(i) - 5).toFixed(1)}" y="${(HC - BAS - h).toFixed(1)}" width="10" height="${h.toFixed(1)}" fill="var(${m.couverture_partielle ? '--mg-barre-partielle' : '--mg-barre'})"><title>${ech(moisFr(m.mois))} : ${ech(m.annonces)} annonces actives${m.couverture_partielle ? ' (couverture AirROI partielle)' : ''}</title></rect>`
         : `<text x="${x(i)}" y="${HC - BAS - 4}" text-anchor="middle">·</text>`
     }).join('')
     const abscisse = mois.map((m, i) => {
@@ -250,7 +255,7 @@
     const bornes = mois.filter(m => m.annonces)
     return `<div class="mg-carte">${entete}<div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${HC}" role="img" aria-label="Annonces actives par mois, 36 derniers mois">
       ${barres}<line class="axe" x1="${G}" x2="${L - D}" y1="${HC - BAS}" y2="${HC - BAS}"/>${abscisse}</svg></div>
-      <p class="mg-mention">${ech(moisFr(bornes[0].mois))} : ${ech(bornes[0].annonces)} annonces · ${ech(moisFr(bornes[bornes.length - 1].mois))} : ${ech(bornes[bornes.length - 1].annonces)} annonces.</p></div>`
+      <p class="mg-mention">${ech(moisFr(bornes[0].mois))} : ${ech(bornes[0].annonces)} annonces · ${ech(moisFr(bornes[bornes.length - 1].mois))} : ${ech(bornes[bornes.length - 1].annonces)} annonces.${mois.some(m => m.couverture_partielle) ? ' Une barre grise : mois où la couverture d’AirROI était encore partielle.' : ''}</p></div>`
   }
 
   // ─── Section 4 : le calendrier AirROI, 12 mois d'un coup (§17.1) ────────

@@ -123,7 +123,7 @@ test('LE TEST QUI COMPTE : sections 1 et 2 — trois courbes N, N-1, N-2, legend
   const cartes = [...doc.querySelectorAll('#mg-corps .mg-carte')]
   for (const carte of cartes.slice(0, 2)) {
     const legende = carte.querySelector('.mg-legende').textContent
-    assert.match(legende, /N : année en cours, partielle/)
+    assert.match(legende, /N : partielle/)
     assert.match(legende, /N-1/)
     assert.match(legende, /N-2/)
     assert.ok(!/20\d\d/.test(legende), `aucune annee en dur dans la legende : ${legende}`)
@@ -236,4 +236,82 @@ test('le calendrier AirROI part du mois en cours (heure de Paris), pas du premie
   const mois = [...doc.querySelectorAll('#mg-airroi-zone .tc-mois h3')].map(h => h.textContent)
   assert.equal(mois[0], 'janvier 2027')
   assert.equal(mois[11], 'décembre 2027')
+})
+
+// ─── Constats de la review de 39d9d81 ───────────────────────────────────────
+test('REVIEW : changer de logement ferme la fenetre de detail du logement precedent', async () => {
+  const { w, doc } = await monter(OK)
+  doc.querySelector('.tc-case[data-jour="2026-12-25"]').click()
+  assert.equal(doc.querySelectorAll('.tc-fond').length, 1)
+  doc.getElementById('mg-bien').value = 'B2'
+  doc.getElementById('mg-bien').dispatchEvent(new w.Event('change'))
+  await attendre()
+  assert.equal(doc.querySelectorAll('.tc-fond').length, 0)
+})
+
+test('REVIEW : Tab reste dans la fenetre de detail', async () => {
+  const { w, doc } = await monter(OK)
+  doc.querySelector('.tc-case[data-jour="2026-10-10"]').click()
+  const ev = new w.KeyboardEvent('keydown', { key: 'Tab', cancelable: true })
+  doc.dispatchEvent(ev)
+  assert.equal(ev.defaultPrevented, true)
+  assert.equal(doc.activeElement, doc.querySelector('.tc-fermer'))
+})
+
+test('REVIEW : un mois de peu d annonces reste trace, en point creux, et le dit', async () => {
+  const brut = { ...MARCHE60, results: MARCHE60.results.map(r => (r.date.startsWith('2026-04') ? { ...r, active_listings_count: 12 } : r)) }
+  const { doc } = await monter({ ...OK, '/api/marche-global': () => reponse(HISTORIQUE(progressionDuMarche(brut))) })
+  const carte = doc.querySelector('#mg-corps .mg-carte')
+  const creux = carte.querySelectorAll('circle.peu')
+  assert.equal(creux.length, 1)
+  assert.match(creux[0].querySelector('title').textContent, /^avr\. 2026 \(N\) · .*trop peu d’annonces/)
+  assert.match(carte.textContent, /Un point creux marque un mois de moins de 30 annonces actives/)
+})
+
+test('REVIEW : N-1 partielle est aussi en pointilles', async () => {
+  const vieux = progressionDuMarche({ ...MARCHE60, results: MARCHE60.results.filter(r => r.date < '2025-08') })
+  const { doc } = await monter({ ...OK, '/api/marche-global': () => reponse(HISTORIQUE(vieux)) })
+  const n1 = doc.querySelector('#mg-corps path[data-rang="N-1"]')
+  assert.equal(n1.getAttribute('stroke-dasharray'), '6 4')
+  assert.equal(doc.querySelector('#mg-corps path[data-rang="N-2"]').getAttribute('stroke-dasharray'), null)
+})
+
+test('REVIEW : sans date de lecture lisible, pas de N devine — non calculable', async () => {
+  const { doc } = await monter({ ...OK, '/api/marche-global': () => reponse(HISTORIQUE(undefined, null)) })
+  assert.match(doc.querySelector('#mg-corps .mg-carte').textContent, /Non calculable : la date de lecture de l’historique est illisible/)
+})
+
+test('REVIEW : 12 mois CALENDAIRES — un mois absent de la capture se dit, sans decaler la fenetre', async () => {
+  const sansDecembre = { ...TEMPERATURE, jours: TEMPERATURE.jours.filter(j => !j.jour.startsWith('2026-12')) }
+  const { doc } = await monter({ ...OK, '/api/marche-temperature': () => reponse(sansDecembre) })
+  const mois = [...doc.querySelectorAll('#mg-airroi-zone .tc-mois')]
+  assert.equal(mois.length, 12)
+  assert.equal(mois[11].querySelector('h3').textContent, 'septembre 2027')
+  assert.match(mois[2].textContent, /décembre 2026.*Non couvert par le modèle AirROI/)
+})
+
+test('REVIEW : une reponse AirROI 200 tardive du logement precedent n ecrit rien', async () => {
+  let premier = true
+  let liberer
+  const lent = new Promise(r => { liberer = r })
+  const { w, doc } = await monter({ ...OK, '/api/marche-temperature': async () => {
+    if (premier) { premier = false; await lent; return reponse({ ...TEMPERATURE, etat: 'capture_absente', motif: 'ANCIEN-LOGEMENT' }) }
+    return reponse(TEMPERATURE)
+  } })
+  doc.getElementById('mg-bien').value = 'B2'
+  doc.getElementById('mg-bien').dispatchEvent(new w.Event('change'))
+  await attendre()
+  liberer()
+  await attendre()
+  assert.ok(!/ANCIEN-LOGEMENT/.test(doc.getElementById('mg-airroi-zone').textContent))
+  assert.equal(doc.querySelectorAll('#mg-airroi-zone .tc-mois').length, 12)
+})
+
+test('REVIEW : une barre grise de couverture partielle est expliquee', async () => {
+  const rp = revparMensuel(MARCHE60)
+  const avec = { ...rp, mois: rp.mois.map((m, i) => (i === rp.mois.length - 30 ? { ...m, couverture_partielle: true } : m)) }
+  const { doc } = await monter({ ...OK, '/api/marche-global': () => reponse(HISTORIQUE(undefined, undefined, avec)) })
+  const carte = [...doc.querySelectorAll('#mg-corps .mg-carte')][2]
+  assert.match(carte.textContent, /Une barre grise : mois où la couverture d’AirROI était encore partielle/)
+  assert.ok([...carte.querySelectorAll('rect title')].some(t => /couverture AirROI partielle/.test(t.textContent)))
 })

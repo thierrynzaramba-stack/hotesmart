@@ -109,8 +109,9 @@ test('REVIEW : jours dans le desordre et jour sans date — les mois sont tries,
 test('vue 12 mois : part du premier mois demande, en montre au plus nbMois, sans navigation', () => {
   const { tc, doc } = monter()
   const a = doc.getElementById('a')
-  tc.monterAnneeTemperature(a, jours(), { premierMois: '2026-11', nbMois: 12 })
-  assert.deepEqual([...a.querySelectorAll('.tc-mois h3')].map(h => h.textContent), ['novembre 2026'])
+  tc.monterAnneeTemperature(a, jours(), { premierMois: '2026-11', nbMois: 3 })
+  assert.deepEqual([...a.querySelectorAll('.tc-mois h3')].map(h => h.textContent), ['novembre 2026', 'décembre 2026', 'janvier 2027'])
+  assert.equal(a.querySelectorAll('.tc-mois')[1].querySelectorAll('.tc-case').length, 0, 'un mois hors capture n a aucune case')
   tc.monterAnneeTemperature(a, jours(), { premierMois: 'n-importe-quoi', nbMois: 1 })
   assert.deepEqual([...a.querySelectorAll('.tc-mois h3')].map(h => h.textContent), ['octobre 2026'], 'un mois illisible ne filtre rien')
   assert.equal(a.querySelectorAll('[data-tc]').length, 0)
@@ -127,4 +128,16 @@ test('SECURITE : la fenetre de detail echappe l evenement ; un niveau inconnu n 
   a.querySelector('.tc-case[data-jour="2026-10-01"]').click()
   assert.equal(doc.querySelectorAll('img').length, 0)
   assert.match(doc.querySelector('.tc-popup').textContent, /<img src=x/)
+})
+
+test('SECURITE : un guillemet dans un evenement ne sort pas des attributs title et aria-label', () => {
+  const { tc, doc } = monter()
+  const a = doc.getElementById('a')
+  const j = jours()
+  j[0].evenement = 'Fête" onmouseover="alert(1)'
+  tc.monterAnneeTemperature(a, j)
+  const c = a.querySelector('.tc-case[data-jour="2026-10-01"]')
+  assert.equal(c.getAttribute('onmouseover'), null)
+  assert.match(c.getAttribute('title'), /Fête" onmouseover/)
+  assert.match(c.getAttribute('aria-label'), /Fête" onmouseover/)
 })
