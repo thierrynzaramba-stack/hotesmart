@@ -261,7 +261,7 @@ test('LE TEST QUI COMPTE (page) : ADR brut et Airbnb seulement, occupation du ma
   assert.match(PAGE, /Un niveau attendu, bâti sur l’historique et le calendrier — pas une mesure/)
   // Regle 13 : la page ne lit du logement que son nom.
   assert.deepEqual([...PAGE.matchAll(/supabase\.from\('properties'\)\.select\('([^']*)'\)/g)].map(m => m[1]), ['id, name'])
-  assert.match(PAGE, /corps\(bloc1\(d\.adr_occupation\) \+ indicateur1\(d\.revpar\) \+ blocAnnees\(d\.progression\) \+ blocProgression\(d\.progression\) \+ bloc3\(d\.calendrier\)\)/)
+  assert.match(PAGE, /corps\(bloc1\(d\.adr_occupation\) \+ indicateur1\(d\.revpar\) \+ blocAnnees\(d\.progression, d\.recupere_le\) \+ blocProgression\(d\.progression\) \+ bloc3\(d\.calendrier\)\)/)
 })
 
 test('la vue rend les trois blocs ; des vacances illisibles laissent les blocs 1 et 2 et disent le calendrier non calculable', async () => {

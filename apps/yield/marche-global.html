@@ -43,6 +43,9 @@
     .mg-defile { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     /* §16.2 : les annees superposees, quatre petits graphiques. */
     .mg-quatre { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px 18px; margin-top: 8px; }
+    /* Un element de grille ne retrecit pas sous son contenu sans min-width:0 :
+       le graphique defilerait la page entiere (review de 98a49da). */
+    .mg-quatre > div { min-width: 0; }
     .mg-quatre h3 { font-size: 13px; font-weight: 600; margin: 0 0 4px; }
     .mg-tuiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
     .mg-tuile { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
@@ -56,7 +59,7 @@
     @media (max-width: 640px) {
       .content { padding-left: 12px; padding-right: 12px; } .mg-carte { padding: 12px; }
       .mg-defile svg.mg { min-width: 680px; }
-      .mg-quatre { grid-template-columns: 1fr; }
+      .mg-quatre { grid-template-columns: minmax(0, 1fr); }
       .mg-quatre .mg-defile svg.mg { min-width: 440px; }
       .mg-defile .mg-table { min-width: 560px; }
     }
@@ -148,15 +151,16 @@
     try {
       r = await fetch(`/api/marche-global?property_id=${encodeURIComponent(el('mg-bien').value)}`, {
         headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
-    } catch (e) { return corps('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>') }
+    } catch (e) { if (j === jeton) corps('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>'); return }
     if (j !== jeton) return
     if (!r.ok) return corps(`<p class="non-calc">Lecture impossible (${r.status}).</p>`)
-    const d = await r.json()
+    let d
+    try { d = await r.json() } catch (e) { if (j === jeton) corps('<p class="non-calc">Réponse illisible.</p>'); return }
     if (j !== jeton) return
     if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
     if (d.etat === 'historique_absent') return corps(`<p class="non-calc">Marché ${ech(d.marche && d.marche.localite)} : ${ech(d.motif)}.</p>`)
     el('mg-meta').innerHTML = `Marché : <b>${ech(d.marche.localite)}</b> (${ech(d.marche.region)}, ${ech(d.marche.pays)}) · historique AirROI lu le ${jourFr(d.recupere_le)}`
-    corps(bloc1(d.adr_occupation) + indicateur1(d.revpar) + blocAnnees(d.progression) + blocProgression(d.progression) + bloc3(d.calendrier))
+    corps(bloc1(d.adr_occupation) + indicateur1(d.revpar) + blocAnnees(d.progression, d.recupere_le) + blocProgression(d.progression) + bloc3(d.calendrier))
   }
 
   // ─── LE CALENDRIER AirROI (§16.1) : sa route, son bloc, sa source ───────
@@ -323,22 +327,31 @@
   // marquee, et aucun total ni moyenne d'annee n'est calcule. L'annee en cours
   // est tracee a part (couleur et epaisseur), la plus ancienne en pale.
   const BLEUS_ANNEES = ['#C9D7EE', '#9DB9E3', '#6F97D3', '#3A68AE', '#1E3F73']
-  const COULEUR_EN_COURS = '#C07A2C'
+  // Ni le bleu de l'historique, ni l'orange de l'occupation, ni la brique
+  // d'AirROI (review de 98a49da) : un vert, propre a l'annee en cours.
+  const COULEUR_EN_COURS = '#1F7A5A'
   const INDICATEURS_ANNEES = [
     ['adr', 'Prix moyen par nuit vendue (ADR médian)', v => euros(v), v => `${Math.round(v)} €`],
     ['occupation', 'Occupation médiane', v => pourcent(v), v => `${Math.round(v * 100)} %`],
     ['revpar', 'RevPAR médian', v => euros(v), v => `${Math.round(v)} €`],
     ['annonces', 'Annonces actives', v => (typeof v === 'number' ? `${v} annonces` : 'non mesuré'), v => `${Math.round(v)}`]]
 
-  function styleAnnee (a, i, annees) {
-    const enCours = i === annees.length - 1 && a.partielle
+  // L'annee EN COURS est celle de la lecture de l'historique (recupere_le),
+  // jamais « la derniere des donnees » : un historique ancien n'a pas d'annee
+  // en cours (review de 98a49da).
+  function styleAnnee (a, anneeEnCours, annees) {
+    const enCours = a.annee === anneeEnCours
     const completes = annees.filter(x => !x.partielle)
     const rang = completes.indexOf(a)
-    const couleur = enCours ? COULEUR_EN_COURS : rang >= 0 ? BLEUS_ANNEES[Math.max(0, BLEUS_ANNEES.length - completes.length + rang)] : '#B9C2CF'
+    const n = completes.length
+    // Les plus recentes au plus fonce ; au-dela de cinq annees, on repartit les
+    // cinq teintes au lieu d'en confondre plusieurs sur la plus pale.
+    const indice = n <= BLEUS_ANNEES.length ? BLEUS_ANNEES.length - n + rang : Math.round(rang * (BLEUS_ANNEES.length - 1) / (n - 1))
+    const couleur = enCours ? COULEUR_EN_COURS : rang >= 0 ? BLEUS_ANNEES[indice] : '#B9C2CF'
     return { enCours, couleur, epaisseur: enCours ? 3 : 1.8, pointilles: a.partielle }
   }
 
-  function petitGraphe (annees, cle, titre, bulle, graduation) {
+  function petitGraphe (annees, anneeEnCours, cle, titre, bulle, graduation) {
     const L = 440, H = 200, G = 46, D = 10, HAUT = 10, BAS = 24
     const vals = annees.flatMap(a => a.mois.map(m => m[cle])).filter(v => typeof v === 'number')
     if (!vals.length) return `<div><h3>${titre}</h3><p class="non-calc">Non mesuré.</p></div>`
@@ -347,33 +360,45 @@
     const y = v => HAUT + (H - HAUT - BAS) * (1 - v / max)
     const grille = [0, 0.5, 1].map(f => `<line class="grille" x1="${G}" x2="${L - D}" y1="${y(max * f)}" y2="${y(max * f)}"/><text x="${G - 6}" y="${y(max * f) + 4}" text-anchor="end">${graduation(max * f)}</text>`).join('')
     const abscisse = INITIALES.map((n, i) => `<text class="initiale" x="${x(i)}" y="${H - BAS + 14}" text-anchor="middle">${n}</text>`).join('')
-    const courbes = annees.map((a, i) => {
-      const st = styleAnnee(a, i, annees)
+    const courbes = annees.map(a => {
+      const st = styleAnnee(a, anneeEnCours, annees)
+      const mesure = k => k >= 0 && k < 12 && typeof a.mois[k][cle] === 'number'
       let dd = ''; let dedans = false
       a.mois.forEach((m, k) => {
         if (typeof m[cle] !== 'number') { dedans = false; return }
         dd += `${dedans ? 'L' : 'M'}${x(k).toFixed(1)},${y(m[cle]).toFixed(1)} `; dedans = true
       })
-      const points = a.mois.map((m, k) => (typeof m[cle] !== 'number' ? '' : `<circle cx="${x(k).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="${m.peu_annonces ? 3 : 5}" fill="${m.peu_annonces ? 'var(--bg)' : 'transparent'}" stroke="${m.peu_annonces ? st.couleur : 'none'}"><title>${moisFr(m.mois)} · ${bulle(m[cle])}${m.peu_annonces ? ' · trop peu d’annonces pour en tirer un %' : ''}</title></circle>`)).join('')
+      // Un mois sans voisin mesure ne trace aucun segment : il porte un point
+      // plein, sinon il serait invisible (review de 98a49da).
+      const points = a.mois.map((m, k) => {
+        if (typeof m[cle] !== 'number') return ''
+        const isole = !mesure(k - 1) && !mesure(k + 1)
+        const r = m.peu_annonces ? 3 : isole ? 3.5 : 5
+        const fill = m.peu_annonces ? 'var(--bg)' : isole ? st.couleur : 'transparent'
+        return `<circle cx="${x(k).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="${r}" fill="${fill}" stroke="${m.peu_annonces ? st.couleur : 'none'}"${isole ? ' class="isole"' : ''}><title>${ech(moisFr(m.mois))} · ${bulle(m[cle])}${m.peu_annonces ? ' · trop peu d’annonces pour en tirer un %' : ''}</title></circle>`
+      }).join('')
       return `<path d="${dd}" fill="none" stroke="${st.couleur}" stroke-width="${st.epaisseur}"${st.pointilles ? ' stroke-dasharray="5 3"' : ''}/>${points}`
     }).join('')
     return `<div><h3>${titre}</h3><div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${H}" role="img" aria-label="${titre}, une courbe par année">${grille}<line class="axe" x1="${G}" x2="${L - D}" y1="${H - BAS}" y2="${H - BAS}"/>${abscisse}${courbes}</svg></div></div>`
   }
 
-  function blocAnnees (prog) {
+  function blocAnnees (prog, recupereLe) {
     const titre = '<h2>Les années superposées</h2><p class="sous">Une courbe par année, de janvier à décembre, pour voir si le marché d’une année ressemble à celui des autres. Médianes de l’ensemble des annonces du marché.</p>'
     if (!prog || prog.statut !== 'calcule' || !prog.annees.length) {
       return `<div class="mg-carte">${titre}<p class="non-calc">Non calculable : ${ech((prog && prog.motif) || 'historique absent')}.</p></div>`
     }
     const annees = prog.annees
-    const legende = `<div class="mg-legende">${annees.map((a, i) => {
-      const st = styleAnnee(a, i, annees)
-      const notes = [st.enCours ? 'en cours' : '', a.partielle ? `partielle : ${a.mois_mesures} mois` : '', a.couverture_partielle ? 'couverture partielle' : ''].filter(Boolean)
-      return `<span><i style="background:${st.couleur};height:${st.enCours ? 4 : 3}px"></i>${ech(a.annee)}${notes.length ? ` (${notes.join(', ')})` : ''}</span>`
+    const anneeEnCours = /^\d{4}/.test(String(recupereLe || '')) ? String(recupereLe).slice(0, 4) : null
+    const legende = `<div class="mg-legende">${annees.map(a => {
+      const st = styleAnnee(a, anneeEnCours, annees)
+      const notes = [st.enCours ? 'en cours' : '', a.partielle ? `partielle : ${ech(a.mois_mesures)} mois` : '', a.couverture_partielle ? 'couverture partielle' : ''].filter(Boolean)
+      // Le trait de legende suit la courbe : pointille pour une annee partielle.
+      const trait = st.pointilles ? `border-top:${st.enCours ? 3 : 2}px dashed ${st.couleur};height:0` : `background:${st.couleur};height:${st.enCours ? 4 : 3}px`
+      return `<span><i style="${trait}"></i>${ech(a.annee)}${notes.length ? ` (${notes.join(', ')})` : ''}</span>`
     }).join('')}</div>`
-    const graphes = INDICATEURS_ANNEES.map(([cle, t, bulle, grad]) => petitGraphe(annees, cle, t, bulle, grad)).join('')
+    const graphes = INDICATEURS_ANNEES.map(([cle, t, bulle, grad]) => petitGraphe(annees, anneeEnCours, cle, t, bulle, grad)).join('')
     return `<div class="mg-carte">${titre}${legende}<div class="mg-quatre">${graphes}</div>
-      <p class="mg-mention">Une année <b>partielle</b> (en pointillés) n’a pas ses douze mois : elle se lit mois par mois, jamais comme un total ou une moyenne d’année. Un point creux signale un mois de moins de ${prog.seuil_annonces} annonces actives : affiché, mais trop peu d’annonces pour en tirer un %.</p></div>`
+      <p class="mg-mention">Une année <b>partielle</b> (en pointillés) n’a pas ses douze mois : elle se lit mois par mois, jamais comme un total ou une moyenne d’année. Un point creux signale un mois de moins de ${ech(prog.seuil_annonces)} annonces actives : affiché, mais trop peu d’annonces pour en tirer un %.</p></div>`
   }
 
   // ─── LA PROGRESSION DU MARCHE (§16.2) ───────────────────────────────────
@@ -389,14 +414,14 @@
     if (!prog || prog.statut !== 'calcule' || !p || p.statut !== 'calcule') {
       return `<div class="mg-carte">${titre}<p class="non-calc">Non calculable : ${ech((p && p.motif) || (prog && prog.motif) || 'historique absent')}.</p></div>`
     }
-    const periode = `${moisFr(p.periode.debut)} → ${moisFr(p.periode.fin)}`
-    const precedente = `${moisFr(p.precedente.debut)} → ${moisFr(p.precedente.fin)}`
+    const periode = ech(`${moisFr(p.periode.debut)} → ${moisFr(p.periode.fin)}`)
+    const precedente = ech(`${moisFr(p.precedente.debut)} → ${moisFr(p.precedente.fin)}`)
     const tuiles = Object.keys(NOMS_PROGRESSION).map(k => {
       const ind = p.indicateurs[k] || {}
       const val = signe(ind.pct)
       return `<div class="mg-tuile"><div class="lib">${NOMS_PROGRESSION[k]}</div>`
         + (val ? `<div class="val">${val}</div>` : `<div class="val non-calc" style="font-size:14px">non calculable</div>`)
-        + `<div class="pied">${val ? `sur ${ind.mois_comparables} mois comparables` : ech(ind.motif || '')}${PIEDS[k] && val ? ` · ${PIEDS[k]}` : ''}</div></div>`
+        + `<div class="pied">${val ? `sur ${ech(ind.mois_comparables)} mois comparables` : ech(ind.motif || '')}${PIEDS[k] && val ? ` · ${PIEDS[k]}` : ''}</div></div>`
     }).join('')
     const cellule = (x, format) => {
       const valeur = typeof x.valeur === 'number' ? format(x.valeur) : 'non mesuré'
@@ -404,11 +429,11 @@
     }
     const lignes = (prog.mois_par_mois || []).map(m => {
       const note = m.precedent_absent ? 'mois de l’an dernier non mesuré' : m.peu_annonces ? 'trop peu d’annonces pour en tirer un %' : ''
-      return `<tr><td>${moisFr(m.mois)}</td><td>${cellule(m.adr, euros)}</td><td>${cellule(m.occupation, pourcent)}</td>`
-        + `<td>${cellule(m.revpar, euros)}</td><td>${cellule(m.annonces, v => String(v))}</td><td>${note ? `<span class="non-calc">${note}</span>` : ''}</td></tr>`
+      return `<tr><td>${ech(moisFr(m.mois))}</td><td>${cellule(m.adr, euros)}</td><td>${cellule(m.occupation, pourcent)}</td>`
+        + `<td>${cellule(m.revpar, euros)}</td><td>${cellule(m.annonces, v => ech(v))}</td><td>${note ? `<span class="non-calc">${note}</span>` : ''}</td></tr>`
     }).join('')
     return `<div class="mg-carte">${titre}
-      <p class="sous">Les <b>12 derniers mois</b> (${periode}) comparés aux <b>12 précédents</b> (${precedente}) : la moyenne des mois, d’une période à l’autre. Seuls comptent les mois mesurés les deux années, avec au moins ${prog.seuil_annonces} annonces actives ; il en faut 9 sur 12.</p>
+      <p class="sous">Les <b>12 derniers mois</b> (${periode}) comparés aux <b>12 précédents</b> (${precedente}) : la moyenne des mois, d’une période à l’autre. Seuls comptent les mois mesurés les deux années, avec au moins ${ech(prog.seuil_annonces)} annonces actives ; il en faut 9 sur 12.</p>
       <div class="mg-tuiles">${tuiles}</div>
       <details class="mg-detail"><summary>Le détail mois par mois (volatil)</summary>
         <p class="mg-mention">Chaque mois comparé au même mois de l’année précédente. <b>Un mois seul varie beaucoup</b> (météo, dates des vacances, un événement) : n’en tirez pas de conclusion, c’est la progression sur 12 mois qui compte.</p>

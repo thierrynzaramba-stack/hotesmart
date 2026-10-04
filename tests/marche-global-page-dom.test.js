@@ -30,8 +30,8 @@ const MARCHE60 = fixture('marche-60.json')
 const RELIEF = fixture('relief-bagneres-2026-09-30.json')
 const MARCHE = { pays: 'France', region: 'Occitania', localite: 'Bagnères-de-Bigorre' }
 
-const HISTORIQUE = (progression = progressionDuMarche(MARCHE60)) => ({
-  source: 'marche', etat: 'calcule', marche: MARCHE, recupere_le: '2026-09-30T10:00:00Z',
+const HISTORIQUE = (progression = progressionDuMarche(MARCHE60), recupereLe = '2026-09-30T10:00:00Z') => ({
+  source: 'marche', etat: 'calcule', marche: MARCHE, recupere_le: recupereLe,
   adr_occupation: adrOccupationMensuel(MARCHE60), revpar: revparMensuel(MARCHE60), progression,
   calendrier: { statut: 'non_calculable', motif: 'les vacances scolaires sont illisibles', mois: [] },
 })
@@ -130,7 +130,7 @@ test('LE TEST QUI COMPTE : l annee en cours est tracee a part, partielle, en poi
   const chemins = [...graphes[0].querySelectorAll('path')]
   assert.equal(chemins.length, 6, 'une courbe par annee')
   const [c2021, , c2023, , , c2026] = chemins
-  assert.equal(c2026.getAttribute('stroke'), '#C07A2C')
+  assert.equal(c2026.getAttribute('stroke'), '#1F7A5A')
   assert.equal(c2026.getAttribute('stroke-dasharray'), '5 3')
   assert.equal(c2026.getAttribute('stroke-width'), '3')
   assert.equal(c2021.getAttribute('stroke-dasharray'), '5 3')
@@ -161,4 +161,75 @@ test('changer de logement pendant la lecture : la reponse du logement precedent 
   for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r))
   assert.ok(!/ANCIEN-LOGEMENT/.test(doc.getElementById('mg-airroi-zone').textContent))
   assert.ok(doc.getElementById('mg-airroi-zone').querySelectorAll('.tc-jour').length >= 28)
+})
+
+// ─── Constats de la review de 98a49da ───────────────────────────────────────
+const sansMois = (garder) => ({ ...MARCHE60, results: MARCHE60.results.filter(r => garder(r.date.slice(0, 7))) })
+
+test('REVIEW : l annee « en cours » est celle de la LECTURE, pas la derniere des donnees', async () => {
+  // Un historique qui s'arrete en juillet 2025, lu en 2026 : 2025 est partielle, pas « en cours ».
+  const vieux = progressionDuMarche(sansMois(m => m <= '2025-07'))
+  const { doc } = await monter({ ...OK, '/api/marche-global': () => reponse(HISTORIQUE(vieux, '2026-09-30T10:00:00Z')) })
+  const legende = doc.querySelector('.mg-quatre').closest('.mg-carte').querySelector('.mg-legende').textContent
+  assert.match(legende, /2025 \(partielle : 7 mois\)/)
+  assert.ok(!/en cours/.test(legende))
+  const derniere = [...doc.querySelectorAll('.mg-quatre svg')[0].querySelectorAll('path')].pop()
+  assert.notEqual(derniere.getAttribute('stroke'), '#1F7A5A')
+})
+
+test('REVIEW : un mois mesure sans voisin porte un point plein — jamais invisible', async () => {
+  // 2027 commence : seul janvier est mesure.
+  const brut = { ...MARCHE60, results: [...MARCHE60.results, { ...MARCHE60.results[MARCHE60.results.length - 1], date: '2026-09-01' }] }
+  const p = progressionDuMarche(brut)
+  const a2026 = p.annees.find(a => a.annee === '2026')
+  // On ne garde de 2026 que janvier, entoure de trous.
+  a2026.mois = a2026.mois.map((m, k) => (k === 0 ? m : { ...m, adr: null, occupation: null, revpar: null, annonces: null }))
+  const { doc } = await monter({ ...OK, '/api/marche-global': () => reponse(HISTORIQUE(p)) })
+  const isoles = doc.querySelectorAll('.mg-quatre svg')[0].querySelectorAll('circle.isole')
+  assert.equal(isoles.length, 1)
+  assert.equal(isoles[0].getAttribute('fill'), '#1F7A5A')
+})
+
+test('REVIEW : au-dela de cinq annees completes, les plus anciennes ne se confondent pas', async () => {
+  const p = progressionDuMarche(MARCHE60)
+  const modele = p.annees.find(a => a.annee === '2023')
+  const annees = ['2017', '2018', '2019', '2020', '2021', '2022', '2023'].map(an => ({ ...modele, annee: an, partielle: false, couverture_partielle: false, mois: modele.mois.map(m => ({ ...m, mois: an + m.mois.slice(4) })) }))
+  const { doc } = await monter({ ...OK, '/api/marche-global': () => reponse(HISTORIQUE({ ...p, annees })) })
+  const couleurs = [...doc.querySelectorAll('.mg-quatre svg')[0].querySelectorAll('path')].map(c => c.getAttribute('stroke'))
+  assert.equal(couleurs.length, 7)
+  assert.equal(couleurs[0], '#C9D7EE')
+  assert.equal(couleurs[6], '#1E3F73')
+  assert.notEqual(couleurs[0], couleurs[1], 'les deux plus anciennes se distinguent')
+})
+
+test('REVIEW : course cote historique — l echec du logement precedent n efface pas le suivant', async () => {
+  let premier = true
+  let liberer
+  const lent = new Promise(r => { liberer = r })
+  const { w, doc } = await monter({ ...OK, '/api/marche-global': async () => {
+    if (premier) { premier = false; await lent; throw new Error('reseau') }
+    return reponse(HISTORIQUE())
+  } })
+  doc.getElementById('mg-bien').value = 'B2'
+  doc.getElementById('mg-bien').dispatchEvent(new w.Event('change'))
+  for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r))
+  liberer()
+  for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r))
+  assert.ok(!/Lecture impossible/.test(doc.getElementById('mg-corps').textContent))
+  assert.match(doc.getElementById('mg-corps').textContent, /La progression du marché/)
+})
+
+test('REVIEW : un mois de peu d annonces sort de la tuile — « sur 11 mois comparables »', async () => {
+  const brut = { ...MARCHE60, results: MARCHE60.results.map(r => (r.date.startsWith('2026-04') ? { ...r, active_listings_count: 12 } : r)) }
+  const { doc } = await monter({ ...OK, '/api/marche-global': () => reponse(HISTORIQUE(progressionDuMarche(brut))) })
+  assert.match(doc.querySelectorAll('.mg-tuile')[0].textContent, /sur 11 mois comparables/)
+})
+
+test('REVIEW : mobile — un element de la grille des quatre graphiques peut retrecir', () => {
+  assert.match(HTML, /\.mg-quatre > div \{ min-width: 0; \}/)
+  assert.match(HTML, /\.mg-quatre \{ grid-template-columns: minmax\(0, 1fr\); \}/)
+})
+
+test('le module commun ne lit rien lui-meme : aucun fetch', () => {
+  assert.ok(!/fetch\(|XMLHttpRequest|supabase/.test(MODULE))
 })

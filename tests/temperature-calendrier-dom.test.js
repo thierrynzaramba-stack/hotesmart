@@ -97,3 +97,10 @@ test('theme sombre : les couleurs des niveaux ont leur version sombre, sous les 
   assert.match(SOURCE, /prefers-color-scheme: dark\)[\s\S]*:root:not\(\[data-theme="light"\]\)[\s\S]*--tc-pic/)
   assert.match(SOURCE, /:root\[data-theme="dark"\][\s\S]*--tc-pic/)
 })
+
+test('REVIEW : jours dans le desordre et jour sans date — les mois sont tries, l illisible est ignore', () => {
+  const { tc, doc } = monter()
+  const a = doc.getElementById('a')
+  tc.monterCalendrierTemperature(a, [...jours()].reverse().concat([{ niveau: 'pic' }, null]))
+  assert.match(a.querySelector('.tc-nav h3').textContent, /octobre 2026/)
+})

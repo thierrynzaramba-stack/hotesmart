@@ -80,8 +80,11 @@ export function injecterStyles () {
 // calendriers peuvent coexister sans se voir.
 export function monterCalendrierTemperature (conteneur, jours) {
   injecterStyles()
-  const parJour = new Map((jours || []).map(x => [x.jour, x]))
-  const mois = [...new Set((jours || []).map(x => x.jour.slice(0, 7)))]
+  // Un jour sans date lisible est ignore ; les mois sont tries, quel que soit
+  // l'ordre recu (review de 98a49da).
+  const valides = (jours || []).filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(String(x.jour)))
+  const parJour = new Map(valides.map(x => [x.jour, x]))
+  const mois = [...new Set(valides.map(x => x.jour.slice(0, 7)))].sort()
   let moisCourant = 0
   let jourChoisi = null
   if (!mois.length) { conteneur.innerHTML = '<p class="non-calc">Aucun jour à afficher pour ce marché.</p>'; return }
