@@ -24,7 +24,12 @@ const CLE = cleCanonique('GET /listings/comparables', { latitude: 43.0636, longi
 function base (tables) {
   const lus = []
   const ecrits = []
-  const client = { from: tb => {
+  const rpcs = []
+  const client = { rpc: async (fn, params) => {
+    rpcs.push({ fn, params })
+    if (tables.__rpcAbsente) return { data: null, error: { message: `Could not find the function public.${fn}(...) in the schema cache` } }
+    return { data: tables.__rpc === undefined ? 'ok' : tables.__rpc, error: null }
+  }, from: tb => {
     lus.push(tb)
     let lignes = [...(tables[tb] || [])]
     const absente = (tables.__absentes || []).includes(tb)
@@ -52,7 +57,7 @@ function base (tables) {
     }
     return q
   } }
-  return { client, lus, ecrits }
+  return { client, lus, ecrits, rpcs }
 }
 
 async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, body = null, tables = {}, garde = { ok: true, userId: 'MEMBRE', accountUserId: 'COMPTE', bien: { id: 'BIEN-A' } }, airroi = null, geocode = null }) {
@@ -85,7 +90,7 @@ async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, bod
       const res = { status (c) { code = c; return res }, setHeader () {}, json: corps => resolve({ code, corps }) }
       Promise.resolve(api({ method, query, body, headers: {} }, res)).then(() => resolve({ code, corps: null }))
     })
-    return { ...r, gardes, lus: b.lus, ecrits: b.ecrits, appelsAirroi }
+    return { ...r, gardes, lus: b.lus, ecrits: b.ecrits, rpcs: b.rpcs, appelsAirroi }
   } finally {
     require.cache[cheminGarde].exports = vraieGarde
     require.cache[cheminClient].exports = vraiClient
@@ -218,33 +223,59 @@ test('WRITER UNIQUE : seul choix-comparables.js ecrit dans comparables_retenus',
   assert.deepEqual(fautifs, [])
 })
 
-// ─── Constats de la review de 4f19d8b ───────────────────────────────────────
-const appel = (o) => ({ endpoint: 'GET /listings/comparables', created_at: new Date(Date.now() - 3600000).toISOString(), cout_usd: 0.1, ...o })
-
-test('LE TEST QUI COMPTE (SECURITE, review S1) : le quota des recherches NOUVELLES — par bien, par compte, et pour tout le mois', async () => {
-  const sansCache = { ...TABLES(), airroi_cache: [] }
-  const cas = {
-    bien: Array.from({ length: 3 }, () => appel({ property_id: 'BIEN-A', user_id: 'COMPTE' })),
-    compte: Array.from({ length: 5 }, (_, i) => appel({ property_id: `AUTRE-${i}`, user_id: 'COMPTE' })),
-    mois: Array.from({ length: 50 }, (_, i) => appel({ property_id: `X-${i}`, user_id: `U-${i}`, created_at: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1, 0, 1)).toISOString() })),
-  }
-  for (const [nom, journal] of Object.entries(cas)) {
-    const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...sansCache, airroi_appels: journal } })
-    assert.equal(r.appelsAirroi.length, 0, `${nom} : aucun appel paye`)
-    assert.equal(r.corps.etat, 'indisponible', nom)
-    assert.match(r.corps.message, /Réessayez demain/)
-    assert.ok(!/\$|budget|quota|airroi/i.test(r.corps.message))
-  }
-  // Juste sous les plafonds : la recherche part.
-  const sous = [...cas.bien.slice(0, 2), appel({ endpoint: 'GET /listings/metrics/all', property_id: 'BIEN-A', user_id: 'COMPTE' })]
-  const ok = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...sansCache, airroi_appels: sous } })
-  assert.equal(ok.appelsAirroi.length, 1, 'les autres endpoints ne comptent pas dans ce quota')
+// ─── Le quota ATOMIQUE (reviews de 4f19d8b et 7ace057, SECURITE) ───────────
+test('LE TEST QUI COMPTE (SECURITE) : une recherche NOUVELLE passe d abord par la reservation atomique, avec les plafonds', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] } })
+  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_bien_jour: 3, p_compte_jour: 5, p_compte_30j: 10, p_tous_mois: 50 } }])
+  assert.equal(r.appelsAirroi.length, 1)
 })
 
-test('quota : une liste FRAICHE en cache ne compte pas — la recherche est servie meme quota atteint', async () => {
-  const journal = Array.from({ length: 3 }, () => appel({ property_id: 'BIEN-A', user_id: 'COMPTE' }))
-  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_appels: journal } })
+test('LE TEST QUI COMPTE (SECURITE) : reservation refusee — AUCUN appel paye, une phrase simple selon le plafond', async () => {
+  const attendus = { bien: /ce logement aujourd’hui\. Réessayez demain/, compte: /aujourd’hui\. Réessayez demain/, compte_mois: /ce mois est atteint/, mois: /momentanément indisponible/, autre: /momentanément indisponible/ }
+  for (const [motif, message] of Object.entries(attendus)) {
+    const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [], __rpc: motif } })
+    assert.equal(r.appelsAirroi.length, 0, motif)
+    assert.equal(r.corps.etat, 'indisponible')
+    assert.match(r.corps.message, message, motif)
+    assert.ok(!/\$|budget|quota|airroi/i.test(r.corps.message))
+  }
+  // Une reponse illisible de la fonction est un REFUS, jamais un paiement.
+  const nulle = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [], __rpc: null } })
+  assert.equal(nulle.appelsAirroi.length, 0)
+})
+
+test('quota : une liste FRAICHE en cache ne reserve rien et ne paie rien', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), __rpc: 'mois' } })
+  assert.equal(r.rpcs.length, 0)
   assert.equal(r.corps.etat, 'calcule')
+})
+
+test('quota : la fonction SQL absente (migration non appliquee) — un message, aucun appel paye', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [], __rpcAbsente: true } })
+  assert.equal(r.appelsAirroi.length, 0)
+  assert.equal(r.corps.etat, 'indisponible')
+})
+
+test('LE TEST QUI COMPTE (SECURITE) : la migration du quota — verrou, comptage ET reservation dans la meme fonction, execution fermee aux clients', () => {
+  const sql = fs.readFileSync(path.join(RACINE, 'migrations', '2026-10-05-comparables-recherches.sql'), 'utf8')
+  assert.ok(sql.split('\n').every(l => l.length < 60), 'lignes courtes')
+  const corpsFn = sql.slice(sql.indexOf('as $$'), sql.lastIndexOf('$$;'))
+  assert.match(corpsFn, /pg_advisory_xact_lock/)
+  assert.ok(corpsFn.indexOf('pg_advisory_xact_lock') < corpsFn.indexOf('select count'), 'le verrou AVANT le premier comptage')
+  assert.ok(corpsFn.lastIndexOf('select count') < corpsFn.indexOf('insert into comparables_recherches'), 'la reservation APRES tous les comptages, dans la meme fonction')
+  for (const p of ["date_trunc('month', now(), 'UTC')", "interval '24 hours'", "interval '30 days'"]) assert.ok(corpsFn.includes(p), p)
+  assert.match(sql, /security definer/)
+  assert.match(sql, /set search_path = public/)
+  assert.match(sql, /revoke all on function[\s\S]*from public, anon, authenticated/)
+  assert.match(sql, /enable row level security/)
+})
+
+test('GET : les retenus du FONDATEUR sont dits a part', async () => {
+  const t = TABLES()
+  t.comparables_retenus = [{ property_id: 'BIEN-A', listing_id: 'F1', actif: true, retenu_par: 'fondateur' }, { property_id: 'BIEN-A', listing_id: String(COMPS[0].listing_info.listing_id), actif: true, retenu_par: 'proprietaire' }]
+  const g = await appeler({ tables: t })
+  assert.deepEqual(g.corps.fondateur, ['F1'])
+  assert.equal(g.corps.retenus.length, 2)
 })
 
 test('REVIEW : une liste en cache PERIMEE (plus de 90 jours) n est plus proposee ni ne valide un choix', async () => {

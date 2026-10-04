@@ -26,7 +26,7 @@ const { depotSupabase } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
 const { validerProfil, geocoder, lireProfil, enregistrerProfil } = require('../lib/marche/profil-bien')
 const { trierComparables } = require('../lib/marche/pertinence')
-const { rechercheDuProfil, validerChoix, enregistrerChoix, jugerQuota } = require('../lib/marche/choix-comparables')
+const { rechercheDuProfil, validerChoix, enregistrerChoix, QUOTA, MESSAGE_QUOTA } = require('../lib/marche/choix-comparables')
 const { FRAICHEUR_JOURS } = require('../lib/airroi/cout')
 const { comparablesRetenus } = require('../lib/marche/etude')
 
@@ -55,22 +55,20 @@ async function listeEnCache (profil, maintenant = new Date()) {
 
 // Une table V2 pas encore installee (migration non appliquee) : la page le dit,
 // sans erreur brute (review de 4f19d8b, C3).
-const tableAbsente = e => /(bien_profil|comparables_retenus|airroi_cache|airroi_appels)/.test(String(e && e.message)) && /(does not exist|schema cache)/i.test(String(e && e.message))
+const tableAbsente = e => /(bien_profil|comparables_retenus|comparables_recherches|reserver_recherche_comparables|airroi_cache|airroi_appels)/.test(String(e && e.message)) && /(does not exist|schema cache)/i.test(String(e && e.message))
 const INDISPONIBLE = 'Cette page n’est pas encore disponible pour ce logement.'
 
-// Le quota des recherches nouvelles (S1) : lu dans le journal des appels.
-async function quotaAtteint (depot, { bienId, compte }) {
-  const now = Date.now()
-  const jour = new Date(now - 86400000).toISOString()
-  const d = new Date(now)
-  const mois = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString()
-  const deCetEndpoint = l => (l || []).filter(a => a.endpoint === ENDPOINT).length
-  const [bienJour, compteJour, toutMois] = await Promise.all([
-    depot.appelsDepuis({ depuis: jour, propertyId: bienId }),
-    depot.appelsDepuis({ depuis: jour, userId: compte }),
-    depot.appelsDepuis({ depuis: mois }),
-  ])
-  return jugerQuota({ bienJour: deCetEndpoint(bienJour), compteJour: deCetEndpoint(compteJour), mois: deCetEndpoint(toutMois) })
+// ⚠ LE QUOTA EST ATOMIQUE (review de 7ace057, SECURITE) : la fonction SQL compte
+// et reserve sous verrou, dans une meme transaction. Rend 'ok' ou le plafond
+// atteint ; une reponse illisible est un REFUS (jamais un paiement par defaut).
+async function reserverRecherche ({ bienId, compte }) {
+  const { data, error } = await supabase.rpc('reserver_recherche_comparables', {
+    p_user: compte, p_property: bienId,
+    p_bien_jour: QUOTA.parBienJour, p_compte_jour: QUOTA.parCompteJour,
+    p_compte_30j: QUOTA.parCompte30j, p_tous_mois: QUOTA.parMoisTousComptes,
+  })
+  if (error) throw new Error(`reserver_recherche_comparables : ${error.message}`)
+  return typeof data === 'string' ? data : 'illisible'
 }
 
 module.exports = async (req, res) => {
@@ -91,9 +89,13 @@ module.exports = async (req, res) => {
   try {
     if (lecture) {
       const profil = await lireProfil(supabase, bienId)
-      const retenus = (await comparablesRetenus(supabase, bienId)).map(r => r.listing_id)
+      const lignes = await comparablesRetenus(supabase, bienId)
       const liste = profil ? await listeEnCache(profil) : null
-      return res.status(200).json({ etat: 'calcule', profil: profilPublic(profil), retenus,
+      // Les retenus du FONDATEUR sont dits a part : la page les montre
+      // verrouilles, et compte ceux qui sont hors de la liste (review de 7ace057).
+      return res.status(200).json({ etat: 'calcule', profil: profilPublic(profil),
+        retenus: lignes.map(r => r.listing_id),
+        fondateur: lignes.filter(r => r.retenu_par === 'fondateur').map(r => r.listing_id),
         comparables: liste ? trierComparables(liste.listings, profil) : null })
     }
 
@@ -113,13 +115,15 @@ module.exports = async (req, res) => {
     if (corps.action === 'chercher') {
       const profil = await lireProfil(supabase, bienId)
       if (!profil) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })
-      const depot = depotSupabase(supabase)
-      // Une liste fraiche en cache ne coute rien ; sinon, le quota d'abord.
+      // Une liste fraiche en cache ne coute rien ; sinon, la RESERVATION d'abord.
       const fraiche = await listeEnCache(profil)
-      if (!fraiche && await quotaAtteint(depot, { bienId, compte })) {
-        return res.status(200).json({ etat: 'indisponible', message: 'Plusieurs recherches ont déjà été lancées récemment. Réessayez demain.' })
+      if (!fraiche) {
+        const motif = await reserverRecherche({ bienId, compte })
+        if (motif !== 'ok') {
+          return res.status(200).json({ etat: 'indisponible', message: MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois })
+        }
       }
-      const client = creerClient({ depot })
+      const client = creerClient({ depot: depotSupabase(supabase) })
       let r
       try {
         r = await client.comparables(rechercheDuProfil(profil), { propertyId: bienId, userId: compte })
@@ -130,8 +134,9 @@ module.exports = async (req, res) => {
         return res.status(200).json({ etat: 'indisponible', message: 'La liste des biens du marché n’est pas disponible pour le moment. Réessayez plus tard.' })
       }
       const listings = r && r.donnees && Array.isArray(r.donnees.listings) ? r.donnees.listings : []
-      const retenus = (await comparablesRetenus(supabase, bienId)).map(x => x.listing_id)
-      return res.status(200).json({ etat: 'calcule', comparables: trierComparables(listings, profil), retenus })
+      const lignes = await comparablesRetenus(supabase, bienId)
+      return res.status(200).json({ etat: 'calcule', comparables: trierComparables(listings, profil),
+        retenus: lignes.map(x => x.listing_id), fondateur: lignes.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id) })
     }
 
     if (corps.action === 'retenir') {

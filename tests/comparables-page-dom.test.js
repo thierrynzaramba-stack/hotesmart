@@ -49,9 +49,9 @@ async function monter (serveur) {
 }
 
 // Un serveur simule : etat du profil, du cache et des retenus.
-function serveur ({ profil = null, cache = null, retenus = [], chercher = () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [] }) } = {}) {
+function serveur ({ profil = null, cache = null, retenus = [], fondateur = [], chercher = () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [] }) } = {}) {
   return ({ methode, corps }) => {
-    if (methode === 'GET') return reponse({ etat: 'calcule', profil, retenus, comparables: cache })
+    if (methode === 'GET') return reponse({ etat: 'calcule', profil, retenus, fondateur, comparables: cache })
     if (corps.action === 'profil') return reponse({ etat: 'enregistre', profil: { ...PROFIL, adresse: corps.adresse } })
     if (corps.action === 'chercher') return chercher(corps)
     if (corps.action === 'retenir') return reponse({ etat: 'enregistre', retenus: corps.listing_ids })
@@ -92,9 +92,15 @@ test('LE TEST QUI COMPTE : un retour sur la page avec la liste en cache ne relan
   assert.equal(doc.querySelector('#cp-eq input[value="parking"]').checked, true)
 })
 
-test('un profil sans liste en cache lance la recherche une fois', async () => {
-  const { appels } = await monter(serveur({ profil: PROFIL, cache: null }))
+test('LE TEST QUI COMPTE (review de 7ace057) : un profil sans liste en cache NE lance PAS de recherche tout seul — un bouton la lance', async () => {
+  const { doc, appels } = await monter(serveur({ profil: PROFIL, cache: null }))
+  assert.equal(posts(appels, 'chercher').length, 0)
+  const b = doc.getElementById('cp-chercher')
+  assert.equal(b.textContent, 'Chercher les biens du marché')
+  b.click()
+  await attendre()
   assert.equal(posts(appels, 'chercher').length, 1)
+  assert.equal(doc.querySelectorAll('.cp-bien').length, 25)
 })
 
 test('LE TEST QUI COMPTE : chaque carte — photo, nom, capacite, equipements, activite, ressemblance, case ; AUCUN prix', async () => {
@@ -168,8 +174,12 @@ test('changer de logement pendant la recherche : la liste du logement precedent 
     if (premier) { premier = false; await lent; return reponse({ etat: 'calcule', comparables: [{ ...CARTES[0], nom: 'ANCIEN-LOGEMENT' }], retenus: [] }) }
     return reponse({ etat: 'calcule', comparables: CARTES, retenus: [] })
   } }))
+  doc.getElementById('cp-chercher').click()
+  await attendre()
   doc.getElementById('cp-bien').value = 'B2'
   doc.getElementById('cp-bien').dispatchEvent(new w.Event('change'))
+  await attendre()
+  doc.getElementById('cp-chercher').click()
   await attendre()
   liberer()
   await attendre()
@@ -177,7 +187,7 @@ test('changer de logement pendant la recherche : la liste du logement precedent 
   assert.equal(doc.querySelectorAll('.cp-bien').length, 25)
 })
 
-test('telephone : les cartes en une colonne qui peut retrecir ; mode sombre par les variables du theme', () => {
+test('telephone : les cartes en une colonne qui peut retrecir ; couleurs prises dans les variables du theme', () => {
   assert.match(HTML, /@media \(max-width: 640px\)[\s\S]*\.cp-liste \{ grid-template-columns: minmax\(0, 1fr\); \}/)
   const css = /<style>([\s\S]*?)<\/style>/.exec(HTML)[1]
   assert.ok(!/#fff\b(?![^;]*color: #fff)/.test(css.replace(/color: #fff/g, '')), 'aucun fond blanc en dur')
@@ -191,4 +201,43 @@ test('la page n appelle que sa route, et ne lit que le nom des logements', () =>
   assert.deepEqual([...HTML.matchAll(/supabase\.from\('properties'\)\.select\('([^']*)'\)/g)].map(m => m[1]), ['id, name'])
   assert.ok(!/api\.airroi|airroi\.com/i.test(HTML))
   assert.ok(!/innerHTML/.test(/<script type="module">([\s\S]*?)<\/script>/.exec(HTML)[1]), 'aucun innerHTML dans le script')
+})
+
+// ─── Constats de la review de 7ace057 (page) ────────────────────────────────
+test('LE TEST QUI COMPTE : les retenus du FONDATEUR — verrouilles dans la liste, annonces hors de la liste, jamais envoyes par l hote', async () => {
+  const dans = CARTES[2].listing_id
+  const { doc, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: [dans, 'F-HORS-1', 'F-HORS-2'], fondateur: [dans, 'F-HORS-1', 'F-HORS-2'] }))
+  const c = doc.querySelector(`.cp-bien[data-id="${dans}"] input`)
+  assert.equal(c.checked, true)
+  assert.equal(c.disabled, true)
+  assert.match(doc.querySelector(`.cp-bien[data-id="${dans}"] .cp-choix`).textContent, /Retenu par l’équipe HôteSmart/)
+  assert.equal(doc.getElementById('cp-hors-liste').textContent, '2 comparables retenus par l’équipe HôteSmart ne figurent pas dans cette liste et restent pris en compte.')
+  // L'hote coche 3 autres : seuls les siens partent.
+  const libres = [...doc.querySelectorAll('.cp-bien input:not([disabled])')].slice(0, 3)
+  for (const x of libres) { x.checked = true; x.dispatchEvent(new doc.defaultView.Event('change')) }
+  doc.getElementById('cp-valider-b').click()
+  await attendre()
+  const envoyes = posts(appels, 'retenir')[0].corps.listing_ids
+  assert.equal(envoyes.length, 3)
+  assert.ok(!envoyes.includes(dans))
+})
+
+test('REVIEW : changer de logement remet le compteur et le bouton a zero, meme si la recherche du suivant echoue', async () => {
+  const s = serveur({ profil: PROFIL, cache: CARTES })
+  const { w, doc } = await monter(({ methode, corps, url }) => (/B2/.test(url) && methode === 'GET' ? reponse({ etat: 'calcule', profil: PROFIL, retenus: [], fondateur: [], comparables: null }) : s({ methode, corps })))
+  const cases = [...doc.querySelectorAll('.cp-bien input')].slice(0, 3)
+  for (const x of cases) { x.checked = true; x.dispatchEvent(new w.Event('change')) }
+  assert.equal(doc.getElementById('cp-valider-b').disabled, false)
+  doc.getElementById('cp-bien').value = 'B2'
+  doc.getElementById('cp-bien').dispatchEvent(new w.Event('change'))
+  await attendre()
+  assert.equal(doc.getElementById('cp-valider-b').disabled, true)
+  assert.match(doc.getElementById('cp-compte').textContent, /^0 sélectionné/)
+})
+
+test('REVIEW : chaque case porte le nom de SON bien pour un lecteur d ecran ; le compteur est annonce', async () => {
+  const { doc } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  const c = doc.querySelector('.cp-bien input')
+  assert.equal(c.getAttribute('aria-label'), `Comparable au mien : ${CARTES[0].nom}`)
+  assert.equal(doc.getElementById('cp-compte').getAttribute('aria-live'), 'polite')
 })

@@ -46,6 +46,8 @@
     .cp-ressemblance { font-size: 11.5px; color: var(--text2); }
     .cp-choix { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; font-size: 13.5px; font-weight: 600; min-height: 44px; cursor: pointer; }
     .cp-choix input { width: 20px; height: 20px; }
+    .cp-fondateur { font-size: 12px; font-weight: 600; color: var(--text2); }
+    #cp-bien { max-width: 100%; }
     .cp-pied { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 10px 0; margin-top: 12px;
       display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
     @media (max-width: 640px) {
@@ -106,7 +108,7 @@
     <div id="cp-liste-zone"><p class="cp-meta">Recherche des biens du marché…</p></div>
     <div class="cp-pied">
       <button type="button" class="cp-btn" id="cp-valider-b" disabled>Valider mes comparables</button>
-      <span id="cp-compte" class="cp-meta" style="margin:0"></span>
+      <span id="cp-compte" class="cp-meta" style="margin:0" aria-live="polite"></span>
       <span id="cp-message-b" aria-live="polite"></span>
     </div>
   </div>
@@ -132,6 +134,9 @@
   let session = null
   let jeton = 0
   const choisis = new Set()
+  // Les retenus du FONDATEUR : montres verrouilles, jamais envoyes par l'hote ;
+  // ceux qui sont hors de la liste sont annonces (review de 7ace057).
+  let fondateur = new Set()
 
   // Un message sur une zone : texte seul.
   function dire (id, texte, classe) {
@@ -188,6 +193,8 @@
   async function charger () {
     const j = ++jeton
     choisis.clear()
+    fondateur = new Set()
+    majCompte()
     el('cp-etape-b').hidden = true
     dire('cp-message-a', ''); dire('cp-message-b', '')
     remplirFormulaire(null)
@@ -198,13 +205,29 @@
     if (r.d.etat === 'indisponible') { el('cp-valider-a').disabled = true; return dire('cp-message-a', r.d.message || 'Page indisponible.', 'cp-erreur') }
     el('cp-valider-a').disabled = false
     remplirFormulaire(r.d.profil)
-    for (const id of r.d.retenus || []) choisis.add(String(id))
+    retenusDu(r.d)
     if (!r.d.profil) return
     dire('cp-message-a', `Adresse retenue : ${r.d.profil.adresse_trouvee}`, 'cp-ok')
     el('cp-etape-b').hidden = false
-    // La liste en cache s'affiche ; sinon on la cherche (une fois par profil).
+    // La liste en cache s'affiche. Sinon, rien ne part tout seul : une
+    // recherche peut couter, c'est l'hote qui la lance (review de 7ace057).
     if (Array.isArray(r.d.comparables)) afficher(r.d.comparables)
-    else chercher(j)
+    else boutonChercher(j)
+  }
+
+  // Les retenus : ceux du fondateur a part, les autres coches pour l'hote.
+  function retenusDu (d) {
+    fondateur = new Set((d.fondateur || []).map(String))
+    for (const id of d.retenus || []) if (!fondateur.has(String(id))) choisis.add(String(id))
+  }
+
+  function boutonChercher (j) {
+    const b = document.createElement('button')
+    b.type = 'button'; b.className = 'cp-btn'; b.id = 'cp-chercher'; b.textContent = 'Chercher les biens du marché'
+    b.addEventListener('click', () => chercher(j))
+    const p = document.createElement('p'); p.className = 'cp-meta'
+    p.textContent = 'Lancez la recherche des biens du marché qui ressemblent au vôtre.'
+    el('cp-liste-zone').replaceChildren(p, b)
   }
 
   async function validerProfil () {
@@ -219,8 +242,9 @@
     dire('cp-message-a', 'Enregistrement…')
     let r
     try { r = await appeler('POST', corps) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
-    el('cp-valider-a').disabled = false
+    // Le bouton n'est rendu qu'au logement qui l'a envoye (review de 7ace057).
     if (j !== jeton) return
+    el('cp-valider-a').disabled = false
     if (!r.ok || !r.d || !r.d.profil) return dire('cp-message-a', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')
     dire('cp-message-a', `Adresse retenue : ${r.d.profil.adresse_trouvee}`, 'cp-ok')
     el('cp-etape-b').hidden = false
@@ -238,7 +262,7 @@
       el('cp-liste-zone').replaceChildren(p)
       return
     }
-    for (const id of r.d.retenus || []) choisis.add(String(id))
+    retenusDu(r.d)
     afficher(r.d.comparables)
   }
 
@@ -247,13 +271,21 @@
     // Un retenu qui n'est plus dans la liste n'est pas compte.
     const ids = new Set(cartes.map(c => String(c.listing_id)))
     for (const id of [...choisis]) if (!ids.has(id)) choisis.delete(id)
+    // Les retenus du fondateur hors de la liste restent pris en compte : on le dit.
+    const horsListe = [...fondateur].filter(id => !ids.has(id)).length
     if (!cartes.length) {
       const p = document.createElement('p'); p.className = 'non-calc'; p.textContent = 'Aucun bien du marché trouvé près de votre logement.'
       el('cp-liste-zone').replaceChildren(p); majCompte(); return
     }
     const liste = document.createElement('div'); liste.className = 'cp-liste'
     for (const c of cartes) liste.append(carte(c))
-    el('cp-liste-zone').replaceChildren(liste)
+    const zone = [liste]
+    if (horsListe) {
+      const n = document.createElement('p'); n.className = 'cp-meta'; n.id = 'cp-hors-liste'
+      n.textContent = `${horsListe} comparable${horsListe > 1 ? 's' : ''} retenu${horsListe > 1 ? 's' : ''} par l’équipe HôteSmart ${horsListe > 1 ? 'ne figurent' : 'ne figure'} pas dans cette liste et ${horsListe > 1 ? 'restent pris' : 'reste pris'} en compte.`
+      zone.push(n)
+    }
+    el('cp-liste-zone').replaceChildren(...zone)
     majCompte()
   }
 
@@ -287,10 +319,21 @@
     const ress = document.createElement('div'); ress.className = 'cp-ressemblance'
     ress.textContent = Number.isFinite(c.ressemblance) ? `${c.ressemblance} % de ressemblance` : ''
     const choix = document.createElement('label'); choix.className = 'cp-choix'
-    const caseC = document.createElement('input'); caseC.type = 'checkbox'; caseC.checked = choisis.has(id)
-    caseC.addEventListener('change', () => { if (caseC.checked) choisis.add(id); else choisis.delete(id); a.classList.toggle('choisi', caseC.checked); majCompte() })
-    a.classList.toggle('choisi', caseC.checked)
-    choix.append(caseC, document.createTextNode('Comparable au mien'))
+    const caseC = document.createElement('input'); caseC.type = 'checkbox'
+    // Un nom accessible PAR BIEN : « Comparable au mien : <nom> » (attribut texte).
+    caseC.setAttribute('aria-label', `Comparable au mien : ${c.nom || 'annonce sans titre'}`)
+    if (fondateur.has(id)) {
+      // Retenu par le fondateur : coche, verrouille, et dit comme tel.
+      caseC.checked = true; caseC.disabled = true
+      a.classList.add('choisi')
+      choix.append(caseC, document.createTextNode('Retenu par l’équipe HôteSmart'))
+      choix.classList.add('cp-fondateur')
+    } else {
+      caseC.checked = choisis.has(id)
+      caseC.addEventListener('change', () => { if (caseC.checked) choisis.add(id); else choisis.delete(id); a.classList.toggle('choisi', caseC.checked); majCompte() })
+      a.classList.toggle('choisi', caseC.checked)
+      choix.append(caseC, document.createTextNode('Comparable au mien'))
+    }
     corps.append(nom, taille, badges, activite, ress, choix)
     a.append(corps)
     return a

@@ -2633,23 +2633,41 @@ comparables vaut **déclaration du positionnement** : il n'y a pas d'étape
 - **Quota des recherches nouvelles** (sécurité). Une recherche que le cache ne
   sert pas coûte 0,10 $. Sans quota, un hôte qui change son profil à chaque
   recherche pourrait vider le budget AirROI global de 10 $ par mois, et couper
-  AirROI pour tous les comptes. Trois plafonds, lus dans le journal
-  `airroi_appels` :
-  - **3 par bien** sur 24 heures ;
-  - **5 par compte** sur 24 heures ;
-  - **50 pour tous les comptes** sur le mois, soit 5 $ : la moitié du budget,
-    pour que les études du fondateur gardent l'autre.
-
-  Une liste fraîche en cache ne compte pas. Quand le quota est atteint, l'hôte
-  lit « Réessayez demain ».
+  AirROI pour tous les comptes.
+  - **Le quota est ATOMIQUE.** La fonction SQL
+    `reserver_recherche_comparables` (migration
+    `2026-10-05-comparables-recherches.sql`) compte puis réserve dans une même
+    transaction, sous `pg_advisory_xact_lock`. La première version lisait le
+    journal, puis payait : 60 requêtes parallèles passaient toutes (review de
+    7ace057).
+  - Plafonds :
+    - **3 par bien** sur 24 heures ;
+    - **5 par compte** sur 24 heures ;
+    - **10 par compte** sur 30 jours ;
+    - **50 pour tous les comptes** sur le mois civil.
+  - Le compteur, `comparables_recherches`, est distinct du journal AirROI : les
+    études du fondateur n'y entrent pas.
+  - Une liste fraîche en cache ne réserve rien. Une réponse illisible de la
+    fonction est un refus, jamais un paiement.
+  - Quand un plafond est atteint, le message dit lequel, sans coût ni jargon.
+- **Aucune recherche ne part seule à l'ouverture de la page.** Pour un profil
+  sans liste en cache, un bouton « Chercher les biens du marché » la lance. Après
+  la validation de l'étape A, la recherche part, puisque c'est le geste de
+  l'hôte.
 - **Les choix du fondateur sont préservés.** Valider :
   - ajoute les biens nouveaux au nom du propriétaire, sans toucher une ligne
     existante ;
   - réactive les biens cochés, sans changer leur provenance ;
   - **ne désactive que les anciens choix du propriétaire**.
 
-  Une ligne du fondateur absente des 25 proposés reste active. *Décision à
-  confirmer par Thierry.*
+  Une ligne du fondateur absente des 25 proposés reste active. **La page le
+  dit** :
+  - un retenu du fondateur présent dans la liste est coché, verrouillé, et
+    marqué « Retenu par l'équipe HôteSmart » ;
+  - ceux qui sont hors de la liste sont comptés sous la liste (« N comparables
+    retenus par l'équipe HôteSmart… restent pris en compte »).
+
+  *Décision à confirmer par Thierry : l'hôte doit-il pouvoir les retirer ?*
 - **Une liste en cache périmée** (plus de 90 jours) n'est plus proposée et ne
   valide plus un choix.
 - **La photo n'est acceptée qu'en https, sur `muscache.com`** (le domaine des
