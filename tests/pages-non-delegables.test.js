@@ -96,6 +96,9 @@ const DELEGABLES = [
   // garde `reservations` en lecture porte sur le LOGEMENT choisi, qui designe
   // le compte (`/api/marche-global?property_id=`).
   'apps/yield/marche-global.html',
+  // ⚠ DELEGABLE (spec §15, 4 octobre 2026), comme marche-global.html : la
+  // garde du logement designe le compte (`/api/marche-temperature?property_id=`).
+  'apps/yield/marche-temperature.html',
 ]
 
 // ─── Un test par page non délégable ─────────────────────────────────────────
