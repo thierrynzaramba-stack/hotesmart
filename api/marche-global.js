@@ -50,6 +50,14 @@ async function calendrier (donnees) {
   }
 }
 
+// Une progression en echec ne fait pas tomber les blocs 1 et 2 (review de bc2e023).
+function progression (donnees) {
+  try { return progressionDuMarche(donnees) } catch (e) {
+    console.error('[marche-global] progression', e.message)
+    return { statut: 'non_calculable', motif: 'la progression du marché est incalculable', annees: [], progression: null, mois_par_mois: [] }
+  }
+}
+
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
 const absente = (error, t) => error && new RegExp(t).test(error.message || '') && /(does not exist|schema cache)/i.test(error.message || '')
@@ -89,7 +97,7 @@ module.exports = async (req, res) => {
       return res.status(200).json({ source: 'marche', etat: 'historique_absent', marche: m, motif: 'l historique en cache est illisible' })
     }
     return res.status(200).json({ source: 'marche', etat: 'calcule', marche: m, recupere_le: ligne.recupere_le,
-      adr_occupation: adrOccupationMensuel(donnees), revpar: revparMensuel(donnees), progression: progressionDuMarche(donnees), calendrier: await calendrier(donnees) })
+      adr_occupation: adrOccupationMensuel(donnees), revpar: revparMensuel(donnees), progression: progression(donnees), calendrier: await calendrier(donnees) })
   } catch (e) {
     console.error('[marche-global]', e.message)
     return res.status(500).json({ error: 'lecture_impossible' })

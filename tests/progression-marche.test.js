@@ -135,3 +135,39 @@ test('historique absent : non calculable, rien d invente', () => {
   assert.equal(r.statut, 'non_calculable')
   assert.deepEqual(r.annees, [])
 })
+
+// ─── Constats de la review de bc2e023 ───────────────────────────────────────
+const sans = (mois) => ({ ...MARCHE60, results: MARCHE60.results.filter(r => r.date.slice(0, 7) !== mois) })
+const avecQueue = (ligne) => ({ ...MARCHE60, results: [...MARCHE60.results, ligne] })
+
+test('REVIEW : un mois qui ne porte QUE le nombre d annonces n est pas mesure — la fenetre ne glisse pas, l annee reste partielle', () => {
+  const r = p.progressionDuMarche(avecQueue({ date: '2026-09-01', active_listings_count: 900 }))
+  assert.deepEqual(r.progression.periode, { debut: '2025-09', fin: '2026-08' })
+  assert.equal(r.progression.indicateurs.annonces.pct, 11.3)
+  assert.equal(r.annees.find(a => a.annee === '2026').mois_mesures, 8)
+  assert.equal(r.mois_par_mois[11].mois, '2026-08')
+})
+
+test('REVIEW : un trou dans la reponse BRUTE garde l alignement (la serie est comblee) et sort le mois du calcul', () => {
+  const r = p.progressionDuMarche(sans('2025-03'))
+  assert.deepEqual(r.progression.periode, { debut: '2025-09', fin: '2026-08' })
+  assert.deepEqual(r.progression.precedente, { debut: '2024-09', fin: '2025-08' })
+  for (const k of p.INDICATEURS) assert.equal(r.progression.indicateurs[k].mois_comparables, 11, k)
+})
+
+test('REVIEW : un mois sans son mois de l an dernier dit « precedent absent », pas « peu d annonces »', () => {
+  const r = p.progressionDuMarche(sans('2025-03'))
+  const mars = r.mois_par_mois.find(m => m.mois === '2026-03')
+  assert.equal(mars.precedent_absent, true)
+  assert.equal(mars.peu_annonces, false)
+  assert.equal(mars.adr.pct, null)
+  const avril = r.mois_par_mois.find(m => m.mois === '2026-04')
+  assert.equal(avril.precedent_absent, false)
+  assert.equal(avril.peu_annonces, false)
+  assert.equal(typeof avril.adr.pct, 'number')
+})
+
+test('REVIEW : des annonces absentes font sortir le mois de la progression des annonces aussi', () => {
+  const s = serie('2024-01', 24, i => (i === 20 ? { annonces: null } : {}))
+  assert.equal(p.progression(s).indicateurs.annonces.mois_comparables, 11)
+})
