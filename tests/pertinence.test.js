@@ -182,3 +182,9 @@ test('REVIEW (C5) : le tri suit le score brut, pas l arrondi affiche', () => {
   assert.equal(r[0].ressemblance, r[1].ressemblance)
   assert.equal(r[0].nom, plus.listing_info.listing_name)
 })
+
+test('RE-REVIEW (65d6cc7) : « Air conditioning » seul et en majuscules est reconnu ; la borne « EV charger - AC » ne l est pas', () => {
+  assert.deepEqual(p.equipementsDeFiche(['Air conditioning']), ['climatisation'])
+  assert.deepEqual(p.equipementsDeFiche(['AIR CONDITIONING']), ['climatisation'])
+  assert.deepEqual(p.equipementsDeFiche(['EV charger - AC']), [])
+})
