@@ -115,9 +115,16 @@ module.exports = async (req, res) => {
     if (corps.action === 'chercher') {
       const profil = await lireProfil(supabase, bienId)
       if (!profil) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })
-      // Une liste fraiche en cache ne coute rien ; sinon, la RESERVATION d'abord.
+      // Une liste fraiche en cache est servie TELLE QUELLE, sans appeler le
+      // client : il relirait le cache et paierait si celui-ci expirait entre les
+      // deux lectures, sans reservation (verification de 13ffd29).
       const fraiche = await listeEnCache(profil)
-      if (!fraiche) {
+      if (fraiche) {
+        const lignesF = await comparablesRetenus(supabase, bienId)
+        return res.status(200).json({ etat: 'calcule', comparables: trierComparables(fraiche.listings, profil),
+          retenus: lignesF.map(x => x.listing_id), fondateur: lignesF.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id) })
+      }
+      {
         const motif = await reserverRecherche({ bienId, compte })
         if (motif !== 'ok') {
           return res.status(200).json({ etat: 'indisponible', message: MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois })

@@ -132,7 +132,7 @@ test('LE TEST QUI COMPTE (securite, review S3) : les lignes portent le COMPTE re
   const up = r.ecrits.find(e => e.tb === 'comparables_retenus' && e.op === 'upsert')
   assert.ok(up.ligne.every(l => l.user_id === 'COMPTE' && l.property_id === 'BIEN-A' && l.retenu_par === 'proprietaire' && l.actif === true))
   assert.deepEqual(up.opts, { onConflict: 'property_id,listing_id', ignoreDuplicates: true }, 'une ligne existante n est jamais reecrite')
-  const ch = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })
+  const ch = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] } })
   assert.deepEqual(ch.appelsAirroi[0].ctx, { propertyId: 'BIEN-A', userId: 'COMPTE' }, 'les plafonds de depense comptent le bien et le compte')
 })
 
@@ -154,7 +154,7 @@ test('LE TEST QUI COMPTE : AUCUN prix, revenu ou occupation ne sort — ni au GE
 })
 
 test('chercher : la recherche AirROI part du PROFIL (position geocodee, vraies chambres, salles de bain, voyageurs)', async () => {
-  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] } })
   assert.deepEqual(r.appelsAirroi[0].params, { latitude: 43.0636, longitude: 0.1476, bedrooms: 1, baths: 1, guests: 2 })
   assert.equal(r.corps.comparables.length, 25)
   assert.deepEqual(r.corps.retenus, [String(COMPS[0].listing_info.listing_id)])
@@ -166,7 +166,7 @@ test('chercher : sans profil, on le demande ; AirROI indisponible (plafond, cle,
   assert.match(sans.corps.message, /Décrivez d’abord votre logement/)
   assert.equal(sans.appelsAirroi.length, 0)
   const e = Object.assign(new Error('Budget AirROI du mois atteint (9.95 $ sur 10 $)'), { code: 'budget_mensuel' })
-  const panne = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES(), airroi: e })
+  const panne = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: e })
   assert.equal(panne.corps.etat, 'indisponible')
   assert.ok(!/\$|budget|airroi|clé|cle/i.test(panne.corps.message), panne.corps.message)
 })
@@ -244,10 +244,12 @@ test('LE TEST QUI COMPTE (SECURITE) : reservation refusee — AUCUN appel paye, 
   assert.equal(nulle.appelsAirroi.length, 0)
 })
 
-test('quota : une liste FRAICHE en cache ne reserve rien et ne paie rien', async () => {
+test('quota : une liste FRAICHE en cache ne reserve rien, et le client AirROI n est meme pas appele', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), __rpc: 'mois' } })
   assert.equal(r.rpcs.length, 0)
+  assert.equal(r.appelsAirroi.length, 0, 'servie depuis la lecture du cache, sans second passage par le client')
   assert.equal(r.corps.etat, 'calcule')
+  assert.equal(r.corps.comparables.length, 25)
 })
 
 test('quota : la fonction SQL absente (migration non appliquee) — un message, aucun appel paye', async () => {
