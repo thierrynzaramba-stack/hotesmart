@@ -7,10 +7,11 @@
 //
 // ⚠ PIPELINE AirROI SEUL : il rend les `jours` de /api/marche-temperature
 // (niveau, sens des composantes, evenement) et rien d'autre. AUCUN prix, ni
-// en euros ni en base 100. Sa palette (brique, quatre paliers) est la sienne :
-// elle ne se confond jamais avec celle de l'historique.
+// en euros ni en base 100. Sa palette : les quatre bleus de l'ancien calendrier
+// de l'historique (§17.1), une seule pour ce calendrier, ou qu'il s'affiche.
 // ⚠ Tout texte venu du serveur passe par ech().
 
+const JOURS_COURTS = ['L', 'M', 'M', 'J', 'V', 'S', 'D']
 const MOIS_LONGS = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
 const JOURS_SEM = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim']
 export const NIVEAUX = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
@@ -26,23 +27,33 @@ export const jourFr = iso => /^\d{4}-\d{2}-\d{2}$/.test(String(iso || '')) ? `${
 export const niv = n => (Object.prototype.hasOwnProperty.call(NIVEAUX, n) ? n : null)
 export const badge = n => niv(n) ? `<span class="tc-badge" style="background:var(--tc-${niv(n)});color:var(--tc-${niv(n)}-txt)">${NIVEAUX[niv(n)]}</span>` : '<span class="non-calc">—</span>'
 const sens = v => SENS[v] || '—'
+const joursValides = jours => (jours || []).filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(String(x.jour)))
+
+// Le detail d'un jour : ce qui fait son niveau, en sens, jamais en chiffres.
+function listeDuJour (x) {
+  const sn = x.sens || {}
+  return `<dl><dt>Saison</dt><dd>${sens(sn.saison)}</dd>`
+    + `<dt>Jour de semaine</dt><dd>${sens(sn.semaine)}${x.week_end ? ' (nuit de week-end)' : ''}</dd>`
+    + `<dt>Férié ou événement</dt><dd>${x.evenement ? `${ech(x.evenement)} — ${sens(sn.evenement)}` : 'aucun'}</dd>`
+    + `<dt>Demande du marché</dt><dd>${sens(sn.demande)} <span class="non-calc">(non comptée dans le niveau : elle date du calcul)</span></dd></dl>`
+}
 
 // Une seule teinte, quatre paliers ; leur version sombre ; les classes du
 // calendrier. Injecte une fois par page.
 const STYLES = `
   :root {
-    --tc-creux: #f6ebe4; --tc-modere: #e2b9a0; --tc-favorable: #b8603a; --tc-pic: #6b2412;
-    --tc-creux-txt: #4a2a1c; --tc-modere-txt: #3d1a0c; --tc-favorable-txt: #ffffff; --tc-pic-txt: #ffffff;
+    --tc-creux: #E8EEF7; --tc-modere: #B9CCE9; --tc-favorable: #6F97D3; --tc-pic: #1E3F73;
+    --tc-creux-txt: #1c2b44; --tc-modere-txt: #1c2b44; --tc-favorable-txt: #1c2b44; --tc-pic-txt: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --tc-creux: #2c2320; --tc-modere: #6a3f2c; --tc-favorable: #b8603a; --tc-pic: #f0a27c;
-      --tc-creux-txt: #e9d8cf; --tc-modere-txt: #f6e3d9; --tc-favorable-txt: #ffffff; --tc-pic-txt: #2a0e04;
+      --tc-creux: #1d2735; --tc-modere: #2c4466; --tc-favorable: #446eae; --tc-pic: #a9c4ef;
+      --tc-creux-txt: #c9d6ea; --tc-modere-txt: #e3ecf8; --tc-favorable-txt: #ffffff; --tc-pic-txt: #0f1d33;
     }
   }
   :root[data-theme="dark"] {
-    --tc-creux: #2c2320; --tc-modere: #6a3f2c; --tc-favorable: #b8603a; --tc-pic: #f0a27c;
-    --tc-creux-txt: #e9d8cf; --tc-modere-txt: #f6e3d9; --tc-favorable-txt: #ffffff; --tc-pic-txt: #2a0e04;
+    --tc-creux: #1d2735; --tc-modere: #2c4466; --tc-favorable: #446eae; --tc-pic: #a9c4ef;
+    --tc-creux-txt: #c9d6ea; --tc-modere-txt: #e3ecf8; --tc-favorable-txt: #ffffff; --tc-pic-txt: #0f1d33;
   }
   .tc-legende { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
   .tc-niv { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; padding: 3px 10px 3px 3px;
@@ -65,6 +76,27 @@ const STYLES = `
   .tc-detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 6px 0 0; }
   .tc-detail dt { color: var(--text2); }
   .tc-detail dd { margin: 0; }
+  /* La vue « 12 mois d'un coup » (§17.1) : la grille et les petites cases de
+     l'ancien calendrier de l'historique. */
+  .tc-legende-simple { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text2); margin: 8px 0 2px; }
+  .tc-legende-simple i { display: inline-block; width: 18px; height: 10px; vertical-align: -1px; margin-right: 6px; border-radius: 2px; border: 0.5px solid var(--border); }
+  .tc-annee { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px 18px; margin-top: 10px; }
+  .tc-mois h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px; text-transform: capitalize; }
+  .tc-mini { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .tc-mjsem { font-size: 10.5px; color: var(--text2); text-align: center; }
+  .tc-case { font: inherit; font-size: 11px; line-height: normal; text-align: center; padding: 4px 0; border: 0; border-radius: 3px; cursor: pointer; }
+  .tc-case:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+  .tc-vide { font-size: 11px; text-align: center; padding: 4px 0; color: var(--text2); }
+  /* La fenetre de detail d'un jour. */
+  .tc-fond { position: fixed; inset: 0; background: rgba(0, 0, 0, .4); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 1000; }
+  .tc-popup { background: var(--bg); color: var(--text); border: 0.5px solid var(--border2); border-radius: 12px; width: 100%; max-width: 380px;
+              padding: 14px 16px; box-shadow: 0 8px 30px rgba(0, 0, 0, .25); font-size: 13.5px; line-height: 1.6; }
+  .tc-popup-tete { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .tc-popup h3 { margin: 0; font-size: 15px; }
+  .tc-popup .tc-fermer { font: inherit; font-size: 20px; border: 0; background: transparent; color: var(--text); cursor: pointer; min-width: 44px; min-height: 44px; }
+  .tc-popup dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 8px 0 0; }
+  .tc-popup dt { color: var(--text2); }
+  .tc-popup dd { margin: 0; }
 `
 
 export function injecterStyles () {
@@ -82,7 +114,7 @@ export function monterCalendrierTemperature (conteneur, jours) {
   injecterStyles()
   // Un jour sans date lisible est ignore ; les mois sont tries, quel que soit
   // l'ordre recu (review de 98a49da).
-  const valides = (jours || []).filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(String(x.jour)))
+  const valides = joursValides(jours)
   const parJour = new Map(valides.map(x => [x.jour, x]))
   const mois = [...new Set(valides.map(x => x.jour.slice(0, 7)))].sort()
   let moisCourant = 0
@@ -93,12 +125,7 @@ export function monterCalendrierTemperature (conteneur, jours) {
     if (!jourChoisi) return '<span class="non-calc">Touchez un jour pour voir son détail.</span>'
     const x = parJour.get(jourChoisi)
     if (!x) return ''
-    const sn = x.sens || {}
-    return `<b>${ech(jourFr(x.jour))}</b> · ${badge(x.niveau)} <span class="non-calc">${DESCRIPTION[niv(x.niveau)] || ''}</span>`
-      + `<dl><dt>Saison</dt><dd>${sens(sn.saison)}</dd>`
-      + `<dt>Jour de semaine</dt><dd>${sens(sn.semaine)}${x.week_end ? ' (nuit de week-end)' : ''}</dd>`
-      + `<dt>Férié ou événement</dt><dd>${x.evenement ? `${ech(x.evenement)} — ${sens(sn.evenement)}` : 'aucun'}</dd>`
-      + `<dt>Demande du marché</dt><dd>${sens(sn.demande)} <span class="non-calc">(non comptée dans le niveau : elle date du calcul)</span></dd></dl>`
+    return `<b>${ech(jourFr(x.jour))}</b> · ${badge(x.niveau)} <span class="non-calc">${DESCRIPTION[niv(x.niveau)] || ''}</span>` + listeDuJour(x)
   }
 
   function peindre () {
@@ -131,4 +158,85 @@ export function monterCalendrierTemperature (conteneur, jours) {
     }))
   }
   peindre()
+}
+
+// ─── La fenetre de detail d'un jour (§17.1) ─────────────────────────────────
+// Se ferme par son bouton, la touche Echap ou un clic a cote ; le focus
+// revient au jour clique.
+export function ouvrirDetailDuJour (x, retour) {
+  fermerDetail()
+  const fond = document.createElement('div')
+  fond.className = 'tc-fond'
+  fond.innerHTML = `<div class="tc-popup" role="dialog" aria-modal="true" aria-labelledby="tc-popup-titre">`
+    + `<div class="tc-popup-tete"><h3 id="tc-popup-titre">${ech(jourFr(x.jour))}</h3>`
+    + `<button type="button" class="tc-fermer" aria-label="Fermer">×</button></div>`
+    + `<div>${badge(x.niveau)} <span class="non-calc">${DESCRIPTION[niv(x.niveau)] || ''}</span></div>`
+    + listeDuJour(x) + `</div>`
+  // Echap ferme ; Tab reste dans la fenetre (son seul bouton) — review de 39d9d81.
+  const touche = e => {
+    if (e.key === 'Escape') fermer()
+    else if (e.key === 'Tab') { e.preventDefault(); fond.querySelector('.tc-fermer').focus() }
+  }
+  function fermer () {
+    document.removeEventListener('keydown', touche)
+    fond.remove()
+    // Le jour clique peut avoir quitte la page (calendrier re-rendu) : rien a viser.
+    if (retour && typeof retour.focus === 'function' && retour.isConnected) retour.focus()
+  }
+  fond._fermer = fermer
+  fond.addEventListener('click', e => { if (e.target === fond) fermer() })
+  fond.querySelector('.tc-fermer').addEventListener('click', fermer)
+  document.addEventListener('keydown', touche)
+  document.body.appendChild(fond)
+  fond.querySelector('.tc-fermer').focus()
+}
+
+export function fermerDetail () {
+  const ouvert = document.querySelector('.tc-fond')
+  if (ouvert && ouvert._fermer) ouvert._fermer()
+}
+
+// ─── La vue « 12 mois d'un coup » (§17.1) ───────────────────────────────────
+// Tous les mois visibles ensemble, sans navigation, a partir de `premierMois`
+// (AAAA-MM). Un clic sur un jour ouvre sa fenetre de detail.
+export function monterAnneeTemperature (conteneur, jours, { premierMois = null, nbMois = 12 } = {}) {
+  injecterStyles()
+  // Un calendrier re-rendu ferme la fenetre de detail de l'ancien (review de 39d9d81).
+  fermerDetail()
+  const valides = joursValides(jours)
+  const parJour = new Map(valides.map(x => [x.jour, x]))
+  const presents = new Set(valides.map(x => x.jour.slice(0, 7)))
+  if (!presents.size) { conteneur.innerHTML = '<p class="non-calc">Aucun jour à afficher pour ce marché.</p>'; return }
+  // nbMois mois CALENDAIRES a partir de premierMois (a defaut, le premier mois
+  // de la capture) : un mois absent de la capture se dit, il ne decale pas la
+  // fenetre (review de 39d9d81).
+  const debut = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(premierMois || '')) ? premierMois : [...presents].sort()[0]
+  const mois = Array.from({ length: nbMois }, (_, i) => {
+    const [a0, m0] = debut.split('-').map(Number)
+    const d = new Date(Date.UTC(a0, m0 - 1 + i, 1))
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+  })
+  const legende = `<div class="tc-legende-simple">${Object.keys(NIVEAUX).map(n => `<span><i style="background:var(--tc-${n})"></i>${NIVEAUX[n]} (${DESCRIPTION[n]})</span>`).join('')}</div>`
+  const entete = JOURS_COURTS.map(j => `<span class="tc-mjsem">${j}</span>`).join('')
+  const blocs = mois.map(m => {
+    const [a, mm] = m.split('-').map(Number)
+    const decalage = (new Date(Date.UTC(a, mm - 1, 1)).getUTCDay() + 6) % 7
+    const nb = new Date(Date.UTC(a, mm, 0)).getUTCDate()
+    let cases = '<span></span>'.repeat(decalage)
+    for (let d = 1; d <= nb; d++) {
+      const cle = `${m}-${String(d).padStart(2, '0')}`
+      const x = parJour.get(cle)
+      const n = x && niv(x.niveau)
+      cases += n
+        ? `<button type="button" class="tc-case" data-jour="${cle}" style="background:var(--tc-${n});color:var(--tc-${n}-txt)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}" title="${ech(jourFr(cle))} · ${NIVEAUX[n]}${x.evenement ? ' · ' + ech(x.evenement) : ''}">${d}</button>`
+        : `<span class="tc-vide">${d}</span>`
+    }
+    const absent = presents.has(m) ? '' : '<p class="non-calc" style="font-size:11.5px;margin:4px 0 0">Non couvert par le modèle AirROI.</p>'
+    return `<div class="tc-mois"><h3>${ech(moisFr(m))}</h3><div class="tc-mini">${entete}${cases}</div>${absent}</div>`
+  }).join('')
+  conteneur.innerHTML = `${legende}<div class="tc-annee">${blocs}</div>`
+  conteneur.querySelectorAll('.tc-case').forEach(b => b.addEventListener('click', () => {
+    const x = parJour.get(b.dataset.jour)
+    if (x) ouvrirDetailDuJour(x, b)
+  }))
 }
