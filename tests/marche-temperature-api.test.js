@@ -148,3 +148,10 @@ test('une lecture au plafond de PostgREST (1000 lignes) se dit, au lieu de servi
   const r = await appeler({ property_id: 'BIEN-A' }, { ...TABLES, marche_temperature_airroi: beaucoup })
   assert.equal(r.code, 503)
 })
+
+test('§18 : la route renvoie « En resume », a partir du mois en cours a Paris', async () => {
+  const r = await appeler({ property_id: 'BIEN-A' }, TABLES)
+  const paris = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 7)
+  assert.ok(r.corps.resume, 'le resume est la')
+  assert.equal(r.corps.resume.periode.debut, paris)
+})

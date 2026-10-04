@@ -2319,3 +2319,85 @@ semaine, l'impact des événements et les suggestions YieldFlow.
 - les tests : la page dans un vrai DOM, le module, et les bornes des seuils
   (−3, +2 et +7 exactement) ;
 - la review, puis la recette sur staging.
+
+## 18. « En résumé » sous le calendrier AirROI (4 octobre 2026) — SPEC
+
+Décision de Thierry du 4 octobre 2026 (document « Section 5 — Conclusion du
+marché »). Staging uniquement. Une carte « En résumé » sous le calendrier
+AirROI de la page « le marché global », en quatre blocs. **Chaque bloc nomme sa
+source**, et les deux pipelines ne se croisent dans aucun calcul.
+
+### 18.1 5a — La tendance du marché (pipeline de l'HISTORIQUE)
+
+- La donnée est la progression de §16.2 : les 12 derniers mois glissants contre
+  les 12 précédents, sur les mois comparables (`progression-marche.js`,
+  inchangé).
+- Trois indicateurs : RevPAR, occupation et nombre de biens. Chacun porte un
+  **sens**, sans aucun chiffre :
+  - ↑ au-dessus de +3 % ;
+  - ↓ en dessous de −3 % ;
+  - → entre les deux, c'est-à-dire stable ;
+  - un indicateur non calculable le dit.
+- **Le verdict suit le RevPAR**, qui réunit le prix et le remplissage : « Le
+  marché est en hausse / stable / en baisse par rapport à l'année dernière ».
+  Sans RevPAR calculable, il n'y a pas de verdict, et c'est dit.
+- **Validé par Thierry le 5 octobre 2026** : la bande de ±3 % et le RevPAR
+  comme indicateur du verdict.
+
+### 18.2 5b — Week-end ou semaine (pipeline AirROI)
+
+- Sur les **12 mois du calendrier affiché**, à partir du mois en cours à Paris :
+  la moyenne des écarts des nuits du vendredi et du samedi, contre celle du
+  lundi au jeudi. **Le dimanche n'entre dans aucun des deux camps.**
+- Verdict : « Le marché est plutôt favorable en week-end », « en semaine » ou
+  « les deux se valent ». Le seuil est un point d'écart, `AVANTAGE_MIN` de §15.
+- Détail : le meilleur jour et le jour le plus faible de la semaine, sur les
+  sept jours.
+- Aucun chiffre affiché : la moyenne reste dans le calcul.
+
+### 18.3 5c — Les niveaux du marché, lus dans la grille YieldFlow (AirROI)
+
+- Le nombre de jours des 12 mois dans chaque niveau AirROI, **présenté** sous
+  les noms et les couleurs de la grille YieldFlow, selon cette correspondance de
+  lecture :
+  - Creux → Base ;
+  - Modéré → Moyen ;
+  - Favorable → Haut ;
+  - Pic → Très haut ou Exceptionnel.
+- **C'est une lecture, pas un calcul croisé** : aucun prix ni aucun quantile de
+  YieldFlow n'est lu.
+- **Pic correspond à deux niveaux** : il est montré sur une seule ligne,
+  « Très haut ou Exceptionnel ». Les séparer demanderait une règle nouvelle
+  (un seuil au-delà de +7, par exemple), que seul Thierry peut fixer.
+  **Validé par Thierry le 5 octobre 2026.**
+- Les couleurs viennent des cinq teintes de `apps/yield/prix.html`, avec une
+  version sombre.
+
+### 18.4 5d — Les événements détectés (AirROI)
+
+- Les `known_holiday_event` dont les jours tombent dans les 12 mois. Les jours
+  consécutifs du même nom ne forment qu'une occurrence, comme dans
+  `evenements()` de §15.
+- Chaque ligne affiche : le nom en français (« Easter » devient « Pâques »), les
+  dates, le niveau AirROI de l'occurrence, et « récurrent » si le nom revient
+  sur les deux années de la capture, sinon « ponctuel ».
+- Introduction : « Ces événements sont détectés par le modèle AirROI. Pour
+  qu'ils influencent vos prix, créez-les dans vos événements. »
+- **C'est une suggestion** : rien n'est créé d'ici.
+- La présentation est celle d'une liste d'événements, en lignes : nom, dates,
+  niveau, récurrence.
+
+### 18.5 Calcul et contraintes
+
+- Le calcul AirROI des blocs 5b, 5c et 5d est une fonction **pure** de
+  `lib/marche/temperature-airroi.js`, `resumeDouzeMois(jours, premierMois)`.
+  `/api/marche-temperature` la renvoie sous `resume`, à partir du mois en cours
+  à Paris lu par l'API.
+- Le bloc 5a est calculé par la page à partir de `progression`, déjà renvoyée
+  par `/api/marche-global`.
+- Les 12 mois partent du mois en cours, comme le calendrier : **validé par
+  Thierry le 5 octobre 2026**.
+- Aucun prix, des textes en français, un mode sombre.
+- Tests unitaires du verdict week-end ou semaine (bornes, dimanche exclu), du
+  regroupement et de la récurrence des événements, et des comptes 5c. La page
+  est testée dans un vrai DOM.
