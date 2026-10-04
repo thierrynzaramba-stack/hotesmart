@@ -89,7 +89,9 @@ const STYLES = `
   .tc-vide { font-size: 11px; text-align: center; padding: 4px 0; color: var(--text2); }
   /* Telephone (demandes de Thierry, 4 octobre 2026) : deux mois par ligne,
      pour ne pas defiler trois metres ; chaque case reste plus haute qu'au
-     bureau (32 px) pour le doigt. A 375 px, une case fait ~21 x 32 px. */
+     bureau (32 px) pour le doigt. Une case fait ~21 x 32 px a 375 px, ~17 x 32
+     a 320 px : sous les 44 px recommandes, compromis assume (moins de
+     defilement). Les chiffres en 12 px tiennent encore a 320 px. */
   @media (max-width: 640px) {
     .tc-annee { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; }
     .tc-mois h3 { font-size: 12.5px; margin-bottom: 4px; }
