@@ -25,6 +25,13 @@ test('FRONTIERE : le calcul du marche global est pur — aucune base, sous aucun
   assert.deepEqual([...src.matchAll(/require\('([^']+)'\)/g)].map(m => m[1]), ['../yield/jours-feries', '../yield/reference'])
 })
 
+test('FRONTIERE (§16.2) : la progression du marche est pure, et ne lit que l historique du marche global', () => {
+  const src = lire('lib/marche/progression-marche.js')
+  for (const motif of [/\.from\(/, /\.rpc\(/, /createClient/, /require\([^)]*supabase/, /fetch\(/, /Date\.now|new Date\(\)/]) assert.ok(!motif.test(src), `progression-marche.js : ${motif}`)
+  // Pipeline ETANCHE : rien du modele AirROI (temperature) n'y entre.
+  assert.deepEqual([...src.matchAll(/require\('([^']+)'\)/g)].map(m => m[1]), ['./marche-global'])
+})
+
 test('FRONTIERE : la vue ne lit que des tables V2, nommees en toutes lettres, et n ecrit rien', () => {
   const src = lire('api/marche-global.js')
   const tables = [...src.matchAll(/\.from\(\s*([^)]*)\)/g)].map(m => m[1].trim().replace(/^['"`]|['"`]$/g, ''))
@@ -33,7 +40,7 @@ test('FRONTIERE : la vue ne lit que des tables V2, nommees en toutes lettres, et
   // Hors la garde, la seule lecture de l'existant : les vacances scolaires,
   // par leur lecteur du coeur (calendrier public, aucune donnee de compte).
   assert.deepEqual([...src.matchAll(/require\('([^']+)'\)/g)].map(m => m[1]),
-    ['@supabase/supabase-js', '../lib/require-permission', '../lib/airroi/client', '../lib/airroi/json', '../lib/marche/marche-global', '../lib/yield/vacances', '../lib/yield/zones-scolaires'])
+    ['@supabase/supabase-js', '../lib/require-permission', '../lib/airroi/client', '../lib/airroi/json', '../lib/marche/marche-global', '../lib/marche/progression-marche', '../lib/yield/vacances', '../lib/yield/zones-scolaires'])
   assert.ok(!/\.(insert|update|upsert|delete|rpc)\(/.test(src), 'aucune ecriture')
   assert.ok(!/creerClient|fetch\(/.test(src), 'aucun appel AirROI depuis la vue')
 })

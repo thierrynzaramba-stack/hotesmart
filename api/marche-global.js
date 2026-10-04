@@ -4,7 +4,9 @@
 //   GET ?property_id=  ->  du marche relie a ce logement : l'ADR et l'occupation
 //                          medianes (bloc 1), le RevPAR en quantiles et la
 //                          couverture (bloc 2), le calendrier jour par jour
-//                          CONSTRUIT (bloc 3, niveau attendu, pas une mesure).
+//                          CONSTRUIT (bloc 3, niveau attendu, pas une mesure),
+//                          les annees superposees et la progression glissante
+//                          (§16.2, lib/marche/progression-marche.js).
 //
 // ⚠ SECURITE (lecon de V2.3.4) : garde du LOGEMENT (lecture des reservations,
 // bien requis : le bien designe le compte) ; seul le marche relie a CE
@@ -24,6 +26,7 @@ const { requirePermission } = require('../lib/require-permission')
 const { cleCanonique } = require('../lib/airroi/client')
 const { lireJson } = require('../lib/airroi/json')
 const { revparMensuel, adrOccupationMensuel, calendrierAttendu } = require('../lib/marche/marche-global')
+const { progressionDuMarche } = require('../lib/marche/progression-marche')
 const { lireVacances, etendueSource } = require('../lib/yield/vacances')
 const { jourLocalParis } = require('../lib/yield/zones-scolaires')
 
@@ -86,7 +89,7 @@ module.exports = async (req, res) => {
       return res.status(200).json({ source: 'marche', etat: 'historique_absent', marche: m, motif: 'l historique en cache est illisible' })
     }
     return res.status(200).json({ source: 'marche', etat: 'calcule', marche: m, recupere_le: ligne.recupere_le,
-      adr_occupation: adrOccupationMensuel(donnees), revpar: revparMensuel(donnees), calendrier: await calendrier(donnees) })
+      adr_occupation: adrOccupationMensuel(donnees), revpar: revparMensuel(donnees), progression: progressionDuMarche(donnees), calendrier: await calendrier(donnees) })
   } catch (e) {
     console.error('[marche-global]', e.message)
     return res.status(500).json({ error: 'lecture_impossible' })

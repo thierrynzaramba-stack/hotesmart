@@ -264,8 +264,11 @@ test('LE TEST QUI COMPTE (page) : ADR brut et Airbnb seulement, occupation du ma
 
 test('la vue rend les trois blocs ; des vacances illisibles laissent les blocs 1 et 2 et disent le calendrier non calculable', async () => {
   const r = await appeler({ property_id: 'x' }, TABLES)
-  assert.deepEqual(Object.keys(r.corps), ['source', 'etat', 'marche', 'recupere_le', 'adr_occupation', 'revpar', 'calendrier'])
+  assert.deepEqual(Object.keys(r.corps), ['source', 'etat', 'marche', 'recupere_le', 'adr_occupation', 'revpar', 'progression', 'calendrier'])
   assert.equal(r.corps.adr_occupation.statut, 'calcule')
+  // §16.2 : les annees superposees et la progression, du MEME historique.
+  assert.equal(r.corps.progression.statut, 'calcule')
+  assert.deepEqual(r.corps.progression.progression.periode, { debut: '2025-09', fin: '2026-08' })
   assert.equal(r.corps.calendrier.statut, 'calcule')
   assert.equal(r.corps.calendrier.mois.length, 12)
   assert.ok(r.corps.calendrier.mois.every(m => m.statut === 'non_calculable'), 'base sans vacances : aucun mois classe')
