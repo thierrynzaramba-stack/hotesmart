@@ -144,7 +144,9 @@ const PAGE = fs.readFileSync(path.join(RACINE, 'apps', 'yield', 'marche-global.h
 test('LE TEST QUI COMPTE : la page est en lecture seule, dit en tete ce qu elle est, et porte les deux mentions', () => {
   const appels = [...PAGE.matchAll(/fetch\(\s*([`'"])([^`'"]*)/g)].map(m => m[2])
   assert.ok(appels.length >= 1)
-  for (const u of appels) assert.ok(u.startsWith('/api/marche-global?property_id='), `appel inattendu : ${u}`)
+  // §16.1 : deux routes, chacune la sienne — l'historique et le modele AirROI.
+  for (const u of appels) assert.ok(u.startsWith('/api/marche-global?property_id=') || u.startsWith('/api/marche-temperature?property_id='), `appel inattendu : ${u}`)
+  assert.equal(appels.length, 2)
   assert.ok(!/method\s*:/.test(PAGE))
   assert.deepEqual([...PAGE.matchAll(/supabase\.from\(\s*'([^']+)'/g)].map(m => m[1]), ['properties'])
   assert.ok(!/\.(insert|update|upsert|delete)\(/.test(PAGE))
@@ -259,13 +261,16 @@ test('LE TEST QUI COMPTE (page) : ADR brut et Airbnb seulement, occupation du ma
   assert.match(PAGE, /Un niveau attendu, bâti sur l’historique et le calendrier — pas une mesure/)
   // Regle 13 : la page ne lit du logement que son nom.
   assert.deepEqual([...PAGE.matchAll(/supabase\.from\('properties'\)\.select\('([^']*)'\)/g)].map(m => m[1]), ['id, name'])
-  assert.match(PAGE, /corps\(bloc1\(d\.adr_occupation\) \+ indicateur1\(d\.revpar\) \+ bloc3\(d\.calendrier\)\)/)
+  assert.match(PAGE, /corps\(bloc1\(d\.adr_occupation\) \+ indicateur1\(d\.revpar\) \+ blocAnnees\(d\.progression, d\.recupere_le\) \+ blocProgression\(d\.progression\) \+ bloc3\(d\.calendrier\)\)/)
 })
 
 test('la vue rend les trois blocs ; des vacances illisibles laissent les blocs 1 et 2 et disent le calendrier non calculable', async () => {
   const r = await appeler({ property_id: 'x' }, TABLES)
-  assert.deepEqual(Object.keys(r.corps), ['source', 'etat', 'marche', 'recupere_le', 'adr_occupation', 'revpar', 'calendrier'])
+  assert.deepEqual(Object.keys(r.corps), ['source', 'etat', 'marche', 'recupere_le', 'adr_occupation', 'revpar', 'progression', 'calendrier'])
   assert.equal(r.corps.adr_occupation.statut, 'calcule')
+  // §16.2 : les annees superposees et la progression, du MEME historique.
+  assert.equal(r.corps.progression.statut, 'calcule')
+  assert.deepEqual(r.corps.progression.progression.periode, { debut: '2025-09', fin: '2026-08' })
   assert.equal(r.corps.calendrier.statut, 'calcule')
   assert.equal(r.corps.calendrier.mois.length, 12)
   assert.ok(r.corps.calendrier.mois.every(m => m.statut === 'non_calculable'), 'base sans vacances : aucun mois classe')

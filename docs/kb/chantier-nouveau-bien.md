@@ -2177,3 +2177,59 @@ lointains (précaution 2 du §14). Elle reste lisible dans le détail d'un jour.
 - **T3** : la page, puis la recette sur staging.
 
 Chaque lot : revue, re-revue sur constat de sécurité, contre-épreuve des tests.
+
+## 16. La page « le marché global » : deux ajouts (4 octobre 2026) — SPEC
+
+Décisions de Thierry du 4 octobre 2026. Staging uniquement.
+
+### 16.1 Le calendrier AirROI dans la page, dans SON bloc (pipeline étanche)
+
+Le calendrier de température du pipeline AirROI (§15) s'affiche dans la page
+« le marché global », **dans son propre bloc**, avec sa source en titre :
+« Estimation AirROI, pas un prix ». **Aucun mélange** avec le calendrier de
+l'historique (bloc 3) : deux blocs, deux légendes, deux palettes (le bleu de
+l'historique, la brique d'AirROI), deux sources nommées. Rien ne compare l'un à
+l'autre : ce sera le rôle d'un module d'assemblage, plus tard.
+
+La page lit les deux routes, chacune la sienne : `/api/marche-global` et
+`/api/marche-temperature`. Le rendu du calendrier AirROI est **un module
+commun** (`shared/temperature-calendrier.js`), utilisé par cette page et par
+`apps/yield/marche-temperature.html` — jamais recopié (règle du dépôt).
+
+### 16.2 Les courbes superposées par année, et la progression du marché
+
+**Courbes** : pour le prix moyen (ADR médian), l'occupation médiane, le RevPAR
+médian et le nombre d'annonces actives, **une courbe par année**, superposées
+sur un axe janvier → décembre.
+- Une année de **moins de 12 mois mesurés** est **partielle** : tracée en
+  pointillé et marquée « partielle ». C'est le cas de l'année en cours, et de la
+  première année de l'historique.
+- Les années à **couverture partielle** (`ANNEES_COUVERTURE_PARTIELLE`, 2021 et
+  2022 à Bagnères) restent marquées comme telles.
+- **Aucun calcul annuel** ne prend une année partielle comme si elle était
+  complète. Il n'y a pas de total ni de moyenne par année civile.
+
+**Progression principale** : les **12 derniers mois mesurés (glissants)** contre
+les **12 précédents**, pour chaque indicateur. La valeur d'une période est la
+moyenne de ses valeurs mensuelles ; la progression est l'écart en %. Seuls
+comptent les mois **comparables**, c'est-à-dire mesurés et suffisamment couverts
+les deux années. En dessous de **9 mois comparables sur 12**, la progression est
+« non calculable », avec son motif.
+
+**Mois par mois** : chaque mois des 12 derniers, comparé au même mois de
+l'année précédente, en %. Il est **en détail seulement**, signalé comme
+**volatil**, et ne sert jamais de titre ni de conclusion.
+
+**Trop peu d'annonces** : un mois de **moins de 30 annonces actives** s'affiche,
+mais **n'entre dans aucun %**, ni dans la progression ni dans le mois par mois.
+Il porte la mention « trop peu d'annonces pour en tirer un % ». À Bagnères,
+aucun mois n'est concerné : les annonces vont de 432 à 1 021.
+
+### 16.3 Les lots
+
+- **G1** : module pur `lib/marche/progression-marche.js` (années, partielles,
+  progression glissante, mois par mois, seuil d'annonces) et ses tests ; l'API
+  `marche-global` renvoie ces données.
+- **G2** : le module commun du calendrier AirROI, branché dans les deux pages.
+- **G3** : la page, avec les courbes superposées, la progression et le bloc
+  AirROI ; puis la recette sur staging.
