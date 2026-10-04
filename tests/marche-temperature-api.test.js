@@ -141,3 +141,9 @@ test('SECURITE : le marche suit le bien RESOLU par la garde, jamais l’identifi
   assert.equal(r.corps.etat, 'calcule')
   assert.equal(r.corps.marche.localite, 'Bagnères-de-Bigorre')
 })
+
+test('une lecture au plafond de PostgREST (1000 lignes) se dit, au lieu de servir un calendrier tronque', async () => {
+  const beaucoup = Array.from({ length: 1000 }, (_, i) => ({ ...lignesBagneres[0], jour: `X-${String(i).padStart(4, '0')}` }))
+  const r = await appeler({ property_id: 'BIEN-A' }, { ...TABLES, marche_temperature_airroi: beaucoup })
+  assert.equal(r.code, 503)
+})

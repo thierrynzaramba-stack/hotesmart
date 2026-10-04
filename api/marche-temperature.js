@@ -48,7 +48,7 @@ module.exports = async (req, res) => {
     }
     if (!c.capture_le) {
       return res.status(200).json({ source: 'airroi', etat: 'capture_absente', marche: m,
-        motif: 'aucune capture AirROI pour ce marche (0,10 $, par un script, jamais depuis cet ecran)' })
+        motif: 'aucune capture AirROI pour ce marche avec la methode de calcul actuelle (0,10 $ si une nouvelle capture est necessaire, par un script, jamais depuis cet ecran)' })
     }
     return res.status(200).json({ source: 'airroi', etat: 'calcule', marche: m, ...pourLEcran(c) })
   } catch (e) {
