@@ -142,3 +142,65 @@ test('REVIEW : un resume en echec ne fait pas tomber le calendrier', () => {
   assert.equal(e.jours.length, 1, 'le calendrier reste')
   assert.equal(e.resume.statut, 'non_calculable')
 })
+
+// ─── L'impact des vacances scolaires, zone par zone (§19) ───────────────────
+const VACANCES = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'vacances-2026-2027.json'), 'utf8')).vacances
+const vac = (zone, nom, d, f) => ({ zone, nom, date_debut: d, date_fin: f })
+// Un mois de fevrier : 10 hors vacances par defaut, chaque zone en vacances une semaine.
+function fevrier (ecartDe) {
+  const out = []
+  for (let d = 1; d <= 28; d++) { const j = `2027-02-${String(d).padStart(2, '0')}`; out.push(jour(j, ecartDe(j))) }
+  return out
+}
+const HIVER = [vac('A', "Vacances d'Hiver", '2027-02-01', '2027-02-07'), vac('B', "Vacances d'Hiver", '2027-02-08', '2027-02-14'), vac('C', "Vacances d'Hiver", '2027-02-15', '2027-02-21')]
+const ZONE_DE = j => (j <= '2027-02-07' ? 'A' : j <= '2027-02-14' ? 'B' : j <= '2027-02-21' ? 'C' : null)
+
+test('LE TEST QUI COMPTE (§19) : l effet d une periode = vacances contre jours HORS vacances des memes mois', () => {
+  const r = t.impactVacances(fevrier(j => (ZONE_DE(j) ? 5 : 0)), HIVER, '2027-02')
+  const h = r.periodes.find(p => p.cle === 'hiver')
+  assert.equal(h.sens, 'hausse')
+  const neutre = t.impactVacances(fevrier(j => (ZONE_DE(j) ? 1 : 0)), HIVER, '2027-02')
+  assert.equal(neutre.periodes[0].sens, 'neutre', 'un point pile : neutre')
+  const baisse = t.impactVacances(fevrier(j => (ZONE_DE(j) ? -1.01 : 0)), HIVER, '2027-02')
+  assert.equal(baisse.periodes[0].sens, 'baisse')
+})
+
+test('LE TEST QUI COMPTE (§19) : l effet de chaque zone, et les plus porteuses a moins d un point de la meilleure', () => {
+  const r = t.impactVacances(fevrier(j => ({ A: 6, B: 2, C: 5.5 }[ZONE_DE(j)] || 0)), HIVER, '2027-02')
+  const h = r.periodes[0]
+  assert.deepEqual(h.zones, [{ zone: 'A', sens: 'hausse' }, { zone: 'B', sens: 'hausse' }, { zone: 'C', sens: 'hausse' }])
+  assert.deepEqual(h.plus_porteuses, ['A', 'C'])
+  const egales = t.impactVacances(fevrier(j => ({ A: 6, B: 5.5, C: 5.2 }[ZONE_DE(j)] || 0)), HIVER, '2027-02')
+  assert.deepEqual(egales.periodes[0].plus_porteuses, [], 'ecart d un point ou moins : les zones se valent')
+})
+
+test('§19 : des dates COMMUNES aux trois zones ne departagent rien — pas d effet par zone', () => {
+  const noel = ['A', 'B', 'C'].map(z => vac(z, 'Vacances de Noël', '2027-02-10', '2027-02-20'))
+  const r = t.impactVacances(fevrier(j => (j >= '2027-02-10' && j <= '2027-02-20' ? 8 : 0)), noel, '2027-02')
+  assert.equal(r.periodes[0].zones, null)
+  assert.equal(r.periodes[0].sens, 'hausse')
+})
+
+test('§19 : une entree d un seul jour n est pas une periode — l ete « debut seulement » est non publie, le pont ecarte', () => {
+  const v = [...HIVER, vac('A', "Pont de l'Ascension", '2027-02-25', '2027-02-25'), vac('A', "Début des Vacances d'Été", '2027-02-26', '2027-02-26')]
+  const r = t.impactVacances(fevrier(() => 0), v, '2027-02')
+  assert.deepEqual(r.periodes.map(p => [p.cle, p.statut]), [['hiver', 'calcule'], ['ete', 'non_publiee']])
+})
+
+test('§19 : sans jour hors vacances dans les memes mois, non calculable ; sans vacances, non calculable', () => {
+  const tout = [vac('A', "Vacances d'Hiver", '2027-02-01', '2027-02-28')]
+  const r = t.impactVacances(fevrier(() => 3), tout, '2027-02')
+  assert.equal(r.periodes[0].statut, 'non_calculable')
+  assert.match(r.periodes[0].motif, /aucun jour hors vacances/)
+  assert.equal(t.impactVacances(fevrier(() => 0), [], '2027-02').statut, 'non_calculable')
+})
+
+test('§19 sur Bagneres : Noel et hiver en hausse, printemps en baisse, Toussaint neutre ; hiver : A et C ; printemps : les zones se valent ; ete non publie', () => {
+  const R = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'relief-bagneres-2026-09-30.json'), 'utf8'))
+  const js = t.construireLignes({ marche: { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }, reponse: R })
+  const r = t.impactVacances(js, VACANCES, '2026-10')
+  assert.deepEqual(r.periodes.map(p => [p.nom, p.sens || p.statut]), [['Toussaint', 'neutre'], ['Noël', 'hausse'], ['Hiver', 'hausse'], ['Printemps', 'baisse'], ['Été', 'non_publiee']])
+  assert.deepEqual(r.periodes.find(p => p.cle === 'hiver').plus_porteuses, ['A', 'C'])
+  assert.deepEqual(r.periodes.find(p => p.cle === 'printemps').plus_porteuses, [])
+  assert.ok(!/ecart|delta|moyenne|prix/.test(JSON.stringify(r)), 'aucun chiffre de modele ne sort')
+})

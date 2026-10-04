@@ -8,7 +8,10 @@
 //                          sur les 12 mois a partir du mois en cours a Paris
 //                          (spec §18).
 //
-// ⚠ PIPELINE ETANCHE : rien de l'historique des ventes n'est lu ici.
+// ⚠ PIPELINE ETANCHE : rien de l'historique des ventes n'est lu ici. Seul le
+// calendrier officiel des vacances scolaires (`school_holidays`, dates
+// publiques) est lu, pour leur impact (§19, decision de Thierry du 5 octobre
+// 2026 : ce n'est pas un melange de pipelines).
 // ⚠ AUCUN PRIX dans la reponse, ni en euros ni en base 100 (§15.6).
 // ⚠ SECURITE : garde du LOGEMENT (meme garde que api/marche-global.js) ; seul
 // le marche relie a CE logement (`marche_biens`) est lu. Pas de lien : « marche
@@ -18,6 +21,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { lireDerniereCapture, pourLEcran } = require('../lib/marche/temperature-airroi')
+const { lireVacances } = require('../lib/yield/vacances')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 // Le mois en cours, a l'heure de Paris : le depart des 12 mois du resume (§18),
@@ -57,7 +61,16 @@ module.exports = async (req, res) => {
         // geste technique (une capture, par un script) est dans la spec §15.
         motif: 'le calendrier de température n’a pas encore été établi pour ce marché' })
     }
-    return res.status(200).json({ source: 'airroi', etat: 'calcule', marche: m, ...pourLEcran(c, moisDeParis()) })
+    // §19 : les vacances de la fenetre ; illisibles (null), seul leur bloc le dit.
+    const depart = moisDeParis()
+    const [a0, m0] = depart.split('-').map(Number)
+    const fin = new Date(Date.UTC(a0, m0 - 1 + 12, 0)).toISOString().slice(0, 10)
+    let vacances
+    try { vacances = await lireVacances(supabase, `${depart}-01`, fin) } catch (e) {
+      console.error('[marche-temperature] vacances', e.message)
+      vacances = null
+    }
+    return res.status(200).json({ source: 'airroi', etat: 'calcule', marche: m, ...pourLEcran(c, depart, vacances) })
   } catch (e) {
     console.error('[marche-temperature]', e.message)
     return res.status(503).json({ error: 'temperature_illisible' })

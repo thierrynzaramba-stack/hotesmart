@@ -42,7 +42,8 @@ const HISTORIQUE = (progression = progressionDuMarche(MARCHE60), recupereLe = '2
   calendrier: { statut: 'calcule', mois: [{ mois: '2026-10', statut: 'calcule', jours: [{ jour: '2026-10-01', niveau: 'fort', pct: 1.2, raisons: ['HISTORIQUE-CALENDRIER'] }] }] },
 })
 const lignes = t.construireLignes({ marche: { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }, reponse: RELIEF })
-const TEMPERATURE = { source: 'airroi', etat: 'calcule', marche: MARCHE, ...t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-10') }
+const VACANCES = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'vacances-2026-2027.json'), 'utf8')).vacances
+const TEMPERATURE = { source: 'airroi', etat: 'calcule', marche: MARCHE, ...t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-10', VACANCES) }
 
 const reponse = (corps, status = 200) => ({ ok: status < 400, status, json: async () => corps })
 const attendre = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)) }
@@ -379,7 +380,7 @@ const blocs = doc => [...resume(doc).querySelectorAll('.mg-bloc')]
 test('LE TEST QUI COMPTE (§18) : quatre blocs dans l ordre, chacun sa source', async () => {
   const { doc } = await monter(OK)
   const b = blocs(doc)
-  assert.deepEqual(b.map(x => x.querySelector('h3').textContent), ['La tendance du marché', 'Week-end ou semaine', 'Les niveaux du marché', 'Les événements détectés'])
+  assert.deepEqual(b.map(x => x.querySelector('h3').textContent), ['La tendance du marché', 'Week-end ou semaine', 'Les niveaux du marché', 'Les événements détectés', 'Les vacances scolaires'])
   assert.match(b[0].querySelector('.mg-source').textContent, /historique du marché/)
   for (const x of b.slice(1)) assert.match(x.querySelector('.mg-source').textContent, /modèle AirROI/)
   // La carte vient APRES le calendrier AirROI.
@@ -503,4 +504,42 @@ test('REVIEW : sans logement, la carte « En resume » reste cachee', async () =
 test('REVIEW : un separateur entre chaque bloc, sauf le premier', async () => {
   assert.match(HTML, /#mg-resume-tendance \{ border-top: 0; padding-top: 4px; \}/)
   assert.ok(!/\.mg-bloc:first-of-type/.test(HTML))
+})
+
+// ─── Les vacances scolaires (§19) ───────────────────────────────────────────
+const blocVac = doc => blocs(doc).find(b => b.querySelector('h3').textContent === 'Les vacances scolaires')
+
+test('LE TEST QUI COMPTE (§19) : la conclusion en une phrase — periodes porteuses, periodes en baisse, zones', async () => {
+  const { doc } = await monter(OK)
+  const b = blocVac(doc)
+  assert.match(b.querySelector('.mg-source').textContent, /modèle AirROI et calendrier officiel des vacances scolaires/)
+  assert.equal(b.querySelector('.mg-verdict').textContent,
+    'Les vacances de Noël et d’hiver portent le marché ; celles de printemps le font baisser. En hiver, les zones A et C sont les plus porteuses ; au printemps, les trois zones se valent.')
+})
+
+test('§19 : une ligne par periode, les zones de l hiver et du printemps, l ete non publie, aucun chiffre', async () => {
+  const { doc } = await monter(OK)
+  const txt = blocVac(doc).querySelector('.mg-sens').textContent
+  assert.match(txt, /→Vacances de la Toussaint : sans effet net/)
+  assert.match(txt, /↑Vacances de Noël : font monter le marché/)
+  assert.match(txt, /↑Vacances d’hiver : font monter le marchézone A ↑ · zone B ↑ · zone C ↑/)
+  assert.match(txt, /↓Vacances de printemps : font baisser le marchézone A ↓ · zone B ↓ · zone C ↓/)
+  assert.match(txt, /Vacances d’été : dates pas encore publiées/)
+  assert.ok(!/\d/.test(txt.replace(/zone [ABC]/g, '')), 'aucun chiffre')
+  assert.match(blocVac(doc).textContent, /l’écart entre zones reste indicatif/)
+})
+
+test('§19 : vacances illisibles — seul ce bloc le dit, les autres restent', async () => {
+  const r = t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-10', null)
+  const { doc } = await monter({ ...OK, '/api/marche-temperature': () => reponse({ source: 'airroi', etat: 'calcule', marche: MARCHE, ...r }) })
+  assert.match(blocVac(doc).textContent, /Non calculable : le calendrier des vacances scolaires est illisible/)
+  assert.equal(blocs(doc).length, 5)
+  assert.match(resume(doc).textContent, /plutôt favorable en week-end/)
+})
+
+test('SECURITE (§19) : un nom de periode ou de zone venu du serveur est echappe', async () => {
+  const r = t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-10', VACANCES)
+  r.resume.vacances.periodes.push({ cle: 'autre', nom: '<img src=x onerror=alert(1)>', statut: 'calcule', sens: 'hausse', zones: [{ zone: '<img src=y>', sens: 'hausse' }], plus_porteuses: ['<img src=z>'] })
+  const { doc } = await monter({ ...OK, '/api/marche-temperature': () => reponse({ source: 'airroi', etat: 'calcule', marche: MARCHE, ...r }) })
+  assert.equal(resume(doc).querySelectorAll('img').length, 0)
 })

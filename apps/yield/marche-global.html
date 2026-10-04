@@ -56,6 +56,7 @@
     .mg-verdict { font-size: 14px; font-weight: 600; margin: 4px 0 8px; }
     .mg-sens { display: grid; grid-template-columns: 26px 1fr; gap: 4px 6px; font-size: 13.5px; align-items: center; }
     .mg-sens b { font-size: 17px; text-align: center; }
+    .mg-zones { color: var(--text2); font-size: 12px; }
     .mg-niv-l { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px; margin-bottom: 4px;
                 border-radius: 4px; background: var(--niv-fond); box-shadow: inset 3px 0 0 var(--niv-lisere); font-size: 13.5px; color: var(--text); }
     .mg-niv-l small { color: var(--text2); }
@@ -421,7 +422,43 @@
     const p = r.periode || {}
     const partiel = p.jours && p.jours_fenetre && p.jours < p.jours_fenetre
       ? `<p class="mg-mention" style="margin-top:8px">Le modèle AirROI ne couvre que ${ech(p.jours)} jours sur ${ech(p.jours_fenetre)} : ce résumé ne porte que sur eux.</p>` : ''
-    return partiel + semaine + niveaux + evenements
+    return partiel + semaine + niveaux + evenements + blocVacances(r.vacances)
+  }
+
+  // 5e — les vacances scolaires (§19) : le modele AirROI croise avec le
+  // calendrier officiel des vacances. Un sens par periode et par zone, jamais
+  // un chiffre, et une conclusion en une phrase.
+  const enListe = xs => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} et ${xs[xs.length - 1]}` : xs[0] || '')
+  const DE_PERIODE = { toussaint: 'de la Toussaint', noel: 'de Noël', hiver: 'd’hiver', printemps: 'de printemps', ete: 'd’été' }
+  const EN_PERIODE = { toussaint: 'À la Toussaint', noel: 'À Noël', hiver: 'En hiver', printemps: 'Au printemps', ete: 'En été' }
+  const EFFET_VAC = { hausse: 'font monter le marché', baisse: 'font baisser le marché', neutre: 'sans effet net' }
+  const FLECHE_VAC = { hausse: '↑', baisse: '↓', neutre: '→' }
+  function blocVacances (v) {
+    if (v === undefined) return ''
+    const tete = '<div class="mg-bloc"><h3>Les vacances scolaires</h3><p class="mg-source">Source : modèle AirROI et calendrier officiel des vacances scolaires — les 12 mois du calendrier ci-dessus.</p>'
+    if (!v || v.statut !== 'calcule' || !Array.isArray(v.periodes)) return `${tete}<p class="non-calc">Non calculable : ${ech((v && v.motif) || 'vacances absentes')}.</p></div>`
+    const calc = v.periodes.filter(p => p.statut === 'calcule' && FLECHE_VAC[p.sens])
+    const hausses = calc.filter(p => p.sens === 'hausse').map(p => DE_PERIODE[p.cle] || ech(p.nom))
+    const baisses = calc.filter(p => p.sens === 'baisse').map(p => DE_PERIODE[p.cle] || ech(p.nom))
+    const phrases = []
+    if (hausses.length) phrases.push(`Les vacances ${enListe(hausses)} portent le marché${baisses.length ? ` ; celles ${enListe(baisses)} le font baisser` : ''}.`)
+    else if (baisses.length) phrases.push(`Aucune période de vacances ne porte nettement le marché ; celles ${enListe(baisses)} le font baisser.`)
+    else if (calc.length) phrases.push('Les vacances scolaires n’ont pas d’effet net sur le marché.')
+    const parZone = calc.filter(p => Array.isArray(p.zones)).map(p => {
+      const pp = Array.isArray(p.plus_porteuses) ? p.plus_porteuses : []
+      return `${EN_PERIODE[p.cle] || ech(p.nom)}, ${pp.length ? (pp.length > 1 ? `les zones ${enListe(pp.map(ech))} sont les plus porteuses` : `la zone ${ech(pp[0])} est la plus porteuse`) : 'les trois zones se valent'}`
+    })
+    // Apres un point-virgule, la suite reprend en minuscule (« ; au printemps »).
+    if (parZone.length) phrases.push(`${parZone.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x)).join(' ; ')}.`)
+    const lignes = v.periodes.map(p => {
+      if (p.statut === 'non_publiee') return `<b aria-hidden="true">·</b><span>Vacances ${DE_PERIODE[p.cle] || ech(p.nom)} : <span class="non-calc">dates pas encore publiées</span></span>`
+      if (p.statut !== 'calcule' || !FLECHE_VAC[p.sens]) return `<b aria-hidden="true">·</b><span>Vacances ${DE_PERIODE[p.cle] || ech(p.nom)} : <span class="non-calc">non calculable${p.motif ? ` (${ech(p.motif)})` : ''}</span></span>`
+      const zones = Array.isArray(p.zones)
+        ? `<br><small class="mg-zones">${p.zones.map(z => `zone ${ech(z.zone)} ${FLECHE_VAC[z.sens] || '·'}`).join(' · ')}</small>` : ''
+      return `<b aria-hidden="true">${FLECHE_VAC[p.sens]}</b><span>Vacances ${DE_PERIODE[p.cle] || ech(p.nom)} : ${EFFET_VAC[p.sens]}${zones}</span>`
+    }).join('')
+    return `${tete}${phrases.length ? `<p class="mg-verdict">${phrases.join(' ')}</p>` : ''}<div class="mg-sens">${lignes}</div>`
+      + '<p class="mg-mention">Chaque période est comparée aux jours hors vacances des mêmes mois. Peu de jours ne concernent qu’une seule zone : l’écart entre zones reste indicatif.</p></div>'
   }
   const NOM_AIRROI = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
 
