@@ -56,6 +56,7 @@
     .mg-verdict { font-size: 14px; font-weight: 600; margin: 4px 0 8px; }
     .mg-sens { display: grid; grid-template-columns: 26px 1fr; gap: 4px 6px; font-size: 13.5px; align-items: center; }
     .mg-sens b { font-size: 17px; text-align: center; }
+    .mg-zones { color: var(--text2); font-size: 12px; }
     .mg-niv-l { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 7px 10px; margin-bottom: 4px;
                 border-radius: 4px; background: var(--niv-fond); box-shadow: inset 3px 0 0 var(--niv-lisere); font-size: 13.5px; color: var(--text); }
     .mg-niv-l small { color: var(--text2); }
@@ -421,7 +422,57 @@
     const p = r.periode || {}
     const partiel = p.jours && p.jours_fenetre && p.jours < p.jours_fenetre
       ? `<p class="mg-mention" style="margin-top:8px">Le modèle AirROI ne couvre que ${ech(p.jours)} jours sur ${ech(p.jours_fenetre)} : ce résumé ne porte que sur eux.</p>` : ''
-    return partiel + semaine + niveaux + evenements
+    return partiel + semaine + niveaux + evenements + blocVacances(r.vacances)
+  }
+
+  // 5e — les vacances scolaires (§19) : le modele AirROI croise avec le
+  // calendrier officiel des vacances. Un sens par periode et par zone, jamais
+  // un chiffre, et une conclusion en une phrase.
+  const enListe = xs => (xs.length > 1 ? `${xs.slice(0, -1).join(', ')} et ${xs[xs.length - 1]}` : xs[0] || '')
+  const DE_PERIODE = { toussaint: 'de la Toussaint', noel: 'de Noël', hiver: 'd’hiver', printemps: 'de printemps', ete: 'd’été' }
+  const EN_PERIODE = { toussaint: 'À la Toussaint', noel: 'À Noël', hiver: 'En hiver', printemps: 'Au printemps', ete: 'En été' }
+  const EFFET_VAC = { hausse: 'font monter le marché', baisse: 'font baisser le marché', neutre: 'sans effet net' }
+  const FLECHE_VAC = { hausse: '↑', baisse: '↓', neutre: '→' }
+  function blocVacances (v) {
+    if (v === undefined) return ''
+    const tete = '<div class="mg-bloc"><h3>Les vacances scolaires</h3><p class="mg-source">Source : modèle AirROI et calendrier officiel des vacances scolaires — les 12 mois du calendrier ci-dessus.</p>'
+    const connues = v && /^\d{4}-\d{2}-\d{2}$/.test(String(v.connues_jusqu_au || ''))
+      ? `<p class="mg-mention">Le calendrier officiel des vacances n’est publié que jusqu’au ${jourFr(v.connues_jusqu_au)} : les vacances suivantes n’entrent pas encore dans ce bilan.</p>` : ''
+    if (!v || v.statut !== 'calcule' || !Array.isArray(v.periodes)) return `${tete}<p class="non-calc">Non calculable : ${ech((v && v.motif) || 'vacances absentes')}.</p>${connues}</div>`
+    // Une meme periode deux fois dans la fenetre se distingue par son annee scolaire.
+    const doublons = new Set(v.periodes.map(p => p.cle).filter((c, i, t) => t.indexOf(c) !== i))
+    const de = p => `${DE_PERIODE[p.cle] || `de ${ech(p.nom)}`}${doublons.has(p.cle) ? ` ${ech(p.annee_scolaire)}` : ''}`
+    const en = p => `${EN_PERIODE[p.cle] || `En ${ech(p.nom)}`}${doublons.has(p.cle) ? ` ${ech(p.annee_scolaire)}` : ''}`
+    const calc = v.periodes.filter(p => p.statut === 'calcule' && FLECHE_VAC[p.sens])
+    const hausses = calc.filter(p => p.sens === 'hausse').map(de)
+    const baisses = calc.filter(p => p.sens === 'baisse').map(de)
+    const phrases = []
+    if (hausses.length) phrases.push(`Les vacances ${enListe(hausses)} portent le marché${baisses.length ? ` ; celles ${enListe(baisses)} le font baisser` : ''}.`)
+    else if (baisses.length) phrases.push(`Aucune période de vacances mesurée ne porte nettement le marché ; celles ${enListe(baisses)} le font baisser.`)
+    else if (calc.length) phrases.push('Les périodes de vacances mesurées n’ont pas d’effet net sur le marché.')
+    // Les zones ne se departagent que dans une periode qui PORTE le marche.
+    const parZone = calc.filter(p => p.sens === 'hausse' && Array.isArray(p.zones)).map(p => {
+      const pp = Array.isArray(p.plus_porteuses) ? p.plus_porteuses : null
+      const nb = Number(p.zones_mesurees) || 0
+      if (!pp || nb < 2) return `${en(p)}, les zones ne se départagent pas (trop peu de zones mesurées)`
+      if (!pp.length) return `${en(p)}, ${nb === 3 ? 'les trois zones se valent' : 'les zones mesurées se valent'}`
+      return `${en(p)}, ${pp.length > 1 ? `les zones ${enListe(pp.map(ech))} sont les plus porteuses` : `la zone ${ech(pp[0])} est la plus porteuse`}`
+    })
+    // Apres un point-virgule, la suite reprend en minuscule (« ; au printemps »).
+    if (parZone.length) phrases.push(`${parZone.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x)).join(' ; ')}.`)
+    const lignes = v.periodes.map(p => {
+      const nom = `Vacances ${de(p)}`
+      if (p.statut === 'debut_seulement') return `<b aria-hidden="true">·</b><span>${nom} : <span class="non-calc">non mesurables, seule leur date de début est publiée</span></span>`
+      if (p.statut === 'hors_fenetre') return `<b aria-hidden="true">·</b><span>${nom} : <span class="non-calc">en grande partie hors des 12 mois, non conclues</span></span>`
+      if (p.statut !== 'calcule' || !FLECHE_VAC[p.sens]) return `<b aria-hidden="true">·</b><span>${nom} : <span class="non-calc">non calculable${p.motif ? ` (${ech(p.motif)})` : ''}</span></span>`
+      const zones = Array.isArray(p.zones)
+        ? `<br><small class="mg-zones">${p.zones.map(z => `zone ${ech(z.zone)} ${FLECHE_VAC[z.sens] || '(non mesurée)'}`).join(' · ')}</small>` : ''
+      const partielle = p.partielle ? ' <span class="non-calc">(en partie seulement dans les 12 mois)</span>' : ''
+      return `<b aria-hidden="true">${FLECHE_VAC[p.sens]}</b><span>${nom} : ${EFFET_VAC[p.sens]}${partielle}${zones}</span>`
+    }).join('')
+    return `${tete}${phrases.length ? `<p class="mg-verdict">${phrases.join(' ')}</p>` : ''}<div class="mg-sens">${lignes}</div>`
+      + '<p class="mg-mention">Chaque période est comparée aux jours hors vacances des mois où elle tombe vraiment. Peu de jours ne concernent qu’une seule zone : l’écart entre zones reste indicatif.</p>'
+      + `${connues}</div>`
   }
   const NOM_AIRROI = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
 

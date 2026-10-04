@@ -28,6 +28,9 @@ function base (tables) {
     const q = {
       select: () => q,
       eq: (k, v) => { lignes = lignes.filter(l => l[k] === v); return q },
+      lte: (k, v) => { lignes = lignes.filter(l => l[k] <= v); return q },
+      gte: (k, v) => { lignes = lignes.filter(l => l[k] >= v); return q },
+      then: (ok, ko) => (tables[tb] === null ? Promise.resolve({ data: null, error: { message: 'panne' } }) : Promise.resolve({ data: lignes, error: null })).then(ok, ko),
       order: (k, { ascending }) => { lignes = [...lignes].sort((a, b) => (a[k] < b[k] ? -1 : a[k] > b[k] ? 1 : 0) * (ascending ? 1 : -1)); return q },
       limit: n => Promise.resolve({ data: lignes.slice(0, n), error: null }),
       range: (a, b) => Promise.resolve({ data: lignes.slice(a, b + 1), error: null }),
@@ -128,11 +131,12 @@ test('sans lien vers un marche, ou sans capture : on le dit, sans rien inventer'
   assert.ok(!/\$|airroi|script/i.test(sansCapture.corps.motif), 'ni cout ni jargon pour l hote')
 })
 
-test('LE TEST QUI COMPTE : pipeline ETANCHE — la route ne lit que le lien et la temperature', async () => {
+test('LE TEST QUI COMPTE : pipeline ETANCHE — la route ne lit que le lien, la temperature et le calendrier des vacances (§19)', async () => {
   const r = await appeler({ property_id: 'BIEN-A' }, TABLES)
-  assert.deepEqual([...new Set(r.lus)], ['marche_biens', 'marche_temperature_airroi'])
+  assert.deepEqual([...new Set(r.lus)], ['marche_biens', 'marche_temperature_airroi', 'school_holidays'])
   const src = fs.readFileSync(path.join(RACINE, 'api', 'marche-temperature.js'), 'utf8')
-  assert.ok(!/airroi\/client|api\.airroi|vacances|bookings_snapshot|airroi_cache/.test(src), 'ni AirROI en direct, ni l historique')
+  assert.ok(!/airroi\/client|api\.airroi|bookings_snapshot|airroi_cache|marche\/marche-global|progression-marche|price_display_log/.test(src), 'ni AirROI en direct, ni l historique des ventes ou du marche')
+  assert.deepEqual([...src.matchAll(/require\('([^']+)'\)/g)].map(m => m[1]), ['@supabase/supabase-js', '../lib/require-permission', '../lib/marche/temperature-airroi', '../lib/yield/vacances'])
   assert.ok(!/\.(insert|update|upsert|delete)\(/.test(src), 'aucune ecriture')
 })
 
@@ -154,4 +158,25 @@ test('§18 : la route renvoie « En resume », a partir du mois en cours a Paris
   const paris = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 7)
   assert.ok(r.corps.resume, 'le resume est la')
   assert.equal(r.corps.resume.periode.debut, paris)
+})
+
+const VAC = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'vacances-2026-2027.json'), 'utf8')).vacances
+
+test('§19 : les vacances lues par la route nourrissent le bloc des vacances ; illisibles, seul ce bloc le dit', async () => {
+  const r = await appeler({ property_id: 'BIEN-A' }, { ...TABLES, school_holidays: VAC })
+  assert.ok(r.corps.resume.vacances, 'le bloc des vacances est la')
+  const casse = await appeler({ property_id: 'BIEN-A' }, { ...TABLES, school_holidays: null })
+  assert.equal(casse.code, 200)
+  assert.equal(casse.corps.jours.length, 729, 'le calendrier reste')
+  // ⚠ La route lit l'HORLOGE : la capture (oct. 2026 - sept. 2028) couvre un
+  // quart de la fenetre jusqu'en juin 2028. Les deux cas sont asserts, aucun n'est
+  // muet (review de 7a11102) — ce test ne rougira pas tout seul avec le calendrier.
+  const paris = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 7)
+  if (paris <= '2028-06') {
+    assert.equal(casse.corps.resume.statut, 'calcule')
+    assert.equal(casse.corps.resume.vacances.statut, 'non_calculable')
+    assert.match(casse.corps.resume.vacances.motif, /illisible/)
+  } else {
+    assert.equal(casse.corps.resume.statut, 'non_calculable')
+  }
 })

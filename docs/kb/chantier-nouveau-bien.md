@@ -2401,3 +2401,85 @@ source**, et les deux pipelines ne se croisent dans aucun calcul.
 - Tests unitaires du verdict week-end ou semaine (bornes, dimanche exclu), du
   regroupement et de la récurrence des événements, et des comptes 5c. La page
   est testée dans un vrai DOM.
+
+## 19. « En résumé » : l'impact des vacances scolaires, zone par zone (5 octobre 2026) — SPEC
+
+Demande de Thierry du 5 octobre 2026 : « il manque les vacances et leur
+impact ; identifier l'impact de chaque zone et conclure ». La méthode a été
+validée le même jour. Staging uniquement.
+
+**Sources.** Le modèle AirROI (les écarts jour par jour) croisé avec le
+**calendrier officiel des vacances scolaires** du cœur (`school_holidays`, lu par
+`lib/yield/vacances.js`).
+
+**Ce n'est pas un mélange de pipelines** (décision de Thierry du 5 octobre
+2026) :
+- le calendrier des vacances ne contient que des dates publiques, ni vente ni
+  marché ;
+- l'historique des ventes n'entre pas dans ce calcul.
+
+### 19.1 Le calcul (pur : `impactVacances(jours, vacances, premierMois)`)
+
+- **Fenêtre** : les 12 mois du calendrier (§17.1).
+- **Périodes** : Toussaint, Noël, Hiver, Printemps et Été. Une entrée d'un seul
+  jour ne compte pas comme une période :
+  - « Pont de l'Ascension » est écarté ;
+  - pour « Début des Vacances d'Été », l'été est dit **non publié**.
+- **Effet d'une période** : la moyenne des écarts des jours de vacances (toutes
+  zones) moins celle des **jours hors de toute vacance des mêmes mois**. On
+  compare ainsi des jours de la même saison.
+- **Effet de chaque zone** : le même calcul sur les seuls jours de vacances de
+  cette zone. Il n'est calculé que si les dates **diffèrent** d'une zone à
+  l'autre, donc pour l'hiver et le printemps. Toussaint et Noël sont communes
+  aux trois zones et ne départagent rien.
+- **Un sens, jamais un chiffre** :
+  - ↑ au-dessus d'un point ;
+  - ↓ en dessous de moins un point ;
+  - → entre les deux.
+
+  C'est le seuil `AVANTAGE_MIN` de §15.
+- **Zones les plus porteuses d'une période** : celles à moins d'un point de la
+  meilleure, à condition que l'écart entre la meilleure et la moins bonne
+  dépasse un point. Sinon, « les trois zones se valent ».
+- **Non calculable**, avec son motif : aucun jour hors vacances dans les mêmes
+  mois, ou aucun jour de vacances dans la fenêtre.
+
+### 19.2 L'affichage : le bloc 5e « Les vacances scolaires »
+
+- La source est nommée : « modèle AirROI et calendrier officiel des vacances
+  scolaires ».
+- Une ligne par période, avec son sens. Pour l'hiver et le printemps, s'y
+  ajoutent le sens de chaque zone et les zones les plus porteuses.
+- **Une conclusion en une phrase** : les périodes qui portent le marché, celles
+  qui le font baisser, et la ou les zones les plus porteuses.
+- Une mise en garde : peu de jours ne concernent qu'une seule zone, donc l'écart
+  entre zones reste indicatif.
+- L'été non publié est dit comme tel.
+
+### 19.3 La route
+
+- `/api/marche-temperature` lit en plus `school_holidays`, par
+  `lireVacances`, sur la fenêtre.
+- Si les vacances sont illisibles, le seul bloc 5e est « non calculable » : le
+  calendrier et les autres blocs restent.
+
+### 19.4 Règles affinées par la review de 7a11102 (5 octobre 2026)
+
+- **Une période se compte par occurrence d'une année scolaire.** Une fenêtre
+  qui commence en janvier voit la fin d'un Noël et le début du suivant : on ne
+  les mélange jamais.
+- **Les mois de comparaison** sont ceux où l'occurrence compte au moins 7 jours
+  de vacances. À défaut, on prend le mois qui en compte le plus.
+  - Effet à Bagnères : le printemps passe de « baisse » à « sans effet net ». La
+    baisse venait de mai, qui ne compte que 2 jours de vacances.
+- **Une occurrence dont moins de la moitié des jours tombent dans la fenêtre
+  n'est pas conclue** : « en grande partie hors des 12 mois ». Au-dessus, elle
+  est conclue, et dite « en partie seulement » si elle n'est pas entière.
+- **Une zone sans donnée est « non mesurée »**, jamais « égale ». « Les trois
+  zones se valent » exige trois zones mesurées.
+- **« Les plus porteuses » n'existe que dans une période qui porte le marché**,
+  et seulement parmi les zones en hausse.
+- **La borne du calendrier des vacances est dite** : la plus proche des dates
+  de fin publiées des trois zones (`etendueSource`).
+- **L'été, dont seule la date de début est publiée**, est dit « non mesurable,
+  seule sa date de début est publiée ».
