@@ -124,7 +124,8 @@ test('sans lien vers un marche, ou sans capture : on le dit, sans rien inventer'
   assert.equal(sansLien.corps.etat, 'marche_inconnu')
   const sansCapture = await appeler({ property_id: 'BIEN-A' }, { ...TABLES, marche_temperature_airroi: [] })
   assert.equal(sansCapture.corps.etat, 'capture_absente')
-  assert.match(sansCapture.corps.motif, /jamais depuis cet ecran/)
+  assert.match(sansCapture.corps.motif, /pas encore été établi/)
+  assert.ok(!/\$|airroi|script/i.test(sansCapture.corps.motif), 'ni cout ni jargon pour l hote')
 })
 
 test('LE TEST QUI COMPTE : pipeline ETANCHE — la route ne lit que le lien et la temperature', async () => {

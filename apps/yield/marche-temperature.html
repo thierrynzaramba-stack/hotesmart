@@ -42,7 +42,7 @@
     .mt-badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
     .mt-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
     .mt-nav button { font: inherit; border: 0.5px solid var(--border2); background: var(--bg); color: var(--text);
-                     border-radius: 8px; padding: 6px 12px; cursor: pointer; min-width: 44px; }
+                     border-radius: 8px; padding: 6px 12px; cursor: pointer; min-width: 44px; min-height: 44px; }
     .mt-nav button:disabled { opacity: .4; cursor: default; }
     .mt-nav h3 { margin: 0; font-size: 16px; text-transform: capitalize; }
     .mt-grille { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; max-width: 560px; }
@@ -117,7 +117,10 @@
   const NIVEAUX = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
   const DESCRIPTION = { creux: 'marché faible', modere: 'marché normal', favorable: 'bon moment', pic: 'très forte demande' }
   const SENS = { haut: 'tire vers le haut', neutre: 'neutre', bas: 'tire vers le bas' }
-  const badge = n => n ? `<span class="mt-badge" style="background:var(--t-${n});color:var(--t-${n}-txt)">${NIVEAUX[n]}</span>` : '<span class="non-calc">—</span>'
+  // ⚠ UN NIVEAU INCONNU N'ENTRE JAMAIS DANS UN STYLE (revue de 675ed3b) : seuls
+  // les quatre niveaux connus sont interpoles.
+  const niv = n => (Object.prototype.hasOwnProperty.call(NIVEAUX, n) ? n : null)
+  const badge = n => niv(n) ? `<span class="mt-badge" style="background:var(--t-${niv(n)});color:var(--t-${niv(n)}-txt)">${NIVEAUX[niv(n)]}</span>` : '<span class="non-calc">—</span>'
 
   let session = null
   let jeton = 0
@@ -149,13 +152,15 @@
     try {
       r = await fetch(`/api/marche-temperature?property_id=${encodeURIComponent(el('mt-bien').value)}`, {
         headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
-    } catch (e) { return corps('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>') }
+    } catch (e) { if (j === jeton) corps('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>'); return }
     if (j !== jeton) return
     if (!r.ok) return corps(`<p class="non-calc">Lecture impossible (${r.status}).</p>`)
-    const d = await r.json()
+    let d
+    try { d = await r.json() } catch (e) { if (j === jeton) corps('<p class="non-calc">Réponse illisible.</p>'); return }
     if (j !== jeton) return
     if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
     if (d.etat === 'capture_absente') return corps(`<p class="non-calc">Marché ${ech(d.marche && d.marche.localite)} : ${ech(d.motif)}.</p>`)
+    if (d.etat !== 'calcule' || !Array.isArray(d.jours) || !d.jours.length) return corps('<p class="non-calc">Aucun jour à afficher pour ce marché.</p>')
     donnees = d
     moisCourant = 0
     jourChoisi = null
@@ -182,8 +187,9 @@
     for (let d = 1; d <= nb; d++) {
       const cle = `${m}-${String(d).padStart(2, '0')}`
       const x = parJour.get(cle)
-      cases += x
-        ? `<button type="button" id="j-${cle}" class="mt-jour${x.evenement ? ' evt' : ''}" data-jour="${cle}" aria-pressed="${cle === jourChoisi}" style="background:var(--t-${x.niveau});color:var(--t-${x.niveau}-txt)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[x.niveau]}${x.evenement ? ', ' + ech(x.evenement) : ''}">${d}</button>`
+      const n = x && niv(x.niveau)
+      cases += n
+        ? `<button type="button" id="j-${cle}" class="mt-jour${x.evenement ? ' evt' : ''}" data-jour="${cle}" aria-pressed="${cle === jourChoisi}" style="background:var(--t-${n});color:var(--t-${n}-txt)" aria-label="${ech(jourFr(cle))} : ${NIVEAUX[n]}${x.evenement ? ', ' + ech(x.evenement) : ''}">${d}</button>`
         : '<div></div>'
     }
     const legende = Object.keys(NIVEAUX).map(n => `<span class="mt-niv"><span class="mt-pastille" style="background:var(--t-${n})"></span><b>${NIVEAUX[n]}</b> ${DESCRIPTION[n]}</span>`).join('')
@@ -201,7 +207,7 @@
     if (!jourChoisi) return '<span class="non-calc">Touchez un jour pour voir son détail.</span>'
     const x = donnees.jours.find(y => y.jour === jourChoisi)
     if (!x) return ''
-    return `<b>${ech(jourFr(x.jour))}</b> · ${badge(x.niveau)} <span class="non-calc">${DESCRIPTION[x.niveau]}</span>`
+    return `<b>${ech(jourFr(x.jour))}</b> · ${badge(x.niveau)} <span class="non-calc">${DESCRIPTION[niv(x.niveau)] || ''}</span>`
       + `<dl><dt>Saison</dt><dd>${SENS[x.sens.saison]}</dd>`
       + `<dt>Jour de semaine</dt><dd>${SENS[x.sens.semaine]}${x.week_end ? ' (nuit de week-end)' : ''}</dd>`
       + `<dt>Férié ou événement</dt><dd>${x.evenement ? `${ech(x.evenement)} — ${SENS[x.sens.evenement]}` : 'aucun'}</dd>`
@@ -277,7 +283,9 @@
       + `<p class="sous">L’écart moyen de chaque mois à la base du modèle, en points (pas en euros), sur les bandes des quatre niveaux.</p>`
       + `<div class="mt-defile"><svg class="mt" viewBox="0 0 ${L} ${H}" role="img" aria-label="Écart moyen mensuel du marché sur deux ans">`
       + bandes + `<line class="axe" x1="${g}" x2="${L - d}" y1="${y(0)}" y2="${y(0)}" stroke-dasharray="3 3"></line>`
-      + `<path d="${ligne}" fill="none" stroke="var(--text)" stroke-width="2"></path>` + graduations + mois + `</svg></div></div>`
+      + `<path d="${ligne}" fill="none" stroke="var(--text)" stroke-width="2"></path>`
+      + pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.ecart).toFixed(1)}" r="2.5" fill="var(--text)"></circle>`).join('')
+      + graduations + mois + `</svg></div></div>`
   }
 
   function brancher () {
