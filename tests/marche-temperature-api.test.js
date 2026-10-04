@@ -168,8 +168,15 @@ test('§19 : les vacances lues par la route nourrissent le bloc des vacances ; i
   const casse = await appeler({ property_id: 'BIEN-A' }, { ...TABLES, school_holidays: null })
   assert.equal(casse.code, 200)
   assert.equal(casse.corps.jours.length, 729, 'le calendrier reste')
-  if (casse.corps.resume.statut === 'calcule') {
+  // ⚠ La route lit l'HORLOGE : la capture (oct. 2026 - sept. 2028) couvre un
+  // quart de la fenetre jusqu'en juin 2028. Les deux cas sont asserts, aucun n'est
+  // muet (review de 7a11102) — ce test ne rougira pas tout seul avec le calendrier.
+  const paris = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 7)
+  if (paris <= '2028-06') {
+    assert.equal(casse.corps.resume.statut, 'calcule')
     assert.equal(casse.corps.resume.vacances.statut, 'non_calculable')
     assert.match(casse.corps.resume.vacances.motif, /illisible/)
+  } else {
+    assert.equal(casse.corps.resume.statut, 'non_calculable')
   }
 })

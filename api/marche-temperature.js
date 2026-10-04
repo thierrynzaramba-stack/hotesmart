@@ -21,7 +21,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { lireDerniereCapture, pourLEcran } = require('../lib/marche/temperature-airroi')
-const { lireVacances } = require('../lib/yield/vacances')
+const { lireVacances, etendueSource } = require('../lib/yield/vacances')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 // Le mois en cours, a l'heure de Paris : le depart des 12 mois du resume (§18),
@@ -65,12 +65,20 @@ module.exports = async (req, res) => {
     const depart = moisDeParis()
     const [a0, m0] = depart.split('-').map(Number)
     const fin = new Date(Date.UTC(a0, m0 - 1 + 12, 0)).toISOString().slice(0, 10)
+    // Et jusqu'ou elles sont connues : la zone publiee le moins loin fixe la
+    // borne (review de 7a11102 : une annee non importee disparaissait en silence).
     let vacances
-    try { vacances = await lireVacances(supabase, `${depart}-01`, fin) } catch (e) {
+    let connuesJusquau = null
+    try {
+      const [v, etendue] = await Promise.all([lireVacances(supabase, `${depart}-01`, fin), etendueSource(supabase)])
+      vacances = v
+      const fins = (etendue || []).map(e => e.date_fin).filter(Boolean).sort()
+      connuesJusquau = fins.length ? fins[0] : null
+    } catch (e) {
       console.error('[marche-temperature] vacances', e.message)
       vacances = null
     }
-    return res.status(200).json({ source: 'airroi', etat: 'calcule', marche: m, ...pourLEcran(c, depart, vacances) })
+    return res.status(200).json({ source: 'airroi', etat: 'calcule', marche: m, ...pourLEcran(c, depart, vacances, connuesJusquau) })
   } catch (e) {
     console.error('[marche-temperature]', e.message)
     return res.status(503).json({ error: 'temperature_illisible' })

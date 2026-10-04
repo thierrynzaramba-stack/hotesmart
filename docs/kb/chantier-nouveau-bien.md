@@ -2462,3 +2462,24 @@ validée le même jour. Staging uniquement.
   `lireVacances`, sur la fenêtre.
 - Si les vacances sont illisibles, le seul bloc 5e est « non calculable » : le
   calendrier et les autres blocs restent.
+
+### 19.4 Règles affinées par la review de 7a11102 (5 octobre 2026)
+
+- **Une période se compte par occurrence d'une année scolaire.** Une fenêtre
+  qui commence en janvier voit la fin d'un Noël et le début du suivant : on ne
+  les mélange jamais.
+- **Les mois de comparaison** sont ceux où l'occurrence compte au moins 7 jours
+  de vacances. À défaut, on prend le mois qui en compte le plus.
+  - Effet à Bagnères : le printemps passe de « baisse » à « sans effet net ». La
+    baisse venait de mai, qui ne compte que 2 jours de vacances.
+- **Une occurrence dont moins de la moitié des jours tombent dans la fenêtre
+  n'est pas conclue** : « en grande partie hors des 12 mois ». Au-dessus, elle
+  est conclue, et dite « en partie seulement » si elle n'est pas entière.
+- **Une zone sans donnée est « non mesurée »**, jamais « égale ». « Les trois
+  zones se valent » exige trois zones mesurées.
+- **« Les plus porteuses » n'existe que dans une période qui porte le marché**,
+  et seulement parmi les zones en hausse.
+- **La borne du calendrier des vacances est dite** : la plus proche des dates
+  de fin publiées des trois zones (`etendueSource`).
+- **L'été, dont seule la date de début est publiée**, est dit « non mesurable,
+  seule sa date de début est publiée ».
