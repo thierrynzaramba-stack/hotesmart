@@ -553,7 +553,7 @@ const avecVacances = (v) => {
   r.resume.vacances = v
   return { '/api/marche-temperature': () => reponse({ source: 'airroi', etat: 'calcule', marche: MARCHE, ...r }) }
 }
-const P = (cle, nom, sens, extra = {}) => ({ cle, nom, annee_scolaire: '2026-2027', statut: 'calcule', sens, partielle: false, zones: null, plus_porteuses: null, ...extra })
+const P = (cle, nom, sens, extra = {}) => ({ cle, nom, annee_scolaire: '2026-2027', statut: 'calcule', niveau: 'favorable', sens, partielle: false, zones: null, plus_porteuses: null, ...extra })
 
 test('REVIEW : la borne du calendrier des vacances est dite', async () => {
   const { doc } = await monter(OK)
@@ -584,6 +584,13 @@ test('REVIEW : periode hors fenetre, periode partielle, meme periode deux annees
   ] }) })
   const txt = blocVac(doc).textContent
   assert.match(txt, /Vacances de Noël 2026-2027 : en grande partie hors des 12 mois, non conclues/)
-  assert.match(txt, /Vacances de Noël 2027-2028 — : font monter le marché \(en partie seulement dans les 12 mois\)/)
+  assert.match(txt, /Vacances de Noël 2027-2028 Favorable : font monter le marché \(en partie seulement dans les 12 mois\)/)
   assert.equal(blocVac(doc).querySelector('.mg-verdict').textContent, 'Les vacances de Noël 2027-2028 portent le marché.')
+})
+
+test('REVIEW (a7a8454) : une periode sans niveau lisible n affiche ni badge ni tiret orphelin', async () => {
+  const { doc } = await monter({ ...OK, ...avecVacances({ statut: 'calcule', periodes: [P('noel', 'Noël', 'hausse', { niveau: undefined })] }) })
+  const txt = blocVac(doc).querySelector('.mg-sens').textContent
+  assert.match(txt, /Vacances de Noël : font monter le marché/)
+  assert.ok(!/— :/.test(txt))
 })
