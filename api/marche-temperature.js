@@ -4,7 +4,9 @@
 //   GET ?property_id=  ->  du marche relie a ce logement, la derniere capture
 //                          AirROI : un niveau par jour (Creux, Modere,
 //                          Favorable, Pic), le sens de chaque composante, les
-//                          evenements nommes, et les analyses.
+//                          evenements nommes, et les analyses ; « En resume »
+//                          sur les 12 mois a partir du mois en cours a Paris
+//                          (spec §18).
 //
 // ⚠ PIPELINE ETANCHE : rien de l'historique des ventes n'est lu ici.
 // ⚠ AUCUN PRIX dans la reponse, ni en euros ni en base 100 (§15.6).
@@ -18,6 +20,9 @@ const { requirePermission } = require('../lib/require-permission')
 const { lireDerniereCapture, pourLEcran } = require('../lib/marche/temperature-airroi')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+// Le mois en cours, a l'heure de Paris : le depart des 12 mois du resume (§18),
+// le meme que celui du calendrier de la page.
+const moisDeParis = (maintenant = new Date()) => maintenant.toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 7)
 const absente = (error, t) => error && new RegExp(t).test(error.message || '') && /(does not exist|schema cache)/i.test(error.message || '')
 
 module.exports = async (req, res) => {
@@ -52,7 +57,7 @@ module.exports = async (req, res) => {
         // geste technique (une capture, par un script) est dans la spec §15.
         motif: 'le calendrier de température n’a pas encore été établi pour ce marché' })
     }
-    return res.status(200).json({ source: 'airroi', etat: 'calcule', marche: m, ...pourLEcran(c) })
+    return res.status(200).json({ source: 'airroi', etat: 'calcule', marche: m, ...pourLEcran(c, moisDeParis()) })
   } catch (e) {
     console.error('[marche-temperature]', e.message)
     return res.status(503).json({ error: 'temperature_illisible' })

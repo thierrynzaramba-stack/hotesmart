@@ -42,7 +42,7 @@ const HISTORIQUE = (progression = progressionDuMarche(MARCHE60), recupereLe = '2
   calendrier: { statut: 'calcule', mois: [{ mois: '2026-10', statut: 'calcule', jours: [{ jour: '2026-10-01', niveau: 'fort', pct: 1.2, raisons: ['HISTORIQUE-CALENDRIER'] }] }] },
 })
 const lignes = t.construireLignes({ marche: { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }, reponse: RELIEF })
-const TEMPERATURE = { source: 'airroi', etat: 'calcule', marche: MARCHE, ...t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }) }
+const TEMPERATURE = { source: 'airroi', etat: 'calcule', marche: MARCHE, ...t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-10') }
 
 const reponse = (corps, status = 200) => ({ ok: status < 400, status, json: async () => corps })
 const attendre = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setImmediate(r)) }
@@ -62,7 +62,8 @@ async function monter (routes, maintenant = MAINTENANT, largeur = 0) {
     const route = Object.keys(routes).find(r => url.startsWith(r))
     return routes[route](url)
   }
-  w.eval(MODULE.replace(/^export /gm, '') + '\nwindow.monterAnneeTemperature = monterAnneeTemperature')
+  // Chaque nom que la page IMPORTE du module est expose, comme le ferait l'import.
+  w.eval(MODULE.replace(/^export /gm, '') + '\nObject.assign(window, { monterAnneeTemperature, fermerDetail, badge, niv })')
   w.requireAuth = async () => ({ access_token: 'jeton-factice' })
   w.renderSidebar = async () => {}
   w.compteCourant = () => null
@@ -86,6 +87,7 @@ test('LE TEST QUI COMPTE : quatre sections, dans l ordre ; l introduction exacte
     'Le remplissage du marché, mois par mois',
     'Le nombre de biens sur le marché',
     'Le calendrier du marché selon AirROI, jour par jour',
+    'En résumé',
   ])
   assert.equal(doc.querySelector('.mg-avertir').textContent.replace(/\s+/g, ' ').trim(),
     'Une estimation du marché, pas un prix. Cette page montre le marché de votre commune d’après les annonces Airbnb. Elle ne calcule aucun prix pour votre logement, n’en pousse aucun, et ne pilote rien.')
@@ -114,7 +116,7 @@ test('LE TEST QUI COMPTE : deux routes, chacune la sienne ; le calendrier AirROI
 test('PIPELINE ETANCHE : la panne de l un n efface pas l autre', async () => {
   const a = await monter({ ...OK, '/api/marche-temperature': () => reponse({}, 500) })
   assert.match(a.doc.getElementById('mg-airroi').textContent, /Lecture impossible \(500\)/)
-  assert.equal(titres(a.doc).length, 4)
+  assert.equal(titres(a.doc).length, 5)
   const b = await monter({ ...OK, '/api/marche-global': () => reponse({}, 500) })
   assert.match(b.doc.getElementById('mg-corps').textContent, /Lecture impossible \(500\)/)
   assert.ok(b.doc.getElementById('mg-airroi-zone').querySelectorAll('.tc-case').length > 300)
@@ -229,7 +231,7 @@ test('changer de logement pendant la lecture : la reponse du logement precedent 
   liberer()
   await attendre()
   assert.ok(!/Lecture impossible/.test(doc.getElementById('mg-corps').textContent))
-  assert.equal(titres(doc).length, 4)
+  assert.equal(titres(doc).length, 5)
 })
 
 test('le calendrier AirROI part du mois en cours (heure de Paris), pas du premier mois de la capture', async () => {
@@ -365,4 +367,93 @@ test('une rotation du telephone redessine les courbes a la nouvelle largeur, san
   await new Promise(r => setTimeout(r, 260))
   assert.equal(doc.querySelector('#mg-corps svg').getAttribute('viewBox'), '0 0 666 260')
   assert.equal(appels.length, avant, 'aucune nouvelle lecture')
+})
+
+// ─── « En resume » (§18) ────────────────────────────────────────────────────
+const resume = doc => doc.getElementById('mg-resume')
+const blocs = doc => [...resume(doc).querySelectorAll('.mg-bloc')]
+
+test('LE TEST QUI COMPTE (§18) : quatre blocs dans l ordre, chacun sa source', async () => {
+  const { doc } = await monter(OK)
+  const b = blocs(doc)
+  assert.deepEqual(b.map(x => x.querySelector('h3').textContent), ['La tendance du marché', 'Week-end ou semaine', 'Les niveaux du marché', 'Les événements détectés'])
+  assert.match(b[0].querySelector('.mg-source').textContent, /historique du marché/)
+  for (const x of b.slice(1)) assert.match(x.querySelector('.mg-source').textContent, /modèle AirROI/)
+  // La carte vient APRES le calendrier AirROI.
+  const ordre = [...doc.querySelectorAll('#mg-airroi-zone, #mg-resume')].map(x => x.id)
+  assert.deepEqual(ordre, ['mg-airroi-zone', 'mg-resume'])
+})
+
+test('LE TEST QUI COMPTE (5a) : la tendance — un sens par indicateur, AUCUN chiffre, le verdict suit le RevPAR', async () => {
+  const { doc } = await monter(OK)
+  const b = blocs(doc)[0]
+  // Bagneres : RevPAR −1,4 % (stable), occupation −9,7 % (baisse), biens +11,3 % (hausse).
+  assert.equal(b.querySelector('.mg-verdict').textContent, 'Le marché est stable par rapport à l’année dernière.')
+  const lignes = b.querySelector('.mg-sens').textContent
+  assert.match(lignes, /→RevPAR : stable/)
+  assert.match(lignes, /↓Occupation : en baisse/)
+  assert.match(lignes, /↑Nombre de biens : en hausse/)
+  assert.ok(!/\d/.test(b.querySelector('.mg-verdict').textContent + lignes), 'aucun chiffre')
+})
+
+test('5a : la bande de ±3 % — au-dela en hausse ou en baisse, a 3 pile stable ; RevPAR non calculable = pas de verdict', async () => {
+  const p = progressionDuMarche(MARCHE60)
+  const avec = (pct) => ({ ...p, progression: { ...p.progression, indicateurs: { ...p.progression.indicateurs, revpar: { pct, mois_comparables: 12 } } } })
+  const verdict = async (pct) => {
+    const { doc } = await monter({ ...OK, '/api/marche-global': () => reponse(HISTORIQUE(avec(pct))) })
+    const v = blocs(doc)[0].querySelector('.mg-verdict')
+    return v ? v.textContent : blocs(doc)[0].textContent
+  }
+  assert.match(await verdict(3), /stable/)
+  assert.match(await verdict(3.1), /en hausse/)
+  assert.match(await verdict(-3), /stable/)
+  assert.match(await verdict(-3.1), /en baisse/)
+  assert.match(await verdict(null), /Pas de verdict : le RevPAR n’est pas calculable/)
+})
+
+test('5b : le verdict week-end, le meilleur et le plus faible jour', async () => {
+  const { doc } = await monter(OK)
+  const b = blocs(doc)[1].textContent
+  assert.match(b, /Le marché est plutôt favorable en week-end\./)
+  assert.match(b, /Meilleur jour : samedi · jour le plus faible : lundi\./)
+  assert.match(b, /semaine : du lundi au jeudi/)
+})
+
+test('LE TEST QUI COMPTE (5c) : les niveaux sous les noms YieldFlow, avec leur nombre de jours, et le rappel que c est une lecture', async () => {
+  const { doc } = await monter(OK)
+  const lignes = [...blocs(doc)[2].querySelectorAll('.mg-niv-l')].map(l => [...l.children].map(c => c.textContent.trim()).join(' | '))
+  assert.deepEqual(lignes, ['Base (Creux) | 106 jours', 'Moyen (Modéré) | 139 jours', 'Haut (Favorable) | 74 jours', 'Très haut ou Exceptionnel (Pic) | 46 jours'])
+  assert.match(blocs(doc)[2].textContent, /une lecture, pas un calcul de vos prix/)
+})
+
+test('LE TEST QUI COMPTE (5d) : les evenements, intro exacte, nom / dates / niveau / recurrence, aucun prix', async () => {
+  const { doc } = await monter(OK)
+  const b = blocs(doc)[3]
+  assert.match(b.textContent, /Ces événements sont détectés par le modèle AirROI\. Pour qu’ils influencent vos prix, créez-les dans vos événements\./)
+  const lignes = [...b.querySelectorAll('.mg-ev-l')]
+  assert.equal(lignes.length, 6)
+  assert.equal(lignes[0].querySelector('strong').textContent, 'Noël')
+  assert.match(lignes[0].textContent, /22\/12\/2026 → 28\/12\/2026 \(7 nuits\)/)
+  assert.match(lignes[0].textContent, /Pic/)
+  assert.match(lignes[0].querySelector('.o').textContent, /récurrent/)
+  assert.ok(lignes.some(l => l.querySelector('strong').textContent === 'Pâques'), 'Easter traduit')
+  assert.ok(!/€/.test(b.textContent))
+  assert.equal(b.querySelectorAll('button, form, input, select').length, 0, 'une suggestion : rien n est cree d ici')
+})
+
+test('SECURITE : un nom d evenement venu du serveur est echappe dans le resume', async () => {
+  const r = t.pourLEcran({ capture_le: '2026-09-30', jours: lignes }, '2026-10')
+  r.resume.evenements[0].nom = '<img src=x onerror=alert(1)>'
+  const { doc } = await monter({ ...OK, '/api/marche-temperature': () => reponse({ source: 'airroi', etat: 'calcule', marche: MARCHE, ...r }) })
+  assert.equal(resume(doc).querySelectorAll('img').length, 0)
+  assert.match(blocs(doc)[3].textContent, /<img src=x/)
+})
+
+test('PIPELINE ETANCHE (§18) : sans AirROI, la tendance reste ; sans historique, les blocs AirROI restent', async () => {
+  const a = await monter({ ...OK, '/api/marche-temperature': () => reponse({}, 500) })
+  assert.match(blocs(a.doc)[0].textContent, /Le marché est stable/)
+  assert.match(resume(a.doc).textContent, /Le marché selon AirROINon calculable|Non calculable : résumé absent/)
+  const b = await monter({ ...OK, '/api/marche-global': () => reponse({}, 500) })
+  assert.match(blocs(b.doc)[0].textContent, /Non calculable/)
+  assert.match(resume(b.doc).textContent, /plutôt favorable en week-end/)
 })
