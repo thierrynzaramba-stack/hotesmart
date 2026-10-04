@@ -269,3 +269,13 @@ test('REVIEW : un nom en forme decomposee (NFD) est reconnu', () => {
   const r = t.impactVacances(fevrier(() => 0), v, '2027-02')
   assert.ok(r.periodes.some(p => p.cle === 'noel'))
 })
+
+test('§19 : chaque periode de vacances porte le NIVEAU du marche sur ses jours (Creux / Modere / Favorable / Pic)', () => {
+  const r = t.impactVacances(L_BAGNERES, VACANCES, '2026-10')
+  assert.deepEqual(r.periodes.map(p => [p.nom, p.niveau]), [['Toussaint', 'modere'], ['Noël', 'favorable'], ['Hiver', 'modere'], ['Printemps', 'creux'], ['Été', undefined]])
+  // Le niveau = la moyenne des ecarts des jours de vacances, classee par niveauDe.
+  const f = t.impactVacances(fevrier(j => (ZONE_DE(j) ? 8 : 0)), HIVER, '2027-02')
+  assert.equal(f.periodes[0].niveau, 'pic')
+  const c = t.impactVacances(fevrier(j => (ZONE_DE(j) ? -4 : 0)), HIVER, '2027-02')
+  assert.equal(c.periodes[0].niveau, 'creux')
+})

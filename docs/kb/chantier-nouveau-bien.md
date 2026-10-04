@@ -2483,3 +2483,18 @@ validée le même jour. Staging uniquement.
   de fin publiées des trois zones (`etendueSource`).
 - **L'été, dont seule la date de début est publiée**, est dit « non mesurable,
   seule sa date de début est publiée ».
+
+### 19.5 Le niveau du marché pendant chaque période (5 octobre 2026)
+
+Demande de Thierry. Chaque période de vacances porte, comme un événement
+(§18.4), **le niveau du marché sur ses jours** : la moyenne des écarts de ses
+jours dans le calendrier AirROI, classée par `niveauDe` en Creux, Modéré,
+Favorable ou Pic. L'été, dont seule la date de début est publiée, n'en a pas.
+
+Le niveau et la flèche disent deux choses différentes :
+- **le niveau est absolu** : quel est le marché ces jours-là ;
+- **la flèche est relative** : les vacances le font-elles monter par rapport
+  aux autres jours des mêmes mois ?
+
+À Bagnères, l'hiver est Modéré et ↑ : février est creux, et ses vacances le
+relèvent. Le printemps est Creux et → : avril est faible, vacances comprises.

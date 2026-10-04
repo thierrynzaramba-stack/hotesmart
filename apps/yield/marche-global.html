@@ -468,7 +468,8 @@
       const zones = Array.isArray(p.zones)
         ? `<br><small class="mg-zones">${p.zones.map(z => `zone ${ech(z.zone)} ${FLECHE_VAC[z.sens] || '(non mesurée)'}`).join(' · ')}</small>` : ''
       const partielle = p.partielle ? ' <span class="non-calc">(en partie seulement dans les 12 mois)</span>' : ''
-      return `<b aria-hidden="true">${FLECHE_VAC[p.sens]}</b><span>${nom} : ${EFFET_VAC[p.sens]}${partielle}${zones}</span>`
+      // Le niveau du marche pendant la periode, comme pour un evenement.
+      return `<b aria-hidden="true">${FLECHE_VAC[p.sens]}</b><span>${nom} ${badge(p.niveau)} : ${EFFET_VAC[p.sens]}${partielle}${zones}</span>`
     }).join('')
     return `${tete}${phrases.length ? `<p class="mg-verdict">${phrases.join(' ')}</p>` : ''}<div class="mg-sens">${lignes}</div>`
       + '<p class="mg-mention">Chaque période est comparée aux jours hors vacances des mois où elle tombe vraiment. Peu de jours ne concernent qu’une seule zone : l’écart entre zones reste indicatif.</p>'

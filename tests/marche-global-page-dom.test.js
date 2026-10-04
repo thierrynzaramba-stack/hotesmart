@@ -520,12 +520,15 @@ test('LE TEST QUI COMPTE (§19) : la conclusion en une phrase — periodes porte
 test('§19 : une ligne par periode, les zones de l hiver et du printemps, l ete non publie, aucun chiffre', async () => {
   const { doc } = await monter(OK)
   const txt = blocVac(doc).querySelector('.mg-sens').textContent
-  assert.match(txt, /→Vacances de la Toussaint : sans effet net/)
-  assert.match(txt, /↑Vacances de Noël : font monter le marché/)
-  assert.match(txt, /↑Vacances d’hiver : font monter le marchézone A ↑ · zone B ↑ · zone C ↑/)
-  assert.match(txt, /→Vacances de printemps : sans effet netzone A → · zone B → · zone C →/)
+  assert.match(txt, /→Vacances de la Toussaint Modéré : sans effet net/)
+  assert.match(txt, /↑Vacances de Noël Favorable : font monter le marché/)
+  assert.match(txt, /↑Vacances d’hiver Modéré : font monter le marchézone A ↑ · zone B ↑ · zone C ↑/)
+  assert.match(txt, /→Vacances de printemps Creux : sans effet netzone A → · zone B → · zone C →/)
   assert.match(txt, /Vacances d’été : non mesurables, seule leur date de début est publiée/)
   assert.ok(!/\d/.test(txt.replace(/zone [ABC]/g, '')), 'aucun chiffre')
+  // Le niveau est le badge du calendrier AirROI, avec sa couleur (demande du 5 octobre 2026).
+  const badges = [...blocVac(doc).querySelectorAll('.mg-sens .tc-badge')].map(b => b.textContent)
+  assert.deepEqual(badges, ['Modéré', 'Favorable', 'Modéré', 'Creux'], 'un niveau par periode mesuree ; l ete n en a pas')
   assert.match(blocVac(doc).textContent, /l’écart entre zones reste indicatif/)
 })
 
@@ -581,6 +584,6 @@ test('REVIEW : periode hors fenetre, periode partielle, meme periode deux annees
   ] }) })
   const txt = blocVac(doc).textContent
   assert.match(txt, /Vacances de Noël 2026-2027 : en grande partie hors des 12 mois, non conclues/)
-  assert.match(txt, /Vacances de Noël 2027-2028 : font monter le marché \(en partie seulement dans les 12 mois\)/)
+  assert.match(txt, /Vacances de Noël 2027-2028 — : font monter le marché \(en partie seulement dans les 12 mois\)/)
   assert.equal(blocVac(doc).querySelector('.mg-verdict').textContent, 'Les vacances de Noël 2027-2028 portent le marché.')
 })
