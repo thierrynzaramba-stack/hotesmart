@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HôteSmart — Choisir vos comparables</title>
+  <link rel="stylesheet" href="/public/style.css">
+  <style>
+    [hidden] { display: none !important; }
+    /* ⚠ « CHOISIR VOS COMPARABLES » (spec §20 de docs/kb/chantier-nouveau-bien.md).
+       Etape A : l'hote decrit son bien. Etape B : il coche au moins 3 biens
+       du marche parmi les 25 que propose AirROI. AUCUN PRIX, aucun revenu,
+       aucune occupation n'est affiche. Toute donnee venue d'AirROI est posee
+       par textContent / setAttribute, jamais par innerHTML (review de a52b3e4). */
+    .cp-intro { font-size: 13.5px; line-height: 1.5; color: var(--text2); margin: 0 0 16px; }
+    .cp-carte { border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 16px; background: var(--bg); }
+    .cp-carte h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+    .cp-carte .sous { font-size: 12.5px; color: var(--text2); margin: 0 0 12px; line-height: 1.45; }
+    .cp-meta { font-size: 12.5px; color: var(--text2); margin: 6px 0 16px; }
+    .non-calc { color: var(--text2); font-style: italic; }
+    .cp-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px 16px; }
+    .cp-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
+    .cp-form label small { font-weight: 400; color: var(--text2); font-size: 12px; line-height: 1.35; }
+    .cp-form input[type="text"], .cp-form input[type="number"] { font: inherit; font-size: 14px; padding: 8px 10px; border: 0.5px solid var(--border2);
+      border-radius: 8px; background: var(--bg); color: var(--text); min-height: 40px; }
+    .cp-adresse { grid-column: 1 / -1; }
+    .cp-eq { display: flex; flex-wrap: wrap; gap: 8px 14px; margin: 12px 0 4px; font-size: 13.5px; }
+    .cp-eq label { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; font-weight: 400; }
+    .cp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+    .cp-btn { font: inherit; font-size: 14px; font-weight: 600; border: 0; border-radius: 8px; padding: 10px 16px; min-height: 44px;
+      background: var(--accent, #2A5E86); color: #fff; cursor: pointer; }
+    .cp-btn:disabled { opacity: .45; cursor: default; }
+    .cp-erreur { color: var(--red, #B3261E); font-size: 13px; }
+    .cp-ok { color: var(--green, #1F6F45); font-size: 13px; }
+    .cp-liste { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 10px; }
+    .cp-bien { border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
+    .cp-bien.choisi { outline: 2px solid var(--accent, #2A5E86); outline-offset: -1px; }
+    .cp-photo { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; background: var(--bg2); display: block; }
+    .cp-sans-photo { width: 100%; aspect-ratio: 3 / 2; background: var(--bg2); display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--text2); }
+    .cp-corps { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+    .cp-nom { font-size: 14px; font-weight: 600; margin: 0; line-height: 1.3; overflow-wrap: anywhere; }
+    .cp-ligne { font-size: 12.5px; color: var(--text2); }
+    .cp-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+    .cp-badge { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--bg2); color: var(--text); border: 0.5px solid var(--border); }
+    .cp-activite { font-size: 12px; font-weight: 600; }
+    .cp-ressemblance { font-size: 11.5px; color: var(--text2); }
+    .cp-choix { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; font-size: 13.5px; font-weight: 600; min-height: 44px; cursor: pointer; }
+    .cp-choix input { width: 20px; height: 20px; }
+    .cp-pied { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 10px 0; margin-top: 12px;
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    @media (max-width: 640px) {
+      .content { padding-left: 12px; padding-right: 12px; } .cp-carte { padding: 12px; }
+      .cp-liste { grid-template-columns: minmax(0, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+<div class="sidebar" id="sidebar"></div>
+<div class="main">
+<div class="content">
+  <div class="header"><h1>Choisir vos comparables</h1></div>
+  <p class="cp-intro">Décrivez votre logement, puis cochez au moins trois biens du marché qui lui ressemblent vraiment.
+    Ce choix déclare votre positionnement : vos prix de départ seront construits à partir de ces biens.
+    <b>Aucun prix</b> n’est affiché ici.</p>
+
+  <div><label class="cp-meta">Logement <select id="cp-bien"></select></label></div>
+
+  <!-- ÉTAPE A : décrire son bien -->
+  <div class="cp-carte" id="cp-etape-a">
+    <h2>1. Votre logement</h2>
+    <p class="sous">Ce profil sert à trouver les biens du marché qui ressemblent au vôtre.</p>
+    <form id="cp-form" class="cp-form" novalidate>
+      <label class="cp-adresse">Adresse du logement
+        <input type="text" id="cp-adresse" name="adresse" autocomplete="street-address" maxlength="200" placeholder="12 rue des Thermes, Bagnères-de-Bigorre">
+        <small>Numéro, rue et commune (ou lieu-dit) : la commune seule ne suffit pas.</small>
+      </label>
+      <label>Voyageurs
+        <input type="number" id="cp-voyageurs" name="voyageurs" min="1" max="30" step="1" inputmode="numeric">
+      </label>
+      <label>Chambres
+        <input type="number" id="cp-chambres" name="chambres" min="0" max="20" step="1" inputmode="numeric">
+        <small>Une chambre = une pièce séparée avec une porte. Un canapé-lit dans le salon n’est <b>pas</b> une chambre :
+          « 1 chambre + 1 salon avec couchage » = 1 chambre.</small>
+      </label>
+      <label>Pièces au total
+        <input type="number" id="cp-pieces" name="pieces" min="1" max="30" step="1" inputmode="numeric">
+        <small>Toutes les pièces à vivre, chambres comprises.</small>
+      </label>
+      <label>Salles de bain
+        <input type="number" id="cp-sdb" name="salles_de_bain" min="0" max="10" step="1" inputmode="numeric">
+      </label>
+    </form>
+    <div class="cp-eq" id="cp-eq" role="group" aria-label="Équipements qui comptent dans le prix"></div>
+    <div class="cp-actions">
+      <button type="button" class="cp-btn" id="cp-valider-a">Valider la description</button>
+      <span id="cp-message-a" aria-live="polite"></span>
+    </div>
+  </div>
+
+  <!-- ÉTAPE B : choisir ses comparables -->
+  <div class="cp-carte" id="cp-etape-b" hidden>
+    <h2>2. Les biens du marché qui ressemblent au vôtre</h2>
+    <p class="sous">Classés du plus ressemblant au moins ressemblant : distance, ouverture dans l’année, équipements, taille.
+      Cochez ceux que vous reconnaissez comme comparables — <b>au moins 3</b>.</p>
+    <div id="cp-liste-zone"><p class="cp-meta">Recherche des biens du marché…</p></div>
+    <div class="cp-pied">
+      <button type="button" class="cp-btn" id="cp-valider-b" disabled>Valider mes comparables</button>
+      <span id="cp-compte" class="cp-meta" style="margin:0"></span>
+      <span id="cp-message-b" aria-live="polite"></span>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+
+<script type="module">
+  // ⚠ Un GET (profil, retenus, liste en cache) puis des POST (profil, chercher,
+  // retenir) sur /api/marche-comparables. Aucun appel AirROI depuis le
+  // navigateur, aucun prix.
+  import { requireAuth } from '/components/auth-guard.js'
+  import { renderSidebar } from '/components/sidebar.js'
+  import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
+  import { supabase } from '/shared/supabase.js'
+  import { initErrorHandler } from '/shared/error-handler.js'
+
+  initErrorHandler()
+  const el = id => document.getElementById(id)
+  const EQUIPEMENTS = { terrasse: 'Terrasse', spa: 'Jacuzzi ou spa', jardin: 'Jardin', piscine: 'Piscine', parking: 'Parking', vue: 'Vue exceptionnelle', climatisation: 'Climatisation' }
+  const MIN = 3
+
+  let session = null
+  let jeton = 0
+  const choisis = new Set()
+
+  // Un message sur une zone : texte seul.
+  function dire (id, texte, classe) {
+    const z = el(id)
+    z.textContent = texte || ''
+    z.className = classe || ''
+  }
+
+  async function appeler (methode, corps) {
+    const r = await fetch(`/api/marche-comparables?property_id=${encodeURIComponent(el('cp-bien').value)}`, {
+      method: methode,
+      headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte(), ...(corps ? { 'Content-Type': 'application/json' } : {}) },
+      ...(corps ? { body: JSON.stringify(corps) } : {}),
+    })
+    let d = null
+    try { d = await r.json() } catch (e) { d = null }
+    return { ok: r.ok, status: r.status, d }
+  }
+
+  async function init () {
+    session = await requireAuth()
+    if (!session) return
+    renderSidebar('yield-comparables').catch(e => console.error('[comparables] sidebar', e))
+    // Les cases des equipements.
+    for (const [cle, nom] of Object.entries(EQUIPEMENTS)) {
+      const l = document.createElement('label')
+      const c = document.createElement('input')
+      c.type = 'checkbox'; c.value = cle; c.name = 'equipements'
+      l.append(c, document.createTextNode(nom))
+      el('cp-eq').append(l)
+    }
+    const compte = compteCourant()
+    let q = supabase.from('properties').select('id, name').order('name')
+    if (compte) q = q.eq('user_id', compte)
+    const { data, error } = await q
+    if (error || !data || !data.length) { dire('cp-message-a', error ? 'Impossible de lire la liste des logements.' : 'Aucun logement accessible sur ce compte.', 'cp-erreur'); return }
+    for (const b of data) { const o = document.createElement('option'); o.value = b.id; o.textContent = b.name; el('cp-bien').append(o) }
+    el('cp-bien').addEventListener('change', charger)
+    el('cp-valider-a').addEventListener('click', validerProfil)
+    el('cp-valider-b').addEventListener('click', retenir)
+    charger()
+  }
+
+  function remplirFormulaire (p) {
+    el('cp-adresse').value = p ? p.adresse : ''
+    el('cp-voyageurs').value = p ? p.voyageurs : ''
+    el('cp-chambres').value = p ? p.chambres : ''
+    el('cp-pieces').value = p ? p.pieces : ''
+    el('cp-sdb').value = p ? p.salles_de_bain : ''
+    const eq = new Set(p && Array.isArray(p.equipements) ? p.equipements : [])
+    for (const c of el('cp-eq').querySelectorAll('input')) c.checked = eq.has(c.value)
+  }
+
+  async function charger () {
+    const j = ++jeton
+    choisis.clear()
+    el('cp-etape-b').hidden = true
+    dire('cp-message-a', ''); dire('cp-message-b', '')
+    remplirFormulaire(null)
+    let r
+    try { r = await appeler('GET') } catch (e) { if (j === jeton) dire('cp-message-a', 'Le serveur ne répond pas.', 'cp-erreur'); return }
+    if (j !== jeton) return
+    if (!r.ok || !r.d) return dire('cp-message-a', `Lecture impossible (${r.status}).`, 'cp-erreur')
+    if (r.d.etat === 'indisponible') { el('cp-valider-a').disabled = true; return dire('cp-message-a', r.d.message || 'Page indisponible.', 'cp-erreur') }
+    el('cp-valider-a').disabled = false
+    remplirFormulaire(r.d.profil)
+    for (const id of r.d.retenus || []) choisis.add(String(id))
+    if (!r.d.profil) return
+    dire('cp-message-a', `Adresse retenue : ${r.d.profil.adresse_trouvee}`, 'cp-ok')
+    el('cp-etape-b').hidden = false
+    // La liste en cache s'affiche ; sinon on la cherche (une fois par profil).
+    if (Array.isArray(r.d.comparables)) afficher(r.d.comparables)
+    else chercher(j)
+  }
+
+  async function validerProfil () {
+    const j = jeton
+    const n = id => el(id).value.trim()
+    const corps = {
+      action: 'profil', adresse: n('cp-adresse'), voyageurs: n('cp-voyageurs'), chambres: n('cp-chambres'),
+      pieces: n('cp-pieces'), salles_de_bain: n('cp-sdb'),
+      equipements: [...el('cp-eq').querySelectorAll('input:checked')].map(c => c.value),
+    }
+    el('cp-valider-a').disabled = true
+    dire('cp-message-a', 'Enregistrement…')
+    let r
+    try { r = await appeler('POST', corps) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
+    el('cp-valider-a').disabled = false
+    if (j !== jeton) return
+    if (!r.ok || !r.d || !r.d.profil) return dire('cp-message-a', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')
+    dire('cp-message-a', `Adresse retenue : ${r.d.profil.adresse_trouvee}`, 'cp-ok')
+    el('cp-etape-b').hidden = false
+    chercher(j)
+  }
+
+  async function chercher (j) {
+    el('cp-liste-zone').replaceChildren(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: 'Recherche des biens du marché…' }))
+    let r
+    try { r = await appeler('POST', { action: 'chercher' }) } catch (e) { r = { ok: false, d: null } }
+    if (j !== jeton) return
+    if (!r.ok || !r.d || r.d.etat !== 'calcule') {
+      const p = document.createElement('p'); p.className = 'non-calc'
+      p.textContent = (r.d && r.d.message) || 'La liste des biens du marché n’est pas disponible pour le moment.'
+      el('cp-liste-zone').replaceChildren(p)
+      return
+    }
+    for (const id of r.d.retenus || []) choisis.add(String(id))
+    afficher(r.d.comparables)
+  }
+
+  // ─── Les cartes : DOM seulement, une donnee AirROI n est jamais du HTML ────
+  function afficher (cartes) {
+    // Un retenu qui n'est plus dans la liste n'est pas compte.
+    const ids = new Set(cartes.map(c => String(c.listing_id)))
+    for (const id of [...choisis]) if (!ids.has(id)) choisis.delete(id)
+    if (!cartes.length) {
+      const p = document.createElement('p'); p.className = 'non-calc'; p.textContent = 'Aucun bien du marché trouvé près de votre logement.'
+      el('cp-liste-zone').replaceChildren(p); majCompte(); return
+    }
+    const liste = document.createElement('div'); liste.className = 'cp-liste'
+    for (const c of cartes) liste.append(carte(c))
+    el('cp-liste-zone').replaceChildren(liste)
+    majCompte()
+  }
+
+  function carte (c) {
+    const id = String(c.listing_id)
+    const a = document.createElement('article'); a.className = 'cp-bien'; a.dataset.id = id
+    if (c.photo) {
+      const img = document.createElement('img')
+      img.className = 'cp-photo'; img.loading = 'lazy'; img.alt = ''
+      img.setAttribute('referrerpolicy', 'no-referrer')
+      img.setAttribute('src', c.photo)
+      a.append(img)
+    } else {
+      const v = document.createElement('div'); v.className = 'cp-sans-photo'; v.textContent = 'Pas de photo'; a.append(v)
+    }
+    const corps = document.createElement('div'); corps.className = 'cp-corps'
+    const nom = document.createElement('h3'); nom.className = 'cp-nom'; nom.textContent = c.nom || 'Annonce sans titre'
+    const taille = document.createElement('div'); taille.className = 'cp-ligne'
+    const morceaux = []
+    if (Number.isFinite(c.voyageurs)) morceaux.push(`${c.voyageurs} voyageur${c.voyageurs > 1 ? 's' : ''}`)
+    if (Number.isFinite(c.chambres)) morceaux.push(c.chambres === 0 ? 'studio' : `${c.chambres} chambre${c.chambres > 1 ? 's' : ''}`)
+    if (Number.isFinite(c.distance_km)) morceaux.push(`à ${String(c.distance_km).replace('.', ',')} km${c.position_approchee ? ' environ' : ''}`)
+    taille.textContent = morceaux.join(' · ')
+    const badges = document.createElement('div'); badges.className = 'cp-badges'
+    for (const e of Array.isArray(c.equipements) ? c.equipements : []) {
+      if (!Object.prototype.hasOwnProperty.call(EQUIPEMENTS, e)) continue
+      const b = document.createElement('span'); b.className = 'cp-badge'; b.textContent = EQUIPEMENTS[e]; badges.append(b)
+    }
+    const activite = document.createElement('div'); activite.className = 'cp-activite'
+    activite.textContent = c.ouvert_toute_annee === true ? 'Ouvert toute l’année' : c.ouvert_toute_annee === false ? 'Saisonnier' : ''
+    const ress = document.createElement('div'); ress.className = 'cp-ressemblance'
+    ress.textContent = Number.isFinite(c.ressemblance) ? `${c.ressemblance} % de ressemblance` : ''
+    const choix = document.createElement('label'); choix.className = 'cp-choix'
+    const caseC = document.createElement('input'); caseC.type = 'checkbox'; caseC.checked = choisis.has(id)
+    caseC.addEventListener('change', () => { if (caseC.checked) choisis.add(id); else choisis.delete(id); a.classList.toggle('choisi', caseC.checked); majCompte() })
+    a.classList.toggle('choisi', caseC.checked)
+    choix.append(caseC, document.createTextNode('Comparable au mien'))
+    corps.append(nom, taille, badges, activite, ress, choix)
+    a.append(corps)
+    return a
+  }
+
+  function majCompte () {
+    const n = choisis.size
+    el('cp-valider-b').disabled = n < MIN
+    el('cp-compte').textContent = n < MIN ? `${n} sélectionné${n > 1 ? 's' : ''} — encore ${MIN - n} au moins` : `${n} sélectionnés`
+  }
+
+  async function retenir () {
+    const j = jeton
+    if (choisis.size < MIN) return
+    el('cp-valider-b').disabled = true
+    dire('cp-message-b', 'Enregistrement…')
+    let r
+    try { r = await appeler('POST', { action: 'retenir', listing_ids: [...choisis] }) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
+    if (j !== jeton) return
+    majCompte()
+    if (!r.ok || !r.d || !Array.isArray(r.d.retenus)) return dire('cp-message-b', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')
+    dire('cp-message-b', `Vos ${r.d.retenus.length} comparables sont enregistrés.`, 'cp-ok')
+  }
+
+  init()
+</script>
+</body>
+</html>

@@ -99,6 +99,10 @@ const DELEGABLES = [
   // ⚠ DELEGABLE (spec §15, 4 octobre 2026), comme marche-global.html : la
   // garde du logement designe le compte (`/api/marche-temperature?property_id=`).
   'apps/yield/marche-temperature.html',
+  // ⚠ DELEGABLE (spec §20, 5 octobre 2026) : « Choisir vos comparables ». La
+  // garde porte sur le LOGEMENT choisi (`/api/marche-comparables?property_id=`) :
+  // `reservations` en lecture, `reglages` en ecriture (et pour le paiement).
+  'apps/yield/comparables.html',
 ]
 
 // ─── Un test par page non délégable ─────────────────────────────────────────
