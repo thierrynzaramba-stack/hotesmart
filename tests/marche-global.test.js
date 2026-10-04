@@ -153,9 +153,9 @@ test('LE TEST QUI COMPTE : la page est en lecture seule, dit en tete ce qu elle 
   assert.match(PAGE, /Une estimation du marché, pas un prix/)
   assert.match(PAGE, /ne pilote rien/)
   assert.match(PAGE, /pas un prix pour votre logement/)
-  // 29 septembre 2026 : le RevPAR montre 36 mois, la mention 2021-2022 est retiree.
-  assert.ok(!/2021-2022 : couverture AirROI en cours de mise en place/.test(PAGE))
-  assert.match(PAGE, /Couverture réelle, mois par mois/)
+  // §17 : la page est refondue en quatre sections ; le detail se prouve dans un
+  // vrai DOM (tests/marche-global-page-dom.test.js).
+  assert.match(PAGE, /Le nombre de biens sur le marché/)
 })
 
 test('un mois ABSENT de la reponse coupe la serie (ligne nulle inseree) ; une valeur de forme inattendue n est pas une mesure', () => {
@@ -253,15 +253,11 @@ test('bloc 3 : aucune horloge dans le calcul — un premier mois illisible est r
   assert.throws(() => calendrierAttendu(MARCHE60, [], [], undefined), /premierMois illisible/)
 })
 
-test('LE TEST QUI COMPTE (page) : ADR brut et Airbnb seulement, occupation du marche jamais mise en regard, calendrier dit « pas une mesure », ordre des blocs', () => {
-  assert.match(PAGE, /ADR <b>brut, avant la commission Airbnb<\/b> \(18,4 % du brut/)
-  assert.match(PAGE, /<b>Airbnb seulement<\/b> : ne le comparez pas à ce que vous touchez net/)
+test('LE TEST QUI COMPTE (page, §17) : occupation du marche jamais mise en regard, le logement lu par son nom seul, ordre des sections', () => {
   assert.match(PAGE, /elle ne se compare pas à l’occupation d’un logement/)
-  assert.match(PAGE, /<b>Lecture\.<\/b> Un mois fort par le prix/)
-  assert.match(PAGE, /Un niveau attendu, bâti sur l’historique et le calendrier — pas une mesure/)
   // Regle 13 : la page ne lit du logement que son nom.
   assert.deepEqual([...PAGE.matchAll(/supabase\.from\('properties'\)\.select\('([^']*)'\)/g)].map(m => m[1]), ['id, name'])
-  assert.match(PAGE, /corps\(bloc1\(d\.adr_occupation\) \+ indicateur1\(d\.revpar\) \+ blocAnnees\(d\.progression, d\.recupere_le\) \+ blocProgression\(d\.progression\) \+ bloc3\(d\.calendrier\)\)/)
+  assert.match(PAGE, /corps\(sectionRevpar\(d\.progression, d\.recupere_le\) \+ sectionRemplissage\(d\.progression, d\.recupere_le\) \+ sectionBiens\(d\.revpar\)\)/)
 })
 
 test('la vue rend les trois blocs ; des vacances illisibles laissent les blocs 1 et 2 et disent le calendrier non calculable', async () => {
@@ -312,55 +308,10 @@ test('la vue classe des jours quand la base porte les vacances (review : la vue 
   assert.ok(r.corps.calendrier.mois.every(m => m.jours.every(j => j.raisons.includes('vacances_3_zones'))))
 })
 
-test('LE TEST QUI COMPTE (29 septembre 2026) : le RevPAR montre les 36 derniers mois, le dit, et porte un repere par mois et par annee ; la donnee garde 60 mois', () => {
+test('LE TEST QUI COMPTE (§17, section 3) : les biens montrent les 36 derniers mois ; la donnee garde 60 mois', () => {
   assert.match(PAGE, /const MOIS_AFFICHES = 36\n/)
-  const corpsInd = PAGE.slice(PAGE.indexOf('function indicateur1'), PAGE.indexOf('function bloc3'))
-  assert.match(corpsInd, /const mois = ind\.mois\.slice\(-MOIS_AFFICHES\)/)
-  assert.match(corpsInd, /<b>Le graphique montre les 3 dernières années \(36 mois\)\.<\/b>/)
-  assert.match(corpsInd, /class="\$\{janvier \? 'repere-annee' : 'repere-mois'\}"/)
-  assert.ok(!/class="partiel"|>couverture partielle</.test(corpsInd), 'plus de fond gris ni de legende « couverture partielle » sur le RevPAR')
+  const corpsBiens = PAGE.slice(PAGE.indexOf('function sectionBiens'), PAGE.indexOf('// ─── Section 4'))
+  assert.match(corpsBiens, /const mois = ind\.mois\.slice\(-MOIS_AFFICHES\)/)
+  assert.match(corpsBiens, /aucune annonce mesurée sur les 3 dernières années/, 'jamais un graphique vide')
   assert.equal(revparMensuel(MARCHE60).mois.length, 60)
-})
-
-// Rend REELLEMENT `indicateur1` de la page (review de ce55488 : un test qui
-// cherche du texte dans le source passerait sur des initiales dans le
-// desordre ou des barres calculees sur 60 mois).
-function rendreIndicateur1 (ind) {
-  const debut = PAGE.indexOf('  function indicateur1 (ind) {')
-  const fin = PAGE.indexOf('  // ─── BLOC 3')
-  assert.ok(debut > 0 && fin > debut)
-  const cst = n => { const m = new RegExp(`const ${n} = ([^\\n]+)\\n`).exec(PAGE); assert.ok(m, n); return m[1] }
-  // eslint-disable-next-line no-new-func
-  return new Function('ind', `
-    const ech = s => String(s ?? '').replace(/[&<>"']/g, c => '&#' + c.charCodeAt(0) + ';')
-    const MOIS = ${cst('MOIS')}
-    const moisFr = ${cst('moisFr')}
-    const euros = v => String(v)
-    const COULEURS = ${cst('COULEURS')}
-    const MOIS_AFFICHES = ${cst('MOIS_AFFICHES')}
-    const INITIALES = ${cst('INITIALES')}
-    ${PAGE.slice(debut, fin)}
-    return indicateur1(ind)`)(ind)
-}
-
-test('LE TEST QUI COMPTE (rendu) : 36 mois dans l ordre, une initiale et une barre par mois, alignees ; l annee au premier mois et a chaque janvier', () => {
-  const html = rendreIndicateur1(revparMensuel(MARCHE60))
-  const initiales = [...html.matchAll(/<text class="initiale" x="([\d.]+)"[^>]*>(\w)<\/text>/g)]
-  assert.equal(initiales.map(m => m[2]).join(''), 'SONDJFMAMJJASONDJFMAMJJASONDJFMAMJJA')
-  assert.deepEqual([...html.matchAll(/<text class="annee"[^>]*>(\d{4})<\/text>/g)].map(m => m[1]), ['2023', '2024', '2025', '2026'])
-  assert.equal([...html.matchAll(/class="repere-annee"/g)].length, 3)
-  assert.equal([...html.matchAll(/class="repere-mois"/g)].length, 33)
-  const barres = [...html.matchAll(/<rect x="([\d.]+)" y="[\d.]+" width="10"[^>]*><title>([^<]+)<\/title>/g)]
-  assert.equal(barres.length, 36)
-  barres.forEach((b, i) => assert.ok(Math.abs(Number(b[1]) + 5 - Number(initiales[i][1])) < 0.1, `barre ${i} decalee`))
-  assert.match(barres[0][2], /^sept\. 2023 : 737 annonces actives$/)
-  assert.ok(!/class="partiel"/.test(html))
-})
-
-test('rendu : rien de mesure sur les 36 derniers mois — un message, jamais un graphique vide ; le bloc prix et remplissage garde ses 60 mois', () => {
-  const ind = revparMensuel(MARCHE60)
-  const vide = { ...ind, mois: ind.mois.map((m, i) => (i < 24 ? m : { ...m, p25: null, p50: null, p75: null, p90: null })) }
-  assert.match(rendreIndicateur1(vide), /Non calculable : aucun RevPAR mesuré sur les 3 dernières années\./)
-  const bloc1 = PAGE.slice(PAGE.indexOf('  function bloc1 (ind) {'), PAGE.indexOf('  function indicateur1 (ind) {'))
-  assert.match(bloc1, /const mois = ind\.mois\n/)
 })
