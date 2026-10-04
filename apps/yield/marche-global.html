@@ -44,12 +44,12 @@
     svg.mg .repere-mois { stroke: var(--border); stroke-width: 0.6; }
     svg.mg text.initiale { font-size: 10px; }
     svg.mg text.annee { font-weight: 600; fill: var(--text); }
-    /* Telephone : un graphique garde une largeur lisible et DEFILE dans sa
-       carte ; la page, elle, ne deborde jamais. */
+    /* Telephone : chaque graphique est DESSINE a la largeur de sa carte (voir
+       largeurGraphe) et tient entier, sans defilement (demande de Thierry,
+       4 octobre 2026) ; la page, elle, ne deborde jamais. */
     .mg-defile { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     @media (max-width: 640px) {
       .content { padding-left: 12px; padding-right: 12px; } .mg-carte { padding: 12px; }
-      .mg-defile svg.mg { min-width: 600px; }
     }
   </style>
 </head>
@@ -104,6 +104,27 @@
 
   let session = null
   let jeton = 0
+  // La derniere reponse de l'historique : redessinee si la largeur change.
+  let dernier = null
+  let largeurDessinee = 0
+
+  // La largeur du dessin suit celle de la carte : sur telephone, une courbe de
+  // douze mois tient entiere, texte a sa taille normale, sans defilement. Sans
+  // mesure possible (page cachee), la largeur de bureau.
+  function largeurGraphe () {
+    const w = el('mg-corps').clientWidth
+    return w > 0 ? Math.max(280, Math.min(900, Math.round(w - 34))) : 900
+  }
+  function dessinerHistorique () {
+    if (!dernier) return
+    largeurDessinee = largeurGraphe()
+    corps(sectionRevpar(dernier.progression, dernier.recupere_le) + sectionRemplissage(dernier.progression, dernier.recupere_le) + sectionBiens(dernier.revpar))
+  }
+  let attente = null
+  window.addEventListener('resize', () => {
+    clearTimeout(attente)
+    attente = setTimeout(() => { if (dernier && largeurGraphe() !== largeurDessinee) dessinerHistorique() }, 200)
+  })
 
   async function init () {
     session = await requireAuth()
@@ -132,6 +153,7 @@
 
   // ─── L'HISTORIQUE (sections 1 a 3) ──────────────────────────────────────
   async function chargerHistorique (j) {
+    dernier = null
     corps('<p class="mg-meta">Lecture du marché…</p>'); el('mg-meta').innerHTML = ''
     let r
     try {
@@ -146,7 +168,8 @@
     if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
     if (d.etat === 'historique_absent') return corps(`<p class="non-calc">Marché ${ech(d.marche && d.marche.localite)} : ${ech(d.motif)}.</p>`)
     el('mg-meta').innerHTML = `Marché : <b>${ech(d.marche.localite)}</b> (${ech(d.marche.region)}, ${ech(d.marche.pays)}) · historique AirROI lu le ${jourFr(d.recupere_le)}`
-    corps(sectionRevpar(d.progression, d.recupere_le) + sectionRemplissage(d.progression, d.recupere_le) + sectionBiens(d.revpar))
+    dernier = d
+    dessinerHistorique()
   }
 
   // ─── Sections 1 et 2 : N, N-1, N-2 superposees ──────────────────────────
@@ -174,7 +197,7 @@
       const motif = prog && prog.statut === 'calcule' && !series.length ? 'la date de lecture de l’historique est illisible' : (prog && prog.motif) || 'historique absent'
       return `<div class="mg-carte">${entete}<p class="non-calc">Non calculable : ${ech(motif)}.</p></div>`
     }
-    const L = 900, H = 260, G = 50, D = 12, HAUT = 12, BAS = 26
+    const L = largeurGraphe(), H = L < 600 ? 220 : 260, G = 50, D = 12, HAUT = 12, BAS = 26
     const max = Math.max(...vals) * 1.08
     const x = k => G + (L - G - D) * k / 11
     const y = v => HAUT + (H - HAUT - BAS) * (1 - v / max)
@@ -238,18 +261,24 @@
     }
     const mois = ind.mois.slice(-MOIS_AFFICHES)
     if (!mois.some(m => m.annonces)) return `<div class="mg-carte">${entete}<p class="non-calc">Non calculable : aucune annonce mesurée sur les 3 dernières années.</p></div>`
-    const L = 900, G = 44, D = 12, HC = 130, BAS = 34
+    const L = largeurGraphe(), G = 44, D = 12, HC = 130, BAS = 34
     const x = i => G + (L - G - D) * (mois.length === 1 ? 0.5 : i / (mois.length - 1))
+    // Etroit (telephone) : barres affinees, et une initiale par trimestre
+    // seulement — 36 initiales ne tiennent pas dans 300 px.
+    const pas = (L - G - D) / Math.max(1, mois.length - 1)
+    const lb = Math.max(3, Math.min(10, pas * 0.6))
+    const etroit = pas < 14
     const maxA = Math.max(...mois.map(m => m.annonces || 0)) || 1
     const barres = mois.map((m, i) => {
       const h = m.annonces ? (HC - BAS - 10) * m.annonces / maxA : 0
       return m.annonces
-        ? `<rect x="${(x(i) - 5).toFixed(1)}" y="${(HC - BAS - h).toFixed(1)}" width="10" height="${h.toFixed(1)}" fill="var(${m.couverture_partielle ? '--mg-barre-partielle' : '--mg-barre'})"><title>${ech(moisFr(m.mois))} : ${ech(m.annonces)} annonces actives${m.couverture_partielle ? ' (couverture AirROI partielle)' : ''}</title></rect>`
+        ? `<rect x="${(x(i) - lb / 2).toFixed(1)}" y="${(HC - BAS - h).toFixed(1)}" width="${lb.toFixed(1)}" height="${h.toFixed(1)}" fill="var(${m.couverture_partielle ? '--mg-barre-partielle' : '--mg-barre'})"><title>${ech(moisFr(m.mois))} : ${ech(m.annonces)} annonces actives${m.couverture_partielle ? ' (couverture AirROI partielle)' : ''}</title></rect>`
         : `<text x="${x(i)}" y="${HC - BAS - 4}" text-anchor="middle">·</text>`
     }).join('')
     const abscisse = mois.map((m, i) => {
       const janvier = m.mois.slice(5) === '01'
-      return `<text class="initiale" x="${x(i)}" y="${HC - BAS + 12}" text-anchor="middle">${INITIALES[Number(m.mois.slice(5, 7)) - 1]}</text>`
+      const trimestre = ['01', '04', '07', '10'].includes(m.mois.slice(5))
+      return (!etroit || trimestre ? `<text class="initiale" x="${x(i)}" y="${HC - BAS + 12}" text-anchor="middle">${INITIALES[Number(m.mois.slice(5, 7)) - 1]}</text>` : '')
         + (janvier || i === 0 ? `<text class="annee" x="${x(i)}" y="${HC - BAS + 27}" text-anchor="middle">${ech(m.mois.slice(0, 4))}</text>` : '')
     }).join('')
     const bornes = mois.filter(m => m.annonces)
