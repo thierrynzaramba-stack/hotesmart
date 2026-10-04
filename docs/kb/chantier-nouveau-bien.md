@@ -2341,8 +2341,8 @@ source**, et les deux pipelines ne se croisent dans aucun calcul.
 - **Le verdict suit le RevPAR**, qui réunit le prix et le remplissage : « Le
   marché est en hausse / stable / en baisse par rapport à l'année dernière ».
   Sans RevPAR calculable, il n'y a pas de verdict, et c'est dit.
-- *Choix de développement, à confirmer par Thierry : la bande de ±3 % et le
-  RevPAR comme indicateur du verdict.*
+- **Validé par Thierry le 5 octobre 2026** : la bande de ±3 % et le RevPAR
+  comme indicateur du verdict.
 
 ### 18.2 5b — Week-end ou semaine (pipeline AirROI)
 
@@ -2368,8 +2368,8 @@ source**, et les deux pipelines ne se croisent dans aucun calcul.
   YieldFlow n'est lu.
 - **Pic correspond à deux niveaux** : il est montré sur une seule ligne,
   « Très haut ou Exceptionnel ». Les séparer demanderait une règle nouvelle
-  (un seuil au-delà de +7, par exemple), que seul Thierry peut fixer. *Choix
-  de développement, à confirmer.*
+  (un seuil au-delà de +7, par exemple), que seul Thierry peut fixer.
+  **Validé par Thierry le 5 octobre 2026.**
 - Les couleurs viennent des cinq teintes de `apps/yield/prix.html`, avec une
   version sombre.
 
@@ -2395,6 +2395,8 @@ source**, et les deux pipelines ne se croisent dans aucun calcul.
   à Paris lu par l'API.
 - Le bloc 5a est calculé par la page à partir de `progression`, déjà renvoyée
   par `/api/marche-global`.
+- Les 12 mois partent du mois en cours, comme le calendrier : **validé par
+  Thierry le 5 octobre 2026**.
 - Aucun prix, des textes en français, un mode sombre.
 - Tests unitaires du verdict week-end ou semaine (bornes, dimanche exclu), du
   regroupement et de la récurrence des événements, et des comptes 5c. La page
