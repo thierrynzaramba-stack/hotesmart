@@ -142,9 +142,11 @@ test('SECURITE : un guillemet dans un evenement ne sort pas des attributs title 
   assert.match(c.getAttribute('aria-label'), /Fête" onmouseover/)
 })
 
-test('telephone : les cases du calendrier 12 mois font au moins 44 px de haut, un mois par ligne', () => {
+test('telephone : deux mois par ligne, des cases de 32 px de haut', () => {
   const media = /@media \(max-width: 640px\) \{([\s\S]*?)\n  \}/.exec(SOURCE)
   assert.ok(media, 'une regle telephone existe')
-  assert.match(media[1], /\.tc-case, \.tc-vide \{[^}]*min-height: 44px/)
-  assert.match(media[1], /\.tc-annee \{ grid-template-columns: minmax\(0, 1fr\)/)
+  assert.match(media[1], /\.tc-annee \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/, 'deux colonnes qui peuvent retrecir')
+  assert.match(media[1], /\.tc-case, \.tc-vide \{[^}]*min-height: 32px/)
+  // 12 px : la taille qui laisse tenir « 28 » dans une case de ~17 px a 320 px.
+  assert.match(media[1], /\.tc-case, \.tc-vide \{[^}]*font-size: 12px/)
 })
