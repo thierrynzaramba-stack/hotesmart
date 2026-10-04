@@ -41,9 +41,24 @@
     .mg-jour { font-size: 11px; text-align: center; padding: 4px 0; border-radius: 3px; color: #1c2b44; cursor: default; }
     .mg-jour.fonce { color: #fff; }
     .mg-defile { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* §16.2 : les annees superposees, quatre petits graphiques. */
+    .mg-quatre { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px 18px; margin-top: 8px; }
+    .mg-quatre h3 { font-size: 13px; font-weight: 600; margin: 0 0 4px; }
+    .mg-tuiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
+    .mg-tuile { border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 12px; }
+    .mg-tuile .lib { font-size: 12px; color: var(--text2); }
+    .mg-tuile .val { font-size: 20px; font-weight: 600; margin: 2px 0; }
+    .mg-tuile .pied { font-size: 11.5px; color: var(--text2); line-height: 1.4; }
+    .mg-detail summary { cursor: pointer; font-size: 13px; font-weight: 600; padding: 6px 0; min-height: 32px; }
+    .mg-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .mg-table th { text-align: left; font-weight: 600; color: var(--text2); font-size: 12px; padding: 6px 8px; border-bottom: 0.5px solid var(--border2); }
+    .mg-table td { padding: 6px 8px; border-bottom: 0.5px solid var(--border); vertical-align: top; }
     @media (max-width: 640px) {
       .content { padding-left: 12px; padding-right: 12px; } .mg-carte { padding: 12px; }
       .mg-defile svg.mg { min-width: 680px; }
+      .mg-quatre { grid-template-columns: 1fr; }
+      .mg-quatre .mg-defile svg.mg { min-width: 440px; }
+      .mg-defile .mg-table { min-width: 560px; }
     }
   </style>
 </head>
@@ -64,6 +79,9 @@
   <div><label class="mg-meta">Logement <select id="mg-bien"></select></label></div>
   <div class="mg-meta" id="mg-meta"></div>
   <div id="mg-corps"><p class="mg-meta">Lecture du marché…</p></div>
+  <!-- §16.1 : le calendrier AirROI, dans SON bloc, lu par SA route. Aucun
+       melange avec l'historique ci-dessus. -->
+  <div id="mg-airroi-zone"></div>
 </div>
 </div>
 </div>
@@ -76,6 +94,7 @@
   import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
+  import { monterCalendrierTemperature } from '/shared/temperature-calendrier.js'
 
   initErrorHandler()
   const el = id => document.getElementById(id)
@@ -117,8 +136,13 @@
 
   function corps (html) { el('mg-corps').innerHTML = html }
 
-  async function charger () {
+  function charger () {
     const j = ++jeton
+    chargerHistorique(j)
+    chargerAirroi(j)
+  }
+
+  async function chargerHistorique (j) {
     corps('<p class="mg-meta">Lecture du marché…</p>'); el('mg-meta').innerHTML = ''
     let r
     try {
@@ -132,7 +156,34 @@
     if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
     if (d.etat === 'historique_absent') return corps(`<p class="non-calc">Marché ${ech(d.marche && d.marche.localite)} : ${ech(d.motif)}.</p>`)
     el('mg-meta').innerHTML = `Marché : <b>${ech(d.marche.localite)}</b> (${ech(d.marche.region)}, ${ech(d.marche.pays)}) · historique AirROI lu le ${jourFr(d.recupere_le)}`
-    corps(bloc1(d.adr_occupation) + indicateur1(d.revpar) + bloc3(d.calendrier))
+    corps(bloc1(d.adr_occupation) + indicateur1(d.revpar) + blocAnnees(d.progression) + blocProgression(d.progression) + bloc3(d.calendrier))
+  }
+
+  // ─── LE CALENDRIER AirROI (§16.1) : sa route, son bloc, sa source ───────
+  // ⚠ PIPELINE ETANCHE : rien de l'historique n'entre ici, rien d'ici n'entre
+  // dans l'historique. Le rendu est le module commun avec la page « La
+  // temperature du marche ».
+  async function chargerAirroi (j) {
+    const zone = el('mg-airroi-zone')
+    zone.innerHTML = `<div class="mg-carte"><h2>Le calendrier du marché selon AirROI, jour par jour</h2>`
+      + `<p class="sous"><b>Estimation AirROI, pas un prix.</b> Le modèle de prix d’AirROI pour cette commune, ramené à quatre niveaux. Il ne tient pas compte de l’historique des ventes ci-dessus et ne se compare pas au calendrier de l’historique : deux sources, deux calendriers.</p>`
+      + `<p class="mg-mention" id="mg-airroi-meta"></p><div id="mg-airroi"><p class="mg-meta">Lecture du modèle AirROI…</p></div></div>`
+    const ici = html => { if (j === jeton) el('mg-airroi').innerHTML = html }
+    let r
+    try {
+      r = await fetch(`/api/marche-temperature?property_id=${encodeURIComponent(el('mg-bien').value)}`, {
+        headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } })
+    } catch (e) { return ici('<p class="non-calc">Lecture impossible : le serveur ne répond pas.</p>') }
+    if (j !== jeton) return
+    if (!r.ok) return ici(`<p class="non-calc">Lecture impossible (${r.status}).</p>`)
+    let d
+    try { d = await r.json() } catch (e) { return ici('<p class="non-calc">Réponse illisible.</p>') }
+    if (j !== jeton) return
+    if (d.etat === 'marche_inconnu') return ici(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
+    if (d.etat === 'capture_absente') return ici(`<p class="non-calc">${ech(d.motif)}.</p>`)
+    if (d.etat !== 'calcule' || !Array.isArray(d.jours) || !d.jours.length) return ici('<p class="non-calc">Aucun jour à afficher pour ce marché.</p>')
+    el('mg-airroi-meta').innerHTML = `Modèle AirROI calculé le ${jourFr(d.capture_le)} · ${d.jours.length} jours`
+    monterCalendrierTemperature(el('mg-airroi'), d.jours)
   }
 
   const pourcent = v => (typeof v === 'number' && Number.isFinite(v) ? `${Math.round(v * 100)} %` : 'non mesuré')
@@ -265,6 +316,104 @@
       <h2 style="margin-top:16px">Couverture réelle, mois par mois</h2>
       <p class="sous">Nombre d’annonces actives mesurées par AirROI : là où la barre est basse, l’historique est mince.</p>
       <div class="mg-defile">${couverture}</div></div>`
+  }
+
+  // ─── LES ANNEES SUPERPOSEES (§16.2) ─────────────────────────────────────
+  // ⚠ Une annee de moins de 12 mois mesures est PARTIELLE : en pointilles,
+  // marquee, et aucun total ni moyenne d'annee n'est calcule. L'annee en cours
+  // est tracee a part (couleur et epaisseur), la plus ancienne en pale.
+  const BLEUS_ANNEES = ['#C9D7EE', '#9DB9E3', '#6F97D3', '#3A68AE', '#1E3F73']
+  const COULEUR_EN_COURS = '#C07A2C'
+  const INDICATEURS_ANNEES = [
+    ['adr', 'Prix moyen par nuit vendue (ADR médian)', v => euros(v), v => `${Math.round(v)} €`],
+    ['occupation', 'Occupation médiane', v => pourcent(v), v => `${Math.round(v * 100)} %`],
+    ['revpar', 'RevPAR médian', v => euros(v), v => `${Math.round(v)} €`],
+    ['annonces', 'Annonces actives', v => (typeof v === 'number' ? `${v} annonces` : 'non mesuré'), v => `${Math.round(v)}`]]
+
+  function styleAnnee (a, i, annees) {
+    const enCours = i === annees.length - 1 && a.partielle
+    const completes = annees.filter(x => !x.partielle)
+    const rang = completes.indexOf(a)
+    const couleur = enCours ? COULEUR_EN_COURS : rang >= 0 ? BLEUS_ANNEES[Math.max(0, BLEUS_ANNEES.length - completes.length + rang)] : '#B9C2CF'
+    return { enCours, couleur, epaisseur: enCours ? 3 : 1.8, pointilles: a.partielle }
+  }
+
+  function petitGraphe (annees, cle, titre, bulle, graduation) {
+    const L = 440, H = 200, G = 46, D = 10, HAUT = 10, BAS = 24
+    const vals = annees.flatMap(a => a.mois.map(m => m[cle])).filter(v => typeof v === 'number')
+    if (!vals.length) return `<div><h3>${titre}</h3><p class="non-calc">Non mesuré.</p></div>`
+    const max = Math.max(...vals) * 1.08 || 1
+    const x = i => G + (L - G - D) * i / 11
+    const y = v => HAUT + (H - HAUT - BAS) * (1 - v / max)
+    const grille = [0, 0.5, 1].map(f => `<line class="grille" x1="${G}" x2="${L - D}" y1="${y(max * f)}" y2="${y(max * f)}"/><text x="${G - 6}" y="${y(max * f) + 4}" text-anchor="end">${graduation(max * f)}</text>`).join('')
+    const abscisse = INITIALES.map((n, i) => `<text class="initiale" x="${x(i)}" y="${H - BAS + 14}" text-anchor="middle">${n}</text>`).join('')
+    const courbes = annees.map((a, i) => {
+      const st = styleAnnee(a, i, annees)
+      let dd = ''; let dedans = false
+      a.mois.forEach((m, k) => {
+        if (typeof m[cle] !== 'number') { dedans = false; return }
+        dd += `${dedans ? 'L' : 'M'}${x(k).toFixed(1)},${y(m[cle]).toFixed(1)} `; dedans = true
+      })
+      const points = a.mois.map((m, k) => (typeof m[cle] !== 'number' ? '' : `<circle cx="${x(k).toFixed(1)}" cy="${y(m[cle]).toFixed(1)}" r="${m.peu_annonces ? 3 : 5}" fill="${m.peu_annonces ? 'var(--bg)' : 'transparent'}" stroke="${m.peu_annonces ? st.couleur : 'none'}"><title>${moisFr(m.mois)} · ${bulle(m[cle])}${m.peu_annonces ? ' · trop peu d’annonces pour en tirer un %' : ''}</title></circle>`)).join('')
+      return `<path d="${dd}" fill="none" stroke="${st.couleur}" stroke-width="${st.epaisseur}"${st.pointilles ? ' stroke-dasharray="5 3"' : ''}/>${points}`
+    }).join('')
+    return `<div><h3>${titre}</h3><div class="mg-defile"><svg class="mg" viewBox="0 0 ${L} ${H}" role="img" aria-label="${titre}, une courbe par année">${grille}<line class="axe" x1="${G}" x2="${L - D}" y1="${H - BAS}" y2="${H - BAS}"/>${abscisse}${courbes}</svg></div></div>`
+  }
+
+  function blocAnnees (prog) {
+    const titre = '<h2>Les années superposées</h2><p class="sous">Une courbe par année, de janvier à décembre, pour voir si le marché d’une année ressemble à celui des autres. Médianes de l’ensemble des annonces du marché.</p>'
+    if (!prog || prog.statut !== 'calcule' || !prog.annees.length) {
+      return `<div class="mg-carte">${titre}<p class="non-calc">Non calculable : ${ech((prog && prog.motif) || 'historique absent')}.</p></div>`
+    }
+    const annees = prog.annees
+    const legende = `<div class="mg-legende">${annees.map((a, i) => {
+      const st = styleAnnee(a, i, annees)
+      const notes = [st.enCours ? 'en cours' : '', a.partielle ? `partielle : ${a.mois_mesures} mois` : '', a.couverture_partielle ? 'couverture partielle' : ''].filter(Boolean)
+      return `<span><i style="background:${st.couleur};height:${st.enCours ? 4 : 3}px"></i>${ech(a.annee)}${notes.length ? ` (${notes.join(', ')})` : ''}</span>`
+    }).join('')}</div>`
+    const graphes = INDICATEURS_ANNEES.map(([cle, t, bulle, grad]) => petitGraphe(annees, cle, t, bulle, grad)).join('')
+    return `<div class="mg-carte">${titre}${legende}<div class="mg-quatre">${graphes}</div>
+      <p class="mg-mention">Une année <b>partielle</b> (en pointillés) n’a pas ses douze mois : elle se lit mois par mois, jamais comme un total ou une moyenne d’année. Un point creux signale un mois de moins de ${prog.seuil_annonces} annonces actives : affiché, mais trop peu d’annonces pour en tirer un %.</p></div>`
+  }
+
+  // ─── LA PROGRESSION DU MARCHE (§16.2) ───────────────────────────────────
+  // Principale : 12 derniers mois glissants contre les 12 precedents. Le mois
+  // par mois est un DETAIL, replie, signale volatil.
+  const signe = v => (typeof v === 'number' ? `${v > 0 ? '+' : v < 0 ? '−' : ''}${String(Math.abs(v)).replace('.', ',')} %` : null)
+  const NOMS_PROGRESSION = { adr: 'Prix moyen (ADR)', occupation: 'Occupation', revpar: 'RevPAR', annonces: 'Annonces actives' }
+  const PIEDS = { occupation: 'variation relative de l’occupation, pas des points' }
+
+  function blocProgression (prog) {
+    const titre = '<h2>La progression du marché</h2>'
+    const p = prog && prog.progression
+    if (!prog || prog.statut !== 'calcule' || !p || p.statut !== 'calcule') {
+      return `<div class="mg-carte">${titre}<p class="non-calc">Non calculable : ${ech((p && p.motif) || (prog && prog.motif) || 'historique absent')}.</p></div>`
+    }
+    const periode = `${moisFr(p.periode.debut)} → ${moisFr(p.periode.fin)}`
+    const precedente = `${moisFr(p.precedente.debut)} → ${moisFr(p.precedente.fin)}`
+    const tuiles = Object.keys(NOMS_PROGRESSION).map(k => {
+      const ind = p.indicateurs[k] || {}
+      const val = signe(ind.pct)
+      return `<div class="mg-tuile"><div class="lib">${NOMS_PROGRESSION[k]}</div>`
+        + (val ? `<div class="val">${val}</div>` : `<div class="val non-calc" style="font-size:14px">non calculable</div>`)
+        + `<div class="pied">${val ? `sur ${ind.mois_comparables} mois comparables` : ech(ind.motif || '')}${PIEDS[k] && val ? ` · ${PIEDS[k]}` : ''}</div></div>`
+    }).join('')
+    const cellule = (x, format) => {
+      const valeur = typeof x.valeur === 'number' ? format(x.valeur) : 'non mesuré'
+      return `${valeur}${signe(x.pct) ? ` <span class="non-calc">(${signe(x.pct)})</span>` : ''}`
+    }
+    const lignes = (prog.mois_par_mois || []).map(m => {
+      const note = m.precedent_absent ? 'mois de l’an dernier non mesuré' : m.peu_annonces ? 'trop peu d’annonces pour en tirer un %' : ''
+      return `<tr><td>${moisFr(m.mois)}</td><td>${cellule(m.adr, euros)}</td><td>${cellule(m.occupation, pourcent)}</td>`
+        + `<td>${cellule(m.revpar, euros)}</td><td>${cellule(m.annonces, v => String(v))}</td><td>${note ? `<span class="non-calc">${note}</span>` : ''}</td></tr>`
+    }).join('')
+    return `<div class="mg-carte">${titre}
+      <p class="sous">Les <b>12 derniers mois</b> (${periode}) comparés aux <b>12 précédents</b> (${precedente}) : la moyenne des mois, d’une période à l’autre. Seuls comptent les mois mesurés les deux années, avec au moins ${prog.seuil_annonces} annonces actives ; il en faut 9 sur 12.</p>
+      <div class="mg-tuiles">${tuiles}</div>
+      <details class="mg-detail"><summary>Le détail mois par mois (volatil)</summary>
+        <p class="mg-mention">Chaque mois comparé au même mois de l’année précédente. <b>Un mois seul varie beaucoup</b> (météo, dates des vacances, un événement) : n’en tirez pas de conclusion, c’est la progression sur 12 mois qui compte.</p>
+        <div class="mg-defile"><table class="mg-table"><thead><tr><th>Mois</th><th>ADR</th><th>Occupation</th><th>RevPAR</th><th>Annonces</th><th></th></tr></thead><tbody>${lignes}</tbody></table></div>
+      </details></div>`
   }
 
   // ─── BLOC 3 : le calendrier jour par jour, CONSTRUIT ────────────────────
