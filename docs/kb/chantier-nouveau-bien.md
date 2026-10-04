@@ -2627,3 +2627,37 @@ comparables vaut **déclaration du positionnement** : il n'y a pas d'étape
 - **C3** : la page `apps/yield/comparables.html` (deux étapes, cartes en colonne
   sur téléphone, mode sombre), ses tests dans un vrai DOM, puis la recette sur
   staging.
+
+### 20.6 Règles posées par les reviews de C1 et C2 (5 octobre 2026)
+
+- **Quota des recherches nouvelles** (sécurité). Une recherche que le cache ne
+  sert pas coûte 0,10 $. Sans quota, un hôte qui change son profil à chaque
+  recherche pourrait vider le budget AirROI global de 10 $ par mois, et couper
+  AirROI pour tous les comptes. Trois plafonds, lus dans le journal
+  `airroi_appels` :
+  - **3 par bien** sur 24 heures ;
+  - **5 par compte** sur 24 heures ;
+  - **50 pour tous les comptes** sur le mois, soit 5 $ : la moitié du budget,
+    pour que les études du fondateur gardent l'autre.
+
+  Une liste fraîche en cache ne compte pas. Quand le quota est atteint, l'hôte
+  lit « Réessayez demain ».
+- **Les choix du fondateur sont préservés.** Valider :
+  - ajoute les biens nouveaux au nom du propriétaire, sans toucher une ligne
+    existante ;
+  - réactive les biens cochés, sans changer leur provenance ;
+  - **ne désactive que les anciens choix du propriétaire**.
+
+  Une ligne du fondateur absente des 25 proposés reste active. *Décision à
+  confirmer par Thierry.*
+- **Une liste en cache périmée** (plus de 90 jours) n'est plus proposée et ne
+  valide plus un choix.
+- **La photo n'est acceptée qu'en https, sur `muscache.com`** (le domaine des
+  photos Airbnb), et l'URL est re-sérialisée. La page l'affiche par
+  `setAttribute`, avec `referrerpolicy="no-referrer"`. Tout champ venu d'AirROI
+  est du texte (`textContent`).
+- **Dette** : les trois écritures d'une validation (ajout, réactivation,
+  désactivation) ne forment pas une transaction. Deux validations simultanées du
+  même bien, depuis deux onglets ou par le titulaire et un membre, peuvent
+  s'entrelacer. Correctif prévu : une fonction SQL transactionnelle, avec sa
+  migration.

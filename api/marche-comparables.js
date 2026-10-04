@@ -26,7 +26,8 @@ const { depotSupabase } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
 const { validerProfil, geocoder, lireProfil, enregistrerProfil } = require('../lib/marche/profil-bien')
 const { trierComparables } = require('../lib/marche/pertinence')
-const { rechercheDuProfil, validerChoix, enregistrerChoix } = require('../lib/marche/choix-comparables')
+const { rechercheDuProfil, validerChoix, enregistrerChoix, jugerQuota } = require('../lib/marche/choix-comparables')
+const { FRAICHEUR_JOURS } = require('../lib/airroi/cout')
 const { comparablesRetenus } = require('../lib/marche/etude')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -38,16 +39,38 @@ const profilPublic = p => (p ? {
   pieces: p.pieces, salles_de_bain: p.salles_de_bain, equipements: p.equipements, maj_le: p.maj_le,
 } : null)
 
-// La derniere liste AirROI de CE profil, en cache seulement (rien n'est paye).
-async function listeEnCache (profil) {
+// La derniere liste AirROI de CE profil, en cache seulement (rien n'est paye),
+// et FRAICHE : au-dela de sa duree de fraicheur, elle n'est plus proposee.
+async function listeEnCache (profil, maintenant = new Date()) {
   const cle = cleCanonique(ENDPOINT, { ...rechercheDuProfil(profil), currency: 'native' })
   const { data, error } = await supabase.from('airroi_cache').select('reponse, recupere_le').eq('cle', cle).limit(1)
   if (error) throw new Error(`airroi_cache : ${error.message}`)
   const l = (data || [])[0]
   if (!l) return null
+  if ((maintenant - new Date(l.recupere_le)) / 86400000 > FRAICHEUR_JOURS[ENDPOINT]) return null
   let donnees
   try { donnees = lireJson(l.reponse) } catch (e) { return null }
   return { listings: (donnees && Array.isArray(donnees.listings)) ? donnees.listings : [], recupere_le: l.recupere_le }
+}
+
+// Une table V2 pas encore installee (migration non appliquee) : la page le dit,
+// sans erreur brute (review de 4f19d8b, C3).
+const tableAbsente = e => /(bien_profil|comparables_retenus|airroi_cache|airroi_appels)/.test(String(e && e.message)) && /(does not exist|schema cache)/i.test(String(e && e.message))
+const INDISPONIBLE = 'Cette page n’est pas encore disponible pour ce logement.'
+
+// Le quota des recherches nouvelles (S1) : lu dans le journal des appels.
+async function quotaAtteint (depot, { bienId, compte }) {
+  const now = Date.now()
+  const jour = new Date(now - 86400000).toISOString()
+  const d = new Date(now)
+  const mois = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)).toISOString()
+  const deCetEndpoint = l => (l || []).filter(a => a.endpoint === ENDPOINT).length
+  const [bienJour, compteJour, toutMois] = await Promise.all([
+    depot.appelsDepuis({ depuis: jour, propertyId: bienId }),
+    depot.appelsDepuis({ depuis: jour, userId: compte }),
+    depot.appelsDepuis({ depuis: mois }),
+  ])
+  return jugerQuota({ bienJour: deCetEndpoint(bienJour), compteJour: deCetEndpoint(compteJour), mois: deCetEndpoint(toutMois) })
 }
 
 module.exports = async (req, res) => {
@@ -90,7 +113,13 @@ module.exports = async (req, res) => {
     if (corps.action === 'chercher') {
       const profil = await lireProfil(supabase, bienId)
       if (!profil) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })
-      const client = creerClient({ depot: depotSupabase(supabase) })
+      const depot = depotSupabase(supabase)
+      // Une liste fraiche en cache ne coute rien ; sinon, le quota d'abord.
+      const fraiche = await listeEnCache(profil)
+      if (!fraiche && await quotaAtteint(depot, { bienId, compte })) {
+        return res.status(200).json({ etat: 'indisponible', message: 'Plusieurs recherches ont déjà été lancées récemment. Réessayez demain.' })
+      }
+      const client = creerClient({ depot })
       let r
       try {
         r = await client.comparables(rechercheDuProfil(profil), { propertyId: bienId, userId: compte })
@@ -118,6 +147,10 @@ module.exports = async (req, res) => {
 
     return res.status(400).json({ error: 'action_inconnue' })
   } catch (e) {
+    if (tableAbsente(e)) {
+      console.error('[marche-comparables] table absente', e.message)
+      return res.status(200).json({ etat: 'indisponible', message: INDISPONIBLE })
+    }
     console.error('[marche-comparables]', e.message)
     return res.status(500).json({ error: 'lecture_impossible' })
   }

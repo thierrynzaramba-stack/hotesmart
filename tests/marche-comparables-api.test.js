@@ -27,14 +27,28 @@ function base (tables) {
   const client = { from: tb => {
     lus.push(tb)
     let lignes = [...(tables[tb] || [])]
+    const absente = (tables.__absentes || []).includes(tb)
+    const erreur = { message: `Could not find the table 'public.${tb}' in the schema cache` }
     const q = {
       select: () => q,
       eq: (k, v) => { lignes = lignes.filter(l => String(l[k]) === String(v)); return q },
+      gte: (k, v) => { lignes = lignes.filter(l => l[k] >= v); return q },
       order: () => q,
-      limit: n => Promise.resolve({ data: lignes.slice(0, n), error: null }),
-      then: (ok, ko) => Promise.resolve({ data: lignes, error: null }).then(ok, ko),
+      limit: n => Promise.resolve(absente ? { data: null, error: erreur } : { data: lignes.slice(0, n), error: null }),
+      // Comme le vrai client : range() se chaine encore (eq apres range).
+      range: (a, z) => { lignes = lignes.slice(a, z + 1); return q },
+      then: (ok, ko) => Promise.resolve(absente ? { data: null, error: erreur } : { data: lignes, error: null }).then(ok, ko),
       upsert: (ligne, opts) => { ecrits.push({ tb, op: 'upsert', ligne, opts }); if (tb === 'bien_profil') tables.bien_profil = [{ ...PROFIL, ...ligne, latitude: String(ligne.latitude), longitude: String(ligne.longitude) }]; return Promise.resolve({ error: null }) },
-      update: (maj) => { const u = { tb, op: 'update', maj, filtres: [] }; ecrits.push(u); const w = { eq: (k, v) => { u.filtres.push(['eq', k, v]); return w }, not: (k, op, v) => { u.filtres.push(['not', k, op, v]); return Promise.resolve({ error: null }) } }; return w },
+      update: (maj) => {
+        const u = { tb, op: 'update', maj, filtres: [] }
+        ecrits.push(u)
+        const w = {
+          eq: (k, v) => { u.filtres.push(['eq', k, v]); return w },
+          in: (k, v) => { u.filtres.push(['in', k, v]); return Promise.resolve({ error: null }) },
+          not: (k, op, v) => { u.filtres.push(['not', k, op, v]); return Promise.resolve({ error: null }) },
+        }
+        return w
+      },
     }
     return q
   } }
@@ -112,6 +126,7 @@ test('LE TEST QUI COMPTE (securite, review S3) : les lignes portent le COMPTE re
   assert.equal(r.code, 200)
   const up = r.ecrits.find(e => e.tb === 'comparables_retenus' && e.op === 'upsert')
   assert.ok(up.ligne.every(l => l.user_id === 'COMPTE' && l.property_id === 'BIEN-A' && l.retenu_par === 'proprietaire' && l.actif === true))
+  assert.deepEqual(up.opts, { onConflict: 'property_id,listing_id', ignoreDuplicates: true }, 'une ligne existante n est jamais reecrite')
   const ch = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })
   assert.deepEqual(ch.appelsAirroi[0].ctx, { propertyId: 'BIEN-A', userId: 'COMPTE' }, 'les plafonds de depense comptent le bien et le compte')
 })
@@ -161,9 +176,13 @@ test('LE TEST QUI COMPTE : retenir — au moins 3, tous dans la derniere liste p
   assert.ok(!intrus.ecrits.length, 'rien n est ecrit')
   const ok = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: [...IDS, IDS[0]] }, tables: TABLES() })
   assert.deepEqual(ok.corps.retenus, IDS, 'doublon retire')
-  const desact = ok.ecrits.find(e => e.op === 'update')
+  const [react, desact] = ok.ecrits.filter(e => e.op === 'update')
+  assert.deepEqual(react.maj, { actif: true })
+  assert.deepEqual(react.filtres, [['eq', 'property_id', 'BIEN-A'], ['in', 'listing_id', IDS]])
   assert.deepEqual(desact.maj, { actif: false })
-  assert.deepEqual(desact.filtres, [['eq', 'property_id', 'BIEN-A'], ['not', 'listing_id', 'in', `(${IDS.join(',')})`]])
+  // ⚠ Review de 4f19d8b (C1) : seuls les anciens choix DU PROPRIETAIRE sont
+  // desactives ; ceux du fondateur restent.
+  assert.deepEqual(desact.filtres, [['eq', 'property_id', 'BIEN-A'], ['eq', 'retenu_par', 'proprietaire'], ['not', 'listing_id', 'in', `(${IDS.join(',')})`]])
   assert.ok(!ok.ecrits.some(e => e.op === 'delete'))
 })
 
@@ -197,4 +216,68 @@ test('WRITER UNIQUE : seul choix-comparables.js ecrit dans comparables_retenus',
   } }
   parcourir(path.join(RACINE, 'lib')); parcourir(path.join(RACINE, 'api'))
   assert.deepEqual(fautifs, [])
+})
+
+// ─── Constats de la review de 4f19d8b ───────────────────────────────────────
+const appel = (o) => ({ endpoint: 'GET /listings/comparables', created_at: new Date(Date.now() - 3600000).toISOString(), cout_usd: 0.1, ...o })
+
+test('LE TEST QUI COMPTE (SECURITE, review S1) : le quota des recherches NOUVELLES — par bien, par compte, et pour tout le mois', async () => {
+  const sansCache = { ...TABLES(), airroi_cache: [] }
+  const cas = {
+    bien: Array.from({ length: 3 }, () => appel({ property_id: 'BIEN-A', user_id: 'COMPTE' })),
+    compte: Array.from({ length: 5 }, (_, i) => appel({ property_id: `AUTRE-${i}`, user_id: 'COMPTE' })),
+    mois: Array.from({ length: 50 }, (_, i) => appel({ property_id: `X-${i}`, user_id: `U-${i}`, created_at: new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1, 0, 1)).toISOString() })),
+  }
+  for (const [nom, journal] of Object.entries(cas)) {
+    const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...sansCache, airroi_appels: journal } })
+    assert.equal(r.appelsAirroi.length, 0, `${nom} : aucun appel paye`)
+    assert.equal(r.corps.etat, 'indisponible', nom)
+    assert.match(r.corps.message, /Réessayez demain/)
+    assert.ok(!/\$|budget|quota|airroi/i.test(r.corps.message))
+  }
+  // Juste sous les plafonds : la recherche part.
+  const sous = [...cas.bien.slice(0, 2), appel({ endpoint: 'GET /listings/metrics/all', property_id: 'BIEN-A', user_id: 'COMPTE' })]
+  const ok = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...sansCache, airroi_appels: sous } })
+  assert.equal(ok.appelsAirroi.length, 1, 'les autres endpoints ne comptent pas dans ce quota')
+})
+
+test('quota : une liste FRAICHE en cache ne compte pas — la recherche est servie meme quota atteint', async () => {
+  const journal = Array.from({ length: 3 }, () => appel({ property_id: 'BIEN-A', user_id: 'COMPTE' }))
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_appels: journal } })
+  assert.equal(r.corps.etat, 'calcule')
+})
+
+test('REVIEW : une liste en cache PERIMEE (plus de 90 jours) n est plus proposee ni ne valide un choix', async () => {
+  const vieux = { ...TABLES(), airroi_cache: [{ ...TABLES().airroi_cache[0], recupere_le: '2026-01-01T00:00:00Z' }] }
+  const g = await appeler({ tables: vieux })
+  assert.equal(g.corps.comparables, null)
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: IDS }, tables: vieux })
+  assert.equal(r.code, 400)
+  assert.match(r.corps.message, /Relancez la recherche/)
+})
+
+test('REVIEW (C3) : la table du profil absente (migration non appliquee) — un message, jamais une erreur brute', async () => {
+  const t = { ...TABLES(), __absentes: ['bien_profil'] }
+  const g = await appeler({ tables: t })
+  assert.equal(g.code, 200)
+  assert.equal(g.corps.etat, 'indisponible')
+  assert.match(g.corps.message, /pas encore disponible/)
+  const p = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: t })
+  assert.equal(p.corps.etat, 'indisponible')
+  assert.equal(p.appelsAirroi.length, 0)
+})
+
+test('REVIEW : retenir apres un changement de profil, avec l ancienne liste encore en cache — refuse, rien n est ecrit', async () => {
+  const t = TABLES()
+  t.bien_profil = [{ ...t.bien_profil[0], voyageurs: 4 }]
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: IDS }, tables: t })
+  assert.equal(r.code, 400)
+  assert.ok(!r.ecrits.length)
+})
+
+test('une carte renvoyee a exactement les cles de la liste blanche', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })
+  for (const c of r.corps.comparables) {
+    assert.deepEqual(Object.keys(c).sort(), ['chambres', 'distance_km', 'equipements', 'listing_id', 'nom', 'ouvert_toute_annee', 'photo', 'position_approchee', 'ressemblance', 'voyageurs'])
+  }
 })
