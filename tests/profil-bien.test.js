@@ -40,7 +40,7 @@ test('adresse vide ou trop longue, equipement inconnu : refuses', () => {
 
 // ─── Le geocodage, sans reseau ──────────────────────────────────────────────
 const reponse = (corps, ok = true, status = 200) => async (url) => { reponse.url = url; return { ok, status, json: async () => corps } }
-const BAN = { features: [{ geometry: { coordinates: [0.147612, 43.063611] }, properties: { label: '12 Rue des Thermes 65200 Bagnères-de-Bigorre', score: 0.93 } }] }
+const BAN = { features: [{ geometry: { coordinates: [0.147612, 43.063611] }, properties: { label: '12 Rue des Thermes 65200 Bagnères-de-Bigorre', score: 0.93, type: 'housenumber' } }] }
 
 test('LE TEST QUI COMPTE : geocodage — position, libelle trouve, score ; l URL est l API Adresse de l Etat', async () => {
   const r = await pb.geocoder('12 rue des Thermes, Bagnères', { fetch: reponse(BAN) })
@@ -113,4 +113,35 @@ test('la migration : lignes courtes, rejouable, RLS fermee, chambres <= pieces, 
   assert.match(sql, /from anon, authenticated/)
   assert.ok(!/\bselect\b/i.test(sql.replace(/--.*$/gm, '')), 'aucun select')
   for (const e of Object.keys(pb.EQUIPEMENTS)) assert.match(sql, new RegExp(`'${e}'`))
+})
+
+// ─── Constats de la review de a52b3e4 ───────────────────────────────────────
+test('REVIEW (C3) : une adresse reduite a la commune est refusee — sinon le bien serait a la mairie', async () => {
+  const commune = { features: [{ geometry: { coordinates: [0.149, 43.065] }, properties: { label: 'Bagnères-de-Bigorre', score: 0.95, type: 'municipality' } }] }
+  assert.match((await pb.geocoder('Bagnères-de-Bigorre', { fetch: reponse(commune) })).erreur, /trop vague/)
+  for (const type of ['street', 'locality']) {
+    const ok = { features: [{ ...BAN.features[0], properties: { ...BAN.features[0].properties, type } }] }
+    assert.ok((await pb.geocoder('x', { fetch: reponse(ok) })).latitude, type)
+  }
+})
+
+test('REVIEW (C4) : un nombre en texte, des chiffres seulement — ni hexadecimal, ni exposant, ni decimal', () => {
+  for (const mauvais of ['0x10', '0b11', '1e1', '4.0', ' ', '-2', '+3']) {
+    assert.ok(pb.validerProfil({ ...SAISIE, voyageurs: mauvais }).erreur, mauvais)
+  }
+  assert.equal(pb.validerProfil({ ...SAISIE, voyageurs: ' 4 ' }).profil.voyageurs, 4)
+})
+
+test('REVIEW (mineurs) : adresse non textuelle ou trop courte, equipements non tableau, libelle non textuel', async () => {
+  assert.match(pb.validerProfil({ ...SAISIE, adresse: { rue: 'x' } }).erreur, /illisible/)
+  assert.match(pb.validerProfil({ ...SAISIE, adresse: 'ab' }).erreur, /trop courte/)
+  assert.match(pb.validerProfil({ ...SAISIE, equipements: 'piscine' }).erreur, /illisible/)
+  const label = { features: [{ ...BAN.features[0], properties: { ...BAN.features[0].properties, label: { x: 1 } } }] }
+  assert.match((await pb.geocoder('x', { fetch: reponse(label) })).erreur, /introuvable/)
+})
+
+test('REVIEW : un service d adresses qui ne repond jamais est abandonne au delai', async () => {
+  const jamais = (url, { signal }) => new Promise((resolve, reject) => { signal.addEventListener('abort', () => { const e = new Error('abort'); e.name = 'AbortError'; reject(e) }) })
+  const r = await pb.geocoder('x', { fetch: jamais, delaiMs: 20 })
+  assert.match(r.erreur, /ne répond pas/)
 })

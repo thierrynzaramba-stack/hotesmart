@@ -97,14 +97,14 @@ test('les equipements Airbnb reconnus — « Garden view » n est pas un jardin,
   assert.deepEqual(p.equipementsDeFiche(null), [])
 })
 
-test('ressemblance : 100 % pour un jumeau ; une composante non mesurable ne compte ni pour ni contre', () => {
+test('ressemblance : 100 % pour un jumeau ; une composante NON MESURABLE COMPTE 0 (review de a52b3e4)', () => {
   const jumeau = fiche({ amenities: ['Free parking on premises', 'Mountain view'] })
   assert.equal(p.trierComparables([jumeau], MOI)[0].ressemblance, 100)
   const sansPosition = fiche({ amenities: ['Free parking on premises', 'Mountain view'] })
   sansPosition.location_info = {}
   const c = p.trierComparables([sansPosition], MOI)[0]
   assert.equal(c.distance_km, null)
-  assert.equal(c.ressemblance, 100)
+  assert.equal(c.ressemblance, 60, 'la zone (40 %) manque')
   // Aucun equipement d'un cote ni de l'autre : la composante vaut 1.
   assert.equal(p.trierComparables([fiche()], { ...MOI, equipements: [] })[0].ressemblance, 100)
 })
@@ -136,4 +136,49 @@ test('donnees reelles (La bulle) : 25 cartes, ressemblances decroissantes, toute
   for (let i = 1; i < r.length; i++) assert.ok(r[i - 1].ressemblance >= r[i].ressemblance)
   assert.ok(r.every(c => c.distance_km < 0.5))
   assert.ok(r[0].ressemblance >= 85)
+})
+
+// ─── Constats de la review de a52b3e4 ───────────────────────────────────────
+test('REVIEW (C1) : une fiche VIDE ne passe jamais devant un voisin mesure', () => {
+  const vide = { listing_info: { listing_id: '42', listing_name: 'Vide' } }
+  const voisin = fiche({ lat: 43.066, bloques: 30 })
+  const r = p.trierComparables([vide, voisin], { ...MOI, equipements: [] })
+  assert.equal(r[0].nom, voisin.listing_info.listing_name)
+  assert.ok(r[1].ressemblance <= 20, `vide : ${r[1].ressemblance} %`)
+})
+
+test('REVIEW (C2) : equipements — ni billard ni vue de piscine, ni garage hors du bien ; carport et clim split reconnus', () => {
+  assert.deepEqual(p.equipementsDeFiche(['Pool table', 'Pool view', 'Paid parking garage off premises', 'Free street parking']), [])
+  assert.deepEqual(p.equipementsDeFiche(['Free carport on premises']), ['parking'])
+  assert.deepEqual(p.equipementsDeFiche(['Paid parking garage on premises']), ['parking'])
+  assert.deepEqual(p.equipementsDeFiche(['AC - split type ductless system']), ['climatisation'])
+  assert.deepEqual(p.equipementsDeFiche(['Window AC unit']), ['climatisation'])
+  assert.deepEqual(p.equipementsDeFiche(['Vacuum cleaner', 'Backpack']), [], '« ac » dans un mot n est pas la clim')
+  assert.deepEqual(p.equipementsDeFiche(['Private outdoor pool - available all year', 'Bay view']), ['piscine', 'vue'])
+  assert.deepEqual(p.equipementsDeFiche(['Waterfront']), ['vue'])
+})
+
+test('LE TEST QUI COMPTE (SECURITE, review de a52b3e4) : la photo — https sur muscache.com seulement, URL reserialisee', () => {
+  assert.equal(p.photoSure('https://a0.muscache.com/im/pictures/x.jpg?im_w=720'), 'https://a0.muscache.com/im/pictures/x.jpg?im_w=720')
+  for (const mauvais of ['https://evil.example/x.jpg', 'http://a0.muscache.com/x.jpg', 'javascript:alert(1)', 'https://muscache.com.evil.example/x', 'https://user:pw@a0.muscache.com/x', 'https://a0.muscache.com:8443/x', null, 42]) {
+    assert.equal(p.photoSure(mauvais), null, String(mauvais))
+  }
+  const casse = p.photoSure('https://a0.muscache.com/x" onerror="alert(1)')
+  assert.ok(casse === null || !/"/.test(casse), 'aucun guillemet ne sort tel quel')
+})
+
+test('REVIEW : un identifiant en double ne donne qu une carte', () => {
+  const a = fiche()
+  const b = { ...fiche(), listing_info: { ...a.listing_info } }
+  assert.equal(p.trierComparables([a, b], MOI).length, 1)
+})
+
+test('REVIEW (C5) : le tri suit le score brut, pas l arrondi affiche', () => {
+  // Deux fiches dont les scores arrondis sont egaux mais pas les bruts : la meilleure passe devant,
+  // quel que soit l'ordre d'AirROI.
+  const moins = fiche({ bloques: 5 })
+  const plus = fiche({ bloques: 4 })
+  const r = p.trierComparables([moins, plus], MOI)
+  assert.equal(r[0].ressemblance, r[1].ressemblance)
+  assert.equal(r[0].nom, plus.listing_info.listing_name)
 })
