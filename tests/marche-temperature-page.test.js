@@ -12,6 +12,9 @@ const path = require('path')
 
 const PAGE = fs.readFileSync(path.join(__dirname, '..', 'apps', 'yield', 'marche-temperature.html'), 'utf8')
 const SCRIPT = PAGE.slice(PAGE.indexOf('<script type="module">'))
+// Le calendrier jour par jour vit dans un module COMMUN (§16.1) : ce qu'on
+// exige de la page, on l'exige aussi de lui.
+const MODULE = fs.readFileSync(path.join(__dirname, '..', 'shared', 'temperature-calendrier.js'), 'utf8')
 
 test('LE TEST QUI COMPTE : lecture seule — un GET sur la temperature, la liste des logements, rien d autre', () => {
   const appels = [...PAGE.matchAll(/fetch\(\s*`([^`]*)`/g)].map(m => m[1])
@@ -27,6 +30,7 @@ test('LE TEST QUI COMPTE : lecture seule — un GET sur la temperature, la liste
 test('LE TEST QUI COMPTE : aucun prix affiche — ni euro, ni base 100', () => {
   assert.ok(!/€/.test(SCRIPT), 'aucun symbole euro dans le rendu')
   assert.ok(!/prix_base100|\.prix\b|price/.test(SCRIPT), 'aucun champ de prix lu')
+  assert.ok(!/€|prix_base100|\.prix\b|price/.test(MODULE), 'ni dans le calendrier commun')
 })
 
 test('la page dit en tete ce qu elle est : le modele AirROI seul, pas un prix, qui ne pilote rien', () => {
@@ -41,7 +45,9 @@ test('PIPELINE ETANCHE : la page ne lit pas l historique (ni marche global, ni v
 })
 
 test('les quatre niveaux, et les six blocs de la spec', () => {
-  for (const n of ['Creux', 'Modéré', 'Favorable', 'Pic']) assert.ok(PAGE.includes(n), n)
+  for (const n of ['Creux', 'Modéré', 'Favorable', 'Pic']) assert.ok(MODULE.includes(n), n)
+  assert.match(SCRIPT, /import \{ monterCalendrierTemperature[^}]*\} from '\/shared\/temperature-calendrier\.js'/)
+  assert.match(SCRIPT, /monterCalendrierTemperature\(el\('mt-calendrier'\), donnees\.jours\)/)
   for (const bloc of ['Jour par jour', 'Mois par mois', 'Week-end ou semaine', 'Fériés et événements', 'Événements à créer dans YieldFlow', 'La saison sur deux ans']) {
     assert.ok(PAGE.includes(bloc), bloc)
   }
@@ -54,7 +60,7 @@ test('toute donnee venue du serveur passe par l echappement HTML', () => {
   // ne sert sans ech qu'en CONDITION (suivi de « ? »).
   const CHAMP = /\b(?:e|s|x|w|d\.marche)\.(?:nom|evenement|localite|region|pays|meilleur|pire)\b(?!\s*\?)/
   const fautifs = []
-  for (const m of SCRIPT.matchAll(/\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g)) {
+  for (const m of (SCRIPT + MODULE).matchAll(/\$\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}/g)) {
     let expr = m[1]
     let avant
     do { avant = expr; expr = expr.replace(/ech\((?:[^()]|\([^()]*\))*\)/g, '') } while (expr !== avant)
@@ -63,7 +69,8 @@ test('toute donnee venue du serveur passe par l echappement HTML', () => {
   assert.deepEqual(fautifs, [])
 })
 
-test('theme sombre : les couleurs des niveaux ont leur version sombre', () => {
-  assert.match(PAGE, /prefers-color-scheme: dark[\s\S]*--t-pic/)
-  assert.match(PAGE, /\[data-theme="dark"\][\s\S]*--t-pic/)
+test('theme sombre : les couleurs des niveaux viennent du module commun, qui a leur version sombre', () => {
+  assert.ok(!/--t-/.test(PAGE), 'plus aucune couleur de niveau propre a la page')
+  assert.match(MODULE, /prefers-color-scheme: dark[\s\S]*--tc-pic/)
+  assert.match(MODULE, /\[data-theme="dark"\][\s\S]*--tc-pic/)
 })
