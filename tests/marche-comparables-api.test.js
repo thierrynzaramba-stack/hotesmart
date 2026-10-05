@@ -267,7 +267,7 @@ test('WRITER UNIQUE : seul choix-comparables.js ecrit dans comparables_retenus',
 // ─── Le quota ATOMIQUE (reviews de 4f19d8b et 7ace057, SECURITE) ───────────
 test('LE TEST QUI COMPTE (SECURITE) : une recherche NOUVELLE passe d abord par la reservation atomique, avec les plafonds', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] } })
-  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche', p_bien_jour: 3, p_compte_jour: 5, p_compte_30j: 10, p_calendriers_90j: 30, p_budget_mois: 5 } }])
+  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche', p_bien_jour: 3, p_compte_jour: 5, p_compte_30j: 10, p_calendriers_90j: 15, p_budget_mois: 15 } }])
   assert.equal(r.appelsAirroi.length, 1)
 })
 
@@ -610,7 +610,7 @@ test('LE TEST QUI COMPTE (§22.5) : « prix » releve chaque calendrier MANQUANT
   const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tablesPrix({ calendriersEnCache: 1 }) })
   assert.deepEqual(r.gardes, [{ domaine: 'reglages', niveau: 'write', bien: 'REF-42', bienRequis: true }])
   assert.equal(reservCal(r).length, 2)
-  assert.ok(reservCal(r).every(x => x.params.p_cout === 0.10 && x.params.p_calendriers_90j === 30))
+  assert.ok(reservCal(r).every(x => x.params.p_cout === 0.10 && x.params.p_calendriers_90j === 15))
   assert.deepEqual(r.appelsAirroi.map(a => a.calendrier).sort(), IDS.slice(1).sort())
   assert.ok(r.appelsAirroi.every(a => a.ctx.propertyId === 'BIEN-A' && a.ctx.userId === 'COMPTE'))
   assert.equal(r.corps.etat, 'calcule')
@@ -712,4 +712,19 @@ test('RE-REVIEW : une reservation en panne arrete TOUS les releves, et la repons
   assert.equal(r.appelsAirroi.length, aLaReponse, 'aucun releve paye apres la reponse')
   assert.ok(aLaReponse <= 3, `au plus un releve par ouvrier encore en vol (vu : ${aLaReponse})`)
   assert.ok(r.code >= 500, 'la panne est dite')
+})
+
+// Decision de Thierry (5 octobre 2026) : 10 calendriers par bien au plus, ceux
+// deja en cache d'abord (gratuits), puis dans l'ordre des retenus.
+test('DECISION : au plus 10 calendriers servent au calcul — ceux en cache d abord, et on ne releve jamais au-dela', async () => {
+  const tb = tablesPrix({ calendriersEnCache: 0 })
+  tb.comparables_retenus = Array.from({ length: 14 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  // Deux calendriers en cache, en FIN de liste : ils passent devant.
+  for (const id of ['9012', '9013']) tb.airroi_cache.push({ cle: cleCal(id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(120) }), recupere_le: new Date().toISOString() })
+  const g = await appeler({ tables: tb })
+  assert.equal(g.corps.prix_depart.a_capturer, 8, '10 au plus, dont 2 deja en cache')
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
+  assert.equal(reservCal(r).length, 8)
+  assert.deepEqual(r.appelsAirroi.map(a => a.calendrier).sort(), Array.from({ length: 8 }, (_, i) => String(9000 + i)).sort())
+  assert.equal(r.corps.a_capturer, 0)
 })

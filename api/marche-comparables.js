@@ -28,7 +28,7 @@ const { validerProfil, validerStrategie, geocoder, lireProfil, enregistrerProfil
 const { reunirEtTrier, repartitionSejourMin } = require('../lib/marche/pertinence')
 const { prixDeDepart } = require('../lib/marche/prix-depart')
 const { lireDerniereCapture } = require('../lib/marche/temperature-airroi')
-const { rechercheDuProfil, validerChoix, enregistrerChoix, corpsRechercheEquipements, COUTS, QUOTA, MESSAGE_QUOTA } = require('../lib/marche/choix-comparables')
+const { rechercheDuProfil, validerChoix, enregistrerChoix, corpsRechercheEquipements, COUTS, QUOTA, MESSAGE_QUOTA, CALENDRIERS_PAR_BIEN } = require('../lib/marche/choix-comparables')
 const { FRAICHEUR_JOURS } = require('../lib/airroi/cout')
 const { comparablesRetenus } = require('../lib/marche/etude')
 
@@ -149,8 +149,12 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
   const dans300 = jourParis(new Date(Date.now() + 300 * 86400000))
   const jours = capture.jours.filter(j => j.jour >= aujourdhui)
   if (!jours.length || !jours.some(j => j.jour >= dans300)) return { ...indispo, message: 'Le calendrier du marché de votre adresse est trop ancien : vos prix de départ ne peuvent pas encore être calculés.' }
-  const ids = lignes.map(l => String(l.listing_id))
-  const cache = await calendriersEnCache(ids)
+  // ⚠ Au plus CALENDRIERS_PAR_BIEN calendriers servent au calcul (decision de
+  // Thierry) : ceux deja en cache d'abord (gratuits), puis dans l'ordre des
+  // retenus — l'equipe d'abord, puis l'ordre du choix.
+  const tous = [...lignes.filter(l => l.retenu_par === 'fondateur'), ...lignes.filter(l => l.retenu_par !== 'fondateur')].map(l => String(l.listing_id))
+  const cache = await calendriersEnCache(tous)
+  const ids = [...tous.filter(id => cache.has(id)), ...tous.filter(id => !cache.has(id))].slice(0, CALENDRIERS_PAR_BIEN)
   let manquants = ids.filter(id => !cache.has(id))
   let refus = null
   if (payer && manquants.length) {
@@ -183,7 +187,7 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
     if (panne) throw panne.reason
     manquants = ids.filter(id => !cache.has(id))
   }
-  const calendriers = lignes.filter(l => cache.has(String(l.listing_id))).map(l => ({
+  const calendriers = lignes.filter(l => ids.includes(String(l.listing_id)) && cache.has(String(l.listing_id))).map(l => ({
     listing_id: String(l.listing_id), position: l.retenu_par === 'fondateur' ? 'equivalent' : l.position,
     jours: cache.get(String(l.listing_id)).filter(n => n && String(n.date) >= aujourdhui),
   }))

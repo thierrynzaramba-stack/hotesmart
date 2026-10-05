@@ -580,3 +580,16 @@ test('coutLibere : vrai seulement avant le reseau ou sur une erreur HTTP ; faux 
     assert.equal(await marque(creerClient({ alerter: null, depot: journalPanne, fetch: faux('non', 403) }), annonce), false, 'HTTP 403 dont la liberation n a pas pu etre journalisee : prudence')
   })
 })
+
+// C6 (review de f37b7da) : la forme du calendrier en ligne n'avait ete vue que
+// dans l'exemple de la documentation. Vraie reponse capturee le 5 octobre 2026.
+test('C6 : une VRAIE reponse du calendrier en ligne passe la forme et se range', async () => {
+  await avecCle(async () => {
+    const brut = lire('calendrier-live-38988457-2026-10-05.json')
+    const c = creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: faux(brut) })
+    const r = await c.calendrierAnnonce('38988457', { propertyId: 'P', userId: 'U' })
+    assert.equal(r.donnees.currency, 'EUR')
+    assert.ok(r.donnees.results.length > 300)
+    assert.ok(r.donnees.results.every(n => /^\d{4}-\d{2}-\d{2}$/.test(n.date) && typeof n.rate === 'number' && Number.isInteger(n.min_nights) && typeof n.available === 'boolean'))
+  })
+})
