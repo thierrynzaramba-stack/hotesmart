@@ -56,7 +56,7 @@ function base (tables) {
       // Comme le vrai client : range() se chaine encore (eq apres range).
       range: (a, z) => { lignes = lignes.slice(a, z + 1); return q },
       then: (ok, ko) => Promise.resolve(absente ? { data: null, error: erreur } : { data: lignes, error: null }).then(ok, ko),
-      upsert: (ligne, opts) => { ecrits.push({ tb, op: 'upsert', ligne, opts }); if (tb === 'bien_profil') tables.bien_profil = [{ ...PROFIL, ...ligne, latitude: String(ligne.latitude), longitude: String(ligne.longitude) }]; return Promise.resolve({ error: null }) },
+      upsert: (ligne, opts) => { ecrits.push({ tb, op: 'upsert', ligne, opts }); if (tables.__upsertPanne === tb) return Promise.resolve({ error: { message: 'connexion perdue' } }); if (tb === 'bien_profil') tables.bien_profil = [{ ...PROFIL, ...ligne, latitude: String(ligne.latitude), longitude: String(ligne.longitude) }]; return Promise.resolve({ error: null }) },
       update: (maj) => {
         const u = { tb, op: 'update', maj, filtres: [] }
         ecrits.push(u)
@@ -95,17 +95,29 @@ async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, bod
       comparables: async (params, ctx) => {
         appelsAirroi.push({ params, ctx })
         if (airroi instanceof Error) throw airroi
-        return { donnees: airroi || { listings: COMPS }, depuisCache: false }
+        // Comme le VRAI client : la reponse entre au cache (la route le relit).
+        const donnees = airroi || { listings: COMPS }
+        const cleBase = cleCanonique('GET /listings/comparables', { ...params, currency: 'native' })
+        tables.airroi_cache = [...(tables.airroi_cache || []).filter(c => c.cle !== cleBase), { cle: cleBase, reponse: JSON.stringify(donnees), recupere_le: new Date().toISOString() }]
+        return { donnees, depuisCache: false }
       },
       calendrierAnnonce: async (listingId, ctx) => {
         appelsAirroi.push({ calendrier: String(listingId), ctx })
+        if ((tables.__calendrier404 || []).includes(String(listingId))) throw Object.assign(new Error('HTTP 404'), { coutLibere: true, http: 404 })
         if (tables.__calendrierEnPanne) throw Object.assign(new Error('HTTP 500'), { coutLibere: tables.__calendrierEnPanne !== 'facture' })
         return { donnees: { currency: 'EUR', results: CALENDRIER(100) }, depuisCache: false }
       },
-      rechercheEquipements: async (corps, ctx) => {
-        appelsAirroi.push({ corps, ctx, equipements: true })
-        if (airroiEq instanceof Error) throw airroiEq
-        return { donnees: airroiEq || { results: SPA }, depuisCache: false }
+      rechercheActifs: async (corps, ctx) => {
+        appelsAirroi.push({ corps, ctx, actifs: true })
+        const page = corps.pagination.offset / 10
+        const err = typeof airroiEq === 'function' ? airroiEq(page) : airroiEq
+        if (err instanceof Error) throw err
+        const reponse = pageActifs(page, tables.__totalActifs ?? 76, tables.__poolActifs || POOL)
+        if (tables.__cacheMuet) return { donnees: lireJson(reponse), depuisCache: false }
+        const cle = cleCanonique('POST /listings/search/radius', corps)
+        // Comme le vrai depot : upsert sur la cle (l'ancienne ligne est remplacee).
+        tables.airroi_cache = [...(tables.airroi_cache || []).filter(c => c.cle !== cle), { cle, reponse, recupere_le: new Date().toISOString() }]
+        return { donnees: lireJson(reponse), depuisCache: false }
       },
     }) }
     globalThis.fetch = async () => ({ ok: true, json: async () => geocode || { features: [{ geometry: { coordinates: [0.1476, 43.0636] }, properties: { label: '12 Rue des Thermes 65200 Bagnères-de-Bigorre', score: 0.93, type: 'housenumber' } }] } })
@@ -141,12 +153,15 @@ function clesArgent (o, chemin = '') {
   return Object.entries(o).flatMap(([k, v]) => [...(CLES_ARGENT.test(k) ? [`${chemin}.${k}`] : []), ...clesArgent(v, `${chemin}.${k}`)])
 }
 const IDS = COMPS.slice(0, 3).map(c => String(c.listing_info.listing_id))
-// Les biens « trouves par equipement » : d'autres annonces reelles (Coeur de vie 23), avec un jacuzzi.
-const SPA = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'comps-cdv23.json'), 'utf8')).listings.slice(0, 4)
-  .map(f => ({ ...f, property_details: { ...f.property_details, amenities: [...f.property_details.amenities, 'Hot tub'] } }))
-const { corpsRechercheEquipements } = require('../lib/marche/choix-comparables')
+// §22.10 : les biens ACTIFS avec jacuzzi — vraie reponse AirROI (Toulouse, 5
+// octobre 2026), declinee en 50 annonces distinctes pour les pages suivantes.
+const ACTIFS = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'actifs-jacuzzi-toulouse-2026-10-05.json'), 'utf8')).results
+const POOL = Array.from({ length: 50 }, (_, i) => ({ ...ACTIFS[i % 10], listing_info: { ...ACTIFS[i % 10].listing_info, listing_id: String(7000000 + i) } }))
+const { corpsRechercheActifs } = require('../lib/marche/choix-comparables')
 const PROFIL_SPA = { ...PROFIL, equipements: ['parking', 'spa'] }
-const CLE_SPA = cleCanonique('POST /listings/search/radius', corpsRechercheEquipements({ ...PROFIL_SPA, latitude: 43.0636, longitude: 0.1476 }))
+const cleActifs = page => cleCanonique('POST /listings/search/radius', corpsRechercheActifs({ ...PROFIL_SPA, latitude: 43.0636, longitude: 0.1476 }, page))
+const pageActifs = (page, total = 76, pool = POOL) => JSON.stringify({ pagination: { total_count: total, page_size: 10, offset: page * 10 }, results: pool.slice(page * 10, page * 10 + 10) })
+const pageEnCache = (page, total, pool) => ({ cle: cleActifs(page), reponse: pageActifs(page, total, pool), recupere_le: new Date().toISOString() })
 
 test('LE TEST QUI COMPTE (securite) : lecture sous reservations:read, toute ecriture ou paiement sous reglages:write — bien requis, le bien RESOLU', async () => {
   const g = await appeler({ tables: TABLES() })
@@ -276,7 +291,7 @@ test('WRITER UNIQUE : seul choix-comparables.js ecrit dans comparables_retenus',
 // ─── Le quota ATOMIQUE (reviews de 4f19d8b et 7ace057, SECURITE) ───────────
 test('LE TEST QUI COMPTE (SECURITE) : une recherche NOUVELLE passe d abord par la reservation atomique, avec les plafonds', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] } })
-  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche', p_bien_jour: 3, p_compte_jour: 5, p_compte_30j: 10, p_calendriers_90j: 15, p_budget_mois: 15 } }])
+  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche', p_bien_jour: 5, p_compte_jour: 10, p_compte_30j: 20, p_calendriers_90j: 15, p_budget_mois: 15 } }])
   assert.equal(r.appelsAirroi.length, 1)
 })
 
@@ -368,60 +383,120 @@ test('une carte renvoyee a exactement les cles de la liste blanche', async () =>
 // ─── §21 : la recherche par equipement ──────────────────────────────────────
 const AVEC_SPA = () => ({ ...TABLES(), bien_profil: [{ ...PROFIL_SPA, property_id: 'BIEN-A' }] })
 
-test('LE TEST QUI COMPTE (§21.2-21.3) : un equipement rare declenche la recherche complementaire, qui RESERVE 0,50 $ avant de partir', async () => {
+// ─── §22.10 : la selection — actifs, meme valeur percue, tries par revenu ───
+const ids = r => r.corps.comparables.map(c => c.listing_id)
+
+test('LE TEST QUI COMPTE (§22.10) : un bien avec jacuzzi — 20 biens ACTIFS qui ONT un jacuzzi, dans l ordre du revenu, 2 pages reservees a 0,50 $ ; aucun voisin', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA() })
-  assert.deepEqual(r.rpcs.map(x => x.params.p_cout), [0.50], 'la liste de base etait en cache : seule la recherche par equipement reserve')
-  const eq = r.appelsAirroi.find(a => a.equipements)
-  assert.deepEqual(eq.corps.filter.amenities, { any: ['hot_tub', 'sauna'] })
-  assert.deepEqual(eq.ctx, { propertyId: 'BIEN-A', userId: 'COMPTE' })
-  assert.equal(r.corps.comparables.length, 29)
-  assert.equal(r.corps.comparables.filter(c => c.source === 'equipements').length, 4)
-  assert.ok(r.corps.comparables.filter(c => c.source === 'equipements').every(c => c.equipements.includes('spa')))
+  assert.deepEqual(reservations(r), [0.50, 0.50])
+  assert.ok(!r.appelsAirroi.some(a => a.params), 'la liste des 25 voisins n est pas demandee')
+  const pages = r.appelsAirroi.filter(a => a.actifs)
+  assert.deepEqual(pages.map(a => a.corps.pagination.offset), [0, 10])
+  const f = pages[0].corps
+  assert.deepEqual(f.filter.amenities, { all: ['hot_tub'] }, 'jacuzzi = jacuzzi : un sauna seul ne compte pas')
+  assert.deepEqual(f.filter.bedrooms, { eq: 1 }, 'meme nombre de chambres')
+  assert.deepEqual(f.filter.room_type, { eq: 'entire_home' })
+  assert.deepEqual(f.sort, { ttm_revenue: 'desc' })
+  assert.equal(f.radius_miles, 6.2)
+  assert.deepEqual([f.latitude, f.longitude], [43.06, 0.15], 'la zone, arrondie au centieme : la cle se partage')
+  assert.deepEqual(ids(r), POOL.slice(0, 20).map(x => x.listing_info.listing_id), 'l ordre d AirROI (revenu), pas la ressemblance')
+  assert.equal(r.corps.encore, true)
+  assert.deepEqual(pages[0].ctx, { propertyId: 'BIEN-A', userId: 'COMPTE' })
 })
 
-test('§21.2 : complementaire refuse par le quota — la liste de base s affiche quand meme, et c est dit ; rien n est paye pour lui', async () => {
-  const t = { ...AVEC_SPA(), __rpc: 'bien' }
-  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: t })
-  assert.equal(r.corps.etat, 'calcule')
-  assert.equal(r.corps.comparables.length, 25)
-  assert.match(r.corps.note, /vos équipements n’a pas pu être lancée : plusieurs recherches/)
-  assert.ok(!r.appelsAirroi.some(a => a.equipements))
-})
-
-test('§21.2 : complementaire en panne chez AirROI — la liste de base reste, la panne est dite', async () => {
-  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA(), airroiEq: new Error('HTTP 500') })
-  assert.equal(r.corps.comparables.length, 25)
-  assert.match(r.corps.note, /pas disponible pour le moment/)
-})
-
-test('§21.2 : tout en cache (base ET complement) — aucune reservation, aucun appel ; le GET sert les deux', async () => {
+test('§22.10 : « Voir 10 de plus » charge la page SUIVANTE (0,50 $), jusqu a 50 au plus', async () => {
   const t = AVEC_SPA()
-  t.airroi_cache = [...t.airroi_cache.filter(c => c.cle !== CLE), { cle: cleCanonique('GET /listings/comparables', { latitude: 43.0636, longitude: 0.1476, bedrooms: 1, baths: 1, guests: 2, currency: 'native' }), reponse: COMPS_BRUT, recupere_le: new Date().toISOString() },
-    { cle: CLE_SPA, reponse: JSON.stringify({ results: SPA }), recupere_le: new Date().toISOString() }]
-  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: t })
-  assert.equal(r.rpcs.length, 0)
-  assert.equal(r.appelsAirroi.length, 0)
-  assert.equal(r.corps.comparables.length, 29)
-  const g = await appeler({ tables: t })
-  assert.equal(g.corps.comparables.length, 29)
-  assert.equal(g.corps.complement_a_chercher, false)
+  t.airroi_cache.push(pageEnCache(0), pageEnCache(1))
+  const r = await appeler({ method: 'POST', body: { action: 'plus' }, tables: t })
+  assert.deepEqual(reservations(r), [0.50])
+  assert.deepEqual(r.appelsAirroi.map(a => a.corps.pagination.offset), [20])
+  assert.equal(r.corps.comparables.length, 30)
+  assert.equal(r.corps.encore, true)
+  // 5 pages : plus rien a voir, rien n est paye.
+  const plein = AVEC_SPA()
+  plein.airroi_cache.push(...[0, 1, 2, 3, 4].map(i => pageEnCache(i)))
+  const g = await appeler({ tables: plein })
+  assert.equal(g.corps.comparables.length, 50)
+  assert.equal(g.corps.encore, false)
+  const non = await appeler({ method: 'POST', body: { action: 'plus' }, tables: plein })
+  assert.equal(non.code, 400)
+  assert.deepEqual([non.rpcs.length, non.appelsAirroi.length], [0, 0])
 })
 
-test('§21.2 : le GET dit quand la recherche par equipement reste a faire, sans rien payer', async () => {
-  const g = await appeler({ tables: AVEC_SPA() })
-  assert.equal(g.corps.complement_a_chercher, true)
-  assert.equal(g.rpcs.length, 0)
+test('§22.10 : AirROI n en a que 8 — une seule page, rien a voir de plus', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...AVEC_SPA(), __totalActifs: 8, __poolActifs: POOL.slice(0, 8) } })
+  assert.deepEqual(reservations(r), [0.50])
+  assert.equal(r.corps.comparables.length, 8)
+  assert.equal(r.corps.encore, false)
+})
+
+test('LE TEST QUI COMPTE (§22.10) : le cache se PARTAGE — les pages chargees par un autre hote du secteur ne se repaient pas', async () => {
+  const t = AVEC_SPA()
+  t.airroi_cache.push(pageEnCache(0), pageEnCache(1))
+  // Un autre bien du meme secteur (a quelques centaines de metres) : meme zone.
+  t.bien_profil = [{ ...PROFIL_SPA, latitude: '43.0612', longitude: '0.1531', property_id: 'BIEN-A' }]
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: t })
+  assert.deepEqual([r.rpcs.length, r.appelsAirroi.length], [0, 0])
+  assert.equal(r.corps.comparables.length, 20)
+  const g = await appeler({ tables: t })
+  assert.equal(g.corps.comparables.length, 20)
+  assert.equal(g.corps.encore, true)
   assert.equal(g.appelsAirroi.length, 0)
 })
 
-test('§21.2 : un bien trouve par equipement peut etre retenu ; un bien inconnu, toujours pas', async () => {
+test('LE TEST QUI COMPTE (§22.10) : aucun bien INACTIF ni retire n est propose — ni affiche, ni retenable', async () => {
+  const pool = POOL.map(x => ({ ...x }))
+  pool[0] = { ...pool[0], performance_metrics: { ...pool[0].performance_metrics, l90d_available_days: 0 } }           // calendrier mort
+  pool[1] = { ...pool[1], performance_metrics: { ...pool[1].performance_metrics, ttm_days_reserved: 12, l90d_days_reserved: 3 } } // trop peu vendu
+  pool[2] = { ...pool[2], performance_metrics: { ...pool[2].performance_metrics, ttm_days_reserved: 12, l90d_days_reserved: 10 } } // annonce recente : ACTIVE
   const t = AVEC_SPA()
-  t.airroi_cache.push({ cle: CLE_SPA, reponse: JSON.stringify({ results: SPA }), recupere_le: new Date().toISOString() })
-  const ids = [...IDS.slice(0, 2), String(SPA[0].listing_info.listing_id)]
-  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: (ids).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: t })
-  assert.equal(r.code, 200)
-  const non = await appeler({ method: 'POST', body: { action: 'retenir', choix: ([...IDS.slice(0, 2), '999999']).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: t })
-  assert.equal(non.code, 400)
+  t.airroi_cache.push(pageEnCache(0, 76, pool), pageEnCache(1, 76, pool))
+  t.airroi_annonces_retirees = [{ listing_id: '7000003', http: 404, constatee_le: new Date().toISOString() }]
+  const g = await appeler({ tables: t })
+  const vus = ids(g)
+  assert.ok(!vus.includes('7000000') && !vus.includes('7000001') && !vus.includes('7000003'))
+  assert.ok(vus.includes('7000002'), '10 nuits sur 90 jours suffisent')
+  assert.equal(vus.length, 17)
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: ['7000000', '7000004', '7000005'].map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: t })
+  assert.equal(r.code, 400)
+  const ok = await appeler({ method: 'POST', body: { action: 'retenir', choix: ['7000002', '7000004', '7000005'].map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: t })
+  assert.equal(ok.code, 200)
+})
+
+test('§22.10 : un bien SANS equipement rare garde ses 25 voisins — seulement les actifs ; pas de « plus »', async () => {
+  const comps = COMPS.map(x => ({ ...x }))
+  comps[0] = { ...comps[0], listing_info: { ...comps[0].listing_info, room_type: 'private_room' } }
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: { listings: comps } })
+  assert.deepEqual(reservations(r), [0.10])
+  assert.ok(!r.appelsAirroi.some(a => a.actifs))
+  assert.equal(r.corps.comparables.length, 24, 'la chambre privee n est pas proposee')
+  assert.equal(r.corps.encore, false)
+  const plus = await appeler({ method: 'POST', body: { action: 'plus' }, tables: TABLES() })
+  assert.equal(plus.code, 400)
+  assert.equal(plus.rpcs.length, 0)
+})
+
+test('§22.10 : la 2e page refusee par le quota — la 1re s affiche, et c est dit', async () => {
+  const t = AVEC_SPA()
+  t.airroi_cache.push(pageEnCache(0))
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...t, __rpc: 'bien' } })
+  assert.equal(r.corps.etat, 'calcule')
+  assert.equal(r.corps.comparables.length, 10)
+  assert.match(r.corps.note, /Plusieurs recherches/)
+  assert.equal(r.appelsAirroi.length, 0)
+})
+
+test('§22.10 : la cle de cache d une page est celle qu ecrit le VRAI client AirROI', async () => {
+  const { creerClient: vraiCreer } = require('../lib/airroi/client')
+  const ecrits = []
+  const depot = { lireCache: async () => null, ecrireCache: async (l) => { ecrits.push(l.cle) }, reserver: async () => 1, terminer: async () => {}, appelsDepuis: async () => [] }
+  const avant = process.env.AIRROI_API_KEY
+  process.env.AIRROI_API_KEY = 'cle-de-test-factice'
+  try {
+    const client = vraiCreer({ depot, alerter: null, fetch: async () => ({ ok: true, status: 200, text: async () => pageActifs(1) }) })
+    await client.rechercheActifs(corpsRechercheActifs({ ...PROFIL_SPA, latitude: 43.0636, longitude: 0.1476 }, 1), { propertyId: 'BIEN-A', userId: 'COMPTE' })
+  } finally { if (avant === undefined) delete process.env.AIRROI_API_KEY; else process.env.AIRROI_API_KEY = avant }
+  assert.deepEqual(ecrits, [cleActifs(1)])
 })
 
 test('LE TEST QUI COMPTE (SECURITE, §21.3) : la migration du quota en dollars — cout reserve sous le meme verrou, somme du mois, ancienne signature supprimee', () => {
@@ -441,44 +516,17 @@ test('LE TEST QUI COMPTE (SECURITE, §21.3) : la migration du quota en dollars �
 const reservations = r => r.rpcs.filter(x => x.fn === 'reserver_recherche_comparables').map(x => x.params.p_cout)
 const rendus = r => r.rpcs.filter(x => x.fn === 'rendre_recherche_comparables').map(x => x.params)
 
-test('REVIEW : base absente et equipement rare — la base reserve 0,10 $ PUIS le complement 0,50 $', async () => {
-  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...AVEC_SPA(), airroi_cache: [] } })
-  assert.deepEqual(reservations(r), [0.10, 0.50])
-  assert.equal(r.corps.comparables.length, 29)
-})
-
-test('LE TEST QUI COMPTE (review C1) : un appel qui ECHOUE rend sa reservation — base comme complement', async () => {
+test('LE TEST QUI COMPTE (review C1) : un appel qui ECHOUE rend sa reservation — base comme page des actifs', async () => {
   const libere = m => Object.assign(new Error(m), { coutLibere: true })
   const base = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: libere('HTTP 422') })
   assert.deepEqual(rendus(base), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche' }])
   assert.equal(base.corps.etat, 'indisponible')
   const comp = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA(), airroiEq: libere('HTTP 422') })
   assert.deepEqual(rendus(comp), [{ p_property: 'BIEN-A', p_cout: 0.50, p_nature: 'recherche' }])
-  assert.equal(comp.corps.comparables.length, 25)
+  assert.equal(comp.corps.etat, 'indisponible')
   // Un appel reussi ne rend rien.
   const ok = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA() })
   assert.deepEqual(rendus(ok), [])
-})
-
-test('REVIEW (C2) : la reservation du complement en PANNE n empeche pas la liste de base — rien n est paye pour lui', async () => {
-  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...AVEC_SPA(), __rpcPanneCout: 0.50 } })
-  assert.equal(r.corps.etat, 'calcule')
-  assert.equal(r.corps.comparables.length, 25)
-  assert.match(r.corps.note, /pas disponible pour le moment/)
-  assert.ok(!r.appelsAirroi.some(a => a.equipements))
-})
-
-test('REVIEW : la cle de cache du complement est celle qu ecrit le VRAI client AirROI', async () => {
-  const { creerClient: vraiCreer } = require('../lib/airroi/client')
-  const ecrits = []
-  const depot = { lireCache: async () => null, ecrireCache: async (l) => { ecrits.push(l.cle) }, reserver: async () => 1, terminer: async () => {}, appelsDepuis: async () => [] }
-  const avant = process.env.AIRROI_API_KEY
-  process.env.AIRROI_API_KEY = 'cle-de-test-factice'
-  try {
-    const client = vraiCreer({ depot, alerter: null, fetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ results: SPA }) }) })
-    await client.rechercheEquipements(corpsRechercheEquipements({ ...PROFIL_SPA, latitude: 43.0636, longitude: 0.1476 }), { propertyId: 'BIEN-A', userId: 'COMPTE' })
-  } finally { if (avant === undefined) delete process.env.AIRROI_API_KEY; else process.env.AIRROI_API_KEY = avant }
-  assert.deepEqual(ecrits, [CLE_SPA])
 })
 
 test('LE TEST QUI COMPTE (SECURITE) : la migration — deux couts seulement, parametres nuls refuses, rendre sous le meme verrou et borne a 10 minutes', () => {
@@ -672,7 +720,7 @@ test('LE TEST QUI COMPTE (SECURITE, §22.5) : la migration de la nature — deux
 })
 
 // ─── Constats de la review de f37b7da ───────────────────────────────────────
-test('LE TEST QUI COMPTE (SECURITE, review S1) : un appel PEUT-ETRE FACTURE (reponse vide, coupure) ne rend PAS sa reservation — base, complement, calendrier', async () => {
+test('LE TEST QUI COMPTE (SECURITE, review S1) : un appel PEUT-ETRE FACTURE (reponse vide, coupure) ne rend PAS sa reservation — base, page des actifs, calendrier', async () => {
   const facture = m => Object.assign(new Error(m), { coutLibere: false })
   const base = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: facture('reponse inattendue') })
   assert.deepEqual(rendus(base), [])
@@ -714,6 +762,8 @@ test('REVIEW (C7) : un calendrier du marche trop ancien (moins de 300 jours a ve
 test('RE-REVIEW : une reservation en panne arrete TOUS les releves, et la reponse attend ceux en vol', async () => {
   const tb = tablesPrix({ calendriersEnCache: 0 })
   tb.comparables_retenus = Array.from({ length: 12 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  // Sans selection en cache, tous les retenus comptent (§22.10) : ce test porte sur les calendriers.
+  tb.airroi_cache = tb.airroi_cache.filter(c => c.cle !== CLE)
   tb.__rpcPanneNieme = 1
   const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
   const aLaReponse = r.appelsAirroi.length
@@ -728,6 +778,8 @@ test('RE-REVIEW : une reservation en panne arrete TOUS les releves, et la repons
 test('DECISION : au plus 10 calendriers servent au calcul — ceux en cache d abord, et on ne releve jamais au-dela', async () => {
   const tb = tablesPrix({ calendriersEnCache: 0 })
   tb.comparables_retenus = Array.from({ length: 14 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  // Sans selection en cache, tous les retenus comptent (§22.10) : ce test porte sur les calendriers.
+  tb.airroi_cache = tb.airroi_cache.filter(c => c.cle !== CLE)
   // Deux calendriers en cache, en FIN de liste : ils passent devant.
   for (const id of ['9012', '9013']) tb.airroi_cache.push({ cle: cleCal(id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(120) }), recupere_le: new Date().toISOString() })
   const g = await appeler({ tables: tb })
@@ -742,6 +794,8 @@ test('DECISION (review de c04e356) : le calcul recoit 10 calendriers au plus, et
   // 12 calendriers en cache : 10 servent, aucun releve.
   const plein = tablesPrix({ calendriersEnCache: 0 })
   plein.comparables_retenus = Array.from({ length: 12 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  // Sans selection en cache, tous les retenus comptent (§22.10) : ce test porte sur les calendriers.
+  plein.airroi_cache = plein.airroi_cache.filter(c => c.cle !== CLE)
   for (const l of plein.comparables_retenus) plein.airroi_cache.push({ cle: cleCal(l.listing_id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(100) }), recupere_le: new Date().toISOString() })
   const g = await appeler({ tables: plein })
   assert.equal(g.corps.prix_depart.prix.comparables.length, 10)
@@ -749,9 +803,120 @@ test('DECISION (review de c04e356) : le calcul recoit 10 calendriers au plus, et
   // Rien en cache, deux comparables de l'equipe EN FIN de liste : releves d'abord.
   const equipe = tablesPrix({ calendriersEnCache: 0 })
   equipe.comparables_retenus = Array.from({ length: 12 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: i >= 10 ? 'fondateur' : 'proprietaire', position: i >= 10 ? null : 'equivalent' }))
+  // Sans selection en cache, tous les retenus comptent (§22.10) : ce test porte sur les calendriers.
+  equipe.airroi_cache = equipe.airroi_cache.filter(c => c.cle !== CLE)
   const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: equipe })
   const releves = r.appelsAirroi.map(a => a.calendrier)
   assert.equal(releves.length, 10)
   assert.ok(releves.includes('9010') && releves.includes('9011'), 'l equipe est relevee')
   assert.ok(!releves.includes('9008') && !releves.includes('9009'), 'les deux derniers choix de l hote attendent')
+})
+
+// ─── §22.9 : les annonces retirees d'Airbnb ne s'affichent pas ──────────────
+// Dates RELATIVES : le code lit l'horloge (constat valable 30 jours).
+const ilYa = jours => new Date(Date.now() - jours * 86400000).toISOString()
+const retiree = (id, http = 404, age = 1) => ({ listing_id: id, http, constatee_le: ilYa(age) })
+
+test('LE TEST QUI COMPTE (§22.9) : une annonce retiree n apparait NULLE PART — carte, retenus, positions, calcul', async () => {
+  const tb = tablesPrix()
+  tb.airroi_annonces_retirees = [retiree(IDS[0])]
+  const g = await appeler({ tables: tb })
+  assert.ok(!g.corps.comparables.some(c => c.listing_id === IDS[0]), 'absente de la carte')
+  assert.equal(g.corps.comparables.length, 24)
+  assert.deepEqual(g.corps.retenus, IDS.slice(1), 'absente des retenus')
+  assert.ok(!(IDS[0] in g.corps.positions))
+  assert.ok(!g.corps.prix_depart.prix || !g.corps.prix_depart.prix.comparables.some(c => c.listing_id === IDS[0]))
+  // Trois retenus dont un retire : il n'en reste que deux, le calcul le dit.
+  assert.equal(g.corps.prix_depart.etat, 'comparables_insuffisants')
+})
+
+test('§22.9 : un calendrier qui repond 404 note l annonce retiree (pour tous les biens), rend la reservation, et ne la compte plus', async () => {
+  const tb = tablesPrix({ calendriersEnCache: 2 })
+  tb.__calendrier404 = [IDS[2]]
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
+  const notes = r.ecrits.filter(e => e.tb === 'airroi_annonces_retirees')
+  assert.deepEqual(notes.map(e => [e.op, e.ligne.listing_id, e.ligne.http, e.opts]), [['upsert', IDS[2], 404, { onConflict: 'listing_id' }]])
+  assert.ok(Math.abs(Date.parse(notes[0].ligne.constatee_le) - Date.now()) < 60000, 'le constat est date du jour')
+  assert.deepEqual(rendus(r), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'calendrier' }], '404 non facture : reservation rendue')
+  assert.equal(r.corps.a_capturer, 0, 'elle ne se propose plus a relever')
+})
+
+test('§22.9 : une annonce retiree ne se choisit pas, et ne se releve plus', async () => {
+  const tb = TABLES()
+  tb.airroi_annonces_retirees = [retiree(IDS[0])]
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: IDS.map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: tb })
+  assert.equal(r.code, 400)
+  const p = tablesPrix({ calendriersEnCache: 0 })
+  p.comparables_retenus.push({ property_id: 'BIEN-A', listing_id: '9999', actif: true, retenu_par: 'proprietaire', position: 'equivalent' })
+  p.airroi_annonces_retirees = [retiree('9999')]
+  const pr = await appeler({ method: 'POST', body: { action: 'prix' }, tables: p })
+  assert.ok(!pr.appelsAirroi.some(a => a.calendrier === '9999'))
+  assert.equal(reservCal(pr).length, 3)
+})
+
+test('GARDE-FOU (review de b83823a, SECURITE) : trois 404 ou plus sans aucun releve reussi = panne presumee, RIEN n est note', async () => {
+  const tb = tablesPrix({ calendriersEnCache: 0 })
+  tb.__calendrier404 = [...IDS]
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
+  assert.equal(r.ecrits.filter(e => e.tb === 'airroi_annonces_retirees').length, 0)
+  assert.equal(rendus(r).length, 3, 'les trois reservations rendues (404 non facture)')
+  assert.equal(r.corps.a_capturer, 3, 'elles restent a relever')
+  // Un seul 404 parmi des releves reussis : c'est une annonce retiree.
+  const un = tablesPrix({ calendriersEnCache: 0 })
+  un.__calendrier404 = [IDS[0]]
+  const r1 = await appeler({ method: 'POST', body: { action: 'prix' }, tables: un })
+  assert.deepEqual(r1.ecrits.filter(e => e.tb === 'airroi_annonces_retirees').map(e => e.ligne.listing_id), [IDS[0]])
+})
+
+test('C1 (review de b83823a) : un constat qui ne s ecrit pas ne casse pas le calcul, et la reservation est RENDUE', async () => {
+  const tb = tablesPrix({ calendriersEnCache: 2 })
+  tb.__calendrier404 = [IDS[2]]
+  tb.__upsertPanne = 'airroi_annonces_retirees'
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
+  assert.equal(r.code, 200)
+  assert.deepEqual(rendus(r), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'calendrier' }])
+  assert.equal(r.corps.a_capturer, 1, 'non notee : elle reste a relever')
+})
+
+test('§22.9 : un constat de plus de 30 jours vieillit — l annonce redevient visible et se re-verifie', async () => {
+  const tb = tablesPrix()
+  tb.airroi_annonces_retirees = [retiree(IDS[0], 404, 31)]
+  const g = await appeler({ tables: tb })
+  assert.ok(g.corps.comparables.some(c => c.listing_id === IDS[0]))
+  assert.ok(g.corps.retenus.includes(IDS[0]))
+})
+
+// ─── Constats de la review de 428fe8c ───────────────────────────────────────
+test('REVIEW (428fe8c) : d anciens retenus qui ne sont plus PROPOSES ne comptent plus — ni au « au moins 3 », ni aux prix — et c est dit', async () => {
+  const t = { ...tablesPrix(), bien_profil: [{ ...PROFIL_SPA, property_id: 'BIEN-A', strategie: 'juste', sejour_min: 2 }] }
+  t.airroi_cache.push(pageEnCache(0), pageEnCache(1))
+  // Les 3 retenus (IDS) sont d'anciens voisins, absents de la selection des actifs avec jacuzzi.
+  const g = await appeler({ tables: t })
+  assert.deepEqual(g.corps.retenus, [])
+  assert.equal(g.corps.retenus_hors_liste, 3)
+  assert.equal(g.corps.prix_depart.etat, 'comparables_insuffisants')
+  const st = await appeler({ method: 'POST', body: { action: 'strategie', strategie: 'juste', sejour_min: 2 }, tables: t })
+  assert.equal(st.code, 400)
+  // Un retenu de l'EQUIPE reste, meme hors de la liste.
+  t.comparables_retenus[0] = { ...t.comparables_retenus[0], retenu_par: 'fondateur' }
+  const g2 = await appeler({ tables: t })
+  assert.deepEqual(g2.corps.fondateur, [IDS[0]])
+  assert.equal(g2.corps.retenus_hors_liste, 2)
+})
+
+test('REVIEW (428fe8c) : « plus » quand la 1re page a expire recharge le debut — jamais « plus rien » a tort', async () => {
+  const t = AVEC_SPA()
+  t.airroi_cache.push({ ...pageEnCache(0), recupere_le: new Date(Date.now() - 91 * 86400000).toISOString() }, pageEnCache(1))
+  const r = await appeler({ method: 'POST', body: { action: 'plus' }, tables: t })
+  assert.equal(r.code, 200)
+  assert.deepEqual(r.appelsAirroi.map(a => a.corps.pagination.offset), [0])
+  assert.equal(r.corps.comparables.length, 20)
+})
+
+test('GARDE-FOU (review de 428fe8c) : une page payee qui ne se relit pas dans le cache ARRETE la boucle — jamais un paiement sans fin', async () => {
+  const t = AVEC_SPA()
+  t.__cacheMuet = true
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: t })
+  assert.equal(r.appelsAirroi.length, 1, 'une seule page payee')
+  assert.equal(r.corps.etat, 'indisponible')
 })

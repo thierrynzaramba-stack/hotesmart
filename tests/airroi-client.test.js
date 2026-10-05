@@ -524,35 +524,46 @@ test('occupancy : num_months = 0 est admis (contrat de l API : 0 a 60) — essai
 })
 
 // ─── §21.2 : la recherche par equipement, corps FIGE ─────────────────────────
-test('§21.2 : POST /listings/search/radius — tarif 0,50 $, fraicheur 90 jours, et le corps construit par la route est valide', () => {
+test('§22.10 : POST /listings/search/radius — tarif 0,50 $, fraicheur 90 jours, et le corps construit par la route est valide', () => {
   const { TARIFS, FRAICHEUR_JOURS } = require('../lib/airroi/cout')
   assert.equal(TARIFS['POST /listings/search/radius'], 0.50)
   assert.equal(FRAICHEUR_JOURS['POST /listings/search/radius'], 90)
-  const { corpsRechercheEquipements } = require('../lib/marche/choix-comparables')
-  const corps = corpsRechercheEquipements({ latitude: 43.6, longitude: 1.45, voyageurs: 2, equipements: ['spa', 'vue', 'parking'] })
-  assert.deepEqual(corps, { latitude: 43.6, longitude: 1.45, radius_miles: 3,
-    filter: { amenities: { any: ['hot_tub', 'sauna', 'ocean_view', 'river_view', 'waterfront', 'lake_access'] }, guests: { range: [1, 4] } },
-    pagination: { page_size: 10, offset: 0 } })
-  assert.equal(corpsRechercheEquipements({ latitude: 43.6, longitude: 1.45, voyageurs: 2, equipements: ['parking', 'terrasse', 'climatisation'] }), null, 'aucun equipement rare : pas de recherche')
+  const { corpsRechercheActifs } = require('../lib/marche/choix-comparables')
+  const corps = corpsRechercheActifs({ latitude: 43.60797, longitude: 1.452579, voyageurs: 2, chambres: 1, equipements: ['spa', 'vue', 'parking'] }, 2)
+  assert.deepEqual(corps, { latitude: 43.61, longitude: 1.45, radius_miles: 6.2,
+    filter: { amenities: { all: ['hot_tub'], any: ['ocean_view', 'river_view', 'waterfront', 'lake_access'] }, bedrooms: { eq: 1 }, guests: { range: [1, 4] },
+      room_type: { eq: 'entire_home' }, ttm_days_booked: { gte: 10 }, l90d_available_days: { gte: 1 } },
+    sort: { ttm_revenue: 'desc' }, pagination: { page_size: 10, offset: 20 } })
+  assert.equal(corpsRechercheActifs({ latitude: 43.6, longitude: 1.45, voyageurs: 2, chambres: 1, equipements: ['parking', 'terrasse', 'climatisation'] }), null, 'aucun equipement rare : pas de recherche')
+  assert.throws(() => corpsRechercheActifs({ latitude: 43.6, longitude: 1.45, voyageurs: 2, chambres: 1, equipements: ['spa'] }, 5), /page invalide/, '50 biens au plus')
 })
 
-test('LE TEST QUI COMPTE (§21.2) : un corps de recherche hors contrat est REFUSE avant tout reseau', async () => {
+test('LE TEST QUI COMPTE (§22.10) : un corps de recherche hors contrat est REFUSE avant tout reseau', async () => {
   const appels = []
   const depot = { lireCache: async () => null, ecrireCache: async () => {}, reserver: async () => 1, terminer: async () => {}, appelsDepuis: async () => [] }
   const { creerClient } = require('../lib/airroi/client')
   const client = creerClient({ depot, alerter: null, fetch: async (...a) => { appels.push(a); throw new Error('reseau interdit') } })
-  const bon = { latitude: 43.6, longitude: 1.45, radius_miles: 3, filter: { amenities: { any: ['hot_tub'] }, guests: { range: [1, 4] } }, pagination: { page_size: 10, offset: 0 } }
+  const { corpsRechercheActifs } = require('../lib/marche/choix-comparables')
+  const bon = corpsRechercheActifs({ latitude: 43.6, longitude: 1.45, voyageurs: 2, chambres: 1, equipements: ['spa'] }, 0)
+  const filtre = (k, v) => ({ ...bon, filter: { ...bon.filter, [k]: v } })
   const mauvais = [
     { ...bon, currency: 'native' },
     { ...bon, radius_miles: 50 },
-    { ...bon, pagination: { page_size: 10, offset: 10 } },
-    { ...bon, filter: { ...bon.filter, amenities: { any: ['wifi'] } } },
-    { ...bon, filter: { ...bon.filter, amenities: { any: [] } } },
-    { ...bon, filter: { ...bon.filter, amenities: { any: ['hot_tub'], none: ['pool'] } } },
-    { ...bon, filter: { ...bon.filter, ttm_avg_rate: { gt: 100 } } },
-    { ...bon, filter: { ...bon.filter, guests: { range: [5, 2] } } },
+    { ...bon, latitude: 43.6079 },                                     // zone non arrondie : la cle ne se partagerait pas
+    { ...bon, pagination: { page_size: 100, offset: 0 } },
+    { ...bon, pagination: { page_size: 10, offset: 50 } },             // 50 biens au plus
+    { ...bon, sort: { ttm_avg_rate: 'desc' } },
+    filtre('amenities', { any: ['wifi'] }),
+    filtre('amenities', { all: [] }),
+    filtre('amenities', { all: ['hot_tub'], none: ['pool'] }),
+    filtre('room_type', { eq: 'private_room' }),
+    filtre('ttm_days_booked', { gte: 0 }),
+    filtre('bedrooms', { gte: 1 }),
+    filtre('ttm_avg_rate', { gt: 100 }),
+    filtre('guests', { range: [5, 2] }),
   ]
-  for (const c of mauvais) await assert.rejects(client.rechercheEquipements(c, { propertyId: 'P', userId: 'U' }), /parametres invalides/)
+  assert.ok(Object.keys(bon).length, 'le bon corps existe')
+  for (const c of mauvais) await assert.rejects(client.rechercheActifs(c, { propertyId: 'P', userId: 'U' }), /parametres invalides/)
   assert.equal(appels.length, 0)
 })
 
@@ -591,5 +602,14 @@ test('C6 : une VRAIE reponse du calendrier en ligne passe la forme et se range',
     assert.equal(r.donnees.currency, 'EUR')
     assert.ok(r.donnees.results.length > 300)
     assert.ok(r.donnees.results.every(n => /^\d{4}-\d{2}-\d{2}$/.test(n.date) && typeof n.rate === 'number' && Number.isInteger(n.min_nights) && typeof n.available === 'boolean'))
+  })
+})
+
+// §22.9 : l'erreur HTTP porte son code (404 = annonce retiree).
+test('une erreur HTTP porte son code', async () => {
+  await avecCle(async () => {
+    const e = await creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: faux('{"detail":"Not found"}', 404) }).calendrierAnnonce('1223814870412684731', { propertyId: 'P', userId: 'U' }).catch(x => x)
+    assert.equal(e.http, 404)
+    assert.equal(e.coutLibere, true)
   })
 })
