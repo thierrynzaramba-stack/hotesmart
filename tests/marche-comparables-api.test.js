@@ -86,6 +86,11 @@ async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, bod
         if (airroi instanceof Error) throw airroi
         return { donnees: airroi || { listings: COMPS }, depuisCache: false }
       },
+      calendrierAnnonce: async (listingId, ctx) => {
+        appelsAirroi.push({ calendrier: String(listingId), ctx })
+        if (tables.__calendrierEnPanne) throw new Error('HTTP 500')
+        return { donnees: { currency: 'EUR', results: CALENDRIER(100) }, depuisCache: false }
+      },
       rechercheEquipements: async (corps, ctx) => {
         appelsAirroi.push({ corps, ctx, equipements: true })
         if (airroiEq instanceof Error) throw airroiEq
@@ -172,8 +177,10 @@ test('LE TEST QUI COMPTE : un GET ne paie JAMAIS — il ne lit que le cache', as
 })
 
 test('LE TEST QUI COMPTE : AUCUN prix, revenu ou occupation ne sort — ni au GET ni a la recherche ; la position de l hote seulement dans SON profil (§21.4)', async () => {
+  // §22.7 : les prix de DEPART de l'hote sont affiches a dessein ; ce qui ne
+  // porte jamais de prix, ce sont les cartes des comparables et le profil.
   for (const r of [await appeler({ tables: TABLES() }), await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })]) {
-    assert.deepEqual(clesArgent(r.corps), [], 'aucune cle d argent, a aucun niveau')
+    assert.deepEqual(clesArgent({ comparables: r.corps.comparables, profil: r.corps.profil }), [], 'aucune cle d argent dans les cartes ni le profil')
     assert.ok(!/geocode_score|€/.test(JSON.stringify(r.corps)))
   }
   const g = await appeler({ tables: TABLES() })
@@ -258,7 +265,7 @@ test('WRITER UNIQUE : seul choix-comparables.js ecrit dans comparables_retenus',
 // ─── Le quota ATOMIQUE (reviews de 4f19d8b et 7ace057, SECURITE) ───────────
 test('LE TEST QUI COMPTE (SECURITE) : une recherche NOUVELLE passe d abord par la reservation atomique, avec les plafonds', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] } })
-  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_cout: 0.10, p_bien_jour: 3, p_compte_jour: 5, p_compte_30j: 10, p_budget_mois: 5 } }])
+  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche', p_bien_jour: 3, p_compte_jour: 5, p_compte_30j: 10, p_calendriers_90j: 30, p_budget_mois: 5 } }])
   assert.equal(r.appelsAirroi.length, 1)
 })
 
@@ -431,10 +438,10 @@ test('REVIEW : base absente et equipement rare — la base reserve 0,10 $ PUIS l
 
 test('LE TEST QUI COMPTE (review C1) : un appel qui ECHOUE rend sa reservation — base comme complement', async () => {
   const base = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: new Error('HTTP 422') })
-  assert.deepEqual(rendus(base), [{ p_property: 'BIEN-A', p_cout: 0.10 }])
+  assert.deepEqual(rendus(base), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche' }])
   assert.equal(base.corps.etat, 'indisponible')
   const comp = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA(), airroiEq: new Error('HTTP 422') })
-  assert.deepEqual(rendus(comp), [{ p_property: 'BIEN-A', p_cout: 0.50 }])
+  assert.deepEqual(rendus(comp), [{ p_property: 'BIEN-A', p_cout: 0.50, p_nature: 'recherche' }])
   assert.equal(comp.corps.comparables.length, 25)
   // Un appel reussi ne rend rien.
   const ok = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA() })
@@ -554,4 +561,92 @@ test('REVIEW (1e64a2b) : la colonne de position absente (migration non collee) �
   const g = await appeler({ tables: t })
   assert.equal(g.code, 200)
   assert.equal(g.corps.etat, 'indisponible')
+})
+
+// ─── §22.7 : les prix de depart ─────────────────────────────────────────────
+const t = require('../lib/marche/temperature-airroi')
+const RELIEF = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'relief-bagneres-2026-09-30.json'), 'utf8'))
+const TEMPERATURE = t.construireLignes({ marche: { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }, reponse: RELIEF })
+// Un calendrier qui suit le marche : base + 3 € par point d'ecart.
+const CALENDRIER = base => TEMPERATURE.filter(j => j.jour < '2027-10-01').map(j => ({ date: j.jour, available: true, rate: Math.round(base + 3 * j.ecart), min_nights: 2 }))
+const cleCal = id => cleCanonique('GET /listings/live/calendar', { listing_id: String(id), currency: 'native' })
+function tablesPrix ({ calendriersEnCache = 3, strategie = 'juste', localite = 'Bagnères-de-Bigorre' } = {}) {
+  const tb = TABLES()
+  tb.bien_profil = [{ ...PROFIL, property_id: 'BIEN-A', strategie, sejour_min: 2 }]
+  tb.comparables_retenus = IDS.map((id, i) => ({ property_id: 'BIEN-A', listing_id: id, actif: true, retenu_par: 'proprietaire', position: ['dessous', 'equivalent', 'dessus'][i] }))
+  tb.marche_biens = [{ property_id: 'BIEN-A', pays: 'France', region: 'Occitania', localite }]
+  tb.marche_temperature_airroi = TEMPERATURE
+  for (const id of IDS.slice(0, calendriersEnCache)) tb.airroi_cache.push({ cle: cleCal(id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(100 + 10 * IDS.indexOf(id)) }), recupere_le: new Date().toISOString() })
+  return tb
+}
+const reservCal = r => r.rpcs.filter(x => x.fn === 'reserver_recherche_comparables' && x.params.p_nature === 'calendrier')
+
+test('LE TEST QUI COMPTE (§22.7) : le GET calcule les prix de depart depuis le CACHE seul — quatre niveaux, aucun paiement', async () => {
+  const g = await appeler({ tables: tablesPrix() })
+  const pd = g.corps.prix_depart
+  assert.equal(pd.etat, 'calcule')
+  assert.deepEqual(pd.prix.niveaux.map(n => n.yieldflow), ['Base', 'Moyen', 'Haut', 'Très haut ou Exceptionnel'])
+  assert.ok(pd.prix.niveaux.every(n => n.statut === 'calcule' && n.prix % 5 === 0))
+  const prix = pd.prix.niveaux.map(n => n.prix)
+  for (let i = 1; i < prix.length; i++) assert.ok(prix[i] >= prix[i - 1], 'les niveaux montent')
+  assert.equal(g.rpcs.length, 0)
+  assert.equal(g.appelsAirroi.length, 0)
+  // Un calendrier manque : le GET le dit, sans rien payer.
+  const manque = await appeler({ tables: tablesPrix({ calendriersEnCache: 2 }) })
+  assert.deepEqual(manque.corps.prix_depart, { etat: 'a_capturer', a_capturer: 1 })
+  assert.equal(manque.rpcs.length, 0)
+})
+
+test('LE TEST QUI COMPTE (§22.5) : « prix » releve chaque calendrier MANQUANT — reserve 0,10 $ (nature calendrier) avant de partir', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tablesPrix({ calendriersEnCache: 1 }) })
+  assert.deepEqual(r.gardes, [{ domaine: 'reglages', niveau: 'write', bien: 'REF-42', bienRequis: true }])
+  assert.equal(reservCal(r).length, 2)
+  assert.ok(reservCal(r).every(x => x.params.p_cout === 0.10 && x.params.p_calendriers_90j === 30))
+  assert.deepEqual(r.appelsAirroi.map(a => a.calendrier), IDS.slice(1))
+  assert.ok(r.appelsAirroi.every(a => a.ctx.propertyId === 'BIEN-A' && a.ctx.userId === 'COMPTE'))
+  assert.equal(r.corps.etat, 'calcule')
+  assert.equal(r.corps.manquants, 0)
+})
+
+test('§22.5 : un calendrier qui echoue rend sa reservation (nature calendrier) ; le plafond atteint arrete les releves suivants, et c est dit', async () => {
+  const panne = await appeler({ method: 'POST', body: { action: 'prix' }, tables: { ...tablesPrix({ calendriersEnCache: 2 }), __calendrierEnPanne: true } })
+  assert.deepEqual(rendus(panne), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'calendrier' }])
+  assert.equal(panne.corps.manquants, 1)
+  assert.match(panne.corps.note, /Les prix de 1 comparable n’ont pas pu être relevés/)
+  const plafond = await appeler({ method: 'POST', body: { action: 'prix' }, tables: { ...tablesPrix({ calendriersEnCache: 0 }), __rpc: 'calendriers' } })
+  assert.equal(reservCal(plafond).length, 1, 'un refus arrete les reservations suivantes')
+  assert.equal(plafond.appelsAirroi.length, 0)
+  assert.match(plafond.corps.note, /déjà été relevés plusieurs fois ce trimestre/)
+})
+
+test('LE TEST QUI COMPTE (§22.7) : le marche relie doit etre celui de l ADRESSE du profil — sinon ni calcul ni paiement', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tablesPrix({ calendriersEnCache: 0, localite: 'Toulouse' }) })
+  assert.equal(r.corps.etat, 'marche_absent')
+  assert.match(r.corps.message, /Le marché de votre adresse n’est pas encore disponible/)
+  assert.equal(r.rpcs.length, 0)
+  assert.equal(r.appelsAirroi.length, 0)
+})
+
+test('§22.7 : sans strategie, ou sans 3 comparables de l hote, rien n est calcule ni paye', async () => {
+  const sans = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tablesPrix({ strategie: null }) })
+  assert.equal(sans.corps.etat, 'strategie_absente')
+  const tb = tablesPrix()
+  tb.comparables_retenus = [...tb.comparables_retenus.slice(0, 2), { property_id: 'BIEN-A', listing_id: 'F1', actif: true, retenu_par: 'fondateur' }]
+  const peu = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
+  assert.equal(peu.corps.etat, 'comparables_insuffisants')
+  assert.equal(peu.rpcs.length + sans.rpcs.length, 0)
+})
+
+test('LE TEST QUI COMPTE (SECURITE, §22.5) : la migration de la nature — deux natures, plafond des calendriers, anciennes signatures supprimees, execution fermee', () => {
+  const sql = fs.readFileSync(path.join(RACINE, 'migrations', '2026-10-05-comparables-recherches-nature.sql'), 'utf8')
+  assert.ok(sql.split('\n').every(l => l.length < 60))
+  assert.match(sql, /check \(nature in \('recherche', 'calendrier'\)\)/)
+  assert.match(sql, /drop function if exists\s+public\.reserver_recherche_comparables\(\s+uuid, uuid, numeric, int, int, int, numeric\)/)
+  assert.match(sql, /drop function if exists\s+public\.rendre_recherche_comparables\(\s+uuid, numeric\)/)
+  assert.match(sql, /p_nature = 'calendrier' and p_cout <> 0\.10/)
+  const res = sql.slice(sql.indexOf('as $$'), sql.indexOf('$$;'))
+  assert.ok(res.indexOf('pg_advisory_xact_lock') < res.indexOf('sum(cout_usd)'))
+  assert.match(res, /nature = 'calendrier'\s+and cree_le > now\(\) - interval '90 days'/)
+  assert.match(sql, /revoke all on function\s+public\.reserver_recherche_comparables\(\s+uuid, uuid, numeric, text,\s+int, int, int, int, numeric\)\s+from public, anon, authenticated/)
+  assert.match(sql, /revoke all on function\s+public\.rendre_recherche_comparables\(\s+uuid, numeric, text\)\s+from public, anon, authenticated/)
 })

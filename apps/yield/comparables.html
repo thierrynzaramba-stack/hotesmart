@@ -83,6 +83,11 @@
     .cp-strategies label small { display: block; color: var(--text2); font-size: 12.5px; margin-top: 2px; }
     .cp-sejour { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13.5px; font-weight: 600; }
     .cp-sejour input { font: inherit; width: 80px; padding: 8px 10px; border: 0.5px solid var(--border2); border-radius: 8px; background: var(--bg); color: var(--text); min-height: 40px; }
+    .cp-prix { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 8px 0; }
+    .cp-prix th { text-align: left; color: var(--text2); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 0.5px solid var(--border2); }
+    .cp-prix td { padding: 8px; border-bottom: 0.5px solid var(--border); }
+    .cp-prix td.prix { font-size: 16px; font-weight: 700; }
+    .cp-suivi { font-size: 12.5px; font-weight: 600; }
     .cp-pied { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 10px 0; margin-top: 12px;
       display: flex; flex-wrap: wrap; align-items: center; gap: 10px; z-index: 500; }
     @media (max-width: 640px) {
@@ -194,6 +199,15 @@
       <span id="cp-message-c" aria-live="polite"></span>
     </div>
   </div>
+
+  <!-- ÉTAPE D : les prix de départ (§22.7) -->
+  <div class="cp-carte" id="cp-etape-d" hidden>
+    <h2>Vos prix de départ</h2>
+    <p class="sous">Calculés à partir des prix affichés par vos comparables, à chaque niveau du marché, selon votre stratégie.
+      Les comparables qui suivent le marché comptent plus que ceux dont les prix ne bougent pas. Rien n’est encore appliqué à vos prix.</p>
+    <div id="cp-zone-prix"></div>
+    <p class="cp-meta" id="cp-note-prix" aria-live="polite"></p>
+  </div>
 </div>
 </div>
 </div>
@@ -279,6 +293,10 @@
   // L'etape C est remplie UNE fois par logement : une nouvelle validation des
   // comparables n'efface pas une saisie en cours (review de dd8c060).
   let strategieAffichee = false
+  // §22.7 : la note de coherence de chaque comparable (sa mention), et le
+  // dernier etat des prix de depart.
+  let suivis = new Map()
+  let prixDepart = null
 
   function dire (id, texte, classe) { const z = el(id); z.textContent = texte || ''; z.className = classe || '' }
   const similaires = () => [...jugements.entries()].filter(([, v]) => POSITIONS.includes(v)).map(([id]) => id)
@@ -355,7 +373,8 @@
   async function charger () {
     const j = ++jeton
     profil = null; cartes = []; jugements.clear(); touches.clear(); fondateur = new Set(); ouvert = null
-    marcheSejour = null; retenusEnregistres = 0; strategieAffichee = false
+    marcheSejour = null; retenusEnregistres = 0; strategieAffichee = false; suivis = new Map(); prixDepart = null
+    el('cp-etape-d').hidden = true
     // Le bouton est rendu au nouveau logement (review de dd8c060).
     el('cp-etape-c').hidden = true; dire('cp-message-c', ''); el('cp-valider-c').disabled = false
     rechercheEnCours++
@@ -380,6 +399,7 @@
     marcheSejour = r.d.marche_sejour_min || null
     retenusEnregistres = (r.d.retenus || []).filter(id => !fondateur.has(String(id))).length
     afficherStrategie()
+    afficherPrix(r.d.prix_depart || null)
     afficherRecap(profil)
     montrerFormulaire(false)
     el('cp-etape-b').hidden = false
@@ -614,6 +634,7 @@
       const b = document.createElement('span'); b.className = 'cp-badge'; b.textContent = EQUIPEMENTS[e]; badges.append(b)
     }
     f.append(photos, entete, ligne, activite, badges)
+    if (suivis.has(id)) f.append(Object.assign(document.createElement('p'), { className: 'cp-suivi', textContent: `Ses prix : ${suivis.get(id)}` }))
     if (c.source === 'equipements') f.append(Object.assign(document.createElement('p'), { className: 'cp-source', textContent: 'Trouvé grâce à vos équipements' }))
     else if (aVosEquipements(c)) f.append(Object.assign(document.createElement('p'), { className: 'cp-source', textContent: 'A l’un de vos équipements' }))
     // §21.6 : tout le reste de l'information, sauf l'argent.
@@ -752,6 +773,68 @@
     if (!r.ok || !r.d || !r.d.profil) return dire('cp-message-c', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')
     profil = r.d.profil
     dire('cp-message-c', 'Votre stratégie est enregistrée.', 'cp-ok')
+    // Les prix de depart suivent la strategie : on les relit (cache seulement).
+    let g
+    try { g = await appeler('GET') } catch (e) { g = null }
+    if (j !== jeton || !g || !g.ok || !g.d) return
+    afficherPrix(g.d.prix_depart || null)
+  }
+
+  // ─── ÉTAPE D : les prix de depart (§22.7) ────────────────────────────────
+  const EUROS = v => `${v} €`
+  function afficherPrix (pd) {
+    prixDepart = pd
+    el('cp-etape-d').hidden = !(profil && profil.strategie && pd)
+    if (el('cp-etape-d').hidden) return
+    const zone = el('cp-zone-prix')
+    zone.replaceChildren()
+    dire('cp-note-prix', (pd && pd.note) || '', 'cp-meta')
+    if (pd.etat === 'a_capturer') {
+      const p = document.createElement('p'); p.className = 'cp-meta'
+      p.textContent = `Les prix de ${pluriel(pd.a_capturer, 'comparable', 'comparables')} ne sont pas encore relevés.`
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'cp-btn'; b.id = 'cp-relever'; b.textContent = 'Relever les prix de vos comparables'
+      b.addEventListener('click', relever)
+      zone.append(p, b); return
+    }
+    if (pd.etat !== 'calcule' || !pd.prix) { zone.append(Object.assign(document.createElement('p'), { className: 'non-calc', textContent: pd.message || 'Vos prix de départ ne peuvent pas encore être calculés.' })); return }
+    const r = pd.prix
+    suivis = new Map((r.comparables || []).map(c => [String(c.listing_id), c.mention]))
+    const t = document.createElement('table'); t.className = 'cp-prix'
+    const th = document.createElement('tr')
+    for (const x of ['Niveau du marché', 'Fourchette de vos comparables', 'Votre prix de départ']) { const c = document.createElement('th'); c.textContent = x; th.append(c) }
+    const tete = document.createElement('thead'); tete.append(th)
+    const corps = document.createElement('tbody')
+    for (const n of r.niveaux || []) {
+      const tr = document.createElement('tr')
+      const a = document.createElement('td'); a.textContent = n.yieldflow
+      const b = document.createElement('td')
+      const c = document.createElement('td')
+      if (n.statut === 'calcule') {
+        b.textContent = `${EUROS(n.fourchette.bas)} à ${EUROS(n.fourchette.haut)}`
+        c.className = 'prix'; c.textContent = EUROS(n.prix)
+      } else { b.className = 'non-calc'; b.textContent = 'non calculable'; c.className = 'non-calc'; c.textContent = n.motif || '' }
+      tr.append(a, b, c); corps.append(tr)
+    }
+    t.append(tete, corps)
+    zone.append(t)
+    if (Number.isFinite(r.cran)) zone.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: `Sur ce marché, un niveau de prix vaut environ ${EUROS(r.cran)} : c’est l’écart moyen d’un niveau au suivant chez vos comparables.` }))
+    const se = r.sejour
+    if (se && se.statut === 'calcule') {
+      const sens = se.ecart_pct < 0 ? `${Math.abs(se.ecart_pct)} % moins cher` : se.ecart_pct > 0 ? `${se.ecart_pct} % plus cher` : 'au même prix'
+      zone.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: `Séjour minimum : parmi vos comparables, ceux qui imposent 2 nuits ou plus vendent la nuit ${sens} que ceux qui acceptent 1 nuit (${EUROS(se.plusieurs_nuits)} contre ${EUROS(se.une_nuit)}).` }))
+    } else if (se) zone.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: `Séjour minimum : ${se.motif}.` }))
+    if (ouvert) ouvrirFiche(ouvert, { defiler: false })
+  }
+
+  async function relever () {
+    const j = jeton
+    const b = el('cp-relever'); if (b) b.disabled = true
+    dire('cp-note-prix', 'Relevé des prix de vos comparables…', 'cp-meta')
+    let r
+    try { r = await appeler('POST', { action: 'prix' }) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
+    if (j !== jeton) return
+    if (!r.ok || !r.d) { if (b) b.disabled = false; return dire('cp-note-prix', (r.d && r.d.message) || 'Relevé impossible.', 'cp-erreur') }
+    afficherPrix(r.d)
   }
 
   init()

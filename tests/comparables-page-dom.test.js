@@ -598,3 +598,68 @@ test('REVIEW : une nouvelle validation des comparables n efface pas une strategi
   assert.equal(doc.querySelector('input[name="strategie"][value="qualite"]').checked, true)
   assert.equal(doc.getElementById('cp-sejour-min').value, '4')
 })
+
+// ─── §22.7 : les prix de depart ─────────────────────────────────────────────
+const IDS3 = CARTES.slice(0, 3).map(c => c.listing_id)
+const PRIX_CALCULE = { etat: 'calcule', manquants: 0, note: null, prix: { statut: 'calcule', strategie: 'juste', cran: 12,
+  niveaux: [
+    { niveau: 'creux', yieldflow: 'Base', statut: 'calcule', prix: 85, fourchette: { bas: 70, haut: 95 }, comparables: 3 },
+    { niveau: 'modere', yieldflow: 'Moyen', statut: 'calcule', prix: 95, fourchette: { bas: 82, haut: 108 }, comparables: 3 },
+    { niveau: 'favorable', yieldflow: 'Haut', statut: 'calcule', prix: 110, fourchette: { bas: 96, haut: 120 }, comparables: 3 },
+    { niveau: 'pic', yieldflow: 'Très haut ou Exceptionnel', statut: 'non_calculable', motif: '2 comparables avec un prix à ce niveau (il en faut 3)' }],
+  comparables: [{ listing_id: IDS3[0], note: 0.82, mention: 'suit bien le marché', position: 'dessous' }],
+  sejour: { statut: 'calcule', une_nuit: 100, plusieurs_nuits: 90, ecart_pct: -10, comparables: [2, 2] } } }
+const pageAvecPrix = (pd, { strategie = 'juste', apres = () => reponse({}, 400) } = {}) => ({ methode, corps }) => (methode === 'GET'
+  ? reponse({ etat: 'calcule', profil: { ...PROFIL, strategie, sejour_min: 2 }, retenus: IDS3, fondateur: [], comparables: CARTES, prix_depart: pd })
+  : apres({ methode, corps }))
+
+test('LE TEST QUI COMPTE (§22.7) : les prix de depart — par niveau, la fourchette des comparables et VOTRE prix ; le cran ; l effet du sejour minimum', async () => {
+  const { doc } = await monter(pageAvecPrix(PRIX_CALCULE))
+  assert.equal(doc.getElementById('cp-etape-d').hidden, false)
+  const lignes = [...doc.querySelectorAll('#cp-zone-prix tbody tr')].map(tr => [...tr.children].map(td => td.textContent))
+  assert.deepEqual(lignes, [
+    ['Base', '70 € à 95 €', '85 €'], ['Moyen', '82 € à 108 €', '95 €'], ['Haut', '96 € à 120 €', '110 €'],
+    ['Très haut ou Exceptionnel', 'non calculable', '2 comparables avec un prix à ce niveau (il en faut 3)']])
+  const z = doc.getElementById('cp-zone-prix').textContent
+  assert.match(z, /un niveau de prix vaut environ 12 €/)
+  assert.match(z, /ceux qui imposent 2 nuits ou plus vendent la nuit 10 % moins cher que ceux qui acceptent 1 nuit \(90 € contre 100 €\)/)
+})
+
+test('§22.7 : sans strategie, pas de section des prix ; la note de coherence d un comparable s affiche dans sa fiche', async () => {
+  const sans = await monter(pageAvecPrix({ etat: 'strategie_absente', message: 'x' }, { strategie: null }))
+  assert.equal(sans.doc.getElementById('cp-etape-d').hidden, true)
+  const { doc, L } = await monter(pageAvecPrix(PRIX_CALCULE))
+  cliquerPoint(L, IDS3[0])
+  assert.match(doc.getElementById('cp-fiche').textContent, /Ses prix : suit bien le marché/)
+})
+
+test('LE TEST QUI COMPTE (§22.7) : des prix a relever — un bouton, jamais un releve automatique ; le releve affiche le resultat', async () => {
+  const { doc, appels } = await monter(pageAvecPrix({ etat: 'a_capturer', a_capturer: 2 }, { apres: ({ corps }) => (corps.action === 'prix' ? reponse(PRIX_CALCULE) : reponse({}, 400)) }))
+  assert.equal(posts(appels, 'prix').length, 0)
+  assert.match(doc.getElementById('cp-zone-prix').textContent, /Les prix de 2 comparables ne sont pas encore relevés/)
+  doc.getElementById('cp-relever').click()
+  await attendre()
+  assert.equal(posts(appels, 'prix').length, 1)
+  assert.equal(doc.querySelectorAll('#cp-zone-prix tbody tr').length, 4)
+})
+
+test('§22.7 : le marche de l adresse indisponible — le message, sans tableau', async () => {
+  const { doc } = await monter(pageAvecPrix({ etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }))
+  assert.match(doc.getElementById('cp-zone-prix').textContent, /Le marché de votre adresse n’est pas encore disponible/)
+  assert.equal(doc.querySelectorAll('#cp-zone-prix table').length, 0)
+})
+
+test('§22.7 : enregistrer une strategie relit les prix de depart (cache seulement)', async () => {
+  let n = 0
+  const { doc, appels } = await monter(({ methode, corps }) => {
+    if (methode === 'GET') { n++; return reponse({ etat: 'calcule', profil: { ...PROFIL, strategie: n > 1 ? 'qualite' : 'juste', sejour_min: 2 }, retenus: IDS3, fondateur: [], comparables: CARTES, prix_depart: n > 1 ? PRIX_CALCULE : { etat: 'a_capturer', a_capturer: 3 } }) }
+    if (corps.action === 'strategie') return reponse({ etat: 'enregistre', profil: { ...PROFIL, strategie: 'qualite', sejour_min: 2 } })
+    return reponse({}, 400)
+  })
+  doc.querySelector('input[name="strategie"][value="qualite"]').checked = true
+  doc.getElementById('cp-sejour-min').value = '2'
+  doc.getElementById('cp-valider-c').click()
+  await attendre()
+  assert.equal(posts(appels, 'prix').length, 0, 'aucun releve payant')
+  assert.equal(doc.querySelectorAll('#cp-zone-prix tbody tr').length, 4)
+})

@@ -26,6 +26,8 @@ const { depotSupabase } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
 const { validerProfil, validerStrategie, geocoder, lireProfil, enregistrerProfil, enregistrerStrategie } = require('../lib/marche/profil-bien')
 const { reunirEtTrier, repartitionSejourMin } = require('../lib/marche/pertinence')
+const { prixDeDepart } = require('../lib/marche/prix-depart')
+const { lireDerniereCapture } = require('../lib/marche/temperature-airroi')
 const { rechercheDuProfil, validerChoix, enregistrerChoix, corpsRechercheEquipements, COUTS, QUOTA, MESSAGE_QUOTA } = require('../lib/marche/choix-comparables')
 const { FRAICHEUR_JOURS } = require('../lib/airroi/cout')
 const { comparablesRetenus } = require('../lib/marche/etude')
@@ -33,6 +35,7 @@ const { comparablesRetenus } = require('../lib/marche/etude')
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const ENDPOINT = 'GET /listings/comparables'
 const ENDPOINT_EQ = 'POST /listings/search/radius'
+const ENDPOINT_CAL = 'GET /listings/live/calendar'
 
 // Ce que l'ecran voit du profil. §21.4 : SA position, pour son marqueur sur la
 // carte. Elle est servie a qui peut lire les reservations de ce bien (titulaire
@@ -77,22 +80,77 @@ const INDISPONIBLE = 'Cette page n’est pas encore disponible pour ce logement.
 // et reserve sous verrou, dans une meme transaction. Rend 'ok' ou le plafond
 // atteint ; une reponse illisible est un REFUS (jamais un paiement par defaut).
 // §21.3 : chaque appel payant reserve son COUT (0,10 $ ou 0,50 $).
-async function reserverRecherche ({ bienId, compte, cout }) {
+async function reserverRecherche ({ bienId, compte, cout, nature = 'recherche' }) {
   const { data, error } = await supabase.rpc('reserver_recherche_comparables', {
-    p_user: compte, p_property: bienId, p_cout: cout,
+    p_user: compte, p_property: bienId, p_cout: cout, p_nature: nature,
     p_bien_jour: QUOTA.parBienJour, p_compte_jour: QUOTA.parCompteJour,
-    p_compte_30j: QUOTA.parCompte30j, p_budget_mois: QUOTA.budgetMoisUsd,
+    p_compte_30j: QUOTA.parCompte30j, p_calendriers_90j: QUOTA.calendriersBien90j,
+    p_budget_mois: QUOTA.budgetMoisUsd,
   })
   if (error) throw new Error(`reserver_recherche_comparables : ${error.message}`)
   return typeof data === 'string' ? data : 'illisible'
 }
 // Un appel qui a echoue RAND sa reservation (review de 25ab9e6, C1). Son propre
 // echec n'empeche rien : il est journalise.
-async function rendreRecherche ({ bienId, cout }) {
+async function rendreRecherche ({ bienId, cout, nature = 'recherche' }) {
   try {
-    const { error } = await supabase.rpc('rendre_recherche_comparables', { p_property: bienId, p_cout: cout })
+    const { error } = await supabase.rpc('rendre_recherche_comparables', { p_property: bienId, p_cout: cout, p_nature: nature })
     if (error) console.error('[marche-comparables] rendre', error.message)
   } catch (e) { console.error('[marche-comparables] rendre', e.message) }
+}
+
+// ─── §22.3 et §22.7 : les prix de depart ────────────────────────────────────
+// Le marche du bien doit etre celui de l'adresse de son profil : sa commune
+// doit figurer dans l'adresse trouvee (sinon, aucun calcul, aucun paiement).
+const sansAccents = v => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+async function marcheDuBien (bienId, profil) {
+  const { data, error } = await supabase.from('marche_biens').select('pays, region, localite').eq('property_id', bienId).limit(1)
+  if (error) throw new Error(`marche_biens : ${error.message}`)
+  const m = (data || [])[0]
+  if (!m || !sansAccents(profil.adresse_trouvee).includes(sansAccents(m.localite))) return null
+  const nfc = v => String(v || '').normalize('NFC')
+  return { pays: nfc(m.pays), region: nfc(m.region), localite: nfc(m.localite) }
+}
+
+// Les prix de depart : `payer` faux = le cache seulement (le GET). Rend
+// { etat, prix?, message?, a_capturer }.
+async function calculerPrix ({ bienId, compte, profil, payer }) {
+  if (!profil || !profil.strategie) return { etat: 'strategie_absente', message: 'Choisissez d’abord votre stratégie de prix.' }
+  const lignes = await comparablesRetenus(supabase, bienId)
+  if (lignes.filter(l => l.retenu_par !== 'fondateur').length < 3) return { etat: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' }
+  const marche = await marcheDuBien(bienId, profil)
+  if (!marche) return { etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }
+  const capture = await lireDerniereCapture(supabase, marche)
+  if (capture.erreur) throw new Error(`temperature : ${capture.erreur}`)
+  if (!capture.jours.length) return { etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }
+  let client = null
+  const ctx = { propertyId: bienId, userId: compte }
+  const calendriers = []
+  let manquants = 0
+  let refus = null
+  for (const l of lignes) {
+    let jours = await cacheFrais(ENDPOINT_CAL, { listing_id: String(l.listing_id), currency: 'native' }, 'results')
+    if (jours === null && payer && !refus) {
+      // Chaque calendrier RESERVE son cout d'abord (§22.5) ; un echec le rend.
+      const motif = await reserverRecherche({ bienId, compte, cout: COUTS.calendrier, nature: 'calendrier' })
+      if (motif !== 'ok') refus = MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois
+      else {
+        try {
+          client = client || creerClient({ depot: depotSupabase(supabase) })
+          const r = await client.calendrierAnnonce(l.listing_id, ctx)
+          jours = r && r.donnees && Array.isArray(r.donnees.results) ? r.donnees.results : null
+        } catch (e) {
+          console.error('[marche-comparables] calendrier', e && (e.code || e.message))
+          await rendreRecherche({ bienId, cout: COUTS.calendrier, nature: 'calendrier' })
+        }
+      }
+    }
+    if (jours === null) { manquants++; continue }
+    calendriers.push({ listing_id: String(l.listing_id), position: l.retenu_par === 'fondateur' ? 'equivalent' : l.position, jours })
+  }
+  if (!payer && manquants) return { etat: 'a_capturer', a_capturer: manquants }
+  const prix = prixDeDepart({ calendriers, marche: capture.jours, strategie: profil.strategie })
+  return { etat: 'calcule', prix, manquants, note: refus || (manquants ? `Les prix de ${manquants} comparable${manquants > 1 ? 's' : ''} n’ont pas pu être relevés.` : null) }
 }
 
 module.exports = async (req, res) => {
@@ -126,7 +184,9 @@ module.exports = async (req, res) => {
         // §22.2 : ce que pratique le marche en sejour minimum (lu dans les fiches).
         marche_sejour_min: base ? repartitionSejourMin([...base, ...(complement || [])]) : null,
         // La recherche par equipement reste a faire : la page propose de la lancer.
-        complement_a_chercher: !!(base && complement === null) })
+        complement_a_chercher: !!(base && complement === null),
+        // §22.7 : les prix de depart, depuis le cache seulement (un GET ne paie jamais).
+        prix_depart: profil ? await calculerPrix({ bienId, compte, profil, payer: false }) : null })
     }
 
     const corps = req.body && typeof req.body === 'object' ? req.body : {}
@@ -201,6 +261,14 @@ module.exports = async (req, res) => {
         marche_sejour_min: repartitionSejourMin([...base, ...complement]),
         retenus: lignes.map(x => x.listing_id), fondateur: lignes.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id),
         positions: Object.fromEntries(lignes.filter(x => x.position).map(x => [x.listing_id, x.position])) })
+    }
+
+    // §22.7 : relever les prix des comparables (cache, sinon 0,10 $ chacun) et
+    // calculer les prix de depart.
+    if (corps.action === 'prix') {
+      const profil = await lireProfil(supabase, bienId)
+      if (!profil) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })
+      return res.status(200).json(await calculerPrix({ bienId, compte, profil, payer: true }))
     }
 
     // §22.2 : la strategie de prix et le sejour minimum souhaite.
