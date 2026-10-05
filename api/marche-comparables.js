@@ -25,32 +25,45 @@ const { creerClient, cleCanonique } = require('../lib/airroi/client')
 const { depotSupabase } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
 const { validerProfil, geocoder, lireProfil, enregistrerProfil } = require('../lib/marche/profil-bien')
-const { trierComparables } = require('../lib/marche/pertinence')
-const { rechercheDuProfil, validerChoix, enregistrerChoix, QUOTA, MESSAGE_QUOTA } = require('../lib/marche/choix-comparables')
+const { reunirEtTrier } = require('../lib/marche/pertinence')
+const { rechercheDuProfil, validerChoix, enregistrerChoix, corpsRechercheEquipements, COUTS, QUOTA, MESSAGE_QUOTA } = require('../lib/marche/choix-comparables')
 const { FRAICHEUR_JOURS } = require('../lib/airroi/cout')
 const { comparablesRetenus } = require('../lib/marche/etude')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const ENDPOINT = 'GET /listings/comparables'
+const ENDPOINT_EQ = 'POST /listings/search/radius'
 
-// Ce que l'ecran voit du profil : pas de position brute.
+// Ce que l'ecran voit du profil. §21.4 : SA position, pour son marqueur sur la
+// carte. Elle est servie a qui peut lire les reservations de ce bien (titulaire
+// et membres delegues de ce bien) — rien de plus que l'adresse, deja servie.
 const profilPublic = p => (p ? {
   adresse: p.adresse, adresse_trouvee: p.adresse_trouvee, voyageurs: p.voyageurs, chambres: p.chambres,
   pieces: p.pieces, salles_de_bain: p.salles_de_bain, equipements: p.equipements, maj_le: p.maj_le,
+  latitude: p.latitude, longitude: p.longitude,
 } : null)
 
-// La derniere liste AirROI de CE profil, en cache seulement (rien n'est paye),
-// et FRAICHE : au-dela de sa duree de fraicheur, elle n'est plus proposee.
-async function listeEnCache (profil, maintenant = new Date()) {
-  const cle = cleCanonique(ENDPOINT, { ...rechercheDuProfil(profil), currency: 'native' })
+// Une reponse AirROI en cache, FRAICHE seulement (au-dela de sa duree de
+// fraicheur, elle n'est plus proposee). Rien n'est paye. Rend le tableau `champ`
+// de la reponse, ou null.
+async function cacheFrais (endpoint, params, champ, maintenant = new Date()) {
+  const cle = cleCanonique(endpoint, params)
   const { data, error } = await supabase.from('airroi_cache').select('reponse, recupere_le').eq('cle', cle).limit(1)
   if (error) throw new Error(`airroi_cache : ${error.message}`)
   const l = (data || [])[0]
   if (!l) return null
-  if ((maintenant - new Date(l.recupere_le)) / 86400000 > FRAICHEUR_JOURS[ENDPOINT]) return null
+  if ((maintenant - new Date(l.recupere_le)) / 86400000 > FRAICHEUR_JOURS[endpoint]) return null
   let donnees
   try { donnees = lireJson(l.reponse) } catch (e) { return null }
-  return { listings: (donnees && Array.isArray(donnees.listings)) ? donnees.listings : [], recupere_le: l.recupere_le }
+  return donnees && Array.isArray(donnees[champ]) ? donnees[champ] : []
+}
+// La liste de base de CE profil (les 25 voisins).
+const listeEnCache = profil => cacheFrais(ENDPOINT, { ...rechercheDuProfil(profil), currency: 'native' }, 'listings')
+// La recherche par equipement de CE profil (§21.2) : [] s'il n'a aucun
+// equipement rare, null si elle reste a faire.
+async function complementEnCache (profil) {
+  const corps = corpsRechercheEquipements(profil)
+  return corps ? cacheFrais(ENDPOINT_EQ, corps, 'results') : []
 }
 
 // Une table V2 pas encore installee (migration non appliquee) : la page le dit,
@@ -61,14 +74,23 @@ const INDISPONIBLE = 'Cette page n’est pas encore disponible pour ce logement.
 // ⚠ LE QUOTA EST ATOMIQUE (review de 7ace057, SECURITE) : la fonction SQL compte
 // et reserve sous verrou, dans une meme transaction. Rend 'ok' ou le plafond
 // atteint ; une reponse illisible est un REFUS (jamais un paiement par defaut).
-async function reserverRecherche ({ bienId, compte }) {
+// §21.3 : chaque appel payant reserve son COUT (0,10 $ ou 0,50 $).
+async function reserverRecherche ({ bienId, compte, cout }) {
   const { data, error } = await supabase.rpc('reserver_recherche_comparables', {
-    p_user: compte, p_property: bienId,
+    p_user: compte, p_property: bienId, p_cout: cout,
     p_bien_jour: QUOTA.parBienJour, p_compte_jour: QUOTA.parCompteJour,
-    p_compte_30j: QUOTA.parCompte30j, p_tous_mois: QUOTA.parMoisTousComptes,
+    p_compte_30j: QUOTA.parCompte30j, p_budget_mois: QUOTA.budgetMoisUsd,
   })
   if (error) throw new Error(`reserver_recherche_comparables : ${error.message}`)
   return typeof data === 'string' ? data : 'illisible'
+}
+// Un appel qui a echoue RAND sa reservation (review de 25ab9e6, C1). Son propre
+// echec n'empeche rien : il est journalise.
+async function rendreRecherche ({ bienId, cout }) {
+  try {
+    const { error } = await supabase.rpc('rendre_recherche_comparables', { p_property: bienId, p_cout: cout })
+    if (error) console.error('[marche-comparables] rendre', error.message)
+  } catch (e) { console.error('[marche-comparables] rendre', e.message) }
 }
 
 module.exports = async (req, res) => {
@@ -90,13 +112,16 @@ module.exports = async (req, res) => {
     if (lecture) {
       const profil = await lireProfil(supabase, bienId)
       const lignes = await comparablesRetenus(supabase, bienId)
-      const liste = profil ? await listeEnCache(profil) : null
+      const base = profil ? await listeEnCache(profil) : null
+      const complement = base ? await complementEnCache(profil) : null
       // Les retenus du FONDATEUR sont dits a part : la page les montre
       // verrouilles, et compte ceux qui sont hors de la liste (review de 7ace057).
       return res.status(200).json({ etat: 'calcule', profil: profilPublic(profil),
         retenus: lignes.map(r => r.listing_id),
         fondateur: lignes.filter(r => r.retenu_par === 'fondateur').map(r => r.listing_id),
-        comparables: liste ? trierComparables(liste.listings, profil) : null })
+        comparables: base ? reunirEtTrier(base, complement || [], profil) : null,
+        // La recherche par equipement reste a faire : la page propose de la lancer.
+        complement_a_chercher: !!(base && complement === null) })
     }
 
     const corps = req.body && typeof req.body === 'object' ? req.body : {}
@@ -115,43 +140,69 @@ module.exports = async (req, res) => {
     if (corps.action === 'chercher') {
       const profil = await lireProfil(supabase, bienId)
       if (!profil) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })
-      // Une liste fraiche en cache est servie TELLE QUELLE, sans appeler le
-      // client : il relirait le cache et paierait si celui-ci expirait entre les
-      // deux lectures, sans reservation (verification de 13ffd29).
-      const fraiche = await listeEnCache(profil)
-      if (fraiche) {
-        const lignesF = await comparablesRetenus(supabase, bienId)
-        return res.status(200).json({ etat: 'calcule', comparables: trierComparables(fraiche.listings, profil),
-          retenus: lignesF.map(x => x.listing_id), fondateur: lignesF.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id) })
-      }
-      {
-        const motif = await reserverRecherche({ bienId, compte })
-        if (motif !== 'ok') {
-          return res.status(200).json({ etat: 'indisponible', message: MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois })
+      // ⚠ Une liste FRAICHE en cache est servie telle quelle, sans appeler le
+      // client (il relirait le cache et paierait sans reservation s'il expirait
+      // entre-temps — verification de 13ffd29). Chaque appel payant RESERVE son
+      // cout d'abord (§21.3) ; le client n'est cree que s'il faut payer.
+      let client = null
+      const leClient = () => (client = client || creerClient({ depot: depotSupabase(supabase) }))
+      const ctx = { propertyId: bienId, userId: compte }
+      const panne = 'La liste des biens du marché n’est pas disponible pour le moment. Réessayez plus tard.'
+      let base = await listeEnCache(profil)
+      if (!base) {
+        const motif = await reserverRecherche({ bienId, compte, cout: COUTS.base })
+        if (motif !== 'ok') return res.status(200).json({ etat: 'indisponible', message: MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois })
+        try {
+          const r = await leClient().comparables(rechercheDuProfil(profil), ctx)
+          base = r && r.donnees && Array.isArray(r.donnees.listings) ? r.donnees.listings : []
+        } catch (e) {
+          // Garde-fou, cle absente, AirROI en panne : une phrase simple pour
+          // l'hote ; le detail au journal (jamais de cle : client.js la masque).
+          console.error('[marche-comparables] airroi', e && (e.code || e.message))
+          await rendreRecherche({ bienId, cout: COUTS.base })
+          return res.status(200).json({ etat: 'indisponible', message: panne })
         }
       }
-      const client = creerClient({ depot: depotSupabase(supabase) })
-      let r
-      try {
-        r = await client.comparables(rechercheDuProfil(profil), { propertyId: bienId, userId: compte })
-      } catch (e) {
-        // Garde-fou de cout, cle absente, AirROI en panne : l'hote lit une phrase
-        // simple ; le detail va au journal (jamais de cle : client.js la masque).
-        console.error('[marche-comparables] airroi', e && (e.code || e.message))
-        return res.status(200).json({ etat: 'indisponible', message: 'La liste des biens du marché n’est pas disponible pour le moment. Réessayez plus tard.' })
+      // La recherche par equipement (§21.2) : son echec n'empeche jamais la
+      // liste de base, il se dit.
+      let complement = await complementEnCache(profil)
+      let note = null
+      if (complement === null) {
+        // Une panne de la reservation elle-meme n'empeche pas la liste de base
+        // (review de 25ab9e6, C2) : on refuse le complement, sans payer.
+        let motif
+        try { motif = await reserverRecherche({ bienId, compte, cout: COUTS.equipements }) } catch (e) {
+          console.error('[marche-comparables] reservation equipements', e.message)
+          motif = 'panne'
+        }
+        if (motif !== 'ok') {
+          complement = []
+          note = motif === 'panne' ? 'La recherche des biens qui ont vos équipements n’est pas disponible pour le moment.'
+            : 'La recherche des biens qui ont vos équipements n’a pas pu être lancée : ' + (MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois).charAt(0).toLowerCase() + (MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois).slice(1)
+        } else {
+          try {
+            const r = await leClient().rechercheEquipements(corpsRechercheEquipements(profil), ctx)
+            complement = r && r.donnees && Array.isArray(r.donnees.results) ? r.donnees.results : []
+          } catch (e) {
+            console.error('[marche-comparables] airroi equipements', e && (e.code || e.message))
+            await rendreRecherche({ bienId, cout: COUTS.equipements })
+            complement = []
+            note = 'La recherche des biens qui ont vos équipements n’est pas disponible pour le moment.'
+          }
+        }
       }
-      const listings = r && r.donnees && Array.isArray(r.donnees.listings) ? r.donnees.listings : []
       const lignes = await comparablesRetenus(supabase, bienId)
-      return res.status(200).json({ etat: 'calcule', comparables: trierComparables(listings, profil),
+      return res.status(200).json({ etat: 'calcule', comparables: reunirEtTrier(base, complement, profil), note,
         retenus: lignes.map(x => x.listing_id), fondateur: lignes.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id) })
     }
 
     if (corps.action === 'retenir') {
       const profil = await lireProfil(supabase, bienId)
       if (!profil) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })
-      const liste = await listeEnCache(profil)
-      if (!liste) return res.status(400).json({ error: 'liste_absente', message: 'Relancez la recherche des biens du marché.' })
-      const v = validerChoix(corps.listing_ids, liste.listings)
+      const base = await listeEnCache(profil)
+      if (!base) return res.status(400).json({ error: 'liste_absente', message: 'Relancez la recherche des biens du marché.' })
+      // Les biens proposes : la liste de base ET ceux trouves par equipement.
+      const v = validerChoix(corps.listing_ids, [...base, ...((await complementEnCache(profil)) || [])])
       if (v.erreur) return res.status(400).json({ error: 'choix_invalide', message: v.erreur })
       await enregistrerChoix(supabase, { userId: compte, propertyId: bienId, ids: v.ids })
       return res.status(200).json({ etat: 'enregistre', retenus: v.ids })

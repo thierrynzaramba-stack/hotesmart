@@ -522,3 +522,36 @@ test('occupancy : num_months = 0 est admis (contrat de l API : 0 a 60) — essai
     assert.deepEqual(JSON.parse(f.appels[0].init.body), { market, num_months: 0, currency: 'native' })
   })
 })
+
+// ─── §21.2 : la recherche par equipement, corps FIGE ─────────────────────────
+test('§21.2 : POST /listings/search/radius — tarif 0,50 $, fraicheur 90 jours, et le corps construit par la route est valide', () => {
+  const { TARIFS, FRAICHEUR_JOURS } = require('../lib/airroi/cout')
+  assert.equal(TARIFS['POST /listings/search/radius'], 0.50)
+  assert.equal(FRAICHEUR_JOURS['POST /listings/search/radius'], 90)
+  const { corpsRechercheEquipements } = require('../lib/marche/choix-comparables')
+  const corps = corpsRechercheEquipements({ latitude: 43.6, longitude: 1.45, voyageurs: 2, equipements: ['spa', 'vue', 'parking'] })
+  assert.deepEqual(corps, { latitude: 43.6, longitude: 1.45, radius_miles: 3,
+    filter: { amenities: { any: ['hot_tub', 'sauna', 'ocean_view', 'river_view', 'waterfront', 'lake_access'] }, guests: { range: [1, 4] } },
+    pagination: { page_size: 10, offset: 0 } })
+  assert.equal(corpsRechercheEquipements({ latitude: 43.6, longitude: 1.45, voyageurs: 2, equipements: ['parking', 'terrasse', 'climatisation'] }), null, 'aucun equipement rare : pas de recherche')
+})
+
+test('LE TEST QUI COMPTE (§21.2) : un corps de recherche hors contrat est REFUSE avant tout reseau', async () => {
+  const appels = []
+  const depot = { lireCache: async () => null, ecrireCache: async () => {}, reserver: async () => 1, terminer: async () => {}, appelsDepuis: async () => [] }
+  const { creerClient } = require('../lib/airroi/client')
+  const client = creerClient({ depot, alerter: null, fetch: async (...a) => { appels.push(a); throw new Error('reseau interdit') } })
+  const bon = { latitude: 43.6, longitude: 1.45, radius_miles: 3, filter: { amenities: { any: ['hot_tub'] }, guests: { range: [1, 4] } }, pagination: { page_size: 10, offset: 0 } }
+  const mauvais = [
+    { ...bon, currency: 'native' },
+    { ...bon, radius_miles: 50 },
+    { ...bon, pagination: { page_size: 10, offset: 10 } },
+    { ...bon, filter: { ...bon.filter, amenities: { any: ['wifi'] } } },
+    { ...bon, filter: { ...bon.filter, amenities: { any: [] } } },
+    { ...bon, filter: { ...bon.filter, amenities: { any: ['hot_tub'], none: ['pool'] } } },
+    { ...bon, filter: { ...bon.filter, ttm_avg_rate: { gt: 100 } } },
+    { ...bon, filter: { ...bon.filter, guests: { range: [5, 2] } } },
+  ]
+  for (const c of mauvais) await assert.rejects(client.rechercheEquipements(c, { propertyId: 'P', userId: 'U' }), /parametres invalides/)
+  assert.equal(appels.length, 0)
+})

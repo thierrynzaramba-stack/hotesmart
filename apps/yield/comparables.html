@@ -5,19 +5,31 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HôteSmart — Choisir vos comparables</title>
   <link rel="stylesheet" href="/public/style.css">
+  <!-- Leaflet 1.9.4 (cdnjs), empreintes d'integrite verifiees le 5 octobre 2026. -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css"
+        integrity="sha512-Zcn6bjR/8RZbLEpLIeOwNtzREBAJnUKESxces60Mpoj+2okopSAcSUIUOseddDm0cxnGQzxIR7vJgsLZbdLE3w==" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"
+          integrity="sha512-BwHfrr4c9kmRkLw6iXFdzcdWV/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz/EWjgk5TYQqX/kvn9pG1NpYfqg==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
   <style>
     [hidden] { display: none !important; }
-    /* ⚠ « CHOISIR VOS COMPARABLES » (spec §20 de docs/kb/chantier-nouveau-bien.md).
-       Etape A : l'hote decrit son bien. Etape B : il coche au moins 3 biens
-       du marche parmi les 25 que propose AirROI. AUCUN PRIX, aucun revenu,
-       aucune occupation n'est affiche. Toute donnee venue d'AirROI est posee
-       par textContent / setAttribute, jamais par innerHTML (review de a52b3e4). */
-    .cp-intro { font-size: 13.5px; line-height: 1.5; color: var(--text2); margin: 0 0 16px; }
+    /* ⚠ « CHOISIR VOS COMPARABLES » SUR UNE CARTE (spec §20 et §21 de
+       docs/kb/chantier-nouveau-bien.md). En haut, le rappel du profil ; la
+       carte, le bien de l'hote et les biens proposes (plus ressemblant = plus
+       gros) ; un clic ouvre la fiche sous la carte, « Logement similaire » ou
+       « Non similaire ». AUCUN PRIX. Toute donnee venue d'AirROI est posee par
+       textContent / setAttribute, jamais comme du HTML. */
+    .cp-intro { font-size: 13.5px; line-height: 1.5; color: var(--text2); margin: 0 0 14px; }
     .cp-carte { border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 16px; background: var(--bg); }
     .cp-carte h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
     .cp-carte .sous { font-size: 12.5px; color: var(--text2); margin: 0 0 12px; line-height: 1.45; }
-    .cp-meta { font-size: 12.5px; color: var(--text2); margin: 6px 0 16px; }
+    .cp-meta { font-size: 12.5px; color: var(--text2); margin: 6px 0 12px; }
     .non-calc { color: var(--text2); font-style: italic; }
+    #cp-bien { max-width: 100%; }
+    /* Le rappel du profil. */
+    .cp-recap { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+    .cp-recap-texte { font-size: 13.5px; line-height: 1.5; }
+    .cp-recap-texte b { font-weight: 600; }
+    /* Le formulaire. */
     .cp-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px 16px; }
     .cp-form label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 600; }
     .cp-form label small { font-weight: 400; color: var(--text2); font-size: 12px; line-height: 1.35; }
@@ -29,30 +41,38 @@
     .cp-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
     .cp-btn { font: inherit; font-size: 14px; font-weight: 600; border: 0; border-radius: 8px; padding: 10px 16px; min-height: 44px;
       background: var(--accent, #2A5E86); color: #fff; cursor: pointer; }
+    .cp-btn.secondaire { background: var(--bg2); color: var(--text); border: 0.5px solid var(--border2); }
     .cp-btn:disabled { opacity: .45; cursor: default; }
     .cp-erreur { color: var(--red, #B3261E); font-size: 13px; }
     .cp-ok { color: var(--green, #1F6F45); font-size: 13px; }
-    .cp-liste { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; margin-top: 10px; }
-    .cp-bien { border: 0.5px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
-    .cp-bien.choisi { outline: 2px solid var(--accent, #2A5E86); outline-offset: -1px; }
-    .cp-photo { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; background: var(--bg2); display: block; }
-    .cp-sans-photo { width: 100%; aspect-ratio: 3 / 2; background: var(--bg2); display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--text2); }
-    .cp-corps { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
-    .cp-nom { font-size: 14px; font-weight: 600; margin: 0; line-height: 1.3; overflow-wrap: anywhere; }
-    .cp-ligne { font-size: 12.5px; color: var(--text2); }
-    .cp-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+    /* La carte. */
+    /* isolation : les couches de Leaflet (z-index jusqu'a 1000) restent DANS la
+       carte et ne passent plus sur le pied collant (review de 995f025). */
+    #cp-map { width: 100%; height: 440px; border-radius: var(--radius); border: 0.5px solid var(--border); background: var(--bg2); isolation: isolate; }
+    .cp-legende { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--text2); margin: 8px 0 0; }
+    .cp-legende i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -1px; margin-right: 5px; }
+    /* La fiche sous la carte. */
+    .cp-fiche { margin-top: 14px; border-top: 0.5px solid var(--border); padding-top: 12px; }
+    .cp-photos { display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; }
+    .cp-photos img { height: 150px; width: auto; max-width: 240px; object-fit: cover; border-radius: 8px; background: var(--bg2); flex: 0 0 auto; }
+    .cp-nom { font-size: 15px; font-weight: 600; margin: 8px 0 4px; overflow-wrap: anywhere; }
+    .cp-ligne { font-size: 12.5px; color: var(--text2); margin: 2px 0; }
+    .cp-badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
     .cp-badge { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--bg2); color: var(--text); border: 0.5px solid var(--border); }
-    .cp-activite { font-size: 12px; font-weight: 600; }
-    .cp-ressemblance { font-size: 11.5px; color: var(--text2); }
-    .cp-choix { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 6px; font-size: 13.5px; font-weight: 600; min-height: 44px; cursor: pointer; }
-    .cp-choix input { width: 20px; height: 20px; }
-    .cp-fondateur { font-size: 12px; font-weight: 600; color: var(--text2); }
-    #cp-bien { max-width: 100%; }
+    .cp-source { font-size: 12px; font-weight: 600; color: #1F8A4C; }
+    .cp-verdict { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .cp-verdict button[aria-pressed="true"].similaire { background: #1F8A4C; color: #fff; }
+    .cp-verdict button[aria-pressed="true"].non { background: #5F6368; color: #fff; }
+    .cp-fondateur { font-size: 13px; font-weight: 600; color: #1F8A4C; margin-top: 10px; }
+    .cp-liste-biens summary { cursor: pointer; font-size: 13px; font-weight: 600; min-height: 32px; padding: 6px 0; }
+    .cp-liste-biens ol { margin: 4px 0 0; padding-left: 20px; font-size: 13px; }
+    .cp-liste-biens button { font: inherit; background: none; border: 0; padding: 4px 0; color: var(--text); cursor: pointer; text-align: left; min-height: 32px; }
     .cp-pied { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 10px 0; margin-top: 12px;
-      display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+      display: flex; flex-wrap: wrap; align-items: center; gap: 10px; z-index: 500; }
     @media (max-width: 640px) {
       .content { padding-left: 12px; padding-right: 12px; } .cp-carte { padding: 12px; }
-      .cp-liste { grid-template-columns: minmax(0, 1fr); }
+      #cp-map { height: 60vh; }
+      .cp-photos img { height: 120px; }
     }
   </style>
 </head>
@@ -62,15 +82,23 @@
 <div class="main">
 <div class="content">
   <div class="header"><h1>Choisir vos comparables</h1></div>
-  <p class="cp-intro">Décrivez votre logement, puis cochez au moins trois biens du marché qui lui ressemblent vraiment.
+  <p class="cp-intro">Décrivez votre logement, puis désignez sur la carte au moins trois biens du marché qui lui ressemblent vraiment.
     Ce choix déclare votre positionnement : vos prix de départ seront construits à partir de ces biens.
     <b>Aucun prix</b> n’est affiché ici.</p>
 
   <div><label class="cp-meta">Logement <select id="cp-bien"></select></label></div>
 
+  <!-- Le rappel du profil, avec « Modifier » -->
+  <div class="cp-carte" id="cp-recap" hidden>
+    <div class="cp-recap">
+      <div class="cp-recap-texte" id="cp-recap-texte"></div>
+      <button type="button" class="cp-btn secondaire" id="cp-modifier">Modifier</button>
+    </div>
+  </div>
+
   <!-- ÉTAPE A : décrire son bien -->
   <div class="cp-carte" id="cp-etape-a">
-    <h2>1. Votre logement</h2>
+    <h2>Votre logement</h2>
     <p class="sous">Ce profil sert à trouver les biens du marché qui ressemblent au vôtre.</p>
     <form id="cp-form" class="cp-form" novalidate>
       <label class="cp-adresse">Adresse du logement
@@ -96,16 +124,32 @@
     <div class="cp-eq" id="cp-eq" role="group" aria-label="Équipements qui comptent dans le prix"></div>
     <div class="cp-actions">
       <button type="button" class="cp-btn" id="cp-valider-a">Valider la description</button>
+      <button type="button" class="cp-btn secondaire" id="cp-annuler-a" hidden>Annuler</button>
       <span id="cp-message-a" aria-live="polite"></span>
     </div>
   </div>
 
-  <!-- ÉTAPE B : choisir ses comparables -->
+  <!-- ÉTAPE B : la carte et la fiche -->
   <div class="cp-carte" id="cp-etape-b" hidden>
-    <h2>2. Les biens du marché qui ressemblent au vôtre</h2>
-    <p class="sous">Classés du plus ressemblant au moins ressemblant : distance, ouverture dans l’année, équipements, taille.
-      Cochez ceux que vous reconnaissez comme comparables — <b>au moins 3</b>.</p>
-    <div id="cp-liste-zone"><p class="cp-meta">Recherche des biens du marché…</p></div>
+    <h2>Les biens du marché autour du vôtre</h2>
+    <p class="sous">Plus un bien vous ressemble, plus son point est gros. Touchez un point pour voir le bien et dire s’il est similaire au vôtre.</p>
+    <div id="cp-zone-liste"><p class="cp-meta">Recherche des biens du marché…</p></div>
+    <div id="cp-zone-carte" hidden>
+      <div id="cp-map" role="region" aria-label="Carte des biens du marché"></div>
+      <div class="cp-legende">
+        <span><i data-couleur="hote"></i>Votre logement</span>
+        <span><i data-couleur="neutre"></i>À juger</span>
+        <span><i data-couleur="similaire"></i>Similaire</span>
+        <span><i data-couleur="non"></i>Non similaire</span>
+      </div>
+      <p class="cp-meta" id="cp-note-position">Airbnb décale souvent la position des annonces de quelques centaines de mètres : la carte est approchée.</p>
+      <p class="cp-erreur" id="cp-carte-erreur" hidden></p>
+      <p class="cp-meta" id="cp-note" aria-live="polite"></p>
+      <div id="cp-complement"></div>
+      <div class="cp-fiche" id="cp-fiche" aria-live="polite"><p class="cp-meta">Touchez un point de la carte pour voir le bien.</p></div>
+      <details class="cp-liste-biens"><summary>Tous les biens, du plus ressemblant au moins ressemblant</summary><ol id="cp-liste-biens"></ol></details>
+      <p class="cp-meta" id="cp-hors-liste" hidden></p>
+    </div>
     <div class="cp-pied">
       <button type="button" class="cp-btn" id="cp-valider-b" disabled>Valider mes comparables</button>
       <span id="cp-compte" class="cp-meta" style="margin:0" aria-live="polite"></span>
@@ -117,9 +161,10 @@
 </div>
 
 <script type="module">
-  // ⚠ Un GET (profil, retenus, liste en cache) puis des POST (profil, chercher,
+  // ⚠ Un GET (profil, retenus, listes en cache) puis des POST (profil, chercher,
   // retenir) sur /api/marche-comparables. Aucun appel AirROI depuis le
-  // navigateur, aucun prix.
+  // navigateur, aucun prix. La carte : Leaflet (window.L) et les fonds
+  // OpenStreetMap, avec leur attribution.
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
   import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
@@ -130,20 +175,31 @@
   const el = id => document.getElementById(id)
   const EQUIPEMENTS = { terrasse: 'Terrasse', spa: 'Jacuzzi ou spa', jardin: 'Jardin', piscine: 'Piscine', parking: 'Parking', vue: 'Vue exceptionnelle', climatisation: 'Climatisation' }
   const MIN = 3
+  // LA seule definition des couleurs (carte et legende) : #5F6368 pour le gris,
+  // lisible en blanc dessus (review de 995f025 : #9AA0A6 etait a 2,6:1).
+  const COULEUR = { neutre: '#2A5E86', similaire: '#1F8A4C', non: '#5F6368', hote: '#E8A33D' }
 
   let session = null
   let jeton = 0
-  const choisis = new Set()
-  // Les retenus du FONDATEUR : montres verrouilles, jamais envoyes par l'hote ;
-  // ceux qui sont hors de la liste sont annonces (review de 7ace057).
+  let profil = null
+  let cartes = []
+  // Les jugements de l'hote : id -> 'similaire' | 'non'. Seuls les similaires
+  // sont envoyes ; « non » est une aide de tri, non enregistree.
+  const jugements = new Map()
+  // Les retenus du FONDATEUR : verrouilles en vert, jamais envoyes par l'hote
+  // (decision de Thierry du 5 octobre 2026).
   let fondateur = new Set()
+  // Les biens que l'hote a JUGES sur cette page (meme annule) : une nouvelle
+  // recherche ne les reecrase pas avec les retenus enregistres (review de 995f025).
+  const touches = new Set()
+  let carte = null
+  const marqueurs = new Map()
+  let ouvert = null
+  // Chaque recherche a son numero : seule la derniere s'affiche (review de 995f025).
+  let rechercheEnCours = 0
 
-  // Un message sur une zone : texte seul.
-  function dire (id, texte, classe) {
-    const z = el(id)
-    z.textContent = texte || ''
-    z.className = classe || ''
-  }
+  function dire (id, texte, classe) { const z = el(id); z.textContent = texte || ''; z.className = classe || '' }
+  const similaires = () => [...jugements.entries()].filter(([, v]) => v === 'similaire').map(([id]) => id)
 
   async function appeler (methode, corps) {
     const r = await fetch(`/api/marche-comparables?property_id=${encodeURIComponent(el('cp-bien').value)}`, {
@@ -160,7 +216,7 @@
     session = await requireAuth()
     if (!session) return
     renderSidebar('yield-comparables').catch(e => console.error('[comparables] sidebar', e))
-    // Les cases des equipements.
+    for (const i of document.querySelectorAll('[data-couleur]')) i.style.background = COULEUR[i.dataset.couleur]
     for (const [cle, nom] of Object.entries(EQUIPEMENTS)) {
       const l = document.createElement('label')
       const c = document.createElement('input')
@@ -177,9 +233,12 @@
     el('cp-bien').addEventListener('change', charger)
     el('cp-valider-a').addEventListener('click', validerProfil)
     el('cp-valider-b').addEventListener('click', retenir)
+    el('cp-modifier').addEventListener('click', () => montrerFormulaire(true))
+    el('cp-annuler-a').addEventListener('click', () => montrerFormulaire(false))
     charger()
   }
 
+  // ─── Le profil : formulaire ou rappel ─────────────────────────────────────
   function remplirFormulaire (p) {
     el('cp-adresse').value = p ? p.adresse : ''
     el('cp-voyageurs').value = p ? p.voyageurs : ''
@@ -189,13 +248,36 @@
     const eq = new Set(p && Array.isArray(p.equipements) ? p.equipements : [])
     for (const c of el('cp-eq').querySelectorAll('input')) c.checked = eq.has(c.value)
   }
+  const pluriel = (n, un, plusieurs) => `${n} ${n > 1 ? plusieurs : un}`
+  function afficherRecap (p) {
+    const t = el('cp-recap-texte')
+    t.replaceChildren()
+    const b = document.createElement('b'); b.textContent = p.adresse_trouvee
+    const eq = (p.equipements || []).filter(e => EQUIPEMENTS[e]).map(e => EQUIPEMENTS[e])
+    const morceaux = [pluriel(p.voyageurs, 'voyageur', 'voyageurs'), p.chambres === 0 ? 'studio (0 chambre)' : pluriel(p.chambres, 'chambre', 'chambres'),
+      pluriel(p.pieces, 'pièce', 'pièces'), pluriel(p.salles_de_bain, 'salle de bain', 'salles de bain')]
+    t.append(b, document.createElement('br'), document.createTextNode(morceaux.join(' · ')), document.createElement('br'),
+      document.createTextNode(eq.length ? `Équipements : ${eq.join(', ')}` : 'Aucun équipement particulier'))
+  }
+  // Le formulaire s'ouvre seul quand il n'y a pas de profil, ou sur « Modifier ».
+  function montrerFormulaire (ouvrir) {
+    el('cp-etape-a').hidden = !ouvrir
+    el('cp-recap').hidden = ouvrir || !profil
+    el('cp-annuler-a').hidden = !profil
+    if (ouvrir) remplirFormulaire(profil)
+  }
 
   async function charger () {
     const j = ++jeton
-    choisis.clear()
-    fondateur = new Set()
+    profil = null; cartes = []; jugements.clear(); touches.clear(); fondateur = new Set(); ouvert = null
+    rechercheEnCours++
     majCompte()
+    dire('cp-note', '', 'cp-meta')
+    el('cp-carte-erreur').hidden = true
     el('cp-etape-b').hidden = true
+    el('cp-recap').hidden = true
+    el('cp-etape-a').hidden = false
+    el('cp-annuler-a').hidden = true
     dire('cp-message-a', ''); dire('cp-message-b', '')
     remplirFormulaire(null)
     let r
@@ -204,30 +286,49 @@
     if (!r.ok || !r.d) return dire('cp-message-a', `Lecture impossible (${r.status}).`, 'cp-erreur')
     if (r.d.etat === 'indisponible') { el('cp-valider-a').disabled = true; return dire('cp-message-a', r.d.message || 'Page indisponible.', 'cp-erreur') }
     el('cp-valider-a').disabled = false
-    remplirFormulaire(r.d.profil)
     retenusDu(r.d)
     if (!r.d.profil) return
-    dire('cp-message-a', `Adresse retenue : ${r.d.profil.adresse_trouvee}`, 'cp-ok')
+    profil = r.d.profil
+    afficherRecap(profil)
+    montrerFormulaire(false)
     el('cp-etape-b').hidden = false
     // La liste en cache s'affiche. Sinon, rien ne part tout seul : une
     // recherche peut couter, c'est l'hote qui la lance (review de 7ace057).
-    if (Array.isArray(r.d.comparables)) afficher(r.d.comparables)
-    else boutonChercher(j)
+    if (Array.isArray(r.d.comparables)) {
+      afficher(r.d.comparables)
+      if (r.d.complement_a_chercher) boutonComplement(j)
+    } else boutonChercher(j)
   }
 
-  // Les retenus : ceux du fondateur a part, les autres coches pour l'hote.
+  // Les retenus enregistres : ceux de l'equipe a part (et jamais dans les
+  // jugements de l'hote) ; les autres coches « similaire », SAUF ceux que l'hote
+  // a deja juges sur cette page.
   function retenusDu (d) {
     fondateur = new Set((d.fondateur || []).map(String))
-    for (const id of d.retenus || []) if (!fondateur.has(String(id))) choisis.add(String(id))
+    for (const id of fondateur) jugements.delete(id)
+    for (const id of d.retenus || []) {
+      const k = String(id)
+      if (!fondateur.has(k) && !touches.has(k)) jugements.set(k, 'similaire')
+    }
+    majCompte()
   }
 
   function boutonChercher (j) {
+    el('cp-zone-carte').hidden = true
     const b = document.createElement('button')
     b.type = 'button'; b.className = 'cp-btn'; b.id = 'cp-chercher'; b.textContent = 'Chercher les biens du marché'
     b.addEventListener('click', () => chercher(j))
     const p = document.createElement('p'); p.className = 'cp-meta'
     p.textContent = 'Lancez la recherche des biens du marché qui ressemblent au vôtre.'
-    el('cp-liste-zone').replaceChildren(p, b)
+    el('cp-zone-liste').replaceChildren(p, b)
+  }
+
+  function boutonComplement (j) {
+    const b = document.createElement('button')
+    b.type = 'button'; b.className = 'cp-btn secondaire'; b.id = 'cp-chercher-complement'
+    b.textContent = 'Chercher aussi les biens qui ont vos équipements'
+    b.addEventListener('click', () => chercher(j))
+    el('cp-complement').replaceChildren(b)
   }
 
   async function validerProfil () {
@@ -246,112 +347,202 @@
     if (j !== jeton) return
     el('cp-valider-a').disabled = false
     if (!r.ok || !r.d || !r.d.profil) return dire('cp-message-a', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')
-    dire('cp-message-a', `Adresse retenue : ${r.d.profil.adresse_trouvee}`, 'cp-ok')
+    dire('cp-message-a', '')
+    profil = r.d.profil
+    afficherRecap(profil)
+    montrerFormulaire(false)
     el('cp-etape-b').hidden = false
+    // Un profil change, une autre recherche : les jugements de l'ancienne
+    // liste ne valent plus pour les biens qui n'y sont plus (afficher le fait).
     chercher(j)
   }
 
   async function chercher (j) {
-    el('cp-liste-zone').replaceChildren(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: 'Recherche des biens du marché…' }))
+    const n = ++rechercheEnCours
+    // Pendant une recherche, on ne valide pas une liste qui va changer.
+    el('cp-valider-b').disabled = true
+    el('cp-complement').replaceChildren()
+    el('cp-zone-liste').replaceChildren(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: 'Recherche des biens du marché…' }))
     let r
     try { r = await appeler('POST', { action: 'chercher' }) } catch (e) { r = { ok: false, d: null } }
-    if (j !== jeton) return
+    if (j !== jeton || n !== rechercheEnCours) return
+    majCompte()
     if (!r.ok || !r.d || r.d.etat !== 'calcule') {
+      el('cp-zone-carte').hidden = true
       const p = document.createElement('p'); p.className = 'non-calc'
       p.textContent = (r.d && r.d.message) || 'La liste des biens du marché n’est pas disponible pour le moment.'
-      el('cp-liste-zone').replaceChildren(p)
+      el('cp-zone-liste').replaceChildren(p)
       return
     }
     retenusDu(r.d)
+    dire('cp-note', r.d.note || '', 'cp-meta')
     afficher(r.d.comparables)
   }
 
-  // ─── Les cartes : DOM seulement, une donnee AirROI n est jamais du HTML ────
-  function afficher (cartes) {
-    // Un retenu qui n'est plus dans la liste n'est pas compte.
+  // ─── La carte ──────────────────────────────────────────────────────────────
+  function etatDe (id) {
+    if (fondateur.has(id)) return 'similaire'
+    return jugements.get(id) || 'neutre'
+  }
+  // Rayon du point : de 6 a 18 selon la ressemblance (0 a 100 %).
+  const rayon = c => 6 + Math.round(12 * Math.max(0, Math.min(100, Number(c.ressemblance) || 0)) / 100)
+  function style (c) {
+    const etat = etatDe(c.listing_id)
+    return { radius: rayon(c), color: c.listing_id === ouvert ? '#111' : '#fff', weight: c.listing_id === ouvert ? 3 : 1.5,
+      fillColor: COULEUR[etat], fillOpacity: etat === 'non' ? 0.45 : 0.85 }
+  }
+
+  function afficher (liste) {
+    cartes = Array.isArray(liste) ? liste : []
     const ids = new Set(cartes.map(c => String(c.listing_id)))
-    for (const id of [...choisis]) if (!ids.has(id)) choisis.delete(id)
-    // Les retenus du fondateur hors de la liste restent pris en compte : on le dit.
-    const horsListe = [...fondateur].filter(id => !ids.has(id)).length
+    for (const id of [...jugements.keys()]) if (!ids.has(id)) jugements.delete(id)
+    el('cp-zone-liste').replaceChildren()
     if (!cartes.length) {
+      el('cp-zone-carte').hidden = true
       const p = document.createElement('p'); p.className = 'non-calc'; p.textContent = 'Aucun bien du marché trouvé près de votre logement.'
-      el('cp-liste-zone').replaceChildren(p); majCompte(); return
+      el('cp-zone-liste').replaceChildren(p); majCompte(); return
     }
-    const liste = document.createElement('div'); liste.className = 'cp-liste'
-    for (const c of cartes) liste.append(carte(c))
-    const zone = [liste]
-    if (horsListe) {
-      const n = document.createElement('p'); n.className = 'cp-meta'; n.id = 'cp-hors-liste'
-      n.textContent = `${horsListe} comparable${horsListe > 1 ? 's' : ''} retenu${horsListe > 1 ? 's' : ''} par l’équipe HôteSmart ${horsListe > 1 ? 'ne figurent' : 'ne figure'} pas dans cette liste et ${horsListe > 1 ? 'restent pris' : 'reste pris'} en compte.`
-      zone.push(n)
-    }
-    el('cp-liste-zone').replaceChildren(...zone)
+    el('cp-zone-carte').hidden = false
+    dessinerCarte()
+    listeAccessible()
+    // Les retenus de l'equipe hors de la liste restent pris en compte : on le dit.
+    const horsListe = [...fondateur].filter(id => !ids.has(id)).length
+    el('cp-hors-liste').hidden = !horsListe
+    el('cp-hors-liste').textContent = horsListe
+      ? `${horsListe} comparable${horsListe > 1 ? 's' : ''} retenu${horsListe > 1 ? 's' : ''} par l’équipe HôteSmart ${horsListe > 1 ? 'ne figurent' : 'ne figure'} pas sur la carte et ${horsListe > 1 ? 'restent pris' : 'reste pris'} en compte.` : ''
+    const premier = ouvert && ids.has(ouvert) ? ouvert : null
+    if (premier) ouvrirFiche(premier); else el('cp-fiche').replaceChildren(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: 'Touchez un point de la carte pour voir le bien.' }))
     majCompte()
   }
 
-  function carte (c) {
-    const id = String(c.listing_id)
-    const a = document.createElement('article'); a.className = 'cp-bien'; a.dataset.id = id
-    if (c.photo) {
-      const img = document.createElement('img')
-      img.className = 'cp-photo'; img.loading = 'lazy'; img.alt = ''
-      img.setAttribute('referrerpolicy', 'no-referrer')
-      img.setAttribute('src', c.photo)
-      a.append(img)
-    } else {
-      const v = document.createElement('div'); v.className = 'cp-sans-photo'; v.textContent = 'Pas de photo'; a.append(v)
+  function dessinerCarte () {
+    const L = window.L
+    // Message a lui (review de 995f025 : la note du serveur l'effacait).
+    if (!L) { el('cp-map').hidden = true; montrerErreurCarte('La carte n’a pas pu se charger : utilisez la liste des biens ci-dessous.'); return }
+    if (!carte) {
+      carte = L.map(el('cp-map'), { scrollWheelZoom: false })
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19,
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">les contributeurs d’OpenStreetMap</a>' }).addTo(carte)
     }
-    const corps = document.createElement('div'); corps.className = 'cp-corps'
+    for (const m of marqueurs.values()) m.remove()
+    marqueurs.clear()
+    const points = []
+    if (profil && Number.isFinite(profil.latitude) && Number.isFinite(profil.longitude)) {
+      const h = L.circleMarker([profil.latitude, profil.longitude], { radius: 11, color: '#111', weight: 3, fillColor: COULEUR.hote, fillOpacity: 1 }).addTo(carte)
+      h.bindTooltip('Votre logement', { permanent: true, direction: 'top', offset: [0, -10] })
+      marqueurs.set('__hote', h)
+      points.push([profil.latitude, profil.longitude])
+    }
+    // Les petits d'abord : un gros point (plus ressemblant) reste cliquable au-dessus.
+    for (const c of [...cartes].sort((a, b) => a.ressemblance - b.ressemblance)) {
+      if (!Number.isFinite(c.latitude) || !Number.isFinite(c.longitude)) continue
+      // L'identifiant du bien voyage avec son point (deux annonces peuvent
+      // partager la meme position).
+      const m = L.circleMarker([c.latitude, c.longitude], { ...style(c), identifiant: c.listing_id }).addTo(carte)
+      m.on('click', () => ouvrirFiche(c.listing_id))
+      marqueurs.set(c.listing_id, m)
+      points.push([c.latitude, c.longitude])
+    }
+    // Aucun point a placer : pas de carte grise sans vue.
+    el('cp-map').hidden = !points.length
+    if (!points.length) { montrerErreurCarte('Aucun bien n’a de position connue : utilisez la liste des biens ci-dessous.'); return }
+    el('cp-carte-erreur').hidden = true
+    carte.fitBounds(points, { padding: [24, 24], maxZoom: 16 })
+    setTimeout(() => carte && carte.invalidateSize && carte.invalidateSize(), 0)
+  }
+  function montrerErreurCarte (texte) { const e = el('cp-carte-erreur'); e.textContent = texte; e.hidden = false }
+
+  function restyler () {
+    for (const c of cartes) { const m = marqueurs.get(c.listing_id); if (m) m.setStyle(style(c)) }
+  }
+
+  // La liste, pour le clavier et les lecteurs d'ecran (et un bien sans position).
+  function listeAccessible () {
+    const ol = el('cp-liste-biens')
+    ol.replaceChildren()
+    for (const c of cartes) {
+      const li = document.createElement('li')
+      const b = document.createElement('button'); b.type = 'button'; b.dataset.id = c.listing_id
+      b.textContent = `${c.nom || 'Annonce sans titre'} — ${c.ressemblance} % de ressemblance${etatDe(c.listing_id) === 'similaire' ? ' (similaire)' : etatDe(c.listing_id) === 'non' ? ' (non similaire)' : ''}`
+      b.addEventListener('click', () => ouvrirFiche(c.listing_id))
+      li.append(b); ol.append(li)
+    }
+  }
+
+  // ─── La fiche sous la carte ───────────────────────────────────────────────
+  function ouvrirFiche (id, { focus = null, defiler = true } = {}) {
+    const c = cartes.find(x => x.listing_id === id)
+    if (!c) return
+    ouvert = id
+    restyler()
+    const f = el('cp-fiche')
+    f.replaceChildren()
+    f.dataset.id = id
+    const photos = document.createElement('div'); photos.className = 'cp-photos'
+    for (const url of Array.isArray(c.photos) ? c.photos : []) {
+      const img = document.createElement('img')
+      img.loading = 'lazy'; img.alt = ''
+      img.setAttribute('referrerpolicy', 'no-referrer')
+      img.setAttribute('src', url)
+      photos.append(img)
+    }
+    if (!photos.children.length) photos.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: 'Pas de photo' }))
     const nom = document.createElement('h3'); nom.className = 'cp-nom'; nom.textContent = c.nom || 'Annonce sans titre'
-    const taille = document.createElement('div'); taille.className = 'cp-ligne'
     const morceaux = []
-    if (Number.isFinite(c.voyageurs)) morceaux.push(`${c.voyageurs} voyageur${c.voyageurs > 1 ? 's' : ''}`)
-    if (Number.isFinite(c.chambres)) morceaux.push(c.chambres === 0 ? 'studio' : `${c.chambres} chambre${c.chambres > 1 ? 's' : ''}`)
+    if (Number.isFinite(c.voyageurs)) morceaux.push(pluriel(c.voyageurs, 'voyageur', 'voyageurs'))
+    if (Number.isFinite(c.chambres)) morceaux.push(c.chambres === 0 ? 'studio' : pluriel(c.chambres, 'chambre', 'chambres'))
     if (Number.isFinite(c.distance_km)) morceaux.push(`à ${String(c.distance_km).replace('.', ',')} km${c.position_approchee ? ' environ' : ''}`)
-    taille.textContent = morceaux.join(' · ')
+    const ligne = document.createElement('p'); ligne.className = 'cp-ligne'; ligne.textContent = morceaux.join(' · ')
+    const activite = document.createElement('p'); activite.className = 'cp-ligne'
+    activite.textContent = [c.ouvert_toute_annee === true ? 'Ouvert toute l’année' : c.ouvert_toute_annee === false ? 'Saisonnier' : '',
+      Number.isFinite(c.ressemblance) ? `${c.ressemblance} % de ressemblance` : ''].filter(Boolean).join(' · ')
     const badges = document.createElement('div'); badges.className = 'cp-badges'
     for (const e of Array.isArray(c.equipements) ? c.equipements : []) {
       if (!Object.prototype.hasOwnProperty.call(EQUIPEMENTS, e)) continue
       const b = document.createElement('span'); b.className = 'cp-badge'; b.textContent = EQUIPEMENTS[e]; badges.append(b)
     }
-    const activite = document.createElement('div'); activite.className = 'cp-activite'
-    activite.textContent = c.ouvert_toute_annee === true ? 'Ouvert toute l’année' : c.ouvert_toute_annee === false ? 'Saisonnier' : ''
-    const ress = document.createElement('div'); ress.className = 'cp-ressemblance'
-    ress.textContent = Number.isFinite(c.ressemblance) ? `${c.ressemblance} % de ressemblance` : ''
-    const choix = document.createElement('label'); choix.className = 'cp-choix'
-    const caseC = document.createElement('input'); caseC.type = 'checkbox'
-    // Un nom accessible PAR BIEN : « Comparable au mien : <nom> » (attribut texte).
-    caseC.setAttribute('aria-label', `Comparable au mien : ${c.nom || 'annonce sans titre'}`)
+    f.append(photos, nom, ligne, activite, badges)
+    if (c.source === 'equipements') f.append(Object.assign(document.createElement('p'), { className: 'cp-source', textContent: 'Trouvé grâce à vos équipements' }))
     if (fondateur.has(id)) {
-      // Retenu par le fondateur : coche, verrouille, et dit comme tel.
-      caseC.checked = true; caseC.disabled = true
-      a.classList.add('choisi')
-      choix.append(caseC, document.createTextNode('Retenu par l’équipe HôteSmart'))
-      choix.classList.add('cp-fondateur')
+      f.append(Object.assign(document.createElement('p'), { className: 'cp-fondateur', textContent: 'Retenu par l’équipe HôteSmart' }))
     } else {
-      caseC.checked = choisis.has(id)
-      caseC.addEventListener('change', () => { if (caseC.checked) choisis.add(id); else choisis.delete(id); a.classList.toggle('choisi', caseC.checked); majCompte() })
-      a.classList.toggle('choisi', caseC.checked)
-      choix.append(caseC, document.createTextNode('Comparable au mien'))
+      const v = document.createElement('div'); v.className = 'cp-verdict'
+      const bouton = (etat, texte, classe) => {
+        const b = document.createElement('button'); b.type = 'button'; b.className = `cp-btn secondaire ${classe}`; b.textContent = texte
+        b.dataset.verdict = etat
+        b.setAttribute('aria-pressed', String(jugements.get(id) === etat))
+        // Un second clic sur le meme bouton annule le jugement.
+        b.addEventListener('click', () => {
+          touches.add(id)
+          if (jugements.get(id) === etat) jugements.delete(id); else jugements.set(id, etat)
+          // La fiche est reconstruite : le focus revient sur le meme bouton, et
+          // la page ne defile pas (review de 995f025).
+          ouvrirFiche(id, { focus: etat, defiler: false }); listeAccessible(); majCompte()
+        })
+        return b
+      }
+      v.append(bouton('similaire', 'Logement similaire', 'similaire'), bouton('non', 'Non similaire', 'non'))
+      f.append(v)
     }
-    corps.append(nom, taille, badges, activite, ress, choix)
-    a.append(corps)
-    return a
+    if (focus) { const b = f.querySelector(`button[data-verdict="${focus}"]`); if (b) b.focus() }
+    // Telephone : la fiche est sous 60 % d'ecran de carte, on l'amene a l'oeil.
+    if (defiler && window.innerWidth <= 640 && typeof f.scrollIntoView === 'function') f.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }
 
   function majCompte () {
-    const n = choisis.size
+    const n = similaires().length
     el('cp-valider-b').disabled = n < MIN
-    el('cp-compte').textContent = n < MIN ? `${n} sélectionné${n > 1 ? 's' : ''} — encore ${MIN - n} au moins` : `${n} sélectionnés`
+    el('cp-compte').textContent = n < MIN ? `${n} similaire${n > 1 ? 's' : ''} — encore ${MIN - n} au moins` : `${n} similaires`
   }
 
   async function retenir () {
     const j = jeton
-    if (choisis.size < MIN) return
+    const ids = similaires()
+    if (ids.length < MIN) return
     el('cp-valider-b').disabled = true
     dire('cp-message-b', 'Enregistrement…')
     let r
-    try { r = await appeler('POST', { action: 'retenir', listing_ids: [...choisis] }) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
+    try { r = await appeler('POST', { action: 'retenir', listing_ids: ids }) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
     if (j !== jeton) return
     majCompte()
     if (!r.ok || !r.d || !Array.isArray(r.d.retenus)) return dire('cp-message-b', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')

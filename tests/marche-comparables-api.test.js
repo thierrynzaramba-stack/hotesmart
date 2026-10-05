@@ -28,6 +28,8 @@ function base (tables) {
   const client = { rpc: async (fn, params) => {
     rpcs.push({ fn, params })
     if (tables.__rpcAbsente) return { data: null, error: { message: `Could not find the function public.${fn}(...) in the schema cache` } }
+    if (fn === 'rendre_recherche_comparables') return { data: true, error: null }
+    if (tables.__rpcPanneCout !== undefined && params.p_cout === tables.__rpcPanneCout) return { data: null, error: { message: 'connexion perdue' } }
     return { data: tables.__rpc === undefined ? 'ok' : tables.__rpc, error: null }
   }, from: tb => {
     lus.push(tb)
@@ -60,7 +62,7 @@ function base (tables) {
   return { client, lus, ecrits, rpcs }
 }
 
-async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, body = null, tables = {}, garde = { ok: true, userId: 'MEMBRE', accountUserId: 'COMPTE', bien: { id: 'BIEN-A' } }, airroi = null, geocode = null }) {
+async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, body = null, tables = {}, garde = { ok: true, userId: 'MEMBRE', accountUserId: 'COMPTE', bien: { id: 'BIEN-A' } }, airroi = null, airroiEq = null, geocode = null }) {
   process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://127.0.0.1:1'
   process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'factice-non-secret'
   const ch = m => require.resolve(path.join(RACINE, m))
@@ -77,11 +79,18 @@ async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, bod
   try {
     require.cache[cheminGarde].exports = { ...vraieGarde, requirePermission: async (req, res, o) => { gardes.push(o); return garde } }
     require.cache[cheminSb].exports = { ...vraiSb, createClient: () => b.client }
-    require.cache[cheminClient].exports = { ...vraiClient, creerClient: () => ({ comparables: async (params, ctx) => {
-      appelsAirroi.push({ params, ctx })
-      if (airroi instanceof Error) throw airroi
-      return { donnees: airroi || { listings: COMPS }, depuisCache: false }
-    } }) }
+    require.cache[cheminClient].exports = { ...vraiClient, creerClient: () => ({
+      comparables: async (params, ctx) => {
+        appelsAirroi.push({ params, ctx })
+        if (airroi instanceof Error) throw airroi
+        return { donnees: airroi || { listings: COMPS }, depuisCache: false }
+      },
+      rechercheEquipements: async (corps, ctx) => {
+        appelsAirroi.push({ corps, ctx, equipements: true })
+        if (airroiEq instanceof Error) throw airroiEq
+        return { donnees: airroiEq || { results: SPA }, depuisCache: false }
+      },
+    }) }
     globalThis.fetch = async () => ({ ok: true, json: async () => geocode || { features: [{ geometry: { coordinates: [0.1476, 43.0636] }, properties: { label: '12 Rue des Thermes 65200 Bagnères-de-Bigorre', score: 0.93, type: 'housenumber' } }] } })
     delete require.cache[ch('api/marche-comparables')]
     const api = require(path.join(RACINE, 'api', 'marche-comparables'))
@@ -106,6 +115,12 @@ const TABLES = () => ({
   airroi_cache: [{ cle: CLE, reponse: COMPS_BRUT, recupere_le: '2026-10-05T10:00:00Z' }],
 })
 const IDS = COMPS.slice(0, 3).map(c => String(c.listing_info.listing_id))
+// Les biens « trouves par equipement » : d'autres annonces reelles (Coeur de vie 23), avec un jacuzzi.
+const SPA = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'comps-cdv23.json'), 'utf8')).listings.slice(0, 4)
+  .map(f => ({ ...f, property_details: { ...f.property_details, amenities: [...f.property_details.amenities, 'Hot tub'] } }))
+const { corpsRechercheEquipements } = require('../lib/marche/choix-comparables')
+const PROFIL_SPA = { ...PROFIL, equipements: ['parking', 'spa'] }
+const CLE_SPA = cleCanonique('POST /listings/search/radius', corpsRechercheEquipements({ ...PROFIL_SPA, latitude: 43.0636, longitude: 0.1476 }))
 
 test('LE TEST QUI COMPTE (securite) : lecture sous reservations:read, toute ecriture ou paiement sous reglages:write — bien requis, le bien RESOLU', async () => {
   const g = await appeler({ tables: TABLES() })
@@ -146,11 +161,14 @@ test('LE TEST QUI COMPTE : un GET ne paie JAMAIS — il ne lit que le cache', as
   assert.ok(!g.ecrits.length, 'aucune ecriture')
 })
 
-test('LE TEST QUI COMPTE : AUCUN prix, revenu ou occupation ne sort — ni au GET ni a la recherche ; pas de position brute du bien', async () => {
+test('LE TEST QUI COMPTE : AUCUN prix, revenu ou occupation ne sort — ni au GET ni a la recherche ; la position de l hote seulement dans SON profil (§21.4)', async () => {
   for (const r of [await appeler({ tables: TABLES() }), await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })]) {
     const texte = JSON.stringify(r.corps)
-    for (const interdit of ['rate', 'revenue', 'occupancy', 'revpar', 'cleaning_fee', 'price', 'latitude', 'longitude']) assert.ok(!texte.includes(interdit), interdit)
+    for (const interdit of ['rate', 'revenue', 'occupancy', 'revpar', 'cleaning_fee', 'price', 'geocode_score']) assert.ok(!texte.includes(interdit), interdit)
   }
+  const g = await appeler({ tables: TABLES() })
+  assert.equal(g.corps.profil.latitude, 43.0636)
+  assert.equal(g.corps.profil.longitude, 0.1476)
 })
 
 test('chercher : la recherche AirROI part du PROFIL (position geocodee, vraies chambres, salles de bain, voyageurs)', async () => {
@@ -226,7 +244,7 @@ test('WRITER UNIQUE : seul choix-comparables.js ecrit dans comparables_retenus',
 // ─── Le quota ATOMIQUE (reviews de 4f19d8b et 7ace057, SECURITE) ───────────
 test('LE TEST QUI COMPTE (SECURITE) : une recherche NOUVELLE passe d abord par la reservation atomique, avec les plafonds', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] } })
-  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_bien_jour: 3, p_compte_jour: 5, p_compte_30j: 10, p_tous_mois: 50 } }])
+  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_cout: 0.10, p_bien_jour: 3, p_compte_jour: 5, p_compte_30j: 10, p_budget_mois: 5 } }])
   assert.equal(r.appelsAirroi.length, 1)
 })
 
@@ -311,6 +329,132 @@ test('REVIEW : retenir apres un changement de profil, avec l ancienne liste enco
 test('une carte renvoyee a exactement les cles de la liste blanche', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })
   for (const c of r.corps.comparables) {
-    assert.deepEqual(Object.keys(c).sort(), ['chambres', 'distance_km', 'equipements', 'listing_id', 'nom', 'ouvert_toute_annee', 'photo', 'position_approchee', 'ressemblance', 'voyageurs'])
+    assert.deepEqual(Object.keys(c).sort(), ['chambres', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
   }
+})
+
+// ─── §21 : la recherche par equipement ──────────────────────────────────────
+const AVEC_SPA = () => ({ ...TABLES(), bien_profil: [{ ...PROFIL_SPA, property_id: 'BIEN-A' }] })
+
+test('LE TEST QUI COMPTE (§21.2-21.3) : un equipement rare declenche la recherche complementaire, qui RESERVE 0,50 $ avant de partir', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA() })
+  assert.deepEqual(r.rpcs.map(x => x.params.p_cout), [0.50], 'la liste de base etait en cache : seule la recherche par equipement reserve')
+  const eq = r.appelsAirroi.find(a => a.equipements)
+  assert.deepEqual(eq.corps.filter.amenities, { any: ['hot_tub', 'sauna'] })
+  assert.deepEqual(eq.ctx, { propertyId: 'BIEN-A', userId: 'COMPTE' })
+  assert.equal(r.corps.comparables.length, 29)
+  assert.equal(r.corps.comparables.filter(c => c.source === 'equipements').length, 4)
+  assert.ok(r.corps.comparables.filter(c => c.source === 'equipements').every(c => c.equipements.includes('spa')))
+})
+
+test('§21.2 : complementaire refuse par le quota — la liste de base s affiche quand meme, et c est dit ; rien n est paye pour lui', async () => {
+  const t = { ...AVEC_SPA(), __rpc: 'bien' }
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: t })
+  assert.equal(r.corps.etat, 'calcule')
+  assert.equal(r.corps.comparables.length, 25)
+  assert.match(r.corps.note, /vos équipements n’a pas pu être lancée : plusieurs recherches/)
+  assert.ok(!r.appelsAirroi.some(a => a.equipements))
+})
+
+test('§21.2 : complementaire en panne chez AirROI — la liste de base reste, la panne est dite', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA(), airroiEq: new Error('HTTP 500') })
+  assert.equal(r.corps.comparables.length, 25)
+  assert.match(r.corps.note, /pas disponible pour le moment/)
+})
+
+test('§21.2 : tout en cache (base ET complement) — aucune reservation, aucun appel ; le GET sert les deux', async () => {
+  const t = AVEC_SPA()
+  t.airroi_cache = [...t.airroi_cache.filter(c => c.cle !== CLE), { cle: cleCanonique('GET /listings/comparables', { latitude: 43.0636, longitude: 0.1476, bedrooms: 1, baths: 1, guests: 2, currency: 'native' }), reponse: COMPS_BRUT, recupere_le: new Date().toISOString() },
+    { cle: CLE_SPA, reponse: JSON.stringify({ results: SPA }), recupere_le: new Date().toISOString() }]
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: t })
+  assert.equal(r.rpcs.length, 0)
+  assert.equal(r.appelsAirroi.length, 0)
+  assert.equal(r.corps.comparables.length, 29)
+  const g = await appeler({ tables: t })
+  assert.equal(g.corps.comparables.length, 29)
+  assert.equal(g.corps.complement_a_chercher, false)
+})
+
+test('§21.2 : le GET dit quand la recherche par equipement reste a faire, sans rien payer', async () => {
+  const g = await appeler({ tables: AVEC_SPA() })
+  assert.equal(g.corps.complement_a_chercher, true)
+  assert.equal(g.rpcs.length, 0)
+  assert.equal(g.appelsAirroi.length, 0)
+})
+
+test('§21.2 : un bien trouve par equipement peut etre retenu ; un bien inconnu, toujours pas', async () => {
+  const t = AVEC_SPA()
+  t.airroi_cache.push({ cle: CLE_SPA, reponse: JSON.stringify({ results: SPA }), recupere_le: new Date().toISOString() })
+  const ids = [...IDS.slice(0, 2), String(SPA[0].listing_info.listing_id)]
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: ids }, tables: t })
+  assert.equal(r.code, 200)
+  const non = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: [...IDS.slice(0, 2), '999999'] }, tables: t })
+  assert.equal(non.code, 400)
+})
+
+test('LE TEST QUI COMPTE (SECURITE, §21.3) : la migration du quota en dollars — cout reserve sous le meme verrou, somme du mois, ancienne signature supprimee', () => {
+  const sql = fs.readFileSync(path.join(RACINE, 'migrations', '2026-10-05-comparables-recherches-cout.sql'), 'utf8')
+  assert.ok(sql.split('\n').every(l => l.length < 60))
+  const corpsFn = sql.slice(sql.indexOf('as $$'), sql.lastIndexOf('$$;'))
+  assert.ok(corpsFn.indexOf('pg_advisory_xact_lock') < corpsFn.indexOf('sum(cout_usd)'), 'le verrou avant la somme')
+  assert.ok(corpsFn.lastIndexOf('select count') < corpsFn.indexOf('insert into comparables_recherches'))
+  assert.match(corpsFn, /\(user_id, property_id, cout_usd\)/)
+  assert.match(corpsFn, /depense \+ p_cout > p_budget_mois/)
+  assert.match(sql, /drop function if exists[\s\S]*uuid, uuid, int, int, int, int\)/)
+  assert.match(sql, /revoke all on function[\s\S]*uuid, uuid, numeric, int, int, int, numeric\)[\s\S]*from public, anon, authenticated/)
+  assert.match(sql, /security definer/)
+})
+
+// ─── Constats de la review de 25ab9e6 ───────────────────────────────────────
+const reservations = r => r.rpcs.filter(x => x.fn === 'reserver_recherche_comparables').map(x => x.params.p_cout)
+const rendus = r => r.rpcs.filter(x => x.fn === 'rendre_recherche_comparables').map(x => x.params)
+
+test('REVIEW : base absente et equipement rare — la base reserve 0,10 $ PUIS le complement 0,50 $', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...AVEC_SPA(), airroi_cache: [] } })
+  assert.deepEqual(reservations(r), [0.10, 0.50])
+  assert.equal(r.corps.comparables.length, 29)
+})
+
+test('LE TEST QUI COMPTE (review C1) : un appel qui ECHOUE rend sa reservation — base comme complement', async () => {
+  const base = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: new Error('HTTP 422') })
+  assert.deepEqual(rendus(base), [{ p_property: 'BIEN-A', p_cout: 0.10 }])
+  assert.equal(base.corps.etat, 'indisponible')
+  const comp = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA(), airroiEq: new Error('HTTP 422') })
+  assert.deepEqual(rendus(comp), [{ p_property: 'BIEN-A', p_cout: 0.50 }])
+  assert.equal(comp.corps.comparables.length, 25)
+  // Un appel reussi ne rend rien.
+  const ok = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA() })
+  assert.deepEqual(rendus(ok), [])
+})
+
+test('REVIEW (C2) : la reservation du complement en PANNE n empeche pas la liste de base — rien n est paye pour lui', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...AVEC_SPA(), __rpcPanneCout: 0.50 } })
+  assert.equal(r.corps.etat, 'calcule')
+  assert.equal(r.corps.comparables.length, 25)
+  assert.match(r.corps.note, /pas disponible pour le moment/)
+  assert.ok(!r.appelsAirroi.some(a => a.equipements))
+})
+
+test('REVIEW : la cle de cache du complement est celle qu ecrit le VRAI client AirROI', async () => {
+  const { creerClient: vraiCreer } = require('../lib/airroi/client')
+  const ecrits = []
+  const depot = { lireCache: async () => null, ecrireCache: async (l) => { ecrits.push(l.cle) }, reserver: async () => 1, terminer: async () => {}, appelsDepuis: async () => [] }
+  const avant = process.env.AIRROI_API_KEY
+  process.env.AIRROI_API_KEY = 'cle-de-test-factice'
+  try {
+    const client = vraiCreer({ depot, alerter: null, fetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ results: SPA }) }) })
+    await client.rechercheEquipements(corpsRechercheEquipements({ ...PROFIL_SPA, latitude: 43.0636, longitude: 0.1476 }), { propertyId: 'BIEN-A', userId: 'COMPTE' })
+  } finally { if (avant === undefined) delete process.env.AIRROI_API_KEY; else process.env.AIRROI_API_KEY = avant }
+  assert.deepEqual(ecrits, [CLE_SPA])
+})
+
+test('LE TEST QUI COMPTE (SECURITE) : la migration — deux couts seulement, parametres nuls refuses, rendre sous le meme verrou et borne a 10 minutes', () => {
+  const sql = fs.readFileSync(path.join(RACINE, 'migrations', '2026-10-05-comparables-recherches-cout.sql'), 'utf8')
+  assert.ok(sql.split('\n').every(l => l.length < 60))
+  assert.match(sql, /p_cout not in \(0\.10, 0\.50\)/)
+  assert.match(sql, /or p_budget_mois is null then/)
+  const rendre = sql.slice(sql.indexOf('rendre_recherche_comparables('), sql.lastIndexOf('$$;'))
+  assert.ok(rendre.indexOf('pg_advisory_xact_lock') < rendre.indexOf('delete from comparables_recherches'))
+  assert.match(rendre, /interval '10 minutes'/)
+  assert.match(sql, /revoke all on function\s+public\.rendre_recherche_comparables\(\s+uuid, numeric\)\s+from public, anon, authenticated/)
 })

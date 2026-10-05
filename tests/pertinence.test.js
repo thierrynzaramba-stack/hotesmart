@@ -35,7 +35,7 @@ test('LE TEST QUI COMPTE : une carte n a AUCUN prix, revenu ou occupation — li
   const cartes = p.trierComparables(COMPS, MOI)
   assert.equal(cartes.length, 25)
   for (const c of cartes) {
-    assert.deepEqual(Object.keys(c).sort(), ['chambres', 'distance_km', 'equipements', 'listing_id', 'nom', 'ouvert_toute_annee', 'photo', 'position_approchee', 'ressemblance', 'voyageurs'])
+    assert.deepEqual(Object.keys(c).sort(), ['chambres', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
   }
   const texte = JSON.stringify(cartes)
   for (const interdit of ['rate', 'revenue', 'occupancy', 'revpar', 'cleaning_fee', 'price', 'prix']) assert.ok(!texte.includes(interdit), interdit)
@@ -187,4 +187,28 @@ test('RE-REVIEW (65d6cc7) : « Air conditioning » seul et en majuscules est rec
   assert.deepEqual(p.equipementsDeFiche(['Air conditioning']), ['climatisation'])
   assert.deepEqual(p.equipementsDeFiche(['AIR CONDITIONING']), ['climatisation'])
   assert.deepEqual(p.equipementsDeFiche(['EV charger - AC']), [])
+})
+
+// ─── §21 : position, photos, provenance ─────────────────────────────────────
+test('§21.4 : une carte porte la position publique de l annonce, ses photos filtrees (8 au plus), sa provenance', () => {
+  const f = fiche({ lat: 43.07, lng: 0.15 })
+  f.listing_info.photo_urls = ['https://a0.muscache.com/1.jpg', 'https://evil.example/2.jpg', ...Array.from({ length: 10 }, (_, i) => `https://a0.muscache.com/p${i}.jpg`)]
+  const c = p.trierComparables([f], MOI)[0]
+  assert.equal(c.latitude, 43.07)
+  assert.equal(c.longitude, 0.15)
+  assert.equal(c.photos.length, 8)
+  assert.equal(c.photos[0], 'https://a0.muscache.com/x.jpg', 'la couverture d abord')
+  assert.ok(c.photos.every(u => u.startsWith('https://a0.muscache.com/')), 'aucune photo hors muscache')
+  assert.equal(c.source, 'voisins')
+  const hors = fiche({ lat: 123 })
+  assert.equal(p.trierComparables([hors], MOI)[0].latitude, null, 'une latitude impossible n est pas une position')
+})
+
+test('§21.2 : les deux listes reunies — sans doublon (la liste de base gagne), triees ensemble, la provenance dite', () => {
+  const a = fiche({ bloques: 100 })
+  const b = fiche({ amenities: ['Hot tub', 'Free parking on premises', 'Mountain view'] })
+  const doublon = { ...a, listing_info: { ...a.listing_info } }
+  const r = p.reunirEtTrier([a], [b, doublon], MOI)
+  assert.equal(r.length, 2)
+  assert.deepEqual(r.map(c => [c.nom, c.source]), [[b.listing_info.listing_name, 'equipements'], [a.listing_info.listing_name, 'voisins']])
 })
