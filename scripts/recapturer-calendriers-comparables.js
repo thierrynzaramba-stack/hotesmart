@@ -58,6 +58,7 @@ const mediane = xs => { if (!xs.length) return null; const t = [...xs].sort((a, 
 // avant et apres, et la part des nuits dont le prix a change.
 function comparer (avant, apres) {
   const lignes = []
+  for (const id of Object.keys(apres)) if (!avant[id]) lignes.push({ id, nouveau: true })
   for (const id of Object.keys(avant)) {
     if (!apres[id]) { lignes.push({ id, absent: true }); continue }
     const a = new Map(avant[id].map(n => [n.date, n.rate]))
@@ -83,8 +84,10 @@ async function principal () {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
   const { count, error } = await sb.from('properties').select('id', { count: 'exact', head: true })
   if (error || !Number.isInteger(count)) throw new Error(`empreinte illisible ${error ? error.message : ''}`)
-  console.log(`Base : ${count} bien(s) — ${count === 3 ? 'STAGING' : count === 5 ? 'PRODUCTION' : 'INCONNUE'} · lecture seule`)
-  if (count !== 3 && count !== 5) process.exit(3)
+  // ⚠ STAGING SEULEMENT (review de 5876a4b) : le loft de recette n'existe que
+  // la. Toute autre empreinte arrete le script.
+  console.log(`Base : ${count} bien(s) — ${count === 3 ? 'STAGING' : 'PAS STAGING'} · lecture seule`)
+  if (count !== 3) { console.error('ECHEC : ce script ne vise que staging (3 biens) — rien n est fait'); process.exit(3) }
   const { data: retenus, error: eR } = await sb.from('comparables_retenus').select('listing_id').eq('property_id', bien).eq('actif', true)
   if (eR) throw new Error(`comparables_retenus : ${eR.message}`)
   const ids = (retenus || []).map(r => String(r.listing_id)).filter(id => /^[0-9]{1,24}$/.test(id))
@@ -123,9 +126,11 @@ async function principal () {
       apres[id] = r.donnees.results
       brut[id] = { recupere_le: r.recupereLe, results: r.donnees.results }
     } catch (e) {
-      console.error(`  ${id} : ${e.message}`)
+      // Dire si l'appel a pu etre facture (review de 5876a4b).
+      console.error(`  ${id} : ${e.message} — ${e.coutLibere === true ? 'non facture' : 'PEUT-ETRE FACTURE'}`)
     }
   }
+  if (!Object.keys(brut).length) throw new Error('aucune capture reussie : pas de seconde photo ecrite')
   const fichier = path.join(FIX, `calendriers-comparables-${bien.slice(0, 8)}-${jour()}.json`)
   ecrireFixtureSansCle(JSON.stringify(brut), fichier, process.env.AIRROI_API_KEY || '')
   console.log(`Seconde photo : ${path.relative(path.join(__dirname, '..'), fichier)} · depense ${Math.round(client.depense.usd * 100) / 100} $`)
@@ -133,6 +138,7 @@ async function principal () {
   console.log('\nPar comparable et par mois : semaine/week-end AVANT → APRES · nuits dont le prix a change')
   for (const l of comparer(avant, apres)) {
     if (l.absent) { console.log(`  ${l.id} : pas de seconde capture`); continue }
+    if (l.nouveau) { console.log(`  ${l.id} : retenu depuis la photo d'octobre — rien a comparer`); continue }
     const f = p => `${p.se === null ? '—' : Math.round(p.se)}/${p.we === null ? '—' : Math.round(p.we)}`
     console.log(`  ${l.id.padEnd(20)} ${l.mois}  ${f(l.avant).padStart(9)} → ${f(l.apres).padEnd(9)} ${l.changes}/${l.nuits}`)
   }

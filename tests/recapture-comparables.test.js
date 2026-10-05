@@ -16,3 +16,7 @@ test('LE TEST QUI COMPTE : une prime week-end qui APPARAIT se voit — semaine e
 test('un comparable sans seconde capture est DIT, jamais compte comme inchange', () => {
   assert.deepEqual(comparer({ X: [{ date: '2027-05-06', rate: 100 }] }, {}), [{ id: 'X', absent: true }])
 })
+
+test('un comparable retenu APRES la photo d octobre est dit, jamais ignore en silence', () => {
+  assert.deepEqual(comparer({}, { Y: [{ date: '2027-05-06', rate: 100 }] }), [{ id: 'Y', nouveau: true }])
+})
