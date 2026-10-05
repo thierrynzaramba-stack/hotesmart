@@ -3142,3 +3142,12 @@ annonces qui n'existent plus.
     introuvable, 0,10 $ si elle est revenue. Un nouveau 404 rafraîchit la date.
   - La réservation est rendue **avant** l'écriture du constat ; un constat qui
     ne s'écrit pas est journalisé et ne casse pas le calcul.
+- **Re-review de 31fa5a5 : constat fermé.** Restent, notés :
+  - un appel avec seulement 1 ou 2 calendriers manquants note ses 404 même
+    pendant une panne d'AirROI. Le risque est faible : seuls les retenus de cet
+    hôte sont touchés, 10 au plus, et le constat expire au bout de 30 jours ;
+  - **dette** : si 3 annonces ou plus sont réellement retirées et que ce sont
+    les seules manquantes, elles ne sont jamais notées. La page propose alors
+    de les relever à chaque visite. C'est gratuit (404 non facturé,
+    réservation rendue), mais l'hôte est relancé sans fin. Piste : confirmer
+    une panne par un relevé témoin, ou noter au second appel identique.
