@@ -3034,3 +3034,47 @@ Le « 10 % » de §22.2 est **remplacé** par le cran de prix mesuré ci-dessous
    bien n'apparaît pas dans l'adresse de son profil, les prix sont « non
    calculables » : « le marché de votre adresse n'est pas encore disponible ».
    Il n'y a ni paiement ni calcul faux.
+
+### 22.8 Review de f37b7da (5 octobre 2026)
+
+- **Sécurité.** Une réservation n'est **rendue que si rien n'a été facturé**.
+  Le client AirROI marque chaque erreur (`coutLibere`) :
+  - **coût libéré**, la réservation est rendue : refus avant l'appel, ou
+    réponse d'erreur du serveur ;
+  - **appel peut-être facturé**, la réservation est gardée : coupure réseau,
+    réponse illisible ou inattendue. Le quota borne alors les nouveaux essais.
+  - Cela vaut pour la liste de base, la recherche par équipement et les
+    calendriers.
+- **Le calendrier d'une annonce** n'est rangé que s'il porte au moins une nuit
+  avec un prix numérique. **Avant la recette, il faut capturer une vraie
+  réponse** : le format `rate`, `min_nights`, `date` vient de la documentation
+  AirROI et n'a encore jamais été vu en réel.
+- **Calcul.**
+  - Un cran nul ou négatif rend le niveau « non calculable » ; sinon, les
+    stratégies s'inverseraient.
+  - L'arrondi se fait au centime avant les 5 € supérieurs.
+  - Un prix calculé non positif n'est pas un prix.
+- **Route.**
+  - Seules les nuits à venir comptent. Le calendrier du marché doit couvrir les
+    300 prochains jours ; sinon, « trop ancien ».
+  - La commune du marché doit figurer **en mots entiers** dans l'adresse.
+  - Le GET calcule avec les calendriers en cache et propose de relever les
+    autres : il dit la même chose que le POST.
+  - Une panne du calcul des prix au GET n'empêche pas les comparables.
+  - Les calendriers se lisent en une requête et se relèvent quatre à la fois.
+- **Couplage du déploiement.** La migration `…-nature.sql` et le code partent
+  **ensemble**. Chacun sans l'autre rend la page « pas encore disponible »,
+  sans paiement.
+- **Décisions de budget, à trancher par Thierry avant la production** :
+  - **Budget SQL des hôtes** : 5 $ par mois, toutes recherches et tous
+    calendriers confondus. Cela couvre environ 2 biens de 25 comparables par
+    mois, pour toute la plateforme.
+  - **Garde-fou du client** : 3 $ par bien sur 90 jours. Il refuse les derniers
+    calendriers d'un bien à 25 comparables (0,60 $ de recherches + 2,50 $ de
+    calendriers).
+  - Les comparables de l'équipe sont payés sur le quota de l'hôte.
+- **Dettes mineures notées** :
+  - le prix par nuit utilisé pour l'effet du séjour minimum est la médiane des
+    médianes par niveau ;
+  - deux POST « prix » simultanés peuvent payer deux fois le même calendrier
+    (coût borné par le quota).

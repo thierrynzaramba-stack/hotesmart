@@ -663,3 +663,17 @@ test('§22.7 : enregistrer une strategie relit les prix de depart (cache seuleme
   assert.equal(posts(appels, 'prix').length, 0, 'aucun releve payant')
   assert.equal(doc.querySelectorAll('#cp-zone-prix tbody tr').length, 4)
 })
+
+// ─── Constats de la review de f37b7da (page) ────────────────────────────────
+test('REVIEW (C4) : des prix calcules avec des comparables manquants — le tableau ET le bouton pour relever ceux qui manquent', async () => {
+  const { doc } = await monter(pageAvecPrix({ ...PRIX_CALCULE, a_capturer: 2, note: 'Les prix de 2 comparables ne sont pas encore relevés.' }))
+  assert.equal(doc.querySelectorAll('#cp-zone-prix tbody tr').length, 4)
+  assert.equal(doc.getElementById('cp-relever').textContent, 'Relever les prix qui manquent')
+  assert.match(doc.getElementById('cp-note-prix').textContent, /2 comparables ne sont pas encore relevés/)
+})
+
+test('REVIEW (C5) : le calcul entier impossible affiche son motif, jamais un tableau vide', async () => {
+  const { doc } = await monter(pageAvecPrix({ etat: 'calcule', a_capturer: 0, prix: { statut: 'non_calculable', motif: 'le calendrier du marché est absent' } }))
+  assert.equal(doc.querySelectorAll('#cp-zone-prix table').length, 0)
+  assert.match(doc.getElementById('cp-zone-prix').textContent, /ne peuvent pas être calculés : le calendrier du marché est absent/)
+})

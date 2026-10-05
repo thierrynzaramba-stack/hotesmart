@@ -100,57 +100,102 @@ async function rendreRecherche ({ bienId, cout, nature = 'recherche' }) {
 }
 
 // ─── §22.3 et §22.7 : les prix de depart ────────────────────────────────────
-// Le marche du bien doit etre celui de l'adresse de son profil : sa commune
-// doit figurer dans l'adresse trouvee (sinon, aucun calcul, aucun paiement).
-const sansAccents = v => String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+// Le marche du bien doit etre celui de l'adresse de son profil : sa commune doit
+// figurer EN MOTS ENTIERS dans l'adresse trouvee (review de f37b7da : « Pau »
+// n'est pas dans « Saint-Paul »). Sinon, aucun calcul, aucun paiement.
+const enMots = v => ` ${String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `
 async function marcheDuBien (bienId, profil) {
   const { data, error } = await supabase.from('marche_biens').select('pays, region, localite').eq('property_id', bienId).limit(1)
   if (error) throw new Error(`marche_biens : ${error.message}`)
   const m = (data || [])[0]
-  if (!m || !sansAccents(profil.adresse_trouvee).includes(sansAccents(m.localite))) return null
+  if (!m || !String(m.localite || '').trim() || !enMots(profil.adresse_trouvee).includes(enMots(m.localite))) return null
   const nfc = v => String(v || '').normalize('NFC')
   return { pays: nfc(m.pays), region: nfc(m.region), localite: nfc(m.localite) }
 }
 
+// Les calendriers en cache (frais), en UNE lecture (review de f37b7da) :
+// Map listing_id -> nuits.
+async function calendriersEnCache (ids, maintenant = new Date()) {
+  const cles = new Map(ids.map(id => [cleCanonique(ENDPOINT_CAL, { listing_id: String(id), currency: 'native' }), String(id)]))
+  if (!cles.size) return new Map()
+  const { data, error } = await supabase.from('airroi_cache').select('cle, reponse, recupere_le').in('cle', [...cles.keys()])
+  if (error) throw new Error(`airroi_cache : ${error.message}`)
+  const out = new Map()
+  for (const l of data || []) {
+    if ((maintenant - new Date(l.recupere_le)) / 86400000 > FRAICHEUR_JOURS[ENDPOINT_CAL]) continue
+    let d; try { d = lireJson(l.reponse) } catch (e) { continue }
+    if (d && Array.isArray(d.results)) out.set(cles.get(l.cle), d.results)
+  }
+  return out
+}
+
+const PARALLELE = 4
+const jourParis = (d = new Date()) => d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
+
 // Les prix de depart : `payer` faux = le cache seulement (le GET). Rend
-// { etat, prix?, message?, a_capturer }.
+// { etat, prix?, message?, a_capturer, note? }.
 async function calculerPrix ({ bienId, compte, profil, payer }) {
   if (!profil || !profil.strategie) return { etat: 'strategie_absente', message: 'Choisissez d’abord votre stratégie de prix.' }
   const lignes = await comparablesRetenus(supabase, bienId)
   if (lignes.filter(l => l.retenu_par !== 'fondateur').length < 3) return { etat: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' }
+  const indispo = { etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }
   const marche = await marcheDuBien(bienId, profil)
-  if (!marche) return { etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }
+  if (!marche) return indispo
   const capture = await lireDerniereCapture(supabase, marche)
   if (capture.erreur) throw new Error(`temperature : ${capture.erreur}`)
-  if (!capture.jours.length) return { etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }
-  let client = null
-  const ctx = { propertyId: bienId, userId: compte }
-  const calendriers = []
-  let manquants = 0
+  // Seules les nuits A VENIR comptent ; le calendrier du marche doit couvrir
+  // les 300 prochains jours (review de f37b7da, C7).
+  const aujourdhui = jourParis()
+  const dans300 = jourParis(new Date(Date.now() + 300 * 86400000))
+  const jours = capture.jours.filter(j => j.jour >= aujourdhui)
+  if (!jours.length || !jours.some(j => j.jour >= dans300)) return { ...indispo, message: 'Le calendrier du marché de votre adresse est trop ancien : vos prix de départ ne peuvent pas encore être calculés.' }
+  const ids = lignes.map(l => String(l.listing_id))
+  const cache = await calendriersEnCache(ids)
+  let manquants = ids.filter(id => !cache.has(id))
   let refus = null
-  for (const l of lignes) {
-    let jours = await cacheFrais(ENDPOINT_CAL, { listing_id: String(l.listing_id), currency: 'native' }, 'results')
-    if (jours === null && payer && !refus) {
-      // Chaque calendrier RESERVE son cout d'abord (§22.5) ; un echec le rend.
-      const motif = await reserverRecherche({ bienId, compte, cout: COUTS.calendrier, nature: 'calendrier' })
-      if (motif !== 'ok') refus = MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois
-      else {
+  if (payer && manquants.length) {
+    let client = null
+    const ctx = { propertyId: bienId, userId: compte }
+    // Quatre releves a la fois ; chaque calendrier RESERVE son cout d'abord.
+    const file = [...manquants]
+    const ouvrier = async () => {
+      while (file.length && !refus) {
+        const id = file.shift()
+        const motif = await reserverRecherche({ bienId, compte, cout: COUTS.calendrier, nature: 'calendrier' })
+        if (motif !== 'ok') { refus = MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois; return }
         try {
           client = client || creerClient({ depot: depotSupabase(supabase) })
-          const r = await client.calendrierAnnonce(l.listing_id, ctx)
-          jours = r && r.donnees && Array.isArray(r.donnees.results) ? r.donnees.results : null
+          const r = await client.calendrierAnnonce(id, ctx)
+          if (r && r.donnees && Array.isArray(r.donnees.results)) cache.set(id, r.donnees.results)
         } catch (e) {
           console.error('[marche-comparables] calendrier', e && (e.code || e.message))
-          await rendreRecherche({ bienId, cout: COUTS.calendrier, nature: 'calendrier' })
+          // ⚠ On ne RAND que si rien n'a ete facture (review de f37b7da, SECURITE).
+          if (e && e.coutLibere === true) await rendreRecherche({ bienId, cout: COUTS.calendrier, nature: 'calendrier' })
         }
       }
     }
-    if (jours === null) { manquants++; continue }
-    calendriers.push({ listing_id: String(l.listing_id), position: l.retenu_par === 'fondateur' ? 'equivalent' : l.position, jours })
+    await Promise.all(Array.from({ length: Math.min(PARALLELE, file.length) }, ouvrier))
+    manquants = ids.filter(id => !cache.has(id))
   }
-  if (!payer && manquants) return { etat: 'a_capturer', a_capturer: manquants }
-  const prix = prixDeDepart({ calendriers, marche: capture.jours, strategie: profil.strategie })
-  return { etat: 'calcule', prix, manquants, note: refus || (manquants ? `Les prix de ${manquants} comparable${manquants > 1 ? 's' : ''} n’ont pas pu être relevés.` : null) }
+  const calendriers = lignes.filter(l => cache.has(String(l.listing_id))).map(l => ({
+    listing_id: String(l.listing_id), position: l.retenu_par === 'fondateur' ? 'equivalent' : l.position,
+    jours: cache.get(String(l.listing_id)).filter(n => n && String(n.date) >= aujourdhui),
+  }))
+  // Rien en cache et rien paye : il faut relever.
+  if (!calendriers.length) return { etat: 'a_capturer', a_capturer: manquants.length, note: refus }
+  // Avec ce qui est disponible, on calcule ; les manquants se proposent a cote
+  // (review de f37b7da, C4 : le GET et le POST disent la meme chose).
+  const prix = prixDeDepart({ calendriers, marche: jours, strategie: profil.strategie })
+  return { etat: 'calcule', prix, a_capturer: manquants.length,
+    note: refus || (manquants.length ? `Les prix de ${manquants.length} comparable${manquants.length > 1 ? 's' : ''} ne sont pas encore relevés.` : null) }
+}
+
+// Au GET, une panne du calcul des prix n'empeche pas les comparables (C3).
+async function prixSansPanne (o) {
+  try { return await calculerPrix(o) } catch (e) {
+    console.error('[marche-comparables] prix', e.message)
+    return { etat: 'erreur', message: 'Vos prix de départ sont momentanément indisponibles.' }
+  }
 }
 
 module.exports = async (req, res) => {
@@ -186,7 +231,7 @@ module.exports = async (req, res) => {
         // La recherche par equipement reste a faire : la page propose de la lancer.
         complement_a_chercher: !!(base && complement === null),
         // §22.7 : les prix de depart, depuis le cache seulement (un GET ne paie jamais).
-        prix_depart: profil ? await calculerPrix({ bienId, compte, profil, payer: false }) : null })
+        prix_depart: profil ? await prixSansPanne({ bienId, compte, profil, payer: false }) : null })
     }
 
     const corps = req.body && typeof req.body === 'object' ? req.body : {}
@@ -224,7 +269,8 @@ module.exports = async (req, res) => {
           // Garde-fou, cle absente, AirROI en panne : une phrase simple pour
           // l'hote ; le detail au journal (jamais de cle : client.js la masque).
           console.error('[marche-comparables] airroi', e && (e.code || e.message))
-          await rendreRecherche({ bienId, cout: COUTS.base })
+          // ⚠ On ne RAND que si rien n'a ete facture (review de f37b7da, SECURITE).
+          if (e && e.coutLibere === true) await rendreRecherche({ bienId, cout: COUTS.base })
           return res.status(200).json({ etat: 'indisponible', message: panne })
         }
       }
@@ -250,7 +296,7 @@ module.exports = async (req, res) => {
             complement = r && r.donnees && Array.isArray(r.donnees.results) ? r.donnees.results : []
           } catch (e) {
             console.error('[marche-comparables] airroi equipements', e && (e.code || e.message))
-            await rendreRecherche({ bienId, cout: COUTS.equipements })
+            if (e && e.coutLibere === true) await rendreRecherche({ bienId, cout: COUTS.equipements })
             complement = []
             note = 'La recherche des biens qui ont vos équipements n’est pas disponible pour le moment.'
           }

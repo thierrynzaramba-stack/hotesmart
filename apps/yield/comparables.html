@@ -789,15 +789,27 @@
     const zone = el('cp-zone-prix')
     zone.replaceChildren()
     dire('cp-note-prix', (pd && pd.note) || '', 'cp-meta')
+    // Des prix a relever : le bouton, a cote du tableau s'il y en a un (review de
+    // f37b7da, C4 : on calcule avec ce qui est deja releve).
+    const bouton = () => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'cp-btn'; b.id = 'cp-relever'
+      b.textContent = pd.etat === 'calcule' ? 'Relever les prix qui manquent' : 'Relever les prix de vos comparables'
+      b.addEventListener('click', relever)
+      return b
+    }
     if (pd.etat === 'a_capturer') {
       const p = document.createElement('p'); p.className = 'cp-meta'
       p.textContent = `Les prix de ${pluriel(pd.a_capturer, 'comparable', 'comparables')} ne sont pas encore relevés.`
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'cp-btn'; b.id = 'cp-relever'; b.textContent = 'Relever les prix de vos comparables'
-      b.addEventListener('click', relever)
-      zone.append(p, b); return
+      zone.append(p, bouton()); return
     }
     if (pd.etat !== 'calcule' || !pd.prix) { zone.append(Object.assign(document.createElement('p'), { className: 'non-calc', textContent: pd.message || 'Vos prix de départ ne peuvent pas encore être calculés.' })); return }
     const r = pd.prix
+    // Le calcul entier impossible : son motif, jamais un tableau vide (C5).
+    if (!Array.isArray(r.niveaux) || !r.niveaux.length) {
+      zone.append(Object.assign(document.createElement('p'), { className: 'non-calc', textContent: `Vos prix de départ ne peuvent pas être calculés : ${r.motif || 'données insuffisantes'}.` }))
+      if (pd.a_capturer > 0) zone.append(bouton())
+      return
+    }
     suivis = new Map((r.comparables || []).map(c => [String(c.listing_id), c.mention]))
     const t = document.createElement('table'); t.className = 'cp-prix'
     const th = document.createElement('tr')
@@ -823,6 +835,7 @@
       const sens = se.ecart_pct < 0 ? `${Math.abs(se.ecart_pct)} % moins cher` : se.ecart_pct > 0 ? `${se.ecart_pct} % plus cher` : 'au même prix'
       zone.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: `Séjour minimum : parmi vos comparables, ceux qui imposent 2 nuits ou plus vendent la nuit ${sens} que ceux qui acceptent 1 nuit (${EUROS(se.plusieurs_nuits)} contre ${EUROS(se.une_nuit)}).` }))
     } else if (se) zone.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: `Séjour minimum : ${se.motif}.` }))
+    if (pd.a_capturer > 0) zone.append(bouton())
     if (ouvert) ouvrirFiche(ouvert, { defiler: false })
   }
 

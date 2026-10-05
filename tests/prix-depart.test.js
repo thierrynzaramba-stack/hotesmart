@@ -116,7 +116,7 @@ test('sans strategie, ou sans calendrier du marche : non calculable', () => {
   assert.match(p.prixDeDepart({ calendriers: [], marche: [], strategie: 'juste' }).motif, /calendrier du marché est absent/)
 })
 
-test('aucun montant de comparable ne sort, seulement la note, la mention et la position', () => {
+test('la liste des comparables ne porte que la note, la mention et la position (la fourchette et l effet du sejour minimum, eux, sont des montants — voulus, §22.7)', () => {
   const cs = [cal('1', 'dessous', etage(100, 10)), cal('2', 'equivalent', etage(100, 10)), cal('3', 'dessus', etage(100, 10))]
   const r = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' })
   for (const c of r.comparables) assert.deepEqual(Object.keys(c).sort(), ['listing_id', 'mention', 'note', 'position'])
@@ -129,4 +129,22 @@ test('agressif retire EXACTEMENT un cran (pas 10 %) ; l arrondi est aux 5 € SU
   // Moyenne 101 : arrondie a 105 (le plus proche donnerait 100).
   const ar = [cal('1', 'equivalent', etage(95, 10)), cal('2', 'equivalent', etage(100, 10)), cal('3', 'equivalent', etage(108, 10))]
   assert.equal(niv(p.prixDeDepart({ calendriers: ar, marche: MARCHE, strategie: 'juste' }), 'creux').prix, 105)
+})
+
+// ─── Constats de la review de f37b7da ───────────────────────────────────────
+test('REVIEW (C1) : un cran nul ou negatif ne s applique pas — non calculable, avec son motif (sinon les strategies s inversent)', () => {
+  const fixes = [cal('1', 'equivalent', () => 110), cal('2', 'equivalent', () => 110), cal('3', 'equivalent', () => 110)]
+  const r = p.prixDeDepart({ calendriers: fixes, marche: MARCHE, strategie: 'agressif' })
+  assert.ok(r.niveaux.every(n => n.statut === 'non_calculable'))
+  assert.match(niv(r, 'creux').motif, /ne montent pas avec le marché/)
+  const inverses = [1, 2, 3].map(i => cal(String(i), 'equivalent', m => 200 - 20 * RANG[m.niveau]))
+  assert.equal(niv(p.prixDeDepart({ calendriers: inverses, marche: MARCHE, strategie: 'agressif' }), 'creux').statut, 'non_calculable')
+})
+
+test('REVIEW (C2) : l arrondi ignore l artefact de virgule flottante — 240 reste 240 ; un prix negatif n est pas un prix', () => {
+  // Trois comparables a 240 au Creux, poids differents : 240,00000000000003 donnait 245.
+  const cs = [cal('1', 'equivalent', etage(240, 10)), cal('2', 'equivalent', etage(240, 10)), cal('3', 'equivalent', etage(240, 10))]
+  assert.equal(niv(p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' }), 'creux').prix, 240)
+  const bas = [cal('1', 'equivalent', etage(2, 30)), cal('2', 'equivalent', etage(2, 30)), cal('3', 'equivalent', etage(2, 30))]
+  assert.equal(niv(p.prixDeDepart({ calendriers: bas, marche: MARCHE, strategie: 'agressif' }), 'creux').statut, 'non_calculable')
 })

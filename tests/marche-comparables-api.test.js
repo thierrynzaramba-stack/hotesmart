@@ -40,6 +40,7 @@ function base (tables) {
       select: () => q,
       eq: (k, v) => { lignes = lignes.filter(l => String(l[k]) === String(v)); return q },
       gte: (k, v) => { lignes = lignes.filter(l => l[k] >= v); return q },
+      in: (k, vs) => { lignes = lignes.filter(l => vs.includes(l[k])); return q },
       order: () => q,
       limit: n => Promise.resolve(absente ? { data: null, error: erreur } : { data: lignes.slice(0, n), error: null }),
       // Comme le vrai client : range() se chaine encore (eq apres range).
@@ -88,7 +89,7 @@ async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, bod
       },
       calendrierAnnonce: async (listingId, ctx) => {
         appelsAirroi.push({ calendrier: String(listingId), ctx })
-        if (tables.__calendrierEnPanne) throw new Error('HTTP 500')
+        if (tables.__calendrierEnPanne) throw Object.assign(new Error('HTTP 500'), { coutLibere: tables.__calendrierEnPanne !== 'facture' })
         return { donnees: { currency: 'EUR', results: CALENDRIER(100) }, depuisCache: false }
       },
       rechercheEquipements: async (corps, ctx) => {
@@ -437,10 +438,11 @@ test('REVIEW : base absente et equipement rare — la base reserve 0,10 $ PUIS l
 })
 
 test('LE TEST QUI COMPTE (review C1) : un appel qui ECHOUE rend sa reservation — base comme complement', async () => {
-  const base = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: new Error('HTTP 422') })
+  const libere = m => Object.assign(new Error(m), { coutLibere: true })
+  const base = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: libere('HTTP 422') })
   assert.deepEqual(rendus(base), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche' }])
   assert.equal(base.corps.etat, 'indisponible')
-  const comp = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA(), airroiEq: new Error('HTTP 422') })
+  const comp = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA(), airroiEq: libere('HTTP 422') })
   assert.deepEqual(rendus(comp), [{ p_property: 'BIEN-A', p_cout: 0.50, p_nature: 'recherche' }])
   assert.equal(comp.corps.comparables.length, 25)
   // Un appel reussi ne rend rien.
@@ -591,10 +593,16 @@ test('LE TEST QUI COMPTE (§22.7) : le GET calcule les prix de depart depuis le 
   for (let i = 1; i < prix.length; i++) assert.ok(prix[i] >= prix[i - 1], 'les niveaux montent')
   assert.equal(g.rpcs.length, 0)
   assert.equal(g.appelsAirroi.length, 0)
-  // Un calendrier manque : le GET le dit, sans rien payer.
+  // Un calendrier manque : le GET calcule avec ce qu'il a, et le DIT, sans rien
+  // payer (review de f37b7da, C4 : GET et POST disent la meme chose).
   const manque = await appeler({ tables: tablesPrix({ calendriersEnCache: 2 }) })
-  assert.deepEqual(manque.corps.prix_depart, { etat: 'a_capturer', a_capturer: 1 })
+  assert.equal(manque.corps.prix_depart.etat, 'calcule')
+  assert.equal(manque.corps.prix_depart.a_capturer, 1)
+  assert.match(manque.corps.prix_depart.note, /Les prix de 1 comparable ne sont pas encore relevés/)
   assert.equal(manque.rpcs.length, 0)
+  const rien = await appeler({ tables: tablesPrix({ calendriersEnCache: 0 }) })
+  assert.equal(rien.corps.prix_depart.etat, 'a_capturer')
+  assert.equal(rien.corps.prix_depart.a_capturer, 3)
 })
 
 test('LE TEST QUI COMPTE (§22.5) : « prix » releve chaque calendrier MANQUANT — reserve 0,10 $ (nature calendrier) avant de partir', async () => {
@@ -602,19 +610,21 @@ test('LE TEST QUI COMPTE (§22.5) : « prix » releve chaque calendrier MANQUANT
   assert.deepEqual(r.gardes, [{ domaine: 'reglages', niveau: 'write', bien: 'REF-42', bienRequis: true }])
   assert.equal(reservCal(r).length, 2)
   assert.ok(reservCal(r).every(x => x.params.p_cout === 0.10 && x.params.p_calendriers_90j === 30))
-  assert.deepEqual(r.appelsAirroi.map(a => a.calendrier), IDS.slice(1))
+  assert.deepEqual(r.appelsAirroi.map(a => a.calendrier).sort(), IDS.slice(1).sort())
   assert.ok(r.appelsAirroi.every(a => a.ctx.propertyId === 'BIEN-A' && a.ctx.userId === 'COMPTE'))
   assert.equal(r.corps.etat, 'calcule')
-  assert.equal(r.corps.manquants, 0)
+  assert.equal(r.corps.a_capturer, 0)
 })
 
 test('§22.5 : un calendrier qui echoue rend sa reservation (nature calendrier) ; le plafond atteint arrete les releves suivants, et c est dit', async () => {
-  const panne = await appeler({ method: 'POST', body: { action: 'prix' }, tables: { ...tablesPrix({ calendriersEnCache: 2 }), __calendrierEnPanne: true } })
+  const panne = await appeler({ method: 'POST', body: { action: 'prix' }, tables: { ...tablesPrix({ calendriersEnCache: 2 }), __calendrierEnPanne: 'libere' } })
   assert.deepEqual(rendus(panne), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'calendrier' }])
-  assert.equal(panne.corps.manquants, 1)
-  assert.match(panne.corps.note, /Les prix de 1 comparable n’ont pas pu être relevés/)
+  assert.equal(panne.corps.a_capturer, 1)
+  assert.match(panne.corps.note, /Les prix de 1 comparable ne sont pas encore relevés/)
   const plafond = await appeler({ method: 'POST', body: { action: 'prix' }, tables: { ...tablesPrix({ calendriersEnCache: 0 }), __rpc: 'calendriers' } })
-  assert.equal(reservCal(plafond).length, 1, 'un refus arrete les reservations suivantes')
+  // Quatre releves partent ensemble : au plus quatre reservations demandees, toutes
+  // refusees (donc gratuites), et AUCUN appel AirROI.
+  assert.ok(reservCal(plafond).length >= 1 && reservCal(plafond).length <= 4)
   assert.equal(plafond.appelsAirroi.length, 0)
   assert.match(plafond.corps.note, /déjà été relevés plusieurs fois ce trimestre/)
 })
@@ -649,4 +659,42 @@ test('LE TEST QUI COMPTE (SECURITE, §22.5) : la migration de la nature — deux
   assert.match(res, /nature = 'calendrier'\s+and cree_le > now\(\) - interval '90 days'/)
   assert.match(sql, /revoke all on function\s+public\.reserver_recherche_comparables\(\s+uuid, uuid, numeric, text,\s+int, int, int, int, numeric\)\s+from public, anon, authenticated/)
   assert.match(sql, /revoke all on function\s+public\.rendre_recherche_comparables\(\s+uuid, numeric, text\)\s+from public, anon, authenticated/)
+})
+
+// ─── Constats de la review de f37b7da ───────────────────────────────────────
+test('LE TEST QUI COMPTE (SECURITE, review S1) : un appel PEUT-ETRE FACTURE (reponse vide, coupure) ne rend PAS sa reservation — base, complement, calendrier', async () => {
+  const facture = m => Object.assign(new Error(m), { coutLibere: false })
+  const base = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: facture('reponse inattendue') })
+  assert.deepEqual(rendus(base), [])
+  const comp = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA(), airroiEq: facture('reseau') })
+  assert.deepEqual(rendus(comp), [])
+  const cal = await appeler({ method: 'POST', body: { action: 'prix' }, tables: { ...tablesPrix({ calendriersEnCache: 2 }), __calendrierEnPanne: 'facture' } })
+  assert.deepEqual(rendus(cal), [])
+})
+
+test('REVIEW : le marche relie doit figurer en MOTS ENTIERS dans l adresse — « Pau » n est pas dans « Saint-Paul » ; une commune vide ne passe pas', async () => {
+  const pau = tablesPrix({ localite: 'Pau' })
+  pau.bien_profil[0].adresse_trouvee = '12 Rue Saint-Paul 31000 Toulouse'
+  assert.equal((await appeler({ tables: pau })).corps.prix_depart.etat, 'marche_absent')
+  assert.equal((await appeler({ tables: tablesPrix({ localite: '' }) })).corps.prix_depart.etat, 'marche_absent')
+  const ok = tablesPrix()
+  ok.bien_profil[0].adresse_trouvee = '12 RUE DES THERMES 65200 BAGNERES DE BIGORRE'
+  assert.equal((await appeler({ tables: ok })).corps.prix_depart.etat, 'calcule', 'tirets et espaces equivalents, accents et casse ignores')
+})
+
+test('REVIEW (C3) : une panne du calcul des prix au GET n empeche pas les comparables', async () => {
+  const tb = { ...tablesPrix(), __absentes: ['marche_biens'] }
+  const g = await appeler({ tables: tb })
+  assert.equal(g.code, 200)
+  assert.equal(g.corps.comparables.length, 25)
+  assert.equal(g.corps.prix_depart.etat, 'erreur')
+})
+
+test('REVIEW (C7) : un calendrier du marche trop ancien (moins de 300 jours a venir) — non calcule, et dit', async () => {
+  const tb = tablesPrix()
+  const limite = new Date(Date.now() + 200 * 86400000).toISOString().slice(0, 10)
+  tb.marche_temperature_airroi = TEMPERATURE.filter(j => j.jour < limite)
+  const g = await appeler({ tables: tb })
+  assert.equal(g.corps.prix_depart.etat, 'marche_absent')
+  assert.match(g.corps.prix_depart.message, /trop ancien/)
 })
