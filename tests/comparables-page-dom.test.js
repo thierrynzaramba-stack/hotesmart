@@ -615,41 +615,58 @@ test('REVIEW : une nouvelle validation des comparables n efface pas une strategi
   assert.equal(doc.getElementById('cp-sejour-min').value, '4')
 })
 
-// ─── §22.7 : les prix de depart ─────────────────────────────────────────────
+// ─── §22.11 : les prix de depart, 8 cases ───────────────────────────────────
 const IDS3 = CARTES.slice(0, 3).map(c => c.listing_id)
-const PRIX_CALCULE = { etat: 'calcule', manquants: 0, note: null, prix: { statut: 'calcule', strategie: 'juste', cran: 12,
-  niveaux: [
-    { niveau: 'creux', yieldflow: 'Base', statut: 'calcule', prix: 85, fourchette: { bas: 70, haut: 95 }, comparables: 3 },
-    { niveau: 'modere', yieldflow: 'Moyen', statut: 'calcule', prix: 95, fourchette: { bas: 82, haut: 108 }, comparables: 3 },
-    { niveau: 'favorable', yieldflow: 'Haut', statut: 'calcule', prix: 110, fourchette: { bas: 96, haut: 120 }, comparables: 3 },
-    { niveau: 'pic', yieldflow: 'Très haut ou Exceptionnel', statut: 'non_calculable', motif: '2 comparables avec un prix à ce niveau (il en faut 3)' }],
-  comparables: [{ listing_id: IDS3[0], note: 0.82, mention: 'suit bien le marché', position: 'dessous' }],
+const kase = (niveau, type, prix, bas, haut) => ({ niveau, type, statut: 'calcule', forme: 1, fourchette: { bas, haut }, hotes: 5, strategies: { agressif: prix - 20, juste: prix, qualite: prix + 5 }, prix })
+const PRIX_CALCULE = { etat: 'calcule', a_capturer: 0, note: null, prix: { statut: 'calcule', strategie: 'juste', hotes: 7, comparables: 9,
+  niveaux_source: 'segment', amplitude: 20, position: 0.14, ancres: { agressif: 140, juste: 158, qualite: 165 },
+  cases: [kase('creux', 'semaine', 157, 65, 281), kase('creux', 'weekend', 173, 81, 308), kase('modere', 'semaine', 158, 70, 281), kase('modere', 'weekend', 187, 97, 342),
+    kase('favorable', 'semaine', 158, 73, 281), kase('favorable', 'weekend', 192, 98, 342), kase('pic', 'semaine', 169, 73, 301),
+    { niveau: 'pic', type: 'weekend', statut: 'non_calculable', motif: '2 hôtes avec des prix dans cette case (il en faut 3)' }],
+  alertes: [{ type: 'weekend', strategie: 'juste', niveau: 'favorable', prix: 150, semaine: 158 }, { type: 'niveau', strategie: 'qualite', niveau: 'pic', jour: 'semaine', prix: 1, precedent: 2 }],
+  serre: { agressif_juste: 18, juste_qualite: 7 }, a_verifier: [IDS3[1]],
   sejour: { statut: 'calcule', une_nuit: 100, plusieurs_nuits: 90, ecart_pct: -10, comparables: [2, 2] } } }
 const pageAvecPrix = (pd, { strategie = 'juste', apres = () => reponse({}, 400) } = {}) => ({ methode, corps }) => (methode === 'GET'
   ? reponse({ etat: 'calcule', profil: { ...PROFIL, strategie, sejour_min: 2 }, retenus: IDS3, fondateur: [], comparables: CARTES, prix_depart: pd })
   : apres({ methode, corps }))
 
-test('LE TEST QUI COMPTE (§22.7) : les prix de depart — par niveau, la fourchette des comparables et VOTRE prix ; le cran ; l effet du sejour minimum', async () => {
+test('LE TEST QUI COMPTE (§22.11) : les 8 cases — semaine et week-end par niveau, VOTRE prix et la fourchette du marche ; plus de cran', async () => {
   const { doc } = await monter(pageAvecPrix(PRIX_CALCULE))
   assert.equal(doc.getElementById('cp-etape-d').hidden, false)
+  assert.deepEqual([...doc.querySelectorAll('#cp-zone-prix thead th')].map(x => x.textContent), ['Niveau', 'Semaine', 'Week-end'])
   const lignes = [...doc.querySelectorAll('#cp-zone-prix tbody tr')].map(tr => [...tr.children].map(td => td.textContent))
   assert.deepEqual(lignes, [
-    ['Base', '70 € à 95 €', '85 €'], ['Moyen', '82 € à 108 €', '95 €'], ['Haut', '96 € à 120 €', '110 €'],
-    ['Très haut ou Exceptionnel', 'non calculable', '2 comparables avec un prix à ce niveau (il en faut 3)']])
+    ['Creux', '157 €marché 65 € à 281 €', '173 €marché 81 € à 308 €'],
+    ['Modéré', '158 €marché 70 € à 281 €', '187 €marché 97 € à 342 €'],
+    ['Favorable', '158 €marché 73 € à 281 €', '192 €marché 98 € à 342 €'],
+    ['Pic', '169 €marché 73 € à 301 €', 'non calculable : 2 hôtes avec des prix dans cette case (il en faut 3)']])
   const z = doc.getElementById('cp-zone-prix').textContent
-  assert.match(z, /un niveau de prix vaut environ 12 €/)
-  assert.match(z, /ceux qui imposent 2 nuits ou plus vendent la nuit 10 % moins cher que ceux qui acceptent 1 nuit \(90 € contre 100 €\)/)
+  assert.doesNotMatch(z, /un niveau de prix vaut/, 'le cran a disparu')
+  assert.match(z, /Week-end : les nuits du vendredi et du samedi\. Prix mesurés sur les 6 prochains mois\./)
+  assert.match(z, /Les niveaux viennent de la saison de vos comparables : leurs prix varient de 20 %/)
+  assert.match(z, /de vos 7 hôtes, par rang : agressif 140 €, prix marché 158 €, haut de gamme 165 €\. Votre stratégie : prix marché\./)
+  assert.match(z, /ceux qui imposent 2 nuits ou plus vendent la nuit 10 % moins cher/)
 })
 
-test('§22.7 : sans strategie, pas de section des prix ; la note de coherence d un comparable s affiche dans sa fiche', async () => {
+test('LE TEST QUI COMPTE (§22.11) : un marche serre, une montee ratee, un comparable a verifier — DITS, jamais lisses', async () => {
+  const { doc } = await monter(pageAvecPrix(PRIX_CALCULE))
+  const avert = [...doc.querySelectorAll('#cp-zone-prix .cp-avert')].map(x => x.textContent)
+  assert.ok(avert.includes('Votre marché est serré : dans certaines cases, seulement 7 € séparent le prix marché et le haut de gamme.'))
+  assert.ok(avert.some(t => /en favorable, votre week-end \(150 €\) est sous votre semaine \(158 €\)\. C’est ce que pratiquent vos comparables : rien n’a été lissé\./.test(t)))
+  assert.ok(!avert.some(t => /niveau pic/.test(t)), 'une alerte d une AUTRE strategie ne s affiche pas')
+  assert.ok(avert.some(t => t.startsWith(`Vérifiez ce comparable : ${CARTES[1].nom}.`)))
+})
+
+test('§22.11 : le repli sur le marche de la ville est dit ; la fiche ne parle plus de « suivre le marche »', async () => {
+  const { doc, L } = await monter(pageAvecPrix({ ...PRIX_CALCULE, prix: { ...PRIX_CALCULE.prix, niveaux_source: 'marche' } }))
+  assert.match(doc.getElementById('cp-zone-prix').textContent, /les niveaux viennent du calendrier du marché de votre ville/)
+  cliquerPoint(L, IDS3[0])
+  assert.doesNotMatch(doc.getElementById('cp-fiche').textContent, /Ses prix :/)
   const sans = await monter(pageAvecPrix({ etat: 'strategie_absente', message: 'x' }, { strategie: null }))
   assert.equal(sans.doc.getElementById('cp-etape-d').hidden, true)
-  const { doc, L } = await monter(pageAvecPrix(PRIX_CALCULE))
-  cliquerPoint(L, IDS3[0])
-  assert.match(doc.getElementById('cp-fiche').textContent, /Ses prix : suit bien le marché/)
 })
 
-test('LE TEST QUI COMPTE (§22.7) : des prix a relever — un bouton, jamais un releve automatique ; le releve affiche le resultat', async () => {
+test('LE TEST QUI COMPTE (§22.5) : des prix a relever — un bouton, jamais un releve automatique ; le releve affiche le resultat', async () => {
   const { doc, appels } = await monter(pageAvecPrix({ etat: 'a_capturer', a_capturer: 2 }, { apres: ({ corps }) => (corps.action === 'prix' ? reponse(PRIX_CALCULE) : reponse({}, 400)) }))
   assert.equal(posts(appels, 'prix').length, 0)
   assert.match(doc.getElementById('cp-zone-prix').textContent, /Les prix de 2 comparables ne sont pas encore relevés/)
@@ -659,13 +676,13 @@ test('LE TEST QUI COMPTE (§22.7) : des prix a relever — un bouton, jamais un 
   assert.equal(doc.querySelectorAll('#cp-zone-prix tbody tr').length, 4)
 })
 
-test('§22.7 : le marche de l adresse indisponible — le message, sans tableau', async () => {
-  const { doc } = await monter(pageAvecPrix({ etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }))
-  assert.match(doc.getElementById('cp-zone-prix').textContent, /Le marché de votre adresse n’est pas encore disponible/)
+test('§22.11 : un etat sans prix (strategie, comparables) affiche son message, sans tableau', async () => {
+  const { doc } = await monter(pageAvecPrix({ etat: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' }))
+  assert.match(doc.getElementById('cp-zone-prix').textContent, /Choisissez d’abord au moins 3 comparables/)
   assert.equal(doc.querySelectorAll('#cp-zone-prix table').length, 0)
 })
 
-test('§22.7 : enregistrer une strategie relit les prix de depart (cache seulement)', async () => {
+test('§22.11 : enregistrer une strategie relit les prix de depart (cache seulement)', async () => {
   let n = 0
   const { doc, appels } = await monter(({ methode, corps }) => {
     if (methode === 'GET') { n++; return reponse({ etat: 'calcule', profil: { ...PROFIL, strategie: n > 1 ? 'qualite' : 'juste', sejour_min: 2 }, retenus: IDS3, fondateur: [], comparables: CARTES, prix_depart: n > 1 ? PRIX_CALCULE : { etat: 'a_capturer', a_capturer: 3 } }) }
@@ -689,9 +706,9 @@ test('REVIEW (C4) : des prix calcules avec des comparables manquants — le tabl
 })
 
 test('REVIEW (C5) : le calcul entier impossible affiche son motif, jamais un tableau vide', async () => {
-  const { doc } = await monter(pageAvecPrix({ etat: 'calcule', a_capturer: 0, prix: { statut: 'non_calculable', motif: 'le calendrier du marché est absent' } }))
+  const { doc } = await monter(pageAvecPrix({ etat: 'calcule', a_capturer: 0, prix: { statut: 'non_calculable', motif: '4 hôtes indépendants parmi vos comparables : il en faut au moins 5. Ajoutez des comparables d’autres hôtes.' } }))
   assert.equal(doc.querySelectorAll('#cp-zone-prix table').length, 0)
-  assert.match(doc.getElementById('cp-zone-prix').textContent, /ne peuvent pas être calculés : le calendrier du marché est absent/)
+  assert.match(doc.getElementById('cp-zone-prix').textContent, /ne peuvent pas être calculés : 4 hôtes indépendants parmi vos comparables : il en faut au moins 5/)
 })
 
 test('REVIEW (428fe8c) : d anciens comparables qui ne sont plus proposes — l hote est averti', async () => {

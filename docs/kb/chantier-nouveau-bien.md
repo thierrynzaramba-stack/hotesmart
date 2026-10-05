@@ -3260,3 +3260,97 @@ un seul bien atteint ce plafond.
   simultanés, jusqu'à 2 $. Le coût reste borné par le quota atomique (5 pages
   par bien et par jour) et par le plafond de 5 $ par bien. C'est la même dette
   que les relevés de calendriers.
+
+### 22.11 Les prix de départ : ancre × forme, 8 cases (5 octobre 2026) — REMPLACE le calcul de §22.7
+
+**Constat de Thierry.** Les paliers étaient trop proches (cran de 1 à 3 €),
+« Moyen » passait sous « Base », et le prix week-end disparaissait, alors que
+ses concurrents en pratiquent un.
+
+**Diagnostic, sur les données brutes.** L'écart week-end disparaissait à trois
+endroits :
+- la **médiane par niveau** : le vendredi et le samedi ne sont qu'un quart des
+  nuits d'un niveau, donc la médiane retombe sur un prix de semaine ;
+- les **niveaux du marché de Toulouse** suivent la saison de toute la ville,
+  pas celle du segment : les week-ends y sont répartis dans tous les niveaux ;
+- **un comparable à prix fixe** (cran 0) pesait plus qu'un comparable qui
+  pratique un vrai prix week-end.
+
+**Décisions de Thierry (5 octobre 2026) :**
+1. **8 cases** : 4 niveaux × semaine / week-end. Le week-end, ce sont les
+   **nuits** du vendredi et du samedi (dette 30 : la convention qui survivra).
+   Chaque prix est mesuré dans sa case, jamais mélangé avec une autre.
+2. **Les niveaux viennent des comparables eux-mêmes** (option b).
+   - Chaque nuit d'une annonce est rapportée à **son propre** prix habituel
+     (sa médiane) du même type de nuit, semaine ou week-end. Le standing et la
+     prime week-end sortent ainsi de la saison.
+   - La moyenne de ces rapports sur les hôtes donne la « saison du segment »
+     de chaque date ; les dates sont réparties en 4 niveaux par quarts.
+   - **Repli** : si l'amplitude de saison (P90 / P10 − 1) reste **sous 10 %**,
+     les comparables sont trop plats, et l'on prend les niveaux du marché de
+     Toulouse.
+3. **La mesure porte sur les 6 prochains mois**, là où les prix sont
+   réellement réglés. La dette 52 départagera « saison du segment » et « prix
+   lointains » le 5 novembre 2026.
+4. **Un hôte = une voix.** Les annonces d'un même hôte sont fondues en une
+   seule valeur (leur moyenne). Il faut **au moins 5 hôtes indépendants** ;
+   sinon, rien n'est calculé et la page le dit. *Vécu : 6 comparables, 4 hôtes
+   seulement ; Charles et Cassandra comptaient double.*
+5. **Ancre × forme.**
+   - **L'ancre d'un hôte** est son prix de semaine habituel. Les ancres des
+     stratégies sont les **percentiles 25 / 50 / 75 par rang** des ancres des
+     hôtes : agressif, prix marché, haut de gamme. Jamais les bords : avec 6
+     comparables, un bord copie un seul bien.
+   - **La forme d'une case** est la médiane, sur les hôtes, du rapport entre le
+     prix de l'hôte dans la case et sa propre ancre. Chaque écart est mesuré par
+     rapport au propre prix de l'hôte ; on ne mélange jamais des standings
+     différents.
+   - **Prix de la case** = ancre de la stratégie × forme de la case.
+6. **Les positions** (−1 « le mien est en dessous », 0 équivalent, +1
+   « supérieur ») : la moyenne par hôte, puis sur les hôtes, décale l'ancre
+   d'**un quart de la largeur des ancres au plus**.
+7. **Jamais hors marché** : le prix est ramené dans la fourchette de sa case,
+   du prix le plus bas au plus haut des hôtes dans cette case.
+8. **Valeurs aberrantes.**
+   - Dans un comparable : sa médiane de la case, avec au moins 3 nuits.
+   - Entre comparables : **aucune exclusion**, ce sont des écarts de standing.
+   - Un hôte à plus du double, ou à moins de la moitié, des autres dans
+     **toutes** les cases est **signalé** à l'hôte (« vérifiez ce
+     comparable »), jamais écarté en silence.
+9. **Contrôles, sans lissage.** Chaque niveau doit être au moins égal au
+   précédent, et le week-end au moins égal à la semaine du même niveau.
+   Sinon, c'est signalé.
+10. **Un écart faible est affiché, pas maquillé.** Si moins de 10 € séparent
+    deux stratégies dans une case, la page le dit : « votre marché est serré ».
+11. **Les relevés de calendrier** (10 au plus par bien) visent d'abord des
+    **hôtes différents** : jamais deux annonces du même hôte tant qu'il manque
+    des hôtes indépendants. Dans un même hôte, l'annonce déjà en cache passe
+    d'abord.
+12. **Arrondi** à l'euro. La règle de prix de YieldFlow (pas de 5 €) s'applique
+    au raccordement, pas ici.
+
+**Exemple réel** (loft de recette, 9 comparables, 7 hôtes, stratégie haut de
+gamme) :
+- ancres des hôtes : 72, 129, 136, 150, 157, 159 et 281 € ;
+- position moyenne +0,14 ;
+- ancres des stratégies : agressif 140 €, prix marché 158 €, haut de gamme
+  165 €.
+
+| Case | Forme | Agressif | Prix marché | Haut de gamme |
+|---|---|---|---|---|
+| Creux, semaine | ×0,99 | 139 | 157 | 164 |
+| Creux, week-end | ×1,10 | 154 | 173 | 182 |
+| Modéré, semaine | ×1,00 | 140 | 158 | 165 |
+| Modéré, week-end | ×1,19 | 166 | 187 | 196 |
+| Favorable, semaine | ×1,00 | 140 | 158 | 166 |
+| Favorable, week-end | ×1,22 | 170 | 192 | 201 |
+| Pic, semaine | ×1,07 | 150 | 169 | 177 |
+| Pic, week-end | ×1,28 | 179 | 202 | 211 |
+
+Tous les contrôles passent. Le marché est **serré** entre prix marché et haut
+de gamme (7 à 9 €), car 4 hôtes sur 7 se tiennent entre 136 et 159 € : la page
+le dit.
+
+**Ce qui disparaît** : la note de cohérence (Spearman), le cran et les 4 paliers
+de §22.7. **Ce qui reste** : l'effet du séjour minimum, les relevés à la
+demande, le quota et le cache.
