@@ -77,9 +77,10 @@ async function monter (serveur, { sansLeaflet = false } = {}) {
   return { w, doc: w.document, appels, L }
 }
 
-function serveur ({ profil = null, cache = null, retenus = [], fondateur = [], aChercher = false, chercher = () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [] }) } = {}) {
+function serveur ({ profil = null, cache = null, retenus = [], fondateur = [], encore = false, chercher = () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [] }), plus = () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [] }) } = {}) {
   return ({ methode, corps }) => {
-    if (methode === 'GET') return reponse({ etat: 'calcule', profil, retenus, fondateur, comparables: cache, complement_a_chercher: aChercher })
+    if (methode === 'GET') return reponse({ etat: 'calcule', profil, retenus, fondateur, comparables: cache, encore })
+    if (corps.action === 'plus') return plus(corps)
     if (corps.action === 'profil') return reponse({ etat: 'enregistre', profil: { ...PROFIL, adresse: corps.adresse } })
     if (corps.action === 'chercher') return chercher(corps)
     if (corps.action === 'retenir') return reponse({ etat: 'enregistre', retenus: corps.choix.map(c => c.listing_id) })
@@ -208,16 +209,31 @@ test('LE TEST QUI COMPTE : les retenus de l EQUIPE — verts et verrouilles (pas
   assert.equal(doc.getElementById('cp-valider-b').disabled, true, 'les retenus de l equipe ne comptent pas dans les 3')
 })
 
-test('§21.2 : un bien trouve par equipement le dit dans sa fiche ; la recherche par equipement a faire se propose, sans partir seule', async () => {
-  const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES, aChercher: true, chercher: () => reponse({ etat: 'calcule', comparables: AVEC_SPA, retenus: [], note: null }) }))
-  assert.equal(posts(appels, 'chercher').length, 0)
-  const b = doc.getElementById('cp-chercher-complement')
-  assert.equal(b.textContent, 'Chercher aussi les biens qui ont vos équipements')
+test('LE TEST QUI COMPTE (§22.10) : « Voir 10 de plus » se propose quand il y en a d autres, ne part jamais seul, ajoute a la liste ; il disparait a 50', async () => {
+  const vingt = CARTES.slice(0, 20)
+  const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: vingt, encore: true,
+    plus: () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [], encore: false }) }))
+  assert.equal(posts(appels, 'plus').length, 0, 'rien ne part tout seul')
+  const b = doc.getElementById('cp-plus')
+  assert.equal(b.textContent, 'Voir 10 de plus')
+  cliquerPoint(L, vingt[0].listing_id); juger(doc, 'equivalent')
   b.click()
   await attendre()
-  const spa = AVEC_SPA.find(c => c.source === 'equipements')
-  cliquerPoint(L, spa.listing_id)
-  assert.match(doc.getElementById('cp-fiche').textContent, /Trouvé grâce à vos équipements/)
+  assert.equal(posts(appels, 'plus').length, 1)
+  assert.equal(visibles(L).length, CARTES.length + 1, 'les biens, plus le marqueur du logement de l hote')
+  assert.equal(pointDe(L, vingt[0].listing_id).style.fillColor, '#1F8A4C', 'un jugement survit au chargement')
+  assert.equal(doc.getElementById('cp-plus'), null, 'plus rien a voir')
+})
+
+test('§22.10 : « Voir 10 de plus » refuse (quota) — la liste reste, le motif est dit', async () => {
+  const vingt = CARTES.slice(0, 20)
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: vingt, encore: true,
+    plus: () => reponse({ etat: 'indisponible', message: 'Plusieurs recherches ont déjà été lancées pour ce logement aujourd’hui. Réessayez demain.' }) }))
+  doc.getElementById('cp-plus').click()
+  await attendre()
+  assert.equal(visibles(L).length, 21, 'les 20 biens, plus le marqueur du logement de l hote')
+  assert.equal(doc.getElementById('cp-zone-carte').hidden, false)
+  assert.match(doc.getElementById('cp-complement').textContent, /Réessayez demain/)
 })
 
 test('la note du serveur s affiche (recherche par equipement refusee ou en panne)', async () => {
@@ -296,11 +312,11 @@ test('telephone : la carte occupe 60 % de la hauteur, la fiche dessous', () => {
 // ─── Constats de la review de 995f025 ───────────────────────────────────────
 test('LE TEST QUI COMPTE (review 1) : un « Non similaire » de l hote n est pas reecrase par les retenus enregistres apres une nouvelle recherche', async () => {
   const [a, b, c] = CARTES.slice(0, 3).map(x => x.listing_id)
-  const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: [a, b, c], aChercher: true,
-    chercher: () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [a, b, c] }) }))
+  const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: [a, b, c], encore: true,
+    plus: () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [a, b, c] }) }))
   cliquerPoint(L, a); juger(doc, 'non')
   cliquerPoint(L, b); juger(doc, 'equivalent')   // second clic : annule
-  doc.getElementById('cp-chercher-complement').click()
+  doc.getElementById('cp-plus').click()
   await attendre()
   assert.equal(pointDe(L, a).style.fillColor, '#5F6368', 'toujours non similaire')
   assert.equal(pointDe(L, b).style.fillColor, '#2A5E86', 'toujours annule')

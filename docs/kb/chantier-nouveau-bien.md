@@ -3151,3 +3151,94 @@ annonces qui n'existent plus.
     de les relever à chaque visite. C'est gratuit (404 non facturé,
     réservation rendue), mais l'hôte est relancé sans fin. Piste : confirmer
     une panne par un relevé témoin, ou noter au second appel identique.
+
+### 22.10 La sélection : des biens actifs, de même valeur perçue, triés par revenu (5 octobre 2026)
+
+**Constat de la recette (Thierry).** Sur le loft de Toulouse (jacuzzi) :
+- les 25 « voisins » d'AirROI étaient tous à moins de 180 m, sans jacuzzi,
+  et entre 41 et 90 € la nuit ;
+- la recherche « spa ou sauna » n'avait lu que **10 biens sur 80**, et 5 de
+  ces 10 étaient **inactifs**, dont 2 retirés d'Airbnb et 2 chambres privées.
+
+**Appel test (0,50 $, go de Thierry).** La nouvelle recherche, sur Toulouse :
+- **76 biens actifs avec jacuzzi** à 10 km ;
+- triés par revenu, prix moyen de 125 à 277 € et revenu de 26 000 à
+  60 000 € sur 12 mois ;
+- 8 des 10 premiers étaient absents de l'ancienne recherche.
+
+Fixture : `tests/fixtures/airroi/actifs-jacuzzi-toulouse-2026-10-05.json`.
+
+**Ce qu'AirROI impose (vérifié par l'appel test et sa documentation) :**
+- **10 résultats par appel au plus.** `page_size` 100 est refusé en HTTP 422,
+  sans facturation. Chaque page coûte 0,50 $.
+- **Filtres** : `room_type {eq}`, `amenities {all|any}`, `bedrooms`, `guests
+  {range}`, `ttm_days_booked {gte}`, `l90d_available_days {gte}`. Tri : `sort
+  {ttm_revenue: "desc"}`.
+- **Pas de « OU » entre deux filtres.** Le filtre se nomme `ttm_days_booked` ;
+  la réponse porte la valeur dans `ttm_days_reserved`.
+
+**Décisions de Thierry :**
+1. **Valeur perçue identique.**
+   - Jacuzzi = jacuzzi : `spa` → `hot_tub` seul. Un sauna seul ne compte pas.
+   - Le bien proposé a **tous** les équipements rares de l'hôte
+     (`amenities.all`). Exception : la vue, qui est un groupe (mer, rivière,
+     bord de l'eau, lac), se demande en `any`.
+2. **Plus de voisins sans l'équipement rare** pour un bien qui en a un. La liste
+   des 25 voisins (`GET /listings/comparables`) ne sert plus qu'aux biens
+   **sans** équipement rare.
+3. **Activité réelle, dans la requête** :
+   - logement entier ;
+   - au moins 30 nuits vendues sur 12 mois, **ou** au moins 10 sur 90 jours
+     (pour ne pas écarter les annonces récentes) ;
+   - au moins 1 nuit ouverte à la vente sur 90 jours.
+
+   AirROI n'a pas de « OU » : la requête demande `ttm_days_booked ≥ 10`, qui
+   englobe les deux cas, et la règle exacte s'applique de notre côté
+   (`lib/marche/activite.js`).
+
+   La même règle filtre les 25 voisins d'un bien sans équipement rare : leur
+   fiche porte les mêmes indicateurs. **Un bien sans indicateur lisible n'est
+   pas proposé** : l'absence de preuve d'activité n'est pas une activité.
+4. **Taille, dans la requête** : même nombre de chambres (`bedrooms {eq}`) et
+   voyageurs ± 2. *Vécu : les rangs 6 et 10 du test avaient 2 chambres ; ils
+   ne devaient pas sortir pour le loft.*
+5. **Tri par revenu sur 12 mois, rayon de 10 km** (6,2 miles). Les cartes
+   gardent **l'ordre d'AirROI** ; la ressemblance ne fait plus que régler la
+   taille du point sur la carte. **Aucun prix ni revenu à l'écran** : le
+   revenu choisit l'ordre, il ne s'affiche pas.
+6. **Chargement à la demande.**
+   - « Chercher » charge 20 biens : 2 pages, 1 $.
+   - Un bouton « Voir 10 de plus » charge la page suivante (0,50 $), tant
+     qu'AirROI en annonce d'autres, et **jusqu'à 50 au plus** (5 pages).
+7. **Cache partagé par recherche, 90 jours, tous comptes.**
+   - La clé est le corps exact de la requête : zone, équipements rares,
+     taille, filtres d'activité, page. Aucune donnée de compte : une page se
+     réutilise par tout hôte du même secteur.
+   - **La zone** est la position du bien **arrondie au centième de degré**
+     (environ 1 km), sinon deux hôtes voisins n'auraient jamais la même clé.
+     Sur un rayon de 10 km, ce décalage est négligeable.
+   - Les pages chargées sont celles qui sont en cache **à la suite, depuis la
+     première**. Une page chargée par un autre hôte est gratuite pour
+     celui-ci.
+8. **Garde-fous.**
+   - Client AirROI : 5 $ par bien sur 90 jours (au lieu de 3 $).
+   - Budget mensuel inchangé pour la recette : 15 $ pour les hôtes, 10 $
+     pour le client. À réévaluer avec le cache partagé.
+   - **Quota des recherches** : une page = une recherche. Les plafonds en
+     nombre passent à 5 par bien et par jour (les 5 pages), 10 par compte et
+     par jour, 20 par compte sur 30 jours. Le plafond en dollars reste le
+     garde-fou principal.
+9. **§7 reste valable** : pas de sélection par tranche de prix selon la
+   stratégie. La stratégie reste après la sélection et n'agit que sur le
+   calcul.
+
+**Hors périmètre** :
+- le calcul des paliers (§22.7) attend ;
+- le tarif du calendrier en ligne (0,20 $ au tarif standard selon la doc, 0,10 $
+  dans notre code) est en cours de vérification par Thierry sur son tableau de
+  bord AirROI.
+
+**Point d'attention, non tranché.** Le garde-fou du client par compte reste à
+4 $ sur 30 jours. Un parcours complet pour un bien coûte 2,50 $ de pages, plus
+10 calendriers à 0,10 ou 0,20 $ : soit 3,50 à 4,50 $. À 0,20 $ le calendrier,
+un seul bien atteint ce plafond.

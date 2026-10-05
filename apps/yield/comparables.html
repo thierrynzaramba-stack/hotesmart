@@ -407,7 +407,7 @@
     // recherche peut couter, c'est l'hote qui la lance (review de 7ace057).
     if (Array.isArray(r.d.comparables)) {
       afficher(r.d.comparables)
-      if (r.d.complement_a_chercher) boutonComplement(j)
+      if (r.d.encore) boutonPlus(j)
     } else boutonChercher(j)
   }
 
@@ -436,12 +436,15 @@
     el('cp-zone-liste').replaceChildren(p, b)
   }
 
-  function boutonComplement (j) {
+  // §22.10 : 10 biens de plus (une page AirROI), tant qu'il y en a, 50 au plus.
+  function boutonPlus (j) {
     const b = document.createElement('button')
-    b.type = 'button'; b.className = 'cp-btn secondaire'; b.id = 'cp-chercher-complement'
-    b.textContent = 'Chercher aussi les biens qui ont vos équipements'
-    b.addEventListener('click', () => chercher(j))
-    el('cp-complement').replaceChildren(b)
+    b.type = 'button'; b.className = 'cp-btn secondaire'; b.id = 'cp-plus'
+    b.textContent = 'Voir 10 de plus'
+    b.addEventListener('click', () => chercher(j, 'plus'))
+    const p = document.createElement('p'); p.className = 'cp-meta'
+    p.textContent = 'Vous n’avez pas trouvé vos comparables ? D’autres biens du marché ont vos équipements.'
+    el('cp-complement').replaceChildren(p, b)
   }
 
   async function validerProfil () {
@@ -470,17 +473,27 @@
     chercher(j)
   }
 
-  async function chercher (j) {
+  async function chercher (j, action = 'chercher') {
     const n = ++rechercheEnCours
     // Pendant une recherche, on ne valide pas une liste qui va changer.
     el('cp-valider-b').disabled = true
     el('cp-complement').replaceChildren()
-    el('cp-zone-liste').replaceChildren(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: 'Recherche des biens du marché…' }))
+    // « Voir 10 de plus » garde la liste affichee pendant le chargement.
+    const attente = Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: action === 'plus' ? 'Chargement de 10 biens de plus…' : 'Recherche des biens du marché…' })
+    if (action === 'plus') el('cp-complement').replaceChildren(attente)
+    else el('cp-zone-liste').replaceChildren(attente)
     let r
-    try { r = await appeler('POST', { action: 'chercher' }) } catch (e) { r = { ok: false, d: null } }
+    try { r = await appeler('POST', { action }) } catch (e) { r = { ok: false, d: null } }
     if (j !== jeton || n !== rechercheEnCours) return
     majCompte()
     if (!r.ok || !r.d || r.d.etat !== 'calcule') {
+      // L'echec de « Voir 10 de plus » n'efface pas la liste deja affichee.
+      if (action === 'plus') {
+        const p = document.createElement('p'); p.className = 'non-calc'
+        p.textContent = (r.d && r.d.message) || 'Les biens suivants ne sont pas disponibles pour le moment.'
+        el('cp-complement').replaceChildren(p)
+        return
+      }
       el('cp-zone-carte').hidden = true
       const p = document.createElement('p'); p.className = 'non-calc'
       p.textContent = (r.d && r.d.message) || 'La liste des biens du marché n’est pas disponible pour le moment.'
@@ -491,6 +504,7 @@
     if (r.d.marche_sejour_min) { marcheSejour = r.d.marche_sejour_min; afficherSejour() }
     dire('cp-note', r.d.note || '', 'cp-meta')
     afficher(r.d.comparables)
+    if (r.d.encore) boutonPlus(j)
   }
 
   // ─── La carte ──────────────────────────────────────────────────────────────
