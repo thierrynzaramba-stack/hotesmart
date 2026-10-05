@@ -953,3 +953,24 @@ test('LE TEST QUI COMPTE (§22.11, decision de Thierry) : les releves visent des
   assert.ok(!releves.includes(String(comps[1].listing_info.listing_id)), 'la 2e annonce du meme hote attend')
   assert.ok(releves.includes(String(comps[10].listing_info.listing_id)), 'un 10e hote passe avant elle')
 })
+
+// ─── Constats de la review de b745bb8 (route) ───────────────────────────────
+test('review de b745bb8 : un CO-HOTE commun fait une seule voix — la 2e annonce de la conciergerie attend', async () => {
+  const comps = COMPS.map(c => ({ ...c }))
+  comps[1] = { ...comps[1], host_info: { ...comps[1].host_info, cohost_ids: [String(comps[0].host_info.host_id)] } }
+  const t = tablesPrix({ calendriersEnCache: 0 })
+  t.airroi_cache = [{ cle: CLE, reponse: JSON.stringify({ listings: comps }), recupere_le: new Date().toISOString() }]
+  t.comparables_retenus = comps.slice(0, 11).map(c => ({ property_id: 'BIEN-A', listing_id: String(c.listing_info.listing_id), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: t })
+  const releves = r.appelsAirroi.map(a => a.calendrier)
+  assert.equal(releves.length, 10)
+  assert.ok(!releves.includes(String(comps[1].listing_info.listing_id)))
+})
+
+test('LE TEST QUI COMPTE (review de b745bb8) : la liste du marche a expire — les hotes ne sont plus identifiables, le calcul REFUSE et dit de relancer la recherche', async () => {
+  const t = tablesPrix()
+  t.airroi_cache = t.airroi_cache.filter(c => c.cle !== CLE)
+  const g = await appeler({ tables: t })
+  assert.equal(g.corps.prix_depart.prix.statut, 'non_calculable')
+  assert.match(g.corps.prix_depart.prix.motif, /n’est pas identifié \(la liste des biens du marché a expiré\) : relancez la recherche/)
+})

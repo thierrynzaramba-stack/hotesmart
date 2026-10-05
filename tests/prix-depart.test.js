@@ -150,3 +150,42 @@ test('une saison en marches d escalier : un niveau vide est NON CALCULABLE, et d
   assert.ok(vides.length > 0)
   assert.ok(vides.every(c => /hôte avec des prix dans cette case/.test(c.motif)))
 })
+
+// ─── Constats de la review de b745bb8 ───────────────────────────────────────
+test('LE TEST QUI COMPTE (review de b745bb8) : un PLATEAU (hotes a prix fixe, une nuit sur cinq plus chere) — les nuits ordinaires restent ensemble, jamais classees « pic »', () => {
+  const plateau = ['A', 'B', 'C', 'D', 'E'].map((h, i) => ({ listing_id: String(i + 1), hote: h,
+    jours: JOURS.map((j, k) => ({ date: j, rate: (80 + 30 * i) * (k % 5 === 0 ? 1.3 : 1) })) }))
+  const r = P.prixDeDepart({ calendriers: plateau, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.niveaux_source, 'segment')
+  const pic = caseDe(r, 'pic', 'semaine')
+  const ordinaires = r.cases.filter(c => c.statut === 'calcule' && c.niveau !== 'pic')
+  assert.ok(ordinaires.length > 0, 'les nuits ordinaires ont leur niveau')
+  for (const c of ordinaires) assert.ok(Math.abs(c.forme - 1) < 0.01, `${c.niveau}/${c.type} : prix ordinaire`)
+  assert.ok(pic.statut === 'calcule' && Math.abs(pic.forme - 1.3) < 0.01, 'le pic porte les nuits cheres, et elles seules')
+})
+
+test('review de b745bb8 : un hote INCONNU ne se compte pas en silence — le calcul refuse et dit pourquoi', () => {
+  const r = P.prixDeDepart({ calendriers: [...cinq().slice(0, 4), { ...annonce('5', 'E', 200), hote: null }], marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.statut, 'non_calculable')
+  assert.match(r.motif, /l’hôte de 1 comparable n’est pas identifié/)
+})
+
+test('review de b745bb8 : la forme d un hote a deux annonces — chacune rapportee a SON prix, une case incomplete ne biaise rien', () => {
+  // Chaque hote : une seconde annonce, trois fois plus chere, SANS aucune nuit de
+  // week-end. Avant le correctif, son prix de semaine entrait dans l'ancre de
+  // l'hote mais pas dans son prix de week-end : la prime s'effondrait.
+  const secondes = cinq().map(c => ({ ...c, listing_id: `${c.listing_id}b`, jours: c.jours.filter(n => !estWE(n.date)).map(n => ({ ...n, rate: n.rate * 3 })) }))
+  const r = P.prixDeDepart({ calendriers: [...cinq(), ...secondes], marche: [], strategie: 'juste', aujourdhui: AUJ })
+  for (const n of P.NIVEAUX) {
+    const we = caseDe(r, n, 'weekend')
+    const se = caseDe(r, n, 'semaine')
+    if (we.statut === 'calcule' && se.statut === 'calcule') assert.ok(Math.abs(we.forme / se.forme - 1.25) < 0.03, `${n} : la prime week-end de 25 % reste (${we.forme} / ${se.forme})`)
+  }
+})
+
+test('review de b745bb8 : le repli dit le MANQUE de donnees, distinct d une absence de saison', () => {
+  const rares = cinq().map(c => ({ ...c, jours: c.jours.slice(0, 5) }))
+  const r = P.prixDeDepart({ calendriers: rares, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.statut, 'non_calculable')
+  assert.match(r.motif, /trop peu de dates où au moins 3 de vos hôtes ont un prix/)
+})

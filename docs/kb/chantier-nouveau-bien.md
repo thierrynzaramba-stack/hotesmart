@@ -3354,3 +3354,21 @@ le dit.
 **Ce qui disparaît** : la note de cohérence (Spearman), le cran et les 4 paliers
 de §22.7. **Ce qui reste** : l'effet du séjour minimum, les relevés à la
 demande, le quota et le cache.
+- **Review de b745bb8 (aucun constat de sécurité).** Corrigé :
+  - **Plateau** : les quarts se calculent par rang moyen. Des dates de même
+    saison restent ensemble : avec des hôtes à prix fixe, les nuits ordinaires
+    ne tombent plus en bloc dans « pic ».
+  - **Hôte inconnu** (liste du marché expirée) : le calcul refuse et dit de
+    relancer la recherche. Sans cela, un seul gestionnaire à 5 annonces
+    passait le seuil des 5 hôtes.
+  - **Co-hôtes** : une voix par **gestionnaire** (hôte et co-hôtes regroupés,
+    même règle que `gestionnaires` de la grille du marché).
+  - **Forme** : chaque annonce est rapportée à son propre prix habituel avant
+    la moyenne par hôte. Un hôte à deux annonces de tailles différentes ne
+    biaise plus la prime week-end.
+  - Le motif du repli distingue le **manque de données** de l'absence de
+    saison.
+  - **Reste, conforme à la spec** : un hôte non relevé passe devant la
+    deuxième annonce, déjà en cache, d'un hôte déjà compté. D'une case à
+    l'autre, ce ne sont pas toujours les mêmes hôtes qui ont des prix ; les
+    contrôles le signalent.

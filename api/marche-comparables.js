@@ -31,6 +31,7 @@ const { lireJson } = require('../lib/airroi/json')
 const { validerProfil, validerStrategie, geocoder, lireProfil, enregistrerProfil, enregistrerStrategie } = require('../lib/marche/profil-bien')
 const { reunirEtTrier, cartesDansLOrdre, repartitionSejourMin } = require('../lib/marche/pertinence')
 const { seulementActives } = require('../lib/marche/activite')
+const { gestionnaires } = require('../lib/marche/grille-marche')
 const { prixDeDepart } = require('../lib/marche/prix-depart')
 const { lireDerniereCapture } = require('../lib/marche/temperature-airroi')
 const { rechercheDuProfil, validerChoix, enregistrerChoix, corpsRechercheActifs, PAGE, PAGES_INITIALES, PAGES_MAX, COUTS, QUOTA, MESSAGE_QUOTA, CALENDRIERS_PAR_BIEN } = require('../lib/marche/choix-comparables')
@@ -147,7 +148,12 @@ async function retenusProposes (bienId, profil, sel = null) {
   if (!s || !s.fiches) return { lignes, horsListe: 0, hoteDe: new Map() }
   const idDe = f => String(f && f.listing_info && f.listing_info.listing_id)
   const proposes = new Set(s.fiches.map(idDe))
-  const hoteDe = new Map(s.fiches.filter(f => f && f.host_info && f.host_info.host_id != null).map(f => [idDe(f), String(f.host_info.host_id)]))
+  // Le GESTIONNAIRE : hote et co-hotes regroupes (review de b745bb8 — une
+  // conciergerie co-hote de plusieurs annonces n'est qu'une voix). Meme regle
+  // que la grille du marche (lib/marche/grille-marche.js, `gestionnaires`).
+  const fiches = s.fiches.filter(f => f && f.host_info)
+  const racines = gestionnaires(fiches.map(f => ({ host_id: f.host_info.host_id, cohost_ids: f.host_info.cohost_ids })))
+  const hoteDe = new Map(fiches.map((f, i) => [idDe(f), `g${racines[i]}`]))
   const garde = lignes.filter(l => l.retenu_par === 'fondateur' || proposes.has(String(l.listing_id)))
   return { lignes: garde, horsListe: lignes.length - garde.length, hoteDe }
 }
@@ -241,11 +247,14 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
   // meme hote tant qu'il manque des hotes independants ; dans un hote, l'annonce
   // deja en cache (gratuite) d'abord, et les hotes deja en cache d'abord. Puis
   // l'equipe, puis l'ordre du choix.
-  const hoteDeL = id => hoteDe.get(id) || `annonce:${id}`
+  // Hote inconnu (selection expiree) : null, le calcul refuse et le dit. Un
+  // retenu de l'equipe hors de la liste compte seul (choix verrouille).
+  const deLEquipe = new Set(lignes.filter(l => l.retenu_par === 'fondateur').map(l => String(l.listing_id)))
+  const hoteDeL = id => hoteDe.get(id) || (deLEquipe.has(id) ? `annonce:${id}` : null)
   const ordre = [...lignes.filter(l => l.retenu_par === 'fondateur'), ...lignes.filter(l => l.retenu_par !== 'fondateur')].map(l => String(l.listing_id))
   const cache = await calendriersEnCache(ordre)
   const parHote = new Map()
-  for (const id of ordre) { const h = hoteDeL(id); if (!parHote.has(h)) parHote.set(h, []); parHote.get(h).push(id) }
+  for (const id of ordre) { const h = hoteDeL(id) ?? `inconnu:${id}`; if (!parHote.has(h)) parHote.set(h, []); parHote.get(h).push(id) }
   const enCacheDabord = xs => [...xs.filter(id => cache.has(id)), ...xs.filter(id => !cache.has(id))]
   // Un representant par hote ; parmi eux, ceux deja en cache (gratuits) d'abord.
   const premiers = enCacheDabord([...parHote.values()].map(xs => enCacheDabord(xs)[0]))
