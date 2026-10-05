@@ -18,9 +18,6 @@
        gros) ; un clic ouvre la fiche sous la carte, « Logement similaire » ou
        « Non similaire ». AUCUN PRIX. Toute donnee venue d'AirROI est posee par
        textContent / setAttribute, jamais comme du HTML. */
-    :root {
-      --cp-neutre: #2A5E86; --cp-similaire: #1F8A4C; --cp-non: #9AA0A6; --cp-hote: #E8A33D;
-    }
     .cp-intro { font-size: 13.5px; line-height: 1.5; color: var(--text2); margin: 0 0 14px; }
     .cp-carte { border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; margin-bottom: 16px; background: var(--bg); }
     .cp-carte h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
@@ -49,7 +46,9 @@
     .cp-erreur { color: var(--red, #B3261E); font-size: 13px; }
     .cp-ok { color: var(--green, #1F6F45); font-size: 13px; }
     /* La carte. */
-    #cp-map { width: 100%; height: 440px; border-radius: var(--radius); border: 0.5px solid var(--border); background: var(--bg2); }
+    /* isolation : les couches de Leaflet (z-index jusqu'a 1000) restent DANS la
+       carte et ne passent plus sur le pied collant (review de 995f025). */
+    #cp-map { width: 100%; height: 440px; border-radius: var(--radius); border: 0.5px solid var(--border); background: var(--bg2); isolation: isolate; }
     .cp-legende { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--text2); margin: 8px 0 0; }
     .cp-legende i { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -1px; margin-right: 5px; }
     /* La fiche sous la carte. */
@@ -60,11 +59,11 @@
     .cp-ligne { font-size: 12.5px; color: var(--text2); margin: 2px 0; }
     .cp-badges { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
     .cp-badge { font-size: 11.5px; padding: 2px 8px; border-radius: 999px; background: var(--bg2); color: var(--text); border: 0.5px solid var(--border); }
-    .cp-source { font-size: 12px; font-weight: 600; color: var(--cp-similaire); }
+    .cp-source { font-size: 12px; font-weight: 600; color: #1F8A4C; }
     .cp-verdict { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-    .cp-verdict button[aria-pressed="true"].similaire { background: var(--cp-similaire); color: #fff; }
-    .cp-verdict button[aria-pressed="true"].non { background: var(--cp-non); color: #fff; }
-    .cp-fondateur { font-size: 13px; font-weight: 600; color: var(--cp-similaire); margin-top: 10px; }
+    .cp-verdict button[aria-pressed="true"].similaire { background: #1F8A4C; color: #fff; }
+    .cp-verdict button[aria-pressed="true"].non { background: #5F6368; color: #fff; }
+    .cp-fondateur { font-size: 13px; font-weight: 600; color: #1F8A4C; margin-top: 10px; }
     .cp-liste-biens summary { cursor: pointer; font-size: 13px; font-weight: 600; min-height: 32px; padding: 6px 0; }
     .cp-liste-biens ol { margin: 4px 0 0; padding-left: 20px; font-size: 13px; }
     .cp-liste-biens button { font: inherit; background: none; border: 0; padding: 4px 0; color: var(--text); cursor: pointer; text-align: left; min-height: 32px; }
@@ -138,12 +137,13 @@
     <div id="cp-zone-carte" hidden>
       <div id="cp-map" role="region" aria-label="Carte des biens du marché"></div>
       <div class="cp-legende">
-        <span><i style="background:var(--cp-hote)"></i>Votre logement</span>
-        <span><i style="background:var(--cp-neutre)"></i>À juger</span>
-        <span><i style="background:var(--cp-similaire)"></i>Similaire</span>
-        <span><i style="background:var(--cp-non)"></i>Non similaire</span>
+        <span><i data-couleur="hote"></i>Votre logement</span>
+        <span><i data-couleur="neutre"></i>À juger</span>
+        <span><i data-couleur="similaire"></i>Similaire</span>
+        <span><i data-couleur="non"></i>Non similaire</span>
       </div>
       <p class="cp-meta" id="cp-note-position">Airbnb décale souvent la position des annonces de quelques centaines de mètres : la carte est approchée.</p>
+      <p class="cp-erreur" id="cp-carte-erreur" hidden></p>
       <p class="cp-meta" id="cp-note" aria-live="polite"></p>
       <div id="cp-complement"></div>
       <div class="cp-fiche" id="cp-fiche" aria-live="polite"><p class="cp-meta">Touchez un point de la carte pour voir le bien.</p></div>
@@ -175,7 +175,9 @@
   const el = id => document.getElementById(id)
   const EQUIPEMENTS = { terrasse: 'Terrasse', spa: 'Jacuzzi ou spa', jardin: 'Jardin', piscine: 'Piscine', parking: 'Parking', vue: 'Vue exceptionnelle', climatisation: 'Climatisation' }
   const MIN = 3
-  const COULEUR = { neutre: '#2A5E86', similaire: '#1F8A4C', non: '#9AA0A6', hote: '#E8A33D' }
+  // LA seule definition des couleurs (carte et legende) : #5F6368 pour le gris,
+  // lisible en blanc dessus (review de 995f025 : #9AA0A6 etait a 2,6:1).
+  const COULEUR = { neutre: '#2A5E86', similaire: '#1F8A4C', non: '#5F6368', hote: '#E8A33D' }
 
   let session = null
   let jeton = 0
@@ -187,9 +189,14 @@
   // Les retenus du FONDATEUR : verrouilles en vert, jamais envoyes par l'hote
   // (decision de Thierry du 5 octobre 2026).
   let fondateur = new Set()
+  // Les biens que l'hote a JUGES sur cette page (meme annule) : une nouvelle
+  // recherche ne les reecrase pas avec les retenus enregistres (review de 995f025).
+  const touches = new Set()
   let carte = null
   const marqueurs = new Map()
   let ouvert = null
+  // Chaque recherche a son numero : seule la derniere s'affiche (review de 995f025).
+  let rechercheEnCours = 0
 
   function dire (id, texte, classe) { const z = el(id); z.textContent = texte || ''; z.className = classe || '' }
   const similaires = () => [...jugements.entries()].filter(([, v]) => v === 'similaire').map(([id]) => id)
@@ -209,6 +216,7 @@
     session = await requireAuth()
     if (!session) return
     renderSidebar('yield-comparables').catch(e => console.error('[comparables] sidebar', e))
+    for (const i of document.querySelectorAll('[data-couleur]')) i.style.background = COULEUR[i.dataset.couleur]
     for (const [cle, nom] of Object.entries(EQUIPEMENTS)) {
       const l = document.createElement('label')
       const c = document.createElement('input')
@@ -261,8 +269,11 @@
 
   async function charger () {
     const j = ++jeton
-    profil = null; cartes = []; jugements.clear(); fondateur = new Set(); ouvert = null
+    profil = null; cartes = []; jugements.clear(); touches.clear(); fondateur = new Set(); ouvert = null
+    rechercheEnCours++
     majCompte()
+    dire('cp-note', '', 'cp-meta')
+    el('cp-carte-erreur').hidden = true
     el('cp-etape-b').hidden = true
     el('cp-recap').hidden = true
     el('cp-etape-a').hidden = false
@@ -289,9 +300,17 @@
     } else boutonChercher(j)
   }
 
+  // Les retenus enregistres : ceux de l'equipe a part (et jamais dans les
+  // jugements de l'hote) ; les autres coches « similaire », SAUF ceux que l'hote
+  // a deja juges sur cette page.
   function retenusDu (d) {
     fondateur = new Set((d.fondateur || []).map(String))
-    for (const id of d.retenus || []) if (!fondateur.has(String(id))) jugements.set(String(id), 'similaire')
+    for (const id of fondateur) jugements.delete(id)
+    for (const id of d.retenus || []) {
+      const k = String(id)
+      if (!fondateur.has(k) && !touches.has(k)) jugements.set(k, 'similaire')
+    }
+    majCompte()
   }
 
   function boutonChercher (j) {
@@ -339,11 +358,15 @@
   }
 
   async function chercher (j) {
+    const n = ++rechercheEnCours
+    // Pendant une recherche, on ne valide pas une liste qui va changer.
+    el('cp-valider-b').disabled = true
     el('cp-complement').replaceChildren()
     el('cp-zone-liste').replaceChildren(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: 'Recherche des biens du marché…' }))
     let r
     try { r = await appeler('POST', { action: 'chercher' }) } catch (e) { r = { ok: false, d: null } }
-    if (j !== jeton) return
+    if (j !== jeton || n !== rechercheEnCours) return
+    majCompte()
     if (!r.ok || !r.d || r.d.etat !== 'calcule') {
       el('cp-zone-carte').hidden = true
       const p = document.createElement('p'); p.className = 'non-calc'
@@ -352,8 +375,8 @@
       return
     }
     retenusDu(r.d)
+    dire('cp-note', r.d.note || '', 'cp-meta')
     afficher(r.d.comparables)
-    dire('cp-note', r.d.note || '')
   }
 
   // ─── La carte ──────────────────────────────────────────────────────────────
@@ -394,7 +417,8 @@
 
   function dessinerCarte () {
     const L = window.L
-    if (!L) { dire('cp-note', 'La carte n’a pas pu se charger : utilisez la liste des biens ci-dessous.', 'cp-erreur'); return }
+    // Message a lui (review de 995f025 : la note du serveur l'effacait).
+    if (!L) { el('cp-map').hidden = true; montrerErreurCarte('La carte n’a pas pu se charger : utilisez la liste des biens ci-dessous.'); return }
     if (!carte) {
       carte = L.map(el('cp-map'), { scrollWheelZoom: false })
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19,
@@ -419,9 +443,14 @@
       marqueurs.set(c.listing_id, m)
       points.push([c.latitude, c.longitude])
     }
-    if (points.length) carte.fitBounds(points, { padding: [24, 24], maxZoom: 16 })
+    // Aucun point a placer : pas de carte grise sans vue.
+    el('cp-map').hidden = !points.length
+    if (!points.length) { montrerErreurCarte('Aucun bien n’a de position connue : utilisez la liste des biens ci-dessous.'); return }
+    el('cp-carte-erreur').hidden = true
+    carte.fitBounds(points, { padding: [24, 24], maxZoom: 16 })
     setTimeout(() => carte && carte.invalidateSize && carte.invalidateSize(), 0)
   }
+  function montrerErreurCarte (texte) { const e = el('cp-carte-erreur'); e.textContent = texte; e.hidden = false }
 
   function restyler () {
     for (const c of cartes) { const m = marqueurs.get(c.listing_id); if (m) m.setStyle(style(c)) }
@@ -441,7 +470,7 @@
   }
 
   // ─── La fiche sous la carte ───────────────────────────────────────────────
-  function ouvrirFiche (id) {
+  function ouvrirFiche (id, { focus = null, defiler = true } = {}) {
     const c = cartes.find(x => x.listing_id === id)
     if (!c) return
     ouvert = id
@@ -483,12 +512,21 @@
         b.dataset.verdict = etat
         b.setAttribute('aria-pressed', String(jugements.get(id) === etat))
         // Un second clic sur le meme bouton annule le jugement.
-        b.addEventListener('click', () => { if (jugements.get(id) === etat) jugements.delete(id); else jugements.set(id, etat); ouvrirFiche(id); listeAccessible(); majCompte() })
+        b.addEventListener('click', () => {
+          touches.add(id)
+          if (jugements.get(id) === etat) jugements.delete(id); else jugements.set(id, etat)
+          // La fiche est reconstruite : le focus revient sur le meme bouton, et
+          // la page ne defile pas (review de 995f025).
+          ouvrirFiche(id, { focus: etat, defiler: false }); listeAccessible(); majCompte()
+        })
         return b
       }
       v.append(bouton('similaire', 'Logement similaire', 'similaire'), bouton('non', 'Non similaire', 'non'))
       f.append(v)
     }
+    if (focus) { const b = f.querySelector(`button[data-verdict="${focus}"]`); if (b) b.focus() }
+    // Telephone : la fiche est sous 60 % d'ecran de carte, on l'amene a l'oeil.
+    if (defiler && window.innerWidth <= 640 && typeof f.scrollIntoView === 'function') f.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
   }
 
   function majCompte () {

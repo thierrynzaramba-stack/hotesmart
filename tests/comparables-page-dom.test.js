@@ -174,7 +174,7 @@ test('LE TEST QUI COMPTE (§21.1) : « Logement similaire » met le point en VER
   assert.equal(point().style.fillColor, '#1F8A4C')
   assert.equal(doc.querySelector('#cp-fiche button[data-verdict="similaire"]').getAttribute('aria-pressed'), 'true')
   juger(doc, 'non')
-  assert.equal(point().style.fillColor, '#9AA0A6')
+  assert.equal(point().style.fillColor, '#5F6368')
   juger(doc, 'non')
   assert.equal(point().style.fillColor, '#2A5E86', 'second clic : annule')
 })
@@ -249,7 +249,8 @@ test('LE TEST QUI COMPTE (SECURITE) : un nom venu d AirROI est du TEXTE, jamais 
 
 test('la liste accessible ouvre la meme fiche (clavier, lecteur d ecran) ; sans Leaflet, la page le dit et la liste reste', async () => {
   const { doc } = await monter(serveur({ profil: PROFIL, cache: CARTES }), { sansLeaflet: true })
-  assert.match(doc.getElementById('cp-note').textContent, /La carte n’a pas pu se charger/)
+  assert.match(doc.getElementById('cp-carte-erreur').textContent, /La carte n’a pas pu se charger/)
+  assert.equal(doc.getElementById('cp-carte-erreur').hidden, false)
   doc.querySelector('#cp-liste-biens button').click()
   assert.equal(doc.getElementById('cp-fiche').dataset.id, CARTES[0].listing_id)
 })
@@ -288,4 +289,113 @@ test('Leaflet charge avec son empreinte d integrite ; la page n appelle que sa r
 
 test('telephone : la carte occupe 60 % de la hauteur, la fiche dessous', () => {
   assert.match(HTML, /@media \(max-width: 640px\)[\s\S]*#cp-map \{ height: 60vh; \}/)
+})
+
+// ─── Constats de la review de 995f025 ───────────────────────────────────────
+test('LE TEST QUI COMPTE (review 1) : un « Non similaire » de l hote n est pas reecrase par les retenus enregistres apres une nouvelle recherche', async () => {
+  const [a, b, c] = CARTES.slice(0, 3).map(x => x.listing_id)
+  const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: [a, b, c], aChercher: true,
+    chercher: () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [a, b, c] }) }))
+  cliquerPoint(L, a); juger(doc, 'non')
+  cliquerPoint(L, b); juger(doc, 'similaire')   // second clic : annule
+  doc.getElementById('cp-chercher-complement').click()
+  await attendre()
+  assert.equal(pointDe(L, a).style.fillColor, '#5F6368', 'toujours non similaire')
+  assert.equal(pointDe(L, b).style.fillColor, '#2A5E86', 'toujours annule')
+  assert.equal(pointDe(L, c).style.fillColor, '#1F8A4C', 'le retenu non touche reste similaire')
+  cliquerPoint(L, CARTES[5].listing_id); juger(doc, 'similaire')
+  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'similaire')
+  doc.getElementById('cp-valider-b').click()
+  await attendre()
+  const envoyes = posts(appels, 'retenir')[0].corps.listing_ids
+  assert.ok(!envoyes.includes(a) && !envoyes.includes(b))
+})
+
+test('REVIEW (2) : la carte isole ses couches — les controles de Leaflet ne passent plus sur le pied', () => {
+  assert.match(HTML, /#cp-map \{[^}]*isolation: isolate;/)
+})
+
+test('REVIEW (3) : apres un jugement, le focus revient sur le meme bouton', async () => {
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  cliquerPoint(L, CARTES[0].listing_id)
+  juger(doc, 'similaire')
+  assert.equal(doc.activeElement && doc.activeElement.dataset.verdict, 'similaire')
+})
+
+test('REVIEW (4) : sans Leaflet, apres une recherche, le message de carte RESTE ; la note d un logement ne passe pas au suivant', async () => {
+  const s = serveur({ profil: PROFIL, cache: null, chercher: () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [], note: 'NOTE-DU-PREMIER' }) })
+  const { w, doc } = await monter(s, { sansLeaflet: true })
+  doc.getElementById('cp-chercher').click()
+  await attendre()
+  assert.match(doc.getElementById('cp-carte-erreur').textContent, /La carte n’a pas pu se charger/)
+  assert.match(doc.getElementById('cp-note').textContent, /NOTE-DU-PREMIER/)
+  doc.getElementById('cp-bien').value = 'B2'
+  doc.getElementById('cp-bien').dispatchEvent(new w.Event('change'))
+  await attendre()
+  assert.equal(doc.getElementById('cp-note').textContent, '')
+})
+
+test('REVIEW (5) : sur telephone, la fiche ouverte est amenee a l ecran ; pas apres un jugement', async () => {
+  const { w, doc, L } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  let defile = 0
+  w.HTMLElement.prototype.scrollIntoView = function () { if (this.id === 'cp-fiche') defile++ }
+  Object.defineProperty(w, 'innerWidth', { configurable: true, value: 375 })
+  cliquerPoint(L, CARTES[0].listing_id)
+  assert.equal(defile, 1)
+  juger(doc, 'similaire')
+  assert.equal(defile, 1, 'un jugement ne fait pas defiler')
+  Object.defineProperty(w, 'innerWidth', { configurable: true, value: 1200 })
+  cliquerPoint(L, CARTES[1].listing_id)
+  assert.equal(defile, 1, 'sur ordinateur, rien ne defile')
+})
+
+test('REVIEW (6) : deux recherches en vol sur le meme logement — seule la DERNIERE s affiche ; « Valider » grise pendant la recherche', async () => {
+  let n = 0
+  let liberer
+  const lent = new Promise(r => { liberer = r })
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: null, chercher: async () => {
+    n++
+    if (n === 1) { await lent; return reponse({ etat: 'calcule', comparables: [{ ...CARTES[0], nom: 'ANCIENNE-RECHERCHE' }], retenus: [] }) }
+    return reponse({ etat: 'calcule', comparables: CARTES, retenus: [] })
+  } }))
+  doc.getElementById('cp-chercher').click()
+  await attendre()
+  assert.equal(doc.getElementById('cp-valider-b').disabled, true)
+  doc.getElementById('cp-modifier').click()
+  doc.getElementById('cp-valider-a').click()
+  await attendre()
+  liberer()
+  await attendre()
+  assert.ok(!/ANCIENNE-RECHERCHE/.test(doc.body.textContent))
+  assert.equal(visibles(L).filter(p => p.tooltip !== 'Votre logement').length, CARTES.length)
+})
+
+test('REVIEW (mineurs) : le compteur compte les retenus des le chargement, meme sans liste ; un retenu de l equipe n est jamais compte pour l hote', async () => {
+  const ids = CARTES.slice(0, 3).map(x => x.listing_id)
+  const a = await monter(serveur({ profil: PROFIL, cache: null, retenus: ids }))
+  assert.match(a.doc.getElementById('cp-compte').textContent, /^3 similaires/)
+  const b = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: ids, fondateur: [ids[0]] }))
+  assert.match(b.doc.getElementById('cp-compte').textContent, /^2 similaires/)
+})
+
+test('REVIEW (mineurs) : aucun bien ni le logement n ont de position — pas de carte grise, un message, la liste reste', async () => {
+  const sansPos = CARTES.map(c => ({ ...c, latitude: null, longitude: null }))
+  const { doc } = await monter(serveur({ profil: { ...PROFIL, latitude: null, longitude: null }, cache: sansPos }))
+  assert.equal(doc.getElementById('cp-map').hidden, true)
+  assert.match(doc.getElementById('cp-carte-erreur').textContent, /Aucun bien n’a de position connue/)
+  assert.equal(doc.querySelectorAll('#cp-liste-biens button').length, CARTES.length)
+})
+
+test('REVIEW : aucune infobulle Leaflet ne recoit un texte venu d AirROI (bindTooltip prend du HTML)', async () => {
+  const piege = [{ ...CARTES[0], nom: '<img src=x onerror=alert(1)>' }]
+  const { L } = await monter(serveur({ profil: PROFIL, cache: piege }))
+  const infobulles = L.points.map(p => p.tooltip).filter(Boolean)
+  assert.deepEqual([...new Set(infobulles)], ['Votre logement'])
+})
+
+test('la legende prend ses couleurs de la MEME table que la carte', async () => {
+  const { doc } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  const fond = k => doc.querySelector(`[data-couleur="${k}"]`).style.background
+  assert.match(fond('non'), /rgb\(95, 99, 104\)|#5F6368/i)
+  assert.match(fond('similaire'), /rgb\(31, 138, 76\)|#1F8A4C/i)
 })
