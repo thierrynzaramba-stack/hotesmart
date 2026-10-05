@@ -2822,3 +2822,14 @@ jacuzzi ou sauna sur 80 dans le rayon, 0,50 $. Ils étaient sur la carte, mais
   dérivée.
 - Tout passe par la liste blanche de `lib/marche/pertinence.js`, les textes
   sont bornés en longueur, et la page les pose en `textContent`.
+- *Review de 05223a1.* Sont masqués :
+  - une devise avant, après ou collée au nombre (€, $, £, EUR, USD, CHF, GBP,
+    euros, dollars, balles) ;
+  - « 20,-€ » ;
+  - « 20E » (E majuscule seulement) ;
+  - un euro écrit en entité HTML (« &euro; »).
+
+  **Limite assumée** : un montant écrit en lettres (« vingt euros ») n'est pas
+  masqué. Une note de 0 est « pas de note ». « À vos équipements » est calculé
+  par le serveur (`a_vos_equipements`), à partir d'une seule liste des
+  équipements rares.

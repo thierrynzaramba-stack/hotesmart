@@ -43,7 +43,7 @@ test('LE TEST QUI COMPTE : une carte n a AUCUN prix, revenu ou occupation — li
   const cartes = p.trierComparables(COMPS, MOI)
   assert.equal(cartes.length, 25)
   for (const c of cartes) {
-    assert.deepEqual(Object.keys(c).sort(), ['chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
+    assert.deepEqual(Object.keys(c).sort(), ['a_vos_equipements', 'chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
   }
   assert.deepEqual(clesArgent(cartes), [], 'aucune cle d argent')
   assert.ok(!/€|\$\s?\d/.test(JSON.stringify(cartes)), 'aucun montant, meme dans la description')
@@ -256,4 +256,33 @@ test('§21.6 : une valeur de forme inattendue n est pas une information (objet, 
   f.host_info = { host_name: { nom: 'x' }, superhost: 'oui' }
   const d = p.trierComparables([f], MOI)[0].details
   assert.deepEqual({ desc: d.description, type: d.type, ar: d.arrivee, note: d.note, avis: d.avis, hote: d.hote, sh: d.superhote }, { desc: null, type: null, ar: null, note: null, avis: null, hote: null, sh: null })
+})
+
+// ─── Constats de la review de 05223a1 ───────────────────────────────────────
+test('LE TEST QUI COMPTE (review) : tous les formats de montant sont masques — devise avant, apres, collee, en entite HTML', () => {
+  const formats = ['20 EUR', '20eur', '€20,50', '1.500 €', '1 500 €', 'EUR 20', 'EUR20', '50 CHF', 'CHF 50', '20 balles', '20,-€', '20E', '20 &euro;', '20&#8364;', '$15', '15 dollars', '£30']
+  for (const f of formats) assert.equal(p.descriptionPropre(`Linge : ${f}.`), 'Linge : ….', f)
+})
+
+test('REVIEW : aucun faux positif — etage, surface, note, liste de nombres, mots en « eur »', () => {
+  const t = '2e étage, 3 E-mails, 25 m², 10 min, 4,9 sur 5, 1, 2, 3 chambres, européen, Europe, eurostar 3'
+  assert.equal(p.descriptionPropre(t), t)
+})
+
+test('REVIEW : une note de 0 n est pas une note (un bien a 2 avis portait 0 partout)', () => {
+  const f = fiche()
+  f.ratings = { num_reviews: 2, rating_overall: 0, rating_cleanliness: 0 }
+  const d = p.trierComparables([f], MOI)[0].details
+  assert.equal(d.note, null)
+  assert.equal(d.notes.proprete, null)
+  assert.equal(d.avis, 2)
+})
+
+test('REVIEW : « a vos equipements » est calcule par le serveur, quelle que soit la provenance — liste de base comprise', () => {
+  const base = fiche({ amenities: ['Hot tub'] })
+  const sans = fiche({ amenities: ['Wifi', 'Free parking on premises'] })
+  const r = p.reunirEtTrier([base, sans], [], { ...MOI, equipements: ['spa', 'parking'] })
+  const de = nom => r.find(c => c.nom === nom)
+  assert.equal(de(base.listing_info.listing_name).a_vos_equipements, true, 'un bien de la liste de BASE avec jacuzzi')
+  assert.equal(de(sans.listing_info.listing_name).a_vos_equipements, false, 'le parking n est pas un equipement rare')
 })

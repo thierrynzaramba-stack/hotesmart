@@ -406,7 +406,8 @@ test('la legende prend ses couleurs de la MEME table que la carte', async () => 
 test('LE TEST QUI COMPTE (§21.6) : un bien qui a l un de vos equipements RARES porte un contour VIOLET, et la legende le dit', async () => {
   const { doc, L } = await monter(serveur({ profil: PROFIL, cache: AVEC_SPA }))
   const spa = AVEC_SPA.find(c => c.source === 'equipements')
-  const sans = AVEC_SPA.find(c => !c.equipements.some(e => ['spa', 'piscine', 'jardin', 'vue'].includes(e) && PROFIL.equipements.includes(e)))
+  // Le temoin est choisi sur ses EQUIPEMENTS bruts, pas par la regle testee.
+  const sans = AVEC_SPA.find(c => c.source === 'voisins' && !c.details.equipements_airbnb.some(e => /hot tub|sauna/i.test(e)))
   assert.equal(pointDe(L, spa.listing_id).style.color, '#7B3FA0')
   assert.equal(pointDe(L, spa.listing_id).style.weight, 4)
   assert.equal(pointDe(L, sans.listing_id).style.color, '#fff')
@@ -458,4 +459,10 @@ test('SECURITE : le lien Airbnb n est construit qu a partir d un identifiant NUM
   const { doc } = await monter(serveur({ profil: PROFIL, cache: [c] }))
   doc.querySelector('#cp-liste-biens button').click()
   assert.equal(doc.querySelectorAll('#cp-fiche a').length, 0)
+})
+
+test('REVIEW : un bien de la liste de BASE avec jacuzzi porte lui aussi le contour violet', async () => {
+  const base = [{ ...CARTES[0], source: 'voisins', a_vos_equipements: true }, ...CARTES.slice(1)]
+  const { L } = await monter(serveur({ profil: PROFIL, cache: base }))
+  assert.equal(pointDe(L, base[0].listing_id).style.color, '#7B3FA0')
 })

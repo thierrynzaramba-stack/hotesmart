@@ -188,11 +188,9 @@
   // LA seule definition des couleurs (carte et legende) : #5F6368 pour le gris,
   // lisible en blanc dessus (review de 995f025 : #9AA0A6 etait a 2,6:1).
   const COULEUR = { neutre: '#2A5E86', similaire: '#1F8A4C', non: '#5F6368', hote: '#E8A33D', equipements: '#7B3FA0' }
-  // Les equipements RARES (§21.2) : un bien qui en partage un avec l'hote porte
-  // un contour violet sur la carte (§21.6).
-  const RARES = ['spa', 'piscine', 'jardin', 'vue']
-  const aVosEquipements = c => !!(profil && Array.isArray(profil.equipements) && Array.isArray(c.equipements) &&
-    c.equipements.some(e => RARES.includes(e) && profil.equipements.includes(e)))
+  // Un bien qui a l'un des equipements RARES de l'hote porte un contour violet
+  // (§21.6). La regle est au SERVEUR (une seule liste des rares).
+  const aVosEquipements = c => c.a_vos_equipements === true
   // Les libelles Airbnb les plus courants, en francais ; les autres restent tels
   // qu'Airbnb les ecrit.
   const EQ_FR = {
