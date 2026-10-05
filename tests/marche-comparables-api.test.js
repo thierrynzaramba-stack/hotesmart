@@ -114,6 +114,14 @@ const TABLES = () => ({
   comparables_retenus: [{ property_id: 'BIEN-A', listing_id: String(COMPS[0].listing_info.listing_id), actif: true }],
   airroi_cache: [{ cle: CLE, reponse: COMPS_BRUT, recupere_le: '2026-10-05T10:00:00Z' }],
 })
+
+// Une carte ne porte AUCUNE cle d'argent, a aucun niveau, ni de montant dans un texte.
+const CLES_ARGENT = /^(ttm_|l90d_)|rate|revenue|occupancy|revpar|fee|price|prix|currency$/i
+function clesArgent (o, chemin = '') {
+  if (Array.isArray(o)) return o.flatMap((x, i) => clesArgent(x, `${chemin}[${i}]`))
+  if (!o || typeof o !== 'object') return []
+  return Object.entries(o).flatMap(([k, v]) => [...(CLES_ARGENT.test(k) ? [`${chemin}.${k}`] : []), ...clesArgent(v, `${chemin}.${k}`)])
+}
 const IDS = COMPS.slice(0, 3).map(c => String(c.listing_info.listing_id))
 // Les biens « trouves par equipement » : d'autres annonces reelles (Coeur de vie 23), avec un jacuzzi.
 const SPA = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'comps-cdv23.json'), 'utf8')).listings.slice(0, 4)
@@ -163,8 +171,8 @@ test('LE TEST QUI COMPTE : un GET ne paie JAMAIS — il ne lit que le cache', as
 
 test('LE TEST QUI COMPTE : AUCUN prix, revenu ou occupation ne sort — ni au GET ni a la recherche ; la position de l hote seulement dans SON profil (§21.4)', async () => {
   for (const r of [await appeler({ tables: TABLES() }), await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })]) {
-    const texte = JSON.stringify(r.corps)
-    for (const interdit of ['rate', 'revenue', 'occupancy', 'revpar', 'cleaning_fee', 'price', 'geocode_score']) assert.ok(!texte.includes(interdit), interdit)
+    assert.deepEqual(clesArgent(r.corps), [], 'aucune cle d argent, a aucun niveau')
+    assert.ok(!/geocode_score|€/.test(JSON.stringify(r.corps)))
   }
   const g = await appeler({ tables: TABLES() })
   assert.equal(g.corps.profil.latitude, 43.0636)
@@ -329,7 +337,7 @@ test('REVIEW : retenir apres un changement de profil, avec l ancienne liste enco
 test('une carte renvoyee a exactement les cles de la liste blanche', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })
   for (const c of r.corps.comparables) {
-    assert.deepEqual(Object.keys(c).sort(), ['chambres', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
+    assert.deepEqual(Object.keys(c).sort(), ['chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
   }
 })
 

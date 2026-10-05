@@ -64,6 +64,14 @@
     .cp-verdict button[aria-pressed="true"].similaire { background: #1F8A4C; color: #fff; }
     .cp-verdict button[aria-pressed="true"].non { background: #5F6368; color: #fff; }
     .cp-fondateur { font-size: 13px; font-weight: 600; color: #1F8A4C; margin-top: 10px; }
+    .cp-entete-fiche { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
+    .cp-lien { font-size: 13px; font-weight: 600; }
+    .cp-desc { font-size: 13px; line-height: 1.5; white-space: pre-line; margin: 6px 0; }
+    .cp-blocs { display: grid; grid-template-columns: max-content 1fr; gap: 3px 12px; font-size: 13px; margin: 8px 0; }
+    .cp-blocs dt { color: var(--text2); }
+    .cp-blocs dd { margin: 0; }
+    .cp-tous-eq ul { columns: 2; column-gap: 18px; font-size: 12.5px; margin: 6px 0 0; padding-left: 18px; }
+    .cp-tous-eq summary, .cp-description summary { cursor: pointer; font-size: 13px; font-weight: 600; min-height: 32px; padding: 6px 0; }
     .cp-liste-biens summary { cursor: pointer; font-size: 13px; font-weight: 600; min-height: 32px; padding: 6px 0; }
     .cp-liste-biens ol { margin: 4px 0 0; padding-left: 20px; font-size: 13px; }
     .cp-liste-biens button { font: inherit; background: none; border: 0; padding: 4px 0; color: var(--text); cursor: pointer; text-align: left; min-height: 32px; }
@@ -72,6 +80,7 @@
     @media (max-width: 640px) {
       .content { padding-left: 12px; padding-right: 12px; } .cp-carte { padding: 12px; }
       #cp-map { height: 60vh; }
+      .cp-tous-eq ul { columns: 1; }
       .cp-photos img { height: 120px; }
     }
   </style>
@@ -141,6 +150,7 @@
         <span><i data-couleur="neutre"></i>À juger</span>
         <span><i data-couleur="similaire"></i>Similaire</span>
         <span><i data-couleur="non"></i>Non similaire</span>
+        <span><i data-contour="equipements"></i>À vos équipements</span>
       </div>
       <p class="cp-meta" id="cp-note-position">Airbnb décale souvent la position des annonces de quelques centaines de mètres : la carte est approchée.</p>
       <p class="cp-erreur" id="cp-carte-erreur" hidden></p>
@@ -177,7 +187,41 @@
   const MIN = 3
   // LA seule definition des couleurs (carte et legende) : #5F6368 pour le gris,
   // lisible en blanc dessus (review de 995f025 : #9AA0A6 etait a 2,6:1).
-  const COULEUR = { neutre: '#2A5E86', similaire: '#1F8A4C', non: '#5F6368', hote: '#E8A33D' }
+  const COULEUR = { neutre: '#2A5E86', similaire: '#1F8A4C', non: '#5F6368', hote: '#E8A33D', equipements: '#7B3FA0' }
+  // Les equipements RARES (§21.2) : un bien qui en partage un avec l'hote porte
+  // un contour violet sur la carte (§21.6).
+  const RARES = ['spa', 'piscine', 'jardin', 'vue']
+  const aVosEquipements = c => !!(profil && Array.isArray(profil.equipements) && Array.isArray(c.equipements) &&
+    c.equipements.some(e => RARES.includes(e) && profil.equipements.includes(e)))
+  // Les libelles Airbnb les plus courants, en francais ; les autres restent tels
+  // qu'Airbnb les ecrit.
+  const EQ_FR = {
+    'Wifi': 'Wifi', 'TV': 'Télévision', 'Kitchen': 'Cuisine', 'Heating': 'Chauffage', 'Smoke alarm': 'Détecteur de fumée',
+    'Dishes and silverware': 'Vaisselle et couverts', 'Coffee maker': 'Cafetière', 'Washer': 'Lave-linge', 'Hangers': 'Cintres',
+    'Refrigerator': 'Réfrigérateur', 'Hair dryer': 'Sèche-cheveux', 'Microwave': 'Micro-ondes', 'Cooking basics': 'Équipements de cuisine de base',
+    'Hot water': 'Eau chaude', 'Clothing storage': 'Rangements', 'Hot water kettle': 'Bouilloire', 'Toaster': 'Grille-pain', 'Oven': 'Four',
+    'Iron': 'Fer à repasser', 'Wine glasses': 'Verres à vin', 'Cleaning products': 'Produits ménagers', 'Drying rack for clothing': 'Étendoir',
+    'Dining table': 'Table à manger', 'Bed linens': 'Linge de lit', 'Free street parking': 'Stationnement gratuit dans la rue',
+    'Baking sheet': 'Plaque de cuisson', 'Essentials': 'Essentiels', 'Self check-in': 'Arrivée autonome', 'Long term stays allowed': 'Séjours longue durée autorisés',
+    'Dishwasher': 'Lave-vaisselle', 'Extra pillows and blankets': 'Oreillers et couvertures supplémentaires', 'Lockbox': 'Boîte à clé',
+    'Free parking on premises': 'Parking gratuit sur place', 'Paid parking on premises': 'Parking payant sur place', 'Paid parking off premises': 'Parking payant à proximité',
+    'Freezer': 'Congélateur', 'Laundromat nearby': 'Laverie à proximité', 'Stove': 'Plaques de cuisson', 'Shampoo': 'Shampooing',
+    'Pack ’n play/Travel crib': 'Lit parapluie', 'Body soap': 'Savon pour le corps', 'Outdoor furniture': 'Mobilier d’extérieur', 'Crib': 'Lit pour bébé',
+    'Pets allowed': 'Animaux acceptés', 'Shower gel': 'Gel douche', 'Private entrance': 'Entrée privée', 'Coffee': 'Café',
+    'Room-darkening shades': 'Stores occultants', 'Ethernet connection': 'Connexion Ethernet', 'Outdoor dining area': 'Espace repas en plein air',
+    'Dryer': 'Sèche-linge', 'Patio or balcony': 'Terrasse ou balcon', 'Dedicated workspace': 'Espace de travail', 'Cleaning before checkout': 'Ménage avant le départ',
+    'Host greets you': 'Accueil par l’hôte', 'Books and reading material': 'Livres et lecture', 'Board games': 'Jeux de société',
+    'Luggage dropoff allowed': 'Dépôt de bagages autorisé', 'Carbon monoxide alarm': 'Détecteur de monoxyde de carbone', 'Bathtub': 'Baignoire',
+    'Air conditioning': 'Climatisation', 'Single level home': 'Logement de plain-pied', 'High chair': 'Chaise haute', 'Mini fridge': 'Mini-réfrigérateur',
+    'First aid kit': 'Trousse de secours', 'Fire extinguisher': 'Extincteur', 'Portable fans': 'Ventilateurs', 'Backyard': 'Jardin',
+    'Pocket wifi': 'Wifi de poche', 'Hot tub': 'Jacuzzi', 'Sound system': 'Système audio', 'Conditioner': 'Après-shampooing', 'Blender': 'Mixeur',
+    'Elevator': 'Ascenseur', 'BBQ grill': 'Barbecue', 'Sauna': 'Sauna', 'Pool': 'Piscine', 'Garden view': 'Vue sur le jardin', 'Mountain view': 'Vue sur la montagne',
+    'River view': 'Vue sur la rivière', 'Breakfast': 'Petit-déjeuner', 'Smoking allowed': 'Fumeurs acceptés', 'Bikes': 'Vélos', 'Gym': 'Salle de sport',
+    'Keypad': 'Digicode', 'Smart lock': 'Serrure connectée', 'Washer – In unit': 'Lave-linge dans le logement', 'Central air conditioning': 'Climatisation centrale',
+    'Exterior security cameras on property': 'Caméras de surveillance extérieures',
+  }
+  const ANNULATION = { Flexible: 'flexible', Moderate: 'modérée', Firm: 'ferme', Strict: 'stricte', 'Super strict': 'très stricte', 'Non-refundable': 'non remboursable' }
+  const virgule = v => String(v).replace('.', ',')
 
   let session = null
   let jeton = 0
@@ -217,6 +261,7 @@
     if (!session) return
     renderSidebar('yield-comparables').catch(e => console.error('[comparables] sidebar', e))
     for (const i of document.querySelectorAll('[data-couleur]')) i.style.background = COULEUR[i.dataset.couleur]
+    for (const i of document.querySelectorAll('[data-contour]')) { i.style.border = `3px solid ${COULEUR.equipements}`; i.style.background = 'transparent' }
     for (const [cle, nom] of Object.entries(EQUIPEMENTS)) {
       const l = document.createElement('label')
       const c = document.createElement('input')
@@ -386,10 +431,13 @@
   }
   // Rayon du point : de 6 a 18 selon la ressemblance (0 a 100 %).
   const rayon = c => 6 + Math.round(12 * Math.max(0, Math.min(100, Number(c.ressemblance) || 0)) / 100)
+  // Le contour : noir pour le bien ouvert ; VIOLET EPAIS pour un bien qui a l'un
+  // des equipements rares de l'hote (§21.6) ; blanc sinon.
   function style (c) {
     const etat = etatDe(c.listing_id)
-    return { radius: rayon(c), color: c.listing_id === ouvert ? '#111' : '#fff', weight: c.listing_id === ouvert ? 3 : 1.5,
-      fillColor: COULEUR[etat], fillOpacity: etat === 'non' ? 0.45 : 0.85 }
+    const eq = aVosEquipements(c)
+    return { radius: rayon(c), color: c.listing_id === ouvert ? '#111' : eq ? COULEUR.equipements : '#fff',
+      weight: c.listing_id === ouvert ? 3 : eq ? 4 : 1.5, fillColor: COULEUR[etat], fillOpacity: etat === 'non' ? 0.45 : 0.85 }
   }
 
   function afficher (liste) {
@@ -487,11 +535,24 @@
       photos.append(img)
     }
     if (!photos.children.length) photos.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: 'Pas de photo' }))
+    const d = c.details || {}
     const nom = document.createElement('h3'); nom.className = 'cp-nom'; nom.textContent = c.nom || 'Annonce sans titre'
+    const entete = document.createElement('div'); entete.className = 'cp-entete-fiche'
+    entete.append(nom)
+    // Le lien vers l'annonce : construit a partir de l'identifiant NUMERIQUE seul.
+    if (/^[0-9]{1,24}$/.test(String(c.listing_id))) {
+      const a = document.createElement('a'); a.className = 'cp-lien'
+      a.setAttribute('href', `https://www.airbnb.fr/rooms/${c.listing_id}`)
+      a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer')
+      a.textContent = 'Voir l’annonce sur Airbnb'
+      entete.append(a)
+    }
     const morceaux = []
     if (Number.isFinite(c.voyageurs)) morceaux.push(pluriel(c.voyageurs, 'voyageur', 'voyageurs'))
     if (Number.isFinite(c.chambres)) morceaux.push(c.chambres === 0 ? 'studio' : pluriel(c.chambres, 'chambre', 'chambres'))
-    if (Number.isFinite(c.distance_km)) morceaux.push(`à ${String(c.distance_km).replace('.', ',')} km${c.position_approchee ? ' environ' : ''}`)
+    if (Number.isFinite(d.lits)) morceaux.push(pluriel(d.lits, 'lit', 'lits'))
+    if (Number.isFinite(d.salles_de_bain)) morceaux.push(`${virgule(d.salles_de_bain)} salle${d.salles_de_bain > 1 ? 's' : ''} de bain`)
+    if (Number.isFinite(c.distance_km)) morceaux.push(`à ${virgule(c.distance_km)} km${c.position_approchee ? ' environ' : ''}`)
     const ligne = document.createElement('p'); ligne.className = 'cp-ligne'; ligne.textContent = morceaux.join(' · ')
     const activite = document.createElement('p'); activite.className = 'cp-ligne'
     activite.textContent = [c.ouvert_toute_annee === true ? 'Ouvert toute l’année' : c.ouvert_toute_annee === false ? 'Saisonnier' : '',
@@ -501,8 +562,41 @@
       if (!Object.prototype.hasOwnProperty.call(EQUIPEMENTS, e)) continue
       const b = document.createElement('span'); b.className = 'cp-badge'; b.textContent = EQUIPEMENTS[e]; badges.append(b)
     }
-    f.append(photos, nom, ligne, activite, badges)
+    f.append(photos, entete, ligne, activite, badges)
     if (c.source === 'equipements') f.append(Object.assign(document.createElement('p'), { className: 'cp-source', textContent: 'Trouvé grâce à vos équipements' }))
+    else if (aVosEquipements(c)) f.append(Object.assign(document.createElement('p'), { className: 'cp-source', textContent: 'A l’un de vos équipements' }))
+    // §21.6 : tout le reste de l'information, sauf l'argent.
+    const blocs = document.createElement('dl'); blocs.className = 'cp-blocs'
+    const ajouter = (titre, valeur) => { if (!valeur) return; const dt = document.createElement('dt'); dt.textContent = titre; const dd = document.createElement('dd'); dd.textContent = valeur; blocs.append(dt, dd) }
+    ajouter('Type', [d.type, d.logement_entier === true ? 'logement entier' : d.logement_entier === false ? 'logement partagé' : ''].filter(Boolean).join(' · '))
+    if (Number.isFinite(d.note)) ajouter('Note', `${virgule(d.note)} sur 5${Number.isFinite(d.avis) ? ` (${pluriel(d.avis, 'avis', 'avis')})` : ''}`)
+    else if (Number.isFinite(d.avis)) ajouter('Avis', pluriel(d.avis, 'avis', 'avis'))
+    const n = d.notes || {}
+    const sous = [['propreté', n.proprete], ['exactitude', n.exactitude], ['arrivée', n.arrivee], ['communication', n.communication], ['emplacement', n.emplacement], ['qualité-prix', n.rapport_qualite]]
+      .filter(([, v]) => Number.isFinite(v)).map(([k, v]) => `${k} ${virgule(v)}`)
+    ajouter('Détail des notes', sous.join(' · '))
+    ajouter('Distinctions', [d.superhote ? 'Superhôte' : '', d.coup_de_coeur ? 'Coup de cœur voyageurs' : ''].filter(Boolean).join(' · '))
+    ajouter('Hôte', [d.hote, d.gestion_pro === true ? 'gestion professionnelle' : d.gestion_pro === false ? 'gestion particulière' : ''].filter(Boolean).join(' · '))
+    ajouter('Réservation', [Number.isFinite(d.sejour_min) ? `séjour minimum ${pluriel(d.sejour_min, 'nuit', 'nuits')}` : '',
+      d.reservation_instantanee === true ? 'réservation instantanée' : d.reservation_instantanee === false ? 'sur demande' : '',
+      d.annulation ? `annulation ${ANNULATION[d.annulation] || d.annulation}` : ''].filter(Boolean).join(' · '))
+    ajouter('Horaires', [d.arrivee ? `arrivée ${d.arrivee}` : '', d.depart ? `départ ${d.depart}` : ''].filter(Boolean).join(' · '))
+    if (Number.isFinite(d.nb_photos)) ajouter('Photos', pluriel(d.nb_photos, 'photo sur l’annonce', 'photos sur l’annonce'))
+    if (blocs.children.length) f.append(blocs)
+    if (d.description) {
+      const det = document.createElement('details'); det.className = 'cp-description'
+      const sm = document.createElement('summary'); sm.textContent = 'Description de l’annonce'
+      const p = document.createElement('p'); p.className = 'cp-desc'; p.textContent = d.description
+      det.append(sm, p); f.append(det)
+    }
+    const tous = Array.isArray(d.equipements_airbnb) ? d.equipements_airbnb : []
+    if (tous.length) {
+      const det = document.createElement('details'); det.className = 'cp-tous-eq'
+      const sm = document.createElement('summary'); sm.textContent = `Tous les équipements (${tous.length})`
+      const ul = document.createElement('ul')
+      for (const e of tous) { const li = document.createElement('li'); li.textContent = EQ_FR[e] || e; ul.append(li) }
+      det.append(sm, ul); f.append(det)
+    }
     if (fondateur.has(id)) {
       f.append(Object.assign(document.createElement('p'), { className: 'cp-fondateur', textContent: 'Retenu par l’équipe HôteSmart' }))
     } else {
