@@ -113,12 +113,18 @@ async function marcheDuBien (bienId, profil) {
   return { pays: nfc(m.pays), region: nfc(m.region), localite: nfc(m.localite) }
 }
 
+// ⚠ Une cle du cache contient des guillemets et des virgules ; `.in()` de
+// supabase-js ne les echappe pas, et la lecture rend ZERO ligne sans erreur
+// (recette du 5 octobre 2026 : la page ne voyait aucun calendrier releve et
+// proposait de tout repayer). La liste PostgREST, echappee a la main.
+const listeEchappee = vs => `(${vs.map(v => `"${String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`).join(',')})`
+
 // Les calendriers en cache (frais), en UNE lecture (review de f37b7da) :
 // Map listing_id -> nuits.
 async function calendriersEnCache (ids, maintenant = new Date()) {
   const cles = new Map(ids.map(id => [cleCanonique(ENDPOINT_CAL, { listing_id: String(id), currency: 'native' }), String(id)]))
   if (!cles.size) return new Map()
-  const { data, error } = await supabase.from('airroi_cache').select('cle, reponse, recupere_le').in('cle', [...cles.keys()])
+  const { data, error } = await supabase.from('airroi_cache').select('cle, reponse, recupere_le').filter('cle', 'in', listeEchappee([...cles.keys()]))
   if (error) throw new Error(`airroi_cache : ${error.message}`)
   const out = new Map()
   for (const l of data || []) {
