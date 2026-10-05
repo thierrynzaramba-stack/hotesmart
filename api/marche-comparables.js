@@ -146,6 +146,7 @@ async function calendriersEnCache (ids, maintenant = new Date()) {
 }
 
 const PARALLELE = 4
+const SEUIL_PANNE_404 = 3
 const jourParis = (d = new Date()) => d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
 
 // Les prix de depart : `payer` faux = le cache seulement (le GET). Rend
@@ -174,6 +175,8 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
   let manquants = ids.filter(id => !cache.has(id))
   let refus = null
   const retireesIci = new Set()
+  const introuvables = new Set()
+  let reussis = 0
   if (payer && manquants.length) {
     let client = null
     const ctx = { propertyId: bienId, userId: compte }
@@ -187,14 +190,14 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
         try {
           client = client || creerClient({ depot: depotSupabase(supabase) })
           const r = await client.calendrierAnnonce(id, ctx)
-          if (r && r.donnees && Array.isArray(r.donnees.results)) cache.set(id, r.donnees.results)
+          if (r && r.donnees && Array.isArray(r.donnees.results)) { cache.set(id, r.donnees.results); reussis++ }
         } catch (e) {
           console.error('[marche-comparables] calendrier', e && (e.code || e.message))
-          // §22.9 : 404 = annonce retiree d'Airbnb. Notee pour tous les biens ;
-          // elle sort du calcul et ne se relevera plus.
-          if (e && e.http === 404) { await noterRetiree(supabase, id, 404); retireesIci.add(id) }
           // ⚠ On ne RAND que si rien n'a ete facture (review de f37b7da, SECURITE).
+          // Rendre AVANT de noter (review de b83823a, C1).
           if (e && e.coutLibere === true) await rendreRecherche({ bienId, cout: COUTS.calendrier, nature: 'calendrier' })
+          // §22.9 : 404 = annonce retiree d'Airbnb, notee APRES la boucle.
+          if (e && e.http === 404) introuvables.add(id)
         }
       }
     }
@@ -205,6 +208,19 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
     const fins = await Promise.allSettled(Array.from({ length: Math.min(PARALLELE, file.length) }, ouvrierSur))
     const panne = fins.find(f => f.status === 'rejected')
     if (panne) throw panne.reason
+    // ⚠ GARDE-FOU (review de b83823a, SECURITE) : le constat cache l'annonce
+    // pour TOUS les hotes. Trois 404 ou plus sans AUCUN releve reussi dans le
+    // meme appel ressemblent a une panne d'AirROI, pas a des annonces retirees :
+    // rien n'est note. Un constat dure 30 jours (lib/marche/annonces-retirees.js).
+    if (introuvables.size >= SEUIL_PANNE_404 && !reussis) {
+      console.error(`[marche-comparables] ${introuvables.size} calendriers en 404 sans aucun releve reussi : panne presumee, rien n'est note`)
+    } else {
+      for (const id of introuvables) {
+        try { await noterRetiree(supabase, id, 404); retireesIci.add(id) } catch (e) {
+          console.error('[marche-comparables] annonce retiree', e.message)
+        }
+      }
+    }
     manquants = ids.filter(id => !cache.has(id) && !retireesIci.has(id))
   }
   const calendriers = lignes.filter(l => ids.includes(String(l.listing_id)) && cache.has(String(l.listing_id))).map(l => ({

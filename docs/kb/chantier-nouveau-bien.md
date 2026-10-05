@@ -3131,3 +3131,14 @@ annonces qui n'existent plus.
   (le choix de l'hôte n'est pas réécrit) ; elle est écartée à la lecture.
 - Migration : `2026-10-05-annonces-retirees.sql`. Elle part **avec** le code,
   comme `…-nature.sql` : sans elle, la page dit « pas encore disponible ».
+- **Review de b83823a.** Le constat cache l'annonce pour **tous** les hôtes.
+  Deux garde-fous ont donc été ajoutés pour qu'un « introuvable » passager
+  d'AirROI ne cache pas des annonces vivantes :
+  - **panne présumée** : trois 404 ou plus dans un même appel, sans aucun
+    relevé réussi, ressemblent à une panne d'AirROI. Rien n'est noté, et c'est
+    journalisé ;
+  - **un constat vieillit** : il vaut 30 jours. Ensuite l'annonce redevient
+    visible et se re-vérifie au prochain relevé : gratuit si elle est toujours
+    introuvable, 0,10 $ si elle est revenue. Un nouveau 404 rafraîchit la date.
+  - La réservation est rendue **avant** l'écriture du constat ; un constat qui
+    ne s'écrit pas est journalisé et ne casse pas le calcul.

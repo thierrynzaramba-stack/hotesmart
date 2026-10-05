@@ -56,7 +56,7 @@ function base (tables) {
       // Comme le vrai client : range() se chaine encore (eq apres range).
       range: (a, z) => { lignes = lignes.slice(a, z + 1); return q },
       then: (ok, ko) => Promise.resolve(absente ? { data: null, error: erreur } : { data: lignes, error: null }).then(ok, ko),
-      upsert: (ligne, opts) => { ecrits.push({ tb, op: 'upsert', ligne, opts }); if (tb === 'bien_profil') tables.bien_profil = [{ ...PROFIL, ...ligne, latitude: String(ligne.latitude), longitude: String(ligne.longitude) }]; return Promise.resolve({ error: null }) },
+      upsert: (ligne, opts) => { ecrits.push({ tb, op: 'upsert', ligne, opts }); if (tables.__upsertPanne === tb) return Promise.resolve({ error: { message: 'connexion perdue' } }); if (tb === 'bien_profil') tables.bien_profil = [{ ...PROFIL, ...ligne, latitude: String(ligne.latitude), longitude: String(ligne.longitude) }]; return Promise.resolve({ error: null }) },
       update: (maj) => {
         const u = { tb, op: 'update', maj, filtres: [] }
         ecrits.push(u)
@@ -758,7 +758,9 @@ test('DECISION (review de c04e356) : le calcul recoit 10 calendriers au plus, et
 })
 
 // ─── §22.9 : les annonces retirees d'Airbnb ne s'affichent pas ──────────────
-const retiree = (id, http = 404) => ({ listing_id: id, http, constatee_le: '2026-10-05T18:07:17Z' })
+// Dates RELATIVES : le code lit l'horloge (constat valable 30 jours).
+const ilYa = jours => new Date(Date.now() - jours * 86400000).toISOString()
+const retiree = (id, http = 404, age = 1) => ({ listing_id: id, http, constatee_le: ilYa(age) })
 
 test('LE TEST QUI COMPTE (§22.9) : une annonce retiree n apparait NULLE PART — carte, retenus, positions, calcul', async () => {
   const tb = tablesPrix()
@@ -778,7 +780,8 @@ test('§22.9 : un calendrier qui repond 404 note l annonce retiree (pour tous le
   tb.__calendrier404 = [IDS[2]]
   const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
   const notes = r.ecrits.filter(e => e.tb === 'airroi_annonces_retirees')
-  assert.deepEqual(notes.map(e => [e.op, e.ligne, e.opts]), [['upsert', { listing_id: IDS[2], http: 404 }, { onConflict: 'listing_id', ignoreDuplicates: true }]])
+  assert.deepEqual(notes.map(e => [e.op, e.ligne.listing_id, e.ligne.http, e.opts]), [['upsert', IDS[2], 404, { onConflict: 'listing_id' }]])
+  assert.ok(Math.abs(Date.parse(notes[0].ligne.constatee_le) - Date.now()) < 60000, 'le constat est date du jour')
   assert.deepEqual(rendus(r), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'calendrier' }], '404 non facture : reservation rendue')
   assert.equal(r.corps.a_capturer, 0, 'elle ne se propose plus a relever')
 })
@@ -794,4 +797,36 @@ test('§22.9 : une annonce retiree ne se choisit pas, et ne se releve plus', asy
   const pr = await appeler({ method: 'POST', body: { action: 'prix' }, tables: p })
   assert.ok(!pr.appelsAirroi.some(a => a.calendrier === '9999'))
   assert.equal(reservCal(pr).length, 3)
+})
+
+test('GARDE-FOU (review de b83823a, SECURITE) : trois 404 ou plus sans aucun releve reussi = panne presumee, RIEN n est note', async () => {
+  const tb = tablesPrix({ calendriersEnCache: 0 })
+  tb.__calendrier404 = [...IDS]
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
+  assert.equal(r.ecrits.filter(e => e.tb === 'airroi_annonces_retirees').length, 0)
+  assert.equal(rendus(r).length, 3, 'les trois reservations rendues (404 non facture)')
+  assert.equal(r.corps.a_capturer, 3, 'elles restent a relever')
+  // Un seul 404 parmi des releves reussis : c'est une annonce retiree.
+  const un = tablesPrix({ calendriersEnCache: 0 })
+  un.__calendrier404 = [IDS[0]]
+  const r1 = await appeler({ method: 'POST', body: { action: 'prix' }, tables: un })
+  assert.deepEqual(r1.ecrits.filter(e => e.tb === 'airroi_annonces_retirees').map(e => e.ligne.listing_id), [IDS[0]])
+})
+
+test('C1 (review de b83823a) : un constat qui ne s ecrit pas ne casse pas le calcul, et la reservation est RENDUE', async () => {
+  const tb = tablesPrix({ calendriersEnCache: 2 })
+  tb.__calendrier404 = [IDS[2]]
+  tb.__upsertPanne = 'airroi_annonces_retirees'
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
+  assert.equal(r.code, 200)
+  assert.deepEqual(rendus(r), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'calendrier' }])
+  assert.equal(r.corps.a_capturer, 1, 'non notee : elle reste a relever')
+})
+
+test('§22.9 : un constat de plus de 30 jours vieillit — l annonce redevient visible et se re-verifie', async () => {
+  const tb = tablesPrix()
+  tb.airroi_annonces_retirees = [retiree(IDS[0], 404, 31)]
+  const g = await appeler({ tables: tb })
+  assert.ok(g.corps.comparables.some(c => c.listing_id === IDS[0]))
+  assert.ok(g.corps.retenus.includes(IDS[0]))
 })
