@@ -31,6 +31,7 @@ const { lireDerniereCapture } = require('../lib/marche/temperature-airroi')
 const { rechercheDuProfil, validerChoix, enregistrerChoix, corpsRechercheEquipements, COUTS, QUOTA, MESSAGE_QUOTA, CALENDRIERS_PAR_BIEN } = require('../lib/marche/choix-comparables')
 const { FRAICHEUR_JOURS } = require('../lib/airroi/cout')
 const { comparablesRetenus } = require('../lib/marche/etude')
+const { annoncesRetirees, noterRetiree, sansRetirees } = require('../lib/marche/annonces-retirees')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const ENDPOINT = 'GET /listings/comparables'
@@ -62,18 +63,27 @@ async function cacheFrais (endpoint, params, champ, maintenant = new Date()) {
   try { donnees = lireJson(l.reponse) } catch (e) { return null }
   return donnees && Array.isArray(donnees[champ]) ? donnees[champ] : []
 }
+// ⚠ §22.9 : une annonce RETIREE d'Airbnb ne s'affiche jamais. Elle est
+// ecartee a la SOURCE — listes en cache, retenus — donc de la carte, du choix,
+// du « au moins 3 » et du calcul.
 // La liste de base de CE profil (les 25 voisins).
-const listeEnCache = profil => cacheFrais(ENDPOINT, { ...rechercheDuProfil(profil), currency: 'native' }, 'listings')
+const listeEnCache = async profil => sansRetirees(supabase, await cacheFrais(ENDPOINT, { ...rechercheDuProfil(profil), currency: 'native' }, 'listings'))
 // La recherche par equipement de CE profil (§21.2) : [] s'il n'a aucun
 // equipement rare, null si elle reste a faire.
 async function complementEnCache (profil) {
   const corps = corpsRechercheEquipements(profil)
-  return corps ? cacheFrais(ENDPOINT_EQ, corps, 'results') : []
+  return corps ? sansRetirees(supabase, await cacheFrais(ENDPOINT_EQ, corps, 'results')) : []
+}
+// Les comparables retenus de ce bien, sans les annonces retirees.
+async function retenusEnLigne (bienId) {
+  const lignes = await comparablesRetenus(supabase, bienId)
+  const retirees = await annoncesRetirees(supabase, lignes.map(l => l.listing_id))
+  return lignes.filter(l => !retirees.has(String(l.listing_id)))
 }
 
 // Une table V2 pas encore installee (migration non appliquee) : la page le dit,
 // sans erreur brute (review de 4f19d8b, C3).
-const tableAbsente = e => /(bien_profil|comparables_retenus|comparables_recherches|reserver_recherche_comparables|airroi_cache|airroi_appels)/.test(String(e && e.message)) && /(does not exist|schema cache)/i.test(String(e && e.message))
+const tableAbsente = e => /(bien_profil|comparables_retenus|comparables_recherches|reserver_recherche_comparables|airroi_cache|airroi_appels|airroi_annonces_retirees)/.test(String(e && e.message)) && /(does not exist|schema cache)/i.test(String(e && e.message))
 const INDISPONIBLE = 'Cette page n’est pas encore disponible pour ce logement.'
 
 // ⚠ LE QUOTA EST ATOMIQUE (review de 7ace057, SECURITE) : la fonction SQL compte
@@ -142,7 +152,7 @@ const jourParis = (d = new Date()) => d.toLocaleDateString('sv-SE', { timeZone: 
 // { etat, prix?, message?, a_capturer, note? }.
 async function calculerPrix ({ bienId, compte, profil, payer }) {
   if (!profil || !profil.strategie) return { etat: 'strategie_absente', message: 'Choisissez d’abord votre stratégie de prix.' }
-  const lignes = await comparablesRetenus(supabase, bienId)
+  const lignes = await retenusEnLigne(bienId)
   if (lignes.filter(l => l.retenu_par !== 'fondateur').length < 3) return { etat: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' }
   const indispo = { etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }
   const marche = await marcheDuBien(bienId, profil)
@@ -163,6 +173,7 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
   const ids = [...tous.filter(id => cache.has(id)), ...tous.filter(id => !cache.has(id))].slice(0, CALENDRIERS_PAR_BIEN)
   let manquants = ids.filter(id => !cache.has(id))
   let refus = null
+  const retireesIci = new Set()
   if (payer && manquants.length) {
     let client = null
     const ctx = { propertyId: bienId, userId: compte }
@@ -179,6 +190,9 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
           if (r && r.donnees && Array.isArray(r.donnees.results)) cache.set(id, r.donnees.results)
         } catch (e) {
           console.error('[marche-comparables] calendrier', e && (e.code || e.message))
+          // §22.9 : 404 = annonce retiree d'Airbnb. Notee pour tous les biens ;
+          // elle sort du calcul et ne se relevera plus.
+          if (e && e.http === 404) { await noterRetiree(supabase, id, 404); retireesIci.add(id) }
           // ⚠ On ne RAND que si rien n'a ete facture (review de f37b7da, SECURITE).
           if (e && e.coutLibere === true) await rendreRecherche({ bienId, cout: COUTS.calendrier, nature: 'calendrier' })
         }
@@ -191,7 +205,7 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
     const fins = await Promise.allSettled(Array.from({ length: Math.min(PARALLELE, file.length) }, ouvrierSur))
     const panne = fins.find(f => f.status === 'rejected')
     if (panne) throw panne.reason
-    manquants = ids.filter(id => !cache.has(id))
+    manquants = ids.filter(id => !cache.has(id) && !retireesIci.has(id))
   }
   const calendriers = lignes.filter(l => ids.includes(String(l.listing_id)) && cache.has(String(l.listing_id))).map(l => ({
     listing_id: String(l.listing_id), position: l.retenu_par === 'fondateur' ? 'equivalent' : l.position,
@@ -232,7 +246,7 @@ module.exports = async (req, res) => {
   try {
     if (lecture) {
       const profil = await lireProfil(supabase, bienId)
-      const lignes = await comparablesRetenus(supabase, bienId)
+      const lignes = await retenusEnLigne(bienId)
       const base = profil ? await listeEnCache(profil) : null
       const complement = base ? await complementEnCache(profil) : null
       // Les retenus du FONDATEUR sont dits a part : la page les montre
@@ -280,7 +294,7 @@ module.exports = async (req, res) => {
         if (motif !== 'ok') return res.status(200).json({ etat: 'indisponible', message: MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois })
         try {
           const r = await leClient().comparables(rechercheDuProfil(profil), ctx)
-          base = r && r.donnees && Array.isArray(r.donnees.listings) ? r.donnees.listings : []
+          base = await sansRetirees(supabase, r && r.donnees && Array.isArray(r.donnees.listings) ? r.donnees.listings : [])
         } catch (e) {
           // Garde-fou, cle absente, AirROI en panne : une phrase simple pour
           // l'hote ; le detail au journal (jamais de cle : client.js la masque).
@@ -309,7 +323,7 @@ module.exports = async (req, res) => {
         } else {
           try {
             const r = await leClient().rechercheEquipements(corpsRechercheEquipements(profil), ctx)
-            complement = r && r.donnees && Array.isArray(r.donnees.results) ? r.donnees.results : []
+            complement = await sansRetirees(supabase, r && r.donnees && Array.isArray(r.donnees.results) ? r.donnees.results : [])
           } catch (e) {
             console.error('[marche-comparables] airroi equipements', e && (e.code || e.message))
             if (e && e.coutLibere === true) await rendreRecherche({ bienId, cout: COUTS.equipements })
@@ -318,7 +332,7 @@ module.exports = async (req, res) => {
           }
         }
       }
-      const lignes = await comparablesRetenus(supabase, bienId)
+      const lignes = await retenusEnLigne(bienId)
       return res.status(200).json({ etat: 'calcule', comparables: reunirEtTrier(base, complement, profil), note,
         marche_sejour_min: repartitionSejourMin([...base, ...complement]),
         retenus: lignes.map(x => x.listing_id), fondateur: lignes.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id),
@@ -338,7 +352,7 @@ module.exports = async (req, res) => {
       const v = validerStrategie(corps)
       if (v.erreur) return res.status(400).json({ error: 'strategie_invalide', message: v.erreur })
       // Le serveur exige lui aussi 3 comparables de l'hote (review de dd8c060).
-      const siens = (await comparablesRetenus(supabase, bienId)).filter(x => x.retenu_par !== 'fondateur')
+      const siens = (await retenusEnLigne(bienId)).filter(x => x.retenu_par !== 'fondateur')
       if (siens.length < 3) return res.status(400).json({ error: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' })
       const ecrit = await enregistrerStrategie(supabase, { propertyId: bienId, strategie: v.strategie, sejourMin: v.sejour_min })
       if (!ecrit) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })

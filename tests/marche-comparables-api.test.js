@@ -99,6 +99,7 @@ async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, bod
       },
       calendrierAnnonce: async (listingId, ctx) => {
         appelsAirroi.push({ calendrier: String(listingId), ctx })
+        if ((tables.__calendrier404 || []).includes(String(listingId))) throw Object.assign(new Error('HTTP 404'), { coutLibere: true, http: 404 })
         if (tables.__calendrierEnPanne) throw Object.assign(new Error('HTTP 500'), { coutLibere: tables.__calendrierEnPanne !== 'facture' })
         return { donnees: { currency: 'EUR', results: CALENDRIER(100) }, depuisCache: false }
       },
@@ -754,4 +755,43 @@ test('DECISION (review de c04e356) : le calcul recoit 10 calendriers au plus, et
   assert.equal(releves.length, 10)
   assert.ok(releves.includes('9010') && releves.includes('9011'), 'l equipe est relevee')
   assert.ok(!releves.includes('9008') && !releves.includes('9009'), 'les deux derniers choix de l hote attendent')
+})
+
+// ─── §22.9 : les annonces retirees d'Airbnb ne s'affichent pas ──────────────
+const retiree = (id, http = 404) => ({ listing_id: id, http, constatee_le: '2026-10-05T18:07:17Z' })
+
+test('LE TEST QUI COMPTE (§22.9) : une annonce retiree n apparait NULLE PART — carte, retenus, positions, calcul', async () => {
+  const tb = tablesPrix()
+  tb.airroi_annonces_retirees = [retiree(IDS[0])]
+  const g = await appeler({ tables: tb })
+  assert.ok(!g.corps.comparables.some(c => c.listing_id === IDS[0]), 'absente de la carte')
+  assert.equal(g.corps.comparables.length, 24)
+  assert.deepEqual(g.corps.retenus, IDS.slice(1), 'absente des retenus')
+  assert.ok(!(IDS[0] in g.corps.positions))
+  assert.ok(!g.corps.prix_depart.prix || !g.corps.prix_depart.prix.comparables.some(c => c.listing_id === IDS[0]))
+  // Trois retenus dont un retire : il n'en reste que deux, le calcul le dit.
+  assert.equal(g.corps.prix_depart.etat, 'comparables_insuffisants')
+})
+
+test('§22.9 : un calendrier qui repond 404 note l annonce retiree (pour tous les biens), rend la reservation, et ne la compte plus', async () => {
+  const tb = tablesPrix({ calendriersEnCache: 2 })
+  tb.__calendrier404 = [IDS[2]]
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
+  const notes = r.ecrits.filter(e => e.tb === 'airroi_annonces_retirees')
+  assert.deepEqual(notes.map(e => [e.op, e.ligne, e.opts]), [['upsert', { listing_id: IDS[2], http: 404 }, { onConflict: 'listing_id', ignoreDuplicates: true }]])
+  assert.deepEqual(rendus(r), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'calendrier' }], '404 non facture : reservation rendue')
+  assert.equal(r.corps.a_capturer, 0, 'elle ne se propose plus a relever')
+})
+
+test('§22.9 : une annonce retiree ne se choisit pas, et ne se releve plus', async () => {
+  const tb = TABLES()
+  tb.airroi_annonces_retirees = [retiree(IDS[0])]
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: IDS.map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: tb })
+  assert.equal(r.code, 400)
+  const p = tablesPrix({ calendriersEnCache: 0 })
+  p.comparables_retenus.push({ property_id: 'BIEN-A', listing_id: '9999', actif: true, retenu_par: 'proprietaire', position: 'equivalent' })
+  p.airroi_annonces_retirees = [retiree('9999')]
+  const pr = await appeler({ method: 'POST', body: { action: 'prix' }, tables: p })
+  assert.ok(!pr.appelsAirroi.some(a => a.calendrier === '9999'))
+  assert.equal(reservCal(pr).length, 3)
 })

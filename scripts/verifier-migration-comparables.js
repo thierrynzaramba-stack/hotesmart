@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // scripts/verifier-migration-comparables.js — les migrations 2026-10-05-bien-profil.sql
 // (+ -strategie), 2026-10-05-comparables-recherches.sql (+ -cout, -nature) et
-// 2026-10-05-comparables-position.sql sont-elles REELLEMENT appliquees ?
+// 2026-10-05-comparables-position.sql et 2026-10-05-annonces-retirees.sql sont-elles
+// REELLEMENT appliquees ?
 // Spec : docs/kb/chantier-nouveau-bien.md §20 a §22.
 //
 //   node --env-file=<.env de la base visee> scripts/verifier-migration-comparables.js
@@ -21,6 +22,7 @@ const FORMES = {
   bien_profil: 'id, user_id, property_id, adresse, adresse_trouvee, latitude, longitude, geocode_score, voyageurs, chambres, pieces, salles_de_bain, equipements, maj_le, strategie, sejour_min',
   comparables_recherches: 'id, user_id, property_id, cree_le, cout_usd, nature',
   comparables_retenus: 'property_id, listing_id, actif, retenu_par, position',
+  airroi_annonces_retirees: 'listing_id, constatee_le, http',
 }
 
 ;(async () => {

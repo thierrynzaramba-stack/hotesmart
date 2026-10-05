@@ -593,3 +593,12 @@ test('C6 : une VRAIE reponse du calendrier en ligne passe la forme et se range',
     assert.ok(r.donnees.results.every(n => /^\d{4}-\d{2}-\d{2}$/.test(n.date) && typeof n.rate === 'number' && Number.isInteger(n.min_nights) && typeof n.available === 'boolean'))
   })
 })
+
+// §22.9 : l'erreur HTTP porte son code (404 = annonce retiree).
+test('une erreur HTTP porte son code', async () => {
+  await avecCle(async () => {
+    const e = await creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: faux('{"detail":"Not found"}', 404) }).calendrierAnnonce('1223814870412684731', { propertyId: 'P', userId: 'U' }).catch(x => x)
+    assert.equal(e.http, 404)
+    assert.equal(e.coutLibere, true)
+  })
+})

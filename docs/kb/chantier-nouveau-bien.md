@@ -3103,3 +3103,31 @@ Le « 10 % » de §22.2 est **remplacé** par le cran de prix mesuré ci-dessous
     10 retenus pour le calcul, donc les prix, peuvent changer à ce moment-là ;
   - le nom passé par `--nom` n'est pas vérifié contre les coordonnées : c'est
     à l'opérateur de nommer juste.
+
+### 22.9 Les annonces retirées d'Airbnb ne s'affichent pas (5 octobre 2026)
+
+**Constat de la recette.** Deux des cinq comparables retenus pour le loft de
+recette (1223814870412684731, 604768749514260674) avaient été retirés
+d'Airbnb : la page Airbnb répond 410, et le calendrier en ligne d'AirROI 404.
+Les données d'AirROI ont du retard : les listes de comparables proposent des
+annonces qui n'existent plus.
+
+**Décision de Thierry : une annonce retirée ne s'affiche pas.**
+- **Une table du cœur, commune à tous les biens** : `airroi_annonces_retirees`
+  (`listing_id` texte numérique, `constatee_le`, `http`). Une annonce retirée
+  l'est pour tout le monde. Aucun prix.
+- **Writer unique** : `lib/marche/annonces-retirees.js`, appelé par la route
+  quand le calendrier en ligne d'une annonce répond **404**. Cette réponse
+  n'est pas facturée : le constat ne coûte rien.
+- **Lecteurs** : la route `api/marche-comparables.js`, à la source. Les listes
+  en cache (base et équipements), les retenus et le calcul des prix en écartent
+  les annonces retirées. Une annonce retirée ne s'affiche donc jamais sur la
+  carte, ne peut pas être choisie, ne compte pas dans le « au moins 3 », et ne
+  se relève plus jamais.
+- **On ne vérifie que les retenus.** Vérifier toutes les cartes coûterait
+  0,10 $ par annonce encore en ligne. Une annonce retirée encore présente dans
+  la liste disparaît dès qu'un hôte la retient et relève ses prix.
+- Une ligne de `comparables_retenus` pointant une annonce retirée reste en base
+  (le choix de l'hôte n'est pas réécrit) ; elle est écartée à la lecture.
+- Migration : `2026-10-05-annonces-retirees.sql`. Elle part **avec** le code,
+  comme `…-nature.sql` : sans elle, la page dit « pas encore disponible ».
