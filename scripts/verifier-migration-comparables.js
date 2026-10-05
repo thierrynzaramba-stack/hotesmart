@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // scripts/verifier-migration-comparables.js — les migrations 2026-10-05-bien-profil.sql
-// et 2026-10-05-comparables-recherches.sql sont-elles REELLEMENT appliquees ?
+// 2026-10-05-comparables-recherches.sql et -cout.sql sont-elles REELLEMENT appliquees ?
 // Spec : docs/kb/chantier-nouveau-bien.md §20.
 //
 //   node --env-file=<.env de la base visee> scripts/verifier-migration-comparables.js
@@ -17,7 +17,7 @@ if (!URL || !KEY) { console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY absents.'
 const sb = createClient(URL, KEY, { auth: { persistSession: false } })
 const FORMES = {
   bien_profil: 'id, user_id, property_id, adresse, adresse_trouvee, latitude, longitude, geocode_score, voyageurs, chambres, pieces, salles_de_bain, equipements, maj_le',
-  comparables_recherches: 'id, user_id, property_id, cree_le',
+  comparables_recherches: 'id, user_id, property_id, cree_le, cout_usd',
 }
 
 ;(async () => {

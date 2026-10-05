@@ -24,7 +24,9 @@ const { trierComparables, reunirEtTrier } = require('../lib/marche/pertinence')
 
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'apps', 'yield', 'comparables.html'), 'utf8')
 const COMPS = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'comps-labulle.json'), 'utf8')).listings
+// Les biens « trouves par equipement » : d'autres annonces reelles, avec un jacuzzi.
 const SPA = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'comps-cdv23.json'), 'utf8')).listings.slice(0, 3)
+  .map(f => ({ ...f, property_details: { ...f.property_details, amenities: [...f.property_details.amenities, 'Hot tub'] } }))
 const PROFIL = { adresse: '12 rue des Thermes', adresse_trouvee: '12 Rue des Thermes 65200 Bagnères-de-Bigorre', voyageurs: 2, chambres: 1, pieces: 2, salles_de_bain: 1, equipements: ['parking', 'spa'], latitude: 43.0636, longitude: 0.1476 }
 const CARTES = trierComparables(COMPS, PROFIL)
 const AVEC_SPA = reunirEtTrier(COMPS, SPA, PROFIL)
@@ -398,4 +400,69 @@ test('la legende prend ses couleurs de la MEME table que la carte', async () => 
   const fond = k => doc.querySelector(`[data-couleur="${k}"]`).style.background
   assert.match(fond('non'), /rgb\(95, 99, 104\)|#5F6368/i)
   assert.match(fond('similaire'), /rgb\(31, 138, 76\)|#1F8A4C/i)
+})
+
+// ─── §21.6 : reperer les biens a vos equipements, et une fiche complete ─────
+test('LE TEST QUI COMPTE (§21.6) : un bien qui a l un de vos equipements RARES porte un contour VIOLET, et la legende le dit', async () => {
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: AVEC_SPA }))
+  const spa = AVEC_SPA.find(c => c.source === 'equipements')
+  // Le temoin est choisi sur ses EQUIPEMENTS bruts, pas par la regle testee.
+  const sans = AVEC_SPA.find(c => c.source === 'voisins' && !c.details.equipements_airbnb.some(e => /hot tub|sauna/i.test(e)))
+  assert.equal(pointDe(L, spa.listing_id).style.color, '#7B3FA0')
+  assert.equal(pointDe(L, spa.listing_id).style.weight, 4)
+  assert.equal(pointDe(L, sans.listing_id).style.color, '#fff')
+  assert.match(doc.querySelector('.cp-legende').textContent, /À vos équipements/)
+  // Ouvert, le contour devient noir ; refermer sur un autre lui rend son violet.
+  cliquerPoint(L, spa.listing_id)
+  assert.equal(pointDe(L, spa.listing_id).style.color, '#111')
+  cliquerPoint(L, sans.listing_id)
+  assert.equal(pointDe(L, spa.listing_id).style.color, '#7B3FA0')
+})
+
+test('LE TEST QUI COMPTE (§21.6) : la fiche complete — lien Airbnb sur, type, note, distinctions, hote, reservation, horaires, description, tous les equipements traduits', async () => {
+  const c = { ...CARTES[0], details: { ...CARTES[0].details, description: 'Bel appartement <b>calme</b>.\nProche des thermes.', type: 'Entire rental unit', logement_entier: true, lits: 2, salles_de_bain: 1.5,
+    note: 4.87, avis: 45, notes: { proprete: 4.9, exactitude: 4.8, arrivee: 5, communication: 5, emplacement: 4.7, rapport_qualite: 4.6 },
+    superhote: true, coup_de_coeur: true, hote: 'Sophie', gestion_pro: false, reservation_instantanee: true, sejour_min: 2, annulation: 'Moderate',
+    arrivee: '3:00 PM', depart: '11:00 AM', equipements_airbnb: ['Hot tub', 'Wifi', 'Robot tondeuse'], nb_photos: 12 } }
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: [c] }))
+  cliquerPoint(L, c.listing_id)
+  const f = doc.getElementById('cp-fiche')
+  const a = f.querySelector('a.cp-lien')
+  assert.equal(a.getAttribute('href'), `https://www.airbnb.fr/rooms/${c.listing_id}`)
+  assert.equal(a.getAttribute('rel'), 'noopener noreferrer')
+  assert.equal(a.getAttribute('target'), '_blank')
+  assert.match(f.querySelector('.cp-ligne').textContent, /2 lits · 1,5 salles de bain/)
+  const blocs = Object.fromEntries([...f.querySelectorAll('.cp-blocs dt')].map(dt => [dt.textContent, dt.nextElementSibling.textContent]))
+  assert.equal(blocs.Type, 'Entire rental unit · logement entier')
+  assert.equal(blocs.Note, '4,87 sur 5 (45 avis)')
+  assert.match(blocs['Détail des notes'], /propreté 4,9 · exactitude 4,8 · arrivée 5 · communication 5 · emplacement 4,7 · qualité-prix 4,6/)
+  assert.equal(blocs.Distinctions, 'Superhôte · Coup de cœur voyageurs')
+  assert.equal(blocs['Hôte'], 'Sophie · gestion particulière')
+  assert.equal(blocs['Réservation'], 'séjour minimum 2 nuits · réservation instantanée · annulation modérée')
+  assert.equal(blocs.Horaires, 'arrivée 3:00 PM · départ 11:00 AM')
+  assert.equal(f.querySelector('.cp-description .cp-desc').textContent, 'Bel appartement <b>calme</b>.\nProche des thermes.', 'du texte, jamais du HTML')
+  assert.equal(f.querySelectorAll('.cp-description b').length, 0)
+  assert.deepEqual([...f.querySelectorAll('.cp-tous-eq li')].map(li => li.textContent), ['Jacuzzi', 'Wifi', 'Robot tondeuse'])
+  assert.match(f.querySelector('.cp-tous-eq summary').textContent, /Tous les équipements \(3\)/)
+})
+
+test('LE TEST QUI COMPTE : aucun montant visible dans les fiches des biens reels (descriptions masquees par le serveur)', async () => {
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  for (const c of CARTES) {
+    cliquerPoint(L, c.listing_id)
+    assert.ok(!/€|\$\s?\d|\d\s?(euros?|eur)\b/i.test(doc.getElementById('cp-fiche').textContent), c.nom)
+  }
+})
+
+test('SECURITE : le lien Airbnb n est construit qu a partir d un identifiant NUMERIQUE', async () => {
+  const c = { ...CARTES[0], listing_id: 'javascript:alert(1)' }
+  const { doc } = await monter(serveur({ profil: PROFIL, cache: [c] }))
+  doc.querySelector('#cp-liste-biens button').click()
+  assert.equal(doc.querySelectorAll('#cp-fiche a').length, 0)
+})
+
+test('REVIEW : un bien de la liste de BASE avec jacuzzi porte lui aussi le contour violet', async () => {
+  const base = [{ ...CARTES[0], source: 'voisins', a_vos_equipements: true }, ...CARTES.slice(1)]
+  const { L } = await monter(serveur({ profil: PROFIL, cache: base }))
+  assert.equal(pointDe(L, base[0].listing_id).style.color, '#7B3FA0')
 })

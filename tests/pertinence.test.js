@@ -30,15 +30,24 @@ function fiche ({ lat = 43.0636, lng = 0.1476, guests = 2, bedrooms = 1, bloques
   }
 }
 const ids = cartes => cartes.map(c => c.nom)
+// Une carte ne porte AUCUNE cle d'argent, a aucun niveau, ni de montant dans un texte.
+const CLES_ARGENT = /^(ttm_|l90d_)|rate|revenue|occupancy|revpar|fee|price|prix|currency$/i
+function clesArgent (o, chemin = '') {
+  if (Array.isArray(o)) return o.flatMap((x, i) => clesArgent(x, `${chemin}[${i}]`))
+  if (!o || typeof o !== 'object') return []
+  return Object.entries(o).flatMap(([k, v]) => [...(CLES_ARGENT.test(k) ? [`${chemin}.${k}`] : []), ...clesArgent(v, `${chemin}.${k}`)])
+}
+
 
 test('LE TEST QUI COMPTE : une carte n a AUCUN prix, revenu ou occupation — liste blanche', () => {
   const cartes = p.trierComparables(COMPS, MOI)
   assert.equal(cartes.length, 25)
   for (const c of cartes) {
-    assert.deepEqual(Object.keys(c).sort(), ['chambres', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
+    assert.deepEqual(Object.keys(c).sort(), ['a_vos_equipements', 'chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
   }
-  const texte = JSON.stringify(cartes)
-  for (const interdit of ['rate', 'revenue', 'occupancy', 'revpar', 'cleaning_fee', 'price', 'prix']) assert.ok(!texte.includes(interdit), interdit)
+  assert.deepEqual(clesArgent(cartes), [], 'aucune cle d argent')
+  assert.ok(!/€|\$\s?\d/.test(JSON.stringify(cartes)), 'aucun montant, meme dans la description')
+  assert.deepEqual(Object.keys(cartes[0].details).sort(), ['annulation', 'arrivee', 'avis', 'coup_de_coeur', 'depart', 'description', 'equipements_airbnb', 'gestion_pro', 'hote', 'lits', 'logement_entier', 'nb_photos', 'note', 'notes', 'reservation_instantanee', 'salles_de_bain', 'sejour_min', 'superhote', 'type'].sort())
 })
 
 test('LE TEST QUI COMPTE (tri) : la ZONE d abord — a tout le reste egal, le plus proche passe devant', () => {
@@ -190,13 +199,13 @@ test('RE-REVIEW (65d6cc7) : « Air conditioning » seul et en majuscules est rec
 })
 
 // ─── §21 : position, photos, provenance ─────────────────────────────────────
-test('§21.4 : une carte porte la position publique de l annonce, ses photos filtrees (8 au plus), sa provenance', () => {
+test('§21.4 : une carte porte la position publique de l annonce, ses photos filtrees (30 au plus), sa provenance', () => {
   const f = fiche({ lat: 43.07, lng: 0.15 })
-  f.listing_info.photo_urls = ['https://a0.muscache.com/1.jpg', 'https://evil.example/2.jpg', ...Array.from({ length: 10 }, (_, i) => `https://a0.muscache.com/p${i}.jpg`)]
+  f.listing_info.photo_urls = ['https://a0.muscache.com/1.jpg', 'https://evil.example/2.jpg', ...Array.from({ length: 40 }, (_, i) => `https://a0.muscache.com/p${i}.jpg`)]
   const c = p.trierComparables([f], MOI)[0]
   assert.equal(c.latitude, 43.07)
   assert.equal(c.longitude, 0.15)
-  assert.equal(c.photos.length, 8)
+  assert.equal(c.photos.length, 30, '§21.6 : jusqu a 30 photos')
   assert.equal(c.photos[0], 'https://a0.muscache.com/x.jpg', 'la couverture d abord')
   assert.ok(c.photos.every(u => u.startsWith('https://a0.muscache.com/')), 'aucune photo hors muscache')
   assert.equal(c.source, 'voisins')
@@ -211,4 +220,69 @@ test('§21.2 : les deux listes reunies — sans doublon (la liste de base gagne)
   const r = p.reunirEtTrier([a], [b, doublon], MOI)
   assert.equal(r.length, 2)
   assert.deepEqual(r.map(c => [c.nom, c.source]), [[b.listing_info.listing_name, 'equipements'], [a.listing_info.listing_name, 'voisins']])
+})
+
+// ─── §21.6 : toute l'information, sauf l'argent ──────────────────────────────
+test('LE TEST QUI COMPTE (§21.6) : details — description, type, lits, note et sous-notes, hote, reservation, horaires, TOUS les equipements ; jamais l argent', () => {
+  const f = fiche({ amenities: ['Hot tub', 'Wifi', 'Pool table'] })
+  Object.assign(f.listing_info, { description: 'Bel appartement.<br />Linge : 15 € ; menage 30€.', listing_type: 'Entire rental unit', room_type: 'entire_home', guest_favorite: true, checkin_time: '3:00 PM', checkout_time: '11:00 AM', photos_count: 12 })
+  f.property_details.beds = 2; f.property_details.baths = 1.5
+  f.host_info = { host_name: 'Sophie', superhost: true, professional_management: false, host_id: 42 }
+  f.booking_settings = { instant_book: true, min_nights: 2, cancellation_policy: 'Moderate' }
+  f.ratings = { num_reviews: 45, rating_overall: 4.87, rating_cleanliness: 4.9, rating_accuracy: 4.8, rating_checkin: 5, rating_communication: 5, rating_location: 4.7, rating_value: 4.6 }
+  const d = p.trierComparables([f], MOI)[0].details
+  assert.equal(d.description, 'Bel appartement.\nLinge : … ; menage ….')
+  assert.deepEqual({ type: d.type, entier: d.logement_entier, lits: d.lits, sdb: d.salles_de_bain, note: d.note, avis: d.avis }, { type: 'Entire rental unit', entier: true, lits: 2, sdb: 1.5, note: 4.87, avis: 45 })
+  assert.deepEqual(d.notes, { proprete: 4.9, exactitude: 4.8, arrivee: 5, communication: 5, emplacement: 4.7, rapport_qualite: 4.6 })
+  assert.deepEqual({ h: d.hote, s: d.superhote, g: d.gestion_pro, c: d.coup_de_coeur }, { h: 'Sophie', s: true, g: false, c: true })
+  assert.deepEqual({ i: d.reservation_instantanee, m: d.sejour_min, a: d.annulation, ar: d.arrivee, de: d.depart, n: d.nb_photos }, { i: true, m: 2, a: 'Moderate', ar: '3:00 PM', de: '11:00 AM', n: 12 })
+  assert.deepEqual(d.equipements_airbnb, ['Hot tub', 'Wifi', 'Pool table'], 'tous les equipements, tels quels')
+  assert.ok(!('host_id' in d))
+  assert.deepEqual(clesArgent(d), [])
+})
+
+test('§21.6 : une description — les balises retirees, les montants masques (euros, dollars, avant ou apres le nombre), le reste intact', () => {
+  assert.equal(p.descriptionPropre('A surcharge of €20 will be requested.<br />Linen 15 euros, cleaning 30€, deposit $ 200 or 1 500 EUR.'),
+    'A surcharge of … will be requested.\nLinen …, cleaning …, deposit … or ….')
+  assert.equal(p.descriptionPropre('Studio de 25 m², 2 personnes, 10 min du centre<script>x</script>'), 'Studio de 25 m², 2 personnes, 10 min du centrex')
+  assert.equal(p.descriptionPropre(42), null)
+  assert.equal(p.descriptionPropre('x'.repeat(5000)).length, 3000)
+})
+
+test('§21.6 : une valeur de forme inattendue n est pas une information (objet, nombre hors bornes)', () => {
+  const f = fiche()
+  Object.assign(f.listing_info, { description: { x: 1 }, listing_type: 42, checkin_time: ['15'] })
+  f.ratings = { rating_overall: 9, num_reviews: -3 }
+  f.host_info = { host_name: { nom: 'x' }, superhost: 'oui' }
+  const d = p.trierComparables([f], MOI)[0].details
+  assert.deepEqual({ desc: d.description, type: d.type, ar: d.arrivee, note: d.note, avis: d.avis, hote: d.hote, sh: d.superhote }, { desc: null, type: null, ar: null, note: null, avis: null, hote: null, sh: null })
+})
+
+// ─── Constats de la review de 05223a1 ───────────────────────────────────────
+test('LE TEST QUI COMPTE (review) : tous les formats de montant sont masques — devise avant, apres, collee, en entite HTML', () => {
+  const formats = ['20 EUR', '20eur', '€20,50', '1.500 €', '1 500 €', 'EUR 20', 'EUR20', '50 CHF', 'CHF 50', '20 balles', '20,-€', '20E', '20 &euro;', '20&#8364;', '$15', '15 dollars', '£30']
+  for (const f of formats) assert.equal(p.descriptionPropre(`Linge : ${f}.`), 'Linge : ….', f)
+})
+
+test('REVIEW : aucun faux positif — etage, surface, note, liste de nombres, mots en « eur »', () => {
+  const t = '2e étage, 3 E-mails, 25 m², 10 min, 4,9 sur 5, 1, 2, 3 chambres, européen, Europe, eurostar 3'
+  assert.equal(p.descriptionPropre(t), t)
+})
+
+test('REVIEW : une note de 0 n est pas une note (un bien a 2 avis portait 0 partout)', () => {
+  const f = fiche()
+  f.ratings = { num_reviews: 2, rating_overall: 0, rating_cleanliness: 0 }
+  const d = p.trierComparables([f], MOI)[0].details
+  assert.equal(d.note, null)
+  assert.equal(d.notes.proprete, null)
+  assert.equal(d.avis, 2)
+})
+
+test('REVIEW : « a vos equipements » est calcule par le serveur, quelle que soit la provenance — liste de base comprise', () => {
+  const base = fiche({ amenities: ['Hot tub'] })
+  const sans = fiche({ amenities: ['Wifi', 'Free parking on premises'] })
+  const r = p.reunirEtTrier([base, sans], [], { ...MOI, equipements: ['spa', 'parking'] })
+  const de = nom => r.find(c => c.nom === nom)
+  assert.equal(de(base.listing_info.listing_name).a_vos_equipements, true, 'un bien de la liste de BASE avec jacuzzi')
+  assert.equal(de(sans.listing_info.listing_name).a_vos_equipements, false, 'le parking n est pas un equipement rare')
 })
