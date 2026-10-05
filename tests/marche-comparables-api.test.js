@@ -51,6 +51,7 @@ function base (tables) {
         ecrits.push(u)
         const w = {
           eq: (k, v) => { u.filtres.push(['eq', k, v]); return w },
+          select: () => Promise.resolve({ data: (tables[tb] || []).filter(l => u.filtres.every(([op, k, v]) => op !== 'eq' || String(l[k]) === String(v))), error: null }),
           in: (k, v) => { u.filtres.push(['in', k, v]); return Promise.resolve({ error: null }) },
           not: (k, op, v) => { u.filtres.push(['not', k, op, v]); return Promise.resolve({ error: null }) },
         }
@@ -116,7 +117,8 @@ const TABLES = () => ({
 })
 
 // Une carte ne porte AUCUNE cle d'argent, a aucun niveau, ni de montant dans un texte.
-const CLES_ARGENT = /^(ttm_|l90d_)|rate|revenue|occupancy|revpar|fee|price|prix|currency$/i
+// Mots ENTIERS d'une cle (« strategie » contient « rate » sans en etre une).
+const CLES_ARGENT = /^(ttm_|l90d_)|(^|_)(rate|revenue|occupancy|revpar|fee|price|prix|currency)(_|$)/i
 function clesArgent (o, chemin = '') {
   if (Array.isArray(o)) return o.flatMap((x, i) => clesArgent(x, `${chemin}[${i}]`))
   if (!o || typeof o !== 'object') return []
@@ -207,7 +209,11 @@ test('LE TEST QUI COMPTE : retenir — au moins 3, tous dans la derniere liste p
   assert.ok(!intrus.ecrits.length, 'rien n est ecrit')
   const ok = await appeler({ method: 'POST', body: { action: 'retenir', choix: ([...IDS, IDS[0]]).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: TABLES() })
   assert.deepEqual(ok.corps.retenus, IDS, 'doublon retire')
-  const [react, desact] = ok.ecrits.filter(e => e.op === 'update')
+  const majs = ok.ecrits.filter(e => e.op === 'update')
+  const react = majs.find(e => e.maj.actif === true)
+  const desact = majs.find(e => e.maj.actif === false)
+  // Review de 1e64a2b : les positions AVANT la reactivation.
+  assert.ok(majs.findIndex(e => e.maj.position) < majs.indexOf(react))
   assert.deepEqual(react.maj, { actif: true })
   assert.deepEqual(react.filtres, [['eq', 'property_id', 'BIEN-A'], ['in', 'listing_id', IDS]])
   assert.deepEqual(desact.maj, { actif: false })
@@ -508,4 +514,33 @@ test('LE TEST QUI COMPTE (§22.1) : la migration de la position — trois valeur
   const sql = fs.readFileSync(path.join(RACINE, 'migrations', '2026-10-05-comparables-position.sql'), 'utf8')
   assert.ok(sql.split('\n').every(l => l.length < 60))
   assert.match(sql, /add column if not exists position text\s+check \(position in \(\s+'dessous', 'equivalent', 'dessus'\)\)/)
+})
+
+// ─── §22.2 : la strategie, et la colonne de position absente ────────────────
+test('LE TEST QUI COMPTE (§22.2) : strategie — sous reglages:write, validee, ecrite sur le bien RESOLU', async () => {
+  const t = TABLES()
+  t.bien_profil[0].strategie = 'agressif'; t.bien_profil[0].sejour_min = 2
+  const r = await appeler({ method: 'POST', body: { action: 'strategie', strategie: 'agressif', sejour_min: '2' }, tables: t })
+  assert.deepEqual(r.gardes, [{ domaine: 'reglages', niveau: 'write', bien: 'REF-42', bienRequis: true }])
+  const maj = r.ecrits.find(e => e.tb === 'bien_profil' && e.op === 'update')
+  assert.deepEqual([maj.maj.strategie, maj.maj.sejour_min], ['agressif', 2])
+  assert.deepEqual(maj.filtres, [['eq', 'property_id', 'BIEN-A']])
+  assert.equal(r.corps.profil.strategie, 'agressif')
+  const mauvais = await appeler({ method: 'POST', body: { action: 'strategie', strategie: 'luxe', sejour_min: 2 }, tables: TABLES() })
+  assert.equal(mauvais.code, 400)
+  assert.ok(!mauvais.ecrits.length)
+})
+
+test('§22.2 : le GET rend la strategie du profil et la repartition du marche par sejour minimum', async () => {
+  const g = await appeler({ tables: TABLES() })
+  assert.equal(g.corps.profil.strategie, null)
+  assert.equal(g.corps.profil.sejour_min, null)
+  assert.deepEqual(g.corps.marche_sejour_min, { total: 25, une: 5, deux: 11, trois_plus: 9 })
+})
+
+test('REVIEW (1e64a2b) : la colonne de position absente (migration non collee) — la page dit « pas encore disponible », jamais une erreur brute', async () => {
+  const t = { ...TABLES(), __absentes: ['comparables_retenus'] }
+  const g = await appeler({ tables: t })
+  assert.equal(g.code, 200)
+  assert.equal(g.corps.etat, 'indisponible')
 })

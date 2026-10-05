@@ -78,6 +78,11 @@
     .cp-liste-biens summary { cursor: pointer; font-size: 13px; font-weight: 600; min-height: 32px; padding: 6px 0; }
     .cp-liste-biens ol { margin: 4px 0 0; padding-left: 20px; font-size: 13px; }
     .cp-liste-biens button { font: inherit; background: none; border: 0; padding: 4px 0; color: var(--text); cursor: pointer; text-align: left; min-height: 32px; }
+    .cp-strategies { display: grid; gap: 8px; margin: 6px 0 12px; }
+    .cp-strategies label { display: flex; gap: 10px; align-items: flex-start; border: 0.5px solid var(--border2); border-radius: 8px; padding: 10px 12px; cursor: pointer; font-size: 13.5px; }
+    .cp-strategies label small { display: block; color: var(--text2); font-size: 12.5px; margin-top: 2px; }
+    .cp-sejour { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13.5px; font-weight: 600; }
+    .cp-sejour input { font: inherit; width: 80px; padding: 8px 10px; border: 0.5px solid var(--border2); border-radius: 8px; background: var(--bg); color: var(--text); min-height: 40px; }
     .cp-pied { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 10px 0; margin-top: 12px;
       display: flex; flex-wrap: wrap; align-items: center; gap: 10px; z-index: 500; }
     @media (max-width: 640px) {
@@ -169,6 +174,26 @@
       <span id="cp-message-b" aria-live="polite"></span>
     </div>
   </div>
+
+  <!-- ÉTAPE C : la stratégie et le séjour minimum (§22.2) -->
+  <div class="cp-carte" id="cp-etape-c" hidden>
+    <h2>Votre stratégie de prix</h2>
+    <p class="sous">Comment voulez-vous vous placer par rapport à vos comparables ?</p>
+    <div class="cp-strategies" role="radiogroup" aria-label="Stratégie de prix">
+      <label><input type="radio" name="strategie" value="juste"><span><b>Prix justes</b><small>Au prix que vaut votre logement face à vos comparables.</small></span></label>
+      <label><input type="radio" name="strategie" value="agressif"><span><b>Agressif</b><small>10 % moins cher, pour attirer des clients et remplir plus vite.</small></span></label>
+      <label><input type="radio" name="strategie" value="qualite"><span><b>Qualité</b><small>10 % plus cher, pour viser le haut du marché.</small></span></label>
+    </div>
+    <label class="cp-sejour">Séjour minimum souhaité
+      <input type="number" id="cp-sejour-min" min="1" max="30" step="1" inputmode="numeric"> nuit(s)
+    </label>
+    <p class="cp-meta" id="cp-marche-sejour"></p>
+    <p class="cp-alerte" id="cp-alerte-sejour" hidden></p>
+    <div class="cp-actions">
+      <button type="button" class="cp-btn" id="cp-valider-c">Enregistrer ma stratégie</button>
+      <span id="cp-message-c" aria-live="polite"></span>
+    </div>
+  </div>
 </div>
 </div>
 </div>
@@ -247,6 +272,10 @@
   let ouvert = null
   // Chaque recherche a son numero : seule la derniere s'affiche (review de 995f025).
   let rechercheEnCours = 0
+  // §22.2 : ce que pratique le marche en sejour minimum, et le nombre de
+  // comparables DEJA enregistres (l'etape C s'ouvre a partir de 3).
+  let marcheSejour = null
+  let retenusEnregistres = 0
 
   function dire (id, texte, classe) { const z = el(id); z.textContent = texte || ''; z.className = classe || '' }
   const similaires = () => [...jugements.entries()].filter(([, v]) => POSITIONS.includes(v)).map(([id]) => id)
@@ -286,6 +315,8 @@
     el('cp-valider-b').addEventListener('click', retenir)
     el('cp-modifier').addEventListener('click', () => montrerFormulaire(true))
     el('cp-annuler-a').addEventListener('click', () => montrerFormulaire(false))
+    el('cp-valider-c').addEventListener('click', enregistrerStrategie)
+    el('cp-sejour-min').addEventListener('input', afficherSejour)
     charger()
   }
 
@@ -321,6 +352,8 @@
   async function charger () {
     const j = ++jeton
     profil = null; cartes = []; jugements.clear(); touches.clear(); fondateur = new Set(); ouvert = null
+    marcheSejour = null; retenusEnregistres = 0
+    el('cp-etape-c').hidden = true; dire('cp-message-c', '')
     rechercheEnCours++
     majCompte()
     dire('cp-note', '', 'cp-meta')
@@ -340,6 +373,9 @@
     retenusDu(r.d)
     if (!r.d.profil) return
     profil = r.d.profil
+    marcheSejour = r.d.marche_sejour_min || null
+    retenusEnregistres = (r.d.retenus || []).filter(id => !fondateur.has(String(id))).length
+    afficherStrategie()
     afficherRecap(profil)
     montrerFormulaire(false)
     el('cp-etape-b').hidden = false
@@ -428,6 +464,7 @@
       return
     }
     retenusDu(r.d)
+    if (r.d.marche_sejour_min) { marcheSejour = r.d.marche_sejour_min; afficherSejour() }
     dire('cp-note', r.d.note || '', 'cp-meta')
     afficher(r.d.comparables)
   }
@@ -614,8 +651,14 @@
       const manque = (Array.isArray(c.rares_manquants) ? c.rares_manquants : []).filter(e => NOM_RARE[e])
       const enPlus = (Array.isArray(c.rares_en_plus) ? c.rares_en_plus : []).filter(e => NOM_RARE[e])
       const ecart = manque.length || enPlus.length
-      if (manque.length) f.append(Object.assign(document.createElement('p'), { className: 'cp-alerte', textContent: `Ce bien n’a pas votre ${manque.map(e => NOM_RARE[e]).join(', ')} : il n’a sans doute pas la même valeur.` }))
-      if (enPlus.length) f.append(Object.assign(document.createElement('p'), { className: 'cp-alerte', textContent: `Ce bien a ${enPlus.map(e => AVEC_ARTICLE[e]).join(', ')}, pas le vôtre : il n’a sans doute pas la même valeur.` }))
+      // « n'a pas votre X » ; « n'a ni votre X, ni votre Y » ; « a X et Y ; le
+      // votre n'en a pas » (review de 1e64a2b).
+      const vos = manque.map(e => `votre ${NOM_RARE[e]}`)
+      if (vos.length) f.append(Object.assign(document.createElement('p'), { className: 'cp-alerte',
+        textContent: `Ce bien n’a ${vos.length === 1 ? `pas ${vos[0]}` : `ni ${vos.join(', ni ')}`} : il n’a sans doute pas la même valeur.` }))
+      const siens = enPlus.map(e => AVEC_ARTICLE[e])
+      if (siens.length) f.append(Object.assign(document.createElement('p'), { className: 'cp-alerte',
+        textContent: `Ce bien a ${siens.length === 1 ? siens[0] : `${siens.slice(0, -1).join(', ')} et ${siens[siens.length - 1]}`} ; le vôtre n’en a pas : il n’a sans doute pas la même valeur.` }))
       f.append(Object.assign(document.createElement('p'), { className: 'cp-explication',
         textContent: 'Un comparable offre une prestation de même valeur aux yeux d’un voyageur. « En dessous » et « Supérieur » servent aux petites différences ; s’il manque un équipement qui change la valeur (jacuzzi, piscine, jardin, vue), choisissez « Pas comparable ».' }))
       const v = document.createElement('div'); v.className = 'cp-verdict'
@@ -660,6 +703,46 @@
     majCompte()
     if (!r.ok || !r.d || !Array.isArray(r.d.retenus)) return dire('cp-message-b', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')
     dire('cp-message-b', `Vos ${r.d.retenus.length} comparables sont enregistrés.`, 'cp-ok')
+    retenusEnregistres = r.d.retenus.length
+    afficherStrategie()
+  }
+
+  // ─── ÉTAPE C : la strategie et le sejour minimum (§22.2) ─────────────────
+  function afficherStrategie () {
+    el('cp-etape-c').hidden = !(profil && retenusEnregistres >= MIN)
+    if (el('cp-etape-c').hidden) return
+    for (const r of document.querySelectorAll('input[name="strategie"]')) r.checked = r.value === profil.strategie
+    el('cp-sejour-min').value = Number.isInteger(profil.sejour_min) ? profil.sejour_min : ''
+    afficherSejour()
+  }
+  const pct = (n, t) => `${Math.round(100 * n / t)} %`
+  function afficherSejour () {
+    const m = marcheSejour
+    const t = m && Number.isInteger(m.total) && m.total > 0 ? m.total : 0
+    el('cp-marche-sejour').textContent = t
+      ? `Sur ${t} biens du marché autour du vôtre : ${m.une} acceptent 1 nuit (${pct(m.une, t)}), ${m.deux} imposent 2 nuits (${pct(m.deux, t)}), ${m.trois_plus} en imposent 3 ou plus (${pct(m.trois_plus, t)}).`
+      : 'Le séjour minimum pratiqué par le marché n’est pas encore connu.'
+    // Imposer plusieurs nuits la ou la plupart en acceptent une : on previent.
+    const voulu = Number(el('cp-sejour-min').value)
+    const alerte = t && Number.isInteger(voulu) && voulu >= 2 && m.une / t >= 0.5
+    el('cp-alerte-sejour').hidden = !alerte
+    el('cp-alerte-sejour').textContent = alerte
+      ? `La plupart des biens autour du vôtre acceptent 1 nuit. Imposer ${voulu} nuits peut vous faire perdre des réservations, ou vous obliger à baisser votre prix par nuit.` : ''
+  }
+
+  async function enregistrerStrategie () {
+    const j = jeton
+    const choisie = document.querySelector('input[name="strategie"]:checked')
+    const corps = { action: 'strategie', strategie: choisie ? choisie.value : null, sejour_min: el('cp-sejour-min').value.trim() }
+    el('cp-valider-c').disabled = true
+    dire('cp-message-c', 'Enregistrement…')
+    let r
+    try { r = await appeler('POST', corps) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
+    if (j !== jeton) return
+    el('cp-valider-c').disabled = false
+    if (!r.ok || !r.d || !r.d.profil) return dire('cp-message-c', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')
+    profil = r.d.profil
+    dire('cp-message-c', 'Votre stratégie est enregistrée.', 'cp-ok')
   }
 
   init()

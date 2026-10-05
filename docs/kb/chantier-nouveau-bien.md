@@ -2965,3 +2965,12 @@ Après la validation des comparables, deux questions :
     prix ;
   - l'affichage ;
   - puis la recette, une fois le marché de Toulouse capturé.
+- *Review de 1e64a2b.*
+  - Les positions sont écrites **avant** la réactivation : un comparable
+    réactivé a toujours sa bonne position, même si une écriture échoue au
+    milieu.
+  - La validation reste **non transactionnelle** : dette §20.6.
+  - **Les migrations `comparables-position` et `bien-profil-strategie` se
+    collent AVANT le déploiement.** Sans elles, la page dit « pas encore
+    disponible », jamais une erreur brute, et le script d'étude du fondateur
+    échoue.

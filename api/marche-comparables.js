@@ -24,8 +24,8 @@ const { requirePermission } = require('../lib/require-permission')
 const { creerClient, cleCanonique } = require('../lib/airroi/client')
 const { depotSupabase } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
-const { validerProfil, geocoder, lireProfil, enregistrerProfil } = require('../lib/marche/profil-bien')
-const { reunirEtTrier } = require('../lib/marche/pertinence')
+const { validerProfil, validerStrategie, geocoder, lireProfil, enregistrerProfil, enregistrerStrategie } = require('../lib/marche/profil-bien')
+const { reunirEtTrier, repartitionSejourMin } = require('../lib/marche/pertinence')
 const { rechercheDuProfil, validerChoix, enregistrerChoix, corpsRechercheEquipements, COUTS, QUOTA, MESSAGE_QUOTA } = require('../lib/marche/choix-comparables')
 const { FRAICHEUR_JOURS } = require('../lib/airroi/cout')
 const { comparablesRetenus } = require('../lib/marche/etude')
@@ -41,6 +41,8 @@ const profilPublic = p => (p ? {
   adresse: p.adresse, adresse_trouvee: p.adresse_trouvee, voyageurs: p.voyageurs, chambres: p.chambres,
   pieces: p.pieces, salles_de_bain: p.salles_de_bain, equipements: p.equipements, maj_le: p.maj_le,
   latitude: p.latitude, longitude: p.longitude,
+  // §22.2 : nulles tant que l'hote n'a pas repondu.
+  strategie: p.strategie || null, sejour_min: Number.isInteger(p.sejour_min) ? p.sejour_min : null,
 } : null)
 
 // Une reponse AirROI en cache, FRAICHE seulement (au-dela de sa duree de
@@ -121,6 +123,8 @@ module.exports = async (req, res) => {
         fondateur: lignes.filter(r => r.retenu_par === 'fondateur').map(r => r.listing_id),
         positions: Object.fromEntries(lignes.filter(r => r.position).map(r => [r.listing_id, r.position])),
         comparables: base ? reunirEtTrier(base, complement || [], profil) : null,
+        // §22.2 : ce que pratique le marche en sejour minimum (lu dans les fiches).
+        marche_sejour_min: base ? repartitionSejourMin([...base, ...(complement || [])]) : null,
         // La recherche par equipement reste a faire : la page propose de la lancer.
         complement_a_chercher: !!(base && complement === null) })
     }
@@ -194,8 +198,18 @@ module.exports = async (req, res) => {
       }
       const lignes = await comparablesRetenus(supabase, bienId)
       return res.status(200).json({ etat: 'calcule', comparables: reunirEtTrier(base, complement, profil), note,
+        marche_sejour_min: repartitionSejourMin([...base, ...complement]),
         retenus: lignes.map(x => x.listing_id), fondateur: lignes.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id),
         positions: Object.fromEntries(lignes.filter(x => x.position).map(x => [x.listing_id, x.position])) })
+    }
+
+    // §22.2 : la strategie de prix et le sejour minimum souhaite.
+    if (corps.action === 'strategie') {
+      const v = validerStrategie(corps)
+      if (v.erreur) return res.status(400).json({ error: 'strategie_invalide', message: v.erreur })
+      const ecrit = await enregistrerStrategie(supabase, { propertyId: bienId, strategie: v.strategie, sejourMin: v.sejour_min })
+      if (!ecrit) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })
+      return res.status(200).json({ etat: 'enregistre', profil: profilPublic(await lireProfil(supabase, bienId)) })
     }
 
     if (corps.action === 'retenir') {

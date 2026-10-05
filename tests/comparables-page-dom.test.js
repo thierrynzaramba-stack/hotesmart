@@ -489,7 +489,7 @@ test('LE TEST QUI COMPTE (§22.1) : un equipement rare qui manque ou qui est en 
   const { doc, L } = await monter(serveur({ profil: PROFIL, cache: [c, temoin, ...CARTES.slice(2)] }))
   cliquerPoint(L, c.listing_id)
   const alertes = [...doc.querySelectorAll('#cp-fiche .cp-alerte')].map(a => a.textContent)
-  assert.deepEqual(alertes, ['Ce bien n’a pas votre jacuzzi ou spa : il n’a sans doute pas la même valeur.', 'Ce bien a une piscine, pas le vôtre : il n’a sans doute pas la même valeur.'])
+  assert.deepEqual(alertes, ['Ce bien n’a pas votre jacuzzi ou spa : il n’a sans doute pas la même valeur.', 'Ce bien a une piscine ; le vôtre n’en a pas : il n’a sans doute pas la même valeur.'])
   assert.ok(doc.querySelector('#cp-fiche button[data-verdict="non"]').classList.contains('en-avant'))
   assert.equal(doc.querySelector('#cp-fiche button[data-verdict="equivalent"]').disabled, false, 'un avertissement, pas un blocage')
   cliquerPoint(L, CARTES[1].listing_id)
@@ -506,4 +506,51 @@ test('§22.1 : au retour, chaque retenu revient avec SA position ; un retenu san
   assert.equal(presse(b), 'dessous')
   assert.equal(presse(c), 'equivalent')
   assert.match(doc.getElementById('cp-compte').textContent, /^3 comparables/)
+})
+
+// ─── §22.2 : la strategie et le sejour minimum ──────────────────────────────
+const MARCHE_SEJOUR = { total: 25, une: 15, deux: 6, trois_plus: 4 }
+
+test('LE TEST QUI COMPTE (§22.2) : l etape « strategie » n apparait qu avec 3 comparables enregistres — puis apres la validation', async () => {
+  const sans = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  assert.equal(sans.doc.getElementById('cp-etape-c').hidden, true)
+  for (const i of [0, 1, 2]) { cliquerPoint(sans.L, CARTES[i].listing_id); juger(sans.doc, 'equivalent') }
+  sans.doc.getElementById('cp-valider-b').click()
+  await attendre()
+  assert.equal(sans.doc.getElementById('cp-etape-c').hidden, false)
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const avec = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: ids }))
+  assert.equal(avec.doc.getElementById('cp-etape-c').hidden, false)
+})
+
+test('LE TEST QUI COMPTE (§22.2) : trois strategies expliquees, le sejour minimum, ce que pratique le marche, et l envoi', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const s = serveur({ profil: PROFIL, cache: CARTES, retenus: ids })
+  const { doc, appels } = await monter(({ methode, corps, url }) => {
+    if (methode === 'GET') return reponse({ etat: 'calcule', profil: { ...PROFIL, strategie: 'qualite', sejour_min: 1 }, retenus: ids, fondateur: [], comparables: CARTES, marche_sejour_min: MARCHE_SEJOUR })
+    if (corps.action === 'strategie') return reponse({ etat: 'enregistre', profil: { ...PROFIL, strategie: corps.strategie, sejour_min: Number(corps.sejour_min) } })
+    return s({ methode, corps, url })
+  })
+  const c = doc.getElementById('cp-etape-c')
+  assert.match(c.textContent, /Prix justes[\s\S]*Agressif[\s\S]*10 % moins cher[\s\S]*Qualité[\s\S]*10 % plus cher/)
+  assert.equal(doc.querySelector('input[name="strategie"][value="qualite"]').checked, true, 'la strategie enregistree revient')
+  assert.equal(doc.getElementById('cp-sejour-min').value, '1')
+  assert.equal(doc.getElementById('cp-marche-sejour').textContent, 'Sur 25 biens du marché autour du vôtre : 15 acceptent 1 nuit (60 %), 6 imposent 2 nuits (24 %), 4 en imposent 3 ou plus (16 %).')
+  assert.equal(doc.getElementById('cp-alerte-sejour').hidden, true)
+  doc.querySelector('input[name="strategie"][value="agressif"]').checked = true
+  doc.getElementById('cp-sejour-min').value = '2'
+  doc.getElementById('cp-sejour-min').dispatchEvent(new doc.defaultView.Event('input'))
+  assert.equal(doc.getElementById('cp-alerte-sejour').hidden, false)
+  assert.match(doc.getElementById('cp-alerte-sejour').textContent, /La plupart des biens autour du vôtre acceptent 1 nuit\. Imposer 2 nuits peut vous faire perdre des réservations/)
+  doc.getElementById('cp-valider-c').click()
+  await attendre()
+  assert.deepEqual(posts(appels, 'strategie')[0].corps, { action: 'strategie', strategie: 'agressif', sejour_min: '2' })
+  assert.match(doc.getElementById('cp-message-c').textContent, /Votre stratégie est enregistrée/)
+})
+
+test('§22.2 : quand la plupart des biens imposent deux nuits, demander 2 nuits ne declenche pas d avertissement', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const { doc } = await monter(({ methode }) => (methode === 'GET'
+    ? reponse({ etat: 'calcule', profil: { ...PROFIL, sejour_min: 2 }, retenus: ids, fondateur: [], comparables: CARTES, marche_sejour_min: { total: 25, une: 5, deux: 11, trois_plus: 9 } }) : reponse({}, 400)))
+  assert.equal(doc.getElementById('cp-alerte-sejour').hidden, true)
 })
