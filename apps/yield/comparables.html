@@ -97,6 +97,7 @@
       #cp-map { height: 60vh; }
       .cp-tous-eq ul { columns: 1; }
       .cp-photos img { height: 120px; }
+      .cp-prix td, .cp-prix th { padding-left: 4px; padding-right: 4px; }
     }
   </style>
 </head>
@@ -848,7 +849,8 @@
       const td = document.createElement('td')
       if (!c || c.statut !== 'calcule') { td.className = 'non-calc'; td.textContent = c && c.motif ? `non calculable : ${c.motif}` : 'non calculable'; return td }
       td.append(Object.assign(document.createElement('span'), { className: 'prix', textContent: EUROS(c.prix) }),
-        Object.assign(document.createElement('span'), { className: 'cp-fourchette', textContent: `marché ${EUROS(c.fourchette.bas)} à ${EUROS(c.fourchette.haut)}` }))
+        // Espaces insecables : la fourchette ne se coupe pas sur telephone.
+        Object.assign(document.createElement('span'), { className: 'cp-fourchette', textContent: `${c.fourchette.bas}\u00a0–\u00a0${c.fourchette.haut}\u00a0€` }))
       return td
     }
     for (const n of NIVEAUX_PRIX) {
@@ -860,10 +862,10 @@
     t.append(tete, corps)
     zone.append(t)
     const dit = (texte, classe = 'cp-meta') => zone.append(Object.assign(document.createElement('p'), { className: classe, textContent: texte }))
-    dit('Week-end : les nuits du vendredi et du samedi. Prix mesurés sur les 6 prochains mois.')
+    dit('Sous chaque prix : la fourchette des prix de vos comparables dans cette case. Week-end : les nuits du vendredi et du samedi. Prix mesurés sur les 6 prochains mois.')
     dit(r.niveaux_source === 'marche'
       ? 'Vos comparables changent peu de prix au fil des saisons : les niveaux viennent du calendrier du marché de votre ville.'
-      : `Les niveaux viennent de la saison de vos comparables : leurs prix varient de ${r.amplitude} % entre leurs dates calmes et leurs dates fortes.`)
+      : `Les niveaux viennent de la saison de vos comparables : leurs prix varient de ${String(r.amplitude).replace('.', ',')} % entre leurs dates calmes et leurs dates fortes.`)
     if (r.ancres) dit(`Prix habituel de semaine de vos ${pluriel(r.hotes, 'hôte', 'hôtes')}, par rang : agressif ${EUROS(r.ancres.agressif)}, prix marché ${EUROS(r.ancres.juste)}, haut de gamme ${EUROS(r.ancres.qualite)}. Votre stratégie : ${NOM_STRATEGIE[r.strategie] || ''}.`)
     // Un ecart faible entre strategies est DIT, jamais maquille.
     if (r.serre) {

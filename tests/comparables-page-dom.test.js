@@ -619,7 +619,7 @@ test('REVIEW : une nouvelle validation des comparables n efface pas une strategi
 const IDS3 = CARTES.slice(0, 3).map(c => c.listing_id)
 const kase = (niveau, type, prix, bas, haut) => ({ niveau, type, statut: 'calcule', forme: 1, fourchette: { bas, haut }, hotes: 5, strategies: { agressif: prix - 20, juste: prix, qualite: prix + 5 }, prix })
 const PRIX_CALCULE = { etat: 'calcule', a_capturer: 0, note: null, prix: { statut: 'calcule', strategie: 'juste', hotes: 7, comparables: 9,
-  niveaux_source: 'segment', amplitude: 20, position: 0.14, ancres: { agressif: 140, juste: 158, qualite: 165 },
+  niveaux_source: 'segment', amplitude: 20.2, position: 0.14, ancres: { agressif: 140, juste: 158, qualite: 165 },
   cases: [kase('creux', 'semaine', 157, 65, 281), kase('creux', 'weekend', 173, 81, 308), kase('modere', 'semaine', 158, 70, 281), kase('modere', 'weekend', 187, 97, 342),
     kase('favorable', 'semaine', 158, 73, 281), kase('favorable', 'weekend', 192, 98, 342), kase('pic', 'semaine', 169, 73, 301),
     { niveau: 'pic', type: 'weekend', statut: 'non_calculable', motif: '2 hôtes avec des prix dans cette case (il en faut 3)' }],
@@ -635,15 +635,16 @@ test('LE TEST QUI COMPTE (§22.11) : les 8 cases — semaine et week-end par niv
   assert.equal(doc.getElementById('cp-etape-d').hidden, false)
   assert.deepEqual([...doc.querySelectorAll('#cp-zone-prix thead th')].map(x => x.textContent), ['Niveau', 'Semaine', 'Week-end'])
   const lignes = [...doc.querySelectorAll('#cp-zone-prix tbody tr')].map(tr => [...tr.children].map(td => td.textContent))
+  const n = '\u00a0'
   assert.deepEqual(lignes, [
-    ['Creux', '157 €marché 65 € à 281 €', '173 €marché 81 € à 308 €'],
-    ['Modéré', '158 €marché 70 € à 281 €', '187 €marché 97 € à 342 €'],
-    ['Favorable', '158 €marché 73 € à 281 €', '192 €marché 98 € à 342 €'],
-    ['Pic', '169 €marché 73 € à 301 €', 'non calculable : 2 hôtes avec des prix dans cette case (il en faut 3)']])
+    ['Creux', `157 €65${n}–${n}281${n}€`, `173 €81${n}–${n}308${n}€`],
+    ['Modéré', `158 €70${n}–${n}281${n}€`, `187 €97${n}–${n}342${n}€`],
+    ['Favorable', `158 €73${n}–${n}281${n}€`, `192 €98${n}–${n}342${n}€`],
+    ['Pic', `169 €73${n}–${n}301${n}€`, 'non calculable : 2 hôtes avec des prix dans cette case (il en faut 3)']])
   const z = doc.getElementById('cp-zone-prix').textContent
   assert.doesNotMatch(z, /un niveau de prix vaut/, 'le cran a disparu')
-  assert.match(z, /Week-end : les nuits du vendredi et du samedi\. Prix mesurés sur les 6 prochains mois\./)
-  assert.match(z, /Les niveaux viennent de la saison de vos comparables : leurs prix varient de 20 %/)
+  assert.match(z, /Sous chaque prix : la fourchette des prix de vos comparables dans cette case\. Week-end : les nuits du vendredi et du samedi\. Prix mesurés sur les 6 prochains mois\./)
+  assert.match(z, /Les niveaux viennent de la saison de vos comparables : leurs prix varient de 20,2 %/)
   assert.match(z, /de vos 7 hôtes, par rang : agressif 140 €, prix marché 158 €, haut de gamme 165 €\. Votre stratégie : prix marché\./)
   assert.match(z, /ceux qui imposent 2 nuits ou plus vendent la nuit 10 % moins cher/)
 })
@@ -718,4 +719,8 @@ test('REVIEW (428fe8c) : d anciens comparables qui ne sont plus proposes — l h
     ? reponse({ etat: 'calcule', profil: PROFIL, retenus: [], fondateur: [], comparables: CARTES, encore: false, retenus_hors_liste: 3 })
     : reponse({}, 400))
   assert.match(avec.doc.getElementById('cp-note').textContent, /3 de vos anciens comparables ne sont plus proposés \(bien inactif, ou sans vos équipements\) : ils ne comptent plus/)
+})
+
+test('§22.11, telephone : la fourchette ne se coupe pas (espaces insecables) et les cellules se resserrent sous 640 px', () => {
+  assert.match(HTML, /@media \(max-width: 640px\) \{[\s\S]*\.cp-prix td, \.cp-prix th \{ padding-left: 4px; padding-right: 4px; \}/)
 })
