@@ -145,3 +145,29 @@ test('REVIEW : un service d adresses qui ne repond jamais est abandonne au delai
   const r = await pb.geocoder('x', { fetch: jamais, delaiMs: 20 })
   assert.match(r.erreur, /ne répond pas/)
 })
+
+// ─── §22.2 : la strategie et le sejour minimum ──────────────────────────────
+test('LE TEST QUI COMPTE (§22.2) : trois strategies (juste, agressif -10 %, qualite +10 %), un sejour minimum de 1 a 30 nuits', () => {
+  assert.deepEqual(pb.STRATEGIES, { juste: 1, agressif: 0.9, qualite: 1.1 })
+  assert.deepEqual(pb.validerStrategie({ strategie: 'agressif', sejour_min: '2' }), { strategie: 'agressif', sejour_min: 2 })
+  for (const mauvais of [{ strategie: 'luxe', sejour_min: 2 }, { strategie: 'juste', sejour_min: 0 }, { strategie: 'juste', sejour_min: 31 }, { strategie: 'juste', sejour_min: '1e1' }, { strategie: 'juste' }, {}]) {
+    assert.ok(pb.validerStrategie(mauvais).erreur, JSON.stringify(mauvais))
+  }
+})
+
+test('§22.2 : l enregistrement n ecrit QUE la strategie et le sejour minimum, sur le profil existant ; sans profil, il le dit', async () => {
+  const appels = []
+  const sb = lignes => ({ from: t => ({ update: maj => ({ eq: (k, v) => ({ select: async () => { appels.push({ t, maj, k, v }); return { data: lignes, error: null } } }) }) }) })
+  assert.equal(await pb.enregistrerStrategie(sb([{ property_id: 'P' }]), { propertyId: 'P', strategie: 'qualite', sejourMin: 3 }), true)
+  assert.equal(appels[0].t, 'bien_profil')
+  assert.deepEqual(Object.keys(appels[0].maj).sort(), ['maj_le', 'sejour_min', 'strategie'])
+  assert.deepEqual([appels[0].k, appels[0].v], ['property_id', 'P'])
+  assert.equal(await pb.enregistrerStrategie(sb([]), { propertyId: 'P', strategie: 'juste', sejourMin: 1 }), false)
+})
+
+test('§22.2 : la migration — deux colonnes nullables, bornees, rejouable', () => {
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'migrations', '2026-10-05-bien-profil-strategie.sql'), 'utf8')
+  assert.ok(sql.split('\n').every(l => l.length < 60))
+  assert.match(sql, /add column if not exists strategie text\s+check \(strategie in \(\s+'juste', 'agressif', 'qualite'\)\)/)
+  assert.match(sql, /add column if not exists sejour_min smallint\s+check \(sejour_min between 1 and 30\)/)
+})

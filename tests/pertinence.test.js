@@ -31,7 +31,8 @@ function fiche ({ lat = 43.0636, lng = 0.1476, guests = 2, bedrooms = 1, bloques
 }
 const ids = cartes => cartes.map(c => c.nom)
 // Une carte ne porte AUCUNE cle d'argent, a aucun niveau, ni de montant dans un texte.
-const CLES_ARGENT = /^(ttm_|l90d_)|rate|revenue|occupancy|revpar|fee|price|prix|currency$/i
+// Mots ENTIERS d'une cle (« strategie » contient « rate » sans en etre une).
+const CLES_ARGENT = /^(ttm_|l90d_)|(^|_)(rate|revenue|occupancy|revpar|fee|price|prix|currency)(_|$)/i
 function clesArgent (o, chemin = '') {
   if (Array.isArray(o)) return o.flatMap((x, i) => clesArgent(x, `${chemin}[${i}]`))
   if (!o || typeof o !== 'object') return []
@@ -43,7 +44,7 @@ test('LE TEST QUI COMPTE : une carte n a AUCUN prix, revenu ou occupation — li
   const cartes = p.trierComparables(COMPS, MOI)
   assert.equal(cartes.length, 25)
   for (const c of cartes) {
-    assert.deepEqual(Object.keys(c).sort(), ['a_vos_equipements', 'chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
+    assert.deepEqual(Object.keys(c).sort(), ['a_vos_equipements', 'chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'rares_en_plus', 'rares_manquants', 'ressemblance', 'source', 'voyageurs'])
   }
   assert.deepEqual(clesArgent(cartes), [], 'aucune cle d argent')
   assert.ok(!/€|\$\s?\d/.test(JSON.stringify(cartes)), 'aucun montant, meme dans la description')
@@ -285,4 +286,18 @@ test('REVIEW : « a vos equipements » est calcule par le serveur, quelle que so
   const de = nom => r.find(c => c.nom === nom)
   assert.equal(de(base.listing_info.listing_name).a_vos_equipements, true, 'un bien de la liste de BASE avec jacuzzi')
   assert.equal(de(sans.listing_info.listing_name).a_vos_equipements, false, 'le parking n est pas un equipement rare')
+})
+
+test('§22.1 : les equipements RARES qui different, dans les deux sens', () => {
+  const f = fiche({ amenities: ['Pool', 'Free parking on premises'] })
+  const c = p.trierComparables([f], { ...MOI, equipements: ['spa', 'parking'] })[0]
+  assert.deepEqual(c.rares_manquants, ['spa'], 'l hote a un jacuzzi, pas ce bien')
+  assert.deepEqual(c.rares_en_plus, ['piscine'], 'ce bien a une piscine, pas l hote')
+})
+
+test('§22.2 : la repartition du marche par sejour minimum — 1, 2, 3 nuits ou plus ; doublon et valeur illisible ignores', () => {
+  const avec = (m, id) => { const f = fiche(); f.booking_settings = { min_nights: m }; if (id) f.listing_info.listing_id = id; return f }
+  const r = p.repartitionSejourMin([avec(1), avec(1), avec(2), avec(3), avec(7), avec('2'), avec(null), avec(2, '5555'), avec(2, '5555')])
+  assert.deepEqual(r, { total: 6, une: 2, deux: 2, trois_plus: 2 })
+  assert.deepEqual(p.repartitionSejourMin(COMPS), { total: 25, une: 5, deux: 11, trois_plus: 9 }, 'La bulle, donnees reelles')
 })

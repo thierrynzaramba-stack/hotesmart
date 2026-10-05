@@ -2833,3 +2833,248 @@ jacuzzi ou sauna sur 80 dans le rayon, 0,50 $. Ils étaient sur la carte, mais
   masqué. Une note de 0 est « pas de note ». « À vos équipements » est calculé
   par le serveur (`a_vos_equipements`), à partir d'une seule liste des
   équipements rares.
+
+## 22. Se positionner : la position par comparable, la stratégie, le séjour minimum, les prix de départ (5 octobre 2026) — SPEC
+
+Décisions de Thierry du 5 octobre 2026. Staging uniquement. Cette étape
+**remplace** « similaire / non similaire » de §21.1 et prolonge le choix des
+comparables jusqu'aux prix de départ.
+
+### 22.1 Un comparable a la même VALEUR PERÇUE
+
+**Définition** (Thierry) : un comparable propose une prestation de **valeur
+perçue équivalente** pour un voyageur. « En dessous » et « supérieur » ne servent
+qu'aux **petites nuances**, par exemple l'emplacement, la décoration ou la
+literie. **Un écart de valeur important veut dire « Pas comparable »**, jamais
+« supérieur » : un studio sans jacuzzi n'est pas le comparable d'un studio avec
+jacuzzi.
+
+- **Quatre boutons dans la fiche d'un bien** :
+
+  | Bouton | Ce que dit l'hôte | Couleur du point |
+  |---|---|---|
+  | « Le mien est en dessous » | position `dessous`, c'est un comparable | vert |
+  | « Équivalent » | position `equivalent`, c'est un comparable | vert |
+  | « Le mien est supérieur » | position `dessus`, c'est un comparable | vert |
+  | « Pas comparable » | non enregistré | gris |
+
+  Un second clic sur le même bouton annule. Il faut **au moins 3 comparables**.
+- **L'explication**, au-dessus des boutons : « Un comparable offre une
+  prestation de même valeur aux yeux d'un voyageur. "En dessous" et
+  "Supérieur" servent aux petites différences ; s'il manque un équipement qui
+  change la valeur (jacuzzi, piscine, jardin, vue), choisissez "Pas
+  comparable". »
+- **Un avertissement, pas un blocage** : la fiche Airbnb est parfois
+  incomplète.
+  - Si le bien n'a pas l'un des équipements rares de l'hôte : « Ce bien n'a pas
+    votre jacuzzi : il n'a sans doute pas la même valeur. »
+  - Dans l'autre sens : « Ce bien a un jacuzzi, pas le vôtre : il n'a sans doute
+    pas la même valeur. »
+  - Dans les deux cas, « Pas comparable » est mis en avant.
+  - Le serveur calcule `rares_manquants` et `rares_en_plus` pour chaque carte.
+- **Stockage** : `comparables_retenus.position`
+  (`dessous` | `equivalent` | `dessus`). Elle est nulle pour un retenu de
+  l'équipe, qui est compté comme « équivalent ».
+
+### 22.2 La stratégie de prix et le séjour minimum
+
+Après la validation des comparables, deux questions :
+
+- **La stratégie** :
+  - « Prix justes » : au positionnement ;
+  - « Agressif » : **10 % en dessous**, pour attirer des clients ;
+  - « Qualité » : **10 % au-dessus**, pour viser le haut du marché.
+
+  *Validé par Thierry.*
+- **Le séjour minimum souhaité** : de 1 à 30 nuits. En regard, ce que pratique
+  le marché :
+  - la part des biens de la liste qui acceptent 1 nuit, 2 nuits, 3 nuits ou
+    plus, lue dans les fiches, sans coût ;
+  - **l'effet sur le prix** : le prix médian par nuit des comparables qui
+    acceptent 1 nuit, comparé à celui des comparables qui en imposent 2 ou
+    plus. On ne l'affiche qu'avec **au moins 2 comparables de chaque côté** ;
+    sinon, « pas assez de comparables pour mesurer l'effet ».
+- **Stockage** : `bien_profil.strategie` (`juste` | `agressif` | `qualite`) et
+  `bien_profil.sejour_min`.
+
+### 22.3 Les prix de départ par niveau
+
+- **Source** : le calendrier de chaque comparable retenu,
+  `GET /listings/live/calendar`, à 0,10 $ par comparable, avec 90 jours de
+  cache. Il donne le prix par nuit (hors frais de ménage), la disponibilité et le
+  séjour minimum, sur 12 mois. **Ce sont les prix affichés des annonces, jamais
+  la recommandation d'AirROI.** *Validé par Thierry.*
+- **Les niveaux** : ceux du calendrier de température AirROI **du marché du
+  bien**. Chaque jour des 12 mois a un niveau :
+
+  | Niveau AirROI | Niveau YieldFlow |
+  |---|---|
+  | Creux | Base |
+  | Modéré | Moyen |
+  | Favorable | Haut |
+  | Pic | Très haut ou Exceptionnel |
+
+- **Le calcul**, une fonction pure, pour chaque niveau :
+  1. Pour chaque comparable, le prix médian de ses nuits de ce niveau
+     (`rate` non nul, nuit réservée ou non).
+  2. Ce prix est ramené au bien de l'hôte selon sa position : en dessous de lui,
+    on monte de 10 % ; supérieur, on baisse de 10 % ; équivalent, on garde. *Les
+     ±10 % sont un choix de développement, à confirmer par Thierry.*
+  3. On en tire le **milieu** (médiane des prix ramenés), la **fourchette
+     basse** (premier quartile) et la **fourchette haute** (troisième
+     quartile).
+  4. La **stratégie** s'applique au milieu : ×0,90, ×1 ou ×1,10.
+  5. Le prix est arrondi aux 5 € supérieurs.
+
+  Il faut au moins 3 comparables avec un prix pour ce niveau ; sinon, « non
+  calculable ».
+- **Rien n'est écrit dans YieldFlow** à cette étape : les prix sont calculés et
+  affichés, et les choix de l'hôte (positions, stratégie, séjour minimum) sont
+  enregistrés. Le passage dans la grille YieldFlow viendra à l'étape suivante,
+  avec une confirmation de l'hôte. *Validé par Thierry.*
+
+### 22.4 Le marché du bien suit l'adresse de son profil
+
+- Le marché d'un bien est celui de **l'adresse de son profil**. Exemple vécu en
+  recette : un logement décrit à Toulouse, mais relié au marché de Bagnères,
+  aurait eu les saisons de Bagnères.
+- Tant que le marché du profil n'a pas son calendrier de température, les prix
+  par niveau sont « non calculables », et la page le dit.
+- Capturer le calendrier d'un nouveau marché (0,10 $) et relier le bien se
+  font par script, avec l'accord du fondateur. Ce sera automatisé dans un lot
+  suivant.
+
+### 22.5 Le quota
+
+- Les calendriers des comparables passent par la **même réservation atomique**
+  (0,10 $ chacun, sous le même budget de 5 $ par mois), avec une nature
+  distincte. Leur plafond : **30 calendriers par bien sur 90 jours**. Les
+  plafonds de recherche par jour ne les comptent pas.
+- Une migration ajoute `nature` (`recherche` | `calendrier`) à
+  `comparables_recherches` et le plafond des calendriers à la fonction.
+
+### 22.6 Les lots
+
+- **P1** : les quatre boutons, l'explication, les avertissements, la position
+  enregistrée (migration `comparables_retenus.position`).
+- **P2** : la stratégie et le séjour minimum (migration `bien_profil`), avec la
+  part du marché par séjour minimum.
+- **P3** :
+  - `GET /listings/live/calendar` dans le client, avec son quota (migration) ;
+  - le calcul pur des prix par niveau et de l'effet du séjour minimum sur le
+    prix ;
+  - l'affichage ;
+  - puis la recette, une fois le marché de Toulouse capturé.
+- *Review de 1e64a2b.*
+  - Les positions sont écrites **avant** la réactivation : un comparable
+    réactivé a toujours sa bonne position, même si une écriture échoue au
+    milieu.
+  - La validation reste **non transactionnelle** : dette §20.6.
+  - **Les migrations `comparables-position` et `bien-profil-strategie` se
+    collent AVANT le déploiement.** Sans elles, la page dit « pas encore
+    disponible », jamais une erreur brute, et le script d'étude du fondateur
+    échoue.
+
+### 22.7 Les prix de départ : la cohérence des comparables et le cran de prix (5 octobre 2026) — REMPLACE le calcul de §22.3
+
+Décisions de Thierry du 5 octobre 2026. La source reste celle de §22.3 : le
+calendrier de chaque comparable sur 12 mois, et les niveaux du marché de ce
+bien.
+
+**Les trois stratégies** (libellés à l'écran) :
+- « Prix marché » (`juste`) ;
+- « Agressif » (`agressif`) ;
+- « Haut de gamme » (`qualite`).
+
+Le « 10 % » de §22.2 est **remplacé** par le cran de prix mesuré ci-dessous.
+
+1. **La note de cohérence d'un comparable, qui est son POIDS.** Le comparable
+   suit-il la tendance du marché ?
+   - Calcul : la corrélation de rang (Spearman) entre son prix par nuit et
+     l'écart du marché (`ecart` du calendrier de température), jour par jour,
+     sur les nuits où il a un prix.
+   - La note vaut cette corrélation, bornée de 0 à 1 ; une corrélation négative
+     donne 0.
+   - Il faut au moins 30 nuits avec un prix ; sinon, la note n'est pas
+     calculable et vaut 0.
+   - Le poids utilisé est le plus grand de la note et de 0,1 : un comparable
+     qui ne suit pas le marché compte peu, mais il compte.
+   - La fiche du bien l'affiche :
+
+     | Note | Mention |
+     |---|---|
+     | à partir de 0,5 | « suit bien le marché » |
+     | de 0,2 à 0,5 | « suit peu le marché » |
+     | sous 0,2 | « ne suit pas le marché » |
+
+2. **Le cran de prix.** Pour chaque comparable, on prend son prix médian à
+   chaque niveau (Creux, Modéré, Favorable, Pic), puis l'écart moyen d'un
+   niveau au suivant, parmi les écarts mesurés. Le cran **E** est la moyenne de
+   ces écarts, pondérée par les notes : c'est ce que vaut « un niveau de prix »
+   sur ce marché.
+3. **Le prix de départ, à chaque niveau L.**
+   - On prend le prix médian p_c(L) de chaque comparable c qui a au moins 3
+     nuits à ce niveau, et il faut au moins 3 comparables.
+   - **Prix marché** : la moyenne pondérée des p_c(L), chaque comparable
+     décalé selon la position de l'hôte. Un comparable dont l'hôte est en
+     dessous compte pour p_c(L) − E/2 ; un équivalent, pour p_c(L) ; un
+     comparable que l'hôte dépasse, pour p_c(L) + E/2. Un retenu de l'équipe
+     compte comme équivalent.
+   - **Agressif** : le prix marché − E.
+   - **Haut de gamme** : le plus haut p_c(L) parmi les comparables dont la
+     note atteint au moins 0,5 (à défaut, parmi tous), + E. *Choix de
+     développement, à confirmer.*
+   - Le prix est arrondi aux 5 € supérieurs.
+   - La **fourchette du marché** affichée va du plus bas au plus haut p_c(L).
+4. **L'effet du séjour minimum sur le prix.** On compare le prix médian par
+   nuit des comparables qui acceptent 1 nuit à celui des comparables qui en
+   imposent 2 ou plus, d'après le séjour minimum médian de leur calendrier. On
+   ne l'affiche qu'avec au moins 2 comparables de chaque côté.
+5. **Le marché doit être celui de l'adresse.** Si la commune du marché relié au
+   bien n'apparaît pas dans l'adresse de son profil, les prix sont « non
+   calculables » : « le marché de votre adresse n'est pas encore disponible ».
+   Il n'y a ni paiement ni calcul faux.
+
+### 22.8 Review de f37b7da (5 octobre 2026)
+
+- **Sécurité.** Une réservation n'est **rendue que si rien n'a été facturé**.
+  Le client AirROI marque chaque erreur (`coutLibere`) :
+  - **coût libéré**, la réservation est rendue : refus avant l'appel, ou
+    réponse d'erreur du serveur ;
+  - **appel peut-être facturé**, la réservation est gardée : coupure réseau,
+    réponse illisible ou inattendue. Le quota borne alors les nouveaux essais.
+  - Cela vaut pour la liste de base, la recherche par équipement et les
+    calendriers.
+- **Le calendrier d'une annonce** n'est rangé que s'il porte au moins une nuit
+  avec un prix numérique. **Avant la recette, il faut capturer une vraie
+  réponse** : le format `rate`, `min_nights`, `date` vient de la documentation
+  AirROI et n'a encore jamais été vu en réel.
+- **Calcul.**
+  - Un cran nul ou négatif rend le niveau « non calculable » ; sinon, les
+    stratégies s'inverseraient.
+  - L'arrondi se fait au centime avant les 5 € supérieurs.
+  - Un prix calculé non positif n'est pas un prix.
+- **Route.**
+  - Seules les nuits à venir comptent. Le calendrier du marché doit couvrir les
+    300 prochains jours ; sinon, « trop ancien ».
+  - La commune du marché doit figurer **en mots entiers** dans l'adresse.
+  - Le GET calcule avec les calendriers en cache et propose de relever les
+    autres : il dit la même chose que le POST.
+  - Une panne du calcul des prix au GET n'empêche pas les comparables.
+  - Les calendriers se lisent en une requête et se relèvent quatre à la fois.
+- **Couplage du déploiement.** La migration `…-nature.sql` et le code partent
+  **ensemble**. Chacun sans l'autre rend la page « pas encore disponible »,
+  sans paiement.
+- **Décisions de budget, à trancher par Thierry avant la production** :
+  - **Budget SQL des hôtes** : 5 $ par mois, toutes recherches et tous
+    calendriers confondus. Cela couvre environ 2 biens de 25 comparables par
+    mois, pour toute la plateforme.
+  - **Garde-fou du client** : 3 $ par bien sur 90 jours. Il refuse les derniers
+    calendriers d'un bien à 25 comparables (0,60 $ de recherches + 2,50 $ de
+    calendriers).
+  - Les comparables de l'équipe sont payés sur le quota de l'hôte.
+- **Dettes mineures notées** :
+  - le prix par nuit utilisé pour l'effet du séjour minimum est la médiane des
+    médianes par niveau ;
+  - deux POST « prix » simultanés peuvent payer deux fois le même calendrier
+    (coût borné par le quota).

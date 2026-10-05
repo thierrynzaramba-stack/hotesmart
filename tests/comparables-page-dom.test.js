@@ -82,7 +82,7 @@ function serveur ({ profil = null, cache = null, retenus = [], fondateur = [], a
     if (methode === 'GET') return reponse({ etat: 'calcule', profil, retenus, fondateur, comparables: cache, complement_a_chercher: aChercher })
     if (corps.action === 'profil') return reponse({ etat: 'enregistre', profil: { ...PROFIL, adresse: corps.adresse } })
     if (corps.action === 'chercher') return chercher(corps)
-    if (corps.action === 'retenir') return reponse({ etat: 'enregistre', retenus: corps.listing_ids })
+    if (corps.action === 'retenir') return reponse({ etat: 'enregistre', retenus: corps.choix.map(c => c.listing_id) })
     return reponse({}, 400)
   }
 }
@@ -172,9 +172,9 @@ test('LE TEST QUI COMPTE (§21.1) : « Logement similaire » met le point en VER
   const point = () => pointDe(L, c.listing_id)
   assert.equal(point().style.fillColor, '#2A5E86')
   cliquerPoint(L, c.listing_id)
-  juger(doc, 'similaire')
+  juger(doc, 'equivalent')
   assert.equal(point().style.fillColor, '#1F8A4C')
-  assert.equal(doc.querySelector('#cp-fiche button[data-verdict="similaire"]').getAttribute('aria-pressed'), 'true')
+  assert.equal(doc.querySelector('#cp-fiche button[data-verdict="equivalent"]').getAttribute('aria-pressed'), 'true')
   juger(doc, 'non')
   assert.equal(point().style.fillColor, '#5F6368')
   juger(doc, 'non')
@@ -183,16 +183,16 @@ test('LE TEST QUI COMPTE (§21.1) : « Logement similaire » met le point en VER
 
 test('LE TEST QUI COMPTE : « Valider mes comparables » grise sous 3 SIMILAIRES ; n envoie que les similaires (jamais les non similaires)', async () => {
   const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
-  for (const i of [0, 2, 4]) { cliquerPoint(L, CARTES[i].listing_id); juger(doc, 'similaire') }
+  for (const i of [0, 2, 4]) { cliquerPoint(L, CARTES[i].listing_id); juger(doc, 'equivalent') }
   cliquerPoint(L, CARTES[5].listing_id); juger(doc, 'non')
   assert.equal(doc.getElementById('cp-valider-b').disabled, false)
-  cliquerPoint(L, CARTES[4].listing_id); juger(doc, 'similaire')
+  cliquerPoint(L, CARTES[4].listing_id); juger(doc, 'equivalent')
   assert.equal(doc.getElementById('cp-valider-b').disabled, true)
-  assert.match(doc.getElementById('cp-compte').textContent, /2 similaires — encore 1 au moins/)
-  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'similaire')
+  assert.match(doc.getElementById('cp-compte').textContent, /2 comparables — encore 1 au moins/)
+  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'equivalent')
   doc.getElementById('cp-valider-b').click()
   await attendre()
-  assert.deepEqual(posts(appels, 'retenir')[0].corps.listing_ids.sort(), [0, 2, 6].map(i => CARTES[i].listing_id).sort())
+  assert.deepEqual(posts(appels, 'retenir')[0].corps.choix.map(c => c.listing_id).sort(), [0, 2, 6].map(i => CARTES[i].listing_id).sort())
   assert.match(doc.getElementById('cp-message-b').textContent, /Vos 3 comparables sont enregistrés/)
 })
 
@@ -276,7 +276,7 @@ test('changer de logement pendant la recherche : la liste du logement precedent 
   await attendre()
   assert.ok(!/ANCIEN-LOGEMENT/.test(doc.body.textContent))
   assert.equal(visibles(L).filter(p => p.tooltip !== 'Votre logement').length, CARTES.length)
-  assert.match(doc.getElementById('cp-compte').textContent, /^0 similaire/)
+  assert.match(doc.getElementById('cp-compte').textContent, /^0 comparable/)
 })
 
 test('Leaflet charge avec son empreinte d integrite ; la page n appelle que sa route ; aucun innerHTML dans le script', () => {
@@ -299,17 +299,17 @@ test('LE TEST QUI COMPTE (review 1) : un « Non similaire » de l hote n est pas
   const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: [a, b, c], aChercher: true,
     chercher: () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [a, b, c] }) }))
   cliquerPoint(L, a); juger(doc, 'non')
-  cliquerPoint(L, b); juger(doc, 'similaire')   // second clic : annule
+  cliquerPoint(L, b); juger(doc, 'equivalent')   // second clic : annule
   doc.getElementById('cp-chercher-complement').click()
   await attendre()
   assert.equal(pointDe(L, a).style.fillColor, '#5F6368', 'toujours non similaire')
   assert.equal(pointDe(L, b).style.fillColor, '#2A5E86', 'toujours annule')
   assert.equal(pointDe(L, c).style.fillColor, '#1F8A4C', 'le retenu non touche reste similaire')
-  cliquerPoint(L, CARTES[5].listing_id); juger(doc, 'similaire')
-  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'similaire')
+  cliquerPoint(L, CARTES[5].listing_id); juger(doc, 'equivalent')
+  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'equivalent')
   doc.getElementById('cp-valider-b').click()
   await attendre()
-  const envoyes = posts(appels, 'retenir')[0].corps.listing_ids
+  const envoyes = posts(appels, 'retenir')[0].corps.choix.map(c => c.listing_id)
   assert.ok(!envoyes.includes(a) && !envoyes.includes(b))
 })
 
@@ -320,8 +320,8 @@ test('REVIEW (2) : la carte isole ses couches — les controles de Leaflet ne pa
 test('REVIEW (3) : apres un jugement, le focus revient sur le meme bouton', async () => {
   const { doc, L } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
   cliquerPoint(L, CARTES[0].listing_id)
-  juger(doc, 'similaire')
-  assert.equal(doc.activeElement && doc.activeElement.dataset.verdict, 'similaire')
+  juger(doc, 'equivalent')
+  assert.equal(doc.activeElement && doc.activeElement.dataset.verdict, 'equivalent')
 })
 
 test('REVIEW (4) : sans Leaflet, apres une recherche, le message de carte RESTE ; la note d un logement ne passe pas au suivant', async () => {
@@ -344,7 +344,7 @@ test('REVIEW (5) : sur telephone, la fiche ouverte est amenee a l ecran ; pas ap
   Object.defineProperty(w, 'innerWidth', { configurable: true, value: 375 })
   cliquerPoint(L, CARTES[0].listing_id)
   assert.equal(defile, 1)
-  juger(doc, 'similaire')
+  juger(doc, 'equivalent')
   assert.equal(defile, 1, 'un jugement ne fait pas defiler')
   Object.defineProperty(w, 'innerWidth', { configurable: true, value: 1200 })
   cliquerPoint(L, CARTES[1].listing_id)
@@ -375,9 +375,9 @@ test('REVIEW (6) : deux recherches en vol sur le meme logement — seule la DERN
 test('REVIEW (mineurs) : le compteur compte les retenus des le chargement, meme sans liste ; un retenu de l equipe n est jamais compte pour l hote', async () => {
   const ids = CARTES.slice(0, 3).map(x => x.listing_id)
   const a = await monter(serveur({ profil: PROFIL, cache: null, retenus: ids }))
-  assert.match(a.doc.getElementById('cp-compte').textContent, /^3 similaires/)
+  assert.match(a.doc.getElementById('cp-compte').textContent, /^3 comparables/)
   const b = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: ids, fondateur: [ids[0]] }))
-  assert.match(b.doc.getElementById('cp-compte').textContent, /^2 similaires/)
+  assert.match(b.doc.getElementById('cp-compte').textContent, /^2 comparables/)
 })
 
 test('REVIEW (mineurs) : aucun bien ni le logement n ont de position — pas de carte grise, un message, la liste reste', async () => {
@@ -465,4 +465,215 @@ test('REVIEW : un bien de la liste de BASE avec jacuzzi porte lui aussi le conto
   const base = [{ ...CARTES[0], source: 'voisins', a_vos_equipements: true }, ...CARTES.slice(1)]
   const { L } = await monter(serveur({ profil: PROFIL, cache: base }))
   assert.equal(pointDe(L, base[0].listing_id).style.color, '#7B3FA0')
+})
+
+// ─── §22.1 : la position par comparable ─────────────────────────────────────
+test('LE TEST QUI COMPTE (§22.1) : quatre boutons, l explication de la VALEUR PERCUE, et la position envoyee', async () => {
+  const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  cliquerPoint(L, CARTES[0].listing_id)
+  assert.deepEqual([...doc.querySelectorAll('#cp-fiche button[data-verdict]')].map(b => b.textContent), ['Le mien est en dessous', 'Équivalent', 'Le mien est supérieur', 'Pas comparable'])
+  assert.match(doc.getElementById('cp-fiche').textContent, /Un comparable offre une prestation de même valeur aux yeux d’un voyageur\. « En dessous » et « Supérieur » servent aux petites différences/)
+  juger(doc, 'dessous')
+  cliquerPoint(L, CARTES[1].listing_id); juger(doc, 'equivalent')
+  cliquerPoint(L, CARTES[2].listing_id); juger(doc, 'dessus')
+  assert.equal(pointDe(L, CARTES[0].listing_id).style.fillColor, '#1F8A4C')
+  doc.getElementById('cp-valider-b').click()
+  await attendre()
+  assert.deepEqual(posts(appels, 'retenir')[0].corps.choix, [
+    { listing_id: CARTES[0].listing_id, position: 'dessous' }, { listing_id: CARTES[1].listing_id, position: 'equivalent' }, { listing_id: CARTES[2].listing_id, position: 'dessus' }])
+})
+
+test('LE TEST QUI COMPTE (§22.1) : un equipement rare qui manque ou qui est en plus — avertissement, « Pas comparable » mis en avant, sans blocage', async () => {
+  const c = { ...CARTES[0], rares_manquants: ['spa'], rares_en_plus: ['piscine'] }
+  const temoin = { ...CARTES[1], rares_manquants: [], rares_en_plus: [] }
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: [c, temoin, ...CARTES.slice(2)] }))
+  cliquerPoint(L, c.listing_id)
+  const alertes = [...doc.querySelectorAll('#cp-fiche .cp-alerte')].map(a => a.textContent)
+  assert.deepEqual(alertes, ['Ce bien n’a pas votre jacuzzi ou spa : il n’a sans doute pas la même valeur.', 'Ce bien a une piscine ; le vôtre n’en a pas : il n’a sans doute pas la même valeur.'])
+  assert.ok(doc.querySelector('#cp-fiche button[data-verdict="non"]').classList.contains('en-avant'))
+  assert.equal(doc.querySelector('#cp-fiche button[data-verdict="equivalent"]').disabled, false, 'un avertissement, pas un blocage')
+  cliquerPoint(L, CARTES[1].listing_id)
+  assert.equal(doc.querySelectorAll('#cp-fiche .cp-alerte').length, 0, 'sans ecart, aucun avertissement')
+})
+
+test('§22.1 : au retour, chaque retenu revient avec SA position ; un retenu sans position compte « equivalent »', async () => {
+  const [a, b, c] = CARTES.slice(0, 3).map(x => x.listing_id)
+  const s = serveur({ profil: PROFIL, cache: CARTES, retenus: [a, b, c] })
+  const { doc, L } = await monter(({ methode, corps, url }) => (methode === 'GET'
+    ? reponse({ etat: 'calcule', profil: PROFIL, retenus: [a, b, c], fondateur: [], positions: { [a]: 'dessus', [b]: 'dessous' }, comparables: CARTES }) : s({ methode, corps, url })))
+  const presse = id => { cliquerPoint(L, id); return doc.querySelector('#cp-fiche button[aria-pressed="true"]').dataset.verdict }
+  assert.equal(presse(a), 'dessus')
+  assert.equal(presse(b), 'dessous')
+  assert.equal(presse(c), 'equivalent')
+  assert.match(doc.getElementById('cp-compte').textContent, /^3 comparables/)
+})
+
+// ─── §22.2 : la strategie et le sejour minimum ──────────────────────────────
+const MARCHE_SEJOUR = { total: 25, une: 15, deux: 6, trois_plus: 4 }
+
+test('LE TEST QUI COMPTE (§22.2) : l etape « strategie » n apparait qu avec 3 comparables enregistres — puis apres la validation', async () => {
+  const sans = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  assert.equal(sans.doc.getElementById('cp-etape-c').hidden, true)
+  for (const i of [0, 1, 2]) { cliquerPoint(sans.L, CARTES[i].listing_id); juger(sans.doc, 'equivalent') }
+  sans.doc.getElementById('cp-valider-b').click()
+  await attendre()
+  assert.equal(sans.doc.getElementById('cp-etape-c').hidden, false)
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const avec = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: ids }))
+  assert.equal(avec.doc.getElementById('cp-etape-c').hidden, false)
+})
+
+test('LE TEST QUI COMPTE (§22.2) : trois strategies expliquees, le sejour minimum, ce que pratique le marche, et l envoi', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const s = serveur({ profil: PROFIL, cache: CARTES, retenus: ids })
+  const { doc, appels } = await monter(({ methode, corps, url }) => {
+    if (methode === 'GET') return reponse({ etat: 'calcule', profil: { ...PROFIL, strategie: 'qualite', sejour_min: 1 }, retenus: ids, fondateur: [], comparables: CARTES, marche_sejour_min: MARCHE_SEJOUR })
+    if (corps.action === 'strategie') return reponse({ etat: 'enregistre', profil: { ...PROFIL, strategie: corps.strategie, sejour_min: Number(corps.sejour_min) } })
+    return s({ methode, corps, url })
+  })
+  const c = doc.getElementById('cp-etape-c')
+  assert.match(c.textContent, /Prix justes[\s\S]*Agressif[\s\S]*10 % moins cher[\s\S]*Qualité[\s\S]*10 % plus cher/)
+  assert.equal(doc.querySelector('input[name="strategie"][value="qualite"]').checked, true, 'la strategie enregistree revient')
+  assert.equal(doc.getElementById('cp-sejour-min').value, '1')
+  assert.equal(doc.getElementById('cp-marche-sejour').textContent, 'Sur 25 biens du marché autour du vôtre : 15 acceptent 1 nuit (60 %), 6 imposent 2 nuits (24 %), 4 en imposent 3 ou plus (16 %).')
+  assert.equal(doc.getElementById('cp-alerte-sejour').hidden, true)
+  doc.querySelector('input[name="strategie"][value="agressif"]').checked = true
+  doc.getElementById('cp-sejour-min').value = '2'
+  doc.getElementById('cp-sejour-min').dispatchEvent(new doc.defaultView.Event('input'))
+  assert.equal(doc.getElementById('cp-alerte-sejour').hidden, false)
+  assert.match(doc.getElementById('cp-alerte-sejour').textContent, /La plupart des biens autour du vôtre acceptent 1 nuit\. Imposer 2 nuits peut vous faire perdre des réservations/)
+  doc.getElementById('cp-valider-c').click()
+  await attendre()
+  assert.deepEqual(posts(appels, 'strategie')[0].corps, { action: 'strategie', strategie: 'agressif', sejour_min: '2' })
+  assert.match(doc.getElementById('cp-message-c').textContent, /Votre stratégie est enregistrée/)
+})
+
+test('§22.2 : quand la plupart des biens imposent deux nuits, demander 2 nuits ne declenche pas d avertissement', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const { doc } = await monter(({ methode }) => (methode === 'GET'
+    ? reponse({ etat: 'calcule', profil: { ...PROFIL, sejour_min: 2 }, retenus: ids, fondateur: [], comparables: CARTES, marche_sejour_min: { total: 25, une: 5, deux: 11, trois_plus: 9 } }) : reponse({}, 400)))
+  assert.equal(doc.getElementById('cp-alerte-sejour').hidden, true)
+})
+
+// ─── Constats de la review de dd8c060 ───────────────────────────────────────
+test('REVIEW : changer de logement pendant l enregistrement de la strategie rend le bouton au nouveau logement', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  let liberer
+  const lent = new Promise(r => { liberer = r })
+  const { w, doc } = await monter(async ({ methode, corps }) => {
+    if (methode === 'GET') return reponse({ etat: 'calcule', profil: PROFIL, retenus: ids, fondateur: [], comparables: CARTES, marche_sejour_min: MARCHE_SEJOUR })
+    if (corps.action === 'strategie') { await lent; return reponse({ etat: 'enregistre', profil: PROFIL }) }
+    return reponse({}, 400)
+  })
+  doc.querySelector('input[name="strategie"][value="juste"]').checked = true
+  doc.getElementById('cp-sejour-min').value = '1'
+  doc.getElementById('cp-valider-c').click()
+  await attendre()
+  doc.getElementById('cp-bien').value = 'B2'
+  doc.getElementById('cp-bien').dispatchEvent(new w.Event('change'))
+  await attendre()
+  liberer()
+  await attendre()
+  assert.equal(doc.getElementById('cp-valider-c').disabled, false)
+})
+
+test('REVIEW : « la plupart », c est plus de la moitie ; les pluriels sont justes', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const page = async m => (await monter(({ methode }) => (methode === 'GET'
+    ? reponse({ etat: 'calcule', profil: { ...PROFIL, sejour_min: 2 }, retenus: ids, fondateur: [], comparables: CARTES, marche_sejour_min: m }) : reponse({}, 400)))).doc
+  assert.equal((await page({ total: 10, une: 5, deux: 3, trois_plus: 2 })).getElementById('cp-alerte-sejour').hidden, true, '50 % pile : pas la plupart')
+  assert.equal((await page({ total: 10, une: 6, deux: 2, trois_plus: 2 })).getElementById('cp-alerte-sejour').hidden, false)
+  assert.equal((await page({ total: 1, une: 1, deux: 0, trois_plus: 0 })).getElementById('cp-marche-sejour').textContent,
+    'Sur 1 bien du marché autour du vôtre : 1 accepte 1 nuit (100 %), 0 impose 2 nuits (0 %), 0 en impose 3 ou plus (0 %).')
+})
+
+test('REVIEW : une nouvelle validation des comparables n efface pas une strategie en cours de saisie', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const s = serveur({ profil: PROFIL, cache: CARTES, retenus: ids })
+  const { doc } = await monter(s)
+  doc.querySelector('input[name="strategie"][value="qualite"]').checked = true
+  doc.getElementById('cp-sejour-min').value = '4'
+  doc.getElementById('cp-valider-b').click()
+  await attendre()
+  assert.equal(doc.querySelector('input[name="strategie"][value="qualite"]').checked, true)
+  assert.equal(doc.getElementById('cp-sejour-min').value, '4')
+})
+
+// ─── §22.7 : les prix de depart ─────────────────────────────────────────────
+const IDS3 = CARTES.slice(0, 3).map(c => c.listing_id)
+const PRIX_CALCULE = { etat: 'calcule', manquants: 0, note: null, prix: { statut: 'calcule', strategie: 'juste', cran: 12,
+  niveaux: [
+    { niveau: 'creux', yieldflow: 'Base', statut: 'calcule', prix: 85, fourchette: { bas: 70, haut: 95 }, comparables: 3 },
+    { niveau: 'modere', yieldflow: 'Moyen', statut: 'calcule', prix: 95, fourchette: { bas: 82, haut: 108 }, comparables: 3 },
+    { niveau: 'favorable', yieldflow: 'Haut', statut: 'calcule', prix: 110, fourchette: { bas: 96, haut: 120 }, comparables: 3 },
+    { niveau: 'pic', yieldflow: 'Très haut ou Exceptionnel', statut: 'non_calculable', motif: '2 comparables avec un prix à ce niveau (il en faut 3)' }],
+  comparables: [{ listing_id: IDS3[0], note: 0.82, mention: 'suit bien le marché', position: 'dessous' }],
+  sejour: { statut: 'calcule', une_nuit: 100, plusieurs_nuits: 90, ecart_pct: -10, comparables: [2, 2] } } }
+const pageAvecPrix = (pd, { strategie = 'juste', apres = () => reponse({}, 400) } = {}) => ({ methode, corps }) => (methode === 'GET'
+  ? reponse({ etat: 'calcule', profil: { ...PROFIL, strategie, sejour_min: 2 }, retenus: IDS3, fondateur: [], comparables: CARTES, prix_depart: pd })
+  : apres({ methode, corps }))
+
+test('LE TEST QUI COMPTE (§22.7) : les prix de depart — par niveau, la fourchette des comparables et VOTRE prix ; le cran ; l effet du sejour minimum', async () => {
+  const { doc } = await monter(pageAvecPrix(PRIX_CALCULE))
+  assert.equal(doc.getElementById('cp-etape-d').hidden, false)
+  const lignes = [...doc.querySelectorAll('#cp-zone-prix tbody tr')].map(tr => [...tr.children].map(td => td.textContent))
+  assert.deepEqual(lignes, [
+    ['Base', '70 € à 95 €', '85 €'], ['Moyen', '82 € à 108 €', '95 €'], ['Haut', '96 € à 120 €', '110 €'],
+    ['Très haut ou Exceptionnel', 'non calculable', '2 comparables avec un prix à ce niveau (il en faut 3)']])
+  const z = doc.getElementById('cp-zone-prix').textContent
+  assert.match(z, /un niveau de prix vaut environ 12 €/)
+  assert.match(z, /ceux qui imposent 2 nuits ou plus vendent la nuit 10 % moins cher que ceux qui acceptent 1 nuit \(90 € contre 100 €\)/)
+})
+
+test('§22.7 : sans strategie, pas de section des prix ; la note de coherence d un comparable s affiche dans sa fiche', async () => {
+  const sans = await monter(pageAvecPrix({ etat: 'strategie_absente', message: 'x' }, { strategie: null }))
+  assert.equal(sans.doc.getElementById('cp-etape-d').hidden, true)
+  const { doc, L } = await monter(pageAvecPrix(PRIX_CALCULE))
+  cliquerPoint(L, IDS3[0])
+  assert.match(doc.getElementById('cp-fiche').textContent, /Ses prix : suit bien le marché/)
+})
+
+test('LE TEST QUI COMPTE (§22.7) : des prix a relever — un bouton, jamais un releve automatique ; le releve affiche le resultat', async () => {
+  const { doc, appels } = await monter(pageAvecPrix({ etat: 'a_capturer', a_capturer: 2 }, { apres: ({ corps }) => (corps.action === 'prix' ? reponse(PRIX_CALCULE) : reponse({}, 400)) }))
+  assert.equal(posts(appels, 'prix').length, 0)
+  assert.match(doc.getElementById('cp-zone-prix').textContent, /Les prix de 2 comparables ne sont pas encore relevés/)
+  doc.getElementById('cp-relever').click()
+  await attendre()
+  assert.equal(posts(appels, 'prix').length, 1)
+  assert.equal(doc.querySelectorAll('#cp-zone-prix tbody tr').length, 4)
+})
+
+test('§22.7 : le marche de l adresse indisponible — le message, sans tableau', async () => {
+  const { doc } = await monter(pageAvecPrix({ etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }))
+  assert.match(doc.getElementById('cp-zone-prix').textContent, /Le marché de votre adresse n’est pas encore disponible/)
+  assert.equal(doc.querySelectorAll('#cp-zone-prix table').length, 0)
+})
+
+test('§22.7 : enregistrer une strategie relit les prix de depart (cache seulement)', async () => {
+  let n = 0
+  const { doc, appels } = await monter(({ methode, corps }) => {
+    if (methode === 'GET') { n++; return reponse({ etat: 'calcule', profil: { ...PROFIL, strategie: n > 1 ? 'qualite' : 'juste', sejour_min: 2 }, retenus: IDS3, fondateur: [], comparables: CARTES, prix_depart: n > 1 ? PRIX_CALCULE : { etat: 'a_capturer', a_capturer: 3 } }) }
+    if (corps.action === 'strategie') return reponse({ etat: 'enregistre', profil: { ...PROFIL, strategie: 'qualite', sejour_min: 2 } })
+    return reponse({}, 400)
+  })
+  doc.querySelector('input[name="strategie"][value="qualite"]').checked = true
+  doc.getElementById('cp-sejour-min').value = '2'
+  doc.getElementById('cp-valider-c').click()
+  await attendre()
+  assert.equal(posts(appels, 'prix').length, 0, 'aucun releve payant')
+  assert.equal(doc.querySelectorAll('#cp-zone-prix tbody tr').length, 4)
+})
+
+// ─── Constats de la review de f37b7da (page) ────────────────────────────────
+test('REVIEW (C4) : des prix calcules avec des comparables manquants — le tableau ET le bouton pour relever ceux qui manquent', async () => {
+  const { doc } = await monter(pageAvecPrix({ ...PRIX_CALCULE, a_capturer: 2, note: 'Les prix de 2 comparables ne sont pas encore relevés.' }))
+  assert.equal(doc.querySelectorAll('#cp-zone-prix tbody tr').length, 4)
+  assert.equal(doc.getElementById('cp-relever').textContent, 'Relever les prix qui manquent')
+  assert.match(doc.getElementById('cp-note-prix').textContent, /2 comparables ne sont pas encore relevés/)
+})
+
+test('REVIEW (C5) : le calcul entier impossible affiche son motif, jamais un tableau vide', async () => {
+  const { doc } = await monter(pageAvecPrix({ etat: 'calcule', a_capturer: 0, prix: { statut: 'non_calculable', motif: 'le calendrier du marché est absent' } }))
+  assert.equal(doc.querySelectorAll('#cp-zone-prix table').length, 0)
+  assert.match(doc.getElementById('cp-zone-prix').textContent, /ne peuvent pas être calculés : le calendrier du marché est absent/)
 })

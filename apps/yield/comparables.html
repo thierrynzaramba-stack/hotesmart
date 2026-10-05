@@ -62,6 +62,9 @@
     .cp-source { font-size: 12px; font-weight: 600; color: #1F8A4C; }
     .cp-verdict { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .cp-verdict button[aria-pressed="true"].similaire { background: #1F8A4C; color: #fff; }
+    .cp-explication { font-size: 12.5px; color: var(--text2); line-height: 1.45; margin: 10px 0 0; }
+    .cp-alerte { font-size: 13px; font-weight: 600; color: #8A4B00; background: #FFF4E0; border-radius: 6px; padding: 6px 10px; margin: 8px 0 0; }
+    .cp-verdict button.en-avant { outline: 2px solid #8A4B00; outline-offset: 1px; }
     .cp-verdict button[aria-pressed="true"].non { background: #5F6368; color: #fff; }
     .cp-fondateur { font-size: 13px; font-weight: 600; color: #1F8A4C; margin-top: 10px; }
     .cp-entete-fiche { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
@@ -75,6 +78,16 @@
     .cp-liste-biens summary { cursor: pointer; font-size: 13px; font-weight: 600; min-height: 32px; padding: 6px 0; }
     .cp-liste-biens ol { margin: 4px 0 0; padding-left: 20px; font-size: 13px; }
     .cp-liste-biens button { font: inherit; background: none; border: 0; padding: 4px 0; color: var(--text); cursor: pointer; text-align: left; min-height: 32px; }
+    .cp-strategies { display: grid; gap: 8px; margin: 6px 0 12px; }
+    .cp-strategies label { display: flex; gap: 10px; align-items: flex-start; border: 0.5px solid var(--border2); border-radius: 8px; padding: 10px 12px; cursor: pointer; font-size: 13.5px; }
+    .cp-strategies label small { display: block; color: var(--text2); font-size: 12.5px; margin-top: 2px; }
+    .cp-sejour { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13.5px; font-weight: 600; }
+    .cp-sejour input { font: inherit; width: 80px; padding: 8px 10px; border: 0.5px solid var(--border2); border-radius: 8px; background: var(--bg); color: var(--text); min-height: 40px; }
+    .cp-prix { width: 100%; border-collapse: collapse; font-size: 13.5px; margin: 8px 0; }
+    .cp-prix th { text-align: left; color: var(--text2); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 0.5px solid var(--border2); }
+    .cp-prix td { padding: 8px; border-bottom: 0.5px solid var(--border); }
+    .cp-prix td.prix { font-size: 16px; font-weight: 700; }
+    .cp-suivi { font-size: 12.5px; font-weight: 600; }
     .cp-pied { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 10px 0; margin-top: 12px;
       display: flex; flex-wrap: wrap; align-items: center; gap: 10px; z-index: 500; }
     @media (max-width: 640px) {
@@ -141,15 +154,15 @@
   <!-- ÉTAPE B : la carte et la fiche -->
   <div class="cp-carte" id="cp-etape-b" hidden>
     <h2>Les biens du marché autour du vôtre</h2>
-    <p class="sous">Plus un bien vous ressemble, plus son point est gros. Touchez un point pour voir le bien et dire s’il est similaire au vôtre.</p>
+    <p class="sous">Plus un bien vous ressemble, plus son point est gros. Touchez un point pour voir le bien et dire où se situe le vôtre par rapport à lui.</p>
     <div id="cp-zone-liste"><p class="cp-meta">Recherche des biens du marché…</p></div>
     <div id="cp-zone-carte" hidden>
       <div id="cp-map" role="region" aria-label="Carte des biens du marché"></div>
       <div class="cp-legende">
         <span><i data-couleur="hote"></i>Votre logement</span>
         <span><i data-couleur="neutre"></i>À juger</span>
-        <span><i data-couleur="similaire"></i>Similaire</span>
-        <span><i data-couleur="non"></i>Non similaire</span>
+        <span><i data-couleur="similaire"></i>Comparable</span>
+        <span><i data-couleur="non"></i>Pas comparable</span>
         <span><i data-contour="equipements"></i>À vos équipements</span>
       </div>
       <p class="cp-meta" id="cp-note-position">Airbnb décale souvent la position des annonces de quelques centaines de mètres : la carte est approchée.</p>
@@ -165,6 +178,35 @@
       <span id="cp-compte" class="cp-meta" style="margin:0" aria-live="polite"></span>
       <span id="cp-message-b" aria-live="polite"></span>
     </div>
+  </div>
+
+  <!-- ÉTAPE C : la stratégie et le séjour minimum (§22.2) -->
+  <div class="cp-carte" id="cp-etape-c" hidden>
+    <h2>Votre stratégie de prix</h2>
+    <p class="sous">Comment voulez-vous vous placer par rapport à vos comparables ?</p>
+    <div class="cp-strategies" role="radiogroup" aria-label="Stratégie de prix">
+      <label><input type="radio" name="strategie" value="juste"><span><b>Prix justes</b><small>Au prix que vaut votre logement face à vos comparables.</small></span></label>
+      <label><input type="radio" name="strategie" value="agressif"><span><b>Agressif</b><small>10 % moins cher, pour attirer des clients et remplir plus vite.</small></span></label>
+      <label><input type="radio" name="strategie" value="qualite"><span><b>Qualité</b><small>10 % plus cher, pour viser le haut du marché.</small></span></label>
+    </div>
+    <label class="cp-sejour">Séjour minimum souhaité
+      <input type="number" id="cp-sejour-min" min="1" max="30" step="1" inputmode="numeric"> nuit(s)
+    </label>
+    <p class="cp-meta" id="cp-marche-sejour"></p>
+    <p class="cp-alerte" id="cp-alerte-sejour" hidden></p>
+    <div class="cp-actions">
+      <button type="button" class="cp-btn" id="cp-valider-c">Enregistrer ma stratégie</button>
+      <span id="cp-message-c" aria-live="polite"></span>
+    </div>
+  </div>
+
+  <!-- ÉTAPE D : les prix de départ (§22.7) -->
+  <div class="cp-carte" id="cp-etape-d" hidden>
+    <h2>Vos prix de départ</h2>
+    <p class="sous">Calculés à partir des prix affichés par vos comparables, à chaque niveau du marché, selon votre stratégie.
+      Les comparables qui suivent le marché comptent plus que ceux dont les prix ne bougent pas. Rien n’est encore appliqué à vos prix.</p>
+    <div id="cp-zone-prix"></div>
+    <p class="cp-meta" id="cp-note-prix" aria-live="polite"></p>
   </div>
 </div>
 </div>
@@ -225,9 +267,14 @@
   let jeton = 0
   let profil = null
   let cartes = []
-  // Les jugements de l'hote : id -> 'similaire' | 'non'. Seuls les similaires
-  // sont envoyes ; « non » est une aide de tri, non enregistree.
+  // Les jugements de l'hote : id -> 'dessous' | 'equivalent' | 'dessus' (un
+  // COMPARABLE, avec sa position, §22.1) ou 'non' (pas comparable, aide de tri
+  // non enregistree).
   const jugements = new Map()
+  const POSITIONS = ['dessous', 'equivalent', 'dessus']
+  const LIBELLE_POSITION = { dessous: 'le vôtre est en dessous', equivalent: 'équivalent', dessus: 'le vôtre est supérieur' }
+  const NOM_RARE = { spa: 'jacuzzi ou spa', piscine: 'piscine', jardin: 'jardin', vue: 'vue exceptionnelle' }
+  const AVEC_ARTICLE = { spa: 'un jacuzzi ou un spa', piscine: 'une piscine', jardin: 'un jardin', vue: 'une vue exceptionnelle' }
   // Les retenus du FONDATEUR : verrouilles en vert, jamais envoyes par l'hote
   // (decision de Thierry du 5 octobre 2026).
   let fondateur = new Set()
@@ -239,9 +286,20 @@
   let ouvert = null
   // Chaque recherche a son numero : seule la derniere s'affiche (review de 995f025).
   let rechercheEnCours = 0
+  // §22.2 : ce que pratique le marche en sejour minimum, et le nombre de
+  // comparables DEJA enregistres (l'etape C s'ouvre a partir de 3).
+  let marcheSejour = null
+  let retenusEnregistres = 0
+  // L'etape C est remplie UNE fois par logement : une nouvelle validation des
+  // comparables n'efface pas une saisie en cours (review de dd8c060).
+  let strategieAffichee = false
+  // §22.7 : la note de coherence de chaque comparable (sa mention), et le
+  // dernier etat des prix de depart.
+  let suivis = new Map()
+  let prixDepart = null
 
   function dire (id, texte, classe) { const z = el(id); z.textContent = texte || ''; z.className = classe || '' }
-  const similaires = () => [...jugements.entries()].filter(([, v]) => v === 'similaire').map(([id]) => id)
+  const similaires = () => [...jugements.entries()].filter(([, v]) => POSITIONS.includes(v)).map(([id]) => id)
 
   async function appeler (methode, corps) {
     const r = await fetch(`/api/marche-comparables?property_id=${encodeURIComponent(el('cp-bien').value)}`, {
@@ -278,6 +336,8 @@
     el('cp-valider-b').addEventListener('click', retenir)
     el('cp-modifier').addEventListener('click', () => montrerFormulaire(true))
     el('cp-annuler-a').addEventListener('click', () => montrerFormulaire(false))
+    el('cp-valider-c').addEventListener('click', enregistrerStrategie)
+    el('cp-sejour-min').addEventListener('input', afficherSejour)
     charger()
   }
 
@@ -313,6 +373,10 @@
   async function charger () {
     const j = ++jeton
     profil = null; cartes = []; jugements.clear(); touches.clear(); fondateur = new Set(); ouvert = null
+    marcheSejour = null; retenusEnregistres = 0; strategieAffichee = false; suivis = new Map(); prixDepart = null
+    el('cp-etape-d').hidden = true
+    // Le bouton est rendu au nouveau logement (review de dd8c060).
+    el('cp-etape-c').hidden = true; dire('cp-message-c', ''); el('cp-valider-c').disabled = false
     rechercheEnCours++
     majCompte()
     dire('cp-note', '', 'cp-meta')
@@ -332,6 +396,10 @@
     retenusDu(r.d)
     if (!r.d.profil) return
     profil = r.d.profil
+    marcheSejour = r.d.marche_sejour_min || null
+    retenusEnregistres = (r.d.retenus || []).filter(id => !fondateur.has(String(id))).length
+    afficherStrategie()
+    afficherPrix(r.d.prix_depart || null)
     afficherRecap(profil)
     montrerFormulaire(false)
     el('cp-etape-b').hidden = false
@@ -349,9 +417,11 @@
   function retenusDu (d) {
     fondateur = new Set((d.fondateur || []).map(String))
     for (const id of fondateur) jugements.delete(id)
+    const positions = d.positions && typeof d.positions === 'object' ? d.positions : {}
     for (const id of d.retenus || []) {
       const k = String(id)
-      if (!fondateur.has(k) && !touches.has(k)) jugements.set(k, 'similaire')
+      // Un retenu sans position (avant §22) est compte « equivalent ».
+      if (!fondateur.has(k) && !touches.has(k)) jugements.set(k, POSITIONS.includes(positions[k]) ? positions[k] : 'equivalent')
     }
     majCompte()
   }
@@ -418,6 +488,7 @@
       return
     }
     retenusDu(r.d)
+    if (r.d.marche_sejour_min) { marcheSejour = r.d.marche_sejour_min; afficherSejour() }
     dire('cp-note', r.d.note || '', 'cp-meta')
     afficher(r.d.comparables)
   }
@@ -425,7 +496,8 @@
   // ─── La carte ──────────────────────────────────────────────────────────────
   function etatDe (id) {
     if (fondateur.has(id)) return 'similaire'
-    return jugements.get(id) || 'neutre'
+    const j = jugements.get(id)
+    return POSITIONS.includes(j) ? 'similaire' : j === 'non' ? 'non' : 'neutre'
   }
   // Rayon du point : de 6 a 18 selon la ressemblance (0 a 100 %).
   const rayon = c => 6 + Math.round(12 * Math.max(0, Math.min(100, Number(c.ressemblance) || 0)) / 100)
@@ -509,7 +581,8 @@
     for (const c of cartes) {
       const li = document.createElement('li')
       const b = document.createElement('button'); b.type = 'button'; b.dataset.id = c.listing_id
-      b.textContent = `${c.nom || 'Annonce sans titre'} — ${c.ressemblance} % de ressemblance${etatDe(c.listing_id) === 'similaire' ? ' (similaire)' : etatDe(c.listing_id) === 'non' ? ' (non similaire)' : ''}`
+      const j = jugements.get(c.listing_id)
+      b.textContent = `${c.nom || 'Annonce sans titre'} — ${c.ressemblance} % de ressemblance${fondateur.has(c.listing_id) ? ' (retenu par l’équipe)' : POSITIONS.includes(j) ? ` (comparable : ${LIBELLE_POSITION[j]})` : j === 'non' ? ' (pas comparable)' : ''}`
       b.addEventListener('click', () => ouvrirFiche(c.listing_id))
       li.append(b); ol.append(li)
     }
@@ -561,6 +634,7 @@
       const b = document.createElement('span'); b.className = 'cp-badge'; b.textContent = EQUIPEMENTS[e]; badges.append(b)
     }
     f.append(photos, entete, ligne, activite, badges)
+    if (suivis.has(id)) f.append(Object.assign(document.createElement('p'), { className: 'cp-suivi', textContent: `Ses prix : ${suivis.get(id)}` }))
     if (c.source === 'equipements') f.append(Object.assign(document.createElement('p'), { className: 'cp-source', textContent: 'Trouvé grâce à vos équipements' }))
     else if (aVosEquipements(c)) f.append(Object.assign(document.createElement('p'), { className: 'cp-source', textContent: 'A l’un de vos équipements' }))
     // §21.6 : tout le reste de l'information, sauf l'argent.
@@ -598,9 +672,23 @@
     if (fondateur.has(id)) {
       f.append(Object.assign(document.createElement('p'), { className: 'cp-fondateur', textContent: 'Retenu par l’équipe HôteSmart' }))
     } else {
+      // §22.1 : un ecart d'equipement RARE signale un ecart de valeur.
+      const manque = (Array.isArray(c.rares_manquants) ? c.rares_manquants : []).filter(e => NOM_RARE[e])
+      const enPlus = (Array.isArray(c.rares_en_plus) ? c.rares_en_plus : []).filter(e => NOM_RARE[e])
+      const ecart = manque.length || enPlus.length
+      // « n'a pas votre X » ; « n'a ni votre X, ni votre Y » ; « a X et Y ; le
+      // votre n'en a pas » (review de 1e64a2b).
+      const vos = manque.map(e => `votre ${NOM_RARE[e]}`)
+      if (vos.length) f.append(Object.assign(document.createElement('p'), { className: 'cp-alerte',
+        textContent: `Ce bien n’a ${vos.length === 1 ? `pas ${vos[0]}` : `ni ${vos.join(', ni ')}`} : il n’a sans doute pas la même valeur.` }))
+      const siens = enPlus.map(e => AVEC_ARTICLE[e])
+      if (siens.length) f.append(Object.assign(document.createElement('p'), { className: 'cp-alerte',
+        textContent: `Ce bien a ${siens.length === 1 ? siens[0] : `${siens.slice(0, -1).join(', ')} et ${siens[siens.length - 1]}`} ; le vôtre n’en a pas : il n’a sans doute pas la même valeur.` }))
+      f.append(Object.assign(document.createElement('p'), { className: 'cp-explication',
+        textContent: 'Un comparable offre une prestation de même valeur aux yeux d’un voyageur. « En dessous » et « Supérieur » servent aux petites différences ; s’il manque un équipement qui change la valeur (jacuzzi, piscine, jardin, vue), choisissez « Pas comparable ».' }))
       const v = document.createElement('div'); v.className = 'cp-verdict'
       const bouton = (etat, texte, classe) => {
-        const b = document.createElement('button'); b.type = 'button'; b.className = `cp-btn secondaire ${classe}`; b.textContent = texte
+        const b = document.createElement('button'); b.type = 'button'; b.className = `cp-btn secondaire ${classe}${etat === 'non' && ecart ? ' en-avant' : ''}`; b.textContent = texte
         b.dataset.verdict = etat
         b.setAttribute('aria-pressed', String(jugements.get(id) === etat))
         // Un second clic sur le meme bouton annule le jugement.
@@ -613,7 +701,8 @@
         })
         return b
       }
-      v.append(bouton('similaire', 'Logement similaire', 'similaire'), bouton('non', 'Non similaire', 'non'))
+      v.append(bouton('dessous', 'Le mien est en dessous', 'similaire'), bouton('equivalent', 'Équivalent', 'similaire'),
+        bouton('dessus', 'Le mien est supérieur', 'similaire'), bouton('non', 'Pas comparable', 'non'))
       f.append(v)
     }
     if (focus) { const b = f.querySelector(`button[data-verdict="${focus}"]`); if (b) b.focus() }
@@ -624,7 +713,7 @@
   function majCompte () {
     const n = similaires().length
     el('cp-valider-b').disabled = n < MIN
-    el('cp-compte').textContent = n < MIN ? `${n} similaire${n > 1 ? 's' : ''} — encore ${MIN - n} au moins` : `${n} similaires`
+    el('cp-compte').textContent = n < MIN ? `${n} comparable${n > 1 ? 's' : ''} — encore ${MIN - n} au moins` : `${n} comparables`
   }
 
   async function retenir () {
@@ -634,11 +723,131 @@
     el('cp-valider-b').disabled = true
     dire('cp-message-b', 'Enregistrement…')
     let r
-    try { r = await appeler('POST', { action: 'retenir', listing_ids: ids }) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
+    try { r = await appeler('POST', { action: 'retenir', choix: ids.map(id => ({ listing_id: id, position: jugements.get(id) })) }) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
     if (j !== jeton) return
     majCompte()
     if (!r.ok || !r.d || !Array.isArray(r.d.retenus)) return dire('cp-message-b', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')
     dire('cp-message-b', `Vos ${r.d.retenus.length} comparables sont enregistrés.`, 'cp-ok')
+    retenusEnregistres = r.d.retenus.length
+    afficherStrategie()
+  }
+
+  // ─── ÉTAPE C : la strategie et le sejour minimum (§22.2) ─────────────────
+  function afficherStrategie () {
+    el('cp-etape-c').hidden = !(profil && retenusEnregistres >= MIN)
+    if (el('cp-etape-c').hidden) return
+    if (!strategieAffichee) {
+      for (const r of document.querySelectorAll('input[name="strategie"]')) r.checked = r.value === profil.strategie
+      el('cp-sejour-min').value = Number.isInteger(profil.sejour_min) ? profil.sejour_min : ''
+      strategieAffichee = true
+    }
+    afficherSejour()
+  }
+  const pct = (n, t) => `${Math.round(100 * n / t)} %`
+  function afficherSejour () {
+    const m = marcheSejour
+    const t = m && Number.isInteger(m.total) && m.total > 0 ? m.total : 0
+    const v = (n, un, plus) => `${n} ${n > 1 ? plus : un}`
+    el('cp-marche-sejour').textContent = t
+      ? `Sur ${v(t, 'bien', 'biens')} du marché autour du vôtre : ${v(m.une, 'accepte', 'acceptent')} 1 nuit (${pct(m.une, t)}), ${v(m.deux, 'impose', 'imposent')} 2 nuits (${pct(m.deux, t)}), ${m.trois_plus} en ${m.trois_plus > 1 ? 'imposent' : 'impose'} 3 ou plus (${pct(m.trois_plus, t)}).`
+      : 'Le séjour minimum pratiqué par le marché n’est pas encore connu.'
+    // Imposer plusieurs nuits la ou LA PLUPART (plus de la moitie) en acceptent
+    // une : on previent.
+    const voulu = Number(el('cp-sejour-min').value)
+    const alerte = t && Number.isInteger(voulu) && voulu >= 2 && m.une / t > 0.5
+    el('cp-alerte-sejour').hidden = !alerte
+    el('cp-alerte-sejour').textContent = alerte
+      ? `La plupart des biens autour du vôtre acceptent 1 nuit. Imposer ${voulu} nuits peut vous faire perdre des réservations, ou vous obliger à baisser votre prix par nuit.` : ''
+  }
+
+  async function enregistrerStrategie () {
+    const j = jeton
+    const choisie = document.querySelector('input[name="strategie"]:checked')
+    const corps = { action: 'strategie', strategie: choisie ? choisie.value : null, sejour_min: el('cp-sejour-min').value.trim() }
+    el('cp-valider-c').disabled = true
+    dire('cp-message-c', 'Enregistrement…')
+    let r
+    try { r = await appeler('POST', corps) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
+    if (j !== jeton) return
+    el('cp-valider-c').disabled = false
+    if (!r.ok || !r.d || !r.d.profil) return dire('cp-message-c', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')
+    profil = r.d.profil
+    dire('cp-message-c', 'Votre stratégie est enregistrée.', 'cp-ok')
+    // Les prix de depart suivent la strategie : on les relit (cache seulement).
+    let g
+    try { g = await appeler('GET') } catch (e) { g = null }
+    if (j !== jeton || !g || !g.ok || !g.d) return
+    afficherPrix(g.d.prix_depart || null)
+  }
+
+  // ─── ÉTAPE D : les prix de depart (§22.7) ────────────────────────────────
+  const EUROS = v => `${v} €`
+  function afficherPrix (pd) {
+    prixDepart = pd
+    el('cp-etape-d').hidden = !(profil && profil.strategie && pd)
+    if (el('cp-etape-d').hidden) return
+    const zone = el('cp-zone-prix')
+    zone.replaceChildren()
+    dire('cp-note-prix', (pd && pd.note) || '', 'cp-meta')
+    // Des prix a relever : le bouton, a cote du tableau s'il y en a un (review de
+    // f37b7da, C4 : on calcule avec ce qui est deja releve).
+    const bouton = () => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'cp-btn'; b.id = 'cp-relever'
+      b.textContent = pd.etat === 'calcule' ? 'Relever les prix qui manquent' : 'Relever les prix de vos comparables'
+      b.addEventListener('click', relever)
+      return b
+    }
+    if (pd.etat === 'a_capturer') {
+      const p = document.createElement('p'); p.className = 'cp-meta'
+      p.textContent = `Les prix de ${pluriel(pd.a_capturer, 'comparable', 'comparables')} ne sont pas encore relevés.`
+      zone.append(p, bouton()); return
+    }
+    if (pd.etat !== 'calcule' || !pd.prix) { zone.append(Object.assign(document.createElement('p'), { className: 'non-calc', textContent: pd.message || 'Vos prix de départ ne peuvent pas encore être calculés.' })); return }
+    const r = pd.prix
+    // Le calcul entier impossible : son motif, jamais un tableau vide (C5).
+    if (!Array.isArray(r.niveaux) || !r.niveaux.length) {
+      zone.append(Object.assign(document.createElement('p'), { className: 'non-calc', textContent: `Vos prix de départ ne peuvent pas être calculés : ${r.motif || 'données insuffisantes'}.` }))
+      if (pd.a_capturer > 0) zone.append(bouton())
+      return
+    }
+    suivis = new Map((r.comparables || []).map(c => [String(c.listing_id), c.mention]))
+    const t = document.createElement('table'); t.className = 'cp-prix'
+    const th = document.createElement('tr')
+    for (const x of ['Niveau du marché', 'Fourchette de vos comparables', 'Votre prix de départ']) { const c = document.createElement('th'); c.textContent = x; th.append(c) }
+    const tete = document.createElement('thead'); tete.append(th)
+    const corps = document.createElement('tbody')
+    for (const n of r.niveaux || []) {
+      const tr = document.createElement('tr')
+      const a = document.createElement('td'); a.textContent = n.yieldflow
+      const b = document.createElement('td')
+      const c = document.createElement('td')
+      if (n.statut === 'calcule') {
+        b.textContent = `${EUROS(n.fourchette.bas)} à ${EUROS(n.fourchette.haut)}`
+        c.className = 'prix'; c.textContent = EUROS(n.prix)
+      } else { b.className = 'non-calc'; b.textContent = 'non calculable'; c.className = 'non-calc'; c.textContent = n.motif || '' }
+      tr.append(a, b, c); corps.append(tr)
+    }
+    t.append(tete, corps)
+    zone.append(t)
+    if (Number.isFinite(r.cran)) zone.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: `Sur ce marché, un niveau de prix vaut environ ${EUROS(r.cran)} : c’est l’écart moyen d’un niveau au suivant chez vos comparables.` }))
+    const se = r.sejour
+    if (se && se.statut === 'calcule') {
+      const sens = se.ecart_pct < 0 ? `${Math.abs(se.ecart_pct)} % moins cher` : se.ecart_pct > 0 ? `${se.ecart_pct} % plus cher` : 'au même prix'
+      zone.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: `Séjour minimum : parmi vos comparables, ceux qui imposent 2 nuits ou plus vendent la nuit ${sens} que ceux qui acceptent 1 nuit (${EUROS(se.plusieurs_nuits)} contre ${EUROS(se.une_nuit)}).` }))
+    } else if (se) zone.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: `Séjour minimum : ${se.motif}.` }))
+    if (pd.a_capturer > 0) zone.append(bouton())
+    if (ouvert) ouvrirFiche(ouvert, { defiler: false })
+  }
+
+  async function relever () {
+    const j = jeton
+    const b = el('cp-relever'); if (b) b.disabled = true
+    dire('cp-note-prix', 'Relevé des prix de vos comparables…', 'cp-meta')
+    let r
+    try { r = await appeler('POST', { action: 'prix' }) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
+    if (j !== jeton) return
+    if (!r.ok || !r.d) { if (b) b.disabled = false; return dire('cp-note-prix', (r.d && r.d.message) || 'Relevé impossible.', 'cp-erreur') }
+    afficherPrix(r.d)
   }
 
   init()

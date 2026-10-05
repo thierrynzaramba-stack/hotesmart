@@ -555,3 +555,28 @@ test('LE TEST QUI COMPTE (§21.2) : un corps de recherche hors contrat est REFUS
   for (const c of mauvais) await assert.rejects(client.rechercheEquipements(c, { propertyId: 'P', userId: 'U' }), /parametres invalides/)
   assert.equal(appels.length, 0)
 })
+
+// ⚠ RE-REVIEW DE 0fab219 (SECURITE) : une erreur levee APRES le depart de la
+// requete n'a jamais `coutLibere === true`, meme si elle vient du cache ou du
+// journal — AirROI a pu facturer, la reservation de l'appelant est gardee.
+test('coutLibere : vrai seulement avant le reseau ou sur une erreur HTTP ; faux des que la requete a pu partir', async () => {
+  await avecCle(async () => {
+    const marque = async (client, appel) => (await appel(client).catch(e => e)).coutLibere
+    const annonce = c => c.annonce('992723390568420450', H)
+    const ok = () => faux(lire('moi.json'))
+    // Avant le reseau : parametres, garde-fou du budget.
+    assert.equal(await marque(creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: ok() }), c => c.annonce('', H)), true, 'parametres invalides')
+    assert.equal(await marque(creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: ok(), gardes: { budgetMensuelUsd: 0.01 } }), annonce), true, 'refus du budget')
+    // Reponse d'erreur du serveur : non facturee.
+    assert.equal(await marque(creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: faux('non', 403) }), annonce), true, 'HTTP 403')
+    // La requete est partie.
+    assert.equal(await marque(creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: async () => { throw new Error('ECONNRESET') } }), annonce), false, 'coupure reseau')
+    assert.equal(await marque(creerClient({ alerter: null, depot: depotFichier(dossier()), fetch: faux('pas du json') }), annonce), false, 'reponse illisible')
+    const cachePanne = { ...depotFichier(dossier()), ecrireCache: async () => { throw new Error('cache plein') } }
+    assert.equal(await marque(creerClient({ alerter: null, depot: cachePanne, fetch: ok() }), annonce), false, 'LE CAS DE LA RE-REVIEW : 200 facture, puis le cache tombe')
+    const base = depotFichier(dossier())
+    const journalPanne = { ...base, terminer: async () => { throw new Error('journal en panne') } }
+    assert.equal(await marque(creerClient({ alerter: null, depot: journalPanne, fetch: async () => { throw new Error('ECONNRESET') } }), annonce), false, 'coupure puis journal en panne')
+    assert.equal(await marque(creerClient({ alerter: null, depot: journalPanne, fetch: faux('non', 403) }), annonce), false, 'HTTP 403 dont la liberation n a pas pu etre journalisee : prudence')
+  })
+})
