@@ -693,3 +693,12 @@ test('REVIEW (C5) : le calcul entier impossible affiche son motif, jamais un tab
   assert.equal(doc.querySelectorAll('#cp-zone-prix table').length, 0)
   assert.match(doc.getElementById('cp-zone-prix').textContent, /ne peuvent pas être calculés : le calendrier du marché est absent/)
 })
+
+test('REVIEW (428fe8c) : d anciens comparables qui ne sont plus proposes — l hote est averti', async () => {
+  const { doc } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  assert.equal(doc.getElementById('cp-note').textContent, '')
+  const avec = await monter(({ methode, corps }) => methode === 'GET'
+    ? reponse({ etat: 'calcule', profil: PROFIL, retenus: [], fondateur: [], comparables: CARTES, encore: false, retenus_hors_liste: 3 })
+    : reponse({}, 400))
+  assert.match(avec.doc.getElementById('cp-note').textContent, /3 de vos anciens comparables ne sont plus proposés \(bien inactif, ou sans vos équipements\) : ils ne comptent plus/)
+})

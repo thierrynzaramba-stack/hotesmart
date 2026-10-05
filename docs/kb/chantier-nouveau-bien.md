@@ -3242,3 +3242,21 @@ Fixture : `tests/fixtures/airroi/actifs-jacuzzi-toulouse-2026-10-05.json`.
 4 $ sur 30 jours. Un parcours complet pour un bien coûte 2,50 $ de pages, plus
 10 calendriers à 0,10 ou 0,20 $ : soit 3,50 à 4,50 $. À 0,20 $ le calendrier,
 un seul bien atteint ce plafond.
+- **Review de 428fe8c (aucun constat de sécurité bloquant).** Corrigé :
+  - **les retenus qui comptent** : quand la sélection est en cache, un
+    retenu de l'hôte qui n'y est plus (inactif, sans les équipements rares,
+    profil changé) ne compte plus, ni pour le « au moins 3 », ni pour le
+    calcul des prix ; la page le dit. Ceux de l'équipe restent. Sans sélection
+    en cache, on ne peut pas juger : tous comptent ;
+  - « Voir 10 de plus » quand la première page a expiré recharge le début,
+    au lieu de répondre « plus rien » à tort ;
+  - **garde-fou** : la boucle de « Chercher » fait 2 tours au plus, et
+    s'arrête si une page payée ne se relit pas dans le cache. Sans lui, un
+    cache qui n'enregistre pas faisait payer sans fin ; le test le démontre
+    sur l'ancien code.
+
+  **Dette** : deux « Voir 10 de plus » simultanés, sur deux instances
+  Vercel, paient deux fois la même page (2 × 0,50 $) ; deux « Chercher »
+  simultanés, jusqu'à 2 $. Le coût reste borné par le quota atomique (5 pages
+  par bien et par jour) et par le plafond de 5 $ par bien. C'est la même dette
+  que les relevés de calendriers.

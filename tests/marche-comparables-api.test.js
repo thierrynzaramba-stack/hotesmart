@@ -97,7 +97,8 @@ async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, bod
         if (airroi instanceof Error) throw airroi
         // Comme le VRAI client : la reponse entre au cache (la route le relit).
         const donnees = airroi || { listings: COMPS }
-        tables.airroi_cache = [...(tables.airroi_cache || []), { cle: cleCanonique('GET /listings/comparables', { ...params, currency: 'native' }), reponse: JSON.stringify(donnees), recupere_le: new Date().toISOString() }]
+        const cleBase = cleCanonique('GET /listings/comparables', { ...params, currency: 'native' })
+        tables.airroi_cache = [...(tables.airroi_cache || []).filter(c => c.cle !== cleBase), { cle: cleBase, reponse: JSON.stringify(donnees), recupere_le: new Date().toISOString() }]
         return { donnees, depuisCache: false }
       },
       calendrierAnnonce: async (listingId, ctx) => {
@@ -112,7 +113,10 @@ async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, bod
         const err = typeof airroiEq === 'function' ? airroiEq(page) : airroiEq
         if (err instanceof Error) throw err
         const reponse = pageActifs(page, tables.__totalActifs ?? 76, tables.__poolActifs || POOL)
-        tables.airroi_cache = [...(tables.airroi_cache || []), { cle: cleCanonique('POST /listings/search/radius', corps), reponse, recupere_le: new Date().toISOString() }]
+        if (tables.__cacheMuet) return { donnees: lireJson(reponse), depuisCache: false }
+        const cle = cleCanonique('POST /listings/search/radius', corps)
+        // Comme le vrai depot : upsert sur la cle (l'ancienne ligne est remplacee).
+        tables.airroi_cache = [...(tables.airroi_cache || []).filter(c => c.cle !== cle), { cle, reponse, recupere_le: new Date().toISOString() }]
         return { donnees: lireJson(reponse), depuisCache: false }
       },
     }) }
@@ -758,6 +762,8 @@ test('REVIEW (C7) : un calendrier du marche trop ancien (moins de 300 jours a ve
 test('RE-REVIEW : une reservation en panne arrete TOUS les releves, et la reponse attend ceux en vol', async () => {
   const tb = tablesPrix({ calendriersEnCache: 0 })
   tb.comparables_retenus = Array.from({ length: 12 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  // Sans selection en cache, tous les retenus comptent (§22.10) : ce test porte sur les calendriers.
+  tb.airroi_cache = tb.airroi_cache.filter(c => c.cle !== CLE)
   tb.__rpcPanneNieme = 1
   const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
   const aLaReponse = r.appelsAirroi.length
@@ -772,6 +778,8 @@ test('RE-REVIEW : une reservation en panne arrete TOUS les releves, et la repons
 test('DECISION : au plus 10 calendriers servent au calcul — ceux en cache d abord, et on ne releve jamais au-dela', async () => {
   const tb = tablesPrix({ calendriersEnCache: 0 })
   tb.comparables_retenus = Array.from({ length: 14 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  // Sans selection en cache, tous les retenus comptent (§22.10) : ce test porte sur les calendriers.
+  tb.airroi_cache = tb.airroi_cache.filter(c => c.cle !== CLE)
   // Deux calendriers en cache, en FIN de liste : ils passent devant.
   for (const id of ['9012', '9013']) tb.airroi_cache.push({ cle: cleCal(id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(120) }), recupere_le: new Date().toISOString() })
   const g = await appeler({ tables: tb })
@@ -786,6 +794,8 @@ test('DECISION (review de c04e356) : le calcul recoit 10 calendriers au plus, et
   // 12 calendriers en cache : 10 servent, aucun releve.
   const plein = tablesPrix({ calendriersEnCache: 0 })
   plein.comparables_retenus = Array.from({ length: 12 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  // Sans selection en cache, tous les retenus comptent (§22.10) : ce test porte sur les calendriers.
+  plein.airroi_cache = plein.airroi_cache.filter(c => c.cle !== CLE)
   for (const l of plein.comparables_retenus) plein.airroi_cache.push({ cle: cleCal(l.listing_id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(100) }), recupere_le: new Date().toISOString() })
   const g = await appeler({ tables: plein })
   assert.equal(g.corps.prix_depart.prix.comparables.length, 10)
@@ -793,6 +803,8 @@ test('DECISION (review de c04e356) : le calcul recoit 10 calendriers au plus, et
   // Rien en cache, deux comparables de l'equipe EN FIN de liste : releves d'abord.
   const equipe = tablesPrix({ calendriersEnCache: 0 })
   equipe.comparables_retenus = Array.from({ length: 12 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: i >= 10 ? 'fondateur' : 'proprietaire', position: i >= 10 ? null : 'equivalent' }))
+  // Sans selection en cache, tous les retenus comptent (§22.10) : ce test porte sur les calendriers.
+  equipe.airroi_cache = equipe.airroi_cache.filter(c => c.cle !== CLE)
   const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: equipe })
   const releves = r.appelsAirroi.map(a => a.calendrier)
   assert.equal(releves.length, 10)
@@ -872,4 +884,39 @@ test('§22.9 : un constat de plus de 30 jours vieillit — l annonce redevient v
   const g = await appeler({ tables: tb })
   assert.ok(g.corps.comparables.some(c => c.listing_id === IDS[0]))
   assert.ok(g.corps.retenus.includes(IDS[0]))
+})
+
+// ─── Constats de la review de 428fe8c ───────────────────────────────────────
+test('REVIEW (428fe8c) : d anciens retenus qui ne sont plus PROPOSES ne comptent plus — ni au « au moins 3 », ni aux prix — et c est dit', async () => {
+  const t = { ...tablesPrix(), bien_profil: [{ ...PROFIL_SPA, property_id: 'BIEN-A', strategie: 'juste', sejour_min: 2 }] }
+  t.airroi_cache.push(pageEnCache(0), pageEnCache(1))
+  // Les 3 retenus (IDS) sont d'anciens voisins, absents de la selection des actifs avec jacuzzi.
+  const g = await appeler({ tables: t })
+  assert.deepEqual(g.corps.retenus, [])
+  assert.equal(g.corps.retenus_hors_liste, 3)
+  assert.equal(g.corps.prix_depart.etat, 'comparables_insuffisants')
+  const st = await appeler({ method: 'POST', body: { action: 'strategie', strategie: 'juste', sejour_min: 2 }, tables: t })
+  assert.equal(st.code, 400)
+  // Un retenu de l'EQUIPE reste, meme hors de la liste.
+  t.comparables_retenus[0] = { ...t.comparables_retenus[0], retenu_par: 'fondateur' }
+  const g2 = await appeler({ tables: t })
+  assert.deepEqual(g2.corps.fondateur, [IDS[0]])
+  assert.equal(g2.corps.retenus_hors_liste, 2)
+})
+
+test('REVIEW (428fe8c) : « plus » quand la 1re page a expire recharge le debut — jamais « plus rien » a tort', async () => {
+  const t = AVEC_SPA()
+  t.airroi_cache.push({ ...pageEnCache(0), recupere_le: new Date(Date.now() - 91 * 86400000).toISOString() }, pageEnCache(1))
+  const r = await appeler({ method: 'POST', body: { action: 'plus' }, tables: t })
+  assert.equal(r.code, 200)
+  assert.deepEqual(r.appelsAirroi.map(a => a.corps.pagination.offset), [0])
+  assert.equal(r.corps.comparables.length, 20)
+})
+
+test('GARDE-FOU (review de 428fe8c) : une page payee qui ne se relit pas dans le cache ARRETE la boucle — jamais un paiement sans fin', async () => {
+  const t = AVEC_SPA()
+  t.__cacheMuet = true
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: t })
+  assert.equal(r.appelsAirroi.length, 1, 'une seule page payee')
+  assert.equal(r.corps.etat, 'indisponible')
 })

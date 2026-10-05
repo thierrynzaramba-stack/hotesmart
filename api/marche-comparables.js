@@ -133,6 +133,20 @@ async function retenusEnLigne (bienId) {
   const retirees = await annoncesRetirees(supabase, lignes.map(l => l.listing_id))
   return lignes.filter(l => !retirees.has(String(l.listing_id)))
 }
+// ⚠ §22.10 (review de 428fe8c) : les retenus QUI COMPTENT. Quand la selection
+// est en cache, un retenu de l'hote qui n'y est plus (inactif, sans les
+// equipements rares, profil change) ne compte plus : ni dans le « au moins 3 »,
+// ni dans le calcul des prix — et l'hote en est averti (`horsListe`). Ceux de
+// l'equipe restent (verrouilles). Sans selection en cache, on ne peut pas
+// juger : tous comptent.
+async function retenusProposes (bienId, profil, sel = null) {
+  const lignes = await retenusEnLigne(bienId)
+  const s = sel || (profil ? await selectionEnCache(profil) : null)
+  if (!s || !s.fiches) return { lignes, horsListe: 0 }
+  const proposes = new Set(s.fiches.map(f => String(f && f.listing_info && f.listing_info.listing_id)))
+  const garde = lignes.filter(l => l.retenu_par === 'fondateur' || proposes.has(String(l.listing_id)))
+  return { lignes: garde, horsListe: lignes.length - garde.length }
+}
 
 // Une table V2 pas encore installee (migration non appliquee) : la page le dit,
 // sans erreur brute (review de 4f19d8b, C3).
@@ -206,7 +220,7 @@ const jourParis = (d = new Date()) => d.toLocaleDateString('sv-SE', { timeZone: 
 // { etat, prix?, message?, a_capturer, note? }.
 async function calculerPrix ({ bienId, compte, profil, payer }) {
   if (!profil || !profil.strategie) return { etat: 'strategie_absente', message: 'Choisissez d’abord votre stratégie de prix.' }
-  const lignes = await retenusEnLigne(bienId)
+  const { lignes } = await retenusProposes(bienId, profil)
   if (lignes.filter(l => l.retenu_par !== 'fondateur').length < 3) return { etat: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' }
   const indispo = { etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }
   const marche = await marcheDuBien(bienId, profil)
@@ -315,8 +329,8 @@ module.exports = async (req, res) => {
   try {
     if (lecture) {
       const profil = await lireProfil(supabase, bienId)
-      const lignes = await retenusEnLigne(bienId)
       const sel = profil ? await selectionEnCache(profil) : { fiches: null, encore: false }
+      const { lignes, horsListe } = await retenusProposes(bienId, profil, sel)
       // Les retenus du FONDATEUR sont dits a part : la page les montre
       // verrouilles, et compte ceux qui sont hors de la liste (review de 7ace057).
       return res.status(200).json({ etat: 'calcule', profil: profilPublic(profil),
@@ -328,6 +342,7 @@ module.exports = async (req, res) => {
         marche_sejour_min: sel.fiches ? repartitionSejourMin(sel.fiches) : null,
         // §22.10 : AirROI en a d'autres, et on n'en a pas 50 : « Voir 10 de plus ».
         encore: !!sel.encore,
+        retenus_hors_liste: horsListe,
         // §22.7 : les prix de depart, depuis le cache seulement (un GET ne paie jamais).
         prix_depart: profil ? await prixSansPanne({ bienId, compte, profil, payer: false }) : null })
     }
@@ -360,14 +375,24 @@ module.exports = async (req, res) => {
       let sel = await selectionEnCache(profil)
       let note = null
       if (sel.rare) {
-        if (corps.action === 'plus') {
-          if (!sel.fiches || !sel.encore) return res.status(400).json({ error: 'plus_rien', message: 'Il n’y a pas d’autres biens à voir.' })
+        if (corps.action === 'plus' && sel.fiches) {
+          if (!sel.encore) return res.status(400).json({ error: 'plus_rien', message: 'Il n’y a pas d’autres biens à voir.' })
           note = await chargerPage(profil, sel.pages, { bienId, compte, leClient })
         } else {
+          // « plus » sans selection en cache (la 1re page a expire, review de
+          // 428fe8c) : on recharge le debut, comme « chercher ».
           // Les pages manquantes parmi les 2 premieres, a la suite.
-          while (!note && sel.pages < PAGES_INITIALES && (sel.pages === 0 || sel.encore)) {
+          // ⚠ AU PLUS 2 TOURS, et arret si la page payee ne se relit pas dans le
+          // cache : jamais une boucle qui paie sans fin (review de 428fe8c).
+          for (let tour = 0; tour < PAGES_INITIALES && !note && sel.pages < PAGES_INITIALES && (sel.pages === 0 || sel.encore); tour++) {
+            const avant = sel.pages
             note = await chargerPage(profil, sel.pages, { bienId, compte, leClient })
-            if (!note) sel = await selectionEnCache(profil)
+            if (note) break
+            sel = await selectionEnCache(profil)
+            if (sel.pages <= avant) {
+              console.error('[marche-comparables] page payee mais absente du cache : arret')
+              note = 'La recherche des biens du marché n’est pas disponible pour le moment. Réessayez plus tard.'
+            }
           }
         }
         sel = await selectionEnCache(profil)
@@ -391,8 +416,8 @@ module.exports = async (req, res) => {
           if (!sel.fiches) return res.status(200).json({ etat: 'indisponible', message: panne })
         }
       }
-      const lignes = await retenusEnLigne(bienId)
-      return res.status(200).json({ etat: 'calcule', comparables: cartesDe(sel, profil), note, encore: !!sel.encore,
+      const { lignes, horsListe } = await retenusProposes(bienId, profil, sel)
+      return res.status(200).json({ etat: 'calcule', comparables: cartesDe(sel, profil), note, encore: !!sel.encore, retenus_hors_liste: horsListe,
         marche_sejour_min: repartitionSejourMin(sel.fiches),
         retenus: lignes.map(x => x.listing_id), fondateur: lignes.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id),
         positions: Object.fromEntries(lignes.filter(x => x.position).map(x => [x.listing_id, x.position])) })
@@ -411,7 +436,7 @@ module.exports = async (req, res) => {
       const v = validerStrategie(corps)
       if (v.erreur) return res.status(400).json({ error: 'strategie_invalide', message: v.erreur })
       // Le serveur exige lui aussi 3 comparables de l'hote (review de dd8c060).
-      const siens = (await retenusEnLigne(bienId)).filter(x => x.retenu_par !== 'fondateur')
+      const siens = (await retenusProposes(bienId, await lireProfil(supabase, bienId))).lignes.filter(x => x.retenu_par !== 'fondateur')
       if (siens.length < 3) return res.status(400).json({ error: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' })
       const ecrit = await enregistrerStrategie(supabase, { propertyId: bienId, strategie: v.strategie, sejourMin: v.sejour_min })
       if (!ecrit) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })

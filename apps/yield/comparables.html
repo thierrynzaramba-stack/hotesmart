@@ -407,6 +407,7 @@
     // recherche peut couter, c'est l'hote qui la lance (review de 7ace057).
     if (Array.isArray(r.d.comparables)) {
       afficher(r.d.comparables)
+      dire('cp-note', noteDe(r.d), 'cp-meta')
       if (r.d.encore) boutonPlus(j)
     } else boutonChercher(j)
   }
@@ -434,6 +435,14 @@
     const p = document.createElement('p'); p.className = 'cp-meta'
     p.textContent = 'Lancez la recherche des biens du marché qui ressemblent au vôtre.'
     el('cp-zone-liste').replaceChildren(p, b)
+  }
+
+  // §22.10 (review de 428fe8c) : d'anciens choix qui ne sont plus proposes
+  // (inactifs, sans vos equipements) ne comptent plus — l'hote le sait.
+  function noteDe (d) {
+    const n = Number(d && d.retenus_hors_liste) || 0
+    const hors = n ? `${n === 1 ? 'Un de vos anciens comparables n’est plus proposé' : `${n} de vos anciens comparables ne sont plus proposés`} (bien inactif, ou sans vos équipements) : ${n === 1 ? 'il ne compte' : 'ils ne comptent'} plus. Choisissez-en d’autres dans la liste.` : ''
+    return [d && d.note, hors].filter(Boolean).join(' ')
   }
 
   // §22.10 : 10 biens de plus (une page AirROI), tant qu'il y en a, 50 au plus.
@@ -502,7 +511,7 @@
     }
     retenusDu(r.d)
     if (r.d.marche_sejour_min) { marcheSejour = r.d.marche_sejour_min; afficherSejour() }
-    dire('cp-note', r.d.note || '', 'cp-meta')
+    dire('cp-note', noteDe(r.d), 'cp-meta')
     afficher(r.d.comparables)
     if (r.d.encore) boutonPlus(j)
   }
