@@ -35,7 +35,8 @@ const ENDPOINT = 'GET /listings/comparables'
 const ENDPOINT_EQ = 'POST /listings/search/radius'
 
 // Ce que l'ecran voit du profil. §21.4 : SA position, pour son marqueur sur la
-// carte — sa propre adresse, montree a lui seul (la garde porte sur son bien).
+// carte. Elle est servie a qui peut lire les reservations de ce bien (titulaire
+// et membres delegues de ce bien) — rien de plus que l'adresse, deja servie.
 const profilPublic = p => (p ? {
   adresse: p.adresse, adresse_trouvee: p.adresse_trouvee, voyageurs: p.voyageurs, chambres: p.chambres,
   pieces: p.pieces, salles_de_bain: p.salles_de_bain, equipements: p.equipements, maj_le: p.maj_le,
@@ -82,6 +83,14 @@ async function reserverRecherche ({ bienId, compte, cout }) {
   })
   if (error) throw new Error(`reserver_recherche_comparables : ${error.message}`)
   return typeof data === 'string' ? data : 'illisible'
+}
+// Un appel qui a echoue RAND sa reservation (review de 25ab9e6, C1). Son propre
+// echec n'empeche rien : il est journalise.
+async function rendreRecherche ({ bienId, cout }) {
+  try {
+    const { error } = await supabase.rpc('rendre_recherche_comparables', { p_property: bienId, p_cout: cout })
+    if (error) console.error('[marche-comparables] rendre', error.message)
+  } catch (e) { console.error('[marche-comparables] rendre', e.message) }
 }
 
 module.exports = async (req, res) => {
@@ -150,6 +159,7 @@ module.exports = async (req, res) => {
           // Garde-fou, cle absente, AirROI en panne : une phrase simple pour
           // l'hote ; le detail au journal (jamais de cle : client.js la masque).
           console.error('[marche-comparables] airroi', e && (e.code || e.message))
+          await rendreRecherche({ bienId, cout: COUTS.base })
           return res.status(200).json({ etat: 'indisponible', message: panne })
         }
       }
@@ -158,14 +168,24 @@ module.exports = async (req, res) => {
       let complement = await complementEnCache(profil)
       let note = null
       if (complement === null) {
-        const motif = await reserverRecherche({ bienId, compte, cout: COUTS.equipements })
-        if (motif !== 'ok') { complement = []; note = 'La recherche des biens qui ont vos équipements n’a pas pu être lancée : ' + (MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois).charAt(0).toLowerCase() + (MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois).slice(1) }
-        else {
+        // Une panne de la reservation elle-meme n'empeche pas la liste de base
+        // (review de 25ab9e6, C2) : on refuse le complement, sans payer.
+        let motif
+        try { motif = await reserverRecherche({ bienId, compte, cout: COUTS.equipements }) } catch (e) {
+          console.error('[marche-comparables] reservation equipements', e.message)
+          motif = 'panne'
+        }
+        if (motif !== 'ok') {
+          complement = []
+          note = motif === 'panne' ? 'La recherche des biens qui ont vos équipements n’est pas disponible pour le moment.'
+            : 'La recherche des biens qui ont vos équipements n’a pas pu être lancée : ' + (MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois).charAt(0).toLowerCase() + (MESSAGE_QUOTA[motif] || MESSAGE_QUOTA.mois).slice(1)
+        } else {
           try {
             const r = await leClient().rechercheEquipements(corpsRechercheEquipements(profil), ctx)
             complement = r && r.donnees && Array.isArray(r.donnees.results) ? r.donnees.results : []
           } catch (e) {
             console.error('[marche-comparables] airroi equipements', e && (e.code || e.message))
+            await rendreRecherche({ bienId, cout: COUTS.equipements })
             complement = []
             note = 'La recherche des biens qui ont vos équipements n’est pas disponible pour le moment.'
           }

@@ -42,8 +42,14 @@ declare
   n int;
   depense numeric;
 begin
-  if p_cout is null or p_cout <= 0
-     or p_cout > 5 then
+  -- Deux couts connus seulement (0,10 et 0,50) ;
+  -- un parametre absent refuse (jamais un
+  -- plafond ignore par un null).
+  if p_cout is null or p_cout not in (0.10, 0.50)
+     or p_user is null or p_property is null
+     or p_bien_jour is null or p_compte_jour is null
+     or p_compte_30j is null
+     or p_budget_mois is null then
     return 'mois';
   end if;
   -- Un seul a la fois, tous comptes : le
@@ -89,6 +95,50 @@ $$;
 revoke all on function
   public.reserver_recherche_comparables(
     uuid, uuid, numeric, int, int, int, numeric)
+  from public, anon, authenticated;
+
+-- Un appel qui ECHOUE rend sa reservation (review
+-- de 25ab9e6) : sinon un appel toujours rate
+-- re-reservait a chaque essai et videait le
+-- budget du mois pour tous les hotes. Rend la
+-- plus recente reservation de ce bien et de ce
+-- cout, faite il y a moins de 10 minutes.
+create or replace function
+  public.rendre_recherche_comparables(
+    p_property uuid,
+    p_cout numeric)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  cible bigint;
+begin
+  if p_property is null or p_cout is null then
+    return false;
+  end if;
+  perform pg_advisory_xact_lock(
+    hashtext('comparables_recherches'));
+  select id into cible
+    from comparables_recherches
+    where property_id = p_property
+      and cout_usd = p_cout
+      and cree_le > now() - interval '10 minutes'
+    order by cree_le desc, id desc
+    limit 1;
+  if cible is null then
+    return false;
+  end if;
+  delete from comparables_recherches
+    where id = cible;
+  return true;
+end;
+$$;
+
+revoke all on function
+  public.rendre_recherche_comparables(
+    uuid, numeric)
   from public, anon, authenticated;
 
 notify pgrst, 'reload schema';

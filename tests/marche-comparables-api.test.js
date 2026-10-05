@@ -28,6 +28,8 @@ function base (tables) {
   const client = { rpc: async (fn, params) => {
     rpcs.push({ fn, params })
     if (tables.__rpcAbsente) return { data: null, error: { message: `Could not find the function public.${fn}(...) in the schema cache` } }
+    if (fn === 'rendre_recherche_comparables') return { data: true, error: null }
+    if (tables.__rpcPanneCout !== undefined && params.p_cout === tables.__rpcPanneCout) return { data: null, error: { message: 'connexion perdue' } }
     return { data: tables.__rpc === undefined ? 'ok' : tables.__rpc, error: null }
   }, from: tb => {
     lus.push(tb)
@@ -401,4 +403,58 @@ test('LE TEST QUI COMPTE (SECURITE, §21.3) : la migration du quota en dollars �
   assert.match(sql, /drop function if exists[\s\S]*uuid, uuid, int, int, int, int\)/)
   assert.match(sql, /revoke all on function[\s\S]*uuid, uuid, numeric, int, int, int, numeric\)[\s\S]*from public, anon, authenticated/)
   assert.match(sql, /security definer/)
+})
+
+// ─── Constats de la review de 25ab9e6 ───────────────────────────────────────
+const reservations = r => r.rpcs.filter(x => x.fn === 'reserver_recherche_comparables').map(x => x.params.p_cout)
+const rendus = r => r.rpcs.filter(x => x.fn === 'rendre_recherche_comparables').map(x => x.params)
+
+test('REVIEW : base absente et equipement rare — la base reserve 0,10 $ PUIS le complement 0,50 $', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...AVEC_SPA(), airroi_cache: [] } })
+  assert.deepEqual(reservations(r), [0.10, 0.50])
+  assert.equal(r.corps.comparables.length, 29)
+})
+
+test('LE TEST QUI COMPTE (review C1) : un appel qui ECHOUE rend sa reservation — base comme complement', async () => {
+  const base = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] }, airroi: new Error('HTTP 422') })
+  assert.deepEqual(rendus(base), [{ p_property: 'BIEN-A', p_cout: 0.10 }])
+  assert.equal(base.corps.etat, 'indisponible')
+  const comp = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA(), airroiEq: new Error('HTTP 422') })
+  assert.deepEqual(rendus(comp), [{ p_property: 'BIEN-A', p_cout: 0.50 }])
+  assert.equal(comp.corps.comparables.length, 25)
+  // Un appel reussi ne rend rien.
+  const ok = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: AVEC_SPA() })
+  assert.deepEqual(rendus(ok), [])
+})
+
+test('REVIEW (C2) : la reservation du complement en PANNE n empeche pas la liste de base — rien n est paye pour lui', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...AVEC_SPA(), __rpcPanneCout: 0.50 } })
+  assert.equal(r.corps.etat, 'calcule')
+  assert.equal(r.corps.comparables.length, 25)
+  assert.match(r.corps.note, /pas disponible pour le moment/)
+  assert.ok(!r.appelsAirroi.some(a => a.equipements))
+})
+
+test('REVIEW : la cle de cache du complement est celle qu ecrit le VRAI client AirROI', async () => {
+  const { creerClient: vraiCreer } = require('../lib/airroi/client')
+  const ecrits = []
+  const depot = { lireCache: async () => null, ecrireCache: async (l) => { ecrits.push(l.cle) }, reserver: async () => 1, terminer: async () => {}, appelsDepuis: async () => [] }
+  const avant = process.env.AIRROI_API_KEY
+  process.env.AIRROI_API_KEY = 'cle-de-test-factice'
+  try {
+    const client = vraiCreer({ depot, alerter: null, fetch: async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ results: SPA }) }) })
+    await client.rechercheEquipements(corpsRechercheEquipements({ ...PROFIL_SPA, latitude: 43.0636, longitude: 0.1476 }), { propertyId: 'BIEN-A', userId: 'COMPTE' })
+  } finally { if (avant === undefined) delete process.env.AIRROI_API_KEY; else process.env.AIRROI_API_KEY = avant }
+  assert.deepEqual(ecrits, [CLE_SPA])
+})
+
+test('LE TEST QUI COMPTE (SECURITE) : la migration — deux couts seulement, parametres nuls refuses, rendre sous le meme verrou et borne a 10 minutes', () => {
+  const sql = fs.readFileSync(path.join(RACINE, 'migrations', '2026-10-05-comparables-recherches-cout.sql'), 'utf8')
+  assert.ok(sql.split('\n').every(l => l.length < 60))
+  assert.match(sql, /p_cout not in \(0\.10, 0\.50\)/)
+  assert.match(sql, /or p_budget_mois is null then/)
+  const rendre = sql.slice(sql.indexOf('rendre_recherche_comparables('), sql.lastIndexOf('$$;'))
+  assert.ok(rendre.indexOf('pg_advisory_xact_lock') < rendre.indexOf('delete from comparables_recherches'))
+  assert.match(rendre, /interval '10 minutes'/)
+  assert.match(sql, /revoke all on function\s+public\.rendre_recherche_comparables\(\s+uuid, numeric\)\s+from public, anon, authenticated/)
 })
