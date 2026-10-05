@@ -554,3 +554,47 @@ test('§22.2 : quand la plupart des biens imposent deux nuits, demander 2 nuits 
     ? reponse({ etat: 'calcule', profil: { ...PROFIL, sejour_min: 2 }, retenus: ids, fondateur: [], comparables: CARTES, marche_sejour_min: { total: 25, une: 5, deux: 11, trois_plus: 9 } }) : reponse({}, 400)))
   assert.equal(doc.getElementById('cp-alerte-sejour').hidden, true)
 })
+
+// ─── Constats de la review de dd8c060 ───────────────────────────────────────
+test('REVIEW : changer de logement pendant l enregistrement de la strategie rend le bouton au nouveau logement', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  let liberer
+  const lent = new Promise(r => { liberer = r })
+  const { w, doc } = await monter(async ({ methode, corps }) => {
+    if (methode === 'GET') return reponse({ etat: 'calcule', profil: PROFIL, retenus: ids, fondateur: [], comparables: CARTES, marche_sejour_min: MARCHE_SEJOUR })
+    if (corps.action === 'strategie') { await lent; return reponse({ etat: 'enregistre', profil: PROFIL }) }
+    return reponse({}, 400)
+  })
+  doc.querySelector('input[name="strategie"][value="juste"]').checked = true
+  doc.getElementById('cp-sejour-min').value = '1'
+  doc.getElementById('cp-valider-c').click()
+  await attendre()
+  doc.getElementById('cp-bien').value = 'B2'
+  doc.getElementById('cp-bien').dispatchEvent(new w.Event('change'))
+  await attendre()
+  liberer()
+  await attendre()
+  assert.equal(doc.getElementById('cp-valider-c').disabled, false)
+})
+
+test('REVIEW : « la plupart », c est plus de la moitie ; les pluriels sont justes', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const page = async m => (await monter(({ methode }) => (methode === 'GET'
+    ? reponse({ etat: 'calcule', profil: { ...PROFIL, sejour_min: 2 }, retenus: ids, fondateur: [], comparables: CARTES, marche_sejour_min: m }) : reponse({}, 400)))).doc
+  assert.equal((await page({ total: 10, une: 5, deux: 3, trois_plus: 2 })).getElementById('cp-alerte-sejour').hidden, true, '50 % pile : pas la plupart')
+  assert.equal((await page({ total: 10, une: 6, deux: 2, trois_plus: 2 })).getElementById('cp-alerte-sejour').hidden, false)
+  assert.equal((await page({ total: 1, une: 1, deux: 0, trois_plus: 0 })).getElementById('cp-marche-sejour').textContent,
+    'Sur 1 bien du marché autour du vôtre : 1 accepte 1 nuit (100 %), 0 impose 2 nuits (0 %), 0 en impose 3 ou plus (0 %).')
+})
+
+test('REVIEW : une nouvelle validation des comparables n efface pas une strategie en cours de saisie', async () => {
+  const ids = CARTES.slice(0, 3).map(c => c.listing_id)
+  const s = serveur({ profil: PROFIL, cache: CARTES, retenus: ids })
+  const { doc } = await monter(s)
+  doc.querySelector('input[name="strategie"][value="qualite"]').checked = true
+  doc.getElementById('cp-sejour-min').value = '4'
+  doc.getElementById('cp-valider-b').click()
+  await attendre()
+  assert.equal(doc.querySelector('input[name="strategie"][value="qualite"]').checked, true)
+  assert.equal(doc.getElementById('cp-sejour-min').value, '4')
+})

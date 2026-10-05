@@ -517,8 +517,10 @@ test('LE TEST QUI COMPTE (§22.1) : la migration de la position — trois valeur
 })
 
 // ─── §22.2 : la strategie, et la colonne de position absente ────────────────
+const TROIS_RETENUS = () => IDS.map(id => ({ property_id: 'BIEN-A', listing_id: id, actif: true, retenu_par: 'proprietaire' }))
 test('LE TEST QUI COMPTE (§22.2) : strategie — sous reglages:write, validee, ecrite sur le bien RESOLU', async () => {
   const t = TABLES()
+  t.comparables_retenus = TROIS_RETENUS()
   t.bien_profil[0].strategie = 'agressif'; t.bien_profil[0].sejour_min = 2
   const r = await appeler({ method: 'POST', body: { action: 'strategie', strategie: 'agressif', sejour_min: '2' }, tables: t })
   assert.deepEqual(r.gardes, [{ domaine: 'reglages', niveau: 'write', bien: 'REF-42', bienRequis: true }])
@@ -529,6 +531,15 @@ test('LE TEST QUI COMPTE (§22.2) : strategie — sous reglages:write, validee, 
   const mauvais = await appeler({ method: 'POST', body: { action: 'strategie', strategie: 'luxe', sejour_min: 2 }, tables: TABLES() })
   assert.equal(mauvais.code, 400)
   assert.ok(!mauvais.ecrits.length)
+})
+
+test('REVIEW (dd8c060) : le serveur refuse une strategie sans 3 comparables de l hote — ceux de l equipe ne comptent pas', async () => {
+  const t = TABLES()
+  t.comparables_retenus = [...TROIS_RETENUS().slice(0, 2), { property_id: 'BIEN-A', listing_id: 'F1', actif: true, retenu_par: 'fondateur' }]
+  const r = await appeler({ method: 'POST', body: { action: 'strategie', strategie: 'juste', sejour_min: 1 }, tables: t })
+  assert.equal(r.code, 400)
+  assert.match(r.corps.message, /au moins 3 comparables/)
+  assert.ok(!r.ecrits.length)
 })
 
 test('§22.2 : le GET rend la strategie du profil et la repartition du marche par sejour minimum', async () => {

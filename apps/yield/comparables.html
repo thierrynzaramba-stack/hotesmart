@@ -276,6 +276,9 @@
   // comparables DEJA enregistres (l'etape C s'ouvre a partir de 3).
   let marcheSejour = null
   let retenusEnregistres = 0
+  // L'etape C est remplie UNE fois par logement : une nouvelle validation des
+  // comparables n'efface pas une saisie en cours (review de dd8c060).
+  let strategieAffichee = false
 
   function dire (id, texte, classe) { const z = el(id); z.textContent = texte || ''; z.className = classe || '' }
   const similaires = () => [...jugements.entries()].filter(([, v]) => POSITIONS.includes(v)).map(([id]) => id)
@@ -352,8 +355,9 @@
   async function charger () {
     const j = ++jeton
     profil = null; cartes = []; jugements.clear(); touches.clear(); fondateur = new Set(); ouvert = null
-    marcheSejour = null; retenusEnregistres = 0
-    el('cp-etape-c').hidden = true; dire('cp-message-c', '')
+    marcheSejour = null; retenusEnregistres = 0; strategieAffichee = false
+    // Le bouton est rendu au nouveau logement (review de dd8c060).
+    el('cp-etape-c').hidden = true; dire('cp-message-c', ''); el('cp-valider-c').disabled = false
     rechercheEnCours++
     majCompte()
     dire('cp-note', '', 'cp-meta')
@@ -711,20 +715,25 @@
   function afficherStrategie () {
     el('cp-etape-c').hidden = !(profil && retenusEnregistres >= MIN)
     if (el('cp-etape-c').hidden) return
-    for (const r of document.querySelectorAll('input[name="strategie"]')) r.checked = r.value === profil.strategie
-    el('cp-sejour-min').value = Number.isInteger(profil.sejour_min) ? profil.sejour_min : ''
+    if (!strategieAffichee) {
+      for (const r of document.querySelectorAll('input[name="strategie"]')) r.checked = r.value === profil.strategie
+      el('cp-sejour-min').value = Number.isInteger(profil.sejour_min) ? profil.sejour_min : ''
+      strategieAffichee = true
+    }
     afficherSejour()
   }
   const pct = (n, t) => `${Math.round(100 * n / t)} %`
   function afficherSejour () {
     const m = marcheSejour
     const t = m && Number.isInteger(m.total) && m.total > 0 ? m.total : 0
+    const v = (n, un, plus) => `${n} ${n > 1 ? plus : un}`
     el('cp-marche-sejour').textContent = t
-      ? `Sur ${t} biens du marché autour du vôtre : ${m.une} acceptent 1 nuit (${pct(m.une, t)}), ${m.deux} imposent 2 nuits (${pct(m.deux, t)}), ${m.trois_plus} en imposent 3 ou plus (${pct(m.trois_plus, t)}).`
+      ? `Sur ${v(t, 'bien', 'biens')} du marché autour du vôtre : ${v(m.une, 'accepte', 'acceptent')} 1 nuit (${pct(m.une, t)}), ${v(m.deux, 'impose', 'imposent')} 2 nuits (${pct(m.deux, t)}), ${m.trois_plus} en ${m.trois_plus > 1 ? 'imposent' : 'impose'} 3 ou plus (${pct(m.trois_plus, t)}).`
       : 'Le séjour minimum pratiqué par le marché n’est pas encore connu.'
-    // Imposer plusieurs nuits la ou la plupart en acceptent une : on previent.
+    // Imposer plusieurs nuits la ou LA PLUPART (plus de la moitie) en acceptent
+    // une : on previent.
     const voulu = Number(el('cp-sejour-min').value)
-    const alerte = t && Number.isInteger(voulu) && voulu >= 2 && m.une / t >= 0.5
+    const alerte = t && Number.isInteger(voulu) && voulu >= 2 && m.une / t > 0.5
     el('cp-alerte-sejour').hidden = !alerte
     el('cp-alerte-sejour').textContent = alerte
       ? `La plupart des biens autour du vôtre acceptent 1 nuit. Imposer ${voulu} nuits peut vous faire perdre des réservations, ou vous obliger à baisser votre prix par nuit.` : ''

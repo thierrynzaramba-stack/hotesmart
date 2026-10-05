@@ -207,6 +207,9 @@ module.exports = async (req, res) => {
     if (corps.action === 'strategie') {
       const v = validerStrategie(corps)
       if (v.erreur) return res.status(400).json({ error: 'strategie_invalide', message: v.erreur })
+      // Le serveur exige lui aussi 3 comparables de l'hote (review de dd8c060).
+      const siens = (await comparablesRetenus(supabase, bienId)).filter(x => x.retenu_par !== 'fondateur')
+      if (siens.length < 3) return res.status(400).json({ error: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' })
       const ecrit = await enregistrerStrategie(supabase, { propertyId: bienId, strategie: v.strategie, sejourMin: v.sejour_min })
       if (!ecrit) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })
       return res.status(200).json({ etat: 'enregistre', profil: profilPublic(await lireProfil(supabase, bienId)) })
