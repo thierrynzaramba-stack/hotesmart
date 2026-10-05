@@ -2787,3 +2787,38 @@ similaires, les retenus de l'équipe verrouillés, la recherche de base à 0,10 
 - **M2 (page)** : la carte, la fiche sous la carte, le rappel des paramètres,
   la mise en page téléphone, les tests dans un vrai DOM (Leaflet simulé), puis
   la recette sur staging.
+
+### 21.6 Recette du 5 octobre 2026 : repérer les biens à vos équipements, et une fiche complète
+
+**Constat.** À Toulouse, la recherche par équipement a fonctionné : 10 biens à
+jacuzzi ou sauna sur 80 dans le rayon, 0,50 $. Ils étaient sur la carte, mais
+**rien ne les distinguait** : seule leur fiche le disait. Demande de Thierry :
+« mets toutes les informations disponibles pour les biens ».
+
+- **Sur la carte**, un bien qui a l'un des équipements RARES cochés par l'hôte
+  (jacuzzi ou spa, piscine, jardin, vue) porte un **contour violet épais**, et la
+  légende dit « À vos équipements ». C'est le cas qu'il vienne de la recherche
+  complémentaire ou de la liste de base.
+- **La fiche affiche toute l'information disponible, sauf l'argent.** Ce qui est
+  montré :
+  - la description ;
+  - le type de logement, logement entier ou non ;
+  - les lits et les salles de bain ;
+  - la note, le nombre d'avis et les six sous-notes ;
+  - Superhôte et « Coup de cœur voyageurs » ;
+  - le prénom de l'hôte et la gestion professionnelle ;
+  - le séjour minimum, la réservation instantanée, la politique d'annulation, les
+    heures d'arrivée et de départ ;
+  - **tous** les équipements, traduits en français quand le libellé est connu,
+    sinon tels qu'Airbnb les écrit ;
+  - les photos, jusqu'à 30, chacune filtrée par `photoSure` ;
+  - le lien « Voir l'annonce sur Airbnb »
+    (`https://www.airbnb.fr/rooms/<identifiant>`, construit à partir de
+    l'identifiant numérique validé).
+
+  **Jamais** de frais de ménage, de supplément voyageur, de prix moyen, de
+  revenu, d'occupation ni de RevPAR. Les blocs `pricing_info` et
+  `performance_metrics` ne sortent pas : seule l'ouverture annuelle en est
+  dérivée.
+- Tout passe par la liste blanche de `lib/marche/pertinence.js`, les textes
+  sont bornés en longueur, et la page les pose en `textContent`.
