@@ -3065,16 +3065,41 @@ Le « 10 % » de §22.2 est **remplacé** par le cran de prix mesuré ci-dessous
 - **Couplage du déploiement.** La migration `…-nature.sql` et le code partent
   **ensemble**. Chacun sans l'autre rend la page « pas encore disponible »,
   sans paiement.
-- **Décisions de budget, à trancher par Thierry avant la production** :
-  - **Budget SQL des hôtes** : 5 $ par mois, toutes recherches et tous
-    calendriers confondus. Cela couvre environ 2 biens de 25 comparables par
-    mois, pour toute la plateforme.
-  - **Garde-fou du client** : 3 $ par bien sur 90 jours. Il refuse les derniers
-    calendriers d'un bien à 25 comparables (0,60 $ de recherches + 2,50 $ de
-    calendriers).
-  - Les comparables de l'équipe sont payés sur le quota de l'hôte.
+- **Décisions de Thierry (5 octobre 2026)** :
+  - **10 calendriers au plus servent au calcul d'un bien** : ceux déjà en
+    cache d'abord (gratuits), puis dans l'ordre des retenus, l'équipe d'abord.
+    On ne relève jamais au-delà. Le plafond SQL en laisse 15 sur 90 jours,
+    pour couvrir un relevé payé mais perdu.
+  - **Budget des hôtes : 15 $ par mois**, pour toute la plateforme. Le
+    garde-fou du client (3 $ par bien sur 90 jours) suffit désormais :
+    0,60 $ de recherches + 1 $ de calendriers.
+  - Haut de gamme : le seuil de note de 0,5 est gardé.
+  - Les comparables de l'équipe restent payés sur le quota de l'hôte.
+- **C6 levé le 5 octobre 2026.** Un vrai calendrier en ligne a été capturé
+  (annonce 38988457, 0,10 $, rangé dans le cache staging).
+  - Clés : `currency`, `cleaning_fee`, `short_stay_cleaning_fee`, `results`.
+  - Une nuit : `date`, `available`, `rate`, `min_nights`.
+  - 361 nuits, toutes avec un prix.
+  - Fixture : `tests/fixtures/airroi/calendrier-live-38988457-2026-10-05.json`.
+- **Recette staging** : le loft de recette est rattaché à Toulouse. Le relief
+  de Toulouse a été capturé le 5 octobre 2026 (703 jours, à partir du 1er
+  novembre) ; `scripts/capturer-relief-airroi.js` prend maintenant
+  `--latitude`, `--longitude` et `--nom`.
 - **Dettes mineures notées** :
   - le prix par nuit utilisé pour l'effet du séjour minimum est la médiane des
     médianes par niveau ;
   - deux POST « prix » simultanés peuvent payer deux fois le même calendrier
     (coût borné par le quota).
+- **Review de c04e356 (aucun constat de sécurité)**. Corrigé : le script de
+  capture refuse une coordonnée vide (elle valait 0, donc une capture payée en
+  (0, 0)) et un `--option valeur` écrit avec une espace. Restent, notés :
+  - **deux « Relever les prix » simultanés** peuvent payer deux fois les
+    mêmes calendriers : rien ne verrouille le bien entre la lecture du cache
+    et les réservations. Borné par le plafond SQL de 15 sur 90 jours ;
+  - **retenus remplacés après un relevé** : chaque nouveau comparable se
+    relève, jusqu'à 15 sur 90 jours. Cela consomme la marge prévue pour un
+    relevé perdu. Choix de conception assumé, à dire à Thierry ;
+  - des calendriers relevés à des dates différentes expirent en décalé : les
+    10 retenus pour le calcul, donc les prix, peuvent changer à ce moment-là ;
+  - le nom passé par `--nom` n'est pas vérifié contre les coordonnées : c'est
+    à l'opérateur de nommer juste.

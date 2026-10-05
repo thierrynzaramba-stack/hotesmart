@@ -7,6 +7,7 @@
 // Usage — c'est Thierry qui le lance, depuis /home/thierry/hotesmart-v23 (la
 // cle ne s'ecrit nulle part : elle passe par l'environnement) :
 //   AIRROI_API_KEY="$AIRROI_KEY" node scripts/capturer-relief-airroi.js [--confirmer] [--cache=<dossier>] [--budget=1]
+//     [--latitude=43.608 --longitude=1.453 --nom=toulouse]   (un autre marche ; defaut : Bagneres)
 //
 // ⚠ `AIRROI_KEY` doit deja etre posee dans le shell : ne JAMAIS coller la cle
 // en clair dans la commande (elle partirait dans l'historique).
@@ -21,7 +22,9 @@
 //   2. il verifie que la reponse ne contient la cle sous AUCUNE forme — sinon
 //      il n'ecrit RIEN dans le depot et echoue ;
 //   3. il ecrit la reponse BRUTE dans
-//      tests/fixtures/airroi/relief-bagneres-<date de capture>.json.
+//      tests/fixtures/airroi/relief-<nom>-<date de capture>.json (nom : bagneres
+//      par defaut, sinon --nom ; c'est a l'operateur qu'il revient de nommer
+//      juste l'endroit vise, le script n'a aucun moyen de le verifier).
 //
 // ⚠ BASE 100 : les pourcentages rendus sont des FACTEURS, jamais le prix d'un
 // logement (le client refuse toute autre base). On prend a AirROI la
@@ -53,13 +56,32 @@ const JOURS = 730
 
 ;(async () => {
   if (!(Number.isFinite(budget) && budget > 0)) { console.error('ECHEC : --budget doit etre un nombre positif'); process.exit(1) }
-  const moi = lireJson(fs.readFileSync(path.join(FIX, 'moi.json'), 'utf8'))
-  const { latitude, longitude } = moi.location_info
+  // Un autre marche se vise par ses coordonnees ET son nom, les deux ou aucun :
+  // le nom ecrit dans le fichier ne doit jamais mentir sur l'endroit capture.
+  // `--latitude 43.6` (espace) serait ignore, et la capture partirait sur
+  // Bagneres : refuse (review de c04e356).
+  const nus = args.filter(a => /^--(latitude|longitude|nom)$/.test(a))
+  if (nus.length) { console.error(`ECHEC : ${nus.join(', ')} s ecrit --option=valeur`); process.exit(1) }
+  const vise = ['latitude', 'longitude', 'nom'].map(n => val(n, null))
+  if (vise.some(v => v !== null) && vise.some(v => v === null)) { console.error('ECHEC : --latitude, --longitude et --nom vont ensemble'); process.exit(1) }
+  let latitude, longitude
+  let nom = 'bagneres'
+  if (vise[0] !== null) {
+    // Une valeur vide donnerait Number('') === 0 : une capture payee en (0, 0).
+    const nombre = v => (/^-?\d+(\.\d+)?$/.test(v) ? Number(v) : NaN)
+    ;[latitude, longitude] = [nombre(vise[0]), nombre(vise[1])]
+    nom = vise[2]
+    if (!(Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) || !/^[a-z0-9-]{2,40}$/.test(nom)) { console.error('ECHEC : coordonnees ou nom (minuscules, chiffres, tirets) invalides'); process.exit(1) }
+  } else {
+    const moi = lireJson(fs.readFileSync(path.join(FIX, 'moi.json'), 'utf8'))
+    ;({ latitude, longitude } = moi.location_info)
+  }
   const [an, mo] = jourLocalParis(new Date().toISOString()).slice(0, 7).split('-').map(Number)
   const debut = new Date(Date.UTC(an, mo, 1)).toISOString().slice(0, 10)
   const fin = new Date(Date.parse(`${debut}T00:00:00Z`) + (JOURS - 1) * 86400000).toISOString().slice(0, 10)
   const depot = depotFichier(dossier)
   const client = creerClient({ depot, alerter: null, gardes: { budgetMensuelUsd: budget } })
+  console.log(`Marche vise : ${nom} (${latitude}, ${longitude})`)
   console.log(`Cache : ${dossier} · plafond du MOIS civil sur ce journal local : ${budget} $ · ${debut} → ${fin} (${JOURS} jours)`)
 
   const E = 'POST /price-recommendation/calendar-prices'
@@ -81,7 +103,7 @@ const JOURS = 730
 
   // Le jour de CAPTURE, a l'heure de Paris.
   const jour = jourLocalParis(String(brut.recupere_le || new Date().toISOString()))
-  const fichier = path.join(SORTIE, `relief-bagneres-${jour}.json`)
+  const fichier = path.join(SORTIE, `relief-${nom}-${jour}.json`)
   // Cle verifiee EN MEMOIRE avant toute ecriture ; sans cle, refus (code 6).
   ecrireFixtureSansCle(brut.reponse, fichier, process.env.AIRROI_API_KEY || '')
   const contenu = brut.reponse
