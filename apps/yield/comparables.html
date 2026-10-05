@@ -87,7 +87,9 @@
     .cp-prix th { text-align: left; color: var(--text2); font-weight: 600; font-size: 12px; padding: 6px 8px; border-bottom: 0.5px solid var(--border2); }
     .cp-prix td { padding: 8px; border-bottom: 0.5px solid var(--border); }
     .cp-prix td.prix { font-size: 16px; font-weight: 700; }
-    .cp-suivi { font-size: 12.5px; font-weight: 600; }
+    .cp-prix .prix { display: block; font-size: 16px; font-weight: 700; }
+    .cp-fourchette { display: block; font-size: 12px; color: var(--text2); }
+    .cp-avert { font-size: 13px; color: var(--text); background: var(--bg2, #f6f6f6); border-radius: 6px; padding: 6px 8px; }
     .cp-pied { position: sticky; bottom: 0; background: var(--bg); border-top: 0.5px solid var(--border); padding: 10px 0; margin-top: 12px;
       display: flex; flex-wrap: wrap; align-items: center; gap: 10px; z-index: 500; }
     @media (max-width: 640px) {
@@ -295,7 +297,6 @@
   let strategieAffichee = false
   // §22.7 : la note de coherence de chaque comparable (sa mention), et le
   // dernier etat des prix de depart.
-  let suivis = new Map()
   let prixDepart = null
 
   function dire (id, texte, classe) { const z = el(id); z.textContent = texte || ''; z.className = classe || '' }
@@ -373,7 +374,7 @@
   async function charger () {
     const j = ++jeton
     profil = null; cartes = []; jugements.clear(); touches.clear(); fondateur = new Set(); ouvert = null
-    marcheSejour = null; retenusEnregistres = 0; strategieAffichee = false; suivis = new Map(); prixDepart = null
+    marcheSejour = null; retenusEnregistres = 0; strategieAffichee = false; prixDepart = null
     el('cp-etape-d').hidden = true
     // Le bouton est rendu au nouveau logement (review de dd8c060).
     el('cp-etape-c').hidden = true; dire('cp-message-c', ''); el('cp-valider-c').disabled = false
@@ -399,7 +400,6 @@
     marcheSejour = r.d.marche_sejour_min || null
     retenusEnregistres = (r.d.retenus || []).filter(id => !fondateur.has(String(id))).length
     afficherStrategie()
-    afficherPrix(r.d.prix_depart || null)
     afficherRecap(profil)
     montrerFormulaire(false)
     el('cp-etape-b').hidden = false
@@ -410,6 +410,8 @@
       dire('cp-note', noteDe(r.d), 'cp-meta')
       if (r.d.encore) boutonPlus(j)
     } else boutonChercher(j)
+    // Apres la liste : un comparable « a verifier » se nomme par sa carte.
+    afficherPrix(r.d.prix_depart || null)
   }
 
   // Les retenus enregistres : ceux de l'equipe a part (et jamais dans les
@@ -657,7 +659,6 @@
       const b = document.createElement('span'); b.className = 'cp-badge'; b.textContent = EQUIPEMENTS[e]; badges.append(b)
     }
     f.append(photos, entete, ligne, activite, badges)
-    if (suivis.has(id)) f.append(Object.assign(document.createElement('p'), { className: 'cp-suivi', textContent: `Ses prix : ${suivis.get(id)}` }))
     if (c.source === 'equipements') f.append(Object.assign(document.createElement('p'), { className: 'cp-source', textContent: 'Trouvé grâce à vos équipements' }))
     else if (aVosEquipements(c)) f.append(Object.assign(document.createElement('p'), { className: 'cp-source', textContent: 'A l’un de vos équipements' }))
     // §21.6 : tout le reste de l'information, sauf l'argent.
@@ -805,6 +806,9 @@
 
   // ─── ÉTAPE D : les prix de depart (§22.7) ────────────────────────────────
   const EUROS = v => `${v} €`
+  const NIVEAUX_PRIX = ['creux', 'modere', 'favorable', 'pic']
+  const NOM_NIVEAU = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
+  const NOM_STRATEGIE = { agressif: 'agressif', juste: 'prix marché', qualite: 'haut de gamme' }
   function afficherPrix (pd) {
     prixDepart = pd
     el('cp-etape-d').hidden = !(profil && profil.strategie && pd)
@@ -828,31 +832,54 @@
     if (pd.etat !== 'calcule' || !pd.prix) { zone.append(Object.assign(document.createElement('p'), { className: 'non-calc', textContent: pd.message || 'Vos prix de départ ne peuvent pas encore être calculés.' })); return }
     const r = pd.prix
     // Le calcul entier impossible : son motif, jamais un tableau vide (C5).
-    if (!Array.isArray(r.niveaux) || !r.niveaux.length) {
-      zone.append(Object.assign(document.createElement('p'), { className: 'non-calc', textContent: `Vos prix de départ ne peuvent pas être calculés : ${r.motif || 'données insuffisantes'}.` }))
+    if (r.statut !== 'calcule' || !Array.isArray(r.cases) || !r.cases.length) {
+      zone.append(Object.assign(document.createElement('p'), { className: 'non-calc', textContent: `Vos prix de départ ne peuvent pas être calculés : ${r.motif || 'données insuffisantes'}` }))
       if (pd.a_capturer > 0) zone.append(bouton())
       return
     }
-    suivis = new Map((r.comparables || []).map(c => [String(c.listing_id), c.mention]))
+    // §22.11 : 8 cases — 4 niveaux × semaine / week-end. Dans chaque case, VOTRE
+    // prix et la fourchette des prix de vos comparables (jamais hors marche).
     const t = document.createElement('table'); t.className = 'cp-prix'
     const th = document.createElement('tr')
-    for (const x of ['Niveau du marché', 'Fourchette de vos comparables', 'Votre prix de départ']) { const c = document.createElement('th'); c.textContent = x; th.append(c) }
+    for (const x of ['Niveau', 'Semaine', 'Week-end']) { const c = document.createElement('th'); c.textContent = x; th.append(c) }
     const tete = document.createElement('thead'); tete.append(th)
     const corps = document.createElement('tbody')
-    for (const n of r.niveaux || []) {
+    const cellule = c => {
+      const td = document.createElement('td')
+      if (!c || c.statut !== 'calcule') { td.className = 'non-calc'; td.textContent = c && c.motif ? `non calculable : ${c.motif}` : 'non calculable'; return td }
+      td.append(Object.assign(document.createElement('span'), { className: 'prix', textContent: EUROS(c.prix) }),
+        Object.assign(document.createElement('span'), { className: 'cp-fourchette', textContent: `marché ${EUROS(c.fourchette.bas)} à ${EUROS(c.fourchette.haut)}` }))
+      return td
+    }
+    for (const n of NIVEAUX_PRIX) {
       const tr = document.createElement('tr')
-      const a = document.createElement('td'); a.textContent = n.yieldflow
-      const b = document.createElement('td')
-      const c = document.createElement('td')
-      if (n.statut === 'calcule') {
-        b.textContent = `${EUROS(n.fourchette.bas)} à ${EUROS(n.fourchette.haut)}`
-        c.className = 'prix'; c.textContent = EUROS(n.prix)
-      } else { b.className = 'non-calc'; b.textContent = 'non calculable'; c.className = 'non-calc'; c.textContent = n.motif || '' }
-      tr.append(a, b, c); corps.append(tr)
+      tr.append(Object.assign(document.createElement('td'), { textContent: NOM_NIVEAU[n] }),
+        cellule(r.cases.find(c => c.niveau === n && c.type === 'semaine')), cellule(r.cases.find(c => c.niveau === n && c.type === 'weekend')))
+      corps.append(tr)
     }
     t.append(tete, corps)
     zone.append(t)
-    if (Number.isFinite(r.cran)) zone.append(Object.assign(document.createElement('p'), { className: 'cp-meta', textContent: `Sur ce marché, un niveau de prix vaut environ ${EUROS(r.cran)} : c’est l’écart moyen d’un niveau au suivant chez vos comparables.` }))
+    const dit = (texte, classe = 'cp-meta') => zone.append(Object.assign(document.createElement('p'), { className: classe, textContent: texte }))
+    dit('Week-end : les nuits du vendredi et du samedi. Prix mesurés sur les 6 prochains mois.')
+    dit(r.niveaux_source === 'marche'
+      ? 'Vos comparables changent peu de prix au fil des saisons : les niveaux viennent du calendrier du marché de votre ville.'
+      : `Les niveaux viennent de la saison de vos comparables : leurs prix varient de ${r.amplitude} % entre leurs dates calmes et leurs dates fortes.`)
+    if (r.ancres) dit(`Prix habituel de semaine de vos ${pluriel(r.hotes, 'hôte', 'hôtes')}, par rang : agressif ${EUROS(r.ancres.agressif)}, prix marché ${EUROS(r.ancres.juste)}, haut de gamme ${EUROS(r.ancres.qualite)}. Votre stratégie : ${NOM_STRATEGIE[r.strategie] || ''}.`)
+    // Un ecart faible entre strategies est DIT, jamais maquille.
+    if (r.serre) {
+      const [a, b, e] = r.serre.juste_qualite <= r.serre.agressif_juste ? ['le prix marché', 'le haut de gamme', r.serre.juste_qualite] : ['l’agressif', 'le prix marché', r.serre.agressif_juste]
+      dit(`Votre marché est serré : dans certaines cases, seulement ${EUROS(e)} séparent ${a} et ${b}.`, 'cp-avert')
+    }
+    // Une montee ratee : signalee, jamais lissee (pour VOTRE strategie).
+    for (const al of (r.alertes || []).filter(x => x.strategie === r.strategie)) {
+      dit(al.type === 'weekend'
+        ? `À vérifier : en ${NOM_NIVEAU[al.niveau].toLowerCase()}, votre week-end (${EUROS(al.prix)}) est sous votre semaine (${EUROS(al.semaine)}). C’est ce que pratiquent vos comparables : rien n’a été lissé.`
+        : `À vérifier : en ${al.jour === 'weekend' ? 'week-end' : 'semaine'}, le niveau ${NOM_NIVEAU[al.niveau].toLowerCase()} (${EUROS(al.prix)}) est sous le niveau précédent (${EUROS(al.precedent)}). C’est ce que pratiquent vos comparables : rien n’a été lissé.`, 'cp-avert')
+    }
+    for (const id of r.a_verifier || []) {
+      const c = cartes.find(x => String(x.listing_id) === String(id))
+      dit(`Vérifiez ce comparable : ${c ? c.nom : 'un de vos comparables'}. Ses prix sont à plus du double, ou à moins de la moitié, de ceux des autres dans toutes les cases.`, 'cp-avert')
+    }
     const se = r.sejour
     if (se && se.statut === 'calcule') {
       const sens = se.ecart_pct < 0 ? `${Math.abs(se.ecart_pct)} % moins cher` : se.ecart_pct > 0 ? `${se.ecart_pct} % plus cher` : 'au même prix'

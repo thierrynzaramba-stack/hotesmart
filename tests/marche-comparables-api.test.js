@@ -627,55 +627,69 @@ test('REVIEW (1e64a2b) : la colonne de position absente (migration non collee) �
 const t = require('../lib/marche/temperature-airroi')
 const RELIEF = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'relief-bagneres-2026-09-30.json'), 'utf8'))
 const TEMPERATURE = t.construireLignes({ marche: { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }, reponse: RELIEF })
-// Un calendrier qui suit le marche : base + 3 € par point d'ecart.
-const CALENDRIER = base => TEMPERATURE.filter(j => j.jour < '2027-10-01').map(j => ({ date: j.jour, available: true, rate: Math.round(base + 3 * j.ecart), min_nights: 2 }))
+// §22.11 : un calendrier RELATIF a aujourd'hui (la route lit l'horloge : regle
+// du depot), 365 nuits, une saison continue (sommet en fevrier, +30 %) et une
+// prime week-end de 25 % ; `plat` : ni saison ni prime.
+const AUJ = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' })
+const CALENDRIER = (base, { plat = false } = {}) => Array.from({ length: 365 }, (_, i) => {
+  const date = new Date(Date.parse(`${AUJ()}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10)
+  const mois = (Date.parse(`${date}T00:00:00Z`) - Date.parse(`${date.slice(0, 4)}-02-10T00:00:00Z`)) / (86400000 * 365) * 2 * Math.PI
+  const we = [5, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay())
+  return { date, available: true, rate: Math.round(base * (plat ? 1 : (1 + 0.3 * Math.max(0, Math.cos(mois))) * (we ? 1.25 : 1)) * 100) / 100, min_nights: 2 }
+})
+// Le calendrier du MARCHE, relatif lui aussi (le repli s'y lit) : la vraie
+// capture de Bagneres, ses jours decales pour commencer aujourd'hui.
+const TEMPERATURE_REL = () => TEMPERATURE.map((r, i) => ({ ...r, jour: new Date(Date.parse(`${AUJ()}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10) }))
+// Les 5 retenus des tests de prix : 5 hotes distincts (fixture comps-labulle).
+const IDS5 = COMPS.slice(0, 5).map(c => String(c.listing_info.listing_id))
 const cleCal = id => cleCanonique('GET /listings/live/calendar', { listing_id: String(id), currency: 'native' })
-function tablesPrix ({ calendriersEnCache = 3, strategie = 'juste', localite = 'Bagnères-de-Bigorre' } = {}) {
+function tablesPrix ({ calendriersEnCache = 5, strategie = 'juste', localite = 'Bagnères-de-Bigorre', plat = false } = {}) {
   const tb = TABLES()
   tb.bien_profil = [{ ...PROFIL, property_id: 'BIEN-A', strategie, sejour_min: 2 }]
-  tb.comparables_retenus = IDS.map((id, i) => ({ property_id: 'BIEN-A', listing_id: id, actif: true, retenu_par: 'proprietaire', position: ['dessous', 'equivalent', 'dessus'][i] }))
+  tb.comparables_retenus = IDS5.map((id, i) => ({ property_id: 'BIEN-A', listing_id: id, actif: true, retenu_par: 'proprietaire', position: ['dessous', 'equivalent', 'dessus'][i % 3] }))
   tb.marche_biens = [{ property_id: 'BIEN-A', pays: 'France', region: 'Occitania', localite }]
-  tb.marche_temperature_airroi = TEMPERATURE
-  for (const id of IDS.slice(0, calendriersEnCache)) tb.airroi_cache.push({ cle: cleCal(id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(100 + 10 * IDS.indexOf(id)) }), recupere_le: new Date().toISOString() })
+  tb.marche_temperature_airroi = TEMPERATURE_REL()
+  for (const id of IDS5.slice(0, calendriersEnCache)) tb.airroi_cache.push({ cle: cleCal(id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(80 + 30 * IDS5.indexOf(id), { plat }) }), recupere_le: new Date().toISOString() })
   return tb
 }
 const reservCal = r => r.rpcs.filter(x => x.fn === 'reserver_recherche_comparables' && x.params.p_nature === 'calendrier')
 
-test('LE TEST QUI COMPTE (§22.7) : le GET calcule les prix de depart depuis le CACHE seul — quatre niveaux, aucun paiement', async () => {
+test('LE TEST QUI COMPTE (§22.11) : le GET calcule les 8 cases depuis le CACHE seul — 5 hotes, tout monte, aucun paiement', async () => {
   const g = await appeler({ tables: tablesPrix() })
   const pd = g.corps.prix_depart
   assert.equal(pd.etat, 'calcule')
-  assert.deepEqual(pd.prix.niveaux.map(n => n.yieldflow), ['Base', 'Moyen', 'Haut', 'Très haut ou Exceptionnel'])
-  assert.ok(pd.prix.niveaux.every(n => n.statut === 'calcule' && n.prix % 5 === 0))
-  const prix = pd.prix.niveaux.map(n => n.prix)
-  for (let i = 1; i < prix.length; i++) assert.ok(prix[i] >= prix[i - 1], 'les niveaux montent')
+  assert.equal(pd.prix.statut, 'calcule')
+  assert.equal(pd.prix.hotes, 5)
+  assert.equal(pd.prix.niveaux_source, 'segment')
+  assert.deepEqual(pd.prix.cases.map(c => `${c.niveau}/${c.type}`), ['creux/semaine', 'creux/weekend', 'modere/semaine', 'modere/weekend', 'favorable/semaine', 'favorable/weekend', 'pic/semaine', 'pic/weekend'])
+  assert.deepEqual(pd.prix.alertes, [])
+  for (const c of pd.prix.cases.filter(x => x.type === 'weekend')) assert.ok(c.prix > pd.prix.cases.find(x => x.niveau === c.niveau && x.type === 'semaine').prix, `${c.niveau} : le week-end au-dessus`)
   assert.equal(g.rpcs.length, 0)
   assert.equal(g.appelsAirroi.length, 0)
-  // Un calendrier manque : le GET calcule avec ce qu'il a, et le DIT, sans rien
-  // payer (review de f37b7da, C4 : GET et POST disent la meme chose).
-  const manque = await appeler({ tables: tablesPrix({ calendriersEnCache: 2 }) })
-  assert.equal(manque.corps.prix_depart.etat, 'calcule')
+  // Un calendrier manque : 4 hotes seulement — le GET le DIT, sans rien payer.
+  const manque = await appeler({ tables: tablesPrix({ calendriersEnCache: 4 }) })
   assert.equal(manque.corps.prix_depart.a_capturer, 1)
-  assert.match(manque.corps.prix_depart.note, /Les prix de 1 comparable ne sont pas encore relevés/)
+  assert.equal(manque.corps.prix_depart.prix.statut, 'non_calculable')
+  assert.match(manque.corps.prix_depart.prix.motif, /4 hôtes indépendants/)
   assert.equal(manque.rpcs.length, 0)
   const rien = await appeler({ tables: tablesPrix({ calendriersEnCache: 0 }) })
   assert.equal(rien.corps.prix_depart.etat, 'a_capturer')
-  assert.equal(rien.corps.prix_depart.a_capturer, 3)
+  assert.equal(rien.corps.prix_depart.a_capturer, 5)
 })
 
 test('LE TEST QUI COMPTE (§22.5) : « prix » releve chaque calendrier MANQUANT — reserve 0,10 $ (nature calendrier) avant de partir', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tablesPrix({ calendriersEnCache: 1 }) })
   assert.deepEqual(r.gardes, [{ domaine: 'reglages', niveau: 'write', bien: 'REF-42', bienRequis: true }])
-  assert.equal(reservCal(r).length, 2)
+  assert.equal(reservCal(r).length, 4)
   assert.ok(reservCal(r).every(x => x.params.p_cout === 0.10 && x.params.p_calendriers_90j === 15))
-  assert.deepEqual(r.appelsAirroi.map(a => a.calendrier).sort(), IDS.slice(1).sort())
+  assert.deepEqual(r.appelsAirroi.map(a => a.calendrier).sort(), IDS5.slice(1).sort())
   assert.ok(r.appelsAirroi.every(a => a.ctx.propertyId === 'BIEN-A' && a.ctx.userId === 'COMPTE'))
   assert.equal(r.corps.etat, 'calcule')
   assert.equal(r.corps.a_capturer, 0)
 })
 
 test('§22.5 : un calendrier qui echoue rend sa reservation (nature calendrier) ; le plafond atteint arrete les releves suivants, et c est dit', async () => {
-  const panne = await appeler({ method: 'POST', body: { action: 'prix' }, tables: { ...tablesPrix({ calendriersEnCache: 2 }), __calendrierEnPanne: 'libere' } })
+  const panne = await appeler({ method: 'POST', body: { action: 'prix' }, tables: { ...tablesPrix({ calendriersEnCache: 4 }), __calendrierEnPanne: 'libere' } })
   assert.deepEqual(rendus(panne), [{ p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'calendrier' }])
   assert.equal(panne.corps.a_capturer, 1)
   assert.match(panne.corps.note, /Les prix de 1 comparable ne sont pas encore relevés/)
@@ -687,12 +701,15 @@ test('§22.5 : un calendrier qui echoue rend sa reservation (nature calendrier) 
   assert.match(plafond.corps.note, /déjà été relevés plusieurs fois ce trimestre/)
 })
 
-test('LE TEST QUI COMPTE (§22.7) : le marche relie doit etre celui de l ADRESSE du profil — sinon ni calcul ni paiement', async () => {
-  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tablesPrix({ calendriersEnCache: 0, localite: 'Toulouse' }) })
-  assert.equal(r.corps.etat, 'marche_absent')
-  assert.match(r.corps.message, /Le marché de votre adresse n’est pas encore disponible/)
-  assert.equal(r.rpcs.length, 0)
+test('LE TEST QUI COMPTE (§22.11) : les niveaux viennent des COMPARABLES — sans marche relie a l adresse, le calcul se fait quand meme ; le marche ne sert qu au repli', async () => {
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tablesPrix({ localite: 'Toulouse' }) })
+  assert.equal(r.corps.etat, 'calcule')
+  assert.equal(r.corps.prix.niveaux_source, 'segment')
   assert.equal(r.appelsAirroi.length, 0)
+  // Des comparables PLATS et aucun marche de l'adresse : rien n'est invente.
+  const plats = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tablesPrix({ localite: 'Toulouse', plat: true }) })
+  assert.equal(plats.corps.prix.statut, 'non_calculable')
+  assert.match(plats.corps.prix.motif, /changent trop peu de prix/)
 })
 
 test('§22.7 : sans strategie, ou sans 3 comparables de l hote, rien n est calcule ni paye', async () => {
@@ -730,14 +747,16 @@ test('LE TEST QUI COMPTE (SECURITE, review S1) : un appel PEUT-ETRE FACTURE (rep
   assert.deepEqual(rendus(cal), [])
 })
 
-test('REVIEW : le marche relie doit figurer en MOTS ENTIERS dans l adresse — « Pau » n est pas dans « Saint-Paul » ; une commune vide ne passe pas', async () => {
-  const pau = tablesPrix({ localite: 'Pau' })
+test('REVIEW : le marche du REPLI doit figurer en MOTS ENTIERS dans l adresse — « Pau » n est pas dans « Saint-Paul » ; une commune vide ne passe pas', async () => {
+  const pau = tablesPrix({ localite: 'Pau', plat: true })
   pau.bien_profil[0].adresse_trouvee = '12 Rue Saint-Paul 31000 Toulouse'
-  assert.equal((await appeler({ tables: pau })).corps.prix_depart.etat, 'marche_absent')
-  assert.equal((await appeler({ tables: tablesPrix({ localite: '' }) })).corps.prix_depart.etat, 'marche_absent')
-  const ok = tablesPrix()
+  assert.equal((await appeler({ tables: pau })).corps.prix_depart.prix.statut, 'non_calculable')
+  assert.equal((await appeler({ tables: tablesPrix({ localite: '', plat: true }) })).corps.prix_depart.prix.statut, 'non_calculable')
+  const ok = tablesPrix({ plat: true })
   ok.bien_profil[0].adresse_trouvee = '12 RUE DES THERMES 65200 BAGNERES DE BIGORRE'
-  assert.equal((await appeler({ tables: ok })).corps.prix_depart.etat, 'calcule', 'tirets et espaces equivalents, accents et casse ignores')
+  const r = (await appeler({ tables: ok })).corps.prix_depart.prix
+  assert.equal(r.statut, 'calcule', 'tirets et espaces equivalents, accents et casse ignores')
+  assert.equal(r.niveaux_source, 'marche')
 })
 
 test('REVIEW (C3) : une panne du calcul des prix au GET n empeche pas les comparables', async () => {
@@ -748,13 +767,12 @@ test('REVIEW (C3) : une panne du calcul des prix au GET n empeche pas les compar
   assert.equal(g.corps.prix_depart.etat, 'erreur')
 })
 
-test('REVIEW (C7) : un calendrier du marche trop ancien (moins de 300 jours a venir) — non calcule, et dit', async () => {
-  const tb = tablesPrix()
-  const limite = new Date(Date.now() + 200 * 86400000).toISOString().slice(0, 10)
-  tb.marche_temperature_airroi = TEMPERATURE.filter(j => j.jour < limite)
+test('§22.11 : repli sur un marche qui ne couvre pas les 6 prochains mois — non calcule, et dit', async () => {
+  const tb = tablesPrix({ plat: true })
+  tb.marche_temperature_airroi = TEMPERATURE_REL().slice(0, 30)
   const g = await appeler({ tables: tb })
-  assert.equal(g.corps.prix_depart.etat, 'marche_absent')
-  assert.match(g.corps.prix_depart.message, /trop ancien/)
+  assert.equal(g.corps.prix_depart.prix.statut, 'non_calculable')
+  assert.match(g.corps.prix_depart.prix.motif, /ne couvre pas les 6 prochains mois/)
 })
 
 // ⚠ RE-REVIEW DE 0fab219 : une panne de la reservation dans UN ouvrier ne laisse
@@ -798,7 +816,7 @@ test('DECISION (review de c04e356) : le calcul recoit 10 calendriers au plus, et
   plein.airroi_cache = plein.airroi_cache.filter(c => c.cle !== CLE)
   for (const l of plein.comparables_retenus) plein.airroi_cache.push({ cle: cleCal(l.listing_id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(100) }), recupere_le: new Date().toISOString() })
   const g = await appeler({ tables: plein })
-  assert.equal(g.corps.prix_depart.prix.comparables.length, 10)
+  assert.equal(g.corps.prix_depart.prix.comparables, 10)
   assert.equal(g.corps.prix_depart.a_capturer, 0)
   // Rien en cache, deux comparables de l'equipe EN FIN de liste : releves d'abord.
   const equipe = tablesPrix({ calendriersEnCache: 0 })
@@ -823,11 +841,11 @@ test('LE TEST QUI COMPTE (§22.9) : une annonce retiree n apparait NULLE PART �
   const g = await appeler({ tables: tb })
   assert.ok(!g.corps.comparables.some(c => c.listing_id === IDS[0]), 'absente de la carte')
   assert.equal(g.corps.comparables.length, 24)
-  assert.deepEqual(g.corps.retenus, IDS.slice(1), 'absente des retenus')
+  assert.deepEqual(g.corps.retenus, IDS5.slice(1), 'absente des retenus')
   assert.ok(!(IDS[0] in g.corps.positions))
-  assert.ok(!g.corps.prix_depart.prix || !g.corps.prix_depart.prix.comparables.some(c => c.listing_id === IDS[0]))
-  // Trois retenus dont un retire : il n'en reste que deux, le calcul le dit.
-  assert.equal(g.corps.prix_depart.etat, 'comparables_insuffisants')
+  // Cinq retenus dont un retire : 4 hotes, le calcul le dit.
+  assert.equal(g.corps.prix_depart.prix.comparables, 4)
+  assert.match(g.corps.prix_depart.prix.motif, /4 hôtes indépendants/)
 })
 
 test('§22.9 : un calendrier qui repond 404 note l annonce retiree (pour tous les biens), rend la reservation, et ne la compte plus', async () => {
@@ -851,16 +869,16 @@ test('§22.9 : une annonce retiree ne se choisit pas, et ne se releve plus', asy
   p.airroi_annonces_retirees = [retiree('9999')]
   const pr = await appeler({ method: 'POST', body: { action: 'prix' }, tables: p })
   assert.ok(!pr.appelsAirroi.some(a => a.calendrier === '9999'))
-  assert.equal(reservCal(pr).length, 3)
+  assert.equal(reservCal(pr).length, 5)
 })
 
 test('GARDE-FOU (review de b83823a, SECURITE) : trois 404 ou plus sans aucun releve reussi = panne presumee, RIEN n est note', async () => {
   const tb = tablesPrix({ calendriersEnCache: 0 })
-  tb.__calendrier404 = [...IDS]
+  tb.__calendrier404 = [...IDS5]
   const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
   assert.equal(r.ecrits.filter(e => e.tb === 'airroi_annonces_retirees').length, 0)
-  assert.equal(rendus(r).length, 3, 'les trois reservations rendues (404 non facture)')
-  assert.equal(r.corps.a_capturer, 3, 'elles restent a relever')
+  assert.equal(rendus(r).length, 5, 'les cinq reservations rendues (404 non facture)')
+  assert.equal(r.corps.a_capturer, 5, 'elles restent a relever')
   // Un seul 404 parmi des releves reussis : c'est une annonce retiree.
   const un = tablesPrix({ calendriersEnCache: 0 })
   un.__calendrier404 = [IDS[0]]
@@ -890,10 +908,10 @@ test('§22.9 : un constat de plus de 30 jours vieillit — l annonce redevient v
 test('REVIEW (428fe8c) : d anciens retenus qui ne sont plus PROPOSES ne comptent plus — ni au « au moins 3 », ni aux prix — et c est dit', async () => {
   const t = { ...tablesPrix(), bien_profil: [{ ...PROFIL_SPA, property_id: 'BIEN-A', strategie: 'juste', sejour_min: 2 }] }
   t.airroi_cache.push(pageEnCache(0), pageEnCache(1))
-  // Les 3 retenus (IDS) sont d'anciens voisins, absents de la selection des actifs avec jacuzzi.
+  // Les 5 retenus (IDS5) sont d'anciens voisins, absents de la selection des actifs avec jacuzzi.
   const g = await appeler({ tables: t })
   assert.deepEqual(g.corps.retenus, [])
-  assert.equal(g.corps.retenus_hors_liste, 3)
+  assert.equal(g.corps.retenus_hors_liste, 5)
   assert.equal(g.corps.prix_depart.etat, 'comparables_insuffisants')
   const st = await appeler({ method: 'POST', body: { action: 'strategie', strategie: 'juste', sejour_min: 2 }, tables: t })
   assert.equal(st.code, 400)
@@ -901,7 +919,7 @@ test('REVIEW (428fe8c) : d anciens retenus qui ne sont plus PROPOSES ne comptent
   t.comparables_retenus[0] = { ...t.comparables_retenus[0], retenu_par: 'fondateur' }
   const g2 = await appeler({ tables: t })
   assert.deepEqual(g2.corps.fondateur, [IDS[0]])
-  assert.equal(g2.corps.retenus_hors_liste, 2)
+  assert.equal(g2.corps.retenus_hors_liste, 4)
 })
 
 test('REVIEW (428fe8c) : « plus » quand la 1re page a expire recharge le debut — jamais « plus rien » a tort', async () => {
@@ -919,4 +937,40 @@ test('GARDE-FOU (review de 428fe8c) : une page payee qui ne se relit pas dans le
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: t })
   assert.equal(r.appelsAirroi.length, 1, 'une seule page payee')
   assert.equal(r.corps.etat, 'indisponible')
+})
+
+test('LE TEST QUI COMPTE (§22.11, decision de Thierry) : les releves visent des HOTES DIFFERENTS d abord — jamais deux annonces du meme hote tant qu il manque des hotes', async () => {
+  // La selection : les 25 voisins ; le 2e a le MEME hote que le 1er.
+  const comps = COMPS.map(c => ({ ...c }))
+  comps[1] = { ...comps[1], host_info: { ...comps[1].host_info, host_id: comps[0].host_info.host_id } }
+  const t = tablesPrix({ calendriersEnCache: 0 })
+  t.airroi_cache = [{ cle: CLE, reponse: JSON.stringify({ listings: comps }), recupere_le: new Date().toISOString() }]
+  // 11 retenus, dans l'ordre de la liste : 10 hotes distincts plus le doublon.
+  t.comparables_retenus = comps.slice(0, 11).map(c => ({ property_id: 'BIEN-A', listing_id: String(c.listing_info.listing_id), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: t })
+  const releves = r.appelsAirroi.map(a => a.calendrier)
+  assert.equal(releves.length, 10)
+  assert.ok(!releves.includes(String(comps[1].listing_info.listing_id)), 'la 2e annonce du meme hote attend')
+  assert.ok(releves.includes(String(comps[10].listing_info.listing_id)), 'un 10e hote passe avant elle')
+})
+
+// ─── Constats de la review de b745bb8 (route) ───────────────────────────────
+test('review de b745bb8 : un CO-HOTE commun fait une seule voix — la 2e annonce de la conciergerie attend', async () => {
+  const comps = COMPS.map(c => ({ ...c }))
+  comps[1] = { ...comps[1], host_info: { ...comps[1].host_info, cohost_ids: [String(comps[0].host_info.host_id)] } }
+  const t = tablesPrix({ calendriersEnCache: 0 })
+  t.airroi_cache = [{ cle: CLE, reponse: JSON.stringify({ listings: comps }), recupere_le: new Date().toISOString() }]
+  t.comparables_retenus = comps.slice(0, 11).map(c => ({ property_id: 'BIEN-A', listing_id: String(c.listing_info.listing_id), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: t })
+  const releves = r.appelsAirroi.map(a => a.calendrier)
+  assert.equal(releves.length, 10)
+  assert.ok(!releves.includes(String(comps[1].listing_info.listing_id)))
+})
+
+test('LE TEST QUI COMPTE (review de b745bb8) : la liste du marche a expire — les hotes ne sont plus identifiables, le calcul REFUSE et dit de relancer la recherche', async () => {
+  const t = tablesPrix()
+  t.airroi_cache = t.airroi_cache.filter(c => c.cle !== CLE)
+  const g = await appeler({ tables: t })
+  assert.equal(g.corps.prix_depart.prix.statut, 'non_calculable')
+  assert.match(g.corps.prix_depart.prix.motif, /n’est pas identifié \(la liste des biens du marché a expiré\) : relancez la recherche/)
 })

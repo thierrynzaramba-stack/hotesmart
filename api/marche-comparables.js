@@ -31,6 +31,7 @@ const { lireJson } = require('../lib/airroi/json')
 const { validerProfil, validerStrategie, geocoder, lireProfil, enregistrerProfil, enregistrerStrategie } = require('../lib/marche/profil-bien')
 const { reunirEtTrier, cartesDansLOrdre, repartitionSejourMin } = require('../lib/marche/pertinence')
 const { seulementActives } = require('../lib/marche/activite')
+const { gestionnaires } = require('../lib/marche/grille-marche')
 const { prixDeDepart } = require('../lib/marche/prix-depart')
 const { lireDerniereCapture } = require('../lib/marche/temperature-airroi')
 const { rechercheDuProfil, validerChoix, enregistrerChoix, corpsRechercheActifs, PAGE, PAGES_INITIALES, PAGES_MAX, COUTS, QUOTA, MESSAGE_QUOTA, CALENDRIERS_PAR_BIEN } = require('../lib/marche/choix-comparables')
@@ -139,13 +140,22 @@ async function retenusEnLigne (bienId) {
 // ni dans le calcul des prix — et l'hote en est averti (`horsListe`). Ceux de
 // l'equipe restent (verrouilles). Sans selection en cache, on ne peut pas
 // juger : tous comptent.
+// §22.11 : rend aussi l'HOTE de chaque annonce de la selection (un hote = une
+// voix) ; une annonce hors selection compte seule.
 async function retenusProposes (bienId, profil, sel = null) {
   const lignes = await retenusEnLigne(bienId)
   const s = sel || (profil ? await selectionEnCache(profil) : null)
-  if (!s || !s.fiches) return { lignes, horsListe: 0 }
-  const proposes = new Set(s.fiches.map(f => String(f && f.listing_info && f.listing_info.listing_id)))
+  if (!s || !s.fiches) return { lignes, horsListe: 0, hoteDe: new Map() }
+  const idDe = f => String(f && f.listing_info && f.listing_info.listing_id)
+  const proposes = new Set(s.fiches.map(idDe))
+  // Le GESTIONNAIRE : hote et co-hotes regroupes (review de b745bb8 — une
+  // conciergerie co-hote de plusieurs annonces n'est qu'une voix). Meme regle
+  // que la grille du marche (lib/marche/grille-marche.js, `gestionnaires`).
+  const fiches = s.fiches.filter(f => f && f.host_info)
+  const racines = gestionnaires(fiches.map(f => ({ host_id: f.host_info.host_id, cohost_ids: f.host_info.cohost_ids })))
+  const hoteDe = new Map(fiches.map((f, i) => [idDe(f), `g${racines[i]}`]))
   const garde = lignes.filter(l => l.retenu_par === 'fondateur' || proposes.has(String(l.listing_id)))
-  return { lignes: garde, horsListe: lignes.length - garde.length }
+  return { lignes: garde, horsListe: lignes.length - garde.length, hoteDe }
 }
 
 // Une table V2 pas encore installee (migration non appliquee) : la page le dit,
@@ -220,25 +230,35 @@ const jourParis = (d = new Date()) => d.toLocaleDateString('sv-SE', { timeZone: 
 // { etat, prix?, message?, a_capturer, note? }.
 async function calculerPrix ({ bienId, compte, profil, payer }) {
   if (!profil || !profil.strategie) return { etat: 'strategie_absente', message: 'Choisissez d’abord votre stratégie de prix.' }
-  const { lignes } = await retenusProposes(bienId, profil)
+  const { lignes, hoteDe } = await retenusProposes(bienId, profil)
   if (lignes.filter(l => l.retenu_par !== 'fondateur').length < 3) return { etat: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' }
-  const indispo = { etat: 'marche_absent', message: 'Le marché de votre adresse n’est pas encore disponible : vos prix de départ ne peuvent pas encore être calculés.' }
-  const marche = await marcheDuBien(bienId, profil)
-  if (!marche) return indispo
-  const capture = await lireDerniereCapture(supabase, marche)
-  if (capture.erreur) throw new Error(`temperature : ${capture.erreur}`)
-  // Seules les nuits A VENIR comptent ; le calendrier du marche doit couvrir
-  // les 300 prochains jours (review de f37b7da, C7).
+  // §22.11 : les niveaux viennent des comparables ; le marche de l'adresse ne
+  // sert qu'au REPLI (segment trop plat). Son absence n'empeche rien d'emblee.
   const aujourdhui = jourParis()
-  const dans300 = jourParis(new Date(Date.now() + 300 * 86400000))
-  const jours = capture.jours.filter(j => j.jour >= aujourdhui)
-  if (!jours.length || !jours.some(j => j.jour >= dans300)) return { ...indispo, message: 'Le calendrier du marché de votre adresse est trop ancien : vos prix de départ ne peuvent pas encore être calculés.' }
+  const marche = await marcheDuBien(bienId, profil)
+  let jours = []
+  if (marche) {
+    const capture = await lireDerniereCapture(supabase, marche)
+    if (capture.erreur) throw new Error(`temperature : ${capture.erreur}`)
+    jours = capture.jours.filter(j => j.jour >= aujourdhui)
+  }
   // ⚠ Au plus CALENDRIERS_PAR_BIEN calendriers servent au calcul (decision de
-  // Thierry) : ceux deja en cache d'abord (gratuits), puis dans l'ordre des
-  // retenus — l'equipe d'abord, puis l'ordre du choix.
-  const tous = [...lignes.filter(l => l.retenu_par === 'fondateur'), ...lignes.filter(l => l.retenu_par !== 'fondateur')].map(l => String(l.listing_id))
-  const cache = await calendriersEnCache(tous)
-  const ids = [...tous.filter(id => cache.has(id)), ...tous.filter(id => !cache.has(id))].slice(0, CALENDRIERS_PAR_BIEN)
+  // Thierry). §22.11 : des HOTES DIFFERENTS d'abord — jamais deux annonces du
+  // meme hote tant qu'il manque des hotes independants ; dans un hote, l'annonce
+  // deja en cache (gratuite) d'abord, et les hotes deja en cache d'abord. Puis
+  // l'equipe, puis l'ordre du choix.
+  // Hote inconnu (selection expiree) : null, le calcul refuse et le dit. Un
+  // retenu de l'equipe hors de la liste compte seul (choix verrouille).
+  const deLEquipe = new Set(lignes.filter(l => l.retenu_par === 'fondateur').map(l => String(l.listing_id)))
+  const hoteDeL = id => hoteDe.get(id) || (deLEquipe.has(id) ? `annonce:${id}` : null)
+  const ordre = [...lignes.filter(l => l.retenu_par === 'fondateur'), ...lignes.filter(l => l.retenu_par !== 'fondateur')].map(l => String(l.listing_id))
+  const cache = await calendriersEnCache(ordre)
+  const parHote = new Map()
+  for (const id of ordre) { const h = hoteDeL(id) ?? `inconnu:${id}`; if (!parHote.has(h)) parHote.set(h, []); parHote.get(h).push(id) }
+  const enCacheDabord = xs => [...xs.filter(id => cache.has(id)), ...xs.filter(id => !cache.has(id))]
+  // Un representant par hote ; parmi eux, ceux deja en cache (gratuits) d'abord.
+  const premiers = enCacheDabord([...parHote.values()].map(xs => enCacheDabord(xs)[0]))
+  const ids = [...premiers, ...enCacheDabord(ordre.filter(id => !premiers.includes(id)))].slice(0, CALENDRIERS_PAR_BIEN)
   let manquants = ids.filter(id => !cache.has(id))
   let refus = null
   const retireesIci = new Set()
@@ -291,14 +311,14 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
     manquants = ids.filter(id => !cache.has(id) && !retireesIci.has(id))
   }
   const calendriers = lignes.filter(l => ids.includes(String(l.listing_id)) && cache.has(String(l.listing_id))).map(l => ({
-    listing_id: String(l.listing_id), position: l.retenu_par === 'fondateur' ? 'equivalent' : l.position,
+    listing_id: String(l.listing_id), hote: hoteDeL(String(l.listing_id)), position: l.retenu_par === 'fondateur' ? 'equivalent' : l.position,
     jours: cache.get(String(l.listing_id)).filter(n => n && String(n.date) >= aujourdhui),
   }))
   // Rien en cache et rien paye : il faut relever.
   if (!calendriers.length) return { etat: 'a_capturer', a_capturer: manquants.length, note: refus }
   // Avec ce qui est disponible, on calcule ; les manquants se proposent a cote
   // (review de f37b7da, C4 : le GET et le POST disent la meme chose).
-  const prix = prixDeDepart({ calendriers, marche: jours, strategie: profil.strategie })
+  const prix = prixDeDepart({ calendriers, marche: jours, strategie: profil.strategie, aujourdhui })
   return { etat: 'calcule', prix, a_capturer: manquants.length,
     note: refus || (manquants.length ? `Les prix de ${manquants.length} comparable${manquants.length > 1 ? 's' : ''} ne sont pas encore relevés.` : null) }
 }

@@ -1,158 +1,191 @@
-// tests/prix-depart.test.js — les prix de depart d'un bien, niveau par niveau
-// (spec §22.7 de docs/kb/chantier-nouveau-bien.md).
+// tests/prix-depart.test.js — les prix de depart d'un bien en 8 cases, ancre ×
+// forme (spec §22.11 de docs/kb/chantier-nouveau-bien.md, decisions de Thierry
+// du 5 octobre 2026). Fonction pure : aucune base, aucun reseau ; `aujourdhui`
+// est injecte (dates figees : le test n'a pas d'horloge).
 //
-// CE QU'ILS EMPECHENT :
-//   - un comparable qui ne suit pas le marche peserait autant qu'un autre ;
-//   - un cran de prix faux ; une strategie mal appliquee ;
-//   - une position (dessous / dessus) qui decalerait dans le mauvais sens ;
-//   - un prix tire de moins de 3 comparables, ou d'un niveau trop peu mesure.
+// CE QU'ILS EMPECHENT (vecu du 5 octobre 2026) :
+//   - un prix week-end qui DISPARAIT (cran de 1 a 3 €, « Moyen » sous « Base ») ;
+//   - un hote compte deux fois parce qu'il a deux annonces ;
+//   - une strategie qui recopie un seul bien ou sort du marche ;
+//   - un ecart faible ou une montee ratee LISSES au lieu d'etre dits.
+
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const p = require('../lib/marche/prix-depart')
+const fs = require('fs')
+const path = require('path')
+const { lireJson } = require('../lib/airroi/json')
+const P = require('../lib/marche/prix-depart')
 
-// Un marche synthetique : 40 jours par niveau, ecarts -6 / 0 / 4 / 9.
-const ECARTS = { creux: -6, modere: 0, favorable: 4, pic: 9 }
-const MARCHE = []
-let d = Date.UTC(2026, 9, 1)
-for (const niveau of Object.keys(ECARTS)) for (let i = 0; i < 40; i++, d += 86400000) MARCHE.push({ jour: new Date(d).toISOString().slice(0, 10), ecart: ECARTS[niveau], niveau })
-// Un calendrier : le prix est une fonction du jour de marche.
-const cal = (id, position, f, minNuits = 2) => ({ listing_id: id, position, jours: MARCHE.map(m => ({ date: m.jour, rate: f(m), min_nights: minNuits })) })
-// Prix par niveau : base + pas * rang du niveau (0..3), donc un cran = pas.
-const RANG = { creux: 0, modere: 1, favorable: 2, pic: 3 }
-const etage = (base, pas) => m => base + pas * RANG[m.niveau]
-const niv = (r, n) => r.niveaux.find(x => x.niveau === n)
+const AUJ = '2026-10-05'
+const jours = n => Array.from({ length: n }, (_, i) => new Date(Date.parse(`${AUJ}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10))
+const JOURS = jours(200)
+const estWE = j => [5, 6].includes(new Date(`${j}T00:00:00Z`).getUTCDay())
+// La saison du segment, CONTINUE (comme dans les vrais calendriers) : un sommet
+// en fevrier, +30 % au plus. Une saison en marches d'escalier ferait des
+// egalites aux seuils des quarts (voir le test des egalites).
+const saison = j => 1 + 0.3 * Math.max(0, Math.cos((Date.parse(`${j}T00:00:00Z`) - Date.parse('2027-02-10T00:00:00Z')) / (86400000 * 365) * 2 * Math.PI))
+// Une annonce synthetique : base × saison × prime week-end.
+const annonce = (id, hote, base, { prime = 1.25, position = 'equivalent', plat = false } = {}) => ({
+  listing_id: id, hote, position,
+  jours: JOURS.map(j => ({ date: j, rate: Math.round(base * (plat ? 1 : saison(j)) * (estWE(j) ? prime : 1) * 100) / 100, min_nights: 2 })),
+})
+const cinq = (opts = {}) => [annonce('1', 'A', 80, opts), annonce('2', 'B', 110, opts), annonce('3', 'C', 130, opts), annonce('4', 'D', 150, opts), annonce('5', 'E', 200, opts)]
+const caseDe = (r, n, t) => r.cases.find(c => c.niveau === n && c.type === t)
 
-test('LE TEST QUI COMPTE : la note de coherence — 1 si le prix suit le marche, 0 s il est fixe ou a contre-sens ; null sous 30 nuits', () => {
-  const parJour = new Map(MARCHE.map(m => [m.jour, m]))
-  assert.equal(p.noteCoherence(cal('a', 'equivalent', etage(100, 10)).jours, parJour), 1)
-  assert.equal(p.noteCoherence(cal('b', 'equivalent', () => 120).jours, parJour), 0)
-  assert.equal(p.noteCoherence(cal('c', 'equivalent', m => 200 - 10 * RANG[m.niveau]).jours, parJour), 0, 'a contre-sens : 0, jamais negatif')
-  assert.equal(p.noteCoherence(cal('d', 'equivalent', etage(100, 10)).jours.slice(0, 29), parJour), null)
+test('LE TEST QUI COMPTE (vecu, loft de recette, 5 octobre 2026) : les 8 cases, 7 hotes, le prix week-end garde, tout monte', () => {
+  const f = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'prix-depart-loft-2026-10-05.json'), 'utf8'))
+  const r = P.prixDeDepart({ calendriers: f.comparables, marche: [], strategie: 'qualite', aujourdhui: '2026-10-05' })
+  assert.equal(r.statut, 'calcule')
+  assert.deepEqual([r.comparables, r.hotes], [9, 7], '9 annonces, 7 hotes : Charles et Cassandra ne comptent qu une fois')
+  assert.equal(r.niveaux_source, 'segment')
+  assert.deepEqual(r.ancres, { agressif: 140, juste: 158, qualite: 165 })
+  const attendu = { 'creux/semaine': [139, 157, 164], 'creux/weekend': [154, 173, 182], 'modere/semaine': [140, 158, 165], 'modere/weekend': [166, 187, 196],
+    'favorable/semaine': [140, 158, 166], 'favorable/weekend': [170, 192, 201], 'pic/semaine': [150, 169, 177], 'pic/weekend': [179, 202, 211] }
+  for (const c of r.cases) assert.deepEqual([c.strategies.agressif, c.strategies.juste, c.strategies.qualite], attendu[`${c.niveau}/${c.type}`], `${c.niveau}/${c.type}`)
+  assert.deepEqual(r.alertes, [], 'tout monte')
+  assert.deepEqual(r.serre, { agressif_juste: 18, juste_qualite: 7 }, 'le marche serre est DIT')
+  // Le week-end garde sa prime a chaque niveau.
+  for (const n of P.NIVEAUX) assert.ok(caseDe(r, n, 'weekend').prix - caseDe(r, n, 'semaine').prix >= 15, n)
 })
 
-test('LE TEST QUI COMPTE : le cran = l ecart moyen d un niveau au suivant, pondere par les notes', () => {
-  // Deux comparables qui suivent (cran 10 et 20) : cran 15.
-  const r = p.prixDeDepart({ calendriers: [cal('1', 'equivalent', etage(100, 10)), cal('2', 'equivalent', etage(100, 20)), cal('3', 'equivalent', etage(100, 15))], marche: MARCHE, strategie: 'juste' })
-  assert.equal(r.cran, 15)
-  // Un comparable a prix fixe (cran 0) ne pese que 0,1 : le cran reste pres de 15.
-  const r2 = p.prixDeDepart({ calendriers: [cal('1', 'equivalent', etage(100, 10)), cal('2', 'equivalent', etage(100, 20)), cal('3', 'equivalent', () => 150)], marche: MARCHE, strategie: 'juste' })
-  assert.equal(r2.cran, 14, '(10 + 20 + 0 × 0,1) / 2,1 ≈ 14')
+test('le week-end se mesure sur les NUITS du vendredi et du samedi (dette 30)', () => {
+  assert.equal(P.typeDe('2026-10-09'), 'weekend', 'vendredi')
+  assert.equal(P.typeDe('2026-10-10'), 'weekend', 'samedi')
+  assert.equal(P.typeDe('2026-10-11'), 'semaine', 'dimanche soir : on repart lundi')
 })
 
-test('LE TEST QUI COMPTE : prix marche = moyenne PONDEREE, chaque prix decale d un demi-cran selon la position', () => {
-  // Trois comparables a 100 au Creux, cran 10 ; positions dessous / equivalent / dessus.
-  const cs = [cal('1', 'dessous', etage(100, 10)), cal('2', 'equivalent', etage(100, 10)), cal('3', 'dessus', etage(100, 10))]
-  const r = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' })
-  assert.equal(r.cran, 10)
-  assert.equal(niv(r, 'creux').prix, 100, '(95 + 100 + 105) / 3')
-  // L'hote en dessous de tous : un demi-cran plus bas.
-  const bas = p.prixDeDepart({ calendriers: cs.map(c => ({ ...c, position: 'dessous' })), marche: MARCHE, strategie: 'juste' })
-  assert.equal(niv(bas, 'creux').prix, 95)
-  const haut = p.prixDeDepart({ calendriers: cs.map(c => ({ ...c, position: 'dessus' })), marche: MARCHE, strategie: 'juste' })
-  assert.equal(niv(haut, 'creux').prix, 105)
-})
-
-test('LE TEST QUI COMPTE : un comparable qui ne suit pas le marche pese peu dans le prix marche', () => {
-  // Deux suiveurs a 100 au Creux, un fixe a 200 : la moyenne ponderee reste pres de 100.
-  const r = p.prixDeDepart({ calendriers: [cal('1', 'equivalent', etage(100, 10)), cal('2', 'equivalent', etage(100, 10)), cal('3', 'equivalent', () => 200)], marche: MARCHE, strategie: 'juste' })
-  assert.equal(niv(r, 'creux').prix, 105, '(100 + 100 + 200 × 0,1) / 2,1 ≈ 104,8 → 105')
-})
-
-test('LE TEST QUI COMPTE : agressif = prix marche − un cran ; haut de gamme = le plus cher qui suit le marche + un cran', () => {
-  const cs = [cal('1', 'equivalent', etage(100, 10)), cal('2', 'equivalent', etage(120, 10)), cal('3', 'equivalent', etage(110, 10)), cal('4', 'equivalent', () => 300)]
-  const marcheR = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' })
-  const agr = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'agressif' })
-  const hg = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'qualite' })
-  assert.equal(marcheR.cran, 10)
-  for (const n of ['creux', 'modere', 'favorable', 'pic']) {
-    assert.ok(niv(agr, n).prix <= niv(marcheR, n).prix - 5, `${n} : agressif sous le marche`)
+test('LE TEST QUI COMPTE : la prime week-end de chaque hote, mesuree contre SON propre prix, survit — et la saison du segment fait monter les niveaux', () => {
+  const r = P.prixDeDepart({ calendriers: cinq(), marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.statut, 'calcule')
+  assert.equal(r.niveaux_source, 'segment')
+  for (const n of P.NIVEAUX) {
+    const se = caseDe(r, n, 'semaine')
+    const we = caseDe(r, n, 'weekend')
+    if (se.statut === 'calcule' && we.statut === 'calcule') assert.ok(Math.abs(we.forme / se.forme - 1.25) < 0.02, `${n} : prime 25 % gardee (${we.forme} / ${se.forme})`)
   }
-  // Haut de gamme : le plus cher des SUIVEURS (120 au Creux) + 10, pas le fixe a 300.
-  assert.equal(niv(hg, 'creux').prix, 130)
-  assert.equal(niv(hg, 'pic').prix, 160)
-  // Sans aucun suiveur, le plus cher de tous.
-  const plats = p.prixDeDepart({ calendriers: [cal('1', 'equivalent', () => 100), cal('2', 'equivalent', () => 120), cal('3', 'equivalent', etage(110, 10))], marche: MARCHE, strategie: 'qualite' })
-  // Seul le 3e suit : 110 + cran ; le cran pese les deux fixes a 0,1 :
-  // (0 × 0,1 + 0 × 0,1 + 10 × 1) / 1,2 ≈ 8,3 → 118,3 → 120.
-  assert.equal(plats.cran, 8)
-  assert.equal(niv(plats, 'creux').prix, 120)
+  assert.ok(caseDe(r, 'pic', 'semaine').prix > caseDe(r, 'creux', 'semaine').prix, 'la saison monte')
+  assert.deepEqual(r.alertes, [])
 })
 
-test('LE TEST QUI COMPTE : moins de 3 comparables avec un prix a un niveau — non calculable, avec son motif', () => {
-  const cs = [cal('1', 'equivalent', etage(100, 10)), cal('2', 'equivalent', etage(100, 10)), cal('3', 'equivalent', etage(100, 10))]
-  cs[2].jours = cs[2].jours.map(j => (MARCHE.find(m => m.jour === j.date).niveau === 'pic' ? { ...j, rate: null } : j))
-  const r = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' })
-  assert.equal(niv(r, 'pic').statut, 'non_calculable')
-  assert.match(niv(r, 'pic').motif, /2 comparables avec un prix à ce niveau \(il en faut 3\)/)
-  assert.equal(niv(r, 'creux').statut, 'calcule')
+test('LE TEST QUI COMPTE : un hote = une voix — une seconde annonce du meme hote ne deplace pas les ancres', () => {
+  const seul = P.prixDeDepart({ calendriers: cinq(), marche: [], strategie: 'juste', aujourdhui: AUJ })
+  const double = P.prixDeDepart({ calendriers: [...cinq(), annonce('6', 'E', 200)], marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.deepEqual([double.hotes, double.comparables], [5, 6])
+  assert.deepEqual(double.ancres, seul.ancres)
 })
 
-test('un niveau ou un comparable a moins de 3 nuits ne compte pas pour lui ; un prix nul ou aberrant n est pas un prix', () => {
-  const cs = [cal('1', 'equivalent', etage(100, 10)), cal('2', 'equivalent', etage(100, 10)), cal('3', 'equivalent', etage(100, 10))]
-  cs[0].jours = cs[0].jours.map((j, i) => (i % 2 ? { ...j, rate: 0 } : i % 3 ? { ...j, rate: 'cher' } : j))
-  const r = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' })
-  assert.equal(niv(r, 'creux').statut, 'calcule')
-  assert.equal(niv(r, 'creux').prix, 100)
+test('moins de 5 hotes independants : rien n est calcule, et c est dit', () => {
+  const r = P.prixDeDepart({ calendriers: [...cinq().slice(0, 4), annonce('6', 'D', 160)], marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.statut, 'non_calculable')
+  assert.match(r.motif, /4 hôtes indépendants parmi vos comparables : il en faut au moins 5/)
 })
 
-test('la fourchette du marche va du plus bas au plus haut prix des comparables a ce niveau ; arrondi aux 5 € superieurs', () => {
-  const cs = [cal('1', 'equivalent', etage(91, 10)), cal('2', 'equivalent', etage(100, 10)), cal('3', 'equivalent', etage(117, 10))]
-  const r = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' })
-  assert.deepEqual(niv(r, 'creux').fourchette, { bas: 91, haut: 117 })
-  assert.equal(niv(r, 'creux').prix % 5, 0)
+test('les strategies se placent aux PERCENTILES 25 / 50 / 75 des ancres, jamais aux bords', () => {
+  const r = P.prixDeDepart({ calendriers: cinq({ plat: true, prime: 1 }), marche: JOURS.map(j => ({ jour: j, niveau: 'modere' })), strategie: 'juste', aujourdhui: AUJ })
+  // Ancres 80, 110, 130, 150, 200 : P25 = 110, P50 = 130, P75 = 150.
+  assert.deepEqual(r.ancres, { agressif: 110, juste: 130, qualite: 150 })
 })
 
-test('LE TEST QUI COMPTE : l effet du sejour minimum sur le prix — 1 nuit contre 2 ou plus, a partir de 2 comparables de chaque cote', () => {
-  const cs = [cal('1', 'equivalent', etage(100, 10), 1), cal('2', 'equivalent', etage(110, 10), 1), cal('3', 'equivalent', etage(90, 10), 2), cal('4', 'equivalent', etage(80, 10), 3)]
-  const r = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' })
-  assert.equal(r.sejour.statut, 'calcule')
-  assert.ok(r.sejour.ecart_pct < 0, 'ici, imposer 2 nuits va avec un prix par nuit plus bas')
-  const un = p.prixDeDepart({ calendriers: cs.slice(0, 3), marche: MARCHE, strategie: 'juste' })
-  assert.equal(un.sejour.statut, 'non_calculable')
+test('les positions decalent l ancre d un quart de la largeur au plus', () => {
+  const dessus = P.prixDeDepart({ calendriers: cinq({ plat: true, prime: 1, position: 'dessus' }), marche: JOURS.map(j => ({ jour: j, niveau: 'modere' })), strategie: 'juste', aujourdhui: AUJ })
+  // Largeur des ancres 200 − 80 = 120 ; un quart : +30 €.
+  assert.deepEqual(dessus.ancres, { agressif: 140, juste: 160, qualite: 180 })
+  assert.equal(dessus.position, 1)
 })
 
-test('sans strategie, ou sans calendrier du marche : non calculable', () => {
-  assert.equal(p.prixDeDepart({ calendriers: [], marche: MARCHE, strategie: 'luxe' }).statut, 'non_calculable')
-  assert.match(p.prixDeDepart({ calendriers: [], marche: [], strategie: 'juste' }).motif, /calendrier du marché est absent/)
+test('segment trop plat (moins de 10 %) : repli sur les niveaux du marche ; sans marche, non calculable', () => {
+  const plats = cinq({ plat: true })
+  const repli = P.prixDeDepart({ calendriers: plats, marche: JOURS.map(j => ({ jour: j, niveau: j.slice(5, 7) === '12' ? 'pic' : 'creux' })), strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(repli.niveaux_source, 'marche')
+  assert.equal(caseDe(repli, 'pic', 'semaine').statut, 'calcule')
+  const sans = P.prixDeDepart({ calendriers: plats, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(sans.statut, 'non_calculable')
+  assert.match(sans.motif, /changent trop peu de prix/)
 })
 
-test('la liste des comparables ne porte que la note, la mention et la position (la fourchette et l effet du sejour minimum, eux, sont des montants — voulus, §22.7)', () => {
-  const cs = [cal('1', 'dessous', etage(100, 10)), cal('2', 'equivalent', etage(100, 10)), cal('3', 'dessus', etage(100, 10))]
-  const r = p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' })
-  for (const c of r.comparables) assert.deepEqual(Object.keys(c).sort(), ['listing_id', 'mention', 'note', 'position'])
+test('jamais hors marche : le prix reste dans la fourchette de sa case', () => {
+  const r = P.prixDeDepart({ calendriers: cinq({ position: 'dessus' }), marche: [], strategie: 'qualite', aujourdhui: AUJ })
+  for (const c of r.cases.filter(x => x.statut === 'calcule')) for (const v of Object.values(c.strategies)) assert.ok(v >= c.fourchette.bas && v <= c.fourchette.haut, `${c.niveau}/${c.type}`)
 })
 
-test('agressif retire EXACTEMENT un cran (pas 10 %) ; l arrondi est aux 5 € SUPERIEURS (pas au plus proche)', () => {
-  // Marche a 200 au Creux, cran 10 : agressif 190 (10 % donnerait 180).
-  const cs = [cal('1', 'equivalent', etage(200, 10)), cal('2', 'equivalent', etage(200, 10)), cal('3', 'equivalent', etage(200, 10))]
-  assert.equal(niv(p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'agressif' }), 'creux').prix, 190)
-  // Moyenne 101 : arrondie a 105 (le plus proche donnerait 100).
-  const ar = [cal('1', 'equivalent', etage(95, 10)), cal('2', 'equivalent', etage(100, 10)), cal('3', 'equivalent', etage(108, 10))]
-  assert.equal(niv(p.prixDeDepart({ calendriers: ar, marche: MARCHE, strategie: 'juste' }), 'creux').prix, 105)
+test('LE TEST QUI COMPTE : une montee ratee est SIGNALEE, jamais lissee', () => {
+  // Les hotes vendent leurs week-ends d'hiver MOINS cher que leurs semaines.
+  const inverses = cinq().map(c => ({ ...c, jours: c.jours.map(n => ({ ...n, rate: estWE(n.date) && saison(n.date) > 1.2 ? n.rate * 0.6 : n.rate })) }))
+  const r = P.prixDeDepart({ calendriers: inverses, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.ok(r.alertes.some(a => a.type === 'weekend'), 'week-end sous la semaine : dit')
+  const c = r.alertes.find(a => a.type === 'weekend')
+  assert.equal(caseDe(r, c.niveau, 'weekend').strategies[c.strategie], c.prix, 'le prix affiche est le prix calcule, pas un prix retouche')
 })
 
-// ─── Constats de la review de f37b7da ───────────────────────────────────────
-test('REVIEW (C1) : un cran nul ou negatif ne s applique pas — non calculable, avec son motif (sinon les strategies s inversent)', () => {
-  const fixes = [cal('1', 'equivalent', () => 110), cal('2', 'equivalent', () => 110), cal('3', 'equivalent', () => 110)]
-  const r = p.prixDeDepart({ calendriers: fixes, marche: MARCHE, strategie: 'agressif' })
-  assert.ok(r.niveaux.every(n => n.statut === 'non_calculable'))
-  assert.match(niv(r, 'creux').motif, /ne montent pas avec le marché/)
-  const inverses = [1, 2, 3].map(i => cal(String(i), 'equivalent', m => 200 - 20 * RANG[m.niveau]))
-  assert.equal(niv(p.prixDeDepart({ calendriers: inverses, marche: MARCHE, strategie: 'agressif' }), 'creux').statut, 'non_calculable')
+test('un marche serre (moins de 10 € entre deux strategies) est DIT', () => {
+  const serres = [annonce('1', 'A', 100), annonce('2', 'B', 104), annonce('3', 'C', 106), annonce('4', 'D', 108), annonce('5', 'E', 112)]
+  const r = P.prixDeDepart({ calendriers: serres, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.ok(r.serre && r.serre.juste_qualite < 10)
+  const large = P.prixDeDepart({ calendriers: cinq(), marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(large.serre, null)
 })
 
-test('REVIEW (C2) : l arrondi ignore l artefact de virgule flottante — 240 reste 240 ; un prix negatif n est pas un prix', () => {
-  // Trois comparables a 240 au Creux, poids differents : 240,00000000000003 donnait 245.
-  const cs = [cal('1', 'equivalent', etage(240, 10)), cal('2', 'equivalent', etage(240, 10)), cal('3', 'equivalent', etage(240, 10))]
-  assert.equal(niv(p.prixDeDepart({ calendriers: cs, marche: MARCHE, strategie: 'juste' }), 'creux').prix, 240)
-  const bas = [cal('1', 'equivalent', etage(2, 30)), cal('2', 'equivalent', etage(2, 30)), cal('3', 'equivalent', etage(2, 30))]
-  assert.equal(niv(p.prixDeDepart({ calendriers: bas, marche: MARCHE, strategie: 'agressif' }), 'creux').statut, 'non_calculable')
+test('un hote a plus du double des autres dans TOUTES les cases est signale, jamais ecarte', () => {
+  const r = P.prixDeDepart({ calendriers: [...cinq().slice(0, 4), annonce('5', 'E', 600)], marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.deepEqual(r.a_verifier, ['5'])
+  assert.equal(r.hotes, 5, 'toujours compte')
 })
 
-test('RE-REVIEW : un prix agressif qui s arrondit a 0 € n est pas un prix', () => {
-  // Marche au creux a 10,003 €, cran de 10 € : l'agressif brut vaut 0,003 €.
-  const r = p.prixDeDepart({ calendriers: ['A', 'B', 'C'].map(id => cal(id, 'equivalent', etage(10.003, 10))), marche: MARCHE, strategie: 'agressif' })
-  assert.equal(niv(r, 'creux').statut, 'non_calculable')
-  assert.match(niv(r, 'creux').motif, /pas positif/)
-  assert.equal(niv(r, 'modere').prix, 10, '10,003 € arrondi au centime')
+test('seules les nuits des 6 prochains mois comptent — ni le passe, ni au-dela', () => {
+  const loin = cinq().map(c => ({ ...c, jours: [...c.jours, { date: '2025-01-03', rate: 9999 }, { date: '2027-09-03', rate: 9999 }] }))
+  const r = P.prixDeDepart({ calendriers: loin, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  const reference = P.prixDeDepart({ calendriers: cinq(), marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.deepEqual(r.cases, reference.cases)
+})
+
+test('strategie ou date absente : non calculable, jamais un prix', () => {
+  assert.equal(P.prixDeDepart({ calendriers: cinq(), marche: [], strategie: null, aujourdhui: AUJ }).statut, 'non_calculable')
+  assert.equal(P.prixDeDepart({ calendriers: cinq(), marche: [], strategie: 'juste', aujourdhui: null }).statut, 'non_calculable')
+})
+
+test('une saison en marches d escalier : un niveau vide est NON CALCULABLE, et dit — jamais rempli au hasard', () => {
+  const marches = cinq().map(c => ({ ...c, jours: c.jours.map(n => ({ ...n, rate: Math.round(c.jours[0].rate / (estWE(c.jours[0].date) ? 1.25 : 1) * (['12', '01', '02', '03'].includes(n.date.slice(5, 7)) ? 1.2 : 1) * (estWE(n.date) ? 1.25 : 1) * 100) / 100 })) }))
+  const r = P.prixDeDepart({ calendriers: marches, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  const vides = r.cases.filter(c => c.statut === 'non_calculable')
+  assert.ok(vides.length > 0)
+  assert.ok(vides.every(c => /hôte avec des prix dans cette case/.test(c.motif)))
+})
+
+// ─── Constats de la review de b745bb8 ───────────────────────────────────────
+test('LE TEST QUI COMPTE (review de b745bb8) : un PLATEAU (hotes a prix fixe, une nuit sur cinq plus chere) — les nuits ordinaires restent ensemble, jamais classees « pic »', () => {
+  const plateau = ['A', 'B', 'C', 'D', 'E'].map((h, i) => ({ listing_id: String(i + 1), hote: h,
+    jours: JOURS.map((j, k) => ({ date: j, rate: (80 + 30 * i) * (k % 5 === 0 ? 1.3 : 1) })) }))
+  const r = P.prixDeDepart({ calendriers: plateau, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.niveaux_source, 'segment')
+  const pic = caseDe(r, 'pic', 'semaine')
+  const ordinaires = r.cases.filter(c => c.statut === 'calcule' && c.niveau !== 'pic')
+  assert.ok(ordinaires.length > 0, 'les nuits ordinaires ont leur niveau')
+  for (const c of ordinaires) assert.ok(Math.abs(c.forme - 1) < 0.01, `${c.niveau}/${c.type} : prix ordinaire`)
+  assert.ok(pic.statut === 'calcule' && Math.abs(pic.forme - 1.3) < 0.01, 'le pic porte les nuits cheres, et elles seules')
+})
+
+test('review de b745bb8 : un hote INCONNU ne se compte pas en silence — le calcul refuse et dit pourquoi', () => {
+  const r = P.prixDeDepart({ calendriers: [...cinq().slice(0, 4), { ...annonce('5', 'E', 200), hote: null }], marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.statut, 'non_calculable')
+  assert.match(r.motif, /l’hôte de 1 comparable n’est pas identifié/)
+})
+
+test('review de b745bb8 : la forme d un hote a deux annonces — chacune rapportee a SON prix, une case incomplete ne biaise rien', () => {
+  // Chaque hote : une seconde annonce, trois fois plus chere, SANS aucune nuit de
+  // week-end. Avant le correctif, son prix de semaine entrait dans l'ancre de
+  // l'hote mais pas dans son prix de week-end : la prime s'effondrait.
+  const secondes = cinq().map(c => ({ ...c, listing_id: `${c.listing_id}b`, jours: c.jours.filter(n => !estWE(n.date)).map(n => ({ ...n, rate: n.rate * 3 })) }))
+  const r = P.prixDeDepart({ calendriers: [...cinq(), ...secondes], marche: [], strategie: 'juste', aujourdhui: AUJ })
+  for (const n of P.NIVEAUX) {
+    const we = caseDe(r, n, 'weekend')
+    const se = caseDe(r, n, 'semaine')
+    if (we.statut === 'calcule' && se.statut === 'calcule') assert.ok(Math.abs(we.forme / se.forme - 1.25) < 0.03, `${n} : la prime week-end de 25 % reste (${we.forme} / ${se.forme})`)
+  }
+})
+
+test('review de b745bb8 : le repli dit le MANQUE de donnees, distinct d une absence de saison', () => {
+  const rares = cinq().map(c => ({ ...c, jours: c.jours.slice(0, 5) }))
+  const r = P.prixDeDepart({ calendriers: rares, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.statut, 'non_calculable')
+  assert.match(r.motif, /trop peu de dates où au moins 3 de vos hôtes ont un prix/)
 })
