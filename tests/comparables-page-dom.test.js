@@ -1,34 +1,61 @@
 // tests/comparables-page-dom.test.js — la page « Choisir vos comparables »
-// dans un VRAI DOM (spec §20 de docs/kb/chantier-nouveau-bien.md, lot C3).
+// SUR UNE CARTE, dans un VRAI DOM (spec §20 et §21 de
+// docs/kb/chantier-nouveau-bien.md).
 //
 // CE QU'ILS EMPECHENT :
-//   - l'etape B visible avant que le bien soit decrit ;
+//   - l'etape B visible avant que le bien soit decrit ; le rappel du profil
+//     absent ou non modifiable ;
 //   - une recherche payante relancee a chaque visite (la liste en cache suffit) ;
-//   - un nom ou une photo venus d'AirROI inseres en HTML ;
-//   - un prix affiche ;
-//   - « Valider » actif sous 3 comparables ;
+//   - un point de carte dont la taille ne suit pas la ressemblance, ou dont la
+//     couleur ne suit pas le jugement (similaire vert, non similaire gris) ;
+//   - un nom, une photo venus d'AirROI inseres comme du HTML ; un prix affiche ;
+//   - « Valider » actif sous 3 similaires ; un retenu de l'equipe modifiable ;
 //   - la reponse d'un logement precedent qui s'afficherait.
 //
-// ⚠ ON EXECUTE LE VRAI SCRIPT DE LA PAGE, nourri par les vraies cartes (tri de
-// lib/marche/pertinence.js sur la capture de La bulle).
+// ⚠ ON EXECUTE LE VRAI SCRIPT DE LA PAGE ; Leaflet est SIMULE (il enregistre
+// les points) — jsdom ne dessine pas de carte.
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 const { JSDOM } = require('jsdom')
 const { lireJson } = require('../lib/airroi/json')
-const { trierComparables } = require('../lib/marche/pertinence')
+const { trierComparables, reunirEtTrier } = require('../lib/marche/pertinence')
 
 const HTML = fs.readFileSync(path.join(__dirname, '..', 'apps', 'yield', 'comparables.html'), 'utf8')
 const COMPS = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'comps-labulle.json'), 'utf8')).listings
-const PROFIL = { adresse: '12 rue des Thermes', adresse_trouvee: '12 Rue des Thermes 65200 Bagnères-de-Bigorre', voyageurs: 2, chambres: 1, pieces: 2, salles_de_bain: 1, equipements: ['parking', 'vue'] }
-const CARTES = trierComparables(COMPS, { ...PROFIL, latitude: 43.0636, longitude: 0.1476 })
+const SPA = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'comps-cdv23.json'), 'utf8')).listings.slice(0, 3)
+const PROFIL = { adresse: '12 rue des Thermes', adresse_trouvee: '12 Rue des Thermes 65200 Bagnères-de-Bigorre', voyageurs: 2, chambres: 1, pieces: 2, salles_de_bain: 1, equipements: ['parking', 'spa'], latitude: 43.0636, longitude: 0.1476 }
+const CARTES = trierComparables(COMPS, PROFIL)
+const AVEC_SPA = reunirEtTrier(COMPS, SPA, PROFIL)
 const attendre = async () => { for (let i = 0; i < 25; i++) await new Promise(r => setImmediate(r)) }
 const reponse = (d, status = 200) => ({ ok: status < 400, status, json: async () => d })
 
-async function monter (serveur) {
-  const dom = new JSDOM(HTML.replace(/<script type="module">[\s\S]*?<\/script>/, ''), { runScripts: 'outside-only', url: 'https://staging.example/apps/yield/comparables' })
+// Une Leaflet simulee : elle garde chaque point, son style et son clic.
+function leafletSimule () {
+  const points = []
+  const L = {
+    points,
+    map: () => ({ fitBounds () {}, invalidateSize () {}, setView () {} }),
+    tileLayer: (url, opts) => ({ url, opts, addTo () { L.tuiles = { url, opts }; return this } }),
+    circleMarker: (latlng, style) => {
+      const m = { latlng, style, ecouteurs: {}, retire: false,
+        addTo () { points.push(m); return m }, remove () { m.retire = true },
+        on (evt, fn) { m.ecouteurs[evt] = fn; return m }, setStyle (s) { m.style = { ...m.style, ...s }; return m },
+        bindTooltip (t, o) { m.tooltip = t; return m } }
+      return m
+    },
+  }
+  return L
+}
+const visibles = L => L.points.filter(p => !p.retire)
+
+async function monter (serveur, { sansLeaflet = false } = {}) {
+  const dom = new JSDOM(HTML.replace(/<script type="module">[\s\S]*?<\/script>/, '').replace(/<script src="https:\/\/cdnjs[^>]*><\/script>/, ''),
+    { runScripts: 'outside-only', url: 'https://staging.example/apps/yield/comparables' })
   const w = dom.window
+  const L = leafletSimule()
+  if (!sansLeaflet) w.L = L
   const appels = []
   w.fetch = async (url, opts = {}) => {
     const corps = opts.body ? JSON.parse(opts.body) : null
@@ -45,13 +72,12 @@ async function monter (serveur) {
   const script = /<script type="module">([\s\S]*?)<\/script>/.exec(HTML)[1].replace(/^\s*import .*$/gm, '')
   w.eval(`(async () => {${script}})()`)
   await attendre()
-  return { w, doc: w.document, appels }
+  return { w, doc: w.document, appels, L }
 }
 
-// Un serveur simule : etat du profil, du cache et des retenus.
-function serveur ({ profil = null, cache = null, retenus = [], fondateur = [], chercher = () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [] }) } = {}) {
+function serveur ({ profil = null, cache = null, retenus = [], fondateur = [], aChercher = false, chercher = () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [] }) } = {}) {
   return ({ methode, corps }) => {
-    if (methode === 'GET') return reponse({ etat: 'calcule', profil, retenus, fondateur, comparables: cache })
+    if (methode === 'GET') return reponse({ etat: 'calcule', profil, retenus, fondateur, comparables: cache, complement_a_chercher: aChercher })
     if (corps.action === 'profil') return reponse({ etat: 'enregistre', profil: { ...PROFIL, adresse: corps.adresse } })
     if (corps.action === 'chercher') return chercher(corps)
     if (corps.action === 'retenir') return reponse({ etat: 'enregistre', retenus: corps.listing_ids })
@@ -59,118 +85,180 @@ function serveur ({ profil = null, cache = null, retenus = [], fondateur = [], c
   }
 }
 const posts = (appels, action) => appels.filter(a => a.methode === 'POST' && a.corps && a.corps.action === action)
+const pointDe = (L, id) => visibles(L).find(x => x.style.identifiant === id)
+const cliquerPoint = (L, id) => pointDe(L, id).ecouteurs.click()
+const juger = (doc, verdict) => doc.querySelector(`#cp-fiche button[data-verdict="${verdict}"]`).click()
 
-test('LE TEST QUI COMPTE : sans profil, seule l etape A — l etape B reste cachee et rien n est cherche', async () => {
+test('LE TEST QUI COMPTE : sans profil, le formulaire seul — ni carte, ni rappel, ni recherche', async () => {
   const { doc, appels } = await monter(serveur())
+  assert.equal(doc.getElementById('cp-etape-a').hidden, false)
   assert.equal(doc.getElementById('cp-etape-b').hidden, true)
+  assert.equal(doc.getElementById('cp-recap').hidden, true)
   assert.equal(posts(appels, 'chercher').length, 0)
-  assert.match(doc.getElementById('cp-etape-a').textContent, /Un canapé-lit dans le salon n’est pas une chambre/)
   assert.match(doc.getElementById('cp-etape-a').textContent, /« 1 chambre \+ 1 salon avec couchage » = 1 chambre/)
   assert.equal(doc.querySelectorAll('#cp-eq input[type="checkbox"]').length, 7)
 })
 
-test('LE TEST QUI COMPTE : valider l etape A envoie le profil, puis ouvre l etape B et cherche les comparables', async () => {
+test('LE TEST QUI COMPTE (§21.1) : avec un profil, le RAPPEL des parametres en haut ; « Modifier » rouvre le formulaire rempli', async () => {
+  const { doc } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  assert.equal(doc.getElementById('cp-recap').hidden, false)
+  assert.equal(doc.getElementById('cp-etape-a').hidden, true)
+  const t = doc.getElementById('cp-recap-texte').textContent
+  assert.match(t, /12 Rue des Thermes 65200 Bagnères-de-Bigorre/)
+  assert.match(t, /2 voyageurs · 1 chambre · 2 pièces · 1 salle de bain/)
+  assert.match(t, /Équipements : Jacuzzi ou spa, Parking|Équipements : Parking, Jacuzzi ou spa/)
+  doc.getElementById('cp-modifier').click()
+  assert.equal(doc.getElementById('cp-etape-a').hidden, false)
+  assert.equal(doc.getElementById('cp-adresse').value, '12 rue des Thermes')
+  assert.equal(doc.querySelector('#cp-eq input[value="spa"]').checked, true)
+  doc.getElementById('cp-annuler-a').click()
+  assert.equal(doc.getElementById('cp-etape-a').hidden, true)
+})
+
+test('valider le formulaire enregistre le profil, affiche le rappel et lance la recherche', async () => {
   const { doc, appels } = await monter(serveur())
   const set = (id, v) => { doc.getElementById(id).value = v }
   set('cp-adresse', '12 rue des Thermes, Bagnères'); set('cp-voyageurs', '2'); set('cp-chambres', '1'); set('cp-pieces', '2'); set('cp-sdb', '1')
-  doc.querySelector('#cp-eq input[value="vue"]').checked = true
+  doc.querySelector('#cp-eq input[value="spa"]').checked = true
   doc.getElementById('cp-valider-a').click()
   await attendre()
-  const p = posts(appels, 'profil')[0].corps
-  assert.deepEqual(p, { action: 'profil', adresse: '12 rue des Thermes, Bagnères', voyageurs: '2', chambres: '1', pieces: '2', salles_de_bain: '1', equipements: ['vue'] })
-  assert.match(doc.getElementById('cp-message-a').textContent, /Adresse retenue : 12 Rue des Thermes 65200 Bagnères-de-Bigorre/)
-  assert.equal(doc.getElementById('cp-etape-b').hidden, false)
+  assert.deepEqual(posts(appels, 'profil')[0].corps, { action: 'profil', adresse: '12 rue des Thermes, Bagnères', voyageurs: '2', chambres: '1', pieces: '2', salles_de_bain: '1', equipements: ['spa'] })
+  assert.equal(doc.getElementById('cp-recap').hidden, false)
   assert.equal(posts(appels, 'chercher').length, 1)
-  assert.equal(doc.querySelectorAll('.cp-bien').length, 25)
+  assert.equal(doc.getElementById('cp-zone-carte').hidden, false)
 })
 
-test('LE TEST QUI COMPTE : un retour sur la page avec la liste en cache ne relance AUCUNE recherche payante', async () => {
-  const { doc, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
-  assert.equal(posts(appels, 'chercher').length, 0)
-  assert.equal(doc.querySelectorAll('.cp-bien').length, 25)
-  assert.equal(doc.getElementById('cp-adresse').value, '12 rue des Thermes')
-  assert.equal(doc.querySelector('#cp-eq input[value="parking"]').checked, true)
+test('LE TEST QUI COMPTE (§21.1) : la carte — le bien de l hote, et un point par bien dont la TAILLE suit la ressemblance', async () => {
+  const { L } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  const pts = visibles(L)
+  const hote = pts.find(p => p.tooltip === 'Votre logement')
+  assert.deepEqual([...hote.latlng], [43.0636, 0.1476])
+  const biens = pts.filter(p => p !== hote)
+  assert.equal(biens.length, CARTES.length)
+  // Plus ressemblant = plus gros : rayon de 6 a 18.
+  for (const c of CARTES) {
+    const p = pointDe(L, c.listing_id)
+    assert.deepEqual([...p.latlng], [c.latitude, c.longitude])
+    assert.equal(p.style.radius, 6 + Math.round(12 * c.ressemblance / 100), c.nom)
+  }
+  const tri = [...CARTES].sort((a, b) => b.ressemblance - a.ressemblance)
+  const r = id => pointDe(L, id).style.radius
+  assert.ok(r(tri[0].listing_id) >= r(tri[tri.length - 1].listing_id))
+  assert.equal(L.tuiles.url, 'https://tile.openstreetmap.org/{z}/{x}/{y}.png')
+  assert.match(L.tuiles.opts.attribution, /OpenStreetMap/)
 })
 
-test('LE TEST QUI COMPTE (review de 7ace057) : un profil sans liste en cache NE lance PAS de recherche tout seul — un bouton la lance', async () => {
-  const { doc, appels } = await monter(serveur({ profil: PROFIL, cache: null }))
-  assert.equal(posts(appels, 'chercher').length, 0)
-  const b = doc.getElementById('cp-chercher')
-  assert.equal(b.textContent, 'Chercher les biens du marché')
-  b.click()
+test('LE TEST QUI COMPTE (§21.1) : un clic ouvre la fiche SOUS la carte — photos, nom, capacite, equipements, activite, ressemblance ; aucun prix', async () => {
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  const c = CARTES[0]
+  cliquerPoint(L, c.listing_id)
+  const f = doc.getElementById('cp-fiche')
+  assert.equal(f.dataset.id, c.listing_id)
+  const imgs = [...f.querySelectorAll('.cp-photos img')]
+  assert.deepEqual(imgs.map(i => i.getAttribute('src')), c.photos)
+  assert.ok(imgs.every(i => i.getAttribute('referrerpolicy') === 'no-referrer'))
+  assert.equal(f.querySelector('.cp-nom').textContent, c.nom)
+  assert.match(f.textContent, /2 voyageurs · 1 chambre/)
+  assert.match(f.textContent, /Ouvert toute l’année|Saisonnier/)
+  assert.match(f.textContent, new RegExp(`${c.ressemblance} % de ressemblance`))
+  assert.ok(!/€|\$|par nuit|revenu|occupation|tarif/i.test(doc.getElementById('cp-etape-b').textContent))
+})
+
+test('LE TEST QUI COMPTE (§21.1) : « Logement similaire » met le point en VERT, « Non similaire » en GRIS ; un second clic annule', async () => {
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  const c = CARTES[1]
+  const point = () => pointDe(L, c.listing_id)
+  assert.equal(point().style.fillColor, '#2A5E86')
+  cliquerPoint(L, c.listing_id)
+  juger(doc, 'similaire')
+  assert.equal(point().style.fillColor, '#1F8A4C')
+  assert.equal(doc.querySelector('#cp-fiche button[data-verdict="similaire"]').getAttribute('aria-pressed'), 'true')
+  juger(doc, 'non')
+  assert.equal(point().style.fillColor, '#9AA0A6')
+  juger(doc, 'non')
+  assert.equal(point().style.fillColor, '#2A5E86', 'second clic : annule')
+})
+
+test('LE TEST QUI COMPTE : « Valider mes comparables » grise sous 3 SIMILAIRES ; n envoie que les similaires (jamais les non similaires)', async () => {
+  const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  for (const i of [0, 2, 4]) { cliquerPoint(L, CARTES[i].listing_id); juger(doc, 'similaire') }
+  cliquerPoint(L, CARTES[5].listing_id); juger(doc, 'non')
+  assert.equal(doc.getElementById('cp-valider-b').disabled, false)
+  cliquerPoint(L, CARTES[4].listing_id); juger(doc, 'similaire')
+  assert.equal(doc.getElementById('cp-valider-b').disabled, true)
+  assert.match(doc.getElementById('cp-compte').textContent, /2 similaires — encore 1 au moins/)
+  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'similaire')
+  doc.getElementById('cp-valider-b').click()
   await attendre()
-  assert.equal(posts(appels, 'chercher').length, 1)
-  assert.equal(doc.querySelectorAll('.cp-bien').length, 25)
-})
-
-test('LE TEST QUI COMPTE : chaque carte — photo, nom, capacite, equipements, activite, ressemblance, case ; AUCUN prix', async () => {
-  const { doc } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
-  const c = doc.querySelector('.cp-bien')
-  assert.equal(c.querySelector('img.cp-photo').getAttribute('src'), CARTES[0].photo)
-  assert.equal(c.querySelector('img.cp-photo').getAttribute('referrerpolicy'), 'no-referrer')
-  assert.equal(c.querySelector('.cp-nom').textContent, CARTES[0].nom)
-  assert.match(c.querySelector('.cp-ligne').textContent, /2 voyageurs · 1 chambre/)
-  assert.match(c.querySelector('.cp-activite').textContent, /Ouvert toute l’année|Saisonnier/)
-  assert.match(c.querySelector('.cp-ressemblance').textContent, /^\d+ % de ressemblance$/)
-  assert.ok(c.querySelector('input[type="checkbox"]'))
-  const tout = doc.getElementById('cp-etape-b').textContent
-  assert.ok(!/€|\$|par nuit|revenu|occupation|tarif/i.test(tout), 'aucun prix ni revenu')
-  // L'ordre est celui du serveur (tri par ressemblance).
-  assert.deepEqual([...doc.querySelectorAll('.cp-bien')].map(x => x.dataset.id), CARTES.map(x => x.listing_id))
-})
-
-test('LE TEST QUI COMPTE (SECURITE) : un nom venu d AirROI est du TEXTE, jamais du HTML', async () => {
-  const piege = [{ ...CARTES[0], nom: '<img src=x onerror=alert(1)>', equipements: ['<b>x</b>', 'piscine'] }]
-  const { doc } = await monter(serveur({ profil: PROFIL, cache: piege }))
-  const c = doc.querySelector('.cp-bien')
-  assert.equal(c.querySelectorAll('img').length, 1, 'seule la photo est une image')
-  assert.equal(c.querySelector('.cp-nom').textContent, '<img src=x onerror=alert(1)>')
-  assert.deepEqual([...c.querySelectorAll('.cp-badge')].map(b => b.textContent), ['Piscine'], 'un equipement inconnu n est pas affiche')
-})
-
-test('LE TEST QUI COMPTE : « Valider mes comparables » grise sous 3 ; a 3, il envoie exactement les biens coches', async () => {
-  const { doc, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
-  const bouton = doc.getElementById('cp-valider-b')
-  const cases = [...doc.querySelectorAll('.cp-bien input[type="checkbox"]')]
-  assert.equal(bouton.disabled, true)
-  for (const i of [0, 3]) { cases[i].checked = true; cases[i].dispatchEvent(new doc.defaultView.Event('change')) }
-  assert.equal(bouton.disabled, true)
-  assert.match(doc.getElementById('cp-compte').textContent, /2 sélectionnés — encore 1 au moins/)
-  cases[5].checked = true; cases[5].dispatchEvent(new doc.defaultView.Event('change'))
-  assert.equal(bouton.disabled, false)
-  bouton.click()
-  await attendre()
-  assert.deepEqual(posts(appels, 'retenir')[0].corps.listing_ids.sort(), [0, 3, 5].map(i => CARTES[i].listing_id).sort())
+  assert.deepEqual(posts(appels, 'retenir')[0].corps.listing_ids.sort(), [0, 2, 6].map(i => CARTES[i].listing_id).sort())
   assert.match(doc.getElementById('cp-message-b').textContent, /Vos 3 comparables sont enregistrés/)
 })
 
-test('les comparables deja retenus sont coches au retour', async () => {
-  const { doc } = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: [CARTES[1].listing_id, CARTES[2].listing_id, CARTES[4].listing_id, '999'] }))
-  const coches = [...doc.querySelectorAll('.cp-bien')].filter(b => b.querySelector('input').checked).map(b => b.dataset.id)
-  assert.deepEqual(coches, [1, 2, 4].map(i => CARTES[i].listing_id))
-  assert.equal(doc.getElementById('cp-valider-b').disabled, false, 'un retenu absent de la liste n est pas compte, les 3 autres suffisent')
+test('LE TEST QUI COMPTE : les retenus de l EQUIPE — verts et verrouilles (pas de bouton), annonces s ils sont hors carte, jamais envoyes', async () => {
+  const dans = CARTES[3].listing_id
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: [dans, 'F-HORS'], fondateur: [dans, 'F-HORS'] }))
+  cliquerPoint(L, dans)
+  assert.match(doc.getElementById('cp-fiche').textContent, /Retenu par l’équipe HôteSmart/)
+  assert.equal(doc.querySelectorAll('#cp-fiche button[data-verdict]').length, 0)
+  const p = pointDe(L, dans)
+  assert.equal(p.style.fillColor, '#1F8A4C')
+  assert.equal(doc.getElementById('cp-hors-liste').textContent, '1 comparable retenu par l’équipe HôteSmart ne figure pas sur la carte et reste pris en compte.')
+  assert.equal(doc.getElementById('cp-valider-b').disabled, true, 'les retenus de l equipe ne comptent pas dans les 3')
 })
 
-test('les messages du serveur s affichent : adresse trop vague, liste indisponible', async () => {
-  const s = serveur({ chercher: () => reponse({ etat: 'indisponible', message: 'La liste des biens du marché n’est pas disponible pour le moment. Réessayez plus tard.' }) })
-  const { doc } = await monter(({ methode, corps }) => (corps && corps.action === 'profil' && corps.adresse === 'Bagnères'
-    ? reponse({ error: 'adresse_introuvable', message: 'Adresse trop vague : indiquez le numéro et la rue.' }, 400) : s({ methode, corps })))
-  doc.getElementById('cp-adresse').value = 'Bagnères'
-  doc.getElementById('cp-valider-a').click()
+test('§21.2 : un bien trouve par equipement le dit dans sa fiche ; la recherche par equipement a faire se propose, sans partir seule', async () => {
+  const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES, aChercher: true, chercher: () => reponse({ etat: 'calcule', comparables: AVEC_SPA, retenus: [], note: null }) }))
+  assert.equal(posts(appels, 'chercher').length, 0)
+  const b = doc.getElementById('cp-chercher-complement')
+  assert.equal(b.textContent, 'Chercher aussi les biens qui ont vos équipements')
+  b.click()
   await attendre()
-  assert.match(doc.getElementById('cp-message-a').textContent, /Adresse trop vague/)
-  assert.equal(doc.getElementById('cp-etape-b').hidden, true)
-  doc.getElementById('cp-adresse').value = '12 rue des Thermes'
-  doc.getElementById('cp-valider-a').click()
-  await attendre()
-  assert.match(doc.getElementById('cp-liste-zone').textContent, /pas disponible pour le moment/)
+  const spa = AVEC_SPA.find(c => c.source === 'equipements')
+  cliquerPoint(L, spa.listing_id)
+  assert.match(doc.getElementById('cp-fiche').textContent, /Trouvé grâce à vos équipements/)
 })
 
-test('changer de logement pendant la recherche : la liste du logement precedent ne s affiche pas', async () => {
+test('la note du serveur s affiche (recherche par equipement refusee ou en panne)', async () => {
+  const { doc } = await monter(serveur({ profil: PROFIL, cache: null, chercher: () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [], note: 'La recherche des biens qui ont vos équipements n’est pas disponible pour le moment.' }) }))
+  doc.getElementById('cp-chercher').click()
+  await attendre()
+  assert.match(doc.getElementById('cp-note').textContent, /vos équipements n’est pas disponible/)
+})
+
+test('LE TEST QUI COMPTE : un retour sur la page avec la liste en cache ne relance AUCUNE recherche payante ; sans cache, un bouton la lance', async () => {
+  const a = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  assert.equal(posts(a.appels, 'chercher').length, 0)
+  const b = await monter(serveur({ profil: PROFIL, cache: null }))
+  assert.equal(posts(b.appels, 'chercher').length, 0)
+  b.doc.getElementById('cp-chercher').click()
+  await attendre()
+  assert.equal(posts(b.appels, 'chercher').length, 1)
+})
+
+test('LE TEST QUI COMPTE (SECURITE) : un nom venu d AirROI est du TEXTE, jamais du HTML — dans la fiche et dans la liste', async () => {
+  const piege = [{ ...CARTES[0], nom: '<img src=x onerror=alert(1)>', equipements: ['<b>x</b>', 'piscine'] }]
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: piege }))
+  cliquerPoint(L, piege[0].listing_id)
+  const f = doc.getElementById('cp-fiche')
+  assert.equal(f.querySelector('.cp-nom').textContent, '<img src=x onerror=alert(1)>')
+  assert.ok(f.querySelectorAll('img').length === piege[0].photos.length, 'seules les photos sont des images')
+  assert.deepEqual([...f.querySelectorAll('.cp-badge')].map(b => b.textContent), ['Piscine'])
+  assert.match(doc.getElementById('cp-liste-biens').textContent, /<img src=x/)
+  assert.equal(doc.getElementById('cp-liste-biens').querySelectorAll('img').length, 0)
+})
+
+test('la liste accessible ouvre la meme fiche (clavier, lecteur d ecran) ; sans Leaflet, la page le dit et la liste reste', async () => {
+  const { doc } = await monter(serveur({ profil: PROFIL, cache: CARTES }), { sansLeaflet: true })
+  assert.match(doc.getElementById('cp-note').textContent, /La carte n’a pas pu se charger/)
+  doc.querySelector('#cp-liste-biens button').click()
+  assert.equal(doc.getElementById('cp-fiche').dataset.id, CARTES[0].listing_id)
+})
+
+test('changer de logement pendant la recherche : la liste du logement precedent ne s affiche pas ; le compteur repart a zero', async () => {
   let premier = true
   let liberer
   const lent = new Promise(r => { liberer = r })
-  const { w, doc } = await monter(serveur({ profil: PROFIL, cache: null, chercher: async () => {
+  const { w, doc, L } = await monter(serveur({ profil: PROFIL, cache: null, chercher: async () => {
     if (premier) { premier = false; await lent; return reponse({ etat: 'calcule', comparables: [{ ...CARTES[0], nom: 'ANCIEN-LOGEMENT' }], retenus: [] }) }
     return reponse({ etat: 'calcule', comparables: CARTES, retenus: [] })
   } }))
@@ -184,60 +272,20 @@ test('changer de logement pendant la recherche : la liste du logement precedent 
   liberer()
   await attendre()
   assert.ok(!/ANCIEN-LOGEMENT/.test(doc.body.textContent))
-  assert.equal(doc.querySelectorAll('.cp-bien').length, 25)
+  assert.equal(visibles(L).filter(p => p.tooltip !== 'Votre logement').length, CARTES.length)
+  assert.match(doc.getElementById('cp-compte').textContent, /^0 similaire/)
 })
 
-test('telephone : les cartes en une colonne qui peut retrecir ; couleurs prises dans les variables du theme', () => {
-  assert.match(HTML, /@media \(max-width: 640px\)[\s\S]*\.cp-liste \{ grid-template-columns: minmax\(0, 1fr\); \}/)
-  const css = /<style>([\s\S]*?)<\/style>/.exec(HTML)[1]
-  assert.ok(!/#fff\b(?![^;]*color: #fff)/.test(css.replace(/color: #fff/g, '')), 'aucun fond blanc en dur')
-  assert.match(css, /background: var\(--bg\)/)
-})
-
-test('la page n appelle que sa route, et ne lit que le nom des logements', () => {
-  const appelsFetch = [...HTML.matchAll(/fetch\(\s*`([^`]*)`/g)].map(m => m[1])
+test('Leaflet charge avec son empreinte d integrite ; la page n appelle que sa route ; aucun innerHTML dans le script', () => {
+  assert.match(HTML, /leaflet\/1\.9\.4\/leaflet\.js"\s+integrity="sha512-BwHfrr4c9kmRkLw6iXFdzcdWV\/PGkVgiIyIWLLlTSXzWQzxuSg4DiQUCpauz\/EWjgk5TYQqX\/kvn9pG1NpYfqg=="/)
+  assert.match(HTML, /leaflet\/1\.9\.4\/leaflet\.css"\s+integrity="sha512-/)
+  const script = /<script type="module">([\s\S]*?)<\/script>/.exec(HTML)[1]
+  const appelsFetch = [...script.matchAll(/fetch\(\s*`([^`]*)`/g)].map(m => m[1])
   assert.equal(appelsFetch.length, 1)
-  assert.ok(appelsFetch[0].startsWith('/api/marche-comparables?property_id=${encodeURIComponent('), appelsFetch[0])
-  assert.deepEqual([...HTML.matchAll(/supabase\.from\('properties'\)\.select\('([^']*)'\)/g)].map(m => m[1]), ['id, name'])
-  assert.ok(!/api\.airroi|airroi\.com/i.test(HTML))
-  assert.ok(!/innerHTML/.test(/<script type="module">([\s\S]*?)<\/script>/.exec(HTML)[1]), 'aucun innerHTML dans le script')
+  assert.ok(appelsFetch[0].startsWith('/api/marche-comparables?property_id='))
+  assert.ok(!/innerHTML/.test(script))
 })
 
-// ─── Constats de la review de 7ace057 (page) ────────────────────────────────
-test('LE TEST QUI COMPTE : les retenus du FONDATEUR — verrouilles dans la liste, annonces hors de la liste, jamais envoyes par l hote', async () => {
-  const dans = CARTES[2].listing_id
-  const { doc, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: [dans, 'F-HORS-1', 'F-HORS-2'], fondateur: [dans, 'F-HORS-1', 'F-HORS-2'] }))
-  const c = doc.querySelector(`.cp-bien[data-id="${dans}"] input`)
-  assert.equal(c.checked, true)
-  assert.equal(c.disabled, true)
-  assert.match(doc.querySelector(`.cp-bien[data-id="${dans}"] .cp-choix`).textContent, /Retenu par l’équipe HôteSmart/)
-  assert.equal(doc.getElementById('cp-hors-liste').textContent, '2 comparables retenus par l’équipe HôteSmart ne figurent pas dans cette liste et restent pris en compte.')
-  // L'hote coche 3 autres : seuls les siens partent.
-  const libres = [...doc.querySelectorAll('.cp-bien input:not([disabled])')].slice(0, 3)
-  for (const x of libres) { x.checked = true; x.dispatchEvent(new doc.defaultView.Event('change')) }
-  doc.getElementById('cp-valider-b').click()
-  await attendre()
-  const envoyes = posts(appels, 'retenir')[0].corps.listing_ids
-  assert.equal(envoyes.length, 3)
-  assert.ok(!envoyes.includes(dans))
-})
-
-test('REVIEW : changer de logement remet le compteur et le bouton a zero, meme si la recherche du suivant echoue', async () => {
-  const s = serveur({ profil: PROFIL, cache: CARTES })
-  const { w, doc } = await monter(({ methode, corps, url }) => (/B2/.test(url) && methode === 'GET' ? reponse({ etat: 'calcule', profil: PROFIL, retenus: [], fondateur: [], comparables: null }) : s({ methode, corps })))
-  const cases = [...doc.querySelectorAll('.cp-bien input')].slice(0, 3)
-  for (const x of cases) { x.checked = true; x.dispatchEvent(new w.Event('change')) }
-  assert.equal(doc.getElementById('cp-valider-b').disabled, false)
-  doc.getElementById('cp-bien').value = 'B2'
-  doc.getElementById('cp-bien').dispatchEvent(new w.Event('change'))
-  await attendre()
-  assert.equal(doc.getElementById('cp-valider-b').disabled, true)
-  assert.match(doc.getElementById('cp-compte').textContent, /^0 sélectionné/)
-})
-
-test('REVIEW : chaque case porte le nom de SON bien pour un lecteur d ecran ; le compteur est annonce', async () => {
-  const { doc } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
-  const c = doc.querySelector('.cp-bien input')
-  assert.equal(c.getAttribute('aria-label'), `Comparable au mien : ${CARTES[0].nom}`)
-  assert.equal(doc.getElementById('cp-compte').getAttribute('aria-live'), 'polite')
+test('telephone : la carte occupe 60 % de la hauteur, la fiche dessous', () => {
+  assert.match(HTML, /@media \(max-width: 640px\)[\s\S]*#cp-map \{ height: 60vh; \}/)
 })
