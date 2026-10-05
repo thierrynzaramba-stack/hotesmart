@@ -2974,3 +2974,63 @@ Après la validation des comparables, deux questions :
     collent AVANT le déploiement.** Sans elles, la page dit « pas encore
     disponible », jamais une erreur brute, et le script d'étude du fondateur
     échoue.
+
+### 22.7 Les prix de départ : la cohérence des comparables et le cran de prix (5 octobre 2026) — REMPLACE le calcul de §22.3
+
+Décisions de Thierry du 5 octobre 2026. La source reste celle de §22.3 : le
+calendrier de chaque comparable sur 12 mois, et les niveaux du marché de ce
+bien.
+
+**Les trois stratégies** (libellés à l'écran) :
+- « Prix marché » (`juste`) ;
+- « Agressif » (`agressif`) ;
+- « Haut de gamme » (`qualite`).
+
+Le « 10 % » de §22.2 est **remplacé** par le cran de prix mesuré ci-dessous.
+
+1. **La note de cohérence d'un comparable, qui est son POIDS.** Le comparable
+   suit-il la tendance du marché ?
+   - Calcul : la corrélation de rang (Spearman) entre son prix par nuit et
+     l'écart du marché (`ecart` du calendrier de température), jour par jour,
+     sur les nuits où il a un prix.
+   - La note vaut cette corrélation, bornée de 0 à 1 ; une corrélation négative
+     donne 0.
+   - Il faut au moins 30 nuits avec un prix ; sinon, la note n'est pas
+     calculable et vaut 0.
+   - Le poids utilisé est le plus grand de la note et de 0,1 : un comparable
+     qui ne suit pas le marché compte peu, mais il compte.
+   - La fiche du bien l'affiche :
+
+     | Note | Mention |
+     |---|---|
+     | à partir de 0,5 | « suit bien le marché » |
+     | de 0,2 à 0,5 | « suit peu le marché » |
+     | sous 0,2 | « ne suit pas le marché » |
+
+2. **Le cran de prix.** Pour chaque comparable, on prend son prix médian à
+   chaque niveau (Creux, Modéré, Favorable, Pic), puis l'écart moyen d'un
+   niveau au suivant, parmi les écarts mesurés. Le cran **E** est la moyenne de
+   ces écarts, pondérée par les notes : c'est ce que vaut « un niveau de prix »
+   sur ce marché.
+3. **Le prix de départ, à chaque niveau L.**
+   - On prend le prix médian p_c(L) de chaque comparable c qui a au moins 3
+     nuits à ce niveau, et il faut au moins 3 comparables.
+   - **Prix marché** : la moyenne pondérée des p_c(L), chaque comparable
+     décalé selon la position de l'hôte. Un comparable dont l'hôte est en
+     dessous compte pour p_c(L) − E/2 ; un équivalent, pour p_c(L) ; un
+     comparable que l'hôte dépasse, pour p_c(L) + E/2. Un retenu de l'équipe
+     compte comme équivalent.
+   - **Agressif** : le prix marché − E.
+   - **Haut de gamme** : le plus haut p_c(L) parmi les comparables dont la
+     note atteint au moins 0,5 (à défaut, parmi tous), + E. *Choix de
+     développement, à confirmer.*
+   - Le prix est arrondi aux 5 € supérieurs.
+   - La **fourchette du marché** affichée va du plus bas au plus haut p_c(L).
+4. **L'effet du séjour minimum sur le prix.** On compare le prix médian par
+   nuit des comparables qui acceptent 1 nuit à celui des comparables qui en
+   imposent 2 ou plus, d'après le séjour minimum médian de leur calendrier. On
+   ne l'affiche qu'avec au moins 2 comparables de chaque côté.
+5. **Le marché doit être celui de l'adresse.** Si la commune du marché relié au
+   bien n'apparaît pas dans l'adresse de son profil, les prix sont « non
+   calculables » : « le marché de votre adresse n'est pas encore disponible ».
+   Il n'y a ni paiement ni calcul faux.
