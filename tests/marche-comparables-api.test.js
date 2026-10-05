@@ -41,7 +41,16 @@ function base (tables) {
       select: () => q,
       eq: (k, v) => { lignes = lignes.filter(l => String(l[k]) === String(v)); return q },
       gte: (k, v) => { lignes = lignes.filter(l => l[k] >= v); return q },
-      in: (k, vs) => { lignes = lignes.filter(l => vs.includes(l[k])); return q },
+      // ⚠ Comme le VRAI client (recette du 5 octobre 2026) : supabase-js n'echappe
+      // pas les guillemets d'une valeur, et PostgREST ne trouve alors RIEN.
+      in: (k, vs) => { lignes = lignes.filter(l => vs.includes(l[k]) && !/["\\]/.test(String(l[k]))); return q },
+      // La liste PostgREST echappee a la main : "a\"b","c" -> ['a"b', 'c'].
+      filter: (k, op, liste) => {
+        assert.equal(op, 'in')
+        const vs = [...String(liste).matchAll(/"((?:\\.|[^"\\])*)"/g)].map(m => m[1].replace(/\\(.)/g, '$1'))
+        lignes = lignes.filter(l => vs.includes(l[k]))
+        return q
+      },
       order: () => q,
       limit: n => Promise.resolve(absente ? { data: null, error: erreur } : { data: lignes.slice(0, n), error: null }),
       // Comme le vrai client : range() se chaine encore (eq apres range).
