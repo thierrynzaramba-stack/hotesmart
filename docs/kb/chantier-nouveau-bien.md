@@ -2683,3 +2683,107 @@ comparables vaut **déclaration du positionnement** : il n'y a pas d'étape
   même bien, depuis deux onglets ou par le titulaire et un membre, peuvent
   s'entrelacer. Correctif prévu : une fonction SQL transactionnelle, avec sa
   migration.
+
+## 21. « Choisir vos comparables » sur une carte, et les biens qui ont vos équipements (5 octobre 2026) — SPEC
+
+Demandes de Thierry du 5 octobre 2026, après la première recette de §20 (un
+studio à Toulouse avec jacuzzi coché : aucun bien à jacuzzi proposé). Staging
+uniquement. Les règles de §20 tiennent toutes : aucun prix, au moins 3 biens
+similaires, les retenus de l'équipe verrouillés, la recherche de base à 0,10 $.
+
+### 21.1 La page
+
+1. **En haut, le rappel des paramètres** : adresse retenue, voyageurs,
+   chambres, pièces, salles de bain, équipements. Un bouton « Modifier » rouvre
+   le formulaire de l'étape A ; une fois validé, la recherche repart.
+2. **La carte** (Leaflet, fonds OpenStreetMap, attribution affichée) :
+   - le bien de l'hôte, bien identifié par son propre marqueur ;
+   - les biens proposés autour, en cercles dont **la taille croît avec la
+     ressemblance** ;
+   - les couleurs :
+
+     | État | Couleur |
+     |---|---|
+     | non jugé | neutre (bleu) |
+     | « similaire » | vert |
+     | « non similaire » | gris |
+     | retenu par l'équipe | vert, verrouillé |
+
+   - la position d'un bien Airbnb est souvent approchée (`exact_location`
+     faux) : la page le dit sous la carte.
+3. **Un clic sur un bien** ouvre sa fiche **sous la carte** :
+   - ses photos, jusqu'à 8, défilantes ;
+   - son nom, sa capacité, ses équipements, « ouvert toute l'année » ou
+     « saisonnier », sa ressemblance ;
+   - « trouvé grâce à vos équipements » s'il vient de la recherche
+     complémentaire ;
+   - deux boutons, « Logement similaire » et « Non similaire ». Un second clic
+     sur le même bouton annule le jugement.
+4. **« Valider mes comparables »** reste grisé sous 3 biens similaires et
+   n'envoie que les similaires. « Non similaire » n'est pas enregistré : c'est
+   une aide de tri pour l'hôte.
+5. Sur téléphone, la carte prend toute la largeur (environ 60 % de la hauteur
+   de l'écran) et la fiche s'affiche dessous.
+
+### 21.2 La recherche complémentaire, par équipement (validée par Thierry)
+
+- **Quand ?** L'hôte a coché au moins un équipement **rare** : jacuzzi ou spa,
+  piscine, jardin, vue exceptionnelle. Terrasse, parking et climatisation sont
+  courants : la recherche de base les départage déjà.
+- **Quoi ?** `POST /listings/search/radius`, à 0,50 $, avec :
+  - la position du profil et un rayon de 3 miles (environ 5 km) ;
+  - une seule page de 10 biens ;
+  - `filter.amenities.any`, selon la correspondance AirROI de la table
+    ci-dessous ;
+  - `filter.guests.range = [max(1, voyageurs − 2), voyageurs + 2]`.
+
+  | Équipement coché | Identifiants AirROI |
+  |---|---|
+  | Jacuzzi ou spa | `hot_tub`, `sauna` |
+  | Piscine | `pool` |
+  | Jardin | `backyard` |
+  | Vue exceptionnelle | `ocean_view`, `river_view`, `waterfront`, `lake_access` |
+
+  La vue montagne n'existe pas dans le filtre AirROI : elle reste reconnue dans
+  les fiches, mais ne déclenche pas cette recherche.
+- **Résultat** : les biens trouvés s'ajoutent aux 25, sans doublon, triés par la
+  même ressemblance, et marqués « trouvés grâce à vos équipements ». La même
+  liste blanche s'applique : aucun prix, revenu ni occupation.
+- **Cache** : 90 jours, sous la clé de la recherche.
+
+### 21.3 Le quota compte les DOLLARS (sécurité)
+
+- Chaque appel payant **réserve son coût**, atomiquement, avant de partir :
+  0,10 $ pour la liste de base, 0,50 $ pour la recherche complémentaire. La
+  table `comparables_recherches` gagne une colonne `cout_usd`, et la fonction
+  `reserver_recherche_comparables` un paramètre de coût.
+- Plafonds :
+  - **3 appels payants par bien** sur 24 heures ;
+  - **5 par compte** sur 24 heures ;
+  - **10 par compte** sur 30 jours ;
+  - **5 $ pour tous les comptes** sur le mois civil, en somme des coûts.
+
+  Les études du fondateur ne sont pas comptées.
+- Le budget AirROI global du client (10 $ par mois) reste le plafond ultime.
+
+### 21.4 Ce que l'API ajoute aux cartes
+
+- `latitude` et `longitude` du bien proposé : sa position publique Airbnb,
+  souvent approchée.
+- `photos` : jusqu'à 8 liens, chacun passé par `photoSure`.
+- `source` : `voisins` ou `equipements`.
+- Le profil renvoyé à l'hôte porte **sa** position, pour son marqueur sur la
+  carte. C'est sa propre adresse, et elle n'est montrée qu'à lui.
+
+### 21.5 Les lots
+
+- **M1 (serveur)** :
+  - `POST /listings/search/radius` dans `lib/airroi/client.js` : tarif,
+    validation stricte du corps, fraîcheur, forme de la réponse ;
+  - la recherche complémentaire dans la route ;
+  - le quota en dollars, avec sa migration ;
+  - les cartes enrichies ;
+  - les tests.
+- **M2 (page)** : la carte, la fiche sous la carte, le rappel des paramètres,
+  la mise en page téléphone, les tests dans un vrai DOM (Leaflet simulé), puis
+  la recette sur staging.
