@@ -148,3 +148,11 @@ test('REVIEW (C2) : l arrondi ignore l artefact de virgule flottante — 240 res
   const bas = [cal('1', 'equivalent', etage(2, 30)), cal('2', 'equivalent', etage(2, 30)), cal('3', 'equivalent', etage(2, 30))]
   assert.equal(niv(p.prixDeDepart({ calendriers: bas, marche: MARCHE, strategie: 'agressif' }), 'creux').statut, 'non_calculable')
 })
+
+test('RE-REVIEW : un prix agressif qui s arrondit a 0 € n est pas un prix', () => {
+  // Marche au creux a 10,003 €, cran de 10 € : l'agressif brut vaut 0,003 €.
+  const r = p.prixDeDepart({ calendriers: ['A', 'B', 'C'].map(id => cal(id, 'equivalent', etage(10.003, 10))), marche: MARCHE, strategie: 'agressif' })
+  assert.equal(niv(r, 'creux').statut, 'non_calculable')
+  assert.match(niv(r, 'creux').motif, /pas positif/)
+  assert.equal(niv(r, 'modere').prix, 10, '10,003 € arrondi au centime')
+})

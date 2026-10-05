@@ -174,7 +174,13 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
         }
       }
     }
-    await Promise.all(Array.from({ length: Math.min(PARALLELE, file.length) }, ouvrier))
+    // ⚠ allSettled, pas all (re-review de 0fab219) : une panne dans un ouvrier
+    // arrete la file pour TOUS, et la reponse attend ceux encore en vol — sinon
+    // ils continuaient a payer apres elle.
+    const ouvrierSur = () => ouvrier().catch(e => { refus = refus || MESSAGE_QUOTA.mois; throw e })
+    const fins = await Promise.allSettled(Array.from({ length: Math.min(PARALLELE, file.length) }, ouvrierSur))
+    const panne = fins.find(f => f.status === 'rejected')
+    if (panne) throw panne.reason
     manquants = ids.filter(id => !cache.has(id))
   }
   const calendriers = lignes.filter(l => cache.has(String(l.listing_id))).map(l => ({

@@ -27,6 +27,7 @@ function base (tables) {
   const rpcs = []
   const client = { rpc: async (fn, params) => {
     rpcs.push({ fn, params })
+    if (tables.__rpcPanneNieme === rpcs.length) return { data: null, error: { message: 'connexion perdue' } }
     if (tables.__rpcAbsente) return { data: null, error: { message: `Could not find the function public.${fn}(...) in the schema cache` } }
     if (fn === 'rendre_recherche_comparables') return { data: true, error: null }
     if (tables.__rpcPanneCout !== undefined && params.p_cout === tables.__rpcPanneCout) return { data: null, error: { message: 'connexion perdue' } }
@@ -697,4 +698,18 @@ test('REVIEW (C7) : un calendrier du marche trop ancien (moins de 300 jours a ve
   const g = await appeler({ tables: tb })
   assert.equal(g.corps.prix_depart.etat, 'marche_absent')
   assert.match(g.corps.prix_depart.message, /trop ancien/)
+})
+
+// ⚠ RE-REVIEW DE 0fab219 : une panne de la reservation dans UN ouvrier ne laisse
+// pas les trois autres payer apres la reponse (Promise.all les abandonnait).
+test('RE-REVIEW : une reservation en panne arrete TOUS les releves, et la reponse attend ceux en vol', async () => {
+  const tb = tablesPrix({ calendriersEnCache: 0 })
+  tb.comparables_retenus = Array.from({ length: 12 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  tb.__rpcPanneNieme = 1
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tb })
+  const aLaReponse = r.appelsAirroi.length
+  await new Promise(res => setTimeout(res, 30))
+  assert.equal(r.appelsAirroi.length, aLaReponse, 'aucun releve paye apres la reponse')
+  assert.ok(aLaReponse <= 3, `au plus un releve par ouvrier encore en vol (vu : ${aLaReponse})`)
+  assert.ok(r.code >= 500, 'la panne est dite')
 })
