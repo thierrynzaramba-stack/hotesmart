@@ -119,6 +119,7 @@ module.exports = async (req, res) => {
       return res.status(200).json({ etat: 'calcule', profil: profilPublic(profil),
         retenus: lignes.map(r => r.listing_id),
         fondateur: lignes.filter(r => r.retenu_par === 'fondateur').map(r => r.listing_id),
+        positions: Object.fromEntries(lignes.filter(r => r.position).map(r => [r.listing_id, r.position])),
         comparables: base ? reunirEtTrier(base, complement || [], profil) : null,
         // La recherche par equipement reste a faire : la page propose de la lancer.
         complement_a_chercher: !!(base && complement === null) })
@@ -193,7 +194,8 @@ module.exports = async (req, res) => {
       }
       const lignes = await comparablesRetenus(supabase, bienId)
       return res.status(200).json({ etat: 'calcule', comparables: reunirEtTrier(base, complement, profil), note,
-        retenus: lignes.map(x => x.listing_id), fondateur: lignes.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id) })
+        retenus: lignes.map(x => x.listing_id), fondateur: lignes.filter(x => x.retenu_par === 'fondateur').map(x => x.listing_id),
+        positions: Object.fromEntries(lignes.filter(x => x.position).map(x => [x.listing_id, x.position])) })
     }
 
     if (corps.action === 'retenir') {
@@ -202,10 +204,10 @@ module.exports = async (req, res) => {
       const base = await listeEnCache(profil)
       if (!base) return res.status(400).json({ error: 'liste_absente', message: 'Relancez la recherche des biens du marché.' })
       // Les biens proposes : la liste de base ET ceux trouves par equipement.
-      const v = validerChoix(corps.listing_ids, [...base, ...((await complementEnCache(profil)) || [])])
+      const v = validerChoix(corps.choix, [...base, ...((await complementEnCache(profil)) || [])])
       if (v.erreur) return res.status(400).json({ error: 'choix_invalide', message: v.erreur })
-      await enregistrerChoix(supabase, { userId: compte, propertyId: bienId, ids: v.ids })
-      return res.status(200).json({ etat: 'enregistre', retenus: v.ids })
+      await enregistrerChoix(supabase, { userId: compte, propertyId: bienId, ids: v.ids, positions: v.positions })
+      return res.status(200).json({ etat: 'enregistre', retenus: v.ids, positions: v.positions })
     }
 
     return res.status(400).json({ error: 'action_inconnue' })

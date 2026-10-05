@@ -82,7 +82,7 @@ function serveur ({ profil = null, cache = null, retenus = [], fondateur = [], a
     if (methode === 'GET') return reponse({ etat: 'calcule', profil, retenus, fondateur, comparables: cache, complement_a_chercher: aChercher })
     if (corps.action === 'profil') return reponse({ etat: 'enregistre', profil: { ...PROFIL, adresse: corps.adresse } })
     if (corps.action === 'chercher') return chercher(corps)
-    if (corps.action === 'retenir') return reponse({ etat: 'enregistre', retenus: corps.listing_ids })
+    if (corps.action === 'retenir') return reponse({ etat: 'enregistre', retenus: corps.choix.map(c => c.listing_id) })
     return reponse({}, 400)
   }
 }
@@ -172,9 +172,9 @@ test('LE TEST QUI COMPTE (§21.1) : « Logement similaire » met le point en VER
   const point = () => pointDe(L, c.listing_id)
   assert.equal(point().style.fillColor, '#2A5E86')
   cliquerPoint(L, c.listing_id)
-  juger(doc, 'similaire')
+  juger(doc, 'equivalent')
   assert.equal(point().style.fillColor, '#1F8A4C')
-  assert.equal(doc.querySelector('#cp-fiche button[data-verdict="similaire"]').getAttribute('aria-pressed'), 'true')
+  assert.equal(doc.querySelector('#cp-fiche button[data-verdict="equivalent"]').getAttribute('aria-pressed'), 'true')
   juger(doc, 'non')
   assert.equal(point().style.fillColor, '#5F6368')
   juger(doc, 'non')
@@ -183,16 +183,16 @@ test('LE TEST QUI COMPTE (§21.1) : « Logement similaire » met le point en VER
 
 test('LE TEST QUI COMPTE : « Valider mes comparables » grise sous 3 SIMILAIRES ; n envoie que les similaires (jamais les non similaires)', async () => {
   const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
-  for (const i of [0, 2, 4]) { cliquerPoint(L, CARTES[i].listing_id); juger(doc, 'similaire') }
+  for (const i of [0, 2, 4]) { cliquerPoint(L, CARTES[i].listing_id); juger(doc, 'equivalent') }
   cliquerPoint(L, CARTES[5].listing_id); juger(doc, 'non')
   assert.equal(doc.getElementById('cp-valider-b').disabled, false)
-  cliquerPoint(L, CARTES[4].listing_id); juger(doc, 'similaire')
+  cliquerPoint(L, CARTES[4].listing_id); juger(doc, 'equivalent')
   assert.equal(doc.getElementById('cp-valider-b').disabled, true)
-  assert.match(doc.getElementById('cp-compte').textContent, /2 similaires — encore 1 au moins/)
-  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'similaire')
+  assert.match(doc.getElementById('cp-compte').textContent, /2 comparables — encore 1 au moins/)
+  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'equivalent')
   doc.getElementById('cp-valider-b').click()
   await attendre()
-  assert.deepEqual(posts(appels, 'retenir')[0].corps.listing_ids.sort(), [0, 2, 6].map(i => CARTES[i].listing_id).sort())
+  assert.deepEqual(posts(appels, 'retenir')[0].corps.choix.map(c => c.listing_id).sort(), [0, 2, 6].map(i => CARTES[i].listing_id).sort())
   assert.match(doc.getElementById('cp-message-b').textContent, /Vos 3 comparables sont enregistrés/)
 })
 
@@ -276,7 +276,7 @@ test('changer de logement pendant la recherche : la liste du logement precedent 
   await attendre()
   assert.ok(!/ANCIEN-LOGEMENT/.test(doc.body.textContent))
   assert.equal(visibles(L).filter(p => p.tooltip !== 'Votre logement').length, CARTES.length)
-  assert.match(doc.getElementById('cp-compte').textContent, /^0 similaire/)
+  assert.match(doc.getElementById('cp-compte').textContent, /^0 comparable/)
 })
 
 test('Leaflet charge avec son empreinte d integrite ; la page n appelle que sa route ; aucun innerHTML dans le script', () => {
@@ -299,17 +299,17 @@ test('LE TEST QUI COMPTE (review 1) : un « Non similaire » de l hote n est pas
   const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: [a, b, c], aChercher: true,
     chercher: () => reponse({ etat: 'calcule', comparables: CARTES, retenus: [a, b, c] }) }))
   cliquerPoint(L, a); juger(doc, 'non')
-  cliquerPoint(L, b); juger(doc, 'similaire')   // second clic : annule
+  cliquerPoint(L, b); juger(doc, 'equivalent')   // second clic : annule
   doc.getElementById('cp-chercher-complement').click()
   await attendre()
   assert.equal(pointDe(L, a).style.fillColor, '#5F6368', 'toujours non similaire')
   assert.equal(pointDe(L, b).style.fillColor, '#2A5E86', 'toujours annule')
   assert.equal(pointDe(L, c).style.fillColor, '#1F8A4C', 'le retenu non touche reste similaire')
-  cliquerPoint(L, CARTES[5].listing_id); juger(doc, 'similaire')
-  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'similaire')
+  cliquerPoint(L, CARTES[5].listing_id); juger(doc, 'equivalent')
+  cliquerPoint(L, CARTES[6].listing_id); juger(doc, 'equivalent')
   doc.getElementById('cp-valider-b').click()
   await attendre()
-  const envoyes = posts(appels, 'retenir')[0].corps.listing_ids
+  const envoyes = posts(appels, 'retenir')[0].corps.choix.map(c => c.listing_id)
   assert.ok(!envoyes.includes(a) && !envoyes.includes(b))
 })
 
@@ -320,8 +320,8 @@ test('REVIEW (2) : la carte isole ses couches — les controles de Leaflet ne pa
 test('REVIEW (3) : apres un jugement, le focus revient sur le meme bouton', async () => {
   const { doc, L } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
   cliquerPoint(L, CARTES[0].listing_id)
-  juger(doc, 'similaire')
-  assert.equal(doc.activeElement && doc.activeElement.dataset.verdict, 'similaire')
+  juger(doc, 'equivalent')
+  assert.equal(doc.activeElement && doc.activeElement.dataset.verdict, 'equivalent')
 })
 
 test('REVIEW (4) : sans Leaflet, apres une recherche, le message de carte RESTE ; la note d un logement ne passe pas au suivant', async () => {
@@ -344,7 +344,7 @@ test('REVIEW (5) : sur telephone, la fiche ouverte est amenee a l ecran ; pas ap
   Object.defineProperty(w, 'innerWidth', { configurable: true, value: 375 })
   cliquerPoint(L, CARTES[0].listing_id)
   assert.equal(defile, 1)
-  juger(doc, 'similaire')
+  juger(doc, 'equivalent')
   assert.equal(defile, 1, 'un jugement ne fait pas defiler')
   Object.defineProperty(w, 'innerWidth', { configurable: true, value: 1200 })
   cliquerPoint(L, CARTES[1].listing_id)
@@ -375,9 +375,9 @@ test('REVIEW (6) : deux recherches en vol sur le meme logement — seule la DERN
 test('REVIEW (mineurs) : le compteur compte les retenus des le chargement, meme sans liste ; un retenu de l equipe n est jamais compte pour l hote', async () => {
   const ids = CARTES.slice(0, 3).map(x => x.listing_id)
   const a = await monter(serveur({ profil: PROFIL, cache: null, retenus: ids }))
-  assert.match(a.doc.getElementById('cp-compte').textContent, /^3 similaires/)
+  assert.match(a.doc.getElementById('cp-compte').textContent, /^3 comparables/)
   const b = await monter(serveur({ profil: PROFIL, cache: CARTES, retenus: ids, fondateur: [ids[0]] }))
-  assert.match(b.doc.getElementById('cp-compte').textContent, /^2 similaires/)
+  assert.match(b.doc.getElementById('cp-compte').textContent, /^2 comparables/)
 })
 
 test('REVIEW (mineurs) : aucun bien ni le logement n ont de position — pas de carte grise, un message, la liste reste', async () => {
@@ -465,4 +465,45 @@ test('REVIEW : un bien de la liste de BASE avec jacuzzi porte lui aussi le conto
   const base = [{ ...CARTES[0], source: 'voisins', a_vos_equipements: true }, ...CARTES.slice(1)]
   const { L } = await monter(serveur({ profil: PROFIL, cache: base }))
   assert.equal(pointDe(L, base[0].listing_id).style.color, '#7B3FA0')
+})
+
+// ─── §22.1 : la position par comparable ─────────────────────────────────────
+test('LE TEST QUI COMPTE (§22.1) : quatre boutons, l explication de la VALEUR PERCUE, et la position envoyee', async () => {
+  const { doc, L, appels } = await monter(serveur({ profil: PROFIL, cache: CARTES }))
+  cliquerPoint(L, CARTES[0].listing_id)
+  assert.deepEqual([...doc.querySelectorAll('#cp-fiche button[data-verdict]')].map(b => b.textContent), ['Le mien est en dessous', 'Équivalent', 'Le mien est supérieur', 'Pas comparable'])
+  assert.match(doc.getElementById('cp-fiche').textContent, /Un comparable offre une prestation de même valeur aux yeux d’un voyageur\. « En dessous » et « Supérieur » servent aux petites différences/)
+  juger(doc, 'dessous')
+  cliquerPoint(L, CARTES[1].listing_id); juger(doc, 'equivalent')
+  cliquerPoint(L, CARTES[2].listing_id); juger(doc, 'dessus')
+  assert.equal(pointDe(L, CARTES[0].listing_id).style.fillColor, '#1F8A4C')
+  doc.getElementById('cp-valider-b').click()
+  await attendre()
+  assert.deepEqual(posts(appels, 'retenir')[0].corps.choix, [
+    { listing_id: CARTES[0].listing_id, position: 'dessous' }, { listing_id: CARTES[1].listing_id, position: 'equivalent' }, { listing_id: CARTES[2].listing_id, position: 'dessus' }])
+})
+
+test('LE TEST QUI COMPTE (§22.1) : un equipement rare qui manque ou qui est en plus — avertissement, « Pas comparable » mis en avant, sans blocage', async () => {
+  const c = { ...CARTES[0], rares_manquants: ['spa'], rares_en_plus: ['piscine'] }
+  const temoin = { ...CARTES[1], rares_manquants: [], rares_en_plus: [] }
+  const { doc, L } = await monter(serveur({ profil: PROFIL, cache: [c, temoin, ...CARTES.slice(2)] }))
+  cliquerPoint(L, c.listing_id)
+  const alertes = [...doc.querySelectorAll('#cp-fiche .cp-alerte')].map(a => a.textContent)
+  assert.deepEqual(alertes, ['Ce bien n’a pas votre jacuzzi ou spa : il n’a sans doute pas la même valeur.', 'Ce bien a une piscine, pas le vôtre : il n’a sans doute pas la même valeur.'])
+  assert.ok(doc.querySelector('#cp-fiche button[data-verdict="non"]').classList.contains('en-avant'))
+  assert.equal(doc.querySelector('#cp-fiche button[data-verdict="equivalent"]').disabled, false, 'un avertissement, pas un blocage')
+  cliquerPoint(L, CARTES[1].listing_id)
+  assert.equal(doc.querySelectorAll('#cp-fiche .cp-alerte').length, 0, 'sans ecart, aucun avertissement')
+})
+
+test('§22.1 : au retour, chaque retenu revient avec SA position ; un retenu sans position compte « equivalent »', async () => {
+  const [a, b, c] = CARTES.slice(0, 3).map(x => x.listing_id)
+  const s = serveur({ profil: PROFIL, cache: CARTES, retenus: [a, b, c] })
+  const { doc, L } = await monter(({ methode, corps, url }) => (methode === 'GET'
+    ? reponse({ etat: 'calcule', profil: PROFIL, retenus: [a, b, c], fondateur: [], positions: { [a]: 'dessus', [b]: 'dessous' }, comparables: CARTES }) : s({ methode, corps, url })))
+  const presse = id => { cliquerPoint(L, id); return doc.querySelector('#cp-fiche button[aria-pressed="true"]').dataset.verdict }
+  assert.equal(presse(a), 'dessus')
+  assert.equal(presse(b), 'dessous')
+  assert.equal(presse(c), 'equivalent')
+  assert.match(doc.getElementById('cp-compte').textContent, /^3 comparables/)
 })

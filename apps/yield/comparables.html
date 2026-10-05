@@ -62,6 +62,9 @@
     .cp-source { font-size: 12px; font-weight: 600; color: #1F8A4C; }
     .cp-verdict { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .cp-verdict button[aria-pressed="true"].similaire { background: #1F8A4C; color: #fff; }
+    .cp-explication { font-size: 12.5px; color: var(--text2); line-height: 1.45; margin: 10px 0 0; }
+    .cp-alerte { font-size: 13px; font-weight: 600; color: #8A4B00; background: #FFF4E0; border-radius: 6px; padding: 6px 10px; margin: 8px 0 0; }
+    .cp-verdict button.en-avant { outline: 2px solid #8A4B00; outline-offset: 1px; }
     .cp-verdict button[aria-pressed="true"].non { background: #5F6368; color: #fff; }
     .cp-fondateur { font-size: 13px; font-weight: 600; color: #1F8A4C; margin-top: 10px; }
     .cp-entete-fiche { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 12px; }
@@ -141,15 +144,15 @@
   <!-- ÉTAPE B : la carte et la fiche -->
   <div class="cp-carte" id="cp-etape-b" hidden>
     <h2>Les biens du marché autour du vôtre</h2>
-    <p class="sous">Plus un bien vous ressemble, plus son point est gros. Touchez un point pour voir le bien et dire s’il est similaire au vôtre.</p>
+    <p class="sous">Plus un bien vous ressemble, plus son point est gros. Touchez un point pour voir le bien et dire où se situe le vôtre par rapport à lui.</p>
     <div id="cp-zone-liste"><p class="cp-meta">Recherche des biens du marché…</p></div>
     <div id="cp-zone-carte" hidden>
       <div id="cp-map" role="region" aria-label="Carte des biens du marché"></div>
       <div class="cp-legende">
         <span><i data-couleur="hote"></i>Votre logement</span>
         <span><i data-couleur="neutre"></i>À juger</span>
-        <span><i data-couleur="similaire"></i>Similaire</span>
-        <span><i data-couleur="non"></i>Non similaire</span>
+        <span><i data-couleur="similaire"></i>Comparable</span>
+        <span><i data-couleur="non"></i>Pas comparable</span>
         <span><i data-contour="equipements"></i>À vos équipements</span>
       </div>
       <p class="cp-meta" id="cp-note-position">Airbnb décale souvent la position des annonces de quelques centaines de mètres : la carte est approchée.</p>
@@ -225,9 +228,14 @@
   let jeton = 0
   let profil = null
   let cartes = []
-  // Les jugements de l'hote : id -> 'similaire' | 'non'. Seuls les similaires
-  // sont envoyes ; « non » est une aide de tri, non enregistree.
+  // Les jugements de l'hote : id -> 'dessous' | 'equivalent' | 'dessus' (un
+  // COMPARABLE, avec sa position, §22.1) ou 'non' (pas comparable, aide de tri
+  // non enregistree).
   const jugements = new Map()
+  const POSITIONS = ['dessous', 'equivalent', 'dessus']
+  const LIBELLE_POSITION = { dessous: 'le vôtre est en dessous', equivalent: 'équivalent', dessus: 'le vôtre est supérieur' }
+  const NOM_RARE = { spa: 'jacuzzi ou spa', piscine: 'piscine', jardin: 'jardin', vue: 'vue exceptionnelle' }
+  const AVEC_ARTICLE = { spa: 'un jacuzzi ou un spa', piscine: 'une piscine', jardin: 'un jardin', vue: 'une vue exceptionnelle' }
   // Les retenus du FONDATEUR : verrouilles en vert, jamais envoyes par l'hote
   // (decision de Thierry du 5 octobre 2026).
   let fondateur = new Set()
@@ -241,7 +249,7 @@
   let rechercheEnCours = 0
 
   function dire (id, texte, classe) { const z = el(id); z.textContent = texte || ''; z.className = classe || '' }
-  const similaires = () => [...jugements.entries()].filter(([, v]) => v === 'similaire').map(([id]) => id)
+  const similaires = () => [...jugements.entries()].filter(([, v]) => POSITIONS.includes(v)).map(([id]) => id)
 
   async function appeler (methode, corps) {
     const r = await fetch(`/api/marche-comparables?property_id=${encodeURIComponent(el('cp-bien').value)}`, {
@@ -349,9 +357,11 @@
   function retenusDu (d) {
     fondateur = new Set((d.fondateur || []).map(String))
     for (const id of fondateur) jugements.delete(id)
+    const positions = d.positions && typeof d.positions === 'object' ? d.positions : {}
     for (const id of d.retenus || []) {
       const k = String(id)
-      if (!fondateur.has(k) && !touches.has(k)) jugements.set(k, 'similaire')
+      // Un retenu sans position (avant §22) est compte « equivalent ».
+      if (!fondateur.has(k) && !touches.has(k)) jugements.set(k, POSITIONS.includes(positions[k]) ? positions[k] : 'equivalent')
     }
     majCompte()
   }
@@ -425,7 +435,8 @@
   // ─── La carte ──────────────────────────────────────────────────────────────
   function etatDe (id) {
     if (fondateur.has(id)) return 'similaire'
-    return jugements.get(id) || 'neutre'
+    const j = jugements.get(id)
+    return POSITIONS.includes(j) ? 'similaire' : j === 'non' ? 'non' : 'neutre'
   }
   // Rayon du point : de 6 a 18 selon la ressemblance (0 a 100 %).
   const rayon = c => 6 + Math.round(12 * Math.max(0, Math.min(100, Number(c.ressemblance) || 0)) / 100)
@@ -509,7 +520,8 @@
     for (const c of cartes) {
       const li = document.createElement('li')
       const b = document.createElement('button'); b.type = 'button'; b.dataset.id = c.listing_id
-      b.textContent = `${c.nom || 'Annonce sans titre'} — ${c.ressemblance} % de ressemblance${etatDe(c.listing_id) === 'similaire' ? ' (similaire)' : etatDe(c.listing_id) === 'non' ? ' (non similaire)' : ''}`
+      const j = jugements.get(c.listing_id)
+      b.textContent = `${c.nom || 'Annonce sans titre'} — ${c.ressemblance} % de ressemblance${fondateur.has(c.listing_id) ? ' (retenu par l’équipe)' : POSITIONS.includes(j) ? ` (comparable : ${LIBELLE_POSITION[j]})` : j === 'non' ? ' (pas comparable)' : ''}`
       b.addEventListener('click', () => ouvrirFiche(c.listing_id))
       li.append(b); ol.append(li)
     }
@@ -598,9 +610,17 @@
     if (fondateur.has(id)) {
       f.append(Object.assign(document.createElement('p'), { className: 'cp-fondateur', textContent: 'Retenu par l’équipe HôteSmart' }))
     } else {
+      // §22.1 : un ecart d'equipement RARE signale un ecart de valeur.
+      const manque = (Array.isArray(c.rares_manquants) ? c.rares_manquants : []).filter(e => NOM_RARE[e])
+      const enPlus = (Array.isArray(c.rares_en_plus) ? c.rares_en_plus : []).filter(e => NOM_RARE[e])
+      const ecart = manque.length || enPlus.length
+      if (manque.length) f.append(Object.assign(document.createElement('p'), { className: 'cp-alerte', textContent: `Ce bien n’a pas votre ${manque.map(e => NOM_RARE[e]).join(', ')} : il n’a sans doute pas la même valeur.` }))
+      if (enPlus.length) f.append(Object.assign(document.createElement('p'), { className: 'cp-alerte', textContent: `Ce bien a ${enPlus.map(e => AVEC_ARTICLE[e]).join(', ')}, pas le vôtre : il n’a sans doute pas la même valeur.` }))
+      f.append(Object.assign(document.createElement('p'), { className: 'cp-explication',
+        textContent: 'Un comparable offre une prestation de même valeur aux yeux d’un voyageur. « En dessous » et « Supérieur » servent aux petites différences ; s’il manque un équipement qui change la valeur (jacuzzi, piscine, jardin, vue), choisissez « Pas comparable ».' }))
       const v = document.createElement('div'); v.className = 'cp-verdict'
       const bouton = (etat, texte, classe) => {
-        const b = document.createElement('button'); b.type = 'button'; b.className = `cp-btn secondaire ${classe}`; b.textContent = texte
+        const b = document.createElement('button'); b.type = 'button'; b.className = `cp-btn secondaire ${classe}${etat === 'non' && ecart ? ' en-avant' : ''}`; b.textContent = texte
         b.dataset.verdict = etat
         b.setAttribute('aria-pressed', String(jugements.get(id) === etat))
         // Un second clic sur le meme bouton annule le jugement.
@@ -613,7 +633,8 @@
         })
         return b
       }
-      v.append(bouton('similaire', 'Logement similaire', 'similaire'), bouton('non', 'Non similaire', 'non'))
+      v.append(bouton('dessous', 'Le mien est en dessous', 'similaire'), bouton('equivalent', 'Équivalent', 'similaire'),
+        bouton('dessus', 'Le mien est supérieur', 'similaire'), bouton('non', 'Pas comparable', 'non'))
       f.append(v)
     }
     if (focus) { const b = f.querySelector(`button[data-verdict="${focus}"]`); if (b) b.focus() }
@@ -624,7 +645,7 @@
   function majCompte () {
     const n = similaires().length
     el('cp-valider-b').disabled = n < MIN
-    el('cp-compte').textContent = n < MIN ? `${n} similaire${n > 1 ? 's' : ''} — encore ${MIN - n} au moins` : `${n} similaires`
+    el('cp-compte').textContent = n < MIN ? `${n} comparable${n > 1 ? 's' : ''} — encore ${MIN - n} au moins` : `${n} comparables`
   }
 
   async function retenir () {
@@ -634,7 +655,7 @@
     el('cp-valider-b').disabled = true
     dire('cp-message-b', 'Enregistrement…')
     let r
-    try { r = await appeler('POST', { action: 'retenir', listing_ids: ids }) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
+    try { r = await appeler('POST', { action: 'retenir', choix: ids.map(id => ({ listing_id: id, position: jugements.get(id) })) }) } catch (e) { r = { ok: false, d: { message: 'Le serveur ne répond pas.' } } }
     if (j !== jeton) return
     majCompte()
     if (!r.ok || !r.d || !Array.isArray(r.d.retenus)) return dire('cp-message-b', (r.d && r.d.message) || 'Enregistrement impossible.', 'cp-erreur')

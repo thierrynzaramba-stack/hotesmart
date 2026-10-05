@@ -150,7 +150,7 @@ test('LE TEST QUI COMPTE (securite, review S3) : les lignes portent le COMPTE re
   const profil = p.ecrits.find(e => e.tb === 'bien_profil')
   assert.equal(profil.ligne.user_id, 'COMPTE')
   assert.equal(profil.ligne.property_id, 'BIEN-A')
-  const r = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: IDS }, tables: TABLES() })
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: (IDS).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: TABLES() })
   assert.equal(r.code, 200)
   const up = r.ecrits.find(e => e.tb === 'comparables_retenus' && e.op === 'upsert')
   assert.ok(up.ligne.every(l => l.user_id === 'COMPTE' && l.property_id === 'BIEN-A' && l.retenu_par === 'proprietaire' && l.actif === true))
@@ -198,14 +198,14 @@ test('chercher : sans profil, on le demande ; AirROI indisponible (plafond, cle,
 })
 
 test('LE TEST QUI COMPTE : retenir — au moins 3, tous dans la derniere liste proposee ; les autres sont desactives, pas supprimes', async () => {
-  const deux = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: IDS.slice(0, 2) }, tables: TABLES() })
+  const deux = await appeler({ method: 'POST', body: { action: 'retenir', choix: (IDS.slice(0, 2)).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: TABLES() })
   assert.equal(deux.code, 400)
   assert.match(deux.corps.message, /au moins 3/)
-  const intrus = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: [...IDS.slice(0, 2), '123456789'] }, tables: TABLES() })
+  const intrus = await appeler({ method: 'POST', body: { action: 'retenir', choix: ([...IDS.slice(0, 2), '123456789']).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: TABLES() })
   assert.equal(intrus.code, 400)
   assert.match(intrus.corps.message, /ne fait plus partie de la liste/)
   assert.ok(!intrus.ecrits.length, 'rien n est ecrit')
-  const ok = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: [...IDS, IDS[0]] }, tables: TABLES() })
+  const ok = await appeler({ method: 'POST', body: { action: 'retenir', choix: ([...IDS, IDS[0]]).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: TABLES() })
   assert.deepEqual(ok.corps.retenus, IDS, 'doublon retire')
   const [react, desact] = ok.ecrits.filter(e => e.op === 'update')
   assert.deepEqual(react.maj, { actif: true })
@@ -218,7 +218,7 @@ test('LE TEST QUI COMPTE : retenir — au moins 3, tous dans la derniere liste p
 })
 
 test('retenir : sans liste en cache pour ce profil, on demande de relancer la recherche', async () => {
-  const r = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: IDS }, tables: { ...TABLES(), airroi_cache: [] } })
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: (IDS).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: { ...TABLES(), airroi_cache: [] } })
   assert.equal(r.code, 400)
   assert.match(r.corps.message, /Relancez la recherche/)
 })
@@ -310,7 +310,7 @@ test('REVIEW : une liste en cache PERIMEE (plus de 90 jours) n est plus proposee
   const vieux = { ...TABLES(), airroi_cache: [{ ...TABLES().airroi_cache[0], recupere_le: '2026-01-01T00:00:00Z' }] }
   const g = await appeler({ tables: vieux })
   assert.equal(g.corps.comparables, null)
-  const r = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: IDS }, tables: vieux })
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: (IDS).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: vieux })
   assert.equal(r.code, 400)
   assert.match(r.corps.message, /Relancez la recherche/)
 })
@@ -329,7 +329,7 @@ test('REVIEW (C3) : la table du profil absente (migration non appliquee) — un 
 test('REVIEW : retenir apres un changement de profil, avec l ancienne liste encore en cache — refuse, rien n est ecrit', async () => {
   const t = TABLES()
   t.bien_profil = [{ ...t.bien_profil[0], voyageurs: 4 }]
-  const r = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: IDS }, tables: t })
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: (IDS).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: t })
   assert.equal(r.code, 400)
   assert.ok(!r.ecrits.length)
 })
@@ -337,7 +337,7 @@ test('REVIEW : retenir apres un changement de profil, avec l ancienne liste enco
 test('une carte renvoyee a exactement les cles de la liste blanche', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: TABLES() })
   for (const c of r.corps.comparables) {
-    assert.deepEqual(Object.keys(c).sort(), ['a_vos_equipements', 'chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
+    assert.deepEqual(Object.keys(c).sort(), ['a_vos_equipements', 'chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'rares_en_plus', 'rares_manquants', 'ressemblance', 'source', 'voyageurs'])
   }
 })
 
@@ -394,9 +394,9 @@ test('§21.2 : un bien trouve par equipement peut etre retenu ; un bien inconnu,
   const t = AVEC_SPA()
   t.airroi_cache.push({ cle: CLE_SPA, reponse: JSON.stringify({ results: SPA }), recupere_le: new Date().toISOString() })
   const ids = [...IDS.slice(0, 2), String(SPA[0].listing_info.listing_id)]
-  const r = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: ids }, tables: t })
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: (ids).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: t })
   assert.equal(r.code, 200)
-  const non = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: [...IDS.slice(0, 2), '999999'] }, tables: t })
+  const non = await appeler({ method: 'POST', body: { action: 'retenir', choix: ([...IDS.slice(0, 2), '999999']).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: t })
   assert.equal(non.code, 400)
 })
 
@@ -465,4 +465,47 @@ test('LE TEST QUI COMPTE (SECURITE) : la migration — deux couts seulement, par
   assert.ok(rendre.indexOf('pg_advisory_xact_lock') < rendre.indexOf('delete from comparables_recherches'))
   assert.match(rendre, /interval '10 minutes'/)
   assert.match(sql, /revoke all on function\s+public\.rendre_recherche_comparables\(\s+uuid, numeric\)\s+from public, anon, authenticated/)
+})
+
+// ─── §22.1 : la position par comparable ─────────────────────────────────────
+test('LE TEST QUI COMPTE (§22.1) : retenir enregistre la POSITION de chaque comparable — jamais sur un retenu de l equipe', async () => {
+  const choix = [{ listing_id: IDS[0], position: 'dessous' }, { listing_id: IDS[1], position: 'equivalent' }, { listing_id: IDS[2], position: 'dessus' }]
+  const r = await appeler({ method: 'POST', body: { action: 'retenir', choix }, tables: TABLES() })
+  assert.equal(r.code, 200)
+  assert.deepEqual(r.corps.positions, { [IDS[0]]: 'dessous', [IDS[1]]: 'equivalent', [IDS[2]]: 'dessus' })
+  const up = r.ecrits.find(e => e.op === 'upsert')
+  assert.deepEqual(up.ligne.map(l => [l.listing_id, l.position]), choix.map(c => [c.listing_id, c.position]))
+  const parPos = r.ecrits.filter(e => e.op === 'update' && e.maj.position)
+  assert.deepEqual(parPos.map(e => [e.maj.position, e.filtres]), [
+    ['dessous', [['eq', 'property_id', 'BIEN-A'], ['eq', 'retenu_par', 'proprietaire'], ['in', 'listing_id', [IDS[0]]]]],
+    ['equivalent', [['eq', 'property_id', 'BIEN-A'], ['eq', 'retenu_par', 'proprietaire'], ['in', 'listing_id', [IDS[1]]]]],
+    ['dessus', [['eq', 'property_id', 'BIEN-A'], ['eq', 'retenu_par', 'proprietaire'], ['in', 'listing_id', [IDS[2]]]]],
+  ])
+})
+
+test('§22.1 : une position inconnue, ou deux positions pour un meme bien, sont refusees — rien n est ecrit', async () => {
+  const mauvais = [
+    [{ listing_id: IDS[0], position: 'similaire' }, { listing_id: IDS[1], position: 'equivalent' }, { listing_id: IDS[2], position: 'dessus' }],
+    [{ listing_id: IDS[0], position: 'dessous' }, { listing_id: IDS[0], position: 'dessus' }, { listing_id: IDS[1], position: 'equivalent' }, { listing_id: IDS[2], position: 'dessus' }],
+  ]
+  for (const choix of mauvais) {
+    const r = await appeler({ method: 'POST', body: { action: 'retenir', choix }, tables: TABLES() })
+    assert.equal(r.code, 400)
+    assert.ok(!r.ecrits.length)
+  }
+  const ancien = await appeler({ method: 'POST', body: { action: 'retenir', listing_ids: IDS }, tables: TABLES() })
+  assert.equal(ancien.code, 400, 'l ancienne forme sans position est refusee')
+})
+
+test('§22.1 : le GET rend la position de chaque retenu', async () => {
+  const t = TABLES()
+  t.comparables_retenus = [{ property_id: 'BIEN-A', listing_id: IDS[0], actif: true, retenu_par: 'proprietaire', position: 'dessus' }]
+  const g = await appeler({ tables: t })
+  assert.deepEqual(g.corps.positions, { [IDS[0]]: 'dessus' })
+})
+
+test('LE TEST QUI COMPTE (§22.1) : la migration de la position — trois valeurs, nullable, rejouable', () => {
+  const sql = fs.readFileSync(path.join(RACINE, 'migrations', '2026-10-05-comparables-position.sql'), 'utf8')
+  assert.ok(sql.split('\n').every(l => l.length < 60))
+  assert.match(sql, /add column if not exists position text\s+check \(position in \(\s+'dessous', 'equivalent', 'dessus'\)\)/)
 })

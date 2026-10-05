@@ -43,7 +43,7 @@ test('LE TEST QUI COMPTE : une carte n a AUCUN prix, revenu ou occupation — li
   const cartes = p.trierComparables(COMPS, MOI)
   assert.equal(cartes.length, 25)
   for (const c of cartes) {
-    assert.deepEqual(Object.keys(c).sort(), ['a_vos_equipements', 'chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'ressemblance', 'source', 'voyageurs'])
+    assert.deepEqual(Object.keys(c).sort(), ['a_vos_equipements', 'chambres', 'details', 'distance_km', 'equipements', 'latitude', 'listing_id', 'longitude', 'nom', 'ouvert_toute_annee', 'photo', 'photos', 'position_approchee', 'rares_en_plus', 'rares_manquants', 'ressemblance', 'source', 'voyageurs'])
   }
   assert.deepEqual(clesArgent(cartes), [], 'aucune cle d argent')
   assert.ok(!/€|\$\s?\d/.test(JSON.stringify(cartes)), 'aucun montant, meme dans la description')
@@ -285,4 +285,11 @@ test('REVIEW : « a vos equipements » est calcule par le serveur, quelle que so
   const de = nom => r.find(c => c.nom === nom)
   assert.equal(de(base.listing_info.listing_name).a_vos_equipements, true, 'un bien de la liste de BASE avec jacuzzi')
   assert.equal(de(sans.listing_info.listing_name).a_vos_equipements, false, 'le parking n est pas un equipement rare')
+})
+
+test('§22.1 : les equipements RARES qui different, dans les deux sens', () => {
+  const f = fiche({ amenities: ['Pool', 'Free parking on premises'] })
+  const c = p.trierComparables([f], { ...MOI, equipements: ['spa', 'parking'] })[0]
+  assert.deepEqual(c.rares_manquants, ['spa'], 'l hote a un jacuzzi, pas ce bien')
+  assert.deepEqual(c.rares_en_plus, ['piscine'], 'ce bien a une piscine, pas l hote')
 })
