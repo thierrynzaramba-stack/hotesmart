@@ -3090,3 +3090,16 @@ Le « 10 % » de §22.2 est **remplacé** par le cran de prix mesuré ci-dessous
     médianes par niveau ;
   - deux POST « prix » simultanés peuvent payer deux fois le même calendrier
     (coût borné par le quota).
+- **Review de c04e356 (aucun constat de sécurité)**. Corrigé : le script de
+  capture refuse une coordonnée vide (elle valait 0, donc une capture payée en
+  (0, 0)) et un `--option valeur` écrit avec une espace. Restent, notés :
+  - **deux « Relever les prix » simultanés** peuvent payer deux fois les
+    mêmes calendriers : rien ne verrouille le bien entre la lecture du cache
+    et les réservations. Borné par le plafond SQL de 15 sur 90 jours ;
+  - **retenus remplacés après un relevé** : chaque nouveau comparable se
+    relève, jusqu'à 15 sur 90 jours. Cela consomme la marge prévue pour un
+    relevé perdu. Choix de conception assumé, à dire à Thierry ;
+  - des calendriers relevés à des dates différentes expirent en décalé : les
+    10 retenus pour le calcul, donc les prix, peuvent changer à ce moment-là ;
+  - le nom passé par `--nom` n'est pas vérifié contre les coordonnées : c'est
+    à l'opérateur de nommer juste.

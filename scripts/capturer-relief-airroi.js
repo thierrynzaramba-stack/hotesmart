@@ -22,7 +22,9 @@
 //   2. il verifie que la reponse ne contient la cle sous AUCUNE forme — sinon
 //      il n'ecrit RIEN dans le depot et echoue ;
 //   3. il ecrit la reponse BRUTE dans
-//      tests/fixtures/airroi/relief-bagneres-<date de capture>.json.
+//      tests/fixtures/airroi/relief-<nom>-<date de capture>.json (nom : bagneres
+//      par defaut, sinon --nom ; c'est a l'operateur qu'il revient de nommer
+//      juste l'endroit vise, le script n'a aucun moyen de le verifier).
 //
 // ⚠ BASE 100 : les pourcentages rendus sont des FACTEURS, jamais le prix d'un
 // logement (le client refuse toute autre base). On prend a AirROI la
@@ -56,12 +58,18 @@ const JOURS = 730
   if (!(Number.isFinite(budget) && budget > 0)) { console.error('ECHEC : --budget doit etre un nombre positif'); process.exit(1) }
   // Un autre marche se vise par ses coordonnees ET son nom, les deux ou aucun :
   // le nom ecrit dans le fichier ne doit jamais mentir sur l'endroit capture.
+  // `--latitude 43.6` (espace) serait ignore, et la capture partirait sur
+  // Bagneres : refuse (review de c04e356).
+  const nus = args.filter(a => /^--(latitude|longitude|nom)$/.test(a))
+  if (nus.length) { console.error(`ECHEC : ${nus.join(', ')} s ecrit --option=valeur`); process.exit(1) }
   const vise = ['latitude', 'longitude', 'nom'].map(n => val(n, null))
   if (vise.some(v => v !== null) && vise.some(v => v === null)) { console.error('ECHEC : --latitude, --longitude et --nom vont ensemble'); process.exit(1) }
   let latitude, longitude
   let nom = 'bagneres'
   if (vise[0] !== null) {
-    [latitude, longitude] = [Number(vise[0]), Number(vise[1])]
+    // Une valeur vide donnerait Number('') === 0 : une capture payee en (0, 0).
+    const nombre = v => (/^-?\d+(\.\d+)?$/.test(v) ? Number(v) : NaN)
+    ;[latitude, longitude] = [nombre(vise[0]), nombre(vise[1])]
     nom = vise[2]
     if (!(Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180) || !/^[a-z0-9-]{2,40}$/.test(nom)) { console.error('ECHEC : coordonnees ou nom (minuscules, chiffres, tirets) invalides'); process.exit(1) }
   } else {

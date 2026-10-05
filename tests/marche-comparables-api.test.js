@@ -728,3 +728,21 @@ test('DECISION : au plus 10 calendriers servent au calcul — ceux en cache d ab
   assert.deepEqual(r.appelsAirroi.map(a => a.calendrier).sort(), Array.from({ length: 8 }, (_, i) => String(9000 + i)).sort())
   assert.equal(r.corps.a_capturer, 0)
 })
+
+test('DECISION (review de c04e356) : le calcul recoit 10 calendriers au plus, et l equipe passe avant l ordre du choix', async () => {
+  // 12 calendriers en cache : 10 servent, aucun releve.
+  const plein = tablesPrix({ calendriersEnCache: 0 })
+  plein.comparables_retenus = Array.from({ length: 12 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: 'proprietaire', position: 'equivalent' }))
+  for (const l of plein.comparables_retenus) plein.airroi_cache.push({ cle: cleCal(l.listing_id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(100) }), recupere_le: new Date().toISOString() })
+  const g = await appeler({ tables: plein })
+  assert.equal(g.corps.prix_depart.prix.comparables.length, 10)
+  assert.equal(g.corps.prix_depart.a_capturer, 0)
+  // Rien en cache, deux comparables de l'equipe EN FIN de liste : releves d'abord.
+  const equipe = tablesPrix({ calendriersEnCache: 0 })
+  equipe.comparables_retenus = Array.from({ length: 12 }, (_, i) => ({ property_id: 'BIEN-A', listing_id: String(9000 + i), actif: true, retenu_par: i >= 10 ? 'fondateur' : 'proprietaire', position: i >= 10 ? null : 'equivalent' }))
+  const r = await appeler({ method: 'POST', body: { action: 'prix' }, tables: equipe })
+  const releves = r.appelsAirroi.map(a => a.calendrier)
+  assert.equal(releves.length, 10)
+  assert.ok(releves.includes('9010') && releves.includes('9011'), 'l equipe est relevee')
+  assert.ok(!releves.includes('9008') && !releves.includes('9009'), 'les deux derniers choix de l hote attendent')
+})
