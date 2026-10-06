@@ -46,10 +46,17 @@ const TABLES_INTERDITES = ['calendar_inventory', 'price_display_log', 'prix_hote
 // Les endpoints qui ecrivent au calendrier ou pilotent les prix.
 const ENDPOINTS_INTERDITS = ['/api/calendar', '/api/yield-pilote', '/api/yield-grille', '/api/yield-exceptions', '/api/channel-', '/api/beds24', '/api/disponibilites', '/api/reservation']
 
+// ⚠ BASE FIXE (review de 2f98e8a) : main au moment de la fusion (7a9ae46).
+// Compare a `origin/main`, le diff se viderait une fois la branche fusionnee, et
+// le test passerait a vide. Un git en echec fait ECHOUER, jamais passer.
+const BASE_MAIN = '7a9ae46d22d303c0ffcb0cbbd5735ec689696ed4'
+// Fichiers EXISTANTS que la V2 retouche, controles chacun a part.
+const RETOUCHES = ['apps/yield/prix.html', 'components/sidebar.js']
+
 test('LE TEST QUI COMPTE (garantie prod) : la liste du code V2 est COMPLETE — un fichier ajoute sans controle fait rougir', () => {
-  let diff = ''
-  try { diff = execSync('git diff --name-only origin/main...HEAD -- api apps lib pages shared', { cwd: RACINE, encoding: 'utf8' }) } catch (e) { return }
-  const apportes = diff.split('\n').filter(Boolean).filter(f => f !== 'apps/yield/prix.html' && fs.existsSync(path.join(RACINE, f)))
+  const diff = execSync(`git diff --name-only ${BASE_MAIN} HEAD -- api apps lib pages shared components`, { cwd: RACINE, encoding: 'utf8' })
+  const apportes = diff.split('\n').filter(Boolean).filter(f => !RETOUCHES.includes(f) && fs.existsSync(path.join(RACINE, f)))
+  assert.ok(apportes.length >= CODE_V2.length, `le diff contre la base fixe ne rend que ${apportes.length} fichiers : il ne prouverait rien`)
   for (const f of apportes) assert.ok(CODE_V2.includes(f), `${f} arrive en production sans controle : l'ajouter a CODE_V2`)
 })
 
@@ -83,9 +90,13 @@ test('garantie prod : le bloc marche de l ecran Prix ne fait que LIRE /api/yield
   assert.ok(i > 0)
   const bloc = src.slice(i, i + 6000)
   assert.match(bloc, /n’agit pas sur vos prix/)
-  for (const m of bloc.matchAll(/fetch\(([^)]*)\)/g)) {
-    assert.match(m[1], /\/api\/yield-marche/)
-    assert.doesNotMatch(m[1], /method\s*:\s*['"](POST|PUT|PATCH|DELETE)/)
+  // L'appel ENTIER, jusqu'a la fin de son instruction (review de 2f98e8a : une
+  // regex qui s'arretait au premier « ) » ne controlait rien).
+  const appels = [...bloc.matchAll(/fetch\(/g)].map(m => bloc.slice(m.index, bloc.indexOf('\n', bloc.indexOf('fetch(', m.index) + 6) + 200))
+  assert.ok(appels.length > 0, 'le bloc lit bien quelque chose')
+  for (const a of appels) {
+    assert.match(a, /\/api\/yield-marche/)
+    assert.doesNotMatch(a, /method\s*:/, 'aucune methode d ecriture : un GET')
   }
 })
 

@@ -3429,3 +3429,12 @@ et les fonctions du quota doivent être refusées à la clé anonyme.
 - relief du marché par commune des biens de production (0,10 $ chacun),
   utile seulement au repli ;
 - rattachement des biens à leur marché.
+
+- **Revue de 2f98e8a (aucun constat de sécurité).** Le test de garantie compare
+  désormais à une **base fixe** (main au moment de la fusion, 7a9ae46), et un
+  git en échec le fait échouer : contre `origin/main`, il se serait vidé une
+  fois la branche fusionnée. Le contrôle du bloc marché de l'écran Prix lit
+  l'appel entier. **À savoir** : les migrations 5 et 6 (quota), rejouées
+  **après** la 7, recréeraient les anciennes fonctions. Elles restent fermées à
+  `anon` et `authenticated`, donc c'est sans effet, mais il faut les rejouer
+  **dans l'ordre**. Budget global : dette 53.
