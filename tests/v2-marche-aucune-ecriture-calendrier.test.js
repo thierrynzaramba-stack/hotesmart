@@ -218,3 +218,12 @@ test('garantie prod (ยง22.13) : le module de la colonne ne lit ni n ecrit rien โ
   const src = lire('shared/prix-depart-jours.js')
   assert.doesNotMatch(src, /fetch\(|supabase|\.from\(|XMLHttpRequest|import\s/)
 })
+
+test('review de 789549c : une lecture en panne (evenements ou comparables) se DIT et ne se garde pas en memoire', () => {
+  const src = lire('apps/yield/prix.html')
+  const i = src.indexOf('async function chargerDepart')
+  const bloc = src.slice(i, src.indexOf('\n  }\n', i))
+  assert.match(bloc, /if \(!c \|\| !ev \|\| !Array\.isArray\(ev\.calendrier\)\) throw new Error\('lecture'\)/)
+  assert.match(bloc, /lecture impossible pour le moment/)
+  assert.match(bloc, /if \(!res\.motif\) departParBien\.set\(bien, res\)/)
+})

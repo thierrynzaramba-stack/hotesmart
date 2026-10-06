@@ -44,8 +44,10 @@ export function niveauAvecEvenements (niveau, evenements) {
 }
 
 // Les evenements qui touchent un jour (entrees du calendrier : { debut, fin, nom,
-// origine, segment }).
-const evenementsDu = (calendrier, j) => (calendrier || []).filter(e => e && e.debut <= j && e.fin >= j)
+// origine, segment }). ⚠ Une date que l'hote a DESACTIVEE (`actif: false`,
+// remise dans la liste par /api/yield-evenements pour pouvoir la reactiver) ne
+// releve rien (review de 789549c).
+const evenementsDu = (calendrier, j) => (calendrier || []).filter(e => e && e.actif !== false && e.debut <= j && e.fin >= j)
 
 /**
  * @param prix       la sortie de prixDeDepart (cases, strategie, jours, statut, motif)

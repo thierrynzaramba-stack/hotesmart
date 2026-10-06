@@ -988,8 +988,12 @@
         lire(`/api/marche-comparables?${new URLSearchParams({ property_id: bien, jours: '1' })}`),
         lire(`/api/yield-evenements?${new URLSearchParams({ bien })}`),
       ])
-      const pd = c && c.prix_depart
-      res = { pd, calendrier: (ev && ev.calendrier) || [], motif: motifNonCalcule(pd) }
+      // ⚠ UNE LECTURE EN PANNE SE DIT, et ne se garde pas en memoire (review de
+      // 789549c) : sans les evenements, la colonne aurait perdu ses
+      // relevements sans le dire.
+      if (!c || !ev || !Array.isArray(ev.calendrier)) throw new Error('lecture')
+      const pd = c.prix_depart
+      res = { pd, calendrier: ev.calendrier, motif: motifNonCalcule(pd) }
     } catch (e) {
       res = { pd: null, calendrier: [], motif: 'prix de départ non calculé : lecture impossible pour le moment' }
     }

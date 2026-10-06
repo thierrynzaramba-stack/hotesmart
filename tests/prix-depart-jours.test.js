@@ -88,3 +88,11 @@ test('un bien sans comparables ou sans strategie : la raison, jamais une erreur'
   assert.equal(M.motifNonCalcule({ etat: 'calcule', prix: { statut: 'calcule' } }), null)
   assert.equal(M.composerJours({ prix: { statut: 'non_calculable' } }).size, 0)
 })
+
+test('review de 789549c : une date commerciale DESACTIVEE par l hote ne releve rien', () => {
+  const jours = [{ date: '2027-02-14', type: 'semaine', niveau: 'modere', source: 'mesure' }]
+  const coupee = { ...ev('calendrier', 'saint_valentin', 'Saint-Valentin', '2027-02-14'), actif: false }
+  const r = M.composerJours({ prix: PRIX(jours), calendrier: [coupee] }).get('2027-02-14')
+  assert.equal(r.niveau, 'modere')
+  assert.deepEqual(r.raisons, ['saison (mesuré)'])
+})
