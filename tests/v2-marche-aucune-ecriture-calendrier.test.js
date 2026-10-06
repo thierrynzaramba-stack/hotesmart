@@ -210,7 +210,7 @@ test('LE TEST QUI COMPTE (garantie prod, §22.13) : la colonne « Prix de depart
   assert.deepEqual(urls.map(u => u.split('?')[0]), ['/api/marche-comparables', '/api/yield-evenements'])
   assert.ok(urls[0].includes("jours: '1'"))
   assert.doesNotMatch(bloc, /method\s*:/, 'aucune methode d ecriture : des GET')
-  assert.match(src, /import \{ composerJours, celluleDepart, motifNonCalcule \} from '\/shared\/prix-depart-jours\.js'/)
+  assert.match(src, /import \{ composerJours, celluleDepart, detailDepart, motifNonCalcule \} from '\/shared\/prix-depart-jours\.js'/)
   assert.match(src, /title="À titre de comparaison : ce prix n’est ni écrit au calendrier ni envoyé aux plateformes\."/)
 })
 

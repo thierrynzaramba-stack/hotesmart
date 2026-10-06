@@ -54,7 +54,7 @@ test('LE TEST QUI COMPTE : le prix de la case selon la strategie, le niveau d ou
   assert.deepEqual([a.niveau, a.prix, a.ecart_eur, a.ecart_pct, a.raisons], ['creux', 100, -25, -20, ['saison (mesuré)']])
   const b = r.get('2026-12-24')
   assert.deepEqual([b.niveau_base, b.niveau, b.prix, b.ecart_eur, b.ecart_pct], ['creux', 'modere', 120, 20, 20])
-  assert.deepEqual(b.raisons, ['saison (mesuré)', 'Noël (+1 niveau)'])
+  assert.deepEqual(b.raisons, ['saison (mesuré)', 'Noël (+1 tranche)'])
   const c = r.get('2027-06-11')
   assert.deepEqual([c.prix, c.source, c.ecart_eur], [150, 'estime', null], 'week-end ; estime ; sans prix au calendrier, pas d ecart')
   assert.deepEqual(c.raisons, ['saison (estimé)', 'week-end'])
@@ -95,4 +95,30 @@ test('review de 789549c : une date commerciale DESACTIVEE par l hote ne releve r
   const r = M.composerJours({ prix: PRIX(jours), calendrier: [coupee] }).get('2027-02-14')
   assert.equal(r.niveau, 'modere')
   assert.deepEqual(r.raisons, ['saison (mesuré)'])
+})
+
+test('LE TEST QUI COMPTE (recette du 6 octobre 2026) : un seul vocabulaire a l ecran — les 5 tranches ; Exceptionnel pour un evenement DECLARE, au prix de la case Tres haut', () => {
+  const jours = ['creux', 'modere', 'favorable', 'pic'].map((n, i) => ({ date: `2026-11-0${i + 2}`, type: 'semaine', niveau: n, source: 'mesure' }))
+  jours.push({ date: '2026-11-06', type: 'semaine', niveau: 'creux', source: 'mesure' })
+  const r = M.composerJours({ prix: PRIX(jours), calendrier: [ev('declare', 'salon', 'Salon du vin', '2026-11-06')] })
+  assert.deepEqual(['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06'].map(d => r.get(d).tranche), ['Base', 'Moyen', 'Haut', 'Très haut', 'Exceptionnel'])
+  assert.equal(r.get('2026-11-06').prix, r.get('2026-11-05').prix, 'Exceptionnel : le prix de la case Tres haut')
+  const teintes = { Base: 'n-base', Moyen: 'n-moyen', Haut: 'n-haut', 'Très haut': 'n-tres-haut', Exceptionnel: 'n-exceptionnel' }
+  for (const x of r.values()) assert.doesNotMatch(M.celluleDepart(x, teintes) + M.detailDepart(x), /Creux|Modéré|Favorable|Pic/)
+  assert.match(M.celluleDepart(r.get('2026-11-06'), teintes), /class="yp-niv-badge n-exceptionnel">Exceptionnel</)
+  assert.equal((M.detailDepart(r.get('2026-11-06')).match(/Exceptionnel/g) || []).length, 1, 'le mot une seule fois dans le detail')
+})
+
+test('LE TEST QUI COMPTE (recette du 6 octobre 2026) : la cellule ALLEGEE — le prix et la tranche, c est tout ; le detail en info-bulle', () => {
+  const jours = [{ date: '2026-12-25', type: 'weekend', niveau: 'favorable', source: 'mesure' }, { date: '2026-12-26', type: 'weekend', niveau: 'favorable', source: 'estime' }]
+  const r = M.composerJours({ prix: PRIX(jours), calendrier: [ev('officiel', 'ferie', 'Noël', '2026-12-25')], existants: new Map([['2026-12-25', 150]]) })
+  const html = M.celluleDepart(r.get('2026-12-25'), { 'Très haut': 'n-tres-haut' })
+  const visible = html.replace(/title="[^"]*"/, '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
+  assert.equal(visible, '190 € Très haut')
+  assert.match(html, /class="yp-niv-badge n-tres-haut"/)
+  assert.match(html, /title="Prix de départ 190 € · Très haut \(mesuré\) · week-end · Noël \(\+1 tranche\) · écart avec votre prix : \+40 € \(\+27 %\)"/)
+  // Sans prix au calendrier : rien de repete dans la cellule, ni dans le detail.
+  const sans = M.celluleDepart(r.get('2026-12-26'))
+  assert.doesNotMatch(sans, /pas de prix au calendrier/)
+  assert.doesNotMatch(M.detailDepart(r.get('2026-12-26')), /écart/)
 })

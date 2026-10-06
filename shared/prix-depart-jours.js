@@ -10,7 +10,13 @@
 // prix (tests/v2-marche-aucune-ecriture-calendrier.test.js).
 // ⚠ Fonctions PURES ; tout texte qui sort en HTML passe par ech().
 
-export const NOM_NIVEAU = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
+// ⚠ UN SEUL VOCABULAIRE A L'ECRAN (recette de Thierry, 6 octobre 2026) : les 5
+// tranches de YieldFlow. Le calcul garde ses noms (creux…pic) ; l'ecran ne
+// montre que ceux-ci. « Exceptionnel » est reserve aux jours touches par un
+// evenement DECLARE par l'hote — au prix de la case « Tres haut » (le calcul ne
+// mesure que 4 niveaux).
+export const TRANCHE = { creux: 'Base', modere: 'Moyen', favorable: 'Haut', pic: 'Très haut' }
+export const EXCEPTIONNEL = 'Exceptionnel'
 export const NOM_SOURCE = { mesure: 'mesuré', estime: 'estimé', marche: 'marché' }
 const ORDRE = ['creux', 'modere', 'favorable', 'pic']
 
@@ -25,8 +31,8 @@ const ORDRE = ['creux', 'modere', 'favorable', 'pic']
 const PLUS_UN = new Set(['ferie', 'pont', 'week_end_prolonge'])
 export function effetEvenement (e) {
   if (!e) return null
-  if (e.origine === 'declare') return { plancher: 'pic', texte: 'au moins pic' }
-  if (e.origine === 'calendrier' || PLUS_UN.has(e.segment)) return { plus: 1, texte: '+1 niveau' }
+  if (e.origine === 'declare') return { plancher: 'pic', texte: 'événement déclaré', exceptionnel: true }
+  if (e.origine === 'calendrier' || PLUS_UN.has(e.segment)) return { plus: 1, texte: '+1 tranche' }
   return { texte: null }
 }
 
@@ -68,6 +74,8 @@ export function composerJours ({ prix, calendrier = [], existants = new Map() })
     const c = caseDe(niveau, j.type)
     if (!c || c.statut !== 'calcule') { out.set(j.date, { ...base, niveau, statut: 'non_calcule', motif: c && c.motif ? c.motif : 'case non calculée' }); continue }
     const p = c.strategies[prix.strategie]
+    const exceptionnel = evs.some(e => { const f = effetEvenement(e); return f && f.exceptionnel })
+    const tranche = exceptionnel ? EXCEPTIONNEL : TRANCHE[niveau]
     const raisons = [`saison (${NOM_SOURCE[j.source] || j.source})`]
     if (j.type === 'weekend') raisons.push('week-end')
     for (const e of evs) {
@@ -76,7 +84,7 @@ export function composerJours ({ prix, calendrier = [], existants = new Map() })
     }
     const ex = existants.get(j.date)
     const ecart = Number.isFinite(ex) && ex > 0 ? { ecart_eur: Math.round(p - ex), ecart_pct: Math.round((p / ex - 1) * 100) } : { ecart_eur: null, ecart_pct: null }
-    out.set(j.date, { ...base, niveau, prix: p, raisons, ...ecart, statut: 'calcule' })
+    out.set(j.date, { ...base, niveau, tranche, prix: p, raisons, ...ecart, statut: 'calcule' })
   }
   return out
 }
@@ -84,16 +92,23 @@ export function composerJours ({ prix, calendrier = [], existants = new Map() })
 const ech = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
 const signe = v => (v > 0 ? `+${v}` : `${v}`)
 
-// La cellule de la colonne « Prix de départ » : le prix, le niveau (et d'ou il
-// vient), la raison, l'ecart avec le prix existant.
-export function celluleDepart (jour) {
+// Le DETAIL d'un jour, en une phrase : tranche, source, raisons, ecart. Il vit
+// dans l'info-bulle (survol) et dans le panneau de la ligne (toucher).
+export function detailDepart (jour) {
+  if (!jour) return ''
+  if (jour.statut !== 'calcule') return `Prix de départ non calculé : ${jour.motif}`
+  const ecart = jour.ecart_eur == null ? null : `écart avec votre prix : ${signe(jour.ecart_eur)} € (${signe(jour.ecart_pct)} %)`
+  return [`Prix de départ ${jour.prix} € · ${jour.tranche} (${NOM_SOURCE[jour.source] || jour.source})`, ...jour.raisons.slice(jour.raisons[0].startsWith('saison') ? 1 : 0), ecart].filter(Boolean).join(' · ')
+}
+
+// La cellule de la colonne « Prix de départ », ALLEGEE (recette de Thierry) : le
+// prix et la tranche, c'est tout ; le detail en info-bulle. `classes` : la
+// table des teintes de l'ecran (tranche -> classe), une seule pour tout l'ecran.
+export function celluleDepart (jour, classes = {}) {
   if (!jour) return '<td class="yp-depart non-calc">—</td>'
-  if (jour.statut !== 'calcule') return `<td class="yp-depart non-calc" title="${ech(jour.motif)}">non calculé<span class="yp-depart-r">${ech(jour.motif)}</span></td>`
-  const niv = `${NOM_NIVEAU[jour.niveau] || jour.niveau} · ${NOM_SOURCE[jour.source] || jour.source}`
-  const ecart = jour.ecart_eur == null ? '<span class="yp-depart-e">pas de prix au calendrier</span>'
-    : `<span class="yp-depart-e ${jour.ecart_eur > 0 ? 'haut' : jour.ecart_eur < 0 ? 'bas' : ''}">${ech(signe(jour.ecart_eur))}&nbsp;€ (${ech(signe(jour.ecart_pct))}&nbsp;%)</span>`
-  return `<td class="yp-depart" title="${ech(jour.raisons.join(' · '))}"><span class="yp-depart-p">${ech(jour.prix)}&nbsp;€</span>`
-    + `<span class="yp-depart-n">${ech(niv)}</span>${ecart}<span class="yp-depart-r">${ech(jour.raisons.join(' · '))}</span></td>`
+  if (jour.statut !== 'calcule') return `<td class="yp-depart non-calc" title="${ech(detailDepart(jour))}">non calculé</td>`
+  return `<td class="yp-depart" title="${ech(detailDepart(jour))}"><span class="yp-depart-p">${ech(jour.prix)}&nbsp;€</span> `
+    + `<span class="yp-niv-badge ${ech(classes[jour.tranche] || '')}">${ech(jour.tranche)}</span></td>`
 }
 
 // Toute la colonne non calculee (bien sans comparables, sans strategie…) : la

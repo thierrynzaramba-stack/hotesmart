@@ -192,11 +192,9 @@
                                        border-left: 1.5px solid var(--border2); }
     /* §22.13 : le PRIX DE DEPART, a titre de comparaison — n'agit sur aucun prix. */
     .yp-table tr.yp-moities .m-depart { color: var(--text2); }
-    .yp-table td.yp-depart { font-size: 12px; line-height: 1.35; min-width: 120px; }
-    .yp-depart-p { display: block; font-size: 13.5px; font-weight: 700; }
-    .yp-depart-n, .yp-depart-r { display: block; color: var(--text2); font-size: 11px; }
-    .yp-depart-e { display: block; font-size: 11.5px; }
-    .yp-depart-e.haut { color: #1F6F45; } .yp-depart-e.bas { color: #A13D2D; }
+    .yp-table td.yp-depart { font-size: 12px; line-height: 1.35; white-space: nowrap; cursor: help; }
+    .yp-depart-p { font-size: 13.5px; font-weight: 700; white-space: nowrap; }
+    .yp-depart-detail { font-size: 12px; color: var(--text2); margin: 6px 0 0; }
     .yp-table td.yp-depart.non-calc { color: var(--text3); }
     .yp-depart-motif { font-size: 12.5px; color: var(--text2); margin: 0 0 8px; }
     .yp-table td.yp-realise { color: var(--text2); }
@@ -530,7 +528,7 @@
   import { initErrorHandler } from '/shared/error-handler.js'
   import { motif, nomSegment, refus } from '/shared/yield-motifs.js'
   import { api as apiClient } from '/shared/api-client.js'
-  import { composerJours, celluleDepart, motifNonCalcule } from '/shared/prix-depart-jours.js'
+  import { composerJours, celluleDepart, detailDepart, motifNonCalcule } from '/shared/prix-depart-jours.js'
 
   initErrorHandler()
 
@@ -1214,7 +1212,7 @@
         <tr>
           <th>Jour</th>
           <th class="sep-g">Prix&nbsp;→&nbsp;suggestion</th>
-          <th class="sep-g" title="Le prix de départ issu de vos comparables, selon votre stratégie : niveau du jour, raison, écart avec votre prix actuel. N’agit pas sur vos prix.">Prix de départ</th>
+          <th class="sep-g" title="Le prix de départ issu de vos comparables, selon votre stratégie, et sa tranche. Le détail (mesuré ou estimé, raison, écart avec votre prix) : au survol, ou en touchant la ligne. N’agit pas sur vos prix.">Prix de départ</th>
           <th class="sep-g">Réalisé</th>
           <th>L’an dernier</th>
           <th colspan="2" title="À gauche vos séjours, à droite ceux de l’an dernier ramenés sur les mêmes jours de semaine (décalage continu de 52 semaines).">Séjours</th>
@@ -1651,14 +1649,14 @@
           ? `<span class="yp-pont" title="${ech(`Jour de pont${n.libelle ? ` — ${n.libelle}` : ''} : coincé entre un jour férié et un week-end. Ces nuits-là se vendent au tarif des jours fériés.`)}">pont</span>`
           : ''}</td>
       <td class="sep-g">${pilotage}</td>
-      ${celluleDepart(departJours.get(n.date))}
+      ${celluleDepart(departJours.get(n.date), CLASSES)}
       <td class="sep-g yp-realise">${realise}</td>
       <td>${reel}</td>
       <td class="yp-bar">${segment(barA)}</td>
       <td class="yp-bar">${segment(barN1, true)}</td>
     </tr>
     <tr class="yp-detail-l" id="d-${n.date}" hidden>
-      <td colspan="7"><div class="yp-detail">${pourquoi(n)}</div></td></tr>`
+      <td colspan="7"><div class="yp-detail">${pourquoi(n)}${departJours.has(n.date) ? `<p class="yp-depart-detail">${ech(detailDepart(departJours.get(n.date)))}</p>` : ''}</div></td></tr>`
   }
 
   // ÉTAGE 1 (ce qui a bougé, PROPRE À CETTE NUIT) + ÉTAGE 3 (le reste, replié).
