@@ -3517,3 +3517,13 @@ vérifier en recette.
       dans le panneau qui s'ouvre quand on touche la ligne.
     - Plus de « pas de prix au calendrier » répété : sans prix, le détail ne
       parle simplement pas d'écart.
+- **Le prix Exceptionnel (décision de Thierry, 6 octobre 2026).**
+  - Calcul : prix Très haut + l'écart Haut → Très haut du même type de jour,
+    dans la stratégie choisie.
+  - Plafond : le haut de la fourchette des comparables de la case Très haut,
+    pour ne jamais sortir du marché. Le détail dit quand le plafond s'applique.
+  - Sans case Haut calculée, le prix reste celui de Très haut, et le détail le
+    dit.
+  - Affiché seulement.
+  - Loft, haut de gamme : semaine 193 + 24 = **217 €** ; week-end 227 + 21 =
+    **248 €** (plafonds 301 € et 342 €).
