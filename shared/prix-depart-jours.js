@@ -19,6 +19,28 @@
 // des comparables de la case Tres haut — jamais hors marche. Affiche seulement.
 export const TRANCHE = { creux: 'Base', modere: 'Moyen', favorable: 'Haut', pic: 'Très haut' }
 export const EXCEPTIONNEL = 'Exceptionnel'
+// ⚠ LA TRANCHE SUIT LE PRIX FINAL DU JOUR, comme YieldFlow (option A, decision
+// de Thierry du 6 octobre 2026) : c'est la tranche ou tombe le prix sur
+// l'ECHELLE DE LA SEMAINE de la strategie (la plus haute dont le prix de semaine
+// est atteint ; a prix egal, la plus haute). Un vendredi de saison moyenne a
+// 206 € s'affiche donc « Tres haut » si la semaine Tres haut vaut 193 €. La
+// saison et le week-end restent dans le detail.
+// ⚠ SANS ECHELLE (aucune case de semaine calculee pour cette strategie), on ne
+// dit pas « Base » au hasard (review de 0899942) : la tranche retombe sur le
+// niveau de la case du jour (`repli`).
+export function trancheDuPrix (prix, cases, strategie, repli = null) {
+  let t = null
+  let echelle = false
+  for (const n of ORDRE) {
+    const c = (cases || []).find(x => x.niveau === n && x.type === 'semaine' && x.statut === 'calcule')
+    const v = c && c.strategies ? c.strategies[strategie] : undefined
+    if (!Number.isFinite(v)) continue
+    echelle = true
+    if (prix >= v) t = n
+  }
+  if (!echelle) return TRANCHE[repli] || TRANCHE.creux
+  return TRANCHE[t || 'creux']
+}
 export const NOM_SOURCE = { mesure: 'mesuré', estime: 'estimé', marche: 'marché' }
 const ORDRE = ['creux', 'modere', 'favorable', 'pic']
 
@@ -34,7 +56,7 @@ const PLUS_UN = new Set(['ferie', 'pont', 'week_end_prolonge'])
 export function effetEvenement (e) {
   if (!e) return null
   if (e.origine === 'declare') return { plancher: 'pic', texte: 'événement déclaré', exceptionnel: true }
-  if (e.origine === 'calendrier' || PLUS_UN.has(e.segment)) return { plus: 1, texte: '+1 tranche' }
+  if (e.origine === 'calendrier' || PLUS_UN.has(e.segment)) return { plus: 1, texte: '+1 tranche de saison' }
   return { texte: null }
 }
 
@@ -76,7 +98,6 @@ export function composerJours ({ prix, calendrier = [], existants = new Map() })
     const c = caseDe(niveau, j.type)
     if (!c || c.statut !== 'calcule') { out.set(j.date, { ...base, niveau, statut: 'non_calcule', motif: c && c.motif ? c.motif : 'case non calculée' }); continue }
     const exceptionnel = evs.some(e => { const f = effetEvenement(e); return f && f.exceptionnel })
-    const tranche = exceptionnel ? EXCEPTIONNEL : TRANCHE[niveau]
     let p = c.strategies[prix.strategie]
     let surcroit = null
     if (exceptionnel) {
@@ -91,13 +112,17 @@ export function composerJours ({ prix, calendrier = [], existants = new Map() })
         surcroit = { ecart: p - tresHaut, plafonne: brut > plafond }
       } else surcroit = { ecart: null }
     }
-    const raisons = [`saison (${NOM_SOURCE[j.source] || j.source})`]
+    const tranche = exceptionnel ? EXCEPTIONNEL : trancheDuPrix(p, prix.cases, prix.strategie, niveau)
+    // La SAISON de base (avant tout relevement) ; chaque evenement dit son effet.
+    const raisons = [`saison ${TRANCHE[j.niveau] || j.niveau} (${NOM_SOURCE[j.source] || j.source})`]
     if (j.type === 'weekend') raisons.push('week-end')
     for (const e of evs) {
       const f = effetEvenement(e)
       // Un jour Exceptionnel : un « +1 tranche » n'y fait plus rien, il ne se dit pas.
       const sansEffet = exceptionnel && f && f.plus
-      raisons.push(f && f.texte && !sansEffet ? `${e.nom} (${f.texte})` : e.nom)
+      // Un « +1 tranche » sur une saison deja au plus haut ne change rien : on le dit.
+      const auPlusHaut = !exceptionnel && f && f.plus && j.niveau === 'pic'
+      raisons.push(auPlusHaut ? `${e.nom} (déjà au plus haut)` : f && f.texte && !sansEffet ? `${e.nom} (${f.texte})` : e.nom)
     }
     if (surcroit) {
       raisons.push(surcroit.ecart === null ? 'écart Haut → Très haut non mesurable : prix Très haut'
@@ -120,7 +145,7 @@ export function detailDepart (jour) {
   if (!jour) return ''
   if (jour.statut !== 'calcule') return `Prix de départ non calculé : ${jour.motif}`
   const ecart = jour.ecart_eur == null ? null : `écart avec votre prix : ${signe(jour.ecart_eur)} € (${signe(jour.ecart_pct)} %)`
-  return [`Prix de départ ${jour.prix} € · ${jour.tranche} (${NOM_SOURCE[jour.source] || jour.source})`, ...jour.raisons.slice(jour.raisons[0].startsWith('saison') ? 1 : 0), ecart].filter(Boolean).join(' · ')
+  return [`Prix de départ ${jour.prix} € · ${jour.tranche}`, ...jour.raisons, ecart].filter(Boolean).join(' · ')
 }
 
 // La cellule de la colonne « Prix de départ », ALLEGEE (recette de Thierry) : le

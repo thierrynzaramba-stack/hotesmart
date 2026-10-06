@@ -3527,3 +3527,19 @@ vérifier en recette.
   - Affiché seulement.
   - Loft, haut de gamme : semaine 193 + 24 = **217 €** ; week-end 227 + 21 =
     **248 €** (plafonds 301 € et 342 €).
+- **La tranche suit le prix final du jour (option A, décision de Thierry,
+  6 octobre 2026).**
+  - **Vécu sur le relevé de février 2027** : « 206 € · Moyen » un vendredi,
+    plus cher que « 193 € · Très haut » la veille. La tranche disait la saison,
+    alors que le prix portait aussi la prime week-end.
+  - **La règle** : la tranche affichée est celle où tombe le prix sur l'échelle
+    des prix de **semaine** de la stratégie ; à prix égal, la plus haute. C'est
+    ce que fait YieldFlow (« Très haut · vendredi »).
+  - La saison de base (avant relèvement) et le week-end restent dans le
+    détail : « saison Moyen (mesuré) · week-end ».
+  - Un « +1 tranche » sur une saison déjà au plus haut se dit « déjà au plus
+    haut ».
+  - **Vérifié sur le loft, Saint-Valentin 2027** (un dimanche, nuit de
+    semaine) : « 193 € · Très haut », détail « saison Très haut (mesuré) ·
+    Saint-Valentin (déjà au plus haut) ». Le 12 et le 13 : « 206 € · Très haut
+    » (week-end, vacances d'hiver d'une autre zone).

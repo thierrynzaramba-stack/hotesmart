@@ -51,13 +51,13 @@ test('LE TEST QUI COMPTE : le prix de la case selon la strategie, le niveau d ou
   const r = M.composerJours({ prix: PRIX(jours), calendrier: [ev('officiel', 'ferie', 'Noël', '2026-12-24')],
     existants: new Map([['2026-12-23', 125], ['2026-12-24', 100]]) })
   const a = r.get('2026-12-23')
-  assert.deepEqual([a.niveau, a.prix, a.ecart_eur, a.ecart_pct, a.raisons], ['creux', 100, -25, -20, ['saison (mesuré)']])
+  assert.deepEqual([a.niveau, a.prix, a.ecart_eur, a.ecart_pct, a.raisons], ['creux', 100, -25, -20, ['saison Base (mesuré)']])
   const b = r.get('2026-12-24')
   assert.deepEqual([b.niveau_base, b.niveau, b.prix, b.ecart_eur, b.ecart_pct], ['creux', 'modere', 120, 20, 20])
-  assert.deepEqual(b.raisons, ['saison (mesuré)', 'Noël (+1 tranche)'])
+  assert.deepEqual(b.raisons, ['saison Base (mesuré)', 'Noël (+1 tranche de saison)'])
   const c = r.get('2027-06-11')
   assert.deepEqual([c.prix, c.source, c.ecart_eur], [150, 'estime', null], 'week-end ; estime ; sans prix au calendrier, pas d ecart')
-  assert.deepEqual(c.raisons, ['saison (estimé)', 'week-end'])
+  assert.deepEqual(c.raisons, ['saison Moyen (estimé)', 'week-end'])
   // La strategie choisit la valeur de la case.
   assert.equal(M.composerJours({ prix: PRIX(jours, { strategie: 'qualite' }) }).get('2026-12-23').prix, 110)
 })
@@ -94,7 +94,7 @@ test('review de 789549c : une date commerciale DESACTIVEE par l hote ne releve r
   const coupee = { ...ev('calendrier', 'saint_valentin', 'Saint-Valentin', '2027-02-14'), actif: false }
   const r = M.composerJours({ prix: PRIX(jours), calendrier: [coupee] }).get('2027-02-14')
   assert.equal(r.niveau, 'modere')
-  assert.deepEqual(r.raisons, ['saison (mesuré)'])
+  assert.deepEqual(r.raisons, ['saison Moyen (mesuré)'])
 })
 
 test('LE TEST QUI COMPTE (recette du 6 octobre 2026) : un seul vocabulaire a l ecran — les 5 tranches ; Exceptionnel pour un evenement DECLARE, au prix de la case Tres haut', () => {
@@ -117,7 +117,7 @@ test('LE TEST QUI COMPTE (recette du 6 octobre 2026) : la cellule ALLEGEE — le
   const visible = html.replace(/title="[^"]*"/, '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
   assert.equal(visible, '190 € Très haut')
   assert.match(html, /class="yp-niv-badge n-tres-haut"/)
-  assert.match(html, /title="Prix de départ 190 € · Très haut \(mesuré\) · week-end · Noël \(\+1 tranche\) · écart avec votre prix : \+40 € \(\+27 %\)"/)
+  assert.match(html, /title="Prix de départ 190 € · Très haut · saison Haut \(mesuré\) · week-end · Noël \(\+1 tranche de saison\) · écart avec votre prix : \+40 € \(\+27 %\)"/)
   // Sans prix au calendrier : rien de repete dans la cellule, ni dans le detail.
   const sans = M.celluleDepart(r.get('2026-12-26'))
   assert.doesNotMatch(sans, /pas de prix au calendrier/)
@@ -161,4 +161,37 @@ test('review de caafb83 : ecart nul ou negatif, ferie + declare, ecart avec le p
   assert.ok(f.raisons.includes('Noël') && !f.raisons.some(x => /\+1 tranche/.test(x)))
   // L'ecart avec le prix existant se calcule sur le prix MAJORE.
   assert.deepEqual([f.ecart_eur, f.ecart_pct], [30, 20])
+})
+
+test('LE TEST QUI COMPTE (option A, recette du 6 octobre 2026) : la tranche suit le PRIX FINAL du jour sur l echelle de la semaine — jamais « Moyen » a un prix de Tres haut', () => {
+  // Le releve de Thierry (fevrier 2027) : semaine Base 153, Moyen 169, Haut 169, Tres haut 193 ;
+  // week-end Base 187, Moyen 206, Haut 206, Tres haut 227.
+  const k = (n, t, v) => ({ niveau: n, type: t, statut: 'calcule', strategies: { agressif: v, juste: v, qualite: v }, fourchette: { bas: 50, haut: 400 } })
+  const cases = [k('creux', 'semaine', 153), k('modere', 'semaine', 169), k('favorable', 'semaine', 169), k('pic', 'semaine', 193),
+    k('creux', 'weekend', 187), k('modere', 'weekend', 206), k('favorable', 'weekend', 206), k('pic', 'weekend', 227)]
+  const jour = (d, type, niveau) => ({ date: d, type, niveau, source: 'mesure' })
+  const r = M.composerJours({ prix: { statut: 'calcule', strategie: 'qualite', cases, jours: [
+    jour('2027-02-05', 'weekend', 'modere'), jour('2027-02-06', 'weekend', 'creux'), jour('2027-02-08', 'semaine', 'modere'),
+    jour('2027-02-09', 'semaine', 'favorable'), jour('2027-02-03', 'semaine', 'creux')] } })
+  assert.deepEqual(['2027-02-05', '2027-02-06', '2027-02-08', '2027-02-09', '2027-02-03'].map(d => `${r.get(d).prix} ${r.get(d).tranche}`),
+    ['206 Très haut', '187 Haut', '169 Haut', '169 Haut', '153 Base'], 'a prix egal, la tranche la plus haute')
+  // La saison et le week-end restent dans le detail.
+  assert.match(M.detailDepart(r.get('2027-02-05')), /^Prix de départ 206 € · Très haut · saison Moyen \(mesuré\) · week-end/)
+})
+
+test('verifie sur le loft (Saint-Valentin 2027, un dimanche deja Tres haut) : un +1 sans effet se dit « deja au plus haut »', () => {
+  const r = M.composerJours({ prix: PRIX([{ date: '2027-02-14', type: 'semaine', niveau: 'pic', source: 'mesure' }]),
+    calendrier: [ev('calendrier', 'commercial:saint_valentin', 'Saint-Valentin', '2027-02-14')] }).get('2027-02-14')
+  assert.deepEqual([r.niveau, r.prix], ['pic', 160])
+  assert.deepEqual(r.raisons, ['saison Très haut (mesuré)', 'Saint-Valentin (déjà au plus haut)'])
+})
+
+test('review de 0899942 : sans echelle de semaine (strategie absente ou cases de semaine non calculees), la tranche suit la case du jour — jamais « Base » au hasard ; la strategie choisit l echelle', () => {
+  const T = M.trancheDuPrix
+  const k = (n, t, a, q) => ({ niveau: n, type: t, statut: 'calcule', strategies: { agressif: a, juste: a, qualite: q } })
+  const sem = [k('creux', 'semaine', 100, 150), k('modere', 'semaine', 110, 160), k('favorable', 'semaine', 120, 170), k('pic', 'semaine', 130, 180)]
+  assert.equal(T(206, sem, 'inconnue', 'modere'), 'Moyen', 'strategie absente des cases')
+  assert.equal(T(206, [k('modere', 'weekend', 206, 206)], 'juste', 'modere'), 'Moyen', 'aucune case de semaine')
+  // La strategie choisit l'echelle : 165 € est Tres haut en agressif, Moyen en haut de gamme.
+  assert.deepEqual([T(165, sem, 'agressif'), T(165, sem, 'qualite')], ['Très haut', 'Moyen'])
 })
