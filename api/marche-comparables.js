@@ -206,8 +206,8 @@ async function marcheDuBien (bienId, profil) {
 }
 // Ce que la page dit du marche relie : son nom, ou pourquoi il n'y en a pas.
 const MARCHE_ABSENT = {
-  aucun: 'Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les contrôler ni pour les remplacer.',
-  adresse: l => `Le marché relié (${l}) n’est pas celui de l’adresse de votre logement : il n’est pas utilisé. Les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les contrôler ni pour les remplacer.`,
+  aucun: 'Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les remplacer si vos comparables changent trop peu de prix.',
+  adresse: l => `Le marché relié (${l}) n’est pas celui de l’adresse de votre logement : il n’est pas utilisé. Les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les remplacer si vos comparables changent trop peu de prix.`,
 }
 
 // ⚠ Une cle du cache contient des guillemets et des virgules ; `.in()` de

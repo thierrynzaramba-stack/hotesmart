@@ -648,7 +648,7 @@ test('LE TEST QUI COMPTE (§22.11) : les 8 cases — semaine et week-end par niv
   assert.doesNotMatch(z, /un niveau de prix vaut/, 'le cran a disparu')
   assert.match(z, /Sous chaque prix : la fourchette des prix de vos comparables dans cette case\. Week-end : les nuits du vendredi et du samedi\. Prix mesurés sur les 6 prochains mois\./)
   assert.match(z, /Les niveaux viennent de la saison de vos comparables : en moyenne sur vos hôtes, leurs prix varient de 20,2 %/)
-  assert.match(z, /suivent le comparable médian de chaque case/)
+  assert.match(z, /suivent l’écart médian de vos hôtes dans chaque case/)
   assert.match(z, /de vos 7 hôtes, par rang : agressif 140 €, prix marché 158 €, haut de gamme 165 €\. Votre stratégie : prix marché\./)
   assert.match(z, /ceux qui imposent 2 nuits ou plus vendent la nuit 10 % moins cher/)
 })
@@ -672,7 +672,7 @@ test('§22.11 : le repli sur le marche de la ville est dit ; la fiche ne parle p
 })
 
 test('recette du 6 octobre 2026 : sans marche relie, la page le DIT au-dessus des prix ; avec un marche relie, rien', async () => {
-  const msg = 'Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les contrôler ni pour les remplacer.'
+  const msg = 'Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les remplacer si vos comparables changent trop peu de prix.'
   const sans = await monter(pageAvecPrix({ ...PRIX_CALCULE, marche: { relie: false, message: msg } }))
   const avert = [...sans.doc.querySelectorAll('#cp-zone-prix .cp-avert')].map(x => x.textContent)
   assert.equal(avert[0], msg)
@@ -680,7 +680,10 @@ test('recette du 6 octobre 2026 : sans marche relie, la page le DIT au-dessus de
   assert.doesNotMatch(avec.doc.getElementById('cp-zone-prix').textContent, /Aucun marché/)
   const sous = sans.doc.querySelector('#cp-etape-d .sous').textContent
   assert.doesNotMatch(sous, /suivent le marché comptent plus/)
-  assert.match(sous, /au rang de votre stratégie/)
+  assert.match(sous, /au rang de votre stratégie, décalé par vos réponses/)
+  // Avant tout releve payant aussi.
+  const capt = await monter(pageAvecPrix({ etat: 'a_capturer', a_capturer: 2, marche: { relie: false, message: msg } }))
+  assert.equal(capt.doc.querySelector('#cp-zone-prix .cp-avert').textContent, msg)
 })
 
 test('LE TEST QUI COMPTE (§22.5) : des prix a relever — un bouton, jamais un releve automatique ; le releve affiche le resultat', async () => {
