@@ -209,7 +209,8 @@
     <h2>Vos prix de départ</h2>
     <p class="sous">Calculés à partir des prix affichés par vos comparables sur les 6 prochains mois. Votre prix de semaine habituel est
       celui de vos hôtes au rang de votre stratégie, décalé par vos réponses « en dessous » ou « supérieur » ; dans chaque case, il suit
-      l’écart médian de vos hôtes entre cette case et leur propre prix habituel, sans sortir de la fourchette de la case.
+      l’écart médian, entre cette case et leur propre prix habituel, de ceux de vos hôtes qui changent leurs prix au fil des saisons,
+      sans sortir de la fourchette de la case.
       Rien n’est encore appliqué à vos prix.</p>
     <div id="cp-zone-prix"></div>
     <p class="cp-meta" id="cp-note-prix" aria-live="polite"></p>
@@ -873,9 +874,16 @@
     zone.append(t)
     const dit = (texte, classe = 'cp-meta') => zone.append(Object.assign(document.createElement('p'), { className: classe, textContent: texte }))
     dit('Sous chaque prix : la fourchette des prix de vos comparables dans cette case. Week-end : les nuits du vendredi et du samedi. Prix mesurés sur les 6 prochains mois.')
-    dit(r.niveaux_source === 'marche'
-      ? 'Vos comparables changent peu de prix au fil des saisons : les niveaux viennent du calendrier du marché de votre ville.'
-      : `Les niveaux viennent de la saison de vos comparables : en moyenne sur vos hôtes, leurs prix varient de ${String(r.amplitude).replace('.', ',')} % entre leurs dates calmes et leurs dates fortes. Vos prix, eux, suivent l’écart médian de vos hôtes dans chaque case : si la plupart de vos comparables gardent un prix fixe, vos prix varient moins que cette saison.`)
+    // Regle (d) : d'ou vient la FORME (saison et week-end), dite a chaque fois.
+    const pct = v => `${String(v).replace('.', ',')} %`
+    const fixes = (r.hotes || 0) - (r.hotes_mouvants || 0)
+    dit(r.niveaux_source === 'phase1'
+      ? `Moins de 2 de vos hôtes changent leurs prix au fil des saisons : la saison et le week-end viennent du marché de ${r.phase1_localite || 'votre ville'} (ses saisons relevées et les prix affichés de ses logements). Votre prix habituel, lui, vient de tous vos hôtes.`
+      : `La saison et le week-end sont mesurés sur les ${r.hotes_mouvants} hôtes sur ${r.hotes} qui changent leurs prix d’au moins ${r.seuil_mouvant_pct} % au fil des saisons : en moyenne, leurs prix varient de ${pct(r.amplitude)} entre leurs dates calmes et leurs dates fortes.${fixes > 0 ? ` ${pluriel(fixes, 'hôte garde', 'hôtes gardent')} un prix presque fixe et ne compte${fixes > 1 ? 'nt' : ''} pas dans la saison.` : ''} Votre prix habituel, lui, vient de tous vos hôtes.`)
+    // Une INFORMATION, sans effet sur le prix (demande de Thierry) : l'ecart de
+    // prime week-end entre vos comparables et le marche de la ville.
+    const pw = r.prime_week_end
+    if (pw) dit(`Prime week-end (pour information, sans effet sur vos prix) : vos comparables ${pw.comparables === null ? 'non mesurée' : pct(pw.comparables)}, marché ${pw.localite ? `de ${pw.localite}` : 'de la ville'} ${pw.marche === null ? 'non mesurée' : pct(pw.marche)}.`)
     if (r.ancres) dit(`Prix habituel de semaine de vos ${pluriel(r.hotes, 'hôte', 'hôtes')}, par rang : agressif ${EUROS(r.ancres.agressif)}, prix marché ${EUROS(r.ancres.juste)}, haut de gamme ${EUROS(r.ancres.qualite)}. Votre stratégie : ${NOM_STRATEGIE[r.strategie] || ''}.`)
     // Un ecart faible entre strategies est DIT, jamais maquille.
     if (r.serre) {

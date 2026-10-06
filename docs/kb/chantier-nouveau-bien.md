@@ -3545,3 +3545,62 @@ vérifier en recette.
     semaine) : « 193 € · Très haut », détail « saison Très haut (mesuré) ·
     Saint-Valentin (déjà au plus haut) ». Le 12 et le 13 : « 206 € · Très haut
     » (week-end, vacances d'hiver d'une autre zone).
+
+### 22.14 Recette du 6 octobre 2026 : marchés reliés en production, règle (d) de la forme
+
+**Production (go de Thierry, 6 octobre 2026).** Écritures faites et relues :
+- `marche_biens` : Cœur de vie 23 et La bulle → Bagnères-de-Bigorre ; Ofuro
+  Futari → Toulouse ; Colomiers → **Colomiers** (AirROI connaît ce marché :
+  « Falcou, Colomiers, Occitania », lookup à 0,01 $).
+- Sans repayer : les 60 mois de Bagnères copiés de staging vers
+  `airroi_cache` (même clé) ; les saisons phase 1 de Bagnères recalculées
+  depuis les captures du 24 septembre ; les températures de Bagnères (729
+  jours) et de Toulouse (703 jours, à partir du 1er novembre).
+- Payé : Toulouse, 60 mois (0,50 $) et pacing (0,20 $), lookup 0,01 $, puis
+  ses saisons phase 1 (18 saisons, jusqu'au 24 septembre 2027) ; Colomiers,
+  60 mois (0,50 $). **Total : 1,22 $.**
+- Le pacing de Bagnères (capture du 24 septembre) n'est **pas** dans le cache
+  de production : le repli de la règle (d) ne peut pas encore y lire les prix du
+  marché. Le copier est une écriture à autoriser.
+
+**« Historique absent »** : ce sont les 60 mois d'ADR et d'occupation du
+marché (`POST /markets/metrics/all`, 0,50 $), rangés dans `airroi_cache` sous
+la clé du marché. La page ne fait que les lire, elle ne paie jamais.
+
+**Règle (d), décision de Thierry.** Constat sur Cœur de vie 23 : la saison des
+comparables variait de 30,2 %, les prix de 15 % seulement (92 → 106 €). Un hôte
+à prix fixe sur cinq (amplitude propre 1,9 %), et deux autres qui ne bougent
+que sur une saison, tiraient la médiane des formes à ×1,00 dans trois tranches
+sur quatre.
+1. **La FORME (saison et week-end) ne se mesure que sur les hôtes qui bougent
+   leurs prix** : amplitude propre d'au moins **10 %** (P90 / P10 de leurs prix
+   rapportés à leur prix habituel du même type de nuit, 6 mois, 8 nuits au
+   moins ; moyenne des annonces d'un hôte). Les niveaux des dates et la forme
+   des cases viennent d'eux seuls.
+2. **Le NIVEAU de prix reste sur tous les hôtes** : P25 / P50 / P75 des prix
+   habituels de semaine. La fourchette d'une case reste celle de tous les hôtes.
+3. **Moins de 2 hôtes qui bougent** (ou une saison trop plate) : la forme vient
+   de la **phase 1** du marché relié — ses saisons (`marche_calendrier`) pour les
+   niveaux, les prix affichés du marché (pacing en cache) pour les formes, case
+   par case, rapportés à leur médiane de semaine. La page le dit. Sans phase 1
+   couvrant la moitié des 6 mois, ou sans prix du marché : non calculable, et dit.
+   Le calendrier de température AirROI ne sert plus au repli.
+4. **Prime week-end, pour information, sans effet sur le prix** : « vos
+   comparables X % » (médiane sur tous les hôtes de leur prix habituel de
+   week-end rapporté à celui de semaine), « marché de la ville Y % » (médiane
+   des écarts mesurés par la phase 1).
+5. **Sans marché relié** : avertissement au-dessus des prix, le calcul n'est pas
+   refusé (décision de Thierry).
+
+**Résultat sur Cœur de vie 23** (4 hôtes qui bougent sur 5, prix marché,
+semaine / week-end) : Base 89 / 94 €, Moyen 102 / 102 €, Haut 103 / 105 €,
+Très haut 121 / 122 €. Les ancres ne changent pas (99 / 102 / 103 €). Prime
+week-end : comparables 0 %, Bagnères 7,8 %. Le loft de recette : 6 hôtes sur 7
+bougent, Creux semaine 157 → 149 €, Très haut week-end 202 → 208 €.
+
+**Simulé, puis écarté.** Le repli sur la phase 1 donne à Bagnères une forme
+presque plate (×0,95 à ×1,05) : la moyenne de toute une ville écrase la saison.
+C'est un repli honnête, peu marqué.
+
+**La bulle** : un seul hôte indépendant parmi ses 3 comparables ; non calculable
+avant comme après (il en faut 5).

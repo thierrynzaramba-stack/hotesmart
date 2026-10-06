@@ -624,9 +624,6 @@ test('REVIEW (1e64a2b) : la colonne de position absente (migration non collee) �
 })
 
 // ─── §22.7 : les prix de depart ─────────────────────────────────────────────
-const t = require('../lib/marche/temperature-airroi')
-const RELIEF = lireJson(fs.readFileSync(path.join(__dirname, 'fixtures', 'airroi', 'relief-bagneres-2026-09-30.json'), 'utf8'))
-const TEMPERATURE = t.construireLignes({ marche: { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }, reponse: RELIEF })
 // §22.11 : un calendrier RELATIF a aujourd'hui (la route lit l'horloge : regle
 // du depot), 365 nuits, une saison continue (sommet en fevrier, +30 %) et une
 // prime week-end de 25 % ; `plat` : ni saison ni prime.
@@ -639,7 +636,15 @@ const CALENDRIER = (base, { plat = false } = {}) => Array.from({ length: 365 }, 
 })
 // Le calendrier du MARCHE, relatif lui aussi (le repli s'y lit) : la vraie
 // capture de Bagneres, ses jours decales pour commencer aujourd'hui.
-const TEMPERATURE_REL = () => TEMPERATURE.map((r, i) => ({ ...r, jour: new Date(Date.parse(`${AUJ()}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10) }))
+// Regle (d) : la PHASE 1 du marche (ses saisons, `marche_calendrier`) et les
+// prix affiches du marche (le pacing, en cache), relatifs a aujourd'hui.
+const dans = n => new Date(Date.parse(`${AUJ()}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10)
+const PHASE1 = ({ jours = 200 } = {}) => ({ pays: 'France', region: 'Occitania', localite: 'Bagnères-de-Bigorre', capture_le: dans(-12), calcule_le: dans(-12),
+  saisons: [{ debut: dans(0), fin: dans(Math.min(60, jours)), saison: 'basse' }, ...(jours > 60 ? [{ debut: dans(61), fin: dans(jours), saison: 'tres_forte' }] : [])],
+  ecart_semaine_week_end: [{ ecart_prix_pct: 8 }] })
+const PACING = () => ({ cle: cleCanonique('POST /markets/metrics/future/pacing', { market: { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }, currency: 'native' }),
+  reponse: JSON.stringify({ results: Array.from({ length: 200 }, (_, i) => ({ date: dans(i), available_rate_avg: (i <= 60 ? 100 : 140) * ([5, 6].includes(new Date(`${dans(i)}T00:00:00Z`).getUTCDay()) ? 1.08 : 1) })) }),
+  recupere_le: new Date().toISOString() })
 // Les 5 retenus des tests de prix : 5 hotes distincts (fixture comps-labulle).
 const IDS5 = COMPS.slice(0, 5).map(c => String(c.listing_info.listing_id))
 const cleCal = id => cleCanonique('GET /listings/live/calendar', { listing_id: String(id), currency: 'native' })
@@ -648,7 +653,8 @@ function tablesPrix ({ calendriersEnCache = 5, strategie = 'juste', localite = '
   tb.bien_profil = [{ ...PROFIL, property_id: 'BIEN-A', strategie, sejour_min: 2 }]
   tb.comparables_retenus = IDS5.map((id, i) => ({ property_id: 'BIEN-A', listing_id: id, actif: true, retenu_par: 'proprietaire', position: ['dessous', 'equivalent', 'dessus'][i % 3] }))
   tb.marche_biens = [{ property_id: 'BIEN-A', pays: 'France', region: 'Occitania', localite }]
-  tb.marche_temperature_airroi = TEMPERATURE_REL()
+  tb.marche_calendrier = [PHASE1()]
+  tb.airroi_cache.push(PACING())
   for (const id of IDS5.slice(0, calendriersEnCache)) tb.airroi_cache.push({ cle: cleCal(id), reponse: JSON.stringify({ currency: 'EUR', results: CALENDRIER(80 + 30 * IDS5.indexOf(id), { plat }) }), recupere_le: new Date().toISOString() })
   return tb
 }
@@ -709,7 +715,7 @@ test('LE TEST QUI COMPTE (§22.11) : les niveaux viennent des COMPARABLES — sa
   // Des comparables PLATS et aucun marche de l'adresse : rien n'est invente.
   const plats = await appeler({ method: 'POST', body: { action: 'prix' }, tables: tablesPrix({ localite: 'Toulouse', plat: true }) })
   assert.equal(plats.corps.prix.statut, 'non_calculable')
-  assert.match(plats.corps.prix.motif, /changent trop peu de prix/)
+  assert.match(plats.corps.prix.motif, /^0 de vos hôtes change ses prix au fil des saisons/)
 })
 
 test('§22.7 : sans strategie, ou sans 3 comparables de l hote, rien n est calcule ni paye', async () => {
@@ -756,7 +762,7 @@ test('REVIEW : le marche du REPLI doit figurer en MOTS ENTIERS dans l adresse �
   ok.bien_profil[0].adresse_trouvee = '12 RUE DES THERMES 65200 BAGNERES DE BIGORRE'
   const r = (await appeler({ tables: ok })).corps.prix_depart.prix
   assert.equal(r.statut, 'calcule', 'tirets et espaces equivalents, accents et casse ignores')
-  assert.equal(r.niveaux_source, 'marche')
+  assert.equal(r.niveaux_source, 'phase1')
 })
 
 test('recette du 6 octobre 2026 : la reponse DIT le marche — relie, d une autre commune, ou absent', async () => {
@@ -783,12 +789,29 @@ test('REVIEW (C3) : une panne du calcul des prix au GET n empeche pas les compar
   assert.equal(g.corps.prix_depart.etat, 'erreur')
 })
 
-test('§22.11 : repli sur un marche qui ne couvre pas les 6 prochains mois — non calcule, et dit', async () => {
+test('regle (d) : repli sur une phase 1 qui ne couvre pas les 6 prochains mois — non calcule, et dit ; sans prix du marche, non calcule non plus', async () => {
   const tb = tablesPrix({ plat: true })
-  tb.marche_temperature_airroi = TEMPERATURE_REL().slice(0, 30)
+  tb.marche_calendrier = [PHASE1({ jours: 30 })]
   const g = await appeler({ tables: tb })
   assert.equal(g.corps.prix_depart.prix.statut, 'non_calculable')
-  assert.match(g.corps.prix_depart.prix.motif, /ne couvre pas les 6 prochains mois/)
+  assert.match(g.corps.prix_depart.prix.motif, /ne couvrent pas les 6 prochains mois/)
+  const sansPacing = tablesPrix({ plat: true })
+  sansPacing.airroi_cache = sansPacing.airroi_cache.filter(l => !l.cle.startsWith('POST /markets/metrics/future/pacing'))
+  assert.equal((await appeler({ tables: sansPacing })).corps.prix_depart.prix.statut, 'non_calculable')
+})
+
+test('LE TEST QUI COMPTE (regle d) : des comparables a prix fixe — la forme vient de la PHASE 1 du marche relie, lue en base et en cache, sans rien payer ; la prime week-end du marche est donnee', async () => {
+  const g = await appeler({ tables: tablesPrix({ plat: true }) })
+  const r = g.corps.prix_depart.prix
+  assert.equal(r.statut, 'calcule')
+  assert.equal(r.niveaux_source, 'phase1')
+  assert.equal(r.phase1_localite, 'Bagnères-de-Bigorre')
+  assert.deepEqual(r.prime_week_end, { comparables: 0, marche: 8, localite: 'Bagnères-de-Bigorre' })
+  const creux = r.cases.find(c => c.niveau === 'creux' && c.type === 'semaine')
+  const pic = r.cases.find(c => c.niveau === 'pic' && c.type === 'semaine')
+  assert.ok(pic.forme / creux.forme > 1.3, `la saison de la phase 1 (${creux.forme} → ${pic.forme})`)
+  assert.equal(g.appelsAirroi.length, 0)
+  assert.equal(g.rpcs.length, 0)
 })
 
 // ⚠ RE-REVIEW DE 0fab219 : une panne de la reservation dans UN ouvrier ne laisse
