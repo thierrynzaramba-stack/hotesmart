@@ -69,6 +69,8 @@ async function monter (serveur, { sansLeaflet = false } = {}) {
   w.compteCourant = () => null
   w.enteteCompte = () => ({})
   w.initErrorHandler = () => {}
+  // La VRAIE table des tranches, depuis le module commun (jamais recopiee).
+  w.TRANCHE = new w.Function(fs.readFileSync(path.join(__dirname, '..', 'shared', 'prix-depart-jours.js'), 'utf8').replace(/^export /gm, '') + '\nreturn TRANCHE')()
   const biens = { data: [{ id: 'B1', name: 'La bulle' }, { id: 'B2', name: 'Cœur de vie' }], error: null }
   w.supabase = { from: () => { const q = { select: () => q, order: () => q, eq: () => q, then: ok => ok(biens) }; return q } }
   const script = /<script type="module">([\s\S]*?)<\/script>/.exec(HTML)[1].replace(/^\s*import .*$/gm, '')
@@ -637,10 +639,10 @@ test('LE TEST QUI COMPTE (§22.11) : les 8 cases — semaine et week-end par niv
   const lignes = [...doc.querySelectorAll('#cp-zone-prix tbody tr')].map(tr => [...tr.children].map(td => td.textContent))
   const n = '\u00a0'
   assert.deepEqual(lignes, [
-    ['Creux', `157 €65${n}–${n}281${n}€`, `173 €81${n}–${n}308${n}€`],
-    ['Modéré', `158 €70${n}–${n}281${n}€`, `187 €97${n}–${n}342${n}€`],
-    ['Favorable', `158 €73${n}–${n}281${n}€`, `192 €98${n}–${n}342${n}€`],
-    ['Pic', `169 €73${n}–${n}301${n}€`, 'non calculable : 2 hôtes avec des prix dans cette case (il en faut 3)']])
+    ['Base', `157 €65${n}–${n}281${n}€`, `173 €81${n}–${n}308${n}€`],
+    ['Moyen', `158 €70${n}–${n}281${n}€`, `187 €97${n}–${n}342${n}€`],
+    ['Haut', `158 €73${n}–${n}281${n}€`, `192 €98${n}–${n}342${n}€`],
+    ['Très haut', `169 €73${n}–${n}301${n}€`, 'non calculable : 2 hôtes avec des prix dans cette case (il en faut 3)']])
   const z = doc.getElementById('cp-zone-prix').textContent
   assert.doesNotMatch(z, /un niveau de prix vaut/, 'le cran a disparu')
   assert.match(z, /Sous chaque prix : la fourchette des prix de vos comparables dans cette case\. Week-end : les nuits du vendredi et du samedi\. Prix mesurés sur les 6 prochains mois\./)
@@ -653,7 +655,7 @@ test('LE TEST QUI COMPTE (§22.11) : un marche serre, une montee ratee, un compa
   const { doc } = await monter(pageAvecPrix(PRIX_CALCULE))
   const avert = [...doc.querySelectorAll('#cp-zone-prix .cp-avert')].map(x => x.textContent)
   assert.ok(avert.includes('Votre marché est serré : dans certaines cases, seulement 7 € séparent le prix marché et le haut de gamme.'))
-  assert.ok(avert.some(t => /en favorable, votre week-end \(150 €\) est sous votre semaine \(158 €\)\. C’est ce que pratiquent vos comparables : rien n’a été lissé\./.test(t)))
+  assert.ok(avert.some(t => /dans la tranche Haut, votre week-end \(150 €\) est sous votre semaine \(158 €\)\. C’est ce que pratiquent vos comparables : rien n’a été lissé\./.test(t)))
   assert.ok(!avert.some(t => /niveau pic/.test(t)), 'une alerte d une AUTRE strategie ne s affiche pas')
   assert.ok(avert.some(t => t.startsWith(`Vérifiez ce comparable : ${CARTES[1].nom}.`)))
 })

@@ -31,7 +31,7 @@ const ORDRE = ['creux', 'modere', 'favorable', 'pic']
 const PLUS_UN = new Set(['ferie', 'pont', 'week_end_prolonge'])
 export function effetEvenement (e) {
   if (!e) return null
-  if (e.origine === 'declare') return { plancher: 'pic', texte: EXCEPTIONNEL, exceptionnel: true }
+  if (e.origine === 'declare') return { plancher: 'pic', texte: 'événement déclaré', exceptionnel: true }
   if (e.origine === 'calendrier' || PLUS_UN.has(e.segment)) return { plus: 1, texte: '+1 tranche' }
   return { texte: null }
 }

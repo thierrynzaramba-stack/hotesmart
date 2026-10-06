@@ -225,6 +225,7 @@
   import { compteCourant, enteteCompte } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
+  import { TRANCHE } from '/shared/prix-depart-jours.js'
 
   initErrorHandler()
   const el = id => document.getElementById(id)
@@ -808,7 +809,9 @@
   // ─── ÉTAPE D : les prix de depart (§22.7) ────────────────────────────────
   const EUROS = v => `${v} €`
   const NIVEAUX_PRIX = ['creux', 'modere', 'favorable', 'pic']
-  const NOM_NIVEAU = { creux: 'Creux', modere: 'Modéré', favorable: 'Favorable', pic: 'Pic' }
+  // ⚠ UN SEUL VOCABULAIRE A L'ECRAN (recette du 6 octobre 2026) : les tranches de
+  // YieldFlow, depuis la MEME table que l'ecran Prix (jamais recopiee).
+  const NOM_NIVEAU = TRANCHE
   const NOM_STRATEGIE = { agressif: 'agressif', juste: 'prix marché', qualite: 'haut de gamme' }
   function afficherPrix (pd) {
     prixDepart = pd
@@ -875,8 +878,8 @@
     // Une montee ratee : signalee, jamais lissee (pour VOTRE strategie).
     for (const al of (r.alertes || []).filter(x => x.strategie === r.strategie)) {
       dit(al.type === 'weekend'
-        ? `À vérifier : en ${NOM_NIVEAU[al.niveau].toLowerCase()}, votre week-end (${EUROS(al.prix)}) est sous votre semaine (${EUROS(al.semaine)}). C’est ce que pratiquent vos comparables : rien n’a été lissé.`
-        : `À vérifier : en ${al.jour === 'weekend' ? 'week-end' : 'semaine'}, le niveau ${NOM_NIVEAU[al.niveau].toLowerCase()} (${EUROS(al.prix)}) est sous le niveau précédent (${EUROS(al.precedent)}). C’est ce que pratiquent vos comparables : rien n’a été lissé.`, 'cp-avert')
+        ? `À vérifier : dans la tranche ${NOM_NIVEAU[al.niveau]}, votre week-end (${EUROS(al.prix)}) est sous votre semaine (${EUROS(al.semaine)}). C’est ce que pratiquent vos comparables : rien n’a été lissé.`
+        : `À vérifier : en ${al.jour === 'weekend' ? 'week-end' : 'semaine'}, la tranche ${NOM_NIVEAU[al.niveau]} (${EUROS(al.prix)}) est sous la tranche précédente (${EUROS(al.precedent)}). C’est ce que pratiquent vos comparables : rien n’a été lissé.`, 'cp-avert')
     }
     for (const id of r.a_verifier || []) {
       const c = cartes.find(x => String(x.listing_id) === String(id))

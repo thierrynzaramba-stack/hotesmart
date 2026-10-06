@@ -103,7 +103,10 @@ test('LE TEST QUI COMPTE (recette du 6 octobre 2026) : un seul vocabulaire a l e
   const r = M.composerJours({ prix: PRIX(jours), calendrier: [ev('declare', 'salon', 'Salon du vin', '2026-11-06')] })
   assert.deepEqual(['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06'].map(d => r.get(d).tranche), ['Base', 'Moyen', 'Haut', 'Très haut', 'Exceptionnel'])
   assert.equal(r.get('2026-11-06').prix, r.get('2026-11-05').prix, 'Exceptionnel : le prix de la case Tres haut')
-  for (const x of r.values()) assert.doesNotMatch(M.celluleDepart(x), /Creux|Modéré|Favorable|Pic/)
+  const teintes = { Base: 'n-base', Moyen: 'n-moyen', Haut: 'n-haut', 'Très haut': 'n-tres-haut', Exceptionnel: 'n-exceptionnel' }
+  for (const x of r.values()) assert.doesNotMatch(M.celluleDepart(x, teintes) + M.detailDepart(x), /Creux|Modéré|Favorable|Pic/)
+  assert.match(M.celluleDepart(r.get('2026-11-06'), teintes), /class="yp-niv-badge n-exceptionnel">Exceptionnel</)
+  assert.equal((M.detailDepart(r.get('2026-11-06')).match(/Exceptionnel/g) || []).length, 1, 'le mot une seule fois dans le detail')
 })
 
 test('LE TEST QUI COMPTE (recette du 6 octobre 2026) : la cellule ALLEGEE — le prix et la tranche, c est tout ; le detail en info-bulle', () => {
