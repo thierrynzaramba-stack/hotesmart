@@ -50,7 +50,8 @@ const evalA = (a = {}) => ({
   ota_review_id: '99999999-9999-4999-8999-999999999999',
   answers_host: { etat: 'impeccable', degats: 'aucun', poubelles: 'fait',
                   communication: 'excellente', regles: 'oui', recommande: 'oui' },
-  public_text: 'Merci pour votre sejour.', private_note: null,
+  // Un texte redige POUR la prestataire, sans le voyageur (repere de vie privee).
+  public_text: 'Merci pour votre sejour.', private_note: null, texte_sans_voyageur: true,
   language: 'fr', deadline_at: DEMAIN, grille_figee: null,
   filled_by_profile: null, published_at: null,
   ...a,
@@ -79,7 +80,7 @@ const evalB = (a = {}) => evalA({ id: 'e2e2e2e2-2222-4222-8222-222222222222',
 function preparer ({
   user = PROD, profil = null, permissions = null,
   evaluations = [], otaReviews = [{ id: '99999999-9999-4999-8999-999999999999', user_id: PROD, external_review_id: 'channex-abc-123' }],
-  verrous = [], erreurMaj = null, criteres = [], erreurLectureCriteres = null, configs = [],
+  verrous = [], erreurMaj = null, criteres = [], erreurLectureCriteres = null, configs = [], snapshots = [], autoParBien = [],
   texteIA = JSON.stringify({ public: 'Voyageur soigneux, logement rendu nickel.', prive: '' }),
 } = {}) {
   const etat = { ecritures: [], insertions: [], requetes: [] }
@@ -153,6 +154,9 @@ function preparer ({
             (q._f.id == null || e.id === q._f.id))
           return Promise.resolve({ data: c, error: null })
         }
+        if (nom === 'bookings_snapshot') {
+          return Promise.resolve({ data: snapshots.filter(x => (q._f.user_id == null || x.user_id === q._f.user_id) && (q._f.booking_id == null || x.booking_id === q._f.booking_id)), error: null })
+        }
         if (nom === 'write_locks') {
           return Promise.resolve({ data: verrous.filter(k => q._f.key == null || k === q._f.key).map(key => ({ key })), error: null })
         }
@@ -164,6 +168,9 @@ function preparer ({
         }
         if (nom === 'avis_criteres') return Promise.resolve({ data: erreurLectureCriteres ? null : criteres, error: erreurLectureCriteres })
         if (nom === 'avis_config') return Promise.resolve({ data: configs, error: null })
+        if (nom === 'avis_auto_validation') {
+          return Promise.resolve({ data: autoParBien.filter(x => (q._f.property_id == null || x.property_id === q._f.property_id) && (q._f.user_id == null || x.user_id === q._f.user_id)), error: null })
+        }
         if (nom === 'profiles') {
           if (q._f.id != null) {
             return Promise.resolve({ data: profil && profil.id === q._f.id ? [profil] : [], error: null })
@@ -215,7 +222,7 @@ function preparer ({
   etat.provider = { appels: [] }
   globalThis.fetch = async (url, opts) => {
     etat.provider.appels.push({ url: String(url), methode: opts?.method || 'GET' })
-    return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: { attributes: { guest_review: null } } }) }
+    return { ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify({ data: { attributes: { reply: null } } }) }
   }
   return etat
 }
@@ -949,11 +956,12 @@ test('une prestataire « soumettre » dont l’hote a repondu : son motif reste 
 })
 
 // ─── L'auto-validation (spec §10 bis, 2 octobre 2026) ───────────────────────
-const AUTO_24 = [{ property_id: null, auto_validation_heures: 24, keywords: [], tone: 'sobre', signature: null }]
+// Le reglage PAR BIEN (option A) : 24 h sur le bien A.
+const AUTO_24 = [{ user_id: PROD, property_id: BIEN_A.id, heures: 24 }]
 
 test('LE TEST QUI COMPTE : la prestataire finit sa part — l’horloge part a maintenant + X h', async () => {
   const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null, deadline_at: new Date(Date.now() + 3 * 86400000).toISOString() })
-  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], configs: AUTO_24 })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], autoParBien: AUTO_24 })
   const handler = require('../api/avis')
   const res = reponse()
   const avant = Date.now()
@@ -966,7 +974,7 @@ test('LE TEST QUI COMPTE : la prestataire finit sa part — l’horloge part a m
 
 test('sans reglage, rien ne se programme', async () => {
   const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null })
-  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], configs: null })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('soumettre'), evaluations: [vierge], autoParBien: [] })
   const handler = require('../api/avis')
   await handler(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: PART_PRESTA }), reponse())
   const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.answers_cleaner)
@@ -1037,4 +1045,118 @@ test('LE TEST QUI COMPTE : pendant une publication (verrou pose), l’hote ne re
     assert.strictEqual(res.body.motif, 'deja_en_cours', action)
     assert.ok(!etat.ecritures.some(e => e.table === 'guest_evaluations'), action + ' : rien n est ecrit')
   }
+})
+
+// ─── Constat de production du 2 octobre 2026 : langue et prenom du voyageur ──
+const RESA = (a = {}) => ({ user_id: PROD, booking_id: 'BK-1',
+  snapshot: { firstName: 'Camille', lastName: 'Martin' },
+  raw: { attributes: { customer: { language: 'fr', name: 'Camille' } } }, ...a })
+
+test('LE TEST QUI COMPTE : sans langue enregistree, le texte est redige dans la langue du voyageur (sa reservation)', async () => {
+  const ev = evalA({ language: null, public_text: null })
+  const etat = preparer({ evaluations: [ev], snapshots: [RESA()] })
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'eval-texte' }, { id: ev.id, action: 'eval-texte' }), res)
+  assert.strictEqual(res.code, 200)
+  assert.match(etat.ia.appels[0], /Langue du texte public : fr\./)
+  assert.ok(etat.ecritures.some(e => e.table === 'guest_evaluations' && e.row.language === 'fr'), 'la langue est retenue')
+})
+
+test('LE TEST QUI COMPTE : l’hote obtient un texte au prenom du voyageur, sans le saisir', async () => {
+  const ev = evalA({ public_text: null })
+  const etat = preparer({ evaluations: [ev], snapshots: [RESA()] })
+  await require('../api/avis')(req({ action: 'eval-texte' }, { id: ev.id, action: 'eval-texte' }), reponse())
+  assert.match(etat.ia.appels[0], /Prenom du voyageur : Camille/)
+})
+
+test('LE TEST QUI COMPTE : la redaction declenchee par la prestataire ne recoit JAMAIS le prenom du voyageur', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null, grille_figee: await grilleUniqueFigee() })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge], criteres: [CRITERE_UNIQUE()], snapshots: [RESA()] })
+  await require('../api/avis')(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: { 'c-unique': 'nickel' } }), reponse())
+  assert.strictEqual(etat.ia.appels.length, 1)
+  assert.match(etat.ia.appels[0], /Prenom du voyageur : inconnu/)
+  assert.ok(!/Camille/.test(etat.ia.appels[0]))
+})
+
+// ─── Revue de 57a79d6 (vie privee) : le texte de l'hote reste ferme a la prestataire ─
+test('LE TEST QUI COMPTE : l’hote redige (texte au prenom du voyageur) — la prestataire ne le LIT pas', async () => {
+  const ev = evalA({ public_text: null, answers_host: null, answers_cleaner: { 'c-unique': 'nickel' }, grille_figee: await grilleUniqueFigee() })
+  const etat = preparer({ evaluations: [ev], snapshots: [RESA()], criteres: [CRITERE_UNIQUE()],
+    texteIA: JSON.stringify({ public: 'Camille a ete un voyageur parfait.', prive: '' }) })
+  await require('../api/avis')(req({ action: 'eval-texte' }, { id: ev.id, action: 'eval-texte' }), reponse())
+  const ecrit = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.public_text)
+  assert.strictEqual(ecrit.row.texte_sans_voyageur, false, 'le texte de l hote n est pas « sans voyageur »')
+  // La ligne telle que la base la garde, relue par la prestataire « valider ».
+  const apres = { ...ev, public_text: 'Camille a ete un voyageur parfait.', texte_sans_voyageur: false }
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [apres], criteres: [CRITERE_UNIQUE()] })
+  const lu = reponse()
+  await require('../api/avis')(reqMembre({ action: 'evaluation', id: apres.id }, null, 'GET'), lu)
+  assert.ok(!JSON.stringify(lu.body).includes('Camille'), 'jamais le prenom du voyageur')
+  assert.strictEqual(lu.body.peut_publier, false)
+})
+
+test('LE TEST QUI COMPTE : et elle ne peut pas PUBLIER ce texte', async () => {
+  const ev = evalA({ public_text: 'Camille a ete un voyageur parfait.', texte_sans_voyageur: false, answers_host: null, answers_cleaner: { 'c-unique': 'nickel' }, grille_figee: await grilleUniqueFigee() })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [ev], criteres: [CRITERE_UNIQUE()] })
+  const res = reponse()
+  await require('../api/avis')(reqMembre({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'texte_de_l_hote')
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
+})
+
+test('le texte redige pour la prestataire porte le repere « sans voyageur »', async () => {
+  const vierge = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: null, texte_sans_voyageur: false, grille_figee: await grilleUniqueFigee() })
+  const etat = preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [vierge], criteres: [CRITERE_UNIQUE()], snapshots: [RESA()] })
+  await require('../api/avis')(reqMembre({ action: 'eval-reponses' }, { id: vierge.id, action: 'eval-reponses', reponses: { 'c-unique': 'nickel' } }), reponse())
+  const ecrit = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.public_text)
+  assert.strictEqual(ecrit.row.texte_sans_voyageur, true)
+})
+
+test('re-revue : elle finit sa part alors qu’un texte de l’hote existe — pas de bouton « Publier » sans issue', async () => {
+  const ev = evalA({ status: 'a_remplir', answers_host: null, answers_cleaner: null, public_text: 'Camille, parfait.', texte_sans_voyageur: false, grille_figee: await grilleUniqueFigee() })
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [ev], criteres: [CRITERE_UNIQUE()] })
+  const res = reponse()
+  await require('../api/avis')(reqMembre({ action: 'eval-reponses' }, { id: ev.id, action: 'eval-reponses', reponses: { 'c-unique': 'nickel' } }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.peut_publier, false)
+  assert.ok(!JSON.stringify(res.body).includes('Camille'))
+})
+
+// ─── « Deja evaluee sur Airbnb » (spec §6) ──────────────────────────────────
+test('LE TEST QUI COMPTE : l’hote range une evaluation faite dans Airbnb — elle sort, rien ne part', async () => {
+  const ev = evalA({ status: 'a_remplir', auto_publier_le: null })
+  const etat = preparer({ evaluations: [ev] })
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'eval-ailleurs' }, { id: ev.id, action: 'eval-ailleurs' }), res)
+  assert.strictEqual(res.code, 200)
+  // (Le double rend la ligne d'avant sur update().eq().select() : on lit l'ecriture.)
+  const maj = etat.ecritures.find(e => e.table === 'guest_evaluations' && e.row.status === 'evaluee_ailleurs')
+  assert.ok(maj, 'le statut est ecrit')
+  assert.strictEqual(maj.row.auto_publier_le, null)
+  assert.ok(etat.insertions.some(i => i.table === 'core_events' && i.row.type === 'avis.evaluee_ailleurs'))
+  assert.strictEqual(etat.provider.appels.length, 0)
+})
+
+test('une prestataire ne range pas, et une evaluation publiee ne se range pas', async () => {
+  preparer({ user: MEMBRE, ...PRESTA_A('valider'), evaluations: [evalA({ status: 'a_remplir' })] })
+  const p = reponse()
+  await require('../api/avis')(reqMembre({ action: 'eval-ailleurs' }, { id: evalA().id, action: 'eval-ailleurs' }), p)
+  assert.strictEqual(p.code, 403)
+  preparer({ evaluations: [evalA({ status: 'publiee' })] })
+  const h = reponse()
+  await require('../api/avis')(req({ action: 'eval-ailleurs' }, { id: evalA().id, action: 'eval-ailleurs' }), h)
+  assert.strictEqual(h.code, 409)
+})
+
+test('une evaluation « Evaluee sur Airbnb » ne se remplit plus et ne se publie plus', async () => {
+  const ev = evalA({ status: 'evaluee_ailleurs' })
+  const etat = preparer({ evaluations: [ev] })
+  const r1 = reponse()
+  await require('../api/avis')(req({ action: 'eval-reponses' }, { id: ev.id, action: 'eval-reponses', reponses: { communication: 'excellente' } }), r1)
+  assert.strictEqual(r1.code, 400)
+  const r2 = reponse()
+  await require('../api/avis')(req({ action: 'eval-publier' }, { id: ev.id, action: 'eval-publier' }), r2)
+  assert.strictEqual(r2.code, 409)
+  assert.strictEqual(etat.provider.appels.filter(a => a.methode === 'POST').length, 0)
 })

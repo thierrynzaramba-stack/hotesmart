@@ -366,3 +366,31 @@ test('une part encore INCOMPLETE ne ferme pas la fenetre', async () => {
   await new Promise(r => setTimeout(r, 10))
   assert.strictEqual(ferme.length, 0)
 })
+
+// ─── Constat de production du 2 octobre 2026 : « 0 css et mise en page » ────
+test('LE TEST QUI COMPTE : la fenetre pose SA mise en page, une seule fois par document', async () => {
+  const { document } = await monter()
+  const { poserStyle } = await import('../core/avis/fenetre-evaluation.js')
+  poserStyle(document)   // une seconde ouverture sur le MEME document
+  const styles = document.querySelectorAll('#hs-avis-style')
+  assert.strictEqual(styles.length, 1)
+  assert.match(styles[0].textContent, /\.hs-avis-critere/)
+  assert.match(styles[0].textContent, /\.hs-avis-principal/)
+})
+
+// ─── « Deja evaluee sur Airbnb » (spec §6) ──────────────────────────────────
+test('l’hote a un bouton « Déjà évaluée sur Airbnb », qui range apres confirmation', async () => {
+  const { conteneur, appels } = await monter({ autres: { 'action=eval-ailleurs': { ok: true, status: 'evaluee_ailleurs' } } })
+  const b = conteneur.querySelector('[data-avis="ailleurs"]')
+  assert.ok(b, 'le bouton existe pour l hote')
+  b.click()
+  await new Promise(r => setTimeout(r, 10))
+  assert.ok(appels.some(a => a.chemin.includes('eval-ailleurs')))
+  assert.match(conteneur.textContent, /Évaluée sur Airbnb/)
+  assert.strictEqual(conteneur.querySelector('[data-avis="publier"]'), null, 'plus de publication')
+})
+
+test('une prestataire n’a pas ce bouton', async () => {
+  const { conteneur } = await monter({ role: 'prestataire', criteres: [CRITERES[0]] })
+  assert.strictEqual(conteneur.querySelector('[data-avis="ailleurs"]'), null)
+})

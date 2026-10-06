@@ -63,6 +63,20 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++ }
   if (eP) ko(`comptage des programmees impossible : ${eP.message}`)
   else console.log(`        evaluations programmees : ${programmees}`)
 
+  // 1 bis. Le reglage PAR BIEN (2026-10-02-avis-auto-validation-par-bien.sql).
+  const { data: parBien, error: eParBien } = await sb.from('avis_auto_validation').select('user_id, property_id, heures').limit(1000)
+  if (eParBien) ko(`avis_auto_validation illisible : ${eParBien.message}`)
+  else {
+    ok(`avis_auto_validation lisible (${parBien.length} bien(s) actives)`)
+    const horsB = parBien.filter(l => !(l.heures >= 1 && l.heures <= 336))
+    if (horsB.length) ko(`${horsB.length} reglage(s) de bien hors de 1..336`)
+  }
+
+  // 2 bis. Le repere de vie privee (2026-10-02-avis-texte-sans-voyageur.sql).
+  const { error: eT } = await sb.from('guest_evaluations').select('texte_sans_voyageur').limit(1)
+  if (eT) ko(`guest_evaluations.texte_sans_voyageur illisible : ${eT.message}`)
+  else ok('guest_evaluations.texte_sans_voyageur lisible')
+
   // 3. Les departs du jour (naissance, §9 bis), avec le filtre du cron.
   const jour = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date())
   const { data: departs, error: eD } = await sb.from('menages')

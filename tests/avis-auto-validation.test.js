@@ -108,14 +108,20 @@ test('un point negatif coche par la prestataire : l’horloge ne part pas, et s�
 
 // ─── Le moteur ──────────────────────────────────────────────────────────────
 // Un double de base : guest_evaluations (lecture par filtres, ecriture
-// conditionnee), avis_config, agent_tasks, properties, core_events.
-function base ({ evaluations = [], heures = 24, configEnPanne = false, configs = null } = {}) {
+// conditionnee), avis_auto_validation (le reglage PAR BIEN), agent_tasks,
+// properties, core_events.
+function base ({ evaluations = [], heures = 24, configEnPanne = false, parBien = null } = {}) {
   const etat = { evaluations: evaluations.map(e => ({ ...e })), taches: [], evenements: [], requetes: [] }
   const from = (table) => {
     const q = { table, f: [], op: 'select' }
     etat.requetes.push(q)
     const executer = () => {
-      if (table === 'avis_config') return configEnPanne ? { data: null, error: { message: 'panne' } } : { data: configs || [{ property_id: null, auto_validation_heures: heures }], error: null }
+      if (table === 'avis_auto_validation') {
+        if (configEnPanne) return { data: null, error: { message: 'panne' } }
+        const bien = (q.f.find(([op, c]) => op === 'eq' && c === 'property_id') || [])[2]
+        const lignes = parBien || (heures ? { b1: heures } : {})
+        return { data: lignes[bien] ? { heures: lignes[bien] } : null, error: null }
+      }
       if (table === 'properties') return { data: { name: 'Studio' }, error: null }
       if (table === 'core_events') { etat.evenements.push(q.ligne); return { data: null, error: null } }
       if (table === 'agent_tasks') {
@@ -329,11 +335,11 @@ test('M1 : le meilleur niveau est la meilleure NOTE, pas le premier rang', () =>
   assert.strictEqual(meilleurNiveau(c), 'excellente')
 })
 
-test('M3 : une ligne de bien NULLE herite du compte ; une valeur de bien prime', async () => {
+test('par bien (option A) : le reglage du bien s’applique ; pas de ligne = desactivee', async () => {
   const { lireHeures } = require('../lib/avis/auto-validation')
-  const sb = (configs) => base({ configs }).sb
-  assert.deepStrictEqual(await lireHeures(sb([{ property_id: 'b1', auto_validation_heures: null }, { property_id: null, auto_validation_heures: 24 }]), { userId: 'u1', propertyId: 'b1' }), { heures: 24 })
-  assert.deepStrictEqual(await lireHeures(sb([{ property_id: 'b1', auto_validation_heures: 6 }, { property_id: null, auto_validation_heures: 24 }]), { userId: 'u1', propertyId: 'b1' }), { heures: 6 })
+  const sb = base({ parBien: { b1: 6 } }).sb
+  assert.deepStrictEqual(await lireHeures(sb, { userId: 'u1', propertyId: 'b1' }), { heures: 6 })
+  assert.deepStrictEqual(await lireHeures(sb, { userId: 'u1', propertyId: 'b2' }), { heures: null })
 })
 
 test('S2 : sous 20 s de reste au cycle, aucune publication ne commence', async () => {

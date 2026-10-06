@@ -22,6 +22,54 @@
 import { appel as appelParDefaut } from './appel.js'
 import { hsBus } from '../../shared/hs-bus.js'
 
+// ─── La mise en page, embarquee ─────────────────────────────────────────────
+// ⚠ LE STYLE VIT AVEC LE MODULE (constat de Thierry en production, 2 octobre
+// 2026 : « 0 css et mise en page »). La fenetre s'ouvre depuis quatre ecrans
+// (page Avis, messagerie, deux calendriers) et la PWA de la prestataire ; une
+// feuille par page, c'est quatre copies qui divergent — ou, comme ici, aucune.
+// Injecte une seule fois par document, sur les couleurs du site quand elles
+// existent (variables de /public/style.css), avec un repli sinon (PWA).
+const STYLE_ID = 'hs-avis-style'
+const STYLE = `
+.hs-avis { font-size: 14px; line-height: 1.45; color: var(--text, #1a1a1a); }
+.hs-avis h2 { font-size: 17px; font-weight: 600; margin: 0 28px 2px 0; }
+.hs-avis-etat { margin: 0 0 14px; font-size: 12.5px; color: var(--text2, #6b6b6b); }
+.hs-avis-questions { border: 0; margin: 0 0 6px; padding: 0; min-width: 0; }
+.hs-avis-questions legend { font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--text2, #6b6b6b); padding: 0; margin-bottom: 6px; }
+.hs-avis-critere { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 0.5px solid #e6e2dd; }
+.hs-avis-critere:first-of-type { border-top: 0; }
+.hs-avis-critere span { flex: 1 1 auto; min-width: 0; }
+.hs-avis-critere select { flex: 0 0 auto; max-width: 55%; font: inherit; font-size: 13.5px; padding: 6px 8px; border: 1px solid #d9d4ce; border-radius: 8px; background: var(--bg, #fff); color: inherit; }
+.hs-avis-compte-rendu { font-size: 12.5px; color: var(--text2, #6b6b6b); margin: 4px 0 14px; }
+.hs-avis-remarque, .hs-avis-texte, .hs-avis-prive { display: block; margin: 0 0 12px; }
+.hs-avis-remarque span, .hs-avis-texte span, .hs-avis-prive span { display: block; font-size: 12.5px; font-weight: 500; margin-bottom: 4px; }
+.hs-avis textarea { display: block; width: 100%; box-sizing: border-box; font: inherit; font-size: 14px; padding: 8px 10px; border: 1px solid #d9d4ce; border-radius: 8px; background: var(--bg, #fff); color: inherit; resize: vertical; }
+.hs-avis textarea[readonly] { background: var(--bg2, #f5f5f3); }
+.hs-avis-note { display: block; font-size: 12px; color: var(--text2, #6b6b6b); margin-top: 4px; }
+.hs-avis .hs-avis-message { background: #eef5ee; color: #2e5e3a; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; font-size: 13px; }
+.hs-avis .hs-avis-erreur { background: #fbeceb; color: #b3261e; border-radius: 8px; padding: 8px 10px; margin: 0 0 12px; font-size: 13px; }
+.hs-avis .hs-avis-vide, .hs-avis .hs-avis-attente { color: var(--text2, #6b6b6b); font-size: 13px; }
+.hs-avis-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.hs-avis-actions button { font: inherit; font-size: 13.5px; padding: 9px 14px; min-height: 40px; border-radius: 10px; border: 1px solid #d9d4ce; background: var(--bg, #fff); color: inherit; cursor: pointer; }
+.hs-avis-actions button:disabled { opacity: .5; cursor: default; }
+.hs-avis-actions .hs-avis-principal { background: #C97B5C; border-color: #C97B5C; color: #fff; font-weight: 600; }
+.hs-avis-actions [data-avis="abandonner"] { color: #b3261e; }
+.hs-avis-actions [data-avis="fermer"] { margin-left: auto; }
+@media (max-width: 480px) {
+  .hs-avis-critere { flex-wrap: wrap; }
+  .hs-avis-critere select { max-width: 100%; width: 100%; }
+  .hs-avis-actions button { flex: 1 1 auto; }
+  .hs-avis-actions [data-avis="fermer"] { margin-left: 0; }
+}
+`
+export function poserStyle (doc = typeof document !== 'undefined' ? document : null) {
+  if (!doc || !doc.head || doc.getElementById(STYLE_ID)) return
+  const s = doc.createElement('style')
+  s.id = STYLE_ID
+  s.textContent = STYLE
+  doc.head.appendChild(s)
+}
+
 const ETAT_LISIBLE = {
   a_remplir: 'À remplir',
   soumise_prestataire: 'Remplie par la prestataire',
@@ -30,6 +78,7 @@ const ETAT_LISIBLE = {
   echec_publication: 'Échec de publication',
   expiree: 'Délai dépassé',
   abandonnee: 'Abandonnée',
+  evaluee_ailleurs: 'Évaluée sur Airbnb',
 }
 
 // Les motifs que le serveur peut rendre, en francais. Un motif inconnu est
@@ -55,6 +104,7 @@ const MOTIF_LISIBLE = {
   langue_non_verifiable: 'Cet avis est négatif et le texte doit être écrit dans une langue que nous ne savons pas relire automatiquement. Écrivez-le vous-même.',
   aucune_reponse: 'Aucun critère n’est rempli : il n’y a rien à rédiger.',
   abandonnee: 'Cette évaluation a été abandonnée : elle ne se publie plus.',
+  evaluee_ailleurs: 'Cette évaluation a déjà été faite sur Airbnb : elle ne se publie plus d’ici.',
   statut_incompatible: 'Cette évaluation n’est pas dans un état qui permet de la publier.',
   sans_reponses: 'Aucune réponse n’est enregistrée : il n’y a rien à publier.',
   etat_provider_inconnu: 'La plateforme ne dit pas si l’avis est déjà parti. Réessayez dans quelques minutes.',
@@ -63,6 +113,7 @@ const MOTIF_LISIBLE = {
   provider_inconnu: 'La plateforme de ce séjour est inconnue : contactez le support.',
   prestataire_non_autorisee: 'L’hôte ne vous a pas autorisée à participer aux évaluations.',
   reponses_de_l_hote: 'L’hôte a répondu à cette évaluation : c’est lui qui la publie.',
+  texte_de_l_hote: 'Ce texte a été rédigé pour l’hôte : c’est lui qui le publie.',
 }
 
 const echapper = (t) => String(t == null ? '' : t)
@@ -91,6 +142,7 @@ export async function ouvrir (ctx = {}) {
   // deux ouvertures successives se marcheraient dessus.
   const etat = { evaluation: null, criteres: [], role: null, reponses: {}, message: null, erreur: null, occupe: false }
 
+  poserStyle(conteneur.ownerDocument)
   const afficher = () => { conteneur.innerHTML = rendre(etat); brancher() }
 
   // ─── Chargement ─────────────────────────────────────────────────────────
@@ -232,6 +284,22 @@ export async function ouvrir (ctx = {}) {
     } catch (err) { etat.erreur = messageDErreur(err) }
   })
 
+  // L'hote l'a deja ecrite dans l'application Airbnb (spec §6) : elle sort de
+  // la liste, sans relance ni publication.
+  const ailleurs = avecOccupe(async () => {
+    const echec = etat.evaluation.status === 'echec_publication'
+    if (!confirmer('Vous avez déjà évalué ce voyageur dans l’application Airbnb ? L’évaluation sortira de la liste, et rien ne sera publié d’ici.'
+      + (echec ? ' Vérifiez sur Airbnb que l’évaluation y figure bien : l’envoi précédent a échoué.' : ''))) return
+    try {
+      const r = await appel('avis?action=eval-ailleurs', {
+        methode: 'POST',
+        corps: { action: 'eval-ailleurs', booking_uid: etat.evaluation.booking_uid || params.booking_uid },
+      })
+      etat.evaluation.status = r.status
+      etat.message = 'Rangée : déjà évaluée sur Airbnb.'
+    } catch (err) { etat.erreur = messageDErreur(err) }
+  })
+
   function brancher () {
     conteneur.querySelectorAll('[data-avis-critere]').forEach(el => {
       el.addEventListener('change', () => {
@@ -265,6 +333,7 @@ export async function ouvrir (ctx = {}) {
     brancherBouton('rediger', redigerTexte)
     brancherBouton('publier', publier)
     brancherBouton('abandonner', abandonner)
+    brancherBouton('ailleurs', ailleurs)
     brancherBouton('fermer', () => fermer())
   }
 
@@ -310,7 +379,7 @@ function compteRendu (etat) {
 function rendre (etat) {
   const e = etat.evaluation || {}
   const publiee = e.status === 'publiee'
-  const fige = ['publiee', 'expiree', 'abandonnee'].includes(e.status)
+  const fige = ['publiee', 'expiree', 'abandonnee', 'evaluee_ailleurs'].includes(e.status)
   const peutRediger = etat.role === 'hote' && !fige
   const peutPublier = !fige && (etat.role === 'hote' || etat.peutPublier === true)
 
@@ -358,6 +427,7 @@ function rendre (etat) {
     !fige && (etat.criteres || []).length ? `<button type="button" data-avis="enregistrer"${etat.occupe ? ' disabled' : ''}>Enregistrer mes réponses</button>` : '',
     peutRediger ? `<button type="button" data-avis="rediger"${etat.occupe ? ' disabled' : ''}>Rédiger le texte</button>` : '',
     peutPublier ? `<button type="button" data-avis="publier" class="hs-avis-principal"${etat.occupe ? ' disabled' : ''}>Publier l’avis</button>` : '',
+    etat.role === 'hote' && !fige ? `<button type="button" data-avis="ailleurs"${etat.occupe ? ' disabled' : ''}>Déjà évaluée sur Airbnb</button>` : '',
     etat.role === 'hote' && !fige ? `<button type="button" data-avis="abandonner"${etat.occupe ? ' disabled' : ''}>Ne pas évaluer</button>` : '',
     `<button type="button" data-avis="fermer">Fermer</button>`,
   ].filter(Boolean).join('')

@@ -15,7 +15,7 @@ const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
 const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
-const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu } = require('../lib/avis/evaluations')
+const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
 const { publier, RefusPublication } = require('../lib/avis/publication')
@@ -459,7 +459,7 @@ async function evaluationsLister (req, res, garde) {
   // n'a droit a rien.
   let requete = supabase.from('guest_evaluations')
     .select('id, booking_uid, property_id, property_id_ref, ota, status, language, '
-      + 'deadline_at, published_at, public_text, created_at, updated_at')
+      + 'deadline_at, published_at, public_text, ota_review_id, created_at, updated_at')
     .eq('user_id', userId)
   if (filtre !== null) requete = requete.or(filtre)
   requete = requete.order('created_at', { ascending: false }).limit(MAX_LIGNES)
@@ -474,25 +474,106 @@ async function evaluationsLister (req, res, garde) {
   if (eBiens) return res.status(503).json({ error: 'Biens illisibles', detail: eBiens.message })
   const nomDe = new Map((biens || []).map(b => [b.id, b.name]))
 
+  const { sejours: contexte, avis: avisDe } = await contexteDesSejours(userId, data || [])
+
   return res.status(200).json({
-    // ⚠ LE TEXTE PUBLIC N'EST PAS SERVI DANS UNE LISTE. Il n'y sert a rien, et
-    // une liste est ce qui fuite le plus facilement dans une capture d'ecran.
-    // Il se lit sur l'evaluation elle-meme, par `action=evaluation`.
-    evaluations: (data || []).map(e => ({
-      id: e.id, booking_uid: e.booking_uid, ota: e.ota, status: e.status,
-      property_id: e.property_id, bien: nomDe.get(e.property_id) || null,
-      langue: e.language, echeance: e.deadline_at, publie_le: e.published_at,
-      a_un_texte: Boolean(String(e.public_text || '').trim()),
-      creee_le: e.created_at,
-    })),
+    // ⚠ CHAQUE LIGNE DIT LE SEJOUR (demande de Thierry du 2 octobre 2026 au
+    // soir) : le voyageur, les dates, le bien, qui a fait le menage, son avis
+    // s'il est visible, et le notre s'il est publie. Notre texte n'est servi
+    // qu'une fois PUBLIE — il est alors public chez Airbnb ; un brouillon reste
+    // dans la fenetre d'evaluation, par `action=evaluation`.
+    evaluations: (data || []).map(e => {
+      const c = contexte.get(String(e.booking_uid)) || {}
+      return {
+        id: e.id, booking_uid: e.booking_uid, ota: e.ota, status: e.status,
+        property_id: e.property_id, bien: nomDe.get(e.property_id) || null,
+        langue: e.language, echeance: e.deadline_at, publie_le: e.published_at,
+        a_un_texte: Boolean(String(e.public_text || '').trim()),
+        creee_le: e.created_at,
+        voyageur: c.voyageur || null,
+        arrivee: c.arrivee || null, depart: c.depart || null,
+        menage_par: c.menagePar || null,
+        avis_voyageur: (e.ota_review_id && avisDe.get(e.ota_review_id)) || null,
+        notre_avis: e.status === 'publiee' ? (e.public_text || null) : null,
+      }
+    }),
     biens: (biens || []).filter(b => refs === null || refs.includes(String(b.provider_property_id)))
       .map(b => ({ id: b.id, nom: b.name })),
     etats: ETATS_LISTE,
   })
 }
 
+// Le contexte des sejours d'une liste, en QUATRE lectures groupees, toutes
+// cloisonnees au compte. ⚠ UNE PANNE ICI N'EMPECHE PAS LA LISTE : les champs
+// manquent, l'hote voit ses evaluations — la raison va au journal.
+async function contexteDesSejours (userId, evaluations) {
+  const parSejour = new Map()
+  const avisDe = new Map()
+  const uids = [...new Set(evaluations.map(e => String(e.booking_uid)))]
+  if (!uids.length) return { sejours: parSejour, avis: avisDe }
+  const objets = [...new Set(evaluations.map(e => e.ota_review_id).filter(Boolean))]
+  const [snaps, menages, avis] = await Promise.all([
+    supabase.from('bookings_snapshot').select('booking_id, snapshot').eq('user_id', userId).in('booking_id', uids),
+    // Le menage le plus RECENT d'un depart donne le nom (un ordre, pour que ce
+    // soit le meme a chaque lecture).
+    supabase.from('menages').select('booking_id, provider_id, status').eq('user_id', userId).in('booking_id', uids).neq('status', 'cancelled')
+      .order('created_at', { ascending: true }),
+    // ⚠ LA VISIBILITE SE LIT DANS LE BRUT, STRICTEMENT (revue de 5497a67, vie
+    // privee) : la colonne `is_hidden` est normalisee par le writer, un champ
+    // absent y devient « visible ». Meme regle que le rangement automatique.
+    objets.length
+      ? supabase.from('ota_reviews').select('id, content_public, overall_score, guest_name, cache:raw->attributes->is_hidden').eq('user_id', userId).in('id', objets)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+  for (const [nom, r] of [['reservations', snaps], ['menages', menages], ['avis', avis]]) {
+    if (r.error) console.error(`[avis] liste : ${nom} illisibles`, r.error.message)
+  }
+  for (const s of snaps.data || []) {
+    const sp = s.snapshot || {}
+    const prenom = String(sp.firstName || '').trim()
+    const nom = String(sp.lastName || '').trim()
+    parSejour.set(String(s.booking_id), {
+      voyageur: (prenom || nom) ? { prenom: prenom || null, nom: nom || null } : null,
+      arrivee: sp.arrival ? String(sp.arrival).slice(0, 10) : null,
+      depart: sp.departure ? String(sp.departure).slice(0, 10) : null,
+    })
+  }
+  // Qui a fait le menage : la prestataire du menage de ce depart.
+  const prov = [...new Set((menages.data || []).map(m => m.provider_id).filter(Boolean))]
+  const { data: personnes, error: eP } = prov.length
+    ? await supabase.from('profiles').select('id, first_name, last_name').eq('account_user_id', userId).in('id', prov)
+    : { data: [], error: null }
+  if (eP) console.error('[avis] liste : prestataires illisibles', eP.message)
+  const nomDePersonne = new Map((personnes || []).map(p => [p.id, [p.first_name, p.last_name].filter(Boolean).join(' ')]))
+  for (const m of menages.data || []) {
+    const c = parSejour.get(String(m.booking_id)) || {}
+    if (m.provider_id && nomDePersonne.get(m.provider_id)) c.menagePar = nomDePersonne.get(m.provider_id)
+    parSejour.set(String(m.booking_id), c)
+  }
+  // L'avis du voyageur, SEULEMENT s'il est visible : un avis cache chez Airbnb
+  // ne se montre pas ici non plus.
+  for (const a of avis.data || []) {
+    avisDe.set(a.id, a.cache === false
+      ? { visible: true, texte: a.content_public || null, note: a.overall_score ?? null }
+      : { visible: false })
+  }
+  for (const e of evaluations) {
+    const c = parSejour.get(String(e.booking_uid)) || {}
+    if (!c.voyageur && e.ota_review_id) {
+      const g = (avis.data || []).find(a => a.id === e.ota_review_id)
+      // Le nom porte par l'avis complete un sejour sans reservation dans le coeur.
+      if (g && g.guest_name) {
+        const [prenom, ...reste] = String(g.guest_name).trim().split(/\s+/)
+        c.voyageur = { prenom: prenom || null, nom: reste.join(' ') || null }
+      }
+    }
+    parSejour.set(String(e.booking_uid), c)
+  }
+  return { sejours: parSejour, avis: avisDe }
+}
+
 const ETATS_LISTE = ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
-                     'echec_publication', 'expiree', 'abandonnee']
+                     'echec_publication', 'expiree', 'abandonnee', 'evaluee_ailleurs']
 
 // ─── La configuration de redaction (mots-cles, ton, signature) ──────────────
 // Spec §4.7 : elle vit dans /settings, onglet « Avis ». Deux niveaux, comme la
@@ -507,7 +588,7 @@ async function configLire (req, res, garde) {
   if (bien && !(await bienAutorise(req, res, garde, bien, false))) return
 
   const requete = supabase.from('avis_config')
-    .select('id, property_id, keywords, tone, signature, auto_validation_heures').eq('user_id', userId)
+    .select('id, property_id, keywords, tone, signature').eq('user_id', userId)
   const { data, error } = await (bien
     ? requete.or(`property_id.eq.${bien},property_id.is.null`)
     : requete.is('property_id', null))
@@ -518,8 +599,52 @@ async function configLire (req, res, garde) {
     compte: liste.find(c => !c.property_id) || null,
     bien: bien ? (liste.find(c => c.property_id === bien) || null) : null,
     tons: [...TONS],
-    auto_validation: { min: HEURES_MIN, max: HEURES_MAX },
   })
+}
+
+// ─── LA PUBLICATION AUTOMATIQUE, BIEN PAR BIEN (spec §10 bis) ───────────────
+// Decision de Thierry du 2 octobre 2026 au soir (option A) : une ligne par
+// bien, un interrupteur et un delai. `avis_auto_validation`, writer unique ici.
+//
+// GET auto-validation — les biens du PERIMETRE, chacun avec son reglage et le
+// droit de le changer.
+async function autoValidationLire (req, res, garde) {
+  const userId = garde.accountUserId
+  const { data: biens, error } = await supabase.from('properties')
+    .select('id, name, provider_property_id').eq('user_id', userId).order('name', { ascending: true })
+  if (error) return res.status(503).json({ error: 'Biens illisibles', detail: error.message })
+  const visibles = (biens || []).filter(b => peutLire(garde.contexte, 'avis', { id: b.id, ref: b.provider_property_id }))
+  const { data: lignes, error: eL } = visibles.length
+    ? await supabase.from('avis_auto_validation').select('property_id, heures')
+      .eq('user_id', userId).in('property_id', visibles.map(b => b.id))
+    : { data: [], error: null }
+  if (eL) return res.status(503).json({ error: 'Réglages illisibles', detail: eL.message })
+  const heuresDe = new Map((lignes || []).map(l => [l.property_id, l.heures]))
+  return res.status(200).json({
+    bornes: { min: HEURES_MIN, max: HEURES_MAX },
+    biens: visibles.map(b => ({
+      property_id: b.id, nom: b.name,
+      heures: heuresDe.has(b.id) ? heuresDe.get(b.id) : null,
+      modifiable: peutEcrire(garde.contexte, 'avis', { id: b.id, ref: b.provider_property_id }),
+    })),
+  })
+}
+
+// POST auto-validation-maj { property_id, heures } — heures nulles = desactivee.
+async function autoValidationEcrire (req, res, garde) {
+  const userId = garde.accountUserId
+  const bien = String(req.body?.property_id || '').trim()
+  if (!UUID_RE.test(bien)) return res.status(400).json({ error: 'Identifiant de bien invalide' })
+  const h = normaliserHeures(req.body?.heures)
+  if (h === undefined) {
+    return res.status(400).json({ error: `Délai invalide : un nombre entier d’heures entre ${HEURES_MIN} et ${HEURES_MAX}` })
+  }
+  if (!(await bienAutorise(req, res, garde, bien, true))) return
+  const { error } = h === null
+    ? await supabase.from('avis_auto_validation').delete().eq('user_id', userId).eq('property_id', bien)
+    : await supabase.from('avis_auto_validation').upsert({ user_id: userId, property_id: bien, heures: h }, { onConflict: 'user_id,property_id' })
+  if (error) return res.status(503).json({ error: 'Réglage non enregistré', detail: error.message })
+  return res.status(200).json({ ok: true, property_id: bien, heures: h })
 }
 
 async function configEcrire (req, res, garde) {
@@ -543,16 +668,6 @@ async function configEcrire (req, res, garde) {
   const keywords = brut.map(k => String(k || '').trim()).filter(Boolean).slice(0, 20).map(k => k.slice(0, 40))
   const signature = req.body?.signature ? String(req.body.signature).trim().slice(0, 120) : null
 
-  // L'auto-validation (§10 bis) : nul = desactivee. Un ecran qui ne l'envoie pas
-  // ne la touche pas — elle n'est ecrite que si le champ est present.
-  let auto = {}
-  if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'auto_validation_heures')) {
-    const h = normaliserHeures(req.body.auto_validation_heures)
-    if (h === undefined) {
-      return res.status(400).json({ error: `Délai d’auto-validation invalide : un nombre entier d’heures entre ${HEURES_MIN} et ${HEURES_MAX}, ou vide pour la désactiver` })
-    }
-    auto = { auto_validation_heures: h }
-  }
 
   // ⚠ L'UNICITE EST PARTIELLE : (user_id) quand property_id est nul,
   // (user_id, property_id) sinon. `upsert` ne sait pas viser un index partiel,
@@ -564,7 +679,9 @@ async function configEcrire (req, res, garde) {
     : lecture.is('property_id', null).maybeSingle())
   if (eL) return res.status(503).json({ error: 'Configuration illisible', detail: eL.message })
 
-  const valeurs = { user_id: userId, property_id: bien, keywords, tone: ton, signature, ...auto }
+  // ⚠ La publication automatique ne s'ecrit plus ici : elle a son writer
+  // unique, `auto-validation-maj`, bien par bien (spec §10 bis).
+  const valeurs = { user_id: userId, property_id: bien, keywords, tone: ton, signature }
   const { error: eE } = deja
     ? await supabase.from('avis_config').update(valeurs).eq('id', deja.id).eq('user_id', userId)
     : await supabase.from('avis_config').insert(valeurs)
@@ -1245,7 +1362,11 @@ async function evaluationLire (req, res, garde) {
         // ⚠ ET SEULEMENT SI L'HOTE L'A AUTORISEE : une prestataire `aucun` ne
         // participe a rien, elle ne lit donc pas le texte (constat de securite
         // du 2 octobre 2026, avec la garde de lib/avis/publication.js).
-        ...(evalPower === 'valider' && evalScope === 'selon_grille' ? { public_text: e.public_text } : {}),
+        //
+        // ⚠ ET SEULEMENT UN TEXTE REDIGE POUR ELLE (revue de 57a79d6, vie
+        // privee) : celui de l'hote ou de l'auto-validation cite le prenom du
+        // voyageur, qu'elle ne voit jamais (spec prestataires §6).
+        ...(evalPower === 'valider' && evalScope === 'selon_grille' && e.texte_sans_voyageur === true ? { public_text: e.public_text } : {}),
       }
 
   // ⚠ `peut_publier` SE REND DES L'OUVERTURE. Constat de review : la fenetre ne
@@ -1266,11 +1387,13 @@ async function evaluationLire (req, res, garde) {
     hoteARepondu: hoteARepondu(e),
   })
 
+  // Un texte qui n'est pas le sien ne se publie pas par elle : l'hote tranche.
+  const texteDeLHote = role === 'prestataire' && e.public_text && e.texte_sans_voyageur !== true
   return res.status(200).json({
     evaluation: vue,
     role,
     criteres: ouverts,
-    peut_publier: decision.peutPublier,
+    peut_publier: decision.peutPublier && !texteDeLHote,
     negatif,
     grille_figee: Boolean(e.grille_figee),
   })
@@ -1310,9 +1433,13 @@ async function evaluationRepondre (req, res, garde) {
     return res.status(400).json({ error: pourLEcran(err.message) })
   }
 
+  // ⚠ UN TEXTE DE L'HOTE (ou de l'auto-validation) DEJA LA : elle ne le
+  // publiera pas (re-revue de 0d29f03) — l'ecran ne lui montre pas un bouton
+  // qui finirait en refus, et l'evaluation revient a l'hote.
+  const texteDeLHote = role === 'prestataire' && Boolean(String(e.public_text || '').trim()) && e.texte_sans_voyageur !== true
   const reponse = {
-    ok: true, status: r.decision.statut, peut_publier: r.decision.peutPublier,
-    motif: r.decision.motif, complet: r.complet, negatif: r.negatif,
+    ok: true, status: r.decision.statut, peut_publier: r.decision.peutPublier && !texteDeLHote,
+    motif: texteDeLHote ? 'un texte de l hote existe : il publie' : r.decision.motif, complet: r.complet, negatif: r.negatif,
   }
 
   // ⚠ L'HOTE EST PREVENU QUAND LA PRESTATAIRE A FINI SA PART et que
@@ -1372,7 +1499,8 @@ async function evaluationRepondre (req, res, garde) {
       answers_host: { ...(e.answers_host || {}), ...(role === 'hote' ? reponses : {}) },
       grille_figee: (r.evaluation && r.evaluation.grille_figee) || e.grille_figee || r.grille,
     }
-    const redige = await redigerEtEnregistrer(aJour)
+    // La prestataire relit ce texte : jamais le prenom du voyageur dedans.
+    const redige = await redigerEtEnregistrer(aJour, { avecPrenom: false })
 
     if (redige.panne) {
       // Une panne de lecture n'est pas un refus de l'IA : les reponses SONT
@@ -1437,7 +1565,39 @@ async function evaluationRepondre (req, res, garde) {
 // Rend { ok: true, public_text, private_note, negatif }
 //   ou { ok: false, motif, detail }            — l'IA refuse, la raison est dite
 //   ou { ok: false, panne: { code, body } }    — une lecture a echoue
-async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAutoPublierLe = null } = {}) {
+// La langue et le prenom du voyageur, lus dans SA reservation (le coeur).
+// ⚠ Constat de production du 2 octobre 2026 : `language` etait nul sur toutes
+// les evaluations nees au depart, et la redaction partait en anglais pour un
+// voyageur francais (la reservation Airbnb dit `customer.language = fr`). Le
+// prenom, connu de la reservation, n'etait utilise que s'il etait saisi a la main.
+async function voyageurDeLaReservation (e) {
+  const { data, error } = await supabase.from('bookings_snapshot').select('snapshot, raw')
+    .eq('user_id', e.user_id).eq('booking_id', String(e.booking_uid)).maybeSingle()
+  if (error) console.error('[avis] reservation illisible pour la redaction', e.id, error.message)
+  if (!data) return { langue: null, prenom: null }
+  const sp = data.snapshot || {}
+  const raw = data.raw || {}
+  const attributs = raw.attributes || raw
+  const client = attributs.customer || raw.customer || {}
+  const brute = String(client.language || client.locale || sp.language || raw.lang || '').trim().toLowerCase()
+  // Un code de langue (« fr », « fr-FR », « pt_BR »), jamais un nom en toutes lettres.
+  const langue = /^[a-z]{2}($|[-_])/.test(brute) ? brute.slice(0, 2) : null
+  const prenom = String(sp.firstName || client.name || '').trim().split(/\s+/)[0] || null
+  return { langue, prenom }
+}
+
+// `avecPrenom` : faux quand c'est la PRESTATAIRE qui declenche la redaction —
+// elle relit le texte, et le nom du voyageur ne lui est jamais montre
+// (docs/specs/spec-prestataires-menage.md §6).
+async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAutoPublierLe = null, avecPrenom = true } = {}) {
+  const voyageur = await voyageurDeLaReservation(e)
+  if (!e.language && voyageur.langue) {
+    e = { ...e, language: voyageur.langue }
+    const { error: eL } = await supabase.from('guest_evaluations')
+      .update({ language: voyageur.langue }).eq('id', e.id).eq('user_id', e.user_id).is('language', null)
+    if (eL) console.error('[avis] langue non enregistree', e.id, eL.message)
+  }
+  const prenomVoyageur = avecPrenom ? (prenom || voyageur.prenom) : null
   // ⚠ LES ERREURS DE LECTURE SE LISENT. Constat de review : un `Promise.all`
   // destructure sans `error` faisait disparaitre EN SILENCE les mots-cles, le
   // ton et la signature de l'hote — le texte partait avec les reglages par
@@ -1495,7 +1655,7 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAuto
   const r = await redigerAvis({
     reponses,
     remarque: remarque ? String(remarque).slice(0, MAX_TEXTE) : null,
-    prenom: prenom ? String(prenom).slice(0, 80) : null,
+    prenom: prenomVoyageur ? String(prenomVoyageur).slice(0, 80) : null,
     langue: e.language || 'en',
     prestataire: rPresta.data?.first_name || null,
     config: fusion,
@@ -1528,7 +1688,8 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAuto
   // demande par l'hote pendant une publication arrivait apres elle et
   // remplacait en base le texte reellement parti chez la plateforme.
   let ecriture = supabase.from('guest_evaluations')
-    .update({ public_text: r.public_text, private_note: r.private_note })
+    // Le repere de vie privee : vrai seulement pour un texte redige SANS le voyageur.
+    .update({ public_text: r.public_text, private_note: r.private_note, texte_sans_voyageur: !avecPrenom })
     .eq('id', e.id).eq('user_id', e.user_id)
     .in('status', ['a_remplir', 'soumise_prestataire', 'a_valider', 'echec_publication'])
   if (siAutoPublierLe) ecriture = ecriture.eq('auto_publier_le', siAutoPublierLe).select('id')
@@ -1804,7 +1965,7 @@ async function evaluationPublier (req, res, garde, options = {}) {
     const memes = JSON.stringify(trier(frais.answers_host)) === JSON.stringify(trier(options.auto.answers_host))
     let negatif = true
     try { negatif = estNegatif({ ...(frais.answers_cleaner || {}), ...(frais.answers_host || {}) }, e.grille_figee) } catch { negatif = true }
-    if (!memes || negatif || frais.auto_publier_le || ['publiee', 'abandonnee', 'expiree'].includes(frais.status)) {
+    if (!memes || negatif || frais.auto_publier_le || ['publiee', 'abandonnee', 'expiree', 'evaluee_ailleurs'].includes(frais.status)) {
       await relacher()
       return res.status(409).json({ error: 'L’hôte a repris l’évaluation : la publication automatique renonce.', motif: 'auto_annulee' })
     }
@@ -1844,6 +2005,8 @@ async function evaluationPublier (req, res, garde, options = {}) {
   const maj = {
     status: r.statut,
     public_text: evaluation.public_text,
+    // Un texte remplace par l'hote peut citer le voyageur : il n'est plus « sans voyageur ».
+    ...(req.body?.public_text && roleEtReglages(garde).role === 'hote' ? { texte_sans_voyageur: false } : {}),
     provider_response: r.provider_response || null,
     validated_by_profile: profilId,
   }
@@ -1934,6 +2097,26 @@ const outilsAutoValidation = {
   },
 }
 
+// POST eval-ailleurs — l'hote l'a deja faite dans l'application Airbnb (spec §6).
+async function evaluationAilleurs (req, res, garde) {
+  const e = await chargerEvaluation(req, res, garde, true)
+  if (!e) return
+  const { role, profilId } = roleEtReglages(garde)
+  if (role !== 'hote') return res.status(403).json({ error: 'Seul l’hôte range une évaluation' })
+  if (!(await laMainALHote(e, res))) return
+  try {
+    const d = await marquerEvalueeAilleurs(supabase, { evaluation: e, parProfil: profilId })
+    const j = await journaliser(supabase, {
+      userId: e.user_id, type: 'avis.evaluee_ailleurs', sujet: e.id,
+      charge: { booking_uid: e.booking_uid, par: 'hote', par_profil: profilId },
+    })
+    if (!j.ok) console.error('[avis] rangement non journalise:', j.erreur)
+    return res.status(200).json({ ok: true, status: d.status })
+  } catch (err) {
+    return res.status(409).json({ error: pourLEcran(err.message) })
+  }
+}
+
 module.exports = async function handler (req, res) {
   try {
     return await router(req, res)
@@ -2005,10 +2188,12 @@ async function router (req, res) {
   const ECRITURES_EVAL = {
     'grille-maj': grilleEcrire,
     'config-maj': configEcrire,
+    'auto-validation-maj': autoValidationEcrire,
     'eval-reponses': evaluationRepondre,
     'eval-texte': evaluationTexte,
     'eval-publier': evaluationPublier,
     'eval-abandon': evaluationAbandonner,
+    'eval-ailleurs': evaluationAilleurs,
     'prestataire-reglages-maj': prestataireReglagesEcrire,
   }
   if (ECRITURES_EVAL[action]) {
@@ -2036,6 +2221,7 @@ async function router (req, res) {
   if (action === 'grille') return await grilleLire(req, res, garde)
   if (action === 'evaluations') return await evaluationsLister(req, res, garde)
   if (action === 'config') return await configLire(req, res, garde)
+  if (action === 'auto-validation') return await autoValidationLire(req, res, garde)
   if (action === 'list') return await lister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })
 }

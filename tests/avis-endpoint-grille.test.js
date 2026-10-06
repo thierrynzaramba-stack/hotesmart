@@ -31,7 +31,7 @@ function preparer ({
   criteres = [], evaluations = [], anciensActifs = [],
   erreurInsertCritere = null, erreurInsertNiveaux = null,
   erreurExtinction = null, erreurActivation = null, erreurRallumage = null,
-  activesRendues = null,
+  activesRendues = null, sejours = null,
 } = {}) {
   // ⚠ UNE SEQUENCE, PAS TROIS LISTES SEPAREES. Constat de review : les tests
   // asseraient trois faits independants (« ils naissent inactifs », « une
@@ -53,7 +53,7 @@ function preparer ({
         or: (e) => { q._or = e; return chain },
         in: (c, v) => { q._in = { c, v }; return chain },
         not: (c, op, v) => { q._not = { c, op, v }; return chain },
-        order: () => chain, limit: () => chain,
+        order: () => chain, limit: () => chain, neq: () => chain,
         insert (row) {
           etat.insertions.push({ table: nom, row })
           etat.sequence.push({ op: 'insert', table: nom, actif: row && row.actif })
@@ -65,6 +65,7 @@ function preparer ({
           return { select: () => ({ single: async () => ({ data: cree, error: null }) }) }
         },
         update (row) { q._mode = 'update'; q._row = row; return chain },
+        upsert (row, opts) { etat.insertions.push({ table: nom, row, upsert: opts }); return Promise.resolve({ error: null }) },
         delete () { q._mode = 'delete'; return chain },
         maybeSingle: async () => { const r = await rep(); return { data: Array.isArray(r.data) ? (r.data[0] || null) : r.data, error: r.error } },
         single: async () => { const r = await rep(); return { data: Array.isArray(r.data) ? (r.data[0] || null) : r.data, error: r.error } },
@@ -99,6 +100,7 @@ function preparer ({
         },
       }
       function rep () {
+        if (nom === 'avis_auto_validation') return Promise.resolve({ data: [{ property_id: BIEN_A.id, heures: 24 }], error: null })
         if (nom === 'properties') {
           const c = [BIEN_A, BIEN_B].filter(b =>
             (q._f.user_id == null || b.user_id === q._f.user_id) &&
@@ -115,6 +117,15 @@ function preparer ({
         // est vrai par construction : une liste vide ne contient rien.
         // Constat de review : la mutation qui servait la ligne brute passait.
         if (nom === 'guest_evaluations') return Promise.resolve({ data: evaluations, error: null })
+        // Le contexte des sejours de la liste (demande du 2 octobre au soir).
+        if (sejours && ['bookings_snapshot', 'menages', 'ota_reviews'].includes(nom)) {
+          etat.lecturesSejours = etat.lecturesSejours || []
+          etat.lecturesSejours.push({ nom, user_id: q._f.user_id })
+          return Promise.resolve({ data: (sejours[nom] || []).filter(x => x.user_id === q._f.user_id), error: null })
+        }
+        if (sejours && nom === 'profiles' && q._f.account_user_id && !q._f.member_user_id) {
+          return Promise.resolve({ data: (sejours.profiles || []).filter(p => p.account_user_id === q._f.account_user_id), error: null })
+        }
         if (nom === 'profiles') {
           const ok = profil && profil.account_user_id === q._f.account_user_id && profil.member_user_id === q._f.member_user_id
           return Promise.resolve({ data: ok ? [profil] : [], error: null })
@@ -417,9 +428,11 @@ test('un etat inconnu est refuse, plutot que silencieusement ignore', async () =
   assert.strictEqual(res.code, 400)
 })
 
-test('LE TEST QUI COMPTE : la liste ne sert PAS le texte public', async () => {
-  // Il n y sert a rien, et une liste est ce qui fuite le plus facilement dans une
-  // capture d ecran.
+test('LE TEST QUI COMPTE : la liste ne sert PAS un BROUILLON — seulement un avis publie', async () => {
+  // Decision de Thierry du 2 octobre 2026 au soir : chaque carte montre NOTRE
+  // avis une fois publie (il est alors public chez Airbnb). Un brouillon, lui,
+  // ne sort jamais d'une liste — ce qui fuite le plus facilement dans une
+  // capture d'ecran.
   //
   // ⚠ CE TEST A ETE DECORATIF. Constat de review : le double ne modelisait pas
   // `guest_evaluations`, donc la liste etait TOUJOURS vide et l'assertion vraie
@@ -435,10 +448,19 @@ test('LE TEST QUI COMPTE : la liste ne sert PAS le texte public', async () => {
   const res = reponse()
   await handler(req({ action: 'evaluations' }, null, 'GET'), res)
   assert.strictEqual(res.body.evaluations.length, 1, 'la liste doit porter l evaluation')
-  const q = JSON.stringify(res.body)
-  assert.ok(!q.includes('public_text'), 'le nom de colonne ne sort pas')
-  assert.ok(!q.includes('VOICI-LE-TEXTE-SECRET'), 'et son contenu encore moins')
-  assert.strictEqual(res.body.evaluations[0].a_un_texte, true, 'on dit qu il y en a un, sans le donner')
+  assert.ok(!JSON.stringify(res.body).includes('public_text'), 'le nom de colonne ne sort pas')
+  assert.strictEqual(res.body.evaluations[0].notre_avis, 'VOICI-LE-TEXTE-SECRET', 'publie : il se montre')
+
+  preparer({ evaluations: [{
+    id: 'e2', booking_uid: 'BK-2', property_id: BIEN_A.id, property_id_ref: 'REF-A',
+    ota: 'airbnb', status: 'a_valider', language: 'fr',
+    deadline_at: null, published_at: null,
+    public_text: 'BROUILLON-NON-PUBLIE', created_at: '2026-09-28T10:00:00Z', updated_at: null,
+  }] })
+  const r2 = reponse()
+  await require('../api/avis')(req({ action: 'evaluations' }, null, 'GET'), r2)
+  assert.ok(!JSON.stringify(r2.body).includes('BROUILLON-NON-PUBLIE'), 'un brouillon ne sort jamais d une liste')
+  assert.strictEqual(r2.body.evaluations[0].a_un_texte, true, 'on dit qu il y en a un, sans le donner')
 })
 
 test('la liste ne sert pas non plus la reference provider du bien', async () => {
@@ -516,28 +538,101 @@ test('un critere avec trop de niveaux est refuse, en nommant lequel', async () =
   assert.match(res.body.error, /n°1/)
 })
 
-// ─── L'auto-validation (spec §10 bis, 2 octobre 2026) ───────────────────────
-test('config-maj : le delai d’auto-validation est un entier de 1 a 336, refuse sinon sans rien ecrire', async () => {
-  for (const v of [0, 337, 'abc', 2.5]) {
-    const etat = preparer({})
-    const handler = require('../api/avis')
-    const res = reponse()
-    await handler(req({ action: 'config-maj' }, { action: 'config-maj', tone: 'sobre', auto_validation_heures: v }), res)
+// ─── La publication automatique, BIEN PAR BIEN (spec §10 bis, option A) ─────
+test('auto-validation : chaque bien du perimetre avec son reglage', async () => {
+  preparer({})
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'auto-validation' }, null, 'GET'), res)
+  assert.strictEqual(res.code, 200)
+  const parId = Object.fromEntries(res.body.biens.map(b => [b.property_id, b]))
+  assert.strictEqual(parId[BIEN_A.id].heures, 24)
+  assert.strictEqual(parId[BIEN_B.id].heures, null, 'pas de ligne = desactivee')
+  assert.strictEqual(parId[BIEN_A.id].modifiable, true)
+})
+
+test('LE TEST QUI COMPTE : un membre ne voit ni ne regle que les biens de SON perimetre', async () => {
+  preparer({ user: MEMBRE, ...MEMBRE_B })
+  const lu = reponse()
+  await require('../api/avis')(reqMembre({ action: 'auto-validation' }, null, 'GET'), lu)
+  assert.deepStrictEqual(lu.body.biens.map(b => b.property_id), [BIEN_B.id])
+  const etat = preparer({ user: MEMBRE, ...MEMBRE_B })
+  const res = reponse()
+  await require('../api/avis')(reqMembre({ action: 'auto-validation-maj' }, { action: 'auto-validation-maj', property_id: BIEN_A.id, heures: 12 }), res)
+  assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.insertions.filter(i => i.table === 'avis_auto_validation').length, 0)
+})
+
+test('auto-validation-maj : 48 h s’ecrit sur le bien, nul supprime la ligne, hors bornes refuse sans rien ecrire', async () => {
+  let etat = preparer({})
+  let res = reponse()
+  await require('../api/avis')(req({ action: 'auto-validation-maj' }, { action: 'auto-validation-maj', property_id: BIEN_A.id, heures: 48 }), res)
+  assert.strictEqual(res.code, 200)
+  const ecrit = etat.insertions.find(i => i.table === 'avis_auto_validation')
+  assert.deepStrictEqual(ecrit.row, { user_id: PROD, property_id: BIEN_A.id, heures: 48 })
+  etat = preparer({})
+  res = reponse()
+  await require('../api/avis')(req({ action: 'auto-validation-maj' }, { action: 'auto-validation-maj', property_id: BIEN_A.id, heures: null }), res)
+  assert.strictEqual(res.code, 200)
+  assert.ok(etat.suppressions.some(x => x.table === 'avis_auto_validation' && x.filtres.property_id === BIEN_A.id && x.filtres.user_id === PROD))
+  for (const v of [0, 337, 'abc']) {
+    etat = preparer({})
+    res = reponse()
+    await require('../api/avis')(req({ action: 'auto-validation-maj' }, { action: 'auto-validation-maj', property_id: BIEN_A.id, heures: v }), res)
     assert.strictEqual(res.code, 400, String(v))
-    assert.strictEqual(etat.insertions.filter(i => i.table === 'avis_config').length, 0)
+    assert.strictEqual(etat.insertions.filter(i => i.table === 'avis_auto_validation').length, 0)
   }
 })
 
-test('config-maj : 48 h s’ecrit, nul desactive, et un ecran qui ne l’envoie pas ne le touche pas', async () => {
-  const ecrit = async (corps) => {
-    const etat = preparer({})
-    const handler = require('../api/avis')
-    const res = reponse()
-    await handler(req({ action: 'config-maj' }, { action: 'config-maj', tone: 'sobre', ...corps }), res)
-    assert.strictEqual(res.code, 200)
-    return etat.insertions.find(i => i.table === 'avis_config').row
-  }
-  assert.strictEqual((await ecrit({ auto_validation_heures: 48 })).auto_validation_heures, 48)
-  assert.strictEqual((await ecrit({ auto_validation_heures: null })).auto_validation_heures, null)
-  assert.ok(!('auto_validation_heures' in (await ecrit({}))), 'absent : la colonne n est pas ecrite')
+test('config-maj n’ecrit plus la publication automatique (writer unique : auto-validation-maj)', async () => {
+  const etat = preparer({})
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'config-maj' }, { action: 'config-maj', tone: 'sobre', auto_validation_heures: 48 }), res)
+  assert.strictEqual(res.code, 200)
+  const row = etat.insertions.find(i => i.table === 'avis_config').row
+  assert.ok(!('auto_validation_heures' in row))
+})
+
+// ─── Une carte par sejour (demande de Thierry du 2 octobre 2026 au soir) ────
+const SEJOURS = {
+  bookings_snapshot: [{ user_id: PROD, booking_id: 'BK-1', snapshot: { firstName: 'Camille', lastName: 'Martin', arrival: '2026-09-21', departure: '2026-09-22' } }],
+  menages: [{ user_id: PROD, booking_id: 'BK-1', provider_id: 'p-regina', status: 'done' }],
+  profiles: [{ id: 'p-regina', account_user_id: PROD, first_name: 'Régina', last_name: null }],
+  ota_reviews: [
+    { id: 'o-1', user_id: PROD, content_public: 'Super séjour', overall_score: 10, cache: false, guest_name: 'Camille' },
+    { id: 'o-2', user_id: PROD, content_public: 'TEXTE-CACHE', overall_score: 9, cache: true, guest_name: 'Léo' },
+    // Un payload partiel : la colonne dirait « visible », le brut ne dit rien.
+    { id: 'o-3', user_id: PROD, content_public: 'TEXTE-SANS-PREUVE', overall_score: 9, is_hidden: false, cache: null, guest_name: 'Zoé Dupont' },
+  ],
+}
+const EVAL = (a = {}) => ({ id: 'e1', booking_uid: 'BK-1', property_id: BIEN_A.id, property_id_ref: 'REF-A', ota: 'airbnb',
+  status: 'a_remplir', language: 'fr', deadline_at: null, published_at: null, public_text: null, ota_review_id: 'o-1',
+  created_at: '2026-09-28T10:00:00Z', updated_at: null, ...a })
+
+test('LE TEST QUI COMPTE : chaque evaluation porte le voyageur, ses dates, le menage et son avis', async () => {
+  const etat = preparer({ evaluations: [EVAL()], sejours: SEJOURS })
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'evaluations' }, null, 'GET'), res)
+  const e = res.body.evaluations[0]
+  assert.deepStrictEqual(e.voyageur, { prenom: 'Camille', nom: 'Martin' })
+  assert.deepStrictEqual([e.arrivee, e.depart], ['2026-09-21', '2026-09-22'])
+  assert.strictEqual(e.menage_par, 'Régina')
+  assert.deepStrictEqual(e.avis_voyageur, { visible: true, texte: 'Super séjour', note: 10 })
+  assert.ok(etat.lecturesSejours.every(l => l.user_id === PROD), 'toutes les lectures cloisonnees au compte')
+})
+
+test('LE TEST QUI COMPTE : un avis du voyageur CACHE chez Airbnb ne se montre pas ici non plus', async () => {
+  preparer({ evaluations: [EVAL({ ota_review_id: 'o-2' })], sejours: SEJOURS })
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'evaluations' }, null, 'GET'), res)
+  assert.deepStrictEqual(res.body.evaluations[0].avis_voyageur, { visible: false })
+  assert.ok(!JSON.stringify(res.body).includes('TEXTE-CACHE'))
+})
+
+test('SECURITE (revue de 5497a67) : sans preuve dans le brut, l’avis reste cache — meme si la colonne dit le contraire', async () => {
+  preparer({ evaluations: [EVAL({ booking_uid: 'BK-9', ota_review_id: 'o-3' })], sejours: SEJOURS })
+  const res = reponse()
+  await require('../api/avis')(req({ action: 'evaluations' }, null, 'GET'), res)
+  assert.deepStrictEqual(res.body.evaluations[0].avis_voyageur, { visible: false })
+  assert.ok(!JSON.stringify(res.body).includes('TEXTE-SANS-PREUVE'))
+  assert.deepStrictEqual(res.body.evaluations[0].voyageur, { prenom: 'Zoé', nom: 'Dupont' }, 'le nom de l avis, coupe en prenom et nom')
 })
