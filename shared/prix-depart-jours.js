@@ -85,19 +85,24 @@ export function composerJours ({ prix, calendrier = [], existants = new Map() })
         const ecart = Math.max(0, p - haut.strategies[prix.strategie])
         const plafond = c.fourchette && Number.isFinite(c.fourchette.haut) ? c.fourchette.haut : Infinity
         const brut = p + ecart
-        surcroit = { ecart, plafonne: brut > plafond }
+        const tresHaut = p
         p = Math.round(Math.min(brut, plafond))
+        // Ce qui est VRAIMENT ajoute (apres plafond), pas l'ecart nominal.
+        surcroit = { ecart: p - tresHaut, plafonne: brut > plafond }
       } else surcroit = { ecart: null }
     }
     const raisons = [`saison (${NOM_SOURCE[j.source] || j.source})`]
     if (j.type === 'weekend') raisons.push('week-end')
     for (const e of evs) {
       const f = effetEvenement(e)
-      raisons.push(f && f.texte ? `${e.nom} (${f.texte})` : e.nom)
+      // Un jour Exceptionnel : un « +1 tranche » n'y fait plus rien, il ne se dit pas.
+      const sansEffet = exceptionnel && f && f.plus
+      raisons.push(f && f.texte && !sansEffet ? `${e.nom} (${f.texte})` : e.nom)
     }
     if (surcroit) {
       raisons.push(surcroit.ecart === null ? 'écart Haut → Très haut non mesurable : prix Très haut'
-        : `majoré de ${surcroit.ecart} € (écart Haut → Très haut)${surcroit.plafonne ? ', plafonné au haut du marché' : ''}`)
+        : surcroit.ecart > 0 ? `majoré de ${surcroit.ecart} € (écart Haut → Très haut)${surcroit.plafonne ? ', plafonné au haut du marché' : ''}`
+          : 'aucune majoration : Haut et Très haut au même prix, ou plafond du marché atteint')
     }
     const ex = existants.get(j.date)
     const ecart = Number.isFinite(ex) && ex > 0 ? { ecart_eur: Math.round(p - ex), ecart_pct: Math.round((p / ex - 1) * 100) } : { ecart_eur: null, ecart_pct: null }

@@ -135,7 +135,7 @@ test('LE TEST QUI COMPTE (decision du 6 octobre 2026) : le prix Exceptionnel = T
   const plafonnees = CASES.map(c => (c.niveau === 'pic' ? { ...c, fourchette: { bas: 50, haut: 170 } } : c))
   const p = M.composerJours({ prix: { ...PRIX([j('2026-11-04')]), cases: plafonnees }, calendrier: [declare('2026-11-04')] }).get('2026-11-04')
   assert.equal(p.prix, 170)
-  assert.ok(p.raisons.some(x => /plafonné au haut du marché/.test(x)))
+  assert.ok(p.raisons.includes('majoré de 10 € (écart Haut → Très haut), plafonné au haut du marché'), 'ce qui est VRAIMENT ajoute : 170 − 160')
   // Strategie : l'ecart se mesure dans la strategie choisie.
   assert.equal(M.composerJours({ prix: PRIX([j('2026-11-04')], { strategie: 'qualite' }), calendrier: [declare('2026-11-04')] }).get('2026-11-04').prix, 190)
   // Case Haut non calculee : le prix Tres haut, et c'est dit.
@@ -145,4 +145,20 @@ test('LE TEST QUI COMPTE (decision du 6 octobre 2026) : le prix Exceptionnel = T
   assert.ok(n.raisons.some(x => /non mesurable/.test(x)))
   // Un jour ordinaire n'est pas touche.
   assert.equal(M.composerJours({ prix: PRIX([j('2026-11-04')]) }).get('2026-11-04').prix, 120)
+})
+
+test('review de caafb83 : ecart nul ou negatif, ferie + declare, ecart avec le prix existant sur un jour Exceptionnel', () => {
+  const j = d => ({ date: d, type: 'semaine', niveau: 'modere', source: 'mesure' })
+  const declare = d => ev('declare', 'festival', 'Festival', d)
+  // Haut au-dessus de Tres haut : l'ecart est ramene a 0, et c'est dit.
+  const inverses = CASES.map(c => (c.niveau === 'favorable' && c.type === 'semaine' ? kase('favorable', 'semaine', 175) : c))
+  const z = M.composerJours({ prix: { ...PRIX([j('2026-11-04')]), cases: inverses }, calendrier: [declare('2026-11-04')] }).get('2026-11-04')
+  assert.equal(z.prix, 160)
+  assert.ok(z.raisons.some(x => /^aucune majoration/.test(x)))
+  // Ferie ET declare le meme jour : Exceptionnel, majore, et le « +1 tranche » ne se dit pas.
+  const f = M.composerJours({ prix: PRIX([j('2026-12-24')]), calendrier: [declare('2026-12-24'), ev('officiel', 'ferie', 'Noël', '2026-12-24')], existants: new Map([['2026-12-24', 150]]) }).get('2026-12-24')
+  assert.deepEqual([f.tranche, f.prix], ['Exceptionnel', 180])
+  assert.ok(f.raisons.includes('Noël') && !f.raisons.some(x => /\+1 tranche/.test(x)))
+  // L'ecart avec le prix existant se calcule sur le prix MAJORE.
+  assert.deepEqual([f.ecart_eur, f.ecart_pct], [30, 20])
 })
