@@ -2880,7 +2880,9 @@ jacuzzi.
 
 Après la validation des comparables, deux questions :
 
-- **La stratégie** :
+- **La stratégie** (⚠ **remplacée par §22.11** : agressif = P25, prix marché =
+  P50, haut de gamme = P75 des prix habituels des hôtes ; les libellés et le
+  ±10 % ci-dessous ne sont plus ceux de l'écran — recette du 6 octobre 2026) :
   - « Prix justes » : au positionnement ;
   - « Agressif » : **10 % en dessous**, pour attirer des clients ;
   - « Qualité » : **10 % au-dessus**, pour viser le haut du marché.

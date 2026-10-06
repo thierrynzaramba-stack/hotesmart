@@ -111,7 +111,7 @@
     let d
     try { d = await r.json() } catch (e) { if (j === jeton) corps('<p class="non-calc">Réponse illisible.</p>'); return }
     if (j !== jeton) return
-    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
+    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement${d.motif ? ` : ${ech(d.motif)}` : ''}.</p>`)
     if (d.etat === 'capture_absente') return corps(`<p class="non-calc">Marché ${ech(d.marche && d.marche.localite)} : ${ech(d.motif)}.</p>`)
     if (d.etat !== 'calcule' || !Array.isArray(d.jours) || !d.jours.length) return corps('<p class="non-calc">Aucun jour à afficher pour ce marché.</p>')
     donnees = d

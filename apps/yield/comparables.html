@@ -188,10 +188,11 @@
     <h2>Votre stratégie de prix</h2>
     <p class="sous">Comment voulez-vous vous placer par rapport à vos comparables ?</p>
     <div class="cp-strategies" role="radiogroup" aria-label="Stratégie de prix">
-      <label><input type="radio" name="strategie" value="juste"><span><b>Prix justes</b><small>Au prix que vaut votre logement face à vos comparables.</small></span></label>
-      <label><input type="radio" name="strategie" value="agressif"><span><b>Agressif</b><small>10 % moins cher, pour attirer des clients et remplir plus vite.</small></span></label>
-      <label><input type="radio" name="strategie" value="qualite"><span><b>Qualité</b><small>10 % plus cher, pour viser le haut du marché.</small></span></label>
+      <label><input type="radio" name="strategie" value="agressif"><span><b>Agressif</b><small>Le prix habituel du premier quart de vos comparables (25ᵉ centile) : moins cher que la plupart, pour remplir plus vite.</small></span></label>
+      <label><input type="radio" name="strategie" value="juste"><span><b>Prix marché</b><small>Le prix habituel du comparable du milieu (médiane, 50ᵉ centile).</small></span></label>
+      <label><input type="radio" name="strategie" value="qualite"><span><b>Haut de gamme</b><small>Le prix habituel du dernier quart de vos comparables (75ᵉ centile), pour viser le haut du marché.</small></span></label>
     </div>
+    <p class="cp-meta">Chaque hôte compte pour une voix, même s’il a plusieurs annonces. Vos réponses « en dessous », « équivalent » et « supérieur » décalent ce prix, d’un quart de l’écart entre le moins cher et le plus cher de vos comparables au plus.</p>
     <label class="cp-sejour">Séjour minimum souhaité
       <input type="number" id="cp-sejour-min" min="1" max="30" step="1" inputmode="numeric"> nuit(s)
     </label>
@@ -206,8 +207,10 @@
   <!-- ÉTAPE D : les prix de départ (§22.7) -->
   <div class="cp-carte" id="cp-etape-d" hidden>
     <h2>Vos prix de départ</h2>
-    <p class="sous">Calculés à partir des prix affichés par vos comparables, à chaque niveau du marché, selon votre stratégie.
-      Les comparables qui suivent le marché comptent plus que ceux dont les prix ne bougent pas. Rien n’est encore appliqué à vos prix.</p>
+    <p class="sous">Calculés à partir des prix affichés par vos comparables sur les 6 prochains mois. Votre prix de semaine habituel est
+      celui de vos hôtes au rang de votre stratégie, décalé par vos réponses « en dessous » ou « supérieur » ; dans chaque case, il suit
+      l’écart médian de vos hôtes entre cette case et leur propre prix habituel, sans sortir de la fourchette de la case.
+      Rien n’est encore appliqué à vos prix.</p>
     <div id="cp-zone-prix"></div>
     <p class="cp-meta" id="cp-note-prix" aria-live="polite"></p>
   </div>
@@ -828,6 +831,10 @@
       b.addEventListener('click', relever)
       return b
     }
+    // Sans marche relie, la page le DIT (recette de Thierry, 6 octobre 2026),
+    // avant tout releve payant : les niveaux ne viennent alors que des
+    // comparables, sans repli possible.
+    if (pd.marche && pd.marche.relie === false) zone.append(Object.assign(document.createElement('p'), { className: 'cp-avert', textContent: pd.marche.message }))
     if (pd.etat === 'a_capturer') {
       const p = document.createElement('p'); p.className = 'cp-meta'
       p.textContent = `Les prix de ${pluriel(pd.a_capturer, 'comparable', 'comparables')} ne sont pas encore relevés.`
@@ -868,7 +875,7 @@
     dit('Sous chaque prix : la fourchette des prix de vos comparables dans cette case. Week-end : les nuits du vendredi et du samedi. Prix mesurés sur les 6 prochains mois.')
     dit(r.niveaux_source === 'marche'
       ? 'Vos comparables changent peu de prix au fil des saisons : les niveaux viennent du calendrier du marché de votre ville.'
-      : `Les niveaux viennent de la saison de vos comparables : leurs prix varient de ${String(r.amplitude).replace('.', ',')} % entre leurs dates calmes et leurs dates fortes.`)
+      : `Les niveaux viennent de la saison de vos comparables : en moyenne sur vos hôtes, leurs prix varient de ${String(r.amplitude).replace('.', ',')} % entre leurs dates calmes et leurs dates fortes. Vos prix, eux, suivent l’écart médian de vos hôtes dans chaque case : si la plupart de vos comparables gardent un prix fixe, vos prix varient moins que cette saison.`)
     if (r.ancres) dit(`Prix habituel de semaine de vos ${pluriel(r.hotes, 'hôte', 'hôtes')}, par rang : agressif ${EUROS(r.ancres.agressif)}, prix marché ${EUROS(r.ancres.juste)}, haut de gamme ${EUROS(r.ancres.qualite)}. Votre stratégie : ${NOM_STRATEGIE[r.strategie] || ''}.`)
     // Un ecart faible entre strategies est DIT, jamais maquille.
     if (r.serre) {

@@ -163,7 +163,7 @@
     if (!r.ok) return corps(`<p class="non-calc">Lecture impossible (${r.status}).</p>`)
     const d = await r.json()
     if (j !== jeton) return
-    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif || 'lien absent')}.</p>`)
+    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement${d.motif ? ` : ${ech(d.motif)}` : ''}.</p>`)
     if (d.etat !== 'calendrier') return corps(`<p class="non-calc">Aucune étude du marché ${d.marche ? `de ${ech(d.marche.localite)} ` : ''}n’est encore enregistrée : rien à montrer.</p>`)
     rendre(d.calendrier)
   }

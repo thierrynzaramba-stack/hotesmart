@@ -759,6 +759,22 @@ test('REVIEW : le marche du REPLI doit figurer en MOTS ENTIERS dans l adresse �
   assert.equal(r.niveaux_source, 'marche')
 })
 
+test('recette du 6 octobre 2026 : la reponse DIT le marche — relie, d une autre commune, ou absent', async () => {
+  const relie = (await appeler({ tables: tablesPrix() })).corps.prix_depart
+  assert.deepEqual(relie.marche, { relie: true, localite: 'Bagnères-de-Bigorre' })
+  const ailleurs = (await appeler({ tables: tablesPrix({ localite: 'Toulouse' }) })).corps.prix_depart
+  assert.equal(ailleurs.marche.relie, false)
+  assert.match(ailleurs.marche.message, /^Le marché relié \(Toulouse\) n’est pas celui de l’adresse de votre logement/)
+  const tb = tablesPrix()
+  tb.marche_biens = []
+  const aucun = (await appeler({ tables: tb })).corps.prix_depart
+  assert.equal(aucun.etat, 'calcule')
+  assert.match(aucun.marche.message, /^Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables/)
+  const rien = (await appeler({ tables: { ...tb, airroi_cache: tb.airroi_cache.filter(l => !l.cle.startsWith('GET /listings/live/calendar')) } })).corps.prix_depart
+  assert.equal(rien.etat, 'a_capturer')
+  assert.equal(rien.marche.relie, false)
+})
+
 test('REVIEW (C3) : une panne du calcul des prix au GET n empeche pas les comparables', async () => {
   const tb = { ...tablesPrix(), __absentes: ['marche_biens'] }
   const g = await appeler({ tables: tb })
