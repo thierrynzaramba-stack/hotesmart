@@ -3502,3 +3502,18 @@ Elle est là **pour comparer** : elle n'agit sur aucun prix.
 **Le mobile.** L'écran Prix est une seule page pour l'ordinateur et le
 téléphone : la colonne s'y ajoute aux autres. Son confort sur téléphone est à
 vérifier en recette.
+- **Recette de Thierry (6 octobre 2026).**
+  - **Un seul vocabulaire à l'écran : les 5 tranches de YieldFlow.**
+    Correspondance : creux → Base, modéré → Moyen, favorable → Haut, pic →
+    Très haut.
+    - « Exceptionnel » est réservé aux jours touchés par un événement **déclaré**
+      par l'hôte. Il prend le prix de la case Très haut, puisque le calcul ne
+      mesure que 4 niveaux.
+    - Le calcul garde ses noms internes.
+  - **Cellule allégée** : le prix et la tranche (« 193 € · Très haut »).
+    - Le détail (mesuré ou estimé, raisons, écart) s'affiche dans l'info-bulle
+      au survol.
+    - Sur téléphone, où une info-bulle ne s'ouvre pas au toucher, il s'affiche
+      dans le panneau qui s'ouvre quand on touche la ligne.
+    - Plus de « pas de prix au calendrier » répété : sans prix, le détail ne
+      parle simplement pas d'écart.
