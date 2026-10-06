@@ -622,7 +622,8 @@ test('REVIEW : une nouvelle validation des comparables n efface pas une strategi
 const IDS3 = CARTES.slice(0, 3).map(c => c.listing_id)
 const kase = (niveau, type, prix, bas, haut) => ({ niveau, type, statut: 'calcule', forme: 1, fourchette: { bas, haut }, hotes: 5, strategies: { agressif: prix - 20, juste: prix, qualite: prix + 5 }, prix })
 const PRIX_CALCULE = { etat: 'calcule', a_capturer: 0, note: null, prix: { statut: 'calcule', strategie: 'juste', hotes: 7, comparables: 9,
-  niveaux_source: 'segment', amplitude: 20.2, position: 0.14, ancres: { agressif: 140, juste: 158, qualite: 165 },
+  niveaux_source: 'segment', amplitude: 20.2, position: 0.14, ancres: { agressif: 140, juste: 158, qualite: 165 }, hotes_mouvants: 6, seuil_mouvant_pct: 10,
+  prime_week_end: { comparables: 17.6, marche: 7.8, localite: 'Bagnères-de-Bigorre' },
   cases: [kase('creux', 'semaine', 157, 65, 281), kase('creux', 'weekend', 173, 81, 308), kase('modere', 'semaine', 158, 70, 281), kase('modere', 'weekend', 187, 97, 342),
     kase('favorable', 'semaine', 158, 73, 281), kase('favorable', 'weekend', 192, 98, 342), kase('pic', 'semaine', 169, 73, 301),
     { niveau: 'pic', type: 'weekend', statut: 'non_calculable', motif: '2 hôtes avec des prix dans cette case (il en faut 3)' }],
@@ -647,8 +648,9 @@ test('LE TEST QUI COMPTE (§22.11) : les 8 cases — semaine et week-end par niv
   const z = doc.getElementById('cp-zone-prix').textContent
   assert.doesNotMatch(z, /un niveau de prix vaut/, 'le cran a disparu')
   assert.match(z, /Sous chaque prix : la fourchette des prix de vos comparables dans cette case\. Week-end : les nuits du vendredi et du samedi\. Prix mesurés sur les 6 prochains mois\./)
-  assert.match(z, /Les niveaux viennent de la saison de vos comparables : en moyenne sur vos hôtes, leurs prix varient de 20,2 %/)
-  assert.match(z, /suivent l’écart médian de vos hôtes dans chaque case/)
+  // Regle (d) : d'ou vient la forme, et la prime week-end pour information.
+  assert.match(z, /La saison et le week-end sont mesurés sur les 6 hôtes sur 7 qui changent leurs prix d’au moins 10 % au fil des saisons : en moyenne, leurs prix varient de 20,2 % entre leurs dates calmes et leurs dates fortes\. 1 hôte garde un prix presque fixe et ne compte pas dans la saison\. Votre prix habituel, lui, vient de tous vos hôtes\./)
+  assert.match(z, /Prime week-end \(pour information, sans effet sur vos prix\) : vos comparables 17,6 %, marché de Bagnères-de-Bigorre 7,8 %\./)
   assert.match(z, /de vos 7 hôtes, par rang : agressif 140 €, prix marché 158 €, haut de gamme 165 €\. Votre stratégie : prix marché\./)
   assert.match(z, /ceux qui imposent 2 nuits ou plus vendent la nuit 10 % moins cher/)
 })
@@ -662,9 +664,16 @@ test('LE TEST QUI COMPTE (§22.11) : un marche serre, une montee ratee, un compa
   assert.ok(avert.some(t => t.startsWith(`Vérifiez ce comparable : ${CARTES[1].nom}.`)))
 })
 
-test('§22.11 : le repli sur le marche de la ville est dit ; la fiche ne parle plus de « suivre le marche »', async () => {
-  const { doc, L } = await monter(pageAvecPrix({ ...PRIX_CALCULE, prix: { ...PRIX_CALCULE.prix, niveaux_source: 'marche' } }))
-  assert.match(doc.getElementById('cp-zone-prix').textContent, /les niveaux viennent du calendrier du marché de votre ville/)
+test('regle (d) : le repli sur la phase 1 du marche est dit ; la fiche ne parle plus de « suivre le marche »', async () => {
+  const { doc, L } = await monter(pageAvecPrix({ ...PRIX_CALCULE, prix: { ...PRIX_CALCULE.prix, niveaux_source: 'phase1', repli: 'peu_mouvants', phase1_localite: 'Bagnères-de-Bigorre', hotes_mouvants: 1, prime_week_end: { comparables: 0, marche: null, localite: 'Bagnères-de-Bigorre' } } }))
+  const z = doc.getElementById('cp-zone-prix').textContent
+  assert.match(z, /Moins de 2 de vos hôtes changent leurs prix au fil des saisons\. La saison et le week-end viennent donc du marché de Bagnères-de-Bigorre/)
+  assert.match(z, /vos comparables 0 %, marché de Bagnères-de-Bigorre non mesurée\./)
+  const plate = await monter(pageAvecPrix({ ...PRIX_CALCULE, prix: { ...PRIX_CALCULE.prix, niveaux_source: 'phase1', repli: 'saison_plate', phase1_localite: 'Toulouse', hotes_mouvants: 4, hotes_non_mesures: 1 } }))
+  const zp = plate.doc.getElementById('cp-zone-prix').textContent
+  assert.match(zp, /Vos 4 hôtes qui changent leurs prix ne le font pas aux mêmes dates : leur saison commune est trop plate\. La saison et le week-end viennent donc du marché de Toulouse/)
+  assert.doesNotMatch(zp, /Moins de 2 de vos hôtes/)
+  assert.match(zp, /1 hôte n’a pas assez de nuits avec un prix pour être jugé\./)
   cliquerPoint(L, IDS3[0])
   assert.doesNotMatch(doc.getElementById('cp-fiche').textContent, /Ses prix :/)
   const sans = await monter(pageAvecPrix({ etat: 'strategie_absente', message: 'x' }, { strategie: null }))

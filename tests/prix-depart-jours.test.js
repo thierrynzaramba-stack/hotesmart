@@ -67,7 +67,7 @@ test('un jour sans niveau, ou une case non calculee : « non calcule » avec la 
   const r = M.composerJours({ prix: { statut: 'calcule', strategie: 'juste', cases, jours: [
     { date: '2027-10-01', type: 'semaine', niveau: null, source: null },
     { date: '2027-02-12', type: 'weekend', niveau: 'pic', source: 'mesure' }] } })
-  assert.match(r.get('2027-10-01').motif, /moins de 3 hôtes ont un prix ce jour-là/)
+  assert.match(r.get('2027-10-01').motif, /aucune saison mesurée ce jour-là/)
   assert.match(r.get('2027-02-12').motif, /2 hôtes avec des prix dans cette case/)
   assert.match(M.celluleDepart(r.get('2027-10-01')), /non calculé/)
 })
