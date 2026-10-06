@@ -282,9 +282,19 @@ une nuit pas encore ouverte), 21 (nuit rouverte à la main sans prix), 24
 (agrandir la fenêtre ne prévient pas), 26 (référence en prix voyageur total,
 ménage compris), 27 (le full sync journalise des nuits sans ligne), **28** (le
 délai affiné par le « vendu à date » N-1). V2 « nouveau bien sans historique »
-cadrée (`docs/kb/chantier-nouveau-bien.md`) ; la page « marché global »
-(AirROI, calendrier jour par jour) est en STAGING seulement, branche
-`lot-v2-3-marche-quand` — rien en production.
+cadrée (`docs/kb/chantier-nouveau-bien.md`).
+
+**V2 marché EN PRODUCTION (branche `lot-v2-3-marche-quand`, octobre 2026), EN
+AFFICHAGE SEUL.** Pages « Le marché global » et « Choisir vos comparables »
+(menu YieldFlow), et colonne « Prix de départ » de la Prédiction de prix, jour
+par jour sur 12 mois (§22.11 à §22.13 : ancre × forme, 8 cases, un hôte = une
+voix, tranches de YieldFlow, Exceptionnel pour les événements déclarés).
+**Rien n'écrit au calendrier ni ne pousse de prix** :
+`tests/v2-marche-aucune-ecriture-calendrier.test.js` le garantit. Les 12
+migrations V2 sont en production, vérifiées par script (§22.12). Garde-fous
+AirROI pour octobre : 25 $ par compte sur 30 jours et 25 $ par mois (dette
+53, à redescendre). Seconde capture des calendriers le 5 novembre 2026
+(dette 52).
 
 **Lots 4.6.6 et 4.6.7 EN PROD le 30 septembre 2026** (0dc6c25, d557124) :
 - **4.6.6 — réduire la fenêtre retire de la vente les nuits qui en sortent**
