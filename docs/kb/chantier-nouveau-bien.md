@@ -3372,3 +3372,60 @@ demande, le quota et le cache.
     deuxième annonce, déjà en cache, d'un hôte déjà compté. D'une case à
     l'autre, ce ne sont pas toujours les mêmes hôtes qui ont des prix ; les
     contrôles le signalent.
+
+### 22.12 Passage en production — pages accessibles, prix affichés, rien n'écrit (6 octobre 2026)
+
+**Décision de Thierry.** Les pages « Le marché global » et « Choisir vos
+comparables » passent en production, accessibles depuis le menu YieldFlow. Les
+prix de départ s'y affichent **sans aucun effet sur le calendrier**, pour
+vérifier leur cohérence et leur comportement sur tous les biens.
+
+**Ses quatre conditions :**
+1. **Main d'abord dans la branche**, puis recette du résultat fusionné sur
+   staging.
+   - Fait le 6 octobre 2026 : fusion 32e9a70, suite à 28 rouges.
+   - Staging 01a5f04 : par rapport à main, il ne diffère plus que par la V2
+     et CLAUDE.md.
+   - Lectures avec le compte de test : messagerie, ménage, pilote YieldFlow,
+     bloc marché et comparables, 11 réponses 200 sur les 3 biens.
+2. **Les migrations, dans l'ordre**, chacune rejouable (`if not exists`,
+   `or replace`, `drop … if exists`) et vérifiée par un script **contre la
+   production** après collage. L'empreinte attendue est de 5 biens.
+3. **Rien n'écrit dans le calendrier, rien ne pousse de prix** :
+   `tests/v2-marche-aucune-ecriture-calendrier.test.js`. La contre-épreuve
+   (une écriture dans `calendar_inventory` et un appel à Channex injectés
+   dans une copie hors du dépôt) le fait rougir.
+4. **La poussée sur main se fait biens en pause.** On observe un cycle du
+   cron, puis on réactive les biens.
+
+**État de la production au 6 octobre 2026**, lu par les vérificateurs avec
+`.env.local` (projet cjmrizpdyhrcurmgyrhs, 5 biens) :
+- trois migrations déjà appliquées : `marche-airroi`, `controle-airbnb` et
+  `calendrier-marche` ;
+- **neuf migrations manquantes**.
+
+| # | Migration | Prérequis | Vérification après collage |
+|---|---|---|---|
+| — | `2026-09-24-marche-airroi.sql` | — | déjà en prod |
+| — | `2026-09-24-controle-airbnb.sql` | marche-airroi | déjà en prod |
+| — | `2026-09-24-calendrier-marche.sql` | — | déjà en prod |
+| 1 | `2026-09-24-marche-biens.sql` | — | `verifier-migration-marche.js` |
+| 2 | `2026-10-04-marche-temperature-airroi.sql` | — | `verifier-temperature-airroi.js` |
+| 3 | `2026-10-05-bien-profil.sql` | — | `verifier-migration-comparables.js` (bien_profil) |
+| 4 | `2026-10-05-bien-profil-strategie.sql` | 3 | idem (strategie, sejour_min) |
+| 5 | `2026-10-05-comparables-recherches.sql` | — | idem (comparables_recherches) |
+| 6 | `2026-10-05-comparables-recherches-cout.sql` | 5 | idem (cout_usd) |
+| 7 | `2026-10-05-comparables-recherches-nature.sql` | 6 | idem (nature, signatures du quota) |
+| 8 | `2026-10-05-comparables-position.sql` | marche-airroi | idem (position) |
+| 9 | `2026-10-05-annonces-retirees.sql` | — | idem (airroi_annonces_retirees) |
+
+Le vérificateur des comparables sonde aussi la vue du navigateur : les tables
+et les fonctions du quota doivent être refusées à la clé anonyme.
+
+**Hors code, avant la recette en production :**
+- `AIRROI_API_KEY` dans les variables Vercel de production (posée par Thierry,
+  jamais affichée) ;
+- budget AirROI du mois de test (décision de Thierry) ;
+- relief du marché par commune des biens de production (0,10 $ chacun),
+  utile seulement au repli ;
+- rattachement des biens à leur marché.

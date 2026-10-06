@@ -177,3 +177,11 @@ test('garantie prod : `pilote-tarifaire` n arrive que par la capacite, et SEULEM
   const { finDeFenetre } = require(path.join(RACINE, 'lib', 'pilote-tarifaire'))
   assert.equal(typeof finDeFenetre, 'function')
 })
+
+test('passage en prod : le menu YieldFlow mene aux deux pages de la V2 (« pages accessibles », demande de Thierry)', () => {
+  const menu = lire('components/sidebar.js')
+  assert.match(menu, /href="\/apps\/yield\/marche-global">[\s\S]{0,120}Le marché global/)
+  assert.match(menu, /href="\/apps\/yield\/comparables">[\s\S]{0,120}Choisir vos comparables/)
+  assert.match(lire('apps/yield/marche-global.html'), /renderSidebar\('yield-marche-global'\)/)
+  assert.match(lire('apps/yield/comparables.html'), /renderSidebar\('yield-comparables'\)/)
+})

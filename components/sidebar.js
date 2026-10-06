@@ -301,6 +301,12 @@ function renderApps(activePage) {
         </a>
         <a class="nav-sub ${activePage === 'yield-evenements' ? 'connected' : ''}" href="/apps/yield/prix?evenements=1">
           <div class="sub-dot ${activePage === 'yield-evenements' ? 'green' : 'gray'}"></div>Vos événements
+        </a>
+        <a class="nav-sub ${activePage === 'yield-marche-global' ? 'connected' : ''}" href="/apps/yield/marche-global">
+          <div class="sub-dot ${activePage === 'yield-marche-global' ? 'green' : 'gray'}"></div>Le marché global
+        </a>
+        <a class="nav-sub ${activePage === 'yield-comparables' ? 'connected' : ''}" href="/apps/yield/comparables">
+          <div class="sub-dot ${activePage === 'yield-comparables' ? 'green' : 'gray'}"></div>Choisir vos comparables
         </a>`
     } else if (app.id === 'menages') {
       // ⚠ NOMMAGE TRANCHE LE 5 SEPTEMBRE 2026. « Planning » designait l'ecran
