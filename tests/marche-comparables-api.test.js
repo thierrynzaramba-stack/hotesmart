@@ -291,7 +291,7 @@ test('WRITER UNIQUE : seul choix-comparables.js ecrit dans comparables_retenus',
 // ─── Le quota ATOMIQUE (reviews de 4f19d8b et 7ace057, SECURITE) ───────────
 test('LE TEST QUI COMPTE (SECURITE) : une recherche NOUVELLE passe d abord par la reservation atomique, avec les plafonds', async () => {
   const r = await appeler({ method: 'POST', body: { action: 'chercher' }, tables: { ...TABLES(), airroi_cache: [] } })
-  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche', p_bien_jour: 5, p_compte_jour: 10, p_compte_30j: 20, p_calendriers_90j: 15, p_budget_mois: 15 } }])
+  assert.deepEqual(r.rpcs, [{ fn: 'reserver_recherche_comparables', params: { p_user: 'COMPTE', p_property: 'BIEN-A', p_cout: 0.10, p_nature: 'recherche', p_bien_jour: 5, p_compte_jour: 10, p_compte_30j: 20, p_calendriers_90j: 15, p_budget_mois: 25 } }])
   assert.equal(r.appelsAirroi.length, 1)
 })
 
@@ -973,4 +973,13 @@ test('LE TEST QUI COMPTE (review de b745bb8) : la liste du marche a expire — l
   const g = await appeler({ tables: t })
   assert.equal(g.corps.prix_depart.prix.statut, 'non_calculable')
   assert.match(g.corps.prix_depart.prix.motif, /n’est pas identifié \(la liste des biens du marché a expiré\) : relancez la recherche/)
+})
+
+test('§22.13 : le detail des 365 jours seulement sur demande (`?jours=1`) — la page des comparables n en recoit pas', async () => {
+  const sans = await appeler({ tables: tablesPrix() })
+  assert.equal(sans.corps.prix_depart.prix.jours, undefined)
+  const avec = await appeler({ query: { property_id: 'REF-42', jours: '1' }, tables: tablesPrix() })
+  assert.equal(avec.corps.prix_depart.prix.jours.length, 365)
+  assert.ok(avec.corps.prix_depart.prix.jours.every(j => /^\d{4}-\d{2}-\d{2}$/.test(j.date) && ['semaine', 'weekend'].includes(j.type)))
+  assert.deepEqual([avec.rpcs.length, avec.appelsAirroi.length], [0, 0], 'une lecture : rien n est paye')
 })

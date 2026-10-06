@@ -190,6 +190,15 @@
                                           border-left: 1.5px solid var(--border2); }
     .yp-table tr.yp-moities .m-passe { color: var(--text3);
                                        border-left: 1.5px solid var(--border2); }
+    /* §22.13 : le PRIX DE DEPART, a titre de comparaison — n'agit sur aucun prix. */
+    .yp-table tr.yp-moities .m-depart { color: var(--text2); }
+    .yp-table td.yp-depart { font-size: 12px; line-height: 1.35; min-width: 120px; }
+    .yp-depart-p { display: block; font-size: 13.5px; font-weight: 700; }
+    .yp-depart-n, .yp-depart-r { display: block; color: var(--text2); font-size: 11px; }
+    .yp-depart-e { display: block; font-size: 11.5px; }
+    .yp-depart-e.haut { color: #1F6F45; } .yp-depart-e.bas { color: #A13D2D; }
+    .yp-table td.yp-depart.non-calc { color: var(--text3); }
+    .yp-depart-motif { font-size: 12.5px; color: var(--text2); margin: 0 0 8px; }
     .yp-table td.yp-realise { color: var(--text2); }
 
     /* ─── Les deux colonnes de planning ──────────────────────────────────── */
@@ -521,6 +530,7 @@
   import { initErrorHandler } from '/shared/error-handler.js'
   import { motif, nomSegment, refus } from '/shared/yield-motifs.js'
   import { api as apiClient } from '/shared/api-client.js'
+  import { composerJours, celluleDepart, motifNonCalcule } from '/shared/prix-depart-jours.js'
 
   initErrorHandler()
 
@@ -528,6 +538,13 @@
   let mois = null
   let enCours = 0
   let donnees = null          // la derniere reponse de /api/yield-prix
+  // §22.13 (chantier nouveau bien) : le PRIX DE DEPART jour par jour, A COTE du
+  // prix existant — AFFICHAGE SEUL, rien n'ecrit au calendrier. Lu une fois par
+  // bien (12 mois), en LECTURE (GET) : les 8 cases et le niveau de chaque jour
+  // (/api/marche-comparables?jours=1), et les evenements (/api/yield-evenements).
+  const departParBien = new Map()
+  let departJours = new Map()
+  let departMotif = null
   let evenements = null       // la derniere reponse de /api/yield-evenements (par bien)
   let popupOuverte = false
   const el = id => document.getElementById(id)
@@ -934,6 +951,7 @@
     etat('Lecture du cœur de données…')
     const p = new URLSearchParams({ property_id: el('yp-bien').value, mois })
     let r, data
+    const depart = chargerDepart(el('yp-bien').value)
     try {
       r = await fetch(`/api/yield-prix?${p}`, {
         headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() }
@@ -946,10 +964,37 @@
     if (jeton !== enCours) return
     if (!r.ok) { etat(refus(data?.error), true); return }
     donnees = data
+    // Le prix de depart, compose avec le prix EXISTANT de chaque nuit.
+    const dep = await depart
+    if (jeton !== enCours) return
+    departMotif = dep.motif
+    departJours = dep.motif ? new Map() : composerJours({ prix: dep.pd.prix, calendrier: dep.calendrier,
+      existants: new Map((data.nuits || []).filter(n => n.prix_actuel != null).map(n => [n.date, Number(n.prix_actuel)])) })
     el('yp-ca').innerHTML = bandeauCa(data)
     el('yp-contenu').innerHTML = vue(data)
     brancher()
     if (popupOuverte) rendrePopup()
+  }
+
+  // §22.13 : une LECTURE par bien, gardee en memoire ; une panne ne casse pas
+  // l'ecran, elle se dit (« prix de depart non calcule »).
+  async function chargerDepart (bien) {
+    if (departParBien.has(bien)) return departParBien.get(bien)
+    const h = { headers: { Authorization: `Bearer ${session.access_token}`, ...enteteCompte() } }
+    const lire = async url => { const x = await fetch(url, h); return x.ok ? x.json() : null }
+    let res
+    try {
+      const [c, ev] = await Promise.all([
+        lire(`/api/marche-comparables?${new URLSearchParams({ property_id: bien, jours: '1' })}`),
+        lire(`/api/yield-evenements?${new URLSearchParams({ bien })}`),
+      ])
+      const pd = c && c.prix_depart
+      res = { pd, calendrier: (ev && ev.calendrier) || [], motif: motifNonCalcule(pd) }
+    } catch (e) {
+      res = { pd: null, calendrier: [], motif: 'prix de départ non calculé : lecture impossible pour le moment' }
+    }
+    if (!res.motif) departParBien.set(bien, res)
+    return res
   }
 
   // ⚠ LE CA DU BANDEAU EST CELUI DU PIED, PAS UN SECOND CALCUL : `pied.a_date`
@@ -1149,20 +1194,23 @@
     d.nuits.forEach((n, i) => {
       if (n.segment !== segCourant) {
         segCourant = n.segment
-        lignes.push(`<tr class="yp-sep"><td colspan="6">${enTeteDeGroupe(d, n)}</td></tr>`)
+        lignes.push(`<tr class="yp-sep"><td colspan="7">${enTeteDeGroupe(d, n)}</td></tr>`)
       }
       lignes.push(ligne(n, sj.annee[i] || null, sj.n1[i] || null))
     })
-    return `<div class="yp-wrap"><table class="yp-table">
+    const bandeauDepart = departMotif ? `<p class="yp-depart-motif">${ech(departMotif)}</p>` : ''
+    return `${bandeauDepart}<div class="yp-wrap"><table class="yp-table">
       <thead>
         <tr class="yp-moities">
           <th></th>
           <th class="m-pilotage">Ce que je pilote</th>
+          <th class="m-depart" title="À titre de comparaison : ce prix n’est ni écrit au calendrier ni envoyé aux plateformes.">Pour comparer</th>
           <th class="m-passe" colspan="4">Ce sur quoi je m’appuie</th>
         </tr>
         <tr>
           <th>Jour</th>
           <th class="sep-g">Prix&nbsp;→&nbsp;suggestion</th>
+          <th class="sep-g" title="Le prix de départ issu de vos comparables, selon votre stratégie : niveau du jour, raison, écart avec votre prix actuel. N’agit pas sur vos prix.">Prix de départ</th>
           <th class="sep-g">Réalisé</th>
           <th>L’an dernier</th>
           <th colspan="2" title="À gauche vos séjours, à droite ceux de l’an dernier ramenés sur les mêmes jours de semaine (décalage continu de 52 semaines).">Séjours</th>
@@ -1599,13 +1647,14 @@
           ? `<span class="yp-pont" title="${ech(`Jour de pont${n.libelle ? ` — ${n.libelle}` : ''} : coincé entre un jour férié et un week-end. Ces nuits-là se vendent au tarif des jours fériés.`)}">pont</span>`
           : ''}</td>
       <td class="sep-g">${pilotage}</td>
+      ${celluleDepart(departJours.get(n.date))}
       <td class="sep-g yp-realise">${realise}</td>
       <td>${reel}</td>
       <td class="yp-bar">${segment(barA)}</td>
       <td class="yp-bar">${segment(barN1, true)}</td>
     </tr>
     <tr class="yp-detail-l" id="d-${n.date}" hidden>
-      <td colspan="6"><div class="yp-detail">${pourquoi(n)}</div></td></tr>`
+      <td colspan="7"><div class="yp-detail">${pourquoi(n)}</div></td></tr>`
   }
 
   // ÉTAGE 1 (ce qui a bougé, PROPRE À CETTE NUIT) + ÉTAGE 3 (le reste, replié).

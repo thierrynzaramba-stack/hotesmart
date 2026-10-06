@@ -3438,3 +3438,67 @@ et les fonctions du quota doivent être refusées à la clé anonyme.
   **après** la 7, recréeraient les anciennes fonctions. Elles restent fermées à
   `anon` et `authenticated`, donc c'est sans effet, mais il faut les rejouer
   **dans l'ordre**. Budget global : dette 53.
+
+### 22.13 Le prix de départ jour par jour sur l'écran « Prédiction de prix » (6 octobre 2026)
+
+**Demande de Thierry.** Sur l'écran « Prédiction de prix », jour par jour sur
+les 12 prochains mois, une colonne « Prix de départ » à côté du prix existant.
+Elle est là **pour comparer** : elle n'agit sur aucun prix.
+
+**Les règles (décisions de Thierry) :**
+1. **Le niveau du jour** vient des niveaux du segment (§22.11).
+   - **Mois 1 à 6 : « mesuré ».**
+   - **Mois 7 à 12 : « estimé »**, par le **repli B** : les prix affichés au
+     loin par les comparables, en attendant la capture du 5 novembre
+     (dette 52).
+   - **Au loin, chaque prix est rapporté au prix habituel de la même période
+     lointaine.** Vécu : rapportés au prix mesuré, les jours de semaine
+     sortaient au pic et les week-ends au creux, parce que les prix lointains
+     ont perdu leur prime week-end. La valeur obtenue se classe contre les
+     seuils des 6 mois mesurés.
+   - Un jour où moins de 3 hôtes ont un prix n'a pas de niveau, et la colonne
+     le dit.
+2. **Les événements relèvent le niveau, sans jamais l'abaisser.** Si plusieurs
+   règles s'appliquent le même jour, on garde la plus haute, sans cumul.
+   - Événement déclaré par l'hôte : **au moins pic**.
+   - Jour férié, pont, week-end prolongé, date commerciale : **+1 niveau**, sans
+     dépasser pic.
+   - Vacances scolaires : **aucun relèvement**, puisque les prix des
+     comparables les intègrent déjà. Elles figurent dans la raison.
+3. **Semaine ou week-end** selon le jour (nuits du vendredi et du samedi).
+4. **Le prix** est celui de la case (niveau × type de jour), selon la stratégie
+   enregistrée du bien.
+5. **Pour chaque jour, la colonne affiche :**
+   - le niveau et sa source (mesuré, estimé ou marché) ;
+   - la raison (saison, week-end, nom de l'événement et son effet) ;
+   - l'écart avec le prix existant, en € et en %. Sans prix au calendrier, la
+     cellule le dit et ne calcule aucun écart.
+6. **Affichage seul.** Le test `tests/v2-marche-aucune-ecriture-calendrier.test.js`
+   le vérifie :
+   - l'écran ne fait que deux lectures (GET), `/api/marche-comparables?jours=1`
+     et `/api/yield-evenements` ;
+   - le module commun `shared/prix-depart-jours.js` ne lit ni n'écrit rien.
+7. **Un bien sans comparables ou sans stratégie** affiche « prix de départ non
+   calculé » et la raison, sans erreur.
+
+**Repli des mois 7 à 12 : pourquoi B, et pas A ni C.**
+- **A, les niveaux du marché AirROI de la ville, est écarté.** Sur 156 jours
+  du loft, ils ne tombent au même niveau que 14 % du temps, et à un niveau
+  près 43 %. Les saisons sont même inversées : le marché de Toulouse est au
+  creux de janvier à avril, le segment des nuits avec jacuzzi au pic en février
+  et mars.
+- **C, la saison de l'an dernier, a été vérifiée sur 4 hôtes sur 7** (prix
+  moyen obtenu mois par mois, 0,40 $). Elle ne confirme pas les mois mesurés :
+  2 mois sur 5 tombent à un niveau près, et novembre est inversé. Le prix moyen
+  réellement obtenu varie peu d'un mois à l'autre (environ 16 % du mois le
+  moins cher au plus cher), et il mélange semaine et week-end.
+- **Décision de Thierry : B, jusqu'au 5 novembre.**
+
+**Garde-fous AirROI (décision de Thierry, 6 octobre 2026)** :
+- 25 $ par compte sur 30 jours (au lieu de 4 $), qui bloquait la vérification ;
+- budget du mois d'octobre : 25 $, pour le client comme pour le quota des
+  hôtes.
+
+**Le mobile.** L'écran Prix est une seule page pour l'ordinateur et le
+téléphone : la colonne s'y ajoute aux autres. Son confort sur téléphone est à
+vérifier en recette.

@@ -35,6 +35,7 @@ const CODE_V2 = [
   'lib/marche/controle.js', 'lib/marche/critere.js', 'lib/marche/etude.js', 'lib/marche/explication.js', 'lib/marche/grille-marche.js',
   'lib/marche/marche-global.js', 'lib/marche/menage.js', 'lib/marche/pertinence.js', 'lib/marche/prix-depart.js', 'lib/marche/profil-bien.js',
   'lib/marche/progression-marche.js', 'lib/marche/saisons.js', 'lib/marche/temperature-airroi.js', 'shared/temperature-calendrier.js',
+  'shared/prix-depart-jours.js',
 ]
 
 // Ce qui ECRIT au calendrier ou pousse des prix (modules et tables).
@@ -54,7 +55,10 @@ const BASE_MAIN = '7a9ae46d22d303c0ffcb0cbbd5735ec689696ed4'
 const RETOUCHES = ['apps/yield/prix.html', 'components/sidebar.js']
 
 test('LE TEST QUI COMPTE (garantie prod) : la liste du code V2 est COMPLETE — un fichier ajoute sans controle fait rougir', () => {
-  const diff = execSync(`git diff --name-only ${BASE_MAIN} HEAD -- api apps lib pages shared components`, { cwd: RACINE, encoding: 'utf8' })
+  // L'arbre de travail contre la base, ET les fichiers neufs pas encore suivis :
+  // un fichier ajoute ne passe jamais inapercu, meme avant son commit.
+  const diff = execSync(`git diff --name-only ${BASE_MAIN} -- api apps lib pages shared components`, { cwd: RACINE, encoding: 'utf8' })
+    + execSync('git ls-files --others --exclude-standard -- api apps lib pages shared components', { cwd: RACINE, encoding: 'utf8' })
   const apportes = diff.split('\n').filter(Boolean).filter(f => !RETOUCHES.includes(f) && fs.existsSync(path.join(RACINE, f)))
   assert.ok(apportes.length >= CODE_V2.length, `le diff contre la base fixe ne rend que ${apportes.length} fichiers : il ne prouverait rien`)
   for (const f of apportes) assert.ok(CODE_V2.includes(f), `${f} arrive en production sans controle : l'ajouter a CODE_V2`)
@@ -195,4 +199,22 @@ test('passage en prod : le menu YieldFlow mene aux deux pages de la V2 (« pages
   assert.match(menu, /href="\/apps\/yield\/comparables">[\s\S]{0,120}Choisir vos comparables/)
   assert.match(lire('apps/yield/marche-global.html'), /renderSidebar\('yield-marche-global'\)/)
   assert.match(lire('apps/yield/comparables.html'), /renderSidebar\('yield-comparables'\)/)
+})
+
+test('LE TEST QUI COMPTE (garantie prod, §22.13) : la colonne « Prix de depart » de l ecran Prix ne fait que LIRE — deux GET, aucune methode d ecriture', () => {
+  const src = lire('apps/yield/prix.html')
+  const i = src.indexOf('async function chargerDepart')
+  assert.ok(i > 0)
+  const bloc = src.slice(i, src.indexOf('\n  }\n', i))
+  const urls = [...bloc.matchAll(/lire\(`([^`]+)`\)/g)].map(m => m[1])
+  assert.deepEqual(urls.map(u => u.split('?')[0]), ['/api/marche-comparables', '/api/yield-evenements'])
+  assert.ok(urls[0].includes("jours: '1'"))
+  assert.doesNotMatch(bloc, /method\s*:/, 'aucune methode d ecriture : des GET')
+  assert.match(src, /import \{ composerJours, celluleDepart, motifNonCalcule \} from '\/shared\/prix-depart-jours\.js'/)
+  assert.match(src, /title="À titre de comparaison : ce prix n’est ni écrit au calendrier ni envoyé aux plateformes\."/)
+})
+
+test('garantie prod (§22.13) : le module de la colonne ne lit ni n ecrit rien — aucun fetch, aucune base', () => {
+  const src = lire('shared/prix-depart-jours.js')
+  assert.doesNotMatch(src, /fetch\(|supabase|\.from\(|XMLHttpRequest|import\s/)
 })

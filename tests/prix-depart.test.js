@@ -189,3 +189,31 @@ test('review de b745bb8 : le repli dit le MANQUE de donnees, distinct d une abse
   assert.equal(r.statut, 'non_calculable')
   assert.match(r.motif, /trop peu de dates où au moins 3 de vos hôtes ont un prix/)
 })
+
+// ─── §22.13 : le niveau de CHAQUE jour, sur 12 mois ─────────────────────────
+test('LE TEST QUI COMPTE (§22.13) : 12 mois jour par jour — « mesure » sur 6 mois, « estime » au-dela (repli B), rien sans 3 hotes', () => {
+  const an = n => Array.from({ length: n }, (_, i) => new Date(Date.parse(`${AUJ}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10))
+  const JOURS_AN = an(365)
+  const hotes = ['A', 'B', 'C', 'D', 'E'].map((h, i) => ({ listing_id: String(i + 1), hote: h,
+    jours: JOURS_AN.map(j => ({ date: j, rate: Math.round((80 + 30 * i) * saison(j) * (estWE(j) ? 1.25 : 1) * 100) / 100 })) }))
+  const r = P.prixDeDepart({ calendriers: hotes, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.jours.length, 365)
+  assert.ok(r.jours.slice(0, 182).every(j => j.source === 'mesure' && j.niveau))
+  assert.ok(r.jours.slice(182).every(j => j.source === 'estime' && j.niveau))
+  assert.equal(r.jours[0].date, AUJ)
+  // Au loin, deux hotes seulement ont un prix : pas de niveau, et c'est dit (null).
+  const peu = hotes.map((h, i) => (i < 3 ? { ...h, jours: h.jours.filter(n => n.date < JOURS_AN[200]) } : h))
+  const r2 = P.prixDeDepart({ calendriers: peu, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  assert.ok(r2.jours.slice(200).every(j => j.niveau === null && j.source === null))
+})
+
+test('LE TEST QUI COMPTE (§22.13, vecu du 6 octobre 2026) : des prix lointains PLATS (prime week-end perdue) ne fabriquent ni pic de semaine ni creux de week-end', () => {
+  const an = Array.from({ length: 365 }, (_, i) => new Date(Date.parse(`${AUJ}T00:00:00Z`) + i * 86400000).toISOString().slice(0, 10))
+  const hotes = ['A', 'B', 'C', 'D', 'E'].map((h, i) => ({ listing_id: String(i + 1), hote: h,
+    jours: an.map((j, k) => ({ date: j, rate: (80 + 30 * i) * (k < 182 ? saison(j) * (estWE(j) ? 1.25 : 1) : 1.1) })) }))
+  const r = P.prixDeDepart({ calendriers: hotes, marche: [], strategie: 'juste', aujourdhui: AUJ })
+  const loin = r.jours.filter(j => j.source === 'estime')
+  const niveaux = new Set(loin.map(j => j.niveau))
+  assert.equal(niveaux.size, 1, `un seul niveau au loin, faute de saison visible (vu : ${[...niveaux]})`)
+  assert.ok(!niveaux.has('pic') && !niveaux.has('creux'), 'ni faux pic, ni faux creux')
+})
