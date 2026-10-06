@@ -25,12 +25,20 @@ export const EXCEPTIONNEL = 'Exceptionnel'
 // est atteint ; a prix egal, la plus haute). Un vendredi de saison moyenne a
 // 206 € s'affiche donc « Tres haut » si la semaine Tres haut vaut 193 €. La
 // saison et le week-end restent dans le detail.
-export function trancheDuPrix (prix, cases, strategie) {
+// ⚠ SANS ECHELLE (aucune case de semaine calculee pour cette strategie), on ne
+// dit pas « Base » au hasard (review de 0899942) : la tranche retombe sur le
+// niveau de la case du jour (`repli`).
+export function trancheDuPrix (prix, cases, strategie, repli = null) {
   let t = null
+  let echelle = false
   for (const n of ORDRE) {
     const c = (cases || []).find(x => x.niveau === n && x.type === 'semaine' && x.statut === 'calcule')
-    if (c && prix >= c.strategies[strategie]) t = n
+    const v = c && c.strategies ? c.strategies[strategie] : undefined
+    if (!Number.isFinite(v)) continue
+    echelle = true
+    if (prix >= v) t = n
   }
+  if (!echelle) return TRANCHE[repli] || TRANCHE.creux
   return TRANCHE[t || 'creux']
 }
 export const NOM_SOURCE = { mesure: 'mesuré', estime: 'estimé', marche: 'marché' }
@@ -48,7 +56,7 @@ const PLUS_UN = new Set(['ferie', 'pont', 'week_end_prolonge'])
 export function effetEvenement (e) {
   if (!e) return null
   if (e.origine === 'declare') return { plancher: 'pic', texte: 'événement déclaré', exceptionnel: true }
-  if (e.origine === 'calendrier' || PLUS_UN.has(e.segment)) return { plus: 1, texte: '+1 tranche' }
+  if (e.origine === 'calendrier' || PLUS_UN.has(e.segment)) return { plus: 1, texte: '+1 tranche de saison' }
   return { texte: null }
 }
 
@@ -104,9 +112,9 @@ export function composerJours ({ prix, calendrier = [], existants = new Map() })
         surcroit = { ecart: p - tresHaut, plafonne: brut > plafond }
       } else surcroit = { ecart: null }
     }
-    const tranche = exceptionnel ? EXCEPTIONNEL : trancheDuPrix(p, prix.cases, prix.strategie)
+    const tranche = exceptionnel ? EXCEPTIONNEL : trancheDuPrix(p, prix.cases, prix.strategie, niveau)
     // La SAISON de base (avant tout relevement) ; chaque evenement dit son effet.
-    const raisons = [`saison ${TRANCHE[j.niveau]} (${NOM_SOURCE[j.source] || j.source})`]
+    const raisons = [`saison ${TRANCHE[j.niveau] || j.niveau} (${NOM_SOURCE[j.source] || j.source})`]
     if (j.type === 'weekend') raisons.push('week-end')
     for (const e of evs) {
       const f = effetEvenement(e)

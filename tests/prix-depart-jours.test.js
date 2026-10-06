@@ -54,7 +54,7 @@ test('LE TEST QUI COMPTE : le prix de la case selon la strategie, le niveau d ou
   assert.deepEqual([a.niveau, a.prix, a.ecart_eur, a.ecart_pct, a.raisons], ['creux', 100, -25, -20, ['saison Base (mesuré)']])
   const b = r.get('2026-12-24')
   assert.deepEqual([b.niveau_base, b.niveau, b.prix, b.ecart_eur, b.ecart_pct], ['creux', 'modere', 120, 20, 20])
-  assert.deepEqual(b.raisons, ['saison Base (mesuré)', 'Noël (+1 tranche)'])
+  assert.deepEqual(b.raisons, ['saison Base (mesuré)', 'Noël (+1 tranche de saison)'])
   const c = r.get('2027-06-11')
   assert.deepEqual([c.prix, c.source, c.ecart_eur], [150, 'estime', null], 'week-end ; estime ; sans prix au calendrier, pas d ecart')
   assert.deepEqual(c.raisons, ['saison Moyen (estimé)', 'week-end'])
@@ -117,7 +117,7 @@ test('LE TEST QUI COMPTE (recette du 6 octobre 2026) : la cellule ALLEGEE — le
   const visible = html.replace(/title="[^"]*"/, '').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim()
   assert.equal(visible, '190 € Très haut')
   assert.match(html, /class="yp-niv-badge n-tres-haut"/)
-  assert.match(html, /title="Prix de départ 190 € · Très haut · saison Haut \(mesuré\) · week-end · Noël \(\+1 tranche\) · écart avec votre prix : \+40 € \(\+27 %\)"/)
+  assert.match(html, /title="Prix de départ 190 € · Très haut · saison Haut \(mesuré\) · week-end · Noël \(\+1 tranche de saison\) · écart avec votre prix : \+40 € \(\+27 %\)"/)
   // Sans prix au calendrier : rien de repete dans la cellule, ni dans le detail.
   const sans = M.celluleDepart(r.get('2026-12-26'))
   assert.doesNotMatch(sans, /pas de prix au calendrier/)
@@ -184,4 +184,14 @@ test('verifie sur le loft (Saint-Valentin 2027, un dimanche deja Tres haut) : un
     calendrier: [ev('calendrier', 'commercial:saint_valentin', 'Saint-Valentin', '2027-02-14')] }).get('2027-02-14')
   assert.deepEqual([r.niveau, r.prix], ['pic', 160])
   assert.deepEqual(r.raisons, ['saison Très haut (mesuré)', 'Saint-Valentin (déjà au plus haut)'])
+})
+
+test('review de 0899942 : sans echelle de semaine (strategie absente ou cases de semaine non calculees), la tranche suit la case du jour — jamais « Base » au hasard ; la strategie choisit l echelle', () => {
+  const T = M.trancheDuPrix
+  const k = (n, t, a, q) => ({ niveau: n, type: t, statut: 'calcule', strategies: { agressif: a, juste: a, qualite: q } })
+  const sem = [k('creux', 'semaine', 100, 150), k('modere', 'semaine', 110, 160), k('favorable', 'semaine', 120, 170), k('pic', 'semaine', 130, 180)]
+  assert.equal(T(206, sem, 'inconnue', 'modere'), 'Moyen', 'strategie absente des cases')
+  assert.equal(T(206, [k('modere', 'weekend', 206, 206)], 'juste', 'modere'), 'Moyen', 'aucune case de semaine')
+  // La strategie choisit l'echelle : 165 € est Tres haut en agressif, Moyen en haut de gamme.
+  assert.deepEqual([T(165, sem, 'agressif'), T(165, sem, 'qualite')], ['Très haut', 'Moyen'])
 })
