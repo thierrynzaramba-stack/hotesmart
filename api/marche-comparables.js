@@ -196,8 +196,10 @@ const enMots = v => ` ${String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
 // Absente : null, et le repli le dira.
 const ENDPOINT_PACING = 'POST /markets/metrics/future/pacing'
 async function phase1DuBien (marche, aujourdhui) {
+  // La derniere capture CALCULEE : une recapture non calculable ne masque pas
+  // la precedente (review de 279eb85).
   const { data, error } = await supabase.from('marche_calendrier').select('localite, capture_le, saisons, ecart_semaine_week_end')
-    .eq('pays', marche.pays).eq('region', marche.region).eq('localite', marche.localite)
+    .eq('pays', marche.pays).eq('region', marche.region).eq('localite', marche.localite).eq('statut', 'calcule')
     .order('capture_le', { ascending: false }).order('calcule_le', { ascending: false }).limit(1)
   if (error) throw new Error(`marche_calendrier : ${error.message}`)
   const ligne = (data || [])[0]

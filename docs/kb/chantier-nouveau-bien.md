@@ -3604,3 +3604,32 @@ C'est un repli honnête, peu marqué.
 
 **La bulle** : un seul hôte indépendant parmi ses 3 comparables ; non calculable
 avant comme après (il en faut 5).
+
+- **Review de 279eb85 (aucun constat de sécurité).** Corrigé :
+  - le motif d'un repli impossible dit sa vraie cause : pas de saisons
+    relevées, saisons qui ne couvrent pas les 6 mois, ou **prix du marché pas
+    encore relevés** (l'état de Bagnères en production) ;
+  - le repli dit pourquoi : « moins de 2 hôtes qui bougent », ou « vos hôtes
+    qui bougent ne le font pas aux mêmes dates » (saison commune plate) ;
+  - un hôte sans 8 nuits n'est pas « à prix fixe » : il est compté à part,
+    « pas assez de nuits pour être jugé » ;
+  - la dernière capture de phase 1 **calculée** est lue (une recapture non
+    calculable ne masque plus la précédente) ;
+  - la prime week-end du marché ne prend que les périodes à venir ;
+  - le motif d'un jour sans niveau (écran Prix) ne parle plus de « 3 hôtes ».
+
+  **Dettes notées, non traitées :**
+  - le seuil d'une case est `min(3, hôtes qui bougent)` : avec 3 hôtes qui
+    bougent, une case à 2 est refusée, alors qu'elle passerait avec 2 hôtes
+    qui bougent (seuil non monotone) ; même chose pour le seuil d'une date
+    (2 au lieu des 3 du §22.13.1 quand seuls 2 hôtes bougent) ;
+  - une annonce de moins de 8 nuits n'entre pas dans le jugement de son hôte,
+    mais entre dans la saison et la forme de cet hôte (impact faible, assumé) ;
+  - aucun writer versionné ne pose le pacing dans `airroi_cache` (le pacing de
+    Toulouse y est par un script ponctuel du 6 octobre) ; pacing et saisons ne
+    sont pas rapprochés par leur date de capture ;
+  - la prime week-end du marché mesure les prix **réservés** (phase 1), les
+    formes du repli les prix **affichés** (pacing) : deux mesures sous le mot
+    « marché » ;
+  - le commentaire de `migrations/2026-09-24-calendrier-marche.sql` (« lue par
+    aucun moteur ») ne tient plus : la table sert au prix de départ affiché.

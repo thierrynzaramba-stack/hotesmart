@@ -116,7 +116,7 @@ test('regle (d) : moins de 2 hotes qui bougent — la forme vient de la PHASE 1 
   assert.ok(repli.jours.filter(j => j.niveau).every(j => j.source === 'marche'))
   const sans = P.prixDeDepart({ calendriers: plats, strategie: 'juste', aujourdhui: AUJ })
   assert.equal(sans.statut, 'non_calculable')
-  assert.match(sans.motif, /^0 de vos hôtes change ses prix au fil des saisons \(il en faut 2\), et les saisons du marché de votre ville ne couvrent pas les 6 prochains mois/)
+  assert.match(sans.motif, /^0 de vos hôtes change ses prix au fil des saisons \(il en faut 2\), et le marché de votre ville n’a pas encore ses saisons relevées$/)
   // Une phase 1 sans formes (prix du marche absents) : non calculable aussi.
   assert.equal(P.prixDeDepart({ calendriers: plats, phase1: { ...PH(() => 'creux'), formes: null }, strategie: 'juste', aujourdhui: AUJ }).statut, 'non_calculable')
 })
@@ -145,6 +145,24 @@ test('LE TEST QUI COMPTE (regle d) : la FORME ne vient que des hotes qui bougent
   assert.equal(r.prime_week_end.comparables, 0)
 })
 
+test('review de 279eb85 : des hotes qui bougent a des dates OPPOSEES — saison commune plate, repli phase 1, et le repli dit pourquoi', () => {
+  const hiver = (id, h, b) => annonce(id, h, b)
+  const ete = (id, h, b) => ({ ...annonce(id, h, b, { prime: 1 }), jours: JOURS.map(j => ({ date: j, rate: Math.round(b * (2.3 - saison(j)) * 100) / 100, min_nights: 2 })) })
+  const opposes = [hiver('1', 'A', 80), hiver('2', 'B', 110), ete('3', 'C', 130), ete('4', 'D', 150), annonce('5', 'E', 200, { plat: true, prime: 1 })]
+  const r = P.prixDeDepart({ calendriers: opposes, phase1: PH(() => 'modere'), strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.niveaux_source, 'phase1')
+  assert.equal(r.repli, 'saison_plate')
+  assert.ok(r.hotes_mouvants >= 2)
+  const peu = P.prixDeDepart({ calendriers: cinq({ plat: true }), phase1: PH(() => 'modere'), strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(peu.repli, 'peu_mouvants')
+})
+
+test('review de 279eb85 : un hote sans 8 nuits n est pas juge — compte a part, jamais « fixe »', () => {
+  const r = P.prixDeDepart({ calendriers: [...cinq().slice(0, 4), { ...annonce('5', 'E', 200), jours: annonce('5', 'E', 200).jours.slice(0, 5) }], strategie: 'juste', aujourdhui: AUJ })
+  assert.equal(r.hotes_mouvants, 4)
+  assert.equal(r.hotes_non_mesures, 1)
+})
+
 test('regle (d) : la prime week-end est une INFORMATION — comparables (tous les hotes) et marche de la ville (phase 1), sans effet sur le prix', () => {
   const avec = P.prixDeDepart({ calendriers: cinq(), phase1: PH(() => 'creux'), strategie: 'juste', aujourdhui: AUJ })
   const sans = P.prixDeDepart({ calendriers: cinq(), strategie: 'juste', aujourdhui: AUJ })
@@ -156,16 +174,18 @@ test('regle (d) : la prime week-end est une INFORMATION — comparables (tous le
 test('regle (d) : phase1DuMarche — les saisons nommees deviennent les niveaux, les prix affiches du marche donnent la forme', () => {
   const pacing = JOURS.map(j => ({ date: j, available_rate_avg: (j < '2026-12-01' ? 100 : 130) * (estWE(j) ? 1.1 : 1) }))
   const ph = P.phase1DuMarche({ localite: 'X', saisons: [{ debut: '2026-10-05', fin: '2026-11-30', saison: 'basse' }, { debut: '2026-12-01', fin: '2027-04-30', saison: 'tres_forte' }],
-    pacing, ecarts: [{ ecart_prix_pct: 7.1 }, { ecart_prix_pct: null }, { ecart_prix_pct: 8.5 }], aujourdhui: AUJ })
+    pacing, ecarts: [{ fin: '2026-09-30', ecart_prix_pct: 40 }, { ecart_prix_pct: 7.1 }, { ecart_prix_pct: null }, { fin: '2026-12-18', ecart_prix_pct: 8.5 }], aujourdhui: AUJ })
   assert.equal(ph.niveaux.get('2026-10-06'), 'creux')
   assert.equal(ph.niveaux.get('2027-02-10'), 'pic')
-  assert.equal(ph.prime_week_end_pct, 7.8)
+  assert.equal(ph.prime_week_end_pct, 7.8, 'une periode deja passee (40 %) ne compte pas')
   // Mediane de semaine sur 6 mois : 130 (plus de jours en tres forte saison).
   assert.ok(Math.abs(ph.formes['pic/semaine'] - 1) < 0.001)
   assert.ok(Math.abs(ph.formes['creux/semaine'] - 100 / 130) < 0.001)
   assert.ok(Math.abs(ph.formes['pic/weekend'] - 1.1) < 0.001)
   assert.equal(ph.formes['modere/semaine'], undefined, 'une saison absente : pas de forme')
   assert.equal(P.phase1DuMarche({ saisons: [], pacing: [], ecarts: [], aujourdhui: AUJ }).formes, null)
+  // Des saisons hors de l'horizon : aucune case, donc des formes ABSENTES (jamais un objet vide).
+  assert.equal(P.phase1DuMarche({ saisons: [{ debut: '2028-01-01', fin: '2028-02-01', saison: 'basse' }], pacing, ecarts: [], aujourdhui: AUJ }).formes, null)
 })
 
 test('jamais hors marche : le prix reste dans la fourchette de sa case', () => {

@@ -639,7 +639,7 @@ const CALENDRIER = (base, { plat = false } = {}) => Array.from({ length: 365 }, 
 // Regle (d) : la PHASE 1 du marche (ses saisons, `marche_calendrier`) et les
 // prix affiches du marche (le pacing, en cache), relatifs a aujourd'hui.
 const dans = n => new Date(Date.parse(`${AUJ()}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10)
-const PHASE1 = ({ jours = 200 } = {}) => ({ pays: 'France', region: 'Occitania', localite: 'Bagnères-de-Bigorre', capture_le: dans(-12), calcule_le: dans(-12),
+const PHASE1 = ({ jours = 200 } = {}) => ({ pays: 'France', region: 'Occitania', localite: 'Bagnères-de-Bigorre', capture_le: dans(-12), calcule_le: dans(-12), statut: 'calcule',
   saisons: [{ debut: dans(0), fin: dans(Math.min(60, jours)), saison: 'basse' }, ...(jours > 60 ? [{ debut: dans(61), fin: dans(jours), saison: 'tres_forte' }] : [])],
   ecart_semaine_week_end: [{ ecart_prix_pct: 8 }] })
 const PACING = () => ({ cle: cleCanonique('POST /markets/metrics/future/pacing', { market: { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }, currency: 'native' }),
@@ -797,7 +797,17 @@ test('regle (d) : repli sur une phase 1 qui ne couvre pas les 6 prochains mois �
   assert.match(g.corps.prix_depart.prix.motif, /ne couvrent pas les 6 prochains mois/)
   const sansPacing = tablesPrix({ plat: true })
   sansPacing.airroi_cache = sansPacing.airroi_cache.filter(l => !l.cle.startsWith('POST /markets/metrics/future/pacing'))
-  assert.equal((await appeler({ tables: sansPacing })).corps.prix_depart.prix.statut, 'non_calculable')
+  const sp = (await appeler({ tables: sansPacing })).corps.prix_depart.prix
+  assert.equal(sp.statut, 'non_calculable')
+  assert.match(sp.motif, /et les prix affichés du marché de votre ville ne sont pas encore relevés$/, 'les saisons couvrent : le motif ne les accuse pas')
+  // Une recapture NON calculable, plus recente, ne masque pas la precedente.
+  const recapture = tablesPrix({ plat: true })
+  recapture.marche_calendrier = [{ ...PHASE1(), capture_le: dans(-1), statut: 'non_calculable', saisons: [] }, PHASE1()]
+  assert.equal((await appeler({ tables: recapture })).corps.prix_depart.prix.niveaux_source, 'phase1')
+  // Aucun marche relie : le motif ne parle pas de saisons qui « ne couvrent pas ».
+  const sansMarche = tablesPrix({ plat: true })
+  sansMarche.marche_biens = []
+  assert.match((await appeler({ tables: sansMarche })).corps.prix_depart.prix.motif, /et le marché de votre ville n’a pas encore ses saisons relevées$/)
 })
 
 test('LE TEST QUI COMPTE (regle d) : des comparables a prix fixe — la forme vient de la PHASE 1 du marche relie, lue en base et en cache, sans rien payer ; la prime week-end du marche est donnee', async () => {

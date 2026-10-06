@@ -209,8 +209,8 @@
     <h2>Vos prix de départ</h2>
     <p class="sous">Calculés à partir des prix affichés par vos comparables sur les 6 prochains mois. Votre prix de semaine habituel est
       celui de vos hôtes au rang de votre stratégie, décalé par vos réponses « en dessous » ou « supérieur » ; dans chaque case, il suit
-      l’écart médian, entre cette case et leur propre prix habituel, de ceux de vos hôtes qui changent leurs prix au fil des saisons,
-      sans sortir de la fourchette de la case.
+      l’écart médian, entre cette case et leur propre prix habituel, de ceux de vos hôtes qui changent leurs prix au fil des saisons
+      (ou, s’ils sont trop peu, celui du marché de votre ville), sans sortir de la fourchette de la case.
       Rien n’est encore appliqué à vos prix.</p>
     <div id="cp-zone-prix"></div>
     <p class="cp-meta" id="cp-note-prix" aria-live="polite"></p>
@@ -876,10 +876,13 @@
     dit('Sous chaque prix : la fourchette des prix de vos comparables dans cette case. Week-end : les nuits du vendredi et du samedi. Prix mesurés sur les 6 prochains mois.')
     // Regle (d) : d'ou vient la FORME (saison et week-end), dite a chaque fois.
     const pct = v => `${String(v).replace('.', ',')} %`
-    const fixes = (r.hotes || 0) - (r.hotes_mouvants || 0)
+    const nonMesures = r.hotes_non_mesures || 0
+    const fixes = (r.hotes || 0) - (r.hotes_mouvants || 0) - nonMesures
+    const ville = r.phase1_localite || 'votre ville'
+    const nonJuges = nonMesures > 0 ? ` ${pluriel(nonMesures, 'hôte n’a', 'hôtes n’ont')} pas assez de nuits avec un prix pour être jugé${nonMesures > 1 ? 's' : ''}.` : ''
     dit(r.niveaux_source === 'phase1'
-      ? `Moins de 2 de vos hôtes changent leurs prix au fil des saisons : la saison et le week-end viennent du marché de ${r.phase1_localite || 'votre ville'} (ses saisons relevées et les prix affichés de ses logements). Votre prix habituel, lui, vient de tous vos hôtes.`
-      : `La saison et le week-end sont mesurés sur les ${r.hotes_mouvants} hôtes sur ${r.hotes} qui changent leurs prix d’au moins ${r.seuil_mouvant_pct} % au fil des saisons : en moyenne, leurs prix varient de ${pct(r.amplitude)} entre leurs dates calmes et leurs dates fortes.${fixes > 0 ? ` ${pluriel(fixes, 'hôte garde', 'hôtes gardent')} un prix presque fixe et ne compte${fixes > 1 ? 'nt' : ''} pas dans la saison.` : ''} Votre prix habituel, lui, vient de tous vos hôtes.`)
+      ? `${r.repli === 'saison_plate' ? `Vos ${r.hotes_mouvants} hôtes qui changent leurs prix ne le font pas aux mêmes dates : leur saison commune est trop plate.` : 'Moins de 2 de vos hôtes changent leurs prix au fil des saisons.'} La saison et le week-end viennent donc du marché de ${ville} (ses saisons relevées et les prix affichés de ses logements). Votre prix habituel, lui, vient de tous vos hôtes.${nonJuges}`
+      : `La saison et le week-end sont mesurés sur les ${r.hotes_mouvants} hôtes sur ${r.hotes} qui changent leurs prix d’au moins ${r.seuil_mouvant_pct} % au fil des saisons : en moyenne, leurs prix varient de ${pct(r.amplitude)} entre leurs dates calmes et leurs dates fortes.${fixes > 0 ? ` ${pluriel(fixes, 'hôte garde', 'hôtes gardent')} un prix presque fixe et ne compte${fixes > 1 ? 'nt' : ''} pas dans la saison.` : ''}${nonJuges} Votre prix habituel, lui, vient de tous vos hôtes.`)
     // Une INFORMATION, sans effet sur le prix (demande de Thierry) : l'ecart de
     // prime week-end entre vos comparables et le marche de la ville.
     const pw = r.prime_week_end

@@ -665,10 +665,15 @@ test('LE TEST QUI COMPTE (§22.11) : un marche serre, une montee ratee, un compa
 })
 
 test('regle (d) : le repli sur la phase 1 du marche est dit ; la fiche ne parle plus de « suivre le marche »', async () => {
-  const { doc, L } = await monter(pageAvecPrix({ ...PRIX_CALCULE, prix: { ...PRIX_CALCULE.prix, niveaux_source: 'phase1', phase1_localite: 'Bagnères-de-Bigorre', hotes_mouvants: 1, prime_week_end: { comparables: 0, marche: null, localite: 'Bagnères-de-Bigorre' } } }))
+  const { doc, L } = await monter(pageAvecPrix({ ...PRIX_CALCULE, prix: { ...PRIX_CALCULE.prix, niveaux_source: 'phase1', repli: 'peu_mouvants', phase1_localite: 'Bagnères-de-Bigorre', hotes_mouvants: 1, prime_week_end: { comparables: 0, marche: null, localite: 'Bagnères-de-Bigorre' } } }))
   const z = doc.getElementById('cp-zone-prix').textContent
-  assert.match(z, /Moins de 2 de vos hôtes changent leurs prix au fil des saisons : la saison et le week-end viennent du marché de Bagnères-de-Bigorre/)
+  assert.match(z, /Moins de 2 de vos hôtes changent leurs prix au fil des saisons\. La saison et le week-end viennent donc du marché de Bagnères-de-Bigorre/)
   assert.match(z, /vos comparables 0 %, marché de Bagnères-de-Bigorre non mesurée\./)
+  const plate = await monter(pageAvecPrix({ ...PRIX_CALCULE, prix: { ...PRIX_CALCULE.prix, niveaux_source: 'phase1', repli: 'saison_plate', phase1_localite: 'Toulouse', hotes_mouvants: 4, hotes_non_mesures: 1 } }))
+  const zp = plate.doc.getElementById('cp-zone-prix').textContent
+  assert.match(zp, /Vos 4 hôtes qui changent leurs prix ne le font pas aux mêmes dates : leur saison commune est trop plate\. La saison et le week-end viennent donc du marché de Toulouse/)
+  assert.doesNotMatch(zp, /Moins de 2 de vos hôtes/)
+  assert.match(zp, /1 hôte n’a pas assez de nuits avec un prix pour être jugé\./)
   cliquerPoint(L, IDS3[0])
   assert.doesNotMatch(doc.getElementById('cp-fiche').textContent, /Ses prix :/)
   const sans = await monter(pageAvecPrix({ etat: 'strategie_absente', message: 'x' }, { strategie: null }))

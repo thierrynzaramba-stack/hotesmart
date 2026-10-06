@@ -93,7 +93,7 @@ export function composerJours ({ prix, calendrier = [], existants = new Map() })
   for (const j of prix.jours) {
     const evs = evenementsDu(calendrier, j.date)
     const base = { date: j.date, type: j.type, niveau_base: j.niveau, source: j.source }
-    if (!j.niveau) { out.set(j.date, { ...base, statut: 'non_calcule', motif: 'moins de 3 hôtes ont un prix ce jour-là' }); continue }
+    if (!j.niveau) { out.set(j.date, { ...base, statut: 'non_calcule', motif: 'aucune saison mesurée ce jour-là (trop peu de comparables qui changent leurs prix ont un prix, ou jour hors des saisons du marché)' }); continue }
     const niveau = niveauAvecEvenements(j.niveau, evs)
     const c = caseDe(niveau, j.type)
     if (!c || c.statut !== 'calcule') { out.set(j.date, { ...base, niveau, statut: 'non_calcule', motif: c && c.motif ? c.motif : 'case non calculée' }); continue }
