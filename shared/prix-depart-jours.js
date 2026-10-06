@@ -13,8 +13,10 @@
 // ⚠ UN SEUL VOCABULAIRE A L'ECRAN (recette de Thierry, 6 octobre 2026) : les 5
 // tranches de YieldFlow. Le calcul garde ses noms (creux…pic) ; l'ecran ne
 // montre que ceux-ci. « Exceptionnel » est reserve aux jours touches par un
-// evenement DECLARE par l'hote — au prix de la case « Tres haut » (le calcul ne
-// mesure que 4 niveaux).
+// evenement DECLARE par l'hote. ⚠ SON PRIX (decision de Thierry, 6 octobre
+// 2026) : le prix Tres haut + l'ecart Haut -> Tres haut du MEME type de jour
+// (semaine / week-end), selon la strategie, PLAFONNE au haut de la fourchette
+// des comparables de la case Tres haut — jamais hors marche. Affiche seulement.
 export const TRANCHE = { creux: 'Base', modere: 'Moyen', favorable: 'Haut', pic: 'Très haut' }
 export const EXCEPTIONNEL = 'Exceptionnel'
 export const NOM_SOURCE = { mesure: 'mesuré', estime: 'estimé', marche: 'marché' }
@@ -73,14 +75,34 @@ export function composerJours ({ prix, calendrier = [], existants = new Map() })
     const niveau = niveauAvecEvenements(j.niveau, evs)
     const c = caseDe(niveau, j.type)
     if (!c || c.statut !== 'calcule') { out.set(j.date, { ...base, niveau, statut: 'non_calcule', motif: c && c.motif ? c.motif : 'case non calculée' }); continue }
-    const p = c.strategies[prix.strategie]
     const exceptionnel = evs.some(e => { const f = effetEvenement(e); return f && f.exceptionnel })
     const tranche = exceptionnel ? EXCEPTIONNEL : TRANCHE[niveau]
+    let p = c.strategies[prix.strategie]
+    let surcroit = null
+    if (exceptionnel) {
+      const haut = caseDe('favorable', j.type)
+      if (haut && haut.statut === 'calcule') {
+        const ecart = Math.max(0, p - haut.strategies[prix.strategie])
+        const plafond = c.fourchette && Number.isFinite(c.fourchette.haut) ? c.fourchette.haut : Infinity
+        const brut = p + ecart
+        const tresHaut = p
+        p = Math.round(Math.min(brut, plafond))
+        // Ce qui est VRAIMENT ajoute (apres plafond), pas l'ecart nominal.
+        surcroit = { ecart: p - tresHaut, plafonne: brut > plafond }
+      } else surcroit = { ecart: null }
+    }
     const raisons = [`saison (${NOM_SOURCE[j.source] || j.source})`]
     if (j.type === 'weekend') raisons.push('week-end')
     for (const e of evs) {
       const f = effetEvenement(e)
-      raisons.push(f && f.texte ? `${e.nom} (${f.texte})` : e.nom)
+      // Un jour Exceptionnel : un « +1 tranche » n'y fait plus rien, il ne se dit pas.
+      const sansEffet = exceptionnel && f && f.plus
+      raisons.push(f && f.texte && !sansEffet ? `${e.nom} (${f.texte})` : e.nom)
+    }
+    if (surcroit) {
+      raisons.push(surcroit.ecart === null ? 'écart Haut → Très haut non mesurable : prix Très haut'
+        : surcroit.ecart > 0 ? `majoré de ${surcroit.ecart} € (écart Haut → Très haut)${surcroit.plafonne ? ', plafonné au haut du marché' : ''}`
+          : 'aucune majoration : Haut et Très haut au même prix, ou plafond du marché atteint')
     }
     const ex = existants.get(j.date)
     const ecart = Number.isFinite(ex) && ex > 0 ? { ecart_eur: Math.round(p - ex), ecart_pct: Math.round((p / ex - 1) * 100) } : { ecart_eur: null, ecart_pct: null }
