@@ -37,7 +37,7 @@ const { requirePermission, verifierSession } = require('../lib/require-permissio
 const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
 const { planningDeGarde } = require('../lib/cleaning/garde')
 const { chargerLiaisons, chargerDisponibilites,
-        dansLaFenetreDeProposition } = require('../lib/cleaning/assign')
+        dansLaFenetreDeProposition, proposeesDe } = require('../lib/cleaning/assign')
 const { extraitVerifie } = require('../lib/extrait-verifie')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -166,7 +166,7 @@ module.exports = async function handler (req, res) {
 
     // ===== LES MENAGES POSES DESSUS =====
     const { data: menagesRows, error: errMen } = await supabase.from('menages')
-      .select('property_id, booking_id, departure_date, status, provider_id, offered_to, offer_expires_at, assignment_reason')
+      .select('property_id, booking_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, assignment_reason')
       .eq('user_id', userId)
       .in('property_id', biens.map(b => b.id))
       .gte('departure_date', du).lte('departure_date', au)
@@ -326,8 +326,12 @@ module.exports = async function handler (req, res) {
       date: m.departure_date,
       status: m.status,
       porteur: nommer(m.provider_id),
-      proposeA: nommer(m.offered_to),
-      expireLe: m.offered_to ? m.offer_expires_at : null,
+      // ⚠ LE TOUR ENTIER (spec proposition-par-rang) : `proposeesA` nomme
+      // toutes les personnes sollicitees en meme temps ; `proposeA` reste la
+      // premiere, pour les ecrans qui n'affichent qu'un nom.
+      proposeA: nommer(proposeesDe(m)[0] || null),
+      proposeesA: proposeesDe(m).map(id => nommer(id)),
+      expireLe: proposeesDe(m).length ? m.offer_expires_at : null,
       // ⚠ LA RAISON PORTE DES PRENOMS, et elle contournait donc la garde
       // `prestataires: read` : `assignment_reason` vaut « Refuse par Marie… »,
       // « reste chez Regina », « Propose a Marie par l'hote ». Rendue sans
@@ -353,7 +357,7 @@ module.exports = async function handler (req, res) {
       // pour un depart PASSE que personne n'a fait. Depuis que la grille montre
       // les sept jours ecoulés, le cas n'est plus rare : il est garanti. Un
       // menage passe sans personne est exactement ce que l'hote doit voir.
-      differe: !m.provider_id && !m.offered_to &&
+      differe: !m.provider_id && !proposeesDe(m).length &&
                m.departure_date >= todayEnParis() &&
                !dansLaFenetreDeProposition(m.departure_date) &&
                !!(responsableDuJour[`${String(m.property_id)}|${m.departure_date}`])

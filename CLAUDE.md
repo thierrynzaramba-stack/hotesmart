@@ -76,6 +76,18 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 - Corollaire pratique : une nouvelle donnée provider se traite dans cet ordre —
   table du cœur, writer dans `lib/`, puis lecture par l'app. Jamais l'inverse.
 
+## RÈGLE — LE MOBILE SUIT L'ORDINATEUR
+- **Toute spec livrée sur la version ordinateur d'un écran est reportée sur sa
+  version mobile — ou le report est PROPOSÉ à Thierry en fin de chantier.**
+  Jamais un chantier desktop clos sans que la question du mobile ait été posée.
+- **Une règle partagée par les deux versions vit dans un module commun**
+  (`shared/…`), jamais recopiée dans chaque page : deux copies divergent.
+- Vécu (30 septembre 2026) : la couleur des réservations était tirée au sort
+  (`SRC[idx % 3]`) sur les deux calendriers ; l'ordinateur avait été corrigé,
+  le téléphone jamais — une réservation Booking s'y affichait en rouge Airbnb.
+  Le mobile n'avait ni fiche, ni ajout, ni messagerie. Rattrapé par
+  `shared/calendrier-resa.js` (docs/kb/reservation-directe.md §12).
+
 ## ARCHITECTURE — CONFIG D'APP vs CONFIG GÉNÉRALE
 - **La configuration d'une APP vit DANS l'app.** Prestataires de ménage et leurs
   biens → `apps/menages/prestataires.html`. Modèles de messages → l'app
@@ -270,7 +282,41 @@ une nuit pas encore ouverte), 21 (nuit rouverte à la main sans prix), 24
 (agrandir la fenêtre ne prévient pas), 26 (référence en prix voyageur total,
 ménage compris), 27 (le full sync journalise des nuits sans ligne), **28** (le
 délai affiné par le « vendu à date » N-1). V2 « nouveau bien sans historique »
-cadrée (`docs/kb/chantier-nouveau-bien.md`), V2.1 et suivants non commencés.
+cadrée (`docs/kb/chantier-nouveau-bien.md`) ; la page « marché global »
+(AirROI, calendrier jour par jour) est en STAGING seulement, branche
+`lot-v2-3-marche-quand` — rien en production.
+
+**Lots 4.6.6 et 4.6.7 EN PROD le 30 septembre 2026** (0dc6c25, d557124) :
+- **4.6.6 — réduire la fenêtre retire de la vente les nuits qui en sortent**
+  (décision de Thierry, option 1 ; dettes 29 et 34 soldées). Enregistrer la
+  fenêtre annonce les nuits OUVERTES au-delà de la nouvelle fin (non vendues,
+  ✎ et ouvertures à la main compris), exige leur nombre et leurs bornes, réduit
+  la fenêtre PUIS les retire : fermées chez le canal par l'écrivain unique
+  (`retirerDeLaVente`, lib/calendrier-writer.js), lignes supprimées seulement
+  si le canal a accepté — elles redeviennent « pas encore ouvertes » et le
+  pilote les rouvre avec leur prix quand la fenêtre les rattrape. Sinon :
+  état d'avant rétabli, fenêtre d'avant restaurée ; tout état douteux sonne au
+  fondateur avec les dates. Un bien sans plan tarifaire se retire en base
+  seulement, et le dit ; Beds24 est refusé. Le canal du moteur relit la
+  fenêtre en base avant d'ouvrir. Éprouvé en réel : Cœur de vie 23 (178 nuits
+  retirées puis rouvertes, prix Channex = base + supplément voyageurs) et La
+  bulle (24 nuits du 31 août au 23 septembre 2027, fermées chez Channex, rien
+  d'autre touché).
+- **4.6.7 — la grille fixée par l'hôte, niveau par niveau** (décisions de
+  Thierry). Table `grille_hote` (+ journal), writer unique
+  `lib/yield/grille-hote.js` — PAS `prix_hote`, qui fige une nuit que le moteur
+  saute. Point d'application unique : `preparerContexte`, APRÈS le
+  positionnement des contextes. Les ajustements (jour de semaine, événements,
+  plancher N-1, primes, fourchette) s'appliquent par-dessus ; l'ordre des
+  niveaux tient à chaque application (un calculé s'écarte d'un pas, un fixé ne
+  bouge jamais) ; « au calcul » (×) n'est jamais refusé ; confirmation « N nuits
+  vont changer de prix » comptée par la règle du moteur, grille actuelle
+  contre proposée. Le prix recommandé au moment du geste est gardé :
+  `grille_hote.recommended_rate_cents`, et `prix_hote.recommended_rate_cents`
+  pour chaque ✎. Migration `2026-09-30-grille-hote` appliquée staging et prod,
+  prouvée par `scripts/verifier-migration-grille-hote.js`.
+- **Staging n'a aucun cron** (docs/STAGING.md §1) : en recette, le pilote se
+  lance par `scripts/piloter-yieldflow.js` (à blanc, puis `--go`).
 
 Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
 RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
@@ -339,6 +385,24 @@ V1.** Un chiffre qui bouge tout seul avec le calendrier est un mauvais
 garde-fou : l'actualiser n'est qu'un sursis.
 
 **REGLE DE COMPTAGE, POSEE LE 14 SEPTEMBRE 2026 (demande de Thierry).**
+⚠ **UNE CINQUIEME FAMILLE A EXISTE LE 1er OCTOBRE 2026, ET ELLE A ETE REFERMEE
+LE JOUR MEME** — deux tests de `tests/pwa-mes-jours-dom.test.js` qui tapaient
+`dans(-3)`, hors du calendrier rendu les 1er, 2 et 3 du mois. Le compte est
+redevenu **28, et exactement 28**. Ce qu'il faut en retenir : un compte a
+geometrie variable est une barriere affaiblie. Le jour ou une vraie regression
+apporte deux rouges un 2 du mois, un compte attendu de « 30 ces jours-la » ne
+fait arreter personne. **Documenter un rouge calendaire est le dernier recours ;
+ancrer le test dans sa fenetre est le premier.**
+
+⚠ **ET LA CONTRE-EPREUVE CALENDAIRE A UN OUTIL**, parce que la faire a la main
+donne de faux resultats : `tests/outils/horloge-decalee.js`, a PRECHARGER
+(`JOURS=10 node --require ./tests/outils/horloge-decalee.js --test <fichier>`). Il
+decale l'horloge de Node **et celle de la fenetre jsdom**, qui vit dans un autre
+realm. Decaler les fixtures seules, ou le seul global de Node, fabrique des
+echecs qui n'ont rien a voir avec le calendrier : mesure du 1er octobre 2026,
+8 et 10 rouges contre 132/132 par l'outil. Il a fallu deux sessions comparant
+leurs mesures pour le voir.
+
 Le nombre attendu est **28, et exactement 28** (8 + 6 + 10 + 4, au 29 septembre
 2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28). Avant tout push : lire le compte,
 pas la couleur. **29 rouges = une regression, on ne pousse pas** tant qu'on ne
@@ -390,6 +454,8 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/kb/reference-yield.md (un jour = UN segment par priorite ; cascade de repli a 4 niveaux, plancher = jour de semaine ; deux seuils, 8 nuits ET 3 resas ; `part_vendue` est une part de VENTES, on extrapole le final, on ne multiplie jamais la capacite).
 - docs/kb/prix-voyageur.md (QUEL champ = prix paye par le voyageur : `amount` Channex/Airbnb est un NET HOTE (ecart +22,85 %), reconstruire via `meta.amount_type` — jamais via le nom du canal ; dates de vente : comparer les JOURS, pas les instants).
 - docs/kb/avis-voyageurs.md (ota_reviews : clé Channex unique = cloisonnement par properties, dette 11/70 levée par l'historique des réservations ; classification propreté en 2 étages, règle avant IA).
+- docs/specs/rotation-deroule.md (**LE DÉROULÉ QUI FAIT FOI pendant une rotation de secret** : `CRON_SECRET` puis `CHANNEL_WEBHOOK_SECRET`, geste par geste, avec la vérification que je fais à chaque pas et la fenêtre de refus d'une minute).
+- docs/specs/rotation-secret-webhook.md (le POURQUOI de la rotation du secret de webhook, et l'historique du piège : une version de ce document a affirmé le contraire du code. **En cas de divergence, le déroulé ci-dessus gagne, et celui-ci se corrige dans le même mouvement.**)
 
 ## VALIDATION
 - `node -c fichier.js` valide la syntaxe CommonJS avant commit.

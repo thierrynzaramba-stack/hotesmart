@@ -20,7 +20,15 @@
 //   1) CLI    : node scripts/backfill-beds24-host.js   (DRY_RUN reglable ci-dessous)
 //   2) require: const { runBackfill } = require('.../scripts/backfill-beds24-host')
 //               await runBackfill({ dryRun }) -> renvoie le recap structure
-//      (utilise par l'endpoint one-shot api/backfill-beds24-host.js)
+//      ⚠ L'ENDPOINT HTTP QUI L'ENVELOPPAIT A ETE SUPPRIME le 1er octobre 2026.
+//      `api/backfill-beds24-host.js` prenait `CRON_SECRET` en QUERY STRING : le
+//      secret partait donc dans les journaux d'acces de la plateforme, dans le
+//      `Referer` et dans l'historique du navigateur de qui lancait le rattrapage.
+//      C'est le MEME secret que celui qui garde `/api/cron`, dont la fuite
+//      rouvrait le trou qu'on venait de fermer. Son en-tete disait « ENDPOINT
+//      ONE-SHOT — A SUPPRIMER A L'ETAPE 5 » ; l'etape 5 est passee depuis
+//      longtemps. Ce script-ci reste, et c'est le bon vehicule : il tourne depuis
+//      la machine, sans exposition reseau.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Reglages (bien visibles) ────────────────────────────────────────────────

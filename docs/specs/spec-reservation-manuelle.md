@@ -121,6 +121,12 @@ réutiliser autoriserait quatre réservations simultanées sur Colomiers, qui po
 `pages/biens-calendrier.html`. `pages/calendrier-mobile.html` reste en
 consultation pure ; le chemin mobile viendra sur besoin réel constaté, pas avant.
 
+> **Le besoin est venu le 30 septembre 2026** (Thierry, chantier « calendrier
+> mobile ») : le mobile porte désormais la fiche, « Écrire au voyageur »,
+> l'ajout (Réservation / Indisponible), la modification et les
+> indisponibilités — par la MÊME règle que l'ordinateur (`shared/calendrier-
+> resa.js`) et les mêmes appels serveur. Retournement voulu, pas une dérive.
+
 ### Étape 0 du calendrier — constaté le 6 septembre, pas supposé
 
 | question | réponse |

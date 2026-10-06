@@ -83,7 +83,7 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
                    // sa date d'expiration : sans elles, aucun test ne pouvait
                    // parler d'une proposition a confirmer. `done` est la verite
                    // serveur des menages faits, que `isMenageObsolete` consulte.
-                   menages = [], done = [],
+                   menages = [], done = [], autrui = undefined,
                    coupureEcriture = false, echecReglage = null,
                    // ⚠ UN REFUS SERVEUR SUR N'IMPORTE QUELLE ECRITURE, applique
                    // APRES la suspension. `coupureEcriture` leve tout de suite,
@@ -117,7 +117,7 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
   src = src.replace(AVANT_BOOT, 'globalThis.__pret = chargerDisponibilites().catch(')
 
   const appels = []
-  const etat = { regles, exceptions, conges, modifiable, autorise, bookings, aPrendre, events, comments, menages, done }
+  const etat = { regles, exceptions, conges, modifiable, autorise, bookings, aPrendre, events, comments, menages, done, autrui }
   // ⚠ SUSPENSION DETERMINISTE, PLUTOT QU'UNE TEMPORISATION.
   // Tester « l'ecran a bascule AVANT la reponse » avec un `setTimeout` de 120 ms
   // et un `souffler(10)` marche sur un poste au repos et lache sur une machine
@@ -232,8 +232,12 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
         .map((l, i) => regle('neuve' + i, 'réglée', l.jours, cad, l.depuis))
     }
     if (corps && corps.action === 'declarerIndisponibilite') {
-      etat.exceptions = etat.exceptions.concat([
-        { id: 'e' + appels.length, date: corps.date, available: false, source: 'prestataire' }])
+      // ⚠ LE DOUBLE SUIT LE SERVEUR DU 1er OCTOBRE 2026 : il écrit le sens
+      // demandé (absent = absence, pour la PWA d'avant) et UNE ligne par jour.
+      // Il écrivait toujours `false` — l'imitation fidèle du défaut corrigé.
+      etat.exceptions = etat.exceptions.filter(e => e.date !== corps.date).concat([
+        { id: 'e' + appels.length, date: corps.date,
+          available: corps.available === undefined ? false : corps.available, source: 'prestataire' }])
     }
     if (corps && corps.action === 'retirerIndisponibilite') {
       etat.exceptions = etat.exceptions.filter(e => e.date !== corps.date)
@@ -255,7 +259,8 @@ function monter ({ regles = [], exceptions = [], conges = [], modifiable = true,
       // Les servir ici fait passer le test par le vrai chemin de chargement.
       bookings: etat.bookings, a_prendre: etat.aPrendre,
       label: 'Regina', property_ids: [], visibility_days: 30,
-      comments: etat.comments, events: etat.events, done: etat.done, menages: etat.menages }) }
+      comments: etat.comments, events: etat.events, done: etat.done, menages: etat.menages,
+      ...(etat.autrui !== undefined ? { autrui: etat.autrui } : {}) }) }
   }
 
   vm.runInContext(src, dom.getInternalVMContext())
@@ -814,24 +819,82 @@ test('un jour de CONGÉ ne bouge pas à la tape', async () => {
   assert.match(feuille(w), /congé/i)
 })
 
-test('un jour où elle ne travaille déjà pas n\'appelle pas le serveur', async () => {
-  // Elle déclare une ABSENCE, jamais une PRÉSENCE : se rendre disponible un jour
-  // que son employeur ne lui a pas confié n'aurait aucun effet, et lui ferait
-  // croire le contraire.
+// ⚠ BUG DU 1er OCTOBRE 2026 — LE TEST QUI SE TROUVAIT ICI FIGEAIT LE DÉFAUT.
+// « Un jour où elle ne travaille déjà pas n'appelle pas le serveur » : le segment
+// était figé sur un jour de repos, et l'écran disait « réglez vos jours
+// habituels ». Tiphaine, absente le mercredi par récurrence, ne pouvait donc pas
+// se rendre disponible UN mercredi. Une exception prime sur la récurrence dans
+// les deux sens.
+
+// Un jour futur que la règle « lundis » ne couvre pas, et un qu'elle couvre.
+const jourDeRepos = () => { let n = 1; while (new Date(dans(n) + 'T12:00:00Z').getUTCDay() === 1) n++; return dans(n) }
+const unLundi = () => { let n = 1; while (new Date(dans(n) + 'T12:00:00Z').getUTCDay() !== 1) n++; return dans(n) }
+const declarations = t => t.appels.filter(a => a.corps && /Indisponibilite$/.test(a.corps.action || ''))
+
+test('un jour de REPOS se rend disponible pour ce jour-là : l\'exception part avec `available: true`', async () => {
+  const j = jourDeRepos()
   const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
   t.seed()
   await t.chargerDisponibilites()
-  const rouge = [...w.document.querySelectorAll('#dispo-months .dispo-case.off')]
-    .find(e => e.dataset.jour >= dans(1))
-  assert.ok(rouge, 'il existe bien un jour non travaillé')
-  rouge.dispatchEvent(new w.Event('click', { bubbles: true }))
-  await souffler(50)
-  assert.strictEqual(ecritures(t).length, 0, 'aucun appel')
-  // ⚠ LE REFUS A CHANGE DE CANAL, PAS DE SENS (lot B). Il se disait dans le
-  // bandeau ; il se dit maintenant DANS la feuille, avec le segment figé — donc
-  // avant même qu'elle touche quoi que ce soit, au lieu d'après.
-  assert.match(feuille(w), /jours habituels/)
-  assert.ok(segments(w).every(b => b.disabled), 'le segment est figé')
+  assert.ok(caseDu(w, j).classList.contains('off'), 'au départ, un jour de repos')
+  taperJour(w, j)
+  assert.ok(segments(w).some(b => !b.disabled), 'le segment n\'est plus figé')
+  assert.doesNotMatch(feuille(w), /pas dans vos jours habituels/)
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.action, 'declarerIndisponibilite')
+  assert.strictEqual(d[0].corps.date, j)
+  assert.strictEqual(d[0].corps.available, true, 'le sens demandé part en toutes lettres')
+  assert.ok(!caseDu(w, j).classList.contains('off'), 'et le jour s\'allume')
+})
+
+test('un jour TRAVAILLÉ déclaré absent envoie `available: false` en toutes lettres', async () => {
+  const j = unLundi()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(!caseDu(w, j).classList.contains('off'))
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.available, false)
+  assert.ok(caseDu(w, j).classList.contains('off'))
+})
+
+test('revenir sur une disponibilité exceptionnelle RETIRE l\'exception — le jour rend la main à la récurrence', async () => {
+  const j = jourDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    exceptions: [{ id: 'e1', date: j, available: true, source: 'prestataire' }] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(!caseDu(w, j).classList.contains('off'), 'allumé par l\'exception')
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.action, 'retirerIndisponibilite', 'on n\'empile pas une absence redondante')
+  assert.ok(caseDu(w, j).classList.contains('off'))
+})
+
+test('une ABSENCE posée par elle sur un jour de repos se retourne en disponibilité, pas en retrait', async () => {
+  // Les absences de Tiphaine en prod tombent aussi sur des jours que sa
+  // récurrence ne couvre plus. Retirer l'exception laisserait le jour éteint :
+  // c'est l'inverse de ce qu'elle demande. On pose le sens demandé.
+  const j = jourDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    exceptions: [{ id: 'e1', date: j, available: false, source: 'prestataire' }] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.action, 'declarerIndisponibilite')
+  assert.strictEqual(d[0].corps.available, true)
+  assert.ok(!caseDu(w, j).classList.contains('off'))
 })
 
 test('le passé ne se modifie pas', async () => {
@@ -2943,11 +3006,11 @@ test('la marque ⏭ ne dépend PAS du filtre de biens — une règle ne lit pas 
   // `activeProps` : décocher une case d'AFFICHAGE effaçait la marque « la
   // réservation a changé ». La feuille est sans filtre partout, ses règles
   // aussi.
-  const jTot = dans(-3), jTard = dans(-1)
+  const jTot = dans(1), jTard = dans(3)
   const { w, t } = monter({
     bookings: [
-      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-6) },
-      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(-4) }
+      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-2) },
+      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(2) }
     ],
     done: [{ booking_id: 'b2', departure_date: jTard }]
   })
@@ -3010,11 +3073,11 @@ test('la FICHE d\'un ménage obsolète le reste quand un bien est décoché', as
   // ⚠ CONSTAT DE REVIEW. La ligne de la feuille avait été convertie sur la liste
   // non filtrée ; son SEUL consommateur, la fiche, ne l'avait pas été. Le même
   // écran marquait le ménage ⏭ et proposait « ✓ Marquer fait ».
-  const jTot = dans(-3), jTard = dans(-1)
+  const jTot = dans(1), jTard = dans(3)
   const { w, t } = monter({
     bookings: [
-      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-6) },
-      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(-4) }
+      { id: 'b1', propId: 'p1', propName: 'Colomiers', departure: jTot, arrival: dans(-2) },
+      { id: 'b2', propId: 'p1', propName: 'Colomiers', departure: jTard, arrival: dans(2) }
     ],
     done: [{ booking_id: 'b2', departure_date: jTard }]
   })
@@ -3119,4 +3182,511 @@ test('une relecture silencieuse PÉRIMÉE n\'écrase pas un chargement plus frai
   await souffler(20)
   assert.ok(caseDu(w, j).classList.contains('off'),
     'et la relecture PÉRIMÉE ne l\'a pas effacée')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// UNE PROPOSITION N'EST PAS UN MÉNAGE PRIS (bug du 1er octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Constat en prod : le ménage du 4 octobre à Ofuro Futari, `offered` à Lena Lou
+// (personne ne le porte), s'affichait en VERT dans son calendrier — « 1 ménage à
+// moi ». Le serveur rend bien `role: 'propose'`, mais le calendrier comptait
+// toute réservation reçue comme la sienne. Même défaut le 6 octobre chez Lola.
+
+const reservation = (j, id = 'b1') =>
+  ({ id, propId: 'p1', propName: 'Colomiers', departure: j, arrival: dans(0) })
+const propositionAMoi = (j, id = 'b1') =>
+  ({ property_id: 'p1', booking_id: id, departure_date: j, role: 'propose', propose: true,
+     status: 'offered', expire_le: new Date(Date.now() + 2 * 86400000).toISOString() })
+
+// ⚠ DÉCISION DE THIERRY, 1er OCTOBRE 2026 (le soir même) : pas de couleur pour
+// une proposition. Ce que personne ne porte va dans la BULLE, comme les ménages
+// non attribués (le 13 et le 15 à Ofuro Futari). Le premier jet la peignait en
+// ambre « à confirmer » ; la règle de couleur est supprimée.
+test('un ménage qu\'on lui PROPOSE n\'est pas vert : il va dans la bulle, sans couleur', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(!el.classList.contains('a-moi'), 'une proposition ne prend pas le fond vert du ménage acquis')
+  assert.ok(!el.classList.contains('a-confirmer'), 'aucune classe de couleur propre')
+  assert.ok(!el.querySelector('.dispo-compte'), 'pas de pastille de ménage acquis')
+  const b = el.querySelector('.dispo-bulle')
+  assert.ok(b, 'la proposition est dans la bulle, comme un ménage non attribué')
+  assert.ok(el.classList.contains('a-prendre'), 'la case passe devant ses voisines, sinon la bulle disparaît dessous')
+  assert.strictEqual(b.textContent, '1')
+  assert.doesNotMatch(el.getAttribute('title'), /à moi/, 'l\'infobulle ne dit pas qu\'il est à elle')
+  assert.match(el.getAttribute('title'), /1 ménage à confirmer/)
+})
+
+test('le ménage qu\'elle PORTE reste vert, même quand il est proposé à quelqu\'un d\'autre', async () => {
+  // Contre-épreuve : `role: 'porteur'` + `propose` = il est à elle, une collègue
+  // est sollicitée en parallèle. Rien ne lui est demandé, rien ne change.
+  const j = dans(3)
+  const { w, t } = monter({
+    bookings: [reservation(j)],
+    menages: [{ property_id: 'p1', booking_id: 'b1', departure_date: j, role: 'porteur', propose: true,
+                status: 'accepted', expire_le: new Date(Date.now() + 86400000).toISOString() }]
+  })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(el.classList.contains('a-moi'))
+  assert.ok(!el.querySelector('.dispo-bulle'), 'le sien ne va pas dans la bulle')
+})
+
+test('la feuille du jour range la proposition sous « À confirmer », pas sous « Votre ménage »', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  assert.match(feuille(w), /À confirmer/, 'une section dit ce qu\'il faut confirmer')
+  assert.doesNotMatch(feuille(w), /Votre ménage/, 'elle ne la présente pas comme acquise')
+  assert.ok(w.document.querySelector('#modal-body [data-mien="b1-' + j + '"]'),
+    'la ligne ouvre toujours la fiche, où elle accepte ou refuse')
+  assert.match(w.document.getElementById('modal-sub').textContent, /1 à confirmer/)
+})
+
+test('sous une proposition, la feuille ne propose pas « Je ne suis pas disponible » — un bouton qui échouerait', async () => {
+  // Constat de review : la section Disponibilité réapparaissait, et son bouton
+  // tombait sur la garde « refusez-le d'abord ». C'est le refus qui la libère.
+  const j = dans(3)
+  const { w, t } = monter({ bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  assert.strictEqual(segments(w).length, 0, 'aucun segment de disponibilité sous une proposition')
+})
+
+test('la garde d\'absence tient sous une proposition, avec la phrase juste et sans rien écrire', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  await t.basculerMonJour(j)
+  await souffler()
+  assert.match(message(w), /refusez-le d’abord/)
+  assert.strictEqual(ecritures(t).length, 0, 'aucune absence n\'est partie')
+})
+
+test('une proposition sur un jour de repos ne l\'allume pas : bulle au calendrier, « À CONFIRMER » dans la liste', async () => {
+  // Elle travaille le lundi seulement ; on lui propose un ménage un autre jour.
+  // Elle n'a rien accepté : le jour reste éteint, la proposition va dans la bulle.
+  let j = dans(3)
+  while (new Date(j + 'T12:00:00Z').getUTCDay() === 1) j = dans(4)
+  const { w, t } = monter({ regles: [regle('r1', 'Tous les lundis', [1])],
+                            bookings: [reservation(j)], menages: [propositionAMoi(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  assert.ok(caseDu(w, j).classList.contains('off'), 'le jour reste éteint')
+  assert.ok(caseDu(w, j).querySelector('.dispo-bulle'), 'la proposition est dans la bulle')
+  const item = agenda(w).querySelector('.agenda-item[data-mien]')
+  assert.ok(item, 'la ligne des 30 jours existe et ouvre la fiche')
+  assert.match(item.textContent, /À CONFIRMER/, 'et dit qu\'il faut répondre')
+  assert.ok(!item.classList.contains('a-confirmer'), 'sans couleur propre')
+})
+
+test('jour TRAVAILLÉ portant une disponibilité redondante à elle : « pas disponible » pose une absence', async () => {
+  // Cas relevé en review : l'exception « disponible » ne change rien à un lundi
+  // déjà travaillé ; la retirer laisserait le jour allumé. On pose le sens demandé.
+  const j = unLundi()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    exceptions: [{ id: 'e1', date: j, available: true, source: 'prestataire' }] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.strictEqual(d[0].corps.action, 'declarerIndisponibilite')
+  assert.strictEqual(d[0].corps.available, false)
+  assert.ok(caseDu(w, j).classList.contains('off'))
+})
+
+test('un ÉCHEC en se rendant disponible rend le jour à son état d\'avant, et le dit', async () => {
+  const j = jourDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    echecEcriture: { status: 503, message: 'Service temporairement indisponible' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(basculerDispo(w, j))
+  await souffler(80)
+  assert.ok(caseDu(w, j).classList.contains('off'), 'le jour de repos est rétabli')
+  assert.match(message(w), /indisponible|Pas enregistré/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// GLISSER SUR LE CALENDRIER : APPUI LONG, PUIS GLISSER (1er octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Décision de Thierry : « Je suis disponible » doit pouvoir ouvrir des jours en
+// masse, y compris des jours de repos. Le glisser avait été écarté de la PWA
+// parce qu'il se bat avec le défilement : il ne démarre donc qu'après un APPUI
+// LONG immobile. Un doigt qui bouge avant fait défiler la page, comme avant.
+// ⚠ jsdom n'a ni `PointerEvent` ni `elementFromPoint` : on envoie l'événement
+// par son TYPE (ce que la page écoute), sur la case visée.
+
+const APPUI_LONG = 450
+const pointeur = (w, el, type, { x = 0, y = 0 } = {}) =>
+  el.dispatchEvent(new w.MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 }))
+const glisser = async (w, de, a) => {
+  pointeur(w, caseDu(w, de), 'pointerdown')
+  await souffler(APPUI_LONG)
+  pointeur(w, caseDu(w, a), 'pointermove')
+  pointeur(w, caseDu(w, a), 'pointerup')
+  caseDu(w, a).dispatchEvent(new w.Event('click', { bubbles: true }))   // le clic qui suit le relâcher
+  await souffler(120)
+}
+// Trois jours consécutifs à venir, dont aucun n'est un lundi.
+const troisJoursDeRepos = () => {
+  let n = 1
+  const lundi = k => new Date(dans(k) + 'T12:00:00Z').getUTCDay() === 1
+  while (lundi(n) || lundi(n + 1) || lundi(n + 2)) n++
+  return [dans(n), dans(n + 1), dans(n + 2)]
+}
+const modalOuverte = w => w.document.getElementById('modal').style.display === 'flex'
+
+test('appui long puis glisser sur trois jours de repos : les trois s\'ouvrent, sans ouvrir la feuille', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  for (const j of [a, b, c]) assert.ok(caseDu(w, j).classList.contains('off'))
+  await glisser(w, a, c)
+  const d = declarations(t)
+  assert.deepStrictEqual(d.map(x => [x.corps.date, x.corps.available]).sort(),
+    [[a, true], [b, true], [c, true]])
+  for (const j of [a, b, c]) assert.ok(!caseDu(w, j).classList.contains('off'), j + ' ouvert')
+  assert.ok(!modalOuverte(w), 'le relâcher n\'ouvre pas la feuille du jour')
+  assert.match(message(w), /3 jours/)
+})
+
+test('un doigt qui BOUGE avant l\'appui long fait défiler : rien n\'est sélectionné, rien ne part', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown', { x: 10, y: 10 })
+  pointeur(w, caseDu(w, a), 'pointermove', { x: 10, y: 40 })     // il défile
+  const tm = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(tm)
+  assert.strictEqual(tm.defaultPrevented, false, 'le défilement n\'est pas bloqué')
+  await souffler(APPUI_LONG)
+  pointeur(w, caseDu(w, c), 'pointermove', { x: 10, y: 200 })
+  pointeur(w, caseDu(w, c), 'pointerup')
+  await souffler(80)
+  assert.strictEqual(declarations(t).length, 0)
+  assert.strictEqual(w.document.querySelectorAll('#dispo-months .dispo-case.sel').length, 0)
+})
+
+test('PENDANT la sélection seulement, le défilement est retenu', async () => {
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  const avant = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(avant)
+  assert.strictEqual(avant.defaultPrevented, false, 'avant l\'appui long : la page défile')
+  await souffler(APPUI_LONG)
+  assert.ok(caseDu(w, a).classList.contains('sel'), 'la sélection démarre, et se voit')
+  const pendant = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(pendant)
+  assert.strictEqual(pendant.defaultPrevented, true, 'pendant : le doigt sélectionne au lieu de défiler')
+  pointeur(w, caseDu(w, a), 'pointerup')
+  await souffler(80)
+  const apres = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(apres)
+  assert.strictEqual(apres.defaultPrevented, false, 'après : la page défile de nouveau')
+})
+
+test('le sens vient du PREMIER jour : partir d\'un jour travaillé ferme la plage', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('tous', 'tous les jours', [0, 1, 2, 3, 4, 5, 6])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  assert.deepStrictEqual(declarations(t).map(x => [x.corps.date, x.corps.available]).sort(),
+    [[a, false], [b, false], [c, false]])
+})
+
+test('la plage NE TOUCHE PAS un congé, une absence de l\'hôte, un jour à ménage — ni n\'ouvre la prise', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const d4 = dans(Number((Date.parse(c) - Date.parse(dans(0))) / 86400000) + 1)
+  const fin = new Date(d4 + 'T12:00:00Z').getUTCDay() === 1 ? dans(Number((Date.parse(d4) - Date.parse(dans(0))) / 86400000) + 1) : d4
+  const { w, t } = monter({
+    regles: [regle('r1', 'lundis', [1])],
+    conges: [{ id: 'c1', debut: b, fin: b, source: 'prestataire' }],
+    exceptions: [{ id: 'h1', date: c, available: false, source: 'hote' }],
+    bookings: [reservation(fin)],
+    aPrendre: [offre(a)]
+  })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  await glisser(w, a, fin)
+  const dates = declarations(t).map(x => x.corps.date)
+  assert.ok(dates.includes(a), 'le jour de repos s\'ouvre')
+  assert.ok(!dates.includes(b), 'le congé reste un congé')
+  assert.ok(!dates.includes(c), 'l\'absence posée par l\'hôte n\'est pas à elle')
+  assert.ok(!dates.includes(fin), 'un jour à ménage n\'est pas un jour à régler')
+  assert.ok(!modalOuverte(w), 'une offre sur la plage n\'ouvre pas la prise')
+})
+
+test('un ÉCHEC au milieu de la plage ARRÊTE et le dit', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    echecEcriture: { status: 503, message: 'Service temporairement indisponible' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  assert.strictEqual(declarations(t).length, 1, 'on ne continue pas après un refus')
+  assert.ok(caseDu(w, a).classList.contains('off'), 'le jour refusé est rétabli')
+  assert.match(message(w), /arrêt|Arrêt|interromp/)
+})
+
+test('une tape courte ouvre toujours la feuille du jour (non-régression)', async () => {
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  pointeur(w, caseDu(w, a), 'pointerup')
+  caseDu(w, a).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(50)
+  assert.ok(modalOuverte(w))
+  assert.strictEqual(declarations(t).length, 0)
+})
+
+// ─── Ce que la review du glisser a trouvé (1er octobre 2026) ────────────────
+
+const pointeurId = (w, el, type, id) => {
+  const ev = new w.MouseEvent(type, { bubbles: true, cancelable: true, clientX: 0, clientY: 0, button: 0 })
+  Object.defineProperty(ev, 'pointerId', { value: id })
+  el.dispatchEvent(ev)
+}
+
+test('une SECONDE plage pendant que la première s\'écrit est refusée, et le dit — rien ne s\'écrit deux fois', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  // 400 ms par écriture : la première plage (trois jours) dure ~1,2 s, la
+  // seconde est lâchée ~0,6 s après — elles se chevauchent vraiment.
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])], retardEcriture: 400 })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)                 // la première plage écrit encore
+  await glisser(w, a, c)
+  assert.match(message(w), /déjà en cours/)
+  await souffler(1500)
+  assert.strictEqual(declarations(t).length, 3, 'trois écritures, pas six')
+})
+
+test('un REPEINT pendant la sélection ne relâche pas le défilement retenu', async () => {
+  // Le repeint reconstruit les cases : le `touchmove` d'un vrai doigt reste
+  // dirigé vers la case DÉTACHÉE. Il est donc écouté sur `document`.
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  const depart = caseDu(w, a)
+  pointeur(w, depart, 'pointerdown')
+  await souffler(APPUI_LONG)
+  await t.chargerDisponibilites()        // repeint complet
+  assert.ok(!depart.isConnected, 'la case de départ a bien été remplacée')
+  const tm = new w.Event('touchmove', { bubbles: true, cancelable: true })
+  w.document.dispatchEvent(tm)
+  assert.strictEqual(tm.defaultPrevented, true)
+  assert.ok(caseDu(w, a).classList.contains('sel'), 'la sélection se repeint aussi')
+  pointeur(w, caseDu(w, a), 'pointerup')
+  await souffler(120)
+})
+
+test('un appui long sur un CONGÉ ne lance pas de sélection (le sens contredirait l\'écran)', async () => {
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('tous', 'tous les jours', [0, 1, 2, 3, 4, 5, 6])],
+    conges: [{ id: 'c1', debut: a, fin: a, source: 'prestataire' }] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  await souffler(APPUI_LONG)
+  assert.strictEqual(w.document.querySelectorAll('#dispo-months .dispo-case.sel').length, 0)
+  pointeur(w, caseDu(w, a), 'pointerup')
+  await souffler(80)
+  assert.strictEqual(declarations(t).length, 0)
+})
+
+test('une tape sur un AUTRE jour juste après un glisser ouvre sa feuille', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  await souffler(APPUI_LONG)
+  pointeur(w, caseDu(w, b), 'pointermove')
+  pointeur(w, caseDu(w, b), 'pointerup')       // au doigt : souvent AUCUN click ne suit
+  caseDu(w, c).dispatchEvent(new w.Event('click', { bubbles: true }))
+  await souffler(60)
+  assert.ok(modalOuverte(w), 'la tape suivante n\'est pas avalée')
+})
+
+test('pendant la sélection, le menu contextuel de l\'appui long est retenu', async () => {
+  const [a] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeur(w, caseDu(w, a), 'pointerdown')
+  await souffler(APPUI_LONG)
+  const cm = new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+  caseDu(w, a).dispatchEvent(cm)
+  assert.strictEqual(cm.defaultPrevented, true)
+  pointeur(w, caseDu(w, a), 'pointerup')
+  await souffler(120)
+})
+
+test('un SECOND doigt ne relance ni ne termine la sélection du premier', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  pointeurId(w, caseDu(w, a), 'pointerdown', 1)
+  await souffler(APPUI_LONG)
+  pointeurId(w, caseDu(w, c), 'pointerdown', 2)
+  pointeurId(w, caseDu(w, c), 'pointerup', 2)
+  assert.ok(caseDu(w, a).classList.contains('sel'), 'la sélection du premier doigt tient')
+  assert.strictEqual(declarations(t).length, 0)
+  pointeurId(w, caseDu(w, c), 'pointermove', 1)
+  pointeurId(w, caseDu(w, c), 'pointerup', 1)
+  await souffler(150)
+  assert.strictEqual(declarations(t).length, 3)
+})
+
+test('une PROPOSITION qu\'on lui fait, dans la plage, n\'est pas touchée', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    bookings: [reservation(b)], menages: [propositionAMoi(b)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  assert.deepStrictEqual(declarations(t).map(x => x.corps.date).sort(), [a, c])
+})
+
+// ─── UN GLISSER = UN SEUL SMS (2 octobre 2026) ──────────────────────────────
+
+test('un glisser envoie chaque jour en `plage`, puis UNE annonce qui résume ce qui a été fait', async () => {
+  const [a, b, c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  await souffler(80)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 3)
+  assert.ok(d.every(x => x.corps.plage === true), 'aucun jour n\'envoie son propre SMS')
+  const ann = t.appels.filter(x => x.corps && x.corps.action === 'annoncerPlage')
+  assert.strictEqual(ann.length, 1, 'une seule annonce pour la plage')
+  // ⚠ ELLE NE DICTE RIEN : le serveur resume ce qu'il a lui-meme enregistre
+  // (constat de securite de la review du 2 octobre 2026).
+  assert.deepStrictEqual(ann[0].corps, { action: 'annoncerPlage' })
+})
+
+test('une plage ARRÊTÉE en route n\'annonce rien si rien n\'a été fait', async () => {
+  const [a, , c] = troisJoursDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])],
+    echecEcriture: { status: 503, message: 'Service temporairement indisponible' } })
+  t.seed()
+  await t.chargerDisponibilites()
+  await glisser(w, a, c)
+  await souffler(80)
+  assert.strictEqual(t.appels.filter(x => x.corps && x.corps.action === 'annoncerPlage').length, 0)
+})
+
+test('une tape sur UN jour (hors glisser) n\'est pas marquée `plage` : son SMS part comme avant', async () => {
+  const j = jourDeRepos()
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])] })
+  t.seed()
+  await t.chargerDisponibilites()
+  assert.ok(basculerDispo(w, j))
+  await souffler(60)
+  const d = declarations(t)
+  assert.strictEqual(d.length, 1)
+  assert.ok(!d[0].corps.plage)
+  assert.strictEqual(t.appels.filter(x => x.corps && x.corps.action === 'annoncerPlage').length, 0)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LES MÉNAGES PRIS PAR D'AUTRES (spec visibilité, 2 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Une liste à part (`autrui`) que le serveur ne remplit que si l'hôte l'a
+// autorisé. Une pastille BLANCHE au calendrier, une section en lecture seule
+// dans la feuille. JAMAIS « à moi » : ni le vert, ni la pastille verte, ni les
+// jours travaillés, ni « Votre ménage », ni le résumé de la feuille.
+
+const prisParLola = (j, heure = '11:00') => ({ bien: 'Ofuro Futari', date: j, heure, prestataire: 'Lola Dupont' })
+
+test('un ménage pris par une autre ne compte JAMAIS comme « à moi », et ne rallume pas un jour de repos', async () => {
+  let j = dans(3)
+  while (new Date(j + 'T12:00:00Z').getUTCDay() === 1) j = dans(4)
+  const { w, t } = monter({ regles: [regle('r1', 'lundis', [1])], autrui: [prisParLola(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  const el = caseDu(w, j)
+  assert.ok(!el.classList.contains('a-moi'), 'pas le vert de « à moi »')
+  assert.ok(el.classList.contains('off'), 'le jour de repos reste éteint : elle ne travaille pas')
+  assert.ok(!el.querySelector('.dispo-compte:not(.autrui)'), 'pas de pastille verte')
+  assert.ok(!el.querySelector('.dispo-bulle'), 'pas la bulle : rien à prendre')
+  const blanc = el.querySelector('.dispo-compte.autrui')
+  assert.ok(blanc, 'une pastille blanche')
+  assert.strictEqual(blanc.textContent, '1')
+  assert.doesNotMatch(el.getAttribute('title'), /à moi/)
+  assert.match(el.getAttribute('title'), /1 ménage pris par une autre/)
+})
+
+test('au toucher, le DÉTAIL : bien, heure, prestataire — en lecture seule, jamais « Votre ménage »', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ autrui: [prisParLola(j)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  assert.match(feuille(w), /Pris par une autre/)
+  assert.match(feuille(w), /Ofuro Futari/)
+  assert.match(feuille(w), /11:00/)
+  assert.match(feuille(w), /Lola Dupont/)
+  assert.doesNotMatch(feuille(w), /Votre ménage/)
+  assert.doesNotMatch(w.document.getElementById('modal-sub').textContent, /à vous/)
+  const section = [...w.document.querySelectorAll('#modal-body .jsect')]
+    .find(s => /Pris par une autre/.test(s.textContent))
+  assert.strictEqual(section.querySelectorAll('button, a, [data-mien], [data-offre]').length, 0,
+    'aucun geste possible sur le ménage d\'une autre')
+})
+
+test('heure inconnue : « heure non précisée »', async () => {
+  const j = dans(3)
+  const { w, t } = monter({ autrui: [prisParLola(j, null)] })
+  t.seed()
+  await t.charger()
+  await t.chargerDisponibilites()
+  taperJour(w, j)
+  assert.match(feuille(w), /heure non précisée/)
+})
+
+test('sans autorisation (liste vide ou absente), rien de blanc n\'apparaît', async () => {
+  for (const autrui of [[], undefined]) {
+    const j = dans(3)
+    const { w, t } = monter({ autrui })
+    t.seed()
+    await t.charger()
+    await t.chargerDisponibilites()
+    assert.strictEqual(w.document.querySelectorAll('#dispo-months .dispo-compte.autrui').length, 0)
+  }
 })

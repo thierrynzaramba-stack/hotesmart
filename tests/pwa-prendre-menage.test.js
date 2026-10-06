@@ -52,7 +52,7 @@ test('lecture : ni porteur, ni proposition en cours', () => {
   // « à prendre » lancerait une course avec une collègue qui s'apprête
   // peut-être à répondre.
   assert.match(LECTURE, /\.is\('provider_id', null\)/)
-  assert.match(LECTURE, /\.is\('offered_to', null\)/)
+  assert.match(LECTURE, /\.is\('proposee_a', null\)/)
 })
 
 test('lecture : ses biens, et aucune donnée voyageur', () => {

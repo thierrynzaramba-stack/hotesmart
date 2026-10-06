@@ -425,9 +425,10 @@ jusqu'au 15 septembre 2026) :
   de droits absente n'ouvre donc pas l'écriture. **Mais un profil `lien` naît à `write`**
   (`api/membres.js`) — sans quoi l'onglet n'existait pour personne et le lot était inatteignable ;
   la fiche porte la case qui le coupe ;
-- ⚠️ **elle déclare une ABSENCE, jamais une présence** : `available` n'est pas un paramètre.
-  Se rendre disponible un jour que l'hôte ne lui a pas confié n'aurait aucun effet et lui ferait
-  croire le contraire ;
+- ~~elle déclare une ABSENCE, jamais une présence~~ — **RÈGLE TOMBÉE LE 1er OCTOBRE 2026**
+  (voir « Une exception prime sur la récurrence, dans les deux sens », en fin de fichier). Une
+  exception d'un jour se pose dans les deux sens ; `available` est un booléen, absent = absence,
+  toute autre valeur = 400 ;
 - ⚠️ **elle ne touche jamais ses jours attitrés** — décision de l'hôte (§12.9d) : pouvoir s'en
   retirer lui permettrait de quitter un bien sans qu'il l'apprenne ;
 - ⚠️ **« rien à supprimer » n'est pas « ce n'est pas à vous »** : un double tap sur « Annuler »
@@ -956,14 +957,15 @@ humain), mais l'écran ne l'explique pas encore.
   ligne simple : le bouton paraissait mort. C'est le parcours de **tous** les profils aujourd'hui.
 - ⚠️ **La légende explique le point** (« le point = choisi à la main »). La maquette portait quatre
   entrées, l'écran n'en avait que trois : le point était dessiné et jamais expliqué.
-- ⚠️ **Une tape, pas un glissé.** L'écran hôte sélectionne une plage au glissé ; sur un téléphone,
-  ce geste se bat avec le défilement. Ici un jour se touche (`click`, jamais `pointerdown`), et
-  une plage passe par le **formulaire de congé** — qui est justement l'objet fait pour ça.
-  Cibles tactiles de 44 px minimum.
+- ~~Une tape, pas un glissé~~ — **le glissé existe depuis le 1er octobre 2026, derrière un appui
+  long** (voir « Glisser sur le calendrier », en fin de fichier). Une tape courte ouvre toujours
+  la feuille du jour ; le défilement n'est retenu que pendant une sélection. Cibles tactiles de
+  44 px minimum.
 - ⚠️ **Elle ne défait que ce qu'elle a déclaré.** Une absence de `source: 'hote'` ne se retire
   pas : l'écran refuse le geste et **dit pourquoi** plutôt que de partir chercher un 409. Un jour
-  de congé est verrouillé (`tabindex="-1"`), et un jour qu'elle ne travaille déjà pas n'appelle
-  personne — elle déclare une **absence**, jamais une présence.
+  de congé est verrouillé (`tabindex="-1"`). ~~Un jour qu'elle ne travaille déjà pas n'appelle
+  personne~~ — **tombé le 1er octobre 2026** : un jour de repos se rend disponible pour ce
+  jour-là (fin de fichier).
 - ⚠️ **Hors ligne, rien ne part, et l'écran le dit.** Le planning a une file d'attente ; une
   absence, non. La rejouer plus tard porterait sur un planning qui a bougé, et on ne peut pas
   annoncer « c'est enregistré » quand rien n'est parti.
@@ -2971,3 +2973,607 @@ refus qui arrive après la fermeture de la feuille, seul chemin qui y écrit.
 lisaient prouvaient encore — supprimer la phrase a suffi à vider une assertion
 sans la faire rougir.**
 
+
+## Une proposition n'est pas un ménage pris (1er octobre 2026)
+
+**Le constat, en prod.** Le ménage du 4 octobre à Ofuro Futari s'affichait en
+**vert** dans le calendrier de Lena Lou — « 1 ménage à moi » — alors qu'elle ne
+l'avait pas accepté. En base il était `offered`, `provider_id` vide,
+`offered_to` = Lena Lou : le cron le lui avait proposé le 1er octobre à 07:45,
+à l'expiration de la proposition faite à Lola. Même défaut le 6 octobre chez
+Lola. Ce sont les deux seules propositions en cours ce jour-là : **toutes**
+étaient touchées.
+
+**La cause : une règle d'affichage, pas la base.** `api/menages-public.js` rend
+dans `bookings` les deux familles — ce qu'elle **porte** et ce qu'on lui
+**propose** — et les distingue par `menages[].role` (`porteur` / `propose`).
+La PWA savait les séparer sur la fiche (`estUneOffre`, badge « À CONFIRMER »),
+mais le calendrier, la feuille du jour et `jourTravaille` comptaient toute
+réservation reçue comme la sienne. Le planning de garde de l'hôte, lui, disait
+juste (« proposé à »).
+
+**Le correctif** (`apps/menages/public.html`) :
+- `offreAMoi(b)` lit le rôle ; `mesMenagesDu` / `mesMenagesTousBiens` ne rendent
+  plus que ce qu'elle porte, `mesOffresDu` / `mesOffresTousBiens` ce qu'on lui
+  propose.
+- ⚠️ **Une proposition va dans la BULLE, sans couleur propre** (décision de
+  Thierry, 1er octobre 2026, le soir même). Le premier correctif, mis en prod,
+  la peignait en **ambre** « à confirmer » ; Thierry l'a vu sur le 4 octobre de
+  Lena Lou et a tranché : **ce que personne ne porte se dit par la bulle**,
+  comme les ménages non attribués (le 13 et le 15 à Ofuro Futari). La règle de
+  couleur est supprimée. La bulle compte les ménages à prendre **et** ce qu'on
+  lui propose à elle ; l'infobulle dit « N ménage(s) à confirmer ». **Tant
+  qu'elle n'a pas accepté, bulle ; à l'acceptation, le ménage devient le sien
+  et passe au vert.**
+- La feuille du jour range la proposition sous **« À confirmer »**, jamais sous
+  « Votre ménage » ; la ligne ouvre la fiche, où elle accepte ou refuse. Le
+  résumé dit « 1 à confirmer ».
+- ⚠️ **Une proposition ne rend pas le jour travaillé** (`jourTravaille`) : elle
+  n'a rien accepté. Mais **la garde d'absence la tient toujours** — se dire
+  absente sous une proposition en cours la laisserait courir ; c'est le
+  **refus** qui la libère, et la phrase le dit.
+- ⚠️ **`role: 'porteur'` + `propose` reste vert** : le ménage est à elle, une
+  collègue est sollicitée en parallèle, rien ne lui est demandé. Un test le
+  tient, sans quoi le correctif aurait pu « réparer » dans le mauvais sens.
+
+**Ce qui se passe à l'expiration d'une proposition sans porteuse** (lu dans le
+code et vérifié en prod le 1er octobre) : `expirerPropositions` efface l'offre,
+passe le ménage `orphaned`, journalise `expired` (qui vaut refus : on ne la
+resollicite pas) et lève `menage_non_assigne` — **e-mail fondateur seul**, le
+SMS de ce type étant en pause depuis le 17 septembre, et étouffé si une autre
+alerte du même bien est partie dans l'heure. `poserPropositionsDues`, au même
+cycle, sollicite la suivante disponible ; s'il n'en reste aucune, le ménage
+reste `orphaned`, sans relance, « à prendre » dans la PWA de chacune.
+
+**Ce que la review a trouvé** (aucun constat de sécurité, trois mineurs, corrigés
+sans seconde review selon la règle) :
+- ⚠️ **Sortir les propositions de « mes ménages » a rouvert un bouton qui
+  échoue.** La section « Disponibilité » de la feuille était masquée par
+  `miensTous`, qui comptait les propositions ; sans elles, « Je ne suis pas
+  disponible » réapparaissait et tombait sur la garde « refusez-le d'abord ».
+  Elle est maintenant masquée aussi sous `aConfirmer`. **Règle : changer ce
+  qu'une liste contient, c'est relire tout ce que sa longueur gardait.**
+- La liste des 30 jours : la ligne garde le badge « À CONFIRMER » (et plus de
+  couleur propre depuis la décision de la bulle).
+- ✓ Effet voulu et désormais testé : une proposition sur un jour de repos ne
+  l'allume pas (`.off` reste) — elle n'a rien accepté — et la liste peut donc
+  dire « vous êtes absente » au-dessus d'une proposition.
+
+Tests : `tests/pwa-mes-jours-dom.test.js`, section « UNE PROPOSITION N'EST PAS
+UN MÉNAGE PRIS » — six tests. Contre-épreuve par `git archive` : quatre rouges
+contre le code d'avant le correctif, deux rouges contre son premier jet ; la
+contre-épreuve `porteur` est verte partout.
+
+## Une exception prime sur la récurrence, dans les deux sens (1er octobre 2026)
+
+**Le constat.** Tiphaine a des jours d'absence réglés en récurrence (une semaine
+sur deux). La rendre disponible exceptionnellement sur UN jour ne marchait pas.
+En prod, ses 14 exceptions étaient **toutes des absences** : aucune
+disponibilité exceptionnelle n'avait jamais été enregistrée.
+
+**Où ça cassait : l'exception n'était pas enregistrée, et seulement par la PWA.**
+Reproduit sur staging : depuis la fiche hôte (`api/disponibilites.js`) les deux
+sens s'enregistrent et le moteur les applique (`estDisponible` : congé >
+exception > règle). Depuis la PWA :
+- l'écran **figeait** le segment sur un jour de repos (« Ce jour n'est pas dans
+  vos jours habituels ») et la tape disait « Vous ne travaillez déjà pas ce
+  jour-là » ;
+- ⚠️ **et le serveur répondait 200 à `available: true` en écrivant `false`.** Un
+  succès sur l'inverse de la demande. Un test l'épinglait comme une règle
+  (« elle déclare une ABSENCE, jamais une présence ») : REVIEW.md règle 17, un
+  test peut figer un bug.
+
+**Pourquoi la raison du lot 2b tombe.** Elle disait : se rendre disponible un
+jour que l'hôte ne lui a pas confié la rendrait candidate sans son accord. Mais
+**depuis le 15 septembre elle règle elle-même ses jours habituels**
+(`reglerMesJours`) : elle pouvait se rendre disponible *tous* les mercredis, pas
+*un* mercredi. La garde n'empêchait rien ; elle obligeait à toucher la récurrence
+pour un seul jour. Et ce que l'hôte lui **confie** vit ailleurs : ses jours
+attitrés (`weekdays`, sur la liaison) filtrent toujours la garde.
+⚠️ **Nuance trouvée en review** : `weekdays` **vide = attitrée tous les jours**
+(cas de Tiphaine). Là, une disponibilité exceptionnelle la rend bien
+**candidate** ce jour-là — et **d'office** si sa liaison est `requires_ack =
+false`. C'est exactement ce qu'elle obtenait déjà en réglant ses jours
+habituels, donc pas d'élévation de droit ; la seule différence est que
+`reglerMesJours` prévient l'hôte (`alertReglesModifiees`) et que l'exception
+d'un jour est **silencieuse** — comme l'étaient déjà ses absences. Prévenir
+l'hôte d'une exception : **tranché le 2 octobre 2026, oui** (section suivante).
+
+**La règle, désormais, des deux côtés** : une exception sur un jour précis prime
+toujours sur la récurrence, dans les deux sens.
+
+**Le correctif :**
+- `api/menages-public.js` (`declarerIndisponibilite`) : `available` booléen ;
+  **absent = absence** (la PWA déjà installée sur un téléphone n'envoie que la
+  date) ; **toute autre valeur = 400**, rien n'est écrit. La mise à jour de SA
+  ligne porte le sens demandé ; une ligne de l'hôte n'est jamais écrasée (409,
+  inchangé).
+- `apps/menages/public.html` : `basculerMonJour` calcule le SENS (l'inverse de ce
+  que dit la journée) et la CIBLE (`jourParSesRegles`, la récurrence seule) :
+  si la récurrence dit déjà le sens voulu, on **retire** son exception plutôt
+  que d'en empiler une redondante ; sinon on pose l'exception du sens voulu,
+  en toutes lettres (`available`). Le segment n'est plus figé sur un jour de
+  repos.
+- ⚠️ **Une absence posée par elle sur un jour que sa récurrence ne couvre plus
+  se RETOURNE en disponibilité**, elle ne se retire pas : la retirer laisserait
+  le jour éteint, l'inverse de la demande. C'est le cas réel de Tiphaine, dont
+  les absences de septembre tombent sur des jours que sa récurrence d'octobre
+  ne couvre plus.
+
+**Tests** : `tests/menages-public-disponibilites.test.js` (les deux sens, la
+mise à jour du sens, absent = absence, **400 sur valeur invalide** — `'true'`,
+`1`, `null`, `{}`… — et la ligne de l'hôte jamais appropriée) ;
+`tests/pwa-mes-jours-dom.test.js` (jour de repos rendu disponible, jour
+travaillé déclaré absent en toutes lettres, retour à la récurrence, absence
+retournée). Six rouges contre le code d'avant (`git archive`). Le double du
+harnais écrivait lui aussi toujours `false` : il imitait fidèlement le défaut,
+il suit maintenant le serveur.
+
+## Glisser sur le calendrier : appui long, puis glisser (1er octobre 2026)
+
+**La demande de Thierry.** « Je suis disponible » doit pouvoir ouvrir des jours
+**en masse**, y compris des jours de repos. Le geste retenu : **glisser sur le
+calendrier**, lancé par un **appui long**.
+
+**Pourquoi l'appui long.** Le glissé avait été écarté de la PWA parce qu'il se
+bat avec le défilement de la page. Il ne démarre donc qu'après **400 ms
+immobile** sur un jour (tolérance 8 px) : un doigt qui bouge avant fait défiler,
+exactement comme avant. Une tape courte ouvre la feuille du jour, inchangée.
+
+⚠️ **Le défilement n'est retenu QUE pendant la sélection.** `touch-action` se
+décide au toucher — trop tôt pour savoir si l'appui sera long. On retient donc
+le `touchmove` (écouteur **non passif**) seulement une fois la sélection lancée ;
+avant et après, la page défile. Un test vérifie les trois moments.
+
+⚠️ **Le doigt se suit par sa position** (`elementFromPoint`), pas par la cible
+de l'événement : au toucher, le navigateur capture implicitement le pointeur sur
+la case de départ. Et **aucun `setPointerCapture`**, pour la raison déjà gravée
+côté hôte.
+
+**Ce que fait la plage** (`basculerPlageMesJours`) :
+- le **sens** est celui du **premier jour** touché — partir d'un jour fermé
+  ouvre, partir d'un jour ouvert ferme (comme l'écran hôte) ;
+- chaque jour passe par `basculerMonJour` (option `plage`) : mêmes gardes, même
+  rendu immédiat, même retour arrière qu'une tape, et la règle « une exception
+  prime sur la récurrence » ; un jour déjà dans le bon sens est sauté ;
+- **ne bougent jamais** : le passé, un congé, une exception posée par l'hôte, un
+  jour qui porte un ménage à elle ou une proposition qu'on lui fait ;
+- ⚠️ **une offre « à prendre » sur la plage n'ouvre pas la prise** : la tape
+  directe sur un jour à bulle ouvre la prise (`basculerMonJour` hors feuille) ;
+  le glissé, lui, ne règle que la disponibilité ;
+- **le premier échec arrête** et le dit (« N jours enregistrés, puis arrêt au
+  … ») — même règle que la plage côté hôte ;
+- le relâcher est suivi d'un `click` : il est ignoré, sinon la feuille du
+  dernier jour s'ouvrirait par-dessus le résultat.
+
+`basculerMonJour` rend désormais `true` / `false` : c'est ce que la plage lit
+pour s'arrêter.
+
+**Ce que la review a trouvé** (aucun constat de sécurité ; deux moyens, cinq
+faibles, tous corrigés avec un test chacun) :
+- ⚠️ **Une plage longue défaisait un jour réglé entre-temps.** `basculerMonJour`
+  inversait l'état du jour *au moment où il l'écrivait* : un jour ouvert par un
+  autre geste pendant l'envoi était refermé par la plage, sous un « ✓ N jours
+  ouverts ». La plage **impose désormais son sens** (`sens`), un jour déjà dans
+  ce sens est un succès ; et **une seule plage à la fois** (« un réglage est
+  déjà en cours d'envoi »).
+- ⚠️ **Un repeint pendant la sélection relâchait le défilement.** Le repeint
+  reconstruit les cases ; le `touchmove` d'un vrai doigt reste dirigé vers la
+  case de départ, détachée, et ne remontait plus jusqu'à la zone. Il est
+  écouté sur **`document`**.
+- **L'ancre doit être réglable** (`jourReglable`, la même règle que la plage) :
+  un appui long sur un congé ou un jour à ménage ne lance plus de sélection —
+  son sens aurait contredit ce que montre la case.
+- Le message d'arrêt ne recopie plus le « ✓ » du jour précédent.
+- Le `click` ignoré après un glissé ne vaut **que pour le dernier jour** : au
+  doigt, le navigateur n'envoie souvent aucun click, et la tape suivante sur un
+  autre jour était avalée.
+- Un **second doigt** ne relance ni ne termine la sélection (`pointerId`).
+- Le **menu contextuel** de l'appui long (Chrome Android) est retenu pendant la
+  sélection. ⚠️ À confirmer sur un vrai téléphone : jsdom ne le prouve pas.
+
+**Tests** (`tests/pwa-mes-jours-dom.test.js`, section « GLISSER ») : trois jours
+de repos ouverts sans ouvrir la feuille ; le doigt qui bouge avant l'appui long
+fait défiler et rien ne part ; le défilement retenu pendant la sélection
+seulement ; le sens du premier jour ; congé, absence de l'hôte, jour à ménage et
+offre intouchés ; arrêt au premier échec ; tape courte inchangée. Cinq rouges
+contre le code d'avant (`git archive`), verts aux dates décalées de 27 à 30 jours
+(`tests/outils/horloge-decalee.js`).
+
+## L'hôte est prévenu de chaque exception qu'elle pose (2 octobre 2026)
+
+**Décision de Thierry** : quand une prestataire pose ou retire elle-même une
+exception d'un jour depuis sa PWA, l'hôte le sait — **un message à chaque
+changement, dans les deux sens** (absente un jour habituel, disponible un jour
+de repos, et les retraits). Il avait le choix d'un message par heure ou de la
+seule tâche ; il a retenu un message par changement, en sachant qu'**un glisser
+de 10 jours envoie 10 messages**.
+
+**Le canal est celui de ses jours habituels** (`alertReglesModifiees`, avec
+`rassurer: false` — la phrase « les ménages acceptés ne sont pas touchés » est
+hors sujet pour une exception) : la **tâche du jour** de cette prestataire
+cumule tout, jours habituels et exceptions ensemble, et **reste** ; l'envoi
+SMS/e-mail configuré part à chaque changement et peut se rater. Le texte est
+en jours : « **Lena s'est déclarée absente le samedi 10 octobre 2026, depuis son
+application.** » — « disponible le », « a retiré son absence du », « a retiré sa
+disponibilité exceptionnelle du ».
+
+- ⚠️ **Le retrait dit CE QUI a été retiré** : la suppression rend désormais
+  `available`. « Elle a retiré une exception » ne dit pas à l'hôte s'il gagne ou
+  perd quelqu'un ce jour-là.
+- ⚠️ **On se tait quand rien n'a changé** : la ligne d'avant est lue ; une double
+  tape qui repose le même sens n'envoie rien. Une lecture en panne ne bloque
+  pas l'écriture — au pire on annonce une fois de trop, jamais une de moins.
+- ⚠️ **Un refus n'annonce rien** (ligne de l'hôte, valeur invalide, passé).
+- **Best-effort** : l'exception est enregistrée avant l'annonce ; une panne
+  d'alerte ne fait pas croire à la prestataire que son geste a échoué.
+- Le bien sert au **routage** de l'envoi (configuration d'alerte par bien) :
+  n'importe laquelle de ses liaisons actives. Sans liaison, la tâche est posée
+  mais rien ne part (limite connue de `envoyerSiPossible`).
+
+**Ce que la review a trouvé** (aucun constat de sécurité) — deux défauts qui
+faisaient dire FAUX à l'hôte, corrigés dans `alertReglesModifiees` et donc
+aussi pour les jours habituels :
+- ⚠️ **Le SMS répétait le premier changement de la journée.** Il coupe le résumé
+  à 100 caractères, et on renvoyait le CUMUL : un glisser de dix jours envoyait
+  dix SMS ne parlant que du premier. Chaque envoi porte désormais **ce
+  changement-ci** ; la tâche garde le cumul en entier.
+- ⚠️ **Un aller-retour finissait sur le mauvais état.** `deja.includes(texte)`
+  écartait tout texte déjà vu dans la journée : absente → disponible → absente,
+  et la tâche finissait sur « disponible ». Seule la **répétition immédiate**
+  (le cumul se termine déjà par ce changement) est un doublon.
+- Le bien de routage est **ordonné** (`unBienDElle`, exportée et réutilisée au
+  lieu d'être recopiée) : sans `order`, le message partait ou non selon l'ordre
+  de la base, quand l'hôte n'a configuré ses alertes que sur un de ses biens.
+- Coût assumé : l'annonce est **attendue** avant la réponse (une fonction
+  serverless peut être coupée après) ; un glisser attend chaque envoi.
+
+Tests : `tests/menages-public-disponibilites.test.js`, section « L'HÔTE EST
+PRÉVENU » — cinq rouges contre le code d'avant (`git archive`), les tests de
+silence verts des deux côtés ; `tests/alert-regles-modifiees.test.js` — le SMS
+réellement envoyé (doubles de `sendSms` / `sendPlatformEmail`), trois rouges
+contre le premier jet.
+
+### Un glisser = un seul SMS qui résume la plage (2 octobre 2026)
+
+**Décision de Thierry** : un glisser sur plusieurs jours produit **un seul SMS**
+qui résume la plage (« **Tiphaine dispo du 12 au 21/10 (10 jours)** »), pas un
+par jour ; la **tâche garde le détail jour par jour**. Une tape sur un seul jour
+garde son SMS, comme avant.
+
+**Comment** : chaque jour du glisser part avec `plage: true` — le serveur l'écrit
+dans la tâche du jour **sans envoi**, marqué « **(glisser)** ». À la fin, la PWA
+appelle **`annoncerPlage`**, sans rien d'autre : le serveur relit la tâche,
+prend les jours « (glisser) » écrits **après le dernier résumé**, compose le SMS
+et inscrit « Résumé envoyé par SMS : « … » » à la fin de la tâche.
+
+⚠️ **Constat de SÉCURITÉ de la review, corrigé** : la première version laissait
+la PWA dicter le résumé (bornes, nombre, sens) et ne consommait pas la fenêtre
+de 10 minutes — un appel forgé pouvait faire dire à l'hôte « absente du 1er au
+30/11 » sans que rien n'ait changé, ou rejouer l'annonce en boucle (SMS
+facturés). Désormais **le corps de la requête est ignoré** (le serveur ne se
+fie qu'à ce qu'il a lui-même écrit) et **la fenêtre se consomme** (le résumé
+inscrit à la fin de la tâche ; un second appel ne trouve plus rien de neuf). Le
+résumé est inscrit **avant** l'envoi, et **sous condition** (`.eq('summary', …)`, lignes
+touchées comptées) : deux annonces simultanées lisaient le même résumé sans
+marque et envoyaient chacune (constat de la re-review, durcissement) — désormais
+une seule passe, l'autre ne touche aucune ligne et n'envoie rien.
+
+**Formats** (tranchés seul) : jours contigus d'un même sens → « Tiphaine dispo
+du 12 au 21/10 (10 jours) », « du 28/10 au 03/11 », « le 12/10 (1 jour) » ; jours
+**non contigus** (congé, ménage, jour déjà dans le bon sens sautés) → « Tiphaine
+dispo 7 jours entre le 12 et le 21/10 » — ne pas prétendre à une plage
+continue ; sens mêlés → « Tiphaine : dispo 5 jours, absente 2 jours, entre le …
+». Le dernier changement d'un jour l'emporte.
+
+⚠️ **Limites connues, assumées** :
+- `plage: true` vient du client : forgé, il évite le SMS de ce jour, **jamais la
+  trace** — la tâche reçoit le détail dans tous les cas.
+- Si l'annonce n'arrive pas (téléphone verrouillé, réseau, ou glisser fini
+  avant minuit et annoncé après — la tâche est datée en heure de Paris), l'hôte
+  n'a **pas de SMS** pour ce glisser ; la tâche, elle, porte tout. Les jours non
+  annoncés partent avec le résumé du glisser suivant du même jour.
+
+**Le harnais** sait maintenant faire partir un vrai SMS (doubles de `sendSms` /
+`sendPlatformEmail`, liaison de routage, configuration d'alerte) et enregistre
+une mise à jour attendue sans `.select()` — sans quoi le détail jour par jour
+était invisible au test.
+
+Tests : « un glisser sur 10 jours donne UN SMS » (rouge contre le code d'avant :
+dix SMS), rejouer l'annonce n'envoie rien de plus, le corps forgé est ignoré,
+jours non contigus, un seul jour, sens mêlés, une tape seule garde son SMS et
+n'est pas ré-annoncée, droit `read` = 403 ; côté PWA, chaque jour part en
+`plage` et une seule annonce suit, sans aucune donnée. Le double de la tâche du
+jour garde son état d'une écriture à l'autre (sinon le test des 10 jours passait
+même si les jours n'écrivaient rien).
+
+## Un test de congé à dates figées (2 octobre 2026)
+
+« poserConge enregistre la plage » (`tests/disponibilites-endpoint.test.js`)
+posait un congé figé au 5-12 octobre 2026 ; `poserConge` refuse une fin
+antérieure à J-30 en lisant l'horloge réelle : rouge le 12 novembre (J+41),
+sans changement de code. Dates rendues relatives (J+3 à J+10), assertions
+inchangées ; vert de J à J+365, et la mutation « source du congé » rougit
+toujours.
+
+## Voir les ménages pris par d'autres (2 octobre 2026)
+
+Spec : `docs/specs/spec-visibilite-menages-autrui.md` (décisions de Thierry :
+portées cumulées, heure de départ du bien, pas de légende, mobile limité à la
+carte). **Par défaut, rien ne change** : sans ligne `menage_visibilite`, elle ne
+voit que ses ménages.
+
+**Stockage** : table `menage_visibilite` (`user_id`, `profile_id`, `par_bien`,
+`profils_vus uuid[]`, `updated_at`, `updated_by`), RLS `prestataires`.
+⚠️ **Migration `migrations/2026-10-02-menage-visibilite.sql` NON APPLIQUÉE** :
+ni staging ni prod (consigne de la nuit). Tant qu'elle ne l'est pas, ce code ne
+peut pas partir sur staging : la lecture du réglage coupe (503) sur une table
+absente — c'est voulu (une panne ne doit ni vider ni remplir la vue), mais ça
+couperait la PWA de toutes les prestataires.
+
+**Writer** (`api/disponibilites.js`, action `reglerVisibilite`) : domaine
+`prestataires`, délégué compris ; chaque prestataire désignée est un profil
+`lien` de ce compte ; jamais elle-même ; 20 au plus. **Lecture** (même endpoint,
+GET) : `visibilite` dans la réponse, panne = 503.
+
+**Serveur PWA** (`api/menages-public.js`, `menagesDAutrui`) : relu à chaque
+lecture du planning ; union des deux portées ; seulement `accepted` / `started`
+/ `completed`, par une personne **active** du compte, sur le **périmètre du
+lien** ; jamais un ménage déjà dans les siens (porté ou proposé à elle). Liste
+**à part** (`autrui`), jamais mêlée à `bookings` ni à `menages` : c'est ce qui
+empêche, par construction, qu'elle compte comme « à moi ». **Liste blanche**
+construite champ par champ : `{ bien, date, heure, prestataire }`, et un test
+d'ÉGALITÉ des clés rougit si un champ s'ajoute.
+
+**Écran PWA** : une pastille **blanche** sur la case, à côté du reste ; le fond,
+le vert, la bulle et « jour travaillé » n'en tiennent aucun compte. Au toucher,
+une section « Pris par une autre » : bien, heure (« heure non précisée » sinon),
+prestataire — en `<div>`, aucun bouton. **Pas de légende** (décision du
+18 septembre maintenue par Thierry).
+
+**Fiche hôte** : carte « Ce qu'elle voit des autres » dans le bloc des jours,
+écrite au changement de case, verrou du bloc, état dit en clair (« Elle ne voit
+que ses propres ménages »), date du dernier réglage. Règles mobiles pour cette
+carte seule ; la fiche entière est la **dette 40**.
+
+**Choix tranchés seul, cette nuit, et pourquoi** :
+- **Pas de filtre de biens sur les ménages d'autrui dans la PWA** : la liste
+  blanche ne porte que le *nom* du bien, pas son identifiant ; ajouter
+  l'identifiant pour honorer un filtre d'affichage aurait fait sortir un champ
+  de plus que la spec.
+- **Pas de ligne dans « Mes 30 jours »** : cette liste dit ce qu'elle a à faire ;
+  le travail des autres reste au calendrier et à la feuille.
+- **Une personne désactivée** reste désignable et affichée « (désactivée) » si
+  elle l'était déjà — sinon une case invisible garderait un réglage qu'on ne
+  peut plus défaire ; ses ménages ne sortent plus côté PWA.
+- **`updated_by`** = l'identifiant de session de qui a réglé (hôte ou délégué) ;
+  la fiche n'affiche que la date (afficher le nom demanderait une lecture de
+  plus).
+- **Ménages proposés à une autre** (non acceptés) : invisibles aux collègues,
+  comme le dit la spec (§11) — seul le PRIS est montré.
+
+Tests (rouges contre `main`) : `tests/menages-public-visibilite.test.js` (sans
+réglage zéro partout ; même requête avec/sans : ses ménages et compteurs
+identiques ; liste blanche exacte ; par bien, par personne, union ; autre compte
+et elle-même ignorées ; panne = 503 ; relu sur ce compte et ce profil — le double
+applique vraiment les filtres), `tests/disponibilites-visibilite.test.js` (hôte,
+délégué `write`, délégué `read` = 403, autre compte / membre à compte / elle-même
+/ plus de 20 / mal formé = 400, lecture et panne), DOM PWA (jamais « à moi »,
+détail en lecture seule, heure non précisée, rien sans autorisation) et DOM fiche
+(défaut, liste, désactivée cochée, écriture immédiate, refus, règles mobiles).
+
+**Ce que la review a trouvé** (aucun constat de sécurité ; les quatre garde-fous
+de la spec — champs sensibles, aucune action, filtrage serveur, délégation et
+cloisonnement — vérifiés un par un et tenus). Corrigé sans seconde review :
+- les lectures d'autrui partent **en promesse** et en **parallèle** (en série,
+  elles rallongeaient tout le planning — ce que `f90874f` avait retiré) ; triées,
+  et une troncature au plafond **se dit** dans les journaux ;
+- la migration est **rejouable** (`drop policy if exists`) et ne donne plus au
+  client que la **lecture** : le writer unique écrit en clé de service, aucune
+  autre voie d'écriture n'existe ;
+- le vérificateur **dit** qu'une table vide ne prouve pas la RLS (règle 16) ;
+- tests ajoutés : un ménage d'un **autre compte** sur le même identifiant de bien
+  ne sort jamais ; **aucune action** (prise, fait, défait, retrait) sur le ménage
+  d'une autre, même avec ses identifiants devinés — avec un contrôle positif sur
+  son propre ménage, sans lequel le test pourrait passer à vide ;
+- sous « par bien », les biens concernés sont rappelés.
+
+**Écarts restants, notés et non traités** (à trancher par Thierry) :
+- ✓ **« Réglé le … par [nom] »** (décision de Thierry, 2 octobre) : le GET
+  rend `regle_par`, résolu par le profil de ce compte dont `member_user_id` est
+  `updated_by` — le titulaire a un tel profil comme le délégué. Une panne de
+  cette lecture ne coupe rien : la date reste, sans le nom ;
+- ✓ **deux mêmes prénoms** se distinguent par l'**initiale du nom**
+  (« Marie D. », « Marie P. ») ; un prénom unique reste seul. Le nom vient de
+  `/api/menages?contacts=1`, déjà appelé par la fiche ;
+- ⚠️ **un délégué n'atteint PAS cette carte** : toute la page Prestataires est
+  « non délégable » (`exigerCompteProprePage`, posée parce qu'en mode basculé
+  elle montrait les données de la mauvaise personne). Le serveur accepte déjà le
+  délégué `prestataires: write` ; l'écran, non. **Décision de Thierry
+  (2 octobre)** : la visibilité part en recette ainsi, et l'ouverture de la page
+  aux délégués — avec cases grisées « lecture seule » pour qui n'a que la
+  lecture — est un **lot séparé** (**dette 47**) ;
+- ⚠️ **ORDRE DE DÉPLOIEMENT** : migration appliquée et prouvée
+  (`scripts/verifier-migration-menage-visibilite.js` + `select pg_policies`)
+  **avant** toute fusion vers staging ou main, sinon la PWA de toutes les
+  prestataires répond 503.
+
+### ⚠️ Règle gravée : seule une personne CONNECTÉE modifie les droits d'une prestataire (2 octobre 2026)
+
+**Demande de Thierry.** Les droits et réglages d'une prestataire — ce qu'elle
+voit des autres, ses biens, son droit de régler ses absences — ne se modifient
+que par une **session HôteSmart** (le titulaire, ou un délégué qui en a le droit).
+**Jamais par un lien PWA**, ni le sien ni celui d'une autre : un jeton de
+prestataire désigne une personne, il ne l'authentifie pas.
+
+- Le writer de visibilité (`api/disponibilites.js`) commence par
+  `verifierSession` : un jeton de prestataire, en `Authorization` comme en
+  paramètre, reçoit **401** et rien ne s'écrit.
+- La PWA (`api/menages-public.js`) n'a **aucune** action qui touche
+  `menage_visibilite` : `reglerVisibilite` y est une action inconnue.
+- La base n'offre au client que la **lecture** (`menage_visibilite_select`) :
+  aucune autre voie d'écriture.
+
+Tests : `tests/disponibilites-visibilite.test.js` — « un JETON DE PRESTATAIRE
+est refusé par le writer de visibilité » (contre-épreuve : garde de session
+retirée dans une copie hors de l'arbre → le test rougit) ;
+`tests/menages-public-visibilite.test.js` — « la PWA n'a AUCUNE action pour
+régler ce qu'elle voit ».
+
+## Proposer à tout un rang (2 octobre 2026)
+
+Spec : `docs/specs/spec-proposition-par-rang.md` (décisions de Thierry : 3 rangs,
+la première qui accepte l'a, « Déjà pris par une collègue », pas de SMS aux
+autres, l'hôte alerté seulement quand il ne reste personne, délai partagé en
+dernière minute). Cas réel qui l'a motivé : Ofuro Futari, dimanche 4 octobre —
+Lena et Tiphaine voulues au rang 1, Lola au rang 2.
+
+**Stockage** : `menages.proposee_a uuid[]` (choix de Thierry : une colonne
+liste). `null` = pas de proposition ; jamais vide (`menages_proposee_non_vide`),
+jamais la porteuse (`menages_proposee_pas_a_soi`), toujours avec une échéance
+(`menages_offre_datee`, tolérante aux deux colonnes pendant la bascule). Index
+GIN pour « ce qu'on me propose ». ⚠️ **Migration
+`migrations/2026-10-02-menages-proposee-a.sql` préparée, NON APPLIQUÉE** ;
+preuve par `scripts/verifier-migration-menages-proposee-a.js`.
+
+**`offered_to` n'est plus écrit**, seulement lu en repli par `proposeesDe()`
+(`lib/cleaning/assign.js`) — l'unique lecture du tour, partout. La migration
+COPIE sans vider ; `rattraperBascule` (début de `expirerPropositions`) reprend à
+chaque cycle ce que l'ancien code a pu poser entre migration et déploiement.
+Colonne `offered_to` à supprimer dans un lot ultérieur, avec `rattraperBascule`.
+
+**Moteur** (`deciderParGarde`) : `proposees` = toutes les candidates du plus
+petit rang de la file (à confirmer, jours réglés, pas dans `exclus`) ; `rang` ;
+`rangsRestants`. `offeredTo` reste un alias en lecture du premier.
+
+**Choix faits au codage** :
+- **rang par défaut = 1** sur la fiche (il était déduit : d'office = 1, à
+  confirmer = 2). Le rang lu en base est borné à 1-3 à l'affichage ;
+- **le modèle parallèle est gardé** : porteuse d'office + rang à confirmer →
+  la proposition part à côté, au rang entier (spec §2 règle 1, précisée) ;
+- **échéance** : `echeanceOffre(depart, maintenant, rangsRestants)` = temps
+  jusqu'à la veille 18 h ÷ rangs restants, borné entre 1 h et 48 h ;
+- **une ligne de journal par personne** (`offered`, `expired`) : c'est la
+  mémoire qui empêche de resolliciter celle qui n'a pas répondu ;
+- **acceptation** conditionnelle sur `.contains('proposee_a', [moi])` : la
+  première vide le tour, la seconde ne touche rien et relit — porteuse changée
+  → 409 « Déjà pris par une collègue. » ;
+- **refus partiel** : elle seule est retirée, conditionnel sur le tour EXACT lu
+  (`contains` + `containedBy`) ; pas d'escalade, pas d'alerte. La dernière du
+  tour → `remplacanteApresRefus` sollicite le rang suivant entier ;
+- **expiration** : l'hôte n'est alerté que si `quiResteASolliciter` ne trouve
+  plus personne (panne de lecture = on suppose qu'il reste quelqu'un : l'alerte
+  attend un cycle plutôt que de partir à tort) ;
+- **`rendreAuMoteur`** (changement des règles d'une prestataire) ne retire
+  qu'elle du tour.
+
+Tests : `tests/proposition-par-rang.test.js` (moteur, dernière minute J+1 :
+trois rangs avant la veille 18 h), et les sections « tour d'un rang » de
+`menages-public-offre`, `cleaning-sync-menages-entite`,
+`prestataires-formulaire-dom`. Contre-épreuve contre `main` par `git archive` :
+tous rougissent, sauf les quatre de non-régression (48 h au loin, plancher 1 h,
+veille passée, alerte au dernier rang). Mutation : retirer la garde
+`restants.has` fait rougir « un tour EXPIRÉ dont un rang reste… N'ALERTE PAS ».
+
+⚠️ **Ordre de déploiement** : migration appliquée et prouvée **avant** toute
+fusion — le nouveau code lit `proposee_a`, une colonne absente fait échouer
+planning PWA et cron. Les rangs de la prod se règlent ensuite par Thierry, sur
+les fiches (aucune écriture de rang en base par le lot).
+
+### Ce que la review a trouvé (2 octobre 2026) — aucun constat de sécurité
+
+- **Bloquant 1, corrigé** — un ménage ACCEPTÉ par une personne du rang était
+  reproposé à sa collègue au cycle suivant (le filtre retirait la porteuse du
+  tour au lieu de constater que le tour était gagné), puis renvoyé de l'une à
+  l'autre toutes les 5 minutes. `poserPropositionsDues` saute désormais un
+  ménage dont la porteuse est dans le rang sollicité.
+- **Bloquant 2, corrigé** — entre migration et déploiement, l'ANCIEN code
+  écrit `offered_to` sans connaître la liste : acceptation refusée par
+  `pas_a_soi`, offre revue par celle qui venait de refuser, expiration en lot
+  qui échoue. La migration pose un **déclencheur**
+  `menages_offered_to_vers_liste` : `offered_to` posé (non nul) → liste
+  `[offered_to]` ; `offered_to` effacé AVEC l'échéance → liste nulle ; rien
+  d'autre (une écriture du nouveau code qui efface `offered_to` en gardant une
+  offre datée ne touche pas la liste). Il couvre aussi les offres posées par
+  l'ancien code invisibles jusqu'au cycle suivant. Pas de serveur Postgres
+  local : il s'éprouve sur staging par un bloc `begin … rollback`.
+  À retirer avec `offered_to`.
+- **Corrigés** : alerte supprimée à tort quand une porteuse d'office est de
+  garde mais que personne ne reprend le `orphaned` ; « Déjà pris par une
+  collègue » affiché quand c'est l'hôte qui a assigné hors du tour ;
+  `offered_to` périmé laissé par un refus partiel.
+- **Dette 49** — deux refus SIMULTANÉS dans un tour de deux : les deux
+  écritures sont conditionnées sur le même tour exact, la seconde reçoit 409 et
+  son refus n'est pas enregistré ; elle reste dans le tour jusqu'à l'échéance.
+  Escalade retardée, aucune perte.
+- **Dette 50** (antérieure au lot) — `expirerPropositions` met à jour par `id`
+  seul : une acceptation commise juste avant l'échéance, entre la lecture du
+  cron et son écriture, est écrasée (`orphaned` avec l'acceptante en
+  porteuse). Le tour à plusieurs rend la course un peu plus probable.
+
+### Recette staging du 2 octobre 2026 — cinq cas conformes
+
+Validée par Thierry (Anna, Berthe au rang 1, Carla au rang 2) : la première qui
+accepte l'a, la seconde lit « Déjà pris par une collègue » ; deux refus du rang
+1 → Carla sollicitée dans la même requête ; Carla ne voit rien tant que le rang
+1 n'a pas fini ; planning hôte conforme avant et après ; rang changé sur la
+fiche et conservé. Échéances réelles conformes au partage (54 h 17 ÷ 2 rangs).
+Nettoyage fait sur go (8 lignes de journal, 2 ménages, 3 profils).
+
+**Lot à part, décidé le 2 octobre 2026** : « moins de 3 h par rang → tous les
+rangs restants sollicités en même temps ». Ce n'est PAS la règle livrée (spec
+§2 bis : 1 h minimum par rang, l'un après l'autre). Choix de Thierry : prod tel
+quel, cette règle viendra avec sa spec, son test rouge contre main, sa review
+et sa recette.
+
+## Un tour en cours s'élargit à qui devient disponible (2 octobre 2026)
+
+**Cas réel** : Ofuro Futari, ménage du mercredi 7 octobre. Posé à 13 h 20 à Lena
+seule (Tiphaine, rang 1 aussi, n'était pas de garde ce mercredi-là : semaine
+sans mercredi dans sa récurrence). À 18 h 09, Tiphaine s'ouvre le 7 depuis sa
+PWA — et rien ne l'ajoutait : le tour était calculé une fois pour toutes à la
+pose. Le cas inverse (devenir indisponible → retirée du tour) existait déjà
+(`apres-changement-regles`).
+
+**Correctif** : `elargirToursEnCours` (`lib/cleaning/sync-menages-entite.js`),
+appelé à la fin de `poserPropositionsDues` — donc dans l'étape cron existante,
+**`api/cron.js` inchangé**. À chaque cycle, chaque tour en cours (garde, auto,
+non échu, dans la fenêtre de proposition) est recalculé par le MÊME moteur
+(`deciderParGarde` + mémoire des refus) ; les candidates qu'il solliciterait et
+qui ne sont pas dans la liste y sont **ajoutées** :
+- on ajoute, on ne retire jamais ; **l'échéance ne bouge pas** (la nouvelle
+  venue a le temps qui reste, les autres ne voient pas leur tour prolongé) ;
+- un point unique couvre tous les chemins (exception de la prestataire ou de
+  l'hôte, absence retirée, règle, congé supprimé, rang changé) : l'ajout arrive
+  au plus 5 minutes après le geste ;
+- **on n'élargit que ce que le journal PROUVE être un tour du moteur** (règle
+  renversée après la review, qui y a trouvé un contournement du choix de
+  l'hôte) : chaque personne du tour a sa ligne `offered`/`created` d'acteur
+  `cron` depuis `offered_at`, et aucune ligne d'un autre acteur. Une proposition
+  de l'hôte (qui ne pose pas de verrou `manual`) ou une ligne de journal
+  manquante → on n'élargit pas. Vérifié sur les trois tours réels de la prod le
+  2 octobre : tous prouvés, dont celui du 7 ;
+- **qui a déjà été sollicitée dans ce tour ne revient pas** (sa ligne existe,
+  elle n'est plus dans la liste : refus, même non journalisé, ou jour perdu) ;
+- **jamais au-delà du rang du tour** (une membre absente par exception datée
+  n'est pas retirée : sans cette garde, le moteur aurait ajouté le rang 2 avant
+  l'épuisement) ; un rang plus prioritaire, lui, est ajouté ;
+- **pas dans la dernière heure** avant l'échéance (elle expirerait avec le tour
+  et perdrait le ménage ; à l'expiration, la pose lui donne un tour entier) ;
+- plafond de SMS vérifié **avant** d'écrire (jamais ajoutée sans être prévenue) ;
+- même garde que la pose : personne ne porte mais la garde désigne une porteuse
+  d'office → on ne sollicite pas ;
+- jamais vers la porteuse, et rien si la porteuse est du rang sollicité (tour
+  déjà gagné) ;
+- écriture conditionnelle sur le tour exact lu et le plancher ; une ligne
+  `offered` (acteur `cron`) par nouvelle ; plafond **partagé** avec la pose.
+
+**Limite connue** : les tours posés par le rattrapage de l'hôte (`api/menages.js`,
+liaison ajoutée) sont journalisés `actor: 'host'` : ils ne sont jamais élargis.
+Sens prudent, assumé.
+
+Tests : section « ÉLARGIR » de `tests/cleaning-sync-menages-entite.test.js`
+(14 tests ; le double applique les filtres de lecture et l'heure des lignes).
+Contre `main` : les deux cas positifs rougissent. Mutations, une par garde
+(preuve d'acteur, preuve des membres, déjà sollicitée, plancher, rang,
+plafond, porteuse d'office, filtre `auto`) : chacune fait rougir son test.

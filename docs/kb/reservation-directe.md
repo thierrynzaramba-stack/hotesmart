@@ -271,7 +271,9 @@ Photo à la clôture : 4/4 biens actifs, 1436 lignes dans `bookings_snapshot`,
 
 Chantier UI calendrier desktop. `pages/biens-calendrier.html` uniquement —
 `pages/calendrier-mobile.html` reste en consultation pure, conformément au
-« desktop d'abord » du §10.
+« desktop d'abord » du §10. **Levé le 30 septembre 2026** (chantier calendrier
+mobile) : le mobile porte fiche, ajout et modification, par la règle commune
+`shared/calendrier-resa.js` — voir §12.
 
 ### Ce qui est devenu modifiable
 
@@ -526,3 +528,26 @@ rafraîchissement (envoi d'un message, changement de bien) ramènerait l'hôte d
 force sur la conversation d'origine, y compris après qu'il en a ouvert une
 autre. `?bien=` n'est appliquée que si le bien est réellement dans la liste :
 une valeur inconnue viderait l'écran par un filtre qui ne correspond à rien.
+
+## 12. Le calendrier mobile rattrape l'ordinateur (30 septembre 2026)
+
+Demande de Thierry. **Constat qui a tout déclenché : la couleur des
+réservations était tirée au sort sur le mobile** (`SRC[idx % 3]`, « source
+variée pour la démo ») — le même défaut que l'ordinateur avait corrigé, jamais
+reporté sur le téléphone. Une réservation Booking s'y affichait en rouge Airbnb.
+
+- **Une règle, deux écrans** : `shared/calendrier-resa.js` porte la famille de
+  source et sa couleur, la transformation des réservations (`mapResa`), le
+  droit de modifier et sa note (`droitsResa` — les quatre conditions de
+  l'ordinateur), la messagerie (`urlConversation`), la capacité, le badge
+  « Pas d'e-mail ». L'ordinateur n'a plus de copie locale ; le mobile non plus.
+- **Mobile** : bulle au nom du voyageur, sans logo, à la couleur du canal,
+  grisée une fois le séjour passé ; tap → fiche (arrivée, départ, nuits,
+  voyageurs, montant, canal, statut, commission, référence) ; « Écrire au
+  voyageur » (éteint, avec la raison, s'il n'y a pas de fil) ; modification et
+  annulation d'une réservation directe ; « + » et « Nouvelle réservation sur ces
+  dates » → le formulaire de l'ordinateur (Réservation / Indisponible) ;
+  indisponibilités dessinées avec leur raison, fiche modifier / supprimer.
+- **Aucune route nouvelle** : `reservationDirecte.creer/modifier/annuler`,
+  `calendar.fermer/modifierFermeture/rouvrirFermeture`,
+  `messages.aUneConversation`, les mêmes gardes serveur.

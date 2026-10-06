@@ -28,6 +28,9 @@
     .prop-ligne { justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 6px 0; }
     .prop-ligne-nom { display: flex; align-items: center; gap: 8px; }
     .rang-select { width: auto; min-width: 210px; font-size: 12px; padding: 5px 8px; }
+    /* LE RANG (spec proposition-par-rang, 2 octobre 2026) : la proposition part
+       en meme temps a toutes les personnes du meme rang. */
+    .rang-num { width: auto; min-width: 92px; font-size: 12px; padding: 5px 8px; margin-left: 6px; }
     .prop-bloc { border-bottom: 0.5px solid var(--border); padding-bottom: 8px; }
     .prop-bloc:last-child { border-bottom: none; }
     .jours-ligne { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 0 0 26px; }
@@ -112,6 +115,24 @@
                    color: var(--text2); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
     .dispo-champ .form-input { font-size: 12px; padding: 5px 8px; width: auto; }
     .dispo-occupe { opacity: .55; pointer-events: none; }
+    /* « CE QU'ELLE VOIT DES AUTRES » (spec visibilite, 2 octobre 2026). */
+    .vis-ligne { display: flex; align-items: flex-start; gap: 8px; font-size: 13px;
+                 padding: 6px 0; cursor: pointer; line-height: 1.35; }
+    .vis-ligne input { margin-top: 2px; flex: none; }
+    .vis-profils { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 2px 0 4px 24px; }
+    .vis-sous { font-size: 12px; color: var(--text2); margin: 8px 0 2px; }
+    /* ⚠ LE MOBILE SUIT L'ORDINATEUR (CLAUDE.md) : cette carte, et elle seule
+       dans ce lot (decision de Thierry ; la fiche entiere est au registre des
+       dettes). Lignes de 44 px, prestataires en colonne, aucun defilement
+       horizontal a 375 px. */
+    @media (max-width: 600px) {
+      .vis-ligne { min-height: 44px; align-items: center; padding: 4px 0; }
+      .vis-ligne input { margin-top: 0; width: 20px; height: 20px; }
+      .vis-profils { flex-direction: column; gap: 0; margin-left: 0; }
+      /* Le rang et l'engagement, au pouce (spec proposition-par-rang). */
+      .rang-select, .rang-num { min-height: 44px; }
+      .rang-num { margin-left: 0; margin-top: 6px; }
+    }
     .btn-mini { background: none; border: 0.5px solid var(--border); border-radius: 12px;
                 font-size: 11px; color: var(--text2); padding: 2px 10px; cursor: pointer; }
     .avert-rang { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E;
@@ -326,6 +347,21 @@
               </div>
               <div id="dispo-conges" style="margin-top:8px"><div class="dispo-vide">Chargement…</div></div>
 
+              <!-- ⚠ CE QU'ELLE VOIT DES MÉNAGES DES AUTRES (spec visibilite,
+                   2 octobre 2026). Par défaut, rien : elle ne voit que les
+                   siens. Les deux portées se CUMULENT. Écrit tout de suite, comme
+                   le reste de ce bloc. Le serveur vérifie le réglage à chaque
+                   lecture de sa PWA : l'écran n'est jamais la garde. -->
+              <div id="vis-carte">
+                <div style="font-size:12px;margin:16px 0 6px">Ce qu'elle voit des autres</div>
+                <label class="vis-ligne"><input type="checkbox" id="vis-par-bien">
+                  <span>Les ménages pris par d'autres sur les biens dont elle reçoit les propositions
+                    <span class="dispo-hint" id="vis-biens"></span></span></label>
+                <div class="vis-sous">Les ménages pris par :</div>
+                <div class="vis-profils" id="vis-profils"></div>
+                <p class="dispo-hint" id="vis-etat"></p>
+              </div>
+
               <!-- ⚠ SANS CE DROIT, L'ONGLET « Mes absences » N'EXISTE PAS dans sa
                    PWA. Il vaut « oui » pour toute personne créée depuis cet écran :
                    le laisser à « non » par défaut aurait rendu cet écran
@@ -335,6 +371,32 @@
                 <span style="font-size:12px">Elle peut déclarer ses absences depuis son application</span>
               </label>
               <div class="jours-aide" id="aide-self-dispo" style="display:none;padding-left:0"></div>
+            </div>
+          </div>
+
+          <!-- ⚠ L'ÉVALUATION DES VOYAGEURS — deux réglages du CŒUR, pas de l'app.
+               Ils vivent sur le profil (`eval_scope`, `eval_power`) et ne se
+               lisent ni ne s'écrivent ici directement : la fiche passe par le
+               bus (`avis.reglages_prestataire`, docs/kb/protocole-coeur.md).
+               Comme les disponibilités, ils s'écrivent TOUT DE SUITE et
+               n'apparaissent qu'en modification. Le bus répond « indisponible »
+               à qui n'a pas le droit d'écriture sur les avis : la section reste
+               alors cachée. « Seulement si vous l'y autorisez » (décision du
+               2 octobre 2026) : la case naît décochée. -->
+          <div id="eval-section" style="display:none">
+            <div style="font-size:11px;color:var(--text2);margin:16px 0 8px;font-weight:500">ÉVALUATION DES VOYAGEURS</div>
+            <div class="dispo-bloc">
+              <label class="prop-checkbox">
+                <input type="checkbox" id="eval-participe">
+                <span style="font-size:12px">Elle remplit les questions marquées « La prestataire » dans votre grille d’évaluation</span>
+              </label>
+              <label class="dispo-champ" style="margin-top:10px;display:block"><span>Quand elle a fini sa part</span>
+                <select class="form-input" id="eval-pouvoir">
+                  <option value="soumettre">Vous relisez et publiez</option>
+                  <option value="valider">Elle publie elle-même — sauf un avis négatif, qui vous revient toujours</option>
+                </select>
+              </label>
+              <div class="jours-aide" id="eval-etat" aria-live="polite" style="padding-left:0;margin-top:6px"></div>
             </div>
           </div>
 
@@ -391,6 +453,8 @@
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
   import { supabase } from '/shared/supabase.js'
+  // Le cœur parle aux apps par le bus, et par lui seul (docs/kb/protocole-coeur.md).
+  import { hsBus } from '/shared/hs-bus.js'
   import { initErrorHandler } from '/shared/error-handler.js'
 
   initErrorHandler()
@@ -622,6 +686,12 @@
             <option value="1" selected>Elle confirme</option>
             <option value="0">D'office — elle reçoit sans confirmer</option>
           </select>
+          <select class="form-input rang-num" id="rang-${p.id}" data-bien="${p.id}"
+                  aria-label="Rang sur ce bien" title="Les personnes du même rang reçoivent la proposition en même temps ; le rang 2 n'est sollicité que si personne du rang 1 n'a accepté.">
+            <option value="1" selected>Rang 1</option>
+            <option value="2">Rang 2</option>
+            <option value="3">Rang 3</option>
+          </select>
         </div>
         <div class="jours-ligne" id="jours-${p.id}">
           <span class="jours-titre">Jours confiés</span>
@@ -677,6 +747,8 @@
       if (!cb || !sel) return
       sel.disabled = !cb.checked
       sel.style.opacity = cb.checked ? '' : '0.45'
+      const selRang = document.getElementById(`rang-${p.id}`)
+      if (selRang) { selRang.disabled = !cb.checked; selRang.style.opacity = cb.checked ? '' : '0.45' }
       if (zone) {
         zone.style.opacity = cb.checked ? '' : '0.45'
         zone.querySelectorAll('input, button').forEach(e => { e.disabled = !cb.checked })
@@ -800,10 +872,14 @@
         const dOffice = document.getElementById(`ack-${p.id}`)?.value === '0'
         return {
           ref: p.id, uuid: p.uuid,
-          // ⚠ LE RANG SUIT L'ENGAGEMENT, il ne le décide plus. Il ne sert qu'à
-          // départager et à remplacer (§12.1) : une personne d'office passe
-          // devant, c'est tout ce que ce chiffre veut dire ici.
-          rang: dOffice ? 1 : 2,
+          // ⚠ LE RANG SE RÈGLE ICI (spec proposition-par-rang, 2 octobre 2026).
+          // Il était déduit de l'engagement (d'office = 1, à confirmer = 2) :
+          // toutes les personnes « à confirmer » d'un bien étaient donc au même
+          // rang, et départagées par un identifiant technique. Désormais
+          // l'hôte le choisit, et un même rang reçoit la proposition en même
+          // temps.
+          rang: [1, 2, 3].includes(Number(document.getElementById(`rang-${p.id}`)?.value))
+            ? Number(document.getElementById(`rang-${p.id}`).value) : 1,
           requires_ack: !dOffice,
           // ⚠ TOUJOURS ENVOYÉ, même vide : `[]` veut dire « aucun jour confié »,
           // un choix explicite, et le serveur le distingue d'un champ absent
@@ -1038,6 +1114,95 @@
     await rechargerTout()
   }
 
+  // ─── L'évaluation des voyageurs : deux réglages du cœur, par le bus ──────
+  // ⚠ UNE RÉPONSE TARDIVE NE PEINT PAS LA FICHE SUIVANTE. Même garde que les
+  // disponibilités : ouvrir la fiche A puis vite la fiche B faisait revenir la
+  // réponse de A après celle de B.
+  // ⚠ L'OUVERTURE ELLE-MÊME SERT DE JETON, pas le seul identifiant : ouvrir A,
+  // fermer, rouvrir A laissait la première lecture, en retard, repeindre la
+  // seconde ouverture (constat de revue). `etat` garde la dernière valeur que
+  // le SERVEUR a confirmée.
+  let reglagesAvis = null   // { profilId, etat }
+
+  function peindreReglagesAvis (d, message, ton) {
+    const participe = document.getElementById('eval-participe')
+    const pouvoir = document.getElementById('eval-pouvoir')
+    const etat = document.getElementById('eval-etat')
+    if (d) {
+      participe.checked = d.eval_scope === 'selon_grille'
+      pouvoir.value = d.eval_power === 'valider' ? 'valider' : 'soumettre'
+      if (reglagesAvis) reglagesAvis.etat = { eval_scope: d.eval_scope, eval_power: d.eval_power }
+    }
+    // Un pouvoir sans participation ne veut rien dire : on le grise.
+    pouvoir.disabled = !participe.checked || participe.disabled
+    etat.textContent = message || (participe.checked
+      ? ''
+      : 'Elle ne voit aucune question tant que vous ne l’y autorisez pas.')
+    etat.style.color = ton === 'erreur' ? '#b3261e' : ''
+  }
+
+  async function chargerReglagesAvis (profil) {
+    const section = document.getElementById('eval-section')
+    section.style.display = 'none'
+    reglagesAvis = null
+    // ⚠ `typeof`, pas une lecture directe : un bus absent (page montée sans ses
+    // imports, comme dans les tests du formulaire) levait une ReferenceError
+    // au milieu de l'ouverture de la fiche.
+    if (!profil || typeof hsBus === 'undefined' || !hsBus) return
+    const demande = profil.id
+    const jeton = { profilId: demande, etat: null }
+    reglagesAvis = jeton
+    const r = await hsBus.demander('avis.reglages_prestataire', { profile_id: demande })
+    if (reglagesAvis !== jeton) return   // une autre ouverture a pris la main
+    // « Indisponible » : pas de droit d'écriture sur les avis, ou cœur injoignable.
+    // La section reste cachée, comme le bus le demande aux apps.
+    if (!r.ok) return
+    const d = r.data
+    const participe = document.getElementById('eval-participe')
+    section.style.display = ''
+    if (!d || d.ok === false) {
+      // ⚠ UN REFUS SE DIT : un membre au périmètre partiel voit pourquoi il ne
+      // peut pas régler, au lieu de cases qui n'enregistrent rien.
+      participe.disabled = true
+      peindreReglagesAvis(null, (d && d.erreur) || 'Réglages illisibles.', 'erreur')
+      return
+    }
+    participe.disabled = false
+    peindreReglagesAvis(d)
+  }
+
+  async function ecrireReglageAvis (champ, valeur) {
+    const jeton = reglagesAvis
+    if (!jeton) return
+    const demande = jeton.profilId
+    const participe = document.getElementById('eval-participe')
+    const pouvoir = document.getElementById('eval-pouvoir')
+    // ⚠ GRISÉES JUSQU'À LA FIN, relecture comprise : une case cliquable pendant
+    // la relecture lançait une seconde écriture en parallèle.
+    participe.disabled = true; pouvoir.disabled = true
+    const r = await hsBus.demander('avis.reglages_prestataire', { profile_id: demande, [champ]: valeur })
+    if (reglagesAvis !== jeton) return
+    if (!r.ok || !r.data || r.data.ok === false) {
+      // ⚠ L'ÉCRAN NE GARDE PAS UNE VALEUR QUE LE SERVEUR N'A PAS PRISE : on relit,
+      // et si la relecture échoue aussi, on revient à la dernière valeur que le
+      // serveur a confirmée.
+      const raison = (r.data && r.data.erreur) || 'Le réglage n’a pas pu être enregistré.'
+      const relu = await hsBus.demander('avis.reglages_prestataire', { profile_id: demande })
+      if (reglagesAvis !== jeton) return
+      const connu = relu.ok && relu.data && relu.data.ok !== false ? relu.data : jeton.etat
+      participe.disabled = !connu
+      peindreReglagesAvis(connu, raison, 'erreur')
+      return
+    }
+    participe.disabled = false
+    peindreReglagesAvis(r.data, 'Enregistré.')
+  }
+
+  document.getElementById('eval-participe').addEventListener('change', (ev) =>
+    ecrireReglageAvis('eval_scope', ev.target.checked ? 'selon_grille' : 'aucun'))
+  document.getElementById('eval-pouvoir').addEventListener('change', (ev) =>
+    ecrireReglageAvis('eval_power', ev.target.value))
+
   function editPrestataire(id) {
     const p = prestataires.find(p => p.id === id)
     if (!p) return
@@ -1074,6 +1239,8 @@
     // faute que les coordonnées ci-dessus.
     const section = document.getElementById('dispo-section')
     section.style.display = profil ? '' : 'none'
+    // Les réglages d'évaluation viennent du cœur, par le bus.
+    chargerReglagesAvis(profil)
     if (profil) {
       // ⚠ L'ÉTAT VIENT DU SERVEUR, ET « INCONNU » N'EST PAS « NON ».
       // `permissions: null` veut dire que le serveur n'a pas pu lire ce droit.
@@ -1135,6 +1302,12 @@
                                    x.provider_id === editionEnCours)
       const sel = document.getElementById(`ack-${prop.id}`)
       if (sel) sel.value = l && l.requires_ack === false ? '0' : '1'
+      // Le rang LU EN BASE, borné à ce que l'écran propose (1 à 3).
+      const selRang = document.getElementById(`rang-${prop.id}`)
+      if (selRang) {
+        const r = Number(l && l.rang)
+        selRang.value = String(Number.isInteger(r) ? Math.min(3, Math.max(1, r)) : 1)
+      }
       // ⚠ `weekdays` NULL VEUT DIRE « TOUS LES JOURS » (§12.1), et c'est l'état
       // de toutes les liaisons d'avant ce lot. L'afficher avec zéro case cochée
       // se lisait « aucun jour » : le premier enregistrement de la fiche envoyait
@@ -1566,6 +1739,9 @@
 
   function resetForm() {
     editionEnCours = null
+    reglagesAvis = null
+    const sectionEval = document.getElementById('eval-section')
+    if (sectionEval) sectionEval.style.display = 'none'
     const section = document.getElementById('dispo-section')
     if (section) section.style.display = 'none'
     document.getElementById('presta-prenom').value = ''
@@ -1789,6 +1965,7 @@
     dispo.regles = data.regles || []
     dispo.exceptions = data.exceptions || []
     dispo.conges = data.conges || []
+    dispo.visibilite = data.visibilite || { par_bien: false, profils_vus: [], regle_le: null }
     peindreDispo()
     return true
   }
@@ -1798,6 +1975,68 @@
     peindreRecurrence()
     peindreMois()
     peindreConges()
+    peindreVisibilite()
+  }
+
+  // ─── CE QU'ELLE VOIT DES AUTRES (spec visibilite, 2 octobre 2026) ─────────
+  // Les autres prestataires du compte, ACTIVES — plus celles deja designees et
+  // desactivees depuis, pour qu'on puisse les decocher (sinon une case
+  // invisible garderait un reglage qu'on ne peut plus voir).
+  function peindreVisibilite() {
+    const v = (dispo && dispo.visibilite) || { par_bien: false, profils_vus: [], regle_le: null }
+    const vus = new Set((v.profils_vus || []).map(String))
+    document.getElementById('vis-par-bien').checked = v.par_bien === true
+    // La spec rappelle les biens concernes sous la case (constat de review) :
+    // ses liaisons ACTIVES, celles dont elle recoit les propositions.
+    const sesBiens = (liaisons || [])
+      .filter(l => String(l.provider_id) === String(dispo.profilId) && l.active !== false)
+      .map(l => ((properties || []).find(p => String(p.id) === String(l.property_id)) || {}).name)
+      .filter(Boolean)
+    document.getElementById('vis-biens').textContent = sesBiens.length
+      ? ` — aujourd'hui : ${sesBiens.join(', ')}` : ' — elle ne reçoit aujourd\'hui les propositions d\'aucun bien'
+    const autres = (prestatairesProfils || [])
+      .filter(p => String(p.id) !== String(dispo.profilId) && (p.actif !== false || vus.has(String(p.id))))
+    // ⚠ DEUX MEMES PRENOMS SE DISTINGUENT (demande de Thierry) : prenom + initiale
+    // du nom, seulement quand le prenom est partage — sinon le prenom seul.
+    const parPrenom = new Map()
+    for (const p of autres) parPrenom.set(p.prenom || '', (parPrenom.get(p.prenom || '') || 0) + 1)
+    const nomAffiche = p => (parPrenom.get(p.prenom || '') > 1 && p.nom)
+      ? `${p.prenom || '—'} ${String(p.nom).trim().charAt(0).toUpperCase()}.` : (p.prenom || '—')
+    document.getElementById('vis-profils').innerHTML = autres.length
+      ? autres.map(p => `<label class="vis-ligne"><input type="checkbox" data-vis="${echapper(p.id)}"` +
+          `${vus.has(String(p.id)) ? ' checked' : ''}><span>${echapper(nomAffiche(p))}` +
+          `${p.actif === false ? ' (désactivée)' : ''}</span></label>`).join('')
+      : '<div class="dispo-vide">Aucune autre prestataire sur ce compte.</div>'
+    // ⚠ L'ETAT PAR DEFAUT EST DIT EN CLAIR : sans phrase, un bloc tout decoche
+    // ne dit pas si c'est voulu ou si rien n'a encore ete regle.
+    const noms = autres.filter(p => vus.has(String(p.id))).map(nomAffiche)
+    const parts = []
+    if (v.par_bien === true) parts.push('les ménages de ses biens')
+    if (noms.length) parts.push('ceux de ' + noms.join(', '))
+    let etat = parts.length ? 'Elle voit aussi ' + parts.join(', et ') + ' — le bien, la date, l\'heure et le nom, rien d\'autre.'
+                            : 'Elle ne voit que ses propres ménages.'
+    if (v.regle_le) etat += ` Réglé le ${new Date(v.regle_le).toLocaleDateString('fr-FR')}` +
+                           (v.regle_par ? ` par ${v.regle_par}.` : '.')
+    document.getElementById('vis-etat').textContent = etat
+  }
+
+  async function reglerVisibilite() {
+    await geste(async () => {
+      const parBien = document.getElementById('vis-par-bien').checked
+      const profils = [...document.querySelectorAll('#vis-profils input[data-vis]:checked')]
+        .map(c => c.dataset.vis)
+      const { ok, data } = await appelDispo('POST', { provider_id: dispo.profilId, action: 'reglerVisibilite',
+        par_bien: parBien, profils_vus: profils })
+      if (!ok) {
+        alert((data && data.error) || 'Le réglage n\'a pas pu être enregistré.')
+        // On repeint l'etat CONNU : les cases ne doivent pas mentir apres un refus.
+        peindreVisibilite()
+        return
+      }
+      dispo.visibilite = data.visibilite || dispo.visibilite
+      peindreVisibilite()
+      showToast('✓ Réglage enregistré')
+    })
   }
 
   function ligneJours(cle, jours, tag, classe) {
@@ -2209,6 +2448,9 @@
   document.getElementById('dispo-auj').addEventListener('click', () => {
     if (dispo) { dispo.mois = 0; peindreMois() } })
   document.getElementById('btn-conge').addEventListener('click', poserConge)
+  document.getElementById('vis-carte').addEventListener('change', e => {
+    if (e.target && e.target.matches('#vis-par-bien, #vis-profils input[data-vis]')) reglerVisibilite()
+  })
 
   const zoneMois = document.getElementById('dispo-months')
   // ⚠ PAS DE `setPointerCapture` — ET C'EST LE CONTRAIRE D'UN OUBLI.

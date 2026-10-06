@@ -21,6 +21,7 @@
     .tab.active { color: #C97B5C; border-bottom-color: #C97B5C; font-weight: 500; }
     .tab .ext { font-size: 10px; color: var(--text2); margin-left: 4px; }
 
+
     .card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 20px; margin-bottom: 16px; }
     .card-title { font-size: 15px; font-weight: 500; margin-bottom: 4px; }
     .card-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; line-height: 1.5; }
@@ -146,6 +147,7 @@
     </div>
   </div>
 
+
   <div id="zone-equipe" style="display:none">
     <div class="card">
       <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:4px">
@@ -214,11 +216,17 @@
 </div><!-- .main -->
 </div><!-- .layout -->
 
+<script>
+  // ⚠ AVANT TOUT : l'ancienne adresse des réglages des avis renvoie vers l'app
+  // Avis (décision du 2 octobre 2026 au soir), y compris pour un compte délégué
+  // que la garde de cette page refuserait.
+  if (new URLSearchParams(location.search).get('onglet') === 'avis') location.replace('/avis?reglages=1')
+</script>
 <script type="module">
   // ⚠ PAGE NON DELEGABLE : elle montre les donnees de la personne connectee,
   // pas celles du compte sur lequel on travaille. Sans ce garde-fou, elle
   // s'ouvrait par URL directe en mode basculé et affichait un contresens.
-  import { exigerCompteProprePage } from '/shared/compte-courant.js'
+  import { exigerCompteProprePage, peutEcrire } from '/shared/compte-courant.js'
   await exigerCompteProprePage({ nomPage: 'Les réglages' })
 
   // Le menu. `renderSidebar` crie si son point de montage manque — c'est ce
@@ -228,6 +236,12 @@
 
 import { supabase } from '/shared/supabase.js'
 import { api } from '/shared/api-client.js'
+
+// ⚠ L'ONGLET AVIS LIT SA SESSION ICI. `core/avis/appel.js` prend le jeton dans
+// `window._supabase` : sans cette ligne, chaque appel partait sans jeton et
+// l'onglet affichait « Non autorisé » (recette du 1er octobre 2026). Même pose
+// que pages/avis.html. Pas d'`enteteCompte` : cette page n'est pas délégable.
+window._supabase = supabase
 
 const DOMAINES = [
   ['reservations', 'Réservations', 'Calendrier, tarifs et disponibilités des biens du périmètre. « Modifier » publie vers les plateformes.'],
@@ -264,6 +278,11 @@ async function charger () {
     const d = await api.membres.list()
     profils = d.profils || []
     biens   = d.biens || []
+    // ⚠ On note CE QUI EST VISIBLE, pour que la bascule d'onglets sache quoi
+    // rallumer : un membre sans droit `equipe` voit `zone-refus`, et revenir de
+    // l'onglet Avis ne doit pas lui afficher une liste d'équipe vide.
+    $('zone-equipe').dataset.visible = 'oui'
+    $('zone-refus').dataset.visible = 'non'
     $('zone-equipe').style.display = 'block'
     $('zone-refus').style.display = 'none'
     rendreListe()
@@ -271,10 +290,21 @@ async function charger () {
     // 403 = domaine `equipe` non accordé. Ce n'est pas une erreur à afficher en
     // rouge : c'est un état normal pour un membre.
     if (/droits insuffisants/i.test(e.message)) {
+      $('zone-refus').dataset.visible = 'oui'
+      $('zone-equipe').dataset.visible = 'non'
       $('zone-refus').style.display = 'block'
       $('zone-equipe').style.display = 'none'
       return
     }
+    // ⚠ MEME SUR UN ECHEC NON PREVU, LES DRAPEAUX SE POSENT. Constat de review :
+    // sans eux, un aller-retour par l'onglet Avis laissait la page entierement
+    // vide, les deux zones restant a `display:none` sans que rien ne le dise.
+    $('zone-refus').dataset.visible = 'oui'
+    $('zone-equipe').dataset.visible = 'non'
+    $('zone-refus').style.display = 'block'
+    $('zone-refus').querySelector('.card-title').textContent = 'Chargement impossible'
+    $('zone-refus').querySelector('.card-sub').textContent =
+      'La liste des profils n’a pas pu être chargée. Rechargez la page.'
     message(e.message)
   }
 }
@@ -584,8 +614,16 @@ $('liste').onclick = e => {
   if (id) ouvrir(profils.find(p => p.id === id))
 }
 
+// ─── L'onglet « Avis » a quitté cette page ──────────────────────────────────
+// Décision de Thierry du 2 octobre 2026 au soir : la configuration d'une app vit
+// DANS l'app (règle du dépôt). Les réglages des avis — grille, rédaction,
+// publication automatique par bien — s'ouvrent depuis « ⚙ Configuration » de la
+// page Avis. L'ancienne adresse y renvoie.
+// (Le renvoi de l'ancienne adresse se fait en tête de script, avant la garde
+// de compte propre : un membre délégué doit arriver aux réglages de l'app.)
+
 const { data: { session } } = await supabase.auth.getSession()
-if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings')
+if (!session) location.href = '/pages/login.html?next=' + encodeURIComponent('/settings' + location.search)
 else charger()
 </script>
 </body>

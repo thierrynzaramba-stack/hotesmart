@@ -97,6 +97,46 @@
                            padding:10px; border:0.5px solid var(--border); border-radius:8px;
                            resize:vertical; margin-top: 4px; }
   </style>
+  <style>
+    /* ─── Les evaluations du voyageur (core/avis/liste-evaluations.js) ────── */
+    #zone-evaluations { margin-bottom: 18px; }
+    .hs-eval-entete { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+    .hs-eval-entete h2 { font-size: 15px; margin: 0; }
+    .hs-eval-filtre { font-size: 12px; color: #6b6b6b; display: flex; gap: 6px; align-items: center; }
+    .hs-eval-resume { font-size: 13px; color: #6b6b6b; margin: 6px 0 10px; }
+    .hs-eval-liste { list-style: none; margin: 0; padding: 0; }
+    /* Une carte par évaluation (demande de Thierry du 2 octobre 2026 au soir). */
+    .hs-eval-carte { padding: 12px 0; border-top: 0.5px solid #e6e2dd; font-size: 13.5px; }
+    .hs-eval-carte:first-child { border-top: 0; }
+    .hs-eval-tete { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .hs-eval-qui { font-weight: 600; font-size: 15px; }
+    .hs-eval-a-faire .hs-eval-qui { color: var(--text); }
+    .hs-eval-infos { color: #6b6b6b; font-size: 12.5px; margin: 2px 0 8px; }
+    .hs-eval-avis { background: #f7f5f2; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
+    .hs-eval-avis p { margin: 4px 0 0; line-height: 1.45; }
+    .hs-eval-notre { background: #fbf3ee; }
+    .hs-eval-libelle { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #6b6b6b; margin-right: 8px; }
+    .hs-eval-note { font-weight: 700; font-size: 13px; }
+    .hs-eval-gris { color: #8a8580; font-size: 12.5px; }
+    .hs-eval-invite { font-weight: 500; }
+    .hs-eval-bouton { margin-top: 8px; font: inherit; font-size: 13.5px; font-weight: 600; padding: 8px 14px; border-radius: 10px; border: 0; background: #C97B5C; color: #fff; cursor: pointer; }
+    .hs-eval-ligne { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 0.5px solid #e6e2dd; font-size: 13px; flex-wrap: wrap; }
+    .hs-eval-ligne:first-child { border-top: 0; }
+    .hs-eval-bien { flex: 1 1 140px; min-width: 0; font-weight: 500; }
+    .hs-eval-etat { color: #6b6b6b; }
+    .hs-eval-a-faire .hs-eval-etat { color: #C97B5C; font-weight: 500; }
+    .hs-eval-delai { color: #6b6b6b; font-size: 12px; }
+    /* ⚠ L'urgence se voit SANS la couleur : « dernier jour » est un mot, pas
+       seulement un rouge — une page lue en niveaux de gris doit rester claire. */
+    .hs-eval-urgent { color: #b3261e; font-size: 12px; font-weight: 600; }
+    .hs-eval-date { color: #6b6b6b; font-size: 12px; }
+    .hs-eval-vide, .hs-avis-attente { font-size: 13px; color: #6b6b6b; }
+    .hs-avis-erreur { font-size: 13px; color: #b3261e; }
+    @media (max-width: 560px) {
+      .hs-eval-ligne { align-items: flex-start; }
+      .hs-eval-bien { flex: 1 1 100%; }
+    }
+  </style>
 </head>
 <body>
 <div class="layout">
@@ -106,10 +146,27 @@
       <div>
         <div class="page-title">⭐ Avis voyageurs</div>
         <div class="page-sub" id="sous-titre">Chargement…</div>
+        <!-- L'auto-validation de l'evaluation (spec §10 bis) : activee ou non,
+             et son delai. Lue sur la config du compte. -->
+        <div class="page-sub" id="etat-auto" hidden></div>
       </div>
-      <button class="btn btn-primary" id="btn-saisir" hidden>+ Saisir un avis reçu</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <!-- ⚠ Réglages refuse un compte délégué : le lien n'apparaît qu'au
+             titulaire qui a le droit d'écriture sur les avis (voir initAvis). -->
+        <!-- Les réglages des avis vivent DANS l'app (décision de Thierry du
+             2 octobre 2026 au soir) : le bouton les ouvre sur place. -->
+        <button class="btn" id="lien-configuration" type="button" hidden>⚙ Configuration</button>
+        <button class="btn btn-primary" id="btn-saisir" hidden>+ Saisir un avis reçu</button>
+      </div>
     </div>
     <div class="content">
+      <!-- ⚠ CE QUI ATTEND L'HOTE PASSE AVANT CE QU'IL A RECU. Les avis des
+           voyageurs sont une lecture ; les evaluations, une action a faire dans
+           un delai. Les mettre en dessous les aurait fait manquer.
+           Le contenu vit dans un module du coeur, /core/avis/liste-evaluations.js. -->
+      <section id="zone-reglages" style="display:none;margin-bottom:18px"></section>
+      <section id="zone-evaluations" class="card" style="display:none"></section>
+
       <div class="avis-stats" id="stats" hidden></div>
 
       <div class="avis-barre">
@@ -173,7 +230,7 @@
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
-  import { peutEcrire, enteteCompte } from '/shared/compte-courant.js'
+  import { peutEcrire, enteteCompte, estTitulaire } from '/shared/compte-courant.js'
   import { supabase } from '/shared/supabase.js'
 
   // ⚠ LE MODULE PILOTE L'INITIALISATION. Il ne suffit PAS de poser les helpers
@@ -192,6 +249,7 @@
   // motif de apps/agent-ai/messagerie.html : fetch direct, jeton de session et
   // `enteteCompte()` pour la delegation de compte.
   window.peutEcrire = peutEcrire
+  window.estTitulaire = estTitulaire
   window.enteteCompte = enteteCompte
   window._supabase = supabase
 
@@ -231,6 +289,41 @@
     if (titre) titre.textContent = 'Chargement impossible'
     if (msg) msg.textContent = 'La page n\'a pas pu se charger. Rechargez pour réessayer.'
   }
+// ─── Les evaluations du voyageur (lot 4) ────────────────────────────────────
+// ⚠ MONTEES A PART, ET UN ECHEC ICI NE CASSE PAS LA PAGE. Les avis recus et les
+// evaluations a faire sont deux choses : si le module du coeur tombe, l'hote doit
+// quand meme voir ses avis.
+;(async () => {
+  try {
+    const [{ monter }, { hsBus }] = await Promise.all([
+      import('/core/avis/liste-evaluations.js'),
+      import('/shared/hs-bus.js'),
+    ])
+    const zone = document.getElementById('zone-evaluations')
+    // ⚠ LA SECTION S'AFFICHE, QUOI QU'IL ARRIVE. Constat de review : la masquer
+    // quand `charge` valait false annulait la garantie du module — il vient
+    // d'ecrire « evaluations illisibles » dans ce conteneur, et la page le
+    // cachait aussitot. L'hote retombait sur une section vide, c'est-a-dire
+    // exactement sur l'idee qu'il n'a rien a evaluer.
+    //
+    // Une liste vide n'est pas une carte vide non plus : le module explique
+    // quand les evaluations apparaissent.
+    await monter(zone, { bus: hsBus })
+    zone.style.display = ''
+    // ⚠ `?evaluer=<booking_uid>` OUVRE LA FENÊTRE D'ÉVALUATION (spec §10 : le
+    // lien de la notification « évaluez le voyageur » mène ici, fenêtre ouverte).
+    // Par le bus, comme le bouton de la liste : droit absent ou séjour inconnu =
+    // « indisponible », et rien ne s'ouvre. On retire le paramètre ensuite, pour
+    // qu'un rechargement ne rouvre pas la fenêtre.
+    const aEvaluer = new URLSearchParams(location.search).get('evaluer')
+    if (aEvaluer && aEvaluer.length <= 200 && hsBus) {
+      try { history.replaceState(null, '', location.pathname) } catch { /* sans historique */ }
+      await hsBus.ouvrir('avis.evaluer', { booking_uid: aEvaluer })
+    }
+  } catch (e) {
+    console.error('[avis] evaluations du voyageur', e)
+  }
+})()
 </script>
 
 <script>
@@ -304,6 +397,52 @@
       throw err
     }
     return data
+  }
+
+  // ⚠ L'ETAT DE LA PUBLICATION AUTOMATIQUE SE DIT EN HAUT DE LA PAGE (demande de
+  // Thierry du 2 octobre 2026), avec le lien vers son reglage. Un echec de
+  // lecture se tait : ce n'est qu'une information, la page ne depend pas d'elle.
+  // Bien par bien depuis le 2 octobre au soir : la ligne compte les biens.
+  async function afficherEtatAuto () {
+    const el = $('etat-auto')
+    try {
+      const auto = await appelAPI('avis?action=auto-validation')
+      const biens = (auto && auto.biens) || []
+      const actifs = biens.filter(b => b.heures)
+      const lien = $('lien-configuration').hidden ? ''
+        : ' · <a href="#" data-ouvrir-reglages>⚙ Configuration</a>'
+      el.innerHTML = (actifs.length
+        ? `Publication automatique des évaluations : <strong>activée sur ${actifs.length} bien(s)</strong> sur ${biens.length} (jamais pour un avis négatif).`
+        : 'Publication automatique des évaluations : <strong>désactivée</strong> sur tous vos biens.') + lien
+      el.hidden = false
+      const a = el.querySelector('[data-ouvrir-reglages]')
+      if (a) a.addEventListener('click', (ev) => { ev.preventDefault(); ouvrirReglages() })
+    } catch { el.hidden = true }
+  }
+
+  // ─── Les réglages, dans l'app ────────────────────────────────────────────
+  // Montés à la demande, une fois ; refermés, ils relisent l'état de la ligne
+  // du haut (un bien vient peut-être d'être activé).
+  let reglagesMontes = false
+  async function ouvrirReglages () {
+    const zone = $('zone-reglages')
+    const ouvert = zone.style.display !== 'none'
+    if (ouvert) { zone.style.display = 'none'; afficherEtatAuto(); return }
+    zone.style.display = ''
+    if (!reglagesMontes) {
+      reglagesMontes = true
+      try {
+        const { monter } = await import('/core/avis/ecran-reglages.js')
+        await monter(zone, { avertir: (m) => console.log('[avis] réglages :', m) })
+      } catch (e) {
+        // ⚠ UN ÉCHEC DE CHARGEMENT SE DIT, et le prochain clic réessaie.
+        console.error('[avis] réglages', e)
+        reglagesMontes = false
+        zone.innerHTML = '<div class="card"><div class="card-title">Réglages des avis indisponibles</div>'
+          + '<div class="card-sub">Rechargez la page. Si cela persiste, contactez le support.</div></div>'
+      }
+    }
+    zone.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   const echapper = t => String(t == null ? '' : t)
@@ -578,6 +717,22 @@
     // Le serveur le revalide : ce masquage est un confort, pas la garde.
     const peut = window.peutEcrire ? window.peutEcrire('avis') : false
     $('btn-saisir').hidden = !peut
+    // « ⚙ Configuration » ouvre les réglages DANS la page. Un membre au droit
+    // d'écriture y règle les biens de son périmètre ; le serveur refuse le
+    // niveau compte (grille, rédaction) à un périmètre partiel, et le dit.
+    $('lien-configuration').hidden = !peut
+    // `onclick`, pas addEventListener : une seconde initialisation ne double pas
+    // l'écouteur (deux bascules s'annuleraient).
+    $('lien-configuration').onclick = ouvrirReglages
+    afficherEtatAuto()
+    // L'ancien chemin /settings?onglet=avis renvoie ici avec ?reglages=1.
+    try {
+      const u = new URL(location.href)
+      if (u.searchParams.get('reglages') === '1' && peut) {
+        u.searchParams.delete('reglages'); history.replaceState(null, '', u.pathname + u.search)
+        ouvrirReglages()
+      }
+    } catch { /* adresse illisible : rien */ }
 
     $('s-date').value = new Date().toISOString().slice(0, 10)
 

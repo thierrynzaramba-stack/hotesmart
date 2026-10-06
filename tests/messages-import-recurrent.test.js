@@ -36,8 +36,15 @@ test('LE TEST QUI COMPTE : le sens du message vient de la donnee, il n est plus 
   assert.ok(!bloc.includes(".from('conversations')"), 'et plus `conversations`, qui n a qu un seul sens')
   assert.ok(!/sender: 'guest'(?!\s*\|)/.test(bloc.replace(/\/\/.*$/gm, '')),
     'aucun expediteur en dur : c est ce qui tuait la garde')
-  assert.ok(bloc.includes("m.direction === 'inbound' ? 'guest' : 'host'"),
-    'le sens fait foi — un message `auto` parti de nos modeles est, pour l appelant, un message de l hote')
+  // ⚠ DECISION RENVERSEE LE 2 OCTOBRE 2026 (Thierry, constat M2 de l'audit
+  // GuestFlow). Cette assertion figeait « un message `auto` de nos modeles est
+  // un message de l'hote » : une question suivie d'un modele J-1 n'etait plus
+  // en attente, l'agent se taisait. Le sens fait toujours foi pour le voyageur ;
+  // `auto` et `ai` sont desormais rendus tels quels, et l'appelant decide ce
+  // qui vaut reponse (REPONSES_HOTE = host, ai — jamais auto).
+  assert.ok(bloc.includes("m.direction === 'inbound' ? 'guest'"), 'le sens fait foi pour le voyageur')
+  assert.ok(bloc.includes("m.sender === 'auto' || m.sender === 'ai' ? m.sender : 'host'"),
+    'un modele automatique reste `auto` : il ne passe plus pour une reponse de l hote')
 })
 
 test('LE TEST QUI COMPTE : la lecture est CLOISONNEE PAR COMPTE, et refuse sans compte', () => {
@@ -93,7 +100,7 @@ test('LE TEST QUI COMPTE : la garde « dernier message de l hote » precede tout
   const debut = src.indexOf('async function processChannelPropertyMessages')
   assert.ok(debut > 0, 'la fonction Channex est reperable')
   const bloc = src.slice(debut, src.indexOf('\nasync function', debut + 10))
-  const posGarde = bloc.indexOf("if (lastMsg && lastMsg.source === 'host') continue")
+  const posGarde = bloc.indexOf("if (lastMsg && REPONSES_HOTE.includes(lastMsg.source)) continue")
   const posIA = bloc.indexOf('const handled = await classifyAndHandle(')
   assert.ok(posGarde > 0, 'la garde existe dans le chemin Channex')
   assert.ok(posIA > posGarde, 'et elle sort AVANT l appel au modele — sinon elle coute ce qu elle pretend economiser')

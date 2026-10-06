@@ -84,13 +84,19 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true,
           const d = (menages || []).filter(m => {
             if (a.or) {
               // ⚠ TOUT TERME EST APPLIQUE, pas seulement ceux qu'on attend.
-              // Extraire les seuls `provider_id`/`offered_to` rendait
+              // Extraire les seuls `provider_id`/`proposee_a` rendait
               // INDETECTABLE l'ajout d'un terme : `,status.eq.offered` aurait
               // fait voir a chaque prestataire tous les menages proposes du
               // compte, sans qu'un test bronche.
               const termes = String(a.or).split(',').map(t => t.trim()).filter(Boolean)
               return termes.some(t => {
                 const [col, op, val] = t.split('.')
+                // `cs` : la liste contient (spec proposition-par-rang : « on lui
+                // propose » = elle est dans `proposee_a`).
+                if (op === 'cs') {
+                  const voulus = String(val).replace(/[{}]/g, '').split(',').filter(Boolean)
+                  return Array.isArray(m[col]) && voulus.every(v => m[col].map(String).includes(v))
+                }
                 if (op !== 'eq') return true   // opérateur non modélisé : on ne masque pas
                 return String(m[col] === undefined ? '' : (m[col] ?? '')) === val
               })
@@ -131,7 +137,7 @@ const req = () => ({ method: 'GET', query: { token: TOKEN }, headers: {} })
 
 const MENAGE = (booking, provider, depart, over = {}) => ({
   booking_id: booking, property_id: '209413', departure_date: depart,
-  provider_id: provider, status: 'accepted', offered_to: null, offer_expires_at: null, ...over
+  provider_id: provider, status: 'accepted', offered_to: null, proposee_a: null, offer_expires_at: null, ...over
 })
 
 // ─── Le filtre par personne ────────────────────────────────────────────────
@@ -187,14 +193,14 @@ test('la lecture des ménages est filtrée par COMPTE et par PERSONNE', async ()
   const q = journal.find(a => a.table === 'menages')
   assert.strictEqual(q.f.user_id, U)
   assert.ok(q.or && q.or.includes(`provider_id.eq.${REGINA}`), 'ce qu\'elle porte')
-  assert.ok(q.or && q.or.includes(`offered_to.eq.${REGINA}`), 'et ce qu\'on lui propose')
+  assert.ok(q.or && q.or.includes(`proposee_a.cs.{${REGINA}}`), 'et ce qu\'on lui propose (elle est dans le tour)')
 })
 
 test('un ménage PROPOSÉ à quelqu\'un d\'autre reste dans SON planning', async () => {
   // ⚠ LA RÈGLE DU 4 SEPTEMBRE. La proposition ne lui retire rien : tant que
   // personne n'a accepté, le ménage reste sa responsabilité, avec la mention.
   preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05',
-    { offered_to: NOUVELLE, offer_expires_at: '2026-09-04T16:00:00Z' })] })
+    { proposee_a: [NOUVELLE], offer_expires_at: '2026-09-04T16:00:00Z' })] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
@@ -207,7 +213,7 @@ test('le prénom de la personne sollicitée n\'est PAS renvoyé à la porteuse',
   // Savoir qu'une proposition est en cours lui suffit ; le nom de sa collègue ne
   // la regarde pas plus que l'organisation de l'hôte.
   preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05',
-    { offered_to: NOUVELLE, offer_expires_at: '2026-09-04T16:00:00Z' })] })
+    { proposee_a: [NOUVELLE], offer_expires_at: '2026-09-04T16:00:00Z' })] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
@@ -216,7 +222,7 @@ test('le prénom de la personne sollicitée n\'est PAS renvoyé à la porteuse',
 
 test('un ménage PROPOSÉ à elle porte son délai, et le rôle « propose »', async () => {
   preparer({ menages: [MENAGE('b1', null, '2026-09-05',
-    { offered_to: REGINA, offer_expires_at: '2026-09-04T16:00:00Z', status: 'offered' })] })
+    { proposee_a: [REGINA], offer_expires_at: '2026-09-04T16:00:00Z', status: 'offered' })] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
@@ -392,7 +398,7 @@ test('un lien SANS profil ne voit pas davantage un ménage SOUS PROPOSITION', as
   // Le chemin legacy gardait ici une garde `.is('offered_to', null)` : elle
   // n'existe plus, parce que le chemin n'existe plus. Le refus est en amont.
   preparer({ profil: null, menages: [
-    { ...MENAGE('b1', null, '2026-09-05'), status: 'offered', offered_to: NOUVELLE,
+    { ...MENAGE('b1', null, '2026-09-05'), status: 'offered', proposee_a: [NOUVELLE],
       offer_expires_at: '2026-09-04T16:00:00Z' },
     { ...MENAGE('b2', null, '2026-09-09'), status: 'unassigned' }
   ] })
@@ -411,5 +417,5 @@ test('le `.or()` ne ramène QUE ses deux colonnes', async () => {
   await handler(req(), reponse())
   const q = journal.find(a => a.table === 'menages')
   const termes = String(q.or).split(',').map(t => t.split('.')[0])
-  assert.deepStrictEqual(termes.sort(), ['offered_to', 'provider_id'])
+  assert.deepStrictEqual(termes.sort(), ['proposee_a', 'provider_id'])
 })

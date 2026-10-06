@@ -1096,3 +1096,42 @@ exactement.
 
 Ce controle est reinjecte dans `scripts/audit-prix-voyageur.js` : s'il cesse un
 jour de dire 5/5, la ligne Channex/Airbnb du tableau est fausse.
+
+---
+
+## Règle 19 — le critère de l'interrupteur, fixé le 30 septembre 2026
+
+> Posé par Thierry le 30 septembre 2026, **avant la lecture du premier relevé**
+> de `grille_controle`. Cadrage : `docs/kb/chantier-nouveau-bien.md` règle 19,
+> qui exigeait que ce critère soit écrit et daté avant toute mesure — faute de
+> quoi on justifierait après coup ce qu'on aurait trouvé.
+
+**Le critère**
+
+> Le passage de la grille marché à un prix réellement poussé ne sera envisagé
+> que si, sur au moins six relevés mensuels consécutifs et sur au moins deux
+> biens, l'écart entre la grille marché et la grille mesurée sur douze mois
+> reste inférieur à 10 % à chaque niveau, sans qu'aucun relevé ne dépasse 15 %
+> sur un niveau quelconque. Un seul relevé hors de ces bornes remet le compteur
+> à zéro. Ce critère est écrit avant la lecture du premier relevé ; il ne sera
+> pas révisé à la lumière des résultats.
+
+**Ce qu'il engage, et ce qu'il n'engage pas**
+
+- Il ouvre une **discussion**, pas un automatisme : l'interrupteur V2.6 reste
+  un geste explicite de Thierry, bien par bien. Un critère rempli ne pousse
+  aucun prix.
+- La comparaison porte sur la grille **mesurée 12 mois**, pas sur celle de
+  3 ans : les deux fenêtres doivent être identiques, sinon l'écart contient une
+  part de dérive et non de méthode.
+- Les deux biens exigés ne sont pas deux relevés du même bien : la base de
+  validation est déjà mince (deux logements, tous deux à Bagnères, tous deux à
+  Thierry, dont une niche jacuzzi). Un seul bien conforme ne prouverait que ce
+  bien-là.
+- **Ne pas réviser ce texte après avoir lu les écarts.** S'il se révèle
+  inatteignable, c'est un résultat : il dira que la méthode ne tient pas, et
+  c'est précisément ce qu'on cherche à savoir.
+
+**Ce qui reste à trancher au moment venu** : ce que « pousser » veut dire —
+remplacer la grille mesurée, la compléter sur les seules dates sans historique,
+ou servir de plancher. Cette question n'appartient pas au critère.

@@ -376,14 +376,19 @@ test('GET : les congés sont cloisonnés par compte ET par prestataire', async (
 })
 
 test('poserConge enregistre la plage, et la marque « hote »', async () => {
+  // ⚠ DATES RELATIVES (2 octobre 2026) : `poserConge` refuse une fin anterieure
+  // a J-30 en lisant l'horloge reelle. Figee au 5-12 octobre 2026, la plage
+  // devenait « trop ancienne » le 12 novembre — un rouge purement calendaire.
+  const enJours = n => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
+  const debut = enJours(3), fin = enJours(10)
   const { handler, etat } = preparer({})
   const res = reponse()
-  await handler(post({ action: 'poserConge', debut: '2026-10-05', fin: '2026-10-12', motif: 'Vacances' }), res)
+  await handler(post({ action: 'poserConge', debut, fin, motif: 'Vacances' }), res)
   assert.strictEqual(res.code, 200)
   const e = etat.ecritures.find(x => x.table === 'conges_plages')
   assert.ok(e, 'une écriture a eu lieu')
-  assert.strictEqual(e.row.debut, '2026-10-05')
-  assert.strictEqual(e.row.fin, '2026-10-12')
+  assert.strictEqual(e.row.debut, debut)
+  assert.strictEqual(e.row.fin, fin)
   assert.strictEqual(e.row.source, 'hote', 'posé depuis la fiche, pas depuis la PWA')
   assert.strictEqual(e.row.user_id, PROD, 'le compte est écrit, pas déduit')
   assert.strictEqual(e.row.provider_id, MARIE)
