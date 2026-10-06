@@ -147,8 +147,8 @@ test('REVIEW : un service d adresses qui ne repond jamais est abandonne au delai
 })
 
 // ─── §22.2 : la strategie et le sejour minimum ──────────────────────────────
-test('LE TEST QUI COMPTE (§22.2) : trois strategies (juste, agressif -10 %, qualite +10 %), un sejour minimum de 1 a 30 nuits', () => {
-  assert.deepEqual(pb.STRATEGIES, { juste: 1, agressif: 0.9, qualite: 1.1 })
+test('LE TEST QUI COMPTE (§22.2) : trois strategies (agressif P25, prix marche P50, haut de gamme P75), un sejour minimum de 1 a 30 nuits', () => {
+  assert.deepEqual(pb.STRATEGIES, { agressif: 0.25, juste: 0.5, qualite: 0.75 })
   assert.deepEqual(pb.validerStrategie({ strategie: 'agressif', sejour_min: '2' }), { strategie: 'agressif', sejour_min: 2 })
   for (const mauvais of [{ strategie: 'luxe', sejour_min: 2 }, { strategie: 'juste', sejour_min: 0 }, { strategie: 'juste', sejour_min: 31 }, { strategie: 'juste', sejour_min: '1e1' }, { strategie: 'juste' }, {}]) {
     assert.ok(pb.validerStrategie(mauvais).erreur, JSON.stringify(mauvais))

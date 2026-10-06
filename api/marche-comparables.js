@@ -191,13 +191,23 @@ async function rendreRecherche ({ bienId, cout, nature = 'recherche' }) {
 // figurer EN MOTS ENTIERS dans l'adresse trouvee (review de f37b7da : « Pau »
 // n'est pas dans « Saint-Paul »). Sinon, aucun calcul, aucun paiement.
 const enMots = v => ` ${String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `
+// Rend { marche, absent } : `absent` dit POURQUOI il n'y a pas de marche
+// ('aucun' lien, ou une 'adresse' qui ne nomme pas sa commune), pour que la
+// page le dise au lieu de calculer en silence (recette de Thierry, 6 octobre
+// 2026).
 async function marcheDuBien (bienId, profil) {
   const { data, error } = await supabase.from('marche_biens').select('pays, region, localite').eq('property_id', bienId).limit(1)
   if (error) throw new Error(`marche_biens : ${error.message}`)
   const m = (data || [])[0]
-  if (!m || !String(m.localite || '').trim() || !enMots(profil.adresse_trouvee).includes(enMots(m.localite))) return null
   const nfc = v => String(v || '').normalize('NFC')
-  return { pays: nfc(m.pays), region: nfc(m.region), localite: nfc(m.localite) }
+  if (!m || !String(m.localite || '').trim()) return { marche: null, absent: 'aucun' }
+  if (!enMots(profil.adresse_trouvee).includes(enMots(m.localite))) return { marche: null, absent: 'adresse', localite: nfc(m.localite) }
+  return { marche: { pays: nfc(m.pays), region: nfc(m.region), localite: nfc(m.localite) }, absent: null }
+}
+// Ce que la page dit du marche relie : son nom, ou pourquoi il n'y en a pas.
+const MARCHE_ABSENT = {
+  aucun: 'Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les contrôler ni pour les remplacer.',
+  adresse: l => `Le marché relié (${l}) n’est pas celui de l’adresse de votre logement : il n’est pas utilisé. Les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les contrôler ni pour les remplacer.`,
 }
 
 // ⚠ Une cle du cache contient des guillemets et des virgules ; `.in()` de
@@ -235,7 +245,10 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
   // §22.11 : les niveaux viennent des comparables ; le marche de l'adresse ne
   // sert qu'au REPLI (segment trop plat). Son absence n'empeche rien d'emblee.
   const aujourdhui = jourParis()
-  const marche = await marcheDuBien(bienId, profil)
+  const { marche, absent, localite } = await marcheDuBien(bienId, profil)
+  const infoMarche = marche
+    ? { relie: true, localite: marche.localite }
+    : { relie: false, message: absent === 'adresse' ? MARCHE_ABSENT.adresse(localite) : MARCHE_ABSENT.aucun }
   let jours = []
   if (marche) {
     const capture = await lireDerniereCapture(supabase, marche)
@@ -315,11 +328,11 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
     jours: cache.get(String(l.listing_id)).filter(n => n && String(n.date) >= aujourdhui),
   }))
   // Rien en cache et rien paye : il faut relever.
-  if (!calendriers.length) return { etat: 'a_capturer', a_capturer: manquants.length, note: refus }
+  if (!calendriers.length) return { etat: 'a_capturer', a_capturer: manquants.length, note: refus, marche: infoMarche }
   // Avec ce qui est disponible, on calcule ; les manquants se proposent a cote
   // (review de f37b7da, C4 : le GET et le POST disent la meme chose).
   const prix = prixDeDepart({ calendriers, marche: jours, strategie: profil.strategie, aujourdhui })
-  return { etat: 'calcule', prix, a_capturer: manquants.length,
+  return { etat: 'calcule', prix, a_capturer: manquants.length, marche: infoMarche,
     note: refus || (manquants.length ? `Les prix de ${manquants.length} comparable${manquants.length > 1 ? 's' : ''} ne sont pas encore relevés.` : null) }
 }
 

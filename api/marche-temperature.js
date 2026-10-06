@@ -47,7 +47,7 @@ module.exports = async (req, res) => {
     // Le marche se lit en forme NFC, comme a l'ecriture.
     const nfc = v => String(v || '').normalize('NFC')
     const m = brutLien ? { pays: nfc(brutLien.pays), region: nfc(brutLien.region), localite: nfc(brutLien.localite) } : null
-    if (!m) return res.status(200).json({ source: 'airroi', etat: 'marche_inconnu', motif: 'aucun marché n’est relié à ce logement' })
+    if (!m) return res.status(200).json({ source: 'airroi', etat: 'marche_inconnu' })
     const c = await lireDerniereCapture(supabase, m)
     if (c.erreur) {
       if (/marche_temperature_airroi/.test(c.erreur) && /(does not exist|schema cache)/i.test(c.erreur)) {

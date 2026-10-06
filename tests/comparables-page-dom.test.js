@@ -550,7 +550,8 @@ test('LE TEST QUI COMPTE (§22.2) : trois strategies expliquees, le sejour minim
     return s({ methode, corps, url })
   })
   const c = doc.getElementById('cp-etape-c')
-  assert.match(c.textContent, /Prix justes[\s\S]*Agressif[\s\S]*10 % moins cher[\s\S]*Qualité[\s\S]*10 % plus cher/)
+  assert.match(c.textContent, /Agressif[\s\S]*25ᵉ centile[\s\S]*Prix marché[\s\S]*50ᵉ centile[\s\S]*Haut de gamme[\s\S]*75ᵉ centile/)
+  assert.doesNotMatch(c.textContent, /10 %|Prix justes|Qualité</)
   assert.equal(doc.querySelector('input[name="strategie"][value="qualite"]').checked, true, 'la strategie enregistree revient')
   assert.equal(doc.getElementById('cp-sejour-min').value, '1')
   assert.equal(doc.getElementById('cp-marche-sejour').textContent, 'Sur 25 biens du marché autour du vôtre : 15 acceptent 1 nuit (60 %), 6 imposent 2 nuits (24 %), 4 en imposent 3 ou plus (16 %).')
@@ -646,7 +647,8 @@ test('LE TEST QUI COMPTE (§22.11) : les 8 cases — semaine et week-end par niv
   const z = doc.getElementById('cp-zone-prix').textContent
   assert.doesNotMatch(z, /un niveau de prix vaut/, 'le cran a disparu')
   assert.match(z, /Sous chaque prix : la fourchette des prix de vos comparables dans cette case\. Week-end : les nuits du vendredi et du samedi\. Prix mesurés sur les 6 prochains mois\./)
-  assert.match(z, /Les niveaux viennent de la saison de vos comparables : leurs prix varient de 20,2 %/)
+  assert.match(z, /Les niveaux viennent de la saison de vos comparables : en moyenne sur vos hôtes, leurs prix varient de 20,2 %/)
+  assert.match(z, /suivent le comparable médian de chaque case/)
   assert.match(z, /de vos 7 hôtes, par rang : agressif 140 €, prix marché 158 €, haut de gamme 165 €\. Votre stratégie : prix marché\./)
   assert.match(z, /ceux qui imposent 2 nuits ou plus vendent la nuit 10 % moins cher/)
 })
@@ -667,6 +669,18 @@ test('§22.11 : le repli sur le marche de la ville est dit ; la fiche ne parle p
   assert.doesNotMatch(doc.getElementById('cp-fiche').textContent, /Ses prix :/)
   const sans = await monter(pageAvecPrix({ etat: 'strategie_absente', message: 'x' }, { strategie: null }))
   assert.equal(sans.doc.getElementById('cp-etape-d').hidden, true)
+})
+
+test('recette du 6 octobre 2026 : sans marche relie, la page le DIT au-dessus des prix ; avec un marche relie, rien', async () => {
+  const msg = 'Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les contrôler ni pour les remplacer.'
+  const sans = await monter(pageAvecPrix({ ...PRIX_CALCULE, marche: { relie: false, message: msg } }))
+  const avert = [...sans.doc.querySelectorAll('#cp-zone-prix .cp-avert')].map(x => x.textContent)
+  assert.equal(avert[0], msg)
+  const avec = await monter(pageAvecPrix({ ...PRIX_CALCULE, marche: { relie: true, localite: 'Bagnères-de-Bigorre' } }))
+  assert.doesNotMatch(avec.doc.getElementById('cp-zone-prix').textContent, /Aucun marché/)
+  const sous = sans.doc.querySelector('#cp-etape-d .sous').textContent
+  assert.doesNotMatch(sous, /suivent le marché comptent plus/)
+  assert.match(sous, /au rang de votre stratégie/)
 })
 
 test('LE TEST QUI COMPTE (§22.5) : des prix a relever — un bouton, jamais un releve automatique ; le releve affiche le resultat', async () => {
