@@ -59,7 +59,22 @@ const FORMES = {
     if (!error) { echecs++; console.error(`  ECHEC ${nomF} : encore appelable`); continue }
     console.log(`  ok    ${nomF} : disparue`)
   }
-  console.log('\nNon vu d ici : les contraintes et la RLS.')
+  // Vu du NAVIGATEUR (cle anon) : les tables du lot et les fonctions du quota
+  // doivent etre REFUSEES. Une table lisible avec des lignes est un ECHEC ; un
+  // appel de fonction accepte aussi (il ne reserverait rien : parametres nuls).
+  if (process.env.SUPABASE_ANON_KEY) {
+    const anon = createClient(URL, process.env.SUPABASE_ANON_KEY, { auth: { persistSession: false } })
+    for (const t of ['bien_profil', 'comparables_recherches', 'airroi_annonces_retirees', 'marche_temperature_airroi', 'comparables_retenus']) {
+      const r = await anon.from(t).select('*').limit(1)
+      const vu = r.error ? `refuse (${r.error.code || r.error.message})` : `${(r.data || []).length} ligne(s)`
+      if (!r.error && (r.data || []).length) { echecs++; console.error(`  ECHEC ${t} vu du navigateur : ${vu}`) } else console.log(`  ok    ${t} vu du navigateur : ${vu}`)
+    }
+    for (const [fn, params] of [['reserver_recherche_comparables', { p_user: null, p_property: null, p_cout: 0.10, p_nature: 'recherche', p_bien_jour: 1, p_compte_jour: 1, p_compte_30j: 1, p_calendriers_90j: 1, p_budget_mois: 1 }], ['rendre_recherche_comparables', { p_property: null, p_cout: 0.10, p_nature: 'recherche' }]]) {
+      const r = await anon.rpc(fn, params)
+      if (!r.error) { echecs++; console.error(`  ECHEC ${fn} appelable depuis le navigateur`) } else console.log(`  ok    ${fn} refusee au navigateur (${r.error.code || r.error.message})`)
+    }
+  } else console.log('  Cle anon absente : la vue du navigateur n est pas sondee.')
+  console.log('\nNon vu d ici : les contraintes.')
   if (echecs) { console.error(`\n${echecs} ECHEC(S)`); process.exit(1) }
   console.log('\nOK')
 })()

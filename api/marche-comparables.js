@@ -323,6 +323,13 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
     note: refus || (manquants.length ? `Les prix de ${manquants.length} comparable${manquants.length > 1 ? 's' : ''} ne sont pas encore relevés.` : null) }
 }
 
+// Le detail jour par jour retire de la reponse, sauf demande (`?jours=1`).
+const sansJours = (pd, garder) => {
+  if (garder || !pd || !pd.prix || !pd.prix.jours) return pd
+  const { jours, ...prix } = pd.prix
+  return { ...pd, prix }
+}
+
 // Au GET, une panne du calcul des prix n'empeche pas les comparables (C3).
 async function prixSansPanne (o) {
   try { return await calculerPrix(o) } catch (e) {
@@ -348,6 +355,9 @@ module.exports = async (req, res) => {
   const compte = garde.accountUserId
   try {
     if (lecture) {
+      // §22.13 : le detail des 365 jours seulement sur demande (l'ecran Prix) ;
+      // la page des comparables n'en a pas besoin.
+      const avecJours = brut(req.query && req.query.jours) === '1'
       const profil = await lireProfil(supabase, bienId)
       const sel = profil ? await selectionEnCache(profil) : { fiches: null, encore: false }
       const { lignes, horsListe } = await retenusProposes(bienId, profil, sel)
@@ -364,7 +374,7 @@ module.exports = async (req, res) => {
         encore: !!sel.encore,
         retenus_hors_liste: horsListe,
         // §22.7 : les prix de depart, depuis le cache seulement (un GET ne paie jamais).
-        prix_depart: profil ? await prixSansPanne({ bienId, compte, profil, payer: false }) : null })
+        prix_depart: profil ? sansJours(await prixSansPanne({ bienId, compte, profil, payer: false }), avecJours) : null })
     }
 
     const corps = req.body && typeof req.body === 'object' ? req.body : {}
@@ -448,7 +458,7 @@ module.exports = async (req, res) => {
     if (corps.action === 'prix') {
       const profil = await lireProfil(supabase, bienId)
       if (!profil) return res.status(400).json({ error: 'profil_absent', message: 'Décrivez d’abord votre logement.' })
-      return res.status(200).json(await calculerPrix({ bienId, compte, profil, payer: true }))
+      return res.status(200).json(sansJours(await calculerPrix({ bienId, compte, profil, payer: true }), false))
     }
 
     // §22.2 : la strategie de prix et le sejour minimum souhaite.
