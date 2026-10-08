@@ -58,15 +58,19 @@ test('l anti-spam est d UN JOUR, pas d une heure', () => {
 test('les trois services sont instrumentes', () => {
   const lu = f => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
   assert.ok(lu('lib/cron-shared.js').includes('signalerSiPanneFacturation'), 'Anthropic (cron)')
-  assert.ok(lu('api/grok.js').includes('signalerSiPanneFacturation'), 'Anthropic (front)')
+  // Depuis le journal IA (9 octobre 2026), api/grok.js passe par le client
+  // partage : son alerte est celle de l'enveloppe.
+  assert.ok(lu('api/grok.js').includes("require('../lib/cron-shared').anthropic"), 'Anthropic (front)')
   assert.ok(lu('lib/platform-notify.js').includes('signalerSiPanneFacturation'), 'Brevo')
   assert.ok(lu('lib/providers/seam.js').includes('signalerSiPanneFacturation'), 'Seam')
 })
 
 test('l enveloppe Anthropic RELANCE l erreur, elle ne l avale pas', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'lib/cron-shared.js'), 'utf8')
-  const bloc = src.slice(src.indexOf('const anthropic = new Proxy'), src.indexOf('module.exports'))
-  assert.ok(/throw e/.test(bloc), 'l erreur est relancee telle quelle')
+  // L'enveloppe vit dans lib/ia/journal.js depuis le journal IA (9 octobre 2026).
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib/ia/journal.js'), 'utf8')
+  const bloc = src.slice(src.indexOf('function envelopper'), src.indexOf('module.exports'))
+  assert.ok(bloc.length > 100 && /throw e/.test(bloc), 'l erreur est relancee telle quelle')
+  assert.match(fs.readFileSync(path.join(__dirname, '..', 'lib/cron-shared.js'), 'utf8'), /surErreur:.*signalerSiPanneFacturation/)
 })
 
 test('reportIncident accepte une fenetre d anti-spam, et garde 1 h par defaut', () => {

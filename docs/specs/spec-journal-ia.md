@@ -1,8 +1,7 @@
 # Spec — Journal unique des appels IA, alerte horaire, page de consommation
 
 Demande de Thierry du 9 octobre 2026, après l'incident du 8 octobre (boucle
-GuestFlow, crédit Anthropic épuisé). **Statut : à valider.** Aucun code avant
-validation.
+GuestFlow, crédit Anthropic épuisé). **Statut : VALIDÉE par Thierry le 9 octobre 2026** (décisions au §6).
 
 ## 1. Inventaire des appels IA (main au 9 octobre 2026, f2526ce)
 
@@ -79,12 +78,14 @@ milliers de lignes par jour).
 ## 3. Alerte horaire
 - À chaque cycle du cron : somme de `cout_usd` sur les 60 dernières minutes,
   tous comptes.
-- Au-delà de `IA_SEUIL_HEURE_USD` (variable Vercel, **proposé : 1 $**, à
-  trancher par Thierry), incident `ia_conso_heure` (SMS + e-mail fondateur,
+- Au-delà de `IA_SEUIL_HEURE_USD` (défaut **0,50 $**), incident `ia_conso_heure` (SMS + e-mail fondateur,
   un par heure au plus) avec le détail par fonction et les 3 fils/biens les plus
   coûteux de l'heure.
-- Seconde alerte, sans coût : plus de **200 appels** en une heure (une boucle
-  sur un modèle non tarifé se verrait quand même).
+- Seconde alerte, sans coût : plus de **100 appels** en une heure
+  (`IA_SEUIL_HEURE_APPELS` ; une boucle sur un modèle non tarifé se verrait
+  quand même).
+- Troisième : plus de **3 $** sur 24 heures glissantes (`IA_SEUIL_JOUR_USD`) —
+  une boucle lente passe sous le seuil horaire.
 
 ## 4. La page de consommation
 - **Fondateur seul** (garde serveur : e-mail de la session = `FOUNDER_EMAIL`) ;
@@ -103,9 +104,14 @@ milliers de lignes par jour).
 4. Page de consommation.
 Chaque lot : revue, staging, prod sur go de Thierry.
 
-## 6. À trancher par Thierry
-1. Seuil de l'alerte horaire (proposé 1 $/h) et celui en nombre d'appels (200/h).
-2. Taux USD → EUR à poser dans Vercel.
-3. Fusion avec `guestflow_appels_ia` (recommandée) et étiquette séparée pour
-   le Simulateur.
-4. Page : fondateur seul pour l'instant.
+## 6. Décisions de Thierry (9 octobre 2026)
+1. Alertes : **0,50 $ par heure**, **100 appels par heure**, et un **seuil
+   journalier de 3 $** (une boucle lente doit aussi être attrapée). Tous
+   réglables par variable : `IA_SEUIL_HEURE_USD`, `IA_SEUIL_HEURE_APPELS`,
+   `IA_SEUIL_JOUR_USD`.
+2. Conversion dollar → euro : **0,92**, affichée comme estimation.
+3. Fusion avec `guestflow_appels_ia` : **oui**. Le Simulateur porte
+   l'étiquette `guestflow_simulateur`, hors quota voyageur.
+4. Page réservée au fondateur pour l'instant.
+5. Les 4 lots dans l'ordre (journal, fusion, alerte, page) ; chaque lot :
+   revue, staging, puis prod sur go.

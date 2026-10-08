@@ -105,7 +105,7 @@ module.exports = async function handler(req, res) {
     classification = await classifierLot({
       userId: user.id, property: { id: refBien, name: garde.bien.name || '' }, bookingId: 'simulation',
       guestName: nomVoyageur, guestPhone: '', arrival: '', departure: '',
-      knowledgeText, results, lot, blocEtat
+      knowledgeText, results, lot, blocEtat, fonctionIA: 'guestflow_simulateur'
     })
   } catch (e) {
     // Credit epuise, prompt trop long, panne reseau : une erreur LISIBLE pour
