@@ -708,3 +708,13 @@ envoi en échec en Mode Auto.
   (`lib/incident-facturation.js`).
 - `totalAutoReplies` ne compte plus que les réponses réellement envoyées (il
   annonçait « 3 réponses » par cycle sans qu'aucune ne parte).
+
+### « Bonjour {prenom} » parti à deux voyageurs (même jour)
+Modèle « arrivée », réservations 814bf119 (11:00) et 12bbf074 (18:00). Cause :
+`generateAutoMessage` (lib/cron-messages.js) améliore le texte par Haiku ; en
+échec (crédit épuisé), son repli rendait le **modèle brut**, avant substitution
+— toute variable pouvait partir ainsi. Désormais : le repli est le texte
+substitué ; sans prénom, la formule est neutre (« Bonjour, »), jamais
+« Voyageur » ; une variable `{…}` restée dans le modèle retient le message et
+prévient l'hôte (`message_non_envoye`) ; une variable réintroduite par l'IA
+fait renvoyer le texte substitué ; une erreur inattendue n'envoie rien.
