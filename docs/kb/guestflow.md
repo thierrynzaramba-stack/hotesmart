@@ -672,3 +672,101 @@ Téléphone : `/api/messages` renvoie `guestPhone` (le `snapshot.guestPhone`, Ch
 Beds24), les conversations « tâche seule » prennent `agent_tasks.guest_phone`. Lien `tel:` dans
 l'en-tête du fil (bouton portant le numéro) et, dans la liste, pour les seules arrivées du jour et du
 lendemain. Si le champ porte deux numéros, on compose le premier ; le champ s'affiche tel quel.
+
+## Incident du 8 octobre 2026 — l'agent reclassait 4 fils à chaque cycle
+
+**Constat.** Alerte « 42 lignes dans `automation_incidents` en 1 h » et crédit
+Anthropic épuisé vers 4 h UTC. Quatre fils (Ofuro Futari ×3, en pause
+volontaire ; Cœur de vie l 23 ×1) passaient toutes les gardes et repartaient à
+l'IA à chaque cycle de 5 minutes : environ 48 appels par heure sur
+`GUESTFLOW_MODEL` (Sonnet 5.5), jusqu'à épuiser le crédit ; puis un incident
+`api_credit` par appel en échec, chaque échec rejoué au cycle suivant (264 en
+une journée). Aucun envoi en double aux voyageurs. Sans lien avec le
+déploiement avis (915f741, poussé après le début de la boucle).
+
+**Cause.** `hasNewerTaskOrConv` ne ferme un fil que sur une tâche de
+classification ou une réponse écrite après le dernier message du voyageur.
+Quatre chemins appelaient l'IA puis n'écrivaient RIEN : bien en pause (réponse
+gelée), réponse automatique vide, proposition du même type déjà en attente,
+envoi en échec en Mode Auto.
+
+**Arrêt (go de Thierry, 8 octobre 2026, 20:51 UTC).** Quatre tâches `ignored`
+« Arrêt de boucle » sur les quatre fils ; deux cycles réels observés ensuite :
+0 fil traité (contre 3), aucun incident.
+
+**Correctif.**
+- Une **trace** (tâche `ignored` du type classé) après chacun de ces chemins :
+  un fil n'est jamais reclassé sans nouveau message du voyageur. Sur un bien en
+  pause, une intervention ou une question inconnue crée toujours sa tâche.
+- `lib/guestflow-garde.js` : **au plus 3 appels IA par fil sur 24 h** (incident
+  `guestflow_plafond`, un par fil et par jour) et **délai croissant après un
+  échec** (5, 10, 20, 40 min… plafonné à 6 h). Journal `guestflow_appels_ia`
+  (migration `2026-10-08-guestflow-appels-ia.sql`) : une ligne par appel, avec
+  le modèle réellement utilisé — ce que le cron ne journalisait pas. Sans la
+  migration, l'agent tourne sans plafond et le dit (`guestflow_journal_absent`).
+- **Un seul incident `api_credit` par service et par heure**
+  (`lib/incident-facturation.js`).
+- `totalAutoReplies` ne compte plus que les réponses réellement envoyées (il
+  annonçait « 3 réponses » par cycle sans qu'aucune ne parte).
+
+### « Bonjour {prenom} » parti à deux voyageurs (même jour)
+Modèle « arrivée », réservations 814bf119 (11:00) et 12bbf074 (18:00). Cause :
+`generateAutoMessage` (lib/cron-messages.js) améliore le texte par Haiku ; en
+échec (crédit épuisé), son repli rendait le **modèle brut**, avant substitution
+— toute variable pouvait partir ainsi. Désormais : le repli est le texte
+substitué ; sans prénom, la formule est neutre (« Bonjour, »), jamais
+« Voyageur » ; une variable `{…}` restée dans le modèle retient le message et
+prévient l'hôte (`message_non_envoye`) ; une variable réintroduite par l'IA
+fait renvoyer le texte substitué ; une erreur inattendue n'envoie rien.
+
+### Reviews de ecce019 et fbd316e (aucun constat de sécurité)
+Corrigé :
+- **B1** — un envoi en échec en Mode Auto devient une **proposition visible**
+  (`pending_validation`, la réponse à renvoyer d'un clic) et l'incident
+  `send_failure` part dès le 1er échec ; avant, la boucle le rejouait.
+- **B2** — au plafond, le message ne disparaît pas : une **tâche visible**
+  (« L'agent IA s'est arrêté sur ce fil… ») et l'hôte alerté ; un nouveau
+  message met à jour cette tâche. Le plafond ne compte que les appels
+  **réussis** (une coupure de crédit ne bloque plus les fils 24 h).
+- **B3** — le garde-fou passe avant l'écartement des propositions périmées.
+- Les traces sont **datées du dernier message du lot** (un message écrit pendant
+  l'appel IA rouvre le fil).
+- Messages automatiques : la garde des variables passe **avant** l'appel IA ;
+  motif « variable inconnue, à corriger dans GuestFlow → Messages » ; détection
+  des variables accentuées ou chiffrées ; une erreur imprévue prévient l'hôte ;
+  le prénom neutre vaut aussi pour les **codes d'accès** (`lib/message-builder.js`,
+  plus de « Bonjour Voyageur »).
+
+**À décider par Thierry / dettes notées :**
+- **Bien en pause — tranché par Thierry le 9 octobre 2026** : pas de réponse
+  automatique tardive à la reprise ; un message reçu pendant la pause devient
+  une tâche VISIBLE « Reçu pendant la pause… » (une par lot, mise à jour par un
+  nouveau message, la réponse que l'agent aurait envoyée jointe en note, jamais
+  envoyée). Les interventions et questions inconnues créent leur tâche comme
+  d'habitude. `GUESTFLOW_MODEL` reste sur Sonnet 5.5 ; Thierry pose une limite
+  de dépense sur la console Anthropic.
+- `prevenirManque` / `prevenirVariableInconnue` écrivent une ligne d'incident
+  par cycle tant que le message est retenu (l'alerte, elle, a son anti-spam).
+- Les traces `ignored` occupent la fenêtre de 200 tâches lue par la messagerie.
+- `lib/message-builder.js` (codes d'accès) n'a pas de garde finale `{…}` ;
+  `[CODE À INSÉRER]` / `[WIFI …]` partent encore sur le chemin des modèles
+  quand la base de connaissance ne les porte pas (antérieur).
+- Review de ad4a21b (aucun constat de sécurité) : la tâche « reçu pendant la
+  pause » à reprendre est cherchée **dans le lot en cours** (bornée par la
+  dernière réponse de l'hôte) — une tâche d'un lot déjà répondu n'est jamais
+  réécrite, sinon le lot ne se fermait plus ; la note suit le lot ; type
+  `info_unknown` (affichée comme information, pas « Intervention requise »).
+  **Tranché par Thierry le 9 octobre 2026** : à la reprise, l'agent répond
+  aux messages reçus en pause et aux nouveaux ensemble ; la tâche « reçu
+  pendant la pause » se **ferme d'elle-même** (`done`, comme « Traité ») dès
+  qu'une réponse part — de l'agent (aussitôt) ou de l'hôte, depuis la
+  messagerie ou l'app OTA (au cycle suivant, avant les gardes qui sortiraient
+  sans voir la réponse).
+- Review de ef61bc0 (aucun constat de sécurité, aucun bloquant). **Dettes** :
+  sur Beds24, un modèle (J-1, code) relu en `host` faute de rapprochement avec
+  le cœur (`nosEnvoisBeds24` illisible, ou texte différent après normalisation)
+  fermerait la tâche « reçu pendant la pause » sans réponse réelle ; un message
+  sorti de la fenêtre de lecture (30 jours Channex, 100 messages Beds24) laisse
+  sa tâche ouverte. **À la reprise sans nouveau message**, l'agent ne répond pas
+  aux messages reçus en pause : il le fera au prochain message du voyageur, et
+  la tâche reste ouverte d'ici là (ou jusqu'à la réponse de l'hôte).
