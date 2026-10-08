@@ -890,3 +890,33 @@ tronquée le dit.
 - la garantie V2 (`tests/v2-marche-aucune-ecriture-calendrier.test.js`) ne
   regarde plus que les zones V2 : un futur fichier V2 hors de ces préfixes
   passerait sans contrôle.
+
+### Échéance et avis visible — recette du 9 octobre 2026
+**Constat.** Julien Darmon (départ 13 septembre) : son avis était lisible et la
+page affichait « 5 jours restants ». Neuf évaluations nées de l'objet Channex
+(départs du 12 au 28 septembre) portaient son `expired_at` (réception + ~30
+jours) au lieu de l'échéance d'Airbnb (départ + 14 jours) ; les évaluations
+nées au départ (`naitreAuDepart`, depuis le 30 septembre) étaient justes.
+
+**Règles (décisions de Thierry).**
+1. Avis du voyageur visible + notre avis non publié = évaluation **expirée** :
+   bouton retiré, hors « En attente de notation » (`lib/avis/cartes.js`) ; la
+   publication est refusée et écrit `expiree` (`api/avis.js`,
+   `evaluationPublier` — l'auto-validation passe par là).
+2. L'échéance d'une évaluation née de l'objet est **réception + 14 jours**
+   (l'objet arrive au départ), la plus proche avec celle de Channex
+   (`lib/avis/naissance.js`).
+3. L'auto-validation ne vise jamais une évaluation fermée : échéance juste
+   (elle désarme à l'échéance) et refus de publication si l'avis est visible.
+
+Réparation des évaluations déjà nées : `scripts/corriger-echeance-avis.js`
+(à blanc par défaut).
+- **Review de 1ad5881 (aucun constat de sécurité)** : un `echec_publication`
+  n'est **jamais** passé en `expiree` (ni par la publication, ni par le script)
+  — notre avis est peut-être parti, et c'est justement ce qui a révélé celui du
+  voyageur ; seule la relecture chez le provider tranche. « Visible » exige une
+  note ou un texte (`voyageurAEcrit`, même preuve que le rangement). Un avis
+  visible **avant** réception + 14 jours range en `evaluee_ailleurs` (l'hôte a
+  évalué sur Airbnb), après en `expiree`. Le script arrête tout sur une lecture
+  en échec. Limite : un objet reçu longtemps après le départ (rattrapage) donne
+  une échéance trop tardive, bornée par celle de Channex.
