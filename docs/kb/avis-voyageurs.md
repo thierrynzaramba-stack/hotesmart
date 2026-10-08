@@ -911,3 +911,12 @@ nées au départ (`naitreAuDepart`, depuis le 30 septembre) étaient justes.
 
 Réparation des évaluations déjà nées : `scripts/corriger-echeance-avis.js`
 (à blanc par défaut).
+- **Review de 1ad5881 (aucun constat de sécurité)** : un `echec_publication`
+  n'est **jamais** passé en `expiree` (ni par la publication, ni par le script)
+  — notre avis est peut-être parti, et c'est justement ce qui a révélé celui du
+  voyageur ; seule la relecture chez le provider tranche. « Visible » exige une
+  note ou un texte (`voyageurAEcrit`, même preuve que le rangement). Un avis
+  visible **avant** réception + 14 jours range en `evaluee_ailleurs` (l'hôte a
+  évalué sur Airbnb), après en `expiree`. Le script arrête tout sur une lecture
+  en échec. Limite : un objet reçu longtemps après le départ (rattrapage) donne
+  une échéance trop tardive, bornée par celle de Channex.

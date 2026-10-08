@@ -147,6 +147,9 @@ test('LE TEST QUI COMPTE (regle de Thierry du 9 octobre 2026, vecu Julien Darmon
   const c = r.anciens.find(x => x.cle === 'sejour:u1')
   assert.equal(c.evaluation.etat, 'expiree')
   assert.equal(c.evaluation.evaluable, false)
+  // Un objet vide et non cache (ni note ni texte) ne prouve rien : en attente.
+  const vide = assembler({ evaluations: [ev('u1', { ota_review_id: 'a1', deadline_at: '2026-10-13T12:00:00Z' })], avis: [av('a1', { cache: false, overall_score: 0, content: null, content_public: null })] })
+  assert.equal(vide.attente.length, 1)
   // Masque : toujours en attente.
   const m = assembler({ evaluations: [ev('u1', { ota_review_id: 'a1', deadline_at: '2026-10-13T12:00:00Z' })], avis: [av('a1', { cache: true, overall_score: 0, content: null, content_public: null })] })
   assert.equal(m.attente.length, 1)

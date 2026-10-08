@@ -1998,7 +1998,7 @@ async function evaluationPublier (req, res, garde, options = {}) {
     return res.status(409).json({ error: 'La plateforme n’a pas encore ouvert d’avis pour ce séjour', motif: 'sans_objet_ota' })
   }
   const { data: objetOta, error: eOta } = await supabase
-    .from('ota_reviews').select('external_review_id, visible:raw->attributes->is_hidden, provider, ota')
+    .from('ota_reviews').select('external_review_id, received_at, provider, ota, cache:raw->attributes->is_hidden, note:raw->attributes->overall_score, texte:raw->attributes->content')
     .eq('id', e.ota_review_id).eq('user_id', e.user_id).maybeSingle()
   if (eOta) return res.status(503).json({ error: 'Référence de la plateforme illisible', detail: eOta.message })
   if (!objetOta?.external_review_id) {
@@ -2008,13 +2008,26 @@ async function evaluationPublier (req, res, garde, options = {}) {
   // Thierry du 9 octobre 2026). Airbnb ne revele l'avis qu'une fois les deux
   // avis ecrits ou le delai passe : on ne peut plus commenter. L'evaluation
   // passe « expiree », rien ne part — l'auto-validation passe par ici aussi.
-  // Lu dans le brut, strictement (`is_hidden === false`).
-  if (objetOta.visible === false && String(objetOta.ota).toLowerCase() === 'airbnb') {
+  // Lu dans le brut, strictement : `is_hidden === false` ET une note ou un texte
+  // (un objet vide et non cache ne prouve rien — revue de 9f76ae2).
+  // ⚠ JAMAIS SUR UN ECHEC DE PUBLICATION (revue de 1ad5881) : notre avis est
+  // peut-etre parti — c'est justement pour cela qu'Airbnb a revele celui du
+  // voyageur. Seule la relecture chez le provider (lib/avis/publication.js) le
+  // sait : on la laisse faire.
+  // Avis visible AVANT reception + 14 jours : l'hote a evalue directement sur
+  // Airbnb (`evaluee_ailleurs`, spec §6) ; apres, la fenetre est fermee (`expiree`).
+  const { voyageurAEcrit, FENETRE_AIRBNB_MS } = require('../lib/avis/naissance')
+  if (e.status !== 'echec_publication' && String(objetOta.ota).toLowerCase() === 'airbnb'
+      && voyageurAEcrit({ is_hidden: objetOta.cache, overall_score: objetOta.note, content: objetOta.texte })) {
+    const recu = Date.parse(objetOta.received_at || '')
+    const ailleurs = Number.isFinite(recu) && Date.now() < recu + FENETRE_AIRBNB_MS
+    const statut = ailleurs ? 'evaluee_ailleurs' : 'expiree'
     const { error: eExp } = await supabase.from('guest_evaluations')
-      .update({ status: 'expiree', auto_publier_le: null }).eq('id', e.id).eq('user_id', e.user_id)
-      .in('status', ['a_remplir', 'soumise_prestataire', 'a_valider', 'echec_publication'])
-    if (eExp) console.error('[avis] statut expiree non ecrit', e.id, eExp.message)
-    return res.status(409).json({ error: 'L’avis du voyageur est déjà visible : Airbnb a fermé l’évaluation.', motif: 'expiree' })
+      .update({ status: statut, auto_publier_le: null, updated_at: new Date().toISOString(), ...(ailleurs ? { origine_texte: 'ailleurs' } : {}) })
+      .eq('id', e.id).eq('user_id', e.user_id)
+      .in('status', ['a_remplir', 'soumise_prestataire', 'a_valider'])
+    if (eExp) console.error(`[avis] statut ${statut} non ecrit`, e.id, eExp.message)
+    return res.status(409).json({ error: ailleurs ? 'L’avis du voyageur est déjà visible : vous l’avez déjà évalué sur Airbnb.' : 'L’avis du voyageur est déjà visible : Airbnb a fermé l’évaluation.', motif: statut })
   }
 
   // Le texte modifie par l'hote arrive ici : c'est LUI qui part, pas celui de

@@ -454,15 +454,40 @@ test('LE TEST QUI COMPTE (point B) : la publication enregistre l origine — tex
 })
 
 // ─── Regle de Thierry du 9 octobre 2026 : avis du voyageur VISIBLE = fenetre fermee ──
-test('LE TEST QUI COMPTE (9 octobre 2026) : l avis du voyageur est VISIBLE — rien ne part chez Airbnb, l evaluation passe expiree', async () => {
-  const etat = preparer({ evaluations: [evalA()], otaReviews: [{ id: '99999999-9999-4999-8999-999999999999', user_id: PROD, external_review_id: 'channex-abc-123', visible: false, provider: 'channex', ota: 'airbnb' }] })
-  const handler = require('../api/avis')
+const objetVisible = (o = {}) => ({ id: '99999999-9999-4999-8999-999999999999', user_id: PROD, external_review_id: 'channex-abc-123', provider: 'channex', ota: 'airbnb',
+  // `visible` : le champ que lisait 1ad5881 — present, il fait rougir sa version sur l'echec de publication.
+  cache: false, visible: false, note: 10, texte: 'Super séjour', received_at: new Date(Date.now() - 20 * 86400000).toISOString(), ...o })
+const publierAvec = async (evaluation, objet) => {
+  const etat = preparer({ evaluations: [evaluation], otaReviews: [objet] })
   const res = reponse()
-  await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+  await require('../api/avis')(req({ action: 'eval-publier' }, { id: evaluation.id, action: 'eval-publier' }), res)
+  return { etat, res, statuts: etat.ecritures.filter(e => e.table === 'guest_evaluations').map(e => e.row.status) }
+}
+
+test('LE TEST QUI COMPTE (9 octobre 2026) : l avis du voyageur est VISIBLE, fenetre passee — rien ne part chez Airbnb, l evaluation passe expiree', async () => {
+  const { res, statuts } = await publierAvec(evalA(), objetVisible())
   assert.strictEqual(res.code, 409)
   assert.strictEqual(res.body.motif, 'expiree')
-  assert.ok(etat.ecritures.some(e => e.table === 'guest_evaluations' && e.row.status === 'expiree'))
-  assert.ok(!etat.ecritures.some(e => e.table === 'guest_evaluations' && e.row.status === 'publiee'), 'rien n est publie')
+  assert.ok(statuts.includes('expiree'))
+  assert.ok(!statuts.includes('publiee'), 'rien n est publie')
+})
+
+test('revue de 1ad5881 : visible AVANT reception + 14 j — l hote a evalue sur Airbnb (evaluee_ailleurs), pas expiree', async () => {
+  const { res, statuts } = await publierAvec(evalA(), objetVisible({ received_at: new Date(Date.now() - 3 * 86400000).toISOString() }))
+  assert.strictEqual(res.body.motif, 'evaluee_ailleurs')
+  assert.ok(statuts.includes('evaluee_ailleurs'))
+})
+
+test('LE TEST QUI COMPTE (revue de 1ad5881) : un ECHEC DE PUBLICATION n expire jamais sur un avis visible — la relecture chez le provider tranche', async () => {
+  const { res, statuts } = await publierAvec(evalA({ status: 'echec_publication' }), objetVisible())
+  assert.notStrictEqual(res.body && res.body.motif, 'expiree')
+  assert.ok(!statuts.includes('expiree'))
+})
+
+test('revue de 1ad5881 : un objet vide et non cache ne prouve rien — la publication n est pas bloquee par lui', async () => {
+  const { res, statuts } = await publierAvec(evalA(), objetVisible({ note: null, texte: null }))
+  assert.notStrictEqual(res.body && res.body.motif, 'expiree')
+  assert.ok(!statuts.includes('expiree'))
 })
 
 // ─── L'ECRITURE PERDUE (constat haut 3) ─────────────────────────────────────
