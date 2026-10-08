@@ -672,3 +672,39 @@ Téléphone : `/api/messages` renvoie `guestPhone` (le `snapshot.guestPhone`, Ch
 Beds24), les conversations « tâche seule » prennent `agent_tasks.guest_phone`. Lien `tel:` dans
 l'en-tête du fil (bouton portant le numéro) et, dans la liste, pour les seules arrivées du jour et du
 lendemain. Si le champ porte deux numéros, on compose le premier ; le champ s'affiche tel quel.
+
+## Incident du 8 octobre 2026 — l'agent reclassait 4 fils à chaque cycle
+
+**Constat.** Alerte « 42 lignes dans `automation_incidents` en 1 h » et crédit
+Anthropic épuisé vers 4 h UTC. Quatre fils (Ofuro Futari ×3, en pause
+volontaire ; Cœur de vie l 23 ×1) passaient toutes les gardes et repartaient à
+l'IA à chaque cycle de 5 minutes : environ 48 appels par heure sur
+`GUESTFLOW_MODEL` (Sonnet 5.5), jusqu'à épuiser le crédit ; puis un incident
+`api_credit` par appel en échec, chaque échec rejoué au cycle suivant (264 en
+une journée). Aucun envoi en double aux voyageurs. Sans lien avec le
+déploiement avis (915f741, poussé après le début de la boucle).
+
+**Cause.** `hasNewerTaskOrConv` ne ferme un fil que sur une tâche de
+classification ou une réponse écrite après le dernier message du voyageur.
+Quatre chemins appelaient l'IA puis n'écrivaient RIEN : bien en pause (réponse
+gelée), réponse automatique vide, proposition du même type déjà en attente,
+envoi en échec en Mode Auto.
+
+**Arrêt (go de Thierry, 8 octobre 2026, 20:51 UTC).** Quatre tâches `ignored`
+« Arrêt de boucle » sur les quatre fils ; deux cycles réels observés ensuite :
+0 fil traité (contre 3), aucun incident.
+
+**Correctif.**
+- Une **trace** (tâche `ignored` du type classé) après chacun de ces chemins :
+  un fil n'est jamais reclassé sans nouveau message du voyageur. Sur un bien en
+  pause, une intervention ou une question inconnue crée toujours sa tâche.
+- `lib/guestflow-garde.js` : **au plus 3 appels IA par fil sur 24 h** (incident
+  `guestflow_plafond`, un par fil et par jour) et **délai croissant après un
+  échec** (5, 10, 20, 40 min… plafonné à 6 h). Journal `guestflow_appels_ia`
+  (migration `2026-10-08-guestflow-appels-ia.sql`) : une ligne par appel, avec
+  le modèle réellement utilisé — ce que le cron ne journalisait pas. Sans la
+  migration, l'agent tourne sans plafond et le dit (`guestflow_journal_absent`).
+- **Un seul incident `api_credit` par service et par heure**
+  (`lib/incident-facturation.js`).
+- `totalAutoReplies` ne compte plus que les réponses réellement envoyées (il
+  annonçait « 3 réponses » par cycle sans qu'aucune ne parte).

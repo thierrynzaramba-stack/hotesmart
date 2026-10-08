@@ -85,3 +85,26 @@ test('reportIncident accepte une fenetre d anti-spam, et garde 1 h par defaut', 
   assert.ok(/Math\.min\(base \* Math\.pow\(2, consecutives\), PLAFOND_ESCALADE_MS\)/.test(src),
     'l escalade part de la base fournie, pas d une constante')
 })
+
+// ─── Incident du 8 octobre 2026 : UN incident api_credit par heure ───────────
+// 264 lignes en une journee, une par appel IA en echec : l'alerte de croissance
+// de la table s'est declenchee pour du bruit.
+test('LE TEST QUI COMPTE (8 octobre 2026) : une panne de credit deja signalee dans l heure n ecrit pas de nouvelle ligne', async () => {
+  const path = require('node:path')
+  const ecrits = []
+  let lignes = []
+  const supabase = { from: () => {
+    const q = { select () { return q }, eq () { return q }, gte () { return q }, like () { return q }, limit: async () => ({ data: lignes, error: null }) }
+    return q
+  } }
+  const stub = (m, exports) => { const c = require.resolve(m); require.cache[c] = { id: c, filename: c, loaded: true, exports } }
+  stub(path.join(__dirname, '../lib/cron-shared'), { supabase })
+  stub(path.join(__dirname, '../lib/founder-notify'), { reportIncident: async (type) => { ecrits.push(type); lignes = [{ id: 1 }] } })
+  delete require.cache[require.resolve('../lib/incident-facturation')]
+  const { signalerSiPanneFacturation } = require('../lib/incident-facturation')
+  const credit = Object.assign(new Error('400 Your credit balance is too low to access the Anthropic API.'), { status: 400 })
+  assert.strictEqual(await signalerSiPanneFacturation('Anthropic (IA)', credit), true)
+  for (let i = 0; i < 5; i++) assert.strictEqual(await signalerSiPanneFacturation('Anthropic (IA)', credit), false)
+  assert.deepStrictEqual(ecrits, ['api_credit'], 'une seule ligne pour six appels en echec')
+  for (const m of ['../lib/cron-shared', '../lib/founder-notify', '../lib/incident-facturation']) delete require.cache[require.resolve(m)]
+})
