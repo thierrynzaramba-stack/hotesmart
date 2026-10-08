@@ -105,10 +105,13 @@ const deuxCycles = async (o) => {
 test('LE TEST QUI COMPTE (vecu, Ofuro Futari en pause) : un bien en pause — UN appel, une trace, et plus rien au cycle suivant', async () => {
   const r = await deuxCycles({ messages: fil(), mode: 'auto', pause: true, reponse: { type: 'sympathy', reason: 'merci', auto_reply: 'Avec plaisir !', sub_tasks: [] } })
   assert.deepStrictEqual([r.premier, r.second], [1, 0])
-  const trace = r.t.agent_tasks.find(x => x.status === 'ignored')
-  assert.ok(trace, 'le lot est marque traite')
-  assert.match(trace.summary, /Bien en pause/)
-  assert.strictEqual(r.t.agent_tasks.filter(x => x.status !== 'ignored').length, 0, 'aucune action proposee a l hote')
+  // Decision de Thierry du 9 octobre : une tache VISIBLE « reçu pendant la
+  // pause », jamais de reponse automatique (ni maintenant ni a la reprise).
+  const visibles = r.t.agent_tasks.filter(x => x.status === 'pending')
+  assert.strictEqual(visibles.length, 1)
+  assert.match(visibles[0].summary, /^Reçu pendant la pause/)
+  assert.strictEqual(visibles[0].sub_tasks[0].suggested_reply, 'Avec plaisir !', 'la reponse proposee jointe en note')
+  assert.strictEqual(r.t.conversations.length, 0, 'rien n est parti')
 })
 
 test('LE TEST QUI COMPTE : une reponse automatique VIDE — une trace, pas de reclassement', async () => {
@@ -221,12 +224,24 @@ test('revue de ecce019 (B3) : sous le plafond, une proposition en attente n est 
 
 test('revue de ecce019 : la trace est DATEE du dernier message du lot — un message ecrit pendant l appel IA rouvre le fil', async () => {
   const t = tables()
-  const c = charger({ tables: t, messages: fil(30), mode: 'auto', pause: true, reponse: { type: 'sympathy', reason: 'merci', auto_reply: 'Ok', sub_tasks: [] } })
+  const c = charger({ tables: t, messages: fil(30), reponse: { type: 'sympathy', reason: 'merci', auto_reply: null, sub_tasks: [] } })
   await c.mod.processChannelPropertyMessages(U, bien, bilan())
   const trace = t.agent_tasks.find(x => x.status === 'ignored')
   assert.ok(Math.abs(Date.parse(trace.created_at) - (Date.now() - 30 * 60e3)) < 5000, 'datee du dernier message du lot (il y a 30 min), pas de l insertion')
   // Un message ecrit 1 min APRES le lot (pendant l'appel) : le fil se rouvre.
-  const d = charger({ tables: t, messages: [...fil(30), { bookingId: B, sender: 'guest', message: 'Et le parking ?', time: recent(29) }], mode: 'auto', pause: true, reponse: { type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] } })
+  const d = charger({ tables: t, messages: [...fil(30), { bookingId: B, sender: 'guest', message: 'Et le parking ?', time: recent(29) }], reponse: { type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] } })
   await d.mod.processChannelPropertyMessages(U, bien, bilan())
   assert.strictEqual(d.appelsIA.length, 1)
+})
+
+test('decision du 9 octobre : en pause, un 2e message met a jour LA tache « reçu pendant la pause » (une seule) ; sans reponse proposee aussi', async () => {
+  const t = tables()
+  const r = await deuxCycles({ tables: t, messages: fil(30), mode: 'auto', pause: true, reponse: { type: 'sympathy', reason: 'merci', auto_reply: null, sub_tasks: [] } })
+  assert.deepStrictEqual([r.premier, r.second], [1, 0])
+  assert.strictEqual(t.agent_tasks.filter(x => x.status === 'pending').length, 1, 'meme sans reponse proposee, visible')
+  const c = charger({ tables: t, messages: [...fil(30), { bookingId: B, sender: 'guest', message: 'Encore merci !', time: recent(10) }], mode: 'auto', pause: true, reponse: { type: 'sympathy', reason: 'merci', auto_reply: 'Avec plaisir', sub_tasks: [] } })
+  await c.mod.processChannelPropertyMessages(U, bien, bilan())
+  const visibles = t.agent_tasks.filter(x => x.status === 'pending')
+  assert.strictEqual(visibles.length, 1, 'une seule tache par lot')
+  assert.match(visibles[0].guest_message, /Encore merci/)
 })

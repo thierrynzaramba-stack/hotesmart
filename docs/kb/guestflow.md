@@ -738,9 +738,13 @@ Corrigé :
   plus de « Bonjour Voyageur »).
 
 **À décider par Thierry / dettes notées :**
-- **Bien en pause** : le lot reçu pendant la pause est marqué traité ; à la
-  reprise, il ne reçoit plus de réponse automatique (avant : il la recevait).
-  Les interventions et questions inconnues, elles, créent toujours leur tâche.
+- **Bien en pause — tranché par Thierry le 9 octobre 2026** : pas de réponse
+  automatique tardive à la reprise ; un message reçu pendant la pause devient
+  une tâche VISIBLE « Reçu pendant la pause… » (une par lot, mise à jour par un
+  nouveau message, la réponse que l'agent aurait envoyée jointe en note, jamais
+  envoyée). Les interventions et questions inconnues créent leur tâche comme
+  d'habitude. `GUESTFLOW_MODEL` reste sur Sonnet 5.5 ; Thierry pose une limite
+  de dépense sur la console Anthropic.
 - `prevenirManque` / `prevenirVariableInconnue` écrivent une ligne d'incident
   par cycle tant que le message est retenu (l'alerte, elle, a son anti-spam).
 - Les traces `ignored` occupent la fenêtre de 200 tâches lue par la messagerie.
