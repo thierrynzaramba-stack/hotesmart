@@ -738,12 +738,24 @@ Corrigé :
   plus de « Bonjour Voyageur »).
 
 **À décider par Thierry / dettes notées :**
-- **Bien en pause** : le lot reçu pendant la pause est marqué traité ; à la
-  reprise, il ne reçoit plus de réponse automatique (avant : il la recevait).
-  Les interventions et questions inconnues, elles, créent toujours leur tâche.
+- **Bien en pause — tranché par Thierry le 9 octobre 2026** : pas de réponse
+  automatique tardive à la reprise ; un message reçu pendant la pause devient
+  une tâche VISIBLE « Reçu pendant la pause… » (une par lot, mise à jour par un
+  nouveau message, la réponse que l'agent aurait envoyée jointe en note, jamais
+  envoyée). Les interventions et questions inconnues créent leur tâche comme
+  d'habitude. `GUESTFLOW_MODEL` reste sur Sonnet 5.5 ; Thierry pose une limite
+  de dépense sur la console Anthropic.
 - `prevenirManque` / `prevenirVariableInconnue` écrivent une ligne d'incident
   par cycle tant que le message est retenu (l'alerte, elle, a son anti-spam).
 - Les traces `ignored` occupent la fenêtre de 200 tâches lue par la messagerie.
 - `lib/message-builder.js` (codes d'accès) n'a pas de garde finale `{…}` ;
   `[CODE À INSÉRER]` / `[WIFI …]` partent encore sur le chemin des modèles
   quand la base de connaissance ne les porte pas (antérieur).
+- Review de ad4a21b (aucun constat de sécurité) : la tâche « reçu pendant la
+  pause » à reprendre est cherchée **dans le lot en cours** (bornée par la
+  dernière réponse de l'hôte) — une tâche d'un lot déjà répondu n'est jamais
+  réécrite, sinon le lot ne se fermait plus ; la note suit le lot ; type
+  `info_unknown` (affichée comme information, pas « Intervention requise »).
+  **À trancher** : à la reprise, si le voyageur réécrit sans que l'hôte ait
+  répondu, le lot couvre aussi le message reçu en pause, et la réponse
+  automatique y répond indirectement.
