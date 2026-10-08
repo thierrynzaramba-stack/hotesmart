@@ -244,4 +244,32 @@ test('decision du 9 octobre : en pause, un 2e message met a jour LA tache « re�
   const visibles = t.agent_tasks.filter(x => x.status === 'pending')
   assert.strictEqual(visibles.length, 1, 'une seule tache par lot')
   assert.match(visibles[0].guest_message, /Encore merci/)
+  assert.strictEqual(visibles[0].task_type, 'info_unknown', 'affichee comme information, pas « Intervention requise »')
+  assert.match(visibles[0].sub_tasks[0].question, /Encore merci/, 'la note suit le lot (revue de ad4a21b)')
+  assert.strictEqual(visibles[0].sub_tasks[0].suggested_reply, 'Avec plaisir')
+  // Revue de ad4a21b : au cycle SUIVANT, plus aucun appel IA.
+  const d = charger({ tables: t, messages: [...fil(30), { bookingId: B, sender: 'guest', message: 'Encore merci !', time: recent(10) }], mode: 'auto', pause: true, reponse: { type: 'sympathy', reason: 'merci', auto_reply: 'Avec plaisir', sub_tasks: [] } })
+  await d.mod.processChannelPropertyMessages(U, bien, bilan())
+  assert.strictEqual(d.appelsIA.length, 0)
+  // La tache de pause est DATEE du lot, pas de l'insertion.
+  assert.ok(Date.parse(visibles[0].created_at) < Date.now() - 20 * 60e3)
+})
+
+test('LE TEST QUI COMPTE (revue de ad4a21b) : l hote repond entre deux messages recus en pause — une NOUVELLE tache, l ancienne intacte, et aucun appel au cycle suivant', async () => {
+  const t = tables()
+  const M1 = { bookingId: B, sender: 'guest', message: 'Merci pour l accueil', time: recent(60) }
+  const H = { bookingId: B, sender: 'host', message: 'Avec plaisir !', time: recent(40) }
+  const M2 = { bookingId: B, sender: 'guest', message: 'Ou est le seche-cheveux ?', time: recent(20) }
+  const rep = { type: 'sympathy', reason: 'x', auto_reply: 'Ok', sub_tasks: [] }
+  const a = charger({ tables: t, messages: [M1], mode: 'auto', pause: true, reponse: rep })
+  await a.mod.processChannelPropertyMessages(U, bien, bilan())
+  const b = charger({ tables: t, messages: [M1, H, M2], mode: 'auto', pause: true, reponse: rep })
+  await b.mod.processChannelPropertyMessages(U, bien, bilan())
+  const pauses = t.agent_tasks.filter(x => x.status === 'pending')
+  assert.strictEqual(pauses.length, 2, 'une tache par lot')
+  assert.match(pauses[0].guest_message, /accueil/, 'la tache du lot deja repondu n est pas reecrite')
+  assert.match(pauses[1].guest_message, /seche-cheveux/)
+  const c = charger({ tables: t, messages: [M1, H, M2], mode: 'auto', pause: true, reponse: rep })
+  await c.mod.processChannelPropertyMessages(U, bien, bilan())
+  assert.strictEqual(c.appelsIA.length, 0, 'le lot est ferme')
 })

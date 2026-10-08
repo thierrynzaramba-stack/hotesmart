@@ -751,3 +751,11 @@ Corrigé :
 - `lib/message-builder.js` (codes d'accès) n'a pas de garde finale `{…}` ;
   `[CODE À INSÉRER]` / `[WIFI …]` partent encore sur le chemin des modèles
   quand la base de connaissance ne les porte pas (antérieur).
+- Review de ad4a21b (aucun constat de sécurité) : la tâche « reçu pendant la
+  pause » à reprendre est cherchée **dans le lot en cours** (bornée par la
+  dernière réponse de l'hôte) — une tâche d'un lot déjà répondu n'est jamais
+  réécrite, sinon le lot ne se fermait plus ; la note suit le lot ; type
+  `info_unknown` (affichée comme information, pas « Intervention requise »).
+  **À trancher** : à la reprise, si le voyageur réécrit sans que l'hôte ait
+  répondu, le lot couvre aussi le message reçu en pause, et la réponse
+  automatique y répond indirectement.
