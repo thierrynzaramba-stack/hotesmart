@@ -239,3 +239,65 @@ test('deux reponses de charabia se distinguent d’un garde-fou viole', async ()
   const r = await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_BIEN }) }, { anthropic: c })
   assert.strictEqual(r.motif, 'ia_illisible')
 })
+
+// ─── Recette de Thierry du 7 octobre 2026, points H et I ─────────────────────
+// Textes PUBLIES chez Airbnb le 2 octobre 2026, recopies tels quels : ils
+// doivent tous etre refuses par les garde-fous d'aujourd'hui.
+const R = require('../lib/avis/redaction')
+const PUBLIES_FAUTIFS = [
+  ['Angela a été une excellente hôte ! Communication fluide du début à la fin, respectueuse des horaires et des règles convenues. Le logement a été quitté propre et en parfait état. Je la recommande vivement aux futurs hôtes.', 'hote'],
+  ['Mickaël a été un voyageur exemplaire ! Communication fluide, respect parfait des horaires et des règles, et il a laissé le logement dans un état impeccable. Un hôte consciencieux et fiable sur lequel on peut compter. Je le recommande vivement aux futurs propriétaires.', 'hote'],
+]
+
+test('LE TEST QUI COMPTE (point H) : les deux textes publies avec l erreur sont refuses — le voyageur appele « hôte », les « propriétaires »', () => {
+  for (const [t] of PUBLIES_FAUTIFS) assert.strictEqual(R.appelleLeVoyageurHote(t, 'fr'), true, t.slice(0, 40))
+  assert.strictEqual(R.parleDeProprietaires(PUBLIES_FAUTIFS[1][0], 'fr'), true)
+  // « hôtes » reste admis pour les LECTEURS de l'avis.
+  for (const t of ['Je recommande Sam aux futurs hôtes.', 'Recommandé à tous les hôtes.', 'Un plaisir pour les autres hôtes.']) assert.strictEqual(R.appelleLeVoyageurHote(t, 'fr'), false, t)
+  assert.strictEqual(R.appelleLeVoyageurHote('Sam was a great host.', 'en'), true)
+  assert.strictEqual(R.appelleLeVoyageurHote('We recommend Sam to future hosts.', 'en'), false)
+  assert.strictEqual(R.parleDeProprietaires('Recommended to all owners.', 'en'), true)
+})
+
+test('point H (decision du 8 octobre) : aucun genre deduit du prenom — voyageuse, il/elle, le/la recommande, he/she sont refuses', () => {
+  for (const t of ['Sandra a été une voyageuse remarquable.', 'Elle a laissé le logement propre.', 'Je la recommande.', 'Je le recommande.']) assert.strictEqual(R.genreLeVoyageur(t, 'fr'), true, t)
+  assert.strictEqual(R.genreLeVoyageur('Un plaisir d’accueillir Sandra, qui a pris soin du logement. Nous recommandons Sandra.', 'fr'), false)
+  assert.strictEqual(R.genreLeVoyageur('She left it spotless.', 'en'), true)
+  assert.strictEqual(R.genreLeVoyageur('Sam left it spotless.', 'en'), false)
+})
+
+test('LE TEST QUI COMPTE (point H) : un texte qui appelle le voyageur « hôte » est REECRIT, avec la raison dans la consigne', async () => {
+  const c = client(json(PUBLIES_FAUTIFS[0][0]), json('Un plaisir d’accueillir Angela, qui a pris soin du logement. Nous recommandons Angela aux futurs hôtes.'))
+  const r = await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_BIEN }), prenom: 'Angela', langue: 'fr' }, { anthropic: c, hasard: () => 0 })
+  assert.strictEqual(r.motif, null)
+  assert.match(r.public_text, /^Un plaisir d’accueillir Angela/)
+  assert.strictEqual(c.appels.length, 2)
+  assert.match(c.appels[1], /le voyageur n’est jamais un hôte/)
+  // Deux fois fautif : rien n'est rendu, l'hote ecrit lui-meme.
+  const c2 = client(json(PUBLIES_FAUTIFS[0][0]))
+  const r2 = await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_BIEN }), prenom: 'Angela', langue: 'fr' }, { anthropic: c2 })
+  assert.strictEqual(r2.public_text, null)
+  assert.strictEqual(r2.motif, 'ia_appelle_hote')
+})
+
+test('point I : la consigne demande 2-3 phrases, une ouverture variee, les mots-cles, et interdit d affirmer un point non coche', () => {
+  const p = R.construirePrompt({ coches: [{ critere: 'Propreté', niveau: 'Très propre' }], prenom: 'Sam', langue: 'fr', config: { keywords: ['cocon', 'zen'] }, negatif: false, durcir: false, ouverture: R.OUVERTURES[2] })
+  assert.match(p, /2 a 3 phrases courtes/)
+  assert.match(p, /Ne commence PAS par « Sam a été »/)
+  assert.ok(p.includes(R.OUVERTURES[2]))
+  assert.match(p, /cocon, zen\. Emploie AU MOINS UN d'entre eux/)
+  assert.match(p, /Ne parle QUE des points coches/)
+  assert.doesNotMatch(p, /facultatif, ne force rien/)
+})
+
+test('point I : un texte sans aucun mot-cle a une seconde chance, jamais un refus', async () => {
+  const sans = json('Un plaisir d’accueillir Sam, qui a pris soin du logement.')
+  const avecMot = json('Un vrai cocon laissé en ordre : un plaisir d’accueillir Sam.')
+  const c = client(sans, avecMot)
+  const r = await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_BIEN }), prenom: 'Sam', langue: 'fr', config: { keywords: ['cocon'] } }, { anthropic: c })
+  assert.match(r.public_text, /cocon/)
+  assert.match(c.appels[1], /n’employait aucun des mots/)
+  const c2 = client(sans)
+  const r2 = await redigerAvis({ reponses: avec({ [PROPRETE]: NIV_BIEN }), prenom: 'Sam', langue: 'fr', config: { keywords: ['cocon'] } }, { anthropic: c2 })
+  assert.strictEqual(r2.motif, null, 'au second essai, le texte juste sans le mot passe')
+})

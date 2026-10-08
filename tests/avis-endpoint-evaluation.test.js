@@ -443,6 +443,16 @@ test('apres publication, la base garde la recommandation, pas seulement les note
   assert.ok(Array.isArray(maj.row.scores.categories))
 })
 
+// ─── L'ORIGINE DE NOTRE AVIS (recette du 7 octobre 2026, point B) ──────────
+test('LE TEST QUI COMPTE (point B) : la publication enregistre l origine — texte de l IA tel quel, ou texte de l hote', async () => {
+  const tel = preparer({ evaluations: [{ ...evalA(), public_text: 'Texte de l IA' }] })
+  await require('../api/avis')(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), reponse())
+  assert.strictEqual(tel.ecritures.find(e => e.table === 'guest_evaluations' && e.row.status === 'publiee').row.origine_texte, 'ia_valide')
+  const sien = preparer({ evaluations: [{ ...evalA(), public_text: 'Texte de l IA' }] })
+  await require('../api/avis')(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier', public_text: 'Mon propre texte' }), reponse())
+  assert.strictEqual(sien.ecritures.find(e => e.table === 'guest_evaluations' && e.row.status === 'publiee').row.origine_texte, 'humain')
+})
+
 // ─── L'ECRITURE PERDUE (constat haut 3) ─────────────────────────────────────
 test('l’ecriture du statut qui echoue ne passe pas pour un succes silencieux', async () => {
   const etat = preparer({ evaluations: [evalA()], erreurMaj: { message: 'colonne absente' } })

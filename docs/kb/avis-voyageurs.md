@@ -806,3 +806,59 @@ La fiche prestataire consomme `ratioProprete` avec `menageEventIds`, et n'affich
 de l'extrait que ce que `spec-prestataires-menage.md` §6 autorise : l'extrait
 seul, étiqueté « retour privé » quand il en vient, jamais le nom du voyageur,
 coupé par `self_view_reviews`.
+
+## 14. Une carte par séjour — recette du 7 octobre 2026
+
+Retours de Thierry sur la page `/avis` en production, diagnostic fait en lecture
+seule le 8 octobre 2026, décisions de Thierry du même jour.
+
+### Ce que les données ont montré
+- **Les avis « 0/10 » sans texte ne sont pas des coquilles** : 24 avis Airbnb
+  marqués `is_hidden` (août à octobre 2026), déposés par le voyageur et cachés
+  par Airbnb tant que l'hôte n'a pas évalué (double aveugle). Ils gonflaient le
+  total (688 au lieu de 664) et entraient à 0 dans la moyenne. La page faisait
+  en plus sa moyenne sur les 500 premières lignes reçues : 9,0 affiché, **9,57**
+  réel (Airbnb 9,72, Booking 8,72).
+- **« ménage : test »** : un profil prestataire de test (3 septembre 2026,
+  désactivé) resté sur 13 ménages passés de Colomiers.
+- **Guillem Cristofol** : deux réservations Airbnb distinctes (21-22 et
+  22-23 septembre), pas un doublon.
+- **Deux évaluations publiées appellent le voyageur « hôte »** (Angela, Cœur de
+  vie 23 ; Mickaël, La bulle, qui parle aussi de « futurs propriétaires »).
+  Elles sont en ligne chez Airbnb : se corrigent à la main là-bas.
+
+### Ce qui change
+- **Une carte par séjour** (`lib/avis/cartes.js`, action `cartes`,
+  `core/avis/cartes.js`) : en tête voyageur, bien, dates, plateforme,
+  prestataire ; « Son avis » (note, texte, classement propreté — le menu seul
+  au droit d'écriture, le badge seul sinon, jamais les deux) ; « Notre avis »
+  (texte, statut, origine). Remplace la liste des évaluations
+  (`core/avis/liste-evaluations.js`, supprimé).
+- **Trois sections** : en attente de notation (triée par délai restant),
+  récents (20 jours), anciens (repliée, lue à l'ouverture). Une évaluation hors
+  délai s'affiche « expirée » dans Anciens et sort de « vous attendent ».
+- **L'avis masqué** s'affiche « avis déposé, masqué par Airbnb jusqu'à votre
+  évaluation », hors compteur et hors moyenne (`lib/stats-avis.js` :
+  `is_hidden = false` dans le ratio, `noteMoyenne` paginée sur toute la
+  période — la même fonction sert la fiche prestataire).
+- **L'origine de notre avis** : colonne `guest_evaluations.origine_texte`
+  (migration `2026-10-08-avis-origine-texte.sql`), décidée à la publication
+  (`lib/avis/origine.js`) : `humain` (le texte envoyé diffère de celui en
+  base), `ia_valide`, `ia_auto`, `ailleurs`. Avant la colonne : rattrapage par
+  `scripts/rattraper-origine-avis.js` — publiée par un profil → `ia_valide` ;
+  sans profil, indécidable → « rédigé par l'IA » seul. Sans la migration,
+  l'écriture est rejouée sans la colonne, jamais perdue.
+- **La consigne de l'IA** (`lib/avis/redaction.js`) : le voyageur n'est jamais
+  « hôte », jamais « propriétaires », formulations neutres (le genre n'est
+  connu nulle part : jamais déduit du prénom), 2 à 3 phrases, ouverture tirée
+  au sort, au moins un mot-clé de l'hôte, rien d'affirmé hors des points cochés.
+  Vérifié **après coup** en français et en anglais (hôte, propriétaire, genre) :
+  un texte fautif est réécrit une fois avec la raison, puis rendu à l'hôte.
+- **Le bouton ☰** ne recouvre plus le titre : `.topbar` laisse sa place au
+  bouton sous 768 px (`components/sidebar.js`, règle commune).
+
+### Sécurité, inchangée
+La carte d'un avis seul ne montre le voyageur et les dates qu'au droit
+`reservations` (même règle que `list`) ; une carte qui porte une évaluation les
+montre, comme la liste des évaluations le faisait. Même périmètre par bien,
+même garde `avis: read`.
