@@ -8,7 +8,7 @@
 // Les quatre appelants (onboarding, messages, analyze, messagerie) envoyaient
 // deja le jeton de session : la garde ne casse aucun parcours.
 
-const { verifierSession } = require('../lib/require-permission')
+const { verifierSession, compteDemande } = require('../lib/require-permission')
 const { avecContexteIA } = require('../lib/ia/journal')
 
 // ⚠ LE CLIENT PARTAGE (spec-journal-ia, 9 octobre 2026) : chaque appel ecrit sa
@@ -50,7 +50,13 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'Requête trop longue' })
     }
 
-    const response = await avecContexteIA({ fonction: 'assistant', userId: appelant }, () => client().messages.create({
+    // Le journal range l'appel sous le COMPTE (comme partout ailleurs), pas sous
+    // l'identite d'un membre delegue (revue de 3a9c75d). X-Compte revalide par
+    // compteDemande ; refus ou panne : l'identite — c'est une attribution, elle
+    // n'ouvre aucun acces.
+    const cible = await compteDemande(req, appelant)
+    const compte = cible && cible.compte ? cible.compte : appelant
+    const response = await avecContexteIA({ fonction: 'assistant', userId: compte }, () => client().messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system: systemPrompt,

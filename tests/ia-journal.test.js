@@ -83,6 +83,17 @@ test('le cout : Haiku 4.5 et Sonnet 5.5 au tarif du 9 octobre 2026, cache compri
   assert.equal(ligneDAppel({ reponse: { model: 'claude-opus-5-5', usage: { input_tokens: 10 } } }).cout_usd, null)
 })
 
-test('une erreur est tronquee a 300 caracteres', () => {
+test('une erreur est tronquee a 300 caracteres, et une cle n y passe jamais (revue de 3a9c75d)', () => {
   assert.equal(ligneDAppel({ erreur: new Error('x'.repeat(1000)) }).erreur.length, 300)
+  const l = ligneDAppel({ erreur: new Error('invalid x-api-key sk-ant-api03-ABCDEFGHIJKLMNOP') })
+  assert.doesNotMatch(l.erreur, /ABCDEFGHIJ/)
+  assert.match(l.erreur, /<masque>/)
+})
+
+test('une ecriture LENTE ne fait pas pendre l appel : au-dela du delai, la reponse part (revue de 3a9c75d)', async () => {
+  const { noterAppelIA } = require('../lib/ia/journal')
+  const lente = { from: () => ({ insert: () => new Promise(() => {}) }) }
+  const debut = Date.now()
+  await noterAppelIA(lente, { fonction: 'x', ok: true }, { delaiMs: 30 })
+  assert.ok(Date.now() - debut < 1000, 'rendu apres le delai, pas pendu')
 })

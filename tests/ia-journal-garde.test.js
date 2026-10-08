@@ -31,11 +31,27 @@ test('LE TEST QUI COMPTE : un seul client Anthropic — le SDK n est charge que 
   assert.ok(TOUS.length > 50, 'le parcours a bien lu le depot')
 })
 
-test('LE TEST QUI COMPTE : tout fichier qui appelle messages.create pose son etiquette', () => {
+test('LE TEST QUI COMPTE : aucun appel direct a l API Anthropic hors du SDK partage (un fetch echapperait au journal et a l alerte)', () => {
+  assert.deepEqual(TOUS.filter(f => /api\.anthropic\.com/.test(lu(f))), [])
+})
+
+// Les fichiers dont les appels sont etiquetes par l'APPELANT, chacun nomme :
+// lib/cron-classify.js `appelerModele` (le modele voulu, puis le repli Haiku)
+// est entoure par `classifierLot`, qui pose `fonctionIA`.
+const ETIQUETES_PAR_L_APPELANT = { [path.join('lib', 'cron-classify.js')]: 1 }
+
+test('LE TEST QUI COMPTE : chaque messages.create porte son etiquette — compte PAR APPEL, pas par fichier (revue de 3a9c75d)', () => {
+  const compter = (texte, re) => (texte.match(re) || []).length
   const appelants = TOUS.filter(f => /messages\.create\s*\(/.test(lu(f)) && !f.endsWith(path.join('ia', 'journal.js')))
   assert.ok(appelants.length >= 7, `les sept appels de l inventaire sont vus (${appelants.length})`)
-  const sansEtiquette = appelants.filter(f => !/avecContexteIA\(\{\s*fonction:/.test(lu(f)))
-  assert.deepEqual(sansEtiquette, [])
+  const ecarts = appelants.map(f => {
+    const t = lu(f)
+    const appels = compter(t, /messages\.create\s*\(/g)
+    const etiquettes = compter(t, /avecContexteIA\(\{\s*fonction:/g)
+    const attendu = f in ETIQUETES_PAR_L_APPELANT ? ETIQUETES_PAR_L_APPELANT[f] : appels
+    return etiquettes >= attendu ? null : `${f} : ${appels} appel(s), ${etiquettes} etiquette(s)`
+  }).filter(Boolean)
+  assert.deepEqual(ecarts, [])
 })
 
 test('le client partage est bien l enveloppe journalisee, et grok/extract-kb passent par lui', () => {
