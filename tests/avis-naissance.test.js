@@ -463,3 +463,15 @@ test('SECURITE (re-revue de 5c59a7b) : entre J+14 et J+30, l’avis public ne pr
   await rangerEvalueesAilleurs(b.sb, [VISIBLE({ booking_uid: 'resa-1', received_at: null })], { maintenant: MAINTENANT })
   assert.strictEqual(b.etat.evaluations[0].status, 'a_remplir', 'sans date de reception : rien')
 })
+
+// ─── Recette de Thierry du 9 octobre 2026 : l'echeance d'AIRBNB, pas celle de Channex ──
+// Vecu : neuf evaluations nees de l'objet affichaient l'echeance Channex
+// (reception + 30 jours) — « 5 jours restants » chez Julien Darmon, parti le
+// 13 septembre, alors qu'Airbnb fermait 14 jours apres le depart.
+test('LE TEST QUI COMPTE (9 octobre 2026) : nee de l objet, l evaluation prend reception + 14 jours (Airbnb), pas l expired_at Channex (+30)', async () => {
+  const recu = new Date(MAINTENANT - 2 * 86400000).toISOString()
+  const channex = new Date(MAINTENANT + 28 * 86400000).toISOString()
+  const { etat, sb } = base({ objets: [{ id: 'objet-1', external_review_id: 'rev-1', expired_at: channex }] })
+  await rattacherObjetsRecus(sb, [ligneAvis({ received_at: recu, expired_at: channex })], { maintenant: MAINTENANT })
+  assert.strictEqual(etat.evaluations[0].deadline_at, new Date(Date.parse(recu) + 14 * 86400000).toISOString())
+})
