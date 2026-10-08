@@ -24,6 +24,7 @@ alter table public.guest_evaluations
   check (origine_texte is null or origine_texte in (
     'humain',
     'ia_valide',
+    'ia_presta',
     'ia_auto',
     'ailleurs'
   ));
@@ -32,7 +33,8 @@ comment on column
   public.guest_evaluations.origine_texte is
   'Origine de notre avis publie : humain (ecrit par '
   'l hote), ia_valide (texte de l IA publie sur un '
-  'geste), ia_auto (publication automatique), '
+  'geste), ia_presta (valide par la prestataire), '
+  'ia_auto (publication automatique), '
   'ailleurs (evalue directement sur Airbnb). Null : '
   'non enregistree (avant le 8 octobre 2026).';
 

@@ -147,9 +147,19 @@ test('SECURITE : un membre `avis: read` / `reservations: none` ne recoit ni le n
   assert.equal(c.voyageur, null)
   assert.equal(c.depart, null)
   assert.ok(!JSON.stringify(r.body).includes('Fanny'), 'le nom ne sort nulle part')
+  assert.ok(!JSON.stringify(r.body).includes(j10(-5)) && !JSON.stringify(r.body).includes(j10(-3)), 'ni les dates du sejour')
+  assert.ok(!JSON.stringify(r.body).includes('u1'), 'ni l identifiant de la reservation')
 })
 
 test('SECURITE : un membre `avis: none` est refuse', async () => {
   preparer({ ...membre({ avis: 'none', property_scope: 'all' }), avis: [avisDe('a1')] })
   assert.equal((await enTantQueMembre({})).code, 403)
+})
+
+test('SECURITE : une EVALUATION d un autre bien n apparait pas chez un membre limite', async () => {
+  preparer({ ...membre({ avis: 'read', reservations: 'read', property_scope: 'some', property_ids: [BIEN_A.id], property_refs: [REF_A] }),
+    evaluations: [EVAL, { ...EVAL, id: 'e2', booking_uid: 'u-b', property_id: BIEN_B.id, property_id_ref: REF_B, ota_review_id: null }] })
+  const r = await enTantQueMembre({ anciens: '1' })
+  const toutes = [...r.body.cartes.attente, ...r.body.cartes.recents, ...r.body.cartes.anciens]
+  assert.deepEqual(toutes.map(c => c.cle), ['sejour:u-masque'])
 })

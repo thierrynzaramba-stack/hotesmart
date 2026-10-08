@@ -96,7 +96,8 @@ function blocSonAvis (a, peutEcrire, i) {
 
 function delai (j) {
   if (j === null || j === undefined) return ''
-  if (j === 0) return '<span class="hs-eval-urgent">dernier jour</span>'
+  // Un jour restant ou moins : moins de 24 h, c'est le dernier jour.
+  if (j <= 1) return '<span class="hs-eval-urgent">dernier jour</span>'
   if (j <= 3) return `<span class="hs-eval-urgent">${j} jour${j > 1 ? 's' : ''} restant${j > 1 ? 's' : ''}</span>`
   return `<span class="hs-eval-delai">${j} jours restants</span>`
 }
@@ -173,6 +174,7 @@ export function rendre (data, opts = {}) {
       + (data.anciens_tronques ? '<p class="hs-carte-gris">Les 500 séjours les plus récents seulement.</p>' : '')
     : '<p class="hs-carte-gris">Chargement…</p>'
   return `<p class="hs-eval-resume">${resume}</p>`
+    + (data && data.liste_incomplete ? '<p class="hs-avis-erreur">La liste est incomplète : les séjours les plus anciens ne sont pas tous affichés.</p>' : '')
     + `<section class="hs-section"><h2>En attente de notation <span class="hs-compte">${n}</span></h2>`
     + (n ? liste(attente, opts, 'w') : '<p class="hs-carte-gris">Aucune évaluation à faire en ce moment.</p>') + '</section>'
     + `<section class="hs-section"><h2>Récents <span class="hs-sous">20 derniers jours</span></h2>`

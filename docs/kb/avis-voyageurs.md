@@ -862,3 +862,31 @@ La carte d'un avis seul ne montre le voyageur et les dates qu'au droit
 `reservations` (même règle que `list`) ; une carte qui porte une évaluation les
 montre, comme la liste des évaluations le faisait. Même périmètre par bien,
 même garde `avis: read`.
+
+### Review de ed445b2 (aucun constat de sécurité)
+Corrigé : les contrôles IA refusaient des textes justes (le verbe *to host*,
+« aux hôtes », le « il » impersonnel) ; le nettoyage du profil « test » aurait
+violé `menages_accepted_a_un_porteur` (un ménage `accepted` doit avoir un
+porteur : `--statut=completed|unassigned` est exigé) ; une prestataire qui
+publie est dite telle (`ia_presta`) ; un échec de publication passe devant tout
+et n'expire pas ; le délai se juge à l'instant (plus de « -0 jour ») ; le lien
+explicite de l'évaluation prime sur la réservation de l'avis ; sans le droit
+`reservations`, ni le nom, ni les dates, ni la prestataire, ni l'identifiant de
+réservation ne sortent, et nom et dates ne sont même pas lus ; une liste
+tronquée le dit.
+
+**Dettes notées :**
+- la période ne filtre que les compteurs, plus la liste : les sections sont
+  temporelles (20 jours, anciens) par décision de Thierry, mais le sélecteur se
+  lit encore comme un filtre de liste ;
+- les compteurs lisent la colonne `is_hidden` normalisée (champ absent = visible),
+  la carte lit le brut strictement : un avis Airbnb sans `is_hidden` dans son brut
+  s'afficherait masqué tout en comptant ; la liste PWA de la prestataire ne filtre
+  pas les masqués ;
+- les actions `list` et `evaluations` n'ont plus d'appelant à l'écran ; leur
+  test « chaque colonne est affichée » ne prouve plus grand-chose ;
+- la règle `.topbar` du ☰ touche toutes les pages : vérifiée à l'œil sur Avis
+  seulement ;
+- la garantie V2 (`tests/v2-marche-aucune-ecriture-calendrier.test.js`) ne
+  regarde plus que les zones V2 : un futur fichier V2 hors de ces préfixes
+  passerait sans contrôle.

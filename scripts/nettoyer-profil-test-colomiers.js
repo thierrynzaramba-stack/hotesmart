@@ -8,7 +8,13 @@
 // de Thierry : le retirer (prestataire non renseigne) et passer en « expiree »
 // les evaluations hors delai de ces sejours.
 //
-//   node --env-file=<.env de la base visee> scripts/nettoyer-profil-test-colomiers.js [--go --biens=5]
+//   node --env-file=<.env de la base visee> scripts/nettoyer-profil-test-colomiers.js [--go --biens=5 --statut=completed|unassigned]
+//
+// ⚠ UN MENAGE `accepted` DOIT AVOIR UN PORTEUR (contrainte
+// menages_accepted_a_un_porteur, revue de ed445b2) : retirer la prestataire
+// impose de changer son statut. Le choix est celui de Thierry, et --go l'exige :
+//   completed  — le menage a eu lieu, par une personne non renseignee ;
+//   unassigned — le menage n'a jamais ete attribue.
 //
 // Sans --go : AUCUNE ecriture, la liste exacte de ce qui serait ecrit.
 // ⚠ --go EXIGE --biens=N, le nombre de biens de la base visee (5 production) :
@@ -29,6 +35,8 @@ const go = args.includes('--go')
 
 ;(async () => {
   if (go && !/^\d+$/.test(String(val('biens') || ''))) { console.error('ECHEC : --go exige --biens=<N> (5 production)'); process.exit(1) }
+  const statut = val('statut')
+  if (go && !['completed', 'unassigned'].includes(statut)) { console.error('ECHEC : --go exige --statut=completed ou --statut=unassigned (un menage accepte doit avoir un porteur)'); process.exit(1) }
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, { auth: { persistSession: false } })
   const { count, error: eC } = await sb.from('properties').select('id', { count: 'exact', head: true })
   if (eC || !Number.isInteger(count)) throw new Error(`empreinte illisible ${eC ? eC.message : ''}`)
@@ -53,7 +61,7 @@ const go = args.includes('--go')
   if (eE) throw new Error(`evaluations : ${eE.message}`)
 
   console.log(`\n${menages.length} menage(s) passe(s) portent le profil « test » :`)
-  for (const m of menages) console.log(`  ${m.departure_date}  ${m.status}  menage ${m.id.slice(0, 8)}  sejour ${String(m.booking_id).slice(0, 8)}  → prestataire non renseigne`)
+  for (const m of menages) console.log(`  ${m.departure_date}  ${m.status}  menage ${m.id.slice(0, 8)}  sejour ${String(m.booking_id).slice(0, 8)}  → prestataire non renseigne${m.status === 'accepted' ? `, statut ${statut || '<--statut a choisir>'}` : ''}`)
   console.log(`\n${evals.length} evaluation(s) hors delai de ces sejours :`)
   for (const e of evals) console.log(`  sejour ${String(e.booking_uid).slice(0, 8)}  echeance ${String(e.deadline_at).slice(0, 10)}  a_remplir → expiree`)
   if (menages.length > ATTENDU.menages || evals.length > ATTENDU.evaluations) {
@@ -64,9 +72,18 @@ const go = args.includes('--go')
 
   const ids = menages.map(m => m.id)
   if (ids.length) {
-    const { data: faits, error } = await sb.from('menages').update({ provider_id: null, updated_at: new Date().toISOString() })
-      .eq('user_id', userId).eq('provider_id', PROFIL_TEST).in('id', ids).select('id')
-    if (error) throw new Error(`ecriture menages : ${error.message}`)
+    // Un seul UPDATE par statut d'origine : `accepted` change de statut avec son
+    // porteur (contrainte), les autres ne perdent que leur porteur.
+    const acceptes = menages.filter(m => m.status === 'accepted').map(m => m.id)
+    const autres = ids.filter(id => !acceptes.includes(id))
+    const faits = []
+    for (const [lot, maj] of [[acceptes, { provider_id: null, status: statut }], [autres, { provider_id: null }]]) {
+      if (!lot.length) continue
+      const { data: d, error } = await sb.from('menages').update({ ...maj, updated_at: new Date().toISOString() })
+        .eq('user_id', userId).eq('provider_id', PROFIL_TEST).in('id', lot).select('id')
+      if (error) throw new Error(`ecriture menages : ${error.message}`)
+      faits.push(...(d || []))
+    }
     console.log(`\n${faits.length} menage(s) : prestataire retire.`)
     const { error: eL } = await sb.from('menage_assignment_log').insert(faits.map(f => ({
       user_id: userId, menage_id: f.id, event: 'manual_assign', from_provider_id: PROFIL_TEST, to_provider_id: null,

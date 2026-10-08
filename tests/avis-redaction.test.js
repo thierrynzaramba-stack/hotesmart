@@ -256,11 +256,16 @@ test('LE TEST QUI COMPTE (point H) : les deux textes publies avec l erreur sont 
   for (const t of ['Je recommande Sam aux futurs hôtes.', 'Recommandé à tous les hôtes.', 'Un plaisir pour les autres hôtes.']) assert.strictEqual(R.appelleLeVoyageurHote(t, 'fr'), false, t)
   assert.strictEqual(R.appelleLeVoyageurHote('Sam was a great host.', 'en'), true)
   assert.strictEqual(R.appelleLeVoyageurHote('We recommend Sam to future hosts.', 'en'), false)
+  // Revue de ed445b2 : le VERBE « to host » et les lecteurs « aux hôtes » sont justes.
+  for (const t of ['It was a pleasure to host Anna.', 'We would happily host Anna again.']) assert.strictEqual(R.appelleLeVoyageurHote(t, 'en'), false, t)
+  assert.strictEqual(R.appelleLeVoyageurHote('Nous recommandons Anna aux hôtes.', 'fr'), false)
   assert.strictEqual(R.parleDeProprietaires('Recommended to all owners.', 'en'), true)
 })
 
 test('point H (decision du 8 octobre) : aucun genre deduit du prenom — voyageuse, il/elle, le/la recommande, he/she sont refuses', () => {
   for (const t of ['Sandra a été une voyageuse remarquable.', 'Elle a laissé le logement propre.', 'Je la recommande.', 'Je le recommande.']) assert.strictEqual(R.genreLeVoyageur(t, 'fr'), true, t)
+  // Revue de ed445b2 : le « il » impersonnel n'est pas un genre.
+  assert.strictEqual(R.genreLeVoyageur('Il n’y a rien à redire. S’il revient, tant mieux.', 'fr'), false)
   assert.strictEqual(R.genreLeVoyageur('Un plaisir d’accueillir Sandra, qui a pris soin du logement. Nous recommandons Sandra.', 'fr'), false)
   assert.strictEqual(R.genreLeVoyageur('She left it spotless.', 'en'), true)
   assert.strictEqual(R.genreLeVoyageur('Sam left it spotless.', 'en'), false)

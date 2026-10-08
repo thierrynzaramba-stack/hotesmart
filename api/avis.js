@@ -608,6 +608,7 @@ async function contexteDesSejours (userId, evaluations) {
 // ⚠ LES COMPTEURS PORTENT SUR TOUTE LA PERIODE, calcules par la base
 // (lib/stats-avis.js) : jamais sur les lignes servies.
 const MAX_AVIS_CARTES = 5000
+const MAX_EVALS_CARTES = 2000
 const PAGE_AVIS = 1000
 async function cartesLister (req, res, garde) {
   const userId = garde.accountUserId
@@ -633,7 +634,7 @@ async function cartesLister (req, res, garde) {
     let q = supabase.from('guest_evaluations').select(champs).eq('user_id', userId)
     if (bienDemande) q = q.eq('property_id_ref', bienDemande)
     else if (filtre !== null) q = q.or(filtre)
-    return q.order('created_at', { ascending: false }).limit(MAX_LIGNES)
+    return q.order('created_at', { ascending: false }).limit(MAX_EVALS_CARTES)
   }
   let ev = await lireEvals(`${champsEval}, origine_texte`)
   if (ev.error && /origine_texte/.test(ev.error.message || '')) ev = await lireEvals(champsEval)
@@ -643,7 +644,10 @@ async function cartesLister (req, res, garde) {
   const avis = []
   for (let debut = 0; debut < MAX_AVIS_CARTES; debut += PAGE_AVIS) {
     let q = supabase.from('ota_reviews')
-      .select(`${CHAMPS}, booking_uid, stay_start, stay_end, guest_name, cache:raw->attributes->is_hidden`)
+      // ⚠ Sans le droit `reservations`, le nom et les dates ne sont meme pas
+      // LUS (regle de CHAMPS_AVEC_SEJOUR) ; la reservation reste lue, elle range
+      // l'avis dans la carte de son sejour.
+      .select(`${CHAMPS}, booking_uid, ${voitSejours ? 'stay_start, stay_end, guest_name, ' : ''}cache:raw->attributes->is_hidden`)
       .eq('user_id', userId).neq('statut', 'ignore')
     if (bienDemande) q = q.eq('property_id_ref', bienDemande)
     else if (filtre) q = q.or(filtre)
@@ -656,6 +660,8 @@ async function cartesLister (req, res, garde) {
     avis.push(...(data || []))
     if (!data || data.length < PAGE_AVIS) break
   }
+  // Une borne atteinte se DIT, jamais en silence (revue de ed445b2).
+  const avisTronques = avis.length >= MAX_AVIS_CARTES
 
   const { data: biens, error: eBiens } = await supabase.from('properties')
     .select('id, name, provider_property_id, provider').eq('user_id', userId)
@@ -684,6 +690,8 @@ async function cartesLister (req, res, garde) {
     cartes: { attente: cartes.attente, recents: cartes.recents, anciens: avecAnciens ? cartes.anciens.slice(0, MAX_LIGNES) : null },
     anciens_total: anciensTotal,
     anciens_tronques: avecAnciens && anciensTotal > MAX_LIGNES,
+    // La liste lue a atteint une borne : des cartes anciennes peuvent manquer.
+    liste_incomplete: avisTronques || (ev.data || []).length >= MAX_EVALS_CARTES,
     biens: (biens || []).filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
       .map(b => ({ name: b.name, provider_property_id: b.provider_property_id })),
     periodes: Object.keys(PERIODES),
@@ -2128,7 +2136,7 @@ async function evaluationPublier (req, res, garde, options = {}) {
   const maj = {
     status: r.statut,
     public_text: evaluation.public_text,
-    ...(r.statut === 'publiee' ? { origine_texte: origineALaPublication({ auto: Boolean(options.auto), texteEnvoye: texteDeLHoteEnvoye, texteEnBase: e.public_text }) } : {}),
+    ...(r.statut === 'publiee' ? { origine_texte: origineALaPublication({ auto: Boolean(options.auto), prestataire: roleEtReglages(garde).role === 'prestataire', texteEnvoye: texteDeLHoteEnvoye, texteEnBase: e.public_text }) } : {}),
     // Un texte remplace par l'hote peut citer le voyageur : il n'est plus « sans voyageur ».
     ...(req.body?.public_text && roleEtReglages(garde).role === 'hote' ? { texte_sans_voyageur: false } : {}),
     provider_response: r.provider_response || null,

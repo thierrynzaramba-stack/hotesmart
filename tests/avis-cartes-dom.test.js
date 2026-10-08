@@ -54,6 +54,8 @@ test('LE TEST QUI COMPTE (point E) : un avis masque par Airbnb se dit, sans 0/10
   assert.match(t, /Avis déposé, masqué par Airbnb jusqu’à votre évaluation\./)
   assert.doesNotMatch(t, /0\/10/)
   assert.match(t, /2 jours restants/)
+  const dernier = rendre(donnees({ attente: [{ ...masque, section: 'attente', evaluation: { ...masque.evaluation, jours_restants: 1 } }] }))
+  assert.match(dernier, /dernier jour/)
   assert.equal(d.querySelector('[data-evaluer]').textContent, 'Évaluer Angela')
   assert.match(d.querySelector('.hs-eval-resume').textContent, /^1 évaluation vous attend\.$/)
 })

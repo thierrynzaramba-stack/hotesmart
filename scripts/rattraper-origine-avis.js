@@ -11,7 +11,8 @@
 // Ce que la base dit :
 //   - `publiee` avec `validated_by_profile` renseigne : un PROFIL a publie —
 //     la publication automatique, elle, n'en porte aucun (api/avis.js,
-//     gardeDuTitulaire) → ia_valide ;
+//     gardeDuTitulaire) → ia_valide, ou ia_presta si ce profil est une
+//     prestataire (`access_mode = 'lien'`, revue de ed445b2) ;
 //   - `publiee` sans profil : publication automatique OU titulaire sans profil,
 //     indiscernables → laissee nulle (« rédigé par l'IA ») ;
 //   - `evaluee_ailleurs` → ailleurs.
@@ -38,17 +39,23 @@ const go = args.includes('--go')
   const { data, error } = await sb.from('guest_evaluations').select('id, status, validated_by_profile, published_at, origine_texte')
     .in('status', ['publiee', 'evaluee_ailleurs']).is('origine_texte', null)
   if (error) throw new Error(/origine_texte/.test(error.message) ? 'la colonne origine_texte n existe pas : appliquer la migration 2026-10-08-avis-origine-texte.sql d abord' : error.message)
-  const plan = { ia_valide: [], ailleurs: [], indecidable: [] }
+  const profils = [...new Set(data.map(e => e.validated_by_profile).filter(Boolean))]
+  const { data: pr, error: eP } = profils.length ? await sb.from('profiles').select('id, access_mode').in('id', profils) : { data: [], error: null }
+  if (eP) throw new Error(`profils : ${eP.message}`)
+  const modeDe = new Map((pr || []).map(p => [p.id, p.access_mode]))
+  const plan = { ia_valide: [], ia_presta: [], ailleurs: [], indecidable: [] }
   for (const e of data) {
     if (e.status === 'evaluee_ailleurs') plan.ailleurs.push(e.id)
-    else if (e.validated_by_profile) plan.ia_valide.push(e.id)
+    else if (e.validated_by_profile && modeDe.get(e.validated_by_profile) === 'lien') plan.ia_presta.push(e.id)
+    else if (e.validated_by_profile && modeDe.has(e.validated_by_profile)) plan.ia_valide.push(e.id)
     else plan.indecidable.push(e.id)
   }
   console.log(`  ${plan.ia_valide.length} publiee(s) par un profil → ia_valide (« rédigé par l'IA, validé par vous »)`)
+  console.log(`  ${plan.ia_presta.length} publiee(s) par une prestataire → ia_presta (« rédigé par l'IA, validé par la prestataire »)`)
   console.log(`  ${plan.ailleurs.length} rangee(s) « évaluée sur Airbnb » → ailleurs`)
   console.log(`  ${plan.indecidable.length} publiee(s) sans profil : laissee(s) nulle(s) (« rédigé par l'IA »)`)
   if (!go) { console.log('Sans --go : AUCUNE ecriture.'); return }
-  for (const [origine, ids] of [['ia_valide', plan.ia_valide], ['ailleurs', plan.ailleurs]]) {
+  for (const [origine, ids] of [['ia_valide', plan.ia_valide], ['ia_presta', plan.ia_presta], ['ailleurs', plan.ailleurs]]) {
     if (!ids.length) continue
     const { data: faits, error: eU } = await sb.from('guest_evaluations').update({ origine_texte: origine })
       .in('id', ids).is('origine_texte', null).select('id')

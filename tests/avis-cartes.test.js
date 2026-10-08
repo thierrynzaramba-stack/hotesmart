@@ -73,7 +73,8 @@ test('SECURITE : sans le droit `reservations`, une carte d avis seul ne dit ni l
   assert.equal(c.arrivee, null)
   assert.equal(c.depart, null)
   assert.equal(c.date_ref, '2026-10-05', 'la date de reception, pas la fin du sejour')
-  assert.equal(c.menage_par, 'Regina', 'le menage reste (la liste des evaluations le montrait deja)')
+  assert.equal(c.menage_par, null, 'ni la prestataire du sejour (revue de ed445b2)')
+  assert.equal(c.cle, 'avis:a', 'ni l identifiant de la reservation dans la cle')
   assert.ok(!JSON.stringify(sans).includes('2026-10-03'), 'la fin du sejour ne sort nulle part')
   // Une carte qui porte une evaluation garde l'identite : on evalue quelqu'un.
   const avec = assemblerCartes({ evaluations: [ev('u1')], avis, sejours, nomBien, voitSejours: false, maintenant: MAINTENANT })
@@ -112,4 +113,28 @@ test('point B : une base sans la colonne (migration en retard) — l ecriture es
 
 test('maintenant est obligatoire : la section depend du jour, jamais d une horloge lue en douce', () => {
   assert.throws(() => assemblerCartes({}), /maintenant requis/)
+})
+
+test('revue de ed445b2 : un delai depasse de quelques heures est PASSE (jamais -0 jour) ; un echec de publication passe devant tout et n expire pas', () => {
+  const r = assembler({ evaluations: [
+    ev('u1', { deadline_at: new Date(MAINTENANT - 3 * 3600000).toISOString() }),
+    ev('u2', { deadline_at: '2026-10-20T12:00:00Z' }),
+    ev('u3', { status: 'echec_publication', deadline_at: '2026-10-07T12:00:00Z' }),
+  ] })
+  assert.equal(r.anciens.find(c => c.cle === 'sejour:u1').evaluation.etat, 'expiree')
+  assert.deepEqual(r.attente.map(c => c.cle), ['sejour:u3', 'sejour:u2'])
+  const reste = assembler({ evaluations: [ev('u1', { deadline_at: new Date(MAINTENANT + 3 * 3600000).toISOString() })] })
+  assert.equal(reste.attente[0].evaluation.jours_restants, 1, 'quelques heures restantes : 1 (l ecran dit « dernier jour »)')
+})
+
+test('revue de ed445b2 : le lien explicite de l evaluation passe avant la reservation de l avis', () => {
+  const r = assembler({ evaluations: [ev('u1', { ota_review_id: 'a1' })], avis: [av('a1', { booking_uid: 'autre-uid' })] })
+  const toutes = [...r.attente, ...r.recents, ...r.anciens]
+  assert.equal(toutes.length, 1)
+  assert.deepEqual(toutes[0].avis.map(a => a.id), ['a1'])
+})
+
+test('revue de ed445b2 : une prestataire qui publie est dite telle', () => {
+  assert.equal(origineALaPublication({ prestataire: true, texteEnBase: 'IA' }), 'ia_presta')
+  assert.equal(origineDe({ status: 'publiee', origine_texte: 'ia_presta' }).libelle, 'rédigé par l’IA, validé par la prestataire')
 })
