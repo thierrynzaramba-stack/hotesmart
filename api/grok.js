@@ -8,12 +8,14 @@
 // Les quatre appelants (onboarding, messages, analyze, messagerie) envoyaient
 // deja le jeton de session : la garde ne casse aucun parcours.
 
-const Anthropic = require('@anthropic-ai/sdk')
-const { verifierSession } = require('../lib/require-permission')
+const { verifierSession, compteDemande } = require('../lib/require-permission')
+const { avecContexteIA } = require('../lib/ia/journal')
 
-const client = new Anthropic({
-  apiKey: process.env.CLAUDE_API_KEY
-})
+// ⚠ LE CLIENT PARTAGE (spec-journal-ia, 9 octobre 2026) : chaque appel ecrit sa
+// ligne dans `ia_appels`, et une panne de FACTURATION y est signalee
+// (signalerSiPanneFacturation, dans l'enveloppe de lib/cron-shared.js).
+// Paresseux : cron-shared ouvre un client Supabase a son chargement.
+const client = () => require('../lib/cron-shared').anthropic
 
 // Bornes de taille : sans elles, un appelant authentifie peut faire couter autant
 // qu'il veut par requete.
@@ -48,24 +50,27 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: 'Requête trop longue' })
     }
 
-    const response = await client.messages.create({
+    // Le journal range l'appel sous le COMPTE (comme partout ailleurs), pas sous
+    // l'identite d'un membre delegue (revue de 3a9c75d). X-Compte revalide par
+    // compteDemande ; refus ou panne : l'identite — c'est une attribution, elle
+    // n'ouvre aucun acces.
+    const cible = await compteDemande(req, appelant)
+    const compte = cible && cible.compte ? cible.compte : appelant
+    const response = await avecContexteIA({ fonction: 'assistant', userId: compte }, () => client().messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1024,
       system: systemPrompt,
       messages: messages
-    })
+    }))
 
     return res.json({
       reply: response.content[0].text
     })
 
   } catch (err) {
+    // Une panne de FACTURATION est deja signalee par l'enveloppe du client
+    // partage (signalerSiPanneFacturation) : la signaler ici la doublerait.
     console.error('[Claude]', err)
-    // Une panne de FACTURATION n'est pas une erreur technique : le service est
-    // coupe et le restera jusqu'a une action humaine. Elle doit reveiller, pas
-    // finir dans un log. Fail-safe : ne change rien a la reponse rendue.
-    const { signalerSiPanneFacturation } = require('../lib/incident-facturation')
-    await signalerSiPanneFacturation('Anthropic (IA)', err)
     return res.status(500).json({ error: 'Erreur Claude API' })
   }
 }

@@ -4,16 +4,17 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
-const Anthropic = require('@anthropic-ai/sdk')
+const { avecContexteIA } = require('../lib/ia/journal')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
 )
 
-const claude = new Anthropic({
-  apiKey: process.env.CLAUDE_API_KEY
-})
+// ⚠ LE CLIENT PARTAGE (spec-journal-ia, 9 octobre 2026) : chaque appel ecrit sa
+// ligne dans `ia_appels`, et une panne de facturation y est signalee — un client
+// fabrique ici echappait aux deux.
+const { anthropic: claude } = require('../lib/cron-shared')
 
 // ─── Fetch helpers Beds24 (dupliqués depuis lib/cron-beds24.js pour autonomie de la fonction Vercel) ─
 async function fetchProperties(beds24Key) {
@@ -100,12 +101,12 @@ ${trimmed}
 Retourne maintenant le JSON des réponses extraites.`
 
   try {
-    const response = await claude.messages.create({
+    const response = await avecContexteIA({ fonction: 'extraction_kb', propertyId }, () => claude.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 4096,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }]
-    })
+    }))
 
     const text = response.content[0].text.trim()
     // Nettoyer si l'IA a malgré tout mis des backticks
@@ -197,7 +198,7 @@ module.exports = async function handler(req, res) {
         properties.map(async (p) => {
           const msgs = propertyMessages[p.id] || []
           if (msgs.length === 0) return [String(p.id), {}]
-          const extractedForProp = await extractForProperty(p.name || `Bien ${p.id}`, p.id, msgs, templates || [])
+          const extractedForProp = await avecContexteIA({ userId: user.id }, () => extractForProperty(p.name || `Bien ${p.id}`, p.id, msgs, templates || []))
           return [String(p.id), extractedForProp]
         })
       )

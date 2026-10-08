@@ -20,6 +20,7 @@ const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origin
 const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
+const { avecContexteIA } = require('../lib/ia/journal')
 const { publier, RefusPublication } = require('../lib/avis/publication')
 // Naissance 1 : la prestataire ouvre ses questions apres « Menage fait » (decision D2).
 const { assurerEvaluation, echeanceDuDepart } = require('../lib/avis/naissance')
@@ -1779,7 +1780,7 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAuto
     return { ok: false, motif: 'aucune_reponse', detail: 'aucun critere rempli : il n y a rien a rediger' }
   }
 
-  const r = await redigerAvis({
+  const r = await avecContexteIA({ userId: e.user_id, propertyId: e.property_id_ref, bookingId: e.booking_uid }, () => redigerAvis({
     reponses,
     remarque: remarque ? String(remarque).slice(0, MAX_TEXTE) : null,
     prenom: prenomVoyageur ? String(prenomVoyageur).slice(0, 80) : null,
@@ -1787,7 +1788,7 @@ async function redigerEtEnregistrer (e, { remarque = null, prenom = null, siAuto
     prestataire: rPresta.data?.first_name || null,
     config: fusion,
     grille: { ...grille, criteres: repondus },
-  })
+  }))
 
   // ⚠ UN REFUS DE GARDE-FOU SE DIT. Il ne se deguise pas en texte vide.
   //
