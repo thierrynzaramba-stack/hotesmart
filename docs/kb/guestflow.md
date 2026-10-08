@@ -756,6 +756,17 @@ Corrigé :
   dernière réponse de l'hôte) — une tâche d'un lot déjà répondu n'est jamais
   réécrite, sinon le lot ne se fermait plus ; la note suit le lot ; type
   `info_unknown` (affichée comme information, pas « Intervention requise »).
-  **À trancher** : à la reprise, si le voyageur réécrit sans que l'hôte ait
-  répondu, le lot couvre aussi le message reçu en pause, et la réponse
-  automatique y répond indirectement.
+  **Tranché par Thierry le 9 octobre 2026** : à la reprise, l'agent répond
+  aux messages reçus en pause et aux nouveaux ensemble ; la tâche « reçu
+  pendant la pause » se **ferme d'elle-même** (`done`, comme « Traité ») dès
+  qu'une réponse part — de l'agent (aussitôt) ou de l'hôte, depuis la
+  messagerie ou l'app OTA (au cycle suivant, avant les gardes qui sortiraient
+  sans voir la réponse).
+- Review de ef61bc0 (aucun constat de sécurité, aucun bloquant). **Dettes** :
+  sur Beds24, un modèle (J-1, code) relu en `host` faute de rapprochement avec
+  le cœur (`nosEnvoisBeds24` illisible, ou texte différent après normalisation)
+  fermerait la tâche « reçu pendant la pause » sans réponse réelle ; un message
+  sorti de la fenêtre de lecture (30 jours Channex, 100 messages Beds24) laisse
+  sa tâche ouverte. **À la reprise sans nouveau message**, l'agent ne répond pas
+  aux messages reçus en pause : il le fera au prochain message du voyageur, et
+  la tâche reste ouverte d'ici là (ou jusqu'à la réponse de l'hôte).
