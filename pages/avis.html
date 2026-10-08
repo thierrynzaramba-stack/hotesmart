@@ -98,44 +98,38 @@
                            resize:vertical; margin-top: 4px; }
   </style>
   <style>
-    /* ─── Les evaluations du voyageur (core/avis/liste-evaluations.js) ────── */
-    #zone-evaluations { margin-bottom: 18px; }
-    .hs-eval-entete { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-    .hs-eval-entete h2 { font-size: 15px; margin: 0; }
-    .hs-eval-filtre { font-size: 12px; color: #6b6b6b; display: flex; gap: 6px; align-items: center; }
-    .hs-eval-resume { font-size: 13px; color: #6b6b6b; margin: 6px 0 10px; }
-    .hs-eval-liste { list-style: none; margin: 0; padding: 0; }
-    /* Une carte par évaluation (demande de Thierry du 2 octobre 2026 au soir). */
-    .hs-eval-carte { padding: 12px 0; border-top: 0.5px solid #e6e2dd; font-size: 13.5px; }
-    .hs-eval-carte:first-child { border-top: 0; }
-    .hs-eval-tete { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-    .hs-eval-qui { font-weight: 600; font-size: 15px; }
-    .hs-eval-a-faire .hs-eval-qui { color: var(--text); }
-    .hs-eval-infos { color: #6b6b6b; font-size: 12.5px; margin: 2px 0 8px; }
-    .hs-eval-avis { background: #f7f5f2; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
-    .hs-eval-avis p { margin: 4px 0 0; line-height: 1.45; }
-    .hs-eval-notre { background: #fbf3ee; }
-    .hs-eval-libelle { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #6b6b6b; margin-right: 8px; }
-    .hs-eval-note { font-weight: 700; font-size: 13px; }
-    .hs-eval-gris { color: #8a8580; font-size: 12.5px; }
-    .hs-eval-invite { font-weight: 500; }
+    /* ─── Une carte par séjour (core/avis/cartes.js, recette du 7 octobre 2026) */
+    #zone-cartes { margin-top: 4px; }
+    .hs-eval-resume { font-size: 13px; color: #6b6b6b; margin: 0 0 12px; }
+    .hs-section { margin: 0 0 22px; }
+    .hs-section h2 { font-size: 15px; margin: 0 0 10px; display: inline-flex; gap: 8px; align-items: baseline; }
+    details.hs-section > summary { cursor: pointer; list-style: revert; }
+    details.hs-section > summary h2 { margin: 0; }
+    .hs-compte { font-size: 12px; font-weight: 600; color: #6b6b6b; background: #f0ede9; border-radius: 999px; padding: 1px 8px; }
+    .hs-sous { font-size: 12px; font-weight: 400; color: #6b6b6b; }
+    .hs-cartes { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+    .hs-carte { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; font-size: 13.5px; min-width: 0; }
+    .hs-carte-a-faire { border-left: 3px solid #C97B5C; }
+    .hs-carte-tete { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .hs-carte-qui { font-weight: 600; font-size: 15px; }
+    .hs-carte-infos { color: #6b6b6b; font-size: 12.5px; margin: 2px 0 8px; overflow-wrap: anywhere; }
+    .hs-carte-bloc { background: #f7f5f2; border-radius: 10px; padding: 8px 10px; margin-top: 6px; }
+    .hs-carte-bloc p { margin: 4px 0 0; line-height: 1.45; overflow-wrap: anywhere; }
+    .hs-carte-bloc.detecte { border-left: 3px solid #E8873A; }
+    .hs-carte-notre { background: #fbf3ee; }
+    .hs-carte-ligne { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .hs-carte-libelle { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: #6b6b6b; }
+    .hs-carte-note { font-weight: 700; font-size: 13px; }
+    .hs-carte-etat { color: #6b6b6b; font-size: 12.5px; }
+    .hs-carte-origine { color: #6b6b6b; font-size: 12px; font-style: italic; }
+    .hs-carte-gris { color: #8a8580; font-size: 12.5px; }
     .hs-eval-bouton { margin-top: 8px; font: inherit; font-size: 13.5px; font-weight: 600; padding: 8px 14px; border-radius: 10px; border: 0; background: #C97B5C; color: #fff; cursor: pointer; }
-    .hs-eval-ligne { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 0.5px solid #e6e2dd; font-size: 13px; flex-wrap: wrap; }
-    .hs-eval-ligne:first-child { border-top: 0; }
-    .hs-eval-bien { flex: 1 1 140px; min-width: 0; font-weight: 500; }
-    .hs-eval-etat { color: #6b6b6b; }
-    .hs-eval-a-faire .hs-eval-etat { color: #C97B5C; font-weight: 500; }
     .hs-eval-delai { color: #6b6b6b; font-size: 12px; }
     /* ⚠ L'urgence se voit SANS la couleur : « dernier jour » est un mot, pas
        seulement un rouge — une page lue en niveaux de gris doit rester claire. */
     .hs-eval-urgent { color: #b3261e; font-size: 12px; font-weight: 600; }
-    .hs-eval-date { color: #6b6b6b; font-size: 12px; }
-    .hs-eval-vide, .hs-avis-attente { font-size: 13px; color: #6b6b6b; }
     .hs-avis-erreur { font-size: 13px; color: #b3261e; }
-    @media (max-width: 560px) {
-      .hs-eval-ligne { align-items: flex-start; }
-      .hs-eval-bien { flex: 1 1 100%; }
-    }
+    select.requalif { margin-left: 0; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -160,12 +154,7 @@
       </div>
     </div>
     <div class="content">
-      <!-- ⚠ CE QUI ATTEND L'HOTE PASSE AVANT CE QU'IL A RECU. Les avis des
-           voyageurs sont une lecture ; les evaluations, une action a faire dans
-           un delai. Les mettre en dessous les aurait fait manquer.
-           Le contenu vit dans un module du coeur, /core/avis/liste-evaluations.js. -->
       <section id="zone-reglages" style="display:none;margin-bottom:18px"></section>
-      <section id="zone-evaluations" class="card" style="display:none"></section>
 
       <div class="avis-stats" id="stats" hidden></div>
 
@@ -176,17 +165,11 @@
         <select id="filtre-periode"></select>
       </div>
 
-      <div id="loader" class="loader">Chargement…</div>
-      <!-- ⚠ Le titre est DYNAMIQUE. Fige a « Aucun avis pour l'instant », il
-           coiffait le message d'erreur : « Aucun avis pour l'instant / Vous
-           n'avez pas accès aux avis de ce compte. » — deux affirmations
-           contradictoires sur le cas le plus courant, un membre au perimetre
-           restreint. Meme famille que la regression corrigee en 37b5798. -->
-      <div id="vide" class="empty-state" style="display:none;">
-        <h2 id="vide-titre">Aucun avis pour l'instant</h2>
-        <p id="vide-msg">Les avis de vos voyageurs apparaîtront ici dès leur publication.</p>
-      </div>
-      <div id="liste"></div>
+      <!-- ⚠ UNE CARTE PAR SEJOUR, POUR TOUS LES AVIS (recette de Thierry du
+           7 octobre 2026) : en attente de notation, recents (20 jours),
+           anciens (repliee). Le contenu vit dans un module du coeur,
+           /core/avis/cartes.js ; l'assemblage, au serveur (action `cartes`). -->
+      <div id="zone-cartes"><p class="hs-carte-gris">Chargement…</p></div>
     </div>
   </div>
 </div>
@@ -280,48 +263,40 @@
     await window.initAvis()
   } catch (e) {
     console.error('[avis] initialisation echouee:', e && e.message)
-    const loader = document.getElementById('loader')
-    const vide = document.getElementById('vide')
-    const msg = document.getElementById('vide-msg')
-    if (loader) loader.style.display = 'none'
-    if (vide) vide.style.display = 'block'
-    const titre = document.getElementById('vide-titre')
-    if (titre) titre.textContent = 'Chargement impossible'
-    if (msg) msg.textContent = 'La page n\'a pas pu se charger. Rechargez pour réessayer.'
+    document.getElementById('zone-cartes').innerHTML = '<p class="hs-avis-erreur">La page n’a pas pu se charger. Rechargez pour réessayer.</p>'
   }
-// ─── Les evaluations du voyageur (lot 4) ────────────────────────────────────
-// ⚠ MONTEES A PART, ET UN ECHEC ICI NE CASSE PAS LA PAGE. Les avis recus et les
-// evaluations a faire sont deux choses : si le module du coeur tombe, l'hote doit
-// quand meme voir ses avis.
+// ─── Les cartes (recette du 7 octobre 2026) ─────────────────────────────────
+// ⚠ UN ECHEC ICI NE CASSE PAS LA PAGE : le module dit lui-meme son echec dans
+// son conteneur ; la saisie et les reglages restent utilisables.
 ;(async () => {
+  const zone = document.getElementById('zone-cartes')
   try {
     const [{ monter }, { hsBus }] = await Promise.all([
-      import('/core/avis/liste-evaluations.js'),
-      import('/shared/hs-bus.js'),
+      import('/core/avis/cartes.js'),
+      import('/shared/hs-bus.js').catch(() => ({ hsBus: null })),
     ])
-    const zone = document.getElementById('zone-evaluations')
-    // ⚠ LA SECTION S'AFFICHE, QUOI QU'IL ARRIVE. Constat de review : la masquer
-    // quand `charge` valait false annulait la garantie du module — il vient
-    // d'ecrire « evaluations illisibles » dans ce conteneur, et la page le
-    // cachait aussitot. L'hote retombait sur une section vide, c'est-a-dire
-    // exactement sur l'idee qu'il n'a rien a evaluer.
-    //
-    // Une liste vide n'est pas une carte vide non plus : le module explique
-    // quand les evaluations apparaissent.
-    await monter(zone, { bus: hsBus })
-    zone.style.display = ''
+    const r = await monter(zone, {
+      appel: window.appelAvis,
+      bus: hsBus,
+      peutEcrire: window.peutEcrire ? window.peutEcrire('avis') : false,
+      filtres: () => ({ periode: document.getElementById('filtre-periode').value || window.periodeAvis(), bien: document.getElementById('filtre-bien').value }),
+      surDonnees: (d) => window.avisSurDonnees(d),
+      zoneStats: document.getElementById('stats'),
+    })
+    window.rechargerCartes = r.recharger
     // ⚠ `?evaluer=<booking_uid>` OUVRE LA FENÊTRE D'ÉVALUATION (spec §10 : le
     // lien de la notification « évaluez le voyageur » mène ici, fenêtre ouverte).
-    // Par le bus, comme le bouton de la liste : droit absent ou séjour inconnu =
-    // « indisponible », et rien ne s'ouvre. On retire le paramètre ensuite, pour
-    // qu'un rechargement ne rouvre pas la fenêtre.
+    // Par le bus : droit absent ou séjour inconnu = rien ne s'ouvre. On retire
+    // le paramètre ensuite, pour qu'un rechargement ne rouvre pas la fenêtre.
     const aEvaluer = new URLSearchParams(location.search).get('evaluer')
     if (aEvaluer && aEvaluer.length <= 200 && hsBus) {
       try { history.replaceState(null, '', location.pathname) } catch { /* sans historique */ }
-      await hsBus.ouvrir('avis.evaluer', { booking_uid: aEvaluer })
+      const o = await hsBus.ouvrir('avis.evaluer', { booking_uid: aEvaluer })
+      if (o && o.ok === true) await r.recharger()
     }
   } catch (e) {
-    console.error('[avis] evaluations du voyageur', e)
+    console.error('[avis] cartes', e)
+    zone.innerHTML = '<p class="hs-avis-erreur">La liste des avis n’a pas pu se charger. Rechargez la page pour réessayer.</p>'
   }
 })()
 </script>
@@ -331,37 +306,8 @@
   const $ = id => document.getElementById(id)
   let biens = [], envoiEnCours = false
 
-  const LIBELLE = {
-    positif:      'Propreté saluée',
-    remarque:     'Remarque propreté',
-    rien_signale: 'Propreté non évoquée'
-  }
-  // Icônes de pouce, en SVG : cohérentes avec les badges, et lisibles quelle
-  // que soit la police du système (un emoji ne l'est pas).
   const LIB_PERIODE = { '15j': '15 derniers jours', '30j': '30 derniers jours',
                         '6mois': '6 derniers mois', toujours: 'Depuis toujours' }
-  const LIB_COURT   = { '15j': 'sur 15 jours', '30j': 'sur 30 jours',
-                        '6mois': 'sur 6 mois', toujours: 'depuis toujours' }
-
-  const POUCE_HAUT = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 21h4V9H2v12zM23 10a2 2 0 0 0-2-2h-6.3l1-4.6v-.3a1.5 1.5 0 0 0-.4-1L14 1 7.6 7.4A2 2 0 0 0 7 8.8V19a2 2 0 0 0 2 2h9a2 2 0 0 0 1.8-1.2l3-7.1c.1-.2.2-.5.2-.7v-2z"/></svg>'
-  const POUCE_BAS  = '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M22 3h-4v12h4V3zM1 14a2 2 0 0 0 2 2h6.3l-1 4.6v.3a1.5 1.5 0 0 0 .4 1L10 23l6.4-6.4a2 2 0 0 0 .6-1.4V5a2 2 0 0 0-2-2H6a2 2 0 0 0-1.8 1.2l-3 7.1c-.1.2-.2.5-.2.7v2z"/></svg>'
-
-  // ⚠ L'étiquette dit D'OÙ vient l'avis, pas ce qu'il vaut. Une détection en
-  // messagerie et un avis Airbnb n'ont ni la même fiabilité ni le même statut :
-  // les confondre visuellement ferait lire une remarque détectée comme un avis
-  // public.
-  function etiquetteSource (a) {
-    if (a.provider === 'manuel') {
-      if (a.source === 'message') return ['messagerie', 'Messagerie']
-      if (a.source === 'sms')     return ['sms', 'SMS']
-      if (a.source === 'email')   return ['email', 'Email']
-      if (a.source === 'oral')    return ['oral', 'De vive voix']
-      return ['autre', 'Direct']
-    }
-    if (a.ota === 'airbnb')  return ['airbnb', 'Avis Airbnb']
-    if (a.ota === 'booking') return ['booking', 'Avis Booking']
-    return ['autre', a.ota || 'Avis']
-  }
 
   // Appel API local, sur le motif de la messagerie : jeton de session et
   // `enteteCompte()` pour la delegation. Il LEVE sur reponse non-ok, comme
@@ -449,12 +395,6 @@
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
 
-  const dateFr = d => {
-    if (!d) return ''
-    const x = new Date(d)
-    return isNaN(x) ? '' : x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
-  }
-
   // ⚠ Pour une colonne `date` (« 2026-08-15 »), pas pour un timestamp.
   // `new Date('2026-08-15')` vaut minuit UTC : formaté en heure locale, il
   // affiche la VEILLE à l'ouest de Greenwich — un séjour décalé d'un jour pour
@@ -466,136 +406,6 @@
     return isNaN(x) ? '' : x.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
   }
 
-  // ⚠ UNE DATE DE RÉCEPTION N'EST PAS UNE DATE DE SÉJOUR. Confondre les deux
-  // fait chercher le mauvais ménage — et côté prestataire, c'est le seul repère
-  // qui permet d'identifier l'intervention concernée. On étiquette donc toujours
-  // ce qu'on montre, et on ne comble jamais un séjour manquant : les avis sans
-  // ancrage basculeront d'eux-mêmes à l'import de l'historique.
-  const libelleDateAvis = a => {
-    const deb = a.stay_start ? dateNueFr(a.stay_start) : ''
-    const fin = a.stay_end ? dateNueFr(a.stay_end) : ''
-    if (deb && fin) return `Séjour ${deb} → ${fin}`
-    if (fin) return `Séjour terminé le ${fin}`
-    if (deb) return `Séjour à partir du ${deb}`
-    const recu = dateFr(a.received_at)
-    return recu ? `Reçu le ${recu}` : ''
-  }
-
-  // Petit sélecteur de correction, à côté du badge. Le serveur revalide le
-  // droit : ce masquage est un confort, pas la garde.
-  function requalif (a) {
-    if (a.statut === 'detecte') return ''   // une détection se confirme ou s'ignore
-    if (!a.ai_analyzed_at) return ''
-    const peut = window.peutEcrire ? window.peutEcrire('avis') : false
-    if (!peut) return a.verdict_source === 'humain' ? '<span class="corrige">corrigé</span>' : ''
-    const opts = [['positif','Propreté saluée'],['remarque','Remarque propreté'],['rien_signale','Propreté non évoquée']]
-      .map(([v,l]) => `<option value="${v}"${a.ai_clean_verdict===v?' selected':''}>${l}</option>`).join('')
-    return `<select class="requalif" data-requalif="${echapper(a.id)}" title="Corriger ce verdict">${opts}</select>` +
-           (a.verdict_source === 'humain' ? '<span class="corrige">corrigé</span>' : '')
-  }
-
-  function badge (avis) {
-    // Pas encore analyse : on le DIT, plutot que d'afficher un gris qui
-    // signifierait « rien a signaler » alors qu'on n'a pas encore regarde.
-    if (!avis.ai_analyzed_at) return '<span class="badge-prop attente">Analyse en cours</span>'
-    const v = avis.ai_clean_verdict
-    if (!LIBELLE[v]) return ''
-    return `<span class="badge-prop ${v}">${LIBELLE[v]}</span>`
-  }
-
-  function nomBien (ref) {
-    const b = biens.find(x => String(x.provider_property_id) === String(ref))
-    return b ? b.name : 'Bien inconnu'
-  }
-
-  // ⚠ Le bandeau n'apparait qu'avec le droit d'ECRITURE : un membre en lecture
-  // voit la detection mais ne peut pas trancher. Le serveur le revalide.
-  function bandeauDetection (a) {
-    if (a.statut !== 'detecte') return ''
-    const peut = window.peutEcrire ? window.peutEcrire('avis') : false
-    const actions = peut ? `
-        <div class="actions">
-          <button class="btn-mini ok" data-valider="${echapper(a.id)}" data-statut="confirme">Confirmer</button>
-          <button class="btn-mini" data-valider="${echapper(a.id)}" data-statut="ignore">Ignorer</button>
-        </div>` : ''
-    return `<div class="bandeau-detecte">
-        <span class="titre">Détecté dans un message</span>
-        <span>À confirmer avant d'être compté</span>${actions}
-      </div>`
-  }
-
-  function ligneAvis (a, i) {
-    const texte = a.content_public || a.content || ''
-    const note = a.overall_score != null ? `${a.overall_score}/10` : ''
-    const [classeSrc, libelleSrc] = etiquetteSource(a)
-    const canal = `<span class="badge-src ${classeSrc}">${echapper(libelleSrc)}</span>`
-    const extrait = a.ai_clean_excerpt
-      ? `<div class="avis-extrait">« ${echapper(a.ai_clean_excerpt)} »</div>` : ''
-    const long = texte.length > 160
-    return `
-      <div class="avis-item ${a.statut === 'detecte' ? 'detecte' : ''}">
-        ${bandeauDetection(a)}
-        <div class="avis-head">
-          ${canal}
-          <span>${echapper(nomBien(a.property_id_ref))}</span>
-          <span>${echapper(libelleDateAvis(a))}</span>
-          ${badge(a)}${requalif(a)}
-          <span class="avis-note">${note}</span>
-        </div>
-        ${extrait}
-        <div class="avis-texte ${long ? 'replie' : ''}" id="txt-${i}">${echapper(texte)}</div>
-        ${long ? `<button class="avis-plus" data-plus="${i}">Voir tout</button>` : ''}
-      </div>`
-  }
-
-  function rendre (data) {
-    // Defensif comme charger() : appelAPI rend {} quand le corps n'est pas du
-    // JSON, et un 200 non-JSON produisait ici un TypeError non capture — depuis
-    // le listener `change`, la rejection n'aurait ete vue nulle part.
-    const avis = Array.isArray(data && data.avis) ? data.avis : []
-    const stats = $('stats')
-    // ⚠ La moyenne porte sur la MEME population que le ratio : la liste est
-    // desormais filtree par periode cote serveur. Trois cartes cote a cote qui
-    // porteraient sur trois populations differentes se contrediraient.
-    const notes = avis.map(a => a.overall_score).filter(v => v != null)
-    const moy = notes.length ? (notes.reduce((s, v) => s + v, 0) / notes.length).toFixed(1) : '—'
-    // ⚠ Le ratio vient du SERVEUR : le front ne reçoit que les premières lignes,
-    // il ne peut pas compter juste. Et c'est la même fonction que celle qui
-    // servira la fiche prestataire.
-    const r = data.ratio || { total: 0, positif: 0, remarque: 0 }
-    // ⚠ Une panne n'est pas « zéro avis ». Le serveur le DIT (`erreur: true`) ;
-    // ne pas le lire annulait l'invariant au dernier mètre — l'écran affichait
-    // 0 / 0 / 0, exactement le résultat que la fonction refusait de donner.
-    if (r.erreur) {
-      stats.innerHTML = `<div class="stat-card alerte" style="grid-column:1/-1">
-        <div class="stat-val">—</div>
-        <div class="stat-lab">Les compteurs n'ont pas pu être calculés. Rechargez pour réessayer.</div></div>`
-      stats.hidden = false
-      return
-    }
-    const libPeriode = LIB_COURT[r.periode] || ''
-    stats.innerHTML = `
-      <div class="stat-card"><div class="stat-val">${r.total}</div>
-        <div class="stat-lab">avis et signalements retenus ${echapper(libPeriode)}</div></div>
-      <div class="stat-card"><div class="stat-val">${moy}</div>
-        <div class="stat-lab">note moyenne sur 10</div></div>
-      <div class="stat-card ${r.remarque > 0 ? 'alerte' : ''}">
-        <div class="stat-val ratio">
-          <span class="ratio-item pos">${POUCE_HAUT}${r.positif}</span>
-          <span class="ratio-item neg">${POUCE_BAS}${r.remarque}</span>
-        </div>
-        <div class="stat-lab">propreté saluée / remarques ${echapper(libPeriode)}</div></div>`
-    stats.hidden = false
-
-    $('liste').innerHTML = avis.map(ligneAvis).join('')
-    // Restaure le libelle neutre : un chargement reussi apres un echec laissait
-    // sinon « Accès refusé » en titre d'un etat vide parfaitement normal.
-    $('vide-titre').textContent = "Aucun avis pour l'instant"
-    $('vide-msg').textContent = 'Les avis de vos voyageurs apparaîtront ici dès leur publication.'
-    $('vide').style.display = avis.length ? 'none' : 'block'
-    $('sous-titre').textContent = avis.length ? `${avis.length} avis` : 'Aucun avis pour le moment'
-  }
-
   // La periode retenue : celle memorisee si elle est connue, sinon 30 jours.
   function periodeVoulue () {
     try {
@@ -605,51 +415,32 @@
     return '30j'
   }
 
-  async function charger () {
-    $('loader').style.display = 'block'
-    const ref = $('filtre-bien').value
-    const periode = $('filtre-periode').value || periodeVoulue()
-    let data
-    try {
-      // ⚠ apiCall LEVE sur reponse non-ok, il ne renvoie pas { error }. Sans ce
-      // try, un 403 — le cas normal d'un membre au perimetre restreint —
-      // remontait en exception non capturee et laissait la page blanche.
-      data = await appelAPI('avis?action=list&periode=' + encodeURIComponent(periode) +
-                            (ref ? '&bien=' + encodeURIComponent(ref) : ''))
-    } catch (e) {
-      $('loader').style.display = 'none'
-      $('liste').innerHTML = ''
-      $('stats').hidden = true
-      $('vide').style.display = 'block'
-      $('vide-titre').textContent = e && e.status === 403
-        ? 'Accès refusé' : 'Chargement impossible'
-      $('vide-msg').textContent = e && e.status === 403
-        ? "Vous n'avez pas accès aux avis de ce compte."
-        : (e && e.message) || 'Rechargez la page pour réessayer.'
-      $('sous-titre').textContent = ''
-      return
-    }
-    $('loader').style.display = 'none'
-    biens = data.biens || []
-    // Les periodes viennent du serveur. On garde le choix courant s'il y figure.
+  // Les filtres se remplissent a la premiere reponse des cartes (les biens et
+  // les periodes viennent du serveur : `PERIODES` fait foi).
+  let filtresRemplis = false
+  window.avisSurDonnees = function (data) {
+    biens = (data && data.biens) || []
+    const n = data && data.cartes ? (data.cartes.attente || []).length + (data.cartes.recents || []).length + (Number(data.anciens_total) || 0) : 0
+    $('sous-titre').textContent = n ? `${n} séjour${n > 1 ? 's' : ''}` : 'Aucun avis pour le moment'
+    if (filtresRemplis) return
+    filtresRemplis = true
     const sel = $('filtre-periode')
     if (!sel.options.length) {
-      for (const cle of (data.periodes || ['30j'])) {
-        sel.insertAdjacentHTML('beforeend',
-          `<option value="${echapper(cle)}">${echapper(LIB_PERIODE[cle] || cle)}</option>`)
+      for (const cle of ((data && data.periodes) || ['30j'])) {
+        sel.insertAdjacentHTML('beforeend', `<option value="${echapper(cle)}">${echapper(LIB_PERIODE[cle] || cle)}</option>`)
       }
       sel.value = periodeVoulue()
     }
     if ($('filtre-bien').options.length <= 1) {
       for (const b of biens) {
-        $('filtre-bien').insertAdjacentHTML('beforeend',
-          `<option value="${echapper(b.provider_property_id)}">${echapper(b.name)}</option>`)
-        $('s-bien').insertAdjacentHTML('beforeend',
-          `<option value="${echapper(b.provider_property_id)}">${echapper(b.name)}</option>`)
+        $('filtre-bien').insertAdjacentHTML('beforeend', `<option value="${echapper(b.provider_property_id)}">${echapper(b.name)}</option>`)
+        $('s-bien').insertAdjacentHTML('beforeend', `<option value="${echapper(b.provider_property_id)}">${echapper(b.name)}</option>`)
       }
     }
-    rendre(data)
   }
+  window.periodeAvis = periodeVoulue
+  window.appelAvis = appelAPI
+  const charger = async () => { if (window.rechargerCartes) await window.rechargerCartes() }
 
   // ─── Saisie manuelle ──────────────────────────────────────────────────────
   async function chargerSejours () {
@@ -752,48 +543,6 @@
     })
     $('s-annuler').addEventListener('click', () => $('saisie-modal').classList.remove('show'))
     $('s-envoyer').addEventListener('click', envoyer)
-    // ⚠ `change` et non `click` : un <select> ne se lit pas au clic.
-    $('liste').addEventListener('change', async e => {
-      const id = e.target?.dataset?.requalif
-      if (!id) return
-      // ⚠ `change` se declenche APRES que le select a pris sa nouvelle valeur :
-      // celle d'avant n'est memorisee nulle part. En cas d'echec, on RECHARGE au
-      // lieu de laisser l'ecran mentir — sinon la ligne affichait le selecteur
-      // sur un verdict et le badge sur un autre, dont aucun n'etait celui de la
-      // base, jusqu'au prochain rechargement manuel.
-      const choisi = e.target.value
-      e.target.disabled = true
-      try {
-        await appelAPI('avis', 'POST', { action: 'requalifier', id, verdict: choisi })
-      } catch (err) {
-        alert((err && err.message) || 'Correction impossible.')
-      }
-      await charger()
-    })
-
-    $('liste').addEventListener('click', async e => {
-      const id = e.target?.dataset?.valider
-      if (id) {
-        // Garde anti-double-clic : deux envois donneraient un 409 sur le second,
-        // et un message d'erreur pour une action qui a reussi.
-        if (e.target.disabled) return
-        e.target.disabled = true
-        try {
-          await appelAPI('avis', 'POST', { action: 'valider', id, statut: e.target.dataset.statut })
-          await charger()
-        } catch (err) {
-          e.target.disabled = false
-          alert((err && err.message) || 'Action impossible.')
-        }
-        return
-      }
-      const i = e.target?.dataset?.plus
-      if (i == null) return
-      $('txt-' + i).classList.remove('replie')
-      e.target.remove()
-    })
-
-    await charger()
   }
 })()
 </script>

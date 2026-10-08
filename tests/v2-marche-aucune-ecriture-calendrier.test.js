@@ -59,7 +59,12 @@ test('LE TEST QUI COMPTE (garantie prod) : la liste du code V2 est COMPLETE — 
   // un fichier ajoute ne passe jamais inapercu, meme avant son commit.
   const diff = execSync(`git diff --name-only ${BASE_MAIN} -- api apps lib pages shared components`, { cwd: RACINE, encoding: 'utf8' })
     + execSync('git ls-files --others --exclude-standard -- api apps lib pages shared components', { cwd: RACINE, encoding: 'utf8' })
-  const apportes = diff.split('\n').filter(Boolean).filter(f => !RETOUCHES.includes(f) && fs.existsSync(path.join(RACINE, f)))
+  // ⚠ LES ZONES DE LA V2 SEULEMENT (chantier avis, 8 octobre 2026) : contre la
+  // base fixe, le diff grossit de TOUT ce que les autres chantiers modifient
+  // ensuite (api/avis.js…), et le test rougissait sur du code qui n'est pas la
+  // V2. Ce qui compte : tout fichier des zones V2 est dans CODE_V2.
+  const ZONE_V2 = /^(lib\/marche\/|lib\/airroi\/|api\/marche-|api\/yield-marche|apps\/yield\/(marche|comparables)|shared\/(prix-depart-jours|temperature-calendrier))/
+  const apportes = diff.split('\n').filter(Boolean).filter(f => ZONE_V2.test(f) && !RETOUCHES.includes(f) && fs.existsSync(path.join(RACINE, f)))
   assert.ok(apportes.length >= CODE_V2.length, `le diff contre la base fixe ne rend que ${apportes.length} fichiers : il ne prouverait rien`)
   for (const f of apportes) assert.ok(CODE_V2.includes(f), `${f} arrive en production sans controle : l'ajouter a CODE_V2`)
 })

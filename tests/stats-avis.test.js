@@ -6,7 +6,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { ratioProprete, borneDepuis, PERIODES } = require('../lib/stats-avis')
+const { ratioProprete, noteMoyenne, borneDepuis, PERIODES } = require('../lib/stats-avis')
 // La semantique PostgREST que ce double doit honorer — une seule implementation
 // pour les trois fichiers qui montent un double d'`ota_reviews`.
 const FAUX = require('./faux-postgrest')
@@ -43,7 +43,9 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
           // filtre n'aurait plus rien retenu — un test rouge pour la mauvaise
           // raison, ce qui est aussi trompeur qu'un test vert pour la mauvaise.
           c.startsWith('menage_events.') ? true
-          : c === 'statut' ? (l.statut || 'confirme') === v : l[c] === v) &&
+          : c === 'statut' ? (l.statut || 'confirme') === v
+          // Un avis sans drapeau est visible, comme la colonne `is_hidden` (defaut false).
+          : c === 'is_hidden' ? (l.is_hidden === true) === v : l[c] === v) &&
         passeEmbed(l) &&
         (!appel.gte || String(l[appel.gte.colonne] || '') >= String(appel.gte.valeur)) &&
         appel.ins.every(f => f.valeurs.includes(String(l[f.colonne]))) &&
@@ -64,8 +66,10 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
         or (expr) { (appel.ors = appel.ors || []).push(String(expr)); return chain },
         gte (c, v) { appel.gte = { colonne: c, valeur: v }; return chain },
         in (c, v) { appel.ins.push({ colonne: c, valeurs: (v || []).map(String) }); return chain },
-        not () { return chain },
+        not (c, op, v) { if (op === 'is' && v === null) (appel.nonNuls = appel.nonNuls || []).push(c); return chain },
         order () { return chain },
+        // La moyenne lit par pages : `range` resout comme `limit`.
+        range (a, z) { return Promise.resolve({ data: lignes.filter(retenir).filter(l => (appel.nonNuls || []).every(c => l[c] != null)).slice(a, z + 1), error: null }) },
         // `avisDuPrestataire` borne ses lectures : le double doit resoudre.
         limit () {
           if (AUTRES.includes(table)) {
@@ -538,4 +542,30 @@ test('ratio : deux biens aux MÊMES bornes tiennent en une seule voie', async ()
     assert.strictEqual(r.positif, 2)
     assert.strictEqual(r.remarque, 1)
   } finally { fauxClient.attribution = null }
+})
+
+
+// ─── Recette du 7 octobre 2026 : les avis MASQUES par Airbnb ────────────────
+// Double aveugle : le voyageur a depose son avis, Airbnb le cache (ni texte ni
+// note) tant que l'hote n'a pas evalue. Ils entraient dans le total (688 au
+// lieu de 664) et a 0/10 dans la moyenne (9,0 au lieu de 9,57).
+test('recette du 7 octobre : un avis MASQUE par Airbnb ne compte ni dans le total ni dans la moyenne', async () => {
+  const lignes = [
+    { user_id: 'U', ai_clean_verdict: 'positif', overall_score: 10, received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'positif', overall_score: 8, received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'rien_signale', overall_score: 0, is_hidden: true, received_at: '2026-10-02T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: null, overall_score: null, received_at: '2026-10-02T00:00:00Z' },
+  ]
+  const r = await ratioProprete(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
+  assert.strictEqual(r.total, 3, 'le masque est exclu du total')
+  const m = await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
+  assert.deepStrictEqual(m, { moyenne: 9, notes: 2 }, 'la moyenne : 10 et 8, ni le 0 du masque ni la note absente')
+})
+
+test('noteMoyenne : TOUTES les pages, jamais les 500 premieres lignes ; perimetre vide = rien', async () => {
+  const lignes = Array.from({ length: 2500 }, (_, i) => ({ user_id: 'U', overall_score: i < 2000 ? 10 : 6, received_at: '2026-10-01T00:00:00Z' }))
+  const m = await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
+  assert.deepStrictEqual(m, { moyenne: 9.2, notes: 2500 })
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: 'U', refs: [] }), { moyenne: null, notes: 0 })
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: null }), { moyenne: null, notes: 0 })
 })

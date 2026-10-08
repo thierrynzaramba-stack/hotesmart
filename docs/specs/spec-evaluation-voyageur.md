@@ -325,7 +325,7 @@ configuration enregistre en bloc, ce n'est pas un chemin chaud.
 | Fenêtre d'évaluation | `core/avis/fenetre-evaluation.js` | coche, enregistre, rédige, publie, abandonne. Confirmation explicite avant un négatif. |
 | État d'un séjour | `core/avis/statut.js` | `avis.statut` par le bus. Ne lève jamais : `absente` et `hors_perimetre` sont des états. |
 | Réglages de la grille | `core/avis/ecran-reglages.js` | onglet « Avis » de `/settings` (§4.7). |
-| Liste des évaluations | `core/avis/liste-evaluations.js` | en tête de `/avis`. Trie par urgence, pas par date. |
+| Cartes par séjour | `core/avis/cartes.js` (assemblage `lib/avis/cartes.js`, action `cartes`) | toute la page `/avis` depuis le 8 octobre 2026 : une carte par séjour (son avis, notre avis), trois sections — en attente (triée par délai), récents (20 jours), anciens. Remplace la liste des évaluations. |
 | Appel authentifié | `core/avis/appel.js` | jeton relu à chaque appel, en-tête de compte délégué. |
 
 **L'ordre de la liste dit l'urgence.** Un échec de publication passe devant tout :
