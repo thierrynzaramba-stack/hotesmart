@@ -453,6 +453,18 @@ test('LE TEST QUI COMPTE (point B) : la publication enregistre l origine — tex
   assert.strictEqual(sien.ecritures.find(e => e.table === 'guest_evaluations' && e.row.status === 'publiee').row.origine_texte, 'humain')
 })
 
+// ─── Regle de Thierry du 9 octobre 2026 : avis du voyageur VISIBLE = fenetre fermee ──
+test('LE TEST QUI COMPTE (9 octobre 2026) : l avis du voyageur est VISIBLE — rien ne part chez Airbnb, l evaluation passe expiree', async () => {
+  const etat = preparer({ evaluations: [evalA()], otaReviews: [{ id: '99999999-9999-4999-8999-999999999999', user_id: PROD, external_review_id: 'channex-abc-123', visible: false, provider: 'channex', ota: 'airbnb' }] })
+  const handler = require('../api/avis')
+  const res = reponse()
+  await handler(req({ action: 'eval-publier' }, { id: evalA().id, action: 'eval-publier' }), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(res.body.motif, 'expiree')
+  assert.ok(etat.ecritures.some(e => e.table === 'guest_evaluations' && e.row.status === 'expiree'))
+  assert.ok(!etat.ecritures.some(e => e.table === 'guest_evaluations' && e.row.status === 'publiee'), 'rien n est publie')
+})
+
 // ─── L'ECRITURE PERDUE (constat haut 3) ─────────────────────────────────────
 test('l’ecriture du statut qui echoue ne passe pas pour un succes silencieux', async () => {
   const etat = preparer({ evaluations: [evalA()], erreurMaj: { message: 'colonne absente' } })

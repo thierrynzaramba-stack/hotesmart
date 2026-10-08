@@ -78,7 +78,8 @@ test('SECURITE : sans le droit `reservations`, une carte d avis seul ne dit ni l
   assert.ok(!JSON.stringify(sans).includes('2026-10-03'), 'la fin du sejour ne sort nulle part')
   // Une carte qui porte une evaluation garde l'identite : on evalue quelqu'un.
   const avec = assemblerCartes({ evaluations: [ev('u1')], avis, sejours, nomBien, voitSejours: false, maintenant: MAINTENANT })
-  assert.deepEqual(avec.attente[0].voyageur, { prenom: 'Angela', nom: 'X' })
+  const carteEval = [...avec.attente, ...avec.recents, ...avec.anciens].find(c => c.evaluation)
+  assert.deepEqual(carteEval.voyageur, { prenom: 'Angela', nom: 'X' })
 })
 
 test('point B : l origine de notre avis — enregistree, deduite du statut, ou « rédigé par l IA » seul', () => {
@@ -137,4 +138,19 @@ test('revue de ed445b2 : le lien explicite de l evaluation passe avant la reserv
 test('revue de ed445b2 : une prestataire qui publie est dite telle', () => {
   assert.equal(origineALaPublication({ prestataire: true, texteEnBase: 'IA' }), 'ia_presta')
   assert.equal(origineDe({ status: 'publiee', origine_texte: 'ia_presta' }).libelle, 'rédigé par l’IA, validé par la prestataire')
+})
+
+test('LE TEST QUI COMPTE (regle de Thierry du 9 octobre 2026, vecu Julien Darmon) : l avis du voyageur VISIBLE et le notre non publie — « expiree », sans bouton, hors « En attente »', () => {
+  // Echeance a 5 jours (l'ancienne echeance Channex), mais l'avis est lisible.
+  const r = assembler({ evaluations: [ev('u1', { ota_review_id: 'a1', deadline_at: '2026-10-13T12:00:00Z' })], avis: [av('a1', { cache: false, overall_score: 10 })] })
+  assert.equal(r.attente.length, 0)
+  const c = r.anciens.find(x => x.cle === 'sejour:u1')
+  assert.equal(c.evaluation.etat, 'expiree')
+  assert.equal(c.evaluation.evaluable, false)
+  // Masque : toujours en attente.
+  const m = assembler({ evaluations: [ev('u1', { ota_review_id: 'a1', deadline_at: '2026-10-13T12:00:00Z' })], avis: [av('a1', { cache: true, overall_score: 0, content: null, content_public: null })] })
+  assert.equal(m.attente.length, 1)
+  // Publiee : rien ne change (notre avis est parti).
+  const p = assembler({ evaluations: [ev('u1', { ota_review_id: 'a1', status: 'publiee', published_at: '2026-10-01T10:00:00Z', public_text: 'Merci' })], avis: [av('a1', { cache: false })] })
+  assert.equal([...p.recents, ...p.anciens][0].evaluation.etat, 'publiee')
 })
