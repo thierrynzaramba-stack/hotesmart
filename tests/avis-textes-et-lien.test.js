@@ -29,13 +29,13 @@ function verifierTexte (origine, texte) {
 
 test('les états, motifs et libellés des modules avis sont accentués', async () => {
   const fenetre = await import('../core/avis/fenetre-evaluation.js')
-  const liste = await import('../core/avis/liste-evaluations.js')
+  const liste = await import('../core/avis/cartes.js')
   const statut = await import('../core/avis/statut.js')
   const reglages = await import('../core/avis/ecran-reglages.js')
   const tables = {
     'fenetre ETAT_LISIBLE': fenetre.ETAT_LISIBLE,
     'fenetre MOTIF_LISIBLE': fenetre.MOTIF_LISIBLE,
-    'liste ETAT_LISIBLE': liste.ETAT_LISIBLE,
+    'cartes ETAT_LISIBLE': liste.ETAT_LISIBLE,
     'statut LISIBLE': statut.LISIBLE,
     'reglages CATEGORIE_LISIBLE': reglages.CATEGORIE_LISIBLE,
     'reglages REMPLI_LISIBLE': reglages.REMPLI_LISIBLE,
@@ -60,16 +60,20 @@ test('l’écran des réglages, rendu sur la grille par défaut, est accentué',
   verifierTexte('rendu des réglages', texte)
 })
 
-test('la liste des évaluations, rendue, est accentuée', async () => {
-  const { rendre } = await import('../core/avis/liste-evaluations.js')
-  const maintenant = Date.parse('2026-10-01T12:00:00Z')
-  const vide = rendre({ evaluations: [], filtre: '' }, maintenant).replace(/<[^>]+>/g, ' ')
-  verifierTexte('liste vide', vide)
-  const pleine = rendre({ evaluations: [
-    { booking_uid: 'a', status: 'a_remplir', echeance: '2026-09-29T00:00:00Z', bien: 'B' },
-    { booking_uid: 'b', status: 'a_valider', echeance: '2026-10-05T00:00:00Z', bien: 'B' },
-  ], filtre: '', message: null }, maintenant).replace(/<[^>]+>/g, ' ')
-  verifierTexte('liste pleine', pleine)
+test('les cartes par séjour, rendues, sont accentuées (toutes les sortes de carte)', async () => {
+  const { rendre, rendreStats } = await import('../core/avis/cartes.js')
+  const vide = rendre({ cartes: { attente: [], recents: [], anciens: [] }, anciens_total: 0 }).replace(/<[^>]+>/g, ' ')
+  verifierTexte('cartes vides', vide)
+  const ev = (status, etat, extra = {}) => ({ booking_uid: 'b', status, etat, echeance: null, jours_restants: 2, publie_le: null, texte: null, origine: null, evaluable: etat === 'a_remplir', ...extra })
+  const c = (cle, section, avis, evaluation) => ({ cle, section, bien: 'B', plateforme: { cle: 'airbnb' }, voyageur: { prenom: 'Sam', nom: null }, arrivee: '2026-09-01', depart: '2026-09-03', menage_par: 'Regina', avis, evaluation })
+  const pleine = rendre({ cartes: {
+    attente: [c('s:1', 'attente', [{ id: 'a', masque: true }], ev('a_remplir', 'a_remplir'))],
+    recents: [c('s:2', 'recents', [{ id: 'b', masque: false, note: 10, texte: 'Super', analyse: true, verdict: 'positif' }],
+      ev('publiee', 'publiee', { texte: 'Merci', publie_le: '2026-09-05T10:00:00Z', origine: { cle: 'ia_valide', libelle: 'rédigé par l’IA, validé par vous' }, evaluable: false }))],
+    anciens: [c('s:3', 'anciens', [], ev('a_remplir', 'expiree', { evaluable: false })), c('a:4', 'anciens', [{ id: 'd', masque: false, detecte: true, analyse: true, verdict: 'remarque' }], null)],
+  }, anciens_total: 2 }, { peutEcrire: true, avecBus: true, anciensOuverts: true }).replace(/<[^>]+>/g, ' ')
+  verifierTexte('cartes pleines', pleine)
+  verifierTexte('compteurs', rendreStats({ total: 3, moyenne: 9.6, notes: 3, positif: 1, remarque: 0, periode: '30j' }).replace(/<[^>]+>/g, ' '))
 })
 
 test('« Moi » devient « L’hôte » dans le choix de qui remplit', async () => {

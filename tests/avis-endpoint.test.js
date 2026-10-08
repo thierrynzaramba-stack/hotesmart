@@ -521,7 +521,10 @@ test('list : chaque colonne renvoyée est bien affichée par la page', async () 
   const fs = require('node:fs'), pathm = require('node:path')
   const racine = pathm.join(__dirname, '..')
   const src = fs.readFileSync(pathm.join(racine, 'api/avis.js'), 'utf8')
+  // Depuis la recette du 7 octobre 2026, la page affiche des CARTES : les
+  // colonnes passent par leur assemblage (lib/avis/cartes.js) avant l'ecran.
   const page = fs.readFileSync(pathm.join(racine, 'pages/avis.html'), 'utf8')
+    + fs.readFileSync(pathm.join(racine, 'lib/avis/cartes.js'), 'utf8')
   const debut = src.indexOf('const CHAMPS = `')
   const bloc = src.slice(debut + 16, src.indexOf('`', debut + 16))
   // Les colonnes conditionnelles comptent aussi : une donnee servie sous droit

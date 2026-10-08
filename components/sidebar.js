@@ -189,6 +189,11 @@ function initMobileSidebar(sidebar) {
       #sidebar-overlay.open { display: block !important; }
       .main { margin-left: 0 !important; }
       .layout { grid-template-columns: 1fr !important; }
+      /* ⚠ LE BOUTON ☰ EST POSE EN FIXE en haut a gauche (14px + ~44px) : la
+         barre de titre lui laisse sa place, sinon il recouvre le titre (recette
+         de Thierry du 7 octobre 2026, page Avis). Regle commune : toutes les
+         pages a .topbar en profitent. */
+      .topbar { padding-left: 68px !important; }
     }
   `
   document.head.appendChild(style)

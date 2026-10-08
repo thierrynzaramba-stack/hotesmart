@@ -14,7 +14,9 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
-const { ratioProprete, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
+const { ratioProprete, noteMoyenne, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
+const { assemblerCartes } = require('../lib/avis/cartes')
+const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origine')
 const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
 const { GRILLE_DEFAUT, CATEGORIES, REMPLI_PAR, validerGrille, estNegatif } = require('../lib/avis/notes-evaluation')
 const { redigerAvis } = require('../lib/avis/redaction')
@@ -503,29 +505,31 @@ async function evaluationsLister (req, res, garde) {
   })
 }
 
-// Le contexte des sejours d'une liste, en QUATRE lectures groupees, toutes
-// cloisonnees au compte. ⚠ UNE PANNE ICI N'EMPECHE PAS LA LISTE : les champs
-// manquent, l'hote voit ses evaluations — la raison va au journal.
-async function contexteDesSejours (userId, evaluations) {
+// Les sejours d'une liste de reservations : voyageur, dates, et qui a fait le
+// menage. Lectures GROUPEES par paquets (une liste `in` de plusieurs centaines
+// d'identifiants depasserait la longueur d'URL), toutes cloisonnees au compte.
+// ⚠ UNE PANNE ICI N'EMPECHE PAS LA LISTE : les champs manquent, l'hote voit ses
+// cartes — la raison va au journal.
+const PAQUET_UIDS = 100
+async function sejoursDe (userId, uidsBruts) {
   const parSejour = new Map()
-  const avisDe = new Map()
-  const uids = [...new Set(evaluations.map(e => String(e.booking_uid)))]
-  if (!uids.length) return { sejours: parSejour, avis: avisDe }
-  const objets = [...new Set(evaluations.map(e => e.ota_review_id).filter(Boolean))]
-  const [snaps, menages, avis] = await Promise.all([
-    supabase.from('bookings_snapshot').select('booking_id, snapshot').eq('user_id', userId).in('booking_id', uids),
+  const uids = [...new Set((uidsBruts || []).filter(Boolean).map(String))]
+  if (!uids.length) return parSejour
+  const paquets = []
+  for (let i = 0; i < uids.length; i += PAQUET_UIDS) paquets.push(uids.slice(i, i + PAQUET_UIDS))
+  const lire = async (fabrique) => {
+    const rs = await Promise.all(paquets.map(fabrique))
+    const ko = rs.find(r => r.error)
+    return ko ? { data: null, error: ko.error } : { data: rs.flatMap(r => r.data || []), error: null }
+  }
+  const [snaps, menages] = await Promise.all([
+    lire(p => supabase.from('bookings_snapshot').select('booking_id, snapshot').eq('user_id', userId).in('booking_id', p)),
     // Le menage le plus RECENT d'un depart donne le nom (un ordre, pour que ce
     // soit le meme a chaque lecture).
-    supabase.from('menages').select('booking_id, provider_id, status').eq('user_id', userId).in('booking_id', uids).neq('status', 'cancelled')
-      .order('created_at', { ascending: true }),
-    // ⚠ LA VISIBILITE SE LIT DANS LE BRUT, STRICTEMENT (revue de 5497a67, vie
-    // privee) : la colonne `is_hidden` est normalisee par le writer, un champ
-    // absent y devient « visible ». Meme regle que le rangement automatique.
-    objets.length
-      ? supabase.from('ota_reviews').select('id, content_public, overall_score, guest_name, cache:raw->attributes->is_hidden').eq('user_id', userId).in('id', objets)
-      : Promise.resolve({ data: [], error: null }),
+    lire(p => supabase.from('menages').select('booking_id, provider_id, status, created_at').eq('user_id', userId).in('booking_id', p).neq('status', 'cancelled')
+      .order('created_at', { ascending: true })),
   ])
-  for (const [nom, r] of [['reservations', snaps], ['menages', menages], ['avis', avis]]) {
+  for (const [nom, r] of [['reservations', snaps], ['menages', menages]]) {
     if (r.error) console.error(`[avis] liste : ${nom} illisibles`, r.error.message)
   }
   for (const s of snaps.data || []) {
@@ -539,17 +543,38 @@ async function contexteDesSejours (userId, evaluations) {
     })
   }
   // Qui a fait le menage : la prestataire du menage de ce depart.
-  const prov = [...new Set((menages.data || []).map(m => m.provider_id).filter(Boolean))]
+  const menagesTries = (menages.data || []).slice().sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')))
+  const prov = [...new Set(menagesTries.map(m => m.provider_id).filter(Boolean))]
   const { data: personnes, error: eP } = prov.length
     ? await supabase.from('profiles').select('id, first_name, last_name').eq('account_user_id', userId).in('id', prov)
     : { data: [], error: null }
   if (eP) console.error('[avis] liste : prestataires illisibles', eP.message)
   const nomDePersonne = new Map((personnes || []).map(p => [p.id, [p.first_name, p.last_name].filter(Boolean).join(' ')]))
-  for (const m of menages.data || []) {
+  for (const m of menagesTries) {
     const c = parSejour.get(String(m.booking_id)) || {}
     if (m.provider_id && nomDePersonne.get(m.provider_id)) c.menagePar = nomDePersonne.get(m.provider_id)
     parSejour.set(String(m.booking_id), c)
   }
+  return parSejour
+}
+
+// Le contexte des sejours d'une liste d'evaluations : les sejours (ci-dessus)
+// et l'avis du voyageur, s'il est visible.
+async function contexteDesSejours (userId, evaluations) {
+  const avisDe = new Map()
+  const uids = [...new Set(evaluations.map(e => String(e.booking_uid)))]
+  if (!uids.length) return { sejours: new Map(), avis: avisDe }
+  const objets = [...new Set(evaluations.map(e => e.ota_review_id).filter(Boolean))]
+  const [parSejour, avis] = await Promise.all([
+    sejoursDe(userId, uids),
+    // ⚠ LA VISIBILITE SE LIT DANS LE BRUT, STRICTEMENT (revue de 5497a67, vie
+    // privee) : la colonne `is_hidden` est normalisee par le writer, un champ
+    // absent y devient « visible ». Meme regle que le rangement automatique.
+    objets.length
+      ? supabase.from('ota_reviews').select('id, content_public, overall_score, guest_name, cache:raw->attributes->is_hidden').eq('user_id', userId).in('id', objets)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+  if (avis.error) console.error('[avis] liste : avis illisibles', avis.error.message)
   // L'avis du voyageur, SEULEMENT s'il est visible : un avis cache chez Airbnb
   // ne se montre pas ici non plus.
   for (const a of avis.data || []) {
@@ -570,6 +595,108 @@ async function contexteDesSejours (userId, evaluations) {
     parSejour.set(String(e.booking_uid), c)
   }
   return { sejours: parSejour, avis: avisDe }
+}
+
+// GET cartes — UNE CARTE PAR SEJOUR, pour tous les avis (recette de Thierry du
+// 7 octobre 2026, points A a E). Les avis recus et nos evaluations, assembles
+// par lib/avis/cartes.js en trois sections : en attente de notation, recents
+// (20 jours), anciens (servis seulement sur demande, `anciens=1`).
+//
+// ⚠ MEMES GARDES QUE `list` ET `evaluations` : domaine `avis` en lecture,
+// perimetre par bien en SQL, le sejour (nom, dates) d'un avis seul au droit
+// `reservations` seulement.
+// ⚠ LES COMPTEURS PORTENT SUR TOUTE LA PERIODE, calcules par la base
+// (lib/stats-avis.js) : jamais sur les lignes servies.
+const MAX_AVIS_CARTES = 5000
+const MAX_EVALS_CARTES = 2000
+const PAGE_AVIS = 1000
+async function cartesLister (req, res, garde) {
+  const userId = garde.accountUserId
+  const periode = periodeNormalisee(String(req.query?.periode || ''))
+  const refs = refsDuPerimetre(garde.contexte)
+  const filtre = filtrePerimetreSql(refs, 'property_id_ref')
+  const vide = { attente: [], recents: [], anciens: [] }
+  if (filtre === '') {
+    return res.status(200).json({ cartes: vide, anciens_total: 0, biens: [], periodes: Object.keys(PERIODES),
+      stats: { total: 0, positif: 0, remarque: 0, moyenne: null, notes: 0, periode, depuis: borneDepuis(periode) } })
+  }
+  const bienDemande = req.query?.bien ? String(req.query.bien) : null
+  if (bienDemande && refs !== null && !refs.map(String).includes(bienDemande)) {
+    return res.status(403).json({ error: 'Bien hors de votre périmètre' })
+  }
+  const voitSejours = !garde.contexte || peutLire(garde.contexte, 'reservations', null)
+  const avecAnciens = String(req.query?.anciens || '') === '1'
+
+  // Les evaluations du perimetre. ⚠ `origine_texte` arrive avec la migration du
+  // 8 octobre : avant elle, on relit sans, et l'origine se deduit du statut.
+  const champsEval = 'id, booking_uid, property_id, property_id_ref, ota, status, deadline_at, published_at, public_text, ota_review_id, created_at'
+  const lireEvals = (champs) => {
+    let q = supabase.from('guest_evaluations').select(champs).eq('user_id', userId)
+    if (bienDemande) q = q.eq('property_id_ref', bienDemande)
+    else if (filtre !== null) q = q.or(filtre)
+    return q.order('created_at', { ascending: false }).limit(MAX_EVALS_CARTES)
+  }
+  let ev = await lireEvals(`${champsEval}, origine_texte`)
+  if (ev.error && /origine_texte/.test(ev.error.message || '')) ev = await lireEvals(champsEval)
+  if (ev.error) return res.status(503).json({ error: 'Évaluations illisibles', detail: ev.error.message })
+
+  // Les avis du perimetre, PAGINES (jamais tronques en silence a 1000 lignes).
+  const avis = []
+  for (let debut = 0; debut < MAX_AVIS_CARTES; debut += PAGE_AVIS) {
+    let q = supabase.from('ota_reviews')
+      // ⚠ Sans le droit `reservations`, le nom et les dates ne sont meme pas
+      // LUS (regle de CHAMPS_AVEC_SEJOUR) ; la reservation reste lue, elle range
+      // l'avis dans la carte de son sejour.
+      .select(`${CHAMPS}, booking_uid, ${voitSejours ? 'stay_start, stay_end, guest_name, ' : ''}cache:raw->attributes->is_hidden`)
+      .eq('user_id', userId).neq('statut', 'ignore')
+    if (bienDemande) q = q.eq('property_id_ref', bienDemande)
+    else if (filtre) q = q.or(filtre)
+    const { data, error } = await q.order('received_at', { ascending: false, nullsFirst: false }).order('id', { ascending: true })
+      .range(debut, debut + PAGE_AVIS - 1)
+    if (error) {
+      console.error('[avis] cartes : lecture echec:', error.message)
+      return res.status(500).json({ error: 'Lecture impossible' })
+    }
+    avis.push(...(data || []))
+    if (!data || data.length < PAGE_AVIS) break
+  }
+  // Une borne atteinte se DIT, jamais en silence (revue de ed445b2).
+  const avisTronques = avis.length >= MAX_AVIS_CARTES
+
+  const { data: biens, error: eBiens } = await supabase.from('properties')
+    .select('id, name, provider_property_id, provider').eq('user_id', userId)
+    .not('provider_property_id', 'is', null).order('name')
+  if (eBiens) return res.status(500).json({ error: 'Lecture impossible' })
+  const nomParId = new Map((biens || []).map(b => [b.id, b.name]))
+  const nomParRef = new Map((biens || []).map(b => [String(b.provider_property_id), b.name]))
+  const nomBien = (id, ref) => (id && nomParId.get(id)) || (ref && nomParRef.get(String(ref))) || null
+
+  // Les sejours, pour les seules cartes servies : on assemble une premiere fois
+  // sans eux pour savoir lesquelles partent, puis on lit leurs sejours.
+  const maintenant = Date.now()
+  const sansSejours = assemblerCartes({ evaluations: ev.data || [], avis, nomBien, voitSejours, maintenant })
+  const servies = [...sansSejours.attente, ...sansSejours.recents, ...(avecAnciens ? sansSejours.anciens : [])]
+  const uids = servies.map(c => (c.cle.startsWith('sejour:') ? c.cle.slice(7) : null)).filter(Boolean)
+  const sejours = await sejoursDe(userId, uids)
+  const cartes = assemblerCartes({ evaluations: ev.data || [], avis, sejours, nomBien, voitSejours, maintenant })
+
+  const refsStats = bienDemande ? [bienDemande] : (refs === null ? null : refs.map(String))
+  const [ratio, moy] = await Promise.all([
+    ratioProprete(supabase, { userId, periode, refs: refsStats }),
+    noteMoyenne(supabase, { userId, periode, refs: refsStats }),
+  ])
+  const anciensTotal = cartes.anciens.length
+  return res.status(200).json({
+    cartes: { attente: cartes.attente, recents: cartes.recents, anciens: avecAnciens ? cartes.anciens.slice(0, MAX_LIGNES) : null },
+    anciens_total: anciensTotal,
+    anciens_tronques: avecAnciens && anciensTotal > MAX_LIGNES,
+    // La liste lue a atteint une borne : des cartes anciennes peuvent manquer.
+    liste_incomplete: avisTronques || (ev.data || []).length >= MAX_EVALS_CARTES,
+    biens: (biens || []).filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
+      .map(b => ({ name: b.name, provider_property_id: b.provider_property_id })),
+    periodes: Object.keys(PERIODES),
+    stats: { ...ratio, moyenne: moy.moyenne, notes: moy.notes, ...(moy.erreur ? { erreur: true } : {}) },
+  })
 }
 
 const ETATS_LISTE = ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
@@ -2002,9 +2129,14 @@ async function evaluationPublier (req, res, garde, options = {}) {
     throw err
   }
 
+  // L'origine de notre avis (point B) : decidee ICI, ou l'on sait si le texte
+  // parti est celui en base (l'IA) ou celui que l'hote a envoye, et si c'est
+  // l'auto-validation qui publie.
+  const texteDeLHoteEnvoye = req.body?.public_text && roleEtReglages(garde).role === 'hote' ? req.body.public_text : null
   const maj = {
     status: r.statut,
     public_text: evaluation.public_text,
+    ...(r.statut === 'publiee' ? { origine_texte: origineALaPublication({ auto: Boolean(options.auto), prestataire: roleEtReglages(garde).role === 'prestataire', texteEnvoye: texteDeLHoteEnvoye, texteEnBase: e.public_text }) } : {}),
     // Un texte remplace par l'hote peut citer le voyageur : il n'est plus « sans voyageur ».
     ...(req.body?.public_text && roleEtReglages(garde).role === 'hote' ? { texte_sans_voyageur: false } : {}),
     provider_response: r.provider_response || null,
@@ -2020,8 +2152,8 @@ async function evaluationPublier (req, res, garde, options = {}) {
       ...(r.is_reviewee_recommended === undefined ? {} : { is_reviewee_recommended: r.is_reviewee_recommended }),
     }
   }
-  const { error: eMaj } = await supabase.from('guest_evaluations')
-    .update(maj).eq('id', e.id).eq('user_id', e.user_id)
+  const { error: eMaj } = await ecrireAvecOrigine(m => supabase.from('guest_evaluations')
+    .update(m).eq('id', e.id).eq('user_id', e.user_id), maj)
   // ⚠ L'AVIS EST PARTI, LA LIGNE NON. C'est le pire cas du chantier : sans ce
   // cri, une republication ulterieure doublerait l'avis chez Airbnb, ou il ne
   // se reprend pas.
@@ -2223,6 +2355,7 @@ async function router (req, res) {
   if (action === 'config') return await configLire(req, res, garde)
   if (action === 'auto-validation') return await autoValidationLire(req, res, garde)
   if (action === 'list') return await lister(req, res, garde)
+  if (action === 'cartes') return await cartesLister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })
 }
 
