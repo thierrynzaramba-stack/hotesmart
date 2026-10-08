@@ -94,7 +94,10 @@ test('LE TEST QUI COMPTE (8 octobre 2026) : une panne de credit deja signalee da
   const ecrits = []
   let lignes = []
   const supabase = { from: () => {
-    const q = { select () { return q }, eq () { return q }, gte () { return q }, like () { return q }, limit: async () => ({ data: lignes, error: null }) }
+    const q = { select () { return q }, eq () { return q }, gte () { return q },
+      // Le filtre est VERIFIE : la colonne et le motif exacts que reportIncident ecrit.
+      like (col, motif) { assert.strictEqual(col, 'detail->>message'); assert.strictEqual(motif, 'Anthropic (IA) est COUPE%'); return q },
+      limit: async () => ({ data: lignes, error: null }) }
     return q
   } }
   const stub = (m, exports) => { const c = require.resolve(m); require.cache[c] = { id: c, filename: c, loaded: true, exports } }

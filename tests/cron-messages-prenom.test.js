@@ -10,18 +10,18 @@ const test = require('node:test')
 const assert = require('node:assert')
 
 function charger (ia) {
-  const incidents = []
+  const incidents = []; const appels = []
   const stub = (m, exports) => { const c = require.resolve(m); require.cache[c] = { id: c, filename: c, loaded: true, exports } }
   stub('../lib/cron-shared', {
     supabase: { from: () => ({}) },
-    anthropic: { messages: { create: async () => { if (ia instanceof Error) throw ia; return { content: [{ text: ia }] } } } },
+    anthropic: { messages: { create: async () => { appels.push(1); if (ia instanceof Error) throw ia; return { content: [{ text: ia }] } } } },
     getPropertyMode: async () => 'auto', isAutomationPaused: async () => false,
     formatDate: d => String(d || ''),
   })
   stub('../lib/founder-notify', { reportIncident: async (type, o) => { incidents.push({ type, ...o }) } })
   delete require.cache[require.resolve('../lib/cron-messages')]
   const mod = require('../lib/cron-messages')
-  return { mod, incidents }
+  return { mod, incidents, appels }
 }
 const credit = Object.assign(new Error('400 Your credit balance is too low'), { status: 400 })
 const bien = { id: 'p1', name: 'La bulle' }
@@ -40,15 +40,38 @@ test('LE TEST QUI COMPTE : sans prenom, la formule est neutre — « Bonjour, »
 })
 
 test('une variable INCONNUE reste dans le modele : le message est RETENU, et l hote prevenu', async () => {
-  const { mod, incidents } = charger('Bonjour Carole')
+  const { mod, incidents, appels } = charger('Bonjour Carole')
   const m = await mod.generateAutoMessage(modele('Bonjour {prenom}, votre {parking} est réservé.'), { firstName: 'Carole', arrival: '2026-10-08', departure: '2026-10-10' }, bien, 'Carole', {}, 'u1')
   assert.strictEqual(m, null)
   assert.deepStrictEqual(incidents.map(i => i.type), ['message_non_envoye'])
   assert.match(incidents[0].detail, /\{parking\}/)
+  assert.match(incidents[0].detail, /A corriger dans GuestFlow → Messages/, 'on corrige le MODELE, pas la base de connaissance')
+  assert.strictEqual(appels.length, 0, 'aucun appel IA paye pour un message retenu (revue de fbd316e)')
+  // Accents, chiffres, espaces : retenus aussi.
+  for (const v of ['{prénom}', '{code_acces2}', '{ prenom }']) {
+    assert.strictEqual(await mod.generateAutoMessage(modele(`Bonjour ${v}`), { firstName: 'Carole' }, bien, 'Carole', {}, 'u1'), null, v)
+  }
 })
 
 test('une variable reintroduite par l IA ne part pas : le texte substitue la remplace', async () => {
   const { mod } = charger('Bonjour {prenom} ! Bienvenue.')
   const m = await mod.generateAutoMessage(modele('Bonjour {prenom}, bienvenue.'), { firstName: 'Carole', arrival: '2026-10-08', departure: '2026-10-10' }, bien, 'Carole', {}, 'u1')
   assert.strictEqual(m, 'Bonjour Carole, bienvenue.')
+})
+
+test('revue de fbd316e : une erreur IMPREVUE n envoie rien et PREVIENT l hote (un evenement unique ne repasse pas)', async () => {
+  const { mod, incidents } = charger('x')
+  const m = await mod.generateAutoMessage(modele('Bonjour {prenom}'), null, bien, 'Carole', {}, 'u1')
+  assert.strictEqual(m, null)
+  assert.deepStrictEqual(incidents.map(i => i.type), ['message_non_envoye'])
+  assert.match(incidents[0].detail, /erreur de preparation/)
+})
+
+test('prenom neutre, partout : en tete de ligne, en milieu de phrase, et le meme moteur pour les codes d acces', () => {
+  const { prenomNeutre, buildMessage } = require('../lib/message-builder')
+  assert.strictEqual(prenomNeutre('{prenom}, bienvenue !', ''), 'Bienvenue !')
+  assert.strictEqual(prenomNeutre('Merci {prenom} pour tout', ''), 'Merci pour tout')
+  assert.strictEqual(prenomNeutre('Bonjour {prenom},', 'Ana'), 'Bonjour Ana,')
+  const t = buildMessage({ template_text: 'Bonjour {prenom}, votre code : {code_acces}' }, { firstName: '' }, 'Voyageur', '1234', {})
+  assert.strictEqual(t, 'Bonjour, votre code : 1234', 'jamais « Bonjour Voyageur »')
 })

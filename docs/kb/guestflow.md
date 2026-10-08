@@ -718,3 +718,32 @@ substitué ; sans prénom, la formule est neutre (« Bonjour, »), jamais
 « Voyageur » ; une variable `{…}` restée dans le modèle retient le message et
 prévient l'hôte (`message_non_envoye`) ; une variable réintroduite par l'IA
 fait renvoyer le texte substitué ; une erreur inattendue n'envoie rien.
+
+### Reviews de ecce019 et fbd316e (aucun constat de sécurité)
+Corrigé :
+- **B1** — un envoi en échec en Mode Auto devient une **proposition visible**
+  (`pending_validation`, la réponse à renvoyer d'un clic) et l'incident
+  `send_failure` part dès le 1er échec ; avant, la boucle le rejouait.
+- **B2** — au plafond, le message ne disparaît pas : une **tâche visible**
+  (« L'agent IA s'est arrêté sur ce fil… ») et l'hôte alerté ; un nouveau
+  message met à jour cette tâche. Le plafond ne compte que les appels
+  **réussis** (une coupure de crédit ne bloque plus les fils 24 h).
+- **B3** — le garde-fou passe avant l'écartement des propositions périmées.
+- Les traces sont **datées du dernier message du lot** (un message écrit pendant
+  l'appel IA rouvre le fil).
+- Messages automatiques : la garde des variables passe **avant** l'appel IA ;
+  motif « variable inconnue, à corriger dans GuestFlow → Messages » ; détection
+  des variables accentuées ou chiffrées ; une erreur imprévue prévient l'hôte ;
+  le prénom neutre vaut aussi pour les **codes d'accès** (`lib/message-builder.js`,
+  plus de « Bonjour Voyageur »).
+
+**À décider par Thierry / dettes notées :**
+- **Bien en pause** : le lot reçu pendant la pause est marqué traité ; à la
+  reprise, il ne reçoit plus de réponse automatique (avant : il la recevait).
+  Les interventions et questions inconnues, elles, créent toujours leur tâche.
+- `prevenirManque` / `prevenirVariableInconnue` écrivent une ligne d'incident
+  par cycle tant que le message est retenu (l'alerte, elle, a son anti-spam).
+- Les traces `ignored` occupent la fenêtre de 200 tâches lue par la messagerie.
+- `lib/message-builder.js` (codes d'accès) n'a pas de garde finale `{…}` ;
+  `[CODE À INSÉRER]` / `[WIFI …]` partent encore sur le chemin des modèles
+  quand la base de connaissance ne les porte pas (antérieur).

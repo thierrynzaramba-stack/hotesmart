@@ -65,8 +65,8 @@ function fakeSupabase (tables, tablesEnPanne = []) {
 
 // `contenuIA` : le tableau `content` que rend l'API (permet un bloc thinking).
 
-function charger ({ tables, messages, reponse, mode = 'test', pause = false }) {
-  const appelsIA = []; const incidents = []
+function charger ({ tables, messages, reponse, mode = 'test', pause = false, envoi = { ok: true, canal: 'ota' } }) {
+  const appelsIA = []; const incidents = []; const alertes = []
   const anthropic = { messages: { create: async (req) => {
     appelsIA.push(req)
     if (reponse instanceof Error) throw reponse
@@ -76,16 +76,17 @@ function charger ({ tables, messages, reponse, mode = 'test', pause = false }) {
     '../lib/cron-shared': { supabase: fakeSupabase(tables), anthropic, getPropertyMode: async () => mode,
       isAutomationPaused: async () => pause, getSignatureForKey: () => '', SENDVIABEDS24_ENABLED: false },
     '../lib/cron-beds24': { fetchMessages: async () => [], fetchBookingsHistory: async () => [] },
-    '../lib/alert-notify': { sendAlertNotifications: async () => {} },
+    '../lib/alert-notify': { sendAlertNotifications: async (a) => { alertes.push(a) } },
+    '../lib/cron-messages': { sendGuestMessage: async () => envoi },
     '../lib/record-message': { recordMessage: async () => ({ ok: true }) },
     '../lib/cles-migrees': { estCleMigree: async () => false },
     '../lib/founder-notify': { reportIncident: async (type, o) => { incidents.push({ type, ...o }); (tables.automation_incidents = tables.automation_incidents || []).push({ type, 'detail->>booking_id': o.detail && o.detail.booking_id, created_at: new Date().toISOString() }) } },
     '../lib/channels': { getProvider: () => ({ getPropertyMessages: async () => messages, syncMessages: async () => {}, syncBookings: async () => {} }) },
   }
-  for (const m of ['../lib/cron-classify', '../lib/guestflow-garde']) delete require.cache[require.resolve(m)]
+  for (const m of ['../lib/cron-classify', '../lib/guestflow-garde', '../lib/cron-messages']) delete require.cache[require.resolve(m)]
   for (const [k, ex] of Object.entries(stubs)) { const c = require.resolve(k); require.cache[c] = { id: c, filename: c, loaded: true, exports: ex } }
   const mod = require('../lib/cron-classify')
-  return { mod, appelsIA, incidents }
+  return { mod, appelsIA, incidents, alertes }
 }
 
 const U = 'user-1', P = 'prop-1', B = 'booking-1'
@@ -153,6 +154,10 @@ test('LE TEST QUI COMPTE : au plus 3 appels par fil sur 24 h — au-dela, aucun 
   assert.deepStrictEqual([r.premier, r.second], [0, 0])
   assert.deepStrictEqual(r.incidents.map(i => i.type), ['guestflow_plafond'], 'un seul incident sur deux cycles')
   assert.strictEqual(r.incidents[0].detail.booking_id, B)
+  // Revue de ecce019 (B2) : le message ne disparait pas — une tache VISIBLE, une seule.
+  const visibles = r.t.agent_tasks.filter(x => x.status === 'pending')
+  assert.strictEqual(visibles.length, 1)
+  assert.match(visibles[0].summary, /L’agent IA s’est arrêté sur ce fil/)
 })
 
 test('le journal dit le modele REELLEMENT utilise', async () => {
@@ -178,4 +183,50 @@ test('garde-fou : journal ABSENT (migration en retard) — l agent tourne et le 
   assert.strictEqual(res.errors.filter(e => e.context === 'guestflow_journal_absent').length, 1)
   const panne = { from: () => ({ select () { return this }, eq () { return this }, gte () { return this }, order () { return this }, limit: async () => ({ data: null, error: { message: 'connexion perdue' } }) }) }
   assert.deepStrictEqual(await G.peutAppeler(panne, { userId: U, propertyId: P, bookingId: B, results: { errors: [] } }), { ok: false, motif: 'lecture' })
+})
+
+test('revue de ecce019 (B2) : au plafond, un 4e message (« une fuite ! ») devient une tache VISIBLE et l hote est ALERTE ; les echecs ne comptent pas', async () => {
+  const t = tables()
+  for (const m of [300, 200, 100]) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
+  const c = charger({ tables: t, messages: [{ bookingId: B, sender: 'guest', message: 'Il y a une fuite d eau !', time: recent(2) }], reponse: { type: 'intervention', reason: 'x', auto_reply: null, sub_tasks: [] } })
+  await c.mod.processChannelPropertyMessages(U, bien, bilan())
+  assert.strictEqual(c.appelsIA.length, 0)
+  assert.strictEqual(t.agent_tasks.filter(x => x.status === 'pending').length, 1)
+  assert.strictEqual(c.alertes.length, 1, 'l hote est alerte')
+  const G = require('../lib/guestflow-garde')
+  const now = Date.now()
+  const echecs = [1, 2, 3, 4].map(k => ({ ok: false, created_at: new Date(now - k * 3600e3).toISOString() }))
+  assert.deepStrictEqual(G.decider(echecs, now), { ok: true }, '4 echecs vieux de plus de 6 h : pas de plafond, delai ecoule')
+})
+
+test('revue de ecce019 (B1) : un envoi en ECHEC en Mode Auto devient une proposition VISIBLE a renvoyer, et l incident part des le 1er echec', async () => {
+  const r = await deuxCycles({ messages: fil(), mode: 'auto', envoi: { ok: false, error: 'HTTP 503' }, reponse: { type: 'sympathy', reason: 'merci', auto_reply: 'Avec plaisir !', sub_tasks: [] } })
+  assert.deepStrictEqual([r.premier, r.second], [1, 0], 'pas de reclassement a chaque cycle')
+  const p = r.t.agent_tasks.find(x => x.status === 'pending_validation')
+  assert.ok(p, 'visible pour l hote')
+  assert.strictEqual(p.suggested_reply, 'Avec plaisir !')
+  assert.match(p.summary, /NON DÉLIVRÉE \(HTTP 503\)/)
+  const inc = r.incidents.find(i => i.type === 'send_failure')
+  assert.ok(inc && inc.threshold === 1)
+})
+
+test('revue de ecce019 (B3) : sous le plafond, une proposition en attente n est PAS ecartee (rien ne la remplacerait)', async () => {
+  const t = tables()
+  for (const m of [300, 200, 100]) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
+  t.agent_tasks.push({ id: 'prop-1', user_id: U, property_id: P, book_id: B, task_type: 'sympathy', status: 'pending_validation', guest_message: 'ancien lot', created_at: recent(200) })
+  const c = charger({ tables: t, messages: fil(5), reponse: { type: 'sympathy', reason: 'x', auto_reply: 'ok', sub_tasks: [] } })
+  await c.mod.processChannelPropertyMessages(U, bien, bilan())
+  assert.strictEqual(t.agent_tasks.find(x => x.id === 'prop-1').status, 'pending_validation')
+})
+
+test('revue de ecce019 : la trace est DATEE du dernier message du lot — un message ecrit pendant l appel IA rouvre le fil', async () => {
+  const t = tables()
+  const c = charger({ tables: t, messages: fil(30), mode: 'auto', pause: true, reponse: { type: 'sympathy', reason: 'merci', auto_reply: 'Ok', sub_tasks: [] } })
+  await c.mod.processChannelPropertyMessages(U, bien, bilan())
+  const trace = t.agent_tasks.find(x => x.status === 'ignored')
+  assert.ok(Math.abs(Date.parse(trace.created_at) - (Date.now() - 30 * 60e3)) < 5000, 'datee du dernier message du lot (il y a 30 min), pas de l insertion')
+  // Un message ecrit 1 min APRES le lot (pendant l'appel) : le fil se rouvre.
+  const d = charger({ tables: t, messages: [...fil(30), { bookingId: B, sender: 'guest', message: 'Et le parking ?', time: recent(29) }], mode: 'auto', pause: true, reponse: { type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] } })
+  await d.mod.processChannelPropertyMessages(U, bien, bilan())
+  assert.strictEqual(d.appelsIA.length, 1)
 })
