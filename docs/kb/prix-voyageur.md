@@ -84,6 +84,10 @@ Grave au §9 de la spec — ne pas le dupliquer ici. Resume operationnel :
 - Channex Booking : `guest_view.total`. `amount` coincide sur les confirmees
   mais suit la penalite sur les annulees.
 - Channex Offline : `amount` (c'est nous qui l'ecrivons).
+- **Puis la taxe de sejour en sort** (lot 2 de la taxe de sejour, 9 octobre
+  2026) : Booking Channex (`guest_view.total` la contient dans les deux modes)
+  et Beds24 (ligne `invoiceItems`). Airbnb ne la contient pas. Detail :
+  `eclatement-yield.md` §2 bis.
 
 ## 3. Ecart chiffre sur les biens migres
 

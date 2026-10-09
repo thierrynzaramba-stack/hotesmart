@@ -33,6 +33,39 @@ Amount » est un réglage que HôteSmart pose à la connexion : un canal repris
 ailleurs peut servir un `amount` déjà brut, et y ajouter la retenue rendrait
 ~23 % **au-dessus** du prix payé. Le module **refuse** plutôt que de supposer.
 
+### 2 bis. Hors taxe de séjour (taxe de séjour, lot 2, 9 octobre 2026)
+
+**Tout prix que YieldFlow propose ou compare est hors taxe de séjour**
+(spec `docs/specs/spec-taxe-sejour.md` §3). `prixVoyageur()` lit le prix
+transmis (tableau ci-dessus), puis en retire la taxe que `taxeSejourDe`
+(`lib/taxe-sejour/lecture.js`, la lecture qui alimente `taxes_sejour`) y trouve :
+
+| provider / canal | la taxe est-elle dans le prix lu ? |
+|---|---|
+| Channex / Booking | **oui, dans les deux modes** : retenue (La bulle, 144 + 2,30 = 146,30) et reversée (Colomiers, 15,14 dans 261,44). Vérifié sur les 11 confirmées de la prod : `guest_view.taxes[]` = `taxeSejourDe`, au centime |
+| Beds24 (ligne `invoiceItems` « taxe de séjour ») | **oui**, dans `price` et dans la somme des charges du repli direct |
+| Channex / Airbnb | **non** : `amount` + Host Fee = `base_price` (115 € sur HMN4XPP3PH), la taxe (2,59 €) est collectée en plus |
+| Beds24 / Airbnb, Offline | rien de transmis |
+
+- Une taxe **reversée** par Airbnb (`pass_through_tax_amount`, jamais vue) :
+  **refus** — on ne sait pas si elle est dans `amount`.
+- Une taxe ≥ au prix : **refus**, jamais un prix nul.
+- La taxe se retire aussi d'une **annulée** (`ignorerAnnulation`) : le prix lu
+  la contient ; la taxe DUE (0) est celle du cœur, pas celle-ci.
+- `eclater()` la rend : `taxe_sejour_retiree` (0 quand le prix n'en contenait pas).
+- La **TVA reste dans le prix** (décision de Thierry, dette 56).
+- Mesure du 9 octobre 2026 (`scripts/mesurer-prix-hors-taxe.js`, prod en
+  lecture) : 75 réservations, 228,54 € retirés de l'historique ; quantiles de
+  La bulle déplacés de 0,35 à 1,20 € ; **0 prix recommandé changé** sur
+  1 825 nuits (5 biens × 365 jours) ni sur les 499 nuits que le pilote tarife —
+  l'arrondi de la grille au pas absorbe l'écart. ⚠ Le Très haut de La bulle
+  mesure 163,80 € (165 avant) : une prochaine vente peut faire basculer un
+  niveau ; la mesure se rejoue.
+- **Nouveau bien** : ses références viennent d'AirROI, dont l'ADR est hors
+  taxes d'après sa documentation (`chantier-nouveau-bien.md`, règle 12).
+  Invariant inscrit ; sa vérification sur une pièce (calendrier AirROI d'une
+  annonce du cœur comparé à nos prix poussés) demande un appel payant, sur go.
+
 ## 3. Répartition UNIFORME — décision de Thierry, 12 septembre 2026
 
 Channex fournit un détail par nuit (`days_breakdown`, parfois inégal :
