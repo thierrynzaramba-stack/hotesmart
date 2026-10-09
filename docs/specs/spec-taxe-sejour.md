@@ -1,7 +1,6 @@
 # Spec — Taxe de séjour dans le cœur, prix vendu hors taxe
 
-Demande de Thierry du 9 octobre 2026. **Statut : à valider.** Aucun code avant
-validation.
+Demande de Thierry du 9 octobre 2026. **Statut : VALIDÉE par Thierry le 9 octobre 2026** (décisions au §6).
 
 ## 0. Principes (décisions de Thierry, 9 octobre 2026)
 1. La taxe de séjour de chaque réservation est stockée dans le cœur.
@@ -100,7 +99,8 @@ Règles du `collecteur` :
 - Booking : `collected_taxes` avec `is_withheld` → `plateforme` ; taxe dans
   `taxes[]` sans retenue → `hote` ; aucune → `personne`.
 - Beds24 historique : ligne présente → `inconnu` (on ne sait pas qui a reversé) ;
-  Airbnb Beds24 → `absent`.
+  Airbnb Beds24 → montant `null`, `origine = absent`, `collecteur = plateforme`
+  (« absente, collectée par Airbnb », décision 2).
 - Direct / Offline : `hote`, montant `calcule` par le barème (§4), `absent` sans barème.
 
 **Le lecteur** : une seule fonction pure, `taxeSejourDe(snapshot, raw, provider)`
@@ -225,12 +225,15 @@ il produit le rapport des écarts historiques, montré à l'hôte une fois.
 Chaque lot : revue, staging, prod sur ton go. Le report mobile des écrans des
 lots 3 et 4 te sera proposé en fin de lot.
 
-## 6. À trancher par Thierry
-1. Table à part `taxes_sejour` plutôt qu'un champ du snapshot (recommandé, §2).
-2. Historique Airbnb Beds24 (914 réservations sans donnée de taxe) : rester
-   `absent` (proposé : Airbnb l'a collectée, rien à contrôler), ou le calculer
-   avec le barème ?
-3. Colomiers : les 15 € de « frais de service » Booking restent dans le prix
-   vendu (proposé), ou sont retirés comme la taxe ?
-4. Seuil du contrôle : max(0,05 €, 1 %), et rappel hebdomadaire tant que le
-   défaut persiste (proposés).
+## 6. Décisions de Thierry (9 octobre 2026)
+1. Table à part `taxes_sejour` : **oui**.
+2. Historique Airbnb Beds24 sans donnée : **« absente, collectée par Airbnb »**
+   (`origine = absent`, `collecteur = plateforme`) — Airbnb collecte en France,
+   le provider ne le transmettait pas.
+3. Frais de service Booking de Colomiers : **laissés dans le prix vendu**. Au
+   registre (dette 55) : l'effet des frais fixes par séjour sur les comparaisons
+   de prix par nuit.
+4. Alerte : seuil **0,05 € ou 1 %** ; **une alerte par bien + canal + type
+   d'écart** (pas par réservation) ; **rappel hebdomadaire** tant que le défaut
+   persiste.
+5. Lot 1 (stockage et rattrapage) lancé : revue, staging, prod sur go.
