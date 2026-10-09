@@ -170,12 +170,15 @@ test('emailOuRien : une adresse mal formee PASSE — le coeur n\'est pas un vali
 function fakeSupabase ({ existing, capture }) {
   capture.upserts = []
   capture.events  = []
+  capture.taxes   = []
   return {
-    from () {
+    from (table) {
       const b = {
         select: () => b, eq: () => b, in: () => b, neq: () => b, limit: async () => ({ data: [], error: null }),
         maybeSingle: async () => ({ data: existing ? { snapshot: existing, property_id: 'PROP', raw_hash: null } : null }),
-        upsert: async row => { capture.upserts.push(row); return { error: null } },
+        // La ligne `taxes_sejour` suit la reservation (spec-taxe-sejour §2) :
+        // comptee a part, elle n'est pas une seconde ecriture du snapshot.
+        upsert: async row => { (table === 'taxes_sejour' ? capture.taxes : capture.upserts).push(row); return { error: null } },
         insert: async row => { capture.events.push(row); return { error: null } }
       }
       return b

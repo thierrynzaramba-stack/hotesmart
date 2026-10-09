@@ -1,0 +1,794 @@
+{
+ "HMN4XPP3PH": {
+  "snapshot": {
+   "provider": "channex",
+   "source": "AirBNB",
+   "status": "confirmed",
+   "arrival": "2026-10-11",
+   "departure": "2026-10-12",
+   "numAdult": 2,
+   "numChild": null
+  },
+  "raw": {
+   "ota_name": "AirBNB",
+   "status": "new",
+   "arrival_date": "2026-10-11",
+   "departure_date": "2026-10-12",
+   "amount": "93.60",
+   "occupancy": {
+    "ages": null,
+    "adults": 2,
+    "infants": 0,
+    "children": 0
+   },
+   "meta": {
+    "amount_type": "Payout Amount"
+   },
+   "rooms": [
+    {
+     "amount": "93.60",
+     "taxes": []
+    }
+   ],
+   "raw_message": "{\"reservation\":{\"airbnb_collected_tax_amount\":\"2.59\",\"airbnb_collected_tax_details\":[{\"name\":\"Taxe Additionnelle Departementale (Fr - Bagnères-de-bigorre (216500595))\",\"amount\":\"0.18\",\"tax_type\":\"airbnb_collected_tax\"},{\"name\":\"Taxe de Sejour (Fr - Bagnères-de-bigorre (216500595))\",\"amount\":\"1.80\",\"tax_type\":\"airbnb_collected_tax\"},{\"name\":\"Taxe Additionnelle Regionale (Fr - Bagnères-de-bigorre (216500595))\",\"amount\":\"0.61\",\"tax_type\":\"airbnb_collected_tax\"}],\"pass_through_tax_amount\":\"0.00\",\"pass_through_tax_details\":[],\"base_price\":\"115.00\",\"payout_amount\":\"93.60\",\"host_fee_base\":\"17.83\",\"host_fee_vat\":\"3.57\",\"extra_guest_fee\":\"0.00\"}}"
+  }
+ },
+ "6609687886": {
+  "snapshot": {
+   "provider": "channex",
+   "source": "BookingCom",
+   "status": "confirmed",
+   "arrival": "2026-10-03",
+   "departure": "2026-10-04",
+   "numAdult": 2,
+   "numChild": null
+  },
+  "raw": {
+   "ota_name": "BookingCom",
+   "status": "new",
+   "arrival_date": "2026-10-03",
+   "departure_date": "2026-10-04",
+   "amount": "144.00",
+   "occupancy": {
+    "ages": [],
+    "adults": 2,
+    "infants": 0,
+    "children": 0
+   },
+   "meta": {},
+   "rooms": [
+    {
+     "amount": "144.00",
+     "taxes": [
+      {
+       "name": "TVA (10%)",
+       "type": "Value Added Tax (VAT)",
+       "nights": 1,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per booking",
+       "total_price": "13.09",
+       "is_inclusive": true,
+       "price_per_unit": "13.09"
+      }
+     ],
+     "collected_taxes": [
+      {
+       "name": "CITY_TAX (Withheld Tax)",
+       "type": "City Tax",
+       "nights": 1,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per person per night",
+       "is_withheld": true,
+       "total_price": "2.30",
+       "is_inclusive": false,
+       "price_per_unit": "1.15"
+      }
+     ],
+     "meta": {
+      "price_details": {
+       "guest_view": {
+        "taxes": [
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "1309",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         },
+         {
+          "code": "3",
+          "type": "Inclusive",
+          "amount": "230",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "CITY_TAX (Withheld Tax)",
+          "charge_frequency": 21
+         }
+        ],
+        "total": {
+         "amount": "14630",
+         "decimal_places": 2
+        }
+       },
+       "hotel_view": {
+        "taxes": [
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "1309",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         },
+         {
+          "code": "3",
+          "type": "Exclusive",
+          "amount": "230",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "CITY_TAX (Withheld Tax)",
+          "charge_frequency": 21
+         }
+        ],
+        "total": {
+         "amount": "14400",
+         "decimal_places": 2
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ },
+ "6412380289": {
+  "snapshot": {
+   "provider": "channex",
+   "source": "BookingCom",
+   "status": "confirmed",
+   "arrival": "2026-10-09",
+   "departure": "2026-10-11",
+   "numAdult": 6,
+   "numChild": null
+  },
+  "raw": {
+   "ota_name": "BookingCom",
+   "status": "new",
+   "arrival_date": "2026-10-09",
+   "departure_date": "2026-10-11",
+   "amount": "248.00",
+   "occupancy": {
+    "ages": [],
+    "adults": 6,
+    "infants": 0,
+    "children": 0
+   },
+   "meta": {},
+   "rooms": [
+    {
+     "amount": "248.00",
+     "taxes": [
+      {
+       "name": "TVA (10%)",
+       "type": "Value Added Tax (VAT)",
+       "nights": 2,
+       "persons": 6,
+       "version": 2,
+       "price_mode": "Per booking",
+       "total_price": "22.55",
+       "is_inclusive": true,
+       "price_per_unit": "22.55"
+      }
+     ],
+     "meta": {
+      "price_details": {
+       "guest_view": {
+        "taxes": [
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "2255",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         }
+        ],
+        "total": {
+         "amount": "24800",
+         "decimal_places": 2
+        }
+       },
+       "hotel_view": {
+        "taxes": [
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "2255",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         }
+        ],
+        "total": {
+         "amount": "24800",
+         "decimal_places": 2
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ },
+ "6067659653": {
+  "snapshot": {
+   "provider": "channex",
+   "source": "BookingCom",
+   "status": "confirmed",
+   "arrival": "2026-08-04",
+   "departure": "2026-08-07",
+   "numAdult": 2,
+   "numChild": null
+  },
+  "raw": {
+   "ota_name": "BookingCom",
+   "status": "new",
+   "arrival_date": "2026-08-04",
+   "departure_date": "2026-08-07",
+   "amount": "261.44",
+   "occupancy": {
+    "ages": [],
+    "adults": 2,
+    "infants": 0,
+    "children": 0
+   },
+   "meta": {},
+   "rooms": [
+    {
+     "amount": "261.44",
+     "taxes": [
+      {
+       "name": "frais de service",
+       "type": "Service Charge",
+       "nights": 3,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per booking",
+       "total_price": "15.00",
+       "is_inclusive": false,
+       "price_per_unit": "15.00"
+      },
+      {
+       "name": "TVA (10%)",
+       "type": "Value Added Tax (VAT)",
+       "nights": 3,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per booking",
+       "total_price": "21.03",
+       "is_inclusive": true,
+       "price_per_unit": "21.03"
+      },
+      {
+       "name": "taxe de séjour (7.2%)",
+       "type": "City Tax",
+       "nights": 3,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per booking",
+       "total_price": "15.14",
+       "is_inclusive": false,
+       "price_per_unit": "15.14"
+      }
+     ],
+     "meta": {
+      "price_details": {
+       "guest_view": {
+        "taxes": [
+         {
+          "code": "14",
+          "type": "Inclusive",
+          "amount": "1500",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "frais de service",
+          "charge_frequency": 12
+         },
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "2103",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         },
+         {
+          "code": "3",
+          "type": "Inclusive",
+          "amount": "1514",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "taxe de séjour (7.2%)",
+          "charge_frequency": 12
+         }
+        ],
+        "total": {
+         "amount": "26144",
+         "decimal_places": 2
+        }
+       },
+       "hotel_view": {
+        "taxes": [
+         {
+          "code": "14",
+          "type": "Inclusive",
+          "amount": "1500",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "frais de service",
+          "charge_frequency": 12
+         },
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "2103",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         },
+         {
+          "code": "3",
+          "type": "Inclusive",
+          "amount": "1514",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "taxe de séjour (7.2%)",
+          "charge_frequency": 12
+         }
+        ],
+        "total": {
+         "amount": "26144",
+         "decimal_places": 2
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ },
+ "HMXZ3EKY3K": {
+  "snapshot": {
+   "provider": "channex",
+   "source": "AirBNB",
+   "status": "confirmed",
+   "arrival": "2026-10-10",
+   "departure": "2026-10-11",
+   "numAdult": 2,
+   "numChild": null
+  },
+  "raw": {
+   "ota_name": "AirBNB",
+   "status": "new",
+   "arrival_date": "2026-10-10",
+   "departure_date": "2026-10-11",
+   "amount": "186.40",
+   "occupancy": {
+    "ages": null,
+    "adults": 2,
+    "infants": 0,
+    "children": 0
+   },
+   "meta": {
+    "amount_type": "Payout Amount"
+   },
+   "rooms": [
+    {
+     "amount": "186.40",
+     "taxes": []
+    }
+   ],
+   "raw_message": "{\"reservation\":{\"airbnb_collected_tax_amount\":\"13.25\",\"airbnb_collected_tax_details\":[{\"name\":\"Taxe de Sejour (Fr - Toulouse (213105554))\",\"amount\":\"9.20\",\"tax_type\":\"airbnb_collected_tax\"},{\"name\":\"Taxe Additionnelle Departementale (Fr - Toulouse (213105554))\",\"amount\":\"0.92\",\"tax_type\":\"airbnb_collected_tax\"},{\"name\":\"Taxe Additionnelle Regionale (Fr - Toulouse (213105554))\",\"amount\":\"3.13\",\"tax_type\":\"airbnb_collected_tax\"}],\"pass_through_tax_amount\":\"0.00\",\"pass_through_tax_details\":[],\"base_price\":\"229.00\",\"payout_amount\":\"186.40\",\"host_fee_base\":\"35.50\",\"host_fee_vat\":\"7.10\",\"extra_guest_fee\":\"0.00\"}}"
+  }
+ },
+ "5261285458": {
+  "snapshot": {
+   "provider": "channex",
+   "source": "BookingCom",
+   "status": "cancelled",
+   "arrival": "2026-11-20",
+   "departure": "2026-11-22",
+   "numAdult": 2,
+   "numChild": null
+  },
+  "raw": {
+   "ota_name": "BookingCom",
+   "status": "cancelled",
+   "arrival_date": "2026-11-20",
+   "departure_date": "2026-11-22",
+   "amount": "0.00",
+   "occupancy": {
+    "ages": [],
+    "adults": 2,
+    "infants": 0,
+    "children": 0
+   },
+   "meta": {},
+   "rooms": [
+    {
+     "amount": "239.00",
+     "taxes": [
+      {
+       "name": "TVA (10%)",
+       "type": "Value Added Tax (VAT)",
+       "nights": 2,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per booking",
+       "total_price": "21.73",
+       "is_inclusive": true,
+       "price_per_unit": "21.73"
+      }
+     ],
+     "collected_taxes": [
+      {
+       "name": "CITY_TAX (Withheld Tax)",
+       "type": "City Tax",
+       "nights": 2,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per person per night",
+       "is_withheld": true,
+       "total_price": "4.61",
+       "is_inclusive": false,
+       "price_per_unit": "1.15"
+      }
+     ],
+     "meta": {
+      "price_details": {
+       "guest_view": {
+        "taxes": [
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "2173",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         },
+         {
+          "code": "3",
+          "type": "Inclusive",
+          "amount": "461",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "CITY_TAX (Withheld Tax)",
+          "charge_frequency": 21
+         }
+        ],
+        "total": {
+         "amount": "24361",
+         "decimal_places": 2
+        }
+       },
+       "hotel_view": {
+        "taxes": [
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "2173",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         },
+         {
+          "code": "3",
+          "type": "Exclusive",
+          "amount": "461",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "CITY_TAX (Withheld Tax)",
+          "charge_frequency": 21
+         }
+        ],
+        "total": {
+         "amount": "23900",
+         "decimal_places": 2
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ },
+ "HM3A9EE3TC": {
+  "snapshot": {
+   "provider": "channex",
+   "source": "AirBNB",
+   "status": "confirmed",
+   "arrival": "2026-10-03",
+   "departure": "2026-10-04",
+   "numAdult": 5,
+   "numChild": null
+  },
+  "raw": {
+   "ota_name": "AirBNB",
+   "status": "new",
+   "arrival_date": "2026-10-03",
+   "departure_date": "2026-10-04",
+   "amount": "109.08",
+   "occupancy": {
+    "ages": null,
+    "adults": 5,
+    "infants": 1,
+    "children": 0
+   },
+   "meta": {
+    "amount_type": "Payout Amount"
+   },
+   "rooms": [
+    {
+     "amount": "109.08",
+     "taxes": []
+    }
+   ],
+   "raw_message": "{\"reservation\":{\"airbnb_collected_tax_amount\":\"6.48\",\"airbnb_collected_tax_details\":[{\"name\":\"Taxe Additionnelle Departementale (Fr - Bagnères-de-bigorre (216500595))\",\"amount\":\"0.45\",\"tax_type\":\"airbnb_collected_tax\"},{\"name\":\"Taxe de Sejour (Fr - Bagnères-de-bigorre (216500595))\",\"amount\":\"4.50\",\"tax_type\":\"airbnb_collected_tax\"},{\"name\":\"Taxe Additionnelle Regionale (Fr - Bagnères-de-bigorre (216500595))\",\"amount\":\"1.53\",\"tax_type\":\"airbnb_collected_tax\"}],\"pass_through_tax_amount\":\"0.00\",\"pass_through_tax_details\":[],\"base_price\":\"134.00\",\"payout_amount\":\"109.08\",\"host_fee_base\":\"20.77\",\"host_fee_vat\":\"4.15\",\"extra_guest_fee\":\"0.00\"}}"
+  }
+ },
+ "6689936744": {
+  "snapshot": {
+   "provider": "channex",
+   "source": "BookingCom",
+   "status": "cancelled",
+   "arrival": "2026-08-15",
+   "departure": "2026-08-16",
+   "numAdult": 2,
+   "numChild": 2
+  },
+  "raw": {
+   "ota_name": "BookingCom",
+   "status": "cancelled",
+   "arrival_date": "2026-08-15",
+   "departure_date": "2026-08-16",
+   "amount": "90.90",
+   "occupancy": {
+    "ages": [
+     13,
+     17
+    ],
+    "adults": 2,
+    "infants": 0,
+    "children": 2
+   },
+   "meta": {},
+   "rooms": [
+    {
+     "amount": "111.85",
+     "taxes": [
+      {
+       "name": "frais de service",
+       "type": "Service Charge",
+       "nights": 1,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per booking",
+       "total_price": "15.00",
+       "is_inclusive": false,
+       "price_per_unit": "15.00"
+      },
+      {
+       "name": "TVA (10%)",
+       "type": "Value Added Tax (VAT)",
+       "nights": 1,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per booking",
+       "total_price": "8.26",
+       "is_inclusive": true,
+       "price_per_unit": "8.26"
+      },
+      {
+       "name": "taxe de séjour (7.2%)",
+       "type": "City Tax",
+       "nights": 1,
+       "persons": 2,
+       "version": 2,
+       "price_mode": "Per booking",
+       "total_price": "5.95",
+       "is_inclusive": false,
+       "price_per_unit": "5.95"
+      }
+     ],
+     "meta": {
+      "price_details": {
+       "guest_view": {
+        "taxes": [
+         {
+          "code": "14",
+          "type": "Inclusive",
+          "amount": "1500",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "frais de service",
+          "charge_frequency": 12
+         },
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "826",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         },
+         {
+          "code": "3",
+          "type": "Inclusive",
+          "amount": "595",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "taxe de séjour (7.2%)",
+          "charge_frequency": 12
+         }
+        ],
+        "total": {
+         "amount": "11185",
+         "decimal_places": 2
+        }
+       },
+       "hotel_view": {
+        "taxes": [
+         {
+          "code": "14",
+          "type": "Inclusive",
+          "amount": "1500",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "frais de service",
+          "charge_frequency": 12
+         },
+         {
+          "code": "19",
+          "type": "Inclusive",
+          "amount": "826",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "TVA (10%)",
+          "charge_frequency": 12
+         },
+         {
+          "code": "3",
+          "type": "Inclusive",
+          "amount": "595",
+          "version": 2,
+          "currency_code": "EUR",
+          "decimal_places": 2,
+          "tax_description": "taxe de séjour (7.2%)",
+          "charge_frequency": 12
+         }
+        ],
+        "total": {
+         "amount": "11185",
+         "decimal_places": 2
+        }
+       }
+      }
+     }
+    }
+   ]
+  }
+ },
+ "beds24_booking_taxe": {
+  "snapshot": {
+   "provider": "beds24",
+   "source": "booking",
+   "status": "confirmed",
+   "arrival": "2026-01-16",
+   "departure": "2026-01-18",
+   "numAdult": 2,
+   "numChild": 0
+  },
+  "raw": {
+   "price": 317.74,
+   "commission": 51.42,
+   "invoiceItems": [
+    {
+     "type": "charge",
+     "description": "[ROOMNAME1]",
+     "lineTotal": 313.14
+    },
+    {
+     "type": "charge",
+     "description": "taxe de séjour",
+     "lineTotal": 4.6
+    }
+   ]
+  }
+ },
+ "beds24_airbnb": {
+  "snapshot": {
+   "provider": "beds24",
+   "source": "airbnb",
+   "status": "confirmed",
+   "arrival": "2024-09-17",
+   "departure": "2024-09-19",
+   "numAdult": 6,
+   "numChild": 0
+  },
+  "raw": {
+   "price": 226,
+   "commission": 40.68,
+   "invoiceItems": [
+    {
+     "type": "charge",
+     "description": "[ROOMNAME1]",
+     "lineTotal": 185.32
+    }
+   ]
+  }
+ },
+ "offline": {
+  "snapshot": {
+   "provider": "channex",
+   "source": "Offline",
+   "status": "confirmed",
+   "arrival": "2026-09-27",
+   "departure": "2026-09-28",
+   "numAdult": 2,
+   "numChild": null
+  },
+  "raw": {
+   "ota_name": "Offline",
+   "status": "new",
+   "arrival_date": "2026-09-27",
+   "departure_date": "2026-09-28",
+   "amount": "89.00",
+   "occupancy": {
+    "ages": [],
+    "adults": 2,
+    "infants": 0,
+    "children": 0
+   },
+   "meta": {},
+   "rooms": [
+    {
+     "amount": "89.00",
+     "taxes": []
+    }
+   ]
+  }
+ }
+}
