@@ -68,7 +68,10 @@ transmis (tableau ci-dessus), puis en retire la taxe que `taxeSejourDe`
   Thierry) : un niveau calculé qui change de prix d'un passage du pilote au
   suivant prévient le fondateur, niveaux et prix dans le message
   (`lib/pilote-quotidien.js`). Elle prévient, elle ne bloque rien ; un niveau
-  fixé par l'hôte n'alarme pas.
+  fixé par l'hôte, une grille non fiable ou un niveau non calculable
+  n'alarment pas ; on compare le montant CALCULÉ (pas celui décalé par un
+  geste de l'hôte), contre une référence qui n'avance que si l'alarme est
+  partie.
 - **Nouveau bien** : ses références viennent d'AirROI, dont l'ADR est hors
   taxes d'après sa documentation (`chantier-nouveau-bien.md`, règle 12).
   **Vérifié le 9 octobre 2026** (un appel, 0,10 $, sur go de Thierry) :

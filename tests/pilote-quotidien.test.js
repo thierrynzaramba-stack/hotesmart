@@ -230,9 +230,38 @@ test('grille changee : premier passage (rien de note) → on note, on n alarme p
   // L'hote fixe le Moyen a 130 : son geste, pas celui du pilote.
   await alarmerSurLePassage(bien(), passageOk([115, 130, 145, 155, 165], ['Moyen']), { alerter }, { etats: [], grille: r.grille })
   assert.deepEqual(alarmes, [])
-  // Un niveau qui devient non calculable est un changement.
-  await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, null]), { alerter }, { etats: [], grille: r.grille })
-  assert.deepEqual(alarmes, ['pilote_grille_changee'])
+  // Un niveau qui devient non calculable ne tarife rien : pas d alarme, et la
+  // reference garde son dernier prix ; c'est contre lui que le prix suivant se compare.
+  const rn = await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, null]), { alerter }, { etats: [], grille: r.grille })
+  assert.deepEqual(alarmes, []); assert.equal(rn.grille[4].prix, 165)
+  await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, 160]), { alerter }, { etats: [], grille: rn.grille })
+  assert.deepEqual(alarmes, ['pilote_grille_changee'], '165 → (non calculable) → 160 : le changement est dit')
+  // Un passage qui ne tarife aucune nuit n alarme pas et ne deplace pas la reference.
+  const vide = { ...passageOk([100, 110, 120, 130, 140]), prix: { ok: true, comptes: { calculees: 0, non_calculables: 3, sous_plancher: 0 } } }  // sous 7 nuits : pas de « regle muette » non plus
+  const rv = await alarmerSurLePassage(bien(), vide, { alerter }, { etats: [], grille: r.grille })
+  assert.equal(alarmes.length, 1); assert.equal(rv.grille, r.grille); assert.equal(rv.grilleAvancee, false)
+})
+
+test('revue de b1c9ac2 : une alarme ETOUFFEE par l anti-spam ne deplace pas la reference — le passage suivant dit le changement', async () => {
+  const avant = passageOk([115, 125, 145, 155, 165]).grille
+  const r = await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, 160]), { alerter: async () => ({ recorded: true, alerted: false }) }, { etats: [], grille: avant })
+  assert.deepEqual(r.envoyees, []); assert.equal(r.grille, avant)
+  const partis = []
+  await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, 160]), { alerter: async (t, o) => { partis.push(o.detail.message); return { alerted: true } } }, { etats: [], grille: r.grille })
+  assert.match(partis[0], /Exceptionnel 165 € → 160 €/)
+})
+
+test('revue de b1c9ac2 : la grille calculee, pas le decalage d ordre du a l hote ; une grille non fiable n est pas notee', async () => {
+  const { niveauxChanges } = require('../lib/pilote-quotidien')
+  assert.deepEqual(niveauxChanges([{ nom: 'Haut', prix: 145, fixe: false }, null], [null, { nom: 'Haut', prix: 145, fixe: false }]), [], 'une entree illisible ne leve pas')
+  const sb = fausseBase({ biens: [bien()] })
+  const canal = canalQuiEcrit(sb)
+  const grilleHote = { base: { niveaux: [{ nom: 'Base', prix: 115 }, { nom: 'Moyen', prix: 150, prix_calcule: 125, fixe_par_hote: true }, { nom: 'Haut', prix: 155, prix_calcule: 145, ajuste_pour_ordre: true }, { nom: 'Très haut', prix: 160, prix_calcule: 155, ajuste_pour_ordre: true }, { nom: 'Exceptionnel', prix: 165, prix_calcule: 165 }] } }
+  await piloterLesBiens(sb, { aujourdHui: AUJ, maintenant: () => Date.parse(`${AUJ}T10:00:00Z`), demander: canal, preparer: preparerAvecGrille(grilleHote), prix: regleDe({}), alerter: async () => {}, sonderRetards: false })
+  assert.deepEqual(sb.marqueurs['pilote:grille:' + ID].errors[0].grille.map(n => n.prix), [115, 125, 145, 155, 165], 'le montant du CALCUL, pas celui decale par le geste de l hote')
+  const sb2 = fausseBase({ biens: [bien()] })
+  await piloterLesBiens(sb2, { aujourdHui: AUJ, maintenant: () => 0, demander: canalQuiEcrit(sb2), preparer: preparerAvecGrille({ base: { fiable: false, niveaux: null } }), prix: regleDe({}), alerter: async () => {}, sonderRetards: false })
+  assert.equal(sb2.marqueurs['pilote:grille:' + ID], undefined)
 })
 
 test('grille changee : un passage dont les prix n ont pas ete entretenus n alarme pas, et garde la reference precedente', async () => {
@@ -251,11 +280,28 @@ test('LE TEST QUI COMPTE : grille changee de bout en bout — le marqueur porte 
   const deps = (jour, grille) => ({ aujourdHui: jour, maintenant: () => Date.parse(`${jour}T10:00:00Z`), demander: canal, preparer: preparerAvecGrille(grille),
     prix: regleDe({}), alerter: async (t, o) => alarmes.push([t, o.detail && o.detail.message]), sonderRetards: false })
   await piloterLesBiens(sb, deps(AUJ, grilleDe([115, 125, 145, 155, 165])))
-  assert.deepEqual(sb.marqueurs[PREFIXE_MARQUEUR + ID].errors[0].grille.map(n => n.prix), [115, 125, 145, 155, 165], 'la grille voyage avec le marqueur')
+  assert.deepEqual(sb.marqueurs['pilote:grille:' + ID].errors[0].grille.map(n => n.prix), [115, 125, 145, 155, 165], 'la reference a sa propre ligne')
   assert.deepEqual(alarmes, [], 'premier passage : on note')
+  // Un geste de l hote (grille, activation) efface le MARQUEUR : la reference reste.
+  delete sb.marqueurs[PREFIXE_MARQUEUR + ID]
   await piloterLesBiens(sb, deps('2026-10-02', grilleDe([115, 125, 145, 155, 160])))
   assert.deepEqual(alarmes.map(a => a[0]), ['pilote_grille_changee'])
   assert.match(alarmes[0][1], /Exceptionnel 165 € → 160 €/)
   await piloterLesBiens(sb, deps('2026-10-03', grilleDe([115, 125, 145, 155, 160])))
   assert.equal(alarmes.length, 1, 'meme grille le surlendemain : rien')
+})
+
+test('revue de b1c9ac2 : l alarme ne change RIEN — memes demandes au canal, et un alerter qui leve n empeche pas le marqueur', async () => {
+  const passe = async (alerter) => {
+    const sb = fausseBase({ biens: [bien()], marqueurs: { ['pilote:grille:' + ID]: { last_run: '2026-09-30T10:00:00Z', errors: [{ grille: passageOk([115, 125, 145, 155, 165]).grille }] } } })
+    const canal = canalQuiEcrit(sb)
+    await piloterLesBiens(sb, { aujourdHui: AUJ, maintenant: () => Date.parse(`${AUJ}T10:00:00Z`), demander: canal, preparer: preparerAvecGrille(grilleDe([115, 125, 145, 155, 160])), prix: regleDe({}), alerter, sonderRetards: false })
+    return { sb, appels: canal.appels }
+  }
+  const a = await passe(async () => ({ alerted: true }))
+  const b = await passe(async () => { throw new Error('brevo en panne') })
+  assert.deepEqual(b.appels, a.appels, 'le canal recoit exactement la meme chose')
+  assert.ok(b.sb.marqueurs[PREFIXE_MARQUEUR + ID], 'marqueur pose malgre l alarme en echec')
+  assert.equal(b.sb.marqueurs['pilote:grille:' + ID].errors[0].grille[4].prix, 165, 'alarme en echec : la reference ne bouge pas')
+  assert.equal(a.sb.marqueurs['pilote:grille:' + ID].errors[0].grille[4].prix, 160)
 })
