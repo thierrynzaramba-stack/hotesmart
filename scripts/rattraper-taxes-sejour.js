@@ -3,7 +3,15 @@
 // reservations deja dans le coeur (spec docs/specs/spec-taxe-sejour.md §2, lot 1).
 //
 //   node --env-file=<.env de la base visee> scripts/rattraper-taxes-sejour.js         (a blanc)
-//   node --env-file=<.env de la base visee> scripts/rattraper-taxes-sejour.js --go    (ecrit)
+//   node --env-file=<.env de la base visee> scripts/rattraper-taxes-sejour.js --go --projet=<ref>   (ecrit)
+//
+// ⚠ `--projet=<ref>` est EXIGE avec --go (revue de 049d3ed) : la reference du
+// projet Supabase vise (affichee a blanc). Un mauvais --env-file est refuse au
+// lieu d'ecrire sur la mauvaise base.
+// ⚠ UNE RESERVATION MODIFIEE PENDANT LE RATTRAPAGE N'EST PAS ECRASEE : juste
+// avant d'ecrire, l'empreinte `raw_hash` de chaque reservation est relue ; si
+// elle a change, la couche sync a deja ecrit (ou ecrira) la taxe a jour, et le
+// rattrapage passe.
 //
 // ⚠ AUCUN APPEL PROVIDER : on relit `bookings_snapshot.raw`, le payload integral
 // deja conserve. La lecture est celle de la couche sync (lib/taxe-sejour/lecture.js)
@@ -20,6 +28,7 @@ const { taxeSejourDe } = require('../lib/taxe-sejour/lecture')
 const { ligneTaxe, ecrireLot, TABLE } = require('../lib/taxe-sejour/writer')
 
 const GO = process.argv.includes('--go')
+const PROJET = (process.argv.find(a => a.startsWith('--projet=')) || '').slice('--projet='.length)
 const PAGE = 200
 
 ;(async () => {
@@ -28,6 +37,7 @@ const PAGE = 200
   const { data: biens, error: eB } = await sb.from('properties').select('id, user_id, name, provider_property_id')
   if (eB || !biens) { console.error('ECHEC : biens illisibles', eB ? eB.message : ''); process.exit(1) }
   console.log(`Projet ${projet} · biens = ${biens.length} (5 = production, 3 = staging) · ${GO ? 'ECRITURE (--go)' : 'A BLANC'}`)
+  if (GO && PROJET !== projet) { console.error(`REFUS : --projet=${PROJET || '(absent)'} ne designe pas la base ouverte (${projet}). Rien n a ete ecrit.`); process.exit(1) }
 
   const { count: total, error: eC } = await sb.from('bookings_snapshot').select('id', { count: 'exact', head: true })
   if (eC || !Number.isInteger(total)) { console.error('ECHEC : compte des reservations illisible'); process.exit(1) }
@@ -38,7 +48,7 @@ const PAGE = 200
   let sansRaw = 0
   for (let a = 0; ; a += PAGE) {
     const { data, error } = await sb.from('bookings_snapshot')
-      .select('user_id, booking_id, property_id, snapshot, raw').order('id').range(a, a + PAGE - 1)
+      .select('user_id, booking_id, property_id, snapshot, raw, raw_hash').order('id').range(a, a + PAGE - 1)
     if (error) { console.error('ECHEC : lecture des reservations', error.message); process.exit(1) }
     for (const l of data) {
       if (l.raw == null) { sansRaw++; continue }
@@ -47,7 +57,7 @@ const PAGE = 200
       lignes.push({ lu, nom: bien.length === 1 ? bien[0].name : `(cle ${l.property_id})`,
         canal: `${l.snapshot?.provider || '?'}/${l.snapshot?.source || '?'}`,
         ligne: ligneTaxe({ userId: l.user_id, bookingId: l.booking_id, propertyId: l.property_id,
-          propertyUuid: bien.length === 1 ? bien[0].id : null, lu }) })
+          propertyUuid: bien.length === 1 ? bien[0].id : null, rawHash: l.raw_hash || null, lu }) })
     }
     if (data.length < PAGE) break
   }
@@ -67,7 +77,7 @@ const PAGE = 200
   console.log(`\nReservations : ${total} · avec payload : ${lignes.length} · sans payload (ignorees) : ${sansRaw}`)
   console.log('\nbien | canal | collecteur | origine | reservations | taxe')
   for (const [k, a] of [...agg.entries()].sort()) console.log(`  ${k} | ${a.n} | ${(a.cents / 100).toFixed(2)} €`)
-  console.log(`\nLibelles de taxe Airbnb non classes : ${inconnus.size ? [...inconnus].map(([l, n]) => `${l} (${n})`).join(', ') : 'aucun'}`)
+  console.log(`\nLibelles de taxe non classes (Airbnb et Booking, non comptes) : ${inconnus.size ? [...inconnus].map(([l, n]) => `${l} (${n})`).join(', ') : 'aucun'}`)
   console.log(`Sans bien resolu (property_uuid vide) : ${lignes.filter(x => !x.ligne.property_uuid).length}`)
 
   if (!GO) { console.log(`\nA BLANC : rien n'a ete ecrit. ${lignes.length} lignes ${TABLE} seraient ecrites (upsert).`); process.exit(0) }
@@ -88,11 +98,30 @@ const PAGE = 200
   if (eT || !(trace || []).length) { console.error('REFUS : l incident n est pas en base —', eT ? eT.message : 'aucune ligne', '— rien n a ete ecrit.'); process.exit(1) }
   console.log(`\nIncident pose et relu (ecriture_de_masse_annoncee, ${trace[0].id}).`)
 
-  const r = await ecrireLot(sb, lignes.map(x => x.ligne))
-  if (r.erreur) { console.error(`ECHEC apres ${r.ecrites} lignes : ${r.erreur}`); process.exit(2) }
+  // Relecture des empreintes juste avant d'ecrire : une reservation modifiee
+  // depuis la lecture est laissee a la couche sync.
+  let ecrites = 0, passees = 0
+  for (let i = 0; i < lignes.length; i += PAGE) {
+    const tranche = lignes.slice(i, i + PAGE).map(x => x.ligne)
+    const parCompte = new Map()
+    for (const l of tranche) parCompte.set(l.user_id, [...(parCompte.get(l.user_id) || []), l.booking_id])
+    const actuelles = new Map()
+    for (const [uid, ids] of parCompte) {
+      const { data, error } = await sb.from('bookings_snapshot').select('booking_id, raw_hash').eq('user_id', uid).in('booking_id', ids)
+      if (error) { console.error(`ECHEC apres ${ecrites} lignes : relecture des empreintes — ${error.message}`); process.exit(2) }
+      for (const d of data) actuelles.set(`${uid}|${d.booking_id}`, d.raw_hash || null)
+    }
+    const aEcrire = tranche.filter(l => actuelles.get(`${l.user_id}|${l.booking_id}`) === l.raw_hash)
+    passees += tranche.length - aEcrire.length
+    const r = await ecrireLot(sb, aEcrire)
+    ecrites += r.ecrites
+    if (r.erreur) { console.error(`ECHEC apres ${ecrites} lignes : ${r.erreur}`); process.exit(2) }
+  }
+  const r = { ecrites }
+  if (passees) console.log(`${passees} reservation(s) modifiee(s) pendant le rattrapage : laissees a la couche sync.`)
   const { count: enBase, error: eN } = await sb.from(TABLE).select('id', { count: 'exact', head: true })
   if (eN) { console.error('ECHEC : relecture du compte', eN.message); process.exit(2) }
   console.log(`Ecrites : ${r.ecrites} · lignes en base : ${enBase}`)
-  if (enBase < lignes.length) { console.error('ECHEC : moins de lignes en base que de reservations rattrapees'); process.exit(2) }
+  if (enBase < lignes.length - passees) { console.error('ECHEC : moins de lignes en base que de reservations rattrapees'); process.exit(2) }
   process.exit(0)
 })().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(1) })

@@ -14,7 +14,7 @@ const { createClient } = require('@supabase/supabase-js')
 
 const COLONNES = ['id', 'user_id', 'booking_id', 'property_id', 'property_uuid', 'montant_cents',
   'communale_cents', 'departementale_cents', 'regionale_cents', 'commune', 'collecteur', 'origine',
-  'inclus_dans_prix', 'adultes', 'nuits', 'source', 'updated_at']
+  'inclus_dans_prix', 'adultes', 'nuits', 'source', 'raw_hash', 'updated_at']
 
 ;(async () => {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)

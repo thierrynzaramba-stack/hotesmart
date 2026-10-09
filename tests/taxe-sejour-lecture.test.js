@@ -76,3 +76,22 @@ test('des entrees vides ne levent pas', () => {
   assert.equal(taxeSejourDe(null, null).origine, 'absent')
   assert.equal(taxeSejourDe({ provider: 'channex', source: 'AirBNB' }, { raw_message: '{pas du json' }).origine, 'absent')
 })
+
+test('revue de 049d3ed : un libelle Airbnb non reconnu n est PAS compte (meme regle que Booking), il est nomme', () => {
+  const p = JSON.parse(JSON.stringify(PIECES.HMN4XPP3PH))
+  const m = JSON.parse(p.raw.raw_message)
+  m.reservation.airbnb_collected_tax_details.push({ name: 'Taxe inconnue (Fr - X)', amount: '9.99', tax_type: 'airbnb_collected_tax' })
+  p.raw.raw_message = JSON.stringify(m)
+  const t = taxeSejourDe(p.snapshot, p.raw, 'channex')
+  assert.equal(t.montant_cents, 259)
+  assert.deepEqual(t.libelles_inconnus, ['Taxe inconnue (Fr - X)'])
+})
+
+test('revue de 049d3ed : Booking retenue ET reversee sur la meme reservation — collecteur inconnu, et dit', () => {
+  const p = JSON.parse(JSON.stringify(PIECES['6609687886']))
+  p.raw.rooms[0].taxes.push({ name: 'taxe de séjour (5%)', total_price: '3.00', is_inclusive: false })
+  const t = taxeSejourDe(p.snapshot, p.raw, 'channex')
+  assert.equal(t.collecteur, 'inconnu')
+  assert.equal(t.montant_cents, 530)
+  assert.match(t.libelles_inconnus.join(), /mixte/)
+})

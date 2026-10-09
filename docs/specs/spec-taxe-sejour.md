@@ -103,6 +103,16 @@ Règles du `collecteur` :
   (« absente, collectée par Airbnb », décision 2).
 - Direct / Offline : `hote`, montant `calcule` par le barème (§4), `absent` sans barème.
 
+**Précisions du lot 1 (revue de 049d3ed)** :
+- une réservation **annulée** passe à 0 € quand un montant était lu ; sans
+  montant lisible (Offline, Airbnb Beds24), elle reste `null` avec
+  `origine = absent` — « rien n'était connu » n'est pas « 0 € dû » ;
+- `raw_hash` : l'empreinte du payload lu ; une ligne dont l'empreinte diffère de
+  celle de `bookings_snapshot` est périmée (écriture de la taxe en échec), et le
+  rattrapage la réécrit ;
+- un libellé non reconnu (Airbnb comme Booking) n'est jamais compté, il est nommé
+  dans le rapport ; une taxe à la fois retenue et reversée donne `inconnu`.
+
 **Le lecteur** : une seule fonction pure, `taxeSejourDe(snapshot, raw, provider)`
 (`lib/taxe-sejour/lecture.js`), utilisée par le writer ET par `prixVoyageur()` —
 une seule règle pour dire « ceci est de la taxe de séjour ». Libellés reconnus :
@@ -222,6 +232,9 @@ il produit le rapport des écarts historiques, montré à l'hôte une fois.
 3. Barème : table versionnée, writer, journal, proposition déduite, écran de la
    fiche du bien, calcul des réservations directes.
 4. Contrôle de cohérence et alertes à l'hôte ; rapport des écarts historiques.
+   ⚠ Un même séjour peut exister sous deux `booking_id` (clé Beds24 et clé
+   Channex, La bulle et Cœur 23 après la bascule) : toute somme de taxes se
+   dédoublonne par `otaReservationCode` (revue de 049d3ed).
 Chaque lot : revue, staging, prod sur ton go. Le report mobile des écrans des
 lots 3 et 4 te sera proposé en fin de lot.
 

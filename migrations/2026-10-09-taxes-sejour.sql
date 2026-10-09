@@ -31,6 +31,9 @@ create table if not exists public.taxes_sejour (
   adultes integer,
   nuits integer,
   source text,
+  -- Empreinte du payload lu : differente de
+  -- celle de bookings_snapshot = ligne perimee.
+  raw_hash text,
   updated_at timestamptz not null
     default now(),
   constraint taxes_sejour_resa_uniq

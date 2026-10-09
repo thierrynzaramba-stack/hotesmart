@@ -80,3 +80,43 @@ test('ecrireLot (rattrapage) s arrete a la premiere erreur et le dit', async () 
   const r = await ecrireLot(sb, Array.from({ length: 5 }, (_, i) => ({ booking_id: String(i) })), { paquet: 2 })
   assert.deepEqual(r, { ecrites: 2, erreur: 'boom' })
 })
+
+// ─── Revue de 049d3ed ───────────────────────────────────────────────────────
+const { saveBookingSnapshots } = require('../lib/bookings-snapshot')
+
+test('revue de 049d3ed (M4) : le chemin « raw seul rafraichi » ecrit aussi la taxe ; budget epuise : ni raw ni taxe', async () => {
+  _viderCache()
+  const existant = { ...P.snapshot }
+  for (const [budget, attendu] of [[{ restant: 5 }, 1], [{ restant: 0 }, 0]]) {
+    const { sb, ecrit } = base()
+    sb.from = ((origine) => (table) => {
+      const b = origine(table)
+      b.update = () => ({ eq: () => ({ eq: async () => ({ error: null }) }) })
+      return b
+    })(sb.from.bind(sb))
+    const r = await saveBookingSnapshot(sb, { userId: 'U', bookingId: 'b1', propertyId: 'p', provider: 'channex',
+      snapshot: P.snapshot, booking: P.raw, existing: existant, existingPropertyId: 'p', existingRawHash: 'ancienne', budgetRaw: budget })
+    assert.equal(r.inchange, true)
+    assert.equal(ecrit.taxes.length, attendu, `budget ${budget.restant}`)
+    if (attendu) assert.ok(ecrit.taxes[0].raw_hash && ecrit.taxes[0].raw_hash !== 'ancienne', 'l empreinte du payload lu')
+  }
+})
+
+test('revue de 049d3ed (M1) : un LOT de reservations ecrit ses taxes en UN upsert, a la fin', async () => {
+  _viderCache()
+  const { sb, ecrit } = base()
+  const appels = []
+  const origine = sb.from.bind(sb)
+  sb.from = (table) => {
+    const b = origine(table)
+    const up = b.upsert
+    b.upsert = async (row) => { appels.push([table, Array.isArray(row) ? row.length : 1]); return up(row) }
+    b.in = () => ({ then: (ok) => ok({ data: [], error: null }) })
+    return b
+  }
+  const lot = ['b1', 'b2', 'b3'].map(id => ({ ...P.raw, id }))
+  const out = await saveBookingSnapshots(sb, { userId: 'U', propertyId: 'p', provider: 'channex', bookings: lot, budgetRaw: { restant: 60 } })
+  assert.equal(out.saved, 3)
+  assert.deepEqual(appels.filter(([t]) => t === 'taxes_sejour'), [['taxes_sejour', 3]])
+  assert.deepEqual(ecrit.taxes[0].map(l => l.booking_id), ['b1', 'b2', 'b3'])
+})
