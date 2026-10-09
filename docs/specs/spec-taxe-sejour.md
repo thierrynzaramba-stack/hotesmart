@@ -1,9 +1,22 @@
 # Spec — Taxe de séjour dans le cœur, prix vendu hors taxe
 
 Demande de Thierry du 9 octobre 2026. **Statut : à valider.** Aucun code avant
-validation. Décisions de Thierry (9 octobre) : stocker la taxe par réservation
-dans le cœur ; YieldFlow travaille sur le prix vendu hors taxe de séjour ; la TVA
-reste dans le prix ; barème par bien pour les réservations directes.
+validation.
+
+## 0. Principes (décisions de Thierry, 9 octobre 2026)
+1. La taxe de séjour de chaque réservation est stockée dans le cœur.
+2. **Les prix proposés et comparés par YieldFlow sont toujours hors taxe de
+   séjour**, nouveau bien compris. La TVA reste dans le prix.
+3. **Le barème est une donnée du cœur**, par bien, affichée et modifiable sur la
+   fiche du bien. Saisi par l'hôte, il **fait foi**. Vide, il est déduit des
+   premières réservations Airbnb et **proposé pré-rempli** : une valeur déduite
+   n'est enregistrée qu'après validation de l'hôte.
+4. Chaque barème porte une **date de début de validité** (les communes changent
+   leurs tarifs au 1er janvier).
+5. **Contrôle de cohérence à chaque réservation reçue** : la taxe transmise par
+   la plateforme est comparée au barème ; un écart ou une taxe absente alerte
+   l'hôte (canal, montant attendu, montant collecté). Il doit détecter les deux
+   cas réels : La bulle à 1,15 € sur Booking, Cœur de vie 23 sans taxe sur Booking.
 
 ## 1. Constat (étape 0, lecture seule sur la production)
 
@@ -107,60 +120,117 @@ d'abord (compte par bien, canal, collecteur, origine), puis `--go` sur ton accor
   `guest_view.taxes[]` reconnues par `taxeSejourDe` ; Beds24 : lignes
   `invoiceItems`). Les deux modes Booking (retenue, reversée) sont couverts par la
   même lecture : la taxe est dans `guest_view.total` dans les deux cas.
+- **Tout prix que YieldFlow propose ou compare est hors taxe de séjour** : prix
+  vendus (historique, N-1, grille, plancher, fourchette), et pour un **nouveau
+  bien** les références de marché. L'ADR d'AirROI est hors taxes d'après sa
+  documentation (KB `chantier-nouveau-bien.md`, règle 12) : le lot 2 l'inscrit
+  comme invariant et le vérifie sur une pièce, au lieu de le supposer.
 - La **TVA reste dans le prix**. Réglage « assujetti TVA » par compte, désactivé
   par défaut : **plus tard**, noté au registre des dettes.
 - Le prix reste calculé à la volée depuis le cœur : grille, comparable N-1,
   plancher et fourchette suivent sans autre changement. KB `prix-voyageur.md` et
   `eclatement-yield.md` mis à jour dans le même commit.
 
-## 4. Barème par bien (réservations directes)
+## 4. Le barème : une donnée du cœur, sur la fiche du bien
 
-Table `taxe_sejour_baremes`, une ligne par bien (`property_uuid`), writer unique
-`lib/taxe-sejour/bareme.js` :
+Table `taxe_sejour_baremes`, writer unique `lib/taxe-sejour/bareme.js`.
+**Une ligne par bien ET par date de début de validité** : on ne réécrit jamais un
+barème passé, on en ajoute un nouveau (« à partir du 1er janvier 2027 »).
 
 | Champ | |
 |---|---|
+| `property_uuid` | `properties.id` |
+| `valide_depuis` | date (une nuit prend le barème en vigueur CETTE nuit) |
+| `commune` | libellé (et code INSEE si connu) |
+| `classement` | `non_classe`, `1` à `5` étoiles, `palace` |
 | `mode` | `forfait` (tarif par adulte et par nuit) ou `proportionnel` (% + plafond) |
 | `tarif_cents` | forfait |
 | `taux_pct`, `plafond_cents` | proportionnel |
-| `departementale_pct` (défaut 10), `regionale_pct` | additionnelles |
-| `commune` | libellé |
-| `origine` | `observe_airbnb` / `hote` |
-| `updated_at` + journal des changements | |
+| `departementale_pct` (défaut 10), `regionale_pct` (défaut 0) | additionnelles |
+| `origine` | `saisi` (par l'hôte) / `deduit_valide` (proposé, puis validé par l'hôte) |
+| `valide_par`, `created_at` | qui a enregistré, quand |
 
-**Calcul** (par séjour, arrondi au centime par composante, comme Airbnb) :
-- forfait : `tarif × adultes × nuits`, puis + départementale + régionale ;
-- proportionnel : `min(taux × prix HT par personne et par nuit, plafond) ×
-  adultes × nuits`, puis les additionnelles. Le prix par personne divise par
-  **tous** les occupants ; seuls les **adultes** paient.
-- Mineurs exonérés. Les âges ne sont pas transmis : on se fie au nombre
+Journal des changements (qui, quand, avant, après), comme `grille_hote_journal`.
+
+**Écran** : la **fiche du bien** (`pages/biens.html`, là où vit déjà le prix
+plancher). Commune, classement, mode, tarif ou % + plafond, parts départementale
+et régionale, date de début de validité, et l'origine affichée (« saisi par
+vous » / « déduit des réservations Airbnb, validé le … »).
+
+**Proposition déduite** (barème vide) : calculée **à la volée**, jamais écrite :
+- la composante « Taxe de Sejour » des taxes Airbnb du bien ÷ (adultes × nuits) ;
+  les additionnelles en % de cette composante ; la commune du libellé Airbnb ;
+- ⚠ un tarif constant peut être un **forfait** ou un **plafond atteint**
+  (Toulouse : 4,60 € partout). On propose un forfait avec la mention « observé
+  sur N réservations Airbnb, à confirmer : si votre bien n'est pas classé, il
+  s'agit peut-être du plafond du tarif proportionnel » ;
+- l'hôte valide (la ligne est écrite, `origine = deduit_valide`), corrige
+  (`saisi`) ou ignore (rien n'est écrit, aucun calcul ni contrôle).
+
+**Calcul** (nuit par nuit avec le barème de la nuit ; arrondi au centime par
+composante et par séjour, comme Airbnb — vérifié : 2 adultes × 1 nuit à
+Bagnères = 1,80 + 0,18 + 0,61 = 2,59 €) :
+- forfait : `tarif × adultes`, puis + départementale + régionale ;
+- proportionnel : `min(taux × prix HT de la nuit ÷ occupants, plafond) ×
+  adultes`, puis les additionnelles. Le prix par personne divise par **tous** les
+  occupants ; seuls les **adultes** paient ;
+- mineurs exonérés ; les âges ne sont pas transmis : on se fie au nombre
   d'adultes déclaré.
 
-**Pré-remplissage** depuis les taxes Airbnb observées du bien : composante
-« Taxe de Sejour » ÷ (adultes × nuits), et le ratio des deux additionnelles.
-⚠ Un tarif constant peut être un **forfait** ou un **plafond atteint** (Toulouse :
-4,60 € partout) : on pré-remplit en forfait, avec la mention « observé sur N
-réservations Airbnb, à confirmer », et l'hôte corrige. Rien n'est appliqué sans
-qu'il ait confirmé le barème.
+Usages : le montant des réservations directes (Offline, `origine = calcule`) et
+le montant ATTENDU du contrôle (§4 bis).
 
-**Où** : réglage du bien dans `/settings` — la taxe de séjour a un sens sans
-YieldFlow (déclaration, moteur de réservation directe), test de CLAUDE.md.
+## 4 bis. Contrôle de cohérence à chaque réservation reçue
+
+Au moment où la couche sync écrit la ligne `taxes_sejour` d'une réservation
+**confirmée, neuve ou modifiée**, d'une plateforme (Airbnb, Booking), si le bien a
+un barème valide pour ses nuits :
+
+- **attendu** = calcul du §4 sur les adultes et les nuits de la réservation ;
+- **collecté** = montant transmis (§2) ;
+- **écart** si |collecté − attendu| > max(0,05 €, 1 % de l'attendu) — l'arrondi
+  par composante ne déclenche rien ;
+- **taxe absente** si collecté = 0 (ou `collecteur = personne`).
+
+Une anomalie **alerte l'hôte** (e-mail hôte existant, `lib/notif-hote-resa.js`
+pour le destinataire) : bien, canal, réservation, adultes × nuits, **montant
+attendu**, **montant collecté**, et la piste (« vérifiez la taxe de séjour dans
+votre extranet Booking »). Anti-répétition : une alerte par **bien × canal ×
+nature** (écart / absente), répétée au plus une fois par semaine tant que le
+défaut persiste ; chaque réservation concernée reste listée sur la fiche du bien
+(« 3 réservations Booking : taxe attendue 2,59 €, collectée 2,30 € »).
+
+Les deux cas réels, rejoués sur les pièces de l'étape 0 (tests du lot) :
+
+| Cas | Réservation | Attendu | Collecté | Résultat |
+|---|---|---|---|---|
+| La bulle, Booking | 6609687886, 2 adultes × 1 nuit | 2,59 € | 2,30 € (1,15 €/pers.) | **écart −0,29 €** |
+| Cœur 23, Booking | 6412380289, 6 adultes × 2 nuits | 15,55 € (= l'Airbnb HMC4CJSRHX, mêmes adultes et nuits) | 0 € | **taxe absente** |
+| La bulle, Airbnb | HMN4XPP3PH, 2 adultes × 1 nuit | 2,59 € | 2,59 € | conforme |
+
+Pas de barème validé : pas de contrôle (on ne compare pas à une proposition),
+mais la fiche du bien invite à le valider. Le rattrapage (§2) **n'alerte pas** :
+il produit le rapport des écarts historiques, montré à l'hôte une fois.
 
 ## 5. Lots
 
 1. Lecteur `taxeSejourDe` + table `taxes_sejour` + writer branché dans la couche
    sync (Channex et Beds24) + rattrapage à blanc puis `--go`.
-2. `prixVoyageur()` hors taxe + KB ; mesure avant/après des prix recommandés
-   (pilote à blanc sur staging et production en lecture).
-3. Barème par bien : table, writer, pré-remplissage, écran `/settings`, calcul
-   des réservations directes (Offline), puis rattrapage de leurs lignes.
-Chaque lot : revue, staging, prod sur ton go. Le report mobile de l'écran du
-lot 3 te sera proposé en fin de lot.
+2. `prixVoyageur()` hors taxe + invariant « prix YieldFlow hors taxe de séjour »
+   (nouveau bien compris) + KB ; mesure avant/après des prix recommandés (pilote
+   à blanc sur staging et production en lecture).
+3. Barème : table versionnée, writer, journal, proposition déduite, écran de la
+   fiche du bien, calcul des réservations directes.
+4. Contrôle de cohérence et alertes à l'hôte ; rapport des écarts historiques.
+Chaque lot : revue, staging, prod sur ton go. Le report mobile des écrans des
+lots 3 et 4 te sera proposé en fin de lot.
 
 ## 6. À trancher par Thierry
 1. Table à part `taxes_sejour` plutôt qu'un champ du snapshot (recommandé, §2).
 2. Historique Airbnb Beds24 (914 réservations sans donnée de taxe) : rester
-   `absent`, ou le calculer avec le barème du lot 3 (`calcule`) ?
+   `absent` (proposé : Airbnb l'a collectée, rien à contrôler), ou le calculer
+   avec le barème ?
 3. Colomiers : les 15 € de « frais de service » Booking restent dans le prix
    vendu (proposé), ou sont retirés comme la taxe ?
-4. Écran du barème dans `/settings` (proposé) plutôt que dans YieldFlow.
+4. Seuil du contrôle : max(0,05 €, 1 %), et rappel hebdomadaire tant que le
+   défaut persiste (proposés).
