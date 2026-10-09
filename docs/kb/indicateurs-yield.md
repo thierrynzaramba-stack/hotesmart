@@ -156,11 +156,18 @@ Validée par Thierry contre ses fichiers, le 12 septembre 2026. Février à 100 
 confirmé par la réalité terrain.
 
 ```
-CA 2025        40 109,25 €
+CA 2025        40 000,00 €   hors taxe de séjour (40 109,25 € avant le 9 octobre 2026)
 nuitées               315   dont 306 à prix connu
 TO              66,7 % → 100 %  (estimé)
-prix moyen     112,57 € → 157,85 €
+prix moyen     112,32 € → 157,39 €   (112,57 € → 157,85 € avant)
 délai médian      2,5 j → 30,5 j
 ```
 
 Ce sont les chiffres à retrouver après toute modification des lots 3.1 ou 3.2.
+
+**Hors taxe de séjour depuis le 9 octobre 2026** (décision de Thierry,
+option A, taxe de séjour lot 2) : le CA et le prix moyen sont lus sur le prix
+vendu HORS taxe de séjour, comme la grille (`eclatement-yield.md` §2 bis). Les
+109,25 € d'écart sont la taxe des réservations Booking de 2025, qui la
+portaient dans leur prix ; nuitées, TO et délais ne bougent pas. Les chiffres
+validés le 12 septembre restent ceux de l'ancienne lecture, taxe comprise.
