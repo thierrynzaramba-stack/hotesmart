@@ -74,9 +74,38 @@ test('Airbnb avec une taxe REVERSEE a l hote (jamais vue) : refus, on ne suppose
   assert.match(r.raison, /reversee par Airbnb/)
 })
 
-test('Offline et Beds24 Airbnb : rien a retirer', () => {
-  assert.equal(pv(copie('offline')).taxe_sejour, 0)
-  assert.equal(pv(copie('beds24_airbnb')).taxe_sejour, 0)
+test('Offline et Beds24 Airbnb : rien a retirer, le prix est intact', () => {
+  for (const cle of ['offline', 'beds24_airbnb']) {
+    const p = copie(cle)
+    const r = pv(p)
+    assert.equal(r.taxe_sejour, 0)
+    assert.equal(r.valeur, cle === 'offline' ? Number(p.raw.amount) : Number(p.raw.price))
+  }
+})
+
+test('revue de 6f9d620 : Booking mixte (retenue ET reversee) — refus, jamais un double retrait', () => {
+  const p = copie('6609687886')
+  p.raw.rooms[0].taxes.push({ name: 'taxe de séjour (7.2%)', total_price: '2.30' })
+  const r = pv(p)
+  assert.equal(r.valeur, null)
+  assert.equal(r.taxe_sejour, null)
+  assert.match(r.raison, /retenue et reversee/)
+})
+
+test('revue de 6f9d620 : la taxe declaree dans guest_view ne concorde pas avec celle lue — refus', () => {
+  const p = copie('6609687886')
+  p.raw.rooms[0].meta.price_details.guest_view.taxes.find(t => /CITY_TAX/.test(t.tax_description)).amount = '250'
+  const r = pv(p)
+  assert.equal(r.valeur, null)
+  assert.match(r.raison, /250 c dans guest_view, 230 c lus/)
+})
+
+test('revue de 6f9d620 : deux chambres, une taxe sur chacune — les deux sortent, une seule fois', () => {
+  const p = copie('6609687886')
+  p.raw.rooms.push(JSON.parse(JSON.stringify(p.raw.rooms[0])))
+  const r = pv(p)
+  assert.equal(r.valeur, 288)
+  assert.equal(r.taxe_sejour, 4.6)
 })
 
 test('une ANNULEE garde sa taxe dans le payload : le prix lu en sort quand meme (la taxe due, 0, est celle du coeur, pas celle-ci)', () => {

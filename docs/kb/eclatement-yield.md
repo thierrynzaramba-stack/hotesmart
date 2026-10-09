@@ -47,6 +47,10 @@ transmis (tableau ci-dessus), puis en retire la taxe que `taxeSejourDe`
 | Channex / Airbnb | **non** : `amount` + Host Fee = `base_price` (115 € sur HMN4XPP3PH), la taxe (2,59 €) est collectée en plus |
 | Beds24 / Airbnb, Offline | rien de transmis |
 
+- **Booking : l'inclusion se vérifie à chaque réservation** (revue de 6f9d620) :
+  la taxe déclarée dans `guest_view.taxes[]` doit égaler celle lue par
+  `taxeSejourDe` ; un écart, ou une taxe à la fois retenue et reversée :
+  **refus** (`taxe_sejour: null`), jamais un double retrait.
 - Une taxe **reversée** par Airbnb (`pass_through_tax_amount`, jamais vue) :
   **refus** — on ne sait pas si elle est dans `amount`.
 - Une taxe ≥ au prix : **refus**, jamais un prix nul.

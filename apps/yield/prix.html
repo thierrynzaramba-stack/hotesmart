@@ -1506,7 +1506,7 @@
       `${x.nuits} nuit${x.nuits > 1 ? 's' : ''}`,
       `${frDate(x.arrivee)} → ${frDate(x.depart)}`,
       x.canal ? `canal ${x.canal}` : null,
-      x.prix_total != null ? `séjour ${euros(x.prix_total)}` : null,
+      x.prix_total != null ? `séjour ${euros(x.prix_total)} hors taxe de séjour` : null,
       !x.confirme ? `réservation non confirmée (${x.statut || '?'})` : null,
       n1 && x.vendu_a_ce_delai === true ? 'déjà vendu à ce délai l’an dernier' : null,
       n1 && x.vendu_a_ce_delai === false ? 'vendu plus tard que le délai actuel' : null,

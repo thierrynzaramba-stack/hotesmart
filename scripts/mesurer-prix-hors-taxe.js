@@ -96,7 +96,7 @@ function rapport (titre, { comparees, changes }) {
   console.log(`biens = ${biens.length} (5 = production, 3 = staging)\n`)
   const auj = jourParis()
   const finEcran = decaler(auj, jours - 1)
-  let total = 0, totalChanges = 0, echec = false
+  let total = 0, totalChanges = 0, totalPilote = 0, changesPilote = 0, taxeRetiree = 0, echec = false
   for (const bien of biens) {
     const fenetre = bien.pilote_tarifaire === 'yieldflow' ? finDeFenetre(bien, auj) : null
     const fin = [finEcran, fenetre || finEcran].sort()[1]
@@ -105,12 +105,13 @@ function rapport (titre, { comparees, changes }) {
     try {
       cAv = await AVANT.preparerContexte(sb, bien, bien.user_id, { aujourdHui: auj, debut: auj, fin })
       cAp = await APRES.preparerContexte(sb, bien, bien.user_id, { aujourdHui: auj, debut: auj, fin })
-    } catch (e) { console.log(`  matiere illisible — ${e.message}\n`); continue }
+    } catch (e) { console.error(`  ECHEC : matiere illisible — ${e.message}\n`); echec = true; continue }
     const gr = (c) => (c.grille && c.grille.base && c.grille.base.niveaux ? c.grille.base.niveaux.map(n => n.prix) : null)
     console.log(`  grille avant ${JSON.stringify(gr(cAv))} · apres ${JSON.stringify(gr(cAp))}`)
     // ⚠ LA MATIERE D'ABORD (un verificateur qui n'a rien lu doit le dire) : 0
     // prix change ne prouve rien si aucune taxe n'a ete retiree de l'historique.
     const avecTaxe = (cAp.eclatements || []).filter(e => e.taxe_sejour_retiree > 0)
+    taxeRetiree += avecTaxe.reduce((a, e) => a + e.taxe_sejour_retiree, 0)
     const somme = (c) => (c.eclatements || []).reduce((a, e) => a + (e.prix_total || 0), 0)
     console.log(`  matiere : ${(cAp.eclatements || []).length} reservations lues · ${avecTaxe.length} avec taxe retiree (${avecTaxe.reduce((a, e) => a + e.taxe_sejour_retiree, 0).toFixed(2)} €) · CA lu avant ${somme(cAv).toFixed(2)} € → apres ${somme(cAp).toFixed(2)} €`)
     const brut = (c) => (c.grille && c.grille.base && c.grille.base.niveaux ? c.grille.base.niveaux.map(n => (n.prix_mesure != null ? Number(n.prix_mesure) : null)) : null)
@@ -143,11 +144,15 @@ function rapport (titre, { comparees, changes }) {
           }
           return p
         } })
-      rapport(`PILOTE (nuits ouvertes a tarifer, ${auj} → ${fenetre})`, comparer(tarifees, avP, apP))
+      const pil = comparer(tarifees, avP, apP)
+      rapport(`PILOTE (nuits ouvertes a tarifer, ${auj} → ${fenetre})`, pil)
+      totalPilote += pil.comparees; changesPilote += pil.changes.length
     }
     console.log('')
   }
   if (echec) { console.error('Mesure INCOMPLETE : au moins une lecture a echoue.'); process.exit(1) }
   if (!total) { console.error('ECHEC : aucune nuit comparee — rien n a ete mesure.'); process.exit(1) }
-  console.log(`TOTAL ecran : ${totalChanges} nuit(s) changent sur ${total}.`)
+  // « 0 changement » ne prouve rien si le nouveau code n'a rien retire.
+  if (!(taxeRetiree > 0)) { console.error('ECHEC : aucune taxe retiree de l historique — la mesure n a pas exerce le changement.'); process.exit(1) }
+  console.log(`TOTAL : taxe retiree de l historique ${taxeRetiree.toFixed(2)} € · ecran ${totalChanges} nuit(s) changent sur ${total} · pilote ${changesPilote} sur ${totalPilote}.`)
 })().catch(e => { console.error('ECHEC :', e.message); process.exit(1) })
