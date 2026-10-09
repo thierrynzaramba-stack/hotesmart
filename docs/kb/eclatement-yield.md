@@ -62,13 +62,24 @@ transmis (tableau ci-dessus), puis en retire la taxe que `taxeSejourDe`
   lecture) : 75 réservations, 228,54 € retirés de l'historique ; quantiles de
   La bulle déplacés de 0,35 à 1,20 € ; **0 prix recommandé changé** sur
   1 825 nuits (5 biens × 365 jours) ni sur les 499 nuits que le pilote tarife —
-  l'arrondi de la grille au pas absorbe l'écart. ⚠ Le Très haut de La bulle
+  l'arrondi de la grille au pas absorbe l'écart. ⚠ L'Exceptionnel de La bulle
   mesure 163,80 € (165 avant) : une prochaine vente peut faire basculer un
-  niveau ; la mesure se rejoue.
+  niveau ; la mesure se rejoue. **Alarme `pilote_grille_changee`** (demande de
+  Thierry) : un niveau calculé qui change de prix d'un passage du pilote au
+  suivant prévient le fondateur, niveaux et prix dans le message
+  (`lib/pilote-quotidien.js`). Elle prévient, elle ne bloque rien ; un niveau
+  fixé par l'hôte n'alarme pas.
 - **Nouveau bien** : ses références viennent d'AirROI, dont l'ADR est hors
   taxes d'après sa documentation (`chantier-nouveau-bien.md`, règle 12).
-  Invariant inscrit ; sa vérification sur une pièce (calendrier AirROI d'une
-  annonce du cœur comparé à nos prix poussés) demande un appel payant, sur go.
+  **Vérifié le 9 octobre 2026** (un appel, 0,10 $, sur go de Thierry) :
+  calendrier AirROI de l'annonce Airbnb de La bulle (`GET
+  /listings/live/calendar`, 357 nuits) contre nos prix poussés
+  (`calendar_inventory`, prod) — sur 259 nuits à vendre des deux côtés, 160 à
+  moins de 0,50 € (114,70 pour 115, 144,90 pour 145 : rapport 0,997 à 1,002).
+  La taxe (≈ 2 %) n'y est sur aucune. 99 nuits de janvier à juillet 2027
+  s'écartent de 10 à 55 €, dans les deux sens, sans décalage d'un jour : pas
+  la taxe, cause non trouvée (le prix affiché par Airbnb n'est peut-être pas
+  celui que nous poussons) — à examiner à part.
 
 ## 3. Répartition UNIFORME — décision de Thierry, 12 septembre 2026
 

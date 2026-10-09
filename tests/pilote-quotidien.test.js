@@ -196,3 +196,66 @@ test('LE TEST QUI COMPTE (dette 25) : capacite non calculable — AUCUN prix dem
   const prix = m ? m.errors[0].prix : (b.erreurs && b.erreurs[0])
   assert.ok(JSON.stringify(b).includes('ouverture_inconnue') || (prix && prix.refus === 'ouverture_inconnue'), 'le bilan dit pourquoi : ouverture inconnue')
 })
+
+// ─── L'ALARME « GRILLE CHANGEE » (taxe de sejour lot 2, demande de Thierry du
+// 9 octobre 2026) : un niveau CALCULE qui change de prix d'un passage a
+// l'autre previent le fondateur, avec les niveaux ; rien ne bloque.
+const NIVEAUX = ['Base', 'Moyen', 'Haut', 'Très haut', 'Exceptionnel']
+const grilleDe = (prix, fixes = []) => ({ base: { niveaux: prix.map((p, i) => ({ nom: NIVEAUX[i], prix: p, ...(fixes.includes(NIVEAUX[i]) ? { fixe_par_hote: true } : {}) })) } })
+const preparerAvecGrille = (grille) => async () => ({ ...(await preparerFactice()()), grille })
+const passageOk = (prix, fixes) => ({ ouverture: { ok: true, ouvertes: 0, comptes: {} }, prix: { ok: true, comptes: { calculees: 8, non_calculables: 0, sous_plancher: 0 } },
+  grille: prix.map((p, i) => ({ nom: NIVEAUX[i], prix: p, fixe: (fixes || []).includes(NIVEAUX[i]) })) })
+
+test('LE TEST QUI COMPTE : grille changee — Exceptionnel 165 → 160 alarme UNE fois (le niveau au bord de l arrondi de La bulle), avec les niveaux dans le message', async () => {
+  const alarmes = []
+  const alerter = async (type, o) => { alarmes.push([type, o.detail]) }
+  const avant = passageOk([115, 125, 145, 155, 165]).grille
+  const r = await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, 160]), { alerter }, { etats: [], grille: avant })
+  assert.deepEqual(alarmes.map(a => a[0]), ['pilote_grille_changee'])
+  assert.match(alarmes[0][1].message, /Exceptionnel 165 € → 160 €/)
+  assert.deepEqual(alarmes[0][1].niveaux, [{ niveau: 'Exceptionnel', avant: 165, apres: 160 }])
+  assert.deepEqual(r.grille.map(n => n.prix), [115, 125, 145, 155, 160], 'la reference avance')
+  // Le lendemain, meme grille : rien.
+  const r2 = await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, 160]), { alerter }, { etats: [], grille: r.grille })
+  assert.equal(alarmes.length, 1); assert.deepEqual(r2.envoyees, [])
+})
+
+test('grille changee : premier passage (rien de note) → on note, on n alarme pas ; niveau fixe par l hote → pas d alarme', async () => {
+  const alarmes = []
+  const alerter = async (t) => alarmes.push(t)
+  const r = await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, 165]), { alerter }, { etats: [] })
+  assert.deepEqual(alarmes, []); assert.equal(r.grille.length, 5)
+  const r0 = await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, 165]), { alerter }, null)
+  assert.deepEqual(alarmes, []); assert.equal(r0.grille.length, 5)
+  // L'hote fixe le Moyen a 130 : son geste, pas celui du pilote.
+  await alarmerSurLePassage(bien(), passageOk([115, 130, 145, 155, 165], ['Moyen']), { alerter }, { etats: [], grille: r.grille })
+  assert.deepEqual(alarmes, [])
+  // Un niveau qui devient non calculable est un changement.
+  await alarmerSurLePassage(bien(), passageOk([115, 125, 145, 155, null]), { alerter }, { etats: [], grille: r.grille })
+  assert.deepEqual(alarmes, ['pilote_grille_changee'])
+})
+
+test('grille changee : un passage dont les prix n ont pas ete entretenus n alarme pas, et garde la reference precedente', async () => {
+  const alarmes = []
+  const avant = passageOk([115, 125, 145, 155, 165]).grille
+  const refuse = { ...passageOk([115, 125, 145, 155, 160]), prix: { ok: false, refus: 'poussee_refusee', message: 'x' } }
+  const r = await alarmerSurLePassage(bien(), refuse, { alerter: async (t) => alarmes.push(t) }, { etats: [], grille: avant })
+  assert.deepEqual(alarmes, ['pilote_poussee_refusee'], 'seule la poussee refusee alarme')
+  assert.deepEqual(r.grille.map(n => n.prix), [115, 125, 145, 155, 165], 'la reference ne bouge pas : le changement alarmera au passage reussi')
+})
+
+test('LE TEST QUI COMPTE : grille changee de bout en bout — le marqueur porte la grille, le lendemain le changement alarme', async () => {
+  const sb = fausseBase({ biens: [bien()] })
+  const canal = canalQuiEcrit(sb)
+  const alarmes = []
+  const deps = (jour, grille) => ({ aujourdHui: jour, maintenant: () => Date.parse(`${jour}T10:00:00Z`), demander: canal, preparer: preparerAvecGrille(grille),
+    prix: regleDe({}), alerter: async (t, o) => alarmes.push([t, o.detail && o.detail.message]), sonderRetards: false })
+  await piloterLesBiens(sb, deps(AUJ, grilleDe([115, 125, 145, 155, 165])))
+  assert.deepEqual(sb.marqueurs[PREFIXE_MARQUEUR + ID].errors[0].grille.map(n => n.prix), [115, 125, 145, 155, 165], 'la grille voyage avec le marqueur')
+  assert.deepEqual(alarmes, [], 'premier passage : on note')
+  await piloterLesBiens(sb, deps('2026-10-02', grilleDe([115, 125, 145, 155, 160])))
+  assert.deepEqual(alarmes.map(a => a[0]), ['pilote_grille_changee'])
+  assert.match(alarmes[0][1], /Exceptionnel 165 € → 160 €/)
+  await piloterLesBiens(sb, deps('2026-10-03', grilleDe([115, 125, 145, 155, 160])))
+  assert.equal(alarmes.length, 1, 'meme grille le surlendemain : rien')
+})
