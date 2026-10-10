@@ -94,5 +94,11 @@
   "properties.connect": "Relier Airbnb ou Booking.com",
   "properties.no_channel": "Aucun canal relié",
 
+  "photo.add": "Ajouter une photo",
+  "photo.replace": "Remplacer",
+  "photo.sending": "Envoi de la photo…",
+  "photo.bad_type": "Choisissez une image (elle sera convertie en JPEG)",
+  "photo.too_big": "Image trop lourde, même compressée (2 Mo max)",
+  "photo.failed": "Échec de l’envoi, réessayez",
   "common.loading": "Chargement…"
 }

@@ -5,7 +5,40 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HôteSmart — Mes biens</title>
   <link rel="stylesheet" href="/public/style.css">
+  <!-- Jetons V5 pour la zone photo (variables seulement, aucun style d'element). -->
+  <link rel="stylesheet" href="/shared/theme.css">
   <style>
+    /* ── Photo de couverture (lot photos, charte V5 : var(--…) seulement) ── */
+    .photo-bien {
+      position: relative; aspect-ratio: 4 / 3; overflow: hidden;
+      border-radius: var(--radius-card); background: var(--surface-2);
+      margin-bottom: 10px; cursor: pointer;
+    }
+    .photo-bien img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .photo-bien--vide {
+      border: 1px dashed var(--border);
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 8px; color: var(--muted);
+      font-size: var(--fs-caption); font-weight: var(--fw-semibold);
+    }
+    .photo-bien--survol { outline: 2px solid var(--amber); outline-offset: -2px; }
+    .photo-bien .icon {
+      width: var(--icon-size-lg); height: var(--icon-size-lg);
+      stroke: currentColor; fill: none;
+      stroke-width: var(--icon-stroke); stroke-linecap: round; stroke-linejoin: round;
+    }
+    .photo-bien__remplacer {
+      position: absolute; top: 10px; inset-inline-end: 10px;
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border: 0; border-radius: var(--radius-pill);
+      background: var(--surface); color: var(--ink);
+      font-size: var(--fs-caption); font-weight: var(--fw-semibold); cursor: pointer;
+    }
+    .photo-bien__etat {
+      position: absolute; inset-inline: 0; bottom: 0; padding: 8px 12px;
+      background: var(--surface); color: var(--muted); font-size: var(--fs-caption);
+    }
+
     .biens-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -250,6 +283,7 @@
   </div>
 </div>
 
+<script src="/shared/i18n/i18n.js"></script>
 <script type="module">
   import { requireAuth } from '/components/auth-guard.js'
   import { renderSidebar } from '/components/sidebar.js'
@@ -258,12 +292,17 @@
   import { logger } from '/shared/logger.js'
   import { bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
   import { openConnexions } from '/components/connexions.js'
+  import { supabase } from '/shared/supabase.js'
+  import { peutEcrire, enteteCompte } from '/shared/compte-courant.js'
   import {
     loadAllProperties, provenanceBadge, hydrateChannelBadges, escapeHtml
   } from '/shared/properties.js'
 
   initErrorHandler()
   const session = await requireAuth()
+  // Les libelles de la zone photo (fr/en/es). Un echec ne bloque pas la page :
+  // T() retombe sur le francais embarque.
+  try { await I18n.init() } catch { /* libelles de repli */ }
   if (!session) throw new Error('Non authentifié')
   await renderSidebar('biens')
 
@@ -384,6 +423,7 @@
     if (p._source === 'beds24') {
       // Bien connecté Beds24 : calendrier et tarifs gérés dans Beds24.
       card.innerHTML = `
+        ${photoZoneHtml(p)}
         <div>
           <h3>${escapeHtml(p.name)}</h3>
           <span class="badge">${escapeHtml(provenanceBadge(p))}</span>
@@ -399,6 +439,7 @@
         </div>
       `
       bindKillSwitch(card, p)
+      bindPhotoZone(card, p)
       return card
     }
 
@@ -417,6 +458,7 @@
       || !!p.migration_target_property_id
 
     card.innerHTML = `
+      ${photoZoneHtml(p)}
       <div>
         <h3>${escapeHtml(p.name)}</h3>
         <span class="badge">${escapeHtml(provenanceBadge(p))}</span>
@@ -457,7 +499,121 @@
     if (rateModeBtn) rateModeBtn.addEventListener('click', () => openRateMode(p))
     const connectBtn = card.querySelector('[data-connect]')
     if (connectBtn) connectBtn.addEventListener('click', (e) => openConnexions(p, e.currentTarget))
+    bindPhotoZone(card, p)
     return card
+  }
+
+  // ─── Photo de couverture (lot photos, 10 octobre 2026) ────────────────────
+  // Regles : charte V5 (var(--…), sprite, i18n), redimensionnement NAVIGATEUR
+  // a 2000 px max en JPEG, 2 Mo max apres compression, « Remplacer » explicite.
+  // L'ecriture est gardee serveur (api/property-photo.js, reglages en ecriture)
+  // et le declencheur est RETIRE sans ce droit (regle des pages delegables).
+  const T = (cle, defaut) => (window.I18n && I18n.t(cle)) !== cle && window.I18n ? I18n.t(cle) : defaut
+  const ic = id => `<svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
+  const peutChangerPhoto = () => { try { return peutEcrire('reglages') } catch { return false } }
+
+  function photoZoneHtml (p) {
+    // Un bien Beds24 « live » n'a pas d'UUID : pas de zone photo (le POST exige
+    // le bien du coeur). Les biens materialises et Channex en ont un.
+    if (!/^[0-9a-f-]{36}$/.test(String(p.id))) return ''
+    const editable = peutChangerPhoto()
+    if (p.photo_url) {
+      return `<div class="photo-bien" data-photo="${escapeHtml(p.id)}" ${editable ? 'role="button" tabindex="0"' : ''}>
+        <img src="${escapeHtml(p.photo_url)}" alt="">
+        ${editable ? `<button type="button" class="photo-bien__remplacer" data-photo-remplacer>${ic('i-photo')}${escapeHtml(T('photo.replace', 'Remplacer'))}</button>` : ''}
+      </div>`
+    }
+    if (!editable) return ''
+    return `<div class="photo-bien photo-bien--vide" data-photo="${escapeHtml(p.id)}" role="button" tabindex="0">
+      ${ic('i-photo')}<span>${escapeHtml(T('photo.add', 'Ajouter une photo'))}</span>
+    </div>`
+  }
+
+  // JPEG <= 2000 px et <= 2 Mo, fabrique dans le navigateur.
+  async function preparerJpeg (fichier) {
+    if (!/^image\//.test(fichier.type)) throw new Error(T('photo.bad_type', 'Choisissez une image'))
+    const img = await new Promise((ok, ko) => {
+      const u = URL.createObjectURL(fichier)
+      const i = new Image()
+      i.onload = () => { URL.revokeObjectURL(u); ok(i) }
+      i.onerror = () => { URL.revokeObjectURL(u); ko(new Error(T('photo.bad_type', 'Choisissez une image'))) }
+      i.src = u
+    })
+    const ratio = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight))
+    const c = document.createElement('canvas')
+    c.width = Math.round(img.naturalWidth * ratio)
+    c.height = Math.round(img.naturalHeight * ratio)
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+    for (const qualite of [0.85, 0.7, 0.55]) {
+      const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', qualite))
+      if (blob && blob.size <= 2 * 1024 * 1024) return blob
+    }
+    throw new Error(T('photo.too_big', 'Image trop lourde (2 Mo max)'))
+  }
+
+  function bindPhotoZone (card, p) {
+    const zone = card.querySelector('[data-photo]')
+    if (!zone || !peutChangerPhoto()) return
+    const choisir = () => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = 'image/*'
+      input.addEventListener('change', () => { if (input.files[0]) envoyerPhoto(zone, p, input.files[0]) })
+      input.click()
+    }
+    zone.addEventListener('click', (e) => { e.preventDefault(); choisir() })
+    zone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choisir() } })
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('photo-bien--survol') })
+    zone.addEventListener('dragleave', () => zone.classList.remove('photo-bien--survol'))
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault()
+      zone.classList.remove('photo-bien--survol')
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]
+      if (f) envoyerPhoto(zone, p, f)
+    })
+  }
+
+  async function envoyerPhoto (zone, p, fichier) {
+    let etat = zone.querySelector('.photo-bien__etat')
+    if (!etat) { etat = document.createElement('span'); etat.className = 'photo-bien__etat'; zone.appendChild(etat) }
+    try {
+      const blob = await preparerJpeg(fichier)
+      // Apercu immediat, remplace par l'URL definitive au retour du serveur.
+      const apercu = URL.createObjectURL(blob)
+      let img = zone.querySelector('img')
+      if (!img) {
+        zone.classList.remove('photo-bien--vide')
+        zone.innerHTML = '<img alt="">'
+        img = zone.querySelector('img')
+      }
+      img.src = apercu
+      etat.textContent = T('photo.sending', 'Envoi…')
+      const base64 = await new Promise((ok, ko) => {
+        const r = new FileReader()
+        r.onload = () => ok(String(r.result).split(',')[1])
+        r.onerror = () => ko(new Error('lecture impossible'))
+        r.readAsDataURL(blob)
+      })
+      const { data: { session } } = await supabase.auth.getSession()
+      const rep = await fetch('/api/property-photo', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json', ...enteteCompte() },
+        body: JSON.stringify({ property_id: p.id, data: base64 })
+      })
+      const corps = await rep.json().catch(() => ({}))
+      if (!rep.ok) throw new Error(corps.error || T('photo.failed', 'Échec de l’envoi'))
+      p.photo_url = corps.photo_url
+      img.src = corps.photo_url
+      URL.revokeObjectURL(apercu)
+      etat.remove()
+      if (!zone.querySelector('[data-photo-remplacer]')) {
+        zone.insertAdjacentHTML('beforeend',
+          `<button type="button" class="photo-bien__remplacer" data-photo-remplacer>${ic('i-photo')}${escapeHtml(T('photo.replace', 'Remplacer'))}</button>`)
+      }
+    } catch (err) {
+      logger.error('Biens', 'photo', err)
+      etat.textContent = err.message || T('photo.failed', 'Échec de l’envoi')
+    }
   }
 
   async function loadProperties() {

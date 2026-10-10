@@ -528,8 +528,13 @@ function renderBiens () {
       ? `<span class="property__rating">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(R.noteSur5(note.moyenne), { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>` : ''
     const puce = etat.menagesOk
       ? `<span class="chip">${esc(t(e.occupeCeSoir ? 'properties.occupied' : 'properties.free'))}</span>` : ''
+    // La photo de couverture (properties.photo_url, lot photos) ; sans elle,
+    // le fond neutre reste.
+    const photo = b.photo_url
+      ? `<span class="property__photo"><img src="${esc(b.photo_url)}" alt="" loading="lazy">${puce}</span>`
+      : `<span class="property__photo property__photo--none">${icone('i-home')}${puce}</span>`
     return `<a class="property" href="${esc(href)}">
-      <span class="property__photo property__photo--none">${icone('i-home')}${puce}</span>
+      ${photo}
       <span class="property__name"><span>${esc(b.name)}</span>${etoile}</span>
       <span class="small muted">${esc(lieu)}</span>
       ${ca}
@@ -593,7 +598,7 @@ async function init () {
   // profil). Pas /api/channel-property, qui interroge Beds24 en direct.
   if (peutLire('reservations') || peutLire('menages')) {
     const { data, error } = await supabase.from('properties')
-      .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency')
+      .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency, photo_url')
       .eq('user_id', compteCourant())
       .order('name', { ascending: true })
     if (error) logger.error('Aujourdhui', 'biens', error)

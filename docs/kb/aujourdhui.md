@@ -47,7 +47,14 @@ Principe 3 de la spec : un chiffre qu'on ne compte pas proprement ne s'affiche p
 - **Canaux reliés par bien** : `ota_connect_status` n'est jamais rafraîchi, et la liste des canaux n'existe
   que chez Channex. Dette 59. La carte « Relier Airbnb ou Booking.com » ne s'affiche que pour un bien sans
   clé provider, un fait de la base. **La dette 59 est un prérequis du lot Logements.**
-- **Photos** : aucune colonne en base. Le cadre garde l'icône du logement.
+- ~~Photos~~ **Photo de couverture livrée (lot photos, 10 octobre 2026)** : `properties.photo_url`,
+  bucket Storage `property-photos` (public en lecture, JPEG 2 Mo, nom de fichier ALÉATOIRE — jamais l'id du
+  bien). Seul writer : `api/property-photo.js` (garde `reglages` en écriture sur le bien ; « Remplacer »
+  n'efface l'ancien fichier qu'APRÈS l'écriture réussie du nouveau, et seulement s'il vit dans notre bucket —
+  règles pures dans `lib/photo-bien.js`). Dépôt par la carte du bien dans `/biens` (clic ou glisser-déposer,
+  redimensionnement navigateur 2000 px max, aperçu). Sans photo, le fond neutre reste. **Import automatique
+  depuis un provider : REPORTÉ** (dette 65) — mesure du 10 octobre : 0 photo chez le partenaire pour les
+  4 biens, plus aucun bien Beds24.
 - **Tuile « codes d'accès créés »** : l'INSERT du cron serrures ne pose pas `user_id`
   (bloquant pré-lancement (d) ; 122 lignes sur 145 le 10 octobre 2026, dont les 5 des 7 derniers jours).
   La RLS rend donc 0 — un faux zéro qui contredisait la ligne d'arrivée « code créé, pas encore envoyé »
