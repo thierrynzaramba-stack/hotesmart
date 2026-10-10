@@ -1,0 +1,91 @@
+/* ============================================================
+   HôteSmart — theme.css
+   LE SEUL FICHIER où un hexa, une police ou un rayon a le droit
+   d'exister. Tout le reste utilise var(--…).
+   Changer la charte = modifier ce fichier, rien d'autre.
+   ============================================================ */
+
+:root {
+  /* Couleurs */
+  --ink: #222222;          /* texte, boutons principaux, icônes */
+  --muted: #717171;        /* texte secondaire */
+  --line: #EBEBEB;         /* séparateurs */
+  --border: #DDDDDD;       /* bordures cartes et boutons secondaires */
+  --surface: #FFFFFF;      /* fond de page */
+  --surface-2: #F7F7F7;    /* fond des pastilles d'icône */
+  --on-ink: #FFFFFF;       /* texte sur fond --ink */
+
+  --brand-night: #0E1726;  /* logo, avatar */
+  --amber: #F5A524;        /* UN seul moment par écran : ce qu'HôteSmart a fait / attend */
+  --amber-soft: #FFF4E0;   /* fond de l'icône d'une action en attente */
+  --amber-text: #B87500;   /* texte ambre lisible sur blanc */
+
+  /* Statuts (jamais la couleur seule : toujours icône ou texte avec) */
+  --ok: #0F7A4F;
+  --ok-soft: #E8F5EE;
+  --warn: #9A5B00;
+  --warn-soft: #FFF4E0;
+  --danger: #B42318;
+  --danger-soft: #FEF0EE;
+
+  /* Typographie */
+  --font: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --fs-h1: 32px;
+  --fs-h2: 22px;
+  --fs-kpi: 28px;
+  --fs-body: 15px;
+  --fs-small: 14px;
+  --fs-caption: 13px;
+  --fs-nav-mobile: 10px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-black: 800;
+  --tracking-tight: -0.03em;
+
+  /* Formes */
+  --radius-pill: 99px;     /* boutons, badges, onglets */
+  --radius-card: 16px;     /* cartes, photos */
+  --radius-tile: 12px;     /* pastilles d'icône */
+
+  /* Tailles */
+  --control: 44px;         /* hauteur min d'un élément cliquable */
+  --control-lg: 48px;
+  --icon-size: 20px;
+  --icon-size-lg: 22px;
+  --icon-stroke: 1.75;
+
+  /* Espacements */
+  --gap-xs: 4px;
+  --gap-s: 8px;
+  --gap-m: 16px;
+  --gap-l: 24px;
+  --gap-xl: 40px;
+  --page-pad: 48px;
+  --page-max: 1200px;
+
+  /* Ombres */
+  --shadow-hover: 0 6px 20px rgba(0, 0, 0, .12);
+}
+
+/* Variante sombre : un bloc de variables, jamais un second fichier.
+   Activée par <html data-theme="dark">. */
+:root[data-theme="dark"] {
+  --ink: #F5F5F5;
+  --muted: #A3A3A3;
+  --line: #2A2A2A;
+  --border: #3A3A3A;
+  --surface: #141414;
+  --surface-2: #1F1F1F;
+  --on-ink: #141414;
+  --amber-soft: #3A2A0A;
+  --ok-soft: #10301F;
+  --warn-soft: #3A2A0A;
+  --danger-soft: #3A1512;
+  --shadow-hover: 0 6px 20px rgba(0, 0, 0, .5);
+}
+
+/* Marque blanche (pages publiques) : l'hôte écrase les jetons sur :root,
+   rien d'autre ne change. Exemple :
+   <style>:root{--ink:#1B3A4B;--amber:#C8963E;--font:'Lora',serif}</style> */

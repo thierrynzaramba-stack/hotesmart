@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- RÈGLES : aucun hexa, aucun texte en dur, aucune icône dessinée ici.
+     Couleurs → theme.css · Textes → i18n/*.json · Icônes → icons.svg -->
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" aria-label="Navigation"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button class="btn btn--secondary btn--icon" data-i18n-attr="aria-label:nav.notifications">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-bell"/></svg>
+    </button>
+    <button class="btn btn--secondary" style="padding-inline: 14px 8px" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials">TH</span>
+    </button>
+  </div>
+</header>
+
+<main class="page">
+
+  <!-- 1. Titre -->
+  <div class="row" style="flex-wrap: wrap; align-items: flex-end; gap: var(--gap-m)">
+    <div style="flex: 1 1 300px">
+      <h1 class="h1" data-i18n="today.greeting" data-i18n-vars='{"name":"Thierry"}'></h1>
+      <p class="muted" style="margin-top: 6px; font-size: 16px" data-bind="summary"></p>
+    </div>
+    <a class="btn btn--outline btn--lg" href="/pages/logements/nouveau">
+      <svg class="icon" style="width:16px;height:16px" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg>
+      <span data-i18n="today.add_property"></span>
+    </a>
+  </div>
+
+  <!-- 2 + 3. Aujourd'hui / À valider -->
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 32px; align-items: start">
+
+    <section style="grid-column: span 2; min-width: 0" aria-labelledby="h-today">
+      <h2 class="h2" id="h-today" style="margin-bottom: 8px" data-i18n="today.title"></h2>
+      <div data-list="events">
+        <!-- Modèle d'une ligne (à générer depuis bookings_snapshot) : -->
+        <a class="event" href="#">
+          <span class="event__time num">11:00</span>
+          <span class="tile-icon" data-i18n-attr="aria-label:today.departure"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-departure"/></svg></span>
+          <span style="min-width: 0">
+            <span class="event__title"><span data-i18n="today.departure"></span> · Cœur de vie 23</span>
+            <span class="event__sub">Famille Martin · <span data-i18n="today.cleaning_confirmed" data-i18n-vars='{"time":"14:00","name":"Régina"}'></span></span>
+          </span>
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+        </a>
+        <a class="event" href="#">
+          <span class="event__time num">16:00</span>
+          <span class="tile-icon" data-i18n-attr="aria-label:today.arrival"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-arrival"/></svg></span>
+          <span style="min-width: 0">
+            <span class="event__title"><span data-i18n="today.arrival"></span> · La bulle</span>
+            <span class="event__sub">Sofia G. · <span data-i18n="today.nights" data-i18n-vars='{"n":2}'></span> · <span data-i18n="today.code_sent"></span></span>
+          </span>
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+        </a>
+        <!-- Action attendue : pastille ambre-soft + bouton principal dans la ligne -->
+        <div class="event">
+          <span class="event__time num">17:00</span>
+          <span class="tile-icon tile-icon--pending" data-i18n-attr="aria-label:today.arrival"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-arrival"/></svg></span>
+          <span style="min-width: 0">
+            <span class="event__title"><span data-i18n="today.arrival"></span> · Ofuro Futari</span>
+            <span class="event__sub">Lucas P. · <span data-i18n="today.nights" data-i18n-vars='{"n":1}'></span> · <span data-i18n="today.code_pending"></span></span>
+          </span>
+          <button class="btn btn--primary" style="height: 40px" data-i18n="today.send_code"></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="stack" style="gap: 12px" aria-labelledby="h-validate">
+      <h2 class="h2" id="h-validate" data-i18n="validate.title"></h2>
+      <div data-list="pending">
+        <div class="card">
+          <span style="font-weight: var(--fw-semibold)" data-i18n="validate.reply_to" data-i18n-vars='{"name":"Emma"}'></span>
+          <span class="small muted" style="line-height: 1.5">« Oui, le parking est inclus, il se trouve au fond de la cour. »</span>
+          <span class="row">
+            <button class="btn btn--primary" style="flex: 1; height: 40px" data-i18n="validate.send"></button>
+            <button class="btn btn--secondary" style="height: 40px" data-i18n="validate.edit"></button>
+          </span>
+        </div>
+        <div class="card" style="margin-top: 12px">
+          <span style="font-weight: var(--fw-semibold)">Samedi · Cœur de vie 23 : <span class="num">118 € → 130 €</span></span>
+          <span class="small muted" style="line-height: 1.5">Forte demande à Bagnères ce week-end.</span>
+          <span class="row">
+            <button class="btn btn--primary" style="flex: 1; height: 40px" data-i18n="validate.apply"></button>
+            <button class="btn btn--secondary" style="height: 40px" data-i18n="validate.ignore"></button>
+          </span>
+        </div>
+      </div>
+      <a class="link small" href="/settings#autonomie" data-i18n="validate.settings"></a>
+    </section>
+  </div>
+
+  <!-- 4. Fait pour vous -->
+  <section class="stack" style="gap: var(--gap-m)" aria-labelledby="h-done">
+    <div class="section-head"><h2 class="h2" id="h-done" data-i18n="done.title"></h2><span class="muted" data-i18n="done.period"></span></div>
+    <div class="grid-auto scroll-x" data-list="done">
+      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-message"/></svg><span class="kpi num">14</span><span class="caption" data-i18n="done.messages" data-i18n-vars='{"langs":3}'></span></div>
+      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-key"/></svg><span class="kpi num">6</span><span class="caption" data-i18n="done.codes"></span></div>
+      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-cleaning"/></svg><span class="kpi num">4</span><span class="caption" data-i18n="done.cleanings"></span></div>
+      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-price"/></svg><span class="kpi num">+140 €</span><span class="caption" data-i18n="done.prices" data-i18n-vars='{"n":2}'></span></div>
+      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-shield"/></svg><span class="kpi num">0</span><span class="caption" data-i18n="done.overbooking"></span></div>
+    </div>
+  </section>
+
+  <!-- 5. 30 jours -->
+  <section style="display: flex; flex-wrap: wrap; gap: 48px; padding: 28px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line)">
+    <div class="stack" style="gap: 4px"><span class="small muted" data-i18n="kpi.revenue"></span><span class="row" style="align-items: baseline; gap: 10px"><span class="kpi num" data-bind="revenue30">4 860 €</span><span class="small" style="font-weight: var(--fw-semibold)">▲ 12 %</span></span></div>
+    <div class="stack" style="gap: 4px"><span class="small muted" data-i18n="kpi.rating"></span><span class="row" style="align-items: baseline; gap: 10px"><span class="kpi num row" style="gap: 6px"><svg class="icon icon--fill" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>4,9</span><span class="small muted" data-i18n="kpi.reviews" data-i18n-vars='{"n":14}'></span></span></div>
+    <div class="stack" style="gap: 4px"><span class="small muted" data-i18n="kpi.occupancy"></span><span class="row" style="align-items: baseline; gap: 10px"><span class="kpi num">78 %</span><span class="small muted" style="font-weight: var(--fw-semibold)">▼ 3 %</span></span></div>
+  </section>
+
+  <!-- 6. Logements -->
+  <section class="stack" style="gap: 20px" aria-labelledby="h-props">
+    <div class="section-head"><h2 class="h2" id="h-props" data-i18n="properties.title"></h2><a class="link small" href="/pages/logements" data-i18n="properties.see_all"></a></div>
+    <div class="scroll-x" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--gap-l)" data-list="properties">
+
+      <a class="property" href="/pages/logements/ofuro-futari">
+        <span class="property__photo"><img src="" alt="" onerror="this.remove()"><span class="chip" data-i18n="properties.occupied"></span></span>
+        <span class="property__name"><span>Ofuro Futari</span><span class="property__rating"><svg class="icon icon--fill" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>5,0</span></span>
+        <span class="small muted">Toulouse · <span data-i18n="properties.next_arrival" data-i18n-vars='{"when":"17:00"}'></span></span>
+        <span><strong class="num">1 240 €</strong> <span class="muted"><span data-i18n="properties.revenue_30"></span> · ▲ 18 %</span></span>
+        <span class="row caption muted" style="gap: 10px"><span class="bar"><span style="width: 60%"></span></span><span data-i18n="properties.autonomy" data-i18n-vars='{"pct":60}'></span></span>
+      </a>
+
+      <a class="property" href="/pages/logements/coeur-de-vie-23">
+        <span class="property__photo"><img src="" alt="" onerror="this.remove()"><span class="chip" data-i18n="properties.free"></span></span>
+        <span class="property__name"><span>Cœur de vie 23</span><span class="property__rating"><svg class="icon icon--fill" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>4,8</span></span>
+        <span class="small muted">Bagnères-de-Bigorre · <span data-i18n="properties.next_arrival" data-i18n-vars='{"when":"dim. 15:00"}'></span></span>
+        <span><strong class="num">1 590 €</strong> <span class="muted"><span data-i18n="properties.revenue_30"></span> · ▲ 6 %</span></span>
+        <!-- Le seul moment ambre de l'écran après le badge : « tout est automatisé » -->
+        <span class="row caption" style="gap: 10px; color: var(--amber-text); font-weight: var(--fw-semibold)"><span class="bar bar--amber"><span style="width: 100%"></span></span><span data-i18n="properties.full_auto"></span></span>
+      </a>
+
+      <a class="property" href="/pages/logements/la-bulle">
+        <span class="property__photo"><img src="" alt="" onerror="this.remove()"><span class="chip" data-i18n="properties.occupied"></span></span>
+        <span class="property__name"><span>La bulle</span><span class="property__rating"><svg class="icon icon--fill" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>4,9</span></span>
+        <span class="small muted">Bagnères-de-Bigorre · <span data-i18n="properties.next_arrival" data-i18n-vars='{"when":"16:00"}'></span></span>
+        <span><strong class="num">1 410 €</strong> <span class="muted"><span data-i18n="properties.revenue_30"></span> · ▼ 4 %</span></span>
+        <span class="row caption muted" style="gap: 10px"><span class="bar"><span style="width: 85%"></span></span><span data-i18n="properties.autonomy" data-i18n-vars='{"pct":85}'></span></span>
+      </a>
+
+      <a class="property" href="/pages/logements/colomiers/connexions">
+        <span class="property__photo property__photo--empty">
+          <svg class="icon" style="width:36px;height:36px" aria-hidden="true"><use href="/shared/icons.svg#i-link"/></svg>
+          <span class="link caption" style="color: var(--ink)" data-i18n="properties.connect"></span>
+        </span>
+        <span class="property__name"><span>Colomiers</span></span>
+        <span class="small muted" data-i18n="properties.no_channel"></span>
+      </a>
+    </div>
+  </section>
+</main>
+
+<nav class="bottombar" aria-label="Navigation"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script>
+(async () => {
+  await I18n.init();
+  HSNav.render({ pendingMessages: 2 });
+
+  // Sous-titre compté — jamais de concaténation à la main
+  const now = new Date();
+  document.querySelector('[data-bind="summary"]').textContent = I18n.t('today.summary', {
+    date: I18n.date(now),
+    arrivals: I18n.t('today.arrivals', { n: 2 }),
+    departures: I18n.t('today.departures', { n: 1 }),
+    todos: I18n.t('today.todos', { n: 1 }),
+  });
+
+  // Re-traduire les textes calculés quand la langue change
+  document.addEventListener('i18n:changed', () => location.reload());
+})();
+</script>
+</body>
+</html>
