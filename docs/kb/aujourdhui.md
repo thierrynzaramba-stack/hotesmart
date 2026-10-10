@@ -26,11 +26,11 @@ Aucune lecture provider. Tout vient du cœur, par un endpoint existant ou une ta
 |---|---|---|
 | Biens | `properties`, lecture directe (`properties_select` = périmètre) | Pas `/api/channel-property`, qui interroge Beds24 en direct. |
 | Arrivées, départs, occupé ce soir, prochaine arrivée | `GET /api/menages?from=<jour>&to=<jour+400>` | Réservations actives uniquement (annulations et blocages exclus). Nuits = départ − arrivée. Heure = `properties.checkin_time` / `checkout_time` du bien. |
-| Ménage d'un départ | même réponse : `menages` + `prestataires` | « ménage après le départ de {checkout_time} » ; aucune heure de ménage n'existe. Clé composite bien et réservation. |
-| Code d'accès d'une arrivée | `GET /api/messages`, champ `arrivee.codeEtat` | « envoyé » seulement si un message sortant contient le code (`etatsDArrivee`). Chargé après le premier affichage. |
+| Ménage d'un départ | même réponse : `menages` + `prestataires` (champ `prenom`) | « ménage après le départ de {checkout_time} » ; aucune heure de ménage n'existe. Clé composite bien et réservation. Le tour : `proposee_a` fait foi, `offered_to` seulement pour une ligne d'avant la bascule (même règle que `tourDe` du planning). Une proposition en cours n'est jamais « sans prestataire ». |
+| Code d'accès d'une arrivée | `GET /api/messages`, champ `arrivee.codeEtat` | « envoyé » seulement si un message sortant contient le code (`etatsDArrivee`). Chargé après le premier affichage. La ligne ouvre le fil seulement s'il existe, sinon la fiche du bien. |
 | À valider | `agent_tasks`, statut `pending` ou `pending_validation` | Même population que la messagerie. Le badge Messages compte les seules `pending_validation`. |
-| Fait pour vous, 7 jours | comptes `head` sur `access_codes`, `menages` (`accepted_at`, hors annulés), `price_display_log` (`source = 'engine'`), `automation_incidents` (`overbooking`) | Une tuile par source lisible. `price_display_log` n'est lisible que par le titulaire (RLS `auth.uid()`). |
-| Revenus et occupation sur 30 j | `GET /api/yield?granularite=jour`, 60 jours, par bien, sommés | CA réparti par nuit, au prix voyageur. Variation par rapport aux 30 jours précédents (infobulle). L'occupation varie en points. |
+| Fait pour vous, 7 jours | comptes `head` sur `access_codes`, `menages` (`accepted_at`, hors annulés : « ménages attribués », pas « confirmés par vos prestataires » — une attribution par l'hôte ou d'office pose aussi `accepted_at`), `price_display_log` (`source = 'engine'`), `automation_incidents` (`overbooking`) | Une tuile par source lisible. `price_display_log` n'est lisible que par le titulaire (RLS `auth.uid()`). |
+| Revenus et occupation sur 30 j | `GET /api/yield?granularite=jour`, 60 jours, par bien, sommés | CA réparti par nuit, au prix voyageur. Variation par rapport aux 30 jours précédents (infobulle). L'occupation varie en points ; son numérateur exclut les nuits vendues un jour en exception (`nuitees_hors_reference`), comme le moteur. Fenêtres calculées sur la date de Paris, jamais par pas de 24 h. |
 | Note sur 30 j | `GET /api/avis?action=cartes&periode=30j` (global, puis `&bien=` par bien) | `stats.moyenne` / `stats.notes` : la même fonction que la page Avis (`lib/stats-avis.js`). |
 | Min et max mensuels, par bien | `GET /api/yield?granularite=mois`, les 12 mois complets précédents | Un mois compte s'il était ouvert (`jours_ouverts > 0`) et si toutes ses nuits ont un prix. Le nombre de mois retenus est affiché. |
 
@@ -53,7 +53,9 @@ Principe 3 de la spec : un chiffre qu'on ne compte pas proprement ne s'affiche p
 - **Boutons « Envoyer » et « Modifier » d'une proposition** : la validation se fait dans le fil de
   conversation. La carte n'a qu'un bouton, **« Voir »**, qui l'ouvre (décision de Thierry).
 - Chiffre **« non calculable »** : une nuit occupée sans prix rend le CA non calculable (jamais un
-  minorant présenté comme un total). Un jour sans capacité rend l'occupation non calculable. Un bien dont la
+  minorant présenté comme un total). Un jour sans capacité, ou dont la capacité est **estimée**
+  (`capacite_estimee` : aucune ligne d'intention ce jour-là), rend l'occupation non calculable : un taux sur un
+  dénominateur estimé n'est pas un fait compté. Un bien dont la
   lecture échoue rend les totaux non calculables. Un bien non raccordé (`/api/yield` répond 409) est
   simplement hors du total : il n'a rien vendu par nous.
 
@@ -77,4 +79,5 @@ choix), Réglages (titulaire), Avis, Aide, la langue (construite depuis `langues
 ## 6. Coût
 
 Deux appels à `/api/yield` par bien, deux biens à la fois. Chacun relit tout l'historique du compte.
+La note : un appel `/api/avis?action=cartes` global puis un par bien, qui assemble toutes les cartes pour ne lire que `stats`.
 Les chiffres arrivent après le reste de la page. Dette 61.

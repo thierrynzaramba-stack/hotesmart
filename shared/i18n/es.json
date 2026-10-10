@@ -30,7 +30,7 @@
   "today.code_pending": "código creado, aún no enviado",
   "today.cleaning_after": "limpieza tras la salida de las {time}",
   "today.cleaning_after_notime": "limpieza tras la salida",
-  "today.cleaning_confirmed": "por {name}, confirmada",
+  "today.cleaning_confirmed": "asignada a {name}",
   "today.cleaning_started": "en curso, por {name}",
   "today.cleaning_done": "hecha por {name}",
   "today.cleaning_offered": "propuesta a {name}, sin respuesta",
@@ -58,7 +58,7 @@
   "done.title": "Hecho para usted",
   "done.period": "Últimos 7 días",
   "done.codes": "{n, plural, one {código de acceso creado} other {códigos de acceso creados}}",
-  "done.cleanings": "{n, plural, one {limpieza confirmada por sus limpiadores} other {limpiezas confirmadas por sus limpiadores}}",
+  "done.cleanings": "{n, plural, one {limpieza asignada} other {limpiezas asignadas}}",
   "done.prices": "{n, plural, one {precio fijado por YieldFlow} other {precios fijados por YieldFlow}}",
   "done.overbooking": "{n, plural, one {sobreventa detectada} other {sobreventas detectadas}}",
 

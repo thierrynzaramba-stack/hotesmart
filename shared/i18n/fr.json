@@ -30,7 +30,7 @@
   "today.code_pending": "code créé, pas encore envoyé",
   "today.cleaning_after": "ménage après le départ de {time}",
   "today.cleaning_after_notime": "ménage après le départ",
-  "today.cleaning_confirmed": "par {name}, confirmé",
+  "today.cleaning_confirmed": "attribué à {name}",
   "today.cleaning_started": "en cours, par {name}",
   "today.cleaning_done": "fait par {name}",
   "today.cleaning_offered": "proposé à {name}, sans réponse",
@@ -58,7 +58,7 @@
   "done.title": "Fait pour vous",
   "done.period": "7 derniers jours",
   "done.codes": "{n, plural, one {code d’accès créé} other {codes d’accès créés}}",
-  "done.cleanings": "{n, plural, one {ménage confirmé par vos prestataires} other {ménages confirmés par vos prestataires}}",
+  "done.cleanings": "{n, plural, one {ménage attribué} other {ménages attribués}}",
   "done.prices": "{n, plural, one {prix posé par YieldFlow} other {prix posés par YieldFlow}}",
   "done.overbooking": "{n, plural, one {surréservation détectée} other {surréservations détectées}}",
 

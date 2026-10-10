@@ -30,7 +30,7 @@
   "today.code_pending": "code created, not sent yet",
   "today.cleaning_after": "cleaning after the {time} check-out",
   "today.cleaning_after_notime": "cleaning after check-out",
-  "today.cleaning_confirmed": "by {name}, confirmed",
+  "today.cleaning_confirmed": "assigned to {name}",
   "today.cleaning_started": "in progress, by {name}",
   "today.cleaning_done": "done by {name}",
   "today.cleaning_offered": "offered to {name}, no answer",
@@ -58,7 +58,7 @@
   "done.title": "Done for you",
   "done.period": "Last 7 days",
   "done.codes": "{n, plural, one {access code created} other {access codes created}}",
-  "done.cleanings": "{n, plural, one {cleaning confirmed by your cleaners} other {cleanings confirmed by your cleaners}}",
+  "done.cleanings": "{n, plural, one {cleaning assigned} other {cleanings assigned}}",
   "done.prices": "{n, plural, one {price set by YieldFlow} other {prices set by YieldFlow}}",
   "done.overbooking": "{n, plural, one {overbooking detected} other {overbookings detected}}",
 

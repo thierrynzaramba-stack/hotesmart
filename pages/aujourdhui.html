@@ -115,7 +115,7 @@ const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use
 const etat = {
   aujourdHui: R.jourParis(),
   biens: [], bookings: [], menages: [], prestataires: [],
-  menagesOk: null, etatsArrivee: {},
+  menagesOk: null, etatsArrivee: {}, conversations: new Set(),
   taches: [], tachesOk: null,
   alarmes: [],
   parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
@@ -141,6 +141,12 @@ async function parPaquets (taches, taille) {
   }
 }
 
+// Une date calendaire de Paris (YYYY-MM-DD) affichée telle quelle, quel que soit
+// le fuseau du navigateur : midi UTC, formaté en UTC.
+function dateDuJour (jour, opts) {
+  const [a, m, d] = jour.split('-').map(Number)
+  return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { ...opts, timeZone: 'UTC' })
+}
 const monnaie = (n, devise) => I18n.money(n, devise || 'EUR')
 
 // ▲ / ▼ / = + valeur ; jamais la couleur seule (spec §2, statuts).
@@ -163,7 +169,7 @@ function renderTitre () {
   const el = $('[data-bind="summary"]')
   el.removeAttribute('data-i18n')
   el.textContent = t('today.summary', {
-    date: I18n.date(new Date()),
+    date: dateDuJour(etat.aujourdHui, { weekday: 'long', day: 'numeric', month: 'long' }),
     arrivals: t('today.arrivals', { n: arrivees }),
     departures: t('today.departures', { n: departs }),
     todos: t('today.todos', { n: todos })
@@ -241,7 +247,6 @@ function renderEvenements () {
   if (etat.menagesOk === false) { zone.innerHTML = `<p class="muted">${esc(t('today.unavailable'))}</p>`; return }
   const evts = evenements()
   if (!evts.length) { zone.innerHTML = `<p class="muted">${esc(t('today.empty'))}</p>`; return }
-  const lireMessages = peutLire('messages')
   zone.innerHTML = evts.map(e => {
     const arrivee = e.type === 'arrivee'
     const libelle = t(arrivee ? 'today.arrival' : 'today.departure')
@@ -253,8 +258,10 @@ function renderEvenements () {
     } else {
       sous.push(phraseMenage(e.menage, e.heure))
     }
+    // Le fil seulement s'il EXISTE : sinon la messagerie répond « conversation
+    // introuvable » (constat de revue). À défaut, la fiche du bien.
     const href = arrivee
-      ? (lireMessages ? lienConversation(e) : `/biens/${encodeURIComponent(e.bienId)}`)
+      ? (etat.conversations.has(e.bookingId) ? lienConversation(e) : `/biens/${encodeURIComponent(e.bienId)}`)
       : '/apps/menages'
     const fin = e.action
       ? `<span class="btn btn--primary" style="height: 40px">${esc(t('today.view'))}</span>`
@@ -278,7 +285,7 @@ async function chargerReservations () {
     // les arrivées et départs du jour, « occupé ce soir » et la prochaine
     // arrivée. Lues par l'endpoint du planning ménage (coeur seul, aucun
     // provider), avec les ménages et les prestataires du même compte.
-    const r = await appel(`/api/menages?from=${etat.aujourdHui}&to=${R.jourParis(Date.now(), 400)}`)
+    const r = await appel(`/api/menages?from=${etat.aujourdHui}&to=${R.ajouterJours(etat.aujourdHui, 400)}`)
     etat.bookings = r.bookings || []
     etat.menages = r.menages || []
     etat.prestataires = r.prestataires || []
@@ -297,6 +304,7 @@ async function chargerEtatsArrivee () {
   try {
     const { conversations } = await appel('/api/messages')
     for (const c of conversations || []) {
+      etat.conversations.add(String(c.bookId))
       if (c.arrivee) etat.etatsArrivee[String(c.bookId)] = c.arrivee
     }
     renderEvenements(); renderTitre()
@@ -394,10 +402,12 @@ function renderCompteurs () {
 // `amount` des réservations, qui est un net hôte pour Airbnb).
 async function chargerChiffresBien (b) {
   if (!b.provider_property_id) { etat.parBien.set(b.id, { nonRaccorde: true }); return }
-  const fin = R.jourParis(Date.now(), -1)
-  const debut = R.jourParis(Date.now(), -60)
-  const milieu = R.jourParis(Date.now(), -30)
-  const avantMilieu = R.jourParis(Date.now(), -31)
+  // Bornes calculées sur la DATE de Paris, jamais par pas de 24 h (heure d'été).
+  const j0 = etat.aujourdHui
+  const fin = R.ajouterJours(j0, -1)
+  const debut = R.ajouterJours(j0, -60)
+  const milieu = R.ajouterJours(j0, -30)
+  const avantMilieu = R.ajouterJours(j0, -31)
   const douze = R.douzeMoisComplets(etat.aujourdHui)
   const base = `/api/yield?property_id=${encodeURIComponent(b.id)}`
   try {
@@ -465,8 +475,7 @@ function renderKpis () {
 
 function quand (jour) {
   if (jour === etat.aujourdHui) return t('properties.today')
-  const [a, m, d] = jour.split('-').map(Number)
-  return I18n.date(new Date(a, m - 1, d), { weekday: 'short', day: 'numeric', month: 'short' })
+  return dateDuJour(jour, { weekday: 'short', day: 'numeric', month: 'short' })
 }
 function renderBiens () {
   const section = $('[data-bind="props-section"]')

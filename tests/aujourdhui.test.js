@@ -60,7 +60,7 @@ test('evenementsDuJour : une action seulement quand le coeur la PROUVE', async (
   const dep = (status) => R.evenementsDuJour({ ...base,
     bookings: [{ id: 'D', propId: '101', arrival: '2026-10-08', departure: J }],
     menages: status ? [{ booking_id: 'D', property_id: '101', status, provider_id: 'p1' }] : [],
-    prestataires: [{ id: 'p1', first_name: 'Régina' }] })[0]
+    prestataires: [{ id: 'p1', prenom: 'Régina' }] })[0]
   assert.equal(dep('unassigned').action, 'menage')
   assert.equal(dep('orphaned').action, 'menage')
   assert.equal(dep('accepted').action, null)
@@ -74,6 +74,52 @@ test('evenementsDuJour : la cle composite bien|reservation (un id Beds24 n\'est 
     bookings: [{ id: '7', propId: '101', arrival: '2026-10-08', departure: J }],
     menages: [{ booking_id: '7', property_id: '102', status: 'unassigned' }] })
   assert.equal(e.menage.statut, null, 'le menage du bien 102 ne s\'applique pas au bien 101')
+})
+
+test('evenementsDuJour : le prenom vient du champ `prenom` de /api/menages, le tour de `proposee_a`', async () => {
+  const R = await charger()
+  // Forme EXACTE de la reponse de l'endpoint (api/menages.js : `prenom`, pas
+  // `first_name`) — la premiere fixture copiait la colonne et figeait le bug.
+  const src = lire('api/menages.js')
+  assert.ok(/id: x\.id, prenom: x\.first_name/.test(src), 'la forme de la reponse a change : revoir la page')
+  const dep = (menage) => R.evenementsDuJour({ aujourdHui: J, biens: BIENS,
+    bookings: [{ id: 'D', propId: '101', arrival: '2026-10-08', departure: J }],
+    menages: [{ booking_id: 'D', property_id: '101', ...menage }],
+    prestataires: [{ id: 'p1', prenom: 'Régina' }, { id: 'p2', prenom: 'Lou' }] })[0]
+  // Proposition de l'hote : statut garde 'unassigned', le tour dans `proposee_a`.
+  const propose = dep({ status: 'unassigned', provider_id: null, offered_to: null, proposee_a: ['p1', 'p2'] })
+  assert.equal(propose.action, null, 'une proposition en cours n\'est pas « personne »')
+  assert.equal(propose.menage.statut, 'offered')
+  assert.equal(propose.menage.proposeeA, 'Régina, Lou')
+  // Ligne d'avant la bascule : `offered_to` seul.
+  assert.equal(dep({ status: 'offered', offered_to: 'p2' }).menage.proposeeA, 'Lou')
+  // Personne, et aucun tour : a faire.
+  assert.equal(dep({ status: 'orphaned', proposee_a: [] }).action, 'menage')
+})
+
+test('chiffresFenetre : nuits en exception hors du taux, capacite estimee non comptee', async () => {
+  const R = await charger()
+  // 3 nuits vendues dont 2 un jour en exception (jour hors des jours ouverts) :
+  // le taux ne doit pas depasser 100 % (le defaut « 300 % » du moteur).
+  const exc = R.chiffresFenetre([
+    { periode: '2026-10-01', ca: 100, nuitees: 1, nuits_a_prix_connu: 1, jours_ouverts: 1, nuitees_hors_reference: 0 },
+    { periode: '2026-10-02', ca: 100, nuitees: 1, nuits_a_prix_connu: 1, jours_ouverts: 0, nuitees_hors_reference: 1 },
+    { periode: '2026-10-03', ca: 100, nuitees: 1, nuits_a_prix_connu: 1, jours_ouverts: 0, nuitees_hors_reference: 1 }
+  ], '2026-10-01', '2026-10-03')
+  assert.equal(exc.ca, 300, 'le CA garde toutes les nuits')
+  assert.equal(R.occupation(exc.nuitees, exc.joursOuverts), 1)
+  const estime = R.chiffresFenetre([
+    { periode: '2026-10-01', ca: 0, nuitees: 0, nuits_a_prix_connu: 0, jours_ouverts: 1, capacite_estimee: true }
+  ], '2026-10-01', '2026-10-01')
+  assert.equal(estime.joursOuverts, null, 'un denominateur estime n\'est pas un fait')
+})
+
+test('ajouterJours : arithmetique sur la date, stable au changement d\'heure', async () => {
+  const R = await charger()
+  assert.equal(R.ajouterJours('2026-10-26', -1), '2026-10-25')
+  assert.equal(R.ajouterJours('2026-10-10', -60), '2026-08-11')
+  assert.equal(R.ajouterJours('2026-03-29', 1), '2026-03-30')
+  assert.equal(R.ajouterJours('2026-12-31', 1), '2027-01-01')
 })
 
 // ─── Etat des biens ─────────────────────────────────────────────────────────

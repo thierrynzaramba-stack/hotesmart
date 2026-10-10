@@ -18,6 +18,14 @@ export function jourParis (maintenant = Date.now(), decalage = 0) {
     .format(new Date(maintenant + decalage * 86400000))
 }
 
+// YYYY-MM-DD decale de n jours, par arithmetique UTC sur la DATE : jamais
+// « maintenant + n x 24 h », qui glisse d'un jour au changement d'heure
+// pres de minuit (constat de revue).
+export function ajouterJours (jour, n) {
+  const [y, m, d] = String(jour).slice(0, 10).split('-').map(Number)
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10)
+}
+
 // Ecart en jours entre deux YYYY-MM-DD (b - a), sans fuseau ni heure d'ete.
 export function joursEntre (a, b) {
   const [ya, ma, da] = String(a).slice(0, 10).split('-').map(Number)
@@ -45,7 +53,9 @@ export function heureCourte (h) {
 export function evenementsDuJour ({ bookings = [], biens = [], menages = [], prestataires = [],
   etatsArrivee = {}, aujourdHui }) {
   const bienParRef = new Map(biens.map(b => [String(b.provider_property_id), b]))
-  const prenomParId = new Map(prestataires.map(p => [String(p.id), p.first_name || '']))
+  // ⚠ `prenom`, pas `first_name` : c'est le nom du champ dans la reponse de
+  // /api/menages (constat de revue — la fixture d'origine figeait le bug).
+  const prenomParId = new Map(prestataires.map(p => [String(p.id), p.prenom || '']))
   const menageParResa = new Map(menages.map(m => [`${m.property_id}|${m.booking_id}`, m]))
   const out = []
   for (const r of bookings) {
@@ -69,13 +79,19 @@ export function evenementsDuJour ({ bookings = [], biens = [], menages = [], pre
       const m = menageParResa.get(`${r.propId}|${r.id}`) || null
       const statut = m ? m.status : null
       const prestataire = m && m.provider_id ? (prenomParId.get(String(m.provider_id)) || null) : null
-      const proposeeA = m && m.offered_to ? (prenomParId.get(String(m.offered_to)) || null) : null
+      // ⚠ LE TOUR : `proposee_a` fait foi, `offered_to` n'est lu que pour une
+      // ligne d'avant la bascule — meme regle que `tourDe` du planning menage
+      // (apps/menages/index.html). Une proposition en cours n'est pas « personne ».
+      const tour = !m ? [] : (Array.isArray(m.proposee_a) && m.proposee_a.length)
+        ? m.proposee_a : (m.offered_to ? [m.offered_to] : [])
+      const proposeeA = tour.map(id => prenomParId.get(String(id))).filter(Boolean).join(', ') || null
+      const sansPersonne = (statut === 'unassigned' || statut === 'orphaned') && !tour.length
       out.push({
         ...base,
         type: 'depart',
         heure: heureCourte(bien.checkout_time),
-        menage: { statut, prestataire, proposeeA },
-        action: (statut === 'unassigned' || statut === 'orphaned') ? 'menage' : null
+        menage: { statut: tour.length && !m.provider_id ? 'offered' : statut, prestataire, proposeeA },
+        action: sansPersonne ? 'menage' : null
       })
     }
   }
@@ -108,7 +124,13 @@ export function etatDesBiens ({ bookings = [], biens = [], aujourdHui }) {
 // CA `null` si une nuit occupee n'a pas de prix connu (la somme serait un
 // minorant presente comme un total). Occupation `null` si un seul jour n'a pas
 // de capacite calculable (docs/kb/capacite-yield.md : « non calculable »
-// n'est jamais zero).
+// n'est jamais zero) OU si sa capacite est ESTIMEE (`capacite_estimee` : pas
+// de ligne d'intention ce jour-la) — un taux sur un denominateur estime n'est
+// pas un fait compte (spec §1, principe 3).
+// ⚠ Le numerateur de l'occupation est celui du moteur : les nuits vendues
+// un jour en exception sortent du taux, comme ce jour sort des jours ouverts
+// (lib/yield/indicateurs.js, `nuiteesRef` ; sinon 300 % sur un bien en
+// exception). Le CA, lui, garde toutes les nuits.
 export function chiffresFenetre (realise = [], debut, fin) {
   const jours = realise.filter(p => p.periode >= debut && p.periode <= fin)
   const attendus = joursEntre(debut, fin) + 1
@@ -117,9 +139,9 @@ export function chiffresFenetre (realise = [], debut, fin) {
   let occCalculable = jours.length === attendus
   for (const p of jours) {
     ca += Number(p.ca) || 0
-    nuitees += Number(p.nuitees) || 0
+    nuitees += (Number(p.nuitees) || 0) - (Number(p.nuitees_hors_reference) || 0)
     if (Number(p.nuits_a_prix_connu) < Number(p.nuitees)) caComplet = false
-    if (p.jours_ouverts == null) occCalculable = false
+    if (p.jours_ouverts == null || p.capacite_estimee) occCalculable = false
     else ouverts += Number(p.jours_ouverts)
   }
   return {
