@@ -233,6 +233,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .event > .btn { grid-column: 3; justify-self: start; }
   .tile-icon { width: 44px; height: 44px; }
   .scroll-x { display: flex; gap: 10px; overflow-x: auto; margin: 0 calc(-1 * var(--page-pad)); padding: 0 var(--page-pad) 4px; scroll-snap-type: x mandatory; scroll-padding-inline: var(--page-pad); }
+  /* Le glissement au doigt reste ; la barre, elle, disparaît (retouche du
+     10 octobre 2026). Les deux écritures couvrent Firefox et WebKit. */
+  .scroll-x { scrollbar-width: none; }
+  .scroll-x::-webkit-scrollbar { display: none; }
   .scroll-x > * { flex: 0 0 auto; scroll-snap-align: start; }
   .scroll-x .stat { width: 132px; }
   .scroll-x .property { width: 180px; }
