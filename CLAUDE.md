@@ -328,6 +328,18 @@ AirROI pour octobre : 25 $ par compte sur 30 jours et 25 $ par mois (dette
 - **Staging n'a aucun cron** (docs/STAGING.md §1) : en recette, le pilote se
   lance par `scripts/piloter-yieldflow.js` (à blanc, puis `--go`).
 
+**Chantier REFONTE UI V5 — lot 1 LIVRÉ (10 octobre 2026, branche
+`lot-ui-v5-1`)** : socle (shared/theme.css seul porteur d'hexas, ui.css,
+icons.svg, nav.js 5 entrées, i18n fr/en/es) et `pages/aujourdhui.html` devenue
+l'accueil (index.html et /dashboard redirigent). Faits comptés seulement :
+« À valider » restreint aux conversations ouvertes (49 → 1 ce jour-là), notes
+affichées /5 (le cœur stocke /10), tuile codes retirée (dette 62, user_id
+absent de l'INSERT serrures), min/max mensuel depuis le premier mois vendu.
+Menu ≡ : section « Outils » PROVISOIRE, retirée lot par lot. Dette 59
+(canaux au cœur) = PRÉREQUIS du lot Logements. Recette du jour : 5 résas de
+test Colomiers annulées par le CRS, deux blocages saisis comme résas passés
+`blocked` (dettes 63-64). KB : docs/kb/aujourdhui.md.
+
 Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
 RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
 remplace `rang === 1` partout, proposition posee a l'approche du depart
