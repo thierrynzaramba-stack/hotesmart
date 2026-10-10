@@ -46,7 +46,7 @@ Principe 3 de la spec : un chiffre qu'on ne compte pas proprement ne s'affiche p
 - **Barre d'autonomie** et **« Tout est automatisé »** : aucune formule n'est définie (spec §4).
 - **Canaux reliés par bien** : `ota_connect_status` n'est jamais rafraîchi, et la liste des canaux n'existe
   que chez Channex. Dette 59. La carte « Relier Airbnb ou Booking.com » ne s'affiche que pour un bien sans
-  clé provider, un fait de la base.
+  clé provider, un fait de la base. **La dette 59 est un prérequis du lot Logements.**
 - **Photos** : aucune colonne en base. Le cadre garde l'icône du logement.
 - **Suggestions de prix YieldFlow « à valider »** : rien n'est en attente, le pilote applique seul.
 - **Somme en € des prix ajustés** : aucune définition (écart à quoi ?). La tuile compte les prix posés.
@@ -73,7 +73,13 @@ reprend les 5 entrées. Vérifié par capture à 390 px, sur un banc qui simule 
 - Ménages : `/apps/menages` ;
 - Logements : `/biens`.
 
-Une entrée sans droit de lecture est masquée. Le menu ≡ porte le sélecteur de compte (seulement s'il y a un
+Une entrée sans droit de lecture est masquée.
+
+**Section « Outils » du menu ≡, PROVISOIRE** (décision de Thierry du 10 octobre 2026) : YieldFlow (délégable,
+lecture des réservations), Serrures, SMS, Réservation directe, Connexions, Abonnement (titulaire seul, comme
+l'ancienne barre latérale). L'ancien accueil y menait par « Mes apps », que la spec supprime. **Chaque lot
+retire la ligne de l'outil qu'il fusionne** : YieldFlow au lot Calendrier, Réservation directe et Connexions
+au lot Logements, etc. La section disparaît quand elle est vide. Le menu ≡ porte le sélecteur de compte (seulement s'il y a un
 choix), Réglages (titulaire), Avis, Aide, la langue (construite depuis `langues.json`) et la déconnexion.
 
 ## 6. Coût

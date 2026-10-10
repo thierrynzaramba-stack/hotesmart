@@ -69,6 +69,10 @@
   // options.onCompte(id)   : bascule (la page se recharge)
   // options.onDeconnexion()
   // options.reglages / options.avis : afficher ces entrées (droits)
+  // options.outils : [{ href, key, icon }] — section « Outils » PROVISOIRE
+  //   (décision de Thierry, 10 octobre 2026) : les écrans qui n'ont pas encore
+  //   rejoint un onglet V5. Chaque lot retire la ligne de l'outil qu'il fusionne
+  //   (YieldFlow → Calendrier, Réservation directe et Connexions → Logements…).
   function renderMenu(options = {}) {
     const bouton = document.querySelector('[data-menu-toggle]');
     const panneau = document.querySelector('[data-menu]');
@@ -85,6 +89,12 @@
           return `<option value="${esc(c.user_id)}"${sel}${mien}>${esc(c.nom)}</option>`;
         }).join('')}</select>
         ${actif && !actif.titulaire ? '<span class="caption muted" data-i18n="nav.account_shared"></span>' : ''}`);
+    }
+    const outils = options.outils || [];
+    if (outils.length) {
+      parts.push(`<span class="menu__label caption muted" data-i18n="nav.tools"></span>`);
+      for (const o of outils) parts.push(`<a class="menu__item" href="${esc(o.href)}">${icon(o.icon)}<span data-i18n="${esc(o.key)}"></span></a>`);
+      parts.push(`<span class="menu__label caption muted" data-i18n="nav.account_menu"></span>`);
     }
     if (options.reglages) parts.push(`<a class="menu__item" href="/settings">${icon('i-settings')}<span data-i18n="nav.settings"></span></a>`);
     if (options.avis) parts.push(`<a class="menu__item" href="/avis">${icon('i-review')}<span data-i18n="nav.reviews"></span></a>`);

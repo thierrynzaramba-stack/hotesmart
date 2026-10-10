@@ -555,7 +555,19 @@ async function init () {
   HSNav.renderMenu({
     comptes: comptes(), compteActif: compteCourant(),
     onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
-    reglages: estTitulaire(), avis: peutLire('avis')
+    reglages: estTitulaire(), avis: peutLire('avis'),
+    // PROVISOIRE (décision de Thierry du 10 octobre 2026) : les outils sans
+    // onglet V5, retirés lot par lot. Mêmes droits que l'ancienne barre
+    // latérale : YieldFlow est délégable (lecture des réservations), les
+    // autres travaillent sur le compte propre et restent au titulaire.
+    outils: [
+      peutLire('reservations') && { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price' },
+      estTitulaire() && { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key' },
+      estTitulaire() && { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send' },
+      estTitulaire() && { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar' },
+      estTitulaire() && { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link' },
+      estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
+    ].filter(Boolean)
   })
 
   // Les biens : lecture directe sous RLS (`properties_select` = périmètre du
