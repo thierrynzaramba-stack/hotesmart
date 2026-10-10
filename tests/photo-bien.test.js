@@ -55,9 +55,24 @@ test('property-photo : garde reglages en ECRITURE sur le bien designe', () => {
   assert.ok(/bienRequis:\s*true/.test(api), 'la ressource designe le compte')
 })
 
+test('property-photo : le remplacement est une ecriture CONDITIONNELLE (course perdue = 409, fichier retire)', () => {
+  const api = sansCommentaires(lire('api/property-photo.js'))
+  assert.ok(/\.is\('photo_url', null\)/.test(api) && /\.eq\('photo_url', bien\.photo_url\)/.test(api),
+    'la mise a jour exige la photo_url lue au depart')
+  assert.ok(/status\(409\)/.test(api), 'le perdant est invite a rejouer')
+})
+
+test('le bucket est VERSIONNE : outillage de creation, et verificateur qui echoue sans lui', () => {
+  const outil = lire('scripts/creer-bucket-photos.js')
+  assert.ok(outil.includes("createBucket('property-photos'") && outil.includes('public: true'))
+  assert.ok(outil.includes('updateBucket'), 'un bucket cree a la main prive est remis en conformite')
+  const verif = lire('scripts/verifier-migration-photo-url.js')
+  assert.ok(verif.includes('process.exit(2)') && verif.includes('ABSENT'), 'bucket absent = ECHEC, pas une remarque')
+})
+
 test('property-photo : l’ancien fichier n’est efface qu’APRES le succes', () => {
   const api = sansCommentaires(lire('api/property-photo.js'))
-  const iMaj = api.indexOf("update({ photo_url")
+  const iMaj = api.indexOf('update({ photo_url')
   const iDel = api.indexOf('cheminDansBucket(bien.photo_url')
   assert.ok(iMaj > 0 && iDel > iMaj, 'l’effacement vient apres l’ecriture de photo_url')
   assert.ok(api.includes('upsert: false'), 'jamais d’ecrasement d’un fichier existant')
@@ -75,6 +90,17 @@ test('biens : la zone photo suit la charte V5 et le droit d’ecriture', () => {
     assert.ok(html.includes(`'${k}'`), `cle ${k} utilisee`)
   }
   assert.ok(/fetch\('\/api\/property-photo'[\s\S]{0,300}enteteCompte\(\)/.test(html), 'X-Compte pose')
+})
+
+test('biens : un envoi rate restaure l’etat d’avant et montre son motif', () => {
+  const html = sansCommentaires(lire('pages/biens.html'))
+  assert.ok(html.includes('const htmlAvant = zone.innerHTML'), 'l’etat de depart est garde')
+  assert.ok(/catch \(err\)[\s\S]{0,400}zone\.innerHTML = htmlAvant/.test(html), 'l’apercu ne survit pas a un echec')
+  assert.ok(/zone\.innerHTML = htmlAvant[\s\S]{0,200}poserEtat\(/.test(html), 'le motif se pose APRES la restauration, jamais sur un noeud detache')
+  assert.ok(html.includes('!session || !session.access_token'), 'session expiree = message propre, pas un TypeError')
+  // theme.css se charge AVANT style.css : --border et --amber restent ceux de la page.
+  const iTheme = html.indexOf('/shared/theme.css'), iStyle = html.indexOf('/public/style.css')
+  assert.ok(iTheme > 0 && iTheme < iStyle, 'theme.css avant style.css (sinon la page entiere est re-peinte)')
 })
 
 test('les cles photo.* existent dans les trois langues', () => {

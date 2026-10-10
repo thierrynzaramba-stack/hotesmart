@@ -63,8 +63,19 @@ module.exports = async function handler (req, res) {
   const photoUrl = pub?.publicUrl
   if (!photoUrl) return res.status(500).json({ error: 'URL publique introuvable' })
 
-  const { error: eMaj } = await supabase.from('properties')
+  // ⚠ ECRITURE CONDITIONNELLE (releve en review) : deux « Remplacer »
+  // simultanes lisaient la meme ancienne URL, et le perdant laissait son
+  // fichier orphelin dans un bucket public. La mise a jour n'ecrit que si
+  // photo_url vaut encore ce qu'on a lu ; sinon on retire NOTRE fichier et
+  // on demande de rejouer.
+  let qMaj = supabase.from('properties')
     .update({ photo_url: photoUrl }).eq('id', bien.id)
+  qMaj = bien.photo_url == null ? qMaj.is('photo_url', null) : qMaj.eq('photo_url', bien.photo_url)
+  const { data: majRows, error: eMaj } = await qMaj.select('id')
+  if (!eMaj && (!majRows || !majRows.length)) {
+    try { await supabase.storage.from(BUCKET).remove([chemin]) } catch { /* rien a faire */ }
+    return res.status(409).json({ error: 'La photo vient de changer : rechargez puis réessayez.' })
+  }
   if (eMaj) {
     // La colonne n'a pas bouge : on retire le fichier qu'on vient de poser
     // plutot que de laisser un orphelin, et l'ancien visuel reste en place.

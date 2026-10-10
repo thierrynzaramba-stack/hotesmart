@@ -52,7 +52,11 @@ Principe 3 de la spec : un chiffre qu'on ne compte pas proprement ne s'affiche p
   bien). Seul writer : `api/property-photo.js` (garde `reglages` en écriture sur le bien ; « Remplacer »
   n'efface l'ancien fichier qu'APRÈS l'écriture réussie du nouveau, et seulement s'il vit dans notre bucket —
   règles pures dans `lib/photo-bien.js`). Dépôt par la carte du bien dans `/biens` (clic ou glisser-déposer,
-  redimensionnement navigateur 2000 px max, aperçu). Sans photo, le fond neutre reste. **Import automatique
+  redimensionnement navigateur 2000 px max, aperçu). Sans photo, le fond neutre reste. **Sur téléphone** : toucher le
+  cadre ouvre la galerie ou l'appareil photo (`<input type=file accept=image/*>`) ; le glisser-déposer est
+  une commodité d'ordinateur, pas le seul chemin. Outillage versionné : `scripts/creer-bucket-photos.js`
+  (idempotent, remet un bucket privé en conformité) et le vérificateur de migration ÉCHOUE si le bucket
+  manque ou est privé. **Import automatique
   depuis un provider : REPORTÉ** (dette 65) — mesure du 10 octobre : 0 photo chez le partenaire pour les
   4 biens, plus aucun bien Beds24.
 - **Tuile « codes d'accès créés »** : l'INSERT du cron serrures ne pose pas `user_id`

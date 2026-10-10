@@ -4,9 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HôteSmart — Mes biens</title>
-  <link rel="stylesheet" href="/public/style.css">
-  <!-- Jetons V5 pour la zone photo (variables seulement, aucun style d'element). -->
+  <!-- Jetons V5 pour la zone photo, charges AVANT style.css : les deux
+       variables partagees (--border, --amber) restent celles de la page
+       (releve en review : l'ordre inverse re-peignait modales et bordures). -->
   <link rel="stylesheet" href="/shared/theme.css">
+  <link rel="stylesheet" href="/public/style.css">
   <style>
     /* ── Photo de couverture (lot photos, charte V5 : var(--…) seulement) ── */
     .photo-bien {
@@ -539,16 +541,22 @@
       i.onerror = () => { URL.revokeObjectURL(u); ko(new Error(T('photo.bad_type', 'Choisissez une image'))) }
       i.src = u
     })
+    // Une image sans dimensions (SVG sans width/height, fichier corrompu)
+    // donnerait un canvas 0x0 et un faux « trop lourde » (releve en review).
+    if (!img.naturalWidth || !img.naturalHeight) throw new Error(T('photo.bad_type', 'Choisissez une image'))
     const ratio = Math.min(1, 2000 / Math.max(img.naturalWidth, img.naturalHeight))
     const c = document.createElement('canvas')
     c.width = Math.round(img.naturalWidth * ratio)
     c.height = Math.round(img.naturalHeight * ratio)
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height)
+    let unBlob = null
     for (const qualite of [0.85, 0.7, 0.55]) {
       const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', qualite))
+      if (blob) unBlob = blob
       if (blob && blob.size <= 2 * 1024 * 1024) return blob
     }
-    throw new Error(T('photo.too_big', 'Image trop lourde (2 Mo max)'))
+    // Aucun blob du tout = image non rasterisable ; des blobs trop gros = trop lourde.
+    throw new Error(unBlob ? T('photo.too_big', 'Image trop lourde (2 Mo max)') : T('photo.bad_type', 'Choisissez une image'))
   }
 
   function bindPhotoZone (card, p) {
@@ -574,12 +582,23 @@
   }
 
   async function envoyerPhoto (zone, p, fichier) {
-    let etat = zone.querySelector('.photo-bien__etat')
-    if (!etat) { etat = document.createElement('span'); etat.className = 'photo-bien__etat'; zone.appendChild(etat) }
+    // L'etat de DEPART, pour tout restaurer sur echec : un apercu qui survit a
+    // un envoi rate ferait croire la photo enregistree (releve en review).
+    const htmlAvant = zone.innerHTML
+    const etaitVide = zone.classList.contains('photo-bien--vide')
+    // ⚠ L'etat se (re)pose a la FIN de chaque branche : un innerHTML
+    // intermediaire detacherait le noeud et rendrait tout message invisible.
+    const poserEtat = (texte) => {
+      let etat = zone.querySelector('.photo-bien__etat')
+      if (!etat) { etat = document.createElement('span'); etat.className = 'photo-bien__etat'; zone.appendChild(etat) }
+      etat.textContent = texte
+      return etat
+    }
+    let apercu = null
     try {
       const blob = await preparerJpeg(fichier)
       // Apercu immediat, remplace par l'URL definitive au retour du serveur.
-      const apercu = URL.createObjectURL(blob)
+      apercu = URL.createObjectURL(blob)
       let img = zone.querySelector('img')
       if (!img) {
         zone.classList.remove('photo-bien--vide')
@@ -587,7 +606,7 @@
         img = zone.querySelector('img')
       }
       img.src = apercu
-      etat.textContent = T('photo.sending', 'Envoi…')
+      poserEtat(T('photo.sending', 'Envoi de la photo…'))
       const base64 = await new Promise((ok, ko) => {
         const r = new FileReader()
         r.onload = () => ok(String(r.result).split(',')[1])
@@ -595,6 +614,8 @@
         r.readAsDataURL(blob)
       })
       const { data: { session } } = await supabase.auth.getSession()
+      // Session expiree : un message propre, jamais un TypeError brut.
+      if (!session || !session.access_token) throw new Error(T('photo.failed', 'Échec de l’envoi, réessayez'))
       const rep = await fetch('/api/property-photo', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json', ...enteteCompte() },
@@ -605,14 +626,18 @@
       p.photo_url = corps.photo_url
       img.src = corps.photo_url
       URL.revokeObjectURL(apercu)
-      etat.remove()
+      zone.querySelector('.photo-bien__etat')?.remove()
       if (!zone.querySelector('[data-photo-remplacer]')) {
         zone.insertAdjacentHTML('beforeend',
           `<button type="button" class="photo-bien__remplacer" data-photo-remplacer>${ic('i-photo')}${escapeHtml(T('photo.replace', 'Remplacer'))}</button>`)
       }
     } catch (err) {
       logger.error('Biens', 'photo', err)
-      etat.textContent = err.message || T('photo.failed', 'Échec de l’envoi')
+      if (apercu) URL.revokeObjectURL(apercu)
+      // Retour a l'etat d'avant (placeholder ou ancienne photo), PUIS le motif.
+      zone.innerHTML = htmlAvant
+      if (etaitVide) zone.classList.add('photo-bien--vide')
+      poserEtat(err.message || T('photo.failed', 'Échec de l’envoi'))
     }
   }
 

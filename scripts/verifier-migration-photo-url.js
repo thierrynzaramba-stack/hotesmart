@@ -19,12 +19,13 @@ const { createClient } = require('@supabase/supabase-js')
   const { error: e } = await sb.from('properties').select('photo_url').limit(0)
   if (e) { console.error(`  ✖ properties.photo_url : ${e.message}`); console.error('ECHEC : migration absente.'); process.exit(2) }
   console.log('  ✔ properties.photo_url lisible par son nom')
-  // Le bucket, s'il existe deja : on le dit, sans en faire un echec — il est
-  // cree par l'outillage du lot, pas par la migration SQL.
-  try {
-    const { data: b } = await sb.storage.getBucket('property-photos')
-    console.log(b ? `  bucket property-photos : present (public=${b.public})` : '  bucket property-photos : absent (cree par le lot, pas par le SQL)')
-  } catch { console.log('  bucket property-photos : absent (cree par le lot, pas par le SQL)') }
+  // Le bucket fait partie du lot (scripts/creer-bucket-photos.js) : absent ou
+  // prive, l'endpoint rend 500 ou des URL publiques qui repondent 400 — c'est
+  // un ECHEC, pas une remarque (releve en review).
+  const { data: b } = await sb.storage.getBucket('property-photos').catch(() => ({ data: null }))
+  if (!b) { console.error('  ✖ bucket property-photos ABSENT — lancer scripts/creer-bucket-photos.js'); process.exit(2) }
+  if (b.public !== true) { console.error('  ✖ bucket property-photos PRIVE — lancer scripts/creer-bucket-photos.js'); process.exit(2) }
+  console.log('  ✔ bucket property-photos present et public')
   console.log('Migration 2026-10-10-photo-url : conforme sur ce que l API permet de prouver.')
   process.exit(0)
 })().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(1) })
