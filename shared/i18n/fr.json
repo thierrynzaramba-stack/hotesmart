@@ -36,6 +36,7 @@
   "today.nights": "{n, plural, one {# nuit} other {# nuits}}",
   "today.code_sent": "code envoyé",
   "today.code_pending": "code créé, pas encore envoyé",
+  "today.send_code": "Envoyer le code",
   "today.cleaning_after": "ménage après le départ de {time}",
   "today.cleaning_after_notime": "ménage après le départ",
   "today.cleaning_confirmed": "attribué à {name}",
@@ -65,7 +66,6 @@
 
   "done.title": "Fait pour vous",
   "done.period": "7 derniers jours",
-  "done.codes": "{n, plural, one {code d’accès créé} other {codes d’accès créés}}",
   "done.cleanings": "{n, plural, one {ménage attribué} other {ménages attribués}}",
   "done.prices": "{n, plural, one {prix posé par YieldFlow} other {prix posés par YieldFlow}}",
   "done.overbooking": "{n, plural, one {surréservation détectée} other {surréservations détectées}}",
@@ -90,8 +90,7 @@
   "properties.today": "aujourd’hui",
   "properties.revenue_30": "sur 30 j",
   "properties.revenue_not_computable": "CA 30 j non calculable",
-  "properties.range": "{min} à {max} par mois",
-  "properties.range_months": "{n, plural, one {sur # mois} other {sur # mois}}",
+  "properties.range": "▼ {min} · ▲ {max}/mois",
   "properties.connect": "Relier Airbnb ou Booking.com",
   "properties.no_channel": "Aucun canal relié",
 

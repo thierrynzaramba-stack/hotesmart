@@ -115,7 +115,7 @@ const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use
 const etat = {
   aujourdHui: R.jourParis(),
   biens: [], bookings: [], menages: [], prestataires: [],
-  menagesOk: null, etatsArrivee: {}, conversations: new Set(),
+  menagesOk: null, etatsArrivee: {}, conversations: new Set(), derniersMessages: new Map(),
   taches: [], tachesOk: null,
   alarmes: [],
   parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
@@ -165,7 +165,7 @@ function renderTitre () {
   const evts = evenements()
   const arrivees = evts.filter(e => e.type === 'arrivee').length
   const departs = evts.filter(e => e.type === 'depart').length
-  const todos = evts.filter(e => e.action).length + etat.taches.length + etat.alarmes.length
+  const todos = evts.filter(e => e.action).length + tachesVisibles().length + etat.alarmes.length
   const el = $('[data-bind="summary"]')
   el.removeAttribute('data-i18n')
   el.textContent = t('today.summary', {
@@ -263,8 +263,10 @@ function renderEvenements () {
     const href = arrivee
       ? (etat.conversations.has(e.bookingId) ? lienConversation(e) : `/biens/${encodeURIComponent(e.bienId)}`)
       : '/apps/menages'
+    // Un code à envoyer porte son geste en toutes lettres (demande de
+    // Thierry) ; le bouton ouvre le fil, où l'envoi se valide.
     const fin = e.action
-      ? `<span class="btn btn--primary" style="height: 40px">${esc(t('today.view'))}</span>`
+      ? `<span class="btn btn--primary" style="height: 40px">${esc(t(e.action === 'code' ? 'today.send_code' : 'today.view'))}</span>`
       : icone('i-chevron')
     return `<a class="event" href="${esc(href)}">
       <span class="event__time num">${esc(e.heure || '')}</span>
@@ -296,18 +298,19 @@ async function chargerReservations () {
   }
 }
 
-// L'état du code d'accès (envoyé / créé non envoyé) n'existe que là : la
-// preuve « code transmis » est un message sortant qui contient le code
-// (api/messages.js, etatsDArrivee). Chargé APRÈS le premier rendu.
+// L'état du code d'accès (envoyé / créé non envoyé) et la date du dernier
+// message par conversation : la preuve « code transmis » est un message
+// sortant qui contient le code (api/messages.js, etatsDArrivee), et le
+// dernier message date l'ouverture d'une conversation (règle des tâches).
 async function chargerEtatsArrivee () {
   if (!peutLire('messages')) return
   try {
     const { conversations } = await appel('/api/messages')
     for (const c of conversations || []) {
       etat.conversations.add(String(c.bookId))
+      if (c.lastTime) etat.derniersMessages.set(String(c.bookId), c.lastTime)
       if (c.arrivee) etat.etatsArrivee[String(c.bookId)] = c.arrivee
     }
-    renderEvenements(); renderTitre()
   } catch (e) { logger.error('Aujourdhui', 'etats d\'arrivee', e) }
 }
 
@@ -333,34 +336,41 @@ function carteTache (tache, sombre) {
   const href = `/apps/agent-ai/messagerie?conv=${encodeURIComponent(tache.book_id || '')}&bien=${encodeURIComponent(tache.property_id || '')}`
   return { titre, texte, href, sombre }
 }
+// Les tâches encore OUVERTES (règle de Thierry du 10 octobre 2026 :
+// séjour non terminé OU dernier message < 7 jours) — shared/aujourdhui.js.
+function tachesVisibles () {
+  return R.tachesOuvertes(etat.taches, {
+    bookings: etat.bookings, derniersMessages: etat.derniersMessages, aujourdHui: etat.aujourdHui
+  })
+}
 function renderTaches () {
   const section = $('[data-bind="validate-section"]')
   const mobile = $('[data-bind="validate-mobile"]')
   if (!etat.tachesOk) { section.hidden = true; mobile.hidden = true; return }
   section.hidden = false
   const liste = $('[data-list="pending"]')
-  if (!etat.taches.length) {
+  const visibles = tachesVisibles()
+  if (!visibles.length) {
     liste.innerHTML = `<p class="muted small">${esc(t('validate.empty'))}</p>`
     mobile.hidden = true
     return
   }
-  const visibles = etat.taches.slice(0, 3)
-  liste.innerHTML = visibles.map(x => {
+  liste.innerHTML = visibles.slice(0, 3).map(x => {
     const c = carteTache(x)
     return `<div class="card">
       <span style="font-weight: var(--fw-semibold)">${esc(c.titre)}</span>
       ${c.texte ? `<span class="small muted clamp-2" style="line-height: 1.5">${esc(c.texte)}</span>` : ''}
       <a class="btn btn--primary" style="height: 40px" href="${esc(c.href)}">${esc(t('validate.view'))}</a>
     </div>`
-  }).join('') + (etat.taches.length > 3
-    ? `<a class="link small" href="/apps/agent-ai/messagerie">${esc(t('validate.more', { n: etat.taches.length - 3 }))}</a>` : '')
-  const premiere = carteTache(etat.taches[0])
+  }).join('') + (visibles.length > 3
+    ? `<a class="link small" href="/apps/agent-ai/messagerie">${esc(t('validate.more', { n: visibles.length - 3 }))}</a>` : '')
+  const premiere = carteTache(visibles[0])
   mobile.hidden = false
   mobile.href = premiere.href
   mobile.innerHTML = `<span class="caption" style="opacity: .8">${esc(t('validate.title'))}</span>
     <span style="font-weight: var(--fw-bold)">${esc(premiere.titre)}</span>
     ${premiere.texte ? `<span class="small clamp-2">${esc(premiere.texte)}</span>` : ''}
-    ${etat.taches.length > 1 ? `<span class="caption" style="opacity: .8">${esc(t('validate.more', { n: etat.taches.length - 1 }))}</span>` : ''}`
+    ${visibles.length > 1 ? `<span class="caption" style="opacity: .8">${esc(t('validate.more', { n: visibles.length - 1 }))}</span>` : ''}`
 }
 
 // ─── 4. Fait pour vous, 7 jours ─────────────────────────────────────────────
@@ -377,8 +387,11 @@ async function compter (table, filtre) {
 }
 async function chargerCompteurs () {
   const depuis = new Date(Date.now() - 7 * 86400000).toISOString()
+  // ⚠ PAS de tuile « codes d'accès » : l'INSERT du cron serrures ne pose pas
+  // `user_id` (bloquant pré-lancement (d) ; 122 lignes sur 145 le 10 octobre
+  // 2026, dont les 5 des 7 derniers jours) — la RLS rend donc 0, un faux zéro
+  // qui contredit la ligne d'arrivée. Dette 62 : la tuile revient avec lui.
   const defs = [
-    peutLire('reservations') && { icon: 'i-key', cle: 'done.codes', f: () => compter('access_codes', q => q.gte('created_at', depuis)) },
     peutLire('menages') && { icon: 'i-cleaning', cle: 'done.cleanings', f: () => compter('menages', q => q.gte('accepted_at', depuis).neq('status', 'cancelled')) },
     // price_display_log : RLS `user_id = auth.uid()` — lisible du seul titulaire.
     estTitulaire() && { icon: 'i-price', cle: 'done.prices', f: () => compter('price_display_log', q => q.eq('source', 'engine').gte('created_at', depuis)) },
@@ -456,16 +469,19 @@ function renderKpis () {
     const nc = `<span class="small muted">${esc(t('kpi.not_computable'))}</span>`
     $('[data-bind="revenue"]').innerHTML = tot.ca != null && devise
       ? `<span class="kpi num">${esc(monnaie(tot.ca, devise))}</span>${deltaPct(tot.caVariation)}` : nc
-    $('[data-bind="occupancy"]').innerHTML = tot.occupation != null
-      ? `<span class="kpi num">${esc(I18n.pct(tot.occupation))}</span>${deltaPoints(tot.occupationEcart)}` : nc
+    // Occupation non calculable : tuile MASQUÉE, pas de texte (demande de
+    // Thierry du 10 octobre 2026) ; le revenu, lui, dit « non calculable ».
+    if (tot.occupation != null) {
+      $('[data-bind="occupancy"]').innerHTML = `<span class="kpi num">${esc(I18n.pct(tot.occupation))}</span>${deltaPoints(tot.occupationEcart)}`
+      $('[data-bind="kpi-occupancy"]').hidden = false
+    }
     $('[data-bind="kpi-revenue"]').hidden = false
-    $('[data-bind="kpi-occupancy"]').hidden = false
     visible = true
   }
   if (etat.noteGlobale) {
     const n = etat.noteGlobale
     $('[data-bind="rating"]').innerHTML = n.moyenne != null
-      ? `<span class="kpi num row" style="gap: 6px">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(n.moyenne, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span><span class="small muted">${esc(t('kpi.reviews', { n: n.notes }))}</span>`
+      ? `<span class="kpi num row" style="gap: 6px">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(R.noteSur5(n.moyenne), { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span><span class="small muted">${esc(t('kpi.reviews', { n: n.notes }))}</span>`
       : `<span class="small muted">${esc(t('kpi.reviews', { n: 0 }))}</span>`
     $('[data-bind="kpi-rating"]').hidden = false
     visible = true
@@ -506,10 +522,10 @@ function renderBiens () {
       ca = `<span class="small muted">${esc(t('properties.revenue_not_computable'))}</span>`
     }
     const mm = chiffres && chiffres.mois
-      ? `<span class="caption muted">${esc(t('properties.range', { min: monnaie(chiffres.mois.min, b.currency), max: monnaie(chiffres.mois.max, b.currency) }))} · ${esc(t('properties.range_months', { n: chiffres.mois.mois }))}</span>`
+      ? `<span class="caption muted num">${esc(t('properties.range', { min: monnaie(chiffres.mois.min, b.currency), max: monnaie(chiffres.mois.max, b.currency) }))}</span>`
       : ''
     const etoile = note && note.moyenne != null
-      ? `<span class="property__rating">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(note.moyenne, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>` : ''
+      ? `<span class="property__rating">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(R.noteSur5(note.moyenne), { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>` : ''
     const puce = etat.menagesOk
       ? `<span class="chip">${esc(t(e.occupeCeSoir ? 'properties.occupied' : 'properties.free'))}</span>` : ''
     return `<a class="property" href="${esc(href)}">
@@ -546,7 +562,10 @@ async function init () {
   document.addEventListener('i18n:changed', () => location.reload())
 
   const user = await getUser()
-  const nom = await prenom(user)
+  const brut = await prenom(user)
+  // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
+  // la partie locale de l'e-mail, en minuscules.
+  const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
   $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
   $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
   // La création de bien n'est pas déléguée (cf. pages/biens.html).
@@ -588,11 +607,12 @@ async function init () {
   })
   nav(0)
 
-  await Promise.all([chargerReservations(), chargerTaches(), chargerAlarmes(), chargerCompteurs()])
-  nav(etat.taches.filter(x => x.status === 'pending_validation').length)
+  // /api/messages dans le même lot : la règle des tâches et l'état des codes
+  // en dépendent — un premier rendu sans lui afficherait un compte faux.
+  await Promise.all([chargerReservations(), chargerTaches(), chargerAlarmes(), chargerCompteurs(), chargerEtatsArrivee()])
+  nav(tachesVisibles().filter(x => x.status === 'pending_validation').length)
   renderEvenements(); renderTaches(); renderCompteurs(); renderBiens(); renderTitre()
 
-  chargerEtatsArrivee()
   chargerNotes()
   if (peutLire('reservations')) {
     await parPaquets(etat.biens.map(b => async () => { await chargerChiffresBien(b); renderBiens() }), 2)

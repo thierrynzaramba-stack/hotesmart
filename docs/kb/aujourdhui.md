@@ -28,11 +28,11 @@ Aucune lecture provider. Tout vient du cœur, par un endpoint existant ou une ta
 | Arrivées, départs, occupé ce soir, prochaine arrivée | `GET /api/menages?from=<jour>&to=<jour+400>` | Réservations actives uniquement (annulations et blocages exclus). Nuits = départ − arrivée. Heure = `properties.checkin_time` / `checkout_time` du bien. |
 | Ménage d'un départ | même réponse : `menages` + `prestataires` (champ `prenom`) | « ménage après le départ de {checkout_time} » ; aucune heure de ménage n'existe. Clé composite bien et réservation. Le tour : `proposee_a` fait foi, `offered_to` seulement pour une ligne d'avant la bascule (même règle que `tourDe` du planning). Une proposition en cours n'est jamais « sans prestataire ». |
 | Code d'accès d'une arrivée | `GET /api/messages`, champ `arrivee.codeEtat` | « envoyé » seulement si un message sortant contient le code (`etatsDArrivee`). Chargé après le premier affichage. La ligne ouvre le fil seulement s'il existe, sinon la fiche du bien. |
-| À valider | `agent_tasks`, statut `pending` ou `pending_validation` | Même population que la messagerie. Le badge Messages compte les seules `pending_validation`. |
-| Fait pour vous, 7 jours | comptes `head` sur `access_codes`, `menages` (`accepted_at`, hors annulés : « ménages attribués », pas « confirmés par vos prestataires » — une attribution par l'hôte ou d'office pose aussi `accepted_at`), `price_display_log` (`source = 'engine'`), `automation_incidents` (`overbooking`) | Une tuile par source lisible. `price_display_log` n'est lisible que par le titulaire (RLS `auth.uid()`). |
+| À valider | `agent_tasks`, statut `pending` ou `pending_validation` | Même population que la messagerie, **restreinte aux conversations encore ouvertes** (séjour non terminé OU dernier message < 7 jours — décision de Thierry du 10 octobre 2026 ; mesure ce jour-là : 49 → 1 à valider, 100 → 14 à traiter). Le badge Messages compte les seules `pending_validation` ouvertes. |
+| Fait pour vous, 7 jours | comptes `head` sur `menages` (`accepted_at`, hors annulés : « ménages attribués », pas « confirmés par vos prestataires » — une attribution par l'hôte ou d'office pose aussi `accepted_at`), `price_display_log` (`source = 'engine'`), `automation_incidents` (`overbooking`) | Une tuile par source lisible. `price_display_log` n'est lisible que par le titulaire (RLS `auth.uid()`). **Pas de tuile codes d'accès** : dette 62. |
 | Revenus et occupation sur 30 j | `GET /api/yield?granularite=jour`, 60 jours, par bien, sommés | CA réparti par nuit, au prix voyageur. Variation par rapport aux 30 jours précédents (infobulle). L'occupation varie en points ; son numérateur exclut les nuits vendues un jour en exception (`nuitees_hors_reference`), comme le moteur. Fenêtres calculées sur la date de Paris, jamais par pas de 24 h. |
-| Note sur 30 j | `GET /api/avis?action=cartes&periode=30j` (global, puis `&bien=` par bien) | `stats.moyenne` / `stats.notes` : la même fonction que la page Avis (`lib/stats-avis.js`). |
-| Min et max mensuels, par bien | `GET /api/yield?granularite=mois`, les 12 mois complets précédents | Un mois compte s'il était ouvert (`jours_ouverts > 0`) et si toutes ses nuits ont un prix. Le nombre de mois retenus est affiché. |
+| Note sur 30 j | `GET /api/avis?action=cartes&periode=30j` (global, puis `&bien=` par bien) | `stats.moyenne` / `stats.notes` : la même fonction que la page Avis (`lib/stats-avis.js`). **Affichée sur 5** (`noteSur5` : le cœur stocke sur 10, Booking nativement et Airbnb normalisé — vérifié le 10 octobre 2026, max observé 10 des deux côtés), le nombre d'avis inchangé. |
+| Min et max mensuels, par bien | `GET /api/yield?granularite=mois`, les 12 mois complets précédents | Un mois compte **depuis le premier mois vendu**, s'il était ouvert (`jours_ouverts > 0`) et si toutes ses nuits ont un prix. Format court : « ▼ min · ▲ max/mois ». |
 
 **Par bien, jamais en global** (règle de la spec) : CA 30 j, note 30 j, min et max mensuels. Le bloc
 « 30 jours » ne porte que des totaux.
@@ -48,6 +48,10 @@ Principe 3 de la spec : un chiffre qu'on ne compte pas proprement ne s'affiche p
   que chez Channex. Dette 59. La carte « Relier Airbnb ou Booking.com » ne s'affiche que pour un bien sans
   clé provider, un fait de la base. **La dette 59 est un prérequis du lot Logements.**
 - **Photos** : aucune colonne en base. Le cadre garde l'icône du logement.
+- **Tuile « codes d'accès créés »** : l'INSERT du cron serrures ne pose pas `user_id`
+  (bloquant pré-lancement (d) ; 122 lignes sur 145 le 10 octobre 2026, dont les 5 des 7 derniers jours).
+  La RLS rend donc 0 — un faux zéro qui contredisait la ligne d'arrivée « code créé, pas encore envoyé »
+  (laquelle est juste : le serveur lit `access_codes` sans ce filtre). Dette 62.
 - **Suggestions de prix YieldFlow « à valider »** : rien n'est en attente, le pilote applique seul.
 - **Somme en € des prix ajustés** : aucune définition (écart à quoi ?). La tuile compte les prix posés.
 - **Boutons « Envoyer » et « Modifier » d'une proposition** : la validation se fait dans le fil de
@@ -55,7 +59,8 @@ Principe 3 de la spec : un chiffre qu'on ne compte pas proprement ne s'affiche p
 - Chiffre **« non calculable »** : une nuit occupée sans prix rend le CA non calculable (jamais un
   minorant présenté comme un total). Un jour sans capacité, ou dont la capacité est **estimée**
   (`capacite_estimee` : aucune ligne d'intention ce jour-là), rend l'occupation non calculable : un taux sur un
-  dénominateur estimé n'est pas un fait compté. Un bien dont la
+  dénominateur estimé n'est pas un fait compté. **La tuile Occupation est alors MASQUÉE**, sans texte
+  (décision de Thierry du 10 octobre 2026) ; le revenu, lui, dit « non calculable ». Un bien dont la
   lecture échoue rend les totaux non calculables. Un bien non raccordé (`/api/yield` répond 409) est
   simplement hors du total : il n'a rien vendu par nous.
 

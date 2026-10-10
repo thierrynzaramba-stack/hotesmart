@@ -101,6 +101,38 @@ export function evenementsDuJour ({ bookings = [], biens = [], menages = [], pre
   return out.sort((a, b) => rang(a).localeCompare(rang(b)) || a.bien.localeCompare(b.bien))
 }
 
+// ─── Les taches encore OUVERTES (regle de Thierry, 10 octobre 2026) ─────────
+// Une tache (`agent_tasks`, pending ou pending_validation) ne compte que si sa
+// conversation est encore ouverte : sejour non termine OU dernier message de
+// moins de 7 jours. Mesure du 10 octobre : 49 « a valider » dont 1 ouverte,
+// 100 « a traiter » dont 14 — le reste est du passe qu'on n'affiche plus.
+// `bookings` : la reponse de /api/menages (departs >= aujourd'hui).
+// `derniersMessages` : Map booking_id -> dernier `lastTime` (/api/messages).
+export function tachesOuvertes (taches = [], { bookings = [], derniersMessages = new Map(),
+  aujourdHui, maintenant = Date.now() } = {}) {
+  const enCours = new Set(), enCoursSansBien = new Set()
+  for (const b of bookings) {
+    if (!b.departure || b.departure < aujourdHui) continue
+    enCours.add(`${b.propId}|${b.id}`)
+    enCoursSansBien.add(String(b.id))
+  }
+  const seuil = maintenant - 7 * 86400000
+  return taches.filter(t => {
+    if (enCours.has(`${t.property_id}|${t.book_id}`) || enCoursSansBien.has(String(t.book_id))) return true
+    const dernier = derniersMessages.get(String(t.book_id))
+    return dernier != null && new Date(dernier).getTime() >= seuil
+  })
+}
+
+// ─── La note affichee : UNE echelle, sur 5 ──────────────────────────────────
+// Le coeur stocke toutes les notes sur 10 (Booking nativement, Airbnb
+// normalise — verifie le 10 octobre 2026 : max observe 10 pour les deux).
+// Decision de Thierry : l'ecran affiche sur 5, partout, en divisant par 2.
+export function noteSur5 (moyenne) {
+  if (moyenne == null || !Number.isFinite(Number(moyenne))) return null
+  return Math.round((Number(moyenne) / 2) * 10) / 10
+}
+
 // ─── Etat de chaque bien ce soir, et sa prochaine arrivee ───────────────────
 export function etatDesBiens ({ bookings = [], biens = [], aujourdHui }) {
   const out = new Map()
@@ -165,11 +197,17 @@ export function occupation (nuitees, joursOuverts) {
 }
 
 // ─── Min / max du CA mensuel sur 12 mois, PAR BIEN ──────────────────────────
-// `realise` : les periodes mois de /api/yield. Un mois ne compte que s'il a ete
-// ouvert a la vente (jours_ouverts > 0) et que toutes ses nuits ont un prix :
-// un mois ou le bien n'existait pas n'est pas un « minimum a 0 € ».
+// `realise` : les periodes mois de /api/yield. Un mois ne compte que s'il est
+// posterieur ou egal au premier mois vendu, ouvert a la vente
+// (jours_ouverts > 0), et que toutes ses nuits ont un prix.
 export function minMaxMensuel (realise = [], moisDebut, moisFin) {
-  const mois = realise.filter(p => p.periode >= moisDebut && p.periode <= moisFin
+  // Depuis le PREMIER mois avec une reservation (decision de Thierry, 10
+  // octobre 2026) : un mois ouvert avant la premiere vente n'est pas un
+  // « minimum a 0 € », le bien n'etait pas encore commercialise.
+  const fenetre = realise.filter(p => p.periode >= moisDebut && p.periode <= moisFin)
+  const premier = fenetre.filter(p => Number(p.nuitees) > 0).map(p => p.periode).sort()[0]
+  if (!premier) return null
+  const mois = fenetre.filter(p => p.periode >= premier
     && Number(p.jours_ouverts) > 0
     && !(Number(p.nuits_a_prix_connu) < Number(p.nuitees)))
   if (!mois.length) return null

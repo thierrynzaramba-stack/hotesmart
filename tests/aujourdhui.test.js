@@ -169,17 +169,48 @@ test('variation : null sans base strictement positive', async () => {
 })
 
 // ─── Min / max mensuel ──────────────────────────────────────────────────────
-test('minMaxMensuel : seuls les mois ouverts et entierement tarifes comptent', async () => {
+test('minMaxMensuel : depuis le premier mois vendu, ouverts et entierement tarifes', async () => {
   const R = await charger()
   const mois = [
-    { periode: '2025-10', ca: 0, nuitees: 0, jours_ouverts: 0, nuits_a_prix_connu: 0 },        // bien pas encore ouvert
-    { periode: '2025-11', ca: 800, nuitees: 8, jours_ouverts: 30, nuits_a_prix_connu: 8 },
+    { periode: '2025-09', ca: 0, nuitees: 0, jours_ouverts: 30, nuits_a_prix_connu: 0 },       // OUVERT mais avant la premiere vente : exclu
+    { periode: '2025-10', ca: 0, nuitees: 0, jours_ouverts: 0, nuits_a_prix_connu: 0 },        // ferme : exclu
+    { periode: '2025-11', ca: 800, nuitees: 8, jours_ouverts: 30, nuits_a_prix_connu: 8 },     // premier mois vendu
     { periode: '2025-12', ca: 2400, nuitees: 20, jours_ouverts: 31, nuits_a_prix_connu: 20 },
     { periode: '2026-01', ca: 300, nuitees: 5, jours_ouverts: 31, nuits_a_prix_connu: 3 },     // nuits sans prix
-    { periode: '2026-02', ca: 0, nuitees: 0, jours_ouverts: 28, nuits_a_prix_connu: 0 }        // ouvert, rien vendu : vrai 0
+    { periode: '2026-02', ca: 0, nuitees: 0, jours_ouverts: 28, nuits_a_prix_connu: 0 }        // ouvert, rien vendu APRES la premiere vente : vrai 0
   ]
-  assert.deepEqual(R.minMaxMensuel(mois, '2025-10', '2026-09'), { min: 0, max: 2400, mois: 3 })
+  assert.deepEqual(R.minMaxMensuel(mois, '2025-09', '2026-09'), { min: 0, max: 2400, mois: 3 })
   assert.equal(R.minMaxMensuel([], '2025-10', '2026-09'), null)
+  // Aucun mois vendu : rien a afficher, jamais une fourchette de zeros.
+  assert.equal(R.minMaxMensuel([{ periode: '2025-11', ca: 0, nuitees: 0, jours_ouverts: 30, nuits_a_prix_connu: 0 }], '2025-10', '2026-09'), null)
+})
+
+test('tachesOuvertes : sejour non termine OU dernier message < 7 jours', async () => {
+  const R = await charger()
+  const maintenant = Date.UTC(2026, 9, 10, 12)
+  const taches = [
+    { id: 'a', book_id: 'B1', property_id: '101', status: 'pending_validation' },  // sejour en cours
+    { id: 'b', book_id: 'B2', property_id: '102', status: 'pending' },             // sejour fini, message d'hier
+    { id: 'c', book_id: 'B3', property_id: '101', status: 'pending_validation' },  // sejour fini, message vieux de 8 j
+    { id: 'd', book_id: 'B4', property_id: '101', status: 'pending' }              // rien de connu : fermee
+  ]
+  const ouvertes = R.tachesOuvertes(taches, {
+    aujourdHui: '2026-10-10', maintenant,
+    bookings: [{ id: 'B1', propId: '101', departure: '2026-10-12' }],
+    derniersMessages: new Map([
+      ['B2', new Date(maintenant - 1 * 86400000).toISOString()],
+      ['B3', new Date(maintenant - 8 * 86400000).toISOString()]
+    ])
+  })
+  assert.deepEqual(ouvertes.map(x => x.id), ['a', 'b'])
+})
+
+test('noteSur5 : le coeur stocke sur 10, l\'ecran affiche sur 5', async () => {
+  const R = await charger()
+  assert.equal(R.noteSur5(9.4), 4.7)
+  assert.equal(R.noteSur5(10), 5)
+  assert.equal(R.noteSur5(9.57), 4.8)
+  assert.equal(R.noteSur5(null), null)
 })
 
 test('douzeMoisComplets : les 12 mois qui precedent le mois en cours', async () => {
@@ -268,6 +299,12 @@ test('la page ne parle a aucun provider et n\'utilise pas channel-property (appe
   for (const interdit of ['/api/beds24', '/api/channel-property', '/api/channel-mapping', 'beds24.com', 'channex', '/api/serrures']) {
     assert.ok(!html.toLowerCase().includes(interdit.toLowerCase()), `appel interdit : ${interdit}`)
   }
+})
+
+test('pas de tuile access_codes tant que l\'INSERT du cron ne pose pas user_id (dette 62)', () => {
+  const html = sansCommentaires(lire('pages/aujourdhui.html'))
+  assert.ok(!html.includes("'access_codes'"), 'la RLS rend 0 sur les lignes sans user_id : un faux zero')
+  assert.ok(!/done\.codes/.test(html), 'la tuile codes ne revient qu\'avec le bloquant (d)')
 })
 
 test('chaque fetch de la page pose X-Compte', () => {
