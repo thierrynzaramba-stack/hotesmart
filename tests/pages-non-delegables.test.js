@@ -63,7 +63,7 @@ const NON_DELEGABLES = [
 // Pages qui fonctionnent RÉELLEMENT sur le compte courant : elles ne doivent
 // surtout pas porter le garde-fou, sinon un membre n'a plus rien à consulter.
 const DELEGABLES = [
-  'pages/index.html',               // biens via channel-property
+  'pages/aujourdhui.html',          // accueil V5 : endpoints compteDelegue + tables sous RLS, compteCourant()
   'pages/biens.html',               // idem
   'pages/biens-calendrier.html',    // listProperties + calendrier par ressource
   'pages/calendrier-mobile.html',   // idem
@@ -163,6 +163,7 @@ test('RECENSEMENT : toute page authentifiée est classée', () => {
     'pages/login.html', 'pages/forgot-password.html', 'pages/reset-password.html',
     'pages/airbnb-retour.html', 'pages/guide.html', 'pages/invitation.html',
     'pages/diagnostic.html', 'pages/channels-test.html',
+    'pages/index.html',          // simple redirection vers /pages/aujourdhui (refonte UI V5, lot 1)
     'apps/menages/public.html',  // PWA prestataire : jeton, pas de session
     'apps/yield/evenements.html', // redirection vers la pop-up de prix.html (22 sept. 2026), aucune session
     'pages/book.html'            // moteur de reservation : page VOYAGEUR,

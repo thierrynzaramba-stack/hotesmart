@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="fr">
+<html lang="fr" dir="auto">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -9,8 +9,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shared/theme.css">
 <link rel="stylesheet" href="/shared/ui.css">
-<!-- RÈGLES : aucun hexa, aucun texte en dur, aucune icône dessinée ici.
-     Couleurs → theme.css · Textes → i18n/*.json · Icônes → icons.svg -->
+<!-- PAGE « AUJOURD'HUI » — refonte UI V5, lot 1. Spec : docs/specs/spec-refonte-ui-v5.md §4.
+     KB : docs/kb/aujourdhui.md (sources de chaque chiffre, et ce qui n'est PAS affiché).
+     RÈGLES : aucun hexa, aucun texte en dur, aucune icône dessinée ici.
+     Couleurs → theme.css · Textes → i18n/*.json · Icônes → icons.svg
+     Règles de comptage → shared/aujourdhui.js (fonctions pures, testées). -->
 </head>
 <body>
 
@@ -19,176 +22,564 @@
     <img src="/shared/logo.svg" width="34" height="34" alt="">
     <span>HôteSmart</span>
   </a>
-  <nav class="topbar__nav" aria-label="Navigation"><!-- rempli par nav.js --></nav>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
   <div class="topbar__actions">
-    <button class="btn btn--secondary btn--icon" data-i18n-attr="aria-label:nav.notifications">
-      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-bell"/></svg>
-    </button>
-    <button class="btn btn--secondary" style="padding-inline: 14px 8px" data-i18n-attr="aria-label:nav.menu">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
-      <span class="avatar" data-bind="initials">TH</span>
+      <span class="avatar" data-bind="initials"></span>
     </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
   </div>
 </header>
 
 <main class="page">
 
+  <!-- Alarme de surréservation : reprise de l'ancien accueil (pages/index.html).
+       Son bouton est le SEUL moyen d'arrêter la réémission des SMS
+       (spec-reservation-manuelle.md §4). Vide et invisible sans alarme. -->
+  <div class="stack" data-list="alarms" hidden></div>
+
   <!-- 1. Titre -->
   <div class="row" style="flex-wrap: wrap; align-items: flex-end; gap: var(--gap-m)">
     <div style="flex: 1 1 300px">
-      <h1 class="h1" data-i18n="today.greeting" data-i18n-vars='{"name":"Thierry"}'></h1>
-      <p class="muted" style="margin-top: 6px; font-size: 16px" data-bind="summary"></p>
+      <h1 class="h1" data-bind="greeting"></h1>
+      <p class="muted" style="margin-top: 6px; font-size: 16px" data-bind="summary" data-i18n="common.loading"></p>
     </div>
-    <a class="btn btn--outline btn--lg" href="/pages/logements/nouveau">
+    <a class="btn btn--outline btn--lg" href="/biens/nouveau" data-bind="add-property" hidden>
       <svg class="icon" style="width:16px;height:16px" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg>
       <span data-i18n="today.add_property"></span>
     </a>
   </div>
+
+  <!-- Mobile : « À valider » devient UNE carte sombre en tête (spec §4) -->
+  <a class="card card--dark only-mobile" data-bind="validate-mobile" hidden></a>
 
   <!-- 2 + 3. Aujourd'hui / À valider -->
   <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 32px; align-items: start">
 
     <section style="grid-column: span 2; min-width: 0" aria-labelledby="h-today">
       <h2 class="h2" id="h-today" style="margin-bottom: 8px" data-i18n="today.title"></h2>
-      <div data-list="events">
-        <!-- Modèle d'une ligne (à générer depuis bookings_snapshot) : -->
-        <a class="event" href="#">
-          <span class="event__time num">11:00</span>
-          <span class="tile-icon" data-i18n-attr="aria-label:today.departure"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-departure"/></svg></span>
-          <span style="min-width: 0">
-            <span class="event__title"><span data-i18n="today.departure"></span> · Cœur de vie 23</span>
-            <span class="event__sub">Famille Martin · <span data-i18n="today.cleaning_confirmed" data-i18n-vars='{"time":"14:00","name":"Régina"}'></span></span>
-          </span>
-          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
-        </a>
-        <a class="event" href="#">
-          <span class="event__time num">16:00</span>
-          <span class="tile-icon" data-i18n-attr="aria-label:today.arrival"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-arrival"/></svg></span>
-          <span style="min-width: 0">
-            <span class="event__title"><span data-i18n="today.arrival"></span> · La bulle</span>
-            <span class="event__sub">Sofia G. · <span data-i18n="today.nights" data-i18n-vars='{"n":2}'></span> · <span data-i18n="today.code_sent"></span></span>
-          </span>
-          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
-        </a>
-        <!-- Action attendue : pastille ambre-soft + bouton principal dans la ligne -->
-        <div class="event">
-          <span class="event__time num">17:00</span>
-          <span class="tile-icon tile-icon--pending" data-i18n-attr="aria-label:today.arrival"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-arrival"/></svg></span>
-          <span style="min-width: 0">
-            <span class="event__title"><span data-i18n="today.arrival"></span> · Ofuro Futari</span>
-            <span class="event__sub">Lucas P. · <span data-i18n="today.nights" data-i18n-vars='{"n":1}'></span> · <span data-i18n="today.code_pending"></span></span>
-          </span>
-          <button class="btn btn--primary" style="height: 40px" data-i18n="today.send_code"></button>
-        </div>
-      </div>
+      <div data-list="events"><p class="muted" data-i18n="common.loading"></p></div>
     </section>
 
-    <section class="stack" style="gap: 12px" aria-labelledby="h-validate">
+    <section class="stack only-desktop" style="gap: 12px" aria-labelledby="h-validate" data-bind="validate-section" hidden>
       <h2 class="h2" id="h-validate" data-i18n="validate.title"></h2>
-      <div data-list="pending">
-        <div class="card">
-          <span style="font-weight: var(--fw-semibold)" data-i18n="validate.reply_to" data-i18n-vars='{"name":"Emma"}'></span>
-          <span class="small muted" style="line-height: 1.5">« Oui, le parking est inclus, il se trouve au fond de la cour. »</span>
-          <span class="row">
-            <button class="btn btn--primary" style="flex: 1; height: 40px" data-i18n="validate.send"></button>
-            <button class="btn btn--secondary" style="height: 40px" data-i18n="validate.edit"></button>
-          </span>
-        </div>
-        <div class="card" style="margin-top: 12px">
-          <span style="font-weight: var(--fw-semibold)">Samedi · Cœur de vie 23 : <span class="num">118 € → 130 €</span></span>
-          <span class="small muted" style="line-height: 1.5">Forte demande à Bagnères ce week-end.</span>
-          <span class="row">
-            <button class="btn btn--primary" style="flex: 1; height: 40px" data-i18n="validate.apply"></button>
-            <button class="btn btn--secondary" style="height: 40px" data-i18n="validate.ignore"></button>
-          </span>
-        </div>
-      </div>
-      <a class="link small" href="/settings#autonomie" data-i18n="validate.settings"></a>
+      <div class="stack" style="gap: 12px" data-list="pending"></div>
+      <a class="link small" href="/apps/agent-ai/config" data-i18n="validate.settings"></a>
     </section>
   </div>
 
-  <!-- 4. Fait pour vous -->
-  <section class="stack" style="gap: var(--gap-m)" aria-labelledby="h-done">
+  <!-- 4. Fait pour vous : seulement les tuiles COMPTÉES (voir le KB) -->
+  <section class="stack" style="gap: var(--gap-m)" aria-labelledby="h-done" data-bind="done-section" hidden>
     <div class="section-head"><h2 class="h2" id="h-done" data-i18n="done.title"></h2><span class="muted" data-i18n="done.period"></span></div>
-    <div class="grid-auto scroll-x" data-list="done">
-      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-message"/></svg><span class="kpi num">14</span><span class="caption" data-i18n="done.messages" data-i18n-vars='{"langs":3}'></span></div>
-      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-key"/></svg><span class="kpi num">6</span><span class="caption" data-i18n="done.codes"></span></div>
-      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-cleaning"/></svg><span class="kpi num">4</span><span class="caption" data-i18n="done.cleanings"></span></div>
-      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-price"/></svg><span class="kpi num">+140 €</span><span class="caption" data-i18n="done.prices" data-i18n-vars='{"n":2}'></span></div>
-      <div class="stat"><svg class="icon icon--lg" aria-hidden="true"><use href="/shared/icons.svg#i-shield"/></svg><span class="kpi num">0</span><span class="caption" data-i18n="done.overbooking"></span></div>
-    </div>
+    <div class="grid-auto scroll-x" data-list="done"></div>
   </section>
 
-  <!-- 5. 30 jours -->
-  <section style="display: flex; flex-wrap: wrap; gap: 48px; padding: 28px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line)">
-    <div class="stack" style="gap: 4px"><span class="small muted" data-i18n="kpi.revenue"></span><span class="row" style="align-items: baseline; gap: 10px"><span class="kpi num" data-bind="revenue30">4 860 €</span><span class="small" style="font-weight: var(--fw-semibold)">▲ 12 %</span></span></div>
-    <div class="stack" style="gap: 4px"><span class="small muted" data-i18n="kpi.rating"></span><span class="row" style="align-items: baseline; gap: 10px"><span class="kpi num row" style="gap: 6px"><svg class="icon icon--fill" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>4,9</span><span class="small muted" data-i18n="kpi.reviews" data-i18n-vars='{"n":14}'></span></span></div>
-    <div class="stack" style="gap: 4px"><span class="small muted" data-i18n="kpi.occupancy"></span><span class="row" style="align-items: baseline; gap: 10px"><span class="kpi num">78 %</span><span class="small muted" style="font-weight: var(--fw-semibold)">▼ 3 %</span></span></div>
+  <!-- 5. 30 jours (totaux du compte) -->
+  <section style="display: flex; flex-wrap: wrap; gap: 48px; padding: 28px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line)" data-bind="kpi-section" hidden>
+    <div class="stack" style="gap: 4px" data-bind="kpi-revenue" hidden><span class="small muted" data-i18n="kpi.revenue"></span><span class="row" style="align-items: baseline; gap: 10px" data-bind="revenue"></span></div>
+    <div class="stack" style="gap: 4px" data-bind="kpi-rating" hidden><span class="small muted" data-i18n="kpi.rating"></span><span class="row" style="align-items: baseline; gap: 10px" data-bind="rating"></span></div>
+    <div class="stack" style="gap: 4px" data-bind="kpi-occupancy" hidden><span class="small muted" data-i18n="kpi.occupancy"></span><span class="row" style="align-items: baseline; gap: 10px" data-bind="occupancy"></span></div>
   </section>
 
   <!-- 6. Logements -->
-  <section class="stack" style="gap: 20px" aria-labelledby="h-props">
-    <div class="section-head"><h2 class="h2" id="h-props" data-i18n="properties.title"></h2><a class="link small" href="/pages/logements" data-i18n="properties.see_all"></a></div>
-    <div class="scroll-x" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--gap-l)" data-list="properties">
-
-      <a class="property" href="/pages/logements/ofuro-futari">
-        <span class="property__photo"><img src="" alt="" onerror="this.remove()"><span class="chip" data-i18n="properties.occupied"></span></span>
-        <span class="property__name"><span>Ofuro Futari</span><span class="property__rating"><svg class="icon icon--fill" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>5,0</span></span>
-        <span class="small muted">Toulouse · <span data-i18n="properties.next_arrival" data-i18n-vars='{"when":"17:00"}'></span></span>
-        <span><strong class="num">1 240 €</strong> <span class="muted"><span data-i18n="properties.revenue_30"></span> · ▲ 18 %</span></span>
-        <span class="row caption muted" style="gap: 10px"><span class="bar"><span style="width: 60%"></span></span><span data-i18n="properties.autonomy" data-i18n-vars='{"pct":60}'></span></span>
-      </a>
-
-      <a class="property" href="/pages/logements/coeur-de-vie-23">
-        <span class="property__photo"><img src="" alt="" onerror="this.remove()"><span class="chip" data-i18n="properties.free"></span></span>
-        <span class="property__name"><span>Cœur de vie 23</span><span class="property__rating"><svg class="icon icon--fill" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>4,8</span></span>
-        <span class="small muted">Bagnères-de-Bigorre · <span data-i18n="properties.next_arrival" data-i18n-vars='{"when":"dim. 15:00"}'></span></span>
-        <span><strong class="num">1 590 €</strong> <span class="muted"><span data-i18n="properties.revenue_30"></span> · ▲ 6 %</span></span>
-        <!-- Le seul moment ambre de l'écran après le badge : « tout est automatisé » -->
-        <span class="row caption" style="gap: 10px; color: var(--amber-text); font-weight: var(--fw-semibold)"><span class="bar bar--amber"><span style="width: 100%"></span></span><span data-i18n="properties.full_auto"></span></span>
-      </a>
-
-      <a class="property" href="/pages/logements/la-bulle">
-        <span class="property__photo"><img src="" alt="" onerror="this.remove()"><span class="chip" data-i18n="properties.occupied"></span></span>
-        <span class="property__name"><span>La bulle</span><span class="property__rating"><svg class="icon icon--fill" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>4,9</span></span>
-        <span class="small muted">Bagnères-de-Bigorre · <span data-i18n="properties.next_arrival" data-i18n-vars='{"when":"16:00"}'></span></span>
-        <span><strong class="num">1 410 €</strong> <span class="muted"><span data-i18n="properties.revenue_30"></span> · ▼ 4 %</span></span>
-        <span class="row caption muted" style="gap: 10px"><span class="bar"><span style="width: 85%"></span></span><span data-i18n="properties.autonomy" data-i18n-vars='{"pct":85}'></span></span>
-      </a>
-
-      <a class="property" href="/pages/logements/colomiers/connexions">
-        <span class="property__photo property__photo--empty">
-          <svg class="icon" style="width:36px;height:36px" aria-hidden="true"><use href="/shared/icons.svg#i-link"/></svg>
-          <span class="link caption" style="color: var(--ink)" data-i18n="properties.connect"></span>
-        </span>
-        <span class="property__name"><span>Colomiers</span></span>
-        <span class="small muted" data-i18n="properties.no_channel"></span>
-      </a>
-    </div>
+  <section class="stack" style="gap: 20px" aria-labelledby="h-props" data-bind="props-section" hidden>
+    <div class="section-head"><h2 class="h2" id="h-props" data-i18n="properties.title"></h2><a class="link small" href="/biens" data-i18n="properties.see_all"></a></div>
+    <div class="property-grid scroll-x" data-list="properties"></div>
   </section>
 </main>
 
-<nav class="bottombar" aria-label="Navigation"><!-- rempli par nav.js --></nav>
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
 
 <script src="/shared/i18n/i18n.js"></script>
 <script src="/shared/nav.js"></script>
-<script>
-(async () => {
-  await I18n.init();
-  HSNav.render({ pendingMessages: 2 });
+<script type="module">
+import { requireAuth } from '/components/auth-guard.js'
+import { supabase, getUser, signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+// ⚠ `enteteCompte()` sur chaque fetch : les endpoints lus ici honorent X-Compte
+// (compteDelegue) ; sans l'en-tête, un membre verrait SON compte pendant que
+// les lectures Supabase, juste à côté, lisent le compte consulté.
+import { compteCourant, moi, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
+  from '/shared/compte-courant.js'
+import * as R from '/shared/aujourdhui.js'
 
-  // Sous-titre compté — jamais de concaténation à la main
-  const now = new Date();
-  document.querySelector('[data-bind="summary"]').textContent = I18n.t('today.summary', {
-    date: I18n.date(now),
-    arrivals: I18n.t('today.arrivals', { n: 2 }),
-    departures: I18n.t('today.departures', { n: 1 }),
-    todos: I18n.t('today.todos', { n: 1 }),
-  });
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
 
-  // Re-traduire les textes calculés quand la langue change
-  document.addEventListener('i18n:changed', () => location.reload());
-})();
+// ─── État de la page : chaque lecture le complète, chaque rendu le relit ────
+const etat = {
+  aujourdHui: R.jourParis(),
+  biens: [], bookings: [], menages: [], prestataires: [],
+  menagesOk: null, etatsArrivee: {},
+  taches: [], tachesOk: null,
+  alarmes: [],
+  parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
+  compteurs: []
+}
+
+// fetch d'un endpoint, avec la session et le compte consulté.
+async function appel (chemin) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const r = await fetch(chemin, {
+    headers: { Authorization: 'Bearer ' + session.access_token, ...enteteCompte() }
+  })
+  const corps = await r.json().catch(() => ({}))
+  if (!r.ok) { const e = new Error(corps.error || `HTTP ${r.status}`); e.status = r.status; throw e }
+  return corps
+}
+
+// Exécute des tâches asynchrones par paquets : /api/yield lit tout l'historique
+// du compte à chaque appel, on ne lance pas dix lectures d'un coup.
+async function parPaquets (taches, taille) {
+  for (let i = 0; i < taches.length; i += taille) {
+    await Promise.allSettled(taches.slice(i, i + taille).map(f => f()))
+  }
+}
+
+const monnaie = (n, devise) => I18n.money(n, devise || 'EUR')
+
+// ▲ / ▼ / = + valeur ; jamais la couleur seule (spec §2, statuts).
+function delta (v, formatte) {
+  if (v == null) return ''
+  // Le sens suit la valeur AFFICHÉE : « ▼ 0 % » pour -0,3 % se contredirait.
+  const arrondi = Math.round(v * 100)
+  const cle = arrondi > 0 ? 'kpi.up' : arrondi < 0 ? 'kpi.down' : 'kpi.same'
+  return `<span class="delta" title="${esc(t('kpi.delta_hint'))}">${esc(t(cle, { v: formatte }))}</span>`
+}
+const deltaPct = v => delta(v, v == null ? '' : I18n.pct(Math.abs(v)))
+const deltaPoints = v => delta(v, v == null ? '' : t('kpi.points', { v: I18n.num(Math.abs(v * 100), { maximumFractionDigits: 0 }) }))
+
+// ─── 1. Titre et sous-titre comptés ─────────────────────────────────────────
+function renderTitre () {
+  const evts = evenements()
+  const arrivees = evts.filter(e => e.type === 'arrivee').length
+  const departs = evts.filter(e => e.type === 'depart').length
+  const todos = evts.filter(e => e.action).length + etat.taches.length + etat.alarmes.length
+  const el = $('[data-bind="summary"]')
+  el.removeAttribute('data-i18n')
+  el.textContent = t('today.summary', {
+    date: I18n.date(new Date()),
+    arrivals: t('today.arrivals', { n: arrivees }),
+    departures: t('today.departures', { n: departs }),
+    todos: t('today.todos', { n: todos })
+  })
+}
+
+// ─── Alarmes de surréservation ──────────────────────────────────────────────
+function nomDuBien (ref) {
+  const b = etat.biens.find(x => String(x.id) === String(ref) || String(x.provider_property_id) === String(ref))
+  return b ? b.name : null
+}
+function renderAlarmes () {
+  const zone = $('[data-list="alarms"]')
+  zone.hidden = !etat.alarmes.length
+  const acquittable = peutEcrire('reservations')
+  zone.innerHTML = etat.alarmes.map(a => {
+    const nom = nomDuBien(a.property_id)
+    return `<div class="alert" role="alert">
+      ${icone('i-alert', 'icon icon--lg')}
+      <span class="alert__title">${esc(nom ? t('alarm.title', { name: nom }) : t('alarm.title_anon'))}</span>
+      <span class="small">${esc(a.detail?.message || t('alarm.default'))}</span>
+      <span class="caption muted">${esc(t('alarm.since', { date: I18n.date(new Date(a.created_at), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) }))}</span>
+      ${acquittable ? `<button type="button" class="btn btn--primary" data-acquitter="${esc(a.id)}">${esc(t('alarm.ack'))}</button>` : ''}
+    </div>`
+  }).join('')
+  zone.querySelectorAll('[data-acquitter]').forEach(b => b.addEventListener('click', () => acquitter(b)))
+}
+async function chargerAlarmes () {
+  try {
+    const { alarmes } = await appel('/api/incidents-acquitter?type=overbooking')
+    etat.alarmes = alarmes || []
+  } catch (e) { logger.error('Aujourdhui', 'alarmes', e) }
+  renderAlarmes(); renderTitre()
+}
+async function acquitter (b) {
+  b.disabled = true
+  b.textContent = t('alarm.acking')
+  try {
+    const { data: { session } } = await supabase.auth.getSession()
+    const rep = await fetch('/api/incidents-acquitter', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json', ...enteteCompte() },
+      body: JSON.stringify({ id: b.dataset.acquitter })
+    })
+    if (!rep.ok) throw new Error('echec')
+    await chargerAlarmes()
+  } catch (e) {
+    b.disabled = false
+    b.textContent = t('alarm.retry')
+  }
+}
+
+// ─── 2. Aujourd'hui : arrivées et départs ───────────────────────────────────
+function evenements () {
+  return R.evenementsDuJour({
+    bookings: etat.bookings, biens: etat.biens, menages: etat.menages,
+    prestataires: etat.prestataires, etatsArrivee: etat.etatsArrivee, aujourdHui: etat.aujourdHui
+  })
+}
+function lienConversation (e) {
+  return `/apps/agent-ai/messagerie?conv=${encodeURIComponent(e.bookingId)}&bien=${encodeURIComponent(e.bienRef)}`
+}
+function phraseMenage (m, heure) {
+  const parts = [heure ? t('today.cleaning_after', { time: heure }) : t('today.cleaning_after_notime')]
+  const s = m.statut
+  if (s === 'accepted' && m.prestataire) parts.push(t('today.cleaning_confirmed', { name: m.prestataire }))
+  else if (s === 'started' && m.prestataire) parts.push(t('today.cleaning_started', { name: m.prestataire }))
+  else if (s === 'completed' && m.prestataire) parts.push(t('today.cleaning_done', { name: m.prestataire }))
+  else if (s === 'offered' && m.proposeeA) parts.push(t('today.cleaning_offered', { name: m.proposeeA }))
+  else if (s === 'unassigned' || s === 'orphaned') parts.push(t('today.cleaning_unassigned'))
+  return parts.join(', ')
+}
+function renderEvenements () {
+  const zone = $('[data-list="events"]')
+  if (etat.menagesOk === false) { zone.innerHTML = `<p class="muted">${esc(t('today.unavailable'))}</p>`; return }
+  const evts = evenements()
+  if (!evts.length) { zone.innerHTML = `<p class="muted">${esc(t('today.empty'))}</p>`; return }
+  const lireMessages = peutLire('messages')
+  zone.innerHTML = evts.map(e => {
+    const arrivee = e.type === 'arrivee'
+    const libelle = t(arrivee ? 'today.arrival' : 'today.departure')
+    const sous = [e.voyageur || t('today.guest')]
+    if (arrivee) {
+      if (e.nuits != null) sous.push(t('today.nights', { n: e.nuits }))
+      if (e.codeEtat === 'transmis') sous.push(t('today.code_sent'))
+      else if (e.codeEtat === 'cree') sous.push(t('today.code_pending'))
+    } else {
+      sous.push(phraseMenage(e.menage, e.heure))
+    }
+    const href = arrivee
+      ? (lireMessages ? lienConversation(e) : `/biens/${encodeURIComponent(e.bienId)}`)
+      : '/apps/menages'
+    const fin = e.action
+      ? `<span class="btn btn--primary" style="height: 40px">${esc(t('today.view'))}</span>`
+      : icone('i-chevron')
+    return `<a class="event" href="${esc(href)}">
+      <span class="event__time num">${esc(e.heure || '')}</span>
+      <span class="tile-icon${e.action ? ' tile-icon--pending' : ''}" role="img" aria-label="${esc(libelle)}">${icone(arrivee ? 'i-arrival' : 'i-departure', 'icon icon--lg')}</span>
+      <span style="min-width: 0">
+        <span class="event__title">${esc(libelle)} · ${esc(e.bien)}</span>
+        <span class="event__sub">${esc(sous.join(' · '))}</span>
+      </span>
+      ${fin}
+    </a>`
+  }).join('')
+}
+
+async function chargerReservations () {
+  if (!peutLire('menages')) { etat.menagesOk = false; return }
+  try {
+    // Les réservations ACTIVES dont le départ est aujourd'hui ou plus tard :
+    // les arrivées et départs du jour, « occupé ce soir » et la prochaine
+    // arrivée. Lues par l'endpoint du planning ménage (coeur seul, aucun
+    // provider), avec les ménages et les prestataires du même compte.
+    const r = await appel(`/api/menages?from=${etat.aujourdHui}&to=${R.jourParis(Date.now(), 400)}`)
+    etat.bookings = r.bookings || []
+    etat.menages = r.menages || []
+    etat.prestataires = r.prestataires || []
+    etat.menagesOk = true
+  } catch (e) {
+    logger.error('Aujourdhui', 'reservations', e)
+    etat.menagesOk = false
+  }
+}
+
+// L'état du code d'accès (envoyé / créé non envoyé) n'existe que là : la
+// preuve « code transmis » est un message sortant qui contient le code
+// (api/messages.js, etatsDArrivee). Chargé APRÈS le premier rendu.
+async function chargerEtatsArrivee () {
+  if (!peutLire('messages')) return
+  try {
+    const { conversations } = await appel('/api/messages')
+    for (const c of conversations || []) {
+      if (c.arrivee) etat.etatsArrivee[String(c.bookId)] = c.arrivee
+    }
+    renderEvenements(); renderTitre()
+  } catch (e) { logger.error('Aujourdhui', 'etats d\'arrivee', e) }
+}
+
+// ─── 3. À valider ───────────────────────────────────────────────────────────
+async function chargerTaches () {
+  if (!peutLire('messages')) return
+  // Lecture directe, comme la messagerie : agent_tasks a une policy RLS
+  // (`can_read(user_id, 'messages', property_id)`), le périmètre s'applique.
+  const { data, error } = await supabase.from('agent_tasks')
+    .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
+    .eq('user_id', compteCourant())
+    .in('status', ['pending', 'pending_validation'])
+    .order('created_at', { ascending: false })
+    .limit(200)
+  if (error) { logger.error('Aujourdhui', 'taches', error); etat.tachesOk = false; return }
+  etat.taches = data || []
+  etat.tachesOk = true
+}
+function carteTache (tache, sombre) {
+  const titre = tache.status === 'pending_validation' && tache.guest_name
+    ? t('validate.reply_to', { name: tache.guest_name }) : t('validate.task')
+  const texte = tache.status === 'pending_validation' && tache.suggested_reply ? tache.suggested_reply : (tache.summary || '')
+  const href = `/apps/agent-ai/messagerie?conv=${encodeURIComponent(tache.book_id || '')}&bien=${encodeURIComponent(tache.property_id || '')}`
+  return { titre, texte, href, sombre }
+}
+function renderTaches () {
+  const section = $('[data-bind="validate-section"]')
+  const mobile = $('[data-bind="validate-mobile"]')
+  if (!etat.tachesOk) { section.hidden = true; mobile.hidden = true; return }
+  section.hidden = false
+  const liste = $('[data-list="pending"]')
+  if (!etat.taches.length) {
+    liste.innerHTML = `<p class="muted small">${esc(t('validate.empty'))}</p>`
+    mobile.hidden = true
+    return
+  }
+  const visibles = etat.taches.slice(0, 3)
+  liste.innerHTML = visibles.map(x => {
+    const c = carteTache(x)
+    return `<div class="card">
+      <span style="font-weight: var(--fw-semibold)">${esc(c.titre)}</span>
+      ${c.texte ? `<span class="small muted clamp-2" style="line-height: 1.5">${esc(c.texte)}</span>` : ''}
+      <a class="btn btn--primary" style="height: 40px" href="${esc(c.href)}">${esc(t('validate.view'))}</a>
+    </div>`
+  }).join('') + (etat.taches.length > 3
+    ? `<a class="link small" href="/apps/agent-ai/messagerie">${esc(t('validate.more', { n: etat.taches.length - 3 }))}</a>` : '')
+  const premiere = carteTache(etat.taches[0])
+  mobile.hidden = false
+  mobile.href = premiere.href
+  mobile.innerHTML = `<span class="caption" style="opacity: .8">${esc(t('validate.title'))}</span>
+    <span style="font-weight: var(--fw-bold)">${esc(premiere.titre)}</span>
+    ${premiere.texte ? `<span class="small clamp-2">${esc(premiere.texte)}</span>` : ''}
+    ${etat.taches.length > 1 ? `<span class="caption" style="opacity: .8">${esc(t('validate.more', { n: etat.taches.length - 1 }))}</span>` : ''}`
+}
+
+// ─── 4. Fait pour vous, 7 jours ─────────────────────────────────────────────
+// Chaque tuile est une REQUÊTE DE COMPTE sur le coeur, et n'apparaît que si le
+// profil a le droit de lire la table (sinon la RLS rendrait 0, un faux zéro).
+// « Messages envoyés » n'y est PAS : message_sent_log est aussi écrit en Mode
+// Test et ne dit pas si le voyageur a reçu le message (KB aujourdhui.md §3).
+async function compter (table, filtre) {
+  let q = supabase.from(table).select('id', { count: 'exact', head: true }).eq('user_id', compteCourant())
+  q = filtre(q)
+  const { count, error } = await q
+  if (error) { logger.error('Aujourdhui', `compte ${table}`, error); return null }
+  return count
+}
+async function chargerCompteurs () {
+  const depuis = new Date(Date.now() - 7 * 86400000).toISOString()
+  const defs = [
+    peutLire('reservations') && { icon: 'i-key', cle: 'done.codes', f: () => compter('access_codes', q => q.gte('created_at', depuis)) },
+    peutLire('menages') && { icon: 'i-cleaning', cle: 'done.cleanings', f: () => compter('menages', q => q.gte('accepted_at', depuis).neq('status', 'cancelled')) },
+    // price_display_log : RLS `user_id = auth.uid()` — lisible du seul titulaire.
+    estTitulaire() && { icon: 'i-price', cle: 'done.prices', f: () => compter('price_display_log', q => q.eq('source', 'engine').gte('created_at', depuis)) },
+    peutLire('reglages') && { icon: 'i-shield', cle: 'done.overbooking', f: () => compter('automation_incidents', q => q.eq('type', 'overbooking').gte('created_at', depuis)) }
+  ].filter(Boolean)
+  const valeurs = await Promise.all(defs.map(d => d.f()))
+  etat.compteurs = defs.map((d, i) => ({ ...d, n: valeurs[i] })).filter(d => d.n != null)
+}
+function renderCompteurs () {
+  const section = $('[data-bind="done-section"]')
+  section.hidden = !etat.compteurs.length
+  $('[data-list="done"]').innerHTML = etat.compteurs.map(c => `<div class="stat">
+    ${icone(c.icon, 'icon icon--lg')}
+    <span class="kpi num">${esc(I18n.num(c.n))}</span>
+    <span class="caption">${esc(t(c.cle, { n: c.n }))}</span>
+  </div>`).join('')
+}
+
+// ─── 5 et 6. Chiffres 30 jours et logements ─────────────────────────────────
+// Source : /api/yield (CA réparti par nuit, au prix VOYAGEUR — jamais le
+// `amount` des réservations, qui est un net hôte pour Airbnb).
+async function chargerChiffresBien (b) {
+  if (!b.provider_property_id) { etat.parBien.set(b.id, { nonRaccorde: true }); return }
+  const fin = R.jourParis(Date.now(), -1)
+  const debut = R.jourParis(Date.now(), -60)
+  const milieu = R.jourParis(Date.now(), -30)
+  const avantMilieu = R.jourParis(Date.now(), -31)
+  const douze = R.douzeMoisComplets(etat.aujourdHui)
+  const base = `/api/yield?property_id=${encodeURIComponent(b.id)}`
+  try {
+    const j = await appel(`${base}&debut=${debut}&fin=${fin}&granularite=jour`)
+    const actuel = R.chiffresFenetre(j.realise || [], milieu, fin)
+    const precedent = R.chiffresFenetre(j.realise || [], debut, avantMilieu)
+    let mois = null
+    try {
+      const m = await appel(`${base}&debut=${douze.jourDebut}&fin=${douze.jourFin}&granularite=mois`)
+      mois = R.minMaxMensuel(m.realise || [], douze.moisDebut, douze.moisFin)
+    } catch (e) { logger.error('Aujourdhui', 'yield mois', e) }
+    etat.parBien.set(b.id, { actuel, precedent, mois })
+  } catch (e) {
+    if (e.status === 409) etat.parBien.set(b.id, { nonRaccorde: true })
+    else { logger.error('Aujourdhui', 'yield jour', e); etat.parBien.set(b.id, { erreur: true }) }
+  }
+}
+async function chargerNotes () {
+  if (!peutLire('avis')) return
+  const lire = async (bien) => {
+    try {
+      const r = await appel(`/api/avis?action=cartes&periode=30j${bien ? `&bien=${encodeURIComponent(bien)}` : ''}`)
+      return r.stats && !r.stats.erreur ? { moyenne: r.stats.moyenne, notes: r.stats.notes } : null
+    } catch (e) { logger.error('Aujourdhui', 'avis', e); return null }
+  }
+  etat.noteGlobale = await lire(null)
+  renderKpis()
+  await parPaquets(etat.biens.filter(b => b.provider_property_id).map(b => async () => {
+    etat.notesParBien.set(b.id, await lire(b.provider_property_id))
+  }), 3)
+  renderBiens()
+}
+
+function deviseUnique () {
+  const devises = new Set(etat.biens.map(b => b.currency || 'EUR'))
+  return devises.size === 1 ? [...devises][0] : null
+}
+function renderKpis () {
+  const section = $('[data-bind="kpi-section"]')
+  let visible = false
+  const lignes = etat.biens.map(b => etat.parBien.get(b.id))
+  const tousCharges = peutLire('reservations') && etat.biens.length && lignes.every(Boolean)
+  if (tousCharges) {
+    const tot = R.totaux(lignes)
+    const devise = deviseUnique()
+    const nc = `<span class="small muted">${esc(t('kpi.not_computable'))}</span>`
+    $('[data-bind="revenue"]').innerHTML = tot.ca != null && devise
+      ? `<span class="kpi num">${esc(monnaie(tot.ca, devise))}</span>${deltaPct(tot.caVariation)}` : nc
+    $('[data-bind="occupancy"]').innerHTML = tot.occupation != null
+      ? `<span class="kpi num">${esc(I18n.pct(tot.occupation))}</span>${deltaPoints(tot.occupationEcart)}` : nc
+    $('[data-bind="kpi-revenue"]').hidden = false
+    $('[data-bind="kpi-occupancy"]').hidden = false
+    visible = true
+  }
+  if (etat.noteGlobale) {
+    const n = etat.noteGlobale
+    $('[data-bind="rating"]').innerHTML = n.moyenne != null
+      ? `<span class="kpi num row" style="gap: 6px">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(n.moyenne, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span><span class="small muted">${esc(t('kpi.reviews', { n: n.notes }))}</span>`
+      : `<span class="small muted">${esc(t('kpi.reviews', { n: 0 }))}</span>`
+    $('[data-bind="kpi-rating"]').hidden = false
+    visible = true
+  }
+  section.hidden = !visible
+}
+
+function quand (jour) {
+  if (jour === etat.aujourdHui) return t('properties.today')
+  const [a, m, d] = jour.split('-').map(Number)
+  return I18n.date(new Date(a, m - 1, d), { weekday: 'short', day: 'numeric', month: 'short' })
+}
+function renderBiens () {
+  const section = $('[data-bind="props-section"]')
+  section.hidden = !etat.biens.length
+  const etats = R.etatDesBiens({ bookings: etat.bookings, biens: etat.biens, aujourdHui: etat.aujourdHui })
+  $('[data-list="properties"]').innerHTML = etat.biens.map(b => {
+    const href = `/biens/${encodeURIComponent(b.id)}`
+    if (!b.provider_property_id) {
+      // Pas de clé provider = aucun canal relié : un FAIT de la base, contrairement
+      // à `ota_connect_status`, que rien ne rafraîchit (KB aujourdhui.md §3).
+      return `<a class="property" href="${esc(href)}">
+        <span class="property__photo property__photo--empty">${icone('i-link', 'icon icon--lg')}<span class="link caption" style="color: var(--ink)">${esc(t('properties.connect'))}</span></span>
+        <span class="property__name"><span>${esc(b.name)}</span></span>
+        <span class="small muted">${esc(t('properties.no_channel'))}</span>
+      </a>`
+    }
+    const e = etats.get(String(b.provider_property_id)) || {}
+    const chiffres = etat.parBien.get(b.id)
+    const note = etat.notesParBien.get(b.id)
+    const lieu = [b.city, e.prochaineArrivee ? t('properties.next_arrival', { when: quand(e.prochaineArrivee) }) : t('properties.no_arrival')]
+      .filter(Boolean).join(' · ')
+    let ca = ''
+    if (chiffres && chiffres.actuel) {
+      ca = chiffres.actuel.ca != null
+        ? `<span><strong class="num">${esc(monnaie(chiffres.actuel.ca, b.currency))}</strong> <span class="muted">${esc(t('properties.revenue_30'))}</span> ${deltaPct(R.variation(chiffres.actuel.ca, chiffres.precedent?.ca))}</span>`
+        : `<span class="small muted">${esc(t('properties.revenue_not_computable'))}</span>`
+    } else if (chiffres && chiffres.erreur) {
+      ca = `<span class="small muted">${esc(t('properties.revenue_not_computable'))}</span>`
+    }
+    const mm = chiffres && chiffres.mois
+      ? `<span class="caption muted">${esc(t('properties.range', { min: monnaie(chiffres.mois.min, b.currency), max: monnaie(chiffres.mois.max, b.currency) }))} · ${esc(t('properties.range_months', { n: chiffres.mois.mois }))}</span>`
+      : ''
+    const etoile = note && note.moyenne != null
+      ? `<span class="property__rating">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(note.moyenne, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>` : ''
+    const puce = etat.menagesOk
+      ? `<span class="chip">${esc(t(e.occupeCeSoir ? 'properties.occupied' : 'properties.free'))}</span>` : ''
+    return `<a class="property" href="${esc(href)}">
+      <span class="property__photo property__photo--none">${icone('i-home')}${puce}</span>
+      <span class="property__name"><span>${esc(b.name)}</span>${etoile}</span>
+      <span class="small muted">${esc(lieu)}</span>
+      ${ca}
+      ${mm}
+    </a>`
+  }).join('')
+}
+
+// ─── Démarrage ──────────────────────────────────────────────────────────────
+// Le prénom du profil titulaire ; à sa création il vaut la partie locale de
+// l'e-mail (trigger du schéma initial) : on lui préfère alors le nom saisi à
+// l'inscription.
+async function prenom (user) {
+  const local = String(user?.email || '').split('@')[0]
+  const plein = String(user?.user_metadata?.full_name || '').trim().split(/\s+/)[0] || ''
+  let profil = ''
+  try {
+    const { data } = await supabase.from('profiles').select('first_name')
+      .eq('member_user_id', moi()).eq('is_owner', true).limit(1)
+    profil = (data && data[0] && data[0].first_name) || ''
+  } catch { /* repli ci-dessous */ }
+  if (profil && profil !== local) return profil
+  return plein || profil
+}
+
+async function init () {
+  const session = await requireAuth()
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+
+  const user = await getUser()
+  const nom = await prenom(user)
+  $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
+  $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
+  // La création de bien n'est pas déléguée (cf. pages/biens.html).
+  $('[data-bind="add-property"]').hidden = !estTitulaire()
+
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis')
+  })
+
+  // Les biens : lecture directe sous RLS (`properties_select` = périmètre du
+  // profil). Pas /api/channel-property, qui interroge Beds24 en direct.
+  if (peutLire('reservations') || peutLire('menages')) {
+    const { data, error } = await supabase.from('properties')
+      .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency')
+      .eq('user_id', compteCourant())
+      .order('name', { ascending: true })
+    if (error) logger.error('Aujourdhui', 'biens', error)
+    etat.biens = data || []
+  }
+  const premier = etat.biens.find(b => b.provider_property_id)
+  const nav = (badge) => HSNav.render({
+    badges: { pendingMessages: badge },
+    liens: premier ? { calendar: `/biens/${encodeURIComponent(premier.id)}/calendrier` } : {},
+    peutLire
+  })
+  nav(0)
+
+  await Promise.all([chargerReservations(), chargerTaches(), chargerAlarmes(), chargerCompteurs()])
+  nav(etat.taches.filter(x => x.status === 'pending_validation').length)
+  renderEvenements(); renderTaches(); renderCompteurs(); renderBiens(); renderTitre()
+
+  chargerEtatsArrivee()
+  chargerNotes()
+  if (peutLire('reservations')) {
+    await parPaquets(etat.biens.map(b => async () => { await chargerChiffresBien(b); renderBiens() }), 2)
+    renderKpis()
+  }
+}
+
+init().catch(e => logger.error('Aujourdhui', e.message, e))
 </script>
 </body>
 </html>

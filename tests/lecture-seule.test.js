@@ -27,7 +27,7 @@ const PAGES = [
   ['pages/biens-calendrier.html',    'reservations'],
   ['pages/calendrier-mobile.html',   'reservations'],
   ['pages/biens.html',               'reservations'],
-  ['pages/index.html',               'reservations']
+  ['pages/aujourdhui.html',           'reservations']
 ]
 
 for (const [page, domaine] of PAGES) {

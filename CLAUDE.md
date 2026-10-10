@@ -449,6 +449,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 
 ## DOC REPO — LIRE AVANT DE CODER
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
+- docs/kb/aujourdhui.md (accueil V5 : source de chaque chiffre, ce qui n'est PAS affiché et pourquoi ; socle UI V5 dans shared/theme.css, ui.css, icons.svg, nav.js, i18n/ — aucun hexa, aucun texte en dur, aucun emoji, `node scripts/i18n-check.js` avant commit).
 - docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
 - docs/kb/dettes-v1.md (REGISTRE des dettes datées avant la clôture V1 : 28 rouges, migrations à appliquer, vacances 2027, mobile et fermetures — chaque lot lit sa ligne avant merge).
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).

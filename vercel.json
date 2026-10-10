@@ -58,7 +58,7 @@
     },
     {
       "source": "/dashboard",
-      "destination": "/pages/index"
+      "destination": "/pages/aujourdhui"
     },
     {
       "source": "/apps/yield",
