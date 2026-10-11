@@ -106,9 +106,16 @@
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg>
     </button>
   </div>
+  <div class="msg-tiroir__onglets" role="group" data-i18n-attr="aria-label:messages.settings">
+    <button type="button" class="tab" data-volet="ia" data-i18n="messages.tab_ia"></button>
+    <button type="button" class="tab" data-volet="alertes" data-i18n="messages.tab_alerts"></button>
+  </div>
+  <label class="msg-tiroir__choixbien">
+    <span class="caption muted" data-i18n="messages.drawer_property"></span>
+    <select data-bind="tiroir-bien"></select>
+  </label>
   <div class="msg-tiroir__corps" data-bind="tiroir-corps"></div>
   <p class="caption msg-tiroir__note" data-bind="tiroir-note" hidden></p>
-  <a class="link small" style="margin: 14px 18px" href="/apps/agent-ai/knowledge" data-i18n="messages.knowledge"></a>
 </aside>
 
 <nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
@@ -146,6 +153,10 @@ const etat = {
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
   modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
+  configIA: {},            // le blob agent_alert_config.config entier (volet Alertes)
+  prompting: { global: '', overrides: {} },   // consignes de l'IA (agent_prompting)
+  brevo: false,            // cle Brevo presente -> canal SMS ouvert
+  tiroirVolet: 'ia', tiroirBien: null,
   modeEnCours: false,      // une bascule a la fois
   ouverte: null            // bookId de la conversation ouverte
 }
@@ -184,9 +195,25 @@ async function charger () {
       .catch(() => { etat.pauses = {} }),
     // Le mode Test/Auto par bien (etape 4) : agent_alert_config, domaine
     // reglages — un profil sans ce droit n'a ni interrupteur ni tiroir.
-    ...(reglagesIci() ? [appel('/api/agent-config')
-      .then(r => { etat.modes = modesDe(r.config) })
-      .catch(() => { etat.modes = null })] : []),
+    ...(reglagesIci() ? [
+      appel('/api/agent-config')
+        .then(r => { etat.modes = modesDe(r.config); etat.configIA = r.config || {} })
+        .catch(() => { etat.modes = null }),
+      // Les consignes de l'IA : la table de l'ancienne page, sous RLS.
+      supabase.from('agent_prompting').select('property_id, instructions')
+        .eq('user_id', compteCourant())
+        .then(({ data, error }) => {
+          if (error) { logger.error('Messages', 'consignes', error); return }
+          for (const ligne of data || []) {
+            if (ligne.property_id === null) etat.prompting.global = ligne.instructions || ''
+            else etat.prompting.overrides[String(ligne.property_id)] = ligne.instructions || ''
+          }
+        }),
+      // La porte SMS : une cle Brevo enregistree, sinon le canal est ferme.
+      appel('/api/sms?action=config')
+        .then(r => { etat.brevo = r.configured === true })
+        .catch(() => { etat.brevo = false })
+    ] : []),
     // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
     // sous RLS, jamais /api/channel-property (il interroge Beds24 en direct).
     supabase.from('properties').select('id, name, provider_property_id, photo_url').eq('user_id', compteCourant())
@@ -792,10 +819,11 @@ async function basculerPause (ref, paused) {
 }
 // Le retour d'erreur des reglages : dans le TIROIR s'il est ouvert (seul
 // acces sur telephone), sinon sous la saisie.
-function noteReglage (texte) {
+function noteReglage (texte, ok = false) {
   const tiroir = $('[data-bind="tiroir"]')
   const note = tiroir.hidden ? $('[data-bind="saisie-etat"]') : $('[data-bind="tiroir-note"]')
   note.hidden = false
+  note.classList.toggle('msg-tiroir__note--ok', ok === true)
   note.textContent = texte
 }
 function renderMode () {
@@ -813,35 +841,190 @@ function renderMode () {
   // Sans conversation ouverte : grise, et l'infobulle dit pourquoi (spec §3.1).
   zone.title = ref ? '' : t('messages.mode_pick')
 }
+// Le tiroir (changement de perimetre du 12 octobre : TOUT GuestFlow vit dans
+// Messages). Deux volets livres a cette recette — « Reponses de l'IA » et
+// « Alertes » — par bien choisi en tete ; « Messages programmes » suivra
+// (recette 2), et l'ancienne config reste en service d'ici la (spec §12 bis).
 function renderTiroir () {
   const tiroir = $('[data-bind="tiroir"]')
   if (tiroir.hidden) return
-  const ecrit = reglagesIci()
+  for (const b of tiroir.querySelectorAll('[data-volet]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.volet === etat.tiroirVolet))
+  }
+  const sel = $('[data-bind="tiroir-bien"]')
+  const refs = [...etat.biens.keys()]
+  if (!etat.tiroirBien || !etat.biens.has(etat.tiroirBien)) etat.tiroirBien = refs[0] || null
+  sel.innerHTML = refs.map(r =>
+    `<option value="${esc(r)}" ${r === etat.tiroirBien ? 'selected' : ''}>${esc(etat.biens.get(r).name || r)}</option>`).join('')
   const corps = $('[data-bind="tiroir-corps"]')
-  corps.innerHTML = [...etat.biens.entries()].map(([ref, b]) => {
-    const mode = etat.modes ? (etat.modes[ref] || 'test') : null
-    const enPause = etat.pauses[ref] === true
-    return `<div class="msg-tiroir__bien">
-      <span class="msg-tiroir__nom">${esc(b.name || ref)}</span>
-      <span class="row" style="gap: 10px; flex-wrap: wrap">
-        ${mode !== null && ecrit ? `<span class="msg-mode" role="group" aria-label="${esc(t('messages.mode_label'))}">
-          <button type="button" class="tab" data-tiroir-mode="${esc(ref)}|test" aria-pressed="${mode === 'test'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_test'))}</button>
-          <button type="button" class="tab" data-tiroir-mode="${esc(ref)}|auto" aria-pressed="${mode === 'auto'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_auto'))}</button>
-        </span>` : ''}
-        ${ecrit ? `<label class="row caption" style="gap: 6px">
-          <input type="checkbox" data-tiroir-pause="${esc(ref)}" ${enPause ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''}>
-          ${esc(t('messages.pause_label'))}
-        </label>` : enPause ? `<span class="caption muted">${esc(t('messages.pause_label'))}</span>` : ''}
-      </span>
-    </div>`
-  }).join('') || `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`
-  corps.querySelectorAll('[data-tiroir-mode]').forEach(x => x.addEventListener('click', () => {
-    const [ref, m] = x.dataset.tiroirMode.split('|')
-    basculerMode(ref, m)
-  }))
-  corps.querySelectorAll('[data-tiroir-pause]').forEach(x => x.addEventListener('change', () =>
-    basculerPause(x.dataset.tiroirPause, x.checked)))
+  const ref = etat.tiroirBien
+  if (!ref) { corps.innerHTML = `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`; return }
+  corps.innerHTML = etat.tiroirVolet === 'alertes' ? voletAlertes(ref) : voletIA(ref)
+  brancherTiroir(corps, ref)
 }
+
+// ── Volet « Reponses de l'IA » : mode, pause, consignes, garde, connaissances.
+function voletIA (ref) {
+  const mode = etat.modes ? (etat.modes[ref] || 'test') : null
+  const enPause = etat.pauses[ref] === true
+  return `<div class="msg-tiroir__bloc">
+      <span class="msg-tiroir__nom">${esc(t('messages.mode_label'))}</span>
+      ${mode !== null ? `<span class="msg-mode" role="group" aria-label="${esc(t('messages.mode_label'))}">
+        <button type="button" class="tab" data-tiroir-mode="test" aria-pressed="${mode === 'test'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_test'))}</button>
+        <button type="button" class="tab" data-tiroir-mode="auto" aria-pressed="${mode === 'auto'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_auto'))}</button>
+      </span>` : `<span class="caption muted">${esc(t('messages.load_error'))}</span>`}
+      <p class="caption muted">${esc(t('messages.auto_scope'))}</p>
+      <label class="row caption" style="gap: 6px">
+        <input type="checkbox" data-tiroir-pause ${enPause ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''}>
+        ${esc(t('messages.pause_label'))}
+      </label>
+    </div>
+    <div class="msg-tiroir__bloc">
+      <span class="msg-tiroir__nom">${esc(t('messages.prompting_title'))}</span>
+      <label class="caption muted">${esc(t('messages.prompting_global'))}</label>
+      <textarea rows="5" data-consignes="global">${esc(etat.prompting.global)}</textarea>
+      <label class="caption muted">${esc(t('messages.prompting_property'))}</label>
+      <textarea rows="4" data-consignes="bien">${esc(etat.prompting.overrides[ref] || '')}</textarea>
+      <button type="button" class="btn btn--primary" data-consignes-save ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.prompting_save'))}</button>
+    </div>
+    <div class="msg-tiroir__bloc">
+      <span class="msg-tiroir__nom">${esc(t('messages.breaker_title'))}</span>
+      <p class="caption muted">${esc(t('messages.breaker_desc'))}</p>
+      <a class="link small" href="/apps/agent-ai/knowledge">${esc(t('messages.knowledge'))}</a>
+    </div>`
+}
+
+// ── Volet « Alertes » : 2 types x 2 canaux, porte Brevo, test apres
+// enregistrement (le serveur n'accepte que des destinataires EN BASE).
+function voletAlertes (ref) {
+  const cfg = etat.configIA[ref] || {}
+  const types = [['intervention', 'messages.alert_intervention'], ['info_unknown', 'messages.alert_info']]
+  return types.map(([k, cle]) => {
+    const a = cfg[k] || {}
+    return `<div class="msg-tiroir__bloc">
+      <span class="msg-tiroir__nom">${esc(t(cle))}</span>
+      <div class="msg-tiroir__canal">
+        <label class="row caption" style="gap: 6px">
+          <input type="checkbox" data-alerte="${k}|sms_enabled" ${a.sms_enabled && etat.brevo ? 'checked' : ''} ${etat.brevo ? '' : 'disabled'}>
+          ${esc(t('messages.channel_sms'))}
+        </label>
+        ${etat.brevo
+          ? `<textarea rows="2" data-alerte="${k}|sms_lines" placeholder="${esc(t('messages.recipients_sms_ph'))}">${esc(a.sms_lines || '')}</textarea>
+            <button type="button" class="link caption" data-tester="${k}|sms">${esc(t('messages.test_send'))}</button>`
+          : `<p class="caption muted">${esc(t('messages.sms_needs_brevo'))} <a class="link" href="/connexions">${esc(t('messages.sms_connect'))}</a></p>`}
+      </div>
+      <div class="msg-tiroir__canal">
+        <label class="row caption" style="gap: 6px">
+          <input type="checkbox" data-alerte="${k}|email_enabled" ${a.email_enabled !== false ? 'checked' : ''}>
+          ${esc(t('messages.channel_email'))}
+        </label>
+        <textarea rows="2" data-alerte="${k}|email_lines" placeholder="${esc(t('messages.recipients_email_ph'))}">${esc(a.email_lines || '')}</textarea>
+        <button type="button" class="link caption" data-tester="${k}|email">${esc(t('messages.test_send'))}</button>
+      </div>
+    </div>`
+  }).join('') + `<div class="msg-tiroir__bloc" style="border-bottom: 0">
+    <button type="button" class="btn btn--primary" data-alertes-save ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.alerts_save'))}</button>
+    <p class="caption muted" style="margin: 0">${esc(t('messages.alerts_hint'))}</p>
+  </div>`
+}
+
+function brancherTiroir (corps, ref) {
+  corps.querySelectorAll('[data-tiroir-mode]').forEach(x =>
+    x.addEventListener('click', () => basculerMode(ref, x.dataset.tiroirMode)))
+  corps.querySelector('[data-tiroir-pause]')?.addEventListener('change', (e) =>
+    basculerPause(ref, e.target.checked))
+  corps.querySelector('[data-consignes-save]')?.addEventListener('click', () => enregistrerConsignes(corps, ref))
+  corps.querySelector('[data-alertes-save]')?.addEventListener('click', () => enregistrerAlertes(corps, ref))
+  corps.querySelectorAll('[data-tester]').forEach(x => x.addEventListener('click', () => {
+    const [type, canal] = x.dataset.tester.split('|')
+    testerCanal(ref, type, canal)
+  }))
+}
+
+// Les consignes : LE WRITER DE L'ANCIENNE PAGE, a l'identique (delete puis
+// insert sous RLS, global puis bien) — on ne cree pas de second chemin.
+async function enregistrerConsignes (corps, ref) {
+  if (etat.modeEnCours) return
+  etat.modeEnCours = true
+  const g = (corps.querySelector('[data-consignes="global"]')?.value || '').trim()
+  const o = (corps.querySelector('[data-consignes="bien"]')?.value || '').trim()
+  const uid = compteCourant()
+  try {
+    await supabase.from('agent_prompting').delete().eq('user_id', uid).is('property_id', null)
+    if (g) {
+      const { error } = await supabase.from('agent_prompting').insert({ user_id: uid, property_id: null, instructions: g })
+      if (error) throw error
+    }
+    await supabase.from('agent_prompting').delete().eq('user_id', uid).eq('property_id', ref)
+    if (o) {
+      const { error } = await supabase.from('agent_prompting').insert({ user_id: uid, property_id: ref, instructions: o })
+      if (error) throw error
+    }
+    etat.prompting.global = g
+    if (o) etat.prompting.overrides[ref] = o
+    else delete etat.prompting.overrides[ref]
+    noteReglage(t('messages.saved'), true)
+  } catch (err) {
+    logger.error('Messages', 'consignes', err)
+    noteReglage(t('messages.mode_error'))
+  }
+  etat.modeEnCours = false
+  renderTiroir()
+}
+
+// Les alertes : POST CIBLE (merge serveur des deux types de CE bien), puis
+// RELECTURE — l'ecran montre la base, jamais l'etat suppose.
+async function enregistrerAlertes (corps, ref) {
+  if (etat.modeEnCours) return
+  etat.modeEnCours = true
+  const avant = etat.configIA[ref] || {}
+  const lireType = (k) => ({
+    // Sans cle Brevo, les champs SMS n'existent pas a l'ecran : on PRESERVE
+    // ce qui est en base, on n'ecrase pas un reglage qu'on ne montre pas.
+    sms_enabled: etat.brevo
+      ? corps.querySelector(`[data-alerte="${k}|sms_enabled"]`)?.checked === true
+      : (avant[k] && avant[k].sms_enabled) === true,
+    sms_lines: etat.brevo
+      ? (corps.querySelector(`[data-alerte="${k}|sms_lines"]`)?.value || '')
+      : ((avant[k] && avant[k].sms_lines) || ''),
+    email_enabled: corps.querySelector(`[data-alerte="${k}|email_enabled"]`)?.checked === true,
+    email_lines: corps.querySelector(`[data-alerte="${k}|email_lines"]`)?.value || ''
+  })
+  let ecritureOk = false
+  try {
+    await appel('/api/agent-config', {
+      alertes_ref: ref,
+      alertes: { intervention: lireType('intervention'), info_unknown: lireType('info_unknown') }
+    })
+    ecritureOk = true
+  } catch (err) { logger.error('Messages', 'alertes', err) }
+  try {
+    const relu = await appel('/api/agent-config')
+    etat.modes = modesDe(relu.config)
+    etat.configIA = relu.config || {}
+  } catch (err) { logger.error('Messages', 'alertes relecture', err) }
+  etat.modeEnCours = false
+  noteReglage(ecritureOk ? t('messages.saved') : t('messages.mode_error'), ecritureOk)
+  renderTiroir()
+}
+
+// Le test part au premier destinataire EN BASE (api/alert-test n'accepte que
+// ceux-la — piege documente par l'ancienne page) : enregistrer d'abord.
+async function testerCanal (ref, type, canal) {
+  const cfg = (etat.configIA[ref] || {})[type] || {}
+  const lignes = String(canal === 'sms' ? cfg.sms_lines || '' : cfg.email_lines || '')
+  const premier = lignes.split('\n').map(l => l.trim()).filter(Boolean)[0] || ''
+  const to = premier.includes(':') ? premier.slice(premier.indexOf(':') + 1).trim() : premier
+  if (!to) { noteReglage(t('messages.test_first_save')); return }
+  try {
+    await appel('/api/alert-test', { channel: canal, to })
+    noteReglage(t('messages.test_sent'), true)
+  } catch (err) {
+    logger.error('Messages', 'test alerte', err)
+    noteReglage(err.message || t('messages.mode_error'))
+  }
+}
+
 function ouvrirTiroir (ouvert) {
   const tiroir = $('[data-bind="tiroir"]')
   tiroir.hidden = !ouvert
@@ -947,6 +1130,14 @@ async function init () {
   btnReglages.hidden = !reglagesIci()
   btnReglages.addEventListener('click', () => ouvrirTiroir($('[data-bind="tiroir"]').hidden))
   $('[data-bind="tiroir-fermer"]').addEventListener('click', () => ouvrirTiroir(false))
+  document.querySelectorAll('[data-volet]').forEach(b => b.addEventListener('click', () => {
+    etat.tiroirVolet = b.dataset.volet
+    renderTiroir()
+  }))
+  $('[data-bind="tiroir-bien"]').addEventListener('change', (e) => {
+    etat.tiroirBien = e.target.value
+    renderTiroir()
+  })
 
   $('[data-bind="recherche"]').addEventListener('input', (e) => { etat.recherche = e.target.value; renderListe() })
   document.querySelectorAll('[data-filtre]').forEach(b => b.addEventListener('click', () => {

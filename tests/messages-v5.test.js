@@ -320,7 +320,7 @@ test('messages etape 4 : passer en Auto exige une confirmation, et l\'etat est R
   // L'ecriture est un POST CIBLE : le MERGE du seul mode vit au SERVEUR
   // (deux onglets s'ecrasaient des configs d'alertes, releve en review).
   const api = lire('api/agent-config.js')
-  assert.ok(/mode_ref/.test(api) && /blob\[ref\] = \{ \.\.\.\(blob\[ref\] \|\| \{\}\), mode \}/.test(api),
+  assert.ok(/mode_ref/.test(api) && /\? \{ \.\.\.\(blob\[ref\] \|\| \{\}\), mode \}/.test(api),
     'agent-config merge le seul mode du bien dans le blob relu en base')
   assert.ok(/mode !== 'test' && mode !== 'auto'/.test(api), 'mode borne a test|auto')
 })
@@ -332,7 +332,7 @@ test('messages etape 4 : les reglages IA sont reserves au TITULAIRE (dette 68)',
   const src = sansCommentaires(html())
   assert.ok(/const reglagesIci = \(\) => \{ try \{ return estTitulaire\(\) \}/.test(src),
     'la garde est le titulaire, pas le droit reglages du compte courant')
-  assert.ok(/reglagesIci\(\) \? \[appel\('\/api\/agent-config'\)/.test(src),
+  assert.ok(/reglagesIci\(\) \? \[\s*appel\('\/api\/agent-config'\)/.test(src),
     'la config IA n\'est pas demandee autrement')
   assert.ok(/etat\.modes !== null && reglagesIci\(\)/.test(src), 'l\'interrupteur disparait')
   assert.ok(/btnReglages\.hidden = !reglagesIci\(\)/.test(src), 'le tiroir aussi')
@@ -374,4 +374,54 @@ test('etape 4 : plus aucun lien vers l\'ancienne app, hors Connaissances', () =>
   const page = html()
   const liens = [...page.matchAll(/agent-ai\/([\w-]+)/g)].map(m => m[1])
   assert.deepEqual([...new Set(liens)], ['knowledge'], 'seul Connaissances survit')
+})
+
+// ─── Recette 1 du changement de perimetre : volets IA + Alertes ──────────────
+test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ par champ', () => {
+  // Demande de Thierry (12 octobre) : ce test NOMME chaque champ manquant.
+  const src = html()
+  const CHAMPS = {
+    'mode Test/Auto par bien': 'data-tiroir-mode',
+    'kill switch (pause) par bien': 'data-tiroir-pause',
+    'consignes generales de l\'IA': 'data-consignes="global"',
+    'consignes du logement': 'data-consignes="bien"',
+    'enregistrer les consignes': 'data-consignes-save',
+    'intervention / SMS actif': 'data-alerte="${k}|sms_enabled"',
+    'intervention / destinataires SMS': 'data-alerte="${k}|sms_lines"',
+    'intervention / e-mail actif': 'data-alerte="${k}|email_enabled"',
+    'intervention / destinataires e-mail': 'data-alerte="${k}|email_lines"',
+    'les DEUX types d\'alerte': "[['intervention', 'messages.alert_intervention'], ['info_unknown', 'messages.alert_info']]",
+    'bouton Tester par canal': 'data-tester',
+    'enregistrer les alertes': 'data-alertes-save',
+    'porte SMS sans cle Brevo (lien /connexions)': 'messages.sms_needs_brevo',
+    'garde des appels IA (circuit breaker, en etat)': 'messages.breaker_desc',
+    'ce qu\'il valide seul (Auto)': 'messages.auto_scope',
+    'lien Connaissances': 'agent-ai/knowledge',
+    'choix du logement en tete du panneau': 'data-bind="tiroir-bien"',
+    'les deux volets': 'data-volet="alertes"'
+  }
+  const manquants = Object.entries(CHAMPS)
+    .filter(([, motif]) => !src.includes(motif))
+    .map(([nom]) => nom)
+  assert.deepEqual(manquants, [],
+    'champs de l\'inventaire §12 bis ABSENTS du tiroir : ' + manquants.join(' ; '))
+})
+
+test('tiroir alertes : merge serveur borne, SMS preserve sans Brevo, test depuis la BASE', () => {
+  const api = lire('api/agent-config.js')
+  assert.ok(api.includes('alertes_ref') && /for \(const type of \['intervention', 'info_unknown'\]\)/.test(api),
+    'le POST cible merge les DEUX types au serveur (jamais le blob entier depuis l\'ecran)')
+  assert.ok(/length > 2000/.test(api), 'destinataires bornes champ par champ')
+  const src = sansCommentaires(html())
+  assert.ok(/sms_enabled: etat\.brevo[\s\S]{0,120}avant\[k\] && avant\[k\]\.sms_enabled/.test(src),
+    'sans cle Brevo, les champs SMS absents de l\'ecran PRESERVENT la base')
+  assert.ok(/const relu = await appel\('\/api\/agent-config'\)[\s\S]*?etat\.configIA = relu\.config/.test(src),
+    'l\'ecran montre la base RELUE apres chaque enregistrement')
+  assert.ok(/'\/api\/alert-test', \{ channel: canal, to \}/.test(src), 'le test passe par alert-test')
+  assert.ok(/\(etat\.configIA\[ref\] \|\| \{\}\)\[type\]/.test(src),
+    'le destinataire du test vient de la base ENREGISTREE (piege documente par l\'ancienne page)')
+  // Les consignes : le writer de l'ancienne page, pas un second chemin.
+  assert.ok(/from\('agent_prompting'\)\.delete\(\)[\s\S]*?is\('property_id', null\)/.test(src)
+    && /from\('agent_prompting'\)\.insert\(\{ user_id: uid, property_id: ref/.test(src),
+    'agent_prompting ecrit comme l\'ancienne page (delete puis insert, global puis bien)')
 })

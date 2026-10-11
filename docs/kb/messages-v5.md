@@ -142,3 +142,27 @@ ni envoi, ni validation (étapes 2 et 3 de la spec §11).
   l'endpoint (booking_change_events).
 - Dette 66 : l'origine des envois (`ia_validee`/`ia_modifiee`/`hote`) posée par
   le writer — prérequis « Fait pour vous », avant le lot Calendrier.
+
+## Changement de périmètre — tout GuestFlow vit dans Messages (12 octobre 2026)
+
+Décision de Thierry, en DEUX recettes ; inventaire champ par champ : spec
+§12 bis. `config.html` RESTE EN SERVICE (URL seule) jusqu'à couverture 100 %.
+
+**Recette 1 (volets « Réponses de l'IA » + « Alertes » du tiroir)** :
+- Panneau par bien (sélecteur en tête, `properties` sous RLS), deux onglets.
+- Volet IA : Test/Auto + pause (mécanique des étapes précédentes), consignes
+  de l'IA (globales + par bien, writer de l'ancienne page À L'IDENTIQUE :
+  delete+insert RLS sur `agent_prompting`), « ce qu'il valide seul » (texte),
+  garde des appels IA en ÉTAT descriptif (rien à régler), lien Connaissances.
+- Volet Alertes : 2 types × 2 canaux, destinataires « Nom : contact », porte
+  SMS sans clé Brevo (lien /connexions, et les champs ABSENTS de l'écran
+  PRÉSERVENT la base), boutons Tester (`/api/alert-test`, destinataire lu de
+  la base ENREGISTRÉE — piège documenté par l'ancienne page).
+- Écriture des alertes : POST CIBLÉ `alertes_ref`/`alertes` de
+  `/api/agent-config` (merge serveur, champs bornés à 2000) + RELECTURE.
+- Le test d'inventaire NOMME chaque champ manquant
+  (tests/messages-v5.test.js, demande de Thierry).
+- Tout le tiroir reste réservé au TITULAIRE (dette 68).
+
+**Recette 2 (à venir)** : volet « Messages programmés » (inventaire §12 bis B),
+puis SEULEMENT redirection de config.html et de l'app templates.
