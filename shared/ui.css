@@ -184,7 +184,8 @@ h1, h2, h3, p { margin: 0; }
 .conv:hover { background: var(--surface-2); }
 .conv[aria-current="true"] { background: var(--surface-2); }
 .conv__avatar { position: relative; width: 44px; height: 44px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink); font-size: var(--fs-small); font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; }
-.conv__canal { position: absolute; bottom: -2px; inset-inline-end: -2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--brand-night); color: var(--on-ink); font-size: 10px; font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; border: 2px solid var(--surface); }
+/* La pastille canal suit la retouche avatars : le bleu nuit reste au LOGO. */
+.conv__canal { position: absolute; bottom: -2px; inset-inline-end: -2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); font-size: 10px; font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); box-shadow: 0 0 0 2px var(--surface); }
 .conv__nom { display: flex; align-items: baseline; gap: 8px; font-weight: var(--fw-semibold); }
 .conv__nom time { margin-inline-start: auto; font-size: var(--fs-caption); color: var(--muted); font-weight: var(--fw-regular); }
 .conv__apercu { display: flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--muted); overflow: hidden; }
@@ -204,7 +205,8 @@ h1, h2, h3, p { margin: 0; }
 .msg-vide { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
 .bulle { max-width: 72%; padding: 10px 14px; border-radius: var(--radius-card); font-size: var(--fs-body); line-height: 1.45; white-space: pre-wrap; overflow-wrap: break-word; }
 .bulle--voyageur { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-end-start-radius: 4px; }
-.bulle--hote { align-self: flex-end; background: var(--ink); color: var(--on-ink); border-end-end-radius: 4px; }
+/* Retouche du 11 octobre : le noir en fond est reserve a la navigation. */
+.bulle--hote { align-self: flex-end; background: var(--surface-2); color: var(--ink); border-end-end-radius: 4px; }
 .bulle--proposition { align-self: flex-end; background: var(--surface); border: 1.5px dashed var(--ink); border-end-end-radius: 4px; }
 .bulle__entete { display: flex; align-items: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); margin-bottom: 4px; }
 .bulle-meta { align-self: flex-end; display: flex; align-items: center; gap: 5px; font-size: var(--fs-caption); color: var(--muted); margin: 2px 4px 8px; }
