@@ -40,12 +40,13 @@
     <div class="msg-liste__outils">
       <div class="row" style="gap: 10px">
         <h1 class="h2" id="h-liste" style="margin-inline-end: auto" data-i18n="messages.title"></h1>
-        <div class="msg-mode" data-bind="mode" hidden role="group" data-i18n-attr="aria-label:messages.mode_label">
-          <button type="button" class="tab" data-mode="test" data-i18n="messages.mode_test"></button>
-          <button type="button" class="tab" data-mode="auto" data-i18n="messages.mode_auto"></button>
-        </div>
-        <button type="button" class="btn btn--secondary btn--icon" data-bind="reglages-btn" hidden data-i18n-attr="aria-label:messages.settings;title:messages.settings">
-          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-settings"/></svg>
+        <button type="button" class="msg-btnrond" data-ouvre-volet="programmes" hidden
+          data-i18n-attr="aria-label:messages.drawer_scheduled;title:messages.drawer_scheduled;data-legende:messages.drawer_scheduled">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-scheduled"/></svg>
+        </button>
+        <button type="button" class="msg-btnrond" data-ouvre-volet="ia" hidden
+          data-i18n-attr="aria-label:messages.tab_ia;title:messages.tab_ia;data-legende:messages.tab_ia">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
         </button>
       </div>
       <label class="msg-recherche">
@@ -101,14 +102,10 @@
 
 <aside class="msg-tiroir" data-bind="tiroir" hidden aria-labelledby="h-tiroir">
   <div class="msg-tiroir__entete">
-    <h2 class="h2" id="h-tiroir" style="font-size: 17px; margin: 0" data-i18n="messages.settings"></h2>
+    <h2 class="h2" id="h-tiroir" style="font-size: 17px; margin: 0" data-bind="tiroir-titre"></h2>
     <button type="button" class="btn btn--secondary btn--icon" data-bind="tiroir-fermer" data-i18n-attr="aria-label:messages.close">
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg>
     </button>
-  </div>
-  <div class="msg-tiroir__onglets" role="group" data-i18n-attr="aria-label:messages.settings">
-    <button type="button" class="tab" data-volet="ia" data-i18n="messages.tab_ia"></button>
-    <button type="button" class="tab" data-volet="alertes" data-i18n="messages.tab_alerts"></button>
   </div>
   <label class="msg-tiroir__choixbien">
     <span class="caption muted" data-i18n="messages.drawer_property"></span>
@@ -334,13 +331,6 @@ function periode (c) {
   const j = x => { const [a, m, d] = String(x).slice(0, 10).split('-').map(Number); return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { day: 'numeric', month: 'short', timeZone: 'UTC' }) }
   return c.firstNight && c.lastNight ? `${j(c.firstNight)} → ${j(c.lastNight)}` : ''
 }
-function heureCourte (iso) {
-  if (!valide(iso)) return ''
-  const d = new Date(iso)
-  const jour = jourParis(d.getTime())
-  if (jour === etat.aujourdHui) return I18n.time(d)
-  return I18n.date(d, { day: 'numeric', month: 'short' })
-}
 function renderFiltres () {
   // Chargement en echec : pas de compte du tout — un « 0 » calcule sur des
   // donnees absentes serait un fait invente (releve en review).
@@ -364,10 +354,8 @@ function renderListe () {
   // coupure nette.
   let groupePrecedent = null
   zone.innerHTML = liste.map(c => {
-    const dernier = c.messages[c.messages.length - 1]
     const bien = etat.biens.get(String(c.propertyId))
     const proposition = tachesDe(c).length > 0
-    const parIA = dernier && dernier.direction === 'outbound' && dernier.kind === 'auto'
     const g = groupeArrivee(c)
     let entete = ''
     if (g !== groupePrecedent) {
@@ -379,17 +367,11 @@ function renderListe () {
     return `${entete}<div class="conv" role="button" tabindex="0" data-conv="${esc(c.bookId)}" aria-current="${c.bookId === etat.ouverte}">
       <span class="conv__avatar">${avatarConv(c)}</span>
       <span style="min-width: 0">
-        <span class="conv__nom">${esc(c.guestName || t('messages.guest'))}<time>${dernier ? esc(heureCourte(dernier.sent_at)) : ''}</time></span>
-        <span class="conv__apercu">
-          ${proposition ? icone('i-ai', 'icon icon--robot') : ''}
-          ${parIA && !proposition ? icone('i-check', 'icon icon--fait') : ''}
-          <span>${esc(dernier ? dernier.body : '')}</span>
-        </span>
+        <span class="conv__nom">${esc(c.guestName || t('messages.guest'))}</span>
         <span class="conv__sous"><span class="conv__etat${enCours(c) ? ' conv__etat--encours' : ''}"></span>${esc([bien?.name, periode(c)].filter(Boolean).join(' · '))}</span>
         ${badgeArrivee(c)}
       </span>
-      ${c.epinglee ? icone('i-pin', 'icon icon--epingle') : ''}
-      ${nonLue(c) ? `<span class="conv__nonlu" role="img" data-i18n-attr="aria-label:messages.unread"></span>` : ''}
+      <span class="conv__droite">${proposition ? icone('i-ai', 'icon icon--robot') : ''}${c.epinglee ? icone('i-pin', 'icon icon--epingle') : ''}${nonLue(c) ? `<span class="conv__nonlu" role="img" data-i18n-attr="aria-label:messages.unread"></span>` : ''}</span>
     </div>`
   }).join('')
     + (etat.hasMore ? `<button type="button" class="btn btn--secondary btn--block" style="margin: 10px auto; width: calc(100% - 28px)" data-plus>${esc(t('messages.show_more_srv'))}</button>` : '')
@@ -776,7 +758,7 @@ async function basculerMode (ref, nouveau) {
   // validation. Confirmation explicite ; le retour en Test n'en demande pas.
   if (nouveau === 'auto' && !window.confirm(t('messages.mode_confirm_auto'))) return
   etat.modeEnCours = true
-  renderMode(); renderTiroir()
+  renderTiroir()
   let ecritureOk = false
   try {
     // POST CIBLE : le serveur merge le seul mode de CE bien dans le blob
@@ -795,7 +777,7 @@ async function basculerMode (ref, nouveau) {
   if (!ecritureOk || (etat.modes && (etat.modes[ref] || 'test') !== nouveau)) {
     noteReglage(t('messages.mode_error'))
   }
-  renderMode(); renderTiroir()
+  renderTiroir()
 }
 // Le kill switch par bien : writer existant /api/property-automation, puis
 // relecture — meme discipline que le mode.
@@ -829,21 +811,6 @@ function noteReglage (texte, ok = false) {
   note.classList.toggle('msg-tiroir__note--ok', ok === true)
   note.textContent = texte
 }
-function renderMode () {
-  const zone = $('[data-bind="mode"]')
-  const possible = etat.modes !== null && reglagesIci()
-  zone.hidden = !possible
-  if (!possible) return
-  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
-  const ref = c && c.propertyId ? String(c.propertyId) : null
-  const mode = ref ? (etat.modes[ref] || 'test') : null
-  for (const b of zone.querySelectorAll('[data-mode]')) {
-    b.disabled = !ref || etat.modeEnCours
-    b.setAttribute('aria-pressed', String(mode === b.dataset.mode))
-  }
-  // Sans conversation ouverte : grise, et l'infobulle dit pourquoi (spec §3.1).
-  zone.title = ref ? '' : t('messages.mode_pick')
-}
 // Le tiroir (changement de perimetre du 12 octobre : TOUT GuestFlow vit dans
 // Messages). Deux volets livres a cette recette — « Reponses de l'IA » et
 // « Alertes » — par bien choisi en tete ; « Messages programmes » suivra
@@ -851,9 +818,8 @@ function renderMode () {
 function renderTiroir () {
   const tiroir = $('[data-bind="tiroir"]')
   if (tiroir.hidden) return
-  for (const b of tiroir.querySelectorAll('[data-volet]')) {
-    b.setAttribute('aria-pressed', String(b.dataset.volet === etat.tiroirVolet))
-  }
+  $('[data-bind="tiroir-titre"]').textContent =
+    t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled' : 'messages.tab_ia')
   const sel = $('[data-bind="tiroir-bien"]')
   const refs = [...etat.biens.keys()]
   if (!etat.tiroirBien || !etat.biens.has(etat.tiroirBien)) etat.tiroirBien = refs[0] || null
@@ -862,8 +828,17 @@ function renderTiroir () {
   const corps = $('[data-bind="tiroir-corps"]')
   const ref = etat.tiroirBien
   if (!ref) { corps.innerHTML = `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`; return }
-  corps.innerHTML = etat.tiroirVolet === 'alertes' ? voletAlertes(ref) : voletIA(ref)
+  corps.innerHTML = etat.tiroirVolet === 'programmes' ? voletProgrammes() : voletIA(ref)
   brancherTiroir(corps, ref)
+}
+
+// ── Volet « Messages programmes » : la recette 2 le remplira. D'ici la, un
+// renvoi HONNETE vers l'ecran actuel (URL seule) — jamais un volet vide.
+function voletProgrammes () {
+  return `<div class="msg-tiroir__bloc" style="border-bottom: 0">
+    <p class="caption muted" style="margin: 0">${esc(t('messages.scheduled_coming'))}</p>
+    <a class="link small" href="/apps/agent-ai/messages">${esc(t('messages.scheduled_old_link'))}</a>
+  </div>`
 }
 
 // ── Volet « Reponses de l'IA » : mode, pause, consignes, garde, connaissances.
@@ -895,7 +870,8 @@ function voletIA (ref) {
       <span class="msg-tiroir__nom">${esc(t('messages.breaker_title'))}</span>
       <p class="caption muted">${esc(t('messages.breaker_desc'))}</p>
       <a class="link small" href="/apps/agent-ai/knowledge">${esc(t('messages.knowledge'))}</a>
-    </div>`
+    </div>
+    <h3 class="msg-tiroir__section">${esc(t('messages.tab_alerts'))}</h3>` + voletAlertes(ref)
 }
 
 // ── Volet « Alertes » : 2 types x 2 canaux, porte Brevo, test apres
@@ -1115,7 +1091,7 @@ function ouvrir (bookId) {
     appel('/api/messages', { action: 'lu', booking_id: String(bookId) })
       .catch(e => logger.error('Messages', 'read_at', e))
   }
-  renderListe(); renderFil(); renderMode()
+  renderListe(); renderFil()
 }
 
 // ─── Démarrage ──────────────────────────────────────────────────────────────
@@ -1147,21 +1123,20 @@ async function init () {
   }
   await charger()
   HSNav.render({ badges: etat.chargementOk ? { pendingMessages: etat.taches.length } : {}, peutLire })
-  renderFiltres(); renderListe(); renderMode()
+  renderFiltres(); renderListe()
 
-  // Etape 4 : Test/Auto (bien du fil ouvert) et tiroir reglages.
-  document.querySelectorAll('[data-bind="mode"] [data-mode]').forEach(b => b.addEventListener('click', () => {
-    const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
-    if (c && c.propertyId) basculerMode(String(c.propertyId), b.dataset.mode)
-  }))
-  const btnReglages = $('[data-bind="reglages-btn"]')
-  btnReglages.hidden = !reglagesIci()
-  btnReglages.addEventListener('click', () => ouvrirTiroir($('[data-bind="tiroir"]').hidden))
+  // Les deux boutons d'en-tete (retouche du 12 octobre) : un volet par
+  // bouton — Messages programmes, et Reponses de l'IA (alertes en bas).
+  document.querySelectorAll('[data-ouvre-volet]').forEach(b => {
+    b.hidden = !reglagesIci()
+    b.addEventListener('click', () => {
+      const tiroir = $('[data-bind="tiroir"]')
+      const deja = !tiroir.hidden && etat.tiroirVolet === b.dataset.ouvreVolet
+      etat.tiroirVolet = b.dataset.ouvreVolet
+      ouvrirTiroir(!deja)
+    })
+  })
   $('[data-bind="tiroir-fermer"]').addEventListener('click', () => ouvrirTiroir(false))
-  document.querySelectorAll('[data-volet]').forEach(b => b.addEventListener('click', () => {
-    etat.tiroirVolet = b.dataset.volet
-    renderTiroir()
-  }))
   $('[data-bind="tiroir-bien"]').addEventListener('change', (e) => {
     etat.tiroirBien = e.target.value
     renderTiroir()
@@ -1171,7 +1146,7 @@ async function init () {
   document.querySelectorAll('[data-filtre]').forEach(b => b.addEventListener('click', () => {
     etat.filtre = b.dataset.filtre; renderFiltres(); renderListe()
   }))
-  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil(); renderMode() })
+  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
   // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
   const zoneTexte = $('[data-bind="texte"]')
   zoneTexte.addEventListener('input', () => ajusterHauteur(zoneTexte))

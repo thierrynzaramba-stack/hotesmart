@@ -161,11 +161,12 @@ test('messages : les correctifs de la revue de acf0fa0 tiennent', () => {
   assert.ok(css.includes('@media (max-width: 899px) {' + String.fromCharCode(10) + '  .msg-retour { display: inline-flex; }'))
   // 2. Un sejour annule ne tient pas une proposition ouverte.
   assert.ok(src.includes('STATUTS_SANS_SEJOUR'), 'les statuts exclus viennent du module partage')
-  // 3. La garde de date vaut pour la LISTE comme pour le fil.
-  assert.ok(src.includes("function heureCourte (iso) {" + String.fromCharCode(10) + "  if (!valide(iso)) return ''"))
-  // 5. Coche verte distincte du bleu d'attente.
-  assert.ok(src.includes("icone('i-check', 'icon icon--fait')"))
-  assert.ok(/\.conv \.icon--fait[^}]*var\(--ok\)/.test(css))
+  // 3 et 5 : l'heure de la liste et l'apercu du dernier message (et sa coche
+  // verte) ont DISPARU avec la retouche du 12 octobre — plus de garde
+  // heureCourte ni de coche a proteger ; la ligne garde nom, bien + dates,
+  // telephone, robot, epingle, point non lu.
+  assert.ok(!src.includes('heureCourte') && !src.includes('conv__apercu'),
+    'ni heure ni extrait dans la liste (retouche du 12 octobre)')
   // 6. Canal inconnu neutre, jamais le A d'Airbnb.
   assert.ok(src.includes("lettreCanal") && !src.includes("(c.ota || '?')[0]"))
   // 4. Echec de chargement : aucun compte, aucun badge calcules sur du vide.
@@ -334,8 +335,8 @@ test('messages etape 4 : les reglages IA sont reserves au TITULAIRE (dette 68)',
     'la garde est le titulaire, pas le droit reglages du compte courant')
   assert.ok(/reglagesIci\(\) \? \[\s*appel\('\/api\/agent-config'\)/.test(src),
     'la config IA n\'est pas demandee autrement')
-  assert.ok(/etat\.modes !== null && reglagesIci\(\)/.test(src), 'l\'interrupteur disparait')
-  assert.ok(/btnReglages\.hidden = !reglagesIci\(\)/.test(src), 'le tiroir aussi')
+  assert.ok(/b\.hidden = !reglagesIci\(\)/.test(src), 'les deux boutons d\'en-tete disparaissent sans titulaire')
+  assert.ok(/mode !== null \?/.test(src), 'le volet IA ne montre pas un mode illisible')
   // Et l'echec d'une bascule de pause SE DIT (dans le tiroir sur mobile).
   assert.ok(/function noteReglage/.test(src) && /\(etat\.pauses\[ref\] === true\) !== paused/.test(src),
     'un kill switch qui n\'a pas pris s\'affiche, jamais silencieux')
@@ -373,7 +374,8 @@ test('etape 4 : plus aucun lien vers l\'ancienne app, hors Connaissances', () =>
   // La nouvelle page garde UN SEUL lien vers l'ancienne app : Connaissances.
   const page = html()
   const liens = [...page.matchAll(/agent-ai\/([\w-]+)/g)].map(m => m[1])
-  assert.deepEqual([...new Set(liens)], ['knowledge'], 'seul Connaissances survit')
+  assert.deepEqual([...new Set(liens)].sort(), ['knowledge', 'messages'],
+    'Connaissances, et le renvoi PROVISOIRE du volet programmes vers l\'ecran actuel (recette 2 le retirera)')
 })
 
 // ─── Recette 1 du changement de perimetre : volets IA + Alertes ──────────────
@@ -398,7 +400,9 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
     'ce qu\'il valide seul (Auto)': 'messages.auto_scope',
     'lien Connaissances': 'agent-ai/knowledge',
     'choix du logement en tete du panneau': 'data-bind="tiroir-bien"',
-    'les deux volets': 'data-volet="alertes"'
+    'bouton Messages programmes (en-tete)': 'data-ouvre-volet="programmes"',
+    'bouton Reponses de l\'IA (en-tete)': 'data-ouvre-volet="ia"',
+    'alertes EN BAS du volet IA': "voletAlertes(ref)"
   }
   const manquants = Object.entries(CHAMPS)
     .filter(([, motif]) => !src.includes(motif))

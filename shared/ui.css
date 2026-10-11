@@ -202,12 +202,17 @@ h1, h2, h3, p { margin: 0; }
 .conv__sous { display: flex; align-items: center; gap: 6px; font-size: var(--fs-caption); color: var(--muted); }
 .conv__etat { width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--border); flex: none; }
 .conv__etat--encours { background: var(--ok); }
-.conv__nonlu { width: 9px; height: 9px; border-radius: var(--radius-pill); background: var(--info); align-self: center; }
+.conv__droite { display: flex; align-items: center; gap: 7px; align-self: center; }
+.conv__nonlu { width: 9px; height: 9px; border-radius: var(--radius-pill); background: var(--info); }
 .conv .icon--robot { width: 15px; height: 15px; color: var(--info); flex: none; }
 .conv .icon--fait { width: 15px; height: 15px; color: var(--ok); flex: none; }
 .icon--tel { width: 13px; height: 13px; }
 .msg-fil { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .msg-fil__entete { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+/* `display: flex` ECRASE l'attribut hidden : sans ces regles, l'en-tete vide
+   et la saisie restaient visibles quand aucun fil n'est ouvert (constate au
+   banc le 12 octobre — defaut present depuis l'etape 1). */
+.msg-fil__entete[hidden], .msg-fil__deroule[hidden], .msg-saisie[hidden] { display: none; }
 .msg-fil__titre { min-width: 0; }
 .msg-fil__titre .small { display: block; }
 .msg-fil__deroule { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 4px; }
@@ -253,9 +258,16 @@ h1, h2, h3, p { margin: 0; }
 .msg-tiroir[hidden] { display: none; }
 .msg-tiroir__entete { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
 .msg-tiroir__corps { display: flex; flex-direction: column; }
-.msg-tiroir__onglets { display: flex; gap: 6px; padding: 12px 18px 0; }
-.msg-tiroir__onglets .tab { height: 34px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); }
-.msg-tiroir__onglets .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.msg-btnrond { position: relative; width: 44px; height: 44px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+.msg-btnrond:hover { box-shadow: var(--shadow-hover); }
+.msg-btnrond .icon { width: 20px; height: 20px; }
+/* La legende, VISIBLE au survol sur ordinateur (title/aria restent pour le
+   clavier, le tactile et les lecteurs d'ecran) ; inerte au tactile. */
+.msg-btnrond::after { content: attr(data-legende); position: absolute; top: calc(100% + 6px); inset-inline-end: 0; background: var(--ink); color: var(--on-ink); font-size: var(--fs-caption); padding: 4px 9px; border-radius: 7px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 30; }
+@media (hover: hover) {
+  .msg-btnrond:hover::after, .msg-btnrond:focus-visible::after { opacity: 1; }
+}
+.msg-tiroir__section { margin: 16px 18px 4px; font-size: var(--fs-small); font-weight: var(--fw-bold); letter-spacing: var(--tracking-tight); }
 .msg-tiroir__choixbien { display: flex; flex-direction: column; gap: 4px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
 .msg-tiroir__choixbien select { height: 38px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 10px; font-size: var(--fs-body); }
 .msg-tiroir__bloc { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
@@ -288,9 +300,6 @@ h1, h2, h3, p { margin: 0; }
   .bulle__actions .btn { flex: 1 1 100%; justify-content: center; }
   .bulle__actions [data-envoyer-prop] { order: -1; }
   .bulle-menu { order: 1; margin-inline-start: auto; }
-  /* L'interrupteur de l'en-tete est masque sur telephone (spec §4) : le
-     reglage reste accessible par le tiroir. */
-  .msg-liste__outils [data-bind="mode"] { display: none; }
 }
 
 /* ---------- Barre du haut ---------- */
