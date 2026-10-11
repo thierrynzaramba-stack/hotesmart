@@ -16,6 +16,8 @@
   --on-ink: #FFFFFF;       /* texte sur fond --ink */
 
   --brand-night: #0E1726;  /* logo, avatar */
+  --on-ink-muted: #A3A3A3; /* texte/icones INACTIFS sur fond --ink (barre du
+                              bas) : contraste 6,4:1 sur #222222 (seuil 4,5) */
   --amber: #F5A524;        /* UN seul moment par écran : ce qu'HôteSmart a fait / attend */
   --amber-soft: #FFF4E0;   /* fond de l'icône d'une action en attente */
   --amber-text: #B87500;   /* texte ambre lisible sur blanc */
@@ -73,6 +75,8 @@
    Activée par <html data-theme="dark">. */
 :root[data-theme="dark"] {
   --ink: #F5F5F5;
+  --on-ink-muted: #595959; /* inactifs sur --ink CLAIR (6,2:1 sur #F5F5F5) ;
+                              la barre claire reste distincte du fond #141414 */
   --muted: #A3A3A3;
   --line: #2A2A2A;
   --border: #3A3A3A;

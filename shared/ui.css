@@ -240,17 +240,19 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .scroll-x > * { flex: 0 0 auto; scroll-snap-align: start; }
   .scroll-x .stat { width: 132px; }
   .scroll-x .property { width: 180px; }
+  /* Barre du bas sur fond noir (retouche charte du 11 octobre 2026) :
+     inactifs en --on-ink-muted, actif en --on-ink, badge ambre inchange. */
   .bottombar {
     position: fixed; inset-inline: 0; bottom: 0; z-index: 10;
     display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
-    background: var(--surface); border-top: 1px solid var(--line);
+    background: var(--ink); border-top: none;
     padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
   }
-  .bottombar a { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; color: var(--muted); font-size: var(--fs-nav-mobile); font-weight: var(--fw-medium); }
-  .bottombar a[aria-current="page"] { color: var(--ink); font-weight: var(--fw-bold); }
+  .bottombar a { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; color: var(--on-ink-muted); font-size: var(--fs-nav-mobile); font-weight: var(--fw-medium); }
+  .bottombar a[aria-current="page"] { color: var(--on-ink); font-weight: var(--fw-bold); }
   .bottombar .icon { width: 24px; height: 24px; }
   .topbar__brand, .topbar__actions { flex: 1 1 auto; }
   .only-desktop { display: none !important; }
   .menu { position: fixed; inset-inline: var(--gap-m); top: 64px; min-width: 0; }
-  .bottombar .badge { position: absolute; top: 2px; inset-inline-end: 18px; border: 2px solid var(--surface); }
+  .bottombar .badge { position: absolute; top: 2px; inset-inline-end: 18px; border: 2px solid var(--ink); }
 }
