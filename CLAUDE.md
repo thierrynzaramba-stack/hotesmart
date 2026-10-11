@@ -344,6 +344,16 @@ AirROI pour octobre : 25 $ par compte sur 30 jours et 25 $ par mois (dette
 - **Staging n'a aucun cron** (docs/STAGING.md §1) : en recette, le pilote se
   lance par `scripts/piloter-yieldflow.js` (à blanc, puis `--go`).
 
+**Refonte UI V5 — lot 2 « Messages » ÉTAPE 1 EN PROD (11 octobre 2026,
+3d59294)** : pages/messages.html en lecture seule (liste + fil), arrivées du
+jour/demain en tête avec téléphone composable (+33 rétabli), photo du bien en
+avatar, logos de canal aux vraies couleurs (jetons --canal-*), « à traiter » =
+séjours à venir/en cours seulement (règle resserrée, module partagé). Ancienne
+messagerie : URL seule, aucun menu. Inventaire : spec lot-messages §12. KB :
+docs/kb/messages-v5.md. Étapes 2-4 à venir (envoi + pagination + read_at ;
+propositions ; Test/Auto). Lot photos LIVRÉ le 10-11 octobre
+(properties.photo_url, bucket property-photos, fiche /biens ; dette 65).
+
 **Chantier REFONTE UI V5 — lot 1 LIVRÉ (10 octobre 2026, branche
 `lot-ui-v5-1`)** : socle (shared/theme.css seul porteur d'hexas, ui.css,
 icons.svg, nav.js 5 entrées, i18n fr/en/es) et `pages/aujourdhui.html` devenue
