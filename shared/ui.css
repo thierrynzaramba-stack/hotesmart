@@ -180,6 +180,9 @@ h1, h2, h3, p { margin: 0; }
 .msg-filtres .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; }
 .msg-filtres .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
 .msg-deroule { overflow-y: auto; flex: 1; }
+.msg-groupe { display: flex; align-items: center; gap: 8px; padding: 12px 14px 6px; font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink); }
+.msg-groupe .icon { width: 14px; height: 14px; }
+.msg-separe { height: 10px; background: var(--surface-2); border-block: 1px solid var(--line); }
 .conv { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; width: 100%; padding: 12px 14px; border: 0; background: none; text-align: start; border-bottom: 1px solid var(--line); cursor: pointer; }
 .conv:hover { background: var(--surface-2); }
 .conv[aria-current="true"] { background: var(--surface-2); }

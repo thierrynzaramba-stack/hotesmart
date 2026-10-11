@@ -195,9 +195,10 @@ function visibles () {
     liste = liste.filter(c => (c.guestName || '').toLowerCase().includes(q)
       || (etat.biens.get(String(c.propertyId))?.name || '').toLowerCase().includes(q))
   }
-  // Tri (spec §3.2 + inventaire §12) : à valider, puis ARRIVÉES du jour et de
-  // demain, puis non lus, puis date décroissante.
-  const rang = c => (tachesDe(c).length ? 0 : groupeArrivee(c) < 2 ? 1 : nonLue(c) ? 2 : 3)
+  // Tri (décision de Thierry du 11 octobre 2026, qui PRIME sur la spec §3.2) :
+  // les arrivées du JOUR toujours en premières lignes, celles de DEMAIN en
+  // secondes, puis à valider, puis non lus, puis date décroissante.
+  const rang = c => { const g = groupeArrivee(c); return g < 2 ? g : tachesDe(c).length ? 2 : nonLue(c) ? 3 : 4 }
   return liste.sort((a, b) => rang(a) - rang(b) || new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
 }
 
@@ -255,12 +256,24 @@ function renderListe () {
   const liste = visibles()
   if (!liste.length) { zone.innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.empty'))}</p>`; return }
   const masqueesAnciennes = !etat.anciennes && etat.conversations.some(c => c.archivee)
+  // Étiquettes de groupe et séparation visuelle (demande de Thierry) : les
+  // arrivées du jour, puis celles de demain, puis le reste derrière une
+  // coupure nette.
+  let groupePrecedent = null
   zone.innerHTML = liste.slice(0, etat.limite).map(c => {
     const dernier = c.messages[c.messages.length - 1]
     const bien = etat.biens.get(String(c.propertyId))
     const proposition = tachesDe(c).length > 0
     const parIA = dernier && dernier.direction === 'outbound' && dernier.kind === 'auto'
-    return `<button type="button" class="conv" data-conv="${esc(c.bookId)}" aria-current="${c.bookId === etat.ouverte}">
+    const g = groupeArrivee(c)
+    let entete = ''
+    if (g !== groupePrecedent) {
+      if (g === 0) entete = `<div class="msg-groupe">${icone('i-arrival', 'icon')}${esc(t('messages.arrives_today'))}</div>`
+      else if (g === 1) entete = `<div class="msg-groupe">${icone('i-arrival', 'icon')}${esc(t('messages.arrives_tomorrow'))}</div>`
+      else if (groupePrecedent !== null) entete = '<div class="msg-separe" role="presentation"></div>'
+      groupePrecedent = g
+    }
+    return `${entete}<div class="conv" role="button" tabindex="0" data-conv="${esc(c.bookId)}" aria-current="${c.bookId === etat.ouverte}">
       <span class="conv__avatar">${avatarConv(c)}</span>
       <span style="min-width: 0">
         <span class="conv__nom">${esc(c.guestName || t('messages.guest'))}<time>${dernier ? esc(heureCourte(dernier.sent_at)) : ''}</time></span>
@@ -273,27 +286,32 @@ function renderListe () {
         ${badgeArrivee(c)}
       </span>
       ${nonLue(c) ? `<span class="conv__nonlu" role="img" data-i18n-attr="aria-label:messages.unread"></span>` : ''}
-    </button>`
+    </div>`
   }).join('')
     + (liste.length > etat.limite ? `<button type="button" class="btn btn--secondary btn--block" style="margin: 10px auto; width: calc(100% - 28px)" data-plus>${esc(t('messages.show_more', { n: liste.length - etat.limite }))}</button>` : '')
     + (masqueesAnciennes ? `<button type="button" class="link small" style="display: block; margin: 8px auto 16px; background: none; border: 0" data-anciennes>${esc(t('messages.show_old'))}</button>` : '')
   I18n.apply(zone)
-  zone.querySelectorAll('[data-conv]').forEach(b => b.addEventListener('click', () => ouvrir(b.dataset.conv)))
+  zone.querySelectorAll('[data-conv]').forEach(b => {
+    b.addEventListener('click', (e) => { if (!e.target.closest('[data-tel]')) ouvrir(b.dataset.conv) })
+    b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ouvrir(b.dataset.conv) } })
+  })
   zone.querySelector('[data-plus]')?.addEventListener('click', () => { etat.limite += PAGE; renderListe() })
   zone.querySelector('[data-anciennes]')?.addEventListener('click', () => { etat.anciennes = true; renderFiltres(); renderListe() })
 }
 
-// Badge et pastilles d'arrivée (liste) : pastilles POSITIVES seulement,
-// l'absence se lit « pas encore » (règle de l'ancienne page).
+// Pastilles d'arrivée (liste) : POSITIVES seulement, l'absence se lit « pas
+// encore » (règle de l'ancienne page). Le TÉLÉPHONE vit dans la ligne pour
+// les arrivées (demande de Thierry du 11 octobre) : l'étiquette de groupe
+// porte déjà « Arrive aujourd'hui / demain », plus de badge par ligne.
 function badgeArrivee (c) {
   const g = groupeArrivee(c)
   if (g > 1) return ''
   const etats = []
-  if (c.arrivee?.menage === 'fait') etats.push(`<span class="row caption" style="gap: 3px">${icone('i-cleaning', 'icon icon--fait')}<span class="sr-only">${esc(t('messages.cleaning_done'))}</span></span>`)
-  if (c.arrivee?.codeEtat === 'transmis') etats.push(`<span class="row caption" style="gap: 3px">${icone('i-key', 'icon icon--fait')}<span class="sr-only">${esc(t('messages.code_sent'))}</span></span>`)
-  return `<span class="row caption" style="gap: 8px; margin-top: 3px">
-    <span class="chip" style="background: var(--surface-2); padding: 3px 10px">${icone('i-arrival', 'icon')}${esc(t(g === 0 ? 'messages.arrives_today' : 'messages.arrives_tomorrow'))}</span>
-    ${etats.join('')}</span>`
+  if (c.arrivee?.menage === 'fait') etats.push(`<span class="row caption" style="gap: 3px">${icone('i-cleaning', 'icon icon--fait')}${esc(t('messages.cleaning_done'))}</span>`)
+  if (c.arrivee?.codeEtat === 'transmis') etats.push(`<span class="row caption" style="gap: 3px">${icone('i-key', 'icon icon--fait')}${esc(t('messages.code_sent'))}</span>`)
+  const tel = lienTelephone(c)
+  if (!etats.length && !tel) return ''
+  return `<span class="row caption muted" style="gap: 12px; margin-top: 3px; flex-wrap: wrap">${etats.join('')}${tel}</span>`
 }
 // Le téléphone en lien d'appel, pour les arrivées du jour et de demain
 // seulement (fonction conservée) : `tel:` n'accepte que chiffres et « + ».
@@ -303,7 +321,7 @@ function lienTelephone (c) {
   const premier = brut.split(/[\/,;]|\s+ou\s+/)[0].trim()
   const num = premier.replace(/[^\d+]/g, '')
   if (num.replace(/\D/g, '').length < 6) return ''
-  return `<a class="link caption" href="tel:${esc(num)}">${esc(t('messages.call'))} ${esc(brut)}</a>`
+  return `<a class="link caption" href="tel:${esc(num)}" data-tel>${esc(t('messages.call'))} ${esc(brut)}</a>`
 }
 
 // ─── Rendu : fil ─────────────────────────────────────────────────────────────
