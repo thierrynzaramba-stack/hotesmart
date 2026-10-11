@@ -189,6 +189,7 @@ h1, h2, h3, p { margin: 0; }
 .conv__etat--encours { background: var(--ok); }
 .conv__nonlu { width: 9px; height: 9px; border-radius: var(--radius-pill); background: var(--info); align-self: center; }
 .conv .icon--robot { width: 15px; height: 15px; color: var(--info); flex: none; }
+.conv .icon--fait { width: 15px; height: 15px; color: var(--ok); flex: none; }
 .msg-fil { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .msg-fil__entete { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
 .msg-fil__titre { min-width: 0; }
@@ -205,7 +206,9 @@ h1, h2, h3, p { margin: 0; }
 .bulle-meta--voyageur { align-self: flex-start; }
 .bulle-meta .icon { width: 13px; height: 13px; }
 .msg-jour { align-self: center; font-size: var(--fs-caption); color: var(--muted); margin: 14px 0 6px; }
+.msg-retour { display: none; }
 @media (max-width: 899px) {
+  .msg-retour { display: inline-flex; }
   .msg-layout { grid-template-columns: 1fr; }
   .msg-fil { display: none; }
   body[data-fil] .msg-fil { display: flex; position: fixed; inset: 0; background: var(--surface); z-index: 20; }

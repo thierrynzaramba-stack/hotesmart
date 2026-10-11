@@ -53,7 +53,7 @@
 
   <section class="msg-fil" aria-labelledby="h-fil">
     <div class="msg-fil__entete" data-bind="fil-entete" hidden>
-      <button type="button" class="btn btn--secondary btn--icon only-mobile" data-bind="retour" data-i18n-attr="aria-label:messages.back">
+      <button type="button" class="btn btn--secondary btn--icon msg-retour" data-bind="retour" data-i18n-attr="aria-label:messages.back">
         <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(180 12 12)"/></svg>
       </button>
       <span class="conv__avatar" data-bind="fil-avatar"></span>
@@ -99,6 +99,8 @@ const $ = (sel) => document.querySelector(sel)
 const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
 
 const PAGE = 50            // conversations affichées, puis « afficher plus » (spec §3.2)
+// Une date illisible ne fait tomber NI la liste NI le fil.
+const valide = (iso) => iso != null && Number.isFinite(new Date(iso).getTime())
 const etat = {
   aujourdHui: jourParis(),
   conversations: [], chargementOk: null,
@@ -139,16 +141,34 @@ async function charger () {
   await Promise.all(lectures)
   // La règle d'ouverture s'évalue sur les SÉJOURS des conversations (départ =
   // lastNight) et leurs derniers messages — mêmes entrées que le lot 1.
+  // ⚠ MEMES EXCLUSIONS QUE LE LOT 1 : /api/menages ne sert que des sejours
+  // ACTIFS. Une annulation future garderait sinon sa proposition « ouverte »
+  // pour toujours, et le badge divergerait de celui de l'accueil.
+  const SANS_SEJOUR = new Set(['cancelled', 'demapped', 'request', 'blocked', 'inquiry', 'black'])
   const sejoursEnCours = etat.conversations
-    .filter(c => c.lastNight).map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
+    .filter(c => c.lastNight && !SANS_SEJOUR.has(String(c.status || '').toLowerCase()))
+    .map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
   const derniers = new Map(etat.conversations.filter(c => c.lastTime).map(c => [String(c.bookId), c.lastTime]))
   etat.taches = tachesOuvertes(etat.taches, {
     bookings: sejoursEnCours, derniersMessages: derniers, aujourdHui: etat.aujourdHui
   })
+  indexerTaches()
 }
 
 // ─── Lecture des conversations : tri, filtres, recherche ────────────────────
-const tachesDe = (c) => etat.taches.filter(x => String(x.book_id) === String(c.bookId))
+// Index reconstruit apres chaque chargement : la recherche re-filtre a chaque
+// frappe, un balayage lineaire par ligne et par comparaison coutait
+// conversations x taches (releve en review).
+let tachesParResa = new Map()
+function indexerTaches () {
+  tachesParResa = new Map()
+  for (const x of etat.taches) {
+    const k = String(x.book_id)
+    if (!tachesParResa.has(k)) tachesParResa.set(k, [])
+    tachesParResa.get(k).push(x)
+  }
+}
+const tachesDe = (c) => tachesParResa.get(String(c.bookId)) || []
 const nonLue = (c) => {
   const dernier = c.messages[c.messages.length - 1]
   return !!dernier && dernier.direction === 'inbound'
@@ -171,18 +191,25 @@ function visibles () {
 
 // ─── Rendu : liste ───────────────────────────────────────────────────────────
 const LETTRE_CANAL = { airbnb: 'A', booking: 'B', direct: 'D' }
+// Un canal inconnu reste NEUTRE : la premiere lettre de « Autre OTA » se
+// lisait Airbnb (releve en review).
+const lettreCanal = (c) => LETTRE_CANAL[c.platform] || '·'
 const initiales = (nom) => (nom || '').trim().split(/\s+/).slice(0, 2).map(m => m[0] || '').join('').toUpperCase() || '·'
 function periode (c) {
   const j = x => { const [a, m, d] = String(x).slice(0, 10).split('-').map(Number); return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { day: 'numeric', month: 'short', timeZone: 'UTC' }) }
   return c.firstNight && c.lastNight ? `${j(c.firstNight)} → ${j(c.lastNight)}` : ''
 }
 function heureCourte (iso) {
+  if (!valide(iso)) return ''
   const d = new Date(iso)
   const jour = jourParis(d.getTime())
   if (jour === etat.aujourdHui) return I18n.time(d)
   return I18n.date(d, { day: 'numeric', month: 'short' })
 }
 function renderFiltres () {
+  // Chargement en echec : pas de compte du tout — un « 0 » calcule sur des
+  // donnees absentes serait un fait invente (releve en review).
+  if (etat.chargementOk === false) { $('.msg-liste__outils').hidden = true; return }
   const toutes = etat.conversations.filter(c => etat.anciennes || !c.archivee)
   $('[data-filtre="nonlus"]').textContent = `● ${toutes.filter(nonLue).length}`
   $('[data-filtre="nonlus"]').setAttribute('aria-label', t('messages.filter_unread'))
@@ -203,12 +230,12 @@ function renderListe () {
     const proposition = tachesDe(c).length > 0
     const parIA = dernier && dernier.direction === 'outbound' && dernier.kind === 'auto'
     return `<button type="button" class="conv" data-conv="${esc(c.bookId)}" aria-current="${c.bookId === etat.ouverte}">
-      <span class="conv__avatar">${esc(initiales(c.guestName))}<span class="conv__canal">${esc(LETTRE_CANAL[c.platform] || (c.ota || '?')[0].toUpperCase())}</span></span>
+      <span class="conv__avatar">${esc(initiales(c.guestName))}<span class="conv__canal">${esc(lettreCanal(c))}</span></span>
       <span style="min-width: 0">
         <span class="conv__nom">${esc(c.guestName || t('messages.guest'))}<time>${dernier ? esc(heureCourte(dernier.sent_at)) : ''}</time></span>
         <span class="conv__apercu">
           ${proposition ? icone('i-ai', 'icon icon--robot') : ''}
-          ${parIA && !proposition ? icone('i-check', 'icon icon--robot') : ''}
+          ${parIA && !proposition ? icone('i-check', 'icon icon--fait') : ''}
           <span>${esc(dernier ? dernier.body : '')}</span>
         </span>
         <span class="conv__sous"><span class="conv__etat${enCours(c) ? ' conv__etat--encours' : ''}"></span>${esc([bien?.name, periode(c)].filter(Boolean).join(' · '))}</span>
@@ -232,7 +259,7 @@ function renderFil () {
   if (!c) { entete.hidden = true; deroule.hidden = true; vide.hidden = false; delete document.body.dataset.fil; return }
   document.body.dataset.fil = '1'
   entete.hidden = false; deroule.hidden = false; vide.hidden = true
-  $('[data-bind="fil-avatar"]').innerHTML = `${esc(initiales(c.guestName))}<span class="conv__canal">${esc(LETTRE_CANAL[c.platform] || (c.ota || '?')[0].toUpperCase())}</span>`
+  $('[data-bind="fil-avatar"]').innerHTML = `${esc(initiales(c.guestName))}<span class="conv__canal">${esc(lettreCanal(c))}</span>`
   $('[data-bind="fil-nom"]').textContent = c.guestName || t('messages.guest')
   const bien = etat.biens.get(String(c.propertyId))
   $('[data-bind="fil-sous"]').textContent = [bien?.name, periode(c)].filter(Boolean).join(' · ')
@@ -247,10 +274,8 @@ function renderFil () {
   // Les messages et les PROPOSITIONS ouvertes, fondus à leur place
   // chronologique (spec §3.3). Étape 1 : la proposition s'affiche SANS boutons
   // — Envoyer / Modifier / Rejeter arrivent à l'étape 3.
-  // Une date illisible ne fait jamais tomber le fil : la proposition sans
-  // `created_at` prend la place du dernier message, un message sans date va
-  // en fin de fil.
-  const valide = (iso) => iso && Number.isFinite(new Date(iso).getTime())
+  // La proposition sans `created_at` prend la place du dernier message, un
+  // message sans date va en fin de fil.
   const dernierInstant = c.lastTime && valide(c.lastTime) ? c.lastTime : new Date().toISOString()
   const entrees = [
     ...c.messages.map(m => ({ quand: valide(m.sent_at) ? m.sent_at : dernierInstant, type: 'message', m })),
@@ -306,12 +331,13 @@ async function init () {
     ].filter(Boolean)
   })
   if (!peutLire('messages')) {
+    $('.msg-liste__outils').hidden = true
     $('[data-list="conversations"]').innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.no_access'))}</p>`
     HSNav.render({ peutLire })
     return
   }
   await charger()
-  HSNav.render({ badges: { pendingMessages: etat.taches.length }, peutLire })
+  HSNav.render({ badges: etat.chargementOk ? { pendingMessages: etat.taches.length } : {}, peutLire })
   renderFiltres(); renderListe()
 
   $('[data-bind="recherche"]').addEventListener('input', (e) => { etat.recherche = e.target.value; etat.limite = PAGE; renderListe() })

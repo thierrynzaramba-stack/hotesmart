@@ -84,6 +84,28 @@ test('messages : sur telephone, le fil ouvert masque la barre du bas', () => {
   assert.ok(src.includes("document.body.dataset.fil = '1'") && src.includes('delete document.body.dataset.fil'))
 })
 
+test('messages : les correctifs de la revue de acf0fa0 tiennent', () => {
+  const src = sansCommentaires(html())
+  const css = lire('shared/ui.css')
+  // 1. Le retour du fil couvre TOUTE la plage du fil plein ecran (<900px).
+  assert.ok(src.includes('msg-retour') && !/only-mobile" data-bind="retour"/.test(src))
+  assert.ok(css.includes('@media (max-width: 899px) {' + String.fromCharCode(10) + '  .msg-retour { display: inline-flex; }'))
+  // 2. Un sejour annule ne tient pas une proposition ouverte.
+  assert.ok(src.includes("SANS_SEJOUR") && src.includes("'cancelled'") && src.includes("'demapped'"))
+  // 3. La garde de date vaut pour la LISTE comme pour le fil.
+  assert.ok(src.includes("function heureCourte (iso) {" + String.fromCharCode(10) + "  if (!valide(iso)) return ''"))
+  // 5. Coche verte distincte du bleu d'attente.
+  assert.ok(src.includes("icone('i-check', 'icon icon--fait')"))
+  assert.ok(/\.conv \.icon--fait[^}]*var\(--ok\)/.test(css))
+  // 6. Canal inconnu neutre, jamais le A d'Airbnb.
+  assert.ok(src.includes("lettreCanal") && !src.includes("(c.ota || '?')[0]"))
+  // 4. Echec de chargement : aucun compte, aucun badge calcules sur du vide.
+  assert.ok(src.includes("etat.chargementOk === false) { $('.msg-liste__outils').hidden = true"))
+  assert.ok(src.includes('etat.chargementOk ? { pendingMessages'))
+  // 7. Index des taches par reservation.
+  assert.ok(src.includes('tachesParResa'))
+})
+
 // ─── Branchements ────────────────────────────────────────────────────────────
 test('l\'onglet Messages mene a la nouvelle page, l\'ancienne messagerie ne vit plus dans aucun menu', () => {
   assert.ok(lire('shared/nav.js').includes("href: '/pages/messages'"))
