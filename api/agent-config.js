@@ -70,8 +70,15 @@ module.exports = async (req, res) => {
     // review). La fenetre lecture->ecriture reste, mais en millisecondes
     // serveur, plus en secondes d'ecran.
     const { alertes_ref, alertes } = req.body || {};
-    if (mode_ref !== undefined || mode !== undefined || alertes_ref !== undefined || alertes !== undefined) {
-      const cible = mode_ref !== undefined || mode !== undefined ? 'mode' : 'alertes';
+    const viseMode = mode_ref !== undefined || mode !== undefined;
+    const viseAlertes = alertes_ref !== undefined || alertes !== undefined;
+    // Une cible par requete : accepter les deux en appliquant la seule
+    // premiere jetterait les alertes sans erreur (releve en review).
+    if (viseMode && viseAlertes) {
+      return res.status(400).json({ error: 'Une cible par requête' });
+    }
+    if (viseMode || viseAlertes) {
+      const cible = viseMode ? 'mode' : 'alertes';
       const ref = String((cible === 'mode' ? mode_ref : alertes_ref) || '').trim();
       if (!ref || ref.length > 64) return res.status(400).json({ error: 'Payload invalide' });
       if (cible === 'mode' && mode !== 'test' && mode !== 'auto') {

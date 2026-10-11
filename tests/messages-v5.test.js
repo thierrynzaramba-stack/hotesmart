@@ -420,8 +420,26 @@ test('tiroir alertes : merge serveur borne, SMS preserve sans Brevo, test depuis
   assert.ok(/'\/api\/alert-test', \{ channel: canal, to \}/.test(src), 'le test passe par alert-test')
   assert.ok(/\(etat\.configIA\[ref\] \|\| \{\}\)\[type\]/.test(src),
     'le destinataire du test vient de la base ENREGISTREE (piege documente par l\'ancienne page)')
-  // Les consignes : le writer de l'ancienne page, pas un second chemin.
-  assert.ok(/from\('agent_prompting'\)\.delete\(\)[\s\S]*?is\('property_id', null\)/.test(src)
-    && /from\('agent_prompting'\)\.insert\(\{ user_id: uid, property_id: ref/.test(src),
-    'agent_prompting ecrit comme l\'ancienne page (delete puis insert, global puis bien)')
+  // Les consignes : meme table, mais INSERT d'abord puis delete des AUTRES
+  // lignes, chaque erreur lue — plus de fenetre de perte ni de doublons
+  // silencieux (releve en review de 634ee15).
+  assert.ok(/\.insert\(\{ user_id: uid, property_id: propertyId, instructions: texte \}\)\.select\('id'\)/.test(src)
+    && /\.neq\('id', neuve\.id\)/.test(src) && /if \(eD\) throw eD/.test(src),
+    'agent_prompting : insert d\'abord, delete des autres, erreurs lues')
+})
+
+test('tiroir : une lecture echouee FERME le volet, elle ne montre jamais un faux vide', () => {
+  // Un formulaire vide enregistre aurait efface destinataires et consignes
+  // de la base (releve en review de 634ee15).
+  const src = sansCommentaires(html())
+  assert.ok(/etat\.modes = null; etat\.configIA = null/.test(src), 'blob illisible = volet Alertes ferme')
+  assert.ok(/if \(etat\.configIA === null\) \{\s*return `<p/.test(src), 'le volet Alertes le dit au lieu de se rendre')
+  assert.ok(/etat\.prompting = null; return/.test(src), 'consignes illisibles = bloc ferme')
+  assert.ok(/etat\.prompting === null \? `<p/.test(src), 'et le bloc le dit')
+  // Pendant une ecriture, les champs gelent (une frappe serait ecartee).
+  assert.ok(/function geler \(corps, fige\)/.test(src) && /geler\(corps, true\)/.test(src), 'champs geles pendant le POST')
+  // Le test refuse une edition non enregistree (il partirait a l'ANCIEN destinataire).
+  assert.ok(/ecran\.value\.trim\(\) !== lignes\.trim\(\)/.test(src), 'tester exige l\'ecran = la base')
+  // Et le serveur refuse un POST a double cible.
+  assert.ok(/viseMode && viseAlertes/.test(lire('api/agent-config.js')), 'une cible par requete')
 })

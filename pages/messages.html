@@ -153,8 +153,8 @@ const etat = {
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
   modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
-  configIA: {},            // le blob agent_alert_config.config entier (volet Alertes)
-  prompting: { global: '', overrides: {} },   // consignes de l'IA (agent_prompting)
+  configIA: null,          // blob agent_alert_config.config ; null = illisible (volet ferme)
+  prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
   brevo: false,            // cle Brevo presente -> canal SMS ouvert
   tiroirVolet: 'ia', tiroirBien: null,
   modeEnCours: false,      // une bascule a la fois
@@ -198,12 +198,15 @@ async function charger () {
     ...(reglagesIci() ? [
       appel('/api/agent-config')
         .then(r => { etat.modes = modesDe(r.config); etat.configIA = r.config || {} })
-        .catch(() => { etat.modes = null }),
+        .catch(() => { etat.modes = null; etat.configIA = null }),
       // Les consignes de l'IA : la table de l'ancienne page, sous RLS.
       supabase.from('agent_prompting').select('property_id, instructions')
         .eq('user_id', compteCourant())
         .then(({ data, error }) => {
-          if (error) { logger.error('Messages', 'consignes', error); return }
+          // Lecture echouee = bloc FERME : des textareas vides enregistres
+          // auraient EFFACE les consignes de la base (releve en review).
+          if (error) { logger.error('Messages', 'consignes', error); etat.prompting = null; return }
+          etat.prompting = { global: '', overrides: {} }
           for (const ligne of data || []) {
             if (ligne.property_id === null) etat.prompting.global = ligne.instructions || ''
             else etat.prompting.overrides[String(ligne.property_id)] = ligne.instructions || ''
@@ -881,11 +884,12 @@ function voletIA (ref) {
     </div>
     <div class="msg-tiroir__bloc">
       <span class="msg-tiroir__nom">${esc(t('messages.prompting_title'))}</span>
+      ${etat.prompting === null ? `<p class="caption muted">${esc(t('messages.load_error'))}</p>` : `
       <label class="caption muted">${esc(t('messages.prompting_global'))}</label>
-      <textarea rows="5" data-consignes="global">${esc(etat.prompting.global)}</textarea>
+      <textarea rows="5" data-consignes="global" ${etat.modeEnCours ? 'disabled' : ''}>${esc(etat.prompting.global)}</textarea>
       <label class="caption muted">${esc(t('messages.prompting_property'))}</label>
-      <textarea rows="4" data-consignes="bien">${esc(etat.prompting.overrides[ref] || '')}</textarea>
-      <button type="button" class="btn btn--primary" data-consignes-save ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.prompting_save'))}</button>
+      <textarea rows="4" data-consignes="bien" ${etat.modeEnCours ? 'disabled' : ''}>${esc(etat.prompting.overrides[ref] || '')}</textarea>
+      <button type="button" class="btn btn--primary" data-consignes-save ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.prompting_save'))}</button>`}
     </div>
     <div class="msg-tiroir__bloc">
       <span class="msg-tiroir__nom">${esc(t('messages.breaker_title'))}</span>
@@ -897,6 +901,9 @@ function voletIA (ref) {
 // ── Volet « Alertes » : 2 types x 2 canaux, porte Brevo, test apres
 // enregistrement (le serveur n'accepte que des destinataires EN BASE).
 function voletAlertes (ref) {
+  if (etat.configIA === null) {
+    return `<p class="caption muted" style="padding: 14px 18px">${esc(t('messages.load_error'))}</p>`
+  }
   const cfg = etat.configIA[ref] || {}
   const types = [['intervention', 'messages.alert_intervention'], ['info_unknown', 'messages.alert_info']]
   return types.map(([k, cle]) => {
@@ -905,20 +912,20 @@ function voletAlertes (ref) {
       <span class="msg-tiroir__nom">${esc(t(cle))}</span>
       <div class="msg-tiroir__canal">
         <label class="row caption" style="gap: 6px">
-          <input type="checkbox" data-alerte="${k}|sms_enabled" ${a.sms_enabled && etat.brevo ? 'checked' : ''} ${etat.brevo ? '' : 'disabled'}>
+          <input type="checkbox" data-alerte="${k}|sms_enabled" ${a.sms_enabled && etat.brevo ? 'checked' : ''} ${etat.brevo && !etat.modeEnCours ? '' : 'disabled'}>
           ${esc(t('messages.channel_sms'))}
         </label>
         ${etat.brevo
-          ? `<textarea rows="2" data-alerte="${k}|sms_lines" placeholder="${esc(t('messages.recipients_sms_ph'))}">${esc(a.sms_lines || '')}</textarea>
+          ? `<textarea rows="2" data-alerte="${k}|sms_lines" ${etat.modeEnCours ? 'disabled' : ''} placeholder="${esc(t('messages.recipients_sms_ph'))}">${esc(a.sms_lines || '')}</textarea>
             <button type="button" class="link caption" data-tester="${k}|sms">${esc(t('messages.test_send'))}</button>`
           : `<p class="caption muted">${esc(t('messages.sms_needs_brevo'))} <a class="link" href="/connexions">${esc(t('messages.sms_connect'))}</a></p>`}
       </div>
       <div class="msg-tiroir__canal">
         <label class="row caption" style="gap: 6px">
-          <input type="checkbox" data-alerte="${k}|email_enabled" ${a.email_enabled !== false ? 'checked' : ''}>
+          <input type="checkbox" data-alerte="${k}|email_enabled" ${a.email_enabled !== false ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''}>
           ${esc(t('messages.channel_email'))}
         </label>
-        <textarea rows="2" data-alerte="${k}|email_lines" placeholder="${esc(t('messages.recipients_email_ph'))}">${esc(a.email_lines || '')}</textarea>
+        <textarea rows="2" data-alerte="${k}|email_lines" ${etat.modeEnCours ? 'disabled' : ''} placeholder="${esc(t('messages.recipients_email_ph'))}">${esc(a.email_lines || '')}</textarea>
         <button type="button" class="link caption" data-tester="${k}|email">${esc(t('messages.test_send'))}</button>
       </div>
     </div>`
@@ -937,29 +944,38 @@ function brancherTiroir (corps, ref) {
   corps.querySelector('[data-alertes-save]')?.addEventListener('click', () => enregistrerAlertes(corps, ref))
   corps.querySelectorAll('[data-tester]').forEach(x => x.addEventListener('click', () => {
     const [type, canal] = x.dataset.tester.split('|')
-    testerCanal(ref, type, canal)
+    testerCanal(corps, ref, type, canal)
   }))
 }
 
-// Les consignes : LE WRITER DE L'ANCIENNE PAGE, a l'identique (delete puis
-// insert sous RLS, global puis bien) — on ne cree pas de second chemin.
+// Les consignes : meme table, meme RLS que l'ancienne page, mais INSERT
+// D'ABORD puis suppression des AUTRES lignes (.neq sur l'id insere) — le
+// delete-puis-insert de l'ancienne page perdait les consignes quand l'insert
+// echouait, et un delete en echec non lu laissait des DOUBLONS que le
+// maybeSingle du cron lisait comme « aucune consigne » (releve en review).
+async function ecrireConsigne (uid, propertyId, texte) {
+  const portee = (q) => propertyId === null ? q.is('property_id', null) : q.eq('property_id', propertyId)
+  if (texte) {
+    const { data: neuve, error: eI } = await supabase.from('agent_prompting')
+      .insert({ user_id: uid, property_id: propertyId, instructions: texte }).select('id').single()
+    if (eI) throw eI
+    const { error: eD } = await portee(supabase.from('agent_prompting').delete().eq('user_id', uid)).neq('id', neuve.id)
+    if (eD) throw eD
+  } else {
+    const { error: eD } = await portee(supabase.from('agent_prompting').delete().eq('user_id', uid))
+    if (eD) throw eD
+  }
+}
 async function enregistrerConsignes (corps, ref) {
-  if (etat.modeEnCours) return
+  if (etat.modeEnCours || etat.prompting === null) return
   etat.modeEnCours = true
+  geler(corps, true)
   const g = (corps.querySelector('[data-consignes="global"]')?.value || '').trim()
   const o = (corps.querySelector('[data-consignes="bien"]')?.value || '').trim()
   const uid = compteCourant()
   try {
-    await supabase.from('agent_prompting').delete().eq('user_id', uid).is('property_id', null)
-    if (g) {
-      const { error } = await supabase.from('agent_prompting').insert({ user_id: uid, property_id: null, instructions: g })
-      if (error) throw error
-    }
-    await supabase.from('agent_prompting').delete().eq('user_id', uid).eq('property_id', ref)
-    if (o) {
-      const { error } = await supabase.from('agent_prompting').insert({ user_id: uid, property_id: ref, instructions: o })
-      if (error) throw error
-    }
+    await ecrireConsigne(uid, null, g)
+    await ecrireConsigne(uid, ref, o)
     etat.prompting.global = g
     if (o) etat.prompting.overrides[ref] = o
     else delete etat.prompting.overrides[ref]
@@ -971,12 +987,18 @@ async function enregistrerConsignes (corps, ref) {
   etat.modeEnCours = false
   renderTiroir()
 }
+// Pendant une ecriture, les champs du volet gelent : une frappe pendant le
+// POST serait silencieusement ecartee par le re-render (releve en review).
+function geler (corps, fige) {
+  corps.querySelectorAll('textarea, input, button').forEach(x => { x.disabled = fige })
+}
 
 // Les alertes : POST CIBLE (merge serveur des deux types de CE bien), puis
 // RELECTURE — l'ecran montre la base, jamais l'etat suppose.
 async function enregistrerAlertes (corps, ref) {
-  if (etat.modeEnCours) return
+  if (etat.modeEnCours || etat.configIA === null) return
   etat.modeEnCours = true
+  geler(corps, true)
   const avant = etat.configIA[ref] || {}
   const lireType = (k) => ({
     // Sans cle Brevo, les champs SMS n'existent pas a l'ecran : on PRESERVE
@@ -1002,17 +1024,23 @@ async function enregistrerAlertes (corps, ref) {
     const relu = await appel('/api/agent-config')
     etat.modes = modesDe(relu.config)
     etat.configIA = relu.config || {}
-  } catch (err) { logger.error('Messages', 'alertes relecture', err) }
+  } catch (err) { logger.error('Messages', 'alertes relecture', err); etat.configIA = null }
   etat.modeEnCours = false
   noteReglage(ecritureOk ? t('messages.saved') : t('messages.mode_error'), ecritureOk)
   renderTiroir()
 }
 
 // Le test part au premier destinataire EN BASE (api/alert-test n'accepte que
-// ceux-la — piege documente par l'ancienne page) : enregistrer d'abord.
-async function testerCanal (ref, type, canal) {
+// ceux-la — piege documente par l'ancienne page). Si l'ecran porte une
+// edition NON enregistree, on refuse : le test partirait a l'ANCIEN
+// destinataire en affichant un succes (releve en review).
+async function testerCanal (corps, ref, type, canal) {
+  if (etat.configIA === null) return
   const cfg = (etat.configIA[ref] || {})[type] || {}
   const lignes = String(canal === 'sms' ? cfg.sms_lines || '' : cfg.email_lines || '')
+  const champ = canal === 'sms' ? 'sms_lines' : 'email_lines'
+  const ecran = corps.querySelector(`[data-alerte="${type}|${champ}"]`)
+  if (ecran && ecran.value.trim() !== lignes.trim()) { noteReglage(t('messages.test_first_save')); return }
   const premier = lignes.split('\n').map(l => l.trim()).filter(Boolean)[0] || ''
   const to = premier.includes(':') ? premier.slice(premier.indexOf(':') + 1).trim() : premier
   if (!to) { noteReglage(t('messages.test_first_save')); return }
