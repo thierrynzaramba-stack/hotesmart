@@ -205,6 +205,7 @@ h1, h2, h3, p { margin: 0; }
 .conv__nonlu { width: 9px; height: 9px; border-radius: var(--radius-pill); background: var(--info); align-self: center; }
 .conv .icon--robot { width: 15px; height: 15px; color: var(--info); flex: none; }
 .conv .icon--fait { width: 15px; height: 15px; color: var(--ok); flex: none; }
+.icon--tel { width: 13px; height: 13px; }
 .msg-fil { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .msg-fil__entete { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
 .msg-fil__titre { min-width: 0; }

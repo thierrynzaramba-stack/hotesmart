@@ -315,13 +315,21 @@ function badgeArrivee (c) {
 }
 // Le téléphone en lien d'appel, pour les arrivées du jour et de demain
 // seulement (fonction conservée) : `tel:` n'accepte que chiffres et « + ».
+// Un numéro livré « 33 6… » SANS le plus ne se compose pas : on le rétablit
+// (demande de Thierry du 11 octobre) — 0033 devient +33, 33XXXXXXXXX aussi ;
+// un numéro national (06…) ou déjà international reste tel quel.
+function numeroAppelable (brut) {
+  const premier = String(brut).trim().split(/[\/,;]|\s+ou\s+/)[0].trim()
+  let num = premier.replace(/[^\d+]/g, '')
+  if (num.startsWith('00')) num = '+' + num.slice(2)
+  if (!num.startsWith('+') && /^33\d{8,}$/.test(num)) num = '+' + num
+  return num
+}
 function lienTelephone (c) {
   if (groupeArrivee(c) > 1 || !c.guestPhone) return ''
-  const brut = String(c.guestPhone).trim()
-  const premier = brut.split(/[\/,;]|\s+ou\s+/)[0].trim()
-  const num = premier.replace(/[^\d+]/g, '')
+  const num = numeroAppelable(c.guestPhone)
   if (num.replace(/\D/g, '').length < 6) return ''
-  return `<a class="link caption" href="tel:${esc(num)}" data-tel>${esc(t('messages.call'))} ${esc(brut)}</a>`
+  return `<a class="link caption row" style="gap: 5px" href="tel:${esc(num)}" data-tel aria-label="${esc(t('messages.call'))}">${icone('i-phone', 'icon icon--tel')}${esc(num)}</a>`
 }
 
 // ─── Rendu : fil ─────────────────────────────────────────────────────────────
