@@ -120,6 +120,8 @@
   "messages.proposal_edit": "Modificar",
   "messages.proposal_reject": "Rechazar",
   "messages.more_actions": "Más acciones",
+  "messages.reject_failed": "Rechazo no guardado, inténtelo de nuevo",
+  "messages.draft_replace": "¿Reemplazar el texto en curso?",
   "messages.load_error": "No se pudo cargar, recargue la página",
   "messages.no_access": "No tiene acceso a los mensajes de esta cuenta",
   "messages.arrives_today": "Llega hoy",

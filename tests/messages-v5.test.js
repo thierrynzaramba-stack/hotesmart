@@ -244,9 +244,12 @@ test('messages : l\'ouverture directe ?conv= exige que le fil existe', () => {
 // ─── Etape 3 : propositions dans le fil (Envoyer / Modifier / Rejeter) ───────
 test('messages etape 3 : Envoyer suit le chemin de l\'ancienne page, jamais un second chemin', () => {
   const src = sansCommentaires(html())
-  // posterMessage d'abord (routage par source), la cloture ensuite.
-  assert.ok(/async function envoyerProposition[\s\S]*?await posterMessage\(c, x\.suggested_reply[\s\S]*?await cloreTache\(x, 'done'/.test(src),
-    'envoi par posterMessage PUIS cloture — la sequence de messagerie.html')
+  // posterMessage d'abord (routage par source), la cloture ensuite — et le
+  // statut RELU juste avant (deux onglets = pas de double message, revue).
+  assert.ok(/async function envoyerProposition[\s\S]*?pending_validation[\s\S]*?await posterMessage\(c, texte\)[\s\S]*?await cloreTache\(x, 'done'/.test(src),
+    'statut relu, envoi par posterMessage PUIS cloture — la sequence de messagerie.html')
+  assert.ok(/if \(!texte\) return/.test(src), 'jamais un message vide (revue de 06e6d50)')
+  assert.ok(/\$\{texteProp \? `<button/.test(src), 'sans texte propose : ni Envoyer ni Modifier')
   assert.ok(src.includes("action: 'proposition'"), 'la cloture passe par /api/messages')
   // L'echec d'envoi laisse la proposition en attente avec Reessayer.
   assert.ok(/envoi proposition[\s\S]*?x\.etatEnvoi = 'echec'/.test(src), 'echec = proposition conservee')
@@ -258,8 +261,12 @@ test('messages etape 3 : Modifier descend le texte, et l\'envoi porte l\'avatar 
   assert.ok(src.includes('etat.enEdition = { tacheId: x.id'), 'la proposition se masque pendant l\'edition')
   // Apres Modifier, c'est lancerEnvoi (envoi MANUEL) qui clot : kind message,
   // donc avatar hote — jamais le robot pose a la main.
-  assert.ok(/const ed = etat\.enEdition[\s\S]*?await cloreTache\(x, 'done', entree\.texte, c\)/.test(src),
-    'l\'envoi apres Modifier valide la proposition')
+  assert.ok(/if \(entree\.valideTache\)[\s\S]*?await cloreTache\(x, 'done', entree\.texte, c\)/.test(src),
+    'l\'envoi apres Modifier valide la proposition — par l\'ENTREE du geste, pas tout envoi du fil (revue)')
+  assert.ok(/function envoyer \(\)[\s\S]*?entree\.valideTache = ed\.tacheId/.test(src),
+    'le marquage nait dans envoyer(), le Reessayer d\'un autre message ne clot rien')
+  assert.ok(/window\.confirm\(t\('messages\.draft_replace'\)\)/.test(src),
+    'un brouillon ne s\'ecrase pas en silence (revue)')
   assert.ok(!/kind: 'auto'/.test(src), 'la page ne fabrique jamais une bulle robot (le coeur ecrit kind message)')
 })
 
@@ -270,6 +277,8 @@ test('messages etape 3 : Rejeter vit dans le menu, et les boutons disparaissent 
     'profil en lecture : AUCUN bouton dans le DOM (spec §9)')
   assert.ok(/async function rejeterProposition[\s\S]*?cloreTache\(x, 'ignored'/.test(src),
     'rejet = statut ignored, celui de l\'ancienne page')
+  assert.ok(/statut === 'ignored'[\s\S]*?messages\.reject_failed/.test(src),
+    'un rejet non enregistre ne disparait pas de l\'ecran (revue de 06e6d50)')
 })
 
 test('messages etape 3 : la cloture retire la tache et met le badge a jour', () => {
@@ -294,4 +303,5 @@ test('api/messages action=proposition : garde write, perimetre, statuts de l\'an
   assert.ok(/from\('conversations'\)\.insert\(\{[\s\S]*?guest_message: tache\.guest_message, agent_reply: texte, book_id: String\(tache\.book_id\)/.test(bloc),
     'le journal conversations de messagerie.html, a l\'identique')
   assert.ok(src.includes("req.body.action === 'proposition'"), 'route branchee')
+  assert.ok(/texte\.length > 10000/.test(bloc), 'texte borne comme les autres champs (revue)')
 })

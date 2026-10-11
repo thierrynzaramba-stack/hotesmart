@@ -241,6 +241,9 @@ async function cloreProposition(req, res) {
   if (!taskId || taskId.length > 64 || !statut) return res.status(400).json({ error: 'Demande invalide' })
   // 'done' signifie « cette reponse est partie » : sans texte, pas de journal.
   if (statut === 'done' && !texte) return res.status(400).json({ error: 'Texte requis' })
+  // Borne comme les autres champs du fichier : le journal n'accueille pas un
+  // payload arbitraire qu'aucun envoi de cette taille ne peut prouver.
+  if (texte.length > 10000) return res.status(400).json({ error: 'Texte trop long' })
   const { data: tache, error: eT } = await supabase.from('agent_tasks')
     .select('id, status, property_id, book_id, guest_name, guest_message')
     .eq('user_id', userId).eq('id', taskId).maybeSingle()

@@ -120,6 +120,8 @@
   "messages.proposal_edit": "Edit",
   "messages.proposal_reject": "Reject",
   "messages.more_actions": "More actions",
+  "messages.reject_failed": "Reject not saved, try again",
+  "messages.draft_replace": "Replace the draft you are writing?",
   "messages.load_error": "Could not load, please reload the page",
   "messages.no_access": "You do not have access to this account’s messages",
   "messages.arrives_today": "Arrives today",

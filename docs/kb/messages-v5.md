@@ -81,7 +81,22 @@ ni envoi, ni validation (étapes 2 et 3 de la spec §11).
 - **Après « Envoyer » direct aussi, la bulle envoyée n'a PAS de robot** : le
   writer (`api/channel-message`) écrit `kind='message'` pour tout envoi validé
   — l'ancienne page a le même comportement. La spec demandait un robot ; le
-  cœur fait foi (signalé à Thierry).
+  cœur fait foi. **Décision de Thierry du 11 octobre : dette 66** — le writer
+  d'envoi posera l'origine (`ia_validee` / `ia_modifiee` / `hote`) au moment de
+  l'envoi, jamais recalculée ; prérequis du lot « Fait pour vous » enrichi,
+  juste après l'étape 4, avant le lot Calendrier. D'ici là, pas de robot.
+- **Constats de la revue de 06e6d50** (tous corrigés, aucun de sécurité) : la
+  validation après « Modifier » est portée par l'ENTRÉE née du geste de la
+  saisie (`entree.valideTache`), plus par tout envoi du fil — le « Réessayer »
+  d'un vieux message manuel ne clôt plus la proposition ; sans
+  `suggested_reply`, ni Envoyer ni Modifier (un clic postait un message vide,
+  api/beds24 n'a aucune garde) ; un rejet que le serveur n'a pas enregistré ne
+  disparaît plus de l'écran (note « Rejet non enregistré, réessayez ») ;
+  relecture du statut juste avant l'envoi (deux onglets = pas de double
+  message, le verrou serveur ne fermait que la double clôture) ; « Modifier »
+  n'écrase plus un brouillon sans confirmation, et le texte descendu NON
+  retouché repart avec sa proposition au changement de fil ; `texte` borné à
+  10 000 caractères côté API.
 - **Rejeter** vit dans le menu ⋯ (`details.bulle-menu`), sans confirmation.
 - Échec d'envoi : la proposition reste (liseré `--danger`), « Non envoyé ·
   Réessayer » ; si la CLÔTURE échoue après un envoi réussi, la bulle part de

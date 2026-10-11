@@ -432,13 +432,17 @@ function renderFil () {
     if (e.type === 'proposition') {
       const x = e.x
       const enCoursEnvoi = x.etatEnvoi === 'en_cours'
+      // Sans texte propose (la bulle montre le resume), NI Envoyer NI
+      // Modifier : un clic posterait un message VIDE au voyageur (releve en
+      // review — api/beds24 sendMessage n'a aucune garde). Rejeter reste.
+      const texteProp = String(x.suggested_reply || '').trim()
       const boutons = peutEcrireMessages() && !enCoursEnvoi ? `<span class="bulle__actions">
           <details class="bulle-menu">
             <summary aria-label="${esc(t('messages.more_actions'))}" title="${esc(t('messages.more_actions'))}">${icone('i-more')}</summary>
             <div class="bulle-menu__liste"><button type="button" data-rejeter="${esc(String(x.id))}">${esc(t('messages.proposal_reject'))}</button></div>
           </details>
-          <button type="button" class="btn btn--secondary" data-modifier="${esc(String(x.id))}">${esc(t('messages.proposal_edit'))}</button>
-          <button type="button" class="btn btn--primary" data-envoyer-prop="${esc(String(x.id))}">${icone('i-send')}${esc(t('messages.send'))}</button>
+          ${texteProp ? `<button type="button" class="btn btn--secondary" data-modifier="${esc(String(x.id))}">${esc(t('messages.proposal_edit'))}</button>
+          <button type="button" class="btn btn--primary" data-envoyer-prop="${esc(String(x.id))}">${icone('i-send')}${esc(t('messages.send'))}</button>` : ''}
         </span>` : ''
       morceaux.push(`<div class="bulle bulle--proposition${x.etatEnvoi === 'echec' ? ' bulle--echec' : ''}">
         <span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.proposal'))}</span>${esc(x.suggested_reply || x.summary || '')}${boutons}</div>
@@ -505,12 +509,13 @@ async function lancerEnvoi (c, entree) {
     // Parti : la bulle definitive viendra du coeur (double ecriture messages).
     const liste = envoisDe(c.bookId)
     liste.splice(liste.indexOf(entree), 1)
-    // Un envoi apres « Modifier » VALIDE la proposition descendue dans la
-    // saisie (etape 3) : meme sequence que l'ancienne page — l'envoi est
-    // parti, la cloture suit. La bulle porte l'avatar hote, pas le robot.
-    const ed = etat.enEdition
-    if (ed && String(ed.bookId) === String(c.bookId)) {
-      const x = etat.taches.find(v => String(v.id) === String(ed.tacheId))
+    // Un envoi apres « Modifier » VALIDE la proposition — mais SEULEMENT
+    // l'entree nee du geste de la saisie (entree.valideTache, posee par
+    // envoyer()) : le « Reessayer » d'un vieux message manuel du meme fil ne
+    // doit jamais clore la proposition avec un texte qui n'est pas le sien
+    // (releve en review). La bulle porte l'avatar hote, pas le robot.
+    if (entree.valideTache) {
+      const x = etat.taches.find(v => String(v.id) === String(entree.valideTache))
       etat.enEdition = null
       if (x) { await cloreTache(x, 'done', entree.texte, c); return }
     }
@@ -531,6 +536,10 @@ async function envoyer () {
   zone.value = ''
   ajusterHauteur(zone)
   const entree = { texte, etatEnvoi: 'en_cours' }
+  // Le geste de la saisie pendant une edition : CETTE entree-la validera la
+  // proposition a son premier envoi reussi (retry compris), aucune autre.
+  const ed = etat.enEdition
+  if (ed && String(ed.bookId) === String(c.bookId)) entree.valideTache = ed.tacheId
   envoisDe(c.bookId).push(entree)
   lancerEnvoi(c, entree)
 }
@@ -549,11 +558,21 @@ async function envoyerProposition (id) {
   const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
   const x = tacheParId(id)
   if (!c || !x || x.etatEnvoi === 'en_cours') return
+  const texte = String(x.suggested_reply || '').trim()
+  if (!texte) return
   x.etatEnvoi = 'en_cours'
   renderFil()
   try {
-    await posterMessage(c, x.suggested_reply || '')
-    await cloreTache(x, 'done', x.suggested_reply || '', c)
+    // Deux onglets, ou la V5 et l'ancienne page : la tache a pu etre validee
+    // ailleurs APRES notre chargement. Le verrou serveur ne ferme que la
+    // double CLOTURE — relire le statut ici evite le double MESSAGE au
+    // voyageur (releve en review). Lecture illisible = pas d'envoi (Reessayer).
+    const { data: frais, error } = await supabase.from('agent_tasks')
+      .select('status').eq('id', x.id).eq('user_id', compteCourant()).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!frais || frais.status !== 'pending_validation') { retirerTache(x); return }
+    await posterMessage(c, texte)
+    await cloreTache(x, 'done', texte, c)
   } catch (err) {
     logger.error('Messages', 'envoi proposition', err)
     x.etatEnvoi = 'echec'
@@ -564,6 +583,10 @@ function modifierProposition (id) {
   const x = tacheParId(id)
   if (!x) return
   const zone = $('[data-bind="texte"]')
+  // Un brouillon deja tape ne s'ecrase jamais en silence (releve en review).
+  const brouillon = zone.value.trim()
+  if (brouillon && brouillon !== String(x.suggested_reply || '').trim()
+    && !window.confirm(t('messages.draft_replace'))) return
   zone.value = x.suggested_reply || ''
   ajusterHauteur(zone)
   etat.enEdition = { tacheId: x.id, bookId: String(etat.ouverte) }
@@ -576,24 +599,40 @@ async function rejeterProposition (id) {
   const c = etat.conversations.find(v => String(v.bookId) === String(etat.ouverte))
   await cloreTache(x, 'ignored', null, c)
 }
-// Cloture cote serveur, puis retrait de l'ecran et badge a jour. Si la cloture
-// echoue APRES un envoi reussi, la bulle part quand meme (le message EST
-// parti) ; au rechargement la proposition reviendra au-dessus du message
-// envoye et « Rejeter » la fermera — on ne renvoie jamais deux fois tout seul.
+// Cloture cote serveur, puis retrait de l'ecran et badge a jour.
+//  - done : si la cloture echoue APRES un envoi reussi, la bulle part quand
+//    meme (le message EST parti) ; au rechargement la proposition reviendra
+//    au-dessus du message envoye et « Rejeter » la fermera — on ne renvoie
+//    jamais deux fois tout seul.
+//  - ignored : RIEN n'est parti — un rejet que le serveur n'a pas enregistre
+//    ne disparait pas de l'ecran, il se dit et se retente (releve en review).
 async function cloreTache (x, statut, texte, c) {
   try {
     await appel('/api/messages', { action: 'proposition', task_id: String(x.id), statut, ...(texte ? { texte } : {}) })
   } catch (err) {
     // 409 deja_close : fermee ailleurs (ancienne page, autre onglet) — meme sortie.
-    if (err.status !== 409) logger.error('Messages', 'cloture proposition', err)
+    if (err.status !== 409) {
+      logger.error('Messages', 'cloture proposition', err)
+      if (statut === 'ignored') {
+        const note = $('[data-bind="saisie-etat"]')
+        note.hidden = false
+        note.textContent = t('messages.reject_failed')
+        return
+      }
+    }
   }
-  etat.taches = etat.taches.filter(v => String(v.id) !== String(x.id))
-  indexerTaches()
-  if (etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)) etat.enEdition = null
   if (statut === 'done' && c) {
     c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message' })
     c.lastTime = new Date().toISOString()
   }
+  retirerTache(x)
+}
+// Retrait local d'une proposition (close ici ou ailleurs) : liste, index,
+// edition en cours, badge, rendus.
+function retirerTache (x) {
+  etat.taches = etat.taches.filter(v => String(v.id) !== String(x.id))
+  indexerTaches()
+  if (etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)) etat.enEdition = null
   majBadge()
   renderFiltres(); renderListe(); renderFil()
 }
@@ -649,9 +688,19 @@ function dateLongue (jour) {
 }
 function ouvrir (bookId) {
   // Changer de fil pendant un « Modifier » : la proposition REVIENT dans son
-  // fil (elle n'est pas close), le texte reste dans la saisie (jamais perdu) —
-  // mais l'envoyer ailleurs ne validera rien.
-  if (etat.enEdition && String(etat.enEdition.bookId) !== String(bookId)) etat.enEdition = null
+  // fil (elle n'est pas close). Le texte descendu NON retouche repart avec
+  // elle (rien n'est perdu, et il n'atterrit pas chez un autre voyageur —
+  // releve en review) ; un texte RETOUCHE reste dans la saisie (on ne jette
+  // jamais ce que l'hote a tape), mais l'envoyer ailleurs ne validera rien.
+  if (etat.enEdition && String(etat.enEdition.bookId) !== String(bookId)) {
+    const zone = $('[data-bind="texte"]')
+    const xEd = tacheParId(etat.enEdition.tacheId)
+    if (xEd && zone.value.trim() === String(xEd.suggested_reply || '').trim()) {
+      zone.value = ''
+      ajusterHauteur(zone)
+    }
+    etat.enEdition = null
+  }
   etat.ouverte = bookId
   const c = etat.conversations.find(x => String(x.bookId) === String(bookId))
   // L'ouverture POSE l'etat lu (etape 2) — optimiste a l'ecran, silencieux en
