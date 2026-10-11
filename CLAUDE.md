@@ -344,8 +344,15 @@ AirROI pour octobre : 25 $ par compte sur 30 jours et 25 $ par mois (dette
 - **Staging n'a aucun cron** (docs/STAGING.md §1) : en recette, le pilote se
   lance par `scripts/piloter-yieldflow.js` (à blanc, puis `--go`).
 
-**Refonte UI V5 — lot 2 « Messages » ÉTAPES 1 ET 2 EN PROD (11 octobre 2026,
-464e2d4)** : étape 1 = pages/messages.html en lecture seule (liste + fil),
+**Refonte UI V5 — lot 2 « Messages » ÉTAPES 1 À 3 EN PROD (11 octobre 2026,
+18bb660)** : étape 3 = Envoyer / Modifier / Rejeter sur les propositions dans
+le fil (Envoyer = chemin de l'ancienne page : posterMessage puis clôture
+statut+journal par POST /api/messages action=proposition ; statuts
+done/ignored, pas de 'rejected' ; statut RELU avant l'envoi — pas de double
+message ; badge décrémenté sans rechargement). Dette 66 ouverte (origine
+ia_validee/ia_modifiee/hote posée par le writer d'envoi — prérequis « Fait
+pour vous », après l'étape 4, avant le lot Calendrier) : d'ici là, bulle
+envoyée SANS robot. étape 1 = pages/messages.html en lecture seule (liste + fil),
 arrivées du jour/demain en tête avec téléphone composable (+33 rétabli), photo
 du bien en avatar, logos de canal aux vraies couleurs (jetons --canal-*),
 « à traiter » = séjours à venir/en cours seulement (règle resserrée, module
