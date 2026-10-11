@@ -128,10 +128,10 @@ async function charger () {
       .catch(e => { logger.error('Messages', 'conversations', e); etat.chargementOk = false }),
     // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
     // sous RLS, jamais /api/channel-property (il interroge Beds24 en direct).
-    supabase.from('properties').select('id, name, provider_property_id').eq('user_id', compteCourant())
+    supabase.from('properties').select('id, name, provider_property_id, photo_url').eq('user_id', compteCourant())
       .then(({ data, error }) => {
         if (error) { logger.error('Messages', 'biens', error); return }
-        for (const b of data || []) if (b.provider_property_id) etat.biens.set(String(b.provider_property_id), { uuid: b.id, name: b.name })
+        for (const b of data || []) if (b.provider_property_id) etat.biens.set(String(b.provider_property_id), { uuid: b.id, name: b.name, photo: b.photo_url || null })
       }),
     supabase.from('agent_tasks')
       .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
@@ -206,6 +206,25 @@ const LETTRE_CANAL = { airbnb: 'A', booking: 'B', direct: 'D' }
 // Un canal inconnu reste NEUTRE : la premiere lettre de « Autre OTA » se
 // lisait Airbnb (releve en review).
 const lettreCanal = (c) => LETTRE_CANAL[c.platform] || '·'
+// La pastille : lettre + COULEUR DE MARQUE (le nom du canal en infobulle),
+// et le grand cercle porte la MINIATURE du logement quand il en a une —
+// repli : les initiales du voyageur (demande de Thierry, 11 octobre 2026).
+const CLASSE_CANAL = { airbnb: 'conv__canal--airbnb', booking: 'conv__canal--booking', direct: 'conv__canal--direct' }
+// Le LOGO du canal (demande de Thierry) : le belo Airbnb (sprite, trace CC0),
+// le « B. » Booking (son logo EST cette lettre), la maison pour le direct ;
+// inconnu = point neutre. Le nom du canal reste en infobulle.
+function pastilleCanal (c) {
+  const dedans = c.platform === 'airbnb' ? icone('i-canal-airbnb', 'icon icon--fill')
+    : c.platform === 'booking' ? 'B.'
+    : c.platform === 'direct' ? icone('i-home')
+    : lettreCanal(c)
+  return `<span class="conv__canal ${CLASSE_CANAL[c.platform] || ''}" title="${esc(c.ota || '')}">${dedans}</span>`
+}
+function avatarConv (c) {
+  const bien = etat.biens.get(String(c.propertyId))
+  const photo = bien?.photo ? `<img src="${esc(bien.photo)}" alt="" loading="lazy">` : ''
+  return `${photo}${photo ? '' : esc(initiales(c.guestName))}${pastilleCanal(c)}`
+}
 const initiales = (nom) => (nom || '').trim().split(/\s+/).slice(0, 2).map(m => m[0] || '').join('').toUpperCase() || '·'
 function periode (c) {
   const j = x => { const [a, m, d] = String(x).slice(0, 10).split('-').map(Number); return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { day: 'numeric', month: 'short', timeZone: 'UTC' }) }
@@ -242,7 +261,7 @@ function renderListe () {
     const proposition = tachesDe(c).length > 0
     const parIA = dernier && dernier.direction === 'outbound' && dernier.kind === 'auto'
     return `<button type="button" class="conv" data-conv="${esc(c.bookId)}" aria-current="${c.bookId === etat.ouverte}">
-      <span class="conv__avatar">${esc(initiales(c.guestName))}<span class="conv__canal">${esc(lettreCanal(c))}</span></span>
+      <span class="conv__avatar">${avatarConv(c)}</span>
       <span style="min-width: 0">
         <span class="conv__nom">${esc(c.guestName || t('messages.guest'))}<time>${dernier ? esc(heureCourte(dernier.sent_at)) : ''}</time></span>
         <span class="conv__apercu">
@@ -295,7 +314,7 @@ function renderFil () {
   if (!c) { entete.hidden = true; deroule.hidden = true; vide.hidden = false; delete document.body.dataset.fil; return }
   document.body.dataset.fil = '1'
   entete.hidden = false; deroule.hidden = false; vide.hidden = true
-  $('[data-bind="fil-avatar"]').innerHTML = `${esc(initiales(c.guestName))}<span class="conv__canal">${esc(lettreCanal(c))}</span>`
+  $('[data-bind="fil-avatar"]').innerHTML = avatarConv(c)
   $('[data-bind="fil-nom"]').textContent = c.guestName || t('messages.guest')
   const bien = etat.biens.get(String(c.propertyId))
   $('[data-bind="fil-sous"]').textContent = [bien?.name, periode(c)].filter(Boolean).join(' · ')

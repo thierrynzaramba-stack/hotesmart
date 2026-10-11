@@ -22,6 +22,15 @@
   --amber-soft: #FFF4E0;   /* fond de l'icône d'une action en attente */
   --amber-text: #B87500;   /* texte ambre lisible sur blanc */
 
+  /* Canaux de réservation : les VRAIES couleurs de marque (demande de
+     Thierry, 11 octobre 2026), portées par la pastille du canal — la lettre
+     A / B / D reste dessus, jamais la couleur seule. Même famille que
+     shared/calendrier-resa.js (rouge Airbnb / bleu Booking au calendrier). */
+  --canal-airbnb: #FF5A5F;
+  --canal-booking: #003580;
+  --canal-direct: #0E1726;   /* la réservation directe est à NOUS : bleu nuit */
+  --on-canal: #FFFFFF;
+
   /* Information neutre (« non lu », proposition en attente dans une liste) :
      JAMAIS pour une action — l'ambre dit « HôteSmart attend ta décision »,
      le bleu dit seulement « du nouveau » (spec lot 2 §3.2 et §6). */

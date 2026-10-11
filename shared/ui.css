@@ -184,8 +184,14 @@ h1, h2, h3, p { margin: 0; }
 .conv:hover { background: var(--surface-2); }
 .conv[aria-current="true"] { background: var(--surface-2); }
 .conv__avatar { position: relative; width: 44px; height: 44px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink); font-size: var(--fs-small); font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; }
-/* La pastille canal suit la retouche avatars : le bleu nuit reste au LOGO. */
-.conv__canal { position: absolute; bottom: -2px; inset-inline-end: -2px; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); font-size: 10px; font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); box-shadow: 0 0 0 2px var(--surface); }
+.conv__avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-pill); }
+/* La pastille canal porte la COULEUR DE MARQUE du canal (A rose Airbnb,
+   B bleu Booking, D bleu nuit direct) ; un canal inconnu reste neutre. */
+.conv__canal { position: absolute; bottom: -2px; inset-inline-end: -2px; z-index: 1; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); font-size: 10px; font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); box-shadow: 0 0 0 2px var(--surface); }
+.conv__canal--airbnb { background: var(--canal-airbnb); color: var(--on-canal); border-color: var(--canal-airbnb); }
+.conv__canal--booking { background: var(--canal-booking); color: var(--on-canal); border-color: var(--canal-booking); }
+.conv__canal--direct { background: var(--canal-direct); color: var(--on-canal); border-color: var(--canal-direct); }
+.conv__canal .icon { width: 11px; height: 11px; stroke-width: 2.4; }
 .conv__nom { display: flex; align-items: baseline; gap: 8px; font-weight: var(--fw-semibold); }
 .conv__nom time { margin-inline-start: auto; font-size: var(--fs-caption); color: var(--muted); font-weight: var(--fw-regular); }
 .conv__apercu { display: flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--muted); overflow: hidden; }

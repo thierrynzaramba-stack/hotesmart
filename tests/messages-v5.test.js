@@ -117,6 +117,34 @@ test('messages : les arrivees du jour et de demain sont CONSERVEES (inventaire �
   assert.ok(src.includes('SANS_ARRIVEE'), 'une annulee n\'est pas une arrivee')
 })
 
+test('messages : miniature du logement et logos de canal (demande du 11 octobre)', () => {
+  const src = sansCommentaires(html())
+  assert.ok(src.includes('function avatarConv'), 'le grand cercle porte la photo du bien')
+  assert.ok(src.includes('bien?.photo'), 'repli : les initiales quand pas de photo')
+  assert.ok(src.includes("icone('i-canal-airbnb'"), 'le belo Airbnb vient du sprite')
+  assert.ok(src.includes("'B.'"), 'le logo Booking est son « B. »')
+  const theme = lire('shared/theme.css')
+  for (const tk of ['--canal-airbnb', '--canal-booking', '--canal-direct', '--on-canal']) {
+    assert.ok(theme.includes(tk + ':'), `jeton ${tk} dans theme.css (seul fichier a hexas)`)
+  }
+  const css = lire('shared/ui.css')
+  assert.ok(!/#[0-9A-Fa-f]{3,6}\b/.test(css), 'aucune couleur de marque en dur hors theme.css')
+})
+
+test('icons.svg : XML valide, et JAMAIS de double tiret dans un commentaire', () => {
+  // Vecu du 11 octobre 2026 : « .icon--fill » cite dans un commentaire a coupe
+  // l'analyse du sprite — tous les symboles suivants (belo compris)
+  // disparaissaient, sans erreur visible.
+  const svg = lire('shared/icons.svg')
+  for (const m of svg.matchAll(/<!--([\s\S]*?)-->/g)) {
+    assert.ok(!m[1].includes('--'), 'double tiret dans un commentaire XML : le sprite casse a partir de la')
+  }
+  assert.ok(svg.includes('id="i-canal-airbnb"'))
+  const apres = svg.slice(svg.indexOf('i-canal-airbnb'))
+  assert.ok(apres.includes('id="i-help"') && apres.includes('id="i-logout"'),
+    'les symboles places APRES le belo restent atteignables')
+})
+
 // ─── Branchements ────────────────────────────────────────────────────────────
 test('l\'onglet Messages mene a la nouvelle page, l\'ancienne messagerie ne vit plus dans aucun menu', () => {
   assert.ok(lire('shared/nav.js').includes("href: '/pages/messages'"))
