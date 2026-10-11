@@ -404,6 +404,13 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
     'bouton Reponses de l\'IA (en-tete)': 'data-ouvre-volet="ia"',
     'alertes EN BAS du volet IA': "voletAlertes(ref)"
   }
+  // Et les verrous de la revue de ddfc88a :
+  assert.ok(/\[hidden\] \{ display: none !important; \}/.test(lire('shared/ui.css')),
+    'hidden gagne TOUJOURS (regle generale, pas une rustine par selecteur)')
+  assert.ok(/if \(etat\.tiroirVolet === 'programmes'\) \{\s*choixBien\.hidden = true/.test(sansCommentaires(src)),
+    'le volet programmes se rend sans bien, sans selecteur de logement')
+  assert.ok(/aria-expanded', String\(ouvert && etat\.tiroirVolet === b\.dataset\.ouvreVolet\)/.test(src),
+    'les boutons annoncent l\'etat du volet')
   const manquants = Object.entries(CHAMPS)
     .filter(([, motif]) => !src.includes(motif))
     .map(([nom]) => nom)

@@ -5,6 +5,12 @@
    ============================================================ */
 
 /* ---------- Base ---------- */
+/* L'attribut hidden GAGNE toujours : une classe display:flex/grid l'ecrasait
+   (origine auteur contre origine navigateur) — en-tete de fil vide, saisie,
+   barre d'outils et boutons restaient visibles caches. Releve en review de
+   ddfc88a, ferme ICI pour toute la classe de defauts. */
+[hidden] { display: none !important; }
+
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body {
@@ -196,9 +202,6 @@ h1, h2, h3, p { margin: 0; }
 .conv__canal--direct { background: var(--canal-direct); color: var(--on-canal); border-color: var(--canal-direct); }
 .conv__canal .icon { width: 11px; height: 11px; stroke-width: 2.4; }
 .conv__nom { display: flex; align-items: baseline; gap: 8px; font-weight: var(--fw-semibold); }
-.conv__nom time { margin-inline-start: auto; font-size: var(--fs-caption); color: var(--muted); font-weight: var(--fw-regular); }
-.conv__apercu { display: flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--muted); overflow: hidden; }
-.conv__apercu span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conv__sous { display: flex; align-items: center; gap: 6px; font-size: var(--fs-caption); color: var(--muted); }
 .conv__etat { width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--border); flex: none; }
 .conv__etat--encours { background: var(--ok); }
@@ -209,10 +212,6 @@ h1, h2, h3, p { margin: 0; }
 .icon--tel { width: 13px; height: 13px; }
 .msg-fil { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .msg-fil__entete { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
-/* `display: flex` ECRASE l'attribut hidden : sans ces regles, l'en-tete vide
-   et la saisie restaient visibles quand aucun fil n'est ouvert (constate au
-   banc le 12 octobre — defaut present depuis l'etape 1). */
-.msg-fil__entete[hidden], .msg-fil__deroule[hidden], .msg-saisie[hidden] { display: none; }
 .msg-fil__titre { min-width: 0; }
 .msg-fil__titre .small { display: block; }
 .msg-fil__deroule { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 4px; }

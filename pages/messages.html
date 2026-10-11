@@ -820,15 +820,24 @@ function renderTiroir () {
   if (tiroir.hidden) return
   $('[data-bind="tiroir-titre"]').textContent =
     t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled' : 'messages.tab_ia')
+  const corps = $('[data-bind="tiroir-corps"]')
+  const choixBien = tiroir.querySelector('.msg-tiroir__choixbien')
+  // Le renvoi provisoire ne depend d'AUCUN bien : il se rend avant le garde
+  // « aucun logement », et sans le selecteur (releve en review de ddfc88a).
+  if (etat.tiroirVolet === 'programmes') {
+    choixBien.hidden = true
+    corps.innerHTML = voletProgrammes()
+    return
+  }
+  choixBien.hidden = false
   const sel = $('[data-bind="tiroir-bien"]')
   const refs = [...etat.biens.keys()]
   if (!etat.tiroirBien || !etat.biens.has(etat.tiroirBien)) etat.tiroirBien = refs[0] || null
   sel.innerHTML = refs.map(r =>
     `<option value="${esc(r)}" ${r === etat.tiroirBien ? 'selected' : ''}>${esc(etat.biens.get(r).name || r)}</option>`).join('')
-  const corps = $('[data-bind="tiroir-corps"]')
   const ref = etat.tiroirBien
   if (!ref) { corps.innerHTML = `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`; return }
-  corps.innerHTML = etat.tiroirVolet === 'programmes' ? voletProgrammes() : voletIA(ref)
+  corps.innerHTML = voletIA(ref)
   brancherTiroir(corps, ref)
 }
 
@@ -1033,6 +1042,10 @@ function ouvrirTiroir (ouvert) {
   const tiroir = $('[data-bind="tiroir"]')
   tiroir.hidden = !ouvert
   $('[data-bind="tiroir-note"]').hidden = true
+  // L'etat ouvert/ferme s'ANNONCE (les onglets retires portaient
+  // aria-pressed ; les boutons portent aria-expanded — releve en review).
+  document.querySelectorAll('[data-ouvre-volet]').forEach(b =>
+    b.setAttribute('aria-expanded', String(ouvert && etat.tiroirVolet === b.dataset.ouvreVolet)))
   if (ouvert) renderTiroir()
 }
 
