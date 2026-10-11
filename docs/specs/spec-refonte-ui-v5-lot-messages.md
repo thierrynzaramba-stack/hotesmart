@@ -187,3 +187,22 @@ Le contenu des messages n'est jamais traduit par l'interface.
 4. En-tête Test/Auto + tiroir réglages, redirection de l'ancienne page GuestFlow,
    retrait du lien « Outils ».
 Chaque étape : desktop + mobile, i18n-check vert, review, preview avec mes données.
+
+## 12. Inventaire (ajouté le 11 octobre 2026, règle « la forme ne supprime jamais le fond »)
+
+Croisement de l'ancienne messagerie (`apps/agent-ai/messagerie.html`), des KB
+(`guestflow.md`, `messagerie-import.md`, `alertes.md`) et de cette spec. Le sort
+de chaque fonction existante :
+
+| Fonction de l'ancienne page | Sort | Raison / étape |
+|---|---|---|
+| Badge « Arrive aujourd'hui / demain » + fils remontés en tête | **CONSERVÉ, étape 1** (réintégré le 11 octobre : perdu par omission, signalé par Thierry) | le jour J, ces fils priment ; tri = à valider, puis arrivées, puis non lus, puis date |
+| Téléphone du voyageur en lien d'appel (arrivées j/j+1) | **CONSERVÉ, étape 1** (réintégré) | à l'arrivée, souvent le seul canal restant |
+| États « ménage fait / code transmis » (liste et fil) | **CONSERVÉ, étape 1** (réintégré) | pastilles positives seulement, comme avant ; source `arrivee` de /api/messages |
+| Marqueurs de tâches « Intervention requise / Info à compléter » | **DÉPLACÉ, étape 3** | ce sont des tâches à traiter : elles rejoignent les propositions dans le fil, avec leurs actions |
+| « À traiter » (tâches `pending`) dans le compteur | **DÉPLACÉ** : accueil (« À valider ») + étape 3 | le compteur de la nouvelle liste ne compte que les propositions |
+| Épingles (conversation_flags.pinned) | **DÉPLACÉ, étape 2** | une écriture ; l'étape 1 est lecture seule |
+| Archiver / désarchiver un fil (manuel) | **DÉPLACÉ, étape 2** | une écriture ; l'auto-archivage reste lu du serveur |
+| Filtre par bien (sélecteur) | **RETIRÉ** (spec §3.2) | la recherche suffit à 4 biens ; à revoir à 10+ |
+| Mode `?legacy=1` (lecture Beds24 directe) | **RETIRÉ** | contraire à l'architecture cœur ; l'ancienne page reste accessible par URL jusqu'à l'étape 4 |
+| Envoi, GuestFlow, Test/Auto, réglages | **DÉPLACÉ, étapes 2-4** | ordre de livraison §11 |

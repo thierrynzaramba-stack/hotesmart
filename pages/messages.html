@@ -66,6 +66,7 @@
           <svg class="icon" style="width:15px;height:15px" aria-hidden="true"><use href="/shared/icons.svg#i-key"/></svg>
           <span data-bind="fil-code-texte"></span>
         </span>
+        <span class="row" style="gap: 12px" data-bind="fil-extras"></span>
         <a class="link caption" data-bind="fil-resa" hidden data-i18n="messages.booking_link"></a>
       </span>
     </div>
@@ -91,7 +92,7 @@ import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCom
   from '/shared/compte-courant.js'
 // La règle « conversation ouverte » est CELLE DU LOT 1 (shared, testée) :
 // séjour non terminé OU dernier message < 7 jours. Jamais recopiée.
-import { tachesOuvertes, jourParis } from '/shared/aujourdhui.js'
+import { tachesOuvertes, jourParis, ajouterJours } from '/shared/aujourdhui.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -175,6 +176,16 @@ const nonLue = (c) => {
 }
 const enCours = (c) => c.lastNight && String(c.lastNight).slice(0, 10) >= etat.aujourdHui
   && String(c.status || '').toLowerCase() !== 'cancelled'
+// Arrivee du jour (0), de demain (1), autre (2) — fonction CONSERVEE de
+// l'ancienne messagerie (inventaire §12 de la spec) : ces fils priment.
+const SANS_ARRIVEE = new Set(['cancelled', 'demapped', 'request', 'blocked', 'inquiry', 'black'])
+function groupeArrivee (c) {
+  const arr = String(c.firstNight || '').slice(0, 10)
+  if (!arr || SANS_ARRIVEE.has(String(c.status || '').toLowerCase())) return 2
+  if (arr === etat.aujourdHui) return 0
+  if (arr === ajouterJours(etat.aujourdHui, 1)) return 1
+  return 2
+}
 function visibles () {
   const q = etat.recherche.trim().toLowerCase()
   let liste = etat.conversations.filter(c => etat.anciennes || !c.archivee)
@@ -184,8 +195,9 @@ function visibles () {
     liste = liste.filter(c => (c.guestName || '').toLowerCase().includes(q)
       || (etat.biens.get(String(c.propertyId))?.name || '').toLowerCase().includes(q))
   }
-  // Tri (spec §3.2) : à valider d'abord, puis non lus, puis date décroissante.
-  const rang = c => (tachesDe(c).length ? 0 : nonLue(c) ? 1 : 2)
+  // Tri (spec §3.2 + inventaire §12) : à valider, puis ARRIVÉES du jour et de
+  // demain, puis non lus, puis date décroissante.
+  const rang = c => (tachesDe(c).length ? 0 : groupeArrivee(c) < 2 ? 1 : nonLue(c) ? 2 : 3)
   return liste.sort((a, b) => rang(a) - rang(b) || new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
 }
 
@@ -239,6 +251,7 @@ function renderListe () {
           <span>${esc(dernier ? dernier.body : '')}</span>
         </span>
         <span class="conv__sous"><span class="conv__etat${enCours(c) ? ' conv__etat--encours' : ''}"></span>${esc([bien?.name, periode(c)].filter(Boolean).join(' · '))}</span>
+        ${badgeArrivee(c)}
       </span>
       ${nonLue(c) ? `<span class="conv__nonlu" role="img" data-i18n-attr="aria-label:messages.unread"></span>` : ''}
     </button>`
@@ -249,6 +262,29 @@ function renderListe () {
   zone.querySelectorAll('[data-conv]').forEach(b => b.addEventListener('click', () => ouvrir(b.dataset.conv)))
   zone.querySelector('[data-plus]')?.addEventListener('click', () => { etat.limite += PAGE; renderListe() })
   zone.querySelector('[data-anciennes]')?.addEventListener('click', () => { etat.anciennes = true; renderFiltres(); renderListe() })
+}
+
+// Badge et pastilles d'arrivée (liste) : pastilles POSITIVES seulement,
+// l'absence se lit « pas encore » (règle de l'ancienne page).
+function badgeArrivee (c) {
+  const g = groupeArrivee(c)
+  if (g > 1) return ''
+  const etats = []
+  if (c.arrivee?.menage === 'fait') etats.push(`<span class="row caption" style="gap: 3px">${icone('i-cleaning', 'icon icon--fait')}<span class="sr-only">${esc(t('messages.cleaning_done'))}</span></span>`)
+  if (c.arrivee?.codeEtat === 'transmis') etats.push(`<span class="row caption" style="gap: 3px">${icone('i-key', 'icon icon--fait')}<span class="sr-only">${esc(t('messages.code_sent'))}</span></span>`)
+  return `<span class="row caption" style="gap: 8px; margin-top: 3px">
+    <span class="chip" style="background: var(--surface-2); padding: 3px 10px">${icone('i-arrival', 'icon')}${esc(t(g === 0 ? 'messages.arrives_today' : 'messages.arrives_tomorrow'))}</span>
+    ${etats.join('')}</span>`
+}
+// Le téléphone en lien d'appel, pour les arrivées du jour et de demain
+// seulement (fonction conservée) : `tel:` n'accepte que chiffres et « + ».
+function lienTelephone (c) {
+  if (groupeArrivee(c) > 1 || !c.guestPhone) return ''
+  const brut = String(c.guestPhone).trim()
+  const premier = brut.split(/[\/,;]|\s+ou\s+/)[0].trim()
+  const num = premier.replace(/[^\d+]/g, '')
+  if (num.replace(/\D/g, '').length < 6) return ''
+  return `<a class="link caption" href="tel:${esc(num)}">${esc(t('messages.call'))} ${esc(brut)}</a>`
 }
 
 // ─── Rendu : fil ─────────────────────────────────────────────────────────────
@@ -268,6 +304,12 @@ function renderFil () {
     code.hidden = false
     $('[data-bind="fil-code-texte"]').textContent = t(c.arrivee.codeEtat === 'transmis' ? 'messages.code_sent' : 'messages.code_pending')
   } else code.hidden = true
+  // Ménage fait et téléphone (arrivées j / j+1) : fonctions CONSERVÉES.
+  const extras = $('[data-bind="fil-extras"]')
+  extras.innerHTML = [
+    c.arrivee?.menage === 'fait' ? `<span class="row caption muted" style="gap: 5px">${icone('i-cleaning', 'icon')}${esc(t('messages.cleaning_done'))}</span>` : '',
+    lienTelephone(c)
+  ].filter(Boolean).join('')
   const resa = $('[data-bind="fil-resa"]')
   if (bien) { resa.hidden = false; resa.href = `/biens/${encodeURIComponent(bien.uuid)}/calendrier` } else resa.hidden = true
 

@@ -120,5 +120,9 @@
   "messages.proposal_hint": "to approve in the current inbox",
   "messages.load_error": "Could not load, please reload the page",
   "messages.no_access": "You do not have access to this account’s messages",
+  "messages.arrives_today": "Arrives today",
+  "messages.arrives_tomorrow": "Arrives tomorrow",
+  "messages.cleaning_done": "cleaning done",
+  "messages.call": "Call",
   "common.loading": "Loading…"
 }

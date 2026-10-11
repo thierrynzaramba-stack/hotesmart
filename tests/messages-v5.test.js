@@ -106,6 +106,17 @@ test('messages : les correctifs de la revue de acf0fa0 tiennent', () => {
   assert.ok(src.includes('tachesParResa'))
 })
 
+test('messages : les arrivees du jour et de demain sont CONSERVEES (inventaire §12)', () => {
+  const src = sansCommentaires(html())
+  assert.ok(src.includes('function groupeArrivee'), 'le groupe d\'arrivee existe')
+  assert.ok(/groupeArrivee\(c\) < 2 \? 1 :/.test(src), 'les arrivees remontent juste apres « a valider »')
+  assert.ok(src.includes('messages.arrives_today') && src.includes('messages.arrives_tomorrow'))
+  assert.ok(src.includes("c.arrivee?.menage === 'fait'"), 'pastille menage POSITIVE seulement')
+  assert.ok(src.includes('function lienTelephone'), 'le telephone en lien d\'appel')
+  assert.ok(/groupeArrivee\(c\) > 1 \|\| !c\.guestPhone/.test(src), 'le tel reste borne aux arrivees j / j+1')
+  assert.ok(src.includes('SANS_ARRIVEE'), 'une annulee n\'est pas une arrivee')
+})
+
 // ─── Branchements ────────────────────────────────────────────────────────────
 test('l\'onglet Messages mene a la nouvelle page, l\'ancienne messagerie ne vit plus dans aucun menu', () => {
   assert.ok(lire('shared/nav.js').includes("href: '/pages/messages'"))

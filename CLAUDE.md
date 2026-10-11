@@ -88,6 +88,22 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
   Le mobile n'avait ni fiche, ni ajout, ni messagerie. Rattrapé par
   `shared/calendrier-resa.js` (docs/kb/reservation-directe.md §12).
 
+## RÈGLE — REFONTE UI : LA FORME NE SUPPRIME JAMAIS LE FOND
+- **Les specs UI (docs/specs/spec-refonte-ui-v5*.md) et la maquette donnent la
+  FORME. Les specs métier (docs/specs/*.md) et les KB (docs/kb/) donnent le
+  FOND.**
+- **Avant chaque lot** : lire les specs métier et la KB de la page refaite, les
+  croiser avec la spec UI, et adapter le template — toute fonction, information
+  ou réglage existant est **conservé, déplacé ou retiré AVEC RAISON**, dans une
+  section « Inventaire » de la spec du lot.
+- **Une spec UI ne supprime jamais une fonction métier par omission.** En cas
+  de conflit entre forme et fond, le fond l'emporte, et on le signale à
+  Thierry.
+- Vécu (11 octobre 2026, lot 2 étape 1) : la nouvelle messagerie avait perdu
+  le badge « Arrive aujourd'hui / demain », le téléphone du voyageur en lien
+  d'appel et l'état du ménage — des affichages que l'ancienne page portait
+  pour les arrivées du jour, repérés par Thierry en recette, pas par la spec.
+
 ## ARCHITECTURE — CONFIG D'APP vs CONFIG GÉNÉRALE
 - **La configuration d'une APP vit DANS l'app.** Prestataires de ménage et leurs
   biens → `apps/menages/prestataires.html`. Modèles de messages → l'app

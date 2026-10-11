@@ -120,5 +120,9 @@
   "messages.proposal_hint": "por validar en la mensajería actual",
   "messages.load_error": "No se pudo cargar, recargue la página",
   "messages.no_access": "No tiene acceso a los mensajes de esta cuenta",
+  "messages.arrives_today": "Llega hoy",
+  "messages.arrives_tomorrow": "Llega mañana",
+  "messages.cleaning_done": "limpieza hecha",
+  "messages.call": "Llamar",
   "common.loading": "Cargando…"
 }

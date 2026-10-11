@@ -24,13 +24,18 @@ ni envoi, ni validation (étapes 2 et 3 de la spec §11).
   aucun état de lecture n'existe en base. Point **bleu** (`--info`, nouveau jeton,
   défini en clair et en sombre) — l'ambre reste réservé à « HôteSmart attend ta
   décision » (badge nav, spec §6).
-- Tri : à valider, puis non lus, puis date. Filtres Tous / ● n / À valider ;
+- Tri : à valider, puis arrivées du jour et de demain, puis non lus, puis date. Filtres Tous / ● n / À valider ;
   recherche côté client (voyageur ou bien).
 - Canal A / B / D sur l'avatar ; point vert = séjour en cours ou à venir.
 - Robot sous une bulle = envoyée par l'IA (`messages.kind = 'auto'`).
 - Mobile : liste et fil empilés ; **le fil ouvert masque la barre du bas**
   (`body[data-fil]`).
 - Une date illisible ne fait jamais tomber le fil (repli sur le dernier instant).
+- **Arrivées du jour et de demain** (inventaire §12 de la spec, fonctions conservées de
+  l'ancienne page, réintégrées le 11 octobre après constat de Thierry) : badge
+  « Arrive aujourd'hui / demain », fils remontés juste après « à valider », pastilles
+  positives ménage fait / code transmis dans la liste, et dans l'en-tête du fil le
+  ménage + le **téléphone en lien d'appel** (borné à ces arrivées).
 
 ### Prévu aux étapes suivantes (décisions de Thierry du 11 octobre 2026, pas des dettes)
 
