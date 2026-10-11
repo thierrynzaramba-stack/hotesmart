@@ -344,14 +344,21 @@ AirROI pour octobre : 25 $ par compte sur 30 jours et 25 $ par mois (dette
 - **Staging n'a aucun cron** (docs/STAGING.md §1) : en recette, le pilote se
   lance par `scripts/piloter-yieldflow.js` (à blanc, puis `--go`).
 
-**Refonte UI V5 — lot 2 « Messages » ÉTAPE 1 EN PROD (11 octobre 2026,
-3d59294)** : pages/messages.html en lecture seule (liste + fil), arrivées du
-jour/demain en tête avec téléphone composable (+33 rétabli), photo du bien en
-avatar, logos de canal aux vraies couleurs (jetons --canal-*), « à traiter » =
-séjours à venir/en cours seulement (règle resserrée, module partagé). Ancienne
-messagerie : URL seule, aucun menu. Inventaire : spec lot-messages §12. KB :
-docs/kb/messages-v5.md. Étapes 2-4 à venir (envoi + pagination + read_at ;
-propositions ; Test/Auto). Lot photos LIVRÉ le 10-11 octobre
+**Refonte UI V5 — lot 2 « Messages » ÉTAPES 1 ET 2 EN PROD (11 octobre 2026,
+464e2d4)** : étape 1 = pages/messages.html en lecture seule (liste + fil),
+arrivées du jour/demain en tête avec téléphone composable (+33 rétabli), photo
+du bien en avatar, logos de canal aux vraies couleurs (jetons --canal-*),
+« à traiter » = séjours à venir/en cours seulement (règle resserrée, module
+partagé). Étape 2 = envoi manuel (routage par SOURCE, échec « Non envoyé ·
+Réessayer », texte jamais perdu), « Proposer une réponse »
+(api/guestflow-proposer.js : génération et garde de coût DU CRON, clés sur la
+référence provider, refus parlants), pagination serveur (curseur composite
+lastTime+bookId, arrivées j/j+1 toujours en première page), état lu
+(conversation_flags.read_at, migration appliquée staging ET prod, writer
+unique POST /api/messages action=lu). Ancienne messagerie : URL seule, aucun
+menu. Inventaire : spec lot-messages §12. KB : docs/kb/messages-v5.md.
+Étapes 3-4 à venir (Envoyer/Modifier/Rejeter dans le fil ; Test/Auto +
+redirection). Lot photos LIVRÉ le 10-11 octobre
 (properties.photo_url, bucket property-photos, fiche /biens ; dette 65).
 
 **Chantier REFONTE UI V5 — lot 1 LIVRÉ (10 octobre 2026, branche
