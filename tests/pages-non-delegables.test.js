@@ -46,6 +46,7 @@ const NON_DELEGABLES = [
   'pages/biens-detail.html',        // connexion des annonces — `reglages`
   'apps/serrures/index.html',       // clé Seam
   'apps/sms/index.html',            // clé Brevo
+  'apps/agent-ai/config.html',      // agent_prompting — `reglages` (RESTAUREE le 12 octobre : la redirection attendra que le tiroir couvre 100 % de l'inventaire §12 bis)
   'apps/agent-ai/knowledge.html',   // knowledge — `reglages`
   'apps/agent-ai/messages.html',    // message_templates — `reglages`
   'apps/agent-ai/analyze.html',     // conversations + clé Beds24
@@ -169,7 +170,6 @@ test('RECENSEMENT : toute page authentifiée est classée', () => {
     'apps/menages/public.html',  // PWA prestataire : jeton, pas de session
     'apps/yield/evenements.html', // redirection vers la pop-up de prix.html (22 sept. 2026), aucune session
     'apps/agent-ai/messagerie.html', // redirection vers /messages (lot 2 etape 4), aucune session
-    'apps/agent-ai/config.html',     // redirection vers /messages (lot 2 etape 4), aucune session
     'pages/book.html'            // moteur de reservation : page VOYAGEUR,
                                  // jeton dans l'URL, aucune session, aucune
                                  // donnee de compte. Marque blanche : elle ne

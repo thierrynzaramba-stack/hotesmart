@@ -342,9 +342,13 @@ test('messages etape 4 : les reglages IA sont reserves au TITULAIRE (dette 68)',
 })
 
 test('etape 4 : l\'ancienne messagerie et l\'ancienne config GuestFlow sont des redirections', () => {
+  // ⚠ config.html n'est PLUS une redirection (12 octobre) : elle reste en
+  // service, URL seule, tant que le tiroir ne couvre pas 100 % de
+  // l'inventaire GuestFlow (spec §12 bis). Seule la messagerie redirige.
+  assert.ok(!lire('apps/agent-ai/config.html').includes("location.replace('/messages')"),
+    'config.html rendue a son service (consigne du 12 octobre)')
   for (const [page, attendu] of [
-    ['apps/agent-ai/messagerie.html', "location.replace('/messages' + (conv ? '?conv=' + encodeURIComponent(conv) : ''))"],
-    ['apps/agent-ai/config.html', "location.replace('/messages')"]
+    ['apps/agent-ai/messagerie.html', "location.replace('/messages' + (conv ? '?conv=' + encodeURIComponent(conv) : ''))"]
   ]) {
     const src = lire(page)
     assert.ok(src.includes(attendu), `${page} redirige vers /messages`)

@@ -207,3 +207,49 @@ de chaque fonction existante :
 | Filtre par bien (sélecteur) | **RETIRÉ** (spec §3.2) | la recherche suffit à 4 biens ; à revoir à 10+ |
 | Mode `?legacy=1` (lecture Beds24 directe) | **RETIRÉ** (dette 43 soldée à l'étape 4 : la page est une redirection) | contraire à l'architecture cœur |
 | Envoi, GuestFlow, Test/Auto, réglages | **DÉPLACÉ, étapes 2-4** | ordre de livraison §11 |
+
+
+## 12 bis. Inventaire GuestFlow COMPLET (12 octobre 2026, changement de périmètre : tout GuestFlow vit dans Messages)
+
+Relevé champ par champ des deux écrans restants de l'ancienne app, avant leur
+absorption par le tiroir de /messages. **`config.html` reste EN SERVICE (URL
+seule) tant que le tiroir ne couvre pas 100 % de cet inventaire** (consigne de
+Thierry du 12 octobre) — sa redirection livrée dans f1210ab a été DÉFAITE.
+
+### A. `apps/agent-ai/config.html` — « Configuration GuestFlow », par bien
+
+| Réglage | Champs exacts | Stockage / writer | Sort (panneau cible) |
+|---|---|---|---|
+| Kill switch par bien | toggle actif/pause | `properties.automation_paused`, `/api/property-automation` | **déjà au tiroir** (volet Réponses de l'IA) |
+| Mode Test/Auto par bien | 2 positions | `agent_alert_config.config[ref].mode`, `/api/agent-config` (POST ciblé `mode_ref`/`mode`) | **déjà au tiroir** (volet Réponses de l'IA) |
+| Alerte « Intervention requise » | SMS : activé + destinataires multilignes « Nom : +33… » + bouton Tester ; Email : activé + destinataires « Nom : email » + Tester | `agent_alert_config.config[ref].intervention.{sms_enabled, sms_lines, email_enabled, email_lines}` ; test : `/api/alert-test` (n'accepte que des destinataires DÉJÀ enregistrés) | volet Alertes |
+| Alerte « Information manquante » | mêmes champs | `…config[ref].info_unknown.{…}` | volet Alertes |
+| Porte SMS | canal SMS gâté sans clé Brevo (`brevoConfigured`), lien /connexions | lecture de la config Brevo | volet Alertes (reprendre la porte) |
+| Consignes de l'Agent AI | texte GLOBAL (tous logements) + OVERRIDE par bien (prime en conflit) | table `agent_prompting` (user_id, property_id NULL = global, instructions) — écrite en RLS DIRECT (delete+insert) | volet Réponses de l'IA |
+| Liste des biens (onglets) | — | ⚠ `/api/channel-property` (appel provider) | le tiroir lit `properties` sous RLS, à conserver |
+
+### B. `apps/agent-ai/messages.html` — « Templates » (messages programmés), par bien
+
+| Réglage | Champs exacts | Stockage / writer |
+|---|---|---|
+| Liste + « Nouveau template » | création avec défauts (arrival, J-1 10:00, earliest 15:00, send_anyway, active) | table `message_templates`, RLS direct |
+| Actif / inactif | toggle par carte (carte grisée si inactif) | `active` |
+| Suppression | bouton poubelle | delete RLS |
+| Événement | `booking_confirmed` (délai APRÈS : 5 min → 24 h) / `arrival` / `departure` (JOUR J-7…J+7 + HEURE 0-23 h) / `menage_done` (0 min → 2 h) | `event_type`, `offset_value` (after) ou `offset_days`+`send_time` (days) |
+| « Envoyer quand même si le délai est dépassé » | toggle, événements « days » seulement | `send_anyway` |
+| Accès (optionnel) | serrure du bien (liste `locks`) + « Pas avant » (heure, défaut 15:00) ; `{code_acces}` | `lock_id`, `earliest_send_time` |
+| Texte du message | textarea, variables `{prenom} {arrivee} {depart} {code_acces} {checkin} {checkout} {logement}` | `template_text` |
+| « Aperçu AI » | bouton, reformulation du texte | chemin grok |
+
+### C. Le reste de l'app
+
+- `knowledge.html` (connaissances par bien) : lien depuis le tiroir, page
+  conservée telle quelle (refonte au lot Logements, spec lot 2 §1).
+- `analyze.html` : hors périmètre (spec §1).
+- « Circuit breaker » (volet Réponses de l'IA, demande du 12 octobre) : la
+  garde de coût IA existe (`lib/guestflow-garde` : plafond jour, délai après
+  échecs) mais n'a AUCUNE UI aujourd'hui — à exposer en ÉTAT (lecture), pas en
+  réglage.
+- « Ce qu'il valide seul » (spec §2) : en Auto, l'IA envoie seule `sympathy`
+  et `info_known` ; `intervention` et `info_unknown` restent à l'hôte —
+  aujourd'hui, un paragraphe d'aide, pas un réglage.
