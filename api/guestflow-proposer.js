@@ -83,12 +83,15 @@ module.exports = async function handler (req, res) {
     }
 
     // Le fil, depuis le coeur (table messages) — jamais un provider.
+    // ⚠ Les plus RECENTS d'abord (desc), puis remis a l'endroit : en ASC, un
+    // fil de plus de 1000 lignes perdrait justement les messages en attente —
+    // la meme lecture que le cron (lib/cron-classify, desc limit 1000).
     const { data: msgs, error: eM } = await supabase.from('messages')
       .select('direction, kind, body, sent_at')
       .eq('user_id', userId).eq('booking_id', String(bookingId))
-      .order('sent_at', { ascending: true }).limit(500)
+      .order('sent_at', { ascending: false }).limit(1000)
     if (eM) return res.status(503).json({ error: 'Lecture impossible' })
-    const thread = (msgs || []).map(m => ({
+    const thread = (msgs || []).reverse().map(m => ({
       source: m.direction === 'inbound' ? 'guest' : (m.kind === 'auto' ? 'auto' : 'host'),
       message: m.body || '', time: m.sent_at
     }))

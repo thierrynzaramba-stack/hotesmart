@@ -25,7 +25,13 @@ const { createClient } = require('@supabase/supabase-js')
   const { data: b } = await sb.storage.getBucket('property-photos').catch(() => ({ data: null }))
   if (!b) { console.error('  ✖ bucket property-photos ABSENT — lancer scripts/creer-bucket-photos.js'); process.exit(2) }
   if (b.public !== true) { console.error('  ✖ bucket property-photos PRIVE — lancer scripts/creer-bucket-photos.js'); process.exit(2) }
-  console.log('  ✔ bucket property-photos present et public')
+  const taille = b.file_size_limit ?? b.fileSizeLimit ?? null
+  const types = b.allowed_mime_types ?? b.allowedMimeTypes ?? null
+  if (Number(taille) !== 2 * 1024 * 1024 || !Array.isArray(types) || types.join() !== 'image/jpeg') {
+    console.error(`  ✖ bucket property-photos MAL REGLE (taille=${taille}, types=${JSON.stringify(types)}) — lancer scripts/creer-bucket-photos.js`)
+    process.exit(2)
+  }
+  console.log('  ✔ bucket property-photos present, public, jpeg, 2 Mo')
   console.log('Migration 2026-10-10-photo-url : conforme sur ce que l API permet de prouver.')
   process.exit(0)
 })().catch(e => { console.error(`ECHEC : ${e.message}`); process.exit(1) })

@@ -92,6 +92,28 @@ test('messages etape 2 : pagination SERVEUR, arrivees toujours en premiere page'
   assert.ok(src.includes('chargerPageSuivante') && src.includes('next_before'), 'la page consomme le curseur')
 })
 
+test('messages etape 2 : les correctifs de la revue de af57948 tiennent', () => {
+  const api = sansCommentaires(lire('api/messages.js'))
+  // 1. Curseur COMPOSITE : deux fils a la meme seconde restent atteignables,
+  //    et un lastTime nul a la frontiere ne ment plus (next_before '').
+  assert.ok(api.includes('before_id') && api.includes('next_before_id'))
+  assert.ok(api.includes("t < before || (t === before && id < beforeId)"))
+  // 9. Le marquage lu porte le perimetre par bien, comme l'archivage.
+  assert.ok(/marquerLu[\s\S]{0,2500}property_id_ref: String\(bien\)/.test(api))
+  const prop = sansCommentaires(lire('api/guestflow-proposer.js'))
+  // 3. Le fil se lit par les plus RECENTS (desc 1000), comme le cron.
+  assert.ok(prop.includes("ascending: false }).limit(1000)") && prop.includes('.reverse()'))
+  const src = sansCommentaires(html())
+  // 2+7. Statuts exclus PARTAGES (module commun), plus aucune copie locale.
+  assert.ok(src.includes('STATUTS_SANS_SEJOUR') && !/SANS_ARRIVEE|const SANS_SEJOUR/.test(src))
+  assert.ok(lire('shared/aujourdhui.js').includes('export const STATUTS_SANS_SEJOUR'))
+  // 6. Le rang se precalcule avant le tri.
+  assert.ok(/\.map\(c => \(\{ c, rg: rang\(c\)/.test(src))
+  // 8. Plus d'etat mort ni de regle perimee en commentaire.
+  assert.ok(!src.includes('etat.limite'))
+  assert.ok(!html().includes('dernier message < 7 jours'), 'commentaire perime retire')
+})
+
 test('guestflow-proposer : reutilise le cron, cle sur la REFERENCE provider, ne court-circuite pas les alertes', () => {
   const api = sansCommentaires(lire('api/guestflow-proposer.js'))
   assert.ok(/require\('\.\.\/lib\/cron-classify'\)/.test(api), 'generation = celle du cron, rien de duplique')
@@ -138,7 +160,7 @@ test('messages : les correctifs de la revue de acf0fa0 tiennent', () => {
   assert.ok(src.includes('msg-retour') && !/only-mobile" data-bind="retour"/.test(src))
   assert.ok(css.includes('@media (max-width: 899px) {' + String.fromCharCode(10) + '  .msg-retour { display: inline-flex; }'))
   // 2. Un sejour annule ne tient pas une proposition ouverte.
-  assert.ok(src.includes("SANS_SEJOUR") && src.includes("'cancelled'") && src.includes("'demapped'"))
+  assert.ok(src.includes('STATUTS_SANS_SEJOUR'), 'les statuts exclus viennent du module partage')
   // 3. La garde de date vaut pour la LISTE comme pour le fil.
   assert.ok(src.includes("function heureCourte (iso) {" + String.fromCharCode(10) + "  if (!valide(iso)) return ''"))
   // 5. Coche verte distincte du bleu d'attente.
@@ -168,7 +190,7 @@ test('messages : les arrivees du jour et de demain sont CONSERVEES (inventaire Â
   assert.ok(src.includes("c.arrivee?.menage === 'fait'"), 'pastille menage POSITIVE seulement')
   assert.ok(src.includes('function lienTelephone'), 'le telephone en lien d\'appel')
   assert.ok(/groupeArrivee\(c\) > 1 \|\| !c\.guestPhone/.test(src), 'le tel reste borne aux arrivees j / j+1')
-  assert.ok(src.includes('SANS_ARRIVEE'), 'une annulee n\'est pas une arrivee')
+  assert.ok(src.includes('STATUTS_SANS_SEJOUR'), 'une annulee n\'est pas une arrivee (statuts du module partage)')
 })
 
 test('messages : miniature du logement et logos de canal (demande du 11 octobre)', () => {

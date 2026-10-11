@@ -202,6 +202,16 @@ test('tachesOuvertes : seulement les sejours A VENIR ou EN COURS (regle du 11 oc
   })
   assert.deepEqual(ouvertes.map(x => x.id), ['a', 'v'],
     'un sejour termine ne produit plus de « message a traiter », meme recent')
+  // ⚠ REPLI SUR LES DATES DE LA TACHE (releve en review) : une tache dont le
+  // sejour n'est pas dans `bookings` (page 1 seulement, droit menages absent,
+  // panne) survit par son propre `departure` a venir.
+  const repli = R.tachesOuvertes([
+    { id: 'r1', book_id: 'X1', property_id: '101', departure: '2026-10-20' },
+    { id: 'r2', book_id: 'X2', property_id: '101', departure: '2026-09-01' },
+    { id: 'r3', book_id: 'X3', property_id: '101' }
+  ], { aujourdHui: '2026-10-10', bookings: [] })
+  assert.deepEqual(repli.map(x => x.id), ['r1'],
+    'le depart a venir porte par la tache suffit ; passe ou inconnu, non')
 })
 
 test('noteSur5 : le coeur stocke sur 10, l\'ecran affiche sur 5', async () => {

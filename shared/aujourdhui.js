@@ -101,6 +101,12 @@ export function evenementsDuJour ({ bookings = [], biens = [], menages = [], pre
   return out.sort((a, b) => rang(a).localeCompare(rang(b)) || a.bien.localeCompare(b.bien))
 }
 
+// ─── Statuts qui ne portent NI sejour NI arrivee ─────────────────────────────
+// La meme liste que STATUTS_SANS_ARRIVEE de api/messages.js (CommonJS : il ne
+// peut pas importer ce module ESM — si l'une bouge, l'autre suit, et le
+// commentaire d'en face le rappelle).
+export const STATUTS_SANS_SEJOUR = new Set(['cancelled', 'demapped', 'request', 'blocked', 'inquiry', 'black'])
+
 // ─── Les taches encore A TRAITER (regle de Thierry, 11 octobre 2026) ────────
 // Une tache (`agent_tasks`) ne compte que si son sejour est A VENIR ou EN
 // COURS. La regle du 10 octobre gardait aussi « dernier message < 7 jours » ;
@@ -109,6 +115,13 @@ export function evenementsDuJour ({ bookings = [], biens = [], menages = [], pre
 // elle, reste lisible dans la messagerie).
 // `bookings` : sejours ACTIFS (departs >= aujourd'hui, annulations exclues).
 // `derniersMessages` reste accepte pour compatibilite mais n'est plus lu.
+// ⚠ REPLI SUR LES DATES DE LA TACHE — releve en review : `bookings` ne couvre
+// que ce que l'appelant a pu charger (premiere page de conversations, droit
+// `menages` present). Une tache dont le sejour n'y est pas mais qui porte son
+// propre `departure` (le cron et guestflow-proposer le remplissent) reste
+// comptee si ce depart est a venir : le badge ne ment pas au-dela de la
+// page 1, et l'accueil d'un profil sans droit menages ne montre plus un
+// « rien a valider » calcule sur du vide.
 export function tachesOuvertes (taches = [], { bookings = [],
   aujourdHui } = {}) {
   const enCours = new Set(), enCoursSansBien = new Set()
@@ -117,8 +130,10 @@ export function tachesOuvertes (taches = [], { bookings = [],
     enCours.add(`${b.propId}|${b.id}`)
     enCoursSansBien.add(String(b.id))
   }
-  return taches.filter(t =>
-    enCours.has(`${t.property_id}|${t.book_id}`) || enCoursSansBien.has(String(t.book_id)))
+  return taches.filter(t => {
+    if (enCours.has(`${t.property_id}|${t.book_id}`) || enCoursSansBien.has(String(t.book_id))) return true
+    return !!t.departure && String(t.departure).slice(0, 10) >= aujourdHui
+  })
 }
 
 // ─── La note affichee : UNE echelle, sur 5 ──────────────────────────────────

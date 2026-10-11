@@ -115,7 +115,7 @@ const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use
 const etat = {
   aujourdHui: R.jourParis(),
   biens: [], bookings: [], menages: [], prestataires: [],
-  menagesOk: null, etatsArrivee: {}, conversations: new Set(), derniersMessages: new Map(),
+  menagesOk: null, etatsArrivee: {}, conversations: new Set(),
   taches: [], tachesOk: null,
   alarmes: [],
   parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
@@ -308,7 +308,6 @@ async function chargerEtatsArrivee () {
     const { conversations } = await appel('/api/messages')
     for (const c of conversations || []) {
       etat.conversations.add(String(c.bookId))
-      if (c.lastTime) etat.derniersMessages.set(String(c.bookId), c.lastTime)
       if (c.arrivee) etat.etatsArrivee[String(c.bookId)] = c.arrivee
     }
   } catch (e) { logger.error('Aujourdhui', 'etats d\'arrivee', e) }
@@ -336,11 +335,12 @@ function carteTache (tache, sombre) {
   const href = `/apps/agent-ai/messagerie?conv=${encodeURIComponent(tache.book_id || '')}&bien=${encodeURIComponent(tache.property_id || '')}`
   return { titre, texte, href, sombre }
 }
-// Les tâches encore OUVERTES (règle de Thierry du 10 octobre 2026 :
-// séjour non terminé OU dernier message < 7 jours) — shared/aujourdhui.js.
+// Les tâches encore À TRAITER (règle du 11 octobre : séjours à venir ou en
+// cours seulement) — shared/aujourdhui.js, avec le repli sur les dates que la
+// tâche porte elle-même (profil sans droit ménages, panne de /api/menages).
 function tachesVisibles () {
   return R.tachesOuvertes(etat.taches, {
-    bookings: etat.bookings, derniersMessages: etat.derniersMessages, aujourdHui: etat.aujourdHui
+    bookings: etat.bookings, aujourdHui: etat.aujourdHui
   })
 }
 function renderTaches () {

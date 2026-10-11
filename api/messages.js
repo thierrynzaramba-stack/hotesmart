@@ -207,9 +207,11 @@ async function marquerLu(req, res) {
   const { data: flag, error: eF } = await supabase.from('conversation_flags')
     .select('id').eq('user_id', userId).eq('book_id', bookingId).maybeSingle()
   if (eF) return res.status(503).json({ error: 'Lecture impossible' })
+  // `property_id_ref` comme l'archivage : la colonne du perimetre par bien ne
+  // doit pas rester nulle sur une ligne nee d'une lecture (releve en review).
   const ecriture = flag
-    ? supabase.from('conversation_flags').update({ read_at: maintenant }).eq('id', flag.id)
-    : supabase.from('conversation_flags').insert({ user_id: userId, book_id: bookingId, read_at: maintenant, pinned: false })
+    ? supabase.from('conversation_flags').update({ read_at: maintenant, property_id_ref: String(bien) }).eq('id', flag.id)
+    : supabase.from('conversation_flags').insert({ user_id: userId, book_id: bookingId, read_at: maintenant, pinned: false, property_id_ref: String(bien) })
   const { error: eW } = await ecriture
   if (eW) {
     // Migration read_at pas encore appliquee : on le dit, sans casser l'ecran.
@@ -482,21 +484,42 @@ module.exports = async function handler(req, res) {
     // attendre la page 2.
     const limite = Number.parseInt(req.query.limit, 10)
     if (Number.isInteger(limite) && limite > 0) {
+      // ⚠ CURSEUR COMPOSITE (lastTime, bookId) — releve en review : deux fils
+      // dont les derniers messages partagent la meme seconde (ecrits par le
+      // meme passage de cron) rendaient le second INATTEIGNABLE avec un simple
+      // `< before` ; et un lastTime nul a la frontiere rendait next_before
+      // null avec has_more true, que le client lisait comme la fin.
       const before = typeof req.query.before === 'string' && req.query.before ? req.query.before : null
+      const beforeId = typeof req.query.before_id === 'string' ? req.query.before_id : ''
+      const cleTri = c => [c.lastTime || '', String(c.bookId)]
+      const apresCurseur = c => {
+        const [t, id] = cleTri(c)
+        return t < before || (t === before && id < beforeId)
+      }
       const aujourdHui = jourParis(0), demain = jourParis(1)
       const arrivee = c => {
         const arr = String(c.firstNight || '').slice(0, 10)
         const st = String(c.status || '').toLowerCase()
         return (arr === aujourdHui || arr === demain) && !STATUTS_SANS_ARRIVEE.has(st)
       }
-      let fenetre = before ? conversations.filter(c => (c.lastTime || '') < before) : conversations
+      // Tri STABLE sur la cle du curseur (la liste arrive triee par lastTime,
+      // on departage les ex aequo par bookId pour que le curseur soit sur).
+      conversations.sort((a, b) => {
+        const [ta, ia] = cleTri(a); const [tb, ib] = cleTri(b)
+        return tb.localeCompare(ta) || ib.localeCompare(ia)
+      })
+      const fenetre = before ? conversations.filter(apresCurseur) : conversations
       const page = fenetre.slice(0, limite)
       if (!before) {
         for (const c of conversations) if (arrivee(c) && !page.includes(c)) page.push(c)
       }
       const hasMore = fenetre.length > limite
-      const nextBefore = hasMore ? (fenetre[limite - 1].lastTime || null) : null
-      return res.status(200).json({ conversations: page, archivage, has_more: hasMore, next_before: nextBefore })
+      const bord = hasMore ? fenetre[limite - 1] : null
+      return res.status(200).json({
+        conversations: page, archivage, has_more: hasMore,
+        next_before: bord ? (bord.lastTime || '') : null,
+        next_before_id: bord ? String(bord.bookId) : null
+      })
     }
 
     return res.status(200).json({ conversations, archivage })

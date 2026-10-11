@@ -510,7 +510,10 @@
   // a 2000 px max en JPEG, 2 Mo max apres compression, « Remplacer » explicite.
   // L'ecriture est gardee serveur (api/property-photo.js, reglages en ecriture)
   // et le declencheur est RETIRE sans ce droit (regle des pages delegables).
-  const T = (cle, defaut) => (window.I18n && I18n.t(cle)) !== cle && window.I18n ? I18n.t(cle) : defaut
+  const T = (cle, defaut) => {
+    const v = window.I18n && I18n.t(cle)
+    return v && v !== cle ? v : defaut
+  }
   const ic = id => `<svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
   const peutChangerPhoto = () => { try { return peutEcrire('reglages') } catch { return false } }
 

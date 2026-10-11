@@ -27,11 +27,18 @@ const REGLAGES = { public: true, fileSizeLimit: 2 * 1024 * 1024, allowedMimeType
     console.log('bucket property-photos CREE (public, jpeg, 2 Mo)')
     return
   }
-  if (existant.public !== true) {
+  const taille = existant.file_size_limit ?? existant.fileSizeLimit ?? null
+  const types = existant.allowed_mime_types ?? existant.allowedMimeTypes ?? null
+  const conforme = existant.public === true
+    && Number(taille) === REGLAGES.fileSizeLimit
+    && Array.isArray(types) && types.length === 1 && types[0] === 'image/jpeg'
+  if (!conforme) {
+    // Public, taille ET types : un bucket cree a la main public mais sans la
+    // limite 2 Mo laissait toute la garde au seul endpoint (releve en review).
     const { error } = await sb.storage.updateBucket('property-photos', REGLAGES)
     if (error) { console.error('ECHEC mise en conformite :', error.message); process.exit(1) }
-    console.log('bucket property-photos remis en conformite (il etait prive)')
+    console.log(`bucket property-photos remis en conformite (public=${existant.public}, taille=${taille}, types=${JSON.stringify(types)})`)
     return
   }
-  console.log(`bucket property-photos conforme (public=${existant.public})`)
+  console.log('bucket property-photos conforme (public, jpeg, 2 Mo)')
 })().catch(e => { console.error('ECHEC :', e.message); process.exit(1) })

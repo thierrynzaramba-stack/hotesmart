@@ -100,9 +100,9 @@ import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
 import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
   from '/shared/compte-courant.js'
-// La règle « conversation ouverte » est CELLE DU LOT 1 (shared, testée) :
-// séjour non terminé OU dernier message < 7 jours. Jamais recopiée.
-import { tachesOuvertes, jourParis, ajouterJours } from '/shared/aujourdhui.js'
+// La règle « à traiter » est PARTAGÉE avec l'accueil (séjours à venir ou en
+// cours seulement, décision du 11 octobre) : jamais recopiée.
+import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/shared/aujourdhui.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -118,7 +118,7 @@ const etat = {
   taches: [],              // pending_validation OUVERTES, par la règle du lot 1
   biens: new Map(),        // provider_property_id -> { uuid, name }
   filtre: 'tous', recherche: '', anciennes: false,
-  hasMore: false, nextBefore: null,   // pagination SERVEUR (etape 2)
+  hasMore: false, nextBefore: null, nextBeforeId: null,   // pagination SERVEUR (etape 2)
   pauses: {},                          // provider_property_id -> kill switch
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   ouverte: null            // bookId de la conversation ouverte
@@ -144,7 +144,8 @@ async function charger () {
     appel(`/api/messages?limit=${PAGE}`).then(r => {
       etat.conversations = r.conversations || []
       etat.hasMore = r.has_more === true
-      etat.nextBefore = r.next_before || null
+      etat.nextBefore = r.next_before != null ? r.next_before : null
+      etat.nextBeforeId = r.next_before_id || null
       etat.chargementOk = true
     })
       .catch(e => { logger.error('Messages', 'conversations', e); etat.chargementOk = false }),
@@ -166,16 +167,15 @@ async function charger () {
   await Promise.all(lectures)
   // La règle d'ouverture s'évalue sur les SÉJOURS des conversations (départ =
   // lastNight) et leurs derniers messages — mêmes entrées que le lot 1.
-  // ⚠ MEMES EXCLUSIONS QUE LE LOT 1 : /api/menages ne sert que des sejours
-  // ACTIFS. Une annulation future garderait sinon sa proposition « ouverte »
-  // pour toujours, et le badge divergerait de celui de l'accueil.
-  const SANS_SEJOUR = new Set(['cancelled', 'demapped', 'request', 'blocked', 'inquiry', 'black'])
+  // Seuls comptent les sejours A VENIR ou EN COURS (regle du 11 octobre) —
+  // statuts exclus partages avec l'accueil (STATUTS_SANS_SEJOUR). Une tache
+  // dont la conversation n'est pas dans la page chargee survit par ses
+  // propres dates (agent_tasks.departure) : voir tachesOuvertes.
   const sejoursEnCours = etat.conversations
-    .filter(c => c.lastNight && !SANS_SEJOUR.has(String(c.status || '').toLowerCase()))
+    .filter(c => c.lastNight && !STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase()))
     .map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
-  const derniers = new Map(etat.conversations.filter(c => c.lastTime).map(c => [String(c.bookId), c.lastTime]))
   etat.taches = tachesOuvertes(etat.taches, {
-    bookings: sejoursEnCours, derniersMessages: derniers, aujourdHui: etat.aujourdHui
+    bookings: sejoursEnCours, aujourdHui: etat.aujourdHui
   })
   indexerTaches()
 }
@@ -210,10 +210,9 @@ const enCours = (c) => c.lastNight && String(c.lastNight).slice(0, 10) >= etat.a
   && String(c.status || '').toLowerCase() !== 'cancelled'
 // Arrivee du jour (0), de demain (1), autre (2) — fonction CONSERVEE de
 // l'ancienne messagerie (inventaire §12 de la spec) : ces fils priment.
-const SANS_ARRIVEE = new Set(['cancelled', 'demapped', 'request', 'blocked', 'inquiry', 'black'])
 function groupeArrivee (c) {
   const arr = String(c.firstNight || '').slice(0, 10)
-  if (!arr || SANS_ARRIVEE.has(String(c.status || '').toLowerCase())) return 2
+  if (!arr || STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase())) return 2
   if (arr === etat.aujourdHui) return 0
   if (arr === ajouterJours(etat.aujourdHui, 1)) return 1
   return 2
@@ -230,8 +229,14 @@ function visibles () {
   // Tri (décision de Thierry du 11 octobre 2026, qui PRIME sur la spec §3.2) :
   // les arrivées du JOUR toujours en premières lignes, celles de DEMAIN en
   // secondes, puis à valider, puis non lus, puis date décroissante.
+  // ⚠ Le rang se calcule UNE fois par conversation, jamais dans le
+  // comparateur (nonLue recopie le fil, la recherche re-trie a chaque frappe
+  // — meme famille que l'index des taches, releve en review).
   const rang = c => { const g = groupeArrivee(c); return g < 2 ? g : tachesDe(c).length ? 2 : nonLue(c) ? 3 : 4 }
-  return liste.sort((a, b) => rang(a) - rang(b) || new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
+  return liste
+    .map(c => ({ c, rg: rang(c), t: new Date(c.lastTime || 0).getTime() }))
+    .sort((x, y) => x.rg - y.rg || y.t - x.t)
+    .map(x => x.c)
 }
 
 // ─── Rendu : liste ───────────────────────────────────────────────────────────
@@ -333,13 +338,14 @@ function renderListe () {
 
 // Page suivante : le curseur du SERVEUR (etape 2), plus un decoupage client.
 async function chargerPageSuivante () {
-  if (!etat.nextBefore) { etat.hasMore = false; renderListe(); return }
+  if (etat.nextBefore == null) { etat.hasMore = false; renderListe(); return }
   try {
-    const r = await appel(`/api/messages?limit=${PAGE}&before=${encodeURIComponent(etat.nextBefore)}`)
+    const r = await appel(`/api/messages?limit=${PAGE}&before=${encodeURIComponent(etat.nextBefore)}&before_id=${encodeURIComponent(etat.nextBeforeId || '')}`)
     const connus = new Set(etat.conversations.map(c => String(c.bookId)))
     for (const c of r.conversations || []) if (!connus.has(String(c.bookId))) etat.conversations.push(c)
     etat.hasMore = r.has_more === true
-    etat.nextBefore = r.next_before || null
+    etat.nextBefore = r.next_before != null ? r.next_before : null
+    etat.nextBeforeId = r.next_before_id || null
     renderFiltres(); renderListe()
   } catch (e) { logger.error('Messages', 'page suivante', e) }
 }
@@ -532,7 +538,7 @@ async function rechargerTaches () {
     .order('created_at', { ascending: false }).limit(200)
   if (error) return
   const sejours = etat.conversations
-    .filter(c => c.lastNight && !SANS_ARRIVEE.has(String(c.status || '').toLowerCase()))
+    .filter(c => c.lastNight && !STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase()))
     .map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
   etat.taches = tachesOuvertes(data || [], { bookings: sejours, aujourdHui: etat.aujourdHui })
   indexerTaches()
@@ -592,9 +598,9 @@ async function init () {
   HSNav.render({ badges: etat.chargementOk ? { pendingMessages: etat.taches.length } : {}, peutLire })
   renderFiltres(); renderListe()
 
-  $('[data-bind="recherche"]').addEventListener('input', (e) => { etat.recherche = e.target.value; etat.limite = PAGE; renderListe() })
+  $('[data-bind="recherche"]').addEventListener('input', (e) => { etat.recherche = e.target.value; renderListe() })
   document.querySelectorAll('[data-filtre]').forEach(b => b.addEventListener('click', () => {
-    etat.filtre = b.dataset.filtre; etat.limite = PAGE; renderFiltres(); renderListe()
+    etat.filtre = b.dataset.filtre; renderFiltres(); renderListe()
   }))
   $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
   // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
