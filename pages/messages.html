@@ -9,10 +9,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shared/theme.css">
 <link rel="stylesheet" href="/shared/ui.css">
-<!-- PAGE « MESSAGES » — refonte UI V5, lot 2 ÉTAPE 1 : LECTURE SEULE (liste +
-     fil, desktop + mobile, données réelles). Spec :
-     docs/specs/spec-refonte-ui-v5-lot-messages.md §3-§5 et §11.
-     Ni saisie, ni envoi, ni validation ici : étapes 2 et 3.
+<!-- PAGE « MESSAGES » — refonte UI V5, lot 2, ÉTAPES 1 à 3 : liste + fil,
+     envoi manuel, « Proposer une réponse », propositions dans le fil avec
+     Envoyer / Modifier / Rejeter, pagination serveur, état lu. Spec :
+     docs/specs/spec-refonte-ui-v5-lot-messages.md §3-§6 et §11.
+     Reste l'étape 4 (Test/Auto, tiroir réglages, redirection ancienne page).
      RÈGLES : aucun hexa, aucun texte en dur, aucune icône dessinée ici,
      aucun appel provider ; X-Compte sur chaque appel. -->
 </head>
@@ -121,6 +122,7 @@ const etat = {
   hasMore: false, nextBefore: null, nextBeforeId: null,   // pagination SERVEUR (etape 2)
   pauses: {},                          // provider_property_id -> kill switch
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
+  enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
   ouverte: null            // bookId de la conversation ouverte
 }
 const peutEcrireMessages = () => { try { return peutEcrire('messages') } catch { return false } }
@@ -410,14 +412,17 @@ function renderFil () {
   if (bien) { resa.hidden = false; resa.href = `/biens/${encodeURIComponent(bien.uuid)}/calendrier` } else resa.hidden = true
 
   // Les messages et les PROPOSITIONS ouvertes, fondus à leur place
-  // chronologique (spec §3.3). Étape 1 : la proposition s'affiche SANS boutons
-  // — Envoyer / Modifier / Rejeter arrivent à l'étape 3.
+  // chronologique (spec §3.3), avec Envoyer / Modifier / Rejeter (étape 3) —
+  // Rejeter dans le menu ⋯, boutons RETIRÉS sans droit d'écriture. Une
+  // proposition descendue dans la saisie (« Modifier ») se masque ici.
   // La proposition sans `created_at` prend la place du dernier message, un
   // message sans date va en fin de fil.
   const dernierInstant = c.lastTime && valide(c.lastTime) ? c.lastTime : new Date().toISOString()
   const entrees = [
     ...c.messages.map(m => ({ quand: valide(m.sent_at) ? m.sent_at : dernierInstant, type: 'message', m })),
-    ...tachesDe(c).map(x => ({ quand: valide(x.created_at) ? x.created_at : dernierInstant, type: 'proposition', x }))
+    ...tachesDe(c)
+      .filter(x => !(etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)))
+      .map(x => ({ quand: valide(x.created_at) ? x.created_at : dernierInstant, type: 'proposition', x }))
   ].sort((a, b) => new Date(a.quand) - new Date(b.quand))
   let jour = null
   deroule.innerHTML = entrees.map(e => {
@@ -425,9 +430,20 @@ function renderFil () {
     const j = jourDe(e.quand)
     if (j !== jour) { jour = j; morceaux.push(`<span class="msg-jour">${esc(dateLongue(j))}</span>`) }
     if (e.type === 'proposition') {
-      morceaux.push(`<div class="bulle bulle--proposition">
-        <span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.proposal'))}</span>${esc(e.x.suggested_reply || e.x.summary || '')}</div>
-        <span class="bulle-meta">${esc(t('messages.proposal_hint'))}</span>`)
+      const x = e.x
+      const enCoursEnvoi = x.etatEnvoi === 'en_cours'
+      const boutons = peutEcrireMessages() && !enCoursEnvoi ? `<span class="bulle__actions">
+          <details class="bulle-menu">
+            <summary aria-label="${esc(t('messages.more_actions'))}" title="${esc(t('messages.more_actions'))}">${icone('i-more')}</summary>
+            <div class="bulle-menu__liste"><button type="button" data-rejeter="${esc(String(x.id))}">${esc(t('messages.proposal_reject'))}</button></div>
+          </details>
+          <button type="button" class="btn btn--secondary" data-modifier="${esc(String(x.id))}">${esc(t('messages.proposal_edit'))}</button>
+          <button type="button" class="btn btn--primary" data-envoyer-prop="${esc(String(x.id))}">${icone('i-send')}${esc(t('messages.send'))}</button>
+        </span>` : ''
+      morceaux.push(`<div class="bulle bulle--proposition${x.etatEnvoi === 'echec' ? ' bulle--echec' : ''}">
+        <span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.proposal'))}</span>${esc(x.suggested_reply || x.summary || '')}${boutons}</div>
+        <span class="bulle-meta">${enCoursEnvoi ? esc(t('messages.sending'))
+          : x.etatEnvoi === 'echec' ? `<span class="msg-echec">${esc(t('messages.not_sent'))}</span> · <button type="button" class="link caption msg-reessayer" data-envoyer-prop="${esc(String(x.id))}">${esc(t('messages.retry'))}</button>` : ''}</span>`)
     } else {
       const m = e.m
       const voyageur = m.direction === 'inbound'
@@ -445,6 +461,12 @@ function renderFil () {
         : esc(t('messages.sending'))}</span>`).join('')
   deroule.querySelectorAll('[data-reessayer]').forEach(b =>
     b.addEventListener('click', () => reessayer(c, Number(b.dataset.reessayer))))
+  deroule.querySelectorAll('[data-envoyer-prop]').forEach(b =>
+    b.addEventListener('click', () => envoyerProposition(b.dataset.envoyerProp)))
+  deroule.querySelectorAll('[data-modifier]').forEach(b =>
+    b.addEventListener('click', () => modifierProposition(b.dataset.modifier)))
+  deroule.querySelectorAll('[data-rejeter]').forEach(b =>
+    b.addEventListener('click', () => rejeterProposition(b.dataset.rejeter)))
   deroule.scrollTop = deroule.scrollHeight
 
   // La saisie (etape 2) : retiree sans droit d'ecriture, jamais grisee.
@@ -483,6 +505,15 @@ async function lancerEnvoi (c, entree) {
     // Parti : la bulle definitive viendra du coeur (double ecriture messages).
     const liste = envoisDe(c.bookId)
     liste.splice(liste.indexOf(entree), 1)
+    // Un envoi apres « Modifier » VALIDE la proposition descendue dans la
+    // saisie (etape 3) : meme sequence que l'ancienne page — l'envoi est
+    // parti, la cloture suit. La bulle porte l'avatar hote, pas le robot.
+    const ed = etat.enEdition
+    if (ed && String(ed.bookId) === String(c.bookId)) {
+      const x = etat.taches.find(v => String(v.id) === String(ed.tacheId))
+      etat.enEdition = null
+      if (x) { await cloreTache(x, 'done', entree.texte, c); return }
+    }
     c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message' })
     c.lastTime = new Date().toISOString()
     renderFil(); renderListe()
@@ -506,6 +537,68 @@ async function envoyer () {
 function reessayer (c, index) {
   const entree = (etat.envois.get(String(c.bookId)) || [])[index]
   if (entree) lancerEnvoi(c, entree)
+}
+
+// ─── Propositions : Envoyer / Modifier / Rejeter (etape 3) ───────────────────
+// « Envoyer » suit LE CHEMIN DE L'ANCIENNE PAGE (messagerie.html) : d'abord
+// posterMessage (routage par source, le meme que l'envoi manuel), PUIS la
+// cloture — statut + journal — par l'action `proposition` de /api/messages.
+// Jamais un second chemin d'envoi.
+const tacheParId = (id) => etat.taches.find(x => String(x.id) === String(id))
+async function envoyerProposition (id) {
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  const x = tacheParId(id)
+  if (!c || !x || x.etatEnvoi === 'en_cours') return
+  x.etatEnvoi = 'en_cours'
+  renderFil()
+  try {
+    await posterMessage(c, x.suggested_reply || '')
+    await cloreTache(x, 'done', x.suggested_reply || '', c)
+  } catch (err) {
+    logger.error('Messages', 'envoi proposition', err)
+    x.etatEnvoi = 'echec'
+    renderFil()
+  }
+}
+function modifierProposition (id) {
+  const x = tacheParId(id)
+  if (!x) return
+  const zone = $('[data-bind="texte"]')
+  zone.value = x.suggested_reply || ''
+  ajusterHauteur(zone)
+  etat.enEdition = { tacheId: x.id, bookId: String(etat.ouverte) }
+  renderFil()
+  zone.focus()
+}
+async function rejeterProposition (id) {
+  const x = tacheParId(id)
+  if (!x || x.etatEnvoi === 'en_cours') return
+  const c = etat.conversations.find(v => String(v.bookId) === String(etat.ouverte))
+  await cloreTache(x, 'ignored', null, c)
+}
+// Cloture cote serveur, puis retrait de l'ecran et badge a jour. Si la cloture
+// echoue APRES un envoi reussi, la bulle part quand meme (le message EST
+// parti) ; au rechargement la proposition reviendra au-dessus du message
+// envoye et « Rejeter » la fermera — on ne renvoie jamais deux fois tout seul.
+async function cloreTache (x, statut, texte, c) {
+  try {
+    await appel('/api/messages', { action: 'proposition', task_id: String(x.id), statut, ...(texte ? { texte } : {}) })
+  } catch (err) {
+    // 409 deja_close : fermee ailleurs (ancienne page, autre onglet) — meme sortie.
+    if (err.status !== 409) logger.error('Messages', 'cloture proposition', err)
+  }
+  etat.taches = etat.taches.filter(v => String(v.id) !== String(x.id))
+  indexerTaches()
+  if (etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)) etat.enEdition = null
+  if (statut === 'done' && c) {
+    c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message' })
+    c.lastTime = new Date().toISOString()
+  }
+  majBadge()
+  renderFiltres(); renderListe(); renderFil()
+}
+function majBadge () {
+  HSNav.render({ badges: { pendingMessages: etat.taches.length }, peutLire })
 }
 
 // ─── « Proposer une reponse » (etape 2) ──────────────────────────────────────
@@ -542,7 +635,7 @@ async function rechargerTaches () {
     .map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
   etat.taches = tachesOuvertes(data || [], { bookings: sejours, aujourdHui: etat.aujourdHui })
   indexerTaches()
-  HSNav.render({ badges: { pendingMessages: etat.taches.length }, peutLire })
+  majBadge()
 }
 
 // La zone de texte grandit jusqu'a 6 lignes (spec §3.4).
@@ -555,6 +648,10 @@ function dateLongue (jour) {
   return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
 }
 function ouvrir (bookId) {
+  // Changer de fil pendant un « Modifier » : la proposition REVIENT dans son
+  // fil (elle n'est pas close), le texte reste dans la saisie (jamais perdu) —
+  // mais l'envoyer ailleurs ne validera rien.
+  if (etat.enEdition && String(etat.enEdition.bookId) !== String(bookId)) etat.enEdition = null
   etat.ouverte = bookId
   const c = etat.conversations.find(x => String(x.bookId) === String(bookId))
   // L'ouverture POSE l'etat lu (etape 2) — optimiste a l'ecran, silencieux en

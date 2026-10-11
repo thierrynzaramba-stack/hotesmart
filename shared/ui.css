@@ -229,6 +229,17 @@ h1, h2, h3, p { margin: 0; }
 .bulle--echec { border: 1px solid var(--danger); }
 .msg-echec { color: var(--danger); font-weight: var(--fw-semibold); }
 .msg-reessayer { background: none; border: 0; padding: 0; color: var(--ink); }
+/* Boutons d'une proposition (etape 3) : Modifier + Envoyer alignes a droite,
+   Rejeter dans le menu ⋯ (spec §3.3). */
+.bulle__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.bulle__actions .btn { padding: 8px 14px; }
+.bulle-menu { position: relative; }
+.bulle-menu summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface); color: var(--ink); }
+.bulle-menu summary::-webkit-details-marker { display: none; }
+.bulle-menu summary .icon { width: 16px; height: 16px; }
+.bulle-menu__liste { position: absolute; inset-inline-end: 0; bottom: calc(100% + 6px); min-width: 130px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); z-index: 5; }
+.bulle-menu__liste button { display: block; width: 100%; text-align: start; background: none; border: 0; padding: 8px 10px; border-radius: 8px; color: var(--danger); font-size: var(--fs-body); font-weight: var(--fw-semibold); cursor: pointer; }
+.bulle-menu__liste button:hover { background: var(--surface-2); }
 .msg-retour { display: none; }
 @media (max-width: 899px) {
   .msg-retour { display: inline-flex; }
@@ -245,6 +256,12 @@ h1, h2, h3, p { margin: 0; }
   body[data-fil] .msg-liste { display: none; }
   body[data-fil] .bottombar { display: none; }
   .bulle { max-width: 86%; }
+  /* Proposition : boutons pleine largeur, Envoyer en premier (spec §4). */
+  .bulle--proposition { max-width: 100%; }
+  .bulle__actions { flex-wrap: wrap; }
+  .bulle__actions .btn { flex: 1 1 100%; justify-content: center; }
+  .bulle__actions [data-envoyer-prop] { order: -1; }
+  .bulle-menu { order: 1; margin-inline-start: auto; }
 }
 
 /* ---------- Barre du haut ---------- */

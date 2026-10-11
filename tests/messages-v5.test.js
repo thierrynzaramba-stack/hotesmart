@@ -240,3 +240,58 @@ test('messages : l\'ouverture directe ?conv= exige que le fil existe', () => {
   assert.ok(/etat\.conversations\.some\([\s\S]{0,120}?demandee/.test(src),
     'jamais un ecran « introuvable » depuis un lien interne')
 })
+
+// ─── Etape 3 : propositions dans le fil (Envoyer / Modifier / Rejeter) ───────
+test('messages etape 3 : Envoyer suit le chemin de l\'ancienne page, jamais un second chemin', () => {
+  const src = sansCommentaires(html())
+  // posterMessage d'abord (routage par source), la cloture ensuite.
+  assert.ok(/async function envoyerProposition[\s\S]*?await posterMessage\(c, x\.suggested_reply[\s\S]*?await cloreTache\(x, 'done'/.test(src),
+    'envoi par posterMessage PUIS cloture — la sequence de messagerie.html')
+  assert.ok(src.includes("action: 'proposition'"), 'la cloture passe par /api/messages')
+  // L'echec d'envoi laisse la proposition en attente avec Reessayer.
+  assert.ok(/envoi proposition[\s\S]*?x\.etatEnvoi = 'echec'/.test(src), 'echec = proposition conservee')
+})
+
+test('messages etape 3 : Modifier descend le texte, et l\'envoi porte l\'avatar hote', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/function modifierProposition[\s\S]*?zone\.value = x\.suggested_reply/.test(src), 'le texte descend dans la saisie')
+  assert.ok(src.includes('etat.enEdition = { tacheId: x.id'), 'la proposition se masque pendant l\'edition')
+  // Apres Modifier, c'est lancerEnvoi (envoi MANUEL) qui clot : kind message,
+  // donc avatar hote — jamais le robot pose a la main.
+  assert.ok(/const ed = etat\.enEdition[\s\S]*?await cloreTache\(x, 'done', entree\.texte, c\)/.test(src),
+    'l\'envoi apres Modifier valide la proposition')
+  assert.ok(!/kind: 'auto'/.test(src), 'la page ne fabrique jamais une bulle robot (le coeur ecrit kind message)')
+})
+
+test('messages etape 3 : Rejeter vit dans le menu, et les boutons disparaissent sans droit d\'ecriture', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/<details class="bulle-menu">[\s\S]*?data-rejeter/.test(src), 'Rejeter dans le menu (spec §3.3)')
+  assert.ok(/peutEcrireMessages\(\) && !enCoursEnvoi \? `<span class="bulle__actions">/.test(src),
+    'profil en lecture : AUCUN bouton dans le DOM (spec §9)')
+  assert.ok(/async function rejeterProposition[\s\S]*?cloreTache\(x, 'ignored'/.test(src),
+    'rejet = statut ignored, celui de l\'ancienne page')
+})
+
+test('messages etape 3 : la cloture retire la tache et met le badge a jour', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/async function cloreTache[\s\S]*?etat\.taches = etat\.taches\.filter[\s\S]*?majBadge\(\)/.test(src),
+    'une seule source de verite : agent_tasks, et le badge suit')
+  assert.ok(/function majBadge[\s\S]*?pendingMessages: etat\.taches\.length/.test(src))
+})
+
+test('api/messages action=proposition : garde write, perimetre, statuts de l\'ancienne page, course fermee', () => {
+  const src = lire('api/messages.js')
+  const bloc = src.slice(src.indexOf('async function cloreProposition'), src.indexOf('async function archiverFil'))
+  assert.ok(bloc.length > 100, 'cloreProposition present')
+  assert.ok(/domaine: 'messages', niveau: 'write', compteDelegue: true/.test(bloc), 'ecriture du domaine messages')
+  assert.ok(/refsDuPerimetre[\s\S]*?status\(404\)/.test(bloc), 'hors perimetre = 404, jamais 403')
+  assert.ok(bloc.includes("'done'") && bloc.includes("'ignored'") && !bloc.includes("'rejected'"),
+    'les statuts de l\'ancienne page, pas une seconde famille')
+  assert.ok(/\.update\(\{ status: statut \}\)[\s\S]*?\.eq\('status', 'pending_validation'\)/.test(bloc),
+    'l\'UPDATE conditionne par le statut ferme la course entre deux clics')
+  assert.ok(/deja_close/.test(bloc), 'une tache deja close se dit, ne se re-ecrit pas')
+  // Le journal de l'ancienne page, memes colonnes.
+  assert.ok(/from\('conversations'\)\.insert\(\{[\s\S]*?guest_message: tache\.guest_message, agent_reply: texte, book_id: String\(tache\.book_id\)/.test(bloc),
+    'le journal conversations de messagerie.html, a l\'identique')
+  assert.ok(src.includes("req.body.action === 'proposition'"), 'route branchee')
+})

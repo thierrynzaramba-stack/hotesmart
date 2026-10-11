@@ -221,6 +221,60 @@ async function marquerLu(req, res) {
   return res.status(200).json({ ok: true, read_at: maintenant })
 }
 
+// ─── Clore une proposition (lot 2 etape 3) ───────────────────────────────────
+// La VALIDATION reste la sequence de l'ancienne page (messagerie.html) : le
+// client envoie d'abord par posterMessage (routage par SOURCE), PUIS cette
+// action pose le statut et le journal `conversations` — ici et pas sous RLS,
+// parce qu'un profil delegue n'ecrit pas ces tables en direct.
+// Statuts : 'done' (envoyee) / 'ignored' (rejetee) — CEUX DE L'ANCIENNE PAGE ;
+// le 'rejected' de la spec n'existe pas en base, on n'ouvre pas une seconde
+// famille (decision du 11 octobre, signalee a Thierry).
+async function cloreProposition(req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  const statut = req.body.statut === 'done' ? 'done'
+    : req.body.statut === 'ignored' ? 'ignored' : null
+  const texte = typeof req.body.texte === 'string' ? req.body.texte.trim() : ''
+  if (!taskId || taskId.length > 64 || !statut) return res.status(400).json({ error: 'Demande invalide' })
+  // 'done' signifie « cette reponse est partie » : sans texte, pas de journal.
+  if (statut === 'done' && !texte) return res.status(400).json({ error: 'Texte requis' })
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, property_id, book_id, guest_name, guest_message')
+    .eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  // Perimetre par bien, 404 pas 403 — meme regle qu'archiverFil.
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+  if (tache.status !== 'pending_validation') {
+    // Deja close ailleurs (ancienne page, autre onglet) : on le dit, on ne
+    // re-ecrit pas — l'ecran retire la bulle dans les deux cas.
+    return res.status(409).json({ error: 'deja_close', statut: tache.status })
+  }
+  // La condition de statut dans l'UPDATE ferme la course entre deux clics.
+  const { data: maj, error: eU } = await supabase.from('agent_tasks')
+    .update({ status: statut })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .select('id')
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
+  if (statut === 'done') {
+    // Le journal de l'ancienne page, memes colonnes. Son echec ne defait pas
+    // la cloture (l'ancienne page ne le verifie pas non plus) : il se logge.
+    const { error: eJ } = await supabase.from('conversations').insert({
+      user_id: userId, property_id: tache.property_id, guest_name: tache.guest_name,
+      guest_message: tache.guest_message, agent_reply: texte, book_id: String(tache.book_id)
+    })
+    if (eJ) console.error('[messages] journal conversations non ecrit', eJ.message)
+  }
+  return res.status(200).json({ ok: true, task_id: tache.id, statut })
+}
+
 async function archiverFil(req, res) {
   const garde = await requirePermission(req, res, {
     domaine: 'messages', niveau: 'write', compteDelegue: true })
@@ -282,6 +336,10 @@ module.exports = async function handler(req, res) {
   // Etape 2 de la messagerie V5 : l'ouverture d'un fil pose read_at.
   if (req.method === 'POST' && req.body && req.body.action === 'lu') {
     return await marquerLu(req, res)
+  }
+  // Etape 3 : Envoyer / Rejeter une proposition clot la tache (et le journal).
+  if (req.method === 'POST' && req.body && req.body.action === 'proposition') {
+    return await cloreProposition(req, res)
   }
 
   // ── Droits ──

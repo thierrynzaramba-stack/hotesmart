@@ -60,12 +60,40 @@ ni envoi, ni validation (étapes 2 et 3 de la spec §11).
   répondre vaut lecture. Un profil en lecture seule ne marque pas (silencieux).
 - Saisie, bouton IA et Réessayer RETIRÉS sans `peutEcrire('messages')`.
 
-### Prévu aux étapes suivantes (décisions de Thierry du 11 octobre 2026, pas des dettes)
+## Étape 3 — Envoyer / Modifier / Rejeter dans le fil (11 octobre 2026)
 
-- **Étape 3** : Envoyer / Modifier / Rejeter sur les propositions, dans le fil.
+- **Envoyer** suit LE CHEMIN DE L'ANCIENNE PAGE, jamais un second :
+  `posterMessage` (routage par source, partagé avec l'envoi manuel), PUIS la
+  clôture par `POST /api/messages action=proposition` — statut + journal
+  `conversations` (mêmes colonnes que messagerie.html), côté serveur parce
+  qu'un profil délégué n'écrit pas ces tables sous RLS. L'UPDATE est
+  conditionné par `status=pending_validation` (course entre deux clics fermée) ;
+  une tâche déjà close répond 409 `deja_close` et l'écran retire la bulle.
+- **Statuts** : `done` (envoyée) / `ignored` (rejetée) — CEUX de l'ancienne
+  page. Le `rejected` de la spec §3.3 n'est PAS utilisé : une seule famille de
+  statuts (le fond l'emporte, signalé à Thierry le 11 octobre).
+- **Une seule source de vérité** : les deux pages ne montrent que
+  `pending_validation` — valider ou rejeter d'un côté fait disparaître des deux.
+- **Modifier** : le texte descend dans la saisie, la bulle se masque
+  (`etat.enEdition`) ; la tâche n'est close (`done`) qu'à l'ENVOI réussi —
+  l'envoi est un envoi manuel, `kind=message`, donc avatar hôte, pas robot.
+  Changer de fil pendant l'édition : la proposition revient, le texte reste.
+- **Après « Envoyer » direct aussi, la bulle envoyée n'a PAS de robot** : le
+  writer (`api/channel-message`) écrit `kind='message'` pour tout envoi validé
+  — l'ancienne page a le même comportement. La spec demandait un robot ; le
+  cœur fait foi (signalé à Thierry).
+- **Rejeter** vit dans le menu ⋯ (`details.bulle-menu`), sans confirmation.
+- Échec d'envoi : la proposition reste (liseré `--danger`), « Non envoyé ·
+  Réessayer » ; si la CLÔTURE échoue après un envoi réussi, la bulle part de
+  l'écran (le message EST parti) et la proposition réapparaîtra au
+  rechargement — « Rejeter » la ferme, on ne renvoie jamais deux fois seul.
+- Boutons retirés sans `messages = write` ; badge nav décrémenté sans
+  rechargement (`majBadge`). Mobile : boutons pleine largeur, Envoyer premier.
+
+### Prévu à l'étape suivante (décisions de Thierry du 11 octobre 2026, pas des dettes)
+
 - **Étape 4** : Test/Auto + tiroir réglages, redirection de l'ancienne page,
   retrait du lien « Outils ». D'ici là : l'ancienne messagerie n'apparaît **dans
-  aucun menu** (nav et barre latérale pointent la nouvelle page), URL seule ; les
-  boutons « Voir » de l'accueil y mènent encore, car on y VALIDE (étape 3).
+  aucun menu** (nav et barre latérale pointent la nouvelle page), URL seule.
 - Lignes système « réservation modifiée / annulée » (spec §3.3) : à exposer par
   l'endpoint (booking_change_events) à l'étape 2+.
