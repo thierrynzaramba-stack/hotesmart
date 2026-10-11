@@ -218,7 +218,8 @@ test('la messagerie V5 : desepingler est une mise a jour, jamais une suppression
   const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'messages.js'), 'utf8')
   const bloc = api.slice(api.indexOf('async function epinglerFil'), api.indexOf('async function archiverFil'))
   assert.ok(bloc.length > 100, 'epinglerFil present')
-  assert.match(bloc, /\.update\(\{ pinned: epingler, property_id_ref/)
+  assert.match(bloc, /\.upsert\(\s*\{ user_id: userId, book_id: bookingId, pinned: epingler, property_id_ref/)
+  assert.match(bloc, /onConflict: 'user_id,book_id'/)
   assert.doesNotMatch(bloc, /\.delete\(\)/)
   // Memes verifications de perimetre qu'archiverFil : 404, jamais 403.
   assert.match(bloc, /refsDuPerimetre/)

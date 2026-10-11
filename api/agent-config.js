@@ -62,7 +62,36 @@ module.exports = async (req, res) => {
 
   // ── POST : sauvegarder la config ─────────────
   if (req.method === 'POST') {
-    const { config } = req.body || {};
+    const { config, mode_ref, mode } = req.body || {};
+
+    // Bascule CIBLEE du mode d'un bien (messagerie V5, etape 4) : le merge se
+    // fait ICI, sur le blob relu en base — un POST du blob entier depuis deux
+    // onglets s'ecrasait des configs d'alertes et des modes (releve en
+    // review). La fenetre lecture->ecriture reste, mais en millisecondes
+    // serveur, plus en secondes d'ecran.
+    if (mode_ref !== undefined || mode !== undefined) {
+      const ref = String(mode_ref || '').trim();
+      if (!ref || ref.length > 64 || (mode !== 'test' && mode !== 'auto')) {
+        return res.status(400).json({ error: 'Payload invalide' });
+      }
+      const { data: lu, error: eL } = await supabase
+        .from('agent_alert_config')
+        .select('config').eq('user_id', userId).maybeSingle();
+      if (eL) return res.status(503).json({ error: 'Lecture impossible' });
+      const blob = (lu && lu.config) || {};
+      blob[ref] = { ...(blob[ref] || {}), mode };
+      const { error: eW } = await supabase
+        .from('agent_alert_config')
+        .upsert(
+          { user_id: userId, config: blob, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' }
+        );
+      if (eW) {
+        console.error('[agent-config] POST mode error:', eW);
+        return res.status(500).json({ error: eW.message });
+      }
+      return res.status(200).json({ ok: true, mode_ref: ref, mode });
+    }
 
     if (!config || typeof config !== 'object') {
       return res.status(400).json({ error: 'Payload invalide' });

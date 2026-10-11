@@ -313,23 +313,32 @@ test('messages etape 4 : passer en Auto exige une confirmation, et l\'etat est R
     'Auto est un geste lourd : confirmation explicite avant (demande de Thierry)')
   // Apres le POST : un GET de relecture nourrit l'interrupteur — jamais
   // l'etat suppose. Idem pour la pause.
-  assert.ok(/await appel\('\/api\/agent-config', \{ config \}\)[\s\S]*?await appel\('\/api\/agent-config'\)[\s\S]*?etat\.modes = modesDe\(relu\.config\)/.test(src),
+  assert.ok(/await appel\('\/api\/agent-config', \{ mode_ref: ref, mode: nouveau \}\)[\s\S]*?await appel\('\/api\/agent-config'\)[\s\S]*?etat\.modes = modesDe\(relu\.config\)/.test(src),
     'le mode affiche vient de la base relue')
   assert.ok(/await appel\('\/api\/property-automation', \{ provider_property_id[\s\S]*?await appel\('\/api\/property-automation'\)[\s\S]*?etat\.pauses = relu\.paused/.test(src),
     'la pause affichee vient de la base relue')
-  // L'ecriture passe par le writer EXISTANT, le blob entier relu d'abord :
-  // on ne touche que le mode de CE bien.
-  assert.ok(/const lu = await appel\('\/api\/agent-config'\)[\s\S]*?config\[ref\] = \{ \.\.\.\(config\[ref\] \|\| \{\}\), mode: nouveau \}/.test(src),
-    'le blob est relu puis modifie sur le seul mode du bien')
+  // L'ecriture est un POST CIBLE : le MERGE du seul mode vit au SERVEUR
+  // (deux onglets s'ecrasaient des configs d'alertes, releve en review).
+  const api = lire('api/agent-config.js')
+  assert.ok(/mode_ref/.test(api) && /blob\[ref\] = \{ \.\.\.\(blob\[ref\] \|\| \{\}\), mode \}/.test(api),
+    'agent-config merge le seul mode du bien dans le blob relu en base')
+  assert.ok(/mode !== 'test' && mode !== 'auto'/.test(api), 'mode borne a test|auto')
 })
 
-test('messages etape 4 : sans droit reglages, ni interrupteur ni tiroir', () => {
+test('messages etape 4 : les reglages IA sont reserves au TITULAIRE (dette 68)', () => {
+  // agent-config et le GET de property-automation n'honorent pas X-Compte :
+  // ouverts a un delegue, l'ecran lirait et ecrirait le MAUVAIS compte sans
+  // erreur (releve en review). Gating estTitulaire() jusqu'a l'audit.
   const src = sansCommentaires(html())
-  assert.ok(/peutLireReglages\(\) \? \[appel\('\/api\/agent-config'\)/.test(src),
-    'la config IA n\'est pas demandee sans le droit')
-  assert.ok(/etat\.modes !== null && peutEcrireReglages\(\)/.test(src),
-    'l\'interrupteur disparait sans ecriture reglages')
-  assert.ok(/btnReglages\.hidden = !peutLireReglages\(\)/.test(src), 'le tiroir aussi')
+  assert.ok(/const reglagesIci = \(\) => \{ try \{ return estTitulaire\(\) \}/.test(src),
+    'la garde est le titulaire, pas le droit reglages du compte courant')
+  assert.ok(/reglagesIci\(\) \? \[appel\('\/api\/agent-config'\)/.test(src),
+    'la config IA n\'est pas demandee autrement')
+  assert.ok(/etat\.modes !== null && reglagesIci\(\)/.test(src), 'l\'interrupteur disparait')
+  assert.ok(/btnReglages\.hidden = !reglagesIci\(\)/.test(src), 'le tiroir aussi')
+  // Et l'echec d'une bascule de pause SE DIT (dans le tiroir sur mobile).
+  assert.ok(/function noteReglage/.test(src) && /\(etat\.pauses\[ref\] === true\) !== paused/.test(src),
+    'un kill switch qui n\'a pas pris s\'affiche, jamais silencieux')
 })
 
 test('etape 4 : l\'ancienne messagerie et l\'ancienne config GuestFlow sont des redirections', () => {

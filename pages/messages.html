@@ -107,6 +107,7 @@
     </button>
   </div>
   <div class="msg-tiroir__corps" data-bind="tiroir-corps"></div>
+  <p class="caption msg-tiroir__note" data-bind="tiroir-note" hidden></p>
   <a class="link small" style="margin: 14px 18px" href="/apps/agent-ai/knowledge" data-i18n="messages.knowledge"></a>
 </aside>
 
@@ -149,8 +150,11 @@ const etat = {
   ouverte: null            // bookId de la conversation ouverte
 }
 const peutEcrireMessages = () => { try { return peutEcrire('messages') } catch { return false } }
-const peutLireReglages = () => { try { return peutLire('reglages') } catch { return false } }
-const peutEcrireReglages = () => { try { return peutEcrire('reglages') } catch { return false } }
+// Les reglages IA (mode, pause) sont reserves au TITULAIRE sur SON compte :
+// /api/agent-config et le GET de /api/property-automation n'honorent pas
+// X-Compte (dette 68) — un delegue y lirait et ecrirait SON propre compte en
+// croyant regler celui du titulaire, sans aucune erreur a l'ecran.
+const reglagesIci = () => { try { return estTitulaire() } catch { return false } }
 
 async function appel (chemin, corpsPost) {
   const { data: { session } } = await supabase.auth.getSession()
@@ -180,7 +184,7 @@ async function charger () {
       .catch(() => { etat.pauses = {} }),
     // Le mode Test/Auto par bien (etape 4) : agent_alert_config, domaine
     // reglages — un profil sans ce droit n'a ni interrupteur ni tiroir.
-    ...(peutLireReglages() ? [appel('/api/agent-config')
+    ...(reglagesIci() ? [appel('/api/agent-config')
       .then(r => { etat.modes = modesDe(r.config) })
       .catch(() => { etat.modes = null })] : []),
     // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
@@ -745,10 +749,10 @@ async function basculerMode (ref, nouveau) {
   renderMode(); renderTiroir()
   let ecritureOk = false
   try {
-    const lu = await appel('/api/agent-config')
-    const config = lu.config || {}
-    config[ref] = { ...(config[ref] || {}), mode: nouveau }
-    await appel('/api/agent-config', { config })
+    // POST CIBLE : le serveur merge le seul mode de CE bien dans le blob
+    // relu en base — jamais le blob entier depuis l'ecran, deux onglets
+    // s'ecrasaient des configs d'alertes (releve en review).
+    await appel('/api/agent-config', { mode_ref: ref, mode: nouveau })
     ecritureOk = true
   } catch (err) {
     logger.error('Messages', 'mode', err)
@@ -759,9 +763,7 @@ async function basculerMode (ref, nouveau) {
   } catch (err) { logger.error('Messages', 'mode relecture', err) }
   etat.modeEnCours = false
   if (!ecritureOk || (etat.modes && (etat.modes[ref] || 'test') !== nouveau)) {
-    const note = $('[data-bind="saisie-etat"]')
-    note.hidden = false
-    note.textContent = t('messages.mode_error')
+    noteReglage(t('messages.mode_error'))
   }
   renderMode(); renderTiroir()
 }
@@ -771,19 +773,34 @@ async function basculerPause (ref, paused) {
   if (etat.modeEnCours) return
   etat.modeEnCours = true
   renderTiroir()
+  let ecritureOk = false
   try {
     await appel('/api/property-automation', { provider_property_id: ref, paused })
+    ecritureOk = true
   } catch (err) { logger.error('Messages', 'pause', err) }
   try {
     const relu = await appel('/api/property-automation')
     etat.pauses = relu.paused || {}
   } catch (err) { logger.error('Messages', 'pause relecture', err) }
   etat.modeEnCours = false
+  // Un kill switch qui n'a pas pris DOIT se dire : croire l'IA en pause
+  // pendant qu'elle envoie est le pire des silences (releve en review).
+  if (!ecritureOk || (etat.pauses[ref] === true) !== paused) {
+    noteReglage(t('messages.mode_error'))
+  }
   renderTiroir(); renderFil()
+}
+// Le retour d'erreur des reglages : dans le TIROIR s'il est ouvert (seul
+// acces sur telephone), sinon sous la saisie.
+function noteReglage (texte) {
+  const tiroir = $('[data-bind="tiroir"]')
+  const note = tiroir.hidden ? $('[data-bind="saisie-etat"]') : $('[data-bind="tiroir-note"]')
+  note.hidden = false
+  note.textContent = texte
 }
 function renderMode () {
   const zone = $('[data-bind="mode"]')
-  const possible = etat.modes !== null && peutEcrireReglages()
+  const possible = etat.modes !== null && reglagesIci()
   zone.hidden = !possible
   if (!possible) return
   const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
@@ -799,7 +816,7 @@ function renderMode () {
 function renderTiroir () {
   const tiroir = $('[data-bind="tiroir"]')
   if (tiroir.hidden) return
-  const ecrit = peutEcrireReglages()
+  const ecrit = reglagesIci()
   const corps = $('[data-bind="tiroir-corps"]')
   corps.innerHTML = [...etat.biens.entries()].map(([ref, b]) => {
     const mode = etat.modes ? (etat.modes[ref] || 'test') : null
@@ -828,6 +845,7 @@ function renderTiroir () {
 function ouvrirTiroir (ouvert) {
   const tiroir = $('[data-bind="tiroir"]')
   tiroir.hidden = !ouvert
+  $('[data-bind="tiroir-note"]').hidden = true
   if (ouvert) renderTiroir()
 }
 
@@ -926,7 +944,7 @@ async function init () {
     if (c && c.propertyId) basculerMode(String(c.propertyId), b.dataset.mode)
   }))
   const btnReglages = $('[data-bind="reglages-btn"]')
-  btnReglages.hidden = !peutLireReglages()
+  btnReglages.hidden = !reglagesIci()
   btnReglages.addEventListener('click', () => ouvrirTiroir($('[data-bind="tiroir"]').hidden))
   $('[data-bind="tiroir-fermer"]').addEventListener('click', () => ouvrirTiroir(false))
 

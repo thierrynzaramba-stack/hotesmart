@@ -308,13 +308,12 @@ async function epinglerFil(req, res) {
   if (refs !== null && !refs.map(String).includes(String(bien))) {
     return res.status(404).json({ error: 'Conversation introuvable' })
   }
-  const { data: flag, error: eF } = await supabase.from('conversation_flags')
-    .select('id').eq('user_id', userId).eq('book_id', bookingId).maybeSingle()
-  if (eF) return res.status(503).json({ error: 'Lecture impossible' })
-  const ecriture = flag
-    ? supabase.from('conversation_flags').update({ pinned: epingler, property_id_ref: String(bien) }).eq('id', flag.id)
-    : supabase.from('conversation_flags').insert({ user_id: userId, book_id: bookingId, pinned: epingler, property_id_ref: String(bien) })
-  const { error: eW } = await ecriture
+  // L'upsert d'archiverFil, a l'identique : pas de select-puis-insert (deux
+  // onglets simultanes violaient la contrainte unique — releve en review) ;
+  // les colonnes absentes (archivage, read_at) ne sont pas touchees.
+  const { error: eW } = await supabase.from('conversation_flags').upsert(
+    { user_id: userId, book_id: bookingId, pinned: epingler, property_id_ref: String(bien) },
+    { onConflict: 'user_id,book_id' })
   if (eW) {
     console.error('[messages] epingle non ecrite :', eW.message)
     return res.status(503).json({ error: 'Épingle non enregistrée' })
