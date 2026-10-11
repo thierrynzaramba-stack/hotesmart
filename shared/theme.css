@@ -22,6 +22,11 @@
   --amber-soft: #FFF4E0;   /* fond de l'icône d'une action en attente */
   --amber-text: #B87500;   /* texte ambre lisible sur blanc */
 
+  /* Information neutre (« non lu », proposition en attente dans une liste) :
+     JAMAIS pour une action — l'ambre dit « HôteSmart attend ta décision »,
+     le bleu dit seulement « du nouveau » (spec lot 2 §3.2 et §6). */
+  --info: #2563EB;
+
   /* Statuts (jamais la couleur seule : toujours icône ou texte avec) */
   --ok: #0F7A4F;
   --ok-soft: #E8F5EE;
@@ -77,6 +82,7 @@
   --ink: #F5F5F5;
   --on-ink-muted: #595959; /* inactifs sur --ink CLAIR (6,2:1 sur #F5F5F5) ;
                               la barre claire reste distincte du fond #141414 */
+  --info: #60A5FA;         /* le bleu lisible sur fond sombre */
   --muted: #A3A3A3;
   --line: #2A2A2A;
   --border: #3A3A3A;

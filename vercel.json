@@ -41,6 +41,10 @@
       "destination": "/apps/reservation-directe/paiements"
     },
     {
+      "source": "/messages",
+      "destination": "/pages/messages"
+    },
+    {
       "source": "/avis",
       "destination": "/pages/avis"
     },

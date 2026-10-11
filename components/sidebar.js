@@ -61,7 +61,7 @@ export async function renderSidebar(activePage = '') {
       </a>`)}
 
       ${siLire('messages', `
-      <a class="nav-item ${activePage === 'agent-ai-messagerie' ? 'active' : ''}" href="/apps/agent-ai/messagerie">
+      <a class="nav-item ${activePage === 'agent-ai-messagerie' ? 'active' : ''}" href="/pages/messages">
         <span class="nav-icon">💬</span>
         <span class="nav-label">Messages</span>
       </a>`)}

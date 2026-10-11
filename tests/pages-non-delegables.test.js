@@ -70,6 +70,10 @@ const DELEGABLES = [
   'apps/menages/index.html',        // délégué en vague 1
   'apps/menages/garde.html',        // api/garde honore X-Compte (compteDelegue), domaine `menages`
   'apps/agent-ai/messagerie.html',  // délégué en vague 1
+  // Messagerie V5 (lot 2, étape 1) : chaque fetch pose X-Compte (/api/messages,
+  // compteDelegue) et les lectures directes (properties, agent_tasks) filtrent
+  // sur compteCourant() sous RLS. Lecture seule à cette étape.
+  'pages/messages.html',
   'pages/avis.html',                // api/avis honore X-Compte (compteDelegue), domaine `avis`
   // ⚠ DELEGABLE, comme le calendrier dont elle lit les memes chiffres.
   // `/api/yield` garde `reservations` en LECTURE. La delegation passe par le

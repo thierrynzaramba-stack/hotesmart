@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « MESSAGES » — refonte UI V5, lot 2 ÉTAPE 1 : LECTURE SEULE (liste +
+     fil, desktop + mobile, données réelles). Spec :
+     docs/specs/spec-refonte-ui-v5-lot-messages.md §3-§5 et §11.
+     Ni saisie, ni envoi, ni validation ici : étapes 2 et 3.
+     RÈGLES : aucun hexa, aucun texte en dur, aucune icône dessinée ici,
+     aucun appel provider ; X-Compte sur chaque appel. -->
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
+
+<main class="msg-layout">
+
+  <section class="msg-liste" aria-labelledby="h-liste">
+    <div class="msg-liste__outils">
+      <h1 class="h2" id="h-liste" data-i18n="messages.title"></h1>
+      <label class="msg-recherche">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-search"/></svg>
+        <input type="search" data-bind="recherche" data-i18n-attr="placeholder:messages.search;aria-label:messages.search">
+      </label>
+      <div class="msg-filtres" role="group" data-i18n-attr="aria-label:messages.filters">
+        <button type="button" class="tab" data-filtre="tous" aria-pressed="true" data-i18n="messages.filter_all"></button>
+        <button type="button" class="tab" data-filtre="nonlus" aria-pressed="false"></button>
+        <button type="button" class="tab" data-filtre="avalider" aria-pressed="false"></button>
+      </div>
+    </div>
+    <div class="msg-deroule" data-list="conversations"><p class="muted" style="padding: 14px" data-i18n="common.loading"></p></div>
+  </section>
+
+  <section class="msg-fil" aria-labelledby="h-fil">
+    <div class="msg-fil__entete" data-bind="fil-entete" hidden>
+      <button type="button" class="btn btn--secondary btn--icon only-mobile" data-bind="retour" data-i18n-attr="aria-label:messages.back">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(180 12 12)"/></svg>
+      </button>
+      <span class="conv__avatar" data-bind="fil-avatar"></span>
+      <div class="msg-fil__titre">
+        <h2 class="h2" id="h-fil" style="font-size: 17px" data-bind="fil-nom"></h2>
+        <span class="small muted" data-bind="fil-sous"></span>
+      </div>
+      <span class="row" style="margin-inline-start: auto; gap: 12px">
+        <span class="row caption muted" style="gap: 5px" data-bind="fil-code" hidden>
+          <svg class="icon" style="width:15px;height:15px" aria-hidden="true"><use href="/shared/icons.svg#i-key"/></svg>
+          <span data-bind="fil-code-texte"></span>
+        </span>
+        <a class="link caption" data-bind="fil-resa" hidden data-i18n="messages.booking_link"></a>
+      </span>
+    </div>
+    <div class="msg-fil__deroule" data-list="fil" hidden></div>
+    <div class="msg-vide" data-bind="fil-vide">
+      <svg class="icon" style="width:36px;height:36px" aria-hidden="true"><use href="/shared/icons.svg#i-message"/></svg>
+      <span data-i18n="messages.select"></span>
+    </div>
+  </section>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+import { requireAuth } from '/components/auth-guard.js'
+import { supabase, getUser, signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte }
+  from '/shared/compte-courant.js'
+// La règle « conversation ouverte » est CELLE DU LOT 1 (shared, testée) :
+// séjour non terminé OU dernier message < 7 jours. Jamais recopiée.
+import { tachesOuvertes, jourParis } from '/shared/aujourdhui.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
+
+const PAGE = 50            // conversations affichées, puis « afficher plus » (spec §3.2)
+const etat = {
+  aujourdHui: jourParis(),
+  conversations: [], chargementOk: null,
+  taches: [],              // pending_validation OUVERTES, par la règle du lot 1
+  biens: new Map(),        // provider_property_id -> { uuid, name }
+  filtre: 'tous', recherche: '', anciennes: false, limite: PAGE,
+  ouverte: null            // bookId de la conversation ouverte
+}
+
+async function appel (chemin) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const r = await fetch(chemin, {
+    headers: { Authorization: 'Bearer ' + session.access_token, ...enteteCompte() }
+  })
+  const corps = await r.json().catch(() => ({}))
+  if (!r.ok) { const e = new Error(corps.error || `HTTP ${r.status}`); e.status = r.status; throw e }
+  return corps
+}
+
+// ─── Lectures ────────────────────────────────────────────────────────────────
+async function charger () {
+  const lectures = [
+    appel('/api/messages').then(r => { etat.conversations = r.conversations || []; etat.chargementOk = true })
+      .catch(e => { logger.error('Messages', 'conversations', e); etat.chargementOk = false }),
+    // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
+    // sous RLS, jamais /api/channel-property (il interroge Beds24 en direct).
+    supabase.from('properties').select('id, name, provider_property_id').eq('user_id', compteCourant())
+      .then(({ data, error }) => {
+        if (error) { logger.error('Messages', 'biens', error); return }
+        for (const b of data || []) if (b.provider_property_id) etat.biens.set(String(b.provider_property_id), { uuid: b.id, name: b.name })
+      }),
+    supabase.from('agent_tasks')
+      .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
+      .in('status', ['pending_validation']).eq('user_id', compteCourant())
+      .order('created_at', { ascending: false }).limit(200)
+      .then(({ data, error }) => { if (error) logger.error('Messages', 'taches', error); else etat.taches = data || [] })
+  ]
+  await Promise.all(lectures)
+  // La règle d'ouverture s'évalue sur les SÉJOURS des conversations (départ =
+  // lastNight) et leurs derniers messages — mêmes entrées que le lot 1.
+  const sejoursEnCours = etat.conversations
+    .filter(c => c.lastNight).map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
+  const derniers = new Map(etat.conversations.filter(c => c.lastTime).map(c => [String(c.bookId), c.lastTime]))
+  etat.taches = tachesOuvertes(etat.taches, {
+    bookings: sejoursEnCours, derniersMessages: derniers, aujourdHui: etat.aujourdHui
+  })
+}
+
+// ─── Lecture des conversations : tri, filtres, recherche ────────────────────
+const tachesDe = (c) => etat.taches.filter(x => String(x.book_id) === String(c.bookId))
+const nonLue = (c) => {
+  const dernier = c.messages[c.messages.length - 1]
+  return !!dernier && dernier.direction === 'inbound'
+}
+const enCours = (c) => c.lastNight && String(c.lastNight).slice(0, 10) >= etat.aujourdHui
+  && String(c.status || '').toLowerCase() !== 'cancelled'
+function visibles () {
+  const q = etat.recherche.trim().toLowerCase()
+  let liste = etat.conversations.filter(c => etat.anciennes || !c.archivee)
+  if (etat.filtre === 'nonlus') liste = liste.filter(nonLue)
+  if (etat.filtre === 'avalider') liste = liste.filter(c => tachesDe(c).length)
+  if (q) {
+    liste = liste.filter(c => (c.guestName || '').toLowerCase().includes(q)
+      || (etat.biens.get(String(c.propertyId))?.name || '').toLowerCase().includes(q))
+  }
+  // Tri (spec §3.2) : à valider d'abord, puis non lus, puis date décroissante.
+  const rang = c => (tachesDe(c).length ? 0 : nonLue(c) ? 1 : 2)
+  return liste.sort((a, b) => rang(a) - rang(b) || new Date(b.lastTime || 0) - new Date(a.lastTime || 0))
+}
+
+// ─── Rendu : liste ───────────────────────────────────────────────────────────
+const LETTRE_CANAL = { airbnb: 'A', booking: 'B', direct: 'D' }
+const initiales = (nom) => (nom || '').trim().split(/\s+/).slice(0, 2).map(m => m[0] || '').join('').toUpperCase() || '·'
+function periode (c) {
+  const j = x => { const [a, m, d] = String(x).slice(0, 10).split('-').map(Number); return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { day: 'numeric', month: 'short', timeZone: 'UTC' }) }
+  return c.firstNight && c.lastNight ? `${j(c.firstNight)} → ${j(c.lastNight)}` : ''
+}
+function heureCourte (iso) {
+  const d = new Date(iso)
+  const jour = jourParis(d.getTime())
+  if (jour === etat.aujourdHui) return I18n.time(d)
+  return I18n.date(d, { day: 'numeric', month: 'short' })
+}
+function renderFiltres () {
+  const toutes = etat.conversations.filter(c => etat.anciennes || !c.archivee)
+  $('[data-filtre="nonlus"]').textContent = `● ${toutes.filter(nonLue).length}`
+  $('[data-filtre="nonlus"]').setAttribute('aria-label', t('messages.filter_unread'))
+  $('[data-filtre="avalider"]').textContent = `${t('messages.filter_validate')} (${toutes.filter(c => tachesDe(c).length).length})`
+  for (const b of document.querySelectorAll('[data-filtre]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.filtre === etat.filtre))
+  }
+}
+function renderListe () {
+  const zone = $('[data-list="conversations"]')
+  if (etat.chargementOk === false) { zone.innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.load_error'))}</p>`; return }
+  const liste = visibles()
+  if (!liste.length) { zone.innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.empty'))}</p>`; return }
+  const masqueesAnciennes = !etat.anciennes && etat.conversations.some(c => c.archivee)
+  zone.innerHTML = liste.slice(0, etat.limite).map(c => {
+    const dernier = c.messages[c.messages.length - 1]
+    const bien = etat.biens.get(String(c.propertyId))
+    const proposition = tachesDe(c).length > 0
+    const parIA = dernier && dernier.direction === 'outbound' && dernier.kind === 'auto'
+    return `<button type="button" class="conv" data-conv="${esc(c.bookId)}" aria-current="${c.bookId === etat.ouverte}">
+      <span class="conv__avatar">${esc(initiales(c.guestName))}<span class="conv__canal">${esc(LETTRE_CANAL[c.platform] || (c.ota || '?')[0].toUpperCase())}</span></span>
+      <span style="min-width: 0">
+        <span class="conv__nom">${esc(c.guestName || t('messages.guest'))}<time>${dernier ? esc(heureCourte(dernier.sent_at)) : ''}</time></span>
+        <span class="conv__apercu">
+          ${proposition ? icone('i-ai', 'icon icon--robot') : ''}
+          ${parIA && !proposition ? icone('i-check', 'icon icon--robot') : ''}
+          <span>${esc(dernier ? dernier.body : '')}</span>
+        </span>
+        <span class="conv__sous"><span class="conv__etat${enCours(c) ? ' conv__etat--encours' : ''}"></span>${esc([bien?.name, periode(c)].filter(Boolean).join(' · '))}</span>
+      </span>
+      ${nonLue(c) ? `<span class="conv__nonlu" role="img" data-i18n-attr="aria-label:messages.unread"></span>` : ''}
+    </button>`
+  }).join('')
+    + (liste.length > etat.limite ? `<button type="button" class="btn btn--secondary btn--block" style="margin: 10px auto; width: calc(100% - 28px)" data-plus>${esc(t('messages.show_more', { n: liste.length - etat.limite }))}</button>` : '')
+    + (masqueesAnciennes ? `<button type="button" class="link small" style="display: block; margin: 8px auto 16px; background: none; border: 0" data-anciennes>${esc(t('messages.show_old'))}</button>` : '')
+  I18n.apply(zone)
+  zone.querySelectorAll('[data-conv]').forEach(b => b.addEventListener('click', () => ouvrir(b.dataset.conv)))
+  zone.querySelector('[data-plus]')?.addEventListener('click', () => { etat.limite += PAGE; renderListe() })
+  zone.querySelector('[data-anciennes]')?.addEventListener('click', () => { etat.anciennes = true; renderFiltres(); renderListe() })
+}
+
+// ─── Rendu : fil ─────────────────────────────────────────────────────────────
+function jourDe (iso) { return jourParis(new Date(iso).getTime()) }
+function renderFil () {
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  const entete = $('[data-bind="fil-entete"]'), deroule = $('[data-list="fil"]'), vide = $('[data-bind="fil-vide"]')
+  if (!c) { entete.hidden = true; deroule.hidden = true; vide.hidden = false; delete document.body.dataset.fil; return }
+  document.body.dataset.fil = '1'
+  entete.hidden = false; deroule.hidden = false; vide.hidden = true
+  $('[data-bind="fil-avatar"]').innerHTML = `${esc(initiales(c.guestName))}<span class="conv__canal">${esc(LETTRE_CANAL[c.platform] || (c.ota || '?')[0].toUpperCase())}</span>`
+  $('[data-bind="fil-nom"]').textContent = c.guestName || t('messages.guest')
+  const bien = etat.biens.get(String(c.propertyId))
+  $('[data-bind="fil-sous"]').textContent = [bien?.name, periode(c)].filter(Boolean).join(' · ')
+  const code = $('[data-bind="fil-code"]')
+  if (c.arrivee && (c.arrivee.codeEtat === 'transmis' || c.arrivee.codeEtat === 'cree')) {
+    code.hidden = false
+    $('[data-bind="fil-code-texte"]').textContent = t(c.arrivee.codeEtat === 'transmis' ? 'messages.code_sent' : 'messages.code_pending')
+  } else code.hidden = true
+  const resa = $('[data-bind="fil-resa"]')
+  if (bien) { resa.hidden = false; resa.href = `/biens/${encodeURIComponent(bien.uuid)}/calendrier` } else resa.hidden = true
+
+  // Les messages et les PROPOSITIONS ouvertes, fondus à leur place
+  // chronologique (spec §3.3). Étape 1 : la proposition s'affiche SANS boutons
+  // — Envoyer / Modifier / Rejeter arrivent à l'étape 3.
+  // Une date illisible ne fait jamais tomber le fil : la proposition sans
+  // `created_at` prend la place du dernier message, un message sans date va
+  // en fin de fil.
+  const valide = (iso) => iso && Number.isFinite(new Date(iso).getTime())
+  const dernierInstant = c.lastTime && valide(c.lastTime) ? c.lastTime : new Date().toISOString()
+  const entrees = [
+    ...c.messages.map(m => ({ quand: valide(m.sent_at) ? m.sent_at : dernierInstant, type: 'message', m })),
+    ...tachesDe(c).map(x => ({ quand: valide(x.created_at) ? x.created_at : dernierInstant, type: 'proposition', x }))
+  ].sort((a, b) => new Date(a.quand) - new Date(b.quand))
+  let jour = null
+  deroule.innerHTML = entrees.map(e => {
+    const morceaux = []
+    const j = jourDe(e.quand)
+    if (j !== jour) { jour = j; morceaux.push(`<span class="msg-jour">${esc(dateLongue(j))}</span>`) }
+    if (e.type === 'proposition') {
+      morceaux.push(`<div class="bulle bulle--proposition">
+        <span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.proposal'))}</span>${esc(e.x.suggested_reply || e.x.summary || '')}</div>
+        <span class="bulle-meta">${esc(t('messages.proposal_hint'))}</span>`)
+    } else {
+      const m = e.m
+      const voyageur = m.direction === 'inbound'
+      morceaux.push(`<div class="bulle ${voyageur ? 'bulle--voyageur' : 'bulle--hote'}">${esc(m.body || '')}</div>
+        <span class="bulle-meta${voyageur ? ' bulle-meta--voyageur' : ''}">${!voyageur && m.kind === 'auto' ? icone('i-ai') : ''}${esc(valide(m.sent_at) ? I18n.time(new Date(m.sent_at)) : '')}</span>`)
+    }
+    return morceaux.join('')
+  }).join('')
+  deroule.scrollTop = deroule.scrollHeight
+}
+function dateLongue (jour) {
+  const [a, m, d] = jour.split('-').map(Number)
+  return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+}
+function ouvrir (bookId) {
+  etat.ouverte = bookId
+  renderListe(); renderFil()
+}
+
+// ─── Démarrage ──────────────────────────────────────────────────────────────
+async function init () {
+  const session = await requireAuth()
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+  const user = await getUser()
+  $('[data-bind="initials"]').textContent = (user?.email || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis'),
+    outils: [
+      peutLire('reservations') && { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price' },
+      estTitulaire() && { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key' },
+      estTitulaire() && { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send' },
+      estTitulaire() && { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar' },
+      estTitulaire() && { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link' },
+      estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
+    ].filter(Boolean)
+  })
+  if (!peutLire('messages')) {
+    $('[data-list="conversations"]').innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.no_access'))}</p>`
+    HSNav.render({ peutLire })
+    return
+  }
+  await charger()
+  HSNav.render({ badges: { pendingMessages: etat.taches.length }, peutLire })
+  renderFiltres(); renderListe()
+
+  $('[data-bind="recherche"]').addEventListener('input', (e) => { etat.recherche = e.target.value; etat.limite = PAGE; renderListe() })
+  document.querySelectorAll('[data-filtre]').forEach(b => b.addEventListener('click', () => {
+    etat.filtre = b.dataset.filtre; etat.limite = PAGE; renderFiltres(); renderListe()
+  }))
+  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
+
+  // Ouverture directe `?conv=` (liens de l'accueil, plus tard) : seulement si
+  // le fil existe — jamais un écran « introuvable » depuis un lien interne.
+  const demandee = new URLSearchParams(location.search).get('conv')
+  if (demandee && etat.conversations.some(x => String(x.bookId) === String(demandee))) ouvrir(String(demandee))
+}
+
+init().catch(e => logger.error('Messages', e.message, e))
+</script>
+</body>
+</html>
