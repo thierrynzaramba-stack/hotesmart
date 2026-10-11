@@ -41,7 +41,7 @@ const CORE = lire('shared', 'calendar-core.js')
 const CAL = sansCommentaires(lire('api', 'calendar.js'))
 const API = lire('api', 'reservation-directe.js')
 const LIB = lire('lib', 'reservation-directe.js')
-const MSG = lire('apps', 'agent-ai', 'messagerie.html')
+const MSG = lire('pages', 'messages.html')   // etape 4 : l'ancienne page est une redirection
 const MSGAPI = lire('api', 'messages.js')
 const CLIENT = lire('shared', 'api-client.js')
 
@@ -284,7 +284,7 @@ test('bulles : colonne elargie et ligne plus haute, de facon coherente', () => {
 test('conversation : le bouton existe et vise la messagerie par booking_id', () => {
   assert.match(PAGE, /id="resa-conversation"/)
   assert.match(PAGE, /Ouvrir la conversation/)
-  assert.match(MODULE, /messagerie\?conv=' \+ encodeURIComponent\(resa\.id\)/)
+  assert.match(MODULE, /\/messages\?conv=' \+ encodeURIComponent\(resa\.id\)/)
   assert.match(PAGE, /urlConversation\(bien, resa\)/)
 })
 
@@ -322,34 +322,27 @@ test('conversation : « je ne sais pas » n\'est jamais presente comme « aucun 
   assert.ok(bloc.includes('resaCourante.resa.id'), 'une reponse tardive ne repeint pas une autre fiche')
 })
 
-test('messagerie : `?conv=` ouvre le fil, et n\'est consommee qu\'UNE fois', () => {
-  // Sans cela, chaque rafraichissement ramenerait l'hote de force sur la
-  // conversation d'origine, y compris apres qu'il en a ouvert une autre.
-  assert.match(MSG, /URLSearchParams\(location\.search\)\.get\('conv'\)/)
-  assert.match(MSG, /function ouvrirConversationDemandee/)
-  const bloc = MSG.slice(MSG.indexOf('function ouvrirConversationDemandee'), MSG.indexOf('window.loadConversations ='))
-  assert.ok(bloc.includes('convDemandee = null'), 'la cible est consommee')
-  assert.ok(bloc.includes('introuvable'), 'un fil absent est DIT, pas ignore')
+test('messagerie : `?conv=` ouvre le fil demande par la fiche', () => {
+  // L'integration fiche -> messagerie vit desormais dans /messages (etape 4) :
+  // urlConversation pointe `?conv=` seul, et la page ouvre le fil s'il existe.
+  assert.match(MSG, /params\.get\('conv'\)/)
+  assert.ok(MSG.includes("etat.conversations.some(x => String(x.bookId) === String(demandee))"),
+    'le fil demande n\'ouvre que s\'il existe — jamais un ecran « introuvable » depuis un lien interne (decision de l\'etape 1)')
 })
 
-test('messagerie : une PANNE de chargement ne se dit pas « conversation introuvable »', () => {
-  // ⚠ Les deux chemins de chargement rattrapent leur propre erreur pour peindre
-  // le panneau de gauche : la promesse tient donc meme quand /api/messages est
-  // tombe, et `conversations` reste vide. Sans drapeau, l'hote lisait que le fil
-  // n'existe pas — et la cible etait consommee, donc un rechargement reussi ne
-  // l'ouvrait plus.
-  const bloc = MSG.slice(MSG.indexOf('function ouvrirConversationDemandee'), MSG.indexOf('window.loadConversations ='))
-  assert.ok(bloc.includes('if (!charge) return'), 'on ne conclut rien sans chargement reussi')
-  assert.ok(bloc.indexOf('if (!charge) return') < bloc.indexOf('convDemandee = null'),
-    'et la cible n\'est pas consommee avant d\'avoir pu conclure')
-  // Les deux chemins rendent bien le drapeau.
-  assert.strictEqual((MSG.match(/\n      return true\n/g) || []).length, 2, 'succes des deux chemins')
-  assert.strictEqual((MSG.match(/\n      return false\n/g) || []).length, 2, 'echec des deux chemins')
+test('messagerie : une PANNE de chargement est DITE, pas lue comme une absence de fil', () => {
+  // La fiche n'envoie ici que si has_conversation a dit vrai : si la page
+  // n'ouvre rien, c'est une panne — et elle s'affiche en toutes lettres.
+  assert.ok(MSG.includes('etat.chargementOk = false'), 'le chargement en echec est memorise')
+  assert.ok(MSG.includes("t('messages.load_error')"), 'et il se dit a l\'ecran')
 })
 
-test('messagerie : `?bien=` n\'est applique que si le bien existe', () => {
-  // Une valeur inconnue viderait l'ecran par un filtre qui ne correspond a rien.
-  assert.match(MSG, /window\._props\.some\(p => String\(p\.provider_property_id\) === String\(bienDemande\)\)/)
+test('messagerie : le lien de la fiche ne porte plus `?bien=`', () => {
+  // /messages n'a pas de filtre par bien qui masquerait le fil : le parametre
+  // est mort avec l'ancienne page (sa valeur inconnue vide:ait l'ecran).
+  const module_ = lire('shared', 'calendrier-resa.js')
+  assert.ok(module_.includes("'/messages?conv=' + encodeURIComponent(resa.id)"))
+  assert.ok(!module_.includes('&bien='), 'plus de second parametre')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

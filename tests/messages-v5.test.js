@@ -178,8 +178,8 @@ test('messages : les correctifs de la revue de acf0fa0 tiennent', () => {
 test('messages : les arrivees du jour et de demain sont CONSERVEES (inventaire §12)', () => {
   const src = sansCommentaires(html())
   assert.ok(src.includes('function groupeArrivee'), 'le groupe d\'arrivee existe')
-  assert.ok(src.includes('return g < 2 ? g : tachesDe(c).length ? 2'),
-    'arrivees du JOUR en tete, demain ensuite, AVANT les « a valider » (decision du 11 octobre)')
+  assert.ok(src.includes('return g < 2 ? g : c.epinglee ? 2 : tachesDe(c).length ? 3'),
+    'arrivees du JOUR en tete, demain ensuite, AVANT epinglees et « a valider » (decision du 11 octobre)')
   assert.ok(src.includes('msg-groupe'), 'etiquettes de groupe « Arrive aujourd\'hui / demain »')
   assert.ok(src.includes('msg-separe'), 'separation visuelle avec le reste de la liste')
   assert.ok(/badgeArrivee[\s\S]{0,800}lienTelephone\(c\)/.test(src), 'le telephone vit dans la LIGNE pour les arrivees')
@@ -304,4 +304,61 @@ test('api/messages action=proposition : garde write, perimetre, statuts de l\'an
     'le journal conversations de messagerie.html, a l\'identique')
   assert.ok(src.includes("req.body.action === 'proposition'"), 'route branchee')
   assert.ok(/texte\.length > 10000/.test(bloc), 'texte borne comme les autres champs (revue)')
+})
+
+// ─── Etape 4 : Test/Auto, tiroir reglages, redirections ──────────────────────
+test('messages etape 4 : passer en Auto exige une confirmation, et l\'etat est RELU apres l\'ecriture', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/nouveau === 'auto' && !window\.confirm\(t\('messages\.mode_confirm_auto'\)\)/.test(src),
+    'Auto est un geste lourd : confirmation explicite avant (demande de Thierry)')
+  // Apres le POST : un GET de relecture nourrit l'interrupteur — jamais
+  // l'etat suppose. Idem pour la pause.
+  assert.ok(/await appel\('\/api\/agent-config', \{ config \}\)[\s\S]*?await appel\('\/api\/agent-config'\)[\s\S]*?etat\.modes = modesDe\(relu\.config\)/.test(src),
+    'le mode affiche vient de la base relue')
+  assert.ok(/await appel\('\/api\/property-automation', \{ provider_property_id[\s\S]*?await appel\('\/api\/property-automation'\)[\s\S]*?etat\.pauses = relu\.paused/.test(src),
+    'la pause affichee vient de la base relue')
+  // L'ecriture passe par le writer EXISTANT, le blob entier relu d'abord :
+  // on ne touche que le mode de CE bien.
+  assert.ok(/const lu = await appel\('\/api\/agent-config'\)[\s\S]*?config\[ref\] = \{ \.\.\.\(config\[ref\] \|\| \{\}\), mode: nouveau \}/.test(src),
+    'le blob est relu puis modifie sur le seul mode du bien')
+})
+
+test('messages etape 4 : sans droit reglages, ni interrupteur ni tiroir', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/peutLireReglages\(\) \? \[appel\('\/api\/agent-config'\)/.test(src),
+    'la config IA n\'est pas demandee sans le droit')
+  assert.ok(/etat\.modes !== null && peutEcrireReglages\(\)/.test(src),
+    'l\'interrupteur disparait sans ecriture reglages')
+  assert.ok(/btnReglages\.hidden = !peutLireReglages\(\)/.test(src), 'le tiroir aussi')
+})
+
+test('etape 4 : l\'ancienne messagerie et l\'ancienne config GuestFlow sont des redirections', () => {
+  for (const [page, attendu] of [
+    ['apps/agent-ai/messagerie.html', "location.replace('/messages' + (conv ? '?conv=' + encodeURIComponent(conv) : ''))"],
+    ['apps/agent-ai/config.html', "location.replace('/messages')"]
+  ]) {
+    const src = lire(page)
+    assert.ok(src.includes(attendu), `${page} redirige vers /messages`)
+    // Plus AUCUNE lecture provider ni ecriture RLS directe : la dette 43
+    // (filet legacy Beds24) et les ecritures agent_tasks/conversations de
+    // l'ancienne page sont closes par la redirection. (Hors commentaires :
+    // l'en-tete de la redirection RACONTE ce qui a disparu.)
+    const code = sansCommentaires(src)
+    for (const interdit of ['/api/beds24', 'supabase', 'agent_tasks', "from('conversations')", 'fetch(']) {
+      assert.ok(!code.includes(interdit), `${page} ne doit plus contenir ${interdit}`)
+    }
+  }
+})
+
+test('etape 4 : plus aucun lien vers l\'ancienne app, hors Connaissances', () => {
+  const accueil = lire('pages/aujourdhui.html')
+  assert.ok(!accueil.includes('agent-ai'), 'l\'accueil pointe /messages')
+  assert.ok(/\/messages\?conv=/.test(accueil), 'les « Voir » ouvrent le fil dans la nouvelle page')
+  const resa = lire('shared/calendrier-resa.js')
+  assert.ok(resa.includes("'/messages?conv=' + encodeURIComponent(resa.id)"),
+    'urlConversation (module partage des deux calendriers) pointe /messages')
+  // La nouvelle page garde UN SEUL lien vers l'ancienne app : Connaissances.
+  const page = html()
+  const liens = [...page.matchAll(/agent-ai\/([\w-]+)/g)].map(m => m[1])
+  assert.deepEqual([...new Set(liens)], ['knowledge'], 'seul Connaissances survit')
 })

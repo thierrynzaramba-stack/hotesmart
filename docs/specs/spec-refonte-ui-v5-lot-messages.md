@@ -201,8 +201,9 @@ de chaque fonction existante :
 | États « ménage fait / code transmis » (liste et fil) | **CONSERVÉ, étape 1** (réintégré) | pastilles positives seulement, comme avant ; source `arrivee` de /api/messages |
 | Marqueurs de tâches « Intervention requise / Info à compléter » | **DÉPLACÉ, étape 3** | ce sont des tâches à traiter : elles rejoignent les propositions dans le fil, avec leurs actions |
 | « À traiter » (tâches `pending`) dans le compteur | **DÉPLACÉ** : accueil (« À valider ») + étape 3 | le compteur de la nouvelle liste ne compte que les propositions |
-| Épingles (conversation_flags.pinned) | **DÉPLACÉ, étape 2** | une écriture ; l'étape 1 est lecture seule |
-| Archiver / désarchiver un fil (manuel) | **DÉPLACÉ, étape 2** | une écriture ; l'auto-archivage reste lu du serveur |
+| Épingles (conversation_flags.pinned) | **LIVRÉ, étape 4** (annoncé étape 2, oublié, rattrapé sur constat des tests DOM le 11 octobre) | menu ⋯ du fil ; action `epingler` gardée (l'ancienne écrivait sous RLS) ; épinglée remontée derrière les arrivées |
+| Archiver / désarchiver un fil (manuel) | **LIVRÉ, étape 4** (même rattrapage) | menu ⋯ du fil ; writer existant `action=archiver` ; une épinglée ne s'archive pas |
+| Bandeau « Évaluer ce voyageur » (lot 5 avis) | **DETTE 67** (absent de cet inventaire à l'origine — le manque qui a motivé le rattrapage) | à reconcevoir dans l'esprit V5 : une proposition dans le fil au départ du voyageur, pas un bandeau ; d'ici là, fiche résa du calendrier et page /avis |
 | Filtre par bien (sélecteur) | **RETIRÉ** (spec §3.2) | la recherche suffit à 4 biens ; à revoir à 10+ |
-| Mode `?legacy=1` (lecture Beds24 directe) | **RETIRÉ** | contraire à l'architecture cœur ; l'ancienne page reste accessible par URL jusqu'à l'étape 4 |
+| Mode `?legacy=1` (lecture Beds24 directe) | **RETIRÉ** (dette 43 soldée à l'étape 4 : la page est une redirection) | contraire à l'architecture cœur |
 | Envoi, GuestFlow, Test/Auto, réglages | **DÉPLACÉ, étapes 2-4** | ordre de livraison §11 |

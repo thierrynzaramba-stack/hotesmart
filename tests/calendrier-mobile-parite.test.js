@@ -78,7 +78,7 @@ test('LE TEST QUI COMPTE : modifiable = reservation directe, bien relie, pas une
 
 test('module : messagerie, capacite, e-mail manquant', async () => {
   const M = await charger()
-  assert.equal(M.urlConversation({ provider_property_id: 'P 1' }, { id: 'B/1' }), '/apps/agent-ai/messagerie?conv=B%2F1&bien=P%201')
+  assert.equal(M.urlConversation({ provider_property_id: 'P 1' }, { id: 'B/1' }), '/messages?conv=B%2F1')
   assert.equal(M.messageCapacite(0, 0, 4), 'Il faut au moins un adulte.')
   assert.equal(M.messageCapacite(3, 2, 4), 'Ce bien accueille 4 personnes au maximum — vous en avez saisi 5.')
   assert.equal(M.messageCapacite(2, 2, 4), null)

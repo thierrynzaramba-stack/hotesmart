@@ -238,9 +238,23 @@ h1, h2, h3, p { margin: 0; }
 .bulle-menu summary::-webkit-details-marker { display: none; }
 .bulle-menu summary .icon { width: 16px; height: 16px; }
 .bulle-menu__liste { position: absolute; inset-inline-end: 0; bottom: calc(100% + 6px); min-width: 130px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); z-index: 5; }
-.bulle-menu__liste button { display: block; width: 100%; text-align: start; background: none; border: 0; padding: 8px 10px; border-radius: 8px; color: var(--danger); font-size: var(--fs-body); font-weight: var(--fw-semibold); cursor: pointer; }
+.bulle-menu__liste button { display: block; width: 100%; text-align: start; background: none; border: 0; padding: 8px 10px; border-radius: 8px; color: var(--ink); font-size: var(--fs-body); font-weight: var(--fw-semibold); cursor: pointer; white-space: nowrap; }
+.bulle-menu__liste button[data-rejeter] { color: var(--danger); }
+.bulle-menu__liste--bas { bottom: auto; top: calc(100% + 6px); }
+.icon--epingle { width: 13px; height: 13px; color: var(--muted); align-self: center; flex: none; }
 .bulle-menu__liste button:hover { background: var(--surface-2); }
 .msg-retour { display: none; }
+/* Test / Auto (etape 4) : segmente a deux positions, et le tiroir reglages. */
+.msg-mode { display: inline-flex; gap: 4px; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
+.msg-mode .tab { padding: 5px 12px; }
+.msg-mode .tab:disabled { opacity: .45; cursor: default; }
+.msg-mode .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); font-weight: var(--fw-semibold); }
+.msg-tiroir { position: fixed; inset-block: 0; inset-inline-end: 0; width: min(360px, 100vw); background: var(--surface); border-inline-start: 1px solid var(--line); box-shadow: var(--shadow-hover); z-index: 40; display: flex; flex-direction: column; overflow-y: auto; }
+.msg-tiroir[hidden] { display: none; }
+.msg-tiroir__entete { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.msg-tiroir__corps { display: flex; flex-direction: column; }
+.msg-tiroir__bien { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.msg-tiroir__nom { font-weight: var(--fw-semibold); }
 @media (max-width: 899px) {
   .msg-retour { display: inline-flex; }
   /* En-tete du fil COMPACT (spec §4) : nom puis bien · dates, chacun sur sa
@@ -262,6 +276,9 @@ h1, h2, h3, p { margin: 0; }
   .bulle__actions .btn { flex: 1 1 100%; justify-content: center; }
   .bulle__actions [data-envoyer-prop] { order: -1; }
   .bulle-menu { order: 1; margin-inline-start: auto; }
+  /* L'interrupteur de l'en-tete est masque sur telephone (spec §4) : le
+     reglage reste accessible par le tiroir. */
+  .msg-liste__outils [data-bind="mode"] { display: none; }
 }
 
 /* ---------- Barre du haut ---------- */

@@ -23,7 +23,6 @@ const lire = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8')
 // Chaque page delegable, avec le domaine qui commande ses ecritures.
 const PAGES = [
   ['apps/menages/index.html',        'menages'],
-  ['apps/agent-ai/messagerie.html',  'messages'],
   ['pages/biens-calendrier.html',    'reservations'],
   ['pages/calendrier-mobile.html',   'reservations'],
   ['pages/biens.html',               'reservations'],
@@ -77,12 +76,9 @@ test('calendrier mobile : la feuille d\'edition ne s\'ouvre pas', () => {
     'openSheet doit refuser avant de proposer une saisie')
 })
 
-test('messagerie : la zone de composition disparait en lecture', () => {
-  const html = lire('apps/agent-ai/messagerie.html')
-  assert.ok(html.includes("peutEcrire('messages') ?"), 'la composition est conditionnee')
-  assert.ok(html.includes('Lecture seule — vous ne pouvez pas répondre'),
-    'et remplacee par une explication')
-})
+// L'ancienne messagerie est une REDIRECTION depuis l'etape 4 du lot
+// Messages V5 : la lecture seule de la nouvelle page est testee dans
+// tests/messages-v5.test.js (saisie et boutons RETIRES sans droit).
 
 test('calendrier : la barre flottante n\'est PAS supprimee du DOM', () => {
   // ⚠ La supprimer provoquait un TypeError a chaque clic : `showFloatBar()` et

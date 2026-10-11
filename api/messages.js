@@ -177,6 +177,9 @@ async function appliquerArchivage(userId, conversations, depuis) {
     c.raisonArchivage = e.raison
     // L'etat lu (etape 2) : expose tel quel, null = jamais ouvert.
     c.readAt = f.read_at || null
+    // L'epingle (etape 4, portee de l'ancienne page) : la liste la montre et
+    // la remonte ; une epinglee n'est jamais archivee (etatArchivage le sait).
+    c.epinglee = f.pinned === true
   }
   return true
 }
@@ -278,6 +281,47 @@ async function cloreProposition(req, res) {
   return res.status(200).json({ ok: true, task_id: tache.id, statut })
 }
 
+// ─── L'epingle (lot 2 etape 4) ───────────────────────────────────────────────
+// Portee de l'ancienne messagerie, qui l'ecrivait en direct sous RLS — ici en
+// action gardee, pour qu'un profil delegue `messages = write` epingle aussi.
+// ⚠ UNE MISE A JOUR, PAS UNE SUPPRESSION (lecon du lot 7 avis) : la ligne
+// porte aussi l'archivage et read_at. Creation avec pinned explicite.
+async function epinglerFil(req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const epingler = req.body.action === 'epingler'
+  const bookingId = String(req.body.booking_id || '').trim()
+  if (!bookingId || bookingId.length > 200 || bookingId === '__SIM_ENABLED__') {
+    return res.status(400).json({ error: 'Conversation invalide' })
+  }
+  // Perimetre par bien, 404 jamais 403 — memes verifications qu'archiverFil.
+  const [m, sn] = await Promise.all([
+    supabase.from('messages').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+    supabase.from('bookings_snapshot').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+  ])
+  if (m.error || sn.error) return res.status(503).json({ error: 'Lecture impossible' })
+  const bien = (m.data && m.data[0] && m.data[0].property_id) || (sn.data && sn.data[0] && sn.data[0].property_id) || null
+  if (bien == null) return res.status(404).json({ error: 'Conversation introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(bien))) {
+    return res.status(404).json({ error: 'Conversation introuvable' })
+  }
+  const { data: flag, error: eF } = await supabase.from('conversation_flags')
+    .select('id').eq('user_id', userId).eq('book_id', bookingId).maybeSingle()
+  if (eF) return res.status(503).json({ error: 'Lecture impossible' })
+  const ecriture = flag
+    ? supabase.from('conversation_flags').update({ pinned: epingler, property_id_ref: String(bien) }).eq('id', flag.id)
+    : supabase.from('conversation_flags').insert({ user_id: userId, book_id: bookingId, pinned: epingler, property_id_ref: String(bien) })
+  const { error: eW } = await ecriture
+  if (eW) {
+    console.error('[messages] epingle non ecrite :', eW.message)
+    return res.status(503).json({ error: 'Épingle non enregistrée' })
+  }
+  return res.status(200).json({ ok: true, booking_id: bookingId, epinglee: epingler })
+}
+
 async function archiverFil(req, res) {
   const garde = await requirePermission(req, res, {
     domaine: 'messages', niveau: 'write', compteDelegue: true })
@@ -343,6 +387,10 @@ module.exports = async function handler(req, res) {
   // Etape 3 : Envoyer / Rejeter une proposition clot la tache (et le journal).
   if (req.method === 'POST' && req.body && req.body.action === 'proposition') {
     return await cloreProposition(req, res)
+  }
+  // Etape 4 : l'epingle, portee de l'ancienne page.
+  if (req.method === 'POST' && req.body && (req.body.action === 'epingler' || req.body.action === 'desepingler')) {
+    return await epinglerFil(req, res)
   }
 
   // ── Droits ──

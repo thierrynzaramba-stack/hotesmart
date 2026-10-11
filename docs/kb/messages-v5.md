@@ -105,10 +105,40 @@ ni envoi, ni validation (étapes 2 et 3 de la spec §11).
 - Boutons retirés sans `messages = write` ; badge nav décrémenté sans
   rechargement (`majBadge`). Mobile : boutons pleine largeur, Envoyer premier.
 
-### Prévu à l'étape suivante (décisions de Thierry du 11 octobre 2026, pas des dettes)
+## Étape 4 — Test/Auto, tiroir réglages, redirections (11 octobre 2026)
 
-- **Étape 4** : Test/Auto + tiroir réglages, redirection de l'ancienne page,
-  retrait du lien « Outils ». D'ici là : l'ancienne messagerie n'apparaît **dans
-  aucun menu** (nav et barre latérale pointent la nouvelle page), URL seule.
+- **Test/Auto** : le mode vit dans `agent_alert_config.config[<ref>].mode`
+  (`test` par défaut), writer EXISTANT `/api/agent-config` (domaine
+  `reglages`) — GET du blob, modification du seul mode du bien, POST, puis
+  **GET de relecture : l'interrupteur montre l'état réel en base, jamais
+  l'état supposé** (demande de Thierry). Passer en **Auto = confirmation
+  explicite** (« les réponses connues partiront sans votre validation ») ;
+  retour en Test sans confirmation. Sélecteur dans l'en-tête de la liste,
+  agissant sur le bien du fil ouvert (grisé sinon, infobulle) ; masqué sur
+  téléphone (le tiroir y donne accès).
+- **Tiroir réglages** : par bien — Test/Auto (même mécanique), kill switch
+  (`/api/property-automation`, relu pareil), lien « Connaissances »
+  (`/apps/agent-ai/knowledge`, seule page de l'ancienne app qui survit). Sans
+  droit `reglages` : pas de tiroir ni d'interrupteur.
+- **Épingle et archivage manuel PORTÉS dans le menu ⋯ du fil** (rattrapage du
+  11 octobre : l'inventaire §12 les annonçait à l'étape 2, les tests DOM de
+  l'ancienne page ont révélé l'oubli). Actions serveur `epingler`/`desepingler`
+  (nouvelles, mêmes gardes qu'archiver ; désépingler = UPDATE, jamais DELETE)
+  et `archiver`/`desarchiver` (writer existant). L'état affiché vient de la
+  RÉPONSE du writer. Épinglée = remontée derrière les arrivées, jamais
+  archivée (l'entrée du menu disparaît, le serveur refuse de toute façon).
+  Le bandeau « Évaluer ce voyageur » (lot 5 avis) n'est PAS porté : dette 67
+  (à reconcevoir en proposition dans le fil au départ, avec la dette 66).
+- **Redirections** : `apps/agent-ai/messagerie.html` et `config.html` ne sont
+  plus que des redirections vers `/messages` (`?conv=` survit ; `?filtre=`
+  accepté : `nonlus` / `avalider`). **Dette 43 SOLDÉE** : le filet legacy
+  Beds24 et les écritures RLS directes de l'ancienne page disparaissent avec
+  elle. L'accueil et `urlConversation` (module partagé des deux calendriers)
+  pointent `/messages`.
+
+### Reste (pas des dettes de ce lot)
+
 - Lignes système « réservation modifiée / annulée » (spec §3.3) : à exposer par
-  l'endpoint (booking_change_events) à l'étape 2+.
+  l'endpoint (booking_change_events).
+- Dette 66 : l'origine des envois (`ia_validee`/`ia_modifiee`/`hote`) posée par
+  le writer — prérequis « Fait pour vous », avant le lot Calendrier.

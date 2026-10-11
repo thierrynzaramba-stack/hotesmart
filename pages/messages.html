@@ -38,7 +38,16 @@
 
   <section class="msg-liste" aria-labelledby="h-liste">
     <div class="msg-liste__outils">
-      <h1 class="h2" id="h-liste" data-i18n="messages.title"></h1>
+      <div class="row" style="gap: 10px">
+        <h1 class="h2" id="h-liste" style="margin-inline-end: auto" data-i18n="messages.title"></h1>
+        <div class="msg-mode" data-bind="mode" hidden role="group" data-i18n-attr="aria-label:messages.mode_label">
+          <button type="button" class="tab" data-mode="test" data-i18n="messages.mode_test"></button>
+          <button type="button" class="tab" data-mode="auto" data-i18n="messages.mode_auto"></button>
+        </div>
+        <button type="button" class="btn btn--secondary btn--icon" data-bind="reglages-btn" hidden data-i18n-attr="aria-label:messages.settings;title:messages.settings">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-settings"/></svg>
+        </button>
+      </div>
       <label class="msg-recherche">
         <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-search"/></svg>
         <input type="search" data-bind="recherche" data-i18n-attr="placeholder:messages.search;aria-label:messages.search">
@@ -69,6 +78,7 @@
         </span>
         <span class="row" style="gap: 12px" data-bind="fil-extras"></span>
         <a class="link caption" data-bind="fil-resa" hidden data-i18n="messages.booking_link"></a>
+        <span data-bind="fil-menu"></span>
       </span>
     </div>
     <div class="msg-fil__deroule" data-list="fil" hidden></div>
@@ -88,6 +98,17 @@
     <p class="caption muted" style="margin: 0; padding: 0 20px 10px" data-bind="saisie-etat" hidden></p>
   </section>
 </main>
+
+<aside class="msg-tiroir" data-bind="tiroir" hidden aria-labelledby="h-tiroir">
+  <div class="msg-tiroir__entete">
+    <h2 class="h2" id="h-tiroir" style="font-size: 17px; margin: 0" data-i18n="messages.settings"></h2>
+    <button type="button" class="btn btn--secondary btn--icon" data-bind="tiroir-fermer" data-i18n-attr="aria-label:messages.close">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg>
+    </button>
+  </div>
+  <div class="msg-tiroir__corps" data-bind="tiroir-corps"></div>
+  <a class="link small" style="margin: 14px 18px" href="/apps/agent-ai/knowledge" data-i18n="messages.knowledge"></a>
+</aside>
 
 <nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
 
@@ -123,9 +144,13 @@ const etat = {
   pauses: {},                          // provider_property_id -> kill switch
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
+  modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
+  modeEnCours: false,      // une bascule a la fois
   ouverte: null            // bookId de la conversation ouverte
 }
 const peutEcrireMessages = () => { try { return peutEcrire('messages') } catch { return false } }
+const peutLireReglages = () => { try { return peutLire('reglages') } catch { return false } }
+const peutEcrireReglages = () => { try { return peutEcrire('reglages') } catch { return false } }
 
 async function appel (chemin, corpsPost) {
   const { data: { session } } = await supabase.auth.getSession()
@@ -153,6 +178,11 @@ async function charger () {
       .catch(e => { logger.error('Messages', 'conversations', e); etat.chargementOk = false }),
     appel('/api/property-automation').then(r => { etat.pauses = r.paused || {} })
       .catch(() => { etat.pauses = {} }),
+    // Le mode Test/Auto par bien (etape 4) : agent_alert_config, domaine
+    // reglages — un profil sans ce droit n'a ni interrupteur ni tiroir.
+    ...(peutLireReglages() ? [appel('/api/agent-config')
+      .then(r => { etat.modes = modesDe(r.config) })
+      .catch(() => { etat.modes = null })] : []),
     // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
     // sous RLS, jamais /api/channel-property (il interroge Beds24 en direct).
     supabase.from('properties').select('id, name, provider_property_id, photo_url').eq('user_id', compteCourant())
@@ -234,7 +264,7 @@ function visibles () {
   // ⚠ Le rang se calcule UNE fois par conversation, jamais dans le
   // comparateur (nonLue recopie le fil, la recherche re-trie a chaque frappe
   // — meme famille que l'index des taches, releve en review).
-  const rang = c => { const g = groupeArrivee(c); return g < 2 ? g : tachesDe(c).length ? 2 : nonLue(c) ? 3 : 4 }
+  const rang = c => { const g = groupeArrivee(c); return g < 2 ? g : c.epinglee ? 2 : tachesDe(c).length ? 3 : nonLue(c) ? 4 : 5 }
   return liste
     .map(c => ({ c, rg: rang(c), t: new Date(c.lastTime || 0).getTime() }))
     .sort((x, y) => x.rg - y.rg || y.t - x.t)
@@ -324,6 +354,7 @@ function renderListe () {
         <span class="conv__sous"><span class="conv__etat${enCours(c) ? ' conv__etat--encours' : ''}"></span>${esc([bien?.name, periode(c)].filter(Boolean).join(' · '))}</span>
         ${badgeArrivee(c)}
       </span>
+      ${c.epinglee ? icone('i-pin', 'icon icon--epingle') : ''}
       ${nonLue(c) ? `<span class="conv__nonlu" role="img" data-i18n-attr="aria-label:messages.unread"></span>` : ''}
     </div>`
   }).join('')
@@ -410,6 +441,21 @@ function renderFil () {
   ].filter(Boolean).join('')
   const resa = $('[data-bind="fil-resa"]')
   if (bien) { resa.hidden = false; resa.href = `/biens/${encodeURIComponent(bien.uuid)}/calendrier` } else resa.hidden = true
+
+  // Le menu du fil (etape 4) : epingler et archiver, PORTES de l'ancienne
+  // page — writers /api/messages (actions epingler/archiver), jamais le RLS
+  // direct. Une epinglee ne s'archive pas : l'entree n'apparait pas (et le
+  // serveur refuse de toute facon, 409 epinglee).
+  const menuFil = $('[data-bind="fil-menu"]')
+  menuFil.innerHTML = peutEcrireMessages() ? `<details class="bulle-menu">
+      <summary aria-label="${esc(t('messages.more_actions'))}" title="${esc(t('messages.more_actions'))}">${icone('i-more')}</summary>
+      <div class="bulle-menu__liste bulle-menu__liste--bas">
+        <button type="button" data-fil-epingle>${esc(t(c.epinglee ? 'messages.unpin' : 'messages.pin'))}</button>
+        ${c.epinglee ? '' : `<button type="button" data-fil-archive>${esc(t(c.archivee ? 'messages.unarchive' : 'messages.archive'))}</button>`}
+      </div>
+    </details>` : ''
+  menuFil.querySelector('[data-fil-epingle]')?.addEventListener('click', () => basculerEpingle(c))
+  menuFil.querySelector('[data-fil-archive]')?.addEventListener('click', () => basculerArchive(c))
 
   // Les messages et les PROPOSITIONS ouvertes, fondus à leur place
   // chronologique (spec §3.3), avec Envoyer / Modifier / Rejeter (étape 3) —
@@ -677,6 +723,136 @@ async function rechargerTaches () {
   majBadge()
 }
 
+// ─── Test / Auto et tiroir reglages (etape 4) ────────────────────────────────
+// Le mode vit dans agent_alert_config.config[<ref>].mode ('test' par defaut),
+// ecrit par le writer EXISTANT /api/agent-config (domaine reglages) : GET du
+// blob entier, modification du seul mode de CE bien, POST du blob — puis
+// RELECTURE : l'interrupteur montre l'etat reel en base, jamais l'etat
+// suppose (demande de Thierry, 11 octobre 2026).
+function modesDe (config) {
+  const modes = {}
+  for (const [k, v] of Object.entries(config || {})) modes[k] = (v && v.mode === 'auto') ? 'auto' : 'test'
+  return modes
+}
+async function basculerMode (ref, nouveau) {
+  if (etat.modeEnCours || etat.modes === null) return
+  const actuel = etat.modes[ref] || 'test'
+  if (nouveau === actuel) return
+  // Passer en Auto est un geste LOURD : tout ce que l'IA sait part sans
+  // validation. Confirmation explicite ; le retour en Test n'en demande pas.
+  if (nouveau === 'auto' && !window.confirm(t('messages.mode_confirm_auto'))) return
+  etat.modeEnCours = true
+  renderMode(); renderTiroir()
+  let ecritureOk = false
+  try {
+    const lu = await appel('/api/agent-config')
+    const config = lu.config || {}
+    config[ref] = { ...(config[ref] || {}), mode: nouveau }
+    await appel('/api/agent-config', { config })
+    ecritureOk = true
+  } catch (err) {
+    logger.error('Messages', 'mode', err)
+  }
+  try {
+    const relu = await appel('/api/agent-config')
+    etat.modes = modesDe(relu.config)
+  } catch (err) { logger.error('Messages', 'mode relecture', err) }
+  etat.modeEnCours = false
+  if (!ecritureOk || (etat.modes && (etat.modes[ref] || 'test') !== nouveau)) {
+    const note = $('[data-bind="saisie-etat"]')
+    note.hidden = false
+    note.textContent = t('messages.mode_error')
+  }
+  renderMode(); renderTiroir()
+}
+// Le kill switch par bien : writer existant /api/property-automation, puis
+// relecture — meme discipline que le mode.
+async function basculerPause (ref, paused) {
+  if (etat.modeEnCours) return
+  etat.modeEnCours = true
+  renderTiroir()
+  try {
+    await appel('/api/property-automation', { provider_property_id: ref, paused })
+  } catch (err) { logger.error('Messages', 'pause', err) }
+  try {
+    const relu = await appel('/api/property-automation')
+    etat.pauses = relu.paused || {}
+  } catch (err) { logger.error('Messages', 'pause relecture', err) }
+  etat.modeEnCours = false
+  renderTiroir(); renderFil()
+}
+function renderMode () {
+  const zone = $('[data-bind="mode"]')
+  const possible = etat.modes !== null && peutEcrireReglages()
+  zone.hidden = !possible
+  if (!possible) return
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  const ref = c && c.propertyId ? String(c.propertyId) : null
+  const mode = ref ? (etat.modes[ref] || 'test') : null
+  for (const b of zone.querySelectorAll('[data-mode]')) {
+    b.disabled = !ref || etat.modeEnCours
+    b.setAttribute('aria-pressed', String(mode === b.dataset.mode))
+  }
+  // Sans conversation ouverte : grise, et l'infobulle dit pourquoi (spec §3.1).
+  zone.title = ref ? '' : t('messages.mode_pick')
+}
+function renderTiroir () {
+  const tiroir = $('[data-bind="tiroir"]')
+  if (tiroir.hidden) return
+  const ecrit = peutEcrireReglages()
+  const corps = $('[data-bind="tiroir-corps"]')
+  corps.innerHTML = [...etat.biens.entries()].map(([ref, b]) => {
+    const mode = etat.modes ? (etat.modes[ref] || 'test') : null
+    const enPause = etat.pauses[ref] === true
+    return `<div class="msg-tiroir__bien">
+      <span class="msg-tiroir__nom">${esc(b.name || ref)}</span>
+      <span class="row" style="gap: 10px; flex-wrap: wrap">
+        ${mode !== null && ecrit ? `<span class="msg-mode" role="group" aria-label="${esc(t('messages.mode_label'))}">
+          <button type="button" class="tab" data-tiroir-mode="${esc(ref)}|test" aria-pressed="${mode === 'test'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_test'))}</button>
+          <button type="button" class="tab" data-tiroir-mode="${esc(ref)}|auto" aria-pressed="${mode === 'auto'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_auto'))}</button>
+        </span>` : ''}
+        ${ecrit ? `<label class="row caption" style="gap: 6px">
+          <input type="checkbox" data-tiroir-pause="${esc(ref)}" ${enPause ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''}>
+          ${esc(t('messages.pause_label'))}
+        </label>` : enPause ? `<span class="caption muted">${esc(t('messages.pause_label'))}</span>` : ''}
+      </span>
+    </div>`
+  }).join('') || `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`
+  corps.querySelectorAll('[data-tiroir-mode]').forEach(x => x.addEventListener('click', () => {
+    const [ref, m] = x.dataset.tiroirMode.split('|')
+    basculerMode(ref, m)
+  }))
+  corps.querySelectorAll('[data-tiroir-pause]').forEach(x => x.addEventListener('change', () =>
+    basculerPause(x.dataset.tiroirPause, x.checked)))
+}
+function ouvrirTiroir (ouvert) {
+  const tiroir = $('[data-bind="tiroir"]')
+  tiroir.hidden = !ouvert
+  if (ouvert) renderTiroir()
+}
+
+// ─── Epingle et archivage manuel (etape 4, portes de l'ancienne page) ──────
+// L'etat affiche vient de la REPONSE du writer, pas de l'etat suppose.
+function noteErreur (err) {
+  const note = $('[data-bind="saisie-etat"]')
+  note.hidden = false
+  note.textContent = (err && err.message) || t('messages.load_error')
+}
+async function basculerEpingle (c) {
+  try {
+    const r = await appel('/api/messages', { action: c.epinglee ? 'desepingler' : 'epingler', booking_id: String(c.bookId) })
+    c.epinglee = r.epinglee === true
+  } catch (err) { logger.error('Messages', 'epingle', err); noteErreur(err) }
+  renderListe(); renderFil()
+}
+async function basculerArchive (c) {
+  try {
+    const r = await appel('/api/messages', { action: c.archivee ? 'desarchiver' : 'archiver', booking_id: String(c.bookId) })
+    c.archivee = r.archivee === true
+  } catch (err) { logger.error('Messages', 'archivage', err); noteErreur(err) }
+  renderFiltres(); renderListe(); renderFil()
+}
+
 // La zone de texte grandit jusqu'a 6 lignes (spec §3.4).
 function ajusterHauteur (zone) {
   zone.style.height = 'auto'
@@ -710,7 +886,7 @@ function ouvrir (bookId) {
     appel('/api/messages', { action: 'lu', booking_id: String(bookId) })
       .catch(e => logger.error('Messages', 'read_at', e))
   }
-  renderListe(); renderFil()
+  renderListe(); renderFil(); renderMode()
 }
 
 // ─── Démarrage ──────────────────────────────────────────────────────────────
@@ -742,13 +918,23 @@ async function init () {
   }
   await charger()
   HSNav.render({ badges: etat.chargementOk ? { pendingMessages: etat.taches.length } : {}, peutLire })
-  renderFiltres(); renderListe()
+  renderFiltres(); renderListe(); renderMode()
+
+  // Etape 4 : Test/Auto (bien du fil ouvert) et tiroir reglages.
+  document.querySelectorAll('[data-bind="mode"] [data-mode]').forEach(b => b.addEventListener('click', () => {
+    const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+    if (c && c.propertyId) basculerMode(String(c.propertyId), b.dataset.mode)
+  }))
+  const btnReglages = $('[data-bind="reglages-btn"]')
+  btnReglages.hidden = !peutLireReglages()
+  btnReglages.addEventListener('click', () => ouvrirTiroir($('[data-bind="tiroir"]').hidden))
+  $('[data-bind="tiroir-fermer"]').addEventListener('click', () => ouvrirTiroir(false))
 
   $('[data-bind="recherche"]').addEventListener('input', (e) => { etat.recherche = e.target.value; renderListe() })
   document.querySelectorAll('[data-filtre]').forEach(b => b.addEventListener('click', () => {
     etat.filtre = b.dataset.filtre; renderFiltres(); renderListe()
   }))
-  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
+  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil(); renderMode() })
   // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
   const zoneTexte = $('[data-bind="texte"]')
   zoneTexte.addEventListener('input', () => ajusterHauteur(zoneTexte))
@@ -758,9 +944,16 @@ async function init () {
   $('[data-bind="envoyer"]').addEventListener('click', envoyer)
   $('[data-bind="proposer"]').addEventListener('click', proposer)
 
-  // Ouverture directe `?conv=` (liens de l'accueil, plus tard) : seulement si
+  // Filtre demandé par l'URL (lien « n de plus » de l'accueil, étape 4).
+  const params = new URLSearchParams(location.search)
+  const filtreDemande = params.get('filtre')
+  if (filtreDemande === 'nonlus' || filtreDemande === 'avalider') {
+    etat.filtre = filtreDemande
+    renderFiltres(); renderListe()
+  }
+  // Ouverture directe `?conv=` (liens de l'accueil) : seulement si
   // le fil existe — jamais un écran « introuvable » depuis un lien interne.
-  const demandee = new URLSearchParams(location.search).get('conv')
+  const demandee = params.get('conv')
   if (demandee && etat.conversations.some(x => String(x.bookId) === String(demandee))) ouvrir(String(demandee))
 }
 

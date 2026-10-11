@@ -65,7 +65,7 @@
     <section class="stack only-desktop" style="gap: 12px" aria-labelledby="h-validate" data-bind="validate-section" hidden>
       <h2 class="h2" id="h-validate" data-i18n="validate.title"></h2>
       <div class="stack" style="gap: 12px" data-list="pending"></div>
-      <a class="link small" href="/apps/agent-ai/config" data-i18n="validate.settings"></a>
+      <a class="link small" href="/messages" data-i18n="validate.settings"></a>
     </section>
   </div>
 
@@ -230,7 +230,9 @@ function evenements () {
   })
 }
 function lienConversation (e) {
-  return `/apps/agent-ai/messagerie?conv=${encodeURIComponent(e.bookingId)}&bien=${encodeURIComponent(e.bienRef)}`
+  // La messagerie V5 (etape 4) : l'ancienne page est une redirection, on
+  // pointe directement /messages — qui ouvre le fil par ?conv= seul.
+  return `/messages?conv=${encodeURIComponent(e.bookingId)}`
 }
 function phraseMenage (m, heure) {
   const parts = [heure ? t('today.cleaning_after', { time: heure }) : t('today.cleaning_after_notime')]
@@ -332,7 +334,7 @@ function carteTache (tache, sombre) {
   const titre = tache.status === 'pending_validation' && tache.guest_name
     ? t('validate.reply_to', { name: tache.guest_name }) : t('validate.task')
   const texte = tache.status === 'pending_validation' && tache.suggested_reply ? tache.suggested_reply : (tache.summary || '')
-  const href = `/apps/agent-ai/messagerie?conv=${encodeURIComponent(tache.book_id || '')}&bien=${encodeURIComponent(tache.property_id || '')}`
+  const href = `/messages?conv=${encodeURIComponent(tache.book_id || '')}`
   return { titre, texte, href, sombre }
 }
 // Les tâches encore À TRAITER (règle du 11 octobre : séjours à venir ou en
@@ -363,7 +365,7 @@ function renderTaches () {
       <a class="btn btn--primary" style="height: 40px" href="${esc(c.href)}">${esc(t('validate.view'))}</a>
     </div>`
   }).join('') + (visibles.length > 3
-    ? `<a class="link small" href="/apps/agent-ai/messagerie">${esc(t('validate.more', { n: visibles.length - 3 }))}</a>` : '')
+    ? `<a class="link small" href="/messages?filtre=avalider">${esc(t('validate.more', { n: visibles.length - 3 }))}</a>` : '')
   const premiere = carteTache(visibles[0])
   mobile.hidden = false
   mobile.href = premiere.href

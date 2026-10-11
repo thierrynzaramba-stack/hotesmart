@@ -198,16 +198,31 @@ test('la ligne du simulateur, un fil inconnu ou un identifiant vide sont refusé
 })
 
 // ─── L'écran ─────────────────────────────────────────────────────────────────
-test('la messagerie : onglets, recherche, bouton, et l’épingle ne supprime plus la ligne', () => {
-  const page = fs.readFileSync(path.join(__dirname, '..', 'apps', 'agent-ai', 'messagerie.html'), 'utf8')
-  assert.match(page, /<div class="conv-vues" id="conv-vues" hidden>/)
-  assert.match(page, /id="conv-recherche"/)
-  assert.match(page, /const visibles = filtrerConversations\(conversations\)/)
-  assert.match(page, /archivageDispo = msgRes\.archivage === true/)
-  assert.match(page, /action: archiver \? 'archiver' : 'desarchiver'/)
-  // ⚠ Désépingler supprimait la ligne — et avec elle l'état d'archivage.
-  assert.doesNotMatch(page, /from\('conversation_flags'\)\.delete\(\)/)
-  assert.match(page, /from\('conversation_flags'\)\.update\(\{ pinned: false \}\)/)
+// L'ancienne page est une REDIRECTION depuis l'etape 4 du lot Messages V5 :
+// l'ecran qui porte epingle et archivage est pages/messages.html, par les
+// ACTIONS du serveur — plus aucune ecriture RLS directe.
+test('la messagerie V5 : epingle et archivage dans le menu du fil, par les actions gardees', () => {
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'messages.html'), 'utf8')
+  assert.match(page, /action: c\.epinglee \? 'desepingler' : 'epingler'/)
+  assert.match(page, /action: c\.archivee \? 'desarchiver' : 'archiver'/)
+  // ⚠ L'etat affiche vient de la REPONSE du writer, jamais de l'etat suppose.
+  assert.match(page, /c\.epinglee = r\.epinglee === true/)
+  assert.match(page, /c\.archivee = r\.archivee === true/)
+  // Une epinglee ne s'archive pas : l'entree du menu n'existe pas.
+  assert.match(page, /\$\{c\.epinglee \? '' : `<button type="button" data-fil-archive/)
+  // Et la page n'ecrit JAMAIS conversation_flags en direct.
+  assert.doesNotMatch(page, /from\('conversation_flags'\)/)
+})
+
+test('la messagerie V5 : desepingler est une mise a jour, jamais une suppression (lecon du lot 7)', () => {
+  const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'messages.js'), 'utf8')
+  const bloc = api.slice(api.indexOf('async function epinglerFil'), api.indexOf('async function archiverFil'))
+  assert.ok(bloc.length > 100, 'epinglerFil present')
+  assert.match(bloc, /\.update\(\{ pinned: epingler, property_id_ref/)
+  assert.doesNotMatch(bloc, /\.delete\(\)/)
+  // Memes verifications de perimetre qu'archiverFil : 404, jamais 403.
+  assert.match(bloc, /refsDuPerimetre/)
+  assert.match(bloc, /status\(404\)/)
 })
 
 test('la lecture des épingles est BORNÉE aux fils lus (pas de troncature à 1000 lignes)', () => {

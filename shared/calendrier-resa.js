@@ -101,11 +101,11 @@ export function sansMessagerieOta (resa) {
 export const TEXTE_SANS_EMAIL = 'Cette réservation directe n\'a pas d\'adresse : ni confirmation, ni consignes d\'arrivée, ni code d\'accès ne peuvent partir. Transmettez-les vous-même, ou saisissez l\'adresse à la création pour les prochaines.'
 export function badgeSansEmailVisible (resa) { return sansMessagerieOta(resa) && !resa.aEmail }
 
-// La messagerie s'ouvre sur `booking_id` ; `bien` evite qu'un filtre de bien
-// deja actif masque la conversation.
+// La messagerie V5 s'ouvre sur `?conv=` seul (etape 4 du lot Messages :
+// l'ancienne page est une redirection, et /messages n'a pas de filtre par
+// bien qui masquerait le fil).
 export function urlConversation (bien, resa) {
-  return '/apps/agent-ai/messagerie?conv=' + encodeURIComponent(resa.id)
-    + (bien.provider_property_id ? '&bien=' + encodeURIComponent(bien.provider_property_id) : '')
+  return '/messages?conv=' + encodeURIComponent(resa.id)
 }
 
 // Voyageurs plafonnes a la capacite (en PERSONNES), dit AVANT la validation.
