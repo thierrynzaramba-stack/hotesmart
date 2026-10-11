@@ -344,8 +344,23 @@ AirROI pour octobre : 25 $ par compte sur 30 jours et 25 $ par mois (dette
 - **Staging n'a aucun cron** (docs/STAGING.md §1) : en recette, le pilote se
   lance par `scripts/piloter-yieldflow.js` (à blanc, puis `--go`).
 
-**Refonte UI V5 — lot 2 « Messages » ÉTAPES 1 À 3 EN PROD (11 octobre 2026,
-18bb660)** : étape 3 = Envoyer / Modifier / Rejeter sur les propositions dans
+**Refonte UI V5 — lot 2 « Messages » ÉTAPES 1 À 4 + RECETTE 1 GUESTFLOW EN
+PROD (12 octobre 2026, 38ed719)** : étape 4 = Test/Auto (confirmation avant
+Auto, état RELU en base), épingle et archivage manuel portés (menu ⋯ du fil,
+actions gardées), ancienne MESSAGERIE en redirection (dette 43 soldée) —
+`config.html` RESTE EN SERVICE (URL seule) jusqu'à couverture 100 % de
+l'inventaire GuestFlow (spec lot-messages §12 bis). CHANGEMENT DE PÉRIMÈTRE
+(12 octobre) : tout GuestFlow vit dans Messages, en deux recettes. Recette 1
+LIVRÉE : tiroir par bien à deux volets portés par deux boutons d'en-tête
+(i-scheduled / i-ai) — « Réponses de l'IA » (mode, pause, consignes
+agent_prompting écrites insert-puis-delete, garde IA en état, Connaissances,
+Alertes en bas : 2 types × 2 canaux, porte Brevo, Tester depuis la base) et
+« Messages programmés » (renvoi provisoire). Liste épurée (plus d'extrait ni
+de date). `[hidden]{display:none !important}` en tête de ui.css (classe de
+défauts fermée). Dettes 66 (origine des envois), 67 (évaluation en
+proposition au départ), 68 (réglages IA non délégables, tiroir réservé au
+titulaire). RESTE : recette 2 = volet Messages programmés (inventaire
+§12 bis B), PUIS redirection de config.html et de l'app templates. étape 3 = Envoyer / Modifier / Rejeter sur les propositions dans
 le fil (Envoyer = chemin de l'ancienne page : posterMessage puis clôture
 statut+journal par POST /api/messages action=proposition ; statuts
 done/ignored, pas de 'rejected' ; statut RELU avant l'envoi — pas de double
