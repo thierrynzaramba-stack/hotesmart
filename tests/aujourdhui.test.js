@@ -185,24 +185,23 @@ test('minMaxMensuel : depuis le premier mois vendu, ouverts et entierement tarif
   assert.equal(R.minMaxMensuel([{ periode: '2025-11', ca: 0, nuitees: 0, jours_ouverts: 30, nuits_a_prix_connu: 0 }], '2025-10', '2026-09'), null)
 })
 
-test('tachesOuvertes : sejour non termine OU dernier message < 7 jours', async () => {
+test('tachesOuvertes : seulement les sejours A VENIR ou EN COURS (regle du 11 octobre)', async () => {
   const R = await charger()
-  const maintenant = Date.UTC(2026, 9, 10, 12)
   const taches = [
     { id: 'a', book_id: 'B1', property_id: '101', status: 'pending_validation' },  // sejour en cours
-    { id: 'b', book_id: 'B2', property_id: '102', status: 'pending' },             // sejour fini, message d'hier
-    { id: 'c', book_id: 'B3', property_id: '101', status: 'pending_validation' },  // sejour fini, message vieux de 8 j
+    { id: 'b', book_id: 'B2', property_id: '102', status: 'pending' },             // sejour fini, message recent : NE compte PLUS
+    { id: 'v', book_id: 'B5', property_id: '101', status: 'pending_validation' },  // sejour a venir
     { id: 'd', book_id: 'B4', property_id: '101', status: 'pending' }              // rien de connu : fermee
   ]
   const ouvertes = R.tachesOuvertes(taches, {
-    aujourdHui: '2026-10-10', maintenant,
-    bookings: [{ id: 'B1', propId: '101', departure: '2026-10-12' }],
-    derniersMessages: new Map([
-      ['B2', new Date(maintenant - 1 * 86400000).toISOString()],
-      ['B3', new Date(maintenant - 8 * 86400000).toISOString()]
-    ])
+    aujourdHui: '2026-10-10',
+    bookings: [
+      { id: 'B1', propId: '101', departure: '2026-10-12' },
+      { id: 'B5', propId: '101', departure: '2026-10-28' }
+    ]
   })
-  assert.deepEqual(ouvertes.map(x => x.id), ['a', 'b'])
+  assert.deepEqual(ouvertes.map(x => x.id), ['a', 'v'],
+    'un sejour termine ne produit plus de « message a traiter », meme recent')
 })
 
 test('noteSur5 : le coeur stocke sur 10, l\'ecran affiche sur 5', async () => {

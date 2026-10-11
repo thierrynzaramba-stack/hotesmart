@@ -101,27 +101,24 @@ export function evenementsDuJour ({ bookings = [], biens = [], menages = [], pre
   return out.sort((a, b) => rang(a).localeCompare(rang(b)) || a.bien.localeCompare(b.bien))
 }
 
-// ─── Les taches encore OUVERTES (regle de Thierry, 10 octobre 2026) ─────────
-// Une tache (`agent_tasks`, pending ou pending_validation) ne compte que si sa
-// conversation est encore ouverte : sejour non termine OU dernier message de
-// moins de 7 jours. Mesure du 10 octobre : 49 « a valider » dont 1 ouverte,
-// 100 « a traiter » dont 14 — le reste est du passe qu'on n'affiche plus.
-// `bookings` : la reponse de /api/menages (departs >= aujourd'hui).
-// `derniersMessages` : Map booking_id -> dernier `lastTime` (/api/messages).
-export function tachesOuvertes (taches = [], { bookings = [], derniersMessages = new Map(),
-  aujourdHui, maintenant = Date.now() } = {}) {
+// ─── Les taches encore A TRAITER (regle de Thierry, 11 octobre 2026) ────────
+// Une tache (`agent_tasks`) ne compte que si son sejour est A VENIR ou EN
+// COURS. La regle du 10 octobre gardait aussi « dernier message < 7 jours » ;
+// Thierry l'a resserree le 11 : un sejour termine ne produit plus de
+// « message a traiter », meme si l'echange est recent (la conversation,
+// elle, reste lisible dans la messagerie).
+// `bookings` : sejours ACTIFS (departs >= aujourd'hui, annulations exclues).
+// `derniersMessages` reste accepte pour compatibilite mais n'est plus lu.
+export function tachesOuvertes (taches = [], { bookings = [],
+  aujourdHui } = {}) {
   const enCours = new Set(), enCoursSansBien = new Set()
   for (const b of bookings) {
     if (!b.departure || b.departure < aujourdHui) continue
     enCours.add(`${b.propId}|${b.id}`)
     enCoursSansBien.add(String(b.id))
   }
-  const seuil = maintenant - 7 * 86400000
-  return taches.filter(t => {
-    if (enCours.has(`${t.property_id}|${t.book_id}`) || enCoursSansBien.has(String(t.book_id))) return true
-    const dernier = derniersMessages.get(String(t.book_id))
-    return dernier != null && new Date(dernier).getTime() >= seuil
-  })
+  return taches.filter(t =>
+    enCours.has(`${t.property_id}|${t.book_id}`) || enCoursSansBien.has(String(t.book_id)))
 }
 
 // ─── La note affichee : UNE echelle, sur 5 ──────────────────────────────────

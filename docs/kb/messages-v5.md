@@ -15,7 +15,7 @@ ni envoi, ni validation (étapes 2 et 3 de la spec §11).
 |---|---|---|
 | Conversations et fils | `GET /api/messages` (un appel) | 50 affichées puis « Afficher plus » **côté client** ; archivées masquées (drapeau `archivee` du serveur), « Afficher les anciennes » |
 | Noms des biens, lien résa | `properties` sous RLS | jamais `/api/channel-property` (Beds24 en direct) |
-| Propositions | `agent_tasks` `pending_validation` sous RLS, **filtrées « conversation ouverte »** par `tachesOuvertes` (règle du lot 1, module partagé) | affichées en bulle pointillée SANS boutons ; badge nav = leur compte |
+| Propositions | `agent_tasks` `pending_validation` sous RLS, **filtrées « séjour à venir ou en cours »** par `tachesOuvertes` (module partagé ; règle resserrée par Thierry le 11 octobre : plus de clause « dernier message < 7 jours ») | affichées en bulle pointillée SANS boutons ; badge nav = leur compte |
 | État du code (en-tête du fil) | `arrivee.codeEtat` de la même réponse | présent pour les arrivées du jour et de demain seulement |
 
 ### Règles d'écran
