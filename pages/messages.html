@@ -75,6 +75,16 @@
       <svg class="icon" style="width:36px;height:36px" aria-hidden="true"><use href="/shared/icons.svg#i-message"/></svg>
       <span data-i18n="messages.select"></span>
     </div>
+    <div class="msg-saisie" data-bind="saisie" hidden>
+      <textarea rows="1" data-bind="texte" data-i18n-attr="placeholder:messages.write;aria-label:messages.write"></textarea>
+      <button type="button" class="btn btn--secondary btn--icon" data-bind="proposer" data-i18n-attr="aria-label:messages.propose;title:messages.propose">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
+      </button>
+      <button type="button" class="btn btn--primary btn--icon" data-bind="envoyer" data-i18n-attr="aria-label:messages.send;title:messages.send">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-send"/></svg>
+      </button>
+    </div>
+    <p class="caption muted" style="margin: 0; padding: 0 20px 10px" data-bind="saisie-etat" hidden></p>
   </section>
 </main>
 
@@ -88,7 +98,7 @@ import { supabase, getUser, signOut } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
-import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte }
+import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
   from '/shared/compte-courant.js'
 // La règle « conversation ouverte » est CELLE DU LOT 1 (shared, testée) :
 // séjour non terminé OU dernier message < 7 jours. Jamais recopiée.
@@ -107,25 +117,39 @@ const etat = {
   conversations: [], chargementOk: null,
   taches: [],              // pending_validation OUVERTES, par la règle du lot 1
   biens: new Map(),        // provider_property_id -> { uuid, name }
-  filtre: 'tous', recherche: '', anciennes: false, limite: PAGE,
+  filtre: 'tous', recherche: '', anciennes: false,
+  hasMore: false, nextBefore: null,   // pagination SERVEUR (etape 2)
+  pauses: {},                          // provider_property_id -> kill switch
+  envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   ouverte: null            // bookId de la conversation ouverte
 }
+const peutEcrireMessages = () => { try { return peutEcrire('messages') } catch { return false } }
 
-async function appel (chemin) {
+async function appel (chemin, corpsPost) {
   const { data: { session } } = await supabase.auth.getSession()
+  if (!session || !session.access_token) { const e = new Error(t('messages.load_error')); e.status = 401; throw e }
   const r = await fetch(chemin, {
-    headers: { Authorization: 'Bearer ' + session.access_token, ...enteteCompte() }
+    method: corpsPost ? 'POST' : 'GET',
+    headers: { Authorization: 'Bearer ' + session.access_token, ...(corpsPost ? { 'Content-Type': 'application/json' } : {}), ...enteteCompte() },
+    ...(corpsPost ? { body: JSON.stringify(corpsPost) } : {})
   })
   const corps = await r.json().catch(() => ({}))
-  if (!r.ok) { const e = new Error(corps.error || `HTTP ${r.status}`); e.status = r.status; throw e }
+  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.error; throw e }
   return corps
 }
 
 // ─── Lectures ────────────────────────────────────────────────────────────────
 async function charger () {
   const lectures = [
-    appel('/api/messages').then(r => { etat.conversations = r.conversations || []; etat.chargementOk = true })
+    appel(`/api/messages?limit=${PAGE}`).then(r => {
+      etat.conversations = r.conversations || []
+      etat.hasMore = r.has_more === true
+      etat.nextBefore = r.next_before || null
+      etat.chargementOk = true
+    })
       .catch(e => { logger.error('Messages', 'conversations', e); etat.chargementOk = false }),
+    appel('/api/property-automation').then(r => { etat.pauses = r.paused || {} })
+      .catch(() => { etat.pauses = {} }),
     // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
     // sous RLS, jamais /api/channel-property (il interroge Beds24 en direct).
     supabase.from('properties').select('id, name, provider_property_id, photo_url').eq('user_id', compteCourant())
@@ -170,9 +194,17 @@ function indexerTaches () {
   }
 }
 const tachesDe = (c) => tachesParResa.get(String(c.bookId)) || []
+// Non lu = dernier message ENTRANT posterieur a la derniere LECTURE — et
+// repondre vaut lecture : la reference est le plus recent de read_at (pose a
+// l'ouverture du fil, etape 2) et du dernier message sortant. Sans l'un ni
+// l'autre, un entrant est non lu.
 const nonLue = (c) => {
-  const dernier = c.messages[c.messages.length - 1]
-  return !!dernier && dernier.direction === 'inbound'
+  const dernierEntrant = [...c.messages].reverse().find(m => m.direction === 'inbound')
+  if (!dernierEntrant) return false
+  const dernierSortant = [...c.messages].reverse().find(m => m.direction === 'outbound')
+  const refs = [c.readAt, dernierSortant && dernierSortant.sent_at].filter(Boolean).map(x => new Date(x).getTime())
+  if (!refs.length) return true
+  return new Date(dernierEntrant.sent_at).getTime() > Math.max(...refs)
 }
 const enCours = (c) => c.lastNight && String(c.lastNight).slice(0, 10) >= etat.aujourdHui
   && String(c.status || '').toLowerCase() !== 'cancelled'
@@ -254,13 +286,13 @@ function renderListe () {
   const zone = $('[data-list="conversations"]')
   if (etat.chargementOk === false) { zone.innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.load_error'))}</p>`; return }
   const liste = visibles()
-  if (!liste.length) { zone.innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.empty'))}</p>`; return }
+  if (!liste.length && !etat.hasMore) { zone.innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.empty'))}</p>`; return }
   const masqueesAnciennes = !etat.anciennes && etat.conversations.some(c => c.archivee)
   // Étiquettes de groupe et séparation visuelle (demande de Thierry) : les
   // arrivées du jour, puis celles de demain, puis le reste derrière une
   // coupure nette.
   let groupePrecedent = null
-  zone.innerHTML = liste.slice(0, etat.limite).map(c => {
+  zone.innerHTML = liste.map(c => {
     const dernier = c.messages[c.messages.length - 1]
     const bien = etat.biens.get(String(c.propertyId))
     const proposition = tachesDe(c).length > 0
@@ -288,15 +320,28 @@ function renderListe () {
       ${nonLue(c) ? `<span class="conv__nonlu" role="img" data-i18n-attr="aria-label:messages.unread"></span>` : ''}
     </div>`
   }).join('')
-    + (liste.length > etat.limite ? `<button type="button" class="btn btn--secondary btn--block" style="margin: 10px auto; width: calc(100% - 28px)" data-plus>${esc(t('messages.show_more', { n: liste.length - etat.limite }))}</button>` : '')
+    + (etat.hasMore ? `<button type="button" class="btn btn--secondary btn--block" style="margin: 10px auto; width: calc(100% - 28px)" data-plus>${esc(t('messages.show_more_srv'))}</button>` : '')
     + (masqueesAnciennes ? `<button type="button" class="link small" style="display: block; margin: 8px auto 16px; background: none; border: 0" data-anciennes>${esc(t('messages.show_old'))}</button>` : '')
   I18n.apply(zone)
   zone.querySelectorAll('[data-conv]').forEach(b => {
     b.addEventListener('click', (e) => { if (!e.target.closest('[data-tel]')) ouvrir(b.dataset.conv) })
     b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ouvrir(b.dataset.conv) } })
   })
-  zone.querySelector('[data-plus]')?.addEventListener('click', () => { etat.limite += PAGE; renderListe() })
+  zone.querySelector('[data-plus]')?.addEventListener('click', chargerPageSuivante)
   zone.querySelector('[data-anciennes]')?.addEventListener('click', () => { etat.anciennes = true; renderFiltres(); renderListe() })
+}
+
+// Page suivante : le curseur du SERVEUR (etape 2), plus un decoupage client.
+async function chargerPageSuivante () {
+  if (!etat.nextBefore) { etat.hasMore = false; renderListe(); return }
+  try {
+    const r = await appel(`/api/messages?limit=${PAGE}&before=${encodeURIComponent(etat.nextBefore)}`)
+    const connus = new Set(etat.conversations.map(c => String(c.bookId)))
+    for (const c of r.conversations || []) if (!connus.has(String(c.bookId))) etat.conversations.push(c)
+    etat.hasMore = r.has_more === true
+    etat.nextBefore = r.next_before || null
+    renderFiltres(); renderListe()
+  } catch (e) { logger.error('Messages', 'page suivante', e) }
 }
 
 // Pastilles d'arrivée (liste) : POSITIVES seulement, l'absence se lit « pas
@@ -385,7 +430,119 @@ function renderFil () {
     }
     return morceaux.join('')
   }).join('')
+    // Les envois en cours ou ECHOUES, toujours en bas du fil : le texte ne se
+    // perd jamais (spec §3.4), « Réessayer » rejoue le même envoi.
+    + (etat.envois.get(String(c.bookId)) || []).map((e, i) => `
+      <div class="bulle bulle--hote${e.etatEnvoi === 'echec' ? ' bulle--echec' : ''}">${esc(e.texte)}</div>
+      <span class="bulle-meta">${e.etatEnvoi === 'echec'
+        ? `<span class="msg-echec">${esc(t('messages.not_sent'))}</span> · <button type="button" class="link caption msg-reessayer" data-reessayer="${i}">${esc(t('messages.retry'))}</button>`
+        : esc(t('messages.sending'))}</span>`).join('')
+  deroule.querySelectorAll('[data-reessayer]').forEach(b =>
+    b.addEventListener('click', () => reessayer(c, Number(b.dataset.reessayer))))
   deroule.scrollTop = deroule.scrollHeight
+
+  // La saisie (etape 2) : retiree sans droit d'ecriture, jamais grisee.
+  const saisie = $('[data-bind="saisie"]')
+  saisie.hidden = !peutEcrireMessages()
+  const enPause = etat.pauses[String(c.propertyId)] === true
+  const btnIA = $('[data-bind="proposer"]')
+  btnIA.disabled = enPause
+  btnIA.title = enPause ? t('messages.paused') : t('messages.propose')
+}
+
+// ─── Envoi manuel (etape 2) ──────────────────────────────────────────────────
+// UN SEUL ENDROIT qui choisit l'endpoint, la regle de l'ancienne page : un
+// bien Channex (reference UUID) passe par /api/channel-message — qui route
+// cote serveur par la SOURCE (fil OTA, ou e-mail pour une resa Offline) — et
+// un bien Beds24 (reference numerique) par /api/beds24. JAMAIS un provider
+// depuis la page.
+async function posterMessage (c, texte) {
+  const isChannex = String(c.propertyId || '').includes('-')
+  const endpoint = isChannex ? '/api/channel-message' : '/api/beds24'
+  const payload = isChannex
+    ? { bookingId: c.bookId, message: texte, propertyId: c.propertyId || null }
+    : { action: 'sendMessage', bookingId: c.bookId, message: texte, propertyId: c.propertyId || null }
+  return appel(endpoint, payload)
+}
+function envoisDe (bookId) {
+  const k = String(bookId)
+  if (!etat.envois.has(k)) etat.envois.set(k, [])
+  return etat.envois.get(k)
+}
+async function lancerEnvoi (c, entree) {
+  entree.etatEnvoi = 'en_cours'
+  renderFil()
+  try {
+    await posterMessage(c, entree.texte)
+    // Parti : la bulle definitive viendra du coeur (double ecriture messages).
+    const liste = envoisDe(c.bookId)
+    liste.splice(liste.indexOf(entree), 1)
+    c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message' })
+    c.lastTime = new Date().toISOString()
+    renderFil(); renderListe()
+  } catch (err) {
+    logger.error('Messages', 'envoi', err)
+    entree.etatEnvoi = 'echec'
+    renderFil()
+  }
+}
+async function envoyer () {
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  const zone = $('[data-bind="texte"]')
+  const texte = zone.value.trim()
+  if (!c || !texte) return
+  zone.value = ''
+  ajusterHauteur(zone)
+  const entree = { texte, etatEnvoi: 'en_cours' }
+  envoisDe(c.bookId).push(entree)
+  lancerEnvoi(c, entree)
+}
+function reessayer (c, index) {
+  const entree = (etat.envois.get(String(c.bookId)) || [])[index]
+  if (entree) lancerEnvoi(c, entree)
+}
+
+// ─── « Proposer une reponse » (etape 2) ──────────────────────────────────────
+async function proposer () {
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  if (!c) return
+  const btn = $('[data-bind="proposer"]'), note = $('[data-bind="saisie-etat"]')
+  btn.disabled = true
+  note.hidden = false
+  note.textContent = t('messages.proposing')
+  try {
+    const r = await appel('/api/guestflow-proposer', { bookingId: c.bookId, propertyId: null })
+    if (r.proposition) {
+      note.hidden = true
+      await rechargerTaches()
+      renderFiltres(); renderListe(); renderFil()
+    } else {
+      note.textContent = r.message || t('messages.no_proposal')
+    }
+  } catch (err) {
+    note.textContent = err.message || t('messages.no_proposal')
+  } finally {
+    btn.disabled = etat.pauses[String(c.propertyId)] === true
+  }
+}
+async function rechargerTaches () {
+  const { data, error } = await supabase.from('agent_tasks')
+    .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
+    .in('status', ['pending_validation']).eq('user_id', compteCourant())
+    .order('created_at', { ascending: false }).limit(200)
+  if (error) return
+  const sejours = etat.conversations
+    .filter(c => c.lastNight && !SANS_ARRIVEE.has(String(c.status || '').toLowerCase()))
+    .map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
+  etat.taches = tachesOuvertes(data || [], { bookings: sejours, aujourdHui: etat.aujourdHui })
+  indexerTaches()
+  HSNav.render({ badges: { pendingMessages: etat.taches.length }, peutLire })
+}
+
+// La zone de texte grandit jusqu'a 6 lignes (spec §3.4).
+function ajusterHauteur (zone) {
+  zone.style.height = 'auto'
+  zone.style.height = Math.min(zone.scrollHeight, 6 * 24 + 16) + 'px'
 }
 function dateLongue (jour) {
   const [a, m, d] = jour.split('-').map(Number)
@@ -393,6 +550,14 @@ function dateLongue (jour) {
 }
 function ouvrir (bookId) {
   etat.ouverte = bookId
+  const c = etat.conversations.find(x => String(x.bookId) === String(bookId))
+  // L'ouverture POSE l'etat lu (etape 2) — optimiste a l'ecran, silencieux en
+  // cas de refus (un profil en lecture seule n'ecrit pas, l'heuristique reste).
+  if (c && nonLue(c) && peutEcrireMessages()) {
+    c.readAt = new Date().toISOString()
+    appel('/api/messages', { action: 'lu', booking_id: String(bookId) })
+      .catch(e => logger.error('Messages', 'read_at', e))
+  }
   renderListe(); renderFil()
 }
 
@@ -432,6 +597,14 @@ async function init () {
     etat.filtre = b.dataset.filtre; etat.limite = PAGE; renderFiltres(); renderListe()
   }))
   $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
+  // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
+  const zoneTexte = $('[data-bind="texte"]')
+  zoneTexte.addEventListener('input', () => ajusterHauteur(zoneTexte))
+  zoneTexte.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); envoyer() }
+  })
+  $('[data-bind="envoyer"]').addEventListener('click', envoyer)
+  $('[data-bind="proposer"]').addEventListener('click', proposer)
 
   // Ouverture directe `?conv=` (liens de l'accueil, plus tard) : seulement si
   // le fil existe — jamais un écran « introuvable » depuis un lien interne.

@@ -47,16 +47,60 @@ test('messages : le point « non lu » et le robot d\'attente sont INFO, jamais 
 })
 
 // ─── Etape 1 : LECTURE SEULE ─────────────────────────────────────────────────
-test('messages : aucune saisie ni action d\'envoi (etapes 2-3)', () => {
+test('messages etape 2 : l\'envoi manuel route par la source, jamais un provider', () => {
   const src = sansCommentaires(html())
-  assert.ok(!/<textarea/.test(src), 'pas de zone de saisie a l\'etape 1')
-  // `i-send` existe ailleurs (menu Outils, ligne SMS) : on interdit un BOUTON
-  // d'envoi dans le fil, pas l'icone dans le menu.
-  assert.ok(!/<button[^>]*i-send|data-envoyer/.test(src), 'pas de bouton envoyer dans le fil')
-  for (const k of ['validate.send', 'validate.edit', 'messages.send', 'messages.reject']) {
-    assert.ok(!src.includes(`'${k}'`), `action ${k} hors etape 1`)
-  }
-  assert.ok(!/method:\s*'POST'/.test(src), 'la page n\'ecrit RIEN')
+  assert.ok(src.includes("'/api/channel-message'") && src.includes("'/api/beds24'"),
+    'les DEUX chemins de l\'ancienne page, choisis par la forme de la reference')
+  assert.ok(src.includes("String(c.propertyId || '').includes('-')"), 'UUID = Channex, numerique = Beds24')
+  assert.ok(!/channex\.io|beds24\.com/i.test(src), 'aucun appel provider direct (les endpoints internes sont le chemin normal)')
+})
+
+test('messages etape 2 : un echec d\'envoi garde le texte et propose Reessayer', () => {
+  const src = sansCommentaires(html())
+  assert.ok(src.includes("entree.etatEnvoi = 'echec'"), 'l\'entree reste dans etat.envois')
+  assert.ok(src.includes('messages.not_sent') && src.includes('messages.retry'))
+  assert.ok(src.includes('data-reessayer'), 'Reessayer rejoue le MEME envoi')
+  assert.ok(!src.includes('envois.delete'), 'le texte n\'est jamais jete sur echec')
+  const css = lire('shared/ui.css')
+  assert.ok(/\.bulle--echec[^}]*var\(--danger\)/.test(css))
+})
+
+test('messages etape 2 : la saisie est RETIREE sans droit d\'ecriture', () => {
+  const src = sansCommentaires(html())
+  assert.ok(src.includes('saisie.hidden = !peutEcrireMessages()'))
+  assert.ok(src.includes("peutEcrire('messages')"), 'le droit vient de compte-courant')
+})
+
+test('messages etape 2 : read_at pose a l\'ouverture, et repondre vaut lecture', () => {
+  const src = sansCommentaires(html())
+  assert.ok(src.includes("{ action: 'lu', booking_id: String(bookId) }"), 'l\'ouverture poste action=lu')
+  assert.ok(src.includes('nonLue(c) && peutEcrireMessages()'), 'un profil en lecture seule n\'ecrit pas')
+  assert.ok(src.includes('dernierSortant'), 'repondre vaut lecture (reference = max(read_at, dernier sortant))')
+  const api = sansCommentaires(lire('api/messages.js'))
+  assert.ok(api.includes("req.body.action === 'lu'") && api.includes('marquerLu'))
+  assert.ok(api.includes('pinned: false'), 'une ligne creee par le marquage n\'epingle pas (la colonne nait true)')
+  assert.ok(/domaine: 'messages', niveau: 'write', compteDelegue: true \}\)\n  if \(!garde\.ok\) return\n  const userId = garde\.accountUserId\n  const bookingId/.test(api.replace(/\r/g, '')), 'marquerLu est garde en ecriture')
+})
+
+test('messages etape 2 : pagination SERVEUR, arrivees toujours en premiere page', () => {
+  const api = sansCommentaires(lire('api/messages.js'))
+  assert.ok(api.includes("Number.parseInt(req.query.limit, 10)"))
+  assert.ok(api.includes('req.query.before'))
+  assert.ok(api.includes('has_more') && api.includes('next_before'))
+  assert.ok(/if \(!before\) \{\s*for \(const c of conversations\) if \(arrivee\(c\)/.test(api), 'les arrivees j/j+1 ne peuvent pas attendre la page 2')
+  const src = sansCommentaires(html())
+  assert.ok(src.includes('chargerPageSuivante') && src.includes('next_before'), 'la page consomme le curseur')
+})
+
+test('guestflow-proposer : reutilise le cron, cle sur la REFERENCE provider, ne court-circuite pas les alertes', () => {
+  const api = sansCommentaires(lire('api/guestflow-proposer.js'))
+  assert.ok(/require\('\.\.\/lib\/cron-classify'\)/.test(api), 'generation = celle du cron, rien de duplique')
+  assert.ok(api.includes('peutAppeler') && api.includes('noterAppel'), 'la garde de cout du cron s\'applique')
+  assert.ok(api.includes('const refBien = String(bien.provider_property_id)'), 'agent_tasks/knowledge/garde cles sur la reference TEXT, jamais l\'UUID')
+  assert.ok(api.includes('property_id: refBien'))
+  assert.ok(/if \(!classification\.auto_reply\)[\s\S]{0,400}proposition: false/.test(api), 'intervention : RIEN depose, le cron alertera (sinon sa garde se tairait)')
+  assert.ok(/domaine: 'messages', niveau: 'write'/.test(api))
+  assert.ok(api.includes("status: 'pending_validation'"))
 })
 
 test('messages : une proposition d\'une conversation FERMEE n\'apparait pas (regle du lot 1, partagee)', () => {
@@ -69,7 +113,10 @@ test('messages : une proposition d\'une conversation FERMEE n\'apparait pas (reg
 
 test('messages : aucun appel provider, X-Compte partout', () => {
   const src = sansCommentaires(html())
-  for (const interdit of ['/api/beds24', '/api/channel-property', '/api/channel-mapping', 'beds24.com', 'channex']) {
+  // `/api/beds24` et `/api/channel-message` sont NOS endpoints (l'envoi route
+  // par la source cote serveur) : seuls les domaines provider et les endpoints
+  // qui interrogent un provider en LECTURE sont interdits ici.
+  for (const interdit of ['/api/channel-property', '/api/channel-mapping', 'beds24.com', 'channex.io']) {
     assert.ok(!src.toLowerCase().includes(interdit.toLowerCase()), `appel interdit : ${interdit}`)
   }
   for (const m of src.matchAll(/fetch\(/g)) {

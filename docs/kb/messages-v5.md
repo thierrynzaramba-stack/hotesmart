@@ -37,11 +37,31 @@ ni envoi, ni validation (étapes 2 et 3 de la spec §11).
   positives ménage fait / code transmis dans la liste, et dans l'en-tête du fil le
   ménage + le **téléphone en lien d'appel** (borné à ces arrivées).
 
+## Étape 2 — envoi, proposition, pagination, état lu (11 octobre 2026)
+
+- **Envoi manuel** : zone de saisie (Ctrl/⌘+Entrée envoie) ; la page choisit
+  `/api/channel-message` (référence UUID) ou `/api/beds24` (numérique), comme
+  l'ancienne page — le serveur route par la SOURCE (fil OTA, e-mail Offline).
+  **Échec** : la bulle reste, liseré `--danger`, « Non envoyé · Réessayer »
+  rejoue le même envoi ; le texte n'est jamais perdu.
+- **« Proposer une réponse »** : `api/guestflow-proposer.js` — génération du
+  cron (`preparerLot` + `classifierLot`), garde de coût du cron
+  (`peutAppeler`/`noterAppel`), clés sur la RÉFÉRENCE provider. Refus parlants :
+  rien en attente, déjà proposé, bien en pause, garde IA. Une classification
+  « intervention » ne dépose RIEN (sinon la garde du cron tairait l'alerte SMS).
+- **Pagination serveur** : `GET /api/messages?limit&before` (tronque après
+  assemblage et tri ; `has_more`/`next_before`) ; sans `limit`, réponse
+  complète (l'ancienne page ne change pas). Les arrivées j/j+1 sont toujours
+  dans la première page. La recherche ne fouille que le chargé.
+- **État lu** : `conversation_flags.read_at` (migration
+  `2026-10-11-conversation-read-at`, writer unique : `POST /api/messages
+  action=lu`, posé à l'ouverture d'un fil, ligne créée avec `pinned=false`).
+  Non lu = dernier ENTRANT postérieur à max(read_at, dernier sortant) —
+  répondre vaut lecture. Un profil en lecture seule ne marque pas (silencieux).
+- Saisie, bouton IA et Réessayer RETIRÉS sans `peutEcrire('messages')`.
+
 ### Prévu aux étapes suivantes (décisions de Thierry du 11 octobre 2026, pas des dettes)
 
-- **Étape 2** : envoi manuel + « Proposer une réponse » ; **pagination serveur**
-  (`limit`/`before` sur `/api/messages`) ; **état lu réel** (colonne `read_at`,
-  posée à l'ouverture d'un fil).
 - **Étape 3** : Envoyer / Modifier / Rejeter sur les propositions, dans le fil.
 - **Étape 4** : Test/Auto + tiroir réglages, redirection de l'ancienne page,
   retrait du lien « Outils ». D'ici là : l'ancienne messagerie n'apparaît **dans

@@ -124,5 +124,15 @@
   "messages.arrives_tomorrow": "Arrives tomorrow",
   "messages.cleaning_done": "cleaning done",
   "messages.call": "Call",
+  "messages.write": "Write…",
+  "messages.send": "Send",
+  "messages.sending": "Sending…",
+  "messages.not_sent": "Not sent",
+  "messages.retry": "Retry",
+  "messages.propose": "Suggest a reply",
+  "messages.proposing": "The assistant is writing…",
+  "messages.no_proposal": "No reply suggested",
+  "messages.paused": "Automation paused on this listing",
+  "messages.show_more_srv": "Show older conversations",
   "common.loading": "Loading…"
 }

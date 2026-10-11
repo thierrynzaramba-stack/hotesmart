@@ -122,11 +122,19 @@ async function appliquerArchivage(userId, conversations, depuis) {
   const flags = []
   let error = null
   for (let i = 0; i < ids.length && !error; i += 100) {
-    const r = await supabase
+    let r = await supabase
       .from('conversation_flags')
-      .select('book_id, pinned, archived_manual, archive_after, unarchived_manual_at')
+      .select('book_id, pinned, archived_manual, archive_after, unarchived_manual_at, read_at')
       .eq('user_id', userId)
       .in('book_id', ids.slice(i, i + 100))
+    // Repli : migration read_at pas encore appliquee sur cette base.
+    if (r.error && /read_at/.test(r.error.message || '')) {
+      r = await supabase
+        .from('conversation_flags')
+        .select('book_id, pinned, archived_manual, archive_after, unarchived_manual_at')
+        .eq('user_id', userId)
+        .in('book_id', ids.slice(i, i + 100))
+    }
     if (r.error) error = r.error
     else flags.push(...(r.data || []))
   }
@@ -167,8 +175,48 @@ async function appliquerArchivage(userId, conversations, depuis) {
     })
     c.archivee = e.archivee
     c.raisonArchivage = e.raison
+    // L'etat lu (etape 2) : expose tel quel, null = jamais ouvert.
+    c.readAt = f.read_at || null
   }
   return true
+}
+
+// ─── L'etat LU (lot 2 etape 2) ───────────────────────────────────────────────
+// SEUL WRITER de conversation_flags.read_at : l'ouverture d'un fil par l'hote.
+// Memes verifications de perimetre que l'archivage ; la ligne est creee avec
+// pinned=false explicite (la colonne nait true par defaut, voir archiverFil).
+async function marquerLu(req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const bookingId = String(req.body.booking_id || '').trim()
+  if (!bookingId || bookingId.length > 200) return res.status(400).json({ error: 'Conversation invalide' })
+  const [m, sn] = await Promise.all([
+    supabase.from('messages').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+    supabase.from('bookings_snapshot').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+  ])
+  if (m.error || sn.error) return res.status(503).json({ error: 'Lecture impossible' })
+  const bien = (m.data && m.data[0] && m.data[0].property_id) || (sn.data && sn.data[0] && sn.data[0].property_id) || null
+  if (bien == null) return res.status(404).json({ error: 'Conversation introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(bien))) {
+    return res.status(404).json({ error: 'Conversation introuvable' })
+  }
+  const maintenant = new Date().toISOString()
+  const { data: flag, error: eF } = await supabase.from('conversation_flags')
+    .select('id').eq('user_id', userId).eq('book_id', bookingId).maybeSingle()
+  if (eF) return res.status(503).json({ error: 'Lecture impossible' })
+  const ecriture = flag
+    ? supabase.from('conversation_flags').update({ read_at: maintenant }).eq('id', flag.id)
+    : supabase.from('conversation_flags').insert({ user_id: userId, book_id: bookingId, read_at: maintenant, pinned: false })
+  const { error: eW } = await ecriture
+  if (eW) {
+    // Migration read_at pas encore appliquee : on le dit, sans casser l'ecran.
+    console.error('[messages] read_at non ecrit :', eW.message)
+    return res.status(503).json({ error: 'Marquage impossible' })
+  }
+  return res.status(200).json({ ok: true, read_at: maintenant })
 }
 
 async function archiverFil(req, res) {
@@ -228,6 +276,10 @@ module.exports = async function handler(req, res) {
   // L'archivage manuel est une ECRITURE : sa propre garde, avant la lecture.
   if (req.method === 'POST' && req.body && (req.body.action === 'archiver' || req.body.action === 'desarchiver')) {
     return await archiverFil(req, res)
+  }
+  // Etape 2 de la messagerie V5 : l'ouverture d'un fil pose read_at.
+  if (req.method === 'POST' && req.body && req.body.action === 'lu') {
+    return await marquerLu(req, res)
   }
 
   // ── Droits ──
@@ -420,6 +472,32 @@ module.exports = async function handler(req, res) {
     // Un echec ici ne prive personne de sa messagerie : les marques manquent, c'est tout.
     try { await etatsDArrivee(userId, conversations, snapByBooking) }
     catch (e) { console.error('[messages] etats d\'arrivee echec', e.message) }
+
+    // ─── Pagination (lot 2 etape 2) ─────────────────────────────────────────
+    // `limit` tronque la reponse APRES le tri par dernier message ; `before`
+    // (un lastTime) demande la page suivante. Sans `limit`, la reponse reste
+    // complete : l'ancienne messagerie et les autres lecteurs ne changent pas.
+    // Les ARRIVEES du jour et de demain sont toujours servies dans la premiere
+    // page (sans `before`) : l'ecran les met en tete, elles ne peuvent pas
+    // attendre la page 2.
+    const limite = Number.parseInt(req.query.limit, 10)
+    if (Number.isInteger(limite) && limite > 0) {
+      const before = typeof req.query.before === 'string' && req.query.before ? req.query.before : null
+      const aujourdHui = jourParis(0), demain = jourParis(1)
+      const arrivee = c => {
+        const arr = String(c.firstNight || '').slice(0, 10)
+        const st = String(c.status || '').toLowerCase()
+        return (arr === aujourdHui || arr === demain) && !STATUTS_SANS_ARRIVEE.has(st)
+      }
+      let fenetre = before ? conversations.filter(c => (c.lastTime || '') < before) : conversations
+      const page = fenetre.slice(0, limite)
+      if (!before) {
+        for (const c of conversations) if (arrivee(c) && !page.includes(c)) page.push(c)
+      }
+      const hasMore = fenetre.length > limite
+      const nextBefore = hasMore ? (fenetre[limite - 1].lastTime || null) : null
+      return res.status(200).json({ conversations: page, archivage, has_more: hasMore, next_before: nextBefore })
+    }
 
     return res.status(200).json({ conversations, archivage })
 

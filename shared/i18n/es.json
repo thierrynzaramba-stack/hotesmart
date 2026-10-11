@@ -124,5 +124,15 @@
   "messages.arrives_tomorrow": "Llega mañana",
   "messages.cleaning_done": "limpieza hecha",
   "messages.call": "Llamar",
+  "messages.write": "Escribir…",
+  "messages.send": "Enviar",
+  "messages.sending": "Enviando…",
+  "messages.not_sent": "No enviado",
+  "messages.retry": "Reintentar",
+  "messages.propose": "Proponer una respuesta",
+  "messages.proposing": "El asistente está escribiendo…",
+  "messages.no_proposal": "Sin respuesta propuesta",
+  "messages.paused": "Automatización en pausa en este alojamiento",
+  "messages.show_more_srv": "Mostrar conversaciones más antiguas",
   "common.loading": "Cargando…"
 }
