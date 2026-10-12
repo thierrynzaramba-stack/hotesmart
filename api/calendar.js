@@ -203,7 +203,7 @@ module.exports = async function handler(req, res) {
     // Aucun identifiant connu : rien a renvoyer, donc rien a proteger. La session
     // est deja verifiee plus haut ; inutile de charger un profil pour repondre
     // une liste vide.
-    if (!biens.length) return { biens: [], compte: null }
+    if (!biens.length) return { biens: [], compte: null, titulaire: false }
 
     const g = await requirePermission(req, res, {
       domaine: 'reservations', niveau, bien: biens[0].id, bienRequis: true, userId
@@ -260,6 +260,7 @@ module.exports = async function handler(req, res) {
         .eq('booking_id', String(req.query.booking))
         .in('property_id', provIdsB)
         .order('property_id', { ascending: true })
+        .order('updated_at', { ascending: false })
         .limit(1)
       let { data: rows, error: errD } = await lireDetail(true)
       // Meme repli que le listing : la colonne raw peut manquer (migration,

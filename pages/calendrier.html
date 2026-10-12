@@ -1340,6 +1340,10 @@ function ouvrirFicheResa (bienId, resaId) {
   // UNE resa a la fois ; la raison est DITE, on n'affirme jamais « aucun
   // fil » sans avoir pu regarder.
   const resaCourante = String(r.id)
+  const encoreCetteResa = () => {
+    const z = $('[data-bind="feuille-corps"]').querySelector('[data-fiche-detail]')
+    return !!z && z.dataset.resa === resaCourante
+  }
   // Le DETAIL (coordonnees, date de reservation, prix par nuit, decomposition
   // du total) vient d'un second appel, par booking_id : jamais dans le
   // listing (minimisation). Une lecture echouee n'affiche rien — la fiche
@@ -1348,8 +1352,8 @@ function ouvrirFicheResa (bienId, resaId) {
     // Reponse en retard : la feuille peut montrer une AUTRE reservation —
     // on n'ecrit que si c'est encore la meme (sinon le tel: de A s'injecte
     // dans la fiche de B).
+    if (!encoreCetteResa()) return
     const zone = $('[data-bind="feuille-corps"]').querySelector('[data-fiche-detail]')
-    if (!zone || zone.dataset.resa !== resaCourante) return
     if (!d || !d.booking_id) return
     const devise = d.currency || r.currency || bien.currency
     const lignesSup = []
@@ -1381,6 +1385,9 @@ function ouvrirFicheResa (bienId, resaId) {
       </details>`
   }).catch(e => logger.error('Calendrier', 'detail reservation', e))
   appel(`/api/messages?booking_id=${encodeURIComponent(resaCourante)}`).then(rep => {
+    // Reponse en retard : la feuille peut montrer une AUTRE resa — le bouton
+    // de conversation de A ne doit pas s'armer dans la fiche de B.
+    if (!encoreCetteResa()) return
     const btn = corps.querySelector('[data-fiche-conv]')
     if (!btn) return
     if (rep && rep.has_conversation) {
@@ -1392,11 +1399,12 @@ function ouvrirFicheResa (bienId, resaId) {
       note.textContent = t(r.offline || familleSource(r.sourceBrute || r.source) === 'direct' ? 'cal.no_thread_direct' : 'cal.no_thread')
     }
   }).catch(() => {
+    if (!encoreCetteResa()) return
     const note = corps.querySelector('[data-fiche-conv-note]')
     if (note) { note.hidden = false; note.textContent = t('cal.thread_unavailable') }
   })
   // Evaluation du voyageur : par le BUS, des le JOUR du depart (module commun).
-  brancherEvaluation({ resa: { id: r.id, checkout: r.checkout }, cible: corps.querySelector('[data-fiche-evaluation]'), encoreAffichee: () => !$('[data-bind="feuille"]').hidden })
+  brancherEvaluation({ resa: { id: r.id, checkout: r.checkout }, cible: corps.querySelector('[data-fiche-evaluation]'), encoreAffichee: () => !$('[data-bind="feuille"]').hidden && encoreCetteResa() })
     .catch(e => logger.error('Calendrier', 'evaluation', e))
   if (!droits.modifiable) return
   const majTotal = () => {
