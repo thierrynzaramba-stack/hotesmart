@@ -409,14 +409,15 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-menu__liste a { display: block; padding: 8px 10px; border-radius: 8px; color: var(--ink); font-weight: var(--fw-semibold); font-size: var(--fs-body); }
 .cal-menu__liste a:hover { background: var(--surface-2); }
 .cal-menu__section { padding: 8px 10px 2px; font-size: var(--fs-caption); color: var(--muted); font-weight: var(--fw-bold); }
-.cal-biens { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
-.cal-pilule { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); padding: 5px 14px 5px 6px; cursor: pointer; flex: none; color: var(--ink); }
-.cal-pilule--active { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
-.cal-pilule--grise { opacity: .5; cursor: default; }
-.cal-pilule__photo { width: 30px; height: 30px; border-radius: var(--radius-pill); overflow: hidden; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; }
-.cal-pilule__photo img { width: 100%; height: 100%; object-fit: cover; }
-.cal-pilule__photo .icon { width: 15px; height: 15px; color: var(--muted); }
-.cal-pilule__nom { font-weight: var(--fw-semibold); font-size: var(--fs-small); white-space: nowrap; }
+/* Biens non affiches : bulles SOUS la grille (retouche point 4). */
+.cal-bulles { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; padding: 4px 2px 8px; }
+.cal-bulle { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; border: 0; background: none; cursor: pointer; color: var(--ink); padding: 4px; border-radius: var(--radius-card); font-family: inherit; }
+.cal-bulle:hover:not(:disabled) { background: var(--surface-2); }
+.cal-bulle--grise { opacity: .5; cursor: default; }
+.cal-bulle__photo { width: 44px; height: 44px; border-radius: var(--radius-pill); overflow: hidden; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.cal-bulle__photo img { width: 100%; height: 100%; object-fit: cover; }
+.cal-bulle__photo .icon { width: 20px; height: 20px; color: var(--muted); }
+.cal-bulle__nom { font-weight: var(--fw-semibold); font-size: var(--fs-caption); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-nav { gap: 8px; }
 .cal-nav__mois { margin: 0 6px; font-size: 17px; }
 .cal-vue { height: 38px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 10px; font-size: var(--fs-small); margin-inline-start: auto; }
@@ -424,17 +425,31 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-vide { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 16px; text-align: center; }
 
 /* Planning ordinateur */
-.cal-planning { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
-.cal-bande { position: sticky; top: 0; z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); padding-inline-start: 120px; }
+.cal-planning { overflow-x: auto; }
+.cal-bande { position: sticky; top: 0; z-index: 5; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding-inline-start: 150px; width: max-content; min-width: 100%; }
 .cal-bande__l { display: grid; grid-auto-flow: column; grid-auto-columns: 46px; }
 .cal-bande__mois { font-size: var(--fs-caption); font-weight: var(--fw-bold); white-space: nowrap; overflow: visible; height: 18px; }
 .cal-bande__mois--debut { border-inline-start: 2px solid var(--info); padding-inline-start: 4px; }
 .cal-bande__jour { text-align: center; font-size: var(--fs-caption); color: var(--muted); padding: 2px 0 6px; }
 .cal-bande__jour b { display: block; color: var(--ink); font-size: var(--fs-small); }
-.cal-bien { border-bottom: 1px solid var(--line); }
-.cal-bien__tete { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px 6px; font-weight: var(--fw-bold); position: sticky; left: 0; }
-.cal-bien__resas { position: relative; height: 32px; margin-inline-start: 120px; width: calc(var(--n) * 46px); }
-.cal-barre { position: absolute; top: 3px; height: 26px; border: 0; border-radius: var(--radius-pill); color: var(--on-ink); font-size: var(--fs-caption); font-weight: var(--fw-semibold); padding: 0 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
+.cal-bien { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); margin-top: 12px; width: max-content; min-width: 100%; overflow: hidden; }
+.cal-bien__ligne { display: flex; align-items: stretch; }
+/* L'identite du bien DANS la colonne de gauche, a hauteur de la ligne
+   Reservations (retouche point 2) : miniature 36 px rayon 10, cap. dessous. */
+.cal-bien__id { width: 150px; min-width: 150px; position: sticky; left: 0; z-index: 3; background: var(--surface); display: flex; align-items: center; gap: 7px; padding: 6px 4px 6px 8px; border-inline-end: 1px solid var(--line); }
+.cal-bien__photo { width: 36px; height: 36px; border-radius: 10px; overflow: hidden; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.cal-bien__photo img { width: 100%; height: 100%; object-fit: cover; }
+.cal-bien__photo .icon { width: 17px; height: 17px; color: var(--muted); }
+.cal-bien__nomcap { min-width: 0; display: flex; flex-direction: column; line-height: 1.2; }
+.cal-bien__nomcap b { font-size: var(--fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-bien__reduire { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 2px; margin-inline-start: auto; flex: none; border-radius: 6px; }
+.cal-bien__reduire:hover { background: var(--surface-2); color: var(--ink); }
+.cal-bien__reduire .icon { width: 13px; height: 13px; }
+.cal-bien__id--mobile { position: static; width: auto; border: 0; padding: 2px 2px 10px; }
+.cal-bien__id--mobile b { font-size: var(--fs-body); }
+/* Barres de resa PLEINE HAUTEUR avec le nom (retouche point 1). */
+.cal-bien__resas { position: relative; height: 48px; width: calc(var(--n) * 46px); flex: none; }
+.cal-barre { position: absolute; top: 5px; height: 38px; border: 0; border-radius: 13px; color: var(--on-ink); font-size: var(--fs-small); font-weight: var(--fw-semibold); padding: 0 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
 .cal-barre--airbnb { background: var(--canal-airbnb); }
 .cal-barre--booking { background: var(--canal-booking); }
 .cal-barre--direct { background: var(--canal-direct); }
@@ -444,9 +459,13 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-barre--coupe-g { border-start-start-radius: 0; border-end-start-radius: 0; }
 .cal-barre--coupe-d { border-start-end-radius: 0; border-end-end-radius: 0; }
 .cal-table { border-collapse: collapse; table-layout: fixed; width: max-content; }
-.cal-table td, .cal-table th { width: 46px; border-inline-start: 1px solid var(--line); }
-.cal-libelle { width: 120px !important; min-width: 120px; text-align: start; padding: 0 10px; position: sticky; left: 0; background: var(--surface); border-inline-start: 0 !important; }
+.cal-table td, .cal-table th { width: 46px; border: 1px solid var(--line); }
+.cal-table tr:last-child td, .cal-table tr:last-child th { border-bottom: 0; }
+.cal-table td:last-child { border-inline-end: 0; }
+.cal-libelle { width: 150px !important; min-width: 150px; text-align: start; padding: 0 10px; position: sticky; left: 0; background: var(--surface); border-inline-start: 0 !important; }
 .cal-nuit { position: relative; height: 40px; text-align: center; font-size: var(--fs-caption); cursor: pointer; user-select: none; }
+.cal-nuit__prix { font-weight: var(--fw-semibold); font-size: var(--fs-small); }
+.cal-nuit:not(.cal-nuit--passe):hover { background-color: color-mix(in srgb, var(--info) 10%, var(--surface)); }
 .cal-param { height: 26px; text-align: center; font-size: var(--fs-caption); color: var(--muted); }
 /* LES QUATRE ÉTATS (§4.1, dette 20) — la couleur EST l'état. */
 .cal-nuit--vendue { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
@@ -458,8 +477,14 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-nuit--passe { opacity: .55; cursor: default; }
 .cal-nuit--sel { box-shadow: inset 0 0 0 2px var(--info); }
 .cal-nuit__saisie { width: 42px; border: 1px solid var(--info); border-radius: 6px; font-size: var(--fs-caption); text-align: center; background: var(--surface); color: var(--ink); }
-.cal-we { background-color: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
+.cal-we { background-color: color-mix(in srgb, var(--info) 8%, var(--surface-2)); }
+.cal-we--debut { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
+.cal-we--fin { box-shadow: inset -2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
 .cal-auj { box-shadow: inset 0 0 0 1px var(--info); }
+/* box-shadow ne se cumule pas entre regles : les combinaisons se declarent. */
+.cal-we--debut.cal-auj { box-shadow: inset 0 0 0 1px var(--info), inset 2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
+.cal-we--fin.cal-auj { box-shadow: inset 0 0 0 1px var(--info), inset -2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
+.cal-nuit--sel.cal-we--debut, .cal-nuit--sel.cal-we--fin { box-shadow: inset 0 0 0 2px var(--info); }
 .cal-orpheline { position: absolute; top: 2px; inset-inline-end: 2px; }
 .cal-orpheline .icon { width: 11px; height: 11px; color: var(--amber); }
 

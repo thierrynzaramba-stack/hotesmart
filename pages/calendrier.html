@@ -52,7 +52,6 @@
           <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-more"/></svg>
         </summary>
         <div class="bulle-menu__liste bulle-menu__liste--bas cal-menu__liste">
-          <button type="button" data-menu-vue><span data-i18n="cal.view_full"></span></button>
           <div class="cal-menu__section" data-i18n="cal.pin_rows"></div>
           <div data-bind="menu-epingles"></div>
           <a href="/apps/yield/prix" data-i18n="cal.link_pricing"></a>
@@ -60,8 +59,6 @@
       </details>
     </div>
   </div>
-
-  <div class="cal-biens" data-bind="pilules"></div>
 
   <div class="row cal-nav">
     <button type="button" class="btn btn--secondary btn--icon" data-nav="-1" data-i18n-attr="aria-label:cal.prev">
@@ -85,6 +82,11 @@
   </div>
 
   <div class="cal-mois" data-bind="grille-mobile" hidden></div>
+
+  <!-- Biens NON affiches : une bulle chacun (photo ronde + nom), clic =
+       le bloc se deploie ; Beds24 grisee, non cliquable (retouche du
+       12 octobre, point 4). -->
+  <div class="cal-bulles" data-bind="bulles"></div>
 
   <p class="caption muted" style="padding: 0 var(--page-pad) 10px" data-bind="etat-charge" hidden></p>
 </main>
@@ -144,7 +146,8 @@ const etat = {
   months: 3, decalage: 0,  // ordinateur ; NON persiste (decision conservee)
   annee: null, mois: null, // telephone : mois calendaire, PERSISTE
   vueMobile: 'rate',       // selecteur de vue (arbitrage (a) : garde a l'etape 1)
-  vueComplete: false, epingles: [],   // menu ⋯ ; epingles PERSISTEES (§11.2)
+  epingles: [],            // lignes cochees au menu ⋯, PERSISTEES (§11.2)
+  choisisDefinis: false,   // prefs lues : un tableau vide est un choix, pas un defaut
   jours: [],               // Date[] de la plage ordinateur
   inv: {}, pp: {}, propsById: {}, rawProps: {}, bookings: {}, fermetures: {},
   states: {},              // uuid -> etats par jour (desktop) / par iso (mobile via index)
@@ -157,11 +160,10 @@ const PREFS_CLE = 'hs_cal_v5_prefs'
 function lirePrefs () {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_CLE) || '{}')
-    if (Array.isArray(p.choisis)) etat.choisis = p.choisis
+    if (Array.isArray(p.choisis)) { etat.choisis = p.choisis; etat.choisisDefinis = true }
     if ([1, 3, 6, 12].includes(p.months)) etat.months = p.months
     if (Number.isInteger(p.annee) && Number.isInteger(p.mois)) { etat.annee = p.annee; etat.mois = p.mois }
     if (typeof p.vueMobile === 'string') etat.vueMobile = p.vueMobile
-    if (typeof p.vueComplete === 'boolean') etat.vueComplete = p.vueComplete
     if (Array.isArray(p.epingles)) etat.epingles = p.epingles
   } catch {}
 }
@@ -169,7 +171,7 @@ function ecrirePrefs () {
   try {
     localStorage.setItem(PREFS_CLE, JSON.stringify({
       choisis: etat.choisis, months: etat.months, annee: etat.annee, mois: etat.mois,
-      vueMobile: etat.vueMobile, vueComplete: etat.vueComplete, epingles: etat.epingles
+      vueMobile: etat.vueMobile, epingles: etat.epingles
     }))
   } catch {}
 }
@@ -191,7 +193,8 @@ async function chargerBiens () {
   const r = await api.channel.listProperties()
   etat.biens = (r && r.properties) || []
   const pilotables = etat.biens.filter(b => b.provider !== 'beds24')
-  if (!etat.choisis.length || !etat.choisis.every(id => pilotables.some(b => b.id === id))) {
+  etat.choisis = etat.choisis.filter(id => pilotables.some(b => b.id === id))
+  if (!etat.choisisDefinis && !etat.choisis.length) {
     etat.choisis = estLarge() ? pilotables.map(b => b.id) : pilotables.slice(0, 1).map(b => b.id)
   }
   if (!estLarge() && etat.choisis.length > 1) etat.choisis = etat.choisis.slice(0, 1)
@@ -325,39 +328,43 @@ function fermeeParBlocage (bienId, iso) {
 
 // ─── Rendu : tronc commun ────────────────────────────────────────────────────
 function renderTout () {
-  renderPilules(); renderMenuPlus(); renderBandeaux()
+  renderBulles(); renderMenuPlus(); renderBandeaux()
   if (estLarge()) { $('[data-bind="grille-mobile"]').hidden = true; renderPlanning() }
   else { $('[data-bind="planning"]').hidden = true; renderGrilleMobile() }
   renderFlottante()
 }
-function renderPilules () {
-  const zone = $('[data-bind="pilules"]')
-  zone.innerHTML = etat.biens.map(b => {
+// Les biens NON affiches, en bulles SOUS la grille (retouche point 4) :
+// photo ronde + nom ; clic = le bloc se deploie (ordinateur : s'ajoute ;
+// telephone : remplace le bien courant). Beds24 : grisee, non cliquable.
+function renderBulles () {
+  const zone = $('[data-bind="bulles"]')
+  const caches = etat.biens.filter(b => b.provider === 'beds24' || !etat.choisis.includes(b.id))
+  zone.innerHTML = caches.map(b => {
     const beds24 = b.provider === 'beds24'
-    const actif = etat.choisis.includes(b.id)
     const photo = b.photo_url ? `<img src="${esc(b.photo_url)}" alt="" loading="lazy">` : icone('i-home')
-    return `<button type="button" class="cal-pilule${actif ? ' cal-pilule--active' : ''}${beds24 ? ' cal-pilule--grise' : ''}"
-      data-pilule="${esc(b.id)}" ${beds24 ? 'disabled' : ''}
-      title="${esc(beds24 ? t('cal.beds24_hint') : b.name || '')}">
-      <span class="cal-pilule__photo">${photo}</span>
-      <span class="cal-pilule__nom">${esc(b.name || '')}</span>
+    return `<button type="button" class="cal-bulle${beds24 ? ' cal-bulle--grise' : ''}"
+      data-bulle="${esc(b.id)}" ${beds24 ? 'disabled' : ''}
+      title="${esc(beds24 ? t('cal.beds24_hint') : t('cal.bubble_show', { nom: b.name || '' }))}">
+      <span class="cal-bulle__photo">${photo}</span>
+      <span class="cal-bulle__nom">${esc(b.name || '')}</span>
       ${beds24 ? `<span class="caption muted">${esc(t('cal.beds24_tag'))}</span>` : ''}
     </button>`
   }).join('')
-  zone.querySelectorAll('[data-pilule]:not([disabled])').forEach(p => p.addEventListener('click', () => {
-    const id = p.dataset.pilule
-    if (estLarge()) {
-      etat.choisis = etat.choisis.includes(id)
-        ? etat.choisis.filter(x => x !== id)
-        : [...etat.choisis, id]
-      if (!etat.choisis.length) etat.choisis = [id]
-    } else etat.choisis = [id]
+  zone.querySelectorAll('[data-bulle]:not([disabled])').forEach(p => p.addEventListener('click', () => {
+    const id = p.dataset.bulle
+    if (estLarge()) etat.choisis = [...etat.choisis, id]
+    else etat.choisis = [id]
+    etat.choisisDefinis = true
     viderSelection(); ecrirePrefs(); charger()
   }))
 }
+// Le bouton « reduire » d'un bloc : le bien repart en bulle (persiste).
+function reduireBien (id) {
+  etat.choisis = etat.choisis.filter(x => x !== id)
+  etat.choisisDefinis = true
+  viderSelection(); ecrirePrefs(); renderTout()
+}
 function renderMenuPlus () {
-  const vueBtn = $('[data-menu-vue] span')
-  if (vueBtn) vueBtn.textContent = t(etat.vueComplete ? 'cal.view_simple' : 'cal.view_full')
   const zone = $('[data-bind="menu-epingles"]')
   zone.innerHTML = Object.keys(ROW_DEFAULTS).map(k => `<label class="row caption" style="gap: 6px; padding: 4px 10px">
       <input type="checkbox" data-epingle="${k}" ${etat.epingles.includes(k) ? 'checked' : ''}>
@@ -399,15 +406,8 @@ const LIGNES_PARAMS = [
   { key: 'ctd', cle: 'cal.param_ctd' },
   { key: 'stopSell', cle: 'cal.param_stopSell' }
 ]
-function lignesVisibles (bienId) {
-  if (etat.vueComplete) return LIGNES_PARAMS.map(l => l.key)
-  const configures = new Set()
-  const st = etat.states[bienId] || {}
-  for (const iso of etat.joursISO || []) {
-    const s = st[iso]; if (!s) continue
-    for (const k in ROW_DEFAULTS) if (s[k] !== ROW_DEFAULTS[k]) configures.add(k)
-  }
-  return LIGNES_PARAMS.map(l => l.key).filter(k => configures.has(k) || etat.epingles.includes(k))
+function lignesVisibles () {
+  return LIGNES_PARAMS.map(l => l.key).filter(k => etat.epingles.includes(k))
 }
 function renderPlanning () {
   const planning = $('[data-bind="planning"]')
@@ -424,10 +424,13 @@ function renderPlanning () {
     bandeMois += `<span class="cal-bande__mois${m !== moisCourant ? ' cal-bande__mois--debut' : ''}">${m !== moisCourant ? esc(dateIntl(iso, langue(), { month: 'long', year: 'numeric' })) : ''}</span>`
     moisCourant = m
     const we = [0, 6].includes(d.getDay())
-    bandeJours += `<span class="cal-bande__jour${we ? ' cal-we' : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(dateIntl(iso, langue(), { weekday: 'narrow' }))}<b>${d.getDate()}</b></span>`
+    const lisere = d.getDay() === 6 ? ' cal-we--debut' : (d.getDay() === 0 ? ' cal-we--fin' : '')
+    bandeJours += `<span class="cal-bande__jour${we ? ' cal-we' + lisere : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(dateIntl(iso, langue(), { weekday: 'narrow' }))}<b>${d.getDate()}</b></span>`
   }
   $('[data-bind="bande"]').innerHTML = `<div class="cal-bande__l">${bandeMois}</div><div class="cal-bande__l">${bandeJours}</div>`
-  $('[data-bind="grilles"]').innerHTML = etat.choisis.map(id => grilleBien(id)).join('')
+  $('[data-bind="grilles"]').innerHTML = etat.choisis.length
+    ? etat.choisis.map(id => grilleBien(id)).join('')
+    : `<p class="muted" style="padding: 24px 16px">${esc(t('cal.all_reduced'))}</p>`
   brancherPlanning()
 }
 function grilleBien (bienId) {
@@ -470,7 +473,9 @@ function grilleBien (bienId) {
     const e = etatNuit(bienId, iso)
     const passe = iso < AUJOURDHUI
     const prix = e === 'attente' ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()))
-    return `<td class="cal-nuit cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${[0, 6].includes(new Date(iso + 'T12:00:00').getDay()) ? ' cal-we' : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}"
+    const jsem = new Date(iso + 'T12:00:00').getDay()
+    const we = [0, 6].includes(jsem) ? ' cal-we' + (jsem === 6 ? ' cal-we--debut' : ' cal-we--fin') : ''
+    return `<td class="cal-nuit cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${we}${iso === AUJOURDHUI ? ' cal-auj' : ''}"
       data-bien="${esc(bienId)}" data-i="${i}" data-iso="${iso}">
       ${orphelines.has(iso) ? `<span class="cal-orpheline" title="${esc(t('cal.orphan_hint'))}">${icone('i-alert')}</span>` : ''}
       <span class="cal-nuit__prix${s.sansPrix && e !== 'attente' ? ' muted' : ''}">${e === 'attente' ? '' : esc(prix || '—')}</span>
@@ -488,9 +493,18 @@ function grilleBien (bienId) {
     }).join('')
     return `<tr><th class="cal-libelle caption">${esc(t(def.cle))}</th>${tds}</tr>`
   }).join('')
+  const photo = bien.photo_url ? `<img src="${esc(bien.photo_url)}" alt="" loading="lazy">` : icone('i-home')
   return `<section class="cal-bien" data-bien-section="${esc(bienId)}">
-    <header class="cal-bien__tete"><span>${esc(bien.name || '')}</span><span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span></header>
-    <div class="cal-bien__resas" style="--n:${etat.joursISO.length}">${barres}${blocages}</div>
+    <div class="cal-bien__ligne">
+      <div class="cal-bien__id">
+        <span class="cal-bien__photo">${photo}</span>
+        <span class="cal-bien__nomcap"><b>${esc(bien.name || '')}</b>
+          <span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span></span>
+        <button type="button" class="cal-bien__reduire" data-reduire="${esc(bienId)}"
+          title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
+      </div>
+      <div class="cal-bien__resas" style="--n:${etat.joursISO.length}">${barres}${blocages}</div>
+    </div>
     <table class="cal-table"><tbody>
       <tr data-ligne-prix><th class="cal-libelle caption">${esc(t('cal.row_price'))}</th>${cellules}</tr>
       ${params}
@@ -518,7 +532,7 @@ function renderGrilleMobile () {
   sel.hidden = false
   sel.innerHTML = VUES_MOBILE.map(v => `<option value="${v.id}" ${etat.vueMobile === v.id ? 'selected' : ''}>${esc(t(v.cle))}</option>`).join('')
   const bienId = etat.choisis[0]
-  if (!bienId) { zone.innerHTML = ''; return }
+  if (!bienId) { zone.innerHTML = `<p class="muted">${esc(t('cal.all_reduced'))}</p>`; return }
   const bien = etat.biens.find(b => b.id === bienId) || {}
   const st = etat.states[bienId] || {}
   const orphelines = etat.orphelines.get(bienId) || new Set()
@@ -550,7 +564,13 @@ function renderGrilleMobile () {
     </button>`
   }
   const resas = (st.__resas || [])
-  zone.innerHTML = `<div class="cal-mois__grille">${entetes}${cases}</div>
+  const photoB = bien.photo_url ? `<img src="${esc(bien.photo_url)}" alt="" loading="lazy">` : icone('i-home')
+  zone.innerHTML = `<div class="cal-bien__id cal-bien__id--mobile">
+      <span class="cal-bien__photo">${photoB}</span>
+      <span class="cal-bien__nomcap"><b>${esc(bien.name || '')}</b>
+        <span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span></span>
+    </div>
+    <div class="cal-mois__grille">${entetes}${cases}</div>
     <div class="cal-mois__legende caption muted">${esc(t('cal.legend'))}</div>
     <div class="cal-mois__resas">${resas.filter(r => String(r.checkout).slice(0, 8) >= toISO(premier).slice(0, 8)).map(r => `
       <button type="button" class="cal-ligne-resa" data-resa="${esc(String(r.id))}" data-bien="${esc(bienId)}">
@@ -643,6 +663,7 @@ function brancherPlanning () {
     })
     td.tabIndex = 0
   })
+  zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
 }
@@ -689,6 +710,7 @@ function brancherMobile () {
       ouvrirPopup([iso])
     })
   })
+  zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
 }
@@ -1410,10 +1432,6 @@ async function init () {
     }
     viderSelection(); charger()
   }))
-  $('[data-menu-vue]').addEventListener('click', () => {
-    etat.vueComplete = !etat.vueComplete
-    ecrirePrefs(); renderTout()
-  })
   $('[data-bind="vue-mobile"]').addEventListener('change', (e) => {
     etat.vueMobile = e.target.value
     ecrirePrefs(); renderGrilleMobile()

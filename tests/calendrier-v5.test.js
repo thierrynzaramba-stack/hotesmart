@@ -98,10 +98,13 @@ test('orphelines : la detection est un MODULE COMMUN (constat 8), regle de l\'an
 test('inventaire §12 : chaque fonction de l\'etape 1 est presente, manquantes nommees', () => {
   const src = html()
   const LIGNES = {
-    'pilules de biens avec photo, Beds24 grisees': 'cal-pilule--grise',
+    'bulles de biens non affiches avec photo, Beds24 grisees (retouche pt 4)': 'cal-bulle--grise',
+    'bouton reduire : le bloc repart en bulle (retouche pt 4)': 'data-reduire=',
     'periode 1/3/6/12 mois': 'data-mois="12"',
     'navigation non persistee (pas de decalage en localStorage)': 'decalage: 0',
-    'vue simplifiee / complete (menu ...)': 'data-menu-vue',
+    'lignes masquees par defaut, cochees au menu ... (retouche pt 3)': 'etat.epingles.includes(k))',
+    'identite du bien dans la colonne gauche (retouche pt 2)': 'cal-bien__photo',
+    'liseres de week-end (retouche pt 1)': 'cal-we--debut',
     'epinglage de lignes PERSISTE': 'epingles: etat.epingles',
     'lien Tarification vers YieldFlow (recadrage etape 1)': '/apps/yield/prix',
     'bandeau lecture seule': 'cal.readonly',
