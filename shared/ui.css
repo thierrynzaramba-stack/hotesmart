@@ -400,10 +400,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 }
 
 /* ---------- Calendrier V5 (lot 3, étape 1) ---------- */
-.cal-page { padding: 14px var(--page-pad) 90px; display: flex; flex-direction: column; gap: 12px; }
+.cal-page { --cal-col: 110px; padding: 14px var(--page-pad) 90px; display: flex; flex-direction: column; gap: 12px; }
 .cal-entete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cal-periode { display: inline-flex; align-items: stretch; height: var(--control); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
-.cal-periode .tab { height: 100%; padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-small); }
+.cal-periode .tab { height: 100%; padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-small); background: transparent; }
 .cal-periode .tab[aria-pressed="true"] { background: var(--info); color: var(--on-ink); }
 .cal-menu__liste { min-width: 220px; }
 .cal-menu__liste a { display: block; padding: 8px 10px; border-radius: 8px; color: var(--ink); font-weight: var(--fw-semibold); font-size: var(--fs-body); }
@@ -414,8 +414,6 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-bulle { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; border: 0; background: none; cursor: pointer; color: var(--ink); padding: 4px; border-radius: var(--radius-card); font-family: inherit; }
 .cal-bulle:hover:not(:disabled) { background: var(--surface-2); }
 .cal-bulle--grise { opacity: .5; cursor: default; }
-.cal-bulle--mini { width: auto; padding: 2px; gap: 0; }
-.cal-bulle--mini .cal-bulle__photo { width: 30px; height: 30px; }
 .cal-photo { border-radius: 8px; overflow: hidden; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; flex: none; }
 .cal-photo img { width: 100%; height: 100%; object-fit: cover; }
 .cal-photo .icon { color: var(--muted); }
@@ -431,7 +429,19 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 /* Planning ordinateur */
 .cal-planning { overflow-x: auto; }
 .cal-bande { position: sticky; top: 0; z-index: 5; display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); width: max-content; min-width: 100%; }
-.cal-bande__angle { width: 150px; min-width: 150px; position: sticky; inset-inline-start: 0; z-index: 6; background: var(--surface); border-inline-end: 1px solid var(--line); border-start-start-radius: var(--radius-card); border-end-start-radius: var(--radius-card); display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; padding: 4px 8px; overflow-x: auto; scrollbar-width: thin; }
+.cal-bande__angle { width: var(--cal-col); min-width: var(--cal-col); position: sticky; inset-inline-start: 0; z-index: 6; background: var(--surface); border-inline-end: 1px solid var(--line); border-start-start-radius: var(--radius-card); border-end-start-radius: var(--radius-card); display: flex; align-items: center; padding: 4px 8px; }
+.cal-angle__menu { position: relative; }
+.cal-angle__puce { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 5px; cursor: pointer; list-style: none; font-size: var(--fs-caption); color: var(--info); }
+.cal-angle__puce::-webkit-details-marker { display: none; }
+.cal-angle__pile { display: inline-flex; }
+.cal-angle__mini { width: 24px; height: 24px; border-radius: var(--radius-pill); border: 2px solid var(--surface); }
+.cal-angle__mini .icon { width: 12px; height: 12px; }
+.cal-angle__pile .cal-angle__mini:not(:first-child) { margin-inline-start: -9px; }
+.cal-angle__liste { position: absolute; top: calc(100% + 4px); inset-inline-start: 0; z-index: 40; min-width: 240px; max-height: 50vh; overflow-y: auto; }
+.cal-angle__liste button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--ink); font-family: inherit; font-size: var(--fs-small); text-align: start; }
+.cal-angle__liste button:hover { background: var(--surface-2); }
+.cal-angle__nom { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.cal-angle__tout { justify-content: center; color: var(--info); font-weight: var(--fw-semibold); border-top: 1px solid var(--line); border-radius: 0; }
 .cal-bande__corps { width: max-content; }
 .cal-bande__l { display: grid; grid-auto-flow: column; grid-auto-columns: 46px; }
 .cal-bande__mois { font-size: var(--fs-caption); font-weight: var(--fw-bold); white-space: nowrap; overflow: visible; height: 18px; }
@@ -455,7 +465,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-bien__bandeau--mobile { padding: 0; }
 .cal-bien__bandeau--mobile .cal-bien__bandeau-int { position: static; display: flex; width: 100%; max-width: none; padding: 2px 2px 10px; }
 .cal-bien__bandeau--mobile .cal-bien__nom { font-size: var(--fs-body); }
-.cal-bien__photo { width: 26px; height: 26px; }
+.cal-bien__photo { width: 28px; height: 28px; border-radius: var(--radius-pill); }
 .cal-bien__photo .icon { width: 14px; height: 14px; }
 .cal-bien__reduire { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 2px; flex: none; margin-inline-start: auto; border-radius: 6px; }
 .cal-bien__reduire:hover { background: var(--surface-2); color: var(--ink); }
@@ -463,25 +473,17 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-bien__ligne { display: flex; align-items: stretch; }
 /* Colonne gauche de la ligne Reservations : un COIN vide sticky, meme
    largeur que les libelles, pour que les barres ne glissent pas dessous. */
-.cal-bien__coin { width: 150px; min-width: 150px; position: sticky; inset-inline-start: 0; z-index: 4; background: var(--surface); border-inline-end: 1px solid var(--line); }
-/* La VIGNETTE du bien : en face des lignes Reservations et Prix, sur leur
-   hauteur — cotes DERIVEES des hauteurs de ligne (--cal-resas-h,
-   --cal-nuit-h), jamais un total en dur. Elle deborde du coin vers la
-   ligne Prix (coin z4, libelle z3), le libelle Prix se decale de sa
-   largeur, et elle laisse passer les pointeurs. */
-.cal-bien__vignette { position: absolute; top: 6px; inset-inline-start: 8px; width: var(--cal-vignette-w); height: calc(var(--cal-resas-h) + var(--cal-nuit-h) - 12px); border-radius: 10px; pointer-events: none; }
-.cal-bien__vignette .icon { width: 22px; height: 22px; }
-.cal-table [data-ligne-prix] .cal-libelle { padding-inline-start: calc(var(--cal-vignette-w) + 16px); }
+.cal-bien__coin { width: var(--cal-col); min-width: var(--cal-col); position: sticky; inset-inline-start: 0; z-index: 4; background: var(--surface); border-inline-end: 1px solid var(--line); }
 /* Barres de resa PLEINE HAUTEUR avec le nom (retouche point 1). */
-.cal-bien { --cal-resas-h: 48px; --cal-nuit-h: 40px; --cal-vignette-w: 80px; }
+.cal-bien { --cal-resas-h: 48px; --cal-nuit-h: 40px; }
 .cal-bien__resas { position: relative; height: var(--cal-resas-h); width: calc(var(--n) * 46px); flex: none; }
 .cal-resas__fond { position: absolute; inset: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 46px; pointer-events: none; border-start-end-radius: var(--radius-card); overflow: hidden; }
 .cal-resas__jour { border-inline-end: 1px solid var(--line); }
 .cal-resas__jour:last-child { border-inline-end: 0; }
 .cal-barre { position: absolute; top: 5px; height: 38px; border: 0; border-radius: 13px; color: var(--on-ink); font-size: var(--fs-small); font-weight: var(--fw-semibold); padding: 0 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
 .cal-barre--airbnb { background: var(--canal-airbnb); }
-.cal-barre--booking { background: var(--canal-booking); }
-.cal-barre--direct { background: var(--canal-direct); }
+.cal-barre--booking { background: var(--info); }
+.cal-barre--direct { background: var(--ok); }
 .cal-barre--blocage { background: var(--surface-2); color: var(--ink); font-style: italic; border: 1px solid var(--border); left: calc(var(--d) / var(--n) * 100%); border-radius: 7px; z-index: 1; }
 .cal-barre--finie { opacity: .45; }
 .cal-barre--finie:hover { opacity: 1; }
@@ -491,14 +493,13 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-table td, .cal-table th { width: 46px; border: 1px solid var(--line); }
 .cal-table tr:last-child td, .cal-table tr:last-child th { border-bottom: 0; }
 .cal-table td:last-child { border-inline-end: 0; }
-.cal-libelle { width: 150px !important; min-width: 150px; text-align: start; padding: 0 10px; position: sticky; inset-inline-start: 0; z-index: 3; background: var(--surface); border-inline-start: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-libelle { width: var(--cal-col) !important; min-width: var(--cal-col); text-align: start; padding: 0 10px; position: sticky; inset-inline-start: 0; z-index: 3; background: var(--surface); border-inline-start: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-nuit { position: relative; height: var(--cal-nuit-h, 40px); text-align: center; font-size: var(--fs-caption); cursor: pointer; user-select: none; }
-.cal-nuit__prix { font-weight: var(--fw-semibold); font-size: var(--fs-small); }
+.cal-nuit__prix { font-weight: var(--fw-semibold); font-size: var(--fs-small); color: var(--ink); }
 .cal-nuit:not(.cal-nuit--passe):hover { background-color: color-mix(in srgb, var(--info) 10%, var(--surface)); }
 .cal-param { height: 26px; text-align: center; font-size: var(--fs-caption); color: var(--muted); }
 /* LES QUATRE ÉTATS (§4.1, dette 20) — la couleur EST l'état. */
 .cal-nuit--vendue { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
-.cal-nuit--vendue .cal-nuit__prix { color: var(--muted); }
 .cal-nuit--ouverte { background: var(--surface); }
 .cal-nuit--fermee { background: repeating-linear-gradient(45deg, var(--amber-soft), var(--amber-soft) 4px, var(--surface) 4px, var(--surface) 8px); }
 .cal-nuit--fermee .cal-nuit__prix { text-decoration: line-through; color: var(--muted); }
@@ -506,19 +507,22 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-nuit--passe { opacity: .55; cursor: default; }
 .cal-nuit--sel { box-shadow: inset 0 0 0 2px var(--info); }
 .cal-nuit__saisie { width: 42px; border: 1px solid var(--info); border-radius: 6px; font-size: var(--fs-caption); text-align: center; background: var(--surface); color: var(--ink); }
-.cal-we { background-color: color-mix(in srgb, var(--info) 8%, var(--surface-2)); }
-.cal-we--debut { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
-.cal-we--fin { box-shadow: inset -2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
+.cal-we { background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); }
+.cal-we--debut { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+.cal-we--fin { box-shadow: inset -2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
 .cal-auj { box-shadow: inset 0 0 0 1px var(--info); }
 /* box-shadow ne se cumule pas entre regles : les combinaisons se declarent. */
-.cal-we--debut.cal-auj { box-shadow: inset 0 0 0 1px var(--info), inset 2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
-.cal-we--fin.cal-auj { box-shadow: inset 0 0 0 1px var(--info), inset -2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
+.cal-we--debut.cal-auj { box-shadow: inset 0 0 0 1px var(--info), inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+.cal-we--fin.cal-auj { box-shadow: inset 0 0 0 1px var(--info), inset -2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
 .cal-nuit--sel.cal-we--debut, .cal-nuit--sel.cal-we--fin { box-shadow: inset 0 0 0 2px var(--info); }
 .cal-nuit--vendue.cal-we { background-color: var(--surface-2); }
-.cal-nuit--vendue.cal-we--debut { box-shadow: inset 0 0 0 1px var(--line), inset 2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
-.cal-nuit--vendue.cal-we--fin { box-shadow: inset 0 0 0 1px var(--line), inset -2px 0 0 color-mix(in srgb, var(--info) 30%, var(--surface)); }
+.cal-nuit--vendue.cal-we--debut { box-shadow: inset 0 0 0 1px var(--line), inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+.cal-nuit--vendue.cal-we--fin { box-shadow: inset 0 0 0 1px var(--line), inset -2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
 .cal-orpheline { position: absolute; top: 2px; inset-inline-end: 2px; }
 .cal-orpheline .icon { width: 11px; height: 11px; color: var(--amber); }
+
+.cal-legende { padding: 8px 2px 0; }
+.cal-legende__pt { display: inline-block; width: 10px; height: 10px; border-radius: var(--radius-pill); vertical-align: -1px; margin-inline-end: 4px; }
 
 /* Barre flottante — les CINQ actions */
 .cal-flottante { position: fixed; bottom: calc(76px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); padding: 10px 14px; z-index: 30; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; }
