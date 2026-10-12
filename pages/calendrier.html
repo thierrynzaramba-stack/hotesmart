@@ -341,7 +341,7 @@ function renderTout () {
 const photoBien = (b) => b.photo_url ? `<img src="${esc(b.photo_url)}" alt="" loading="lazy">` : icone('i-home')
 function identiteBien (bien, { mobile = false } = {}) {
   return `<div class="cal-bien__bandeau${mobile ? ' cal-bien__bandeau--mobile' : ''}"><div class="cal-bien__bandeau-int">
-      ${mobile ? `<span class="cal-bien__photo">${photoBien(bien)}</span>` : ''}
+      ${mobile ? `<span class="cal-photo cal-bien__photo">${photoBien(bien)}</span>` : ''}
       <b class="cal-bien__nom">${esc(bien.name || '')}</b>
       <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
         title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
@@ -359,7 +359,7 @@ function renderBulles () {
     return `<button type="button" class="cal-bulle${beds24 ? ' cal-bulle--grise' : ''}"
       data-bulle="${esc(b.id)}" ${beds24 ? 'disabled' : ''}
       title="${esc(beds24 ? t('cal.beds24_hint') : t('cal.bubble_show', { nom: b.name || '' }))}">
-      <span class="cal-bulle__photo">${photoBien(b)}</span>
+      <span class="cal-photo cal-bulle__photo">${photoBien(b)}</span>
       <span class="cal-bulle__nom">${esc(b.name || '')}</span>
       ${beds24 ? `<span class="caption muted">${esc(t('cal.beds24_tag'))}</span>` : ''}
     </button>`
@@ -511,7 +511,7 @@ function grilleBien (bienId) {
   return `<section class="cal-bien" data-bien-section="${esc(bienId)}">
     ${identiteBien(bien)}
     <div class="cal-bien__ligne">
-      <div class="cal-bien__coin"><span class="cal-bien__vignette">${photoBien(bien)}</span></div>
+      <div class="cal-bien__coin"><span class="cal-photo cal-bien__vignette">${photoBien(bien)}</span></div>
       <div class="cal-bien__resas" style="--n:${etat.joursISO.length}">${barres}${blocages}</div>
     </div>
     <table class="cal-table"><tbody>
