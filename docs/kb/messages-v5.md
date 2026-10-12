@@ -181,10 +181,14 @@ Décision de Thierry, en DEUX recettes ; inventaire champ par champ : spec
   (Colomiers 2, Cœur de vie 23 4, La bulle 5, serrures comprises), 0 écart.
 - **Redirection FAITE (12 octobre 2026, go de Thierry après recette 2 en
   prod)** : config.html et l'app templates (« Envoi programmé ») redirigent
-  vers /messages, comme la messagerie depuis l'étape 4 — plus AUCUNE page de
-  l'ancienne app n'écrit en direct (la « dette écriture directe de
-  l'ancienne page » est close ; les writers RLS survivent, appelés par le
-  panneau, titulaire seulement — dette 68). La sidebar des anciennes pages
+  vers /messages, comme la messagerie depuis l'étape 4 — plus aucune des
+  pages ABSORBÉES (messagerie, config, templates) n'écrit en direct : la
+  « dette écriture directe de l'ancienne page » est close pour elles (les
+  writers RLS survivent, appelés par le panneau, titulaire seulement —
+  dette 68). ⚠ `knowledge.html` (delete+insert sur `knowledge`) et
+  `analyze.html` (insert `knowledge`, lecture /api/beds24 DIRECTE — famille
+  E1) restent des pages ACTIVES qui écrivent en direct : à traiter au lot
+  Logements, ne pas les croire closes. La sidebar des anciennes pages
   ne liste plus que la Base de connaissance. Le témoin de parité vit
   désormais FIGÉ dans tests/messages-v5.test.js (l'original : git 89cd48e).
   **LE LOT 2 « MESSAGES » EST CLOS.**

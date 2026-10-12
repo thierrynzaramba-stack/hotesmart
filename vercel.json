@@ -118,7 +118,7 @@
     },
     {
       "source": "/apps/agent-ai",
-      "destination": "/apps/agent-ai/config"
+      "destination": "/pages/messages"
     },
     {
       "source": "/apps/agent-ai/knowledge",

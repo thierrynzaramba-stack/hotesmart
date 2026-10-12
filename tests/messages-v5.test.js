@@ -347,8 +347,8 @@ test('etape 4 : l\'ancienne messagerie et l\'ancienne config GuestFlow sont des 
   // TROIS pages de l'ancienne app redirigent : plus aucune n'ecrit en direct.
   for (const [page, attendu] of [
     ['apps/agent-ai/messagerie.html', "location.replace('/messages' + (conv ? '?conv=' + encodeURIComponent(conv) : ''))"],
-    ['apps/agent-ai/config.html', "location.replace('/messages')"],
-    ['apps/agent-ai/messages.html', "location.replace('/messages')"]
+    ['apps/agent-ai/config.html', "location.replace('/messages?volet=ia')"],
+    ['apps/agent-ai/messages.html', "location.replace('/messages?volet=programmes')"]
   ]) {
     const src = lire(page)
     assert.ok(src.includes(attendu), `${page} redirige vers /messages`)
@@ -416,6 +416,13 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
     'les messages programmes se chargent a l\'ouverture du volet, pas au boot')
   assert.ok(/aria-expanded', String\(ouvert && etat\.tiroirVolet === b\.dataset\.ouvreVolet\)/.test(src),
     'les boutons annoncent l\'etat du volet')
+  // Les redirections rouvrent le bon volet, et JS coupe a son repli.
+  assert.ok(/voletDemande === 'ia' \|\| voletDemande === 'programmes'\) && reglagesIci\(\)/.test(src),
+    '?volet= honore a l\'arrivee, titulaire seulement')
+  for (const page of ['apps/agent-ai/config.html', 'apps/agent-ai/messages.html']) {
+    assert.ok(/http-equiv="refresh" content="0;url=\/messages\?volet=/.test(lire(page)),
+      page + ' : repli meta refresh (JS bloque = page blanche sinon)')
+  }
   const manquants = Object.entries(CHAMPS)
     .filter(([, motif]) => !src.includes(motif))
     .map(([nom]) => nom)

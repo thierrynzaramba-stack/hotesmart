@@ -1,6 +1,11 @@
 // scripts/verifier-parite-templates.js — PARITÉ CHAMP À CHAMP entre
-// l'ancienne app templates (apps/agent-ai/messages.html) et le volet
-// « Messages programmés » de /messages (recette 2, 12 octobre 2026).
+// l'ancienne app templates et le volet « Messages programmés » de /messages
+// (recette 2, 12 octobre 2026).
+// ⚠ L'ancienne app est une REDIRECTION depuis le 12 octobre : les témoins
+// de ce script (LABELS_ANCIENS, momentAncien) sont FIGÉS, relevés avant sa
+// disparition — l'original fait foi dans git (89cd48e,
+// apps/agent-ai/messages.html), même référence que les littéraux de
+// tests/messages-v5.test.js.
 //
 // LECTURE SEULE. Usage :
 //   node --env-file=/home/thierry/hotesmart/.env.local scripts/verifier-parite-templates.js

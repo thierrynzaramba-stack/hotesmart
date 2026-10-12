@@ -3,16 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0;url=/messages?volet=programmes">
 <title>HôteSmart</title>
 <!-- ANCIENNE APP TEMPLATES (« Envoi programmé »), absorbée par /messages
      (recette 2 du changement de périmètre, 12 octobre 2026 — spec
-     lot-messages §12 bis B : parité champ à champ prouvée sur les 11
-     messages réels, redirection validée par Thierry). Le volet « Messages
-     programmés » du panneau porte tout l'inventaire ; le writer
-     (message_templates sous RLS) est inchangé. Avec cette redirection, plus
-     AUCUNE page de l'ancienne app n'écrit en direct. Historique : git. -->
+     lot-messages §12 bis B : parité prouvée sur les 11 messages réels,
+     redirection validée par Thierry). Le volet « Messages programmés »
+     s'ouvre à l'arrivée (?volet=programmes) ; le writer (message_templates
+     sous RLS) est inchangé — appelé par le panneau désormais. knowledge.html
+     et analyze.html, elles, restent des pages actives (lot Logements).
+     Historique : git (89cd48e et avant). -->
 <script>
-  location.replace('/messages')
+  location.replace('/messages?volet=programmes')
 </script>
 </head>
 <body></body>

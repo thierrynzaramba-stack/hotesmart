@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="0;url=/messages?volet=ia">
 <title>HôteSmart</title>
 <!-- ANCIENNE CONFIGURATION GUESTFLOW, absorbée par /messages (recettes 1 et 2
-     du changement de périmètre, 12 octobre 2026 — spec lot-messages §12 bis :
-     couverture 100 % vérifiée, redirection validée par Thierry après recette
-     en production). Mode Test/Auto, kill switch, consignes de l'IA et
-     alertes vivent dans le panneau de /messages ; les writers
+     du changement de périmètre, 12 octobre 2026 — spec lot-messages §12 bis,
+     redirection validée par Thierry après recette en production). Le volet
+     « Réponses de l'IA » s'ouvre à l'arrivée (?volet=ia) ; les writers
      (/api/agent-config, /api/property-automation, agent_prompting) sont
      inchangés. Historique de la page : git (89cd48e et avant). -->
 <script>
-  location.replace('/messages')
+  location.replace('/messages?volet=ia')
 </script>
 </head>
 <body></body>

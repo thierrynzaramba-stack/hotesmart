@@ -1407,6 +1407,14 @@ async function init () {
 
   // Filtre demandé par l'URL (lien « n de plus » de l'accueil, étape 4).
   const params = new URLSearchParams(location.search)
+  // Volet demandé par les redirections de l'ancienne app (?volet=ia ou
+  // programmes) : le panneau s'ouvre à l'arrivée — titulaire seulement,
+  // comme les boutons qui y mènent.
+  const voletDemande = params.get('volet')
+  if ((voletDemande === 'ia' || voletDemande === 'programmes') && reglagesIci()) {
+    etat.tiroirVolet = voletDemande
+    ouvrirTiroir(true)
+  }
   const filtreDemande = params.get('filtre')
   if (filtreDemande === 'nonlus' || filtreDemande === 'avalider') {
     etat.filtre = filtreDemande

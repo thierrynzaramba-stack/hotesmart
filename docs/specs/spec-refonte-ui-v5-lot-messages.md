@@ -216,8 +216,9 @@ absorption par le tiroir de /messages. ~~`config.html` reste EN SERVICE tant
 que le tiroir ne couvre pas 100 % de cet inventaire~~ **COUVERTURE 100 %
 LIVRÉE (recettes 1 et 2, validées en production par Thierry) : les trois
 pages de l'ancienne app — messagerie, config, templates — sont des
-REDIRECTIONS vers /messages depuis le 12 octobre 2026.** Seule
-`knowledge.html` survit (lot Logements).
+REDIRECTIONS vers /messages depuis le 12 octobre 2026.** Survivent comme
+pages actives : `knowledge.html` ET `analyze.html` (celle-ci avec sa lecture
+/api/beds24 directe, famille E1) — toutes deux pour le lot Logements.
 
 ### A. `apps/agent-ai/config.html` — « Configuration GuestFlow », par bien
 
