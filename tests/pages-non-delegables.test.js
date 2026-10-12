@@ -71,6 +71,10 @@ const DELEGABLES = [
   // compteDelegue) et les lectures directes (properties, agent_tasks) filtrent
   // sur compteCourant() sous RLS. Lecture seule à cette étape.
   'pages/messages.html',
+  // Calendrier V5 (lot 3, etape 1) : api/calendar garde chaque bien
+  // (gardeSurBiens), les ecritures passent par les writers gardes, et
+  // api-client pose X-Compte — meme classement que les deux anciennes pages.
+  'pages/calendrier.html',
   'pages/avis.html',                // api/avis honore X-Compte (compteDelegue), domaine `avis`
   // ⚠ DELEGABLE, comme le calendrier dont elle lit les memes chiffres.
   // `/api/yield` garde `reservations` en LECTURE. La delegation passe par le

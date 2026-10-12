@@ -1,0 +1,1403 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « CALENDRIER » — refonte UI V5, lot 3 ÉTAPE 1 : grille (4 états en
+     couleur, dette 20), les cinq actions, popup, formulaire avec « Bloquer
+     les dates » (dette 64), fiches — UNE page, deux dispositions (planning
+     ≥ 900 px, mois < 900 px). Spec :
+     docs/specs/spec-refonte-ui-v5-lot-calendrier.md §3-§7, §9, §11-§12.
+     YieldFlow INTACT à cette étape (recadrage du 12 octobre) : pas de
+     volets, pas d'interrupteur ; lien « Tarification » dans le menu ⋯.
+     RÈGLES : aucun hexa, aucun texte en dur, icônes du sprite, aucun appel
+     provider ni moteur ; X-Compte sur chaque appel ; la vendabilité se lit
+     EXCLUSIVEMENT dans calendar_inventory. -->
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- nav.js --></div>
+  </div>
+</header>
+
+<main class="cal-page">
+  <div class="cal-entete">
+    <h1 class="h2" data-i18n="cal.title"></h1>
+    <div class="row" style="gap: 8px; margin-inline-start: auto">
+      <div class="cal-periode" data-bind="periode" role="group" data-i18n-attr="aria-label:cal.period">
+        <button type="button" class="tab" data-mois="1">1 m</button>
+        <button type="button" class="tab" data-mois="3">3 m</button>
+        <button type="button" class="tab" data-mois="6">6 m</button>
+        <button type="button" class="tab" data-mois="12">12 m</button>
+      </div>
+      <details class="bulle-menu cal-menu" data-bind="menu-plus">
+        <summary class="msg-btnrond" data-i18n-attr="aria-label:cal.more;title:cal.more;data-legende:cal.more">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-more"/></svg>
+        </summary>
+        <div class="bulle-menu__liste bulle-menu__liste--bas cal-menu__liste">
+          <button type="button" data-menu-vue><span data-i18n="cal.view_full"></span></button>
+          <div class="cal-menu__section" data-i18n="cal.pin_rows"></div>
+          <div data-bind="menu-epingles"></div>
+          <a href="/apps/yield/prix" data-i18n="cal.link_pricing"></a>
+        </div>
+      </details>
+    </div>
+  </div>
+
+  <div class="cal-biens" data-bind="pilules"></div>
+
+  <div class="row cal-nav">
+    <button type="button" class="btn btn--secondary btn--icon" data-nav="-1" data-i18n-attr="aria-label:cal.prev">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(180 12 12)"/></svg>
+    </button>
+    <button type="button" class="btn btn--secondary" data-nav="0" data-i18n="cal.today"></button>
+    <button type="button" class="btn btn--secondary btn--icon" data-nav="1" data-i18n-attr="aria-label:cal.next">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+    </button>
+    <span class="h2 cal-nav__mois" data-bind="mois-libelle" hidden></span>
+    <select class="cal-vue" data-bind="vue-mobile" hidden data-i18n-attr="aria-label:cal.mobile_view"></select>
+  </div>
+
+  <p class="card cal-avis" data-bind="avis-lecture" hidden data-i18n="cal.readonly"></p>
+  <p class="card cal-avis" data-bind="avis-beds24" hidden></p>
+  <div class="cal-vide" data-bind="etat-vide" hidden></div>
+
+  <div class="cal-planning" data-bind="planning" hidden>
+    <div class="cal-bande" data-bind="bande"></div>
+    <div data-bind="grilles"></div>
+  </div>
+
+  <div class="cal-mois" data-bind="grille-mobile" hidden></div>
+
+  <p class="caption muted" style="padding: 0 var(--page-pad) 10px" data-bind="etat-charge" hidden></p>
+</main>
+
+<div class="cal-flottante" data-bind="flottante" hidden>
+  <span class="small" data-bind="flottante-compte"></span>
+  <span class="row" style="gap: 8px; flex-wrap: wrap" data-bind="flottante-actions"></span>
+  <button type="button" class="link small" data-bind="flottante-annuler" data-i18n="cal.cancel_selection"></button>
+</div>
+
+<aside class="msg-tiroir cal-feuille" data-bind="feuille" hidden aria-labelledby="h-feuille">
+  <div class="msg-tiroir__entete">
+    <h2 class="h2" id="h-feuille" style="font-size: 17px; margin: 0" data-bind="feuille-titre"></h2>
+    <button type="button" class="btn btn--secondary btn--icon" data-bind="feuille-fermer" data-i18n-attr="aria-label:messages.close">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg>
+    </button>
+  </div>
+  <div class="msg-tiroir__corps" data-bind="feuille-corps"></div>
+  <p class="caption msg-tiroir__note" data-bind="feuille-note" hidden></p>
+</aside>
+
+<div class="cal-toasts" data-bind="toasts" aria-live="polite"></div>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+import { requireAuth } from '/components/auth-guard.js'
+import { supabase, getUser, signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
+  from '/shared/compte-courant.js'
+import { api } from '/shared/api-client.js'
+import { toISO, computeDays, buildStateFromInventory, loadCalendarData, ROW_DEFAULTS }
+  from '/shared/calendar-core.js'
+import { mapResa, familleSource, LIBELLE_CANAL, libelleStatut, droitsResa, badgeSansEmailVisible,
+  TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, brancherEvaluation }
+  from '/shared/calendrier-resa.js'
+import { ACTIONS_BARRE, RUBRIQUES_POPUP, CHAMPS_FICHE, etatDeNuit, prixIntl, dateIntl }
+  from '/shared/calendrier-contrat.js'
+import { detecterOrphelines } from '/shared/nuits-orphelines.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (s) => document.querySelector(s)
+const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
+const AUJOURDHUI = toISO(new Date())
+const estLarge = () => window.matchMedia('(min-width: 900px)').matches
+const langue = () => (window.I18n && I18n.lang) || document.documentElement.lang || 'fr'
+
+const etat = {
+  biens: [],               // /api/channel-property : {id(uuid), name, provider, provider_property_id, capacity, base_price, currency, photo_url, included_guests, extra_guest_fee, pilote_tarifaire}
+  choisis: [],             // uuids affiches (multi >=900, un seul <900)
+  months: 3, decalage: 0,  // ordinateur ; NON persiste (decision conservee)
+  annee: null, mois: null, // telephone : mois calendaire, PERSISTE
+  vueMobile: 'rate',       // selecteur de vue (arbitrage (a) : garde a l'etape 1)
+  vueComplete: false, epingles: [],   // menu ⋯ ; epingles PERSISTEES (§11.2)
+  jours: [],               // Date[] de la plage ordinateur
+  inv: {}, pp: {}, propsById: {}, rawProps: {}, bookings: {}, fermetures: {},
+  states: {},              // uuid -> etats par jour (desktop) / par iso (mobile via index)
+  fenetres: new Map(),     // uuid -> { fin: iso } du pilote (4e etat) ; absent = pas de fenetre
+  orphelines: new Map(),   // uuid -> Set iso
+  sel: null,               // { bien, a, b } indices desktop / { bien, duIso, auIso } mobile
+  lectureSeule: false, chargement: 0, dernierSave: null
+}
+const PREFS_CLE = 'hs_cal_v5_prefs'
+function lirePrefs () {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREFS_CLE) || '{}')
+    if (Array.isArray(p.choisis)) etat.choisis = p.choisis
+    if ([1, 3, 6, 12].includes(p.months)) etat.months = p.months
+    if (Number.isInteger(p.annee) && Number.isInteger(p.mois)) { etat.annee = p.annee; etat.mois = p.mois }
+    if (typeof p.vueMobile === 'string') etat.vueMobile = p.vueMobile
+    if (typeof p.vueComplete === 'boolean') etat.vueComplete = p.vueComplete
+    if (Array.isArray(p.epingles)) etat.epingles = p.epingles
+  } catch {}
+}
+function ecrirePrefs () {
+  try {
+    localStorage.setItem(PREFS_CLE, JSON.stringify({
+      choisis: etat.choisis, months: etat.months, annee: etat.annee, mois: etat.mois,
+      vueMobile: etat.vueMobile, vueComplete: etat.vueComplete, epingles: etat.epingles
+    }))
+  } catch {}
+}
+
+// ─── Toasts (verdicts du writer, « Annuler » = vraie ecriture inverse) ──────
+function toast (texte, { duree = 5000, erreur = false, annuler = null } = {}) {
+  const zone = $('[data-bind="toasts"]')
+  const el = document.createElement('div')
+  el.className = 'cal-toast' + (erreur ? ' cal-toast--erreur' : '')
+  el.innerHTML = `<span>${esc(texte)}</span>` + (annuler
+    ? `<button type="button" class="link" data-annuler>${esc(t('cal.undo'))}</button>` : '')
+  zone.appendChild(el)
+  if (annuler) el.querySelector('[data-annuler]').addEventListener('click', () => { el.remove(); annuler() })
+  setTimeout(() => el.remove(), duree)
+}
+
+// ─── Chargement ──────────────────────────────────────────────────────────────
+async function chargerBiens () {
+  const r = await api.channel.listProperties()
+  etat.biens = (r && r.properties) || []
+  const pilotables = etat.biens.filter(b => b.provider !== 'beds24')
+  if (!etat.choisis.length || !etat.choisis.every(id => pilotables.some(b => b.id === id))) {
+    etat.choisis = estLarge() ? pilotables.map(b => b.id) : pilotables.slice(0, 1).map(b => b.id)
+  }
+  if (!estLarge() && etat.choisis.length > 1) etat.choisis = etat.choisis.slice(0, 1)
+}
+function bornesLecture () {
+  if (estLarge()) {
+    const jours = computeDays(etat.months, $('[data-bind="planning"]').clientWidth || 1200, etat.decalage)
+    etat.jours = jours
+    return { start: toISO(jours[0]), end: toISO(jours[jours.length - 1]) }
+  }
+  const d = new Date()
+  if (etat.annee == null) { etat.annee = d.getFullYear(); etat.mois = d.getMonth() }
+  const debut = new Date(etat.annee, etat.mois, 1)
+  const fin = new Date(etat.annee, etat.mois + 1, 0)
+  // marge pour les sejours a cheval et la detection d'orphelines
+  debut.setDate(debut.getDate() - 10); fin.setDate(fin.getDate() + 10)
+  return { start: toISO(debut), end: toISO(fin) }
+}
+let jetonLecture = 0
+async function charger () {
+  const jeton = ++jetonLecture
+  $('[data-bind="etat-charge"]').hidden = false
+  $('[data-bind="etat-charge"]').textContent = t('common.loading')
+  const { start, end } = bornesLecture()
+  try {
+    const refs = etat.choisis
+    const [donnees] = await Promise.all([
+      loadCalendarData(refs, start, end),
+      chargerFenetres(refs)
+    ])
+    if (jeton !== jetonLecture) return   // reponse en retard : on ne repeint pas
+    Object.assign(etat, { inv: donnees.inv, pp: donnees.pp, propsById: donnees.propsById, rawProps: donnees.rawProps, fermetures: donnees.fermetures })
+    etat.bookings = donnees.bookings || {}
+    construireEtats(start, end)
+    $('[data-bind="etat-charge"]').hidden = true
+    renderTout()
+  } catch (e) {
+    if (jeton !== jetonLecture) return
+    logger.error('Calendrier', 'chargement', e)
+    $('[data-bind="etat-charge"]').hidden = false
+    $('[data-bind="etat-charge"]').textContent = t('cal.load_error')
+  }
+}
+// La fenetre du pilote (4e etat « pas encore ouverte », dette 20) : lue de
+// /api/yield-pilote pour les seuls biens PILOTES — jamais d'etat invente, un
+// bien illisible n'a simplement pas de 4e etat ce coup-ci.
+async function chargerFenetres (refs) {
+  etat.fenetres = new Map()
+  const pilotes = etat.biens.filter(b => refs.includes(b.id) && b.pilote_tarifaire === 'yieldflow' && b.provider_property_id)
+  await Promise.all(pilotes.map(async (b) => {
+    try {
+      const r = await appel(`/api/yield-pilote?bien=${encodeURIComponent(b.provider_property_id)}`)
+      const f = r && r.fenetre
+      if (!f || !f.valeur) return
+      const jours = f.type === 'mois' ? Math.round(Number(f.valeur) * 30) : Number(f.valeur)
+      if (!Number.isFinite(jours) || jours <= 0) return
+      const fin = new Date(); fin.setDate(fin.getDate() + jours)
+      etat.fenetres.set(b.id, { fin: toISO(fin) })
+    } catch (e) { logger.error('Calendrier', 'fenetre pilote', e) }
+  }))
+}
+async function appel (chemin, corpsPost) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const r = await fetch(chemin, {
+    method: corpsPost ? 'POST' : 'GET',
+    headers: { Authorization: 'Bearer ' + session.access_token, ...(corpsPost ? { 'Content-Type': 'application/json' } : {}), ...enteteCompte() },
+    ...(corpsPost ? { body: JSON.stringify(corpsPost) } : {})
+  })
+  const corps = await r.json().catch(() => ({}))
+  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.error; throw e }
+  return corps
+}
+
+function construireEtats (start, end) {
+  etat.states = {}
+  etat.orphelines = new Map()
+  const joursISO = []
+  for (let d = new Date(start + 'T12:00:00'); toISO(d) <= end; d.setDate(d.getDate() + 1)) joursISO.push(toISO(d))
+  etat.joursISO = joursISO
+  for (const id of etat.choisis) {
+    const bien = etat.biens.find(b => b.id === id) || {}
+    const base = Number.isFinite(Number(etat.propsById[id]?.base)) ? Number(etat.propsById[id].base) : (Number(bien.base_price) || null)
+    const dates = joursISO.map(iso => new Date(iso + 'T12:00:00'))
+    const st = buildStateFromInventory(dates, etat.inv[id], base)
+    const parIso = {}
+    joursISO.forEach((iso, i) => { parIso[iso] = st[i] })
+    etat.states[id] = parIso
+    // Nuits vendues du bien (barres + etat « vendue » de chaque nuit).
+    const resas = mapResa((etat.bookings && etat.bookings[id]) || [])
+    etat.states[id].__resas = resas
+    const vendue = new Set()
+    for (const r of resas) {
+      for (let d = new Date(r.startISO + 'T12:00:00'); toISO(d) < r.checkout; d.setDate(d.getDate() + 1)) vendue.add(toISO(d))
+    }
+    etat.states[id].__vendues = vendue
+    // Orphelines (module commun, constat 8) : jours libres non couvrables.
+    const libre = (iso) => {
+      const s = parIso[iso]
+      if (!s) return false
+      return !vendue.has(iso) && s.avail !== 'closed' && s.stopSell !== 'closed'
+    }
+    etat.orphelines.set(id, detecterOrphelines(joursISO, {
+      estLibre: libre,
+      inventaire: (iso) => (etat.inv[id] || {})[iso]
+    }))
+  }
+}
+// L'etat d'une nuit (§4.1) — la SEULE regle, pour les deux ecrans.
+// Un BLOCAGE de l'hote prime sur « pas encore ouverte » : les nuits hors
+// fenetre sont fermees PAR LE MOTEUR (retrait de la vente), celles d'un
+// blocage le sont PAR L'HOTE — elles restent « fermees » a l'ecran.
+function etatNuit (bienId, iso) {
+  const s = etat.states[bienId]?.[iso]
+  if (!s) return 'ouverte'
+  const vendue = etat.states[bienId].__vendues.has(iso)
+  const fermee = s.avail === 'closed' || s.stopSell === 'closed'
+  const fenetre = etat.fenetres.get(bienId)
+  const horsFenetre = !!(fenetre && iso > fenetre.fin) && !fermeeParBlocage(bienId, iso)
+  return etatDeNuit({ vendue, fermee, horsFenetre })
+}
+function fermeeParBlocage (bienId, iso) {
+  const ref = String(etat.biens.find(b => b.id === bienId)?.provider_property_id || '')
+  const liste = etat.fermetures[bienId] || etat.fermetures[ref] || []
+  return (liste || []).some(f => iso >= String(f.debut).slice(0, 10) && iso <= String(f.fin).slice(0, 10))
+}
+
+// ─── Rendu : tronc commun ────────────────────────────────────────────────────
+function renderTout () {
+  renderPilules(); renderMenuPlus(); renderBandeaux()
+  if (estLarge()) { $('[data-bind="grille-mobile"]').hidden = true; renderPlanning() }
+  else { $('[data-bind="planning"]').hidden = true; renderGrilleMobile() }
+  renderFlottante()
+}
+function renderPilules () {
+  const zone = $('[data-bind="pilules"]')
+  zone.innerHTML = etat.biens.map(b => {
+    const beds24 = b.provider === 'beds24'
+    const actif = etat.choisis.includes(b.id)
+    const photo = b.photo_url ? `<img src="${esc(b.photo_url)}" alt="" loading="lazy">` : icone('i-home')
+    return `<button type="button" class="cal-pilule${actif ? ' cal-pilule--active' : ''}${beds24 ? ' cal-pilule--grise' : ''}"
+      data-pilule="${esc(b.id)}" ${beds24 ? 'disabled' : ''}
+      title="${esc(beds24 ? t('cal.beds24_hint') : b.name || '')}">
+      <span class="cal-pilule__photo">${photo}</span>
+      <span class="cal-pilule__nom">${esc(b.name || '')}</span>
+      ${beds24 ? `<span class="caption muted">${esc(t('cal.beds24_tag'))}</span>` : ''}
+    </button>`
+  }).join('')
+  zone.querySelectorAll('[data-pilule]:not([disabled])').forEach(p => p.addEventListener('click', () => {
+    const id = p.dataset.pilule
+    if (estLarge()) {
+      etat.choisis = etat.choisis.includes(id)
+        ? etat.choisis.filter(x => x !== id)
+        : [...etat.choisis, id]
+      if (!etat.choisis.length) etat.choisis = [id]
+    } else etat.choisis = [id]
+    viderSelection(); ecrirePrefs(); charger()
+  }))
+}
+function renderMenuPlus () {
+  const vueBtn = $('[data-menu-vue] span')
+  if (vueBtn) vueBtn.textContent = t(etat.vueComplete ? 'cal.view_simple' : 'cal.view_full')
+  const zone = $('[data-bind="menu-epingles"]')
+  zone.innerHTML = Object.keys(ROW_DEFAULTS).map(k => `<label class="row caption" style="gap: 6px; padding: 4px 10px">
+      <input type="checkbox" data-epingle="${k}" ${etat.epingles.includes(k) ? 'checked' : ''}>
+      ${esc(t('cal.param_' + k))}
+    </label>`).join('')
+  zone.querySelectorAll('[data-epingle]').forEach(x => x.addEventListener('change', () => {
+    etat.epingles = x.checked ? [...new Set([...etat.epingles, x.dataset.epingle])] : etat.epingles.filter(e => e !== x.dataset.epingle)
+    ecrirePrefs(); renderTout()
+  }))
+}
+function renderBandeaux () {
+  $('[data-bind="avis-lecture"]').hidden = !etat.lectureSeule
+  const beds = etat.biens.filter(b => b.provider === 'beds24')
+  const avisB = $('[data-bind="avis-beds24"]')
+  avisB.hidden = !beds.length
+  if (beds.length) {
+    avisB.textContent = t(beds.length === etat.biens.length ? 'cal.beds24_all' : 'cal.beds24_some',
+      { noms: beds.map(b => b.name).join(', ') })
+  }
+  const vide = $('[data-bind="etat-vide"]')
+  const aucun = !etat.biens.filter(b => b.provider !== 'beds24').length
+  vide.hidden = !aucun
+  if (aucun) {
+    vide.innerHTML = beds.length
+      ? `<p class="muted">${esc(t('cal.empty_beds24'))}</p>`
+      : (peutEcrire('reservations') && !etat.lectureSeule
+        ? `<p class="muted">${esc(t('cal.empty_owner'))}</p><a class="btn btn--primary" href="/pages/onboarding.html">${esc(t('cal.connect'))}</a>`
+        : `<p class="muted">${esc(t('cal.empty_member'))}</p>`)
+  }
+}
+
+// ─── Rendu ordinateur : planning multi-biens ────────────────────────────────
+const LIGNES_PARAMS = [
+  { key: 'minStayArr', cle: 'cal.param_minStayArr' },
+  { key: 'minStayThrough', cle: 'cal.param_minStayThrough' },
+  { key: 'maxStay', cle: 'cal.param_maxStay' },
+  { key: 'avail', cle: 'cal.param_avail' },
+  { key: 'cta', cle: 'cal.param_cta' },
+  { key: 'ctd', cle: 'cal.param_ctd' },
+  { key: 'stopSell', cle: 'cal.param_stopSell' }
+]
+function lignesVisibles (bienId) {
+  if (etat.vueComplete) return LIGNES_PARAMS.map(l => l.key)
+  const configures = new Set()
+  const st = etat.states[bienId] || {}
+  for (const iso of etat.joursISO || []) {
+    const s = st[iso]; if (!s) continue
+    for (const k in ROW_DEFAULTS) if (s[k] !== ROW_DEFAULTS[k]) configures.add(k)
+  }
+  return LIGNES_PARAMS.map(l => l.key).filter(k => configures.has(k) || etat.epingles.includes(k))
+}
+function renderPlanning () {
+  const planning = $('[data-bind="planning"]')
+  planning.hidden = false
+  $('[data-bind="mois-libelle"]').hidden = true
+  $('[data-bind="vue-mobile"]').hidden = true
+  const jours = etat.jours
+  if (!jours.length) return
+  // Bande mois + jours, UNE fois pour tous les biens (décision 21/09/2026).
+  let bandeMois = '', bandeJours = '', moisCourant = ''
+  for (const d of jours) {
+    const iso = toISO(d)
+    const m = iso.slice(0, 7)
+    bandeMois += `<span class="cal-bande__mois${m !== moisCourant ? ' cal-bande__mois--debut' : ''}">${m !== moisCourant ? esc(dateIntl(iso, langue(), { month: 'long', year: 'numeric' })) : ''}</span>`
+    moisCourant = m
+    const we = [0, 6].includes(d.getDay())
+    bandeJours += `<span class="cal-bande__jour${we ? ' cal-we' : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(dateIntl(iso, langue(), { weekday: 'narrow' }))}<b>${d.getDate()}</b></span>`
+  }
+  $('[data-bind="bande"]').innerHTML = `<div class="cal-bande__l">${bandeMois}</div><div class="cal-bande__l">${bandeJours}</div>`
+  $('[data-bind="grilles"]').innerHTML = etat.choisis.map(id => grilleBien(id)).join('')
+  brancherPlanning()
+}
+function grilleBien (bienId) {
+  const bien = etat.biens.find(b => b.id === bienId) || {}
+  const jours = etat.jours
+  const st = etat.states[bienId] || {}
+  const orphelines = etat.orphelines.get(bienId) || new Set()
+  // Ligne des reservations : barres positionnees en colonnes.
+  const resas = st.__resas || []
+  const barres = resas.map(r => {
+    const i0 = etat.joursISO.indexOf(r.startISO)
+    const i1 = etat.joursISO.indexOf(String(r.checkout).slice(0, 10))
+    if (i1 < 0 && i0 < 0) return ''
+    const debut = Math.max(i0, 0), fin = i1 < 0 ? etat.joursISO.length : i1
+    if (fin <= 0 || debut >= etat.joursISO.length) return ''
+    const famille = familleSource(r.sourceBrute || r.source)
+    const terminee = String(r.checkout).slice(0, 10) <= AUJOURDHUI
+    return `<button type="button" class="cal-barre cal-barre--${famille}${terminee ? ' cal-barre--finie' : ''}${i0 < 0 ? ' cal-barre--coupe-g' : ''}${i1 < 0 ? ' cal-barre--coupe-d' : ''}"
+      style="--d:${debut};--f:${fin}" data-resa="${esc(String(r.id))}" data-bien="${esc(bienId)}"
+      title="${esc((r.name || '') + ' · ' + dateIntl(r.startISO, langue()) + ' → ' + dateIntl(r.checkout, langue()) + (terminee ? ' · ' + t('cal.stay_over') : ''))}">${esc(r.name || '')}</button>`
+  }).join('')
+  const ref = String(bien.provider_property_id || '')
+  const blocages = ((etat.fermetures[bienId] || etat.fermetures[ref]) || []).map(f => {
+    const i0 = etat.joursISO.indexOf(String(f.debut).slice(0, 10))
+    const i1 = etat.joursISO.indexOf(String(f.fin).slice(0, 10))
+    if (i0 < 0 && i1 < 0) return ''
+    const debut = Math.max(i0, 0), fin = (i1 < 0 ? etat.joursISO.length : i1 + 1)
+    return `<button type="button" class="cal-barre cal-barre--blocage" style="--d:${debut};--f:${fin}"
+      data-blocage="${esc(String(f.id))}" data-bien="${esc(bienId)}"
+      title="${esc(t('cal.blocked_title', { du: dateIntl(f.debut, langue()), au: dateIntl(f.fin, langue()), raison: f.raison || '' }))}">${esc(f.raison || t('cal.blocked'))}</button>`
+  }).join('')
+  // Ligne des prix : une cellule par nuit, COULEUR = ETAT (§4.1).
+  const cellules = etat.joursISO.map((iso, i) => {
+    const s = st[iso] || {}
+    const e = etatNuit(bienId, iso)
+    const passe = iso < AUJOURDHUI
+    const prix = e === 'attente' ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()))
+    return `<td class="cal-nuit cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${[0, 6].includes(new Date(iso + 'T12:00:00').getDay()) ? ' cal-we' : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}"
+      data-bien="${esc(bienId)}" data-i="${i}" data-iso="${iso}">
+      ${orphelines.has(iso) ? `<span class="cal-orpheline" title="${esc(t('cal.orphan_hint'))}">${icone('i-alert')}</span>` : ''}
+      <span class="cal-nuit__prix${s.sansPrix && e !== 'attente' ? ' muted' : ''}">${e === 'attente' ? '' : esc(prix || '—')}</span>
+    </td>`
+  }).join('')
+  const params = lignesVisibles(bienId).map(k => {
+    const def = LIGNES_PARAMS.find(l => l.key === k)
+    const tds = etat.joursISO.map(iso => {
+      const s = st[iso] || {}
+      let v = s[k]
+      if (k === 'avail') v = v === 'closed' ? t('cal.closed_short') : ''
+      else if (k === 'cta' || k === 'ctd' || k === 'stopSell') v = v === 'closed' ? '✕' : ''
+      else v = v ? String(v) : ''
+      return `<td class="cal-param${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(v)}</td>`
+    }).join('')
+    return `<tr><th class="cal-libelle caption">${esc(t(def.cle))}</th>${tds}</tr>`
+  }).join('')
+  return `<section class="cal-bien" data-bien-section="${esc(bienId)}">
+    <header class="cal-bien__tete"><span>${esc(bien.name || '')}</span><span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span></header>
+    <div class="cal-bien__resas" style="--n:${etat.joursISO.length}">${barres}${blocages}</div>
+    <table class="cal-table"><tbody>
+      <tr data-ligne-prix><th class="cal-libelle caption">${esc(t('cal.row_price'))}</th>${cellules}</tr>
+      ${params}
+    </tbody></table>
+  </section>`
+}
+
+// ─── Rendu téléphone : grille mensuelle ─────────────────────────────────────
+const VUES_MOBILE = [
+  { id: 'rate', cle: 'cal.row_price' },
+  { id: 'minStayArr', cle: 'cal.param_minStayArr' },
+  { id: 'minStayThrough', cle: 'cal.param_minStayThrough' },
+  { id: 'maxStay', cle: 'cal.param_maxStay' },
+  { id: 'avail', cle: 'cal.param_avail' },
+  { id: 'cta', cle: 'cal.param_cta' },
+  { id: 'ctd', cle: 'cal.param_ctd' }
+]
+function renderGrilleMobile () {
+  const zone = $('[data-bind="grille-mobile"]')
+  zone.hidden = false
+  const libelle = $('[data-bind="mois-libelle"]')
+  libelle.hidden = false
+  libelle.textContent = dateIntl(`${etat.annee}-${String(etat.mois + 1).padStart(2, '0')}-01`, langue(), { month: 'long', year: 'numeric' })
+  const sel = $('[data-bind="vue-mobile"]')
+  sel.hidden = false
+  sel.innerHTML = VUES_MOBILE.map(v => `<option value="${v.id}" ${etat.vueMobile === v.id ? 'selected' : ''}>${esc(t(v.cle))}</option>`).join('')
+  const bienId = etat.choisis[0]
+  if (!bienId) { zone.innerHTML = ''; return }
+  const bien = etat.biens.find(b => b.id === bienId) || {}
+  const st = etat.states[bienId] || {}
+  const orphelines = etat.orphelines.get(bienId) || new Set()
+  const premier = new Date(etat.annee, etat.mois, 1)
+  const dernier = new Date(etat.annee, etat.mois + 1, 0)
+  const decale = (premier.getDay() + 6) % 7   // Lun=0
+  let cases = ''
+  const entetes = [1, 2, 3, 4, 5, 6, 0].map(d =>
+    `<span class="cal-mois__jour caption muted">${esc(new Intl.DateTimeFormat(langue(), { weekday: 'short' }).format(new Date(Date.UTC(2024, 0, d === 0 ? 7 : d))))}</span>`).join('')
+  for (let i = 0; i < decale; i++) cases += '<span></span>'
+  for (let j = 1; j <= dernier.getDate(); j++) {
+    const iso = toISO(new Date(etat.annee, etat.mois, j))
+    const s = st[iso] || {}
+    const e = etatNuit(bienId, iso)
+    const passe = iso < AUJOURDHUI
+    let valeur = ''
+    if (etat.vueMobile === 'rate') valeur = e === 'attente' ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()) || '—')
+    else {
+      const v = s[etat.vueMobile]
+      valeur = (etat.vueMobile === 'avail' || etat.vueMobile === 'cta' || etat.vueMobile === 'ctd')
+        ? (v === 'closed' ? '✕' : '·') : (v ? String(v) : '·')
+    }
+    const selection = etat.sel && etat.sel.bien === bienId && iso >= etat.sel.duIso && iso <= etat.sel.auIso
+    cases += `<button type="button" class="cal-case cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}${selection ? ' cal-case--sel' : ''}"
+      data-case="${iso}" ${passe ? 'data-passe="1"' : ''}>
+      <span class="caption">${j}</span>
+      ${orphelines.has(iso) ? `<span class="cal-orpheline">${icone('i-alert')}</span>` : ''}
+      <span class="cal-case__valeur">${esc(valeur)}</span>
+    </button>`
+  }
+  const resas = (st.__resas || [])
+  zone.innerHTML = `<div class="cal-mois__grille">${entetes}${cases}</div>
+    <div class="cal-mois__legende caption muted">${esc(t('cal.legend'))}</div>
+    <div class="cal-mois__resas">${resas.filter(r => String(r.checkout).slice(0, 8) >= toISO(premier).slice(0, 8)).map(r => `
+      <button type="button" class="cal-ligne-resa" data-resa="${esc(String(r.id))}" data-bien="${esc(bienId)}">
+        <span class="cal-ligne-resa__point cal-barre--${familleSource(r.sourceBrute || r.source)}"></span>
+        <span style="min-width:0"><b>${esc(r.name || '')}</b>
+        <span class="caption muted"> ${esc(dateIntl(r.startISO, langue(), { day: 'numeric', month: 'short' }))} → ${esc(dateIntl(r.checkout, langue(), { day: 'numeric', month: 'short' }))}</span></span>
+      </button>`).join('')}
+      ${(((etat.fermetures[bienId] || etat.fermetures[String(bien.provider_property_id || '')]) || [])).map(f => `
+      <button type="button" class="cal-ligne-resa" data-blocage="${esc(String(f.id))}" data-bien="${esc(bienId)}">
+        <span class="cal-ligne-resa__point cal-barre--blocage"></span>
+        <span style="min-width:0"><b>${esc(f.raison || t('cal.blocked'))}</b>
+        <span class="caption muted"> ${esc(dateIntl(f.debut, langue(), { day: 'numeric', month: 'short' }))} → ${esc(dateIntl(f.fin, langue(), { day: 'numeric', month: 'short' }))}</span></span>
+      </button>`).join('')}
+    </div>`
+  brancherMobile()
+}
+
+// ─── Sélection (les DEUX écrans) et barre flottante ─────────────────────────
+function viderSelection () { etat.sel = null; renderFlottante() }
+function joursSelection () {
+  if (!etat.sel) return []
+  if (etat.sel.a != null) {
+    const [a, b] = [Math.min(etat.sel.a, etat.sel.b), Math.max(etat.sel.a, etat.sel.b)]
+    return etat.joursISO.slice(a, b + 1).filter(iso => iso >= AUJOURDHUI)
+  }
+  return (etat.joursISO || []).filter(iso => iso >= etat.sel.duIso && iso <= etat.sel.auIso && iso >= AUJOURDHUI)
+}
+function renderFlottante () {
+  const barre = $('[data-bind="flottante"]')
+  const jours = joursSelection()
+  if (!jours.length || etat.lectureSeule || !peutEcrire('reservations')) { barre.hidden = true; return }
+  barre.hidden = false
+  $('[data-bind="flottante-compte"]').textContent = t('cal.n_days', { n: jours.length })
+  const bienId = etat.sel.bien
+  const st = etat.states[bienId] || {}
+  const toutFerme = jours.every(iso => {
+    const s = st[iso] || {}
+    return s.avail === 'closed' || s.stopSell === 'closed'
+  })
+  // LES CINQ ACTIONS, depuis le CONTRAT partagé (§14) — jamais une copie.
+  $('[data-bind="flottante-actions"]').innerHTML = ACTIONS_BARRE.map(a => {
+    const cle = a.id === 'fermer' && toutFerme ? a.cleInverse : a.cle
+    return `<button type="button" class="btn ${a.id === 'prix' ? 'btn--primary' : 'btn--secondary'}" data-action="${a.id}">
+      ${icone(a.icone)}${esc(t(cle))}</button>`
+  }).join('')
+  barre.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => actionBarre(b.dataset.action, toutFerme)))
+}
+function actionBarre (id, toutFerme) {
+  const jours = joursSelection()
+  if (!jours.length) return
+  if (id === 'prix') { return actionPrix(jours) }
+  if (id === 'fermer') { return toutFerme ? rouvrir(jours) : fermer(jours) }
+  if (id === 'bloquer') { return ouvrirFormulaire('bloquer', jours) }
+  if (id === 'reservation') { return ouvrirFormulaire('reservation', jours) }
+  if (id === 'plus') { return ouvrirPopup(jours) }
+}
+
+function brancherPlanning () {
+  const zone = $('[data-bind="grilles"]')
+  // Selection cliquer-glisser sur la ligne Prix, un bien a la fois ; jours
+  // passes exclus cellule par cellule (A.3, conserve).
+  let enCours = null
+  zone.querySelectorAll('[data-ligne-prix] .cal-nuit').forEach(td => {
+    td.addEventListener('mousedown', (e) => {
+      if (etat.lectureSeule || !peutEcrire('reservations')) return
+      if (td.dataset.iso < AUJOURDHUI) return
+      e.preventDefault()
+      enCours = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
+      etat.sel = { ...enCours }
+      peindreSelectionDesktop()
+    })
+    td.addEventListener('mouseenter', () => {
+      if (!enCours || td.dataset.bien !== enCours.bien) return
+      if (td.dataset.iso < AUJOURDHUI) return
+      enCours.b = Number(td.dataset.i)
+      etat.sel = { ...enCours }
+      peindreSelectionDesktop()
+    })
+    // Clavier : Entree / F2 / chiffre = saisie inline (A.5, conserve).
+    td.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'F2' || /^[0-9]$/.test(e.key)) {
+        e.preventDefault()
+        etat.sel = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
+        actionPrix(joursSelection(), /^[0-9]$/.test(e.key) ? e.key : '')
+      }
+    })
+    td.tabIndex = 0
+  })
+  document.addEventListener('mouseup', () => { if (enCours) { enCours = null; renderFlottante() } }, { once: true })
+  zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
+  zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
+}
+function peindreSelectionDesktop () {
+  const [a, b] = [Math.min(etat.sel.a, etat.sel.b), Math.max(etat.sel.a, etat.sel.b)]
+  document.querySelectorAll('[data-ligne-prix] .cal-nuit').forEach(td => {
+    const dans = td.dataset.bien === etat.sel.bien && Number(td.dataset.i) >= a && Number(td.dataset.i) <= b && td.dataset.iso >= AUJOURDHUI
+    td.classList.toggle('cal-nuit--sel', dans)
+  })
+}
+function brancherMobile () {
+  const zone = $('[data-bind="grille-mobile"]')
+  const bienId = etat.choisis[0]
+  // Appui court = popup Configurer pre-remplie sur ce jour (arbitrage (a) :
+  // le detail de nuit viendra a l'etape 2) ; appui LONG puis glisser =
+  // selection -> barre d'actions (§9). Jour passe : rien (garde commune).
+  let presse = null, long = false
+  zone.querySelectorAll('[data-case]').forEach(c => {
+    const iso = c.dataset.case
+    c.addEventListener('touchstart', () => {
+      if (iso < AUJOURDHUI || etat.lectureSeule || !peutEcrire('reservations')) return
+      long = false
+      presse = setTimeout(() => {
+        long = true
+        etat.sel = { bien: bienId, duIso: iso, auIso: iso }
+        renderGrilleMobile(); renderFlottante()
+      }, 450)
+    }, { passive: true })
+    c.addEventListener('touchend', () => clearTimeout(presse), { passive: true })
+    c.addEventListener('click', () => {
+      if (iso < AUJOURDHUI) return
+      if (long) { long = false; return }
+      if (etat.sel && etat.sel.bien === bienId && etat.sel.duIso) {
+        // une selection est ouverte : le tap l'etend
+        if (iso < etat.sel.duIso) etat.sel.duIso = iso
+        else etat.sel.auIso = iso
+        renderGrilleMobile(); renderFlottante()
+        return
+      }
+      ouvrirPopup([iso])
+    })
+  })
+  zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
+  zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
+}
+
+// ─── Écritures : save + verdicts + « Annuler » (vraie écriture inverse) ─────
+function verdictToast (r) {
+  if (!r) return
+  if (r.config_saved === false) return toast(t('cal.save_error'), { erreur: true, duree: 8000 })
+  if (r.push_failed) return toast(t('cal.push_failed'), { erreur: true, duree: 12000 })
+  if (r.local_only) return toast(t('cal.local_only'), { duree: 8000 })
+  if (r.warnings && r.warnings.length) toast(String(r.warnings[0]), { duree: 8000 })
+  if (r.task_ids && (r.task_ids.restrictions || r.task_ids.availability)) {
+    const ids = [r.task_ids.restrictions, r.task_ids.availability].filter(Boolean).join(', ')
+    try { navigator.clipboard.writeText(ids) } catch {}
+    toast(t('cal.task_copied', { ids }), { duree: 6000 })
+  }
+}
+// Enregistre des segments et propose « Annuler » : les valeurs PRECEDENTES
+// des dates touchees sont relevees AVANT l'ecriture, et « Annuler » les
+// REECRIT par le meme writer — jamais un undo d'affichage (§11.1).
+async function saveAvecAnnulation (bienId, segments, { cle = 'rate', valeursAvant = null } = {}) {
+  try {
+    const r = await appel('/api/calendar', { action: 'save', property_id: bienId, segments })
+    verdictToast(r)
+    if (r && r.config_saved !== false && !r.push_failed && valeursAvant && valeursAvant.length) {
+      toast(t('cal.saved'), {
+        duree: 10000,
+        annuler: async () => {
+          try {
+            const inverse = valeursAvant.map(v => ({ date_from: v.iso, date_to: v.iso, [cle]: v.valeur }))
+            const r2 = await appel('/api/calendar', { action: 'save', property_id: bienId, segments: inverse })
+            verdictToast(r2)
+            await charger()
+          } catch (e) { logger.error('Calendrier', 'annulation', e); toast(t('cal.save_error'), { erreur: true }) }
+        }
+      })
+    }
+    await charger()
+    return r
+  } catch (e) {
+    // Bien pilote par YieldFlow : le refus tarifaire du serveur, en clair,
+    // AVANT toute mutation locale (texte-contrat, §13).
+    if (e.code === 'refus_ecriture_tarifaire' || /yieldflow/i.test(e.message || '')) {
+      toast(t('cal.piloted_price'), { erreur: true, duree: 8000 })
+    } else {
+      logger.error('Calendrier', 'save', e)
+      toast(e.message || t('cal.save_error'), { erreur: true, duree: 8000 })
+    }
+    return null
+  }
+}
+// Prix : saisie INLINE dans la premiere cellule selectionnee (A.6 conserve,
+// jamais un prompt) ; au telephone, la popup s'ouvre sur la rubrique prix.
+function actionPrix (jours, amorce = '') {
+  const bienId = etat.sel.bien
+  const bien = etat.biens.find(b => b.id === bienId) || {}
+  // Bien pilote : refus AVANT toute saisie (A.6, texte-contrat §13).
+  if (bien.pilote_tarifaire === 'yieldflow') {
+    return toast(t('cal.piloted_price'), { duree: 7000 })
+  }
+  if (!estLarge()) return ouvrirPopup(jours, 'rate')
+  const premier = jours[0]
+  const td = document.querySelector(`[data-ligne-prix] .cal-nuit[data-bien="${CSS.escape(bienId)}"][data-iso="${premier}"]`)
+  if (!td) return
+  const valeurActuelle = etat.states[bienId]?.[premier]?.rate
+  const html = td.innerHTML
+  td.innerHTML = `<input class="cal-nuit__saisie" type="text" inputmode="decimal" value="${esc(amorce || (valeurActuelle != null ? String(valeurActuelle) : ''))}">`
+  const input = td.querySelector('input')
+  input.focus(); input.select()
+  let fini = false
+  const terminer = (commit) => {
+    if (fini) return
+    fini = true
+    const brut = input.value
+    td.innerHTML = html
+    if (!commit) return
+    const prix = Number(String(brut).replace(',', '.'))
+    if (!Number.isFinite(prix) || prix <= 0) return toast(t('cal.price_invalid'), { erreur: true })
+    const st = etat.states[bienId] || {}
+    const valeursAvant = jours.map(iso => ({ iso, valeur: st[iso] && st[iso].rate != null ? st[iso].rate : null }))
+      .filter(v => v.valeur != null)
+    const segments = [{ date_from: premier, date_to: jours[jours.length - 1], rate: prix }]
+    viderSelection()
+    saveAvecAnnulation(bienId, segments, { valeursAvant })
+  }
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') terminer(true)
+    if (e.key === 'Escape') terminer(false)
+  })
+  input.addEventListener('blur', () => terminer(true))
+}
+// Fermer / Rouvrir a la vente : regles A.5 MOT POUR MOT.
+async function fermer (jours) {
+  const bienId = etat.sel.bien
+  const bien = etat.biens.find(b => b.id === bienId) || {}
+  // Bien pilote YieldFlow : un stop_sell nu serait indistinguable d'une
+  // fermeture calculee du moteur -> bascule vers « Bloquer les dates ».
+  if (bien.pilote_tarifaire === 'yieldflow') return ouvrirFormulaire('bloquer', jours)
+  const segments = plagesContigues(jours).map(p => ({ date_from: p[0], date_to: p[1], stop_sell: true }))
+  viderSelection()
+  await saveAvecAnnulation(bienId, segments, { valeursAvant: null })
+}
+async function rouvrir (jours) {
+  const bienId = etat.sel.bien
+  // Nuit couverte par un blocage : refus + fiche (le serveur refuse 409 de meme).
+  const bloquee = jours.find(iso => fermeeParBlocage(bienId, iso))
+  if (bloquee) {
+    toast(t('cal.blocked_reopen'), { erreur: true, duree: 7000 })
+    const ref = String(etat.biens.find(b => b.id === bienId)?.provider_property_id || '')
+    const f = ((etat.fermetures[bienId] || etat.fermetures[ref]) || []).find(f => bloquee >= String(f.debut).slice(0, 10) && bloquee <= String(f.fin).slice(0, 10))
+    if (f) ouvrirFicheBlocage(bienId, String(f.id))
+    viderSelection()
+    return
+  }
+  const segments = plagesContigues(jours).map(p => ({ date_from: p[0], date_to: p[1], stop_sell: false, avail: 1 }))
+  viderSelection()
+  await saveAvecAnnulation(bienId, segments, { valeursAvant: null })
+}
+function plagesContigues (jours) {
+  const plages = []
+  let debut = jours[0], prec = jours[0]
+  for (const iso of jours.slice(1)) {
+    const attendu = toISO(new Date(new Date(prec + 'T12:00:00').getTime() + 86400000))
+    if (iso !== attendu) { plages.push([debut, prec]); debut = iso }
+    prec = iso
+  }
+  plages.push([debut, prec])
+  return plages
+}
+
+// ─── Popup « Configurer les dates » (§5) — les deux écrans, mêmes rubriques ─
+// Rubriques depuis le CONTRAT partagé (§14). Plage SERRÉE à aujourd'hui sur
+// les deux écrans (constat 5). Garde YieldFlow : le tarif est retiré des
+// segments AVANT toute mutation (défaut de recette du 20/09/2026).
+const JOURS_SEMAINE = [1, 2, 3, 4, 5, 6, 0]
+function ouvrirPopup (jours, rubriqueOuverte = null) {
+  const bienId = (etat.sel && etat.sel.bien) || etat.choisis[0]
+  const bien = etat.biens.find(b => b.id === bienId) || {}
+  const du = jours[0], au = jours[jours.length - 1]
+  const pp = etat.pp[bienId] || { included: bien.included_guests || bien.capacity || 1, extraFee: Number(bien.extra_guest_fee) || 0 }
+  const brut = etat.rawProps[bienId] || {}
+  const chips = (id) => JOURS_SEMAINE.map(d =>
+    `<label class="cal-chip"><input type="checkbox" data-chip="${id}" value="${d}" checked>
+      ${esc(new Intl.DateTimeFormat(langue(), { weekday: 'short' }).format(new Date(Date.UTC(2024, 0, d === 0 ? 7 : d))))}</label>`).join('')
+  const rub = (r) => {
+    if (r.id === 'rate') {
+      return `<details class="cal-rub" data-rub="rate" ${rubriqueOuverte === 'rate' ? 'open' : ''}><summary>${esc(t(r.cle))}</summary><div class="cal-rub__corps">
+        <div class="row" style="gap: 8px; flex-wrap: wrap">
+          <select data-champ="rate-mode"><option value="set">${esc(t('cal.mode_set'))}</option><option value="inc">+</option><option value="dec">−</option></select>
+          <input type="text" inputmode="decimal" data-champ="rate-valeur" style="width: 90px">
+          <select data-champ="rate-unite"><option value="eur">${esc(bien.currency || 'EUR')}</option><option value="pct">%</option></select>
+        </div>
+        <div class="row" style="gap: 6px; flex-wrap: wrap">${chips('rate')}</div>
+        <p class="caption muted" data-apercu-rate></p>
+      </div></details>`
+    }
+    if (r.id === 'perPerson') {
+      return `<details class="cal-rub" data-rub="perPerson"><summary>${esc(t(r.cle))}</summary><div class="cal-rub__corps">
+        <label class="caption muted">${esc(t('cal.pp_included'))}</label>
+        <input type="number" min="1" max="${Number(bien.capacity) || 99}" data-champ="pp-included" value="${esc(String(pp.included))}">
+        <label class="caption muted">${esc(t('cal.pp_fee'))}</label>
+        <input type="text" inputmode="decimal" data-champ="pp-fee" value="${esc(String(pp.extraFee))}">
+        <p class="caption muted">${esc(t('cal.pp_hint'))}</p>
+      </div></details>`
+    }
+    if (r.id === 'orphelines') {
+      return `<details class="cal-rub" data-rub="orphelines" ${rubriqueOuverte === 'orphelines' ? 'open' : ''}><summary>${esc(t(r.cle))}</summary><div class="cal-rub__corps">
+        <label class="row caption" style="gap: 6px"><input type="checkbox" data-champ="orph-autofix" ${brut.orphan_autofix ? 'checked' : ''}>${esc(t('cal.orph_autofix'))}</label>
+        <p class="caption muted">${esc(t('cal.orph_autofix_hint'))}</p>
+        <label class="row caption" style="gap: 6px"><input type="checkbox" data-champ="orph-prix" ${brut.orphan_price_enabled ? 'checked' : ''}>${esc(t('cal.orph_price'))}</label>
+        <div class="row" style="gap: 8px">
+          <select data-champ="orph-mode"><option value="set" ${brut.orphan_price_mode === 'set' ? 'selected' : ''}>${esc(t('cal.mode_set'))}</option><option value="dec" ${brut.orphan_price_mode === 'dec' ? 'selected' : ''}>−</option></select>
+          <input type="text" inputmode="decimal" data-champ="orph-valeur" style="width: 90px" value="${esc(brut.orphan_price_value != null ? String(brut.orphan_price_value) : '')}">
+          <select data-champ="orph-unite"><option value="eur" ${brut.orphan_price_unit !== 'pct' ? 'selected' : ''}>${esc(bien.currency || 'EUR')}</option><option value="pct" ${brut.orphan_price_unit === 'pct' ? 'selected' : ''}>%</option></select>
+        </div>
+      </div></details>`
+    }
+    const numerique = ['minStayArrival', 'minStayThrough', 'maxStay'].includes(r.id)
+    if (numerique) {
+      return `<details class="cal-rub" data-rub="${r.id}"><summary>${esc(t(r.cle))}</summary><div class="cal-rub__corps">
+        <input type="number" min="0" data-champ="${r.id}-valeur" placeholder="0">
+        <p class="caption muted">${esc(t('cal.zero_means_none'))}</p>
+        <div class="row" style="gap: 6px; flex-wrap: wrap">${chips(r.id)}</div>
+      </div></details>`
+    }
+    // avail / cta / ctd / stopSell : trois positions.
+    return `<details class="cal-rub" data-rub="${r.id}"><summary>${esc(t(r.cle))}</summary><div class="cal-rub__corps">
+      <select data-champ="${r.id}-valeur">
+        <option value="">${esc(t('cal.leave'))}</option>
+        <option value="open">${esc(t('cal.open_' + r.id))}</option>
+        <option value="closed">${esc(t('cal.closed_' + r.id))}</option>
+      </select>
+      <div class="row" style="gap: 6px; flex-wrap: wrap">${chips(r.id)}</div>
+    </div></details>`
+  }
+  ouvrirFeuille(t('cal.configure'), `
+    <div class="msg-tiroir__bloc">
+      <label class="caption muted">${esc(t('cal.from'))}</label>
+      <input type="date" data-champ="cfg-du" value="${du}" min="${AUJOURDHUI}">
+      <label class="caption muted">${esc(t('cal.to'))}</label>
+      <input type="date" data-champ="cfg-au" value="${au}" min="${AUJOURDHUI}">
+      <p class="caption muted">${esc(t('cal.configure_hint'))}</p>
+    </div>
+    ${RUBRIQUES_POPUP.map(rub).join('')}
+    <div class="msg-tiroir__bloc" style="border-bottom: 0">
+      <button type="button" class="btn btn--primary" data-cfg-save>${esc(t('cal.save'))}</button>
+    </div>`)
+  const corps = $('[data-bind="feuille-corps"]')
+  const majApercu = () => {
+    const ap = corps.querySelector('[data-apercu-rate]')
+    if (!ap) return
+    const mode = corps.querySelector('[data-champ="rate-mode"]').value
+    const unite = corps.querySelector('[data-champ="rate-unite"]').value
+    const v = Number(String(corps.querySelector('[data-champ="rate-valeur"]').value).replace(',', '.'))
+    const exemple = etat.states[bienId]?.[du]?.rate
+    if (!Number.isFinite(v) || exemple == null) { ap.textContent = ''; return }
+    let apres = v
+    if (mode !== 'set') {
+      const delta = unite === 'pct' ? exemple * v / 100 : v
+      apres = mode === 'inc' ? exemple + delta : exemple - delta
+    }
+    ap.textContent = t('cal.price_preview', {
+      avant: prixIntl(exemple, bien.currency, langue()) || '—',
+      apres: prixIntl(Math.max(0, Math.round(apres * 100) / 100), bien.currency, langue()) || '—'
+    })
+  }
+  corps.querySelectorAll('[data-champ^="rate-"]').forEach(x => x.addEventListener('input', majApercu))
+  corps.querySelector('[data-cfg-save]').addEventListener('click', () => enregistrerPopup(bienId, corps))
+}
+function joursCochés (corps, id) {
+  return new Set([...corps.querySelectorAll(`[data-chip="${id}"]:checked`)].map(x => Number(x.value)))
+}
+function datesDeLaPlage (corps) {
+  // SERRAGE a aujourd'hui, les deux ecrans (constat 5) ; plage passee = refus.
+  let du = corps.querySelector('[data-champ="cfg-du"]').value
+  const au = corps.querySelector('[data-champ="cfg-au"]').value
+  if (du < AUJOURDHUI) du = AUJOURDHUI
+  if (!du || !au || au < du) return null
+  const dates = []
+  for (let d = new Date(du + 'T12:00:00'); toISO(d) <= au; d.setDate(d.getDate() + 1)) dates.push(toISO(d))
+  return dates
+}
+async function enregistrerPopup (bienId, corps) {
+  const bien = etat.biens.find(b => b.id === bienId) || {}
+  const dates = datesDeLaPlage(corps)
+  if (!dates) return noteFeuille(t('cal.range_invalid'))
+  const segments = []
+  // Prix : mode set + jours complets = UN segment ; sinon un segment PAR
+  // date (le calcul se fait ici, comme l'ancienne page).
+  const rvBrut = corps.querySelector('[data-champ="rate-valeur"]').value
+  if (String(rvBrut).trim() !== '') {
+    const mode = corps.querySelector('[data-champ="rate-mode"]').value
+    const unite = corps.querySelector('[data-champ="rate-unite"]').value
+    const v = Number(String(rvBrut).replace(',', '.'))
+    if (!Number.isFinite(v)) return noteFeuille(t('cal.price_invalid'))
+    const jours = joursCochés(corps, 'rate')
+    const st = etat.states[bienId] || {}
+    for (const iso of dates) {
+      if (!jours.has(new Date(iso + 'T12:00:00').getDay())) continue
+      let prix = v
+      if (mode !== 'set') {
+        const actuel = st[iso]?.rate
+        if (actuel == null) continue
+        const delta = unite === 'pct' ? actuel * v / 100 : v
+        prix = mode === 'inc' ? actuel + delta : actuel - delta
+      }
+      segments.push({ date_from: iso, date_to: iso, rate: Math.max(0, Math.round(prix * 100) / 100) })
+    }
+  }
+  // Numeriques et ouvert/ferme.
+  const num = { minStayArrival: 'min_stay_arrival', minStayThrough: 'min_stay_through', maxStay: 'max_stay' }
+  for (const [id, col] of Object.entries(num)) {
+    const brut = corps.querySelector(`[data-champ="${id}-valeur"]`)?.value
+    if (String(brut ?? '').trim() === '') continue
+    const jours = joursCochés(corps, id)
+    for (const p of plagesParJours(dates, jours)) segments.push({ date_from: p[0], date_to: p[1], [col]: Number(brut) })
+  }
+  const oc = { avail: (v) => ({ avail: v === 'open' ? 1 : 0 }), cta: (v) => ({ cta: v === 'closed' }), ctd: (v) => ({ ctd: v === 'closed' }), stopSell: (v) => ({ stop_sell: v === 'closed' }) }
+  for (const [id, f] of Object.entries(oc)) {
+    const v = corps.querySelector(`[data-champ="${id}-valeur"]`)?.value
+    if (!v) continue
+    const jours = joursCochés(corps, id)
+    for (const p of plagesParJours(dates, jours)) segments.push({ date_from: p[0], date_to: p[1], ...f(v) })
+  }
+  // Prix par personne : configuration du BIEN (domaine reglages), seulement
+  // si la valeur change reellement.
+  const ppIncl = Number(corps.querySelector('[data-champ="pp-included"]')?.value)
+  const ppFee = Number(String(corps.querySelector('[data-champ="pp-fee"]')?.value || '').replace(',', '.'))
+  const ppActuel = etat.pp[bienId] || {}
+  if (Number.isFinite(ppIncl) && Number.isFinite(ppFee) && (ppIncl !== ppActuel.included || ppFee !== ppActuel.extraFee)) {
+    segments.push({ kind: 'perPerson', included: ppIncl, extra_guest_fee: ppFee })
+  }
+  // Nuits orphelines (arbitrage (d) : rubrique de la popup a l'etape 1) —
+  // memes colonnes que l'ancienne app, stop_sell delibere absent de l'autofix.
+  const brut = etat.rawProps[bienId] || {}
+  const oAuto = corps.querySelector('[data-champ="orph-autofix"]').checked
+  const oPrix = corps.querySelector('[data-champ="orph-prix"]').checked
+  const oMode = corps.querySelector('[data-champ="orph-mode"]').value
+  const oUnite = corps.querySelector('[data-champ="orph-unite"]').value
+  const oValeur = corps.querySelector('[data-champ="orph-valeur"]').value
+  if (oAuto !== !!brut.orphan_autofix || oPrix !== !!brut.orphan_price_enabled
+    || oMode !== (brut.orphan_price_mode || 'set') || oUnite !== (brut.orphan_price_unit || 'eur')
+    || String(oValeur) !== String(brut.orphan_price_value ?? '')) {
+    segments.push({ kind: 'orphanConfig', orphan_autofix: oAuto, orphan_price_enabled: oPrix, orphan_price_mode: oMode, orphan_price_unit: oUnite, orphan_price_value: oValeur !== '' ? oValeur : null })
+  }
+  if (!segments.length) return noteFeuille(t('cal.nothing_to_save'))
+  // Garde YieldFlow : le TARIF est retire des segments AVANT toute mutation
+  // (le reste part quand meme), texte-contrat dit.
+  let finaux = segments
+  if (bien.pilote_tarifaire === 'yieldflow') {
+    const sansTarif = segments.filter(s => s.rate === undefined)
+    if (sansTarif.length !== segments.length) toast(t('cal.piloted_price'), { duree: 7000 })
+    finaux = sansTarif
+    if (!finaux.length) return
+  }
+  fermerFeuille()
+  await saveAvecAnnulation(bienId, finaux, { valeursAvant: null })
+}
+function plagesParJours (dates, jours) {
+  const retenues = dates.filter(iso => jours.has(new Date(iso + 'T12:00:00').getDay()))
+  return retenues.length ? plagesContigues(retenues) : []
+}
+
+// ─── Feuille commune (popup, formulaire, fiches) ────────────────────────────
+function ouvrirFeuille (titre, html) {
+  const f = $('[data-bind="feuille"]')
+  f.hidden = false
+  $('[data-bind="feuille-titre"]').textContent = titre
+  $('[data-bind="feuille-corps"]').innerHTML = html
+  $('[data-bind="feuille-note"]').hidden = true
+}
+function fermerFeuille () { $('[data-bind="feuille"]').hidden = true }
+function noteFeuille (texte) {
+  const n = $('[data-bind="feuille-note"]')
+  n.hidden = false
+  n.textContent = texte
+}
+
+// ─── Formulaire « Ajouter » : Réservation / Bloquer les dates (§6) ──────────
+function ouvrirFormulaire (type, jours) {
+  const bienId = (etat.sel && etat.sel.bien) || etat.choisis[0]
+  const bien = etat.biens.find(b => b.id === bienId) || {}
+  const channex = bien.provider !== 'beds24' && String(bien.provider_property_id || '').length > 0
+  const du = jours[0]
+  const auNuit = jours[jours.length - 1]
+  const depart = toISO(new Date(new Date(auNuit + 'T12:00:00').getTime() + 86400000))
+  const prixDefaut = etat.states[bienId]?.[du]?.rate ?? Number(bien.base_price) ?? ''
+  ouvrirFeuille(t('cal.add_title'), `
+    <div class="msg-tiroir__bloc">
+      <div class="msg-filtres" role="group">
+        <button type="button" class="tab" data-type="reservation" aria-pressed="${type === 'reservation'}" ${channex ? '' : 'disabled'}>${esc(t('cal.type_booking'))}</button>
+        <button type="button" class="tab" data-type="bloquer" aria-pressed="${type === 'bloquer'}">${esc(t('cal.type_block'))}</button>
+      </div>
+      ${channex ? '' : `<p class="caption muted">${esc(t('cal.booking_channex_only'))}</p>`}
+      <p class="caption muted" data-recap>${esc(t('cal.recap', { du: dateIntl(du, langue()), au: dateIntl(depart, langue()), n: jours.length }))}</p>
+      <label class="caption muted">${esc(t('cal.from'))}</label>
+      <input type="date" data-aj="du" value="${du}" min="${AUJOURDHUI}">
+      <label class="caption muted">${esc(t('cal.to_checkout'))}</label>
+      <input type="date" data-aj="depart" value="${depart}" min="${AUJOURDHUI}">
+    </div>
+    <div class="msg-tiroir__bloc" data-zone="reservation" ${type === 'reservation' ? '' : 'hidden'}>
+      <label class="caption muted">${esc(t('cal.guest_first'))}*</label><input type="text" data-aj="prenom">
+      <label class="caption muted">${esc(t('cal.guest_last'))}*</label><input type="text" data-aj="nom">
+      <label class="caption muted">${esc(t('cal.guest_email'))}</label><input type="email" data-aj="email">
+      <label class="caption muted">${esc(t('cal.guest_phone'))}</label><input type="tel" data-aj="tel">
+      <div class="row" style="gap: 10px">
+        <span><label class="caption muted">${esc(t('cal.adults'))}</label><input type="number" min="1" value="2" data-aj="adultes" style="width: 70px"></span>
+        <span><label class="caption muted">${esc(t('cal.children'))}</label><input type="number" min="0" value="0" data-aj="enfants" style="width: 70px"></span>
+      </div>
+      <p class="caption" data-aj-capacite></p>
+      <label class="caption muted">${esc(t('cal.price_night'))}</label>
+      <input type="text" inputmode="decimal" data-aj="prix" value="${esc(prixDefaut !== '' && prixDefaut != null ? String(prixDefaut) : '')}">
+      <p class="caption muted" data-aj-total></p>
+      <label class="caption muted">${esc(t('cal.note'))}</label>
+      <textarea rows="2" data-aj="note" placeholder="${esc(t('cal.note_hint'))}"></textarea>
+    </div>
+    <div class="msg-tiroir__bloc" data-zone="bloquer" ${type === 'bloquer' ? '' : 'hidden'}>
+      <label class="caption muted">${esc(t('cal.block_reason'))}*</label>
+      <input type="text" maxlength="200" data-aj="raison" placeholder="${esc(t('cal.block_reason_ph'))}">
+      <p class="caption muted">${esc(t('cal.block_hint'))}</p>
+    </div>
+    <div class="msg-tiroir__bloc" style="border-bottom: 0">
+      <button type="button" class="btn btn--primary" data-aj-save>${esc(t(type === 'reservation' ? 'cal.create_booking' : 'cal.create_block'))}</button>
+      <p class="caption" data-aj-etat></p>
+    </div>`)
+  const corps = $('[data-bind="feuille-corps"]')
+  let typeCourant = channex ? type : 'bloquer'
+  const majType = () => {
+    corps.querySelectorAll('[data-type]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.type === typeCourant)))
+    corps.querySelector('[data-zone="reservation"]').hidden = typeCourant !== 'reservation'
+    corps.querySelector('[data-zone="bloquer"]').hidden = typeCourant !== 'bloquer'
+    corps.querySelector('[data-aj-save]').textContent = t(typeCourant === 'reservation' ? 'cal.create_booking' : 'cal.create_block')
+  }
+  corps.querySelectorAll('[data-type]:not([disabled])').forEach(b => b.addEventListener('click', () => { typeCourant = b.dataset.type; majType() }))
+  majType()
+  const majCapaciteEtTotal = () => {
+    const adultes = Number(corps.querySelector('[data-aj="adultes"]').value)
+    const enfants = Number(corps.querySelector('[data-aj="enfants"]').value)
+    const zone = corps.querySelector('[data-aj-capacite]')
+    const msg = messageCapacite(adultes, enfants, Number(bien.capacity) || 99)
+    zone.textContent = msg || t('cal.capacity', { n: bien.capacity || '—' })
+    zone.classList.toggle('msg-echec', !!msg)
+    const prix = Number(String(corps.querySelector('[data-aj="prix"]').value).replace(',', '.'))
+    const nuits = nuitsEntre(corps.querySelector('[data-aj="du"]').value, corps.querySelector('[data-aj="depart"]').value)
+    corps.querySelector('[data-aj-total]').textContent = Number.isFinite(prix) && nuits > 0
+      ? t('cal.total_stay', { total: prixIntl(prix * nuits, bien.currency, langue()), n: nuits }) : ''
+  }
+  corps.querySelectorAll('[data-aj]').forEach(x => x.addEventListener('input', majCapaciteEtTotal))
+  majCapaciteEtTotal()
+  corps.querySelector('[data-aj-save]').addEventListener('click', async () => {
+    const etatEl = corps.querySelector('[data-aj-etat]')
+    const duV = corps.querySelector('[data-aj="du"]').value
+    const departV = corps.querySelector('[data-aj="depart"]').value
+    if (!duV || !departV || departV <= duV || duV < AUJOURDHUI) { etatEl.textContent = t('cal.range_invalid'); return }
+    const bouton = corps.querySelector('[data-aj-save]')
+    bouton.disabled = true
+    try {
+      if (typeCourant === 'bloquer') {
+        // Dette 64 fermee : un blocage N'A ni montant ni voyageur — l'objet
+        // fermetures + stop_sell par le writer unique.
+        const raison = corps.querySelector('[data-aj="raison"]').value.trim()
+        if (!raison) { etatEl.textContent = t('cal.block_reason_required'); bouton.disabled = false; return }
+        const finNuit = toISO(new Date(new Date(departV + 'T12:00:00').getTime() - 86400000))
+        await api.calendar.fermer(bienId, duV, finNuit, raison)
+        fermerFeuille(); viderSelection()
+        toast(t('cal.block_created'))
+        await charger()
+      } else {
+        const prenom = corps.querySelector('[data-aj="prenom"]').value.trim()
+        const nom = corps.querySelector('[data-aj="nom"]').value.trim()
+        if (!prenom || !nom) { etatEl.textContent = t('cal.name_required'); bouton.disabled = false; return }
+        const adultes = Number(corps.querySelector('[data-aj="adultes"]').value)
+        const enfants = Number(corps.querySelector('[data-aj="enfants"]').value)
+        if (messageCapacite(adultes, enfants, Number(bien.capacity) || 99)) { etatEl.textContent = messageCapacite(adultes, enfants, Number(bien.capacity) || 99); bouton.disabled = false; return }
+        const prix = Number(String(corps.querySelector('[data-aj="prix"]').value).replace(',', '.'))
+        if (!Number.isFinite(prix) || prix <= 0) { etatEl.textContent = t('cal.price_invalid'); bouton.disabled = false; return }
+        etatEl.textContent = t('cal.sending')
+        await appel('/api/reservation-directe', {
+          propertyId: bien.provider_property_id, arrivee: duV, depart: departV,
+          prenom, nom,
+          email: corps.querySelector('[data-aj="email"]').value.trim() || null,
+          telephone: corps.querySelector('[data-aj="tel"]').value.trim() || null,
+          adultes, enfants, prixParNuit: prix,
+          note: corps.querySelector('[data-aj="note"]').value.trim() || null
+        })
+        fermerFeuille(); viderSelection()
+        // Confirmation EN DEUX TEMPS : le coeur apprend la resa par le feed.
+        toast(t('cal.booking_sent'), { duree: 9000 })
+        setTimeout(() => charger(), 8000)
+      }
+    } catch (e) {
+      logger.error('Calendrier', 'creation', e)
+      etatEl.textContent = e.message || t('cal.save_error')
+      bouton.disabled = false
+    }
+  })
+}
+
+// ─── Fiches : UN composant pour les deux écrans (§7) ────────────────────────
+function ouvrirFicheResa (bienId, resaId) {
+  const bien = etat.biens.find(b => b.id === bienId) || {}
+  const r = (etat.states[bienId]?.__resas || []).find(x => String(x.id) === String(resaId))
+  if (!r) return
+  const droits = droitsResa(bien, r, peutEcrire('reservations') && !etat.lectureSeule)
+  const famille = familleSource(r.sourceBrute || r.source)
+  const valeurs = {
+    statut: libelleStatut(r.statut),
+    arrivee: dateIntl(r.startISO, langue()) + (r.arrivalHour ? ' · ' + r.arrivalHour : ''),
+    depart: dateIntl(r.checkout, langue()),
+    nuits: String(r.span || nuitsEntre(r.startISO, r.checkout)),
+    voyageurs: [r.numAdult, r.numChild].filter(v => v != null).join(' + ') || null,
+    montant: r.amount != null ? prixIntl(r.amount, r.currency || bien.currency, langue()) : null,
+    canal: LIBELLE_CANAL[famille] || r.source || null,
+    commission: r.commission != null ? prixIntl(r.commission, r.currency || bien.currency, langue()) : null,
+    reference: r.otaCode || null,
+    identifiant: String(r.id)
+  }
+  // CHAMPS_FICHE : le contrat partage — la ligne Statut sur les DEUX ecrans.
+  const lignes = CHAMPS_FICHE
+    .filter(c => valeurs[c.id] != null && valeurs[c.id] !== '')
+    .map(c => `<div class="cal-fiche__ligne"><span class="caption muted">${esc(t(c.cle))}</span><span>${esc(valeurs[c.id])}</span></div>`)
+    .join('')
+  ouvrirFeuille(r.name || t('cal.booking'), `
+    <div class="msg-tiroir__bloc">
+      <span class="row" style="gap: 8px"><span class="cal-ligne-resa__point cal-barre--${famille}"></span>${esc(LIBELLE_CANAL[famille] || '')}</span>
+      ${badgeSansEmailVisible(r) ? `<p class="caption msg-echec">${esc(t('cal.no_email'))}</p><p class="caption muted">${esc(TEXTE_SANS_EMAIL)}</p>` : ''}
+      ${lignes}
+      <span data-fiche-evaluation></span>
+      <button type="button" class="btn btn--secondary" data-fiche-conv disabled>${esc(t('cal.open_conversation'))}</button>
+      <p class="caption muted" data-fiche-conv-note hidden></p>
+    </div>
+    ${droits.modifiable ? `<div class="msg-tiroir__bloc">
+      <label class="caption muted">${esc(t('cal.fiche_arrivee'))}</label><input type="date" data-f="arrivee" value="${r.startISO}">
+      <label class="caption muted">${esc(t('cal.fiche_depart'))}</label><input type="date" data-f="depart" value="${String(r.checkout).slice(0, 10)}">
+      <div class="row" style="gap: 10px">
+        <span><label class="caption muted">${esc(t('cal.adults'))}</label><input type="number" min="1" data-f="adultes" value="${r.numAdult || 1}" style="width: 70px"></span>
+        <span><label class="caption muted">${esc(t('cal.children'))}</label><input type="number" min="0" data-f="enfants" value="${r.numChild || 0}" style="width: 70px"></span>
+      </div>
+      <label class="caption muted">${esc(t('cal.price_night'))}</label>
+      <input type="text" inputmode="decimal" data-f="prix" placeholder="${esc(t('cal.price_unchanged'))}">
+      <p class="caption muted" data-f-total></p>
+      <span class="row" style="gap: 8px">
+        <button type="button" class="btn btn--primary" data-f-save>${esc(t('cal.save'))}</button>
+        <button type="button" class="link" data-f-annuler-resa>${esc(t('cal.cancel_booking'))}</button>
+      </span>
+      <p class="caption" data-f-etat></p>
+    </div>` : `<p class="caption muted" style="padding: 0 18px 14px">${esc(droits.note || '')}</p>`}`)
+  const corps = $('[data-bind="feuille-corps"]')
+  // « Ouvrir la conversation » : nait DESACTIVE, resolu par booking_id —
+  // UNE resa a la fois ; la raison est DITE, on n'affirme jamais « aucun
+  // fil » sans avoir pu regarder.
+  const resaCourante = String(r.id)
+  appel(`/api/messages?booking_id=${encodeURIComponent(resaCourante)}`).then(rep => {
+    const btn = corps.querySelector('[data-fiche-conv]')
+    if (!btn) return
+    if (rep && rep.has_conversation) {
+      btn.disabled = false
+      btn.addEventListener('click', () => { location.href = urlConversation(bien, r) })
+    } else {
+      const note = corps.querySelector('[data-fiche-conv-note]')
+      note.hidden = false
+      note.textContent = t(r.offline || familleSource(r.sourceBrute || r.source) === 'direct' ? 'cal.no_thread_direct' : 'cal.no_thread')
+    }
+  }).catch(() => {
+    const note = corps.querySelector('[data-fiche-conv-note]')
+    if (note) { note.hidden = false; note.textContent = t('cal.thread_unavailable') }
+  })
+  // Evaluation du voyageur : par le BUS, des le JOUR du depart (module commun).
+  brancherEvaluation({ resa: { id: r.id, checkout: r.checkout }, cible: corps.querySelector('[data-fiche-evaluation]'), encoreAffichee: () => !$('[data-bind="feuille"]').hidden })
+    .catch(e => logger.error('Calendrier', 'evaluation', e))
+  if (!droits.modifiable) return
+  const majTotal = () => {
+    const a = corps.querySelector('[data-f="arrivee"]').value
+    const d = corps.querySelector('[data-f="depart"]').value
+    const brut = corps.querySelector('[data-f="prix"]').value
+    const nuits = nuitsEntre(a, d)
+    const zone = corps.querySelector('[data-f-total]')
+    if (nuits <= 0) { zone.textContent = ''; return }
+    // Les TROIS cas du total (A.9) : prix saisi x nuits ; duree inchangee =
+    // montant inchange ; duree changee sans prix saisi = « au tarif actuel ».
+    if (String(brut).trim() !== '') {
+      const p = Number(String(brut).replace(',', '.'))
+      zone.textContent = Number.isFinite(p) ? t('cal.total_stay', { total: prixIntl(p * nuits, r.currency || bien.currency, langue()), n: nuits }) : ''
+    } else if (nuits === (r.span || nuitsEntre(r.startISO, r.checkout)) ) {
+      zone.textContent = r.amount != null ? t('cal.total_unchanged', { total: prixIntl(r.amount, r.currency || bien.currency, langue()) }) : ''
+    } else {
+      const parNuit = r.amount != null && r.span ? r.amount / r.span : null
+      zone.textContent = parNuit != null ? t('cal.total_at_current', { total: prixIntl(parNuit * nuits, r.currency || bien.currency, langue()), prix: prixIntl(parNuit, r.currency || bien.currency, langue()) }) : ''
+    }
+  }
+  corps.querySelectorAll('[data-f]').forEach(x => x.addEventListener('input', majTotal))
+  majTotal()
+  corps.querySelector('[data-f-save]').addEventListener('click', async () => {
+    const etatEl = corps.querySelector('[data-f-etat]')
+    const charge = {
+      propertyId: bien.provider_property_id, bookingId: r.id,
+      arrivee: corps.querySelector('[data-f="arrivee"]').value,
+      depart: corps.querySelector('[data-f="depart"]').value,
+      adultes: Number(corps.querySelector('[data-f="adultes"]').value),
+      enfants: Number(corps.querySelector('[data-f="enfants"]').value)
+    }
+    // Le PRIX est ABSENT du payload s'il n'est pas touche (l'arrondi
+    // rejouait : 100,00 / 3 nuits -> 99,99).
+    const brut = corps.querySelector('[data-f="prix"]').value
+    if (String(brut).trim() !== '') {
+      const p = Number(String(brut).replace(',', '.'))
+      if (!Number.isFinite(p) || p <= 0) { etatEl.textContent = t('cal.price_invalid'); return }
+      charge.prixParNuit = p
+    }
+    if (charge.arrivee === r.startISO && charge.depart === String(r.checkout).slice(0, 10)
+      && charge.adultes === (r.numAdult || 1) && charge.enfants === (r.numChild || 0) && charge.prixParNuit === undefined) {
+      etatEl.textContent = t('cal.no_change'); return
+    }
+    try {
+      etatEl.textContent = t('cal.sending')
+      await fetch('/api/reservation-directe', { method: 'PUT', headers: await entetesJson(), body: JSON.stringify(charge) }).then(reponseOuErreur)
+      fermerFeuille()
+      // On ne redessine PAS : le retour vient du feed.
+      toast(t('cal.booking_sent'), { duree: 9000 })
+      setTimeout(() => charger(), 8000)
+    } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
+  })
+  corps.querySelector('[data-f-annuler-resa]').addEventListener('click', async () => {
+    if (!window.confirm(t('cal.cancel_confirm'))) return
+    const etatEl = corps.querySelector('[data-f-etat]')
+    try {
+      etatEl.textContent = t('cal.sending')
+      await fetch('/api/reservation-directe', { method: 'DELETE', headers: await entetesJson(), body: JSON.stringify({ propertyId: bien.provider_property_id, bookingId: r.id }) }).then(reponseOuErreur)
+      fermerFeuille()
+      // La barre RESTE affichee : les dates ne sont pas encore libres cote canal.
+      toast(t('cal.booking_cancelled'), { duree: 9000 })
+      setTimeout(() => charger(), 8000)
+    } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
+  })
+}
+async function entetesJson () {
+  const { data: { session } } = await supabase.auth.getSession()
+  return { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json', ...enteteCompte() }
+}
+async function reponseOuErreur (r) {
+  const corps = await r.json().catch(() => ({}))
+  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; throw e }
+  return corps
+}
+function ouvrirFicheBlocage (bienId, blocageId) {
+  const bien = etat.biens.find(b => b.id === bienId) || {}
+  const ref = String(bien.provider_property_id || '')
+  const f = ((etat.fermetures[bienId] || etat.fermetures[ref]) || []).find(x => String(x.id) === String(blocageId))
+  if (!f) return
+  const ecrit = peutEcrire('reservations') && !etat.lectureSeule
+  ouvrirFeuille(t('cal.block_title', { raison: f.raison || '' }), `
+    <div class="msg-tiroir__bloc">
+      <label class="caption muted">${esc(t('cal.first_night'))}</label>
+      <input type="date" data-b="debut" value="${String(f.debut).slice(0, 10)}" ${ecrit ? '' : 'disabled'}>
+      <label class="caption muted">${esc(t('cal.last_night'))}</label>
+      <input type="date" data-b="fin" value="${String(f.fin).slice(0, 10)}" ${ecrit ? '' : 'disabled'}>
+      <label class="caption muted">${esc(t('cal.block_reason'))}</label>
+      <input type="text" maxlength="200" data-b="raison" value="${esc(f.raison || '')}" ${ecrit ? '' : 'disabled'}>
+      <p class="caption muted">${esc(t('cal.block_hint'))}</p>
+      ${ecrit ? `<span class="row" style="gap: 8px">
+        <button type="button" class="btn btn--primary" data-b-save>${esc(t('cal.save'))}</button>
+        <button type="button" class="link" data-b-suppr>${esc(t('cal.block_delete'))}</button>
+      </span><p class="caption" data-b-etat></p>` : ''}
+    </div>`)
+  if (!ecrit) return
+  const corps = $('[data-bind="feuille-corps"]')
+  corps.querySelector('[data-b-save]').addEventListener('click', async () => {
+    const etatEl = corps.querySelector('[data-b-etat]')
+    const debut = corps.querySelector('[data-b="debut"]').value
+    const fin = corps.querySelector('[data-b="fin"]').value
+    const raison = corps.querySelector('[data-b="raison"]').value.trim()
+    if (!debut || !fin || fin < debut) { etatEl.textContent = t('cal.range_invalid'); return }
+    if (!raison) { etatEl.textContent = t('cal.block_reason_required'); return }
+    if (debut === String(f.debut).slice(0, 10) && fin === String(f.fin).slice(0, 10) && raison === (f.raison || '')) {
+      etatEl.textContent = t('cal.no_change'); return
+    }
+    try {
+      await api.calendar.modifierFermeture(bienId, f.id, debut, fin, raison)
+      fermerFeuille(); toast(t('cal.saved')); await charger()
+    } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
+  })
+  corps.querySelector('[data-b-suppr]').addEventListener('click', async () => {
+    if (!window.confirm(t('cal.block_delete_confirm'))) return
+    const etatEl = corps.querySelector('[data-b-etat]')
+    try {
+      await api.calendar.rouvrirFermeture(bienId, f.id)
+      fermerFeuille(); toast(t('cal.block_deleted')); await charger()
+    } catch (e) { etatEl.textContent = e.message || t('cal.save_error') }
+  })
+}
+
+// ─── Démarrage ──────────────────────────────────────────────────────────────
+async function init () {
+  const session = await requireAuth()
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+  const user = await getUser()
+  $('[data-bind="initials"]').textContent = (user?.email || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis'),
+    outils: [
+      peutLire('reservations') && { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price' },
+      estTitulaire() && { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key' },
+      estTitulaire() && { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send' },
+      estTitulaire() && { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar' },
+      estTitulaire() && { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link' },
+      estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
+    ].filter(Boolean)
+  })
+  HSNav.render({ peutLire })
+  if (!peutLire('reservations')) {
+    $('[data-bind="etat-vide"]').hidden = false
+    $('[data-bind="etat-vide"]').innerHTML = `<p class="muted">${esc(t('cal.no_access'))}</p>`
+    return
+  }
+  etat.lectureSeule = !peutEcrire('reservations')
+  lirePrefs()
+  // Periode (ordinateur).
+  document.querySelectorAll('[data-mois]').forEach(b => {
+    b.setAttribute('aria-pressed', String(Number(b.dataset.mois) === etat.months))
+    b.addEventListener('click', () => {
+      etat.months = Number(b.dataset.mois)
+      document.querySelectorAll('[data-mois]').forEach(x => x.setAttribute('aria-pressed', String(x === b)))
+      viderSelection(); ecrirePrefs(); charger()
+    })
+  })
+  // Navigation : pas de 30 jours (ordinateur) / mois calendaire (telephone).
+  document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => {
+    const sens = Number(b.dataset.nav)
+    if (estLarge()) {
+      etat.decalage = sens === 0 ? 0 : etat.decalage + sens * 30
+    } else {
+      if (sens === 0) { const d = new Date(); etat.annee = d.getFullYear(); etat.mois = d.getMonth() }
+      else { etat.mois += sens; if (etat.mois < 0) { etat.mois = 11; etat.annee-- } if (etat.mois > 11) { etat.mois = 0; etat.annee++ } }
+      ecrirePrefs()
+    }
+    viderSelection(); charger()
+  }))
+  $('[data-menu-vue]').addEventListener('click', () => {
+    etat.vueComplete = !etat.vueComplete
+    ecrirePrefs(); renderTout()
+  })
+  $('[data-bind="vue-mobile"]').addEventListener('change', (e) => {
+    etat.vueMobile = e.target.value
+    ecrirePrefs(); renderGrilleMobile()
+  })
+  $('[data-bind="feuille-fermer"]').addEventListener('click', fermerFeuille)
+  $('[data-bind="flottante-annuler"]').addEventListener('click', () => { viderSelection(); renderTout() })
+  // Changement de jour : re-rendu si la date a change (onglet ouvert la nuit).
+  let jourVu = AUJOURDHUI
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && toISO(new Date()) !== jourVu) location.reload()
+  })
+  // Bascule de disposition au passage du seuil 900 px.
+  let large = estLarge()
+  window.addEventListener('resize', () => {
+    if (estLarge() !== large) { large = estLarge(); viderSelection(); chargerBiens().then(charger) }
+  })
+  await chargerBiens()
+  await charger()
+}
+init().catch(e => logger.error('Calendrier', e.message, e))
+
+</script>
+</body>
+</html>

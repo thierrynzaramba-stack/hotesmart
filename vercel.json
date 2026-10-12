@@ -117,6 +117,10 @@
       "destination": "/pages/biens-detail"
     },
     {
+      "source": "/calendrier",
+      "destination": "/pages/calendrier"
+    },
+    {
       "source": "/apps/agent-ai",
       "destination": "/pages/messages"
     },

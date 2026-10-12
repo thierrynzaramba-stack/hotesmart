@@ -398,3 +398,103 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .menu { position: fixed; inset-inline: var(--gap-m); top: 64px; min-width: 0; }
   .bottombar .badge { position: absolute; top: 2px; inset-inline-end: 18px; border: 2px solid var(--ink); }
 }
+
+/* ---------- Calendrier V5 (lot 3, étape 1) ---------- */
+.cal-page { padding: 14px var(--page-pad) 90px; display: flex; flex-direction: column; gap: 12px; }
+.cal-entete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cal-periode { display: inline-flex; gap: 4px; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
+.cal-periode .tab { padding: 5px 12px; }
+.cal-periode .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); }
+.cal-menu__liste { min-width: 220px; }
+.cal-menu__liste a { display: block; padding: 8px 10px; border-radius: 8px; color: var(--ink); font-weight: var(--fw-semibold); font-size: var(--fs-body); }
+.cal-menu__liste a:hover { background: var(--surface-2); }
+.cal-menu__section { padding: 8px 10px 2px; font-size: var(--fs-caption); color: var(--muted); font-weight: var(--fw-bold); }
+.cal-biens { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 2px; }
+.cal-pilule { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); padding: 5px 14px 5px 6px; cursor: pointer; flex: none; color: var(--ink); }
+.cal-pilule--active { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.cal-pilule--grise { opacity: .5; cursor: default; }
+.cal-pilule__photo { width: 30px; height: 30px; border-radius: var(--radius-pill); overflow: hidden; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; }
+.cal-pilule__photo img { width: 100%; height: 100%; object-fit: cover; }
+.cal-pilule__photo .icon { width: 15px; height: 15px; color: var(--muted); }
+.cal-pilule__nom { font-weight: var(--fw-semibold); font-size: var(--fs-small); white-space: nowrap; }
+.cal-nav { gap: 8px; }
+.cal-nav__mois { margin: 0 6px; font-size: 17px; }
+.cal-vue { height: 38px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 10px; font-size: var(--fs-small); margin-inline-start: auto; }
+.cal-avis { padding: 12px 16px; font-size: var(--fs-small); color: var(--muted); }
+.cal-vide { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 16px; text-align: center; }
+
+/* Planning ordinateur */
+.cal-planning { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); }
+.cal-bande { position: sticky; top: 0; z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); padding-inline-start: 120px; }
+.cal-bande__l { display: grid; grid-auto-flow: column; grid-auto-columns: 46px; }
+.cal-bande__mois { font-size: var(--fs-caption); font-weight: var(--fw-bold); white-space: nowrap; overflow: visible; height: 18px; }
+.cal-bande__mois--debut { border-inline-start: 2px solid var(--info); padding-inline-start: 4px; }
+.cal-bande__jour { text-align: center; font-size: var(--fs-caption); color: var(--muted); padding: 2px 0 6px; }
+.cal-bande__jour b { display: block; color: var(--ink); font-size: var(--fs-small); }
+.cal-bien { border-bottom: 1px solid var(--line); }
+.cal-bien__tete { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px 6px; font-weight: var(--fw-bold); position: sticky; left: 0; }
+.cal-bien__resas { position: relative; height: 32px; margin-inline-start: 120px; width: calc(var(--n) * 46px); }
+.cal-barre { position: absolute; top: 3px; height: 26px; border: 0; border-radius: var(--radius-pill); color: var(--on-ink); font-size: var(--fs-caption); font-weight: var(--fw-semibold); padding: 0 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
+.cal-barre--airbnb { background: var(--canal-airbnb); }
+.cal-barre--booking { background: var(--canal-booking); }
+.cal-barre--direct { background: var(--canal-direct); }
+.cal-barre--blocage { background: var(--surface-2); color: var(--ink); font-style: italic; border: 1px solid var(--border); left: calc(var(--d) / var(--n) * 100%); border-radius: 7px; z-index: 1; }
+.cal-barre--finie { opacity: .45; }
+.cal-barre--finie:hover { opacity: 1; }
+.cal-barre--coupe-g { border-start-start-radius: 0; border-end-start-radius: 0; }
+.cal-barre--coupe-d { border-start-end-radius: 0; border-end-end-radius: 0; }
+.cal-table { border-collapse: collapse; table-layout: fixed; width: max-content; }
+.cal-table td, .cal-table th { width: 46px; border-inline-start: 1px solid var(--line); }
+.cal-libelle { width: 120px !important; min-width: 120px; text-align: start; padding: 0 10px; position: sticky; left: 0; background: var(--surface); border-inline-start: 0 !important; }
+.cal-nuit { position: relative; height: 40px; text-align: center; font-size: var(--fs-caption); cursor: pointer; user-select: none; }
+.cal-param { height: 26px; text-align: center; font-size: var(--fs-caption); color: var(--muted); }
+/* LES QUATRE ÉTATS (§4.1, dette 20) — la couleur EST l'état. */
+.cal-nuit--vendue { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.cal-nuit--vendue .cal-nuit__prix { color: var(--muted); }
+.cal-nuit--ouverte { background: var(--surface); }
+.cal-nuit--fermee { background: repeating-linear-gradient(45deg, var(--amber-soft), var(--amber-soft) 4px, var(--surface) 4px, var(--surface) 8px); }
+.cal-nuit--fermee .cal-nuit__prix { text-decoration: line-through; color: var(--muted); }
+.cal-nuit--attente { background: var(--surface); outline: 1px dashed var(--muted); outline-offset: -3px; }
+.cal-nuit--passe { opacity: .55; cursor: default; }
+.cal-nuit--sel { box-shadow: inset 0 0 0 2px var(--info); }
+.cal-nuit__saisie { width: 42px; border: 1px solid var(--info); border-radius: 6px; font-size: var(--fs-caption); text-align: center; background: var(--surface); color: var(--ink); }
+.cal-we { background-color: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
+.cal-auj { box-shadow: inset 0 0 0 1px var(--info); }
+.cal-orpheline { position: absolute; top: 2px; inset-inline-end: 2px; }
+.cal-orpheline .icon { width: 11px; height: 11px; color: var(--amber); }
+
+/* Barre flottante — les CINQ actions */
+.cal-flottante { position: fixed; bottom: calc(76px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); padding: 10px 14px; z-index: 30; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; }
+
+/* Grille téléphone */
+.cal-mois__grille { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-mois__jour { text-align: center; }
+.cal-case { position: relative; aspect-ratio: 1 / 1.45; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: var(--ink); display: flex; flex-direction: column; justify-content: space-between; align-items: center; padding: 3px 2px; cursor: pointer; font-family: inherit; }
+.cal-case .cal-case__valeur { font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+.cal-case--sel { box-shadow: inset 0 0 0 2px var(--info); }
+.cal-mois__legende { margin: 10px 2px; }
+.cal-mois__resas { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.cal-ligne-resa { display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 9px 6px; border-bottom: 1px solid var(--line); cursor: pointer; text-align: start; color: var(--ink); font-family: inherit; font-size: var(--fs-small); }
+.cal-ligne-resa__point { width: 11px; height: 11px; border-radius: var(--radius-pill); flex: none; display: inline-block; }
+.cal-ligne-resa__point.cal-barre--blocage { border: 1px solid var(--border); }
+
+/* Feuille, rubriques, fiche */
+.cal-feuille input[type="date"], .cal-feuille input[type="text"], .cal-feuille input[type="email"], .cal-feuille input[type="tel"], .cal-feuille input[type="number"], .cal-feuille select, .cal-feuille textarea { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 9px 12px; font-size: var(--fs-small); font-family: inherit; max-width: 100%; }
+.cal-rub { border-bottom: 1px solid var(--line); }
+.cal-rub summary { padding: 12px 18px; font-weight: var(--fw-semibold); cursor: pointer; }
+.cal-rub__corps { display: flex; flex-direction: column; gap: 10px; padding: 0 18px 14px; }
+.cal-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px 9px; font-size: var(--fs-caption); cursor: pointer; }
+.cal-chip:has(input:checked) { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.cal-chip input { position: absolute; opacity: 0; }
+.cal-fiche__ligne { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-small); }
+
+/* Toasts */
+.cal-toasts { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; max-width: min(92vw, 480px); }
+.cal-toast { display: flex; align-items: center; gap: 12px; background: var(--ink); color: var(--on-ink); border-radius: var(--radius-card); padding: 11px 16px; font-size: var(--fs-small); box-shadow: var(--shadow-hover); }
+.cal-toast--erreur { background: var(--danger); }
+.cal-toast .link { color: var(--on-ink); text-decoration: underline; background: none; border: 0; cursor: pointer; font-weight: var(--fw-bold); }
+
+@media (max-width: 899px) {
+  .cal-periode { display: none; }
+  .cal-flottante { bottom: calc(86px + env(safe-area-inset-bottom)); width: calc(100vw - 20px); }
+}
