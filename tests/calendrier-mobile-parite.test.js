@@ -53,7 +53,7 @@ test('LE TEST QUI COMPTE : le telephone ne tire plus la source au sort, et lit l
 })
 
 test('LE TEST QUI COMPTE : les deux ecrans suivent la MEME regle — aucun ne la redefinit', () => {
-  for (const f of ['pages/calendrier.html', 'pages/calendrier.html']) {
+  for (const f of ['pages/calendrier.html']) {
     const s = sansCommentaires(lire(f))
     assert.match(s, /from '\/shared\/calendrier-resa\.js'/, `${f} importe le module commun`)
     for (const def of [/function familleSource\s*\(/, /function mapResa\s*\(/, /function sansMessagerieOta\s*\(/, /function estOffline\s*\(/, /COLORS_BY_SOURCE\s*=/, /LIBELLE_CANAL\s*=/]) {

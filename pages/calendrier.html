@@ -298,7 +298,7 @@ function construireEtats (start, end) {
     const libre = (iso) => {
       const s = parIso[iso]
       if (!s) return false
-      return !vendue.has(iso) && s.avail !== 'closed' && s.stopSell !== 'closed'
+      return !vendue.has(iso) && !nuitFermee(s)
     }
     etat.orphelines.set(id, detecterOrphelines(joursISO, {
       estLibre: libre,
@@ -873,6 +873,10 @@ function brancherPlanning () {
     })
     // Clavier : Entree / F2 / chiffre = saisie inline (A.5, conserve).
     td.addEventListener('keydown', (e) => {
+      // Memes gardes que mousedown/touchstart/click : lecture seule et jour
+      // passe refusent AUSSI au clavier (revue de 6f3d6af).
+      if (etat.lectureSeule || !peutEcrire('reservations')) return
+      if (td.dataset.iso < AUJOURDHUI) return
       const chiffre = /^[0-9]$/.test(e.key)
       if (chiffre && etat.vueMobile !== 'rate') return
       if (e.key === 'Enter' || e.key === 'F2' || chiffre) {
@@ -1714,6 +1718,13 @@ async function init () {
   }
   etat.lectureSeule = !peutEcrire('reservations')
   lirePrefs()
+  // Lien profond ?bien=<uuid> (redirections des anciennes routes
+  // /biens/:id/calendrier) : ce bien s'affiche, en tete.
+  const bienDemande = new URLSearchParams(location.search).get('bien')
+  if (bienDemande) {
+    etat.choisis = [bienDemande, ...etat.choisis.filter(x => x !== bienDemande)]
+    etat.choisisDefinis = true
+  }
   // Periode (ordinateur).
   document.querySelectorAll('[data-mois]').forEach(b => {
     b.setAttribute('aria-pressed', String(Number(b.dataset.mois) === etat.months))

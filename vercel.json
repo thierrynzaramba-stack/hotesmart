@@ -4,7 +4,9 @@
   "outputDirectory": ".",
   "cleanUrls": true,
   "trailingSlash": false,
-  "regions": ["cdg1"],
+  "regions": [
+    "cdg1"
+  ],
   "functions": {
     "api/cron.js": {
       "maxDuration": 60
@@ -51,10 +53,6 @@
     {
       "source": "/guide",
       "destination": "/pages/guide"
-    },
-    {
-      "source": "/m/calendrier",
-      "destination": "/pages/calendrier-mobile"
     },
     {
       "source": "/login",
@@ -109,10 +107,6 @@
       "destination": "/pages/biens-nouveau"
     },
     {
-      "source": "/biens/:id/calendrier",
-      "destination": "/pages/biens-calendrier"
-    },
-    {
       "source": "/biens/:id",
       "destination": "/pages/biens-detail"
     },
@@ -150,6 +144,18 @@
           "value": "/"
         }
       ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/m/calendrier",
+      "destination": "/calendrier",
+      "permanent": false
+    },
+    {
+      "source": "/biens/:id/calendrier",
+      "destination": "/calendrier?bien=:id",
+      "permanent": false
     }
   ]
 }

@@ -389,7 +389,13 @@ test('colonne `raw` absente : on DEGRADE, on ne tombe pas', () => {
 })
 
 test('PRIX : ne pas toucher au prix ne doit PAS repricer le sejour', () => {
-  // memePrix : meme total a l'arrondi pres = prix OMIS du payload.
+  // ⚠ 100,00 sur 3 nuits : `amount / nuits` arrondi au centime donne
+  // 33,33 x 3 = 99,99. Garde SERVEUR (inchangee par le retargage) :
+  const put = API.slice(API.indexOf("if (req.method === 'PUT')"))
+  assert.ok(put.includes('memeDuree'), 'le cas « meme duree » est distingue')
+  assert.match(put, /totalActuelCents - base \* \(listeNuits\.length - 1\)/,
+    'montant exact conserve, reliquat sur la derniere nuit')
+  // Cote V5 : meme total a l'arrondi pres = prix OMIS du payload.
   assert.match(PAGE, /Math\.abs\(p \* r\.span - r\.amount\) < 0\.005/)
   assert.match(PAGE, /charge\.prixParNuit === undefined/)
 })
@@ -468,8 +474,19 @@ test('perimetre : le filtre nul est bien le cas du proprietaire (non regresse)',
 })
 
 test('refus : la PHRASE va dans `error`, le code dans `code`', () => {
-  // Le front construit son message depuis corps.message/error et route par
-  // corps.code — jamais l'inverse.
+  // Garde SERVEUR (inchangee par le retargage) : les refus metier portent
+  // une phrase dans error, leur identifiant dans code, via le helper.
+  assert.match(API, /function reponseRefus/)
+  assert.match(API, /error: resultat\.message \|\| 'La demande a ete refusee\.'/)
+  for (const code of ['reservation_ota', 'reservation_non_modifiable', 'reservation_moteur']) {
+    assert.ok(!new RegExp(`error: '${code}'`).test(API), `${code} ne doit plus etre dans error`)
+    assert.ok(API.includes(`code: '${code}'`), `${code} doit etre dans code`)
+  }
+  assert.ok(!/\.json\(resultat\)/.test(API), 'plus de resultat brut rendu au front')
+  assert.strictEqual((API.match(/\.json\(reponseRefus\(resultat\)\)/g) || []).length, 2,
+    'creation ET modification')
+  // Cote V5 : le front construit son message depuis corps.message/error et
+  // route par corps.code.
   assert.match(PAGE, /new Error\(corps\.message \|\| corps\.error/)
   assert.match(PAGE, /e\.code = corps\.code \|\| corps\.error/)
 })
@@ -565,5 +582,7 @@ test('fermetures : l ecran les affiche mais la VENDABILITE vient de calendar_inv
   // nuitFermee lit inv (avail/stopSell) ; fermeeParBlocage ne sert qu'a
   // distinguer « fermee par l hote » de « pas encore ouverte ».
   assert.match(PAGE, /function nuitFermee \(s\)/)
-  assert.match(PAGE_BRUTE, /vendabilite se lit\n\/\/ EXCLUSIVEMENT dans calendar_inventory|EXCLUSIVEMENT dans calendar_inventory/)
+  // `fermee` derive de nuitFermee(s) — l'etat d'inventaire — jamais des
+  // fermetures (comportement, pas commentaire).
+  assert.match(PAGE, /const fermee = nuitFermee\(s\)/)
 })

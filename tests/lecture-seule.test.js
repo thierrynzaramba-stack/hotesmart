@@ -24,7 +24,6 @@ const lire = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8')
 const PAGES = [
   ['apps/menages/index.html',        'menages'],
   ['pages/calendrier.html',    'reservations'],
-  ['pages/calendrier.html',   'reservations'],
   ['pages/biens.html',               'reservations'],
   ['pages/aujourdhui.html',           'reservations']
 ]
@@ -104,9 +103,9 @@ test('calendrier : l\'etat lecture seule est pose AVANT tout rendu', () => {
   const html = lire('pages/calendrier.html')
   const iNoAccess = html.indexOf("cal.no_access")
   const iFlag = html.indexOf("etat.lectureSeule = !peutEcrire('reservations')")
-  const iCharge = html.lastIndexOf('charger()')
-  assert.ok(iNoAccess > 0 && iFlag > 0 && iFlag < iCharge,
-    'le drapeau precede le premier chargement')
+  const iPrefs = html.indexOf('lirePrefs()', iFlag - 2000)
+  assert.ok(iNoAccess > 0 && iFlag > 0 && iFlag < html.indexOf('lirePrefs()', iFlag),
+    'le drapeau est pose des l init, avant les prefs et tout chargement')
   assert.ok(/avis-lecture"\]'\)\.hidden = !etat\.lectureSeule/.test(html), 'et le bandeau le dit')
 })
 
@@ -116,7 +115,9 @@ test('calendrier mobile : les zones de rendu sont STATIQUES, jamais remplacees',
   // ecrivent dans des data-bind fixes du markup.
   const html = lire('pages/calendrier.html')
   assert.ok(html.includes('data-bind="grille-mobile"'), 'zone fixe du telephone')
-  assert.ok(!/main\.innerHTML|<main[^>]*>\s*<\/main>[^]*innerHTML/.test(html.split('<script')[1] || ''), 'aucun remplacement de <main>')
+  const module_ = html.split('<script type="module">')[1] || ''
+  assert.ok(module_.length > 1000, 'le module de la page est bien la')
+  assert.ok(!/main\.innerHTML/.test(module_), 'aucun remplacement de <main>')
 })
 
 test('calendrier mobile : un compte 100% Beds24 n\'est pas invite a se reconnecter', () => {

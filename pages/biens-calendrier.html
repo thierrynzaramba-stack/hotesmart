@@ -13,7 +13,10 @@
      /biens/:id/calendrier survit et aboutit ici ; le choix des biens vit
      dans les préférences de la page unique. L'historique complet est dans
      git (963d05d et avant). -->
-<script>location.replace('/calendrier')</script>
+<script>
+  var m = location.pathname.match(/\/biens\/([^/]+)\/calendrier/)
+  location.replace('/calendrier' + (m ? '?bien=' + encodeURIComponent(m[1]) : ''))
+</script>
 </head>
 <body></body>
 </html>

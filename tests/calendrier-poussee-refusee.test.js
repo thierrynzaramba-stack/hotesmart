@@ -189,6 +189,8 @@ test('les ecrans calendrier distinguent « non publie » de « enregistre »', (
     'aucune ecriture calendrier hors de saveAvecAnnulation')
   assert.ok((src.match(/saveAvecAnnulation\(/g) || []).length >= 4,
     'les chemins d ecriture consomment le point unique')
+  assert.ok(!/api\.calendar\.save\(/.test(src),
+    'aucun wrapper d ecriture calendar qui contournerait verdictToast')
   const fr = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/fr.json'), 'utf8')
   assert.match(fr, /NON PUBLIÉ/, 'et le refus se DIT (cle cal.push_failed)')
 })

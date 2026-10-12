@@ -131,7 +131,9 @@ test('mise en page : le dernier bien n\'est pas cache par la barre flottante', (
 })
 
 test('LES JOURS DU MOIS NE SONT RENDUS QU\'UNE FOIS, sous le mois', () => {
-  // La bande (mois + jours) est UNIQUE pour tous les biens.
-  assert.match(PAGE_BRUTE, /Bande mois \+ jours, UNE fois pour tous les biens/)
-  assert.ok((PAGE.match(/cal-bande__l/g) || []).length >= 2)
+  // Le template des jours (cal-bande__jour) n'existe qu'UNE fois, dans
+  // renderPlanning — jamais dans grilleBien (comportement, pas commentaire).
+  assert.strictEqual((PAGE.match(/cal-bande__jour\$/g) || []).length, 1)
+  const grille = PAGE.slice(PAGE.indexOf('function grilleBien'), PAGE.indexOf('// ─── Rendu téléphone'))
+  assert.ok(!grille.includes('cal-bande'), 'grilleBien ne rend aucune bande')
 })

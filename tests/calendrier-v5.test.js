@@ -172,8 +172,10 @@ test('calendrier : aucun appel provider, moteur ou AirROI depuis la page', () =>
 })
 
 test('les anciennes pages calendrier REDIRIGENT vers /calendrier (go de Thierry du 13 octobre 2026)', () => {
-  assert.ok(lire('pages/biens-calendrier.html').includes("location.replace('/calendrier')"))
+  assert.ok(lire('pages/biens-calendrier.html').includes("location.replace('/calendrier'"))
+  assert.ok(lire('pages/biens-calendrier.html').includes("'?bien='"), 'le lien profond porte le bien en query')
   assert.ok(lire('pages/calendrier-mobile.html').includes("location.replace('/calendrier')"))
+  assert.ok(lire('vercel.json').includes('"/calendrier?bien=:id"'), 'redirect declaratif qui PORTE l id')
   assert.ok(lire('vercel.json').includes('"/calendrier"'), 'la route /calendrier existe')
   assert.ok(!/"destination": "\/pages\/calendrier\.html"/.test(lire('vercel.json')), 'cleanUrls : pas de .html en destination')
 })
