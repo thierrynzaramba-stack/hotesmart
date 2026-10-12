@@ -11,13 +11,13 @@ const assert = require('node:assert')
 const fs = require('fs')
 const path = require('path')
 
-const PAGE_BRUTE = fs.readFileSync(path.join(__dirname, '..', 'pages', 'biens-calendrier.html'), 'utf8')
+const PAGE_BRUTE = fs.readFileSync(path.join(__dirname, '..', 'pages', 'calendrier.html'), 'utf8')
 // ⚠ On teste le CODE, pas les commentaires. Les explications citent volontiers
 // ce qu'on a supprime (« l'ancienne version faisait SRC[idx % 3] ») : chercher
 // ces chaines dans le fichier brut ferait echouer un test sur sa propre
 // documentation.
 const PAGE = PAGE_BRUTE.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
-const MOBILE = fs.readFileSync(path.join(__dirname, '..', 'pages', 'calendrier-mobile.html'), 'utf8')
+const MOBILE = fs.readFileSync(path.join(__dirname, '..', 'pages', 'calendrier.html'), 'utf8')
 const CAL = fs.readFileSync(path.join(__dirname, '..', 'api', 'calendar.js'), 'utf8')
 // Chantier calendrier mobile (30 septembre 2026) : la regle des reservations vit
 // dans un module COMMUN aux deux ecrans. Les tests qui la cherchaient dans la
@@ -29,28 +29,27 @@ const MOBILE_CODE = MOBILE.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n
 // ─── L'endpoint sert ce qu'il faut a la fiche ───────────────────────────────
 
 test('front : le bien porte provider_property_id, sans quoi RIEN ne fonctionne', () => {
-  // ⚠ mapBien ne le recopiait pas : JSON.stringify supprimait la cle et le
-  // serveur repondait « propertyId manquant ». Creation ET annulation
-  // echouaient a 100 % des cas.
-  assert.match(PAGE, /provider_property_id:p\.provider_property_id/)
+  // RETARGE 13/10/2026 : les anciennes pages redirigent vers la V5.
+  assert.match(PAGE, /propertyId: bien\.provider_property_id/)
 })
 
 test('front : le nom du voyageur est echappe dans l\'attribut ET le libelle', () => {
-  // Un nom venu d'une OTA contenant un guillemet cassait l'attribut `title`.
-  assert.match(PAGE, /title="'\+escapeHtmlLocal\(bk\.name/)
-  assert.match(PAGE, /const nameShort=escapeHtmlLocal\(/)
+  assert.match(PAGE, /title="\$\{esc\(\(r\.name \|\| ''\)/)
+  assert.match(PAGE, /\$\{esc\(court\)\}/)
 })
 
-test('front : TOUS les overlays neutralisent le raccourci clavier', () => {
-  // Le focus peut etre sur un <button> d'une modale : une frappe demarrait
-  // l'edition d'un tarif DERRIERE la fenetre.
-  assert.match(PAGE, /\['overlay','overlay-ajout','overlay-resa'\]/)
+test('front : la saisie clavier ne demarre que depuis une cellule focalisee, en vue Prix', () => {
+  // L'ancien bug : une frappe demarrait l'edition DERRIERE une modale.
+  // V5 : le raccourci vit sur la CELLULE, les chiffres refusent hors vue Prix.
+  assert.match(PAGE, /td\.addEventListener\('keydown'/)
+  assert.match(PAGE, /if \(chiffre && etat\.vueMobile !== 'rate'\) return/)
 })
 
 test('front : le bouton de validation est reinitialise a chaque ouverture', () => {
-  // Sinon, apres une creation reussie, il restait « Envoi… » et desactive.
-  const bloc = PAGE.slice(PAGE.indexOf('function ouvrirFormulaireAjout'), PAGE.indexOf('function fermerFormulaireAjout'))
-  assert.ok(bloc.includes('btnV.disabled = false'))
+  // V5 : la feuille est RECONSTRUITE a chaque ouverture ; sur un refus le
+  // bouton est REACTIVE explicitement.
+  assert.match(PAGE, /bouton\.disabled = true/)
+  assert.match(PAGE, /bouton\.disabled = false/)
 })
 
 test('calendrier : chaque reservation porte son booking_id', () => {
@@ -91,37 +90,27 @@ test('calendrier : « Offline » est reconnu comme une reservation directe', () 
 // ─── Aucun bouton qui promet un pouvoir qu'on n'a pas ───────────────────────
 
 test('fiche : les actions exigent Offline + Channex + droit + pas lecture seule', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('function ouvrirFicheResa'), PAGE.indexOf('async function annulerResaCourante'))
-  assert.ok(bloc.includes('resa.offline'), 'reserve aux reservations directes')
-  assert.ok(bloc.includes('channex'), 'reserve aux biens Channex')
-  assert.ok(bloc.includes("peutEcrire('reservations')"), 'exige le droit')
-  assert.ok(bloc.includes('LECTURE_SEULE'), 'exclut la lecture seule')
+  // V5 : la regle est LE module (droitsResa), appele avec le droit reel.
+  assert.match(PAGE, /droitsResa\(bien, r, peutEcrire\('reservations'\) && !etat\.lectureSeule\)/)
+  assert.match(PAGE, /\$\{droits\.modifiable \?/)
 })
 
 test('fiche : une reservation OTA explique POURQUOI elle n\'est pas modifiable', () => {
-  // Un vide laisserait croire a un bug ; on dit ou aller.
   assert.match(MODULE, /modifiable uniquement chez/)
-  assert.match(PAGE, /note\.textContent = droits\.note/)
+  assert.match(PAGE, /esc\(droits\.note \|\| ''\)/)
 })
 
-test('ajout : le bouton reste cache hors Channex, sans droit ou en lecture seule', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('function showFloatBar'), PAGE.indexOf('function hideFloatBar'))
-  assert.ok(bloc.includes("btn-ajouter-resa"))
-  assert.ok(bloc.includes('channex'))
-  assert.ok(bloc.includes("peutEcrire('reservations')"))
-  assert.ok(bloc.includes('LECTURE_SEULE'))
-  assert.ok(bloc.includes("style.display = ok ? '' : 'none'"))
+test('ajout : la reservation reste fermee hors Channex, et tout l\'ajout sans droit', () => {
+  assert.match(PAGE, /\$\{channex \? '' : 'disabled'\}/)
+  assert.match(PAGE, /cal\.booking_channex_only/)
+  assert.match(PAGE, /if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) \{ barre\.hidden = true/)
+  assert.match(PAGE, /\$\{mobile && peut \? `<button type="button" class="cal-btn-plus"/)
 })
 
 // ─── La fiche reste ouvrable en consultation ────────────────────────────────
 
-test('fiche : l\'ecouteur est pose AVANT la sortie « lecture seule »', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('function attachEvents'))
-  const posEcouteur = bloc.indexOf('ouvrirFicheResa')
-  const posRetour = bloc.indexOf('if(LECTURE_SEULE) return')
-  assert.ok(posEcouteur > -1 && posRetour > -1)
-  assert.ok(posEcouteur < posRetour,
-    'consulter une reservation n\'est pas ecrire : la fiche doit s\'ouvrir meme en lecture seule')
+test('fiche : la consultation reste ouverte en lecture seule', () => {
+  assert.match(PAGE, /\[data-resa\]'\)\.forEach\(b => b\.addEventListener\('click', \(\) => ouvrirFicheResa\(/)
 })
 
 // ─── Le cœur n'est jamais ecrit par le front ────────────────────────────────
@@ -132,10 +121,11 @@ test('ajout : aucune ecriture directe du snapshot depuis la page', () => {
 })
 
 test('ajout : confirmation en DEUX temps, sans affirmer ce qui n\'est pas vrai', () => {
-  // « envoyee » est un fait ; « visible dans HoteSmart » ne peut pas etre affirme
-  // a cet instant — la reservation n'existe dans le cœur qu'apres le feed.
-  assert.match(PAGE, /Envoyée au canal/)
-  assert.match(PAGE, /prochain rafraîchissement/)
+  // « envoyee » est un fait ; le coeur n'apprend la resa que par le feed.
+  assert.match(PAGE, /cal\.booking_sent/)
+  const FR = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/fr.json'), 'utf8')
+  assert.match(FR, /Envoyée au canal/)
+  assert.match(PAGE, /setTimeout\(\(\) => charger\(\), 8000\)/)
 })
 
 // ─── Desktop d'abord ────────────────────────────────────────────────────────
@@ -147,9 +137,10 @@ test('ajout : confirmation en DEUX temps, sans affirmer ce qui n\'est pas vrai',
 // l'ajout et la modification — par la MEME regle et les MEMES appels que
 // l'ordinateur (tests/calendrier-mobile-parite.test.js).
 test('MOBILE RATTRAPE (30 septembre 2026) : fiche et ajout sur telephone, par la regle commune', () => {
-  assert.ok(MOBILE_CODE.includes('ouvrirFicheResa'), 'la fiche existe sur mobile')
-  assert.ok(MOBILE_CODE.includes('api.reservationDirecte.creer('), 'l ajout existe sur mobile')
-  assert.match(MOBILE_CODE, /droitsResa\(bien, resa, ecriture\(\)\)/, 'le droit de modifier : la regle commune')
+  // V5 : UNE page pour les deux ecrans — par CONSTRUCTION.
+  assert.ok(PAGE.includes('function brancherMobile'), 'le telephone est branche')
+  assert.ok(PAGE.includes('ouvrirFicheResa'), 'la fiche existe sur mobile')
+  assert.ok(PAGE.includes("appel('/api/reservation-directe'"), 'l ajout existe (writer unique)')
 })
 
 // ─── L'endpoint d'ecriture ──────────────────────────────────────────────────
@@ -214,29 +205,22 @@ test('endpoint : un conflit de disponibilite rend 409, pas 400', () => {
 // ─── Retouches du formulaire (7 septembre 2026) ─────────────────────────────
 
 test('formulaire : prenom et nom sont DEUX champs', () => {
-  assert.match(PAGE, /id="ajout-prenom"/)
-  assert.match(PAGE, /id="ajout-nom"/)
-  // L'ancienne version coupait « Prénom Nom » sur le premier espace : un nom
-  // compose partait de travers.
-  assert.ok(!PAGE.includes("nomComplet.split(' ')"), 'plus de decoupage a l\'espace')
+  assert.match(PAGE, /data-aj="prenom"/)
+  assert.match(PAGE, /data-aj="nom"/)
+  assert.ok(!PAGE.includes("nomComplet.split(' ')"))
   assert.match(PAGE, /name: prenom/)
   assert.match(PAGE, /surname: nom/)
 })
 
 test('formulaire : le TOTAL du sejour est affiche avant validation', () => {
-  assert.match(PAGE, /function rafraichirTotal/)
-  assert.match(PAGE, /Total du séjour/)
-  // Recalcule a chaque frappe, pas seulement a l'ouverture.
-  assert.match(PAGE, /\['ajout-prix','ajout-adultes','ajout-enfants'\]/)
+  assert.match(PAGE, /majCapaciteEtTotal/)
+  assert.match(PAGE, /cal\.total_stay/)
+  assert.match(PAGE, /\[data-aj\]'\)\.forEach\(x => x\.addEventListener\('input', majCapaciteEtTotal\)\)/)
 })
 
 test('formulaire : les voyageurs sont plafonnes a la CAPACITE du bien', () => {
-  assert.match(PAGE, /function depassementCapacite/)
-  // Le plafond et son message vivent dans le module commun depuis la review du
-  // lot mobile (1er octobre 2026) : la page l'appelle avec la capacite du bien,
-  // aux TROIS endroits (saisie, fiche, enregistrement).
-  assert.strictEqual((PAGE.match(/messageCapacite\([^)]*bien\.capacity\)/g) || []).length, 3)
-  assert.ok(!/au maximum — vous en avez saisi/.test(PAGE), 'plus de copie du message dans la page')
+  assert.ok((PAGE.match(/messageCapacite\(adultes, enfants, Number\(bien\.capacity\) \|\| 99\)/g) || []).length >= 3)
+  assert.ok(!/au maximum — vous en avez saisi/.test(PAGE))
   assert.match(MODULE, /au maximum/)
 })
 
@@ -284,23 +268,20 @@ test('endpoint : le prix par nuit est arrondi au centime avant repartition', () 
 })
 
 test('formulaire : le total porte la DEVISE DU BIEN, pas « € » en dur', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('function rafraichirTotal'), PAGE.indexOf('function depassementCapacite'))
-  assert.ok(bloc.includes('curSym('), 'la page a deja un helper de devise, utilise partout ailleurs')
-  assert.ok(!/Total du séjour : ' \+ total\.toFixed\(2\) \+ ' €/.test(bloc), 'plus d\'euro code en dur')
+  assert.match(PAGE, /prixIntl\(prix \* nuits, bien\.currency, langue\(\)\)/)
+  assert.ok(!/toFixed\(2\) \+ ' €/.test(PAGE))
 })
 
 test('formulaire : les compteurs sont reinitialises ET verifies a l\'ouverture', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('function ouvrirFormulaireAjout'), PAGE.indexOf('function fermerFormulaireAjout'))
-  assert.ok(bloc.includes("getElementById('ajout-adultes').value = 2"))
-  assert.ok(bloc.includes("getElementById('ajout-enfants').value = 0"))
-  assert.ok(bloc.includes('verifierCapaciteAffichee()'), 'verifie des l\'ouverture, pas seulement a la frappe')
+  // V5 : le formulaire est RECONSTRUIT avec ses defauts, capacite verifiee
+  // immediatement (majCapaciteEtTotal() a l'ouverture).
+  assert.match(PAGE, /value="2" data-aj="adultes"/)
+  assert.match(PAGE, /value="0" data-aj="enfants"/)
+  assert.match(PAGE, /majCapaciteEtTotal\(\)/)
 })
 
 test('formulaire : l\'avertissement de capacite n\'ecrase pas le message d\'etat', () => {
-  // `ajout-etat` porte « Envoi au canal… » et le refus d'un 409 ; une frappe
-  // effacait l'information.
-  assert.match(PAGE, /id="ajout-alerte"/)
-  assert.match(PAGE, /function verifierCapaciteAffichee/)
-  const bloc = PAGE.slice(PAGE.indexOf('function verifierCapaciteAffichee'), PAGE.indexOf("];['ajout-prix'") + 200)
-  assert.ok(!bloc.includes("ajout-etat"), 'l\'avertissement a sa propre zone')
+  // data-aj-etat porte « Envoi… » et les refus ; la capacite a SA zone.
+  assert.match(PAGE, /data-aj-capacite/)
+  assert.match(PAGE, /data-aj-etat/)
 })

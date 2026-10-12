@@ -47,8 +47,9 @@ test('LE TEST QUI COMPTE : le mode `keep` PREVIENT l hote, il ne se contente pas
   // ⚠ LE FRONT NE LIT QUE `warnings` — c'est la raison d'etre du correctif.
   // Si un jour il lisait `task_ids`, ce test pourrait s'assouplir ; tant qu'il
   // ne le fait pas, l'avertissement est le seul canal.
-  const front = lire('pages/biens-calendrier.html')
-  assert.ok(/resp\.warnings/.test(front), 'le front lit warnings')
+  // RETARGE 13/10/2026 : la V5 lit warnings dans verdictToast (r.warnings).
+  const front = lire('pages/calendrier.html')
+  assert.ok(/r\.warnings && r\.warnings\.length/.test(front), 'le front lit warnings')
   assert.ok(!/restrictions_skipped/.test(front),
     'et NE lit pas restrictions_skipped : le drapeau seul est invisible a l hote')
 

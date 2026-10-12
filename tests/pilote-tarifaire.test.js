@@ -310,36 +310,33 @@ test('LE TEST QUI COMPTE : la colonne absente ne tue pas la LECTURE du calendrie
     'et le journal dit quoi faire')
 })
 
-test('LE TEST QUI COMPTE : les trois ecrans retirent le TARIF, pas la fermeture', () => {
-  // Le serveur refuse TOUTE la requete des qu elle porte un `rate`. Si un ecran
-  // envoie quand meme le tarif avec une fermeture saisie au meme moment, l hote
-  // perd AUSSI sa fermeture — alors que l arbitrage B la lui promet.
-  const bureau = lire('pages/biens-calendrier.html')
-  const mobile = lire('pages/calendrier-mobile.html')
-  assert.ok(/estPiloteYield\(sel\.bienId\)/.test(bureau), 'saisie en ligne')
-  assert.ok(/p\.key==='rate'&&estPiloteYield\(popupBienId\)/.test(bureau), 'popup des parametres')
-  assert.ok(/p\.type==='price'&&currentBien&&currentBien\.pilote_tarifaire==='yieldflow'/.test(mobile),
-    'et le mobile, qui n avait aucune garde')
-  // Le retrait se DIT : un tarif retire en silence est un tarif que l hote
-  // croit avoir pose.
-  for (const [nom, src] of [['bureau', bureau], ['mobile', mobile]]) {
-    assert.ok(/tarifIgnore/.test(src), `${nom} : le retrait est trace`)
-    assert.ok(/pilotés par YieldFlow/.test(src), `${nom} : et annonce a l hote`)
-    assert.ok(/Le reste de votre saisie, lui, est bien pris en compte/.test(src),
-      `${nom} : en disant que le reste est passe`)
-  }
+// RETARGE le 13 octobre 2026 : les anciennes pages redirigent vers la V5
+// (UNE page pour les deux ecrans) — les invariants restent, les motifs
+// suivent la V5.
+test('LE TEST QUI COMPTE : la page retire le TARIF, pas la fermeture', () => {
+  // Le serveur refuse TOUTE la requete des qu elle porte un `rate`. Si
+  // l ecran envoie quand meme le tarif avec une fermeture saisie au meme
+  // moment, l hote perd AUSSI sa fermeture — l arbitrage B la lui promet.
+  const page = lire('pages/calendrier.html')
+  assert.ok((page.match(/bien\.pilote_tarifaire === 'yieldflow'/g) || []).length >= 2,
+    'la garde pilote existe sur la saisie ET la popup')
+  assert.ok(/const sansTarif = segments\.filter\(s => s\.rate === undefined\)/.test(page),
+    'la popup retire le TARIF seul, le reste part')
+  assert.ok(/cal\.piloted_price/.test(page), 'le retrait est DIT a l hote')
+  const fr = lire('shared/i18n/fr.json')
+  assert.ok(/pilotés par YieldFlow/.test(fr), 'et la phrase nomme YieldFlow')
+  assert.ok(/La disponibilité et la fermeture se règlent toujours ici/.test(fr),
+    'en disant que le reste se regle toujours ici')
 })
 
 test('apres un refus, l ecran ne montre pas des prix qui n existent pas', () => {
-  // L etat local est mute et re-rendu AVANT l envoi : sans relecture, l hote
-  // lit une erreur en VOYANT ses nouveaux prix, et les croit enregistres.
-  const src = lire('pages/biens-calendrier.html')
-  const catches = src.match(/catch\(err\)\{[^}]*\}/g) || []
-  const sauvegardes = catches.filter(c => /sauvegarde/.test(c))
-  assert.ok(sauvegardes.length >= 2, 'les deux chemins d ecriture ont un catch')
-  for (const c of sauvegardes) {
-    assert.ok(/reloadInventory\(\)/.test(c), `un catch sans relecture : ${c.slice(0, 60)}`)
-  }
+  // V5 : AUCUNE mutation locale avant envoi — l etat affiche vient de la
+  // base RELUE apres chaque ecriture (charger() dans saveAvecAnnulation,
+  // succes comme annulation).
+  const src = lire('pages/calendrier.html')
+  const save = src.split('async function saveAvecAnnulation')[1].split('\n}')[0]
+  assert.ok(/await charger\(\)/.test(save), 'relecture du coeur apres ecriture')
+  assert.ok(!/st\[[^\]]+\]\.rate\s*=/.test(src), 'aucune mutation locale du prix')
 })
 
 test('le second ecrivain de `rate_sync_mode` est garde lui aussi', () => {
@@ -372,34 +369,19 @@ test('l ecran dit ce que le mode fait AUJOURD HUI — et plus la promesse d avan
 
 test('LE TEST QUI COMPTE : le refus intercepte AVANT que l ecran ne peigne', () => {
   // ⚠ DEFAUT TROUVE PAR THIERRY EN RECETTE SUR STAGING, 20 septembre 2026.
-  // La garde de la popup etait posee APRES la boucle qui mute l etat local :
-  // elle empechait bien l ENVOI, mais `st[i].rate` etait deja ecrase et
-  // `renderBlocks()` avait peint le nouveau prix. Comme plus aucune requete ne
-  // partait, aucun `catch` ne se declenchait, donc aucune relecture du cœur —
-  // le prix refuse restait AFFICHE jusqu au prochain rechargement. « Un hote
-  // croirait son prix pris en compte. »
-  //
-  // La lecon depasse ce fichier : empecher l envoi ne suffit pas quand l ecran
-  // a deja peint. Un refus doit intercepter AVANT la mutation, sinon il faut
-  // defaire — et defaire, ca s oublie.
-  const src = lire('pages/biens-calendrier.html')
-  const iGarde = src.indexOf("p.key==='rate'&&estPiloteYield(popupBienId)")
-  const iMutation = src.indexOf("st[i][p.key]=computeNewRate")
-  assert.ok(iGarde > 0, 'la garde de la popup existe')
-  assert.ok(iMutation > 0, 'la mutation de l etat local existe')
-  assert.ok(iGarde < iMutation,
-    'la garde doit preceder la mutation : sinon l ecran peint un prix refuse')
-
-  // La saisie en ligne refuse avant meme d ouvrir le champ.
-  const iInline = src.indexOf("sel.row==='rate'&&estPiloteYield(sel.bienId)")
-  const iChamp = src.indexOf("cell.innerHTML='<input class=\"rate-input\"")
-  assert.ok(iInline > 0 && iChamp > 0 && iInline < iChamp,
+  // La lecon : empecher l envoi ne suffit pas quand l ecran a deja peint.
+  // V5 : la saisie en ligne refuse AVANT d ouvrir le champ, et la garde de
+  // la popup filtre les segments AVANT l envoi — il n existe AUCUNE mutation
+  // locale d etat (l ecran peint ce que la base relue dit).
+  const src = lire('pages/calendrier.html')
+  const corps = src.split('function actionPrix')[1].split('\n}')[0]
+  const iGarde = corps.indexOf("bien.pilote_tarifaire === 'yieldflow'")
+  const iChamp = corps.indexOf('cal-nuit__saisie')
+  assert.ok(iGarde > 0 && iChamp > 0 && iGarde < iChamp,
     'la saisie en ligne refuse avant d ouvrir le champ')
-
-  // Le mobile ne mute aucun etat local : sa garde precede le seul push.
-  const mob = lire('pages/calendrier-mobile.html')
-  const iGardeMob = mob.indexOf("p.type==='price'&&currentBien")
-  const iPush = mob.indexOf('segments.push({date_from:sISO,date_to:eISO,days:daysArr,rate:')
-  assert.ok(iGardeMob > 0 && iPush > 0 && iGardeMob < iPush,
-    'le mobile refuse avant de construire le segment tarifaire')
+  const popup = src.split('async function enregistrerPopup')[1].split('\n}')[0]
+  const iFiltre = popup.indexOf('s.rate === undefined')
+  const iEnvoi = popup.indexOf('saveAvecAnnulation(')
+  assert.ok(iFiltre > 0 && iEnvoi > 0 && iFiltre < iEnvoi,
+    'la popup retire le tarif AVANT l envoi')
 })

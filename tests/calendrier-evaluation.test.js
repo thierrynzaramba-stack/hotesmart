@@ -79,16 +79,14 @@ test('LE TEST QUI COMPTE : une réponse tardive ne peint pas la fiche suivante',
   assert.strictEqual(z.innerHTML, '')
 })
 
-test('l’ordinateur ET le téléphone branchent la même fonction, chacun dans sa zone', () => {
-  const pc = fs.readFileSync(path.join(__dirname, '..', 'pages', 'biens-calendrier.html'), 'utf8')
-  const tel = fs.readFileSync(path.join(__dirname, '..', 'pages', 'calendrier-mobile.html'), 'utf8')
-  assert.match(pc, /'<div id="resa-avis"><\/div>'/)
-  assert.match(pc, /brancherEvaluation\(\{ resa, cible: document\.getElementById\('resa-avis'\)/)
-  assert.match(tel, /<div id="fiche-avis"><\/div>/)
-  assert.match(tel, /brancherEvaluation\(\{ resa, cible: document\.getElementById\('fiche-avis'\)/)
-  // Le bus se charge à la demande dans la fonction commune, pas par un import statique des pages.
-  assert.doesNotMatch(pc, /import \{ hsBus \}/)
-  assert.doesNotMatch(tel, /import \{ hsBus \}/)
+test('la page UNIQUE (les deux écrans) branche la fonction commune dans sa fiche', () => {
+  // RETARGE le 13 octobre 2026 : les anciennes pages redirigent vers la V5,
+  // dont la fiche est LA MEME sur ordinateur et telephone.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'calendrier.html'), 'utf8')
+  assert.match(page, /data-fiche-evaluation/)
+  assert.match(page, /brancherEvaluation\(\{ resa: \{ id: r\.id, checkout: r\.checkout \}, cible: corps\.querySelector\('\[data-fiche-evaluation\]'\)/)
+  // Le bus se charge à la demande dans la fonction commune, pas par un import statique de la page.
+  assert.doesNotMatch(page, /import \{ hsBus \}/)
 })
 
 // ─── Constats de la revue de 2a3a7bf ────────────────────────────────────────

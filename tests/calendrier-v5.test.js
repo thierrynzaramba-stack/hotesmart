@@ -171,9 +171,9 @@ test('calendrier : aucun appel provider, moteur ou AirROI depuis la page', () =>
   assert.ok(!src.includes('/api/cron'), 'jamais le moteur')
 })
 
-test('etape 1 : les anciennes pages calendrier restent INTACTES (redirection = commit separe apres recette)', () => {
-  assert.ok(!lire('pages/biens-calendrier.html').includes("location.replace('/calendrier'"))
-  assert.ok(!lire('pages/calendrier-mobile.html').includes("location.replace('/calendrier'"))
+test('les anciennes pages calendrier REDIRIGENT vers /calendrier (go de Thierry du 13 octobre 2026)', () => {
+  assert.ok(lire('pages/biens-calendrier.html').includes("location.replace('/calendrier')"))
+  assert.ok(lire('pages/calendrier-mobile.html').includes("location.replace('/calendrier')"))
   assert.ok(lire('vercel.json').includes('"/calendrier"'), 'la route /calendrier existe')
   assert.ok(!/"destination": "\/pages\/calendrier\.html"/.test(lire('vercel.json')), 'cleanUrls : pas de .html en destination')
 })

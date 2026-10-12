@@ -222,19 +222,12 @@ test('LE TEST QUI COMPTE : « pas de prix » ne s affiche jamais « 0 »', () =>
   // Zero est un PRIX — et le pire, puisque le canal ne l'applique pas et vend
   // au tarif de la grille. L'absence de prix est un ETAT : la nuit est fermee.
   // Les confondre a fait craindre a l'hote de brader son logement.
-  const mobile = fs.readFileSync(path.join(__dirname, '..', 'pages/calendrier-mobile.html'), 'utf8')
-  assert.ok(!/Number\(currentBien\.base_price\)\|\|0|Number\(currentBien\.base_price\) \|\| 0/.test(mobile),
-    'plus de `|| 0` qui fabrique un prix a zero')
-  assert.ok(/return \(b>0\)\?b:null/.test(mobile), 'sans prix de base, on rend null')
-  assert.ok(/function afficherTarif\(v,sym\)\{ return v==null \? '—'/.test(mobile),
-    'et l affichage montre « — »')
-  // Les calculs, eux, ont besoin d un nombre : ils passent par rateCalcul.
-  assert.ok(/function rateCalcul\(iso\)/.test(mobile))
-  assert.ok(!/computeFinal\(rateFor\(/.test(mobile),
-    'aucun calcul ne part de rateFor, qui peut valoir null')
-
-  const grille = fs.readFileSync(path.join(__dirname, '..', 'pages/biens-calendrier.html'), 'utf8')
-  assert.ok(/s\.rate == null \? '—'/.test(grille), 'meme regle dans la grille')
+  // RETARGE 13/10/2026 : la page V5 (les deux ecrans) porte la regle par
+  // prixAffiche : « sans prix » s'affiche — (jamais 0), via l'etat sansPrix
+  // du coeur (calendar-core), et prixIntl rend null sur un montant absent.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages/calendrier.html'), 'utf8')
+  assert.ok(/s\.sansPrix \? '—'/.test(page), 'sans prix de base : « — », jamais 0')
+  assert.ok(!/base_price\)\s*\|\|\s*0/.test(page), 'plus de `|| 0` qui fabrique un prix a zero')
 
   const core = fs.readFileSync(path.join(__dirname, '..', 'shared/calendar-core.js'), 'utf8')
   assert.ok(/sansPrix: rate == null/.test(core),

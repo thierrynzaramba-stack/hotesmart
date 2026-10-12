@@ -310,11 +310,14 @@ function construireEtats (start, end) {
 // Un BLOCAGE de l'hote prime sur « pas encore ouverte » : les nuits hors
 // fenetre sont fermees PAR LE MOTEUR (retrait de la vente), celles d'un
 // blocage le sont PAR L'HOTE — elles restent « fermees » a l'ecran.
+// « Fermee » a UNE definition dans toute la page (inv, jamais les
+// fermetures : la vendabilite se lit EXCLUSIVEMENT dans calendar_inventory).
+function nuitFermee (s) { return s.avail === 'closed' || s.stopSell === 'closed' }
 function etatNuit (bienId, iso) {
   const s = etat.states[bienId]?.[iso]
   if (!s) return 'ouverte'
   const vendue = etat.states[bienId].__vendues.has(iso)
-  const fermee = s.avail === 'closed' || s.stopSell === 'closed'
+  const fermee = nuitFermee(s)
   const fenetre = etat.fenetres.get(bienId)
   const horsFenetre = !!(fenetre && iso > fenetre.fin) && !fermeeParBlocage(bienId, iso)
   return etatDeNuit({ vendue, fermee, horsFenetre })
@@ -824,10 +827,7 @@ function renderFlottante () {
   $('[data-bind="flottante-compte"]').textContent = t('cal.n_days', { n: jours.length })
   const bienId = etat.sel.bien
   const st = etat.states[bienId] || {}
-  const toutFerme = jours.every(iso => {
-    const s = st[iso] || {}
-    return s.avail === 'closed' || s.stopSell === 'closed'
-  })
+  const toutFerme = jours.every(iso => nuitFermee(st[iso] || {}))
   // LES CINQ ACTIONS, depuis le CONTRAT partagé (§14) — jamais une copie.
   $('[data-bind="flottante-actions"]').innerHTML = ACTIONS_BARRE.map(a => {
     const cle = a.id === 'fermer' && toutFerme ? a.cleInverse : a.cle
@@ -933,6 +933,9 @@ function brancherMobile () {
     c.addEventListener('touchcancel', () => clearTimeout(presse), { passive: true })
     c.addEventListener('click', () => {
       if (iso < AUJOURDHUI) return
+      // Meme garde que l'appui long : en lecture, la popup d'edition ne
+      // s'ouvre pas (la consultation passe par les fiches, ouvertes a tous).
+      if (etat.lectureSeule || !peutEcrire('reservations')) return
       if (long) { long = false; return }
       if (etat.sel && etat.sel.bien === bienId && etat.sel.duIso) {
         // une selection est ouverte SUR CE BIEN : le tap l'etend
