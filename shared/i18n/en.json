@@ -253,6 +253,7 @@
   "cal.action_reservation": "Booking",
   "cal.action_plus": "More…",
   "cal.undo": "Undo",
+  "cal.undo_partial": "Undone — {n} night(s) without their own price keep the new price",
   "cal.saved": "Saved",
   "cal.save_error": "Could not save, try again",
   "cal.push_failed": "NOT PUBLISHED — saved here, but the platform refused: try again.",

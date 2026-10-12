@@ -253,6 +253,7 @@
   "cal.action_reservation": "Reserva",
   "cal.action_plus": "Más…",
   "cal.undo": "Deshacer",
+  "cal.undo_partial": "Deshecho — {n} noche(s) sin precio propio conservan el nuevo precio",
   "cal.saved": "Guardado",
   "cal.save_error": "No se pudo guardar, inténtelo de nuevo",
   "cal.push_failed": "NO PUBLICADO — guardado aquí, pero la plataforma lo rechazó: inténtelo de nuevo.",

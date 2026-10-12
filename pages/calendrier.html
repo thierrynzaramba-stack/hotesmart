@@ -235,7 +235,8 @@ async function charger () {
     $('[data-bind="etat-charge"]').textContent = t('cal.load_error')
   }
 }
-// La fenetre du pilote (4e etat « pas encore ouverte », dette 20) : lue de
+// La fenetre du pilote (4e etat « pas encore ouverte », dette 20) : fin
+// calculee par le SERVEUR (fenetre_fin, regle du moteur) ; repli client de
 // /api/yield-pilote pour les seuls biens PILOTES — jamais d'etat invente, un
 // bien illisible n'a simplement pas de 4e etat ce coup-ci.
 async function chargerFenetres (refs) {
@@ -244,6 +245,10 @@ async function chargerFenetres (refs) {
   await Promise.all(pilotes.map(async (b) => {
     try {
       const r = await appel(`/api/yield-pilote?bien=${encodeURIComponent(b.provider_property_id)}`)
+      if (r && typeof r.fenetre_fin === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.fenetre_fin)) {
+        etat.fenetres.set(b.id, { fin: r.fenetre_fin })
+        return
+      }
       const f = r && r.fenetre
       if (!f || !f.valeur) return
       const jours = f.type === 'mois' ? Math.round(Number(f.valeur) * 30) : Number(f.valeur)
@@ -261,7 +266,7 @@ async function appel (chemin, corpsPost) {
     ...(corpsPost ? { body: JSON.stringify(corpsPost) } : {})
   })
   const corps = await r.json().catch(() => ({}))
-  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.error; throw e }
+  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.code || corps.error; throw e }
   return corps
 }
 
@@ -315,7 +320,7 @@ function etatNuit (bienId, iso) {
 function fermeeParBlocage (bienId, iso) {
   const ref = String(etat.biens.find(b => b.id === bienId)?.provider_property_id || '')
   const liste = etat.fermetures[bienId] || etat.fermetures[ref] || []
-  return (liste || []).some(f => iso >= String(f.debut).slice(0, 10) && iso <= String(f.fin).slice(0, 10))
+  return (liste || []).some(f => iso >= String(f.date_debut).slice(0, 10) && iso <= String(f.date_fin).slice(0, 10))
 }
 
 // ─── Rendu : tronc commun ────────────────────────────────────────────────────
@@ -433,11 +438,13 @@ function grilleBien (bienId) {
   // Ligne des reservations : barres positionnees en colonnes.
   const resas = st.__resas || []
   const barres = resas.map(r => {
+    const co = String(r.checkout).slice(0, 10)
+    // CHEVAUCHEMENT : un sejour couvrant toute la plage visible avait ses
+    // deux bornes hors fenetre et disparaissait (review).
+    if (co <= etat.joursISO[0] || r.startISO > etat.joursISO[etat.joursISO.length - 1]) return ''
     const i0 = etat.joursISO.indexOf(r.startISO)
-    const i1 = etat.joursISO.indexOf(String(r.checkout).slice(0, 10))
-    if (i1 < 0 && i0 < 0) return ''
-    const debut = Math.max(i0, 0), fin = i1 < 0 ? etat.joursISO.length : i1
-    if (fin <= 0 || debut >= etat.joursISO.length) return ''
+    const i1 = etat.joursISO.indexOf(co)
+    const debut = i0 < 0 ? 0 : i0, fin = i1 < 0 ? etat.joursISO.length : i1
     const famille = familleSource(r.sourceBrute || r.source)
     const terminee = String(r.checkout).slice(0, 10) <= AUJOURDHUI
     return `<button type="button" class="cal-barre cal-barre--${famille}${terminee ? ' cal-barre--finie' : ''}${i0 < 0 ? ' cal-barre--coupe-g' : ''}${i1 < 0 ? ' cal-barre--coupe-d' : ''}"
@@ -445,14 +452,17 @@ function grilleBien (bienId) {
       title="${esc((r.name || '') + ' · ' + dateIntl(r.startISO, langue()) + ' → ' + dateIntl(r.checkout, langue()) + (terminee ? ' · ' + t('cal.stay_over') : ''))}">${esc(r.name || '')}</button>`
   }).join('')
   const ref = String(bien.provider_property_id || '')
+  const premierISO = etat.joursISO[0], dernierISO = etat.joursISO[etat.joursISO.length - 1]
   const blocages = ((etat.fermetures[bienId] || etat.fermetures[ref]) || []).map(f => {
-    const i0 = etat.joursISO.indexOf(String(f.debut).slice(0, 10))
-    const i1 = etat.joursISO.indexOf(String(f.fin).slice(0, 10))
-    if (i0 < 0 && i1 < 0) return ''
-    const debut = Math.max(i0, 0), fin = (i1 < 0 ? etat.joursISO.length : i1 + 1)
+    const fd = String(f.date_debut).slice(0, 10), ff = String(f.date_fin).slice(0, 10)
+    // CHEVAUCHEMENT, pas « une borne visible » : un blocage couvrant toute la
+    // plage avait ses deux bornes hors fenetre et disparaissait (review).
+    if (ff < premierISO || fd > dernierISO) return ''
+    const i0 = etat.joursISO.indexOf(fd), i1 = etat.joursISO.indexOf(ff)
+    const debut = i0 < 0 ? 0 : i0, fin = (i1 < 0 ? etat.joursISO.length : i1 + 1)
     return `<button type="button" class="cal-barre cal-barre--blocage" style="--d:${debut};--f:${fin}"
       data-blocage="${esc(String(f.id))}" data-bien="${esc(bienId)}"
-      title="${esc(t('cal.blocked_title', { du: dateIntl(f.debut, langue()), au: dateIntl(f.fin, langue()), raison: f.raison || '' }))}">${esc(f.raison || t('cal.blocked'))}</button>`
+      title="${esc(t('cal.blocked_title', { du: dateIntl(f.date_debut, langue()), au: dateIntl(f.date_fin, langue()), raison: f.raison || '' }))}">${esc(f.raison || t('cal.blocked'))}</button>`
   }).join('')
   // Ligne des prix : une cellule par nuit, COULEUR = ETAT (§4.1).
   const cellules = etat.joursISO.map((iso, i) => {
@@ -552,7 +562,7 @@ function renderGrilleMobile () {
       <button type="button" class="cal-ligne-resa" data-blocage="${esc(String(f.id))}" data-bien="${esc(bienId)}">
         <span class="cal-ligne-resa__point cal-barre--blocage"></span>
         <span style="min-width:0"><b>${esc(f.raison || t('cal.blocked'))}</b>
-        <span class="caption muted"> ${esc(dateIntl(f.debut, langue(), { day: 'numeric', month: 'short' }))} → ${esc(dateIntl(f.fin, langue(), { day: 'numeric', month: 'short' }))}</span></span>
+        <span class="caption muted"> ${esc(dateIntl(f.date_debut, langue(), { day: 'numeric', month: 'short' }))} → ${esc(dateIntl(f.date_fin, langue(), { day: 'numeric', month: 'short' }))}</span></span>
       </button>`).join('')}
     </div>`
   brancherMobile()
@@ -598,25 +608,29 @@ function actionBarre (id, toutFerme) {
   if (id === 'plus') { return ouvrirPopup(jours) }
 }
 
+let glisseEnCours = null
+document.addEventListener('mouseup', () => { if (glisseEnCours) { glisseEnCours = null; renderFlottante() } })
+
 function brancherPlanning () {
   const zone = $('[data-bind="grilles"]')
   // Selection cliquer-glisser sur la ligne Prix, un bien a la fois ; jours
-  // passes exclus cellule par cellule (A.3, conserve).
-  let enCours = null
+  // passes exclus cellule par cellule (A.3, conserve). `glisseEnCours` vit au
+  // module : le mouseup qui la clot est PERMANENT et pose UNE fois (un
+  // { once: true } par render etait consomme par le premier clic — review).
   zone.querySelectorAll('[data-ligne-prix] .cal-nuit').forEach(td => {
     td.addEventListener('mousedown', (e) => {
       if (etat.lectureSeule || !peutEcrire('reservations')) return
       if (td.dataset.iso < AUJOURDHUI) return
       e.preventDefault()
-      enCours = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
-      etat.sel = { ...enCours }
+      glisseEnCours = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
+      etat.sel = { ...glisseEnCours }
       peindreSelectionDesktop()
     })
     td.addEventListener('mouseenter', () => {
-      if (!enCours || td.dataset.bien !== enCours.bien) return
+      if (!glisseEnCours || td.dataset.bien !== glisseEnCours.bien) return
       if (td.dataset.iso < AUJOURDHUI) return
-      enCours.b = Number(td.dataset.i)
-      etat.sel = { ...enCours }
+      glisseEnCours.b = Number(td.dataset.i)
+      etat.sel = { ...glisseEnCours }
       peindreSelectionDesktop()
     })
     // Clavier : Entree / F2 / chiffre = saisie inline (A.5, conserve).
@@ -629,7 +643,6 @@ function brancherPlanning () {
     })
     td.tabIndex = 0
   })
-  document.addEventListener('mouseup', () => { if (enCours) { enCours = null; renderFlottante() } }, { once: true })
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
 }
@@ -658,7 +671,11 @@ function brancherMobile () {
         renderGrilleMobile(); renderFlottante()
       }, 450)
     }, { passive: true })
+    // Le scroll declenchait l'appui long : move et cancel l'annulent aussi
+    // (review).
     c.addEventListener('touchend', () => clearTimeout(presse), { passive: true })
+    c.addEventListener('touchmove', () => clearTimeout(presse), { passive: true })
+    c.addEventListener('touchcancel', () => clearTimeout(presse), { passive: true })
     c.addEventListener('click', () => {
       if (iso < AUJOURDHUI) return
       if (long) { long = false; return }
@@ -692,7 +709,7 @@ function verdictToast (r) {
 // Enregistre des segments et propose « Annuler » : les valeurs PRECEDENTES
 // des dates touchees sont relevees AVANT l'ecriture, et « Annuler » les
 // REECRIT par le meme writer — jamais un undo d'affichage (§11.1).
-async function saveAvecAnnulation (bienId, segments, { cle = 'rate', valeursAvant = null } = {}) {
+async function saveAvecAnnulation (bienId, segments, { cle = 'rate', valeursAvant = null, sansPrix = 0 } = {}) {
   try {
     const r = await appel('/api/calendar', { action: 'save', property_id: bienId, segments })
     verdictToast(r)
@@ -704,6 +721,7 @@ async function saveAvecAnnulation (bienId, segments, { cle = 'rate', valeursAvan
             const inverse = valeursAvant.map(v => ({ date_from: v.iso, date_to: v.iso, [cle]: v.valeur }))
             const r2 = await appel('/api/calendar', { action: 'save', property_id: bienId, segments: inverse })
             verdictToast(r2)
+            if (sansPrix > 0) toast(t('cal.undo_partial', { n: sansPrix }), { duree: 8000 })
             await charger()
           } catch (e) { logger.error('Calendrier', 'annulation', e); toast(t('cal.save_error'), { erreur: true }) }
         }
@@ -714,7 +732,7 @@ async function saveAvecAnnulation (bienId, segments, { cle = 'rate', valeursAvan
   } catch (e) {
     // Bien pilote par YieldFlow : le refus tarifaire du serveur, en clair,
     // AVANT toute mutation locale (texte-contrat, §13).
-    if (e.code === 'refus_ecriture_tarifaire' || /yieldflow/i.test(e.message || '')) {
+    if (e.code === 'pilote_yieldflow' || /yieldflow/i.test(e.message || '')) {
       toast(t('cal.piloted_price'), { erreur: true, duree: 8000 })
     } else {
       logger.error('Calendrier', 'save', e)
@@ -750,12 +768,12 @@ function actionPrix (jours, amorce = '') {
     if (!commit) return
     const prix = Number(String(brut).replace(',', '.'))
     if (!Number.isFinite(prix) || prix <= 0) return toast(t('cal.price_invalid'), { erreur: true })
-    const st = etat.states[bienId] || {}
-    const valeursAvant = jours.map(iso => ({ iso, valeur: st[iso] && st[iso].rate != null ? st[iso].rate : null }))
+    const inv = etat.inv[bienId] || {}
+    const valeursAvant = jours.map(iso => ({ iso, valeur: inv[iso] && inv[iso].rate != null ? inv[iso].rate : null }))
       .filter(v => v.valeur != null)
     const segments = [{ date_from: premier, date_to: jours[jours.length - 1], rate: prix }]
     viderSelection()
-    saveAvecAnnulation(bienId, segments, { valeursAvant })
+    saveAvecAnnulation(bienId, segments, { valeursAvant, sansPrix: jours.length - valeursAvant.length })
   }
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') terminer(true)
@@ -781,7 +799,7 @@ async function rouvrir (jours) {
   if (bloquee) {
     toast(t('cal.blocked_reopen'), { erreur: true, duree: 7000 })
     const ref = String(etat.biens.find(b => b.id === bienId)?.provider_property_id || '')
-    const f = ((etat.fermetures[bienId] || etat.fermetures[ref]) || []).find(f => bloquee >= String(f.debut).slice(0, 10) && bloquee <= String(f.fin).slice(0, 10))
+    const f = ((etat.fermetures[bienId] || etat.fermetures[ref]) || []).find(f => bloquee >= String(f.date_debut).slice(0, 10) && bloquee <= String(f.date_fin).slice(0, 10))
     if (f) ouvrirFicheBlocage(bienId, String(f.id))
     viderSelection()
     return
@@ -919,8 +937,9 @@ async function enregistrerPopup (bienId, corps) {
   const dates = datesDeLaPlage(corps)
   if (!dates) return noteFeuille(t('cal.range_invalid'))
   const segments = []
-  // Prix : mode set + jours complets = UN segment ; sinon un segment PAR
-  // date (le calcul se fait ici, comme l'ancienne page).
+  // Prix : mode set = un segment par PLAGE contigue (90 jours faisaient 90
+  // segments — review) ; inc/dec = un segment PAR date, le calcul depend de
+  // la valeur actuelle de chaque nuit.
   const rvBrut = corps.querySelector('[data-champ="rate-valeur"]').value
   if (String(rvBrut).trim() !== '') {
     const mode = corps.querySelector('[data-champ="rate-mode"]').value
@@ -928,17 +947,20 @@ async function enregistrerPopup (bienId, corps) {
     const v = Number(String(rvBrut).replace(',', '.'))
     if (!Number.isFinite(v)) return noteFeuille(t('cal.price_invalid'))
     const jours = joursCochés(corps, 'rate')
-    const st = etat.states[bienId] || {}
-    for (const iso of dates) {
-      if (!jours.has(new Date(iso + 'T12:00:00').getDay())) continue
-      let prix = v
-      if (mode !== 'set') {
+    if (mode === 'set') {
+      for (const p of plagesParJours(dates, jours)) {
+        segments.push({ date_from: p[0], date_to: p[1], rate: Math.max(0, Math.round(v * 100) / 100) })
+      }
+    } else {
+      const st = etat.states[bienId] || {}
+      for (const iso of dates) {
+        if (!jours.has(new Date(iso + 'T12:00:00').getDay())) continue
         const actuel = st[iso]?.rate
         if (actuel == null) continue
         const delta = unite === 'pct' ? actuel * v / 100 : v
-        prix = mode === 'inc' ? actuel + delta : actuel - delta
+        const prix = mode === 'inc' ? actuel + delta : actuel - delta
+        segments.push({ date_from: iso, date_to: iso, rate: Math.max(0, Math.round(prix * 100) / 100) })
       }
-      segments.push({ date_from: iso, date_to: iso, rate: Math.max(0, Math.round(prix * 100) / 100) })
     }
   }
   // Numeriques et ouvert/ferme.
@@ -971,11 +993,14 @@ async function enregistrerPopup (bienId, corps) {
   const oPrix = corps.querySelector('[data-champ="orph-prix"]').checked
   const oMode = corps.querySelector('[data-champ="orph-mode"]').value
   const oUnite = corps.querySelector('[data-champ="orph-unite"]').value
-  const oValeur = corps.querySelector('[data-champ="orph-valeur"]').value
+  // Virgule decimale normalisee ; un champ VIDE garde l'ancienne valeur
+  // (le serveur ignore null — l'effacement passe par decocher la case).
+  const oSaisie = String(corps.querySelector('[data-champ="orph-valeur"]').value).trim().replace(',', '.')
+  const oValeur = oSaisie !== '' ? oSaisie : (brut.orphan_price_value ?? null)
   if (oAuto !== !!brut.orphan_autofix || oPrix !== !!brut.orphan_price_enabled
     || oMode !== (brut.orphan_price_mode || 'set') || oUnite !== (brut.orphan_price_unit || 'eur')
-    || String(oValeur) !== String(brut.orphan_price_value ?? '')) {
-    segments.push({ kind: 'orphanConfig', orphan_autofix: oAuto, orphan_price_enabled: oPrix, orphan_price_mode: oMode, orphan_price_unit: oUnite, orphan_price_value: oValeur !== '' ? oValeur : null })
+    || String(oValeur ?? '') !== String(brut.orphan_price_value ?? '')) {
+    segments.push({ kind: 'orphanConfig', orphan_autofix: oAuto, orphan_price_enabled: oPrix, orphan_price_mode: oMode, orphan_price_unit: oUnite, orphan_price_value: oValeur })
   }
   if (!segments.length) return noteFeuille(t('cal.nothing_to_save'))
   // Garde YieldFlow : le TARIF est retire des segments AVANT toute mutation
@@ -1241,13 +1266,16 @@ function ouvrirFicheResa (bienId, resaId) {
         children: Number(corps.querySelector('[data-f="enfants"]').value) || 0
       }
     }
-    // Le PRIX est ABSENT du payload s'il n'est pas touche (l'arrondi
-    // rejouait : 100,00 / 3 nuits -> 99,99).
+    // Le PRIX est ABSENT du payload s'il n'est pas touche. Le champ est
+    // PREREMPLI, donc « non vide » ne suffit pas : meme prix qu'en base
+    // (a l'arrondi pres, sur les nuits d'ORIGINE) = pas touche — sinon
+    // l'arrondi rejouait (100,00 / 3 nuits -> 99,99).
     const brut = corps.querySelector('[data-f="prix"]').value
     if (String(brut).trim() !== '') {
       const p = Number(String(brut).replace(',', '.'))
       if (!Number.isFinite(p) || p <= 0) { etatEl.textContent = t('cal.price_invalid'); return }
-      charge.prixParNuit = p
+      const memePrix = r.amount != null && r.span && Math.abs(p * r.span - r.amount) < 0.005
+      if (!memePrix) charge.prixParNuit = p
     }
     if (charge.arrival === r.startISO && charge.departure === String(r.checkout).slice(0, 10)
       && charge.occupancy.adults === (r.numAdult || 1) && charge.occupancy.children === (r.numChild || 0)
@@ -1294,9 +1322,9 @@ function ouvrirFicheBlocage (bienId, blocageId) {
   ouvrirFeuille(t('cal.block_title', { raison: f.raison || '' }), `
     <div class="msg-tiroir__bloc">
       <label class="caption muted">${esc(t('cal.first_night'))}</label>
-      <input type="date" data-b="debut" value="${String(f.debut).slice(0, 10)}" ${ecrit ? '' : 'disabled'}>
+      <input type="date" data-b="debut" value="${String(f.date_debut).slice(0, 10)}" ${ecrit ? '' : 'disabled'}>
       <label class="caption muted">${esc(t('cal.last_night'))}</label>
-      <input type="date" data-b="fin" value="${String(f.fin).slice(0, 10)}" ${ecrit ? '' : 'disabled'}>
+      <input type="date" data-b="fin" value="${String(f.date_fin).slice(0, 10)}" ${ecrit ? '' : 'disabled'}>
       <label class="caption muted">${esc(t('cal.block_reason'))}</label>
       <input type="text" maxlength="200" data-b="raison" value="${esc(f.raison || '')}" ${ecrit ? '' : 'disabled'}>
       <p class="caption muted">${esc(t('cal.block_hint'))}</p>
@@ -1314,7 +1342,7 @@ function ouvrirFicheBlocage (bienId, blocageId) {
     const raison = corps.querySelector('[data-b="raison"]').value.trim()
     if (!debut || !fin || fin < debut) { etatEl.textContent = t('cal.range_invalid'); return }
     if (!raison) { etatEl.textContent = t('cal.block_reason_required'); return }
-    if (debut === String(f.debut).slice(0, 10) && fin === String(f.fin).slice(0, 10) && raison === (f.raison || '')) {
+    if (debut === String(f.date_debut).slice(0, 10) && fin === String(f.date_fin).slice(0, 10) && raison === (f.raison || '')) {
       etatEl.textContent = t('cal.no_change'); return
     }
     try {

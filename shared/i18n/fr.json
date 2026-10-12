@@ -253,6 +253,7 @@
   "cal.action_reservation": "Réservation",
   "cal.action_plus": "Plus…",
   "cal.undo": "Annuler",
+  "cal.undo_partial": "Annulé — {n} nuit(s) sans prix propre conservent le nouveau prix",
   "cal.saved": "Enregistré",
   "cal.save_error": "Enregistrement impossible, réessayez",
   "cal.push_failed": "NON PUBLIÉ — enregistré ici, mais la plateforme n’a pas accepté : réessayez.",
