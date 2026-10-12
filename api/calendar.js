@@ -39,6 +39,7 @@ const { readStatus, colonneRawAbsente } = require('../lib/bookings-snapshot')
 // seconde implementation (docs/kb/prix-voyageur.md — amount Airbnb est un
 // net hote, la reconstruction passe par meta.amount_type).
 const { prixVoyageur, dateDeVente } = require('../lib/yield/eclatement')
+const { taxeSejourDe } = require('../lib/taxe-sejour/lecture')
 
 // Le detail par nuit TEL QUE LE CANAL LE SERT (Channex : rooms[].days en
 // objet date -> montant, ou rooms[].meta.days_breakdown en tableau). Beds24
@@ -279,6 +280,16 @@ module.exports = async function handler(req, res) {
       // sortie : le total PAYE se recompose (valeur + taxe) — prixTaxeComprise
       // n'est pas exporte et lib/yield ne se modifie pas sans go.
       const pv = prixVoyageur(s, raw, provider)
+      // La taxe de sejour TELLE QUE LE MODULE LA LIT (lib/taxe-sejour) : elle
+      // peut etre incluse dans le prix, collectee EN SUS par la plateforme
+      // (Airbnb la transmet dans le message brut), ou non transmise.
+      const ts = taxeSejourDe(s, raw, provider)
+      // Les « frais Airbnb » transmis par le canal = la retenue hote (Host
+      // Fee), soit total recompose - net verse. Le frais de SERVICE voyageur
+      // d'Airbnb n'est transmis par aucun canal — on ne l'invente pas.
+      const canalFiche = String(s.source || '').trim().toLowerCase()
+      const fraisCanal = (canalFiche === 'airbnb' && pv.valeur != null && Number(s.amount) > 0 && pv.valeur > Number(s.amount))
+        ? Math.round((pv.valeur - Number(s.amount)) * 100) / 100 : null
       return res.status(200).json({
         booking_id: String(ligne.booking_id),
         guestEmail: gardeGet.titulaire ? (s.guestEmail || null) : null,
@@ -288,6 +299,12 @@ module.exports = async function handler(req, res) {
           ? { valeur: Math.round((pv.valeur + (pv.taxe_sejour || 0)) * 100) / 100, source: pv.source }
           : { valeur: null, raison: pv.raison || null },
         taxeSejour: pv.taxe_sejour != null && pv.taxe_sejour > 0 ? pv.taxe_sejour : null,
+        taxeSejourInfo: {
+          montant: ts && ts.montant_cents != null ? ts.montant_cents / 100 : null,
+          collecteur: (ts && ts.collecteur) || null,
+          incluse: !!(ts && ts.inclus_dans_prix === true)
+        },
+        fraisCanal,
         prixParNuit: prixParNuitDuRaw(raw),
         factures: (() => {
           const l = (((raw && raw.invoiceItems) || [])

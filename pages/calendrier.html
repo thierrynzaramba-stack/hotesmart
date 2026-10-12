@@ -1372,6 +1372,16 @@ function ouvrirFicheResa (bienId, resaId) {
       const raison = d.totalVoyageur && d.totalVoyageur.raison
       deco.push([t('cal.price_total_paid'), t('cal.price_total_unknown') + (raison ? ' — ' + raison : '')])
     }
+    // Taxe de sejour NON incluse dans le total : collectee en sus (montant
+    // transmis), ou collectee par la plateforme sans montant — on le DIT.
+    const ts = d.taxeSejourInfo || {}
+    if (!d.taxeSejour) {
+      if (ts.montant > 0) deco.push([t('cal.tourist_tax'), prixIntl(ts.montant, devise, langue()) + ' ' + t('cal.tt_extra')])
+      else if (ts.collecteur === 'plateforme') deco.push([t('cal.tourist_tax'), t('cal.tt_platform_unknown')])
+    }
+    // Frais Airbnb (retenue hote transmise) — le frais de SERVICE voyageur
+    // d'Airbnb n'est transmis par aucun canal.
+    if (d.fraisCanal) deco.push([t('cal.airbnb_fee'), prixIntl(d.fraisCanal, devise, langue())])
     for (const f of d.factures || []) deco.push([f.libelle, prixIntl(f.montant, devise, langue())])
     const parNuit = (d.prixParNuit || []).map(n =>
       `<div class="cal-fiche__ligne"><span class="caption muted">${esc(dateIntl(n.date, langue(), { day: 'numeric', month: 'short' }))}</span><span>${esc(prixIntl(n.montant, devise, langue()) || '')}</span></div>`).join('')
