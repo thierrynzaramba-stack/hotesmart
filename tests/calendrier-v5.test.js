@@ -135,6 +135,8 @@ test('inventaire §12 : chaque fonction de l\'etape 1 est presente, manquantes n
     'fiche : Ouvrir la conversation resolu par booking_id': '/api/messages?booking_id=',
     'fiche : evaluation par le bus des le jour du depart': 'brancherEvaluation(',
     'fiche : badge pas d\'e-mail': 'badgeSansEmailVisible(',
+    'fiche : coordonnees et date de reservation par appel DETAIL (12/10)': 'data-fiche-detail',
+    'fiche : volet Detail du prix (par nuit + decomposition)': 'cal.price_detail',
     'fiche : prix ABSENT du payload si non touche': 'charge.prixParNuit === undefined',
     'fiche : annulation confirmee, la barre reste': 'cal.cancel_confirm',
     'fiche blocage : modifier / supprimer': 'rouvrirFermeture',

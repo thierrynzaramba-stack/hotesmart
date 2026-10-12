@@ -35,6 +35,38 @@ function journaliserRepli (ou) {
 }
 
 const { readStatus, colonneRawAbsente } = require('../lib/bookings-snapshot')
+// Regles du prix et de la date de vente : LE module du moteur, jamais une
+// seconde implementation (docs/kb/prix-voyageur.md — amount Airbnb est un
+// net hote, la reconstruction passe par meta.amount_type).
+const { prixVoyageur, dateDeVente } = require('../lib/yield/eclatement')
+
+// Le detail par nuit TEL QUE LE CANAL LE SERT (Channex : rooms[].days en
+// objet date -> montant, ou rooms[].meta.days_breakdown en tableau). Beds24
+// ne le fournit pas — on rend null et la fiche LE DIT, plutot que d'inventer
+// une repartition (l'uniforme est une regle du MOTEUR : eclatement-yield.md).
+function prixParNuitDuRaw (raw) {
+  const parDate = {}
+  let vide = true
+  for (const ro of (raw && raw.rooms) || []) {
+    const sources = []
+    if (ro && ro.days && typeof ro.days === 'object' && !Array.isArray(ro.days)) {
+      for (const [d, m] of Object.entries(ro.days)) sources.push({ date: d, montant: m })
+    }
+    const bd = ro && ro.meta && ro.meta.days_breakdown
+    if (!sources.length && Array.isArray(bd)) {
+      for (const x of bd) sources.push({ date: x && (x.date || x.day), montant: x && (x.amount ?? x.price) })
+    }
+    for (const { date, montant } of sources) {
+      const d = typeof date === 'string' ? date.slice(0, 10) : null
+      const m = Number(montant)
+      if (!d || !Number.isFinite(m)) continue
+      parDate[d] = (parDate[d] || 0) + m
+      vide = false
+    }
+  }
+  if (vide) return null
+  return Object.keys(parDate).sort().map(d => ({ date: d, montant: Math.round(parDate[d] * 100) / 100 }))
+}
 const { requirePermission, verifierSession, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { peutLire, peutEcrire } = require('../lib/permissions')
 
@@ -219,6 +251,62 @@ module.exports = async function handler(req, res) {
     const owned = gardeGet.biens
     const ownedIds = owned.map(p => p.id)
     if (!ownedIds.length) return res.status(200).json({ properties: [], inventory: {}, bookings: {} })
+
+    // ===== Detail d'UNE reservation (fiche) =====
+    // Coordonnees, date de vente, prix par nuit et decomposition du total :
+    // JAMAIS dans le listing (minimisation — « un booleen, pas l'adresse »,
+    // cf. plus bas), seulement ici, pour UN booking_id, sous la meme garde.
+    if (req.query.booking) {
+      const provDe = {}
+      owned.forEach(p => { if (p.provider_property_id != null) provDe[String(p.provider_property_id)] = p.provider })
+      const provIdsB = Object.keys(provDe)
+      if (!provIdsB.length) return res.status(404).json({ error: 'Reservation introuvable' })
+      const lireDetail = (avecRaw) => supabase
+        .from('bookings_snapshot')
+        .select('booking_id, property_id, snapshot' + (avecRaw ? ', raw' : ''))
+        .eq('user_id', gardeGet.compte)
+        .eq('booking_id', String(req.query.booking))
+        .in('property_id', provIdsB)
+        .limit(1)
+      let { data: rows, error: errD } = await lireDetail(true)
+      // Meme repli que le listing : la colonne raw peut manquer (migration,
+      // cache de schema) — la fiche rend alors ce que le snapshot porte.
+      if (errD && colonneRawAbsente(errD)) ({ data: rows, error: errD } = await lireDetail(false))
+      if (errD) {
+        console.error('[calendar] lecture detail reservation', errD.message)
+        return res.status(500).json({ error: 'Erreur lecture reservation' })
+      }
+      const ligne = rows && rows[0]
+      if (!ligne) return res.status(404).json({ error: 'Reservation introuvable' })
+      const s = ligne.snapshot || {}
+      const raw = ligne.raw || null
+      const provider = provDe[String(ligne.property_id)] || null
+      // prixVoyageur rend la valeur HORS taxe de sejour et la taxe qu'il en a
+      // sortie : le total PAYE se recompose (valeur + taxe) — prixTaxeComprise
+      // n'est pas exporte et lib/yield ne se modifie pas sans go.
+      const pv = prixVoyageur(s, raw, provider)
+      return res.status(200).json({
+        booking_id: String(ligne.booking_id),
+        guestEmail: s.guestEmail || null,
+        guestPhone: s.guestPhone || null,
+        vendueLe: dateDeVente(s, raw, provider),
+        totalVoyageur: pv.valeur != null
+          ? { valeur: Math.round((pv.valeur + (pv.taxe_sejour || 0)) * 100) / 100, source: pv.source }
+          : { valeur: null, raison: pv.raison || null },
+        taxeSejour: pv.taxe_sejour != null && pv.taxe_sejour > 0 ? pv.taxe_sejour : null,
+        prixParNuit: prixParNuitDuRaw(raw),
+        factures: (() => {
+          const l = (((raw && raw.invoiceItems) || [])
+            .filter(i => i && i.type === 'charge')
+            .map(i => ({ libelle: String(i.description || ''), montant: Number(i.lineTotal) || 0 }))
+            .filter(f => f.libelle || f.montant)).slice(0, 50)
+          return l.length ? l : null
+        })(),
+        amount: s.amount ?? null,
+        commission: s.commission ?? null,
+        currency: s.currency || null
+      })
+    }
 
     // inventory
     // ⚠ LECTURE PAGINEE. INCIDENT DU 7 SEPTEMBRE 2026, second foyer.
