@@ -359,8 +359,15 @@ Alertes en bas : 2 types × 2 canaux, porte Brevo, Tester depuis la base) et
 de date). `[hidden]{display:none !important}` en tête de ui.css (classe de
 défauts fermée). Dettes 66 (origine des envois), 67 (évaluation en
 proposition au départ), 68 (réglages IA non délégables, tiroir réservé au
-titulaire). RESTE : recette 2 = volet Messages programmés (inventaire
-§12 bis B), PUIS redirection de config.html et de l'app templates. étape 3 = Envoyer / Modifier / Rejeter sur les propositions dans
+titulaire). Recette 2 LIVRÉE
+(volet Messages programmés, parité prouvée sur les 11 messages réels — 0
+écart, scripts/verifier-parite-templates.js), puis REDIRECTIONS (go de
+Thierry du 12 octobre) : messagerie, config et templates redirigent vers
+/messages, sidebar réduite à la Base de connaissance, plus aucune écriture
+directe depuis l'ancienne app. **LOT 2 « MESSAGES » CLOS.** Restent au
+registre : dettes 66 (origine des envois) et 67 (évaluation en proposition
+au départ) — à traiter ensemble avant le lot Calendrier — et 68 (délégation
+des réglages IA). étape 3 = Envoyer / Modifier / Rejeter sur les propositions dans
 le fil (Envoyer = chemin de l'ancienne page : posterMessage puis clôture
 statut+journal par POST /api/messages action=proposition ; statuts
 done/ignored, pas de 'rejected' ; statut RELU avant l'envoi — pas de double

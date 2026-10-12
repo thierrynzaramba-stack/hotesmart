@@ -285,15 +285,12 @@ function renderApps(activePage) {
       // La Messagerie est dans le menu principal ("Messages"). La to-do (ex
       // "Signature Humaine") et le Simulateur sont désormais intégrés DANS la
       // page Messages — ils ne figurent plus dans ce sous-menu.
+      // Envoi programme et Configuration vivent dans /messages depuis le
+      // 12 octobre 2026 (panneau GuestFlow) : seule la Base de connaissance
+      // reste une page a part, jusqu'au lot Logements.
       subMenu = `
         <a class="nav-sub ${activePage === 'agent-ai-knowledge' ? 'connected' : ''}" href="/apps/agent-ai/knowledge">
           <div class="sub-dot ${activePage === 'agent-ai-knowledge' ? 'green' : 'gray'}"></div>Base de connaissance
-        </a>
-        <a class="nav-sub ${activePage === 'agent-ai-messages' ? 'connected' : ''}" href="/apps/agent-ai/messages">
-          <div class="sub-dot ${activePage === 'agent-ai-messages' ? 'green' : 'gray'}"></div>Envoi programmé
-        </a>
-        <a class="nav-sub ${activePage === 'agent-ai-config' ? 'connected' : ''}" href="/apps/agent-ai/config">
-          <div class="sub-dot ${activePage === 'agent-ai-config' ? 'green' : 'gray'}"></div>Configuration
         </a>`
     } else if (app.id === 'yield') {
       // ⚠ DEUX ECRANS, DEUX QUESTIONS. La synthese repond a « ou j'en suis »,

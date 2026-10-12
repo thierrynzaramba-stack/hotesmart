@@ -909,7 +909,6 @@ function voletProgrammes (ref) {
   return (cartes || `<p class="caption muted" style="padding: 14px 18px 0">${esc(t('messages.prog_empty'))}</p>`)
     + `<div class="msg-tiroir__bloc" style="border-bottom: 0">
       <button type="button" class="btn btn--primary" data-prog-nouveau ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.prog_new'))}</button>
-      <a class="link small" href="/apps/agent-ai/messages">${esc(t('messages.scheduled_old_link'))}</a>
     </div>`
 }
 function carteProgramme (x) {

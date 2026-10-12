@@ -343,13 +343,12 @@ test('messages etape 4 : les reglages IA sont reserves au TITULAIRE (dette 68)',
 })
 
 test('etape 4 : l\'ancienne messagerie et l\'ancienne config GuestFlow sont des redirections', () => {
-  // ⚠ config.html n'est PLUS une redirection (12 octobre) : elle reste en
-  // service, URL seule, tant que le tiroir ne couvre pas 100 % de
-  // l'inventaire GuestFlow (spec §12 bis). Seule la messagerie redirige.
-  assert.ok(!lire('apps/agent-ai/config.html').includes("location.replace('/messages')"),
-    'config.html rendue a son service (consigne du 12 octobre)')
+  // Depuis le go de Thierry du 12 octobre (apres recette 2 en prod), les
+  // TROIS pages de l'ancienne app redirigent : plus aucune n'ecrit en direct.
   for (const [page, attendu] of [
-    ['apps/agent-ai/messagerie.html', "location.replace('/messages' + (conv ? '?conv=' + encodeURIComponent(conv) : ''))"]
+    ['apps/agent-ai/messagerie.html', "location.replace('/messages' + (conv ? '?conv=' + encodeURIComponent(conv) : ''))"],
+    ['apps/agent-ai/config.html', "location.replace('/messages')"],
+    ['apps/agent-ai/messages.html', "location.replace('/messages')"]
   ]) {
     const src = lire(page)
     assert.ok(src.includes(attendu), `${page} redirige vers /messages`)
@@ -374,8 +373,12 @@ test('etape 4 : plus aucun lien vers l\'ancienne app, hors Connaissances', () =>
   // La nouvelle page garde UN SEUL lien vers l'ancienne app : Connaissances.
   const page = html()
   const liens = [...page.matchAll(/agent-ai\/([\w-]+)/g)].map(m => m[1])
-  assert.deepEqual([...new Set(liens)].sort(), ['knowledge', 'messages'],
-    'Connaissances, et le renvoi PROVISOIRE du volet programmes vers l\'ecran actuel (recette 2 le retirera)')
+  assert.deepEqual([...new Set(liens)], ['knowledge'],
+    'seul Connaissances survit (le renvoi provisoire est parti avec la redirection)')
+  // Et la barre laterale des anciennes pages ne liste plus que Connaissances.
+  const sidebar = lire('components/sidebar.js')
+  assert.ok(!sidebar.includes('agent-ai/messages') && !sidebar.includes('agent-ai/config'),
+    'Envoi programme et Configuration retires de la sidebar')
 })
 
 // ─── Recette 1 du changement de perimetre : volets IA + Alertes ──────────────
@@ -458,30 +461,22 @@ test('tiroir : une lecture echouee FERME le volet, elle ne montre jamais un faux
 })
 
 // ─── Recette 2 : volet « Messages programmes » (inventaire §12 bis B) ────────
-test('programmes : le module partage est IDENTIQUE aux listes de l\'ancienne app, ecart nomme', () => {
-  const ancien = lire('apps/agent-ai/messages.html')
+test('programmes : le module partage reste fidele aux listes relevees de l\'ancienne app, ecart nomme', () => {
+  // L'ancienne app est une REDIRECTION depuis le 12 octobre 2026 : les
+  // temoins ci-dessous sont ses litteraux, releves avant sa disparition
+  // (git 89cd48e, apps/agent-ai/messages.html) et prouves sur les 11
+  // messages reels par scripts/verifier-parite-templates.js (0 ecart).
+  // Ils FIGENT le contrat : une valeur retiree du module perdrait les
+  // templates en base qui la portent.
   const module_ = lire('shared/messages-programmes.js')
   const ecarts = []
-  // Les delais, releves dans l'ancienne page.
-  for (const d of ['5min', '15min', '1h', '2h', '4h', '8h', '24h']) {
-    if (!new RegExp(`value: '${d}'`).test(ancien)) ecarts.push(`delai ${d} absent de l'ancienne app`)
-  }
   if (!module_.includes("delais: ['5min', '15min', '1h', '2h', '4h', '8h', '24h']")) ecarts.push('delais booking_confirmed divergents')
   if (!module_.includes("delais: ['0min', '10min', '30min', '1h', '2h']")) ecarts.push('delais menage_done divergents')
-  if (!ancien.includes('[-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7]')) ecarts.push('jours de l\'ancienne app introuvables')
-  if (!module_.includes('[-7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7]')) ecarts.push('jours du module divergents')
-  // Les defauts du « Nouveau », champ par champ contre l'insert de l'ancienne.
-  const insertAncien = ancien.slice(ancien.indexOf('window.addTemplate'), ancien.indexOf('window.updateField'))
-  for (const [cle, attendu] of [
-    ["event_type: 'arrival'", 'event_type'], ["reference: 'arrival'", 'reference'],
-    ['offset_days: -1', 'offset_days'], ["send_time: '10:00'", 'send_time'],
-    ["earliest_send_time: '15:00'", 'earliest_send_time'], ['send_anyway: true', 'send_anyway'],
-    ['active: true', 'active'], ["template_text: ''", 'template_text'], ['lock_id: null', 'lock_id']
-  ]) {
-    if (!insertAncien.includes(cle)) ecarts.push(`defaut ancien introuvable : ${attendu}`)
-    if (!module_.includes(cle.replace(/,$/, ''))) ecarts.push(`defaut du module divergent : ${attendu}`)
+  if (!module_.includes('[-7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7]')) ecarts.push('jours divergents')
+  for (const cle of ["event_type: 'arrival'", "reference: 'arrival'", 'offset_days: -1', "send_time: '10:00'",
+    "earliest_send_time: '15:00'", 'send_anyway: true', 'active: true', "template_text: ''", 'lock_id: null']) {
+    if (!module_.includes(cle)) ecarts.push(`defaut du module divergent : ${cle}`)
   }
-  // La reference derivee, le mapping exact.
   if (!/eventType === 'departure' \? 'departure'\s*: eventType === 'booking_confirmed' \? 'booking' : 'arrival'/.test(module_)) {
     ecarts.push('mapping reference divergent')
   }
