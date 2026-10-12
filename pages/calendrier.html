@@ -645,7 +645,13 @@ function renderGrilleMobile () {
   const decale = (premier.getDay() + 6) % 7   // Lun=0
   let cases = ''
   const entetes = [1, 2, 3, 4, 5, 6, 0].map(d =>
-    `<span class="cal-mois__jour caption muted">${esc(new Intl.DateTimeFormat(langue(), { weekday: 'short' }).format(new Date(Date.UTC(2024, 0, d === 0 ? 7 : d))))}</span>`).join('')
+    `<span class="cal-mois__jour caption muted${classesWE(d)}">${esc(new Intl.DateTimeFormat(langue(), { weekday: 'short' }).format(new Date(Date.UTC(2024, 0, d === 0 ? 7 : d))))}</span>`).join('')
+  // Canal de la resa qui couvre chaque nuit vendue (contour de la case).
+  const canalParNuit = {}
+  for (const resa of (st.__resas || [])) {
+    const fam = familleSource(resa.sourceBrute || resa.source)
+    for (let d = new Date(resa.startISO + 'T12:00:00'); toISO(d) < resa.checkout; d.setDate(d.getDate() + 1)) canalParNuit[toISO(d)] = fam
+  }
   for (let i = 0; i < decale; i++) cases += '<span></span>'
   for (let j = 1; j <= dernier.getDate(); j++) {
     const iso = toISO(new Date(etat.annee, etat.mois, j))
@@ -660,7 +666,8 @@ function renderGrilleMobile () {
         ? (v === 'closed' ? '✕' : '·') : (v ? String(v) : '·')
     }
     const selection = etat.sel && etat.sel.bien === bienId && iso >= etat.sel.duIso && iso <= etat.sel.auIso
-    cases += `<button type="button" class="cal-case cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}${selection ? ' cal-case--sel' : ''}"
+    const we = classesWE(new Date(iso + 'T12:00:00').getDay())
+    cases += `<button type="button" class="cal-case cal-nuit--${e}${e === 'vendue' && canalParNuit[iso] ? ' cal-barre--' + canalParNuit[iso] : ''}${passe ? ' cal-nuit--passe' : ''}${we}${iso === AUJOURDHUI ? ' cal-auj' : ''}${selection ? ' cal-case--sel' : ''}"
       data-case="${iso}" ${passe ? 'data-passe="1"' : ''}>
       <span class="caption">${j}</span>
       ${orphelines.has(iso) ? `<span class="cal-orpheline">${icone('i-alert')}</span>` : ''}

@@ -505,7 +505,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
    cellule de prix garde sa structure (week-end compris), décision du
    12 octobre. Au TÉLÉPHONE, la case du mois n'a pas de barre : le gris
    vendue y reste l'information (la légende le dit). */
-.cal-case.cal-nuit--vendue { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.cal-case.cal-nuit--vendue { background: var(--surface-2); border: 2px solid var(--coul, var(--line)); }
+.cal-case.cal-we { background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); box-shadow: none; }
+.cal-case.cal-nuit--vendue.cal-we { background-color: var(--surface-2); }
+.cal-mois__jour.cal-we { background: none; box-shadow: none; color: var(--ink); font-weight: var(--fw-bold); }
 .cal-case.cal-auj { box-shadow: inset 0 0 0 1px var(--info); }
 .cal-case.cal-case--sel { box-shadow: inset 0 0 0 2px var(--info); }
 .cal-nuit--ouverte { background: var(--surface); }
