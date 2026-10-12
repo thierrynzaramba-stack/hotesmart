@@ -235,7 +235,6 @@
   "cal.param_cta": "Arrival",
   "cal.param_ctd": "Departure",
   "cal.param_stopSell": "Stop sell",
-  "cal.closed_short": "Closed",
   "cal.stay_over": "stay over",
   "cal.blocked": "Blocked",
   "cal.blocked_title": "Blocked from {du} to {au} — {raison} — click to edit",

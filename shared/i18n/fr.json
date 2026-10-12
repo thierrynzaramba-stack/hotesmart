@@ -235,7 +235,6 @@
   "cal.param_cta": "Arrivée",
   "cal.param_ctd": "Départ",
   "cal.param_stopSell": "Stop vente",
-  "cal.closed_short": "Fermé",
   "cal.stay_over": "séjour terminé",
   "cal.blocked": "Bloqué",
   "cal.blocked_title": "Bloqué du {du} au {au} — {raison} — cliquer pour modifier",

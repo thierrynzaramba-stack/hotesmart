@@ -235,7 +235,6 @@
   "cal.param_cta": "Llegada",
   "cal.param_ctd": "Salida",
   "cal.param_stopSell": "Stop venta",
-  "cal.closed_short": "Cerrado",
   "cal.stay_over": "estancia terminada",
   "cal.blocked": "Bloqueado",
   "cal.blocked_title": "Bloqueado del {du} al {au} — {raison} — clic para modificar",

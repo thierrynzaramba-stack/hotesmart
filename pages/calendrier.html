@@ -120,7 +120,7 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
-import { toISO, computeDays, buildStateFromInventory, loadCalendarData }
+import { toISO, computeDays, buildStateFromInventory, loadCalendarData, PARAMS }
   from '/shared/calendar-core.js'
 import { mapResa, familleSource, LIBELLE_CANAL, libelleStatut, droitsResa, badgeSansEmailVisible,
   TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, brancherEvaluation }
@@ -159,7 +159,7 @@ function lirePrefs () {
     if (Array.isArray(p.choisis)) { etat.choisis = p.choisis; etat.choisisDefinis = true }
     if ([1, 3, 6, 12].includes(p.months)) etat.months = p.months
     if (Number.isInteger(p.annee) && Number.isInteger(p.mois)) { etat.annee = p.annee; etat.mois = p.mois }
-    if (typeof p.vueMobile === 'string') etat.vueMobile = p.vueMobile
+    if (typeof p.vueMobile === 'string' && VUES.some(v => v.id === p.vueMobile)) etat.vueMobile = p.vueMobile
   } catch {}
 }
 function ecrirePrefs () {
@@ -492,10 +492,11 @@ const VUES = [
   { id: 'ctd', cle: 'cal.param_ctd' },
   { id: 'stopSell', cle: 'cal.param_stopSell' }
 ]
+const VUES_OUVERT_FERME = new Set(PARAMS.filter(p => p.type === 'openclosed').map(p => p.key))
 function valeurDeVue (e, s, bien) {
   if (etat.vueMobile === 'rate') return prixAffiche(e, s, bien)
   const v = s[etat.vueMobile]
-  return ['avail', 'cta', 'ctd', 'stopSell'].includes(etat.vueMobile)
+  return VUES_OUVERT_FERME.has(etat.vueMobile)
     ? (v === 'closed' ? '✕' : '·') : (v ? String(v) : '·')
 }
 function libelleVue () {
@@ -507,7 +508,7 @@ function libelleVue () {
 function majSelecteurVue () {
   const sel = $('[data-bind="vue-mobile"]')
   const nav = $('.cal-nav')
-  if (nav && sel.parentElement !== nav) nav.appendChild(sel)
+  if (nav && sel.parentElement !== nav) nav.insertBefore(sel, nav.querySelector('[data-bind="menu-plus"]'))
   sel.hidden = false
   sel.innerHTML = VUES.map(v => `<option value="${v.id}" ${etat.vueMobile === v.id ? 'selected' : ''}>${esc(t(v.cle))}</option>`).join('')
   return sel
@@ -543,6 +544,10 @@ function renderPlanning () {
     ? etat.choisis.map(id => grilleBien(id, fonds)).join('')
     : (aPilotables ? `<p class="muted" style="padding: 24px 16px">${esc(t('cal.all_reduced'))}</p>` : '')
   brancherPlanning()
+  // Un re-render (changement de vue) reconstruit les cellules : la
+  // selection en cours se repeint, sinon la flottante agit sur des nuits
+  // invisibles (revue de a8debbf).
+  if (etat.sel && etat.sel.a != null) peindreSelectionDesktop()
 }
 function grilleBien (bienId, fonds) {
   const bien = etat.biens.find(b => b.id === bienId) || {}
@@ -597,7 +602,7 @@ function grilleBien (bienId, fonds) {
     return `<td class="cal-nuit cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${we}"
       data-bien="${esc(bienId)}" data-i="${i}" data-iso="${iso}">
       ${orphelines.has(iso) ? `<span class="cal-orpheline" title="${esc(t('cal.orphan_hint'))}">${icone('i-alert')}</span>` : ''}
-      <span class="cal-nuit__prix${s.sansPrix && e !== 'attente' ? ' muted' : ''}">${esc(valeur)}</span>
+      <span class="cal-nuit__prix${etat.vueMobile === 'rate' && s.sansPrix && e !== 'attente' ? ' muted' : ''}">${esc(valeur)}</span>
     </td>`
   }).join('')
   return `<section class="cal-bien" data-bien-section="${esc(bienId)}">
@@ -792,10 +797,12 @@ function brancherPlanning () {
     })
     // Clavier : Entree / F2 / chiffre = saisie inline (A.5, conserve).
     td.addEventListener('keydown', (e) => {
-      if (etat.vueMobile === 'rate' && (e.key === 'Enter' || e.key === 'F2' || /^[0-9]$/.test(e.key))) {
+      const chiffre = /^[0-9]$/.test(e.key)
+      if (chiffre && etat.vueMobile !== 'rate') return
+      if (e.key === 'Enter' || e.key === 'F2' || chiffre) {
         e.preventDefault()
         etat.sel = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
-        actionPrix(joursSelection(), /^[0-9]$/.test(e.key) ? e.key : '')
+        actionPrix(joursSelection(), chiffre ? e.key : '')
       }
     })
     td.tabIndex = 0
