@@ -194,7 +194,6 @@ async function chargerBiens () {
   if (!etat.choisisDefinis && !etat.choisis.length) {
     etat.choisis = estLarge() ? pilotables.map(b => b.id) : pilotables.slice(0, 1).map(b => b.id)
   }
-  if (!estLarge() && etat.choisis.length > 1) etat.choisis = etat.choisis.slice(0, 1)
 }
 function bornesLecture () {
   if (estLarge()) {
@@ -340,11 +339,11 @@ const photoBien = (b) => b.photo_url ? `<img src="${esc(b.photo_url)}" alt="" lo
 function identiteBien (bien, { mobile = false } = {}) {
   const peut = !etat.lectureSeule && peutEcrire('reservations')
   return `<div class="cal-bien__bandeau${mobile ? ' cal-bien__bandeau--mobile' : ''}"><div class="cal-bien__bandeau-int">
+      <span class="cal-poigne" data-poigne title="${esc(t('cal.drag_hint'))}" aria-label="${esc(t('cal.drag_hint'))}">${icone('i-menu')}</span>
       <span class="cal-photo cal-bien__photo">${photoBien(bien)}</span>
       <b class="cal-bien__nom">${esc(bien.name || '')}</b>
       ${mobile ? '' : `<span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span>`}
-      ${mobile ? '<span data-slot-vue></span>' : ''}
-      ${mobile && peut ? `<button type="button" class="cal-btn-plus" data-plus title="${esc(t('cal.add_title'))}" aria-label="${esc(t('cal.add_title'))}">${icone('i-plus')}</button>` : ''}
+      ${mobile && peut ? `<button type="button" class="cal-btn-plus" data-plus="${esc(bien.id)}" title="${esc(t('cal.add_title'))}" aria-label="${esc(t('cal.add_title'))}">${icone('i-plus')}</button>` : ''}
       <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
         title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
     </div></div>`
@@ -439,12 +438,58 @@ function brancherAngle (zone) {
 }
 function brancherBulles (zone) {
   zone.querySelectorAll('[data-bulle]:not([disabled])').forEach(p => p.addEventListener('click', () => {
-    const id = p.dataset.bulle
-    if (estLarge()) etat.choisis = [...etat.choisis, id]
-    else etat.choisis = [id]
+    etat.choisis = [...etat.choisis, p.dataset.bulle]
     etat.choisisDefinis = true
     viderSelection(); ecrirePrefs(); charger()
   }))
+}
+// ─── L'ORDRE des biens : la liste etat.choisis, persistee et COMMUNE aux
+//     deux ecrans. On attrape un bloc par la POIGNEE de son bandeau ; au
+//     doigt, la section sous le doigt devient la cible.
+function deplacerBien (id, cibleId) {
+  if (!id || id === cibleId) return
+  const liste = etat.choisis.filter(x => x !== id)
+  const i = liste.indexOf(cibleId)
+  liste.splice(i < 0 ? liste.length : i, 0, id)
+  etat.choisis = liste
+  etat.choisisDefinis = true
+  ecrirePrefs(); renderTout()
+}
+function brancherDrag (zone) {
+  const sections = [...zone.querySelectorAll('[data-bien-section]')]
+  sections.forEach(section => {
+    const poigne = section.querySelector('[data-poigne]')
+    if (!poigne) return
+    poigne.addEventListener('mousedown', () => section.setAttribute('draggable', 'true'))
+    section.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', section.dataset.bienSection)
+      e.dataTransfer.effectAllowed = 'move'
+      section.classList.add('cal-bien--saisi')
+    })
+    section.addEventListener('dragend', () => { section.removeAttribute('draggable'); section.classList.remove('cal-bien--saisi') })
+    section.addEventListener('dragover', (e) => { e.preventDefault(); section.classList.add('cal-bien--cible') })
+    section.addEventListener('dragleave', () => section.classList.remove('cal-bien--cible'))
+    section.addEventListener('drop', (e) => {
+      e.preventDefault()
+      section.classList.remove('cal-bien--cible')
+      deplacerBien(e.dataTransfer.getData('text/plain'), section.dataset.bienSection)
+    })
+    // Tactile : glisser la poignee, la section sous le doigt est la cible.
+    let cible = null
+    poigne.addEventListener('touchmove', (e) => {
+      e.preventDefault()
+      const tp = e.touches[0]
+      const el = document.elementFromPoint(tp.clientX, tp.clientY)
+      const s = el && el.closest('[data-bien-section]')
+      sections.forEach(x => x.classList.toggle('cal-bien--cible', x === s && s !== section))
+      cible = s && s !== section ? s.dataset.bienSection : null
+    }, { passive: false })
+    poigne.addEventListener('touchend', () => {
+      sections.forEach(x => x.classList.remove('cal-bien--cible'))
+      if (cible) deplacerBien(section.dataset.bienSection, cible)
+      cible = null
+    })
+  })
 }
 function renderBulles () {
   const zone = $('[data-bind="bulles"]')
@@ -623,19 +668,36 @@ function grilleBien (bienId, fonds) {
 function renderGrilleMobile () {
   const zone = $('[data-bind="grille-mobile"]')
   zone.hidden = false
-  // La nav du haut est celle de l'ordinateur : au telephone, le mois vit
-  // SOUS le bandeau du bien (structure de l'ancien calendrier mobile,
-  // retouche du 12 octobre). Le selecteur de vue est GARE dans la nav avant
-  // chaque re-render (innerHTML le detruirait), puis pose dans le bandeau.
+  // Multi-biens au telephone (13 octobre) : le mois et le selecteur de vue
+  // sont GLOBAUX en tete, puis les calendriers des biens choisis s'EMPILENT
+  // (le nom au-dessus, la grille dessous) ; les bulles du bas en AJOUTENT.
+  // Le selecteur est gare dans la nav avant chaque innerHTML (qui le
+  // detruirait), puis pose dans son emplacement global.
   $('[data-bind="mois-libelle"]').hidden = true
   const sel = majSelecteurVue()
-  const bienId = etat.choisis[0]
-  if (!bienId) {
+  if (!etat.choisis.length) {
     sel.hidden = true
     zone.innerHTML = etat.biens.some(b => b.provider !== 'beds24')
       ? `<p class="muted">${esc(t('cal.all_reduced'))}</p>` : ''
     return
   }
+  const moisTitre = dateIntl(`${etat.annee}-${String(etat.mois + 1).padStart(2, '0')}-01`, langue(), { month: 'long', year: 'numeric' })
+  zone.innerHTML = `<div class="cal-mois__nav">
+      <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="-1" aria-label="${esc(t('cal.prev'))}">${icone('i-chevron', 'icon cal-chevron-g')}</button>
+      <b>${esc(moisTitre)}</b>
+      <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="1" aria-label="${esc(t('cal.next'))}">${icone('i-chevron')}</button>
+      ${(etat.annee === new Date().getFullYear() && etat.mois === new Date().getMonth()) ? '' : `<button type="button" class="link small" data-mois-nav="0">${esc(t('cal.today'))}</button>`}
+    </div>
+    <div class="cal-mois__vue" data-slot-vue></div>
+    ${etat.choisis.map(id => blocBienMobile(id)).join('')}
+    <div class="cal-mois__legende caption muted">${esc(t('cal.legend'))}</div>`
+  const slot = zone.querySelector('[data-slot-vue]')
+  if (slot) slot.appendChild(sel)
+  brancherMobile()
+}
+// Le calendrier d'UN bien au telephone : bandeau (nom au-dessus), en-tetes
+// de jours, semaines avec leur calque de barres.
+function blocBienMobile (bienId) {
   const bien = etat.biens.find(b => b.id === bienId) || {}
   const st = etat.states[bienId] || {}
   const orphelines = etat.orphelines.get(bienId) || new Set()
@@ -644,9 +706,6 @@ function renderGrilleMobile () {
   const decale = (premier.getDay() + 6) % 7   // Lun=0
   const entetes = [1, 2, 3, 4, 5, 6, 0].map(d =>
     `<span class="cal-mois__jour caption muted${classesWE(d)}">${esc(new Intl.DateTimeFormat(langue(), { weekday: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, 0, d === 0 ? 7 : d))))}</span>`).join('')
-  // Cellules lineaires (vides en tete/queue), puis rendu PAR SEMAINE : la
-  // semaine porte un calque de barres (fermetures en cases entieres sous les
-  // reservations en DEMI-cases arrivee/depart) — verbatim de l'ancien mobile.
   const cells = []
   for (let i = 0; i < decale; i++) cells.push(null)
   for (let j = 1; j <= dernier.getDate(); j++) {
@@ -668,9 +727,9 @@ function renderGrilleMobile () {
       const e = etatNuit(bienId, iso)
       const passe = iso < AUJOURDHUI
       const valeur = valeurDeVue(e, s, bien)
-      const selection = etat.sel && etat.sel.bien === bienId && iso >= etat.sel.duIso && iso <= etat.sel.auIso
+      const selection = etat.sel && etat.sel.bien === bienId && etat.sel.duIso && iso >= etat.sel.duIso && iso <= etat.sel.auIso
       return `<button type="button" class="cal-case cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${classesWE(c.dow)}${iso === AUJOURDHUI ? ' cal-auj' : ''}${selection ? ' cal-case--sel' : ''}"
-        data-case="${iso}" ${passe ? 'data-passe="1"' : ''}>
+        data-case="${iso}" data-bien="${esc(bienId)}" ${passe ? 'data-passe="1"' : ''}>
         <span class="cal-case__num">${j}</span>
         ${orphelines.has(iso) ? `<span class="cal-orpheline">${icone('i-alert')}</span>` : ''}
         <span class="cal-case__valeur">${esc(valeur)}</span>
@@ -678,7 +737,6 @@ function renderGrilleMobile () {
     }).join('')
     const colW = 100 / 7
     let barres = ''
-    // Les blocages d'abord, SOUS les reservations : cases entieres, raison.
     for (const f of fermes) {
       const fd = String(f.date_debut).slice(0, 10), ff = String(f.date_fin).slice(0, 10)
       let a = -1, z = -1
@@ -692,8 +750,6 @@ function renderGrilleMobile () {
         style="left: calc(${a * colW}% + 2px); width: calc(${(z + 1 - a) * colW}% - 4px); z-index: 1"
         data-blocage="${esc(String(f.id))}" data-bien="${esc(bienId)}">${esc(debutIci ? (f.raison || t('cal.blocked')) : '')}</button>`
     }
-    // Les reservations : DEMI-cases a l'arrivee et au depart (le depart est
-    // une demi-journee), nom du voyageur si le sejour commence ici.
     for (const r of resas) {
       const ci = r.startISO, co = String(r.checkout).slice(0, 10)
       let a = -1, z = -1
@@ -714,20 +770,11 @@ function renderGrilleMobile () {
     }
     semaines += `<div class="cal-sem">${cases}${barres ? `<span class="cal-sem__couche">${barres}</span>` : ''}</div>`
   }
-  const moisTitre = dateIntl(`${etat.annee}-${String(etat.mois + 1).padStart(2, '0')}-01`, langue(), { month: 'long', year: 'numeric' })
-  zone.innerHTML = `${identiteBien(bien, { mobile: true })}
-    <div class="cal-mois__nav">
-      <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="-1" aria-label="${esc(t('cal.prev'))}">${icone('i-chevron', 'icon cal-chevron-g')}</button>
-      <b>${esc(moisTitre)}</b>
-      <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="1" aria-label="${esc(t('cal.next'))}">${icone('i-chevron')}</button>
-      ${(etat.annee === new Date().getFullYear() && etat.mois === new Date().getMonth()) ? '' : `<button type="button" class="link small" data-mois-nav="0">${esc(t('cal.today'))}</button>`}
-    </div>
+  return `<section class="cal-bien-mobile" data-bien-section="${esc(bienId)}">
+    ${identiteBien(bien, { mobile: true })}
     <div class="cal-mois__grille">${entetes}</div>
     <div class="cal-mois__semaines">${semaines}</div>
-    <div class="cal-mois__legende caption muted">${esc(t('cal.legend'))}</div>`
-  const slot = zone.querySelector('[data-slot-vue]')
-  if (slot) slot.appendChild(sel)
-  brancherMobile()
+  </section>`
 }
 
 // ─── Sélection (les DEUX écrans) et barre flottante ─────────────────────────
@@ -810,6 +857,7 @@ function brancherPlanning () {
   zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
+  brancherDrag(zone)
 }
 // La navigation de mois (telephone) : UNE regle, sens 0 = retour au mois
 // courant (le bouton « Aujourd'hui » du haut est masque au telephone).
@@ -831,13 +879,15 @@ function peindreSelectionDesktop () {
 }
 function brancherMobile () {
   const zone = $('[data-bind="grille-mobile"]')
-  const bienId = etat.choisis[0]
   // Appui court = popup Configurer pre-remplie sur ce jour (arbitrage (a) :
   // le detail de nuit viendra a l'etape 2) ; appui LONG puis glisser =
   // selection -> barre d'actions (§9). Jour passe : rien (garde commune).
+  // MULTI-BIENS : chaque case porte SON bien — la popup et la selection
+  // visent le bien tape, jamais le premier de la liste.
   let presse = null, long = false
   zone.querySelectorAll('[data-case]').forEach(c => {
     const iso = c.dataset.case
+    const bienId = c.dataset.bien
     c.addEventListener('touchstart', () => {
       if (iso < AUJOURDHUI || etat.lectureSeule || !peutEcrire('reservations')) return
       long = false
@@ -856,23 +906,23 @@ function brancherMobile () {
       if (iso < AUJOURDHUI) return
       if (long) { long = false; return }
       if (etat.sel && etat.sel.bien === bienId && etat.sel.duIso) {
-        // une selection est ouverte : le tap l'etend
+        // une selection est ouverte SUR CE BIEN : le tap l'etend
         if (iso < etat.sel.duIso) etat.sel.duIso = iso
         else etat.sel.auIso = iso
         renderGrilleMobile(); renderFlottante()
         return
       }
-      ouvrirPopup([iso])
+      ouvrirPopup([iso], null, bienId)
     })
   })
   zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
-  // ‹ mois › sous le bandeau (structure de l'ancien mobile) et bouton +
-  // (Reservation / Bloquer les dates, arrivee aujourd'hui par defaut).
+  // ‹ mois › global, bouton + PAR BIEN (arrivee aujourd'hui par defaut),
+  // et reordonnancement par la poignee du bandeau.
   zone.querySelectorAll('[data-mois-nav]').forEach(b => b.addEventListener('click', () => naviguerMois(Number(b.dataset.moisNav))))
-  const plus = zone.querySelector('[data-plus]')
-  if (plus) plus.addEventListener('click', () => { etat.sel = null; ouvrirFormulaire('reservation', [AUJOURDHUI]) })
+  zone.querySelectorAll('[data-plus]').forEach(b => b.addEventListener('click', () => { etat.sel = null; ouvrirFormulaire('reservation', [AUJOURDHUI], b.dataset.plus) }))
+  brancherDrag(zone)
 }
 
 // ─── Écritures : save + verdicts + « Annuler » (vraie écriture inverse) ─────
@@ -1007,8 +1057,8 @@ function plagesContigues (jours) {
 // les deux écrans (constat 5). Garde YieldFlow : le tarif est retiré des
 // segments AVANT toute mutation (défaut de recette du 20/09/2026).
 const JOURS_SEMAINE = [1, 2, 3, 4, 5, 6, 0]
-function ouvrirPopup (jours, rubriqueOuverte = null) {
-  const bienId = (etat.sel && etat.sel.bien) || etat.choisis[0]
+function ouvrirPopup (jours, rubriqueOuverte = null, bienForce = null) {
+  const bienId = bienForce || (etat.sel && etat.sel.bien) || etat.choisis[0]
   const bien = etat.biens.find(b => b.id === bienId) || {}
   const du = jours[0], au = jours[jours.length - 1]
   const pp = etat.pp[bienId] || { included: bien.included_guests || bien.capacity || 1, extraFee: Number(bien.extra_guest_fee) || 0 }
@@ -1218,8 +1268,8 @@ function noteFeuille (texte) {
 }
 
 // ─── Formulaire « Ajouter » : Réservation / Bloquer les dates (§6) ──────────
-function ouvrirFormulaire (type, jours) {
-  const bienId = (etat.sel && etat.sel.bien) || etat.choisis[0]
+function ouvrirFormulaire (type, jours, bienForce = null) {
+  const bienId = bienForce || (etat.sel && etat.sel.bien) || etat.choisis[0]
   const bien = etat.biens.find(b => b.id === bienId) || {}
   const channex = bien.provider !== 'beds24' && String(bien.provider_property_id || '').length > 0
   const du = jours[0]
