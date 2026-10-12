@@ -364,10 +364,16 @@ titulaire). Recette 2 LIVRÉE
 écart, scripts/verifier-parite-templates.js), puis REDIRECTIONS (go de
 Thierry du 12 octobre) : messagerie, config et templates redirigent vers
 /messages, sidebar réduite à la Base de connaissance, plus aucune écriture
-directe depuis l'ancienne app. **LOT 2 « MESSAGES » CLOS.** Restent au
-registre : dettes 66 (origine des envois) et 67 (évaluation en proposition
-au départ) — à traiter ensemble avant le lot Calendrier — et 68 (délégation
-des réglages IA). étape 3 = Envoyer / Modifier / Rejeter sur les propositions dans
+directe depuis l'ancienne app. **LOT 2 « MESSAGES » CLOS.** **Dettes 66 et 67
+SOLDÉES le 12 octobre 2026 (6dc64ea)** : `messages.origine`
+(ia_validee/ia_modifiee/hote/ia_auto, posée par le writer à l'envoi, liste
+fermée trois fois — CHECK, record-message, endpoints de page ; migration
+prouvée prod ET staging par un insert refusé), robot sur les bulles ia_*,
+tuile accueil « messages écrits par l'IA » comptée au serveur depuis la
+colonne seule ; proposition « Évaluer {prénom} ? » en fin de fil au JOUR du
+départ (règle PARTAGÉE `departEvaluable` de shared/calendrier-resa.js), par
+le bus du cœur (fenêtre avis.evaluer) — même writer que la fiche résa.
+Reste la dette 68 (délégation des réglages IA). étape 3 = Envoyer / Modifier / Rejeter sur les propositions dans
 le fil (Envoyer = chemin de l'ancienne page : posterMessage puis clôture
 statut+journal par POST /api/messages action=proposition ; statuts
 done/ignored, pas de 'rejected' ; statut RELU avant l'envoi — pas de double
