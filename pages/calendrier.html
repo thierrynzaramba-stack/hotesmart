@@ -709,13 +709,15 @@ function renderGrilleMobile () {
     return
   }
   const moisTitre = dateIntl(`${etat.annee}-${String(etat.mois + 1).padStart(2, '0')}-01`, langue(), { month: 'long', year: 'numeric' })
-  zone.innerHTML = `<div class="cal-mois__nav">
+  zone.innerHTML = `<div class="cal-mois__tete">
+    <div class="cal-mois__nav">
       <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="-1" aria-label="${esc(t('cal.prev'))}">${icone('i-chevron', 'icon cal-chevron-g')}</button>
       <b>${esc(moisTitre)}</b>
       <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="1" aria-label="${esc(t('cal.next'))}">${icone('i-chevron')}</button>
       ${(etat.annee === new Date().getFullYear() && etat.mois === new Date().getMonth()) ? '' : `<button type="button" class="link small" data-mois-nav="0">${esc(t('cal.today'))}</button>`}
     </div>
     <div class="cal-mois__vue" data-slot-vue></div>
+    </div>
     ${etat.choisis.map(id => blocBienMobile(id)).join('')}
     <div class="cal-mois__legende caption muted">${esc(t('cal.legend'))}</div>`
   const slot = zone.querySelector('[data-slot-vue]')

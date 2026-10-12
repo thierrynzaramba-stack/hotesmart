@@ -547,13 +547,16 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 /* Grille téléphone — structure de l'ancien calendrier mobile (12 octobre) :
    rendu PAR SEMAINE, chaque semaine porte un calque de barres (blocages en
    cases entières sous les réservations en demi-cases). */
+/* L'en-tete du telephone (mois + selecteur) reste VISIBLE au defilement
+   des calendriers empiles (recette du 13 octobre). */
+.cal-mois__tete { position: sticky; top: 0; z-index: 10; background: var(--surface); padding: 4px 0 8px; margin: 0 calc(-1 * var(--page-pad)); padding-inline: var(--page-pad); box-shadow: 0 1px 0 var(--line); }
 .cal-mois__nav { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 8px; }
 .cal-mois__nav b { font-size: 17px; text-transform: capitalize; min-width: 150px; text-align: center; }
 .cal-chevron-g { transform: rotate(180deg); }
 .cal-btn-plus { width: 34px; height: 34px; border: 0; border-radius: var(--radius-pill); background: var(--info); color: var(--on-ink); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
 .cal-poigne { color: var(--muted); cursor: grab; flex: none; display: inline-flex; padding: 4px 2px; touch-action: none; }
 .cal-poigne .icon { width: 14px; height: 14px; }
-.cal-mois__vue { margin-bottom: 8px; }
+.cal-mois__vue { margin-bottom: 0; }
 .cal-mois__vue select { width: 100%; }
 .cal-bien-mobile { margin-bottom: 18px; }
 /* Delimitation entre les calendriers empiles (recette du 13 octobre). */
