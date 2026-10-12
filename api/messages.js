@@ -415,8 +415,6 @@ module.exports = async function handler(req, res) {
   // Le cas property_id NULL est EXCLU (defaut) : une conversation voyageur sans
   // bien rattache ne doit pas apparaitre a un membre limite a un autre bien.
   const filtreOr = filtrePerimetreSql(refsAutorisees)
-  if (filtreOr === '') return res.status(200).json({ conversations: [] })
-
   // ─── La tuile « messages ecrits par l'IA » (dette 66) ──────────────────────
   // COMPTE SEUL, depuis la COLONNE origine seulement : les envois d'avant la
   // migration (origine null) ne comptent pas — aucun historique reconstitue
@@ -426,6 +424,9 @@ module.exports = async function handler(req, res) {
     const brut = typeof req.query.depuis === 'string' ? req.query.depuis : ''
     const depuis = Number.isFinite(new Date(brut).getTime())
       ? brut : new Date(Date.now() - 7 * 86400000).toISOString()
+    // Un perimetre vide compte ZERO — jamais la forme {conversations} d'une
+    // autre reponse (revue de 658d758).
+    if (filtreOr === '') return res.status(200).json({ messages_ia: 0, depuis })
     let q = supabase.from('messages').select('id', { count: 'exact', head: true })
       .eq('user_id', userId).eq('direction', 'outbound')
       .in('origine', ['ia_validee', 'ia_modifiee', 'ia_auto'])
@@ -439,6 +440,8 @@ module.exports = async function handler(req, res) {
     }
     return res.status(200).json({ messages_ia: count || 0, depuis })
   }
+
+  if (filtreOr === '') return res.status(200).json({ conversations: [] })
 
   // ─── Existence d'un fil pour UNE reservation ───────────────────────────────
   // Sert au bouton « Ouvrir la conversation » de la fiche du calendrier

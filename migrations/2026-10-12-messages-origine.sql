@@ -13,8 +13,10 @@
 -- « messages ecrits par l'IA » ne compte QUE la
 -- colonne, aucun historique reconstitue.
 -- Writers : api/channel-message.js, api/beds24
--- (sendMessage), lib/cron-messages.js,
--- lib/cron-arrival-code.js.
+-- (sendMessage) et lib/cron-classify.js
+-- (ia_auto). Les TEMPLATES programmes
+-- (cron-messages, cron-arrival-code) ne sont
+-- PAS l'IA : ils restent sans origine.
 --
 -- ⚠ LIGNES COURTES (editeur Supabase).
 -- Rejouable. Aucun SELECT ici.

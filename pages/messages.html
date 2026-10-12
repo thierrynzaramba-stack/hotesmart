@@ -132,6 +132,7 @@ import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVer
 import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/shared/aujourdhui.js'
 import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, reinitialiserMoment, libelleJour, libelleHeure, libelleDelai as libelleDelaiBrut }
   from '/shared/messages-programmes.js'
+import { departEvaluable } from '/shared/calendrier-resa.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -1323,32 +1324,38 @@ async function basculerArchive (c) {
 // la fenetre standard du coeur (avis.evaluer, les boutons a niveaux du
 // chantier avis) — meme writer que la fiche resa, rien de duplique.
 function sejourTerminePour (c) {
-  const depart = String(c.lastNight || '').slice(0, 10)
-  return depart && depart < etat.aujourdHui
+  // La regle du « quand » est PARTAGEE avec la fiche resa (des le JOUR du
+  // depart) : jamais recopiee, les deux copies divergeaient d'un jour.
+  return departEvaluable(c.lastNight, etat.aujourdHui)
     && !STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase())
 }
 function peindreEvaluation (c, cible) {
   if (!cible || !sejourTerminePour(c)) return
   const connu = etat.evaluations.get(String(c.bookId))
-  if (connu === 'rien') return
+  if (connu === 'rien' || connu === 'encours') return
   if (connu) { peindreEtatEvaluation(c, cible, connu); return }
   chargerEvaluation(c)
 }
 async function chargerEvaluation (c) {
   const bookId = String(c.bookId)
-  etat.evaluations.set(bookId, 'rien')   // pas de redemande en boucle
-  let bus = null
-  try { bus = (await import('/shared/hs-bus.js')).hsBus } catch { return }
-  if (!bus) return
+  // 'encours' bloque la redemande PENDANT ce rendu seulement : un echec
+  // transitoire ne se fige jamais (le cache s'invalide a chaque ouverture
+  // du fil — revue de 658d758), une reponse « rien » si.
+  etat.evaluations.set(bookId, 'encours')
   try {
+    const { hsBus: bus } = await import('/shared/hs-bus.js')
+    if (!bus) { etat.evaluations.delete(bookId); return }
     const r = await bus.demander('avis.statut', { booking_uid: bookId })
-    if (!r || !r.ok || !r.data) return
+    if (!r || !r.ok || !r.data) { etat.evaluations.delete(bookId); return }
     if (r.data.etat === 'publiee') etat.evaluations.set(bookId, 'publiee')
     else if (r.data.evaluable && peutEcrireMessages() && await bus.disponible('avis.evaluer')) {
       etat.evaluations.set(bookId, 'evaluable')
-    } else return
+    } else { etat.evaluations.set(bookId, 'rien'); return }
     if (String(etat.ouverte) === bookId) renderFil()
-  } catch (err) { logger.error('Messages', 'evaluation', err) }
+  } catch (err) {
+    logger.error('Messages', 'evaluation', err)
+    etat.evaluations.delete(bookId)
+  }
 }
 function peindreEtatEvaluation (c, cible, statut) {
   if (statut === 'publiee') {
@@ -1356,13 +1363,16 @@ function peindreEtatEvaluation (c, cible, statut) {
     return
   }
   const prenom = String(c.guestName || '').trim().split(/\s+/)[0] || t('messages.guest')
+  const parent = cible.parentElement
   cible.outerHTML = `<div class="bulle bulle--proposition">
       <span class="bulle__entete">${icone('i-review', 'icon icon--robot')}${esc(t('messages.review_ask', { name: prenom }))}</span>
       <span class="bulle__actions">
         <button type="button" class="btn btn--primary" data-evaluer>${esc(t('messages.review_open'))}</button>
       </span>
     </div>`
-  document.querySelector('[data-evaluer]')?.addEventListener('click', () => ouvrirEvaluation(c))
+  // Dans le DEROULE seulement : le premier [data-evaluer] du document
+  // pourrait etre ailleurs (revue de 658d758).
+  parent?.querySelector('[data-evaluer]')?.addEventListener('click', () => ouvrirEvaluation(c))
 }
 async function ouvrirEvaluation (c) {
   let bus = null
@@ -1386,6 +1396,9 @@ function dateLongue (jour) {
   return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
 }
 function ouvrir (bookId) {
+  // Le statut d'evaluation se REDEMANDE a chaque ouverture : une publication
+  // faite depuis la fiche resa, ou un echec transitoire, ne fige rien.
+  etat.evaluations.delete(String(bookId))
   // Changer de fil pendant un « Modifier » : la proposition REVIENT dans son
   // fil (elle n'est pas close). Le texte descendu NON retouche repart avec
   // elle (rien n'est perdu, et il n'atterrit pas chez un autre voyageur —

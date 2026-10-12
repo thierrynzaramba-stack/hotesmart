@@ -135,13 +135,20 @@ function aujourdhuiLocal () {
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
 }
 
+// La SEULE regle du « quand » : l'evaluation se propose DES LE JOUR du
+// depart (checkout <= aujourd'hui). Partagee entre la fiche resa et le fil
+// de /messages — deux copies divergeaient d'un jour (revue de 658d758).
+export function departEvaluable (depart, aujourdhui) {
+  const d = String(depart || '').slice(0, 10)
+  return !!d && d <= String(aujourdhui)
+}
+
 export async function brancherEvaluation ({ resa, cible, encoreAffichee = () => true, bus = undefined, aujourdhui = aujourdhuiLocal() } = {}) {
   if (!resa || !cible) return 'rien'
   cible.innerHTML = ''
   // Une réservation sans identifiant n'a pas d'évaluation : pas d'appel inutile.
   if (resa.id == null || resa.id === '') return 'rien'
-  const depart = String(resa.checkout || '').slice(0, 10)
-  if (!depart || depart > aujourdhui) return 'avant_depart'
+  if (!departEvaluable(resa.checkout, aujourdhui)) return 'avant_depart'
   let b = bus
   if (b === undefined) {
     try { b = (await import('./hs-bus.js')).hsBus } catch { b = null }

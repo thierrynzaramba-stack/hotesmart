@@ -575,7 +575,15 @@ test('dette 66 : la tuile IA compte la COLONNE seule, au serveur, jamais un faux
 
 test('dette 67 : « Evaluer {prenom} ? » au DEPART seulement, par le BUS seulement', () => {
   const src = sansCommentaires(html())
-  assert.ok(/depart && depart < etat\.aujourdHui/.test(src), 'jamais avant le depart du voyageur')
+  assert.ok(/departEvaluable\(c\.lastNight, etat\.aujourdHui\)/.test(src),
+    'la regle du « quand » (des le JOUR du depart) est PARTAGEE avec la fiche resa — jamais recopiee')
+  assert.ok(/export function departEvaluable/.test(lire('shared/calendrier-resa.js'))
+    && /departEvaluable\(resa\.checkout, aujourdhui\)/.test(lire('shared/calendrier-resa.js')),
+    'les deux ecrans traversent la meme fonction du module commun')
+  // Le cache ne fige jamais une erreur, et chaque ouverture redemande.
+  assert.ok(/etat\.evaluations\.delete\(String\(bookId\)\)/.test(src), 'ouverture = statut frais')
+  assert.ok(/'encours'/.test(src) && /etat\.evaluations\.delete\(bookId\)/.test(src),
+    'un echec transitoire ne cache pas la proposition pour la session')
   assert.ok(/bus\.demander\('avis\.statut'/.test(src) && /bus\.ouvrir\('avis\.evaluer'/.test(src),
     'statut et geste par le bus du coeur — meme writer que la fiche resa (les boutons a niveaux)')
   assert.ok(!/from\('ota_reviews'\)/.test(src) && !/\/api\/avis/.test(src),

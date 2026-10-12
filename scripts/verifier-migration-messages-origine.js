@@ -12,15 +12,29 @@ async function main () {
   const { error: eL } = await supabase.from('messages').select('origine').limit(1)
   if (eL) { console.error('✗ colonne origine illisible :', eL.message); process.exit(1) }
   console.log('  ✔ messages.origine lisible par son nom')
-  // La contrainte : un insert hors liste doit ECHOUER (rien n'est ecrit).
-  const { error: eI } = await supabase.from('messages').insert({ origine: 'hors_liste_preuve' })
-  if (!eI) { console.error('✗ un INSERT origine=hors_liste a ETE ACCEPTE — contrainte absente ; ligne parasite a supprimer !'); process.exit(1) }
-  if (!/messages_origine_fermee|check constraint/i.test(eI.message) && !/violates/i.test(eI.message)) {
-    // refus pour une AUTRE raison (not-null d'une autre colonne) : la
-    // contrainte n'est pas prouvee, on le dit.
-    console.log('  ⚠ insert refuse pour une autre raison (' + eI.message.slice(0, 80) + ') — contrainte non prouvee par ce chemin')
+  // La contrainte, PROUVEE : un insert COMPLET (les NOT NULL servis par des
+  // valeurs factices) dont la seule faute est l'origine hors liste. Sans ces
+  // valeurs, le NOT NULL de user_id refusait TOUJOURS et le script disait
+  // « fermee » sur une base sans contrainte — le faux vert exact de la regle
+  // feedback-verificateur-faux-vert (releve en review de 658d758).
+  const factice = {
+    user_id: '00000000-0000-0000-0000-000000000000',
+    provider: 'channex', property_id: 'verif-origine-preuve',
+    direction: 'outbound', sender: 'host', body: '',
+    origine: 'hors_liste_preuve'
+  }
+  const { data: inseree, error: eI } = await supabase.from('messages').insert(factice).select('id')
+  if (!eI) {
+    // Accepte = contrainte ABSENTE. On efface la ligne de preuve et on echoue.
+    if (inseree && inseree[0]) await supabase.from('messages').delete().eq('id', inseree[0].id)
+    console.error('✗ un INSERT origine=hors_liste a ETE ACCEPTE — contrainte absente (ligne de preuve supprimee)')
+    process.exit(1)
+  }
+  if (/messages_origine_fermee/i.test(eI.message)) {
+    console.log('  ✔ la liste est fermee (insert hors liste refuse PAR LA CONTRAINTE)')
   } else {
-    console.log('  ✔ la liste est fermee (insert hors liste refuse par la contrainte)')
+    console.error('✗ insert refuse pour une AUTRE raison (' + eI.message.slice(0, 120) + ') — la contrainte n\'est PAS prouvee')
+    process.exit(1)
   }
   console.log('Migration 2026-10-12-messages-origine : conforme sur ce que l API permet de prouver.')
 }
