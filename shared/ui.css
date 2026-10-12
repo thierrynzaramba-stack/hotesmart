@@ -556,6 +556,8 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-mois__vue { margin-bottom: 8px; }
 .cal-mois__vue select { width: 100%; }
 .cal-bien-mobile { margin-bottom: 18px; }
+/* Delimitation entre les calendriers empiles (recette du 13 octobre). */
+.cal-bien-mobile + .cal-bien-mobile { border-top: 3px solid var(--line); padding-top: 16px; }
 .cal-bien--saisi { opacity: .55; }
 .cal-bien--cible { outline: 2px dashed var(--info); outline-offset: 3px; border-radius: var(--radius-card); }
 .cal-btn-plus .icon { width: 16px; height: 16px; }
