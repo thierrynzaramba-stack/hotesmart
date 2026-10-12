@@ -295,10 +295,17 @@ function construireEtats (start, end) {
     const resas = mapResa((etat.bookings && etat.bookings[id]) || [])
     etat.states[id].__resas = resas
     const vendue = new Set()
+    const canalParNuit = {}
     for (const r of resas) {
-      for (let d = new Date(r.startISO + 'T12:00:00'); toISO(d) < r.checkout; d.setDate(d.getDate() + 1)) vendue.add(toISO(d))
+      const fam = familleSource(r.sourceBrute || r.source)
+      for (let d = new Date(r.startISO + 'T12:00:00'); toISO(d) < r.checkout; d.setDate(d.getDate() + 1)) {
+        const nuit = toISO(d)
+        vendue.add(nuit)
+        canalParNuit[nuit] = fam
+      }
     }
     etat.states[id].__vendues = vendue
+    etat.states[id].__canalParNuit = canalParNuit
     // Orphelines (module commun, constat 8) : jours libres non couvrables.
     const libre = (iso) => {
       const s = parIso[iso]
@@ -431,6 +438,11 @@ function brancherAngle (zone) {
       liste.style.insetInlineStart = Math.max(8, r.left) + 'px'
     })
     $('[data-bind="planning"]').addEventListener('scroll', () => { det.open = false }, { passive: true })
+  }
+  const menuPlus = $('[data-bind="menu-plus"]')
+  if (menuPlus && !menuPlus.dataset.fermeAuScroll) {
+    menuPlus.dataset.fermeAuScroll = '1'
+    window.addEventListener('scroll', () => { menuPlus.open = false }, { passive: true })
   }
 }
 function brancherBulles (zone) {
@@ -645,16 +657,12 @@ function renderGrilleMobile () {
   const decale = (premier.getDay() + 6) % 7   // Lun=0
   let cases = ''
   const entetes = [1, 2, 3, 4, 5, 6, 0].map(d =>
-    `<span class="cal-mois__jour caption muted${classesWE(d)}">${esc(new Intl.DateTimeFormat(langue(), { weekday: 'short' }).format(new Date(Date.UTC(2024, 0, d === 0 ? 7 : d))))}</span>`).join('')
-  // Canal de la resa qui couvre chaque nuit vendue (contour de la case).
-  const canalParNuit = {}
-  for (const resa of (st.__resas || [])) {
-    const fam = familleSource(resa.sourceBrute || resa.source)
-    for (let d = new Date(resa.startISO + 'T12:00:00'); toISO(d) < resa.checkout; d.setDate(d.getDate() + 1)) canalParNuit[toISO(d)] = fam
-  }
+    `<span class="cal-mois__jour caption muted${classesWE(d)}">${esc(new Intl.DateTimeFormat(langue(), { weekday: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, 0, d === 0 ? 7 : d))))}</span>`).join('')
+  const canalParNuit = st.__canalParNuit || {}
   for (let i = 0; i < decale; i++) cases += '<span></span>'
   for (let j = 1; j <= dernier.getDate(); j++) {
-    const iso = toISO(new Date(etat.annee, etat.mois, j))
+    const dte = new Date(etat.annee, etat.mois, j)
+    const iso = toISO(dte)
     const s = st[iso] || {}
     const e = etatNuit(bienId, iso)
     const passe = iso < AUJOURDHUI
@@ -666,7 +674,7 @@ function renderGrilleMobile () {
         ? (v === 'closed' ? '✕' : '·') : (v ? String(v) : '·')
     }
     const selection = etat.sel && etat.sel.bien === bienId && iso >= etat.sel.duIso && iso <= etat.sel.auIso
-    const we = classesWE(new Date(iso + 'T12:00:00').getDay())
+    const we = classesWE(dte.getDay())
     cases += `<button type="button" class="cal-case cal-nuit--${e}${e === 'vendue' && canalParNuit[iso] ? ' cal-barre--' + canalParNuit[iso] : ''}${passe ? ' cal-nuit--passe' : ''}${we}${iso === AUJOURDHUI ? ' cal-auj' : ''}${selection ? ' cal-case--sel' : ''}"
       data-case="${iso}" ${passe ? 'data-passe="1"' : ''}>
       <span class="caption">${j}</span>
