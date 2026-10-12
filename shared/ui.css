@@ -525,9 +525,9 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-we--fin.cal-auj { box-shadow: inset 0 0 0 1px var(--info), inset -2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
 .cal-nuit--sel.cal-we--debut, .cal-nuit--sel.cal-we--fin { box-shadow: inset 0 0 0 2px var(--info); }
 /* Cases MOBILES — declarees APRES les combos ci-dessus : a specificite
-   egale l'ordre tranche, et la selection doit gagner sur le week-end et la
-   vendue (revue de e251bc9). Vendue = GRISEE (les barres disent le canal) ;
-   aujourd'hui = PASTILLE NOIRE sur le numero, pas un cadre. */
+   egale l'ordre tranche (selection > week-end). La nuit VENDUE n'est PLUS
+   grisee (13 octobre) : la barre dit la reservation, la case garde son
+   fond ; aujourd'hui = PASTILLE NOIRE sur le numero, pas un cadre. */
 .cal-case.cal-we { background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); box-shadow: none; }
 .cal-mois__jour.cal-we { box-shadow: none; color: var(--ink); font-weight: var(--fw-bold); }
 .cal-case.cal-auj { box-shadow: none; }
