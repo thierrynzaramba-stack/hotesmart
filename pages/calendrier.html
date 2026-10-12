@@ -193,7 +193,9 @@ async function chargerBiens () {
   const r = await api.channel.listProperties()
   etat.biens = (r && r.properties) || []
   const pilotables = etat.biens.filter(b => b.provider !== 'beds24')
+  const avaitDesIds = etat.choisis.length > 0
   etat.choisis = etat.choisis.filter(id => pilotables.some(b => b.id === id))
+  if (avaitDesIds && !etat.choisis.length) etat.choisisDefinis = false
   if (!etat.choisisDefinis && !etat.choisis.length) {
     etat.choisis = estLarge() ? pilotables.map(b => b.id) : pilotables.slice(0, 1).map(b => b.id)
   }
@@ -333,6 +335,20 @@ function renderTout () {
   else { $('[data-bind="planning"]').hidden = true; renderGrilleMobile() }
   renderFlottante()
 }
+// L'identite d'un bien : photo (36 px rayon 10) + nom + capacite, et le
+// bouton reduire — UNE construction pour grille, mobile et bulles (une
+// copie par ecran diverge : vecu du 30 septembre).
+const photoBien = (b) => b.photo_url ? `<img src="${esc(b.photo_url)}" alt="" loading="lazy">` : icone('i-home')
+function identiteBien (bien, { mobile = false } = {}) {
+  return `<div class="cal-bien__id${mobile ? ' cal-bien__id--mobile' : ''}">
+      <span class="cal-bien__photo">${photoBien(bien)}</span>
+      <span class="cal-bien__nomcap"><b>${esc(bien.name || '')}</b>
+        <span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span></span>
+      <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
+        title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
+    </div>`
+}
+
 // Les biens NON affiches, en bulles SOUS la grille (retouche point 4) :
 // photo ronde + nom ; clic = le bloc se deploie (ordinateur : s'ajoute ;
 // telephone : remplace le bien courant). Beds24 : grisee, non cliquable.
@@ -341,11 +357,10 @@ function renderBulles () {
   const caches = etat.biens.filter(b => b.provider === 'beds24' || !etat.choisis.includes(b.id))
   zone.innerHTML = caches.map(b => {
     const beds24 = b.provider === 'beds24'
-    const photo = b.photo_url ? `<img src="${esc(b.photo_url)}" alt="" loading="lazy">` : icone('i-home')
     return `<button type="button" class="cal-bulle${beds24 ? ' cal-bulle--grise' : ''}"
       data-bulle="${esc(b.id)}" ${beds24 ? 'disabled' : ''}
       title="${esc(beds24 ? t('cal.beds24_hint') : t('cal.bubble_show', { nom: b.name || '' }))}">
-      <span class="cal-bulle__photo">${photo}</span>
+      <span class="cal-bulle__photo">${photoBien(b)}</span>
       <span class="cal-bulle__nom">${esc(b.name || '')}</span>
       ${beds24 ? `<span class="caption muted">${esc(t('cal.beds24_tag'))}</span>` : ''}
     </button>`
@@ -428,9 +443,10 @@ function renderPlanning () {
     bandeJours += `<span class="cal-bande__jour${we ? ' cal-we' + lisere : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(dateIntl(iso, langue(), { weekday: 'narrow' }))}<b>${d.getDate()}</b></span>`
   }
   $('[data-bind="bande"]').innerHTML = `<div class="cal-bande__l">${bandeMois}</div><div class="cal-bande__l">${bandeJours}</div>`
+  const aPilotables = etat.biens.some(b => b.provider !== 'beds24')
   $('[data-bind="grilles"]').innerHTML = etat.choisis.length
     ? etat.choisis.map(id => grilleBien(id)).join('')
-    : `<p class="muted" style="padding: 24px 16px">${esc(t('cal.all_reduced'))}</p>`
+    : (aPilotables ? `<p class="muted" style="padding: 24px 16px">${esc(t('cal.all_reduced'))}</p>` : '')
   brancherPlanning()
 }
 function grilleBien (bienId) {
@@ -481,7 +497,7 @@ function grilleBien (bienId) {
       <span class="cal-nuit__prix${s.sansPrix && e !== 'attente' ? ' muted' : ''}">${e === 'attente' ? '' : esc(prix || '—')}</span>
     </td>`
   }).join('')
-  const params = lignesVisibles(bienId).map(k => {
+  const params = lignesVisibles().map(k => {
     const def = LIGNES_PARAMS.find(l => l.key === k)
     const tds = etat.joursISO.map(iso => {
       const s = st[iso] || {}
@@ -493,16 +509,9 @@ function grilleBien (bienId) {
     }).join('')
     return `<tr><th class="cal-libelle caption">${esc(t(def.cle))}</th>${tds}</tr>`
   }).join('')
-  const photo = bien.photo_url ? `<img src="${esc(bien.photo_url)}" alt="" loading="lazy">` : icone('i-home')
   return `<section class="cal-bien" data-bien-section="${esc(bienId)}">
     <div class="cal-bien__ligne">
-      <div class="cal-bien__id">
-        <span class="cal-bien__photo">${photo}</span>
-        <span class="cal-bien__nomcap"><b>${esc(bien.name || '')}</b>
-          <span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span></span>
-        <button type="button" class="cal-bien__reduire" data-reduire="${esc(bienId)}"
-          title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
-      </div>
+      ${identiteBien(bien)}
       <div class="cal-bien__resas" style="--n:${etat.joursISO.length}">${barres}${blocages}</div>
     </div>
     <table class="cal-table"><tbody>
@@ -532,7 +541,11 @@ function renderGrilleMobile () {
   sel.hidden = false
   sel.innerHTML = VUES_MOBILE.map(v => `<option value="${v.id}" ${etat.vueMobile === v.id ? 'selected' : ''}>${esc(t(v.cle))}</option>`).join('')
   const bienId = etat.choisis[0]
-  if (!bienId) { zone.innerHTML = `<p class="muted">${esc(t('cal.all_reduced'))}</p>`; return }
+  if (!bienId) {
+    zone.innerHTML = etat.biens.some(b => b.provider !== 'beds24')
+      ? `<p class="muted">${esc(t('cal.all_reduced'))}</p>` : ''
+    return
+  }
   const bien = etat.biens.find(b => b.id === bienId) || {}
   const st = etat.states[bienId] || {}
   const orphelines = etat.orphelines.get(bienId) || new Set()
@@ -564,12 +577,7 @@ function renderGrilleMobile () {
     </button>`
   }
   const resas = (st.__resas || [])
-  const photoB = bien.photo_url ? `<img src="${esc(bien.photo_url)}" alt="" loading="lazy">` : icone('i-home')
-  zone.innerHTML = `<div class="cal-bien__id cal-bien__id--mobile">
-      <span class="cal-bien__photo">${photoB}</span>
-      <span class="cal-bien__nomcap"><b>${esc(bien.name || '')}</b>
-        <span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span></span>
-    </div>
+  zone.innerHTML = `${identiteBien(bien, { mobile: true })}
     <div class="cal-mois__grille">${entetes}${cases}</div>
     <div class="cal-mois__legende caption muted">${esc(t('cal.legend'))}</div>
     <div class="cal-mois__resas">${resas.filter(r => String(r.checkout).slice(0, 8) >= toISO(premier).slice(0, 8)).map(r => `
