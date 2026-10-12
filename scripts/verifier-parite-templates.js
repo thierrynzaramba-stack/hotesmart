@@ -19,25 +19,29 @@
 const { createClient } = require('@supabase/supabase-js')
 
 async function main () {
-  const { EVENEMENTS_PROGRAMMES, ecartsDeRepresentation, referenceDe, libelleJour, libelleHeure } =
+  const { EVENEMENTS_PROGRAMMES, ecartsDeRepresentation, referenceDe, libelleJour, libelleHeure, libelleDelai } =
     await import('../shared/messages-programmes.js')
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
-  // L'affichage de l'ANCIENNE page (formatTiming), recopié ici comme témoin.
-  const ANCIENS_DELAIS = {
-    booking_confirmed: ['5min', '15min', '1h', '2h', '4h', '8h', '24h'],
-    menage_done: ['0min', '10min', '30min', '1h', '2h']
+  // L'affichage de l'ANCIENNE page : ses LABELS litteraux, en temoin (jamais
+  // les fonctions du volet — un temoin qui traverse le writer ne detecte
+  // rien, regle feedback-verificateur-faux-vert, releve en review).
+  const LABELS_ANCIENS = {
+    '0min': 'Immédiatement', '5min': '5 min après', '10min': '10 min après', '15min': '15 min après',
+    '30min': '30 min après', '1h': '1h après', '2h': '2h après', '4h': '4h après', '8h': '8h après', '24h': '24h après'
   }
   function momentAncien (t) {
     const type = (t.event_type === 'booking_confirmed' || t.event_type === 'menage_done') ? 'after' : 'days'
-    if (type === 'after') return t.offset_value || 'immédiatement'
+    if (type === 'after') return t.offset_value ? (LABELS_ANCIENS[t.offset_value] || t.offset_value) : 'immédiatement'
     const jour = t.offset_days === 0 ? 'Jour J' : t.offset_days > 0 ? `J+${t.offset_days}` : `J${t.offset_days}`
     return `${jour} à ${String(t.send_time || '10:00').replace(':00', 'h')}`
   }
+  // L'affichage du VOLET : ses propres fonctions, importees du module.
+  const TEXTES_FR = { apres: 'après', immediatement: 'Immédiatement' }
   function momentNouveau (t) {
     const ev = EVENEMENTS_PROGRAMMES[t.event_type]
     if (!ev) return '(événement inconnu)'
-    if (ev.type === 'apres') return t.offset_value || 'immédiatement'
+    if (ev.type === 'apres') return t.offset_value ? libelleDelai(t.offset_value, TEXTES_FR) : 'immédiatement'
     return `${libelleJour(t.offset_days, 'Jour J')} à ${libelleHeure(t.send_time || '10:00')}`
   }
   const referenceAncienne = (e) => e === 'departure' ? 'departure' : e === 'booking_confirmed' ? 'booking' : 'arrival'

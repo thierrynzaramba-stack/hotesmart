@@ -130,7 +130,7 @@ import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVer
 // La règle « à traiter » est PARTAGÉE avec l'accueil (séjours à venir ou en
 // cours seulement, décision du 11 octobre) : jamais recopiée.
 import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/shared/aujourdhui.js'
-import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, libelleJour, libelleHeure }
+import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, reinitialiserMoment, libelleJour, libelleHeure, libelleDelai as libelleDelaiBrut }
   from '/shared/messages-programmes.js'
 
 initErrorHandler()
@@ -823,6 +823,7 @@ function noteReglage (texte, ok = false) {
 function renderTiroir () {
   const tiroir = $('[data-bind="tiroir"]')
   if (tiroir.hidden) return
+  sauverTextesProgrammes()
   $('[data-bind="tiroir-titre"]').textContent =
     t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled' : 'messages.tab_ia')
   const corps = $('[data-bind="tiroir-corps"]')
@@ -857,31 +858,48 @@ async function chargerProgrammes (ref) {
   if (etat.templatesEnCours) return
   etat.templatesEnCours = true
   etat.templatesBien = ref
+  // undefined DES LE DEPART : un render pendant le chargement (fin d'un
+  // enregistrement apres changement de bien) affichait les cartes de
+  // l'ANCIEN bien sous l'etiquette du nouveau (releve en review).
+  etat.templates = undefined
   const [tpl, verrous] = await Promise.all([
     supabase.from('message_templates').select('*')
       .eq('user_id', compteCourant()).eq('property_id', ref).order('created_at'),
     supabase.from('property_locks').select('lock_id, role, locks(id, label, brand)')
       .eq('property_id', ref)
   ])
-  // Lecture echouee = volet FERME (un formulaire vide enregistre detruirait
-  // la base — meme regle que les alertes, revue de 634ee15).
-  if (tpl.error) { logger.error('Messages', 'programmes', tpl.error); etat.templates = null }
-  else etat.templates = tpl.data || []
-  etat.serrures = verrous.error ? [] : (verrous.data || []).map(x => x.locks).filter(Boolean)
-  if (verrous.error) logger.error('Messages', 'serrures', verrous.error)
+  // Lecture echouee = volet FERME, serrures COMPRISES : des serrures
+  // illisibles rendaient un select mensonger qui detruisait lock_id a la
+  // premiere sauvegarde (releve en review de 49c6ad4).
+  if (tpl.error || verrous.error) {
+    logger.error('Messages', 'programmes', tpl.error || verrous.error)
+    etat.templates = null
+    etat.serrures = []
+  } else {
+    etat.templates = tpl.data || []
+    etat.serrures = (verrous.data || []).map(x => x.locks).filter(Boolean)
+  }
   etat.templatesEnCours = false
   renderTiroir()
+}
+// AVANT tout re-render du volet : chaque texte en cours de frappe repart
+// dans son template — changer un champ d'une AUTRE carte, basculer Actif ou
+// creer une carte effacait les brouillons (releve en review).
+function sauverTextesProgrammes () {
+  if (!Array.isArray(etat.templates)) return
+  document.querySelectorAll('[data-prog-texte]').forEach(x => {
+    const v = etat.templates.find(w => String(w.id) === String(x.dataset.progTexte))
+    if (v) v.template_text = x.value
+  })
 }
 function resumeMoment (x) {
   const ev = EVENEMENTS_PROGRAMMES[x.event_type] || EVENEMENTS_PROGRAMMES.arrival
   if (ev.type === 'apres') return x.offset_value ? libelleDelai(x.offset_value) : t('messages.immediately')
   return `${libelleJour(x.offset_days, t('messages.prog_day_j'))} · ${libelleHeure(x.send_time || '10:00')}`
 }
-// « 5min » -> « 5 min apres », « 0min » -> « Immediatement » (forme de
-// l'ancienne page, traduite).
+// Les libelles EXACTS de l'ancienne page, via le module partage.
 function libelleDelai (v) {
-  if (v === '0min') return t('messages.immediately')
-  return v.replace('min', ' min').replace(/h$/, ' h') + ' ' + t('messages.after')
+  return libelleDelaiBrut(v, { apres: t('messages.after'), immediatement: t('messages.immediately') })
 }
 function voletProgrammes (ref) {
   if (etat.templates === null) {
@@ -947,25 +965,26 @@ function carteProgramme (x) {
     <p class="caption muted" style="margin: 0">${esc(t('messages.prog_vars'))}</p>
     <span class="row" style="gap: 8px">
       <button type="button" class="btn btn--primary" data-prog-save="${esc(x.id)}" ${gele}>${esc(t('messages.prog_save'))}</button>
-      <button type="button" class="btn btn--secondary" data-prog-apercu="${esc(x.id)}" ${gele}>${esc(t('messages.prog_preview'))}</button>
+      <button type="button" class="btn btn--secondary" data-prog-apercu="${esc(x.id)}" ${gele || (x.apercuEnCours ? 'disabled' : '')}>${esc(t('messages.prog_preview'))}</button>
     </span>
-    <p class="caption" data-prog-rendu="${esc(x.id)}" hidden style="margin: 0; white-space: pre-wrap"></p>
+    ${x.apercuRendu ? `<p class="caption muted" style="margin: 0; white-space: pre-wrap">${esc(x.apercuRendu)}</p>` : ''}
   </div>`
 }
 function brancherProgrammes (corps, ref) {
   const de = (id) => etat.templates.find(v => String(v.id) === String(id))
   corps.querySelectorAll('[data-prog]').forEach(x => x.addEventListener('change', () => {
+    if (etat.modeEnCours) return
     const [id, champ] = x.dataset.prog.split('|')
     const v = de(id)
     if (!v) return
-    // Le TEXTE en cours de frappe survit a un re-render de structure.
-    const texte = corps.querySelector(`[data-prog-texte="${id}"]`)
-    if (texte) v.template_text = texte.value
     if (champ === 'send_anyway') v.send_anyway = x.checked
     else if (champ === 'offset_days') v.offset_days = Number.parseInt(x.value, 10)
     else if (champ === 'lock_id') v.lock_id = x.value || null
     else v[champ] = x.value
-    if (champ === 'event_type') v.reference = referenceDe(v.event_type)
+    // Changer l'evenement REINITIALISE le moment (la regle de l'ancienne
+    // app) : sans quoi un offset null de l'ancien type etait SAUVE pendant
+    // que l'ecran montrait la premiere option (releve en review).
+    if (champ === 'event_type') reinitialiserMoment(v)
     renderTiroir()
   }))
   corps.querySelectorAll('[data-prog-actif]').forEach(x => x.addEventListener('change', () =>
@@ -983,9 +1002,8 @@ async function enregistrerProgramme (corps, id) {
   const v = etat.templates.find(x => String(x.id) === String(id))
   if (!v) return
   etat.modeEnCours = true
-  geler(corps, true)
-  const texte = corps.querySelector(`[data-prog-texte="${id}"]`)
-  if (texte) v.template_text = texte.value
+  sauverTextesProgrammes()
+  renderTiroir()
   // L'UPDATE de l'ancienne app, memes colonnes — et la ligne RELUE remplace
   // l'etat local (l'ecran montre la base, jamais l'etat suppose).
   const { data: relu, error } = await supabase.from('message_templates').update({
@@ -998,14 +1016,18 @@ async function enregistrerProgramme (corps, id) {
   etat.modeEnCours = false
   if (error) { logger.error('Messages', 'programme', error); noteReglage(t('messages.mode_error')) }
   else {
-    etat.templates = etat.templates.map(x => String(x.id) === String(id) ? relu : x)
+    etat.templates = etat.templates.map(x => String(x.id) === String(id)
+      ? { ...relu, apercuRendu: x.apercuRendu } : x)
     noteReglage(t('messages.saved'), true)
   }
   renderTiroir()
 }
 async function basculerActifProgramme (id, actif) {
   if (etat.modeEnCours) return
+  const v = etat.templates.find(x => String(x.id) === String(id))
+  if (v) v.active = actif
   etat.modeEnCours = true
+  renderTiroir()
   const { data: relu, error } = await supabase.from('message_templates')
     .update({ active: actif }).eq('id', id).select().single()
   etat.modeEnCours = false
@@ -1018,6 +1040,7 @@ async function supprimerProgramme (id) {
   // Geste DESTRUCTIF : confirmation explicite, jamais silencieux.
   if (!window.confirm(t('messages.prog_delete_confirm'))) return
   etat.modeEnCours = true
+  renderTiroir()
   const { error } = await supabase.from('message_templates').delete().eq('id', id)
   etat.modeEnCours = false
   if (error) { logger.error('Messages', 'programme suppression', error); noteReglage(t('messages.mode_error')) }
@@ -1027,6 +1050,7 @@ async function supprimerProgramme (id) {
 async function nouveauProgramme (ref) {
   if (etat.modeEnCours) return
   etat.modeEnCours = true
+  renderTiroir()
   const { data: nee, error } = await supabase.from('message_templates')
     .insert({ user_id: compteCourant(), property_id: ref, ...DEFAUTS_NOUVEAU_PROGRAMME })
     .select().single()
@@ -1039,21 +1063,28 @@ async function nouveauProgramme (ref) {
 // l'ouverture ni a la saisie. Le MEME chemin que l'ancienne app : /api/grok,
 // wrapper interne — jamais un provider. Prompt repris a l'identique.
 async function apercuProgramme (corps, id) {
+  const v = etat.templates.find(x => String(x.id) === String(id))
+  if (!v || v.apercuEnCours) return
   const texte = (corps.querySelector(`[data-prog-texte="${id}"]`)?.value || '').trim()
-  const rendu = corps.querySelector(`[data-prog-rendu="${id}"]`)
-  if (!texte) { rendu.hidden = false; rendu.textContent = t('messages.prog_write_first'); return }
-  rendu.hidden = false
-  rendu.textContent = t('messages.proposing')
+  if (!texte) { v.apercuRendu = t('messages.prog_write_first'); renderTiroir(); return }
+  // L'etat de l'apercu vit sur le TEMPLATE (champs locaux, jamais envoyes a
+  // l'update) : un re-render pendant l'attente ne perd plus la reponse, et
+  // le bouton gele empeche les appels IA concurrents (releve en review).
+  v.apercuEnCours = true
+  v.apercuRendu = t('messages.proposing')
+  renderTiroir()
   try {
     const r = await appel('/api/grok', {
       systemPrompt: 'Tu es un assistant de conciergerie LCD. Personnalise ce template pour un voyageur fictif. Remplace : {prenom}→Marie, {nom}→Dupont, {arrivee}→15 avril, {depart}→17 avril, {logement}→le logement, {checkin}→18h, {checkout}→10h, {code_acces}→123456, {wifi_nom}→HoteSmartWifi, {wifi_mdp}→motdepasse123, {telephone_hote}→0660346760.',
       messages: [{ role: 'user', content: `Template : "${texte}"` }]
     })
-    rendu.textContent = r.reply || t('messages.no_proposal')
+    v.apercuRendu = r.reply || t('messages.no_proposal')
   } catch (err) {
     logger.error('Messages', 'apercu', err)
-    rendu.textContent = t('messages.mode_error')
+    v.apercuRendu = t('messages.mode_error')
   }
+  v.apercuEnCours = false
+  renderTiroir()
 }
 
 // ── Volet « Reponses de l'IA » : mode, pause, consignes, garde, connaissances.
@@ -1181,7 +1212,7 @@ async function enregistrerConsignes (corps, ref) {
 // Pendant une ecriture, les champs du volet gelent : une frappe pendant le
 // POST serait silencieusement ecartee par le re-render (releve en review).
 function geler (corps, fige) {
-  corps.querySelectorAll('textarea, input, button').forEach(x => { x.disabled = fige })
+  corps.querySelectorAll('textarea, input, button, select').forEach(x => { x.disabled = fige })
 }
 
 // Les alertes : POST CIBLE (merge serveur des deux types de CE bien), puis

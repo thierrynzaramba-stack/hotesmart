@@ -496,6 +496,17 @@ test('programmes : memes writers RLS que l\'ancienne app, confirmation avant sup
     'le Nouveau pose les defauts du module partage')
   assert.ok(/window\.confirm\(t\('messages\.prog_delete_confirm'\)\)/.test(src),
     'la suppression se confirme (geste destructif)')
+  // Les verrous de la revue de 49c6ad4 :
+  assert.ok(/function sauverTextesProgrammes/.test(src) && /sauverTextesProgrammes\(\)\n/.test(src),
+    'TOUS les brouillons survivent a un re-render, pas seulement la carte touchee')
+  assert.ok(/if \(champ === 'event_type'\) reinitialiserMoment\(v\)/.test(src),
+    'changer l\'evenement reinitialise le moment (regle de l\'ancienne app)')
+  assert.ok(/textarea, input, button, select/.test(src), 'geler fige aussi les select')
+  assert.ok(/if \(tpl\.error \|\| verrous\.error\)/.test(src),
+    'des serrures illisibles ferment le volet (un select mensonger detruisait lock_id)')
+  assert.ok(/etat\.templates = undefined\n/.test(src.replace(/\r/g, '')) || /etat\.templates = undefined/.test(src),
+    'undefined des le depart du chargement (pas les cartes de l\'ancien bien)')
+  assert.ok(/v\.apercuEnCours/.test(src), 'pas d\'appels IA concurrents sur Apercu')
   assert.ok(/\.select\(\)\.single\(\)/.test(src), 'la ligne RELUE remplace l\'etat local')
   // Lecture echouee = volet ferme (regle des alertes).
   assert.ok(/etat\.templates = null/.test(src) && /etat\.templates === null/.test(src),

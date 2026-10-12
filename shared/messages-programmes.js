@@ -10,10 +10,24 @@
 // en base à la première sauvegarde (un select ne garde que ses options).
 
 export const EVENEMENTS_PROGRAMMES = {
-  booking_confirmed: { type: 'apres', reference: 'booking', delais: ['5min', '15min', '1h', '2h', '4h', '8h', '24h'] },
-  arrival: { type: 'jours', reference: 'arrival' },
-  departure: { type: 'jours', reference: 'departure' },
-  menage_done: { type: 'apres', reference: 'arrival', delais: ['0min', '10min', '30min', '1h', '2h'] }
+  booking_confirmed: { type: 'apres', reference: 'booking', send_anyway: false, delais: ['5min', '15min', '1h', '2h', '4h', '8h', '24h'] },
+  arrival: { type: 'jours', reference: 'arrival', send_anyway: true },
+  departure: { type: 'jours', reference: 'departure', send_anyway: true },
+  menage_done: { type: 'apres', reference: 'arrival', send_anyway: false, delais: ['0min', '10min', '30min', '1h', '2h'] }
+}
+
+// Changer l'evenement REINITIALISE le moment — la regle exacte de
+// updateEventType de l'ancienne app (sans elle, un offset null de l'ancien
+// type etait sauve pendant que l'ecran montrait la premiere option — releve
+// en review de 49c6ad4).
+export function reinitialiserMoment (t) {
+  const ev = EVENEMENTS_PROGRAMMES[t.event_type]
+  t.reference = referenceDe(t.event_type)
+  t.offset_days = 0
+  t.offset_value = (ev && ev.delais && ev.delais[0]) || null
+  t.send_time = '10:00'
+  t.earliest_send_time = '15:00'
+  t.send_anyway = !!(ev && ev.send_anyway)
 }
 
 export const JOURS_PROGRAMMES = [-7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7]
@@ -42,6 +56,14 @@ export function libelleJour (n, jourJ) {
 // « 10:00 » -> « 10h », comme l'ancienne page.
 export function libelleHeure (h) {
   return String(h || '').replace(':00', 'h')
+}
+
+// « 5min » -> « 5 min apres », « 1h » -> « 1h apres », « 0min » ->
+// « Immediatement » — les libelles EXACTS de l'ancienne page (pas d'espace
+// avant le h), textes traduits passes par l'appelant.
+export function libelleDelai (v, textes) {
+  if (v === '0min') return textes.immediatement
+  return String(v).replace('min', ' min') + ' ' + textes.apres
 }
 
 // Un template REEL est-il representable par les listes du volet ? Toute
