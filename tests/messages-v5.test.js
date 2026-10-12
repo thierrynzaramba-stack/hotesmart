@@ -407,8 +407,10 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
   // Et les verrous de la revue de ddfc88a :
   assert.ok(/\[hidden\] \{ display: none !important; \}/.test(lire('shared/ui.css')),
     'hidden gagne TOUJOURS (regle generale, pas une rustine par selecteur)')
-  assert.ok(/if \(etat\.tiroirVolet === 'programmes'\) \{\s*choixBien\.hidden = true/.test(sansCommentaires(src)),
-    'le volet programmes se rend sans bien, sans selecteur de logement')
+  // (le renvoi provisoire sans bien a vecu : le VRAI volet programmes depend
+  // du bien choisi, et ses donnees ne se chargent qu'a l'OUVERTURE du volet)
+  assert.ok(/etat\.templatesBien !== ref \|\| etat\.templates === undefined/.test(sansCommentaires(src)),
+    'les messages programmes se chargent a l\'ouverture du volet, pas au boot')
   assert.ok(/aria-expanded', String\(ouvert && etat\.tiroirVolet === b\.dataset\.ouvreVolet\)/.test(src),
     'les boutons annoncent l\'etat du volet')
   const manquants = Object.entries(CHAMPS)
@@ -453,4 +455,62 @@ test('tiroir : une lecture echouee FERME le volet, elle ne montre jamais un faux
   assert.ok(/ecran\.value\.trim\(\) !== lignes\.trim\(\)/.test(src), 'tester exige l\'ecran = la base')
   // Et le serveur refuse un POST a double cible.
   assert.ok(/viseMode && viseAlertes/.test(lire('api/agent-config.js')), 'une cible par requete')
+})
+
+// ─── Recette 2 : volet « Messages programmes » (inventaire §12 bis B) ────────
+test('programmes : le module partage est IDENTIQUE aux listes de l\'ancienne app, ecart nomme', () => {
+  const ancien = lire('apps/agent-ai/messages.html')
+  const module_ = lire('shared/messages-programmes.js')
+  const ecarts = []
+  // Les delais, releves dans l'ancienne page.
+  for (const d of ['5min', '15min', '1h', '2h', '4h', '8h', '24h']) {
+    if (!new RegExp(`value: '${d}'`).test(ancien)) ecarts.push(`delai ${d} absent de l'ancienne app`)
+  }
+  if (!module_.includes("delais: ['5min', '15min', '1h', '2h', '4h', '8h', '24h']")) ecarts.push('delais booking_confirmed divergents')
+  if (!module_.includes("delais: ['0min', '10min', '30min', '1h', '2h']")) ecarts.push('delais menage_done divergents')
+  if (!ancien.includes('[-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7]')) ecarts.push('jours de l\'ancienne app introuvables')
+  if (!module_.includes('[-7, -6, -5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7]')) ecarts.push('jours du module divergents')
+  // Les defauts du « Nouveau », champ par champ contre l'insert de l'ancienne.
+  const insertAncien = ancien.slice(ancien.indexOf('window.addTemplate'), ancien.indexOf('window.updateField'))
+  for (const [cle, attendu] of [
+    ["event_type: 'arrival'", 'event_type'], ["reference: 'arrival'", 'reference'],
+    ['offset_days: -1', 'offset_days'], ["send_time: '10:00'", 'send_time'],
+    ["earliest_send_time: '15:00'", 'earliest_send_time'], ['send_anyway: true', 'send_anyway'],
+    ['active: true', 'active'], ["template_text: ''", 'template_text'], ['lock_id: null', 'lock_id']
+  ]) {
+    if (!insertAncien.includes(cle)) ecarts.push(`defaut ancien introuvable : ${attendu}`)
+    if (!module_.includes(cle.replace(/,$/, ''))) ecarts.push(`defaut du module divergent : ${attendu}`)
+  }
+  // La reference derivee, le mapping exact.
+  if (!/eventType === 'departure' \? 'departure'\s*: eventType === 'booking_confirmed' \? 'booking' : 'arrival'/.test(module_)) {
+    ecarts.push('mapping reference divergent')
+  }
+  assert.deepEqual(ecarts, [], 'parite rompue : ' + ecarts.join(' ; '))
+})
+
+test('programmes : memes writers RLS que l\'ancienne app, confirmation avant suppression', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/from\('message_templates'\)\.update\(\{\s*event_type: v\.event_type, reference: referenceDe\(v\.event_type\),\s*offset_days: v\.offset_days, offset_value: v\.offset_value,\s*send_time: v\.send_time, earliest_send_time: v\.earliest_send_time \|\| '15:00',\s*send_anyway: v\.send_anyway, active: v\.active,\s*template_text: v\.template_text, lock_id: v\.lock_id \|\| null/.test(src),
+    'l\'UPDATE de l\'ancienne app, memes colonnes')
+  assert.ok(/\.insert\(\{ user_id: compteCourant\(\), property_id: ref, \.\.\.DEFAUTS_NOUVEAU_PROGRAMME \}\)/.test(src),
+    'le Nouveau pose les defauts du module partage')
+  assert.ok(/window\.confirm\(t\('messages\.prog_delete_confirm'\)\)/.test(src),
+    'la suppression se confirme (geste destructif)')
+  assert.ok(/\.select\(\)\.single\(\)/.test(src), 'la ligne RELUE remplace l\'etat local')
+  // Lecture echouee = volet ferme (regle des alertes).
+  assert.ok(/etat\.templates = null/.test(src) && /etat\.templates === null/.test(src),
+    'un volet illisible se FERME, il ne montre pas un faux vide')
+})
+
+test('programmes : Apercu AI sur bouton EXPLICITE seulement, par /api/grok', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/data-prog-apercu/.test(src) && /appel\('\/api\/grok'/.test(src),
+    'le chemin de l\'ancienne app (wrapper interne, jamais un provider)')
+  // Jamais declenche a l'ouverture ni a la saisie (consigne de Thierry) :
+  // apercuProgramme n'est appele QUE par le click du bouton.
+  const appels = [...src.matchAll(/apercuProgramme\s*\(/g)].length
+  assert.strictEqual(appels, 2, 'une definition + un seul appel (le click)')
+  assert.ok(/\[data-prog-apercu\]'\)\.forEach\(x => x\.addEventListener\('click'/.test(src.replace(/\n/g, ' ')) || /data-prog-apercu.*addEventListener\('click'/.test(src.replace(/\n/g, ' ')),
+    'declenche par click uniquement')
+  assert.ok(!/addEventListener\('input', [^)]*apercu/i.test(src), 'jamais a la saisie')
 })

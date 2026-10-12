@@ -164,5 +164,20 @@ Décision de Thierry, en DEUX recettes ; inventaire champ par champ : spec
   (tests/messages-v5.test.js, demande de Thierry).
 - Tout le tiroir reste réservé au TITULAIRE (dette 68).
 
-**Recette 2 (à venir)** : volet « Messages programmés » (inventaire §12 bis B),
-puis SEULEMENT redirection de config.html et de l'app templates.
+**Recette 2 (12 octobre 2026) — volet « Messages programmés »** :
+- Constantes PARTAGÉES (`shared/messages-programmes.js`) : événements, délais,
+  jours, heures, défauts du « Nouveau », mapping `reference` — repris à
+  l'IDENTIQUE de l'ancienne app (test de parité littéral, écarts nommés).
+- Cartes de l'inventaire B au complet : actif/inactif, suppression (avec
+  CONFIRMATION), événement, délai ou jour+heure, « envoyer quand même »,
+  serrure (`property_locks`→`locks`) + « pas avant », texte + 7 variables,
+  Aperçu AI (bouton EXPLICITE seulement, `/api/grok` comme l'ancienne page).
+- Writers : les MÊMES écritures RLS que l'ancienne app (update mêmes
+  colonnes, insert défauts, delete) ; la ligne RELUE (`select().single()`)
+  remplace l'état local ; lecture échouée = volet fermé ; chargé à
+  l'OUVERTURE du volet, jamais au boot ; titulaire seulement (dette 68).
+- **Parité sur données réelles** : `scripts/verifier-parite-templates.js`
+  (lecture seule, non-vacuité exigée) — le 12 octobre : 11 messages comparés
+  (Colomiers 2, Cœur de vie 23 4, La bulle 5, serrures comprises), 0 écart.
+- La redirection de config.html et de l'app templates viendra APRÈS la
+  validation de Thierry, en commit séparé.

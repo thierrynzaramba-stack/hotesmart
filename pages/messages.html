@@ -130,6 +130,8 @@ import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVer
 // La règle « à traiter » est PARTAGÉE avec l'accueil (séjours à venir ou en
 // cours seulement, décision du 11 octobre) : jamais recopiée.
 import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/shared/aujourdhui.js'
+import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, libelleJour, libelleHeure }
+  from '/shared/messages-programmes.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -154,6 +156,9 @@ const etat = {
   prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
   brevo: false,            // cle Brevo presente -> canal SMS ouvert
   tiroirVolet: 'ia', tiroirBien: null,
+  templates: undefined,    // messages programmes du bien choisi ; null = illisible
+  templatesBien: null, templatesEnCours: false,
+  serrures: [],            // serrures du bien choisi (property_locks -> locks)
   modeEnCours: false,      // une bascule a la fois
   ouverte: null            // bookId de la conversation ouverte
 }
@@ -821,15 +826,6 @@ function renderTiroir () {
   $('[data-bind="tiroir-titre"]').textContent =
     t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled' : 'messages.tab_ia')
   const corps = $('[data-bind="tiroir-corps"]')
-  const choixBien = tiroir.querySelector('.msg-tiroir__choixbien')
-  // Le renvoi provisoire ne depend d'AUCUN bien : il se rend avant le garde
-  // « aucun logement », et sans le selecteur (releve en review de ddfc88a).
-  if (etat.tiroirVolet === 'programmes') {
-    choixBien.hidden = true
-    corps.innerHTML = voletProgrammes()
-    return
-  }
-  choixBien.hidden = false
   const sel = $('[data-bind="tiroir-bien"]')
   const refs = [...etat.biens.keys()]
   if (!etat.tiroirBien || !etat.biens.has(etat.tiroirBien)) etat.tiroirBien = refs[0] || null
@@ -837,17 +833,227 @@ function renderTiroir () {
     `<option value="${esc(r)}" ${r === etat.tiroirBien ? 'selected' : ''}>${esc(etat.biens.get(r).name || r)}</option>`).join('')
   const ref = etat.tiroirBien
   if (!ref) { corps.innerHTML = `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`; return }
+  if (etat.tiroirVolet === 'programmes') {
+    // Les messages programmes du bien se chargent a l'OUVERTURE du volet,
+    // jamais au boot de la page.
+    if (etat.templatesBien !== ref || etat.templates === undefined) {
+      corps.innerHTML = `<p class="muted small" style="padding: 14px 18px">${esc(t('common.loading'))}</p>`
+      chargerProgrammes(ref)
+      return
+    }
+    corps.innerHTML = voletProgrammes(ref)
+    brancherProgrammes(corps, ref)
+    return
+  }
   corps.innerHTML = voletIA(ref)
   brancherTiroir(corps, ref)
 }
 
-// ── Volet « Messages programmes » : la recette 2 le remplira. D'ici la, un
-// renvoi HONNETE vers l'ecran actuel (URL seule) — jamais un volet vide.
-function voletProgrammes () {
-  return `<div class="msg-tiroir__bloc" style="border-bottom: 0">
-    <p class="caption muted" style="margin: 0">${esc(t('messages.scheduled_coming'))}</p>
-    <a class="link small" href="/apps/agent-ai/messages">${esc(t('messages.scheduled_old_link'))}</a>
+// ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
+// MEMES lectures et MEMES ecritures RLS que l'ancienne app templates
+// (message_templates, property_locks -> locks) : aucun second chemin, et le
+// titulaire seulement (dette 68) — le tiroir n'existe pas pour un delegue.
+async function chargerProgrammes (ref) {
+  if (etat.templatesEnCours) return
+  etat.templatesEnCours = true
+  etat.templatesBien = ref
+  const [tpl, verrous] = await Promise.all([
+    supabase.from('message_templates').select('*')
+      .eq('user_id', compteCourant()).eq('property_id', ref).order('created_at'),
+    supabase.from('property_locks').select('lock_id, role, locks(id, label, brand)')
+      .eq('property_id', ref)
+  ])
+  // Lecture echouee = volet FERME (un formulaire vide enregistre detruirait
+  // la base — meme regle que les alertes, revue de 634ee15).
+  if (tpl.error) { logger.error('Messages', 'programmes', tpl.error); etat.templates = null }
+  else etat.templates = tpl.data || []
+  etat.serrures = verrous.error ? [] : (verrous.data || []).map(x => x.locks).filter(Boolean)
+  if (verrous.error) logger.error('Messages', 'serrures', verrous.error)
+  etat.templatesEnCours = false
+  renderTiroir()
+}
+function resumeMoment (x) {
+  const ev = EVENEMENTS_PROGRAMMES[x.event_type] || EVENEMENTS_PROGRAMMES.arrival
+  if (ev.type === 'apres') return x.offset_value ? libelleDelai(x.offset_value) : t('messages.immediately')
+  return `${libelleJour(x.offset_days, t('messages.prog_day_j'))} · ${libelleHeure(x.send_time || '10:00')}`
+}
+// « 5min » -> « 5 min apres », « 0min » -> « Immediatement » (forme de
+// l'ancienne page, traduite).
+function libelleDelai (v) {
+  if (v === '0min') return t('messages.immediately')
+  return v.replace('min', ' min').replace(/h$/, ' h') + ' ' + t('messages.after')
+}
+function voletProgrammes (ref) {
+  if (etat.templates === null) {
+    return `<p class="caption muted" style="padding: 14px 18px">${esc(t('messages.load_error'))}</p>`
+  }
+  const cartes = etat.templates.map(x => carteProgramme(x)).join('')
+  return (cartes || `<p class="caption muted" style="padding: 14px 18px 0">${esc(t('messages.prog_empty'))}</p>`)
+    + `<div class="msg-tiroir__bloc" style="border-bottom: 0">
+      <button type="button" class="btn btn--primary" data-prog-nouveau ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.prog_new'))}</button>
+      <a class="link small" href="/apps/agent-ai/messages">${esc(t('messages.scheduled_old_link'))}</a>
+    </div>`
+}
+function carteProgramme (x) {
+  const ev = EVENEMENTS_PROGRAMMES[x.event_type] || EVENEMENTS_PROGRAMMES.arrival
+  const gele = etat.modeEnCours ? 'disabled' : ''
+  const CLES_EV = { booking_confirmed: 'messages.ev_booking', arrival: 'messages.ev_arrival', departure: 'messages.ev_departure', menage_done: 'messages.ev_cleaning' }
+  const moment = ev.type === 'apres'
+    ? `<label class="caption muted">${esc(t('messages.prog_delay'))}</label>
+      <select data-prog="${esc(x.id)}|offset_value" ${gele}>
+        ${ev.delais.map(d => `<option value="${d}" ${x.offset_value === d ? 'selected' : ''}>${esc(libelleDelai(d))}</option>`).join('')}
+      </select>`
+    : `<span class="row" style="gap: 8px; flex-wrap: wrap">
+      <label class="caption muted">${esc(t('messages.prog_day'))}</label>
+      <select data-prog="${esc(x.id)}|offset_days" ${gele}>
+        ${JOURS_PROGRAMMES.map(j => `<option value="${j}" ${x.offset_days === j ? 'selected' : ''}>${esc(libelleJour(j, t('messages.prog_day_j')))}</option>`).join('')}
+      </select>
+      <label class="caption muted">${esc(t('messages.prog_hour'))}</label>
+      <select data-prog="${esc(x.id)}|send_time" ${gele}>
+        ${HEURES_PROGRAMMES.map(h => `<option value="${h}" ${(x.send_time || '10:00') === h ? 'selected' : ''}>${esc(libelleHeure(h))}</option>`).join('')}
+      </select></span>
+      <label class="row caption" style="gap: 6px">
+        <input type="checkbox" data-prog="${esc(x.id)}|send_anyway" ${x.send_anyway ? 'checked' : ''} ${gele}>
+        ${esc(t('messages.prog_send_anyway'))}
+      </label>`
+  const serrure = `<label class="caption muted">${esc(t('messages.prog_access'))}</label>
+    <span class="row" style="gap: 8px; flex-wrap: wrap">
+      <select data-prog="${esc(x.id)}|lock_id" ${gele}>
+        <option value="">${esc(t('messages.prog_lock_none'))}</option>
+        ${etat.serrures.map(l => `<option value="${esc(l.id)}" ${x.lock_id === l.id ? 'selected' : ''}>${esc(l.label || l.id)}</option>`).join('')}
+      </select>
+      ${x.lock_id ? `<label class="caption muted">${esc(t('messages.prog_not_before'))}</label>
+      <select data-prog="${esc(x.id)}|earliest_send_time" ${gele}>
+        ${HEURES_PROGRAMMES.map(h => `<option value="${h}" ${(x.earliest_send_time || '15:00') === h ? 'selected' : ''}>${esc(libelleHeure(h))}</option>`).join('')}
+      </select>` : ''}
+    </span>
+    <p class="caption muted" style="margin: 0">${esc(t(x.lock_id ? 'messages.prog_lock_hint' : 'messages.prog_lock_none_hint'))}</p>`
+  return `<div class="msg-tiroir__bloc prog-carte${x.active ? '' : ' prog-carte--off'}">
+    <span class="row" style="gap: 8px">
+      <span class="msg-tiroir__nom" style="margin-inline-end: auto">${esc(t(CLES_EV[x.event_type] || 'messages.ev_arrival'))}</span>
+      <span class="caption muted">${esc(resumeMoment(x))}</span>
+      <label class="row caption" style="gap: 5px" title="${esc(t(x.active ? 'messages.prog_active' : 'messages.prog_inactive'))}">
+        <input type="checkbox" data-prog-actif="${esc(x.id)}" ${x.active ? 'checked' : ''} ${gele} aria-label="${esc(t('messages.prog_active'))}">
+      </label>
+      <button type="button" class="link caption" data-prog-suppr="${esc(x.id)}" ${gele} aria-label="${esc(t('messages.prog_delete'))}">${icone('i-close')}</button>
+    </span>
+    <label class="caption muted">${esc(t('messages.prog_event'))}</label>
+    <select data-prog="${esc(x.id)}|event_type" ${gele}>
+      ${Object.keys(EVENEMENTS_PROGRAMMES).map(k => `<option value="${k}" ${x.event_type === k ? 'selected' : ''}>${esc(t(CLES_EV[k]))}</option>`).join('')}
+    </select>
+    ${moment}
+    ${serrure}
+    <textarea rows="4" data-prog-texte="${esc(x.id)}" ${gele} placeholder="${esc(t('messages.prog_placeholder'))}">${esc(x.template_text || '')}</textarea>
+    <p class="caption muted" style="margin: 0">${esc(t('messages.prog_vars'))}</p>
+    <span class="row" style="gap: 8px">
+      <button type="button" class="btn btn--primary" data-prog-save="${esc(x.id)}" ${gele}>${esc(t('messages.prog_save'))}</button>
+      <button type="button" class="btn btn--secondary" data-prog-apercu="${esc(x.id)}" ${gele}>${esc(t('messages.prog_preview'))}</button>
+    </span>
+    <p class="caption" data-prog-rendu="${esc(x.id)}" hidden style="margin: 0; white-space: pre-wrap"></p>
   </div>`
+}
+function brancherProgrammes (corps, ref) {
+  const de = (id) => etat.templates.find(v => String(v.id) === String(id))
+  corps.querySelectorAll('[data-prog]').forEach(x => x.addEventListener('change', () => {
+    const [id, champ] = x.dataset.prog.split('|')
+    const v = de(id)
+    if (!v) return
+    // Le TEXTE en cours de frappe survit a un re-render de structure.
+    const texte = corps.querySelector(`[data-prog-texte="${id}"]`)
+    if (texte) v.template_text = texte.value
+    if (champ === 'send_anyway') v.send_anyway = x.checked
+    else if (champ === 'offset_days') v.offset_days = Number.parseInt(x.value, 10)
+    else if (champ === 'lock_id') v.lock_id = x.value || null
+    else v[champ] = x.value
+    if (champ === 'event_type') v.reference = referenceDe(v.event_type)
+    renderTiroir()
+  }))
+  corps.querySelectorAll('[data-prog-actif]').forEach(x => x.addEventListener('change', () =>
+    basculerActifProgramme(x.dataset.progActif, x.checked)))
+  corps.querySelectorAll('[data-prog-suppr]').forEach(x => x.addEventListener('click', () =>
+    supprimerProgramme(x.dataset.progSuppr)))
+  corps.querySelectorAll('[data-prog-save]').forEach(x => x.addEventListener('click', () =>
+    enregistrerProgramme(corps, x.dataset.progSave)))
+  corps.querySelectorAll('[data-prog-apercu]').forEach(x => x.addEventListener('click', () =>
+    apercuProgramme(corps, x.dataset.progApercu)))
+  corps.querySelector('[data-prog-nouveau]')?.addEventListener('click', () => nouveauProgramme(ref))
+}
+async function enregistrerProgramme (corps, id) {
+  if (etat.modeEnCours) return
+  const v = etat.templates.find(x => String(x.id) === String(id))
+  if (!v) return
+  etat.modeEnCours = true
+  geler(corps, true)
+  const texte = corps.querySelector(`[data-prog-texte="${id}"]`)
+  if (texte) v.template_text = texte.value
+  // L'UPDATE de l'ancienne app, memes colonnes — et la ligne RELUE remplace
+  // l'etat local (l'ecran montre la base, jamais l'etat suppose).
+  const { data: relu, error } = await supabase.from('message_templates').update({
+    event_type: v.event_type, reference: referenceDe(v.event_type),
+    offset_days: v.offset_days, offset_value: v.offset_value,
+    send_time: v.send_time, earliest_send_time: v.earliest_send_time || '15:00',
+    send_anyway: v.send_anyway, active: v.active,
+    template_text: v.template_text, lock_id: v.lock_id || null
+  }).eq('id', id).select().single()
+  etat.modeEnCours = false
+  if (error) { logger.error('Messages', 'programme', error); noteReglage(t('messages.mode_error')) }
+  else {
+    etat.templates = etat.templates.map(x => String(x.id) === String(id) ? relu : x)
+    noteReglage(t('messages.saved'), true)
+  }
+  renderTiroir()
+}
+async function basculerActifProgramme (id, actif) {
+  if (etat.modeEnCours) return
+  etat.modeEnCours = true
+  const { data: relu, error } = await supabase.from('message_templates')
+    .update({ active: actif }).eq('id', id).select().single()
+  etat.modeEnCours = false
+  if (error) { logger.error('Messages', 'programme actif', error); noteReglage(t('messages.mode_error')) }
+  else etat.templates = etat.templates.map(x => String(x.id) === String(id) ? relu : x)
+  renderTiroir()
+}
+async function supprimerProgramme (id) {
+  if (etat.modeEnCours) return
+  // Geste DESTRUCTIF : confirmation explicite, jamais silencieux.
+  if (!window.confirm(t('messages.prog_delete_confirm'))) return
+  etat.modeEnCours = true
+  const { error } = await supabase.from('message_templates').delete().eq('id', id)
+  etat.modeEnCours = false
+  if (error) { logger.error('Messages', 'programme suppression', error); noteReglage(t('messages.mode_error')) }
+  else etat.templates = etat.templates.filter(x => String(x.id) !== String(id))
+  renderTiroir()
+}
+async function nouveauProgramme (ref) {
+  if (etat.modeEnCours) return
+  etat.modeEnCours = true
+  const { data: nee, error } = await supabase.from('message_templates')
+    .insert({ user_id: compteCourant(), property_id: ref, ...DEFAUTS_NOUVEAU_PROGRAMME })
+    .select().single()
+  etat.modeEnCours = false
+  if (error) { logger.error('Messages', 'programme nouveau', error); noteReglage(t('messages.mode_error')) }
+  else etat.templates.push(nee)
+  renderTiroir()
+}
+// « Apercu AI » : bouton EXPLICITE seulement (consigne de Thierry), jamais a
+// l'ouverture ni a la saisie. Le MEME chemin que l'ancienne app : /api/grok,
+// wrapper interne — jamais un provider. Prompt repris a l'identique.
+async function apercuProgramme (corps, id) {
+  const texte = (corps.querySelector(`[data-prog-texte="${id}"]`)?.value || '').trim()
+  const rendu = corps.querySelector(`[data-prog-rendu="${id}"]`)
+  if (!texte) { rendu.hidden = false; rendu.textContent = t('messages.prog_write_first'); return }
+  rendu.hidden = false
+  rendu.textContent = t('messages.proposing')
+  try {
+    const r = await appel('/api/grok', {
+      systemPrompt: 'Tu es un assistant de conciergerie LCD. Personnalise ce template pour un voyageur fictif. Remplace : {prenom}→Marie, {nom}→Dupont, {arrivee}→15 avril, {depart}→17 avril, {logement}→le logement, {checkin}→18h, {checkout}→10h, {code_acces}→123456, {wifi_nom}→HoteSmartWifi, {wifi_mdp}→motdepasse123, {telephone_hote}→0660346760.',
+      messages: [{ role: 'user', content: `Template : "${texte}"` }]
+    })
+    rendu.textContent = r.reply || t('messages.no_proposal')
+  } catch (err) {
+    logger.error('Messages', 'apercu', err)
+    rendu.textContent = t('messages.mode_error')
+  }
 }
 
 // ── Volet « Reponses de l'IA » : mode, pause, consignes, garde, connaissances.

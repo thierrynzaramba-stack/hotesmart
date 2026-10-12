@@ -276,6 +276,11 @@ h1, h2, h3, p { margin: 0; }
 .msg-tiroir__canal { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-card); }
 .msg-tiroir__canal .link { align-self: flex-start; background: none; border: 0; padding: 0; cursor: pointer; }
 .msg-tiroir__nom { font-weight: var(--fw-semibold); }
+.msg-tiroir__bloc select { height: 36px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 8px; font-size: var(--fs-small); max-width: 100%; }
+.prog-carte--off { opacity: .55; }
+.prog-carte [data-prog-suppr] { background: none; border: 0; padding: 4px; cursor: pointer; color: var(--muted); }
+.prog-carte [data-prog-suppr]:hover { color: var(--danger); }
+.prog-carte [data-prog-suppr] .icon { width: 15px; height: 15px; }
 .msg-tiroir__note { margin: 10px 18px 0; color: var(--danger); font-weight: var(--fw-semibold); }
 .msg-tiroir__note--ok { color: var(--ok); }
 @media (max-width: 899px) {
