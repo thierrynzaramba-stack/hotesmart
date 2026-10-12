@@ -1109,13 +1109,19 @@ function ouvrirFormulaire (type, jours) {
         const prix = Number(String(corps.querySelector('[data-aj="prix"]').value).replace(',', '.'))
         if (!Number.isFinite(prix) || prix <= 0) { etatEl.textContent = t('cal.price_invalid'); bouton.disabled = false; return }
         etatEl.textContent = t('cal.sending')
+        // Le CONTRAT de api/reservation-directe, a l'identique de l'ancienne
+        // page : customer/occupancy, et la « Note interne » EST `reference`.
         await appel('/api/reservation-directe', {
-          propertyId: bien.provider_property_id, arrivee: duV, depart: departV,
-          prenom, nom,
-          email: corps.querySelector('[data-aj="email"]').value.trim() || null,
-          telephone: corps.querySelector('[data-aj="tel"]').value.trim() || null,
-          adultes, enfants, prixParNuit: prix,
-          note: corps.querySelector('[data-aj="note"]').value.trim() || null
+          propertyId: bien.provider_property_id,
+          arrival: duV, departure: departV,
+          prixParNuit: prix,
+          customer: {
+            name: prenom, surname: nom,
+            mail: corps.querySelector('[data-aj="email"]').value.trim() || null,
+            phone: corps.querySelector('[data-aj="tel"]').value.trim() || null
+          },
+          occupancy: { adults: adultes || 1, children: enfants || 0 },
+          reference: corps.querySelector('[data-aj="note"]').value.trim() || null
         })
         fermerFeuille(); viderSelection()
         // Confirmation EN DEUX TEMPS : le coeur apprend la resa par le feed.
@@ -1228,10 +1234,12 @@ function ouvrirFicheResa (bienId, resaId) {
     const etatEl = corps.querySelector('[data-f-etat]')
     const charge = {
       propertyId: bien.provider_property_id, bookingId: r.id,
-      arrivee: corps.querySelector('[data-f="arrivee"]').value,
-      depart: corps.querySelector('[data-f="depart"]').value,
-      adultes: Number(corps.querySelector('[data-f="adultes"]').value),
-      enfants: Number(corps.querySelector('[data-f="enfants"]').value)
+      arrival: corps.querySelector('[data-f="arrivee"]').value,
+      departure: corps.querySelector('[data-f="depart"]').value,
+      occupancy: {
+        adults: Number(corps.querySelector('[data-f="adultes"]').value) || 1,
+        children: Number(corps.querySelector('[data-f="enfants"]').value) || 0
+      }
     }
     // Le PRIX est ABSENT du payload s'il n'est pas touche (l'arrondi
     // rejouait : 100,00 / 3 nuits -> 99,99).
@@ -1241,8 +1249,9 @@ function ouvrirFicheResa (bienId, resaId) {
       if (!Number.isFinite(p) || p <= 0) { etatEl.textContent = t('cal.price_invalid'); return }
       charge.prixParNuit = p
     }
-    if (charge.arrivee === r.startISO && charge.depart === String(r.checkout).slice(0, 10)
-      && charge.adultes === (r.numAdult || 1) && charge.enfants === (r.numChild || 0) && charge.prixParNuit === undefined) {
+    if (charge.arrival === r.startISO && charge.departure === String(r.checkout).slice(0, 10)
+      && charge.occupancy.adults === (r.numAdult || 1) && charge.occupancy.children === (r.numChild || 0)
+      && charge.prixParNuit === undefined) {
       etatEl.textContent = t('cal.no_change'); return
     }
     try {
