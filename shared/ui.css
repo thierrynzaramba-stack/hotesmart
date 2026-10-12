@@ -402,8 +402,8 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 /* ---------- Calendrier V5 (lot 3, étape 1) ---------- */
 .cal-page { padding: 14px var(--page-pad) 90px; display: flex; flex-direction: column; gap: 12px; }
 .cal-entete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.cal-periode { display: inline-flex; align-items: stretch; height: 38px; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
-.cal-periode .tab { padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-small); }
+.cal-periode { display: inline-flex; align-items: stretch; height: var(--control); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
+.cal-periode .tab { height: 100%; padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-small); }
 .cal-periode .tab[aria-pressed="true"] { background: var(--info); color: var(--on-ink); }
 .cal-menu__liste { min-width: 220px; }
 .cal-menu__liste a { display: block; padding: 8px 10px; border-radius: 8px; color: var(--ink); font-weight: var(--fw-semibold); font-size: var(--fs-body); }
@@ -442,13 +442,16 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
    au-dessus du bloc ; l'interieur est sticky a gauche pour rester lisible
    pendant le defilement horizontal. */
 .cal-bien__bandeau { border-bottom: 1px solid var(--line); border-start-start-radius: var(--radius-card); border-start-end-radius: var(--radius-card); background: var(--surface); }
-.cal-bien__bandeau-int { position: sticky; left: 0; display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; max-width: min(96vw, 100%); }
+.cal-bien__bandeau-int { position: sticky; left: 0; display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; max-width: min(calc(100vw - 2 * var(--page-pad)), 100%); }
 .cal-bien__nom { font-size: var(--fs-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-bien__bandeau--mobile { border: 0; border-radius: 0; background: none; }
+.cal-bien__bandeau--mobile .cal-bien__bandeau-int { position: static; display: flex; width: 100%; max-width: none; padding: 2px 2px 10px; }
 .cal-bien__bandeau--mobile .cal-bien__nom { font-size: var(--fs-body); }
 .cal-bien__photo { width: 26px; height: 26px; border-radius: 8px; overflow: hidden; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; flex: none; }
 .cal-bien__photo img { width: 100%; height: 100%; object-fit: cover; }
 .cal-bien__photo .icon { width: 14px; height: 14px; color: var(--muted); }
-.cal-bien__reduire { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 2px; flex: none; border-radius: 6px; }
+.cal-bien__reduire { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 2px; flex: none; margin-inline-start: auto; border-radius: 6px; }
+.cal-bien__bandeau-int > .caption { white-space: nowrap; flex: none; }
 .cal-bien__reduire:hover { background: var(--surface-2); color: var(--ink); }
 .cal-bien__reduire .icon { width: 13px; height: 13px; }
 .cal-bien__ligne { display: flex; align-items: stretch; }
@@ -470,7 +473,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-table td, .cal-table th { width: 46px; border: 1px solid var(--line); }
 .cal-table tr:last-child td, .cal-table tr:last-child th { border-bottom: 0; }
 .cal-table td:last-child { border-inline-end: 0; }
-.cal-libelle { width: 150px !important; min-width: 150px; text-align: start; padding: 0 10px; position: sticky; left: 0; background: var(--surface); border-inline-start: 0 !important; }
+.cal-libelle { width: 150px !important; min-width: 150px; text-align: start; padding: 0 10px; position: sticky; left: 0; z-index: 3; background: var(--surface); border-inline-start: 0 !important; }
 .cal-nuit { position: relative; height: 40px; text-align: center; font-size: var(--fs-caption); cursor: pointer; user-select: none; }
 .cal-nuit__prix { font-weight: var(--fw-semibold); font-size: var(--fs-small); }
 .cal-nuit:not(.cal-nuit--passe):hover { background-color: color-mix(in srgb, var(--info) 10%, var(--surface)); }
