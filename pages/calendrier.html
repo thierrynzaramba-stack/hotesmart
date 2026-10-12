@@ -347,23 +347,34 @@ function identiteBien (bien, { mobile = false } = {}) {
         title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
     </div></div>`
 }
+// Le fond de la ligne des reservations : une case par jour, QUADRILLAGE et
+// week-ends compris — sans eux, impossible de lire la date d'une barre
+// (constat de recette du 12 octobre).
+function fondsResas () {
+  return etat.joursISO.map(iso => {
+    const j = new Date(iso + 'T12:00:00').getDay()
+    const we = [0, 6].includes(j) ? ' cal-we' + (j === 6 ? ' cal-we--debut' : ' cal-we--fin') : ''
+    return `<span class="cal-resas__jour${we}${iso === AUJOURDHUI ? ' cal-auj' : ''}"></span>`
+  }).join('')
+}
 
 // Les biens NON affiches, en bulles SOUS la grille (retouche point 4) :
 // photo ronde + nom ; clic = le bloc se deploie (ordinateur : s'ajoute ;
 // telephone : remplace le bien courant). Beds24 : grisee, non cliquable.
-function renderBulles () {
-  const zone = $('[data-bind="bulles"]')
+function bullesHtml ({ mini = false } = {}) {
   const caches = etat.biens.filter(b => b.provider === 'beds24' || !etat.choisis.includes(b.id))
-  zone.innerHTML = caches.map(b => {
+  return caches.map(b => {
     const beds24 = b.provider === 'beds24'
-    return `<button type="button" class="cal-bulle${beds24 ? ' cal-bulle--grise' : ''}"
+    return `<button type="button" class="cal-bulle${mini ? ' cal-bulle--mini' : ''}${beds24 ? ' cal-bulle--grise' : ''}"
       data-bulle="${esc(b.id)}" ${beds24 ? 'disabled' : ''}
       title="${esc(beds24 ? t('cal.beds24_hint') : t('cal.bubble_show', { nom: b.name || '' }))}">
       <span class="cal-photo cal-bulle__photo">${photoBien(b)}</span>
-      <span class="cal-bulle__nom">${esc(b.name || '')}</span>
-      ${beds24 ? `<span class="caption muted">${esc(t('cal.beds24_tag'))}</span>` : ''}
+      ${mini ? '' : `<span class="cal-bulle__nom">${esc(b.name || '')}</span>
+      ${beds24 ? `<span class="caption muted">${esc(t('cal.beds24_tag'))}</span>` : ''}`}
     </button>`
   }).join('')
+}
+function brancherBulles (zone) {
   zone.querySelectorAll('[data-bulle]:not([disabled])').forEach(p => p.addEventListener('click', () => {
     const id = p.dataset.bulle
     if (estLarge()) etat.choisis = [...etat.choisis, id]
@@ -371,6 +382,11 @@ function renderBulles () {
     etat.choisisDefinis = true
     viderSelection(); ecrirePrefs(); charger()
   }))
+}
+function renderBulles () {
+  const zone = $('[data-bind="bulles"]')
+  zone.innerHTML = estLarge() ? '' : bullesHtml()
+  brancherBulles(zone)
 }
 // Le bouton « reduire » d'un bloc : le bien repart en bulle (persiste).
 function reduireBien (id) {
@@ -441,7 +457,10 @@ function renderPlanning () {
     const lisere = d.getDay() === 6 ? ' cal-we--debut' : (d.getDay() === 0 ? ' cal-we--fin' : '')
     bandeJours += `<span class="cal-bande__jour${we ? ' cal-we' + lisere : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(dateIntl(iso, langue(), { weekday: 'narrow' }))}<b>${d.getDate()}</b></span>`
   }
-  $('[data-bind="bande"]').innerHTML = `<div class="cal-bande__l">${bandeMois}</div><div class="cal-bande__l">${bandeJours}</div>`
+  const bande = $('[data-bind="bande"]')
+  bande.innerHTML = `<div class="cal-bande__angle">${bullesHtml({ mini: true })}</div>
+    <div class="cal-bande__corps"><div class="cal-bande__l">${bandeMois}</div><div class="cal-bande__l">${bandeJours}</div></div>`
+  brancherBulles(bande)
   const aPilotables = etat.biens.some(b => b.provider !== 'beds24')
   $('[data-bind="grilles"]').innerHTML = etat.choisis.length
     ? etat.choisis.map(id => grilleBien(id)).join('')
@@ -510,14 +529,16 @@ function grilleBien (bienId) {
   }).join('')
   return `<section class="cal-bien" data-bien-section="${esc(bienId)}">
     ${identiteBien(bien)}
-    <div class="cal-bien__ligne">
-      <div class="cal-bien__coin"><span class="cal-photo cal-bien__vignette">${photoBien(bien)}</span></div>
-      <div class="cal-bien__resas" style="--n:${etat.joursISO.length}">${barres}${blocages}</div>
+    <div class="cal-bien__cadre">
+      <div class="cal-bien__ligne">
+        <div class="cal-bien__coin"><span class="cal-photo cal-bien__vignette">${photoBien(bien)}</span></div>
+        <div class="cal-bien__resas" style="--n:${etat.joursISO.length}"><span class="cal-resas__fond">${fondsResas()}</span>${barres}${blocages}</div>
+      </div>
+      <table class="cal-table"><tbody>
+        <tr data-ligne-prix><th class="cal-libelle"></th>${cellules}</tr>
+        ${params}
+      </tbody></table>
     </div>
-    <table class="cal-table"><tbody>
-      <tr data-ligne-prix><th class="cal-libelle caption">${esc(t('cal.row_price'))}</th>${cellules}</tr>
-      ${params}
-    </tbody></table>
   </section>`
 }
 
