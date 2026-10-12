@@ -549,9 +549,10 @@ function grilleBien (bienId, fonds) {
       ? mots.map(m => m[0].toUpperCase()).join('')
       : (mots[0] || '')
     const canal = LIBELLE_CANAL[famille] || (r.sourceBrute || r.source || '')
+    const total = r.amount != null ? prixIntl(r.amount, r.currency || bien.currency, langue()) : null
     return `<button type="button" class="cal-barre cal-barre--${famille}${terminee ? ' cal-barre--finie' : ''}${i0 < 0 ? ' cal-barre--coupe-g' : ''}${i1 < 0 ? ' cal-barre--coupe-d' : ''}"
       style="--d:${debut};--f:${fin}" data-resa="${esc(String(r.id))}" data-bien="${esc(bienId)}"
-      title="${esc((r.name || '') + ' · ' + dateIntl(r.startISO, langue()) + ' → ' + dateIntl(r.checkout, langue()) + ' · ' + canal + (terminee ? ' · ' + t('cal.stay_over') : ''))}">${esc(court)}</button>`
+      title="${esc((r.name || '') + ' · ' + dateIntl(r.startISO, langue()) + ' → ' + dateIntl(r.checkout, langue()) + ' · ' + canal + (total ? ' · ' + total : '') + (terminee ? ' · ' + t('cal.stay_over') : ''))}">${esc(court)}</button>`
   }).join('')
   const ref = String(bien.provider_property_id || '')
   const premierISO = etat.joursISO[0], dernierISO = etat.joursISO[etat.joursISO.length - 1]
@@ -571,7 +572,7 @@ function grilleBien (bienId, fonds) {
     const s = st[iso] || {}
     const e = etatNuit(bienId, iso)
     const passe = iso < AUJOURDHUI
-    const prix = (e === 'attente' || e === 'vendue') ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()))
+    const prix = e === 'attente' ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()))
     const we = classesWE(new Date(iso + 'T12:00:00').getDay())
     return `<td class="cal-nuit cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${we}"
       data-bien="${esc(bienId)}" data-i="${i}" data-iso="${iso}">
@@ -595,11 +596,11 @@ function grilleBien (bienId, fonds) {
     ${identiteBien(bien)}
     <div class="cal-bien__cadre">
       <div class="cal-bien__ligne">
-        <div class="cal-bien__coin"></div>
+        <div class="cal-bien__coin"><span class="caption">${esc(t('cal.row_resas'))}</span></div>
         <div class="cal-bien__resas" style="--n:${etat.joursISO.length}"><span class="cal-resas__fond">${fonds}</span>${barres}${blocages}</div>
       </div>
       <table class="cal-table"><tbody>
-        <tr data-ligne-prix><th class="cal-libelle"><span class="sr-only">${esc(t('cal.row_price'))}</span></th>${cellules}</tr>
+        <tr data-ligne-prix><th class="cal-libelle caption">${esc(t('cal.row_price'))}</th>${cellules}</tr>
         ${params}
       </tbody></table>
     </div>
@@ -647,7 +648,7 @@ function renderGrilleMobile () {
     const e = etatNuit(bienId, iso)
     const passe = iso < AUJOURDHUI
     let valeur = ''
-    if (etat.vueMobile === 'rate') valeur = (e === 'attente' || e === 'vendue') ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()) || '—')
+    if (etat.vueMobile === 'rate') valeur = e === 'attente' ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()) || '—')
     else {
       const v = s[etat.vueMobile]
       valeur = (etat.vueMobile === 'avail' || etat.vueMobile === 'cta' || etat.vueMobile === 'ctd')

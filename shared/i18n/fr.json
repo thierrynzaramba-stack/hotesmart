@@ -257,6 +257,7 @@
   "cal.show_one": "Afficher",
   "cal.show_all": "Tout afficher",
   "cal.all_shown": "Tous les biens",
+  "cal.row_resas": "Réservations",
   "cal.undo": "Annuler",
   "cal.undo_partial": "Annulé — {n} nuit(s) sans prix propre conservent le nouveau prix",
   "cal.saved": "Enregistré",

@@ -257,6 +257,7 @@
   "cal.show_one": "Show",
   "cal.show_all": "Show all",
   "cal.all_shown": "All listings",
+  "cal.row_resas": "Bookings",
   "cal.undo": "Undo",
   "cal.undo_partial": "Undone — {n} night(s) without their own price keep the new price",
   "cal.saved": "Saved",

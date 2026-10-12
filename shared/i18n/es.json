@@ -257,6 +257,7 @@
   "cal.show_one": "Mostrar",
   "cal.show_all": "Mostrar todo",
   "cal.all_shown": "Todos los alojamientos",
+  "cal.row_resas": "Reservas",
   "cal.undo": "Deshacer",
   "cal.undo_partial": "Deshecho — {n} noche(s) sin precio propio conservan el nuevo precio",
   "cal.saved": "Guardado",
