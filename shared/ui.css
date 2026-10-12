@@ -482,15 +482,15 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-resas__fond { position: absolute; inset: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 46px; pointer-events: none; border-start-end-radius: var(--radius-card); overflow: hidden; }
 .cal-resas__jour { border-inline-end: 1px solid var(--line); }
 .cal-resas__jour:last-child { border-inline-end: 0; }
-.cal-barre { position: absolute; top: 5px; height: 38px; background: transparent; border: 2px solid var(--coul, var(--border)); border-radius: 13px; color: var(--coul, var(--ink)); font-size: var(--fs-small); font-weight: var(--fw-semibold); padding: 0 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
+.cal-barre { position: absolute; top: 5px; height: 38px; background: var(--surface); border: 2px solid var(--coul, var(--border)); border-radius: 13px; color: var(--ink); font-size: var(--fs-small); font-weight: var(--fw-semibold); padding: 0 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
 .cal-barre--airbnb { --coul: var(--canal-airbnb); }
 .cal-barre--booking { --coul: var(--info); }
 .cal-barre--direct { --coul: var(--ok); }
-.cal-barre--blocage { color: var(--ink); font-style: italic; border-width: 1px; left: calc(var(--d) / var(--n) * 100%); border-radius: 7px; z-index: 1; }
-.cal-barre--finie { opacity: .45; }
+.cal-barre--blocage { font-style: italic; border-width: 1px; left: calc(var(--d) / var(--n) * 100%); border-radius: 7px; z-index: 1; }
+.cal-barre--finie { opacity: .6; }
 .cal-barre--finie:hover { opacity: 1; }
-.cal-barre--coupe-g { border-start-start-radius: 0; border-end-start-radius: 0; }
-.cal-barre--coupe-d { border-start-end-radius: 0; border-end-end-radius: 0; }
+.cal-barre--coupe-g { border-start-start-radius: 0; border-end-start-radius: 0; border-inline-start: 0; }
+.cal-barre--coupe-d { border-start-end-radius: 0; border-end-end-radius: 0; border-inline-end: 0; }
 .cal-table { border-collapse: collapse; table-layout: fixed; width: max-content; }
 .cal-table td, .cal-table th { width: 46px; border: 1px solid var(--line); }
 .cal-table tr:last-child td, .cal-table tr:last-child th { border-bottom: 0; }
@@ -528,6 +528,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 
 .cal-legende { padding: 8px 2px 0; }
 .cal-legende__pt { display: inline-block; width: 10px; height: 10px; border-radius: var(--radius-pill); border: 2px solid var(--coul, var(--border)); background: none; vertical-align: -1px; margin-inline-end: 4px; }
+.cal-legende__pt--blocage, .cal-ligne-resa__point.cal-barre--blocage { border-width: 1px; }
 
 /* Barre flottante — les CINQ actions */
 .cal-flottante { position: fixed; bottom: calc(76px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); padding: 10px 14px; z-index: 30; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; }
