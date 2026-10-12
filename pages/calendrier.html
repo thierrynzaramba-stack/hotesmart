@@ -41,12 +41,6 @@
   <div class="cal-entete">
     <h1 class="h2" data-i18n="cal.title"></h1>
     <div class="row" style="gap: 8px; margin-inline-start: auto">
-      <div class="cal-periode" data-bind="periode" role="group" data-i18n-attr="aria-label:cal.period">
-        <button type="button" class="tab" data-mois="1">1 m</button>
-        <button type="button" class="tab" data-mois="3">3 m</button>
-        <button type="button" class="tab" data-mois="6">6 m</button>
-        <button type="button" class="tab" data-mois="12">12 m</button>
-      </div>
       <details class="bulle-menu cal-menu" data-bind="menu-plus">
         <summary class="msg-btnrond" data-i18n-attr="aria-label:cal.more;title:cal.more;data-legende:cal.more">
           <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-more"/></svg>
@@ -68,6 +62,12 @@
     <button type="button" class="btn btn--secondary btn--icon" data-nav="1" data-i18n-attr="aria-label:cal.next">
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
     </button>
+    <div class="cal-periode" data-bind="periode" role="group" data-i18n-attr="aria-label:cal.period">
+      <button type="button" class="tab" data-mois="1">1 m</button>
+      <button type="button" class="tab" data-mois="3">3 m</button>
+      <button type="button" class="tab" data-mois="6">6 m</button>
+      <button type="button" class="tab" data-mois="12">12 m</button>
+    </div>
     <span class="h2 cal-nav__mois" data-bind="mois-libelle" hidden></span>
     <select class="cal-vue" data-bind="vue-mobile" hidden data-i18n-attr="aria-label:cal.mobile_view"></select>
   </div>
@@ -340,13 +340,13 @@ function renderTout () {
 // copie par ecran diverge : vecu du 30 septembre).
 const photoBien = (b) => b.photo_url ? `<img src="${esc(b.photo_url)}" alt="" loading="lazy">` : icone('i-home')
 function identiteBien (bien, { mobile = false } = {}) {
-  return `<div class="cal-bien__id${mobile ? ' cal-bien__id--mobile' : ''}">
+  return `<div class="cal-bien__bandeau${mobile ? ' cal-bien__bandeau--mobile' : ''}"><div class="cal-bien__bandeau-int">
       <span class="cal-bien__photo">${photoBien(bien)}</span>
-      <span class="cal-bien__nomcap"><b>${esc(bien.name || '')}</b>
-        <span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span></span>
+      <b class="cal-bien__nom">${esc(bien.name || '')}</b>
+      <span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span>
       <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
         title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
-    </div>`
+    </div></div>`
 }
 
 // Les biens NON affiches, en bulles SOUS la grille (retouche point 4) :
@@ -510,8 +510,9 @@ function grilleBien (bienId) {
     return `<tr><th class="cal-libelle caption">${esc(t(def.cle))}</th>${tds}</tr>`
   }).join('')
   return `<section class="cal-bien" data-bien-section="${esc(bienId)}">
+    ${identiteBien(bien)}
     <div class="cal-bien__ligne">
-      ${identiteBien(bien)}
+      <div class="cal-bien__coin"></div>
       <div class="cal-bien__resas" style="--n:${etat.joursISO.length}">${barres}${blocages}</div>
     </div>
     <table class="cal-table"><tbody>

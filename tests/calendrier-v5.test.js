@@ -103,7 +103,7 @@ test('inventaire §12 : chaque fonction de l\'etape 1 est presente, manquantes n
     'periode 1/3/6/12 mois': 'data-mois="12"',
     'navigation non persistee (pas de decalage en localStorage)': 'decalage: 0',
     'lignes masquees par defaut, cochees au menu ... (retouche pt 3)': 'etat.epingles.includes(k))',
-    'identite du bien dans la colonne gauche (retouche pt 2)': 'cal-bien__photo',
+    'bandeau identite du bien, sticky a gauche (ajustement 12/10)': 'cal-bien__bandeau',
     'liseres de week-end (retouche pt 1)': 'cal-we--debut',
     'epinglage de lignes PERSISTE': 'epingles: etat.epingles',
     'lien Tarification vers YieldFlow (recadrage etape 1)': '/apps/yield/prix',
