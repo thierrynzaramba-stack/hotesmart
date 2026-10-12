@@ -1314,7 +1314,7 @@ function ouvrirFicheResa (bienId, resaId) {
       <span class="row" style="gap: 8px"><span class="cal-ligne-resa__point cal-barre--${famille}"></span>${esc(LIBELLE_CANAL[famille] || '')}</span>
       ${badgeSansEmailVisible(r) ? `<p class="caption msg-echec">${esc(t('cal.no_email'))}</p><p class="caption muted">${esc(TEXTE_SANS_EMAIL)}</p>` : ''}
       ${lignes}
-      <span data-fiche-detail></span>
+      <span data-fiche-detail data-resa="${esc(String(r.id))}"></span>
       <span data-fiche-evaluation></span>
       <button type="button" class="btn btn--secondary" data-fiche-conv disabled>${esc(t('cal.open_conversation'))}</button>
       <p class="caption muted" data-fiche-conv-note hidden></p>
@@ -1345,8 +1345,12 @@ function ouvrirFicheResa (bienId, resaId) {
   // listing (minimisation). Une lecture echouee n'affiche rien — la fiche
   // reste juste, pas de champ invente.
   appel(`/api/calendar?property_ids=${encodeURIComponent(bienId)}&start=${r.startISO}&end=${String(r.checkout).slice(0, 10)}&booking=${encodeURIComponent(resaCourante)}`).then(d => {
-    const zone = corps.querySelector('[data-fiche-detail]')
-    if (!zone || !d) return
+    // Reponse en retard : la feuille peut montrer une AUTRE reservation —
+    // on n'ecrit que si c'est encore la meme (sinon le tel: de A s'injecte
+    // dans la fiche de B).
+    const zone = $('[data-bind="feuille-corps"]').querySelector('[data-fiche-detail]')
+    if (!zone || zone.dataset.resa !== resaCourante) return
+    if (!d || !d.booking_id) return
     const devise = d.currency || r.currency || bien.currency
     const lignesSup = []
     if (d.guestPhone) lignesSup.push(`<div class="cal-fiche__ligne"><span class="caption muted">${esc(t('cal.fiche_phone'))}</span><a href="tel:${esc(String(d.guestPhone).replace(/[^+\d]/g, ''))}">${esc(d.guestPhone)}</a></div>`)
@@ -1361,10 +1365,9 @@ function ouvrirFicheResa (bienId, resaId) {
       deco.push([t('cal.price_total_paid'), prixIntl(d.totalVoyageur.valeur, devise, langue())])
       if (d.taxeSejour) deco.push([t('cal.incl_tourist_tax'), prixIntl(d.taxeSejour, devise, langue())])
     } else {
-      deco.push([t('cal.price_total_paid'), t('cal.price_total_unknown')])
+      const raison = d.totalVoyageur && d.totalVoyageur.raison
+      deco.push([t('cal.price_total_paid'), t('cal.price_total_unknown') + (raison ? ' — ' + raison : '')])
     }
-    if (d.commission != null) deco.push([t('cal.fiche_commission'), prixIntl(d.commission, devise, langue())])
-    if (d.amount != null) deco.push([t('cal.fiche_montant'), prixIntl(d.amount, devise, langue())])
     for (const f of d.factures || []) deco.push([f.libelle, prixIntl(f.montant, devise, langue())])
     const parNuit = (d.prixParNuit || []).map(n =>
       `<div class="cal-fiche__ligne"><span class="caption muted">${esc(dateIntl(n.date, langue(), { day: 'numeric', month: 'short' }))}</span><span>${esc(prixIntl(n.montant, devise, langue()) || '')}</span></div>`).join('')

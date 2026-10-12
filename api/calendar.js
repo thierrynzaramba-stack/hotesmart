@@ -46,26 +46,18 @@ const { prixVoyageur, dateDeVente } = require('../lib/yield/eclatement')
 // une repartition (l'uniforme est une regle du MOTEUR : eclatement-yield.md).
 function prixParNuitDuRaw (raw) {
   const parDate = {}
-  let vide = true
   for (const ro of (raw && raw.rooms) || []) {
-    const sources = []
-    if (ro && ro.days && typeof ro.days === 'object' && !Array.isArray(ro.days)) {
-      for (const [d, m] of Object.entries(ro.days)) sources.push({ date: d, montant: m })
-    }
-    const bd = ro && ro.meta && ro.meta.days_breakdown
-    if (!sources.length && Array.isArray(bd)) {
-      for (const x of bd) sources.push({ date: x && (x.date || x.day), montant: x && (x.amount ?? x.price) })
-    }
-    for (const { date, montant } of sources) {
+    if (!ro || !ro.days || typeof ro.days !== 'object' || Array.isArray(ro.days)) continue
+    for (const [date, montant] of Object.entries(ro.days)) {
       const d = typeof date === 'string' ? date.slice(0, 10) : null
       const m = Number(montant)
       if (!d || !Number.isFinite(m)) continue
       parDate[d] = (parDate[d] || 0) + m
-      vide = false
     }
   }
-  if (vide) return null
-  return Object.keys(parDate).sort().map(d => ({ date: d, montant: Math.round(parDate[d] * 100) / 100 }))
+  const dates = Object.keys(parDate).sort()
+  if (!dates.length) return null
+  return dates.map(d => ({ date: d, montant: Math.round(parDate[d] * 100) / 100 }))
 }
 const { requirePermission, verifierSession, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { peutLire, peutEcrire } = require('../lib/permissions')
@@ -231,7 +223,7 @@ module.exports = async function handler(req, res) {
         return null
       }
     }
-    return { biens, compte: g.accountUserId }
+    return { biens, compte: g.accountUserId, titulaire: g.userId === g.accountUserId }
   }
 
   // ===== GET : inventory + reservations =====
@@ -250,7 +242,7 @@ module.exports = async function handler(req, res) {
 
     const owned = gardeGet.biens
     const ownedIds = owned.map(p => p.id)
-    if (!ownedIds.length) return res.status(200).json({ properties: [], inventory: {}, bookings: {} })
+    if (!ownedIds.length && !req.query.booking) return res.status(200).json({ properties: [], inventory: {}, bookings: {} })
 
     // ===== Detail d'UNE reservation (fiche) =====
     // Coordonnees, date de vente, prix par nuit et decomposition du total :
@@ -267,6 +259,7 @@ module.exports = async function handler(req, res) {
         .eq('user_id', gardeGet.compte)
         .eq('booking_id', String(req.query.booking))
         .in('property_id', provIdsB)
+        .order('property_id', { ascending: true })
         .limit(1)
       let { data: rows, error: errD } = await lireDetail(true)
       // Meme repli que le listing : la colonne raw peut manquer (migration,
@@ -287,8 +280,8 @@ module.exports = async function handler(req, res) {
       const pv = prixVoyageur(s, raw, provider)
       return res.status(200).json({
         booking_id: String(ligne.booking_id),
-        guestEmail: s.guestEmail || null,
-        guestPhone: s.guestPhone || null,
+        guestEmail: gardeGet.titulaire ? (s.guestEmail || null) : null,
+        guestPhone: gardeGet.titulaire ? (s.guestPhone || null) : null,
         vendueLe: dateDeVente(s, raw, provider),
         totalVoyageur: pv.valeur != null
           ? { valeur: Math.round((pv.valeur + (pv.taxe_sejour || 0)) * 100) / 100, source: pv.source }
@@ -302,8 +295,6 @@ module.exports = async function handler(req, res) {
             .filter(f => f.libelle || f.montant)).slice(0, 50)
           return l.length ? l : null
         })(),
-        amount: s.amount ?? null,
-        commission: s.commission ?? null,
         currency: s.currency || null
       })
     }
