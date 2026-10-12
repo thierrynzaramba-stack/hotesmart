@@ -295,17 +295,10 @@ function construireEtats (start, end) {
     const resas = mapResa((etat.bookings && etat.bookings[id]) || [])
     etat.states[id].__resas = resas
     const vendue = new Set()
-    const canalParNuit = {}
     for (const r of resas) {
-      const fam = familleSource(r.sourceBrute || r.source)
-      for (let d = new Date(r.startISO + 'T12:00:00'); toISO(d) < r.checkout; d.setDate(d.getDate() + 1)) {
-        const nuit = toISO(d)
-        vendue.add(nuit)
-        canalParNuit[nuit] = fam
-      }
+      for (let d = new Date(r.startISO + 'T12:00:00'); toISO(d) < r.checkout; d.setDate(d.getDate() + 1)) vendue.add(toISO(d))
     }
     etat.states[id].__vendues = vendue
-    etat.states[id].__canalParNuit = canalParNuit
     // Orphelines (module commun, constat 8) : jours libres non couvrables.
     const libre = (iso) => {
       const s = parIso[iso]
@@ -349,10 +342,13 @@ function renderTout () {
 // copie par ecran diverge : vecu du 30 septembre).
 const photoBien = (b) => b.photo_url ? `<img src="${esc(b.photo_url)}" alt="" loading="lazy">` : icone('i-home')
 function identiteBien (bien, { mobile = false } = {}) {
+  const peut = !etat.lectureSeule && peutEcrire('reservations')
   return `<div class="cal-bien__bandeau${mobile ? ' cal-bien__bandeau--mobile' : ''}"><div class="cal-bien__bandeau-int">
       <span class="cal-photo cal-bien__photo">${photoBien(bien)}</span>
       <b class="cal-bien__nom">${esc(bien.name || '')}</b>
-      <span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span>
+      ${mobile ? '' : `<span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span>`}
+      ${mobile ? '<span data-slot-vue></span>' : ''}
+      ${mobile && peut ? `<button type="button" class="cal-btn-plus" data-plus title="${esc(t('cal.add_title'))}" aria-label="${esc(t('cal.add_title'))}">${icone('i-plus')}</button>` : ''}
       <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
         title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
     </div></div>`
@@ -568,7 +564,7 @@ function grilleBien (bienId, fonds) {
     const canal = LIBELLE_CANAL[famille] || (r.sourceBrute || r.source || '')
     const total = r.amount != null ? t('cal.fiche_montant') + ' ' + prixIntl(r.amount, r.currency || bien.currency, langue()) : null
     return `<button type="button" class="cal-barre cal-barre--${famille}${terminee ? ' cal-barre--finie' : ''}${i0 < 0 ? ' cal-barre--coupe-g' : ''}${i1 < 0 ? ' cal-barre--coupe-d' : ''}"
-      style="--d:${debut};--f:${fin}" data-resa="${esc(String(r.id))}" data-bien="${esc(bienId)}"
+      style="--d:${debut};--f:${fin}" ${r.id ? `data-resa="${esc(String(r.id))}"` : ''} data-bien="${esc(bienId)}"
       title="${esc((r.name || '') + ' · ' + dateIntl(r.startISO, langue()) + ' → ' + dateIntl(r.checkout, langue()) + ' · ' + canal + (total ? ' · ' + total : '') + (terminee ? ' · ' + t('cal.stay_over') : ''))}">${esc(court)}</button>`
   }).join('')
   const ref = String(bien.provider_property_id || '')
@@ -649,6 +645,7 @@ function renderGrilleMobile () {
   sel.innerHTML = VUES_MOBILE.map(v => `<option value="${v.id}" ${etat.vueMobile === v.id ? 'selected' : ''}>${esc(t(v.cle))}</option>`).join('')
   const bienId = etat.choisis[0]
   if (!bienId) {
+    sel.hidden = true
     zone.innerHTML = etat.biens.some(b => b.provider !== 'beds24')
       ? `<p class="muted">${esc(t('cal.all_reduced'))}</p>` : ''
     return
@@ -733,24 +730,17 @@ function renderGrilleMobile () {
       const terminee = co <= AUJOURDHUI
       barres += `<button type="button" class="cal-mbar cal-barre--${famille}${commence ? '' : ' cal-mbar--coupe-g'}${finit ? '' : ' cal-mbar--coupe-d'}${terminee ? ' cal-mbar--finie' : ''}"
         style="left: calc(${gauche}% + 2px); width: calc(${largeur}% - 4px); z-index: 2"
-        data-resa="${esc(String(r.id))}" data-bien="${esc(bienId)}">${esc(commence ? (r.name || '') : '')}</button>`
+        ${r.id ? `data-resa="${esc(String(r.id))}"` : ''} data-bien="${esc(bienId)}">${esc(commence ? (r.name || '') : '')}</button>`
     }
     semaines += `<div class="cal-sem">${cases}${barres ? `<span class="cal-sem__couche">${barres}</span>` : ''}</div>`
   }
   const moisTitre = dateIntl(`${etat.annee}-${String(etat.mois + 1).padStart(2, '0')}-01`, langue(), { month: 'long', year: 'numeric' })
-  const peut = !etat.lectureSeule && peutEcrire('reservations')
-  zone.innerHTML = `<div class="cal-bien__bandeau cal-bien__bandeau--mobile"><div class="cal-bien__bandeau-int">
-      <span class="cal-photo cal-bien__photo">${photoBien(bien)}</span>
-      <b class="cal-bien__nom">${esc(bien.name || '')}</b>
-      <span data-slot-vue></span>
-      ${peut ? `<button type="button" class="cal-btn-plus" data-plus title="${esc(t('cal.add_title'))}" aria-label="${esc(t('cal.add_title'))}">${icone('i-plus')}</button>` : ''}
-      <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
-        title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
-    </div></div>
+  zone.innerHTML = `${identiteBien(bien, { mobile: true })}
     <div class="cal-mois__nav">
       <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="-1" aria-label="${esc(t('cal.prev'))}">${icone('i-chevron', 'icon cal-chevron-g')}</button>
       <b>${esc(moisTitre)}</b>
       <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="1" aria-label="${esc(t('cal.next'))}">${icone('i-chevron')}</button>
+      ${(etat.annee === new Date().getFullYear() && etat.mois === new Date().getMonth()) ? '' : `<button type="button" class="link small" data-mois-nav="0">${esc(t('cal.today'))}</button>`}
     </div>
     <div class="cal-mois__grille">${entetes}</div>
     <div class="cal-mois__semaines">${semaines}</div>
@@ -838,17 +828,17 @@ function brancherPlanning () {
   zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
-  // ‹ mois › sous le bandeau (structure de l'ancien mobile) et bouton +
-  // (Reservation / Bloquer les dates, arrivee aujourd'hui par defaut).
-  zone.querySelectorAll('[data-mois-nav]').forEach(b => b.addEventListener('click', () => {
-    const sens = Number(b.dataset.moisNav)
+}
+// La navigation de mois (telephone) : UNE regle, sens 0 = retour au mois
+// courant (le bouton « Aujourd'hui » du haut est masque au telephone).
+function naviguerMois (sens) {
+  if (sens === 0) { const d = new Date(); etat.annee = d.getFullYear(); etat.mois = d.getMonth() }
+  else {
     etat.mois += sens
     if (etat.mois < 0) { etat.mois = 11; etat.annee-- }
     if (etat.mois > 11) { etat.mois = 0; etat.annee++ }
-    viderSelection(); ecrirePrefs(); charger()
-  }))
-  const plus = zone.querySelector('[data-plus]')
-  if (plus) plus.addEventListener('click', () => { etat.sel = null; ouvrirFormulaire('reservation', [AUJOURDHUI]) })
+  }
+  viderSelection(); ecrirePrefs(); charger()
 }
 function peindreSelectionDesktop () {
   const [a, b] = [Math.min(etat.sel.a, etat.sel.b), Math.max(etat.sel.a, etat.sel.b)]
@@ -898,13 +888,7 @@ function brancherMobile () {
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
   // ‹ mois › sous le bandeau (structure de l'ancien mobile) et bouton +
   // (Reservation / Bloquer les dates, arrivee aujourd'hui par defaut).
-  zone.querySelectorAll('[data-mois-nav]').forEach(b => b.addEventListener('click', () => {
-    const sens = Number(b.dataset.moisNav)
-    etat.mois += sens
-    if (etat.mois < 0) { etat.mois = 11; etat.annee-- }
-    if (etat.mois > 11) { etat.mois = 0; etat.annee++ }
-    viderSelection(); ecrirePrefs(); charger()
-  }))
+  zone.querySelectorAll('[data-mois-nav]').forEach(b => b.addEventListener('click', () => naviguerMois(Number(b.dataset.moisNav))))
   const plus = zone.querySelector('[data-plus]')
   if (plus) plus.addEventListener('click', () => { etat.sel = null; ouvrirFormulaire('reservation', [AUJOURDHUI]) })
 }
@@ -1678,12 +1662,8 @@ async function init () {
     const sens = Number(b.dataset.nav)
     if (estLarge()) {
       etat.decalage = sens === 0 ? 0 : etat.decalage + sens * 30
-    } else {
-      if (sens === 0) { const d = new Date(); etat.annee = d.getFullYear(); etat.mois = d.getMonth() }
-      else { etat.mois += sens; if (etat.mois < 0) { etat.mois = 11; etat.annee-- } if (etat.mois > 11) { etat.mois = 0; etat.annee++ } }
-      ecrirePrefs()
-    }
-    viderSelection(); charger()
+      viderSelection(); charger()
+    } else naviguerMois(sens)
   }))
   $('[data-bind="vue-mobile"]').addEventListener('change', (e) => {
     etat.vueMobile = e.target.value

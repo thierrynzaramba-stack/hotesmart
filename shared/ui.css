@@ -486,7 +486,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-resas__fond { position: absolute; inset: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 46px; pointer-events: none; border-start-end-radius: var(--radius-card); overflow: hidden; }
 .cal-resas__jour { border-inline-end: 1px solid var(--line); }
 .cal-resas__jour:last-child { border-inline-end: 0; }
-.cal-barre { position: absolute; top: 5px; height: 38px; background: var(--coul, var(--surface-2)); border: 0; border-radius: 13px; color: var(--on-ink); font-size: var(--fs-small); font-weight: var(--fw-semibold); padding: 0 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
+.cal-barre { position: absolute; top: 5px; height: 38px; background: color-mix(in srgb, var(--coul, var(--surface-2)) 82%, black); border: 0; border-radius: 13px; color: var(--on-canal, var(--on-ink)); font-size: var(--fs-small); font-weight: var(--fw-semibold); padding: 0 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
 .cal-barre--airbnb { --coul: var(--canal-airbnb); }
 .cal-barre--booking { --coul: var(--info); }
 .cal-barre--direct { --coul: var(--ok); }
@@ -559,7 +559,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-mois__semaines { display: flex; flex-direction: column; gap: 4px; }
 .cal-sem { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; position: relative; }
 .cal-sem__couche { position: absolute; left: 0; right: 0; top: 26px; pointer-events: none; z-index: 3; }
-.cal-mbar { position: absolute; height: 22px; border: 0; border-radius: 11px; background: var(--coul, var(--surface-2)); color: var(--on-ink); font-size: var(--fs-caption); font-weight: var(--fw-semibold); display: flex; align-items: center; padding: 0 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; pointer-events: auto; cursor: pointer; font-family: inherit; }
+.cal-mbar { position: absolute; height: 22px; border: 0; border-radius: 11px; background: color-mix(in srgb, var(--coul, var(--surface-2)) 82%, black); color: var(--on-canal, var(--on-ink)); font-size: var(--fs-caption); font-weight: var(--fw-semibold); display: flex; align-items: center; padding: 0 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; pointer-events: auto; cursor: pointer; font-family: inherit; }
 .cal-mbar--blocage { background: var(--surface-2); color: var(--ink); font-style: italic; border: 1px solid var(--border); border-radius: 7px; }
 .cal-mbar--finie { opacity: .45; }
 .cal-mbar--coupe-g { border-start-start-radius: 0; border-end-start-radius: 0; }
