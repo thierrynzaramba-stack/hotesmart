@@ -137,6 +137,8 @@ test('inventaire §12 : chaque fonction de l\'etape 1 est presente, manquantes n
     'fiche : badge pas d\'e-mail': 'badgeSansEmailVisible(',
     'fiche : coordonnees et date de reservation par appel DETAIL (12/10)': 'data-fiche-detail',
     'fiche : volet Detail du prix (par nuit + decomposition)': 'cal.price_detail',
+    'fiche : taxe de sejour hors total seulement si NON incluse': '!d.taxeSejour && !ts.incluse',
+    'fiche : frais Airbnb (retenue hote)': 'cal.airbnb_fee',
     'fiche : prix ABSENT du payload si non touche': 'charge.prixParNuit === undefined',
     'fiche : annulation confirmee, la barre reste': 'cal.cancel_confirm',
     'fiche blocage : modifier / supprimer': 'rouvrirFermeture',

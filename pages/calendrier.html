@@ -1375,7 +1375,7 @@ function ouvrirFicheResa (bienId, resaId) {
     // Taxe de sejour NON incluse dans le total : collectee en sus (montant
     // transmis), ou collectee par la plateforme sans montant — on le DIT.
     const ts = d.taxeSejourInfo || {}
-    if (!d.taxeSejour) {
+    if (!d.taxeSejour && !ts.incluse) {
       if (ts.montant > 0) deco.push([t('cal.tourist_tax'), prixIntl(ts.montant, devise, langue()) + ' ' + t('cal.tt_extra')])
       else if (ts.collecteur === 'plateforme') deco.push([t('cal.tourist_tax'), t('cal.tt_platform_unknown')])
     }

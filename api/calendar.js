@@ -283,13 +283,17 @@ module.exports = async function handler(req, res) {
       // La taxe de sejour TELLE QUE LE MODULE LA LIT (lib/taxe-sejour) : elle
       // peut etre incluse dans le prix, collectee EN SUS par la plateforme
       // (Airbnb la transmet dans le message brut), ou non transmise.
-      const ts = taxeSejourDe(s, raw, provider)
+      const annulee = readStatus(s, provider) === 'cancelled'
+      const ts = annulee ? null : taxeSejourDe(s, raw, provider)
       // Les « frais Airbnb » transmis par le canal = la retenue hote (Host
-      // Fee), soit total recompose - net verse. Le frais de SERVICE voyageur
-      // d'Airbnb n'est transmis par aucun canal — on ne l'invente pas.
-      const canalFiche = String(s.source || '').trim().toLowerCase()
-      const fraisCanal = (canalFiche === 'airbnb' && pv.valeur != null && Number(s.amount) > 0 && pv.valeur > Number(s.amount))
-        ? Math.round((pv.valeur - Number(s.amount)) * 100) / 100 : null
+      // Fee), soit total recompose MOINS raw.amount — le MEME operande que
+      // prixVoyageur (snapshot.amount peut porter une autre revision). Le
+      // frais de SERVICE voyageur d'Airbnb n'est transmis par aucun canal —
+      // on ne l'invente pas. Rien de tout ca sur une annulee.
+      const canalFiche = String(s.source || (raw && raw.ota_name) || '').trim().toLowerCase()
+      const netCanal = raw && Number(raw.amount) > 0 ? Number(raw.amount) : null
+      const fraisCanal = (!annulee && canalFiche === 'airbnb' && pv.valeur != null && netCanal != null && pv.valeur > netCanal)
+        ? Math.round((pv.valeur - netCanal) * 100) / 100 : null
       return res.status(200).json({
         booking_id: String(ligne.booking_id),
         guestEmail: gardeGet.titulaire ? (s.guestEmail || null) : null,
@@ -299,11 +303,11 @@ module.exports = async function handler(req, res) {
           ? { valeur: Math.round((pv.valeur + (pv.taxe_sejour || 0)) * 100) / 100, source: pv.source }
           : { valeur: null, raison: pv.raison || null },
         taxeSejour: pv.taxe_sejour != null && pv.taxe_sejour > 0 ? pv.taxe_sejour : null,
-        taxeSejourInfo: {
-          montant: ts && ts.montant_cents != null ? ts.montant_cents / 100 : null,
-          collecteur: (ts && ts.collecteur) || null,
-          incluse: !!(ts && ts.inclus_dans_prix === true)
-        },
+        taxeSejourInfo: ts ? {
+          montant: ts.montant_cents != null ? ts.montant_cents / 100 : null,
+          collecteur: ts.collecteur || null,
+          incluse: ts.inclus_dans_prix === true
+        } : null,
         fraisCanal,
         prixParNuit: prixParNuitDuRaw(raw),
         factures: (() => {
