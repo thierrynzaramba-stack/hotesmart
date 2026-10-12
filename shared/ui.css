@@ -405,6 +405,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-periode { display: inline-flex; align-items: stretch; height: var(--control); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
 .cal-periode .tab { height: 100%; padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-small); background: transparent; }
 .cal-periode .tab[aria-pressed="true"] { background: var(--info); color: var(--on-ink); }
+/* La bande des dates est STICKY (z5) et l'angle z6 : la liste du menu ...
+   (z5 de .bulle-menu__liste, declaree avant dans le DOM) passait DERRIERE
+   les dates a l'ouverture (constat de recette du 12 octobre). */
+.cal-menu .bulle-menu__liste { z-index: 40; }
 .cal-menu__liste { min-width: 220px; }
 .cal-menu__liste a { display: block; padding: 8px 10px; border-radius: 8px; color: var(--ink); font-weight: var(--fw-semibold); font-size: var(--fs-body); }
 .cal-menu__liste a:hover { background: var(--surface-2); }
