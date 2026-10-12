@@ -637,10 +637,14 @@ const VUES_MOBILE = [
 function renderGrilleMobile () {
   const zone = $('[data-bind="grille-mobile"]')
   zone.hidden = false
-  const libelle = $('[data-bind="mois-libelle"]')
-  libelle.hidden = false
-  libelle.textContent = dateIntl(`${etat.annee}-${String(etat.mois + 1).padStart(2, '0')}-01`, langue(), { month: 'long', year: 'numeric' })
+  // La nav du haut est celle de l'ordinateur : au telephone, le mois vit
+  // SOUS le bandeau du bien (structure de l'ancien calendrier mobile,
+  // retouche du 12 octobre). Le selecteur de vue est GARE dans la nav avant
+  // chaque re-render (innerHTML le detruirait), puis pose dans le bandeau.
+  $('[data-bind="mois-libelle"]').hidden = true
   const sel = $('[data-bind="vue-mobile"]')
+  const nav = $('.cal-nav')
+  if (nav && sel.parentElement !== nav) nav.appendChild(sel)
   sel.hidden = false
   sel.innerHTML = VUES_MOBILE.map(v => `<option value="${v.id}" ${etat.vueMobile === v.id ? 'selected' : ''}>${esc(t(v.cle))}</option>`).join('')
   const bienId = etat.choisis[0]
@@ -655,53 +659,104 @@ function renderGrilleMobile () {
   const premier = new Date(etat.annee, etat.mois, 1)
   const dernier = new Date(etat.annee, etat.mois + 1, 0)
   const decale = (premier.getDay() + 6) % 7   // Lun=0
-  let cases = ''
   const entetes = [1, 2, 3, 4, 5, 6, 0].map(d =>
     `<span class="cal-mois__jour caption muted${classesWE(d)}">${esc(new Intl.DateTimeFormat(langue(), { weekday: 'short', timeZone: 'UTC' }).format(new Date(Date.UTC(2024, 0, d === 0 ? 7 : d))))}</span>`).join('')
-  const canalParNuit = st.__canalParNuit || {}
-  for (let i = 0; i < decale; i++) cases += '<span></span>'
+  // Cellules lineaires (vides en tete/queue), puis rendu PAR SEMAINE : la
+  // semaine porte un calque de barres (fermetures en cases entieres sous les
+  // reservations en DEMI-cases arrivee/depart) — verbatim de l'ancien mobile.
+  const cells = []
+  for (let i = 0; i < decale; i++) cells.push(null)
   for (let j = 1; j <= dernier.getDate(); j++) {
     const dte = new Date(etat.annee, etat.mois, j)
-    const iso = toISO(dte)
-    const s = st[iso] || {}
-    const e = etatNuit(bienId, iso)
-    const passe = iso < AUJOURDHUI
-    let valeur = ''
-    if (etat.vueMobile === 'rate') valeur = prixAffiche(e, s, bien)
-    else {
-      const v = s[etat.vueMobile]
-      valeur = (etat.vueMobile === 'avail' || etat.vueMobile === 'cta' || etat.vueMobile === 'ctd')
-        ? (v === 'closed' ? '✕' : '·') : (v ? String(v) : '·')
-    }
-    const selection = etat.sel && etat.sel.bien === bienId && iso >= etat.sel.duIso && iso <= etat.sel.auIso
-    const we = classesWE(dte.getDay())
-    cases += `<button type="button" class="cal-case cal-nuit--${e}${e === 'vendue' && canalParNuit[iso] ? ' cal-barre--' + canalParNuit[iso] : ''}${passe ? ' cal-nuit--passe' : ''}${we}${iso === AUJOURDHUI ? ' cal-auj' : ''}${selection ? ' cal-case--sel' : ''}"
-      data-case="${iso}" ${passe ? 'data-passe="1"' : ''}>
-      <span class="caption">${j}</span>
-      ${orphelines.has(iso) ? `<span class="cal-orpheline">${icone('i-alert')}</span>` : ''}
-      <span class="cal-case__valeur">${esc(valeur)}</span>
-    </button>`
+    cells.push({ j, iso: toISO(dte), dow: dte.getDay() })
   }
-  const resas = (st.__resas || [])
-  zone.innerHTML = `${identiteBien(bien, { mobile: true })}
-    <div class="cal-mois__grille">${entetes}${cases}</div>
-    <div class="cal-mois__legende caption muted">${esc(t('cal.legend'))}</div>
-    <div class="cal-mois__legende caption muted">${['airbnb', 'booking', 'direct'].map(f =>
-      `<span class="cal-legende__pt cal-barre--${f}"></span>${esc(LIBELLE_CANAL[f])}`).join(' · ')
-      + ` · <span class="cal-legende__pt cal-legende__pt--blocage"></span>${esc(t('cal.blocked'))}`}</div>
-    <div class="cal-mois__resas">${resas.filter(r => String(r.checkout).slice(0, 8) >= toISO(premier).slice(0, 8)).map(r => `
-      <button type="button" class="cal-ligne-resa" data-resa="${esc(String(r.id))}" data-bien="${esc(bienId)}">
-        <span class="cal-ligne-resa__point cal-barre--${familleSource(r.sourceBrute || r.source)}"></span>
-        <span style="min-width:0"><b>${esc(r.name || '')}</b>
-        <span class="caption muted"> ${esc(dateIntl(r.startISO, langue(), { day: 'numeric', month: 'short' }))} → ${esc(dateIntl(r.checkout, langue(), { day: 'numeric', month: 'short' }))}</span></span>
-      </button>`).join('')}
-      ${(((etat.fermetures[bienId] || etat.fermetures[String(bien.provider_property_id || '')]) || [])).map(f => `
-      <button type="button" class="cal-ligne-resa" data-blocage="${esc(String(f.id))}" data-bien="${esc(bienId)}">
-        <span class="cal-ligne-resa__point cal-barre--blocage"></span>
-        <span style="min-width:0"><b>${esc(f.raison || t('cal.blocked'))}</b>
-        <span class="caption muted"> ${esc(dateIntl(f.date_debut, langue(), { day: 'numeric', month: 'short' }))} → ${esc(dateIntl(f.date_fin, langue(), { day: 'numeric', month: 'short' }))}</span></span>
-      </button>`).join('')}
-    </div>`
+  while (cells.length % 7 !== 0) cells.push(null)
+  const resas = st.__resas || []
+  const ref = String(bien.provider_property_id || '')
+  const fermes = (etat.fermetures[bienId] || etat.fermetures[ref]) || []
+  let semaines = ''
+  for (let w = 0; w < cells.length / 7; w++) {
+    const slice = cells.slice(w * 7, w * 7 + 7)
+    const isoByCol = slice.map(c => c && c.iso)
+    const cases = slice.map(c => {
+      if (!c) return '<span class="cal-case cal-case--vide"></span>'
+      const { j, iso } = c
+      const s = st[iso] || {}
+      const e = etatNuit(bienId, iso)
+      const passe = iso < AUJOURDHUI
+      let valeur = ''
+      if (etat.vueMobile === 'rate') valeur = prixAffiche(e, s, bien)
+      else {
+        const v = s[etat.vueMobile]
+        valeur = (etat.vueMobile === 'avail' || etat.vueMobile === 'cta' || etat.vueMobile === 'ctd')
+          ? (v === 'closed' ? '✕' : '·') : (v ? String(v) : '·')
+      }
+      const selection = etat.sel && etat.sel.bien === bienId && iso >= etat.sel.duIso && iso <= etat.sel.auIso
+      return `<button type="button" class="cal-case cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${classesWE(c.dow)}${iso === AUJOURDHUI ? ' cal-auj' : ''}${selection ? ' cal-case--sel' : ''}"
+        data-case="${iso}" ${passe ? 'data-passe="1"' : ''}>
+        <span class="cal-case__num">${j}</span>
+        ${orphelines.has(iso) ? `<span class="cal-orpheline">${icone('i-alert')}</span>` : ''}
+        <span class="cal-case__valeur">${esc(valeur)}</span>
+      </button>`
+    }).join('')
+    const colW = 100 / 7
+    let barres = ''
+    // Les blocages d'abord, SOUS les reservations : cases entieres, raison.
+    for (const f of fermes) {
+      const fd = String(f.date_debut).slice(0, 10), ff = String(f.date_fin).slice(0, 10)
+      let a = -1, z = -1
+      for (let col = 0; col < 7; col++) {
+        const iso = isoByCol[col]; if (!iso) continue
+        if (iso >= fd && iso <= ff) { if (a < 0) a = col; z = col }
+      }
+      if (a < 0) continue
+      const debutIci = isoByCol[a] === fd, finIci = isoByCol[z] === ff
+      barres += `<button type="button" class="cal-mbar cal-mbar--blocage${debutIci ? '' : ' cal-mbar--coupe-g'}${finIci ? '' : ' cal-mbar--coupe-d'}"
+        style="left: calc(${a * colW}% + 2px); width: calc(${(z + 1 - a) * colW}% - 4px); z-index: 1"
+        data-blocage="${esc(String(f.id))}" data-bien="${esc(bienId)}">${esc(debutIci ? (f.raison || t('cal.blocked')) : '')}</button>`
+    }
+    // Les reservations : DEMI-cases a l'arrivee et au depart (le depart est
+    // une demi-journee), nom du voyageur si le sejour commence ici.
+    for (const r of resas) {
+      const ci = r.startISO, co = String(r.checkout).slice(0, 10)
+      let a = -1, z = -1
+      for (let col = 0; col < 7; col++) {
+        const iso = isoByCol[col]; if (!iso) continue
+        if (iso >= ci && iso <= co) { if (a < 0) a = col; z = col }
+      }
+      if (a < 0) continue
+      const commence = isoByCol[a] === ci, finit = isoByCol[z] === co
+      const gauche = (a + (commence ? 0.5 : 0)) * colW
+      const largeur = ((z + (finit ? 0.5 : 1)) - (a + (commence ? 0.5 : 0))) * colW
+      if (largeur <= 0) continue
+      const famille = familleSource(r.sourceBrute || r.source)
+      const terminee = co <= AUJOURDHUI
+      barres += `<button type="button" class="cal-mbar cal-barre--${famille}${commence ? '' : ' cal-mbar--coupe-g'}${finit ? '' : ' cal-mbar--coupe-d'}${terminee ? ' cal-mbar--finie' : ''}"
+        style="left: calc(${gauche}% + 2px); width: calc(${largeur}% - 4px); z-index: 2"
+        data-resa="${esc(String(r.id))}" data-bien="${esc(bienId)}">${esc(commence ? (r.name || '') : '')}</button>`
+    }
+    semaines += `<div class="cal-sem">${cases}${barres ? `<span class="cal-sem__couche">${barres}</span>` : ''}</div>`
+  }
+  const moisTitre = dateIntl(`${etat.annee}-${String(etat.mois + 1).padStart(2, '0')}-01`, langue(), { month: 'long', year: 'numeric' })
+  const peut = !etat.lectureSeule && peutEcrire('reservations')
+  zone.innerHTML = `<div class="cal-bien__bandeau cal-bien__bandeau--mobile"><div class="cal-bien__bandeau-int">
+      <span class="cal-photo cal-bien__photo">${photoBien(bien)}</span>
+      <b class="cal-bien__nom">${esc(bien.name || '')}</b>
+      <span data-slot-vue></span>
+      ${peut ? `<button type="button" class="cal-btn-plus" data-plus title="${esc(t('cal.add_title'))}" aria-label="${esc(t('cal.add_title'))}">${icone('i-plus')}</button>` : ''}
+      <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
+        title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
+    </div></div>
+    <div class="cal-mois__nav">
+      <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="-1" aria-label="${esc(t('cal.prev'))}">${icone('i-chevron', 'icon cal-chevron-g')}</button>
+      <b>${esc(moisTitre)}</b>
+      <button type="button" class="btn btn--secondary btn--icon" data-mois-nav="1" aria-label="${esc(t('cal.next'))}">${icone('i-chevron')}</button>
+    </div>
+    <div class="cal-mois__grille">${entetes}</div>
+    <div class="cal-mois__semaines">${semaines}</div>
+    <div class="cal-mois__legende caption muted">${esc(t('cal.legend'))}</div>`
+  const slot = zone.querySelector('[data-slot-vue]')
+  if (slot) slot.appendChild(sel)
   brancherMobile()
 }
 
@@ -783,6 +838,17 @@ function brancherPlanning () {
   zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
+  // ‹ mois › sous le bandeau (structure de l'ancien mobile) et bouton +
+  // (Reservation / Bloquer les dates, arrivee aujourd'hui par defaut).
+  zone.querySelectorAll('[data-mois-nav]').forEach(b => b.addEventListener('click', () => {
+    const sens = Number(b.dataset.moisNav)
+    etat.mois += sens
+    if (etat.mois < 0) { etat.mois = 11; etat.annee-- }
+    if (etat.mois > 11) { etat.mois = 0; etat.annee++ }
+    viderSelection(); ecrirePrefs(); charger()
+  }))
+  const plus = zone.querySelector('[data-plus]')
+  if (plus) plus.addEventListener('click', () => { etat.sel = null; ouvrirFormulaire('reservation', [AUJOURDHUI]) })
 }
 function peindreSelectionDesktop () {
   const [a, b] = [Math.min(etat.sel.a, etat.sel.b), Math.max(etat.sel.a, etat.sel.b)]
@@ -830,6 +896,17 @@ function brancherMobile () {
   zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
+  // ‹ mois › sous le bandeau (structure de l'ancien mobile) et bouton +
+  // (Reservation / Bloquer les dates, arrivee aujourd'hui par defaut).
+  zone.querySelectorAll('[data-mois-nav]').forEach(b => b.addEventListener('click', () => {
+    const sens = Number(b.dataset.moisNav)
+    etat.mois += sens
+    if (etat.mois < 0) { etat.mois = 11; etat.annee-- }
+    if (etat.mois > 11) { etat.mois = 0; etat.annee++ }
+    viderSelection(); ecrirePrefs(); charger()
+  }))
+  const plus = zone.querySelector('[data-plus]')
+  if (plus) plus.addEventListener('click', () => { etat.sel = null; ouvrirFormulaire('reservation', [AUJOURDHUI]) })
 }
 
 // ─── Écritures : save + verdicts + « Annuler » (vraie écriture inverse) ─────
