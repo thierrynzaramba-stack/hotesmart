@@ -402,6 +402,23 @@ Menu ≡ : section « Outils » PROVISOIRE, retirée lot par lot. Dette 59
 test Colomiers annulées par le CRS, deux blocages saisis comme résas passés
 `blocked` (dettes 63-64). KB : docs/kb/aujourdhui.md.
 
+**Refonte UI V5, lot Calendrier : ETAPE 1 + retouches EN PROD le 12 octobre
+2026 (e8ed91d).** `/calendrier` (pages/calendrier.html, contrat partage
+shared/calendrier-contrat.js, orphelines shared/nuits-orphelines.js) : grille
+par blocs de bien (nom hors cadre, 2 lignes de contenu, vignette supprimee puis
+bandeau photo 28), 4 etats en couleur (vendue = la BARRE seule a l'ordinateur,
+le gris reste au telephone), barres en CONTOUR couleur canal (booking = --info,
+direct = --ok ; prenom, total au survol), selecteur de biens masques dans
+l'angle de la bande, lignes optionnelles cochees au menu ... (par defaut
+Reservations + Prix), fiche enrichie par GET /api/calendar?booking=
+(coordonnees TITULAIRE SEUL, date de vente, detail du prix : total voyageur
+via prixVoyageur, taxe de sejour via taxeSejourDe, frais Airbnb = retenue
+hote ; kb synchronisation.md §8 ter). Le frais de SERVICE voyageur Airbnb
+n'est transmis par aucun canal. ANCIENNES pages calendrier INTACTES : la
+redirection viendra sur go explicite de Thierry. Restent : recette mobile a
+poursuivre, etapes 2-4 de la spec (volets Prix/Evenements/Bilan/Marche,
+marques ~ et ✎). Banc local : ~/.cache/hotesmart-banc (hors depot).
+
 Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
 RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
 remplace `rang === 1` partout, proposition posee a l'approche du depart
