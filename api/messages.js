@@ -417,6 +417,29 @@ module.exports = async function handler(req, res) {
   const filtreOr = filtrePerimetreSql(refsAutorisees)
   if (filtreOr === '') return res.status(200).json({ conversations: [] })
 
+  // ─── La tuile « messages ecrits par l'IA » (dette 66) ──────────────────────
+  // COMPTE SEUL, depuis la COLONNE origine seulement : les envois d'avant la
+  // migration (origine null) ne comptent pas — aucun historique reconstitue
+  // (decision de Thierry du 12 octobre 2026). Migration absente : la tuile
+  // se dit indisponible, elle n'invente pas un zero.
+  if (req.method === 'GET' && req.query && req.query.stats === 'ia') {
+    const brut = typeof req.query.depuis === 'string' ? req.query.depuis : ''
+    const depuis = Number.isFinite(new Date(brut).getTime())
+      ? brut : new Date(Date.now() - 7 * 86400000).toISOString()
+    let q = supabase.from('messages').select('id', { count: 'exact', head: true })
+      .eq('user_id', userId).eq('direction', 'outbound')
+      .in('origine', ['ia_validee', 'ia_modifiee', 'ia_auto'])
+      .gte('sent_at', depuis)
+    if (filtreOr) q = q.or(filtreOr)
+    const { count, error } = await q
+    if (error) {
+      if (/origine/.test(error.message || '')) return res.status(200).json({ indisponible: true })
+      console.error('[messages] stats ia', error.message)
+      return res.status(500).json({ error: 'Lecture impossible' })
+    }
+    return res.status(200).json({ messages_ia: count || 0, depuis })
+  }
+
   // ─── Existence d'un fil pour UNE reservation ───────────────────────────────
   // Sert au bouton « Ouvrir la conversation » de la fiche du calendrier
   // (docs/kb/reservation-directe.md §12) : un bouton actif qui ouvre une liste
@@ -465,16 +488,24 @@ module.exports = async function handler(req, res) {
 
     // ── 2 SELECT (zero N+1) : messages recents + snapshots du user ──
     const [msgRes, snapRes] = await Promise.all([
-      (() => {
-        let q = supabase
-          .from('messages')
-          .select('booking_id, property_id, provider, ota, sender, direction, body, sent_at, kind')
-          .eq('user_id', userId)
-          .gte('sent_at', since)
-        if (filtreOr) q = q.or(filtreOr)
-        return q
-          .order('sent_at', { ascending: false })   // 2000 plus RECENTS (re-tri asc en memoire)
-          .limit(2000)
+      (async () => {
+        const lire = (colonnes) => {
+          let q = supabase
+            .from('messages')
+            .select(colonnes)
+            .eq('user_id', userId)
+            .gte('sent_at', since)
+          if (filtreOr) q = q.or(filtreOr)
+          return q
+            .order('sent_at', { ascending: false })   // 2000 plus RECENTS (re-tri asc en memoire)
+            .limit(2000)
+        }
+        // `origine` (dette 66) avec repli : migration pas encore posee.
+        let r = await lire('booking_id, property_id, provider, ota, sender, direction, body, sent_at, kind, origine')
+        if (r.error && /origine/.test(r.error.message || '')) {
+          r = await lire('booking_id, property_id, provider, ota, sender, direction, body, sent_at, kind')
+        }
+        return r
       })(),
       (() => {
         let q = supabase
@@ -532,7 +563,8 @@ module.exports = async function handler(req, res) {
         direction: m.direction,
         body:      m.body,
         sent_at:   m.sent_at,
-        kind:      m.kind
+        kind:      m.kind,
+        origine:   m.origine || null
       })
     }
 

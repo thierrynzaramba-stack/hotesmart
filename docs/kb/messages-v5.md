@@ -192,3 +192,28 @@ Décision de Thierry, en DEUX recettes ; inventaire champ par champ : spec
   ne liste plus que la Base de connaissance. Le témoin de parité vit
   désormais FIGÉ dans tests/messages-v5.test.js (l'original : git 89cd48e).
   **LE LOT 2 « MESSAGES » EST CLOS.**
+
+## Dettes 66 + 67 soldées (12 octobre 2026)
+
+- **66 — l'origine des envois** : colonne `messages.origine`
+  (`ia_validee` / `ia_modifiee` / `hote` / `ia_auto`), POSÉE PAR LE WRITER À
+  L'ENVOI, jamais recalculée. Liste fermée trois fois : contrainte CHECK en
+  base, `ORIGINES` de `lib/record-message.js` (valeur inconnue = null loggé,
+  colonne absente = repli sans casser l'envoi), et les endpoints de page qui
+  refusent `ia_auto` (réservé à `lib/cron-classify` — les templates
+  programmés de cron-messages/cron-arrival-code ne sont PAS l'IA : sans
+  origine). Le robot s'affiche sur `kind='auto'` OU `origine ia_*` (consigne
+  de Thierry : ia_modifiee aussi — remplace la spec §3.3). Tuile accueil
+  « messages écrits par l'IA » : compte SERVEUR (`/api/messages?stats=ia`,
+  périmètre appliqué) depuis la colonne SEULE — aucun historique
+  reconstitué, tuile masquée si la migration manque.
+- **67 — évaluer au départ** : à l'ouverture d'un fil au séjour TERMINÉ, la
+  page demande `avis.statut` au BUS (import à la demande, cache par
+  réservation) ; évaluable + droit → proposition pointillée « Évaluer
+  {prénom} ? » dont le bouton ouvre la fenêtre standard du cœur
+  (`avis.evaluer`, les boutons à niveaux du chantier avis) — MÊME WRITER que
+  la fiche résa ; au retour, le statut se relit (« publiée ✓ » sans
+  rechargement) ; jamais avant le départ, silencieux sans bus ou sans droit.
+- Migration `2026-10-12-messages-origine` : staging puis prod (collage
+  Thierry), prouvée par `scripts/verifier-migration-messages-origine.js`
+  (colonne par son nom + liste fermée par un INSERT refusé).

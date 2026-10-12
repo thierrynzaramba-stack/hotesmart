@@ -247,7 +247,7 @@ test('messages etape 3 : Envoyer suit le chemin de l\'ancienne page, jamais un s
   const src = sansCommentaires(html())
   // posterMessage d'abord (routage par source), la cloture ensuite — et le
   // statut RELU juste avant (deux onglets = pas de double message, revue).
-  assert.ok(/async function envoyerProposition[\s\S]*?pending_validation[\s\S]*?await posterMessage\(c, texte\)[\s\S]*?await cloreTache\(x, 'done'/.test(src),
+  assert.ok(/async function envoyerProposition[\s\S]*?pending_validation[\s\S]*?await posterMessage\(c, texte, 'ia_validee'\)[\s\S]*?await cloreTache\(x, 'done'/.test(src),
     'statut relu, envoi par posterMessage PUIS cloture — la sequence de messagerie.html')
   assert.ok(/if \(!texte\) return/.test(src), 'jamais un message vide (revue de 06e6d50)')
   assert.ok(/\$\{texteProp \? `<button/.test(src), 'sans texte propose : ni Envoyer ni Modifier')
@@ -262,7 +262,7 @@ test('messages etape 3 : Modifier descend le texte, et l\'envoi porte l\'avatar 
   assert.ok(src.includes('etat.enEdition = { tacheId: x.id'), 'la proposition se masque pendant l\'edition')
   // Apres Modifier, c'est lancerEnvoi (envoi MANUEL) qui clot : kind message,
   // donc avatar hote — jamais le robot pose a la main.
-  assert.ok(/if \(entree\.valideTache\)[\s\S]*?await cloreTache\(x, 'done', entree\.texte, c\)/.test(src),
+  assert.ok(/if \(entree\.valideTache\)[\s\S]*?await cloreTache\(x, 'done', entree\.texte, c, 'ia_modifiee'\)/.test(src),
     'l\'envoi apres Modifier valide la proposition — par l\'ENTREE du geste, pas tout envoi du fil (revue)')
   assert.ok(/function envoyer \(\)[\s\S]*?entree\.valideTache = ed\.tacheId/.test(src),
     'le marquage nait dans envoyer(), le Reessayer d\'un autre message ne clot rien')
@@ -526,4 +526,62 @@ test('programmes : Apercu AI sur bouton EXPLICITE seulement, par /api/grok', () 
   assert.ok(/\[data-prog-apercu\]'\)\.forEach\(x => x\.addEventListener\('click'/.test(src.replace(/\n/g, ' ')) || /data-prog-apercu.*addEventListener\('click'/.test(src.replace(/\n/g, ' ')),
     'declenche par click uniquement')
   assert.ok(!/addEventListener\('input', [^)]*apercu/i.test(src), 'jamais a la saisie')
+})
+
+// ─── Dettes 66 + 67 : origine des envois, evaluation au depart ───────────────
+test('dette 66 : l\'origine est posee A L\'ENVOI par les writers, liste FERMEE', () => {
+  const rm = lire('lib/record-message.js')
+  assert.ok(/const ORIGINES = new Set\(\['ia_validee', 'ia_modifiee', 'hote', 'ia_auto'\]\)/.test(rm),
+    'la liste fermee vit dans le writer commun')
+  assert.ok(/origine inconnue ignoree/.test(rm) && /colonneOrigineAbsente/.test(rm),
+    'valeur inconnue = null logge ; migration absente = repli sans casser l\'envoi')
+  // Les deux endpoints de page REFUSENT ia_auto (reserve au cron).
+  for (const f of ['api/channel-message.js', 'api/beds24.js']) {
+    const src = lire(f)
+    assert.ok(/'ia_validee', 'ia_modifiee', 'hote'/.test(src) && !/'ia_auto'/.test(src.replace(/\/\/[^\n]*/g, '')),
+      f + ' : liste client a trois valeurs, jamais ia_auto depuis une page')
+  }
+  // La reponse generee par l'IA et partie seule porte ia_auto ; les templates
+  // programmes (cron-messages, cron-arrival-code) restent SANS origine.
+  assert.ok(/origine:\s+'ia_auto'/.test(lire('lib/cron-classify.js')), 'cron-classify pose ia_auto')
+  assert.ok(!/origine/.test(sansCommentaires(lire('lib/cron-messages.js'))), 'un template programme n\'est pas l\'IA')
+  assert.ok(!/origine/.test(sansCommentaires(lire('lib/cron-arrival-code.js'))), 'un code d\'acces non plus')
+  // La migration ferme la liste en base.
+  const mig = lire('migrations/2026-10-12-messages-origine.sql')
+  assert.ok(/'ia_validee', 'ia_modifiee',\s*\n\s*'hote', 'ia_auto'/.test(mig) && /check/.test(mig))
+})
+
+test('dette 66 : la page pose l\'origine au GESTE, et le robot suit ia_*', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/await posterMessage\(c, texte, 'ia_validee'\)/.test(src), 'Envoyer tel quel = ia_validee')
+  assert.ok(/entree\.valideTache \? 'ia_modifiee' : 'hote'/.test(src), 'apres Modifier = ia_modifiee, sinon hote')
+  assert.ok(/m\.kind === 'auto' \|\| \/\^ia_\/\.test\(String\(m\.origine \|\| ''\)\)/.test(src),
+    'le robot s\'affiche sur les bulles ia_* (consigne du 12 octobre), le coeur fait foi')
+  // Le GET expose origine avec repli (migration pas posee = pas de panne).
+  const api = lire('api/messages.js')
+  assert.ok(/kind, origine'/.test(api) && /r\.error && \/origine\/\.test/.test(api), 'lecture avec repli')
+})
+
+test('dette 66 : la tuile IA compte la COLONNE seule, au serveur, jamais un faux zero', () => {
+  const api = lire('api/messages.js')
+  assert.ok(/stats === 'ia'/.test(api)
+    && /\.in\('origine', \['ia_validee', 'ia_modifiee', 'ia_auto'\]\)/.test(api)
+    && /indisponible: true/.test(api),
+    'compte serveur sur origine, indisponible si migration absente')
+  const accueil = lire('pages/aujourdhui.html')
+  assert.ok(/stats=ia/.test(accueil) && /r\.indisponible/.test(accueil),
+    'la tuile se masque quand le compte est indisponible (faits comptes seulement)')
+})
+
+test('dette 67 : « Evaluer {prenom} ? » au DEPART seulement, par le BUS seulement', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/depart && depart < etat\.aujourdHui/.test(src), 'jamais avant le depart du voyageur')
+  assert.ok(/bus\.demander\('avis\.statut'/.test(src) && /bus\.ouvrir\('avis\.evaluer'/.test(src),
+    'statut et geste par le bus du coeur — meme writer que la fiche resa (les boutons a niveaux)')
+  assert.ok(!/from\('ota_reviews'\)/.test(src) && !/\/api\/avis/.test(src),
+    'jamais les tables ni l\'endpoint des avis en direct')
+  assert.ok(/await bus\.disponible\('avis\.evaluer'\)/.test(src), 'silencieux sans droit')
+  assert.ok(/review_published/.test(src), 'publiee = dit, sans bouton')
+  assert.ok(/etat\.evaluations\.delete\(String\(c\.bookId\)\)/.test(src),
+    'au retour de la fenetre, le statut se RELIT (publiee sans rechargement)')
 })

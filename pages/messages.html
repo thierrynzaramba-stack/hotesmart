@@ -159,6 +159,7 @@ const etat = {
   templates: undefined,    // messages programmes du bien choisi ; null = illisible
   templatesBien: null, templatesEnCours: false,
   serrures: [],            // serrures du bien choisi (property_locks -> locks)
+  evaluations: new Map(),  // bookId -> 'evaluable' | 'publiee' | 'rien' (dette 67, via le BUS)
   modeEnCours: false,      // une bascule a la fois
   ouverte: null            // bookId de la conversation ouverte
 }
@@ -518,8 +519,9 @@ function renderFil () {
     } else {
       const m = e.m
       const voyageur = m.direction === 'inbound'
+      const robot = !voyageur && (m.kind === 'auto' || /^ia_/.test(String(m.origine || '')))
       morceaux.push(`<div class="bulle ${voyageur ? 'bulle--voyageur' : 'bulle--hote'}">${esc(m.body || '')}</div>
-        <span class="bulle-meta${voyageur ? ' bulle-meta--voyageur' : ''}">${!voyageur && m.kind === 'auto' ? icone('i-ai') : ''}${esc(valide(m.sent_at) ? I18n.time(new Date(m.sent_at)) : '')}</span>`)
+        <span class="bulle-meta${voyageur ? ' bulle-meta--voyageur' : ''}">${robot ? icone('i-ai') : ''}${esc(valide(m.sent_at) ? I18n.time(new Date(m.sent_at)) : '')}</span>`)
     }
     return morceaux.join('')
   }).join('')
@@ -538,6 +540,11 @@ function renderFil () {
     b.addEventListener('click', () => modifierProposition(b.dataset.modifier)))
   deroule.querySelectorAll('[data-rejeter]').forEach(b =>
     b.addEventListener('click', () => rejeterProposition(b.dataset.rejeter)))
+  // Dette 67 : au sejour TERMINE, la proposition « Evaluer {prenom} ? » en
+  // fin de fil — par le BUS du coeur seulement (meme writer que la fiche
+  // resa : la fenetre standard avis.evaluer et ses boutons a niveaux).
+  deroule.insertAdjacentHTML('beforeend', `<span data-bind="fil-evaluation"></span>`)
+  peindreEvaluation(c, deroule.querySelector('[data-bind="fil-evaluation"]'))
   deroule.scrollTop = deroule.scrollHeight
 
   // La saisie (etape 2) : retiree sans droit d'ecriture, jamais grisee.
@@ -555,12 +562,14 @@ function renderFil () {
 // cote serveur par la SOURCE (fil OTA, ou e-mail pour une resa Offline) — et
 // un bien Beds24 (reference numerique) par /api/beds24. JAMAIS un provider
 // depuis la page.
-async function posterMessage (c, texte) {
+async function posterMessage (c, texte, origine = 'hote') {
   const isChannex = String(c.propertyId || '').includes('-')
   const endpoint = isChannex ? '/api/channel-message' : '/api/beds24'
+  // Dette 66 : l'origine du GESTE part avec l'envoi — posee par le writer,
+  // jamais recalculee.
   const payload = isChannex
-    ? { bookingId: c.bookId, message: texte, propertyId: c.propertyId || null }
-    : { action: 'sendMessage', bookingId: c.bookId, message: texte, propertyId: c.propertyId || null }
+    ? { bookingId: c.bookId, message: texte, propertyId: c.propertyId || null, origine }
+    : { action: 'sendMessage', bookingId: c.bookId, message: texte, propertyId: c.propertyId || null, origine }
   return appel(endpoint, payload)
 }
 function envoisDe (bookId) {
@@ -572,7 +581,8 @@ async function lancerEnvoi (c, entree) {
   entree.etatEnvoi = 'en_cours'
   renderFil()
   try {
-    await posterMessage(c, entree.texte)
+    const origine = entree.valideTache ? 'ia_modifiee' : 'hote'
+    await posterMessage(c, entree.texte, origine)
     // Parti : la bulle definitive viendra du coeur (double ecriture messages).
     const liste = envoisDe(c.bookId)
     liste.splice(liste.indexOf(entree), 1)
@@ -584,9 +594,9 @@ async function lancerEnvoi (c, entree) {
     if (entree.valideTache) {
       const x = etat.taches.find(v => String(v.id) === String(entree.valideTache))
       etat.enEdition = null
-      if (x) { await cloreTache(x, 'done', entree.texte, c); return }
+      if (x) { await cloreTache(x, 'done', entree.texte, c, 'ia_modifiee'); return }
     }
-    c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message' })
+    c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message', origine })
     c.lastTime = new Date().toISOString()
     renderFil(); renderListe()
   } catch (err) {
@@ -638,7 +648,7 @@ async function envoyerProposition (id) {
       .select('status').eq('id', x.id).eq('user_id', compteCourant()).maybeSingle()
     if (error) throw new Error(error.message)
     if (!frais || frais.status !== 'pending_validation') { retirerTache(x); return }
-    await posterMessage(c, texte)
+    await posterMessage(c, texte, 'ia_validee')
     await cloreTache(x, 'done', texte, c)
   } catch (err) {
     logger.error('Messages', 'envoi proposition', err)
@@ -673,7 +683,7 @@ async function rejeterProposition (id) {
 //    jamais deux fois tout seul.
 //  - ignored : RIEN n'est parti — un rejet que le serveur n'a pas enregistre
 //    ne disparait pas de l'ecran, il se dit et se retente (releve en review).
-async function cloreTache (x, statut, texte, c) {
+async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
   try {
     await appel('/api/messages', { action: 'proposition', task_id: String(x.id), statut, ...(texte ? { texte } : {}) })
   } catch (err) {
@@ -689,7 +699,7 @@ async function cloreTache (x, statut, texte, c) {
     }
   }
   if (statut === 'done' && c) {
-    c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message' })
+    c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message', origine })
     c.lastTime = new Date().toISOString()
   }
   retirerTache(x)
@@ -1305,6 +1315,65 @@ async function basculerArchive (c) {
     c.archivee = r.archivee === true
   } catch (err) { logger.error('Messages', 'archivage', err); noteErreur(err) }
   renderFiltres(); renderListe(); renderFil()
+}
+
+// ─── « Evaluer {prenom} ? » au depart du voyageur (dette 67) ─────────────────
+// RIEN avant le depart ; silencieux sans bus ou sans droit ; « publiee ✓ »
+// quand c'est fait. Le statut vient du BUS (avis.statut) et le geste OUVRE
+// la fenetre standard du coeur (avis.evaluer, les boutons a niveaux du
+// chantier avis) — meme writer que la fiche resa, rien de duplique.
+function sejourTerminePour (c) {
+  const depart = String(c.lastNight || '').slice(0, 10)
+  return depart && depart < etat.aujourdHui
+    && !STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase())
+}
+function peindreEvaluation (c, cible) {
+  if (!cible || !sejourTerminePour(c)) return
+  const connu = etat.evaluations.get(String(c.bookId))
+  if (connu === 'rien') return
+  if (connu) { peindreEtatEvaluation(c, cible, connu); return }
+  chargerEvaluation(c)
+}
+async function chargerEvaluation (c) {
+  const bookId = String(c.bookId)
+  etat.evaluations.set(bookId, 'rien')   // pas de redemande en boucle
+  let bus = null
+  try { bus = (await import('/shared/hs-bus.js')).hsBus } catch { return }
+  if (!bus) return
+  try {
+    const r = await bus.demander('avis.statut', { booking_uid: bookId })
+    if (!r || !r.ok || !r.data) return
+    if (r.data.etat === 'publiee') etat.evaluations.set(bookId, 'publiee')
+    else if (r.data.evaluable && peutEcrireMessages() && await bus.disponible('avis.evaluer')) {
+      etat.evaluations.set(bookId, 'evaluable')
+    } else return
+    if (String(etat.ouverte) === bookId) renderFil()
+  } catch (err) { logger.error('Messages', 'evaluation', err) }
+}
+function peindreEtatEvaluation (c, cible, statut) {
+  if (statut === 'publiee') {
+    cible.outerHTML = `<span class="msg-jour">${icone('i-review', 'icon')} ${esc(t('messages.review_published'))}</span>`
+    return
+  }
+  const prenom = String(c.guestName || '').trim().split(/\s+/)[0] || t('messages.guest')
+  cible.outerHTML = `<div class="bulle bulle--proposition">
+      <span class="bulle__entete">${icone('i-review', 'icon icon--robot')}${esc(t('messages.review_ask', { name: prenom }))}</span>
+      <span class="bulle__actions">
+        <button type="button" class="btn btn--primary" data-evaluer>${esc(t('messages.review_open'))}</button>
+      </span>
+    </div>`
+  document.querySelector('[data-evaluer]')?.addEventListener('click', () => ouvrirEvaluation(c))
+}
+async function ouvrirEvaluation (c) {
+  let bus = null
+  try { bus = (await import('/shared/hs-bus.js')).hsBus } catch { return }
+  if (!bus) return
+  try {
+    await bus.ouvrir('avis.evaluer', { booking_uid: String(c.bookId) })
+  } catch (err) { logger.error('Messages', 'evaluer', err) }
+  // Au retour de la fenetre : le statut se RELIT (publiee ✓ sans rechargement).
+  etat.evaluations.delete(String(c.bookId))
+  chargerEvaluation(c)
 }
 
 // La zone de texte grandit jusqu'a 6 lignes (spec §3.4).

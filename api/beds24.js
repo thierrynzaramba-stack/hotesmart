@@ -406,7 +406,10 @@ module.exports = async function handler(req, res) {
             providerMsgId: null,
             ota:           null,
             sentAt:        null,
-            kind:          'message'
+            kind:          'message',
+            // Dette 66 : l'origine du GESTE, liste fermee cote page (jamais
+            // ia_auto d'ici), defaut hote.
+            origine:       ['ia_validee', 'ia_modifiee', 'hote'].includes(req.body && req.body.origine) ? req.body.origine : 'hote'
           })
         }
 

@@ -394,6 +394,15 @@ async function chargerCompteurs () {
   // 2026, dont les 5 des 7 derniers jours) — la RLS rend donc 0, un faux zéro
   // qui contredit la ligne d'arrivée. Dette 62 : la tuile revient avec lui.
   const defs = [
+    // « Messages ecrits par l'IA » (dette 66) : compte SERVEUR depuis la
+    // colonne origine seulement ; indisponible (migration absente) = tuile
+    // masquee, jamais un faux zero.
+    peutLire('messages') && {
+      icon: 'i-ai', cle: 'done.ia_messages',
+      f: () => appel(`/api/messages?stats=ia&depuis=${encodeURIComponent(depuis)}`)
+        .then(r => (r && !r.indisponible && Number.isFinite(r.messages_ia)) ? r.messages_ia : null)
+        .catch(() => null)
+    },
     peutLire('menages') && { icon: 'i-cleaning', cle: 'done.cleanings', f: () => compter('menages', q => q.gte('accepted_at', depuis).neq('status', 'cancelled')) },
     // price_display_log : RLS `user_id = auth.uid()` — lisible du seul titulaire.
     estTitulaire() && { icon: 'i-price', cle: 'done.prices', f: () => compter('price_display_log', q => q.eq('source', 'engine').gte('created_at', depuis)) },
