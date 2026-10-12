@@ -203,7 +203,8 @@ async function chargerBiens () {
 }
 function bornesLecture () {
   if (estLarge()) {
-    const jours = computeDays(etat.months, $('[data-bind="planning"]').clientWidth || 1200, etat.decalage)
+    const largeur = ($('[data-bind="planning"]').clientWidth || 1200) - (150 - 120)
+    const jours = computeDays(etat.months, largeur, etat.decalage)
     etat.jours = jours
     return { start: toISO(jours[0]), end: toISO(jours[jours.length - 1]) }
   }
@@ -347,13 +348,19 @@ function identiteBien (bien, { mobile = false } = {}) {
         title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
     </div></div>`
 }
+// La regle du marquage week-end, UNE fois (bande, fond des resas,
+// cellules de prix) : trois copies divergeraient (vecu du 30 septembre).
+function classesWE (jourSemaine) {
+  return [0, 6].includes(jourSemaine)
+    ? ' cal-we' + (jourSemaine === 6 ? ' cal-we--debut' : ' cal-we--fin') : ''
+}
 // Le fond de la ligne des reservations : une case par jour, QUADRILLAGE et
 // week-ends compris — sans eux, impossible de lire la date d'une barre
-// (constat de recette du 12 octobre).
+// (constat de recette du 12 octobre). Identique pour tous les biens :
+// calcule UNE fois par render.
 function fondsResas () {
   return etat.joursISO.map(iso => {
-    const j = new Date(iso + 'T12:00:00').getDay()
-    const we = [0, 6].includes(j) ? ' cal-we' + (j === 6 ? ' cal-we--debut' : ' cal-we--fin') : ''
+    const we = classesWE(new Date(iso + 'T12:00:00').getDay())
     return `<span class="cal-resas__jour${we}${iso === AUJOURDHUI ? ' cal-auj' : ''}"></span>`
   }).join('')
 }
@@ -362,7 +369,9 @@ function fondsResas () {
 // photo ronde + nom ; clic = le bloc se deploie (ordinateur : s'ajoute ;
 // telephone : remplace le bien courant). Beds24 : grisee, non cliquable.
 function bullesHtml ({ mini = false } = {}) {
-  const caches = etat.biens.filter(b => b.provider === 'beds24' || !etat.choisis.includes(b.id))
+  const caches = etat.biens.filter(b => mini
+    ? (b.provider !== 'beds24' && !etat.choisis.includes(b.id))
+    : (b.provider === 'beds24' || !etat.choisis.includes(b.id)))
   return caches.map(b => {
     const beds24 = b.provider === 'beds24'
     return `<button type="button" class="cal-bulle${mini ? ' cal-bulle--mini' : ''}${beds24 ? ' cal-bulle--grise' : ''}"
@@ -453,21 +462,20 @@ function renderPlanning () {
     const m = iso.slice(0, 7)
     bandeMois += `<span class="cal-bande__mois${m !== moisCourant ? ' cal-bande__mois--debut' : ''}">${m !== moisCourant ? esc(dateIntl(iso, langue(), { month: 'long', year: 'numeric' })) : ''}</span>`
     moisCourant = m
-    const we = [0, 6].includes(d.getDay())
-    const lisere = d.getDay() === 6 ? ' cal-we--debut' : (d.getDay() === 0 ? ' cal-we--fin' : '')
-    bandeJours += `<span class="cal-bande__jour${we ? ' cal-we' + lisere : ''}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(dateIntl(iso, langue(), { weekday: 'narrow' }))}<b>${d.getDate()}</b></span>`
+    bandeJours += `<span class="cal-bande__jour${classesWE(d.getDay())}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(dateIntl(iso, langue(), { weekday: 'narrow' }))}<b>${d.getDate()}</b></span>`
   }
   const bande = $('[data-bind="bande"]')
   bande.innerHTML = `<div class="cal-bande__angle">${bullesHtml({ mini: true })}</div>
     <div class="cal-bande__corps"><div class="cal-bande__l">${bandeMois}</div><div class="cal-bande__l">${bandeJours}</div></div>`
   brancherBulles(bande)
   const aPilotables = etat.biens.some(b => b.provider !== 'beds24')
+  const fonds = fondsResas()
   $('[data-bind="grilles"]').innerHTML = etat.choisis.length
-    ? etat.choisis.map(id => grilleBien(id)).join('')
+    ? etat.choisis.map(id => grilleBien(id, fonds)).join('')
     : (aPilotables ? `<p class="muted" style="padding: 24px 16px">${esc(t('cal.all_reduced'))}</p>` : '')
   brancherPlanning()
 }
-function grilleBien (bienId) {
+function grilleBien (bienId, fonds) {
   const bien = etat.biens.find(b => b.id === bienId) || {}
   const jours = etat.jours
   const st = etat.states[bienId] || {}
@@ -507,8 +515,7 @@ function grilleBien (bienId) {
     const e = etatNuit(bienId, iso)
     const passe = iso < AUJOURDHUI
     const prix = e === 'attente' ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()))
-    const jsem = new Date(iso + 'T12:00:00').getDay()
-    const we = [0, 6].includes(jsem) ? ' cal-we' + (jsem === 6 ? ' cal-we--debut' : ' cal-we--fin') : ''
+    const we = classesWE(new Date(iso + 'T12:00:00').getDay())
     return `<td class="cal-nuit cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${we}${iso === AUJOURDHUI ? ' cal-auj' : ''}"
       data-bien="${esc(bienId)}" data-i="${i}" data-iso="${iso}">
       ${orphelines.has(iso) ? `<span class="cal-orpheline" title="${esc(t('cal.orphan_hint'))}">${icone('i-alert')}</span>` : ''}
@@ -532,10 +539,10 @@ function grilleBien (bienId) {
     <div class="cal-bien__cadre">
       <div class="cal-bien__ligne">
         <div class="cal-bien__coin"><span class="cal-photo cal-bien__vignette">${photoBien(bien)}</span></div>
-        <div class="cal-bien__resas" style="--n:${etat.joursISO.length}"><span class="cal-resas__fond">${fondsResas()}</span>${barres}${blocages}</div>
+        <div class="cal-bien__resas" style="--n:${etat.joursISO.length}"><span class="cal-resas__fond">${fonds}</span>${barres}${blocages}</div>
       </div>
       <table class="cal-table"><tbody>
-        <tr data-ligne-prix><th class="cal-libelle"></th>${cellules}</tr>
+        <tr data-ligne-prix><th class="cal-libelle"><span class="sr-only">${esc(t('cal.row_price'))}</span></th>${cellules}</tr>
         ${params}
       </tbody></table>
     </div>

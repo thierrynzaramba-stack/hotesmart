@@ -431,7 +431,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 /* Planning ordinateur */
 .cal-planning { overflow-x: auto; }
 .cal-bande { position: sticky; top: 0; z-index: 5; display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); width: max-content; min-width: 100%; }
-.cal-bande__angle { width: 150px; min-width: 150px; position: sticky; inset-inline-start: 0; z-index: 6; background: var(--surface); border-inline-end: 1px solid var(--line); border-start-start-radius: var(--radius-card); border-end-start-radius: var(--radius-card); display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 4px 8px; overflow: hidden; }
+.cal-bande__angle { width: 150px; min-width: 150px; position: sticky; inset-inline-start: 0; z-index: 6; background: var(--surface); border-inline-end: 1px solid var(--line); border-start-start-radius: var(--radius-card); border-end-start-radius: var(--radius-card); display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; padding: 4px 8px; overflow-x: auto; scrollbar-width: thin; }
 .cal-bande__corps { width: max-content; }
 .cal-bande__l { display: grid; grid-auto-flow: column; grid-auto-columns: 46px; }
 .cal-bande__mois { font-size: var(--fs-caption); font-weight: var(--fw-bold); white-space: nowrap; overflow: visible; height: 18px; }
@@ -477,6 +477,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-bien__resas { position: relative; height: var(--cal-resas-h); width: calc(var(--n) * 46px); flex: none; }
 .cal-resas__fond { position: absolute; inset: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 46px; pointer-events: none; border-start-end-radius: var(--radius-card); overflow: hidden; }
 .cal-resas__jour { border-inline-end: 1px solid var(--line); }
+.cal-resas__jour:last-child { border-inline-end: 0; }
 .cal-barre { position: absolute; top: 5px; height: 38px; border: 0; border-radius: 13px; color: var(--on-ink); font-size: var(--fs-small); font-weight: var(--fw-semibold); padding: 0 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
 .cal-barre--airbnb { background: var(--canal-airbnb); }
 .cal-barre--booking { background: var(--canal-booking); }
