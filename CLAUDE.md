@@ -402,8 +402,17 @@ Menu ≡ : section « Outils » PROVISOIRE, retirée lot par lot. Dette 59
 test Colomiers annulées par le CRS, deux blocages saisis comme résas passés
 `blocked` (dettes 63-64). KB : docs/kb/aujourdhui.md.
 
-**Refonte UI V5, lot Calendrier : ETAPE 1 + retouches EN PROD le 12 octobre
-2026 (e8ed91d).** `/calendrier` (pages/calendrier.html, contrat partage
+**Refonte UI V5, lot Calendrier : ETAPE 1 + retouches EN PROD le 13 octobre
+2026 (963d05d).** Depuis e8ed91d : barres PLEINES (l'essai contour est
+referme), telephone restructure comme l'ancien mobile (barres en demi-cases
+par semaine, pastille noire aujourd'hui, mois + selecteur STICKY en tete,
+multi-biens EMPILES avec delimitation, bulles = AJOUT), la ligne de donnees
+de l'ordinateur suit le SELECTEUR DE VUE partage (les lignes a cocher ont
+disparu), dates reservees non grisees, ORDRE des biens par glisser (poignee
+du bandeau, tactile + souris) — liste etat.choisis persistee COMMUNE aux
+deux ecrans.
+
+(Bloc d'origine :) `/calendrier` (pages/calendrier.html, contrat partage
 shared/calendrier-contrat.js, orphelines shared/nuits-orphelines.js) : grille
 par blocs de bien (nom hors cadre, 2 lignes de contenu, vignette supprimee puis
 bandeau photo 28), 4 etats en couleur (vendue = la BARRE seule a l'ordinateur,
