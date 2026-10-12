@@ -202,7 +202,9 @@ async function chargerBiens () {
 }
 function bornesLecture () {
   if (estLarge()) {
-    const largeur = ($('[data-bind="planning"]').clientWidth || 1200) - (110 - 120)
+    const planning = $('[data-bind="planning"]')
+    const col = parseInt(getComputedStyle(planning).getPropertyValue('--cal-col')) || 110
+    const largeur = (planning.clientWidth || 1200) - (col - 120)
     const jours = computeDays(etat.months, largeur, etat.decalage)
     etat.jours = jours
     return { start: toISO(jours[0]), end: toISO(jours[jours.length - 1]) }
@@ -389,13 +391,13 @@ function angleHtml () {
   const masques = etat.biens.filter(b => b.provider !== 'beds24' && !etat.choisis.includes(b.id))
   if (!masques.length) return `<span class="caption muted">${esc(t('cal.all_shown'))}</span>`
   const minis = masques.slice(0, 4).map(b => `<span class="cal-photo cal-angle__mini">${photoBien(b)}</span>`).join('')
-  return `<details class="bulle-menu cal-angle__menu">
+  return `<details class="cal-angle__menu">
     <summary class="cal-angle__puce" title="${esc(t('cal.hidden_props'))}">
       <span class="cal-angle__pile">${minis}</span>
       <b>${masques.length}</b>
       <span class="caption">${esc(t('cal.hidden_props'))}</span>
     </summary>
-    <div class="bulle-menu__liste cal-angle__liste">
+    <div class="cal-angle__liste">
       ${masques.map(b => `<button type="button" data-afficher="${esc(b.id)}">
         <span class="cal-photo cal-angle__mini">${photoBien(b)}</span>
         <span class="cal-angle__nom">${esc(b.name || '')}</span>
@@ -414,6 +416,17 @@ function brancherAngle (zone) {
   zone.querySelectorAll('[data-afficher]').forEach(b => b.addEventListener('click', () => afficher([b.dataset.afficher])))
   const tout = zone.querySelector('[data-tout-afficher]')
   if (tout) tout.addEventListener('click', () => afficher(etat.biens.filter(b => b.provider !== 'beds24').map(b => b.id)))
+  const det = zone.querySelector('.cal-angle__menu')
+  if (det) {
+    det.addEventListener('toggle', () => {
+      if (!det.open) return
+      const r = det.querySelector('summary').getBoundingClientRect()
+      const liste = det.querySelector('.cal-angle__liste')
+      liste.style.top = (r.bottom + 4) + 'px'
+      liste.style.insetInlineStart = Math.max(8, r.left) + 'px'
+    })
+    $('[data-bind="planning"]').addEventListener('scroll', () => { det.open = false }, { passive: true })
+  }
 }
 function brancherBulles (zone) {
   zone.querySelectorAll('[data-bulle]:not([disabled])').forEach(p => p.addEventListener('click', () => {
@@ -497,12 +510,14 @@ function renderPlanning () {
     bandeJours += `<span class="cal-bande__jour${classesWE(d.getDay())}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(dateIntl(iso, langue(), { weekday: 'narrow' }))}<b>${d.getDate()}</b></span>`
   }
   const bande = $('[data-bind="bande"]')
+  const menuOuvert = !!bande.querySelector('.cal-angle__menu[open]')
   bande.innerHTML = `<div class="cal-bande__angle">${angleHtml()}</div>
     <div class="cal-bande__corps"><div class="cal-bande__l">${bandeMois}</div><div class="cal-bande__l">${bandeJours}</div></div>`
   brancherAngle(bande)
+  if (menuOuvert) { const d = bande.querySelector('.cal-angle__menu'); if (d) d.open = true }
   $('[data-bind="legende-canaux"]').innerHTML = ['airbnb', 'booking', 'direct'].map(f =>
     `<span class="cal-legende__pt cal-barre--${f}"></span>${esc(LIBELLE_CANAL[f])}`).join(' · ')
-    + ` · <span class="cal-legende__pt cal-barre--blocage"></span>${esc(t('cal.blocked'))}`
+    + ` · <span class="cal-legende__pt cal-legende__pt--blocage"></span>${esc(t('cal.blocked'))}`
   const aPilotables = etat.biens.some(b => b.provider !== 'beds24')
   const fonds = fondsResas()
   $('[data-bind="grilles"]').innerHTML = etat.choisis.length
@@ -632,7 +647,7 @@ function renderGrilleMobile () {
     const e = etatNuit(bienId, iso)
     const passe = iso < AUJOURDHUI
     let valeur = ''
-    if (etat.vueMobile === 'rate') valeur = e === 'attente' ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()) || '—')
+    if (etat.vueMobile === 'rate') valeur = (e === 'attente' || e === 'vendue') ? '' : (s.sansPrix ? '—' : prixIntl(s.rate, bien.currency, langue()) || '—')
     else {
       const v = s[etat.vueMobile]
       valeur = (etat.vueMobile === 'avail' || etat.vueMobile === 'cta' || etat.vueMobile === 'ctd')
@@ -650,6 +665,9 @@ function renderGrilleMobile () {
   zone.innerHTML = `${identiteBien(bien, { mobile: true })}
     <div class="cal-mois__grille">${entetes}${cases}</div>
     <div class="cal-mois__legende caption muted">${esc(t('cal.legend'))}</div>
+    <div class="cal-mois__legende caption muted">${['airbnb', 'booking', 'direct'].map(f =>
+      `<span class="cal-legende__pt cal-barre--${f}"></span>${esc(LIBELLE_CANAL[f])}`).join(' · ')
+      + ` · <span class="cal-legende__pt cal-legende__pt--blocage"></span>${esc(t('cal.blocked'))}`}</div>
     <div class="cal-mois__resas">${resas.filter(r => String(r.checkout).slice(0, 8) >= toISO(premier).slice(0, 8)).map(r => `
       <button type="button" class="cal-ligne-resa" data-resa="${esc(String(r.id))}" data-bien="${esc(bienId)}">
         <span class="cal-ligne-resa__point cal-barre--${familleSource(r.sourceBrute || r.source)}"></span>
