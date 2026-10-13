@@ -280,3 +280,43 @@ composants (décisions de Thierry) :
 - réordonnancement des biens : module partagé `shared/reordonner-biens.js`
   (extrait du calendrier), souris ET doigt sur les deux pages — la règle
   « le mobile suit l'ordinateur » est donc tenue sans report.
+
+## 15. Étape 2 livrée — la bulle « À traiter » et le badge (13 octobre 2026)
+
+- **La règle vit dans un module PUR** : `shared/menages-a-traiter.js`
+  (`lignesATraiter`, `comptesParType`), éprouvé par 14 tests sans DOM ni
+  réseau — c'est elle qui décide de ce que l'hôte voit en rouge.
+- **Fenêtre propre à la bulle** : J−30 → J+30, en UNE requête, indépendante
+  de la période affichée (un hôte en vue 12 mois voit les mêmes alertes
+  qu'en vue 1 mois).
+- **Ce qui entre** : jours sans aucune prestataire disponible (une ligne par
+  bien, avec le nombre de jours, biens non confiés exclus) ; ménage à venir
+  que personne ne porte ; proposition sans réponse à **moins de 48 h**
+  seulement (§13 : une offre qui court n'est pas une alerte) ; départ passé
+  non marqué fait ; remarque de propreté confirmée (sous `avis:read`).
+  Un ménage **différé** n'y entre jamais.
+- **Ce qui n'entre pas** : les jours à régler (§13), un ménage porté ou fait,
+  un trou passé, un bien hors périmètre (ignoré, jamais rendu sans nom).
+- **Rendu** : ordinateur, liste deux colonnes, 8 lignes puis « Tout voir (n) » ;
+  téléphone, les compteurs SEULS, un appui ouvre la liste du type. Rien à
+  traiter : une ligne blanche à coche verte, **sans ambre**. Lecture
+  impossible : la bulle se tait et le DIT (jamais « rien à traiter » sur une
+  panne).
+- **Badge** : `nav.js` porte `menagesATraiter` sur l'onglet Ménages, alimenté
+  par la page elle-même.
+
+### Reste à trancher par Thierry
+
+Le badge n'apparaît **que sur la page Ménages** : les autres pages n'ont pas
+le compte sans une requête de plus. Trois voies — (a) chaque page appelle
+`/api/garde` sur 61 jours au chargement (simple, une requête par page) ;
+(b) un endpoint de synthèse qui ne rend que les compteurs (plus léger, mais
+c'est un endpoint de plus) ; (c) attendre. **Rien n'est fait tant que
+Thierry n'a pas choisi.**
+
+### Les boutons d'action viennent à l'étape 3
+
+Les lignes de la bulle n'ont pas encore de bouton (Assigner, Réassigner,
+Fait, Voir) : ce sont des écritures et une fiche, livrées à l'étape 3 avec
+la note pour la prestataire. La bulle de l'étape 2 **dit** ce qui attend ;
+elle ne le traite pas encore.

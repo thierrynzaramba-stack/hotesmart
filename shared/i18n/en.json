@@ -390,5 +390,16 @@
   "menages.tt_propose": "Offered, awaiting reply",
   "menages.retour_bon": "good guest feedback",
   "menages.retour_mauvais": "bad guest feedback",
-  "menages.personne_jour": "No cleaner available"
+  "menages.personne_jour": "No cleaner available",
+  "menages.atraiter": "To handle",
+  "menages.atraiter_fenetre": "30 days",
+  "menages.atraiter_rien": "Nothing to handle in the next 30 days.",
+  "menages.atraiter_panne": "“To handle” list unavailable right now.",
+  "menages.tout_voir": "See all ({n})",
+  "menages.n_jours": "{n} days with nobody",
+  "menages.type_sans_personnel": "No cleaner available",
+  "menages.type_non_assigne": "Nobody on this cleaning",
+  "menages.type_non_pris": "Offered, no reply — departure imminent",
+  "menages.type_non_termine": "Past departure, cleaning not marked done",
+  "menages.type_mauvais_retour": "Bad guest feedback"
 }

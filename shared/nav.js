@@ -15,7 +15,7 @@
     { id: 'today',      href: '/pages/aujourdhui',          key: 'nav.today',      icon: 'i-today' },
     { id: 'calendar',   href: '/biens',                     key: 'nav.calendar',   icon: 'i-calendar', hrefMobile: '/m/calendrier', domaine: 'reservations' },
     { id: 'messages',   href: '/pages/messages',            key: 'nav.messages',   icon: 'i-message', badge: 'pendingMessages', domaine: 'messages' },
-    { id: 'cleaning',   href: '/apps/menages',              key: 'nav.cleaning',   icon: 'i-cleaning', domaine: 'menages' },
+    { id: 'cleaning',   href: '/apps/menages',              key: 'nav.cleaning',   icon: 'i-cleaning', badge: 'menagesATraiter', domaine: 'menages' },
     { id: 'properties', href: '/biens',                     key: 'nav.properties', icon: 'i-home', domaine: 'reservations' },
   ];
 
@@ -24,7 +24,7 @@
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const isCurrent = (href) => location.pathname.replace(/\/$/, '').endsWith(href.replace(/\/$/, ''));
 
-  // options.badges : { pendingMessages: n }
+  // options.badges : { pendingMessages: n, menagesATraiter: n }
   // options.liens  : { calendar: '/biens/<id>/calendrier' } — remplace href
   // options.peutLire(domaine) : masque une entrée sans droit (jamais une
   //   entrée qui mène à une page vide ou à un refus).

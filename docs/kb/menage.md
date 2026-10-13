@@ -3655,3 +3655,14 @@ filtré) — d'où l'extraction. `api/garde.js` ne calcule plus `absences[]` :
 plus aucun écran ne les lit depuis que l'absence est une case vide ; le jour
 où un écran en aura besoin, elles viendront de `planningDeGarde`, qui
 connaît déjà la disponibilité.
+
+### Étape 2 : « À traiter » (13 octobre 2026)
+
+La règle de l'alerte est un module PUR, `shared/menages-a-traiter.js`, testé
+hors DOM : une proposition qui court normalement n'est PAS une alerte (elle
+n'entre qu'à moins de 48 h du départ), un ménage différé jamais, un bien non
+confié ne produit aucun « sans personnel ». La bulle lit sa PROPRE fenêtre
+(J−30 → J+30), indépendante de la période affichée. Une panne de lecture se
+dit : on n'annonce jamais « rien à traiter » sur une erreur. Badge ambre de
+l'onglet Ménages alimenté par la page (les autres pages : décision de
+Thierry en attente, spec §15).

@@ -47,6 +47,9 @@
     </a>
   </div>
 
+  <!-- « À traiter » : le SEUL moment ambre de l'écran (spec §3.1). -->
+  <section class="men-bulle" data-bind="bulle" hidden aria-labelledby="h-atraiter"></section>
+
   <!-- La même barre de période que le Calendrier (référence visuelle). -->
   <div class="row men-nav">
     <button type="button" class="btn btn--secondary btn--icon" data-nav="-1" data-i18n-attr="aria-label:menages.prev">
@@ -100,6 +103,7 @@ import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCom
 import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
 import { bandeJoursHtml, classesWE as classesWEDuJour } from '/shared/bande-jours.js'
+import { lignesATraiter, comptesParType, TYPES } from '/shared/menages-a-traiter.js'
 import { brancherReordonnancement } from '/shared/reordonner-biens.js'
 
 initErrorHandler()
@@ -123,7 +127,10 @@ const etat = {
   mois: 1,              // 1 / 3 / 6 / 12 (persisté, comme le calendrier)
   decalage: 0,          // en jours, NON persisté (même règle que le calendrier)
   masques: [],          // refs des biens masqués (persisté PAR COMPTE)
-  ordre: []             // ordre des biens (poignée de déplacement, persisté)
+  ordre: [],            // ordre des biens (poignée de déplacement, persisté)
+  aTraiter: [],         // lignes de la bulle (fenêtre PROPRE : J−30 → J+30)
+  toutVoir: false,      // « Tout voir » déplié
+  typeOuvert: null      // téléphone : le type dont la liste est ouverte
 }
 // ⚠ Une clé PAR COMPTE : la page est délégable, et une ref provider masquée
 // sur un compte ne doit pas faire disparaître le bien homonyme d'un autre
@@ -142,6 +149,8 @@ function ecrirePrefs () {
 }
 
 // ─── Dates (Intl, jamais de formatage à la main) ────────────────────────────
+const dateCourte = iso => new Intl.DateTimeFormat(langue(), { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' })
+  .format(new Date(iso + 'T12:00:00Z'))
 const dateLongue = iso => new Intl.DateTimeFormat(langue(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
   .format(new Date(iso + 'T12:00:00Z'))
 const estLarge = () => window.matchMedia('(min-width: 900px)').matches
@@ -172,6 +181,36 @@ async function appel (chemin) {
   if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; throw e }
   return corps
 }
+// ⚠ LA BULLE A SA PROPRE FENÊTRE (spec §3.1) : aujourd'hui → J+30, et
+// J−30 → hier pour « non terminé » et « mauvais retour ». Elle ne suit donc
+// PAS la période choisie — un hôte en vue 12 mois doit voir les mêmes
+// alertes qu'en vue 1 mois. 61 jours : une seule requête, sous le plafond.
+let jetonBulle = 0
+async function chargerATraiter () {
+  const jeton = ++jetonBulle
+  const d = new Date(AUJOURDHUI + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() - 30)
+  const du = d.toISOString().slice(0, 10)
+  d.setUTCDate(d.getUTCDate() + 60)
+  const au = d.toISOString().slice(0, 10)
+  try {
+    const r = await appel(`/api/garde?du=${du}&au=${au}`)
+    if (jeton !== jetonBulle) return
+    etat.aTraiter = lignesATraiter({
+      biens: r.biens || [], garde: r.garde || [], menages: r.menages || [],
+      avecAvis: !!r.avec_avis, aujourdhui: AUJOURDHUI
+    })
+  } catch (e) {
+    if (jeton !== jetonBulle) return
+    // ⚠ UNE BULLE QUI N'A PAS PU LIRE NE DIT PAS « RIEN À TRAITER » : elle se
+    // tait et le dit. Annoncer le calme sur une panne est le pire des deux.
+    logger.error('Menages', 'à traiter', e)
+    etat.aTraiter = null
+  }
+  renderBulle()
+  majBadge()
+}
+
 let jetonLecture = 0
 async function charger () {
   const jeton = ++jetonLecture
@@ -494,6 +533,85 @@ function trousDuBien (g) {
   return new Set((g ? g.jours : []).filter(j => j.trou && dans.has(j.date)).map(j => j.date))
 }
 
+// ─── La bulle « À traiter » ─────────────────────────────────────────────────
+const ICONE_TYPE = {
+  sans_personnel: 'i-shield-off', non_assigne: 'i-circle-dashed',
+  non_pris: 'i-alert', non_termine: 'i-scheduled', mauvais_retour: 'i-thumb-down'
+}
+const MAX_LIGNES = 8
+
+// Le badge ambre de l'onglet Ménages = le nombre de lignes de la bulle.
+function majBadge () {
+  const n = Array.isArray(etat.aTraiter) ? etat.aTraiter.length : 0
+  HSNav.render({ peutLire, badges: { menagesATraiter: n } })
+}
+
+function ligneHtml (l) {
+  const photo = l.photo ? `<img src="${esc(l.photo)}" alt="" loading="lazy">` : icone('i-home')
+  const quand = l.type === 'sans_personnel'
+    ? t('menages.n_jours', { n: l.nbJours })
+    : dateCourte(l.date)
+  const qui = l.qui && l.qui.prenom ? ` · ${esc(l.qui.prenom)}` : ''
+  return `<div class="men-atr" title="${esc(t('menages.type_' + l.type))}">
+    <span class="men-atr__type men-atr__type--${esc(l.type)}" aria-label="${esc(t('menages.type_' + l.type))}">${icone(ICONE_TYPE[l.type])}</span>
+    <span class="cal-photo men-atr__photo">${photo}</span>
+    <span class="men-atr__texte">
+      <b>${esc(l.bienNom)}</b>
+      <span class="caption muted">${esc(quand)}${qui}</span>
+    </span>
+  </div>`
+}
+
+function renderBulle () {
+  const zone = $('[data-bind="bulle"]')
+  zone.hidden = false
+  // Panne de lecture : on le DIT, on n'annonce pas le calme.
+  if (etat.aTraiter === null) {
+    zone.className = 'men-bulle men-bulle--muette'
+    zone.innerHTML = `<p class="caption muted" style="margin: 0">${esc(t('menages.atraiter_panne'))}</p>`
+    return
+  }
+  const lignes = etat.aTraiter
+  // Rien à traiter : une ligne blanche avec une coche verte, SANS ambre.
+  if (!lignes.length) {
+    zone.className = 'men-bulle men-bulle--calme'
+    zone.innerHTML = `<span class="men-atr__type men-atr__type--ok">${icone('i-check')}</span>
+      <span data-i18n="menages.atraiter_rien"></span>`
+    I18n.apply(zone)
+    return
+  }
+  zone.className = 'men-bulle'
+  const comptes = comptesParType(lignes)
+  // ⚠ TÉLÉPHONE : LES COMPTEURS SEULS (spec §4), un appui ouvre la liste du
+  // type — huit lignes avant le calendrier le repousseraient hors de l'écran.
+  // Ordinateur : la liste, 8 lignes puis « Tout voir ».
+  const parType = etat.typeOuvert ? lignes.filter(l => l.type === etat.typeOuvert) : null
+  const visibles = parType || (estLarge() ? (etat.toutVoir ? lignes : lignes.slice(0, MAX_LIGNES)) : [])
+  const reste = parType ? 0 : lignes.length - visibles.length
+  const filtrees = visibles
+  const compteurs = TYPES.filter(ty => comptes[ty]).map(ty =>
+    `<button type="button" class="men-cpt${etat.typeOuvert === ty ? ' men-cpt--ouvert' : ''}" data-type="${esc(ty)}"
+       aria-pressed="${etat.typeOuvert === ty}" title="${esc(t('menages.type_' + ty))}" aria-label="${esc(t('menages.type_' + ty))}">
+      <span class="men-atr__type men-atr__type--${esc(ty)}">${icone(ICONE_TYPE[ty])}</span><b>${comptes[ty]}</b>
+    </button>`).join('')
+  zone.innerHTML = `
+    <div class="men-bulle__tete">
+      <h2 class="h2" id="h-atraiter" data-i18n="menages.atraiter"></h2>
+      <span class="badge badge--amber">${lignes.length}</span>
+      <span class="caption muted" style="margin-inline-start: auto" data-i18n="menages.atraiter_fenetre"></span>
+    </div>
+    <div class="men-cpts">${compteurs}</div>
+    <div class="men-atrs">${filtrees.map(ligneHtml).join('')}</div>
+    ${reste > 0 && estLarge() ? `<button type="button" class="link small" data-tout-voir>${esc(t('menages.tout_voir', { n: reste }))}</button>` : ''}`
+  I18n.apply(zone)
+  const tv = zone.querySelector('[data-tout-voir]')
+  if (tv) tv.addEventListener('click', () => { etat.toutVoir = true; renderBulle() })
+  zone.querySelectorAll('[data-type]').forEach(b => b.addEventListener('click', () => {
+    etat.typeOuvert = etat.typeOuvert === b.dataset.type ? null : b.dataset.type
+    renderBulle()
+  }))
+}
+
 // MÊME UI QUE LE CALENDRIER. Ordinateur : le sélecteur vit dans l'angle de la
 // bande (puce aux miniatures empilées + menu « Afficher » / « Tout
 // afficher ») ; téléphone : des bulles photo au-dessus des dates.
@@ -586,7 +704,7 @@ async function init () {
       estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
     ].filter(Boolean)
   })
-  HSNav.render({ peutLire })
+  majBadge()
   if (!peutLire('menages')) {
     $('[data-bind="etat-vide"]').hidden = false
     $('[data-bind="etat-vide"]').innerHTML = `<p class="muted">${esc(t('menages.no_access'))}</p>`
@@ -608,7 +726,7 @@ async function init () {
   // calendrier : angle à l'ordinateur, bulles au téléphone).
   let large = estLarge()
   window.addEventListener('resize', () => {
-    if (estLarge() !== large) { large = estLarge(); renderTout() }
+    if (estLarge() !== large) { large = estLarge(); renderTout(); renderBulle() }
   })
   // L'en-tête collant suit le défilement horizontal du calendrier (téléphone).
   const scrollEl = $('[data-bind="planning"]')
@@ -619,7 +737,7 @@ async function init () {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && toISO(new Date()) !== jourVu) location.reload()
   })
-  await charger()
+  await Promise.all([charger(), chargerATraiter()])
 }
 init().catch(e => logger.error('Menages', e.message, e))
 

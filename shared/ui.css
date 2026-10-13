@@ -623,6 +623,27 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-entete .h2 { flex: 1; margin: 0; }
 .men-nav { flex-wrap: wrap; }
 .men-avis { padding: 12px 16px; color: var(--warn); }
+
+/* « À traiter » : le SEUL moment ambre de l'écran (spec §3.1). */
+.men-bulle { background: var(--amber-soft); border-radius: 20px; padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 10px; }
+.men-bulle--calme { flex-direction: row; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 12px 16px; font-size: var(--fs-small); }
+.men-bulle--muette { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 12px 16px; }
+.men-bulle__tete { display: flex; align-items: center; gap: 10px; }
+.men-bulle__tete .h2 { margin: 0; font-size: 17px; }
+.men-atrs { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 8px; }
+.men-atr { display: flex; align-items: center; gap: 10px; background: var(--surface); border-radius: var(--radius-card); padding: 8px 12px; min-width: 0; }
+.men-atr__texte { display: flex; flex-direction: column; min-width: 0; }
+.men-atr__texte b { font-size: var(--fs-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.men-atr__photo { width: 36px; height: 36px; border-radius: 10px; }
+.men-atr__photo .icon { width: 16px; height: 16px; }
+/* L'icône du type porte le SENS ; la couleur ne vient qu'en renfort. */
+.men-atr__type { display: inline-flex; flex: none; color: var(--danger); }
+.men-atr__type--non_assigne { color: var(--muted); }
+.men-atr__type--ok { color: var(--ok); }
+.men-cpts { display: flex; flex-wrap: wrap; gap: 8px; }
+.men-cpt { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--surface); cursor: pointer; font-family: inherit; color: var(--ink); font-size: var(--fs-small); font-weight: var(--fw-bold); }
+.men-cpt--ouvert { border-color: var(--ink); }
+.men-cpt .icon { width: 16px; height: 16px; }
 .men-vide { padding: 30px 0; }
 
 /* La bande des dates : le composant du calendrier, dans un porteur COLLANT

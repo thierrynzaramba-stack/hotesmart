@@ -85,6 +85,12 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
     'biens masqués persistés par compte': 'hs_menages_v5_prefs',
     'le sélecteur en MOIS du calendrier (recette 13/10)': 'data-mois="12"',
     'au-delà de 92 jours, lecture par TRANCHES fusionnées': 'TRANCHE_MAX',
+    'bulle « À traiter » : le module partagé décide, la page peint (étape 2)': 'lignesATraiter',
+    'la bulle a sa PROPRE fenêtre J−30 → J+30, pas celle du planning': 'chargerATraiter',
+    'badge ambre de l\'onglet Ménages = les lignes de la bulle': 'menagesATraiter',
+    'une bulle qui n\'a pas pu lire se TAIT, elle n\'annonce pas le calme': 'menages.atraiter_panne',
+    'rien à traiter : une ligne blanche à coche verte, sans ambre': 'men-bulle--calme',
+    'téléphone : compteurs seuls, un appui ouvre la liste du type': 'typeOuvert',
     'X-Compte sur chaque appel': 'enteteCompte()',
     'entrée sous menages:read, erreur 403 dite': 'menages.no_access'
   }
