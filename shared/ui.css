@@ -647,7 +647,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-regler { color: var(--muted); display: inline-flex; flex: none; }
 .men-regler .icon { width: 14px; height: 14px; }
 
-.men-lane { position: relative; display: grid; grid-template-columns: repeat(14, minmax(var(--men-case, 0px), 1fr)); align-items: center; min-height: 44px; }
+.men-lane { position: relative; display: grid; grid-template-columns: repeat(14, minmax(var(--men-case, 0px), 1fr)); align-items: center; min-height: 44px;
+  /* Traits verticaux entre les jours (demande de Thierry, recette étape 1) :
+     un filet par frontière de colonne, DERRIÈRE les barres et pastilles. */
+  background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(100% / 14 - 1px), var(--line) calc(100% / 14 - 1px), var(--line) calc(100% / 14)); }
 .men-lane > * { grid-row: 1; }
 .men-barre { height: 30px; margin: 0 2px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
 .men-barre--off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 5px, var(--surface) 5px 10px); border: 1px dashed var(--border); }
