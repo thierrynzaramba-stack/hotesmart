@@ -190,13 +190,19 @@ module.exports = async function handler (req, res) {
     // la remplace par du vide — et la prestataire perd « le code a change ».
     // Best-effort : sans note, l'ecran reste juste (champ vide, visible).
     const notes = {}
+    let notesLues = true
     if ((menagesRows || []).length) {
       const { data: notesRows, error: eN } = await supabase.from('menage_comments')
         .select('booking_id, departure_date, comment')
         .eq('user_id', userId)
         .in('booking_id', [...new Set(menagesRows.map(m => String(m.booking_id)))])
         .limit(LOT_MENAGES)
-      if (eN) console.error('[garde] lecture notes echec', eN.message)
+      // ⚠ UNE NOTE ILLISIBLE SE DIT. « Best-effort » n'allait pas ici : la
+      // fiche ouvre un champ pre-rempli, donc un champ vide sur une consigne
+      // existante se fait ECRASER au premier enregistrement. L'ecran coupe le
+      // champ et le dit (revue de 6822e47).
+      if (eN) { console.error('[garde] lecture notes echec', eN.message); notesLues = false }
+      if ((notesRows || []).length >= LOT_MENAGES) notesLues = false
       for (const n of (notesRows || [])) {
         notes[`${String(n.booking_id)}|${String(n.departure_date).slice(0, 10)}`] = n.comment || ''
       }
@@ -458,6 +464,7 @@ module.exports = async function handler (req, res) {
       // L'ecran le DIT a l'hote : mieux vaut « liste incomplete » qu'un jour
       // paisible qui cache un menage sans personne.
       tronque: tronqueBiens || (menagesRows || []).length >= LOT_MENAGES || tronqueFaits,
+      notes_lues: notesLues,
       // Les trous BRUTS, tels que la brique les rend — y compris les jours sans
       // ménage. L'écran ne met en rouge que ceux qui portent un ménage (§12.6),
       // mais il doit pouvoir montrer les autres en gris : c'est ce qui permet de

@@ -431,5 +431,8 @@
   "menages.note_non_transmise": "Note enregistrée — non transmise à la prestataire.",
   "menages.tt_tour": "Proposé à {noms}",
   "menages.tt_expire": "réponse attendue avant le {quand}",
-  "menages.retour_prive": "retour privé"
+  "menages.retour_prive": "retour privé",
+  "menages.note_effacee": "Note effacée.",
+  "menages.note_illisible": "Les consignes ne sont pas lisibles pour l'instant — n'écrivez pas, vous effaceriez la précédente.",
+  "menages.menage_n": "Ménage {n}"
 }

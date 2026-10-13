@@ -3780,3 +3780,32 @@ elle qui a marqué ? », que la fiche dit en toutes lettres.
 
 Tests : `tests/menages-note.test.js` (12) et la section « étape 3 » de
 `tests/garde-endpoint.test.js` (5).
+
+**Constats de la revue (6822e47).** Le plus grave n'était visible par aucun
+test : la fiche appelait `heureParis`, **fonction supprimée d'un nettoyage
+précédent**. Elle s'ouvrait VIDE au clic sur un ménage proposé — la pastille
+la plus fréquente — parce que l'erreur survenait avant toute écriture dans le
+DOM. D'où `tests/pages-v5-identifiants.test.js` : *aucune fonction appelée
+n'est inconnue*, sur les pages V5. Il rougit sur ce bug précis
+(contre-épreuve faite), et il attrape la classe entière.
+
+Les autres :
+- **La note ne part plus à toute l'équipe du bien** mais à qui est SUR ce
+  ménage (porteuse + proposées) ; à l'équipe seulement si personne n'est
+  encore dessus. L'événement `note` est exempté du filtre d'appartenance côté
+  PWA : envoyé à tous, il montrait le nom du voyageur et les bornes du séjour
+  à une prestataire qui n'a pas ce ménage. Défaut **repris de l'ancien écran**,
+  fermé ici.
+- Un séjour **annulé** refuse la note, comme il refuse « fait ».
+- `charger()` après une note (et non `chargerATraiter` seul) : sans lui,
+  rouvrir la fiche réaffichait l'ANCIENNE note, et un second enregistrement
+  l'aurait réécrite par-dessus la nouvelle.
+- **Une note illisible se DIT** (`notes_lues: false`) et le champ ne s'ouvre
+  pas : un champ vide sur une consigne existante se fait écraser au premier
+  enregistrement. « Best-effort » n'allait pas pour cette lecture-là.
+- Effacer dit « effacée », plus « transmise ».
+- La pastille chiffrée donne accès à **chaque** ménage du jour (bascule) :
+  le second n'avait aucune fiche, alors que l'ancien écran les listait.
+- Un seul envoi par clic (le fil est un INSERT : deux clics envoyaient la
+  consigne deux fois) ; `.men-case` devenu bouton a sa remise à zéro CSS ;
+  `.men-fiche` passe après `.men-volet` pour que son z-index s'applique.

@@ -166,7 +166,9 @@ const etat = {
   equipe: null,         // [{id, prenom, nom, actif, aRegler, biens, retours}] — null = pas encore lu
   equipeAvecAvis: false,
   equipePersonnes: true, // faux = pas le droit de voir QUI compose l'équipe
-  fiche: null           // le ménage ouvert dans la fiche
+  fiche: null,          // le ménage ouvert dans la fiche
+  ficheVoisins: null,   // les autres ménages du même jour, s'il y en a
+  notesLues: true       // faux = les consignes n'ont pas pu être lues
 }
 // ⚠ Une clé PAR COMPTE : la page est délégable, et une ref provider masquée
 // sur un compte ne doit pas faire disparaître le bien homonyme d'un autre
@@ -308,6 +310,7 @@ async function charger () {
     etat.biens = d0.biens || []
     etat.garde = [...gardeParBien.values()]
     etat.menages = reponses.flatMap(r => r.menages || [])
+    etat.notesLues = reponses.every(r => r.notes_lues !== false)
     etat.avecNoms = !!d0.avec_noms
     etat.avecAvis = !!d0.avec_avis
     etat.tronque = reponses.some(r => !!r.tronque)
@@ -536,10 +539,12 @@ function renderTout () {
   // Le clic sur une pastille ouvre la fiche du ménage qu'elle représente.
   cal.querySelectorAll('[data-fiche]').forEach(b => b.addEventListener('click', () => {
     const bien = etat.biens.find(x => String(x.id) === String(b.dataset.ficheBien))
-    const m = etat.menages.find(x => String(x.bookingId) === String(b.dataset.fiche) &&
-                                     String(x.propertyId) === String(b.dataset.ficheBien) &&
-                                     String(x.date) === String(b.dataset.ficheDate))
-    if (bien && m) ouvrirFiche(m, bien)
+    if (!bien) return
+    const ids = String(b.dataset.fiche).split('~')
+    const ms = ids.map(id => etat.menages.find(x => String(x.bookingId) === id &&
+      String(x.propertyId) === String(b.dataset.ficheBien) &&
+      String(x.date) === String(b.dataset.ficheDate))).filter(Boolean)
+    if (ms.length) ouvrirFiche(ms[0], bien, ms)
   }))
   renderBulles()
 }
@@ -592,8 +597,11 @@ function renderLignes (bien, g, menagesDuBien, trous) {
         ? `<span class="men-mk__retour${m.retour.verdict === 'remarque' ? ' men-mk__retour--mauvais' : ''}" title="${esc(t(m.retour.verdict === 'remarque' ? 'menages.retour_mauvais' : 'menages.retour_bon'))}">${icone(m.retour.verdict === 'remarque' ? 'i-thumb-down' : 'i-thumb-up')}</span>` : ''
       const n = ms.length > 1 ? `<span class="men-mk__n">${ms.length}</span>` : ''
       const titres = ms.map(infobulle).join('\n—\n')
+      // ⚠ TOUS LES MENAGES DE LA CASE sont atteignables : la pastille affiche
+      // le plus grave, mais s'il y en a deux, le second doit aussi avoir sa
+      // fiche — l'ancien écran, que ce lot remplace, les listait tous les deux.
       return `<button type="button" class="men-case" style="grid-column: ${i + 1}" title="${esc(titres)}"
-        data-fiche="${esc(m.bookingId)}" data-fiche-bien="${esc(bien.id)}" data-fiche-date="${esc(iso)}">
+        data-fiche="${esc(ms.map(x => x.bookingId).join('~'))}" data-fiche-bien="${esc(bien.id)}" data-fiche-date="${esc(iso)}">
         <span class="men-mk ${CLASSE_MK[e]}">${icone(ICONE_MK[e])}${retour}${n}</span>
       </button>`
     }).join('')
@@ -639,8 +647,9 @@ function frise (m) {
       ? `<p class="caption muted" style="margin: 6px 0 0" data-i18n="menages.fait_par_hote"></p>` : '')
 }
 
-function ouvrirFiche (m, bien) {
+function ouvrirFiche (m, bien, voisins = null) {
   etat.fiche = { ...m, bienNom: bien.name, bienId: String(bien.id) }
+  etat.ficheVoisins = (voisins && voisins.length > 1) ? { bien, liste: voisins } : null
   $('[data-bind="fiche-titre"]').textContent = `${bien.name} · ${dateLongue(m.date)}`
   $('[data-bind="fiche"]').hidden = false
   $('[data-bind="voile"]').hidden = false
@@ -671,18 +680,30 @@ function renderFiche () {
        </p>${m.retour.extrait ? `<p class="caption men-fiche__extrait">« ${esc(m.retour.extrait)} »</p>` : ''}`
     : ''
 
+  // Deux ménages le même jour : on passe de l'un à l'autre.
+  const v = etat.ficheVoisins
+  const bascule = v
+    ? `<div class="row" style="gap: 6px; padding-bottom: 10px; flex-wrap: wrap">${v.liste.map((x, i) =>
+        `<button type="button" class="btn btn--secondary men-fiche__presta" data-voisin="${i}"
+           aria-pressed="${String(x.bookingId) === String(m.bookingId)}">${esc(t('menages.menage_n', { n: i + 1 }))}</button>`).join('')}</div>`
+    : ''
+
   corps.innerHTML = `
+    ${bascule}
     ${frise(m)}
     <div class="men-fiche__bloc">
       <p class="caption muted" style="margin: 0 0 4px" data-i18n="menages.fiche_qui"></p>
       <p style="margin: 0; font-weight: var(--fw-semibold)">${esc(qui || t('menages.sans_presta'))}</p>
       ${tour.length ? `<p class="caption muted" style="margin: 4px 0 0">${esc(
         t('menages.tt_tour', { noms: tour.map(p => nomOu(p, 'menages.quelquun')).join(', ') }))}${
-        m.expireLe ? ' · ' + esc(t('menages.tt_expire', { quand: heureParis(m.expireLe) })) : ''}</p>` : ''}
+        m.expireLe ? ' · ' + esc(t('menages.tt_expire', { quand: heureIntl(m.expireLe) })) : ''}</p>` : ''}
       ${m.raison ? `<p class="caption muted" style="margin: 4px 0 0">${esc(m.raison)}</p>` : ''}
     </div>
     ${retour ? `<div class="men-fiche__bloc">${retour}</div>` : ''}
-    ${peutEcrire('menages') ? `<div class="men-fiche__bloc">
+    ${peutEcrire('menages') && etat.notesLues === false ? `<div class="men-fiche__bloc">
+      <p class="caption muted" style="margin: 0" data-i18n="menages.note_illisible"></p>
+    </div>` : ''}
+    ${peutEcrire('menages') && etat.notesLues !== false ? `<div class="men-fiche__bloc">
       <label class="caption muted" for="f-note" data-i18n="menages.note_titre"></label>
       <textarea id="f-note" class="men-fiche__note" rows="3" maxlength="2000"
         data-i18n-attr="placeholder:menages.note_aide">${esc(m.note || '')}</textarea>
@@ -697,6 +718,10 @@ function renderFiche () {
     </div>` : ''}`
   I18n.apply(corps)
 
+  corps.querySelectorAll('[data-voisin]').forEach(b => b.addEventListener('click', () => {
+    const x = etat.ficheVoisins.liste[Number(b.dataset.voisin)]
+    if (x) ouvrirFiche(x, etat.ficheVoisins.bien, etat.ficheVoisins.liste)
+  }))
   const save = corps.querySelector('[data-note-save]')
   if (save) save.addEventListener('click', () => enregistrerNote(corps))
   const zone = corps.querySelector('[data-fiche-presta]')
@@ -727,16 +752,30 @@ function renderFiche () {
 async function enregistrerNote (corps) {
   const m = etat.fiche
   const etatEl = corps.querySelector('[data-note-etat]')
+  const bouton = corps.querySelector('[data-note-save]')
   const texte = corps.querySelector('#f-note').value
   etatEl.textContent = ''
+  // ⚠ UN SEUL ENVOI : l'upsert de la note est idempotent, mais le fil est un
+  // INSERT — deux clics envoyaient la même consigne DEUX FOIS à la prestataire.
+  if (bouton.disabled) return
+  bouton.disabled = true
   let r
   try {
     r = await poster('/api/menages', { action: 'note', property_id: m.bienId,
                                        booking_id: m.bookingId, departure_date: m.date, texte })
-  } catch (e) { etatEl.textContent = e.message || t('menages.geste_echec'); return }
+  } catch (e) { etatEl.textContent = e.message || t('menages.geste_echec'); bouton.disabled = false; return }
+  finally { if (bouton) bouton.disabled = false }
   etat.fiche.note = texte.trim()
-  etatEl.textContent = r.transmise ? t('menages.note_ok') : t('menages.note_non_transmise')
-  await chargerATraiter()
+  // ⚠ `vide` : effacer n'est pas transmettre. Dire « transmise » sur un
+  // retrait ferait croire que la consigne a disparu partout — elle reste dans
+  // le fil de la prestataire tant qu'elle ne l'a pas lue.
+  etatEl.textContent = r.vide ? t('menages.note_effacee')
+    : (r.transmise ? t('menages.note_ok') : t('menages.note_non_transmise'))
+  // ⚠ `rafraichir`, PAS `chargerATraiter` : la note vit dans `etat.menages`,
+  // que seul `charger()` remplit. Sans lui, rouvrir la fiche réaffichait
+  // l'ANCIENNE note — et un second enregistrement l'aurait réécrite par-dessus
+  // la nouvelle (revue de 6822e47).
+  await rafraichir()
 }
 
 // ─── Volet « Équipe ménage » ────────────────────────────────────────────────

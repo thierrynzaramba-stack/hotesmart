@@ -572,6 +572,11 @@ async function ecrireNote (req, res) {
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
   if (!men) return res.status(404).json({ error: 'Ménage introuvable' })
+  // ⚠ LA MEME GARDE QUE `marquerDepuisLHote` : `api/garde.js` ecarte les
+  // menages annules, donc une note posee sur l'un d'eux ne reviendrait dans
+  // aucune fiche — indelebile depuis l'ecran — et partirait quand meme dans le
+  // fil de la prestataire, pour un sejour qui n'existe plus.
+  if (men.status === 'cancelled') return res.status(409).json({ error: 'Ce séjour est annulé' })
 
   const { error: eUp } = await supabase.from('menage_comments').upsert({
     user_id: userId,
@@ -603,9 +608,37 @@ async function ecrireNote (req, res) {
   // ⚠ `property_ids` VIDE = TOUS LES BIENS (convention de `public_tokens`,
   // l'inverse de `profile_permissions`) : la confondre priverait de la note
   // les prestataires qui couvrent tout le parc.
-  const vises = (jetons || []).filter(j =>
+  const duBien = (jetons || []).filter(j =>
     !Array.isArray(j.property_ids) || !j.property_ids.length ||
     j.property_ids.map(String).includes(String(property_id)))
+
+  // ⚠ LA NOTE NE PART QU'A QUI EST CONCERNE PAR CE MENAGE. L'ancien ecran
+  // l'envoyait a TOUS les jetons du bien, et l'evenement `note` est exempte du
+  // filtre d'appartenance cote PWA : une prestataire qui n'a pas ce menage
+  // lisait le nom du voyageur et les deux bornes de son sejour. Repris tel
+  // quel, ce serait la fuite que `api/menages-public.js` a fermee pour tous
+  // les autres types d'evenement (revue de 6822e47).
+  // Si PERSONNE n'est encore sur le menage, la note part a l'equipe du bien :
+  // c'est le cas ou l'hote prepare une consigne avant d'avoir assigne.
+  const { data: ligne } = await supabase.from('menages')
+    .select('provider_id, proposee_a').eq('user_id', userId)
+    .eq('property_id', String(property_id)).eq('booking_id', String(booking_id))
+    .eq('departure_date', departure_date).maybeSingle()
+  const concernees = new Set([
+    ...(ligne && ligne.provider_id ? [String(ligne.provider_id)] : []),
+    ...((ligne && Array.isArray(ligne.proposee_a)) ? ligne.proposee_a.map(String) : [])
+  ])
+  let vises = duBien
+  if (concernees.size) {
+    const { data: profs } = await supabase.from('profiles')
+      .select('id, pwa_token').eq('account_user_id', userId).eq('access_mode', 'lien')
+      .in('id', [...concernees])
+    const leurs = new Set((profs || []).map(p => String(p.pwa_token)).filter(Boolean))
+    // Un jeton introuvable (profil sans lien) ne doit pas elargir l'envoi :
+    // on retombe sur l'equipe du bien seulement si AUCUN jeton n'est resolu.
+    const filtres = duBien.filter(j => leurs.has(String(j.token)))
+    if (filtres.length) vises = filtres
+  }
   if (!vises.length) return res.status(200).json({ ok: true, transmise: false })
 
   // Le contenu du fil vient du COEUR : nom du bien et voyageur lus ici.

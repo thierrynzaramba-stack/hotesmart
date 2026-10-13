@@ -431,5 +431,8 @@
   "menages.note_non_transmise": "Nota guardada: no enviada a la persona de limpieza.",
   "menages.tt_tour": "Propuesto a {noms}",
   "menages.tt_expire": "respuesta esperada antes del {quand}",
-  "menages.retour_prive": "comentario privado"
+  "menages.retour_prive": "comentario privado",
+  "menages.note_effacee": "Nota borrada.",
+  "menages.note_illisible": "Las notas no se pueden leer ahora: no escribas, borrarías la anterior.",
+  "menages.menage_n": "Limpieza {n}"
 }

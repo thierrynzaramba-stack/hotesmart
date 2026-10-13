@@ -30,6 +30,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      menage = { status: 'accepted' },
                      jetons = [{ token: 'tok-r', property_ids: [] }],
                      erreurJetons = null, erreurEvents = null, erreurUpsert = null,
+                     profilsJetons = [],
                      snapshot = { firstName: 'Sofia', lastName: 'Garcia', arrival: '2026-10-07' },
                      bien = { name: 'La bulle' } } = {}) {
   const etat = { notes: [], events: [], lectures: [] }
@@ -51,6 +52,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         maybeSingle () {
           if (table === 'profiles') return Promise.resolve({ data: profil, error: null })
           if (table === 'profile_permissions') return Promise.resolve({ data: permissions, error: null })
+          if (table === 'profiles' && a.f.access_mode === 'lien') return Promise.resolve({ data: profilsJetons, error: null })
           if (table === 'menages') {
             // Les filtres sont HONORÉS : `.eq('user_id')` est la seule garde
             // inter-comptes pour un titulaire (son périmètre vaut `null`).
@@ -65,6 +67,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
           if (table === 'public_tokens') {
             return Promise.resolve({ data: erreurJetons ? null : jetons, error: erreurJetons }).then(ok)
           }
+          if (table === 'profiles') return Promise.resolve({ data: profilsJetons, error: null }).then(ok)
           return Promise.resolve({ data: [], error: null }).then(ok)
         }
       }
@@ -226,4 +229,57 @@ test('une panne d\'écriture de la note : 500, et rien n\'est transmis', async (
   await handler(post(corps()), res)
   assert.strictEqual(res.code, 500)
   assert.strictEqual(etat.events.length, 0)
+})
+
+// ─── Constats de la revue de 6822e47 ───────────────────────────────────────
+
+test('un séjour ANNULÉ refuse la note, comme il refuse « fait »', async () => {
+  // `api/garde.js` écarte les ménages annulés : une note posée sur l'un d'eux
+  // ne reviendrait dans aucune fiche — indélébile depuis l'écran — et partirait
+  // quand même dans le fil, pour un séjour qui n'existe plus.
+  const { handler, etat } = preparer({ menage: { status: 'cancelled' } })
+  const res = reponse()
+  await handler(post(corps()), res)
+  assert.strictEqual(res.code, 409)
+  assert.strictEqual(etat.notes.length, 0)
+})
+
+test('LA NOTE NE PART QU\'À QUI EST SUR CE MÉNAGE, pas à toute l\'équipe du bien', async () => {
+  // L'événement `note` est exempté du filtre d'appartenance côté PWA : envoyé
+  // à tous les jetons du bien, il montrait le nom du voyageur et les bornes du
+  // séjour à une prestataire qui n'a pas ce ménage.
+  const { handler, etat } = preparer({
+    menage: { status: 'accepted', provider_id: 'p-marie', proposee_a: null },
+    jetons: [{ token: 'tok-marie', property_ids: [] }, { token: 'tok-autre', property_ids: [] }],
+    profilsJetons: [{ id: 'p-marie', pwa_token: 'tok-marie' }]
+  })
+  const res = reponse()
+  await handler(post(corps()), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.events.length, 1, 'une seule prestataire prévenue')
+  assert.strictEqual(etat.events[0].token, 'tok-marie')
+})
+
+test('... et les PROPOSÉES du tour la reçoivent aussi', async () => {
+  const { handler, etat } = preparer({
+    menage: { status: 'unassigned', provider_id: null, proposee_a: ['p-a', 'p-b'] },
+    jetons: [{ token: 'tok-a', property_ids: [] }, { token: 'tok-b', property_ids: [] },
+             { token: 'tok-c', property_ids: [] }],
+    profilsJetons: [{ id: 'p-a', pwa_token: 'tok-a' }, { id: 'p-b', pwa_token: 'tok-b' }]
+  })
+  const res = reponse()
+  await handler(post(corps()), res)
+  assert.deepStrictEqual(etat.events.map(e => e.token).sort(), ['tok-a', 'tok-b'])
+})
+
+test('si PERSONNE n\'est encore dessus, la note part à l\'équipe du bien', async () => {
+  // Le cas où l'hôte prépare une consigne avant d'avoir assigné : la taire
+  // ferait perdre l'information à tout le monde.
+  const { handler, etat } = preparer({
+    menage: { status: 'unassigned', provider_id: null, proposee_a: null },
+    jetons: [{ token: 'tok-a', property_ids: [] }, { token: 'tok-b', property_ids: [] }]
+  })
+  const res = reponse()
+  await handler(post(corps()), res)
+  assert.strictEqual(etat.events.length, 2)
 })

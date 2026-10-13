@@ -431,5 +431,8 @@
   "menages.note_non_transmise": "Note saved — not sent to the cleaner.",
   "menages.tt_tour": "Offered to {noms}",
   "menages.tt_expire": "answer expected by {quand}",
-  "menages.retour_prive": "private feedback"
+  "menages.retour_prive": "private feedback",
+  "menages.note_effacee": "Note cleared.",
+  "menages.note_illisible": "Notes can't be read right now — don't write, you would erase the previous one.",
+  "menages.menage_n": "Cleaning {n}"
 }
