@@ -638,6 +638,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-atr__texte { display: flex; flex-direction: column; min-width: 0; }
 .men-atr__texte b { font-size: var(--fs-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .men-atr__photo { width: 36px; height: 36px; border-radius: 10px; }
+.men-atr__ini { font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted); }
 .men-atr__photo .icon { width: 16px; height: 16px; }
 /* L'icône du type porte le SENS ; la couleur ne vient qu'en renfort. */
 .men-atr__type { display: inline-flex; flex: none; color: var(--danger); }
@@ -650,11 +651,6 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-choix { position: absolute; top: calc(100% + 4px); inset-inline-end: 8px; z-index: 40; min-width: 180px; max-height: 50vh; overflow-y: auto; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); }
 .men-choix button { display: block; width: 100%; text-align: start; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--ink); font-family: inherit; font-size: var(--fs-small); }
 .men-choix button:hover { background: var(--surface-2); }
-.men-cpts { display: flex; flex-wrap: wrap; gap: 8px; }
-.men-cpt { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--surface); cursor: pointer; font-family: inherit; color: var(--ink); font-size: var(--fs-small); font-weight: var(--fw-medium); }
-.men-cpt b { font-weight: var(--fw-black); }
-.men-cpt--ouvert { border-color: var(--ink); }
-.men-cpt .icon { width: 16px; height: 16px; }
 .men-vide { padding: 30px 0; }
 
 /* La bande des dates : le composant du calendrier, dans un porteur COLLANT

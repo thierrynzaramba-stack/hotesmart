@@ -90,7 +90,7 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
     'badge ambre de l\'onglet Ménages = les lignes de la bulle': 'menagesATraiter',
     'une bulle qui n\'a pas pu lire se TAIT, elle n\'annonce pas le calme': 'menages.atraiter_panne',
     'rien à traiter : une ligne blanche à coche verte, sans ambre': 'men-bulle--calme',
-    'téléphone : compteurs seuls, un appui ouvre la liste du type': 'typeOuvert',
+    'la miniature du bien reste, initiales à défaut de photo': 'men-atr__ini',
     'valider un ménage écrit sur le SERVEUR, writer partagé avec la PWA (D1)': 'validerMenage',
     'changer la prestataire depuis la bulle': 'ouvrirChangement',
     '« Annuler » rejoue l\'inverse RÉEL (defaire), pas un simple retrait visuel': "action: 'defaire'",

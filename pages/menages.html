@@ -105,7 +105,7 @@ import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVer
 import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
 import { bandeJoursHtml, classesWE as classesWEDuJour } from '/shared/bande-jours.js'
-import { lignesATraiter, comptesParType, TYPES } from '/shared/menages-a-traiter.js'
+import { lignesATraiter } from '/shared/menages-a-traiter.js'
 import { brancherReordonnancement } from '/shared/reordonner-biens.js'
 
 initErrorHandler()
@@ -133,8 +133,7 @@ const etat = {
   aTraiter: [],         // lignes de la bulle (fenêtre PROPRE : J−30 → J+30)
   aTraiterTronque: false,
   prestataires: [],     // annuaire pour « changer la prestataire » (vide sans le droit)
-  toutVoir: false,      // « Tout voir » déplié
-  typeOuvert: null      // téléphone : le type dont la liste est ouverte
+  toutVoir: false       // « Tout voir » déplié
 }
 // ⚠ Une clé PAR COMPTE : la page est délégable, et une ref provider masquée
 // sur un compte ne doit pas faire disparaître le bien homonyme d'un autre
@@ -659,11 +658,14 @@ function majBadge () {
 // une date, et devait deviner à l'icône POURQUOI elle était là. Le titre dit
 // désormais ce qui ne va pas ; le bien, la date et le prénom suivent.
 function ligneHtml (l) {
-  // ⚠ PAS DE PICTOGRAMME (recette du 13 octobre) : depuis que le titre dit le
-  // problème en toutes lettres, l'icône du type ne faisait que le répéter —
-  // et la maison de repli d'un bien sans photo ne disait rien du tout. La
-  // photo reste quand elle existe : elle, elle identifie le logement.
-  const photo = l.photo ? `<span class="cal-photo men-atr__photo"><img src="${esc(l.photo)}" alt="" loading="lazy"></span>` : ''
+  // ⚠ PAS DE PICTOGRAMME DE TYPE (recette du 13 octobre) : depuis que le titre
+  // dit le problème en toutes lettres, l'icône ne faisait que le répéter. La
+  // MINIATURE DU BIEN reste, elle : elle identifie le logement d'un coup
+  // d'œil. Sans photo, ses initiales — jamais une maison générique, qui ne
+  // distinguerait aucun bien d'un autre.
+  const photo = `<span class="cal-photo men-atr__photo">${l.photo
+    ? `<img src="${esc(l.photo)}" alt="" loading="lazy">`
+    : `<span class="men-atr__ini" aria-hidden="true">${esc(String(l.bienNom || '').trim().slice(0, 2).toUpperCase())}</span>`}</span>`
   const quand = l.type === 'sans_personnel'
     ? t('menages.n_jours', { n: l.nbJours })
     : dateCourte(l.date)
@@ -714,21 +716,11 @@ function renderBulle () {
     return
   }
   zone.className = 'men-bulle'
-  const comptes = comptesParType(lignes)
-  // ⚠ TÉLÉPHONE : LES COMPTEURS SEULS (spec §4), un appui ouvre la liste du
-  // type — huit lignes avant le calendrier le repousseraient hors de l'écran.
-  // Ordinateur : la liste, 8 lignes puis « Tout voir ».
-  const parType = etat.typeOuvert ? lignes.filter(l => l.type === etat.typeOuvert) : null
-  const visibles = parType || (estLarge() ? (etat.toutVoir ? lignes : lignes.slice(0, MAX_LIGNES)) : [])
-  const reste = parType ? 0 : lignes.length - visibles.length
-  const filtrees = visibles
-  // Les compteurs se nomment, eux aussi : un chiffre sous un dessin ne dit
-  // pas de quoi il est le compte.
-  const compteurs = TYPES.filter(ty => comptes[ty]).map(ty =>
-    `<button type="button" class="men-cpt${etat.typeOuvert === ty ? ' men-cpt--ouvert' : ''}" data-type="${esc(ty)}"
-       aria-pressed="${etat.typeOuvert === ty}" title="${esc(t('menages.type_' + ty))}">
-      <span>${esc(t('menages.court_' + ty))}</span><b>${comptes[ty]}</b>
-    </button>`).join('')
+  // ⚠ PLUS DE COMPTEURS PAR TYPE (recette du 13 octobre) : une rangée de
+  // chiffres au-dessus d'une liste qui dit déjà tout en toutes lettres ne
+  // faisait que répéter. La liste, partout, 8 lignes puis « Tout voir ».
+  const filtrees = etat.toutVoir ? lignes : lignes.slice(0, MAX_LIGNES)
+  const reste = lignes.length - filtrees.length
   zone.innerHTML = `
     <div class="men-bulle__tete">
       <h2 class="h2" id="h-atraiter" data-i18n="menages.atraiter"></h2>
@@ -736,16 +728,11 @@ function renderBulle () {
       <span class="caption muted" style="margin-inline-start: auto" data-i18n="menages.atraiter_fenetre"></span>
     </div>
     ${etat.aTraiterTronque ? `<p class="caption" style="margin: 0; color: var(--warn)" data-i18n="menages.atraiter_tronque"></p>` : ''}
-    <div class="men-cpts">${compteurs}</div>
     <div class="men-atrs">${filtrees.map(ligneHtml).join('')}</div>
-    ${reste > 0 && estLarge() ? `<button type="button" class="link small" data-tout-voir>${esc(t('menages.tout_voir', { n: reste }))}</button>` : ''}`
+    ${reste > 0 ? `<button type="button" class="link small" data-tout-voir>${esc(t('menages.tout_voir', { n: reste }))}</button>` : ''}`
   I18n.apply(zone)
   const tv = zone.querySelector('[data-tout-voir]')
   if (tv) tv.addEventListener('click', () => { etat.toutVoir = true; renderBulle() })
-  zone.querySelectorAll('[data-type]').forEach(b => b.addEventListener('click', () => {
-    etat.typeOuvert = etat.typeOuvert === b.dataset.type ? null : b.dataset.type
-    renderBulle()
-  }))
   // Les gestes : la ligne connaît SA donnée par son rang dans la liste rendue.
   zone.querySelectorAll('.men-atr').forEach((el, i) => {
     const l = filtrees[i]
@@ -873,10 +860,6 @@ async function init () {
   window.addEventListener('resize', () => {
     if (estLarge() !== large) {
       large = estLarge()
-      // Le filtre par type est un geste du TÉLÉPHONE : le garder en passant
-      // à l'ordinateur masquait les autres lignes sans « Tout voir » pour
-      // les ramener (revue de c197a10).
-      etat.typeOuvert = null
       renderTout(); renderBulle()
     }
   })
