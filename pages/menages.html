@@ -642,10 +642,6 @@ async function rafraichir () {
 }
 
 // ─── La bulle « À traiter » ─────────────────────────────────────────────────
-const ICONE_TYPE = {
-  sans_personnel: 'i-shield-off', non_assigne: 'i-circle-dashed',
-  non_pris: 'i-alert', non_termine: 'i-scheduled', mauvais_retour: 'i-thumb-down'
-}
 const MAX_LIGNES = 8
 
 // Le badge ambre de l'onglet Ménages = le nombre de lignes de la bulle.
@@ -663,14 +659,17 @@ function majBadge () {
 // une date, et devait deviner à l'icône POURQUOI elle était là. Le titre dit
 // désormais ce qui ne va pas ; le bien, la date et le prénom suivent.
 function ligneHtml (l) {
-  const photo = l.photo ? `<img src="${esc(l.photo)}" alt="" loading="lazy">` : icone('i-home')
+  // ⚠ PAS DE PICTOGRAMME (recette du 13 octobre) : depuis que le titre dit le
+  // problème en toutes lettres, l'icône du type ne faisait que le répéter —
+  // et la maison de repli d'un bien sans photo ne disait rien du tout. La
+  // photo reste quand elle existe : elle, elle identifie le logement.
+  const photo = l.photo ? `<span class="cal-photo men-atr__photo"><img src="${esc(l.photo)}" alt="" loading="lazy"></span>` : ''
   const quand = l.type === 'sans_personnel'
     ? t('menages.n_jours', { n: l.nbJours })
     : dateCourte(l.date)
   const qui = l.qui && l.qui.prenom ? ` · ${esc(l.qui.prenom)}` : ''
   return `<div class="men-atr">
-    <span class="men-atr__type men-atr__type--${esc(l.type)}" aria-hidden="true">${icone(ICONE_TYPE[l.type])}</span>
-    <span class="cal-photo men-atr__photo">${photo}</span>
+    ${photo}
     <span class="men-atr__texte">
       <b>${esc(t('menages.type_' + l.type))}</b>
       <span class="caption muted">${esc(l.bienNom)} · ${esc(quand)}${qui}</span>
@@ -723,10 +722,12 @@ function renderBulle () {
   const visibles = parType || (estLarge() ? (etat.toutVoir ? lignes : lignes.slice(0, MAX_LIGNES)) : [])
   const reste = parType ? 0 : lignes.length - visibles.length
   const filtrees = visibles
+  // Les compteurs se nomment, eux aussi : un chiffre sous un dessin ne dit
+  // pas de quoi il est le compte.
   const compteurs = TYPES.filter(ty => comptes[ty]).map(ty =>
     `<button type="button" class="men-cpt${etat.typeOuvert === ty ? ' men-cpt--ouvert' : ''}" data-type="${esc(ty)}"
-       aria-pressed="${etat.typeOuvert === ty}" title="${esc(t('menages.type_' + ty))}" aria-label="${esc(t('menages.type_' + ty))}">
-      <span class="men-atr__type men-atr__type--${esc(ty)}">${icone(ICONE_TYPE[ty])}</span><b>${comptes[ty]}</b>
+       aria-pressed="${etat.typeOuvert === ty}" title="${esc(t('menages.type_' + ty))}">
+      <span>${esc(t('menages.court_' + ty))}</span><b>${comptes[ty]}</b>
     </button>`).join('')
   zone.innerHTML = `
     <div class="men-bulle__tete">

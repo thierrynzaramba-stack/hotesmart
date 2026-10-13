@@ -410,5 +410,10 @@
   "menages.annuler": "Annuler",
   "menages.fait_ok": "Ménage validé — {bien}",
   "menages.change_ok": "Confié à {prenom}",
-  "menages.geste_echec": "Le geste n'a pas pu être enregistré."
+  "menages.geste_echec": "Le geste n'a pas pu être enregistré.",
+  "menages.court_sans_personnel": "Sans personne",
+  "menages.court_non_assigne": "Non assignés",
+  "menages.court_non_pris": "Sans réponse",
+  "menages.court_non_termine": "Non terminés",
+  "menages.court_mauvais_retour": "Mauvais retours"
 }

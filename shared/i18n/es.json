@@ -410,5 +410,10 @@
   "menages.annuler": "Deshacer",
   "menages.fait_ok": "Limpieza validada — {bien}",
   "menages.change_ok": "Asignado a {prenom}",
-  "menages.geste_echec": "No se pudo guardar la acción."
+  "menages.geste_echec": "No se pudo guardar la acción.",
+  "menages.court_sans_personnel": "Sin nadie",
+  "menages.court_non_assigne": "Sin asignar",
+  "menages.court_non_pris": "Sin respuesta",
+  "menages.court_non_termine": "Sin terminar",
+  "menages.court_mauvais_retour": "Malos comentarios"
 }

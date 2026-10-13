@@ -410,5 +410,10 @@
   "menages.annuler": "Undo",
   "menages.fait_ok": "Cleaning marked done — {bien}",
   "menages.change_ok": "Assigned to {prenom}",
-  "menages.geste_echec": "The action could not be saved."
+  "menages.geste_echec": "The action could not be saved.",
+  "menages.court_sans_personnel": "Nobody available",
+  "menages.court_non_assigne": "Unassigned",
+  "menages.court_non_pris": "No reply",
+  "menages.court_non_termine": "Not done",
+  "menages.court_mauvais_retour": "Bad feedback"
 }

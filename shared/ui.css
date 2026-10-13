@@ -651,7 +651,8 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-choix button { display: block; width: 100%; text-align: start; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--ink); font-family: inherit; font-size: var(--fs-small); }
 .men-choix button:hover { background: var(--surface-2); }
 .men-cpts { display: flex; flex-wrap: wrap; gap: 8px; }
-.men-cpt { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--surface); cursor: pointer; font-family: inherit; color: var(--ink); font-size: var(--fs-small); font-weight: var(--fw-bold); }
+.men-cpt { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 14px; border: 1px solid transparent; border-radius: var(--radius-pill); background: var(--surface); cursor: pointer; font-family: inherit; color: var(--ink); font-size: var(--fs-small); font-weight: var(--fw-medium); }
+.men-cpt b { font-weight: var(--fw-black); }
 .men-cpt--ouvert { border-color: var(--ink); }
 .men-cpt .icon { width: 16px; height: 16px; }
 .men-vide { padding: 30px 0; }
