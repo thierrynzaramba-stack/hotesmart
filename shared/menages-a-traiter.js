@@ -20,10 +20,21 @@ const RANG = Object.fromEntries(TYPES.map((t, i) => [t, i]))
 // Un « non pris » n'est une alerte que si personne ne peut plus le prendre,
 // ou si le départ est imminent (décision de Thierry, §13 / Q2) : une offre
 // qui court normalement n'est pas une alerte, c'est le fonctionnement normal.
-export const HEURES_IMMINENT = 48
+//
+// ⚠ L'IMMINENCE SE COMPTE EN JOURS, pas en heures d'horloge. « 48 h » mesuré
+// depuis un instant faisait apparaître l'alerte à 14 h (midi UTC moins deux
+// jours) : le matin de J−2 l'hôte ne voyait rien, l'après-midi si — et la
+// demi-journée perdue était celle où il regardait. Deux jours CALENDAIRES,
+// c'est ce que « moins de 48 h » veut dire pour qui lit l'écran, et c'est
+// insensible au fuseau (revue de c197a10).
+export const JOURS_IMMINENT = 2
 
-const jourDe = (iso) => new Date(String(iso).slice(0, 10) + 'T12:00:00Z')
-const heuresAvant = (iso, maintenant) => (jourDe(iso).getTime() - maintenant) / 3600000
+const cleJour = (iso) => String(iso).slice(0, 10)
+function jourPlus (iso, n) {
+  const d = new Date(cleJour(iso) + 'T12:00:00Z')
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
 
 // `garde` et `menages` sont ceux de /api/garde ; `biens` donne nom et photo.
 // `maintenant` est injecté (règle du dépôt : un test qui lit l'horloge prend
@@ -31,6 +42,13 @@ const heuresAvant = (iso, maintenant) => (jourDe(iso).getTime() - maintenant) / 
 export function lignesATraiter ({ biens = [], garde = [], menages = [],
                                   avecAvis = false, aujourdhui, maintenant = Date.now() } = {}) {
   const parBien = new Map(biens.map(b => [String(b.id), b]))
+  // ⚠ `gere: false` = AUCUNE prestataire liée à ce bien. Le moteur n'alerte
+  // jamais dessus (« alerter à chaque départ noierait les vraies alertes sous
+  // du bruit permanent », décision du 3 septembre 2026) : la bulle non plus.
+  // Un hôte qui fait ses ménages lui-même verrait sinon une ligne par départ,
+  // qu'il ne pourrait même pas solder — le writer de « fait » est la PWA.
+  // ⚠ ABSENCE de ligne `garde` ≠ `gere: false` : sans information, on alerte.
+  const nonConfie = new Set(garde.filter(g => g && g.gere === false).map(g => String(g.propertyId)))
   const lignes = []
   const ajouter = (type, bien, date, extra = {}) => {
     if (!bien) return   // un bien hors périmètre n'existe pas pour l'écran
@@ -48,17 +66,21 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
     ajouter('sans_personnel', parBien.get(String(g.propertyId)), jours[0], { nbJours: jours.length })
   }
 
+  const limiteImminente = jourPlus(aujourdhui, JOURS_IMMINENT)
   for (const m of menages) {
     const bien = parBien.get(String(m.propertyId))
     const passe = m.date < aujourdhui
     const tour = (m.proposeesA || []).filter(Boolean)
+    const confie = !nonConfie.has(String(m.propertyId))
 
     // ─── Non terminé : départ passé, jamais marqué fait ───────────────────
     if (passe) {
-      if (!m.fait) ajouter('non_termine', bien, m.date, { qui: m.porteur || null })
+      if (!m.fait && confie) ajouter('non_termine', bien, m.date, { qui: m.porteur || null })
       // ─── Mauvais retour : une remarque CONFIRMÉE sur un ménage fait ─────
       // (le serveur ne rend que les verdicts validés par un humain, et rien
       // du tout sans le droit `avis`.)
+      // ⚠ CELUI-CI VAUT AUSSI POUR UN BIEN NON CONFIÉ : ce n'est pas une
+      // alerte de couverture, c'est la parole d'un voyageur sur un séjour.
       if (avecAvis && m.retour && m.retour.verdict === 'remarque') {
         ajouter('mauvais_retour', bien, m.date, { qui: m.porteur || null, retour: m.retour })
       }
@@ -66,15 +88,27 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
     }
 
     // ─── À venir ──────────────────────────────────────────────────────────
+    if (!confie) continue                      // bien non confié : aucun bruit
     if (m.fait || m.porteur) continue          // quelqu'un s'en occupe
-    if (m.differe) continue                    // la proposition partira en temps voulu
     if (tour.length) {
-      // Proposé : alerte seulement si le départ est imminent (§13).
-      if (heuresAvant(m.date, maintenant) <= HEURES_IMMINENT) {
+      // Proposé : alerte si le départ est imminent, OU si l'offre est MORTE.
+      // ⚠ L'ÉCHÉANCE DÉPASSÉE COMPTE (§13 : « laissé expirer »). Le cron
+      // escalade normalement, mais une panne avalée l'a déjà empêché 24 h :
+      // sans ce test, une offre périmée sur un départ lointain laissait
+      // l'écran annoncer le calme (revue de c197a10).
+      const expiree = m.expireLe && Date.parse(m.expireLe) <= maintenant
+      if (m.date <= limiteImminente || expiree) {
         ajouter('non_pris', bien, m.date, { qui: tour[0], expireLe: m.expireLe || null })
       }
       continue
     }
+    // ⚠ `differe` NE SUFFIT PAS À SE TAIRE : le serveur le calcule sans
+    // regarder le statut, et un ménage REFUSÉ par tout le monde (`orphaned`,
+    // offres effacées, verrou `manual` — le moteur ne le reprendra pas) le
+    // porte aussi. Se fier à lui seul rendait le refus invisible jusqu'à
+    // J−7, alors que c'est exactement ce qui demande une décision humaine
+    // (§13 : « plus de preneur possible » ; revue de c197a10).
+    if (m.differe && m.status !== 'orphaned') continue
     ajouter('non_assigne', bien, m.date)
   }
 

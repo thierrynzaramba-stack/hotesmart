@@ -290,11 +290,20 @@ composants (décisions de Thierry) :
   de la période affichée (un hôte en vue 12 mois voit les mêmes alertes
   qu'en vue 1 mois).
 - **Ce qui entre** : jours sans aucune prestataire disponible (une ligne par
-  bien, avec le nombre de jours, biens non confiés exclus) ; ménage à venir
-  que personne ne porte ; proposition sans réponse à **moins de 48 h**
-  seulement (§13 : une offre qui court n'est pas une alerte) ; départ passé
-  non marqué fait ; remarque de propreté confirmée (sous `avis:read`).
-  Un ménage **différé** n'y entre jamais.
+  bien, avec le nombre de jours) ; ménage à venir que personne ne porte,
+  **refus compris** (`orphaned` : le moteur ne le reprendra pas, quelle que
+  soit la distance du départ) ; proposition sans réponse à **moins de deux
+  jours** du départ, ou dont l'**échéance est dépassée** (§13 : « plus de
+  preneur possible OU imminent » — une offre qui court n'est pas une
+  alerte) ; départ passé non marqué fait ; remarque de propreté confirmée
+  (sous `avis:read`). Un ménage **différé** n'y entre pas — sauf s'il a été
+  refusé.
+- **Les biens NON CONFIÉS ne produisent aucune alerte de couverture**
+  (décision du 3 septembre 2026, que le moteur applique déjà) : ni « sans
+  personnel », ni « non assigné », ni « non terminé » — un hôte qui fait ses
+  ménages lui-même n'a pas de badge ambre permanent, et ne pourrait pas les
+  solder (le writer de « fait » est la PWA). Un **mauvais retour** reste dit :
+  c'est la parole d'un voyageur, pas une alerte de couverture.
 - **Ce qui n'entre pas** : les jours à régler (§13), un ménage porté ou fait,
   un trou passé, un bien hors périmètre (ignoré, jamais rendu sans nom).
 - **Rendu** : ordinateur, liste deux colonnes, 8 lignes puis « Tout voir (n) » ;

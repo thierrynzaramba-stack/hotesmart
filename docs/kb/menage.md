@@ -3666,3 +3666,12 @@ confié ne produit aucun « sans personnel ». La bulle lit sa PROPRE fenêtre
 dit : on n'annonce jamais « rien à traiter » sur une erreur. Badge ambre de
 l'onglet Ménages alimenté par la page (les autres pages : décision de
 Thierry en attente, spec §15).
+
+**Trois trous fermés en revue (c197a10)**, tous dans la règle d'alerte :
+un ménage REFUSÉ (`orphaned`) porte `differe: true` côté serveur — se fier à
+ce seul drapeau le rendait invisible jusqu'à J−7, dans la bulle ET sur le
+planning (pastille blanche « à faire ») ; une offre dont l'échéance est
+dépassée n'alertait pas tant que le départ était lointain (vécu « erreur
+avalée, cron à 200 ») ; et un bien NON CONFIÉ produisait une ligne par
+départ, en permanence — le bruit que la décision du 3 septembre 2026 écarte.
+La règle lit donc `status` et `gere`, pas seulement `differe`.

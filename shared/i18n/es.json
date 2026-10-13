@@ -396,10 +396,11 @@
   "menages.atraiter_rien": "Nada que tratar en los próximos 30 días.",
   "menages.atraiter_panne": "La lista «por tratar» no está disponible ahora.",
   "menages.tout_voir": "Ver todo ({n})",
-  "menages.n_jours": "{n} días sin nadie",
+  "menages.n_jours": "{n, plural, one {# día sin nadie} other {# días sin nadie}}",
   "menages.type_sans_personnel": "Ninguna persona disponible",
   "menages.type_non_assigne": "Nadie en esta limpieza",
   "menages.type_non_pris": "Propuesta sin respuesta: salida inminente",
   "menages.type_non_termine": "Salida pasada, limpieza sin marcar",
-  "menages.type_mauvais_retour": "Mal comentario del viajero"
+  "menages.type_mauvais_retour": "Mal comentario del viajero",
+  "menages.atraiter_tronque": "Lista incompleta: pueden faltar alertas."
 }

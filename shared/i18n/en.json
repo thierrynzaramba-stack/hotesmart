@@ -396,10 +396,11 @@
   "menages.atraiter_rien": "Nothing to handle in the next 30 days.",
   "menages.atraiter_panne": "“To handle” list unavailable right now.",
   "menages.tout_voir": "See all ({n})",
-  "menages.n_jours": "{n} days with nobody",
+  "menages.n_jours": "{n, plural, one {# day with nobody} other {# days with nobody}}",
   "menages.type_sans_personnel": "No cleaner available",
   "menages.type_non_assigne": "Nobody on this cleaning",
   "menages.type_non_pris": "Offered, no reply — departure imminent",
   "menages.type_non_termine": "Past departure, cleaning not marked done",
-  "menages.type_mauvais_retour": "Bad guest feedback"
+  "menages.type_mauvais_retour": "Bad guest feedback",
+  "menages.atraiter_tronque": "Incomplete list — some alerts may be missing."
 }

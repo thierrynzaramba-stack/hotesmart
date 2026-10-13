@@ -147,3 +147,57 @@ test('comptesParType rend les cinq compteurs, zéros compris', async () => {
 test('rien à traiter : aucune ligne — la bulle saura se taire', async () => {
   assert.deepEqual(appeler({}), [])
 })
+
+// ─── Les trois trous trouvés en revue de c197a10 ────────────────────────────
+
+test('un ménage REFUSÉ par tout le monde alerte, même si le départ est loin', async () => {
+  // ⚠ LE CAS QUI MANQUAIT. Un refus efface la proposition et pose
+  // `assigned_by = 'manual'` : le moteur ne reprendra PAS ce ménage. Le
+  // serveur, lui, rend `differe: true` (pas de porteur, pas d'offre, un
+  // responsable existe ce jour-là) — un drapeau qui ne regarde pas le
+  // statut. Se fier à lui seul rendait le refus invisible jusqu'à J−7,
+  // alors que c'est exactement ce qui demande une décision humaine.
+  // Décision §13 / Q2 : « plus de preneur possible » OU « moins de 48 h ».
+  const l = appeler({ menages: [menage({ date: '2026-11-20', status: 'orphaned', differe: true })] })
+  assert.deepEqual(l.map(x => x.type), ['non_assigne'])
+})
+
+test('une offre EXPIRÉE alerte : personne ne la porte, et elle est morte', async () => {
+  // Vécu « erreur avalée, cron à 200 » : 24 h de panne d'escalade invisible.
+  // Tant que `proposee_a` reste renseigné, le départ lointain suffisait à
+  // taire l'alerte — l'écran annonçait le calme sur une offre périmée.
+  const l = appeler({ menages: [menage({ date: '2026-11-20', proposeesA: [REGINA],
+                                         expireLe: '2026-10-10T18:00:00Z' })] })
+  assert.deepEqual(l.map(x => x.type), ['non_pris'])
+})
+
+test('un bien NON CONFIÉ ne produit AUCUNE alerte de couverture (3 septembre 2026)', async () => {
+  // L'hôte qui fait ses ménages lui-même : le moteur n'alerte jamais sur ces
+  // biens (`aucuneLiaison`), et la bulle doit dire la même chose. Sinon :
+  // une ligne par départ, en permanence, et un badge ambre qui ne redescend
+  // jamais — le bruit que ce module existe pour éviter. Il ne pourrait même
+  // pas les solder : le writer de « fait » est la PWA de la prestataire.
+  const garde = [{ propertyId: '101', gere: false, jours: [] }]
+  const menages = [
+    menage({ bookingId: 'a', date: '2026-10-20' }),                      // à venir, personne
+    menage({ bookingId: 'b', date: '2026-10-10', porteur: null })        // passé, non fait
+  ]
+  assert.deepEqual(appeler({ garde, menages }), [])
+})
+
+test('... mais un MAUVAIS RETOUR d\'un bien non confié reste dit', async () => {
+  // Ce n'est pas une alerte de couverture : c'est la parole d'un voyageur
+  // sur un séjour. Elle vaut pour l'hôte même s'il a fait le ménage.
+  const garde = [{ propertyId: '101', gere: false, jours: [] }]
+  const m = menage({ date: '2026-10-10', fait: true,
+                     retour: { verdict: 'remarque', extrait: 'Poussière', prive: true } })
+  assert.deepEqual(appeler({ garde, menages: [m], avecAvis: true }).map(x => x.type), ['mauvais_retour'])
+})
+
+test('un bien SANS ligne de garde du tout reste traité (le serveur peut n\'en rendre aucune)', async () => {
+  // Absence d'information ≠ « non confié » : sans ligne `garde`, on ne peut
+  // pas conclure que le bien n'est confié à personne. On alerte donc, comme
+  // avant — c'est le `gere: false` EXPLICITE qui fait taire, lui seul.
+  const l = appeler({ menages: [menage({ date: '2026-10-20' })] })
+  assert.deepEqual(l.map(x => x.type), ['non_assigne'])
+})

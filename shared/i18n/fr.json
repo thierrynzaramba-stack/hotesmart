@@ -396,10 +396,11 @@
   "menages.atraiter_rien": "Rien à traiter sur les 30 prochains jours.",
   "menages.atraiter_panne": "Liste « à traiter » non lisible pour l'instant.",
   "menages.tout_voir": "Tout voir ({n})",
-  "menages.n_jours": "{n} jours sans personne",
+  "menages.n_jours": "{n, plural, one {# jour sans personne} other {# jours sans personne}}",
   "menages.type_sans_personnel": "Aucune prestataire disponible",
   "menages.type_non_assigne": "Personne sur ce ménage",
   "menages.type_non_pris": "Proposé, sans réponse — départ imminent",
   "menages.type_non_termine": "Départ passé, ménage non marqué fait",
-  "menages.type_mauvais_retour": "Mauvais retour du voyageur"
+  "menages.type_mauvais_retour": "Mauvais retour du voyageur",
+  "menages.atraiter_tronque": "Liste incomplète — certaines alertes peuvent manquer."
 }
