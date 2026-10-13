@@ -190,3 +190,52 @@ données, recette de Thierry, puis prod.
 Retraits proposés par cette spec, à valider par Thierry : compteurs « ménages cette semaine /
 effectués / restants » (remplacés par la bulle et les pastilles) ; vue en colonnes par jour
 (remplacée par le calendrier par bien) ; nom du voyageur sur la carte (déplacé dans la fiche).
+
+## 13. Décisions du design sur les parties E et F de l'inventaire (13 octobre 2026)
+
+Ces décisions FONT FOI sur les sections précédentes en cas de divergence.
+
+- **Q1 / étapes** : la fiche ménage affiche les trois étapes réellement
+  enregistrées — **Proposé → Pris → Fait** — avec date et heure
+  (`offered_at`, `accepted_at`, `menage_done.done_at`). La frise
+  Arrivée / Ménage / Photos et la pastille « En cours » (§3.2) sont
+  RETIRÉES ; elles deviennent un futur chantier PWA (backlog).
+- **Q2 / non pris** : définition de l'inventaire retenue ; un ménage porté
+  pendant qu'une proposition court est « pris » ; un différé n'entre jamais
+  dans la bulle. **Pastille rouge dès que le ménage n'est pas pris** ; la
+  bulle, elle, ne l'affiche que s'il n'y a **plus de preneur possible**
+  (tous les rangs ont refusé ou laissé expirer) OU si le départ est à
+  **moins de 48 h**. Une offre qui court normalement n'est pas une alerte.
+- **Q3 / retours** : « Mauvais retour » = verdict « remarque » confirmé par
+  un humain. Le **👍 positif est conservé** : un ménage fait porte un badge
+  vert si le retour est bon, rouge s'il est mauvais. Seuls les mauvais
+  retours entrent dans la bulle.
+- **Q4 / jours à régler** : engrenage gris sur la ligne de la prestataire,
+  jamais « € » ; clic → sa fiche, section des jours ; n'entre pas dans la
+  bulle.
+- **Note pour la prestataire** : la fiche ménage V5 la reconstruit à
+  l'identique (mêmes writers, même envoi, même message « non transmise »).
+  **Bloquant de l'étape 3.**
+- **Édition des gardes** : aucun nouvel écran dans ce lot ; les gardes se
+  règlent dans la fiche de chaque prestataire. Clic sur le prénom ou
+  l'avatar d'une ligne → fiche de la prestataire. « Assigner » sur
+  « Sans personnel » → liste des prestataires du compte, puis la fiche
+  choisie. Le bouton « Modifier les gardes » est RETIRÉ.
+- **Sans personnel** : exclut les biens sans aucune prestataire (décision du
+  3 septembre) — pas de rouge, le bloc du bien n'affiche aucune ligne.
+- **Sans `prestataires:read`** : avatars neutres numérotés (P1, P2), sans
+  prénom ; recherche par nom désactivée.
+- **Remplaçante** : le ménage apparaît sur la ligne de la remplaçante ; si
+  elle n'est pas assignée au bien, une **ligne temporaire** est ajoutée pour
+  la période.
+- **Deux ménages, même jour, même ligne** : une seule pastille avec « 2 » ;
+  clic → la liste.
+- **Noms longs** : nom du bien sur une ligne avec « … », complet au survol ;
+  prénom seul sur la ligne d'une prestataire.
+- **Boutons** : chaque bouton suit SON droit (« Fait » = `menages:write` ;
+  « Assigner / Réassigner » = `prestataires:write` ; « Voir » = `avis:read`) ;
+  non autorisé = absent du DOM, pas grisé.
+- **Recommandations de l'inventaire appliquées pour le reste** (E.4) :
+  liste incomplète (`tronque`) = bandeau visible comme l'ancien Planning ;
+  badge de navigation alimenté comme `pendingMessages` (précisé à
+  l'étape 2) ; détail du jour agrégé remplacé par la fiche ménage.

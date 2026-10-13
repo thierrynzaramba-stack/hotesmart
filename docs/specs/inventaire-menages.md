@@ -748,3 +748,38 @@ finira « Non assigné » dans la bulle (cas `bridees` du moteur).
 **Rien à voir avec l'argent** : l'icône « € » de la maquette serait un
 contresens — proposer une icône de réglage (engrenage), grise, avec
 l'infobulle « jours à régler dans sa fiche ».
+
+## G. Décisions du design (13 octobre 2026) — les ⚠ de E et F sont tranchés
+
+Reçues de Thierry, reportées aussi dans la spec (§13, qui fait foi) :
+
+1. **Q1** : étapes affichées = Proposé → Pris → Fait, avec date et heure.
+   « En cours », Arrivée, Photos : RETIRÉS, notés backlog PWA (futures
+   actions prestataire).
+2. **Q2** : mapping de l'inventaire retenu, avec deux précisions —
+   la **pastille** est rouge dès que le ménage n'est pas pris ; la **bulle**
+   ne montre un « non pris » que si plus aucun preneur n'est possible
+   (rangs épuisés) ou si le départ est à moins de 48 h.
+3. **Q3** : 👍 conservé — badge vert/rouge sur la pastille d'un ménage
+   fait ; seules les remarques confirmées entrent dans la bulle.
+4. **Q4** : engrenage gris, clic → fiche de la prestataire (section jours),
+   jamais dans la bulle.
+5. **E.1 note** : reconstruite à l'identique dans la fiche V5 — bloquant de
+   l'étape 3.
+6. **E.3 gardes** : pas de nouvel écran ; clic prénom/avatar → fiche
+   prestataire ; « Assigner » (Sans personnel) → liste des prestataires puis
+   fiche ; bouton « Modifier les gardes » retiré.
+7. **Sans personnel** : biens sans aucune liaison exclus (3 septembre) —
+   aucune ligne, pas de rouge.
+8. **Sans `prestataires:read`** : avatars neutres P1, P2…, recherche par nom
+   désactivée.
+9. **Remplaçante** : ménage sur SA ligne ; ligne temporaire si elle n'est
+   pas assignée au bien.
+10. **Deux ménages même jour même ligne** : une pastille chiffrée « 2 »,
+    clic → liste.
+11. **Noms longs** : bien sur une ligne avec « … » (complet au survol) ;
+    prénom seul pour une prestataire.
+12. **Boutons** : un droit par bouton, absent du DOM sinon.
+13. **Recommandations appliquées** (reste de E.4) : `tronque` → bandeau
+    visible ; badge nav → mécanique `pendingMessages`, précisée à
+    l'étape 2 ; détail du jour agrégé → remplacé par la fiche ménage.
