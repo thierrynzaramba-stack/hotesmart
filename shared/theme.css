@@ -31,6 +31,18 @@
   --canal-direct: #0E1726;   /* la réservation directe est à NOUS : bleu nuit */
   --on-canal: #FFFFFF;
 
+  /* Prestataires de ménage : pastels des barres de garde (page Ménages V5).
+     La couleur est STABLE par personne (hash sur l'identifiant, côté page) et
+     jamais seule : l'avatar porte toujours les initiales ou un numéro. */
+  --presta-1: #DDE4E6;
+  --presta-2: #EAE3EE;
+  --presta-3: #E3EADF;
+  --presta-4: #F1E6DA;
+  --presta-5: #E5E9F2;
+  --presta-6: #F0E2E4;
+  --presta-7: #E9EDDC;
+  --presta-8: #E2EAEA;
+
   /* Information neutre (« non lu », proposition en attente dans une liste) :
      JAMAIS pour une action — l'ambre dit « HôteSmart attend ta décision »,
      le bleu dit seulement « du nouveau » (spec lot 2 §3.2 et §6). */
@@ -83,6 +95,7 @@
 
   /* Ombres */
   --shadow-hover: 0 6px 20px rgba(0, 0, 0, .12);
+  --shadow-dot: 0 1px 3px rgba(0, 0, 0, .18);   /* pastilles du planning ménages */
 }
 
 /* Variante sombre : un bloc de variables, jamais un second fichier.

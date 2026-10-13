@@ -36,7 +36,8 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      liaisons = [], regles = [], exceptions = [], menages = [],
                      profils = [{ id: REGINA, first_name: 'Régina', active: true },
                                 { id: SECONDE, first_name: 'Marie', active: true }],
-                     erreurLiaisons = null, erreurBiens = null, avis = [], erreurAvis = null } = {}) {
+                     erreurLiaisons = null, erreurBiens = null, avis = [], erreurAvis = null,
+                     done = [], erreurDone = null } = {}) {
   const etat = { lectures: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -54,6 +55,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         if (table === 'menages') return { data: menages, error: null }
         if (table === 'profiles') return { data: profils, error: null }
         if (table === 'ota_reviews') return { data: erreurAvis ? null : avis, error: erreurAvis }
+        if (table === 'menage_done') return { data: erreurDone ? null : done, error: erreurDone }
         return { data: [], error: null }
       }
       const chain = {
@@ -1032,4 +1034,48 @@ test('le sous-menu de la reservation directe n existe QUE pour le titulaire', ()
   assert.deepStrictEqual(libelles, ['Liens', 'Paiements'])
   assert.match(bloc, /href="\/apps\/reservation-directe"/)
   assert.match(bloc, /href="\/apps\/reservation-directe\/paiements"/)
+})
+
+// ─── Lot Ménages V5, étape 1 : la photo du bien et la vérité « fait » ────────
+
+test('chaque bien porte sa photo de couverture, null quand il n\'en a pas', async () => {
+  const { handler } = preparer({
+    biens: [{ provider_property_id: BIEN, name: 'La bulle', photo_url: 'https://x/p.jpg' },
+            { provider_property_id: '209414', name: 'Sans photo' }],
+    liaisons: [LIAISON()]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.biens[0].photo, 'https://x/p.jpg')
+  assert.strictEqual(res.body.biens[1].photo, null, 'une absence est null, jamais une chaîne vide')
+})
+
+test('un ménage présent dans menage_done sort `fait: true` — la vérité SERVEUR, pas le localStorage', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()],
+    menages: [MENAGE(), MENAGE({ booking_id: 'b2', departure_date: '2026-09-13' })],
+    done: [{ property_id: BIEN, booking_id: 'b1', departure_date: '2026-09-12' }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  const parBooking = Object.fromEntries(res.body.menages.map(m => [m.bookingId, m.fait]))
+  assert.strictEqual(parBooking.b1, true)
+  assert.strictEqual(parBooking.b2, false)
+})
+
+test('une panne de menage_done ne coupe PAS le planning : les ménages sortent, aucun n\'est dit fait', async () => {
+  // Même règle que l'annuaire : sans « fait », l'écran reste JUSTE (un ménage
+  // fait redevient « à faire », défaut visible) — rien à voir avec les
+  // liaisons, dont l'absence rendrait la garde fausse.
+  const { handler } = preparer({
+    liaisons: [LIAISON()], menages: [MENAGE()],
+    erreurDone: { message: 'boom' }
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.menages.length, 1)
+  assert.strictEqual(res.body.menages[0].fait, false)
 })

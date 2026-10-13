@@ -3577,3 +3577,41 @@ Tests : section « ÉLARGIR » de `tests/cleaning-sync-menages-entite.test.js`
 Contre `main` : les deux cas positifs rougissent. Mutations, une par garde
 (preuve d'acteur, preuve des membres, déjà sollicitée, plancher, rang,
 plafond, porteuse d'office, filtre `auto`) : chacune fait rougir son test.
+
+## La page « Ménages » V5 lit la garde — étape 1, lecture seule (13 octobre 2026)
+
+Lot 4 de la refonte UI (spec `docs/specs/lot-menages-v5/`, fond :
+`docs/specs/inventaire-menages.md` parties E/F/G). `pages/menages.html`
+(route `/menages`) remplacera à terme l'écran Ménages ET le Planning de
+garde ; à cette étape elle n'écrit RIEN et n'est pas encore dans la
+navigation (bascule et redirections : étape 4).
+
+**`api/garde.js` étendu, lecture seule** (même commit) :
+- `biens[].photo` = `properties.photo_url` (lot photos), `null` sans photo ;
+- `menages[].fait` = présence dans `menage_done` — la vérité SERVEUR du
+  « fait », celle que la PWA écrit ; l'ancien écran hôte, lui, ne lisait que
+  son localStorage (écart D1 de l'inventaire ; l'écriture côté hôte vient à
+  l'étape 3, par un writer partagé). Une panne de `menage_done` ne coupe
+  PAS le planning : sans « fait », l'écran reste juste (défaut visible),
+  même règle que l'annuaire des prénoms.
+
+**Ce que la page dessine** (une ligne par prestataire) : barre = jours où
+elle est LA GARDE CALCULÉE (responsable du jour — pas « disponible » au sens
+large) ; une porteuse hors garde a une ligne TEMPORAIRE sans barre (décision
+§13, remplaçante) ; pastilles = fait (vert + badge retour 👍/👎 serveur) /
+pris / non pris (proposition en cours) / non assigné (ligne « Sans
+prestataire ») / à venir (différé, jamais une alarme) ; « Personne » =
+trous de garde d'un bien GÉRÉ, rouges seulement quand un ménage tombe dedans
+(§12.6), gris sinon ; un bien sans liaison n'affiche aucune ligne (décision
+du 3 septembre).
+
+**Sans `prestataires: read`** : la page rend UNE ligne neutre par bien
+(« quelqu'un »), pas des avatars numérotés P1/P2 — le serveur ne rend AUCUN
+identifiant sans ce droit (un identifiant stable, même anonyme, reconstitue
+le calendrier de présence du personnel sur la fenêtre : c'est précisément ce
+que `nommer()` refuse). Le point est signalé à Thierry : sa décision G8
+(« P1, P2 ») n'est pas implémentable sans affaiblir cette garde.
+
+Tests : `tests/menages-v5.test.js` (règles V5, décisions §13 nommées une à
+une, lecture seule, un seul endpoint) et la section « Lot Ménages V5 » de
+`tests/garde-endpoint.test.js` (photo, fait, panne de menage_done).

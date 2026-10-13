@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « MÉNAGES » — refonte UI V5, lot 4 ÉTAPE 1 : LECTURE SEULE.
+     Un calendrier 14 jours, un bloc par bien, une ligne par prestataire :
+     barre = jours où elle est LA GARDE CALCULÉE (api/garde.js, même brique
+     que le moteur), pastille = ménage. « Personne » = trou de garde d'un
+     bien GÉRÉ seulement (décision du 3 septembre : un bien sans prestataire
+     n'affiche aucune ligne, jamais de rouge). Pas de bulle « À traiter »
+     (étape 2), aucune action d'écriture (étape 3).
+     Spec : docs/specs/lot-menages-v5/spec-refonte-ui-v5-lot-menages.md
+     (+ §13, les décisions) ; fond : docs/specs/inventaire-menages.md.
+     RÈGLES : aucun hexa, aucun texte en dur, icônes du sprite, aucun appel
+     provider ; X-Compte sur chaque appel ; la vérité « fait » vient du
+     serveur (menage_done), jamais du localStorage de l'ancien écran. -->
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- nav.js --></div>
+  </div>
+</header>
+
+<main class="men-page">
+  <div class="men-entete">
+    <h1 class="h2" data-i18n="menages.title"></h1>
+    <a class="btn btn--secondary btn--icon" href="/apps/menages/prestataires" data-i18n-attr="aria-label:menages.prestataires;title:menages.prestataires">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-users"/></svg>
+    </a>
+  </div>
+
+  <div class="row men-nav">
+    <button type="button" class="btn btn--secondary btn--icon" data-nav="-1" data-i18n-attr="aria-label:menages.prev">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(180 12 12)"/></svg>
+    </button>
+    <button type="button" class="men-nav__periode" data-bind="periode" data-i18n-attr="aria-label:menages.period_pick"></button>
+    <input type="month" class="sr-only" data-bind="mois-choix" tabindex="-1" aria-hidden="true">
+    <button type="button" class="btn btn--secondary btn--icon" data-nav="1" data-i18n-attr="aria-label:menages.next">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+    </button>
+    <button type="button" class="btn btn--secondary" data-nav="0" data-i18n="menages.today"></button>
+  </div>
+
+  <p class="card men-avis" data-bind="avis-tronque" hidden data-i18n="menages.truncated"></p>
+  <div class="men-vide" data-bind="etat-vide" hidden></div>
+
+  <div class="men-scroll" data-bind="planning" hidden>
+    <div class="men-cal" data-bind="cal"></div>
+  </div>
+
+  <p class="caption muted men-legende" data-bind="legende" hidden></p>
+  <div class="men-bulles" data-bind="bulles"></div>
+  <p class="caption muted" data-bind="etat-charge" hidden></p>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+import { requireAuth } from '/components/auth-guard.js'
+import { getUser, signOut } from '/shared/supabase.js'
+import { supabase } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte }
+  from '/shared/compte-courant.js'
+import { toISO } from '/shared/calendar-core.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (s) => document.querySelector(s)
+const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
+const AUJOURDHUI = toISO(new Date())
+const JOURS_FENETRE = 14
+const langue = () => (window.I18n && I18n.lang) || document.documentElement.lang || 'fr'
+
+const etat = {
+  biens: [],            // réponse /api/garde : [{id(ref provider), name, photo}]
+  garde: [],            // [{propertyId, gere, jours: [{date, responsable, remplacante, trou}]}]
+  menages: [],          // [{propertyId, bookingId, date, status, fait, porteur, proposeesA, expireLe, raison, retour, differe}]
+  avecNoms: false, avecAvis: false, tronque: false,
+  jours: [],            // les 14 iso de la fenêtre
+  decalage: 0,          // en jours, NON persisté (même règle que le calendrier)
+  masques: [],          // refs des biens masqués (persisté)
+  anonymes: new Map()   // sans prestataires:read : rien à numéroter — une seule
+                        // ligne « couverture » par bien (le serveur refuse tout
+                        // identifiant : un UUID stable reconstituerait le
+                        // calendrier de présence du personnel — invariant de
+                        // l'inventaire, partie A.5)
+}
+const PREFS_CLE = 'hs_menages_v5_prefs'
+function lirePrefs () {
+  try {
+    const p = JSON.parse(localStorage.getItem(PREFS_CLE) || '{}')
+    if (Array.isArray(p.masques)) etat.masques = p.masques.map(String)
+  } catch {}
+}
+function ecrirePrefs () {
+  try { localStorage.setItem(PREFS_CLE, JSON.stringify({ masques: etat.masques })) } catch {}
+}
+
+// ─── Dates (Intl, jamais de formatage à la main) ────────────────────────────
+const dateCourt = iso => new Intl.DateTimeFormat(langue(), { day: 'numeric', month: 'short', timeZone: 'UTC' })
+  .format(new Date(iso + 'T12:00:00Z'))
+const jourAbrege = iso => new Intl.DateTimeFormat(langue(), { weekday: 'short', timeZone: 'UTC' })
+  .format(new Date(iso + 'T12:00:00Z')).replace('.', '').slice(0, 2)
+const dateLongue = iso => new Intl.DateTimeFormat(langue(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+  .format(new Date(iso + 'T12:00:00Z'))
+const heureParis = v => new Intl.DateTimeFormat(langue(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
+  .format(new Date(v))
+const estWE = iso => [0, 6].includes(new Date(iso + 'T12:00:00Z').getUTCDay())
+
+function fenetre () {
+  const base = new Date(AUJOURDHUI + 'T12:00:00Z')
+  base.setUTCDate(base.getUTCDate() + etat.decalage)
+  const jours = []
+  for (let i = 0; i < JOURS_FENETRE; i++) {
+    const d = new Date(base); d.setUTCDate(d.getUTCDate() + i)
+    jours.push(d.toISOString().slice(0, 10))
+  }
+  return jours
+}
+
+// ─── Couleur stable par personne (pastels de theme.css, jamais d'hexa ici) ──
+const NB_PASTELS = 8
+function couleurDe (id) {
+  let h = 0
+  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0
+  return `var(--presta-${(h % NB_PASTELS) + 1})`
+}
+const initiales = prenom => String(prenom || '').trim().slice(0, 2).toUpperCase()
+
+// ─── Chargement ─────────────────────────────────────────────────────────────
+async function appel (chemin) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const r = await fetch(chemin, {
+    headers: { Authorization: 'Bearer ' + session.access_token, ...enteteCompte() }
+  })
+  const corps = await r.json().catch(() => ({}))
+  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; throw e }
+  return corps
+}
+let jetonLecture = 0
+async function charger () {
+  const jeton = ++jetonLecture
+  const chargeEl = $('[data-bind="etat-charge"]')
+  chargeEl.hidden = false
+  chargeEl.textContent = t('common.loading')
+  const jours = fenetre()
+  try {
+    const d = await appel(`/api/garde?du=${jours[0]}&au=${jours[jours.length - 1]}`)
+    if (jeton !== jetonLecture) return   // réponse en retard : on ne repeint pas
+    etat.jours = jours
+    etat.biens = d.biens || []
+    etat.garde = d.garde || []
+    etat.menages = d.menages || []
+    etat.avecNoms = !!d.avec_noms
+    etat.avecAvis = !!d.avec_avis
+    etat.tronque = !!d.tronque
+    chargeEl.hidden = true
+    renderTout()
+  } catch (e) {
+    if (jeton !== jetonLecture) return
+    logger.error('Menages', 'chargement', e)
+    chargeEl.hidden = true
+    const vide = $('[data-bind="etat-vide"]')
+    vide.hidden = false
+    vide.innerHTML = `<p class="muted">${esc(e.status === 403 ? t('menages.no_access') : t('menages.load_error'))}</p>`
+    $('[data-bind="planning"]').hidden = true
+  }
+}
+
+// ─── L'état d'un ménage → sa pastille (décisions §13 et Q2 de l'inventaire) ─
+function etatPastille (m) {
+  if (m.fait) return 'fait'
+  if (m.porteur) return 'pris'
+  if ((m.proposeesA || []).length || m.status === 'offered') return 'np'
+  if (m.differe) return 'avenir'
+  return 'na'
+}
+const CLASSE_MK = { fait: 'men-mk--fait', pris: '', np: 'men-mk--np', na: 'men-mk--na', avenir: 'men-mk--avenir' }
+const ICONE_MK = { fait: 'i-check', pris: 'i-cleaning', np: 'i-alert', na: 'i-cleaning', avenir: 'i-cleaning' }
+
+function nomOu (p, defaut) {
+  if (!p) return t(defaut)
+  return p.prenom || t('menages.quelquun')
+}
+function infobulle (bien, m) {
+  const parts = [`${bien.name} — ${dateLongue(m.date)}`, t('menages.tt_' + etatPastille(m))]
+  if (m.porteur) parts.push(nomOu(m.porteur, 'menages.quelquun'))
+  const tour = (m.proposeesA || []).filter(Boolean)
+  if (tour.length) {
+    parts.push(t('menages.tt_tour', { noms: tour.map(p => nomOu(p, 'menages.quelquun')).join(', ') || String(tour.length) }))
+    if (m.expireLe) parts.push(t('menages.tt_expire', { quand: heureParis(m.expireLe) }))
+  }
+  if (m.raison) parts.push(m.raison)
+  if (m.retour) {
+    parts.push(t(m.retour.verdict === 'remarque' ? 'menages.retour_mauvais' : 'menages.retour_bon'))
+    if (m.retour.prive) parts.push(t('menages.retour_prive'))
+  }
+  return parts.join('\n')
+}
+
+// ─── Construction des lignes d'un bien ──────────────────────────────────────
+// Une ligne par prestataire : (a) responsable d'au moins un jour de la
+// fenêtre ; (b) porteuse ou proposée d'un ménage de la fenêtre (ligne
+// TEMPORAIRE, sans barre — décision §13 « remplaçante »). Sans
+// `prestataires:read` : UNE ligne neutre par bien.
+const CLE_COUVERTURE = '__couverture'
+const CLE_SANS = '__sans'
+function lignesDuBien (bien, g, menagesDuBien) {
+  const lanes = new Map()
+  const lane = (cle) => {
+    if (!lanes.has(cle)) {
+      lanes.set(cle, { cle, prenom: null, actif: null, aRegler: false, jours: new Set(), menages: new Map() })
+    }
+    return lanes.get(cle)
+  }
+  const cleDe = p => (p && etat.avecNoms && p.id) ? String(p.id) : CLE_COUVERTURE
+  const responsableDu = {}
+  for (const j of (g ? g.jours : [])) {
+    responsableDu[j.date] = j.responsable || null
+    if (!j.responsable) continue
+    const l = lane(cleDe(j.responsable))
+    l.jours.add(j.date)
+    if (j.responsable.prenom) l.prenom = j.responsable.prenom
+    if (j.responsable.actif === false) l.actif = false
+    if (j.responsable.a_regler) l.aRegler = true
+  }
+  for (const m of menagesDuBien) {
+    const e = etatPastille(m)
+    let cle
+    if (m.porteur) cle = cleDe(m.porteur)
+    else if (e === 'np') cle = cleDe((m.proposeesA || [])[0])
+    else if (e === 'avenir') cle = cleDe(responsableDu[m.date])
+    else cle = CLE_SANS
+    const l = lane(cle)
+    const p = m.porteur || (m.proposeesA || [])[0]
+    if (p && p.prenom && !l.prenom) l.prenom = p.prenom
+    if (!l.menages.has(m.date)) l.menages.set(m.date, [])
+    l.menages.get(m.date).push(m)
+  }
+  // « Sans prestataire » toujours en dernier ; les autres par premier jour de barre.
+  return [...lanes.values()].sort((a, b) => {
+    if (a.cle === CLE_SANS) return 1
+    if (b.cle === CLE_SANS) return -1
+    const ja = [...a.jours].sort()[0] || '9999', jb = [...b.jours].sort()[0] || '9999'
+    return ja < jb ? -1 : ja > jb ? 1 : 0
+  })
+}
+
+// Les suites de jours consécutifs d'un ensemble, en indices de la fenêtre.
+function suites (joursSet) {
+  const idx = etat.jours.map((iso, i) => joursSet.has(iso) ? i : -1).filter(i => i >= 0)
+  const runs = []
+  for (const i of idx) {
+    const r = runs[runs.length - 1]
+    if (r && i === r.fin + 1) r.fin = i
+    else runs.push({ debut: i, fin: i })
+  }
+  return runs
+}
+
+// ─── Rendu ──────────────────────────────────────────────────────────────────
+function renderTout () {
+  const cal = $('[data-bind="cal"]')
+  const planning = $('[data-bind="planning"]')
+  const vide = $('[data-bind="etat-vide"]')
+  $('[data-bind="avis-tronque"]').hidden = !etat.tronque
+  $('[data-bind="periode"]').textContent = `${dateCourt(etat.jours[0])} → ${dateCourt(etat.jours[etat.jours.length - 1])}`
+
+  const visibles = etat.biens.filter(b => !etat.masques.includes(String(b.id)))
+  if (!etat.biens.length) {
+    planning.hidden = true
+    vide.hidden = false
+    vide.innerHTML = `<p class="muted">${esc(t('menages.empty'))}</p>`
+    renderBulles(); renderLegende(false)
+    return
+  }
+  vide.hidden = true
+  planning.hidden = false
+
+  const entetes = `<div class="men-jours">
+    <span class="men-jours__coin"></span>
+    ${etat.jours.map(iso => `<span class="men-jour${estWE(iso) ? ' men-jour--we' : ''}${iso === AUJOURDHUI ? ' men-jour--auj' : ''}">${esc(jourAbrege(iso))}<b>${new Date(iso + 'T12:00:00Z').getUTCDate()}</b></span>`).join('')}
+  </div>`
+
+  const parBienGarde = new Map(etat.garde.map(g => [String(g.propertyId), g]))
+  const menagesParBien = new Map()
+  for (const m of etat.menages) {
+    const cle = String(m.propertyId)
+    if (!menagesParBien.has(cle)) menagesParBien.set(cle, [])
+    menagesParBien.get(cle).push(m)
+  }
+
+  const blocs = visibles.map(bien => {
+    const g = parBienGarde.get(String(bien.id))
+    const gere = !!(g && g.gere)
+    const menagesDuBien = (menagesParBien.get(String(bien.id)) || []).filter(m => etat.jours.includes(m.date))
+    const photo = bien.photo
+      ? `<img src="${esc(bien.photo)}" alt="" loading="lazy">`
+      : `<span class="men-bien__ini" aria-hidden="true">${esc(initiales(bien.name))}</span>`
+    const tete = `<div class="men-bien">
+      <span class="men-bien__id">${photo}<span class="men-bien__nom" title="${esc(bien.name)}">${esc(bien.name)}</span></span>
+      <button type="button" class="men-masquer" data-masquer="${esc(bien.id)}" data-i18n-attr="aria-label:menages.masquer_bien;title:menages.masquer_bien">${icone('i-close')}</button>
+    </div>`
+
+    // Un bien non confié : aucune ligne, jamais de rouge (décision du 3 sept.).
+    if (!gere) {
+      return tete + (menagesDuBien.length ? renderLignes(bien, g, menagesDuBien) :
+        `<p class="men-nonconfie caption muted" data-i18n="menages.non_confie"></p>`)
+    }
+    return tete + renderLignes(bien, g, menagesDuBien) + renderTrous(bien, g, menagesDuBien)
+  }).join('')
+
+  cal.innerHTML = entetes + blocs
+  I18n.apply(cal)
+  cal.querySelectorAll('[data-masquer]').forEach(b => b.addEventListener('click', () => {
+    etat.masques = [...new Set([...etat.masques, String(b.dataset.masquer)])]
+    ecrirePrefs(); renderTout()
+  }))
+  renderBulles()
+  renderLegende(true)
+}
+
+function renderLignes (bien, g, menagesDuBien) {
+  const lanes = lignesDuBien(bien, g, menagesDuBien)
+  return lanes.map(l => {
+    const sans = l.cle === CLE_SANS
+    const anonyme = l.cle === CLE_COUVERTURE
+    const coul = sans || anonyme ? 'var(--surface-2)' : couleurDe(l.cle)
+    const nom = sans ? t('menages.sans_presta') : (l.prenom || t('menages.quelquun'))
+    const avatar = sans || (anonyme && !l.prenom)
+      ? `<span class="men-av men-av--inconnu" aria-hidden="true">?</span>`
+      : `<span class="men-av" style="--coul: ${coul}" aria-hidden="true">${esc(initiales(nom))}</span>`
+    const regler = l.aRegler
+      ? `<span class="men-regler" data-i18n-attr="title:menages.a_regler">${icone('i-settings')}</span>` : ''
+    const off = l.actif === false
+    const barres = sans ? '' : suites(l.jours).map(r =>
+      `<span class="men-barre${off ? ' men-barre--off' : ''}" style="grid-column: ${r.debut + 1} / ${r.fin + 2}; --coul: ${coul}"></span>`).join('')
+    const pastilles = [...l.menages.entries()].map(([iso, ms]) => {
+      const i = etat.jours.indexOf(iso)
+      if (i < 0) return ''
+      const m = ms[0]
+      const e = etatPastille(m)
+      const retour = (e === 'fait' && m.retour)
+        ? `<span class="men-mk__retour${m.retour.verdict === 'remarque' ? ' men-mk__retour--mauvais' : ''}">${icone(m.retour.verdict === 'remarque' ? 'i-thumb-down' : 'i-thumb-up')}</span>` : ''
+      const n = ms.length > 1 ? `<span class="men-mk__n">${ms.length}</span>` : ''
+      const titres = ms.map(x => infobulle(bien, x)).join('\n—\n')
+      return `<span class="men-case" style="grid-column: ${i + 1}" title="${esc(titres)}">
+        <span class="men-mk ${CLASSE_MK[e]}">${icone(ICONE_MK[e])}${retour}${n}</span>
+      </span>`
+    }).join('')
+    return `<div class="men-ligne${off ? ' men-ligne--off' : ''}">
+      <span class="men-qui${sans || off ? ' men-qui--off' : ''}">${avatar}<span class="men-prenom">${esc(nom)}</span>${regler}</span>
+      <span class="men-lane">${barres}${pastilles}</span>
+    </div>`
+  }).join('')
+}
+
+// « Personne » : les TROUS DE GARDE d'un bien géré. Rouge seulement quand un
+// ménage tombe dans le trou (§12.6), gris sinon — on voit venir sans bruit.
+function renderTrous (bien, g, menagesDuBien) {
+  const trous = new Set((g.jours || []).filter(j => j.trou && etat.jours.includes(j.date)).map(j => j.date))
+  if (!trous.size) return ''
+  const datesAvecMenage = new Set(menagesDuBien.map(m => m.date))
+  const runs = suites(trous)
+  const segments = runs.map(r => {
+    const jours = etat.jours.slice(r.debut, r.fin + 1)
+    const grave = jours.some(j => datesAvecMenage.has(j))
+    return `<span class="men-trou${grave ? '' : ' men-trou--calme'}" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(jours.map(dateLongue).join(', '))}">${icone('i-shield-off')}<span data-i18n="menages.personne"></span></span>`
+  }).join('')
+  return `<div class="men-ligne">
+    <span class="men-qui men-qui--off"><span class="men-av men-av--inconnu" aria-hidden="true">!</span><span class="men-prenom" data-i18n="menages.personne"></span></span>
+    <span class="men-lane">${segments}</span>
+  </div>`
+}
+
+function renderBulles () {
+  const zone = $('[data-bind="bulles"]')
+  const masques = etat.biens.filter(b => etat.masques.includes(String(b.id)))
+  zone.innerHTML = masques.map(b => {
+    const photo = b.photo ? `<img src="${esc(b.photo)}" alt="">`
+      : `<span class="men-bien__ini" aria-hidden="true">${esc(initiales(b.name))}</span>`
+    return `<button type="button" class="men-bulle" data-afficher="${esc(b.id)}" data-i18n-attr="title:menages.afficher_bien">${photo}<span>${esc(b.name)}</span></button>`
+  }).join('')
+  I18n.apply(zone)
+  zone.querySelectorAll('[data-afficher]').forEach(b => b.addEventListener('click', () => {
+    etat.masques = etat.masques.filter(x => x !== String(b.dataset.afficher))
+    ecrirePrefs(); renderTout()
+  }))
+}
+
+function renderLegende (visible) {
+  const el = $('[data-bind="legende"]')
+  el.hidden = !visible
+  if (!visible) return
+  const pt = (html, cle) => `<span class="men-leg">${html}<span data-i18n="${cle}"></span></span>`
+  el.innerHTML = [
+    pt('<span class="men-leg__barre" style="--coul: var(--presta-1)"></span>', 'menages.leg_garde'),
+    pt(`<span class="men-mk men-leg__mk">${icone('i-cleaning')}</span>`, 'menages.leg_pris'),
+    pt(`<span class="men-mk men-mk--fait men-leg__mk">${icone('i-check')}</span>`, 'menages.leg_fait'),
+    pt(`<span class="men-mk men-mk--np men-leg__mk">${icone('i-alert')}</span>`, 'menages.leg_np'),
+    pt(`<span class="men-mk men-mk--na men-leg__mk">${icone('i-cleaning')}</span>`, 'menages.leg_na'),
+    pt(`<span class="men-mk men-mk--avenir men-leg__mk">${icone('i-cleaning')}</span>`, 'menages.leg_avenir'),
+    pt('<span class="men-leg__barre men-trou"></span>', 'menages.leg_personne'),
+    pt('<span class="men-leg__barre men-barre--off"></span>', 'menages.leg_off'),
+    pt(`<span class="men-regler">${icone('i-settings')}</span>`, 'menages.leg_regler')
+  ].join('')
+  I18n.apply(el)
+}
+
+// ─── Démarrage ──────────────────────────────────────────────────────────────
+async function init () {
+  const session = await requireAuth()
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+  const user = await getUser()
+  $('[data-bind="initials"]').textContent = (user?.email || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis'),
+    outils: [
+      peutLire('reservations') && { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price' },
+      estTitulaire() && { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key' },
+      estTitulaire() && { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send' },
+      estTitulaire() && { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar' },
+      estTitulaire() && { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link' },
+      estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
+    ].filter(Boolean)
+  })
+  HSNav.render({ peutLire })
+  if (!peutLire('menages')) {
+    $('[data-bind="etat-vide"]').hidden = false
+    $('[data-bind="etat-vide"]').innerHTML = `<p class="muted">${esc(t('menages.no_access'))}</p>`
+    return
+  }
+  lirePrefs()
+  document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => {
+    const sens = Number(b.dataset.nav)
+    etat.decalage = sens === 0 ? 0 : etat.decalage + sens * JOURS_FENETRE
+    charger()
+  }))
+  // Clic sur la période → sélecteur de mois natif (remplace le mini-calendrier
+  // de l'ancienne page) ; la fenêtre saute au 1er du mois choisi.
+  const choixMois = $('[data-bind="mois-choix"]')
+  $('[data-bind="periode"]').addEventListener('click', () => {
+    choixMois.value = etat.jours.length ? etat.jours[0].slice(0, 7) : AUJOURDHUI.slice(0, 7)
+    if (choixMois.showPicker) { try { choixMois.showPicker() } catch { choixMois.focus() } } else choixMois.focus()
+  })
+  choixMois.addEventListener('change', () => {
+    if (!/^\d{4}-\d{2}$/.test(choixMois.value)) return
+    const cible = new Date(choixMois.value + '-01T12:00:00Z')
+    etat.decalage = Math.round((cible - new Date(AUJOURDHUI + 'T12:00:00Z')) / 86400000)
+    charger()
+  })
+  // Changement de jour : re-rendu si la date a changé (onglet ouvert la nuit).
+  let jourVu = AUJOURDHUI
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && toISO(new Date()) !== jourVu) location.reload()
+  })
+  await charger()
+}
+init().catch(e => logger.error('Menages', e.message, e))
+
+</script>
+</body>
+</html>

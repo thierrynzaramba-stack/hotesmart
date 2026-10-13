@@ -67,6 +67,10 @@ const DELEGABLES = [
   'pages/calendrier-mobile.html',   // idem
   'apps/menages/index.html',        // délégué en vague 1
   'apps/menages/garde.html',        // api/garde honore X-Compte (compteDelegue), domaine `menages`
+  // Ménages V5 (lot 4, étape 1) : LECTURE SEULE par api/garde (compteDelegue),
+  // X-Compte posé par enteteCompte() sur chaque appel — même classement que
+  // garde.html, qu'elle remplacera à l'étape 4.
+  'pages/menages.html',
   // Messagerie V5 (lot 2, étape 1) : chaque fetch pose X-Compte (/api/messages,
   // compteDelegue) et les lectures directes (properties, agent_tasks) filtrent
   // sur compteCourant() sous RLS. Lecture seule à cette étape.

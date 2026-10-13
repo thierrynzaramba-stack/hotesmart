@@ -783,3 +783,15 @@ Reçues de Thierry, reportées aussi dans la spec (§13, qui fait foi) :
 13. **Recommandations appliquées** (reste de E.4) : `tronque` → bandeau
     visible ; badge nav → mécanique `pendingMessages`, précisée à
     l'étape 2 ; détail du jour agrégé → remplacé par la fiche ménage.
+
+### Addendum à G8 (étape 1, 13 octobre 2026)
+
+« Avatars neutres numérotés (P1, P2) » n'est **pas implémentable sans
+affaiblir une garde serveur délibérée** : sans `prestataires:read`,
+`api/garde.js` ne rend AUCUN identifiant, même pseudonyme (invariant A.5 —
+un identifiant stable par personne, rendu jour par jour, reconstitue le
+calendrier de présence du personnel ; numéroter P1/P2 sur 14 jours le
+reconstitue aussi). L'étape 1 rend donc UNE ligne neutre par bien
+(« quelqu'un ») pour un membre sans ce droit. Si Thierry tient aux P1/P2,
+c'est une décision de sécurité à prendre explicitement (desserrer
+`nommer()`), pas un choix d'écran.

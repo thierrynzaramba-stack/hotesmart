@@ -115,6 +115,10 @@
       "destination": "/pages/calendrier"
     },
     {
+      "source": "/menages",
+      "destination": "/pages/menages"
+    },
+    {
       "source": "/apps/agent-ai",
       "destination": "/pages/messages"
     },

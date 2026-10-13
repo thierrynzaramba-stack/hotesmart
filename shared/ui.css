@@ -608,3 +608,91 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .cal-nav [data-nav] { display: none; }
   .cal-flottante { bottom: calc(86px + env(safe-area-inset-bottom)); width: calc(100vw - 20px); }
 }
+
+/* ============================================================
+   Page « Ménages » (lot 4, étape 1 : lecture seule)
+   Un bloc par bien, une ligne par prestataire : barre = garde,
+   pastille = ménage. Les pastels viennent de theme.css.
+   ============================================================ */
+.men-page { padding: 0 var(--page-pad) 40px; max-width: var(--page-max); margin: 0 auto; }
+.men-entete { display: flex; align-items: center; gap: 10px; padding: 22px 0 14px; }
+.men-entete .h2 { flex: 1; margin: 0; }
+.men-nav { flex-wrap: wrap; padding-bottom: 12px; }
+.men-nav__periode { font-size: var(--fs-body); font-weight: var(--fw-semibold); min-width: 136px; text-align: center; background: none; border: 0; cursor: pointer; font-family: inherit; color: var(--ink); padding: 8px 4px; text-decoration: underline dotted; }
+.men-avis { padding: 12px 16px; margin-bottom: 12px; color: var(--warn); }
+.men-vide { padding: 30px 0; }
+
+.men-cal { --men-col: 190px; min-width: 0; }
+.men-jours { display: grid; grid-template-columns: var(--men-col) repeat(14, minmax(var(--men-case, 0px), 1fr)); }
+.men-jour { text-align: center; font-size: 11px; color: var(--muted); line-height: 1.2; padding: 6px 0 8px; }
+.men-jour b { display: block; font-size: var(--fs-small); color: var(--ink); font-weight: var(--fw-semibold); }
+.men-jour--we { background: var(--surface-2); border-radius: 8px 8px 0 0; }
+.men-jour--auj b { background: var(--ink); color: var(--on-ink); border-radius: var(--radius-pill); width: 26px; height: 26px; line-height: 26px; margin: 0 auto; }
+
+.men-bien { display: flex; align-items: center; gap: 12px; padding: 18px 0 8px; border-top: 1px solid var(--line); position: sticky; inset-inline-start: 0; }
+.men-bien__id { display: flex; align-items: center; gap: 12px; font-size: var(--fs-body); font-weight: var(--fw-bold); min-width: 0; }
+.men-bien img, .men-bien__ini { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; flex: none; }
+.men-bien__ini { background: var(--surface-2); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; font-weight: var(--fw-bold); font-size: var(--fs-small); font-style: normal; }
+.men-bien__nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.men-masquer { border: 0; background: none; color: var(--muted); cursor: pointer; display: inline-flex; padding: 6px; }
+.men-masquer .icon { width: 14px; height: 14px; }
+.men-nonconfie { margin: 0 0 8px; }
+
+.men-ligne { display: grid; grid-template-columns: var(--men-col) 1fr; align-items: center; }
+.men-qui { display: flex; align-items: center; gap: 10px; font-size: var(--fs-small); font-weight: var(--fw-medium); min-height: 44px; padding-inline: 12px 8px; overflow: hidden; white-space: nowrap; position: sticky; inset-inline-start: 0; background: var(--surface); z-index: 3; }
+.men-qui--off { color: var(--muted); }
+.men-prenom { overflow: hidden; text-overflow: ellipsis; }
+.men-av { width: 28px; height: 28px; border-radius: var(--radius-pill); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: var(--fw-bold); flex: none; background: var(--coul, var(--surface-2)); color: var(--ink); }
+.men-av--inconnu { border: 1.5px dashed var(--muted); background: var(--surface); color: var(--muted); }
+.men-regler { color: var(--muted); display: inline-flex; flex: none; }
+.men-regler .icon { width: 14px; height: 14px; }
+
+.men-lane { position: relative; display: grid; grid-template-columns: repeat(14, minmax(var(--men-case, 0px), 1fr)); align-items: center; min-height: 44px; }
+.men-lane > * { grid-row: 1; }
+.men-barre { height: 30px; margin: 0 2px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
+.men-barre--off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 5px, var(--surface) 5px 10px); border: 1px dashed var(--border); }
+.men-trou { height: 30px; margin: 0 2px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--danger); border: 1.5px dashed var(--danger); background: repeating-linear-gradient(135deg, var(--danger-soft) 0 5px, var(--surface) 5px 10px); overflow: hidden; white-space: nowrap; }
+.men-trou .icon { width: 13px; height: 13px; flex: none; }
+.men-trou--calme { color: var(--muted); border-color: var(--border); background: repeating-linear-gradient(135deg, var(--surface-2) 0 5px, var(--surface) 5px 10px); }
+
+.men-case { display: flex; align-items: center; justify-content: center; min-height: 44px; }
+.men-mk { position: relative; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow-dot); }
+.men-mk .icon { width: 14px; height: 14px; }
+.men-mk--fait { background: var(--ok); color: var(--surface); box-shadow: none; }
+.men-mk--np { border: 2px dashed var(--danger); background: var(--danger-soft); color: var(--danger); box-shadow: none; }
+.men-mk--na { border: 2px dashed var(--muted); background: var(--surface); color: var(--muted); box-shadow: none; }
+.men-mk--avenir { background: var(--surface-2); color: var(--muted); box-shadow: none; }
+.men-mk__n { position: absolute; top: -5px; inset-inline-end: -6px; min-width: 16px; height: 16px; border-radius: var(--radius-pill); background: var(--ink); color: var(--on-ink); font-size: 10px; font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; padding: 0 3px; }
+.men-mk__retour { position: absolute; bottom: -5px; inset-inline-end: -6px; width: 16px; height: 16px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; background: var(--ok); color: var(--surface); box-shadow: 0 0 0 2px var(--surface); }
+.men-mk__retour--mauvais { background: var(--danger); }
+.men-mk__retour .icon { width: 10px; height: 10px; }
+
+.men-legende { padding: 14px 2px 0; display: flex; flex-wrap: wrap; gap: 14px 20px; }
+.men-leg { display: inline-flex; align-items: center; gap: 7px; }
+.men-leg__barre { display: inline-block; width: 36px; height: 14px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
+.men-leg__barre.men-trou { height: 14px; margin: 0; }
+.men-leg__mk { width: 22px; height: 22px; }
+.men-leg__mk .icon { width: 11px; height: 11px; }
+
+.men-bulles { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 0 0; }
+.men-bulle { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); padding: 5px 14px 5px 6px; font-size: var(--fs-small); font-weight: var(--fw-medium); cursor: pointer; font-family: inherit; }
+.men-bulle img, .men-bulle .men-bien__ini { width: 28px; height: 28px; border-radius: var(--radius-pill); object-fit: cover; }
+
+@media (max-width: 899px) {
+  .men-page { padding: 0 16px 100px; }
+  /* Le calendrier seul défile horizontalement : 7 jours visibles, la suite au
+     doigt. Identités (bien, prénom) collantes au bord de départ. */
+  .men-scroll { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+  .men-cal { --men-col: 0px; --men-case: calc((100vw - 32px - 44px) / 7); min-width: max-content; }
+  .men-jours { grid-template-columns: repeat(14, var(--men-case)); }
+  .men-jours__coin { display: none; }
+  .men-ligne { display: block; }
+  .men-lane { grid-template-columns: repeat(14, var(--men-case)); }
+  .men-qui { min-height: 34px; width: max-content; max-width: 70vw; padding-inline-start: 2px; }
+  .men-bien { position: sticky; inset-inline-start: 2px; width: max-content; max-width: 80vw; }
+  .men-bien img, .men-bien__ini { width: 34px; height: 34px; border-radius: 7px; }
+  .men-barre, .men-trou { height: 24px; }
+  .men-mk { width: 22px; height: 22px; }
+  .men-mk .icon { width: 11px; height: 11px; }
+  .men-case { min-height: 44px; min-width: 44px; }
+}

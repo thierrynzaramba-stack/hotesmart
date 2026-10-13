@@ -122,7 +122,7 @@ module.exports = async function handler (req, res) {
     if (filtreRef === '') return res.status(200).json({ jours, biens: [], garde: [], menages: [] })
 
     let qProps = supabase.from('properties')
-      .select('provider_property_id, name')
+      .select('provider_property_id, name, photo_url')
       .eq('user_id', userId).not('provider_property_id', 'is', null)
     if (filtreRef) qProps = qProps.or(filtreRef)
     const { data: propRows, error: errProps } = await qProps
@@ -132,7 +132,10 @@ module.exports = async function handler (req, res) {
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
     const biens = (propRows || []).map(p => ({
-      id: String(p.provider_property_id), name: p.name || `Bien ${p.provider_property_id}`
+      id: String(p.provider_property_id), name: p.name || `Bien ${p.provider_property_id}`,
+      // La photo de couverture (lot photos) : l'ecran V5 l'affiche en tete de
+      // bloc, repli initiales cote client. `null` est une absence, pas une panne.
+      photo: p.photo_url || null
     }))
     // ⚠ UNE TRONCATURE SE DIT. Elle efface precisement ce que cet ecran existe
     // pour montrer : un menage hors du lot rend son jour « sans menage », donc
@@ -178,6 +181,24 @@ module.exports = async function handler (req, res) {
     if (errMen) {
       console.error('[garde] lecture menages echec', errMen.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+
+    // ===== LES MENAGES FAITS (verite serveur `menage_done`, lot Menages V5 D1) =====
+    // ⚠ Best-effort : sans cette lecture, le planning reste JUSTE — un menage
+    // fait redevient « a faire » a l'ecran, defaut visible et sans danger.
+    // C'est la difference avec les liaisons, dont l'absence rendrait la garde
+    // fausse. Le writer de la table reste la PWA (un writer par domaine).
+    const faits = new Set()
+    if ((menagesRows || []).length) {
+      const { data: doneRows, error: errDone } = await supabase.from('menage_done')
+        .select('property_id, booking_id, departure_date')
+        .eq('user_id', userId)
+        .in('booking_id', [...new Set(menagesRows.map(m => String(m.booking_id)))])
+        .limit(LOT_MENAGES)
+      if (errDone) console.error('[garde] lecture menage_done echec', errDone.message)
+      for (const d of (doneRows || [])) {
+        faits.add(`${String(d.property_id)}|${String(d.booking_id)}|${String(d.departure_date).slice(0, 10)}`)
+      }
     }
 
     // ===== L'ANNUAIRE, ET LES POUCES =====
@@ -325,6 +346,8 @@ module.exports = async function handler (req, res) {
       bookingId: String(m.booking_id),
       date: m.departure_date,
       status: m.status,
+      // La verite serveur de « fait » — jamais le localStorage de l'ancien ecran.
+      fait: faits.has(`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`),
       porteur: nommer(m.provider_id),
       // ⚠ LE TOUR ENTIER (spec proposition-par-rang) : `proposeesA` nomme
       // toutes les personnes sollicitees en meme temps ; `proposeA` reste la
