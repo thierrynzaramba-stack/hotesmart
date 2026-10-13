@@ -161,7 +161,6 @@ function fenetre () {
   return jours
 }
 
-const initiales = prenom => String(prenom || '').trim().slice(0, 2).toUpperCase()
 
 // ─── Chargement ─────────────────────────────────────────────────────────────
 async function appel (chemin) {
@@ -444,9 +443,6 @@ function renderLignes (bien, g, menagesDuBien) {
     const anonyme = l.cle === CLE_COUVERTURE
     const coul = sans || anonyme ? 'var(--surface-2)' : couleurDe(l.cle)
     const nom = sans ? t('menages.sans_presta') : (l.prenom || t('menages.quelquun'))
-    const avatar = sans || (anonyme && !l.prenom)
-      ? `<span class="men-av men-av--inconnu" aria-hidden="true">?</span>`
-      : `<span class="men-av" style="--coul: ${coul}" aria-hidden="true">${esc(initiales(nom))}</span>`
     const regler = l.aRegler
       ? `<span class="men-regler" data-i18n-attr="title:menages.a_regler">${icone('i-settings')}</span>` : ''
     const off = l.actif === false
@@ -471,7 +467,7 @@ function renderLignes (bien, g, menagesDuBien) {
       </span>`
     }).join('')
     return `<div class="men-ligne">
-      <div class="cal-bien__coin"><span class="men-qui${sans || off ? ' men-qui--off' : ''}">${avatar}<span class="men-prenom">${esc(nom)}</span>${regler}</span></div>
+      <div class="cal-bien__coin"><span class="men-qui${sans || off ? ' men-qui--off' : ''}"><span class="men-prenom">${esc(nom)}</span>${regler}</span></div>
       <span class="men-lane" style="--n: ${nb}">${fondsJours()}${barres}${pastilles}</span>
     </div>`
   }).join('')
@@ -490,7 +486,7 @@ function renderTrous (bien, g, menagesDuBien) {
     return `<span class="men-trou" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(quand)}">${icone('i-shield-off')}${libelle}</span>`
   }).join('')
   return `<div class="men-ligne">
-    <div class="cal-bien__coin"><span class="men-qui men-qui--off"><span class="men-av men-av--inconnu" aria-hidden="true">!</span><span class="men-prenom" data-i18n="menages.personne"></span></span></div>
+    <div class="cal-bien__coin"><span class="men-qui men-qui--off"><span class="men-prenom" data-i18n="menages.personne"></span></span></div>
     <span class="men-lane" style="--n: ${etat.jours.length}">${fondsJours()}${segments}</span>
   </div>`
 }
