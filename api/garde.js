@@ -170,7 +170,7 @@ module.exports = async function handler (req, res) {
 
     // ===== LES MENAGES POSES DESSUS =====
     const { data: menagesRows, error: errMen } = await supabase.from('menages')
-      .select('property_id, booking_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, assignment_reason')
+      .select('property_id, booking_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, assignment_reason, offered_at, accepted_at')
       .eq('user_id', userId)
       .in('property_id', biens.map(b => b.id))
       .gte('departure_date', du).lte('departure_date', au)
@@ -184,6 +184,24 @@ module.exports = async function handler (req, res) {
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
 
+    // ===== LES NOTES DE L'HOTE (fiche menage, etape 3) =====
+    // ⚠ SANS ELLES, LA FICHE EFFACERAIT. Elle ouvre un champ de note ; s'il
+    // s'affiche vide alors qu'une consigne existe, le premier enregistrement
+    // la remplace par du vide — et la prestataire perd « le code a change ».
+    // Best-effort : sans note, l'ecran reste juste (champ vide, visible).
+    const notes = {}
+    if ((menagesRows || []).length) {
+      const { data: notesRows, error: eN } = await supabase.from('menage_comments')
+        .select('booking_id, departure_date, comment')
+        .eq('user_id', userId)
+        .in('booking_id', [...new Set(menagesRows.map(m => String(m.booking_id)))])
+        .limit(LOT_MENAGES)
+      if (eN) console.error('[garde] lecture notes echec', eN.message)
+      for (const n of (notesRows || [])) {
+        notes[`${String(n.booking_id)}|${String(n.departure_date).slice(0, 10)}`] = n.comment || ''
+      }
+    }
+
     // ===== LES MENAGES FAITS (verite serveur `menage_done`, lot Menages V5 D1) =====
     // ⚠ Best-effort : sans cette lecture, le planning reste JUSTE — un menage
     // fait redevient « a faire » a l'ecran, defaut visible et sans danger.
@@ -192,10 +210,11 @@ module.exports = async function handler (req, res) {
     // lequel passent la PWA et l'ecran de l'hote (un writer par domaine, deux
     // portes gardees chacune de son cote).
     const faits = new Set()
+    const detailFait = {}
     let tronqueFaits = false
     if ((menagesRows || []).length) {
       const { data: doneRows, error: errDone } = await supabase.from('menage_done')
-        .select('property_id, booking_id, departure_date')
+        .select('property_id, booking_id, departure_date, done_at, done_by_token')
         .eq('user_id', userId)
         .in('booking_id', [...new Set(menagesRows.map(m => String(m.booking_id)))])
         .limit(LOT_MENAGES)
@@ -204,7 +223,12 @@ module.exports = async function handler (req, res) {
       // du lot, des menages FAITS redeviendraient « a faire » sans bandeau.
       tronqueFaits = (doneRows || []).length >= LOT_MENAGES
       for (const d of (doneRows || [])) {
-        faits.add(`${String(d.property_id)}|${String(d.booking_id)}|${String(d.departure_date).slice(0, 10)}`)
+        const cle = `${String(d.property_id)}|${String(d.booking_id)}|${String(d.departure_date).slice(0, 10)}`
+        faits.add(cle)
+        // ⚠ `done_by_token` NE SORT PAS : c'est le secret d'acces de la
+        // prestataire. On n'en garde que la REPONSE a « est-ce elle qui a
+        // marque ? », que la fiche affiche en toutes lettres.
+        detailFait[cle] = { quand: d.done_at || null, parElle: !!d.done_by_token }
       }
     }
 
@@ -372,8 +396,19 @@ module.exports = async function handler (req, res) {
       // TOUT en silence (revue de 4235a21).
       date: String(m.departure_date).slice(0, 10),
       status: m.status,
+      // La consigne de l'hote pour CE menage (vide = aucune).
+      note: notes[`${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || '',
       // La verite serveur de « fait » — jamais le localStorage de l'ancien ecran.
       fait: faits.has(`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`),
+      // Les TROIS etapes reellement enregistrees (Q1 de l'inventaire) :
+      // propose, pris, fait. `started` / `completed` existent au schema mais
+      // AUCUN code ne les ecrit — la fiche n'invente pas d'etape.
+      etapes: {
+        propose: m.offered_at || null,
+        pris: m.accepted_at || null,
+        fait: (detailFait[`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || {}).quand || null,
+        parElle: (detailFait[`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || {}).parElle || false
+      },
       porteur: nommer(m.provider_id),
       // ⚠ LE TOUR ENTIER (spec proposition-par-rang) : `proposeesA` nomme
       // toutes les personnes sollicitees en meme temps ; `proposeA` reste la

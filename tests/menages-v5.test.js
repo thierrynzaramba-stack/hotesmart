@@ -100,6 +100,11 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
     'le COMPTE de retours, jamais une moyenne étoilée (décision H.6)': 'retoursHtml',
     'une désactivée reste listée, grisée': 'men-eq--off',
     '« Ajouter » réservé au titulaire, absent du DOM sinon (D6)': 'estTitulaire()',
+    'fiche ménage : les TROIS étapes datées (Q1), aucune inventée': 'function frise',
+    'la NOTE pour la prestataire est reconstruite (bloquant E.1)': 'enregistrerNote',
+    'elle part par le SERVEUR, pas depuis le navigateur': "action: 'note'",
+    'la note existante est préremplie — sinon enregistrer l\'effacerait': 'm.note',
+    'réassigner depuis la fiche': 'data-fiche-presta',
     'X-Compte sur chaque appel': 'enteteCompte()',
     'entrée sous menages:read, erreur 403 dite': 'menages.no_access'
   }

@@ -418,5 +418,18 @@
   "menages.equipe.vide": "Nobody in the team yet.",
   "menages.equipe.panne": "Team unavailable right now.",
   "menages.equipe.nom_manquant": "[Last name]",
-  "menages.equipe.sans_droit": "You don't have access to the team."
+  "menages.equipe.sans_droit": "You don't have access to the team.",
+  "menages.etape_propose": "Offered",
+  "menages.etape_pris": "Taken",
+  "menages.etape_fait": "Done",
+  "menages.fait_par_hote": "Marked done by you, not by the cleaner.",
+  "menages.fiche_qui": "Who is handling it",
+  "menages.note_titre": "Note for the cleaner",
+  "menages.note_aide": "E.g. the key box code has changed.",
+  "menages.note_enregistrer": "Save note",
+  "menages.note_ok": "Note saved and sent.",
+  "menages.note_non_transmise": "Note saved — not sent to the cleaner.",
+  "menages.tt_tour": "Offered to {noms}",
+  "menages.tt_expire": "answer expected by {quand}",
+  "menages.retour_prive": "private feedback"
 }

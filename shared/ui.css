@@ -718,6 +718,23 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 /* Le verrou de defilement du volet : la classe existait sans regle, donc le
    planning defilait derriere lui au telephone (revue de dfcf8d4). */
 body.men-volet-ouvert { overflow: hidden; }
+/* La fiche d'un ménage : même gabarit que le volet, au-dessus de lui. */
+.men-fiche { z-index: 70; }
+.men-fiche__corps { flex: 1; overflow-y: auto; padding: 4px 20px 24px; }
+.men-fiche__bloc { padding: 16px 0; border-top: 1px solid var(--line); }
+.men-fiche__note { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 10px 12px; font-size: var(--fs-small); font-family: inherit; resize: vertical; margin-top: 6px; }
+.men-fiche__presta { height: 36px; padding: 0 14px; font-size: var(--fs-caption); }
+.men-fiche__retour { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fs-small); color: var(--ok); }
+.men-fiche__retour--mauvais { color: var(--danger); }
+.men-fiche__extrait { margin: 6px 0 0; font-style: italic; color: var(--muted); }
+/* Les trois étapes, chacune avec SA date. */
+.men-frise { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.men-frise__pas { display: flex; align-items: center; gap: 10px; font-size: var(--fs-small); color: var(--muted); }
+.men-frise__point { width: 22px; height: 22px; border-radius: var(--radius-pill); border: 2px solid var(--border); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.men-frise__point .icon { width: 12px; height: 12px; }
+.men-frise__pas--ok { color: var(--ink); }
+.men-frise__pas--ok .men-frise__point { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.men-frise__nom { flex: 1; font-weight: var(--fw-medium); }
 .men-volet { position: fixed; inset-block: 0; inset-inline-end: 0; width: 460px; max-width: 100vw; z-index: 60; background: var(--surface); border-inline-start: 1px solid var(--line); box-shadow: -12px 0 32px rgba(0, 0, 0, .12); display: flex; flex-direction: column; }
 .men-volet__tete { display: flex; align-items: center; gap: 12px; padding: 20px 20px 12px; }
 .men-volet__tete .h2 { flex: 1; margin: 0; font-size: 20px; font-weight: var(--fw-black); }

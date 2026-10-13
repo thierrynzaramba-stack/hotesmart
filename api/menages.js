@@ -60,6 +60,7 @@ module.exports = async function handler(req, res) {
     const action = req.body && req.body.action
     if (action === 'liaisons') return await ecrireLiaisons(req, res)
     if (action === 'fait' || action === 'defaire') return await marquerDepuisLHote(req, res, action === 'fait')
+    if (action === 'note') return await ecrireNote(req, res)
     return await reassigner(req, res)
   }
   if (req.method !== 'GET') return res.status(405).json({ error: 'Méthode non autorisée' })
@@ -519,6 +520,122 @@ async function equipeMenage (req, res, garde, userId) {
   }
 
   return res.status(200).json({ prestataires: sortie, avec_avis: avecAvis, avec_personnes: true })
+}
+
+// ===== LA NOTE POUR LA PRESTATAIRE (fiche menage V5, etape 3) =====
+//
+// ⚠ LA FONCTION QUE LA V5 NE DEVAIT PAS PERDRE. L'ancien ecran l'ecrivait
+// DEPUIS LE NAVIGATEUR (upsert `menage_comments` + INSERT `menage_events` en
+// boucle, sous RLS) : deux writers de plus cote client, dont un JOURNAL de
+// notifications. Ici, le serveur fait les deux, derriere ses gardes — et le
+// contenu du fil vient du COEUR, jamais du corps de la requete : sans cela,
+// un appel force ecrirait n'importe quel nom de voyageur dans l'ecran de la
+// prestataire.
+//
+// ⚠ DEUX DROITS, DEUX EFFETS. `menages: write` enregistre la note. La
+// TRANSMETTRE exige de lire `public_tokens`, qui est sous `prestataires:
+// read` : un membre qui ne l'a pas enregistre bien sa note, mais elle ne
+// part pas — et la reponse le DIT (`transmise: false`), sinon l'ecran
+// afficherait un succes complet pour une note que personne ne lira.
+async function ecrireNote (req, res) {
+  const appelant = await verifierSession(req, res)
+  if (!appelant) return
+  const garde = await requirePermission(req, res, {
+    domaine: 'menages', niveau: 'write', userId: appelant, compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+
+  const { property_id, booking_id, departure_date } = req.body || {}
+  const texte = String(req.body?.texte ?? '').trim()
+  if (!property_id || !booking_id || !departure_date) {
+    return res.status(400).json({ error: 'Champs requis manquants (property_id, booking_id, departure_date)' })
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(departure_date))) {
+    return res.status(400).json({ error: 'Format departure_date invalide, attendu YYYY-MM-DD' })
+  }
+  // ⚠ BORNEE. Le texte part dans un SMS et dans un fil ; sans borne, un
+  // copier-coller malheureux remplirait la base et l'ecran de la prestataire.
+  if (texte.length > 2000) return res.status(400).json({ error: 'Note trop longue (2000 caractères)' })
+
+  const refs = refsDuPerimetre(garde.contexte)
+  if (Array.isArray(refs) && !refs.map(String).includes(String(property_id))) {
+    return res.status(403).json({ error: 'Bien hors périmètre' })
+  }
+  // Le menage doit exister : une note sur un couple invente ne serait lue par
+  // personne et ne pourrait plus etre effacee depuis l'ecran.
+  const { data: men, error: eMen } = await supabase.from('menages')
+    .select('status').eq('user_id', userId)
+    .eq('property_id', String(property_id)).eq('booking_id', String(booking_id))
+    .eq('departure_date', departure_date).maybeSingle()
+  if (eMen) {
+    console.error('[menages] note : lecture menage echec', eMen.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!men) return res.status(404).json({ error: 'Ménage introuvable' })
+
+  const { error: eUp } = await supabase.from('menage_comments').upsert({
+    user_id: userId,
+    booking_id: String(booking_id),
+    departure_date,
+    property_id: String(property_id),
+    comment: texte,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id,booking_id,departure_date' })
+  if (eUp) {
+    console.error('[menages] note : ecriture echec', eUp.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+
+  // ⚠ UNE NOTE VIDE EFFACE, elle ne notifie pas : annoncer « note de
+  // l'employeur » pour une consigne retiree serait un faux evenement.
+  if (!texte) return res.status(200).json({ ok: true, transmise: true, vide: true })
+
+  // La TRANSMISSION, sous `prestataires: read` seulement.
+  if (!peutLire(garde.contexte, 'prestataires', null)) {
+    return res.status(200).json({ ok: true, transmise: false })
+  }
+  const { data: jetons, error: eJ } = await supabase.from('public_tokens')
+    .select('token, property_ids').eq('user_id', userId)
+  if (eJ) {
+    console.error('[menages] note : lecture jetons echec', eJ.message)
+    return res.status(200).json({ ok: true, transmise: false })
+  }
+  // ⚠ `property_ids` VIDE = TOUS LES BIENS (convention de `public_tokens`,
+  // l'inverse de `profile_permissions`) : la confondre priverait de la note
+  // les prestataires qui couvrent tout le parc.
+  const vises = (jetons || []).filter(j =>
+    !Array.isArray(j.property_ids) || !j.property_ids.length ||
+    j.property_ids.map(String).includes(String(property_id)))
+  if (!vises.length) return res.status(200).json({ ok: true, transmise: false })
+
+  // Le contenu du fil vient du COEUR : nom du bien et voyageur lus ici.
+  const { data: bien } = await supabase.from('properties')
+    .select('name').eq('user_id', userId)
+    .eq('provider_property_id', String(property_id)).maybeSingle()
+  const { data: resa } = await supabase.from('bookings_snapshot')
+    .select('snapshot').eq('user_id', userId)
+    .eq('booking_id', String(booking_id)).limit(1).maybeSingle()
+  const s = (resa && resa.snapshot) || {}
+  const voyageur = [s.firstName, s.lastName].filter(Boolean).join(' ').trim()
+
+  const lignes = vises.map(j => ({
+    user_id: userId,
+    booking_id: String(booking_id),
+    property_id: String(property_id),
+    property_name: (bien && bien.name) || '',
+    event_type: 'note',
+    event_data: { guestName: voyageur, arrival: s.arrival || null,
+                  departure: departure_date, comment: texte },
+    token: j.token
+  }))
+  const { error: eEv } = await supabase.from('menage_events').insert(lignes)
+  if (eEv) {
+    console.error('[menages] note : fil echec', eEv.message)
+    // La note EST enregistree : on ne ment pas sur ce point, on dit seulement
+    // qu'elle n'est pas partie.
+    return res.status(200).json({ ok: true, transmise: false })
+  }
+  return res.status(200).json({ ok: true, transmise: true })
 }
 
 // Le jour courant A PARIS : la meme regle que `api/garde.js` et la PWA — un

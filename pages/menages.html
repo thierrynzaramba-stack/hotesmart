@@ -104,6 +104,18 @@
   <div class="men-volet__pied" data-bind="equipe-pied"></div>
 </aside>
 
+<!-- Fiche d'un ménage : les trois étapes datées, la note pour la
+     prestataire, et le changement de personne. -->
+<aside class="men-volet men-fiche" data-bind="fiche" hidden aria-labelledby="h-fiche" role="dialog" aria-modal="true">
+  <div class="men-volet__tete">
+    <h2 class="h2" id="h-fiche" data-bind="fiche-titre"></h2>
+    <button type="button" class="btn btn--secondary btn--icon" data-bind="fermer-fiche" data-i18n-attr="aria-label:menages.equipe.fermer">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg>
+    </button>
+  </div>
+  <div class="men-fiche__corps" data-bind="fiche-corps"></div>
+</aside>
+
 <div class="cal-toasts" data-bind="toasts" aria-live="polite"></div>
 
 <nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
@@ -153,7 +165,8 @@ const etat = {
   toutVoir: false,      // « Tout voir » déplié
   equipe: null,         // [{id, prenom, nom, actif, aRegler, biens, retours}] — null = pas encore lu
   equipeAvecAvis: false,
-  equipePersonnes: true // faux = pas le droit de voir QUI compose l'équipe
+  equipePersonnes: true, // faux = pas le droit de voir QUI compose l'équipe
+  fiche: null           // le ménage ouvert dans la fiche
 }
 // ⚠ Une clé PAR COMPTE : la page est délégable, et une ref provider masquée
 // sur un compte ne doit pas faire disparaître le bien homonyme d'un autre
@@ -520,6 +533,14 @@ function renderTout () {
     ecrirePrefs(); renderTout()
   }))
   brancherPoignees(cal)
+  // Le clic sur une pastille ouvre la fiche du ménage qu'elle représente.
+  cal.querySelectorAll('[data-fiche]').forEach(b => b.addEventListener('click', () => {
+    const bien = etat.biens.find(x => String(x.id) === String(b.dataset.ficheBien))
+    const m = etat.menages.find(x => String(x.bookingId) === String(b.dataset.fiche) &&
+                                     String(x.propertyId) === String(b.dataset.ficheBien) &&
+                                     String(x.date) === String(b.dataset.ficheDate))
+    if (bien && m) ouvrirFiche(m, bien)
+  }))
   renderBulles()
 }
 
@@ -571,9 +592,10 @@ function renderLignes (bien, g, menagesDuBien, trous) {
         ? `<span class="men-mk__retour${m.retour.verdict === 'remarque' ? ' men-mk__retour--mauvais' : ''}" title="${esc(t(m.retour.verdict === 'remarque' ? 'menages.retour_mauvais' : 'menages.retour_bon'))}">${icone(m.retour.verdict === 'remarque' ? 'i-thumb-down' : 'i-thumb-up')}</span>` : ''
       const n = ms.length > 1 ? `<span class="men-mk__n">${ms.length}</span>` : ''
       const titres = ms.map(infobulle).join('\n—\n')
-      return `<span class="men-case" style="grid-column: ${i + 1}" title="${esc(titres)}">
+      return `<button type="button" class="men-case" style="grid-column: ${i + 1}" title="${esc(titres)}"
+        data-fiche="${esc(m.bookingId)}" data-fiche-bien="${esc(bien.id)}" data-fiche-date="${esc(iso)}">
         <span class="men-mk ${CLASSE_MK[e]}">${icone(ICONE_MK[e])}${retour}${n}</span>
-      </span>`
+      </button>`
     }).join('')
     return `<div class="men-ligne">
       <div class="cal-bien__coin"><span class="men-qui${sans || off ? ' men-qui--off' : ''}"><span class="men-prenom">${esc(nom)}</span>${regler}</span></div>
@@ -589,6 +611,132 @@ function renderLignes (bien, g, menagesDuBien, trous) {
 function trousDuBien (g) {
   const dans = new Set(etat.jours)
   return new Set((g ? g.jours : []).filter(j => j.trou && dans.has(j.date)).map(j => j.date))
+}
+
+// ─── Fiche d'un ménage (étape 3) ────────────────────────────────────────────
+const heureIntl = v => new Intl.DateTimeFormat(langue(), {
+  day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris'
+}).format(new Date(v))
+
+// ⚠ TROIS ÉTAPES, PAS CINQ (Q1 de l'inventaire). `started` et `completed`
+// existent au schéma, mais aucun code ne les écrit : une frise « Arrivée →
+// Photos → Terminé » afficherait des jalons qu'on ne sait pas dater. On ne
+// montre que ce qui est enregistré — et chaque étape porte SA date.
+function frise (m) {
+  const e = m.etapes || {}
+  const pas = [
+    { cle: 'propose', quand: e.propose, faite: !!e.propose },
+    { cle: 'pris', quand: e.pris, faite: !!e.pris || !!m.porteur },
+    { cle: 'fait', quand: e.fait, faite: !!m.fait }
+  ]
+  return `<ol class="men-frise">${pas.map(p => `
+    <li class="men-frise__pas${p.faite ? ' men-frise__pas--ok' : ''}">
+      <span class="men-frise__point">${p.faite ? icone('i-check') : ''}</span>
+      <span class="men-frise__nom" data-i18n="menages.etape_${p.cle}"></span>
+      <span class="caption muted">${p.quand ? esc(heureIntl(p.quand)) : '—'}</span>
+    </li>`).join('')}</ol>` +
+    (m.fait && e.parElle === false
+      ? `<p class="caption muted" style="margin: 6px 0 0" data-i18n="menages.fait_par_hote"></p>` : '')
+}
+
+function ouvrirFiche (m, bien) {
+  etat.fiche = { ...m, bienNom: bien.name, bienId: String(bien.id) }
+  $('[data-bind="fiche-titre"]').textContent = `${bien.name} · ${dateLongue(m.date)}`
+  $('[data-bind="fiche"]').hidden = false
+  $('[data-bind="voile"]').hidden = false
+  document.body.classList.add('men-volet-ouvert')
+  renderFiche()
+  $('[data-bind="fermer-fiche"]').focus()
+}
+function fermerFiche () {
+  $('[data-bind="fiche"]').hidden = true
+  if ($('[data-bind="volet"]').hidden) {
+    $('[data-bind="voile"]').hidden = true
+    document.body.classList.remove('men-volet-ouvert')
+  }
+  etat.fiche = null
+}
+
+function renderFiche () {
+  const m = etat.fiche
+  if (!m) return
+  const corps = $('[data-bind="fiche-corps"]')
+  const qui = m.porteur ? nomOu(m.porteur, 'menages.sans_presta') : null
+  const tour = (m.proposeesA || []).filter(Boolean)
+  const retour = m.retour
+    ? `<p class="men-fiche__retour${m.retour.verdict === 'remarque' ? ' men-fiche__retour--mauvais' : ''}">
+         ${icone(m.retour.verdict === 'remarque' ? 'i-thumb-down' : 'i-thumb-up')}
+         <span>${esc(t(m.retour.verdict === 'remarque' ? 'menages.retour_mauvais' : 'menages.retour_bon'))}${
+           m.retour.prive ? ' · ' + esc(t('menages.retour_prive')) : ''}</span>
+       </p>${m.retour.extrait ? `<p class="caption men-fiche__extrait">« ${esc(m.retour.extrait)} »</p>` : ''}`
+    : ''
+
+  corps.innerHTML = `
+    ${frise(m)}
+    <div class="men-fiche__bloc">
+      <p class="caption muted" style="margin: 0 0 4px" data-i18n="menages.fiche_qui"></p>
+      <p style="margin: 0; font-weight: var(--fw-semibold)">${esc(qui || t('menages.sans_presta'))}</p>
+      ${tour.length ? `<p class="caption muted" style="margin: 4px 0 0">${esc(
+        t('menages.tt_tour', { noms: tour.map(p => nomOu(p, 'menages.quelquun')).join(', ') }))}${
+        m.expireLe ? ' · ' + esc(t('menages.tt_expire', { quand: heureParis(m.expireLe) })) : ''}</p>` : ''}
+      ${m.raison ? `<p class="caption muted" style="margin: 4px 0 0">${esc(m.raison)}</p>` : ''}
+    </div>
+    ${retour ? `<div class="men-fiche__bloc">${retour}</div>` : ''}
+    ${peutEcrire('menages') ? `<div class="men-fiche__bloc">
+      <label class="caption muted" for="f-note" data-i18n="menages.note_titre"></label>
+      <textarea id="f-note" class="men-fiche__note" rows="3" maxlength="2000"
+        data-i18n-attr="placeholder:menages.note_aide">${esc(m.note || '')}</textarea>
+      <span class="row" style="gap: 8px; margin-top: 8px">
+        <button type="button" class="btn btn--primary" data-note-save data-i18n="menages.note_enregistrer"></button>
+        <span class="caption" data-note-etat></span>
+      </span>
+    </div>` : ''}
+    ${peutEcrire('prestataires') ? `<div class="men-fiche__bloc">
+      <p class="caption muted" style="margin: 0 0 6px" data-i18n="menages.changer_qui"></p>
+      <span class="row" style="flex-wrap: wrap; gap: 6px" data-fiche-presta></span>
+    </div>` : ''}`
+  I18n.apply(corps)
+
+  const save = corps.querySelector('[data-note-save]')
+  if (save) save.addEventListener('click', () => enregistrerNote(corps))
+  const zone = corps.querySelector('[data-fiche-presta]')
+  if (zone) {
+    const dejaLa = m.porteur && m.porteur.id ? String(m.porteur.id) : null
+    const offrables = etat.prestataires.filter(p => String(p.id) !== dejaLa)
+    zone.innerHTML = offrables.length
+      ? offrables.map(p => `<button type="button" class="btn btn--secondary men-fiche__presta" data-presta="${esc(p.id)}">${esc(p.prenom || '')}</button>`).join('')
+      : `<span class="caption muted">${esc(t('menages.changer_vide'))}</span>`
+    zone.querySelectorAll('[data-presta]').forEach(b => b.addEventListener('click', async () => {
+      let r
+      try {
+        r = await poster('/api/menages', { property_id: m.bienId, booking_id: m.bookingId,
+                                           departure_date: m.date, provider_id: b.dataset.presta,
+                                           mode: 'assigner' })
+      } catch (e) { toast(e.message || t('menages.geste_echec')); return }
+      toast(t('menages.change_ok', { prenom: r.prenom || b.textContent }))
+      fermerFiche()
+      await rafraichir()
+    }))
+  }
+}
+
+// ⚠ LA NOTE PART PAR LE SERVEUR (étape 3) : l'ancien écran l'écrivait depuis
+// le navigateur, dans DEUX tables dont un journal de notifications. Et la
+// réponse dit si elle a été TRANSMISE — enregistrée sans l'être, c'est une
+// consigne que personne ne lira.
+async function enregistrerNote (corps) {
+  const m = etat.fiche
+  const etatEl = corps.querySelector('[data-note-etat]')
+  const texte = corps.querySelector('#f-note').value
+  etatEl.textContent = ''
+  let r
+  try {
+    r = await poster('/api/menages', { action: 'note', property_id: m.bienId,
+                                       booking_id: m.bookingId, departure_date: m.date, texte })
+  } catch (e) { etatEl.textContent = e.message || t('menages.geste_echec'); return }
+  etat.fiche.note = texte.trim()
+  etatEl.textContent = r.transmise ? t('menages.note_ok') : t('menages.note_non_transmise')
+  await chargerATraiter()
 }
 
 // ─── Volet « Équipe ménage » ────────────────────────────────────────────────
@@ -1003,9 +1151,14 @@ async function init () {
   })
   $('[data-bind="ouvrir-equipe"]').addEventListener('click', ouvrirEquipe)
   $('[data-bind="fermer-equipe"]').addEventListener('click', fermerEquipe)
-  $('[data-bind="voile"]').addEventListener('click', fermerEquipe)
+  $('[data-bind="fermer-fiche"]').addEventListener('click', fermerFiche)
+  $('[data-bind="voile"]').addEventListener('click', () => {
+    if (!$('[data-bind="fiche"]').hidden) fermerFiche(); else fermerEquipe()
+  })
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('[data-bind="volet"]').hidden) fermerEquipe()
+    if (e.key !== 'Escape') return
+    if (!$('[data-bind="fiche"]').hidden) fermerFiche()
+    else if (!$('[data-bind="volet"]').hidden) fermerEquipe()
   })
   // L'en-tête collant suit le défilement horizontal du calendrier (téléphone).
   const scrollEl = $('[data-bind="planning"]')

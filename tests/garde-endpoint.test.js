@@ -37,7 +37,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      profils = [{ id: REGINA, first_name: 'Régina', active: true },
                                 { id: SECONDE, first_name: 'Marie', active: true }],
                      erreurLiaisons = null, erreurBiens = null, avis = [], erreurAvis = null,
-                     done = [], erreurDone = null, conges = [] } = {}) {
+                     done = [], erreurDone = null, conges = [], notes = [] } = {}) {
   const etat = { lectures: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -57,6 +57,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         if (table === 'ota_reviews') return { data: erreurAvis ? null : avis, error: erreurAvis }
         if (table === 'menage_done') return { data: erreurDone ? null : done, error: erreurDone }
         if (table === 'conges_plages') return { data: conges, error: null }
+        if (table === 'menage_comments') return { data: notes, error: null }
         return { data: [], error: null }
       }
       const chain = {
@@ -1107,4 +1108,69 @@ test('sans `prestataires: read`, la liste est VIDE — pas un identifiant', asyn
   await handler({ ...get(), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
   assert.strictEqual(res.code, 200)
   assert.deepStrictEqual(res.body.prestataires, [])
+})
+
+// ─── Lot Ménages V5, étape 3 : les étapes de la fiche ────────────────────────
+
+test('la fiche reçoit les TROIS étapes réellement enregistrées, et pas une de plus', async () => {
+  // Q1 de l'inventaire : `started` / `completed` existent au schéma mais aucun
+  // code ne les écrit. La fiche n'invente pas d'étape qu'on ne sait pas dater.
+  const { handler } = preparer({
+    liaisons: [LIAISON()],
+    menages: [MENAGE({ offered_at: '2026-09-05T10:00:00Z', accepted_at: '2026-09-05T18:30:00Z' })],
+    done: [{ property_id: BIEN, booking_id: 'b1', departure_date: '2026-09-12',
+             done_at: '2026-09-12T11:00:00Z', done_by_token: 'tok-r' }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  const e = res.body.menages[0].etapes
+  assert.strictEqual(e.propose, '2026-09-05T10:00:00Z')
+  assert.strictEqual(e.pris, '2026-09-05T18:30:00Z')
+  assert.strictEqual(e.fait, '2026-09-12T11:00:00Z')
+  assert.strictEqual(e.parElle, true, 'marqué par la prestataire : son jeton était posé')
+})
+
+test('le JETON de la prestataire ne sort jamais — seulement la réponse « est-ce elle »', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()], menages: [MENAGE()],
+    done: [{ property_id: BIEN, booking_id: 'b1', departure_date: '2026-09-12',
+             done_at: '2026-09-12T11:00:00Z', done_by_token: 'SECRET-abc' }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.ok(!JSON.stringify(res.body).includes('SECRET-abc'), 'le secret d\'accès ne traverse pas')
+  assert.strictEqual(res.body.menages[0].etapes.parElle, true)
+})
+
+test('un ménage marqué par l\'HÔTE se distingue de celui marqué par elle', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()], menages: [MENAGE()],
+    done: [{ property_id: BIEN, booking_id: 'b1', departure_date: '2026-09-12',
+             done_at: '2026-09-12T11:00:00Z', done_by_token: null }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.menages[0].etapes.parElle, false)
+})
+
+test('la fiche reçoit la NOTE existante — sans elle, l\'enregistrer l\'effacerait', async () => {
+  // La fiche ouvre un champ de note. S'il s'affiche vide alors qu'une consigne
+  // existe, le premier enregistrement la remplace par du vide, et la
+  // prestataire perd « le code de la boîte a changé ».
+  const { handler } = preparer({
+    liaisons: [LIAISON()], menages: [MENAGE()],
+    notes: [{ booking_id: 'b1', departure_date: '2026-09-12', comment: 'Code porte : 4521' }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(res.body.menages[0].note, 'Code porte : 4521')
+})
+
+test('un ménage sans note porte une chaîne vide, jamais `undefined`', async () => {
+  const { handler } = preparer({ liaisons: [LIAISON()], menages: [MENAGE()] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.menages[0].note, '')
 })

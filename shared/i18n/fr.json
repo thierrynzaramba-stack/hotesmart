@@ -418,5 +418,18 @@
   "menages.equipe.vide": "Personne dans l'équipe pour l'instant.",
   "menages.equipe.panne": "Équipe non lisible pour l'instant.",
   "menages.equipe.nom_manquant": "[Nom]",
-  "menages.equipe.sans_droit": "Vous n'avez pas accès à l'équipe."
+  "menages.equipe.sans_droit": "Vous n'avez pas accès à l'équipe.",
+  "menages.etape_propose": "Proposé",
+  "menages.etape_pris": "Pris",
+  "menages.etape_fait": "Fait",
+  "menages.fait_par_hote": "Marqué fait par vous, pas par la prestataire.",
+  "menages.fiche_qui": "Qui s'en occupe",
+  "menages.note_titre": "Note pour la prestataire",
+  "menages.note_aide": "Ex. : le code de la boîte à clés a changé.",
+  "menages.note_enregistrer": "Enregistrer la note",
+  "menages.note_ok": "Note enregistrée et transmise.",
+  "menages.note_non_transmise": "Note enregistrée — non transmise à la prestataire.",
+  "menages.tt_tour": "Proposé à {noms}",
+  "menages.tt_expire": "réponse attendue avant le {quand}",
+  "menages.retour_prive": "retour privé"
 }

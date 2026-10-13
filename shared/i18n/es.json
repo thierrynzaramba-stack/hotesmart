@@ -418,5 +418,18 @@
   "menages.equipe.vide": "Nadie en el equipo por ahora.",
   "menages.equipe.panne": "El equipo no está disponible ahora.",
   "menages.equipe.nom_manquant": "[Apellido]",
-  "menages.equipe.sans_droit": "No tienes acceso al equipo."
+  "menages.equipe.sans_droit": "No tienes acceso al equipo.",
+  "menages.etape_propose": "Propuesta",
+  "menages.etape_pris": "Aceptada",
+  "menages.etape_fait": "Hecha",
+  "menages.fait_par_hote": "Marcada por ti, no por la persona de limpieza.",
+  "menages.fiche_qui": "Quién se encarga",
+  "menages.note_titre": "Nota para la persona de limpieza",
+  "menages.note_aide": "Ej.: el código de la caja ha cambiado.",
+  "menages.note_enregistrer": "Guardar la nota",
+  "menages.note_ok": "Nota guardada y enviada.",
+  "menages.note_non_transmise": "Nota guardada: no enviada a la persona de limpieza.",
+  "menages.tt_tour": "Propuesto a {noms}",
+  "menages.tt_expire": "respuesta esperada antes del {quand}",
+  "menages.retour_prive": "comentario privado"
 }

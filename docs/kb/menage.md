@@ -3746,3 +3746,37 @@ désormais (`todayEnParis`). Les autres :
   et le message annonçait pourtant « confié à … ».
 - `tests/menages-fait-hote.test.js` (11 tests) couvre enfin ce chemin :
   droits, périmètre, 404, 409, départ futur, trace, idempotence.
+
+### La fiche ménage et la note pour la prestataire (13 octobre 2026, étape 3)
+
+**Le bloquant de l'inventaire E.1 est levé.** La note pour la prestataire —
+« le code de la boîte a changé », « les poubelles sortent le mardi » — vit
+désormais dans la fiche V5, et elle part **par le serveur** :
+`POST /api/menages {action:'note'}`.
+
+- **L'ancien écran l'écrivait depuis le NAVIGATEUR** : upsert `menage_comments`
+  puis INSERT `menage_events` en boucle, sous RLS. Deux writers côté client,
+  dont un journal de notifications.
+- **Deux droits, deux effets** : `menages: write` enregistre la note ; la
+  TRANSMETTRE exige `prestataires: read` (lecture de `public_tokens`). Un
+  membre qui ne l'a pas enregistre bien sa consigne, mais elle ne part pas —
+  et la réponse le DIT (`transmise: false`). Annoncer un succès complet ferait
+  croire à l'hôte que sa prestataire est prévenue.
+- **Le contenu du fil vient du CŒUR** (nom du bien lu dans `properties`,
+  voyageur dans `bookings_snapshot`), jamais du corps de la requête : sans
+  cela, un appel forgé écrirait n'importe quel nom dans son écran.
+- **Une note vide efface sans notifier** : annoncer « note de l'employeur »
+  pour une consigne retirée serait un faux événement.
+- ⚠ **`api/garde.js` rend la note existante** (`menages[].note`). Sans elle, la
+  fiche ouvrait un champ vide sur une consigne existante, et le premier
+  enregistrement l'effaçait.
+
+**Les trois étapes** (Q1) : `api/garde.js` rend `etapes {propose, pris, fait,
+parElle}` — `offered_at`, `accepted_at`, `menage_done.done_at`. `started` et
+`completed` existent au schéma mais **aucun code ne les écrit** : la fiche ne
+montre aucun jalon qu'on ne sait pas dater. `done_by_token` **ne sort pas**
+(c'est le secret d'accès de la prestataire) : seule sort la réponse à « est-ce
+elle qui a marqué ? », que la fiche dit en toutes lettres.
+
+Tests : `tests/menages-note.test.js` (12) et la section « étape 3 » de
+`tests/garde-endpoint.test.js` (5).
