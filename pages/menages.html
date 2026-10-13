@@ -65,8 +65,10 @@
     </div>
   </div>
 
-  <!-- Les biens masqués remontent AVANT les dates (recette du 13 octobre). -->
-  <div class="men-bulles" data-bind="bulles"></div>
+  <!-- Les biens masqués remontent AVANT les dates (recette du 13 octobre) :
+       MÊME UI que le calendrier — bulles photo au téléphone, sélecteur dans
+       l'angle de la bande à l'ordinateur. -->
+  <div class="cal-bulles" data-bind="bulles"></div>
 
   <p class="card men-avis" data-bind="avis-tronque" hidden data-i18n="menages.truncated"></p>
   <div class="men-vide" data-bind="etat-vide" hidden></div>
@@ -148,6 +150,17 @@ const dateLongue = iso => new Intl.DateTimeFormat(langue(), { weekday: 'long', d
 const heureParis = v => new Intl.DateTimeFormat(langue(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
   .format(new Date(v))
 const estWE = iso => [0, 6].includes(new Date(iso + 'T12:00:00Z').getUTCDay())
+const estLarge = () => window.matchMedia('(min-width: 900px)').matches
+// Les classes de week-end du CALENDRIER (liserés début/fin) — même UI.
+const classesWE = iso => {
+  const d = new Date(iso + 'T12:00:00Z').getUTCDay()
+  return (d === 0 || d === 6) ? ' cal-we' + (d === 6 ? ' cal-we--debut' : ' cal-we--fin') : ''
+}
+const jourEtroit = iso => new Intl.DateTimeFormat(langue(), { weekday: 'narrow', timeZone: 'UTC' })
+  .format(new Date(iso + 'T12:00:00Z'))
+const moisLong = iso => new Intl.DateTimeFormat(langue(), { month: 'long', year: 'numeric', timeZone: 'UTC' })
+  .format(new Date(iso + 'T12:00:00Z'))
+const photoBien = b => b.photo ? `<img src="${esc(b.photo)}" alt="" loading="lazy">` : icone('i-home')
 
 function fenetre () {
   const base = new Date(AUJOURDHUI + 'T12:00:00Z')
@@ -319,8 +332,13 @@ function lignesDuBien (bien, g, menagesDuBien, absencesDuBien) {
 // même structure que l'en-tête, sur toute la hauteur (recette étape 1).
 function fondsWE () {
   return etat.jours.map((iso, i) => {
-    if (iso === AUJOURDHUI) return `<span class="men-we men-we--auj${estWE(iso) ? ' men-we--fin' : ''}" style="grid-column: ${i + 1}"></span>`
-    return estWE(iso) ? `<span class="men-we" style="grid-column: ${i + 1}"></span>` : ''
+    const d = new Date(iso + 'T12:00:00Z').getUTCDay()
+    const we = (d === 0 || d === 6)
+    const cls = ['men-we']
+    if (we) cls.push(d === 6 ? 'men-we--debut' : 'men-we--fin'); else cls.push('men-we--hors')
+    if (iso === AUJOURDHUI) cls.push('men-we--auj')
+    if (!we && iso !== AUJOURDHUI) return ''
+    return `<span class="${cls.join(' ')}" style="grid-column: ${i + 1}"></span>`
   }).join('')
 }
 
@@ -368,10 +386,23 @@ function renderTout () {
   planning.hidden = false
   tete.hidden = false
 
-  calTete.innerHTML = `<div class="men-jours">
-    <span class="men-jours__coin"></span>
-    ${etat.jours.map(iso => `<span class="men-jour${estWE(iso) ? ' men-jour--we' : ''}${iso === AUJOURDHUI ? ' men-jour--auj' : ''}">${esc(jourAbrege(iso))}<b>${new Date(iso + 'T12:00:00Z').getUTCDate()}</b></span>`).join('')}
+  // La bande du CALENDRIER : ligne des mois (nom au premier jour de chaque
+  // mois) + ligne des jours (lettre étroite + numéro, liserés week-end,
+  // aujourd'hui cerclé --info) ; l'angle porte le sélecteur des biens masqués.
+  let moisCourant = ''
+  let bandeMois = '', bandeJours = ''
+  for (const iso of etat.jours) {
+    const m = iso.slice(0, 7)
+    bandeMois += `<span class="cal-bande__mois${m !== moisCourant ? ' cal-bande__mois--debut' : ''}">${m !== moisCourant ? esc(moisLong(iso)) : ''}</span>`
+    moisCourant = m
+    bandeJours += `<span class="cal-bande__jour${classesWE(iso)}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(jourEtroit(iso))}<b>${new Date(iso + 'T12:00:00Z').getUTCDate()}</b></span>`
+  }
+  calTete.innerHTML = `<div class="men-jours men-jours--mois">
+    <span class="men-jours__coin">${angleHtml()}</span>${bandeMois}
+  </div><div class="men-jours">
+    <span class="men-jours__coin"></span>${bandeJours}
   </div>`
+  brancherAngle(calTete)
 
   const parBienGarde = new Map(etat.garde.map(g => [String(g.propertyId), g]))
   const joursSet = new Set(etat.jours)
@@ -495,15 +526,61 @@ function renderTrous (bien, g, menagesDuBien) {
   </div>`
 }
 
+// MÊME UI QUE LE CALENDRIER. Ordinateur : le sélecteur vit dans l'angle de la
+// bande (puce aux miniatures empilées + menu « Afficher » / « Tout
+// afficher ») ; téléphone : des bulles photo au-dessus des dates.
+function lesMasques () {
+  return etat.biens.filter(b => etat.masques.includes(String(b.id)))
+}
+function angleHtml () {
+  if (!estLarge()) return ''
+  const masques = lesMasques()
+  if (!masques.length) return `<span class="caption muted">${esc(t('cal.all_shown'))}</span>`
+  const minis = masques.slice(0, 4).map(b => `<span class="cal-photo cal-angle__mini">${photoBien(b)}</span>`).join('')
+  return `<details class="cal-angle__menu">
+    <summary class="cal-angle__puce" title="${esc(t('cal.hidden_props'))}">
+      <span class="cal-angle__pile">${minis}</span>
+      <b>${masques.length}</b>
+      <span class="caption">${esc(t('cal.hidden_props'))}</span>
+    </summary>
+    <div class="cal-angle__liste">
+      ${masques.map(b => `<button type="button" data-afficher="${esc(b.id)}">
+        <span class="cal-photo cal-angle__mini">${photoBien(b)}</span>
+        <span class="cal-angle__nom">${esc(b.name || '')}</span>
+        <span class="link small">${esc(t('cal.show_one'))}</span>
+      </button>`).join('')}
+      <button type="button" class="cal-angle__tout" data-tout-afficher>${esc(t('cal.show_all'))}</button>
+    </div>
+  </details>`
+}
+function brancherAngle (zone) {
+  const afficher = ids => {
+    etat.masques = etat.masques.filter(x => !ids.includes(x))
+    ecrirePrefs(); renderTout()
+  }
+  zone.querySelectorAll('[data-afficher]').forEach(b => b.addEventListener('click', () => afficher([String(b.dataset.afficher)])))
+  const tout = zone.querySelector('[data-tout-afficher]')
+  if (tout) tout.addEventListener('click', () => afficher(etat.masques.slice()))
+  const det = zone.querySelector('.cal-angle__menu')
+  if (det) {
+    det.addEventListener('toggle', () => {
+      if (!det.open) return
+      const r = det.querySelector('summary').getBoundingClientRect()
+      const liste = det.querySelector('.cal-angle__liste')
+      liste.style.top = (r.bottom + 4) + 'px'
+      liste.style.insetInlineStart = Math.max(8, r.left) + 'px'
+    })
+    $('[data-bind="planning"]').addEventListener('scroll', () => { det.open = false }, { passive: true })
+  }
+}
 function renderBulles () {
   const zone = $('[data-bind="bulles"]')
-  const masques = etat.biens.filter(b => etat.masques.includes(String(b.id)))
-  zone.innerHTML = masques.map(b => {
-    const photo = b.photo ? `<img src="${esc(b.photo)}" alt="">`
-      : `<span class="men-bien__ini" aria-hidden="true">${esc(initiales(b.name))}</span>`
-    return `<button type="button" class="men-bulle" data-afficher="${esc(b.id)}" data-i18n-attr="title:menages.afficher_bien">${photo}<span>${esc(b.name)}</span></button>`
-  }).join('')
-  I18n.apply(zone)
+  if (estLarge()) { zone.innerHTML = ''; return }
+  zone.innerHTML = lesMasques().map(b =>
+    `<button type="button" class="cal-bulle" data-afficher="${esc(b.id)}" title="${esc(t('cal.bubble_show', { nom: b.name || '' }))}">
+      <span class="cal-photo cal-bulle__photo">${photoBien(b)}</span>
+      <span class="cal-bulle__nom">${esc(b.name)}</span>
+    </button>`).join('')
   zone.querySelectorAll('[data-afficher]').forEach(b => b.addEventListener('click', () => {
     etat.masques = etat.masques.filter(x => x !== String(b.dataset.afficher))
     ecrirePrefs(); renderTout()
@@ -569,6 +646,12 @@ async function init () {
     etat.mois = n
     ecrirePrefs(); charger()
   }))
+  // Bascule angle <-> bulles au passage du seuil 900 px (même UI que le
+  // calendrier : angle à l'ordinateur, bulles au téléphone).
+  let large = estLarge()
+  window.addEventListener('resize', () => {
+    if (estLarge() !== large) { large = estLarge(); renderTout() }
+  })
   // L'en-tête collant suit le défilement horizontal du calendrier (téléphone).
   const scrollEl = $('[data-bind="planning"]')
   const teteEl = $('[data-bind="tete"]')

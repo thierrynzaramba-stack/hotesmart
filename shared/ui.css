@@ -625,18 +625,16 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-cal { --men-col: 190px; min-width: 0; }  /* --nb pose par le JS a chaque rendu */
 
 .men-jours { display: grid; grid-template-columns: var(--men-col) repeat(var(--nb), minmax(var(--men-case, 0px), 1fr)); }
-/* Toute fenetre fait desormais >= 30 jours : la taille « dense » EST la base
-   (revue de 29f587c — un style de base inatteignable ment). */
-.men-jour { text-align: center; font-size: 10px; color: var(--ink); font-weight: var(--fw-semibold); text-transform: capitalize; line-height: 1.25; padding: 7px 0 8px; }
-.men-jour b { display: block; font-size: 13px; color: var(--ink); font-weight: var(--fw-bold); }
+/* L'en-tete reprend LA BANDE DU CALENDRIER (cal-bande__mois / __jour, cal-we,
+   cal-auj — recette du 13 octobre) ; seul le squelette de grille est men-. */
+.men-jours--mois { min-height: 20px; align-items: end; }
+.men-jours__coin { display: flex; align-items: center; padding-inline: 2px 8px; min-width: 0; position: sticky; inset-inline-start: 0; background: var(--surface); z-index: 4; }
 /* Au-dela d'un mois : colonnes fixes, le calendrier DEFILE aussi a
    l'ordinateur — l'en-tete collant suit (synchronise en JS). */
 .men-cal--defile { --men-case: 38px; min-width: max-content; }
 /* L'en-tete des dates reste visible au defilement vertical, et suit le
    defilement horizontal du calendrier (synchronise en JS). */
 .men-tete { position: sticky; top: 0; z-index: 20; background: var(--surface); overflow: hidden; box-shadow: 0 1px 0 var(--line); }
-.men-jour--we { background: var(--surface-2); border-radius: 8px 8px 0 0; }
-.men-jour--auj b { background: var(--ink); color: var(--on-ink); border-radius: var(--radius-pill); width: 22px; height: 22px; line-height: 22px; margin: 0 auto; }
 
 .men-bien { display: flex; align-items: center; gap: 12px; padding: 18px 0 8px; border-top: 1px solid var(--line); position: sticky; inset-inline-start: 0; }
 .men-bien__id { display: flex; align-items: center; gap: 12px; font-size: var(--fs-body); font-weight: var(--fw-bold); min-width: 0; }
@@ -663,12 +661,14 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-lane > * { grid-row: 1; }
 /* Colonne de week-end : toute la hauteur, derrière barres et pastilles ; le
    filet de droite est redessiné car le fond recouvre celui du gradient. */
-.men-we { align-self: stretch; height: 100%; background: var(--surface-2); border-inline-end: 1px solid var(--line); }
-/* La colonne d'AUJOURD'HUI : deux rails verticaux discrets, sur toute la
-   hauteur — la lecture verticale demandee en recette. */
-.men-we--auj { background: none; border-inline: 1.5px solid color-mix(in srgb, var(--ink) 30%, transparent); }
-/* Aujourd'hui UN JOUR DE WEEK-END : la teinte reste, les rails par-dessus. */
-.men-we--auj.men-we--fin { background: var(--surface-2); }
+.men-we { align-self: stretch; height: 100%; background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); border-inline-end: 1px solid var(--line); }
+.men-we--debut { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+.men-we--fin { box-shadow: inset -2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+/* La colonne d'AUJOURD'HUI : les rails --info du calendrier (cal-auj), sur
+   toute la hauteur ; un week-end garde sa teinte dessous. */
+.men-we--hors { background-color: transparent; border-inline-end: 0; }
+.men-we--auj { box-shadow: inset 1.5px 0 0 var(--info), inset -1.5px 0 0 var(--info); }
+.men-we--debut.men-we--auj { box-shadow: inset 1.5px 0 0 var(--info), inset -1.5px 0 0 var(--info), inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
 .men-periode { display: inline-flex; gap: 6px; }
 .men-periode .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); }
 .men-periode .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
@@ -702,10 +702,6 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-leg__mk { width: 22px; height: 22px; }
 .men-leg__mk .icon { width: 11px; height: 11px; }
 
-.men-bulles { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 0 10px; }
-.men-bulles:empty { padding: 0; }
-.men-bulle { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); padding: 5px 14px 5px 6px; font-size: var(--fs-small); font-weight: var(--fw-medium); cursor: pointer; font-family: inherit; }
-.men-bulle img, .men-bulle .men-bien__ini { width: 28px; height: 28px; border-radius: var(--radius-pill); object-fit: cover; }
 
 @media (max-width: 899px) {
   .men-page { padding: 0 16px 100px; }
