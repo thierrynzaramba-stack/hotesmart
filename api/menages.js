@@ -23,6 +23,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { isActiveStatus } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
+const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 const { echeanceOffre, chargerLiaisons, chargerDisponibilites,
         deciderParGarde } = require('../lib/cleaning/assign')
 const { notifierAssignation, notifierProposition } = require('../lib/cleaning/notifier-prestataire')
@@ -57,6 +58,7 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST') {
     const action = req.body && req.body.action
     if (action === 'liaisons') return await ecrireLiaisons(req, res)
+    if (action === 'fait' || action === 'defaire') return await marquerDepuisLHote(req, res, action === 'fait')
     return await reassigner(req, res)
   }
   if (req.method !== 'GET') return res.status(405).json({ error: 'Méthode non autorisée' })
@@ -363,6 +365,64 @@ module.exports = async function handler(req, res) {
 // ⚠ Le menage est designe par son IDENTITE, pas par un id opaque venu du client
 // (REVIEW.md regle 11) : on ne fait pas confiance a un identifiant pour dire a
 // quel compte appartient la ressource. Le `user_id` du filtre vient de la garde.
+// ===== « FAIT » DEPUIS L'ECRAN DE L'HOTE (ecart D1 de l'inventaire) =====
+//
+// ⚠ L'ANCIEN ECRAN NE MARQUAIT QUE DANS LE NAVIGATEUR (`localStorage`) : le
+// geste ne quittait pas la machine, la prestataire ne le voyait pas, et il
+// disparaissait au changement d'appareil. Ici, l'hote ecrit dans la MEME
+// table que la PWA, par le MEME writer (`lib/cleaning/menage-fait`), chacun
+// derriere sa garde — `menages: write` pour lui, le jeton et ses gardes de
+// porteuse pour elle.
+//
+// ⚠ `done_by_token` RESTE NULL quand c'est l'hote : c'est la seule trace qui
+// distingue « marque par la personne qui l'a fait » de « marque par l'hote ».
+async function marquerDepuisLHote (req, res, fait) {
+  const appelant = await verifierSession(req, res)
+  if (!appelant) return
+  const garde = await requirePermission(req, res, {
+    domaine: 'menages', niveau: 'write', userId: appelant, compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+
+  const { property_id, booking_id, departure_date } = req.body || {}
+  if (!property_id || !booking_id || !departure_date) {
+    return res.status(400).json({ error: 'Champs requis manquants (property_id, booking_id, departure_date)' })
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(departure_date))) {
+    return res.status(400).json({ error: 'Format departure_date invalide, attendu YYYY-MM-DD' })
+  }
+  // Le bien doit etre DANS LE PERIMETRE : une reference passee dans le corps
+  // ne doit pas suffire a toucher le menage d'un bien qu'on ne voit pas.
+  const refs = refsDuPerimetre(garde.contexte)
+  if (Array.isArray(refs) && !refs.map(String).includes(String(property_id))) {
+    return res.status(403).json({ error: 'Bien hors périmètre' })
+  }
+  // ⚠ LE MENAGE DOIT EXISTER, ET N'ETRE PAS ANNULE. Sans ce controle, un
+  // couple (bien, reservation, date) invente creerait une ligne `menage_done`
+  // qui ne correspond a aucun menage — invisible et indelebile par l'ecran.
+  const { data: men, error: eMen } = await supabase.from('menages')
+    .select('status').eq('user_id', userId)
+    .eq('property_id', String(property_id)).eq('booking_id', String(booking_id))
+    .eq('departure_date', departure_date).maybeSingle()
+  if (eMen) {
+    console.error('[menages] lecture menage echec', eMen.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!men) return res.status(404).json({ error: 'Ménage introuvable' })
+  if (men.status === 'cancelled') return res.status(409).json({ error: 'Ce séjour est annulé' })
+
+  const r = fait
+    ? await marquerFait(supabase, { userId, propertyId: property_id, bookingId: booking_id,
+                                    departureDate: departure_date, parToken: null })
+    : await defaireFait(supabase, { userId, propertyId: property_id, bookingId: booking_id,
+                                    departureDate: departure_date })
+  if (!r.ok) {
+    console.error('[menages] menage_done echec', r.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+  return res.status(200).json({ ok: true, fait })
+}
+
 async function reassigner (req, res) {
   const appelant = await verifierSession(req, res)
   if (!appelant) return

@@ -402,5 +402,13 @@
   "menages.type_non_pris": "Proposé, toujours sans réponse",
   "menages.type_non_termine": "Ménage non marqué fait",
   "menages.type_mauvais_retour": "Mauvais retour du voyageur",
-  "menages.atraiter_tronque": "Liste incomplète — certaines alertes peuvent manquer."
+  "menages.atraiter_tronque": "Liste incomplète — certaines alertes peuvent manquer.",
+  "menages.valider": "Valider",
+  "menages.changer": "Changer",
+  "menages.changer_qui": "Confier à :",
+  "menages.changer_vide": "Aucune prestataire active.",
+  "menages.annuler": "Annuler",
+  "menages.fait_ok": "Ménage validé — {bien}",
+  "menages.change_ok": "Confié à {prenom}",
+  "menages.geste_echec": "Le geste n'a pas pu être enregistré."
 }

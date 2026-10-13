@@ -1080,3 +1080,31 @@ test('une panne de menage_done ne coupe PAS le planning : les ménages sortent, 
   assert.strictEqual(res.body.menages.length, 1)
   assert.strictEqual(res.body.menages[0].fait, false)
 })
+
+// ─── Lot Ménages V5, étape 3 : l'annuaire pour « changer la prestataire » ───
+
+test('la liste des prestataires ACTIVES sort, triée, sous `prestataires: read`', async () => {
+  const { handler } = preparer({ liaisons: [LIAISON()],
+    profils: [{ id: SECONDE, first_name: 'Marie', active: true },
+              { id: REGINA, first_name: 'Régina', active: true },
+              { id: 'p-off', first_name: 'Partie', active: false }] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(res.body.prestataires,
+    [{ id: SECONDE, prenom: 'Marie' }, { id: REGINA, prenom: 'Régina' }],
+    'les actives, par prénom — une désactivée ne s\'assigne pas')
+})
+
+test('sans `prestataires: read`, la liste est VIDE — pas un identifiant', async () => {
+  const { handler } = preparer({
+    user: MEMBRE,
+    profil: { id: 'pr1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { menages: 'read', prestataires: 'none', property_scope: 'all' },
+    liaisons: [LIAISON()]
+  })
+  const res = reponse()
+  await handler({ ...get(), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(res.body.prestataires, [])
+})

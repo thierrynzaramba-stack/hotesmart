@@ -402,5 +402,13 @@
   "menages.type_non_pris": "Offered, still no reply",
   "menages.type_non_termine": "Cleaning not marked done",
   "menages.type_mauvais_retour": "Bad guest feedback",
-  "menages.atraiter_tronque": "Incomplete list — some alerts may be missing."
+  "menages.atraiter_tronque": "Incomplete list — some alerts may be missing.",
+  "menages.valider": "Mark done",
+  "menages.changer": "Change",
+  "menages.changer_qui": "Assign to:",
+  "menages.changer_vide": "No active cleaner.",
+  "menages.annuler": "Undo",
+  "menages.fait_ok": "Cleaning marked done — {bien}",
+  "menages.change_ok": "Assigned to {prenom}",
+  "menages.geste_echec": "The action could not be saved."
 }

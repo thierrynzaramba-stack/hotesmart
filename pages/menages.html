@@ -87,6 +87,8 @@
   <p class="caption muted" data-bind="etat-charge" hidden></p>
 </main>
 
+<div class="cal-toasts" data-bind="toasts" aria-live="polite"></div>
+
 <nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
 
 <script src="/shared/i18n/i18n.js"></script>
@@ -98,7 +100,7 @@ import { supabase } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
-import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte }
+import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
   from '/shared/compte-courant.js'
 import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
@@ -130,6 +132,7 @@ const etat = {
   ordre: [],            // ordre des biens (poignée de déplacement, persisté)
   aTraiter: [],         // lignes de la bulle (fenêtre PROPRE : J−30 → J+30)
   aTraiterTronque: false,
+  prestataires: [],     // annuaire pour « changer la prestataire » (vide sans le droit)
   toutVoir: false,      // « Tout voir » déplié
   typeOuvert: null      // téléphone : le type dont la liste est ouverte
 }
@@ -186,6 +189,31 @@ async function appel (chemin) {
 // J−30 → hier pour « non terminé » et « mauvais retour ». Elle ne suit donc
 // PAS la période choisie — un hôte en vue 12 mois doit voir les mêmes
 // alertes qu'en vue 1 mois. 61 jours : une seule requête, sous le plafond.
+async function poster (chemin, corps) {
+  const { data: { session } } = await supabase.auth.getSession()
+  const r = await fetch(chemin, {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + session.access_token, 'Content-Type': 'application/json', ...enteteCompte() },
+    body: JSON.stringify(corps)
+  })
+  const c = await r.json().catch(() => ({}))
+  if (!r.ok) { const e = new Error(c.message || c.error || `HTTP ${r.status}`); e.status = r.status; throw e }
+  return c
+}
+
+// Un mot à l'écran après un geste, avec son « Annuler » quand le geste se
+// défait vraiment (⚠ jamais un « Annuler » qui ne rejoue pas l'inverse réel).
+function toast (texte, { annuler = null } = {}) {
+  const zone = $('[data-bind="toasts"]')
+  const el = document.createElement('div')
+  el.className = 'cal-toast'
+  el.innerHTML = `<span>${esc(texte)}</span>` +
+    (annuler ? `<button type="button" class="link" data-annuler>${esc(t('menages.annuler'))}</button>` : '')
+  zone.appendChild(el)
+  if (annuler) el.querySelector('[data-annuler]').addEventListener('click', () => { el.remove(); annuler() })
+  setTimeout(() => el.remove(), 6000)
+}
+
 let jetonBulle = 0
 async function chargerATraiter () {
   const jeton = ++jetonBulle
@@ -205,6 +233,7 @@ async function chargerATraiter () {
     // planning, donc le bandeau de `charger()` ne la couvre pas. Taire
     // celle-ci ferait d'un compte incomplet un compte qui paraît complet.
     etat.aTraiterTronque = !!r.tronque
+    etat.prestataires = r.prestataires || []
   } catch (e) {
     if (jeton !== jetonBulle) return
     // ⚠ UNE BULLE QUI N'A PAS PU LIRE NE DIT PAS « RIEN À TRAITER » : elle se
@@ -543,6 +572,57 @@ function trousDuBien (g) {
   return new Set((g ? g.jours : []).filter(j => j.trou && dans.has(j.date)).map(j => j.date))
 }
 
+// ─── Les gestes de la bulle (étape 3, demandés en recette) ─────────────────
+// ⚠ ILS ÉCRIVENT SUR LE SERVEUR, pas dans le navigateur. « Fait » marqué ici
+// est le même fait que celui de la PWA : même table, même writer (écart D1).
+async function validerMenage (l) {
+  try {
+    await poster('/api/menages', { action: 'fait', property_id: l.bienId,
+                                   booking_id: l.bookingId, departure_date: l.date })
+    toast(t('menages.fait_ok', { bien: l.bienNom }), {
+      annuler: async () => {
+        try {
+          await poster('/api/menages', { action: 'defaire', property_id: l.bienId,
+                                         booking_id: l.bookingId, departure_date: l.date })
+          await rafraichir()
+        } catch (e) { toast(e.message || t('menages.geste_echec')) }
+      }
+    })
+    await rafraichir()
+  } catch (e) { toast(e.message || t('menages.geste_echec')) }
+}
+
+// Changer la prestataire : la liste des actives, puis « Assigner » (transfert
+// immédiat) ou « Proposer » (elle confirme) — les deux gestes que le serveur
+// distingue déjà (spec §11.6).
+function ouvrirChangement (l, ancre) {
+  document.querySelectorAll('.men-choix').forEach(x => x.remove())
+  const choix = document.createElement('div')
+  choix.className = 'men-choix'
+  choix.innerHTML = `<p class="caption muted" style="margin: 0 0 6px">${esc(t('menages.changer_qui'))}</p>` +
+    etat.prestataires.map(p => `<button type="button" data-presta="${esc(p.id)}">${esc(p.prenom || '')}</button>`).join('') +
+    (etat.prestataires.length ? '' : `<p class="caption muted" style="margin: 0">${esc(t('menages.changer_vide'))}</p>`)
+  ancre.appendChild(choix)
+  const fermer = () => choix.remove()
+  setTimeout(() => document.addEventListener('click', fermer, { once: true }), 0)
+  choix.addEventListener('click', e => e.stopPropagation())
+  choix.querySelectorAll('[data-presta]').forEach(b => b.addEventListener('click', async () => {
+    fermer()
+    try {
+      const r = await poster('/api/menages', { property_id: l.bienId, booking_id: l.bookingId,
+                                               departure_date: l.date, provider_id: b.dataset.presta,
+                                               mode: 'assigner' })
+      toast(t('menages.change_ok', { prenom: r.prenom || b.textContent }))
+      await rafraichir()
+    } catch (e) { toast(e.message || t('menages.geste_echec')) }
+  }))
+}
+
+// Après un geste : la bulle ET le planning, puisque les deux lisent le cœur.
+async function rafraichir () {
+  await Promise.all([chargerATraiter(), charger()])
+}
+
 // ─── La bulle « À traiter » ─────────────────────────────────────────────────
 const ICONE_TYPE = {
   sans_personnel: 'i-shield-off', non_assigne: 'i-circle-dashed',
@@ -577,7 +657,23 @@ function ligneHtml (l) {
       <b>${esc(t('menages.type_' + l.type))}</b>
       <span class="caption muted">${esc(l.bienNom)} · ${esc(quand)}${qui}</span>
     </span>
+    ${boutonsLigne(l)}
   </div>`
+}
+
+// ⚠ CHAQUE BOUTON SUIT SON DROIT, et un bouton non autorisé est ABSENT du DOM
+// (décision G12) : griser promet un geste qu'on refusera.
+function boutonsLigne (l) {
+  const b = []
+  if (l.type === 'non_termine' && peutEcrire('menages')) {
+    b.push(`<button type="button" class="btn btn--secondary men-atr__btn" data-valider>${esc(t('menages.valider'))}</button>`)
+  }
+  // Changer la prestataire : partout où quelqu'un doit faire le ménage.
+  if (['non_termine', 'non_assigne', 'non_pris'].includes(l.type) &&
+      peutEcrire('prestataires') && etat.prestataires.length) {
+    b.push(`<button type="button" class="btn btn--secondary men-atr__btn" data-changer>${esc(t('menages.changer'))}</button>`)
+  }
+  return b.length ? `<span class="men-atr__actions">${b.join('')}</span>` : ''
 }
 
 function renderBulle () {
@@ -629,6 +725,15 @@ function renderBulle () {
     etat.typeOuvert = etat.typeOuvert === b.dataset.type ? null : b.dataset.type
     renderBulle()
   }))
+  // Les gestes : la ligne connaît SA donnée par son rang dans la liste rendue.
+  zone.querySelectorAll('.men-atr').forEach((el, i) => {
+    const l = filtrees[i]
+    if (!l) return
+    const v = el.querySelector('[data-valider]')
+    if (v) v.addEventListener('click', () => validerMenage(l))
+    const c = el.querySelector('[data-changer]')
+    if (c) c.addEventListener('click', (e) => { e.stopPropagation(); ouvrirChangement(l, el) })
+  })
 }
 
 // MÊME UI QUE LE CALENDRIER. Ordinateur : le sélecteur vit dans l'angle de la

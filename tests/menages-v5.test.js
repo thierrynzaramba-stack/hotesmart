@@ -91,6 +91,9 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
     'une bulle qui n\'a pas pu lire se TAIT, elle n\'annonce pas le calme': 'menages.atraiter_panne',
     'rien à traiter : une ligne blanche à coche verte, sans ambre': 'men-bulle--calme',
     'téléphone : compteurs seuls, un appui ouvre la liste du type': 'typeOuvert',
+    'valider un ménage écrit sur le SERVEUR, writer partagé avec la PWA (D1)': 'validerMenage',
+    'changer la prestataire depuis la bulle': 'ouvrirChangement',
+    '« Annuler » rejoue l\'inverse RÉEL (defaire), pas un simple retrait visuel': "action: 'defaire'",
     'X-Compte sur chaque appel': 'enteteCompte()',
     'entrée sous menages:read, erreur 403 dite': 'menages.no_access'
   }
@@ -131,10 +134,17 @@ test('ménages : la route /menages existe (cleanUrls : pas de .html en destinati
   assert.ok(!/"destination": "\/pages\/menages\.html"/.test(v), 'destination avec .html')
 })
 
-test('ménages : étape 1 en LECTURE SEULE — aucune écriture depuis la page', () => {
+test('ménages : les écritures passent par l\'ENDPOINT gardé, jamais par Supabase direct', () => {
+  // ⚠ Depuis l'étape 3 (gestes de la bulle), la page écrit. Ce qu'on garde :
+  // aucune table touchée depuis le navigateur — tout passe par /api/menages,
+  // qui porte la session, le droit et le périmètre.
   const src = sansCommentaires(html())
-  assert.ok(!/method:\s*'POST'|method:\s*"POST"/.test(src), 'un POST à l\'étape 1')
-  assert.ok(!src.includes('.insert(') && !src.includes('.update(') && !src.includes('.upsert('), 'écriture directe')
+  assert.ok(!src.includes('.insert(') && !src.includes('.update(') && !src.includes('.upsert(') &&
+            !src.includes('.delete('), 'écriture Supabase directe depuis la page')
+  assert.ok(src.includes("poster('/api/menages'"), 'les gestes passent par l\'endpoint')
+  // Et chaque bouton suit SON droit, absent du DOM sinon (décision G12).
+  assert.ok(/peutEcrire\('menages'\)/.test(src), '« Valider » sous menages:write')
+  assert.ok(/peutEcrire\('prestataires'\)/.test(src), '« Changer » sous prestataires:write')
 })
 
 test('ménages : le sprite porte les icônes neuves (bouclier barré, pouces)', () => {

@@ -402,5 +402,13 @@
   "menages.type_non_pris": "Propuesta, aún sin respuesta",
   "menages.type_non_termine": "Limpieza sin marcar como hecha",
   "menages.type_mauvais_retour": "Mal comentario del viajero",
-  "menages.atraiter_tronque": "Lista incompleta: pueden faltar alertas."
+  "menages.atraiter_tronque": "Lista incompleta: pueden faltar alertas.",
+  "menages.valider": "Validar",
+  "menages.changer": "Cambiar",
+  "menages.changer_qui": "Asignar a:",
+  "menages.changer_vide": "Ninguna persona activa.",
+  "menages.annuler": "Deshacer",
+  "menages.fait_ok": "Limpieza validada — {bien}",
+  "menages.change_ok": "Asignado a {prenom}",
+  "menages.geste_echec": "No se pudo guardar la acción."
 }

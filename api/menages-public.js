@@ -1,6 +1,6 @@
 // ⚠️ DOC : comportement documenté dans docs/kb/menage.md — si tu modifies/ajoutes/supprimes une fonctionnalité ici, mets à jour ce(s) kb (MÊME COMMIT).
 const { createClient } = require('@supabase/supabase-js')
-const { markReady } = require('../lib/cron-property-status')
+const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 // Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
@@ -401,33 +401,19 @@ module.exports = async function handler(req, res) {
             : 'Ce ménage ne vous est pas attribué' })
         }
 
-        // Insert dans menage_done. ON CONFLICT DO NOTHING grace a la contrainte unique.
-        // On utilise upsert avec ignoreDuplicates pour rester idempotent.
-        const { error: insertErr } = await supabase
-          .from('menage_done')
-          .upsert({
-            user_id: userId,
-            property_id: String(property_id),
-            booking_id: String(booking_id),
-            departure_date,
-            done_by_token: token
-          }, { onConflict: 'user_id,property_id,booking_id,departure_date', ignoreDuplicates: true })
-
-        if (insertErr) {
-          console.error('[Menage] Erreur insert menage_done:', insertErr.message)
+        // ⚠ LE WRITER PARTAGE (lib/cleaning/menage-fait) : la PWA et l'ecran
+        // de l'hote ecrivent par la MEME porte, chacun derriere SES gardes.
+        // `done_by_token` porte le jeton : c'est la trace qui dit que c'est
+        // la prestataire elle-meme qui a marque.
+        const fait = await marquerFait(supabase, {
+          userId, propertyId: property_id, bookingId: booking_id,
+          departureDate: departure_date, parToken: token
+        })
+        if (!fait.ok) {
+          console.error('[Menage] Erreur insert menage_done:', fait.message)
           return res.status(500).json({ error: 'Erreur enregistrement menage' })
         }
-
-        // Met a jour property_status.last_menage_at via la fonction existante
-        try {
-          await markReady(userId, String(property_id))
-          console.log(`[Menage] ${property_id} booking ${booking_id} dep ${departure_date} -> ready`)
-        } catch (err) {
-          console.error('[Menage] Erreur markReady:', err.message)
-          // On ne bloque pas la reponse : le menage_done est deja insere,
-          // c'est la verite. property_status est secondaire.
-        }
-
+        console.log(`[Menage] ${property_id} booking ${booking_id} dep ${departure_date} -> ready`)
         return res.json({ success: true, message: 'Menage marque, logement pret' })
       } catch (err) {
         console.error('[Menage] markDone erreur:', err.message)
@@ -474,42 +460,16 @@ module.exports = async function handler(req, res) {
         }
 
         // Suppression de la ligne menage_done
-        const { error: delErr } = await supabase
-          .from('menage_done')
-          .delete()
-          .eq('user_id', userId)
-          .eq('property_id', String(property_id))
-          .eq('booking_id', String(booking_id))
-          .eq('departure_date', departure_date)
-
-        if (delErr) {
-          console.error('[Menage] Erreur delete menage_done:', delErr.message)
+        // ⚠ LE WRITER PARTAGE, comme markDone : il recale `last_menage_at`
+        // sur le ménage fait le plus récent qui RESTE, et ne touche à rien
+        // s'il n'en reste aucun (cette date peut venir d'ailleurs).
+        const defait = await defaireFait(supabase, {
+          userId, propertyId: property_id, bookingId: booking_id, departureDate: departure_date
+        })
+        if (!defait.ok) {
+          console.error('[Menage] Erreur delete menage_done:', defait.message)
           return res.status(500).json({ error: 'Erreur suppression menage' })
         }
-
-        // Recalcul de last_menage_at = MAX(done_at) des menages restants pour ce bien.
-        // Si plus aucun menage : on remet last_menage_at a NULL (ou on laisse tel quel ?
-        // On choisit de laisser tel quel pour ne pas casser un last_menage_at venu d'ailleurs).
-        const { data: latestDone } = await supabase
-          .from('menage_done')
-          .select('done_at')
-          .eq('user_id', userId)
-          .eq('property_id', String(property_id))
-          .order('done_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        if (latestDone) {
-          await supabase
-            .from('property_status')
-            .update({ last_menage_at: latestDone.done_at, updated_at: new Date().toISOString() })
-            .eq('user_id', userId)
-            .eq('property_id', String(property_id))
-        }
-        // Si latestDone est null, on ne touche pas a property_status :
-        // last_menage_at peut venir d'autre source (cron, ancien etat) qu'on
-        // ne veut pas effacer aveuglement.
-
         console.log(`[Menage] markUndone ${property_id} booking ${booking_id} dep ${departure_date}`)
         return res.json({ success: true, message: 'Menage decoche' })
       } catch (err) {

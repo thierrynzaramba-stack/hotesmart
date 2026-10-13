@@ -208,6 +208,7 @@ module.exports = async function handler (req, res) {
 
     // ===== L'ANNUAIRE, ET LES POUCES =====
     const prenoms = {}
+    let prestataires = []
     if (avecNoms) {
       const { data: pr, error: errPr } = await supabase.from('profiles')
         .select('id, first_name, active')
@@ -217,7 +218,13 @@ module.exports = async function handler (req, res) {
       // l'absence rendrait la garde FAUSSE.
       if (errPr) console.error('[garde] lecture annuaire echec', errPr.message)
       for (const p of (pr || [])) prenoms[p.id] = { prenom: p.first_name, actif: p.active !== false }
-
+      // ⚠ L'ANNUAIRE EST DEJA LU : on l'EXPOSE, pour que l'ecran puisse offrir
+      // « changer la prestataire » sans une requete de plus. Les DESACTIVEES
+      // en sont exclues — on ne propose pas d'assigner quelqu'un qui n'est
+      // plus dans l'equipe. Rien ne sort sans `prestataires: read`.
+      prestataires = (pr || []).filter(p => p.active !== false)
+        .map(p => ({ id: p.id, prenom: p.first_name }))
+        .sort((a, b) => String(a.prenom || '').localeCompare(String(b.prenom || '')))
     }
 
     // ===== LES ABSENCES DES PRESTATAIRES : PLUS CALCULEES =====
@@ -404,7 +411,7 @@ module.exports = async function handler (req, res) {
     }))
 
     return res.status(200).json({
-      jours, biens, garde: gardeParBien, menages,
+      jours, biens, garde: gardeParBien, menages, prestataires,
       avec_noms: avecNoms,
       // ⚠ `avec_avis` DIT CE QUI SORT, pas ce que le droit autorise. Le retour de
       // propreté est une parole de voyageur rapportée à côté d'un nom : sans

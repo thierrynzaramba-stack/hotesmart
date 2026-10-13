@@ -3697,3 +3697,27 @@ et le cron recalcule cette valeur.
 geste ne se répète pas. Il contourne sciemment le writer unique
 (`api/menages-public.js`), ce qui est acceptable pour un rattrapage
 d'historique daté, pas comme habitude.
+
+### « Fait » et « Changer » depuis l'écran de l'hôte (13 octobre 2026, étape 3)
+
+**L'écart D1 est soldé.** `lib/cleaning/menage-fait.js` est LE writer de
+`menage_done` : la PWA de la prestataire et l'écran de l'hôte écrivent par la
+même porte, chacun derrière SES gardes (jeton + porteuse + fenêtre pour elle,
+session + `menages: write` + périmètre pour lui). L'ancien écran hôte ne
+marquait que dans `localStorage` — le geste ne quittait pas la machine.
+
+- `POST /api/menages {action:'fait'|'defaire', property_id, booking_id,
+  departure_date}` : garde `menages: write` (compteDelegue), bien dans le
+  périmètre, **ménage existant et non annulé** (sans ce contrôle, un couple
+  inventé créait une ligne orpheline, invisible et indélébile par l'écran).
+- `done_by_token` reste **NULL** quand c'est l'hôte : c'est la seule trace qui
+  distingue « marqué par la personne qui l'a fait » d'un geste de l'hôte.
+- « Annuler » du message rejoue l'INVERSE RÉEL (`defaire`), jamais un simple
+  retrait visuel.
+- **Changer la prestataire** réutilise la réassignation existante (spec §11.6,
+  garde `prestataires: write`), en mode `assigner` : le geste part d'une
+  alerte, donc il est immédiat et elle est notifiée. `api/garde.js` expose
+  l'annuaire qu'il lisait déjà (`prestataires[]`, actives seulement, rien sans
+  `prestataires: read`) — aucune requête de plus.
+- Chaque bouton suit SON droit et est **absent du DOM** sinon : griser
+  promettrait un geste qu'on refuserait.

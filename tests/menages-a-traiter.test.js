@@ -201,3 +201,14 @@ test('un bien SANS ligne de garde du tout reste traité (le serveur peut n\'en r
   const l = appeler({ menages: [menage({ date: '2026-10-20' })] })
   assert.deepEqual(l.map(x => x.type), ['non_assigne'])
 })
+
+test('chaque ligne de ménage porte son bookingId — sans lui, aucun geste ne sait quoi valider', async () => {
+  const l = appeler({ menages: [
+    menage({ bookingId: 'x1', date: '2026-10-20' }),                      // non assigné
+    menage({ bookingId: 'x2', date: '2026-10-10', porteur: REGINA }),     // non terminé
+    menage({ bookingId: 'x3', date: '2026-10-14', proposeesA: [REGINA] }) // non pris
+  ] })
+  assert.equal(l.length, 3)
+  for (const x of l) assert.ok(x.bookingId, `${x.type} sans bookingId`)
+  assert.deepEqual(l.map(x => x.bookingId).sort(), ['x1', 'x2', 'x3'])
+})

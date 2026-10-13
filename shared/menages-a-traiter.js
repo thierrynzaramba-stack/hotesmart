@@ -75,14 +75,14 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
 
     // ─── Non terminé : départ passé, jamais marqué fait ───────────────────
     if (passe) {
-      if (!m.fait && confie) ajouter('non_termine', bien, m.date, { qui: m.porteur || null })
+      if (!m.fait && confie) ajouter('non_termine', bien, m.date, { bookingId: String(m.bookingId), qui: m.porteur || null })
       // ─── Mauvais retour : une remarque CONFIRMÉE sur un ménage fait ─────
       // (le serveur ne rend que les verdicts validés par un humain, et rien
       // du tout sans le droit `avis`.)
       // ⚠ CELUI-CI VAUT AUSSI POUR UN BIEN NON CONFIÉ : ce n'est pas une
       // alerte de couverture, c'est la parole d'un voyageur sur un séjour.
       if (avecAvis && m.retour && m.retour.verdict === 'remarque') {
-        ajouter('mauvais_retour', bien, m.date, { qui: m.porteur || null, retour: m.retour })
+        ajouter('mauvais_retour', bien, m.date, { bookingId: String(m.bookingId), qui: m.porteur || null, retour: m.retour })
       }
       continue
     }
@@ -98,7 +98,7 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
       // l'écran annoncer le calme (revue de c197a10).
       const expiree = m.expireLe && Date.parse(m.expireLe) <= maintenant
       if (m.date <= limiteImminente || expiree) {
-        ajouter('non_pris', bien, m.date, { qui: tour[0], expireLe: m.expireLe || null })
+        ajouter('non_pris', bien, m.date, { bookingId: String(m.bookingId), qui: tour[0], expireLe: m.expireLe || null })
       }
       continue
     }
@@ -109,7 +109,7 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
     // J−7, alors que c'est exactement ce qui demande une décision humaine
     // (§13 : « plus de preneur possible » ; revue de c197a10).
     if (m.differe && m.status !== 'orphaned') continue
-    ajouter('non_assigne', bien, m.date)
+    ajouter('non_assigne', bien, m.date, { bookingId: String(m.bookingId) })
   }
 
   return lignes.sort((a, b) =>
