@@ -1305,12 +1305,16 @@ if ("serviceWorker" in navigator) {
         }
       }
 
+      // ⚠ `detail` porte le nom du voyageur et la consigne de l'hote (type
+      // `note`) : des donnees du coeur, pas les notres. On echappe AVANT de
+      // poser les `<br>` — dans l'autre ordre, ils seraient echappes a leur
+      // tour et le texte afficherait « <br> » en toutes lettres (D2).
       return `
-        <div class="news-item ${n.read ? 'read' : 'unread'}" data-id="${n.id}">
+        <div class="news-item ${n.read ? 'read' : 'unread'}" data-id="${echapper(n.id)}">
           <div class="news-icon">${icons[n.event_type] || '📋'}</div>
           <div class="news-content">
-            <div class="news-content-title">${labels[n.event_type] || n.event_type}</div>
-            <div class="news-content-sub">${detail.replace(/\n/g, '<br>')}</div>
+            <div class="news-content-title">${labels[n.event_type] || echapper(n.event_type)}</div>
+            <div class="news-content-sub">${echapper(detail).replace(/\n/g, '<br>')}</div>
           </div>
           <div class="news-time">${timeStr}</div>
         </div>
@@ -1897,18 +1901,22 @@ if ("serviceWorker" in navigator) {
     rendreLesCartes()
     document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
     document.getElementById('modal-sub').textContent = formatDate(m.date)
+    // ⚠ TOUT CE QUI VIENT DU COEUR PASSE PAR `echapper`, ICI AUSSI. Le nom du
+    // voyageur est ecrit par la sync depuis le payload provider, la consigne par
+    // l'hote : aucun des deux n'est a nous. C'etait le seul gabarit du fichier
+    // a interpoler ces champs nus dans `innerHTML` (lot Menages V5, D2).
     document.getElementById('modal-body').innerHTML = `
-      <div class="modal-row"><span>Voyageur</span><span>${m.guestName}</span></div>
-      <div class="modal-row"><span>Adultes</span><span>${m.numAdult || '—'}</span></div>
-      <div class="modal-row"><span>Enfants</span><span>${m.numChild > 0 ? m.numChild + ' enfant(s) 👶' : 'Aucun'}</span></div>
-      <div class="modal-row"><span>Arrivée</span><span>${m.arrival || '—'}</span></div>
-      <div class="modal-row"><span>Départ</span><span>${m.departure || '—'}</span></div>
+      <div class="modal-row"><span>Voyageur</span><span>${echapper(m.guestName)}</span></div>
+      <div class="modal-row"><span>Adultes</span><span>${echapper(m.numAdult || '—')}</span></div>
+      <div class="modal-row"><span>Enfants</span><span>${m.numChild > 0 ? echapper(m.numChild) + ' enfant(s) 👶' : 'Aucun'}</span></div>
+      <div class="modal-row"><span>Arrivée</span><span>${echapper(m.arrival || '—')}</span></div>
+      <div class="modal-row"><span>Départ</span><span>${echapper(m.departure || '—')}</span></div>
       <div class="modal-row"><span>Statut</span><span>${m.done ? '✅ Effectué' : (m.pending ? '⏳ En attente d envoi' : '⏳ À faire')}</span></div>
     `
 
     const noteEl = document.getElementById('modal-note')
     noteEl.innerHTML = m.comment
-      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${m.comment}</div>`
+      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${echapper(m.comment)}</div>`
       : ''
 
     hideModalMessages()
