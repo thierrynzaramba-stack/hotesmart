@@ -412,6 +412,18 @@ disparu), dates reservees non grisees, ORDRE des biens par glisser (poignee
 du bandeau, tactile + souris) — liste etat.choisis persistee COMMUNE aux
 deux ecrans.
 
+**Redirections FAITES le 13 octobre 2026 (4a108e5, go de Thierry)** :
+biens-calendrier.html et calendrier-mobile.html redirigent vers /calendrier ;
+redirects declaratifs vercel.json (/biens/:id/calendrier -> /calendrier?bien=:id,
+honore par la V5 : le bien demande s'affiche en tete). Les ~96 garde-fous des
+anciennes pages sont RETARGES sur la V5 (11 fichiers de tests — les gardes
+SERVEUR de reservation-directe restaurees apres review). Multi-biens au
+telephone (calendriers EMPILES, bulles = ajout), ordre des biens par GLISSER
+(poignee du bandeau), vue partagee par selecteur, fiche enrichie (detail
+?booking=). Suite : 4988 tests dont 28 rouges attendus. EN SUSPENS (Thierry
+tranche) : le SURVOL DE COLONNE de l'ancien planning (demande du 21/09)
+n'existe pas en V5 — a reporter ou abandonner.
+
 (Bloc d'origine :) `/calendrier` (pages/calendrier.html, contrat partage
 shared/calendrier-contrat.js, orphelines shared/nuits-orphelines.js) : grille
 par blocs de bien (nom hors cadre, 2 lignes de contenu, vignette supprimee puis
