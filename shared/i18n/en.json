@@ -389,5 +389,6 @@
   "menages.tt_alerte": "Nobody to do it",
   "menages.tt_propose": "Offered, awaiting reply",
   "menages.retour_bon": "good guest feedback",
-  "menages.retour_mauvais": "bad guest feedback"
+  "menages.retour_mauvais": "bad guest feedback",
+  "menages.personne_jour": "No cleaner available"
 }

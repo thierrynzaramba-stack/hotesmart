@@ -389,5 +389,6 @@
   "menages.tt_alerte": "Personne pour le faire",
   "menages.tt_propose": "Proposé, en attente de réponse",
   "menages.retour_bon": "bon retour du voyageur",
-  "menages.retour_mauvais": "mauvais retour du voyageur"
+  "menages.retour_mauvais": "mauvais retour du voyageur",
+  "menages.personne_jour": "Aucune prestataire disponible"
 }

@@ -263,9 +263,11 @@ composants (décisions de Thierry) :
   période souligné est RETIRÉ (et le sélecteur de mois avec lui) ;
 - moins de bruit : une absence est une CASE VIDE (les pilules « Absente »
   sont retirées de l'écran ; l'endpoint continue de servir `absences[]`) ;
-  une désactivée = prénom grisé, ligne vide ; « Personne » rouge hachuré =
-  les seuls jours sans AUCUNE prestataire disponible (remplace le gris
-  « on voit venir » du §12.6) ;
+  une désactivée = prénom grisé, ligne vide ; les jours sans AUCUNE
+  prestataire disponible marquent la COLONNE du bien en rouge hachuré avec
+  un « ! » (recette du 13 octobre : une ligne nommée « Personne » laissait
+  croire à une personne de plus dans l'équipe) ; ils remplacent le gris
+  « on voit venir » du §12.6 ;
 - TROIS états de pastille, sans légende : à faire (blanche, balai — pris et
   à venir fusionnés), fait (verte, coche + badge retour), personne pour le
   faire (rouge, !) ; infobulle = état · prénom · date ; la légende sous la

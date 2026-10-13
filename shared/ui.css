@@ -658,7 +658,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-fond { position: absolute; inset: 0; z-index: 0; display: grid; grid-template-columns: repeat(var(--n), 46px); pointer-events: none; }
 /* Le fond est positionné : sans contre-mesure il PEINDRAIT PAR-DESSUS les
    barres (statiques), qui paraissaient coupées à chaque week-end. */
-.men-barre, .men-trou, .men-case { position: relative; z-index: 1; }
+.men-barre, .men-case { position: relative; z-index: 1; }
 .men-jj { align-self: stretch; height: 100%; border-inline-end: 1px solid var(--line); }
 .men-jj:last-child { border-inline-end: 0; }
 .men-jj.cal-we { background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); }
@@ -666,8 +666,12 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-jj.cal-we--debut.cal-auj { box-shadow: inset 1.5px 0 0 var(--info), inset -1.5px 0 0 var(--info), inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
 
 .men-barre { height: 28px; margin: 0 2px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
-.men-trou { height: 28px; margin: 0 2px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--danger); border: 1.5px dashed var(--danger); background: repeating-linear-gradient(135deg, var(--danger-soft) 0 5px, var(--surface) 5px 10px); overflow: hidden; white-space: nowrap; }
-.men-trou .icon { width: 13px; height: 13px; flex: none; }
+/* Jour sans AUCUNE prestataire disponible : la colonne entière du bien, en
+   rouge hachuré, un « ! » en tête de bloc (recette du 13 octobre — une
+   ligne « Personne » laissait croire à une personne de plus dans l'équipe). */
+.men-jj--trou { background: repeating-linear-gradient(135deg, var(--danger-soft) 0 5px, var(--surface) 5px 10px); border-inline-end-color: color-mix(in srgb, var(--danger) 35%, transparent); pointer-events: auto; }
+.men-jj__bang { position: absolute; top: 2px; inset-inline-start: 0; right: 0; text-align: center; font-size: var(--fs-caption); font-weight: var(--fw-black); color: var(--danger); }
+.men-jj { position: relative; }
 
 /* Les TROIS pastilles (décision du 13 octobre) : à faire (blanche, balai),
    fait (verte, coche + badge retour), personne pour le faire (rouge, !). */

@@ -3638,10 +3638,11 @@ La page `/menages` reprend LE GABARIT du calendrier : bande partagée
 `shared/bande-jours.js` (utilisée par les deux pages), blocs bordés,
 colonnes 46 px, angle/bulles, barre de période. TROIS états de pastille
 (à faire / fait + badge retour / personne pour le faire) ; une absence est
-une case vide (l'endpoint SERT toujours `absences[]`, l'écran ne la dessine
-plus — décision de Thierry) ; « Personne » rouge = les seuls jours de trou
-de garde (le gris du §12.6 est retiré) ; désactivée = prénom grisé, ligne
-vide. Bouton de période actif NOIR sur toutes les pages (le calendrier est
+une case vide (décision de Thierry) ; un jour sans aucune prestataire
+disponible marque la COLONNE du bien en rouge hachuré avec un « ! » — pas
+de ligne « Personne », qui se lisait comme une personne de plus dans
+l'équipe ; désactivée = prénom grisé, ligne vide ; pas de bulle d'initiales
+dans la colonne des prénoms (la couleur vit sur la barre). Bouton de période actif NOIR sur toutes les pages (le calendrier est
 aligné).
 
 **Deux composants PARTAGÉS** (recette : « reprendre, pas imiter ») :

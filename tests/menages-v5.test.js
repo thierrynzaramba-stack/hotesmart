@@ -69,7 +69,7 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
     'badge retour vert/rouge sur un ménage fait (Q3)': 'men-mk__retour',
     'jours à régler = engrenage gris, jamais « € » (Q4)': 'men-regler',
     'bien non confié : aucune ligne, jamais de rouge (3 septembre)': 'menages.non_confie',
-    '« Personne » = les jours sans AUCUNE prestataire disponible (13/10)': 'renderTrous',
+    'les jours sans AUCUNE prestataire : la COLONNE du bien, pas une ligne (13/10)': 'men-jj--trou',
     'sans prestataires:read : ligne neutre, pas d\'identifiant (invariant A.5)': 'CLE_COUVERTURE',
     'ligne temporaire de la remplaçante (ménage sans barre)': 'lignesDuBien',
     'deux ménages même jour même ligne : pastille chiffrée': 'men-mk__n',

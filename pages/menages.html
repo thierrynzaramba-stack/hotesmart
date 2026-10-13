@@ -309,17 +309,26 @@ function lignesDuBien (bien, g, menagesDuBien) {
 // Fond des colonnes, peint en PREMIER dans chaque ligne : une cellule par
 // jour (filet, teinte week-end, rails d'aujourd'hui) — la même grammaire que
 // la ligne Réservations du calendrier (cal-resas__jour).
-let fondsCache = ''
-function fondsJours () {
-  if (!fondsCache) {
-    // ⚠ UN CONTENEUR DÉDIÉ, comme `cal-resas__fond` du calendrier : dans la
-    // piste elle-même, les cellules sont suivies des barres et des pastilles,
-    // donc `:last-child` ne désignait jamais le dernier jour et le filet de
-    // droite doublait la bordure du cadre (revue de 742fa7f).
-    fondsCache = `<span class="men-fond">` + etat.jours.map(iso =>
-      `<span class="men-jj${classesWE(iso)}${iso === AUJOURDHUI ? ' cal-auj' : ''}"></span>`).join('') + `</span>`
+// ⚠ UN CONTENEUR DÉDIÉ, comme `cal-resas__fond` du calendrier : dans la
+// piste elle-même, les cellules sont suivies des barres et des pastilles,
+// donc `:last-child` ne désignait jamais le dernier jour et le filet de
+// droite doublait la bordure du cadre (revue de 742fa7f).
+//
+// ⚠ LE FOND PORTE AUSSI LES JOURS SANS PERSONNE (recette du 13 octobre) :
+// plus de ligne « Personne » dédiée — la COLONNE du bien passe en rouge
+// hachuré, et un « ! » la nomme sur la première ligne du bloc.
+const fondsCache = new Map()
+function fondsJours (trous, marque) {
+  const cle = `${marque ? 'M' : '-'}|${[...(trous || [])].sort().join(',')}`
+  if (!fondsCache.has(cle)) {
+    fondsCache.set(cle, `<span class="men-fond">` + etat.jours.map(iso => {
+      const trou = !!(trous && trous.has(iso))
+      const bang = trou && marque ? `<span class="men-jj__bang" aria-hidden="true">!</span>` : ''
+      const titre = trou ? ` title="${esc(t('menages.personne_jour') + ' — ' + dateLongue(iso))}"` : ''
+      return `<span class="men-jj${classesWE(iso)}${iso === AUJOURDHUI ? ' cal-auj' : ''}${trou ? ' men-jj--trou' : ''}"${titre}>${bang}</span>`
+    }).join('') + `</span>`)
   }
-  return fondsCache
+  return fondsCache.get(cle)
 }
 
 // Les suites de jours consécutifs d'un ensemble, en indices de la fenêtre.
@@ -344,7 +353,7 @@ function renderTout () {
   $('[data-bind="avis-tronque"]').hidden = !etat.tronque
   document.querySelectorAll('[data-mois]').forEach(b =>
     b.setAttribute('aria-pressed', String(Number(b.dataset.mois) === etat.mois)))
-  fondsCache = ''
+  fondsCache.clear()
 
   // L'ordre des biens suit la poignée (persisté, biens masqués compris).
   const rang = new Map(ordreComplet().map((id, i) => [id, i]))
@@ -395,10 +404,13 @@ function renderTout () {
         title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
     </div></div>`
     // Un bien non confié : aucune ligne, jamais de rouge (décision du 3 sept.).
+    // Un bien non confié n'a PAS de jours « sans personne » : il n'a confié
+    // aucun ménage (décision du 3 septembre, pas de rouge permanent).
+    const trous = gere ? trousDuBien(g) : new Set()
     const corps = !gere
-      ? (menagesDuBien.length ? renderLignes(bien, g, menagesDuBien)
+      ? (menagesDuBien.length ? renderLignes(bien, g, menagesDuBien, trous)
          : `<p class="men-nonconfie caption muted" data-i18n="menages.non_confie"></p>`)
-      : renderLignes(bien, g, menagesDuBien) + renderTrous(bien, g, menagesDuBien)
+      : renderLignes(bien, g, menagesDuBien, trous)
     return `<section class="men-bloc" data-bien-section="${esc(bien.id)}">
       ${enteteBien}<div class="men-cadre">${corps}</div>
     </section>`
@@ -435,10 +447,10 @@ function ordreComplet () {
 }
 
 
-function renderLignes (bien, g, menagesDuBien) {
+function renderLignes (bien, g, menagesDuBien, trous) {
   const lanes = lignesDuBien(bien, g, menagesDuBien)
   const nb = etat.jours.length
-  return lanes.map(l => {
+  return lanes.map((l, rang) => {
     const sans = l.cle === CLE_SANS
     const anonyme = l.cle === CLE_COUVERTURE
     const coul = sans || anonyme ? 'var(--surface-2)' : couleurDe(l.cle)
@@ -468,27 +480,18 @@ function renderLignes (bien, g, menagesDuBien) {
     }).join('')
     return `<div class="men-ligne">
       <div class="cal-bien__coin"><span class="men-qui${sans || off ? ' men-qui--off' : ''}"><span class="men-prenom">${esc(nom)}</span>${regler}</span></div>
-      <span class="men-lane" style="--n: ${nb}">${fondsJours()}${barres}${pastilles}</span>
+      <span class="men-lane" style="--n: ${nb}">${fondsJours(trous, rang === 0)}${barres}${pastilles}</span>
     </div>`
   }).join('')
 }
 
-// « Personne » : les jours où AUCUNE prestataire n'est disponible pour le
-// bien (trous de garde) — rouge hachuré, et seulement eux (décision du
-// 13 octobre, qui remplace le gris « on voit venir » du §12.6).
-function renderTrous (bien, g, menagesDuBien) {
-  const trous = new Set((g.jours || []).filter(j => j.trou && etat.jours.includes(j.date)).map(j => j.date))
-  if (!trous.size) return ''
-  const segments = suites(trous).map(r => {
-    const quand = r.debut === r.fin ? dateLongue(etat.jours[r.debut])
-      : `${dateLongue(etat.jours[r.debut])} → ${dateLongue(etat.jours[r.fin])}`
-    const libelle = r.fin > r.debut ? '<span data-i18n="menages.personne"></span>' : ''
-    return `<span class="men-trou" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(quand)}">${icone('i-shield-off')}${libelle}</span>`
-  }).join('')
-  return `<div class="men-ligne">
-    <div class="cal-bien__coin"><span class="men-qui men-qui--off"><span class="men-prenom" data-i18n="menages.personne"></span></span></div>
-    <span class="men-lane" style="--n: ${etat.jours.length}">${fondsJours()}${segments}</span>
-  </div>`
+// Les jours où AUCUNE prestataire n'est disponible pour le bien. Ils ne
+// font plus une LIGNE à eux (recette du 13 octobre) : c'est la COLONNE du
+// bien qui passe en rouge hachuré, avec un « ! » — une ligne nommée
+// « Personne » laissait croire à une personne de plus dans l'équipe.
+function trousDuBien (g) {
+  const dans = new Set(etat.jours)
+  return new Set((g ? g.jours : []).filter(j => j.trou && dans.has(j.date)).map(j => j.date))
 }
 
 // MÊME UI QUE LE CALENDRIER. Ordinateur : le sélecteur vit dans l'angle de la

@@ -389,5 +389,6 @@
   "menages.tt_alerte": "Nadie para hacerla",
   "menages.tt_propose": "Propuesta, esperando respuesta",
   "menages.retour_bon": "buen comentario del viajero",
-  "menages.retour_mauvais": "mal comentario del viajero"
+  "menages.retour_mauvais": "mal comentario del viajero",
+  "menages.personne_jour": "Ninguna persona disponible"
 }
