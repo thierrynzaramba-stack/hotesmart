@@ -239,3 +239,14 @@ Ces décisions FONT FOI sur les sections précédentes en cas de divergence.
   liste incomplète (`tronque`) = bandeau visible comme l'ancien Planning ;
   badge de navigation alimenté comme `pendingMessages` (précisé à
   l'étape 2) ; détail du jour agrégé remplacé par la fiche ménage.
+
+### Précision d'étape 1 (revue de 4235a21)
+
+- **Un ménage = UN marqueur**, posé sur la ligne de la première sollicitée du
+  tour ; les autres lignes du tour restent vierges ce jour-là. Le tour entier
+  se lit dans l'infobulle (et dans la fiche ménage à l'étape 3). Doubler la
+  pastille sur chaque ligne compterait deux ménages là où il n'y en a qu'un.
+- **Sur une pastille agrégée (« 2 »), le plus grave l'emporte** (non pris >
+  non assigné > pris > à venir > fait) — même règle que l'ancien Planning.
+- Les jours d'un trou de garde sont peints **jour par jour** : rouge ceux qui
+  portent un ménage, gris les autres (§12.6).

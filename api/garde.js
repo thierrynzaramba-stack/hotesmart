@@ -189,6 +189,7 @@ module.exports = async function handler (req, res) {
     // C'est la difference avec les liaisons, dont l'absence rendrait la garde
     // fausse. Le writer de la table reste la PWA (un writer par domaine).
     const faits = new Set()
+    let tronqueFaits = false
     if ((menagesRows || []).length) {
       const { data: doneRows, error: errDone } = await supabase.from('menage_done')
         .select('property_id, booking_id, departure_date')
@@ -196,6 +197,9 @@ module.exports = async function handler (req, res) {
         .in('booking_id', [...new Set(menagesRows.map(m => String(m.booking_id)))])
         .limit(LOT_MENAGES)
       if (errDone) console.error('[garde] lecture menage_done echec', errDone.message)
+      // ⚠ UNE TRONCATURE SE DIT — celle-ci aussi (revue de 4235a21) : au-delà
+      // du lot, des menages FAITS redeviendraient « a faire » sans bandeau.
+      tronqueFaits = (doneRows || []).length >= LOT_MENAGES
       for (const d of (doneRows || [])) {
         faits.add(`${String(d.property_id)}|${String(d.booking_id)}|${String(d.departure_date).slice(0, 10)}`)
       }
@@ -344,7 +348,10 @@ module.exports = async function handler (req, res) {
     const menages = (menagesRows || []).map(m => ({
       propertyId: String(m.property_id),
       bookingId: String(m.booking_id),
-      date: m.departure_date,
+      // Normalise comme la cle `fait` ci-dessous : si la colonne devenait un
+      // timestamp, l'ecran filtrerait `date` contre ses jours ISO et perdrait
+      // TOUT en silence (revue de 4235a21).
+      date: String(m.departure_date).slice(0, 10),
       status: m.status,
       // La verite serveur de « fait » — jamais le localStorage de l'ancien ecran.
       fait: faits.has(`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`),
@@ -396,7 +403,7 @@ module.exports = async function handler (req, res) {
       avec_avis: avecNoms && avecAvis,
       // L'ecran le DIT a l'hote : mieux vaut « liste incomplete » qu'un jour
       // paisible qui cache un menage sans personne.
-      tronque: tronqueBiens || (menagesRows || []).length >= LOT_MENAGES,
+      tronque: tronqueBiens || (menagesRows || []).length >= LOT_MENAGES || tronqueFaits,
       // Les trous BRUTS, tels que la brique les rend — y compris les jours sans
       // ménage. L'écran ne met en rouge que ceux qui portent un ménage (§12.6),
       // mais il doit pouvoir montrer les autres en gris : c'est ce qui permet de

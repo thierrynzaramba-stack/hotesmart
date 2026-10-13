@@ -85,6 +85,7 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCompte }
   from '/shared/compte-courant.js'
 import { toISO } from '/shared/calendar-core.js'
+import { couleurDe } from '/shared/presta-couleur.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -101,22 +102,20 @@ const etat = {
   avecNoms: false, avecAvis: false, tronque: false,
   jours: [],            // les 14 iso de la fenêtre
   decalage: 0,          // en jours, NON persisté (même règle que le calendrier)
-  masques: [],          // refs des biens masqués (persisté)
-  anonymes: new Map()   // sans prestataires:read : rien à numéroter — une seule
-                        // ligne « couverture » par bien (le serveur refuse tout
-                        // identifiant : un UUID stable reconstituerait le
-                        // calendrier de présence du personnel — invariant de
-                        // l'inventaire, partie A.5)
+  masques: []           // refs des biens masqués (persisté PAR COMPTE)
 }
-const PREFS_CLE = 'hs_menages_v5_prefs'
+// ⚠ Une clé PAR COMPTE : la page est délégable, et une ref provider masquée
+// sur un compte ne doit pas faire disparaître le bien homonyme d'un autre
+// (constat de la revue de 4235a21).
+const prefsCle = () => `hs_menages_v5_prefs:${compteCourant() || 'moi'}`
 function lirePrefs () {
   try {
-    const p = JSON.parse(localStorage.getItem(PREFS_CLE) || '{}')
+    const p = JSON.parse(localStorage.getItem(prefsCle()) || '{}')
     if (Array.isArray(p.masques)) etat.masques = p.masques.map(String)
   } catch {}
 }
 function ecrirePrefs () {
-  try { localStorage.setItem(PREFS_CLE, JSON.stringify({ masques: etat.masques })) } catch {}
+  try { localStorage.setItem(prefsCle(), JSON.stringify({ masques: etat.masques })) } catch {}
 }
 
 // ─── Dates (Intl, jamais de formatage à la main) ────────────────────────────
@@ -141,13 +140,6 @@ function fenetre () {
   return jours
 }
 
-// ─── Couleur stable par personne (pastels de theme.css, jamais d'hexa ici) ──
-const NB_PASTELS = 8
-function couleurDe (id) {
-  let h = 0
-  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0
-  return `var(--presta-${(h % NB_PASTELS) + 1})`
-}
 const initiales = prenom => String(prenom || '').trim().slice(0, 2).toUpperCase()
 
 // ─── Chargement ─────────────────────────────────────────────────────────────
@@ -200,6 +192,9 @@ function etatPastille (m) {
 }
 const CLASSE_MK = { fait: 'men-mk--fait', pris: '', np: 'men-mk--np', na: 'men-mk--na', avenir: 'men-mk--avenir' }
 const ICONE_MK = { fait: 'i-check', pris: 'i-cleaning', np: 'i-alert', na: 'i-cleaning', avenir: 'i-cleaning' }
+// Gravité d'affichage quand plusieurs ménages partagent une case : l'alarme
+// passe devant le travail, le travail devant le terminé.
+const GRAVITE = { np: 4, na: 3, pris: 2, avenir: 1, fait: 0 }
 
 function nomOu (p, defaut) {
   if (!p) return t(defaut)
@@ -361,7 +356,11 @@ function renderLignes (bien, g, menagesDuBien) {
     const pastilles = [...l.menages.entries()].map(([iso, ms]) => {
       const i = etat.jours.indexOf(iso)
       if (i < 0) return ''
-      const m = ms[0]
+      // ⚠ LE PLUS GRAVE L'EMPORTE sur une pastille agrégée (revue de 4235a21 :
+      // un « non pris » rouge se cachait derrière un « fait » vert chiffré —
+      // surtout sans prestataires:read, où TOUT le bien tient sur une ligne).
+      // Même règle que l'ancien Planning de garde (GRAVITE, A.2).
+      const m = ms.reduce((pire, x) => GRAVITE[etatPastille(x)] > GRAVITE[etatPastille(pire)] ? x : pire, ms[0])
       const e = etatPastille(m)
       const retour = (e === 'fait' && m.retour)
         ? `<span class="men-mk__retour${m.retour.verdict === 'remarque' ? ' men-mk__retour--mauvais' : ''}">${icone(m.retour.verdict === 'remarque' ? 'i-thumb-down' : 'i-thumb-up')}</span>` : ''
@@ -384,11 +383,23 @@ function renderTrous (bien, g, menagesDuBien) {
   const trous = new Set((g.jours || []).filter(j => j.trou && etat.jours.includes(j.date)).map(j => j.date))
   if (!trous.size) return ''
   const datesAvecMenage = new Set(menagesDuBien.map(m => m.date))
-  const runs = suites(trous)
-  const segments = runs.map(r => {
+  // ⚠ DÉCOUPÉ AU JOUR, pas au run (revue de 4235a21) : §12.6 met en rouge les
+  // seuls jours du trou qui PORTENT un ménage — un trou d'une semaine avec un
+  // ménage le mercredi ne rougit que le mercredi, le reste reste gris.
+  const segments = suites(trous).flatMap(r => {
+    const sous = []
+    for (let i = r.debut; i <= r.fin; i++) {
+      const grave = datesAvecMenage.has(etat.jours[i])
+      const s = sous[sous.length - 1]
+      if (s && s.grave === grave && i === s.fin + 1) s.fin = i
+      else sous.push({ debut: i, fin: i, grave })
+    }
+    return sous
+  }).map(r => {
     const jours = etat.jours.slice(r.debut, r.fin + 1)
-    const grave = jours.some(j => datesAvecMenage.has(j))
-    return `<span class="men-trou${grave ? '' : ' men-trou--calme'}" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(jours.map(dateLongue).join(', '))}">${icone('i-shield-off')}<span data-i18n="menages.personne"></span></span>`
+    // Sur un segment d'un seul jour, l'icône seule : le mot se couperait.
+    const libelle = r.fin > r.debut ? '<span data-i18n="menages.personne"></span>' : ''
+    return `<span class="men-trou${r.grave ? '' : ' men-trou--calme'}" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(jours.map(dateLongue).join(', '))}">${icone('i-shield-off')}${libelle}</span>`
   }).join('')
   return `<div class="men-ligne">
     <span class="men-qui men-qui--off"><span class="men-av men-av--inconnu" aria-hidden="true">!</span><span class="men-prenom" data-i18n="menages.personne"></span></span>
