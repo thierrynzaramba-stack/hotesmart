@@ -652,6 +652,9 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
      un filet par frontière de colonne, DERRIÈRE les barres et pastilles. */
   background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(100% / 14 - 1px), var(--line) calc(100% / 14 - 1px), var(--line) calc(100% / 14)); }
 .men-lane > * { grid-row: 1; }
+/* Colonne de week-end : toute la hauteur, derrière barres et pastilles ; le
+   filet de droite est redessiné car le fond recouvre celui du gradient. */
+.men-we { align-self: stretch; height: 100%; background: var(--surface-2); border-inline-end: 1px solid var(--line); }
 .men-barre { height: 30px; margin: 0 2px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
 .men-barre--off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 5px, var(--surface) 5px 10px); border: 1px dashed var(--border); }
 .men-trou { height: 30px; margin: 0 2px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--danger); border: 1.5px dashed var(--danger); background: repeating-linear-gradient(135deg, var(--danger-soft) 0 5px, var(--surface) 5px 10px); overflow: hidden; white-space: nowrap; }

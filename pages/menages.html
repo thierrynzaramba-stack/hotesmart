@@ -264,6 +264,14 @@ function lignesDuBien (bien, g, menagesDuBien) {
   })
 }
 
+// Fond des colonnes de week-end, peint en PREMIER dans chaque ligne (donc
+// derrière barres et pastilles) — la même structure que l'en-tête, sur toute
+// la hauteur (demande de Thierry, recette étape 1).
+function fondsWE () {
+  return etat.jours.map((iso, i) => estWE(iso)
+    ? `<span class="men-we" style="grid-column: ${i + 1}"></span>` : '').join('')
+}
+
 // Les suites de jours consécutifs d'un ensemble, en indices de la fenêtre.
 function suites (joursSet) {
   const idx = etat.jours.map((iso, i) => joursSet.has(iso) ? i : -1).filter(i => i >= 0)
@@ -372,7 +380,7 @@ function renderLignes (bien, g, menagesDuBien) {
     }).join('')
     return `<div class="men-ligne${off ? ' men-ligne--off' : ''}">
       <span class="men-qui${sans || off ? ' men-qui--off' : ''}">${avatar}<span class="men-prenom">${esc(nom)}</span>${regler}</span>
-      <span class="men-lane">${barres}${pastilles}</span>
+      <span class="men-lane">${fondsWE()}${barres}${pastilles}</span>
     </div>`
   }).join('')
 }
@@ -403,7 +411,7 @@ function renderTrous (bien, g, menagesDuBien) {
   }).join('')
   return `<div class="men-ligne">
     <span class="men-qui men-qui--off"><span class="men-av men-av--inconnu" aria-hidden="true">!</span><span class="men-prenom" data-i18n="menages.personne"></span></span>
-    <span class="men-lane">${segments}</span>
+    <span class="men-lane">${fondsWE()}${segments}</span>
   </div>`
 }
 
