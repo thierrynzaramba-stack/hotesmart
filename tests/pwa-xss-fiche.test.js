@@ -37,7 +37,9 @@ const dans = n => iso(new Date(AUJ.getTime() + n * 86400000))
 // `onerror` tire — jsdom ne charge pas les ressources, c'est la PRÉSENCE de
 // l'élément qui prouve que le HTML a été interprété) et une balise <script>.
 const NOM_PIEGE = '<img src=x onerror="window.__xss=1">Mallory'
-const CONSIGNE_PIEGEE = '<script>window.__xss2=1</script>clés sous le pot'
+// Multi-lignes : la consigne garde ses retours a la ligne (poses en <br>
+// APRES l'echappement, dans la fiche comme dans le fil — revue de def72c0).
+const CONSIGNE_PIEGEE = '<script>window.__xss2=1</script>clés sous le pot\npoubelles le mardi'
 
 function monter ({ bookings = [], comments = [], events = [] } = {}) {
   const html = fs.readFileSync(FICHIER, 'utf8')
@@ -122,6 +124,10 @@ test('la fiche ménage affiche un nom de voyageur piégé COMME DU TEXTE, jamais
     'la consigne reste lisible')
   assert.ok(note.textContent.includes('<script>'),
     'sa balise est affichée en toutes lettres')
+  assert.ok(note.querySelector('br'),
+    'les retours à la ligne de la consigne restent des <br> dans la fiche')
+  assert.ok(note.textContent.includes('poubelles le mardi'),
+    'la seconde ligne de la consigne est toujours là')
 })
 
 test('le fil d\'actualités affiche une note piégée COMME DU TEXTE, jamais comme du HTML', async () => {

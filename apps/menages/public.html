@@ -1284,7 +1284,7 @@ if ("serviceWorker" in navigator) {
       let detail = n.property_name || ''
       if (n.event_data) {
         if (n.event_type === 'note') {
-          detail = `${n.property_name} · ${n.event_data.guestName || ''}\nArrivée : ${n.event_data.arrival || '—'} · Départ : ${n.event_data.departure || '—'}\n📝 ${n.event_data.comment || ''}`
+          detail = `${n.property_name || ''} · ${n.event_data.guestName || ''}\nArrivée : ${n.event_data.arrival || '—'} · Départ : ${n.event_data.departure || '—'}\n📝 ${n.event_data.comment || ''}`
         } else {
           // ⚠ LE LOGEMENT ET LE JOUR, RIEN D'AUTRE. On y mettait le nom du
           // voyageur et les deux bornes du sejour : trois informations dont
@@ -1914,9 +1914,12 @@ if ("serviceWorker" in navigator) {
       <div class="modal-row"><span>Statut</span><span>${m.done ? '✅ Effectué' : (m.pending ? '⏳ En attente d envoi' : '⏳ À faire')}</span></div>
     `
 
+    // Les retours a la ligne de la consigne restent des retours a la ligne,
+    // comme dans le fil d'actualites : echapper puis poser les <br>, dans cet
+    // ordre (constat de la revue de def72c0 — avant, le \n brut se condensait).
     const noteEl = document.getElementById('modal-note')
     noteEl.innerHTML = m.comment
-      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${echapper(m.comment)}</div>`
+      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${echapper(m.comment).replace(/\n/g, '<br>')}</div>`
       : ''
 
     hideModalMessages()
