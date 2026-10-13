@@ -623,13 +623,16 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-vide { padding: 30px 0; }
 
 .men-cal { --men-col: 190px; --nb: 14; min-width: 0; }
-.men-cal--30 { --nb: 30; }
+
 .men-jours { display: grid; grid-template-columns: var(--men-col) repeat(var(--nb), minmax(var(--men-case, 0px), 1fr)); }
 .men-jour { text-align: center; font-size: 12px; color: var(--ink); font-weight: var(--fw-semibold); text-transform: capitalize; line-height: 1.25; padding: 7px 0 8px; }
 .men-jour b { display: block; font-size: 15px; color: var(--ink); font-weight: var(--fw-bold); }
-.men-cal--30 .men-jour { font-size: 10px; }
-.men-cal--30 .men-jour b { font-size: 13px; }
-.men-cal--30 .men-jour--auj b { width: 22px; height: 22px; line-height: 22px; }
+.men-cal--dense .men-jour { font-size: 10px; }
+.men-cal--dense .men-jour b { font-size: 13px; }
+.men-cal--dense .men-jour--auj b { width: 22px; height: 22px; line-height: 22px; }
+/* Au-dela d'un mois : colonnes fixes, le calendrier DEFILE aussi a
+   l'ordinateur — l'en-tete collant suit (synchronise en JS). */
+.men-cal--defile { --men-case: 38px; min-width: max-content; }
 /* L'en-tete des dates reste visible au defilement vertical, et suit le
    defilement horizontal du calendrier (synchronise en JS). */
 .men-tete { position: sticky; top: 0; z-index: 20; background: var(--surface); overflow: hidden; box-shadow: 0 1px 0 var(--line); }
@@ -688,6 +691,12 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-mk__retour--mauvais { background: var(--danger); }
 .men-mk__retour .icon { width: 10px; height: 10px; }
 
+.men-scroll, .men-tete { overflow-x: auto; }
+.men-tete { overflow-x: hidden; }
+/* Absence d'une prestataire (conge, indisponibilite) : fine, hachuree,
+   SOUS la hauteur d'une barre de garde — une absence n'est pas une garde. */
+.men-abs { height: 20px; margin: 0 3px; border-radius: var(--radius-pill); border: 1.5px dashed var(--muted); background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--surface) 4px 8px); }
+.men-leg__barre.men-abs { height: 12px; margin: 0; }
 .men-legende { padding: 14px 2px 0; display: flex; flex-wrap: wrap; gap: 14px 20px; }
 .men-leg { display: inline-flex; align-items: center; gap: 7px; }
 .men-leg__barre { display: inline-block; width: 36px; height: 14px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
@@ -695,7 +704,8 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-leg__mk { width: 22px; height: 22px; }
 .men-leg__mk .icon { width: 11px; height: 11px; }
 
-.men-bulles { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 0 0; }
+.men-bulles { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 0 10px; }
+.men-bulles:empty { padding: 0; }
 .men-bulle { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); padding: 5px 14px 5px 6px; font-size: var(--fs-small); font-weight: var(--fw-medium); cursor: pointer; font-family: inherit; }
 .men-bulle img, .men-bulle .men-bien__ini { width: 28px; height: 28px; border-radius: var(--radius-pill); object-fit: cover; }
 

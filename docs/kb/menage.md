@@ -3615,3 +3615,19 @@ que `nommer()` refuse). Le point est signalé à Thierry : sa décision G8
 Tests : `tests/menages-v5.test.js` (règles V5, décisions §13 nommées une à
 une, lecture seule, un seul endpoint) et la section « Lot Ménages V5 » de
 `tests/garde-endpoint.test.js` (photo, fait, panne de menage_done).
+
+### Complément de recette (13 octobre 2026, même étape)
+
+- **Les absences des prestataires sont sur le planning** : `api/garde.js`
+  rend `absences[]` (attitrée ce jour-là mais indisponible — congé,
+  exception, règle illisible), calculées par LES briques du moteur
+  (`attitreeCeJour` + `estDisponible`), jamais une copie. Portée =
+  `prestataires: read` (le calendrier personnel du personnel), avec le
+  prénom pour qu'une semaine d'absence complète ait une ligne nommée.
+  L'écran les dessine en pilule fine hachurée sur la ligne de la personne.
+- **Le sélecteur de fenêtre est celui du calendrier** : 1 m / 3 m / 6 m /
+  12 m. L'endpoint refuse toujours au-delà de `MAX_JOURS = 92` : la page lit
+  par TRANCHES consécutives et fusionne (biens de la première, le reste
+  concaténé, `tronque` en OU). Au-delà d'un mois : colonnes fixes et
+  défilement horizontal, ordinateur comme téléphone, l'en-tête collant suit.
+- Les bulles des biens masqués vivent AU-DESSUS des dates (recette).

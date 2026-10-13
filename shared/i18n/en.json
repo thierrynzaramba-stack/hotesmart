@@ -401,7 +401,11 @@
   "menages.leg_personne": "Nobody",
   "menages.leg_off": "Deactivated",
   "menages.leg_regler": "Days to set",
-  "menages.p14": "14 d",
-  "menages.p30": "30 d",
-  "menages.period_len": "Number of days shown"
+  "menages.period_len": "Number of days shown",
+  "menages.m1": "1 mo",
+  "menages.m3": "3 mo",
+  "menages.m6": "6 mo",
+  "menages.m12": "12 mo",
+  "menages.absente": "Away — leave or declared unavailability",
+  "menages.leg_abs": "Away"
 }

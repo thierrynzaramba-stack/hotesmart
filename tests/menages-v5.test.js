@@ -83,6 +83,9 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
     'navigation non persistée (comme le calendrier)': 'decalage: 0',
     'biens masqués en bulles, persistés': 'hs_menages_v5_prefs',
     'tour complet et échéance dans l\'infobulle (délai en heure de Paris)': "'Europe/Paris'",
+    'absences des prestataires dessinées sur leur ligne (recette 13/10)': 'men-abs',
+    'le sélecteur en MOIS du calendrier (recette 13/10)': 'data-mois="12"',
+    'au-delà de 92 jours, lecture par TRANCHES fusionnées': 'TRANCHE_MAX',
     'X-Compte sur chaque appel': 'enteteCompte()',
     'entrée sous menages:read, erreur 403 dite': 'menages.no_access'
   }

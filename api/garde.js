@@ -35,7 +35,8 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
-const { planningDeGarde } = require('../lib/cleaning/garde')
+const { planningDeGarde, normaliserLiaison, attitreeCeJour } = require('../lib/cleaning/garde')
+const { estDisponible } = require('../lib/cleaning/availability')
 const { chargerLiaisons, chargerDisponibilites,
         dansLaFenetreDeProposition, proposeesDe } = require('../lib/cleaning/assign')
 const { extraitVerifie } = require('../lib/extrait-verifie')
@@ -219,6 +220,35 @@ module.exports = async function handler (req, res) {
 
     }
 
+    // ===== LES ABSENCES DES PRESTATAIRES (recette du 13 octobre 2026) =====
+    // Une absence = ATTITREE ce jour-la (weekdays de la liaison) mais
+    // INDISPONIBLE (conge, exception, regle illisible comprise) — les MEMES
+    // briques que le moteur (`attitreeCeJour`, `estDisponible`), jamais une
+    // copie. Sous `prestataires: read` SEULEMENT : le calendrier personnel du
+    // personnel a la portee des prenoms, pas celle de la couverture.
+    const absences = []
+    if (avecNoms) {
+      const lireDe = (m, cle) => (m && typeof m.get === 'function' ? m.get(cle) : null) || []
+      for (const pb of planning.biens) {
+        const joursIso = pb.jours.map(j => j.date)
+        const brutes = liaisonsParBien.get(`${userId}|${pb.propertyId}`) || []
+        for (const brute of brutes) {
+          const l = normaliserLiaison(brute)
+          if (!l || l.active === false) continue
+          const cle = `${userId}|${l.providerId}`
+          const ctx = { regles: lireDe(dispos.regles, cle),
+                        exceptions: lireDe(dispos.exceptions, cle),
+                        conges: lireDe(dispos.conges, cle) }
+          for (const date of joursIso) {
+            if (attitreeCeJour(l, date) && !estDisponible(date, ctx)) {
+              absences.push({ propertyId: String(pb.propertyId), providerId: String(l.providerId),
+                              prenom: (prenoms[l.providerId] || {}).prenom || null, date })
+            }
+          }
+        }
+      }
+    }
+
     // ===== LE RETOUR DE PROPRETE DU SEJOUR =====
     //
     // ⚠ ATTACHE A UN MENAGE, PAS A UNE PERSONNE. C'est ce que le voyageur a dit
@@ -395,6 +425,8 @@ module.exports = async function handler (req, res) {
 
     return res.status(200).json({
       jours, biens, garde: gardeParBien, menages,
+      // Vide sans `prestataires: read` — jamais un identifiant sans le droit.
+      absences,
       avec_noms: avecNoms,
       // ⚠ `avec_avis` DIT CE QUI SORT, pas ce que le droit autorise. Le retour de
       // propreté est une parole de voyageur rapportée à côté d'un nom : sans

@@ -58,10 +58,15 @@
     </button>
     <button type="button" class="btn btn--secondary" data-nav="0" data-i18n="menages.today"></button>
     <div class="men-periode" role="group" data-i18n-attr="aria-label:menages.period_len">
-      <button type="button" class="tab" data-jours="14" data-i18n="menages.p14"></button>
-      <button type="button" class="tab" data-jours="30" data-i18n="menages.p30"></button>
+      <button type="button" class="tab" data-mois="1" data-i18n="menages.m1"></button>
+      <button type="button" class="tab" data-mois="3" data-i18n="menages.m3"></button>
+      <button type="button" class="tab" data-mois="6" data-i18n="menages.m6"></button>
+      <button type="button" class="tab" data-mois="12" data-i18n="menages.m12"></button>
     </div>
   </div>
+
+  <!-- Les biens masqués remontent AVANT les dates (recette du 13 octobre). -->
+  <div class="men-bulles" data-bind="bulles"></div>
 
   <p class="card men-avis" data-bind="avis-tronque" hidden data-i18n="menages.truncated"></p>
   <div class="men-vide" data-bind="etat-vide" hidden></div>
@@ -76,7 +81,6 @@
   </div>
 
   <p class="caption muted men-legende" data-bind="legende" hidden></p>
-  <div class="men-bulles" data-bind="bulles"></div>
   <p class="caption muted" data-bind="etat-charge" hidden></p>
 </main>
 
@@ -101,7 +105,11 @@ const t = (k, v) => I18n.t(k, v)
 const $ = (s) => document.querySelector(s)
 const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
 const AUJOURDHUI = toISO(new Date())
-const FENETRES = [14, 30]
+// Le MEME selecteur que le calendrier (recette du 13 octobre) : des mois.
+// L'endpoint refuse au-dela de 92 jours : au-dela, la page lit par TRANCHES.
+const MOIS = [1, 3, 6, 12]
+const JOURS_PAR_MOIS = { 1: 30, 3: 91, 6: 182, 12: 364 }
+const TRANCHE_MAX = 92
 const langue = () => (window.I18n && I18n.lang) || document.documentElement.lang || 'fr'
 
 const etat = {
@@ -110,9 +118,10 @@ const etat = {
   menages: [],          // [{propertyId, bookingId, date, status, fait, porteur, proposeesA, expireLe, raison, retour, differe}]
   avecNoms: false, avecAvis: false, tronque: false,
   jours: [],            // les iso de la fenêtre
-  nbJours: 14,          // 14 ou 30 (persisté)
+  mois: 1,              // 1 / 3 / 6 / 12 (persisté, comme le calendrier)
   decalage: 0,          // en jours, NON persisté (même règle que le calendrier)
-  masques: []           // refs des biens masqués (persisté PAR COMPTE)
+  masques: [],          // refs des biens masqués (persisté PAR COMPTE)
+  absences: []          // [{propertyId, providerId, date}] — vides sans prestataires:read
 }
 // ⚠ Une clé PAR COMPTE : la page est délégable, et une ref provider masquée
 // sur un compte ne doit pas faire disparaître le bien homonyme d'un autre
@@ -122,11 +131,11 @@ function lirePrefs () {
   try {
     const p = JSON.parse(localStorage.getItem(prefsCle()) || '{}')
     if (Array.isArray(p.masques)) etat.masques = p.masques.map(String)
-    if (FENETRES.includes(p.nbJours)) etat.nbJours = p.nbJours
+    if (MOIS.includes(p.mois)) etat.mois = p.mois
   } catch {}
 }
 function ecrirePrefs () {
-  try { localStorage.setItem(prefsCle(), JSON.stringify({ masques: etat.masques, nbJours: etat.nbJours })) } catch {}
+  try { localStorage.setItem(prefsCle(), JSON.stringify({ masques: etat.masques, mois: etat.mois })) } catch {}
 }
 
 // ─── Dates (Intl, jamais de formatage à la main) ────────────────────────────
@@ -144,7 +153,7 @@ function fenetre () {
   const base = new Date(AUJOURDHUI + 'T12:00:00Z')
   base.setUTCDate(base.getUTCDate() + etat.decalage)
   const jours = []
-  for (let i = 0; i < etat.nbJours; i++) {
+  for (let i = 0; i < JOURS_PAR_MOIS[etat.mois]; i++) {
     const d = new Date(base); d.setUTCDate(d.getUTCDate() + i)
     jours.push(d.toISOString().slice(0, 10))
   }
@@ -171,15 +180,33 @@ async function charger () {
   chargeEl.textContent = t('common.loading')
   const jours = fenetre()
   try {
-    const d = await appel(`/api/garde?du=${jours[0]}&au=${jours[jours.length - 1]}`)
+    // L'endpoint refuse une fenetre > 92 jours (troncature silencieuse
+    // interdite) : 6 et 12 mois se lisent par TRANCHES consecutives, fusionnees
+    // ici — les biens viennent de la premiere, le reste se concatene.
+    const tranches = []
+    for (let i = 0; i < jours.length; i += TRANCHE_MAX) {
+      const bloc = jours.slice(i, i + TRANCHE_MAX)
+      tranches.push([bloc[0], bloc[bloc.length - 1]])
+    }
+    const reponses = await Promise.all(tranches.map(([du, au]) => appel(`/api/garde?du=${du}&au=${au}`)))
     if (jeton !== jetonLecture) return   // réponse en retard : on ne repeint pas
+    const d0 = reponses[0]
+    const gardeParBien = new Map()
+    for (const r of reponses) {
+      for (const g of (r.garde || [])) {
+        const cle = String(g.propertyId)
+        if (!gardeParBien.has(cle)) gardeParBien.set(cle, { propertyId: cle, gere: g.gere, jours: [] })
+        gardeParBien.get(cle).jours.push(...(g.jours || []))
+      }
+    }
     etat.jours = jours
-    etat.biens = d.biens || []
-    etat.garde = d.garde || []
-    etat.menages = d.menages || []
-    etat.avecNoms = !!d.avec_noms
-    etat.avecAvis = !!d.avec_avis
-    etat.tronque = !!d.tronque
+    etat.biens = d0.biens || []
+    etat.garde = [...gardeParBien.values()]
+    etat.menages = reponses.flatMap(r => r.menages || [])
+    etat.absences = reponses.flatMap(r => r.absences || [])
+    etat.avecNoms = !!d0.avec_noms
+    etat.avecAvis = !!d0.avec_avis
+    etat.tronque = reponses.some(r => !!r.tronque)
     chargeEl.hidden = true
     renderTout()
   } catch (e) {
@@ -241,7 +268,7 @@ function lignesDuBien (bien, g, menagesDuBien) {
   const lanes = new Map()
   const lane = (cle) => {
     if (!lanes.has(cle)) {
-      lanes.set(cle, { cle, prenom: null, actif: null, aRegler: false, jours: new Set(), menages: new Map() })
+      lanes.set(cle, { cle, prenom: null, actif: null, aRegler: false, jours: new Set(), abs: new Set(), menages: new Map() })
     }
     return lanes.get(cle)
   }
@@ -255,6 +282,15 @@ function lignesDuBien (bien, g, menagesDuBien) {
     if (j.responsable.prenom) l.prenom = j.responsable.prenom
     if (j.responsable.actif === false) l.actif = false
     if (j.responsable.a_regler) l.aRegler = true
+  }
+  // Ses ABSENCES (congé, indisponibilité) : visibles sur SA ligne — et une
+  // semaine entière d'absence crée sa ligne même sans un seul jour de garde.
+  for (const a of etat.absences) {
+    if (String(a.propertyId) !== String(bien.id)) continue
+    if (!etat.jours.includes(a.date)) continue
+    const la = lane(String(a.providerId))
+    la.abs.add(a.date)
+    if (a.prenom && !la.prenom) la.prenom = a.prenom
   }
   for (const m of menagesDuBien) {
     const e = etatPastille(m)
@@ -309,10 +345,16 @@ function renderTout () {
   const vide = $('[data-bind="etat-vide"]')
   $('[data-bind="avis-tronque"]').hidden = !etat.tronque
   $('[data-bind="periode"]').textContent = `${dateCourt(etat.jours[0])} → ${dateCourt(etat.jours[etat.jours.length - 1])}`
-  document.querySelectorAll('[data-jours]').forEach(b =>
-    b.setAttribute('aria-pressed', String(Number(b.dataset.jours) === etat.nbJours)))
-  // 14 ou 30 colonnes : la grille entière suit (--nb pilote les deux conteneurs).
-  for (const el of [cal, calTete]) el.classList.toggle('men-cal--30', etat.nbJours === 30)
+  document.querySelectorAll('[data-mois]').forEach(b =>
+    b.setAttribute('aria-pressed', String(Number(b.dataset.mois) === etat.mois)))
+  // La grille entière suit la fenêtre (--nb pilote les deux conteneurs) :
+  // dense = en-tête réduit dès un mois ; défile = colonnes fixes + défilement
+  // horizontal au-delà d'un mois (l'en-tête collant suit, déjà synchronisé).
+  for (const el of [cal, calTete]) {
+    el.style.setProperty('--nb', String(etat.jours.length))
+    el.classList.toggle('men-cal--dense', etat.jours.length >= 30)
+    el.classList.toggle('men-cal--defile', etat.jours.length > 31)
+  }
 
   const visibles = etat.biens.filter(b => !etat.masques.includes(String(b.id)))
   if (!etat.biens.length) {
@@ -385,6 +427,8 @@ function renderLignes (bien, g, menagesDuBien) {
     const off = l.actif === false
     const barres = sans ? '' : suites(l.jours).map(r =>
       `<span class="men-barre${off ? ' men-barre--off' : ''}" style="grid-column: ${r.debut + 1} / ${r.fin + 2}; --coul: ${coul}"></span>`).join('')
+    const absences = sans ? '' : suites(l.abs).map(r =>
+      `<span class="men-abs" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(t('menages.absente') + ' — ' + etat.jours.slice(r.debut, r.fin + 1).map(dateLongue).join(', '))}"></span>`).join('')
     const pastilles = [...l.menages.entries()].map(([iso, ms]) => {
       const i = etat.jours.indexOf(iso)
       if (i < 0) return ''
@@ -404,7 +448,7 @@ function renderLignes (bien, g, menagesDuBien) {
     }).join('')
     return `<div class="men-ligne${off ? ' men-ligne--off' : ''}">
       <span class="men-qui${sans || off ? ' men-qui--off' : ''}">${avatar}<span class="men-prenom">${esc(nom)}</span>${regler}</span>
-      <span class="men-lane">${fondsWE()}${barres}${pastilles}</span>
+      <span class="men-lane">${fondsWE()}${barres}${absences}${pastilles}</span>
     </div>`
   }).join('')
 }
@@ -467,6 +511,7 @@ function renderLegende (visible) {
     pt(`<span class="men-mk men-mk--na men-leg__mk">${icone('i-cleaning')}</span>`, 'menages.leg_na'),
     pt(`<span class="men-mk men-mk--avenir men-leg__mk">${icone('i-cleaning')}</span>`, 'menages.leg_avenir'),
     pt('<span class="men-leg__barre men-trou"></span>', 'menages.leg_personne'),
+    pt('<span class="men-leg__barre men-abs"></span>', 'menages.leg_abs'),
     pt('<span class="men-leg__barre men-barre--off"></span>', 'menages.leg_off'),
     pt(`<span class="men-regler">${icone('i-settings')}</span>`, 'menages.leg_regler')
   ].join('')
@@ -503,13 +548,13 @@ async function init () {
   lirePrefs()
   document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => {
     const sens = Number(b.dataset.nav)
-    etat.decalage = sens === 0 ? 0 : etat.decalage + sens * etat.nbJours
+    etat.decalage = sens === 0 ? 0 : etat.decalage + sens * JOURS_PAR_MOIS[etat.mois]
     charger()
   }))
-  document.querySelectorAll('[data-jours]').forEach(b => b.addEventListener('click', () => {
-    const n = Number(b.dataset.jours)
-    if (!FENETRES.includes(n) || n === etat.nbJours) return
-    etat.nbJours = n
+  document.querySelectorAll('[data-mois]').forEach(b => b.addEventListener('click', () => {
+    const n = Number(b.dataset.mois)
+    if (!MOIS.includes(n) || n === etat.mois) return
+    etat.mois = n
     ecrirePrefs(); charger()
   }))
   // L'en-tête collant suit le défilement horizontal du calendrier (téléphone).

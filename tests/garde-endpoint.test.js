@@ -37,7 +37,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      profils = [{ id: REGINA, first_name: 'Régina', active: true },
                                 { id: SECONDE, first_name: 'Marie', active: true }],
                      erreurLiaisons = null, erreurBiens = null, avis = [], erreurAvis = null,
-                     done = [], erreurDone = null } = {}) {
+                     done = [], erreurDone = null, conges = [] } = {}) {
   const etat = { lectures: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -56,6 +56,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         if (table === 'profiles') return { data: profils, error: null }
         if (table === 'ota_reviews') return { data: erreurAvis ? null : avis, error: erreurAvis }
         if (table === 'menage_done') return { data: erreurDone ? null : done, error: erreurDone }
+        if (table === 'conges_plages') return { data: conges, error: null }
         return { data: [], error: null }
       }
       const chain = {
@@ -1078,4 +1079,44 @@ test('une panne de menage_done ne coupe PAS le planning : les ménages sortent, 
   assert.strictEqual(res.code, 200)
   assert.strictEqual(res.body.menages.length, 1)
   assert.strictEqual(res.body.menages[0].fait, false)
+})
+
+// ─── Lot Ménages V5, recette : les absences des prestataires ─────────────────
+
+test('une attitrée INDISPONIBLE (exception) sort dans `absences`, jour par jour', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()],
+    exceptions: [{ user_id: PROD, provider_id: REGINA, date: '2026-09-09', available: false }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(res.body.absences,
+    [{ propertyId: BIEN, providerId: REGINA, prenom: 'Régina', date: '2026-09-09' }],
+    'le jour d\'exception, et lui seul — avec le prénom (la ligne d\'une absente sans garde doit pouvoir se nommer)')
+})
+
+test('un congé couvre ses jours en `absences` — mêmes briques que le moteur', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()],
+    conges: [{ user_id: PROD, provider_id: REGINA, debut: '2026-09-11', fin: '2026-09-12' }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(res.body.absences.map(a => a.date), ['2026-09-11', '2026-09-12'])
+})
+
+test('sans `prestataires: read`, `absences` est VIDE — le calendrier personnel a la portée des prénoms', async () => {
+  const { handler } = preparer({
+    user: MEMBRE,
+    profil: { id: 'pr1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { menages: 'read', prestataires: 'none', property_scope: 'all' },
+    liaisons: [LIAISON()],
+    exceptions: [{ user_id: PROD, provider_id: REGINA, date: '2026-09-09', available: false }]
+  })
+  const res = reponse()
+  await handler({ ...get(), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.code, 200)
+  assert.deepStrictEqual(res.body.absences, [], 'pas un identifiant sans le droit')
 })
