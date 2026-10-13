@@ -795,3 +795,181 @@ reconstitue aussi). L'étape 1 rend donc UNE ligne neutre par bien
 (« quelqu'un ») pour un membre sans ce droit. Si Thierry tient aux P1/P2,
 c'est une décision de sécurité à prendre explicitement (desserrer
 `nommer()`), pas un choix d'écran.
+
+## H. Configuration prestataire
+
+Relevé du 13 octobre 2026, AVANT le volet « Équipe ménage » (lecture seule).
+Lecture intégrale de `apps/menages/prestataires.html`, `api/membres.js`,
+`api/menages.js`, `api/disponibilites.js`, `api/menages-public.js`,
+`lib/stats-avis.js`, `lib/attribution-prestataire.js`, `api/avis.js`, et des
+migrations des tables citées. Complète A.3 et B : A.3 dit **comment l'écran se
+comporte**, H dit **où chaque réglage atterrit, qui l'écrit, sous quel droit,
+et ce qu'il change pour la prestataire**.
+
+### H.1 Tous les champs et réglages de la fiche
+
+| Champ / réglage | Stockage | Qui l'écrit | Ce qu'il change |
+|---|---|---|---|
+| Prénom | `profiles.first_name` (NOT NULL) | `/api/membres` create/update | Nom affiché partout (liste, planning, garde, SMS) ; compose le libellé du lien |
+| Nom | `profiles.last_name` | `/api/membres` (refus si vide à la création ; champ ABSENT = non touché en édition — c'est ce qui rend la règle non rétroactive) | Distingue deux homonymes |
+| Libellé du lien | `public_tokens.label` | **écriture directe** (prestataires.html) ; posé une fois par `synchroniserTokenPwa` | Titre de la carte et en-tête de sa PWA ; composé « prénom + nom » des DEUX côtés |
+| Téléphone | `profiles.phone` | `/api/membres` (envoyé **même vide** en édition, sinon un numéro serait ineffaçable) | Seul canal SMS ; sans lui, les notifications se taisent |
+| E-mail | `profiles.email` | `/api/membres` (modifiable tant que `member_user_id` est nul) | Canal e-mail des notifications |
+| Prévenir par SMS / e-mail | `profiles.notify_sms` / `notify_email` (défaut `true`) | `/api/membres` ; à la création, seuls les canaux TRANCHÉS partent | Intention séparée de la coordonnée : l'envoi exige **les deux** |
+| Biens cochés | **TROIS représentations** : `public_tokens.property_ids` (text[]), `profile_permissions.property_ids` (uuid[]), `property_cleaning_providers` | écriture directe · `/api/membres` · `/api/menages action:'liaisons'` | (1) ce que la PWA sert, (2) le droit, (3) l'assignabilité par le moteur. **Convention inversée** : vide dans `public_tokens` = TOUS ; `selected` vide dans `profile_permissions` = AUCUN. Saisie unique : `saisieDesBiens()`, garde `perimetreRefuse()` |
+| Rang par bien | `property_cleaning_providers.rang` | `/api/menages liaisons` (serveur 1..9 ; écran 1-3) | Ordre du tour : même rang = sollicitées ensemble |
+| Engagement d'office / à confirmer | `property_cleaning_providers.requires_ack` (défaut `true`) | `/api/menages liaisons` | Décide si le ménage naît **porté** ou seulement **proposé**. C'est lui qui parle, jamais le rang (§12.3) |
+| Jours attitrés par bien | `property_cleaning_providers.weekdays` — **NULL = tous**, `[]` = aucun | `/api/menages liaisons` (entiers 0-6 stricts) | Quels jours l'hôte lui confie CE bien. Aucun jour = jamais candidate (§12.9c) |
+| Jours de travail (règles, cadence, semaines A/B) | `provider_availability_rules` (`rrule`, `active`, `source`) | `/api/disponibilites poserRegle` / `retirerRegle` (désactivation, jamais suppression) | Quels jours elle **est là**, tous biens confondus. **Aucune RRULE ne transite** |
+| Exceptions ponctuelles | `provider_availability_exceptions` (unicité `provider_id, date`) | `/api/disponibilites` — immédiat | Prime sur la règle |
+| Congés | `conges_plages` (CHECK `debut <= fin`, aucune unicité) | `/api/disponibilites` — immédiat | Étage 1 de la précédence ; jours verrouillés ; étiquetés « posé par vous » via `source` |
+| Visibilité calendrier (7-90 j) | `public_tokens.visibility_days` (défaut 30) | **écriture directe** | Horizon de son planning — **et aussi** la profondeur de son fil d'actualités (voir H.5) |
+| Période du ratio d'avis | `public_tokens.ratio_periode` (CHECK 15j/30j/6mois/toujours) | **écriture directe** | Période du ratio **permanent** de son en-tête, inatteignable par le client |
+| « Elle peut déclarer ses absences » | `profile_permissions.self_availability` (défaut `none`) | `/api/membres` (rien n'est envoyé si le droit n'a pas pu être LU) | Ouvre/ferme l'écriture de ses disponibilités depuis sa PWA |
+| Évaluation des voyageurs — participation | `profiles.eval_scope` (défaut `aucun`) | **bus** `avis.reglages_prestataire` → `api/avis.js` | Quelles questions d'évaluation elle voit |
+| Évaluation — pouvoir | `profiles.eval_power` (défaut `soumettre`) | idem | `valider` = elle publie elle-même, **sauf un avis négatif, qui repasse toujours par l'hôte** |
+| Visibilité des ménages d'autrui | `menage_visibilite` (`par_bien`, `profils_vus` ≤ 20) | `/api/disponibilites reglerVisibilite` — **writer unique**, immédiat | Les deux portées se **cumulent** ; absence de ligne = elle ne voit que les siens |
+| **Délai de retrait — réglage de COMPTE** | `menage_reglages.retrait_delai_heures` (défaut 24, CHECK 0..168) | **écriture directe**, upsert `onConflict user_id` | **Une ligne par hôte, vaut pour tout le parc** — pas un réglage de la fiche |
+| Statut actif / désactivé | `profiles.active` + **suppression de la ligne `public_tokens`** | `/api/membres deactivate`, puis liaisons vidées, puis delete | Coupe le lien immédiatement. ⚠ Le moteur ne lit ni `public_tokens` ni `profiles.active` : **couper les liaisons est obligatoire** |
+| Jeton du lien PWA | `profiles.pwa_token` + `public_tokens.token` | `/api/membres create` SEUL (32 octets) | L'URL de sa PWA. Le jeton ne sort jamais d'une réponse de profil, seulement dans `lien` |
+| **Note interne sur la prestataire** | **AUCUNE — vérifié** (`grep note_interne` = 0 ; rien dans `profiles`, `public_tokens`, `property_cleaning_providers`) | — | **Le champ n'existe nulle part.** La V5 ne peut pas le « reporter » : ce serait un ajout |
+
+### H.2 Toutes les actions, et le droit de chacune
+
+| Action | Endpoint / écriture | Droit requis | Côté prestataire |
+|---|---|---|---|
+| **Ouvrir la page** | — | **Titulaire SEUL** (`exigerCompteProprePage`) ; les lectures sont ensuite sous `prestataires: read` (RLS) | — |
+| Créer | `/api/membres create` → liaisons → `public_tokens` | `equipe: write`, **NON DÉLÉGABLE** | Lien actif immédiatement. ⚠ **Aucune notification ne part** : elle n'apprend son lien que si l'hôte le lui transmet |
+| Éditer | `/api/membres update` + `public_tokens` + liaisons | `equipe: write` (profil) + `prestataires: write` (le reste) | Périmètre, nom, coordonnées, canaux changent à sa prochaine ouverture |
+| Désactiver / supprimer | `deactivate` → liaisons vidées → delete `public_tokens` | `equipe: write` non délégable ; bloqué si le rapprochement est indisponible | **Son lien cesse de fonctionner** (401 partout) ; ⚠ son périmètre est perdu avec la ligne |
+| Changer rang / biens / jours / engagement | `/api/menages liaisons` | `prestataires: write` (délégable côté serveur, mais l'écran est fermé aux non-titulaires) | Change son tour et ses candidatures ; rattrapage immédiat des ménages à venir |
+| Poser / retirer congé, exception, règles | `/api/disponibilites` — immédiat | `prestataires: write`, délégable | Son calendrier change ; elle voit la **source** de chaque ligne |
+| Régler ce qu'elle voit des autres | `reglerVisibilite` — immédiat | `prestataires: write`, **délégable** | Bloc « autrui » : bien, date, heure, prénom — **aucun identifiant, donc aucune action possible** |
+| Régler « elle déclare ses absences » | `/api/membres update` | `equipe: write` **non délégable** | Fait apparaître/disparaître la saisie d'absences |
+| Régler l'évaluation des voyageurs | bus → `api/avis.js` | `avis: write` **ET** périmètre complet **ET** l'appelant n'est pas une prestataire | Lui ouvre les questions d'évaluation, et son pouvoir de publier |
+| Régler le délai de retrait | `menage_reglages` upsert — immédiat | `prestataires: write` (policy RLS) | Jusqu'à quand « me retirer » lui reste ouvert |
+| **Copier le lien PWA** | `navigator.clipboard` seul — **aucun appel serveur** | lire la carte | Rien ne part : c'est à l'hôte de le transmettre |
+| ⚠ **« Inviter » / « renvoyer le lien »** | **N'EXISTE PAS** | — | Le lien n'atteint la prestataire que **greffé à une notification de ménage** |
+| ⚠ **« Régénérer le lien » / « Réactiver »** | `/api/membres` les porte (`regenerate`, `reactivate`) mais **AUCUNE page ne les appelle** — vérifié par grep sur `pages/` et `apps/`, y compris `pages/settings.html` | — | Un lien compromis ne peut pas être tourné ; un profil désactivé ne peut pas être ranimé |
+
+### H.3 Endpoints et tables
+
+| Voie | Lit | Écrit | Gardes |
+|---|---|---|---|
+| `GET /api/menages?contacts=1` | properties, bookings_snapshot, menages ; **sous `prestataires: read`** : profiles (+ contacts en opt-in), profile_permissions, public_tokens (rapprochement par JETON), liaisons | — | session → `menages: read`, compteDelegue ; service key, le filtre `user_id` est la seule défense ; `contacts=1` est une exposition, **pas une garde** |
+| `POST /api/menages action:'liaisons'` | profiles, properties, liaisons | `property_cleaning_providers` (désactivation **bornée au périmètre**, upsert), puis rattrapage des ménages | `prestataires: write`, compteDelegue ; référence SQL sûre, rang 1..9, weekdays 0-6 stricts, `requires_ack` booléen strict |
+| `POST /api/membres` | profiles, profile_permissions, properties | profiles, profile_permissions, public_tokens (**INSERT à la création seule**, delete à la désactivation) | `equipe` **non délégable** ; 404 pour un profil d'un autre compte ; `access_mode` verrouillé après création ; mode `lien` → tous les domaines forcés à `none` |
+| `GET/POST /api/disponibilites` | règles **actives seules**, exceptions (plancher J−30), congés (bornés sur `fin`), `menage_visibilite` | les quatre mêmes tables — **writer unique côté hôte de chacune** | `prestataires` read/write, compteDelegue ; `prestataireDuCompte` ; `validerRegle` **partagé avec la PWA** ; aucune RRULE acceptée du client |
+| Bus `avis.reglages_prestataire` | profiles (eval_*) | `profiles.eval_scope`, `eval_power` (update re-filtré compte + `access_mode`) | `avis: write` + périmètre complet + appelant non prestataire ; 409 si le profil a changé pendant l'écriture |
+| **Écritures directes sous RLS** (navigateur) | `public_tokens`, `menage_reglages` | idem | policies `can_read/can_write(user_id, 'prestataires')` |
+
+### H.4 Ce que la prestataire voit, réglage par réglage
+
+| Réglage | Effet dans sa PWA |
+|---|---|
+| `property_ids` du jeton | Quels biens apparaissent — **vide = TOUS les biens du compte** |
+| `visibility_days` | Horizon de ses ménages (J−14 → J+N), borne aussi la **prise** d'un ménage **et la profondeur de son fil d'actualités** |
+| `ratio_periode` | Période du ratio **permanent** de son en-tête (le client ne peut pas la déplacer) |
+| `self_view_reviews` | **Coupe la vue Avis entière** ; défaut `true` ; une panne de lecture **coupe**, elle n'ouvre pas |
+| `self_availability` | `none` → pas de saisie d'absences (mais la réponse reste un contrat COMPLET) ; `write` → elle déclare et retire. Défaut **`none`** — l'inverse de `self_view_reviews` |
+| `weekdays` + `requires_ack` + `rang` | Ce qui lui **arrive** : un ménage porté d'office, ou une proposition avec échéance |
+| règles / exceptions / congés | Son calendrier, avec la **source** de chaque ligne |
+| `menage_visibilite` | Le bloc « autrui » : bien, date, heure, prénom — relu à chaque lecture |
+| `eval_scope` / `eval_power` | Les questions d'évaluation après « Ménage fait », et si sa réponse se publie |
+| `retrait_delai_heures` | Jusqu'à quand « me retirer » reste cliquable ; illisible → bouton grisé (on ne devine pas) |
+| `phone`/`email` + `notify_*` | Si elle apprend un ménage **sans ouvrir sa PWA** ; le message porte le lien avec son jeton |
+| `active` / ligne `public_tokens` | Lien mort : **401 partout**, lecture comme écriture |
+
+### H.5 Écarts et trous
+
+1. **Aucune action « inviter » ni « renvoyer le lien ».** L'écran sait copier le
+   lien et l'ouvrir ; rien ne l'envoie. Le seul chemin par lequel il atteint la
+   prestataire est une **notification de ménage**. *Conséquence* : une
+   prestataire créée avant son premier ménage n'a aucun moyen d'obtenir son
+   accès, et l'hôte transmet une URL qui **contient le secret** (jeton en clair
+   dans ses SMS, son presse-papier, son historique). *Ce qu'il faudrait* : une
+   action « lui envoyer son lien », par les canaux déjà réglés, tracée.
+2. **« Régénérer le lien » et « Réactiver » sont INATTEIGNABLES.**
+   `/api/membres` les porte, mais **aucune page ne les appelle** (vérifié sur
+   `pages/` et `apps/`, `settings.html` comprise). *Conséquence* : un jeton
+   compromis ne peut être tourné qu'en supprimant et recréant la personne — ce
+   qui perd ses liaisons, son périmètre et **l'attribution de ses avis** (le
+   jeton est la clé de la voie 1). *Ce qu'il faudrait* : brancher les deux sur
+   la fiche, avec l'avertissement que le serveur rend déjà.
+3. **`self_view_reviews` n'est réglable sur aucun écran**, alors que c'est
+   l'interrupteur qui coupe toute la vue Avis de la PWA — et que la fiche règle
+   juste à côté son **pouvoir de publier** des avis.
+4. **`prestataire_periodes` n'a aucun writer applicatif.** La table est la
+   **voie 2** de l'attribution des avis ; sans écran pour déclarer « elle a fait
+   ce bien du X au Y », un avis hors voie 1 reste non attribué — et c'est la
+   majorité (136 des 168 avis n'ont pas de séjour résolu).
+5. **Aucune note interne ni champ libre** sur la prestataire (vérifié).
+   Une consigne (« ne pas lui confier le 23 pendant les travaux ») n'a nulle part
+   où vivre.
+6. **Trois niveaux d'exigence pour la même fiche** : la RLS accepte un délégué
+   `prestataires: write`, l'écran refuse tout non-titulaire, `/api/membres` exige
+   `equipe: write` non délégable (recoupe D-4, dette 47).
+7. **La note de propreté chiffrée existe et n'est montrée nulle part** — H.6.
+
+### H.6 La note de propreté chiffrée : elle existe, et elle est invisible
+
+**`ota_reviews.score_clean numeric` existe**, créée le 2 septembre 2026 avec ce
+commentaire : *« categorie 'clean', extraite pour la fiche prestataire »*.
+**Elle est alimentée. Elle n'a jamais servi.**
+
+**(a) Les colonnes chiffrées de `ota_reviews`** : `overall_score` (note globale
+du séjour, brute), **`score_clean`** (catégorie propreté, brute), `scores`
+(toutes catégories, jsonb), plus `raw` (payload provider intégral).
+
+**(b) Qui l'écrit, et où elle est fiable.** Deux writers, les deux crons de
+poll : Channex (`extraireScoreClean`, catégorie `clean` ou `cleanliness`) et
+Beds24 (`scoring.clean`). **Aucune normalisation** — la valeur est brute.
+La saisie manuelle et les détections en messagerie la laissent **nulle**.
+Fiabilité, telle que `echelleFiable` la tranche déjà :
+
+| Couple | `score_clean` | Échelle fiable |
+|---|---|---|
+| Airbnb via Channex | oui | **oui**, /10 |
+| Booking via Beds24 | oui | **oui** (mesuré sur 93 avis) |
+| Booking via Channex | présent mais incohérent | **non — exclu explicitement** |
+| Manuel / détection messagerie | **jamais** | — |
+
+**(c) Qui la LIT : un seul fichier.** `lib/cron-reviews-classify.js` (le seuil
+≤ 6 de l'étage 1). **Aucun endpoint ne la rend, aucun écran ne l'affiche,
+aucune statistique ne l'agrège.** Pour mesurer sa couverture réelle :
+
+```sql
+select provider, ota, count(*) as avis, count(score_clean) as avec_note,
+       round(avg(score_clean)::numeric, 2) as moyenne
+  from ota_reviews
+ where statut = 'confirme' and is_hidden = false
+ group by 1, 2 order by 1, 2;
+```
+
+**(d) Ce qui existe déjà pour noter une prestataire.** `lib/stats-avis.js`
+porte deux fonctions, et elles ne font pas la même chose :
+- **`ratioProprete`** — elle **COMPTE**, elle ne note pas. Rend
+  `{ total, positif, remarque, rien_signale, non_analyses }`, et `erreur: true`
+  sur panne (*une panne n'est pas zéro avis*). Comptage **côté base** (quatre
+  `count` exacts, aucune ligne rapatriée, donc aucune borne ne fausse le
+  chiffre — correctif du 14 septembre). Filtres : compte, `statut='confirme'`,
+  `is_hidden=false`, période (15j / 30j / 6mois / toujours). **Rattachement à
+  une personne** par `filtresAttribution` : voie 1 = le ménage précis (clé
+  `menage_event_id` → jeton de la prestataire), voie 2 = `prestataire_periodes`,
+  moins leur intersection ; **aucune voie = ZÉRO, jamais « tous »**. Déjà en
+  production dans la PWA et dans `/avis`.
+- **`noteMoyenne`** — elle note, mais `overall_score` (le **séjour**, pas la
+  propreté) et **sans** paramètre de prestataire.
+
+**(e) Recommandation pour le volet « Équipe ménage » : afficher le COMPTE de
+bons et mauvais retours, pas une moyenne étoilée.** `score_clean` n'est fiable
+que sur deux couples provider/OTA, absente de tous les avis manuels et des
+détections, et l'attribution n'est que partielle : une étoile moyenne donnerait
+un chiffre **faux-précis**, là où « 2 remarques sur 57 ménages, les voici » se
+vérifie ligne par ligne. La fonction qui le calcule existe, elle est testée et
+déjà servie à la prestataire elle-même — l'hôte verrait le même chiffre qu'elle.
+
+**Si Thierry veut quand même l'étoile** : le travail est petit (ajouter le
+paramètre de prestataire à `noteMoyenne` et viser `score_clean`), mais il
+faudra **écarter Booking/Channex** de la moyenne et ne jamais mélanger deux
+échelles — et accepter qu'une prestataire sans avis fiable n'ait pas de note.
