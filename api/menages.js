@@ -365,6 +365,14 @@ module.exports = async function handler(req, res) {
 // ⚠ Le menage est designe par son IDENTITE, pas par un id opaque venu du client
 // (REVIEW.md regle 11) : on ne fait pas confiance a un identifiant pour dire a
 // quel compte appartient la ressource. Le `user_id` du filtre vient de la garde.
+// Le jour courant A PARIS : la meme regle que `api/garde.js` et la PWA — un
+// menage se juge sur le calendrier de l'hote, pas sur UTC.
+function todayEnParis () {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date())
+}
+
 // ===== « FAIT » DEPUIS L'ECRAN DE L'HOTE (ecart D1 de l'inventaire) =====
 //
 // ⚠ L'ANCIEN ECRAN NE MARQUAIT QUE DANS LE NAVIGATEUR (`localStorage`) : le
@@ -411,16 +419,38 @@ async function marquerDepuisLHote (req, res, fait) {
   if (!men) return res.status(404).json({ error: 'Ménage introuvable' })
   if (men.status === 'cancelled') return res.status(409).json({ error: 'Ce séjour est annulé' })
 
+  // ⚠ UN MENAGE A VENIR NE PEUT PAS ETRE FAIT — la MEME garde que la PWA
+  // (`api/menages-public.js`, markDone). Sans elle, un depart futur marque
+  // produisait une ligne que l'ecran ne montre plus (le menage devient
+  // « fait », donc il sort de la bulle et passe vert au planning), donc
+  // indelebile hors du message de six secondes ; et le menage disparaissait
+  // de la PWA de la prestataire sans avoir ete fait (revue de 7f79406).
+  const aujourdhui = todayEnParis()
+  if (fait && String(departure_date) > aujourdhui) {
+    return res.status(400).json({ error: 'Ce ménage n\'a pas encore eu lieu' })
+  }
+
+  // ⚠ « PRET MAINTENANT » N'EST VRAI QUE POUR UN MENAGE DU JOUR (ou d'hier,
+  // le temps que l'hote regularise au reveil). Regulariser un menage de la
+  // semaine derniere ne dit RIEN de l'etat actuel du logement : passer le
+  // bien `ready` y annoncerait « propre et libre » en plein sejour.
+  const veille = new Date(aujourdhui + 'T12:00:00Z')
+  veille.setUTCDate(veille.getUTCDate() - 1)
+  const recent = String(departure_date) >= veille.toISOString().slice(0, 10)
+
   const r = fait
     ? await marquerFait(supabase, { userId, propertyId: property_id, bookingId: booking_id,
-                                    departureDate: departure_date, parToken: null })
+                                    departureDate: departure_date, parToken: null,
+                                    majStatut: recent })
     : await defaireFait(supabase, { userId, propertyId: property_id, bookingId: booking_id,
                                     departureDate: departure_date })
   if (!r.ok) {
     console.error('[menages] menage_done echec', r.message)
     return res.status(500).json({ error: 'Enregistrement impossible' })
   }
-  return res.status(200).json({ ok: true, fait })
+  // `insere` dit si la ligne est NEE de ce geste : l'ecran n'offre « Annuler »
+  // que dans ce cas — sinon il effacerait la ligne de la prestataire.
+  return res.status(200).json({ ok: true, fait, insere: fait ? !!r.insere : true })
 }
 
 async function reassigner (req, res) {

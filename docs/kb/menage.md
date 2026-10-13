@@ -3721,3 +3721,28 @@ marquait que dans `localStorage` — le geste ne quittait pas la machine.
   `prestataires: read`) — aucune requête de plus.
 - Chaque bouton suit SON droit et est **absent du DOM** sinon : griser
   promettrait un geste qu'on refuserait.
+
+**Constats de la revue (7f79406), tous fermés.** Le plus grave : le chemin
+hôte acceptait un départ FUTUR, que la PWA refuse — le ménage devenait
+« fait », sortait de la liste à traiter, passait vert au planning et
+disparaissait de la PWA sans avoir été fait. Même garde des deux côtés
+désormais (`todayEnParis`). Les autres :
+- `markReady` n'écrit pas « un ménage a eu lieu » mais « le logement est
+  propre et LIBRE, maintenant » (`status: ready` + `current_booking_id: null`).
+  Régulariser un ménage de la semaine dernière l'aurait annoncé en plein
+  séjour — et `defaireFait` ne sait pas le défaire. Le writer reçoit donc
+  `majStatut`, que l'appelant tranche : toujours pour la PWA (elle sort du
+  logement), seulement pour un départ d'hier ou du jour côté hôte.
+- Le writer rend `insere` : « Annuler » n'est offert que si la ligne est NÉE
+  du geste. Sinon l'hôte aurait effacé la ligne — et la trace — que la
+  prestataire venait de poser.
+- Le journal de la PWA ne dit plus « -> ready » quand `markReady` a échoué
+  en silence (vécu « erreur avalée, cron à 200 »).
+- L'écriture et la relecture ne partagent plus leur `try` : une panne de
+  LECTURE disait « le geste n'a pas pu être enregistré » alors que la
+  prestataire était déjà notifiée — l'hôte en sollicitait une seconde.
+- La personne déjà sur le ménage n'est plus reproposée dans « Changer » :
+  la choisir ne transférait rien (le serveur y lit « retirer la proposition »)
+  et le message annonçait pourtant « confié à … ».
+- `tests/menages-fait-hote.test.js` (11 tests) couvre enfin ce chemin :
+  droits, périmètre, 404, 409, départ futur, trace, idempotence.

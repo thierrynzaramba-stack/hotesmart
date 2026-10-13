@@ -188,7 +188,9 @@ module.exports = async function handler (req, res) {
     // ⚠ Best-effort : sans cette lecture, le planning reste JUSTE — un menage
     // fait redevient « a faire » a l'ecran, defaut visible et sans danger.
     // C'est la difference avec les liaisons, dont l'absence rendrait la garde
-    // fausse. Le writer de la table reste la PWA (un writer par domaine).
+    // fausse. Le writer de la table est `lib/cleaning/menage-fait.js`, par
+    // lequel passent la PWA et l'ecran de l'hote (un writer par domaine, deux
+    // portes gardees chacune de son cote).
     const faits = new Set()
     let tronqueFaits = false
     if ((menagesRows || []).length) {

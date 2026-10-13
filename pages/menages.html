@@ -576,20 +576,30 @@ function trousDuBien (g) {
 // ⚠ ILS ÉCRIVENT SUR LE SERVEUR, pas dans le navigateur. « Fait » marqué ici
 // est le même fait que celui de la PWA : même table, même writer (écart D1).
 async function validerMenage (l) {
+  let r
+  // ⚠ L'ÉCRITURE ET LA RELECTURE NE SE CONFONDENT PAS. Les mettre dans le même
+  // `try` faisait dire « le geste n'a pas pu être enregistré » quand c'était la
+  // RELECTURE qui échouait — l'hôte recommençait un geste déjà fait, et sur
+  // « Changer » cela voulait dire deux personnes sollicitées (revue de 7f79406).
   try {
-    await poster('/api/menages', { action: 'fait', property_id: l.bienId,
-                                   booking_id: l.bookingId, departure_date: l.date })
-    toast(t('menages.fait_ok', { bien: l.bienNom }), {
-      annuler: async () => {
-        try {
-          await poster('/api/menages', { action: 'defaire', property_id: l.bienId,
-                                         booking_id: l.bookingId, departure_date: l.date })
+    r = await poster('/api/menages', { action: 'fait', property_id: l.bienId,
+                                       booking_id: l.bookingId, departure_date: l.date })
+  } catch (e) { toast(e.message || t('menages.geste_echec')); return }
+  toast(t('menages.fait_ok', { bien: l.bienNom }), {
+    // ⚠ « Annuler » N'EST OFFERT QUE SI LA LIGNE EST NÉE DE CE GESTE. Si la
+    // prestataire avait marqué entre-temps, l'écriture est un no-op : annuler
+    // supprimerait SA ligne, donc sa trace et son travail validé.
+    annuler: r && r.insere
+      ? async () => {
+          try {
+            await poster('/api/menages', { action: 'defaire', property_id: l.bienId,
+                                           booking_id: l.bookingId, departure_date: l.date })
+          } catch (e) { toast(e.message || t('menages.geste_echec')); return }
           await rafraichir()
-        } catch (e) { toast(e.message || t('menages.geste_echec')) }
-      }
-    })
-    await rafraichir()
-  } catch (e) { toast(e.message || t('menages.geste_echec')) }
+        }
+      : null
+  })
+  await rafraichir()
 }
 
 // Changer la prestataire : la liste des actives, puis « Assigner » (transfert
@@ -599,27 +609,35 @@ function ouvrirChangement (l, ancre) {
   document.querySelectorAll('.men-choix').forEach(x => x.remove())
   const choix = document.createElement('div')
   choix.className = 'men-choix'
+  // ⚠ LA PERSONNE DÉJÀ SUR LE MÉNAGE N'EST PAS REPROPOSÉE : la choisir ne
+  // transfère rien (le serveur y voit « retirer la proposition »), et le
+  // message aurait dit « confié à Marie » sans que rien ne bouge.
+  const dejaLa = l.qui && l.qui.id ? String(l.qui.id) : null
+  const offrables = etat.prestataires.filter(p => String(p.id) !== dejaLa)
   choix.innerHTML = `<p class="caption muted" style="margin: 0 0 6px">${esc(t('menages.changer_qui'))}</p>` +
-    etat.prestataires.map(p => `<button type="button" data-presta="${esc(p.id)}">${esc(p.prenom || '')}</button>`).join('') +
-    (etat.prestataires.length ? '' : `<p class="caption muted" style="margin: 0">${esc(t('menages.changer_vide'))}</p>`)
+    offrables.map(p => `<button type="button" data-presta="${esc(p.id)}">${esc(p.prenom || '')}</button>`).join('') +
+    (offrables.length ? '' : `<p class="caption muted" style="margin: 0">${esc(t('menages.changer_vide'))}</p>`)
   ancre.appendChild(choix)
   const fermer = () => choix.remove()
   setTimeout(() => document.addEventListener('click', fermer, { once: true }), 0)
   choix.addEventListener('click', e => e.stopPropagation())
   choix.querySelectorAll('[data-presta]').forEach(b => b.addEventListener('click', async () => {
     fermer()
+    let r
     try {
-      const r = await poster('/api/menages', { property_id: l.bienId, booking_id: l.bookingId,
-                                               departure_date: l.date, provider_id: b.dataset.presta,
-                                               mode: 'assigner' })
-      toast(t('menages.change_ok', { prenom: r.prenom || b.textContent }))
-      await rafraichir()
-    } catch (e) { toast(e.message || t('menages.geste_echec')) }
+      r = await poster('/api/menages', { property_id: l.bienId, booking_id: l.bookingId,
+                                         departure_date: l.date, provider_id: b.dataset.presta,
+                                         mode: 'assigner' })
+    } catch (e) { toast(e.message || t('menages.geste_echec')); return }
+    toast(t('menages.change_ok', { prenom: r.prenom || b.textContent }))
+    await rafraichir()
   }))
 }
 
 // Après un geste : la bulle ET le planning, puisque les deux lisent le cœur.
 async function rafraichir () {
+  // Les deux lectures disent elles-mêmes leurs pannes (bulle muette, bandeau
+  // d'erreur du planning) : on ne les habille pas d'un message de geste raté.
   await Promise.all([chargerATraiter(), charger()])
 }
 
@@ -669,8 +687,10 @@ function boutonsLigne (l) {
     b.push(`<button type="button" class="btn btn--secondary men-atr__btn" data-valider>${esc(t('menages.valider'))}</button>`)
   }
   // Changer la prestataire : partout où quelqu'un doit faire le ménage.
+  const dejaLa = l.qui && l.qui.id ? String(l.qui.id) : null
+  const offrables = etat.prestataires.filter(p => String(p.id) !== dejaLa).length
   if (['non_termine', 'non_assigne', 'non_pris'].includes(l.type) &&
-      peutEcrire('prestataires') && etat.prestataires.length) {
+      peutEcrire('prestataires') && offrables) {
     b.push(`<button type="button" class="btn btn--secondary men-atr__btn" data-changer>${esc(t('menages.changer'))}</button>`)
   }
   return b.length ? `<span class="men-atr__actions">${b.join('')}</span>` : ''

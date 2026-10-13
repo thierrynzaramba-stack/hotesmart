@@ -405,15 +405,20 @@ module.exports = async function handler(req, res) {
         // de l'hote ecrivent par la MEME porte, chacun derriere SES gardes.
         // `done_by_token` porte le jeton : c'est la trace qui dit que c'est
         // la prestataire elle-meme qui a marque.
+        // `majStatut: true` — elle sort du logement : il est propre MAINTENANT.
         const fait = await marquerFait(supabase, {
           userId, propertyId: property_id, bookingId: booking_id,
-          departureDate: departure_date, parToken: token
+          departureDate: departure_date, parToken: token, majStatut: true
         })
         if (!fait.ok) {
           console.error('[Menage] Erreur insert menage_done:', fait.message)
           return res.status(500).json({ error: 'Erreur enregistrement menage' })
         }
-        console.log(`[Menage] ${property_id} booking ${booking_id} dep ${departure_date} -> ready`)
+        // ⚠ LE JOURNAL NE DIT « ready » QUE SI C'EST VRAI : `markReady` peut
+        // échouer en silence (il ne bloque pas), et un log qui l'affirme quand
+        // même fait chercher la panne ailleurs (revue de 7f79406).
+        console.log(`[Menage] ${property_id} booking ${booking_id} dep ${departure_date}` +
+                    (fait.statutMaj ? ' -> ready' : ' (statut NON mis a jour)'))
         return res.json({ success: true, message: 'Menage marque, logement pret' })
       } catch (err) {
         console.error('[Menage] markDone erreur:', err.message)
