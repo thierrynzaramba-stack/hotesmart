@@ -42,9 +42,10 @@
 <main class="men-page">
   <div class="men-entete">
     <h1 class="h2" data-i18n="menages.title"></h1>
-    <a class="btn btn--secondary btn--icon" href="/apps/menages/prestataires" data-i18n-attr="aria-label:menages.prestataires;title:menages.prestataires">
+    <button type="button" class="btn btn--secondary" data-bind="ouvrir-equipe">
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-users"/></svg>
-    </a>
+      <span data-i18n="menages.equipe.titre"></span>
+    </button>
   </div>
 
   <!-- « À traiter » : le SEUL moment ambre de l'écran (spec §3.1). -->
@@ -86,6 +87,22 @@
 
   <p class="caption muted" data-bind="etat-charge" hidden></p>
 </main>
+
+<!-- Volet « Équipe ménage » : ordinateur 460 px à droite, téléphone plein
+     écran. Il LIT ; la configuration reste l'écran existant (refonte à venir). -->
+<div class="men-voile" data-bind="voile" hidden></div>
+<aside class="men-volet" data-bind="volet" hidden aria-labelledby="h-equipe" role="dialog" aria-modal="true">
+  <div class="men-volet__tete">
+    <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-users"/></svg>
+    <h2 class="h2" id="h-equipe" data-i18n="menages.equipe.titre"></h2>
+    <span class="caption muted" data-bind="equipe-compte"></span>
+    <button type="button" class="btn btn--secondary btn--icon" data-bind="fermer-equipe" data-i18n-attr="aria-label:menages.equipe.fermer">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg>
+    </button>
+  </div>
+  <nav class="men-volet__liste" data-bind="equipe-liste" data-i18n-attr="aria-label:menages.equipe.titre"></nav>
+  <div class="men-volet__pied" data-bind="equipe-pied"></div>
+</aside>
 
 <div class="cal-toasts" data-bind="toasts" aria-live="polite"></div>
 
@@ -133,7 +150,9 @@ const etat = {
   aTraiter: [],         // lignes de la bulle (fenêtre PROPRE : J−30 → J+30)
   aTraiterTronque: false,
   prestataires: [],     // annuaire pour « changer la prestataire » (vide sans le droit)
-  toutVoir: false       // « Tout voir » déplié
+  toutVoir: false,      // « Tout voir » déplié
+  equipe: null,         // [{id, prenom, nom, actif, aRegler, biens, retours}] — null = pas encore lu
+  equipeAvecAvis: false
 }
 // ⚠ Une clé PAR COMPTE : la page est délégable, et une ref provider masquée
 // sur un compte ne doit pas faire disparaître le bien homonyme d'un autre
@@ -571,6 +590,107 @@ function trousDuBien (g) {
   return new Set((g ? g.jours : []).filter(j => j.trou && dans.has(j.date)).map(j => j.date))
 }
 
+// ─── Volet « Équipe ménage » ────────────────────────────────────────────────
+// ⚠ IL NE CONFIGURE RIEN : un clic sur une ligne ouvre l'écran de
+// configuration existant. Le volet dit QUI compose l'équipe, ce que chacune
+// couvre, et ce que les voyageurs ont dit d'elle.
+let equipeChargee = false
+async function chargerEquipe () {
+  try {
+    const r = await appel('/api/menages?equipe=1')
+    etat.equipe = r.prestataires || []
+    etat.equipeAvecAvis = !!r.avec_avis
+  } catch (e) {
+    logger.error('Menages', 'équipe', e)
+    // ⚠ Une panne ne se déguise pas en équipe vide : `null` fait dire « non
+    // lisible », jamais « personne dans l'équipe ».
+    etat.equipe = null
+  }
+  equipeChargee = true
+  renderEquipe()
+}
+
+function ouvrirEquipe () {
+  $('[data-bind="volet"]').hidden = false
+  $('[data-bind="voile"]').hidden = false
+  document.body.classList.add('men-volet-ouvert')
+  $('[data-bind="fermer-equipe"]').focus()
+  if (!equipeChargee) { renderEquipe(); chargerEquipe() } else renderEquipe()
+}
+function fermerEquipe () {
+  $('[data-bind="volet"]').hidden = true
+  $('[data-bind="voile"]').hidden = true
+  document.body.classList.remove('men-volet-ouvert')
+  const b = $('[data-bind="ouvrir-equipe"]')
+  if (b) b.focus()
+}
+
+// Les biens couverts : miniatures rondes empilées, photo ou initiales.
+function miniaturesBiens (biens) {
+  if (!biens || !biens.length) return `<span class="caption muted">—</span>`
+  return biens.slice(0, 4).map(b => `<span class="cal-photo men-mini" title="${esc(b.nom)}">${b.photo
+    ? `<img src="${esc(b.photo)}" alt="" loading="lazy">`
+    : `<span class="men-mini__ini" aria-hidden="true">${esc(String(b.nom || '').trim().slice(0, 2).toUpperCase())}</span>`}</span>`).join('') +
+    (biens.length > 4 ? `<span class="caption muted men-mini__plus">+${biens.length - 4}</span>` : '')
+}
+
+// ⚠ LE COMPTE DE RETOURS, PAS UNE MOYENNE ÉTOILÉE (décision de Thierry du
+// 13 octobre, inventaire H.6) : la note chiffrée `score_clean` n'est fiable
+// que sur deux couples provider/OTA et absente des avis manuels — une étoile
+// serait un chiffre faux-précis. C'est le MÊME chiffre, par la MÊME fonction
+// et sur la MÊME période, que celui que la prestataire voit chez elle.
+function retoursHtml (r) {
+  if (!r || !r.total) return `<span class="men-note men-note--vide">—</span>`
+  const bon = `<span class="men-note__bon${r.positif ? '' : ' men-note--vide'}">${icone('i-thumb-up')}<b>${r.positif}</b></span>`
+  const mauvais = `<span class="men-note__mauvais${r.remarque ? '' : ' men-note--vide'}">${icone('i-thumb-down')}<b>${r.remarque}</b></span>`
+  return `<span class="men-note">${bon}${mauvais}</span>`
+}
+
+function renderEquipe () {
+  const liste = $('[data-bind="equipe-liste"]')
+  const compte = $('[data-bind="equipe-compte"]')
+  const pied = $('[data-bind="equipe-pied"]')
+
+  if (!equipeChargee) {
+    compte.textContent = ''
+    liste.innerHTML = `<p class="caption muted" style="padding: 12px">${esc(t('common.loading'))}</p>`
+  } else if (etat.equipe === null) {
+    compte.textContent = ''
+    liste.innerHTML = `<p class="caption muted" style="padding: 12px">${esc(t('menages.equipe.panne'))}</p>`
+  } else if (!etat.equipe.length) {
+    compte.textContent = ''
+    liste.innerHTML = `<p class="caption muted" style="padding: 12px">${esc(t('menages.equipe.vide'))}</p>`
+  } else {
+    compte.textContent = etat.equipe.length
+    liste.innerHTML = etat.equipe.map(p => {
+      const nom = [p.prenom, p.nom].filter(Boolean).join(' ') || t('menages.quelquun')
+      // Un nom de famille manquant se DIT : la fiche l'exige à la création,
+      // mais les fiches anciennes n'en ont pas (règle non rétroactive, H.1).
+      const manque = p.nom ? '' : ` <span class="men-eq__manque" data-i18n="menages.equipe.nom_manquant"></span>`
+      const regler = p.aRegler
+        ? `<span class="men-regler" data-i18n-attr="title:menages.a_regler">${icone('i-settings')}</span>` : ''
+      return `<a class="men-eq${p.actif ? '' : ' men-eq--off'}" href="/apps/menages/prestataires"
+         data-i18n-attr="aria-label:menages.equipe.configurer">
+        <span class="men-eq__id">
+          <span class="men-eq__nom">${esc(nom)}${manque}</span>
+          ${etat.equipeAvecAvis ? retoursHtml(p.retours) : ''}
+        </span>
+        <span class="men-eq__biens">${miniaturesBiens(p.biens)}</span>
+        ${regler}
+        <svg class="icon men-eq__chevron" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+      </a>`
+    }).join('')
+  }
+
+  // « Ajouter » : création réservée au TITULAIRE (décision D6), donc absent du
+  // DOM pour un délégué — griser promettrait un geste qu'on refuserait.
+  pied.innerHTML = estTitulaire()
+    ? `<a class="btn btn--outline btn--block btn--lg" href="/apps/menages/prestataires">
+         ${icone('i-plus')}<span data-i18n="menages.equipe.ajouter"></span></a>`
+    : ''
+  I18n.apply($('[data-bind="volet"]'))
+}
+
 // ─── Les gestes de la bulle (étape 3, demandés en recette) ─────────────────
 // ⚠ ILS ÉCRIVENT SUR LE SERVEUR, pas dans le navigateur. « Fait » marqué ici
 // est le même fait que celui de la PWA : même table, même writer (écart D1).
@@ -862,6 +982,12 @@ async function init () {
       large = estLarge()
       renderTout(); renderBulle()
     }
+  })
+  $('[data-bind="ouvrir-equipe"]').addEventListener('click', ouvrirEquipe)
+  $('[data-bind="fermer-equipe"]').addEventListener('click', fermerEquipe)
+  $('[data-bind="voile"]').addEventListener('click', fermerEquipe)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('[data-bind="volet"]').hidden) fermerEquipe()
   })
   // L'en-tête collant suit le défilement horizontal du calendrier (téléphone).
   const scrollEl = $('[data-bind="planning"]')

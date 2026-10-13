@@ -41,7 +41,8 @@ button{font-family:inherit;cursor:pointer}
 .on{height:30px;width:100%;display:flex;align-items:center;justify-content:center}
 .mk{width:28px;height:28px;border-radius:99px;background:#FFFFFF;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,0.18)}
 .mk.np{border:2px dashed #C13515;box-shadow:none;background:#FCEDEA}
-.mk.ec{background:#222222}
+.mk.f{background:#1A7F4B;box-shadow:none;position:relative}
+.rv{position:absolute;top:-6px;right:-8px;width:16px;height:16px;border-radius:99px;background:#1A7F4B;border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center}
 .mk.na{border:2px dashed #717171;box-shadow:none}
 .none{grid-column:2 / 16;height:34px;margin:5px 2px;border-radius:99px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;font-weight:700;color:#C13515;border:1.5px dashed #C13515;background:repeating-linear-gradient(135deg,#FCEDEA 0 5px,#FFFFFF 5px 10px)}
 .lg{display:flex;flex-wrap:wrap;gap:20px;font-size:12px;color:#717171}
@@ -70,7 +71,7 @@ button{font-family:inherit;cursor:pointer}
 
   <div class="pad" style="display: flex; align-items: center; gap: 10px; padding-top: 24px; padding-bottom: 20px">
     <h1 style="margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.03em; flex: 1">Ménages</h1>
-    <button class="ico" aria-label="Prestataires" title="Prestataires"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.4 0 4 1.5 4.6 4"/></svg></button>
+    <button style="height: 44px; padding: 0 18px 0 14px; border: 1px solid #DDDDDD; border-radius: 99px; background: #FFFFFF; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.4 0 4 1.5 4.6 4"/></svg>Équipe ménage</button>
   </div>
 
   <!-- Bulle À traiter (30 jours) : une seule liste, l'icône dit le type -->
@@ -99,7 +100,6 @@ button{font-family:inherit;cursor:pointer}
     <button class="ico" aria-label="Période suivante"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
     <button style="height: 44px; padding: 0 18px; border: 1px solid #DDDDDD; border-radius: 99px; background: #FFFFFF; font-size: 14px; font-weight: 600">Aujourd’hui</button>
     <span style="flex: 1"></span>
-    <button style="height: 44px; padding: 0 16px; border: 1px solid #DDDDDD; border-radius: 99px; background: #FFFFFF; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6Z"/></svg>Modifier les gardes</button>
   </div>
 
   <!-- Calendrier : un bloc par bien, une ligne par prestataire assignée au bien.
@@ -144,7 +144,7 @@ button{font-family:inherit;cursor:pointer}
         <div class="who"><span class="av" style="background: #E3EADF">LE</span>Lena</div>
         <div class="lane" style="grid-column: 2 / 16">
           <div style="width: 100%; display: grid; grid-template-columns: repeat(14,1fr); align-items: center">
-            <span style="grid-column: 1 / 2; height: 30px; margin: 0 2px; border-radius: 99px; background: #E3EADF; display: flex; align-items: center; justify-content: center"><span class="mk ec" aria-label="Ménage en cours"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span>
+            <span style="grid-column: 1 / 2; height: 30px; margin: 0 2px; border-radius: 99px; background: #E3EADF; display: flex; align-items: center; justify-content: center"><span class="mk f" aria-label="Ménage fait, bon retour"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="rv" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v10H4V10ZM7 10l4-7c1.5 0 2.5 1 2.3 2.6L13 10h5.5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 17.3 20H7"/></svg></span></span></span>
             <span style="grid-column: 4 / 5; height: 30px; margin: 0 2px; border-radius: 99px; background: #E3EADF; display: flex; align-items: center; justify-content: center"><span class="mk np" aria-label="Ménage non pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 6v7M12 17.5v.5"/></svg></span></span>
             <span style="grid-column: 7 / 11; height: 30px; margin: 0 2px; border-radius: 99px; background: #E3EADF"></span>
             <span style="grid-column: 12 / 13; height: 30px; margin: 0 2px; border-radius: 99px; background: #E3EADF; display: flex; align-items: center; justify-content: center"><span class="mk" aria-label="Ménage pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span>
@@ -168,7 +168,10 @@ button{font-family:inherit;cursor:pointer}
     <span><span class="mk" style="width: 22px; height: 22px"></span>Ménage pris</span>
     <span><span class="mk np" style="width: 22px; height: 22px"></span>Non pris</span>
     <span><span class="mk na" style="width: 22px; height: 22px"></span>Non assigné</span>
-    <span><span class="mk ec" style="width: 22px; height: 22px"></span>En cours</span>
+    <span><span class="mk f" style="width: 22px; height: 22px"></span>Fait</span>
+    <span><span class="rv" style="position: static; background: #1A7F4B"></span>Bon retour</span>
+    <span><span class="rv" style="position: static; background: #C13515"></span>Mauvais retour</span>
+    <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#717171" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Jours à régler</span>
     <span><span style="width: 40px; height: 16px; border-radius: 99px; border: 1.5px dashed #C13515; background: repeating-linear-gradient(135deg,#FCEDEA 0 4px,#FFFFFF 4px 8px)"></span>Personne</span>
   </div>
 </div>

@@ -27,6 +27,7 @@ const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 const { echeanceOffre, chargerLiaisons, chargerDisponibilites,
         deciderParGarde } = require('../lib/cleaning/assign')
 const { notifierAssignation, notifierProposition } = require('../lib/cleaning/notifier-prestataire')
+const { ratioProprete } = require('../lib/stats-avis')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -88,6 +89,13 @@ module.exports = async function handler(req, res) {
   if (!garde.ok) { console.log(t.ligne(' -> 403')); return }
   const userId = garde.accountUserId
   const filtreRef = filtrePerimetreSql(refsDuPerimetre(garde.contexte), 'provider_property_id')
+
+  // ⚠ L'EQUIPE SE LIT SEULE, AVANT LES LECTURES LOURDES. Le volet « Equipe
+  // menage » n'a besoin ni des reservations, ni des menages, ni du planning :
+  // les charger pour lui ferait payer un ecran qui ne les montre pas. Branche
+  // posee ICI, apres les droits et avant la premiere requete de donnees.
+  if (String(req.query.equipe || '') === '1') return await equipeMenage(req, res, garde, userId)
+
   if (filtreRef === '') return res.status(200).json({ properties: [], bookings: [] })
 
   try {
@@ -365,6 +373,110 @@ module.exports = async function handler(req, res) {
 // ⚠ Le menage est designe par son IDENTITE, pas par un id opaque venu du client
 // (REVIEW.md regle 11) : on ne fait pas confiance a un identifiant pour dire a
 // quel compte appartient la ressource. Le `user_id` du filtre vient de la garde.
+// ===== L'EQUIPE MENAGE (volet du 13 octobre 2026) =====
+//
+// Rend les personnes de l'equipe, avec les biens qu'elles couvrent et le compte
+// de retours voyageurs qui leur est rattache. Lecture seule.
+//
+// ⚠ TROIS DROITS, TROIS CHOSES (comme api/garde.js) : `menages: read` ouvre
+// l'endpoint, `prestataires: read` donne les PERSONNES (sans lui, pas meme un
+// identifiant), `avis: read` donne les RETOURS. Un membre qui voit la
+// couverture ne voit pas forcement qui compose l'equipe, ni ce que les
+// voyageurs ont dit d'elles.
+//
+// ⚠ LES DESACTIVEES SONT RENDUES (drapeau `actif`) : elles restent dans la
+// liste, grisees — les effacer ferait disparaitre l'historique d'une personne
+// qui a travaille pour l'hote.
+async function equipeMenage (req, res, garde, userId) {
+  if (!peutLire(garde.contexte, 'prestataires', null)) {
+    // Pas une erreur : l'ecran n'affiche simplement pas le volet.
+    return res.status(200).json({ prestataires: [], avec_avis: false })
+  }
+  const avecAvis = peutLire(garde.contexte, 'avis', null)
+
+  const { data: profils, error: eProf } = await supabase.from('profiles')
+    .select('id, first_name, last_name, active, pwa_token')
+    .eq('account_user_id', userId).eq('access_mode', 'lien')
+    .order('first_name', { ascending: true })
+  if (eProf) {
+    console.error('[menages] equipe : lecture profils echec', eProf.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!profils || !profils.length) return res.status(200).json({ prestataires: [], avec_avis: avecAvis })
+
+  // Les biens couverts : liaisons ACTIVES, bornees au perimetre de l'appelant.
+  const refs = refsDuPerimetre(garde.contexte)
+  let qL = supabase.from('property_cleaning_providers')
+    .select('provider_id, property_id, requires_ack, weekdays')
+    .eq('user_id', userId).eq('active', true)
+  if (Array.isArray(refs)) {
+    if (!refs.length) return res.status(200).json({ prestataires: [], avec_avis: avecAvis })
+    qL = qL.in('property_id', refs.map(String))
+  }
+  const { data: liaisons, error: eL } = await qL.limit(2000)
+  if (eL) {
+    console.error('[menages] equipe : lecture liaisons echec', eL.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+
+  const { data: biens } = await supabase.from('properties')
+    .select('provider_property_id, name, photo_url')
+    .eq('user_id', userId).not('provider_property_id', 'is', null).limit(200)
+  const bienPar = new Map((biens || []).map(b => [String(b.provider_property_id),
+    { id: String(b.provider_property_id), nom: b.name || '', photo: b.photo_url || null }]))
+
+  // ⚠ LA MEME PERIODE QU'ELLE VOIT. Le ratio de son en-tete suit
+  // `public_tokens.ratio_periode` : prendre une autre periode ici afficherait a
+  // l'hote un chiffre different du sien, pour la meme realite.
+  const periodes = new Map()
+  if (avecAvis) {
+    const jetons = profils.map(p => p.pwa_token).filter(Boolean)
+    if (jetons.length) {
+      const { data: pt } = await supabase.from('public_tokens')
+        .select('token, ratio_periode').eq('user_id', userId).in('token', jetons)
+      for (const x of (pt || [])) periodes.set(String(x.token), x.ratio_periode || 'toujours')
+    }
+  }
+
+  const sortie = []
+  for (const p of profils) {
+    const siennes = (liaisons || []).filter(l => String(l.provider_id) === String(p.id))
+    sortie.push({
+      id: p.id,
+      prenom: p.first_name || null,
+      nom: p.last_name || null,
+      actif: p.active !== false,
+      // ⚠ `aRegler` : la MEME regle que api/garde.js (§12.9c) — elle doit
+      // confirmer, et aucun jour ne lui est confie sur ce bien, donc le moteur
+      // ne lui proposera JAMAIS rien dessus.
+      aRegler: siennes.some(l => l.requires_ack === true &&
+                                 !(Array.isArray(l.weekdays) && l.weekdays.length)),
+      biens: siennes.map(l => bienPar.get(String(l.property_id))).filter(Boolean),
+      retours: null
+    })
+  }
+
+  // Les retours, un appel par personne (la fonction compte en base, elle ne
+  // rapatrie aucune ligne). ⚠ Une panne ne vide pas la liste : `retours` reste
+  // `null` et l'ecran affiche « — », il n'invente pas un zero.
+  if (avecAvis) {
+    await Promise.all(sortie.map(async (s, i) => {
+      try {
+        const r = await ratioProprete(supabase, {
+          userId, prestataireId: s.id,
+          periode: periodes.get(String(profils[i].pwa_token || '')) || 'toujours',
+          refs: Array.isArray(refs) ? refs.map(String) : null
+        })
+        if (r && !r.erreur) s.retours = { positif: r.positif, remarque: r.remarque, total: r.total }
+      } catch (e) {
+        console.error('[menages] equipe : ratio echec', e.message)
+      }
+    }))
+  }
+
+  return res.status(200).json({ prestataires: sortie, avec_avis: avecAvis })
+}
+
 // Le jour courant A PARIS : la meme regle que `api/garde.js` et la PWA — un
 // menage se juge sur le calendrier de l'hote, pas sur UTC.
 function todayEnParis () {

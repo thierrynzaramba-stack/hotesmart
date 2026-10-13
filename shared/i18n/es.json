@@ -410,5 +410,12 @@
   "menages.annuler": "Deshacer",
   "menages.fait_ok": "Limpieza validada — {bien}",
   "menages.change_ok": "Asignado a {prenom}",
-  "menages.geste_echec": "No se pudo guardar la acción."
+  "menages.geste_echec": "No se pudo guardar la acción.",
+  "menages.equipe.titre": "Equipo de limpieza",
+  "menages.equipe.fermer": "Cerrar",
+  "menages.equipe.ajouter": "Añadir",
+  "menages.equipe.configurer": "Configurar",
+  "menages.equipe.vide": "Nadie en el equipo por ahora.",
+  "menages.equipe.panne": "El equipo no está disponible ahora.",
+  "menages.equipe.nom_manquant": "[Apellido]"
 }

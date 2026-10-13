@@ -713,8 +713,38 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-mk__retour--mauvais { background: var(--danger); }
 .men-mk__retour .icon { width: 10px; height: 10px; }
 
+/* ── Volet « Équipe ménage » ─────────────────────────────────────────────── */
+.men-voile { position: fixed; inset: 0; background: rgba(0, 0, 0, .28); z-index: 50; }
+.men-volet { position: fixed; inset-block: 0; inset-inline-end: 0; width: 460px; max-width: 100vw; z-index: 60; background: var(--surface); border-inline-start: 1px solid var(--line); box-shadow: -12px 0 32px rgba(0, 0, 0, .12); display: flex; flex-direction: column; }
+.men-volet__tete { display: flex; align-items: center; gap: 12px; padding: 20px 20px 12px; }
+.men-volet__tete .h2 { flex: 1; margin: 0; font-size: 20px; font-weight: var(--fw-black); }
+.men-volet__liste { flex: 1; overflow-y: auto; padding: 4px 12px; }
+.men-volet__pied { padding: 16px 20px calc(24px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+.men-volet__pied:empty { display: none; }
+.men-eq { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 0 12px; border-radius: 14px; color: var(--ink); }
+.men-eq:hover { background: var(--surface-2); }
+.men-eq--off .men-eq__nom, .men-eq--off .men-note { color: var(--muted); }
+.men-eq__id { flex: 1; min-width: 0; }
+.men-eq__nom { display: block; font-size: 16px; font-weight: var(--fw-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.men-eq__manque { color: var(--muted); font-weight: var(--fw-medium); }
+.men-eq__biens { display: flex; align-items: center; flex: none; }
+.men-eq__chevron { color: var(--muted); flex: none; width: 18px; height: 18px; }
+.men-mini { width: 26px; height: 26px; border-radius: var(--radius-pill); border: 2px solid var(--surface); margin-inline-start: -6px; }
+.men-mini__ini { font-size: 9px; font-weight: var(--fw-bold); color: var(--muted); }
+.men-mini__plus { margin-inline-start: 4px; }
+/* Le COMPTE de retours (décision du 13 octobre) : jamais une moyenne étoilée. */
+.men-note { display: flex; align-items: center; gap: 10px; margin-top: 2px; font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.men-note__bon, .men-note__mauvais { display: inline-flex; align-items: center; gap: 4px; }
+.men-note__bon { color: var(--ok); }
+.men-note__mauvais { color: var(--danger); }
+.men-note--vide { color: var(--muted); }
+.men-note .icon { width: 14px; height: 14px; }
+
 @media (max-width: 899px) {
   .men-page { padding: 10px 16px 100px; }
+  /* Téléphone : le volet prend tout l'écran (la barre du bas reste sous lui). */
+  .men-volet { width: 100vw; border-inline-start: 0; }
+  .men-voile { display: none; }
   /* Les deux boutons passent SOUS le texte : cote a cote sur 390 px, ils
      ecrasaient le titre a « Cle… » et le bien sur cinq lignes. */
   .men-atr { flex-wrap: wrap; }

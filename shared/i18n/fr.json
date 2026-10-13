@@ -410,5 +410,12 @@
   "menages.annuler": "Annuler",
   "menages.fait_ok": "Ménage validé — {bien}",
   "menages.change_ok": "Confié à {prenom}",
-  "menages.geste_echec": "Le geste n'a pas pu être enregistré."
+  "menages.geste_echec": "Le geste n'a pas pu être enregistré.",
+  "menages.equipe.titre": "Équipe ménage",
+  "menages.equipe.fermer": "Fermer",
+  "menages.equipe.ajouter": "Ajouter",
+  "menages.equipe.configurer": "Configurer",
+  "menages.equipe.vide": "Personne dans l'équipe pour l'instant.",
+  "menages.equipe.panne": "Équipe non lisible pour l'instant.",
+  "menages.equipe.nom_manquant": "[Nom]"
 }

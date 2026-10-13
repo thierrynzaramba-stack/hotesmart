@@ -94,6 +94,10 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
     'valider un ménage écrit sur le SERVEUR, writer partagé avec la PWA (D1)': 'validerMenage',
     'changer la prestataire depuis la bulle': 'ouvrirChangement',
     '« Annuler » rejoue l\'inverse RÉEL (defaire), pas un simple retrait visuel': "action: 'defaire'",
+    'volet « Équipe ménage » : il LIT, la configuration reste l\'écran existant': 'ouvrirEquipe',
+    'le COMPTE de retours, jamais une moyenne étoilée (décision H.6)': 'retoursHtml',
+    'une désactivée reste listée, grisée': 'men-eq--off',
+    '« Ajouter » réservé au titulaire, absent du DOM sinon (D6)': 'estTitulaire()',
     'X-Compte sur chaque appel': 'enteteCompte()',
     'entrée sous menages:read, erreur 403 dite': 'menages.no_access'
   }

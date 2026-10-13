@@ -973,3 +973,43 @@ déjà servie à la prestataire elle-même — l'hôte verrait le même chiffre 
 paramètre de prestataire à `noteMoyenne` et viser `score_clean`), mais il
 faudra **écarter Booking/Channex** de la moyenne et ne jamais mélanger deux
 échelles — et accepter qu'une prestataire sans avis fiable n'ait pas de note.
+
+### H.7 Décisions de Thierry sur les trous de H.5 (13 octobre 2026)
+
+Prises à la lecture de cet inventaire. **Elles concernent l'écran de
+configuration V5, pas le volet « Équipe ménage »** — qui ne fait que lire.
+
+1. **« Envoyer le lien » sera une action** (SMS ou partage natif), pour que
+   l'hôte n'ait **plus jamais à transmettre un mot de passe en clair** par ses
+   propres moyens. Ferme H.5-1.
+2. **« Régénérer le lien » et « Réactiver » seront branchés** sur les endpoints
+   qui existent déjà (`/api/membres` `regenerate` / `reactivate`), aujourd'hui
+   appelés par aucune page. Ferme H.5-2.
+3. **Note interne : pas maintenant.** H.5-5 reste ouvert, assumé.
+
+Rappel pour qui reprendra : H.5-3 (`self_view_reviews` non réglable), H.5-4
+(`prestataire_periodes` sans writer) et H.5-6 (trois niveaux d'exigence sur la
+même fiche) n'ont pas encore été tranchés.
+
+### H.8 Le volet « Équipe ménage » (livré le 13 octobre 2026)
+
+Lecture seule, dans `pages/menages.html`. **Il ne configure rien** : un clic
+sur une ligne ouvre l'écran de configuration existant.
+
+- **Données** : `GET /api/menages?equipe=1`, branche posée AVANT les lectures
+  lourdes (le volet n'a besoin ni des réservations, ni du planning).
+- **Trois droits, trois choses** : `menages: read` ouvre l'endpoint,
+  `prestataires: read` donne les PERSONNES (sans lui, liste vide et rien n'est
+  même lu), `avis: read` donne les RETOURS.
+- **Les désactivées sont rendues**, avec leur drapeau : elles restent dans la
+  liste, grisées — les effacer ferait disparaître l'historique de quelqu'un
+  qui a travaillé pour l'hôte.
+- **Le compte de retours, jamais une moyenne étoilée** (décision de Thierry,
+  H.6) : pouce vert et pouce rouge, par `ratioProprete` — **la même fonction,
+  et sur la période du jeton de chaque personne, donc le même chiffre qu'elle
+  voit chez elle**. Une panne de comptage laisse « — », elle n'invente pas un
+  zéro ; un ratio absent aussi.
+- **« Ajouter » n'existe que pour le titulaire** (décision D6) : absent du DOM
+  pour un délégué, jamais grisé.
+- Tests : `tests/menages-equipe.test.js` (11) — droits, périmètre, désactivées,
+  biens, « jours à régler », période de comptage, pannes.

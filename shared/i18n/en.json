@@ -410,5 +410,12 @@
   "menages.annuler": "Undo",
   "menages.fait_ok": "Cleaning marked done — {bien}",
   "menages.change_ok": "Assigned to {prenom}",
-  "menages.geste_echec": "The action could not be saved."
+  "menages.geste_echec": "The action could not be saved.",
+  "menages.equipe.titre": "Cleaning team",
+  "menages.equipe.fermer": "Close",
+  "menages.equipe.ajouter": "Add",
+  "menages.equipe.configurer": "Configure",
+  "menages.equipe.vide": "Nobody in the team yet.",
+  "menages.equipe.panne": "Team unavailable right now.",
+  "menages.equipe.nom_manquant": "[Last name]"
 }
