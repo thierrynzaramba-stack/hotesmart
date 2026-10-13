@@ -417,5 +417,6 @@
   "menages.equipe.configurer": "Configurer",
   "menages.equipe.vide": "Personne dans l'équipe pour l'instant.",
   "menages.equipe.panne": "Équipe non lisible pour l'instant.",
-  "menages.equipe.nom_manquant": "[Nom]"
+  "menages.equipe.nom_manquant": "[Nom]",
+  "menages.equipe.sans_droit": "Vous n'avez pas accès à l'équipe."
 }

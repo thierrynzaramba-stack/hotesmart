@@ -25,7 +25,7 @@ const { requirePermission, verifierSession } = require('../lib/require-permissio
 const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
 const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 const { echeanceOffre, chargerLiaisons, chargerDisponibilites,
-        deciderParGarde } = require('../lib/cleaning/assign')
+        deciderParGarde, lireTout } = require('../lib/cleaning/assign')
 const { notifierAssignation, notifierProposition } = require('../lib/cleaning/notifier-prestataire')
 const { ratioProprete } = require('../lib/stats-avis')
 
@@ -389,8 +389,10 @@ module.exports = async function handler(req, res) {
 // qui a travaille pour l'hote.
 async function equipeMenage (req, res, garde, userId) {
   if (!peutLire(garde.contexte, 'prestataires', null)) {
-    // Pas une erreur : l'ecran n'affiche simplement pas le volet.
-    return res.status(200).json({ prestataires: [], avec_avis: false })
+    // ⚠ `avec_personnes: false` DIT la différence : une équipe vide et une
+    // équipe qu'on n'a pas le droit de voir ne se racontent pas pareil — sans
+    // ce drapeau, l'écran affirmait « personne dans l'équipe » à un délégué.
+    return res.status(200).json({ prestataires: [], avec_avis: false, avec_personnes: false })
   }
   const avecAvis = peutLire(garde.contexte, 'avis', null)
 
@@ -402,7 +404,7 @@ async function equipeMenage (req, res, garde, userId) {
     console.error('[menages] equipe : lecture profils echec', eProf.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
-  if (!profils || !profils.length) return res.status(200).json({ prestataires: [], avec_avis: avecAvis })
+  if (!profils || !profils.length) return res.status(200).json({ prestataires: [], avec_avis: avecAvis, avec_personnes: true })
 
   // Les biens couverts : liaisons ACTIVES, bornees au perimetre de l'appelant.
   const refs = refsDuPerimetre(garde.contexte)
@@ -410,31 +412,66 @@ async function equipeMenage (req, res, garde, userId) {
     .select('provider_id, property_id, requires_ack, weekdays')
     .eq('user_id', userId).eq('active', true)
   if (Array.isArray(refs)) {
-    if (!refs.length) return res.status(200).json({ prestataires: [], avec_avis: avecAvis })
+    if (!refs.length) return res.status(200).json({ prestataires: [], avec_avis: avecAvis, avec_personnes: true })
     qL = qL.in('property_id', refs.map(String))
   }
-  const { data: liaisons, error: eL } = await qL.limit(2000)
-  if (eL) {
+  // ⚠ `lireTout`, PAS UN `limit` : PostgREST plafonne à `db-max-rows` (1000),
+  // qu'aucune borne demandée ne lève — et sans `order`, les lignes retenues
+  // changent d'un appel à l'autre, donc les biens et l'engrenage « jours à
+  // régler » clignoteraient d'un rafraîchissement au suivant.
+  let liaisons
+  try {
+    liaisons = await lireTout(() => qL, 'liaisons equipe', 'property_id')
+  } catch (eL) {
     console.error('[menages] equipe : lecture liaisons echec', eL.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
 
-  const { data: biens } = await supabase.from('properties')
+  // ⚠ UNE PANNE ICI COUPE : sans les noms, chaque personne paraîtrait ne
+  // couvrir AUCUN bien — un écran faux, et faux dans le sens rassurant.
+  // Bornée au périmètre comme les liaisons, et ordonnée (sans `order`, les
+  // lignes servies au-delà du plafond sont arbitraires).
+  let qB = supabase.from('properties')
     .select('provider_property_id, name, photo_url')
-    .eq('user_id', userId).not('provider_property_id', 'is', null).limit(200)
+    .eq('user_id', userId).not('provider_property_id', 'is', null)
+  if (Array.isArray(refs)) qB = qB.in('provider_property_id', refs.map(String))
+  let biens
+  try {
+    biens = await lireTout(() => qB, 'biens equipe', 'provider_property_id')
+  } catch (eB) {
+    console.error('[menages] equipe : lecture biens echec', eB.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
   const bienPar = new Map((biens || []).map(b => [String(b.provider_property_id),
     { id: String(b.provider_property_id), nom: b.name || '', photo: b.photo_url || null }]))
 
   // ⚠ LA MEME PERIODE QU'ELLE VOIT. Le ratio de son en-tete suit
   // `public_tokens.ratio_periode` : prendre une autre periode ici afficherait a
   // l'hote un chiffre different du sien, pour la meme realite.
+  // ⚠ UNE PANNE NE SE DEGUISE PAS EN « toujours ». Retomber sur une période
+  // plus large ferait lire à l'hôte 47 retours là où elle en voit 2 — un
+  // élargissement silencieux, la faute que `api/menages-public.js` a déjà
+  // fermée. Sans les périodes, on ne compte PAS : l'écran affiche « — ».
+  // ⚠ Et la valeur est VALIDÉE, avec le même repli que la PWA (`toujours`,
+  // jamais le `30j` par défaut de `periodeNormalisee`) : deux chiffres
+  // contradictoires pour la même personne seraient pires que pas de chiffre.
+  const PERIODES_JETON = ['15j', '30j', '6mois', 'toujours']
   const periodes = new Map()
+  let periodesLues = true
   if (avecAvis) {
     const jetons = profils.map(p => p.pwa_token).filter(Boolean)
     if (jetons.length) {
-      const { data: pt } = await supabase.from('public_tokens')
+      const { data: pt, error: ePt } = await supabase.from('public_tokens')
         .select('token, ratio_periode').eq('user_id', userId).in('token', jetons)
-      for (const x of (pt || [])) periodes.set(String(x.token), x.ratio_periode || 'toujours')
+      if (ePt) {
+        console.error('[menages] equipe : lecture periodes echec', ePt.message)
+        periodesLues = false
+      } else {
+        for (const x of (pt || [])) {
+          periodes.set(String(x.token),
+            PERIODES_JETON.includes(x.ratio_periode) ? x.ratio_periode : 'toujours')
+        }
+      }
     }
   }
 
@@ -459,22 +496,29 @@ async function equipeMenage (req, res, garde, userId) {
   // Les retours, un appel par personne (la fonction compte en base, elle ne
   // rapatrie aucune ligne). ⚠ Une panne ne vide pas la liste : `retours` reste
   // `null` et l'ecran affiche « — », il n'invente pas un zero.
-  if (avecAvis) {
-    await Promise.all(sortie.map(async (s, i) => {
-      try {
-        const r = await ratioProprete(supabase, {
-          userId, prestataireId: s.id,
-          periode: periodes.get(String(profils[i].pwa_token || '')) || 'toujours',
-          refs: Array.isArray(refs) ? refs.map(String) : null
-        })
-        if (r && !r.erreur) s.retours = { positif: r.positif, remarque: r.remarque, total: r.total }
-      } catch (e) {
-        console.error('[menages] equipe : ratio echec', e.message)
-      }
-    }))
+  // ⚠ CONCURRENCE BORNEE : chaque comptage fait une resolution d'attribution
+  // plus quatre `count`. Quinze personnes d'un coup, c'est plus de cent
+  // requetes simultanees sur une seule ouverture de volet.
+  if (avecAvis && periodesLues) {
+    const LOT = 4
+    for (let i = 0; i < sortie.length; i += LOT) {
+      await Promise.all(sortie.slice(i, i + LOT).map(async (s, j) => {
+        const p = profils[i + j]
+        try {
+          const r = await ratioProprete(supabase, {
+            userId, prestataireId: s.id,
+            periode: periodes.get(String(p.pwa_token || '')) || 'toujours',
+            refs: Array.isArray(refs) ? refs.map(String) : null
+          })
+          if (r && !r.erreur) s.retours = { positif: r.positif, remarque: r.remarque, total: r.total }
+        } catch (e) {
+          console.error('[menages] equipe : ratio echec', e.message)
+        }
+      }))
+    }
   }
 
-  return res.status(200).json({ prestataires: sortie, avec_avis: avecAvis })
+  return res.status(200).json({ prestataires: sortie, avec_avis: avecAvis, avec_personnes: true })
 }
 
 // Le jour courant A PARIS : la meme regle que `api/garde.js` et la PWA — un

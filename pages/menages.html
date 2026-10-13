@@ -152,7 +152,8 @@ const etat = {
   prestataires: [],     // annuaire pour « changer la prestataire » (vide sans le droit)
   toutVoir: false,      // « Tout voir » déplié
   equipe: null,         // [{id, prenom, nom, actif, aRegler, biens, retours}] — null = pas encore lu
-  equipeAvecAvis: false
+  equipeAvecAvis: false,
+  equipePersonnes: true // faux = pas le droit de voir QUI compose l'équipe
 }
 // ⚠ Une clé PAR COMPTE : la page est délégable, et une ref provider masquée
 // sur un compte ne doit pas faire disparaître le bien homonyme d'un autre
@@ -594,19 +595,29 @@ function trousDuBien (g) {
 // ⚠ IL NE CONFIGURE RIEN : un clic sur une ligne ouvre l'écran de
 // configuration existant. Le volet dit QUI compose l'équipe, ce que chacune
 // couvre, et ce que les voyageurs ont dit d'elle.
+// `null` = jamais lu ou panne, `[]` = équipe vide (le serveur distingue).
 let equipeChargee = false
+let equipeEnCours = false
 async function chargerEquipe () {
+  if (equipeEnCours) return          // deux clics rapides, un seul appel
+  equipeEnCours = true
   try {
     const r = await appel('/api/menages?equipe=1')
     etat.equipe = r.prestataires || []
     etat.equipeAvecAvis = !!r.avec_avis
+    etat.equipePersonnes = r.avec_personnes !== false
+    // ⚠ CHARGÉE SEULEMENT SUR SUCCÈS : marquer une panne comme « chargée »
+    // figeait le volet sur « non lisible » pour toute la session, sans jamais
+    // retenter — il fallait recharger la page (revue de dfcf8d4).
+    equipeChargee = true
   } catch (e) {
     logger.error('Menages', 'équipe', e)
     // ⚠ Une panne ne se déguise pas en équipe vide : `null` fait dire « non
     // lisible », jamais « personne dans l'équipe ».
     etat.equipe = null
+  } finally {
+    equipeEnCours = false
   }
-  equipeChargee = true
   renderEquipe()
 }
 
@@ -615,7 +626,8 @@ function ouvrirEquipe () {
   $('[data-bind="voile"]').hidden = false
   document.body.classList.add('men-volet-ouvert')
   $('[data-bind="fermer-equipe"]').focus()
-  if (!equipeChargee) { renderEquipe(); chargerEquipe() } else renderEquipe()
+  renderEquipe()
+  if (!equipeChargee) chargerEquipe()
 }
 function fermerEquipe () {
   $('[data-bind="volet"]').hidden = true
@@ -658,8 +670,12 @@ function renderEquipe () {
     compte.textContent = ''
     liste.innerHTML = `<p class="caption muted" style="padding: 12px">${esc(t('menages.equipe.panne'))}</p>`
   } else if (!etat.equipe.length) {
+    // ⚠ « VIDE » ET « PAS LE DROIT » NE SE DISENT PAS PAREIL : affirmer
+    // l'équipe vide à un délégué qui n'a pas `prestataires: read` serait une
+    // contre-vérité (revue de dfcf8d4).
     compte.textContent = ''
-    liste.innerHTML = `<p class="caption muted" style="padding: 12px">${esc(t('menages.equipe.vide'))}</p>`
+    liste.innerHTML = `<p class="caption muted" style="padding: 12px">${esc(
+      etat.equipePersonnes ? t('menages.equipe.vide') : t('menages.equipe.sans_droit'))}</p>`
   } else {
     compte.textContent = etat.equipe.length
     liste.innerHTML = etat.equipe.map(p => {
@@ -669,8 +685,10 @@ function renderEquipe () {
       const manque = p.nom ? '' : ` <span class="men-eq__manque" data-i18n="menages.equipe.nom_manquant"></span>`
       const regler = p.aRegler
         ? `<span class="men-regler" data-i18n-attr="title:menages.a_regler">${icone('i-settings')}</span>` : ''
+      // ⚠ L'aria-label COMPLÈTE le nom, il ne le remplace pas : « Configurer »
+      // seul rendait huit lignes indistinguables au lecteur d'écran.
       return `<a class="men-eq${p.actif ? '' : ' men-eq--off'}" href="/apps/menages/prestataires"
-         data-i18n-attr="aria-label:menages.equipe.configurer">
+         aria-label="${esc(t('menages.equipe.configurer') + ' — ' + nom)}">
         <span class="men-eq__id">
           <span class="men-eq__nom">${esc(nom)}${manque}</span>
           ${etat.equipeAvecAvis ? retoursHtml(p.retours) : ''}

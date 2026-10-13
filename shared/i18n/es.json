@@ -417,5 +417,6 @@
   "menages.equipe.configurer": "Configurar",
   "menages.equipe.vide": "Nadie en el equipo por ahora.",
   "menages.equipe.panne": "El equipo no está disponible ahora.",
-  "menages.equipe.nom_manquant": "[Apellido]"
+  "menages.equipe.nom_manquant": "[Apellido]",
+  "menages.equipe.sans_droit": "No tienes acceso al equipo."
 }

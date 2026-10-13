@@ -31,7 +31,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      liaisons = [], biens = [{ provider_property_id: BIEN, name: 'La bulle', photo_url: 'p.jpg' },
                                              { provider_property_id: BIEN2, name: 'Colomiers', photo_url: null }],
                      jetons = [{ token: 'tok-r', ratio_periode: '30j' }],
-                     ratio = null, erreurProfils = null } = {}) {
+                     ratio = null, erreurProfils = null, erreurBiens = null, erreurJetons = null } = {}) {
   const etat = { lectures: [], ratios: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -42,8 +42,8 @@ function preparer ({ user = PROD, profil = null, permissions = null,
       const rep = () => {
         if (table === 'profiles') return { data: profils, error: erreurProfils }
         if (table === 'property_cleaning_providers') return { data: liaisons, error: null }
-        if (table === 'properties') return { data: biens, error: null }
-        if (table === 'public_tokens') return { data: jetons, error: null }
+        if (table === 'properties') return { data: erreurBiens ? null : biens, error: erreurBiens }
+        if (table === 'public_tokens') return { data: erreurJetons ? null : jetons, error: erreurJetons }
         return { data: [], error: null }
       }
       const chain = {
@@ -53,6 +53,9 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         in (c, v) { a.f['in_' + c] = v; return chain },
         gte () { return chain }, lte () { return chain }, order () { return chain },
         limit () { return Promise.resolve(rep()) },
+        // ⚠ `lireTout` pagine : `.order().range()`. Un double qui s'arrête à
+        // `limit` ferait rougir le test sur sa propre faiblesse.
+        range (from) { return Promise.resolve(from === 0 ? rep() : { data: [], error: null }) },
         maybeSingle () {
           if (table === 'profiles') return Promise.resolve({ data: profil, error: null })
           if (table === 'profile_permissions') return Promise.resolve({ data: permissions, error: null })
@@ -246,4 +249,66 @@ test('une panne de lecture des profils : 503, pas une liste vide', async () => {
   const res = reponse()
   await handler(get(), res)
   assert.strictEqual(res.code, 503)
+})
+
+// ─── Constats de la revue de dfcf8d4 : les pannes ne mentent pas ────────────
+
+test('une panne de lecture des BIENS coupe — elle n\'affiche pas « aucun bien couvert »', async () => {
+  // Sans les noms, chaque personne paraîtrait ne couvrir aucun bien : un écran
+  // faux, et faux dans le sens rassurant.
+  const { handler } = preparer({ liaisons: [LIAISON()], erreurBiens: { message: 'boom' } })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 503)
+})
+
+test('une panne de lecture des PÉRIODES empêche le comptage — elle ne l\'élargit pas', async () => {
+  // Retomber sur « toujours » ferait lire à l'hôte 47 retours là où elle en
+  // voit 2 : un élargissement silencieux. Sans période sûre, pas de chiffre.
+  const { handler, etat } = preparer({ liaisons: [LIAISON()], erreurJetons: { message: 'boom' } })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.ratios.length, 0, 'aucun comptage lancé')
+  assert.ok(res.body.prestataires.every(p => p.retours === null), 'et l\'écran affiche « — »')
+})
+
+test('une période inconnue en base retombe sur « toujours », comme la PWA', async () => {
+  // `periodeNormalisee` retomberait sur « 30j » : deux chiffres contradictoires
+  // pour la même personne seraient pires que pas de chiffre.
+  const { handler, etat } = preparer({ liaisons: [LIAISON()],
+    jetons: [{ token: 'tok-r', ratio_periode: 'bizarre' }] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(etat.ratios.find(o => o.prestataireId === REGINA).periode, 'toujours')
+})
+
+test('sans `prestataires: read`, la réponse DIT que ce n\'est pas une équipe vide', async () => {
+  // Sans ce drapeau, l'écran affirmait « personne dans l'équipe » à un délégué
+  // qui n'a simplement pas le droit de la voir.
+  const { handler } = preparer({
+    user: MEMBRE,
+    profil: { id: 'pr1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { menages: 'read', prestataires: 'none', property_scope: 'all' }
+  })
+  const res = reponse()
+  await handler(get({ 'x-compte': PROD }), res)
+  assert.strictEqual(res.body.avec_personnes, false)
+  const { handler: h2 } = preparer({ liaisons: [LIAISON()] })
+  const r2 = reponse()
+  await h2(get(), r2)
+  assert.strictEqual(r2.body.avec_personnes, true, 'et une vraie équipe le dit aussi')
+})
+
+test('les biens sont bornés au PÉRIMÈTRE, pas seulement les liaisons', async () => {
+  const { handler, etat } = preparer({
+    user: MEMBRE,
+    profil: { id: 'pr1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { menages: 'read', prestataires: 'read', property_scope: 'selected', property_ids: [BIEN2] },
+    liaisons: [LIAISON({ property_id: BIEN2 })]
+  })
+  const res = reponse()
+  await handler(get({ 'x-compte': PROD }), res)
+  const q = etat.lectures.find(x => x.table === 'properties')
+  assert.deepStrictEqual(q.f.in_provider_property_id, [BIEN2])
 })
