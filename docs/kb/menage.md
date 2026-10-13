@@ -3631,3 +3631,15 @@ une, lecture seule, un seul endpoint) et la section « Lot Ménages V5 » de
   concaténé, `tronque` en OU). Au-delà d'un mois : colonnes fixes et
   défilement horizontal, ordinateur comme téléphone, l'en-tête collant suit.
 - Les bulles des biens masqués vivent AU-DESSUS des dates (recette).
+
+### Recette visuelle du 13 octobre 2026 (même commit)
+
+La page `/menages` reprend LE GABARIT du calendrier : bande partagée
+`shared/bande-jours.js` (utilisée par les deux pages), blocs bordés,
+colonnes 46 px, angle/bulles, barre de période. TROIS états de pastille
+(à faire / fait + badge retour / personne pour le faire) ; une absence est
+une case vide (l'endpoint SERT toujours `absences[]`, l'écran ne la dessine
+plus — décision de Thierry) ; « Personne » rouge = les seuls jours de trou
+de garde (le gris du §12.6 est retiré) ; désactivée = prénom grisé, ligne
+vide. Bouton de période actif NOIR sur toutes les pages (le calendrier est
+aligné). Réordonner les biens : poignée à la souris, report tactile proposé.

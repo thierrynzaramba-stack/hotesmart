@@ -32,16 +32,17 @@
   --on-canal: #FFFFFF;
 
   /* Prestataires de ménage : pastels des barres de garde (page Ménages V5).
-     La couleur est STABLE par personne (hash sur l'identifiant, côté page) et
-     jamais seule : l'avatar porte toujours les initiales ou un numéro. */
-  --presta-1: #DDE4E6;
-  --presta-2: #EAE3EE;
-  --presta-3: #E3EADF;
-  --presta-4: #F1E6DA;
-  --presta-5: #E5E9F2;
-  --presta-6: #F0E2E4;
-  --presta-7: #E9EDDC;
-  --presta-8: #E2EAEA;
+     FROIDS OU NEUTRES SEULEMENT — jamais de rose ni de rouge, réservés aux
+     alertes (décision de Thierry, 13 octobre 2026). La couleur est STABLE par
+     personne (hash dans shared/presta-couleur.js) et jamais seule. */
+  --presta-1: #DDE4E6;   /* bleu gris */
+  --presta-2: #E3EADF;   /* sauge */
+  --presta-3: #E4E2F0;   /* lavande */
+  --presta-4: #F1E6DA;   /* sable */
+  --presta-5: #DCE8EF;   /* bleu pâle */
+  --presta-6: #DFEAE5;   /* vert d'eau */
+  --presta-7: #E8E7E2;   /* grège */
+  --presta-8: #E2E6EE;   /* bleu lin */
 
   /* Information neutre (« non lu », proposition en attente dans une liste) :
      JAMAIS pour une action — l'ambre dit « HôteSmart attend ta décision »,

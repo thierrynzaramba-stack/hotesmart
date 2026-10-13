@@ -250,3 +250,31 @@ Ces décisions FONT FOI sur les sections précédentes en cas de divergence.
   non assigné > pris > à venir > fait) — même règle que l'ancien Planning.
 - Les jours d'un trou de garde sont peints **jour par jour** : rouge ceux qui
   portent un ménage, gris les autres (§12.6).
+
+## 14. Retouches d'après recette visuelle (13 octobre 2026) — FONT FOI
+
+Le Calendrier V5 est la référence : la page Ménages en REPREND les
+composants (décisions de Thierry) :
+- même gabarit : page pleine largeur, colonnes 46 px, --cal-col ; la BANDE
+  (mois + jours) est un composant partagé `shared/bande-jours.js`, utilisé
+  par les DEUX pages ; blocs bordés par bien, titre hors cadre (poignée de
+  déplacement — ordre persisté —, photo ronde, nom, ×), libellés en coin ;
+  même barre de période (‹ Aujourd'hui › + 1 m/3 m/6 m/12 m), le texte de
+  période souligné est RETIRÉ (et le sélecteur de mois avec lui) ;
+- moins de bruit : une absence est une CASE VIDE (les pilules « Absente »
+  sont retirées de l'écran ; l'endpoint continue de servir `absences[]`) ;
+  une désactivée = prénom grisé, ligne vide ; « Personne » rouge hachuré =
+  les seuls jours sans AUCUNE prestataire disponible (remplace le gris
+  « on voit venir » du §12.6) ;
+- TROIS états de pastille, sans légende : à faire (blanche, balai — pris et
+  à venir fusionnés), fait (verte, coche + badge retour), personne pour le
+  faire (rouge, !) ; infobulle = état · prénom · date ; la légende sous la
+  grille est SUPPRIMÉE ;
+- pastels des prestataires : froids ou neutres seulement (theme.css),
+  jamais rose ni rouge ;
+- cohérence inter-pages : le bouton de période ACTIF est NOIR (--ink)
+  partout — le Calendrier est aligné ; le bleu --info reste au marqueur
+  d'aujourd'hui ;
+- report mobile : le réordonnancement à la poignée est souris seulement à
+  cette étape — le report tactile est PROPOSÉ à Thierry (règle « le mobile
+  suit l'ordinateur »).

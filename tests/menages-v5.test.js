@@ -27,7 +27,10 @@ test('ménages : aucun hexa, aucun emoji, aucune icône dessinée', () => {
 test('ménages : les pastels des prestataires vivent dans theme.css, la page n\'en connaît que le nom', () => {
   const theme = lire('shared/theme.css')
   for (let i = 1; i <= 8; i++) assert.ok(theme.includes(`--presta-${i}:`), `--presta-${i} absent de theme.css`)
-  assert.ok(sansCommentaires(html()).includes('var(--presta-'), 'la page consomme les jetons')
+  // La page passe par le MODULE partagé (shared/presta-couleur.js), qui seul
+  // nomme les jetons — plus aucune copie locale du hash (revue de 4235a21).
+  assert.ok(sansCommentaires(html()).includes("from '/shared/presta-couleur.js'"), 'la page importe le module partagé')
+  assert.ok(lire('shared/presta-couleur.js').includes('var(--presta-'), 'le module nomme les jetons')
   // Et ui.css reste sans hexa (règle de revue, spec socle §6.1).
   assert.ok(!/#[0-9A-Fa-f]{3,6}\b/.test(sansCommentaires(lire('shared/ui.css'))), 'hexa dans ui.css')
 })
@@ -43,14 +46,11 @@ test('ménages : chaque clé de texte existe dans les trois langues', () => {
   // couvertes nominativement juste après.
   for (const k of [...cles]) if (k.endsWith('_')) cles.delete(k)
   assert.ok(cles.size > 15, 'extraction vide')
-  const ETATS = ['fait', 'pris', 'np', 'na', 'avenir']
+  const ETATS = ['fait', 'afaire', 'alerte']
   for (const l of ['fr', 'en', 'es']) {
     const d = JSON.parse(lire(`shared/i18n/${l}.json`))
     for (const k of cles) assert.ok(k in d, `${l} : clé « ${k} » absente`)
-    for (const e of ETATS) {
-      assert.ok(('menages.tt_' + e) in d, `${l} : clé dynamique menages.tt_${e} absente`)
-      assert.ok(('menages.leg_' + e) in d, `${l} : clé menages.leg_${e} absente`)
-    }
+    for (const e of ETATS) assert.ok(('menages.tt_' + e) in d, `${l} : clé dynamique menages.tt_${e} absente`)
   }
 })
 
@@ -65,25 +65,24 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
   const src = html()
   const LIGNES = {
     'la vérité « fait » vient du serveur (D1 lecture), jamais du localStorage': 'm.fait',
-    'pastille rouge dès que le ménage n\'est pas pris (Q2)': "'np'",
-    'un différé n\'est jamais une alarme (Q2) — pastille à venir grise': "'avenir'",
+    'TROIS états seulement, lisibles sans légende (13/10)': "'alerte'",
     'badge retour vert/rouge sur un ménage fait (Q3)': 'men-mk__retour',
     'jours à régler = engrenage gris, jamais « € » (Q4)': 'men-regler',
     'bien non confié : aucune ligne, jamais de rouge (3 septembre)': 'menages.non_confie',
-    '« Personne » rouge seulement quand un ménage tombe dans le trou (§12.6)': 'men-trou--calme',
+    '« Personne » = les jours sans AUCUNE prestataire disponible (13/10)': 'renderTrous',
     'sans prestataires:read : ligne neutre, pas d\'identifiant (invariant A.5)': 'CLE_COUVERTURE',
     'ligne temporaire de la remplaçante (ménage sans barre)': 'lignesDuBien',
     'deux ménages même jour même ligne : pastille chiffrée': 'men-mk__n',
-    'prestataire désactivée : barre grise hachurée': 'men-barre--off',
+    'désactivée : prénom grisé, ligne vide (13/10)': 'men-qui--off',
     'couleur stable par personne (hash, pastels du thème)': 'couleurDe(',
-    'photo de couverture du bien, repli initiales': 'men-bien__ini',
+    'la BANDE du calendrier, composant partagé (13/10)': 'bandeJoursHtml',
+    'le bloc bordé par bien du calendrier (13/10)': 'cal-bien__bandeau',
+    'poignée de déplacement, ordre persisté (13/10)': 'brancherPoignees',
+    'l\'angle et les bulles du calendrier': 'cal-angle__menu',
     'troncature DITE (bandeau, pas console.warn)': 'menages.truncated',
     'anti-course : la réponse en retard ne repeint pas': 'jetonLecture',
-    'sélecteur de mois au clic sur la période': 'mois-choix',
     'navigation non persistée (comme le calendrier)': 'decalage: 0',
-    'biens masqués en bulles, persistés': 'hs_menages_v5_prefs',
-    'tour complet et échéance dans l\'infobulle (délai en heure de Paris)': "'Europe/Paris'",
-    'absences des prestataires dessinées sur leur ligne (recette 13/10)': 'men-abs',
+    'biens masqués persistés par compte': 'hs_menages_v5_prefs',
     'le sélecteur en MOIS du calendrier (recette 13/10)': 'data-mois="12"',
     'au-delà de 92 jours, lecture par TRANCHES fusionnées': 'TRANCHE_MAX',
     'X-Compte sur chaque appel': 'enteteCompte()',
@@ -95,12 +94,11 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
 
 test('ménages : l\'état d\'une pastille suit les décisions Q1/Q2 (ordre des tests)', () => {
   const src = sansCommentaires(html())
-  // fait AVANT porteur (un ménage fait reste vert même porté), porteur AVANT
-  // proposition (porté + proposition en cours = PRIS, cas nominal §12.4),
-  // proposition AVANT differe, differe AVANT « na ».
+  // fait AVANT « à faire » (un ménage fait reste vert même porté), et
+  // porté/différé = À FAIRE, tout le reste = ALERTE (décision du 13 octobre).
   const corps = /function etatPastille[\s\S]*?\n}/.exec(src)
   assert.ok(corps, 'etatPastille introuvable')
-  const ordre = ['m.fait', 'm.porteur', 'proposeesA', 'differe']
+  const ordre = ['m.fait', 'm.porteur', 'alerte']
   let pos = -1
   for (const jalon of ordre) {
     const p = corps[0].indexOf(jalon)

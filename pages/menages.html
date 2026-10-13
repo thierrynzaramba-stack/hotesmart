@@ -47,17 +47,16 @@
     </a>
   </div>
 
+  <!-- La même barre de période que le Calendrier (référence visuelle). -->
   <div class="row men-nav">
     <button type="button" class="btn btn--secondary btn--icon" data-nav="-1" data-i18n-attr="aria-label:menages.prev">
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(180 12 12)"/></svg>
     </button>
-    <button type="button" class="men-nav__periode" data-bind="periode" data-i18n-attr="aria-label:menages.period_pick"></button>
-    <input type="month" class="sr-only" data-bind="mois-choix" tabindex="-1" aria-hidden="true">
+    <button type="button" class="btn btn--secondary" data-nav="0" data-i18n="menages.today"></button>
     <button type="button" class="btn btn--secondary btn--icon" data-nav="1" data-i18n-attr="aria-label:menages.next">
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
     </button>
-    <button type="button" class="btn btn--secondary" data-nav="0" data-i18n="menages.today"></button>
-    <div class="men-periode" role="group" data-i18n-attr="aria-label:menages.period_len">
+    <div class="cal-periode men-periode" role="group" data-i18n-attr="aria-label:menages.period_len">
       <button type="button" class="tab" data-mois="1" data-i18n="menages.m1"></button>
       <button type="button" class="tab" data-mois="3" data-i18n="menages.m3"></button>
       <button type="button" class="tab" data-mois="6" data-i18n="menages.m6"></button>
@@ -76,13 +75,12 @@
   <!-- L'en-tête des dates vit HORS du défilement vertical (sticky) et se
        synchronise avec le défilement horizontal du calendrier (recette). -->
   <div class="men-tete" data-bind="tete" hidden>
-    <div class="men-cal" data-bind="cal-tete"></div>
+    <div data-bind="cal-tete"></div>
   </div>
   <div class="men-scroll" data-bind="planning" hidden>
-    <div class="men-cal" data-bind="cal"></div>
+    <div data-bind="cal"></div>
   </div>
 
-  <p class="caption muted men-legende" data-bind="legende" hidden></p>
   <p class="caption muted" data-bind="etat-charge" hidden></p>
 </main>
 
@@ -101,6 +99,7 @@ import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCom
   from '/shared/compte-courant.js'
 import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
+import { bandeJoursHtml } from '/shared/bande-jours.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -123,7 +122,7 @@ const etat = {
   mois: 1,              // 1 / 3 / 6 / 12 (persisté, comme le calendrier)
   decalage: 0,          // en jours, NON persisté (même règle que le calendrier)
   masques: [],          // refs des biens masqués (persisté PAR COMPTE)
-  absences: []          // [{propertyId, providerId, date}] — vides sans prestataires:read
+  ordre: []             // ordre des biens (poignée de déplacement, persisté)
 }
 // ⚠ Une clé PAR COMPTE : la page est délégable, et une ref provider masquée
 // sur un compte ne doit pas faire disparaître le bien homonyme d'un autre
@@ -133,33 +132,24 @@ function lirePrefs () {
   try {
     const p = JSON.parse(localStorage.getItem(prefsCle()) || '{}')
     if (Array.isArray(p.masques)) etat.masques = p.masques.map(String)
+    if (Array.isArray(p.ordre)) etat.ordre = p.ordre.map(String)
     if (MOIS.includes(p.mois)) etat.mois = p.mois
   } catch {}
 }
 function ecrirePrefs () {
-  try { localStorage.setItem(prefsCle(), JSON.stringify({ masques: etat.masques, mois: etat.mois })) } catch {}
+  try { localStorage.setItem(prefsCle(), JSON.stringify({ masques: etat.masques, ordre: etat.ordre, mois: etat.mois })) } catch {}
 }
 
 // ─── Dates (Intl, jamais de formatage à la main) ────────────────────────────
-const dateCourt = iso => new Intl.DateTimeFormat(langue(), { day: 'numeric', month: 'short', timeZone: 'UTC' })
-  .format(new Date(iso + 'T12:00:00Z'))
-const jourAbrege = iso => new Intl.DateTimeFormat(langue(), { weekday: 'short', timeZone: 'UTC' })
-  .format(new Date(iso + 'T12:00:00Z')).replace('.', '').slice(0, 2)
 const dateLongue = iso => new Intl.DateTimeFormat(langue(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
   .format(new Date(iso + 'T12:00:00Z'))
-const heureParis = v => new Intl.DateTimeFormat(langue(), { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Paris' })
-  .format(new Date(v))
-const estWE = iso => [0, 6].includes(new Date(iso + 'T12:00:00Z').getUTCDay())
 const estLarge = () => window.matchMedia('(min-width: 900px)').matches
-// Les classes de week-end du CALENDRIER (liserés début/fin) — même UI.
+// Les classes de week-end du CALENDRIER (liserés début/fin) — composant
+// partagé shared/bande-jours.js pour la bande ; ici la même règle par jour.
 const classesWE = iso => {
   const d = new Date(iso + 'T12:00:00Z').getUTCDay()
   return (d === 0 || d === 6) ? ' cal-we' + (d === 6 ? ' cal-we--debut' : ' cal-we--fin') : ''
 }
-const jourEtroit = iso => new Intl.DateTimeFormat(langue(), { weekday: 'narrow', timeZone: 'UTC' })
-  .format(new Date(iso + 'T12:00:00Z'))
-const moisLong = iso => new Intl.DateTimeFormat(langue(), { month: 'long', year: 'numeric', timeZone: 'UTC' })
-  .format(new Date(iso + 'T12:00:00Z'))
 const photoBien = b => b.photo ? `<img src="${esc(b.photo)}" alt="" loading="lazy">` : icone('i-home')
 
 function fenetre () {
@@ -216,7 +206,6 @@ async function charger () {
     etat.biens = d0.biens || []
     etat.garde = [...gardeParBien.values()]
     etat.menages = reponses.flatMap(r => r.menages || [])
-    etat.absences = reponses.flatMap(r => r.absences || [])
     etat.avecNoms = !!d0.avec_noms
     etat.avecAvis = !!d0.avec_avis
     etat.tronque = reponses.some(r => !!r.tronque)
@@ -236,38 +225,28 @@ async function charger () {
   }
 }
 
-// ─── L'état d'un ménage → sa pastille (décisions §13 et Q2 de l'inventaire) ─
+// ─── L'état d'un ménage → sa pastille. TROIS états, lisibles sans légende
+// (décision de Thierry, 13 octobre) : à faire (pris OU à venir), fait,
+// personne pour le faire (proposition sans preneur, orphelin, non assigné).
 function etatPastille (m) {
   if (m.fait) return 'fait'
-  if (m.porteur) return 'pris'
-  if ((m.proposeesA || []).length || m.status === 'offered') return 'np'
-  if (m.differe) return 'avenir'
-  return 'na'
+  if (m.porteur || m.differe) return 'afaire'
+  return 'alerte'
 }
-const CLASSE_MK = { fait: 'men-mk--fait', pris: '', np: 'men-mk--np', na: 'men-mk--na', avenir: 'men-mk--avenir' }
-const ICONE_MK = { fait: 'i-check', pris: 'i-cleaning', np: 'i-alert', na: 'i-cleaning', avenir: 'i-cleaning' }
+const CLASSE_MK = { fait: 'men-mk--fait', afaire: '', alerte: 'men-mk--alerte' }
+const ICONE_MK = { fait: 'i-check', afaire: 'i-cleaning', alerte: 'i-alert' }
 // Gravité d'affichage quand plusieurs ménages partagent une case : l'alarme
 // passe devant le travail, le travail devant le terminé.
-const GRAVITE = { np: 4, na: 3, pris: 2, avenir: 1, fait: 0 }
+const GRAVITE = { alerte: 2, afaire: 1, fait: 0 }
 
 function nomOu (p, defaut) {
   if (!p) return t(defaut)
   return p.prenom || t('menages.quelquun')
 }
+// Infobulle : état · prénom · date, rien d'autre (décision du 13 octobre).
 function infobulle (bien, m) {
-  const parts = [`${bien.name} — ${dateLongue(m.date)}`, t('menages.tt_' + etatPastille(m))]
-  if (m.porteur) parts.push(nomOu(m.porteur, 'menages.quelquun'))
-  const tour = (m.proposeesA || []).filter(Boolean)
-  if (tour.length) {
-    parts.push(t('menages.tt_tour', { noms: tour.map(p => nomOu(p, 'menages.quelquun')).join(', ') || String(tour.length) }))
-    if (m.expireLe) parts.push(t('menages.tt_expire', { quand: heureParis(m.expireLe) }))
-  }
-  if (m.raison) parts.push(m.raison)
-  if (m.retour) {
-    parts.push(t(m.retour.verdict === 'remarque' ? 'menages.retour_mauvais' : 'menages.retour_bon'))
-    if (m.retour.prive) parts.push(t('menages.retour_prive'))
-  }
-  return parts.join('\n')
+  const qui = m.porteur || (m.proposeesA || [])[0] || null
+  return `${t('menages.tt_' + etatPastille(m))} · ${nomOu(qui, 'menages.sans_presta')} · ${dateLongue(m.date)}`
 }
 
 // ─── Construction des lignes d'un bien ──────────────────────────────────────
@@ -277,11 +256,11 @@ function infobulle (bien, m) {
 // `prestataires:read` : UNE ligne neutre par bien.
 const CLE_COUVERTURE = '__couverture'
 const CLE_SANS = '__sans'
-function lignesDuBien (bien, g, menagesDuBien, absencesDuBien) {
+function lignesDuBien (bien, g, menagesDuBien) {
   const lanes = new Map()
   const lane = (cle) => {
     if (!lanes.has(cle)) {
-      lanes.set(cle, { cle, prenom: null, actif: null, aRegler: false, jours: new Set(), abs: new Set(), menages: new Map() })
+      lanes.set(cle, { cle, prenom: null, actif: null, aRegler: false, jours: new Set(), menages: new Map() })
     }
     return lanes.get(cle)
   }
@@ -296,21 +275,14 @@ function lignesDuBien (bien, g, menagesDuBien, absencesDuBien) {
     if (j.responsable.actif === false) l.actif = false
     if (j.responsable.a_regler) l.aRegler = true
   }
-  // Ses ABSENCES (congé, indisponibilité) : visibles sur SA ligne — et une
-  // semaine entière d'absence crée sa ligne même sans un seul jour de garde.
-  // (Pré-indexées par bien et par fenêtre dans renderTout — revue de 29f587c.)
-  for (const a of (absencesDuBien || [])) {
-    const la = lane(String(a.providerId))
-    la.abs.add(a.date)
-    if (a.prenom && !la.prenom) la.prenom = a.prenom
-    if (a.actif === false) la.actif = false
-  }
+  // Une ABSENCE est une case VIDE (décision du 13 octobre : moins de bruit) —
+  // la barre s'arrête d'elle-même, puisque la garde ne la désigne pas.
   for (const m of menagesDuBien) {
     const e = etatPastille(m)
     let cle
     if (m.porteur) cle = cleDe(m.porteur)
-    else if (e === 'np') cle = cleDe((m.proposeesA || [])[0])
-    else if (e === 'avenir') cle = cleDe(responsableDu[m.date])
+    else if ((m.proposeesA || []).length) cle = cleDe(m.proposeesA[0])
+    else if (m.differe) cle = cleDe(responsableDu[m.date])
     else cle = CLE_SANS
     const l = lane(cle)
     const p = m.porteur || (m.proposeesA || [])[0]
@@ -327,19 +299,16 @@ function lignesDuBien (bien, g, menagesDuBien, absencesDuBien) {
   })
 }
 
-// Fond des colonnes, peint en PREMIER dans chaque ligne (donc derrière barres
-// et pastilles) : week-ends teintés + marque verticale d'AUJOURD'HUI — la
-// même structure que l'en-tête, sur toute la hauteur (recette étape 1).
-function fondsWE () {
-  return etat.jours.map((iso, i) => {
-    const d = new Date(iso + 'T12:00:00Z').getUTCDay()
-    const we = (d === 0 || d === 6)
-    const cls = ['men-we']
-    if (we) cls.push(d === 6 ? 'men-we--debut' : 'men-we--fin'); else cls.push('men-we--hors')
-    if (iso === AUJOURDHUI) cls.push('men-we--auj')
-    if (!we && iso !== AUJOURDHUI) return ''
-    return `<span class="${cls.join(' ')}" style="grid-column: ${i + 1}"></span>`
-  }).join('')
+// Fond des colonnes, peint en PREMIER dans chaque ligne : une cellule par
+// jour (filet, teinte week-end, rails d'aujourd'hui) — la même grammaire que
+// la ligne Réservations du calendrier (cal-resas__jour).
+let fondsCache = ''
+function fondsJours () {
+  if (!fondsCache) {
+    fondsCache = etat.jours.map((iso, i) =>
+      `<span class="men-jj${classesWE(iso)}${iso === AUJOURDHUI ? ' cal-auj' : ''}" style="grid-column: ${i + 1}"></span>`).join('')
+  }
+  return fondsCache
 }
 
 // Les suites de jours consécutifs d'un ensemble, en indices de la fenêtre.
@@ -362,57 +331,39 @@ function renderTout () {
   const planning = $('[data-bind="planning"]')
   const vide = $('[data-bind="etat-vide"]')
   $('[data-bind="avis-tronque"]').hidden = !etat.tronque
-  $('[data-bind="periode"]').textContent = `${dateCourt(etat.jours[0])} → ${dateCourt(etat.jours[etat.jours.length - 1])}`
   document.querySelectorAll('[data-mois]').forEach(b =>
     b.setAttribute('aria-pressed', String(Number(b.dataset.mois) === etat.mois)))
-  // La grille entière suit la fenêtre (--nb pilote les deux conteneurs) ;
-  // défile = colonnes fixes + défilement horizontal au-delà d'un mois
-  // (l'en-tête collant suit, déjà synchronisé).
-  for (const el of [cal, calTete]) {
-    el.style.setProperty('--nb', String(etat.jours.length))
-    el.classList.toggle('men-cal--defile', etat.jours.length > 31)
-  }
+  fondsCache = ''
 
-  const visibles = etat.biens.filter(b => !etat.masques.includes(String(b.id)))
+  // L'ordre des biens suit la poignée (persisté) ; les inconnus en queue.
+  const rang = new Map(etat.ordre.map((id, i) => [id, i]))
+  const visibles = etat.biens
+    .filter(b => !etat.masques.includes(String(b.id)))
+    .sort((a, b) => (rang.has(String(a.id)) ? rang.get(String(a.id)) : 999) -
+                    (rang.has(String(b.id)) ? rang.get(String(b.id)) : 999))
   if (!etat.biens.length) {
     planning.hidden = true
     tete.hidden = true
     vide.hidden = false
     vide.innerHTML = `<p class="muted">${esc(t('menages.empty'))}</p>`
-    renderBulles(); renderLegende(false)
+    renderBulles()
     return
   }
   vide.hidden = true
   planning.hidden = false
   tete.hidden = false
 
-  // La bande du CALENDRIER : ligne des mois (nom au premier jour de chaque
-  // mois) + ligne des jours (lettre étroite + numéro, liserés week-end,
-  // aujourd'hui cerclé --info) ; l'angle porte le sélecteur des biens masqués.
-  let moisCourant = ''
-  let bandeMois = '', bandeJours = ''
-  for (const iso of etat.jours) {
-    const m = iso.slice(0, 7)
-    bandeMois += `<span class="cal-bande__mois${m !== moisCourant ? ' cal-bande__mois--debut' : ''}">${m !== moisCourant ? esc(moisLong(iso)) : ''}</span>`
-    moisCourant = m
-    bandeJours += `<span class="cal-bande__jour${classesWE(iso)}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(jourEtroit(iso))}<b>${new Date(iso + 'T12:00:00Z').getUTCDate()}</b></span>`
-  }
-  calTete.innerHTML = `<div class="men-jours men-jours--mois">
-    <span class="men-jours__coin">${angleHtml()}</span>${bandeMois}
-  </div><div class="men-jours">
-    <span class="men-jours__coin"></span>${bandeJours}
+  // LA bande du calendrier (composant partagé shared/bande-jours.js) ; son
+  // angle porte le sélecteur des biens masqués, comme au Calendrier.
+  const bande = bandeJoursHtml({ jours: etat.jours, langue: langue(), aujourdhui: AUJOURDHUI, esc })
+  calTete.innerHTML = `<div class="cal-bande">
+    <div class="cal-bande__angle">${angleHtml()}</div>
+    <div class="cal-bande__corps"><div class="cal-bande__l">${bande.mois}</div><div class="cal-bande__l">${bande.jours}</div></div>
   </div>`
   brancherAngle(calTete)
 
   const parBienGarde = new Map(etat.garde.map(g => [String(g.propertyId), g]))
   const joursSet = new Set(etat.jours)
-  const absParBien = new Map()
-  for (const a of etat.absences) {
-    if (!joursSet.has(a.date)) continue
-    const cle = String(a.propertyId)
-    if (!absParBien.has(cle)) absParBien.set(cle, [])
-    absParBien.get(cle).push(a)
-  }
   const menagesParBien = new Map()
   for (const m of etat.menages) {
     const cle = String(m.propertyId)
@@ -420,38 +371,72 @@ function renderTout () {
     menagesParBien.get(cle).push(m)
   }
 
+  // Un BLOC BORDÉ par bien, comme le calendrier : titre hors cadre (poignée,
+  // photo ronde, nom, ×), lignes dans le cadre.
   const blocs = visibles.map(bien => {
     const g = parBienGarde.get(String(bien.id))
     const gere = !!(g && g.gere)
-    const menagesDuBien = (menagesParBien.get(String(bien.id)) || []).filter(m => etat.jours.includes(m.date))
-    const photo = bien.photo
-      ? `<img src="${esc(bien.photo)}" alt="" loading="lazy">`
-      : `<span class="men-bien__ini" aria-hidden="true">${esc(initiales(bien.name))}</span>`
-    const enteteBien = `<div class="men-bien">
-      <span class="men-bien__id">${photo}<span class="men-bien__nom" title="${esc(bien.name)}">${esc(bien.name)}</span></span>
-      <button type="button" class="men-masquer" data-masquer="${esc(bien.id)}" data-i18n-attr="aria-label:menages.masquer_bien;title:menages.masquer_bien">${icone('i-close')}</button>
-    </div>`
-
+    const menagesDuBien = (menagesParBien.get(String(bien.id)) || []).filter(m => joursSet.has(m.date))
+    const enteteBien = `<div class="cal-bien__bandeau"><div class="cal-bien__bandeau-int">
+      <span class="cal-poigne" data-poigne title="${esc(t('cal.drag_hint'))}" aria-label="${esc(t('cal.drag_hint'))}">${icone('i-menu')}</span>
+      <span class="cal-photo cal-bien__photo">${photoBien(bien)}</span>
+      <b class="cal-bien__nom">${esc(bien.name || '')}</b>
+      <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
+        title="${esc(t('cal.reduce'))}" aria-label="${esc(t('cal.reduce'))}">${icone('i-close')}</button>
+    </div></div>`
     // Un bien non confié : aucune ligne, jamais de rouge (décision du 3 sept.).
-    if (!gere) {
-      return enteteBien + (menagesDuBien.length ? renderLignes(bien, g, menagesDuBien, absParBien.get(String(bien.id))) :
-        `<p class="men-nonconfie caption muted" data-i18n="menages.non_confie"></p>`)
-    }
-    return enteteBien + renderLignes(bien, g, menagesDuBien, absParBien.get(String(bien.id))) + renderTrous(bien, g, menagesDuBien)
+    const corps = !gere
+      ? (menagesDuBien.length ? renderLignes(bien, g, menagesDuBien)
+         : `<p class="men-nonconfie caption muted" data-i18n="menages.non_confie"></p>`)
+      : renderLignes(bien, g, menagesDuBien) + renderTrous(bien, g, menagesDuBien)
+    return `<section class="men-bloc" data-bien-section="${esc(bien.id)}">
+      ${enteteBien}<div class="men-cadre">${corps}</div>
+    </section>`
   }).join('')
 
   cal.innerHTML = blocs
   I18n.apply(cal)
-  cal.querySelectorAll('[data-masquer]').forEach(b => b.addEventListener('click', () => {
-    etat.masques = [...new Set([...etat.masques, String(b.dataset.masquer)])]
+  cal.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => {
+    etat.masques = [...new Set([...etat.masques, String(b.dataset.reduire)])]
     ecrirePrefs(); renderTout()
   }))
+  brancherPoignees(cal)
   renderBulles()
-  renderLegende(true)
 }
 
-function renderLignes (bien, g, menagesDuBien, absencesDuBien) {
-  const lanes = lignesDuBien(bien, g, menagesDuBien, absencesDuBien)
+// Réordonner les biens à la poignée (ordinateur ; le report tactile est
+// PROPOSÉ à Thierry, règle « le mobile suit l'ordinateur »).
+function brancherPoignees (zone) {
+  const sections = [...zone.querySelectorAll('[data-bien-section]')]
+  for (const s of sections) {
+    const poigne = s.querySelector('[data-poigne]')
+    if (!poigne) continue
+    poigne.addEventListener('mousedown', () => { s.draggable = true })
+    s.addEventListener('dragstart', e => {
+      e.dataTransfer.setData('text/plain', s.dataset.bienSection)
+      s.classList.add('men-bloc--saisi')
+    })
+    s.addEventListener('dragend', () => { s.draggable = false; s.classList.remove('men-bloc--saisi') })
+    s.addEventListener('dragover', e => { e.preventDefault(); s.classList.add('men-bloc--cible') })
+    s.addEventListener('dragleave', () => s.classList.remove('men-bloc--cible'))
+    s.addEventListener('drop', e => {
+      e.preventDefault()
+      s.classList.remove('men-bloc--cible')
+      const saisi = e.dataTransfer.getData('text/plain')
+      const cible = s.dataset.bienSection
+      if (!saisi || saisi === cible) return
+      const ids = [...zone.querySelectorAll('[data-bien-section]')].map(x => x.dataset.bienSection)
+        .filter(x => x !== saisi)
+      ids.splice(ids.indexOf(cible), 0, saisi)
+      etat.ordre = ids
+      ecrirePrefs(); renderTout()
+    })
+  }
+}
+
+function renderLignes (bien, g, menagesDuBien) {
+  const lanes = lignesDuBien(bien, g, menagesDuBien)
+  const nb = etat.jours.length
   return lanes.map(l => {
     const sans = l.cle === CLE_SANS
     const anonyme = l.cle === CLE_COUVERTURE
@@ -463,15 +448,9 @@ function renderLignes (bien, g, menagesDuBien, absencesDuBien) {
     const regler = l.aRegler
       ? `<span class="men-regler" data-i18n-attr="title:menages.a_regler">${icone('i-settings')}</span>` : ''
     const off = l.actif === false
-    const barres = sans ? '' : suites(l.jours).map(r =>
-      `<span class="men-barre${off ? ' men-barre--off' : ''}" style="grid-column: ${r.debut + 1} / ${r.fin + 2}; --coul: ${coul}"></span>`).join('')
-    const absences = sans ? '' : suites(l.abs).map(r => {
-      // Deux bornes, jamais l'enumeration : un conge de trois mois en vue
-      // 12 m produisait une infobulle de 90 dates (revue de 29f587c).
-      const quand = r.debut === r.fin ? dateLongue(etat.jours[r.debut])
-        : `${dateLongue(etat.jours[r.debut])} → ${dateLongue(etat.jours[r.fin])}`
-      return `<span class="men-abs" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(t('menages.absente') + ' — ' + quand)}"></span>`
-    }).join('')
+    // Une désactivée = prénom grisé, LIGNE VIDE (décision du 13 octobre).
+    const barres = (sans || off) ? '' : suites(l.jours).map(r =>
+      `<span class="men-barre" style="grid-column: ${r.debut + 1} / ${r.fin + 2}; --coul: ${coul}"></span>`).join('')
     const pastilles = [...l.menages.entries()].map(([iso, ms]) => {
       const i = etat.jours.indexOf(iso)
       if (i < 0) return ''
@@ -489,40 +468,28 @@ function renderLignes (bien, g, menagesDuBien, absencesDuBien) {
         <span class="men-mk ${CLASSE_MK[e]}">${icone(ICONE_MK[e])}${retour}${n}</span>
       </span>`
     }).join('')
-    return `<div class="men-ligne${off ? ' men-ligne--off' : ''}">
-      <span class="men-qui${sans || off ? ' men-qui--off' : ''}">${avatar}<span class="men-prenom">${esc(nom)}</span>${regler}</span>
-      <span class="men-lane">${fondsWE()}${barres}${absences}${pastilles}</span>
+    return `<div class="men-ligne">
+      <div class="cal-bien__coin"><span class="men-qui${sans || off ? ' men-qui--off' : ''}">${avatar}<span class="men-prenom">${esc(nom)}</span>${regler}</span></div>
+      <span class="men-lane" style="--n: ${nb}">${fondsJours()}${barres}${pastilles}</span>
     </div>`
   }).join('')
 }
 
-// « Personne » : les TROUS DE GARDE d'un bien géré. Rouge seulement quand un
-// ménage tombe dans le trou (§12.6), gris sinon — on voit venir sans bruit.
+// « Personne » : les jours où AUCUNE prestataire n'est disponible pour le
+// bien (trous de garde) — rouge hachuré, et seulement eux (décision du
+// 13 octobre, qui remplace le gris « on voit venir » du §12.6).
 function renderTrous (bien, g, menagesDuBien) {
   const trous = new Set((g.jours || []).filter(j => j.trou && etat.jours.includes(j.date)).map(j => j.date))
   if (!trous.size) return ''
-  const datesAvecMenage = new Set(menagesDuBien.map(m => m.date))
-  // ⚠ DÉCOUPÉ AU JOUR, pas au run (revue de 4235a21) : §12.6 met en rouge les
-  // seuls jours du trou qui PORTENT un ménage — un trou d'une semaine avec un
-  // ménage le mercredi ne rougit que le mercredi, le reste reste gris.
-  const segments = suites(trous).flatMap(r => {
-    const sous = []
-    for (let i = r.debut; i <= r.fin; i++) {
-      const grave = datesAvecMenage.has(etat.jours[i])
-      const s = sous[sous.length - 1]
-      if (s && s.grave === grave && i === s.fin + 1) s.fin = i
-      else sous.push({ debut: i, fin: i, grave })
-    }
-    return sous
-  }).map(r => {
-    const jours = etat.jours.slice(r.debut, r.fin + 1)
-    // Sur un segment d'un seul jour, l'icône seule : le mot se couperait.
+  const segments = suites(trous).map(r => {
+    const quand = r.debut === r.fin ? dateLongue(etat.jours[r.debut])
+      : `${dateLongue(etat.jours[r.debut])} → ${dateLongue(etat.jours[r.fin])}`
     const libelle = r.fin > r.debut ? '<span data-i18n="menages.personne"></span>' : ''
-    return `<span class="men-trou${r.grave ? '' : ' men-trou--calme'}" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(jours.map(dateLongue).join(', '))}">${icone('i-shield-off')}${libelle}</span>`
+    return `<span class="men-trou" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(quand)}">${icone('i-shield-off')}${libelle}</span>`
   }).join('')
   return `<div class="men-ligne">
-    <span class="men-qui men-qui--off"><span class="men-av men-av--inconnu" aria-hidden="true">!</span><span class="men-prenom" data-i18n="menages.personne"></span></span>
-    <span class="men-lane">${fondsWE()}${segments}</span>
+    <div class="cal-bien__coin"><span class="men-qui men-qui--off"><span class="men-av men-av--inconnu" aria-hidden="true">!</span><span class="men-prenom" data-i18n="menages.personne"></span></span></div>
+    <span class="men-lane" style="--n: ${etat.jours.length}">${fondsJours()}${segments}</span>
   </div>`
 }
 
@@ -587,26 +554,6 @@ function renderBulles () {
   }))
 }
 
-function renderLegende (visible) {
-  const el = $('[data-bind="legende"]')
-  el.hidden = !visible
-  if (!visible) return
-  const pt = (html, cle) => `<span class="men-leg">${html}<span data-i18n="${cle}"></span></span>`
-  el.innerHTML = [
-    pt('<span class="men-leg__barre" style="--coul: var(--presta-1)"></span>', 'menages.leg_garde'),
-    pt(`<span class="men-mk men-leg__mk">${icone('i-cleaning')}</span>`, 'menages.leg_pris'),
-    pt(`<span class="men-mk men-mk--fait men-leg__mk">${icone('i-check')}</span>`, 'menages.leg_fait'),
-    pt(`<span class="men-mk men-mk--np men-leg__mk">${icone('i-alert')}</span>`, 'menages.leg_np'),
-    pt(`<span class="men-mk men-mk--na men-leg__mk">${icone('i-cleaning')}</span>`, 'menages.leg_na'),
-    pt(`<span class="men-mk men-mk--avenir men-leg__mk">${icone('i-cleaning')}</span>`, 'menages.leg_avenir'),
-    pt('<span class="men-leg__barre men-trou"></span>', 'menages.leg_personne'),
-    pt('<span class="men-leg__barre men-abs"></span>', 'menages.leg_abs'),
-    pt('<span class="men-leg__barre men-barre--off"></span>', 'menages.leg_off'),
-    pt(`<span class="men-regler">${icone('i-settings')}</span>`, 'menages.leg_regler')
-  ].join('')
-  I18n.apply(el)
-}
-
 // ─── Démarrage ──────────────────────────────────────────────────────────────
 async function init () {
   const session = await requireAuth()
@@ -656,19 +603,6 @@ async function init () {
   const scrollEl = $('[data-bind="planning"]')
   const teteEl = $('[data-bind="tete"]')
   scrollEl.addEventListener('scroll', () => { teteEl.scrollLeft = scrollEl.scrollLeft }, { passive: true })
-  // Clic sur la période → sélecteur de mois natif (remplace le mini-calendrier
-  // de l'ancienne page) ; la fenêtre saute au 1er du mois choisi.
-  const choixMois = $('[data-bind="mois-choix"]')
-  $('[data-bind="periode"]').addEventListener('click', () => {
-    choixMois.value = etat.jours.length ? etat.jours[0].slice(0, 7) : AUJOURDHUI.slice(0, 7)
-    if (choixMois.showPicker) { try { choixMois.showPicker() } catch { choixMois.focus() } } else choixMois.focus()
-  })
-  choixMois.addEventListener('change', () => {
-    if (!/^\d{4}-\d{2}$/.test(choixMois.value)) return
-    const cible = new Date(choixMois.value + '-01T12:00:00Z')
-    etat.decalage = Math.round((cible - new Date(AUJOURDHUI + 'T12:00:00Z')) / 86400000)
-    charger()
-  })
   // Changement de jour : re-rendu si la date a changé (onglet ouvert la nuit).
   let jourVu = AUJOURDHUI
   document.addEventListener('visibilitychange', () => {

@@ -131,9 +131,20 @@ test('mise en page : le dernier bien n\'est pas cache par la barre flottante', (
 })
 
 test('LES JOURS DU MOIS NE SONT RENDUS QU\'UNE FOIS, sous le mois', () => {
-  // Le template des jours (cal-bande__jour) n'existe qu'UNE fois, dans
-  // renderPlanning — jamais dans grilleBien (comportement, pas commentaire).
-  assert.strictEqual((PAGE.match(/cal-bande__jour\$/g) || []).length, 1)
+  // ⚠ RETARGE le 13 octobre 2026 : la bande vit desormais dans le MODULE
+  // PARTAGE `shared/bande-jours.js`, consomme par le calendrier ET par la page
+  // Menages (recette de Thierry : « reprendre les composants, pas les
+  // imiter »). L'invariant n'a pas bouge — un seul endroit rend les jours —
+  // mais il se mesure la ou le template vit maintenant.
+  const module = sansCommentaires(lire('shared', 'bande-jours.js'))
+  assert.strictEqual((module.match(/cal-bande__jour\$/g) || []).length, 1,
+    'le template des jours vit UNE fois, dans le module partage')
+  for (const page of ['calendrier.html', 'menages.html']) {
+    const src = sansCommentaires(lire('pages', page))
+    assert.strictEqual((src.match(/cal-bande__jour\$/g) || []).length, 0,
+      `${page} consomme le module, elle ne recopie pas le template`)
+    assert.ok(src.includes('bandeJoursHtml'), `${page} appelle le composant partage`)
+  }
   const grille = PAGE.slice(PAGE.indexOf('function grilleBien'), PAGE.indexOf('// ─── Rendu téléphone'))
   assert.ok(!grille.includes('cal-bande'), 'grilleBien ne rend aucune bande')
 })

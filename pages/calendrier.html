@@ -128,6 +128,7 @@ import { mapResa, familleSource, LIBELLE_CANAL, libelleStatut, droitsResa, badge
 import { ACTIONS_BARRE, RUBRIQUES_POPUP, CHAMPS_FICHE, etatDeNuit, prixIntl, dateIntl }
   from '/shared/calendrier-contrat.js'
 import { detecterOrphelines } from '/shared/nuits-orphelines.js'
+import { bandeJoursHtml } from '/shared/bande-jours.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -595,15 +596,11 @@ function renderPlanning () {
   majSelecteurVue()
   const jours = etat.jours
   if (!jours.length) return
-  // Bande mois + jours, UNE fois pour tous les biens (décision 21/09/2026).
-  let bandeMois = '', bandeJours = '', moisCourant = ''
-  for (const d of jours) {
-    const iso = toISO(d)
-    const m = iso.slice(0, 7)
-    bandeMois += `<span class="cal-bande__mois${m !== moisCourant ? ' cal-bande__mois--debut' : ''}">${m !== moisCourant ? esc(dateIntl(iso, langue(), { month: 'long', year: 'numeric' })) : ''}</span>`
-    moisCourant = m
-    bandeJours += `<span class="cal-bande__jour${classesWE(d.getDay())}${iso === AUJOURDHUI ? ' cal-auj' : ''}">${esc(dateIntl(iso, langue(), { weekday: 'narrow' }))}<b>${d.getDate()}</b></span>`
-  }
+  // Bande mois + jours, UNE fois pour tous les biens (décision 21/09/2026) —
+  // le composant PARTAGÉ avec la page Ménages (shared/bande-jours.js).
+  const { mois: bandeMois, jours: bandeJours } = bandeJoursHtml({
+    jours: jours.map(toISO), langue: langue(), aujourdhui: AUJOURDHUI, esc
+  })
   const bande = $('[data-bind="bande"]')
   const menuOuvert = !!bande.querySelector('.cal-angle__menu[open]')
   bande.innerHTML = `<div class="cal-bande__angle">${angleHtml()}</div>

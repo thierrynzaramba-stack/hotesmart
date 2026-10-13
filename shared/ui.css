@@ -404,7 +404,9 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-entete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cal-periode { display: inline-flex; align-items: stretch; height: var(--control); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
 .cal-periode .tab { height: 100%; padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-small); background: transparent; }
-.cal-periode .tab[aria-pressed="true"] { background: var(--info); color: var(--on-ink); }
+/* Le bouton de periode ACTIF est NOIR sur toutes les pages (decision de
+   Thierry, 13 octobre) : le bleu --info reste au marqueur d'aujourd'hui. */
+.cal-periode .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); }
 /* La bande des dates est STICKY (z5) et l'angle z6 : la liste du menu ...
    (z5 de .bulle-menu__liste, declaree avant dans le DOM) passait DERRIERE
    les dates a l'ouverture (constat de recette du 12 octobre). */
@@ -611,114 +613,85 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 
 /* ============================================================
    Page « Ménages » (lot 4, étape 1 : lecture seule)
-   Un bloc par bien, une ligne par prestataire : barre = garde,
-   pastille = ménage. Les pastels viennent de theme.css.
+   LE GABARIT DU CALENDRIER (recette du 13 octobre) : mêmes largeurs
+   (--cal-col, colonnes 46 px), même bande (shared/bande-jours.js),
+   mêmes blocs bordés par bien, mêmes bulles et angle. Les pastels
+   viennent de theme.css (froids/neutres seulement).
    ============================================================ */
-.men-page { padding: 0 var(--page-pad) 40px; max-width: var(--page-max); margin: 0 auto; }
-.men-entete { display: flex; align-items: center; gap: 10px; padding: 22px 0 14px; }
+.men-page { --cal-col: 110px; padding: 14px var(--page-pad) 90px; display: flex; flex-direction: column; gap: 12px; }
+.men-entete { display: flex; align-items: center; gap: 10px; }
 .men-entete .h2 { flex: 1; margin: 0; }
-.men-nav { flex-wrap: wrap; padding-bottom: 12px; }
-.men-nav__periode { font-size: var(--fs-body); font-weight: var(--fw-semibold); min-width: 136px; text-align: center; background: none; border: 0; cursor: pointer; font-family: inherit; color: var(--ink); padding: 8px 4px; text-decoration: underline dotted; }
-.men-avis { padding: 12px 16px; margin-bottom: 12px; color: var(--warn); }
+.men-nav { flex-wrap: wrap; }
+.men-avis { padding: 12px 16px; color: var(--warn); }
 .men-vide { padding: 30px 0; }
 
-.men-cal { --men-col: 190px; min-width: 0; }  /* --nb pose par le JS a chaque rendu */
+/* La bande des dates : le composant du calendrier, dans un porteur COLLANT
+   (hors du défilement vertical) synchronisé en X avec le planning. */
+.men-tete { position: sticky; top: 0; z-index: 20; background: var(--surface); overflow: hidden; }
+.men-tete .cal-bande { position: static; }
+.men-scroll { overflow-x: auto; }
 
-.men-jours { display: grid; grid-template-columns: var(--men-col) repeat(var(--nb), minmax(var(--men-case, 0px), 1fr)); }
-/* L'en-tete reprend LA BANDE DU CALENDRIER (cal-bande__mois / __jour, cal-we,
-   cal-auj — recette du 13 octobre) ; seul le squelette de grille est men-. */
-.men-jours--mois { min-height: 20px; align-items: end; }
-.men-jours__coin { display: flex; align-items: center; padding-inline: 2px 8px; min-width: 0; position: sticky; inset-inline-start: 0; background: var(--surface); z-index: 4; }
-/* Au-dela d'un mois : colonnes fixes, le calendrier DEFILE aussi a
-   l'ordinateur — l'en-tete collant suit (synchronise en JS). */
-.men-cal--defile { --men-case: 38px; min-width: max-content; }
-/* L'en-tete des dates reste visible au defilement vertical, et suit le
-   defilement horizontal du calendrier (synchronise en JS). */
-.men-tete { position: sticky; top: 0; z-index: 20; background: var(--surface); overflow: hidden; box-shadow: 0 1px 0 var(--line); }
-
-.men-bien { display: flex; align-items: center; gap: 12px; padding: 18px 0 8px; border-top: 1px solid var(--line); position: sticky; inset-inline-start: 0; }
-.men-bien__id { display: flex; align-items: center; gap: 12px; font-size: var(--fs-body); font-weight: var(--fw-bold); min-width: 0; }
-.men-bien img, .men-bien__ini { width: 52px; height: 52px; border-radius: 10px; object-fit: cover; flex: none; }
-.men-bien__ini { background: var(--surface-2); color: var(--muted); display: inline-flex; align-items: center; justify-content: center; font-weight: var(--fw-bold); font-size: var(--fs-small); font-style: normal; }
-.men-bien__nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.men-masquer { border: 0; background: none; color: var(--muted); cursor: pointer; display: inline-flex; padding: 6px; }
-.men-masquer .icon { width: 14px; height: 14px; }
-.men-nonconfie { margin: 0 0 8px; }
-
-.men-ligne { display: grid; grid-template-columns: var(--men-col) 1fr; align-items: center; }
-.men-qui { display: flex; align-items: center; gap: 10px; font-size: var(--fs-small); font-weight: var(--fw-medium); min-height: 44px; padding-inline: 12px 8px; overflow: hidden; white-space: nowrap; position: sticky; inset-inline-start: 0; background: var(--surface); z-index: 3; }
+/* Un bloc par bien : titre HORS cadre (poignée, photo ronde, nom, ×),
+   cadre bordé, une ligne par prestataire avec son libellé en coin. */
+.men-bloc { width: max-content; min-width: 100%; }
+.men-bloc + .men-bloc { margin-top: 14px; }
+.men-bloc--saisi { opacity: .55; }
+.men-bloc--cible { outline: 2px dashed var(--info); outline-offset: 3px; border-radius: var(--radius-card); }
+.men-cadre { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); width: max-content; min-width: 100%; }
+.men-ligne { display: flex; align-items: stretch; }
+.men-ligne + .men-ligne { border-top: 1px solid var(--line); }
+.men-ligne:first-child .cal-bien__coin { border-start-start-radius: var(--radius-card); }
+.men-ligne:last-child .cal-bien__coin { border-end-start-radius: var(--radius-card); }
+.men-qui { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .men-qui--off { color: var(--muted); }
-.men-prenom { overflow: hidden; text-overflow: ellipsis; }
-.men-av { width: 28px; height: 28px; border-radius: var(--radius-pill); display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: var(--fw-bold); flex: none; background: var(--coul, var(--surface-2)); color: var(--ink); }
+.men-prenom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); font-weight: var(--fw-medium); }
+.men-av { width: 22px; height: 22px; border-radius: var(--radius-pill); display: inline-flex; align-items: center; justify-content: center; font-size: 9px; font-weight: var(--fw-bold); flex: none; background: var(--coul, var(--surface-2)); color: var(--ink); }
 .men-av--inconnu { border: 1.5px dashed var(--muted); background: var(--surface); color: var(--muted); }
 .men-regler { color: var(--muted); display: inline-flex; flex: none; }
-.men-regler .icon { width: 14px; height: 14px; }
+.men-regler .icon { width: 13px; height: 13px; }
+.men-nonconfie { margin: 0; padding: 10px 12px; }
 
-.men-lane { position: relative; display: grid; grid-template-columns: repeat(var(--nb), minmax(var(--men-case, 0px), 1fr)); align-items: center; min-height: 44px;
-  /* Traits verticaux entre les jours (demande de Thierry, recette étape 1) :
-     un filet par frontière de colonne, DERRIÈRE les barres et pastilles. */
-  background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(100% / var(--nb) - 1px), var(--line) calc(100% / var(--nb) - 1px), var(--line) calc(100% / var(--nb))); }
+/* La piste d'une ligne : n colonnes de 46 px, fonds (filets, week-ends,
+   aujourd'hui) peints par cellule comme la ligne Réservations du calendrier. */
+.men-lane { position: relative; display: grid; grid-template-columns: repeat(var(--n), 46px); align-items: center; min-height: 44px; width: calc(var(--n) * 46px); flex: none; }
 .men-lane > * { grid-row: 1; }
-/* Colonne de week-end : toute la hauteur, derrière barres et pastilles ; le
-   filet de droite est redessiné car le fond recouvre celui du gradient. */
-.men-we { align-self: stretch; height: 100%; background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); border-inline-end: 1px solid var(--line); }
-.men-we--debut { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
-.men-we--fin { box-shadow: inset -2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
-/* La colonne d'AUJOURD'HUI : les rails --info du calendrier (cal-auj), sur
-   toute la hauteur ; un week-end garde sa teinte dessous. */
-.men-we--hors { background-color: transparent; border-inline-end: 0; }
-.men-we--auj { box-shadow: inset 1.5px 0 0 var(--info), inset -1.5px 0 0 var(--info); }
-.men-we--debut.men-we--auj { box-shadow: inset 1.5px 0 0 var(--info), inset -1.5px 0 0 var(--info), inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
-.men-periode { display: inline-flex; gap: 6px; }
-.men-periode .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); }
-.men-periode .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
-.men-barre { height: 30px; margin: 0 2px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
-.men-barre--off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 5px, var(--surface) 5px 10px); border: 1px dashed var(--border); }
-.men-trou { height: 30px; margin: 0 2px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--danger); border: 1.5px dashed var(--danger); background: repeating-linear-gradient(135deg, var(--danger-soft) 0 5px, var(--surface) 5px 10px); overflow: hidden; white-space: nowrap; }
-.men-trou .icon { width: 13px; height: 13px; flex: none; }
-.men-trou--calme { color: var(--muted); border-color: var(--border); background: repeating-linear-gradient(135deg, var(--surface-2) 0 5px, var(--surface) 5px 10px); }
+.men-jj { align-self: stretch; height: 100%; border-inline-end: 1px solid var(--line); }
+.men-jj:last-child, .men-jj--fin-de-plage { border-inline-end: 0; }
+.men-jj.cal-we { background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); }
+.men-jj.cal-auj { box-shadow: inset 1.5px 0 0 var(--info), inset -1.5px 0 0 var(--info); }
+.men-jj.cal-we--debut.cal-auj { box-shadow: inset 1.5px 0 0 var(--info), inset -1.5px 0 0 var(--info), inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
 
+.men-barre { height: 28px; margin: 0 2px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
+.men-trou { height: 28px; margin: 0 2px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--danger); border: 1.5px dashed var(--danger); background: repeating-linear-gradient(135deg, var(--danger-soft) 0 5px, var(--surface) 5px 10px); overflow: hidden; white-space: nowrap; }
+.men-trou .icon { width: 13px; height: 13px; flex: none; }
+
+/* Les TROIS pastilles (décision du 13 octobre) : à faire (blanche, balai),
+   fait (verte, coche + badge retour), personne pour le faire (rouge, !). */
 .men-case { display: flex; align-items: center; justify-content: center; min-height: 44px; }
 .men-mk { position: relative; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow-dot); }
 .men-mk .icon { width: 14px; height: 14px; }
 .men-mk--fait { background: var(--ok); color: var(--surface); box-shadow: none; }
-.men-mk--np { border: 2px dashed var(--danger); background: var(--danger-soft); color: var(--danger); box-shadow: none; }
-.men-mk--na { border: 2px dashed var(--muted); background: var(--surface); color: var(--muted); box-shadow: none; }
-.men-mk--avenir { background: var(--surface-2); color: var(--muted); box-shadow: none; }
+.men-mk--alerte { background: var(--danger); color: var(--surface); box-shadow: none; }
 .men-mk__n { position: absolute; top: -5px; inset-inline-end: -6px; min-width: 16px; height: 16px; border-radius: var(--radius-pill); background: var(--ink); color: var(--on-ink); font-size: 10px; font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; padding: 0 3px; }
 .men-mk__retour { position: absolute; bottom: -5px; inset-inline-end: -6px; width: 16px; height: 16px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; background: var(--ok); color: var(--surface); box-shadow: 0 0 0 2px var(--surface); }
 .men-mk__retour--mauvais { background: var(--danger); }
 .men-mk__retour .icon { width: 10px; height: 10px; }
 
-.men-scroll { overflow-x: auto; }
-/* Absence d'une prestataire (conge, indisponibilite) : fine, hachuree,
-   SOUS la hauteur d'une barre de garde — une absence n'est pas une garde. */
-.men-abs { height: 20px; margin: 0 3px; border-radius: var(--radius-pill); border: 1.5px dashed var(--muted); background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--surface) 4px 8px); }
-.men-leg__barre.men-abs { height: 12px; margin: 0; }
-.men-legende { padding: 14px 2px 0; display: flex; flex-wrap: wrap; gap: 14px 20px; }
-.men-leg { display: inline-flex; align-items: center; gap: 7px; }
-.men-leg__barre { display: inline-block; width: 36px; height: 14px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
-.men-leg__barre.men-trou { height: 14px; margin: 0; }
-.men-leg__mk { width: 22px; height: 22px; }
-.men-leg__mk .icon { width: 11px; height: 11px; }
-
-
 @media (max-width: 899px) {
-  .men-page { padding: 0 16px 100px; }
-  /* Le calendrier seul défile horizontalement : 7 jours visibles, la suite au
-     doigt. Identités (bien, prénom) collantes au bord de départ. */
-  .men-scroll { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+  .men-page { padding: 10px 16px 100px; }
+  .men-nav .cal-periode { display: inline-flex; }  /* le calendrier la masque, ici elle sert */
+  .men-scroll { margin: 0 -16px; padding: 0 16px; }
   .men-tete { margin: 0 -16px; padding: 0 16px; }
-  .men-cal { --men-col: 0px; --men-case: calc((100vw - 32px - 44px) / 7); min-width: max-content; }
-  .men-jours { grid-template-columns: repeat(var(--nb), var(--men-case)); }
-  .men-jours__coin { display: none; }
+  .men-page { --cal-col: 0px; }
+  .men-tete .cal-bande__angle { display: none; }
+  /* Identités au-dessus de la piste, collantes au bord de départ. */
   .men-ligne { display: block; }
-  .men-lane { grid-template-columns: repeat(var(--nb), var(--men-case)); }
-  .men-qui { min-height: 34px; width: max-content; max-width: 70vw; padding-inline-start: 2px; }
-  .men-bien { position: sticky; inset-inline-start: 2px; width: max-content; max-width: 80vw; }
-  .men-bien img, .men-bien__ini { width: 34px; height: 34px; border-radius: 7px; }
+  .men-ligne .cal-bien__coin { width: max-content; min-width: 0; max-width: 70vw; border-inline-end: 0; padding: 6px 10px 0; position: sticky; inset-inline-start: 2px; background: none; }
+  .men-bloc .cal-bien__bandeau-int { position: sticky; inset-inline-start: 2px; max-width: 85vw; }
+  .men-bloc .cal-poigne { display: none; }  /* réordonner à la souris seulement — report mobile proposé à Thierry */
+  .men-lane { min-height: 40px; }
   .men-barre, .men-trou { height: 24px; }
   .men-mk { width: 22px; height: 22px; }
   .men-mk .icon { width: 11px; height: 11px; }
-  .men-case { min-height: 44px; min-width: 44px; }
+  .men-case { min-width: 44px; }
 }
