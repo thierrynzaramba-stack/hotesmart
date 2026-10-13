@@ -560,18 +560,22 @@ function majBadge () {
   HSNav.render({ peutLire, badges: { menagesATraiter: etat.aTraiter.length } })
 }
 
+// ⚠ LE PROBLÈME EN TOUTES LETTRES, EN PREMIER (recette du 13 octobre).
+// La ligne disait « Ofuro Futari · dim. 13 sept. » : l'hôte lisait un bien et
+// une date, et devait deviner à l'icône POURQUOI elle était là. Le titre dit
+// désormais ce qui ne va pas ; le bien, la date et le prénom suivent.
 function ligneHtml (l) {
   const photo = l.photo ? `<img src="${esc(l.photo)}" alt="" loading="lazy">` : icone('i-home')
   const quand = l.type === 'sans_personnel'
     ? t('menages.n_jours', { n: l.nbJours })
     : dateCourte(l.date)
   const qui = l.qui && l.qui.prenom ? ` · ${esc(l.qui.prenom)}` : ''
-  return `<div class="men-atr" title="${esc(t('menages.type_' + l.type))}">
-    <span class="men-atr__type men-atr__type--${esc(l.type)}" aria-label="${esc(t('menages.type_' + l.type))}">${icone(ICONE_TYPE[l.type])}</span>
+  return `<div class="men-atr">
+    <span class="men-atr__type men-atr__type--${esc(l.type)}" aria-hidden="true">${icone(ICONE_TYPE[l.type])}</span>
     <span class="cal-photo men-atr__photo">${photo}</span>
     <span class="men-atr__texte">
-      <b>${esc(l.bienNom)}</b>
-      <span class="caption muted">${esc(quand)}${qui}</span>
+      <b>${esc(t('menages.type_' + l.type))}</b>
+      <span class="caption muted">${esc(l.bienNom)} · ${esc(quand)}${qui}</span>
     </span>
   </div>`
 }
