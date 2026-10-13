@@ -665,6 +665,8 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 /* La colonne d'AUJOURD'HUI : deux rails verticaux discrets, sur toute la
    hauteur — la lecture verticale demandee en recette. */
 .men-we--auj { background: none; border-inline: 1.5px solid color-mix(in srgb, var(--ink) 30%, transparent); }
+/* Aujourd'hui UN JOUR DE WEEK-END : la teinte reste, les rails par-dessus. */
+.men-we--auj.men-we--fin { background: var(--surface-2); }
 .men-periode { display: inline-flex; gap: 6px; }
 .men-periode .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); }
 .men-periode .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
@@ -704,10 +706,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .men-scroll { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
   .men-tete { margin: 0 -16px; padding: 0 16px; }
   .men-cal { --men-col: 0px; --men-case: calc((100vw - 32px - 44px) / 7); min-width: max-content; }
-  .men-jours { grid-template-columns: repeat(14, var(--men-case)); }
+  .men-jours { grid-template-columns: repeat(var(--nb), var(--men-case)); }
   .men-jours__coin { display: none; }
   .men-ligne { display: block; }
-  .men-lane { grid-template-columns: repeat(14, var(--men-case)); }
+  .men-lane { grid-template-columns: repeat(var(--nb), var(--men-case)); }
   .men-qui { min-height: 34px; width: max-content; max-width: 70vw; padding-inline-start: 2px; }
   .men-bien { position: sticky; inset-inline-start: 2px; width: max-content; max-width: 80vw; }
   .men-bien img, .men-bien__ini { width: 34px; height: 34px; border-radius: 7px; }

@@ -402,5 +402,6 @@
   "menages.leg_off": "Désactivée",
   "menages.leg_regler": "Jours à régler",
   "menages.p14": "14 j",
-  "menages.p30": "30 j"
+  "menages.p30": "30 j",
+  "menages.period_len": "Nombre de jours affichés"
 }

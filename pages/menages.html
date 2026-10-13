@@ -57,7 +57,7 @@
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
     </button>
     <button type="button" class="btn btn--secondary" data-nav="0" data-i18n="menages.today"></button>
-    <div class="men-periode" role="group" data-i18n-attr="aria-label:menages.period_pick">
+    <div class="men-periode" role="group" data-i18n-attr="aria-label:menages.period_len">
       <button type="button" class="tab" data-jours="14" data-i18n="menages.p14"></button>
       <button type="button" class="tab" data-jours="30" data-i18n="menages.p30"></button>
     </div>
@@ -190,6 +190,9 @@ async function charger () {
     vide.hidden = false
     vide.innerHTML = `<p class="muted">${esc(e.status === 403 ? t('menages.no_access') : t('menages.load_error'))}</p>`
     $('[data-bind="planning"]').hidden = true
+    // L'en-tete collant suit le corps : des dates perimees au-dessus d'une
+    // erreur diraient une fenetre qu'on n'affiche pas (revue de bad5d25).
+    $('[data-bind="tete"]').hidden = true
   }
 }
 
@@ -280,7 +283,7 @@ function lignesDuBien (bien, g, menagesDuBien) {
 // même structure que l'en-tête, sur toute la hauteur (recette étape 1).
 function fondsWE () {
   return etat.jours.map((iso, i) => {
-    if (iso === AUJOURDHUI) return `<span class="men-we men-we--auj" style="grid-column: ${i + 1}"></span>`
+    if (iso === AUJOURDHUI) return `<span class="men-we men-we--auj${estWE(iso) ? ' men-we--fin' : ''}" style="grid-column: ${i + 1}"></span>`
     return estWE(iso) ? `<span class="men-we" style="grid-column: ${i + 1}"></span>` : ''
   }).join('')
 }
@@ -344,17 +347,17 @@ function renderTout () {
     const photo = bien.photo
       ? `<img src="${esc(bien.photo)}" alt="" loading="lazy">`
       : `<span class="men-bien__ini" aria-hidden="true">${esc(initiales(bien.name))}</span>`
-    const tete = `<div class="men-bien">
+    const enteteBien = `<div class="men-bien">
       <span class="men-bien__id">${photo}<span class="men-bien__nom" title="${esc(bien.name)}">${esc(bien.name)}</span></span>
       <button type="button" class="men-masquer" data-masquer="${esc(bien.id)}" data-i18n-attr="aria-label:menages.masquer_bien;title:menages.masquer_bien">${icone('i-close')}</button>
     </div>`
 
     // Un bien non confié : aucune ligne, jamais de rouge (décision du 3 sept.).
     if (!gere) {
-      return tete + (menagesDuBien.length ? renderLignes(bien, g, menagesDuBien) :
+      return enteteBien + (menagesDuBien.length ? renderLignes(bien, g, menagesDuBien) :
         `<p class="men-nonconfie caption muted" data-i18n="menages.non_confie"></p>`)
     }
-    return tete + renderLignes(bien, g, menagesDuBien) + renderTrous(bien, g, menagesDuBien)
+    return enteteBien + renderLignes(bien, g, menagesDuBien) + renderTrous(bien, g, menagesDuBien)
   }).join('')
 
   cal.innerHTML = blocs
@@ -511,9 +514,8 @@ async function init () {
   }))
   // L'en-tête collant suit le défilement horizontal du calendrier (téléphone).
   const scrollEl = $('[data-bind="planning"]')
-  scrollEl.addEventListener('scroll', () => {
-    $('[data-bind="tete"]').scrollLeft = scrollEl.scrollLeft
-  }, { passive: true })
+  const teteEl = $('[data-bind="tete"]')
+  scrollEl.addEventListener('scroll', () => { teteEl.scrollLeft = scrollEl.scrollLeft }, { passive: true })
   // Clic sur la période → sélecteur de mois natif (remplace le mini-calendrier
   // de l'ancienne page) ; la fenêtre saute au 1er du mois choisi.
   const choixMois = $('[data-bind="mois-choix"]')
