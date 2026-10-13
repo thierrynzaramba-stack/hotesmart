@@ -566,3 +566,185 @@ i18n V5 devra traiter les DEUX côtés ou passer par des codes
        (`validerRegle`, `extraitEstPrive`) ; anti-courses systématiques
        (jetons de lecture, verrou `geste()`) ; l'état affiché vient toujours
        du serveur.
+
+---
+
+# Lot 4 — réponse à la spec `lot-menages-v5/spec-refonte-ui-v5-lot-menages.md`
+
+Ajouté le 13 octobre 2026, AVANT tout code, à la demande de Thierry :
+le tableau de conformité (§12 de la spec) et les réponses aux questions
+Q1-Q4 (§11), vérifiées contre le code de la branche `lot-menages-v5`
+(f352ce7). La charte reste celle déjà en place dans le dépôt
+(`shared/theme.css`, `shared/ui.css`, `shared/nav.js`, sprite
+`shared/icons.svg`, i18n `shared/i18n/`) — les maquettes donnent la forme,
+pas leurs hexas ni leurs SVG : les miniatures sont provisoires, la page
+utilisera `properties.photo_url` (lot photos, writer unique
+`api/property-photo.js`, repli initiales du bien).
+
+## E. Tableau de conformité (§12)
+
+Chaque fonction de l'inventaire (parties A et B), classée. « Remplacée » =
+la fonction survit sous une autre forme ; « retirée » = elle disparaît, et
+seul Thierry valide un retrait.
+
+### E.1 Écran « Ménages » (`apps/menages/index.html`, A.1)
+
+| Fonction | Où aujourd'hui | Où demain | Statut |
+|---|---|---|---|
+| Vue semaine en colonnes par jour | index.html | calendrier 14 j, un bloc par bien, une ligne par prestataire | **remplacée** (retrait de la vue en colonnes proposé par la spec — à valider) |
+| Mini-calendrier mensuel (navigation) | index.html | sélecteur de mois au clic sur la période | **déplacée** |
+| Pastilles du mini-calendrier (jaune = a ménage, vert = tous faits) | index.html | — | **retirée** (avec le mini-calendrier ; l'information revient par les pastilles du calendrier — à valider) |
+| Compteurs semaine (total / effectués / restants) | index.html | — | **retirée** (proposé par la spec, à valider par Thierry) |
+| **Note pour la prestataire** (upsert `menage_comments` + INSERT `menage_events` par jeton + message « non transmise au prestataire » quand le droit manque) | modal fiche ménage d'index.html | fiche ménage V5 | **conservée — ⚠ OUBLIÉE par la spec et la maquette.** La « fiche ménage (existante) » n'est pas un composant partagé : elle vit DANS index.html, que ce lot supprime. La fiche V5 doit reconstruire la note avec ses deux writers et sa garde |
+| Marquer fait / non fait côté hôte | localStorage `menages-done` | écriture serveur partagée avec la PWA (D1) : bouton « Fait » de la bulle + fiche + toast « Annuler » (= markUndone) | **remplacée** — writer unique : extraire l'écriture `menage_done` + `markReady` d'`api/menages-public.js` vers `lib/cleaning/`, appelée par les DEUX endpoints chacun derrière sa garde ; le GET hôte doit EXPOSER `menage_done` (aujourd'hui absent — vérifié) ; ancien localStorage ignoré (spec) |
+| Pastille prestataire 4 états (porté / ⏳ proposé / ⚠ personne / personne) | colonne jour | pastilles du calendrier (5 états) + bulle | **remplacée** — le mapping états réels → pastilles est figé en Q2 (l'état « En cours » de la maquette n'existe pas en donnée) |
+| Réassignation (Proposer / Assigner / Retirer la proposition, vérité = réponse serveur, geste = libellé du bouton) | modal fiche | fiche ménage V5, mêmes trois gestes, mêmes gardes | **conservée** |
+| Nom du voyageur + adultes/enfants sur la carte | carte du jour | fiche ménage | **déplacée** (proposé par la spec) |
+| Gardes d'écran : lecture seule, 401 → /login, `planningEnErreur()` jamais un planning vide trompeur | index.html | nouvelle page | **conservée** — préciser la spec : « Fait » suit `menages:write`, « Assigner / Réassigner » suivent `prestataires:write` (deux droits distincts, pas un seul) |
+| `data.tronque` (console.warn seulement) | index.html | bandeau visible, comme garde.html | **déplacée / améliorée** — la spec est muette, à prévoir |
+| Filtres de biens | index.html et garde.html | bulles « biens masqués » partagées avec le Calendrier (prefs localStorage) | **conservée** |
+| Anti-courses (jeton de chargement, réponse lente n'écrase pas) | les deux écrans | à reconduire | **conservée** |
+
+### E.2 Écran « Planning » de garde (`apps/menages/garde.html`, A.2)
+
+| Fonction | Où aujourd'hui | Où demain | Statut |
+|---|---|---|---|
+| Ligne Garde : responsable calculée par jour, couleur stable par personne, prénom entier | garde.html | barre de couleur par prestataire | **conservée — ⚠ à préciser** : `api/garde.js` rend par jour la RESPONSABLE (+ remplaçante), pas toutes les candidates. Barre = « jours où elle est la garde calculée » est dérivable tel quel ; « de garde/disponible » au sens large (toutes candidates) exigerait d'étendre l'endpoint — à trancher au design |
+| Remplaçante du jour | popup détail | — | **⚠ retirée par omission** — la spec ne la mentionne nulle part ; à trancher (fiche du jour ? infobulle ?) |
+| Trou de garde | `trous` de la brique, rendu rouge | barre rouge hachurée « Personne » + bouton « + » ; type « Sans personnel » de la bulle | **conservée — ⚠ garde-fou à écrire** : exclure les biens sans AUCUNE liaison (`aucuneLiaison`) — décision du 3 septembre 2026, « un hôte qui fait son ménage lui-même ne produit pas de bruit ». La maquette Colomiers (barre rouge sous Lola grisée) est juste parce que Lola EST liée ; un bien non confié n'affiche ni rouge ni ligne dans la bulle |
+| « non confié » (gris, jamais rouge) | garde.html | — | **conservée** — spec muette : rendu à définir (bloc du bien sans ligne prestataire, mention grise) |
+| États ménage agrégés par case (GRAVITE : le plus grave l'emporte + exposant du nombre) | garde.html | une pastille PAR ménage | **remplacée** — deux ménages le même jour sur la même ligne = deux pastilles ; comportement à dessiner (la maquette n'a jamais deux pastilles par case) |
+| Tour complet (« proposé à Lena et Tiphaine ») + échéance `delaiTexte` (heure de Paris, « délai dépassé ») | title + popup | fiche ménage | **déplacée** — à reconstruire dans la fiche, la spec est muette |
+| Retour de propreté 👍/👎 + extrait + « retour privé » / « requalifié par vous » | popup détail | bulle « Mauvais retour » (remarques seules) + fiche ménage | **déplacée — ⚠ le 👍 positif disparaît du planning** ; le conserver au moins dans la fiche ménage (même règle `extraitEstPrive`, mêmes étiquettes) |
+| Popup détail d'un jour (garde + remplaçante + ménages + retours) | garde.html | fiche ménage au clic pastille | **remplacée** — il n'y a plus de « détail du jour » agrégé ; signalé |
+| Prestataire désactivée (rouge) | ligne garde | barre grise hachurée | **conservée** (rendu changé, assumé par la spec — le rouge reste réservé aux alarmes) |
+| « Jours à régler » (`a_regler`, ambre) | ligne garde | marque discrète sur la case | **conservée — ⚠ l'icône « € » de la maquette est un CONTRESENS** (voir Q4 : c'est un réglage de jours, pas d'argent) — proposer un engrenage ; « jamais ambre » : conforme (l'ambre reste à la bulle) |
+| `differe` (« proposition à venir », gris) | garde.html | pastille à définir | **conservée** — mapping figé en Q2 : un différé n'entre JAMAIS dans la bulle (rien à traiter) |
+| Bandeau troncature | garde.html | conservé tel quel | **conservée** |
+| Rendu sans `prestataires:read` (« quelqu'un » / « personne », ni prénom ni UUID) | garde.html + api | rendu dégradé à définir | **conservée — ⚠ la maquette suppose le droit** : sans lui, pas de lignes nominatives par prestataire ; définir la forme (lanes anonymes ? une seule lane « couverture » ?) |
+| Périodes 1 mois / 3 mois | garde.html | 14 jours ‹ › + Aujourd'hui | **remplacée** (fenêtre réduite, bornes serveur inchangées MAX_JOURS=92) |
+| Resize débouncé qui ne repeint pas par-dessus une erreur | garde.html | à reconduire | **conservée** |
+
+### E.3 Endpoints et périphérie
+
+| Fonction | Où aujourd'hui | Où demain | Statut |
+|---|---|---|---|
+| GET `/api/menages?from&to` (+ toutes ses gardes) | existant | réutilisé ; À ÉTENDRE : exposer `menage_done` et `properties.photo_url` (absents — vérifié) | **conservée** (extension de lecture seule) |
+| GET `/api/garde?du&au` (+ trois droits trois portées) | existant | réutilisé ; À ÉTENDRE : `photo_url` ; candidates par jour SI la barre « disponible » est retenue | **conservée** (extension à trancher) |
+| POST reassigner / liaisons / `rattraperMenagesSansPersonne` | existants | inchangés | **conservée** |
+| `api/disponibilites.js` (règles, exceptions, congés, visibilité) | existant | inchangé | **conservée** |
+| Écran Prestataires entier (A.3) et ses writers | prestataires.html | inchangé, icône en haut à droite | **conservée** (hors périmètre, spec §1) |
+| « Modifier les gardes » / « Assigner » → « édition des gardes du bien, positionnée sur le 1er jour sans garde » | **n'existe pas** : les gardes se règlent dans la FICHE PRESTATAIRE (par personne : jours par bien + dispos), pas par bien ni par jour | ? | **⚠ ÉCART MAJEUR À TRANCHER** : la cible du bouton n'existe pas. Options : (a) ouvrir prestataires.html (l'hôte choisit la personne) — trivial mais ne « se positionne » pas ; (b) ouvrir la fiche de la prestataire liée au bien ; (c) un écran d'édition par bien = un NOUVEAU chantier, hors « conservés tels quels » du §1 |
+| PWA entière (partie B) | apps/menages/public.html + api/menages-public.js | inchangée, sauf D2 (échappement openModal) | **conservée** |
+| Badge ambre de l'onglet Ménages | n'existe pas | `shared/nav.js` (mécanique `badges` existante, modèle `pendingMessages`) | **nouvelle** — préciser à l'étape 2 comment les AUTRES pages l'alimentent (coût d'un appel par page) |
+| Bulle « À traiter » (Sans personnel, Non assigné, Non pris, Non terminé, Mauvais retour) | dérivable (`trous`, `menages`, `menage_done`, `ota_reviews` via api/garde) | bulle, tri fixe, 8 + « Tout voir », coche verte si vide | **nouvelle** — droits par type : Mauvais retour sous `avis:read`, noms sous `prestataires:read`, boutons sous le write du domaine |
+| Redirections des anciennes pages | apps/menages/index.html, garde.html | stubs + redirects vercel.json + retargage des tests (précédent du calendrier) | **déplacée** (étape 4) |
+
+### E.4 Ce que la spec ou la maquette oublient (synthèse des ⚠)
+
+1. La **note pour la prestataire** (fiche) — fonction métier entière, deux writers.
+2. La **remplaçante** du jour, et le **détail du jour** agrégé.
+3. Le **👍 positif** du retour de propreté (seul le mauvais retour survit).
+4. **« non confié » ≠ « Personne »** : le garde-fou anti-bruit du 3 septembre.
+5. Le **rendu sans `prestataires:read`** (la maquette suppose le droit).
+6. La **troncature** sur la nouvelle page.
+7. La **cible réelle** de « Modifier les gardes » / « Assigner » (E.3).
+8. L'état **« En cours » n'existe pas en donnée** (Q1) ; l'icône **« € » est un
+   contresens** (Q4) ; les étapes « Arrivée / Photos » n'existent pas (Q1).
+9. **Deux pastilles possibles** le même jour sur la même ligne (E.2).
+10. Les boutons suivent **deux droits distincts** (`menages:write` vs
+    `prestataires:write`), pas un seul.
+
+## F. Réponses aux questions ouvertes (§11)
+
+### Q1 — Les étapes réelles d'un ménage dans la PWA
+
+Le cycle de vie, vérifié dans le code (`api/menages-public.js`,
+`lib/cleaning/`) :
+
+1. **Naissance** : le writer unique (`sync-menages-entite`, cron) crée la
+   ligne `menages`. Si la garde du jour est d'office (`requires_ack=false`),
+   elle PORTE dès la création (`accepted`) ; sinon le ménage attend.
+2. **Proposition** : posée à l'approche du départ (fenêtre 7 jours,
+   `poserPropositionsDues`), tour par rang (`proposee_a[]`), échéance
+   `offer_expires_at`, notifiée SMS/email.
+3. **Pris** : la prestataire **accepte** l'offre (`accepterMenage`) ou
+   **prend** un ménage à prendre (`prendreMenage`) → `accepted` +
+   `accepted_at`. Elle peut se **retirer** (`retirerMonMenage`, délai de
+   l'hôte) → `orphaned`.
+4. **Fait** : `markDone` → ligne `menage_done` (+ `markReady` →
+   `property_status.last_menage_at`). Défaisable (`markUndone`).
+
+**C'est tout.** Les statuts `started` et `completed` existent dans le CHECK
+du schéma mais **aucun code ne les écrit** (vérifié par grep sur api/ et
+lib/). Il n'y a **ni heure d'arrivée réelle, ni photos, ni « en cours », ni
+« terminé » distinct de « fait »**. Les étapes affichables dans la fiche,
+avec leurs dates réelles : **Proposé (`offered_at`, échéance) → Pris
+(`accepted_at`) → Fait (`menage_done.done_at`)**. La frise « Pris → Arrivée
+→ Ménage → Photos → Terminé » de la maquette mobile n'a pas de donnée
+au-delà de Pris/Fait ; la pastille « En cours » (noire) non plus — soit on la
+retire, soit c'est un chantier PWA futur (nouvelles actions prestataire).
+
+### Q2 — Définition exacte de « non pris »
+
+**Non pris = une proposition est EN COURS et personne ne porte** :
+`provider_id` null ET `proposee_a` non vide ET `offer_expires_at > now`.
+⚠ Depuis le modèle parallèle, un ménage peut être PORTÉ et sous proposition
+en même temps (cas nominal §12.4) : celui-là est « pris », pas « non pris »
+— quelqu'un le fera quoi qu'il arrive.
+
+Le délai : `echeanceOffre` = min(48 h, temps restant ÷ rangs restants),
+plancher 1 h, jamais après la **veille du départ 18 h** (heure de Paris).
+Expirée → le cron escalade au rang suivant ; tour épuisé → `orphaned`.
+
+Mapping complet proposé pour les pastilles et la bulle (à faire valider par
+le design) :
+
+| Donnée réelle | Pastille | Bulle |
+|---|---|---|
+| `provider_id` (accepted) sans `menage_done` | Pris (blanche) | — |
+| `menage_done` présent | Fait (verte) | — |
+| proposition en cours (ci-dessus) | Non pris (rouge pointillé) | **Non pris** |
+| `orphaned`, ou `unassigned` verrouillé `manual`, ou tour épuisé | Non assigné (gris pointillé) | **Non assigné** |
+| `differe` (départ hors fenêtre 7 j, un responsable existe) | Pris à venir — gris plein, pas d'alarme | **jamais** (rien à traiter) |
+| départ passé sans `menage_done` | — | **Non terminé** (J−30 → hier) |
+
+### Q3 — Le classement des retours ménage
+
+- **Stockage** : table `ota_reviews` du cœur. Colonnes qui portent le
+  classement : `ai_clean_verdict` (`positif` / `remarque` /
+  `rien_signale`), `ai_clean_excerpt` (l'extrait montrable),
+  `verdict_source` (`humain` prime : requalification), `statut`
+  (**seul `confirme` compte** — la validation humaine ; une détection en
+  attente n'est pas un fait), `content_private` / `content_public` (JAMAIS
+  envoyés au front : servent seulement à l'étiquette « retour privé » via
+  `extraitEstPrive`, défaut privé au moindre doute).
+- **Sources d'alimentation** : poll quotidien Channex + webhook
+  `updated_review` + saisie manuelle + détection automatique dans les
+  messages entrants — toutes passent par la validation humaine avant de
+  compter (chantier avis, KB avis-voyageurs).
+- **Méthode** : classification propreté en deux étages, règle avant IA.
+- **Rattachement au ménage** : par le COUPLE (`property_id_ref`,
+  `booking_uid`) = (`menages.property_id`, `menages.booking_id`) — jamais
+  par le nom. Deux avis sur le même séjour : la requalification humaine
+  prime, sinon la remarque prime sur le compliment.
+- **« Mauvais retour » de la bulle** = `ai_clean_verdict='remarque'` ET
+  `statut='confirme'`, fenêtre J−30 → hier, sous `avis:read` (prénoms sous
+  `prestataires:read`). Lecture seule, déjà servie par `api/garde.js`
+  (verdict + extrait + `prive`) : « Voir » affiche l'extrait étiqueté et le
+  ménage concerné, jamais le nom du voyageur.
+
+### Q4 — Le sens de « jours à régler »
+
+`a_regler` (api/garde.js) = la liaison de cette personne sur ce bien est
+**« à confirmer » (`requires_ack=true`) ET ses jours attitrés ne sont pas
+réglés** (`weekdays` NULL ou `[]`). Depuis le §12.9c, le moteur **ne propose
+qu'aux liaisons « à confirmer » dont les jours sont EXPLICITEMENT réglés**
+(`joursAttitresRegles`) : une telle personne apparaît de garde à l'écran
+mais **ne recevra jamais aucune proposition** sur ce bien. Le drapeau dit à
+l'hôte : « réglez ses jours dans la fiche prestataire », sinon le ménage
+finira « Non assigné » dans la bulle (cas `bridees` du moteur).
+
+**Rien à voir avec l'argent** : l'icône « € » de la maquette serait un
+contresens — proposer une icône de réglage (engrenage), grise, avec
+l'infobulle « jours à régler dans sa fiche ».

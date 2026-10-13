@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>HôteSmart — Ménages mobile (V5)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FFFFFF;font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#222222;-webkit-font-smoothing:antialiased}
+a{color:#222222;text-decoration:none}
+button{font-family:inherit;cursor:pointer}
+.ico{width:44px;height:44px;border:1px solid #DDDDDD;border-radius:99px;background:#FFFFFF;display:flex;align-items:center;justify-content:center;flex:none}
+.th{border-radius:8px;flex:none}
+.av{border-radius:99px;display:flex;align-items:center;justify-content:center;font-weight:700;flex:none;background:#FFFFFF}
+.steps{display:flex;align-items:center;margin-top:10px}
+.sp{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#717171;width:50px;text-align:center}
+.sp i{width:26px;height:26px;border-radius:99px;display:flex;align-items:center;justify-content:center;border:2px solid #DDDDDD;background:#FFFFFF;font-style:normal}
+.sp.ok i{background:#1A7F4B;border-color:#1A7F4B}
+.sp.now i{border-color:#222222;box-shadow:0 0 0 3px #EBEBEB}
+.sp.now{color:#222222;font-weight:700}
+.ln{flex:1;height:2px;background:#DDDDDD;margin-bottom:16px}
+.ln.ok{background:#1A7F4B}
+.chip{flex:1;min-width:0;height:64px;border-radius:14px;background:#FFFFFF;border:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:16px;font-weight:800;padding:0}
+.cal{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));row-gap:4px}
+.dh{text-align:center;font-size:10px;color:#717171;line-height:1.15;padding-bottom:4px;border-bottom:1px solid #EBEBEB}
+.dh b{display:block;font-size:12px;color:#222222}
+.dh.we{background:#F7F7F7}
+.dh.today b{background:#222222;color:#FFFFFF;border-radius:99px;width:20px;height:20px;line-height:20px;margin:0 auto}
+.bn{grid-column:1 / -1;display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;padding-top:8px}
+.bar{height:24px;border-radius:99px;margin:0 1px}
+.who{grid-column:1 / -1;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;padding-top:2px}
+.who .av{width:20px;height:20px;font-size:8px}
+.bar .av{width:20px;height:20px;font-size:8px}
+.gap{height:26px;border-radius:99px;margin:0 1px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:11px;font-weight:700;color:#C13515;border:1.5px dashed #C13515;background:repeating-linear-gradient(135deg,#FCEDEA 0 4px,#FFFFFF 4px 8px)}
+.mk{width:20px;height:20px;justify-self:center;align-self:center;border-radius:99px;background:#FFFFFF;box-shadow:0 1px 2px rgba(0,0,0,0.25)}
+.mk.p{border:1.5px solid #222222;box-shadow:none}
+.mk.np{border:1.5px dashed #C13515;background:#FCEDEA;box-shadow:none}
+.mk.ec{background:#222222}
+.nav a{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10px;color:#BDBDBD;padding-top:8px}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; background: #FFFFFF; display: flex; flex-direction: column; overflow: hidden">
+  <div style="flex: 1; overflow: hidden; padding: 0 16px">
+
+    <div style="display: flex; align-items: center; gap: 8px; padding: 14px 0 10px">
+      <h1 style="margin: 0; flex: 1; font-size: 26px; font-weight: 800; letter-spacing: -0.03em">Ménages</h1>
+      <button class="ico" aria-label="Modifier les gardes"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6Z"/></svg></button>
+      <button class="ico" aria-label="Prestataires"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.4 0 4 1.5 4.6 4"/></svg></button>
+    </div>
+
+    <!-- Bulle À traiter : 5 compteurs, un tap ouvre la liste -->
+    <section aria-label="À traiter, 30 prochains jours" style="background: #FFF4E0; border-radius: 18px; padding: 10px 10px 10px">
+      <div style="display: flex; align-items: center; gap: 8px; padding: 0 4px 8px">
+        <h2 style="margin: 0; flex: 1; font-size: 15px; font-weight: 700">À traiter</h2>
+        <span style="font-size: 12px; color: #717171">30 j</span>
+        <span style="min-width: 22px; height: 22px; padding: 0 6px; border-radius: 99px; background: #F5A524; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center">6</span>
+      </div>
+      <div style="display: flex; gap: 6px">
+        <button class="chip" aria-label="Sans personnel : 1 bien"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6Z"/><path d="M4 4l16 16"/></svg>1</button>
+        <button class="chip" aria-label="Non assignés : 1"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#717171" stroke-width="2" stroke-dasharray="3 3" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>1</button>
+        <button class="chip" aria-label="Non pris : 2"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-dasharray="3 3" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>2</button>
+        <button class="chip" aria-label="Non terminés : 1"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>1</button>
+        <button class="chip" aria-label="Mauvais retours : 1"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4Z"/><path d="M9 9l6 4M15 9l-6 4"/></svg>1</button>
+      </div>
+    </section>
+
+    <!-- Calendrier : une ligne par prestataire assignée au bien, 7 jours -->
+    <section aria-label="Planning par bien et par prestataire" style="margin-top: 14px">
+      <div class="cal">
+        <span class="dh today">ma<b>13</b></span><span class="dh">me<b>14</b></span><span class="dh">je<b>15</b></span><span class="dh">ve<b>16</b></span><span class="dh we">sa<b>17</b></span><span class="dh we">di<b>18</b></span><span class="dh">lu<b>19</b></span>
+        <div class="bn" style="grid-row: 2"><svg width="34" height="34" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Cœur de vie 23" style="border-radius: 7px; flex: none; display: block"><rect width="64" height="64" fill="#BFD8E8"/><rect y="44" width="64" height="20" fill="#9DB08A"/><path d="M14 22 32 10l18 12v32H14Z" fill="#EADBC4"/><path d="M11 23 32 8l21 15" fill="none" stroke="#8A5A44" stroke-width="4" stroke-linejoin="round"/><rect x="20" y="27" width="8" height="9" rx="1" fill="#5F7C93"/><rect x="36" y="27" width="8" height="9" rx="1" fill="#5F7C93"/><rect x="28" y="41" width="8" height="13" rx="1" fill="#8A5A44"/></svg>Cœur de vie 23</div>
+        <div class="who" style="grid-row: 3"><span class="av" style="background: #DDE4E6">RÉ</span><span>Régina</span></div>
+        <span class="bar" style="grid-row: 4; grid-column: 1 / 8; background: #DDE4E6"></span><span class="mk p" style="grid-row: 4; grid-column: 2" aria-label="Pris"></span><span class="mk p" style="grid-row: 4; grid-column: 6" aria-label="Pris"></span>
+        <div class="bn" style="grid-row: 5"><svg width="34" height="34" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Colomiers" style="border-radius: 7px; flex: none; display: block"><rect width="64" height="64" fill="#D6E6EF"/><rect y="46" width="64" height="18" fill="#8DB07A"/><path d="M12 30 30 18l18 12v20H12Z" fill="#F4F0E8"/><path d="M9 31 30 16l21 15" fill="none" stroke="#C0573E" stroke-width="4" stroke-linejoin="round"/><rect x="18" y="34" width="8" height="7" rx="1" fill="#6D8FA6"/><rect x="33" y="35" width="7" height="15" rx="1" fill="#6B4E3A"/><circle cx="54" cy="40" r="7" fill="#5E8A4F"/><rect x="53" y="44" width="2" height="6" fill="#6B4E3A"/></svg>Colomiers</div>
+        <div class="gap" style="grid-row: 6; grid-column: 1 / 8"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6Z"/><path d="M4 4l16 16"/></svg>Personne</div>
+        <div class="bn" style="grid-row: 7"><svg width="34" height="34" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="La bulle" style="border-radius: 7px; flex: none; display: block"><rect width="64" height="64" fill="#2E3557"/><circle cx="50" cy="13" r="2" fill="#FFFFFF"/><circle cx="14" cy="10" r="1.5" fill="#FFFFFF"/><rect y="48" width="64" height="16" fill="#4E6B4A"/><path d="M10 50a22 22 0 0 1 44 0Z" fill="#CFE3F2" opacity="0.9"/><path d="M18 50a14 14 0 0 1 28 0" fill="none" stroke="#FFFFFF" stroke-width="1.5" opacity="0.7"/><rect x="24" y="42" width="16" height="6" rx="2" fill="#F2C58B"/></svg>La bulle</div>
+        <div class="who" style="grid-row: 8"><span class="av" style="background: #DDE4E6">RÉ</span><span>Régina</span></div>
+        <span class="bar" style="grid-row: 9; grid-column: 1 / 8; background: #DDE4E6"></span><span class="mk p" style="grid-row: 9; grid-column: 2" aria-label="Pris"></span><span class="mk np" style="grid-row: 9; grid-column: 5" aria-label="Non pris"></span>
+        <div class="bn" style="grid-row: 10"><svg width="34" height="34" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Ofuro Futari" style="border-radius: 7px; flex: none; display: block"><rect width="64" height="64" fill="#EDE3D3"/><path d="M0 18h64" stroke="#D2C2A8" stroke-width="2"/><path d="M22 14c-3-4 3-6 0-10M32 14c-3-4 3-6 0-10M42 14c-3-4 3-6 0-10" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/><rect x="12" y="24" width="40" height="30" rx="5" fill="#B07A4F"/><rect x="12" y="24" width="40" height="7" rx="3" fill="#8F5F3B"/><path d="M12 36h40M12 45h40" stroke="#8F5F3B" stroke-width="1.5"/><rect x="16" y="27" width="32" height="3" rx="1.5" fill="#9CC9D6"/></svg>Ofuro Futari</div>
+        <div class="who" style="grid-row: 11"><span class="av" style="background: #E3EADF">LE</span><span>Lena</span></div>
+        <span class="bar" style="grid-row: 12; grid-column: 1 / 2; background: #E3EADF"></span><span class="bar" style="grid-row: 12; grid-column: 4 / 5; background: #E3EADF"></span><span class="bar" style="grid-row: 12; grid-column: 7 / 8; background: #E3EADF"></span><span class="mk ec" style="grid-row: 12; grid-column: 1" aria-label="En cours"></span><span class="mk np" style="grid-row: 12; grid-column: 4" aria-label="Non pris"></span>
+        <div class="who" style="grid-row: 13"><span class="av" style="background: #F1E6DA">TI</span><span>Tiphaine</span></div>
+        <span class="bar" style="grid-row: 14; grid-column: 2 / 4; background: #F1E6DA"></span><span class="bar" style="grid-row: 14; grid-column: 5 / 7; background: #F1E6DA"></span><span class="mk p" style="grid-row: 14; grid-column: 3" aria-label="Pris"></span><span class="mk p" style="grid-row: 14; grid-column: 5" aria-label="Pris"></span><span class="mk p" style="grid-row: 14; grid-column: 6" aria-label="Pris"></span>
+      </div>
+    </section>
+  </div>
+
+  <nav class="nav" aria-label="Navigation" style="height: 76px; background: #222222; display: flex; padding: 0 8px; flex: none">
+    <a href="Mobile-v5.dc.html"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11 12 4l8 7v9H4Z"/></svg>Aujourd’hui</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>Calendrier</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4Z"/></svg>Messages</a>
+    <a href="#" aria-current="page" style="color: #FFFFFF; font-weight: 700"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg>Ménages</a>
+    <a href="#"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BDBDBD" stroke-width="1.75" stroke-linejoin="round" aria-hidden="true"><path d="M3 21V10l9-6 9 6v11Z"/><path d="M9 21v-6h6v6"/></svg>Logements</a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
