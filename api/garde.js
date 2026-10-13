@@ -43,12 +43,13 @@ const { extraitVerifie } = require('../lib/extrait-verifie')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
-// ⚠ FENETRE BORNEE A 92 JOURS — le meme plafond que `planningDeGarde`, et pour
-// la meme raison : il fait tourner la recurrence RRULE par (personne, jour), et
-// une fenetre d'un an demandee par une URL bricolee ferait des dizaines de
-// milliers d'evaluations pour un ecran que personne ne regarde.
-// L'ecran propose 1 mois et 3 mois : au-dela, une garde n'a plus de sens — les
-// regles de disponibilite auront change avant.
+// ⚠ FENETRE BORNEE A 92 JOURS PAR REQUETE — le meme plafond que
+// `planningDeGarde`, qui fait tourner la recurrence RRULE par (personne, jour).
+// Ce n'est PAS un plafond d'ecran : depuis la recette du 13 octobre 2026, la
+// page Menages V5 propose jusqu'a 12 mois et lit alors par TRANCHES de 92
+// jours. Le plafond borne le COUT UNITAIRE d'une requete (et d'une URL
+// bricolee) : une fenetre d'un an se paie en quatre requetes visibles, jamais
+// en une requete silencieusement enorme.
 const MAX_JOURS = 92
 const LOT_MENAGES = 500
 const LOT_BIENS = 200
@@ -120,7 +121,7 @@ module.exports = async function handler (req, res) {
   try {
     // ===== LES BIENS DU PERIMETRE =====
     const filtreRef = filtrePerimetreSql(refsDuPerimetre(garde.contexte), 'provider_property_id')
-    if (filtreRef === '') return res.status(200).json({ jours, biens: [], garde: [], menages: [] })
+    if (filtreRef === '') return res.status(200).json({ jours, biens: [], garde: [], menages: [], absences: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
 
     let qProps = supabase.from('properties')
       .select('provider_property_id, name, photo_url')
@@ -142,7 +143,7 @@ module.exports = async function handler (req, res) {
     // pour montrer : un menage hors du lot rend son jour « sans menage », donc
     // gris au lieu de rouge — l'alerte devient un silence.
     const tronqueBiens = (propRows || []).length >= LOT_BIENS
-    if (!biens.length) return res.status(200).json({ jours, biens: [], garde: [], menages: [] })
+    if (!biens.length) return res.status(200).json({ jours, biens: [], garde: [], menages: [], absences: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
 
     // ===== LE CONTEXTE DE GARDE =====
     // ⚠ UNE PANNE COUPE. Rendre une garde calculee sur des liaisons ou des
@@ -229,6 +230,17 @@ module.exports = async function handler (req, res) {
     const absences = []
     if (avecNoms) {
       const lireDe = (m, cle) => (m && typeof m.get === 'function' ? m.get(cle) : null) || []
+      // ⚠ MEMOISE PAR (personne, jour) : la meme prestataire liee a N biens
+      // n'est evaluee qu'une fois par jour — estDisponible re-parse la RRULE a
+      // chaque appel, et ce bloc double deja le travail du planning (revue de
+      // 29f587c ; exposer la dispo depuis planningDeGarde reste la vraie
+      // sortie, notee au meme endroit).
+      const dispoCache = new Map()
+      const estDispo = (cle, ctx, date) => {
+        const k = cle + '|' + date
+        if (!dispoCache.has(k)) dispoCache.set(k, estDisponible(date, ctx))
+        return dispoCache.get(k)
+      }
       for (const pb of planning.biens) {
         const joursIso = pb.jours.map(j => j.date)
         const brutes = liaisonsParBien.get(`${userId}|${pb.propertyId}`) || []
@@ -240,9 +252,12 @@ module.exports = async function handler (req, res) {
                         exceptions: lireDe(dispos.exceptions, cle),
                         conges: lireDe(dispos.conges, cle) }
           for (const date of joursIso) {
-            if (attitreeCeJour(l, date) && !estDisponible(date, ctx)) {
+            if (attitreeCeJour(l, date) && !estDispo(cle, ctx, date)) {
               absences.push({ propertyId: String(pb.propertyId), providerId: String(l.providerId),
-                              prenom: (prenoms[l.providerId] || {}).prenom || null, date })
+                              prenom: (prenoms[l.providerId] || {}).prenom || null,
+                              // Une desactivee absente reste grisee a l'ecran,
+                              // comme partout ailleurs (revue de 29f587c).
+                              actif: (prenoms[l.providerId] || {}).actif !== false, date })
             }
           }
         }

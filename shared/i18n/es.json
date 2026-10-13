@@ -401,11 +401,11 @@
   "menages.leg_personne": "Nadie",
   "menages.leg_off": "Desactivada",
   "menages.leg_regler": "Días por configurar",
-  "menages.period_len": "Número de días mostrados",
+  "menages.period_len": "Número de meses mostrados",
   "menages.m1": "1 m",
   "menages.m3": "3 m",
   "menages.m6": "6 m",
   "menages.m12": "12 m",
-  "menages.absente": "Ausente: vacaciones o indisponibilidad declarada",
+  "menages.absente": "Ausente o no disponible",
   "menages.leg_abs": "Ausente"
 }

@@ -1092,7 +1092,7 @@ test('une attitrée INDISPONIBLE (exception) sort dans `absences`, jour par jour
   await handler(get(), res)
   assert.strictEqual(res.code, 200)
   assert.deepStrictEqual(res.body.absences,
-    [{ propertyId: BIEN, providerId: REGINA, prenom: 'Régina', date: '2026-09-09' }],
+    [{ propertyId: BIEN, providerId: REGINA, prenom: 'Régina', actif: true, date: '2026-09-09' }],
     'le jour d\'exception, et lui seul — avec le prénom (la ligne d\'une absente sans garde doit pouvoir se nommer)')
 })
 

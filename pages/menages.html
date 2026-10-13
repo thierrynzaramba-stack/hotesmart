@@ -264,7 +264,7 @@ function infobulle (bien, m) {
 // `prestataires:read` : UNE ligne neutre par bien.
 const CLE_COUVERTURE = '__couverture'
 const CLE_SANS = '__sans'
-function lignesDuBien (bien, g, menagesDuBien) {
+function lignesDuBien (bien, g, menagesDuBien, absencesDuBien) {
   const lanes = new Map()
   const lane = (cle) => {
     if (!lanes.has(cle)) {
@@ -285,12 +285,12 @@ function lignesDuBien (bien, g, menagesDuBien) {
   }
   // Ses ABSENCES (congé, indisponibilité) : visibles sur SA ligne — et une
   // semaine entière d'absence crée sa ligne même sans un seul jour de garde.
-  for (const a of etat.absences) {
-    if (String(a.propertyId) !== String(bien.id)) continue
-    if (!etat.jours.includes(a.date)) continue
+  // (Pré-indexées par bien et par fenêtre dans renderTout — revue de 29f587c.)
+  for (const a of (absencesDuBien || [])) {
     const la = lane(String(a.providerId))
     la.abs.add(a.date)
     if (a.prenom && !la.prenom) la.prenom = a.prenom
+    if (a.actif === false) la.actif = false
   }
   for (const m of menagesDuBien) {
     const e = etatPastille(m)
@@ -347,12 +347,11 @@ function renderTout () {
   $('[data-bind="periode"]').textContent = `${dateCourt(etat.jours[0])} → ${dateCourt(etat.jours[etat.jours.length - 1])}`
   document.querySelectorAll('[data-mois]').forEach(b =>
     b.setAttribute('aria-pressed', String(Number(b.dataset.mois) === etat.mois)))
-  // La grille entière suit la fenêtre (--nb pilote les deux conteneurs) :
-  // dense = en-tête réduit dès un mois ; défile = colonnes fixes + défilement
-  // horizontal au-delà d'un mois (l'en-tête collant suit, déjà synchronisé).
+  // La grille entière suit la fenêtre (--nb pilote les deux conteneurs) ;
+  // défile = colonnes fixes + défilement horizontal au-delà d'un mois
+  // (l'en-tête collant suit, déjà synchronisé).
   for (const el of [cal, calTete]) {
     el.style.setProperty('--nb', String(etat.jours.length))
-    el.classList.toggle('men-cal--dense', etat.jours.length >= 30)
     el.classList.toggle('men-cal--defile', etat.jours.length > 31)
   }
 
@@ -375,6 +374,14 @@ function renderTout () {
   </div>`
 
   const parBienGarde = new Map(etat.garde.map(g => [String(g.propertyId), g]))
+  const joursSet = new Set(etat.jours)
+  const absParBien = new Map()
+  for (const a of etat.absences) {
+    if (!joursSet.has(a.date)) continue
+    const cle = String(a.propertyId)
+    if (!absParBien.has(cle)) absParBien.set(cle, [])
+    absParBien.get(cle).push(a)
+  }
   const menagesParBien = new Map()
   for (const m of etat.menages) {
     const cle = String(m.propertyId)
@@ -396,10 +403,10 @@ function renderTout () {
 
     // Un bien non confié : aucune ligne, jamais de rouge (décision du 3 sept.).
     if (!gere) {
-      return enteteBien + (menagesDuBien.length ? renderLignes(bien, g, menagesDuBien) :
+      return enteteBien + (menagesDuBien.length ? renderLignes(bien, g, menagesDuBien, absParBien.get(String(bien.id))) :
         `<p class="men-nonconfie caption muted" data-i18n="menages.non_confie"></p>`)
     }
-    return enteteBien + renderLignes(bien, g, menagesDuBien) + renderTrous(bien, g, menagesDuBien)
+    return enteteBien + renderLignes(bien, g, menagesDuBien, absParBien.get(String(bien.id))) + renderTrous(bien, g, menagesDuBien)
   }).join('')
 
   cal.innerHTML = blocs
@@ -412,8 +419,8 @@ function renderTout () {
   renderLegende(true)
 }
 
-function renderLignes (bien, g, menagesDuBien) {
-  const lanes = lignesDuBien(bien, g, menagesDuBien)
+function renderLignes (bien, g, menagesDuBien, absencesDuBien) {
+  const lanes = lignesDuBien(bien, g, menagesDuBien, absencesDuBien)
   return lanes.map(l => {
     const sans = l.cle === CLE_SANS
     const anonyme = l.cle === CLE_COUVERTURE
@@ -427,8 +434,13 @@ function renderLignes (bien, g, menagesDuBien) {
     const off = l.actif === false
     const barres = sans ? '' : suites(l.jours).map(r =>
       `<span class="men-barre${off ? ' men-barre--off' : ''}" style="grid-column: ${r.debut + 1} / ${r.fin + 2}; --coul: ${coul}"></span>`).join('')
-    const absences = sans ? '' : suites(l.abs).map(r =>
-      `<span class="men-abs" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(t('menages.absente') + ' — ' + etat.jours.slice(r.debut, r.fin + 1).map(dateLongue).join(', '))}"></span>`).join('')
+    const absences = sans ? '' : suites(l.abs).map(r => {
+      // Deux bornes, jamais l'enumeration : un conge de trois mois en vue
+      // 12 m produisait une infobulle de 90 dates (revue de 29f587c).
+      const quand = r.debut === r.fin ? dateLongue(etat.jours[r.debut])
+        : `${dateLongue(etat.jours[r.debut])} → ${dateLongue(etat.jours[r.fin])}`
+      return `<span class="men-abs" style="grid-column: ${r.debut + 1} / ${r.fin + 2}" title="${esc(t('menages.absente') + ' — ' + quand)}"></span>`
+    }).join('')
     const pastilles = [...l.menages.entries()].map(([iso, ms]) => {
       const i = etat.jours.indexOf(iso)
       if (i < 0) return ''
