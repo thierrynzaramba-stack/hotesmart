@@ -386,5 +386,8 @@
   "menages.m6": "6 m",
   "menages.m12": "12 m",
   "menages.tt_afaire": "Por hacer",
-  "menages.tt_alerte": "Nadie para hacerla"
+  "menages.tt_alerte": "Nadie para hacerla",
+  "menages.tt_propose": "Propuesta, esperando respuesta",
+  "menages.retour_bon": "buen comentario del viajero",
+  "menages.retour_mauvais": "mal comentario del viajero"
 }

@@ -35,8 +35,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
-const { planningDeGarde, normaliserLiaison, attitreeCeJour } = require('../lib/cleaning/garde')
-const { estDisponible } = require('../lib/cleaning/availability')
+const { planningDeGarde } = require('../lib/cleaning/garde')
 const { chargerLiaisons, chargerDisponibilites,
         dansLaFenetreDeProposition, proposeesDe } = require('../lib/cleaning/assign')
 const { extraitVerifie } = require('../lib/extrait-verifie')
@@ -121,7 +120,7 @@ module.exports = async function handler (req, res) {
   try {
     // ===== LES BIENS DU PERIMETRE =====
     const filtreRef = filtrePerimetreSql(refsDuPerimetre(garde.contexte), 'provider_property_id')
-    if (filtreRef === '') return res.status(200).json({ jours, biens: [], garde: [], menages: [], absences: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
+    if (filtreRef === '') return res.status(200).json({ jours, biens: [], garde: [], menages: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
 
     let qProps = supabase.from('properties')
       .select('provider_property_id, name, photo_url')
@@ -143,7 +142,7 @@ module.exports = async function handler (req, res) {
     // pour montrer : un menage hors du lot rend son jour « sans menage », donc
     // gris au lieu de rouge — l'alerte devient un silence.
     const tronqueBiens = (propRows || []).length >= LOT_BIENS
-    if (!biens.length) return res.status(200).json({ jours, biens: [], garde: [], menages: [], absences: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
+    if (!biens.length) return res.status(200).json({ jours, biens: [], garde: [], menages: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
 
     // ===== LE CONTEXTE DE GARDE =====
     // ⚠ UNE PANNE COUPE. Rendre une garde calculee sur des liaisons ou des
@@ -221,49 +220,15 @@ module.exports = async function handler (req, res) {
 
     }
 
-    // ===== LES ABSENCES DES PRESTATAIRES (recette du 13 octobre 2026) =====
-    // Une absence = ATTITREE ce jour-la (weekdays de la liaison) mais
-    // INDISPONIBLE (conge, exception, regle illisible comprise) — les MEMES
-    // briques que le moteur (`attitreeCeJour`, `estDisponible`), jamais une
-    // copie. Sous `prestataires: read` SEULEMENT : le calendrier personnel du
-    // personnel a la portee des prenoms, pas celle de la couverture.
-    const absences = []
-    if (avecNoms) {
-      const lireDe = (m, cle) => (m && typeof m.get === 'function' ? m.get(cle) : null) || []
-      // ⚠ MEMOISE PAR (personne, jour) : la meme prestataire liee a N biens
-      // n'est evaluee qu'une fois par jour — estDisponible re-parse la RRULE a
-      // chaque appel, et ce bloc double deja le travail du planning (revue de
-      // 29f587c ; exposer la dispo depuis planningDeGarde reste la vraie
-      // sortie, notee au meme endroit).
-      const dispoCache = new Map()
-      const estDispo = (cle, ctx, date) => {
-        const k = cle + '|' + date
-        if (!dispoCache.has(k)) dispoCache.set(k, estDisponible(date, ctx))
-        return dispoCache.get(k)
-      }
-      for (const pb of planning.biens) {
-        const joursIso = pb.jours.map(j => j.date)
-        const brutes = liaisonsParBien.get(`${userId}|${pb.propertyId}`) || []
-        for (const brute of brutes) {
-          const l = normaliserLiaison(brute)
-          if (!l || l.active === false) continue
-          const cle = `${userId}|${l.providerId}`
-          const ctx = { regles: lireDe(dispos.regles, cle),
-                        exceptions: lireDe(dispos.exceptions, cle),
-                        conges: lireDe(dispos.conges, cle) }
-          for (const date of joursIso) {
-            if (attitreeCeJour(l, date) && !estDispo(cle, ctx, date)) {
-              absences.push({ propertyId: String(pb.propertyId), providerId: String(l.providerId),
-                              prenom: (prenoms[l.providerId] || {}).prenom || null,
-                              // Une desactivee absente reste grisee a l'ecran,
-                              // comme partout ailleurs (revue de 29f587c).
-                              actif: (prenoms[l.providerId] || {}).actif !== false, date })
-            }
-          }
-        }
-      }
-    }
-
+    // ===== LES ABSENCES DES PRESTATAIRES : PLUS CALCULEES =====
+    // Servies un temps (recette du 13 octobre), puis RETIREES de l'ecran le
+    // meme jour (« une absence = une case vide, moins de bruit »). Plus aucun
+    // consommateur ne les lisait, et le bloc re-evaluait `attitreeCeJour` +
+    // `estDisponible` — donc re-parsait la RRULE — par bien, par liaison et
+    // par jour, quatre fois en vue 12 mois (la page lit par tranches). Le
+    // jour ou un ecran en aura besoin : les EXPOSER depuis `planningDeGarde`,
+    // qui connait deja la disponibilite jour par jour, au lieu d'une
+    // seconde passe (revue de 742fa7f).
     // ===== LE RETOUR DE PROPRETE DU SEJOUR =====
     //
     // ⚠ ATTACHE A UN MENAGE, PAS A UNE PERSONNE. C'est ce que le voyageur a dit
@@ -440,8 +405,6 @@ module.exports = async function handler (req, res) {
 
     return res.status(200).json({
       jours, biens, garde: gardeParBien, menages,
-      // Vide sans `prestataires: read` — jamais un identifiant sans le droit.
-      absences,
       avec_noms: avecNoms,
       // ⚠ `avec_avis` DIT CE QUI SORT, pas ce que le droit autorise. Le retour de
       // propreté est une parole de voyageur rapportée à côté d'un nom : sans

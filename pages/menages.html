@@ -99,7 +99,8 @@ import { compteCourant, peutLire, estTitulaire, comptes, basculerVers, enteteCom
   from '/shared/compte-courant.js'
 import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
-import { bandeJoursHtml } from '/shared/bande-jours.js'
+import { bandeJoursHtml, classesWE as classesWEDuJour } from '/shared/bande-jours.js'
+import { brancherReordonnancement } from '/shared/reordonner-biens.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -144,12 +145,9 @@ function ecrirePrefs () {
 const dateLongue = iso => new Intl.DateTimeFormat(langue(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
   .format(new Date(iso + 'T12:00:00Z'))
 const estLarge = () => window.matchMedia('(min-width: 900px)').matches
-// Les classes de week-end du CALENDRIER (liserés début/fin) — composant
-// partagé shared/bande-jours.js pour la bande ; ici la même règle par jour.
-const classesWE = iso => {
-  const d = new Date(iso + 'T12:00:00Z').getUTCDay()
-  return (d === 0 || d === 6) ? ' cal-we' + (d === 6 ? ' cal-we--debut' : ' cal-we--fin') : ''
-}
+// La règle des week-ends vient du MODULE, comme la bande : une seule
+// implémentation pour les deux plannings (revue de 742fa7f).
+const classesWE = iso => classesWEDuJour(new Date(iso + 'T12:00:00').getDay())
 const photoBien = b => b.photo ? `<img src="${esc(b.photo)}" alt="" loading="lazy">` : icone('i-home')
 
 function fenetre () {
@@ -243,10 +241,20 @@ function nomOu (p, defaut) {
   if (!p) return t(defaut)
   return p.prenom || t('menages.quelquun')
 }
-// Infobulle : état · prénom · date, rien d'autre (décision du 13 octobre).
-function infobulle (bien, m) {
+// Infobulle : état · prénom · date (décision du 13 octobre).
+// ⚠ L'ÉTAT DIT DOIT S'ACCORDER AU PRÉNOM DIT. Les trois pastilles fusionnent
+// « proposé, en attente » et « personne » dans le même rouge ; l'infobulle,
+// elle, les distingue — sinon elle annonçait « Personne pour le faire ·
+// Marie », deux affirmations contradictoires (revue de 742fa7f).
+function infobulle (m) {
   const qui = m.porteur || (m.proposeesA || [])[0] || null
-  return `${t('menages.tt_' + etatPastille(m))} · ${nomOu(qui, 'menages.sans_presta')} · ${dateLongue(m.date)}`
+  const e = etatPastille(m)
+  const cle = (e === 'alerte' && (m.proposeesA || []).length) ? 'menages.tt_propose' : 'menages.tt_' + e
+  // Un retour de propreté ne vit pas QUE dans la couleur du badge
+  // (theme.css : « jamais la couleur seule »).
+  const retour = m.retour
+    ? ' · ' + t(m.retour.verdict === 'remarque' ? 'menages.retour_mauvais' : 'menages.retour_bon') : ''
+  return `${t(cle)} · ${nomOu(qui, 'menages.sans_presta')} · ${dateLongue(m.date)}${retour}`
 }
 
 // ─── Construction des lignes d'un bien ──────────────────────────────────────
@@ -305,8 +313,12 @@ function lignesDuBien (bien, g, menagesDuBien) {
 let fondsCache = ''
 function fondsJours () {
   if (!fondsCache) {
-    fondsCache = etat.jours.map((iso, i) =>
-      `<span class="men-jj${classesWE(iso)}${iso === AUJOURDHUI ? ' cal-auj' : ''}" style="grid-column: ${i + 1}"></span>`).join('')
+    // ⚠ UN CONTENEUR DÉDIÉ, comme `cal-resas__fond` du calendrier : dans la
+    // piste elle-même, les cellules sont suivies des barres et des pastilles,
+    // donc `:last-child` ne désignait jamais le dernier jour et le filet de
+    // droite doublait la bordure du cadre (revue de 742fa7f).
+    fondsCache = `<span class="men-fond">` + etat.jours.map(iso =>
+      `<span class="men-jj${classesWE(iso)}${iso === AUJOURDHUI ? ' cal-auj' : ''}"></span>`).join('') + `</span>`
   }
   return fondsCache
 }
@@ -335,12 +347,11 @@ function renderTout () {
     b.setAttribute('aria-pressed', String(Number(b.dataset.mois) === etat.mois)))
   fondsCache = ''
 
-  // L'ordre des biens suit la poignée (persisté) ; les inconnus en queue.
-  const rang = new Map(etat.ordre.map((id, i) => [id, i]))
+  // L'ordre des biens suit la poignée (persisté, biens masqués compris).
+  const rang = new Map(ordreComplet().map((id, i) => [id, i]))
   const visibles = etat.biens
     .filter(b => !etat.masques.includes(String(b.id)))
-    .sort((a, b) => (rang.has(String(a.id)) ? rang.get(String(a.id)) : 999) -
-                    (rang.has(String(b.id)) ? rang.get(String(b.id)) : 999))
+    .sort((a, b) => rang.get(String(a.id)) - rang.get(String(b.id)))
   if (!etat.biens.length) {
     planning.hidden = true
     tete.hidden = true
@@ -404,35 +415,26 @@ function renderTout () {
   renderBulles()
 }
 
-// Réordonner les biens à la poignée (ordinateur ; le report tactile est
-// PROPOSÉ à Thierry, règle « le mobile suit l'ordinateur »).
+// Réordonner les blocs : LE module partagé (shared/reordonner-biens.js) —
+// souris ET doigt, insertion correcte, poignée seule, payload filtré. La
+// page avait réécrit ce geste et en avait repayé les quatre défauts.
 function brancherPoignees (zone) {
-  const sections = [...zone.querySelectorAll('[data-bien-section]')]
-  for (const s of sections) {
-    const poigne = s.querySelector('[data-poigne]')
-    if (!poigne) continue
-    poigne.addEventListener('mousedown', () => { s.draggable = true })
-    s.addEventListener('dragstart', e => {
-      e.dataTransfer.setData('text/plain', s.dataset.bienSection)
-      s.classList.add('men-bloc--saisi')
-    })
-    s.addEventListener('dragend', () => { s.draggable = false; s.classList.remove('men-bloc--saisi') })
-    s.addEventListener('dragover', e => { e.preventDefault(); s.classList.add('men-bloc--cible') })
-    s.addEventListener('dragleave', () => s.classList.remove('men-bloc--cible'))
-    s.addEventListener('drop', e => {
-      e.preventDefault()
-      s.classList.remove('men-bloc--cible')
-      const saisi = e.dataTransfer.getData('text/plain')
-      const cible = s.dataset.bienSection
-      if (!saisi || saisi === cible) return
-      const ids = [...zone.querySelectorAll('[data-bien-section]')].map(x => x.dataset.bienSection)
-        .filter(x => x !== saisi)
-      ids.splice(ids.indexOf(cible), 0, saisi)
-      etat.ordre = ids
-      ecrirePrefs(); renderTout()
-    })
-  }
+  brancherReordonnancement(zone, {
+    // ⚠ L'ORDRE COMPLET, biens masqués compris : reconstruire depuis les
+    // seules sections visibles faisait revenir en DERNIER un bien masqué
+    // puis ré-affiché, dont la place avait été réglée à la main.
+    ordre: () => ordreComplet(),
+    onOrdre: (liste) => { etat.ordre = liste; ecrirePrefs(); renderTout() }
+  })
 }
+// L'ordre de référence : ce que les préférences disent, complété par les
+// biens que le serveur a rendus et que les préférences ne connaissent pas.
+function ordreComplet () {
+  const connus = etat.ordre.filter(id => etat.biens.some(b => String(b.id) === id))
+  const neufs = etat.biens.map(b => String(b.id)).filter(id => !connus.includes(id))
+  return [...connus, ...neufs]
+}
+
 
 function renderLignes (bien, g, menagesDuBien) {
   const lanes = lignesDuBien(bien, g, menagesDuBien)
@@ -461,9 +463,9 @@ function renderLignes (bien, g, menagesDuBien) {
       const m = ms.reduce((pire, x) => GRAVITE[etatPastille(x)] > GRAVITE[etatPastille(pire)] ? x : pire, ms[0])
       const e = etatPastille(m)
       const retour = (e === 'fait' && m.retour)
-        ? `<span class="men-mk__retour${m.retour.verdict === 'remarque' ? ' men-mk__retour--mauvais' : ''}">${icone(m.retour.verdict === 'remarque' ? 'i-thumb-down' : 'i-thumb-up')}</span>` : ''
+        ? `<span class="men-mk__retour${m.retour.verdict === 'remarque' ? ' men-mk__retour--mauvais' : ''}" title="${esc(t(m.retour.verdict === 'remarque' ? 'menages.retour_mauvais' : 'menages.retour_bon'))}">${icone(m.retour.verdict === 'remarque' ? 'i-thumb-down' : 'i-thumb-up')}</span>` : ''
       const n = ms.length > 1 ? `<span class="men-mk__n">${ms.length}</span>` : ''
-      const titres = ms.map(x => infobulle(bien, x)).join('\n—\n')
+      const titres = ms.map(infobulle).join('\n—\n')
       return `<span class="men-case" style="grid-column: ${i + 1}" title="${esc(titres)}">
         <span class="men-mk ${CLASSE_MK[e]}">${icone(ICONE_MK[e])}${retour}${n}</span>
       </span>`
@@ -537,7 +539,17 @@ function brancherAngle (zone) {
       liste.style.top = (r.bottom + 4) + 'px'
       liste.style.insetInlineStart = Math.max(8, r.left) + 'px'
     })
-    $('[data-bind="planning"]').addEventListener('scroll', () => { det.open = false }, { passive: true })
+    // ⚠ UNE SEULE FOIS : `[data-bind="planning"]` SURVIT aux rendus, et
+    // brancherAngle est rappelé à chaque renderTout — un écouteur par rendu
+    // s'empilait, chacun retenant un <details> détaché (revue de 742fa7f).
+    const planning = $('[data-bind="planning"]')
+    if (!planning.dataset.fermeAngle) {
+      planning.dataset.fermeAngle = '1'
+      planning.addEventListener('scroll', () => {
+        const ouvert = $('[data-bind="tete"]').querySelector('.cal-angle__menu[open]')
+        if (ouvert) ouvert.open = false
+      }, { passive: true })
+    }
   }
 }
 function renderBulles () {

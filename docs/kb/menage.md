@@ -3642,4 +3642,15 @@ une case vide (l'endpoint SERT toujours `absences[]`, l'écran ne la dessine
 plus — décision de Thierry) ; « Personne » rouge = les seuls jours de trou
 de garde (le gris du §12.6 est retiré) ; désactivée = prénom grisé, ligne
 vide. Bouton de période actif NOIR sur toutes les pages (le calendrier est
-aligné). Réordonner les biens : poignée à la souris, report tactile proposé.
+aligné).
+
+**Deux composants PARTAGÉS** (recette : « reprendre, pas imiter ») :
+`shared/bande-jours.js` (bande mois + jours, règle des week-ends) et
+`shared/reordonner-biens.js` (poignée, souris et doigt). La page Ménages
+avait réécrit le second à la main et en avait repayé les quatre défauts que
+le calendrier avait déjà corrigés en review (insertion toujours avant la
+cible, `draggable` jamais désarmé, `dragstart` non gardé, payload non
+filtré) — d'où l'extraction. `api/garde.js` ne calcule plus `absences[]` :
+plus aucun écran ne les lit depuis que l'absence est une case vide ; le jour
+où un écran en aura besoin, elles viendront de `planningDeGarde`, qui
+connaît déjà la disponibilité.

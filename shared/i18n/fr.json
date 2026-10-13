@@ -386,5 +386,8 @@
   "menages.m6": "6 m",
   "menages.m12": "12 m",
   "menages.tt_afaire": "À faire",
-  "menages.tt_alerte": "Personne pour le faire"
+  "menages.tt_alerte": "Personne pour le faire",
+  "menages.tt_propose": "Proposé, en attente de réponse",
+  "menages.retour_bon": "bon retour du voyageur",
+  "menages.retour_mauvais": "mauvais retour du voyageur"
 }

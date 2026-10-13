@@ -129,6 +129,7 @@ import { ACTIONS_BARRE, RUBRIQUES_POPUP, CHAMPS_FICHE, etatDeNuit, prixIntl, dat
   from '/shared/calendrier-contrat.js'
 import { detecterOrphelines } from '/shared/nuits-orphelines.js'
 import { bandeJoursHtml } from '/shared/bande-jours.js'
+import { brancherReordonnancement, deplacer } from '/shared/reordonner-biens.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -450,77 +451,20 @@ function brancherBulles (zone) {
 // ─── L'ORDRE des biens : la liste etat.choisis, persistee et COMMUNE aux
 //     deux ecrans. On attrape un bloc par la POIGNEE de son bandeau ; au
 //     doigt, la section sous le doigt devient la cible.
+// Réordonner les blocs : LE module partagé (shared/reordonner-biens.js),
+// souris et doigt — la page Ménages branche exactement le même geste.
+function brancherDrag (zone) {
+  brancherReordonnancement(zone, {
+    ordre: () => etat.choisis,
+    onOrdre: (liste) => { etat.choisis = liste; etat.choisisDefinis = true; ecrirePrefs(); renderTout() }
+  })
+}
 function deplacerBien (id, cibleId) {
-  // Un payload etranger (drop venu d'ailleurs) ne doit JAMAIS entrer dans
-  // la liste persistee ; et glisser sur son voisin du dessous doit marcher :
-  // si la source PRECEDAIT la cible, on insere APRES elle (sinon, avec deux
-  // biens, descendre le premier etait un no-op — revue de 4929bcd).
-  if (!id || id === cibleId || !etat.choisis.includes(id) || !etat.choisis.includes(cibleId)) return
-  const descendait = etat.choisis.indexOf(id) < etat.choisis.indexOf(cibleId)
-  const liste = etat.choisis.filter(x => x !== id)
-  const i = liste.indexOf(cibleId)
-  liste.splice(descendait ? i + 1 : i, 0, id)
+  const liste = deplacer(etat.choisis, id, cibleId)
+  if (!liste) return
   etat.choisis = liste
   etat.choisisDefinis = true
   ecrirePrefs(); renderTout()
-}
-function brancherDrag (zone) {
-  const sections = [...zone.querySelectorAll('[data-bien-section]')]
-  sections.forEach(section => {
-    const poigne = section.querySelector('[data-poigne]')
-    if (!poigne) return
-    // Le drag ne s'ARME que par la poignee, et se desarme au mouseup meme
-    // sans drag (sinon la section restait draggable et un glisser anodin —
-    // photo native, texte selectionne, case passee — reordonnait les biens).
-    poigne.addEventListener('mousedown', () => {
-      section.setAttribute('draggable', 'true')
-      section.dataset.armePoigne = '1'
-      document.addEventListener('mouseup', () => {
-        section.removeAttribute('draggable'); delete section.dataset.armePoigne
-      }, { once: true })
-    })
-    section.addEventListener('dragstart', (e) => {
-      if (!section.dataset.armePoigne) { e.preventDefault(); return }
-      e.dataTransfer.setData('text/plain', section.dataset.bienSection)
-      e.dataTransfer.effectAllowed = 'move'
-      section.classList.add('cal-bien--saisi')
-    })
-    section.addEventListener('dragend', () => { section.removeAttribute('draggable'); delete section.dataset.armePoigne; section.classList.remove('cal-bien--saisi') })
-    section.addEventListener('dragover', (e) => { e.preventDefault(); section.classList.add('cal-bien--cible') })
-    section.addEventListener('dragleave', (e) => {
-      // Les frontieres des enfants emettent dragleave : on n'eteint que
-      // quand on QUITTE vraiment la section (sinon le surlignage clignote).
-      if (!section.contains(e.relatedTarget)) section.classList.remove('cal-bien--cible')
-    })
-    section.addEventListener('drop', (e) => {
-      e.preventDefault()
-      section.classList.remove('cal-bien--cible')
-      deplacerBien(e.dataTransfer.getData('text/plain'), section.dataset.bienSection)
-    })
-    // Tactile : glisser la poignee, la section sous le doigt est la cible ;
-    // pres des bords, la page DEFILE (sinon une cible hors ecran est
-    // inatteignable) ; touchcancel nettoie SANS deplacer.
-    let cible = null
-    poigne.addEventListener('touchmove', (e) => {
-      e.preventDefault()
-      const tp = e.touches[0]
-      if (tp.clientY < 90) window.scrollBy(0, -16)
-      else if (tp.clientY > window.innerHeight - 90) window.scrollBy(0, 16)
-      const el = document.elementFromPoint(tp.clientX, tp.clientY)
-      const s = el && el.closest('[data-bien-section]')
-      sections.forEach(x => x.classList.toggle('cal-bien--cible', x === s && s !== section))
-      cible = s && s !== section ? s.dataset.bienSection : null
-    }, { passive: false })
-    poigne.addEventListener('touchend', () => {
-      sections.forEach(x => x.classList.remove('cal-bien--cible'))
-      if (cible) deplacerBien(section.dataset.bienSection, cible)
-      cible = null
-    })
-    poigne.addEventListener('touchcancel', () => {
-      sections.forEach(x => x.classList.remove('cal-bien--cible'))
-      cible = null
-    })
-  })
 }
 function renderBulles () {
   const zone = $('[data-bind="bulles"]')

@@ -275,6 +275,6 @@ composants (décisions de Thierry) :
 - cohérence inter-pages : le bouton de période ACTIF est NOIR (--ink)
   partout — le Calendrier est aligné ; le bleu --info reste au marqueur
   d'aujourd'hui ;
-- report mobile : le réordonnancement à la poignée est souris seulement à
-  cette étape — le report tactile est PROPOSÉ à Thierry (règle « le mobile
-  suit l'ordinateur »).
+- réordonnancement des biens : module partagé `shared/reordonner-biens.js`
+  (extrait du calendrier), souris ET doigt sur les deux pages — la règle
+  « le mobile suit l'ordinateur » est donc tenue sans report.
