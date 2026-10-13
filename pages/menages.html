@@ -687,7 +687,7 @@ function renderEquipe () {
         ? `<span class="men-regler" data-i18n-attr="title:menages.a_regler">${icone('i-settings')}</span>` : ''
       // ⚠ L'aria-label COMPLÈTE le nom, il ne le remplace pas : « Configurer »
       // seul rendait huit lignes indistinguables au lecteur d'écran.
-      return `<a class="men-eq${p.actif ? '' : ' men-eq--off'}" href="/apps/menages/prestataires"
+      return `<a class="men-eq${p.actif ? '' : ' men-eq--off'}" href="/apps/menages/prestataires?presta=${encodeURIComponent(p.id)}"
          aria-label="${esc(t('menages.equipe.configurer') + ' — ' + nom)}">
         <span class="men-eq__id">
           <span class="men-eq__nom">${esc(nom)}${manque}</span>
@@ -703,7 +703,7 @@ function renderEquipe () {
   // « Ajouter » : création réservée au TITULAIRE (décision D6), donc absent du
   // DOM pour un délégué — griser promettrait un geste qu'on refuserait.
   pied.innerHTML = estTitulaire()
-    ? `<a class="btn btn--outline btn--block btn--lg" href="/apps/menages/prestataires">
+    ? `<a class="btn btn--outline btn--block btn--lg" href="/apps/menages/prestataires?nouveau=1">
          ${icone('i-plus')}<span data-i18n="menages.equipe.ajouter"></span></a>`
     : ''
   I18n.apply($('[data-bind="volet"]'))

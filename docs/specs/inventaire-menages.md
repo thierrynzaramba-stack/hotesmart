@@ -1013,3 +1013,13 @@ sur une ligne ouvre l'écran de configuration existant.
   pour un délégué, jamais grisé.
 - Tests : `tests/menages-equipe.test.js` (11) — droits, périmètre, désactivées,
   biens, « jours à régler », période de comptage, pannes.
+
+**Ouverture directe depuis le volet (13 octobre 2026).** Un clic sur une
+ligne ouvre `/apps/menages/prestataires?presta=<id>` : la fiche de cette
+personne, **en modification**. « Ajouter » ouvre `?nouveau=1` : le formulaire
+vierge. Depuis le volet, l'hôte a déjà choisi QUI il veut régler — le faire
+retomber sur la liste lui demanderait de rechoisir ce qu'il vient de
+désigner. ⚠ L'identifiant d'URL ne désigne rien par lui-même : l'écran
+n'ouvre que ce que sa liste DÉJÀ CHARGÉE contient (donc déjà filtrée par le
+compte et les droits) ; un identifiant étranger ne fait rien, sans erreur
+bruyante.

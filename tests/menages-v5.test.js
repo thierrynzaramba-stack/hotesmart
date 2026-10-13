@@ -95,6 +95,8 @@ test('décisions §13 : chaque règle de l\'étape 1 est présente, manquantes n
     'changer la prestataire depuis la bulle': 'ouvrirChangement',
     '« Annuler » rejoue l\'inverse RÉEL (defaire), pas un simple retrait visuel': "action: 'defaire'",
     'volet « Équipe ménage » : il LIT, la configuration reste l\'écran existant': 'ouvrirEquipe',
+    'un clic ouvre SA fiche en modification, pas la liste': 'prestataires?presta=',
+    '« Ajouter » ouvre le formulaire vierge': 'prestataires?nouveau=1',
     'le COMPTE de retours, jamais une moyenne étoilée (décision H.6)': 'retoursHtml',
     'une désactivée reste listée, grisée': 'men-eq--off',
     '« Ajouter » réservé au titulaire, absent du DOM sinon (D6)': 'estTitulaire()',
