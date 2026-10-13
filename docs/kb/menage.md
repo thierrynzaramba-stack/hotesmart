@@ -3675,3 +3675,25 @@ dépassée n'alertait pas tant que le départ était lointain (vécu « erreur
 avalée, cron à 200 ») ; et un bien NON CONFIÉ produisait une ligne par
 départ, en permanence — le bruit que la décision du 3 septembre 2026 écarte.
 La règle lit donc `status` et `gere`, pas seulement `differe`.
+
+### Rattrapage de `menage_done` pour Tiphaine et Lena (13 octobre 2026)
+
+Demande de Thierry, pendant la recette de l'étape 2 : leurs ménages passés
+étaient faits mais jamais marqués (elles n'utilisaient pas encore la PWA) —
+ils remontaient donc en « non terminé » dans la bulle « À traiter ».
+
+**14 lignes écrites en production** (15 ménages passés, 1 déjà marqué) :
+Ofuro Futari, du 18 septembre au 11 octobre 2026, Tiphaine 6, Lena 8. Écrites
+par upsert idempotent sur la clé de la PWA
+(`user_id, property_id, booking_id, departure_date`), avec
+`done_at` = le JOUR du ménage (pas l'instant du rattrapage) et
+`done_by_token = NULL` — c'est cette absence de jeton qui distingue le
+rattrapage d'un marquage par la prestataire, si la question se pose plus tard.
+
+`property_status.last_menage_at` n'a PAS été touché : ces ménages sont passés,
+et le cron recalcule cette valeur.
+
+**À partir de maintenant, elles marquent elles-mêmes depuis la PWA** : ce
+geste ne se répète pas. Il contourne sciemment le writer unique
+(`api/menages-public.js`), ce qui est acceptable pour un rattrapage
+d'historique daté, pas comme habitude.
