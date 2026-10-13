@@ -400,5 +400,7 @@
   "menages.leg_avenir": "Coming",
   "menages.leg_personne": "Nobody",
   "menages.leg_off": "Deactivated",
-  "menages.leg_regler": "Days to set"
+  "menages.leg_regler": "Days to set",
+  "menages.p14": "14 d",
+  "menages.p30": "30 d"
 }

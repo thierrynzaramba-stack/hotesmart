@@ -622,10 +622,17 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-avis { padding: 12px 16px; margin-bottom: 12px; color: var(--warn); }
 .men-vide { padding: 30px 0; }
 
-.men-cal { --men-col: 190px; min-width: 0; }
-.men-jours { display: grid; grid-template-columns: var(--men-col) repeat(14, minmax(var(--men-case, 0px), 1fr)); }
-.men-jour { text-align: center; font-size: 11px; color: var(--muted); line-height: 1.2; padding: 6px 0 8px; }
-.men-jour b { display: block; font-size: var(--fs-small); color: var(--ink); font-weight: var(--fw-semibold); }
+.men-cal { --men-col: 190px; --nb: 14; min-width: 0; }
+.men-cal--30 { --nb: 30; }
+.men-jours { display: grid; grid-template-columns: var(--men-col) repeat(var(--nb), minmax(var(--men-case, 0px), 1fr)); }
+.men-jour { text-align: center; font-size: 12px; color: var(--ink); font-weight: var(--fw-semibold); text-transform: capitalize; line-height: 1.25; padding: 7px 0 8px; }
+.men-jour b { display: block; font-size: 15px; color: var(--ink); font-weight: var(--fw-bold); }
+.men-cal--30 .men-jour { font-size: 10px; }
+.men-cal--30 .men-jour b { font-size: 13px; }
+.men-cal--30 .men-jour--auj b { width: 22px; height: 22px; line-height: 22px; }
+/* L'en-tete des dates reste visible au defilement vertical, et suit le
+   defilement horizontal du calendrier (synchronise en JS). */
+.men-tete { position: sticky; top: 0; z-index: 20; background: var(--surface); overflow: hidden; box-shadow: 0 1px 0 var(--line); }
 .men-jour--we { background: var(--surface-2); border-radius: 8px 8px 0 0; }
 .men-jour--auj b { background: var(--ink); color: var(--on-ink); border-radius: var(--radius-pill); width: 26px; height: 26px; line-height: 26px; margin: 0 auto; }
 
@@ -647,14 +654,20 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .men-regler { color: var(--muted); display: inline-flex; flex: none; }
 .men-regler .icon { width: 14px; height: 14px; }
 
-.men-lane { position: relative; display: grid; grid-template-columns: repeat(14, minmax(var(--men-case, 0px), 1fr)); align-items: center; min-height: 44px;
+.men-lane { position: relative; display: grid; grid-template-columns: repeat(var(--nb), minmax(var(--men-case, 0px), 1fr)); align-items: center; min-height: 44px;
   /* Traits verticaux entre les jours (demande de Thierry, recette étape 1) :
      un filet par frontière de colonne, DERRIÈRE les barres et pastilles. */
-  background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(100% / 14 - 1px), var(--line) calc(100% / 14 - 1px), var(--line) calc(100% / 14)); }
+  background-image: repeating-linear-gradient(to right, transparent 0, transparent calc(100% / var(--nb) - 1px), var(--line) calc(100% / var(--nb) - 1px), var(--line) calc(100% / var(--nb))); }
 .men-lane > * { grid-row: 1; }
 /* Colonne de week-end : toute la hauteur, derrière barres et pastilles ; le
    filet de droite est redessiné car le fond recouvre celui du gradient. */
 .men-we { align-self: stretch; height: 100%; background: var(--surface-2); border-inline-end: 1px solid var(--line); }
+/* La colonne d'AUJOURD'HUI : deux rails verticaux discrets, sur toute la
+   hauteur — la lecture verticale demandee en recette. */
+.men-we--auj { background: none; border-inline: 1.5px solid color-mix(in srgb, var(--ink) 30%, transparent); }
+.men-periode { display: inline-flex; gap: 6px; }
+.men-periode .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); }
+.men-periode .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
 .men-barre { height: 30px; margin: 0 2px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
 .men-barre--off { background: repeating-linear-gradient(135deg, var(--surface-2) 0 5px, var(--surface) 5px 10px); border: 1px dashed var(--border); }
 .men-trou { height: 30px; margin: 0 2px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--danger); border: 1.5px dashed var(--danger); background: repeating-linear-gradient(135deg, var(--danger-soft) 0 5px, var(--surface) 5px 10px); overflow: hidden; white-space: nowrap; }
@@ -689,6 +702,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   /* Le calendrier seul défile horizontalement : 7 jours visibles, la suite au
      doigt. Identités (bien, prénom) collantes au bord de départ. */
   .men-scroll { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+  .men-tete { margin: 0 -16px; padding: 0 16px; }
   .men-cal { --men-col: 0px; --men-case: calc((100vw - 32px - 44px) / 7); min-width: max-content; }
   .men-jours { grid-template-columns: repeat(14, var(--men-case)); }
   .men-jours__coin { display: none; }

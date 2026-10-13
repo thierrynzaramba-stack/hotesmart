@@ -57,11 +57,20 @@
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
     </button>
     <button type="button" class="btn btn--secondary" data-nav="0" data-i18n="menages.today"></button>
+    <div class="men-periode" role="group" data-i18n-attr="aria-label:menages.period_pick">
+      <button type="button" class="tab" data-jours="14" data-i18n="menages.p14"></button>
+      <button type="button" class="tab" data-jours="30" data-i18n="menages.p30"></button>
+    </div>
   </div>
 
   <p class="card men-avis" data-bind="avis-tronque" hidden data-i18n="menages.truncated"></p>
   <div class="men-vide" data-bind="etat-vide" hidden></div>
 
+  <!-- L'en-tête des dates vit HORS du défilement vertical (sticky) et se
+       synchronise avec le défilement horizontal du calendrier (recette). -->
+  <div class="men-tete" data-bind="tete" hidden>
+    <div class="men-cal" data-bind="cal-tete"></div>
+  </div>
   <div class="men-scroll" data-bind="planning" hidden>
     <div class="men-cal" data-bind="cal"></div>
   </div>
@@ -92,7 +101,7 @@ const t = (k, v) => I18n.t(k, v)
 const $ = (s) => document.querySelector(s)
 const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
 const AUJOURDHUI = toISO(new Date())
-const JOURS_FENETRE = 14
+const FENETRES = [14, 30]
 const langue = () => (window.I18n && I18n.lang) || document.documentElement.lang || 'fr'
 
 const etat = {
@@ -100,7 +109,8 @@ const etat = {
   garde: [],            // [{propertyId, gere, jours: [{date, responsable, remplacante, trou}]}]
   menages: [],          // [{propertyId, bookingId, date, status, fait, porteur, proposeesA, expireLe, raison, retour, differe}]
   avecNoms: false, avecAvis: false, tronque: false,
-  jours: [],            // les 14 iso de la fenêtre
+  jours: [],            // les iso de la fenêtre
+  nbJours: 14,          // 14 ou 30 (persisté)
   decalage: 0,          // en jours, NON persisté (même règle que le calendrier)
   masques: []           // refs des biens masqués (persisté PAR COMPTE)
 }
@@ -112,10 +122,11 @@ function lirePrefs () {
   try {
     const p = JSON.parse(localStorage.getItem(prefsCle()) || '{}')
     if (Array.isArray(p.masques)) etat.masques = p.masques.map(String)
+    if (FENETRES.includes(p.nbJours)) etat.nbJours = p.nbJours
   } catch {}
 }
 function ecrirePrefs () {
-  try { localStorage.setItem(prefsCle(), JSON.stringify({ masques: etat.masques })) } catch {}
+  try { localStorage.setItem(prefsCle(), JSON.stringify({ masques: etat.masques, nbJours: etat.nbJours })) } catch {}
 }
 
 // ─── Dates (Intl, jamais de formatage à la main) ────────────────────────────
@@ -133,7 +144,7 @@ function fenetre () {
   const base = new Date(AUJOURDHUI + 'T12:00:00Z')
   base.setUTCDate(base.getUTCDate() + etat.decalage)
   const jours = []
-  for (let i = 0; i < JOURS_FENETRE; i++) {
+  for (let i = 0; i < etat.nbJours; i++) {
     const d = new Date(base); d.setUTCDate(d.getUTCDate() + i)
     jours.push(d.toISOString().slice(0, 10))
   }
@@ -264,12 +275,14 @@ function lignesDuBien (bien, g, menagesDuBien) {
   })
 }
 
-// Fond des colonnes de week-end, peint en PREMIER dans chaque ligne (donc
-// derrière barres et pastilles) — la même structure que l'en-tête, sur toute
-// la hauteur (demande de Thierry, recette étape 1).
+// Fond des colonnes, peint en PREMIER dans chaque ligne (donc derrière barres
+// et pastilles) : week-ends teintés + marque verticale d'AUJOURD'HUI — la
+// même structure que l'en-tête, sur toute la hauteur (recette étape 1).
 function fondsWE () {
-  return etat.jours.map((iso, i) => estWE(iso)
-    ? `<span class="men-we" style="grid-column: ${i + 1}"></span>` : '').join('')
+  return etat.jours.map((iso, i) => {
+    if (iso === AUJOURDHUI) return `<span class="men-we men-we--auj" style="grid-column: ${i + 1}"></span>`
+    return estWE(iso) ? `<span class="men-we" style="grid-column: ${i + 1}"></span>` : ''
+  }).join('')
 }
 
 // Les suites de jours consécutifs d'un ensemble, en indices de la fenêtre.
@@ -287,14 +300,21 @@ function suites (joursSet) {
 // ─── Rendu ──────────────────────────────────────────────────────────────────
 function renderTout () {
   const cal = $('[data-bind="cal"]')
+  const calTete = $('[data-bind="cal-tete"]')
+  const tete = $('[data-bind="tete"]')
   const planning = $('[data-bind="planning"]')
   const vide = $('[data-bind="etat-vide"]')
   $('[data-bind="avis-tronque"]').hidden = !etat.tronque
   $('[data-bind="periode"]').textContent = `${dateCourt(etat.jours[0])} → ${dateCourt(etat.jours[etat.jours.length - 1])}`
+  document.querySelectorAll('[data-jours]').forEach(b =>
+    b.setAttribute('aria-pressed', String(Number(b.dataset.jours) === etat.nbJours)))
+  // 14 ou 30 colonnes : la grille entière suit (--nb pilote les deux conteneurs).
+  for (const el of [cal, calTete]) el.classList.toggle('men-cal--30', etat.nbJours === 30)
 
   const visibles = etat.biens.filter(b => !etat.masques.includes(String(b.id)))
   if (!etat.biens.length) {
     planning.hidden = true
+    tete.hidden = true
     vide.hidden = false
     vide.innerHTML = `<p class="muted">${esc(t('menages.empty'))}</p>`
     renderBulles(); renderLegende(false)
@@ -302,8 +322,9 @@ function renderTout () {
   }
   vide.hidden = true
   planning.hidden = false
+  tete.hidden = false
 
-  const entetes = `<div class="men-jours">
+  calTete.innerHTML = `<div class="men-jours">
     <span class="men-jours__coin"></span>
     ${etat.jours.map(iso => `<span class="men-jour${estWE(iso) ? ' men-jour--we' : ''}${iso === AUJOURDHUI ? ' men-jour--auj' : ''}">${esc(jourAbrege(iso))}<b>${new Date(iso + 'T12:00:00Z').getUTCDate()}</b></span>`).join('')}
   </div>`
@@ -336,7 +357,7 @@ function renderTout () {
     return tete + renderLignes(bien, g, menagesDuBien) + renderTrous(bien, g, menagesDuBien)
   }).join('')
 
-  cal.innerHTML = entetes + blocs
+  cal.innerHTML = blocs
   I18n.apply(cal)
   cal.querySelectorAll('[data-masquer]').forEach(b => b.addEventListener('click', () => {
     etat.masques = [...new Set([...etat.masques, String(b.dataset.masquer)])]
@@ -479,9 +500,20 @@ async function init () {
   lirePrefs()
   document.querySelectorAll('[data-nav]').forEach(b => b.addEventListener('click', () => {
     const sens = Number(b.dataset.nav)
-    etat.decalage = sens === 0 ? 0 : etat.decalage + sens * JOURS_FENETRE
+    etat.decalage = sens === 0 ? 0 : etat.decalage + sens * etat.nbJours
     charger()
   }))
+  document.querySelectorAll('[data-jours]').forEach(b => b.addEventListener('click', () => {
+    const n = Number(b.dataset.jours)
+    if (!FENETRES.includes(n) || n === etat.nbJours) return
+    etat.nbJours = n
+    ecrirePrefs(); charger()
+  }))
+  // L'en-tête collant suit le défilement horizontal du calendrier (téléphone).
+  const scrollEl = $('[data-bind="planning"]')
+  scrollEl.addEventListener('scroll', () => {
+    $('[data-bind="tete"]').scrollLeft = scrollEl.scrollLeft
+  }, { passive: true })
   // Clic sur la période → sélecteur de mois natif (remplace le mini-calendrier
   // de l'ancienne page) ; la fenêtre saute au 1er du mois choisi.
   const choixMois = $('[data-bind="mois-choix"]')
