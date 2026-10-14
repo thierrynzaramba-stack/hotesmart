@@ -543,6 +543,7 @@
   "menages.equipe.config.apercu_horizon": "{n} prochains jours",
   "menages.equipe.config.apercu_propose": "proposé",
   "menages.equipe.config.apercu_vide": "Aucun ménage à venir dans sa page.",
+  "menages.equipe.config.apercu_borne": "Aperçu limité aux {n} jours chargés dans votre planning.",
   "menages.equipe.vide": "Personne dans l'équipe pour l'instant.",
   "menages.equipe.panne": "Équipe non lisible pour l'instant.",
   "menages.equipe.nom_manquant": "[Nom]",

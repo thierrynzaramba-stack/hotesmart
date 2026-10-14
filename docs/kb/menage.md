@@ -3940,3 +3940,46 @@ Un **rang 3** existant se **lit** même si l'écran n'en propose que deux
 **hors du périmètre** de l'appelant est ignoré, jamais rendu sans nom — et
 jamais compté en défaut : alerter un délégué sur un bien qu'il ne peut même pas
 ouvrir ne lui laisse aucun geste.
+
+
+## Les constats de la revue de ac28b1f (14 octobre 2026)
+
+Six défauts, **aucun de sécurité**. Les trois premiers valent d'être retenus.
+
+**1. La synchro de `public_tokens.property_ids` ignorait le périmètre du
+délégué.** La désactivation des liaisons, elle, est bornée : un délégué limité
+au bien A laisse B et C **actifs**. En écrivant `property_ids` depuis la liste
+REÇUE de l'écran, on l'amputait à `['A']` — et la page de la prestataire
+cessait de servir B et C : **ses ménages y disparaissaient et ses « fait »
+étaient refusés**, pendant que le moteur continuait de les lui attribuer.
+C'était le dommage même que la borne de périmètre existe pour empêcher,
+réintroduit par l'autre représentation de « ses biens ». **La source est
+désormais l'état APRÈS écriture** (`apres`, lu sans borne) : les liaisons
+réellement actives de cette personne, tous périmètres confondus.
+*Leçon générale : quand une décision a deux représentations, une garde posée
+sur l'une ne protège pas l'autre.*
+
+**2. Un périmètre vide tronquait la réponse** (`personne: null`, sans `droits`
+ni `lien`) : les trois onglets levaient un TypeError **hors** du try/catch du
+chargement, et la fenêtre restait figée sur « Chargement… », sans message et
+sans fermeture. Et le cas n'est pas rare : `refsDuPerimetre` rend `[]` pour
+**tout état dégradé de délégation** — invitation non acceptée, profil
+désactivé, comptes discordants — pas seulement pour un périmètre à zéro bien.
+On ne lit rien de plus (aucune requête n'est même construite), **on répond
+complètement**.
+
+**3. `pwa_vue_le` était groupé** avec `visibility_days` et `ratio_periode` dans
+la fiche — alors que le volet Équipe sépare les deux exprès. Tant que la
+migration n'est pas appliquée, le select entier échoue : « Jours visibles »
+devient illisible et « Période du ratio » **disparaît**. Deux réglages
+existants perdus par une colonne neuve. *Une règle qu'on pose à un endroit se
+vérifie à tous les autres : le commentaire du vérificateur de migration
+affirmait la séparation, le code de ce chemin ne la faisait pas.*
+
+Les trois autres : l'aperçu de sa page promettait l'horizon réel (jusqu'à
+90 jours) en ne lisant que la fenêtre de planning de l'hôte (30 par défaut) —
+il annonce maintenant ce qu'il couvre ; `mois=2026-13` passait la validation et
+rendait un calendrier **vide**, lu comme « elle n'a aucun jour » ; et le refus
+« c'est son dernier logement » comptait des liaisons bornées au périmètre, donc
+empêchait un délégué de retirer son seul bien visible — il ne vaut plus que
+pour qui voit l'ensemble (`droits.perimetre_complet`).

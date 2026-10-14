@@ -543,6 +543,7 @@
   "menages.equipe.config.apercu_horizon": "próximos {n} días",
   "menages.equipe.config.apercu_propose": "propuesto",
   "menages.equipe.config.apercu_vide": "Ninguna limpieza próxima en su página.",
+  "menages.equipe.config.apercu_borne": "Vista previa limitada a los {n} días cargados en su planning.",
   "menages.equipe.vide": "Nadie en el equipo por ahora.",
   "menages.equipe.panne": "El equipo no está disponible ahora.",
   "menages.equipe.nom_manquant": "[Apellido]",

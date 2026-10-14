@@ -1458,6 +1458,16 @@ function renderCorpsConfig () {
     zone.innerHTML = `<p class="caption muted" style="padding: 16px">${esc(t('common.loading'))}</p>`
     return
   }
+  // ⚠ UNE FICHE SANS PERSONNE NE SE PEINT PAS, ELLE SE DIT. Les trois onglets
+  // lisent `personne.…` dans leurs gabarits : un `null` y lève un TypeError
+  // HORS du try/catch du chargement, et la fenêtre reste figée sur
+  // « Chargement… », sans message et sans fermeture (constat de la revue de
+  // ac28b1f). Le serveur répond désormais complètement — cette garde est la
+  // seconde ligne, pour tout ce qu'on n'a pas prévu.
+  if (!cfg.fiche.personne) {
+    zone.innerHTML = `<p class="caption muted" style="padding: 16px">${esc(t('menages.equipe.panne'))}</p>`
+    return
+  }
   zone.classList.toggle('is-occupe', cfg.occupe)
   zone.innerHTML = cfg.onglet === 'cal' ? htmlOngletCal()
                  : cfg.onglet === 'param' ? htmlOngletParam()
@@ -1962,9 +1972,15 @@ function htmlOngletVoit () {
   const p = f.personne
   const peut = (f.droits || {}).equipe === 'write'
   const horizon = f.lien ? f.lien.visibility_days : null
-  // Ses ménages à venir, tels que le planning de l'hôte les connaît.
-  const siens = (etat.aTraiter === null ? [] : (etat.menages || []))
-  const lignes = apercuMenages(p.id, horizon)
+  // ⚠ L'APERÇU NE PROMET QUE CE QU'IL COUVRE (constat de la revue de ac28b1f).
+  // Il est peint avec le planning DÉJÀ CHARGÉ par l'hôte — 30 jours par
+  // défaut. Annoncer « les 90 prochains jours » sur une fenêtre d'un mois
+  // faisait lire « elle ne voit presque rien » sur un réglage parfaitement
+  // large. On annonce donc ce qu'on montre, et on dit quand c'est plus court
+  // que son horizon réel.
+  const charges = (etat.jours || []).length || 30
+  const couvert = horizon ? Math.min(horizon, charges) : charges
+  const lignes = apercuMenages(p.id, couvert)
   const corps = lignes.length
     ? lignes.map(m => `<li class="men-cfg__apercu">
         <span class="cal-photo men-cfg__apercuPhoto">${photoBien(m.bien || {})}</span>
@@ -1985,6 +2001,8 @@ function htmlOngletVoit () {
           : t('menages.equipe.config.lien_illisible'))}</span>
       </div>
       <ul class="men-cfg__telListe">${corps}</ul>
+      ${horizon && couvert < horizon
+        ? `<p class="caption muted">${esc(t('menages.equipe.config.apercu_borne', { n: couvert }))}</p>` : ''}
     </div>
     <div class="men-cfg__voitTxt">
       <h3 class="men-cfg__h3" data-i18n="menages.equipe.config.sa_page"></h3>
@@ -2096,8 +2114,15 @@ function brancherConfig () {
       // un périmètre vide ne retire pas l'accès, il l'OUVRE à tous les biens du
       // compte (convention `property_ids`). Pour retirer quelqu'un, il y a
       // « Retirer de l'équipe », qui supprime la ligne entière.
+      // ⚠ CE REFUS COMPTE DES LIAISONS BORNÉES AU PÉRIMÈTRE DE L'APPELANT
+      // (constat de la revue de ac28b1f) : un délégué limité au bien A se
+      // voyait refuser le retrait de A sur une prestataire qui sert aussi B et
+      // C. Il n'a de sens que pour qui voit l'ENSEMBLE — et c'est aussi le
+      // seul cas où le périmètre deviendrait vraiment vide.
       const actifsApres = (cfg.fiche.liaisons || []).filter(x => x.active).length - (actifAvant ? 1 : 0)
-      if (actifAvant && actifsApres === 0) { toast(t('menages.equipe.config.dernier_bien')); return }
+      if (actifAvant && actifsApres === 0 && (cfg.fiche.droits || {}).perimetre_complet) {
+        toast(t('menages.equipe.config.dernier_bien')); return
+      }
       envoyerLiaisons(b => (String(b.property_id) === String(id) ? { ...b, active: !actifAvant } : b))
       return
     }

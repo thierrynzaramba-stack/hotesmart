@@ -586,3 +586,16 @@ test('la RRULE ne sort toujours pas, pas même par le calendrier', async () => {
   await handler(get({ mois: '2026-11' }), res)
   assert.ok(!JSON.stringify(res.body).includes('FREQ='))
 })
+
+test('un mois HORS PLAGE ne fabrique pas un calendrier vide', async () => {
+  // ⚠ CONSTAT DE LA REVUE DE ac28b1f. `2026-13` passait le motif `\d{4}-\d{2}`,
+  // produisait une date invalide, et la boucle ne tournait pas : 200 avec
+  // `jours: []`, que l'écran lit comme « elle n'a aucun jour ».
+  const { handler } = preparer({})
+  for (const mois of ['2026-13', '2026-00', '2026-99']) {
+    const res = reponse()
+    await handler(get({ mois }), res)
+    assert.strictEqual(res.body.mois, new Date().toISOString().slice(0, 7), mois)
+    assert.ok(res.body.jours.length >= 59, `${mois} : un vrai calendrier, pas une liste vide`)
+  }
+})

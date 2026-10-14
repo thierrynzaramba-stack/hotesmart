@@ -104,7 +104,12 @@ module.exports = async function handler (req, res) {
   if (lecture) {
     // ⚠ LE MOIS EST VALIDE ICI, et il est le SEUL parametre de fenetre : un
     // `mois=` libre ferait calculer des annees de calendrier pour rien.
-    const m = /^\d{4}-\d{2}$/.test(String(req.query.mois || '')) ? String(req.query.mois) : null
+    // ⚠ LE MOIS EST BORNE A 01-12 (constat de la revue de ac28b1f) : `2026-13`
+    // passait le motif, produisait une date invalide, et la boucle du
+    // calendrier ne tournait pas — 200 avec `jours: []`, que l'ecran lisait
+    // comme « elle n'a aucun jour ». Un mois illisible retombe sur le mois
+    // courant, comme avant, mais il ne fabrique plus un calendrier vide.
+    const m = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.mois || '')) ? String(req.query.mois) : null
     return await lire(res, userId, providerId, m)
   }
   return await ecrire(req, res, userId, providerId, appelant)

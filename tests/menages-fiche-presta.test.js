@@ -227,7 +227,14 @@ test('le PÉRIMÈTRE de l\'appelant borne les biens ET les liaisons', async () =
   assert.deepStrictEqual(qLiens.f.in_property_id, [BIEN], 'les liaisons aussi')
 })
 
-test('un périmètre VIDE ne montre rien, et ne lit rien', async () => {
+test('un périmètre VIDE ne montre rien, ne lit rien — mais RÉPOND complètement', async () => {
+  // ⚠ CONSTAT DE LA REVUE DE ac28b1f. La réponse était tronquée
+  // (`personne: null`, pas de `droits`, pas de `lien`) : l'écran levait un
+  // TypeError dans chacun des trois onglets, et la fenêtre restait figée sur
+  // « Chargement… », sans message et sans fermeture possible.
+  // ⚠ ET LE CAS N'EST PAS RARE : `refsDuPerimetre` rend `[]` pour TOUT état
+  // dégradé de délégation — invitation non acceptée, profil désactivé, comptes
+  // discordants — pas seulement pour un périmètre à zéro bien.
   const { handler, etat } = preparer({
     ...DELEGUE,
     permissions: { menages: 'read', prestataires: 'read', property_scope: 'selected',
@@ -238,7 +245,50 @@ test('un périmètre VIDE ne montre rien, et ne lit rien', async () => {
   await handler(get(REGINA, ENTETE_COMPTE), res)
   assert.strictEqual(res.code, 200)
   assert.deepStrictEqual(res.body.biens, [])
-  assert.strictEqual(etat.lectures.some(l => l.table === 'property_cleaning_providers'), false)
+  assert.deepStrictEqual(res.body.liaisons, [])
+  assert.strictEqual(etat.lectures.some(l => l.table === 'property_cleaning_providers'), false,
+    'on ne lit rien de plus')
+  // Et tout ce dont l'écran a besoin pour se peindre est bien là.
+  assert.ok(res.body.personne, 'la personne est rendue')
+  assert.strictEqual(res.body.personne.prenom, 'Régina')
+  assert.ok(res.body.droits, 'les droits aussi — sans eux, l\'écran ne sait rien griser')
+  assert.strictEqual(res.body.droits.prestataires, 'read')
+  assert.ok(Array.isArray(res.body.collegues))
+})
+
+test('la réponse dit si le périmètre de l\'appelant est COMPLET', async () => {
+  // Le garde-fou « c'est son dernier logement » compte les liaisons RENDUES,
+  // donc bornées : un délégué limité au bien A se voyait refuser le retrait de
+  // A sur une prestataire qui sert aussi B et C. Le refus n'a de sens que pour
+  // qui voit l'ensemble.
+  const { handler } = preparer({ liaisons: [LIAISON()] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.droits.perimetre_complet, true, 'le titulaire voit tout')
+
+  const d = preparer({
+    ...DELEGUE,
+    permissions: { menages: 'read', prestataires: 'write', property_scope: 'selected',
+                   property_ids: [BIEN], property_refs: [BIEN] },
+    liaisons: [LIAISON()]
+  })
+  const res2 = reponse()
+  await d.handler(get(REGINA, ENTETE_COMPTE), res2)
+  assert.strictEqual(res2.body.droits.perimetre_complet, false)
+})
+
+test('`pwa_vue_le` est lu À PART : une colonne neuve n\'emporte pas deux réglages existants', async () => {
+  // ⚠ CONSTAT DE LA REVUE DE ac28b1f. Groupée avec `visibility_days` et
+  // `ratio_periode`, la colonne neuve faisait échouer le select entier tant que
+  // la migration n'était pas appliquée : « Jours visibles » devenait illisible
+  // et « Période du ratio » DISPARAISSAIT de l'écran.
+  const { handler, etat } = preparer({ liaisons: [LIAISON()] })
+  const res = reponse()
+  await handler(get(), res)
+  const lectures = etat.lectures.filter(l => l.table === 'public_tokens')
+  assert.strictEqual(lectures.length, 2, 'deux requêtes, pas une')
+  assert.ok(res.body.lien, 'et les deux réglages existants sont bien là')
+  assert.strictEqual(res.body.personne.vue_le, '2026-10-13T18:09:00Z')
 })
 
 test('un identifiant d\'un AUTRE compte rend 404, pas 403', async () => {

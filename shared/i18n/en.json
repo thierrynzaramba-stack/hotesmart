@@ -543,6 +543,7 @@
   "menages.equipe.config.apercu_horizon": "next {n} days",
   "menages.equipe.config.apercu_propose": "offered",
   "menages.equipe.config.apercu_vide": "No upcoming clean in her page.",
+  "menages.equipe.config.apercu_borne": "Preview limited to the {n} days loaded in your schedule.",
   "menages.equipe.vide": "Nobody in the team yet.",
   "menages.equipe.panne": "Team unavailable right now.",
   "menages.equipe.nom_manquant": "[Last name]",

@@ -665,32 +665,51 @@ async function fichePrestataire (req, res, garde, userId, profilId) {
   const refs = refsDuPerimetre(garde.contexte)
   // Les biens que l'APPELANT peut voir : c'est son perimetre qui borne l'ecran,
   // pas celui de la prestataire.
-  let qB = supabase.from('properties')
-    .select('provider_property_id, name, photo_url')
-    .eq('user_id', userId).not('provider_property_id', 'is', null)
-  if (Array.isArray(refs)) {
-    if (!refs.length) return res.status(200).json({ personne: null, biens: [], liaisons: [] })
-    qB = qB.in('provider_property_id', refs.map(String))
+  //
+  // ⚠ UN PERIMETRE VIDE NE TRONQUE PAS LA REPONSE (constat de la revue de
+  // ac28b1f). Elle rendait `{ personne: null, biens: [], liaisons: [] }`, sans
+  // `droits` ni `lien` : l'ecran levait un TypeError dans chacun des trois
+  // onglets et la fenetre restait figee sur « Chargement… », sans message et
+  // sans fermeture. Et le cas n'est pas rare : `refsDuPerimetre` rend `[]`
+  // pour TOUT etat degrade de delegation — invitation non acceptee, profil
+  // desactive, comptes discordants — pas seulement pour un perimetre a zero
+  // bien. On ne LIT rien de plus, on REPOND completement.
+  // ⚠ ET ON NE CONSTRUIT MEME PAS LES REQUETES : un perimetre vide ne touche
+  // pas la base, c'est la garde de depart de ce lot.
+  const perimetreVide = Array.isArray(refs) && !refs.length
+  const requeteBiens = () => {
+    let q = supabase.from('properties')
+      .select('provider_property_id, name, photo_url')
+      .eq('user_id', userId).not('provider_property_id', 'is', null)
+    if (Array.isArray(refs) && refs.length) q = q.in('provider_property_id', refs.map(String))
+    return q
   }
-  let biens
-  try {
-    biens = await lireTout(() => qB, 'biens fiche presta', 'provider_property_id')
-  } catch (eB) {
-    console.error('[menages] fiche presta : lecture biens echec', eB.message)
-    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  let biens = []
+  if (!perimetreVide) {
+    try {
+      biens = await lireTout(requeteBiens, 'biens fiche presta', 'provider_property_id')
+    } catch (eB) {
+      console.error('[menages] fiche presta : lecture biens echec', eB.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
   }
 
   // ⚠ ACTIVES **ET** INACTIVES, bornees au perimetre de l'appelant.
-  let qL = supabase.from('property_cleaning_providers')
-    .select('property_id, rang, requires_ack, weekdays, active')
-    .eq('user_id', userId).eq('provider_id', profilId)
-  if (Array.isArray(refs)) qL = qL.in('property_id', refs.map(String))
-  let liaisons
-  try {
-    liaisons = await lireTout(() => qL, 'liaisons fiche presta', 'property_id')
-  } catch (eL) {
-    console.error('[menages] fiche presta : lecture liaisons echec', eL.message)
-    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  const requeteLiaisons = () => {
+    let q = supabase.from('property_cleaning_providers')
+      .select('property_id, rang, requires_ack, weekdays, active')
+      .eq('user_id', userId).eq('provider_id', profilId)
+    if (Array.isArray(refs) && refs.length) q = q.in('property_id', refs.map(String))
+    return q
+  }
+  let liaisons = []
+  if (!perimetreVide) {
+    try {
+      liaisons = await lireTout(requeteLiaisons, 'liaisons fiche presta', 'property_id')
+    } catch (eL) {
+      console.error('[menages] fiche presta : lecture liaisons echec', eL.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
   }
 
   // Les reglages portes par son LIEN (sa page), et sa derniere ouverture.
@@ -698,17 +717,29 @@ async function fichePrestataire (req, res, garde, userId, profilId) {
   // « valeurs par defaut ». Afficher 30 jours sur une panne ferait croire a
   // l'hote qu'il a regle ce qu'il n'a pas regle — et un enregistrement
   // ulterieur l'ecrirait pour de bon.
+  //
+  // ⚠ DEUX REQUETES, POUR LA MEME RAISON QU'AU VOLET EQUIPE (constat de la
+  // revue de ac28b1f : ce chemin-ci les avait groupees). `pwa_vue_le` est une
+  // colonne NEUVE, et sa migration s'applique APRES le deploiement : groupee,
+  // elle faisait echouer le select entier, donc `lien: null`, donc
+  // « Jours visibles » illisible et « Periode du ratio » DISPARUE — deux
+  // reglages existants perdus a cause d'une nouveaute. Une nouveaute qui tombe
+  // ne doit emporter qu'elle-meme.
   let lien = null
+  let vueLe
   if (p.pwa_token) {
     const { data: pt, error: ePt } = await supabase.from('public_tokens')
-      .select('visibility_days, ratio_periode, pwa_vue_le')
+      .select('visibility_days, ratio_periode')
       .eq('user_id', userId).eq('token', p.pwa_token).maybeSingle()
     if (ePt) console.error('[menages] fiche presta : lecture jeton echec', ePt.message)
     else if (pt) {
       lien = { visibility_days: pt.visibility_days || 30,
-               ratio_periode: pt.ratio_periode || 'toujours',
-               vue_le: pt.pwa_vue_le || null }
+               ratio_periode: pt.ratio_periode || 'toujours' }
     }
+    const { data: vu, error: eVu } = await supabase.from('public_tokens')
+      .select('pwa_vue_le').eq('user_id', userId).eq('token', p.pwa_token).maybeSingle()
+    if (eVu) console.error('[menages] fiche presta : lecture de la vue echec', eVu.message)
+    else if (vu) vueLe = vu.pwa_vue_le || null
   }
 
   // Le droit « elle declare ses absences ». ⚠ `null` = NON LU : la case se
@@ -737,7 +768,7 @@ async function fichePrestataire (req, res, garde, userId, profilId) {
       notify_sms: p.notify_sms !== false, notify_email: p.notify_email !== false,
       self_availability: selfDispo,
       // `null` = jamais ouverte ; absent = on ne sait pas (lien ou lecture).
-      ...(lien ? { vue_le: lien.vue_le } : {}),
+      ...(vueLe !== undefined ? { vue_le: vueLe } : {}),
       // Un lien SANS personne derriere ne peut rien recevoir : l'ecran coupe
       // alors les champs plutot que de promettre un enregistrement.
       a_un_lien: !!p.pwa_token
@@ -759,6 +790,12 @@ async function fichePrestataire (req, res, garde, userId, profilId) {
     // canaux, le droit d'absences et le retrait sont reserves au titulaire.
     // Les boutons que ces droits ne couvrent pas sont ABSENTS du DOM.
     droits: {
+      // ⚠ L'ECRAN DOIT SAVOIR S'IL VOIT TOUT. Son garde-fou « c'est son dernier
+      // logement » compte les liaisons RENDUES, donc bornees : un delegue
+      // limite au bien A se voyait refuser le retrait de A sur une prestataire
+      // qui sert aussi B et C (constat de la revue de ac28b1f). Le refus n'a de
+      // sens que pour qui voit l'ensemble.
+      perimetre_complet: !Array.isArray(refs),
       prestataires: peutEcrire(garde.contexte, 'prestataires', null) ? 'write' : 'read',
       equipe: peutEcrire(garde.contexte, 'equipe', null) ? 'write' : 'none',
       avis: peutEcrire(garde.contexte, 'avis', null) ? 'write'
@@ -1472,6 +1509,18 @@ async function ecrireLiaisons (req, res) {
   // SERVEUR de l'app menage, au meme endroit que les liaisons — et l'ecran V5
   // n'y touche pas.
   //
+  // ⚠ LA SOURCE EST L'ETAT APRES ECRITURE, PAS CE QUE L'ECRAN A ENVOYE
+  // (constat de la revue de ac28b1f). `voulues` ne contient que les biens du
+  // PERIMETRE de l'appelant : un delegue limite au bien A, reglant une
+  // prestataire liee a A, B et C, aurait ecrit `property_ids = ['A']` — alors
+  // que la desactivation des liaisons, elle, est bornee et laisse B et C
+  // ACTIFS. Sa page cessait alors de servir B et C : ses menages y
+  // disparaissaient et ses « fait » etaient refuses, pendant que le moteur
+  // continuait de les lui attribuer. C'est exactement le dommage que la borne
+  // de perimetre existe pour empecher, par l'autre representation de
+  // « ses biens ». `apres` est lu sans borne de perimetre : il dit les
+  // liaisons REELLEMENT actives de cette personne, tous perimetres confondus.
+  //
   // ⚠ UNE LISTE VIDE N'EST JAMAIS ECRITE : la convention de `property_ids` est
   // inversee — vide = AUCUNE RESTRICTION, donc TOUS les biens du compte.
   // L'ecrire en retirant le dernier bien OUVRIRAIT son acces au lieu de le
@@ -1479,8 +1528,9 @@ async function ecrireLiaisons (req, res) {
   // menage a elle (le filtrage de sa page est par PERSONNE depuis le lot 2.5),
   // ce qui est inoffensif — et le retrait d'une personne passe par
   // « Retirer de l'equipe », qui supprime la ligne entiere.
-  if (prof.pwa_token && voulues.length) {
-    const servis = [...new Set(voulues.map(v => String(v.ref)))].sort()
+  const siennesApres = (apres || []).filter(l => String(l.provider_id) === String(provider_id))
+  if (prof.pwa_token && siennesApres.length) {
+    const servis = [...new Set(siennesApres.map(l => String(l.property_id)))].sort()
     const { error: eTok } = await supabase.from('public_tokens')
       .update({ property_ids: servis })
       .eq('user_id', userId).eq('token', prof.pwa_token)
