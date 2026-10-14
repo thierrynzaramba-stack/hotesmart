@@ -1,6 +1,11 @@
 -- « Vu » par la prestataire, menage par menage
 -- (14 octobre 2026) — Lot Menages V5.
--- NON APPLIQUEE : staging puis prod, par Thierry.
+-- APPLIQUEE staging ET prod le 14 octobre 2026 par
+-- Thierry. Prouvee deux fois contre chaque base par
+-- scripts/verifier-migration-menage-vu-le.js (qui
+-- couvre les DEUX migrations) : staging 3 biens,
+-- 0 validation ; prod 5 biens, 28 validations
+-- rattrapees sur 28 attendues, 0 sans auteur.
 -- Lignes < 60 car. : collage manuel dans l'editeur.
 --
 -- POURQUOI. Une prestataire a qui le menage est

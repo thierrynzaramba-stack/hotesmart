@@ -1,6 +1,11 @@
 -- QUI a dit « vu » (14 octobre 2026) — Lot Menages V5.
 -- Complement de 2026-10-14-menage-vu-le, a coller APRES.
--- NON APPLIQUEE : staging puis prod, par Thierry.
+-- APPLIQUEE staging ET prod le 14 octobre 2026 par
+-- Thierry. Prouvee deux fois contre chaque base par
+-- scripts/verifier-migration-menage-vu-le.js (qui
+-- couvre les DEUX migrations) : staging 3 biens,
+-- 0 validation ; prod 5 biens, 28 validations
+-- rattrapees sur 28 attendues, 0 sans auteur.
 -- Lignes < 60 car. : collage manuel dans l'editeur.
 --
 -- POURQUOI, ET C'EST UN CONSTAT DE REVUE (20fb83d).
