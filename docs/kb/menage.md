@@ -4237,3 +4237,49 @@ gestes qui n'ont rien à voir. Un test le garde, borné aux clés `menages.*`.
 **Le mécanisme ne bouge pas** : `vu_le`, `vu_par`, la caducité au changement de
 porteuse, les deux relances à 9 h et leurs marqueurs. Seuls l'habillage, la
 place du geste et les mots ont changé.
+
+## Les constats de la revue de 6452d75 (14 octobre 2026)
+
+Aucun constat de sécurité : les gardes serveur de `validerMonMenage` ne sont pas
+touchées par ce commit, et la caducité par `vu_par` est appliquée **à la
+lecture** — le client reçoit déjà `vu_le: null` quand la validation est celle
+d'une porteuse précédente. Quatre défauts d'écran, dont un bloquant.
+
+**1. Un échec rendait le bouton MORT, sur la surface principale.** Le
+réarmement (`bouton.disabled = false`) vivait **après** le `return` de la
+branche « modal ouvert » — or la feuille du jour **est** le modal, et c'est là
+que le bouton vit le plus souvent. Elle touchait « Vu », le POST échouait, elle
+lisait « Réessayez »… et le bouton ne repartait plus jamais : le seul moyen de
+le réarmer était de fermer puis rouvrir la feuille, ce qu'aucun texte ne disait.
+L'accusé n'arrivait donc jamais, l'hôte continuait de lire « Pas vu », et les
+deux relances de 9 h continuaient de sonner — **sur quelqu'un qui avait fait le
+geste**. *Leçon : un `return` anticipé dans une fonction de récupération d'erreur
+est à lire deux fois ; c'est le chemin qu'on teste le moins.*
+
+**2. Le libellé restauré était l'état courant, pas le canonique.**
+`const avant = bouton.innerHTML` capturait ce que le bouton affichait à cet
+instant — qui pouvait déjà être le message du premier échec. Deux échecs
+rapprochés laissaient « Réessayez » à demeure, sur un bouton pourtant cliquable
+et fonctionnel. `LIBELLE_VU` est désormais défini une seule fois, posé par le
+rendu et restauré par `echecVu`, avec un seul minuteur par bouton
+(`clearTimeout`) — deux restaurations qui se croisent écrasaient la bonne.
+
+**3. L'aperçu coupait l'ÉTAT, pas seulement le GESTE.** `.apercu .jvu` masquait
+aussi la mention inerte « ✓ Vu ». L'hôte ouvrait l'aperçu précisément pour
+savoir si elle avait vu le ménage, et la ligne ressemblait à celle d'un ménage
+jamais lu : **l'aperçu mentait sur la seule information que ce lot ajoute à
+cette page**. Le sélecteur ne porte plus que sur `[data-vu]`. C'est mot pour mot
+la leçon déjà gravée treize lignes plus bas dans le même fichier (revue de
+`6d007f3`) : *seules les écritures sont coupées, pas la lecture*. La relire
+n'aurait coûté que de regarder le voisin immédiat.
+
+**4. On repeignait avant de recharger.** Les trois autres gestes du fichier font
+l'inverse. Repeindre sur l'écriture optimiste puis recharger laissait la feuille
+peinte sur une vérité que le rechargement venait de jeter : si l'hôte a changé
+de porteuse entre le rendu et le clic, le serveur ressert `vu_le: null`, et
+l'agenda montrait « Vu » pendant que la feuille ouverte par-dessus montrait
+« ✓ Vu ». Deux surfaces, deux réponses pour le même ménage — exactement ce que
+la fabrique unique `boutonVu` existe pour empêcher. Et le repeint est
+inconditionnel : `rechargerAssignations` sort en silence sur une panne de
+lecture, et sans lui le bouton restait « Vu » alors que l'écriture avait abouti.
+Garde au passage : `ouvrirJour(null)` quand la fiche est ouverte sans feuille.

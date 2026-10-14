@@ -282,9 +282,15 @@
     /* Vu : l'etat, pas une action. Gris, sans bordure marquee, non cliquable. */
     .jvu[disabled] { cursor: default; color: var(--text2); border-color: transparent;
                      background: transparent; font-weight: 500; }
-    /* L'hote regarde, il n'agit pas : le garde reel est sur `fetch`, ceci evite
-       d'offrir un bouton dont on sait qu'il echouera. */
-    .apercu .jvu { display: none !important; }
+    /* ⚠ SEUL LE GESTE EST COUPE, PAS L'ETAT (constat de la revue de 6452d75,
+       et c'est la meme lecon que la revue de 6d007f3 treize lignes plus bas).
+       `.jvu` tout court masquait aussi la mention inerte « ✓ Vu » : l'hote
+       ouvrait l'apercu pour savoir si elle avait vu le menage, et sa ligne
+       ressemblait a celle d'un menage jamais lu. L'apercu mentait sur la seule
+       information que ce lot ajoute a cette page.
+       Le garde reel contre l'ecriture est le `fetch` patche ; ceci evite
+       seulement d'offrir un bouton dont on sait qu'il echouera. */
+    .apercu .jvu[data-vu] { display: none !important; }
     .jmarque { flex-shrink: 0; font-size: 11px; color: var(--text2); margin-left: 6px; }
     .jmarque.fait { color: var(--green); font-weight: 700; }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
@@ -328,8 +334,10 @@
       padding: 10px 12px; min-height: 44px; font-size: 13.5px; cursor: pointer;
     }
     .agenda-item + .agenda-item { margin-top: 6px; }
-    /* La rangee porte l'ecart quand le bouton « Vu » accompagne l'item. */
-    .jrangee + .jrangee, .jrangee + .agenda-item, .agenda-item + .jrangee { margin-top: 6px; }
+    /* La rangee porte l'ecart quand le bouton « Vu » accompagne l'item.
+       (`.jrangee + .jrangee` est deja declare plus haut, avec les lignes de la
+       feuille du jour : les deux surfaces partagent la rangee.) */
+    .jrangee + .agenda-item, .agenda-item + .jrangee { margin-top: 6px; }
     .jrangee .agenda-item { margin-top: 0; }
     .agenda-item.offre { border: 1px dashed var(--primary); }
     .agenda-item.fait .agenda-bien { color: var(--text3); text-decoration: line-through; }
@@ -1559,11 +1567,16 @@ if ("serviceWorker" in navigator && !APERCU) {
     '<path d="M1.5 12S5 5.5 12 5.5 22.5 12 22.5 12 19 18.5 12 18.5 1.5 12 1.5 12Z"/>' +
     '<circle cx="12" cy="12" r="3.2"/></svg>'
 
+  // ⚠ LE LIBELLE CANONIQUE, A UN SEUL ENDROIT : le rendu le pose, et `echecVu`
+  // le restaure apres un message d'erreur. Deux ecritures separees auraient
+  // fini par montrer deux boutons differents pour le meme etat.
+  const LIBELLE_VU = `${OEIL}<span>Vu</span>`
+
   // Le bouton, ou la mention — ou rien. Rendu A COTE de la ligne, jamais dedans.
   function boutonVu (m) {
     if (estPasVu(m)) {
       return `<button type="button" class="jvu" data-vu="${echapper(m.id)}" ` +
-             `aria-label="J'ai vu le ménage du ${echapper(m.dateStr)}">${OEIL}<span>Vu</span></button>`
+             `aria-label="J'ai vu le ménage du ${echapper(m.dateStr)}">${LIBELLE_VU}</button>`
     }
     if (dejaVu(m)) return '<span class="jvu" disabled>✓ Vu</span>'
     return ''
@@ -2351,12 +2364,30 @@ if ("serviceWorker" in navigator && !APERCU) {
   // bouton lui-meme porte le mot, le temps de le lire. Un echec muet sur un
   // accuse de lecture serait le pire des deux : elle croirait avoir prevenu.
   function echecVu (bouton, texte) {
-    if (document.getElementById('modal').style.display === 'flex') { showModalError(texte); return }
-    if (!bouton) return
-    bouton.disabled = false
-    const avant = bouton.innerHTML
-    bouton.innerHTML = `${OEIL}<span>${echapper(texte)}</span>`
-    setTimeout(() => { if (bouton.isConnected) bouton.innerHTML = avant }, 3500)
+    // ⚠ LE REARMEMENT PASSE EN PREMIER, ET SANS CONDITION (constat de la revue
+    // de 6452d75). Il vivait APRES le `return` de la branche modal — or la
+    // feuille du jour EST le modal, et c'est la surface principale du bouton :
+    // sur un echec, elle lisait « Reessayez » et le bouton restait mort, pour
+    // toujours. Le seul moyen de le rearmer etait de fermer puis rouvrir la
+    // feuille, ce qu'aucun texte ne lui disait — et l'accuse n'arrivait jamais,
+    // pendant que les deux relances de 9 h continuaient de sonner.
+    if (bouton) {
+      bouton.disabled = false
+      // ⚠ ON RESTAURE LE LIBELLE CANONIQUE, PAS L'ETAT COURANT. `bouton.innerHTML`
+      // lu a cet instant peut DEJA etre un message d'erreur (second echec avant
+      // la fin du premier minuteur) : le bouton finissait par porter
+      // « Reessayez » a demeure, sans plus nommer le geste qu'il declenche.
+      // ⚠ ET UN SEUL MINUTEUR PAR BOUTON : deux echecs rapproches armaient deux
+      // restaurations qui se croisaient, la derniere ecrasant la bonne.
+      clearTimeout(bouton.__minuteurVu)
+      bouton.innerHTML = `${OEIL}<span>${echapper(texte)}</span>`
+      bouton.__minuteurVu = setTimeout(() => {
+        if (bouton.isConnected) bouton.innerHTML = LIBELLE_VU
+      }, 3500)
+    }
+    // Le modal, quand il est ouvert, dit le refus en toutes lettres : le
+    // bouton seul ne porte que deux mots.
+    if (document.getElementById('modal').style.display === 'flex') showModalError(texte)
   }
 
   let vuEnCours = null
@@ -2384,11 +2415,21 @@ if ("serviceWorker" in navigator && !APERCU) {
       // ⚠ L'ECRAN SUIT LA DATE DU SERVEUR, pas l'instant du clic : c'est elle
       // que l'hote lira, et c'est elle qui eteint l'alerte et les relances.
       if (menage.assign) menage.assign.vu_le = (data && data.vu_le) || new Date().toISOString()
-      // ⚠ ON REPEINT PAR LE MEME CHEMIN QUE LE RENDU : le bouton devient « ✓ Vu »
-      // parce que `boutonVu` le decide, pas parce qu'on l'a bricole sur place.
-      routeRender()
-      if (feuilleOuverteSur(jourOuvert)) ouvrirJour(jourOuvert)
+      // ⚠ ON RECHARGE D'ABORD, ON REPEINT ENSUITE (constat de la revue de
+      // 6452d75, et c'est l'ordre des trois autres gestes de ce fichier).
+      // Repeindre sur l'ecriture optimiste PUIS recharger laissait la feuille
+      // peinte sur une verite que le rechargement venait de jeter : si le
+      // serveur dit autre chose — l'hote a change de porteuse entre le rendu et
+      // le clic, et `validePar` ressert alors `vu_le: null` — l'agenda montrait
+      // « Vu » et la feuille ouverte par-dessus « ✓ Vu ». Deux surfaces, deux
+      // reponses pour le meme menage : exactement ce que la fabrique unique
+      // `boutonVu` existe pour empecher.
       await rechargerAssignations()
+      // ⚠ ET ON REPEINT MEME SI LE RECHARGEMENT A ECHOUE : il sort en silence
+      // sur une panne de lecture (l'ecran garde ce qu'il a), et sans ce rendu
+      // le bouton resterait « Vu » alors que l'ecriture, elle, a abouti.
+      routeRender()
+      if (jourOuvert && feuilleOuverteSur(jourOuvert)) ouvrirJour(jourOuvert)
     } catch (err) {
       echecVu(bouton, 'Réessayez')
     } finally {

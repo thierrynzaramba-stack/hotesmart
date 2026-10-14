@@ -1082,7 +1082,7 @@ function ligneHtml (l) {
   const vue = l.type === 'pas_vu' && l.vueLe !== undefined
     ? ` · ${esc(l.vueLe ? t('menages.vue_il_y_a', { quand: ilYa(l.vueLe) }) : t('menages.vue_jamais'))}`
     : ''
-  // Seul `non_valide` garde un pictogramme (téléphone barré) : il ne dit pas un
+  // Seul `pas_vu` garde un pictogramme (téléphone barré) : il ne dit pas un
   // problème de couverture, et le distinguer évite de le lire comme tel.
   const ico = l.type === 'pas_vu'
     ? `<span class="men-atr__type">${icone('i-phone-off')}</span>`

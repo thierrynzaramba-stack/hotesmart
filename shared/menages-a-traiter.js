@@ -178,7 +178,7 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
     // aujourdhui`). Avec `vuLe`, un départ de la semaine dernière jamais
     // validé alerterait pour toujours — alors que `non_termine` le dit déjà,
     // et mieux : on ne demande pas de valider ce qui est derrière. Même borne
-    // que le bouton de sa page (`estAValider`).
+    // que le bouton de sa page (`estPasVu`).
     // ⚠ UN MENAGE DEJA MARQUE FAIT NE DIT RIEN : elle y est allee, savoir
     // si elle l'avait valide n'apprend plus rien a personne.
     // ⚠ LA LECTURE DES OUVERTURES N'EST PLUS UNE CONDITION D'ENTREE : la

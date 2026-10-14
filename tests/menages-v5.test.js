@@ -397,12 +397,58 @@ test('PWA : « Vu » ne passe JAMAIS par la file hors ligne', () => {
   assert.ok(corps.includes('navigator.onLine === false'), 'et hors ligne, on le DIT')
 })
 
-test('PWA : l\'aperçu de l\'hôte ne montre pas le bouton « Vu »', () => {
+test('PWA : l\'aperçu coupe le GESTE « Vu », mais montre l\'ÉTAT', () => {
   // Dire « vu » depuis l'écran de l'hôte éteindrait l'alerte et les deux
   // relances sur quelqu'un qui n'a rien lu — la faute exacte que `apercu=1`
   // existe pour empêcher sur les autres gestes.
+  // ⚠ MAIS SEULES LES ÉCRITURES SONT COUPÉES, PAS LA LECTURE (constat de la
+  // revue de 6452d75, et la même leçon que la revue de 6d007f3). `.jvu` tout
+  // court masquait aussi la mention inerte « ✓ Vu » : l'hôte ouvrait l'aperçu
+  // pour savoir si elle avait vu le ménage, et la ligne ressemblait à celle
+  // d'un ménage jamais lu. L'aperçu mentait sur la seule information que ce
+  // lot ajoute à cette page.
   const src = lire('apps/menages/public.html')
-  assert.ok(/\.apercu \.jvu \{ display: none !important; \}/.test(src))
+  assert.ok(/\.apercu \.jvu\[data-vu\] \{ display: none !important; \}/.test(src),
+    'le sélecteur ne porte que sur le bouton, pas sur la mention')
+  assert.ok(!/\.apercu \.jvu \{/.test(src), 'et plus sur la classe entière')
+})
+
+test('PWA : un échec de « Vu » RÉARME toujours le bouton', () => {
+  // ⚠ LE CONSTAT MAJEUR DE LA REVUE DE 6452d75. Le réarmement vivait APRÈS le
+  // `return` de la branche modal — or la feuille du jour EST le modal, et
+  // c'est la surface principale du bouton : elle lisait « Réessayez » et le
+  // bouton restait mort pour toujours. L'accusé n'arrivait jamais, pendant que
+  // les deux relances de 9 h continuaient de sonner.
+  const src = sansCommentaires(lire('apps/menages/public.html'))
+  const i = src.indexOf('function echecVu')
+  assert.ok(i > 0)
+  const corps = src.slice(i, i + 900)
+  const rearme = corps.indexOf('bouton.disabled = false')
+  const modal = corps.indexOf('showModalError')
+  assert.ok(rearme > 0 && modal > rearme,
+    'le réarmement passe AVANT la branche qui parle au modal')
+  // Et le libellé restauré est le canonique, pas l'état courant du bouton.
+  assert.ok(corps.includes('LIBELLE_VU'), 'on restaure le libellé canonique')
+  assert.ok(!corps.includes('const avant = bouton.innerHTML'),
+    'jamais l\'état courant : un second échec y capturerait le message du premier')
+  assert.ok(corps.includes('clearTimeout'), 'un seul minuteur par bouton')
+})
+
+test('PWA : « Vu » recharge AVANT de repeindre', () => {
+  // ⚠ L'ORDRE DES TROIS AUTRES GESTES DE CE FICHIER (constat de la revue de
+  // 6452d75). Repeindre sur l'écriture optimiste puis recharger laissait la
+  // feuille peinte sur une vérité que le rechargement venait de jeter : si
+  // l'hôte a changé de porteuse entre le rendu et le clic, le serveur ressert
+  // `vu_le: null` et les deux surfaces disaient deux choses du même ménage.
+  const src = sansCommentaires(lire('apps/menages/public.html'))
+  const i = src.indexOf('async function direVu')
+  assert.ok(i > 0)
+  const corps = src.slice(i, src.indexOf('async function rechargerAssignations'))
+  const recharge = corps.indexOf('await rechargerAssignations()')
+  const repeint = corps.indexOf('ouvrirJour(jourOuvert)')
+  assert.ok(recharge > 0 && repeint > recharge, 'on recharge, PUIS on repeint la feuille')
+  assert.ok(/jourOuvert && feuilleOuverteSur\(jourOuvert\)/.test(corps),
+    'et jamais `ouvrirJour(null)` quand la fiche est ouverte sans feuille')
 })
 
 test('vocabulaire : « Vu » / « Pas vu », jamais « validé » à l\'écran', () => {
