@@ -4181,3 +4181,59 @@ décide de ce que sa **page** affiche — et les deux ont divergé dans ce dép�
 trouvait rien. Rien n'est marqué dans ce cas : ce n'est pas une relance faite,
 c'est un réglage à réparer, et le crier à chaque cycle est le seul signal qui
 existe.
+
+## « Vu » / « Pas vu » : le vocabulaire et la place du bouton (14 octobre 2026)
+
+**Retour de recette de Thierry, le soir même** : *« page de la prestataire :
+trop de changements. Reviens à la page telle qu'elle était, ajoute UNIQUEMENT
+un petit bouton 👁 Vu. »* Et : *« Vocabulaire partout : Vu / Pas vu, jamais
+valider / validé / non validé. »*
+
+**Ce qui est retiré.** Le badge « À VALIDER » (et son fond ambre) sur chaque
+ligne ; le bouton pleine largeur dans la fiche du ménage ; l'enveloppe `wrap`
+de la barre d'actions. Sa page retrouve exactement la mise en page et les
+couleurs d'avant le lot — le **seul** ajout visible est le bouton.
+
+**Où vit le bouton, et pourquoi là.** Sur la **ligne** du ménage, dans les deux
+surfaces qui listent ses ménages (feuille du jour, liste des jours à venir),
+par une fabrique unique. Il est le **frère** de la ligne, pas son enfant : la
+ligne EST un `<button>` (elle ouvre la fiche), et un bouton dans un bouton est
+invalide — le clic partirait aux deux, elle toucherait « Vu » et la fiche
+s'ouvrirait par-dessus. D'où `.jrangee`, qui n'existe que lorsqu'il y a quelque
+chose à côté : sans bouton, la ligne garde son rendu d'avant, au pixel près.
+
+Le gestionnaire teste `[data-vu]` **avant** `[data-mien]` et coupe la
+propagation : un doigt qui déborde ne doit pas ouvrir la fiche à la place.
+
+**Deux états, une seule règle.** `estPasVu` rend le bouton, `dejaVu` rend la
+mention « ✓ Vu » grise et inerte. Montrer l'état vu, et pas seulement l'absence
+de bouton, lève le doute exact que cet accusé existe pour lever : sans lui, le
+bouton disparaissait au clic et rien ne disait si le geste était parti.
+
+**Une icône, pas un emoji** (demande explicite). `shared/icons.svg` n'a pas
+d'œil, et **cette page ne charge pas le sprite du tout** : elle est hors ligne
+et dessine ses icônes en ligne, comme les deux pouces des avis. Un `<use href>`
+vers un fichier externe serait une dépendance réseau de plus sur un téléphone
+en sous-sol. L'œil est donc un SVG inline, à la convention du fichier.
+
+**Un refus se dit là où elle regarde.** Cette page n'a pas de bandeau général :
+quand le modal est ouvert, c'est lui qui parle ; sinon le bouton lui-même porte
+le mot (« Hors ligne », « Réessayez ») le temps d'être lu. Un échec muet sur un
+accusé de lecture serait le pire des deux : elle croirait avoir prévenu.
+
+**Le vocabulaire, et son périmètre.** Le type redevient `pas_vu` — il avait
+porté le nom `non_valide` quelques heures. Ce qu'il **mesure**, lui, a bien
+changé ce jour-là (le ménage, plus le lien) ; le nom est redevenu le bon.
+Libellés : « Pas vu » dans la bulle et sur l'en-tête de la fiche. Le SMS nomme
+**exactement** le bouton qu'elle cherchera : *« Un menage vous a ete attribue le
+[date] a [bien]. Ouvrez votre page et touchez Vu. »* — un message qui dirait
+« validez » devant un bouton qui dit « Vu » lui ferait chercher autre chose.
+
+⚠ **Le périmètre s'arrête là.** Ailleurs dans l'app, « valider » garde son autre
+sens : l'hôte qui CONSTATE qu'un ménage est fait (`menages.fait_ok`,
+« Ménage validé »), et l'écran `validate.*`. Les renommer confondrait deux
+gestes qui n'ont rien à voir. Un test le garde, borné aux clés `menages.*`.
+
+**Le mécanisme ne bouge pas** : `vu_le`, `vu_par`, la caducité au changement de
+porteuse, les deux relances à 9 h et leurs marqueurs. Seuls l'habillage, la
+place du geste et les mots ont changé.

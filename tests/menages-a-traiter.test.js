@@ -239,7 +239,7 @@ test('un ménage à elle qu\'elle n\'a pas validé, à J−1 : alerte', async ()
     menages: [menage({ date: DEMAIN, porteur: REGINA, vuLe: null })],
     vues: { 'p-regina': AVANT }, vuesLues: true
   })
-  assert.deepEqual(l.map(x => x.type), ['non_valide'])
+  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
   assert.equal(l[0].qui.prenom, 'Régina', 'et il dit QUI appeler')
   assert.equal(l[0].vueLe, AVANT, 'la date d\'ouverture reste AFFICHÉE, sans entrer dans la règle')
   assert.equal(l[0].nbMenages, 1)
@@ -280,8 +280,8 @@ test('UNE PANNE DE LECTURE DES OUVERTURES N\'ÉTEINT PLUS l\'alerte d\'une porte
   // `public_tokens` : un timeout PostgREST la faisait taire entièrement, et
   // l'hôte lisait le calme. La réponse est maintenant sur le ménage.
   const m = [menage({ date: DEMAIN, porteur: REGINA, vuLe: null })]
-  assert.deepEqual(appeler({ menages: m, vues: {}, vuesLues: false }).map(x => x.type), ['non_valide'])
-  assert.deepEqual(appeler({ menages: m }).map(x => x.type), ['non_valide'],
+  assert.deepEqual(appeler({ menages: m, vues: {}, vuesLues: false }).map(x => x.type), ['pas_vu'])
+  assert.deepEqual(appeler({ menages: m }).map(x => x.type), ['pas_vu'],
     'et sans l\'information du tout, l\'alerte tient aussi')
   // ⚠ MAIS ELLE NE DIT PLUS « page jamais ouverte » : on n'a rien lu.
   assert.equal(appeler({ menages: m })[0].vueLe, undefined)
@@ -289,7 +289,7 @@ test('UNE PANNE DE LECTURE DES OUVERTURES N\'ÉTEINT PLUS l\'alerte d\'une porte
 
 test('un serveur qui ne sert pas `vuLe` se TAIT (il n\'accuse pas toute l\'équipe)', async () => {
   // ⚠ `undefined` ≠ `null`. Une version antérieure de /api/garde ne connaît
-  // pas la colonne : peindre « non validé » partout accuserait tout le monde
+  // pas la colonne : peindre « pas vu » partout accuserait tout le monde
   // sur une absence de donnée. On se tait, et le vérificateur de migration est
   // là pour que ce silence ne dure pas.
   const l = appeler({
@@ -299,7 +299,7 @@ test('un serveur qui ne sert pas `vuLe` se TAIT (il n\'accuse pas toute l\'équi
   assert.deepEqual(l, [])
 })
 
-test('un ménage DÉJÀ FAIT ne produit pas « non validé » : elle y est allée', async () => {
+test('un ménage DÉJÀ FAIT ne produit pas « pas vu » : elle y est allée', async () => {
   const l = appeler({
     menages: [menage({ date: '2026-10-13', porteur: REGINA, fait: true, vuLe: null })],
     vues: { 'p-regina': AVANT }, vuesLues: true
@@ -307,7 +307,7 @@ test('un ménage DÉJÀ FAIT ne produit pas « non validé » : elle y est allé
   assert.deepEqual(l, [])
 })
 
-test('« non validé » vaut AUSSI sur un bien non confié : ce n\'est pas une alerte de couverture', async () => {
+test('« pas vu » vaut AUSSI sur un bien non confié : ce n\'est pas une alerte de couverture', async () => {
   // L'hôte a mis quelqu'un à la main sur un bien qu'il gère lui-même : si
   // cette personne ne l'a pas lu, le logement sera découvert quand même.
   const garde = [{ propertyId: '101', gere: false, jours: [] }]
@@ -315,7 +315,7 @@ test('« non validé » vaut AUSSI sur un bien non confié : ce n\'est pas une a
     garde, menages: [menage({ date: DEMAIN, porteur: REGINA, vuLe: null })],
     vues: { 'p-regina': AVANT }, vuesLues: true
   })
-  assert.deepEqual(l.map(x => x.type), ['non_valide'])
+  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
 })
 
 test('UNE LIGNE PAR PERSONNE, avec son ménage le PLUS PROCHE', async () => {
@@ -328,7 +328,7 @@ test('UNE LIGNE PAR PERSONNE, avec son ménage le PLUS PROCHE', async () => {
     ],
     vues: { 'p-regina': AVANT }, vuesLues: true
   })
-  const pv = l.filter(x => x.type === 'non_valide')
+  const pv = l.filter(x => x.type === 'pas_vu')
   assert.equal(pv.length, 1, 'une seule ligne pour Régina')
   assert.equal(pv[0].date, '2026-10-13', 'celle du départ le plus proche')
   assert.equal(pv[0].nbMenages, 3, 'et elle dit combien il y en a')
@@ -343,8 +343,8 @@ test('une PROPOSITION non vue alerte aussi, et nomme la personne sollicitée', a
   })
   // `non_pris` sort aussi : le départ est imminent et personne ne le porte.
   // Les deux disent une chose différente, et toutes deux sont vraies.
-  assert.deepEqual(l.map(x => x.type), ['non_pris', 'non_valide'])
-  assert.equal(l.find(x => x.type === 'non_valide').qui.prenom, 'Lena')
+  assert.deepEqual(l.map(x => x.type), ['non_pris', 'pas_vu'])
+  assert.equal(l.find(x => x.type === 'pas_vu').qui.prenom, 'Lena')
 })
 
 test('... et une NOTE changée après son ouverture alerte : « le code a changé »', async () => {
@@ -355,7 +355,7 @@ test('... et une NOTE changée après son ouverture alerte : « le code a chang�
                        etapes: { propose: '2026-10-01T08:00:00Z' }, noteLe: APRES, vuLe: null })],
     vues: { 'p-lena': AVANT }, vuesLues: true
   })
-  assert.deepEqual(l.map(x => x.type), ['non_pris', 'non_valide'])
+  assert.deepEqual(l.map(x => x.type), ['non_pris', 'pas_vu'])
 })
 
 test('JAMAIS ouverte, sur une proposition : alerte sans condition de date', async () => {
@@ -365,8 +365,8 @@ test('JAMAIS ouverte, sur une proposition : alerte sans condition de date', asyn
     menages: [menage({ date: DEMAIN, proposeesA: [LENA], vuLe: null })],
     vues: { 'p-lena': null }, vuesLues: true
   })
-  assert.deepEqual(l.map(x => x.type), ['non_pris', 'non_valide'])
-  assert.equal(l.find(x => x.type === 'non_valide').vueLe, null)
+  assert.deepEqual(l.map(x => x.type), ['non_pris', 'pas_vu'])
+  assert.equal(l.find(x => x.type === 'pas_vu').vueLe, null)
 })
 
 test('une PANNE de lecture se TAIT sur une PROPOSITION (elle n\'accuse pas au hasard)', async () => {
@@ -397,10 +397,10 @@ test('un jalon INCONNU ne devine pas : pas d\'alerte sur une date qu\'on ignore'
   assert.deepEqual(l.map(x => x.type), ['non_pris'])
 })
 
-test('le tri place « non validé » après les alertes de couverture et avant le passé', async () => {
+test('le tri place « pas vu » après les alertes de couverture et avant le passé', async () => {
   const { TYPES } = require('../shared/menages-a-traiter.js')
   assert.deepEqual(TYPES,
-    ['sans_personnel', 'non_assigne', 'non_pris', 'non_valide', 'non_termine', 'mauvais_retour'])
+    ['sans_personnel', 'non_assigne', 'non_pris', 'pas_vu', 'non_termine', 'mauvais_retour'])
 })
 
 test('la borne de l\'imminence est EXPORTÉE : la bulle et la fiche ne la recalculent pas', async () => {

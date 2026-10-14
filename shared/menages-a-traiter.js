@@ -14,14 +14,16 @@
 
 // L'ordre d'affichage, et l'ordre tout court : ce qui bloque la couverture
 // d'abord, le reproche en dernier (spec §3.1).
-// `non_valide` se place APRES les trois alertes de couverture et AVANT le
-// passe : « personne ne viendra » est plus grave que « quelqu'un viendra
-// peut-etre sans le savoir », qui est plus urgent qu'un depart deja manque.
-// ⚠ IL S'APPELAIT `pas_vu` jusqu'au 14 octobre 2026. Renomme avec ce qu'il
-// mesure : non plus « elle n'a pas ouvert sa page » (un indice de
-// remplacement, par LIEN et pour tous ses menages a la fois) mais « elle n'a
-// pas valide CE menage » — le bouton « Vu » de sa page.
-export const TYPES = ['sans_personnel', 'non_assigne', 'non_pris', 'non_valide', 'non_termine', 'mauvais_retour']
+// `pas_vu` se place APRES les trois alertes de couverture et AVANT le passe :
+// « personne ne viendra » est plus grave que « quelqu'un viendra peut-etre
+// sans le savoir », qui est plus urgent qu'un depart deja manque.
+// ⚠ IL A PORTE LE NOM `non_valide` QUELQUES HEURES, le 14 octobre 2026, le
+// temps que Thierry tranche le vocabulaire : « Vu » / « Pas vu » partout,
+// jamais « valider ». Ce qu'il MESURE a bien change ce jour-la — non plus
+// « elle n'a pas ouvert sa page » (un indice de remplacement, par LIEN et pour
+// tous ses menages a la fois) mais « elle n'a pas vu CE menage », le bouton
+// oeil de sa page. Le nom, lui, est redevenu le bon.
+export const TYPES = ['sans_personnel', 'non_assigne', 'non_pris', 'pas_vu', 'non_termine', 'mauvais_retour']
 const RANG = Object.fromEntries(TYPES.map((t, i) => [t, i]))
 
 // Un « non pris » n'est une alerte que si personne ne peut plus le prendre,
@@ -50,8 +52,8 @@ function jourPlus (iso, n) {
 // la page garantissait qu'un jour l'un des deux change seul.
 export const limiteDeLImminence = (aujourdhui) => jourPlus(aujourdhui, JOURS_IMMINENT)
 
-// ⚠ « ELLE NE L'A PAS VALIDE » EST UNE SEULE REGLE, PARTAGEE. L'en-tete de sa
-// fiche (« A jour » / « Non valide ») et la bulle « A traiter » posent la MEME
+// ⚠ « ELLE NE L'A PAS VU » EST UNE SEULE REGLE, PARTAGEE. L'en-tete de sa
+// fiche (« A jour » / « Pas vu ») et la bulle « A traiter » posent la MEME
 // question, sur la MEME fenetre. Deux implementations auraient fini par se
 // contredire sur le meme ecran, et c'est exactement ce qu'un hote ne pardonne
 // pas : un bandeau vert au-dessus d'une ligne rouge sur la meme personne.
@@ -77,7 +79,7 @@ export const limiteDeLImminence = (aujourdhui) => jourPlus(aujourdhui, JOURS_IMM
 //     lecture en panne) ;
 //   - aucun jalon connu cote proposition : accuser sur une date qu'on ignore
 //     serait au hasard.
-// Rend `true` quand elle est concernee et n'a pas valide ; `false` sinon.
+// Rend `true` quand elle est concernee et ne l'a pas vu ; `false` sinon.
 export function nonVuPar (m, profilId, vueLe) {
   if (!m) return null
   const id = String(profilId || '')
@@ -253,8 +255,8 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
   }
 
   for (const v of pasVus.values()) {
-    ajouter('non_valide', v.bien, v.date, { bookingId: v.bookingId, qui: v.qui,
-                                            vueLe: v.vueLe, nbMenages: v.nbMenages })
+    ajouter('pas_vu', v.bien, v.date, { bookingId: v.bookingId, qui: v.qui,
+                                        vueLe: v.vueLe, nbMenages: v.nbMenages })
   }
 
   return lignes.sort((a, b) =>

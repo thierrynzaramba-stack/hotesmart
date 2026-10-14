@@ -342,10 +342,10 @@ async function chargerATraiter () {
   renderBulle()
   majBadge()
   // ⚠ LE NUMÉRO N'EST CHARGÉ QUE S'IL SERT. L'équipe se lit à l'ouverture du
-  // volet ; une alerte « Non validé » a besoin du numéro tout de suite, et sans
+  // volet ; une alerte « Pas vu » a besoin du numéro tout de suite, et sans
   // elle cette lecture — un comptage d'avis par personne — ne se justifie pas
   // au démarrage de la page.
-  if (Array.isArray(etat.aTraiter) && etat.aTraiter.some(l => l.type === 'non_valide') &&
+  if (Array.isArray(etat.aTraiter) && etat.aTraiter.some(l => l.type === 'pas_vu') &&
       !equipeChargee && !equipeEnCours) {
     chargerEquipe().then(renderBulle).catch(() => {})
   }
@@ -1070,27 +1070,27 @@ function ligneHtml (l) {
     ? t('menages.n_jours', { n: l.nbJours })
     : dateCourte(l.date)
   const qui = l.qui && l.qui.prenom ? ` · ${esc(l.qui.prenom)}` : ''
-  // ⚠ « Non validé » DIT OÙ ELLE EN EST DE SA PAGE, sinon l'hôte ne sait pas
+  // ⚠ « Pas vu » DIT OÙ ELLE EN EST DE SA PAGE, sinon l'hôte ne sait pas
   // s'il doit appeler ou attendre cinq minutes : « page vue il y a 2 h et
-  // toujours pas validé » et « page jamais ouverte » ne se traitent pas
+  // toujours pas vu » et « page jamais ouverte » ne se traitent pas
   // pareil. Jamais ouverte est le cas le plus grave : il se dit en toutes
   // lettres, pas par une absence de date.
   // ⚠ `undefined` NE DIT RIEN — et ce n'est pas `null`. La lecture des
   // ouvertures peut être en panne alors que l'alerte, elle, tient (elle ne
   // dépend plus que du ménage) : afficher « page jamais ouverte » serait
   // alors une accusation inventée.
-  const vue = l.type === 'non_valide' && l.vueLe !== undefined
+  const vue = l.type === 'pas_vu' && l.vueLe !== undefined
     ? ` · ${esc(l.vueLe ? t('menages.vue_il_y_a', { quand: ilYa(l.vueLe) }) : t('menages.vue_jamais'))}`
     : ''
   // Seul `non_valide` garde un pictogramme (téléphone barré) : il ne dit pas un
   // problème de couverture, et le distinguer évite de le lire comme tel.
-  const ico = l.type === 'non_valide'
+  const ico = l.type === 'pas_vu'
     ? `<span class="men-atr__type">${icone('i-phone-off')}</span>`
     : ''
   return `<div class="men-atr">
     ${photo}${ico}
     <span class="men-atr__texte">
-      <b${l.type === 'non_valide' ? ' class="men-atr__rouge"' : ''}>${esc(t('menages.type_' + l.type))}</b>
+      <b${l.type === 'pas_vu' ? ' class="men-atr__rouge"' : ''}>${esc(t('menages.type_' + l.type))}</b>
       <span class="caption muted">${esc(l.bienNom)} · ${esc(quand)}${qui}${vue}</span>
     </span>
     ${boutonsLigne(l)}
@@ -1101,13 +1101,13 @@ function ligneHtml (l) {
 // (décision G12) : griser promet un geste qu'on refusera.
 function boutonsLigne (l) {
   const b = []
-  // ⚠ APPELER EST LE SEUL GESTE QUI RÉSOUT « Non validé » : rien dans
-  // HôteSmart ne peut forcer quelqu'un à valider son ménage — les deux
+  // ⚠ APPELER EST LE SEUL GESTE QUI RÉSOUT « Pas vu » : rien dans HôteSmart
+  // ne peut forcer quelqu'un à ouvrir son ménage — les deux
   // relances par SMS (la veille et le matin, 9 h) sont tout ce que la machine
   // sait faire. Le bouton est ABSENT sans numéro (on ne propose pas un appel
   // qu'on ne peut pas passer) — même règle que les droits : jamais grisé,
   // absent.
-  if (l.type === 'non_valide') {
+  if (l.type === 'pas_vu') {
     // ⚠ LE NUMERO VIENT DU VOLET ÉQUIPE, pas de `/api/garde` : cet endpoint
     // refuse les coordonnées (« qui est de garde » n'est pas « comment la
     // joindre »), et son test le garde.
@@ -1445,7 +1445,7 @@ function vueHtml (p) {
       <span data-i18n="menages.equipe.config.a_jour"></span></span>`
   }
   return `<span class="men-cfg__vue men-cfg__vue--ko" title="${esc(titre)}">${icone('i-phone-off')}
-    <span data-i18n="menages.equipe.config.non_valide"></span></span>`
+    <span data-i18n="menages.equipe.config.pas_vu"></span></span>`
 }
 
 // ⚠ VERT OU ROUGE, JAMAIS D'AMBRE ICI (décision de Thierry). `rien` est

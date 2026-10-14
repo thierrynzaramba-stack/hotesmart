@@ -263,6 +263,28 @@
        `.offre` : depuis ce lot, les lignes de SES menages s'ouvrent aussi, et
        annoncer « rien a faire ici » sur la ligne qui porte son unique geste
        serait exactement l'inverse. */
+    /* ⚠ LE BOUTON « VU » EST UN FRERE DE LA LIGNE, PAS SON ENFANT. La ligne
+       EST un `<button>` (elle ouvre la fiche) : un bouton dans un bouton est
+       invalide, et le clic partirait aux deux. Ils vivent donc cote a cote
+       dans une rangee, et la ligne garde toute la largeur restante.
+       ⚠ RIEN D'AUTRE NE CHANGE : pas de fond, pas de bordure sur la ligne,
+       pas de badge. Le seul ajout visible de ce lot sur sa page est ce bouton
+       (decision de Thierry, recette du 14 octobre). */
+    .jrangee { display: flex; align-items: stretch; gap: 6px; }
+    .jrangee + .jrangee, .jrangee + .jligne, .jligne + .jrangee { margin-top: 6px; }
+    .jrangee .jligne { margin-top: 0; }
+    .jvu { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px;
+           background: var(--bg); border: 0.5px solid var(--border);
+           border-radius: var(--radius); padding: 0 12px; min-height: 44px;
+           font-family: inherit; font-size: 12px; font-weight: 600; color: inherit;
+           cursor: pointer; }
+    .jvu svg { width: 15px; height: 15px; flex-shrink: 0; }
+    /* Vu : l'etat, pas une action. Gris, sans bordure marquee, non cliquable. */
+    .jvu[disabled] { cursor: default; color: var(--text2); border-color: transparent;
+                     background: transparent; font-weight: 500; }
+    /* L'hote regarde, il n'agit pas : le garde reel est sur `fetch`, ceci evite
+       d'offrir un bouton dont on sait qu'il echouera. */
+    .apercu .jvu { display: none !important; }
     .jmarque { flex-shrink: 0; font-size: 11px; color: var(--text2); margin-left: 6px; }
     .jmarque.fait { color: var(--green); font-weight: 700; }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
@@ -306,6 +328,9 @@
       padding: 10px 12px; min-height: 44px; font-size: 13.5px; cursor: pointer;
     }
     .agenda-item + .agenda-item { margin-top: 6px; }
+    /* La rangee porte l'ecart quand le bouton « Vu » accompagne l'item. */
+    .jrangee + .jrangee, .jrangee + .agenda-item, .agenda-item + .jrangee { margin-top: 6px; }
+    .jrangee .agenda-item { margin-top: 0; }
     .agenda-item.offre { border: 1px dashed var(--primary); }
     .agenda-item.fait .agenda-bien { color: var(--text3); text-decoration: line-through; }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
@@ -412,12 +437,6 @@
     /* ⚠ Une offre n'est PAS un menage a faire : elle attend une reponse. La
        distinguer a l'oeil evite qu'on s'organise autour de quelque chose qu'on
        n'a pas encore accepte — ou qu'on laisse filer une offre sans repondre. */
-    /* « A VALIDER » : un menage qui est DEJA le sien, mais qu'elle n'a pas
-       encore dit avoir vu. Pas la couleur d'une offre — il n'y a rien a
-       gagner ni a perdre, seulement un accuse a donner. */
-    .badge-valider { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
-      color: #8a5a00; background: #fff4d6; border: 1px solid #f0d08a;
-      border-radius: 6px; padding: 1px 5px; margin-block-start: 2px; }
     .badge-propose { display: inline-block; font-size: 9px; font-style: italic; opacity: 0.75;
                      margin-top: 3px; }
     .badge-offre { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.3px;
@@ -466,19 +485,13 @@
     .modal-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
     .modal-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
     .modal-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 0.5px solid var(--border); }
-    /* ⚠ `wrap` DEPUIS LE BOUTON « VU » (14 octobre 2026) : la barre peut porter
-       trois boutons à libellé entier, et sur 390 px ils se comprimaient jusqu'à
-       casser « Vu, c'est noté » sur trois lignes. Ils passent maintenant à la
-       ligne entiers. */
-    .modal-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-    .modal-actions .btn { flex: 1 1 auto; min-width: 42%; }
+    .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
     /* ⚠ APERÇU : l'hôte regarde, il n'agit pas. Les gestes qui engagent la
        prestataire disparaissent — « Fermer » reste, sinon la fenêtre modale
        devient un piège. Le garde réel est sur `fetch` : ceci évite d'offrir un
        bouton dont on sait qu'il échouera. */
     .apercu #modal-prendre, .apercu #modal-retirer, .apercu #modal-accepter,
-    .apercu #modal-refuser, .apercu #modal-done,
-    .apercu #modal-vu { display: none !important; }
+    .apercu #modal-refuser, .apercu #modal-done { display: none !important; }
     /* ⚠ SEULES LES ÉCRITURES SONT COUPÉES, PAS LA LECTURE (constat de la revue
        de 6d007f3). `pointer-events: none` sur toutes les cases empêchait aussi
        d'OUVRIR la feuille d'un jour — c'est-à-dire la seule chose que l'hôte
@@ -781,7 +794,6 @@
     <div class="modal-actions">
       <button class="btn btn-primary" id="modal-prendre" style="display:none">Je prends ce ménage</button>
       <button class="btn" id="modal-retirer" style="display:none">Je ne peux plus le faire</button>
-      <button class="btn btn-primary" id="modal-vu" style="display:none">✓ Vu, c'est noté</button>
       <button class="btn btn-primary" id="modal-accepter" style="display:none">✓ J'accepte</button>
       <button class="btn" id="modal-refuser" style="display:none">Je ne peux pas</button>
       <button class="btn btn-primary" id="modal-done">✓ Marquer fait</button>
@@ -984,6 +996,16 @@ if ("serviceWorker" in navigator && !APERCU) {
       if (!ouvrirPriseDeMenage(o.dataset.offre, libres, o.dataset.offreCle)) ouvrirJour(o.dataset.offre)
       return
     }
+    // ⚠ AVANT `data-mien` : le bouton « Vu » est le VOISIN de la ligne, pas son
+    // enfant, mais un doigt qui deborde ne doit pas ouvrir la fiche a la place.
+    const bv = e.target.closest('[data-vu]')
+    if (bv && !bv.disabled) {
+      e.stopPropagation()
+      const mv = tousMesMenagesEnrichis().concat(menagesEnrichisDu(jourOuvert || ''))
+        .find(x => x.id === bv.dataset.vu)
+      if (mv) direVu(mv, bv)
+      return
+    }
     const mi = e.target.closest('[data-mien]')
     if (mi) {
       // ⚠ LA MEME FICHE QUE LE PLANNING, pas une copie. Deux fiches du meme
@@ -1008,7 +1030,6 @@ if ("serviceWorker" in navigator && !APERCU) {
     document.getElementById('modal-done').addEventListener('click', onModalDoneClick)
     document.getElementById('modal-prendre').addEventListener('click', prendreLeMenage)
     document.getElementById('modal-retirer').addEventListener('click', retirerLeMenage)
-    document.getElementById('modal-vu').addEventListener('click', validerLeMenage)
     document.getElementById('modal-accepter').addEventListener('click', () => repondreOffre(true))
     document.getElementById('modal-refuser').addEventListener('click', () => repondreOffre(false))
     document.getElementById('modal').addEventListener('click', (e) => { if (e.target === document.getElementById('modal')) closeModal() })
@@ -1490,30 +1511,62 @@ if ("serviceWorker" in navigator && !APERCU) {
   function estUneOffre (m) { return !!(m.assign && m.assign.role === 'propose') }
   function estPropose (m) { return !!(m.assign && m.assign.role === 'porteur' && m.assign.propose) }
 
-  // ⚠ « A VALIDER » : UN MENAGE A ELLE QU'ELLE N'A PAS DIT AVOIR VU (14 octobre
-  // 2026). C'est le cas de tous les menages ATTRIBUES D'OFFICE : ils naissent
-  // acceptes, elle n'a jamais rien eu a confirmer, et son hote n'avait donc
-  // aucun moyen de savoir si elle les avait lus.
+  // ⚠ « VU » / « PAS VU », JAMAIS « VALIDER » (vocabulaire fixe par Thierry,
+  // recette du 14 octobre). Elle lit « Vu » sur son bouton, l'hote lit « Pas
+  // vu » dans sa bulle : c'est le meme fait, dit du meme mot des deux cotes.
   //
-  // ⚠ UNE SEULE REGLE POUR LE BADGE ET POUR LE BOUTON. Les separer, c'est
+  // ⚠ CE QUE CE BOUTON COMBLE. Un menage ATTRIBUE D'OFFICE nait `accepted` :
+  // elle n'a jamais rien eu a confirmer, et son hote n'avait aucun moyen de
+  // savoir si elle l'avait lu.
+  //
+  // ⚠ UNE SEULE REGLE POUR L'AFFICHAGE ET POUR LE GESTE. Les separer, c'est
   // exactement le defaut du 14 octobre sur les cases de jours : le rendu et le
-  // geste avaient chacun leur idee de ce que l'ecran montrait.
+  // clic avaient chacun leur idee de ce que l'ecran montrait.
   //
   // Quatre conditions, toutes necessaires :
-  //   - le menage est A ELLE (une offre se valide en l'acceptant) ;
+  //   - le menage est A ELLE (une offre se confirme en l'acceptant) ;
   //   - `vu_le` est vide ;
   //   - il n'est pas deja fait — elle y est allee, l'accuse n'apprend plus rien ;
-  //   - il n'est pas passe : on ne demande pas de valider ce qui est derriere.
+  //   - il n'est pas passe : on ne demande pas de lire ce qui est derriere.
   // ⚠ `vu_le === undefined` NE DEMANDE RIEN : une version anterieure du serveur
-  // ne sert pas ce champ, et peindre « a valider » partout sur un ancien
-  // deploiement ferait apparaitre un bouton qui echouerait.
-  function estAValider (m) {
+  // ne sert pas ce champ, et peindre le bouton partout sur un ancien
+  // deploiement en ferait un bouton qui echoue.
+  function estPasVu (m) {
     const a = m && m.assign
     if (!a || a.role !== 'porteur') return false
     if (a.vu_le === undefined) return false
     if (a.vu_le) return false
     if (m.done) return false
     return m.dateStr >= jourParis()
+  }
+
+  // ⚠ L'ETAT « VU » SE MONTRE AUSSI, et il ne se confond pas avec son absence :
+  // un menage qu'elle a ouvert garde la mention en gris, sans bouton. Sans
+  // elle, le bouton disparaissait au clic et rien ne disait si le geste etait
+  // parti — exactement le doute que cet accuse existe pour lever.
+  function dejaVu (m) {
+    const a = m && m.assign
+    return !!(a && a.role === 'porteur' && a.vu_le && !m.done && m.dateStr >= jourParis())
+  }
+
+  // ⚠ UNE ICONE, PAS UN EMOJI (decision de Thierry). Le sprite partage
+  // `shared/icons.svg` n'a pas d'oeil, et cette page ne le charge pas du tout —
+  // elle est hors ligne et dessine ses icones en ligne, comme les deux pouces
+  // des avis. Un `<use href>` vers un fichier externe serait une dependance
+  // reseau de plus sur un telephone en sous-sol.
+  const OEIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M1.5 12S5 5.5 12 5.5 22.5 12 22.5 12 19 18.5 12 18.5 1.5 12 1.5 12Z"/>' +
+    '<circle cx="12" cy="12" r="3.2"/></svg>'
+
+  // Le bouton, ou la mention — ou rien. Rendu A COTE de la ligne, jamais dedans.
+  function boutonVu (m) {
+    if (estPasVu(m)) {
+      return `<button type="button" class="jvu" data-vu="${echapper(m.id)}" ` +
+             `aria-label="J'ai vu le ménage du ${echapper(m.dateStr)}">${OEIL}<span>Vu</span></button>`
+    }
+    if (dejaVu(m)) return '<span class="jvu" disabled>✓ Vu</span>'
+    return ''
   }
 
   // Le temps qu'il reste pour repondre, en clair. « Il reste 3 h » se decide
@@ -1536,10 +1589,6 @@ if ("serviceWorker" in navigator && !APERCU) {
     }
     // ⚠ Discret : ce menage reste le sien, rien ne lui est demande.
     if (estPropose(m)) return '<div class="badge-propose">proposé à quelqu\'un</div>'
-    // ⚠ EN DERNIER : un menage peut etre a elle, non valide, ET propose a
-    // quelqu'un d'autre. La proposition se dit d'abord — c'est elle qui peut
-    // lui retirer le menage.
-    if (estAValider(m)) return '<div class="badge-valider">À VALIDER</div>'
     return ''
   }
 
@@ -1621,7 +1670,6 @@ if ("serviceWorker" in navigator && !APERCU) {
     document.getElementById('modal-done').style.display = 'none'
     document.getElementById('modal-accepter').style.display = 'none'
     document.getElementById('modal-refuser').style.display = 'none'
-    document.getElementById('modal-vu').style.display = 'none'
     const btn = document.getElementById('modal-prendre')
     btn.style.display = ''
     btn.disabled = false
@@ -1753,9 +1801,13 @@ if ("serviceWorker" in navigator && !APERCU) {
           // le disait encore, mais il fallait deja savoir qu'il y avait quelque
           // chose a y lire.
           const marques = marquesDuMenage(m, obs, '<span class="jmarque fait">✓ FAIT</span>')
-          return `<button class="jligne${obs ? ' obsolete' : ''}" data-mien="${echapper(m.id)}">` +
+          const vu = boutonVu(m)
+          const ligne = `<button class="jligne${obs ? ' obsolete' : ''}" data-mien="${echapper(m.id)}">` +
             `<span class="jligne-bien">${echapper(m.propName || '—')}</span>` +
             marques + '</button>'
+          // ⚠ LA RANGEE N'EXISTE QUE S'IL Y A QUELQUE CHOSE A COTE : sans elle,
+          // la ligne garde EXACTEMENT la mise en page d'avant ce lot.
+          return vu ? `<div class="jrangee">${ligne}${vu}</div>` : ligne
         }).join('') + '</div>'
     }
 
@@ -1811,7 +1863,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     hideModalMessages()
     reinitialiserRetrait()
     priseEnCours = null
-    for (const id of ['modal-done', 'modal-prendre', 'modal-accepter', 'modal-refuser', 'modal-vu']) {
+    for (const id of ['modal-done', 'modal-prendre', 'modal-accepter', 'modal-refuser']) {
       document.getElementById(id).style.display = 'none'
     }
     document.getElementById('modal').style.display = 'flex'
@@ -1855,7 +1907,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     reinitialiserRetrait()
     priseEnCours = null
     jourOuvert = null
-    for (const id of ['modal-done', 'modal-prendre', 'modal-accepter', 'modal-refuser', 'modal-vu']) {
+    for (const id of ['modal-done', 'modal-prendre', 'modal-accepter', 'modal-refuser']) {
       document.getElementById(id).style.display = 'none'
     }
     reglagesOuverts = true
@@ -2095,14 +2147,6 @@ if ("serviceWorker" in navigator && !APERCU) {
     const btn = document.getElementById('modal-done')
     const btnOui = document.getElementById('modal-accepter')
     const btnNon = document.getElementById('modal-refuser')
-    // ⚠ LE BOUTON « VU » SUIT LA MEME REGLE QUE SON BADGE (`estAValider`), et
-    // il se remet a zero ICI comme les autres : le modal est partage, et un
-    // bouton laisse visible d'une fiche precedente validerait le menage
-    // d'a-cote.
-    const btnVu = document.getElementById('modal-vu')
-    btnVu.style.display = estAValider(m) ? '' : 'none'
-    btnVu.disabled = false
-    btnVu.textContent = '✓ Vu, c\'est noté'
     // ⚠ Le modal est PARTAGE : sans cette remise a zero, le bouton « Je prends »
     // d'une feuille precedente restait visible sur la fiche d'un menage a elle.
     document.getElementById('modal-prendre').style.display = 'none'
@@ -2142,10 +2186,6 @@ if ("serviceWorker" in navigator && !APERCU) {
     btnOui.style.display = offre ? '' : 'none'
     btnNon.style.display = offre ? '' : 'none'
     btn.style.display = offre ? 'none' : ''
-    // ⚠ `estAValider` l'exclut deja (role `propose`), mais la fiche d'une offre
-    // sort plus bas sans repasser par le reste : on le pose aussi ici, pour que
-    // la regle ne tienne pas a l'ordre des lignes.
-    if (offre) btnVu.style.display = 'none'
     if (offre) {
       const d = delaiRestant(m)
       // ⚠ Une offre expiree ne peut plus aboutir : le serveur rendra 409.
@@ -2291,24 +2331,43 @@ if ("serviceWorker" in navigator && !APERCU) {
   // fait : il dit « je l'ai vu ». C'est ce que son hote attend d'un menage
   // attribue d'office, qu'elle n'a jamais eu a confirmer.
   //
+  // ⚠ IL NE PASSE PAS PAR LA FICHE, et donc pas par `selectedMenage` : le
+  // bouton vit sur la LIGNE (decision de Thierry, recette du 14 octobre), et
+  // deux lignes peuvent etre visibles en meme temps. Prendre « le menage
+  // ouvert » aurait valide le voisin.
+  //
   // ⚠ IDEMPOTENT, DONC REJOUABLE — contrairement a `repondreOffre`. Le serveur
-  // n'ecrit que si `vu_le` est vide et rend `success` dans les deux cas :
+  // n'ecrit que si personne ne l'a deja vu et rend `success` dans les deux cas :
   // `fetchWithRetry` peut donc rejouer sans rien casser, et c'est exactement ce
   // qu'il faut sur un telephone en 4G instable.
   //
   // ⚠ AUCUNE FILE HORS LIGNE, ET CE N'EST PAS UN OUBLI. `enqueuePending` garde
-  // UNE action par menage : y mettre une validation EFFACERAIT un « fait » qui
+  // UNE action par menage : y mettre un « vu » EFFACERAIT un « fait » qui
   // attend d'etre envoye — elle perdrait le travail au profit de l'accuse. Hors
   // ligne, on le dit.
-  async function validerLeMenage() {
-    const menage = selectedMenage
-    if (!menage) return
-    const btnVu = document.getElementById('modal-vu')
+  // ⚠ UN REFUS SE DIT LA OU ELLE REGARDE, et cette page n'a pas de bandeau
+  // general : elle a un modal, et des messages attaches a chaque feuille. Quand
+  // le modal est ouvert (feuille du jour), c'est lui qui parle ; sinon le
+  // bouton lui-meme porte le mot, le temps de le lire. Un echec muet sur un
+  // accuse de lecture serait le pire des deux : elle croirait avoir prevenu.
+  function echecVu (bouton, texte) {
+    if (document.getElementById('modal').style.display === 'flex') { showModalError(texte); return }
+    if (!bouton) return
+    bouton.disabled = false
+    const avant = bouton.innerHTML
+    bouton.innerHTML = `${OEIL}<span>${echapper(texte)}</span>`
+    setTimeout(() => { if (bouton.isConnected) bouton.innerHTML = avant }, 3500)
+  }
+
+  let vuEnCours = null
+  async function direVu (menage, bouton) {
+    if (!menage || vuEnCours === menage.id) return
     if (navigator.onLine === false) {
-      showModalError('Hors ligne : votre « vu » partira quand le réseau reviendra. Réessayez alors.')
+      echecVu(bouton, 'Hors ligne')
       return
     }
-    btnVu.disabled = true
+    vuEnCours = menage.id
+    if (bouton) bouton.disabled = true
     try {
       const res = await fetchWithRetry(`/api/menages-public?token=${currentToken}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2319,19 +2378,21 @@ if ("serviceWorker" in navigator && !APERCU) {
       })
       const data = await res.json().catch(() => null)
       if (!res.ok) {
-        showModalError((data && data.error) || 'Impossible d\'enregistrer. Réessayez.')
-        btnVu.disabled = false
+        echecVu(bouton, (data && data.error) || 'Réessayez')
         return
       }
       // ⚠ L'ECRAN SUIT LA DATE DU SERVEUR, pas l'instant du clic : c'est elle
-      // que l'hote lira, et c'est elle qui eteint le badge et les relances.
+      // que l'hote lira, et c'est elle qui eteint l'alerte et les relances.
       if (menage.assign) menage.assign.vu_le = (data && data.vu_le) || new Date().toISOString()
-      btnVu.style.display = 'none'
-      showModalSuccess('C\'est noté : votre hôte voit que vous l\'avez vu.')
+      // ⚠ ON REPEINT PAR LE MEME CHEMIN QUE LE RENDU : le bouton devient « ✓ Vu »
+      // parce que `boutonVu` le decide, pas parce qu'on l'a bricole sur place.
+      routeRender()
+      if (feuilleOuverteSur(jourOuvert)) ouvrirJour(jourOuvert)
       await rechargerAssignations()
     } catch (err) {
-      showModalError('Connexion impossible. Réessayez.')
-      btnVu.disabled = false
+      echecVu(bouton, 'Réessayez')
+    } finally {
+      vuEnCours = null
     }
   }
 
@@ -3307,12 +3368,19 @@ if ("serviceWorker" in navigator && !APERCU) {
                // ⚠ LA MEME FICHE QUE LA FEUILLE DU JOUR, par le meme chemin.
                // Deux fiches du meme menage finiraient par dire deux choses
                // differentes.
-               ? `<button type="button" class="agenda-item${l.fait ? ' fait' : ''}` +
-                 `${l.obsolete ? ' obsolete' : ''}" data-mien="${echapper(l.menage.id)}">` +
-                 `<span class="agenda-bien">${echapper(l.bien)}</span>` +
-                 '<span class="agenda-marques">' +
-                 marquesDuMenage(l.menage, l.obsolete, '<span class="agenda-tag fait">FAIT</span>') +
-                 '</span></button>'
+               ? (() => {
+                   const item = `<button type="button" class="agenda-item${l.fait ? ' fait' : ''}` +
+                     `${l.obsolete ? ' obsolete' : ''}" data-mien="${echapper(l.menage.id)}">` +
+                     `<span class="agenda-bien">${echapper(l.bien)}</span>` +
+                     '<span class="agenda-marques">' +
+                     marquesDuMenage(l.menage, l.obsolete, '<span class="agenda-tag fait">FAIT</span>') +
+                     '</span></button>'
+                   // ⚠ MEME REGLE, MEME FABRIQUE que la feuille du jour : deux
+                   // surfaces qui decideraient chacune de leur cote finiraient
+                   // par montrer le bouton a l'une et pas a l'autre.
+                   const vu = boutonVu(l.menage)
+                   return vu ? `<div class="jrangee">${item}${vu}</div>` : item
+                 })()
                // ⚠ ECHAPPEE COMME TOUT CE QUI VIENT DU SERVEUR. Ailleurs dans
                // ce fichier, `data-jour` porte une date fabriquee localement ;
                // ici elle vient de `departure_date`, et les bornes de la fenetre
@@ -4372,6 +4440,13 @@ if ("serviceWorker" in navigator && !APERCU) {
     // s'affichait sous le calendrier, et le toucher ne faisait rien. Le detour
     // par la case du calendrier puis la feuille du jour restait le seul chemin
     // vers « Marquer fait ».
+    const bv = e.target.closest('[data-vu]')
+    if (bv && !bv.disabled) {
+      e.stopPropagation()
+      const mv = tousMesMenagesEnrichis().find(x => x.id === bv.dataset.vu)
+      if (mv) direVu(mv, bv)
+      return
+    }
     const mi = e.target.closest('.agenda-item[data-mien]')
     if (!mi) return
     // ⚠ SANS LE FILTRE DE BIENS, comme dans la feuille du jour : `openModal`

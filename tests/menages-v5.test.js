@@ -339,33 +339,58 @@ test('config : « Ouvrir sa page » garde le mode lecture seule', () => {
   assert.ok(corps.includes('estSaPage(lien)'), 'et on vérifie qu\'il mène bien à SA page')
 })
 
-test('PWA : le bouton « Vu » et son badge lisent LA MÊME règle', () => {
+test('PWA : le bouton « Vu » et son état lisent LA MÊME règle', () => {
   // ⚠ LE DÉFAUT DU 14 OCTOBRE, EN PLUS PETIT. Les cases de jours avaient un
   // rendu et un clic qui avaient chacun leur idée de ce que l'écran montrait :
-  // cliquer lundi envoyait « tous les jours sauf lundi ». Ici, un badge
-  // « À VALIDER » peint par une règle et un bouton affiché par une autre
-  // donneraient le même genre d'écran — un badge sans bouton, ou l'inverse.
+  // cliquer lundi envoyait « tous les jours sauf lundi ». Ici, un bouton peint
+  // par une règle et un geste autorisé par une autre donneraient le même genre
+  // d'écran.
   const src = sansCommentaires(lire('apps/menages/public.html'))
-  assert.ok(/function estAValider \(m\)/.test(src), 'la règle existe, et une seule fois')
-  // Le badge l'appelle…
-  const i = src.indexOf('function badgeOffre')
+  assert.ok(/function estPasVu \(m\)/.test(src), 'la règle existe, et une seule fois')
+  // Une seule fabrique rend le bouton ET la mention « ✓ Vu ».
+  const i = src.indexOf('function boutonVu')
   assert.ok(i > 0)
-  assert.ok(src.slice(i, i + 700).includes('estAValider(m)'), 'le badge lit la règle')
-  // …et le bouton aussi.
-  const j = src.indexOf('btnVu.style.display')
-  assert.ok(j > 0 && src.slice(j, j + 120).includes('estAValider(m)'), 'le bouton lit la MÊME')
-  // Et le geste part sur la bonne action.
+  const fab = src.slice(i, i + 700)
+  assert.ok(fab.includes('estPasVu(m)') && fab.includes('dejaVu(m)'),
+    'la fabrique lit les deux états, et rien d\'autre ne les décide')
+  // Les deux surfaces qui listent ses ménages passent par elle.
+  assert.equal((src.match(/boutonVu\(/g) || []).length, 2,
+    'appelée par la feuille du jour ET la liste des jours, et nulle part ailleurs')
   assert.ok(src.includes("action: 'validerMenage'"))
-  assert.ok(/getElementById\('modal-vu'\)\.addEventListener\('click', validerLeMenage\)/.test(src),
-    'et il a un gestionnaire : pas un bouton mort')
+})
+
+test('PWA : « Vu » est un FRÈRE de la ligne, jamais son enfant', () => {
+  // ⚠ LA LIGNE EST UN `<button>` (elle ouvre la fiche). Un bouton dans un
+  // bouton est invalide, et le clic partirait aux deux : elle toucherait
+  // « Vu » et la fiche s'ouvrirait par-dessus.
+  const src = sansCommentaires(lire('apps/menages/public.html'))
+  assert.ok(/class="jrangee"/.test(src), 'les deux vivent côte à côte dans une rangée')
+  // Et le gestionnaire traite « Vu » AVANT l'ouverture de la fiche.
+  for (const bloc of ['[data-vu]']) {
+    assert.ok(src.includes(`closest('${bloc}')`), `${bloc} est bien écouté`)
+  }
+  const i = src.indexOf("closest('[data-vu]')")
+  const j = src.indexOf("closest('[data-mien]')")
+  assert.ok(i > 0 && j > i, '« Vu » est testé avant la ligne, sinon la fiche s\'ouvre à la place')
+  assert.ok(src.includes('e.stopPropagation()'), 'et le clic ne remonte pas')
+})
+
+test('PWA : la ligne n\'a ni badge ni fond ajouté par ce lot', () => {
+  // ⚠ DEMANDE DE THIERRY (recette du 14 octobre) : sa page revient à ce
+  // qu'elle était, et le SEUL ajout visible est le bouton. Un badge ou un fond
+  // de ligne y avait été introduit puis retiré — ce test empêche le retour.
+  const src = lire('apps/menages/public.html')
+  assert.ok(!src.includes('badge-valider'), 'aucun badge « À VALIDER »')
+  assert.ok(!src.includes('À VALIDER'), 'ni son libellé')
+  assert.ok(!/\.jligne[^{]*\{[^}]*background:\s*#f/i.test(src), 'aucun fond coloré sur la ligne')
 })
 
 test('PWA : « Vu » ne passe JAMAIS par la file hors ligne', () => {
-  // ⚠ `enqueuePending` garde UNE action par ménage : y mettre une validation
+  // ⚠ `enqueuePending` garde UNE action par ménage : y mettre un « vu »
   // effacerait un « fait » qui attend d'être envoyé — elle perdrait son travail
   // au profit de l'accusé de lecture.
   const src = sansCommentaires(lire('apps/menages/public.html'))
-  const i = src.indexOf('async function validerLeMenage')
+  const i = src.indexOf('async function direVu')
   assert.ok(i > 0)
   const corps = src.slice(i, src.indexOf('async function rechargerAssignations'))
   assert.ok(!corps.includes('enqueuePending'), 'aucune mise en file')
@@ -373,11 +398,33 @@ test('PWA : « Vu » ne passe JAMAIS par la file hors ligne', () => {
 })
 
 test('PWA : l\'aperçu de l\'hôte ne montre pas le bouton « Vu »', () => {
-  // Valider depuis l'écran de l'hôte éteindrait l'alerte et les deux relances
-  // sur quelqu'un qui n'a rien lu — la faute exacte que `apercu=1` existe pour
-  // empêcher sur les autres gestes.
+  // Dire « vu » depuis l'écran de l'hôte éteindrait l'alerte et les deux
+  // relances sur quelqu'un qui n'a rien lu — la faute exacte que `apercu=1`
+  // existe pour empêcher sur les autres gestes.
   const src = lire('apps/menages/public.html')
-  assert.ok(/\.apercu #modal-vu \{ display: none !important; \}/.test(src))
+  assert.ok(/\.apercu \.jvu \{ display: none !important; \}/.test(src))
+})
+
+test('vocabulaire : « Vu » / « Pas vu », jamais « validé » à l\'écran', () => {
+  // ⚠ DÉCISION DE THIERRY (recette du 14 octobre). Le SMS doit nommer
+  // EXACTEMENT le bouton qu'elle cherchera : un message qui dit « validez »
+  // devant un bouton qui dit « Vu » lui fait chercher autre chose.
+  const fr = JSON.parse(lire('shared/i18n/fr.json'))
+  assert.equal(fr['menages.type_pas_vu'], 'Pas vu')
+  assert.equal(fr['menages.equipe.config.pas_vu'], 'Pas vu')
+  // ⚠ LE PÉRIMÈTRE EST CELUI QUE THIERRY A NOMMÉ : l'accusé de lecture. Ailleurs
+  // dans l'app, « valider » garde son autre sens — l'hôte qui CONSTATE qu'un
+  // ménage est fait (« Ménage validé »). Confondre les deux renommerait un geste
+  // qui n'a rien à voir.
+  for (const [cle, val] of Object.entries(fr)) {
+    if (!/^menages\./.test(cle)) continue
+    assert.ok(!/non valid|à valider/i.test(String(val)),
+      `« ${cle} » parle encore de validation là où on dit « vu » : ${val}`)
+  }
+  // Et le texte des relances, au mot près.
+  const notif = sansCommentaires(lire('lib/cleaning/notifier-prestataire.js'))
+  assert.ok(notif.includes('Un menage vous a ete attribue le'), 'la phrase de Thierry')
+  assert.ok(notif.includes('Ouvrez votre page et touchez Vu.'), 'et son geste, nommé comme sur la page')
 })
 
 test('config : l\'état « À jour » ne se conclut pas sur une lecture manquante', () => {
