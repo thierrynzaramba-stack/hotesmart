@@ -477,3 +477,28 @@ test('un jeton REFUSE n\'horodate rien', async () => {
   assert.strictEqual(res.code, 401)
   assert.strictEqual(journal.find(a => a.table === 'public_tokens' && a.update), undefined)
 })
+
+test('le mode APERÇU de l\'hôte n\'horodate RIEN', async () => {
+  // ⚠ L'hôte ouvre sa page dans un cadre, depuis sa fiche, pour voir ce
+  // qu'elle voit. Si cette lecture posait la date, elle ferait croire qu'ELLE
+  // a regardé — et l'alerte « Ménage non reçu » se tairait à tort, juste parce
+  // que l'hôte s'est inquiété.
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler({ ...req(), query: { ...req().query, apercu: '1' } }, res)
+  assert.strictEqual(res.code, null, 'la page se sert normalement')
+  assert.ok(Array.isArray(res.body.bookings))
+  assert.strictEqual(journal.find(a => a.table === 'public_tokens' && a.update), undefined)
+})
+
+test('... et une valeur autre que `1` horodate comme d\'habitude', async () => {
+  // La garde est une ÉGALITÉ stricte : `apercu=0`, `apercu=oui` ou un champ
+  // vide ne doivent pas faire taire l'horodatage par accident.
+  for (const v of ['0', 'oui', '']) {
+    const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+    const handler = require('../api/menages-public')
+    await handler({ ...req(), query: { ...req().query, apercu: v } }, reponse())
+    assert.ok(journal.find(a => a.table === 'public_tokens' && a.update), `apercu=${v}`)
+  }
+})

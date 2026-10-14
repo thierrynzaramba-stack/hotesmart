@@ -461,6 +461,19 @@
     .modal-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
     .modal-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 0.5px solid var(--border); }
     .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+    /* ⚠ APERÇU : l'hôte regarde, il n'agit pas. Les gestes qui engagent la
+       prestataire disparaissent — « Fermer » reste, sinon la fenêtre modale
+       devient un piège. Le garde réel est sur `fetch` : ceci évite d'offrir un
+       bouton dont on sait qu'il échouera. */
+    .apercu #modal-prendre, .apercu #modal-retirer, .apercu #modal-accepter,
+    .apercu #modal-refuser, .apercu #modal-done { display: none !important; }
+    .apercu .dispo-case { pointer-events: none; }
+    .apercu .apercu-bandeau { display: flex; }
+    .apercu-bandeau {
+      display: none; align-items: center; justify-content: center; gap: 6px;
+      padding: 7px 10px; background: var(--bg2, #F2F2F2); color: var(--text2);
+      font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--border);
+    }
 
     .modal-error   { background: #FEE2E2; border: 0.5px solid #DC2626; color: #991B1B; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
     .modal-error.visible { display: block; }
@@ -552,6 +565,9 @@
   </style>
 </head>
 <body>
+<!-- Visible seulement en apercu (classe `apercu` sur <html>) : l'hote doit
+     savoir qu'il regarde l'ecran de quelqu'un d'autre, et qu'il n'agit pas. -->
+<div class="apercu-bandeau">Aperçu — lecture seule</div>
 
 <div class="layout">
   <div class="main" style="margin-left:0">
@@ -754,8 +770,45 @@
 </div>
 
 <script type="module">
+// ═══════════════════════════════════════════════════════════════════════════
+// MODE APERÇU (`?apercu=1`) — CETTE PAGE, VUE PAR L'HÔTE, SANS POUVOIR AGIR
+//
+// L'hôte ouvre la page de sa prestataire dans un cadre, depuis sa fiche, pour
+// voir ce qu'elle voit. Quatre choses deviennent alors interdites, et aucune
+// n'est cosmétique :
+//
+//   1. ÉCRIRE. Un clic de l'hôte sur « Je prends » prendrait un ménage À SA
+//      PLACE, sous son identité à elle. Le garde est posé sur `fetch`
+//      lui-même, pas sur les boutons : un bouton qu'on oublie de masquer
+//      reste inoffensif, l'inverse n'est pas vrai.
+//   2. HORODATER SA DERNIÈRE OUVERTURE. C'est le serveur qui refuse (le GET
+//      porte `apercu=1`) : sans cela, l'hôte qui regarde ferait croire qu'ELLE
+//      a regardé, et l'alerte « Ménage non reçu » se tairait à tort.
+//   3. GARDER SON JETON. `getToken()` l'écrit d'ordinaire dans le
+//      `localStorage` — qui est celui du navigateur de l'HÔTE, même origine.
+//      Son lien est son mot de passe : il ne reste pas chez quelqu'un d'autre.
+//   4. S'INSTALLER. Ni service worker, ni manifeste : le navigateur de l'hôte
+//      proposerait d'installer l'application de sa prestataire, et un cache
+//      lui survivrait.
+// ═══════════════════════════════════════════════════════════════════════════
+const APERCU = new URLSearchParams(window.location.search).get('apercu') === '1'
+if (APERCU) {
+  document.documentElement.classList.add('apercu')
+  const vraiFetch = window.fetch.bind(window)
+  window.fetch = (url, options) => {
+    const m = String((options && options.method) || 'GET').toUpperCase()
+    if (m !== 'GET' && m !== 'HEAD') {
+      console.warn('[apercu] écriture refusée :', m, String(url).split('?')[0])
+      return Promise.reject(new Error('Aperçu : lecture seule'))
+    }
+    // Le serveur n'horodate pas une lecture faite par l'hôte.
+    const u = String(url)
+    return vraiFetch(u.includes('apercu=1') ? u : u + (u.includes('?') ? '&' : '?') + 'apercu=1', options)
+  }
+}
+
 // PWA: enregistrement service worker
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && !APERCU) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch((err) => console.warn("SW registration failed:", err));
   });
@@ -823,6 +876,10 @@ if ("serviceWorker" in navigator) {
 
   function getToken() {
     const fromUrl = new URLSearchParams(window.location.search).get('token');
+    // ⚠ EN APERÇU, LE JETON NE SE RANGE NI NE SE REPÊCHE. Il ne doit pas rester
+    // dans le navigateur de l'hôte (même origine), et un jeton déjà rangé là
+    // ferait afficher la page de QUELQU'UN D'AUTRE dans le cadre.
+    if (APERCU) return fromUrl;
     if (fromUrl) {
       try { localStorage.setItem('hotesmart-clean-token', fromUrl); } catch(e) {}
       return fromUrl;
@@ -831,6 +888,7 @@ if ("serviceWorker" in navigator) {
   }
   // PWA: injection du manifest dynamique selon le token courant
   (function injectManifest() {
+    if (APERCU) return;   // on n'installe pas l'application de quelqu'un d'autre
     const t = getToken();
     const link = document.getElementById('dynamic-manifest');
     if (link) link.href = t ? '/api/manifest?token=' + encodeURIComponent(t) : '/api/manifest';

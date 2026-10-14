@@ -859,12 +859,22 @@ module.exports = async function handler(req, res) {
     // LEVE (client indisponible, reseau coupe) ferait tomber tout le GET dans
     // son `catch` general, donc un 500 — l'ecran de la prestataire noir pour
     // un horodatage de confort.
-    try {
-      const { error: errVue } = await supabase.from('public_tokens')
-        .update({ pwa_vue_le: new Date().toISOString() }).eq('token', token)
-      if (errVue) console.error('[menages-public] horodatage de la vue echec:', errVue.message)
-    } catch (eVue) {
-      console.error('[menages-public] horodatage de la vue impossible:', eVue.message)
+    //
+    // ⚠ ET L'APERCU DE L'HOTE N'HORODATE RIEN (`apercu=1`). Depuis sa fiche,
+    // l'hote ouvre la page de sa prestataire dans un cadre pour voir ce qu'elle
+    // voit : si cette lecture posait la date, elle ferait croire qu'ELLE a
+    // regarde, et l'alerte « Menage non recu » se tairait a tort — juste parce
+    // que l'hote s'est inquiete. On ECRIT MOINS quand on n'est pas sur : le
+    // seul abus possible est qu'une prestataire ajoute `apercu=1` a son propre
+    // lien pour ne pas etre horodatee, ce qui ne lui vaudrait que des rappels.
+    if (String(req.query.apercu || '') !== '1') {
+      try {
+        const { error: errVue } = await supabase.from('public_tokens')
+          .update({ pwa_vue_le: new Date().toISOString() }).eq('token', token)
+        if (errVue) console.error('[menages-public] horodatage de la vue echec:', errVue.message)
+      } catch (eVue) {
+        console.error('[menages-public] horodatage de la vue impossible:', eVue.message)
+      }
     }
 
     return res.json({

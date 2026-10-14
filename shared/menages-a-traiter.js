@@ -39,6 +39,36 @@ function jourPlus (iso, n) {
   return d.toISOString().slice(0, 10)
 }
 
+// ⚠ « ELLE NE L'A PAS VU » EST UNE SEULE REGLE, PARTAGEE. L'en-tete de sa
+// fiche (« A jour » / « Menage non recu ») et la bulle « A traiter » posent la
+// MEME question ; seule la fenetre differe — la bulle se borne a 48 h, la fiche
+// regarde tout ce qui est a venir. Deux implementations auraient fini par se
+// contredire sur le meme ecran, et c'est exactement ce qu'un hote ne pardonne
+// pas : un bandeau vert au-dessus d'une ligne rouge sur la meme personne.
+//
+// Rend `null` quand on ne peut RIEN conclure :
+//   - `vueLe === undefined` : on ne sait pas (lien supprime, lecture en panne) ;
+//   - aucun jalon connu : un menage d'office ancien peut n'avoir aucune date
+//     d'attribution, et accuser sur une date qu'on ignore serait au hasard.
+// Rend `true` quand elle est concernee et n'a pas vu ; `false` sinon.
+export function nonVuPar (m, profilId, vueLe) {
+  if (vueLe === undefined || !m) return null
+  const id = String(profilId || '')
+  if (!id) return null
+  const porte = m.porteur && String(m.porteur.id) === id
+  const propose = (m.proposeesA || []).filter(Boolean).some(q => String(q.id) === id)
+  if (!porte && !propose) return false
+  // ⚠ JAMAIS OUVERTE ALERTE SANS CONDITION DE DATE : c'est le cas le plus
+  // grave, et il n'a aucun jalon a comparer.
+  if (vueLe === null) return true
+  const jalons = [porte ? (m.etapes || {}).pris : (m.etapes || {}).propose, m.noteLe]
+    .filter(Boolean).map(x => Date.parse(x)).filter(x => Number.isFinite(x))
+  if (!jalons.length) return null
+  const vu = Date.parse(vueLe)
+  if (!Number.isFinite(vu)) return null
+  return jalons.some(j => j > vu)
+}
+
 // `garde` et `menages` sont ceux de /api/garde ; `biens` donne nom et photo.
 // `maintenant` est injecté (règle du dépôt : un test qui lit l'horloge prend
 // des dates relatives, un test qui injecte le temps prend des dates figées).
@@ -119,18 +149,8 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
         // n'existe plus. Seul un `null` EXPLICITE veut dire « jamais ».
         if (!vid || !Object.prototype.hasOwnProperty.call(vues, vid)) continue
         const vueLe = vues[vid]
-        const porte = m.porteur && String(m.porteur.id) === vid
-        // Ce qui la concerne, et dont la date est CONNUE : son attribution
-        // (prise si elle porte, proposition sinon) et la dernière note.
-        const jalons = [porte ? (m.etapes || {}).pris : (m.etapes || {}).propose, m.noteLe]
-          .filter(Boolean).map(x => Date.parse(x)).filter(x => Number.isFinite(x))
-        // ⚠ JAMAIS OUVERTE ALERTE SANS CONDITION DE DATE : c'est le cas le
-        // plus grave, et il n'a aucun jalon à comparer.
-        // ⚠ UN JALON INCONNU NE DEVINE PAS. Un ménage d'office ancien peut
-        // n'avoir aucune date d'attribution : alerter « elle ne l'a pas vu »
-        // sur une date qu'on ne connaît pas accuserait au hasard.
-        const aVoir = vueLe === null || (jalons.length && jalons.some(j => j > Date.parse(vueLe)))
-        if (!aVoir) continue
+        // La règle vit au-dessus, et la fiche de la personne lit la MÊME.
+        if (nonVuPar(m, vid, vueLe) !== true) continue
         const vu = pasVus.get(vid)
         if (!vu || m.date < vu.date) {
           pasVus.set(vid, { qui: q, date: m.date, bien, bookingId: String(m.bookingId),

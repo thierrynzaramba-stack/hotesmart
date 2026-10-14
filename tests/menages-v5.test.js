@@ -233,9 +233,36 @@ test('config : les quatre périodes de ratio sont celles que la BASE accepte', (
   }
 })
 
-test('config : l\'aperçu de sa page n\'appelle JAMAIS /api/menages-public', () => {
-  // Cet appel est le writer de « vue il y a … » : l'utiliser depuis l'écran de
-  // l'hôte horodaterait une ouverture qu'elle n'a pas faite, et poserait son
-  // jeton dans l'URL d'une iframe.
-  assert.ok(!sansCommentaires(html()).includes('menages-public'))
+test('config : l\'aperçu ouvre SA page en mode `apercu=1`, jamais autrement', () => {
+  // ⚠ L'INVARIANT A CHANGÉ DE FORME, PAS DE FOND (recette du 14 octobre).
+  // L'aperçu était reconstitué par l'écran ; c'est maintenant une iframe sur
+  // son vrai lien. Le danger reste le même : le chargement de sa page est le
+  // writer de sa dernière ouverture. Sans `apercu=1`, l'hôte qui s'inquiète
+  // ferait croire qu'ELLE a regardé, et l'alerte « Ménage non reçu » se
+  // tairait à tort.
+  const src = sansCommentaires(html())
+  assert.ok(src.includes("'apercu=1'"), 'le lien du cadre porte le mode aperçu')
+  // Et l'écran n'appelle toujours pas l'endpoint lui-même.
+  assert.ok(!src.includes('/api/menages-public'))
+})
+
+test('config : le lien du cadre ne survit pas au changement de fiche', () => {
+  // Le cadre d'une personne ne doit jamais s'ouvrir sur la page d'une autre.
+  const src = sansCommentaires(html())
+  const i = src.indexOf('async function ouvrirConfig')
+  assert.ok(i > 0)
+  assert.ok(src.slice(i, i + 700).includes('cfg.lienApercu = null'))
+})
+
+test('PWA : le mode aperçu coupe les écritures, le jeton et l\'installation', () => {
+  // ⚠ LE GARDE EST SUR `fetch`, PAS SUR LES BOUTONS : un bouton qu'on oublie
+  // de masquer reste alors inoffensif ; l'inverse n'est pas vrai.
+  const src = sansCommentaires(lire('apps/menages/public.html'))
+  assert.ok(/window\.fetch = /.test(src), 'les écritures sont refusées à la source')
+  assert.ok(src.includes("if (APERCU) return fromUrl"),
+    'le jeton ne se range pas dans le navigateur de l\'hôte')
+  assert.ok(src.includes('"serviceWorker" in navigator && !APERCU'),
+    'ni service worker en aperçu')
+  assert.ok(/injectManifest[\s\S]{0,200}if \(APERCU\) return/.test(src),
+    'ni manifeste : on n\'installe pas l\'application de quelqu\'un d\'autre')
 })

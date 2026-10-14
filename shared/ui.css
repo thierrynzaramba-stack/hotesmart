@@ -753,7 +753,12 @@ body.men-volet-ouvert { overflow: hidden; }
 .men-volet__liste { flex: 1; overflow-y: auto; padding: 4px 12px; }
 .men-volet__pied { padding: 16px 20px calc(24px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 .men-volet__pied:empty { display: none; }
-.men-eq { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 0 12px; border-radius: 14px; color: var(--ink); }
+/* ⚠ C'EST UN <button>, PAS UN LIEN (il ouvre une fenêtre, il ne navigue pas) —
+   et un bouton arrive avec SES défauts de navigateur : bordure, fond gris,
+   largeur au contenu, police système, texte centré. Sans ces remises à zéro,
+   la ligne ne ressemblait plus à rien (recette du 14 octobre). */
+.men-eq { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 0 12px; border-radius: 14px; color: var(--ink);
+  width: 100%; background: none; border: 0; font: inherit; text-align: start; cursor: pointer; }
 .men-eq:hover { background: var(--surface-2); }
 .men-eq--off .men-eq__nom, .men-eq--off .men-note { color: var(--muted); }
 .men-eq__id { flex: 1; min-width: 0; }
@@ -834,8 +839,12 @@ body.men-volet-ouvert { overflow: hidden; }
 .men-cfg__actions { display: flex; gap: 6px; flex: none; }
 .men-cfg__vue { display: inline-flex; align-items: center; gap: 5px; }
 .men-cfg__vue .icon { width: 14px; height: 14px; }
-/* Jamais ouverte : c'est le cas qui fait téléphoner, il se voit. */
-.men-cfg__vue--jamais { color: var(--danger); font-weight: var(--fw-semibold); }
+/* Deux états, et deux seulement. Le rouge est réservé au cas qui fait
+   téléphoner : elle porte un ménage qu'elle n'a pas vu. « Lien ouvert il y a
+   trois jours » ne disait rien à l'hôte — ce qu'il veut savoir, c'est si ce
+   qu'il vient de confier est ARRIVÉ chez elle (recette du 14 octobre). */
+.men-cfg__vue--ok { color: var(--ok); }
+.men-cfg__vue--ko { color: var(--danger); font-weight: var(--fw-semibold); }
 
 /* La phrase d'état : elle ne se cache jamais, et elle porte son geste. */
 .men-cfg__etat { padding: 0 var(--gap-l) var(--gap-s); }
@@ -898,22 +907,13 @@ body.men-volet-ouvert { overflow: hidden; }
   border: 1.5px solid var(--border); border-radius: 10px; background: var(--surface);
 }
 .men-cfg__cell.is-on { background: var(--ok); border-color: var(--ok); }
-/* Hachuré = elle ne travaille pas ce jour-là. L'information vient de SES
-   règles : c'est ce qui explique un jour confié qui ne produit rien. */
-.men-cfg__cell.is-off {
-  background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--surface) 4px 8px);
-  border-color: var(--line);
-}
-.men-cfg__cell.is-on.is-off {
-  background: repeating-linear-gradient(135deg, var(--ok) 0 4px, var(--ok-soft) 4px 8px);
-  border-color: var(--ok);
-}
+/* ⚠ PLUS DE HACHURES ICI (recette du 14 octobre). Elles disaient « elle ne
+   travaille pas ce jour-là » sur les jours que l'hôte CONFIE : deux sujets
+   différents dans la même case. Ses jours à elle vivent dans la section
+   « Quand elle est là », juste en dessous, et séparément. */
 /* Pas encore réglé : ni coché, ni vide — en pointillé. L'hôte doit voir qu'il
    n'a rien décidé, pas croire qu'il a tout coché. */
 .men-cfg__cell.is-vierge { border-style: dashed; border-color: var(--muted); background: var(--surface); }
-.men-cfg__cell.is-vierge.is-off {
-  background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--surface) 4px 8px);
-}
 .men-cfg__cell:disabled { cursor: default; }
 .men-cfg__av { margin: 8px 0 0; font-size: var(--fs-caption); color: var(--danger); }
 .men-cfg__libres { margin-block-start: 10px; }
@@ -1023,20 +1023,22 @@ body.men-volet-ouvert { overflow: hidden; }
    viennent du planning de l'hôte — jamais d'un appel à sa page avec son jeton,
    qui horodaterait une ouverture qu'elle n'a pas faite. */
 .men-cfg__voit { display: flex; gap: var(--gap-l); align-items: flex-start; flex-wrap: wrap; }
+/* Le cadre de téléphone : SA page, en lecture seule. La hauteur est celle d'un
+   téléphone, pas celle d'un fragment — un cadre trop court ferait défiler deux
+   fois (la fenêtre, puis la page dedans) pour voir trois lignes. */
 .men-cfg__tel {
-  width: 300px; flex: none; padding: 16px 14px 18px;
+  width: 320px; height: 580px; flex: none; display: block;
   border: 10px solid var(--ink); border-radius: 36px; background: var(--surface);
 }
-.men-cfg__telTete { display: flex; flex-direction: column; gap: 2px; margin-block-end: 12px; }
-.men-cfg__telListe { list-style: none; margin: 0; padding: 0; }
-.men-cfg__apercu { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-block-end: 1px solid var(--line); }
-.men-cfg__apercuPhoto { width: 36px; height: 36px; border-radius: 10px; flex: none; }
-.men-cfg__apercuTxt { display: flex; flex-direction: column; min-width: 0; }
+.men-cfg__tel--vide { display: flex; align-items: center; justify-content: center; padding: 16px; }
 .men-cfg__voitTxt { flex: 1; min-width: 220px; }
 .men-cfg__voitBtns { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-block-start: 14px; }
 
 /* Téléphone : plein écran, et les colonnes passent en une seule. */
 @media (max-width: 899px) {
+  /* Le cadre prend la largeur, avec une hauteur qui laisse voir le texte et
+     les boutons sous lui. */
+  .men-cfg__tel { width: 100%; height: 70vh; }
   .men-cfg {
     inset: 0; transform: none; width: 100%; max-height: none; height: 100%;
     border-radius: 0;
@@ -1048,10 +1050,13 @@ body.men-volet-ouvert { overflow: hidden; }
   /* Le nom et son interrupteur sur la MÊME ligne : laissés au fil du flex, le
      bouton tombait seul sous le nom, à gauche, et ne se lisait plus comme
      « confier ce bien ». Les deux menus passent dessous, en pleine largeur. */
-  .men-cfg__bienTete { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; }
-  .men-cfg__bienNom { min-width: 0; order: 1; }
-  .men-cfg__bienTete > .men-cfg__sw { order: 2; }
-  .men-cfg__bienTete .men-cfg__seg { order: 3; grid-column: 1 / -1; justify-self: start; }
+  /* Le nom d'abord, son menu dessous et en pleine largeur : les quatre choix
+     portent des phrases entières, qui ne tiennent pas à côté d'un nom de bien
+     sur 390 px. ⚠ Les règles `order` de l'interrupteur d'avant faisaient
+     passer le menu AVANT le nom (recette du 14 octobre). */
+  .men-cfg__bienTete { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  .men-cfg__bienNom { min-width: 0; }
+  .men-cfg__choix { width: 100%; }
   /* ⚠ LES SEPT CASES RESTENT ATTEIGNABLES AU DOIGT : elles passent sous le nom
      du bien et prennent toute la largeur, au lieu de se tasser à droite. */
   .men-cfg__cells, .men-cfg__joursTete { grid-template-columns: repeat(7, 1fr); width: 100%; margin-inline: 0; }

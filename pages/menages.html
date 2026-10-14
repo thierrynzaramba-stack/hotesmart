@@ -160,7 +160,7 @@ import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVer
 import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
 import { bandeJoursHtml, classesWE as classesWEDuJour } from '/shared/bande-jours.js'
-import { lignesATraiter } from '/shared/menages-a-traiter.js'
+import { lignesATraiter, nonVuPar } from '/shared/menages-a-traiter.js'
 import { etatDeLaPrestataire, defautDeLaLiaison } from '/shared/presta-etat.js'
 import { hsBus } from '/shared/hs-bus.js'
 import { brancherReordonnancement } from '/shared/reordonner-biens.js'
@@ -1254,6 +1254,9 @@ const cfg = {
   fiche: null,        // réponse de /api/menages?presta=… (null = pas lu)
   dispo: null,        // réponse de /api/disponibilites (null = pas lu)
   eval: null,         // réglages d'évaluation (bus avis), null = pas lu
+  lienApercu: null,   // le lien du cadre, demandé à l'ouverture de l'onglet
+  lienEnCours: false,
+  lienErreur: false,
   erreur: false,
   occupe: false
 }
@@ -1262,6 +1265,9 @@ async function ouvrirConfig (profilId) {
   cfg.profilId = String(profilId)
   cfg.onglet = 'cal'
   cfg.fiche = null; cfg.dispo = null; cfg.eval = null; cfg.erreur = false
+  // ⚠ LE LIEN NE SURVIT PAS À LA FICHE : le cadre d'une personne ne doit
+  // jamais s'ouvrir sur la page d'une autre.
+  cfg.lienApercu = null; cfg.lienErreur = false
   $('[data-bind="cfg"]').hidden = false
   $('[data-bind="cfg-voile"]').hidden = false
   document.body.classList.add('men-cfg-ouvert')
@@ -1382,17 +1388,30 @@ function renderConfig () {
   I18n.apply(zone)
 }
 
-// « Vue il y a … », avec la date exacte au survol. ⚠ `undefined` (on ne sait
-// pas) ne se dit pas comme `null` (jamais ouverte) : affirmer « jamais
-// ouverte » sur une lecture manquée enverrait l'hôte téléphoner pour rien.
+// ⚠ DEUX ÉTATS, PAS UNE DATE (décision de Thierry, recette du 14 octobre).
+// « Lien ouvert il y a trois jours » ne dit rien à l'hôte : ce qu'il veut
+// savoir, c'est si ce qu'il vient de lui confier est ARRIVÉ chez elle. La date
+// exacte reste, au survol seulement.
+//
+// ⚠ ET LA RÈGLE EST CELLE DE LA BULLE, à la fenêtre près (`nonVuPar`, module
+// partagé). La bulle se borne à 48 h — c'est une alerte, elle ne crie que sur
+// ce qui presse ; la fiche regarde TOUT ce qui est à venir, parce qu'on vient
+// de l'ouvrir pour cette personne-là. Deux implémentations finiraient par
+// afficher un bandeau vert au-dessus d'une ligne rouge sur la même personne.
+//
+// ⚠ ON NE SAIT PAS ≠ TOUT VA BIEN : sans `vue_le` (lien supprimé, lecture en
+// panne), on n'affiche RIEN plutôt qu'un « À jour » rassurant et faux.
 function vueHtml (p) {
   if (!Object.prototype.hasOwnProperty.call(p, 'vue_le')) return ''
-  if (!p.vue_le) {
-    return `<span class="men-cfg__vue men-cfg__vue--jamais">${icone('i-phone-off')}
-      <span data-i18n="menages.equipe.config.vue_jamais"></span></span>`
+  const nonVus = (etat.menages || []).filter(m => m.date >= AUJOURDHUI && !m.fait &&
+    nonVuPar(m, p.id, p.vue_le) === true)
+  const titre = p.vue_le ? dateHeure(p.vue_le) : t('menages.equipe.config.vue_jamais')
+  if (!nonVus.length) {
+    return `<span class="men-cfg__vue men-cfg__vue--ok" title="${esc(titre)}">${icone('i-check')}
+      <span data-i18n="menages.equipe.config.a_jour"></span></span>`
   }
-  return `<span class="men-cfg__vue" title="${esc(dateHeure(p.vue_le))}">${icone('i-phone')}
-    <span>${esc(t('menages.equipe.config.vue', { quand: ilYa(p.vue_le) }))}</span></span>`
+  return `<span class="men-cfg__vue men-cfg__vue--ko" title="${esc(titre)}">${icone('i-phone-off')}
+    <span data-i18n="menages.equipe.config.non_recu"></span></span>`
 }
 
 // ⚠ VERT OU ROUGE, JAMAIS D'AMBRE ICI (décision de Thierry). `rien` est
@@ -1482,89 +1501,83 @@ function renderCorpsConfig () {
 // retirerait tous ses jours sans que l'hôte l'ait voulu.
 const joursDuBien = (l) => (Array.isArray(l.weekdays) ? l.weekdays : [0, 1, 2, 3, 4, 5, 6])
 
-// Les jours où elle travaille, tous biens confondus : l'UNION de ses règles
-// actives. Sert à hachurer les cases confiées un jour où elle n'est pas là.
-// ⚠ AUCUNE RÈGLE = DISPONIBLE SEPT JOURS SUR SEPT (règle du moteur) : rien
-// n'est hachuré, et surtout pas tout.
-function joursOuElleTravaille () {
-  const regles = ((cfg.dispo || {}).regles || []).filter(r => r.active !== false)
-  if (!regles.length) return null
-  const u = new Set()
-  for (const r of regles) for (const j of (r.jours || [])) u.add(Number(j))
-  // Une règle illisible (`jours: null`) ne permet aucune conclusion : on
-  // préfère ne rien hachurer plutôt que d'affirmer une absence.
-  if (regles.some(r => !Array.isArray(r.jours))) return null
-  return u
-}
-
 function htmlOngletCal () {
   const f = cfg.fiche
   const peut = (f.droits || {}).prestataires === 'write'
   const parId = new Map((f.liaisons || []).map(l => [String(l.property_id), l]))
-  const travaille = joursOuElleTravaille()
   const confies = [], libres = []
   for (const b of (f.biens || [])) {
     const l = parId.get(String(b.id))
     if (l && l.active) confies.push({ b, l }); else libres.push({ b, l: l || null })
   }
 
-  const ligneBien = ({ b, l }) => {
-    const jours = joursDuBien(l)
-    // ⚠ « PAS ENCORE RÉGLÉ » NE SE PEINT PAS COMME « TOUS LES JOURS ».
-    // `weekdays = null` vaut bien « attitrée tous les jours » pour le moteur —
-    // mais pour une liaison « elle confirme », elle ne sera JAMAIS sollicitée
-    // (la file ne retient que les jours explicitement réglés). Sept cases
-    // vertes au-dessus de « ses jours ne sont pas réglés » faisait dire à
-    // l'écran deux choses contraires, sur le réglage même qui bloque Lola.
-    // L'état vierge se montre donc comme tel ; le premier clic matérialise les
-    // sept jours puis en retire un, jamais l'inverse.
-    const vierge = !Array.isArray(l.weekdays)
-    const cases = CFG_JOURS.map(j => {
-      const on = jours.includes(j.n)
-      // Hachuré = elle ne travaille pas ce jour-là. L'information est RÉELLE
-      // (ses règles), et elle explique pourquoi un jour confié ne produit rien.
-      const horsJours = travaille && !travaille.has(j.n)
-      return `<button type="button" class="men-cfg__cell${on && !vierge ? ' is-on' : ''}${
-        vierge ? ' is-vierge' : ''}${horsJours ? ' is-off' : ''}"
-        aria-pressed="${on && !vierge}" ${peut ? '' : 'disabled'}
-        data-cfg-jour="${b.id}:${j.n}" aria-label="${esc(t('menages.jour_' + j.n))}"></button>`
-    }).join('')
-    const seg = (nom, valeurs, courant, attr) => `<div class="men-cfg__seg" role="group">${valeurs.map(v =>
-      `<button type="button" class="${String(v.v) === String(courant) ? 'is-on' : ''}" ${peut ? '' : 'disabled'}
-        data-${attr}="${b.id}:${v.v}">${esc(v.l)}</button>`).join('')}</div>`
-    // ⚠ LE RANG 3 S'AFFICHE S'IL EXISTE (décision de Thierry) : l'écran n'en
-    // propose que deux, mais il ne mentira pas sur une liaison déjà posée.
-    const rangs = [1, 2].concat(l.rang > 2 ? [l.rang] : []).map(r => ({ v: r, l: String(r) }))
-    return `<div class="men-cfg__bien">
-      <div class="men-cfg__bienTete">
-        <span class="men-cfg__bienNom">${esc(b.nom)}</span>
-        ${seg('eng', [{ v: '0', l: t('menages.equipe.config.doffice') },
-                      { v: '1', l: t('menages.equipe.config.confirme') }],
-              l.requires_ack ? '1' : '0', 'cfg-eng')}
-        ${seg('rang', rangs, l.rang, 'cfg-rang')}
-        <button type="button" class="men-cfg__sw is-on" role="switch" aria-checked="true" ${peut ? '' : 'disabled'}
-                data-cfg-bien="${b.id}" aria-label="${esc(t('menages.equipe.config.confier', { bien: b.nom }))}"></button>
-      </div>
-      <div class="men-cfg__cells">${cases}</div>
-      ${avertissementBien(l)}
-    </div>`
+  // ⚠ UN SEUL MENU PAR BIEN (décision de Thierry, recette du 14 octobre).
+  // « D'office / Elle confirme » et le rang étaient DEUX réglages pour une
+  // seule question — « qu'est-ce que je lui confie sur ce bien ? » — et leur
+  // combinaison se lisait mal : rien, à l'écran, ne disait que le rang ne sert
+  // qu'à celles qui confirment. Les quatre choix recouvrent exactement ce qui
+  // existe en base (relevé du 14 octobre 2026 : 0 combinaison hors de ces
+  // quatre sur les 15 liaisons de production).
+  //
+  // ⚠ ET LA CINQUIÈME OPTION N'EST PAS DÉCORATIVE : une liaison « d'office en
+  // rang 2 », ou un rang 3, reste possible en base. Elle s'affiche TELLE
+  // QUELLE plutôt que d'être silencieusement réécrite par le premier
+  // enregistrement — un écran qui ne sait pas montrer un état ne doit pas
+  // l'effacer.
+  const choixDuBien = (l) => {
+    if (!l || !l.active) return 'non'
+    if (l.requires_ack === false) return l.rang === 1 ? 'office' : 'autre'
+    if (l.rang === 1) return 'p1'
+    if (l.rang === 2) return 'p2'
+    return 'autre'
   }
 
-  const ligneLibre = ({ b }) => `<div class="men-cfg__bien men-cfg__bien--off">
-    <div class="men-cfg__bienTete">
-      <span class="men-cfg__bienNom">${esc(b.nom)}</span>
-      <button type="button" class="men-cfg__sw" role="switch" aria-checked="false" ${peut ? '' : 'disabled'}
-              data-cfg-bien="${b.id}" aria-label="${esc(t('menages.equipe.config.confier', { bien: b.nom }))}"></button>
-    </div>
-  </div>`
+  const ligneBien = ({ b, l }) => {
+    // ⚠ UN BIEN PEUT N'AVOIR AUCUNE LIAISON : il n'a jamais été confié à cette
+    // personne. Le menu existe quand même — c'est par lui qu'on le lui confie —
+    // mais il n'y a ni jours, ni avertissement à lire.
+    const confie = !!(l && l.active)
+    const choix = choixDuBien(l)
+    const jours = l ? joursDuBien(l) : []
+    const cases = CFG_JOURS.map(j => {
+      const on = jours.includes(j.n)
+      // ⚠ PAS ENCORE RÉGLÉ ≠ TOUS LES JOURS, MAIS SEULEMENT QUAND ÇA BLOQUE.
+      // `weekdays = null` vaut « tous les jours » pour le moteur. Pour un bien
+      // ATTRIBUÉ D'OFFICE, c'est vrai sans réserve : elle les reçoit tous, et
+      // les sept cases sont pleines. Pour un bien PROPOSÉ, la file ne retient
+      // que les jours explicitement réglés — elle ne sera donc jamais
+      // sollicitée, et montrer sept cases pleines au-dessus de « ses jours ne
+      // sont pas réglés » ferait dire à l'écran deux choses contraires.
+      const vierge = !!l && l.requires_ack !== false && !Array.isArray(l.weekdays)
+      return `<button type="button" class="men-cfg__cell${on && !vierge ? ' is-on' : ''}${
+        vierge ? ' is-vierge' : ''}" aria-pressed="${on && !vierge}" ${peut ? '' : 'disabled'}
+        data-cfg-jour="${b.id}:${j.n}" aria-label="${esc(t('menages.jour_' + j.n))}"></button>`
+    }).join('')
+    const options = ['office', 'p1', 'p2', 'non'].map(v =>
+      `<option value="${v}"${choix === v ? ' selected' : ''}>${esc(t('menages.equipe.config.choix_' + v))}</option>`)
+    if (choix === 'autre' && l) {
+      options.unshift(`<option value="autre" selected>${esc(t('menages.equipe.config.choix_autre', {
+        mode: t(l.requires_ack === false ? 'menages.equipe.config.doffice' : 'menages.equipe.config.confirme'),
+        rang: l.rang }))}</option>`)
+    }
+    return `<div class="men-cfg__bien${confie ? '' : ' men-cfg__bien--off'}">
+      <div class="men-cfg__bienTete">
+        <span class="men-cfg__bienNom">${esc(b.nom)}</span>
+        <select class="men-cfg__choix" ${peut ? '' : 'disabled'} data-cfg-choix="${b.id}"
+                aria-label="${esc(t('menages.equipe.config.confier', { bien: b.nom }))}">${options.join('')}</select>
+      </div>
+      ${confie ? `<div class="men-cfg__cells">${cases}</div>` : ''}
+      ${confie ? avertissementBien(l) : ''}
+    </div>`
+  }
 
   return `
   <section class="men-cfg__sec" data-cfg-sec="biens">
     <h3 class="men-cfg__h3" data-i18n="menages.equipe.config.confie_titre"></h3>
-    <p class="caption muted men-cfg__aide" data-i18n="menages.equipe.config.confie_aide"></p>
+    <p class="caption muted men-cfg__aide" data-i18n="menages.equipe.config.jours_aide"></p>
     <div class="men-cfg__joursTete">${CFG_JOURS.map(j => `<span>${esc(j.c)}</span>`).join('')}</div>
-    ${confies.map(ligneBien).join('') || `<p class="caption muted" data-i18n="menages.equipe.config.aucun_bien"></p>`}
-    ${libres.length ? `<div class="men-cfg__libres">${libres.map(ligneLibre).join('')}</div>` : ''}
+    ${confies.concat(libres).map(ligneBien).join('')
+      || `<p class="caption muted" data-i18n="menages.equipe.config.aucun_bien"></p>`}
   </section>
 
   <section class="men-cfg__sec" data-cfg-sec="jours">
@@ -1962,48 +1975,38 @@ function htmlRetirer () {
 
 // ─── Onglet « Ce qu'elle voit » ─────────────────────────────────────────────
 //
-// ⚠ AUCUN APPEL À SA PAGE, ET AUCUN JETON DANS LE DOM. L'aperçu est peint avec
-// les données de l'HÔTE (le planning déjà chargé), pas en ouvrant
-// `/api/menages-public` avec son jeton : cet appel horodaterait une ouverture
-// qu'elle n'a pas faite — il est le writer de « vue il y a … » — et poserait
-// son mot de passe dans l'URL d'une iframe.
+// ⚠ SA VRAIE PAGE, DANS UN CADRE, EN LECTURE SEULE (décision de Thierry,
+// recette du 14 octobre). Un aperçu reconstitué à partir des données de l'hôte
+// racontait ce que sa page MONTRERAIT ; il ne pouvait pas dire ce qu'elle
+// montre vraiment — ni sa mise en page, ni ses onglets, ni ce que ses réglages
+// y changent. Une iframe sur son propre lien, oui.
+//
+// ⚠ TROIS CHOSES QUE `?apercu=1` FERME, côté `apps/menages/public.html` :
+//   - toute ÉCRITURE (garde posée sur `fetch`, pas sur les boutons : un bouton
+//     qu'on oublie de masquer reste alors inoffensif) ;
+//   - l'HORODATAGE de sa dernière ouverture (le serveur refuse) : sans cela,
+//     l'hôte qui s'inquiète ferait croire qu'ELLE a regardé, et l'alerte
+//     « Ménage non reçu » se tairait à tort ;
+//   - la MÉMOIRE du jeton dans le navigateur de l'hôte (même origine), le
+//     service worker et le manifeste.
+//
+// ⚠ CE QUE CELA COÛTE, ET C'EST ASSUMÉ : le jeton entre dans l'attribut `src`
+// de l'iframe, donc dans le DOM de l'écran de l'hôte. Il n'y entre qu'à
+// l'ouverture de cet onglet-là, jamais au chargement de la fiche.
 function htmlOngletVoit () {
   const f = cfg.fiche
   const p = f.personne
   const peut = (f.droits || {}).equipe === 'write'
-  const horizon = f.lien ? f.lien.visibility_days : null
-  // ⚠ L'APERÇU NE PROMET QUE CE QU'IL COUVRE (constat de la revue de ac28b1f).
-  // Il est peint avec le planning DÉJÀ CHARGÉ par l'hôte — 30 jours par
-  // défaut. Annoncer « les 90 prochains jours » sur une fenêtre d'un mois
-  // faisait lire « elle ne voit presque rien » sur un réglage parfaitement
-  // large. On annonce donc ce qu'on montre, et on dit quand c'est plus court
-  // que son horizon réel.
-  const charges = (etat.jours || []).length || 30
-  const couvert = horizon ? Math.min(horizon, charges) : charges
-  const lignes = apercuMenages(p.id, couvert)
-  const corps = lignes.length
-    ? lignes.map(m => `<li class="men-cfg__apercu">
-        <span class="cal-photo men-cfg__apercuPhoto">${photoBien(m.bien || {})}</span>
-        <span class="men-cfg__apercuTxt">
-          <b>${esc(dateCourte(m.date))}</b>
-          <span class="caption muted">${esc(m.bienNom)}${m.role === 'propose'
-            ? ' · ' + esc(t('menages.equipe.config.apercu_propose')) : ''}</span>
-        </span>
-      </li>`).join('')
-    : `<li class="caption muted" data-i18n="menages.equipe.config.apercu_vide"></li>`
+  const cadre = p.a_un_lien
+    ? (cfg.lienApercu
+        ? `<iframe class="men-cfg__tel" src="${esc(cfg.lienApercu)}" loading="lazy"
+             referrerpolicy="no-referrer" title="${esc(t('menages.equipe.config.sa_page'))}"></iframe>`
+        : `<div class="men-cfg__tel men-cfg__tel--vide"><span class="caption muted">${esc(
+             cfg.lienErreur ? t('menages.equipe.config.apercu_ko') : t('common.loading'))}</span></div>`)
+    : ''
   return `
   <section class="men-cfg__sec men-cfg__voit">
-    <div class="men-cfg__tel" aria-hidden="false">
-      <div class="men-cfg__telTete">
-        <b>${esc(t('menages.equipe.config.apercu_bonjour', { prenom: p.prenom || '' }))}</b>
-        <span class="caption muted">${esc(horizon
-          ? t('menages.equipe.config.apercu_horizon', { n: horizon })
-          : t('menages.equipe.config.lien_illisible'))}</span>
-      </div>
-      <ul class="men-cfg__telListe">${corps}</ul>
-      ${horizon && couvert < horizon
-        ? `<p class="caption muted">${esc(t('menages.equipe.config.apercu_borne', { n: couvert }))}</p>` : ''}
-    </div>
+    ${cadre}
     <div class="men-cfg__voitTxt">
       <h3 class="men-cfg__h3" data-i18n="menages.equipe.config.sa_page"></h3>
       <p class="caption muted" data-i18n="menages.equipe.config.sa_page_aide"></p>
@@ -2021,28 +2024,25 @@ function htmlOngletVoit () {
   </section>`
 }
 
-// Ce qu'elle verra dans sa page : ses ménages à venir, dans SON horizon.
-// ⚠ On ne montre QUE ce que l'hôte voit déjà : si son périmètre est partiel,
-// l'aperçu l'est aussi — et c'est honnête, l'écran ne prétend pas être sa page.
-function apercuMenages (profilId, horizon) {
-  const fin = horizon ? jourPlusConfig(AUJOURDHUI, horizon) : jourPlusConfig(AUJOURDHUI, 30)
-  const out = []
-  for (const m of (etat.menages || [])) {
-    if (m.date < AUJOURDHUI || m.date > fin) continue
-    const porte = m.porteur && String(m.porteur.id) === String(profilId)
-    const propose = (m.proposeesA || []).some(q => q && String(q.id) === String(profilId))
-    if (!porte && !propose) continue
-    const bien = (etat.biens || []).find(b => String(b.id) === String(m.propertyId))
-    out.push({ date: m.date, bienNom: bien ? bien.name : '', bien: bien ? { photo: bien.photo } : {},
-               role: porte ? 'porteur' : 'propose' })
+// Le lien du cadre n'est demandé QU'À L'OUVERTURE de cet onglet, et une seule
+// fois par fiche : c'est son mot de passe, il n'a pas à voyager pour les deux
+// autres onglets.
+async function chargerApercu () {
+  if (cfg.lienApercu || cfg.lienEnCours) return
+  const id = cfg.profilId
+  cfg.lienEnCours = true
+  try {
+    const lien = await lienDElle()
+    if (cfg.profilId !== id) return
+    cfg.lienApercu = lien + (lien.includes('?') ? '&' : '?') + 'apercu=1'
+    cfg.lienErreur = false
+  } catch (e) {
+    logger.error('Menages', 'aperçu', e)
+    if (cfg.profilId === id) cfg.lienErreur = true
+  } finally {
+    cfg.lienEnCours = false
   }
-  return out.sort((a, b) => a.date < b.date ? -1 : 1).slice(0, 8)
-}
-
-const jourPlusConfig = (iso, n) => {
-  const d = new Date(iso + 'T12:00:00Z')
-  d.setUTCDate(d.getUTCDate() + n)
-  return d.toISOString().slice(0, 10)
+  if (cfg.onglet === 'voit') renderConfig()
 }
 
 // ─── Les gestes ─────────────────────────────────────────────────────────────
@@ -2088,68 +2088,25 @@ function brancherConfig () {
   $('[data-bind="cfg-voile"]').addEventListener('click', fermerConfig)
 
   zone.addEventListener('click', (ev) => {
-    const el = ev.target.closest('[data-cfg-onglet],[data-cfg-fix],[data-cfg-bien],[data-cfg-eng],' +
-      '[data-cfg-rang],[data-cfg-jour],[data-cfg-self],[data-cfg-parbien],[data-cfg-vu],' +
+    const el = ev.target.closest('[data-cfg-onglet],[data-cfg-fix],' +
+      '[data-cfg-jour],[data-cfg-self],[data-cfg-parbien],[data-cfg-vu],' +
       '[data-cfg-visibles],[data-cfg-ratio],[data-cfg-sms],[data-cfg-mail],[data-cfg-eval-scope],' +
       '[data-cfg-eval-power],[data-cfg-retirer],[data-cfg-envoyer],[data-cfg-ouvrir],' +
       '[data-cfg-nouveau],[data-cfg-conge-new],[data-cfg-conge-off]')
     if (!el || el.disabled) return
     const d = el.dataset
 
-    if (d.cfgOnglet) { cfg.onglet = d.cfgOnglet; renderConfig(); return }
+    if (d.cfgOnglet) {
+      cfg.onglet = d.cfgOnglet
+      renderConfig()
+      if (cfg.onglet === 'voit') chargerApercu()
+      return
+    }
     if (d.cfgFix) {
       cfg.onglet = 'cal'
       renderConfig()
       const cible = $(`[data-cfg-sec="${d.cfgFix === 'biens' ? 'biens' : 'biens'}"]`)
       if (cible) cible.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      return
-    }
-
-    // ── Ce que vous lui confiez ──
-    if (d.cfgBien) {
-      const id = d.cfgBien
-      const l = (cfg.fiche.liaisons || []).find(x => String(x.property_id) === String(id))
-      const actifAvant = !!(l && l.active)
-      // ⚠ RETIRER LE DERNIER BIEN EST REFUSÉ, et le message dit quoi faire :
-      // un périmètre vide ne retire pas l'accès, il l'OUVRE à tous les biens du
-      // compte (convention `property_ids`). Pour retirer quelqu'un, il y a
-      // « Retirer de l'équipe », qui supprime la ligne entière.
-      // ⚠ CE REFUS COMPTE DES LIAISONS BORNÉES AU PÉRIMÈTRE DE L'APPELANT
-      // (constat de la revue de ac28b1f) : un délégué limité au bien A se
-      // voyait refuser le retrait de A sur une prestataire qui sert aussi B et
-      // C. Il n'a de sens que pour qui voit l'ENSEMBLE — et c'est aussi le
-      // seul cas où le périmètre deviendrait vraiment vide.
-      const actifsApres = (cfg.fiche.liaisons || []).filter(x => x.active).length - (actifAvant ? 1 : 0)
-      if (actifAvant && actifsApres === 0 && (cfg.fiche.droits || {}).perimetre_complet) {
-        toast(t('menages.equipe.config.dernier_bien')); return
-      }
-      envoyerLiaisons(b => (String(b.property_id) === String(id) ? { ...b, active: !actifAvant } : b))
-      return
-    }
-    if (d.cfgEng) {
-      const [id, v] = d.cfgEng.split(':')
-      envoyerLiaisons(b => (String(b.property_id) === id ? { ...b, requires_ack: v === '1' } : b))
-      return
-    }
-    if (d.cfgRang) {
-      const [id, v] = d.cfgRang.split(':')
-      envoyerLiaisons(b => (String(b.property_id) === id ? { ...b, rang: Number(v) } : b))
-      return
-    }
-    if (d.cfgJour) {
-      const [id, j] = d.cfgJour.split(':')
-      const n = Number(j)
-      envoyerLiaisons(b => {
-        if (String(b.property_id) !== id) return b
-        // ⚠ `null` DEVIENT EXPLICITE AU PREMIER CLIC : « tous les jours » se
-        // matérialise en liste, puis le jour cliqué en sort. Sans cela, le
-        // premier clic enverrait `[un seul jour]` et retirerait les six autres
-        // d'un coup, sans que l'hôte l'ait voulu.
-        const jours = Array.isArray(b.weekdays) ? [...b.weekdays] : [0, 1, 2, 3, 4, 5, 6]
-        const i = jours.indexOf(n)
-        if (i >= 0) jours.splice(i, 1); else jours.push(n)
-        return { ...b, weekdays: jours.sort((a, c) => a - c) }
-      })
       return
     }
 
@@ -2231,6 +2188,31 @@ function brancherConfig () {
   // Les champs de texte s'enregistrent à la sortie du champ, et seulement si la
   // valeur a changé : une écriture par frappe enverrait une requête par lettre.
   zone.addEventListener('change', (ev) => {
+    // ── Le menu d'un bien : UN geste, quatre choix ──
+    const menu = ev.target.closest('[data-cfg-choix]')
+    if (menu && !menu.disabled) {
+      const id = menu.dataset.cfgChoix
+      const v = menu.value
+      // ⚠ « Tel quel » N'EST PAS UN CHOIX : c'est l'état lu en base, affiché
+      // pour ne pas l'effacer. Le sélectionner ne doit rien écrire.
+      if (v === 'autre') return
+      const l = (cfg.fiche.liaisons || []).find(x => String(x.property_id) === String(id))
+      const actifAvant = !!(l && l.active)
+      // ⚠ RETIRER LE DERNIER BIEN EST REFUSÉ, et le message dit quoi faire : un
+      // périmètre vide ne retire pas l'accès, il l'OUVRE à tous les biens du
+      // compte. Le refus ne vaut que pour qui voit l'ENSEMBLE des biens —
+      // sinon un délégué ne pourrait pas retirer son seul bien visible.
+      const actifsApres = (cfg.fiche.liaisons || []).filter(x => x.active).length - (actifAvant ? 1 : 0)
+      if (v === 'non' && actifAvant && actifsApres === 0 && (cfg.fiche.droits || {}).perimetre_complet) {
+        toast(t('menages.equipe.config.dernier_bien')); renderConfig(); return
+      }
+      const vers = { office: { active: true, requires_ack: false, rang: 1 },
+                     p1: { active: true, requires_ack: true, rang: 1 },
+                     p2: { active: true, requires_ack: true, rang: 2 },
+                     non: { active: false } }[v]
+      envoyerLiaisons(b => (String(b.property_id) === String(id) ? { ...b, ...vers } : b))
+      return
+    }
     const el = ev.target.closest('[data-cfg-champ]')
     if (!el || el.disabled) return
     const cle = el.dataset.cfgChamp
