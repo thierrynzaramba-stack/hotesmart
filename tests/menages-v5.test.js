@@ -164,3 +164,78 @@ test('ménages : le sprite porte les icônes neuves (bouclier barré, pouces)', 
     assert.ok(sprite.includes(`id="${id}"`), `${id} absent du sprite`)
   }
 })
+
+// ─── La fenêtre de configuration d'une prestataire ─────────────────────────
+//
+// ⚠ CE QUE CES GARDE-FOUS TIENNENT. Cette fenêtre écrit TOUT ce qu'un hôte
+// règle sur une personne. Trois promesses s'y perdraient sans bruit : que son
+// JETON ne traverse jamais l'écran, que la phrase d'état vienne du MOTEUR et
+// non d'une approximation locale, et que chaque écriture passe par l'endpoint
+// qui en est le writer.
+
+test('config : la phrase d\'état vient du module du moteur, elle n\'est pas recalculée', () => {
+  const src = sansCommentaires(html())
+  assert.ok(/import \{[^}]*etatDeLaPrestataire[^}]*\} from '\/shared\/presta-etat\.js'/.test(src),
+    'le module d\'état doit être importé')
+  assert.ok(src.includes('etatDeLaPrestataire({'), 'et appelé')
+  // La règle des trois états de `weekdays` ne se réécrit pas dans la page :
+  // elle est dans `defautDeLaLiaison`, qui est importé.
+  assert.ok(/import \{[^}]*defautDeLaLiaison[^}]*\}/.test(src))
+})
+
+test('config : AUCUNE écriture directe en base, chaque geste passe par son endpoint', () => {
+  const src = sansCommentaires(html())
+  // L'écran d'avant écrivait `public_tokens` et `menage_reglages` depuis le
+  // navigateur, sous RLS. Ici, le serveur le fait — un writer client de moins.
+  assert.ok(!/supabase\s*\.\s*from\s*\(/.test(src), 'aucune table touchée depuis le navigateur')
+  for (const action of ['reglages_lien', 'liaisons', 'reglerVisibilite', 'deactivate', 'regenerate']) {
+    assert.ok(src.includes(`'${action}'`), `l'action ${action} doit passer par un endpoint`)
+  }
+})
+
+test('config : le JETON ne traverse jamais l\'écran — il se demande au geste', () => {
+  const src = sansCommentaires(html())
+  // Son lien est son mot de passe. La fiche ne le charge pas : « Envoyer le
+  // lien » et « Ouvrir sa page » le demandent au moment du clic.
+  assert.ok(src.includes("action=lien&profile_id="), 'le lien se demande à /api/membres')
+  assert.ok(!/personne\.(pwa_)?token/.test(src), 'et il n\'est jamais lu depuis la fiche')
+  assert.ok(src.includes("'noopener'"), 'la page ouverte n\'a aucune poignée sur celle de l\'hôte')
+})
+
+test('config : retirer de l\'équipe coupe les LIAISONS d\'abord, puis le profil', () => {
+  // Le moteur ne lit ni le lien ni le statut du profil : ce sont les liaisons
+  // qui le font travailler. Dans l'autre ordre, un échec laisserait le cron
+  // attribuer des ménages à quelqu'un dont le lien n'existe plus.
+  const src = sansCommentaires(html())
+  const i = src.indexOf('async function retirerDeLEquipe')
+  assert.ok(i > 0)
+  const corps = src.slice(i, i + 2000)
+  assert.ok(corps.indexOf("action: 'liaisons'") < corps.indexOf("action: 'deactivate'"),
+    'les liaisons sont coupées AVANT la désactivation')
+  assert.ok(corps.includes('retirer_demi'), 'et un retrait à moitié fait se DIT')
+})
+
+test('config : un périmètre vide est refusé à l\'écran — il OUVRE l\'accès, il ne le ferme pas', () => {
+  // Convention inversée de `public_tokens.property_ids` : vide = TOUS les
+  // biens du compte. Retirer le dernier bien doit donc être refusé, et le
+  // message renvoyer vers « Retirer de l'équipe ».
+  assert.ok(sansCommentaires(html()).includes('dernier_bien'))
+})
+
+test('config : les quatre périodes de ratio sont celles que la BASE accepte', () => {
+  // La maquette en proposait trois autres (30 j / 90 j / 1 an) : une valeur
+  // hors du CHECK ferait échouer l'écriture avec un message Postgres.
+  const src = sansCommentaires(html())
+  assert.ok(src.includes("CFG_PERIODES = ['15j', '30j', '6mois', 'toujours']"))
+  const fr = JSON.parse(lire('shared/i18n/fr.json'))
+  for (const p of ['15j', '30j', '6mois', 'toujours']) {
+    assert.ok(fr[`menages.equipe.config.periode_${p}`], `libellé manquant pour ${p}`)
+  }
+})
+
+test('config : l\'aperçu de sa page n\'appelle JAMAIS /api/menages-public', () => {
+  // Cet appel est le writer de « vue il y a … » : l'utiliser depuis l'écran de
+  // l'hôte horodaterait une ouverture qu'elle n'a pas faite, et poserait son
+  // jeton dans l'URL d'une iframe.
+  assert.ok(!sansCommentaires(html()).includes('menages-public'))
+})

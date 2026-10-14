@@ -24,7 +24,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
-const { lireRrule, cleJour } = require('../lib/cleaning/availability')
+const { lireRrule, cleJour, estDisponible, congeCouvrant } = require('../lib/cleaning/availability')
 // ⚠ LA REGLE RECURRENTE EST VALIDEE EN UN SEUL ENDROIT, partage avec la PWA
 // (`api/menages-public.js`) depuis le 15 septembre 2026.
 const { validerRegle, libelle } = require('../lib/cleaning/regles')
@@ -101,7 +101,12 @@ module.exports = async function handler (req, res) {
   if (qui.erreur === 400) return res.status(400).json({ error: 'Prestataire inconnu' })
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
 
-  if (lecture) return await lire(res, userId, providerId)
+  if (lecture) {
+    // ⚠ LE MOIS EST VALIDE ICI, et il est le SEUL parametre de fenetre : un
+    // `mois=` libre ferait calculer des annees de calendrier pour rien.
+    const m = /^\d{4}-\d{2}$/.test(String(req.query.mois || '')) ? String(req.query.mois) : null
+    return await lire(res, userId, providerId, m)
+  }
   return await ecrire(req, res, userId, providerId, appelant)
 }
 
@@ -110,7 +115,7 @@ module.exports = async function handler (req, res) {
 // Rend les regles telles que l'ECRAN les manipule — des jours et une cadence —
 // pas la chaine RRULE. `label` porte le libelle construit a l'ecriture ; la
 // chaine elle-meme ne sort jamais.
-async function lire (res, userId, providerId) {
+async function lire (res, userId, providerId, moisDemande = null) {
   const { data: regles, error: errR } = await supabase.from('provider_availability_rules')
     // ⚠ `rrule` EST LUE ICI, ET NE SORT PAS D'ICI. L'ecran a besoin des JOURS et
     // de la CADENCE pour recocher ses cases — pas de la chaine, qui reste une
@@ -211,7 +216,45 @@ async function lire (res, userId, providerId) {
     if (qui) reglePar = [qui.first_name, qui.last_name].filter(Boolean).join(' ').trim() || null
   }
 
+  // ─── LE CALENDRIER, CALCULE PAR LE MOTEUR LUI-MEME ────────────────────────
+  //
+  // ⚠ LA REGLE DE PRECEDENCE NE SE RECOPIE PAS DANS UN NAVIGATEUR. Conge >
+  // exception > regle > « aucune regle = disponible », plus « une regle
+  // illisible rend INDISPONIBLE » : c'est `estDisponible` de
+  // `lib/cleaning/availability.js` — le MEME code que celui qui decide a qui
+  // un menage est attribue. Une seconde implementation cote ecran divergerait
+  // le jour ou le moteur change, et l'hote lirait un calendrier qui n'est pas
+  // celui du moteur.
+  //
+  // ⚠ ON NE REND QUE DEUX MOIS, a partir du premier du mois demande : c'est ce
+  // que la fenetre de configuration affiche. Le client ne choisit pas une
+  // fenetre arbitraire — un `mois=` libre ferait calculer des annees pour rien.
+  const debutCal = moisDemande ? `${moisDemande}-01` : `${cleJour(new Date()).slice(0, 7)}-01`
+  const jours = []
+  {
+    const d = new Date(debutCal + 'T12:00:00Z')
+    const fin = new Date(d); fin.setUTCMonth(fin.getUTCMonth() + 2)
+    const ctx = { regles: regles || [], exceptions: exceptions || [], conges: conges || [] }
+    while (d < fin) {
+      const iso = d.toISOString().slice(0, 10)
+      const conge = congeCouvrant(iso, conges || [])
+      const exc = (exceptions || []).find(e => cleJour(e.date) === iso)
+      jours.push({
+        date: iso,
+        dispo: estDisponible(iso, ctx),
+        // CE QUI a tranche, pour la legende : un conge se verrouille, une
+        // exception porte un point (« regle a la main »), une regle n'a pas
+        // besoin d'etre dite.
+        conge: conge ? { motif: conge.motif || null, source: conge.source || 'hote' } : null,
+        exception: exc ? { source: exc.source || 'hote' } : null
+      })
+      d.setUTCDate(d.getUTCDate() + 1)
+    }
+  }
+
   return res.status(200).json({
+    mois: debutCal.slice(0, 7),
+    jours,
     regles: reglesLisibles,
     exceptions: exceptions || [],
     conges: conges || [],

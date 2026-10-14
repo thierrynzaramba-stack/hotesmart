@@ -493,3 +493,96 @@ test('GET ne rend QUE les règles actives — les désactivées ne mangent pas l
   const lecture = etat.lectures.find(l => l.table === 'provider_availability_rules')
   assert.strictEqual(lecture.f.active, true, 'le filtre est posé côté base, pas côté écran')
 })
+
+// ─── LE CALENDRIER EST CALCULÉ PAR LE MOTEUR, pas par l'écran ──────────────
+//
+// ⚠ POURQUOI C'EST LE SERVEUR QUI LE REND. La précédence — congé > exception >
+// règle > « aucune règle = disponible », plus « une règle illisible rend
+// INDISPONIBLE » — est celle de `lib/cleaning/availability.js`, le code qui
+// décide à qui un ménage est attribué. Recopiée dans un navigateur, elle
+// divergerait au premier changement du moteur, et l'hôte lirait un calendrier
+// qui n'est pas celui du moteur.
+
+test('le calendrier rend DEUX mois à partir du mois demandé', async () => {
+  const { handler } = preparer({})
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  assert.strictEqual(res.body.mois, '2026-11')
+  assert.strictEqual(res.body.jours[0].date, '2026-11-01')
+  assert.strictEqual(res.body.jours.at(-1).date, '2026-12-31')
+  assert.strictEqual(res.body.jours.length, 61, '30 jours de novembre + 31 de décembre')
+})
+
+test('un mois ILLISIBLE retombe sur le mois courant, il ne fait pas tout calculer', async () => {
+  // Un `mois=` libre ferait calculer des années de calendrier pour rien.
+  const { handler } = preparer({})
+  const res = reponse()
+  await handler(get({ mois: '2026-13-99' }), res)
+  assert.strictEqual(res.body.mois, new Date().toISOString().slice(0, 7))
+})
+
+test('aucune règle = DISPONIBLE tous les jours (la règle du moteur)', async () => {
+  const { handler } = preparer({ regles: [] })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  assert.ok(res.body.jours.every(j => j.dispo === true))
+  assert.strictEqual(res.body.aucune_regle, true, 'et l\'écran peut le dire')
+})
+
+test('un CONGÉ verrouille le jour, et il le dit — bornes INCLUSES', async () => {
+  const { handler } = preparer({
+    regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', active: true, source: 'prestataire' }],
+    conges: [{ id: 'c1', debut: '2026-11-09', fin: '2026-11-15', motif: 'Vacances', source: 'prestataire' }]
+  })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  const parJour = Object.fromEntries(res.body.jours.map(j => [j.date, j]))
+  assert.strictEqual(parJour['2026-11-09'].dispo, false, 'le premier jour du congé')
+  assert.strictEqual(parJour['2026-11-15'].dispo, false, 'ET le dernier : les bornes sont incluses')
+  assert.strictEqual(parJour['2026-11-09'].conge.motif, 'Vacances')
+  assert.strictEqual(parJour['2026-11-09'].conge.source, 'prestataire')
+  assert.strictEqual(parJour['2026-11-16'].dispo, true, 'le lundi suivant, elle retravaille')
+})
+
+test('une EXCEPTION tranche dans les DEUX sens, et le congé l\'emporte sur elle', async () => {
+  const { handler } = preparer({
+    regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO', active: true }],
+    exceptions: [{ id: 'e1', date: '2026-11-11', available: true, source: 'prestataire' },
+                 { id: 'e2', date: '2026-11-02', available: false, source: 'hote' },
+                 { id: 'e3', date: '2026-11-10', available: true, source: 'prestataire' }],
+    conges: [{ id: 'c1', debut: '2026-11-10', fin: '2026-11-10', motif: null, source: 'hote' }]
+  })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  const parJour = Object.fromEntries(res.body.jours.map(j => [j.date, j]))
+  assert.strictEqual(parJour['2026-11-11'].dispo, true, 'un mercredi ouvert à la main, alors qu\'elle ne travaille que le lundi')
+  assert.strictEqual(parJour['2026-11-02'].dispo, false, 'un lundi fermé à la main')
+  assert.strictEqual(parJour['2026-11-10'].dispo, false, 'LE CONGÉ L\'EMPORTE sur une exception « disponible »')
+  assert.strictEqual(parJour['2026-11-11'].exception.source, 'prestataire', 'et l\'écran sait qui l\'a posée')
+})
+
+test('une règle ILLISIBLE rend INDISPONIBLE : une panne coupe, elle n\'ouvre pas', async () => {
+  // L'ignorer la ferait paraître disponible tous les jours, et on lui
+  // assignerait des ménages qu'elle ne peut pas faire — sans que personne ne
+  // le sache avant le jour J.
+  const { handler } = preparer({ regles: [{ id: 'r1', rrule: 'n importe quoi', active: true }] })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  assert.ok(res.body.jours.every(j => j.dispo === false))
+})
+
+test('une règle DÉSACTIVÉE ne compte pas : on retombe sur « disponible »', async () => {
+  const { handler } = preparer({ regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO', active: false }] })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  assert.ok(res.body.jours.every(j => j.dispo === true))
+})
+
+test('la RRULE ne sort toujours pas, pas même par le calendrier', async () => {
+  const { handler } = preparer({
+    regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO;INTERVAL=2;DTSTART=20261005', active: true }]
+  })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  assert.ok(!JSON.stringify(res.body).includes('FREQ='))
+})

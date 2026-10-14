@@ -69,10 +69,19 @@ function identifiantsManquants (html) {
     .replace(/'(?:\\.|[^'\\\n])*'/g, "''")
     .replace(/"(?:\\.|[^"\\\n])*"/g, '""')
   const brut = m[1]
+  // ⚠ UN PARAMÈTRE EST UNE DÉCLARATION. Sans la dernière alternative, une
+  // fonction qui reçoit un rappel (`gesteConfig(fn)` → `fn()`) était accusée :
+  // le nom n'apparaît nulle part sous la forme `const fn` ni `fn =`. C'était un
+  // FAUX POSITIF, et un test qui crie pour rien s'apprend à être ignoré — le
+  // vrai défaut passerait alors avec les autres. La liste des paramètres est
+  // bornée à `[^)]*`, donc elle ne traverse pas une parenthèse : un appel
+  // `f(fn)` ne compte pas comme une déclaration.
   const declare = (nom) => new RegExp(
     '(?:function|const|let|var|class)\\s+' + nom + '\\b' +   // déclaration
     '|\\b' + nom + '\\s*[:=]' +                              // propriété ou affectation
-    '|import\\s*\\{[\\s\\S]*?\\b' + nom + '\\b[\\s\\S]*?\\}\\s*\\n?\\s*from' // import nommé, même sur plusieurs lignes
+    '|import\\s*\\{[\\s\\S]*?\\b' + nom + '\\b[\\s\\S]*?\\}\\s*\\n?\\s*from' + // import nommé, même sur plusieurs lignes
+    '|function\\s+[\\w$]*\\s*\\([^)]*\\b' + nom + '\\b[^)]*\\)' +  // paramètre d'une fonction nommée
+    '|\\([^)]*\\b' + nom + '\\b[^)]*\\)\\s*=>'                  // paramètre d'une fléchée
   ).test(brut)
 
   const appels = new Set()

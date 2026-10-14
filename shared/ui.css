@@ -800,3 +800,266 @@ body.men-volet-ouvert { overflow: hidden; }
   .men-mk .icon { width: 11px; height: 11px; }
   .men-case { min-width: 44px; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONFIGURATION D'UNE PRESTATAIRE (lot Ménages V5)
+   Une fenêtre à trois onglets, par-dessus le planning. PLEIN ÉCRAN au
+   téléphone : c'est un formulaire, pas un aperçu, et le réduire y rendait les
+   sept cases de jours intouchables au doigt.
+   ⚠ VERT = OK, ROUGE = PROBLÈME, JAMAIS D'AMBRE ICI (décision de Thierry) :
+   l'ambre de la bulle « À traiter » dit « à regarder un jour » ; ici, un
+   réglage marche ou ne marche pas.
+   ⚠ AUCUN HEXA : tout vient de theme.css, donc le mode sombre suit.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.men-cfg__voile {
+  position: fixed; inset: 0; z-index: 60; background: rgb(0 0 0 / 0.4);
+}
+.men-cfg {
+  position: fixed; z-index: 61; inset-block-start: 50%; inset-inline-start: 50%;
+  transform: translate(-50%, -50%);
+  width: min(760px, calc(100vw - 32px)); max-height: min(92vh, 1000px);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-hover);
+}
+.men-cfg__tete {
+  display: flex; align-items: flex-start; gap: var(--gap-s);
+  padding: var(--gap-l) var(--gap-l) var(--gap-s);
+}
+.men-cfg__id { flex: 1; min-width: 0; }
+.men-cfg__sous {
+  display: flex; align-items: center; gap: var(--gap-m); flex-wrap: wrap;
+  margin-block-start: 6px; font-size: var(--fs-caption); color: var(--muted);
+}
+.men-cfg__actions { display: flex; gap: 6px; flex: none; }
+.men-cfg__vue { display: inline-flex; align-items: center; gap: 5px; }
+.men-cfg__vue .icon { width: 14px; height: 14px; }
+/* Jamais ouverte : c'est le cas qui fait téléphoner, il se voit. */
+.men-cfg__vue--jamais { color: var(--danger); font-weight: var(--fw-semibold); }
+
+/* La phrase d'état : elle ne se cache jamais, et elle porte son geste. */
+.men-cfg__etat { padding: 0 var(--gap-l) var(--gap-s); }
+.men-cfg__state {
+  display: flex; align-items: flex-start; gap: var(--gap-s);
+  padding: 12px 14px; border-radius: var(--radius-tile);
+  font-size: var(--fs-body); line-height: 1.45;
+}
+.men-cfg__state .icon { flex: none; margin-block-start: 2px; }
+.men-cfg__state--ok { background: var(--ok-soft); }
+.men-cfg__state--ok .icon { color: var(--ok); }
+.men-cfg__state--ko { background: var(--danger-soft); color: var(--danger); }
+.men-cfg__state--ko .icon { color: var(--danger); }
+.men-cfg__fix { margin-inline-start: auto; flex: none; height: 36px; }
+
+.men-cfg__onglets {
+  display: flex; gap: 4px; padding: 0 var(--gap-l);
+  border-block-end: 1px solid var(--line); flex: none;
+}
+.men-cfg__onglet {
+  height: 48px; padding: 0 14px; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-body); font-weight: var(--fw-medium);
+  color: var(--muted); border-block-end: 2px solid transparent;
+}
+.men-cfg__onglet.is-on { color: var(--ink); font-weight: var(--fw-bold); border-block-end-color: var(--ink); }
+
+.men-cfg__corps { overflow-y: auto; flex: 1; }
+/* Pendant une écriture, l'écran ne se laisse pas recliquer : deux gestes
+   concurrents enverraient deux listes calculées sur le même état d'avant. */
+.men-cfg__corps.is-occupe { opacity: 0.6; pointer-events: none; }
+.men-cfg__sec { padding: var(--gap-m) var(--gap-l); border-block-start: 1px solid var(--line); }
+.men-cfg__sec:first-child { border-block-start: 0; }
+.men-cfg__secTete { display: flex; align-items: center; gap: var(--gap-s); }
+.men-cfg__h3 { margin: 0 0 4px; font-size: var(--fs-h2); font-weight: var(--fw-bold); }
+.men-cfg__aide { margin: 0 0 10px; }
+.men-cfg__trace { margin-inline-start: auto; }
+.men-cfg__pied {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 12px var(--gap-l); border-block-start: 1px solid var(--line);
+  font-size: var(--fs-caption); color: var(--muted);
+}
+.men-cfg__pied .icon { width: 15px; height: 15px; color: var(--ok); }
+
+/* Un bien : son nom, son engagement, son rang, son interrupteur, ses jours. */
+.men-cfg__joursTete {
+  display: grid; grid-template-columns: repeat(7, 38px); gap: 6px;
+  margin-inline-start: auto; width: max-content;
+  font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted); text-align: center;
+}
+.men-cfg__bien { padding: 12px 0; border-block-end: 1px solid var(--line); }
+.men-cfg__bien--off { opacity: 0.55; }
+.men-cfg__bienTete { display: flex; align-items: center; gap: var(--gap-s); flex-wrap: wrap; }
+.men-cfg__bienNom { flex: 1; min-width: 120px; font-weight: var(--fw-bold); }
+.men-cfg__cells {
+  display: grid; grid-template-columns: repeat(7, 38px); gap: 6px;
+  margin: 10px 0 0 auto; width: max-content;
+}
+.men-cfg__cell {
+  width: 38px; height: 38px; padding: 0; cursor: pointer;
+  border: 1.5px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.men-cfg__cell.is-on { background: var(--ok); border-color: var(--ok); }
+/* Hachuré = elle ne travaille pas ce jour-là. L'information vient de SES
+   règles : c'est ce qui explique un jour confié qui ne produit rien. */
+.men-cfg__cell.is-off {
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--surface) 4px 8px);
+  border-color: var(--line);
+}
+.men-cfg__cell.is-on.is-off {
+  background: repeating-linear-gradient(135deg, var(--ok) 0 4px, var(--ok-soft) 4px 8px);
+  border-color: var(--ok);
+}
+/* Pas encore réglé : ni coché, ni vide — en pointillé. L'hôte doit voir qu'il
+   n'a rien décidé, pas croire qu'il a tout coché. */
+.men-cfg__cell.is-vierge { border-style: dashed; border-color: var(--muted); background: var(--surface); }
+.men-cfg__cell.is-vierge.is-off {
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 4px, var(--surface) 4px 8px);
+}
+.men-cfg__cell:disabled { cursor: default; }
+.men-cfg__av { margin: 8px 0 0; font-size: var(--fs-caption); color: var(--danger); }
+.men-cfg__libres { margin-block-start: 10px; }
+
+/* Segments et interrupteurs. Le choix actif est NOIR (demande de Thierry) : il
+   ne se confond ni avec le vert d'un état, ni avec le rouge d'un défaut. */
+.men-cfg__seg {
+  display: inline-flex; gap: 2px; padding: 3px; flex: none;
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+}
+.men-cfg__seg button {
+  height: 34px; padding: 0 14px; border: 0; cursor: pointer; background: none;
+  border-radius: var(--radius-pill); font-family: inherit;
+  font-size: var(--fs-caption); font-weight: var(--fw-semibold); color: var(--muted);
+}
+.men-cfg__seg button.is-on { background: var(--ink); color: var(--on-ink); }
+.men-cfg__seg button:disabled { cursor: default; opacity: 0.6; }
+.men-cfg__sw {
+  width: 44px; height: 26px; flex: none; padding: 0; cursor: pointer; position: relative;
+  border: 0; border-radius: var(--radius-pill); background: var(--border);
+}
+.men-cfg__sw::after {
+  content: ""; position: absolute; inset-block-start: 3px; inset-inline-start: 3px;
+  width: 20px; height: 20px; border-radius: var(--radius-pill);
+  background: var(--surface); box-shadow: var(--shadow-dot);
+}
+.men-cfg__sw.is-on { background: var(--ink); }
+.men-cfg__sw.is-on::after { inset-inline-start: 21px; }
+.men-cfg__sw:disabled { cursor: default; opacity: 0.5; }
+.men-cfg__row { display: flex; align-items: center; gap: var(--gap-m); padding: 12px 0; border-block-end: 1px solid var(--line); }
+.men-cfg__rowTxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+
+/* Ses jours de travail, en lecture. A en VERT, B en BLEU (demande de
+   Thierry) : deux semaines qui se ressemblent se confondent à l'œil. */
+.men-cfg__sem { display: flex; align-items: center; gap: 6px; margin-block-end: 6px; }
+.men-cfg__ab { width: 16px; font-size: var(--fs-caption); font-weight: var(--fw-black); }
+.men-cfg__ab--a { color: var(--ok); }
+.men-cfg__ab--b { color: var(--info); }
+.men-cfg__pastille {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted);
+}
+.men-cfg__pastille.is-on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+
+/* Le calendrier deux mois, en lecture. Chaque jour vient du serveur. */
+.men-cfg__cal { display: flex; flex-wrap: wrap; gap: var(--gap-l); margin-block-start: 12px; }
+.men-cfg__moisNom { font-weight: var(--fw-bold); margin-block-end: 8px; text-transform: capitalize; }
+.men-cfg__moisTete, .men-cfg__grille {
+  display: grid; grid-template-columns: repeat(7, 32px); gap: 4px;
+}
+.men-cfg__moisTete { font-size: var(--fs-caption); color: var(--muted); text-align: center; margin-block-end: 6px; }
+.men-cfg__jour {
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  position: relative; border-radius: var(--radius-pill);
+  font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted);
+}
+.men-cfg__jour.is-on { background: var(--ok-soft); color: var(--ok); }
+.men-cfg__jour.is-conge {
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 3px, var(--surface) 3px 6px);
+  color: var(--muted);
+}
+.men-cfg__jour.is-passe { opacity: 0.45; }
+.men-cfg__pt {
+  position: absolute; inset-block-end: 3px; inset-inline-start: 50%;
+  width: 4px; height: 4px; margin-inline-start: -2px;
+  border-radius: var(--radius-pill); background: currentColor;
+}
+.men-cfg__pt--lg { position: static; margin: 0; width: 5px; height: 5px; background: var(--ink); }
+.men-cfg__legende {
+  display: flex; align-items: center; gap: var(--gap-m); flex-wrap: wrap;
+  margin-block-start: 12px; font-size: var(--fs-caption); color: var(--muted);
+}
+.men-cfg__legende > span { display: inline-flex; align-items: center; gap: 6px; }
+.men-cfg__lg { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--line); }
+.men-cfg__lg.is-on { background: var(--ok-soft); border-color: var(--ok); }
+.men-cfg__lg.is-conge { background: repeating-linear-gradient(135deg, var(--surface-2) 0 3px, var(--surface) 3px 6px); }
+.men-cfg__corriger { margin-inline-start: auto; height: 36px; }
+
+.men-cfg__conges { margin-block-start: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-tile); }
+.men-cfg__congesTete { display: flex; align-items: center; gap: var(--gap-s); }
+.men-cfg__poser { margin-inline-start: auto; height: 36px; }
+.men-cfg__congesListe { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.men-cfg__conge { display: flex; align-items: center; gap: var(--gap-s); flex-wrap: wrap; }
+
+.men-cfg__puces { display: flex; flex-wrap: wrap; gap: 8px; }
+.men-cfg__puce {
+  height: 38px; padding: 0 14px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--surface); color: var(--muted);
+  font-size: var(--fs-body); font-weight: var(--fw-semibold);
+}
+.men-cfg__puce.is-on { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.men-cfg__puce:disabled { cursor: default; opacity: 0.6; }
+
+.men-cfg__champs { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-s); }
+.men-cfg__champ { display: flex; flex-direction: column; gap: 6px; }
+.men-cfg__champ input {
+  height: 44px; padding: 0 14px; font-family: inherit; font-size: var(--fs-body);
+  color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-tile);
+}
+.men-cfg__champ input:disabled { opacity: 0.6; }
+.men-cfg__retirer { color: var(--danger); border-color: var(--danger); }
+
+/* L'aperçu de sa page : un cadre de téléphone, SANS aucune action. Les données
+   viennent du planning de l'hôte — jamais d'un appel à sa page avec son jeton,
+   qui horodaterait une ouverture qu'elle n'a pas faite. */
+.men-cfg__voit { display: flex; gap: var(--gap-l); align-items: flex-start; flex-wrap: wrap; }
+.men-cfg__tel {
+  width: 300px; flex: none; padding: 16px 14px 18px;
+  border: 10px solid var(--ink); border-radius: 36px; background: var(--surface);
+}
+.men-cfg__telTete { display: flex; flex-direction: column; gap: 2px; margin-block-end: 12px; }
+.men-cfg__telListe { list-style: none; margin: 0; padding: 0; }
+.men-cfg__apercu { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-block-end: 1px solid var(--line); }
+.men-cfg__apercuPhoto { width: 36px; height: 36px; border-radius: 10px; flex: none; }
+.men-cfg__apercuTxt { display: flex; flex-direction: column; min-width: 0; }
+.men-cfg__voitTxt { flex: 1; min-width: 220px; }
+.men-cfg__voitBtns { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-block-start: 14px; }
+
+/* Téléphone : plein écran, et les colonnes passent en une seule. */
+@media (max-width: 899px) {
+  .men-cfg {
+    inset: 0; transform: none; width: 100%; max-height: none; height: 100%;
+    border-radius: 0;
+  }
+  .men-cfg__tete, .men-cfg__etat, .men-cfg__onglets, .men-cfg__sec, .men-cfg__pied {
+    padding-inline: var(--gap-m);
+  }
+  .men-cfg__champs { grid-template-columns: 1fr; }
+  /* Le nom et son interrupteur sur la MÊME ligne : laissés au fil du flex, le
+     bouton tombait seul sous le nom, à gauche, et ne se lisait plus comme
+     « confier ce bien ». Les deux menus passent dessous, en pleine largeur. */
+  .men-cfg__bienTete { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: center; }
+  .men-cfg__bienNom { min-width: 0; order: 1; }
+  .men-cfg__bienTete > .men-cfg__sw { order: 2; }
+  .men-cfg__bienTete .men-cfg__seg { order: 3; grid-column: 1 / -1; justify-self: start; }
+  /* ⚠ LES SEPT CASES RESTENT ATTEIGNABLES AU DOIGT : elles passent sous le nom
+     du bien et prennent toute la largeur, au lieu de se tasser à droite. */
+  .men-cfg__cells, .men-cfg__joursTete { grid-template-columns: repeat(7, 1fr); width: 100%; margin-inline: 0; }
+  .men-cfg__cell { width: 100%; }
+  .men-cfg__voit { flex-direction: column; }
+  .men-cfg__tel { width: 100%; }
+  .men-cfg__fix { margin-inline-start: 0; }
+  .men-cfg__state { flex-wrap: wrap; }
+}
+/* Le voile et la fenêtre couvrent la barre du bas au téléphone. */
+body.men-cfg-ouvert { overflow: hidden; }
