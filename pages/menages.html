@@ -195,6 +195,8 @@ const etat = {
   biens: [],            // réponse /api/garde : [{id(ref provider), name, photo}]
   garde: [],            // [{propertyId, gere, jours: [{date, responsable, remplacante, trou}]}]
   menages: [],          // [{propertyId, bookingId, date, status, fait, porteur, proposeesA, expireLe, raison, retour, differe}]
+  menagesBulle: [],     // ceux de la bulle (J−30 → J+30), pour l'état d'une fiche
+  bulleLue: false,      // faux = pas encore lue, ou lecture en panne
   avecNoms: false, avecAvis: false, tronque: false,
   jours: [],            // les iso de la fenêtre
   mois: 1,              // 1 / 3 / 6 / 12 (persisté, comme le calendrier)
@@ -318,12 +320,24 @@ async function chargerATraiter () {
     // celle-ci ferait d'un compte incomplet un compte qui paraît complet.
     etat.aTraiterTronque = !!r.tronque
     etat.prestataires = r.prestataires || []
+    // ⚠ L'EN-TÊTE DE LA FICHE LIT CETTE FENÊTRE-LÀ, pas celle du planning
+    // (constat de la revue de 6d007f3). Le planning suit le sélecteur de
+    // l'hôte et peut n'être pas encore chargé, ou avoir échoué : son tableau
+    // vide se lisait alors « aucun ménage », donc « À jour » en vert — un
+    // rassurant et faux. La bulle, elle, est lue au démarrage et couvre
+    // J−30 → J+30, indépendamment de ce que l'hôte regarde.
+    etat.menagesBulle = r.menages || []
+    etat.vuesBulle = r.vues || null
+    etat.bulleLue = true
   } catch (e) {
     if (jeton !== jetonBulle) return
     // ⚠ UNE BULLE QUI N'A PAS PU LIRE NE DIT PAS « RIEN À TRAITER » : elle se
     // tait et le dit. Annoncer le calme sur une panne est le pire des deux.
     logger.error('Menages', 'à traiter', e)
     etat.aTraiter = null
+    // ⚠ UNE PANNE NE DIT PAS « RIEN À VOIR » : sans cette remise à zéro,
+    // l'en-tête de la fiche aurait conclu « À jour » sur la lecture d'avant.
+    etat.bulleLue = false
   }
   renderBulle()
   majBadge()
@@ -1267,7 +1281,10 @@ async function ouvrirConfig (profilId) {
   cfg.fiche = null; cfg.dispo = null; cfg.eval = null; cfg.erreur = false
   // ⚠ LE LIEN NE SURVIT PAS À LA FICHE : le cadre d'une personne ne doit
   // jamais s'ouvrir sur la page d'une autre.
-  cfg.lienApercu = null; cfg.lienErreur = false
+  // ⚠ `lienEnCours` AUSSI : sans lui, changer de fiche pendant l'appel laissait
+  // le cadre de la SUIVANTE bloqué sur « Chargement… » sans jamais réessayer
+  // (constat de la revue de 6d007f3).
+  cfg.lienApercu = null; cfg.lienErreur = false; cfg.lienEnCours = false
   $('[data-bind="cfg"]').hidden = false
   $('[data-bind="cfg-voile"]').hidden = false
   document.body.classList.add('men-cfg-ouvert')
@@ -1403,8 +1420,15 @@ function renderConfig () {
 // panne), on n'affiche RIEN plutôt qu'un « À jour » rassurant et faux.
 function vueHtml (p) {
   if (!Object.prototype.hasOwnProperty.call(p, 'vue_le')) return ''
-  const nonVus = (etat.menages || []).filter(m => m.date >= AUJOURDHUI && !m.fait &&
+  // ⚠ ON NE CONCLUT RIEN SANS AVOIR LU. « Aucun ménage connu » et « la lecture
+  // n'a pas eu lieu » se ressemblent dans un tableau vide, et seul le second
+  // interdit de dire « À jour » (constat de la revue de 6d007f3).
+  if (!etat.bulleLue) return ''
+  const nonVus = (etat.menagesBulle || []).filter(m => m.date >= AUJOURDHUI && !m.fait &&
     nonVuPar(m, p.id, p.vue_le) === true)
+  // La date exacte au survol — et, quand elle n'a jamais ouvert, on le dit là
+  // plutôt que de l'afficher en permanence : l'état répond à « est-ce arrivé
+  // chez elle », pas à « depuis quand ».
   const titre = p.vue_le ? dateHeure(p.vue_le) : t('menages.equipe.config.vue_jamais')
   if (!nonVus.length) {
     return `<span class="men-cfg__vue men-cfg__vue--ok" title="${esc(titre)}">${icone('i-check')}
@@ -2034,7 +2058,8 @@ async function chargerApercu () {
   try {
     const lien = await lienDElle()
     if (cfg.profilId !== id) return
-    cfg.lienApercu = lien + (lien.includes('?') ? '&' : '?') + 'apercu=1'
+    if (!estSaPage(lien)) throw new Error('ce lien ne mene pas a sa page')
+    cfg.lienApercu = enApercu(lien)
     cfg.lienErreur = false
   } catch (e) {
     logger.error('Menages', 'aperçu', e)
@@ -2107,6 +2132,30 @@ function brancherConfig () {
       renderConfig()
       const cible = $(`[data-cfg-sec="${d.cfgFix === 'biens' ? 'biens' : 'biens'}"]`)
       if (cible) cible.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      return
+    }
+
+    // ── Les jours confiés sur un bien ──
+    // ⚠ CE BLOC AVAIT ÉTÉ EMPORTÉ avec l'interrupteur et les deux menus qu'il
+    // remplaçait (constat haut de la revue de 6d007f3) : les sept cases
+    // restaient peintes et cliquables, et ne faisaient RIEN. Pire, une liaison
+    // « proposée » sans jours réglés — les cases en pointillé — ne pouvait plus
+    // être résolue du tout : c'est exactement le blocage que cet écran existe
+    // pour lever.
+    if (d.cfgJour) {
+      const [id, j] = d.cfgJour.split(':')
+      const n = Number(j)
+      envoyerLiaisons(b => {
+        if (String(b.property_id) !== id) return b
+        // ⚠ `null` DEVIENT EXPLICITE AU PREMIER CLIC : « tous les jours » se
+        // matérialise en liste, puis le jour cliqué en sort. Sans cela, le
+        // premier clic enverrait `[un seul jour]` et retirerait les six autres
+        // d'un coup, sans que l'hôte l'ait voulu.
+        const jours = Array.isArray(b.weekdays) ? [...b.weekdays] : [0, 1, 2, 3, 4, 5, 6]
+        const i = jours.indexOf(n)
+        if (i >= 0) jours.splice(i, 1); else jours.push(n)
+        return { ...b, weekdays: jours.sort((a, c) => a - c) }
+      })
       return
     }
 
@@ -2260,6 +2309,21 @@ async function lienDElle () {
   return r.lien
 }
 
+// ⚠ LE CADRE N'ENCADRE QUE SA PAGE. `/api/membres action:'lien'` rend aussi,
+// pour un profil d'un autre mode d'accès, une URL d'INVITATION — une page qui
+// n'a ni mode aperçu, ni garde sur les écritures. L'écran ne vérifiait que
+// `a_un_lien` (l'existence d'un jeton), qui n'est pas le même prédicat
+// (constat de la revue de 6d007f3).
+const estSaPage = (lien) => {
+  try { return new URL(lien, location.origin).pathname.startsWith('/apps/menages/public') }
+  catch { return false }
+}
+// Le mode lecture seule, posé au même endroit pour les deux usages : le cadre
+// ET « Ouvrir sa page ». Ce bouton est à deux centimètres du cadre — l'ouvrir
+// sans le mode défaisait les trois gardes d'un clic : horodatage, jeton rangé
+// dans le navigateur de l'hôte, service worker installé.
+const enApercu = (lien) => lien + (lien.includes('?') ? '&' : '?') + 'apercu=1'
+
 // « Envoyer le lien » : le partage natif du téléphone quand il existe (SMS,
 // messagerie…), sinon le presse-papier. ⚠ POUR QUE L'HÔTE N'AIT PLUS JAMAIS À
 // RECOPIER UN MOT DE PASSE À LA MAIN (décision H.7-1) : jusqu'ici, le seul
@@ -2289,9 +2353,13 @@ async function envoyerLien () {
 async function ouvrirSaPage () {
   try {
     const lien = await lienDElle()
+    // ⚠ EN LECTURE SEULE, COMME LE CADRE. L'hôte veut voir sa page en grand,
+    // pas s'y substituer : sans le mode, ce clic horodatait sa dernière
+    // ouverture — et le badge passait au vert sur quelqu'un qui n'a jamais
+    // rien ouvert.
     // ⚠ `noopener` : la page ouverte porte son jeton dans l'URL, et on ne lui
     // donne aucune poignée sur celle de l'hôte.
-    window.open(lien, '_blank', 'noopener')
+    window.open(estSaPage(lien) ? enApercu(lien) : lien, '_blank', 'noopener')
   } catch (e) {
     logger.error('Menages', 'ouvrir sa page', e)
     toast(t('menages.equipe.config.echec'))

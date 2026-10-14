@@ -266,3 +266,80 @@ test('PWA : le mode aperçu coupe les écritures, le jeton et l\'installation', 
   assert.ok(/injectManifest[\s\S]{0,200}if \(APERCU\) return/.test(src),
     'ni manifeste : on n\'installe pas l\'application de quelqu\'un d\'autre')
 })
+
+test('config : CHAQUE geste rendu a un gestionnaire — aucun bouton mort', () => {
+  // ⚠ LE GARDE-FOU NÉ DU CONSTAT HAUT DE LA REVUE DE 6d007f3. En remplaçant
+  // l'interrupteur et les deux menus par un seul, le bloc qui traitait les
+  // CASES DE JOURS est parti avec eux : sept cases restaient peintes et
+  // cliquables, et ne faisaient rien. Aucun test ne l'a vu — ils vérifiaient
+  // ce qui est rendu, pas ce qui répond.
+  //
+  // La question posée est volontairement modeste : « ce `data-cfg-…` que la
+  // page dessine est-il lu quelque part ? ». Elle ne dit rien de ce que fait
+  // le gestionnaire ; elle attrape ce qui n'en a AUCUN.
+  const src = sansCommentaires(html())
+  // `conge-off` → `cfgCongeOff`, comme le `dataset` du navigateur le nomme.
+  const nomDataset = s => 'cfg' + s.split('-').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join('')
+  // `sec` est un repère de section pour le défilement, pas un geste.
+  const STRUCTURELS = new Set(['sec'])
+  const rendus = new Set()
+  for (const m of src.matchAll(/data-cfg-([a-z-]+)[=">\s]/g)) rendus.add(m[1])
+  const morts = []
+  for (const attr of rendus) {
+    if (STRUCTURELS.has(attr)) continue
+    const nom = nomDataset(attr)
+    // Trois formes de lecture : `d.cfgX`, `'cfgX' in d`, ou `dataset.cfgX`.
+    const lu = new RegExp(`d\\.${nom}\\b|'${nom}' in d|dataset\\.${nom}\\b`).test(src)
+    if (!lu) morts.push(attr)
+  }
+  assert.deepEqual(morts, [], 'gestes rendus sans gestionnaire')
+})
+
+test('PWA : l\'aperçu ne laisse AUCUNE mémoire chez l\'hôte', () => {
+  // ⚠ LE CONSTAT DE SÉCURITÉ DE LA REVUE DE 6d007f3. Le garde ne portait que
+  // sur le jeton. Cette page range aussi, sous des clés qui ne portent AUCUN
+  // identifiant de personne, le miroir de ses ménages faits, sa file d'actions
+  // hors ligne et ses notifications acquittées. Dans l'iframe — même origine —
+  // ce miroir écrasait celui de l'hôte s'il utilise aussi l'application.
+  const src = sansCommentaires(lire('apps/menages/public.html'))
+  assert.ok(/Object\.defineProperty\(window, 'localStorage'/.test(src),
+    'le stockage local est neutralisé en aperçu, pas seulement le jeton')
+  const i = src.indexOf('if (APERCU) {')
+  const j = src.indexOf("Object.defineProperty(window, 'localStorage'")
+  assert.ok(i > 0 && j > i && j - i < 1200, 'et il est posé AVANT tout autre code de la page')
+})
+
+test('PWA : le service worker ne met JAMAIS en cache une URL portant un jeton', () => {
+  // La clé du cache est l'URL complète : un document mis en cache sous
+  // `public.html?token=…` range le jeton dans le Cache Storage, et il y reste.
+  const sw = sansCommentaires(lire('apps/menages/sw.js'))
+  assert.ok(/req\.url\.includes\('token='\)/.test(sw))
+  // ⚠ Et la version du cache doit avoir CHANGÉ : l'activation n'évince que les
+  // versions dont le nom diffère. Sans bump, les entrées déjà écrites avec un
+  // jeton survivent au correctif.
+  assert.ok(!sw.includes('hotesmart-clean-v3-refonte'), 'la version du cache est bumpée')
+})
+
+test('config : « Ouvrir sa page » garde le mode lecture seule', () => {
+  // Ce bouton est à deux centimètres du cadre. Sans le mode, il horodate sa
+  // dernière ouverture, range son jeton chez l'hôte et installe son
+  // application — et le badge passe au vert sur quelqu'un qui n'a rien ouvert.
+  const src = sansCommentaires(html())
+  const i = src.indexOf('async function ouvrirSaPage')
+  assert.ok(i > 0)
+  const corps = src.slice(i, i + 900)
+  assert.ok(corps.includes('enApercu(lien)'), 'le lien ouvert porte `apercu=1`')
+  assert.ok(corps.includes('estSaPage(lien)'), 'et on vérifie qu\'il mène bien à SA page')
+})
+
+test('config : l\'état « À jour » ne se conclut pas sur une lecture manquante', () => {
+  // « Aucun ménage connu » et « la lecture n'a pas eu lieu » se ressemblent
+  // dans un tableau vide — seul le second interdit de dire « À jour ».
+  const src = sansCommentaires(html())
+  const i = src.indexOf('function vueHtml')
+  assert.ok(i > 0)
+  const corps = src.slice(i, i + 900)
+  assert.ok(corps.includes('if (!etat.bulleLue) return'))
+  assert.ok(corps.includes('etat.menagesBulle'),
+    'et la fenêtre lue est celle de la bulle, pas le planning que l\'hôte fait varier')
+})

@@ -467,7 +467,15 @@
        bouton dont on sait qu'il échouera. */
     .apercu #modal-prendre, .apercu #modal-retirer, .apercu #modal-accepter,
     .apercu #modal-refuser, .apercu #modal-done { display: none !important; }
-    .apercu .dispo-case { pointer-events: none; }
+    /* ⚠ SEULES LES ÉCRITURES SONT COUPÉES, PAS LA LECTURE (constat de la revue
+       de 6d007f3). `pointer-events: none` sur toutes les cases empêchait aussi
+       d'OUVRIR la feuille d'un jour — c'est-à-dire la seule chose que l'hôte
+       vient voir. Le segment « Disponible / Pas disponible », lui, écrit : il
+       disparaît, plutôt que d'échouer en « Connexion impossible » et de faire
+       croire à l'hôte que son réseau est en panne. */
+    .apercu [data-dispo] { display: none !important; }
+    .apercu #news-close { display: none !important; }
+    .apercu .sync-banner { display: none !important; }
     .apercu .apercu-bandeau { display: flex; }
     .apercu-bandeau {
       display: none; align-items: center; justify-content: center; gap: 6px;
@@ -794,6 +802,33 @@
 const APERCU = new URLSearchParams(window.location.search).get('apercu') === '1'
 if (APERCU) {
   document.documentElement.classList.add('apercu')
+  // ⚠ AUCUNE MÉMOIRE DE SON TRAVAIL CHEZ QUELQU'UN D'AUTRE (constat de
+  // sécurité de la revue de 6d007f3). Le garde ne portait que sur le jeton,
+  // dans `getToken()` — mais cette page range aussi, sous des clés qui ne
+  // portent AUCUN identifiant de personne (`menages-done-server-v2`,
+  // `menages-pending-v2`, `menages-read-v2`), le miroir de ses ménages faits,
+  // sa file d'actions hors ligne et ses notifications acquittées. Dans
+  // l'iframe de l'hôte, qui est la MÊME ORIGINE, ce miroir écrasait le sien
+  // s'il utilise aussi l'application — et laissait dans tous les cas les
+  // données de travail d'un tiers sur sa machine.
+  //
+  // Un stockage EN MÉMOIRE, le temps du cadre : la page fonctionne
+  // normalement, et rien ne survit à sa fermeture. Posé ici, avant tout autre
+  // code, il couvre aussi les clés qu'on ajouterait demain.
+  try {
+    const memoire = new Map()
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k) => (memoire.has(String(k)) ? memoire.get(String(k)) : null),
+        setItem: (k, v) => { memoire.set(String(k), String(v)) },
+        removeItem: (k) => { memoire.delete(String(k)) },
+        clear: () => memoire.clear(),
+        key: (i) => [...memoire.keys()][i] ?? null,
+        get length () { return memoire.size }
+      }
+    })
+  } catch (e) { console.warn('[apercu] stockage local non neutralise', e) }
   const vraiFetch = window.fetch.bind(window)
   window.fetch = (url, options) => {
     const m = String((options && options.method) || 'GET').toUpperCase()
