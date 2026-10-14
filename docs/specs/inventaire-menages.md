@@ -1023,3 +1023,524 @@ désigner. ⚠ L'identifiant d'URL ne désigne rien par lui-même : l'écran
 n'ouvre que ce que sa liste DÉJÀ CHARGÉE contient (donc déjà filtrée par le
 compte et les droits) ; un identifiant étranger ne fait rien, sans erreur
 bruyante.
+
+## I. Configuration d'une prestataire — analyse (14 octobre 2026)
+
+Analyse demandée par Thierry avant de refaire la maquette. **Lecture seule,
+aucune ligne de code écrite.** Sources : `lib/cleaning/garde.js`,
+`assign.js`, `availability.js`, `sync-menages-entite.js`,
+`apres-changement-regles.js`, `changement-regles.js`, `api/menages.js`,
+`api/menages-public.js`, `api/disponibilites.js`,
+`apps/menages/prestataires.html` lu en entier, et **les données de production
+du 14 octobre 2026** (lecture seule, aucun écrit).
+
+⚠ **La maquette à trois onglets est indicative.** Mot de Thierry le
+13 octobre : *« ui non finaliser et va changer »*. Ce qui est confronté ici,
+c'est le FOND — quels réglages existent, qui les décide, lesquels servent —
+pas la mise en page.
+
+### I.1 Comment le moteur décide qui reçoit un ménage
+
+**Un ménage ne se crée pas à la main : il naît d'un DÉPART.** Toutes les
+5 minutes, le cron regarde les réservations dont le départ tombe entre J−30 et
+J+180 ; pour chaque départ sans ligne de ménage, il en crée une — et c'est à
+cet instant qu'il décide qui la porte (`lib/cleaning/sync-menages-entite.js`).
+La **date du ménage est la date de départ**, et elle fait partie de son
+identité : si le voyageur décale son départ du samedi au mardi, ce n'est pas le
+même ménage, un autre naît et il est recalculé avec la garde du mardi.
+
+Ensuite, **trois filtres dans cet ordre exact**, puis un classement
+(`lib/cleaning/garde.js`) :
+
+| # | Filtre | Le réglage qui tranche | Qui le décide |
+|---|---|---|---|
+| 1 | La liaison existe-t-elle, et est-elle active ? | **Biens couverts** (cases à cocher) | **l'hôte** |
+| 2 | Ce bien lui est-il confié CE JOUR de la semaine ? | **Jours confiés** (`weekdays`, par bien) | **l'hôte** |
+| 3 | Est-elle LÀ ce jour-là, tous biens confondus ? | **Jours de travail** + exceptions + congés | **elle** (ou l'hôte) |
+| 4 | Classement du tour | **Rang** (1-3 à l'écran, 1-9 au serveur) | **l'hôte** |
+| 5 | Lui arrive-t-il d'office, ou lui est-il proposé ? | **Engagement** (`requires_ack`) | **l'hôte** |
+
+**Les trois états des « jours confiés », et aucun ne veut dire la même chose :**
+
+| en base | sens |
+|---|---|
+| **vide (`NULL`)** | attitrée **tous les jours** — c'est l'état de toutes les liaisons d'avant le lot 3 |
+| **`[]`** | **aucun jour** — choix explicite de l'hôte, elle ne recevra rien sur ce bien |
+| **`[2,3]`** | mardi et mercredi seulement (0 = dimanche … 6 = samedi) |
+
+**La précédence de la disponibilité est gravée** (`availability.js`) :
+**congé** (l'emporte sur tout, bornes incluses des deux côtés) > **exception du
+jour** (dans les deux sens : « pas ce samedi », ou « disponible ce mercredi
+alors que je ne travaille jamais le mercredi ») > **règle hebdomadaire** >
+**aucune règle = disponible sept jours sur sept**. Et une règle **illisible rend
+indisponible, elle n'est pas ignorée** : *« une panne coupe, elle n'ouvre
+pas »* — l'ignorer ferait assigner des ménages qu'elle ne peut pas faire.
+
+**Le menu d'engagement a exactement deux options**
+(`apps/menages/prestataires.html:708-711`) :
+
+| libellé exact | effet |
+|---|---|
+| **« Elle confirme »** *(sélectionné par défaut)* | elle reçoit une **proposition** à laquelle elle doit répondre ; le ménage ne devient le sien qu'à son « oui » |
+| **« D'office — elle reçoit sans confirmer »** | elle **porte** le ménage dès sa création |
+
+« D'office » n'est pas le défaut à l'écran, et c'est voulu : *« c'est le rôle le
+plus engageant, il se choisit. On ne devient pas responsable d'un logement par
+accident. »* Côté moteur, une liaison lue sans cette information est traitée
+comme « elle confirme ».
+
+**Le rang ne décide PAS qui porte.** Il sert à deux choses : départager deux
+personnes également candidates, et **ordonner les tours de proposition**. Un
+tour, c'est **tout le rang le plus petit qui reste** : toutes les personnes de
+ce rang reçoivent la proposition **en même temps**, et **la première qui accepte
+l'a**. Le rang suivant n'est appelé qu'à l'**épuisement** du tour — quand toutes
+ont refusé ou laissé expirer. Et **la remplaçante n'est pas « celle de rang 2 »,
+c'est la suivante disponible** : un rang 2 en congé ce jour-là n'est pas la
+remplaçante de ce jour, le rang 3 l'est.
+
+**La proposition n'est pas posée à la création du ménage**, mais quand le départ
+entre dans les **7 jours** (`JOURS_PROPOSITION = 7`). Deux raisons, chacune
+suffisante : une proposition expire en 48 h au plus — posée pour un départ dans
+six mois elle serait morte deux jours plus tard, la file épuisée, et la
+responsable du jour n'aurait **plus jamais** l'occasion de prendre ce ménage ;
+et le moteur balaie J−30/J+180, donc proposer à la création enverrait **un SMS
+par réservation future de l'historique** à la première activation d'un compte.
+Entre-temps le ménage est marqué `differee` et **porté par la personne
+d'office : personne n'est découvert**.
+
+**L'échéance d'une proposition** : 48 h de base, **jamais au-delà de la veille
+du départ à 18 h de Paris**, et **le temps restant est DIVISÉ par le nombre de
+rangs encore à solliciter** (décision de Thierry du 2 octobre 2026 — trois rangs
+à 48 h feraient six jours, et pour un départ demain les rangs 2 et 3 n'auraient
+jamais été sollicités à temps). Plancher d'une heure, aucun plafond de dernière
+minute : *« une proposition courte vaut mieux qu'une proposition impossible. »*
+
+#### Exemple déroulé — Cœur de vie 23, départ le mardi 20 octobre 2026
+
+| | jours confiés | engagement | rang |
+|---|---|---|---|
+| **Régina** | *vide* → tous les jours | **D'office** | 1 |
+| **Lena** | mardi + mercredi | **Elle confirme** | 1 |
+| **Tiphaine** | mardi | **Elle confirme** | 2 |
+
+**Scène 1 — tout le monde est là.** À la création du ménage (le 2 juillet, quand
+la réservation est entrée) : les trois liaisons sont actives (filtre 1) ; le
+20 octobre est un mardi, les trois l'ont dans leurs jours (filtre 2) ; aucun
+congé (filtre 3). **Porteuse = la première qui n'a rien à confirmer = Régina.**
+Le ménage naît **au nom de Régina**. Le départ est à 110 jours : la proposition
+est **différée**, rien ne part.
+
+**Le mardi 13 octobre (J−7)**, le départ entre dans la fenêtre. La file à
+confirmer est Lena (rang 1) et Tiphaine (rang 2). **Le tour, c'est le rang 1
+seul → Lena.** Deux rangs restent à solliciter, le temps jusqu'au lundi 19 à
+18 h est divisé par 2, plafonné à 48 h → **l'échéance de Lena tombe le
+15 octobre**. Lena reçoit un SMS et/ou un e-mail avec le bien, la date et son
+délai. **Régina ne reçoit rien** : elle n'a rien à confirmer, le ménage est déjà
+dans son application. **Pendant ces 48 h, le ménage est à Régina — le logement
+est couvert quoi qu'il arrive.**
+
+- **Lena accepte** → le ménage **bascule chez elle**, la proposition s'efface,
+  le journal trace le transfert des deux côtés.
+- **Lena refuse** → elle est seule dans son tour, donc **on passe au rang 2
+  (Tiphaine) dans le même enregistrement** : il n'existe aucun instant où le
+  ménage soit à la fois refusé et sans proposition. Régina reste porteuse.
+  **Aucune alerte à l'hôte : quelqu'un porte le ménage.**
+- **Lena ne répond pas** → le 15, sa proposition expire, une ligne `expired`
+  est écrite à son nom (c'est la mémoire qui l'empêche de recevoir un SMS
+  toutes les 48 h jusqu'au départ), le ménage **reste chez Régina**, et
+  Tiphaine est sollicitée **au même cycle** : *« c'est le REFUS qui verrouille,
+  pas le silence. »*
+- **Tiphaine refuse aussi** → plus personne à solliciter. Régina garde le
+  ménage, **aucune alerte** : le logement est couvert.
+
+**Scène 2 — Lena est en congé du 18 au 22 octobre.** Le congé couvre le 20 :
+elle n'est **pas candidate**, elle ne reçoit rien et ne recevra rien. Les
+candidates sont Régina (d'office) et Tiphaine. **Le tour est le rang 2
+directement** — `rangDuTour` est le plus petit rang **de la file**, et la file
+ne contient que Tiphaine. À l'écran de l'hôte, les jours du congé de Lena sont
+**verrouillés et marqués d'une croix**, avec la ligne « ✕ du … au … — [motif] ·
+déclaré par elle ».
+
+**Scène 3 — personne n'a le mardi confié** (Régina mercredi, Lena mercredi,
+Tiphaine jeudi). Les trois sortent au filtre 2 → **zéro candidate**. Le ménage
+naît **sans personne**, et **l'hôte est alerté** : *« Ménage du 2026-10-20 :
+personne n'est de garde ce jour-là sur ce bien (ni attitrée, ni disponible). »*
+Une alerte **par bien, pas par ménage** — trois départs sans personne sur le
+même bien sont un seul problème. Rien ne se répare tout seul : dès qu'un jour
+est confié, le rattrapage du cron reprend ce ménage au cycle suivant.
+
+**Variante, et c'est le cas « jours à régler »** : si les trois sont à « Elle
+confirme » et qu'**aucune n'a de jours réglés** (vide partout), alors les trois
+**sont** candidates (vide = tous les jours), mais **la file de proposition est
+vide** : on ne propose qu'aux liaisons dont les jours sont **explicitement**
+réglés (décision du 4 septembre 2026 — sinon elle recevrait un SMS à chaque
+départ, pour des jours qu'elle n'a jamais déclaré prendre). Résultat : personne
+ne porte, **aucun SMS ne part**, et l'hôte est alerté avec le motif « jours ».
+Le statut reste `unassigned`, **jamais `orphaned`** : le jour où l'hôte règle
+les jours, le cron reprend ce ménage **tout seul**.
+
+**Deux cas sans personne qu'il ne faut pas confondre** : un **trou de garde**
+(le bien a des prestataires, personne n'est là) **alerte** ; **aucune liaison**
+(le bien n'est pas géré par l'app ménage) **n'alerte jamais** — un hôte qui fait
+son ménage lui-même recevrait sinon une alerte à chaque départ.
+
+⚠ **Un piège qui vit dans l'écran actuel, et que la refonte doit garder** :
+décocher TOUS les biens **ne retire pas l'accès, ça l'OUVRE à tous les biens du
+compte** (convention `public_tokens.property_ids` vide = aucune restriction).
+L'écran refuse donc l'enregistrement : *« Cochez au moins un bien. Un périmètre
+vide ne retire pas l'accès : il l'ouvre à TOUS les biens du compte. Pour retirer
+cette personne, utilisez « Supprimer ». »*
+
+### I.2 Ce qui sert vraiment, dans les données de Thierry
+
+Lecture de la production le 14 octobre 2026.
+
+**Six profils en mode lien** : **Lena Lou**, **Lola** (sans nom), **Régina**
+(sans nom), **Tiphaine Nzaramba** actives ; **test** et **test2** désactivées
+(résidus à purger).
+
+| Réglage | Ce qui est réellement posé |
+|---|---|
+| **Liaisons bien ↔ personne** | **15, dont 7 inactives** |
+| **Rang** | **1 et 2 seulement** — le rang 3 n'a jamais servi |
+| **Engagement** | **« D'office » sur 2 liaisons sur 15** (Régina sur Cœur de vie 23 et La bulle). Tout le reste est « elle confirme » |
+| **Jours confiés** | réglés sur **14 des 15** liaisons |
+| **Règles de jours de travail** | **30 lignes, 3 actives — TOUTES posées par la prestataire** (`source: prestataire`) : Lola (hebdo, 4 jours), Tiphaine (2 règles « toutes les 2 semaines » = semaines A/B) |
+| **Exceptions ponctuelles** | **26, toutes « par prestataire »** |
+| **Congés** | **1 seul** (Lola, 18→19 septembre, posé par elle) |
+| **L'hôte n'a JAMAIS rien posé lui-même** dans les jours de travail, les exceptions ou les congés | 0 ligne `source: hote` |
+
+**Toujours à leur valeur par défaut, sans exception :**
+
+- **Visibilité du calendrier = 30 jours** pour les six profils ;
+- **Évaluation des voyageurs** : `eval_scope = aucun` et `eval_power =
+  soumettre` pour tout le monde — **aucune prestataire ne remplit d'évaluation
+  aujourd'hui** ;
+- **Délai de retrait** : aucune ligne → le défaut de 24 h s'applique ;
+- **Période du ratio** : « toujours » partout, sauf Régina (30 jours) ;
+- **« Elle déclare ses absences »** : accordé à tout le monde sauf **Régina
+  (= none)** ;
+- **« Ce qu'elle voit des autres »** : 2 lignes seulement (Lena, Tiphaine), les
+  deux à « les ménages de ses biens », **0 personne nommément vue**.
+
+⚠ **UN CAS RÉEL À CORRIGER, trouvé en lisant ces données.** **Lola est liée
+ACTIVE à Cœur de vie 23 et à La bulle, en « elle confirme », avec AUCUN jour
+confié** (vide) : c'est exactement le cas « jours à régler » de I.1. **Le moteur
+ne lui proposera jamais rien sur ces deux biens** — elle est candidate, mais
+jamais sollicitée. Aucun écran ne le dit aujourd'hui en face de son nom ; seule
+une alerte de ménage le révèle, et seulement si personne d'autre ne porte le
+ménage. **C'est la première chose que l'écran V5 devrait montrer en face d'une
+personne.**
+
+**Lecture de ces chiffres pour le design** : sur douze réglages de la fiche,
+**cinq n'ont jamais été touchés par Thierry**, et les trois couches de
+disponibilité (jours de travail, exceptions, congés) sont **remplies par les
+prestataires, pas par lui**. L'écran actuel leur donne autant de place qu'aux
+réglages qui décident vraiment — biens, jours confiés, engagement, rang.
+
+### I.3 Ce qu'elle change elle-même, et ce qui est réservé à l'hôte
+
+Tout passe par `api/menages-public.js`, **toujours sous une double garde** : le
+**jeton** de son lien PWA l'identifie, et le droit **`self_availability`** dit si
+elle gère ses disponibilités. À `none`, elle passe par son hôte. Une panne de
+lecture de ce droit **coupe** (503) plutôt que de deviner.
+
+**Ce qu'elle peut faire :**
+
+| Geste | Ce que ça écrit |
+|---|---|
+| **Régler ses jours habituels** (quels jours, et une semaine sur deux ou non) | ses règles, `source: prestataire` |
+| **Poser / retirer un congé** (une plage, motif facultatif) | une plage, `source: prestataire` |
+| **Se déclarer absente un jour**, ou **disponible un jour qu'elle ne travaille pas d'habitude** | une exception datée (**les deux sens depuis le 1er octobre 2026**) |
+| **Accepter / refuser** un ménage proposé | voir I.1 |
+| **Prendre** un ménage que personne ne porte | — |
+| **Se retirer** d'un ménage qu'elle porte, dans le délai réglé par l'hôte | — |
+
+Deux gardes de bon sens : **rien dans le passé**, et **« aujourd'hui » se lit en
+heure de Paris** — sinon, entre minuit et 2 h du matin l'été, elle pourrait
+déclarer sur un jour déjà écoulé.
+
+**Ce qui est RÉSERVÉ à l'hôte, et pourquoi.** Ses **jours confiés** ne sont pas
+modifiables par elle, c'est écrit au point d'entrée de l'API : *« ELLE NE
+DÉCLARE QUE DES INDISPONIBILITÉS. Ses JOURS ATTITRÉS sont une décision de
+l'HÔTE : pouvoir s'en retirer elle-même lui permettrait de quitter un bien sans
+qu'il l'apprenne, alors qu'il compte sur elle pour le préparer. »* (décision du
+4 septembre 2026). Vérifié : **aucune action de la PWA n'écrit jamais dans la
+table des liaisons.** Sont aussi réservés : l'engagement, le rang, les biens
+couverts, et tout ce qui est en I.4.
+
+**Ce qu'elle fait à la place** : si l'hôte lui a confié le mardi mais qu'elle ne
+peut pas un mardi précis, elle pose une **absence** ; si elle ne veut plus du
+mardi du tout, elle **retire le mardi de ses jours habituels**. Dans les deux
+cas **le bien reste confié** — c'est sa **disponibilité** qui change. L'hôte
+garde la main sur la liaison.
+
+**Et elle ne défait que ce qu'elle a déclaré** : un congé ou une absence posés
+par l'hôte lui sont refusés (409 *« Ce congé a été posé par votre employeur »*),
+et elle ne peut pas **s'approprier** une ligne de l'hôte (*« Votre employeur a
+déjà noté quelque chose sur cette date. Prévenez-le directement. »* — le
+commentaire du code note que c'était *« le défaut le plus grave du lot »*).
+Nuance soignée : **« rien à supprimer » n'est pas « ce n'est pas à vous »** — sur
+un téléphone en 3G, un double tap sur « Annuler » accusait l'employeur d'une
+absence qu'elle venait de retirer elle-même.
+
+**Ce que l'hôte voit quand elle a changé quelque chose — trois traces, et elles
+ne dépendent pas d'un message qui se perd :**
+
+1. **Une notification immédiate, écrite en JOURS, pas en règles** — parce que
+   *« Règle #a4f2 désactivée »* ne dit rien à personne. Phrases réellement
+   produites : *« Lola ne travaille plus le samedi à partir du … »* ·
+   *« Elle se déclare désormais disponible le mercredi. »* suivi, quand il n'y
+   a que du gain, de *« Cela ne lui confie aucun logement : c'est vous qui
+   décidez des jours où vous lui confiez un bien. »* · *« Lola ne vient plus
+   qu'une semaine sur 2 sur ses jours habituels — elle en fait donc moins
+   qu'avant. »* Un glisser sur plusieurs jours produit **un seul** SMS.
+   **Et quand rien n'a vraiment changé, le système se tait.**
+2. **La reprise automatique des ménages concernés** : si elle retire un jour sur
+   lequel des ménages lui étaient **proposés**, ces propositions lui sont
+   retirées et rendues au moteur. **On ne touche jamais un ménage qu'elle a
+   ACCEPTÉ** — *« un engagement ne se défait que par un humain »* — et on ne
+   retire **qu'elle** du tour, ses collègues du même rang gardent la
+   proposition. L'hôte est informé **avant** la reprise.
+3. **La trace écrite, qui reste** : « ✎ Jours modifiés par elle depuis son
+   application, le [date] », parce que *« un SMS se rate, un e-mail se classe.
+   La trace, elle, RESTE. »* Et elle ne s'affiche **que si c'est elle** :
+   « modifié par vous » n'apprend rien à celui qui vient de le faire.
+   ⚠ Le **point** du calendrier (« réglé à la main ») est la seule des trois
+   traces qui **ne dit pas qui**.
+
+### I.4 Le haut et le bas de l'écran actuel
+
+Tout ce que contient `apps/menages/prestataires.html` **autre que** les
+biens / jours / congés, dans l'ordre d'apparition.
+
+**En-tête** : « Prestataires ménages » / « Gérez les accès de vos
+intervenants ».
+
+**La liste « Mes prestataires »** — chaque carte porte : « 🧹 [nom] » (ou
+« 🧹 Sans nom ») ; trois boutons **« 👁 Voir »** (ouvre sa PWA), **« ✏️
+Modifier »**, **« Supprimer »** ; des pastilles **« 📅 N jours visibles »** et
+**« ⭐ Ratio [période] »** ; **« ⚠️ Nom manquant »** pour une fiche d'avant la
+règle du nom obligatoire ; un résumé de rôle **« 👤 d'office sur N biens, à
+confirmer sur M »** ou **« Aucun bien attribué »** ou l'avertissement rouge
+**« ⚠ lien seul — aucun ménage assignable »** ; **le lien PWA en clair** avec un
+bouton 📋 ; et le bloc **« BIENS ASSIGNÉS »** / **« TOUS LES BIENS »**.
+
+**Carte « Retrait d'un ménage » — LE SEUL RÉGLAGE DE COMPTE de cette page**,
+hors des fiches : « Jusqu'à quand une prestataire peut se retirer seule »,
+options **« Jusqu'au dernier moment »** · **« 12 h »** · **« 24 h »** *(défaut)*
+· **« 48 h »** · **« 72 h avant »**. Le délai se compte depuis **minuit heure de
+Paris** le jour du départ ; une **panne de lecture grise le bouton de retrait**
+chez elle, on ne devine pas.
+
+**La fiche**, dans l'ordre :
+
+| Bloc | Contenu exact |
+|---|---|
+| **Identité** | « Prénom * (ex: Marie) » et « Nom * (ex: Dupont) ». **Le nom est obligatoire depuis le 15 septembre 2026**, et ce n'est pas de l'état civil : *« un prénom seul ne DÉSIGNE personne dès qu'il y a deux Marie — ni dans cette liste, ni dans le planning, ni dans les avis, ni dans le SMS qui arrive chez elle »*. **Non rétroactif** : les anciennes fiches sont seulement marquées |
+| **Contacts** | « Téléphone (optionnel) », « Email (optionnel) », avec l'aide : *« Sert à la prévenir quand vous lui assignez un ménage en urgence, et quand un ménage lui est proposé — avec son délai de réponse. Sans aucun des deux, elle ne le verra qu'en ouvrant son lien. »* Ce texte **ne promet que ce qui part** : l'assignation d'office décidée par le cron reste **muette** |
+| **Canaux** | « La prévenir par SMS » / « La prévenir par e-mail ». **Deux choix, pas une déduction** : avant, le seul moyen de ne pas notifier était d'**effacer le numéro**, donc de perdre le moyen de l'appeler. Avertissements : *« ⚠️ aucun numéro n'est renseigné : rien ne partira par ce canal »* · *« ⚠️ Aucun canal actif : … Une assignation en urgence sera muette. »* |
+| **Biens accessibles** | les blocs bien / engagement / rang / jours confiés (I.1), et l'avertissement *« ⚠️ [bien] n'aura plus personne d'office : les ménages y seront seulement proposés, et resteront sans personne si nul ne répond. »* |
+| **« SES JOURS DE TRAVAIL »** | navigation 2 mois, « Aujourd'hui », « réglable jusqu'en [mois] » ; bascule **« Une semaine sur deux… »** / **« Revenir à toutes les semaines »** avec l'ancrage **« Cette semaine est une semaine A — du … au … (n° N) »** et le lien **« c'est plutôt une semaine B »** ; légende **« Elle travaille »** · **« Elle est absente »** · **« Congé — verrouillé »** · **« le point = réglé à la main »** ; et la phrase du piège : *« Aucun jour coché : elle est disponible TOUS les jours. »* |
+| **« Ce qu'elle voit des autres »** | voir ci-dessous — c'est ce que la maquette laisse en placeholder |
+| **« Elle peut déclarer ses absences depuis son application »** | **cochée par défaut** dans la fiche. Sans ce droit, **l'onglet « Mes absences » n'existe pas** dans sa PWA. Si le serveur n'a pas pu le lire, la case est **grisée** : *« ⚠️ Ce réglage n'a pas pu être lu : il ne sera pas modifié en enregistrant. »* (un simple timeout révoquait un droit que personne n'avait touché) |
+| **« ÉVALUATION DES VOYAGEURS »** | « Elle remplit les questions marquées « La prestataire » dans votre grille d'évaluation » (**naît décochée**), puis « Quand elle a fini sa part » : **« Vous relisez et publiez »** ou **« Elle publie elle-même — sauf un avis négatif, qui vous revient toujours »**. Menu grisé tant que la case n'est pas cochée |
+| **« Visibilité du calendrier »** | « Nombre de jours visibles par la femme de ménage à partir d'aujourd'hui » : 7 · 14 · **30 (défaut)** · 60 · 90 jours |
+| **« Période du ratio affiché »** | « Sur quelle période la prestataire voit ses avis de propreté comptés, dans son app » : 15 jours · 30 jours · 6 mois · **Depuis le début (défaut)** |
+| **Bas de fiche** | **« Créer et générer le lien »** / **« Sauvegarder les modifications »**, et **« Annuler »** |
+
+**« Ce qu'elle voit des autres » — la liste exacte des réglages** (c'est la
+carte que la maquette laisse en « [Réglage — à reprendre de l'existant] ») :
+
+1. une case **« Les ménages pris par d'autres sur les biens dont elle reçoit les
+   propositions »**, suivie du rappel dynamique **« — aujourd'hui : [noms des
+   biens] »** (ou *« — elle ne reçoit aujourd'hui les propositions d'aucun
+   bien »*) ;
+2. un sous-titre **« Les ménages pris par : »**, puis **une case par autre
+   prestataire du compte**, avec son prénom — **prénom + initiale du nom
+   seulement quand deux personnes partagent le prénom** (demande de Thierry) —
+   et la mention **« (désactivée) »** pour une personne désactivée déjà cochée.
+   Sinon : *« Aucune autre prestataire sur ce compte. »* ;
+3. une phrase d'état : **« Elle ne voit que ses propres ménages. »** ou **« Elle
+   voit aussi les ménages de ses biens, et ceux de [noms] — le bien, la date,
+   l'heure et le nom, rien d'autre. »**, éventuellement suivie de *« Réglé le …
+   par … »*.
+
+**Les deux portées se cumulent**, et le défaut est **rien**. C'est aussi **la
+seule carte de cette page adaptée au mobile**.
+
+**Il n'y a PAS de bouton « activer / désactiver ».** Le seul geste est
+**« Supprimer »** dans la liste, qui demande *« Retirer ce prestataire ? Son
+lien cessera de fonctionner et il ne recevra plus de ménages. »* puis
+**désactive le profil, coupe toutes ses liaisons, et supprime le lien** — les
+trois sont nécessaires : *« effacer le seul lien laissait le profil actif et ses
+liaisons actives, si bien que le cron continuait d'attribuer des ménages — d'office
+si elle était référente — à quelqu'un dont le lien n'existe plus. »* Si les
+liaisons n'ont pas pu être coupées, il le **dit**. **Et il n'existe aucun moyen
+de ranimer un profil depuis cet écran.**
+
+⚠ **DEUX TEMPORALITÉS D'ENREGISTREMENT DANS UN MÊME FORMULAIRE, et la refonte
+doit trancher.** Les **disponibilités**, la carte **« Ce qu'elle voit des
+autres »** et les **deux réglages d'évaluation** s'écrivent **immédiatement**.
+L'identité, les contacts, les canaux, les biens/jours/engagement/rang, le droit
+d'absences, la visibilité et la période du ratio attendent le **bouton
+« Sauvegarder »**. Rien à l'écran ne distingue les deux : un hôte qui clique
+« Annuler » croit avoir tout annulé.
+
+### I.5 La maquette confrontée à l'existant
+
+#### Ce qui est JUSTE et à garder
+
+- **Séparer en trois temps** est le bon réflexe : la fiche actuelle est un seul
+  rouleau de douze réglages d'origines différentes.
+- **L'onglet Biens** colle au modèle : un bloc par bien, avec engagement et
+  rang. Les deux options du menu sont les bonnes, et l'avertissement « plus
+  personne d'office » est **exactement** celui du code.
+- **Les biens non couverts listés à part** : bonne idée, l'écran actuel ne les
+  distingue pas.
+- **La trace « Modifié par elle · 1 oct. 21:02 »** existe pour de vrai et vaut
+  d'être gardée visible.
+- **Les congés avec leur source** (« déclaré par elle » / « posé par vous ») et
+  le **calendrier 2 mois** sont fidèles.
+
+#### Ce qui est FAUX
+
+1. **« Qui fait quoi, quel jour » mélange deux décideurs.** La grille
+   biens × jours suggère un seul réglage. Il y en a deux, de propriétaires
+   différents : les **jours confiés** sont une décision de **l'hôte**, par
+   **bien** ; les **jours de travail** sont une déclaration de **la
+   prestataire**, pour **tous les biens à la fois**. Dans les données réelles,
+   **l'hôte n'a jamais posé un seul jour de travail** et **les prestataires
+   n'en posent que trois règles** — ce sont deux objets vivants, pas deux vues
+   du même.
+2. **La cadence A/B est présentée par bien, alors qu'elle appartient aux
+   règles.** « Semaine A / Semaine B » dans une grille biens × jours laisse
+   croire qu'on peut confier un bien en semaine A et pas en B. **Cela n'existe
+   pas en base** : les jours confiés n'ont aucune notion de semaine, et l'A/B
+   vit dans les règles de la prestataire (c'est le cas de Tiphaine, deux règles
+   « toutes les 2 semaines »).
+3. **« Toutes les semaines pareilles » et « Cette semaine A/B » sont des
+   réglages de SA récurrence**, pas de la grille. Les mettre au-dessus d'une
+   grille biens × jours les rattache au mauvais objet.
+4. **L'onglet Accès promet « Désactiver » et « Supprimer » comme deux gestes
+   distincts.** Aujourd'hui, **« Supprimer » fait les deux à la fois** (désactive,
+   coupe les liaisons, supprime le lien), et **aucun écran ne sait réactiver**.
+   Si la maquette garde les deux boutons, elle engage le branchement de
+   `reactivate` — ce qui est **déjà décidé** (H.7-2), mais c'est du travail, pas
+   un simple report.
+
+#### Ce qui MANQUE
+
+De l'onglet **Accès** : les **canaux SMS / e-mail** (deux cases, avec leurs deux
+avertissements), la **visibilité du calendrier** (7-90 jours), la **période du
+ratio d'avis**, le droit **« elle déclare ses absences »**, les **deux réglages
+d'évaluation des voyageurs**, et **l'identité** (prénom + nom, nom obligatoire).
+Les deux placeholders « [Réglage — à reprendre de l'existant] » correspondent à
+la carte « Ce qu'elle voit des autres », dont la liste exacte est en I.4 : **une
+case de portée par bien + une case par autre prestataire**, pas deux réglages.
+
+Manquent aussi, et ce sont les plus utiles : **l'avertissement « aucun jour
+confié »** (sans lui, le cas Lola de I.2 reste invisible), **le refus du
+périmètre vide** (« cochez au moins un bien »), **le délai de retrait** (réglage
+de COMPTE — il ne doit pas entrer dans la fiche d'une personne), et la
+distinction entre **ce qui s'enregistre tout de suite** et ce qui attend le
+bouton.
+
+#### Ce qui est EN TROP
+
+Rien n'est en trop au sens strict, mais **la grille biens × jours en deux
+semaines est un objet beaucoup plus gros que ce qu'il représente** : 2 semaines
+× 7 jours × N biens cases à régler, pour un réglage qui, en vérité, est **sept
+cases par bien** (les jours confiés) **plus sept cases pour la personne** (ses
+jours de travail).
+
+#### La réponse nette : NON, la grille ne peut pas remplacer les deux sans perte
+
+Quatre raisons, chacune suffisante :
+
+1. **Propriétaires différents.** L'hôte décide des jours confiés ; la
+   prestataire déclare ses jours de travail. Une seule grille ne peut pas être à
+   la fois modifiable par l'un et par l'autre — et **le code refuse** à la
+   prestataire d'écrire dans les jours confiés, par décision du 4 septembre 2026.
+2. **Portées différentes.** Un jour confié vaut **pour un bien** ; un jour de
+   travail vaut **pour tous les biens**. Une grille oblige à répéter « je ne
+   travaille pas le mardi » sur chaque ligne de bien — et le jour où un bien est
+   ajouté, la nouvelle ligne naît sans cette information.
+3. **La grille ne sait pas dire « elle n'est pas là ».** C'est **le** cas
+   d'usage : un bien reste confié le mardi, et elle est absente ce mardi-là. En
+   grille, décocher la case dit « ce bien ne lui est plus confié le mardi » —
+   ce qui est une **autre décision**, qui restera en place après son retour.
+4. **Les exceptions et les congés sont encore deux couches**, avec un ordre de
+   priorité gravé (congé > exception > règle). Une grille n'a pas de place pour
+   eux ; le calendrier 2 mois de la maquette, oui — et c'est pour cela qu'il
+   faut le garder **à côté**, pas sous la grille.
+
+**Ce qui peut être fait, et qui est probablement l'intention :** garder une
+grille **biens × jours pour les jours confiés SEULS** — là, elle est juste, et
+elle gagne vraiment sur sept cases répétées par bloc de bien — et poser
+**au-dessus, en une ligne de lecture, ses jours de travail à elle** : « Elle
+travaille : lundi, mardi, jeudi, vendredi · une semaine sur deux · modifié par
+elle le 1er oct. ». Les jours où elle ne travaille pas apparaissent alors
+**grisés dans la grille**, avec l'explication en une phrase. L'hôte voit la
+conséquence sans que les deux réglages se confondent.
+
+### I.6 Proposition d'organisation de l'écran
+
+**Le principe : organiser par QUI DÉCIDE**, pas par nature technique. C'est la
+seule séparation qui tienne, parce que c'est celle du code — et c'est celle que
+l'écran actuel n'exprime que par un paragraphe d'aide.
+
+**1. En haut, toujours visible : qui c'est, et est-ce que ça marche.**
+Prénom + nom, et **une phrase d'état qui dit la vérité du moteur** :
+« D'office sur 2 biens, sur proposition sur 3 » · « ⚠ Liée à 2 biens, mais
+aucun jour confié : elle ne recevra jamais de proposition » (le cas Lola) ·
+« ⚠ Aucun bien ». Cette phrase est ce qui manque le plus aujourd'hui : l'hôte
+doit ouvrir trois blocs pour savoir si une personne est utile au moteur.
+
+**2. « Ce que vous lui confiez » — les décisions de l'hôte.** Le bloc principal,
+ouvert par défaut. Un bloc par bien : **engagement**, **rang**, **jours
+confiés**. Les biens non couverts en bas, pliés. Les avertissements du code
+affichés là où ils naissent (aucun jour confié, plus personne d'office,
+périmètre vide refusé).
+
+**3. « Quand elle est là » — ce qu'elle déclare, en LECTURE d'abord.** Ses jours
+de travail en une ligne, sa cadence, ses congés et ses absences sur le
+calendrier 2 mois, **avec la source de chaque ligne** et la trace « ✎ modifié
+par elle le … ». L'hôte **peut** corriger (il en a le droit), mais le geste est
+secondaire : dans les faits, **il ne l'a jamais utilisé**. Donc un lien
+« corriger ses jours » plutôt qu'un formulaire ouvert.
+
+**4. « Son accès » — plié par défaut.** Le lien avec **« Lui envoyer son lien »**
+(décision H.7-1), « Régénérer » (H.7-2, avec son avertissement), téléphone,
+e-mail, les deux cases de canaux. C'est consulté quand quelque chose ne marche
+pas, pas à chaque visite.
+
+**5. « Ce qu'elle voit » — plié par défaut.** La visibilité du calendrier, la
+carte « Ce qu'elle voit des autres » (la case de portée + une case par
+collègue), le droit « elle déclare ses absences ». Trois réglages
+d'**affichage** et de **permission**, qui ne changent pas qui fait le ménage.
+
+**6. « Avis et évaluation » — plié, et visiblement optionnel.** La période du
+ratio et les deux réglages d'évaluation. **Aucun n'a jamais été touché** (I.2) ;
+ils doivent rester atteignables sans occuper le haut de l'écran.
+
+**7. En bas : Désactiver / Supprimer**, avec la confirmation actuelle et ce que
+chacun fait vraiment.
+
+**À cacher par défaut** : les groupes 4, 5 et 6 — ce sont exactement ceux dont
+les données montrent qu'ils vivent à leur valeur par défaut. **À ne jamais
+cacher** : la phrase d'état du point 1, et les avertissements du groupe 2.
+
+**Deux points que la refonte doit trancher explicitement :**
+
+- **Le délai de retrait ne va PAS dans la fiche** : c'est un réglage de COMPTE,
+  une seule ligne par hôte pour tout le parc. Il reste sur la page, hors des
+  fiches — ou il part dans les réglages de l'app ménage.
+- **Les deux temporalités d'enregistrement** (I.4) : soit tout attend le bouton,
+  soit chaque réglage immédiat le dit (« enregistré »). L'état actuel — où
+  « Annuler » n'annule pas la moitié de l'écran — est un défaut à part entière.
+
+**Un dernier point, pour qui reprendra :** `docs/kb/menage.md` affirme encore
+*« Le rang n'apparaît plus à l'écran »*. C'était vrai au lot 3.5 ; la spec
+« proposition par rang » du 2 octobre 2026 l'a **remis**, choisi par l'hôte.
+**Ce paragraphe du KB est à corriger au commit de la refonte.**
