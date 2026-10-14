@@ -233,6 +233,60 @@ test('config : les quatre périodes de ratio sont celles que la BASE accepte', (
   }
 })
 
+test('les QUATRE gestes d\'assignation existent, et une seule fois', () => {
+  // ⚠ CE QUE L'ANCIEN PLANNING FAISAIT ET QUE LA V5 NE FAISAIT PAS (étape 4,
+  // 14 octobre 2026). L'écran ne savait qu'ASSIGNER : un clic sur un prénom, et
+  // le ménage changeait de main sur-le-champ. Trois gestes manquaient — et le
+  // premier est le DÉFAUT du serveur, parce qu'engager quelqu'un sans son
+  // accord doit rester un choix explicite.
+  const src = sansCommentaires(html())
+  assert.ok(/function htmlGestesAssignation/.test(src), 'une seule fabrique')
+  assert.ok(/function gesteAssignation/.test(src), 'un seul geste')
+  assert.ok(/function brancherGestesAssignation/.test(src), 'un seul branchement')
+  // Les deux modes du serveur sont rendus, nommés, et distincts.
+  assert.ok(src.includes("data-mode=\"proposer\"") && src.includes("data-mode=\"assigner\""),
+    'proposer ET assigner, pas un seul')
+  assert.ok(src.includes('data-retirer-offre'), 'retirer la proposition')
+  assert.ok(src.includes('data-personne'), 'et retirer tout le monde')
+  // ⚠ LES DEUX SURFACES PARTAGENT LA FABRIQUE. Deux listes écrites côte à côte
+  // finiraient par offrir des gestes différents sur le même ménage — le défaut
+  // que ce lot a déjà payé deux fois.
+  assert.equal((src.match(/htmlGestesAssignation\(/g) || []).length, 2,
+    'définie une fois, appelée par la bulle ET par la fiche')
+  assert.equal((src.match(/brancherGestesAssignation\(/g) || []).length, 2)
+})
+
+test('« Retirer la proposition » vise la PORTEUSE, en mode assigner', () => {
+  // ⚠ C'est ainsi que le serveur lit un retrait (api/menages.js, « RE-CHOISIR
+  // LA PORTEUSE = RETIRER LA PROPOSITION »). Viser la personne SOLLICITÉE
+  // transférerait le ménage à celle qui n'a jamais répondu — l'inverse exact
+  // du geste demandé.
+  const src = sansCommentaires(html())
+  const i = src.indexOf('function brancherGestesAssignation')
+  assert.ok(i > 0)
+  const corps = src.slice(i, i + 1200)
+  assert.ok(/retirerOffre' in b\.dataset[\s\S]{0,140}cible\.qui/.test(corps),
+    'le retrait repasse la porteuse actuelle')
+  assert.ok(/personne' in b\.dataset[\s\S]{0,120}providerId: null/.test(corps),
+    '« Personne » envoie bien un provider nul')
+})
+
+test('l\'écran annonce ce que le SERVEUR a fait, pas ce qu\'il a demandé', () => {
+  // ⚠ « Proposé » et « assigné » ne se disent pas pareil : annoncer un transfert
+  // quand on n'a posé qu'une question ferait croire à l'hôte que le ménage a
+  // changé de main — alors qu'il reste chez sa porteuse tant que personne n'a
+  // accepté.
+  const src = sansCommentaires(html())
+  const i = src.indexOf('async function gesteAssignation')
+  const corps = src.slice(i, i + 900)
+  assert.ok(corps.includes('r.retiree'), 'le retrait se dit')
+  assert.ok(corps.includes('r.assignee'), 'le transfert se dit')
+  assert.ok(corps.includes('menages.propose_ok'), 'et la proposition se dit autrement')
+  const fr = JSON.parse(lire('shared/i18n/fr.json'))
+  assert.match(fr['menages.propose_ok'], /reste chez sa porteuse/,
+    'le message dit ce qui n\'a PAS changé')
+})
+
 test('config : l\'écran de l\'hôte n\'appelle JAMAIS l\'endpoint de sa page', () => {
   // ⚠ L'ONGLET « CE QU'ELLE VOIT » EST SUPPRIMÉ (décision de Thierry, 14
   // octobre 2026), et son cadre avec : plus aucune iframe, donc plus aucun

@@ -798,22 +798,13 @@ function renderFiche () {
   if (save) save.addEventListener('click', () => enregistrerNote(corps))
   const zone = corps.querySelector('[data-fiche-presta]')
   if (zone) {
-    const dejaLa = m.porteur && m.porteur.id ? String(m.porteur.id) : null
-    const offrables = etat.prestataires.filter(p => String(p.id) !== dejaLa)
-    zone.innerHTML = offrables.length
-      ? offrables.map(p => `<button type="button" class="btn btn--secondary men-fiche__presta" data-presta="${esc(p.id)}">${esc(p.prenom || '')}</button>`).join('')
-      : `<span class="caption muted">${esc(t('menages.changer_vide'))}</span>`
-    zone.querySelectorAll('[data-presta]').forEach(b => b.addEventListener('click', async () => {
-      let r
-      try {
-        r = await poster('/api/menages', { property_id: m.bienId, booking_id: m.bookingId,
-                                           departure_date: m.date, provider_id: b.dataset.presta,
-                                           mode: 'assigner' })
-      } catch (e) { toast(e.message || t('menages.geste_echec')); return }
-      toast(t('menages.change_ok', { prenom: r.prenom || b.textContent }))
-      fermerFiche()
-      await rafraichir()
-    }))
+    // ⚠ LA MÊME FABRIQUE QUE LA BULLE. `qui` est la porteuse — la fiche la
+    // nomme `porteur`, la bulle `qui` ; on ne garde qu'un vocabulaire ici.
+    const cible = { bienId: m.bienId, bookingId: m.bookingId, date: m.date,
+                    qui: m.porteur, proposeesA: m.proposeesA, expireLe: m.expireLe }
+    zone.classList.add('men-chx')
+    zone.innerHTML = htmlGestesAssignation(cible)
+    brancherGestesAssignation(zone, cible, async () => { fermerFiche(); await rafraichir() })
   }
 }
 
@@ -1001,36 +992,103 @@ async function validerMenage (l) {
   await rafraichir()
 }
 
-// Changer la prestataire : la liste des actives, puis « Assigner » (transfert
-// immédiat) ou « Proposer » (elle confirme) — les deux gestes que le serveur
-// distingue déjà (spec §11.6).
+// ─── LES QUATRE GESTES D'ASSIGNATION, UNE SEULE FOIS ────────────────────────
+//
+// ⚠ CE QUE L'ANCIEN PLANNING FAISAIT ET QUE CET ÉCRAN NE FAISAIT PAS (étape 4,
+// 14 octobre 2026). La V5 ne savait qu'ASSIGNER : un clic sur un prénom, et le
+// ménage changeait de main sur-le-champ. Trois gestes manquaient, et le premier
+// est le DÉFAUT du serveur :
+//   · « Proposer » — elle confirme, et le ménage RESTE chez sa porteuse tant
+//     que personne n'a accepté. Engager quelqu'un sans son accord doit rester
+//     un choix explicite, pas ce qui arrive quand on touche un prénom.
+//   · « Assigner » — transfert immédiat, sans confirmation. Le geste d'urgence :
+//     quelqu'un se décommande à deux heures du départ.
+//   · « Retirer la proposition » — elle s'efface, le ménage ne bouge pas.
+//   · « Personne » — plus de porteuse du tout.
+//
+// ⚠ UNE SEULE FABRIQUE POUR LES DEUX SURFACES (la bulle et la fiche). Deux
+// listes écrites à côté l'une de l'autre finiraient par offrir des gestes
+// différents sur le même ménage — c'est le défaut que ce lot a déjà payé deux
+// fois (les cases de jours, puis le badge « Vu »).
+//
+// `cible` : { bienId, bookingId, date, qui, proposeesA, expireLe }.
+function htmlGestesAssignation (cible) {
+  const dejaLa = cible.qui && cible.qui.id ? String(cible.qui.id) : null
+  const offrables = (etat.prestataires || []).filter(p => String(p.id) !== dejaLa)
+  // Une proposition court-elle ? Les deux surfaces ne nomment pas la même
+  // chose : la bulle porte `expireLe`, la fiche `proposeesA`.
+  const propose = !!((cible.proposeesA || []).length || cible.expireLe)
+  const ligne = (p) => `<div class="men-chx__p">
+      <span class="men-chx__nom">${esc(p.prenom || '')}</span>
+      <button type="button" class="btn btn--secondary men-chx__b"
+              data-presta="${esc(p.id)}" data-mode="proposer">${esc(t('menages.proposer'))}</button>
+      <button type="button" class="btn btn--secondary men-chx__b"
+              data-presta="${esc(p.id)}" data-mode="assigner">${esc(t('menages.assigner'))}</button>
+    </div>`
+  return `<p class="caption muted men-chx__t">${esc(t('menages.changer_qui'))}
+      <span class="men-chx__aide">${esc(t('menages.proposer'))} : ${esc(t('menages.proposer_aide'))} ·
+      ${esc(t('menages.assigner'))} : ${esc(t('menages.assigner_aide'))}</span></p>` +
+    (offrables.length
+      ? offrables.map(ligne).join('')
+      : `<p class="caption muted men-chx__t">${esc(t('menages.changer_vide'))}</p>`) +
+    (propose ? `<button type="button" class="btn btn--secondary men-chx__g" data-retirer-offre>
+        ${esc(t('menages.retirer_proposition'))}</button>` : '') +
+    (dejaLa ? `<button type="button" class="btn btn--secondary men-chx__g" data-personne>
+        ${esc(t('menages.retirer_personne'))}</button>` : '')
+}
+
+// Le geste lui-même. ⚠ LE SERVEUR TRANCHE, et c'est SA réponse qu'on annonce :
+// « proposé » et « assigné » ne se disent pas pareil, et l'écran ne doit pas
+// promettre un transfert quand il n'a posé qu'une question.
+async function gesteAssignation (cible, { providerId, mode }) {
+  let r
+  try {
+    r = await poster('/api/menages', { property_id: cible.bienId, booking_id: cible.bookingId,
+                                       departure_date: cible.date, provider_id: providerId, mode })
+  } catch (e) { toast(e.message || t('menages.geste_echec')); return false }
+  if (!providerId) toast(t('menages.retire_ok'))
+  else if (r && r.retiree) toast(t('menages.proposition_retiree'))
+  else if (r && r.assignee) toast(t('menages.change_ok', { prenom: r.prenom || '' }))
+  else toast(t('menages.propose_ok', { prenom: (r && r.prenom) || '' }))
+  return true
+}
+
+// ⚠ LE BRANCHEMENT EST COMMUN LUI AUSSI : une zone, les quatre gestes.
+// `apres` est appelé après un geste réussi (refermer, rafraîchir).
+function brancherGestesAssignation (zone, cible, apres) {
+  zone.addEventListener('click', async (ev) => {
+    const b = ev.target.closest('[data-presta],[data-retirer-offre],[data-personne]')
+    if (!b || b.disabled) return
+    ev.stopPropagation()
+    // ⚠ « Retirer la proposition » = re-choisir la PORTEUSE actuelle, en mode
+    // `assigner` : c'est ce que le serveur lit comme un retrait (api/menages.js
+    // §« RE-CHOISIR LA PORTEUSE = RETIRER LA PROPOSITION »). Elle garde son
+    // ménage, l'offre s'efface.
+    const quoi = 'retirerOffre' in b.dataset
+      ? { providerId: (cible.qui || {}).id, mode: 'assigner' }
+      : ('personne' in b.dataset
+          ? { providerId: null, mode: 'assigner' }
+          : { providerId: b.dataset.presta, mode: b.dataset.mode })
+    zone.querySelectorAll('button').forEach(x => { x.disabled = true })
+    const ok = await gesteAssignation(cible, quoi)
+    if (!ok) { zone.querySelectorAll('button').forEach(x => { x.disabled = false }); return }
+    await apres()
+  })
+}
+
+// Changer la prestataire : la liste des actives et les quatre gestes.
 function ouvrirChangement (l, ancre) {
   document.querySelectorAll('.men-choix').forEach(x => x.remove())
   const choix = document.createElement('div')
   choix.className = 'men-choix'
-  // ⚠ LA PERSONNE DÉJÀ SUR LE MÉNAGE N'EST PAS REPROPOSÉE : la choisir ne
-  // transfère rien (le serveur y voit « retirer la proposition »), et le
-  // message aurait dit « confié à Marie » sans que rien ne bouge.
-  const dejaLa = l.qui && l.qui.id ? String(l.qui.id) : null
-  const offrables = etat.prestataires.filter(p => String(p.id) !== dejaLa)
-  choix.innerHTML = `<p class="caption muted" style="margin: 0 0 6px">${esc(t('menages.changer_qui'))}</p>` +
-    offrables.map(p => `<button type="button" data-presta="${esc(p.id)}">${esc(p.prenom || '')}</button>`).join('') +
-    (offrables.length ? '' : `<p class="caption muted" style="margin: 0">${esc(t('menages.changer_vide'))}</p>`)
+  // ⚠ LA PERSONNE DÉJÀ SUR LE MÉNAGE N'EST PAS REPROPOSÉE dans la liste : elle
+  // a son propre geste, « Retirer la proposition », qui dit ce qu'il fait.
+  choix.innerHTML = htmlGestesAssignation(l)
   ancre.appendChild(choix)
   const fermer = () => choix.remove()
   setTimeout(() => document.addEventListener('click', fermer, { once: true }), 0)
   choix.addEventListener('click', e => e.stopPropagation())
-  choix.querySelectorAll('[data-presta]').forEach(b => b.addEventListener('click', async () => {
-    fermer()
-    let r
-    try {
-      r = await poster('/api/menages', { property_id: l.bienId, booking_id: l.bookingId,
-                                         departure_date: l.date, provider_id: b.dataset.presta,
-                                         mode: 'assigner' })
-    } catch (e) { toast(e.message || t('menages.geste_echec')); return }
-    toast(t('menages.change_ok', { prenom: r.prenom || b.textContent }))
-    await rafraichir()
-  }))
+  brancherGestesAssignation(choix, l, async () => { fermer(); await rafraichir() })
 }
 
 // Après un geste : la bulle ET le planning, puisque les deux lisent le cœur.

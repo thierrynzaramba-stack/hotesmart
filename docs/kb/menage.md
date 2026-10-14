@@ -4303,3 +4303,41 @@ touche.
 Détail attrapé au passage : la coloration du jour courant
 (`.agenda-jour.auj`) portait sur l'item, donc sur la **moitié gauche** de la
 bulle. Elle porte maintenant sur l'enveloppe.
+
+## Les quatre gestes d'assignation reviennent dans la V5 (14 octobre 2026)
+
+Étape 4, premier des deux chantiers qui conditionnent la suppression des anciens
+écrans.
+
+**Ce qui manquait.** La page V5 ne savait qu'**assigner** : un clic sur un
+prénom, et le ménage changeait de main sur-le-champ. L'ancien planning
+(`apps/menages/index.html`) en portait trois autres, que le serveur distingue
+depuis toujours (`api/menages.js`, « DEUX GESTES DISTINCTS ») :
+
+- **« Proposer »** — elle confirme, et le ménage **reste chez sa porteuse** tant
+  que personne n'a accepté. C'est le **défaut du serveur** (`mode` absent ⇒
+  `proposer`), et la raison est écrite dans le code : *engager quelqu'un sans son
+  accord doit rester un choix explicite, pas ce qui arrive par défaut*. L'écran
+  V5 faisait précisément l'inverse.
+- **« Retirer la proposition »** — elle s'efface, le ménage ne bouge pas. Le
+  serveur le reconnaît à ceci : on **re-choisit la porteuse actuelle** en mode
+  `assigner`. Viser la personne sollicitée transférerait le ménage à celle qui
+  n'a jamais répondu.
+- **« Personne »** — `provider_id: null`.
+
+**Une seule fabrique pour les deux surfaces** (le menu de la bulle et la fiche
+ménage) : `htmlGestesAssignation` rend, `gesteAssignation` poste,
+`brancherGestesAssignation` écoute. Deux listes écrites côte à côte finiraient
+par offrir des gestes différents sur le même ménage — c'est le défaut que ce lot
+a déjà payé deux fois (les cases de jours, puis le bouton « Vu »).
+
+**L'écran annonce ce que le serveur a FAIT**, lu dans sa réponse (`assignee`,
+`retiree`), jamais ce qu'on lui a demandé : « proposé » et « assigné » ne se
+disent pas pareil, et le message de proposition dit explicitement ce qui **n'a
+pas** changé (« le ménage reste chez sa porteuse »).
+
+**Détail CSS qui a coûté une capture** : `.men-choix button` met tous les boutons
+du popover en bloc et en pleine largeur. Une classe seule ne pèse pas assez —
+les deux gestes tombaient l'un sous l'autre et le prénom disparaissait sous eux.
+Les règles passent donc par le parent (`.men-chx__p .men-chx__b`) au lieu de
+toucher à la règle d'origine, qui sert encore aux deux boutons du bas.
