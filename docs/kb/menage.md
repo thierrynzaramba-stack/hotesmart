@@ -4098,3 +4098,86 @@ sa garde d'origine (`estSaPage` : même origine **et** chemin de sa page, pour n
 jamais ouvrir une URL d'invitation dans la session de l'hôte). Le mode
 `?apercu=1` de `apps/menages/public.html` reste donc entièrement en place,
 bouton « Vu » compris, qui y est masqué comme les autres gestes.
+
+## Les constats de la revue de 20fb83d (14 octobre 2026)
+
+Aucun constat de sécurité : `validerMonMenage` est cloisonné par jeton → compte
+→ profil, et l'écriture porte `user_id` + `provider_id` + la condition d'auteur.
+Huit défauts réels, dont deux qui rouvraient le trou que le lot vient fermer.
+
+**1. Une colonne neuve ne doit pas pouvoir emporter les colonnes qui marchaient.**
+`api/garde.js` et `api/menages-public.js` nommaient `vu_le` dans leur `select`
+principal, alors que la migration se colle **à la main, après le push**. Entre
+les deux, PostgREST rend 42703 sur le select **entier** — et les deux endpoints
+traitent toute erreur de lecture en 503. La page Ménages de l'hôte (bulle,
+calendrier de garde, fiche prestataire) **et** la page de chaque prestataire
+auraient affiché « service indisponible » jusqu'au collage du SQL. Et ce n'est
+pas la première fois : `pwa_vue_le` groupé avec `visibility_days` avait fait
+exactement cela à la revue de `ac28b1f`. La deuxième occurrence du même défaut
+sur le même lot est ce qui justifie `lib/colonne-absente.js` : le prédicat
+existe pour **dégrader**, jamais pour avaler — l'appelant relit sans la colonne,
+sert le champ **absent** (et non `null` : les deux ne disent pas la même chose),
+et l'alerte se tait au lieu d'accuser tout le monde.
+
+**2. Une validation ne vaut que pour qui l'a posée** (`vu_par`, migration
+`2026-10-14-menage-vu-par`). `vu_le` seul dit QUAND, pas QUI. Or un ménage
+change de main : l'hôte réassigne, une collègue accepte, le moteur pose une
+remplaçante après un refus. La validation d'Anna restait collée au ménage passé
+chez Béa — Béa n'avait **ni badge, ni bouton, ni relance**, et l'hôte lisait
+« À jour » sur quelqu'un qui n'avait jamais rien lu. **Le trou que ce lot existe
+pour fermer, rouvert par le geste le plus courant de l'hôte.**
+
+*Pourquoi `vu_par` plutôt que « remettre `vu_le` à null à chaque
+réassignation ».* Il faudrait le faire dans les **six** chemins qui écrivent
+`provider_id` aujourd'hui, et dans tous ceux qui viendront ; rien ne le
+garantit, et **aucun test ne peut attraper un septième chemin qui n'existe pas
+encore**. La donnée porte donc son propriétaire, et un changement de porteuse
+rend la validation caduque **tout seul**. Même règle lue aux trois endroits
+(`api/garde.js`, `api/menages-public.js`, `lib/cleaning/relance-validation.js`),
+et la garde d'idempotence de l'écriture devient une condition d'**auteur** —
+sinon la nouvelle porteuse tapait « Vu » et s'entendait répondre « déjà fait »
+sans que rien ne soit à son nom.
+
+**3. Le marqueur de relance se pose AVANT l'envoi, et c'est l'ordre qui compte.**
+Posé après, un échec durable de l'UPDATE (droit, verrou, migration passée à
+moitié) laissait la ligne éligible au cycle suivant : le **même SMS repartait
+toutes les cinq minutes**, jusqu'à 288 par jour et par ménage, chez quelqu'un
+qui travaille, sur la clé Brevo de l'hôte — et rien ne sonnait nulle part. Le
+commentaire d'origine annonçait « un SMS de trop au prochain cycle » ; c'était
+une boucle sans sortie. Ce que l'ordre inverse coûte, et c'est assumé : ce
+rappel-là est perdu. Il en reste un second, et l'alerte « Non validé » de l'hôte
+ne dépend pas de l'envoi. Un échec de marquage **arrête le cycle** : il échouera
+sur les lignes suivantes, et continuer n'enverrait que des messages qu'on ne
+sait pas marquer.
+
+**4. Le « fait » vit dans `menage_done`, pas dans `menages.status`.** Sans cette
+lecture, elle finissait son ménage à 8 h et recevait à 9 h « touchez Vu » sur
+une page où le bouton n'existe plus (`estAValider` exclut `m.done`). **Un SMS
+auquel on ne PEUT pas obéir** est le plus sûr moyen de lui apprendre à ne plus
+les lire — exactement ce que ce module dit vouloir éviter.
+
+**5. Le filtre anti-répétition est posé EN BASE, pas en JS.** Il l'était après
+la limite : sur un gros compte, les lignes du jour déjà relancées mangeaient
+toutes les places et les ménages de **demain** n'étaient jamais lus, en silence,
+avec un bilan qui ressemblait à un cycle calme. Une requête **par jour**,
+chacune filtrée sur **son** marqueur ; et la limite atteinte se dit (`lotPlein`).
+
+**6. Une panne de lecture n'est pas un ménage introuvable.** La relecture de
+repli de `validerMonMenage` jetait son erreur : un hoquet de la base annonçait
+« ce ménage n'est pas le vôtre » à quelqu'un qui venait de le valider. 503,
+comme partout dans ce fichier.
+
+**7. Pas de lien, pas d'alerte — même pour la porteuse.** Une personne absente
+d'une carte **lue** n'a aucune ligne `public_tokens` : elle n'a pas de page,
+donc aucun moyen de valider, et la ligne rouge ne pouvait être éteinte par
+aucun geste. *Absente d'une carte lue ≠ carte non lue* : une panne de lecture
+(`vuesLues: false`) ne dit rien de personne, et l'alerte tient alors — c'est
+tout l'intérêt d'avoir déplacé la règle sur le ménage.
+
+**8. On ne relance pas sur un ménage qui n'est pas sur sa page.** Une liaison
+suffit à lui attribuer le ménage, mais c'est `public_tokens.property_ids` qui
+décide de ce que sa **page** affiche — et les deux ont divergé dans ce dépôt
+(ancien second writer). Elle recevait « touchez Vu », ouvrait sa page, n'y
+trouvait rien. Rien n'est marqué dans ce cas : ce n'est pas une relance faite,
+c'est un réglage à réparer, et le crier à chaque cycle est le seul signal qui
+existe.

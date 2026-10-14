@@ -38,7 +38,10 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                                 { id: SECONDE, first_name: 'Marie', active: true }],
                      erreurLiaisons = null, erreurBiens = null, avis = [], erreurAvis = null,
                      done = [], erreurDone = null, conges = [], notes = [],
-                     jetons = [], erreurJetons = null } = {}) {
+                     jetons = [], erreurJetons = null,
+                     // La migration pas encore collee : le `select` qui nomme
+                     // `vu_le` echoue, celui qui ne la nomme pas passe.
+                     erreurColonneMenages = null } = {}) {
   const etat = { lectures: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -53,7 +56,20 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         }
         if (table === 'provider_availability_rules') return { data: regles, error: null }
         if (table === 'provider_availability_exceptions') return { data: exceptions, error: null }
-        if (table === 'menages') return { data: menages, error: null }
+        if (table === 'menages') {
+          const demandeValidation = /vu_le/.test(String(a.cols || ''))
+          if (erreurColonneMenages && demandeValidation) {
+            return { data: null, error: erreurColonneMenages }
+          }
+          // ⚠ LE DOUBLE REND CE QUI EST DEMANDE, comme PostgREST : sans cela,
+          // le repli recevrait quand meme `vu_le` et le test ne prouverait
+          // rien.
+          if (demandeValidation) return { data: menages, error: null }
+          return { data: menages.map(m => {
+            const { vu_le, vu_par, ...reste } = m
+            return reste
+          }), error: null }
+        }
         if (table === 'profiles') return { data: profils, error: null }
         if (table === 'ota_reviews') return { data: erreurAvis ? null : avis, error: erreurAvis }
         if (table === 'menage_done') return { data: erreurDone ? null : done, error: erreurDone }
@@ -63,7 +79,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         return { data: [], error: null }
       }
       const chain = {
-        select () { return chain },
+        select (cols) { a.cols = cols; return chain },
         eq (c, v) { a.f[c] = v; return chain },
         neq (c, v) { a.f['neq_' + c] = v; return chain },
         in (c, v) { a.f['in_' + c] = v; return chain },
@@ -1196,10 +1212,42 @@ test('chaque menage dit s\'il a ete valide — `null` est une REPONSE, pas un ou
 
 test('... et la date quand elle a valide', async () => {
   const { handler } = preparer({
-    liaisons: [LIAISON()], menages: [MENAGE({ vu_le: '2026-09-11T06:30:00Z' })] })
+    liaisons: [LIAISON()],
+    menages: [MENAGE({ vu_le: '2026-09-11T06:30:00Z', vu_par: REGINA })] })
   const res = reponse()
   await handler(get(), res)
   assert.strictEqual(res.body.menages[0].vuLe, '2026-09-11T06:30:00Z')
+})
+
+test('la validation de la porteuse PRECEDENTE ne compte pas (constat de 20fb83d)', async () => {
+  // ⚠ UN MENAGE CHANGE DE MAIN : l'hote reassigne, une collegue accepte, le
+  // moteur pose une remplacante apres un refus. Le `vu_le` de la precedente
+  // restait colle au menage, et l'hote lisait « A jour » sur quelqu'un qui
+  // n'avait jamais rien lu — le trou meme que ce lot existe pour fermer,
+  // rouvert par le geste le plus courant de l'hote.
+  const { handler } = preparer({
+    liaisons: [LIAISON()],
+    menages: [MENAGE({ provider_id: REGINA, vu_le: '2026-09-11T06:30:00Z', vu_par: 'p-lena' })] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.menages[0].vuLe, null,
+    'la date d\'une autre personne vaut « non valide », pas « a jour »')
+})
+
+test('une colonne de validation ABSENTE ne coupe pas la garde (constat de 20fb83d)', async () => {
+  // ⚠ LA MIGRATION SE COLLE A LA MAIN, APRES LE PUSH. Entre les deux, un
+  // `select` qui nomme `vu_le` echoue EN ENTIER (42703) : cet endpoint rendait
+  // 503, donc bulle, calendrier de garde et fiche prestataire morts pour
+  // l'hote. On relit sans la colonne, et l'alerte se tait — elle ne coupe pas.
+  const { handler } = preparer({
+    liaisons: [LIAISON()], menages: [MENAGE()],
+    erreurColonneMenages: { code: '42703', message: 'column menages.vu_le does not exist' } })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.code, 200, 'la page de l\'hote tient')
+  assert.strictEqual(res.body.menages.length, 1, 'et les menages sont servis')
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(res.body.menages[0], 'vuLe'), false,
+    'le champ est ABSENT : `undefined` fait taire l\'alerte, `null` l\'allumerait')
 })
 
 // ─── « Derniere ouverture de sa page », pour la PROPOSITION non vue ─────────

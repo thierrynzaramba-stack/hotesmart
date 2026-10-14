@@ -193,15 +193,27 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
         // un lien qui n'existe plus. Seul un `null` EXPLICITE veut dire
         // « jamais ». La porteuse, elle, ne lit pas cette carte.
         let vueLe
+        const carteLue = !!(vuesLues && vues)
+        const connue = carteLue && Object.prototype.hasOwnProperty.call(vues, vid)
         if (!porte) {
-          if (!vuesLues || !vues || !Object.prototype.hasOwnProperty.call(vues, vid)) continue
+          if (!connue) continue
           vueLe = vues[vid]
-        } else if (vuesLues && vues && Object.prototype.hasOwnProperty.call(vues, vid)) {
-          // Pour la porteuse, la date d'ouverture n'entre pas dans la règle :
+        } else {
+          // ⚠ PAS DE LIEN, PAS D'ALERTE — MÊME POUR LA PORTEUSE (constat de la
+          // revue de 20fb83d). Une personne ABSENTE d'une carte LUE n'a aucune
+          // ligne `public_tokens` : elle n'a pas de page, donc aucun moyen de
+          // valider. La ligne « Non validé » resterait rouge jusqu'au départ
+          // sans qu'aucun geste puisse l'éteindre — et une alerte qu'on ne peut
+          // pas résoudre est exactement ce qui apprend à ne plus regarder.
+          // ⚠ ABSENTE D'UNE CARTE LUE ≠ CARTE NON LUE. Une panne de lecture
+          // (`vuesLues: false`) ne dit rien de personne : l'alerte TIENT alors,
+          // et c'est tout l'intérêt d'avoir déplacé la règle sur le ménage.
+          if (carteLue && !connue) continue
+          // La date d'ouverture n'entre pas dans la règle de la porteuse :
           // elle n'est gardée que pour l'AFFICHER (« page vue il y a 2 h, et
           // toujours pas validé » se décide autrement que « page jamais
           // ouverte »). `undefined` = on ne le dira pas.
-          vueLe = vues[vid]
+          if (connue) vueLe = vues[vid]
         }
         // La règle vit au-dessus, et la fiche de la personne lit la MÊME.
         if (nonVuPar(m, vid, vueLe) !== true) continue

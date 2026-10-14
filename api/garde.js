@@ -39,6 +39,20 @@ const { planningDeGarde } = require('../lib/cleaning/garde')
 const { chargerLiaisons, chargerDisponibilites,
         dansLaFenetreDeProposition, proposeesDe } = require('../lib/cleaning/assign')
 const { extraitVerifie } = require('../lib/extrait-verifie')
+const { colonneAbsente } = require('../lib/colonne-absente')
+
+// ⚠ UNE VALIDATION NE VAUT QUE POUR QUI L'A POSEE. Un menage change de main —
+// l'hote reassigne, une collegue accepte, le moteur pose une remplacante apres
+// un refus — et le `vu_le` de la precedente restait colle au menage : l'hote
+// lisait « A jour » sur quelqu'un qui n'avait jamais rien lu (constat de la
+// revue de 20fb83d). `vu_par` ABSENT fait retomber sur `vu_le` seul, soit
+// l'ancien comportement, jamais une panne.
+function valideParLaPorteuse (m) {
+  if (!m || !m.vu_le) return null
+  if (!('vu_par' in m)) return m.vu_le || null
+  if (!m.provider_id) return null
+  return String(m.vu_par || '') === String(m.provider_id) ? m.vu_le : null
+}
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -169,8 +183,20 @@ module.exports = async function handler (req, res) {
     })
 
     // ===== LES MENAGES POSES DESSUS =====
-    const { data: menagesRows, error: errMen } = await supabase.from('menages')
-      .select('property_id, booking_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, assignment_reason, offered_at, accepted_at, vu_le')
+    //
+    // ⚠ `vu_le` EST DEMANDE A PART, ET SON ABSENCE NE COUPE RIEN (constat de la
+    // revue de 20fb83d). C'est la MEME faute qu'au commit ac28b1f, ou
+    // `pwa_vue_le` avait ete groupe avec `visibility_days` : tant que la
+    // migration n'est pas collee, le select ENTIER echoue en 42703, et cet
+    // endpoint rend 503 — bulle, calendrier de garde et fiche prestataire morts
+    // pour l'hote, entre le push et le geste manuel de Thierry. Une colonne
+    // neuve ne doit jamais pouvoir emporter les colonnes qui marchaient.
+    // ⚠ ET LE REPLI SE TAIT PROPREMENT : sans `vuLe`, `nonVuPar` rend `null`
+    // pour la porteuse (c'est exactement a cela que sert son `undefined`), donc
+    // l'alerte « Non valide » disparait au lieu d'accuser tout le monde.
+    const COLONNES_MENAGE = 'property_id, booking_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, assignment_reason, offered_at, accepted_at'
+    const lireMenages = (colonnes) => supabase.from('menages')
+      .select(colonnes)
       .eq('user_id', userId)
       .in('property_id', biens.map(b => b.id))
       .gte('departure_date', du).lte('departure_date', au)
@@ -179,6 +205,15 @@ module.exports = async function handler (req, res) {
       .neq('status', 'cancelled')
       .order('departure_date', { ascending: true })
       .limit(LOT_MENAGES)
+    // ⚠ LES DEUX COLONNES ENSEMBLE, et c'est voulu : sans `vu_par`, une
+    // validation ne peut pas etre rattachee a quelqu'un, et le repli doit
+    // alors se taire ENTIEREMENT plutot que de servir une date dont on ne sait
+    // pas de qui elle est.
+    let { data: menagesRows, error: errMen } = await lireMenages(`${COLONNES_MENAGE}, vu_le, vu_par`)
+    if (errMen && colonneAbsente(errMen)) {
+      console.warn('[garde] menages.vu_le / vu_par absente : migrations 2026-10-14-menage-vu-le et -vu-par non appliquees')
+      ;({ data: menagesRows, error: errMen } = await lireMenages(COLONNES_MENAGE))
+    }
     if (errMen) {
       console.error('[garde] lecture menages echec', errMen.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -473,8 +508,13 @@ module.exports = async function handler (req, res) {
       // `public_tokens.pwa_vue_le` n'y repondait que par procuration — « a-t-
       // elle ouvert sa page un jour ? », pour tous ses menages a la fois.
       // ⚠ NULL = NON VALIDE, ET C'EST UNE REPONSE. Ne pas le servir ferait
-      // taire l'alerte, pas l'inverse.
-      vuLe: m.vu_le || null,
+      // taire l'alerte, pas l'inverse — et c'est bien pour cela que le champ
+      // est ABSENT (et non `null`) quand les colonnes n'ont pas pu etre lues :
+      // les deux cas ne disent pas la meme chose.
+      // ⚠ ET LA VALIDATION D'UNE AUTRE PERSONNE NE COMPTE PAS (constat de la
+      // revue de 20fb83d) : apres une reassignation, celle qui porte le menage
+      // maintenant n'a rien lu, et c'est exactement ce que l'hote doit voir.
+      ...('vu_le' in m ? { vuLe: valideParLaPorteuse(m) } : {}),
       // ⚠ LE TOUR ENTIER (spec proposition-par-rang) : `proposeesA` nomme
       // toutes les personnes sollicitees en meme temps ; `proposeA` reste la
       // premiere, pour les ecrans qui n'affichent qu'un nom.

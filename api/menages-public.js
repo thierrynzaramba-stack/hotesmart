@@ -7,6 +7,7 @@ const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, filtresAttribution, MAX_IDS } = require('../lib/attribution-prestataire')
 const { alertMenageRefuse, alertReglesModifiees, alertPlageModifiee } = require('../lib/alert-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
+const { colonneAbsente } = require('../lib/colonne-absente')
 // Le moteur de garde (lot 3.3) : c'est LUI qui dit qui remplace, jamais un
 // « rang 2 » lu en dur — un rang 2 en conge ou non attitre ce jour-la n'est pas
 // la remplacante de ce jour.
@@ -187,6 +188,26 @@ async function profilActifDuJeton (userId, token) {
   }
   if (!profil || profil.active === false) return { statut: 401 }
   return { profil }
+}
+
+// ⚠ UNE VALIDATION NE VAUT QUE POUR QUI L'A POSEE (constat de la revue de
+// 20fb83d). Un menage change de main — l'hote reassigne, une collegue accepte,
+// le moteur pose une remplacante apres un refus — et le `vu_le` de la
+// precedente restait colle au menage : la nouvelle porteuse n'avait ni bouton
+// ni relance, et l'hote lisait « A jour » sur quelqu'un qui n'avait rien lu.
+//
+// ⚠ C'EST LA DONNEE QUI PORTE SON PROPRIETAIRE, pas six chemins d'ecriture qui
+// pensent a la remettre a zero : un septieme chemin arrivera, et aucun test ne
+// peut attraper celui qui n'existe pas encore.
+//
+// Rend la date quand elle vaut, `null` sinon. `vu_par` ABSENT de la ligne (le
+// complement de migration n'est pas colle) fait retomber sur `vu_le` seul :
+// l'ancien comportement, pas une panne.
+function validePar (ligne, providerId) {
+  if (!ligne || !ligne.vu_le) return null
+  if (!('vu_par' in ligne)) return ligne.vu_le || null
+  if (!providerId) return null
+  return String(ligne.vu_par || '') === String(providerId) ? ligne.vu_le : null
 }
 
 // Le meme refus, ecrit une seule fois : un lien sans personne derriere lui est
@@ -660,8 +681,16 @@ module.exports = async function handler(req, res) {
     //     Le garder en secours, c'etait garder la faille qu'on venait de fermer.
     // Desormais : pas de profil actif, pas d'acces. La garde elle-meme est posee
     // PLUS HAUT, avant les lectures lourdes — voir `profilActifDuJeton`.
-    let requete = supabase.from('menages')
-      .select('booking_id, property_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, vu_le')
+    // ⚠ `vu_le` NE DOIT PAS POUVOIR EMPORTER LE PLANNING (constat de la revue
+    // de 20fb83d). Une migration se colle A LA MAIN apres le push : entre les
+    // deux, un `select` qui nomme la colonne echoue EN ENTIER (42703), et ce
+    // GET rend 503 — la page de CHAQUE prestataire affiche « service
+    // indisponible », pour un bouton de confort. On relit donc sans elle, et
+    // le bouton « Vu » disparait le temps que la colonne arrive.
+    const COLONNES_MENAGE = 'booking_id, property_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at'
+    const COLONNES_VALIDATION = 'vu_le, vu_par'
+    const requeteMenages = (colonnes) => supabase.from('menages')
+      .select(colonnes)
       .eq('user_id', userId)
       .neq('status', 'cancelled')
       .gte('departure_date', dateFrom)
@@ -676,8 +705,13 @@ module.exports = async function handler(req, res) {
     // ⚠ « ON LE LUI PROPOSE » = elle est DANS le tour (`proposee_a` contient
     // son identifiant, spec proposition-par-rang) — ses collegues du meme rang
     // aussi, et chacune ne voit que SA proposition.
-    requete = requete.or(`provider_id.eq.${profilPresta.id},proposee_a.cs.{${profilPresta.id}}`)
-    const { data: mn, error: errMen } = await requete
+    const lireMesMenages = (colonnes) => requeteMenages(colonnes)
+      .or(`provider_id.eq.${profilPresta.id},proposee_a.cs.{${profilPresta.id}}`)
+    let { data: mn, error: errMen } = await lireMesMenages(`${COLONNES_MENAGE}, ${COLONNES_VALIDATION}`)
+    if (errMen && colonneAbsente(errMen)) {
+      console.warn('[menages-public] menages.vu_le absente : migration 2026-10-14-menage-vu-le non appliquee')
+      ;({ data: mn, error: errMen } = await lireMesMenages(COLONNES_MENAGE))
+    }
     // ⚠ Une liste vide par panne serait indiscernable d'« aucun menage », et la
     // prestataire conclurait qu'elle n'a rien a faire aujourd'hui.
     if (errMen) {
@@ -937,10 +971,14 @@ module.exports = async function handler(req, res) {
         propose: proposeesDe(m).length > 0,
         expire_le: proposeesDe(m).length ? m.offer_expires_at : null,
         // ⚠ `vu_le` EST SERVI MEME QUAND IL EST NUL : c'est ce nul qui fait
-        // apparaitre le bouton « Vu ». L'omettre quand il manque ferait
-        // disparaitre le bouton sur les anciens clients comme sur les neufs,
-        // sans que rien ne le signale.
-        vu_le: m.vu_le || null
+        // apparaitre le bouton « Vu ». Il est en revanche ABSENT quand la
+        // colonne n'a pas pu etre lue (migration pas encore collee), et son
+        // ecran traite `undefined` comme « ne rien demander » — un bouton qui
+        // echouerait ne doit pas etre propose.
+        // ⚠ ET UNE VALIDATION D'UNE AUTRE PERSONNE NE COMPTE PAS (constat de
+        // la revue de 20fb83d) : le menage a change de main, celle qui le
+        // porte maintenant n'a rien lu.
+        ...('vu_le' in m ? { vu_le: validePar(m, m.provider_id) } : {})
       })),
       prenom: profilPresta.first_name,
       // ⚠ UNE LISTE A PART, JAMAIS MELEE A `bookings` NI A `menages` : c'est ce
@@ -1139,7 +1177,7 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
                 // bouton « Vu », et lui envoyer deux relances parce qu'elle ne
                 // l'a pas tape, serait absurde — et lui apprendrait a ignorer
                 // les relances.
-                vu_le: new Date().toISOString(),
+                vu_le: new Date().toISOString(), vu_par: profil.id,
                 updated_at: new Date().toISOString() })
       .eq('id', menage.id).contains('proposee_a', [moi])
       .gt('offer_expires_at', new Date().toISOString())
@@ -1778,7 +1816,7 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
               assignment_reason: `Pris par ${profil.first_name}.`,
               // ⚠ LE PRENDRE VAUT LE VALIDER : elle l'a cherche, choisi et
               // pris. Meme raison qu'a l'acceptation d'une proposition.
-              vu_le: new Date().toISOString(),
+              vu_le: new Date().toISOString(), vu_par: profil.id,
               accepted_at: new Date().toISOString(),
               updated_at: new Date().toISOString() })
     .eq('id', menage.id)
@@ -1862,12 +1900,19 @@ async function validerMonMenage (req, res, token, { propertyId, bookingId, depar
   // menage expirerait chez quelqu'un d'autre.
   const quand = new Date().toISOString()
   const { data: maj, error: errMaj } = await supabase.from('menages')
-    .update({ vu_le: quand, updated_at: quand })
+    // ⚠ `vu_par` AVEC `vu_le`, TOUJOURS : une date sans son auteur survivrait
+    // au prochain changement de porteuse et eteindrait l'alerte chez la
+    // suivante (constat de la revue de 20fb83d).
+    .update({ vu_le: quand, vu_par: profil.id, updated_at: quand })
     .eq('user_id', pt.user_id).eq('property_id', String(propertyId))
     .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
     .eq('provider_id', profil.id)
-    .is('vu_le', null)
-    .select('id, vu_le')
+    // ⚠ IDEMPOTENT POUR ELLE, PAS POUR LA PRECEDENTE. `vu_le is null` seul
+    // refusait d'ecrire sur un menage valide par la porteuse d'AVANT puis
+    // reassigne : elle tapait « Vu » et le serveur lui repondait « deja fait »
+    // sans que rien ne soit a son nom. La condition porte donc sur l'AUTEUR.
+    .or(`vu_le.is.null,vu_par.neq.${profil.id}`)
+    .select('id, vu_le, vu_par')
   if (errMaj) {
     console.error('[menages-public] validation echec:', errMaj.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -1877,11 +1922,20 @@ async function validerMonMenage (req, res, token, { propertyId, bookingId, depar
   // date quand on peut la lire : son ecran doit finir coche dans le premier
   // cas, et il n'a rien a apprendre du second.
   if (!maj || !maj.length) {
-    const { data: deja } = await supabase.from('menages')
-      .select('vu_le').eq('user_id', pt.user_id).eq('property_id', String(propertyId))
+    const { data: deja, error: errRelu } = await supabase.from('menages')
+      .select('vu_le, vu_par').eq('user_id', pt.user_id).eq('property_id', String(propertyId))
       .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
       .eq('provider_id', profil.id).maybeSingle()
-    if (deja && deja.vu_le) return res.json({ success: true, vu_le: deja.vu_le })
+    // ⚠ UNE PANNE DE LECTURE N'EST PAS UN MENAGE INTROUVABLE (constat de la
+    // revue de 20fb83d, et regle de ce fichier). Rendre 404 ici annoncerait
+    // « ce menage n'est pas le votre » a quelqu'un qui vient de le valider,
+    // pour un hoquet de la base.
+    if (errRelu) {
+      console.error('[menages-public] relecture de la validation echec:', errRelu.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    const sienne = validePar(deja, profil.id)
+    if (sienne) return res.json({ success: true, vu_le: sienne })
     return res.status(404).json({ error: 'Ménage introuvable' })
   }
   return res.json({ success: true, vu_le: maj[0].vu_le })

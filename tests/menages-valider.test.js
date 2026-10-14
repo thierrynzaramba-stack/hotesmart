@@ -29,8 +29,8 @@ const BIEN = '209413', BOOK = 'b1', DEPART = '2026-10-15'
 // ─────────────────────────────────────────────────────────────────────────────
 
 function preparerEndpoint ({ profil = { id: REGINA, first_name: 'Régina', active: true },
-                             menage = { id: 'm1', provider_id: REGINA, vu_le: null },
-                             erreurMaj = null } = {}) {
+                             menage = { id: 'm1', provider_id: REGINA, vu_le: null, vu_par: null },
+                             erreurMaj = null, erreurRelecture = null } = {}) {
   const etat = { majs: [] }
   const client = {
     from (table) {
@@ -51,6 +51,7 @@ function preparerEndpoint ({ profil = { id: REGINA, first_name: 'Régina', activ
             return Promise.resolve({ data: bon ? profil : null, error: null })
           }
           if (table === 'menages') {
+            if (erreurRelecture) return Promise.resolve({ data: null, error: erreurRelecture })
             // La relecture d'après zéro ligne : la ligne telle qu'elle est.
             const bon = a.f.user_id === U && String(a.f.property_id) === BIEN &&
                         String(a.f.booking_id) === BOOK && a.f.departure_date === DEPART &&
@@ -60,25 +61,32 @@ function preparerEndpoint ({ profil = { id: REGINA, first_name: 'Régina', activ
           return Promise.resolve({ data: null, error: null })
         },
         update (row) {
-          const q = { row, f: {}, is: {} }
+          const q = { row, f: {}, ou: null }
           const c2 = {
             eq (c, v) { q.f[c] = v; return c2 },
-            is (c, v) { q.is[c] = v; return c2 },
+            or (expr) { q.ou = expr; return c2 },
             select () {
               etat.majs.push({ table, ...q })
               // ⚠ LE DOUBLE APPLIQUE LES CONDITIONS, comme PostgREST : c'est
-              // la seule façon qu'un retrait de `.eq('provider_id')` ou de
-              // `.is('vu_le', null)` fasse rougir quelque chose.
+              // la seule façon qu'un retrait de `.eq('provider_id')` ou de la
+              // condition d'auteur fasse rougir quelque chose.
               const sienne = q.f.provider_id === profil.id &&
                              q.f.user_id === U &&
                              String(q.f.property_id) === BIEN &&
                              String(q.f.booking_id) === BOOK &&
                              q.f.departure_date === DEPART
               const bonMenage = menage && menage.provider_id === profil.id
-              const pasDejaVu = !('vu_le' in q.is) || !menage || menage.vu_le === null
-              const ok = sienne && bonMenage && pasDejaVu
+              // `vu_le.is.null,vu_par.neq.<moi>` : écrire si personne n'a
+              // validé, OU si la validation est celle de quelqu'un d'autre.
+              let libre = true
+              if (q.ou && menage) {
+                const dautrui = menage.vu_par && String(menage.vu_par) !== String(profil.id)
+                libre = !menage.vu_le || !!dautrui
+              }
+              const ok = sienne && bonMenage && libre
               return Promise.resolve({
-                data: ok ? [{ id: 'm1', vu_le: row.vu_le }] : [], error: erreurMaj })
+                data: ok ? [{ id: 'm1', vu_le: row.vu_le, vu_par: row.vu_par }] : [],
+                error: erreurMaj })
             }
           }
           return c2
@@ -141,15 +149,52 @@ test('elle ne peut PAS valider le ménage d\'une collègue', async () => {
 })
 
 test('deux tapes ne déplacent pas la date : le geste est idempotent', async () => {
-  // ⚠ `vu_le is null` DANS L'UPDATE. Sans lui, un second envoi (réseau lent,
-  // double tape) réécrirait la date : l'hôte lirait « vu à 9 h 02 » sur un
-  // ménage vu à 7 h 40, et la relance de 9 h aurait l'air déclenchée pour rien.
+  // ⚠ LA GARDE D'AUTEUR DANS L'UPDATE. Sans elle, un second envoi (réseau
+  // lent, double tape) réécrirait la date : l'hôte lirait « vu à 9 h 02 » sur
+  // un ménage vu à 7 h 40, et la relance de 9 h aurait l'air déclenchée pour
+  // rien.
   const dejaVu = '2026-10-14T07:40:00.000Z'
-  const etat = preparerEndpoint({ menage: { id: 'm1', provider_id: REGINA, vu_le: dejaVu } })
+  const etat = preparerEndpoint({
+    menage: { id: 'm1', provider_id: REGINA, vu_le: dejaVu, vu_par: REGINA } })
   const res = await appelerValider()
   assert.equal(res.code, 200, 'et ce n\'est pas une erreur : son écran doit finir coché')
   assert.equal(res.corps.vu_le, dejaVu, 'la PREMIÈRE date, pas la seconde')
-  assert.equal(etat.majs[0].is.vu_le, null, 'la garde est bien posée en base')
+  assert.ok(/vu_le\.is\.null/.test(etat.majs[0].ou), 'la garde est bien posée en base')
+})
+
+test('une validation de la porteuse PRÉCÉDENTE ne vaut pas pour elle', async () => {
+  // ⚠ LE CONSTAT MAJEUR DE LA REVUE DE 20fb83d. Lena validait, l'hôte
+  // réassignait à Régina, et le `vu_le` de Lena restait collé au ménage :
+  // Régina n'avait ni bouton ni relance, et l'hôte lisait « À jour » sur
+  // quelqu'un qui n'avait jamais rien lu. Le geste doit donc pouvoir écrire
+  // PAR-DESSUS une validation qui n'est pas la sienne.
+  const etat = preparerEndpoint({
+    menage: { id: 'm1', provider_id: REGINA, vu_le: '2026-10-13T06:00:00Z', vu_par: LENA } })
+  const res = await appelerValider()
+  assert.equal(res.code, 200)
+  assert.notEqual(res.corps.vu_le, '2026-10-13T06:00:00Z', 'c\'est SA date, pas celle de Lena')
+  assert.equal(etat.majs[0].row.vu_par, REGINA, 'et la validation porte son nom')
+})
+
+test('« Vu » écrit TOUJOURS son auteur avec sa date', async () => {
+  // Une date sans auteur survivrait au prochain changement de porteuse et
+  // éteindrait l'alerte chez la suivante.
+  const etat = preparerEndpoint()
+  await appelerValider()
+  assert.ok(etat.majs[0].row.vu_le)
+  assert.equal(etat.majs[0].row.vu_par, REGINA)
+})
+
+test('une PANNE de relecture rend 503, pas « ménage introuvable »', async () => {
+  // ⚠ RÈGLE DE CE FICHIER : la panne coupe en 503, elle ne se fait pas passer
+  // pour un lien invalide. Un 404 annoncerait « ce ménage n'est pas le vôtre »
+  // à quelqu'un qui vient de le valider, pour un hoquet de la base.
+  const etat = preparerEndpoint({
+    menage: { id: 'm1', provider_id: LENA, vu_le: null, vu_par: null },
+    erreurRelecture: { message: 'timeout' } })
+  const res = await appelerValider()
+  assert.equal(res.code, 503)
+  assert.equal(etat.majs.length, 1, 'l\'écriture a bien été tentée avant')
 })
 
 test('un jeton sans profil actif ne valide rien', async () => {
@@ -172,11 +217,15 @@ test('une date mal formée est refusée AVANT toute lecture', async () => {
 // LES DEUX RELANCES
 // ─────────────────────────────────────────────────────────────────────────────
 
-function preparerRelance ({ menages = [], erreurLecture = null, erreurMarqueur = null } = {}) {
-  const etat = { notifs: [], marqueurs: [], lu: null }
+function preparerRelance ({ menages = [], faits = [], erreurLecture = null,
+                            erreurMarqueur = null,
+                            // Le lien de la prestataire : son jeton, et ce que sa PAGE montre.
+                            // `null` = aucun lien ; `[]` = tous les biens.
+                            jeton = 'tok-regina', perimetre = [] } = {}) {
+  const etat = { notifs: [], marqueurs: [], lectures: [] }
   const client = {
     from (table) {
-      const a = { table, f: {}, in: {}, is: {}, not: {} }
+      const a = { table, f: {}, in: {}, is: {}, not: {}, limite: null }
       const chain = {
         select () { return chain },
         eq (c, v) { a.f[c] = v; return chain },
@@ -184,31 +233,37 @@ function preparerRelance ({ menages = [], erreurLecture = null, erreurMarqueur =
         is (c, v) { a.is[c] = v; return chain },
         not (c, op, v) { a.not[c] = [op, v]; return chain },
         order () { return chain },
-        limit () {
+        limit (n) {
+          a.limite = n
           if (table === 'menages') {
-            etat.lu = a
+            etat.lectures.push(a)
             if (erreurLecture) return Promise.resolve({ data: null, error: erreurLecture })
             // ⚠ LE DOUBLE APPLIQUE LES FILTRES. Sans cela, retirer
-            // `.is('vu_le', null)` ou `.eq('status','accepted')` du module ne
-            // casserait rien — et ce sont eux qui empêchent de relancer un
-            // ménage déjà validé, ou une PROPOSITION (qui a sa propre boucle).
-            const jours = a.in.departure_date || []
+            // `.eq('status','accepted')` ou le filtre du MARQUEUR du module ne
+            // casserait rien — et c'est lui qui empêche de relancer deux fois
+            // le même jour.
             return Promise.resolve({
               data: menages.filter(m =>
-                jours.includes(m.departure_date) &&
+                m.departure_date === a.f.departure_date &&
                 (a.f.status === undefined || m.status === a.f.status) &&
-                (!('vu_le' in a.is) || m.vu_le === null) &&
-                (!a.not.provider_id || m.provider_id !== null)),
+                (!a.not.provider_id || m.provider_id !== null) &&
+                Object.keys(a.is).every(c => (m[c] || null) === null)),
               error: null })
+          }
+          if (table === 'menage_done') {
+            return Promise.resolve({ data: faits, error: null })
           }
           return Promise.resolve({ data: [], error: null })
         },
         update (row) {
-          const q = { row, f: {} }
+          const q = { row, f: {}, is: {} }
           const c2 = {
-            eq (c, v) {
-              q.f[c] = v
-              etat.marqueurs.push({ id: v, row })
+            eq (c, v) { q.f[c] = v; return c2 },
+            // ⚠ L'UPDATE SE TERMINE PAR `.is(champ, null)` : la garde qui
+            // empêche deux marquages concurrents du même jour.
+            is (c, v) {
+              q.is[c] = v
+              etat.marqueurs.push({ id: q.f.id, row, is: q.is })
               return Promise.resolve({ error: erreurMarqueur })
             }
           }
@@ -218,6 +273,15 @@ function preparerRelance ({ menages = [], erreurLecture = null, erreurMarqueur =
           if (table === 'properties') {
             return Promise.resolve({
               data: [{ id: BIEN, user_id: U, name: 'La bulle' }], error: null }).then(ok)
+          }
+          if (table === 'profiles') {
+            return Promise.resolve({
+              data: (a.in.id || []).map(id => ({ id, pwa_token: jeton })), error: null }).then(ok)
+          }
+          if (table === 'public_tokens') {
+            const jetons = a.in.token || []
+            return Promise.resolve({
+              data: jetons.map(t => ({ token: t, property_ids: perimetre })), error: null }).then(ok)
           }
           return Promise.resolve({ data: [], error: null }).then(ok)
         }
@@ -241,8 +305,8 @@ function preparerRelance ({ menages = [], erreurLecture = null, erreurMarqueur =
 }
 
 const DOFFICE = (o = {}) => ({
-  id: 'm1', user_id: U, property_id: BIEN, provider_id: REGINA,
-  departure_date: DEPART, status: 'accepted', vu_le: null,
+  id: 'm1', user_id: U, property_id: BIEN, booking_id: BOOK, provider_id: REGINA,
+  departure_date: DEPART, status: 'accepted', vu_le: null, vu_par: null,
   relance_vu_j1_le: null, relance_vu_j0_le: null, ...o
 })
 
@@ -305,10 +369,68 @@ test('relance : la veille marquée ne bloque pas celle du jour même', async () 
 })
 
 test('relance : un ménage DÉJÀ VALIDÉ n\'est pas relancé', async () => {
-  const etat = preparerRelance({ menages: [DOFFICE({ vu_le: '2026-10-13T18:00:00Z' })] })
+  const etat = preparerRelance({
+    menages: [DOFFICE({ vu_le: '2026-10-13T18:00:00Z', vu_par: REGINA })] })
   const { relancerValidations } = require('../lib/cleaning/relance-validation')
   await relancerValidations({}, { maintenant: A_NEUF_HEURES })
   assert.equal(etat.notifs.length, 0)
+})
+
+test('relance : une validation de la porteuse PRÉCÉDENTE ne compte pas', async () => {
+  // ⚠ LE CONSTAT MAJEUR DE LA REVUE DE 20fb83d. Lena valide, l'hôte réassigne
+  // à Régina : la validation de Lena ne doit ni éteindre l'alerte, ni faire
+  // sauter la relance de Régina, qui n'a rien lu.
+  const etat = preparerRelance({
+    menages: [DOFFICE({ vu_le: '2026-10-13T18:00:00Z', vu_par: LENA })] })
+  const { relancerValidations } = require('../lib/cleaning/relance-validation')
+  await relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.equal(etat.notifs.length, 1, 'la nouvelle porteuse est bien relancée')
+  assert.equal(etat.notifs[0].providerId, REGINA)
+})
+
+test('relance : un ménage DÉJÀ FAIT ne reçoit rien', async () => {
+  // ⚠ Le « fait » vit dans `menage_done`, pas dans `menages.status`. Sans cette
+  // lecture, elle finissait son ménage à 8 h et recevait à 9 h « touchez Vu »
+  // sur une page où le bouton n'existe plus — un SMS auquel on ne PEUT pas
+  // obéir, et le plus sûr moyen de lui apprendre à ne plus les lire.
+  const etat = preparerRelance({
+    menages: [DOFFICE({ departure_date: '2026-10-14' })],
+    faits: [{ property_id: BIEN, booking_id: BOOK, departure_date: '2026-10-14' }] })
+  const { relancerValidations } = require('../lib/cleaning/relance-validation')
+  const bilan = await relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.equal(etat.notifs.length, 0)
+  assert.equal(etat.marqueurs.length, 0, 'et rien n\'est marqué : il n\'y avait rien à envoyer')
+  assert.equal(bilan.faits, 1)
+})
+
+test('relance : un ménage ABSENT de sa page ne reçoit rien', async () => {
+  // ⚠ Une liaison suffit à lui attribuer le ménage, mais c'est
+  // `public_tokens.property_ids` qui décide de ce que sa PAGE affiche — et les
+  // deux ont divergé dans ce dépôt. Elle recevrait « touchez Vu », ouvrirait sa
+  // page, et n'y trouverait rien.
+  const etat = preparerRelance({ menages: [DOFFICE()], perimetre: ['999'] })
+  const { relancerValidations } = require('../lib/cleaning/relance-validation')
+  const bilan = await relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.equal(etat.notifs.length, 0)
+  assert.equal(bilan.horsPage, 1)
+})
+
+test('relance : un périmètre VIDE veut dire TOUS les biens', async () => {
+  // La convention de tout ce dépôt : une liste vide n'est pas « aucun bien ».
+  const etat = preparerRelance({ menages: [DOFFICE()], perimetre: [] })
+  const { relancerValidations } = require('../lib/cleaning/relance-validation')
+  await relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.equal(etat.notifs.length, 1)
+})
+
+test('relance : une prestataire SANS LIEN ne reçoit rien', async () => {
+  // Pas de jeton, pas de page : il n'y a rien à quoi l'envoyer, et le SMS lui
+  // demanderait d'ouvrir quelque chose qui n'existe pas.
+  const etat = preparerRelance({ menages: [DOFFICE()], jeton: null })
+  const { relancerValidations } = require('../lib/cleaning/relance-validation')
+  const bilan = await relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.equal(etat.notifs.length, 0)
+  assert.equal(bilan.horsPage, 1)
 })
 
 test('relance : une PROPOSITION n\'est pas relancée — elle a sa propre boucle', async () => {
@@ -334,8 +456,21 @@ test('relance : DEUX JOURS SEULEMENT — la garde d\'envoi de masse', async () =
   const { relancerValidations } = require('../lib/cleaning/relance-validation')
   await relancerValidations({}, { maintenant: A_NEUF_HEURES })
   assert.equal(etat.notifs.length, 0)
-  assert.deepEqual(etat.lu.in.departure_date, ['2026-10-14', '2026-10-15'],
-    'la requête elle-même ne demande que deux jours')
+  assert.deepEqual(etat.lectures.map(l => l.f.departure_date), ['2026-10-14', '2026-10-15'],
+    'les requêtes elles-mêmes ne demandent que deux jours')
+})
+
+test('relance : UNE REQUÊTE PAR JOUR, chacune filtrée sur SON marqueur', async () => {
+  // ⚠ LE CONSTAT DE LA REVUE DE 20fb83d. Le filtre des marqueurs se faisait en
+  // JS, APRÈS la limite : sur un gros compte, les lignes du jour déjà relancées
+  // mangeaient toutes les places et les ménages de DEMAIN n'étaient jamais lus
+  // — en silence, avec un bilan qui ressemblait à un cycle calme.
+  const etat = preparerRelance({ menages: [DOFFICE()] })
+  const { relancerValidations } = require('../lib/cleaning/relance-validation')
+  await relancerValidations({}, { maintenant: A_NEUF_HEURES })
+  assert.equal(etat.lectures.length, 2)
+  assert.deepEqual(etat.lectures.map(l => Object.keys(l.is)[0]),
+    ['relance_vu_j0_le', 'relance_vu_j1_le'], 'chaque jour filtre SON marqueur, en base')
 })
 
 test('relance : une panne de lecture est RAPPORTÉE, pas avalée', async () => {
@@ -350,13 +485,18 @@ test('relance : une panne de lecture est RAPPORTÉE, pas avalée', async () => {
   assert.equal(results.errors[0].context, 'relance_validation')
 })
 
-test('relance : un marqueur qui ne se pose pas est CRIÉ, et ne compte pas', async () => {
-  // ⚠ C'est le seul défaut de ce module qui se paie chez la prestataire : au
-  // cycle suivant, elle recevrait le même SMS.
+test('relance : UN MARQUEUR QUI NE SE POSE PAS ANNULE L\'ENVOI', async () => {
+  // ⚠ LE CONSTAT DE LA REVUE DE 20fb83d, ET C'EST UNE QUESTION D'ORDRE. Le
+  // marqueur était posé APRÈS l'envoi : un échec durable de l'UPDATE laissait
+  // la ligne éligible au cycle suivant, et le MÊME SMS repartait toutes les
+  // cinq minutes — jusqu'à 288 par jour et par ménage, chez quelqu'un qui
+  // travaille, sur la clé Brevo de l'hôte, sans que rien ne sonne.
+  // Ce que l'ordre inverse coûte : ce rappel-là est perdu. Il en reste un
+  // second, et l'alerte « Non validé » de l'hôte ne dépend pas de l'envoi.
   const etat = preparerRelance({ menages: [DOFFICE()], erreurMarqueur: { message: 'ko' } })
   const { relancerValidations } = require('../lib/cleaning/relance-validation')
   const bilan = await relancerValidations({}, { maintenant: A_NEUF_HEURES })
-  assert.equal(etat.notifs.length, 1, 'le SMS est parti')
-  assert.equal(bilan.erreurs, 1, 'et l\'échec du marqueur est compté')
+  assert.equal(etat.notifs.length, 0, 'AUCUN SMS : on n\'envoie pas ce qu\'on ne sait pas marquer')
+  assert.equal(bilan.erreurs, 1)
   assert.equal(bilan.relances, 0)
 })
