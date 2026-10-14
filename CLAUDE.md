@@ -470,14 +470,15 @@ le defaut du serveur —, « Assigner », « Retirer la proposition », « Perso
 et ce que l'ancien ecran faisait d'autre, la V5 le fait mieux (la note passait
 en ecriture RLS directe ; « Marquer fait » n'ecrivait que dans le localStorage).
 
-- `apps/menages/garde.html` est en lecture seule et la V5 le remplace, mais sa
-  suppression emporte **16 garde-fous de rendu** que `tests/garde-endpoint.test.js`
-  tient sur lui (« non confie » pas en rouge, delai en heure de Paris, prenom
-  entier, une seule infobulle, le resize qui ne ramene pas sur aujourd'hui…).
-  Les retransposer vers la V5 un par un est le vrai travail ; un repointage
-  automatique a ete mesure : 16 echecs sur 18.
-- `apps/menages/prestataires.html` reste de toute facon : la saisie de la
-  recurrence A/B y vit encore, atteinte par « Corriger pour elle ».
+- `apps/menages/garde.html` est **ferme aussi** (14 octobre 2026). Ses SEIZE
+  garde-fous de rendu ont ete transposes un par un vers `pages/menages.html`
+  dans `tests/garde-endpoint.test.js`. **Deux choses ne sont pas reprises, et
+  c'est assume** (l'inventaire les signalait deja) : la REMPLACANTE du jour et
+  le DETAIL DU JOUR agrege — le clic ouvre la fiche d'UN menage. L'endpoint
+  continue de rendre la remplacante, et un test garde ce contrat.
+- `apps/menages/prestataires.html` reste : la saisie de la **recurrence A/B** y
+  vit encore, atteinte par « Corriger pour elle ». C'est le dernier ecran du
+  domaine a reprendre.
 
 ## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
 

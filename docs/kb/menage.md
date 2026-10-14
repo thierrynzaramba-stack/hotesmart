@@ -4377,3 +4377,51 @@ que l'écran a été redirigé — pas parce qu'on l'a perdu de vue.
 
 **Reste `apps/menages/garde.html`** : lecture seule, remplacé à l'écran, mais sa
 suppression emporte 16 garde-fous de rendu à transposer un par un.
+
+## Le planning de garde est fermé : seize garde-fous transposés (14 octobre 2026)
+
+`apps/menages/garde.html` devient une redirection. Il était en **lecture seule**
+— il n'a jamais rien écrit — et son unique appel est celui que la page V5 fait
+déjà. Ce qui le retenait n'était pas une fonction, c'étaient **seize assertions
+de rendu** que `tests/garde-endpoint.test.js` tenait sur lui.
+
+**Un repointage automatique ne marchait pas** : mesuré, 16 échecs sur 18. Ces
+assertions décrivaient un écran précis (`delaiTexte`, `GRAVITE`, `--case`,
+`renderSidebar('menages-garde')`). Chacune a donc été réécrite en visant ce que
+la V5 fait **vraiment**, sous d'autres noms :
+
+| ce qui était gardé | où ça vit en V5 |
+|---|---|
+| délai affiché, en heure de Paris | `menages.tt_expire` + `heureIntl` (`timeZone: 'Europe/Paris'`) |
+| offre périmée signalée | `const expiree` dans `shared/menages-a-traiter.js` |
+| « non confié » jamais en rouge | `men-nonconfie` + `const trous = gere ? … : new Set()` |
+| un refus n'est pas un report | `m.differe && m.status !== 'orphaned'` |
+| la case montre le plus grave | `GRAVITE` + `reduce` sur les ménages du jour |
+| prénom entier, ellipse en CSS | pas de `initialeDe`, `text-overflow` dans `ui.css` |
+| une seule infobulle | `const titres = ms.map(infobulle)` sur la case |
+| largeur de case non recopiée | la grille vient de `shared/calendar-core.js` |
+| le resize ne ramène pas sur aujourd'hui | `if (estLarge() !== large)` |
+| la liste de ce qui ne doit pas se perdre | **clés i18n**, plus des bouts de phrase |
+
+⚠ **Viser les clés i18n, pas les libellés.** L'ancienne liste cherchait
+« personne de garde », « jours à régler », « quelqu'un » dans le HTML. La V5 dit
+les mêmes choses avec d'autres mots : une formulation retouchée aurait fait
+croire qu'une information avait disparu. Le test vérifie maintenant que la clé
+existe **et** qu'elle est employée.
+
+**Deux contrats ont changé, et c'est délibéré :**
+
+1. **La remplaçante du jour n'est plus montrée** — perte assumée, signalée dès
+   l'inventaire (§E.2). L'**endpoint** continue de la rendre, et le test garde
+   ce contrat serveur intact pour le jour où l'écran la reprendra.
+2. **6 et 12 mois sont désormais proposés.** L'ancien écran s'interdisait ces
+   fenêtres : les règles de disponibilité auront changé avant, et il aurait
+   présenté une prévision comme un fait. La V5 les propose parce que ce qu'elle
+   montre loin, ce sont les **ménages et les liaisons**, pas une garde calculée.
+   La borne serveur (92 jours) est respectée par **découpage en tranches**, pas
+   contournée — et le test vérifie que la plus grande tranche passe, pas
+   seulement que 93 jours sont refusés.
+
+**Le sous-menu Ménages tombe à deux entrées** : « Ménages » et « Prestataires ».
+Le doublon que le renommage du 5 septembre cherchait à lever — deux écrans
+appelés « Planning » — se lève tout seul, les deux ayant fusionné dans la V5.

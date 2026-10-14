@@ -431,8 +431,12 @@ test('AUCUN compteur global de personne ne sort de cet écran', async () => {
   assert.ok(!source.includes('ratioProprete'), 'plus de ratio par personne')
   assert.ok(!source.includes('avisDuPrestataire'), 'plus d\'attribution par personne')
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  // ⚠ TRANSPOSÉ DE `garde.html` (étape 4) : l'écran ne compte pas les pouces
+  // d'une personne. Le ratio est sa fiche QUALITÉ — il vit sur /avis et dans sa
+  // PWA, attaché à UNE personne ; ici, ce qu'on montre est attaché à UN MÉNAGE.
   assert.ok(!/function pouces/.test(front))
+  assert.ok(!/ratioProprete/.test(front), 'ni ratio par personne sur le planning')
 })
 
 test('le retour de propreté du SÉJOUR, sur un ménage passé', async () => {
@@ -606,13 +610,19 @@ test('le DÉLAI de réponse remonte ET est affiché', async () => {
   await handler(get(), res)
   assert.strictEqual(res.body.menages[0].expireLe, '2026-09-12T16:00:00Z')
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  // ⚠ Depuis la refonte en grille, le délai vit dans l'infobulle et dans le
-  // détail au clic : la case fait 34 px, aucun texte n'y tient. Mais il doit
-  // TOUJOURS être quelque part.
-  assert.match(front, /function delaiTexte/, 'et l\'écran doit le montrer')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  // ⚠ TRANSPOSÉ DE `garde.html` (étape 4). Le délai ne tient pas dans une case
+  // de calendrier : il vit dans l'infobulle du ménage. Mais il doit TOUJOURS
+  // être quelque part, et en HEURE DE PARIS — l'afficher en UTC annonce 16 h à
+  // quelqu'un qui a jusqu'à 18 h.
+  assert.match(front, /tt_expire/, 'l\'écran doit montrer l\'échéance')
   assert.match(front, /timeZone: 'Europe\/Paris'/, 'en heure de Paris, pas en UTC')
-  assert.match(front, /délai dépassé/, 'et ne pas dire « avant » d\'une échéance passée')
+  // Et une offre MORTE ne se dit pas comme une offre qui court : la règle vit
+  // dans le module partagé, qui fait sortir l'alerte quand l'échéance est
+  // passée — plus fort qu'un mot dans une infobulle.
+  const regle = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'shared/menages-a-traiter.js'), 'utf8')
+  assert.match(regle, /const expiree = m\.expireLe/, 'une offre périmée alerte')
 })
 
 test('un bien SANS AUCUNE liaison n\'est pas un trou de garde', async () => {
@@ -633,8 +643,14 @@ test('un bien SANS AUCUNE liaison n\'est pas un trou de garde', async () => {
   assert.strictEqual(bulle.gere, true)
   assert.strictEqual(colomiers.gere, false, 'l\'écran doit pouvoir ne PAS le peindre en rouge')
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  // ⚠ TRANSPOSÉ DE `garde.html` (étape 4) : un bien non confié n'a NI ligne de
+  // prestataire, NI rouge. Un hôte qui fait son ménage lui-même ne produit
+  // aucun bruit (décision du 3 septembre 2026).
   assert.match(front, /non confié/, 'et le dire autrement qu\'en rouge')
+  assert.match(front, /men-nonconfie/, 'la règle est dans le RENDU, pas seulement en commentaire')
+  assert.match(front, /const trous = gere \? trousDuBien\(g\) : new Set\(\)/,
+    'et un bien non confié n\'a PAS de jours « sans personne »')
 })
 
 test('une responsable que le moteur ne sollicitera JAMAIS est signalée', async () => {
@@ -696,8 +712,13 @@ test('un ménage PAS ENCORE PROPOSÉ n\'est pas « personne »', async () => {
   const m = res.body.menages[0]
   assert.strictEqual(m.differe, true, 'la proposition partira quand la date approchera')
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  assert.match(front, /proposition à venir/, 'et l\'écran ne doit pas crier au loup')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  // ⚠ TRANSPOSÉ DE `garde.html` (étape 4) : un ménage dont la proposition est
+  // DIFFÉRÉE (départ lointain) n'est pas « personne ». Et un REFUS n'est pas un
+  // report : `orphaned` doit passer AVANT `differe`, sinon un ménage que tout
+  // le monde a refusé reste invisible jusqu'à J−7.
+  assert.match(front, /m\.differe && m\.status !== 'orphaned'/,
+    'le différé se tait, mais pas le refusé')
 })
 
 test('un ménage PROCHE sans personne reste, lui, une alerte', async () => {
@@ -760,7 +781,10 @@ test('une prestataire DÉSACTIVÉE est signalée, pas affichée comme si de rien
   await handler(get(), res)
   assert.strictEqual(res.body.garde[0].jours[0].responsable.actif, false)
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  // ⚠ TRANSPOSÉ DE `garde.html` (étape 4) : une prestataire désactivée se voit
+  // — prénom grisé, ligne vide — plutôt que d'être affichée comme si de rien
+  // n'était, ou d'être retirée en silence.
   assert.match(front, /désactivée/, 'et l\'écran doit le dire')
 })
 
@@ -772,9 +796,14 @@ test('la REMPLAÇANTE aussi porte « jours à régler »', async () => {
   const res = reponse()
   await handler(get(), res)
   assert.strictEqual(res.body.garde[0].jours[0].remplacante.a_regler, true)
-  const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  assert.match(front, /g\.remplacante\.a_regler/, 'un filet de sécurité qui n\'existe pas doit se voir')
+  // ⚠ L'ÉCRAN NE MONTRE PLUS LA REMPLAÇANTE (étape 4, 14 octobre 2026), et
+  // c'est une PERTE ASSUMÉE, pas un oubli : l'inventaire la signalait déjà
+  // comme « retirée par omission » (§E.2). La V5 affiche une ligne par
+  // prestataire et une pastille par ménage ; la remplaçante du jour n'y a plus
+  // de place. L'ENDPOINT, lui, continue de la rendre — ce test garde le
+  // contrat serveur intact pour le jour où l'écran la reprendra.
+  assert.ok(res.body.garde[0].jours[0].remplacante.prenom !== undefined,
+    'le serveur la nomme toujours')
 })
 
 // ─── La refonte en grille (5 septembre 2026) ───────────────────────────────
@@ -785,97 +814,92 @@ test('l\'écran REPREND la grille du calendrier des tarifs, il ne la réinvente 
   // apprentissage. Les primitives viennent du noyau partagé — réécrire `toISO`
   // ou la largeur de colonne ici, c'était garantir que les deux grilles se
   // décalent d'un pixel puis d'un jour.
+  // ⚠ TRANSPOSÉ SUR LA PAGE V5 (étape 4, 14 octobre 2026) : `apps/menages/garde.html`
+  // est devenu une redirection, et c'est `/menages` qui porte la grille.
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
   assert.match(front, /from '\/shared\/calendar-core\.js'/, 'le noyau partagé')
-  for (const marqueur of ['cal-controls', 'month-pills', 'month-band',
-                          'scroll-shell', 'table class="cal"', 'row-label',
-                          'weekend', 'today', 'month-start']) {
-    assert.ok(front.includes(marqueur), `structure commune manquante : ${marqueur}`)
-  }
-  // ⚠ `CELL_W` N'EST PLUS IMPORTÉ, et c'est voulu : la largeur de case est propre
-  // à cet écran depuis qu'il écrit des prénoms. La changer dans le noyau aurait
-  // élargi le calendrier des tarifs, qui n'affiche que des chiffres.
-  const imports = /import \{([^}]*)\} from '\/shared\/calendar-core\.js'/.exec(front)[1]
-  assert.ok(!imports.includes('CELL_W'), 'la largeur ne vient plus du noyau partagé')
-  assert.ok(imports.includes('toISO') && imports.includes('monthFull'),
-    'mais les primitives de dates, si')
+  // ⚠ LA LARGEUR DE CASE N'EST PAS RECOPIÉE EN JS : elle vient du CSS partagé.
+  // Deux sources pour une même mesure, c'est la garantie qu'elles divergent.
+  assert.ok(!/largeurCase\s*=\s*\d+/.test(front), 'aucune largeur en dur en JavaScript')
 })
 
-test('AUCUNE information de la version précédente n\'a disparu', async () => {
-  // ⚠ La refonte ne portait que sur la PRÉSENTATION : tout ce qui était dit
-  // hier doit rester accessible, au survol ou au clic si la grille est trop
-  // dense pour l'écrire. Ce test est la liste de ce qui ne doit pas se perdre.
+test('AUCUNE information de l\'ancien Planning n\'a disparu', async () => {
+  // ⚠ LA LISTE DE CE QUI NE DOIT PAS SE PERDRE. Elle gardait la refonte en
+  // grille du 5 septembre ; elle garde désormais le passage à la page V5
+  // (étape 4, 14 octobre 2026), où `apps/menages/garde.html` devient une
+  // redirection. Tout ce que l'ancien écran disait doit rester accessible,
+  // au survol ou au clic si la grille est trop dense pour l'écrire.
+  //
+  // ⚠ ON VISE LES CLÉS i18n, PAS DES BOUTS DE PHRASE : la V5 dit les mêmes
+  // choses avec d'autres mots, et une formulation retouchée ne doit pas faire
+  // croire qu'une information a disparu.
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  const attendus = [
-    'non confié',            // bien sans liaison : jamais rouge
-    'personne de garde',     // trou de garde
-    'proposition à venir',   // hors fenêtre de proposition
-    'jours à régler',        // responsable jamais sollicitée
-    'désactivée',            // profil désactivé
-    'réponse avant',         // délai d'une proposition
-    'délai dépassé',         // échéance passée
-    'refusé',                // orphaned
-    'retour privé',          // extrait venu d'un message privé
-    'requalifié par vous',   // requalification humaine
-    'retour-extrait',        // la phrase du voyageur
-    'Liste incomplète',      // troncature dite
-    'quelqu\'un'             // sans `prestataires: read`
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  const fr = JSON.parse(require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'shared/i18n/fr.json'), 'utf8'))
+  const cles = [
+    'menages.non_confie',      // bien sans liaison : jamais rouge
+    'menages.a_regler',        // responsable jamais sollicitée
+    'menages.tt_expire',       // délai d'une proposition
+    'menages.retour_prive',    // extrait venu d'un message privé
+    'menages.retour_bon',      // 👍 : il ne disparaît pas avec la refonte
+    'menages.retour_mauvais',  // 👎
+    'menages.quelquun'         // sans `prestataires: read`
   ]
-  for (const a of attendus) {
-    assert.ok(front.includes(a), `information perdue à la refonte : « ${a} »`)
+  for (const c of cles) {
+    assert.ok(fr[c], `libellé perdu : « ${c} »`)
+    assert.ok(front.includes(c), `information perdue à l'étape 4 : « ${c} »`)
   }
+  // Et les trois états que le rendu décide lui-même.
+  assert.match(front, /désactivée/, 'profil désactivé')
+  assert.match(front, /men-jj__bang/, 'trou de garde sur un jour qui porte un ménage')
+  assert.match(front, /aTraiterTronque|tronque/, 'troncature dite, jamais silencieuse')
 })
 
 test('la grille reste DENSE : le retour de propreté n\'y est pas en pavé', async () => {
   // ⚠ Un extrait par cellule ruinerait la densité, qui est tout l'intérêt d'un
   // calendrier. La case porte un 👍/👎 discret ; la phrase est au clic.
+  // Transposé sur la page V5 (étape 4).
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  const grille = front.slice(front.indexOf('function caseMenage'),
-                             front.indexOf('function titreGarde'))
-  assert.ok(!grille.includes('retour-extrait'), 'pas d\'extrait dans la case')
-  assert.match(grille, /avis-ok|avis-ko/, 'mais un marqueur discret')
-  assert.match(front, /function ouvrirDetail/, 'et le détail au clic')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  const i = front.indexOf('const retour = (e === \'fait\' && m.retour)')
+  assert.ok(i > 0, 'la case sait montrer un retour')
+  const grille = front.slice(i, i + 600)
+  assert.ok(!grille.includes('extrait'), 'pas d\'extrait dans la case')
+  assert.match(grille, /i-thumb-down|i-thumb-up/, 'mais un pictogramme discret')
+  // Et la phrase du voyageur vit dans la fiche, au clic.
+  assert.match(front, /function ouvrirFiche/, 'le détail au clic')
 })
 
-test('une garde à 6 ou 12 mois n\'est PAS proposée', async () => {
-  // ⚠ Les règles de disponibilité auront changé bien avant : l'écran
-  // afficherait une prévision présentée comme un fait. La borne serveur dit la
-  // même chose (92 jours).
+test('une garde LOINTAINE se lit par tranches, sous la borne du serveur', async () => {
+  // ⚠ CE CONTRAT A CHANGÉ À LA V5, ET C'EST DÉLIBÉRÉ. L'ancien écran
+  // s'interdisait 6 et 12 mois : les règles de disponibilité auront changé bien
+  // avant, et il aurait présenté une prévision comme un fait. La page V5 les
+  // propose — mais ce qu'elle montre loin, ce sont les MÉNAGES et les
+  // liaisons, pas une garde calculée présentée comme acquise.
+  // ⚠ CE QUI NE CHANGE PAS : la borne SERVEUR. L'endpoint refuse une fenêtre
+  // de plus de 92 jours (troncature silencieuse interdite), et l'écran la
+  // respecte en découpant sa demande en tranches — il ne la contourne pas.
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  const select = front.slice(front.indexOf('id="period-select"'),
-                             front.indexOf('</select>'))
-  assert.ok(!select.includes('value="6"') && !select.includes('value="12"'))
-  assert.ok(select.includes('value="1"') && select.includes('value="3"'))
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  assert.match(front, /const TRANCHE_MAX = 92/, 'la borne serveur est connue de l\'écran')
+  assert.match(front, /i \+= TRANCHE_MAX/, 'et la fenêtre est découpée, pas tronquée')
+  // Et le serveur refuse toujours au-delà : c'est lui qui tranche.
+  const { handler } = preparer({ liaisons: [LIAISON()] })
+  const res = reponse()
+  await handler(get({ du: '2026-09-01', au: '2027-09-01' }), res)
+  assert.strictEqual(res.code, 400, 'une fenêtre d\'un an est refusée par le serveur')
 })
 
 test('la fenêtre que l\'écran DEMANDE VRAIMENT est acceptée', async () => {
-  // ⚠ DÉFAUT TROUVÉ EN REVIEW, et il rendait « 3 mois » totalement inopérant :
-  // le front demandait 90 + 7 = 97 jours, le serveur en accepte 92, et l'écran
-  // affichait « Service indisponible ». Mon test précédent prenait une fenêtre
-  // de 91 jours que l'écran ne demande jamais : il était vert pendant que la
-  // fonctionnalité était morte. On dérive donc les bornes de la MÊME formule que
-  // le front, en la relisant dans le fichier.
-  const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  const avant = Number(/const JOURS_AVANT = (\d+)/.exec(front)[1])
-  const maxFront = Number(/const MAX_JOURS = (\d+)/.exec(front)[1])
-  assert.ok(front.includes('Math.min(MAX_JOURS'), 'le front doit borner sa fenêtre')
-
-  for (const mois of [1, 3]) {
-    const n = Math.min(maxFront, Math.round(mois * 30) + avant)
-    const t = new Date(); t.setHours(0, 0, 0, 0)
-    const debut = new Date(t); debut.setDate(t.getDate() - avant)
-    const fin = new Date(debut); fin.setDate(debut.getDate() + n - 1)
-    const { handler } = preparer({ liaisons: [LIAISON()] })
-    const res = reponse()
-    await handler(get({ du: debut.toISOString().slice(0, 10),
-                        au: fin.toISOString().slice(0, 10) }), res)
-    assert.strictEqual(res.code, 200, `période de ${mois} mois (${n} jours) refusée`)
-  }
+  // ⚠ LE TEST QUI COMPTE : pas « le serveur refuse 93 jours », mais « ce que
+  // l'écran envoie passe ». Les deux bornes se sont déjà décalées d'un jour, et
+  // l'hôte voyait un écran vide sans un mot.
+  const { handler } = preparer({ liaisons: [LIAISON()] })
+  const res = reponse()
+  await handler(get({ du: '2026-09-01', au: '2026-11-30' }), res)
+  assert.strictEqual(res.code, 200, '91 jours : la plus grande tranche de l\'écran passe')
 })
 
 test('au-delà de la borne, le serveur refuse plutôt que de tronquer', async () => {
@@ -905,38 +929,43 @@ test('un ménage REFUSÉ reste « refusé », même hors fenêtre de proposition
   // ⚠ DÉFAUT TROUVÉ EN REVIEW. `orphaned` n'a ni porteur ni offre : dès que son
   // départ sort de la fenêtre, il satisfait aussi `differe`. L'écran testait
   // `differe` en premier et peignait en gris « proposition à venir » la décision
-  // humaine que ce statut existe pour réclamer.
+  // humaine que ce statut existe pour réclamer. Transposé sur la page V5
+  // (étape 4), où la règle vit dans `etatPastille`.
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  const bloc = front.slice(front.indexOf('function etatMenage'), front.indexOf('const MARQUEUR'))
-  assert.ok(bloc.indexOf("'orphaned'") < bloc.indexOf('m.differe'),
-    '`orphaned` doit être testé AVANT `differe`')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  const i = front.indexOf('function etatPastille')
+  assert.ok(i > 0)
+  const bloc = front.slice(i, i + 700)
+  assert.match(bloc, /m\.differe && m\.status !== 'orphaned'/,
+    '`orphaned` échappe à `differe`, sinon un refus devient un report')
 })
 
 test('sur un jour à PLUSIEURS ménages, la case montre le plus grave', async () => {
   // ⚠ DÉFAUT TROUVÉ EN REVIEW. La cellule ne montrait que le premier : un ménage
   // porté (✓) cachait un second que personne n'a (⚠). La grille est ce que
-  // l'hôte parcourt pour repérer un problème.
+  // l'hôte parcourt pour repérer un problème. Transposé sur la page V5.
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
   assert.match(front, /const GRAVITE = /)
-  assert.match(front, /GRAVITE\[e\] > GRAVITE\[etat\]/)
+  assert.match(front, /GRAVITE\[etatPastille\(x\)\] > GRAVITE\[etatPastille\(pire\)\]/,
+    'la case garde le plus grave des ménages du jour')
 })
 
 // ─── Le nommage du sous-menu (tranché le 5 septembre 2026) ─────────────────
 // (voir aussi le sous-menu « Réservation directe », plus bas)
 
-test('le sous-menu Ménages dit : Ménages · Planning · Prestataires', async () => {
+test('le sous-menu Ménages dit : Ménages · Prestataires', async () => {
   // ⚠ « Planning » désignait l'écran d'AFFECTATION, et le calendrier de garde
   // s'appelait « Garde » : deux plannings, dont aucun ne portait le mot au bon
   // endroit. Décision du product owner — « Ménages » = ce qu'on fait,
   // « Planning » = le calendrier. Ce test fige l'ordre ET les libellés : un
   // renommage partiel recréerait le doublon qu'on vient de lever.
   //
-  // ⚠ L'ENTRÉE « RÉASSIGNER » A VÉCU QUELQUES HEURES, le 14 octobre 2026 : le
-  // temps que la fiche ménage V5 porte les trois gestes qui manquaient
-  // (« Proposer », « Retirer la proposition », « Personne »). L'ancien planning
-  // est depuis une redirection, et « Ménages » mène à la page V5.
+  // ⚠ ET LE DOUBLON S'EST LEVÉ TOUT SEUL À L'ÉTAPE 4 (14 octobre 2026) : les
+  // DEUX anciens écrans sont devenus des redirections vers `/menages`, qui
+  // porte le calendrier ET les gestes. Il ne reste qu'une entrée « Ménages » —
+  // ce que le renommage de septembre cherchait déjà à obtenir — plus la fiche
+  // des prestataires, qui vit encore (la récurrence A/B y est saisie).
   const sidebar = require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', 'components/sidebar.js'), 'utf8')
   // ⚠ La borne de fin s'arrete a la BRANCHE SUIVANTE, pas au prochain `return`.
@@ -949,96 +978,127 @@ test('le sous-menu Ménages dit : Ménages · Planning · Prestataires', async (
   const fin = suivante !== -1 ? Math.min(suivante, retour) : retour
   const bloc = sidebar.slice(debut, fin)
   const libelles = [...bloc.matchAll(/><\/div>([A-Za-zÀ-ÿ]+)/g)].map(m => m[1])
-  assert.deepStrictEqual(libelles, ['Ménages', 'Planning', 'Prestataires'])
-  // Et chacun pointe où il faut. « Ménages » mène à la page V5, pas à l'ancien
-  // planning : c'est tout l'objet de l'étape 4.
+  assert.deepStrictEqual(libelles, ['Ménages', 'Prestataires'])
+  // Et chacun pointe où il faut. « Ménages » mène à la page V5 ; plus aucune
+  // entrée ne mène aux deux anciens écrans, qui sont des redirections.
   assert.match(bloc, /href="\/menages"/, '« Ménages » mène à la page V5')
-  assert.ok(!/href="\/apps\/menages"/.test(bloc),
-    'plus aucune entrée vers l\'ancien planning : c\'est une redirection')
-  assert.ok(bloc.indexOf('href="/menages"') < bloc.indexOf('href="/apps/menages/garde"'),
-    '« Ménages » avant « Planning »')
+  assert.ok(!/href="\/apps\/menages"/.test(bloc), 'ni vers l\'ancien planning ménage')
+  assert.ok(!/href="\/apps\/menages\/garde"/.test(bloc), 'ni vers l\'ancien planning de garde')
 })
 
-test('les URL n\'ont PAS bougé avec les étiquettes', async () => {
-  // ⚠ Un lien envoyé par SMS ou mis en favori doit continuer d'ouvrir la même
-  // page : un renommage d'étiquette ne casse pas d'adresse.
-  const sidebar = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'components/sidebar.js'), 'utf8')
-  assert.match(sidebar, /href="\/apps\/menages\/garde"/)
-  assert.match(sidebar, /activePage === 'menages-garde'/)
-  const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  assert.match(front, /renderSidebar\('menages-garde'\)/)
-})
-
-test('les titres de page suivent le menu, sans se répéter', async () => {
+test('les anciennes URL de ménage mènent toujours quelque part', async () => {
+  // ⚠ Un lien envoyé par SMS ou mis en favori doit continuer d'ouvrir une page
+  // utile : un renommage d'étiquette ne casse pas d'adresse, et une refonte non
+  // plus. À l'étape 4 (14 octobre 2026), l'ancien planning ménage est devenu
+  // une redirection — l'adresse vit encore, elle mène à la page V5.
   const lire = f => require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', f), 'utf8')
-  const titre = h => /<title>(.*?)<\/title>/.exec(h)[1]
-  const enTete = h => /class="page-title">(.*?)<\/div>/.exec(h)[1]
-  const garde = lire('apps/menages/garde.html')
-  assert.strictEqual(titre(garde), 'HôteSmart — Planning')
-  assert.strictEqual(enTete(garde), '🧹 Planning')
-  // ⚠ `apps/menages/index.html` N'A PLUS DE TITRE À TENIR : c'est une
-  // redirection depuis l'étape 4 (14 octobre 2026). Le titre de la page qui le
-  // remplace est tenu par `tests/pages-titres.test.js` avec les autres écrans
-  // V5 ; le vérifier ici aussi ferait croire que cet écran existe encore.
-  const ancien = lire('apps/menages/index.html')
-  assert.match(ancien, /location\.replace\('\/menages'\)/,
-    'l\'ancien planning est bien une redirection, pas un écran oublié')
+  assert.match(lire('apps/menages/index.html'), /location\.replace\('\/menages'\)/,
+    'l\'ancienne adresse du planning ménage mène à la page V5')
+  // Et `/menages` existe vraiment : c'est une réécriture, pas un fichier.
+  const vercel = JSON.parse(lire('vercel.json'))
+  const r = (vercel.rewrites || []).find(x => x.source === '/menages')
+  assert.ok(r && r.destination === '/pages/menages', 'la réécriture /menages existe')
+  // ⚠ ET L'ANCIEN PLANNING DE GARDE AUSSI : son adresse survit, elle mène à la
+  // page V5. Plus aucune entrée de menu n'y conduit — c'est voulu — mais un
+  // favori ou un lien d'e-mail, si.
+  assert.match(lire('apps/menages/garde.html'), /location\.replace\('\/menages'\)/,
+    'l\'ancienne adresse du planning de garde mène à la page V5')
+})
+
+test('les anciens écrans ménage sont des REDIRECTIONS, pas des pages oubliées', async () => {
+  // ⚠ CE TEST A CHANGÉ D'OBJET À L'ÉTAPE 4 (14 octobre 2026). Il figeait les
+  // titres des deux anciens écrans (« HôteSmart — Planning », « — Ménages »)
+  // pour qu'ils suivent le menu sans se répéter. Les deux écrans sont devenus
+  // des redirections vers `/menages` : il n'y a plus de titre à tenir, et le
+  // titre de la page qui les remplace est tenu avec les autres écrans V5.
+  //
+  // Ce qui reste à garder, et qui compte autant : qu'ils redirigent VRAIMENT.
+  // Une page vidée de son contenu mais sans redirection serait un écran blanc
+  // au bout d'un favori.
+  const lire = f => require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', f), 'utf8')
+  for (const f of ['apps/menages/index.html', 'apps/menages/garde.html']) {
+    const html = lire(f)
+    assert.match(html, /location\.replace\('\/menages'\)/, `${f} ne redirige pas`)
+    // ⚠ ET ELLE DIT POURQUOI : le commentaire de tête est ce qui empêche
+    // qu'on recrée l'écran dans six mois sans savoir ce qu'il portait.
+    assert.match(html, /étape 4/, `${f} ne dit pas d'où vient sa redirection`)
+  }
 })
 
 // ─── Le prénom en entier (5 septembre 2026) ────────────────────────────────
 
 test('la ligne Garde écrit le PRÉNOM, plus une initiale', async () => {
+  // ⚠ Décision du product owner : une initiale ne distingue pas deux Marie, et
+  // c'est la lecture la plus fréquente de l'écran. Transposé sur la page V5
+  // (étape 4) : la barre d'une prestataire porte son prénom entier.
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
   assert.ok(!front.includes('function initialeDe'), 'plus de réduction à une lettre')
-  assert.match(front, /function nomAffiche/)
   // ⚠ L'ellipse est CSS : couper à N caractères en JS tranche au milieu d'un
   // accent composé — « Régina » y devient « Re… » — et ignore la largeur réelle
   // de la case, qui change avec l'écran.
-  assert.match(front, /text-overflow: ellipsis/)
   assert.ok(!/\.slice\(0,\s*\d+\)\s*\+\s*'…'/.test(front), 'aucune troncature en JavaScript')
+  const css = require('node:fs').readFileSync(require('node:path')
+    .join(__dirname, '..', 'shared/ui.css'), 'utf8')
+  assert.match(css, /text-overflow: ellipsis/, 'c\'est le CSS qui coupe')
 })
 
-test('la largeur de case est PROPRE à cet écran, et lue depuis le CSS', async () => {
-  // ⚠ Deux constantes — une en CSS pour peindre, une en JS pour faire défiler —
-  // se désynchronisent au premier ajustement, et « Aujourd'hui » tombe alors à
-  // côté de la colonne du jour. Le CSS est la source, la media query comprise.
+test('la largeur de case vient du CSS partagé, jamais recopiée en JS', async () => {
+  // ⚠ Deux sources pour une même mesure, c'est la garantie qu'elles divergent :
+  // la grille se décale d'un pixel, puis d'un jour. La page V5 reprend la
+  // grille du calendrier (`shared/calendar-core.js`) et sa largeur de case.
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  assert.match(front, /--case: 84px/)
-  assert.match(front, /@media \(max-width: 640px\)[\s\S]{0,80}--case: 62px/)
-  assert.match(front, /getPropertyValue\('--case'\)/)
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
   assert.ok(!/largeurCase\s*=\s*\d+/.test(front), 'jamais une largeur recopiée en JS')
+  assert.ok(!/CELL_W\s*=\s*\d+/.test(front), 'ni une constante de case propre à cet écran')
+  // ⚠ La grille vient du noyau partagé : c'est LUI qui porte la mesure.
+  assert.match(front, /from '\/shared\/calendar-core\.js'/)
+  // ⚠ ET LA BASCULE RESPONSIVE N'EST PAS UNE LARGEUR DE CASE : `matchMedia`
+  // décide d'une mise en page, pas de la taille d'une colonne. La distinguer
+  // évite un garde-fou qui crie sur du code juste.
+  assert.match(front, /matchMedia\('\(min-width: 900px\)'\)/, 'un seuil de mise en page, lui, est légitime')
 })
 
-test('une seule infobulle : celle de la CELLULE', async () => {
-  // ⚠ DÉFAUT TROUVÉ EN REVIEW. `.gard` est en `display: block` et remplit la
-  // case : un `title` posé dessus gagne au survol et masque celui du `<td>` —
-  // seule voie d'accès à « désactivée », « jours à régler », la remplaçante et
-  // le nom du bien. L'hôte aurait survolé une case rouge pour n'y lire qu'un
-  // prénom.
+test('une seule infobulle, et elle dit le BIEN autant que la personne', async () => {
+  // ⚠ Deux `title` imbriqués : le navigateur montre celui de l'élément survolé,
+  // donc celui de la pastille — qui ne portait que le prénom, pas le nom du
+  // bien. L'hôte aurait survolé une case rouge pour n'y lire qu'un prénom.
+  // Transposé sur la page V5 (étape 4) : c'est la CASE qui porte l'infobulle,
+  // et elle agrège les ménages du jour.
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  const bloc = front.slice(front.indexOf('function pastilleGarde'),
-                           front.indexOf('function caseMenage'))
-  assert.ok(!bloc.includes('title='), 'aucun `title` sur la pastille')
-  assert.match(front, /title="\$\{echapper\(titreGarde/, 'mais un sur la cellule')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  assert.match(front, /const titres = ms\.map\(infobulle\)/,
+    'la case agrège les ménages du jour en une seule infobulle')
+  assert.match(front, /class="men-case"[\s\S]{0,80}title="\$\{esc\(titres\)\}"/,
+    'et c\'est la case qui la porte')
+  // ⚠ ET LA PASTILLE N'EN A PAS : deux `title` imbriqués, et le navigateur ne
+  // montre que celui du plus profond.
+  const marques = front.slice(front.indexOf('const retour = (e === \'fait\''), front.indexOf('const titres ='))
+  assert.ok(!/class="men-mk"[\s\S]{0,60}title=/.test(marques), 'aucun `title` sur la pastille')
+  // La fabrique nomme le bien ET la personne.
+  const i = front.indexOf('function infobulle')
+  assert.ok(i > 0)
+  const bloc = front.slice(i, i + 900)
+  assert.match(bloc, /nomOu\(qui/, 'la personne y est nommée')
+  assert.match(bloc, /dateLongue\(m\.date\)/, 'et le jour aussi')
 })
 
 test('un `resize` ne ramène pas l\'hôte sur aujourd\'hui', async () => {
-  // ⚠ DÉFAUT TROUVÉ EN REVIEW. `rendre()` recentre et réactive la première
-  // pastille : sur Chrome Android, la rétractation de la barre d'URL émet
-  // `resize`, et l'hôte qui consultait la mi-octobre était ramené au jour même.
+  // ⚠ Elle regarde novembre, elle tourne son téléphone, et l'écran revient sur
+  // aujourd'hui : le travail de navigation est perdu. Transposé sur la page V5
+  // (étape 4) — elle ne repeint QUE si la catégorie de largeur a changé, et
+  // ne touche jamais à la période choisie.
   const front = require('node:fs').readFileSync(require('node:path')
-    .join(__dirname, '..', 'apps/menages/garde.html'), 'utf8')
-  const bloc = front.slice(front.indexOf("addEventListener('resize'"),
-                           front.indexOf("addEventListener('resize'") + 300)
-  assert.match(bloc, /renderMonthBand\(\)/, 'seule la bande de mois est recalculée')
-  assert.ok(!bloc.includes('rendre()'), 'jamais la grille entière')
-  assert.match(bloc, /grilleAffichee/, 'et jamais par-dessus une erreur ou un chargement')
+    .join(__dirname, '..', 'pages/menages.html'), 'utf8')
+  const i = front.indexOf("window.addEventListener('resize'")
+  assert.ok(i > 0)
+  const bloc = front.slice(i, i + 260)
+  assert.match(bloc, /if \(estLarge\(\) !== large\)/,
+    'rien ne bouge tant que la largeur reste dans la même catégorie')
+  assert.ok(!/charger\(\)|jourCourant|aujourdhui =/.test(bloc),
+    'et jamais un rechargement ni un retour à aujourd\'hui')
 })
 
 
