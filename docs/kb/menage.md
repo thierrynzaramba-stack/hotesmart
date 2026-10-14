@@ -4341,3 +4341,39 @@ du popover en bloc et en pleine largeur. Une classe seule ne pèse pas assez —
 les deux gestes tombaient l'un sous l'autre et le prénom disparaissait sous eux.
 Les règles passent donc par le parent (`.men-chx__p .men-chx__b`) au lieu de
 toucher à la règle d'origine, qui sert encore aux deux boutons du bas.
+
+## L'ancien planning ménage est fermé (14 octobre 2026)
+
+`apps/menages/index.html` devient une redirection vers `/menages`. Il avait
+survécu à l'étape 4 parce qu'il portait trois gestes que la V5 ne reprenait
+pas ; la fiche V5 les porte depuis `241ee10`.
+
+**Ce qu'il faisait d'autre, la V5 le fait mieux** — et c'est ce qui rend la
+fermeture sans regret :
+
+- **la note** partait en **écriture RLS directe** depuis le navigateur
+  (`menage_comments.upsert`), sans passer par aucun endpoint. La V5 passe par
+  `/api/menages action:'note'`, son writer, qui sait aussi la **transmettre** à
+  la prestataire et le dire ;
+- **« Marquer fait » n'écrivait que dans le `localStorage`** (`menages-done`).
+  Il ne quittait pas la machine : la prestataire ne le voyait pas, un autre
+  appareil de l'hôte non plus, et l'hôte croyait pourtant avoir enregistré
+  quelque chose. La V5 écrit en base (`action: 'fait'` → `menage_done`).
+
+**Les tests ont été reportés, pas supprimés.** Le garde-fou « les écritures
+restent derrière un droit » vise désormais `pages/menages.html`, et il s'énonce
+mieux qu'avant : **deux droits distincts**, `menages:write` pour « Valider » et
+`prestataires:write` pour les quatre gestes d'assignation — les confondre
+donnerait à un délégué le droit de changer de prestataire parce qu'il peut
+cocher un ménage fait. Le garde-fou « ne pas lire un élément qu'on vient de
+retirer » devient « aucun **écouteur** posé sur un geste non rendu » : c'est le
+cas qui casse vraiment une page, et la V5 rend ses gestes dans des gabarits
+conditionnels.
+
+`tests/pages-identifiants.test.js` voit sa liste se vider : cet écran était le
+**dernier à appeler l'API en `fetch` brut**. Le test garde sa raison d'être pour
+le prochain qui y reviendrait, et vérifie au passage que la liste est vide parce
+que l'écran a été redirigé — pas parce qu'on l'a perdu de vue.
+
+**Reste `apps/menages/garde.html`** : lecture seule, remplacé à l'écran, mais sa
+suppression emporte 16 garde-fous de rendu à transposer un par un.

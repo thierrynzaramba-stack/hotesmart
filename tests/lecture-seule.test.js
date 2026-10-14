@@ -22,7 +22,7 @@ const lire = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8')
 
 // Chaque page delegable, avec le domaine qui commande ses ecritures.
 const PAGES = [
-  ['apps/menages/index.html',        'menages'],
+  ['pages/menages.html',             'menages'],
   ['pages/calendrier.html',    'reservations'],
   ['pages/biens.html',               'reservations'],
   ['pages/aujourdhui.html',           'reservations']
@@ -36,26 +36,45 @@ for (const [page, domaine] of PAGES) {
   })
 }
 
-test('menages : « Marquer fait » disparait en lecture seule', () => {
-  // Le constat exact du test humain.
-  const html = lire('apps/menages/index.html')
-  const i = html.indexOf("if (!peutEcrire('menages'))")
-  assert.ok(i > 0, 'le bloc de lecture seule doit exister')
-  const bloc = html.slice(i, i + 700)
-  assert.ok(bloc.includes("getElementById('modal-done')"),
-    '« Marquer fait » doit etre retire comme le champ de note')
-  assert.ok(bloc.includes("getElementById('btn-save-comment')"),
-    'le bouton d\'enregistrement de note aussi')
+test('menages : les gestes suivent DEUX droits distincts, pas un seul', () => {
+  // ⚠ LE CONSTAT EXACT DU TEST HUMAIN, reporte sur la page V5 (etape 4,
+  // 14 octobre 2026 : l'ancien planning est devenu une redirection). Il
+  // s'enonce desormais mieux qu'avant : « Fait » suit `menages:write`,
+  // « Proposer / Assigner / Retirer » suivent `prestataires:write`. Les
+  // confondre donnerait a un delegue le droit de changer de prestataire parce
+  // qu'il peut cocher un menage fait — deux decisions tres differentes
+  // (docs/specs/inventaire-menages.md §E.1).
+  const html = lire('pages/menages.html')
+  assert.ok(html.includes("peutEcrire('menages')"), 'le droit des menages est consulte')
+  assert.ok(html.includes("peutEcrire('prestataires')"), 'celui des prestataires aussi')
+  // « Valider » (marquer fait) est rendu SOUS le droit menages.
+  assert.match(html, /l\.type === 'non_termine' && peutEcrire\('menages'\)/,
+    '« Valider » n\'est pas rendu sans le droit')
+  // « Changer » (les quatre gestes d'assignation) sous le droit prestataires.
+  assert.match(html, /peutEcrire\('prestataires'\) && offrables/,
+    '« Changer » n\'est pas rendu sans le droit')
 })
 
-test('menages : openModal ne suppose pas le bouton present', () => {
+test('menages : aucun ECOUTEUR n\'est pose sur un geste non rendu', () => {
   // ⚠ Retirer un element sans proteger ce qui le lit ensuite casse la page pour
   // le membre — exactement le genre de regression que ce lot doit eviter.
-  const html = lire('apps/menages/index.html')
-  const i = html.indexOf("const btn = document.getElementById('modal-done')")
-  assert.ok(i > 0)
-  assert.ok(html.slice(i, i + 160).includes('if (btn)'),
-    'le code qui suit doit tolerer un bouton absent')
+  // L'ancien ecran posait la garde sur UN bouton (`if (btn)`) ; la page V5 rend
+  // ses gestes dans des gabarits CONDITIONNELS (droits, note deja lue...), donc
+  // `querySelector` peut rendre `null` pour de bon.
+  //
+  // ⚠ CE QUI EST VISE EST L'ECOUTEUR, pas toute lecture. Un `textContent` lu
+  // dans un gestionnaire ne s'execute que si le bouton qui l'a declenche
+  // existait : exiger `if (x)` partout serait du bruit. `addEventListener` sur
+  // `null`, lui, casse le rendu avant que la page n'affiche quoi que ce soit.
+  const html = lire('pages/menages.html')
+  assert.ok(!/corps\.querySelector\([^)]+\)\.addEventListener/.test(html),
+    'jamais d\'ecouteur pose directement sur le resultat d\'un querySelector')
+  for (const m of html.matchAll(/const (\w+) = corps\.querySelector\([^)]+\)/g)) {
+    const apres = html.slice(m.index, m.index + 400)
+    if (!new RegExp(`${m[1]}\\.addEventListener`).test(apres)) continue
+    assert.match(apres, new RegExp(`if \\(${m[1]}\\)`),
+      `un ecouteur est pose sur « ${m[1]} » sans verifier qu'il a ete rendu`)
+  }
 })
 
 // RETARGE le 13 octobre 2026 : les anciennes pages calendrier redirigent

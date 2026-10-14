@@ -462,18 +462,14 @@ validation de la precedente — sinon l'hote lit « A jour » sur quelqu'un qui 
 jamais rien lu. C'est la DONNEE qui porte son proprietaire, pas les six chemins
 d'ecriture de `provider_id` qui pensent a la remettre a zero.
 
-⚠ **ETAPE 4 FAITE A MOITIE, ET C'EST DELIBERE.** La navigation principale
-(`shared/nav.js`, `pages/aujourdhui.html`, entree « Menages » de la sidebar)
-mene desormais a `/menages`. Mais **les deux anciens ecrans ne sont PAS
-supprimes** :
+⚠ **ETAPE 4 : UN ECRAN FERME, UN RESTE.** La navigation principale
+(`shared/nav.js`, `pages/aujourdhui.html`, sidebar) mene a `/menages`, et
+**`apps/menages/index.html` est une redirection** depuis le 14 octobre 2026 :
+la fiche V5 porte desormais les QUATRE gestes d'assignation (« Proposer » —
+le defaut du serveur —, « Assigner », « Retirer la proposition », « Personne »),
+et ce que l'ancien ecran faisait d'autre, la V5 le fait mieux (la note passait
+en ecriture RLS directe ; « Marquer fait » n'ecrivait que dans le localStorage).
 
-- `apps/menages/index.html` porte **TROIS gestes que la V5 ne reprend pas** —
-  « Proposer » (elle confirme, le menage reste chez son porteur), « Retirer la
-  proposition » et « Retirer (personne) ». La fiche V5 ne sait qu'ASSIGNER
-  (`mode: 'assigner'`). Le rediriger ferait perdre le geste par defaut quand le
-  temps le permet : engager quelqu'un sans son accord doit rester explicite.
-  D'ou l'entree « Reassigner » de la sidebar, TEMPORAIRE, qui disparait avec
-  l'ecran le jour ou la fiche V5 portera les trois gestes.
 - `apps/menages/garde.html` est en lecture seule et la V5 le remplace, mais sa
   suppression emporte **16 garde-fous de rendu** que `tests/garde-endpoint.test.js`
   tient sur lui (« non confie » pas en rouge, delai en heure de Paris, prenom
