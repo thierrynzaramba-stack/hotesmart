@@ -4283,3 +4283,23 @@ la fabrique unique `boutonVu` existe pour empêcher. Et le repeint est
 inconditionnel : `rechargerAssignations` sort en silence sur une panne de
 lecture, et sans lui le bouton restait « Vu » alors que l'écriture avait abouti.
 Garde au passage : `ouvrirJour(null)` quand la fiche est ouverte sans feuille.
+
+## Une seule bulle, deux zones (14 octobre 2026)
+
+Demande de Thierry pendant la recette : *« mets Vu dans la bulle avec le nom du
+bien pour simplifier. On le garde à droite. »*
+
+Ce qui change est **l'habillage, pas la structure**. L'enveloppe `.jrangee`
+porte désormais le fond, la bordure et l'arrondi ; la ligne du ménage et le
+bouton les perdent, et un trait fin les sépare. On lit un seul bloc.
+
+Ce qui **ne change pas** : ce sont toujours deux boutons **frères**. La ligne
+est elle-même un `<button>` (elle ouvre la fiche), et un bouton dans un bouton
+ferait partir le clic aux deux — c'est la raison qui avait sorti le bouton de
+la ligne au départ, et elle tient toujours. Le trait de séparation n'est pas
+décoratif : sans lui, « Vu » se lit comme une étiquette et personne ne le
+touche.
+
+Détail attrapé au passage : la coloration du jour courant
+(`.agenda-jour.auj`) portait sur l'item, donc sur la **moitié gauche** de la
+bulle. Elle porte maintenant sur l'enveloppe.

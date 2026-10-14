@@ -270,18 +270,29 @@
        ⚠ RIEN D'AUTRE NE CHANGE : pas de fond, pas de bordure sur la ligne,
        pas de badge. Le seul ajout visible de ce lot sur sa page est ce bouton
        (decision de Thierry, recette du 14 octobre). */
-    .jrangee { display: flex; align-items: stretch; gap: 6px; }
+    /* ⚠ UNE SEULE BULLE A L'OEIL, DEUX ZONES AU DOIGT (demande de Thierry,
+       recette du 14 octobre : « mets Vu dans la bulle avec le nom du bien »).
+       L'enveloppe porte le fond, la bordure et l'arrondi ; la ligne et le
+       bouton les perdent. On lit un seul bloc — mais ce sont toujours deux
+       boutons FRERES, ce qui est la seule structure valide : la ligne EST un
+       `<button>` (elle ouvre la fiche), et un bouton dans un bouton ferait
+       partir le clic aux deux. */
+    .jrangee { display: flex; align-items: stretch; gap: 0;
+               background: var(--bg); border: 0.5px solid var(--border);
+               border-radius: var(--radius); overflow: hidden; }
     .jrangee + .jrangee, .jrangee + .jligne, .jligne + .jrangee { margin-top: 6px; }
-    .jrangee .jligne { margin-top: 0; }
+    .jrangee .jligne { margin-top: 0; border: none; background: transparent; border-radius: 0; }
     .jvu { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px;
-           background: var(--bg); border: 0.5px solid var(--border);
-           border-radius: var(--radius); padding: 0 12px; min-height: 44px;
+           background: transparent; border: none; border-radius: 0;
+           padding: 0 14px; min-height: 44px;
            font-family: inherit; font-size: 12px; font-weight: 600; color: inherit;
            cursor: pointer; }
+    /* Le trait qui separe les deux zones : sans lui, « Vu » se lit comme une
+       etiquette et personne ne le touche. */
+    .jrangee .jvu[data-vu] { border-inline-start: 0.5px solid var(--border); }
     .jvu svg { width: 15px; height: 15px; flex-shrink: 0; }
-    /* Vu : l'etat, pas une action. Gris, sans bordure marquee, non cliquable. */
-    .jvu[disabled] { cursor: default; color: var(--text2); border-color: transparent;
-                     background: transparent; font-weight: 500; }
+    /* Vu : l'etat, pas une action. Gris, sans trait, non cliquable. */
+    .jvu[disabled] { cursor: default; color: var(--text2); font-weight: 500; }
     /* ⚠ SEUL LE GESTE EST COUPE, PAS L'ETAT (constat de la revue de 6452d75,
        et c'est la meme lecon que la revue de 6d007f3 treize lignes plus bas).
        `.jvu` tout court masquait aussi la mention inerte « ✓ Vu » : l'hote
@@ -334,11 +345,15 @@
       padding: 10px 12px; min-height: 44px; font-size: 13.5px; cursor: pointer;
     }
     .agenda-item + .agenda-item { margin-top: 6px; }
-    /* La rangee porte l'ecart quand le bouton « Vu » accompagne l'item.
+    /* La rangee porte l'ecart quand le bouton « Vu » accompagne l'item, et
+       l'item perd son fond : c'est l'enveloppe qui le porte.
        (`.jrangee + .jrangee` est deja declare plus haut, avec les lignes de la
        feuille du jour : les deux surfaces partagent la rangee.) */
     .jrangee + .agenda-item, .agenda-item + .jrangee { margin-top: 6px; }
-    .jrangee .agenda-item { margin-top: 0; }
+    .jrangee .agenda-item { margin-top: 0; border: none; background: transparent; border-radius: 0; }
+    /* Le jour courant colore la bulle ENTIERE, pas la moitie gauche. */
+    .agenda-jour.auj .jrangee { background: var(--primary-bg); border-color: rgba(201,123,92,.3); }
+    .agenda-jour.auj .jrangee .agenda-item { background: transparent; }
     .agenda-item.offre { border: 1px dashed var(--primary); }
     .agenda-item.fait .agenda-bien { color: var(--text3); text-decoration: line-through; }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
