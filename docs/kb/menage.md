@@ -3809,3 +3809,134 @@ Les autres :
 - Un seul envoi par clic (le fil est un INSERT : deux clics envoyaient la
   consigne deux fois) ; `.men-case` devenu bouton a sa remise à zéro CSS ;
   `.men-fiche` passe après `.men-volet` pour que son z-index s'applique.
+
+## « Dernière ouverture de sa page », et l'alerte « Pas vu » (14 octobre 2026)
+
+**Le besoin, mot de Thierry** : *savoir si une prestataire a bien vu ses
+derniers ménages, sans estimation.*
+
+**Inventaire d'avant : rien ne l'enregistrait.** Zéro occurrence de `last_seen`,
+`last_opened`, `seen_at` dans le dépôt. Le seul voisin, `menage_events.read`,
+est un **booléen par notification**, posé quand elle *tape* sur son fil
+(`markRead`), et **sans date** : il dit « elle a acquitté cette notification »,
+pas « elle a ouvert sa page ».
+
+**La colonne** : `public_tokens.pwa_vue_le timestamptz`
+(`migrations/2026-10-14-pwa-vue-le.sql`, vérifiée par
+`scripts/verifier-migration-pwa-vue-le.js`).
+
+**Writer unique, et il est dans le serveur** : le succès du GET planning de
+`api/menages-public.js`, juste avant la réponse. Ni le navigateur, ni un
+`localStorage`, ni un acquittement de notification.
+
+| Décision | Pourquoi |
+|---|---|
+| **Sur le JETON, pas sur le profil** | la page EST le lien. « Nouveau lien » doit repartir de « Pas encore ouverte », et la régénération du jeton le donne gratuitement |
+| **Seule une synchro SERVEUR compte** | le service worker ne met jamais `/api/` en cache (`apps/menages/sw.js`) : arriver dans ce code veut dire qu'elle a bien reçu des données fraîches. Hors ligne, elle peint un cache qui **ne contient pas** le ménage neuf — elle ne l'a donc pas vu, et l'alerte doit tenir |
+| **Une panne d'écriture ne coupe pas sa page** | `try` + test d'erreur : ne pas savoir quand elle a regardé est un confort pour l'hôte, ses ménages du jour non. Une écriture qui **lève** ferait tomber tout le GET dans son `catch` général, donc un 500 — son écran noir pour un horodatage de confort |
+| **Un jeton refusé n'horodate rien** | « pas de profil actif, pas d'écriture » ne souffre pas d'exception, et l'horodatage ferait croire qu'elle a regardé |
+| **Le retour sur l'onglet ne déclenche aucune requête** | `visibilitychange` ne fait qu'un repeint (`public.html`) : un téléphone posé avec la page ouverte ne fabrique pas un faux « vue il y a 2 minutes » |
+
+**Ce qui sort, et par quelle porte.**
+
+- `/api/garde` rend `vues: { profilId: instant | null }` + `vues_lues`, **sous
+  `prestataires: read`** (la carte porte des identifiants stables de personnes,
+  exactement ce que `nommer()` refuse sans ce droit). **Le jeton ne sort pas** :
+  il sert à joindre, et un test le garde.
+- ⚠ **`api/garde.js` refuse les COORDONNÉES**, et son test l'exige depuis
+  l'étape 1 : *« l'écran répond à qui est de garde, pas à qui est ce
+  voyageur »*. Le numéro du bouton « Appeler » vient donc de
+  `/api/menages?equipe=1`, dont l'objet **est** les personnes. *Un même droit ne
+  justifie pas de servir une donnée par deux portes.*
+- `/api/menages?equipe=1` rend `tel` et `vueLe` par personne — **en deux
+  requêtes séparées** de celle des périodes de ratio : grouper ferait dépendre
+  les retours voyageurs, en production depuis le 13 octobre, d'une colonne
+  neuve. Entre le déploiement et l'application de la migration, le volet
+  afficherait « — » partout. **Une nouveauté qui tombe ne doit emporter
+  qu'elle-même.**
+
+**L'alerte, dans `shared/menages-a-traiter.js`** : type `pas_vu`, placé **après**
+les trois alertes de couverture et **avant** le passé — « personne ne viendra »
+est plus grave que « quelqu'un viendra peut-être sans le savoir », qui est plus
+urgent qu'un départ déjà manqué.
+
+Trois conditions, **toutes** nécessaires :
+
+1. elle **porte** le ménage, ou il lui est **proposé** ;
+2. sa dernière ouverture est **antérieure** à son attribution (`etapes.pris` si
+   elle porte, `etapes.propose` sinon) **ou** à la dernière note (`noteLe`) ;
+3. le départ est à **moins de 48 h** — comptés en **jours calendaires**, la même
+   borne que `non_pris`, pour que deux alertes du même écran ne se contredisent
+   pas.
+
+**Une ligne par PERSONNE**, avec son départ le plus proche et le nombre de
+ménages concernés : trois départs qu'elle n'a pas vus sont **un** coup de
+téléphone. L'alerte s'éteint dès qu'elle ouvre sa page, et **appeler est le seul
+geste qui la résout** — rien dans HôteSmart ne peut forcer quelqu'un à ouvrir
+son lien. Le bouton est **absent** sans numéro.
+
+**Quatre silences, et chacun a sa raison** :
+
+| Cas | Ce qui se passe | Pourquoi |
+|---|---|---|
+| `vues_lues: false` (panne) | **rien** | une carte vide voudrait dire « aucune ne l'a jamais ouverte » : un timeout PostgREST fabriquait une pleine page de rouge |
+| personne **absente** de la carte | **rien** | son lien n'existe plus (retirée de l'équipe) : annoncer « page jamais ouverte » sur un lien supprimé serait faux, et aucun geste ne l'éteindrait |
+| aucun **jalon** connu | **rien** | un ménage d'office ancien peut n'avoir aucune date d'attribution : alerter sur une date qu'on ignore accuse au hasard |
+| ménage déjà **marqué fait** | **rien** | elle y est allée |
+
+**Et deux alertes qui ne s'excluent pas** : un ménage proposé, imminent et non
+vu produit **`non_pris` ET `pas_vu`**. Elles disent une chose différente —
+« personne ne l'a pris » et « la personne sollicitée ne l'a peut-être pas lu » —
+et toutes deux sont vraies.
+
+**Ce que je n'ai pas codé, et pourquoi** : « antérieure à l'HORAIRE » n'est pas
+mesurable. Il n'existe **aucun horaire par ménage** — c'est
+`properties.checkout_time`, un réglage **du bien**. Le prendre pour jalon
+ferait sonner l'alerte à chaque modification du bien, y compris un changement
+de nom. La date, elle, est couverte **gratuitement** : elle fait partie de
+l'identité du ménage, donc un départ décalé crée un **autre** ménage, dont le
+`created_at` est postérieur.
+
+## La phrase d'état d'une prestataire : `shared/presta-etat.js` (14 octobre 2026)
+
+**« Est-ce que cette personne recevra des ménages ? »** — la question que
+l'écran de configuration ne posait nulle part, et dont la réponse est **la règle
+du moteur**, pas une approximation d'écran.
+
+**Le cas réel qui l'a fait écrire** (lecture de la production, 14 octobre
+2026) : **Lola est liée ACTIVE à Cœur de vie 23 et La bulle, en « elle
+confirme », avec AUCUN jour confié.** Le moteur ne lui proposera **jamais**
+rien : elle est candidate (jours `null` = tous les jours), mais la file de
+proposition ne retient que les liaisons dont les jours sont **explicitement**
+réglés (décision du 4 septembre 2026). **Aucun écran ne le disait**, et seule
+une alerte de ménage le révélait — à condition que personne d'autre ne porte le
+ménage.
+
+Le module est **pur** et rend des **clés**, jamais du texte (les libellés sont
+i18n, sous `menages.equipe.config.*`). Il est partagé par l'ordinateur et le
+téléphone : une règle commune vit dans un module commun.
+
+**Deux états, pas trois** (demande de Thierry : *« jamais d'ambre ici »*).
+`rien` est réservé au cas où elle ne recevra **aucun** ménage. Un bien mal
+réglé **parmi d'autres qui marchent** ne rougit pas l'en-tête : il porte son
+avertissement sur sa ligne, là où le geste se fait. Sinon la seule alerte
+vraiment grave — « cette personne ne sert à rien » — se noierait dans du rouge
+permanent.
+
+**Le motif commande le geste** : `aucun_bien` → « choisir ses biens » ;
+`aucun_jour` / `jours_a_regler` → « choisir ses jours ». Deux boutons pour deux
+causes différentes.
+
+Et les trois états d'une liaison, repris du moteur sans les réinventer :
+
+| `weekdays` | d'office | elle confirme |
+|---|---|---|
+| `null` / absent | **OK** — elle ne confirme rien, tous les jours lui vont | **`jours_a_regler`** — jamais sollicitée |
+| `[]` | **`aucun_jour`** — jamais candidate | **`aucun_jour`** |
+| `[2,3]` | OK | OK |
+
+Un **rang 3** existant se **lit** même si l'écran n'en propose que deux
+(décision de Thierry) : on ne mentira pas sur une liaison déjà posée. Un bien
+**hors du périmètre** de l'appelant est ignoré, jamais rendu sans nom — et
+jamais compté en défaut : alerter un délégué sur un bien qu'il ne peut même pas
+ouvrir ne lui laisse aucun geste.

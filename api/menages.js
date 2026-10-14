@@ -398,7 +398,7 @@ async function equipeMenage (req, res, garde, userId) {
   const avecAvis = peutLire(garde.contexte, 'avis', null)
 
   const { data: profils, error: eProf } = await supabase.from('profiles')
-    .select('id, first_name, last_name, active, pwa_token')
+    .select('id, first_name, last_name, active, pwa_token, phone')
     .eq('account_user_id', userId).eq('access_mode', 'lien')
     .order('first_name', { ascending: true })
   if (eProf) {
@@ -456,23 +456,47 @@ async function equipeMenage (req, res, garde, userId) {
   // ⚠ Et la valeur est VALIDÉE, avec le même repli que la PWA (`toujours`,
   // jamais le `30j` par défaut de `periodeNormalisee`) : deux chiffres
   // contradictoires pour la même personne seraient pires que pas de chiffre.
+  //
+  // ⚠ LA LECTURE DES JETONS N'EST PLUS CONDITIONNEE AU DROIT `avis` : elle
+  // porte aussi `pwa_vue_le`, la derniere ouverture de sa page, qui n'a rien a
+  // voir avec les avis. On est deja sous `prestataires: read` — le droit des
+  // PERSONNES — et la periode du ratio, elle, ne sert toujours que si `avis`
+  // est accorde.
   const PERIODES_JETON = ['15j', '30j', '6mois', 'toujours']
   const periodes = new Map()
+  const vues = new Map()
   let periodesLues = true
-  if (avecAvis) {
-    const jetons = profils.map(p => p.pwa_token).filter(Boolean)
-    if (jetons.length) {
-      const { data: pt, error: ePt } = await supabase.from('public_tokens')
-        .select('token, ratio_periode').eq('user_id', userId).in('token', jetons)
-      if (ePt) {
-        console.error('[menages] equipe : lecture periodes echec', ePt.message)
-        periodesLues = false
-      } else {
-        for (const x of (pt || [])) {
-          periodes.set(String(x.token),
-            PERIODES_JETON.includes(x.ratio_periode) ? x.ratio_periode : 'toujours')
-        }
+  //
+  // ⚠ DEUX REQUETES, PAS UNE, ET C'EST VOLONTAIRE. Grouper `ratio_periode` et
+  // `pwa_vue_le` ferait dependre les RETOURS VOYAGEURS — en production depuis
+  // le 13 octobre — d'une colonne neuve : entre le deploiement et
+  // l'application de la migration, la lecture entiere echouerait et le volet
+  // afficherait « — » partout. Une nouveaute qui tombe ne doit emporter
+  // qu'elle-meme.
+  const jetons = profils.map(p => p.pwa_token).filter(Boolean)
+  if (jetons.length) {
+    const { data: pt, error: ePt } = await supabase.from('public_tokens')
+      .select('token, ratio_periode').eq('user_id', userId).in('token', jetons)
+    if (ePt) {
+      console.error('[menages] equipe : lecture periodes echec', ePt.message)
+      periodesLues = false
+    } else {
+      for (const x of (pt || [])) {
+        periodes.set(String(x.token),
+          PERIODES_JETON.includes(x.ratio_periode) ? x.ratio_periode : 'toujours')
       }
+    }
+    // La derniere ouverture de sa page. Best-effort : sans elle, l'en-tete de
+    // la fiche ne dit rien de sa page — tout le reste de l'ecran tient.
+    const { data: vu, error: eVu } = await supabase.from('public_tokens')
+      .select('token, pwa_vue_le').eq('user_id', userId).in('token', jetons)
+    if (eVu) console.error('[menages] equipe : lecture des vues echec', eVu.message)
+    else {
+      // ⚠ `null` (jamais ouverte) ET « pas de ligne » ne se disent pas pareil :
+      // un jeton PRESENT a `pwa_vue_le = null` n'a jamais ete ouvert ; une
+      // personne SANS ligne a perdu son lien, et l'ecran ne doit rien
+      // affirmer de sa page.
+      for (const x of (vu || [])) vues.set(String(x.token), x.pwa_vue_le || null)
     }
   }
 
@@ -490,6 +514,15 @@ async function equipeMenage (req, res, garde, userId) {
       aRegler: siennes.some(l => l.requires_ack === true &&
                                  !(Array.isArray(l.weekdays) && l.weekdays.length)),
       biens: siennes.map(l => bienPar.get(String(l.property_id))).filter(Boolean),
+      // ⚠ LE NUMERO SORT ICI, et nulle part ailleurs. `api/garde.js` le refuse
+      // (« qui est de garde » n'est pas « comment la joindre ») ; cette branche
+      // a les PERSONNES pour objet, et l'ecran propose de les appeler — un
+      // bouton « Appeler » sans numero ne sert a rien. Sous `prestataires:
+      // read`, comme tout le reste de cette reponse.
+      tel: p.phone || null,
+      // La derniere ouverture de SA page : `null` = jamais, ABSENT (undefined)
+      // = on ne sait pas (lien supprime, ou lecture en panne).
+      ...(p.pwa_token && vues.has(String(p.pwa_token)) ? { vueLe: vues.get(String(p.pwa_token)) } : {}),
       retours: null
     })
   }

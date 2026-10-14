@@ -37,7 +37,8 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      profils = [{ id: REGINA, first_name: 'Régina', active: true },
                                 { id: SECONDE, first_name: 'Marie', active: true }],
                      erreurLiaisons = null, erreurBiens = null, avis = [], erreurAvis = null,
-                     done = [], erreurDone = null, conges = [], notes = [] } = {}) {
+                     done = [], erreurDone = null, conges = [], notes = [],
+                     jetons = [], erreurJetons = null } = {}) {
   const etat = { lectures: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -58,6 +59,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         if (table === 'menage_done') return { data: erreurDone ? null : done, error: erreurDone }
         if (table === 'conges_plages') return { data: conges, error: null }
         if (table === 'menage_comments') return { data: notes, error: null }
+        if (table === 'public_tokens') return { data: erreurJetons ? null : jetons, error: erreurJetons }
         return { data: [], error: null }
       }
       const chain = {
@@ -1173,4 +1175,106 @@ test('un ménage sans note porte une chaîne vide, jamais `undefined`', async ()
   const res = reponse()
   await handler(get(), res)
   assert.strictEqual(res.body.menages[0].note, '')
+})
+
+// ─── « Derniere ouverture de sa page », pour l'alerte « Pas vu » ────────────
+//
+// ⚠ CE QUI EST EN JEU. Le type `pas_vu` de la bulle « A traiter » ne lit que
+// cette carte. Trois facons de la rendre nuisible : laisser sortir le JETON
+// (c'est son mot de passe), confondre « jamais ouverte » avec « on ne sait
+// pas » (une alerte sur toute l'equipe), et se taire sur une panne de lecture
+// (la meme alerte, mais a cause d'un timeout).
+
+test('la derniere ouverture sort par PERSONNE, et le jeton ne sort pas', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()],
+    profils: [{ id: REGINA, first_name: 'Régina', active: true, pwa_token: 'jeton-secret' }],
+    jetons: [{ token: 'jeton-secret', pwa_vue_le: '2026-10-13T18:09:00Z' }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.vues_lues, true)
+  assert.strictEqual(res.body.vues[REGINA], '2026-10-13T18:09:00Z')
+  assert.ok(!JSON.stringify(res.body).includes('jeton-secret'), 'le jeton sert a joindre, pas a sortir')
+})
+
+test('un lien JAMAIS ouvert rend `null` — ce n\'est pas « on ne sait pas »', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()],
+    profils: [{ id: REGINA, first_name: 'Régina', active: true, pwa_token: 'tok-r' }],
+    jetons: [{ token: 'tok-r', pwa_vue_le: null }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.vues_lues, true)
+  assert.strictEqual(res.body.vues[REGINA], null, 'present et null : jamais ouverte')
+  assert.ok(Object.prototype.hasOwnProperty.call(res.body.vues, REGINA))
+})
+
+test('une personne SANS ligne de jeton est ABSENTE de la carte, pas « jamais vue »', async () => {
+  // Retiree de l'equipe : la ligne `public_tokens` est supprimee. Annoncer
+  // « page jamais ouverte » sur un lien qui n'existe plus serait faux, et
+  // ferait sonner une alerte qu'aucun geste ne peut eteindre.
+  const { handler } = preparer({
+    liaisons: [LIAISON()],
+    profils: [{ id: REGINA, first_name: 'Régina', active: true, pwa_token: 'tok-r' }],
+    jetons: []
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.vues_lues, true)
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(res.body.vues, REGINA), false)
+})
+
+test('une PANNE de lecture le DIT : `vues_lues: false`, et la carte reste vide', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()],
+    profils: [{ id: REGINA, first_name: 'Régina', active: true, pwa_token: 'tok-r' }],
+    erreurJetons: { message: 'timeout' }
+  })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.vues_lues, false, 'sans ce drapeau, un timeout alertait sur toute l\'equipe')
+  assert.deepStrictEqual(res.body.vues, {})
+})
+
+test('aucun jeton a lire n\'est PAS une panne', async () => {
+  // Un compte sans aucune prestataire a lien : il n'y a rien a lire, et c'est
+  // un etat normal — pas une lecture ratee.
+  const { handler } = preparer({ liaisons: [LIAISON()], profils: [] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.vues_lues, true)
+  assert.deepStrictEqual(res.body.vues, {})
+})
+
+test('sans `prestataires: read`, AUCUNE carte des ouvertures ne sort', async () => {
+  // La carte est `{ profilId: instant }` : rendue sans le droit, elle livrerait
+  // des identifiants stables de personnes — ce que `nommer()` refuse deja.
+  const { handler } = preparer({
+    user: MEMBRE,
+    profil: { id: 'pr1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { menages: 'read', prestataires: 'none', avis: 'none', property_scope: 'all' },
+    liaisons: [LIAISON()],
+    profils: [{ id: REGINA, first_name: 'Régina', active: true, pwa_token: 'tok-r' }],
+    jetons: [{ token: 'tok-r', pwa_vue_le: '2026-10-13T18:09:00Z' }]
+  })
+  const res = reponse()
+  await handler({ ...get(), headers: { authorization: 'Bearer jeton', 'x-compte': PROD } }, res)
+  assert.strictEqual(res.body.avec_noms, false)
+  assert.deepStrictEqual(res.body.vues, {})
+  assert.strictEqual(res.body.vues_lues, false)
+})
+
+test('la NOTE sort avec sa date : une consigne changee hier soir doit alerter', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()], menages: [MENAGE()],
+    notes: [{ booking_id: 'b1', departure_date: '2026-09-12', comment: 'Le code a changé',
+              updated_at: '2026-10-13T20:30:00Z' }]
+  })
+  const res = reponse()
+  await handler(get(), res)
+  const m = res.body.menages.find(x => x.note)
+  assert.ok(m, 'la note est bien la')
+  assert.strictEqual(m.noteLe, '2026-10-13T20:30:00Z')
 })

@@ -141,6 +141,20 @@ initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
 const $ = (s) => document.querySelector(s)
 const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
+
+// « il y a 3 heures », dans la langue de l'écran, SANS clé par unité : c'est
+// exactement ce que `Intl.RelativeTimeFormat` sait faire, et une table de
+// clés maison divergerait des pluriels de chaque langue.
+function ilYa (iso) {
+  const ms = Date.now() - Date.parse(iso)
+  if (!Number.isFinite(ms)) return ''
+  const rtf = new Intl.RelativeTimeFormat(I18n.lang || 'fr', { numeric: 'auto' })
+  const min = Math.round(ms / 60000)
+  if (min < 60) return rtf.format(-Math.max(min, 1), 'minute')
+  const h = Math.round(min / 60)
+  if (h < 24) return rtf.format(-h, 'hour')
+  return rtf.format(-Math.round(h / 24), 'day')
+}
 const AUJOURDHUI = toISO(new Date())
 // Le MEME selecteur que le calendrier (recette du 13 octobre) : des mois.
 // L'endpoint refuse au-dela de 92 jours : au-dela, la page lit par TRANCHES.
@@ -261,7 +275,11 @@ async function chargerATraiter () {
     if (jeton !== jetonBulle) return
     etat.aTraiter = lignesATraiter({
       biens: r.biens || [], garde: r.garde || [], menages: r.menages || [],
-      avecAvis: !!r.avec_avis, aujourdhui: AUJOURDHUI
+      avecAvis: !!r.avec_avis, aujourdhui: AUJOURDHUI,
+      // ⚠ « Pas vu » NE S'INVENTE PAS. `vues_lues: false` (panne de lecture)
+      // laisse le module muet sur ce type : une carte vide voudrait dire
+      // « aucune ne l'a jamais ouverte », donc une alerte sur toute l'équipe.
+      vues: r.vues || null, vuesLues: !!r.vues_lues
     })
     // ⚠ LA BULLE A SA PROPRE TRONCATURE : sa fenêtre n'est pas celle du
     // planning, donc le bandeau de `charger()` ne la couvre pas. Taire
@@ -277,6 +295,14 @@ async function chargerATraiter () {
   }
   renderBulle()
   majBadge()
+  // ⚠ LE NUMÉRO N'EST CHARGÉ QUE S'IL SERT. L'équipe se lit à l'ouverture du
+  // volet ; une alerte « Pas vu » a besoin du numéro tout de suite, et sans
+  // elle cette lecture — un comptage d'avis par personne — ne se justifie pas
+  // au démarrage de la page.
+  if (Array.isArray(etat.aTraiter) && etat.aTraiter.some(l => l.type === 'pas_vu') &&
+      !equipeChargee && !equipeEnCours) {
+    chargerEquipe().then(renderBulle).catch(() => {})
+  }
 }
 
 let jetonLecture = 0
@@ -995,11 +1021,22 @@ function ligneHtml (l) {
     ? t('menages.n_jours', { n: l.nbJours })
     : dateCourte(l.date)
   const qui = l.qui && l.qui.prenom ? ` · ${esc(l.qui.prenom)}` : ''
+  // ⚠ « Pas vu » DIT DEPUIS QUAND, sinon l'hôte ne sait pas s'il doit appeler
+  // ou attendre cinq minutes. Jamais ouverte est le cas le plus grave : il se
+  // dit en toutes lettres, pas par une absence de date.
+  const vue = l.type === 'pas_vu'
+    ? ` · ${esc(l.vueLe ? t('menages.vue_il_y_a', { quand: ilYa(l.vueLe) }) : t('menages.vue_jamais'))}`
+    : ''
+  // Seul `pas_vu` garde un pictogramme (téléphone barré) : il ne dit pas un
+  // problème de couverture, et le distinguer évite de le lire comme tel.
+  const ico = l.type === 'pas_vu'
+    ? `<span class="men-atr__type">${icone('i-phone-off')}</span>`
+    : ''
   return `<div class="men-atr">
-    ${photo}
+    ${photo}${ico}
     <span class="men-atr__texte">
-      <b>${esc(t('menages.type_' + l.type))}</b>
-      <span class="caption muted">${esc(l.bienNom)} · ${esc(quand)}${qui}</span>
+      <b${l.type === 'pas_vu' ? ' class="men-atr__rouge"' : ''}>${esc(t('menages.type_' + l.type))}</b>
+      <span class="caption muted">${esc(l.bienNom)} · ${esc(quand)}${qui}${vue}</span>
     </span>
     ${boutonsLigne(l)}
   </div>`
@@ -1009,6 +1046,20 @@ function ligneHtml (l) {
 // (décision G12) : griser promet un geste qu'on refusera.
 function boutonsLigne (l) {
   const b = []
+  // ⚠ APPELER EST LE SEUL GESTE QUI RÉSOUT « Pas vu » : rien dans HôteSmart ne
+  // peut forcer quelqu'un à ouvrir sa page. Le bouton est ABSENT sans numéro
+  // (on ne propose pas un appel qu'on ne peut pas passer) — même règle que les
+  // droits : jamais grisé, absent.
+  if (l.type === 'pas_vu') {
+    // ⚠ LE NUMERO VIENT DU VOLET ÉQUIPE, pas de `/api/garde` : cet endpoint
+    // refuse les coordonnées (« qui est de garde » n'est pas « comment la
+    // joindre »), et son test le garde.
+    const tel = ((etat.equipe || []).find(p => l.qui && String(p.id) === String(l.qui.id)) || {}).tel
+    if (tel) {
+      b.push(`<a class="btn btn--secondary men-atr__btn" href="tel:${esc(String(tel).replace(/[^+0-9]/g, ''))}">`
+        + `${icone('i-phone')}${esc(t('menages.appeler'))}</a>`)
+    }
+  }
   if (l.type === 'non_termine' && peutEcrire('menages')) {
     b.push(`<button type="button" class="btn btn--secondary men-atr__btn" data-valider>${esc(t('menages.valider'))}</button>`)
   }

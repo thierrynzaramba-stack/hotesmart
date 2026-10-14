@@ -31,7 +31,8 @@ const SNAPS = [
 
 function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true, access_mode: 'lien' },
                      menages = null, erreurProfil = null, erreurMenages = null,
-                     tokenPropIds = ['209413'], done = [], events = [] } = {}) {
+                     tokenPropIds = ['209413'], done = [], events = [],
+                     erreurUpdate = null } = {}) {
   const journal = []
   const client = {
     from (table) {
@@ -39,6 +40,11 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true,
       journal.push(a)
       const chain = {
         select (c) { a.colonnes = c; return chain },
+        // ⚠ LES ECRITURES SONT CAPTUREES, pas avalees : c'est ce qui rend
+        // l'horodatage « derniere ouverture de sa page » eprouvable. Un double
+        // sans `update` laissait le code lever, donc le test passait sans rien
+        // garantir.
+        update (v) { a.update = v; if (erreurUpdate) a.erreurUpdate = erreurUpdate; return chain },
         eq (c, v) { a.f[c] = v; return chain },
         neq (c, v) { a.neq = { c, v }; return chain },
         is (c, v) { (a.is = a.is || []).push({ c, v }); return chain },
@@ -69,6 +75,7 @@ function preparer ({ profil = { id: REGINA, first_name: 'Régina', active: true,
         then (ok, ko) { return Promise.resolve(rep()).then(ok, ko) }
       }
       function rep () {
+        if (a.update) return { data: null, error: a.erreurUpdate || null }
         if (table === 'properties') return { data: BIENS, error: null }
         if (table === 'bookings_snapshot') return { data: SNAPS, error: null }
         if (table === 'menage_done') return { data: done, error: null }
@@ -418,4 +425,55 @@ test('le `.or()` ne ramène QUE ses deux colonnes', async () => {
   const q = journal.find(a => a.table === 'menages')
   const termes = String(q.or).split(',').map(t => t.split('.')[0])
   assert.deepStrictEqual(termes.sort(), ['proposee_a', 'provider_id'])
+})
+
+// ─── « Derniere ouverture de sa page » : le writer unique est ICI ───────────
+//
+// ⚠ POURQUOI UN SEUL ENDROIT. L'hote assigne un menage pour apres-demain sans
+// aucun moyen de savoir si elle l'a vu. L'horodatage est ecrit par le SERVEUR,
+// au succes du GET planning, et par personne d'autre : ni le navigateur (une
+// PWA hors ligne peint un cache qui ne contient pas le menage neuf), ni un
+// localStorage (il ne remonte jamais), ni un acquittement de notification
+// (`menage_events.read` est un booleen sans date, pose seulement si elle TAPE
+// sur son fil).
+
+test('un chargement reussi du planning horodate sa derniere ouverture', async () => {
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  const avant = Date.now()
+  await handler(req(), res)
+  assert.strictEqual(res.code, null, 'la page repond normalement')
+  const w = journal.find(a => a.table === 'public_tokens' && a.update)
+  assert.ok(w, 'une ecriture part sur public_tokens')
+  assert.strictEqual(w.f.token, TOKEN, 'et sur CE jeton, jamais sur un autre')
+  assert.deepStrictEqual(Object.keys(w.update), ['pwa_vue_le'],
+    'un seul champ : ce chemin ne touche a rien d\'autre du jeton')
+  const quand = Date.parse(w.update.pwa_vue_le)
+  assert.ok(quand >= avant && quand <= Date.now() + 1000, 'c\'est l\'instant du serveur')
+})
+
+test('une PANNE d\'horodatage ne casse PAS sa page', async () => {
+  // Ne pas savoir quand elle a regarde est un confort pour l'hote ; ses
+  // menages du jour, non. Un 500 ici lui laisserait un ecran noir.
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')],
+                             erreurUpdate: { message: 'timeout' } })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, null, 'pas de 503, pas de 500')
+  assert.ok(Array.isArray(res.body.bookings), 'et son planning est bien la')
+  assert.ok(journal.find(a => a.table === 'public_tokens' && a.update), 'l\'ecriture a bien ete tentee')
+})
+
+test('un jeton REFUSE n\'horodate rien', async () => {
+  // Un porteur de lien revoque ne doit pas pouvoir ecrire une ligne, meme
+  // anodine : « pas de profil actif, pas d'ecriture » ne souffre pas
+  // d'exception. Et l'horodatage servirait a faire croire qu'elle a regarde.
+  const journal = preparer({ profil: null, menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const handler = require('../api/menages-public')
+  const res = reponse()
+  await handler(req(), res)
+  assert.strictEqual(res.code, 401)
+  assert.strictEqual(journal.find(a => a.table === 'public_tokens' && a.update), undefined)
 })

@@ -189,11 +189,15 @@ module.exports = async function handler (req, res) {
     // s'affiche vide alors qu'une consigne existe, le premier enregistrement
     // la remplace par du vide — et la prestataire perd « le code a change ».
     // Best-effort : sans note, l'ecran reste juste (champ vide, visible).
+    // ⚠ `updated_at` SORT AVEC LA NOTE : une consigne changee apres la
+    // derniere ouverture de sa page est exactement ce que l'alerte « Pas vu »
+    // doit attraper (« le code de la boite a change » ecrit hier soir).
     const notes = {}
+    const notesLe = {}
     let notesLues = true
     if ((menagesRows || []).length) {
       const { data: notesRows, error: eN } = await supabase.from('menage_comments')
-        .select('booking_id, departure_date, comment')
+        .select('booking_id, departure_date, comment, updated_at')
         .eq('user_id', userId)
         .in('booking_id', [...new Set(menagesRows.map(m => String(m.booking_id)))])
         .limit(LOT_MENAGES)
@@ -204,7 +208,11 @@ module.exports = async function handler (req, res) {
       if (eN) { console.error('[garde] lecture notes echec', eN.message); notesLues = false }
       if ((notesRows || []).length >= LOT_MENAGES) notesLues = false
       for (const n of (notesRows || [])) {
-        notes[`${String(n.booking_id)}|${String(n.departure_date).slice(0, 10)}`] = n.comment || ''
+        const cle = `${String(n.booking_id)}|${String(n.departure_date).slice(0, 10)}`
+        notes[cle] = n.comment || ''
+        // Une note vide a bien ete ECRITE a cette date (l'hote l'a effacee) :
+        // c'est un changement, et il compte comme les autres.
+        notesLe[cle] = n.updated_at || null
       }
     }
 
@@ -241,9 +249,13 @@ module.exports = async function handler (req, res) {
     // ===== L'ANNUAIRE, ET LES POUCES =====
     const prenoms = {}
     let prestataires = []
+    // « Vue il y a … » : l'instant de sa derniere synchro serveur reussie, par
+    // PERSONNE. Writer unique : le GET planning de api/menages-public.js.
+    const vues = {}
+    let vuesLues = false
     if (avecNoms) {
       const { data: pr, error: errPr } = await supabase.from('profiles')
-        .select('id, first_name, active')
+        .select('id, first_name, active, pwa_token')
         .eq('account_user_id', userId).eq('access_mode', 'lien')
       // ⚠ Une panne ici ne coupe PAS l'ecran : sans prenoms, il reste juste et
       // lisible (« quelqu'un »). C'est la difference avec les liaisons, dont
@@ -254,9 +266,46 @@ module.exports = async function handler (req, res) {
       // « changer la prestataire » sans une requete de plus. Les DESACTIVEES
       // en sont exclues — on ne propose pas d'assigner quelqu'un qui n'est
       // plus dans l'equipe. Rien ne sort sans `prestataires: read`.
+      // ⚠ AUCUNE COORDONNEE NE SORT D'ICI, et le test le garde. Cet ecran
+      // repond a « qui est de garde », pas a « comment la joindre » : le
+      // numero de l'alerte « Pas vu » vient de `/api/menages?equipe=1`, dont
+      // l'objet EST les personnes. Un meme droit ne justifie pas de servir une
+      // donnee par deux portes.
       prestataires = (pr || []).filter(p => p.active !== false)
         .map(p => ({ id: p.id, prenom: p.first_name }))
         .sort((a, b) => String(a.prenom || '').localeCompare(String(b.prenom || '')))
+
+      // ⚠ LE JETON NE SORT PAS. Il sert ICI a joindre son horodatage, et c'est
+      // tout : ce qui part est `{ profilId: instant }`. Son lien est son mot de
+      // passe, et cet endpoint sert un ecran d'hote.
+      //
+      // ⚠ `vuesLues` DIT SI ON SAIT. Une panne de lecture laisse la carte vide,
+      // et une carte vide voudrait dire « aucune ne l'a jamais ouverte » —
+      // c'est-a-dire une alerte « Pas vu » sur toute l'equipe. Sans ce
+      // drapeau, un timeout PostgREST fabriquait une pleine page de rouge.
+      const jetons = (pr || []).map(x => x.pwa_token).filter(Boolean)
+      if (!jetons.length) {
+        vuesLues = true   // rien a lire n'est pas une panne
+      } else {
+        const { data: pt, error: errVues } = await supabase.from('public_tokens')
+          .select('token, pwa_vue_le').eq('user_id', userId).in('token', jetons)
+        if (errVues) console.error('[garde] lecture des vues echec', errVues.message)
+        else {
+          vuesLues = true
+          const parJeton = new Map((pt || []).map(x => [String(x.token), x.pwa_vue_le || null]))
+          // ⚠ UN JETON SUPPRIME N'EST PAS « JAMAIS OUVERTE ». Une personne
+          // retiree de l'equipe n'a plus de ligne `public_tokens` : elle reste
+          // donc ABSENTE de la carte, et l'ecran ne dit rien d'elle — plutot
+          // que d'annoncer une page jamais ouverte sur un lien qui n'existe
+          // plus. Seul un jeton PRESENT a `pwa_vue_le = null` veut dire
+          // « jamais ouverte ».
+          for (const x of (pr || [])) {
+            if (x.pwa_token && parJeton.has(String(x.pwa_token))) {
+              vues[x.id] = parJeton.get(String(x.pwa_token))
+            }
+          }
+        }
+      }
     }
 
     // ===== LES ABSENCES DES PRESTATAIRES : PLUS CALCULEES =====
@@ -404,6 +453,8 @@ module.exports = async function handler (req, res) {
       status: m.status,
       // La consigne de l'hote pour CE menage (vide = aucune).
       note: notes[`${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || '',
+      // Quand la consigne a change pour la derniere fois (null = aucune note).
+      noteLe: notesLe[`${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || null,
       // La verite serveur de « fait » — jamais le localStorage de l'ancien ecran.
       fait: faits.has(`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`),
       // Les TROIS etapes reellement enregistrees (Q1 de l'inventaire) :
@@ -455,6 +506,11 @@ module.exports = async function handler (req, res) {
 
     return res.status(200).json({
       jours, biens, garde: gardeParBien, menages, prestataires,
+      // `{ profilId: instant | null }` — null = ce lien n'a jamais ete ouvert.
+      // Une personne ABSENTE de la carte est une personne dont on ne sait
+      // rien ; `vues_lues: false` dit que la lecture a echoue, et l'ecran se
+      // tait alors au lieu d'alerter sur toute l'equipe.
+      vues, vues_lues: vuesLues,
       avec_noms: avecNoms,
       // ⚠ `avec_avis` DIT CE QUI SORT, pas ce que le droit autorise. Le retour de
       // propreté est une parole de voyageur rapportée à côté d'un nom : sans

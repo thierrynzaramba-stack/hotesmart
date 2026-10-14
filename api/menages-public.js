@@ -835,6 +835,38 @@ module.exports = async function handler(req, res) {
     if (autrui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
     const delaiRetrait = lu.erreur ? null : lu.heures
 
+    // ─── « VUE IL Y A … » : LA SEULE TRACE D'OUVERTURE DE SA PAGE ───────────
+    // ⚠ WRITER UNIQUE, ET IL EST ICI. L'hote assigne un menage pour
+    // apres-demain sans aucun moyen de savoir si elle l'a vu. Cet horodatage
+    // est ce qui le lui dira — l'en-tete de sa fiche (« Vue il y a … ») et le
+    // type `pas_vu` de la bulle « A traiter » ne lisent que lui.
+    //
+    // ⚠ ECRIT PAR LE SERVEUR, AU SUCCES, ET NULLE PART AILLEURS. Ni le
+    // navigateur, ni un localStorage : une PWA hors ligne peint un cache qui
+    // ne contient pas le menage neuf — elle ne l'a donc pas vu, et l'alerte
+    // doit tenir. Le service worker ne met JAMAIS `/api/` en cache
+    // (`apps/menages/sw.js`), donc arriver ici veut dire qu'elle a bien recu
+    // les donnees fraiches du serveur.
+    //
+    // ⚠ CE CHEMIN NE DOIT ETRE APPELE QUE PAR ELLE. L'ecran de l'hote qui
+    // montre « ce qu'elle voit » peint les donnees que l'HOTE possede deja :
+    // appeler cet endpoint avec son jeton horodaterait une ouverture qu'elle
+    // n'a pas faite, et exposerait son jeton au passage.
+    //
+    // ⚠ UNE PANNE D'ECRITURE NE COUPE PAS SA PAGE. Ne pas savoir quand elle a
+    // regarde est un confort pour l'hote ; ses menages du jour, non.
+    // ⚠ ET LE `try` COMPTE AUTANT QUE LE TEST D'ERREUR : une ecriture qui
+    // LEVE (client indisponible, reseau coupe) ferait tomber tout le GET dans
+    // son `catch` general, donc un 500 — l'ecran de la prestataire noir pour
+    // un horodatage de confort.
+    try {
+      const { error: errVue } = await supabase.from('public_tokens')
+        .update({ pwa_vue_le: new Date().toISOString() }).eq('token', token)
+      if (errVue) console.error('[menages-public] horodatage de la vue echec:', errVue.message)
+    } catch (eVue) {
+      console.error('[menages-public] horodatage de la vue impossible:', eVue.message)
+    }
+
     return res.json({
       bookings: allBookings, label: tokenData.label,
       // Les menages que personne ne porte, sur ses biens. Voir le bloc plus haut

@@ -212,3 +212,145 @@ test('chaque ligne de ménage porte son bookingId — sans lui, aucun geste ne s
   for (const x of l) assert.ok(x.bookingId, `${x.type} sans bookingId`)
   assert.deepEqual(l.map(x => x.bookingId).sort(), ['x1', 'x2', 'x3'])
 })
+
+// ─── « Pas vu » : elle ne sait peut-être pas qu'elle doit venir ─────────────
+//
+// ⚠ TROIS CONDITIONS, TOUTES NÉCESSAIRES (décision de Thierry) : elle porte ou
+// on lui propose · sa dernière ouverture est antérieure à ce qui la concerne ·
+// le départ est à moins de 48 h. Le besoin : savoir si une prestataire a bien
+// vu ses derniers ménages, SANS estimation — l'horodatage est écrit par le
+// serveur au succès du GET planning de sa PWA, et par lui seul.
+
+const LENA = { id: 'p-lena', prenom: 'Lena', actif: true }
+const DEMAIN = '2026-10-14'
+const AVANT = '2026-10-10T08:00:00Z'   // sa dernière ouverture
+const APRES = '2026-10-12T08:00:00Z'   // ce qui la concerne, posé après
+
+test('un ménage attribué APRÈS sa dernière ouverture, à J−1 : alerte', async () => {
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
+  assert.equal(l[0].qui.prenom, 'Régina', 'et il dit QUI appeler')
+  assert.equal(l[0].vueLe, AVANT)
+  assert.equal(l[0].nbMenages, 1)
+})
+
+test('... elle ouvre sa page, l\'alerte disparaît', async () => {
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })],
+    vues: { 'p-regina': '2026-10-13T07:30:00Z' }, vuesLues: true
+  })
+  assert.deepEqual(l, [], 'vue après l\'attribution : il n\'y a plus rien à signaler')
+})
+
+test('... et un départ à J+5 n\'alerte pas : le temps de regarder reste entier', async () => {
+  const l = appeler({
+    menages: [menage({ date: '2026-10-18', porteur: REGINA, etapes: { pris: APRES } })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l, [])
+})
+
+test('JAMAIS ouverte : alerte sans condition de date — le cas le plus grave', async () => {
+  // Rien à comparer, et c'est précisément le problème : elle a un ménage
+  // demain et n'a jamais ouvert son lien.
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, porteur: REGINA })],
+    vues: { 'p-regina': null }, vuesLues: true
+  })
+  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
+  assert.equal(l[0].vueLe, null)
+})
+
+test('une PROPOSITION non vue alerte aussi, et nomme la personne sollicitée', async () => {
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, proposeesA: [LENA], etapes: { propose: APRES } })],
+    vues: { 'p-lena': AVANT }, vuesLues: true
+  })
+  // `non_pris` sort aussi : le départ est imminent et personne ne le porte.
+  // Les deux disent une chose différente, et toutes deux sont vraies.
+  assert.deepEqual(l.map(x => x.type), ['non_pris', 'pas_vu'])
+  assert.equal(l.find(x => x.type === 'pas_vu').qui.prenom, 'Lena')
+})
+
+test('une NOTE changée après sa dernière ouverture alerte : « le code a changé »', async () => {
+  // L'attribution est ancienne, mais la consigne vient de bouger — c'est
+  // exactement ce qu'elle doit lire avant d'y aller.
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, porteur: REGINA,
+                       etapes: { pris: '2026-10-01T08:00:00Z' }, noteLe: APRES })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
+})
+
+test('UNE LIGNE PAR PERSONNE, avec son ménage le PLUS PROCHE', async () => {
+  // Trois départs qu'elle n'a pas vus sont un seul coup de téléphone.
+  const l = appeler({
+    menages: [
+      menage({ bookingId: 'b1', date: '2026-10-15', porteur: REGINA, etapes: { pris: APRES } }),
+      menage({ bookingId: 'b2', date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } }),
+      menage({ bookingId: 'b3', date: '2026-10-13', porteur: REGINA, etapes: { pris: APRES } })
+    ],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  const pv = l.filter(x => x.type === 'pas_vu')
+  assert.equal(pv.length, 1, 'une seule ligne pour Régina')
+  assert.equal(pv[0].date, '2026-10-13', 'celle du départ le plus proche')
+  assert.equal(pv[0].nbMenages, 3, 'et elle dit combien il y en a')
+})
+
+test('une PANNE de lecture des ouvertures se TAIT (elle n\'accuse pas toute l\'équipe)', async () => {
+  // Sans ce garde-fou, un timeout PostgREST rendait une carte vide — donc
+  // « aucune ne l'a jamais ouverte », donc une pleine page de rouge.
+  const m = [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })]
+  assert.deepEqual(appeler({ menages: m, vues: {}, vuesLues: false }), [])
+  assert.deepEqual(appeler({ menages: m }), [], 'et sans l\'information du tout, rien non plus')
+})
+
+test('une personne ABSENTE de la carte ne produit rien : son lien n\'existe plus', async () => {
+  // Retirée de l'équipe, la ligne `public_tokens` est supprimée. Annoncer
+  // « page jamais ouverte » sur un lien qui n'existe plus serait faux.
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })],
+    vues: { 'p-lena': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l, [])
+})
+
+test('un jalon INCONNU ne devine pas : pas d\'alerte sur une date qu\'on ignore', async () => {
+  // Un ménage d'office ancien peut n'avoir aucune date d'attribution. Alerter
+  // « elle ne l'a pas vu » accuserait au hasard.
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: {} })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l, [])
+})
+
+test('un ménage DÉJÀ FAIT ne produit pas « pas vu » : elle y est allée', async () => {
+  const l = appeler({
+    menages: [menage({ date: '2026-10-13', porteur: REGINA, fait: true, etapes: { pris: APRES } })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l, [])
+})
+
+test('« pas vu » vaut AUSSI sur un bien non confié : ce n\'est pas une alerte de couverture', async () => {
+  // L'hôte a mis quelqu'un à la main sur un bien qu'il gère lui-même : si
+  // cette personne ne l'a pas lu, le logement sera découvert quand même.
+  const garde = [{ propertyId: '101', gere: false, jours: [] }]
+  const l = appeler({
+    garde, menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
+})
+
+test('le tri place « pas vu » après les alertes de couverture et avant le passé', async () => {
+  const { TYPES } = require('../shared/menages-a-traiter.js')
+  assert.deepEqual(TYPES,
+    ['sans_personnel', 'non_assigne', 'non_pris', 'pas_vu', 'non_termine', 'mauvais_retour'])
+})

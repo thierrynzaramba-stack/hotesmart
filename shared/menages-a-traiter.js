@@ -14,7 +14,10 @@
 
 // L'ordre d'affichage, et l'ordre tout court : ce qui bloque la couverture
 // d'abord, le reproche en dernier (spec §3.1).
-export const TYPES = ['sans_personnel', 'non_assigne', 'non_pris', 'non_termine', 'mauvais_retour']
+// `pas_vu` se place APRES les trois alertes de couverture et AVANT le passe :
+// « personne ne viendra » est plus grave que « quelqu'un viendra peut-etre sans
+// le savoir », qui est plus urgent qu'un depart deja manque.
+export const TYPES = ['sans_personnel', 'non_assigne', 'non_pris', 'pas_vu', 'non_termine', 'mauvais_retour']
 const RANG = Object.fromEntries(TYPES.map((t, i) => [t, i]))
 
 // Un « non pris » n'est une alerte que si personne ne peut plus le prendre,
@@ -39,8 +42,12 @@ function jourPlus (iso, n) {
 // `garde` et `menages` sont ceux de /api/garde ; `biens` donne nom et photo.
 // `maintenant` est injecté (règle du dépôt : un test qui lit l'horloge prend
 // des dates relatives, un test qui injecte le temps prend des dates figées).
+// `vues` est la carte `{ profilId: instant | null }` de /api/garde — null =
+// ce lien n'a jamais ete ouvert, ABSENT = on ne sait rien de cette personne.
+// `vuesLues = false` dit que la lecture a echoue : on se tait alors.
 export function lignesATraiter ({ biens = [], garde = [], menages = [],
-                                  avecAvis = false, aujourdhui, maintenant = Date.now() } = {}) {
+                                  avecAvis = false, aujourdhui, maintenant = Date.now(),
+                                  vues = null, vuesLues = false } = {}) {
   const parBien = new Map(biens.map(b => [String(b.id), b]))
   // ⚠ `gere: false` = AUCUNE prestataire liée à ce bien. Le moteur n'alerte
   // jamais dessus (« alerter à chaque départ noierait les vraies alertes sous
@@ -67,6 +74,10 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
   }
 
   const limiteImminente = jourPlus(aujourdhui, JOURS_IMMINENT)
+  // ─── « Pas vu » : une ligne par PERSONNE, son menage le plus proche ──────
+  // On accumule pendant la boucle, on tranche apres : trois departs qu'elle
+  // n'a pas vus sont un seul coup de telephone.
+  const pasVus = new Map()
   for (const m of menages) {
     const bien = parBien.get(String(m.propertyId))
     const passe = m.date < aujourdhui
@@ -85,6 +96,49 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
         ajouter('mauvais_retour', bien, m.date, { bookingId: String(m.bookingId), qui: m.porteur || null, retour: m.retour })
       }
       continue
+    }
+
+    // ─── Elle ne sait peut-être pas qu'elle doit venir ────────────────────
+    // ⚠ CE N'EST PAS UNE ALERTE DE COUVERTURE, donc elle vaut AUSSI sur un
+    // bien non confié : quelqu'un est dessus, par la main de l'hôte ou par le
+    // moteur, et le logement sera découvert si cette personne ne l'a pas lu.
+    // Trois conditions, toutes nécessaires (décision de Thierry) : elle porte
+    // ou on lui propose · sa dernière ouverture est antérieure à ce qui la
+    // concerne · le départ est à moins de 48 h.
+    //
+    // ⚠ L'IMMINENCE SE COMPTE EN JOURS CALENDAIRES, comme `non_pris` : la
+    // même borne, pour que deux alertes du même écran ne se contredisent pas.
+    // ⚠ UN MENAGE DEJA MARQUE FAIT NE DIT RIEN : elle y est allee, savoir
+    // quand elle a ouvert sa page n'apprend plus rien a personne.
+    if (vuesLues && vues && !m.fait && m.date <= limiteImminente) {
+      for (const q of [m.porteur, ...tour].filter(Boolean)) {
+        const vid = String(q.id || '')
+        // ⚠ ABSENT DE LA CARTE ≠ JAMAIS OUVERTE. Une personne dont on ne lit
+        // pas le lien (retirée de l'équipe, lien supprimé) ne produit aucune
+        // alerte : on n'invente pas une page jamais ouverte sur un lien qui
+        // n'existe plus. Seul un `null` EXPLICITE veut dire « jamais ».
+        if (!vid || !Object.prototype.hasOwnProperty.call(vues, vid)) continue
+        const vueLe = vues[vid]
+        const porte = m.porteur && String(m.porteur.id) === vid
+        // Ce qui la concerne, et dont la date est CONNUE : son attribution
+        // (prise si elle porte, proposition sinon) et la dernière note.
+        const jalons = [porte ? (m.etapes || {}).pris : (m.etapes || {}).propose, m.noteLe]
+          .filter(Boolean).map(x => Date.parse(x)).filter(x => Number.isFinite(x))
+        // ⚠ JAMAIS OUVERTE ALERTE SANS CONDITION DE DATE : c'est le cas le
+        // plus grave, et il n'a aucun jalon à comparer.
+        // ⚠ UN JALON INCONNU NE DEVINE PAS. Un ménage d'office ancien peut
+        // n'avoir aucune date d'attribution : alerter « elle ne l'a pas vu »
+        // sur une date qu'on ne connaît pas accuserait au hasard.
+        const aVoir = vueLe === null || (jalons.length && jalons.some(j => j > Date.parse(vueLe)))
+        if (!aVoir) continue
+        const vu = pasVus.get(vid)
+        if (!vu || m.date < vu.date) {
+          pasVus.set(vid, { qui: q, date: m.date, bien, bookingId: String(m.bookingId),
+                            vueLe, nbMenages: (vu ? vu.nbMenages : 0) + 1 })
+        } else {
+          vu.nbMenages++
+        }
+      }
     }
 
     // ─── À venir ──────────────────────────────────────────────────────────
@@ -110,6 +164,11 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
     // (§13 : « plus de preneur possible » ; revue de c197a10).
     if (m.differe && m.status !== 'orphaned') continue
     ajouter('non_assigne', bien, m.date, { bookingId: String(m.bookingId) })
+  }
+
+  for (const v of pasVus.values()) {
+    ajouter('pas_vu', v.bien, v.date, { bookingId: v.bookingId, qui: v.qui,
+                                        vueLe: v.vueLe, nbMenages: v.nbMenages })
   }
 
   return lignes.sort((a, b) =>
