@@ -328,8 +328,11 @@ function renderApps(activePage) {
       // l'app. Un commentaire n'a rien a faire dans une chaine qui part au
       // navigateur, et surtout pas avec des accents graves dedans.
       subMenu = `
-        <a class="nav-sub ${activePage === 'menages' ? 'connected' : ''}" href="/apps/menages">
+        <a class="nav-sub ${activePage === 'menages' ? 'connected' : ''}" href="/menages">
           <div class="sub-dot ${activePage === 'menages' ? 'green' : 'gray'}"></div>Ménages
+        </a>
+        <a class="nav-sub ${activePage === 'menages-planning' ? 'connected' : ''}" href="/apps/menages">
+          <div class="sub-dot ${activePage === 'menages-planning' ? 'green' : 'gray'}"></div>Réassigner
         </a>
         <a class="nav-sub ${activePage === 'menages-garde' ? 'connected' : ''}" href="/apps/menages/garde">
           <div class="sub-dot ${activePage === 'menages-garde' ? 'green' : 'gray'}"></div>Planning

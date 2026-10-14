@@ -926,12 +926,19 @@ test('sur un jour à PLUSIEURS ménages, la case montre le plus grave', async ()
 // ─── Le nommage du sous-menu (tranché le 5 septembre 2026) ─────────────────
 // (voir aussi le sous-menu « Réservation directe », plus bas)
 
-test('le sous-menu Ménages dit : Ménages · Planning · Prestataires', async () => {
+test('le sous-menu Ménages dit : Ménages · Réassigner · Planning · Prestataires', async () => {
   // ⚠ « Planning » désignait l'écran d'AFFECTATION, et le calendrier de garde
   // s'appelait « Garde » : deux plannings, dont aucun ne portait le mot au bon
   // endroit. Décision du product owner — « Ménages » = ce qu'on fait,
   // « Planning » = le calendrier. Ce test fige l'ordre ET les libellés : un
   // renommage partiel recréerait le doublon qu'on vient de lever.
+  //
+  // ⚠ « RÉASSIGNER » EST NÉ DE L'ÉTAPE 4, ET IL EST TEMPORAIRE (14 octobre
+  // 2026). « Ménages » mène désormais à la page V5 ; l'ancien planning garde
+  // une entrée a lui parce qu'il porte TROIS gestes que la V5 ne reprend pas
+  // encore — « Proposer » (elle confirme), « Retirer la proposition » et
+  // « Retirer (personne) ». Le jour où la fiche ménage V5 les portera, cette
+  // entrée disparaît avec l'écran, et ce test revient à trois libellés.
   const sidebar = require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', 'components/sidebar.js'), 'utf8')
   // ⚠ La borne de fin s'arrete a la BRANCHE SUIVANTE, pas au prochain `return`.
@@ -944,10 +951,14 @@ test('le sous-menu Ménages dit : Ménages · Planning · Prestataires', async (
   const fin = suivante !== -1 ? Math.min(suivante, retour) : retour
   const bloc = sidebar.slice(debut, fin)
   const libelles = [...bloc.matchAll(/><\/div>([A-Za-zÀ-ÿ]+)/g)].map(m => m[1])
-  assert.deepStrictEqual(libelles, ['Ménages', 'Planning', 'Prestataires'])
-  // Et chacun pointe où il faut.
+  assert.deepStrictEqual(libelles, ['Ménages', 'Réassigner', 'Planning', 'Prestataires'])
+  // Et chacun pointe où il faut. « Ménages » mène à la page V5, pas à l'ancien
+  // planning : c'est tout l'objet de l'étape 4.
+  assert.match(bloc, /href="\/menages"/, '« Ménages » mène à la page V5')
+  assert.ok(bloc.indexOf('href="/menages"') < bloc.indexOf('href="/apps/menages"'),
+    '« Ménages » avant « Réassigner »')
   assert.ok(bloc.indexOf('href="/apps/menages"') < bloc.indexOf('href="/apps/menages/garde"'),
-    '« Ménages » avant « Planning »')
+    '« Réassigner » avant « Planning »')
 })
 
 test('les URL n\'ont PAS bougé avec les étiquettes', async () => {

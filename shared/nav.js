@@ -15,7 +15,7 @@
     { id: 'today',      href: '/pages/aujourdhui',          key: 'nav.today',      icon: 'i-today' },
     { id: 'calendar',   href: '/biens',                     key: 'nav.calendar',   icon: 'i-calendar', hrefMobile: '/m/calendrier', domaine: 'reservations' },
     { id: 'messages',   href: '/pages/messages',            key: 'nav.messages',   icon: 'i-message', badge: 'pendingMessages', domaine: 'messages' },
-    { id: 'cleaning',   href: '/apps/menages',              key: 'nav.cleaning',   icon: 'i-cleaning', badge: 'menagesATraiter', domaine: 'menages' },
+    { id: 'cleaning',   href: '/menages',                   key: 'nav.cleaning',   icon: 'i-cleaning', badge: 'menagesATraiter', domaine: 'menages' },
     { id: 'properties', href: '/biens',                     key: 'nav.properties', icon: 'i-home', domaine: 'reservations' },
   ];
 

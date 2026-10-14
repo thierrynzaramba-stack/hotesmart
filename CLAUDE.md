@@ -447,6 +447,42 @@ remplace `rang === 1` partout, proposition posee a l'approche du depart
 sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
 (ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
 
+**LOT MENAGES V5 EN PRODUCTION le 14 octobre 2026 (66064f9).** La page
+`/menages` (bulle « A traiter », calendrier de garde, volet Equipe, fiche
+menage et sa note, fenetre de configuration d'une prestataire a deux onglets)
+et l'ACCUSE DE LECTURE : bouton « Vu » dans la bulle du bien sur la page de la
+prestataire, alerte « Pas vu » chez l'hote, deux relances SMS a 9 h (la veille
+et le jour meme). Migrations `2026-10-14-menage-vu-le` et `-vu-par` appliquees
+staging ET prod, prouvees par `scripts/verifier-migration-menage-vu-le.js`
+(prod : 28 validations rattrapees sur 28, 0 sans auteur).
+
+⚠ **Regle gravee : une validation ne vaut que pour QUI l'a posee**
+(`menages.vu_par = provider_id`). Un menage qui change de main perd la
+validation de la precedente — sinon l'hote lit « A jour » sur quelqu'un qui n'a
+jamais rien lu. C'est la DONNEE qui porte son proprietaire, pas les six chemins
+d'ecriture de `provider_id` qui pensent a la remettre a zero.
+
+⚠ **ETAPE 4 FAITE A MOITIE, ET C'EST DELIBERE.** La navigation principale
+(`shared/nav.js`, `pages/aujourdhui.html`, entree « Menages » de la sidebar)
+mene desormais a `/menages`. Mais **les deux anciens ecrans ne sont PAS
+supprimes** :
+
+- `apps/menages/index.html` porte **TROIS gestes que la V5 ne reprend pas** —
+  « Proposer » (elle confirme, le menage reste chez son porteur), « Retirer la
+  proposition » et « Retirer (personne) ». La fiche V5 ne sait qu'ASSIGNER
+  (`mode: 'assigner'`). Le rediriger ferait perdre le geste par defaut quand le
+  temps le permet : engager quelqu'un sans son accord doit rester explicite.
+  D'ou l'entree « Reassigner » de la sidebar, TEMPORAIRE, qui disparait avec
+  l'ecran le jour ou la fiche V5 portera les trois gestes.
+- `apps/menages/garde.html` est en lecture seule et la V5 le remplace, mais sa
+  suppression emporte **16 garde-fous de rendu** que `tests/garde-endpoint.test.js`
+  tient sur lui (« non confie » pas en rouge, delai en heure de Paris, prenom
+  entier, une seule infobulle, le resize qui ne ramene pas sur aujourd'hui…).
+  Les retransposer vers la V5 un par un est le vrai travail ; un repointage
+  automatique a ete mesure : 16 echecs sur 18.
+- `apps/menages/prestataires.html` reste de toute facon : la saisie de la
+  recurrence A/B y vit encore, atteinte par « Corriger pour elle ».
+
 ## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
 
 **Constat du 13 septembre 2026.** `tests/booking-changes.test.js` (6) et

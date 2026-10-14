@@ -264,7 +264,7 @@ function renderEvenements () {
     // introuvable » (constat de revue). À défaut, la fiche du bien.
     const href = arrivee
       ? (etat.conversations.has(e.bookingId) ? lienConversation(e) : `/biens/${encodeURIComponent(e.bienId)}`)
-      : '/apps/menages'
+      : '/menages'
     // Un code à envoyer porte son geste en toutes lettres (demande de
     // Thierry) ; le bouton ouvre le fil, où l'envoi se valide.
     const fin = e.action
