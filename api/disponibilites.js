@@ -153,7 +153,11 @@ async function lire (res, userId, providerId, moisDemande = null) {
   // — de quoi comprendre ce qui vient de se passer — et tout le futur.
   const plancher = jourMoins(30)
   const { data: exceptions, error: errE } = await supabase.from('provider_availability_exceptions')
-    .select('id, date, available, reason, source')
+    // ⚠ `created_at` SORT AUSSI : la fiche en fait une trace lisible, comme
+    // pour les regles. « Reglé par vous le … » a cote de « Reglé par elle
+    // le … » — meme en-tete, deux sources. L'hote qui decouvre une absence
+    // doit pouvoir dire si elle vient d'elle ou de son propre geste.
+    .select('id, date, available, reason, source, created_at')
     .eq('user_id', userId).eq('provider_id', providerId)
     .gte('date', plancher)
     .order('date', { ascending: true }).limit(LOT_EXCEPTIONS)
@@ -244,14 +248,33 @@ async function lire (res, userId, providerId, moisDemande = null) {
       const iso = d.toISOString().slice(0, 10)
       const conge = congeCouvrant(iso, conges || [])
       const exc = (exceptions || []).find(e => cleJour(e.date) === iso)
+      const dispo = estDisponible(iso, ctx)
       jours.push({
         date: iso,
-        dispo: estDisponible(iso, ctx),
+        dispo,
+        // ⚠ CE QUE LE JOUR VAUDRAIT SI ON RETIRAIT SON EXCEPTION, calcule par
+        // le MEME `estDisponible`. C'est ce qui permet a l'ecran de choisir
+        // entre RETIRER l'exception et en poser une contraire, sans recopier
+        // la regle de precedence dans un navigateur.
+        //
+        // ⚠ ET CE N'EST PAS UN CONFORT. Sans lui, un clic pose toujours une
+        // exception : basculer un jour puis le rebasculer laissait une
+        // exception redondante — un jour fige que plus rien n'explique, et qui
+        // survit au retrait de la recurrence. C'est le defaut que l'ancien
+        // ecran evitait en recalculant la precedence cote client.
+        //
+        // Les conges comptent : ils priment sur tout, exception comprise. Un
+        // jour sous conge vaut donc `false` ici aussi — l'ecran le laisse
+        // inerte, et c'est la verite du moteur.
+        sans_exception: exc ? estDisponible(iso, { ...ctx, exceptions: [] }) : dispo,
         // CE QUI a tranche, pour la legende : un conge se verrouille, une
         // exception porte un point (« regle a la main »), une regle n'a pas
         // besoin d'etre dite.
         conge: conge ? { motif: conge.motif || null, source: conge.source || 'hote' } : null,
-        exception: exc ? { source: exc.source || 'hote' } : null
+        // ⚠ L'IDENTIFIANT SORT : c'est par lui que l'ecran la retire
+        // (`retirerException` n'accepte qu'un id). Sans lui, le second clic ne
+        // pouvait que poser une exception contraire.
+        exception: exc ? { id: exc.id, source: exc.source || 'hote', created_at: exc.created_at || null } : null
       })
       d.setUTCDate(d.getUTCDate() + 1)
     }
@@ -402,10 +425,15 @@ async function poserException (req, res, userId, providerId) {
   // corriger, pas echouer — l'hote corrige ce que la prestataire a declare, et
   // c'est le sens meme de ce reglage.
   const { data, error } = await supabase.from('provider_availability_exceptions')
+    // ⚠ `created_at` EST REPOSE A CHAQUE ECRITURE. La ligne porte UNE decision,
+    // et la trace affiche sa date : sans cela, corriger aujourd'hui une absence
+    // declaree par elle le 2 octobre faisait dire a l'ecran « regle par vous le
+    // 2 octobre » — la source changeait, la date restait celle de l'autre.
     .upsert({ user_id: userId, provider_id: providerId, date: jour,
               available, reason: reason ? String(reason).slice(0, 200) : null,
-              source: 'hote' }, { onConflict: 'provider_id,date' })
-    .select('id, date, available, reason, source')
+              source: 'hote', created_at: new Date().toISOString() },
+            { onConflict: 'provider_id,date' })
+    .select('id, date, available, reason, source, created_at')
     .maybeSingle()
   if (error) {
     console.error('[disponibilites] upsert exception echec', error.message)

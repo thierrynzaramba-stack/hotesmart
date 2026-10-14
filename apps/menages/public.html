@@ -3247,11 +3247,27 @@ if ("serviceWorker" in navigator && !APERCU) {
         const cls = 'dispo-case' + (congeVisible ? ' conge' : (libre ? '' : ' off')) +
                     (j < auj ? ' passe' : '') + (j === auj ? ' auj' : '') +
                     (miens.length ? ' a-moi' : '') +
-                    (exc && exc.source === 'prestataire' ? ' manuel' : '') +
+                    // ⚠ LE POINT MARQUE LES DEUX SOURCES (14 octobre 2026). Il
+                    // ne disait que « c'est moi qui l'ai posee » : un jour
+                    // regle par l'hote s'eteignait donc comme un jour ordinaire
+                    // hors de ses jours habituels, sans aucune marque. Elle
+                    // decouvrait la correction en touchant la case, ou pas du
+                    // tout. UN SEUL point pour les deux — deux points de sens
+                    // different dans 44 px, c'est un point qu'on ne sait plus
+                    // lire — et c'est le TITRE qui dit lequel.
+                    (exc ? ' manuel' : '') +
                     (libres.length || aConfirmer.length ? ' a-prendre' : '')
+        // ⚠ QUI A REGLE CE JOUR-LA. Son employeur peut poser une absence pour
+        // elle, mais aussi lui demander de venir : deux sens, deux phrases —
+        // c'est la meme regle que la feuille du jour, qui le dit en entier.
+        const parLHote = !!(exc && exc.source !== 'prestataire')
         const titre = [
           congeVisible ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
-            : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là')),
+            : (libre
+                ? (parLHote ? 'Venue demandée par votre employeur' : 'Je travaille')
+                : (exc
+                    ? (parLHote ? 'Absence posée par votre employeur' : 'Je suis absente')
+                    : 'Je ne travaille pas ce jour-là')),
           miens.length ? `${miens.length} ménage${miens.length > 1 ? 's' : ''} à moi` : '',
           aConfirmer.length ? `${aConfirmer.length} ménage${aConfirmer.length > 1 ? 's' : ''} à confirmer` : '',
           libres.length ? `${libres.length} ménage${libres.length > 1 ? 's' : ''} à prendre` : '',

@@ -793,6 +793,53 @@ un appelant qui ne passe pas `conges` obtient exactement le verdict d'avant.
   ⚠️ jsdom n'implémente pas `PointerEvent` — les tests dispatchent l'événement par son **type**,
   ce que la page écoute réellement.
 
+### La fiche V5 : le calendrier se touche, et le SENS vient du serveur (14 oct. 2026)
+
+Étape 1 de la reprise des derniers gestes de `apps/menages/prestataires.html` dans
+`pages/menages.html`. Le calendrier deux mois de la fiche était **en lecture** ; il bascule
+désormais un jour au clic — poser une absence pour elle, ou la remettre au travail.
+
+- ⚠️ **`/api/disponibilites` rend `jours[].sans_exception`** : ce que le jour vaudrait **si on
+  retirait son exception**, calculé par le même `estDisponible` que `dispo`. C'est lui qui décide
+  du geste — **retirer** l'exception quand la récurrence dit déjà ce que l'hôte veut, **poser**
+  sinon. Sans ce champ, l'écran pose toujours : un aller-retour laisse une exception redondante,
+  le jour reste figé « à la main », il survit au retrait de la récurrence, et plus rien ne
+  l'explique. L'ancien écran évitait ce défaut en **recalculant la précédence côté client** —
+  exactement ce que la V5 s'interdit (une seconde implémentation finit par contredire le moteur).
+- **Les congés comptent dans `sans_exception`** : ils priment sur tout, exception comprise. Un
+  jour sous congé vaut donc `false` des deux côtés, et son bouton est inerte — la donnée dit la
+  même chose que l'écran.
+- **`jours[].exception` sort avec son `id`** : `retirerException` n'accepte qu'un identifiant.
+  Sans lui, le second clic ne pourrait qu'empiler l'exception contraire.
+- ⚠️ **`poserException` repose `created_at` à chaque écriture.** L'upsert remplace une ligne
+  existante : sans cela, corriger aujourd'hui une absence qu'elle a déclarée il y a deux semaines
+  gardait la date de SA déclaration, et la fiche affichait « Réglé par vous » avec la date de
+  l'autre. La ligne porte UNE décision, et sa date est celle de cette décision.
+- **Deux traces, le même en-tête** (demande de Thierry) : « Réglé par elle · date » et « Réglé par
+  vous · date », au-dessus de la section. Elles lisent les règles **et** les exceptions — depuis
+  que le calendrier se touche, le geste le plus courant de l'hôte est une absence ponctuelle, et
+  une trace qui ne lirait que les récurrences resterait muette après dix clics. ⚠️ **Elle ne dit
+  pas QUI** : les deux tables portent `source`, pas d'auteur — un délégué apparaît donc comme
+  « vous ». Seule la visibilité nomme le sien (`updated_by`).
+- **44 px de cible au doigt** (demande de Thierry) : au téléphone, les deux mois s'empilent en
+  pleine largeur et chaque case prend sa part — 48 px mesurés sur 390 px. Une cible de 32 px avec
+  4 px de gouttière fait rater le jour voisin, et **une absence posée sur le mauvais jour ne se
+  voit pas** : elle se découvre quand personne ne vient.
+- **« Corriger pour elle » reste** tant que la récurrence A/B ne se règle pas ici (étape 2) : le
+  retirer fermerait le seul chemin vers elle.
+
+**Et elle le voit dans son application, sans SMS** (décision de Thierry) : le point du calendrier
+de la PWA marque désormais les exceptions des **deux** sources, et le titre dit laquelle —
+« Absence posée par votre employeur » / « Venue demandée par votre employeur ». Il ne marquait que
+les siennes : un jour réglé par l'hôte s'éteignait comme un jour ordinaire hors de ses jours
+habituels, sans aucune marque. **Un seul point pour les deux** — deux points de sens différent
+dans 44 px, c'est un point qu'on ne sait plus lire — et la feuille du jour dit la phrase entière,
+comme elle le faisait déjà.
+
+⚠️ **Retirer une exception qu'elle a posée ne lui laisse AUCUNE trace** : la ligne est supprimée,
+et l'écriture `source: 'hote'` n'existe que pour ce que l'hôte POSE. C'est une limite connue, pas
+un oubli — le signaler demanderait un journal des gestes, qui n'existe pas sur ces deux tables.
+
 ### L'écran prestataire : « Mes jours de travail » (lot 2b, 15 sept. 2026)
 
 `apps/menages/public.html`, onglet **« Mes jours »**. Le même calendrier sur un an glissant que

@@ -599,3 +599,94 @@ test('un mois HORS PLAGE ne fabrique pas un calendrier vide', async () => {
     assert.ok(res.body.jours.length >= 59, `${mois} : un vrai calendrier, pas une liste vide`)
   }
 })
+
+// ─── LE SENS DU GESTE, QUAND L'HÔTE TOUCHE UN JOUR (étape 1, 14 octobre 2026) ─
+//
+// ⚠ CE QUI EST EN JEU. Depuis que le calendrier de la fiche se touche, l'écran
+// doit choisir entre DEUX gestes contraires : retirer l'exception du jour, ou en
+// poser une à l'envers. La réponse ne se devine pas de `dispo` — qui est l'état
+// FINAL — mais de ce que le jour vaudrait sans son exception. C'est
+// `sans_exception`, calculé par `estDisponible`, le code du moteur.
+//
+// Sans lui, l'écran pose toujours : basculer un jour puis le rebasculer laisse
+// une exception redondante, le jour reste figé « à la main », il survit au
+// retrait de la récurrence, et plus rien à l'écran ne l'explique.
+
+test('sans_exception dit ce que le jour vaudrait SANS son exception', async () => {
+  const { handler } = preparer({
+    // Elle travaille du lundi au vendredi. Le lundi 9 porte une absence posée à
+    // la main : l'état final est « absente », mais la récurrence dit « là ».
+    regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', active: true, source: 'hote' }],
+    exceptions: [{ id: 'e1', date: '2026-11-09', available: false, reason: null,
+                   source: 'hote', created_at: '2026-11-02T08:00:00Z' }]
+  })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  const j = res.body.jours.find(x => x.date === '2026-11-09')
+  assert.strictEqual(j.dispo, false, 'l\'état final : absente')
+  assert.strictEqual(j.sans_exception, true,
+    'mais la récurrence dit « là » — donc la remettre au travail se fait en RETIRANT l\'exception')
+})
+
+test('sans exception, sans_exception vaut l\'état du jour', async () => {
+  // ⚠ L'ÉCRAN S'APPUIE SUR CETTE ÉGALITÉ pour ne jamais tenter un retrait sur
+  // un jour qui n'a rien à retirer : `sans_exception === voulu` est alors
+  // toujours faux, et le geste pose.
+  const { handler } = preparer({
+    regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', active: true, source: 'hote' }]
+  })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  assert.ok(res.body.jours.every(j => j.sans_exception === j.dispo))
+})
+
+test('un jour sous CONGÉ reste indisponible même sans son exception', async () => {
+  // ⚠ LE CONGÉ PRIME SUR TOUT, exception comprise. Si `sans_exception` ignorait
+  // les congés, il rendrait `true` sur un jour verrouillé : l'écran croirait
+  // qu'un retrait suffit à la remettre au travail, et promettrait un geste sans
+  // aucun effet. Le bouton est inerte, et la donnée dit la même chose que lui.
+  const { handler } = preparer({
+    regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', active: true, source: 'hote' }],
+    conges: [{ id: 'c1', debut: '2026-11-09', fin: '2026-11-13', motif: 'Vacances', source: 'prestataire' }],
+    exceptions: [{ id: 'e1', date: '2026-11-10', available: true, reason: null,
+                   source: 'hote', created_at: '2026-11-02T08:00:00Z' }]
+  })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  const j = res.body.jours.find(x => x.date === '2026-11-10')
+  assert.strictEqual(j.dispo, false)
+  assert.strictEqual(j.sans_exception, false, 'le congé tient des deux côtés')
+})
+
+test('l\'exception du jour sort avec son IDENTIFIANT et sa trace', async () => {
+  // ⚠ SANS L'ID, LE RETRAIT EST IMPOSSIBLE : `retirerException` n'accepte qu'un
+  // identifiant, et l'écran ne pourrait que poser l'exception contraire — donc
+  // empiler. Sans `created_at`, la fiche ne sait pas dire « Réglé par vous · le
+  // … » à côté de « Réglé par elle · le … ».
+  const { handler } = preparer({
+    exceptions: [{ id: 'e1', date: '2026-11-09', available: false, reason: null,
+                   source: 'hote', created_at: '2026-11-02T08:00:00Z' }]
+  })
+  const res = reponse()
+  await handler(get({ mois: '2026-11' }), res)
+  const j = res.body.jours.find(x => x.date === '2026-11-09')
+  assert.strictEqual(j.exception.id, 'e1')
+  assert.strictEqual(j.exception.source, 'hote')
+  assert.strictEqual(j.exception.created_at, '2026-11-02T08:00:00Z')
+})
+
+test('poser une exception repose sa DATE DE GESTE', async () => {
+  // ⚠ L'UPSERT REMPLACE UNE LIGNE EXISTANTE. Sans `created_at` dans l'écriture,
+  // corriger aujourd'hui une absence qu'elle a déclarée le 2 octobre laissait la
+  // date du 2 octobre : la fiche affichait « Réglé par vous · 2 octobre » pour
+  // un geste fait à l'instant. La source changeait, la date restait à l'autre.
+  const { handler, etat } = preparer({})
+  const avant = Date.now()
+  await handler(post({ action: 'poserException', date: '2026-11-09', available: false }), reponse())
+  const e = etat.ecritures.find(x => x.table === 'provider_availability_exceptions')
+  assert.strictEqual(e.op, 'upsert')
+  assert.strictEqual(e.row.source, 'hote')
+  assert.ok(e.row.created_at, 'la date du geste part avec l\'écriture')
+  const pose = Date.parse(e.row.created_at)
+  assert.ok(pose >= avant && pose <= Date.now() + 1000, 'et c\'est bien MAINTENANT')
+})

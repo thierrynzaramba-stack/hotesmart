@@ -473,6 +473,8 @@
   "menages.equipe.config.av_a_regler": "Sus días no están definidos: nunca se le propondrá este alojamiento.",
   "menages.equipe.config.ici_titre": "Cuándo está disponible",
   "menages.equipe.config.regle_par_elle": "Definido por ella · {quand}",
+  "menages.equipe.config.regle_par_vous": "Definido por usted · {quand}",
+  "menages.equipe.config.cal_geste": "Toque un día para marcarla ausente, o de vuelta al trabajo.",
   "menages.equipe.config.self_dispo": "Ella declara sus ausencias",
   "menages.equipe.config.self_dispo_aide": "desde su aplicación",
   "menages.equipe.config.self_dispo_illisible": "No se pudo leer este ajuste: no se modificará.",

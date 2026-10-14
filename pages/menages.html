@@ -1705,13 +1705,33 @@ function avertissementBien (l) {
 // ⚠ LA TRACE NE S'AFFICHE QUE SI C'EST ELLE. « Modifié par vous » n'apprend
 // rien à celui qui vient de le faire ; et un SMS se rate, un e-mail se classe —
 // la trace, elle, reste.
+// ⚠ DEUX SOURCES, LE MEME EN-TETE (demande de Thierry, 14 octobre 2026). Un
+// jour peut venir d'elle — depuis son application — ou d'un geste fait ici. La
+// fiche dit les deux : « Réglé par elle · date » et « Réglé par vous · date ».
+//
+// ⚠ ET ELLE COMPTE LES EXCEPTIONS, PAS SEULEMENT LES REGLES. Depuis que le
+// calendrier se touche, le geste le plus courant de l'hôte est une absence
+// ponctuelle : une trace qui ne lirait que les récurrences resterait muette
+// après dix clics.
+//
+// ⚠ LA TRACE DE L'HOTE NE DIT PAS QUI, et c'est une limite assumée : les deux
+// tables portent `source`, pas d'auteur. Un délégué qui règle apparaît donc
+// comme « vous » à l'hôte. Seule la visibilité nomme son auteur (`updated_by`).
 function traceDispo () {
   const regles = ((cfg.dispo || {}).regles || []).filter(r => r.active !== false)
-  const sienne = regles.filter(r => r.source === 'prestataire')
-    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0]
-  if (!sienne || !sienne.created_at) return ''
-  return `<span class="caption muted men-cfg__trace">${esc(
-    t('menages.equipe.config.regle_par_elle', { quand: dateHeure(sienne.created_at) }))}</span>`
+  // ⚠ Les exceptions remontent avec un plancher d'un mois (garde de lecture du
+  // serveur) : un geste plus vieux ne compte plus dans la trace. C'est voulu —
+  // la trace répond à « qui a touché ça récemment ».
+  const excs = ((cfg.dispo || {}).exceptions || [])
+  const dernier = (src) => [...regles, ...excs]
+    .filter(x => (x.source || 'hote') === src)
+    .map(x => x.created_at).filter(Boolean)
+    .sort().pop() || null
+  const ligne = (cle, quand) => quand
+    ? `<span class="caption muted men-cfg__trace">${esc(t(cle, { quand: dateHeure(quand) }))}</span>`
+    : ''
+  return ligne('menages.equipe.config.regle_par_elle', dernier('prestataire')) +
+         ligne('menages.equipe.config.regle_par_vous', dernier('hote'))
 }
 
 function htmlSelfDispo () {
@@ -1769,13 +1789,21 @@ function semaineAncree (ancre) {
   return (semaines(String(ancre).slice(0, 10)) - semaines(AUJOURDHUI)) % 2 === 0
 }
 
-// Le calendrier deux mois, EN LECTURE. ⚠ CHAQUE JOUR VIENT DU SERVEUR, qui
-// l'a calculé avec `estDisponible` — le même code que celui qui décide à qui un
-// ménage est attribué. Rien n'est recalculé ici : un calendrier peint par une
-// seconde implémentation finirait par contredire le moteur.
+// Le calendrier deux mois. ⚠ CHAQUE JOUR VIENT DU SERVEUR, qui l'a calculé
+// avec `estDisponible` — le même code que celui qui décide à qui un ménage est
+// attribué. Rien n'est recalculé ici : un calendrier peint par une seconde
+// implémentation finirait par contredire le moteur.
+//
+// ⚠ ET IL SE TOUCHE (étape 1 du 14 octobre 2026) : un clic pose ou retire une
+// absence ponctuelle pour elle. Le SENS du geste se lit sur `sans_exception`,
+// que le serveur calcule avec ce même `estDisponible` — voir `basculerJour`.
 function htmlCalendrier () {
   const jours = (cfg.dispo || {}).jours
   if (!Array.isArray(jours) || !jours.length) return ''
+  // ⚠ LE MEME DROIT QUE « Corriger pour elle » : quand une prestataire est là
+  // relève de sa gestion (domaine `prestataires`), pas de la consultation du
+  // planning. Sans le droit, le calendrier reste exactement ce qu'il était.
+  const peut = (cfg.fiche.droits || {}).prestataires === 'write'
   const parMois = new Map()
   for (const j of jours) {
     const m = j.date.slice(0, 7)
@@ -1792,7 +1820,8 @@ function htmlCalendrier () {
       const cl = ['men-cfg__jour']
       if (j.dispo) cl.push('is-on')
       if (j.conge) cl.push('is-conge')
-      if (j.date < AUJOURDHUI) cl.push('is-passe')
+      const passe = j.date < AUJOURDHUI
+      if (passe) cl.push('is-passe')
       // Le point = réglé à la main (une exception datée). ⚠ Il ne dit PAS qui :
       // c'est la seule des trois traces qui reste muette là-dessus, et la
       // légende ne prétend pas le contraire.
@@ -1800,8 +1829,22 @@ function htmlCalendrier () {
       const titre = j.conge
         ? t('menages.equipe.config.cal_conge', { motif: j.conge.motif || t('menages.equipe.config.conge_sans_motif') })
         : t(j.dispo ? 'menages.equipe.config.cal_travaille' : 'menages.equipe.config.cal_absente')
-      return `<span class="${cl.join(' ')}" title="${esc(dateLongue(j.date) + ' — ' + titre)}">
-        ${Number(j.date.slice(8, 10))}${point}</span>`
+      // ⚠ TROIS JOURS NE SE TOUCHENT PAS, ET CHACUN POUR SA RAISON :
+      //   — le PASSÉ : rien à y régler, le ménage a eu lieu ou non ;
+      //   — un jour sous CONGÉ : le congé prime sur tout (`estDisponible`), une
+      //     exception posée là ne changerait RIEN et l'écran promettrait un
+      //     geste sans effet. Il se défait par la liste des congés ;
+      //   — sans le droit `prestataires: write`.
+      // Un bouton inerte est `disabled`, pas simplement ignoré : le curseur, le
+      // focus clavier et les lecteurs d'écran le disent alors d'eux-mêmes.
+      const fige = passe || !!j.conge || !peut
+      // ⚠ L'aria-label PORTE LA DATE : « 14 » seul ne désigne rien au lecteur
+      // d'écran, et il y a deux « 14 » dans la fenêtre (deux mois).
+      return `<button type="button" class="${cl.join(' ')}"${fige ? ' disabled' : ''}
+        data-cfg-dispo="${esc(j.date)}" aria-pressed="${j.dispo === true}"
+        title="${esc(dateLongue(j.date) + ' — ' + titre)}"
+        aria-label="${esc(dateLongue(j.date) + ' — ' + titre)}">${
+        Number(j.date.slice(8, 10))}${point}</button>`
     }))
     return `<div class="men-cfg__mois">
       <div class="men-cfg__moisNom">${esc(nomMois(m))}</div>
@@ -1809,11 +1852,17 @@ function htmlCalendrier () {
       <div class="men-cfg__grille">${cases.join('')}</div>
     </div>`
   }
-  const corriger = (cfg.fiche.droits || {}).prestataires === 'write'
+  // ⚠ « Corriger pour elle » RESTE : ses jours habituels (la récurrence A/B) ne
+  // se règlent pas encore ici — c'est l'étape 2. Le retirer avant fermerait le
+  // seul chemin vers eux.
+  const corriger = peut
     ? `<a class="btn btn--secondary men-cfg__corriger" href="/apps/menages/prestataires?presta=${encodeURIComponent(cfg.profilId)}">
          <span data-i18n="menages.equipe.config.corriger"></span></a>`
     : ''
-  return `<div class="men-cfg__cal">${[...parMois].map(([m, l]) => grille(m, l)).join('')}</div>
+  const aide = peut
+    ? `<p class="caption muted men-cfg__aide" data-i18n="menages.equipe.config.cal_geste"></p>`
+    : ''
+  return `${aide}<div class="men-cfg__cal">${[...parMois].map(([m, l]) => grille(m, l)).join('')}</div>
     <div class="men-cfg__legende">
       <span><i class="men-cfg__lg is-on"></i><span data-i18n="menages.equipe.config.cal_travaille"></span></span>
       <span><i class="men-cfg__lg"></i><span data-i18n="menages.equipe.config.cal_absente"></span></span>
@@ -2128,7 +2177,7 @@ function brancherConfig () {
 
   zone.addEventListener('click', (ev) => {
     const el = ev.target.closest('[data-cfg-onglet],[data-cfg-fix],' +
-      '[data-cfg-jour],[data-cfg-self],[data-cfg-parbien],[data-cfg-vu],' +
+      '[data-cfg-jour],[data-cfg-dispo],[data-cfg-self],[data-cfg-parbien],[data-cfg-vu],' +
       '[data-cfg-visibles],[data-cfg-ratio],[data-cfg-sms],[data-cfg-mail],[data-cfg-eval-scope],' +
       '[data-cfg-eval-power],[data-cfg-retirer],[data-cfg-envoyer],[data-cfg-ouvrir],' +
       '[data-cfg-nouveau],[data-cfg-conge-new],[data-cfg-conge-off]')
@@ -2164,6 +2213,9 @@ function brancherConfig () {
         ? { ...b, weekdays: joursApresClic(b, n) } : b))
       return
     }
+
+    // ── Un jour de son calendrier ──
+    if (d.cfgDispo) { basculerJour(d.cfgDispo); return }
 
     // ── Quand elle est là ──
     if ('cfgSelf' in d) {
@@ -2282,6 +2334,39 @@ function brancherConfig () {
     gesteConfig(() => poster('/api/membres',
       { action: 'update', profile_id: cfg.profilId, [vers]: apres }))
   })
+}
+
+// ─── Un jour de son calendrier, basculé par l'hôte ──────────────────────────
+//
+// ⚠ LE SENS DU GESTE VIENT DU SERVEUR. `sans_exception` dit ce que le jour
+// vaudrait si on retirait son exception — calculé par `estDisponible`, le code
+// du moteur. Quand la récurrence dit DÉJÀ ce que l'hôte veut, on RETIRE
+// l'exception au lieu d'en poser une contraire.
+//
+// ⚠ SANS CELA, UN ALLER-RETOUR LAISSE UNE TRACE QUI NE S'EFFACE PLUS : basculer
+// un jour puis le rebasculer empilait deux exceptions redondantes, et le jour
+// restait figé à la main — il survivait au retrait de la récurrence, sans que
+// rien à l'écran ne l'explique. C'est le défaut que l'ancien écran évitait en
+// recalculant la précédence côté client ; ici c'est le serveur qui la dit.
+//
+// ⚠ ET IL N'Y A PAS DE SECOND CALCUL ICI. Recopier « congé > exception > règle »
+// dans la page la ferait diverger du moteur au premier ajustement.
+async function basculerJour (date) {
+  const j = ((cfg.dispo || {}).jours || []).find(x => x.date === date)
+  // Un jour hors du calendrier lu, passé ou sous congé : le bouton est déjà
+  // `disabled`, cette garde est la seconde ligne.
+  if (!j || j.conge || j.date < AUJOURDHUI) return
+  if ((cfg.fiche.droits || {}).prestataires !== 'write') return
+  const voulu = !j.dispo
+  // ⚠ RETIRER DEMANDE UN IDENTIFIANT : `retirerException` n'accepte que l'id, et
+  // sans lui le geste ne pourrait que poser l'exception contraire. S'il manque
+  // (réponse d'un serveur d'avant ce lot), on pose — dégradé, mais juste.
+  const retrait = j.sans_exception === voulu && j.exception && j.exception.id
+  await gesteConfig(() => retrait
+    ? poster('/api/disponibilites',
+      { action: 'retirerException', provider_id: cfg.profilId, id: j.exception.id })
+    : poster('/api/disponibilites',
+      { action: 'poserException', provider_id: cfg.profilId, date: j.date, available: voulu }))
 }
 
 // ─── Son congé, posé par l'hôte ─────────────────────────────────────────────

@@ -989,11 +989,18 @@ body.men-volet-ouvert { overflow: hidden; }
   display: grid; grid-template-columns: repeat(7, 32px); gap: 4px;
 }
 .men-cfg__moisTete { font-size: var(--fs-caption); color: var(--muted); text-align: center; margin-block-end: 6px; }
+/* ⚠ C'EST UN BOUTON depuis l'étape 1 du 14 octobre 2026 : un clic pose ou
+   retire une absence. Les propriétés du bouton natif sont donc remises à zéro —
+   sans quoi la bordure et la police du système reprenaient la main et le
+   calendrier changeait d'aspect. */
 .men-cfg__jour {
   width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
   position: relative; border-radius: var(--radius-pill);
-  font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted);
+  padding: 0; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted);
 }
+/* Passé, sous congé, ou sans le droit : le curseur le dit avant le clic. */
+.men-cfg__jour:disabled { cursor: default; }
 .men-cfg__jour.is-on { background: var(--ok-soft); color: var(--ok); }
 .men-cfg__jour.is-conge {
   background: repeating-linear-gradient(135deg, var(--surface-2) 0 3px, var(--surface) 3px 6px);
@@ -1071,6 +1078,18 @@ body.men-volet-ouvert { overflow: hidden; }
      du bien et prennent toute la largeur, au lieu de se tasser à droite. */
   .men-cfg__cells, .men-cfg__joursTete { grid-template-columns: repeat(7, 1fr); width: 100%; margin-inline: 0; }
   .men-cfg__cell { width: 100%; }
+  /* ⚠ 44 px DE ZONE TAPABLE AU DOIGT (demande de Thierry, 14 octobre 2026).
+     Le calendrier se touche désormais : une cible de 32 px avec 4 px de gouttière
+     fait rater le jour voisin une fois sur trois, et une absence posée sur le
+     mauvais jour ne se voit pas — elle se découvre quand personne ne vient.
+     Les deux mois s'empilent en pleine largeur, et chaque case prend sa part :
+     sur 390 px, une cellule fait ~47 px. `aspect-ratio` garde le rond rond. */
+  .men-cfg__mois { flex: 1 1 100%; min-width: 0; }
+  .men-cfg__moisTete, .men-cfg__grille { grid-template-columns: repeat(7, 1fr); }
+  .men-cfg__jour {
+    width: 100%; height: auto; aspect-ratio: 1; min-height: 44px;
+    font-size: var(--fs-body);
+  }
   /* Les trois gestes du lien en colonne : trois boutons à libellé entier ne
      tiennent pas sur une ligne de 390 px. */
   .men-cfg__lienBtns { flex-direction: column; align-items: stretch; }

@@ -473,6 +473,8 @@
   "menages.equipe.config.av_a_regler": "Ses jours ne sont pas réglés : elle ne sera jamais sollicitée sur ce bien.",
   "menages.equipe.config.ici_titre": "Quand elle est là",
   "menages.equipe.config.regle_par_elle": "Réglé par elle · {quand}",
+  "menages.equipe.config.regle_par_vous": "Réglé par vous · {quand}",
+  "menages.equipe.config.cal_geste": "Touchez un jour pour la déclarer absente, ou la remettre au travail.",
   "menages.equipe.config.self_dispo": "Elle déclare ses absences",
   "menages.equipe.config.self_dispo_aide": "depuis son application",
   "menages.equipe.config.self_dispo_illisible": "Ce réglage n'a pas pu être lu : il ne sera pas modifié.",
