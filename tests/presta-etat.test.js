@@ -14,7 +14,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 
 const { etatDeLaPrestataire, defautDeLaLiaison, formeDesJours,
-        joursAffiches, joursApresClic } = require('../shared/presta-etat.js')
+        joursAffiches, joursApresClic, gesteDuJour } = require('../shared/presta-etat.js')
 
 const BIENS = { 101: 'La bulle', 102: 'Cœur de vie 23', 103: 'Ofuro Futari' }
 const nomDuBien = (id) => (Object.prototype.hasOwnProperty.call(BIENS, id) ? BIENS[id] : null)
@@ -199,4 +199,114 @@ test('une liaison absente ne montre rien et ne casse rien', async () => {
   // Un bien jamais confié à cette personne : il a un menu, pas de jours.
   assert.deepEqual(joursAffiches(null), [])
   assert.deepEqual(joursApresClic(null, 1), [1])
+})
+
+// ─── LE CLIC SUR UN JOUR DE SON CALENDRIER (fiche V5, 14 octobre 2026) ───────
+//
+// ⚠ CE QUI EST EN JEU. Quatre sorties pour un seul clic, et aucune n'était
+// couverte (constat de la revue de fc6c27d). Une sortie inversée pose une
+// absence là où l'hôte voulait une venue — et une absence posée sur le mauvais
+// jour ne se voit pas : elle se découvre quand personne ne vient.
+//
+// Convention des fixtures : `dispo` est l'état FINAL rendu par le serveur,
+// `sans_exception` ce que le jour vaudrait sans son exception.
+
+const AUJ = '2026-11-10'
+const jourDeCal = (o = {}) => ({ date: '2026-11-16', dispo: true, sans_exception: true,
+                                 conge: null, exception: null, ...o })
+
+test('un jour sans exception : on POSE, dans le sens contraire à l\'état', () => {
+  const g = gesteDuJour(jourDeCal({ dispo: true, sans_exception: true }), { aujourdhui: AUJ })
+  assert.deepEqual(g, { action: 'poser', date: '2026-11-16', available: false })
+  const g2 = gesteDuJour(jourDeCal({ dispo: false, sans_exception: false }), { aujourdhui: AUJ })
+  assert.deepEqual(g2, { action: 'poser', date: '2026-11-16', available: true })
+})
+
+test('défaire son PROPRE geste RETIRE l\'exception, au lieu d\'en empiler une', () => {
+  // ⚠ C'EST LA RAISON D'ÊTRE DE `sans_exception`. Sans lui, l'écran poserait une
+  // exception « disponible » par-dessus une récurrence qui dit déjà
+  // « disponible » : le jour resterait figé à la main, survivrait au retrait de
+  // la récurrence, et plus rien ne l'expliquerait.
+  const g = gesteDuJour(jourDeCal({
+    dispo: false, sans_exception: true,
+    exception: { id: 'e1', source: 'hote' }
+  }), { aujourdhui: AUJ })
+  assert.deepEqual(g, { action: 'retirer', id: 'e1' })
+})
+
+test('défaire une absence qu\'ELLE a déclarée POSE, pour qu\'elle le voie', () => {
+  // ⚠ LE GESTE QUI COMPTE LE PLUS : « je sais que tu t'es déclarée absente,
+  // viens quand même ». Retirer sa ligne rendrait le jour à sa récurrence —
+  // sans point, sans phrase dans son application, et sans SMS : elle n'apprend
+  // nulle part qu'on l'attend. On pose par-dessus, au prix d'une exception que
+  // la récurrence dirait déjà.
+  const g = gesteDuJour(jourDeCal({
+    dispo: false, sans_exception: true,
+    exception: { id: 'e1', source: 'prestataire' }
+  }), { aujourdhui: AUJ })
+  assert.deepEqual(g, { action: 'poser', date: '2026-11-16', available: true })
+})
+
+test('le geste CONVERGE : rien ne s\'empile, et la base revient à l\'état nu', () => {
+  // ⚠ CHAQUE CLIC INVERSE L'ÉTAT VISIBLE, et la ligne finit par disparaître.
+  // L'exception que l'hôte pose par-dessus celle de la prestataire est
+  // redondante avec la récurrence : c'est le prix de la trace. Elle ne reste
+  // pas pour autant — deux clics de plus la retirent, sans jamais en empiler
+  // une seconde (la contrainte SQL est d'ailleurs sur `provider_id, date`).
+  //
+  // Elle s'est déclarée absente un jour que sa récurrence travaille.
+  let j = jourDeCal({ dispo: false, sans_exception: true,
+                      exception: { id: 'e1', source: 'prestataire' } })
+  const g1 = gesteDuJour(j, { aujourdhui: AUJ })
+  assert.deepEqual(g1, { action: 'poser', date: '2026-11-16', available: true },
+    '1er clic : on l\'attend — et elle le voit')
+
+  // Le serveur a remplacé : l'exception est celle de l'hôte, le jour est vert.
+  j = jourDeCal({ dispo: true, sans_exception: true,
+                  exception: { id: 'e1', source: 'hote' } })
+  const g2 = gesteDuJour(j, { aujourdhui: AUJ })
+  assert.deepEqual(g2, { action: 'poser', date: '2026-11-16', available: false },
+    '2e clic : il la déclare absente, le geste reste l\'inverse de ce qui est affiché')
+
+  // Et là seulement, défaire son propre geste rend le jour à la récurrence.
+  j = jourDeCal({ dispo: false, sans_exception: true,
+                  exception: { id: 'e1', source: 'hote' } })
+  assert.deepEqual(gesteDuJour(j, { aujourdhui: AUJ }), { action: 'retirer', id: 'e1' },
+    '3e clic : la ligne disparaît, le jour est rendu à sa récurrence')
+})
+
+test('une exception REDONDANTE avec la récurrence se corrige au clic suivant', () => {
+  // État qu'on ne doit plus créer, mais qui existe en base (ancien écran) :
+  // l'exception dit la même chose que la récurrence. Le clic pose la contraire.
+  const g = gesteDuJour(jourDeCal({
+    dispo: true, sans_exception: true,
+    exception: { id: 'e1', source: 'hote' }
+  }), { aujourdhui: AUJ })
+  assert.deepEqual(g, { action: 'poser', date: '2026-11-16', available: false })
+})
+
+test('sans l\'identifiant de l\'exception, on POSE — dégradé, mais juste', () => {
+  // Réponse d'un serveur d'avant ce lot : le retrait est impossible (il n'accepte
+  // qu'un id), poser reste exact.
+  const g = gesteDuJour(jourDeCal({
+    dispo: false, sans_exception: true, exception: { source: 'hote' }
+  }), { aujourdhui: AUJ })
+  assert.equal(g.action, 'poser')
+})
+
+test('un congé, un jour passé, l\'absence de droit : AUCUN geste', () => {
+  // ⚠ LE CONGÉ PRIME SUR TOUT, exception comprise : une exception posée là ne
+  // changerait rien, et l'écran promettrait un geste sans effet.
+  assert.equal(gesteDuJour(jourDeCal({ conge: { motif: 'Vacances' } }), { aujourdhui: AUJ }).motif, 'conge')
+  assert.equal(gesteDuJour(jourDeCal({ date: '2026-11-09' }), { aujourdhui: AUJ }).motif, 'passe')
+  assert.equal(gesteDuJour(jourDeCal(), { aujourdhui: AUJ, peutEcrire: false }).motif, 'sans_droit')
+  assert.equal(gesteDuJour(null, { aujourdhui: AUJ }).motif, 'inconnu')
+  for (const j of [jourDeCal({ conge: {} }), jourDeCal({ date: '2026-11-09' }), null]) {
+    assert.equal(gesteDuJour(j, { aujourdhui: AUJ }).action, 'rien')
+  }
+})
+
+test('AUJOURD\'HUI se touche encore — c\'est demain qui est déjà joué, pas ce soir', () => {
+  const g = gesteDuJour(jourDeCal({ date: AUJ }), { aujourdhui: AUJ })
+  assert.equal(g.action, 'poser')
 })

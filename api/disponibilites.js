@@ -420,6 +420,24 @@ async function poserException (req, res, userId, providerId) {
   if (!jour) return res.status(400).json({ error: 'Date invalide' })
   if (typeof available !== 'boolean') return res.status(400).json({ error: 'Sens de l\'exception manquant' })
 
+  // ⚠ LES MEMES DEUX BORNES QUE `poserConge`, ET POUR LA MEME RAISON.
+  // `lire()` ne rend les exceptions que depuis `gte('date', jourMoins(30))` :
+  // une exception posee plus tot est inseree avec succes, n'apparait dans aucune
+  // reponse, son `id` n'est jamais rendu — et `retirerException`, qui n'accepte
+  // qu'un id, devient inatteignable. Une ligne indelebile, creee par un geste
+  // qui annonce « enregistre ». Par l'autre bout, une date hors de l'horizon de
+  // l'ecran a le meme defaut.
+  // ⚠ LA GARDE ETAIT COTE ECRAN SEULEMENT (un bouton `disabled` sur le passe),
+  // et l'ecran borne en heure LOCALE du navigateur : un hote a UTC-8 a 18 h est
+  // deja le lendemain a Paris. Le serveur, lui, borne en heure de Paris comme
+  // tout ce domaine.
+  if (jour < jourMoins(30)) {
+    return res.status(400).json({ error: 'Cette date est trop ancienne pour être enregistrée' })
+  }
+  if (jour > jourPlus(HORIZON_JOURS)) {
+    return res.status(400).json({ error: 'Cette date est trop loin dans le futur' })
+  }
+
   // ⚠ UNE SEULE DECISION PAR PERSONNE ET PAR JOUR (contrainte SQL). L'upsert
   // remplace : reposer « pas ce samedi » sur un jour deja marque disponible doit
   // corriger, pas echouer — l'hote corrige ce que la prestataire a declare, et

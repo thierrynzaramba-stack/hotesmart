@@ -820,7 +820,10 @@ désormais un jour au clic — poser une absence pour elle, ou la remettre au tr
   que le calendrier se touche, le geste le plus courant de l'hôte est une absence ponctuelle, et
   une trace qui ne lirait que les récurrences resterait muette après dix clics. ⚠️ **Elle ne dit
   pas QUI** : les deux tables portent `source`, pas d'auteur — un délégué apparaît donc comme
-  « vous ». Seule la visibilité nomme le sien (`updated_by`).
+  « vous ». Seule la visibilité nomme le sien (`updated_by`). ⚠️ **Et le plancher du serveur porte
+  sur la DATE de l'exception, pas sur celle du geste** : un geste de l'an dernier sur une date à
+  venir compte dans la trace, un geste d'hier sur une date vieille d'un mois n'y est pas —
+  approximation assumée, ce qui intéresse l'hôte vit dans le futur.
 - **44 px de cible au doigt** (demande de Thierry) : au téléphone, les deux mois s'empilent en
   pleine largeur et chaque case prend sa part — 48 px mesurés sur 390 px. Une cible de 32 px avec
   4 px de gouttière fait rater le jour voisin, et **une absence posée sur le mauvais jour ne se
@@ -830,15 +833,36 @@ désormais un jour au clic — poser une absence pour elle, ou la remettre au tr
 
 **Et elle le voit dans son application, sans SMS** (décision de Thierry) : le point du calendrier
 de la PWA marque désormais les exceptions des **deux** sources, et le titre dit laquelle —
-« Absence posée par votre employeur » / « Venue demandée par votre employeur ». Il ne marquait que
+« Absence posée par votre employeur » / « Venue demandée par votre employeur ». ⚠️ **La phrase vient
+du SENS de l'exception (`available`), pas de l'état final du jour** : `jourTravaille` porte une
+couche d'affichage qui rend « travaillé » tout jour portant un ménage, et choisir la phrase dessus
+annonçait « Venue demandée » sur un jour où l'hôte venait de poser une **absence** — pendant que la
+feuille du même jour disait l'inverse (constat de la revue de fc6c27d). Il ne marquait que
 les siennes : un jour réglé par l'hôte s'éteignait comme un jour ordinaire hors de ses jours
 habituels, sans aucune marque. **Un seul point pour les deux** — deux points de sens différent
 dans 44 px, c'est un point qu'on ne sait plus lire — et la feuille du jour dit la phrase entière,
 comme elle le faisait déjà.
 
-⚠️ **Retirer une exception qu'elle a posée ne lui laisse AUCUNE trace** : la ligne est supprimée,
-et l'écriture `source: 'hote'` n'existe que pour ce que l'hôte POSE. C'est une limite connue, pas
-un oubli — le signaler demanderait un journal des gestes, qui n'existe pas sur ces deux tables.
+⚠️ **ON NE RETIRE QUE LES GESTES DE L'HÔTE** (constat de la revue de fc6c27d). Défaire une absence
+que la **prestataire** a déclarée supprimerait sa ligne : le jour redeviendrait un jour ordinaire de
+sa récurrence — sans point, sans phrase, sans SMS — et elle n'apprendrait **nulle part** qu'on
+l'attend. C'est pourtant le geste qui compte le plus : *« je sais que tu t'es déclarée absente,
+viens quand même »*. On **pose** donc une exception `source: 'hote'` par-dessus la sienne, au prix
+d'une exception que la récurrence dirait déjà — **la trace vaut mieux que la pureté**. Rien ne
+s'empile pour autant (contrainte SQL sur `provider_id, date`) et le cycle converge : poser,
+reposer l'absence, puis retirer rend le jour à sa récurrence.
+
+⚠️ **La table de vérité du clic vit dans `shared/presta-etat.js`** (`gesteDuJour`), comme celle des
+jours confiés — éprouvée sans DOM par `tests/presta-etat.test.js`. La revue l'a relevée : quatre
+sorties pour un seul clic, et rien ne les couvrait. C'est aussi la divergence entre le rendu et le
+clic qui avait déjà inversé un geste sur une liaison vierge (re-revue de e528ca1).
+
+⚠️ **`poserException` borne ses dates comme `poserConge`** (J−30 → J+400). `lire()` ne rend les
+exceptions que depuis `jourMoins(30)` : une exception posée plus tôt était insérée avec succès,
+n'apparaissait dans aucune réponse, et `retirerException` — qui n'accepte qu'un `id` — devenait
+inatteignable. Une ligne indélébile, créée par un geste qui annonce « enregistré ». La garde ne
+vivait que dans l'écran, **en heure locale du navigateur** : un hôte à UTC−8 à 18 h est déjà le
+lendemain à Paris.
 
 ### L'écran prestataire : « Mes jours de travail » (lot 2b, 15 sept. 2026)
 

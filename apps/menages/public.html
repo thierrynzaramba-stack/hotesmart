@@ -118,8 +118,12 @@
     .dispo-case.inerte { cursor: not-allowed; }
     .dispo-case.passe:not(.inerte), .dispo-case.conge:not(.inerte) { cursor: pointer; }
     .dispo-case.auj { box-shadow: inset 0 0 0 2px var(--primary); }
-    /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « cette absence, c'est
-       moi qui l'ai posee » ; le lot 2 en a introduit d'autres, verts et centres
+    /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « ce jour-la a ete
+       regle a la main » — par elle OU par son employeur depuis le 14 octobre
+       2026 ; le TITRE de la case dit lequel des deux, et UN SEUL point sert aux
+       deux sources : deux points de sens different dans 44 px, c'est un point
+       qu'on ne sait plus lire. */
+    /* ⚠ ET IL RESTE SEUL DE SON ESPECE ICI ; le lot 2 en a introduit d'autres, verts et centres
        sous le numero, qui disent « j'ai un menage ». Deux points de sens
        different dans 44 px, c'est un seul point qu'on ne sait plus lire. Et sans
        `left`, celui-ci suivait le flux — donc bougeait au passage de la case en
@@ -3261,13 +3265,22 @@ if ("serviceWorker" in navigator && !APERCU) {
         // elle, mais aussi lui demander de venir : deux sens, deux phrases —
         // c'est la meme regle que la feuille du jour, qui le dit en entier.
         const parLHote = !!(exc && exc.source !== 'prestataire')
+        // ⚠ LA PHRASE DE L'HOTE VIENT DU SENS DE SON EXCEPTION, PAS DE L'ETAT
+        // FINAL DU JOUR. `libre` porte la couche d'affichage de
+        // `jourTravaille` : un jour qui porte un menage est « travaille » quoi
+        // qu'en disent les regles. Choisir la phrase dessus annoncait « Venue
+        // demandee par votre employeur » sur un jour ou l'hote venait au
+        // contraire de poser une ABSENCE, parce qu'un menage y etait deja
+        // attribue — et la feuille du meme jour, qui lit `e.available`, disait
+        // l'inverse. Deux ecrans de la meme application qui se contredisent.
+        // La contradiction entre « absente » et un menage attribue, elle, est
+        // REELLE : elle se lit alors dans la suite du titre, et c'est ce qu'elle
+        // doit voir.
         const titre = [
           congeVisible ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
-            : (libre
-                ? (parLHote ? 'Venue demandée par votre employeur' : 'Je travaille')
-                : (exc
-                    ? (parLHote ? 'Absence posée par votre employeur' : 'Je suis absente')
-                    : 'Je ne travaille pas ce jour-là')),
+            : (parLHote
+                ? (exc.available ? 'Venue demandée par votre employeur' : 'Absence posée par votre employeur')
+                : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là'))),
           miens.length ? `${miens.length} ménage${miens.length > 1 ? 's' : ''} à moi` : '',
           aConfirmer.length ? `${aConfirmer.length} ménage${aConfirmer.length > 1 ? 's' : ''} à confirmer` : '',
           libres.length ? `${libres.length} ménage${libres.length > 1 ? 's' : ''} à prendre` : '',

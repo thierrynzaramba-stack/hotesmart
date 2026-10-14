@@ -161,7 +161,7 @@ import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
 import { bandeJoursHtml, classesWE as classesWEDuJour } from '/shared/bande-jours.js'
 import { lignesATraiter, nonVuPar, limiteDeLImminence } from '/shared/menages-a-traiter.js'
-import { etatDeLaPrestataire, defautDeLaLiaison, joursAffiches, joursApresClic } from '/shared/presta-etat.js'
+import { etatDeLaPrestataire, defautDeLaLiaison, joursAffiches, joursApresClic, gesteDuJour } from '/shared/presta-etat.js'
 import { hsBus } from '/shared/hs-bus.js'
 import { brancherReordonnancement } from '/shared/reordonner-biens.js'
 
@@ -1719,9 +1719,12 @@ function avertissementBien (l) {
 // comme « vous » à l'hôte. Seule la visibilité nomme son auteur (`updated_by`).
 function traceDispo () {
   const regles = ((cfg.dispo || {}).regles || []).filter(r => r.active !== false)
-  // ⚠ Les exceptions remontent avec un plancher d'un mois (garde de lecture du
-  // serveur) : un geste plus vieux ne compte plus dans la trace. C'est voulu —
-  // la trace répond à « qui a touché ça récemment ».
+  // ⚠ LE PLANCHER DU SERVEUR PORTE SUR LA DATE DE L'EXCEPTION, PAS SUR CELLE DU
+  // GESTE (`gte('date', jourMoins(30))`). Un geste fait il y a six mois sur une
+  // date à venir compte donc dans la trace, et un geste d'hier sur une date
+  // vieille de plus d'un mois n'y est pas. C'est une approximation assumée : la
+  // trace répond à « qui a touché ses jours », et ce qui intéresse l'hôte vit
+  // dans le futur. La borner sur `created_at` demanderait une seconde lecture.
   const excs = ((cfg.dispo || {}).exceptions || [])
   const dernier = (src) => [...regles, ...excs]
     .filter(x => (x.source || 'hote') === src)
@@ -2353,20 +2356,21 @@ function brancherConfig () {
 // dans la page la ferait diverger du moteur au premier ajustement.
 async function basculerJour (date) {
   const j = ((cfg.dispo || {}).jours || []).find(x => x.date === date)
-  // Un jour hors du calendrier lu, passé ou sous congé : le bouton est déjà
-  // `disabled`, cette garde est la seconde ligne.
-  if (!j || j.conge || j.date < AUJOURDHUI) return
-  if ((cfg.fiche.droits || {}).prestataires !== 'write') return
-  const voulu = !j.dispo
-  // ⚠ RETIRER DEMANDE UN IDENTIFIANT : `retirerException` n'accepte que l'id, et
-  // sans lui le geste ne pourrait que poser l'exception contraire. S'il manque
-  // (réponse d'un serveur d'avant ce lot), on pose — dégradé, mais juste.
-  const retrait = j.sans_exception === voulu && j.exception && j.exception.id
-  await gesteConfig(() => retrait
+  // ⚠ LA TABLE DE VÉRITÉ EST DANS LE MODULE (`shared/presta-etat.js`), comme
+  // celle des jours confiés : c'est la divergence entre le rendu et le clic qui
+  // avait déjà inversé un geste sur une liaison vierge (re-revue de e528ca1).
+  // Les quatre sorties y sont éprouvées sans DOM.
+  const geste = gesteDuJour(j, { aujourdhui: AUJOURDHUI,
+    peutEcrire: (cfg.fiche.droits || {}).prestataires === 'write' })
+  // Jour passé, sous congé, hors du calendrier lu, ou sans le droit : le bouton
+  // est déjà `disabled`, ceci est la seconde ligne.
+  if (geste.action === 'rien') return
+  await gesteConfig(() => geste.action === 'retirer'
     ? poster('/api/disponibilites',
-      { action: 'retirerException', provider_id: cfg.profilId, id: j.exception.id })
+      { action: 'retirerException', provider_id: cfg.profilId, id: geste.id })
     : poster('/api/disponibilites',
-      { action: 'poserException', provider_id: cfg.profilId, date: j.date, available: voulu }))
+      { action: 'poserException', provider_id: cfg.profilId,
+        date: geste.date, available: geste.available }))
 }
 
 // ─── Son congé, posé par l'hôte ─────────────────────────────────────────────

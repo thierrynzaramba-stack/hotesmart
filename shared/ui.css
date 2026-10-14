@@ -900,10 +900,17 @@ body.men-volet-ouvert { overflow: hidden; }
 .men-cfg__corps.is-occupe { opacity: 0.6; pointer-events: none; }
 .men-cfg__sec { padding: var(--gap-m) var(--gap-l); border-block-start: 1px solid var(--line); }
 .men-cfg__sec:first-child { border-block-start: 0; }
-.men-cfg__secTete { display: flex; align-items: center; gap: var(--gap-s); }
+/* ⚠ LES TRACES PASSENT A LA LIGNE PLUTOT QUE DE SE TASSER. Depuis le
+   14 octobre 2026 l'en-tete peut porter DEUX traces — « Réglé par elle » et
+   « Réglé par vous ». Sans `flex-wrap`, trois elements se partageaient une
+   rangee de 390 px et les deux dates se comprimaient ; et avec `auto` sur
+   chacune, l'espace libre se repartissait entre les deux marges, si bien que la
+   premiere ne collait plus a droite. Seule la PREMIERE pousse, les suivantes la
+   suivent. */
+.men-cfg__secTete { display: flex; align-items: center; gap: var(--gap-s); flex-wrap: wrap; }
 .men-cfg__h3 { margin: 0 0 4px; font-size: var(--fs-h2); font-weight: var(--fw-bold); }
 .men-cfg__aide { margin: 0 0 10px; }
-.men-cfg__trace { margin-inline-start: auto; }
+.men-cfg__trace:first-of-type { margin-inline-start: auto; }
 .men-cfg__pied {
   display: flex; align-items: center; gap: 8px; flex: none;
   padding: 12px var(--gap-l); border-block-start: 1px solid var(--line);

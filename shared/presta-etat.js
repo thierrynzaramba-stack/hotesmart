@@ -137,3 +137,44 @@ export function etatDeLaPrestataire ({ liaisons = [], nomDuBien = () => null } =
   const motif = biensEnDefaut.every(b => b.defaut === 'aucun_jour') ? 'aucun_jour' : 'jours_a_regler'
   return { etat: 'rien', motif, biens, biensEnDefaut, action: 'jours' }
 }
+
+// ─── UN JOUR DE SON CALENDRIER, TOUCHE PAR L'HOTE (14 octobre 2026) ──────────
+//
+// ⚠ LA TABLE DE VERITE VIT ICI, PAS DANS LA PAGE. Quatre sorties pour un seul
+// clic — poser une absence, poser une venue, retirer ce que l'hote avait pose,
+// ne rien faire — et la revue de fc6c27d l'a relevee : rien ne la couvrait. A
+// l'etape 2 (la recurrence A/B dans la V5), une refonte du calendrier peut en
+// inverser une sans qu'aucun test ne bouge, et « une absence posee sur le
+// mauvais jour ne se voit pas : elle se decouvre quand personne ne vient ».
+//
+// ⚠ LE SENS VIENT DU SERVEUR, PAS D'UN CALCUL D'ECRAN. `jour.sans_exception`
+// dit ce que le jour vaudrait si on retirait son exception — calcule par
+// `estDisponible`, le code du moteur. Quand la recurrence dit DEJA ce que
+// l'hote veut, on RETIRE au lieu d'empiler une exception redondante.
+//
+// ⚠ ON NE RETIRE QUE LES GESTES DE L'HOTE. Defaire une absence que la
+// PRESTATAIRE a declaree supprimerait sa ligne : le jour redeviendrait un jour
+// ordinaire de sa recurrence, sans point et sans phrase dans son application, et
+// elle n'apprendrait nulle part qu'on l'attend. C'est pourtant le geste qui
+// compte le plus — « je sais que tu t'es declaree absente, viens quand meme ».
+// On pose donc par-dessus, au prix d'une exception que la recurrence dirait
+// deja : la trace vaut mieux que la purete.
+export function gesteDuJour (jour, { aujourdhui = null, peutEcrire = true } = {}) {
+  if (!jour || !jour.date) return { action: 'rien', motif: 'inconnu' }
+  if (!peutEcrire) return { action: 'rien', motif: 'sans_droit' }
+  // ⚠ Le conge PRIME sur tout, exception comprise : une exception posee la ne
+  // changerait rien, et l'ecran promettrait un geste sans effet. Il se defait
+  // par la liste des conges.
+  if (jour.conge) return { action: 'rien', motif: 'conge' }
+  if (aujourdhui && String(jour.date) < String(aujourdhui)) return { action: 'rien', motif: 'passe' }
+
+  const voulu = jour.dispo !== true
+  const exc = jour.exception || null
+  const sienne = !!(exc && exc.source === 'prestataire')
+  // ⚠ RETIRER DEMANDE UN IDENTIFIANT : le serveur n'accepte que l'id. S'il
+  // manque — reponse d'un serveur d'avant ce lot — on pose : degrade, mais juste.
+  if (jour.sans_exception === voulu && exc && exc.id && !sienne) {
+    return { action: 'retirer', id: exc.id }
+  }
+  return { action: 'poser', date: jour.date, available: voulu }
+}

@@ -249,6 +249,12 @@ test('une exception, elle, se supprime — et sous les mêmes filtres', async ()
 
 // ─── Les exceptions ────────────────────────────────────────────────────────
 
+// ⚠ DATE RELATIVE, ET C'EST LA RÈGLE DU DÉPÔT : ce chemin LIT L'HORLOGE depuis
+// que `poserException` borne les dates (J−30 → J+400). Une fixture figée au
+// 12 septembre 2026 passait à l'écriture de ce test et refusait un mois plus
+// tard — la cinquième famille de rouges calendaires, évitée à sa source.
+const dansNJours = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
+
 test('une exception se pose dans les DEUX sens, et remplace la précédente', async () => {
   // ⚠ Une seule décision par personne et par jour (contrainte SQL) : reposer
   // « pas ce samedi » sur un jour marqué disponible doit CORRIGER, pas échouer —
@@ -256,7 +262,7 @@ test('une exception se pose dans les DEUX sens, et remplace la précédente', as
   for (const available of [true, false]) {
     const { handler, etat } = preparer({})
     const res = reponse()
-    await handler(post({ action: 'poserException', date: '2026-09-12', available }), res)
+    await handler(post({ action: 'poserException', date: dansNJours(7), available }), res)
     assert.strictEqual(res.code, 200)
     const e = etat.ecritures.find(x => x.op === 'upsert')
     assert.strictEqual(e.row.available, available)
@@ -689,4 +695,29 @@ test('poser une exception repose sa DATE DE GESTE', async () => {
   assert.ok(e.row.created_at, 'la date du geste part avec l\'écriture')
   const pose = Date.parse(e.row.created_at)
   assert.ok(pose >= avant && pose <= Date.now() + 1000, 'et c\'est bien MAINTENANT')
+})
+
+test('une exception HORS DE PORTÉE de l\'écran est refusée, des deux côtés', async () => {
+  // ⚠ UNE LIGNE QU'ON NE POURRA NI VOIR NI RETIRER. `lire()` ne rend les
+  // exceptions que depuis `gte('date', jourMoins(30))` : une exception posée
+  // plus tôt est insérée avec succès, n'apparaît dans aucune réponse, son `id`
+  // n'est jamais rendu — et `retirerException`, qui n'accepte qu'un id, devient
+  // inatteignable. Une ligne indélébile, créée par un geste qui annonce
+  // « enregistré ». `poserConge` portait déjà les deux gardes ; celui-ci non.
+  // ⚠ ET LA GARDE ÉTAIT CÔTE ÉCRAN SEULEMENT, en heure LOCALE du navigateur :
+  // un hôte à UTC−8 à 18 h est déjà le lendemain à Paris.
+  for (const date of [dansNJours(-31), dansNJours(-400), dansNJours(401)]) {
+    const { handler, etat } = preparer({})
+    const res = reponse()
+    await handler(post({ action: 'poserException', date, available: false }), res)
+    assert.strictEqual(res.code, 400, date)
+    assert.strictEqual(etat.ecritures.length, 0, `${date} : rien n'est écrit`)
+  }
+  // Et la fenêtre utile reste ouverte — hier, aujourd'hui, dans un an.
+  for (const date of [dansNJours(-1), dansNJours(0), dansNJours(365)]) {
+    const { handler } = preparer({})
+    const res = reponse()
+    await handler(post({ action: 'poserException', date, available: false }), res)
+    assert.strictEqual(res.code, 200, date)
+  }
 })
