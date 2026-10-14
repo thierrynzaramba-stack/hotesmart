@@ -13,8 +13,8 @@
 const test = require('node:test')
 const assert = require('node:assert/strict')
 
-const { etatDeLaPrestataire, defautDeLaLiaison, formeDesJours } =
-  require('../shared/presta-etat.js')
+const { etatDeLaPrestataire, defautDeLaLiaison, formeDesJours,
+        joursAffiches, joursApresClic } = require('../shared/presta-etat.js')
 
 const BIENS = { 101: 'La bulle', 102: 'Cœur de vie 23', 103: 'Ofuro Futari' }
 const nomDuBien = (id) => (Object.prototype.hasOwnProperty.call(BIENS, id) ? BIENS[id] : null)
@@ -149,4 +149,54 @@ test('rang 3 existant se LIT, meme si l\'ecran n\'en propose que deux', async ()
   // liaison deja posee en rang 3.
   assert.equal(etat([lien({ rang: 3 })]).biens[0].rang, 3)
   assert.equal(etat([lien({ rang: null })]).biens[0].rang, 1, 'un rang absent vaut 1')
+})
+
+// ─── Ce que l'écran montre, et ce qu'un clic en fait ────────────────────────
+//
+// ⚠ LE DÉFAUT QUE CES TESTS FERMENT (re-revue de e528ca1). `weekdays = null` se
+// peint de deux façons — sept cases pleines sur un bien d'office, sept cases
+// vides sur un bien proposé — et le rendu et le gestionnaire de clic en
+// avaient chacun leur idée. Les cases étaient peintes vides, le clic partait de
+// « tous les jours » pour en retirer un : cliquer lundi envoyait « tous les
+// jours SAUF lundi », l'inverse exact du geste, sur le réglage même qui bloque.
+
+test('d\'office sans jours : l\'écran montre SEPT jours, et un clic en retire un', async () => {
+  const l = lien({ weekdays: null, requires_ack: false })
+  assert.deepEqual(joursAffiches(l), [0, 1, 2, 3, 4, 5, 6], 'elle les reçoit vraiment tous')
+  assert.deepEqual(joursApresClic(l, 1), [0, 2, 3, 4, 5, 6], 'le lundi sort')
+})
+
+test('PROPOSÉ sans jours : l\'écran ne montre RIEN, et un clic AJOUTE', async () => {
+  // Le cas Lola : elle ne sera jamais sollicitée tant que ses jours ne sont pas
+  // réglés. Le premier clic doit donc poser CE jour, et lui seul.
+  const l = lien({ weekdays: null, requires_ack: true })
+  assert.deepEqual(joursAffiches(l), [], 'rien n\'est réglé, et l\'écran le montre')
+  assert.deepEqual(joursApresClic(l, 1), [1], 'cliquer lundi lui confie le lundi')
+  assert.notDeepEqual(joursApresClic(l, 1), [0, 2, 3, 4, 5, 6], 'surtout pas l\'inverse')
+})
+
+test('une liste existante se modifie, et reste triée', async () => {
+  const l = lien({ weekdays: [3, 1] })
+  assert.deepEqual(joursAffiches(l), [1, 3])
+  assert.deepEqual(joursApresClic(l, 6), [1, 3, 6])
+  assert.deepEqual(joursApresClic(l, 3), [1])
+})
+
+test('`[]` reste `[]` : « aucun jour » est un choix, pas une absence de choix', async () => {
+  const l = lien({ weekdays: [] })
+  assert.deepEqual(joursAffiches(l), [])
+  assert.deepEqual(joursApresClic(l, 2), [2], 'et le premier clic le rouvre')
+})
+
+test('un jour hors bornes n\'entre jamais dans la liste', async () => {
+  // La convention du moteur est 0-6 ; un huitième jour viendrait d'un défaut
+  // d'écran, et le serveur le refuserait — autant ne pas l'envoyer.
+  assert.deepEqual(joursApresClic(lien({ weekdays: [2] }), 9), [2])
+  assert.deepEqual(joursApresClic(lien({ weekdays: [2] }), -1), [2])
+})
+
+test('une liaison absente ne montre rien et ne casse rien', async () => {
+  // Un bien jamais confié à cette personne : il a un menu, pas de jours.
+  assert.deepEqual(joursAffiches(null), [])
+  assert.deepEqual(joursApresClic(null, 1), [1])
 })

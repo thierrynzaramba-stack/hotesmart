@@ -339,7 +339,8 @@ test('config : l\'état « À jour » ne se conclut pas sur une lecture manquant
   const i = src.indexOf('function vueHtml')
   assert.ok(i > 0)
   const corps = src.slice(i, i + 900)
-  assert.ok(corps.includes('if (!etat.bulleLue) return'))
+  assert.ok(corps.includes('if (!etat.bulleLue || etat.aTraiterTronque) return'),
+    'ni sur une lecture TRONQUÉE : un vert conclu sur une liste coupée est le même mensonge')
   assert.ok(corps.includes('etat.menagesBulle'),
     'et la fenêtre lue est celle de la bulle, pas le planning que l\'hôte fait varier')
 })

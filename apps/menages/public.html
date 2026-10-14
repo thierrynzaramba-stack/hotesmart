@@ -473,7 +473,7 @@
        vient voir. Le segment « Disponible / Pas disponible », lui, écrit : il
        disparaît, plutôt que d'échouer en « Connexion impossible » et de faire
        croire à l'hôte que son réseau est en panne. */
-    .apercu [data-dispo] { display: none !important; }
+    .apercu [data-dispo], .apercu #btn-reglages { display: none !important; }
     .apercu #news-close { display: none !important; }
     .apercu .sync-banner { display: none !important; }
     .apercu .apercu-bandeau { display: flex; }
@@ -828,7 +828,18 @@ if (APERCU) {
         get length () { return memoire.size }
       }
     })
-  } catch (e) { console.warn('[apercu] stockage local non neutralise', e) }
+  } catch (e) {
+    // ⚠ UN GARDE DE SÉCURITÉ QUI NE PEUT PAS SE POSER ARRÊTE LA PAGE, il ne la
+    // laisse pas tourner (constat de la re-revue de e528ca1). Sans cela, un
+    // navigateur où `localStorage` n'est pas redéfinissable ramenait le défaut
+    // d'origine EN SILENCE : les données de travail de la prestataire écrites
+    // dans le stockage de l'hôte, et le miroir de ses ménages faits écrasé.
+    console.error('[apercu] stockage local non neutralise — cadre refuse', e)
+    document.documentElement.innerHTML =
+      '<body style="font:14px system-ui;padding:24px;text-align:center;color:#C13515">' +
+      'Aperçu impossible sur ce navigateur.</body>'
+    throw e
+  }
   const vraiFetch = window.fetch.bind(window)
   window.fetch = (url, options) => {
     const m = String((options && options.method) || 'GET').toUpperCase()
@@ -4157,6 +4168,12 @@ if ("serviceWorker" in navigator && !APERCU) {
   ;(() => {
     const zone = document.getElementById('dispo-months')
     zone.addEventListener('pointerdown', e => {
+      // ⚠ EN APERÇU, L'APPUI LONG N'EXISTE PAS (constat de la re-revue de
+      // e528ca1). C'est un geste d'ÉCRITURE : le garde sur `fetch` le refuse
+      // bien, mais trop tard — la sélection est déjà peinte et l'hôte lit
+      // « pas enregistré », comme si son réseau était en panne. On ne propose
+      // pas un geste dont on sait qu'il sera refusé.
+      if (APERCU) return
       if (e.button > 0 || !mesJours || !mesJours.modifiable) return
       // ⚠ UN SECOND DOIGT NE RELANCE RIEN : il ne termine pas non plus la
       // selection du premier (filtre par `pointerId` plus bas).

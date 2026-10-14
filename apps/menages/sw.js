@@ -46,20 +46,28 @@ self.addEventListener('fetch', (event) => {
   // Storage, et il y reste. Le cas qui l'a fait voir : l'hote ouvre la page de
   // sa prestataire dans un cadre (mode apercu), sur un navigateur ou CE service
   // worker est deja installe — le scope l'intercepte, et le jeton d'une tierce
-  // personne atterrit dans le cache de l'hote. Ne rien cacher ici ne coute
-  // rien : le repli hors ligne sert `./public.html` (sans parametre), et le
-  // jeton est relu depuis le stockage local.
-  if (req.url.includes('token=') || req.url.includes('apercu=1')) {
-    return;
-  }
+  // personne atterrit dans le cache de l'hote.
+  //
+  // ⚠ ON NE CACHE PAS, MAIS ON REPOND QUAND MEME. Un `return` sec rendait la
+  // main au navigateur : il supprimait du meme coup le REPLI HORS LIGNE pour
+  // ces URL — c'est-a-dire pour TOUTES les navigations de la prestataire, dont
+  // le `start_url` de sa PWA installee, qui porte toujours son jeton. Le mode
+  // hors ligne, qui est la raison d'etre de cette application, tombait a 100 %
+  // des lancements (constat de la re-revue de e528ca1). Le repli sert
+  // `./public.html` — la coquille sans parametre, deja en cache — et le jeton
+  // est relu depuis le stockage local.
+  const avecJeton = req.url.includes('token=') || req.url.includes('apercu=1');
   // Pour les autres ressources (HTML/CSS/JS/icones): network-first
   event.respondWith(
     fetch(req)
       .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_VERSION).then((cache) => cache.put(req, copy));
+        if (!avecJeton) {
+          const copy = res.clone();
+          caches.open(CACHE_VERSION).then((cache) => cache.put(req, copy));
+        }
         return res;
       })
-      .catch(() => caches.match(req).then((cached) => cached || caches.match('./public.html')))
+      .catch(() => caches.match(avecJeton ? './public.html' : req)
+        .then((cached) => cached || caches.match('./public.html')))
   );
 });

@@ -46,6 +46,34 @@ export function defautDeLaLiaison (l) {
   return null
 }
 
+// ⚠ CE QUE L'ECRAN MONTRE, ET CE QU'UN CLIC EN FAIT : UNE SEULE SOURCE.
+// `weekdays = null` se peint de DEUX facons, et c'est la que le defaut s'est
+// loge (re-revue de e528ca1) :
+//   - sur un bien ATTRIBUE D'OFFICE, les sept cases sont PLEINES — elle les
+//     recoit vraiment tous, la valeur ne bloque rien ;
+//   - sur un bien PROPOSE, elles sont VIDES — « ses jours ne sont pas regles »,
+//     la file ne la sollicitera jamais.
+// Le rendu et le gestionnaire de clic en avaient chacun leur idee : les cases
+// etaient peintes vides, et le clic partait de « tous les jours » pour en
+// retirer un. Cliquer lundi envoyait donc « tous les jours SAUF lundi » —
+// l'inverse exact du geste, sur le reglage meme qui bloque.
+export function joursAffiches (l) {
+  if (!l) return []
+  if (Array.isArray(l.weekdays)) return [...l.weekdays].sort((a, b) => a - b)
+  // `null` : plein si elle recoit vraiment tout, vide si rien ne partira.
+  return l.requires_ack === false ? [0, 1, 2, 3, 4, 5, 6] : []
+}
+
+// L'etat APRES un clic sur `jour`, a partir de ce que l'ecran montrait.
+export function joursApresClic (l, jour) {
+  const n = Number(jour)
+  const jours = joursAffiches(l)
+  const i = jours.indexOf(n)
+  if (i >= 0) jours.splice(i, 1)
+  else if (Number.isInteger(n) && n >= 0 && n <= 6) jours.push(n)
+  return jours.sort((a, b) => a - b)
+}
+
 // Quelle FORME prennent ses jours, pour une phrase lisible. Rend une cle, pas
 // une phrase : `tous`, `weekend`, `semaine`, ou `liste` (avec les jours).
 export function formeDesJours (jours) {

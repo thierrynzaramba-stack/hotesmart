@@ -161,7 +161,7 @@ import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
 import { bandeJoursHtml, classesWE as classesWEDuJour } from '/shared/bande-jours.js'
 import { lignesATraiter, nonVuPar } from '/shared/menages-a-traiter.js'
-import { etatDeLaPrestataire, defautDeLaLiaison } from '/shared/presta-etat.js'
+import { etatDeLaPrestataire, defautDeLaLiaison, joursAffiches, joursApresClic } from '/shared/presta-etat.js'
 import { hsBus } from '/shared/hs-bus.js'
 import { brancherReordonnancement } from '/shared/reordonner-biens.js'
 
@@ -1423,7 +1423,10 @@ function vueHtml (p) {
   // ⚠ ON NE CONCLUT RIEN SANS AVOIR LU. « Aucun ménage connu » et « la lecture
   // n'a pas eu lieu » se ressemblent dans un tableau vide, et seul le second
   // interdit de dire « À jour » (constat de la revue de 6d007f3).
-  if (!etat.bulleLue) return ''
+  // ⚠ ET PAS DAVANTAGE SUR UNE LECTURE TRONQUÉE (constat de la re-revue de
+  // e528ca1) : au-delà du plafond de lignes, les derniers ménages ne sont pas
+  // rendus — un vert conclu sur une liste coupée est le même mensonge.
+  if (!etat.bulleLue || etat.aTraiterTronque) return ''
   const nonVus = (etat.menagesBulle || []).filter(m => m.date >= AUJOURDHUI && !m.fait &&
     nonVuPar(m, p.id, p.vue_le) === true)
   // La date exacte au survol — et, quand elle n'a jamais ouvert, on le dit là
@@ -1518,13 +1521,6 @@ function renderCorpsConfig () {
   I18n.apply(zone)
 }
 
-// ⚠ `null` (jamais réglé) et `[]` (aucun jour) NE SE PEIGNENT PAS PAREIL.
-// `null` s'affiche TOUS COCHÉS — c'est la vérité du moteur (« attitrée tous les
-// jours ») — et c'est justement pourquoi l'écran d'avant cochait les sept
-// cases : les montrer vides ferait envoyer `[]` au premier enregistrement, et
-// retirerait tous ses jours sans que l'hôte l'ait voulu.
-const joursDuBien = (l) => (Array.isArray(l.weekdays) ? l.weekdays : [0, 1, 2, 3, 4, 5, 6])
-
 function htmlOngletCal () {
   const f = cfg.fiche
   const peut = (f.droits || {}).prestataires === 'write'
@@ -1562,7 +1558,9 @@ function htmlOngletCal () {
     // mais il n'y a ni jours, ni avertissement à lire.
     const confie = !!(l && l.active)
     const choix = choixDuBien(l)
-    const jours = l ? joursDuBien(l) : []
+    // ⚠ LA MEME SOURCE QUE LE CLIC (`shared/presta-etat.js`) : c'est leur
+    // divergence qui avait inverse le geste sur une liaison vierge.
+    const jours = joursAffiches(l)
     const cases = CFG_JOURS.map(j => {
       const on = jours.includes(j.n)
       // ⚠ PAS ENCORE RÉGLÉ ≠ TOUS LES JOURS, MAIS SEULEMENT QUAND ÇA BLOQUE.
@@ -1572,6 +1570,9 @@ function htmlOngletCal () {
       // que les jours explicitement réglés — elle ne sera donc jamais
       // sollicitée, et montrer sept cases pleines au-dessus de « ses jours ne
       // sont pas réglés » ferait dire à l'écran deux choses contraires.
+      // Pointillé = l'hôte n'a rien réglé ET cela BLOQUE : la liaison est
+      // « proposée », donc elle ne sera jamais sollicitée tant que ses jours
+      // ne sont pas explicitement choisis.
       const vierge = !!l && l.requires_ack !== false && !Array.isArray(l.weekdays)
       return `<button type="button" class="men-cfg__cell${on && !vierge ? ' is-on' : ''}${
         vierge ? ' is-vierge' : ''}" aria-pressed="${on && !vierge}" ${peut ? '' : 'disabled'}
@@ -2145,17 +2146,10 @@ function brancherConfig () {
     if (d.cfgJour) {
       const [id, j] = d.cfgJour.split(':')
       const n = Number(j)
-      envoyerLiaisons(b => {
-        if (String(b.property_id) !== id) return b
-        // ⚠ `null` DEVIENT EXPLICITE AU PREMIER CLIC : « tous les jours » se
-        // matérialise en liste, puis le jour cliqué en sort. Sans cela, le
-        // premier clic enverrait `[un seul jour]` et retirerait les six autres
-        // d'un coup, sans que l'hôte l'ait voulu.
-        const jours = Array.isArray(b.weekdays) ? [...b.weekdays] : [0, 1, 2, 3, 4, 5, 6]
-        const i = jours.indexOf(n)
-        if (i >= 0) jours.splice(i, 1); else jours.push(n)
-        return { ...b, weekdays: jours.sort((a, c) => a - c) }
-      })
+      // ⚠ LA REGLE EST DANS LE MODULE, partagée avec le RENDU : c'est leur
+      // divergence qui avait inversé le geste (re-revue de e528ca1).
+      envoyerLiaisons(b => (String(b.property_id) === id
+        ? { ...b, weekdays: joursApresClic(b, n) } : b))
       return
     }
 
@@ -2314,9 +2308,16 @@ async function lienDElle () {
 // n'a ni mode aperçu, ni garde sur les écritures. L'écran ne vérifiait que
 // `a_un_lien` (l'existence d'un jeton), qui n'est pas le même prédicat
 // (constat de la revue de 6d007f3).
+// ⚠ L'ORIGINE COMPTE AUTANT QUE LE CHEMIN (constat de la re-revue de e528ca1).
+// `lienDAcces` construit l'URL à partir d'une base qui vient de la requête :
+// une base erronée — variable d'environnement, en-tête `host` d'une preview —
+// donnerait une adresse d'une AUTRE origine, où ni le garde sur les écritures
+// ni le stockage volatile n'existent. Le jeton partirait dans un cadre tiers.
 const estSaPage = (lien) => {
-  try { return new URL(lien, location.origin).pathname.startsWith('/apps/menages/public') }
-  catch { return false }
+  try {
+    const u = new URL(lien, location.origin)
+    return u.origin === location.origin && u.pathname.startsWith('/apps/menages/public')
+  } catch { return false }
 }
 // Le mode lecture seule, posé au même endroit pour les deux usages : le cadre
 // ET « Ouvrir sa page ». Ce bouton est à deux centimètres du cadre — l'ouvrir
@@ -2359,7 +2360,14 @@ async function ouvrirSaPage () {
     // rien ouvert.
     // ⚠ `noopener` : la page ouverte porte son jeton dans l'URL, et on ne lui
     // donne aucune poignée sur celle de l'hôte.
-    window.open(estSaPage(lien) ? enApercu(lien) : lien, '_blank', 'noopener')
+    // ⚠ ON NE SE RABAT PAS SUR LE LIEN BRUT (constat de la re-revue de
+    // e528ca1) : `lienDAcces` rend une URL d'INVITATION pour un profil qui
+    // n'est plus en mode « lien ». Ouverte dans la session de l'hôte, elle lui
+    // propose de rejoindre le compte — et un clic de plus CONSOMMERAIT
+    // l'invitation destinée à la prestataire. Le cadre refuse ce lien ; ce
+    // bouton le refuse aussi.
+    if (!estSaPage(lien)) { toast(t('menages.equipe.config.apercu_ko')); return }
+    window.open(enApercu(lien), '_blank', 'noopener')
   } catch (e) {
     logger.error('Menages', 'ouvrir sa page', e)
     toast(t('menages.equipe.config.echec'))
