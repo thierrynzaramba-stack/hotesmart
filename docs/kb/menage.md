@@ -3983,3 +3983,118 @@ rendait un calendrier **vide**, lu comme « elle n'a aucun jour » ; et le refus
 « c'est son dernier logement » comptait des liaisons bornées au périmètre, donc
 empêchait un délégué de retirer son seul bien visible — il ne vaut plus que
 pour qui voit l'ensemble (`droits.perimetre_complet`).
+
+## « Vu » : l'accusé de réception d'un ménage attribué d'office (14 octobre 2026)
+
+**La demande de Thierry**, recette du 14 octobre : « pour Régina où les ménages
+sont attribués d'office, créer un bouton vu sur sa page ; s'il n'est pas validé,
+envoie un SMS 24 h avant et le jour J à 9 h. Enlève "Ménage non reçu",
+transforme "Non validé". »
+
+**Le trou qu'il ferme.** Une prestataire **référente** (`requires_ack = false`)
+n'a rien à confirmer : son ménage naît `accepted`, personne ne lui demande rien,
+et rien ne garantit qu'elle l'a lu — alors que l'hôte le croit confié. La
+**proposition**, elle, avait déjà sa boucle complète depuis le lot 3.3 :
+échéance, notification, escalade au refus. L'attribution d'office n'avait
+**rien** entre l'assignation et le départ du voyageur.
+
+`public_tokens.pwa_vue_le` (étape 3 de ce lot) répondait à une question
+**voisine mais plus faible** : « a-t-elle ouvert sa page ? », par **LIEN** et
+pour tous ses ménages à la fois. Elle ouvre sa page lundi, l'hôte lui ajoute un
+ménage mardi, et plus rien ne distingue les deux. La colonne reste — elle sert
+encore la **proposition** non vue et le « Vue il y a … » de sa fiche — mais elle
+ne décide plus de l'alerte.
+
+**La colonne.** `menages.vu_le` (migration `2026-10-14-menage-vu-le`), plus deux
+marqueurs de relance. **Writer unique : `api/menages-public.js`** — le bouton
+« Vu », et les **deux gestes par lesquels elle se saisit déjà d'un ménage**
+(accepter une proposition, prendre un ménage libre), qui valent validation :
+elle a dit oui. Lui réafficher un bouton « Vu » après « J'accepte », et la
+relancer parce qu'elle ne l'a pas tapé, lui apprendrait à ignorer les relances.
+
+**Le rattrapage de la migration ne couvre QUE ces deux gestes**
+(`assignment_reason like 'Accepte par %'` / `'Pris par %'`). Un ménage attribué
+d'office n'a jamais été validé par personne : le dire est exact, et c'est le
+point de départ de la relance. Sans ce rattrapage, un ménage accepté la semaine
+dernière et qui part demain serait annoncé « non validé » et vaudrait deux SMS
+pour un oui déjà donné.
+
+**Le même fait, deux mots.** Elle lit « Vu » sur son bouton ; l'hôte lit
+« Non validé » dans sa bulle et sur la fiche. C'est la même colonne. Le type
+`pas_vu` de `shared/menages-a-traiter.js` est renommé `non_valide` — nommé par
+ce qu'il mesure, et non plus par son indice de remplacement.
+
+**Deux situations, deux sources, dans `nonVuPar`** — et les confondre serait la
+faute :
+- **elle le PORTE** → `vuLe` tranche, et la carte des ouvertures de liens
+  n'entre plus dans la règle. **L'alerte tient donc même quand la lecture de
+  `public_tokens` est en panne** : avant, un timeout PostgREST la faisait taire
+  entièrement, et l'hôte lisait le calme ;
+- **on lui PROPOSE** → il n'y a rien à valider (accepter *est* la validation),
+  donc la seule question reste « sait-elle qu'on lui demande quelque chose ? »,
+  et c'est la dernière ouverture de sa page qui y répond, comme avant.
+
+`vuLe === undefined` **se tait** (une version antérieure de `/api/garde` ne sert
+pas la colonne) : on ne crie pas sur une absence de donnée. Deux tests tiennent
+ce silence par les deux bouts — l'un vérifie qu'on se taise, l'autre que
+`/api/garde` serve bien le champ, `null` compris.
+
+**Deux bornes nouvelles, et chacune a sa raison.**
+1. **Le passé est exclu** (`m.date >= aujourdhui`). Avec `vuLe`, un départ de la
+   semaine dernière jamais validé alerterait pour toujours — alors que
+   `non_termine` le dit déjà, et mieux. Même borne que le bouton de sa page.
+2. **L'en-tête de la fiche prestataire lit désormais LA MÊME FENÊTRE que la
+   bulle** (`limiteDeLImminence`, exportée pour n'exister qu'une fois). Elle
+   regardait tout ce qui est à venir, ce qui se tenait quand la question était
+   « a-t-elle ouvert sa page ? » — une réponse par personne. Un ménage d'office
+   pour dans trois mois n'est validé par personne : sans borne, **chaque
+   prestataire serait rouge en permanence**, et un rouge permanent n'est plus lu.
+
+**Les deux relances** (`lib/cleaning/relance-validation.js`, branché au cron
+après les propositions dues). À **9 h de Paris**, la veille puis le jour même,
+tant que `vu_le` est nul. Trois choses y sont délibérées :
+- **« à partir de 9 h », pas « à 9 h pile »** : un cycle qui échoue à 9 h 00
+  doit rattraper à 9 h 05, et un ménage attribué à 15 h pour demain doit être
+  annoncé tout de suite. Avant 9 h, le module **ne marque rien** — marquer
+  ferait sauter la relance pour toujours ;
+- **deux marqueurs séparés** (`relance_vu_j1_le`, `relance_vu_j0_le`), **par
+  ménage**. Un compteur global relancerait deux fois le même jour dès qu'un
+  cycle échoue au milieu, et une prestataire qui reçoit deux fois le même SMS
+  cesse de les lire. Un seul marqueur ferait sauter le dernier rappel, celui qui
+  précède le départ ;
+- **deux jours seulement, c'est la garde d'envoi de masse** (REVIEW.md règle 2) :
+  la première activation d'un compte ne peut pas produire un SMS par
+  réservation future de l'historique.
+
+**Le marqueur se pose même quand rien n'est parti**, et c'est un choix : un
+profil sans numéro ni e-mail, ou qui a décoché les deux canaux, ne recevra
+jamais rien — réessayer toutes les cinq minutes jusqu'au départ ne lui
+apprendrait rien. Le compte `muettes` le dit dans les logs ; l'hôte, lui, le lit
+dans sa fiche (« Aucun canal actif »).
+
+**Côté sa page**, une seule règle (`estAValider`) pour le badge « À VALIDER » et
+pour le bouton. Les séparer, c'est reproduire en petit le défaut du 14 octobre
+sur les cases de jours : le rendu et le geste avaient chacun leur idée de ce que
+l'écran montrait. Le geste est **idempotent** (`vu_le is null` dans l'update),
+donc rejouable par `fetchWithRetry` ; et il **ne passe jamais par la file hors
+ligne**, parce que `enqueuePending` garde UNE action par ménage — y mettre une
+validation effacerait un « fait » qui attend d'être envoyé, et elle perdrait son
+travail au profit de l'accusé de lecture.
+
+## L'onglet « Ce qu'elle voit » est supprimé (14 octobre 2026)
+
+Décision de Thierry, même recette : « on laisse tomber la page aperçu qu'elle
+voit, on reporte "Envoyer le lien / Ouvrir sa page / Nouveau lien" sur la page
+configuration. »
+
+L'onglet avait vécu deux formes en une journée — un aperçu reconstitué à partir
+des données de l'hôte, puis une **iframe** sur sa vraie page en `?apercu=1`. La
+seconde était juste, et coûtait néanmoins **le jeton de la prestataire dans le
+DOM de l'écran de l'hôte** à chaque ouverture de l'onglet. Les trois gestes du
+lien, eux, servent tous les jours.
+
+Ce qui **reste** : « Ouvrir sa page » en mode lecture seule (`apercu=1`), avec
+sa garde d'origine (`estSaPage` : même origine **et** chemin de sa page, pour ne
+jamais ouvrir une URL d'invitation dans la session de l'hôte). Le mode
+`?apercu=1` de `apps/menages/public.html` reste donc entièrement en place,
+bouton « Vu » compris, qui y est masqué comme les autres gestes.

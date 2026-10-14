@@ -110,6 +110,7 @@ const { classerAvis } = require('../lib/cron-reviews-classify')
 const { classerMessages } = require('../lib/cron-messages-classify')
 const { rattacherMenages } = require('../lib/cron-rattacher-menages')
 const { synchroniserMenages, expirerPropositions, poserPropositionsDues } = require('../lib/cleaning/sync-menages-entite')
+const { relancerValidations } = require('../lib/cleaning/relance-validation')
 const { processChannelProperties } = require('../lib/cron-channel-props')
 const { processSyncQueue } = require('../lib/cron-channel-sync')
 const { processMessagesBackfill } = require('../lib/cron-channel-messages-backfill')
@@ -432,6 +433,28 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur propositions dues:', err.message)
       results.errors.push({ context: 'propositions_dues', error: err.message })
+    }
+
+    // 4undecies bis. LES DEUX RELANCES D'UN MÉNAGE NON VALIDÉ (14 octobre 2026).
+    // ⚠ CE QU'ELLES COMBLENT. Un ménage ATTRIBUÉ D'OFFICE naît `accepted` : la
+    // prestataire n'a rien à confirmer, personne ne lui demande rien, et rien
+    // ne garantit qu'elle l'a lu — alors que l'hôte le croit confié. La
+    // proposition, elle, a sa propre boucle (échéance, escalade, notification) ;
+    // l'attribution d'office n'avait RIEN entre l'assignation et le départ.
+    // ⚠ À 9 H DE PARIS, LA VEILLE PUIS LE JOUR MÊME, et le module se tait
+    // avant cette heure — le cycle de 5 minutes repasse. Chaque relance laisse
+    // sa marque SUR LE MÉNAGE (`relance_vu_j1_le` / `relance_vu_j0_le`) : deux
+    // messages au plus par ménage, jamais deux fois le même.
+    // ⚠ DEUX JOURS SEULEMENT, c'est la garde d'envoi de masse (REVIEW.md
+    // règle 2) : la première activation d'un compte ne peut pas produire un
+    // SMS par réservation de l'historique.
+    // Placée APRÈS les propositions dues, dont elle lit le résultat : un ménage
+    // qui vient de changer de main dans ce cycle est relancé chez sa nouvelle
+    // porteuse, pas chez l'ancienne.
+    try { await chrono.mesure('relance_validation', () => relancerValidations(results)) }
+    catch (err) {
+      console.error('[Cron] Erreur relance des validations:', err.message)
+      results.errors.push({ context: 'relance_validation', error: err.message })
     }
 
     // 4duodecies bis. TENTATIVES BLOQUÉES EN « PAYÉ » (moteur, §6.2).

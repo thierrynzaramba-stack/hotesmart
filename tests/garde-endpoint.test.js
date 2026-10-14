@@ -1177,7 +1177,32 @@ test('un ménage sans note porte une chaîne vide, jamais `undefined`', async ()
   assert.strictEqual(res.body.menages[0].note, '')
 })
 
-// ─── « Derniere ouverture de sa page », pour l'alerte « Pas vu » ────────────
+// ─── « Elle a valide ce menage », pour l'alerte « Non valide » ─────────────
+//
+// ⚠ CE QUI EST EN JEU. Depuis le 14 octobre 2026, c'est `vuLe` — pose par le
+// bouton « Vu » de sa page — qui decide de l'alerte « Non valide », et plus la
+// derniere ouverture de son lien. Un serveur qui ne sert pas ce champ fait
+// TAIRE l'alerte (`nonVuPar` rend `null` sur `undefined`, exprès : on ne crie
+// pas sur une absence de donnee). Ce test est ce qui empeche ce silence.
+
+test('chaque menage dit s\'il a ete valide — `null` est une REPONSE, pas un oubli', async () => {
+  const { handler } = preparer({ liaisons: [LIAISON()], menages: [MENAGE({ vu_le: null })] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(res.body.menages[0], 'vuLe'), true,
+    'absent du corps, l\'alerte « Non valide » se tait entierement')
+  assert.strictEqual(res.body.menages[0].vuLe, null)
+})
+
+test('... et la date quand elle a valide', async () => {
+  const { handler } = preparer({
+    liaisons: [LIAISON()], menages: [MENAGE({ vu_le: '2026-09-11T06:30:00Z' })] })
+  const res = reponse()
+  await handler(get(), res)
+  assert.strictEqual(res.body.menages[0].vuLe, '2026-09-11T06:30:00Z')
+})
+
+// ─── « Derniere ouverture de sa page », pour la PROPOSITION non vue ─────────
 //
 // ⚠ CE QUI EST EN JEU. Le type `pas_vu` de la bulle « A traiter » ne lit que
 // cette carte. Trois facons de la rendre nuisible : laisser sortir le JETON

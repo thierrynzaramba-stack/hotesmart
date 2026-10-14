@@ -14,10 +14,14 @@
 
 // L'ordre d'affichage, et l'ordre tout court : ce qui bloque la couverture
 // d'abord, le reproche en dernier (spec §3.1).
-// `pas_vu` se place APRES les trois alertes de couverture et AVANT le passe :
-// « personne ne viendra » est plus grave que « quelqu'un viendra peut-etre sans
-// le savoir », qui est plus urgent qu'un depart deja manque.
-export const TYPES = ['sans_personnel', 'non_assigne', 'non_pris', 'pas_vu', 'non_termine', 'mauvais_retour']
+// `non_valide` se place APRES les trois alertes de couverture et AVANT le
+// passe : « personne ne viendra » est plus grave que « quelqu'un viendra
+// peut-etre sans le savoir », qui est plus urgent qu'un depart deja manque.
+// ⚠ IL S'APPELAIT `pas_vu` jusqu'au 14 octobre 2026. Renomme avec ce qu'il
+// mesure : non plus « elle n'a pas ouvert sa page » (un indice de
+// remplacement, par LIEN et pour tous ses menages a la fois) mais « elle n'a
+// pas valide CE menage » — le bouton « Vu » de sa page.
+export const TYPES = ['sans_personnel', 'non_assigne', 'non_pris', 'non_valide', 'non_termine', 'mauvais_retour']
 const RANG = Object.fromEntries(TYPES.map((t, i) => [t, i]))
 
 // Un « non pris » n'est une alerte que si personne ne peut plus le prendre,
@@ -39,29 +43,60 @@ function jourPlus (iso, n) {
   return d.toISOString().slice(0, 10)
 }
 
-// ⚠ « ELLE NE L'A PAS VU » EST UNE SEULE REGLE, PARTAGEE. L'en-tete de sa
-// fiche (« A jour » / « Menage non recu ») et la bulle « A traiter » posent la
-// MEME question ; seule la fenetre differe — la bulle se borne a 48 h, la fiche
-// regarde tout ce qui est a venir. Deux implementations auraient fini par se
+// ⚠ LA BORNE DE L'IMMINENCE, EXPORTEE — une seule fois, pour un seul calcul.
+// La bulle et l'en-tete de la fiche prestataire doivent crier sur EXACTEMENT
+// la meme fenetre : un bandeau vert au-dessus d'une ligne rouge sur la meme
+// personne est ce qu'un hote ne pardonne pas. Recopier `jourPlus(auj, 2)` dans
+// la page garantissait qu'un jour l'un des deux change seul.
+export const limiteDeLImminence = (aujourdhui) => jourPlus(aujourdhui, JOURS_IMMINENT)
+
+// ⚠ « ELLE NE L'A PAS VALIDE » EST UNE SEULE REGLE, PARTAGEE. L'en-tete de sa
+// fiche (« A jour » / « Non valide ») et la bulle « A traiter » posent la MEME
+// question, sur la MEME fenetre. Deux implementations auraient fini par se
 // contredire sur le meme ecran, et c'est exactement ce qu'un hote ne pardonne
 // pas : un bandeau vert au-dessus d'une ligne rouge sur la meme personne.
 //
+// ⚠ DEUX SITUATIONS, DEUX SOURCES — et c'est le changement du 14 octobre 2026 :
+//
+//   - ELLE LE PORTE. La question se tranche sur CE menage : `vuLe`, pose par le
+//     bouton « Vu » de sa page (et par les deux gestes qui valent deja oui,
+//     accepter une proposition et prendre un menage libre). C'est une reponse
+//     exacte, la ou « a-t-elle ouvert sa page ? » n'etait qu'un indice de
+//     remplacement : elle ouvre sa page lundi, l'hote lui ajoute un menage
+//     mardi, et plus rien ne distinguait les deux.
+//
+//   - ON LUI PROPOSE. Il n'y a rien a valider : accepter EST la validation, et
+//     l'offre a sa propre boucle (echeance, escalade, relance). La seule
+//     question qui reste est « sait-elle qu'on lui demande quelque chose ? »,
+//     et c'est la derniere ouverture de sa page qui y repond, comme avant.
+//
 // Rend `null` quand on ne peut RIEN conclure :
-//   - `vueLe === undefined` : on ne sait pas (lien supprime, lecture en panne) ;
-//   - aucun jalon connu : un menage d'office ancien peut n'avoir aucune date
-//     d'attribution, et accuser sur une date qu'on ignore serait au hasard.
-// Rend `true` quand elle est concernee et n'a pas vu ; `false` sinon.
+//   - `m.vuLe === undefined` (porteuse) : le serveur ne sert pas la colonne —
+//     on se TAIT plutot que d'accuser tout le monde ;
+//   - `vueLe === undefined` (proposee) : on ne sait pas (lien supprime,
+//     lecture en panne) ;
+//   - aucun jalon connu cote proposition : accuser sur une date qu'on ignore
+//     serait au hasard.
+// Rend `true` quand elle est concernee et n'a pas valide ; `false` sinon.
 export function nonVuPar (m, profilId, vueLe) {
-  if (vueLe === undefined || !m) return null
+  if (!m) return null
   const id = String(profilId || '')
   if (!id) return null
   const porte = m.porteur && String(m.porteur.id) === id
   const propose = (m.proposeesA || []).filter(Boolean).some(q => String(q.id) === id)
   if (!porte && !propose) return false
+  // ⚠ LA PORTEUSE NE DEPEND PLUS DE `vueLe` DU TOUT : l'alerte tient donc meme
+  // quand la lecture des ouvertures de liens est en panne. C'est le menage
+  // lui-meme qui porte la reponse.
+  if (porte) {
+    if (m.vuLe === undefined) return null
+    return !m.vuLe
+  }
+  if (vueLe === undefined) return null
   // ⚠ JAMAIS OUVERTE ALERTE SANS CONDITION DE DATE : c'est le cas le plus
   // grave, et il n'a aucun jalon a comparer.
   if (vueLe === null) return true
-  const jalons = [porte ? (m.etapes || {}).pris : (m.etapes || {}).propose, m.noteLe]
+  const jalons = [(m.etapes || {}).propose, m.noteLe]
     .filter(Boolean).map(x => Date.parse(x)).filter(x => Number.isFinite(x))
   if (!jalons.length) return null
   const vu = Date.parse(vueLe)
@@ -103,7 +138,7 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
     ajouter('sans_personnel', parBien.get(String(g.propertyId)), jours[0], { nbJours: jours.length })
   }
 
-  const limiteImminente = jourPlus(aujourdhui, JOURS_IMMINENT)
+  const limiteImminente = limiteDeLImminence(aujourdhui)
   // ─── « Pas vu » : une ligne par PERSONNE, son menage le plus proche ──────
   // On accumule pendant la boucle, on tranche apres : trois departs qu'elle
   // n'a pas vus sont un seul coup de telephone.
@@ -132,23 +167,42 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
     // ⚠ CE N'EST PAS UNE ALERTE DE COUVERTURE, donc elle vaut AUSSI sur un
     // bien non confié : quelqu'un est dessus, par la main de l'hôte ou par le
     // moteur, et le logement sera découvert si cette personne ne l'a pas lu.
-    // Trois conditions, toutes nécessaires (décision de Thierry) : elle porte
-    // ou on lui propose · sa dernière ouverture est antérieure à ce qui la
-    // concerne · le départ est à moins de 48 h.
+    // Trois conditions, toutes nécessaires : elle porte ou on lui propose ·
+    // elle n'a pas validé (la règle ci-dessus) · le départ est proche.
     //
     // ⚠ L'IMMINENCE SE COMPTE EN JOURS CALENDAIRES, comme `non_pris` : la
     // même borne, pour que deux alertes du même écran ne se contredisent pas.
+    // ⚠ ET LE PASSÉ EST EXCLU DEPUIS LE 14 OCTOBRE 2026 (`m.date >=
+    // aujourdhui`). Avec `vuLe`, un départ de la semaine dernière jamais
+    // validé alerterait pour toujours — alors que `non_termine` le dit déjà,
+    // et mieux : on ne demande pas de valider ce qui est derrière. Même borne
+    // que le bouton de sa page (`estAValider`).
     // ⚠ UN MENAGE DEJA MARQUE FAIT NE DIT RIEN : elle y est allee, savoir
-    // quand elle a ouvert sa page n'apprend plus rien a personne.
-    if (vuesLues && vues && !m.fait && m.date <= limiteImminente) {
+    // si elle l'avait valide n'apprend plus rien a personne.
+    // ⚠ LA LECTURE DES OUVERTURES N'EST PLUS UNE CONDITION D'ENTREE : la
+    // porteuse se juge sur le menage. Elle ne commande plus que le cas de la
+    // PROPOSITION, et c'est pourquoi le test est descendu dans la boucle.
+    if (!m.fait && m.date >= aujourdhui && m.date <= limiteImminente) {
       for (const q of [m.porteur, ...tour].filter(Boolean)) {
         const vid = String(q.id || '')
+        if (!vid) continue
+        const porte = m.porteur && String(m.porteur.id) === vid
         // ⚠ ABSENT DE LA CARTE ≠ JAMAIS OUVERTE. Une personne dont on ne lit
         // pas le lien (retirée de l'équipe, lien supprimé) ne produit aucune
-        // alerte : on n'invente pas une page jamais ouverte sur un lien qui
-        // n'existe plus. Seul un `null` EXPLICITE veut dire « jamais ».
-        if (!vid || !Object.prototype.hasOwnProperty.call(vues, vid)) continue
-        const vueLe = vues[vid]
+        // alerte de PROPOSITION : on n'invente pas une page jamais ouverte sur
+        // un lien qui n'existe plus. Seul un `null` EXPLICITE veut dire
+        // « jamais ». La porteuse, elle, ne lit pas cette carte.
+        let vueLe
+        if (!porte) {
+          if (!vuesLues || !vues || !Object.prototype.hasOwnProperty.call(vues, vid)) continue
+          vueLe = vues[vid]
+        } else if (vuesLues && vues && Object.prototype.hasOwnProperty.call(vues, vid)) {
+          // Pour la porteuse, la date d'ouverture n'entre pas dans la règle :
+          // elle n'est gardée que pour l'AFFICHER (« page vue il y a 2 h, et
+          // toujours pas validé » se décide autrement que « page jamais
+          // ouverte »). `undefined` = on ne le dira pas.
+          vueLe = vues[vid]
+        }
         // La règle vit au-dessus, et la fiche de la personne lit la MÊME.
         if (nonVuPar(m, vid, vueLe) !== true) continue
         const vu = pasVus.get(vid)
@@ -187,8 +241,8 @@ export function lignesATraiter ({ biens = [], garde = [], menages = [],
   }
 
   for (const v of pasVus.values()) {
-    ajouter('pas_vu', v.bien, v.date, { bookingId: v.bookingId, qui: v.qui,
-                                        vueLe: v.vueLe, nbMenages: v.nbMenages })
+    ajouter('non_valide', v.bien, v.date, { bookingId: v.bookingId, qui: v.qui,
+                                            vueLe: v.vueLe, nbMenages: v.nbMenages })
   }
 
   return lignes.sort((a, b) =>

@@ -213,144 +213,204 @@ test('chaque ligne de ménage porte son bookingId — sans lui, aucun geste ne s
   assert.deepEqual(l.map(x => x.bookingId).sort(), ['x1', 'x2', 'x3'])
 })
 
-// ─── « Pas vu » : elle ne sait peut-être pas qu'elle doit venir ─────────────
+// ─── « Non validé » : elle ne sait peut-être pas qu'elle doit venir ────────
 //
-// ⚠ TROIS CONDITIONS, TOUTES NÉCESSAIRES (décision de Thierry) : elle porte ou
-// on lui propose · sa dernière ouverture est antérieure à ce qui la concerne ·
-// le départ est à moins de 48 h. Le besoin : savoir si une prestataire a bien
-// vu ses derniers ménages, SANS estimation — l'horodatage est écrit par le
-// serveur au succès du GET planning de sa PWA, et par lui seul.
+// ⚠ LA QUESTION A CHANGÉ LE 14 OCTOBRE 2026, et c'est tout l'objet de ces
+// tests. Elle était « a-t-elle ouvert sa page ? » — une réponse par PERSONNE,
+// tirée de `public_tokens.pwa_vue_le`, qui ne disait rien d'un ménage en
+// particulier : elle ouvre sa page lundi, l'hôte lui en ajoute un mardi, et
+// plus rien ne les distinguait. Elle est désormais « a-t-elle validé CE
+// ménage ? », et la réponse est sur le ménage (`vuLe`, posé par le bouton
+// « Vu » de sa page).
+//
+// ⚠ DEUX SOURCES, DEUX SITUATIONS, et les confondre serait la faute :
+//   - ELLE LE PORTE → `vuLe` tranche, et `vues` n'entre pas dans la règle ;
+//   - ON LUI PROPOSE → rien à valider (accepter EST la validation), donc la
+//     seule question reste « sait-elle qu'on lui demande quelque chose ? », et
+//     c'est la dernière ouverture de sa page qui y répond, comme avant.
 
 const LENA = { id: 'p-lena', prenom: 'Lena', actif: true }
 const DEMAIN = '2026-10-14'
 const AVANT = '2026-10-10T08:00:00Z'   // sa dernière ouverture
 const APRES = '2026-10-12T08:00:00Z'   // ce qui la concerne, posé après
 
-test('un ménage attribué APRÈS sa dernière ouverture, à J−1 : alerte', async () => {
+test('un ménage à elle qu\'elle n\'a pas validé, à J−1 : alerte', async () => {
   const l = appeler({
-    menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })],
+    menages: [menage({ date: DEMAIN, porteur: REGINA, vuLe: null })],
     vues: { 'p-regina': AVANT }, vuesLues: true
   })
-  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
+  assert.deepEqual(l.map(x => x.type), ['non_valide'])
   assert.equal(l[0].qui.prenom, 'Régina', 'et il dit QUI appeler')
-  assert.equal(l[0].vueLe, AVANT)
+  assert.equal(l[0].vueLe, AVANT, 'la date d\'ouverture reste AFFICHÉE, sans entrer dans la règle')
   assert.equal(l[0].nbMenages, 1)
 })
 
-test('... elle ouvre sa page, l\'alerte disparaît', async () => {
+test('... elle tape « Vu », l\'alerte disparaît', async () => {
+  // ⚠ ET MÊME SI SA PAGE N'A JAMAIS ÉTÉ OUVERTE AILLEURS. L'ancienne règle
+  // concluait sur l'ouverture du LIEN ; une validation posée sur ce ménage-là
+  // est une réponse plus forte, et elle gagne.
   const l = appeler({
-    menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })],
-    vues: { 'p-regina': '2026-10-13T07:30:00Z' }, vuesLues: true
+    menages: [menage({ date: DEMAIN, porteur: REGINA, vuLe: '2026-10-13T07:30:00Z' })],
+    vues: { 'p-regina': null }, vuesLues: true
   })
-  assert.deepEqual(l, [], 'vue après l\'attribution : il n\'y a plus rien à signaler')
+  assert.deepEqual(l, [], 'validé : il n\'y a plus rien à signaler')
 })
 
 test('... et un départ à J+5 n\'alerte pas : le temps de regarder reste entier', async () => {
   const l = appeler({
-    menages: [menage({ date: '2026-10-18', porteur: REGINA, etapes: { pris: APRES } })],
+    menages: [menage({ date: '2026-10-18', porteur: REGINA, vuLe: null })],
     vues: { 'p-regina': AVANT }, vuesLues: true
   })
   assert.deepEqual(l, [])
 })
 
-test('JAMAIS ouverte : alerte sans condition de date — le cas le plus grave', async () => {
-  // Rien à comparer, et c'est précisément le problème : elle a un ménage
-  // demain et n'a jamais ouvert son lien.
+test('un départ PASSÉ non validé ne dit que « non terminé » — on ne valide pas le passé', async () => {
+  // ⚠ LE GARDE-FOU DU 14 OCTOBRE. Avec `vuLe`, un départ de la semaine
+  // dernière jamais validé alerterait POUR TOUJOURS : `non_termine` le dit
+  // déjà, et mieux. Même borne que le bouton de sa page (`estAValider`).
   const l = appeler({
-    menages: [menage({ date: DEMAIN, porteur: REGINA })],
-    vues: { 'p-regina': null }, vuesLues: true
-  })
-  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
-  assert.equal(l[0].vueLe, null)
-})
-
-test('une PROPOSITION non vue alerte aussi, et nomme la personne sollicitée', async () => {
-  const l = appeler({
-    menages: [menage({ date: DEMAIN, proposeesA: [LENA], etapes: { propose: APRES } })],
-    vues: { 'p-lena': AVANT }, vuesLues: true
-  })
-  // `non_pris` sort aussi : le départ est imminent et personne ne le porte.
-  // Les deux disent une chose différente, et toutes deux sont vraies.
-  assert.deepEqual(l.map(x => x.type), ['non_pris', 'pas_vu'])
-  assert.equal(l.find(x => x.type === 'pas_vu').qui.prenom, 'Lena')
-})
-
-test('une NOTE changée après sa dernière ouverture alerte : « le code a changé »', async () => {
-  // L'attribution est ancienne, mais la consigne vient de bouger — c'est
-  // exactement ce qu'elle doit lire avant d'y aller.
-  const l = appeler({
-    menages: [menage({ date: DEMAIN, porteur: REGINA,
-                       etapes: { pris: '2026-10-01T08:00:00Z' }, noteLe: APRES })],
+    menages: [menage({ date: '2026-10-10', porteur: REGINA, vuLe: null })],
     vues: { 'p-regina': AVANT }, vuesLues: true
   })
-  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
+  assert.deepEqual(l.map(x => x.type), ['non_termine'])
+})
+
+test('UNE PANNE DE LECTURE DES OUVERTURES N\'ÉTEINT PLUS l\'alerte d\'une porteuse', async () => {
+  // ⚠ CE QUE LE CHANGEMENT GAGNE. L'alerte dépendait d'une lecture de
+  // `public_tokens` : un timeout PostgREST la faisait taire entièrement, et
+  // l'hôte lisait le calme. La réponse est maintenant sur le ménage.
+  const m = [menage({ date: DEMAIN, porteur: REGINA, vuLe: null })]
+  assert.deepEqual(appeler({ menages: m, vues: {}, vuesLues: false }).map(x => x.type), ['non_valide'])
+  assert.deepEqual(appeler({ menages: m }).map(x => x.type), ['non_valide'],
+    'et sans l\'information du tout, l\'alerte tient aussi')
+  // ⚠ MAIS ELLE NE DIT PLUS « page jamais ouverte » : on n'a rien lu.
+  assert.equal(appeler({ menages: m })[0].vueLe, undefined)
+})
+
+test('un serveur qui ne sert pas `vuLe` se TAIT (il n\'accuse pas toute l\'équipe)', async () => {
+  // ⚠ `undefined` ≠ `null`. Une version antérieure de /api/garde ne connaît
+  // pas la colonne : peindre « non validé » partout accuserait tout le monde
+  // sur une absence de donnée. On se tait, et le vérificateur de migration est
+  // là pour que ce silence ne dure pas.
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, porteur: REGINA })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l, [])
+})
+
+test('un ménage DÉJÀ FAIT ne produit pas « non validé » : elle y est allée', async () => {
+  const l = appeler({
+    menages: [menage({ date: '2026-10-13', porteur: REGINA, fait: true, vuLe: null })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l, [])
+})
+
+test('« non validé » vaut AUSSI sur un bien non confié : ce n\'est pas une alerte de couverture', async () => {
+  // L'hôte a mis quelqu'un à la main sur un bien qu'il gère lui-même : si
+  // cette personne ne l'a pas lu, le logement sera découvert quand même.
+  const garde = [{ propertyId: '101', gere: false, jours: [] }]
+  const l = appeler({
+    garde, menages: [menage({ date: DEMAIN, porteur: REGINA, vuLe: null })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l.map(x => x.type), ['non_valide'])
 })
 
 test('UNE LIGNE PAR PERSONNE, avec son ménage le PLUS PROCHE', async () => {
-  // Trois départs qu'elle n'a pas vus sont un seul coup de téléphone.
+  // Trois départs qu'elle n'a pas validés sont un seul coup de téléphone.
   const l = appeler({
     menages: [
-      menage({ bookingId: 'b1', date: '2026-10-15', porteur: REGINA, etapes: { pris: APRES } }),
-      menage({ bookingId: 'b2', date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } }),
-      menage({ bookingId: 'b3', date: '2026-10-13', porteur: REGINA, etapes: { pris: APRES } })
+      menage({ bookingId: 'b1', date: '2026-10-15', porteur: REGINA, vuLe: null }),
+      menage({ bookingId: 'b2', date: DEMAIN, porteur: REGINA, vuLe: null }),
+      menage({ bookingId: 'b3', date: '2026-10-13', porteur: REGINA, vuLe: null })
     ],
     vues: { 'p-regina': AVANT }, vuesLues: true
   })
-  const pv = l.filter(x => x.type === 'pas_vu')
+  const pv = l.filter(x => x.type === 'non_valide')
   assert.equal(pv.length, 1, 'une seule ligne pour Régina')
   assert.equal(pv[0].date, '2026-10-13', 'celle du départ le plus proche')
   assert.equal(pv[0].nbMenages, 3, 'et elle dit combien il y en a')
 })
 
-test('une PANNE de lecture des ouvertures se TAIT (elle n\'accuse pas toute l\'équipe)', async () => {
+// ─── La PROPOSITION, elle, garde l'ancienne règle ──────────────────────────
+
+test('une PROPOSITION non vue alerte aussi, et nomme la personne sollicitée', async () => {
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, proposeesA: [LENA], etapes: { propose: APRES }, vuLe: null })],
+    vues: { 'p-lena': AVANT }, vuesLues: true
+  })
+  // `non_pris` sort aussi : le départ est imminent et personne ne le porte.
+  // Les deux disent une chose différente, et toutes deux sont vraies.
+  assert.deepEqual(l.map(x => x.type), ['non_pris', 'non_valide'])
+  assert.equal(l.find(x => x.type === 'non_valide').qui.prenom, 'Lena')
+})
+
+test('... et une NOTE changée après son ouverture alerte : « le code a changé »', async () => {
+  // La proposition est ancienne, mais la consigne vient de bouger — c'est
+  // exactement ce qu'elle doit lire avant de répondre.
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, proposeesA: [LENA],
+                       etapes: { propose: '2026-10-01T08:00:00Z' }, noteLe: APRES, vuLe: null })],
+    vues: { 'p-lena': AVANT }, vuesLues: true
+  })
+  assert.deepEqual(l.map(x => x.type), ['non_pris', 'non_valide'])
+})
+
+test('JAMAIS ouverte, sur une proposition : alerte sans condition de date', async () => {
+  // Rien à comparer, et c'est précisément le problème : on lui demande
+  // quelque chose pour demain et elle n'a jamais ouvert son lien.
+  const l = appeler({
+    menages: [menage({ date: DEMAIN, proposeesA: [LENA], vuLe: null })],
+    vues: { 'p-lena': null }, vuesLues: true
+  })
+  assert.deepEqual(l.map(x => x.type), ['non_pris', 'non_valide'])
+  assert.equal(l.find(x => x.type === 'non_valide').vueLe, null)
+})
+
+test('une PANNE de lecture se TAIT sur une PROPOSITION (elle n\'accuse pas au hasard)', async () => {
   // Sans ce garde-fou, un timeout PostgREST rendait une carte vide — donc
   // « aucune ne l'a jamais ouverte », donc une pleine page de rouge.
-  const m = [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })]
-  assert.deepEqual(appeler({ menages: m, vues: {}, vuesLues: false }), [])
-  assert.deepEqual(appeler({ menages: m }), [], 'et sans l\'information du tout, rien non plus')
+  const m = [menage({ date: DEMAIN, proposeesA: [LENA], etapes: { propose: APRES }, vuLe: null })]
+  assert.deepEqual(appeler({ menages: m, vues: {}, vuesLues: false }).map(x => x.type), ['non_pris'])
+  assert.deepEqual(appeler({ menages: m }).map(x => x.type), ['non_pris'])
 })
 
 test('une personne ABSENTE de la carte ne produit rien : son lien n\'existe plus', async () => {
   // Retirée de l'équipe, la ligne `public_tokens` est supprimée. Annoncer
   // « page jamais ouverte » sur un lien qui n'existe plus serait faux.
   const l = appeler({
-    menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })],
-    vues: { 'p-lena': AVANT }, vuesLues: true
+    menages: [menage({ date: DEMAIN, proposeesA: [LENA], etapes: { propose: APRES }, vuLe: null })],
+    vues: { 'p-regina': AVANT }, vuesLues: true
   })
-  assert.deepEqual(l, [])
+  assert.deepEqual(l.map(x => x.type), ['non_pris'])
 })
 
 test('un jalon INCONNU ne devine pas : pas d\'alerte sur une date qu\'on ignore', async () => {
-  // Un ménage d'office ancien peut n'avoir aucune date d'attribution. Alerter
-  // « elle ne l'a pas vu » accuserait au hasard.
+  // Une proposition peut n'avoir aucune date. Alerter « elle ne l'a pas vue »
+  // accuserait au hasard.
   const l = appeler({
-    menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: {} })],
-    vues: { 'p-regina': AVANT }, vuesLues: true
+    menages: [menage({ date: DEMAIN, proposeesA: [LENA], etapes: {}, vuLe: null })],
+    vues: { 'p-lena': AVANT }, vuesLues: true
   })
-  assert.deepEqual(l, [])
+  assert.deepEqual(l.map(x => x.type), ['non_pris'])
 })
 
-test('un ménage DÉJÀ FAIT ne produit pas « pas vu » : elle y est allée', async () => {
-  const l = appeler({
-    menages: [menage({ date: '2026-10-13', porteur: REGINA, fait: true, etapes: { pris: APRES } })],
-    vues: { 'p-regina': AVANT }, vuesLues: true
-  })
-  assert.deepEqual(l, [])
-})
-
-test('« pas vu » vaut AUSSI sur un bien non confié : ce n\'est pas une alerte de couverture', async () => {
-  // L'hôte a mis quelqu'un à la main sur un bien qu'il gère lui-même : si
-  // cette personne ne l'a pas lu, le logement sera découvert quand même.
-  const garde = [{ propertyId: '101', gere: false, jours: [] }]
-  const l = appeler({
-    garde, menages: [menage({ date: DEMAIN, porteur: REGINA, etapes: { pris: APRES } })],
-    vues: { 'p-regina': AVANT }, vuesLues: true
-  })
-  assert.deepEqual(l.map(x => x.type), ['pas_vu'])
-})
-
-test('le tri place « pas vu » après les alertes de couverture et avant le passé', async () => {
+test('le tri place « non validé » après les alertes de couverture et avant le passé', async () => {
   const { TYPES } = require('../shared/menages-a-traiter.js')
   assert.deepEqual(TYPES,
-    ['sans_personnel', 'non_assigne', 'non_pris', 'pas_vu', 'non_termine', 'mauvais_retour'])
+    ['sans_personnel', 'non_assigne', 'non_pris', 'non_valide', 'non_termine', 'mauvais_retour'])
+})
+
+test('la borne de l\'imminence est EXPORTÉE : la bulle et la fiche ne la recalculent pas', async () => {
+  // ⚠ UN BANDEAU VERT AU-DESSUS D'UNE LIGNE ROUGE sur la même personne est ce
+  // qu'un hôte ne pardonne pas. L'en-tête de la fiche prestataire lit la même
+  // fenêtre que la bulle depuis le 14 octobre 2026 — recopier `+2 jours` dans
+  // la page garantissait qu'un jour l'un des deux change seul.
+  const { limiteDeLImminence, JOURS_IMMINENT } = require('../shared/menages-a-traiter.js')
+  assert.equal(JOURS_IMMINENT, 2)
+  assert.equal(limiteDeLImminence('2026-10-13'), '2026-10-15')
+  // Et elle franchit un changement de mois sans se tromper.
+  assert.equal(limiteDeLImminence('2026-10-30'), '2026-11-01')
 })

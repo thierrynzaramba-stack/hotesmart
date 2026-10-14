@@ -160,7 +160,7 @@ import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVer
 import { toISO } from '/shared/calendar-core.js'
 import { couleurDe } from '/shared/presta-couleur.js'
 import { bandeJoursHtml, classesWE as classesWEDuJour } from '/shared/bande-jours.js'
-import { lignesATraiter, nonVuPar } from '/shared/menages-a-traiter.js'
+import { lignesATraiter, nonVuPar, limiteDeLImminence } from '/shared/menages-a-traiter.js'
 import { etatDeLaPrestataire, defautDeLaLiaison, joursAffiches, joursApresClic } from '/shared/presta-etat.js'
 import { hsBus } from '/shared/hs-bus.js'
 import { brancherReordonnancement } from '/shared/reordonner-biens.js'
@@ -342,10 +342,10 @@ async function chargerATraiter () {
   renderBulle()
   majBadge()
   // ⚠ LE NUMÉRO N'EST CHARGÉ QUE S'IL SERT. L'équipe se lit à l'ouverture du
-  // volet ; une alerte « Pas vu » a besoin du numéro tout de suite, et sans
+  // volet ; une alerte « Non validé » a besoin du numéro tout de suite, et sans
   // elle cette lecture — un comptage d'avis par personne — ne se justifie pas
   // au démarrage de la page.
-  if (Array.isArray(etat.aTraiter) && etat.aTraiter.some(l => l.type === 'pas_vu') &&
+  if (Array.isArray(etat.aTraiter) && etat.aTraiter.some(l => l.type === 'non_valide') &&
       !equipeChargee && !equipeEnCours) {
     chargerEquipe().then(renderBulle).catch(() => {})
   }
@@ -1070,21 +1070,27 @@ function ligneHtml (l) {
     ? t('menages.n_jours', { n: l.nbJours })
     : dateCourte(l.date)
   const qui = l.qui && l.qui.prenom ? ` · ${esc(l.qui.prenom)}` : ''
-  // ⚠ « Pas vu » DIT DEPUIS QUAND, sinon l'hôte ne sait pas s'il doit appeler
-  // ou attendre cinq minutes. Jamais ouverte est le cas le plus grave : il se
-  // dit en toutes lettres, pas par une absence de date.
-  const vue = l.type === 'pas_vu'
+  // ⚠ « Non validé » DIT OÙ ELLE EN EST DE SA PAGE, sinon l'hôte ne sait pas
+  // s'il doit appeler ou attendre cinq minutes : « page vue il y a 2 h et
+  // toujours pas validé » et « page jamais ouverte » ne se traitent pas
+  // pareil. Jamais ouverte est le cas le plus grave : il se dit en toutes
+  // lettres, pas par une absence de date.
+  // ⚠ `undefined` NE DIT RIEN — et ce n'est pas `null`. La lecture des
+  // ouvertures peut être en panne alors que l'alerte, elle, tient (elle ne
+  // dépend plus que du ménage) : afficher « page jamais ouverte » serait
+  // alors une accusation inventée.
+  const vue = l.type === 'non_valide' && l.vueLe !== undefined
     ? ` · ${esc(l.vueLe ? t('menages.vue_il_y_a', { quand: ilYa(l.vueLe) }) : t('menages.vue_jamais'))}`
     : ''
-  // Seul `pas_vu` garde un pictogramme (téléphone barré) : il ne dit pas un
+  // Seul `non_valide` garde un pictogramme (téléphone barré) : il ne dit pas un
   // problème de couverture, et le distinguer évite de le lire comme tel.
-  const ico = l.type === 'pas_vu'
+  const ico = l.type === 'non_valide'
     ? `<span class="men-atr__type">${icone('i-phone-off')}</span>`
     : ''
   return `<div class="men-atr">
     ${photo}${ico}
     <span class="men-atr__texte">
-      <b${l.type === 'pas_vu' ? ' class="men-atr__rouge"' : ''}>${esc(t('menages.type_' + l.type))}</b>
+      <b${l.type === 'non_valide' ? ' class="men-atr__rouge"' : ''}>${esc(t('menages.type_' + l.type))}</b>
       <span class="caption muted">${esc(l.bienNom)} · ${esc(quand)}${qui}${vue}</span>
     </span>
     ${boutonsLigne(l)}
@@ -1095,11 +1101,13 @@ function ligneHtml (l) {
 // (décision G12) : griser promet un geste qu'on refusera.
 function boutonsLigne (l) {
   const b = []
-  // ⚠ APPELER EST LE SEUL GESTE QUI RÉSOUT « Pas vu » : rien dans HôteSmart ne
-  // peut forcer quelqu'un à ouvrir sa page. Le bouton est ABSENT sans numéro
-  // (on ne propose pas un appel qu'on ne peut pas passer) — même règle que les
-  // droits : jamais grisé, absent.
-  if (l.type === 'pas_vu') {
+  // ⚠ APPELER EST LE SEUL GESTE QUI RÉSOUT « Non validé » : rien dans
+  // HôteSmart ne peut forcer quelqu'un à valider son ménage — les deux
+  // relances par SMS (la veille et le matin, 9 h) sont tout ce que la machine
+  // sait faire. Le bouton est ABSENT sans numéro (on ne propose pas un appel
+  // qu'on ne peut pas passer) — même règle que les droits : jamais grisé,
+  // absent.
+  if (l.type === 'non_valide') {
     // ⚠ LE NUMERO VIENT DU VOLET ÉQUIPE, pas de `/api/garde` : cet endpoint
     // refuse les coordonnées (« qui est de garde » n'est pas « comment la
     // joindre »), et son test le garde.
@@ -1256,7 +1264,7 @@ function renderBulles () {
 //
 // ⚠ L'ÉTAT EST CELUI DU SERVEUR. Chaque geste écrit PUIS RELIT : un écran qui
 // se peint sur une écriture supposée réussie ment dès la première panne.
-const CFG_ONGLETS = ['voit', 'cal', 'param']
+const CFG_ONGLETS = ['cal', 'param']
 const CFG_JOURS = [{ n: 1, c: 'L' }, { n: 2, c: 'M' }, { n: 3, c: 'M' }, { n: 4, c: 'J' },
                    { n: 5, c: 'V' }, { n: 6, c: 'S' }, { n: 0, c: 'D' }]
 const CFG_VISIBLES = [7, 14, 30, 60, 90]
@@ -1268,9 +1276,6 @@ const cfg = {
   fiche: null,        // réponse de /api/menages?presta=… (null = pas lu)
   dispo: null,        // réponse de /api/disponibilites (null = pas lu)
   eval: null,         // réglages d'évaluation (bus avis), null = pas lu
-  lienApercu: null,   // le lien du cadre, demandé à l'ouverture de l'onglet
-  lienEnCours: false,
-  lienErreur: false,
   erreur: false,
   occupe: false
 }
@@ -1279,12 +1284,6 @@ async function ouvrirConfig (profilId) {
   cfg.profilId = String(profilId)
   cfg.onglet = 'cal'
   cfg.fiche = null; cfg.dispo = null; cfg.eval = null; cfg.erreur = false
-  // ⚠ LE LIEN NE SURVIT PAS À LA FICHE : le cadre d'une personne ne doit
-  // jamais s'ouvrir sur la page d'une autre.
-  // ⚠ `lienEnCours` AUSSI : sans lui, changer de fiche pendant l'appel laissait
-  // le cadre de la SUIVANTE bloqué sur « Chargement… » sans jamais réessayer
-  // (constat de la revue de 6d007f3).
-  cfg.lienApercu = null; cfg.lienErreur = false; cfg.lienEnCours = false
   $('[data-bind="cfg"]').hidden = false
   $('[data-bind="cfg-voile"]').hidden = false
   document.body.classList.add('men-cfg-ouvert')
@@ -1410,14 +1409,18 @@ function renderConfig () {
 // savoir, c'est si ce qu'il vient de lui confier est ARRIVÉ chez elle. La date
 // exacte reste, au survol seulement.
 //
-// ⚠ ET LA RÈGLE EST CELLE DE LA BULLE, à la fenêtre près (`nonVuPar`, module
-// partagé). La bulle se borne à 48 h — c'est une alerte, elle ne crie que sur
-// ce qui presse ; la fiche regarde TOUT ce qui est à venir, parce qu'on vient
-// de l'ouvrir pour cette personne-là. Deux implémentations finiraient par
+// ⚠ ET LA RÈGLE EST CELLE DE LA BULLE, FENÊTRE COMPRISE (`nonVuPar` et
+// `JOURS_IMMINENT`, module partagé). La fiche regardait TOUT ce qui est à
+// venir, ce qui se tenait quand la question était « a-t-elle ouvert sa page ? »
+// — une réponse par personne. Depuis le 14 octobre 2026 la question est « a-t-
+// elle validé CE ménage ? », et un ménage attribué d'office pour dans trois
+// mois n'est validé par personne : sans borne, chaque prestataire serait rouge
+// en permanence, et un rouge permanent n'est plus lu.
+// Même fenêtre, donc : ce qui presse. Deux implémentations finiraient par
 // afficher un bandeau vert au-dessus d'une ligne rouge sur la même personne.
 //
-// ⚠ ON NE SAIT PAS ≠ TOUT VA BIEN : sans `vue_le` (lien supprimé, lecture en
-// panne), on n'affiche RIEN plutôt qu'un « À jour » rassurant et faux.
+// ⚠ ON NE SAIT PAS ≠ TOUT VA BIEN : sans la lecture de la bulle, on n'affiche
+// RIEN plutôt qu'un « À jour » rassurant et faux.
 function vueHtml (p) {
   if (!Object.prototype.hasOwnProperty.call(p, 'vue_le')) return ''
   // ⚠ ON NE CONCLUT RIEN SANS AVOIR LU. « Aucun ménage connu » et « la lecture
@@ -1427,7 +1430,11 @@ function vueHtml (p) {
   // e528ca1) : au-delà du plafond de lignes, les derniers ménages ne sont pas
   // rendus — un vert conclu sur une liste coupée est le même mensonge.
   if (!etat.bulleLue || etat.aTraiterTronque) return ''
-  const nonVus = (etat.menagesBulle || []).filter(m => m.date >= AUJOURDHUI && !m.fait &&
+  // La même borne que la bulle, calculée de la même façon : J + JOURS_IMMINENT
+  // en jours CALENDAIRES, insensible au fuseau.
+  const limite = limiteDeLImminence(AUJOURDHUI)
+  const nonVus = (etat.menagesBulle || []).filter(m =>
+    m.date >= AUJOURDHUI && m.date <= limite && !m.fait &&
     nonVuPar(m, p.id, p.vue_le) === true)
   // La date exacte au survol — et, quand elle n'a jamais ouvert, on le dit là
   // plutôt que de l'afficher en permanence : l'état répond à « est-ce arrivé
@@ -1438,7 +1445,7 @@ function vueHtml (p) {
       <span data-i18n="menages.equipe.config.a_jour"></span></span>`
   }
   return `<span class="men-cfg__vue men-cfg__vue--ko" title="${esc(titre)}">${icone('i-phone-off')}
-    <span data-i18n="menages.equipe.config.non_recu"></span></span>`
+    <span data-i18n="menages.equipe.config.non_valide"></span></span>`
 }
 
 // ⚠ VERT OU ROUGE, JAMAIS D'AMBRE ICI (décision de Thierry). `rien` est
@@ -1515,9 +1522,7 @@ function renderCorpsConfig () {
     return
   }
   zone.classList.toggle('is-occupe', cfg.occupe)
-  zone.innerHTML = cfg.onglet === 'cal' ? htmlOngletCal()
-                 : cfg.onglet === 'param' ? htmlOngletParam()
-                 : htmlOngletVoit()
+  zone.innerHTML = cfg.onglet === 'param' ? htmlOngletParam() : htmlOngletCal()
   I18n.apply(zone)
 }
 
@@ -1901,6 +1906,28 @@ function htmlOngletParam () {
   const avMuet = !(p.notify_sms && p.tel) && !(p.notify_email && p.email)
     ? `<p class="men-cfg__av" data-i18n="menages.equipe.config.av_muet"></p>` : ''
 
+  // ⚠ LES TROIS GESTES DU LIEN VIVENT ICI (décision de Thierry, 14 octobre
+  // 2026). Ils habitaient l'onglet « Ce qu'elle voit », supprimé avec son
+  // cadre : un aperçu de sa page ne disait rien de plus que sa page elle-même,
+  // et le jeton n'a plus à entrer dans le DOM de l'hôte pour être envoyé.
+  // ⚠ « Ouvrir sa page » RESTE EN LECTURE SEULE (`apercu=1`) : ce bouton est
+  // le seul chemin qui mène encore chez elle depuis cet écran, et sans le mode
+  // il horodaterait une ouverture qu'elle n'a pas faite.
+  const lien = `<section class="men-cfg__sec">
+    <h3 class="men-cfg__h3" data-i18n="menages.equipe.config.son_lien"></h3>
+    ${p.a_un_lien ? `<p class="caption muted" data-i18n="menages.equipe.config.son_lien_aide"></p>
+      <div class="men-cfg__lienBtns">
+        ${peut ? `<button type="button" class="btn btn--primary" data-cfg-envoyer>
+          ${icone('i-send')}<span data-i18n="menages.equipe.config.envoyer"></span></button>` : ''}
+        <button type="button" class="btn btn--secondary" data-cfg-ouvrir>
+          ${icone('i-link')}<span data-i18n="menages.equipe.config.ouvrir"></span></button>
+        ${peut ? `<button type="button" class="btn btn--secondary" data-cfg-nouveau>
+          ${icone('i-key')}<span data-i18n="menages.equipe.config.nouveau_lien"></span></button>` : ''}
+      </div>
+      ${peut ? `<p class="caption muted" data-i18n="menages.equipe.config.nouveau_lien_av"></p>` : ''}`
+      : `<p class="men-cfg__av" data-i18n="menages.equipe.config.sans_lien"></p>`}
+  </section>`
+
   return `
   <section class="men-cfg__sec">
     <h3 class="men-cfg__h3" data-i18n="menages.equipe.config.identite"></h3>
@@ -1920,6 +1947,7 @@ function htmlOngletParam () {
     ${avMail}${avMuet}
   </section>
 
+  ${lien}
   ${htmlEval()}
   ${htmlRatio()}
   ${htmlRetirer()}`
@@ -1998,79 +2026,6 @@ function htmlRetirer () {
   </section>`
 }
 
-// ─── Onglet « Ce qu'elle voit » ─────────────────────────────────────────────
-//
-// ⚠ SA VRAIE PAGE, DANS UN CADRE, EN LECTURE SEULE (décision de Thierry,
-// recette du 14 octobre). Un aperçu reconstitué à partir des données de l'hôte
-// racontait ce que sa page MONTRERAIT ; il ne pouvait pas dire ce qu'elle
-// montre vraiment — ni sa mise en page, ni ses onglets, ni ce que ses réglages
-// y changent. Une iframe sur son propre lien, oui.
-//
-// ⚠ TROIS CHOSES QUE `?apercu=1` FERME, côté `apps/menages/public.html` :
-//   - toute ÉCRITURE (garde posée sur `fetch`, pas sur les boutons : un bouton
-//     qu'on oublie de masquer reste alors inoffensif) ;
-//   - l'HORODATAGE de sa dernière ouverture (le serveur refuse) : sans cela,
-//     l'hôte qui s'inquiète ferait croire qu'ELLE a regardé, et l'alerte
-//     « Ménage non reçu » se tairait à tort ;
-//   - la MÉMOIRE du jeton dans le navigateur de l'hôte (même origine), le
-//     service worker et le manifeste.
-//
-// ⚠ CE QUE CELA COÛTE, ET C'EST ASSUMÉ : le jeton entre dans l'attribut `src`
-// de l'iframe, donc dans le DOM de l'écran de l'hôte. Il n'y entre qu'à
-// l'ouverture de cet onglet-là, jamais au chargement de la fiche.
-function htmlOngletVoit () {
-  const f = cfg.fiche
-  const p = f.personne
-  const peut = (f.droits || {}).equipe === 'write'
-  const cadre = p.a_un_lien
-    ? (cfg.lienApercu
-        ? `<iframe class="men-cfg__tel" src="${esc(cfg.lienApercu)}" loading="lazy"
-             referrerpolicy="no-referrer" title="${esc(t('menages.equipe.config.sa_page'))}"></iframe>`
-        : `<div class="men-cfg__tel men-cfg__tel--vide"><span class="caption muted">${esc(
-             cfg.lienErreur ? t('menages.equipe.config.apercu_ko') : t('common.loading'))}</span></div>`)
-    : ''
-  return `
-  <section class="men-cfg__sec men-cfg__voit">
-    ${cadre}
-    <div class="men-cfg__voitTxt">
-      <h3 class="men-cfg__h3" data-i18n="menages.equipe.config.sa_page"></h3>
-      <p class="caption muted" data-i18n="menages.equipe.config.sa_page_aide"></p>
-      ${p.a_un_lien ? `<div class="men-cfg__voitBtns">
-        ${peut ? `<button type="button" class="btn btn--primary" data-cfg-envoyer>
-          ${icone('i-send')}<span data-i18n="menages.equipe.config.envoyer"></span></button>` : ''}
-        <button type="button" class="btn btn--secondary" data-cfg-ouvrir>
-          ${icone('i-link')}<span data-i18n="menages.equipe.config.ouvrir"></span></button>
-        ${peut ? `<button type="button" class="btn btn--secondary" data-cfg-nouveau>
-          ${icone('i-key')}<span data-i18n="menages.equipe.config.nouveau_lien"></span></button>` : ''}
-      </div>
-      ${peut ? `<p class="caption muted" data-i18n="menages.equipe.config.nouveau_lien_av"></p>` : ''}`
-      : `<p class="men-cfg__av" data-i18n="menages.equipe.config.sans_lien"></p>`}
-    </div>
-  </section>`
-}
-
-// Le lien du cadre n'est demandé QU'À L'OUVERTURE de cet onglet, et une seule
-// fois par fiche : c'est son mot de passe, il n'a pas à voyager pour les deux
-// autres onglets.
-async function chargerApercu () {
-  if (cfg.lienApercu || cfg.lienEnCours) return
-  const id = cfg.profilId
-  cfg.lienEnCours = true
-  try {
-    const lien = await lienDElle()
-    if (cfg.profilId !== id) return
-    if (!estSaPage(lien)) throw new Error('ce lien ne mene pas a sa page')
-    cfg.lienApercu = enApercu(lien)
-    cfg.lienErreur = false
-  } catch (e) {
-    logger.error('Menages', 'aperçu', e)
-    if (cfg.profilId === id) cfg.lienErreur = true
-  } finally {
-    cfg.lienEnCours = false
-  }
-  if (cfg.onglet === 'voit') renderConfig()
-}
-
 // ─── Les gestes ─────────────────────────────────────────────────────────────
 //
 // ⚠ CHAQUE ÉCRITURE PASSE PAR L'ENDPOINT QUI EN EST LE WRITER, jamais en
@@ -2125,7 +2080,6 @@ function brancherConfig () {
     if (d.cfgOnglet) {
       cfg.onglet = d.cfgOnglet
       renderConfig()
-      if (cfg.onglet === 'voit') chargerApercu()
       return
     }
     if (d.cfgFix) {
@@ -2303,9 +2257,9 @@ async function lienDElle () {
   return r.lien
 }
 
-// ⚠ LE CADRE N'ENCADRE QUE SA PAGE. `/api/membres action:'lien'` rend aussi,
+// ⚠ CE BOUTON NE MÈNE QU'À SA PAGE. `/api/membres action:'lien'` rend aussi,
 // pour un profil d'un autre mode d'accès, une URL d'INVITATION — une page qui
-// n'a ni mode aperçu, ni garde sur les écritures. L'écran ne vérifiait que
+// n'a ni mode lecture seule, ni garde sur les écritures. L'écran ne vérifiait que
 // `a_un_lien` (l'existence d'un jeton), qui n'est pas le même prédicat
 // (constat de la revue de 6d007f3).
 // ⚠ L'ORIGINE COMPTE AUTANT QUE LE CHEMIN (constat de la re-revue de e528ca1).
@@ -2319,10 +2273,9 @@ const estSaPage = (lien) => {
     return u.origin === location.origin && u.pathname.startsWith('/apps/menages/public')
   } catch { return false }
 }
-// Le mode lecture seule, posé au même endroit pour les deux usages : le cadre
-// ET « Ouvrir sa page ». Ce bouton est à deux centimètres du cadre — l'ouvrir
-// sans le mode défaisait les trois gardes d'un clic : horodatage, jeton rangé
-// dans le navigateur de l'hôte, service worker installé.
+// Le mode lecture seule de sa page. L'ouvrir sans lui défait trois gardes d'un
+// clic : l'horodatage de sa dernière ouverture, le jeton rangé dans le
+// navigateur de l'hôte, le service worker installé chez lui.
 const enApercu = (lien) => lien + (lien.includes('?') ? '&' : '?') + 'apercu=1'
 
 // « Envoyer le lien » : le partage natif du téléphone quand il existe (SMS,
@@ -2354,8 +2307,8 @@ async function envoyerLien () {
 async function ouvrirSaPage () {
   try {
     const lien = await lienDElle()
-    // ⚠ EN LECTURE SEULE, COMME LE CADRE. L'hôte veut voir sa page en grand,
-    // pas s'y substituer : sans le mode, ce clic horodatait sa dernière
+    // ⚠ EN LECTURE SEULE. L'hôte veut voir sa page, pas s'y substituer :
+    // sans le mode, ce clic horodatait sa dernière
     // ouverture — et le badge passait au vert sur quelqu'un qui n'a jamais
     // rien ouvert.
     // ⚠ `noopener` : la page ouverte porte son jeton dans l'URL, et on ne lui
@@ -2366,7 +2319,7 @@ async function ouvrirSaPage () {
     // propose de rejoindre le compte — et un clic de plus CONSOMMERAIT
     // l'invitation destinée à la prestataire. Le cadre refuse ce lien ; ce
     // bouton le refuse aussi.
-    if (!estSaPage(lien)) { toast(t('menages.equipe.config.apercu_ko')); return }
+    if (!estSaPage(lien)) { toast(t('menages.equipe.config.page_ko')); return }
     window.open(enApercu(lien), '_blank', 'noopener')
   } catch (e) {
     logger.error('Menages', 'ouvrir sa page', e)

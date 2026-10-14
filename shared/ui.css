@@ -1019,26 +1019,13 @@ body.men-volet-ouvert { overflow: hidden; }
 .men-cfg__champ input:disabled { opacity: 0.6; }
 .men-cfg__retirer { color: var(--danger); border-color: var(--danger); }
 
-/* L'aperçu de sa page : un cadre de téléphone, SANS aucune action. Les données
-   viennent du planning de l'hôte — jamais d'un appel à sa page avec son jeton,
-   qui horodaterait une ouverture qu'elle n'a pas faite. */
-.men-cfg__voit { display: flex; gap: var(--gap-l); align-items: flex-start; flex-wrap: wrap; }
-/* Le cadre de téléphone : SA page, en lecture seule. La hauteur est celle d'un
-   téléphone, pas celle d'un fragment — un cadre trop court ferait défiler deux
-   fois (la fenêtre, puis la page dedans) pour voir trois lignes. */
-.men-cfg__tel {
-  width: 320px; height: 580px; flex: none; display: block;
-  border: 10px solid var(--ink); border-radius: 36px; background: var(--surface);
-}
-.men-cfg__tel--vide { display: flex; align-items: center; justify-content: center; padding: 16px; }
-.men-cfg__voitTxt { flex: 1; min-width: 220px; }
-.men-cfg__voitBtns { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; margin-block-start: 14px; }
+/* Les trois gestes de son lien, dans l'onglet Configuration. En ligne tant
+   qu'ils tiennent, puis repliés : « Envoyer le lien » doit rester le premier
+   lu, c'est celui qu'on cherche. */
+.men-cfg__lienBtns { display: flex; flex-wrap: wrap; gap: 10px; margin-block: 12px; }
 
 /* Téléphone : plein écran, et les colonnes passent en une seule. */
 @media (max-width: 899px) {
-  /* Le cadre prend la largeur, avec une hauteur qui laisse voir le texte et
-     les boutons sous lui. */
-  .men-cfg__tel { width: 100%; height: 70vh; }
   .men-cfg {
     inset: 0; transform: none; width: 100%; max-height: none; height: 100%;
     border-radius: 0;
@@ -1061,8 +1048,9 @@ body.men-volet-ouvert { overflow: hidden; }
      du bien et prennent toute la largeur, au lieu de se tasser à droite. */
   .men-cfg__cells, .men-cfg__joursTete { grid-template-columns: repeat(7, 1fr); width: 100%; margin-inline: 0; }
   .men-cfg__cell { width: 100%; }
-  .men-cfg__voit { flex-direction: column; }
-  .men-cfg__tel { width: 100%; }
+  /* Les trois gestes du lien en colonne : trois boutons à libellé entier ne
+     tiennent pas sur une ligne de 390 px. */
+  .men-cfg__lienBtns { flex-direction: column; align-items: stretch; }
   .men-cfg__fix { margin-inline-start: 0; }
   .men-cfg__state { flex-wrap: wrap; }
 }

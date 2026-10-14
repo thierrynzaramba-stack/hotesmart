@@ -233,25 +233,32 @@ test('config : les quatre périodes de ratio sont celles que la BASE accepte', (
   }
 })
 
-test('config : l\'aperçu ouvre SA page en mode `apercu=1`, jamais autrement', () => {
-  // ⚠ L'INVARIANT A CHANGÉ DE FORME, PAS DE FOND (recette du 14 octobre).
-  // L'aperçu était reconstitué par l'écran ; c'est maintenant une iframe sur
-  // son vrai lien. Le danger reste le même : le chargement de sa page est le
-  // writer de sa dernière ouverture. Sans `apercu=1`, l'hôte qui s'inquiète
-  // ferait croire qu'ELLE a regardé, et l'alerte « Ménage non reçu » se
-  // tairait à tort.
+test('config : l\'écran de l\'hôte n\'appelle JAMAIS l\'endpoint de sa page', () => {
+  // ⚠ L'ONGLET « CE QU'ELLE VOIT » EST SUPPRIMÉ (décision de Thierry, 14
+  // octobre 2026), et son cadre avec : plus aucune iframe, donc plus aucun
+  // jeton dans le DOM de l'hôte. Il ne reste que « Ouvrir sa page », en
+  // lecture seule (test plus bas).
+  // L'invariant qui survit à la suppression : le chargement de sa page est le
+  // writer de sa dernière ouverture. Si cet écran l'appelait, il ferait croire
+  // qu'ELLE a regardé, et l'alerte « Non validé » se tairait à tort.
   const src = sansCommentaires(html())
-  assert.ok(src.includes("'apercu=1'"), 'le lien du cadre porte le mode aperçu')
-  // Et l'écran n'appelle toujours pas l'endpoint lui-même.
-  assert.ok(!src.includes('/api/menages-public'))
+  assert.ok(!src.includes('/api/menages-public'), 'aucun appel à sa page')
+  assert.ok(!/<iframe/.test(src), 'aucun cadre : son jeton n\'entre pas dans le DOM de l\'hôte')
+  assert.ok(src.includes("CFG_ONGLETS = ['cal', 'param']"), 'deux onglets, plus trois')
 })
 
-test('config : le lien du cadre ne survit pas au changement de fiche', () => {
-  // Le cadre d'une personne ne doit jamais s'ouvrir sur la page d'une autre.
+test('config : les trois gestes du lien sont dans l\'onglet Configuration', () => {
+  // Ils vivaient dans l'onglet supprimé. Les perdre laisserait l'hôte sans
+  // aucun moyen de transmettre le lien depuis cet écran — la fiche serait
+  // configurable par quelqu'un qui n'a jamais reçu sa page.
   const src = sansCommentaires(html())
-  const i = src.indexOf('async function ouvrirConfig')
+  const i = src.indexOf('function htmlOngletParam')
   assert.ok(i > 0)
-  assert.ok(src.slice(i, i + 700).includes('cfg.lienApercu = null'))
+  const j = src.indexOf('function htmlEval')
+  const corps = src.slice(i, j > i ? j : i + 6000)
+  for (const geste of ['data-cfg-envoyer', 'data-cfg-ouvrir', 'data-cfg-nouveau']) {
+    assert.ok(corps.includes(geste), `${geste} absent de l'onglet Configuration`)
+  }
 })
 
 test('PWA : le mode aperçu coupe les écritures, le jeton et l\'installation', () => {
@@ -330,6 +337,47 @@ test('config : « Ouvrir sa page » garde le mode lecture seule', () => {
   const corps = src.slice(i, i + 900)
   assert.ok(corps.includes('enApercu(lien)'), 'le lien ouvert porte `apercu=1`')
   assert.ok(corps.includes('estSaPage(lien)'), 'et on vérifie qu\'il mène bien à SA page')
+})
+
+test('PWA : le bouton « Vu » et son badge lisent LA MÊME règle', () => {
+  // ⚠ LE DÉFAUT DU 14 OCTOBRE, EN PLUS PETIT. Les cases de jours avaient un
+  // rendu et un clic qui avaient chacun leur idée de ce que l'écran montrait :
+  // cliquer lundi envoyait « tous les jours sauf lundi ». Ici, un badge
+  // « À VALIDER » peint par une règle et un bouton affiché par une autre
+  // donneraient le même genre d'écran — un badge sans bouton, ou l'inverse.
+  const src = sansCommentaires(lire('apps/menages/public.html'))
+  assert.ok(/function estAValider \(m\)/.test(src), 'la règle existe, et une seule fois')
+  // Le badge l'appelle…
+  const i = src.indexOf('function badgeOffre')
+  assert.ok(i > 0)
+  assert.ok(src.slice(i, i + 700).includes('estAValider(m)'), 'le badge lit la règle')
+  // …et le bouton aussi.
+  const j = src.indexOf('btnVu.style.display')
+  assert.ok(j > 0 && src.slice(j, j + 120).includes('estAValider(m)'), 'le bouton lit la MÊME')
+  // Et le geste part sur la bonne action.
+  assert.ok(src.includes("action: 'validerMenage'"))
+  assert.ok(/getElementById\('modal-vu'\)\.addEventListener\('click', validerLeMenage\)/.test(src),
+    'et il a un gestionnaire : pas un bouton mort')
+})
+
+test('PWA : « Vu » ne passe JAMAIS par la file hors ligne', () => {
+  // ⚠ `enqueuePending` garde UNE action par ménage : y mettre une validation
+  // effacerait un « fait » qui attend d'être envoyé — elle perdrait son travail
+  // au profit de l'accusé de lecture.
+  const src = sansCommentaires(lire('apps/menages/public.html'))
+  const i = src.indexOf('async function validerLeMenage')
+  assert.ok(i > 0)
+  const corps = src.slice(i, src.indexOf('async function rechargerAssignations'))
+  assert.ok(!corps.includes('enqueuePending'), 'aucune mise en file')
+  assert.ok(corps.includes('navigator.onLine === false'), 'et hors ligne, on le DIT')
+})
+
+test('PWA : l\'aperçu de l\'hôte ne montre pas le bouton « Vu »', () => {
+  // Valider depuis l'écran de l'hôte éteindrait l'alerte et les deux relances
+  // sur quelqu'un qui n'a rien lu — la faute exacte que `apercu=1` existe pour
+  // empêcher sur les autres gestes.
+  const src = lire('apps/menages/public.html')
+  assert.ok(/\.apercu #modal-vu \{ display: none !important; \}/.test(src))
 })
 
 test('config : l\'état « À jour » ne se conclut pas sur une lecture manquante', () => {

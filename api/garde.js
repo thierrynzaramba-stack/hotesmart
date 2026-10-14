@@ -170,7 +170,7 @@ module.exports = async function handler (req, res) {
 
     // ===== LES MENAGES POSES DESSUS =====
     const { data: menagesRows, error: errMen } = await supabase.from('menages')
-      .select('property_id, booking_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, assignment_reason, offered_at, accepted_at')
+      .select('property_id, booking_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, assignment_reason, offered_at, accepted_at, vu_le')
       .eq('user_id', userId)
       .in('property_id', biens.map(b => b.id))
       .gte('departure_date', du).lte('departure_date', au)
@@ -467,6 +467,14 @@ module.exports = async function handler (req, res) {
         parElle: (detailFait[`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || {}).parElle || false
       },
       porteur: nommer(m.provider_id),
+      // ⚠ « ELLE L'A VU » SE LIT SUR LE MENAGE, plus par deduction. L'instant
+      // ou la porteuse a dit « vu » depuis sa page (14 octobre 2026) : c'est ce
+      // que l'alerte « Non valide » et la fiche posent comme question, et
+      // `public_tokens.pwa_vue_le` n'y repondait que par procuration — « a-t-
+      // elle ouvert sa page un jour ? », pour tous ses menages a la fois.
+      // ⚠ NULL = NON VALIDE, ET C'EST UNE REPONSE. Ne pas le servir ferait
+      // taire l'alerte, pas l'inverse.
+      vuLe: m.vu_le || null,
       // ⚠ LE TOUR ENTIER (spec proposition-par-rang) : `proposeesA` nomme
       // toutes les personnes sollicitees en meme temps ; `proposeA` reste la
       // premiere, pour les ecrans qui n'affichent qu'un nom.

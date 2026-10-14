@@ -262,6 +262,31 @@ module.exports = async function handler(req, res) {
       })
     }
 
+    // --- VALIDER UN MENAGE QU'ELLE PORTE (« Vu », 14 octobre 2026) ---
+    //
+    // ⚠ CE QUE CE GESTE COMBLE. Une prestataire a qui le menage est ATTRIBUE
+    // D'OFFICE n'a rien a confirmer : son menage nait `accepted`, et personne
+    // ne sait donc si elle l'a lu. L'hote n'avait qu'un indice de remplacement
+    // — « a-t-elle ouvert sa page ? » — qui ne dit rien de CE menage-la.
+    //
+    // ⚠ CE N'EST NI UNE ACCEPTATION NI UN REFUS : il n'y a rien a refuser
+    // d'office, et ce bouton ne transfere aucune responsabilite. Il dit
+    // seulement « je l'ai vu », et c'est ce que l'hote attend.
+    if (action === 'validerMenage') {
+      if (!booking_id || !property_id || !departure_date) {
+        return res.status(400).json({ error: 'Champs requis manquants (booking_id, property_id, departure_date)' })
+      }
+      // ⚠ LE FORMAT SE VERIFIE ICI AUSSI. Une date non normalisee retrouve la
+      // ligne en Postgres tout en passant a cote d'une comparaison de chaines :
+      // c'est le defaut deja ferme sur `prendreMenage`.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(departure_date))) {
+        return res.status(400).json({ error: 'Date invalide' })
+      }
+      return await validerMonMenage(req, res, token, {
+        propertyId: property_id, bookingId: booking_id, departureDate: departure_date
+      })
+    }
+
     // --- PRENDRE UN MENAGE QUE PERSONNE NE PORTE (refonte PWA v2, lot 2) ---
     //
     // Le pendant en ecriture de la liste `a_prendre` servie au GET. Les gardes y
@@ -636,7 +661,7 @@ module.exports = async function handler(req, res) {
     // Desormais : pas de profil actif, pas d'acces. La garde elle-meme est posee
     // PLUS HAUT, avant les lectures lourdes — voir `profilActifDuJeton`.
     let requete = supabase.from('menages')
-      .select('booking_id, property_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at')
+      .select('booking_id, property_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, vu_le')
       .eq('user_id', userId)
       .neq('status', 'cancelled')
       .gte('departure_date', dateFrom)
@@ -910,7 +935,12 @@ module.exports = async function handler(req, res) {
         // seulement qu'une proposition est en cours (porteuse) ou qu'on la lui
         // fait (proposee) — jamais a qui d'autre.
         propose: proposeesDe(m).length > 0,
-        expire_le: proposeesDe(m).length ? m.offer_expires_at : null
+        expire_le: proposeesDe(m).length ? m.offer_expires_at : null,
+        // ⚠ `vu_le` EST SERVI MEME QUAND IL EST NUL : c'est ce nul qui fait
+        // apparaitre le bouton « Vu ». L'omettre quand il manque ferait
+        // disparaitre le bouton sur les anciens clients comme sur les neufs,
+        // sans que rien ne le signale.
+        vu_le: m.vu_le || null
       })),
       prenom: profilPresta.first_name,
       // ⚠ UNE LISTE A PART, JAMAIS MELEE A `bookings` NI A `menages` : c'est ce
@@ -1103,6 +1133,13 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
                 // recalculerait l'assignation contre sa decision.
                 assignment_reason: `Accepte par ${profil.first_name}.`,
                 accepted_at: new Date().toISOString(),
+                // ⚠ ACCEPTER VAUT VALIDER, et le dire ici evite de lui
+                // demander deux fois la meme chose : elle vient de taper
+                // « J'accepte » sur ce menage precis. Lui afficher ensuite un
+                // bouton « Vu », et lui envoyer deux relances parce qu'elle ne
+                // l'a pas tape, serait absurde — et lui apprendrait a ignorer
+                // les relances.
+                vu_le: new Date().toISOString(),
                 updated_at: new Date().toISOString() })
       .eq('id', menage.id).contains('proposee_a', [moi])
       .gt('offer_expires_at', new Date().toISOString())
@@ -1739,6 +1776,9 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
               // (« Decision humaine, conservee »).
               assigned_by: 'manual',
               assignment_reason: `Pris par ${profil.first_name}.`,
+              // ⚠ LE PRENDRE VAUT LE VALIDER : elle l'a cherche, choisi et
+              // pris. Meme raison qu'a l'acceptation d'une proposition.
+              vu_le: new Date().toISOString(),
               accepted_at: new Date().toISOString(),
               updated_at: new Date().toISOString() })
     .eq('id', menage.id)
@@ -1777,6 +1817,74 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
     console.error('[menages-public] trace de prise NON ECRITE:', menage.id, errLog.message)
   }
   return res.json({ success: true, status: 'accepted' })
+}
+
+// ─── « VU » : ELLE VALIDE UN MENAGE QU'ELLE PORTE (14 octobre 2026) ─────────
+//
+// ⚠ POURQUOI CE GESTE EXISTE. Un menage ATTRIBUE D'OFFICE nait `accepted` :
+// elle n'a rien a confirmer, et l'hote n'a donc aucun moyen de savoir si elle
+// l'a lu. C'est ce trou que ce bouton ferme, menage par menage — la ou
+// `public_tokens.pwa_vue_le` ne disait que « elle a ouvert sa page un jour ».
+//
+// ⚠ IL NE DECIDE DE RIEN D'AUTRE. Pas d'acceptation (rien a accepter), pas de
+// transfert, pas de refus : le seul effet est de poser une date. C'est
+// pourquoi il n'y a ici ni ecriture conditionnelle atomique ni journal
+// d'assignation — rien ne change de main.
+//
+// ⚠ ET IL EST IDEMPOTENT, PAR `vu_le is null`. Deux taps (reseau lent, file
+// hors ligne rejouee) ne doivent pas deplacer la date : l'hote lirait « vu a
+// 9 h 02 » sur un menage vu a 7 h 40, et la relance de 9 h aurait l'air
+// d'avoir ete declenchee pour rien.
+async function validerMonMenage (req, res, token, { propertyId, bookingId, departureDate }) {
+  const { data: pt, error: errTok } = await supabase.from('public_tokens')
+    .select('user_id').eq('token', token).maybeSingle()
+  if (errTok) {
+    console.error('[menages-public] lecture du token echec:', errTok.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!pt) return res.status(401).json({ error: 'Token invalide' })
+
+  // GARDE 1 — ETRE QUELQU'UN. Un lien sans profil actif ne porte aucun menage :
+  // il n'a rien a valider, et le laisser ecrire poserait une validation au nom
+  // de personne.
+  const porteur = await profilActifDuJeton(pt.user_id, token)
+  if (porteur.statut) return refuserPorteur(res, porteur.statut)
+  const profil = porteur.profil
+
+  // GARDE 2 — C'EST SON MENAGE. L'ecriture porte sur `provider_id = elle` :
+  // valider le menage d'une collegue eteindrait l'alerte de l'hote et les deux
+  // relances sur quelqu'un qui n'a jamais rien lu. C'est la garde qui compte
+  // ici, et elle est DANS l'update, pas testee avant.
+  //
+  // ⚠ ET SEULEMENT CE QU'ELLE PORTE, PAS CE QU'ON LUI PROPOSE : une
+  // proposition se valide en l'acceptant, ce qui pose `vu_le` au meme instant.
+  // Laisser valider une offre lui ferait croire qu'elle a repondu — et le
+  // menage expirerait chez quelqu'un d'autre.
+  const quand = new Date().toISOString()
+  const { data: maj, error: errMaj } = await supabase.from('menages')
+    .update({ vu_le: quand, updated_at: quand })
+    .eq('user_id', pt.user_id).eq('property_id', String(propertyId))
+    .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
+    .eq('provider_id', profil.id)
+    .is('vu_le', null)
+    .select('id, vu_le')
+  if (errMaj) {
+    console.error('[menages-public] validation echec:', errMaj.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ZERO LIGNE : soit elle l'avait deja valide (le cas courant — deux taps),
+  // soit ce menage n'est pas le sien. Les deux se repondent `success`, avec la
+  // date quand on peut la lire : son ecran doit finir coche dans le premier
+  // cas, et il n'a rien a apprendre du second.
+  if (!maj || !maj.length) {
+    const { data: deja } = await supabase.from('menages')
+      .select('vu_le').eq('user_id', pt.user_id).eq('property_id', String(propertyId))
+      .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
+      .eq('provider_id', profil.id).maybeSingle()
+    if (deja && deja.vu_le) return res.json({ success: true, vu_le: deja.vu_le })
+    return res.status(404).json({ error: 'Ménage introuvable' })
+  }
+  return res.json({ success: true, vu_le: maj[0].vu_le })
 }
 
 // ─── LE DELAI DE RETRAIT, REGLE PAR L'HOTE (lot 5) ──────────────────────────
