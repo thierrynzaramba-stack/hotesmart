@@ -9,9 +9,28 @@
 // crees peuvent contenir des entrees dont la CLE porte un jeton (voir le
 // filtre du `fetch` ci-dessous). L'activation supprime toute version qui n'est
 // pas celle-ci : changer le nom est ce qui les EVINCE.
-const CACHE_VERSION = 'hotesmart-clean-v4-sans-jeton';
+// ⚠ BUMPE LE 15 OCTOBRE 2026, ET C'EST CE QUI FAIT ARRIVER LA REFONTE V5
+// jusqu'à une PWA installée (constat de la revue de 41d4afe). Sans bump, le
+// `install` ne se rejoue pas — sw.js n'aurait pas changé — et l'entrée
+// `./public.html` du cache précédent reste celle figée la veille. Or les
+// navigations de la prestataire portent TOUJOURS un jeton, donc le handler
+// `fetch` ne les remet jamais en cache (`avecJeton`, plus bas) : ouverte hors
+// ligne, elle aurait vu l'ancienne page indéfiniment, même après dix passages
+// en ligne.
+const CACHE_VERSION = 'hotesmart-clean-v5-charte';
+// ⚠ LES DEUX FEUILLES DE STYLE SONT DANS LA COQUILLE DEPUIS LA CHARTE V5
+// (constat de la revue de 41d4afe). `public.html` remappe les seize variables
+// de `public/style.css` SUR les tokens de `theme.css` : sans `theme.css`, les
+// valeurs de repli de l'ancienne feuille sont détruites elles aussi, et
+// l'écran ne se contente pas d'être dépouillé — il devient inutilisable
+// (fonds transparents, `min-height: var(--control)` à `auto`, tailles de
+// police initiales). Une dépendance dont l'absence casse l'écran se précache.
+// La police, elle, reste dehors : son absence fait retomber sur `system-ui`,
+// ce qui est une dégradation, pas une panne.
 const OFFLINE_URLS = [
   './public.html',
+  '/shared/theme.css',
+  '/public/style.css',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];
@@ -58,6 +77,15 @@ self.addEventListener('fetch', (event) => {
   // est relu depuis le stockage local.
   const avecJeton = req.url.includes('token=') || req.url.includes('apercu=1');
   // Pour les autres ressources (HTML/CSS/JS/icones): network-first
+  // ⚠ LE REPLI SUR LA COQUILLE NE VAUT QUE POUR UNE NAVIGATION (constat de la
+  // revue de 41d4afe). Il répondait `public.html` à N'IMPORTE QUELLE requête
+  // ratée — donc à `/shared/theme.css` sur un premier chargement en réseau
+  // faible : le navigateur recevait du `text/html` pour une feuille de style,
+  // la refusait, et la page tombait sans aucune de ses variables. Une
+  // sous-ressource qui manque doit échouer comme elle échouerait sans service
+  // worker ; le document, lui, garde son repli — c'est la raison d'être de
+  // cette application.
+  const navigation = req.mode === 'navigate';
   event.respondWith(
     fetch(req)
       .then((res) => {
@@ -67,7 +95,11 @@ self.addEventListener('fetch', (event) => {
         }
         return res;
       })
-      .catch(() => caches.match(avecJeton ? './public.html' : req)
-        .then((cached) => cached || caches.match('./public.html')))
+      .catch(() => caches.match(avecJeton && navigation ? './public.html' : req)
+        .then((cached) => {
+          if (cached) return cached;
+          if (navigation) return caches.match('./public.html');
+          return Response.error();
+        }))
   );
 });

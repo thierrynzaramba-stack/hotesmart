@@ -4582,6 +4582,56 @@ Les deux nouveaux fonds (pastille noire d'aujourd'hui, hachures d'absence)
 lettre, ni un point, ni un tiret. Ce n'est pas une ruse — c'est la même limite
 qui lui évite d'attraper `.dispo-case.manuel::before`, et le test le dit.
 
+### Les dix constats de la revue, et ce qu'ils ont appris
+
+Aucun de sécurité ; tous intégrés dans le commit suivant. Trois méritent d'être
+retenus au-delà de ce lot.
+
+**1. Une pastille noire ne suffit pas : tout ce qui se dessine dessus doit
+s'inverser avec elle.** `.dispo-case.auj` posait bien le fond noir et inversait
+le compteur — mais pas le NUMÉRO. La règle qui le colore
+(`.a-moi:not(.off):not(.conge):not(.passe) .dispo-num`) pèse (0,5,0), chaque
+`:not()` comptant sa classe, contre (0,4,0) pour celle d'aujourd'hui, et elle
+est déclarée après : **un jour où elle a un ménage aujourd'hui — le cas le plus
+fréquent de l'écran — perdait sa date, #222222 sur #222222.** Même famille pour
+le contour de sélection de l'appui long et le pointillé du congé, tous deux
+noirs sur noir.
+
+**2. Une PWA hors ligne ne peut pas dépendre d'une feuille qu'elle ne précache
+pas.** Le remappage fait de `theme.css` une dépendance DURE : il pointe les
+seize variables de `public/style.css` SUR ses tokens, donc sans lui les valeurs
+de repli de l'ancienne feuille sont détruites elles aussi — l'écran n'est pas
+dépouillé, il est inutilisable. Pire, le service worker repliait **toute**
+requête ratée sur `public.html` : le navigateur recevait du `text/html` pour une
+feuille de style. Le repli ne vaut désormais que pour une NAVIGATION
+(`req.mode === 'navigate'`) ; une sous-ressource qui manque échoue comme elle
+échouerait sans service worker. Et les deux feuilles sont entrées dans
+`OFFLINE_URLS`. ⚠ **Corollaire** : une refonte visuelle de cette page oblige à
+bumper `CACHE_VERSION`, sans quoi elle n'atteint jamais une PWA installée — les
+navigations portent toujours un jeton, donc le handler `fetch` ne les remet
+jamais en cache.
+
+**3. Un remappage peut retourner un token contre lui-même.** `--amber:
+var(--amber-text)` faisait lire `var(--amber)` à #B87500, un brun sombre, là où
+la charte veut l'ambre franc : le compteur des nouveautés sortait comme une
+alerte. La leçon est générale — **avant de remapper un nom, chercher qui le
+lit** : si une règle attend la valeur D'ORIGINE du token, le remappage la
+trahit en silence.
+
+Les autres : la cible tactile des pastilles tombée à 40 px (une `margin` est
+hors de la zone de frappe, un `padding` dedans — d'où `background-clip:
+content-box`) ; le contraste de la voie ambre à 3,45:1, sous le seuil AA, en
+9 px gras (passé à `--warn`, 5,1:1) ; un `@media (max-width: 440px)` écrasé par
+le `@media (max-width: 900px)` déclaré plus bas, qui matche aussi à 390 px ; et
+un commentaire qui invoquait une « référence circulaire » qui n'en était pas —
+dans un dépôt où un document a déjà affirmé le contraire du code, **un
+commentaire faux à côté d'une règle juste est de la dette**.
+
+Restent hors périmètre, à trancher par Thierry : `<meta name="theme-color">` et
+`background_color`/`theme_color` de `api/manifest.js` sont encore TERRACOTTA —
+la PWA installée ouvre sur un écran de démarrage terre cuite avant d'afficher
+une page noir et blanc.
+
 ### Les captures
 
 `docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et

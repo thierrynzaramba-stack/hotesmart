@@ -45,15 +45,22 @@
       /* ⚠ `--border` N'EST PAS REMAPPÉ, ET C'EST VOLONTAIRE : le token
          `--border` de theme.css est exactement la bordure de carte
          V5, plus nette que l'ancien `rgba(0,0,0,.1)`. Le redéfinir ICI sur
-         `--line` aurait en plus rendu `--border2: var(--border)` circulaire —
-         les deux vivent sur le MÊME élément, `:root` et `html` étant un seul
-         nœud. Les séparateurs fins prennent `var(--line)` nommément, là où
-         ils comptent. */
+         `--line` aurait fait valoir `--border2` la même chose que `--border`,
+         puisque les deux vivent sur le MÊME élément et que la valeur se résout
+         à l'usage : le gris de bordure et le gris de séparateur auraient
+         fusionné. (La première version de ce commentaire parlait de référence
+         circulaire : c'était faux, et un commentaire faux à côté d'une règle
+         juste est de la dette — constat de la revue de 41d4afe.) Les
+         séparateurs fins prennent `var(--line)` nommément, là où ils comptent. */
       --border2: var(--border);
       --green: var(--ok);
       --green-bg: var(--ok-soft);
-      --amber: var(--amber-text);
-      --amber-bg: var(--amber-soft);
+      /* ⚠ `--amber` ET `--amber-bg` NE SONT PAS REMAPPÉS (constat de la revue
+         de 41d4afe). Les pointer sur `--amber-text` faisait lire `--amber` à
+         #B87500 — un brun sombre — là où la charte veut l'ambre franc : le
+         compteur des nouveautés sortait comme une alerte, et sous le seuil de
+         contraste. Non remappés, ils prennent la valeur de theme.css, chargé
+         APRÈS `public/style.css`. Personne d'autre ne les lit (vérifié). */
       --radius: var(--radius-tile);
       --radius-lg: var(--radius-card);
       --primary: var(--ink);
@@ -230,6 +237,13 @@
                                             text-decoration-color: var(--on-ink); }
     .dispo-case.auj:not(.vide) .dispo-compte { background: var(--on-ink); color: var(--ink); }
     .dispo-case.auj:not(.vide).manuel::before { background: var(--on-ink); }
+    /* ⚠ ET TOUT CE QUI SE DESSINE SUR CETTE CASE S'INVERSE AVEC ELLE (constat
+       de la revue de 41d4afe) : le contour de sélection de l'appui long était
+       noir à l'intérieur d'une case noire — elle glissait son doigt depuis
+       aujourd'hui et rien ne s'allumait — et le pointillé du congé disparaissait
+       de la même façon, sa couleur étant écrasée par la règle du jour courant. */
+    .dispo-case.auj:not(.vide).sel { outline-color: var(--on-ink); }
+    .dispo-case.auj:not(.vide).conge { border-color: var(--muted-2); }
     /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « ce jour-la a ete
        regle a la main » — par elle OU par son employeur depuis le 14 octobre
        2026 ; le TITRE de la case dit lequel des deux, et UN SEUL point sert aux
@@ -289,7 +303,14 @@
        numero barre a specificite egale, cette regle le rallumait en plein noir
        gras sur les cases `conge.a-moi` et `a-moi.passe` — celles qui portent
        deja le plus de marques. */
-    .dispo-case.a-moi:not(.off):not(.conge):not(.passe) .dispo-num {
+    /* ⚠ `:not(.auj)` : SANS LUI, LE JOUR LE PLUS LU DE L'ÉCRAN PERDAIT SA DATE
+       (constat de la revue de 41d4afe). Cette règle pèse (0,5,0) — chaque
+       `:not()` compte sa classe — contre (0,4,0) pour celle qui inverse le
+       numéro sur la pastille noire d'aujourd'hui, et elle est déclarée APRÈS :
+       une case « aujourd'hui + un ménage », c'est-à-dire le cas le plus
+       fréquent, sortait en #222222 sur #222222. La couleur du compteur, elle,
+       avait bien été inversée — c'est le numéro qui manquait. */
+    .dispo-case.a-moi:not(.off):not(.conge):not(.passe):not(.auj) .dispo-num {
       color: var(--text); font-weight: 700; }
     /* ⚠ LE PASSE GARDE SON VERT, et l'opacite fait le travail d'estompe.
        Le repeindre en gris le rendait INDISTINGUABLE d'un jour passe sans
@@ -560,10 +581,15 @@
        revenant sur celle du meme jour). C'etaient des pastilles d'information ;
        ce sont maintenant de vraies cases a cocher, avec une cible tactile de
        44 px comme le reste de cet ecran. */
-        /* ⚠ RONDES ET DE 40 px (charte V5). La cible tactile reste à 44 px par la
-       hauteur de ligne : c'est le DESSIN qui fait 40, pas la zone qu'on vise. */
+        /* ⚠ RONDES DE 40 px, MAIS CLIQUABLES SUR 44 (constat de la revue de
+       41d4afe). La première version posait `width: 40px` + `margin: 2px` : une
+       marge est HORS de la zone de frappe, et la cible tombait donc à 40 px —
+       la seule entorse à une règle que ce fichier réaffirme six fois. Le
+       `padding` reste dans la zone, et `background-clip: content-box` dessine
+       le rond sur les 40 px intérieurs. */
     .dispo-pastille { display: inline-flex; align-items: center; justify-content: center;
-                      width: 40px; height: 40px; margin: 2px; border-radius: 50%;
+                      box-sizing: border-box; width: 44px; height: 44px; padding: 2px;
+                      background-clip: content-box; border-radius: 50%;
                       font-size: var(--fs-caption); font-weight: var(--fw-semibold);
                       background: var(--surface-2); color: var(--muted);
                       cursor: pointer; user-select: none; border: 1px solid transparent; }
@@ -578,22 +604,20 @@
     .dispo-ligne-ab.fige .dispo-pastille { cursor: default; opacity: .55; }
     /* ⚠ SEPT PASTILLES DE 44 px FONT 308 px : avec l'étiquette « Semaine A »
        sur la même ligne, il en manque soixante, et la rangée se repliait en
+       4 + 3 — les deux lignes A et B perdant alors l'alignement qu'on vient
+       justement y comparer. L'étiquette passe donc au-dessus À TOUTE LARGEUR :
+       cette carte vit dans une feuille de 400 px, sur un téléphone comme sur
+       un ordinateur, et une requête de média sur la FENÊTRE ne voyait pas le
+       repli qui se produisait quand même sur grand écran. */
+    .dispo-tag.a, .dispo-tag.b { flex-basis: 100%; justify-content: flex-start;
+                                 background: none; height: 20px; padding: 0;
+                                 min-width: 0; margin-bottom: 2px; }
+    .dispo-ligne-ab { gap: 0; }
+    /* ⚠ SEPT PASTILLES DE 44 px FONT 308 px : avec l'étiquette « Semaine A »
+       sur la même ligne, il en manque soixante, et la rangée se repliait en
        4 + 3. Les deux lignes A et B perdaient alors leur alignement — or c'est
        exactement ce qu'on vient y comparer. L'étiquette passe au-dessus, et la
        semaine tient d'un seul tenant. (Constat J.11 point 6.) */
-    @media (max-width: 440px) {
-      .dispo-ligne-ab { gap: 0; }
-      .dispo-tag.a, .dispo-tag.b { flex-basis: 100%; justify-content: flex-start;
-                                   background: none; height: 20px; padding: 0;
-                                   min-width: 0; margin-bottom: 2px; }
-      /* ⚠ ET LES VINGT-DEUX PIXELS QUI MANQUAIENT SE PRENNENT SUR LES MARGES,
-         PAS SUR LA CIBLE TACTILE. Sept pastilles de 44 px (40 de dessin, 2 de
-         marge de chaque côté) font 308 px ; la feuille n'en offrait que 286.
-         Rétrécir la pastille aurait réglé la mise en page en cassant la règle
-         qui compte — 44 px sous le pouce, partout sur cet écran. */
-      #modal-body > .dispo-carte { padding: 14px 10px; }
-      .modal { padding-left: 14px; padding-right: 14px; }
-    }
     .dispo-mini { display: inline-flex; align-items: center; min-height: var(--control);
                   padding: 0 16px; font-family: var(--font); font-size: var(--fs-caption);
                   font-weight: var(--fw-semibold); border-radius: var(--radius-pill);
@@ -665,9 +689,13 @@
                      margin-top: 3px; }
         /* ⚠ L'UN DES DEUX SEULS AMBRES DE L'ÉCRAN (l'autre est le compteur des
        nouveautés) : « HôteSmart attend votre décision, et un délai court ». */
+    /* ⚠ `--warn`, PAS `--amber-text` : #B87500 sur #FFF4E0 donne 3,45:1, sous
+       le seuil AA — et en 9 px gras, aucune exemption « grand texte » ne joue.
+       `--warn` (#9A5B00) sur le même fond passe à 5,1:1 (constat de la revue
+       de 41d4afe). Le bord garde l'ambre franc, qui ne porte pas de texte. */
     .badge-offre { display: inline-block; font-size: 9px; font-weight: var(--fw-bold);
                    letter-spacing: 0.3px; border: 1px solid var(--amber);
-                   background: var(--amber-soft); color: var(--amber-text);
+                   background: var(--warn-soft); color: var(--warn);
                    border-radius: var(--radius-pill); padding: 2px 8px; margin-top: 3px; }
     /* ⚠ 44 px DE HAUT, C'EST LA CIBLE TACTILE, pas une marge decorative. C'est
        le SEUL chemin de retour vers le calendrier depuis que la barre d'onglets
@@ -733,7 +761,12 @@
     .modal-row span:first-child { color: var(--muted); }
     .modal-row span:last-child { font-weight: var(--fw-semibold); text-align: right; }
     .modal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
-    .modal-actions .btn { flex: 1; min-width: 130px; }
+    /* ⚠ `1 1 auto`, PAS `1` : à parts égales, « Je prends ce ménage » (170 px
+       de texte) et « Fermer » (90 px) recevaient la même largeur, et le
+       premier passait sur deux lignes dans un bouton deux fois trop large pour
+       le second. La base `auto` leur laisse leur largeur naturelle, puis
+       partage ce qui reste. */
+    .modal-actions .btn { flex: 1 1 auto; min-width: 110px; }
     /* ⚠ APERÇU : l'hôte regarde, il n'agit pas. Les gestes qui engagent la
        prestataire disparaissent — « Fermer » reste, sinon la fenêtre modale
        devient un piège. Le garde réel est sur `fetch` : ceci évite d'offrir un
@@ -767,8 +800,8 @@
                      line-height: 1.5; display: none; }
     .modal-success.visible { display: block; }
     /* Le second et dernier ambre : il porte « à confirmer — 4 h restantes ». */
-    .modal-warning { background: var(--amber-soft); border: 1px solid var(--amber);
-                     color: var(--amber-text); border-radius: var(--radius-tile);
+    .modal-warning { background: var(--warn-soft); border: 1px solid var(--amber);
+                     color: var(--warn); border-radius: var(--radius-tile);
                      padding: 12px 14px; margin-top: 14px; font-size: var(--fs-caption);
                      line-height: 1.5; display: none; }
     .modal-warning.visible { display: block; }
@@ -896,6 +929,22 @@
         font-size: 12px;
       }
     }
+    /* ⚠ CE BLOC EST DÉCLARÉ EN DERNIER, ET CE N'EST PAS DU RANGEMENT
+       (constat de la revue de 41d4afe). Il vivait plus haut, avec les
+       pastilles : le `@media (max-width: 900px)` ci-dessus matche AUSSI à
+       390 px, et son raccourci `padding:` sur `.modal` écrasait, à spécificité
+       égale et plus tard, les marges que ce bloc-ci vient réduire. Les
+       « vingt-deux pixels pris sur les marges » n'existaient donc pas. */
+    @media (max-width: 440px) {
+      /* ⚠ ET LES VINGT-DEUX PIXELS QUI MANQUAIENT SE PRENNENT SUR LES MARGES,
+         PAS SUR LA CIBLE TACTILE. Sept pastilles de 44 px (40 de dessin, 2 de
+         marge de chaque côté) font 308 px ; la feuille n'en offrait que 286.
+         Rétrécir la pastille aurait réglé la mise en page en cassant la règle
+         qui compte — 44 px sous le pouce, partout sur cet écran. */
+      #modal-body > .dispo-carte { padding: 14px 10px; }
+      .modal { padding-left: 14px; padding-right: 14px; }
+    }
+
   </style>
 </head>
 <body>
