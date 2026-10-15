@@ -350,8 +350,11 @@ panne n'échoue pas l'enregistrement des liaisons.
 
 ## B. Côté prestataire — la PWA (« HôteSmart Clean »)
 
-Sources lues en entier : `apps/menages/public.html` (4 563 l.),
-`apps/menages/sw.js` (49 l.), `api/menages-public.js` (2 554 l.).
+Sources lues en entier : `apps/menages/public.html` (4 951 l.),
+`apps/menages/sw.js` (73 l.), `api/menages-public.js` (2 723 l.),
+`lib/cleaning/relance-validation.js`, `lib/cleaning/notifier-prestataire.js`.
+**Relue et mise à jour le 15 octobre 2026** (tout ce qui a été ajouté depuis le
+13 octobre est marqué « **+ 14-15 oct.** » ; le récapitulatif est en B.7).
 
 ### B.1 Accès, identité, installation
 
@@ -360,7 +363,9 @@ Sources lues en entier : `apps/menages/public.html` (4 563 l.),
 | Entrée | `?token=` dans l'URL, persisté `localStorage['hotesmart-clean-token']` ; sans token → « ❌ Lien invalide » | `getToken()` |
 | Identité serveur | **Le jeton ne vaut rien par lui-même** : il DÉSIGNE un profil (`profiles.pwa_token` + `access_mode='lien'` + `active`). Pas de profil actif = 401 partout (lecture ET écriture), « pont de convergence » fermé le 14/09/2026 (fuite Tiphaine : 11 séjours + noms voyageurs via ligne `public_tokens` orpheline) | `profilActifDuJeton()` — garde unique de TOUT l'endpoint, posée AVANT les lectures lourdes |
 | Panne ≠ jeton invalide | Toute erreur PostgREST rend **503**, jamais 401 : le front purge sa file hors ligne sur tout 4xx, un 401 de panne détruirait un « ménage fait » en attente | règle répétée sur chaque chemin |
-| PWA | Manifest dynamique `/api/manifest?token=...`, SW `sw.js` : **network-first**, cache `hotesmart-clean-v3-refonte` (coquille `public.html` + 2 icônes), `/api/` et `supabase.co` **jamais cachés**, fallback hors ligne = coquille. Bump manuel de `CACHE_VERSION` à chaque refonte | `sw.js` |
+| PWA | Manifest dynamique `/api/manifest?token=...`, SW `sw.js` : **network-first**, cache `hotesmart-clean-v4-sans-jeton` (coquille `public.html` + 2 icônes), `/api/` et `supabase.co` **jamais cachés**, fallback hors ligne = coquille. Bump manuel de `CACHE_VERSION` à chaque refonte | `sw.js` |
+| **+ 14-15 oct. — aucune URL à jeton en cache** | La CLÉ du Cache Storage est l'URL entière : `public.html?token=…` y rangeait le jeton, et le scope interceptait l'aperçu de l'hôte. Ces URL ne sont plus mises en cache — **mais elles répondent quand même** (repli sur `./public.html`, jeton relu du stockage local), sinon le mode hors ligne tombait à 100 % des lancements, le `start_url` d'une PWA installée portant toujours le jeton | `sw.js`, revues de `6d007f3` et `e528ca1` |
+| **+ 14-15 oct. — aperçu par l'hôte** (`?apercu=1`) | L'hôte ouvre SA page depuis la fiche, dans un cadre. Quatre interdits, aucun cosmétique : (1) **écrire** — le garde est sur `fetch`, pas sur les boutons ; (2) **horodater sa dernière ouverture** — le serveur refuse, sinon l'alerte « ménage non vu » se tairait à tort ; (3) **garder son jeton** ; (4) **s'installer** (ni SW ni manifeste). Et `localStorage` est remplacé par une **mémoire volatile** : ses ménages faits, sa file hors ligne et ses notifications acquittées n'atterrissent pas chez l'hôte (même origine). Si ce remplacement échoue, **la page refuse de s'ouvrir** au lieu de retomber en silence sur le défaut | `public.html` l. 833-905 |
 | Structure | Plus d'onglets depuis le 18/09 : **le calendrier EST la page** (`#dispo-vue`). Vue Avis = détour par la porte `#entete-ratio`, retour « ‹ Mon calendrier ». Réglages = feuille modale (nœuds déplacés par `appendChild`, jamais recréés) | refonte v7, KB |
 
 ### B.2 Ce qu'elle voit (GET `/api/menages-public?token=`)
@@ -369,7 +374,7 @@ Toutes les lectures passent par le cœur (`bookings_snapshot`, `menages`, …) �
 zéro appel provider (conforme règle cœur-de-données).
 
 - **`bookings`** — ses réservations à ménage : `bookings_snapshot` filtré par fenêtre **J−14 / J+`visibility_days`** (défaut 30 ; le J−14 est la famille 4 des tests rouges), filtre de dates **dans la requête SQL** (incident troncature 1000 lignes du 07/09), statut canonique `readStatus` = `confirmed` seul (pas de ménage fantôme sur `black`/`request`), puis **intersecté avec `menages` à elle** (`provider_id = elle` OU `proposee_a ∋ elle`). Champs : propId, propName, arrival, departure, **firstName, lastName** (nom du voyageur), numAdult, numChild.
-- **`menages`** — ses assignations avec `role` (`porteur`/`propose`), `propose` (booléen : une proposition est en cours), `expire_le`. **Jamais le nom ni l'id des collègues du tour.**
+- **`menages`** — ses assignations avec `role` (`porteur`/`propose`), `propose` (booléen : une proposition est en cours), `expire_le`, **+ 14-15 oct. `vu_le`** (servi MÊME NUL : c'est ce nul qui fait apparaître le bouton « Vu » ; absent du contrat si la migration `2026-10-14-menage-vu-le` n'est pas collée, et l'écran ne demande alors rien). **Une validation ne vaut que pour qui l'a posée** : `validePar` rend `null` dès que `vu_par ≠ provider_id` — un ménage qui change de main perd la validation de la précédente. **Jamais le nom ni l'id des collègues du tour.**
 - **`a_prendre`** — ménages que personne ne porte (`orphaned`, ou `unassigned` non verrouillé `manual` par l'hôte), sur ses biens, bornés aujourd'hui-Paris → fin de fenêtre : **ni voyageur, ni occupation, ni arrivée** (décision post-fuite 14/09). Liste blanche : booking_id, property_id, property_name, departure_date, status.
 - **`autrui`** — ménages pris par d'autres (spec visibilité 02/10) : relu à CHAQUE GET depuis `menage_visibilite` (`par_bien` × liaisons actives + `profils_vus`), statuts `accepted/started/completed`, dédoublonné contre les siens, **liste blanche : bien (nom seul), date, heure de départ du bien, prénom+nom de la prestataire** — aucun identifiant, donc aucune action possible. Plafond 500 + warning troncature. Panne → 503 (pas de vue faussement vide).
 - **`comments`** — consignes de l'hôte (`menage_comments`) par booking_id (⚠ lues par `.in('booking_id', …)` sans filtre d'assignation propre — voir D).
@@ -391,11 +396,12 @@ zéro appel provider (conforme règle cœur-de-données).
 | `declarerConge` / `retirerConge` | `conges_plages` | write ; dates validées `cleJour` ; fin < aujourd'hui refusée (un congé en cours passe) ; durée ET distance ≤ `HORIZON_CONGE_JOURS=400` (même plafond que l'hôte, importé) ; **idempotence par jumelle** (première ligne, jamais `maybeSingle` sur table sans unicité — le TOCTOU 3G rendait 503 définitif) ; retrait : UUID validé (22P02 → 400 pas 503), `source='prestataire'` seul |
 | `reglerMesJours` | `provider_availability_rules` (insert puis désactivation **par id** — **l'ordre est la garde** : un échec laisse l'union visible, jamais zéro règle = « dispo tous les jours ») | write ; ≤ 2 lots ; `validerRegle` partagé avec l'hôte ; **aucune RRULE n'entre** ; tout validé avant d'écrire ; `apresChangementDeRegles` attendu (notification + reprise des propositions des jours retirés) |
 | `annoncerPlage` | — (lit la tâche du jour) | write ; **corps ignoré** (constat sécurité) : le résumé SMS est composé serveur depuis les marques `(glisser)`, fenêtre consommée — un appel forgé ne dicte ni ne double rien |
+| **+ 14-15 oct. `validerMenage`** | `menages.vu_le` + `vu_par` | « Vu », pas « Valider » (vocabulaire de Thierry) : un ACCUSÉ DE LECTURE sur un ménage DÉJÀ sien, qui ne prend, ne rend et ne marque rien. **Idempotent par `vu_le is null`** (deux taps, réseau lent, rejeu : le second ne réécrit pas et rend quand même `success`) — mais `.or(vu_le.is.null, vu_par.neq.moi)` : idempotent pour elle, PAS pour la précédente porteuse. `vu_par` est toujours écrit avec `vu_le` (une date sans auteur survivrait à un changement de porteuse). Une proposition ne se valide pas ici : l'accepter pose `vu_le` au même instant |
 | `markRead` | `menage_events.read` | garde de porteur ajoutée (un lien orphelin ne fait plus taire son fil) ; cloisonné `.eq('token')` |
 
 ### B.4 Mécanique front notable (à conserver dans toute refonte)
 
-- **File hors ligne** (`menages-pending-v2`) : SEULEMENT markDone/markUndone (+ markRead cumulatif). Idempotence par remplacement d'action conflictuelle ; erreur métier/4xx → abandon, 5xx/réseau → retry. **Exclus délibérément** : prise, retrait, réponse à offre (courses), absences et congés (« hors ligne, on le DIT ») — `repondreOffre` refuse même le retry de `fetchWithRetry` (rejeu non idempotent = 409 menteur).
+- **File hors ligne** (`menages-pending-v2`) : SEULEMENT markDone/markUndone (+ markRead cumulatif). Idempotence par remplacement d'action conflictuelle ; erreur métier/4xx → abandon, 5xx/réseau → retry. **Exclus délibérément** : prise, retrait, réponse à offre (courses), absences et congés (« hors ligne, on le DIT ») — `repondreOffre` refuse même le retry de `fetchWithRetry` (rejeu non idempotent = 409 menteur). **+ 14-15 oct. « Vu » en est exclu AUSSI, et ce n'est pas un oubli** : la file garde UNE action par ménage, y mettre un « vu » EFFACERAIT un « fait » qui attend d'être envoyé — elle perdrait le travail au profit de l'accusé. Hors ligne, le bouton porte le mot « Hors ligne » pendant 3,5 s puis se réarme (un seul minuteur par bouton, libellé canonique restauré, réarmement **avant** tout message — sinon un échec dans la feuille du jour laissait le bouton mort pour toujours).
 - **Rendu optimiste** : bascule d'un jour (verrou **par jour** `enVolParJour`, posé AVANT la mutation ; rattrapage par jour ; `reappliquerEnVol` sur toute relecture ; catch = relecture silencieuse avant restitution car l'écriture est idempotente et a pu aboutir) ; jours habituels (photo `reglesAvantVol` au premier envoi d'une rafale, numéro d'ordre `seqRegles`, reprise si la coche a bougé). **Pas d'optimiste** sur prise/retrait/offre (le verdict serveur fait foi, relecture complète derrière). Alternance/ancrage/congés : verrou écran tenu jusqu'au repeint (sinon perte de toutes les règles, mesurée).
 - **Jetons de lecture** partout (`lectureDispoCourante`, `chargementCourant`) : seule la dernière demande écrit à l'écran.
 - **Pannes honnêtes** : 503 sur `action=disponibilites` ne masque plus le calendrier (les ménages viennent de `loadData`) ; état `panneLecture` ≠ `sansDroit` ≠ lecture seule (3 phrases distinctes) ; sans droit, calendrier **vide pas barré**.
@@ -409,7 +415,7 @@ zéro appel provider (conforme règle cœur-de-données).
 2. **Aucun code d'arrivée ne transite** par cet endpoint ni par la PWA (l'envoi du code est côté cron `lib/cron-arrival-code.js`) — confirmé par lecture complète.
 3. `a_prendre` et `autrui` : anonymisés par construction (liste blanche champ par champ).
 4. Avis : extrait seul, badge « retour privé » côté sûr, jamais le nom du voyageur. `content_public`/`content_private` lus serveur pour l'étiquette, jamais renvoyés.
-5. `openModal` injecte `m.guestName`, `m.comment` (note hôte) et `m.arrival/departure` **sans `echapper()`** dans `innerHTML` — données du cœur écrites par la sync (XSS côté hôte/provider théorique), alors que tout le reste du fichier échappe systématiquement. → D.
+5. ~~`openModal` injecte `m.guestName`, `m.comment` et `m.arrival/departure` **sans `echapper()`**~~ — **SOLDÉ le 14 octobre** (`def72c0`, étape 0 du lot V5, D2) : la fiche échappe désormais les six champs ; la consigne et le fil échappent **puis** posent les `<br>` (dans l'autre ordre, le texte affichait « <br> » en toutes lettres — constat de la revue de `def72c0`).
 
 ### B.6 Textes en dur / i18n
 
@@ -420,6 +426,50 @@ phrase du serveur plutôt que d'en inventer une qui dirait moins ») — toute
 i18n V5 devra traiter les DEUX côtés ou passer par des codes
 (`code: 'delai_depasse'` existe déjà sur un seul chemin). Dates via
 `toLocaleDateString('fr-FR')` en dur.
+
+### B.7 Ce qui s'est ajouté depuis la rédaction de B (13 → 15 octobre 2026)
+
+Six choses, dans l'ordre où elles touchent la prestataire.
+
+1. **« Vu » : elle accuse réception d'un ménage qui est déjà le sien.**
+   Un ménage ATTRIBUÉ D'OFFICE naît `accepted` : elle n'a jamais rien eu à
+   confirmer, et l'hôte n'avait aucun moyen de savoir si elle l'avait lu. Le
+   bouton (œil + « Vu ») vit **sur la ligne, à côté d'elle**, jamais dans la
+   fiche — deux lignes peuvent être visibles en même temps, et « le ménage
+   ouvert » aurait validé le voisin. Quatre conditions, les mêmes pour le rendu
+   et pour le geste (`estPasVu`) : à elle, `vu_le` vide, pas déjà fait, pas
+   passé. Une fois posé, l'état se MONTRE (« ✓ Vu » gris, sans bouton) : sans
+   ça, le bouton disparaissait au clic et rien ne disait si le geste était
+   parti. Deux surfaces le portent — la feuille du jour et la liste des
+   30 jours — par **une seule fabrique** (`boutonVu`).
+   Commits `20fb83d`, `a140787`, `6452d75`, `10cfc74`, `66064f9`.
+2. **Ses deux relances, la veille et le jour même à 9 h de Paris**
+   (`lib/cleaning/relance-validation.js`). Tant qu'elle n'a pas touché « Vu ».
+   Le SMS **nomme le bouton** : « Un menage vous a ete attribue le … Ouvrez
+   votre page et touchez Vu. » — un message qui dirait « validez » devant un
+   bouton qui dit « Vu » la ferait chercher autre chose. La fenêtre est la
+   garde d'envoi de masse : **deux jours seulement**, une marque par ménage,
+   60 envois par cycle. Ce module **ne réassigne, n'escalade et ne retire
+   rien** : seul l'hôte change de prestataire.
+3. **Les absences « réglées par votre hôte » se voient dans son appli**
+   (14 oct., `fc6c27d` + `0d5cf44`). Le point sous la date marque désormais
+   **les deux sources** — avant, un jour réglé par l'hôte s'éteignait sans
+   aucune marque, comme un jour ordinaire hors de ses jours habituels. **Un
+   seul point** (deux points de sens différent dans 44 px, c'est un point
+   qu'on ne sait plus lire) : c'est le TITRE qui dit lequel, et il vient du
+   **sens de l'exception** (`exc.available`), jamais de l'état final du jour —
+   « Absence posée par votre employeur » / « Venue demandée par votre
+   employeur ». La feuille du jour dit les deux phrases en entier et fige le
+   segment.
+4. **La fiche échappe tout ce qui vient du cœur** (`def72c0`) — voir B.5.5.
+5. **Le mode hors ligne ne tombe plus**, et le jeton ne traîne plus dans le
+   Cache Storage ni dans le `localStorage` de l'hôte — voir B.1.
+6. **L'évaluation du voyageur s'ouvre après « Ménage fait »** (lot 5 du
+   chantier avis) : `hsBus.ouvrir('avis.questions_prestataire')`, avec le jeton
+   de la PWA comme identité. **Seulement après un succès EN LIGNE** (hors
+   ligne, le ménage n'est pas encore fait côté serveur et le cœur refuserait),
+   et le bus se charge **à la demande** — un import statique qui échoue
+   emporterait tout le script, « Ménage fait » compris.
 
 ## C. Specs et KB qui font foi
 
@@ -1544,3 +1594,281 @@ cacher** : la phrase d'état du point 1, et les avertissements du groupe 2.
 *« Le rang n'apparaît plus à l'écran »*. C'était vrai au lot 3.5 ; la spec
 « proposition par rang » du 2 octobre 2026 l'a **remis**, choisi par l'hôte.
 **Ce paragraphe du KB est à corriger au commit de la refonte.**
+
+---
+
+# J. L'appli prestataire, écran par écran — inventaire du 15 octobre 2026
+
+Lecture seule, avant la refonte V5 de `apps/menages/public.html`. Demandé par
+Thierry : chaque écran et chaque action **dans l'ordre où la prestataire les
+rencontre**, ce qu'elle voit, ce qu'elle peut faire, et **ce qui dépend des
+réglages de l'hôte**. Les captures sont dans
+`docs/specs/pwa-v5/captures/` (téléphone 390 × 844, données de test : Régina,
+La bulle, Cœur de vie 23, Ofuro Futari).
+
+## J.0 Les sept réglages de l'hôte qui changent cet écran
+
+Aucun n'est visible par elle ; tous changent ce qu'elle voit. C'est la première
+chose à savoir avant de lire la suite : **il n'y a pas une PWA, il y en a une
+par combinaison de ces sept réglages.**
+
+| Réglage | Où il vit | Ce qu'il change chez elle |
+|---|---|---|
+| `active` + `pwa_token` | `profiles`, `public_tokens` | Lien mort = **401 partout**, lecture comprise |
+| `property_ids` | `public_tokens` | Les biens qu'elle voit ; **vide = tous** (convention inverse de `profile_permissions`) |
+| `visibility_days` (défaut 30) | `public_tokens` | La profondeur de son calendrier **et** la fenêtre de son fil d'actualités (couplage implicite, D 9h) |
+| `self_availability` (défaut **none**) | `profile_permissions` | `none` : calendrier sans absences, phrase « gérées par votre employeur » · lecture : il montre, elle ne touche pas · `write` : engrenage, bascule d'un jour, congés |
+| `self_view_reviews` (défaut **true**) | `profile_permissions` | Toute la vue Avis, porte comprise |
+| `ratio_periode` | `public_tokens` | La période du ratio d'en-tête — **inatteignable depuis sa page** |
+| Visibilité d'autrui | `menage_visibilite` (par bien × liaisons actives, ou profils nommés) | La section « Pris par une autre » et les pastilles grises |
+| `retrait_delai_heures` (défaut 24) | `menage_reglages` | L'existence du bouton « Je ne peux plus le faire » ; **illisible → bouton grisé**, jamais deviné |
+| Verrou `assigned_by='manual'` | `menages` | Un ménage non attribué qu'elle **ne peut pas** prendre (« Votre hôte gère ce ménage lui-même ») |
+
+## J.1 Ouverture du lien — `01-ouverture.png`
+
+Elle reçoit un SMS avec son lien (`?token=`), l'ouvre, et le jeton se range
+dans le `localStorage` : les fois suivantes, l'URL nue suffit. Android/iOS
+proposent « Ajouter à l'écran d'accueil » (manifeste dynamique).
+
+**Ce qu'elle voit, de haut en bas** : le titre « 🧹 Planning ménages », son
+**prénom** (`public_tokens.label`), et à droite **le ratio de propreté** —
+👍 7 / 👎 1 « sur 18 avis · sur 30 jours ». Ce ratio **est la porte des avis** ;
+il n'y a plus d'onglets depuis le 18 septembre. Puis, dans l'ordre : le bandeau
+de synchronisation (masqué si rien), le fil 🔔 **Nouveautés**, la carte **Biens
+affichés**, le **calendrier de deux mois**, et sous lui la liste de ses
+**30 prochains jours**.
+
+- Sans jeton : « ❌ Lien invalide », rien d'autre (`13-lien-invalide.png`).
+- Hors réseau au démarrage : le sous-titre devient « (Hors ligne — données en
+  cache) » et la coquille s'affiche depuis le service worker.
+
+## J.2 Le fil d'actualités — en haut de la page
+
+Ce qui a changé depuis sa dernière visite, et **la seule chose de cet écran qui
+périme** : une annonce disparaît au bout de **72 h** (côté écran seulement, la
+ligne reste en base pour l'hôte).
+
+Quatre types : 🧹 **Nouveau ménage** · ✏️ **Ménage modifié** (avec le détail
+« départ : avant → après ») · ❌ **Ménage annulé** · 📝 **Note de l'employeur**
+(seule à porter le nom du voyageur et les bornes du séjour).
+
+**Ce qu'elle peut faire** : toucher une ligne pour l'acquitter, ou « ✓ Tout
+marquer lu ». L'acquittement est **persisté localement d'abord**, puis mis en
+file — il ne réapparaît pas au rechargement même hors ligne.
+
+**Vocabulaire gravé** : « Nouveau **ménage** », jamais « nouvelle
+réservation ». La réservation est le fait de l'hôte ; ce qu'elle change pour
+elle, c'est qu'un ménage apparaît.
+
+## J.3 La carte « Biens affichés »
+
+Une case par logement. C'est un **filtre d'affichage, jamais une règle** : il
+allège la silhouette du mois, il ne traverse ni la feuille du jour, ni le
+calcul « ⏭ obsolète », ni les gardes d'écriture. La liste contient aussi les
+biens des ménages **à prendre** — sans quoi un logement où elle n'a rien
+d'assigné n'y figurait pas, donc jamais coché, donc ses bulles disparaissaient
+de l'écran.
+
+## J.4 Le calendrier — le cœur de la page
+
+Deux mois (empilés sous 680 px), cases de 44 px minimum, une seule marque par
+information :
+
+| Ce qu'elle voit | Ce que ça veut dire |
+|---|---|
+| Case blanche, numéro net | Elle travaille |
+| **Numéro barré** | Elle ne travaille pas : absence, repos ou congé — **une seule marque pour les trois**, la nuance vit dans la feuille qu'on ouvre |
+| Case estompée **et** barrée | Jour passé |
+| Bordure pointillée + ✕ | Congé |
+| Fond coloré | **Un ménage à elle ce jour-là** — le fond ne code que ça |
+| Pastille chiffrée | Combien de ménages à elle (et en gris : combien pris par une autre) |
+| Bulle en haut | Combien à prendre ou à confirmer |
+| **Point sous le numéro** | Une exception existe ce jour-là — **la sienne ou celle de l'hôte** (14 oct.) ; le titre dit laquelle |
+| Lettre **A** / **B** à gauche | La semaine, quand elle travaille une semaine sur deux |
+| ⚙ **Mes jours** | L'engrenage, posé dans les cases mortes du dernier mois — **seulement si elle règle quelque chose** |
+
+**Une tape ouvre la feuille du jour, toujours** — elle ne décide plus rien, elle
+montre. **Un appui long de 400 ms immobile**, puis un glissé, règle une plage
+d'un coup (un seul SMS de résumé à l'hôte, composé **par le serveur**).
+**Un jour qui n'a rien à dire ne s'ouvre pas.**
+
+## J.5 La feuille du jour — `03`, `04`
+
+Trois sections, dans cet ordre, parce que c'est l'ordre de l'urgence :
+
+1. **Ce qu'on lui propose** (« À PRENDRE ») — le bien seul, **ni voyageur, ni
+   occupation, ni arrivée** : le serveur ne les envoie même pas.
+2. **À confirmer** — les propositions qui lui sont faites, avec le délai qui
+   court (« À CONFIRMER · 4 h restantes »).
+3. **Pris par une autre** — bien, heure, prénom et nom de la collègue. Pas un
+   bouton : aucune action n'existe, l'écran n'en promet pas.
+4. **Ses ménages à elle** — une ligne par ménage, ses marques (✓ FAIT,
+   ⏳ en attente d'envoi, 📝 consigne, ⏭ la réservation a changé) et, **à
+   côté** de la ligne, le bouton 👁 **Vu**.
+5. **Disponibilité** — le segment « Je suis disponible / Je ne suis pas
+   disponible ». Il **n'apparaît pas** si elle porte un ménage ce jour-là (un
+   ménage FIXE la journée), ni sous une proposition (c'est le refus qui
+   libère), ni si elle ne règle rien. Il est **figé**, avec sa phrase, quand le
+   jour est un congé ou quand l'exception vient de l'hôte.
+
+## J.6 La fiche d'un ménage — `05`, et l'offre `06`
+
+Voyageur, adultes, enfants, arrivée, départ, statut ; la **note de
+l'employeur** en encadré ; puis les boutons, **mutuellement exclusifs** :
+
+- **✓ Marquer fait** — le geste central. Refusé si le voyageur n'est pas
+  encore parti (« 🔒 ») et si le ménage est obsolète (« ⏭ un voyageur suivant
+  est déjà arrivé »). En succès **et en ligne**, les questions d'évaluation du
+  voyageur s'ouvrent derrière. **Hors ligne : mis en file**, et c'est le seul
+  geste qui l'est.
+- **↩ Marquer non fait** — l'inverse, même file.
+- **✓ J'accepte / Je ne peux pas** — sur une proposition seulement. Jamais de
+  file (accepter est une **course**, pas un geste idempotent), jamais de rejeu,
+  et le message final dit lequel des trois cas s'est produit : quelqu'un porte
+  encore, la suivante est sollicitée, ou l'hôte est prévenu.
+- **Je ne peux plus le faire** — n'apparaît que si le délai de l'hôte le
+  permet, compté **en heure de Paris** comme le serveur. Confirmation, parce
+  que le geste engage quelqu'un d'autre.
+
+## J.7 Sa liste des 30 prochains jours — `02`
+
+Sous le calendrier : il dit **où et quand**, elle dit **quoi**. Ses ménages et
+ceux à prendre, mêlés et triés par date ; le jour courant en évidence ; les
+jours où elle s'est dite absente portent « · vous êtes absente ». Chaque ligne
+ouvre **la même fiche** que la feuille du jour, et porte le même bouton « Vu ».
+
+## J.8 Ses jours, ses absences, ses congés — `08`
+
+Derrière l'engrenage, une feuille modale (les cartes sont **déménagées**, pas
+recréées — elles gardent leurs écouteurs) :
+
+- **Mes jours de travail** — sept cases à cocher, ou deux lignes **Semaine A /
+  Semaine B** quand elle travaille une semaine sur deux, avec la phrase
+  d'ancrage (« Cette semaine est une **semaine A** »), le lien d'inversion et
+  « Revenir à toutes les semaines ». Tout s'enregistre **au changement d'une
+  case**, en **un seul appel** (insert puis désactivation par id : un échec
+  laisse l'union visible, jamais zéro règle — c'est-à-dire « disponible tous
+  les jours », l'inverse de ce qu'elle demandait).
+- **Je serai absente plusieurs jours** — du / au / motif / Poser, et la liste
+  des congés avec « Annuler » sur les siens seulement (ceux de l'hôte portent
+  « — posé par votre employeur »).
+- Aucune RRULE ne descend jamais jusqu'ici ; une règle que l'écran ne sait pas
+  afficher le **dit** (« Demandez à votre employeur »).
+- **Elle ne redessine pas ses jours ATTITRÉS** (`weekdays` sur la liaison) :
+  l'aide le précise — « pour être proposée un jour de plus, dites-le aussi à
+  votre employeur : c'est lui qui confie les logements ».
+
+## J.9 Ses avis — `09`
+
+On y entre par le ratio, on en revient par « ‹ Mon calendrier ». Un sélecteur
+de période **libre** (mémorisé sur son appareil), le compteur de la période
+consultée, puis les avis **qui parlent de propreté** : pouce, dates du séjour
+étiquetées, nom du bien, badge « retour privé », et l'**extrait seul** — jamais
+le nom du voyageur, jamais le texte complet. Un avis sans extrait le **dit**
+plutôt que d'afficher une carte vide. Une panne de comptage ne montre jamais
+« 0 avis » : elle montre « Compteurs indisponibles ».
+
+## J.10 Les états dégradés — `10`, `11`, `12`
+
+Quatre états, quatre phrases distinctes, et c'est volontaire :
+
+| État | Ce qui s'affiche |
+|---|---|
+| **Sans droit** (`self_availability: none`) | Calendrier **vide, pas barré** (le serveur ne dit pas qu'elle ne travaille pas : il refuse de répondre) + « Vos absences sont gérées par votre employeur. » |
+| **Lecture seule** | Cases figées mais **visibles** + « c'est votre employeur qui pose vos absences » |
+| **Panne de lecture** (503) | Le calendrier **reste** — ses ménages viennent d'un autre appel — + « Vos absences n'ont pas pu être lues. Vos ménages, eux, sont à jour. » Une lecture ratée n'efface jamais une lecture réussie |
+| **Hors ligne** | Bandeau rouge en haut, file d'attente comptée, gestes non filables refusés avec leur mot |
+
+## J.11 Points D — ce qui est cassé, incohérent ou illisible AUJOURD'HUI
+
+Relevés sur le code lu en entier et sur les treize captures. Numérotation
+indépendante de la partie D (côté hôte).
+
+1. **Les dates du cœur s'affichent en ISO dans les fiches.** « Arrivée
+   2026-10-11 · Départ 2026-10-15 » dans la fiche d'un ménage et « Départ
+   2026-10-18 » dans « Prendre ce ménage » — alors que le sous-titre de la même
+   carte dit « 15 oct. » et que tout le reste de l'app parle en « jeudi
+   15 octobre ». **Trois formats de la même date sur un écran de 390 px**, et
+   ce sont les deux champs les plus consultés. (`05`, `06`, `07`.)
+2. **Une famille entière de textes sans accents**, tous visibles par elle :
+   « Vos actions seront **envoyees** au retour de la connexion », « 1 action(s)
+   en attente **d envoi** », « **Menage marque** comme fait », « Menage
+   **decoche** », « **Donnees manquantes** », « Le voyageur n **est** pas
+   encore parti », « En attente **d envoi** ». Le reste du fichier est
+   accentué : c'est un résidu, pas un choix. (`12`.)
+3. **La fiche n'a pas de bouton « Vu ».** Il vit sur la ligne — décision
+   assumée (deux lignes visibles à la fois) — mais ouvrir la fiche est le geste
+   le plus naturel quand on veut « voir » un ménage, et l'accusé n'y est pas.
+   Elle peut lire le ménage en entier sans que l'hôte l'apprenne, et recevoir
+   la relance de 9 h le lendemain. (`05`.)
+4. **La fiche ne dit pas l'heure.** Ni celle du départ du voyageur, ni celle de
+   l'arrivée du suivant — alors que la section « Pris par une autre » affiche,
+   elle, une heure. C'est l'information qui organise sa journée, et elle est
+   seulement dans la note de l'hôte quand il pense à l'écrire. (`05`, `03`.)
+5. **Deux ratios contradictoires sur le même écran.** En haut « 👍 7 👎 1 sur
+   18 avis · sur 30 jours » (la période de l'HÔTE, inatteignable depuis sa
+   page) ; en dessous « 42 avis pris en compte, depuis le début · 👍 16 👎 3 »
+   (la période qu'ELLE consulte). Les deux sont justes et le code s'en explique
+   longuement ; à l'œil, l'écran se contredit. (`09`.)
+6. **Les pastilles A/B se replient sur deux rangées en 390 px.** L'étiquette
+   « Semaine A » + sept cases ne tiennent pas : on lit L M M J, puis V S D en
+   dessous, et l'alignement entre la ligne A et la ligne B se perd — or c'est
+   exactement ce qu'on vient y comparer. (`08`.)
+7. **La lettre A/B n'est pas une propriété de la semaine.** `lettreSemaine`
+   est calculée **par rapport à aujourd'hui** : la semaine courante est
+   toujours « A ». Le 9 novembre est donc « A » cette semaine et « B » la
+   semaine prochaine. Rien ne l'explique sur le calendrier (la légende a été
+   retirée le 18 septembre), et la seule explication vit derrière l'engrenage.
+   (`02`, `08`.)
+8. **Les messages d'état du calendrier sont SOUS le calendrier.** « Vos
+   absences n'ont pas pu être lues », « gérées par votre employeur » :
+   deux écrans de défilement plus bas que le haut de page. Sur un téléphone,
+   la panne est invisible tant qu'on ne cherche pas. (`11`.)
+9. **« 2 propositions » est écrit deux fois de suite** dans la feuille du jour
+   — en sous-titre puis en titre de section. (`04`.)
+10. **Le fil d'actualités occupe le premier écran entier.** Trois annonces et
+    la carte des biens remplissent les 844 px : le calendrier, qui EST la page,
+    commence sous la ligne de flottaison. Une annonce lue reste affichée
+    jusqu'à 72 h. (`01`.)
+11. **« 1 enfant(s) »** — le pluriel bricolé de la fiche. (`05`.)
+12. **« Statut : ⏳ À faire »** dans la fiche, juste au-dessus d'un bouton qui
+    dit « ✓ Marquer fait ». La ligne n'apprend rien que le bouton ne dise. (`05`.)
+13. **i18n zéro**, des deux côtés : textes du front **et phrases d'erreur du
+    serveur**, affichées telles quelles. Un seul chemin porte un code
+    (`delai_depasse`). Contraste avec le calendrier V5 et ses clés `cal.*`.
+    (B.6, inchangé.)
+14. **Le fil et le calendrier partagent une seule borne** (`visibility_days`) :
+    réduire la profondeur du calendrier raccourcit aussi ses notifications.
+    (D 9h, inchangé.)
+15. **Aucune légende, nulle part.** Décision de Thierry du 18 septembre — à
+    reconfirmer pour la V5 : sept marques visuelles (barré, estompé, pointillé,
+    fond, pastille, bulle, point) s'apprennent en touchant les cases une par
+    une.
+
+## J.12 Les captures
+
+`docs/specs/pwa-v5/captures/`, téléphone 390 × 844 :
+
+| Fichier | Écran |
+|---|---|
+| `01-ouverture.png` | L'ouverture du lien : en-tête, ratio, fil, biens |
+| `02-agenda.png` | Le second mois (alternance A/B, congés) et la liste des 30 jours |
+| `03-feuille-du-jour.png` | La feuille d'aujourd'hui : son ménage et le bouton « Vu » |
+| `04-feuille-a-prendre.png` | Un jour à deux propositions, avec le segment de disponibilité |
+| `05-fiche-menage.png` | La fiche d'un ménage à elle, avec la note de l'employeur |
+| `06-offre-a-confirmer.png` | Une proposition : « J'accepte » / « Je ne peux pas », délai |
+| `07-prendre-ce-menage.png` | « Prendre ce ménage » un jour où elle est absente |
+| `08-mes-jours.png` | Ses jours habituels (semaines A/B), l'ancrage, ses congés |
+| `09-mes-avis.png` | La vue Avis : ratio consulté, extraits, « retour privé » |
+| `10-sans-droit.png` | `self_availability: none` — calendrier vide, pas barré |
+| `11-panne-de-lecture.png` | 503 sur ses absences : le calendrier reste |
+| `12-hors-ligne.png` | Le bandeau hors ligne et la file d'attente |
+| `13-lien-invalide.png` | Sans jeton |
+
+**Comment elles sont faites** (hors dépôt, aucune base touchée) :
+`~/.cache/hotesmart-banc/pwa.js` sert le worktree sur le port 4790 avec des
+stubs de `/api/menages-public`, joue un geste par écran (`?ecran=`) et simule
+les états dégradés (`?cas=sansdroit|panne`).
+⚠ Deux artefacts du banc, pas des défauts produit : les emoji sortent en noir
+et blanc (police Noto monochrome), et les champs `<input type="date">`
+affichent `mm/dd/yyyy` (locale du navigateur sans tête).
