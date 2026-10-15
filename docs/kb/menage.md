@@ -4496,3 +4496,93 @@ existe **et** qu'elle est employée.
 **Le sous-menu Ménages tombe à deux entrées** : « Ménages » et « Prestataires ».
 Le doublon que le renommage du 5 septembre cherchait à lever — deux écrans
 appelés « Planning » — se lève tout seul, les deux ayant fusionné dans la V5.
+
+## L'appli prestataire passe à la charte V5 — CSS SEUL (15 octobre 2026)
+
+Demande de Thierry, en une règle : « aucune modification du HTML généré, du JS,
+des textes, des clés i18n, des endpoints ni du comportement. Seuls les styles
+changent. Si un point exige de toucher au DOM ou au JS, tu ne le fais pas : tu
+le listes. » Ce qui suit est donc une refonte **visuelle**, et la preuve en est
+mécanique : tout ce qui suit `</style>` dans `apps/menages/public.html` est
+**octet pour octet identique** à la version d'avant. La seule addition hors CSS
+est le chargement de `shared/theme.css` et de la police.
+
+### Le socle : seize variables, zéro ligne de `public/style.css` touchée
+
+`public.html` charge `public/style.css`, **partagé avec les trois écrans de
+l'hôte** (`index`, `garde`, `prestataires`). Le modifier aurait repeint ces
+trois écrans par ricochet. Or ce fichier est presque entièrement piloté par
+seize variables (`--bg --bg2 --bg3 --text --text2 --text3 --border --border2
+--green --green-bg --amber --amber-bg --radius --radius-lg --primary
+--primary-bg`), déclarées sur `:root`.
+
+**On les remappe sur les tokens, dans le `:root` local de la page**, qui est
+déclaré après : `.btn`, `.topbar`, `.content`, `.modal` suivent sans qu'une
+seule de leurs règles soit réécrite. C'est tout le socle de la bascule.
+
+⚠ **`--border` n'est PAS remappé**, et la raison est une règle du langage :
+`:root` et `html` sont le MÊME nœud. Écrire `--border: var(--line)` puis
+`--border2: var(--border)` aurait rendu la seconde circulaire — les deux
+auraient valu `--line`. Le token `--border` de `theme.css` étant exactement la
+bordure de carte V5, on le laisse passer tel quel.
+
+Deux tokens ont été ajoutés à `theme.css`, qui reste le seul fichier où un hexa
+a le droit d'exister : **`--muted-2`** (texte tertiaire sur fond CLAIR — à ne
+pas confondre avec `--on-ink-muted`, qui se lit sur fond sombre et devient
+illisible ici) et **`--scrim`** / **`--shadow-sheet`** pour les feuilles du bas.
+
+### Ce que la charte a changé, et pourquoi
+
+| Avant | Après | La raison |
+|---|---|---|
+| `.btn-primary` en aplat noir | **blanc, bord noir 1,5 px** | Le noir ne dit plus qu'une chose : « c'est celui-ci qui est choisi » (cases du filtre, faces d'un segment). Un bouton d'ACTION ne se peint pas comme un choix actif |
+| Hors ligne en rouge | **fond noir, texte blanc** | Hors ligne est un ÉTAT, pas une erreur. Rien n'a échoué : elle est dans un sous-sol, et ses gestes partiront en remontant |
+| « À PRENDRE » terre cuite | **pointillé gris, sans couleur** | Ce qui n'est à personne n'a pas à crier plus fort que le travail acquis |
+| Note de l'hôte sur fond jaune | **gris très clair** | Le jaune la mettait au rang d'une alerte : c'est une consigne de travail, qu'on lit |
+| Segment vert / gris | **la face choisie en noir, les deux** | Deux couleurs pour deux faces du même réglage laissaient croire qu'une des réponses était la bonne |
+| Pastilles A/B vertes et ambre | **vertes dans les deux lignes** | La même case disait deux choses selon la ligne où elle tombait, et l'ambre n'a plus droit qu'à deux emplois : « à confirmer » et le compteur des nouveautés |
+| Absence = numéro barré | **barré ET hachuré** | Le barré seul demandait de lire un chiffre de 14 px pour savoir si la journée compte |
+| Aujourd'hui en liseré | **pastille noire pleine** | Et la règle porte `:not(.vide)` pour une raison de CASCADE : `.a-moi` est déclarée plus bas à spécificité égale et reprenait le fond |
+| Avis sur fond teinté | **carte blanche, liseré gauche 4 px** | Le fond mettait tout l'avis en accusation (ou en éloge) ; ce qu'on lit d'abord doit être le texte |
+
+### Deux défauts de mise en page réglés au passage
+
+- **« Ce mois-ci » n'était stylé nulle part** : `.btn-mini` n'existait que sous
+  `.dispo-item`, et ce bouton-là tombait au rendu natif du navigateur — un
+  rectangle système au milieu d'un écran dessiné.
+- **Les sept pastilles de « Mes jours » ne tenaient pas sur une ligne** à
+  390 px (308 px nécessaires, 286 disponibles) : la semaine se repliait en
+  4 + 3. L'étiquette « Semaine A » passe au-dessus, et **les vingt-deux pixels
+  manquants se prennent sur les marges de la feuille, jamais sur la cible
+  tactile** — 44 px sous le pouce reste la règle qui ne se négocie pas.
+
+### ⚠ CE QUE LES TESTS FIGENT, ET QUI A DONC SURVÉCU
+
+`tests/pwa-mes-jours-dom.test.js` lit la feuille de style **mot pour mot** —
+c'est voulu : « un test de structure ne voit pas un bouton qui ressemble à du
+texte mort ». Quatre assertions portent sur des NOMS de variables ou des
+valeurs littérales, et la refonte a dû s'y plier :
+
+1. `.jmarque.fait` doit contenir `var(--green)` — gardé (le vert de « fait »
+   est de toute façon celui que la charte autorise) ;
+2. `.dispo-bulle` doit contenir `background: var(--bg2)` et
+   `border: 1px solid var(--border2)` — gardés, remappés, rendu identique ;
+3. `.agenda-item` doit contenir `min-height: 44px` — gardé : **les 52 px de la
+   charte viennent du padding**, et le plancher reste la cible du pouce le jour
+   où le texte manquerait ;
+4. la liste des fonds de case doit valoir EXACTEMENT
+   `['a-moi -> var(--green-bg)']` — donc **le jour qui porte un ménage reste
+   vert**, là où la charte l'aurait voulu gris. Le passer au gris demandait de
+   toucher un test, c'est-à-dire de sortir du périmètre « CSS seul » : c'est un
+   point remonté à Thierry, pas une décision prise au passage.
+
+Les deux nouveaux fonds (pastille noire d'aujourd'hui, hachures d'absence)
+échappent à cette égalité stricte parce que leurs sélecteurs portent un
+`:not(…)` : la regexp du test s'arrête au premier caractère qui n'est ni une
+lettre, ni un point, ni un tiret. Ce n'est pas une ruse — c'est la même limite
+qui lui évite d'attraper `.dispo-case.manuel::before`, et le test le dit.
+
+### Les captures
+
+`docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et
+`avant-apres/` (les treize paires côte à côte), toutes en 390 × 844.

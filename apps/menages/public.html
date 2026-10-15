@@ -13,25 +13,120 @@
   <link rel="manifest" id="dynamic-manifest">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="stylesheet" href="/public/style.css">
+  <!-- ⚠ LES TOKENS V5 APRÈS L'ANCIENNE FEUILLE, ET LE REMAPPAGE APRÈS LES DEUX.
+       `public/style.css` est PARTAGÉ avec les trois écrans de l'hôte
+       (index, garde, prestataires) : on ne le touche pas. Il est presque
+       entièrement piloté par seize variables, redéfinies plus bas sur les
+       tokens — `.btn`, `.topbar`, `.content` et `.modal` suivent sans qu'une
+       seule de leurs règles soit réécrite.
+       ⚠ LA POLICE EST UN CONFORT, PAS UNE DÉPENDANCE : hors ligne (la raison
+       d'être de cette application) elle retombe sur `system-ui`, déclaré dans
+       `--font`. Le service worker ne la met pas en cache — c'est le cache HTTP
+       du navigateur qui la ressert après la première visite. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/shared/theme.css">
   <style>
+    /* ─── V5 : LES SEIZE VARIABLES DE L'ANCIEN SYSTÈME, REMAPPÉES SUR LES
+       TOKENS. C'est tout le socle de la refonte : pas un hexa ici, et pas une
+       ligne de `public/style.css` modifiée.
+       ⚠ `--primary` (terre cuite) DISPARAÎT de la charte : il survit comme
+       alias de `--ink` pour les treize règles qui le nomment encore, chacune
+       revue plus bas. Le garder pointé quelque part évite qu'une règle oubliée
+       retombe sur du noir par accident de cascade. */
     :root {
-      --primary: #C97B5C;
-      --primary-bg: #FAECE7;
+      --bg: var(--surface);
+      --bg2: var(--surface-2);
+      --bg3: var(--line);
+      --text: var(--ink);
+      --text2: var(--muted);
+      --text3: var(--muted-2);
+      /* ⚠ `--border` N'EST PAS REMAPPÉ, ET C'EST VOLONTAIRE : le token
+         `--border` de theme.css est exactement la bordure de carte
+         V5, plus nette que l'ancien `rgba(0,0,0,.1)`. Le redéfinir ICI sur
+         `--line` aurait en plus rendu `--border2: var(--border)` circulaire —
+         les deux vivent sur le MÊME élément, `:root` et `html` étant un seul
+         nœud. Les séparateurs fins prennent `var(--line)` nommément, là où
+         ils comptent. */
+      --border2: var(--border);
+      --green: var(--ok);
+      --green-bg: var(--ok-soft);
+      --amber: var(--amber-text);
+      --amber-bg: var(--amber-soft);
+      --radius: var(--radius-tile);
+      --radius-lg: var(--radius-card);
+      --primary: var(--ink);
+      --primary-bg: var(--surface-2);
     }
 
+    /* ⚠ LA BARRE DU HAUT ET LE CONTENU viennent de `public/style.css`, qui
+       les dessine pour un écran de bureau à barre latérale : 24 px de marge
+       partout et un titre de 15 px. Au téléphone, la marge mange un dixième de
+       la largeur utile. */
+    .topbar { border-bottom: 1px solid var(--line); background: var(--surface); }
+    .page-title { font-weight: var(--fw-bold); color: var(--ink); }
+    .page-sub { color: var(--muted); }
+    .content { padding: 16px; }
+
+    /* ⚠ LA POLICE ET LE FOND SE POSENT ICI, pas dans `public/style.css` : ce
+       fichier met `background: var(--bg2)` sur le corps (gris), et la V5 veut
+       du blanc. Même spécificité, déclarée après : celle-ci gagne. */
+    body { font-family: var(--font); background: var(--surface); color: var(--ink);
+           font-size: var(--fs-small); }
+
+    /* ─── LES BOUTONS (charte V5, 15 octobre 2026) ──────────────────────────
+       ⚠ LE NOIR NE SERT PLUS QU'À DIRE « C'EST CELUI-CI QUI EST CHOISI » :
+       cases du filtre, faces d'un segment. Un bouton d'ACTION — Vu, Je prends,
+       J'accepte, Marquer fait, Poser — est blanc à bord noir. C'est le
+       changement le plus visible de la refonte : `.btn-primary` portait un
+       aplat noir dans `public/style.css`, et ce fichier est partagé avec les
+       trois écrans de l'hôte. On le surcharge ici, on ne le touche pas.
+       ⚠ 44 px DE HAUT PARTOUT : `public/style.css` donne `padding: 8px 16px`
+       sur 13 px de texte, soit 33 px — sous la cible tactile, sur un écran qui
+       ne se tient qu'au pouce. */
+    .btn { display: inline-flex; align-items: center; justify-content: center;
+           min-height: var(--control); padding: 0 18px;
+           border-radius: var(--radius-pill); border: 1px solid var(--border);
+           background: var(--surface); color: var(--ink);
+           font-family: var(--font); font-size: var(--fs-small);
+           font-weight: var(--fw-semibold); }
+    .btn:hover { background: var(--surface-2); }
+    .btn-primary { background: var(--surface); color: var(--ink);
+                   border: 1.5px solid var(--ink); font-weight: var(--fw-bold); }
+    .btn-primary:hover { background: var(--surface-2); opacity: 1; }
+    .btn:disabled { opacity: .4; }
+
     .avis-etat { text-align: center; padding: 40px 20px; color: var(--text2); font-size: 13px; line-height: 1.6; }
-    .dispo-carte { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg);
-                   padding: 16px; margin-bottom: 12px; }
-    .dispo-titre { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .dispo-carte { background: var(--surface); border: 1px solid var(--border);
+                   border-radius: var(--radius-card); padding: 16px; margin-bottom: 12px; }
+    .dispo-titre { font-size: var(--fs-caption); font-weight: var(--fw-bold); margin-bottom: 10px; }
     .dispo-saisie { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .dispo-input { flex: 1; min-width: 150px; padding: 10px; font-size: 14px;
-                   border: 0.5px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+    .dispo-input { flex: 1; min-width: 150px; min-height: var(--control); padding: 0 12px;
+                   font-family: var(--font); font-size: var(--fs-small);
+                   border: 1px solid var(--border); border-radius: var(--radius-tile);
+                   background: var(--surface); color: var(--ink); }
     .dispo-aide { font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.5; }
     .dispo-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
-                  font-size: 13px; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
+                  font-size: var(--fs-caption); padding: 10px 0; min-height: 52px;
+                  border-bottom: 1px solid var(--line); }
     .dispo-item:last-child { border-bottom: none; }
-    .dispo-item .btn-mini { background: none; border: 0.5px solid var(--border); border-radius: 14px;
-                            font-size: 12px; color: var(--text2); padding: 4px 12px; cursor: pointer; }
+    /* ⚠ `.btn-mini` N'ÉTAIT STYLÉ QUE DANS `.dispo-item` : le bouton
+       « Ce mois-ci » de la barre du calendrier, qui porte la même classe,
+       tombait au rendu natif du navigateur — un rectangle gris système au
+       milieu d'un écran dessiné. Il hérite désormais de la même pilule, et la
+       règle plus spécifique d'en dessous ne fait que la reprendre. */
+    .btn-mini { display: inline-flex; align-items: center; justify-content: center;
+                min-height: var(--control); padding: 0 16px;
+                border: 1px solid var(--border); border-radius: var(--radius-pill);
+                background: var(--surface); color: var(--ink);
+                font-family: var(--font); font-size: 12px;
+                font-weight: var(--fw-semibold); cursor: pointer; }
+    .btn-mini:hover { background: var(--surface-2); }
+    .dispo-item .btn-mini { background: var(--surface); border: 1px solid var(--border);
+                            border-radius: var(--radius-pill); min-height: var(--control);
+                            padding: 0 16px; font-family: var(--font); font-size: 12px;
+                            font-weight: var(--fw-semibold); color: var(--ink); cursor: pointer; }
     .dispo-source { font-size: 11px; color: var(--text2); }
 
     /* ── MON CALENDRIER (lot 2b, 15 septembre 2026) ──
@@ -41,9 +136,11 @@
        La paire rouge manque au systeme (public/style.css n'a que --green et
        --amber) : meme saturation que le vert. */
     .dispo-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-    .dispo-titre-mois { font-size: 14px; font-weight: 600; text-transform: capitalize; flex: 1; }
-    .dispo-rond { width: 34px; height: 34px; border-radius: 50%; border: 0.5px solid var(--border);
-                  background: var(--bg); color: var(--text); font-size: 16px; line-height: 1;
+    .dispo-titre-mois { font-size: var(--fs-body); font-weight: var(--fw-bold);
+                        text-transform: capitalize; flex: 1; }
+    .dispo-rond { width: var(--control); height: var(--control); border-radius: 50%;
+                  border: 1px solid var(--border);
+                  background: var(--surface); color: var(--ink); font-size: 16px; line-height: 1;
                   display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
     .dispo-rond[disabled] { opacity: .3; }
     /* ⚠ DEUX MOIS, ET LA MISE EN PAGE SUIT LA LARGEUR, pas le materiel : une
@@ -59,8 +156,13 @@
     .dispo-grille.alt { grid-template-columns: 18px repeat(7, 1fr); }
     .dispo-sem { display: flex; align-items: center; justify-content: center;
                  font-size: 10px; font-weight: 700; color: var(--text3); }
-    .dispo-sem.a { color: var(--green); } .dispo-sem.b { color: var(--amber); }
-    .dispo-dow { font-size: 10px; font-weight: 600; color: var(--text3); text-align: center; padding-bottom: 2px; }
+        /* ⚠ LES DEUX LETTRES SONT DU MÊME GRIS (charte V5). Vert et ambre les
+       mettaient à égalité avec « fait » et « à confirmer », pour un simple
+       repère de quinzaine — et l'ambre n'a plus droit qu'à deux emplois sur
+       cet écran. Ce qui distingue A de B est la LETTRE, pas sa couleur. */
+    .dispo-sem.a, .dispo-sem.b { color: var(--muted); font-weight: var(--fw-bold); }
+    .dispo-dow { font-size: 10px; font-weight: var(--fw-bold); color: var(--muted-2);
+                 text-align: center; padding-bottom: 2px; }
     /* ⚠ 44 px MINIMUM : c'est la cible tactile recommandee, et cet ecran est
        fait pour un pouce, pas pour une souris. */
     /* ⚠ `column` : sans elle, les points ajoutes au lot 2 se posaient A COTE du
@@ -75,7 +177,8 @@
        seule chose se lit sans decodeur.
        Le filet clair ne porte aucune information : il tient la grille, sans quoi
        un mois de cases blanches sur fond blanc n'aurait plus de structure. */
-    .dispo-case { min-height: 44px; aspect-ratio: 1; border: 1px solid var(--border); border-radius: 8px;
+    .dispo-case { min-height: var(--control); aspect-ratio: 1; border: 1px solid var(--line);
+                  border-radius: var(--radius-tile);
                   display: flex; flex-direction: column; gap: 2px;
                   align-items: center; justify-content: center; font-size: 14px;
                   font-variant-numeric: tabular-nums; font-weight: 600; position: relative;
@@ -84,7 +187,7 @@
                   -webkit-touch-callout: none; }
     /* La plage en cours de selection (appui long puis glisser, 1er octobre 2026).
        Un contour, pas un fond : le fond dit deja ce qu'est le jour. */
-    .dispo-case.sel { outline: 2px solid var(--primary); outline-offset: -2px; }
+    .dispo-case.sel { outline: 2px solid var(--ink); outline-offset: -2px; }
     /* ⚠ INDISPONIBLE = LE NUMERO EST BARRE. Absence, repos, conge : une seule
        marque pour les trois, parce qu'elles disent la meme chose a qui regarde —
        « pas ce jour-la ». La nuance (qui l'a posee, pourquoi) vit dans la feuille
@@ -102,7 +205,7 @@
     .dispo-case.passe { opacity: .45; cursor: not-allowed; }
     .dispo-case.conge { cursor: not-allowed; border-style: dashed; border-color: var(--border2); }
     .dispo-case.conge::after { content: "✕"; position: absolute; top: 3px; right: 4px;
-                               font-size: 9px; color: var(--text3); opacity: .8; }
+                               font-size: 9px; color: var(--muted-2); opacity: .8; }
     /* Une case de conge PORTANT une offre redevient actionnable : le curseur
        doit le dire, sinon il annonce « interdit » sur le seul geste possible. */
     .dispo-case.conge.a-prendre { cursor: pointer; }
@@ -117,7 +220,16 @@
        le dire. `not-allowed` ne reste que sur ce qui n'ouvre vraiment rien. */
     .dispo-case.inerte { cursor: not-allowed; }
     .dispo-case.passe:not(.inerte), .dispo-case.conge:not(.inerte) { cursor: pointer; }
-    .dispo-case.auj { box-shadow: inset 0 0 0 2px var(--primary); }
+        /* ⚠ AUJOURD'HUI EST UNE PASTILLE NOIRE PLEINE (charte V5), et la règle
+       porte `:not(.vide)` pour une raison de CASCADE, pas de style : `.a-moi`
+       est déclarée PLUS BAS à spécificité égale et reprenait le fond. Un jour
+       qui porte un ménage garde sa pastille chiffrée, inversée juste en
+       dessous — le noir dit « c'est maintenant », le chiffre dit « combien ». */
+    .dispo-case.auj:not(.vide) { background: var(--ink); border-color: var(--ink); }
+    .dispo-case.auj:not(.vide) .dispo-num { color: var(--on-ink); font-weight: var(--fw-bold);
+                                            text-decoration-color: var(--on-ink); }
+    .dispo-case.auj:not(.vide) .dispo-compte { background: var(--on-ink); color: var(--ink); }
+    .dispo-case.auj:not(.vide).manuel::before { background: var(--on-ink); }
     /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « ce jour-la a ete
        regle a la main » — par elle OU par son employeur depuis le 14 octobre
        2026 ; le TITRE de la case dit lequel des deux, et UN SEUL point sert aux
@@ -134,7 +246,7 @@
        l'information la plus accessoire. */
     .dispo-case.manuel::before { content: ""; position: absolute; top: 4px; left: 4px;
                                  width: 4px; height: 4px;
-                                 border-radius: 50%; background: var(--text3); opacity: .8; }
+                                 border-radius: 50%; background: var(--muted); opacity: .9; }
 
     /* ─── MES MENAGES : FOND VERT + PASTILLE CHIFFREE (lot A) ──────────────
        Les points ne disaient qu'une chose — « il y en a » — et il fallait les
@@ -152,10 +264,23 @@
        cocher. Les tests DOM ne pouvaient pas le voir : jsdom lit le
        `textContent`, jamais la cascade. */
     .dispo-compte { display: inline-flex; align-items: center; justify-content: center;
-                    height: 16px; min-width: 16px; padding: 0 4px; border-radius: 8px;
-                    background: var(--green); color: #fff; font-size: 10.5px;
+                    height: 16px; min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill);
+                    background: var(--ink); color: var(--on-ink); font-size: 10.5px;
                     font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+        /* ⚠ LE FOND NE CODE TOUJOURS QU'UNE CHOSE — « j'ai du travail ce jour-là »
+       — ET IL RESTE VERT, remappé sur `--ok-soft`. La charte V5 l'aurait voulu
+       gris ; `tests/pwa-mes-jours-dom.test.js` (l. 2424) fige ce fond ET son
+       nom de variable, en une égalité STRICTE sur la liste des fonds de case.
+       Le passer au gris demandait de toucher un test, c'est-à-dire de sortir
+       du périmètre « CSS seul » — c'est donc un point remonté à Thierry, pas
+       une décision prise ici. */
     .dispo-case.a-moi { background: var(--green-bg); border-color: transparent; }
+    /* ⚠ UNE ABSENCE SE HACHURE, EN PLUS DU NUMÉRO BARRÉ (charte V5). Le barré
+       seul demandait de lire un chiffre de 14 px pour savoir si la journée
+       compte ; la hachure se voit à la distance où l'on lit un mois entier.
+       Elle ne touche ni aujourd'hui (pastille pleine) ni les cases vides. */
+    .dispo-case.off:not(.auj):not(.vide):not(.a-moi) {
+      background: repeating-linear-gradient(45deg, transparent 0 4px, var(--line) 4px 5px); }
     /* ⚠ UNE PROPOSITION QU'ON LUI FAIT VA DANS LA BULLE, PAS DANS UNE COULEUR
        (decision de Thierry, 1er octobre 2026). Le premier correctif la peignait
        en ambre « a confirmer » ; ce qui n'est porte par personne se dit par la
@@ -171,14 +296,14 @@
        menage : a 45 % d'opacite, l'ecart entre `--bg2` et le blanc de la carte
        tombe sous 2 % de luminance. Un mois ecoule ne disait plus rien de ce
        qu'elle y avait fait. */
-    .dispo-case.passe .dispo-compte { background: var(--bg3); color: var(--text3); }
+    .dispo-case.passe .dispo-compte { background: var(--line); color: var(--muted); }
     /* PRIS PAR UNE AUTRE (spec visibilite, 2 octobre 2026) : une pastille sur
        fond BLANC, a cote du reste. Elle ne touche ni le fond du jour, ni le vert
        de « a moi », ni la bulle. Pas de legende (decision de Thierry) : le detail
        au toucher suffit a la comprendre. */
-    .dispo-compte.autrui { background: #fff; color: var(--text2); border: 1px solid var(--border2); }
-    .dispo-case.passe .dispo-compte.autrui { background: #fff; color: var(--text3); }
-    .jligne.autrui { cursor: default; background: var(--bg); }
+    .dispo-compte.autrui { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+    .dispo-case.passe .dispo-compte.autrui { background: var(--surface); color: var(--muted-2); }
+    .jligne.autrui { cursor: default; background: var(--surface); }
 
     /* A PRENDRE : bulle de dialogue posee AU-DESSUS de la case, avec une pointe
        qui designe la date — forme retenue le 17 septembre 2026. Elle dit « ce
@@ -200,8 +325,11 @@
          chiffre gras flottant au-dessus d'une date, qui se lit comme une
          seconde date. Un gris tres clair suffit a la decoller sans lui rendre
          la couleur qu'on vient de lui retirer. */
-      background: var(--bg2); color: var(--text2); border: 1px solid var(--border2);
-      font-size: 11px; font-weight: 700;
+      /* ⚠ `--bg2` et `--border2`, PAS leurs tokens : les deux valent la même
+         chose depuis le remappage, et `tests/pwa-mes-jours-dom.test.js`
+         (l. 2406) cherche ces noms-là, mot pour mot. */
+      background: var(--bg2); color: var(--ink); border: 1px solid var(--border2);
+      font-size: 11px; font-weight: var(--fw-bold);
       display: inline-flex; align-items: center; justify-content: center;
       font-variant-numeric: tabular-nums; line-height: 1;
       box-shadow: 0 1px 4px rgba(0,0,0,.14);
@@ -231,14 +359,16 @@
                          padding-right: 2px; }
     .dispo-lien-config { background: none; border: 0; padding: 6px 2px; cursor: pointer;
                          display: inline-flex; align-items: center; gap: 6px;
-                         font-size: 12px; color: var(--text3); font-family: inherit;
+                         font-size: 12px; color: var(--muted); font-family: var(--font);
+                         font-weight: var(--fw-semibold);
                          line-height: 1.25; text-align: right; }
     .dispo-lien-config svg { width: 13px; height: 13px; flex-shrink: 0; }
-    .dispo-lien-config:hover { color: var(--text2); }
+    .dispo-lien-config:hover { color: var(--ink); }
     /* ⚠ L'ENGRENAGE SEUL GARDE UNE CIBLE DE 40 px. Sans libelle, le bouton se
        reduirait a l'icone — 13 px a viser au pouce, un tiers du minimum tenu
        partout ailleurs sur cet ecran. */
-    .dispo-lien-config.seul { min-width: 40px; min-height: 40px; justify-content: center; padding: 0; }
+    .dispo-lien-config.seul { min-width: var(--control); min-height: var(--control);
+                              justify-content: center; padding: 0; }
 
     /* ─── LA FEUILLE DU JOUR (lot B) ────────────────────────────────────────
        Un seul geste ouvre TOUT ce qui concerne la journee : ce qu'on lui
@@ -249,20 +379,23 @@
        savoir ce qu'on declenchait. Et sur un jour d'absence portant une offre,
        la bascule de disponibilite etait purement inatteignable. */
     .jsect { margin-bottom: 16px; }
-    .jsect-t { font-size: 11px; font-weight: 700; letter-spacing: .5px;
-               text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
-    .jsect-vide { font-size: 12.5px; color: var(--text3); padding: 2px 0 4px; }
+    .jsect-t { font-size: 11px; font-weight: var(--fw-bold); letter-spacing: .5px;
+               text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+    .jsect-vide { font-size: 12.5px; color: var(--muted); padding: 2px 0 4px; line-height: 1.5; }
     /* ⚠ 44 px DE HAUT. Depuis que le planning a disparu, cette ligne est le SEUL
        chemin vers la fiche du menage — donc vers « Marquer fait ». `padding:
        10px 12px` sur 13 px de texte donnait 40 px : sous la cible tactile, sur
        le geste le plus frequent de l'ecran. */
     .jligne { display: flex; align-items: center; gap: 10px; width: 100%;
-              background: var(--bg); border: 0.5px solid var(--border);
-              border-radius: var(--radius); padding: 10px 12px; min-height: 44px;
+              background: var(--surface); border: 1px solid var(--line);
+              border-radius: var(--radius-tile); padding: 16px 14px; min-height: 44px;
               text-align: left; cursor: pointer;
-              font-family: inherit; color: inherit; font-size: 13px; }
+              font-family: var(--font); color: var(--ink); font-size: var(--fs-small); }
     .jligne + .jligne { margin-top: 6px; }
-    .jligne.offre { border: 1px dashed var(--primary); }
+        /* ⚠ « À PRENDRE » N'A PLUS DE COULEUR (charte V5) : le pointillé dit déjà
+       « ce n'est à personne ». La terre cuite en faisait la marque la plus
+       criante de l'écran, pour ce qui n'engage justement personne. */
+    .jligne.offre { border: 1px dashed var(--border); }
     /* ⚠ `cursor: pointer` EST DANS LA REGLE DE BASE ci-dessus, pas sur la seule
        `.offre` : depuis ce lot, les lignes de SES menages s'ouvrent aussi, et
        annoncer « rien a faire ici » sur la ligne qui porte son unique geste
@@ -282,21 +415,27 @@
        `<button>` (elle ouvre la fiche), et un bouton dans un bouton ferait
        partir le clic aux deux. */
     .jrangee { display: flex; align-items: stretch; gap: 0;
-               background: var(--bg); border: 0.5px solid var(--border);
-               border-radius: var(--radius); overflow: hidden; }
+               background: var(--surface); border: 1px solid var(--line);
+               border-radius: var(--radius-tile); overflow: hidden; }
     .jrangee + .jrangee, .jrangee + .jligne, .jligne + .jrangee { margin-top: 6px; }
     .jrangee .jligne { margin-top: 0; border: none; background: transparent; border-radius: 0; }
+        /* ⚠ C'EST UN BOUTON D'ACTION : noir, gras. Il ne porte pas le bord de la
+       charte parce qu'il vit DANS la bulle de la ligne — c'est l'enveloppe qui
+       porte la forme, et le trait vertical qui sépare les deux zones. */
     .jvu { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px;
            background: transparent; border: none; border-radius: 0;
-           padding: 0 14px; min-height: 44px;
-           font-family: inherit; font-size: 12px; font-weight: 600; color: inherit;
+           padding: 0 16px; min-height: 52px; /* la hauteur de la rangée */
+           font-family: var(--font); font-size: var(--fs-caption);
+           font-weight: var(--fw-bold); color: var(--ink);
            cursor: pointer; }
     /* Le trait qui separe les deux zones : sans lui, « Vu » se lit comme une
        etiquette et personne ne le touche. */
-    .jrangee .jvu[data-vu] { border-inline-start: 0.5px solid var(--border); }
+    .jrangee .jvu[data-vu] { border-inline-start: 1px solid var(--line); }
     .jvu svg { width: 15px; height: 15px; flex-shrink: 0; }
     /* Vu : l'etat, pas une action. Gris, sans trait, non cliquable. */
-    .jvu[disabled] { cursor: default; color: var(--text2); font-weight: 500; }
+        /* ✓ Vu : un ÉTAT, et le vert de la charte le dit — c'est fait, il n'y a
+       plus rien à toucher. */
+    .jvu[disabled] { cursor: default; color: var(--ok); font-weight: var(--fw-semibold); }
     /* ⚠ SEUL LE GESTE EST COUPE, PAS L'ETAT (constat de la revue de 6452d75,
        et c'est la meme lecon que la revue de 6d007f3 treize lignes plus bas).
        `.jvu` tout court masquait aussi la mention inerte « ✓ Vu » : l'hote
@@ -306,35 +445,47 @@
        Le garde reel contre l'ecriture est le `fetch` patche ; ceci evite
        seulement d'offrir un bouton dont on sait qu'il echouera. */
     .apercu .jvu[data-vu] { display: none !important; }
-    .jmarque { flex-shrink: 0; font-size: 11px; color: var(--text2); margin-left: 6px; }
-    .jmarque.fait { color: var(--green); font-weight: 700; }
+    .jmarque { flex-shrink: 0; font-size: 11px; color: var(--muted); margin-left: 6px; }
+    /* ⚠ `var(--green)`, PAS `var(--ok)` : les deux valent la même couleur
+       depuis le remappage du socle, mais `tests/pwa-mes-jours-dom.test.js`
+       cherche ce nom-là dans le fichier. Le vert de « fait » est de toute
+       façon celui que la charte V5 autorise ici. */
+    .jmarque.fait { color: var(--green); font-weight: var(--fw-bold); }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
        c'est justement la qu'on va lire ce qui a change. */
     .jligne.obsolete { opacity: .55; }
     .jligne.obsolete .jligne-bien { text-decoration: line-through; }
-    .jligne-bien { flex: 1; min-width: 0; font-weight: 600; }
+    .jligne-bien { flex: 1; min-width: 0; font-weight: var(--fw-semibold); }
     /* ⚠ LE CHOIX MONTRE LES DEUX FACES, ET LAQUELLE EST VRAIE. Deux boutons
        d'action (« me declarer absente ») obligeaient a savoir ou on en est pour
        lire ce qu'on allait faire. Un segment dit l'etat ET l'alternative dans la
        meme image. */
-    .jseg { display: flex; border: 1px solid var(--border2); border-radius: var(--radius);
+        /* ⚠ LA FACE CHOISIE EST NOIRE, LES DEUX (charte V5 : le noir ne dit que
+       « c'est celui-ci »). Elles étaient vert et gris : deux couleurs pour deux
+       faces du MÊME réglage, qui laissaient croire qu'une des deux réponses
+       était la bonne. Ce que l'écran doit dire est « voilà où vous en êtes »,
+       pas « voilà ce qu'il faut répondre ». */
+    .jseg { display: flex; border: 1px solid var(--border); border-radius: var(--radius-pill);
             overflow: hidden; }
-    .jseg button { flex: 1; border: 0; background: var(--bg); color: var(--text2);
-                   padding: 11px 8px; font-size: 13px; font-weight: 600;
-                   cursor: pointer; font-family: inherit; line-height: 1.25; }
-    .jseg button + button { border-left: 1px solid var(--border2); }
-    .jseg button[aria-pressed="true"] { background: var(--green-bg); color: var(--green); }
-    .jseg button[aria-pressed="true"].non { background: var(--bg3); color: var(--text); }
+    .jseg button { flex: 1; border: 0; background: var(--surface); color: var(--muted);
+                   padding: 0 10px; min-height: var(--control-lg);
+                   font-size: var(--fs-small); font-weight: var(--fw-semibold);
+                   cursor: pointer; font-family: var(--font); line-height: 1.25; }
+    .jseg button + button { border-left: 1px solid var(--border); }
+    .jseg button[aria-pressed="true"],
+    .jseg button[aria-pressed="true"].non { background: var(--ink); color: var(--on-ink);
+                                            font-weight: var(--fw-bold); }
     .jseg button:disabled { opacity: .45; cursor: not-allowed; }
 
     /* ─── Mes 30 prochains jours (refonte v2, lot 3) ──────────────────────── */
     .agenda-jour + .agenda-jour { margin-top: 14px; }
-    .agenda-date { font-size: 12.5px; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
-    .agenda-date em { font-style: normal; font-weight: 400; color: var(--text3); }
+    .agenda-date { font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--ink);
+                  margin-bottom: 8px; }
+    .agenda-date em { font-style: normal; font-weight: var(--fw-regular); color: var(--muted); }
     /* ⚠ SEUL LE JOUR MEME PORTE UN FOND PLEIN. C'est ce qu'elle fait
        MAINTENANT ; tout mettre en avant, c'est ne rien mettre en avant. */
-    .agenda-jour.auj .agenda-date { color: var(--primary); }
-    .agenda-jour.auj .agenda-item { background: var(--primary-bg); border-color: rgba(201,123,92,.3); }
+    .agenda-jour.auj .agenda-date { color: var(--ink); }
+    .agenda-jour.auj .agenda-item { background: var(--surface-2); border-color: var(--border); }
     /* ⚠ TOUTE LIGNE EST UN BOUTON, ET FAIT 44 px. Les siennes etaient des
        `<div>` inertes : le commentaire qui suivait renvoyait leur detail « au
        planning » — la page qui a disparu. La ligne de la liste et la case du
@@ -345,8 +496,12 @@
     .agenda-item {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
       width: 100%; text-align: left; font-family: inherit; color: var(--text);
-      background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius);
-      padding: 10px 12px; min-height: 44px; font-size: 13.5px; cursor: pointer;
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-tile);
+      /* ⚠ LA LIGNE FAIT 52 px (charte V5), ET LA RÈGLE DIT QUAND MÊME
+         `min-height: 44px` : les 52 viennent du padding, et le plancher reste
+         la cible du pouce le jour où le texte manquerait. C'est aussi le mot
+         que `tests/pwa-mes-jours-dom.test.js` (l. 1721) cherche ici. */
+      padding: 16px 14px; min-height: 44px; font-size: var(--fs-small); cursor: pointer;
     }
     .agenda-item + .agenda-item { margin-top: 6px; }
     /* La rangee porte l'ecart quand le bouton « Vu » accompagne l'item, et
@@ -356,10 +511,10 @@
     .jrangee + .agenda-item, .agenda-item + .jrangee { margin-top: 6px; }
     .jrangee .agenda-item { margin-top: 0; border: none; background: transparent; border-radius: 0; }
     /* Le jour courant colore la bulle ENTIERE, pas la moitie gauche. */
-    .agenda-jour.auj .jrangee { background: var(--primary-bg); border-color: rgba(201,123,92,.3); }
+    .agenda-jour.auj .jrangee { background: var(--surface-2); border-color: var(--border); }
     .agenda-jour.auj .jrangee .agenda-item { background: transparent; }
-    .agenda-item.offre { border: 1px dashed var(--primary); }
-    .agenda-item.fait .agenda-bien { color: var(--text3); text-decoration: line-through; }
+    .agenda-item.offre { border: 1px dashed var(--border); }
+    .agenda-item.fait .agenda-bien { color: var(--muted-2); text-decoration: line-through; }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
        c'est justement la qu'on va lire ce qui a change (meme regle que
        `.jligne.obsolete` dans la feuille du jour). */
@@ -375,67 +530,109 @@
        trois glyphes dans un `flex-shrink: 0`, toute la compression retombe sur
        le nom — et une ligne sur trois hauteurs, au telephone, chasse le reste
        de la liste hors de l'ecran. */
-    .agenda-bien { flex: 1; font-weight: 600; min-width: 0;
+    .agenda-bien { flex: 1; font-weight: var(--fw-semibold); min-width: 0;
                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .agenda-tag {
-      font-size: 9.5px; font-weight: 700; letter-spacing: .3px; border-radius: 999px;
-      padding: 2px 8px; flex-shrink: 0;
+      font-size: 9.5px; font-weight: var(--fw-bold); letter-spacing: .3px;
+      border-radius: var(--radius-pill); padding: 3px 9px; flex-shrink: 0;
     }
-    .agenda-tag.offre { background: var(--primary); color: #fff; }
-    .agenda-tag.fait { background: var(--green-bg); color: var(--green); }
-    .agenda-vide { font-size: 12.5px; color: var(--text2); }
+    /* Même règle que la ligne : ce qui n'est à personne se dit en pointillé
+       gris, jamais en aplat de couleur. */
+    .agenda-tag.offre { background: var(--surface); color: var(--muted);
+                        border: 1px dashed var(--border); }
+    .agenda-tag.fait { background: var(--ok-soft); color: var(--ok); }
+    .agenda-vide { font-size: 12.5px; color: var(--muted); }
 
     .dispo-champ { display: flex; flex-direction: column; gap: 4px; font-size: 11px;
-                   color: var(--text2); font-weight: 600; flex: 1; min-width: 120px; }
+                   color: var(--muted); font-weight: var(--fw-semibold); flex: 1; min-width: 120px; }
     .dispo-lignes-ab { display: flex; flex-direction: column; gap: 8px; }
     .dispo-ligne-ab { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
-    .dispo-tag { display: inline-flex; align-items: center; justify-content: center; min-width: 78px;
-                 height: 32px; border-radius: var(--radius); padding: 0 8px;
-                 font-size: 11px; font-weight: 700; }
-    .dispo-tag.a { background: var(--green-bg); color: var(--green); }
-    .dispo-tag.b { background: var(--amber-bg); color: var(--amber); }
-    .dispo-tag.simple { background: none; color: var(--text2); font-weight: 600; justify-content: flex-start; }
+        .dispo-tag { display: inline-flex; align-items: center; justify-content: center; min-width: 78px;
+                 height: 32px; border-radius: var(--radius-pill); padding: 0 10px;
+                 font-size: 11px; font-weight: var(--fw-bold); }
+    /* ⚠ MÊME GRIS POUR A ET POUR B, comme les lettres de la grille : ce sont
+       deux moitiés d'un même réglage, pas deux statuts. L'ambre est réservé à
+       « à confirmer » et au compteur des nouveautés. */
+    .dispo-tag.a, .dispo-tag.b { background: var(--surface-2); color: var(--muted); }
+    .dispo-tag.simple { background: none; color: var(--muted); font-weight: var(--fw-semibold);
+                        justify-content: flex-start; }
     /* ⚠ LES JOURS HABITUELS SE REGLENT ICI (decision du 15 septembre 2026,
        revenant sur celle du meme jour). C'etaient des pastilles d'information ;
        ce sont maintenant de vraies cases a cocher, avec une cible tactile de
        44 px comme le reste de cet ecran. */
+        /* ⚠ RONDES ET DE 40 px (charte V5). La cible tactile reste à 44 px par la
+       hauteur de ligne : c'est le DESSIN qui fait 40, pas la zone qu'on vise. */
     .dispo-pastille { display: inline-flex; align-items: center; justify-content: center;
-                      width: 44px; height: 44px; border-radius: var(--radius);
-                      font-size: 13px; font-weight: 600; background: var(--bg2); color: var(--text3);
+                      width: 40px; height: 40px; margin: 2px; border-radius: 50%;
+                      font-size: var(--fs-caption); font-weight: var(--fw-semibold);
+                      background: var(--surface-2); color: var(--muted);
                       cursor: pointer; user-select: none; border: 1px solid transparent; }
     .dispo-pastille input { position: absolute; opacity: 0; pointer-events: none; }
-    .dispo-pastille:focus-within { box-shadow: 0 0 0 2px var(--primary); }
-    .dispo-pastille.on { background: var(--green-bg); color: var(--green); border-color: var(--green); }
-    .dispo-ligne-ab.b .dispo-pastille.on { background: var(--amber-bg); color: var(--amber);
-                                           border-color: var(--amber); }
+    .dispo-pastille:focus-within { box-shadow: 0 0 0 2px var(--ink); }
+    /* ⚠ UN JOUR COCHÉ EST VERT, EN A COMME EN B. La ligne B les peignait en
+       ambre : la même case disait deux choses selon la ligne où elle tombait,
+       et l'ambre ne dit plus que « HôteSmart attend une réponse ». */
+    .dispo-pastille.on,
+    .dispo-ligne-ab.b .dispo-pastille.on { background: var(--ok); color: var(--on-ink);
+                                           border-color: var(--ok); }
     .dispo-ligne-ab.fige .dispo-pastille { cursor: default; opacity: .55; }
-    .dispo-mini { font-size: 12.5px; padding: 8px 12px; border-radius: var(--radius);
-                  border: 0.5px solid var(--border); background: var(--bg); color: var(--text);
+    /* ⚠ SEPT PASTILLES DE 44 px FONT 308 px : avec l'étiquette « Semaine A »
+       sur la même ligne, il en manque soixante, et la rangée se repliait en
+       4 + 3. Les deux lignes A et B perdaient alors leur alignement — or c'est
+       exactement ce qu'on vient y comparer. L'étiquette passe au-dessus, et la
+       semaine tient d'un seul tenant. (Constat J.11 point 6.) */
+    @media (max-width: 440px) {
+      .dispo-ligne-ab { gap: 0; }
+      .dispo-tag.a, .dispo-tag.b { flex-basis: 100%; justify-content: flex-start;
+                                   background: none; height: 20px; padding: 0;
+                                   min-width: 0; margin-bottom: 2px; }
+      /* ⚠ ET LES VINGT-DEUX PIXELS QUI MANQUAIENT SE PRENNENT SUR LES MARGES,
+         PAS SUR LA CIBLE TACTILE. Sept pastilles de 44 px (40 de dessin, 2 de
+         marge de chaque côté) font 308 px ; la feuille n'en offrait que 286.
+         Rétrécir la pastille aurait réglé la mise en page en cassant la règle
+         qui compte — 44 px sous le pouce, partout sur cet écran. */
+      #modal-body > .dispo-carte { padding: 14px 10px; }
+      .modal { padding-left: 14px; padding-right: 14px; }
+    }
+    .dispo-mini { display: inline-flex; align-items: center; min-height: var(--control);
+                  padding: 0 16px; font-family: var(--font); font-size: var(--fs-caption);
+                  font-weight: var(--fw-semibold); border-radius: var(--radius-pill);
+                  border: 1px solid var(--border); background: var(--surface); color: var(--ink);
                   cursor: pointer; }
-    .dispo-lien { background: none; border: 0; color: var(--primary); font-size: 12px;
-                  text-decoration: underline; cursor: pointer; padding: 4px 0; }
+    .dispo-lien { background: none; border: 0; color: var(--ink); font-family: var(--font);
+                  font-size: 12px; font-weight: var(--fw-semibold);
+                  text-decoration: underline; text-underline-offset: 2px;
+                  cursor: pointer; padding: 10px 0; min-height: var(--control); }
     .dispo-ancre { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-                   margin-top: 10px; font-size: 12px; color: var(--text2); }
-    .avis-etat strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 4px; }
+                   margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .avis-etat strong { display: block; color: var(--ink); font-size: var(--fs-body);
+                        font-weight: var(--fw-bold); margin-bottom: 6px; }
     .ratio { display: flex; gap: 14px; align-items: center; }
-    .ratio-item { display: flex; gap: 5px; align-items: center; font-size: 18px; font-weight: 600; }
+    .ratio-item { display: flex; gap: 5px; align-items: center; font-size: 18px;
+                 font-weight: var(--fw-bold); }
     .ratio-item svg { width: 15px; height: 15px; }
-    .ratio-item.pos { color: #1E7B34; }
-    .ratio-item.neg { color: #A85B12; }
-    .avis-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; }
-    .avis-card.neg { border-left: 3px solid #A85B12; }
-    .avis-card.pos { border-left: 3px solid #1E7B34; }
-    .avis-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+    .ratio-item.pos { color: var(--ok); }
+    .ratio-item.neg { color: var(--danger); }
+        /* Carte blanche, et UN SEUL signal de couleur : le liseré de gauche. Le
+       fond teinté mettait tout l'avis en accusation (ou en éloge) ; ce qu'on
+       lit d'abord doit être le texte. */
+    .avis-card { background: var(--surface); border: 1px solid var(--line);
+                 border-radius: var(--radius-card); padding: 14px 16px; margin-bottom: 10px; }
+    .avis-card.neg { border-left: 4px solid var(--danger); }
+    .avis-card.pos { border-left: 4px solid var(--ok); }
+    .avis-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
     .avis-meta svg { width: 13px; height: 13px; }
-    .avis-meta .pos { color: #1E7B34; }
-    .avis-meta .neg { color: #A85B12; }
-    .avis-texte { font-size: 13px; line-height: 1.5; }
+    .avis-meta .pos { color: var(--ok); }
+    .avis-meta .neg { color: var(--danger); }
+    .avis-texte { font-size: var(--fs-small); line-height: 1.55; color: var(--ink); }
     .entete-ratio { text-align: right; line-height: 1.3; cursor: pointer;
-                    border-radius: var(--radius); padding: 4px 6px; margin: -4px -6px; }
-    .entete-ratio:hover { background: var(--bg2); }
-    .entete-ratio:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+                    border-radius: var(--radius-pill); padding: 6px 10px; margin: -6px -10px;
+                    min-height: var(--control); display: flex; flex-direction: column;
+                    justify-content: center; }
+    .entete-ratio:hover { background: var(--surface-2); }
+    .entete-ratio:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
     /* Repli quand les chiffres ne sont pas surs : la porte reste, pas le chiffre. */
-    .ratio-porte { font-size: 13px; font-weight: 600; color: var(--primary); white-space: nowrap; }
+    .ratio-porte { font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--ink); white-space: nowrap; }
     .entete-ratio .ratio { justify-content: flex-end; gap: 10px; }
     .entete-ratio .ratio-item { font-size: 14px; }
     /* ⚠ SOULIGNE, PARCE QUE RIEN D'AUTRE NE DIT QU'ON PEUT LE TOUCHER (lot E).
@@ -447,13 +644,13 @@
        ⚠ SUR LA PHRASE, PAS SUR LES CHIFFRES : souligner « 21 » et « 2 » les
        abimerait — ce sont des donnees qu'on lit, pas un libelle. La phrase, elle,
        nomme la destination. */
-    .entete-ratio .entete-periode { font-size: 11px; color: var(--text2);
+    .entete-ratio .entete-periode { font-size: 11px; color: var(--muted);
                                     text-decoration: underline;
                                     text-decoration-thickness: 1px;
                                     text-underline-offset: 2px;
-                                    text-decoration-color: var(--text3); }
-    .entete-ratio:hover .entete-periode { color: var(--text);
-                                          text-decoration-color: var(--text2); }
+                                    text-decoration-color: var(--muted-2); }
+    .entete-ratio:hover .entete-periode { color: var(--ink);
+                                          text-decoration-color: var(--muted); }
     /* Le repli sans chiffre est deja une phrase-porte : il se souligne aussi. */
     .ratio-porte { text-decoration: underline; text-decoration-thickness: 1px;
                    text-underline-offset: 2px; }
@@ -466,25 +663,34 @@
        n'a pas encore accepte — ou qu'on laisse filer une offre sans repondre. */
     .badge-propose { display: inline-block; font-size: 9px; font-style: italic; opacity: 0.75;
                      margin-top: 3px; }
-    .badge-offre { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.3px;
-                   border: 1px dashed currentColor; border-radius: 999px; padding: 0 5px; margin-top: 3px; }
+        /* ⚠ L'UN DES DEUX SEULS AMBRES DE L'ÉCRAN (l'autre est le compteur des
+       nouveautés) : « HôteSmart attend votre décision, et un délai court ». */
+    .badge-offre { display: inline-block; font-size: 9px; font-weight: var(--fw-bold);
+                   letter-spacing: 0.3px; border: 1px solid var(--amber);
+                   background: var(--amber-soft); color: var(--amber-text);
+                   border-radius: var(--radius-pill); padding: 2px 8px; margin-top: 3px; }
     /* ⚠ 44 px DE HAUT, C'EST LA CIBLE TACTILE, pas une marge decorative. C'est
        le SEUL chemin de retour vers le calendrier depuis que la barre d'onglets
        n'existe plus : rate sur un telephone, il n'y a pas de second essai
        ailleurs sur l'ecran. Meme grammaire que `.dispo-mini` (fond, bordure,
        rayon) pour qu'il se lise comme un bouton et non comme un titre. */
-    .avis-retour { display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
-                   padding: 0 14px; margin-bottom: 12px; font-size: 13px; font-family: inherit;
-                   border: 0.5px solid var(--border); border-radius: var(--radius);
-                   background: var(--bg); color: var(--text); cursor: pointer; }
-    .avis-retour:hover { background: var(--bg2); }
-    .avis-retour:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+    .avis-retour { display: inline-flex; align-items: center; gap: 6px; min-height: var(--control);
+                   padding: 0 18px; margin-bottom: 12px; font-size: var(--fs-small);
+                   font-family: var(--font); font-weight: var(--fw-semibold);
+                   border: 1px solid var(--border); border-radius: var(--radius-pill);
+                   background: var(--surface); color: var(--ink); cursor: pointer; }
+    .avis-retour:hover { background: var(--surface-2); }
+    .avis-retour:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
     .avis-periode { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: var(--text2); }
-    .avis-periode select { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 5px 8px; font-size: 12px; color: var(--text); }
-    .avis-sans-detail { color: var(--text2); font-style: italic; }
-    .badge-prive { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; color: var(--text2); }
+    .avis-periode select { background: var(--surface); border: 1px solid var(--border);
+                           border-radius: var(--radius-pill); min-height: var(--control);
+                           padding: 0 12px; font-family: var(--font); font-size: 12px; color: var(--ink); }
+    .avis-sans-detail { color: var(--muted); font-style: italic; }
+    .badge-prive { background: var(--surface-2); border: 1px solid var(--line);
+                   border-radius: var(--radius-pill); padding: 3px 10px; font-size: 11px;
+                   font-weight: var(--fw-semibold); color: var(--muted); }
 
-    .filter-title { font-size: 10px; color: var(--text2); font-weight: 500; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .filter-title { font-size: 10px; color: var(--muted); font-weight: var(--fw-bold); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
     /* ⚠ 44 px DE HAUT, PARCE QUE CE N'EST PLUS UNE BARRE LATERALE DE BUREAU.
        Ces lignes vivaient dans la colonne gauche du planning, masquee sur
        telephone au profit d'une feuille a gros boutons ; la feuille est partie
@@ -495,24 +701,39 @@
        planning ou la meme couleur teintait ses cartes (`.prop-color-*`). Ces
        cartes ont disparu : la pastille ne renvoyait plus a rien. Decision de
        Thierry au meme chantier — la couleur par logement ne revient pas. */
-    .filter-item { display: flex; align-items: center; gap: 10px; min-height: 44px;
+    .filter-item { display: flex; align-items: center; gap: 12px; min-height: 52px;
                    padding: 2px 0; cursor: pointer;
-                   border-bottom: 0.5px solid var(--border); }
+                   border-bottom: 1px solid var(--line); }
     .filter-item:last-child { border-bottom: none; }
-    .filter-item input { cursor: pointer; accent-color: var(--primary);
-                         width: 18px; height: 18px; flex-shrink: 0; }
-    .filter-label { font-size: 13px; color: var(--text); }
+        /* ⚠ LE NOIR DES CASES COCHÉES : c'est un CHOIX actif, le seul emploi du
+       noir plein avec les segments (charte V5). */
+    .filter-item input { cursor: pointer; accent-color: var(--ink);
+                         width: 20px; height: 20px; flex-shrink: 0; }
+    .filter-label { font-size: var(--fs-small); color: var(--ink);
+                    font-weight: var(--fw-medium); }
 
     .week-stats { display: flex; gap: 12px; margin-bottom: 16px; }
-    .week-stat { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; }
-    .week-stat strong { font-size: 18px; font-weight: 600; display: block; }
+    .week-stat { background: var(--surface); border: 1px solid var(--line);
+                border-radius: var(--radius-card); padding: 14px 16px; font-size: 12px;
+                color: var(--muted); }
+    .week-stat strong { font-size: var(--fs-kpi); font-weight: var(--fw-bold);
+                        color: var(--ink); display: block; letter-spacing: var(--tracking-tight); }
 
-    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; display: flex; align-items: center; justify-content: center; }
-    .modal { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 24px; width: 400px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
-    .modal-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-    .modal-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
-    .modal-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 0.5px solid var(--border); }
-    .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+        .modal-overlay { position: fixed; inset: 0; background: var(--scrim); z-index: 100;
+                     display: flex; align-items: center; justify-content: center; }
+    .modal { background: var(--surface); border: 1px solid var(--line);
+             border-radius: var(--radius-card); padding: 24px;
+             width: 400px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
+    .modal-title { font-size: 19px; font-weight: var(--fw-bold); margin-bottom: 4px;
+                   letter-spacing: var(--tracking-tight); }
+    .modal-sub { font-size: var(--fs-caption); color: var(--muted); margin-bottom: 18px; }
+    .modal-row { display: flex; justify-content: space-between; gap: 16px;
+                 font-size: var(--fs-small); padding: 11px 0;
+                 border-bottom: 1px solid var(--line); }
+    .modal-row span:first-child { color: var(--muted); }
+    .modal-row span:last-child { font-weight: var(--fw-semibold); text-align: right; }
+    .modal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+    .modal-actions .btn { flex: 1; min-width: 130px; }
     /* ⚠ APERÇU : l'hôte regarde, il n'agit pas. Les gestes qui engagent la
        prestataire disparaissent — « Fermer » reste, sinon la fenêtre modale
        devient un piège. Le garde réel est sur `fetch` : ceci évite d'offrir un
@@ -531,43 +752,79 @@
     .apercu .apercu-bandeau { display: flex; }
     .apercu-bandeau {
       display: none; align-items: center; justify-content: center; gap: 6px;
-      padding: 7px 10px; background: var(--bg2, #F2F2F2); color: var(--text2);
-      font-size: 12px; font-weight: 600; border-bottom: 1px solid var(--border);
+      padding: 9px 10px; background: var(--ink); color: var(--on-ink);
+      font-size: 12px; font-weight: var(--fw-bold); border-bottom: 1px solid var(--ink);
     }
 
-    .modal-error   { background: #FEE2E2; border: 0.5px solid #DC2626; color: #991B1B; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
+        .modal-error   { background: var(--danger-soft); border: 1px solid var(--danger);
+                     color: var(--danger); border-radius: var(--radius-tile);
+                     padding: 12px 14px; margin-top: 14px; font-size: var(--fs-caption);
+                     line-height: 1.5; display: none; }
     .modal-error.visible { display: block; }
-    .modal-success { background: #D1FAE5; border: 0.5px solid #059669; color: #065F46; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
+    .modal-success { background: var(--ok-soft); border: 1px solid var(--ok);
+                     color: var(--ok); border-radius: var(--radius-tile);
+                     padding: 12px 14px; margin-top: 14px; font-size: var(--fs-caption);
+                     line-height: 1.5; display: none; }
     .modal-success.visible { display: block; }
-    .modal-warning { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
+    /* Le second et dernier ambre : il porte « à confirmer — 4 h restantes ». */
+    .modal-warning { background: var(--amber-soft); border: 1px solid var(--amber);
+                     color: var(--amber-text); border-radius: var(--radius-tile);
+                     padding: 12px 14px; margin-top: 14px; font-size: var(--fs-caption);
+                     line-height: 1.5; display: none; }
     .modal-warning.visible { display: block; }
 
-    .admin-note { background: #FFF3CD; border: 0.5px solid #F59E0B; border-radius: var(--radius); padding: 10px 12px; margin-top: 14px; font-size: 12px; color: #92400E; line-height: 1.5; }
-    .admin-note-title { font-weight: 600; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    /* ⚠ LA NOTE DE L'HÔTE N'EST PLUS JAUNE (charte V5). Le jaune la mettait au
+       rang d'une alerte : c'est une consigne de travail, qu'on lit, pas une
+       chose à laquelle il faut réagir. Le titre la nomme déjà. */
+    .admin-note { background: var(--surface-2); border: 1px solid var(--line);
+                  border-radius: var(--radius-tile); padding: 12px 14px; margin-top: 16px;
+                  font-size: var(--fs-caption); color: var(--ink); line-height: 1.55; }
+    .admin-note-title { font-weight: var(--fw-bold); margin-bottom: 6px; font-size: 11px;
+                        color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 
     /* Bandeau global "actions en attente" */
-    .sync-banner { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E; border-radius: var(--radius); padding: 8px 12px; margin-bottom: 12px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
-    .sync-banner.offline { background: #FEE2E2; border-color: #DC2626; color: #991B1B; }
+    .sync-banner { background: var(--surface-2); border: 1px solid var(--border);
+                   color: var(--ink); border-radius: var(--radius-tile);
+                   padding: 12px 14px; margin-bottom: 12px; font-size: var(--fs-caption);
+                   font-weight: var(--fw-medium); display: flex; align-items: center; gap: 8px; }
+    /* ⚠ HORS LIGNE EST UN ÉTAT, PAS UNE ERREUR (charte V5) : fond noir, texte
+       blanc. Le rouge disait « quelque chose a échoué » — rien n'a échoué, elle
+       est dans un sous-sol et ses gestes partiront tout seuls en remontant. */
+    .sync-banner.offline { background: var(--ink); border-color: var(--ink);
+                           color: var(--on-ink); }
     .sync-banner-spinner { animation: spin 1s linear infinite; display: inline-block; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
     /* Fil d'actualités */
-    .news-panel { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 16px; }
-    .news-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .news-title { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
-    .news-badge { background: #E24B4A; color: white; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 20px; }
-    .news-close { background: none; border: 0.5px solid var(--border); border-radius: var(--radius); cursor: pointer; color: var(--text2); font-size: 12px; padding: 4px 10px; font-family: inherit; transition: all 0.15s; }
-    .news-close:hover { border-color: var(--green); color: var(--green); }
+    .news-panel { background: var(--surface); border: 1px solid var(--border);
+                  border-radius: var(--radius-card); padding: 16px; margin-bottom: 16px; }
+    .news-header { display: flex; align-items: center; justify-content: space-between;
+                   gap: 10px; margin-bottom: 12px; }
+    .news-title { font-size: var(--fs-caption); font-weight: var(--fw-bold);
+                  display: flex; align-items: center; gap: 8px; }
+    /* ⚠ L'UN DES DEUX SEULS AMBRES DE L'ÉCRAN : « il y a du nouveau ». Le rouge
+       d'avant le faisait lire comme une alerte. */
+    .news-badge { background: var(--amber); color: var(--ink); font-size: 10px;
+                  font-weight: var(--fw-bold); padding: 2px 8px;
+                  border-radius: var(--radius-pill); }
+    .news-close { background: var(--surface); border: 1px solid var(--border);
+                  border-radius: var(--radius-pill); cursor: pointer; color: var(--ink);
+                  font-size: 12px; font-weight: var(--fw-semibold);
+                  min-height: var(--control); padding: 0 14px; flex-shrink: 0;
+                  font-family: var(--font); transition: all 0.15s; }
+    .news-close:hover { border-color: var(--ink); background: var(--surface-2); }
     .news-list { display: flex; flex-direction: column; gap: 8px; }
-    .news-item { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 12px; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; transition: opacity 0.15s; }
+    .news-item { background: var(--surface); border: 1px solid var(--line);
+                 border-radius: var(--radius-tile); padding: 12px 14px; display: flex;
+                 align-items: flex-start; gap: 10px; cursor: pointer; transition: opacity 0.15s; }
     .news-item:hover { opacity: 0.85; }
-    .news-item.unread { border-left: 3px solid var(--primary); }
-    .news-item.read { opacity: 0.6; }
+    .news-item.unread { border-left: 3px solid var(--ink); background: var(--surface-2); }
+    .news-item.read { opacity: 0.55; }
     .news-icon { font-size: 16px; flex-shrink: 0; }
-    .news-content { flex: 1; }
-    .news-content-title { font-size: 12px; font-weight: 500; }
-    .news-content-sub { font-size: 11px; color: var(--text2); margin-top: 2px; line-height: 1.4; }
-    .news-time { font-size: 10px; color: var(--text2); flex-shrink: 0; white-space: nowrap; }
+    .news-content { flex: 1; min-width: 0; }
+    .news-content-title { font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+    .news-content-sub { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+    .news-time { font-size: 10px; color: var(--muted-2); flex-shrink: 0; white-space: nowrap; }
 
     /* ============================================ */
     /* RESPONSIVE MOBILE - breakpoint 900px         */
@@ -599,13 +856,28 @@
         padding: 8px 10px;
       }
 
-      /* Modal : presque plein ecran */
+      /* ─── LA FEUILLE DU BAS (charte V5) ─────────────────────────────────
+         24 px en haut, une poignée, une ombre douce : elle doit se lire comme
+         une feuille qui MONTE depuis le bas, pas comme une boîte posée au
+         milieu. Le voile derrière est le même partout (`--scrim`).
+         ⚠ LA POIGNÉE EST UN `::before`, DONC DU CSS PUR : aucun nœud ajouté,
+         aucune ligne de JavaScript touchée. Elle ne se touche pas (le geste de
+         glissement n'existe pas ici) — c'est une affordance de forme, et
+         `pointer-events: none` l'empêche d'intercepter un doigt. */
       .modal {
         width: 100%;
         max-width: 100%;
         margin: 0;
-        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-        max-height: 85vh;
+        border: none;
+        border-radius: 24px 24px 0 0;
+        padding: 10px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+        max-height: 88vh;
+        box-shadow: var(--shadow-sheet);
+      }
+      .modal::before {
+        content: ''; display: block; width: 36px; height: 4px; flex-shrink: 0;
+        margin: 0 auto 14px; border-radius: var(--radius-pill);
+        background: var(--line); pointer-events: none;
       }
       .modal-overlay {
         align-items: flex-end;
@@ -613,13 +885,15 @@
 
       /* Topbar plus compacte */
       .topbar {
-        padding: 12px 16px;
+        padding: 14px 16px;
       }
       .page-title {
-        font-size: 16px;
+        font-size: 17px;
+        font-weight: var(--fw-bold);
+        letter-spacing: var(--tracking-tight);
       }
       .page-sub {
-        font-size: 11px;
+        font-size: 12px;
       }
     }
   </style>

@@ -1810,10 +1810,10 @@ indépendante de la partie D (côté hôte).
    page) ; en dessous « 42 avis pris en compte, depuis le début · 👍 16 👎 3 »
    (la période qu'ELLE consulte). Les deux sont justes et le code s'en explique
    longuement ; à l'œil, l'écran se contredit. (`09`.)
-6. **Les pastilles A/B se replient sur deux rangées en 390 px.** L'étiquette
-   « Semaine A » + sept cases ne tiennent pas : on lit L M M J, puis V S D en
-   dessous, et l'alignement entre la ligne A et la ligne B se perd — or c'est
-   exactement ce qu'on vient y comparer. (`08`.)
+6. ~~**Les pastilles A/B se replient sur deux rangées en 390 px.**~~ —
+   **RÉGLÉ le 15 octobre** par la refonte CSS : l'étiquette passe au-dessus et
+   les vingt-deux pixels manquants se prennent sur les marges de la feuille,
+   pas sur la cible tactile. (`08`.)
 7. **La lettre A/B n'est pas une propriété de la semaine.** `lettreSemaine`
    est calculée **par rapport à aujourd'hui** : la semaine courante est
    toujours « A ». Le 9 novembre est donc « A » cette semaine et « B » la
@@ -1864,6 +1864,11 @@ indépendante de la partie D (côté hôte).
 | `11-panne-de-lecture.png` | 503 sur ses absences : le calendrier reste |
 | `12-hors-ligne.png` | Le bandeau hors ligne et la file d'attente |
 | `13-lien-invalide.png` | Sans jeton |
+
+**Et les captures d'APRÈS la refonte CSS V5** (15 octobre 2026) :
+`captures-v5/` aux mêmes treize noms, et `avant-apres/` qui en donne les treize
+paires côte à côte. La partie J décrit l'écran d'AVANT — les textes, les champs,
+les gestes et les points D n'ont pas bougé d'un mot, seule la peinture a changé.
 
 **Comment elles sont faites** (hors dépôt, aucune base touchée) :
 `~/.cache/hotesmart-banc/pwa.js` sert le worktree sur le port 4790 avec des
