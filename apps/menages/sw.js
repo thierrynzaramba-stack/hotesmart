@@ -17,7 +17,13 @@
 // `fetch` ne les remet jamais en cache (`avecJeton`, plus bas) : ouverte hors
 // ligne, elle aurait vu l'ancienne page indéfiniment, même après dix passages
 // en ligne.
-const CACHE_VERSION = 'hotesmart-clean-v5-charte';
+// ⚠ REBUMPE LE 16 OCTOBRE 2026 : `public.html` a changé deux fois depuis
+// (modernisation, puis vignettes et vert du jour courant), et le mécanisme
+// décrit juste au-dessus vaut à chaque fois — sans bump, une PWA installée
+// ouverte hors ligne sert indéfiniment l'entrée précachée de la veille. Un
+// seul bump couvre les commits d'un même lot ; ce qui ne se rattrape pas,
+// c'est de l'oublier avant la mise en production.
+const CACHE_VERSION = 'hotesmart-clean-v6-vignettes';
 // ⚠ LES DEUX FEUILLES DE STYLE SONT DANS LA COQUILLE DEPUIS LA CHARTE V5
 // (constat de la revue de 41d4afe). `public.html` remappe les seize variables
 // de `public/style.css` SUR les tokens de `theme.css` : sans `theme.css`, les

@@ -601,8 +601,15 @@
        noms d'une liste de lieux.
        ⚠ `flex-shrink: 0` : sans lui, elle se tasse en ovale dès qu'un nom de
        bien est long, et c'est précisément là qu'on la regarde. */
+    /* ⚠ PAS `--surface-2` POUR LE REPLI, ET UN FILET (constat de la revue de
+       9454cf6). C'est exactement le fond d'une nouveauté non lue et celui de
+       la ligne d'aujourd'hui : sur ces deux surfaces — les plus fréquentes de
+       l'écran — le disque disparaissait, et il ne restait que deux initiales
+       grises flottantes. Or un bien sans photo est le cas par DÉFAUT
+       aujourd'hui : rien n'importe les photos automatiquement. */
     .pwa-vignette { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
-                    overflow: hidden; background: var(--surface-2);
+                    overflow: hidden; background: var(--line);
+                    box-shadow: inset 0 0 0 1px var(--border);
                     display: inline-flex; align-items: center; justify-content: center; }
     .pwa-vignette img { width: 100%; height: 100%; object-fit: cover; display: block; }
     /* Sans photo, les initiales du bien — jamais une maison générique, qui ne
@@ -1941,9 +1948,16 @@ if ("serviceWorker" in navigator && !APERCU) {
       // 16 octobre). Le balai disait le TYPE d'événement — information que le
       // titre de la ligne écrit déjà en toutes lettres — pendant que le
       // logement, lui, ne se lisait qu'en petit sous ce titre. Un événement
-      // sans bien connu garde son emoji : il reste des lignes `note` servies
+      // sans bien du tout garde son emoji : il reste des lignes `note` servies
       // sans `property_id` par des versions antérieures du writer.
-      const vign = n.property_id != null && biensParId[String(n.property_id)]
+      // ⚠ LA MÊME RÈGLE QUE LA LISTE DES TRENTE JOURS, ET C'EST LE POINT
+      // (constat de la revue de 9454cf6). Cette garde exigeait AUSSI que le
+      // bien soit présent dans `biens` ; la liste, elle, appelle toujours la
+      // fabrique et retombe sur les initiales. Un bien autorisé mais absent de
+      // `properties` — supprimé, ou dont le `provider_property_id` est passé à
+      // `null` — sortait donc en emoji ici et en initiales là-bas : la
+      // divergence exacte qu'« une seule fabrique » existe pour empêcher.
+      const vign = n.property_id != null
         ? vignetteBien(n.property_id, n.property_name)
         : `<div class="news-icon">${icons[n.event_type] || '📋'}</div>`
       return `
