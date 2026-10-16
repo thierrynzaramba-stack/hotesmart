@@ -255,6 +255,53 @@ test('une exception, elle, se supprime — et sous les mêmes filtres', async ()
 // tard — la cinquième famille de rouges calendaires, évitée à sa source.
 const dansNJours = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10)
 
+// ⚠ LE MOIS DEMANDÉ SUIT L'HORLOGE, LUI AUSSI (17 octobre 2026). Ces tests
+// demandaient `mois: MOIS` avec des congés figés au même mois : cohérents
+// entre eux, mais pas avec le calendrier. `api/disponibilites.js` ne calcule
+// que des mois À VENIR — au 16 décembre, novembre est derrière, la réponse ne
+// porte plus ces jours-là, et trois tests tombent. La contre-épreuve à horloge
+// décalée (`tests/outils/horloge-decalee.js`) les a vus rougir à J+30, J+60 et
+// J+90 alors qu'ils étaient verts le jour même : c'est exactement la dette des
+// 28, prise AVANT qu'elle coûte.
+//
+// ⚠ LE MOIS PROCHAIN, PAS LE MOIS COURANT : entier, et toujours devant, quel
+// que soit le jour où la suite tourne. Un test qui passe le 1er et tombe le 28
+// est pire qu'un test rouge.
+const MOIS = (() => {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  d.setMonth(d.getMonth() + 1, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+})()
+const DANS_LE_MOIS = (j) => `${MOIS}-${String(j).padStart(2, '0')}`
+// Le SECOND mois rendu, et sa longueur : le calendrier en sert toujours deux.
+// ⚠ On ne compte pas « 30 + 31 » à la main — février, et les années
+// bissextiles, auraient fait tomber le test deux fois par an.
+const nbJours = (m) => new Date(Date.UTC(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0)).getUTCDate()
+const MOIS_2 = (() => {
+  const d = new Date(Date.UTC(Number(MOIS.slice(0, 4)), Number(MOIS.slice(5, 7)), 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+})()
+const DERNIER_JOUR = `${MOIS_2}-${nbJours(MOIS_2)}`
+// ⚠ ET LE JOUR DE LA SEMAINE COMPTE AUTANT QUE LA DATE. Les tests de congé et
+// d'exception posent une règle « du lundi au vendredi » puis vérifient qu'un
+// jour précis est travaillé ou non : avec un numéro figé (« le 16 »), ils ne
+// tenaient que les mois où ce numéro tombe un lundi. La contre-épreuve les a
+// vus rougir à J+45 et J+60, verts partout ailleurs — le pire des cas, celui
+// qui fait chercher une régression là où il n'y a qu'un calendrier.
+const LUNDI = (n) => {
+  const d = new Date(Date.UTC(Number(MOIS.slice(0, 4)), Number(MOIS.slice(5, 7)) - 1, 1, 12))
+  while (d.getUTCDay() !== 1) d.setUTCDate(d.getUTCDate() + 1)
+  d.setUTCDate(d.getUTCDate() + 7 * (n - 1))
+  return d.toISOString().slice(0, 10)
+}
+const PLUS = (iso, n) => {
+  const d = new Date(`${iso}T12:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+const NB_JOURS_RENDUS = nbJours(MOIS) + nbJours(MOIS_2)
+
 test('une exception se pose dans les DEUX sens, et remplace la précédente', async () => {
   // ⚠ Une seule décision par personne et par jour (contrainte SQL) : reposer
   // « pas ce samedi » sur un jour marqué disponible doit CORRIGER, pas échouer —
@@ -512,11 +559,12 @@ test('GET ne rend QUE les règles actives — les désactivées ne mangent pas l
 test('le calendrier rend DEUX mois à partir du mois demandé', async () => {
   const { handler } = preparer({})
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
-  assert.strictEqual(res.body.mois, '2026-11')
-  assert.strictEqual(res.body.jours[0].date, '2026-11-01')
-  assert.strictEqual(res.body.jours.at(-1).date, '2026-12-31')
-  assert.strictEqual(res.body.jours.length, 61, '30 jours de novembre + 31 de décembre')
+  await handler(get({ mois: MOIS }), res)
+  assert.strictEqual(res.body.mois, MOIS)
+  assert.strictEqual(res.body.jours[0].date, DANS_LE_MOIS(1))
+  assert.strictEqual(res.body.jours.at(-1).date, DERNIER_JOUR)
+  assert.strictEqual(res.body.jours.length, NB_JOURS_RENDUS,
+    'les deux mois entiers, quelle que soit leur longueur')
 })
 
 test('un mois ILLISIBLE retombe sur le mois courant, il ne fait pas tout calculer', async () => {
@@ -530,7 +578,7 @@ test('un mois ILLISIBLE retombe sur le mois courant, il ne fait pas tout calcule
 test('aucune règle = DISPONIBLE tous les jours (la règle du moteur)', async () => {
   const { handler } = preparer({ regles: [] })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
+  await handler(get({ mois: MOIS }), res)
   assert.ok(res.body.jours.every(j => j.dispo === true))
   assert.strictEqual(res.body.aucune_regle, true, 'et l\'écran peut le dire')
 })
@@ -538,33 +586,33 @@ test('aucune règle = DISPONIBLE tous les jours (la règle du moteur)', async ()
 test('un CONGÉ verrouille le jour, et il le dit — bornes INCLUSES', async () => {
   const { handler } = preparer({
     regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', active: true, source: 'prestataire' }],
-    conges: [{ id: 'c1', debut: '2026-11-09', fin: '2026-11-15', motif: 'Vacances', source: 'prestataire' }]
+    conges: [{ id: 'c1', debut: LUNDI(1), fin: PLUS(LUNDI(1), 6), motif: 'Vacances', source: 'prestataire' }]
   })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
+  await handler(get({ mois: MOIS }), res)
   const parJour = Object.fromEntries(res.body.jours.map(j => [j.date, j]))
-  assert.strictEqual(parJour['2026-11-09'].dispo, false, 'le premier jour du congé')
-  assert.strictEqual(parJour['2026-11-15'].dispo, false, 'ET le dernier : les bornes sont incluses')
-  assert.strictEqual(parJour['2026-11-09'].conge.motif, 'Vacances')
-  assert.strictEqual(parJour['2026-11-09'].conge.source, 'prestataire')
-  assert.strictEqual(parJour['2026-11-16'].dispo, true, 'le lundi suivant, elle retravaille')
+  assert.strictEqual(parJour[LUNDI(1)].dispo, false, 'le premier jour du congé')
+  assert.strictEqual(parJour[PLUS(LUNDI(1), 6)].dispo, false, 'ET le dernier : les bornes sont incluses')
+  assert.strictEqual(parJour[LUNDI(1)].conge.motif, 'Vacances')
+  assert.strictEqual(parJour[LUNDI(1)].conge.source, 'prestataire')
+  assert.strictEqual(parJour[LUNDI(2)].dispo, true, 'le lundi suivant, elle retravaille')
 })
 
 test('une EXCEPTION tranche dans les DEUX sens, et le congé l\'emporte sur elle', async () => {
   const { handler } = preparer({
     regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO', active: true }],
-    exceptions: [{ id: 'e1', date: '2026-11-11', available: true, source: 'prestataire' },
-                 { id: 'e2', date: '2026-11-02', available: false, source: 'hote' },
-                 { id: 'e3', date: '2026-11-10', available: true, source: 'prestataire' }],
-    conges: [{ id: 'c1', debut: '2026-11-10', fin: '2026-11-10', motif: null, source: 'hote' }]
+    exceptions: [{ id: 'e1', date: DANS_LE_MOIS(11), available: true, source: 'prestataire' },
+                 { id: 'e2', date: DANS_LE_MOIS(2), available: false, source: 'hote' },
+                 { id: 'e3', date: DANS_LE_MOIS(10), available: true, source: 'prestataire' }],
+    conges: [{ id: 'c1', debut: DANS_LE_MOIS(10), fin: DANS_LE_MOIS(10), motif: null, source: 'hote' }]
   })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
+  await handler(get({ mois: MOIS }), res)
   const parJour = Object.fromEntries(res.body.jours.map(j => [j.date, j]))
-  assert.strictEqual(parJour['2026-11-11'].dispo, true, 'un mercredi ouvert à la main, alors qu\'elle ne travaille que le lundi')
-  assert.strictEqual(parJour['2026-11-02'].dispo, false, 'un lundi fermé à la main')
-  assert.strictEqual(parJour['2026-11-10'].dispo, false, 'LE CONGÉ L\'EMPORTE sur une exception « disponible »')
-  assert.strictEqual(parJour['2026-11-11'].exception.source, 'prestataire', 'et l\'écran sait qui l\'a posée')
+  assert.strictEqual(parJour[DANS_LE_MOIS(11)].dispo, true, 'un mercredi ouvert à la main, alors qu\'elle ne travaille que le lundi')
+  assert.strictEqual(parJour[DANS_LE_MOIS(2)].dispo, false, 'un lundi fermé à la main')
+  assert.strictEqual(parJour[DANS_LE_MOIS(10)].dispo, false, 'LE CONGÉ L\'EMPORTE sur une exception « disponible »')
+  assert.strictEqual(parJour[DANS_LE_MOIS(11)].exception.source, 'prestataire', 'et l\'écran sait qui l\'a posée')
 })
 
 test('une règle ILLISIBLE rend INDISPONIBLE : une panne coupe, elle n\'ouvre pas', async () => {
@@ -573,14 +621,14 @@ test('une règle ILLISIBLE rend INDISPONIBLE : une panne coupe, elle n\'ouvre pa
   // le sache avant le jour J.
   const { handler } = preparer({ regles: [{ id: 'r1', rrule: 'n importe quoi', active: true }] })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
+  await handler(get({ mois: MOIS }), res)
   assert.ok(res.body.jours.every(j => j.dispo === false))
 })
 
 test('une règle DÉSACTIVÉE ne compte pas : on retombe sur « disponible »', async () => {
   const { handler } = preparer({ regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO', active: false }] })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
+  await handler(get({ mois: MOIS }), res)
   assert.ok(res.body.jours.every(j => j.dispo === true))
 })
 
@@ -589,7 +637,7 @@ test('la RRULE ne sort toujours pas, pas même par le calendrier', async () => {
     regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO;INTERVAL=2;DTSTART=20261005', active: true }]
   })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
+  await handler(get({ mois: MOIS }), res)
   assert.ok(!JSON.stringify(res.body).includes('FREQ='))
 })
 
@@ -620,15 +668,15 @@ test('un mois HORS PLAGE ne fabrique pas un calendrier vide', async () => {
 
 test('sans_exception dit ce que le jour vaudrait SANS son exception', async () => {
   const { handler } = preparer({
-    // Elle travaille du lundi au vendredi. Le lundi 9 porte une absence posée à
+    // Elle travaille du lundi au vendredi. Le premier lundi porte une absence posée à
     // la main : l'état final est « absente », mais la récurrence dit « là ».
     regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', active: true, source: 'hote' }],
-    exceptions: [{ id: 'e1', date: '2026-11-09', available: false, reason: null,
-                   source: 'hote', created_at: '2026-11-02T08:00:00Z' }]
+    exceptions: [{ id: 'e1', date: LUNDI(1), available: false, reason: null,
+                   source: 'hote', created_at: `${LUNDI(1)}T08:00:00Z` }]
   })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
-  const j = res.body.jours.find(x => x.date === '2026-11-09')
+  await handler(get({ mois: MOIS }), res)
+  const j = res.body.jours.find(x => x.date === LUNDI(1))
   assert.strictEqual(j.dispo, false, 'l\'état final : absente')
   assert.strictEqual(j.sans_exception, true,
     'mais la récurrence dit « là » — donc la remettre au travail se fait en RETIRANT l\'exception')
@@ -642,7 +690,7 @@ test('sans exception, sans_exception vaut l\'état du jour', async () => {
     regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', active: true, source: 'hote' }]
   })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
+  await handler(get({ mois: MOIS }), res)
   assert.ok(res.body.jours.every(j => j.sans_exception === j.dispo))
 })
 
@@ -653,13 +701,13 @@ test('un jour sous CONGÉ reste indisponible même sans son exception', async ()
   // aucun effet. Le bouton est inerte, et la donnée dit la même chose que lui.
   const { handler } = preparer({
     regles: [{ id: 'r1', rrule: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR', active: true, source: 'hote' }],
-    conges: [{ id: 'c1', debut: '2026-11-09', fin: '2026-11-13', motif: 'Vacances', source: 'prestataire' }],
-    exceptions: [{ id: 'e1', date: '2026-11-10', available: true, reason: null,
+    conges: [{ id: 'c1', debut: DANS_LE_MOIS(9), fin: DANS_LE_MOIS(13), motif: 'Vacances', source: 'prestataire' }],
+    exceptions: [{ id: 'e1', date: DANS_LE_MOIS(10), available: true, reason: null,
                    source: 'hote', created_at: '2026-11-02T08:00:00Z' }]
   })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
-  const j = res.body.jours.find(x => x.date === '2026-11-10')
+  await handler(get({ mois: MOIS }), res)
+  const j = res.body.jours.find(x => x.date === DANS_LE_MOIS(10))
   assert.strictEqual(j.dispo, false)
   assert.strictEqual(j.sans_exception, false, 'le congé tient des deux côtés')
 })
@@ -670,12 +718,12 @@ test('l\'exception du jour sort avec son IDENTIFIANT et sa trace', async () => {
   // empiler. Sans `created_at`, la fiche ne sait pas dire « Réglé par vous · le
   // … » à côté de « Réglé par elle · le … ».
   const { handler } = preparer({
-    exceptions: [{ id: 'e1', date: '2026-11-09', available: false, reason: null,
+    exceptions: [{ id: 'e1', date: DANS_LE_MOIS(9), available: false, reason: null,
                    source: 'hote', created_at: '2026-11-02T08:00:00Z' }]
   })
   const res = reponse()
-  await handler(get({ mois: '2026-11' }), res)
-  const j = res.body.jours.find(x => x.date === '2026-11-09')
+  await handler(get({ mois: MOIS }), res)
+  const j = res.body.jours.find(x => x.date === DANS_LE_MOIS(9))
   assert.strictEqual(j.exception.id, 'e1')
   assert.strictEqual(j.exception.source, 'hote')
   assert.strictEqual(j.exception.created_at, '2026-11-02T08:00:00Z')
@@ -688,7 +736,7 @@ test('poser une exception repose sa DATE DE GESTE', async () => {
   // un geste fait à l'instant. La source changeait, la date restait à l'autre.
   const { handler, etat } = preparer({})
   const avant = Date.now()
-  await handler(post({ action: 'poserException', date: '2026-11-09', available: false }), reponse())
+  await handler(post({ action: 'poserException', date: DANS_LE_MOIS(9), available: false }), reponse())
   const e = etat.ecritures.find(x => x.table === 'provider_availability_exceptions')
   assert.strictEqual(e.op, 'upsert')
   assert.strictEqual(e.row.source, 'hote')

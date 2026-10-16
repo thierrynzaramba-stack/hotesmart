@@ -67,8 +67,27 @@ test('lireReponse : JSON illisible ou enrobé', () => {
 })
 
 // ─── La ligne écrite ────────────────────────────────────────────────────────
+//
+// ⚠ DES DATES RELATIVES, PARCE QUE CE TEST LIT L'HORLOGE (17 octobre 2026).
+// Règle du dépôt : dates relatives si le test lit l'horloge, dates figées s'il
+// injecte le temps. `lib/cron-messages-classify.js` ne lit que les messages
+// d'une fenêtre glissante, et n'accepte aucune injection de temps. Ce message
+// était daté du 20 août 2026 : fin septembre il en est sorti, et DIX tests
+// sont devenus rouges d'un coup — pas sur la classification, mais sur le
+// CURSEUR et les erreurs de cycle, c'est-à-dire sur la mécanique qui empêche
+// la file de geler. Pire que l'alarme ignorée : le message était écarté AVANT
+// la garde de panne DB, si bien que la garde n'était jamais appelée et que le
+// test ne prouvait plus rien du tout.
+const ilYa = (n, h = 10) => {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 11) + String(h).padStart(2, '0') + ':00:00Z'
+}
+const jourIlYa = (n) => ilYa(n).slice(0, 10)
+
 const MSG = { id: 'aaaaaaaa-1111-4111-8111-111111111111', user_id: 'u1', direction: 'inbound',
-              body: TEXTE, sent_at: '2026-08-20T10:00:00Z', created_at: '2026-08-20T10:00:00Z',
+              body: TEXTE, sent_at: ilYa(2), created_at: ilYa(2),
               booking_id: '77', property_id: '209413' }
 const BIEN = { id: 'uuid-bien', user_id: 'u1', provider_property_id: '209413' }
 
@@ -96,10 +115,10 @@ test('versLigne : la gravité va dans raw, pas dans une colonne', () => {
 })
 
 test('versLigne : le séjour est dénormalisé quand il est connu', () => {
-  const l = versLigne(MSG, BIEN, { booking_uid: '77', stay_start: '2026-08-18', stay_end: '2026-08-20' },
+  const l = versLigne(MSG, BIEN, { booking_uid: '77', stay_start: jourIlYa(4), stay_end: jourIlYa(2) },
                       { signale: true, extrait: null })
   assert.strictEqual(l.booking_uid, '77')
-  assert.strictEqual(l.stay_start, '2026-08-18')
+  assert.strictEqual(l.stay_start, jourIlYa(4))
 })
 
 test('versLigne : sans séjour, les colonnes d\'ancrage sont ABSENTES', () => {
@@ -340,8 +359,8 @@ test('premier échec : le curseur ne dépasse pas, mais le compteur monte', asyn
 test('échec après un succès : le travail déjà fait n\'est pas jeté', async () => {
   // dernierTraite conservait `null` sur échec, donc le lot entier était rejoué —
   // c'est ce qui rouvrait la porte au retraitement.
-  const M1 = { ...MSG, id: 'bbbbbbbb-1111-4111-8111-111111111111', created_at: '2026-08-20T09:00:00Z' }
-  const M2 = { ...MSG, id: 'cccccccc-1111-4111-8111-111111111111', created_at: '2026-08-20T10:00:00Z' }
+  const M1 = { ...MSG, id: 'bbbbbbbb-1111-4111-8111-111111111111', created_at: ilYa(2, 9) }
+  const M2 = { ...MSG, id: 'cccccccc-1111-4111-8111-111111111111', created_at: ilYa(2, 10) }
   let n = 0
   const journal = []
   await classerMessages(null, {

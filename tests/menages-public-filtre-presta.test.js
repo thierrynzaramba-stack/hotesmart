@@ -19,13 +19,38 @@ const U = 'compte-1', TOKEN = 'regina-x', REGINA = 'p-regina', NOUVELLE = 'p-nou
 
 const BIENS = [{ provider_property_id: '209413', name: 'La bulle', provider: 'beds24' }]
 
+// ⚠ DES DATES RELATIVES, PARCE QUE CE TEST LIT L'HORLOGE (17 octobre 2026).
+// C'est la règle du dépôt : dates relatives si le test lit l'horloge, dates
+// figées s'il injecte le temps. Celui-ci n'injecte rien — `api/menages-public.js`
+// calcule sa fenêtre avec `new Date()` — et ses séjours étaient figés au
+// 1er-5 septembre 2026. Le 21 septembre, ils sont sortis de la fenêtre J−14 du
+// fil d'actualités, et quatre tests de CLOISONNEMENT sont devenus rouges sans
+// qu'une ligne de production ait bougé. Un test qui rougit tout seul au
+// calendrier n'est plus une barrière : on apprend à ignorer sa couleur.
+//
+// ⚠ MIDI, ET EN HEURE LOCALE. Le serveur borne sa fenêtre avec
+// `new Date(); setHours(0,0,0,0)`, donc en heure locale : un `toISOString()`
+// décalerait d'un jour chaque nuit entre minuit et 02 h en France, et le test
+// serait instable aux heures où l'on travaille le moins bien. Midi met aussi
+// le calcul hors d'atteinte des bascules d'heure d'été.
+const jour = (n) => {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  d.setDate(d.getDate() + n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+// Le séjour d'Alice part AUJOURD'HUI : c'est le cas qui compte, celui d'un
+// ménage qu'elle a encore à faire. Celui de Bruno part quatre jours après.
+const ARR_A = jour(-4), DEP_A = jour(0)
+const ARR_B = jour(1), DEP_B = jour(4)
+
 // Deux séjours sur le MÊME bien, l'un à Régina, l'autre à la nouvelle.
 const SNAPS = [
   { booking_id: 'b1', property_id: '209413',
-    snapshot: { status: 'confirmed', arrival: '2026-09-01', departure: '2026-09-05',
+    snapshot: { status: 'confirmed', arrival: ARR_A, departure: DEP_A,
                 firstName: 'Alice', lastName: 'Martin', provider: 'beds24' } },
   { booking_id: 'b2', property_id: '209413',
-    snapshot: { status: 'confirmed', arrival: '2026-09-06', departure: '2026-09-09',
+    snapshot: { status: 'confirmed', arrival: ARR_B, departure: DEP_B,
                 firstName: 'Bruno', lastName: 'Durand', provider: 'beds24' } }
 ]
 
@@ -150,7 +175,7 @@ const MENAGE = (booking, provider, depart, over = {}) => ({
 // ─── Le filtre par personne ────────────────────────────────────────────────
 
 test('la prestataire ne voit QUE les ménages qui lui sont assignés', async () => {
-  preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
@@ -161,7 +186,7 @@ test('la prestataire ne voit QUE les ménages qui lui sont assignés', async () 
 test('le séjour de l\'AUTRE prestataire ne sort pas — ni le nom du voyageur', async () => {
   // Le filtre porte sur la réponse entière : un champ imprévu qui laisserait
   // fuiter « Bruno Durand » serait attrapé ici.
-  preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
@@ -182,7 +207,7 @@ test('aucun ménage assigné : planning VIDE, pas le planning du bien', async ()
 })
 
 test('un ménage ANNULÉ ne revient pas au planning', async () => {
-  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   await handler(req(), reponse())
   const q = journal.find(a => a.table === 'menages')
@@ -194,7 +219,7 @@ test('la lecture des ménages est filtrée par COMPTE et par PERSONNE', async ()
   // ⚠ Sans `user_id`, la service key contourne la RLS et rien ne cloisonne.
   // Le filtre par personne, lui, porte désormais sur les DEUX colonnes : ce
   // qu'elle porte, et ce qu'on lui propose.
-  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   await handler(req(), reponse())
   const q = journal.find(a => a.table === 'menages')
@@ -206,7 +231,7 @@ test('la lecture des ménages est filtrée par COMPTE et par PERSONNE', async ()
 test('un ménage PROPOSÉ à quelqu\'un d\'autre reste dans SON planning', async () => {
   // ⚠ LA RÈGLE DU 4 SEPTEMBRE. La proposition ne lui retire rien : tant que
   // personne n'a accepté, le ménage reste sa responsabilité, avec la mention.
-  preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05',
+  preparer({ menages: [MENAGE('b1', REGINA, DEP_A,
     { proposee_a: [NOUVELLE], offer_expires_at: '2026-09-04T16:00:00Z' })] })
   const handler = require('../api/menages-public')
   const res = reponse()
@@ -219,7 +244,7 @@ test('un ménage PROPOSÉ à quelqu\'un d\'autre reste dans SON planning', async
 test('le prénom de la personne sollicitée n\'est PAS renvoyé à la porteuse', async () => {
   // Savoir qu'une proposition est en cours lui suffit ; le nom de sa collègue ne
   // la regarde pas plus que l'organisation de l'hôte.
-  preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05',
+  preparer({ menages: [MENAGE('b1', REGINA, DEP_A,
     { proposee_a: [NOUVELLE], offer_expires_at: '2026-09-04T16:00:00Z' })] })
   const handler = require('../api/menages-public')
   const res = reponse()
@@ -228,7 +253,7 @@ test('le prénom de la personne sollicitée n\'est PAS renvoyé à la porteuse',
 })
 
 test('un ménage PROPOSÉ à elle porte son délai, et le rôle « propose »', async () => {
-  preparer({ menages: [MENAGE('b1', null, '2026-09-05',
+  preparer({ menages: [MENAGE('b1', null, DEP_A,
     { proposee_a: [REGINA], offer_expires_at: '2026-09-04T16:00:00Z', status: 'offered' })] })
   const handler = require('../api/menages-public')
   const res = reponse()
@@ -254,8 +279,8 @@ test('un jeton SANS profil est refusé — et ne laisse fuir AUCUN séjour', asy
   // ménage `b2` n'est à personne. C'est précisément celui que l'ancien chemin
   // laissait passer, et avec lui le séjour de Bruno Durand.
   preparer({ profil: null, menages: [
-    MENAGE('b1', REGINA, '2026-09-05'),
-    { ...MENAGE('b2', null, '2026-09-09'), status: 'unassigned' }
+    MENAGE('b1', REGINA, DEP_A),
+    { ...MENAGE('b2', null, DEP_B), status: 'unassigned' }
   ] })
   const handler = require('../api/menages-public')
   const res = reponse()
@@ -275,8 +300,8 @@ test('un lien legacy SANS profil ne fonctionne plus, même sur un bien sans assi
   // connu et assumé (product owner, 14 septembre 2026) ; le remède est de
   // recréer la prestataire depuis sa fiche, ce qui pose un profil.
   preparer({ profil: null, menages: [
-    { ...MENAGE('b1', null, '2026-09-05'), status: 'unassigned' },
-    { ...MENAGE('b2', null, '2026-09-09'), status: 'unassigned' }
+    { ...MENAGE('b1', null, DEP_A), status: 'unassigned' },
+    { ...MENAGE('b2', null, DEP_B), status: 'unassigned' }
   ] })
   const handler = require('../api/menages-public')
   const res = reponse()
@@ -289,7 +314,7 @@ test('un profil DÉSACTIVÉ est refusé comme un profil absent', async () => {
   // `active = false`. Un profil désactivé ne porte aucune assignation — son
   // jeton ne doit pas pour autant redevenir une clé passe-partout.
   preparer({ profil: { id: REGINA, first_name: 'Régina', active: false, access_mode: 'lien' },
-             menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+             menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
@@ -302,7 +327,7 @@ test('un profil de type `compte` portant un jeton n\'ouvre PAS la PWA', async ()
   // mais la garde ne doit pas dépendre de cet état de fait — un jeton posé par
   // erreur sur un titulaire ouvrirait sinon la PWA à un compte entier.
   preparer({ profil: { id: REGINA, first_name: 'Régina', active: true, access_mode: 'compte' },
-             menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+             menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
@@ -334,7 +359,7 @@ test('PANNE de lecture des ménages : 503, jamais « rien à faire »', async ()
 // ─── Ce que la réponse porte en plus ───────────────────────────────────────
 
 test('le statut d\'assignation est renvoyé, pour distinguer proposé et engagé', async () => {
-  preparer({ menages: [{ ...MENAGE('b1', REGINA, '2026-09-05'), status: 'offered' }] })
+  preparer({ menages: [{ ...MENAGE('b1', REGINA, DEP_A), status: 'offered' }] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
@@ -348,10 +373,10 @@ test('la liste des ménages FAITS suit la personne, pas les biens du token', asy
   // des ménages terminés par l'autre prestataire traversaient le filtre que ce
   // lot vient d'installer.
   preparer({
-    menages: [MENAGE('b1', REGINA, '2026-09-05')],
+    menages: [MENAGE('b1', REGINA, DEP_A)],
     done: [
-      { booking_id: 'b1', property_id: '209413', departure_date: '2026-09-05', done_at: 'x' },
-      { booking_id: 'b2', property_id: '209413', departure_date: '2026-09-09', done_at: 'y' }
+      { booking_id: 'b1', property_id: '209413', departure_date: DEP_A, done_at: 'x' },
+      { booking_id: 'b2', property_id: '209413', departure_date: DEP_B, done_at: 'y' }
     ]
   })
   const handler = require('../api/menages-public')
@@ -372,12 +397,12 @@ test('le fil d\'actualités ne porte QUE ses ménages', async () => {
   // pendant que `bookings` et `done`, eux, étaient bien filtrés. Filtrer les
   // réservations ne servait à rien tant que cette porte restait ouverte.
   preparer({
-    menages: [MENAGE('b1', REGINA, '2026-09-05')],
+    menages: [MENAGE('b1', REGINA, DEP_A)],
     events: [
       { id: 'e1', token: TOKEN, property_id: '209413', booking_id: 'b1', event_type: 'new',
-        event_data: { guestName: 'Alice Martin', arrival: '2026-09-01', departure: '2026-09-05' } },
+        event_data: { guestName: 'Alice Martin', arrival: ARR_A, departure: DEP_A } },
       { id: 'e2', token: TOKEN, property_id: '209413', booking_id: 'b2', event_type: 'new',
-        event_data: { guestName: 'Bruno Durand', arrival: '2026-09-06', departure: '2026-09-09' } }
+        event_data: { guestName: 'Bruno Durand', arrival: ARR_B, departure: DEP_B } }
     ]
   })
   const handler = require('../api/menages-public')
@@ -405,9 +430,9 @@ test('un lien SANS profil ne voit pas davantage un ménage SOUS PROPOSITION', as
   // Le chemin legacy gardait ici une garde `.is('offered_to', null)` : elle
   // n'existe plus, parce que le chemin n'existe plus. Le refus est en amont.
   preparer({ profil: null, menages: [
-    { ...MENAGE('b1', null, '2026-09-05'), status: 'offered', proposee_a: [NOUVELLE],
+    { ...MENAGE('b1', null, DEP_A), status: 'offered', proposee_a: [NOUVELLE],
       offer_expires_at: '2026-09-04T16:00:00Z' },
-    { ...MENAGE('b2', null, '2026-09-09'), status: 'unassigned' }
+    { ...MENAGE('b2', null, DEP_B), status: 'unassigned' }
   ] })
   const handler = require('../api/menages-public')
   const res = reponse()
@@ -419,7 +444,7 @@ test('le `.or()` ne ramène QUE ses deux colonnes', async () => {
   // ⚠ Un terme supplémentaire ferait voir à chaque prestataire des ménages qui
   // ne la concernent pas. Le double applique tous les termes : ajouter
   // `status.eq.offered` fait tomber ce test.
-  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   await handler(req(), reponse())
   const q = journal.find(a => a.table === 'menages')
@@ -438,7 +463,7 @@ test('le `.or()` ne ramène QUE ses deux colonnes', async () => {
 // sur son fil).
 
 test('un chargement reussi du planning horodate sa derniere ouverture', async () => {
-  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   const res = reponse()
   const avant = Date.now()
@@ -456,7 +481,7 @@ test('un chargement reussi du planning horodate sa derniere ouverture', async ()
 test('une PANNE d\'horodatage ne casse PAS sa page', async () => {
   // Ne pas savoir quand elle a regarde est un confort pour l'hote ; ses
   // menages du jour, non. Un 500 ici lui laisserait un ecran noir.
-  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')],
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)],
                              erreurUpdate: { message: 'timeout' } })
   const handler = require('../api/menages-public')
   const res = reponse()
@@ -470,7 +495,7 @@ test('un jeton REFUSE n\'horodate rien', async () => {
   // Un porteur de lien revoque ne doit pas pouvoir ecrire une ligne, meme
   // anodine : « pas de profil actif, pas d'ecriture » ne souffre pas
   // d'exception. Et l'horodatage servirait a faire croire qu'elle a regarde.
-  const journal = preparer({ profil: null, menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const journal = preparer({ profil: null, menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler(req(), res)
@@ -483,7 +508,7 @@ test('le mode APERÇU de l\'hôte n\'horodate RIEN', async () => {
   // qu'elle voit. Si cette lecture posait la date, elle ferait croire qu'ELLE
   // a regardé — et l'alerte « Ménage non reçu » se tairait à tort, juste parce
   // que l'hôte s'est inquiété.
-  const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+  const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
   const handler = require('../api/menages-public')
   const res = reponse()
   await handler({ ...req(), query: { ...req().query, apercu: '1' } }, res)
@@ -496,7 +521,7 @@ test('... et une valeur autre que `1` horodate comme d\'habitude', async () => {
   // La garde est une ÉGALITÉ stricte : `apercu=0`, `apercu=oui` ou un champ
   // vide ne doivent pas faire taire l'horodatage par accident.
   for (const v of ['0', 'oui', '']) {
-    const journal = preparer({ menages: [MENAGE('b1', REGINA, '2026-09-05')] })
+    const journal = preparer({ menages: [MENAGE('b1', REGINA, DEP_A)] })
     const handler = require('../api/menages-public')
     await handler({ ...req(), query: { ...req().query, apercu: v } }, reponse())
     assert.ok(journal.find(a => a.table === 'public_tokens' && a.update), `apercu=${v}`)

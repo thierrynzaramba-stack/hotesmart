@@ -480,7 +480,42 @@ en ecriture RLS directe ; « Marquer fait » n'ecrivait que dans le localStorage
   vit encore, atteinte par « Corriger pour elle ». C'est le dernier ecran du
   domaine a reprendre.
 
-## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
+## ⚠ DETTE SOLDEE LE 17 OCTOBRE 2026 — LA SUITE EST A ZERO ROUGE
+
+**5249 tests, 5249 verts.** Les quatre familles decrites ci-dessous ont ete
+reparees par la regle qu'elles illustraient : *dates relatives si le test lit
+l'horloge, dates figees s'il injecte le temps.*
+
+| fichier | rouges | ce qui a change |
+|---|---|---|
+| `tests/booking-changes.test.js` | 8 | le sejour par defaut de `snap()` devient a venir ; les tests de la garde gardent leurs dates figees, ils INJECTENT `AUJOURDHUI` |
+| `tests/messages-classify.test.js` | 10 | le message de reference est date d'il y a deux jours |
+| `tests/avis-endpoint.test.js` | 6 | les avis de reference suivent l'horloge ; les avis volontairement ANCIENS (`2024-01-01`) restent figes, c'est leur role |
+| `tests/menages-public-filtre-presta.test.js` | 4 | les deux sejours sont relatifs, l'un partant aujourd'hui |
+
+**Deux pieges trouves par la contre-epreuve, et pas par la suite :**
+`JOURS=N node --require ./tests/outils/horloge-decalee.js --test …` a montre
+que `tests/disponibilites-endpoint.test.js` — vert ce jour-la — rougissait a
+J+30, J+45, J+60 et J+90. Deux causes, toutes deux invisibles a la lecture :
+un **mois demande fige** (`2026-11`) alors que l'endpoint ne calcule que des
+mois a venir, et des jours designes par leur **numero** (« le 16 ») dans des
+tests qui posent une regle « du lundi au vendredi » — le 16 n'est un lundi
+qu'un mois sur sept. Les deux sont ancres : mois courant + 1, et de VRAIS
+lundis calcules. Eprouve a J+15, 45, 60, 75, 120, 200 et 400 : zero rouge.
+
+**La regle de comptage devient donc : ZERO.** Un seul rouge est un vrai rouge.
+Et la contre-epreuve a horloge decalee n'est plus un outil de diagnostic, c'est
+la seule facon de savoir si un test neuf tiendra dans deux mois.
+
+⚠ **IL RESTE UN ROUGE A J+60**, hors du domaine menage :
+`tests/airroi-client.test.js` — « LE TEST QUI COMPTE (SECURITE, review de
+f40ee9e) ». Il calcule pourtant sa fenetre relativement : la cause est
+ailleurs, probablement dans une fixture sur disque qui ne suit pas. C'est le
+chantier marche, donc YieldFlow : a reprendre avec le go de Thierry.
+
+## CE QUI SUIT EST L'HISTOIRE DE CETTE DETTE, gardee pour la lecon
+
+## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (soldee le 17 octobre 2026)
 
 **Constat du 13 septembre 2026.** `tests/booking-changes.test.js` (6) et
 `tests/booking-changes-dispatch.test.js` (2) echouent depuis la nuit du 12 au
