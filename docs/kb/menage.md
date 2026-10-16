@@ -4724,6 +4724,51 @@ Ce qu'il a fallu ajouter pour cela :
 - ⚠ La vignette est **décorative** (`alt=""`) : le nom du bien est écrit juste
   à côté, l'annoncer deux fois ferait lire « La bulle La bulle ».
 
+## « Vu » entre dans le fil d'actualités (16 octobre 2026)
+
+Demande de Thierry, captures d'écran de la production à l'appui : « dans le cas
+de Régina (attribution d'office), le bouton Vu face au ménage programmé **et
+face au nouveau ménage**. Quand elle clique sur Vu sur le nouveau ménage, il
+s'enlève de la liste, et il est marqué vu dans la liste des ménages. »
+
+**Pourquoi c'est juste.** Le fil est l'endroit où elle APPREND le ménage. Lui
+demander de le retrouver trois cartes plus bas, dans la liste des trente jours,
+pour en accuser réception, est un détour qu'on lui impose pour rien — et c'est
+le détour qui fait qu'un accusé n'arrive jamais, donc que les deux relances de
+9 h continuent de sonner.
+
+**La troisième surface, et toujours une seule fabrique.** `boutonVu` est
+appelée par la feuille du jour, la liste des trente jours et maintenant le fil.
+`tests/menages-v5.test.js` compte ces appels : le chiffre est passé de 2 à 3,
+et le commentaire dit ce qu'il garde — **non pas le nombre de surfaces, qui
+grandira encore, mais le fait qu'aucune ne dessine son propre bouton**. Le jour
+où ce compte monte sans que `boutonVu` soit appelée, deux surfaces se mettront
+à dire deux choses du même ménage.
+
+**L'annonce s'éteint quand le ménage est vu.** `annonceEteinte` : une annonce
+de type `new` dont le ménage porte `vu_le` ne s'affiche plus. Elle a fait son
+travail ; la répéter en gris pendant trois jours pousse vers le bas ce qui
+vient vraiment d'arriver.
+- ⚠ **Seulement `new`** : un ménage MODIFIÉ ou ANNULÉ garde son annonce même
+  s'il a été vu, parce que ce qu'elle annonce n'est pas l'attribution mais le
+  changement — et `vu_le`, lui, ne se repose pas.
+- ⚠ **Côté écran seulement**, comme la péremption de 72 h : la ligne reste en
+  base, c'est la trace, et l'hôte la consulte.
+- ⚠ **On valide d'abord, on acquitte ensuite**, et seulement si la validation a
+  abouti : acquitter avant ferait disparaître l'annonce d'un ménage que l'hôte
+  continue de croire non lu — elle aurait perdu la trace du geste ET le geste.
+
+**Une proposition n'en reçoit pas**, et c'est la garde serveur qui le dit
+(`validerMonMenage` écrit sur `provider_id = elle`) : une offre se confirme en
+l'acceptant, ce qui pose `vu_le` au même instant. Laisser valider une offre lui
+ferait croire qu'elle a répondu — et le ménage expirerait chez quelqu'un
+d'autre. La fabrique unique porte déjà cette règle (`estPasVu` exige
+`role === 'porteur'`) : le fil l'hérite sans rien réécrire.
+
+**Le bouton porte ici sa propre forme** (bord encre, pilule), contrairement aux
+deux autres surfaces où il vit DANS la bulle de la ligne : une annonce n'est
+pas un bouton, et sans bord « Vu » s'y lirait comme une étiquette de plus.
+
 ### Les captures
 
 `docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et

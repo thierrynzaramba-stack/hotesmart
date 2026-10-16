@@ -968,6 +968,19 @@
     .news-content-sub { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
     .news-time { font-size: 10px; color: var(--muted-2); flex-shrink: 0; white-space: nowrap;
                  font-variant-numeric: tabular-nums; }
+    /* ⚠ LA COLONNE DE DROITE D'UNE ANNONCE : l'heure, et sous elle le bouton
+       « Vu » quand l'annonce porte un ménage à elle (16 octobre 2026). */
+    .news-droite { display: flex; flex-direction: column; align-items: flex-end;
+                   gap: 6px; flex-shrink: 0; }
+    /* ⚠ ICI LE BOUTON PORTE SA PROPRE FORME, contrairement aux deux autres
+       surfaces : dans la feuille du jour et dans la liste des trente jours, il
+       vit DANS la bulle de la ligne et c'est l'enveloppe qui la porte. Une
+       annonce n'est pas un bouton : il lui faut son bord, sinon « Vu » se lit
+       comme une étiquette de plus et personne ne le touche. */
+    .news-item .jvu { min-height: var(--control); padding: 0 14px;
+                      border: 1.5px solid var(--ink); border-radius: var(--radius-pill);
+                      background: var(--surface); }
+    .news-item .jvu:hover { background: var(--surface-2); }
 
     /* ============================================ */
     /* RESPONSIVE MOBILE - breakpoint 900px         */
@@ -1877,6 +1890,37 @@ if ("serviceWorker" in navigator && !APERCU) {
   // ⚠ COTE ECRAN, PAS COTE SERVEUR : la ligne reste en base — c'est la trace,
   // et l'hote la consulte. Ce qui perime, c'est son affichage a elle.
   const PEREMPTION_H = 72
+
+  // ⚠ LE MÉNAGE D'UNE ANNONCE (16 octobre 2026). `menage_events` porte
+  // `property_id` et `booking_id` : c'est la même identité que partout ailleurs
+  // sur cet écran, moins la date de départ — qu'on ne compare donc pas, un
+  // séjour pouvant avoir bougé entre l'annonce et aujourd'hui.
+  // `null` quand l'annonce ne désigne aucun ménage à elle : les lignes `note`
+  // des versions antérieures du writer n'ont pas ces champs, et un ménage
+  // annulé a disparu de `bookings`.
+  function menageDeLAnnonce (n) {
+    if (!n || n.property_id == null || n.booking_id == null) return null
+    return tousMesMenagesEnrichis().find(m =>
+      String(m.propId) === String(n.property_id) &&
+      String(m.bookId) === String(n.booking_id)) || null
+  }
+
+  // ⚠ UNE ANNONCE DE NOUVEAU MÉNAGE S'ÉTEINT QUAND LE MÉNAGE EST VU (demande
+  // de Thierry, recette du 16 octobre : « elle clique sur Vu sur le nouveau
+  // ménage, il s'enlève de la liste, et il est marqué vu dans la liste des
+  // ménages »). L'annonce a fait son travail : le répéter en gris pendant
+  // trois jours pousse vers le bas ce qui vient vraiment d'arriver.
+  // ⚠ SEULEMENT `new`, ET C'EST LA LIMITE : un ménage MODIFIÉ ou ANNULÉ garde
+  // son annonce même s'il a été vu, parce que ce qu'elle annonce n'est pas
+  // l'attribution mais le changement — et `vu_le`, lui, ne se repose pas.
+  // ⚠ CÔTÉ ÉCRAN SEULEMENT, comme la péremption : la ligne reste en base,
+  // c'est la trace, et l'hôte la consulte.
+  function annonceEteinte (n) {
+    if (!n || n.event_type !== 'new') return false
+    const m = menageDeLAnnonce(n)
+    return !!(m && m.assign && m.assign.vu_le)
+  }
+
   function annonceFraiche (n) {
     const t = Date.parse(n.created_at)
     if (!Number.isFinite(t)) return true   // date illisible : on montre, on ne cache pas
@@ -1890,7 +1934,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     // ⚠ UN SEUL ENDROIT DECIDE DE CE QUI S'AFFICHE : peremption ET acquittement.
     // Deux filtres separes auraient diverge au premier ajout — et le compteur
     // aurait annonce des nouvelles qu'aucune liste ne montre.
-    const visibles = newsItems.filter(annonceFraiche)
+    const visibles = newsItems.filter(n => annonceFraiche(n) && !annonceEteinte(n))
     const unread = visibles.filter(n => !n.read)
     const panel  = document.getElementById('news-panel')
     const count  = document.getElementById('news-count')
@@ -1960,6 +2004,17 @@ if ("serviceWorker" in navigator && !APERCU) {
       const vign = n.property_id != null
         ? vignetteBien(n.property_id, n.property_name)
         : `<div class="news-icon">${icons[n.event_type] || '📋'}</div>`
+      // ⚠ « VU » FACE À UN NOUVEAU MÉNAGE, comme il l'est déjà face à un
+      // ménage programmé (demande de Thierry, recette du 16 octobre). C'est
+      // l'endroit où elle apprend le ménage : lui demander de le retrouver
+      // trois cartes plus bas pour en accuser réception est un détour qu'on lui
+      // impose pour rien.
+      // ⚠ LA MÊME FABRIQUE QUE LES DEUX AUTRES SURFACES (`boutonVu`), donc les
+      // mêmes quatre conditions : à elle, pas encore vu, pas déjà fait, pas
+      // passé. Un ménage proposé n'en reçoit pas — il se confirme en
+      // l'acceptant, et le serveur refuse de le valider autrement.
+      const mAnn = n.event_type === 'new' ? menageDeLAnnonce(n) : null
+      const vuAnn = mAnn ? boutonVu(mAnn) : ''
       return `
         <div class="news-item ${n.read ? 'read' : 'unread'}" data-id="${echapper(n.id)}">
           ${vign}
@@ -1967,15 +2022,35 @@ if ("serviceWorker" in navigator && !APERCU) {
             <div class="news-content-title">${labels[n.event_type] || echapper(n.event_type)}</div>
             <div class="news-content-sub">${echapper(detail).replace(/\n/g, '<br>')}</div>
           </div>
-          <div class="news-time">${timeStr}</div>
+          <div class="news-droite">
+            <div class="news-time">${timeStr}</div>
+            ${vuAnn}
+          </div>
         </div>
       `
     }).join('')
 
     list.querySelectorAll('.news-item').forEach(item => {
-      item.addEventListener('click', () => {
+      item.addEventListener('click', async (e) => {
         const id = item.dataset.id
         const n = newsItems.find(n => String(n.id) === String(id))
+        // ⚠ LE BOUTON D'ABORD, ET IL NE DOIT PAS OUVRIR L'ANNONCE SOUS LUI.
+        const bv = e.target.closest('[data-vu]')
+        if (bv && !bv.disabled) {
+          e.stopPropagation()
+          const m = tousMesMenagesEnrichis().find(x => x.id === bv.dataset.vu)
+          if (!m) return
+          // ⚠ ON VALIDE D'ABORD, ON ACQUITTE ENSUITE — et seulement si la
+          // validation a abouti. Acquitter avant ferait disparaître l'annonce
+          // d'un ménage que l'hôte continue de croire non lu : elle aurait
+          // perdu la trace du geste ET le geste lui-même. `direVu` recharge
+          // les assignations, donc `annonceEteinte` sera vraie au repeint, et
+          // c'est ce qui retire la ligne de la liste.
+          await direVu(m, bv)
+          if (n && !n.read) markEventsRead([id])
+          else renderNews()
+          return
+        }
         if (n && !n.read) markEventsRead([id])
       })
     })

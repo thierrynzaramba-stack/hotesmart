@@ -407,9 +407,16 @@ test('PWA : le bouton « Vu » et son état lisent LA MÊME règle', () => {
   const fab = src.slice(i, i + 700)
   assert.ok(fab.includes('estPasVu(m)') && fab.includes('dejaVu(m)'),
     'la fabrique lit les deux états, et rien d\'autre ne les décide')
-  // Les deux surfaces qui listent ses ménages passent par elle.
-  assert.equal((src.match(/boutonVu\(/g) || []).length, 2,
-    'appelée par la feuille du jour ET la liste des jours, et nulle part ailleurs')
+  // ⚠ TROIS SURFACES DEPUIS LE 16 OCTOBRE 2026, et le chiffre est la garde.
+  // Le fil d'actualités porte désormais « Vu » face à un nouveau ménage
+  // (demande de Thierry : c'est là qu'elle APPREND le ménage, lui faire
+  // retrouver la ligne trois cartes plus bas pour en accuser réception est un
+  // détour imposé pour rien). Ce que ce test protège n'est pas le nombre de
+  // surfaces — il grandira encore — mais le fait qu'aucune ne dessine son
+  // propre bouton : le jour où ce compte monte sans que `boutonVu` soit
+  // appelée, deux surfaces se mettront à dire deux choses du même ménage.
+  assert.equal((src.match(/boutonVu\(/g) || []).length, 3,
+    'appelée par la feuille du jour, la liste des jours ET le fil — et nulle part ailleurs')
   assert.ok(src.includes("action: 'validerMenage'"))
 })
 
