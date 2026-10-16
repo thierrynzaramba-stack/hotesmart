@@ -155,10 +155,23 @@ const etat = {
   lectureSeule: false, chargement: 0, dernierSave: null
 }
 const PREFS_CLE = 'hs_cal_v5_prefs'
+// ⚠ UN DEFAUT N'EST PAS UN CHOIX, ET LA LISTE DES BIENS EST COMMUNE AUX DEUX
+// ECRANS. Les deux phrases ensemble font le piege repare le 17 octobre 2026 :
+// sous 900 px le calendrier n'affiche qu'UN bien (defaut voulu, ligne ~215) ;
+// `ecrirePrefs` enregistrait `choisis` a chaque geste -- changer de mois,
+// changer de vue -- donc ce defaut du telephone s'ecrivait dans la preference
+// COMMUNE, et l'ordinateur rouvrait sur un seul bien. L'hote croyait ses biens
+// disparus sans avoir rien decide.
+//
+// LA REGLE : `choisis` ne s'ECRIT que si l'hote l'a VOULU (`choisisDefinis`),
+// et ne se RELIT que s'il porte le drapeau qui le dit. Sans drapeau, chaque
+// ecran recalcule SON defaut -- c'est ce qui repare, tout seul, les listes
+// deja amputees par le telephone avant ce correctif.
+const PREFS_DRAPEAU = 'choisisParLHote'
 function lirePrefs () {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_CLE) || '{}')
-    if (Array.isArray(p.choisis)) { etat.choisis = p.choisis; etat.choisisDefinis = true }
+    if (Array.isArray(p.choisis) && p[PREFS_DRAPEAU]) { etat.choisis = p.choisis; etat.choisisDefinis = true }
     if ([1, 3, 6, 12].includes(p.months)) etat.months = p.months
     if (Number.isInteger(p.annee) && Number.isInteger(p.mois)) { etat.annee = p.annee; etat.mois = p.mois }
     if (typeof p.vueMobile === 'string' && VUES.some(v => v.id === p.vueMobile)) etat.vueMobile = p.vueMobile
@@ -166,10 +179,14 @@ function lirePrefs () {
 }
 function ecrirePrefs () {
   try {
-    localStorage.setItem(PREFS_CLE, JSON.stringify({
-      choisis: etat.choisis, months: etat.months, annee: etat.annee, mois: etat.mois,
+    const p = {
+      months: etat.months, annee: etat.annee, mois: etat.mois,
       vueMobile: etat.vueMobile
-    }))
+    }
+    // Le mois, la periode et la vue s'enregistrent toujours : ce sont des
+    // gestes. La liste des biens, elle, n'entre ici qu'une fois choisie.
+    if (etat.choisisDefinis) { p.choisis = etat.choisis; p[PREFS_DRAPEAU] = true }
+    localStorage.setItem(PREFS_CLE, JSON.stringify(p))
   } catch {}
 }
 
