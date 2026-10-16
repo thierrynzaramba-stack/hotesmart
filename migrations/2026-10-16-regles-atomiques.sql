@@ -1,5 +1,18 @@
 -- Les jours habituels se remplacent EN UNE FOIS
 -- (16 octobre 2026) — Lot Menages V5, etape 2.
+-- APPLIQUEE en PROD le 16 octobre 2026 par Thierry,
+-- sur le projet cjmrizpdyhrcurmgyrhs, et prouvee par
+-- scripts/verifier-migration-regles-atomiques.js :
+-- trois refus attendus (source inconnue, liaison
+-- incomplete, plafond depasse), aucune ecriture.
+-- APPLIQUEE aussi sur STAGING (ortyofzzdsthlhqmzsnq),
+-- verifiee de la meme facon, et c'est la que
+-- l'ATOMICITE a ete prouvee contre une vraie base :
+-- scripts/prouver-atomicite-regles.js provoque une
+-- erreur APRES la desactivation et relit — les regles
+-- actives sont exactement celles d'avant. Ce script
+-- ecrit (sur une liaison jetable qu'il supprime), et
+-- il REFUSE de tourner sur la production.
 -- Lignes < 60 car. : collage manuel dans l'editeur.
 --
 -- POURQUOI. Remplacer les jours habituels d'une

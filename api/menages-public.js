@@ -27,7 +27,8 @@ const { cleJour, lireRrule } = require('../lib/cleaning/availability')
 // importe exactement ce module : deux validations pour la meme regle
 // divergeraient au premier ajustement, et la copie finit toujours par etre la
 // plus permissive des deux.
-const { validerRegle, remplacerRegles } = require('../lib/cleaning/regles')
+const { validerRegle, remplacerRegles,
+        MAX_REGLES_ACTIVES } = require('../lib/cleaning/regles')
 // ⚠ LE PENDANT DE LA DECISION DU 15 SEPTEMBRE : elle regle ses jours, l'hote
 // l'apprend, et les menages PROPOSES des jours retires reviennent au moteur.
 const { apresChangementDeRegles, unBienDElle } = require('../lib/cleaning/apres-changement-regles')
@@ -50,7 +51,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // plafond decrivait exactement le danger qu'il n'ecartait pas.
 // Une lecture tronquee de regles, c'est un calendrier qui montre autre chose que
 // ce que le moteur applique.
-const MAX_REGLES_ACTIVES = 50
+// ⚠ LA BORNE VIENT DU MODULE depuis le 16 octobre 2026 : elle etait declaree
+// ici ET dans `api/disponibilites.js`, avec deux valeurs differentes (50 et
+// 200) passees a la MEME fonction Postgres.
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -2340,6 +2343,15 @@ async function reglerMesJours (req, res, token) {
   if (r.erreur === 'rpc_absente') {
     console.error('[menages-public] migration 2026-10-16-regles-atomiques NON APPLIQUEE', r.detail)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ⚠ LE PLAFOND SE DIT, il ne se tait pas. Et il se dit AVEC LE GESTE QU'ELLE
+  // PEUT FAIRE : elle ne peut pas nettoyer ses propres regles depuis cette
+  // page — c'est son employeur qui le peut.
+  if (r.erreur === 'plafond') {
+    console.error('[menages-public] plafond de regles actives atteint', r.detail || '')
+    return res.status(409).json({
+      error: 'Vos jours n\'ont pas pu être enregistrés : vous avez trop de règles ' +
+             'enregistrées. Prévenez votre employeur.' })
   }
   if (r.erreur) {
     if (r.status === 400) return res.status(400).json({ error: r.erreur })

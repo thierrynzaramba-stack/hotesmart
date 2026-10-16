@@ -27,7 +27,8 @@ const { requirePermission, verifierSession } = require('../lib/require-permissio
 const { lireRrule, cleJour, estDisponible, congeCouvrant } = require('../lib/cleaning/availability')
 // ⚠ LA REGLE RECURRENTE EST VALIDEE EN UN SEUL ENDROIT, partage avec la PWA
 // (`api/menages-public.js`) depuis le 15 septembre 2026.
-const { validerRegle, libelle, remplacerRegles } = require('../lib/cleaning/regles')
+const { validerRegle, libelle, remplacerRegles,
+        MAX_REGLES_ACTIVES } = require('../lib/cleaning/regles')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -395,8 +396,12 @@ async function reglerJours (req, res, userId, providerId) {
   if (lots.length > 2) return res.status(400).json({ error: 'Trop de lignes' })
   const cadence = Number((req.body || {}).toutes_les_n_semaines) || 1
 
+  // ⚠ LA BORNE VIENT DU MODULE, PAS DE L'ECRAN. `LOT_REGLES` (200) est la
+  // borne de LECTURE de cet endpoint : elle dit combien de regles on accepte
+  // d'AFFICHER, pas combien on accepte d'en remplacer. Les confondre faisait
+  // qu'une prestataire reglable ici etait refusee depuis sa page.
   const r = await remplacerRegles(supabase, {
-    userId, providerId, lots, cadence, source: 'hote', maxActives: LOT_REGLES })
+    userId, providerId, lots, cadence, source: 'hote', maxActives: MAX_REGLES_ACTIVES })
 
   // ⚠ IL N'Y A PLUS D'ETAT INTERMEDIAIRE A ANNONCER. Tant que le remplacement
   // se faisait en deux ecritures, cette branche disait « les nouveaux jours
@@ -407,6 +412,18 @@ async function reglerJours (req, res, userId, providerId) {
   if (r.erreur === 'rpc_absente') {
     console.error('[disponibilites] migration 2026-10-16-regles-atomiques NON APPLIQUEE', r.detail)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ⚠ LE PLAFOND N'EST PAS UNE PANNE, ET IL NE DOIT PAS SE LIRE COMME UNE PANNE
+  // (demande de Thierry, 16 octobre 2026 : « un message clair a l'ecran, jamais
+  // un echec silencieux »). « Service temporairement indisponible » ferait
+  // reessayer indefiniment un geste qui echouera toujours. On dit le nombre,
+  // la borne, et quoi faire.
+  if (r.erreur === 'plafond') {
+    console.error('[disponibilites] plafond de regles actives atteint', r.detail || '')
+    return res.status(409).json({
+      error: `Ses jours habituels n'ont pas pu être remplacés : elle a plus de ` +
+             `${MAX_REGLES_ACTIVES} règles de récurrence actives. ` +
+             `Prévenez-nous, il faut en retirer avant.` })
   }
   if (r.erreur) {
     if (r.status === 400) return res.status(400).json({ error: r.erreur })

@@ -899,10 +899,17 @@ test('le PLAFOND et la LECTURE sont la même borne', async () => {
   // ADDITION, et les règles au-delà restaient actives — invisibles à l'écran,
   // appliquées par le moteur, sans aucune issue par l'interface. Le plafond
   // décrivait exactement le danger qu'il n'écartait pas.
+  // ⚠ LA BORNE A DEMENAGE LE 16 OCTOBRE 2026, et pour la même raison qu'elle
+  // existe : elle était déclarée ICI *et* dans `api/disponibilites.js`, avec
+  // deux valeurs différentes — 50 et 200 — passées à la même fonction
+  // Postgres. Une prestataire pouvait donc être réglable depuis un écran et
+  // refusée depuis l'autre. Elle vit maintenant dans `lib/cleaning/regles.js`,
+  // avec la mécanique d'écriture ; ce que ce test garde est inchangé : la
+  // LECTURE de cet endpoint est bornée par la MÊME constante que l'écriture.
   const src = require('node:fs').readFileSync(
     require('node:path').join(__dirname, '..', 'api', 'menages-public.js'), 'utf8')
-  const m = /const MAX_REGLES_ACTIVES = (\d+)/.exec(src)
-  assert.ok(m, 'le plafond est introuvable')
+  assert.match(src, /MAX_REGLES_ACTIVES\s*\}?\s*=\s*require\(['"]\.\.\/lib\/cleaning\/regles['"]\)|MAX_REGLES_ACTIVES\s*\} = require/,
+    'le plafond est IMPORTÉ, plus déclaré ici')
   assert.match(src, /\.limit\(MAX_REGLES_ACTIVES\)/,
     'la lecture des règles doit être bornée par LA MÊME constante')
   assert.ok(!/\.limit\(50\)[\s\S]{0,80}provider_availability_rules/.test(src))

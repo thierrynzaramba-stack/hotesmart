@@ -151,6 +151,52 @@ test('la forme d\'AVANT vient de la transaction, pas d\'une lecture a cote', asy
   assert.deepStrictEqual(r.formes, [{ jours: [1, 3, 5], cadence: 1 }])
 })
 
+test('LE PLAFOND EST UNE SEULE BORNE : module, SQL, et les deux endpoints', () => {
+  // ⚠ LE DEFAUT QUE CE TEST FERME, ET IL ETAIT DEJA EN BASE. `api/menages-public.js`
+  // declarait 50, `api/disponibilites.js` 200, et les deux passaient leur
+  // chiffre a la MEME fonction Postgres : la meme prestataire pouvait etre
+  // reglable depuis un ecran et refusee depuis l'autre, sans que rien ne
+  // l'explique. C'est le defaut classique d'une regle recopiee — les copies
+  // derivent, et la plus permissive gagne par accident.
+  const { MAX_REGLES_ACTIVES } = require('../lib/cleaning/regles')
+  assert.strictEqual(typeof MAX_REGLES_ACTIVES, 'number')
+
+  // Le defaut de la fonction SQL doit valoir le meme chiffre : un appelant qui
+  // oublierait l'argument tomberait sinon sur une autre borne.
+  const sql = fs.readFileSync(
+    path.join(__dirname, '..', 'migrations', '2026-10-16-regles-atomiques.sql'), 'utf8')
+  const defautSql = /p_max_actives int default (\d+)/.exec(sql)
+  assert.ok(defautSql, 'la fonction porte un defaut')
+  assert.strictEqual(Number(defautSql[1]), MAX_REGLES_ACTIVES,
+    'le defaut SQL et la borne du module disent le meme chiffre')
+
+  // Et aucun endpoint ne redeclare la sienne.
+  for (const f of ['api/menages-public.js', 'api/disponibilites.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+      .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+    assert.ok(!/const MAX_REGLES_ACTIVES\s*=\s*\d/.test(src),
+      f + ' ne redeclare pas la borne, il l\'importe')
+  }
+})
+
+test('un plafond atteint se DIT, et ne se lit pas comme une panne', async () => {
+  // ⚠ « Service temporairement indisponible » ferait reessayer indefiniment un
+  // geste qui echouera toujours. Le refus porte un 409 — un conflit d'etat,
+  // pas une panne — et une phrase qui dit quoi faire.
+  const c = faureClient({ rpc: () => ({ data: null, error: { code: '54000', message: 'trop de regles actives: 51' } }) })
+  const r = await remplacerRegles(c, {
+    userId: 'u1', providerId: 'p1', lots: LOTS_SIMPLES, cadence: 1, source: 'hote'
+  })
+  assert.strictEqual(r.erreur, 'plafond')
+  // Les deux endpoints traduisent ce motif en phrase : on verifie qu'ils le
+  // reconnaissent, et qu'ils ne le noient pas dans le cas general.
+  for (const f of ['api/menages-public.js', 'api/disponibilites.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    assert.match(src, /r\.erreur === 'plafond'/, f + ' reconnait le plafond')
+    assert.match(src, /status\(409\)/, f + ' le dit en 409, pas en 503')
+  }
+})
+
 test('la migration desactive PAR ID, insere, et ne valide pas a cote', () => {
   // ⚠ CE QUE LA MIGRATION DOIT DIRE, et qu'aucun stub ne peut prouver.
   const sql = fs.readFileSync(
