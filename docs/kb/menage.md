@@ -4916,3 +4916,61 @@ jour-là rien n'ait à être réécrit.
 
 `docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et
 `avant-apres/` (les treize paires côte à côte), toutes en 390 × 844.
+
+
+## Étape 2 : ses jours habituels se cochent depuis la fiche (16 octobre 2026)
+
+Le dernier des cinq gestes qui n'existaient que dans l'ancien écran, avec la
+création. La fiche AFFICHAIT la récurrence et renvoyait l'hôte ailleurs pour la
+changer — or c'est le réglage qu'on touche le plus souvent : une prestataire
+qui change de jours, c'est tous les mois.
+
+**Ce que la carte porte** : les sept cases (ou deux lignes A/B en quinzaine),
+le bouton « Une semaine sur deux… » / « Revenir à toutes les semaines », la
+phrase d'ancrage avec ses dates et son numéro de semaine ISO, et le lien
+d'inversion. Captures : `docs/specs/pwa-v5/fiche/`.
+
+**Un seul appel, et c'est la transaction** (`reglerJours`). L'ancien écran
+enchaînait un `retirerRegle` par règle puis un `poserRegle` par ligne.
+
+⚠ **ON NE MONTRE JAMAIS « AUCUNE CASE COCHÉE »** (précision n° 2 de Thierry).
+Une récurrence VIDE ne veut pas dire « elle ne travaille jamais » : elle veut
+dire **disponible tous les jours** (étage 4 de la précédence). Sept cases vides
+disaient donc l'inverse de la vérité — c'est le piège que l'ancien écran
+expliquait par un avertissement. On montre les sept cases **cochées, en gris**,
+avec « Tous les jours (par défaut) » : le piège disparaît au lieu d'être
+commenté. L'avertissement ne reste que pour le GESTE — au moment où l'hôte
+décoche la dernière case — et il dit la vérité : tout décocher la rend
+disponible tous les jours, pas introuvable.
+
+⚠ **ON N'ÉCRIT JAMAIS SUR UNE RÈGLE QU'ON NE SAIT PAS RELIRE.** Remplacer
+efface : une récurrence que cet écran n'affiche pas serait perdue sans que
+personne ne sache ce qu'elle portait. Le geste est alors fermé, et l'écran le
+dit.
+
+⚠ **L'INVERSION ÉCHANGE LE CONTENU DES DEUX LIGNES**, elle ne déplace pas
+l'ancre. Déplacer l'ancre donnerait le même résultat — mais l'écran afficherait
+« semaine A » sur ce qui était B, et l'hôte ne pourrait plus vérifier ce qu'il
+vient de faire.
+
+### ⚠ DEUX DÉFAUTS ANTÉRIEURS, QUE SEUL LE BANC A MONTRÉS
+
+Tous deux invisibles à la lecture du code, et visibles en une capture.
+
+**1. `cadence` est un NOMBRE, pas la chaîne `'quinzaine'`.** `lireRrule` rend
+l'INTERVAL de la RRULE (1, 2, …) ; la fiche le comparait à `'quinzaine'`. La
+comparaison était toujours fausse : **l'alternance A/B ne s'est jamais affichée
+dans cette fiche depuis qu'elle existe.** Et le banc lui-même servait
+`cadence: 'quinzaine'` — c'est ainsi que le défaut a survécu : **le stub
+confirmait le code**. Un banc qui ne dit pas la vérité du serveur ne prouve
+rien ; il a été corrigé en même temps.
+
+**2. `semaineAncree` comptait les semaines depuis l'epoch — un JEUDI.**
+`Date.parse(iso) / 604800000` découpe le temps en tranches de sept jours à
+partir du 1er janvier 1970. Deux dates de la même semaine civile tombaient donc
+dans deux tranches différentes dès que l'une était un lundi, un mardi ou un
+mercredi : une ancre posée en début de semaine faisait afficher la ligne A sur
+les jours de B. L'hôte lisait « semaine A » sur ce qui est B, cochait en
+conséquence, et **déplaçait la venue de sa prestataire d'une semaine**. On
+ramène chaque date à SON lundi avant de compter — la règle que sa page
+applique déjà.

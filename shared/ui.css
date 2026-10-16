@@ -988,6 +988,36 @@ body.men-volet-ouvert { overflow: hidden; }
   font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted);
 }
 .men-cfg__pastille.is-on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+/* ⚠ ELLES SE COCHENT (étape 2, 16 octobre 2026). Le `<label>` porte la cible
+   tactile, l'`<input>` vit dedans et garde le clavier comme le lecteur
+   d'écran : une `<div>` avec un `onclick` aurait perdu les deux.
+   ⚠ 28 px DE DESSIN, 36 DE CIBLE : le padding est dans la zone de frappe, la
+   marge ne l'aurait pas été. */
+label.men-cfg__pastille { cursor: pointer; box-sizing: content-box; padding: 4px; }
+label.men-cfg__pastille:focus-within { box-shadow: 0 0 0 2px var(--ink); }
+.men-cfg__pastille input { position: absolute; opacity: 0; pointer-events: none; }
+/* ⚠ « TOUS LES JOURS (PAR DÉFAUT) » SE VOIT, ET SE VOIT COMME UN DÉFAUT.
+   Une récurrence vide veut dire « disponible tous les jours » : montrer sept
+   cases VIDES disait l'inverse de la vérité. On les montre cochées, mais en
+   gris — pas en vert — parce que personne ne les a cochées. */
+.men-cfg__pastille.is-defaut { background: var(--surface-2); border-color: var(--line);
+                               color: var(--muted); }
+.men-cfg__regles { margin-block-end: var(--gap-m); }
+.men-cfg__h4 { font-size: var(--fs-small); font-weight: var(--fw-bold);
+               margin-block-end: var(--gap-s); }
+.men-cfg__ancre { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s);
+                  margin-block-start: var(--gap-s); font-size: var(--fs-caption);
+                  color: var(--muted); }
+.men-cfg__lien { background: none; border: 0; padding: 4px 0; cursor: pointer;
+                 font: inherit; font-weight: var(--fw-semibold); color: var(--ink);
+                 text-decoration: underline; text-underline-offset: 2px; }
+.men-cfg__secBas { margin-block-start: var(--gap-s); }
+.men-cfg__mini { min-height: 36px; padding-inline: 14px; font-size: var(--fs-caption); }
+/* L'avertissement des règles illisibles : il FERME le geste, il ne le commente
+   pas — d'où l'ambre, qui dit « HôteSmart attend quelque chose de vous ». */
+.men-cfg__avert { color: var(--warn); background: var(--warn-soft);
+                  border-radius: var(--radius-tile); padding: 8px 10px;
+                  margin-block-start: var(--gap-s); }
 
 /* Le calendrier deux mois, en lecture. Chaque jour vient du serveur. */
 .men-cfg__cal { display: flex; flex-wrap: wrap; gap: var(--gap-l); margin-block-start: 12px; }

@@ -458,6 +458,61 @@ test('PWA : « Vu » ne passe JAMAIS par la file hors ligne', () => {
   assert.ok(corps.includes('navigator.onLine === false'), 'et hors ligne, on le DIT')
 })
 
+test('fiche : ses jours habituels SE COCHENT, et par de vraies cases', () => {
+  // ⚠ LE DERNIER DES CINQ GESTES qui n'existaient que dans l'ancien écran, avec
+  // la création. La fiche AFFICHAIT la récurrence et renvoyait l'hôte ailleurs
+  // pour la changer — or c'est le réglage qu'on touche le plus souvent.
+  const src = sansCommentaires(html())
+  assert.match(src, /data-cfg-regle=/, 'les pastilles portent un geste')
+  assert.match(src, /<input type="checkbox" data-cfg-regle=/,
+    'de VRAIES cases à cocher : le clavier et le lecteur d\'écran les gardent')
+  assert.match(src, /label class="men-cfg__pastille/,
+    'le label porte la cible tactile, la case vit dedans')
+  // Et le geste passe par l'action ATOMIQUE, pas par les deux actions unitaires
+  // de l'ancien écran : une panne au milieu y laissait zéro règle active.
+  assert.match(src, /action: 'reglerJours'/)
+  assert.ok(!/action: 'poserRegle'|action: 'retirerRegle'/.test(src),
+    'plus aucun appel unitaire depuis cet écran')
+})
+
+test('fiche : JAMAIS « aucune case cochée » sur une liaison vierge', () => {
+  // ⚠ PRÉCISION N° 2 DE THIERRY (14 octobre). Une récurrence VIDE ne veut pas
+  // dire « elle ne travaille jamais » : elle veut dire « disponible tous les
+  // jours » (étage 4 de la précédence). Sept cases vides disaient donc
+  // exactement l'inverse de la vérité — c'est le piège que l'ancien écran
+  // expliquait par un avertissement. On montre les sept cases COCHÉES, en
+  // gris : le piège disparaît au lieu d'être commenté.
+  const src = sansCommentaires(html())
+  assert.match(src, /const vierge = !lues\.length && !opaques\.length/)
+  assert.match(src, /vierge \? new Set\(CFG_JOURS\.map\(j => j\.n\)\) : u, vierge/,
+    'vierge : les sept jours, cochés')
+  assert.match(src, /is-defaut/, 'et marqués comme un défaut, pas comme un choix')
+  assert.match(src, /reg_defaut/, 'avec « Tous les jours (par défaut) »')
+  // ⚠ ET LA PHRASE D'AVERTISSEMENT NE S'AFFICHE QU'AU GESTE, jamais en
+  // permanence : elle commente un décochage, elle ne décrit pas un état.
+  assert.match(src, /if \(lots\.every\(l => !l\.jours\.length\)\) toast\(t\('menages\.equipe\.config\.reg_vide'\)\)/)
+})
+
+test('fiche : la CADENCE est un nombre, et la semaine commence un LUNDI', () => {
+  // ⚠ DEUX DÉFAUTS ANTÉRIEURS, trouvés au banc le 16 octobre 2026 — tous deux
+  // invisibles à la lecture du code, et visibles en une capture.
+  //
+  // 1. `lireRrule` rend l'INTERVAL de la RRULE (1, 2, …) ; cet écran le
+  //    comparait à la chaîne `'quinzaine'`. La comparaison était toujours
+  //    fausse : l'alternance A/B ne s'est JAMAIS affichée dans cette fiche.
+  // 2. `semaineAncree` comptait les semaines depuis l'epoch — un JEUDI. Deux
+  //    dates de la même semaine civile tombaient dans deux tranches dès que
+  //    l'une était un lundi, un mardi ou un mercredi : A et B s'échangeaient,
+  //    l'hôte cochait sur la mauvaise ligne, et la venue de sa prestataire se
+  //    décalait d'une semaine.
+  const src = sansCommentaires(html())
+  assert.ok(!/cadence === 'quinzaine'/.test(src),
+    'la cadence ne se compare plus à une chaîne')
+  assert.match(src, /Number\(r\.cadence\) >= 2/)
+  assert.match(src, /function semaineAncree[\s\S]{0,260}lundiDeLaSemaine\(iso\)/,
+    'la parité se compte depuis le lundi, pas depuis l\'epoch')
+})
+
 test('SA PAGE NE DIT JAMAIS « EMPLOYEUR » — elle est indépendante', () => {
   // ⚠ DÉCISION DE THIERRY, 16 octobre 2026, et elle tranche un arbitrage resté
   // ouvert depuis le 14. Une prestataire de ménage est INDÉPENDANTE : elle

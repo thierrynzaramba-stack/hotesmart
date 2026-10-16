@@ -279,7 +279,15 @@ async function poster (chemin, corps) {
     body: JSON.stringify(corps)
   })
   const c = await r.json().catch(() => ({}))
-  if (!r.ok) { const e = new Error(c.message || c.error || `HTTP ${r.status}`); e.status = r.status; throw e }
+  // ⚠ LE `code` VOYAGE AVEC L'ERREUR (16 octobre 2026). Sans lui, l'appelant
+  // n'avait que la phrase du serveur — du français, sur un écran traduit en
+  // trois langues. Il peut désormais traduire lui-même, et retomber sur la
+  // phrase quand il ne connaît pas le code.
+  if (!r.ok) {
+    const e = new Error(c.message || c.error || `HTTP ${r.status}`)
+    e.status = r.status; e.code = c.code || null; e.data = c
+    throw e
+  }
   return c
 }
 
@@ -1418,7 +1426,13 @@ async function gesteConfig (fn) {
     await chargerConfig()
   } catch (e) {
     logger.error('Menages', 'config geste', e)
-    toast(t('menages.equipe.config.echec'))
+    // ⚠ UN REFUS QUI SE COMPREND, PAS UN « échec » DE PLUS. Le plafond de
+    // règles est le seul cas où le serveur sait dire quoi faire : le noyer
+    // dans le message générique ferait réessayer un geste qui échouera
+    // toujours (demande de Thierry, 16 octobre).
+    toast(e && e.code === 'trop_de_regles'
+      ? t('menages.equipe.config.trop_de_regles', { max: (e.data && e.data.max) || 50 })
+      : t('menages.equipe.config.echec'))
     await chargerConfig().catch(() => {})
   } finally {
     cfg.occupe = false
@@ -1759,37 +1773,150 @@ function htmlSelfDispo () {
 // Les semaines A/B, EN LECTURE : c'est elle qui les règle depuis son
 // application, et dans les données réelles l'hôte n'en a jamais posé une seule.
 // Le geste reste offert (« Corriger pour elle »), il n'occupe pas la place.
+// SES JOURS HABITUELS, ET ILS SE COCHENT (étape 2, 16 octobre 2026).
+//
+// ⚠ CE QUE CET ÉCRAN REMPLACE. Jusqu'ici la fiche AFFICHAIT la récurrence et
+// renvoyait l'hôte vers l'ancien écran pour la changer. C'est le dernier des
+// cinq gestes qui n'existaient que là-bas — avec la création — et celui qu'il
+// faut le plus souvent : une prestataire qui change de jours, c'est tous les
+// mois.
+//
+// ⚠ ON NE MONTRE JAMAIS « AUCUNE CASE COCHÉE » (précision n° 2 de Thierry,
+// 14 octobre). Une récurrence VIDE ne veut pas dire « elle ne travaille
+// jamais » : elle veut dire « disponible tous les jours » (étage 4 de la
+// précédence). Sept cases vides disaient donc exactement l'inverse de la
+// vérité, et c'est le piège que l'ancien écran expliquait par un
+// avertissement. On montre les sept cases COCHÉES, en gris, avec « Tous les
+// jours (par défaut) » : le piège disparaît au lieu d'être commenté.
+// L'avertissement, lui, n'apparaît qu'au moment où l'hôte décoche la dernière.
 function htmlSemaines () {
+  const peut = (cfg.fiche.droits || {}).prestataires === 'write'
   const regles = ((cfg.dispo || {}).regles || []).filter(r => r.active !== false)
-  if (!regles.length) {
-    return `<p class="caption muted men-cfg__aide" data-i18n="menages.equipe.config.aucune_regle"></p>`
-  }
-  const alterne = regles.some(r => r.cadence === 'quinzaine')
-  const ligne = (lettre, jours) => `<div class="men-cfg__sem">
+  // ⚠ LES RÈGLES QU'ON NE SAIT PAS RELIRE SE DISENT, ET FERMENT LE GESTE. Les
+  // remplacer les effacerait sans que personne ne sache ce qu'elles portaient
+  // (même garde que la PWA, qui les signale aussi).
+  const opaques = regles.filter(r => !Array.isArray(r.jours))
+  const lues = regles.filter(r => Array.isArray(r.jours))
+  // ⚠ `cadence` EST UN NOMBRE, PAS UNE CHAÎNE (défaut trouvé au banc le
+  // 16 octobre 2026, antérieur à ce lot). `lireRrule` rend l'INTERVAL de la
+  // RRULE — 1, 2, … — et cet écran le comparait à `'quinzaine'` : la
+  // comparaison était toujours fausse, donc l'alternance A/B ne s'est JAMAIS
+  // affichée dans cette fiche depuis qu'elle existe. Un écran qui lit mal son
+  // propre contrat ne se voit pas en lisant le code : il se voit en regardant
+  // l'écran avec de vraies données.
+  const alterne = lues.some(r => Number(r.cadence) >= 2)
+  const vierge = !lues.length && !opaques.length
+
+  const pastille = (jour, coche, lot, fige, defaut) => fige
+    ? `<span class="men-cfg__pastille${coche ? ' is-on' : ''}${defaut ? ' is-defaut' : ''}">${esc(jour.c)}</span>`
+    // ⚠ UN `<label>` AVEC SA CASE DEDANS, comme les jours confiés et comme sa
+    // page : la cible tactile fait toute la pastille, et le clavier comme le
+    // lecteur d'écran gardent une vraie case à cocher. Une `<div>` avec un
+    // `onclick` perdrait les deux.
+    : `<label class="men-cfg__pastille${coche ? ' is-on' : ''}${defaut ? ' is-defaut' : ''}">` +
+      `<input type="checkbox" data-cfg-regle="${lot}" value="${jour.n}"${coche ? ' checked' : ''}>` +
+      `<span>${esc(jour.c)}</span></label>`
+
+  const ligne = (lettre, jours, defaut) => `<div class="men-cfg__sem">
     ${alterne ? `<span class="men-cfg__ab men-cfg__ab--${lettre.toLowerCase()}">${lettre}</span>` : ''}
-    ${CFG_JOURS.map(j => `<span class="men-cfg__pastille${jours.has(j.n) ? ' is-on' : ''}">${esc(j.c)}</span>`).join('')}
+    ${CFG_JOURS.map(j => pastille(j, jours.has(j.n), lettre || 'A', !peut, defaut)).join('')}
   </div>`
+
+  // Les deux lignes, ou la seule. En quinzaine, chaque règle porte son ancre :
+  // A = celles dont l'ancre tombe sur la semaine courante.
+  let corps
   if (!alterne) {
     const u = new Set()
-    for (const r of regles) for (const j of (r.jours || [])) u.add(Number(j))
-    return ligne('', u)
+    for (const r of lues) for (const j of (r.jours || [])) u.add(Number(j))
+    // Vierge : les sept cases cochées, en gris. Ce n'est pas un réglage, c'est
+    // ce que le moteur fait déjà.
+    corps = ligne('', vierge ? new Set(CFG_JOURS.map(j => j.n)) : u, vierge)
+  } else {
+    const semA = new Set(), semB = new Set()
+    for (const r of lues) {
+      const cible = (Number(r.cadence) >= 2 && !semaineAncree(r.ancre)) ? semB : semA
+      for (const j of (r.jours || [])) cible.add(Number(j))
+    }
+    corps = ligne('A', semA, false) + ligne('B', semB, false)
   }
-  // En quinzaine, chaque règle porte sa propre ancre : A = celles dont l'ancre
-  // tombe sur la semaine courante.
-  const semA = new Set(), semB = new Set()
-  for (const r of regles) {
-    const cible = (r.cadence === 'quinzaine' && !semaineAncree(r.ancre)) ? semB : semA
-    for (const j of (r.jours || [])) cible.add(Number(j))
-  }
-  return ligne('A', semA) + ligne('B', semB)
+
+  const aide = vierge
+    ? `<p class="caption muted men-cfg__aide">${esc(t('menages.equipe.config.reg_defaut'))}</p>`
+    : `<p class="caption muted men-cfg__aide">${esc(t('menages.equipe.config.reg_aide'))}</p>`
+
+  // ⚠ L'ANCRAGE SE DIT EN DATES, PAS SEULEMENT EN LETTRE. « Semaine A » ne
+  // désigne rien tant qu'on ne sait pas laquelle : l'hôte doit pouvoir
+  // vérifier lui-même, sans compter les semaines sur un calendrier.
+  const ancrage = (alterne && peut) ? `<div class="men-cfg__ancre">
+    <span>${esc(t('menages.equipe.config.reg_ancrage', {
+      lettre: 'A', debut: dateCourte(lundiDeLaSemaine(AUJOURDHUI)),
+      fin: dateCourte(dimancheDeLaSemaine(AUJOURDHUI)), num: numeroDeSemaine(AUJOURDHUI) }))}</span>
+    <button type="button" class="men-cfg__lien" data-cfg-inverser="1">${esc(
+      t('menages.equipe.config.reg_inverser', { autre: 'B' }))}</button>
+  </div>` : ''
+
+  const bascule = peut ? `<div class="men-cfg__secBas">
+    <button type="button" class="btn btn--secondary men-cfg__mini" data-cfg-alterner="${alterne ? '0' : '1'}">${esc(
+      t(alterne ? 'menages.equipe.config.reg_simple' : 'menages.equipe.config.reg_alterner'))}</button>
+  </div>` : ''
+
+  const avert = opaques.length
+    ? `<p class="caption men-cfg__avert">${esc(t('menages.equipe.config.reg_opaques', { n: opaques.length }))}</p>`
+    : ''
+
+  // ⚠ LA CARTE SE NOMME, parce que deux réglages se suivent dans cette section
+  // et qu'ils ne disent pas la même chose : les pastilles portent sa
+  // RÉCURRENCE (tous les mardis), le calendrier en dessous porte ses
+  // EXCEPTIONS (pas ce mardi-là). Sans titre, les sept cases se lisaient comme
+  // un en-tête du calendrier.
+  return `<div class="men-cfg__regles" data-bind="cfg-regles">
+    <h4 class="men-cfg__h4">${esc(t('menages.equipe.config.reg_titre'))}</h4>
+    ${corps}${aide}${ancrage}${bascule}${avert}
+  </div>`
 }
 
-// La semaine ISO de l'ancre a-t-elle la même parité que celle d'aujourd'hui ?
+// ⚠ LES TROIS REPÈRES DE LA SEMAINE, calculés ici et nulle part ailleurs.
+// `AUJOURDHUI` est une date nue (« 2026-10-16 ») : on la lit en UTC, sinon le
+// lundi bascule d'un jour à minuit local et l'ancrage se décale d'une semaine
+// entière — c'est la même garde que `lundiDe` dans sa page.
+const jourUTC = (iso) => new Date(`${String(iso).slice(0, 10)}T12:00:00Z`)
+function lundiDeLaSemaine (iso) {
+  const d = jourUTC(iso)
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7))
+  return d.toISOString().slice(0, 10)
+}
+function dimancheDeLaSemaine (iso) {
+  const d = jourUTC(lundiDeLaSemaine(iso))
+  d.setUTCDate(d.getUTCDate() + 6)
+  return d.toISOString().slice(0, 10)
+}
+// Le numéro ISO : le jeudi de la semaine décide de l'année, sinon la dernière
+// semaine de décembre et la première de janvier se disputent le même numéro.
+function numeroDeSemaine (iso) {
+  const d = jourUTC(iso)
+  d.setUTCDate(d.getUTCDate() + 3 - ((d.getUTCDay() + 6) % 7))
+  const premier = new Date(Date.UTC(d.getUTCFullYear(), 0, 4, 12))
+  return 1 + Math.round(((d - premier) / 86400000 - 3 + ((premier.getUTCDay() + 6) % 7)) / 7)
+}
+
+// La semaine de l'ancre a-t-elle la même parité que celle d'aujourd'hui ?
 // ⚠ Sans cela, A et B s'inversaient une semaine sur deux à l'écran.
+//
+// ⚠ ET ON COMPTE DEPUIS LE LUNDI, PAS DEPUIS L'EPOCH (défaut trouvé au banc le
+// 16 octobre 2026, antérieur à ce lot). `Date.parse(iso) / 604800000` découpe
+// le temps en tranches de sept jours à partir du 1er janvier 1970 — un JEUDI.
+// Deux dates de la même semaine civile tombaient donc dans deux tranches
+// différentes dès que l'une était un lundi, un mardi ou un mercredi : une
+// ancre posée en début de semaine faisait afficher la ligne A sur les jours de
+// B, et inversement. L'hôte lisait « semaine A » sur ce qui est B, cochait en
+// conséquence, et déplaçait la venue de sa prestataire d'une semaine.
+// On ramène donc chaque date à SON lundi avant de compter : les deux valeurs
+// sont alors des lundis, leur écart est un multiple de sept jours, et la
+// parité dit la vérité. C'est la règle que sa page applique déjà (`lundiDe`).
 function semaineAncree (ancre) {
   if (!ancre) return true
-  const semaines = (iso) => Math.floor(Date.parse(iso + 'T12:00:00Z') / 604800000)
-  return (semaines(String(ancre).slice(0, 10)) - semaines(AUJOURDHUI)) % 2 === 0
+  const sem = (iso) => Math.round(jourUTC(lundiDeLaSemaine(iso)).getTime() / 604800000)
+  return (sem(String(ancre).slice(0, 10)) - sem(AUJOURDHUI)) % 2 === 0
 }
 
 // Le calendrier deux mois. ⚠ CHAQUE JOUR VIENT DU SERVEUR, qui l'a calculé
@@ -2183,7 +2310,8 @@ function brancherConfig () {
       '[data-cfg-jour],[data-cfg-dispo],[data-cfg-self],[data-cfg-parbien],[data-cfg-vu],' +
       '[data-cfg-visibles],[data-cfg-ratio],[data-cfg-sms],[data-cfg-mail],[data-cfg-eval-scope],' +
       '[data-cfg-eval-power],[data-cfg-retirer],[data-cfg-envoyer],[data-cfg-ouvrir],' +
-      '[data-cfg-nouveau],[data-cfg-conge-new],[data-cfg-conge-off]')
+      '[data-cfg-nouveau],[data-cfg-conge-new],[data-cfg-conge-off],' +
+      '[data-cfg-alterner],[data-cfg-inverser]')
     if (!el || el.disabled) return
     const d = el.dataset
 
@@ -2219,6 +2347,10 @@ function brancherConfig () {
 
     // ── Un jour de son calendrier ──
     if (d.cfgDispo) { basculerJour(d.cfgDispo); return }
+
+    // ── Ses jours habituels : la quinzaine, et l'ancrage ──
+    if (d.cfgAlterner) { basculerAlternanceConfig(d.cfgAlterner); return }
+    if (d.cfgInverser) { inverserAncrageConfig(); return }
 
     // ── Quand elle est là ──
     if ('cfgSelf' in d) {
@@ -2298,6 +2430,18 @@ function brancherConfig () {
   // Les champs de texte s'enregistrent à la sortie du champ, et seulement si la
   // valeur a changé : une écriture par frappe enverrait une requête par lettre.
   zone.addEventListener('change', (ev) => {
+    // ── Ses jours habituels : une case cochée enregistre tout de suite ──
+    // ⚠ MÊME GESTE QUE SA PAGE, et c'est voulu : deux écrans qui règlent la
+    // même chose doivent se tenir pareil. Un bouton « Enregistrer » ici et un
+    // enregistrement immédiat là-bas feraient croire, d'un côté ou de l'autre,
+    // que le réglage n'est pas parti.
+    const caseRegle = ev.target.closest('[data-cfg-regle]')
+    if (caseRegle && !caseRegle.disabled) {
+      const d = caseRegle.dataset
+      cocherJourRegle(d.cfgRegle, caseRegle.value)
+      return
+    }
+
     // ── Le menu d'un bien : UN geste, quatre choix ──
     const menu = ev.target.closest('[data-cfg-choix]')
     if (menu && !menu.disabled) {
@@ -2354,6 +2498,120 @@ function brancherConfig () {
 //
 // ⚠ ET IL N'Y A PAS DE SECOND CALCUL ICI. Recopier « congé > exception > règle »
 // dans la page la ferait diverger du moteur au premier ajustement.
+// ─── SES JOURS HABITUELS : écrire ───────────────────────────────────────────
+//
+// ⚠ UN SEUL APPEL POUR TOUT LE RÉGLAGE, et c'est une transaction Postgres
+// (`reglerJours`, migration 2026-10-16). L'ancien écran enchaînait un
+// `retirerRegle` par règle puis un `poserRegle` par ligne : le réseau qui
+// lâche au milieu laissait ZÉRO règle active, c'est-à-dire « disponible tous
+// les jours » — l'inverse exact de ce que l'hôte venait de faire.
+//
+// ⚠ ON N'ÉCRIT JAMAIS SUR UNE RÈGLE QU'ON NE SAIT PAS RELIRE. Remplacer
+// efface : une récurrence que cet écran n'affiche pas serait perdue sans que
+// personne ne sache ce qu'elle portait. Le geste est alors fermé, et l'écran
+// le dit (`reg_opaques`).
+function reglesOpaquesConfig () {
+  return ((cfg.dispo || {}).regles || [])
+    .filter(r => r.active !== false && !Array.isArray(r.jours))
+}
+
+function joursCochesConfig (lot) {
+  return [...document.querySelectorAll(`[data-cfg-regle="${lot}"]:checked`)]
+    .map(i => Number(i.value))
+}
+
+// ⚠ ON GARDE L'ANCRAGE EXISTANT. Le déplacer à chaque modification inverserait
+// son rythme : elle viendrait la semaine où elle ne devait pas venir, et
+// personne ne verrait pourquoi.
+function ancreConfig () {
+  const r = ((cfg.dispo || {}).regles || [])
+    .find(x => x.active !== false && Number(x.cadence) >= 2 && x.ancre)
+  return lundiDeLaSemaine(r ? r.ancre : AUJOURDHUI)
+}
+
+function semaineSuivante (iso) {
+  const d = jourUTC(iso)
+  d.setUTCDate(d.getUTCDate() + 7)
+  return d.toISOString().slice(0, 10)
+}
+
+// ⚠ LE FOCUS SURVIT AU REPEINT. Ces cases sont reconstruites à CHAQUE geste
+// (l'écriture recharge la fiche entière) : au clavier, la case qu'on vient de
+// cocher disparaissait sous le doigt et la tabulation suivante repartait du
+// haut du panneau. On note laquelle, et on la lui rend. Même garde que sa page.
+async function ecrireRegles (lots, alterne, focus = null) {
+  const opaques = reglesOpaquesConfig()
+  if (opaques.length) { toast(t('menages.equipe.config.reg_opaques', { n: opaques.length })); return }
+  await gesteConfig(async () => {
+    await poster('/api/disponibilites', {
+      action: 'reglerJours', provider_id: cfg.profilId,
+      toutes_les_n_semaines: alterne ? 2 : 1, lots
+    })
+    toast(t('menages.equipe.config.reg_fait'))
+  })
+  if (!focus) return
+  const rendu = document.querySelector(
+    `[data-cfg-regle="${focus.lot}"][value="${focus.valeur}"]`)
+  if (rendu) rendu.focus()
+}
+
+// Ce que l'écran porte À L'INSTANT du geste : la source est le DOM, pas un
+// état parallèle qui pourrait en diverger.
+function lotsDeLEcran (alterne) {
+  const ancre = ancreConfig()
+  const a = { jours: joursCochesConfig('A'), ancre }
+  if (!alterne) return [a]
+  return [a, { jours: joursCochesConfig('B'), ancre: semaineSuivante(ancre) }]
+}
+
+function enQuinzaineConfig () {
+  return ((cfg.dispo || {}).regles || [])
+    .some(r => r.active !== false && Number(r.cadence) >= 2)
+}
+
+// Une case cochée ou décochée enregistre tout de suite : c'est le geste de sa
+// page, et deux écrans qui règlent la même chose doivent se tenir pareil.
+//
+// ⚠ ET LA PHRASE N'APPARAÎT QU'ICI, au moment où la dernière case tombe
+// (précision n° 2 de Thierry). Elle ne décrit pas un état permanent — l'écran
+// montre déjà « Tous les jours (par défaut) » quand il n'y a aucune règle —
+// elle commente un GESTE : « vous venez de tout décocher, et voilà ce que ça
+// fait ». Affichée en permanence, elle aurait été un avertissement de plus
+// qu'on apprend à ne plus lire.
+// ⚠ ET ELLE DIT LA VÉRITÉ : tout décocher ne la rend pas introuvable, ça la
+// rend disponible TOUS LES JOURS. C'est le piège entier de cette carte.
+function cocherJourRegle (lot, valeur) {
+  const alterne = enQuinzaineConfig()
+  const lots = lotsDeLEcran(alterne)
+  if (lots.every(l => !l.jours.length)) toast(t('menages.equipe.config.reg_vide'))
+  ecrireRegles(lots, alterne, { lot, valeur })
+}
+
+// ⚠ PASSER EN QUINZAINE NE DUPLIQUE PAS SES JOURS. « Une semaine sur deux »
+// veut dire qu'elle ne vient PAS l'autre semaine : la ligne B naît vide, et
+// l'hôte la remplit s'il le veut. La dupliquer donnerait un réglage identique
+// à celui d'avant, sous deux lignes — c'est-à-dire un bouton qui ne fait rien.
+function basculerAlternanceConfig (vers) {
+  const alterne = vers === '1'
+  if (alterne) return ecrireRegles([{ jours: joursCochesConfig('A'), ancre: ancreConfig() }], true)
+  // Revenir à toutes les semaines : les deux lignes fusionnent. Un jour coché
+  // d'un seul côté reste coché — on n'enlève rien que l'hôte n'ait décoché.
+  const u = [...new Set(joursCochesConfig('A').concat(joursCochesConfig('B')))].sort((x, y) => x - y)
+  return ecrireRegles([{ jours: u, ancre: ancreConfig() }], false)
+}
+
+// ⚠ L'INVERSION ÉCHANGE LE CONTENU DES DEUX LIGNES, elle ne déplace pas
+// l'ancre. Déplacer l'ancre d'une semaine donnerait le même résultat — mais
+// l'écran afficherait alors « semaine A » sur ce qui était B, et l'hôte ne
+// pourrait plus vérifier ce qu'il vient de faire.
+function inverserAncrageConfig () {
+  const ancre = ancreConfig()
+  return ecrireRegles([
+    { jours: joursCochesConfig('B'), ancre },
+    { jours: joursCochesConfig('A'), ancre: semaineSuivante(ancre) }
+  ], true)
+}
+
 async function basculerJour (date) {
   const j = ((cfg.dispo || {}).jours || []).find(x => x.date === date)
   // ⚠ LA TABLE DE VÉRITÉ EST DANS LE MODULE (`shared/presta-etat.js`), comme
