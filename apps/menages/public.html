@@ -270,12 +270,18 @@
        le dire. `not-allowed` ne reste que sur ce qui n'ouvre vraiment rien. */
     .dispo-case.inerte { cursor: not-allowed; }
     .dispo-case.passe:not(.inerte), .dispo-case.conge:not(.inerte) { cursor: pointer; }
-        /* ⚠ AUJOURD'HUI EST UNE PASTILLE NOIRE PLEINE (charte V5), et la règle
-       porte `:not(.vide)` pour une raison de CASCADE, pas de style : `.a-moi`
-       est déclarée PLUS BAS à spécificité égale et reprenait le fond. Un jour
-       qui porte un ménage garde sa pastille chiffrée, inversée juste en
-       dessous — le noir dit « c'est maintenant », le chiffre dit « combien ». */
-    .dispo-case.auj:not(.vide) { background: var(--ink); border-color: var(--ink); }
+        /* ⚠ AUJOURD'HUI EST UNE PASTILLE VERTE PLEINE (recette de Thierry,
+       16 octobre 2026 : « le fond noir ne va pas, garde le vert en plus
+       foncé »). Le noir de la charte faisait du jour courant la tache la plus
+       sombre d'une grille par ailleurs claire — il criait plus fort que le
+       travail. Le vert foncé reste de la MÊME famille que le vert pâle du jour
+       qui porte un ménage : une seule couleur, deux intensités, et l'écart dit
+       lequel est aujourd'hui.
+       ⚠ La règle porte `:not(.vide)` pour une raison de CASCADE, pas de style :
+       `.a-moi` est déclarée PLUS BAS à spécificité égale et reprenait le fond.
+       Un jour qui porte un ménage garde sa pastille chiffrée, inversée juste
+       en dessous. */
+    .dispo-case.auj:not(.vide) { background: var(--ok); border-color: var(--ok); }
     .dispo-case.auj:not(.vide) .dispo-num { color: var(--on-ink); font-weight: var(--fw-bold);
                                             text-decoration-color: var(--on-ink); }
     .dispo-case.auj:not(.vide) .dispo-compte { background: var(--on-ink); color: var(--ink); }
@@ -587,6 +593,26 @@
     /* Les marques ⏳ 📝 ⏭ et le badge d'offre sont ceux de la feuille du jour
        (`.jmarque`, `.badge-offre`) : une seule fabrique, donc une seule verite. */
     .agenda-marques { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+
+    /* ─── LA VIGNETTE DU BIEN (16 octobre 2026) ─────────────────────────────
+       ⚠ RONDE ET PETITE : elle identifie le logement d'un coup d'œil, elle ne
+       le montre pas. À 36 px on reconnaît une porte, une façade, une couleur —
+       c'est tout ce qu'on lui demande, et c'est ce qui sépare une liste de
+       noms d'une liste de lieux.
+       ⚠ `flex-shrink: 0` : sans lui, elle se tasse en ovale dès qu'un nom de
+       bien est long, et c'est précisément là qu'on la regarde. */
+    .pwa-vignette { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+                    overflow: hidden; background: var(--surface-2);
+                    display: inline-flex; align-items: center; justify-content: center; }
+    .pwa-vignette img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    /* Sans photo, les initiales du bien — jamais une maison générique, qui ne
+       distinguerait aucun logement d'un autre. */
+    .pwa-vignette__ini { font-size: 12px; font-weight: var(--fw-bold); color: var(--muted);
+                         letter-spacing: .02em; }
+    /* Dans le fil, la vignette tient la place de l'emoji : un cran plus petite,
+       alignée sur la première ligne du texte. */
+    .news-item .pwa-vignette { width: 32px; height: 32px; }
+    .news-item .pwa-vignette__ini { font-size: 11px; }
     /* ⚠ `flex: 1` ET `nowrap`, COMME `.jligne-bien`. L'ellipse ne se declenche
        jamais sans `white-space: nowrap` : le nom revenait a la ligne au lieu
        d'etre coupe. Inoffensif tant que la droite ne portait qu'une pastille
@@ -1036,7 +1062,7 @@
   <div class="main" style="margin-left:0">
     <div class="topbar">
       <div>
-        <div class="page-title">🧹 Planning ménages</div>
+        <div class="page-title">Planning ménages</div>
         <div class="page-sub" id="presta-label">Chargement...</div>
       </div>
       <!-- Ratio permanent : visible des l'ouverture et sur tous les onglets,
@@ -1326,6 +1352,11 @@ if ("serviceWorker" in navigator && !APERCU) {
   const LS_READ        = 'menages-read-v2'          // miroir LOCAL des notifs acquittees (event ids) - offline-safe
 
   let properties = []
+  // ⚠ LES BIENS AVEC LEUR VIGNETTE, servis une fois par le GET (16 octobre
+  // 2026). Indexés par identifiant de bien : la même photo sert le fil
+  // d'actualités et la liste des trente jours, et `properties` — reconstruit à
+  // partir des réservations — n'a jamais porté que l'id et le nom.
+  let biensParId = {}
   let bookings = []
   let doneSet = new Set()              // ids menage afficheS comme fait (= union miroir + pending)
   let serverDoneSet = new Set()        // miroir serveur
@@ -1675,6 +1706,12 @@ if ("serviceWorker" in navigator && !APERCU) {
       }
     })
     properties = [...propMap.values()]
+    // ⚠ ON REMPLACE, ON NE FUSIONNE PAS : un bien retiré de son périmètre doit
+    // disparaître de cette table comme il disparaît du reste de l'écran.
+    biensParId = {}
+    ;(Array.isArray(data.biens) ? data.biens : []).forEach(b => {
+      if (b && b.id != null) biensParId[String(b.id)] = { nom: b.nom || '', photo: b.photo || null }
+    })
     activeProps = new Set(properties.map(p => p.id))
     bookings = data.bookings || []
 
@@ -1773,6 +1810,28 @@ if ("serviceWorker" in navigator && !APERCU) {
   // la marque ⏭ sur tous les autres.
   function tousMesMenagesEnrichis () {
     return bookings.map(enrichirMenage).filter(Boolean)
+  }
+
+  // ⚠ UNE SEULE FABRIQUE DE VIGNETTE, pour le fil et pour la liste des trente
+  // jours — même règle que `boutonVu` et `marquesDuMenage`. Deux surfaces qui
+  // dessineraient chacune leur miniature finiraient par montrer la photo d'un
+  // côté et les initiales de l'autre pour le même logement.
+  //
+  // ⚠ SANS PHOTO, LES INITIALES DU BIEN — jamais une icône de maison générique,
+  // qui ne distinguerait aucun logement d'un autre (c'est la règle déjà écrite
+  // dans le calendrier de l'hôte, `pages/menages.html`).
+  //
+  // ⚠ `loading="lazy"` ET `alt=""` : la vignette est décorative, le nom du bien
+  // est écrit juste à côté. L'annoncer deux fois à un lecteur d'écran ferait
+  // lire « La bulle La bulle ».
+  function vignetteBien (propId, nomSecours) {
+    const b = biensParId[String(propId)] || null
+    const nom = (b && b.nom) || nomSecours || ''
+    const ini = String(nom).trim().slice(0, 2).toUpperCase()
+    return '<span class="pwa-vignette">' + (b && b.photo
+      ? `<img src="${echapper(b.photo)}" alt="" loading="lazy">`
+      : `<span class="pwa-vignette__ini" aria-hidden="true">${echapper(ini)}</span>`) +
+      '</span>'
   }
 
   function renderFilters() {
@@ -1878,9 +1937,18 @@ if ("serviceWorker" in navigator && !APERCU) {
       // `note`) : des donnees du coeur, pas les notres. On echappe AVANT de
       // poser les `<br>` — dans l'autre ordre, ils seraient echappes a leur
       // tour et le texte afficherait « <br> » en toutes lettres (D2).
+      // ⚠ LA VIGNETTE DU BIEN REMPLACE L'EMOJI (demande de Thierry, recette du
+      // 16 octobre). Le balai disait le TYPE d'événement — information que le
+      // titre de la ligne écrit déjà en toutes lettres — pendant que le
+      // logement, lui, ne se lisait qu'en petit sous ce titre. Un événement
+      // sans bien connu garde son emoji : il reste des lignes `note` servies
+      // sans `property_id` par des versions antérieures du writer.
+      const vign = n.property_id != null && biensParId[String(n.property_id)]
+        ? vignetteBien(n.property_id, n.property_name)
+        : `<div class="news-icon">${icons[n.event_type] || '📋'}</div>`
       return `
         <div class="news-item ${n.read ? 'read' : 'unread'}" data-id="${echapper(n.id)}">
-          <div class="news-icon">${icons[n.event_type] || '📋'}</div>
+          ${vign}
           <div class="news-content">
             <div class="news-content-title">${labels[n.event_type] || echapper(n.event_type)}</div>
             <div class="news-content-sub">${echapper(detail).replace(/\n/g, '<br>')}</div>
@@ -3859,6 +3927,7 @@ if ("serviceWorker" in navigator && !APERCU) {
                ? (() => {
                    const item = `<button type="button" class="agenda-item${l.fait ? ' fait' : ''}` +
                      `${l.obsolete ? ' obsolete' : ''}" data-mien="${echapper(l.menage.id)}">` +
+                     vignetteBien(l.menage.propId, l.bien) +
                      `<span class="agenda-bien">${echapper(l.bien)}</span>` +
                      '<span class="agenda-marques">' +
                      marquesDuMenage(l.menage, l.obsolete, '<span class="agenda-tag fait">FAIT</span>') +
@@ -3886,6 +3955,7 @@ if ("serviceWorker" in navigator && !APERCU) {
                // serveur. L'identifiant, lui, ne depend d'aucun ordre.
                : `<button type="button" class="agenda-item offre" data-jour="${echapper(jour)}"` +
                  ` data-offre-cle="${echapper(cleOffre(l.offre))}">` +
+                 vignetteBien(l.offre.property_id, l.bien) +
                  `<span class="agenda-bien">${echapper(l.bien)}</span>` +
                  '<span class="agenda-tag offre">À PRENDRE</span></button>').join('') +
              '</div>'

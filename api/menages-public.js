@@ -568,7 +568,7 @@ module.exports = async function handler(req, res) {
     // ('black') retomberait sur le fallback 'confirmed' -> menage fantome.
     const { data: propRows, error: errProps } = await supabase
       .from('properties')
-      .select('provider_property_id, name, provider, checkout_time')
+      .select('provider_property_id, name, provider, checkout_time, photo_url')
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null)
     // ⚠ L'ERREUR ETAIT AVALEE, trois instructions avant la garde `errSnaps`.
@@ -586,7 +586,7 @@ module.exports = async function handler(req, res) {
     const properties = (propRows || [])
       .filter(p => !allowedIds.length || allowedIds.includes(String(p.provider_property_id)))
       .map(p => ({ id: String(p.provider_property_id), name: p.name, provider: p.provider,
-                   checkout_time: p.checkout_time }))
+                   checkout_time: p.checkout_time, photo: p.photo_url || null }))
     const propNameById = {}
     const propProviderById = {}
     properties.forEach(p => { propNameById[p.id] = p.name; propProviderById[p.id] = p.provider })
@@ -949,6 +949,16 @@ module.exports = async function handler(req, res) {
       // deviner un defaut qui n'est peut-etre pas celui de l'hote.
       retrait_delai_heures: delaiRetrait,
       property_ids: allowedIds, visibility_days: visibilityDays,
+      // ⚠ LES BIENS DE SON PERIMETRE, AVEC LEUR VIGNETTE (16 octobre 2026).
+      // Servis UNE fois, pas recopies dans chaque reservation : la meme photo
+      // revient sur la ligne du menage, dans le fil d'actualites et dans la
+      // feuille du jour. Liste blanche de trois champs — id, nom, photo — et
+      // rien d'autre : c'est la meme discipline que `a_prendre` et `autrui`.
+      // La photo est une URL publique du bien, deja servie a l'hote par
+      // `api/garde.js` ; la prestataire voit ce logement en y entrant.
+      // `properties` est DEJA filtre par `allowedIds` plus haut, donc aucun
+      // bien hors de son perimetre ne peut sortir par ici.
+      biens: properties.map(p => ({ id: p.id, nom: p.name, photo: p.photo })),
       comments, events: eventsData || [],
       done: doneList,
       // Le statut de chaque menage assigne : `offered` = a confirmer (suppleant),

@@ -4684,6 +4684,46 @@ Le vert reste exactement là où la charte le veut : `✓ Vu`, « FAIT », le po
 des avis, et le fond du jour qui porte un ménage — ce dernier étant de toute
 façon figé par `tests/pwa-mes-jours-dom.test.js`.
 
+### La recette du 16 octobre : le vert revient, et les biens prennent un visage
+
+Quatre retours de Thierry sur la preview, et le premier revient sur la charte.
+
+**1. « Le jour sous fond noir, ça ne va pas — garde le vert en plus foncé. »**
+La pastille noire d'aujourd'hui faisait du jour courant la tache la plus sombre
+d'une grille par ailleurs claire : elle criait plus fort que le travail. Elle
+passe en `--ok`, le vert foncé — **même famille que le vert pâle du jour qui
+porte un ménage, deux intensités, et l'écart dit lequel est aujourd'hui.**
+
+**2. « Planning ménages, sans le balai. »** L'emoji quitte le titre. C'est du
+HTML, donc hors du périmètre « CSS seul » des deux commits précédents : il a
+été demandé nommément.
+
+**3 et 4. La vignette du bien, dans le fil ET dans la liste des trente jours.**
+Le balai du fil disait le TYPE d'événement — ce que le titre de la ligne écrit
+déjà en toutes lettres — pendant que le logement, lui, ne se lisait qu'en petit
+dessous. La photo du bien identifie le lieu d'un coup d'œil.
+
+Ce qu'il a fallu ajouter pour cela :
+
+- **Côté serveur**, `api/menages-public.js` sert désormais `biens: [{id, nom,
+  photo}]` — une liste blanche de trois champs, **servie une fois** plutôt que
+  recopiée dans chaque réservation, et déjà filtrée par `allowedIds` : aucun
+  bien hors de son périmètre ne peut sortir par là. La photo est l'URL publique
+  que `api/garde.js` sert déjà à l'hôte ; la prestataire voit ce logement en y
+  entrant.
+- **Côté écran**, **une seule fabrique** (`vignetteBien`) pour les deux
+  surfaces — même règle que `boutonVu` et `marquesDuMenage` : deux surfaces qui
+  dessineraient chacune leur miniature finiraient par montrer la photo d'un
+  côté et les initiales de l'autre pour le même logement.
+- ⚠ **Sans photo, les initiales du bien, jamais une maison générique** — elle
+  ne distinguerait aucun logement d'un autre. C'est la règle déjà écrite dans
+  le calendrier de l'hôte, reprise ici.
+- ⚠ **Un événement sans `property_id` garde son emoji** : le writer a produit
+  des lignes `note` sans ce champ, et une vignette vide vaudrait moins qu'un
+  pictogramme.
+- ⚠ La vignette est **décorative** (`alt=""`) : le nom du bien est écrit juste
+  à côté, l'annoncer deux fois ferait lire « La bulle La bulle ».
+
 ### Les captures
 
 `docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et
