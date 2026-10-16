@@ -501,11 +501,14 @@
     /* Le trait qui separe les deux zones : sans lui, « Vu » se lit comme une
        etiquette et personne ne le touche. */
     .jrangee .jvu[data-vu] { border-inline-start: 1px solid var(--line); }
-    .jvu svg { width: 15px; height: 15px; flex-shrink: 0; }
+    .jvu svg { width: 17px; height: 17px; flex-shrink: 0; }
     /* Vu : l'etat, pas une action. Gris, sans trait, non cliquable. */
         /* ✓ Vu : un ÉTAT, et le vert de la charte le dit — c'est fait, il n'y a
        plus rien à toucher. */
-    .jvu[disabled] { cursor: default; color: var(--ok); font-weight: var(--fw-semibold); }
+    /* ⚠ L'ÉTAT N'A PLUS DE MOT, donc plus besoin de graisse : la pastille
+       verte le dit seule, et la ligne s'allège d'autant. */
+    .jvu[disabled] { cursor: default; color: var(--ok); padding: 0 16px; }
+    .jvu.est-vu svg { width: 20px; height: 20px; }
     /* ⚠ SEUL LE GESTE EST COUPE, PAS L'ETAT (constat de la revue de 6452d75,
        et c'est la meme lecon que la revue de 6d007f3 treize lignes plus bas).
        `.jvu` tout court masquait aussi la mention inerte « ✓ Vu » : l'hote
@@ -2168,19 +2171,36 @@ if ("serviceWorker" in navigator && !APERCU) {
   }
 
   // ⚠ UNE ICONE, PAS UN EMOJI (decision de Thierry). Le sprite partage
-  // `shared/icons.svg` n'a pas d'oeil, et cette page ne le charge pas du tout —
-  // elle est hors ligne et dessine ses icones en ligne, comme les deux pouces
-  // des avis. Un `<use href>` vers un fichier externe serait une dependance
-  // reseau de plus sur un telephone en sous-sol.
-  const OEIL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+  // `shared/icons.svg` n'a pas cette icone, et cette page ne le charge pas du
+  // tout — elle est hors ligne et dessine ses icones en ligne, comme les deux
+  // pouces des avis. Un `<use href>` vers un fichier externe serait une
+  // dependance reseau de plus sur un telephone en sous-sol.
+  //
+  // ⚠ UN CERCLE A COCHER, PLUS UN OEIL (recette de Thierry, 16 octobre 2026 :
+  // « l'oeil avec Vu n'est pas tres joli »). Un oeil demande une paupiere, un
+  // iris et une pupille : a 15 px, ces trois traits se referment en pate. Le
+  // cercle vide ne demande qu'un seul trait, il se lit a toutes les tailles,
+  // et il DIT CE QU'IL ATTEND — c'est le vocabulaire universel de l'accuse,
+  // celui des cases a cocher et des messageries.
+  const CERCLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
     'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-    '<path d="M1.5 12S5 5.5 12 5.5 22.5 12 22.5 12 19 18.5 12 18.5 1.5 12 1.5 12Z"/>' +
-    '<circle cx="12" cy="12" r="3.2"/></svg>'
+    '<circle cx="12" cy="12" r="9"/></svg>'
+
+  // ⚠ ET UNE FOIS COCHE, LE MOT N'APPREND PLUS RIEN (meme recette : « enlever
+  // Vu quand c'est clique »). La pastille pleine et sa coche disent l'etat a
+  // elles seules ; le mot ne servait qu'a nommer un GESTE qui n'est plus a
+  // faire. Il ne disparait pas pour autant : il reste dans `aria-label` et
+  // dans l'infobulle, parce qu'un etat qui ne se lit qu'a l'oeil n'existe pas
+  // pour qui utilise un lecteur d'ecran.
+  const CERCLE_COCHE = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9" fill="currentColor"/>' +
+    '<path d="M8.2 12.3l2.6 2.6 5-5.2" fill="none" stroke="var(--surface)" stroke-width="2.2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
   // ⚠ LE LIBELLE CANONIQUE, A UN SEUL ENDROIT : le rendu le pose, et `echecVu`
   // le restaure apres un message d'erreur. Deux ecritures separees auraient
   // fini par montrer deux boutons differents pour le meme etat.
-  const LIBELLE_VU = `${OEIL}<span>Vu</span>`
+  const LIBELLE_VU = `${CERCLE}<span>Vu</span>`
 
   // Le bouton, ou la mention — ou rien. Rendu A COTE de la ligne, jamais dedans.
   function boutonVu (m) {
@@ -2188,7 +2208,11 @@ if ("serviceWorker" in navigator && !APERCU) {
       return `<button type="button" class="jvu" data-vu="${echapper(m.id)}" ` +
              `aria-label="J'ai vu le ménage du ${echapper(m.dateStr)}">${LIBELLE_VU}</button>`
     }
-    if (dejaVu(m)) return '<span class="jvu" disabled>✓ Vu</span>'
+    // ⚠ L'ETAT SE DIT SANS MOT, MAIS PAS SANS NOM : `title` pour la souris,
+    // `aria-label` pour le lecteur d'ecran. La mention reste une balise INERTE
+    // (pas un `<button>`) : il n'y a plus rien a toucher.
+    if (dejaVu(m)) return '<span class="jvu est-vu" disabled title="Vu" ' +
+      'role="img" aria-label="Vu">' + CERCLE_COCHE + '</span>'
     return ''
   }
 

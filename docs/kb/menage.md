@@ -4825,6 +4825,27 @@ l'état de son écran à elle — ce sont des gestes qui n'ont de sens que pour
 celle qui les porte. **La ligne de partage est là** : un accusé de lecture dit
 où elle en est, une action dit ce qu'elle peut faire.
 
+### Le dessin du bouton « Vu » (16 octobre 2026)
+
+Recette de Thierry : « l'œil avec Vu n'est pas très joli », et « peut-être
+enlever Vu quand c'est cliqué ». Deux remarques, deux règles de dessin.
+
+**Un œil demande trois traits ; un cercle en demande un.** Paupière, iris,
+pupille : à 15 px, les trois se referment en pâté. Le cercle vide se lit à
+toutes les tailles — et surtout **il dit ce qu'il attend**. C'est le
+vocabulaire universel de l'accusé de réception, celui des cases à cocher et des
+messageries : on n'a pas besoin d'apprendre qu'un rond vide se coche.
+
+**Une fois le geste fait, le mot n'apprend plus rien.** « Vu » nommait un
+GESTE ; il n'y a plus de geste. La pastille verte cochée dit l'état à elle
+seule, et la ligne s'allège d'autant — c'est visible sur une liste de trente
+jours, où le même mot se répétait autant de fois qu'il y a de ménages.
+⚠ **Le mot ne disparaît pas pour autant** : il reste dans `title` et
+`aria-label`. Un état qui ne se lit qu'à l'œil n'existe pas pour qui utilise un
+lecteur d'écran.
+
+Les trois surfaces suivent, puisqu'elles passent toutes par `boutonVu`.
+
 ### Les captures
 
 `docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et
