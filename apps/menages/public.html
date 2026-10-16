@@ -961,7 +961,16 @@
                  align-items: flex-start; gap: 10px; cursor: pointer; transition: opacity 0.15s; }
     .news-item:hover { opacity: 0.85; }
     .news-item.unread { border-left: 3px solid var(--ink); background: var(--surface-2); }
-    .news-item.read { opacity: 0.55; }
+    /* ⚠ L'AFFADISSEMENT NE TOUCHE PLUS LA COLONNE DE DROITE (constat de la
+       revue de a218fd6). `opacity` sur la carte entière emportait le bouton
+       « Vu » — qu'on vient justement d'y mettre pour qu'il soit touché : une
+       simple tape sur la carte pour en lire le détail la marquait lue, et le
+       bouton encore actif passait à 55 %. L'opacité se pose donc sur ce qui
+       est lu, pas sur ce qui reste à faire. */
+    .news-item.read > .pwa-vignette,
+    .news-item.read > .news-icon,
+    .news-item.read > .news-content,
+    .news-item.read .news-time { opacity: 0.55; }
     .news-icon { font-size: 14px; line-height: 1.4; flex-shrink: 0; }
     .news-content { flex: 1; min-width: 0; }
     .news-content-title { font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
@@ -1915,10 +1924,17 @@ if ("serviceWorker" in navigator && !APERCU) {
   // l'attribution mais le changement — et `vu_le`, lui, ne se repose pas.
   // ⚠ CÔTÉ ÉCRAN SEULEMENT, comme la péremption : la ligne reste en base,
   // c'est la trace, et l'hôte la consulte.
+  // ⚠ `role === 'porteur'`, COMME LA FABRIQUE DU BOUTON (constat de la revue
+  // de a218fd6). Le serveur sert `vu_le` de la porteuse COURANTE, pas de celle
+  // qui regarde : sur un ménage dont elle n'a qu'une PROPOSITION, ce champ
+  // porte la date de quelqu'un d'autre. Sans cette condition, Marie porte le
+  // ménage et clique « Vu », l'hôte le propose ensuite à Régina — et l'annonce
+  // disparaît du fil de Régina, qui n'a rien vu et à qui il reste une offre à
+  // répondre. Le fil est précisément l'endroit où elle l'apprend.
   function annonceEteinte (n) {
     if (!n || n.event_type !== 'new') return false
     const m = menageDeLAnnonce(n)
-    return !!(m && m.assign && m.assign.vu_le)
+    return !!(m && m.assign && m.assign.role === 'porteur' && m.assign.vu_le)
   }
 
   function annonceFraiche (n) {
@@ -2039,16 +2055,20 @@ if ("serviceWorker" in navigator && !APERCU) {
         if (bv && !bv.disabled) {
           e.stopPropagation()
           const m = tousMesMenagesEnrichis().find(x => x.id === bv.dataset.vu)
-          if (!m) return
-          // ⚠ ON VALIDE D'ABORD, ON ACQUITTE ENSUITE — et seulement si la
-          // validation a abouti. Acquitter avant ferait disparaître l'annonce
-          // d'un ménage que l'hôte continue de croire non lu : elle aurait
-          // perdu la trace du geste ET le geste lui-même. `direVu` recharge
-          // les assignations, donc `annonceEteinte` sera vraie au repeint, et
-          // c'est ce qui retire la ligne de la liste.
+          // ⚠ UN MÉNAGE INTROUVABLE REPEINT, IL NE SORT PAS EN SILENCE
+          // (constat de la revue de a218fd6) : il a pu quitter `bookings`
+          // entre le rendu et la tape — rechargement silencieux, départ sorti
+          // de la fenêtre, réservation annulée. Un bouton qui ne fait RIEN est
+          // ce que cet écran s'interdit ; on lui montre la liste telle qu'elle
+          // est, comme le fait déjà la liste des trente jours.
+          if (!m) { renderNews(); return }
+          // ⚠ `direVu` ACQUITTE L'ANNONCE ELLE-MÊME, et seulement en cas de
+          // succès (constat de la revue de a218fd6). L'acquitter ici était
+          // inconditionnel : sur un échec, l'annonce passait en gris alors que
+          // rien n'était parti, et le `renderNews` détruisait dans la même
+          // tâche le message d'erreur écrit dans le bouton. C'est aussi ce qui
+          // fait que le geste vaut la même chose depuis les trois surfaces.
           await direVu(m, bv)
-          if (n && !n.read) markEventsRead([id])
-          else renderNews()
           return
         }
         if (n && !n.read) markEventsRead([id])
@@ -2969,12 +2989,19 @@ if ("serviceWorker" in navigator && !APERCU) {
     if (document.getElementById('modal').style.display === 'flex') showModalError(texte)
   }
 
+  // ⚠ ELLE REND VRAI OU FAUX, ET CE N'EST PAS DU CONFORT (constat de la revue
+  // de a218fd6). Le fil acquitte l'annonce APRÈS ce geste : sans verdict, il
+  // l'acquittait même sur un échec — et le `renderNews` qui suit détruisait
+  // dans la même tâche le message d'erreur que `echecVu` venait d'écrire dans
+  // un bouton désormais détaché. Elle tapait « Vu » dans le métro, rien ne
+  // bougeait, l'annonce passait en gris et rien n'était parti : exactement
+  // « le pire des deux », qu'`echecVu` existe pour empêcher.
   let vuEnCours = null
   async function direVu (menage, bouton) {
-    if (!menage || vuEnCours === menage.id) return
+    if (!menage || vuEnCours === menage.id) return false
     if (navigator.onLine === false) {
       echecVu(bouton, 'Hors ligne')
-      return
+      return false
     }
     vuEnCours = menage.id
     if (bouton) bouton.disabled = true
@@ -2989,7 +3016,7 @@ if ("serviceWorker" in navigator && !APERCU) {
       const data = await res.json().catch(() => null)
       if (!res.ok) {
         echecVu(bouton, (data && data.error) || 'Réessayez')
-        return
+        return false
       }
       // ⚠ L'ECRAN SUIT LA DATE DU SERVEUR, pas l'instant du clic : c'est elle
       // que l'hote lira, et c'est elle qui eteint l'alerte et les relances.
@@ -3008,9 +3035,27 @@ if ("serviceWorker" in navigator && !APERCU) {
       // sur une panne de lecture (l'ecran garde ce qu'il a), et sans ce rendu
       // le bouton resterait « Vu » alors que l'ecriture, elle, a abouti.
       routeRender()
+      // ⚠ ET LE FIL AVEC (constat de la revue de a218fd6). `routeRender` ne
+      // repeint que le calendrier : un « Vu » posé depuis la liste des trente
+      // jours laissait l'annonce du même ménage dans le fil, avec son bouton
+      // encore actif — deux surfaces qui disent deux choses du même ménage,
+      // ce que la fabrique unique existe pour empêcher.
+      // ⚠ ET SON ANNONCE EST ACQUITTÉE, d'où que vienne le geste : sans cela,
+      // une annonce éteinte à l'écran restait `read = false` en base pour
+      // toujours, et l'hôte n'en voyait jamais la trace.
+      const aAcquitter = newsItems
+        .filter(n => !n.read && n.event_type === 'new' &&
+                     n.property_id != null && n.booking_id != null &&
+                     String(n.property_id) === String(menage.propId) &&
+                     String(n.booking_id) === String(menage.bookId))
+        .map(n => n.id)
+      if (aAcquitter.length) markEventsRead(aAcquitter)
+      else renderNews()
       if (jourOuvert && feuilleOuverteSur(jourOuvert)) ouvrirJour(jourOuvert)
+      return true
     } catch (err) {
       echecVu(bouton, 'Réessayez')
+      return false
     } finally {
       vuEnCours = null
     }

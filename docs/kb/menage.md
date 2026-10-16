@@ -4769,6 +4769,35 @@ d'autre. La fabrique unique porte déjà cette règle (`estPasVu` exige
 deux autres surfaces où il vit DANS la bulle de la ligne : une annonce n'est
 pas un bouton, et sans bord « Vu » s'y lirait comme une étiquette de plus.
 
+### Les cinq constats de la revue, et les deux leçons qui restent
+
+**1. Un filtre doit lire la MÊME règle que la fabrique.** `annonceEteinte`
+testait `assign.vu_le` sans exiger `role === 'porteur'`, là où `estPasVu` et
+`dejaVu` l'exigent. Or le serveur sert `vu_le` **de la porteuse courante**, pas
+de celle qui regarde : sur un ménage dont elle n'a qu'une PROPOSITION, ce champ
+porte la date de quelqu'un d'autre. Marie porte le ménage et clique « Vu » ;
+l'hôte le propose ensuite à Régina ; l'annonce disparaissait du fil de Régina,
+qui n'avait rien vu et à qui il restait une offre à répondre — dans le seul
+endroit où elle l'apprend. Le bouton, lui, était bien refusé : **c'est le
+filtre qui avait sa propre idée de l'état de l'écran**, exactement le défaut
+que la fabrique unique existe pour empêcher.
+
+**2. Un geste qui échoue ne doit pas être acquitté — ni repeint dans la même
+tâche.** Le fil appelait `direVu` puis acquittait l'annonce sans attendre de
+verdict : `direVu` ne rendait rien. Hors ligne, en 503, en 404, `echecVu`
+écrivait « Hors ligne » dans le bouton, puis le `renderNews` suivant remplaçait
+`innerHTML` **dans la même tâche** — le nœud était détaché, le message jamais
+peint, et le minuteur de réarmement sortait sur `isConnected === false`. Elle
+tapait « Vu » dans le métro, rien ne bougeait, l'annonce passait en gris, et
+rien n'était parti. `direVu` rend désormais un booléen et **acquitte
+elle-même**, seulement en cas de succès.
+
+Les trois autres : l'extinction n'atteignait pas le fil quand le geste venait
+d'une autre surface (`routeRender` ne repeint que le calendrier — et l'annonce
+restait `read = false` en base pour toujours, donc sans trace pour l'hôte) ; un
+ménage introuvable sortait en clic mort, sans repeint ; et `opacity` sur une
+carte lue affadissait le bouton qu'on vient d'y mettre pour qu'il soit touché.
+
 ### Les captures
 
 `docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et
