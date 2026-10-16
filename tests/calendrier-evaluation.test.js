@@ -53,7 +53,10 @@ test('évaluable et droit d’écriture : le bouton ouvre la fenêtre du cœur P
 test('publiée : le dit, sans bouton', async () => {
   const z = zone()
   assert.strictEqual(await brancherEvaluation({ resa: RESA, cible: z, bus: bus({ statut: { ok: true, data: { etat: 'publiee' } } }), aujourdhui: AUJ }), 'publiee')
-  assert.match(z.textContent, /Évaluation publiée ✓/)
+  // Le « ✓ » etait un caractere dans le texte ; c'est desormais l'icone
+  // i-check de la charte (aucun emoji dans un module partage, 17 oct. 2026).
+  assert.match(z.textContent, /Évaluation publiée/)
+  assert.match(z.querySelector('use').getAttribute('href'), /#i-check$/)
   assert.strictEqual(z.querySelector('button'), null)
 })
 
@@ -106,12 +109,29 @@ test('publiée pendant que la fiche est ouverte : la fiche le dit tout de suite'
   ecouteurs[0].fn({ booking_uid: 'AUTRE' })
   assert.ok(z.querySelector('button'), 'un autre séjour ne change rien')
   ecouteurs[0].fn({ booking_uid: 'BK-9' })
-  assert.match(z.textContent, /Évaluation publiée ✓/)
+  assert.match(z.textContent, /Évaluation publiée/)
   assert.strictEqual(ecouteurs.length, 0, 'l’écoute s’arrête')
 })
 
-test('le bouton fait 44 px de haut au moins', async () => {
+test('le bouton fait 44 px de haut au moins — et il les tient de la CHARTE', async () => {
   const z = zone()
   await brancherEvaluation({ resa: RESA, cible: z, bus: bus({ statut: { ok: true, data: { etat: 'a_remplir', evaluable: true } } }), aujourdhui: AUJ })
-  assert.match(z.querySelector('button').getAttribute('style'), /min-height:44px/)
+  // La hauteur ne vient plus d'un style inline mais de la classe `.btn`, que
+  // les DEUX pages consommatrices servent. Le test tient donc les deux bouts :
+  // le bouton porte la classe, et la classe vaut `--control` (44 px).
+  const bouton = z.querySelector('button')
+  assert.match(bouton.className, /\bbtn\b/, 'le bouton porte la classe de la charte')
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const regle = ui.slice(ui.indexOf('.btn {'), ui.indexOf('}', ui.indexOf('.btn {')))
+  assert.match(regle, /height:\s*var\(--control\)/, '.btn doit valoir --control')
+  const theme = fs.readFileSync(path.join(__dirname, '..', 'shared', 'theme.css'), 'utf8')
+  assert.match(theme, /--control:\s*44px/, '--control doit valoir 44 px')
+})
+
+test('NI HEXA NI EMOJI dans le module partage de la fiche', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'shared', 'calendrier-resa.js'), 'utf8')
+    .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
+  assert.ok(!/#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{3}\b(?![\w-])/.test(src.replace(/icons\.svg#[\w-]+/g, '')), 'couleur en dur')
+  assert.ok(!/\p{Extended_Pictographic}/u.test(src), 'emoji')
+  assert.ok(!/--amber/.test(src), 'l ambre ne se pose jamais sur un bouton')
 })

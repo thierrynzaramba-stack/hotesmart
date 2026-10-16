@@ -283,21 +283,31 @@ export async function exigerCompteProprePage (options = {}) {
   await new Promise(() => {})
 }
 
+// ⚠ DES JETONS AVEC REPLI, ET C'EST VOULU. Ce module est chargé par 26 pages,
+// dont la plupart des apps legacy ne servent PAS `theme.css` (avis, yield, sms,
+// serrures, settings…). Un `var(--muted)` nu y rendrait du vide. Le repli porte
+// donc la valeur d'avant : sur une page V5 la charte gagne, sur une page legacy
+// rien ne bouge. Les replis tombent quand la dernière page sera refondue.
+// Avant le 17 octobre 2026 : trois hexas — dont un bouton terracotta #C97B5C
+// qui n'existe dans aucune charte — et un emoji.
 function afficherRefusDePage (nomPage, nomActif, nomSien) {
   const html = `
     <div style="max-width:460px;margin:80px auto;padding:28px;text-align:center;
-                font-family:system-ui,-apple-system,sans-serif;line-height:1.6">
-      <div style="font-size:34px;margin-bottom:14px">⚠️</div>
-      <h1 style="font-size:18px;font-weight:500;margin:0 0 10px">
+                font-family:var(--font, system-ui),-apple-system,sans-serif;line-height:1.6">
+      <div style="margin-bottom:14px;color:var(--warn, #9A5B00)">
+        <svg aria-hidden="true" style="width:34px;height:34px" fill="none" stroke="currentColor"
+             stroke-width="1.75"><use href="/shared/icons.svg#i-alert"/></svg></div>
+      <h1 style="font-size:18px;font-weight:500;margin:0 0 10px;color:var(--ink, #222)">
         ${echapper(nomPage)} concerne votre propre compte</h1>
-      <p style="font-size:14px;color:#6b7280;margin:0 0 20px">
+      <p style="font-size:14px;color:var(--muted, #6b7280);margin:0 0 20px">
         Vous travaillez actuellement sur <strong>${echapper(nomActif)}</strong>.
         Rebasculez sur <strong>${echapper(nomSien)}</strong> pour y accéder.</p>
-      <button id="hs-rebasculer" style="background:#C97B5C;color:#fff;border:0;border-radius:8px;
-              padding:11px 20px;font-size:14px;cursor:pointer;font-family:inherit">
+      <button id="hs-rebasculer" style="background:var(--surface, #fff);color:var(--ink, #222);
+              border:1px solid var(--ink, #222);border-radius:var(--radius-pill, 99px);
+              min-height:44px;padding:0 20px;font-size:14px;cursor:pointer;font-family:inherit">
         Revenir sur mon compte</button>
       <div style="margin-top:14px">
-        <a href="/" style="font-size:13px;color:#6b7280">Retour à l’accueil</a>
+        <a href="/" style="font-size:13px;color:var(--muted, #6b7280)">Retour à l’accueil</a>
       </div>
     </div>`
   document.body.innerHTML = html

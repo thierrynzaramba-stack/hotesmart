@@ -129,6 +129,14 @@ export function messageCapacite (adultes, enfants, capacite) {
 // ⚠ LE BUS SE CHARGE À LA DEMANDE : un import statique qui échouerait ferait
 // tomber le calendrier entier. ⚠ `encoreAffichee` : une réponse tardive ne
 // peint pas la fiche suivante.
+// ⚠ NI HEXA NI EMOJI DANS CE MODULE. Les deux pages qui le chargent
+// (`/messages` et `/calendrier`) servent `theme.css` ET `ui.css` : les jetons
+// et les classes sont donc disponibles, et aucune couleur ne se redéfinit ici.
+// Avant le 17 octobre 2026 cette zone portait quatre hexas, deux emoji et un
+// bouton AMBRE — l'ambre dit « HôteSmart attend ta décision », il ne se pose
+// jamais sur un bouton (constat 3 de l'inventaire des bugs UI V5).
+const icone = (id) => `<svg class="icon" aria-hidden="true" style="width:16px;height:16px"><use href="/shared/icons.svg#${id}"/></svg>`
+
 function aujourdhuiLocal () {
   const d = new Date()
   const p = (n) => String(n).padStart(2, '0')
@@ -158,13 +166,16 @@ export async function brancherEvaluation ({ resa, cible, encoreAffichee = () => 
   const r = await b.demander('avis.statut', { booking_uid: bookingUid })
   if (!encoreAffichee() || !r || !r.ok || !r.data) return 'rien'
   const peindrePubliee = () => {
-    cible.innerHTML = '<div style="margin:0 0 12px;padding:8px 12px;border-radius:8px;background:#eef8f0;color:#1E7B34;font-size:13px">⭐ Évaluation publiée ✓</div>'
+    cible.innerHTML = `<div class="row small" style="margin:0 0 12px;padding:8px 12px;border-radius:var(--radius-tile);background:var(--ok-soft);color:var(--ok)">${icone('i-check')}<span>Évaluation publiée</span></div>`
   }
   if (r.data.etat === 'publiee') { peindrePubliee(); return 'publiee' }
   if (!r.data.evaluable) return 'rien'
   if (!(await b.disponible('avis.evaluer')) || !encoreAffichee()) return 'sans_droit'
-  // 44 px de haut au moins : la cible tactile d'un doigt, dans la feuille du téléphone.
-  cible.innerHTML = '<button type="button" style="width:100%;min-height:44px;margin:0 0 12px;padding:12px;border:0;border-radius:8px;background:#fff8e6;color:#7a5200;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit">⭐ Évaluer ce voyageur</button>'
+  // `.btn` porte deja les 44 px de `--control` : la cible tactile d'un doigt,
+  // dans la feuille du telephone. Et il n'est plus AMBRE — l'ambre dit
+  // « HoteSmart attend ta decision », il ne se pose jamais sur un bouton
+  // (charte, constat 3 de l'inventaire des bugs UI V5).
+  cible.innerHTML = `<button type="button" class="btn btn--secondary btn--block" style="margin:0 0 12px">${icone('i-review')}<span>Évaluer ce voyageur</span></button>`
   cible.querySelector('button').addEventListener('click', () => b.ouvrir('avis.evaluer', { booking_uid: bookingUid }))
   // ⚠ PUBLIÉE PENDANT QUE LA FICHE EST OUVERTE : elle le dit tout de suite,
   // au lieu de garder un bouton qui mènerait à « déjà publiée ».

@@ -382,7 +382,9 @@ function renderListe () {
     </div>`
   }).join('')
     + (etat.hasMore ? `<button type="button" class="btn btn--secondary btn--block" style="margin: 10px auto; width: calc(100% - 28px)" data-plus>${esc(t('messages.show_more_srv'))}</button>` : '')
-    + (masqueesAnciennes ? `<button type="button" class="link small" style="display: block; margin: 8px auto 16px; background: none; border: 0" data-anciennes>${esc(t('messages.show_old'))}</button>` : '')
+    // Même règle que le lien d'appel : 44 px de zone de frappe, par le padding
+    // et non par la marge, sans grossir la ligne (les marges absorbent).
+    + (masqueesAnciennes ? `<button type="button" class="link small" style="display: block; margin: 0 auto 5px; padding-block: 11px; min-height: var(--control); background: none; border: 0" data-anciennes>${esc(t('messages.show_old'))}</button>` : '')
   I18n.apply(zone)
   zone.querySelectorAll('[data-conv]').forEach(b => {
     b.addEventListener('click', (e) => { if (!e.target.closest('[data-tel]')) ouvrir(b.dataset.conv) })
@@ -436,7 +438,13 @@ function lienTelephone (c) {
   if (groupeArrivee(c) > 1 || !c.guestPhone) return ''
   const num = numeroAppelable(c.guestPhone)
   if (num.replace(/\D/g, '').length < 6) return ''
-  return `<a class="link caption row" style="gap: 5px" href="tel:${esc(num)}" data-tel aria-label="${esc(t('messages.call'))}">${icone('i-phone', 'icon icon--tel')}${esc(num)}</a>`
+  // ⚠ 44 PX DE HAUT, SANS GROSSIR LA LIGNE. C'est le geste des arrivées du
+  // jour — on appelle le voyageur qui arrive — et il n'offrait que 18 px au
+  // pouce, contre les 44 de `--control` (constat 6 de l'inventaire des bugs
+  // UI V5). Le `padding` vertical agrandit la ZONE DE FRAPPE pendant que la
+  // marge négative rend la place prise à la liste : le texte ne bouge pas.
+  // Une marge, elle, n'aurait pas été cliquable.
+  return `<a class="link caption row" style="gap: 5px; min-height: var(--control); padding-block: 13px; margin-block: -13px" href="tel:${esc(num)}" data-tel aria-label="${esc(t('messages.call'))}">${icone('i-phone', 'icon icon--tel')}${esc(num)}</a>`
 }
 
 // ─── Rendu : fil ─────────────────────────────────────────────────────────────
