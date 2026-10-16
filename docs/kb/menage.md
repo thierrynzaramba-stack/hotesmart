@@ -5005,15 +5005,23 @@ s'affiche jamais. Défaut `'hote'`, comme la fiche : le seul writer d'avant le
 15 septembre 2026 était l'hôte, et une valeur absente ne doit pas se lire
 « elle ».
 
-Sa carte « Mes jours de travail » ajoute alors : **« Ces jours ont été réglés
-par votre hôte. Vous pouvez les changer ; prévenez-le. »**
+Sa carte « Mes jours de travail » ajoute alors **« Réglés par votre hôte »** ou
+**« Réglés par vous »** — la même forme que ses congés, qui disent « — posé par
+votre hôte » en trois mots.
+- ⚠ **Aussi court que sur ses absences** (recette du 17 octobre). La première
+  version ajoutait « Vous pouvez les changer ; prévenez-le » : le droit de
+  changer se voit à ce que les cases SE COCHENT, et l'écrire en toutes lettres
+  revenait à commenter l'écran plutôt qu'à dire ce qu'il montre.
+- ⚠ **DEUX ÉTATS, PAS UN SEUL.** « Réglés par vous » compte autant que l'autre :
+  sans lui, l'absence de mention voudrait dire deux choses — « c'est vous » ou
+  « on ne sait pas » — et elle ne pourrait pas distinguer ses propres jours
+  d'un réglage qu'elle n'a pas fait.
 - ⚠ **Seulement si elle peut encore y toucher.** Quand elle ne règle rien,
   l'aide dit déjà « Réglé par votre hôte — pour le changer, dites-le lui » :
   deux fois la même phrase sur le même écran.
-- ⚠ **Une seule règle de lui suffit à l'afficher.** C'est le FAIT qui compte —
-  il y a là-dedans quelque chose qu'elle n'a pas décidé — et un décompte
-  (« 1 de vos 3 règles ») ne l'aiderait en rien : ce qu'elle veut savoir, c'est
-  s'il faut en parler à quelqu'un.
+- ⚠ **Une seule règle de lui suffit à dire « votre hôte ».** C'est le FAIT qui
+  compte — il y a là-dedans quelque chose qu'elle n'a pas décidé — et un
+  décompte (« 1 de vos 3 règles ») ne l'aiderait en rien.
 
 ### La recette comparative
 

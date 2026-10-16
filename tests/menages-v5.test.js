@@ -532,10 +532,15 @@ test('sa page DIT qui a réglé ses jours habituels', () => {
     path.join(__dirname, '..', 'apps/menages/public.html'), 'utf8'))
   assert.match(pwa, /r\.source && r\.source !== 'prestataire'/,
     'une règle qui n\'est pas d\'elle vient de lui')
-  assert.match(pwa, /Ces jours ont été réglés par votre hôte/)
+  // ⚠ DEUX ÉTATS, AUSSI COURTS QUE SUR SES ABSENCES (recette du 17 octobre).
+  // Sans « Réglés par vous », l'absence de mention voudrait dire deux choses —
+  // « c'est vous » ou « on ne sait pas ».
+  assert.match(pwa, /'Réglés par votre hôte' : 'Réglés par vous'/)
+  assert.ok(!/Vous pouvez les changer/.test(pwa),
+    'le droit de changer se voit à ce que les cases se cochent')
   // ⚠ PAS DEUX FOIS LA MÊME PHRASE. Quand elle ne règle rien, l'aide dit déjà
   // « Réglé par votre hôte — pour le changer, dites-le lui ».
-  assert.match(pwa, /if \(parLHote && !fige\)/)
+  assert.match(pwa, /if \(toutes\.length && !fige\)/)
 })
 
 test('SA PAGE NE DIT JAMAIS « EMPLOYEUR » — elle est indépendante', () => {

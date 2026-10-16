@@ -3816,12 +3816,26 @@ if ("serviceWorker" in navigator && !APERCU) {
     // la-dedans quelque chose qu'elle n'a pas decide — et parce qu'un decompte
     // (« 1 de vos 3 regles ») ne l'aiderait en rien : ce qu'elle veut savoir,
     // c'est s'il faut en parler a quelqu'un.
-    const parLHote = act.concat(opaques).some(r => r.source && r.source !== 'prestataire')
-    if (parLHote && !fige) {
-      // ⚠ LA PHRASE TIENT EN UN SEUL LITTERAL, meme longue : coupee en deux,
-      // elle devient introuvable par une recherche de texte — et c'est par la
-      // qu'on retrouve ce qu'un ecran dit vraiment.
-      const dit = 'Ces jours ont été réglés par votre hôte. Vous pouvez les changer ; prévenez-le.'
+    // ⚠ LA MEME FORME QUE SES ABSENCES, ET AUSSI COURTE (recette de Thierry,
+    // 17 octobre 2026). Ses conges disent « — pose par votre hote » en trois
+    // mots ; ses jours habituels n'ont aucune raison d'en dire vingt. La
+    // premiere version ajoutait « Vous pouvez les changer ; prevenez-le » :
+    // le droit de changer se voit a ce que les cases SE COCHENT, et le lui
+    // ecrire en toutes lettres revenait a commenter l'ecran plutot qu'a dire
+    // ce qu'il montre.
+    //
+    // ⚠ DEUX ETATS, PAS UN SEUL. « Regles par vous » compte autant que
+    // « Regles par votre hote » : sans lui, l'absence de mention voudrait dire
+    // deux choses — « c'est vous » ou « on ne sait pas » — et elle ne pourrait
+    // pas distinguer ses propres jours d'un reglage qu'elle n'a pas fait.
+    //
+    // ⚠ UNE SEULE REGLE DE LUI SUFFIT A DIRE « votre hote ». C'est le FAIT qui
+    // compte — il y a la-dedans quelque chose qu'elle n'a pas decide — et un
+    // decompte ne l'aiderait en rien.
+    const toutes = act.concat(opaques)
+    if (toutes.length && !fige) {
+      const parLHote = toutes.some(r => r.source && r.source !== 'prestataire')
+      const dit = parLHote ? 'Réglés par votre hôte' : 'Réglés par vous'
       aide.innerHTML += `<br><span class="dispo-source">${dit}</span>`
     }
 
