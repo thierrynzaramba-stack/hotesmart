@@ -856,7 +856,13 @@ test('LA MÊME VALIDATION QUE L\'HÔTE — éprouvée par le COMPORTEMENT', asyn
     const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
       .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
     assert.match(src, /require\(['"]\.\.\/lib\/cleaning\/regles['"]\)/, f)
-    assert.match(src, /validerRegle\(/, f)
+    // ⚠ `validerRegle(` OU `remplacerRegles(` DEPUIS LE 16 OCTOBRE 2026. La
+    // mécanique d'écriture est partie dans le module avec la validation : un
+    // endpoint qui appelle `remplacerRegles` valide donc par ce chemin, et
+    // n'appelle plus `validerRegle` lui-même. Ce que ce test garde est
+    // inchangé — aucun des deux endpoints ne valide dans son coin — et il le
+    // garde mieux : l'ORDRE d'écriture aussi est désormais commun.
+    assert.match(src, /(validerRegle|remplacerRegles)\(/, f)
   }
 })
 

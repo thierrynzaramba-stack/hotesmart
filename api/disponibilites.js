@@ -27,7 +27,7 @@ const { requirePermission, verifierSession } = require('../lib/require-permissio
 const { lireRrule, cleJour, estDisponible, congeCouvrant } = require('../lib/cleaning/availability')
 // ⚠ LA REGLE RECURRENTE EST VALIDEE EN UN SEUL ENDROIT, partage avec la PWA
 // (`api/menages-public.js`) depuis le 15 septembre 2026.
-const { validerRegle, libelle } = require('../lib/cleaning/regles')
+const { validerRegle, libelle, remplacerRegles } = require('../lib/cleaning/regles')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -301,6 +301,7 @@ async function ecrire (req, res, userId, providerId, appelant) {
   const { action } = req.body || {}
 
   if (action === 'reglerVisibilite') return await reglerVisibilite(req, res, userId, providerId, appelant)
+  if (action === 'reglerJours')     return await reglerJours(req, res, userId, providerId)
   if (action === 'poserRegle')      return await poserRegle(req, res, userId, providerId)
   if (action === 'retirerRegle')    return await retirerRegle(req, res, userId, providerId)
   if (action === 'poserException')  return await poserException(req, res, userId, providerId)
@@ -369,6 +370,48 @@ async function reglerVisibilite (req, res, userId, providerId, appelant) {
 // chaine acceptee depuis le client serait une expression executee par la lib
 // `rrule` sur des donnees d'un autre compte, et un `COUNT=100000` suffirait a
 // faire tourner le moteur d'assignation pour rien a chaque cycle.
+// TOUS SES JOURS HABITUELS EN UN SEUL ALLER-RETOUR (fiche V5, 16 octobre 2026).
+//
+// ⚠ POURQUOI CETTE ACTION EXISTE A COTE DE `poserRegle`. L'ancien ecran reglait
+// la recurrence en N appels : un `retirerRegle` par regle active, puis un
+// `poserRegle` par ligne. Le reseau qui lache au milieu — un telephone, un
+// ascenseur — laissait ZERO regle active, c'est-a-dire « disponible tous les
+// jours » : le moteur lui attribue alors des menages n'importe quel jour, et
+// personne ne l'a demande. C'est l'inverse exact de ce que l'hote venait de
+// faire, et rien a l'ecran ne le disait.
+//
+// L'ordre juste — inserer PUIS desactiver — vit dans `lib/cleaning/regles.js`,
+// avec la PWA, parce que c'est une REGLE et non une mecanique d'ecran. Les deux
+// endpoints l'appellent ; ils ne different que par leurs gardes et par la
+// `source` ecrite en base.
+//
+// ⚠ `source: 'hote'` : c'est ce qui permet a sa page de distinguer ce qu'elle a
+// regle elle-meme de ce que son employeur a regle pour elle.
+async function reglerJours (req, res, userId, providerId) {
+  const lots = Array.isArray((req.body || {}).lots) ? req.body.lots : null
+  if (!lots) return res.status(400).json({ error: 'Rien à enregistrer' })
+  // Une ligne en semaine simple, deux en quinzaine : au-dela, c'est un corps
+  // forge — l'ecran n'en produit jamais trois.
+  if (lots.length > 2) return res.status(400).json({ error: 'Trop de lignes' })
+  const cadence = Number((req.body || {}).toutes_les_n_semaines) || 1
+
+  const r = await remplacerRegles(supabase, {
+    userId, providerId, lots, cadence, source: 'hote', maxActives: LOT_REGLES })
+
+  if (r.erreur === 'desactivation') {
+    console.error('[disponibilites] desactivation regles echec', r.detail)
+    return res.status(503).json({
+      error: 'Les nouveaux jours sont enregistrés, mais les anciens n\'ont pas pu être retirés. ' +
+             'Rouvrez la fiche et vérifiez.' })
+  }
+  if (r.erreur) {
+    if (r.status === 400) return res.status(400).json({ error: r.erreur })
+    console.error('[disponibilites] reglage des jours echec', r.erreur, r.detail || '')
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  return res.status(200).json({ success: true, poses: r.poses })
+}
+
 async function poserRegle (req, res, userId, providerId) {
   // ⚠ LA VALIDATION VIT DANS `lib/cleaning/regles.js`, PARTAGEE AVEC LA PWA.
   // Depuis le 15 septembre 2026, la prestataire regle aussi ses jours depuis

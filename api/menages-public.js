@@ -27,7 +27,7 @@ const { cleJour, lireRrule } = require('../lib/cleaning/availability')
 // importe exactement ce module : deux validations pour la meme regle
 // divergeraient au premier ajustement, et la copie finit toujours par etre la
 // plus permissive des deux.
-const { validerRegle } = require('../lib/cleaning/regles')
+const { validerRegle, remplacerRegles } = require('../lib/cleaning/regles')
 // ⚠ LE PENDANT DE LA DECISION DU 15 SEPTEMBRE : elle regle ses jours, l'hote
 // l'apprend, et les menages PROPOSES des jours retires reviennent au moteur.
 const { apresChangementDeRegles, unBienDElle } = require('../lib/cleaning/apres-changement-regles')
@@ -2319,81 +2319,34 @@ async function reglerMesJours (req, res, token) {
   if (lotsBruts.length > 2) return res.status(400).json({ error: 'Trop de lignes' })
   const cadence = Number((req.body || {}).toutes_les_n_semaines) || 1
 
-  // ⚠ ON VALIDE TOUT AVANT D'ECRIRE QUOI QUE CE SOIT. Valider lot par lot en
-  // ecrivant au fil de l'eau laisserait la moitie d'un reglage en base sur un
-  // corps a moitie faux.
-  // ⚠ UNE LIGNE VIDE EST LEGITIME — « aucun jour cette semaine-la » — et ne
-  // produit simplement aucune regle. Ce n'est pas une erreur de saisie.
-  const aPoser = []
-  // La FORME de ce qu'on pose, pour le comparer a l'existant en jours de semaine.
-  // ⚠ On ne compare pas des RRULE : l'hote doit lire « elle ne travaille plus le
-  // samedi », pas « regle #a4f2 desactivee ».
-  const formeAPoser = []
-  for (const lot of lotsBruts) {
-    const jours = (lot && lot.jours) || []
-    if (!Array.isArray(jours)) return res.status(400).json({ error: 'Jours invalides' })
-    if (!jours.length) continue
-    const v = validerRegle({ jours, toutes_les_n_semaines: cadence, depuis: lot && lot.depuis })
-    if (v.erreur) return res.status(400).json({ error: v.erreur })
-    // ⚠ `source: 'prestataire'` — c'est ELLE qui pose. La colonne sert a deux
-    // choses que rien d'autre ne porte : la notification a l'instant du
-    // changement, et la TRACE lisible dans sa fiche longtemps apres. Une
-    // notification se rate ; la trace, elle, reste.
-    aPoser.push({ user_id: qui.userId, provider_id: qui.profil.id,
-                  rrule: v.rrule, label: v.label, active: true, source: 'prestataire' })
-    formeAPoser.push({ jours: v.jours, cadence: v.cadence })
-  }
+  // ⚠ LA MECANIQUE VIT DANS `lib/cleaning/regles.js`, AVEC LA VALIDATION
+  // (16 octobre 2026). Elle y est partie le jour ou la fiche de l'hote a eu
+  // besoin du MEME geste : valider tous les lots avant d'ecrire quoi que ce
+  // soit, INSERER PUIS DESACTIVER PAR ID — l'ordre est la garde, un echec
+  // laisse l'union des deux reglages et jamais zero regle — et rendre la FORME
+  // posee pour que l'appelant puisse annoncer ce qui a change.
+  // Les deux endpoints ne different plus que par leurs gardes et par la
+  // `source` : ici `prestataire`, c'est ELLE qui pose.
+  const r = await remplacerRegles(supabase, {
+    userId: qui.userId, providerId: qui.profil.id, lots: lotsBruts, cadence,
+    source: 'prestataire', maxActives: MAX_REGLES_ACTIVES })
 
-  // Ce qui est actif AUJOURD'HUI : c'est ce qu'on desactivera, et rien d'autre.
-  // ⚠ ON DESIGNE LES LIGNES PAR LEUR ID, PAS PAR UN FILTRE `active = true`.
-  // Un filtre desactiverait aussi ce qu'on vient d'inserer.
-  const { data: avant, error: errLire } = await supabase.from('provider_availability_rules')
-    // ⚠ `rrule` EN PLUS DE `id` : c'est la forme d'AVANT, et sans elle on ne peut
-    // pas dire a l'hote CE QUI a change — seulement que quelque chose a change.
-    .select('id, rrule').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
-    .eq('active', true).limit(MAX_REGLES_ACTIVES + 1)
-  if (errLire) {
-    console.error('[menages-public] lecture regles avant reglage echec:', errLire.message)
+  if (r.erreur === 'desactivation') {
+    console.error('[menages-public] desactivation regles echec:', r.detail)
+    // ⚠ ON DIT CE QUI S'EST REELLEMENT PASSE. « Service indisponible » ferait
+    // croire que rien n'est parti, alors que les nouveaux jours SONT poses :
+    // elle est disponible sur l'union des deux reglages, et elle doit le
+    // savoir pour recommencer.
+    return res.status(503).json({
+      error: 'Vos nouveaux jours sont enregistrés, mais les anciens n\'ont pas pu être retirés. ' +
+             'Rouvrez cet onglet et vérifiez.' })
+  }
+  if (r.erreur) {
+    if (r.status === 400) return res.status(400).json({ error: r.erreur })
+    console.error('[menages-public] reglage des jours echec:', r.erreur, r.detail || '')
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
-  if ((avant || []).length > MAX_REGLES_ACTIVES) {
-    // Ne devrait pas arriver : la lecture et le plafond sont la meme borne.
-    console.error('[menages-public] plus de regles actives que le plafond')
-    return res.status(503).json({ error: 'Service temporairement indisponible' })
-  }
-
-  // ⚠ ON INSERE AVANT DE DESACTIVER, ET L'ORDRE EST LA GARDE.
-  // L'inverse — desactiver puis inserer — laisse ZERO regle si la seconde
-  // moitie echoue, c'est-a-dire « disponible tous les jours » : le moteur lui
-  // attribue alors des menages n'importe quel jour, et personne ne l'a demande.
-  // Dans cet ordre, un echec laisse l'ANCIEN et le NOUVEAU actifs : elle est
-  // disponible sur l'union des deux, ce que l'ecran AFFICHE fidelement et que le
-  // geste suivant corrige. Entre deux etats degrades, on choisit celui qui se
-  // voit et qui ne dit pas le contraire de ce qui s'est passe.
-  if (aPoser.length) {
-    const { error: errIns } = await supabase.from('provider_availability_rules').insert(aPoser)
-    if (errIns) {
-      console.error('[menages-public] insert regles echec:', errIns.message)
-      return res.status(503).json({ error: 'Service temporairement indisponible' })
-    }
-  }
-
-  const anciens = (avant || []).map(r => r.id)
-  if (anciens.length) {
-    const { error: errMaj } = await supabase.from('provider_availability_rules')
-      .update({ active: false })
-      .in('id', anciens).eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
-    if (errMaj) {
-      console.error('[menages-public] desactivation regles echec:', errMaj.message)
-      // ⚠ ON DIT CE QUI S'EST REELLEMENT PASSE. « Service indisponible » ferait
-      // croire que rien n'est parti, alors que les nouveaux jours SONT poses :
-      // elle est disponible sur l'union des deux reglages, et elle doit le
-      // savoir pour recommencer.
-      return res.status(503).json({
-        error: 'Vos nouveaux jours sont enregistrés, mais les anciens n\'ont pas pu être retirés. ' +
-               'Rouvrez cet onglet et vérifiez.' })
-    }
-  }
+  const avant = r.avant
 
   // ⚠ APRES L'ECRITURE, ET SANS POUVOIR LA DEFAIRE. La notification et la
   // reprise des propositions sont best-effort : la verite est deja en base, et
@@ -2405,10 +2358,10 @@ async function reglerMesJours (req, res, token) {
   const formeAvant = (avant || []).map(r => lireRrule(r.rrule)).filter(Boolean)
   await apresChangementDeRegles({
     userId: qui.userId, providerId: qui.profil.id, prenom: qui.profil.first_name,
-    avant: formeAvant, apres: formeAPoser
+    avant: formeAvant, apres: r.formes
   })
 
-  return res.status(200).json({ success: true, posees: aPoser.length, retirees: anciens.length })
+  return res.status(200).json({ success: true, posees: r.poses, retirees: (avant || []).length })
 }
 
 // Elle pose ou retire un CONGE — une PLAGE (15 septembre 2026).
