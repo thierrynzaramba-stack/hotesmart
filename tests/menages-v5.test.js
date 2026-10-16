@@ -468,10 +468,18 @@ test('PWA : l\'aperçu coupe le GESTE « Vu », mais montre l\'ÉTAT', () => {
   // pour savoir si elle avait vu le ménage, et la ligne ressemblait à celle
   // d'un ménage jamais lu. L'aperçu mentait sur la seule information que ce
   // lot ajoute à cette page.
+  // ⚠ ET DEPUIS LE 16 OCTOBRE 2026, IL NE LE MASQUE PLUS : il le DÉSACTIVE.
+  // Masqué, l'hôte ouvrait la page de sa prestataire, n'y voyait aucun « Vu »
+  // et en concluait que le bouton n'existait pas chez elle — c'est arrivé en
+  // recette. Un aperçu qui retire des éléments ne montre plus « ce qu'elle
+  // voit », qui est sa seule raison d'être. Le geste, lui, reste coupé deux
+  // fois : `pointer-events` ici, et le `fetch` patché, qui est le vrai garde.
   const src = lire('apps/menages/public.html')
-  assert.ok(/\.apercu \.jvu\[data-vu\] \{ display: none !important; \}/.test(src),
-    'le sélecteur ne porte que sur le bouton, pas sur la mention')
+  assert.ok(/\.apercu \.jvu\[data-vu\],\s*\n\s*\.apercu #news-close \{ pointer-events: none;/.test(src),
+    'le bouton est inerte, et le sélecteur ne porte que sur lui — pas sur la mention « ✓ Vu »')
   assert.ok(!/\.apercu \.jvu \{/.test(src), 'et plus sur la classe entière')
+  assert.ok(!/\.apercu \.jvu\[data-vu\] \{ display: none/.test(src),
+    'il ne disparaît plus de l\'aperçu')
 })
 
 test('PWA : un échec de « Vu » RÉARME toujours le bouton', () => {

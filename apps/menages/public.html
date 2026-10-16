@@ -514,7 +514,19 @@
        information que ce lot ajoute a cette page.
        Le garde reel contre l'ecriture est le `fetch` patche ; ceci evite
        seulement d'offrir un bouton dont on sait qu'il echouera. */
-    .apercu .jvu[data-vu] { display: none !important; }
+    /* ⚠ L'APERÇU MONTRE LE BOUTON, IL NE LE LAISSE PAS AGIR (recette de
+       Thierry, 16 octobre 2026). Il le MASQUAIT : l'hôte ouvrait la page de sa
+       prestataire, n'y voyait aucun « Vu », et en concluait que le bouton
+       n'existait pas chez elle — c'est exactement ce qui vient de se produire
+       en recette. Un aperçu qui retire des éléments ne montre plus « ce qu'elle
+       voit », qui est sa seule raison d'être.
+       ⚠ LE GESTE RESTE COUPÉ, par `pointer-events` ici et par le `fetch`
+       patché là-haut — ce dernier est le vrai garde ; celui-ci évite seulement
+       d'offrir un bouton dont on sait qu'il échouera. Dire « vu » depuis
+       l'écran de l'hôte éteindrait l'alerte et les deux relances de 9 h sur
+       quelqu'un qui n'a rien lu. */
+    .apercu .jvu[data-vu],
+    .apercu #news-close { pointer-events: none; opacity: .45; cursor: default; }
     .jmarque { flex-shrink: 0; font-size: 11px; color: var(--muted); margin-left: 6px; }
     /* ⚠ `var(--green)`, PAS `var(--ok)` : les deux valent la même couleur
        depuis le remappage du socle, mais `tests/pwa-mes-jours-dom.test.js`
@@ -881,7 +893,6 @@
        disparaît, plutôt que d'échouer en « Connexion impossible » et de faire
        croire à l'hôte que son réseau est en panne. */
     .apercu [data-dispo], .apercu #btn-reglages { display: none !important; }
-    .apercu #news-close { display: none !important; }
     .apercu .sync-banner { display: none !important; }
     .apercu .apercu-bandeau { display: flex; }
     .apercu-bandeau {

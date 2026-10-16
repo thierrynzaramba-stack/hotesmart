@@ -4798,6 +4798,33 @@ restait `read = false` en base pour toujours, donc sans trace pour l'hôte) ; un
 ménage introuvable sortait en clic mort, sans repeint ; et `opacity` sur une
 carte lue affadissait le bouton qu'on vient d'y mettre pour qu'il soit touché.
 
+### ⚠ L'APERÇU MONTRE LE BOUTON, IL NE LE LAISSE PLUS DISPARAÎTRE (16 oct. 2026)
+
+Vécu en recette, et c'est la leçon du jour. Thierry ouvre la page de Régina
+depuis sa fiche — donc en `?apercu=1` — et signale que **le bouton « Vu »
+manque**. Il ne manquait pas : l'aperçu le MASQUAIT (`display: none`), avec
+« ✓ Tout marquer lu ». Reproduit au banc à l'identique.
+
+**Un aperçu qui retire des éléments ne montre plus « ce qu'elle voit », qui est
+sa seule raison d'être.** L'hôte en tire une conclusion fausse sur l'écran de
+sa prestataire — ici, que le bouton n'existe pas chez elle. C'est la même
+famille de faute que celle corrigée à la revue de `6452d75` : `.jvu` tout court
+masquait aussi la mention inerte « ✓ Vu », et l'hôte, venu savoir si elle avait
+vu le ménage, voyait une ligne de ménage jamais lu.
+
+Les deux boutons sont donc **affichés et inertes** (`pointer-events: none`,
+opacité réduite). Le geste reste coupé deux fois : ici pour ne pas offrir un
+bouton dont on sait qu'il échouera, et par le `fetch` patché, **qui est le vrai
+garde**. Dire « vu » depuis l'écran de l'hôte éteindrait l'alerte et les deux
+relances de 9 h sur quelqu'un qui n'a rien lu.
+
+Ce qui reste MASQUÉ en aperçu, et pourquoi : « Je prends ce ménage », « Je ne
+peux plus le faire », « J'accepte », « Je ne peux pas », « Marquer fait », le
+segment de disponibilité et l'engrenage. Ceux-là n'informent pas l'hôte sur
+l'état de son écran à elle — ce sont des gestes qui n'ont de sens que pour
+celle qui les porte. **La ligne de partage est là** : un accusé de lecture dit
+où elle en est, une action dit ce qu'elle peut faire.
+
 ### Les captures
 
 `docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et
