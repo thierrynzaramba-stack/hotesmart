@@ -4966,6 +4966,21 @@ confirmait le code**. Un banc qui ne dit pas la vérité du serveur ne prouve
 rien ; il a été corrigé en même temps.
 
 **2. `semaineAncree` comptait les semaines depuis l'epoch — un JEUDI.**
+**Mesuré en production le 16 octobre 2026** (`scripts/diagnostic-parite-semaines.js`,
+lecture seule) : **3 règles actives, 0 illisible, 2 de cadence ≥ 2 — et les
+DEUX étaient affichées sur la mauvaise ligne.** Leurs ancres tombent toutes
+deux un **lundi** (28 septembre et 5 octobre), c'est-à-dire exactement le cas
+où le découpage epoch se trompe : 100 % des règles d'alternance du parc.
+Les deux ont été posées par la prestataire depuis sa page — qui, elle,
+affichait juste.
+
+⚠ **Rien à corriger en base.** Le moteur n'a jamais lu ce calcul (mesure
+rejouée : 14 décisions, 7 jours × 2 règles), sa page non plus, l'ancien écran
+non plus. Seule la fiche V5 mentait, et elle était en lecture seule jusqu'au
+16 octobre : aucune écriture n'a pu en découler. Ce qui a été faussé est ce que
+l'hôte **croyait** — il lisait les jours de la semaine B sur la ligne A, et
+inversement.
+
 `Date.parse(iso) / 604800000` découpe le temps en tranches de sept jours à
 partir du 1er janvier 1970. Deux dates de la même semaine civile tombaient donc
 dans deux tranches différentes dès que l'une était un lundi, un mardi ou un
