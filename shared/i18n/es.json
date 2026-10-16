@@ -475,6 +475,8 @@
   "menages.equipe.config.regle_par_elle": "Definido por ella · {quand}",
   "menages.equipe.config.regle_par_vous": "Definido por usted · {quand}",
   "menages.equipe.config.cal_geste": "Toque un día para marcarla ausente, o de vuelta al trabajo.",
+  "menages.equipe.config.trop_de_regles": "No se han podido reemplazar sus días habituales: tiene más de {max} reglas de recurrencia activas. Avísanos, hay que quitar algunas antes.",
+  "menages.equipe.config.trop_de_regles_presta": "No se han podido guardar tus días. Avisa a tu anfitrión.",
   "menages.equipe.config.self_dispo": "Ella declara sus ausencias",
   "menages.equipe.config.self_dispo_aide": "desde su aplicación",
   "menages.equipe.config.self_dispo_illisible": "No se pudo leer este ajuste: no se modificará.",

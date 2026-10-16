@@ -2206,7 +2206,7 @@ async function mesDisponibilites (req, res, token) {
   // ⚠ LE MEME CONTRAT QUE LE CHEMIN NOMINAL, `conges` COMPRIS. Depuis que la
   // reponse porte des conges, une branche qui les omet fait lever le front des
   // qu'il itere `data.conges` : la prestataire sans droit verrait un ecran casse
-  // au lieu du message « gérées par votre employeur ». Une reponse partielle est
+  // au lieu du message « gérées par votre hôte ». Une reponse partielle est
   // un piege pose pour le lot d'apres.
   if (qui.erreur === 403) {
     return res.status(200).json({ autorise: false, exceptions: [], conges: [], regles: [] })
@@ -2346,12 +2346,15 @@ async function reglerMesJours (req, res, token) {
   }
   // ⚠ LE PLAFOND SE DIT, il ne se tait pas. Et il se dit AVEC LE GESTE QU'ELLE
   // PEUT FAIRE : elle ne peut pas nettoyer ses propres regles depuis cette
-  // page — c'est son employeur qui le peut.
+  // page — c'est son hôte qui le peut.
   if (r.erreur === 'plafond') {
     console.error('[menages-public] plafond de regles actives atteint', r.detail || '')
     return res.status(409).json({
-      error: 'Vos jours n\'ont pas pu être enregistrés : vous avez trop de règles ' +
-             'enregistrées. Prévenez votre employeur.' })
+      // ⚠ LE CODE PART AVEC LA PHRASE (16 octobre 2026) : sa page n'a pas
+      // encore de moteur i18n, elle affiche donc le francais du serveur ; la
+      // fiche de l'hote, elle, traduit `code` par ses propres cles.
+      code: 'trop_de_regles',
+      error: 'Vos jours n\'ont pas pu être enregistrés. Prévenez votre hôte.' })
   }
   if (r.erreur) {
     if (r.status === 400) return res.status(400).json({ error: r.erreur })
@@ -2386,7 +2389,7 @@ async function mesConges (req, res, token, { retirer }) {
   const qui = await celleQuiDeclare(token, { ecriture: true })
   if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
   if (qui.erreur === 403) {
-    return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+    return res.status(403).json({ error: 'Vos absences sont gérées par votre hôte' })
   }
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
 
@@ -2413,7 +2416,7 @@ async function mesConges (req, res, token, { retirer }) {
     if (!data || !data.length) {
       // ⚠ « RIEN A SUPPRIMER » N'EST PAS « CE N'EST PAS A VOUS » — meme nuance
       // que sur les absences d'un jour, et pour la meme raison : sur un telephone
-      // en 3G, un double tap ne doit pas accuser l'employeur.
+      // en 3G, un double tap ne doit pas accuser l'hôte.
       const { data: reste, error: errLire } = await supabase.from('conges_plages')
         .select('id').eq('id', String(id))
         .eq('user_id', qui.userId).eq('provider_id', qui.profil.id).maybeSingle()
@@ -2422,7 +2425,7 @@ async function mesConges (req, res, token, { retirer }) {
         return res.status(503).json({ error: 'Service temporairement indisponible' })
       }
       if (!reste) return res.status(200).json({ success: true, retire: true })
-      return res.status(409).json({ error: 'Ce congé a été posé par votre employeur' })
+      return res.status(409).json({ error: 'Ce congé a été posé par votre hôte' })
     }
     return res.status(200).json({ success: true, retire: true })
   }
@@ -2514,7 +2517,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
   const qui = await celleQuiDeclare(token, { ecriture: true })
   if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
   if (qui.erreur === 403) {
-    return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+    return res.status(403).json({ error: 'Vos absences sont gérées par votre hôte' })
   }
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
 
@@ -2555,7 +2558,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
       // ⚠ « RIEN A SUPPRIMER » N'EST PAS « CE N'EST PAS A VOUS ». Zero ligne
       // touchee couvre deux cas tres differents, et le 409 les confondait : sur
       // cette PWA en 3G, un double tap sur « Annuler » annoncait a la
-      // prestataire que son employeur avait pose une absence qu'elle venait
+      // prestataire que son hôte avait pose une absence qu'elle venait
       // elle-meme de retirer. On regarde ce qui occupe reellement ce jour.
       const { data: reste, error: errLire } = await supabase
         .from('provider_availability_exceptions')
@@ -2569,7 +2572,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
       // Plus rien sur ce jour : c'est le resultat qu'elle demandait. Succes
       // idempotent, comme le chemin de declaration.
       if (!reste) return res.status(200).json({ success: true, date: jour, retiree: true })
-      return res.status(409).json({ error: 'Cette absence a été posée par votre employeur' })
+      return res.status(409).json({ error: 'Cette absence a été posée par votre hôte' })
     }
     await annoncerException(qui, jour, data[0].available === true
       ? 'a retiré sa disponibilité exceptionnelle du' : 'a retiré son absence du', { envoyer })
@@ -2624,7 +2627,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
     // pas la sienne (l'update ci-dessus n'a rien touche).
     if (error.code === '23505') {
       return res.status(409).json({
-        error: 'Votre employeur a déjà noté quelque chose sur cette date. Prévenez-le directement.' })
+        error: 'Votre hôte a déjà noté quelque chose sur cette date. Prévenez-le directement.' })
     }
     console.error('[menages-public] declaration indisponibilite echec:', error.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -2644,7 +2647,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
 async function annoncerMaPlage (req, res, token) {
   const qui = await celleQuiDeclare(token, { ecriture: true })
   if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
-  if (qui.erreur === 403) return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+  if (qui.erreur === 403) return res.status(403).json({ error: 'Vos absences sont gérées par votre hôte' })
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
   let envoye = false
   try {

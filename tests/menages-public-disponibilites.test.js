@@ -339,12 +339,12 @@ test('un profil DÉSACTIVÉ ne déclare plus rien', async () => {
   assert.strictEqual(etat.ecritures.length, 0)
 })
 
-test('`self_availability` à \'none\' : elle passe par son employeur', async () => {
+test('`self_availability` à \'none\' : elle passe par son hôte', async () => {
   const { handler, etat } = preparer({ droits: { self_availability: 'none' } })
   const res = reponse()
   await handler(ecrire({ date: DEMAIN }), res)
   assert.strictEqual(res.code, 403)
-  assert.match(res.body.error, /employeur/)
+  assert.match(res.body.error, /hôte/)
   assert.strictEqual(etat.ecritures.length, 0)
 })
 
@@ -507,7 +507,7 @@ test('elle ne S\'APPROPRIE PAS une absence posée par l\'hôte', async () => {
   const res = reponse()
   await handler(ecrire({ date: DEMAIN }), res)
   assert.strictEqual(res.code, 409)
-  assert.match(res.body.error, /employeur/)
+  assert.match(res.body.error, /hôte/)
   // L'update n'a touché aucune ligne (il vise `source = 'prestataire'`), et
   // l'insert s'est heurté à la contrainte d'unicité : rien n'a changé de main.
   const maj = etat.ecritures.find(x => x.table === 'provider_availability_exceptions' && x.op === 'update')
@@ -538,13 +538,13 @@ test('elle NE PEUT PAS défaire une absence posée par l\'hôte', async () => {
   await handler({ method: 'POST', query: { token: TOKEN }, headers: {},
                   body: { action: 'retirerIndisponibilite', date: DEMAIN } }, res)
   assert.strictEqual(res.code, 409)
-  assert.match(res.body.error, /employeur/)
+  assert.match(res.body.error, /hôte/)
 })
 
 test('retirer DEUX FOIS la même absence ne ment pas', async () => {
   // ⚠ DÉFAUT TROUVÉ EN REVIEW. « Rien à supprimer » n'est pas « ce n'est pas à
   // vous » : sur cette PWA en 3G, un double tap sur « Annuler » annonçait à la
-  // prestataire que son employeur avait posé une absence qu'elle venait
+  // prestataire que son hôte avait posé une absence qu'elle venait
   // elle-même de retirer. Plus rien sur ce jour = c'est le résultat qu'elle
   // demandait : succès idempotent.
   const { handler } = preparer({ supprime: [], ligneExistante: null })
@@ -685,7 +685,7 @@ test('elle déclare un congé, marqué à SA source', async () => {
   assert.strictEqual(e.row.provider_id, MARIE)
 })
 
-test('elle ne peut PAS retirer un congé posé par son employeur', async () => {
+test('elle ne peut PAS retirer un congé posé par son hôte', async () => {
   // ⚠ MÊME GARDE QUE LES ABSENCES D'UN JOUR. Un congé posé par l'hôte — « tu ne
   // travailles pas cette semaine-là » — n'est pas le sien à défaire : le lui
   // laisser effacer la remettrait candidate sur des jours dont il l'avait
@@ -694,14 +694,14 @@ test('elle ne peut PAS retirer un congé posé par son employeur', async () => {
   const res = reponse()
   await handler(ecrire({ action: 'retirerConge', id: CONGE_ID }), res)
   assert.strictEqual(res.code, 409)
-  assert.match(res.body.error, /employeur/)
+  assert.match(res.body.error, /hôte/)
   const e = etat.ecritures.find(x => x.table === 'conges_plages' && x.op === 'delete')
   assert.strictEqual(e.f.source, 'prestataire', 'le DELETE filtre sur SA source')
 })
 
 test('retirer deux fois le même congé reste un SUCCÈS, pas une accusation', async () => {
   // ⚠ Sur un téléphone en 3G, un double tap ne doit pas annoncer que
-  // l'employeur a posé un congé qu'elle vient elle-même de retirer.
+  // l'hôte a posé un congé qu'elle vient elle-même de retirer.
   const { handler } = preparer({ congeSupprime: [], congeExistant: null })
   const res = reponse()
   await handler(ecrire({ action: 'retirerConge', id: CONGE_ID }), res)

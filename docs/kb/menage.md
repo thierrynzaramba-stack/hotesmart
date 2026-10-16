@@ -4846,6 +4846,48 @@ lecteur d'écran.
 
 Les trois surfaces suivent, puisqu'elles passent toutes par `boutonVu`.
 
+## ⚠ SA PAGE NE DIT PLUS JAMAIS « EMPLOYEUR » (16 octobre 2026)
+
+Décision de Thierry, et elle tranche un arbitrage resté ouvert depuis le
+14 octobre — je l'avais laissé de côté en gardant « employeur » par cohérence
+interne, ce qui revenait à propager le mauvais mot partout.
+
+**Une prestataire de ménage est INDÉPENDANTE** : elle facture, elle n'est pas
+salariée. « Votre employeur » lui donnait un lien de subordination qui n'existe
+pas — et, accessoirement, faisait décrire à HôteSmart une relation de travail
+qui n'est pas la sienne. Le mot est « votre hôte », partout.
+
+Vingt-neuf occurrences dans `apps/menages/public.html`, onze dans
+`api/menages-public.js`, et vingt-cinq dans les tests qui figeaient les phrases.
+
+⚠ **Les commentaires sont purgés aussi, et c'est voulu** : un mot qui reste
+dans le code revient dans l'écran. La prochaine phrase écrite sous un
+commentaire qui dit « employeur » dira « employeur ».
+
+⚠ **Le serveur de sa page est couvert par le même test.** `api/menages-public.js`
+renvoie des phrases que la PWA affiche TELLES QUELLES — « on affiche la phrase
+du serveur plutôt que d'en inventer une qui dirait moins ». Purger l'écran sans
+purger l'endpoint aurait laissé le mot revenir par la porte de derrière, au
+premier refus.
+
+`tests/menages-v5.test.js` garde les cinq fichiers (la page, son endpoint, les
+trois fichiers i18n) et vérifie en plus que « votre hôte » est bien là : sans
+cette seconde moitié, tout supprimer ferait passer le test.
+
+### Le plafond se dit, en trois langues
+
+Les deux messages de refus passent par `shared/i18n` (580 clés) :
+`menages.equipe.config.trop_de_regles` pour la fiche, qui reçoit un `code` et
+un `max` plutôt qu'une phrase — l'écran est traduit, lui envoyer du français en
+dur le rendrait bilingue au premier refus — et
+`trop_de_regles_presta` pour sa page.
+
+⚠ **Sa page, elle, n'a pas encore de moteur i18n** (point D13 de l'inventaire :
+tout y est en français en dur, des deux côtés). Elle affiche donc la phrase du
+serveur ; la clé existe en trois langues pour le jour où ce moteur arrivera,
+et le serveur envoie `code: 'trop_de_regles'` à côté de la phrase pour que ce
+jour-là rien n'ait à être réécrit.
+
 ### Les captures
 
 `docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et

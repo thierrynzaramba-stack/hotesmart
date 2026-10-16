@@ -475,6 +475,8 @@
   "menages.equipe.config.regle_par_elle": "Set by her · {quand}",
   "menages.equipe.config.regle_par_vous": "Set by you · {quand}",
   "menages.equipe.config.cal_geste": "Tap a day to mark her away, or back at work.",
+  "menages.equipe.config.trop_de_regles": "Her usual days could not be replaced: she has more than {max} active recurrence rules. Let us know — some must be removed first.",
+  "menages.equipe.config.trop_de_regles_presta": "Your days could not be saved. Let your host know.",
   "menages.equipe.config.self_dispo": "She reports her time off",
   "menages.equipe.config.self_dispo_aide": "from her own app",
   "menages.equipe.config.self_dispo_illisible": "This setting could not be read: it will not be changed.",

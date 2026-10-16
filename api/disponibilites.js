@@ -387,7 +387,7 @@ async function reglerVisibilite (req, res, userId, providerId, appelant) {
 // `source` ecrite en base.
 //
 // ⚠ `source: 'hote'` : c'est ce qui permet a sa page de distinguer ce qu'elle a
-// regle elle-meme de ce que son employeur a regle pour elle.
+// regle elle-meme de ce que son hote a regle pour elle.
 async function reglerJours (req, res, userId, providerId) {
   const lots = Array.isArray((req.body || {}).lots) ? req.body.lots : null
   if (!lots) return res.status(400).json({ error: 'Rien à enregistrer' })
@@ -420,7 +420,12 @@ async function reglerJours (req, res, userId, providerId) {
   // la borne, et quoi faire.
   if (r.erreur === 'plafond') {
     console.error('[disponibilites] plafond de regles actives atteint', r.detail || '')
+    // ⚠ UN CODE ET UN MAXIMUM, PAS UNE PHRASE (16 octobre 2026). La fiche est
+    // traduite (fr/en/es) : lui envoyer du francais en dur rendrait l'ecran
+    // bilingue au premier refus. `error` reste en repli, pour les chemins qui
+    // affichent la phrase du serveur telle quelle.
     return res.status(409).json({
+      code: 'trop_de_regles', max: MAX_REGLES_ACTIVES,
       error: `Ses jours habituels n'ont pas pu être remplacés : elle a plus de ` +
              `${MAX_REGLES_ACTIVES} règles de récurrence actives. ` +
              `Prévenez-nous, il faut en retirer avant.` })

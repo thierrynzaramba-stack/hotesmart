@@ -297,7 +297,7 @@
     .dispo-case.auj:not(.vide).sel { outline-color: var(--on-ink); }
     .dispo-case.auj:not(.vide).conge { border-color: var(--muted-2); }
     /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « ce jour-la a ete
-       regle a la main » — par elle OU par son employeur depuis le 14 octobre
+       regle a la main » — par elle OU par son hôte depuis le 14 octobre
        2026 ; le TITRE de la case dit lequel des deux, et UN SEUL point sert aux
        deux sources : deux points de sens different dans 44 px, c'est un point
        qu'on ne sait plus lire. */
@@ -1224,7 +1224,7 @@
             <div class="dispo-titre">Mes jours de travail</div>
             <!-- ⚠ EN LECTURE SEULE, ET C'EST UNE DECISION PRODUIT (15 sept. 2026).
                  Ses jours habituels sont l'ORGANISATION DU TRAVAIL, reglee par son
-                 employeur. Elle declare ses ABSENCES — un jour, ou une plage — elle
+                 hôte. Elle declare ses ABSENCES — un jour, ou une plage — elle
                  ne redessine pas son planning. Le serveur n'expose d'ailleurs
                  aucune action sur les regles. -->
             <div id="dispo-recur"></div>
@@ -1994,7 +1994,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     // montre ce qu'elle sert.
     const icons  = { new: '🧹', modified: '✏️', cancelled: '❌', note: '📝' }
     const labels = { new: 'Nouveau ménage', modified: 'Ménage modifié',
-                     cancelled: 'Ménage annulé', note: "Note de l'employeur" }
+                     cancelled: 'Ménage annulé', note: "Note de l'hôte" }
 
     list.innerHTML = visibles.map(n => {
       const d = new Date(n.created_at)
@@ -2507,8 +2507,8 @@ if ("serviceWorker" in navigator && !APERCU) {
                 // C'est la regression que `basculerMonJour` avait deja corrigee
                 // une fois ; la feuille ne doit pas la reintroduire.
                 ? (e.available
-                   ? '<div class="jsect-vide" style="padding-top:8px">Votre employeur vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.</div>'
-                   : '<div class="jsect-vide" style="padding-top:8px">Absence posée par votre employeur — pour la retirer, dites-le lui.</div>')
+                   ? '<div class="jsect-vide" style="padding-top:8px">Votre hôte vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.</div>'
+                   : '<div class="jsect-vide" style="padding-top:8px">Absence posée par votre hôte — pour la retirer, dites-le lui.</div>')
                 : '')) +
         '</div>'
     }
@@ -2777,7 +2777,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     // ordre (constat de la revue de def72c0 — avant, le \n brut se condensait).
     const noteEl = document.getElementById('modal-note')
     noteEl.innerHTML = m.comment
-      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${echapper(m.comment).replace(/\n/g, '<br>')}</div>`
+      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'hôte</div>${echapper(m.comment).replace(/\n/g, '<br>')}</div>`
       : ''
 
     hideModalMessages()
@@ -2962,7 +2962,7 @@ if ("serviceWorker" in navigator && !APERCU) {
       //                  decouvert, l'hote n'est pas alerte ;
       //   - `escalade` : la personne suivante de garde vient d'etre sollicitee.
       //                  L'hote n'est PAS alerte non plus (`!porte && !suivante`
-      //                  cote serveur) : lui dire « votre employeur est prevenu »
+      //                  cote serveur) : lui dire « votre hôte est prevenu »
       //                  etait un mensonge, la faute exacte du commit c6d0553 ;
       //   - ni l'un ni l'autre : plus personne ne porte ce menage, et LA l'hote
       //                  recoit une tache in-app plus un SMS/email.
@@ -2972,7 +2972,7 @@ if ("serviceWorker" in navigator && !APERCU) {
             ? 'Réponse enregistrée. Ce ménage reste à la personne qui en a la charge.'
             : (data && data.escalade
                 ? 'Réponse enregistrée. Le ménage est proposé à quelqu\'un d\'autre.'
-                : 'Réponse enregistrée : votre employeur est prévenu.')))
+                : 'Réponse enregistrée : votre hôte est prévenu.')))
       await rechargerAssignations()
       setTimeout(closeModal, 1200)
     } catch (err) {
@@ -3380,13 +3380,13 @@ if ("serviceWorker" in navigator && !APERCU) {
   //
   // ⚠ ELLE DECLARE UNE EXCEPTION D'UN JOUR, DANS LES DEUX SENS (depuis le
   // 1er octobre 2026), mais jamais ses JOURS
-  // ATTITRES : ceux-la sont une decision de son employeur. Pouvoir s'en retirer
+  // ATTITRES : ceux-la sont une decision de son hôte. Pouvoir s'en retirer
   // elle-meme lui permettrait de quitter un bien sans qu'il l'apprenne, alors
   // qu'il compte sur elle pour le preparer.
   //
   // ⚠ AUCUNE FILE HORS LIGNE ICI, contrairement a « marquer fait ». Une absence
   // rejouee deux heures plus tard porterait sur un planning qui a bouge — et
-  // surtout, l'ecran ne peut pas promettre que son employeur l'a vue si rien
+  // surtout, l'ecran ne peut pas promettre que son hôte l'a vue si rien
   // n'est parti. Hors ligne, on le DIT.
   let dispoCharge = false
 
@@ -3682,7 +3682,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     const msg = document.getElementById('dispo-message')
     if (mesJours.panneLecture) {
       // ⚠ QUATRE ETATS, ET CELUI-CI EST LE PLUS DELICAT : ON NE SAIT PAS.
-      // « Vos absences sont gerees par votre employeur » serait FAUX — personne
+      // « Vos absences sont gerees par votre hôte » serait FAUX — personne
       // ne les gere, la lecture a echoue. Le calendrier reste pour ses menages,
       // et la phrase dit exactement ce qui manque.
       msg.textContent = 'Vos absences n\'ont pas pu être lues. Vos ménages, eux, sont à jour — '
@@ -3692,9 +3692,9 @@ if ("serviceWorker" in navigator && !APERCU) {
       // ne disent pas la meme chose : dans le premier cas elle CONSULTE ses
       // jours, dans le second le serveur ne les lui envoie meme pas. Une seule
       // phrase pour les deux lui aurait fait chercher une liste absente.
-      msg.textContent = 'Vos absences sont gérées par votre employeur. Prévenez-le directement.'
+      msg.textContent = 'Vos absences sont gérées par votre hôte. Prévenez-le directement.'
     } else if (!mesJours.modifiable) {
-      msg.textContent = 'Vous pouvez consulter vos jours, mais c\'est votre employeur qui pose vos absences.'
+      msg.textContent = 'Vous pouvez consulter vos jours, mais c\'est votre hôte qui pose vos absences.'
     } else if (!msg.dataset.garde) {
       // ⚠ PLUS DE MODE D'EMPLOI (demande de Thierry, 18 septembre 2026). « Touchez
       // un jour pour voir ce qui s'y passe » decrivait le geste le plus evident
@@ -3728,7 +3728,7 @@ if ("serviceWorker" in navigator && !APERCU) {
   // declaration d'absence »). La carte est donc un FORMULAIRE, pas un resume.
   //
   // ⚠ CE QUE CA OUVRE, ET QUI N'EST PAS FERME ICI : elle peut se retirer d'un
-  // jour sur lequel son employeur compte, et rien ne l'en previent. Noté au KB.
+  // jour sur lequel son hôte compte, et rien ne l'en previent. Noté au KB.
   function peindreMesRegles () {
     const zone = document.getElementById('dispo-recur')
     const aide = document.getElementById('dispo-recur-aide')
@@ -3764,7 +3764,7 @@ if ("serviceWorker" in navigator && !APERCU) {
       // elle-meme ou elle en est.
       aide.innerHTML = fige
         ? `Cette semaine est une <b>semaine ${lettreSemaine(AUJ())}</b>. ` +
-          'Réglé par votre employeur — pour le changer, dites-le lui.'
+          'Réglé par votre hôte — pour le changer, dites-le lui.'
         : 'Cochez les jours où vous travaillez habituellement.'
     } else {
       const tous = fusion(act)
@@ -3774,7 +3774,7 @@ if ("serviceWorker" in navigator && !APERCU) {
           '<div style="margin-top:8px"><button type="button" class="dispo-mini" id="dispo-alterner">' +
           'Une semaine sur deux…</button></div>')
       aide.textContent = fige
-        ? 'Réglé par votre employeur — pour le changer, dites-le lui.'
+        ? 'Réglé par votre hôte — pour le changer, dites-le lui.'
         : 'Cochez les jours où vous travaillez habituellement.'
     }
     // ⚠ LA PHRASE REVIENT, MAIS SEULEMENT QUAND ELLE EST VRAIE ET UTILE.
@@ -3794,11 +3794,11 @@ if ("serviceWorker" in navigator && !APERCU) {
       // Elle coche le mardi, l'ecran le peint vert, et elle n'aura jamais un
       // menage le mardi. C'est le geste naturel de qui veut plus de travail.
       aide.textContent += ' Pour être proposée un jour de plus, dites-le aussi ' +
-        'à votre employeur : c\'est lui qui confie les logements.'
+        'à votre hôte : c\'est lui qui confie les logements.'
     }
     if (opaques.length) {
       aide.innerHTML += '<br>Vous avez aussi ' + opaques.length +
-        ' règle(s) que cet écran ne sait pas afficher. Demandez à votre employeur.'
+        ' règle(s) que cet écran ne sait pas afficher. Demandez à votre hôte.'
     }
     const bAlt = document.getElementById('dispo-alterner')
     if (bAlt) bAlt.addEventListener('click', () => basculerMonAlternance(true))
@@ -3911,7 +3911,7 @@ if ("serviceWorker" in navigator && !APERCU) {
                     // lire — et c'est le TITRE qui dit lequel.
                     (exc ? ' manuel' : '') +
                     (libres.length || aConfirmer.length ? ' a-prendre' : '')
-        // ⚠ QUI A REGLE CE JOUR-LA. Son employeur peut poser une absence pour
+        // ⚠ QUI A REGLE CE JOUR-LA. Son hôte peut poser une absence pour
         // elle, mais aussi lui demander de venir : deux sens, deux phrases —
         // c'est la meme regle que la feuille du jour, qui le dit en entier.
         const parLHote = !!(exc && exc.source !== 'prestataire')
@@ -3919,7 +3919,7 @@ if ("serviceWorker" in navigator && !APERCU) {
         // FINAL DU JOUR. `libre` porte la couche d'affichage de
         // `jourTravaille` : un jour qui porte un menage est « travaille » quoi
         // qu'en disent les regles. Choisir la phrase dessus annoncait « Venue
-        // demandee par votre employeur » sur un jour ou l'hote venait au
+        // demandee par votre hôte » sur un jour ou l'hote venait au
         // contraire de poser une ABSENCE, parce qu'un menage y etait deja
         // attribue — et la feuille du meme jour, qui lit `e.available`, disait
         // l'inverse. Deux ecrans de la meme application qui se contredisent.
@@ -3929,7 +3929,7 @@ if ("serviceWorker" in navigator && !APERCU) {
         const titre = [
           congeVisible ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
             : (parLHote
-                ? (exc.available ? 'Venue demandée par votre employeur' : 'Absence posée par votre employeur')
+                ? (exc.available ? 'Venue demandée par votre hôte' : 'Absence posée par votre hôte')
                 : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là'))),
           miens.length ? `${miens.length} ménage${miens.length > 1 ? 's' : ''} à moi` : '',
           aConfirmer.length ? `${aConfirmer.length} ménage${aConfirmer.length > 1 ? 's' : ''} à confirmer` : '',
@@ -4155,7 +4155,7 @@ if ("serviceWorker" in navigator && !APERCU) {
       <div class="dispo-item">
         <span>✕ du ${echapper(jourLisible(c.debut))} au ${echapper(jourLisible(c.fin))}
           ${c.motif ? '— ' + echapper(c.motif) : ''}
-          ${c.source === 'prestataire' ? '' : '<span class="dispo-source">— posé par votre employeur</span>'}
+          ${c.source === 'prestataire' ? '' : '<span class="dispo-source">— posé par votre hôte</span>'}
         </span>
         ${c.source === 'prestataire' && mesJours.modifiable
           ? `<button class="btn-mini" data-conge="${echapper(c.id)}">Annuler</button>` : ''}
@@ -4591,19 +4591,19 @@ if ("serviceWorker" in navigator && !APERCU) {
     }
     const exc = exceptionDuJour(j)
     // ⚠ ELLE N'ANNULE QUE CE QU'ELLE A DECLARE. Une absence posee par son
-    // employeur n'est pas la sienne a defaire : la lui laisser effacer la
+    // hôte n'est pas la sienne a defaire : la lui laisser effacer la
     // remettrait candidate sur un jour dont il l'avait retiree, sans qu'il
     // l'apprenne. L'ecran ne propose donc pas le geste.
     if (exc && exc.source !== 'prestataire') {
       // ⚠ DEUX SENS, DEUX PHRASES. L'hote peut poser « pas ce samedi-la »
       // (`available: false`) MAIS AUSSI « viens exceptionnellement ce samedi »
       // (`available: true`). Un libelle unique annoncait « cette absence a ete
-      // posee par votre employeur » a quelqu'un a qui on venait au contraire de
+      // posee par votre hôte » a quelqu'un a qui on venait au contraire de
       // DEMANDER de venir — elle n'y comprenait rien, et n'avait aucun moyen de
       // dire qu'elle ne pouvait pas.
       direIci(exc.available
-        ? 'Votre employeur vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.'
-        : 'Cette absence a été posée par votre employeur. Pour la retirer, dites-le lui.')
+        ? 'Votre hôte vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.'
+        : 'Cette absence a été posée par votre hôte. Pour la retirer, dites-le lui.')
       return
     }
     // ⚠ UN MENAGE FIXE LA JOURNEE (lot A). Se declarer absente pendant qu'on doit
@@ -4696,7 +4696,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     // Identite de l'objet d'etat, pour reconnaitre un RECHARGEMENT survenu
     // entre-temps (`chargerDisponibilites` remplace `mesJours` en entier).
     // Sans ce reperage, un rattrapage tardif reecrivait des donnees fraiches
-    // par-dessus, effacant a l'ecran une absence que l'employeur venait de poser.
+    // par-dessus, effacant a l'ecran une absence que l'hôte venait de poser.
     const monEtat = mesJours
 
     // ⚠ LE DRAPEAU SE POSE AVANT CE QU'IL GARDE, et avant le redessin qui le LIT.
@@ -4966,7 +4966,7 @@ if ("serviceWorker" in navigator && !APERCU) {
       if (mien !== lectureDispoCourante) return false
       // ⚠ UN DROIT RETIRE N'EST PAS UN ECHEC DE LECTURE. Rendre `false` en
       // silence laissait les cases ACTIVES sous un « Non autorisé » seul :
-      // chaque tape suivante repartait vers le meme 403. Quand l'employeur
+      // chaque tape suivante repartait vers le meme 403. Quand l'hôte
       // reprend la main, l'ecran doit le dire — c'est le seul cas ou le
       // rattrapage a le droit de remplacer le panneau.
       if (data.autorise !== true) { calendrierSansDroit(); return false }

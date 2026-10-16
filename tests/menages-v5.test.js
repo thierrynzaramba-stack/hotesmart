@@ -458,6 +458,38 @@ test('PWA : « Vu » ne passe JAMAIS par la file hors ligne', () => {
   assert.ok(corps.includes('navigator.onLine === false'), 'et hors ligne, on le DIT')
 })
 
+test('SA PAGE NE DIT JAMAIS « EMPLOYEUR » — elle est indépendante', () => {
+  // ⚠ DÉCISION DE THIERRY, 16 octobre 2026, et elle tranche un arbitrage resté
+  // ouvert depuis le 14. Une prestataire de ménage est INDÉPENDANTE : elle
+  // facture, elle n'est pas salariée. « Votre employeur » lui donnait un lien
+  // de subordination qui n'existe pas — et, accessoirement, exposait HôteSmart
+  // à décrire une relation de travail qui n'est pas la sienne.
+  //
+  // ⚠ CE TEST COUVRE AUSSI LES COMMENTAIRES, ET C'EST VOULU. Un mot qui reste
+  // dans le code revient dans l'écran : la prochaine phrase écrite au-dessus
+  // d'un commentaire qui dit « employeur » dira « employeur ».
+  //
+  // ⚠ ET IL COUVRE LE SERVEUR DE SA PAGE. `api/menages-public.js` renvoie des
+  // phrases que la PWA affiche TELLES QUELLES (« on affiche la phrase du
+  // serveur plutôt que d'en inventer une qui dirait moins ») : purger l'écran
+  // sans purger l'endpoint aurait laissé le mot revenir par la porte de
+  // derrière, au premier refus.
+  const fs = require('node:fs'), path = require('node:path')
+  const fichiers = ['apps/menages/public.html', 'api/menages-public.js',
+                    'shared/i18n/fr.json', 'shared/i18n/en.json', 'shared/i18n/es.json']
+  for (const f of fichiers) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    const lignes = src.split('\n')
+      .map((l, i) => /employeur/i.test(l) ? `${f}:${i + 1} ${l.trim().slice(0, 80)}` : null)
+      .filter(Boolean)
+    assert.deepStrictEqual(lignes, [], `« employeur » subsiste dans ${f}`)
+  }
+  // Et le mot qui le remplace est bien là : sans cette seconde moitié, tout
+  // supprimer ferait passer le test.
+  const pwa = fs.readFileSync(path.join(__dirname, '..', 'apps/menages/public.html'), 'utf8')
+  assert.match(pwa, /votre hôte/, 'le mot juste a pris sa place')
+})
+
 test('PWA : l\'aperçu coupe le GESTE « Vu », mais montre l\'ÉTAT', () => {
   // Dire « vu » depuis l'écran de l'hôte éteindrait l'alerte et les deux
   // relances sur quelqu'un qui n'a rien lu — la faute exacte que `apercu=1`

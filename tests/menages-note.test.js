@@ -176,7 +176,7 @@ test('un jeton SANS biens couvre TOUS les biens (convention de public_tokens)', 
 })
 
 test('une note VIDE efface sans notifier', async () => {
-  // Annoncer « note de l'employeur » pour une consigne retirée serait un faux
+  // Annoncer « note de l'hôte » pour une consigne retirée serait un faux
   // événement dans son fil.
   const { handler, etat } = preparer({})
   const res = reponse()
