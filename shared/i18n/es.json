@@ -487,7 +487,7 @@
   "menages.equipe.config.reg_vide": "Ningún día marcado: vuelve a estar disponible TODOS los días — es lo que hace el motor sin regla. Para dejar de proponerle trabajo, quítale los alojamientos.",
   "menages.equipe.config.reg_alterner": "Una semana de cada dos…",
   "menages.equipe.config.reg_simple": "Volver a todas las semanas",
-  "menages.equipe.config.reg_ancrage": "Esta semana es una semana {lettre} — del {debut} al {fin} (n.º {num})",
+  "menages.equipe.config.reg_ancrage": "Esta semana es una semana {lettre} — del {debut} al {fin}",
   "menages.equipe.config.reg_inverser": "Es más bien una semana {autre}",
   "menages.equipe.config.reg_opaques": "{n} regla(s) que esta pantalla no sabe mostrar: reemplazarlas las borraría.",
   "menages.equipe.config.reg_fait": "Sus días habituales se han guardado.",

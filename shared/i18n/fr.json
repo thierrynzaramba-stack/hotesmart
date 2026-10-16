@@ -487,7 +487,7 @@
   "menages.equipe.config.reg_vide": "Aucun jour coché : elle redevient disponible TOUS les jours — c'est ce que le moteur fait sans règle. Pour qu'elle ne soit plus proposée, retirez-lui ses biens.",
   "menages.equipe.config.reg_alterner": "Une semaine sur deux…",
   "menages.equipe.config.reg_simple": "Revenir à toutes les semaines",
-  "menages.equipe.config.reg_ancrage": "Cette semaine est une semaine {lettre} — du {debut} au {fin} (n° {num})",
+  "menages.equipe.config.reg_ancrage": "Cette semaine est une semaine {lettre} — du {debut} au {fin}",
   "menages.equipe.config.reg_inverser": "C'est plutôt une semaine {autre}",
   "menages.equipe.config.reg_opaques": "{n} règle(s) que cet écran ne sait pas afficher : les remplacer les effacerait.",
   "menages.equipe.config.reg_fait": "Ses jours habituels sont enregistrés.",

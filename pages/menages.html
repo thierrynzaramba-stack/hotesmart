@@ -1847,10 +1847,15 @@ function htmlSemaines () {
   // ⚠ L'ANCRAGE SE DIT EN DATES, PAS SEULEMENT EN LETTRE. « Semaine A » ne
   // désigne rien tant qu'on ne sait pas laquelle : l'hôte doit pouvoir
   // vérifier lui-même, sans compter les semaines sur un calendrier.
+  // ⚠ PAS DE NUMÉRO DE SEMAINE (recette de Thierry, 16 octobre 2026). « n° 42 »
+  // est un repère d'agenda professionnel : il ne dit rien à qui n'en utilise
+  // pas, et il allonge une phrase dont le travail est de situer DEUX dates.
+  // Les bornes en toutes lettres suffisent, et elles se vérifient d'un coup
+  // d'œil sur n'importe quel calendrier.
   const ancrage = (alterne && peut) ? `<div class="men-cfg__ancre">
     <span>${esc(t('menages.equipe.config.reg_ancrage', {
-      lettre: 'A', debut: dateCourte(lundiDeLaSemaine(AUJOURDHUI)),
-      fin: dateCourte(dimancheDeLaSemaine(AUJOURDHUI)), num: numeroDeSemaine(AUJOURDHUI) }))}</span>
+      lettre: 'A', debut: bornDeSemaine(lundiDeLaSemaine(AUJOURDHUI), false),
+      fin: bornDeSemaine(dimancheDeLaSemaine(AUJOURDHUI), true) }))}</span>
     <button type="button" class="men-cfg__lien" data-cfg-inverser="1">${esc(
       t('menages.equipe.config.reg_inverser', { autre: 'B' }))}</button>
   </div>` : ''
@@ -1890,13 +1895,19 @@ function dimancheDeLaSemaine (iso) {
   d.setUTCDate(d.getUTCDate() + 6)
   return d.toISOString().slice(0, 10)
 }
-// Le numéro ISO : le jeudi de la semaine décide de l'année, sinon la dernière
-// semaine de décembre et la première de janvier se disputent le même numéro.
-function numeroDeSemaine (iso) {
+// ⚠ LE MOIS SUR LA SEULE BORNE DE FIN : « du lundi 12 au dimanche 18 octobre »
+// se lit d'un trait, « du lundi 12 octobre au dimanche 18 octobre » répète un
+// mot que personne ne relit. Une semaine à cheval sur deux mois le porte des
+// deux côtés — sinon « du lundi 28 au dimanche 3 novembre » ferait chercher un
+// 28 novembre qui n'existe pas dans cette semaine-là.
+function bornDeSemaine (iso, avecMois) {
   const d = jourUTC(iso)
-  d.setUTCDate(d.getUTCDate() + 3 - ((d.getUTCDay() + 6) % 7))
-  const premier = new Date(Date.UTC(d.getUTCFullYear(), 0, 4, 12))
-  return 1 + Math.round(((d - premier) / 86400000 - 3 + ((premier.getUTCDay() + 6) % 7)) / 7)
+  const aCheval = jourUTC(lundiDeLaSemaine(iso)).getUTCMonth() !==
+                  jourUTC(dimancheDeLaSemaine(iso)).getUTCMonth()
+  return d.toLocaleDateString(langue(), {
+    weekday: 'long', day: 'numeric',
+    ...(avecMois || aCheval ? { month: 'long' } : {}), timeZone: 'UTC'
+  })
 }
 
 // La semaine de l'ancre a-t-elle la même parité que celle d'aujourd'hui ?

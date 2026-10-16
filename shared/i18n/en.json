@@ -487,7 +487,7 @@
   "menages.equipe.config.reg_vide": "No day ticked: she becomes available EVERY day again — that is what the engine does without a rule. To stop offering her work, remove her properties.",
   "menages.equipe.config.reg_alterner": "Every other week…",
   "menages.equipe.config.reg_simple": "Back to every week",
-  "menages.equipe.config.reg_ancrage": "This week is a week {lettre} — {debut} to {fin} (no. {num})",
+  "menages.equipe.config.reg_ancrage": "This week is a week {lettre} — {debut} to {fin}",
   "menages.equipe.config.reg_inverser": "It is a week {autre} instead",
   "menages.equipe.config.reg_opaques": "{n} rule(s) this screen cannot display: replacing them would erase them.",
   "menages.equipe.config.reg_fait": "Her usual days have been saved.",
