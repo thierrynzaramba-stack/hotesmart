@@ -152,6 +152,7 @@ const etat = {
   fenetres: new Map(),     // uuid -> { fin: iso } du pilote (4e etat) ; absent = pas de fenetre
   orphelines: new Map(),   // uuid -> Set iso
   sel: null,               // { bien, a, b } indices desktop / { bien, duIso, auIso } mobile
+  bienDemande: null,       // ?bien=<uuid> : le bien a METTRE EN TETE, jamais un choix de liste
   lectureSeule: false, chargement: 0, dernierSave: null
 }
 const PREFS_CLE = 'hs_cal_v5_prefs'
@@ -210,8 +211,21 @@ async function chargerBiens () {
   const avaitDesIds = etat.choisis.length > 0
   etat.choisis = etat.choisis.filter(id => pilotables.some(b => b.id === id))
   if (avaitDesIds && !etat.choisis.length) etat.choisisDefinis = false
-  if (!etat.choisisDefinis && !etat.choisis.length) {
+  // ⚠ LE DEFAUT SE RECALCULE A CHAQUE FOIS, pas seulement quand la liste est
+  // vide : `chargerBiens` est rappele au franchissement des 900 px (resize), et
+  // c'est tout son objet. Avec l'ancienne condition, un telephone tourne en
+  // paysage restait sur un seul bien et une fenetre reduite empilait les trois
+  // (constat 2 de la revue de 3fa1d8f).
+  if (!etat.choisisDefinis) {
     etat.choisis = estLarge() ? pilotables.map(b => b.id) : pilotables.slice(0, 1).map(b => b.id)
+  }
+  // Le lien profond passe APRES le defaut, et ne le marque jamais comme un
+  // choix : a l'ordinateur le bien demande passe EN TETE des autres, au
+  // telephone il prend la place unique. Un bien inconnu du compte est ignore.
+  if (etat.bienDemande && pilotables.some(b => b.id === etat.bienDemande)) {
+    etat.choisis = estLarge()
+      ? [etat.bienDemande, ...etat.choisis.filter(x => x !== etat.bienDemande)]
+      : [etat.bienDemande]
   }
 }
 function bornesLecture () {
@@ -1678,11 +1692,12 @@ async function init () {
   lirePrefs()
   // Lien profond ?bien=<uuid> (redirections des anciennes routes
   // /biens/:id/calendrier) : ce bien s'affiche, en tete.
-  const bienDemande = new URLSearchParams(location.search).get('bien')
-  if (bienDemande) {
-    etat.choisis = [bienDemande, ...etat.choisis.filter(x => x !== bienDemande)]
-    etat.choisisDefinis = true
-  }
+  // ⚠ IL DIT QUEL BIEN REGARDER, PAS LESQUELS GARDER. Il est donc RETENU ici
+  // et applique dans `chargerBiens`, APRES le defaut — et sans marquer
+  // `choisisDefinis` (constat 1 de la revue de 3fa1d8f) : le marquer gravait
+  // « un seul bien » comme la decision de l'hote des son premier geste, alors
+  // qu'il avait seulement clique la tuile « Calendrier » de l'accueil.
+  etat.bienDemande = new URLSearchParams(location.search).get('bien') || null
   // Periode (ordinateur).
   document.querySelectorAll('[data-mois]').forEach(b => {
     b.setAttribute('aria-pressed', String(Number(b.dataset.mois) === etat.months))

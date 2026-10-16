@@ -70,10 +70,18 @@ function ecran ({ large, stock, biens = BIENS }) {
   return ctx
 }
 
-// Ouvrir la page : lire les preferences, puis charger les biens.
+// ⚠ UNE COPIE DANS NOTRE REALM AVANT DE COMPARER. Les tableaux que la page
+// construit naissent DANS le contexte `vm` : leur prototype `Array` n'est pas
+// le notre, et `assert.deepEqual` strict refuse alors deux listes pourtant
+// identiques. On compare les valeurs, pas les royaumes.
+const liste = (ctx) => [...ctx.etat.choisis]
+
+// Ouvrir la page : lire les preferences, retenir le lien profond, puis charger
+// les biens — l'ordre exact de `init()`.
 async function ouvrir (opts) {
   const ctx = ecran(opts)
   ctx.lirePrefs()
+  ctx.etat.bienDemande = opts.bien || null
   await ctx.chargerBiens()
   return ctx
 }
@@ -83,7 +91,7 @@ test('LE TEST QUI COMPTE : le telephone n’ampute pas la liste de l’ordinateu
 
   // 1. Le telephone s'ouvre : un seul bien, c'est le defaut voulu.
   const tel = await ouvrir({ large: false, stock })
-  assert.deepEqual(tel.etat.choisis, ['u1'], 'le telephone montre un seul bien')
+  assert.deepEqual(liste(tel), ['u1'], 'le telephone montre un seul bien')
 
   // 2. L'hote change de mois — un geste qui enregistre les preferences.
   tel.etat.mois = 11; tel.etat.annee = 2026
@@ -91,7 +99,7 @@ test('LE TEST QUI COMPTE : le telephone n’ampute pas la liste de l’ordinateu
 
   // 3. Il rouvre sur son ordinateur : les TROIS biens pilotables sont la.
   const bureau = await ouvrir({ large: true, stock })
-  assert.deepEqual(bureau.etat.choisis, ['u1', 'u2', 'u3'],
+  assert.deepEqual(liste(bureau), ['u1', 'u2', 'u3'],
     'l’ordinateur garde ses biens : le defaut du telephone ne s’enregistre pas')
 })
 
@@ -118,14 +126,14 @@ test('un choix VOULU, lui, s’enregistre et vaut sur les deux ecrans', async ()
   assert.equal(stock.lu().choisisParLHote, true, 'le drapeau dit que c’est un choix')
 
   const bureau = await ouvrir({ large: true, stock })
-  assert.deepEqual(bureau.etat.choisis, ['u1', 'u3'], 'l’ordinateur honore le choix du telephone')
+  assert.deepEqual(liste(bureau), ['u1', 'u3'], 'l’ordinateur honore le choix du telephone')
 })
 
 test('L’AUTO-REPARATION : une preference ecrite AVANT le correctif est tenue pour un defaut', async () => {
   // Pas de drapeau : exactement ce que le telephone avait enregistre.
   const stock = memoire(JSON.stringify({ choisis: ['u1'], months: 3, annee: null, mois: null, vueMobile: 'rate' }))
   const bureau = await ouvrir({ large: true, stock })
-  assert.deepEqual(bureau.etat.choisis, ['u1', 'u2', 'u3'],
+  assert.deepEqual(liste(bureau), ['u1', 'u2', 'u3'],
     'l’ordinateur recalcule son defaut au lieu de subir la liste amputee')
 })
 
@@ -137,7 +145,7 @@ test('l’ordre des biens, lui, est un choix : il survit', async () => {
   bureau.etat.choisisDefinis = true
   bureau.ecrirePrefs()
   const apres = await ouvrir({ large: true, stock })
-  assert.deepEqual(apres.etat.choisis, ['u3', 'u1', 'u2'])
+  assert.deepEqual(liste(apres), ['u3', 'u1', 'u2'])
 })
 
 test('un bien retire du compte sort de la liste, et le defaut revient s’il n’en reste aucun', async () => {
@@ -149,10 +157,104 @@ test('un bien retire du compte sort de la liste, et le defaut revient s’il n�
 
   // u3 n'existe plus : la liste se vide, donc le defaut reprend la main.
   const sansU3 = await ouvrir({ large: true, stock, biens: BIENS.filter(b => b.id !== 'u3') })
-  assert.deepEqual(sansU3.etat.choisis, ['u1', 'u2'])
+  assert.deepEqual(liste(sansU3), ['u1', 'u2'])
+})
+
+// ─── Le lien profond ?bien= (constat 1 de la revue de 3fa1d8f) ──────────────
+// Il arrive de la tuile « Calendrier » de l'accueil, du lien « réservation »
+// de /messages, de la fiche d'un bien et de la redirection déclarative
+// /biens/:id/calendrier. C'est le chemin le PLUS frequent vers cette page.
+
+test('LE LIEN PROFOND N’EST PAS UN CHOIX : il met le bien en tete, il n’isole pas', async () => {
+  const stock = memoire()
+  const bureau = await ouvrir({ large: true, stock, bien: 'u2' })
+  assert.deepEqual(liste(bureau), ['u2', 'u1', 'u3'],
+    'le bien demande passe en tete, les autres restent')
+  assert.equal(bureau.etat.choisisDefinis, false, 'un lien n’est pas une decision de l’hote')
+})
+
+test('et le premier geste apres un lien profond ne grave rien', async () => {
+  const stock = memoire()
+  const bureau = await ouvrir({ large: true, stock, bien: 'u2' })
+  bureau.etat.mois = 11; bureau.etat.annee = 2026
+  bureau.ecrirePrefs()
+  assert.equal(stock.lu().choisis, undefined, 'la liste n’est pas enregistree')
+
+  // Il rouvre /calendrier sans lien : il retrouve TOUS ses biens, dans l'ordre.
+  const apres = await ouvrir({ large: true, stock })
+  assert.deepEqual(liste(apres), ['u1', 'u2', 'u3'])
+})
+
+test('au telephone, le lien profond prend la place unique', async () => {
+  const tel = await ouvrir({ large: false, stock: memoire(), bien: 'u3' })
+  assert.deepEqual(liste(tel), ['u3'], 'un seul bien au telephone, et c’est celui demande')
+})
+
+test('un lien profond honore le choix de l’hote sans le defaire', async () => {
+  const stock = memoire(JSON.stringify({ choisis: ['u1', 'u3'], choisisParLHote: true, months: 3, annee: null, mois: null, vueMobile: 'rate' }))
+  const bureau = await ouvrir({ large: true, stock, bien: 'u3' })
+  assert.deepEqual(liste(bureau), ['u3', 'u1'], 'le bien demande passe en tete DE SA liste')
+  bureau.ecrirePrefs()
+  assert.equal(stock.lu().choisisParLHote, true, 'son choix reste un choix')
+})
+
+test('un ?bien= inconnu du compte est ignore, il ne vide pas le planning', async () => {
+  const bureau = await ouvrir({ large: true, stock: memoire(), bien: 'inconnu' })
+  assert.deepEqual(liste(bureau), ['u1', 'u2', 'u3'])
+})
+
+test('un ?bien= qui designe un bien Beds24 est ignore : il n’est pas pilotable', async () => {
+  const bureau = await ouvrir({ large: true, stock: memoire(), bien: 'u9' })
+  assert.deepEqual(liste(bureau), ['u1', 'u2', 'u3'])
+})
+
+// ─── Le franchissement des 900 px (constat 2 de la revue de 3fa1d8f) ────────
+
+test('LE SEUIL SE FRANCHIT DANS LES DEUX SENS : le defaut suit l’ecran', async () => {
+  const stock = memoire()
+  const ctx = ecran({ large: false, stock })
+  ctx.lirePrefs()
+  await ctx.chargerBiens()
+  assert.deepEqual(liste(ctx), ['u1'], 'telephone : un bien')
+
+  // Le telephone tourne en paysage : `chargerBiens` est rappele.
+  ctx.estLarge = () => true
+  await ctx.chargerBiens()
+  assert.deepEqual(liste(ctx), ['u1', 'u2', 'u3'], 'paysage : les trois reviennent')
+
+  // Et dans l'autre sens.
+  ctx.estLarge = () => false
+  await ctx.chargerBiens()
+  assert.deepEqual(liste(ctx), ['u1'], 'portrait : un seul a nouveau')
+})
+
+test('mais un choix de l’hote traverse le seuil sans bouger', async () => {
+  const stock = memoire()
+  const ctx = ecran({ large: true, stock })
+  ctx.lirePrefs()
+  await ctx.chargerBiens()
+  ctx.etat.choisis = ['u3', 'u1']
+  ctx.etat.choisisDefinis = true
+  ctx.estLarge = () => false
+  await ctx.chargerBiens()
+  assert.deepEqual(liste(ctx), ['u3', 'u1'], 'ce qu’il a choisi ne se recalcule pas')
 })
 
 test('un bien Beds24 n’entre jamais dans le defaut', async () => {
   const bureau = await ouvrir({ large: true, stock: memoire() })
   assert.ok(!bureau.etat.choisis.includes('u9'), 'Beds24 reste hors du planning pilotable')
+})
+
+// ⚠ CE QUE LE HARNAIS NE PEUT PAS EXECUTER. Les tests ci-dessus posent
+// `etat.bienDemande` eux-memes, comme `init()` le fait : ils eprouvent le
+// TRAITEMENT du lien profond, pas sa LECTURE. La garde qui suit tient l'autre
+// bout — elle lit le vrai bloc de `init()` dans la page.
+test('init() retient le ?bien= sans en faire une decision de l’hote', () => {
+  const i = PAGE.indexOf('etat.bienDemande = new URLSearchParams')
+  assert.ok(i > 0, 'init() doit poser etat.bienDemande depuis l’URL')
+  const bloc = PAGE.slice(i, i + 400)
+  assert.ok(!/choisisDefinis\s*=\s*true/.test(bloc),
+    'le lien profond ne doit jamais marquer choisisDefinis')
+  assert.ok(!/etat\.choisis\s*=\s*\[\s*bienDemande/.test(PAGE),
+    'le lien profond ne touche plus etat.choisis dans init() : c’est chargerBiens qui l’applique, APRES le defaut')
 })
