@@ -1,6 +1,8 @@
 import { logger } from '/shared/logger.js'
-
-const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+// ⚠ LA MEME REGLE QUE LES LIGNES DE CONSOLE, et elle vit dans config.js : la
+// bande et la console s'allument ensemble. La recopier ici est le constat 4 de
+// la revue de f997bf5 — deux copies divergent en silence.
+import { MODE_DIAGNOSTIC } from '/shared/config.js'
 
 // ⚠ CAPTURER N'EST PAS AFFICHER. Les erreurs se capturent PARTOUT — elles
 // alimentent `logger.getLogs()`, donc le diagnostic ; c'est la BANDE qui est
@@ -13,7 +15,13 @@ const isDev = window.location.hostname === 'localhost' || window.location.hostna
 // la croix. Au téléphone elle passe PAR-DESSUS la barre de navigation
 // (z-index 9999 contre 10 de `.bottombar`) : l'hôte perd ses cinq onglets
 // jusqu'à ce qu'il pense à fermer un bandeau qu'il ne comprend pas. Seul le
-// DÉTAIL JSON était conditionné par `isDev` ; l'affichage, lui, ne l'était pas.
+// DÉTAIL JSON était conditionné par l'environnement ; l'affichage, lui, ne
+// l'était pas.
+//
+// ⚠ ET LA PORTE N'EST PAS « localhost ». Elle est `MODE_DIAGNOSTIC`
+// (config.js) : développement, recette staging, et `?debug=1` partout —
+// sinon la bande disparaîtrait aussi de la recette, là où elle sert
+// (constat 1 de la revue de f997bf5).
 export function initErrorHandler() {
   // Les deux captures d'abord : elles valent en production comme en local.
   window.addEventListener('error', (e) => {
@@ -25,7 +33,7 @@ export function initErrorHandler() {
 
   // ⚠ LA SEULE PORTE DE LA BANDE, et elle est AVANT sa construction : en
   // production, aucun élément n'est créé, aucun écouteur `hs:log` n'est posé.
-  if (!isDev) return
+  if (!MODE_DIAGNOSTIC) return
 
   // Barre de debug en bas de l'écran
   const bar = document.createElement('div')
@@ -53,7 +61,7 @@ export function initErrorHandler() {
     const { level, source, message, data } = e.detail
     const colors = { INFO: '#1D9E75', WARN: '#BA7517', ERROR: '#E24B4A' }
     const msg = document.getElementById('hs-debug-msg')
-    // `isDev` est déjà acquis ici : la bande n'existe pas ailleurs.
+    // Le mode diagnostic est déjà acquis ici : la bande n’existe pas ailleurs.
     const detail = data ? ` — ${JSON.stringify(data)}` : ''
     msg.innerHTML = `<span style="color:${colors[level]}">[${level}]</span> ${source} → ${message}${detail}`
     bar.style.display = 'flex'

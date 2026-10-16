@@ -70,6 +70,41 @@ if (CIBLE_SUPABASE === 'prod' && HOTE.includes('staging')) {
   )
 }
 
+// ─── Mode diagnostic : qui a le droit de voir une erreur technique ──────────
+// ⚠ UNE SEULE REGLE, ET ELLE VIT ICI, avec la resolution d'environnement.
+// `shared/logger.js` (lignes de console) et `shared/error-handler.js` (bande
+// de debug en bas de l'ecran) l'IMPORTENT au lieu de la recopier : les deux
+// s'allument ensemble ou pas du tout. Deux copies de cette regle divergent le
+// jour ou l'une apprend staging et pas l'autre — constat 4 de la revue de
+// f997bf5, et la regle CLAUDE.md « une regle partagee vit dans un module
+// commun, jamais recopiee dans chaque page ».
+//
+// CE QUI L'ALLUME :
+//   - le DEVELOPPEMENT : localhost, 127.0.0.1, ::1, *.local, et une adresse de
+//     reseau local — la recette au telephone se fait sur http://192.168.x.x ;
+//   - la RECETTE sur le projet staging, par les MEMES motifs ancres que
+//     CIBLE_SUPABASE, jamais un simple « contient staging » ;
+//   - une porte EXPLICITE, `?debug=1`, qui vaut PARTOUT. C'est elle qui couvre
+//     les previews du projet de PRODUCTION (hotesmart-git-<branche>-...), ou
+//     Thierry joue ses recettes, sans qu'un hostname de plus soit a deviner.
+//
+// ⚠ ET LE DEFAUT EST « ETEINT ». Un hostname inconnu — un domaine propre qui
+// arriverait demain — ne montre RIEN. Le sens du risque est celui-la : une
+// bande technique chez un hote payant est le defaut qu'on repare ici, tandis
+// qu'une bande absente en recette se rallume d'un `?debug=1`.
+const HOTES_LOCAUX = [
+  /^localhost$/, /^127\.0\.0\.1$/, /^\[?::1\]?$/, /\.local$/,
+  /^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./
+]
+function porteDebug () {
+  try {
+    return new URLSearchParams(location.search).get('debug') === '1'
+  } catch { return false }
+}
+export const MODE_DIAGNOSTIC =
+  typeof location !== 'undefined' &&
+  (HOTES_LOCAUX.some(m => m.test(HOTE)) || CIBLE_SUPABASE === 'staging' || porteDebug())
+
 export const ENV = CIBLES_SUPABASE[CIBLE_SUPABASE]
 
 // Trace la cible, jamais la cle : un ecran qui ment sur sa base est le pire
