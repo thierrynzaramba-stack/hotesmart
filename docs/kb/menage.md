@@ -4989,3 +4989,35 @@ les jours de B. L'hôte lisait « semaine A » sur ce qui est B, cochait en
 conséquence, et **déplaçait la venue de sa prestataire d'une semaine**. On
 ramène chaque date à SON lundi avant de compter — la règle que sa page
 applique déjà.
+
+
+## Étape 2, 3e volet : sa page dit qui a réglé ses jours (17 octobre 2026)
+
+Précision n° 4 de Thierry, et le dernier trou du lot. Ses **absences** disaient
+déjà leur source — « Absence posée par votre hôte » — mais pas ses **jours
+habituels** : son hôte pouvait changer les jours où elle est candidate sans
+qu'aucun écran ne le lui dise. Elle ouvrait sa page, voyait d'autres cases
+cochées, et n'avait aucun moyen de savoir si elle s'était trompée elle-même.
+
+`api/menages-public.js` lit et sert désormais `source` sur les règles — les
+deux moitiés, sinon le champ sort toujours à `undefined` et la mention ne
+s'affiche jamais. Défaut `'hote'`, comme la fiche : le seul writer d'avant le
+15 septembre 2026 était l'hôte, et une valeur absente ne doit pas se lire
+« elle ».
+
+Sa carte « Mes jours de travail » ajoute alors : **« Ces jours ont été réglés
+par votre hôte. Vous pouvez les changer ; prévenez-le. »**
+- ⚠ **Seulement si elle peut encore y toucher.** Quand elle ne règle rien,
+  l'aide dit déjà « Réglé par votre hôte — pour le changer, dites-le lui » :
+  deux fois la même phrase sur le même écran.
+- ⚠ **Une seule règle de lui suffit à l'afficher.** C'est le FAIT qui compte —
+  il y a là-dedans quelque chose qu'elle n'a pas décidé — et un décompte
+  (« 1 de vos 3 règles ») ne l'aiderait en rien : ce qu'elle veut savoir, c'est
+  s'il faut en parler à quelqu'un.
+
+### La recette comparative
+
+`docs/specs/pwa-v5/fiche/03-fiche-et-page-cote-a-cote.png` : la fiche de l'hôte
+et sa page, avec **les deux vraies règles de production**. Les deux écrans
+disent enfin la même chose — ligne A = M · V · S · D, ligne B = V · S · D.
+Jusqu'au 16 octobre, la fiche les affichait inversées.

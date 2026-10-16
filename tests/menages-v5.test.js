@@ -513,6 +513,31 @@ test('fiche : la CADENCE est un nombre, et la semaine commence un LUNDI', () => 
     'la parité se compte depuis le lundi, pas depuis l\'epoch')
 })
 
+test('sa page DIT qui a réglé ses jours habituels', () => {
+  // ⚠ PRÉCISION N° 4 DE THIERRY, et le dernier trou du lot. Ses ABSENCES
+  // disaient déjà leur source — « Absence posée par votre hôte » — mais pas
+  // ses JOURS HABITUELS : son hôte pouvait changer les jours où elle est
+  // candidate sans qu'aucun écran ne le lui dise. Elle ouvrait sa page, voyait
+  // d'autres cases cochées, et n'avait aucun moyen de savoir si elle s'était
+  // trompée elle-même.
+  const fs = require('node:fs'), path = require('node:path')
+  const api = fs.readFileSync(path.join(__dirname, '..', 'api/menages-public.js'), 'utf8')
+  // Il faut la LIRE en base pour pouvoir la servir : les deux moitiés, sinon
+  // `source` sort toujours à `undefined` et la mention ne s'affiche jamais.
+  assert.match(api, /\.select\('id, label, rrule, source'\)/, 'la colonne est lue')
+  assert.match(api, /source: r\.source \|\| 'hote'/,
+    'et servie, avec le même défaut que la fiche : un writer absent était l\'hôte')
+
+  const pwa = sansCommentaires(fs.readFileSync(
+    path.join(__dirname, '..', 'apps/menages/public.html'), 'utf8'))
+  assert.match(pwa, /r\.source && r\.source !== 'prestataire'/,
+    'une règle qui n\'est pas d\'elle vient de lui')
+  assert.match(pwa, /Ces jours ont été réglés par votre hôte/)
+  // ⚠ PAS DEUX FOIS LA MÊME PHRASE. Quand elle ne règle rien, l'aide dit déjà
+  // « Réglé par votre hôte — pour le changer, dites-le lui ».
+  assert.match(pwa, /if \(parLHote && !fige\)/)
+})
+
 test('SA PAGE NE DIT JAMAIS « EMPLOYEUR » — elle est indépendante', () => {
   // ⚠ DÉCISION DE THIERRY, 16 octobre 2026, et elle tranche un arbitrage resté
   // ouvert depuis le 14. Une prestataire de ménage est INDÉPENDANTE : elle

@@ -3800,6 +3800,31 @@ if ("serviceWorker" in navigator && !APERCU) {
       aide.innerHTML += '<br>Vous avez aussi ' + opaques.length +
         ' règle(s) que cet écran ne sait pas afficher. Demandez à votre hôte.'
     }
+    // ⚠ QUI A REGLE SES JOURS (17 octobre 2026, precision n° 4 de Thierry).
+    // Ses ABSENCES disaient deja leur source — « Absence posee par votre
+    // hote » — mais pas ses JOURS HABITUELS : son hote pouvait changer les
+    // jours ou elle est candidate sans qu'aucun ecran ne le lui dise. Elle
+    // ouvrait sa page, voyait d'autres cases cochees, et n'avait aucun moyen
+    // de savoir si elle s'etait trompee elle-meme.
+    //
+    // ⚠ LA MENTION NE S'AFFICHE QUE SI ELLE PEUT ENCORE Y TOUCHER. Quand elle
+    // ne regle rien, l'aide dit deja « Regle par votre hote — pour le changer,
+    // dites-le lui » : la repeter en dessous ferait deux fois la meme phrase.
+    //
+    // ⚠ ET ELLE NE DIT PAS « votre hote a tout regle ». Une seule regle posee
+    // par lui suffit a l'afficher, parce que c'est le FAIT qui compte — il y a
+    // la-dedans quelque chose qu'elle n'a pas decide — et parce qu'un decompte
+    // (« 1 de vos 3 regles ») ne l'aiderait en rien : ce qu'elle veut savoir,
+    // c'est s'il faut en parler a quelqu'un.
+    const parLHote = act.concat(opaques).some(r => r.source && r.source !== 'prestataire')
+    if (parLHote && !fige) {
+      // ⚠ LA PHRASE TIENT EN UN SEUL LITTERAL, meme longue : coupee en deux,
+      // elle devient introuvable par une recherche de texte — et c'est par la
+      // qu'on retrouve ce qu'un ecran dit vraiment.
+      const dit = 'Ces jours ont été réglés par votre hôte. Vous pouvez les changer ; prévenez-le.'
+      aide.innerHTML += `<br><span class="dispo-source">${dit}</span>`
+    }
+
     const bAlt = document.getElementById('dispo-alterner')
     if (bAlt) bAlt.addEventListener('click', () => basculerMonAlternance(true))
     const bSimple = document.getElementById('dispo-simple')

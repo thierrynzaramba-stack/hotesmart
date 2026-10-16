@@ -2240,7 +2240,7 @@ async function mesDisponibilites (req, res, token) {
   // envoyait toujours. Le defaut ne se voyait pas sur un profil SANS regle,
   // c'est-a-dire sur le seul qu'on regardait.
   const { data: regles, error: errR } = await supabase.from('provider_availability_rules')
-    .select('id, label, rrule').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .select('id, label, rrule, source').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
     .eq('active', true).order('created_at', { ascending: true }).limit(MAX_REGLES_ACTIVES)
   if (errR) {
     console.error('[menages-public] lecture regles echec:', errR.message)
@@ -2278,6 +2278,16 @@ async function mesDisponibilites (req, res, token) {
       return {
         id: r.id,
         label: r.label,
+        // ⚠ QUI A POSE CETTE REGLE (17 octobre 2026, precision n° 4 de
+        // Thierry). Ses ABSENCES disaient deja leur source — « Absence posee
+        // par votre hote » — mais pas ses JOURS HABITUELS : son hote pouvait
+        // changer les jours ou elle est candidate sans qu'aucun ecran ne le
+        // lui dise. Elle ouvrait sa page, voyait d'autres cases cochees, et
+        // n'avait aucun moyen de savoir si elle s'etait trompee elle-meme.
+        // ⚠ `|| 'hote'` : le seul writer d'avant le 15 septembre 2026 etait
+        // l'hote, et une valeur absente ne doit pas se lire « elle » — c'est
+        // la meme convention que `api/disponibilites.js`.
+        source: r.source || 'hote',
         jours: forme ? forme.jours : null,
         cadence: forme ? forme.cadence : null,
         ancre: forme ? forme.ancre : null

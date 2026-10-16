@@ -622,8 +622,13 @@ test('une règle ILLISIBLE sort avec `jours: null`, elle ne fait pas tomber la l
   const res = reponse()
   await handler(lire(), res)
   assert.strictEqual(res.body.autorise, true)
+  // ⚠ `source` EST SERVI DEPUIS LE 17 OCTOBRE 2026, et l'égalité STRICTE de ce
+  // test est ce qui l'a fait remarquer : une règle illisible la porte comme
+  // les autres, sinon l'écran ne saurait pas dire qui a posé celle-là
+  // précisément — c'est-à-dire celle dont il ne sait rien d'autre.
   assert.deepStrictEqual(res.body.regles,
-    [{ id: 'r1', label: 'Le premier lundi du mois', jours: null, cadence: null, ancre: null }])
+    [{ id: 'r1', label: 'Le premier lundi du mois', source: 'hote',
+       jours: null, cadence: null, ancre: null }])
 })
 
 test('sans le droit, la lecture répond « non autorisé » sans rien fuir', async () => {
