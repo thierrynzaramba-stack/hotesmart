@@ -284,7 +284,10 @@
     .dispo-case.auj:not(.vide) { background: var(--ok); border-color: var(--ok); }
     .dispo-case.auj:not(.vide) .dispo-num { color: var(--on-ink); font-weight: var(--fw-bold);
                                             text-decoration-color: var(--on-ink); }
-    .dispo-case.auj:not(.vide) .dispo-compte { background: var(--on-ink); color: var(--ink); }
+    /* Sur la pastille d'aujourd'hui, déjà verte, le compteur s'inverse : fond
+       clair, chiffre vert. Le détacher par le noir y aurait rouvert la tache
+       sombre qu'on vient de retirer. */
+    .dispo-case.auj:not(.vide) .dispo-compte { background: var(--on-ink); color: var(--ok); }
     .dispo-case.auj:not(.vide).manuel::before { background: var(--on-ink); }
     /* ⚠ ET TOUT CE QUI SE DESSINE SUR CETTE CASE S'INVERSE AVEC ELLE (constat
        de la revue de 41d4afe) : le contour de sélection de l'appui long était
@@ -328,7 +331,14 @@
        `textContent`, jamais la cascade. */
     .dispo-compte { display: inline-flex; align-items: center; justify-content: center;
                     height: 16px; min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill);
-                    background: var(--ink); color: var(--on-ink); font-size: 10.5px;
+                    /* ⚠ VERT FONCÉ, PAS NOIR (recette de Thierry, 16 octobre
+                       2026). Le noir faisait du compteur la marque la plus
+                       sombre de la grille, pour un chiffre qui ne dit qu'une
+                       quantité ; et il n'avait aucun lien avec le vert pâle de
+                       la case qui le porte. Un cran plus foncé que son fond
+                       suffit à le détacher — c'est la même couleur, deux
+                       intensités, comme le jour courant et le jour à ménage. */
+                    background: var(--ok); color: var(--on-ink); font-size: 10.5px;
                     font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
         /* ⚠ LE FOND NE CODE TOUJOURS QU'UNE CHOSE — « j'ai du travail ce jour-là »
        — ET IL RESTE VERT, remappé sur `--ok-soft`. La charte V5 l'aurait voulu
