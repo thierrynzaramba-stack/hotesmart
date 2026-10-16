@@ -1994,7 +1994,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     // montre ce qu'elle sert.
     const icons  = { new: '🧹', modified: '✏️', cancelled: '❌', note: '📝' }
     const labels = { new: 'Nouveau ménage', modified: 'Ménage modifié',
-                     cancelled: 'Ménage annulé', note: "Note de l'hôte" }
+                     cancelled: 'Ménage annulé', note: 'Note de votre hôte' }
 
     list.innerHTML = visibles.map(n => {
       const d = new Date(n.created_at)
@@ -2260,7 +2260,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     return badgeOffre(m) +
       (m.done ? fait : '') +
       (m.pending ? '<span class="jmarque" title="En attente d’envoi">⏳</span>' : '') +
-      (m.comment ? '<span class="jmarque" title="Consigne de votre hôte">📝</span>' : '') +
+      (m.comment ? '<span class="jmarque" title="Note de votre hôte">📝</span>' : '') +
       (obs ? '<span class="jmarque" title="La réservation a changé">⏭</span>' : '')
   }
 
@@ -2777,7 +2777,7 @@ if ("serviceWorker" in navigator && !APERCU) {
     // ordre (constat de la revue de def72c0 — avant, le \n brut se condensait).
     const noteEl = document.getElementById('modal-note')
     noteEl.innerHTML = m.comment
-      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'hôte</div>${echapper(m.comment).replace(/\n/g, '<br>')}</div>`
+      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de votre hôte</div>${echapper(m.comment).replace(/\n/g, '<br>')}</div>`
       : ''
 
     hideModalMessages()

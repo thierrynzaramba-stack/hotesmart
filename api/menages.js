@@ -874,7 +874,7 @@ async function ecrireNote (req, res) {
   }
 
   // ⚠ UNE NOTE VIDE EFFACE, elle ne notifie pas : annoncer « note de
-  // l'employeur » pour une consigne retiree serait un faux evenement.
+  // l'hote » pour une consigne retiree serait un faux evenement.
   if (!texte) return res.status(200).json({ ok: true, transmise: true, vide: true })
 
   // La TRANSMISSION, sous `prestataires: read` seulement.

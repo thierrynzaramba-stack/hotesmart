@@ -4870,9 +4870,33 @@ du serveur plutôt que d'en inventer une qui dirait moins ». Purger l'écran sa
 purger l'endpoint aurait laissé le mot revenir par la porte de derrière, au
 premier refus.
 
-`tests/menages-v5.test.js` garde les cinq fichiers (la page, son endpoint, les
-trois fichiers i18n) et vérifie en plus que « votre hôte » est bien là : sans
+⚠ **ET TOUT CE QUI LUI PARLE QUAND ELLE N'EST PAS DEVANT L'ÉCRAN** (complément
+de Thierry, même jour). Un SMS de relance qui dirait « votre employeur »
+annulerait tout le travail fait sur la page : **elle lit le message AVANT
+d'ouvrir l'application**, et c'est lui qui donne le ton. Les onze fichiers
+gardés par `tests/menages-v5.test.js` :
+
+| Ce qu'elle voit | Ce qu'elle reçoit |
+|---|---|
+| `apps/menages/public.html` | `lib/cleaning/notifier-prestataire.js` — assignation, proposition, « Vu » attendu |
+| `api/menages-public.js` | `lib/cleaning/relance-validation.js` — les deux relances de 9 h |
+| `shared/i18n/fr.json` | `lib/cleaning/changement-regles.js` — les mots d'un changement de jours |
+| `shared/i18n/en.json` | `lib/cleaning/apres-changement-regles.js` — l'annonce et la reprise |
+| `shared/i18n/es.json` | `lib/cleaning/sync-menages.js` — le writer de son fil |
+| | `api/menages.js` — la note de l'hôte et son événement |
+
+Aucun des six émetteurs ne disait « employeur » au moment du balayage : le test
+les garde désormais **fermés**, et c'est là tout son intérêt — un mot ne revient
+jamais là où on l'a enlevé, il revient là où personne ne regardait.
+
+Le test vérifie en plus que « votre hôte » est bien présent dans la page : sans
 cette seconde moitié, tout supprimer ferait passer le test.
+
+### Un seul nom pour la consigne : « Note de votre hôte »
+
+Elle s'appelait « Note de l'employeur » dans le fil, « Note de l'hôte » dans la
+fiche et « Consigne de votre hôte » sur la marque 📝 — **trois noms pour la même
+chose**, sur le même écran. C'est « Note de votre hôte », aux trois endroits.
 
 ### Le plafond se dit, en trois langues
 

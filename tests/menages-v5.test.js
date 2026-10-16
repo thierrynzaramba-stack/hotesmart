@@ -474,9 +474,26 @@ test('SA PAGE NE DIT JAMAIS « EMPLOYEUR » — elle est indépendante', () => {
   // serveur plutôt que d'en inventer une qui dirait moins ») : purger l'écran
   // sans purger l'endpoint aurait laissé le mot revenir par la porte de
   // derrière, au premier refus.
+  // ⚠ ET TOUT CE QUI LUI PARLE QUAND ELLE N'EST PAS DEVANT L'ECRAN (complément
+  // de Thierry, 16 octobre 2026). Un SMS de relance qui dirait « votre
+  // employeur » annulerait tout le travail fait sur la page : elle lit le
+  // message AVANT d'ouvrir l'application, et c'est lui qui donne le ton.
+  // La liste couvre les quatre chemins sortants vers elle — l'assignation, la
+  // proposition, les deux relances « Vu », et l'annonce d'un changement de ses
+  // jours — plus les deux writers qui composent ce qu'elle lira dans son fil.
   const fs = require('node:fs'), path = require('node:path')
-  const fichiers = ['apps/menages/public.html', 'api/menages-public.js',
-                    'shared/i18n/fr.json', 'shared/i18n/en.json', 'shared/i18n/es.json']
+  const fichiers = [
+    // Ce qu'elle voit
+    'apps/menages/public.html', 'api/menages-public.js',
+    'shared/i18n/fr.json', 'shared/i18n/en.json', 'shared/i18n/es.json',
+    // Ce qu'elle reçoit : SMS, e-mails, crons
+    'lib/cleaning/notifier-prestataire.js',   // assignation, proposition, « Vu » attendu
+    'lib/cleaning/relance-validation.js',     // les deux relances de 9 h
+    'lib/cleaning/changement-regles.js',      // les mots d'un changement de jours
+    'lib/cleaning/apres-changement-regles.js',// l'annonce et la reprise
+    'lib/cleaning/sync-menages.js',           // le writer de son fil d'actualités
+    'api/menages.js'                          // la note de l'hôte, et son événement
+  ]
   for (const f of fichiers) {
     const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
     const lignes = src.split('\n')
