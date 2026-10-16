@@ -398,11 +398,15 @@ async function reglerJours (req, res, userId, providerId) {
   const r = await remplacerRegles(supabase, {
     userId, providerId, lots, cadence, source: 'hote', maxActives: LOT_REGLES })
 
-  if (r.erreur === 'desactivation') {
-    console.error('[disponibilites] desactivation regles echec', r.detail)
-    return res.status(503).json({
-      error: 'Les nouveaux jours sont enregistrés, mais les anciens n\'ont pas pu être retirés. ' +
-             'Rouvrez la fiche et vérifiez.' })
+  // ⚠ IL N'Y A PLUS D'ETAT INTERMEDIAIRE A ANNONCER. Tant que le remplacement
+  // se faisait en deux ecritures, cette branche disait « les nouveaux jours
+  // sont enregistres, mais les anciens n'ont pas pu etre retires » — une phrase
+  // qui existait parce que le cas existait. La fonction Postgres est une
+  // transaction : soit tout est pose, soit rien n'a bouge, et l'ecran n'a plus
+  // qu'un seul refus a dire.
+  if (r.erreur === 'rpc_absente') {
+    console.error('[disponibilites] migration 2026-10-16-regles-atomiques NON APPLIQUEE', r.detail)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
   if (r.erreur) {
     if (r.status === 400) return res.status(400).json({ error: r.erreur })

@@ -2331,15 +2331,15 @@ async function reglerMesJours (req, res, token) {
     userId: qui.userId, providerId: qui.profil.id, lots: lotsBruts, cadence,
     source: 'prestataire', maxActives: MAX_REGLES_ACTIVES })
 
-  if (r.erreur === 'desactivation') {
-    console.error('[menages-public] desactivation regles echec:', r.detail)
-    // ⚠ ON DIT CE QUI S'EST REELLEMENT PASSE. « Service indisponible » ferait
-    // croire que rien n'est parti, alors que les nouveaux jours SONT poses :
-    // elle est disponible sur l'union des deux reglages, et elle doit le
-    // savoir pour recommencer.
-    return res.status(503).json({
-      error: 'Vos nouveaux jours sont enregistrés, mais les anciens n\'ont pas pu être retirés. ' +
-             'Rouvrez cet onglet et vérifiez.' })
+  // ⚠ LA PHRASE « vos nouveaux jours sont enregistres, mais les anciens n'ont
+  // pas pu etre retires » A DISPARU AVEC SON CAS (16 octobre 2026). Elle
+  // existait parce que le remplacement se faisait en deux ecritures et pouvait
+  // s'arreter au milieu. La fonction Postgres est une transaction : soit tout
+  // est pose, soit rien n'a bouge — et un ecran qui n'a qu'un seul refus a
+  // dire est un ecran qu'on comprend.
+  if (r.erreur === 'rpc_absente') {
+    console.error('[menages-public] migration 2026-10-16-regles-atomiques NON APPLIQUEE', r.detail)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
   if (r.erreur) {
     if (r.status === 400) return res.status(400).json({ error: r.erreur })
