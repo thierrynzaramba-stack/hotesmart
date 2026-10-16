@@ -70,11 +70,47 @@
     /* ⚠ LA BARRE DU HAUT ET LE CONTENU viennent de `public/style.css`, qui
        les dessine pour un écran de bureau à barre latérale : 24 px de marge
        partout et un titre de 15 px. Au téléphone, la marge mange un dixième de
-       la largeur utile. */
-    .topbar { border-bottom: 1px solid var(--line); background: var(--surface); }
-    .page-title { font-weight: var(--fw-bold); color: var(--ink); }
-    .page-sub { color: var(--muted); }
-    .content { padding: 16px; }
+       la largeur utile.
+       ⚠ ELLE EST DÉJÀ FIXE : `.topbar` est hors du conteneur qui défile
+       (`.content`), donc le ratio des avis — la seule porte vers eux — reste
+       atteignable à tout moment. Rien à rendre « collant ». */
+    .topbar { border-bottom: 1px solid var(--line); background: var(--surface);
+              gap: 12px; }
+    /* ⚠ SON PRÉNOM PASSE DEVANT, ET LE TITRE DE L'APPLICATION DERRIÈRE
+       (modernisation du 16 octobre 2026). Le DOM met « Planning ménages » en
+       titre et « Régina » en sous-titre ; c'est l'ordre d'un logiciel, pas
+       celui d'une personne qui ouvre SA page. `column-reverse` les échange à
+       l'œil sans toucher à un seul nœud — l'ordre de lecture d'un lecteur
+       d'écran, lui, ne change pas, et il reste juste.
+       ⚠ `min-width: 0` : sans lui, un prénom long pousse le ratio hors de la
+       barre au lieu de se couper. */
+    .topbar > div:first-child { display: flex; flex-direction: column-reverse;
+                                align-items: flex-start; min-width: 0; }
+    .page-title { font-size: 11px; font-weight: var(--fw-bold); color: var(--muted);
+                  text-transform: uppercase; letter-spacing: .08em; }
+    .page-sub { font-size: 20px; font-weight: var(--fw-bold); color: var(--ink);
+                margin-top: 0; margin-bottom: 1px; letter-spacing: var(--tracking-tight);
+                max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; }
+    .content { padding: 16px; display: flex; flex-direction: column; }
+
+    /* ⚠ DEUX RANGS DE SURFACES, ET C'EST TOUTE LA HIÉRARCHIE DE LA PAGE.
+       Tout était en carte blanche bordée : le fil des nouveautés, le filtre de
+       biens, le calendrier et la liste des trente jours avaient exactement le
+       même poids. Les deux premiers sont des OUTILS — on les consulte, on les
+       règle — les deux autres sont le TRAVAIL. Les outils passent donc sur le
+       gris de fond, sans bordure ; le travail garde la carte blanche. */
+    .news-panel, #carte-biens { background: var(--surface-2); border-color: transparent; }
+
+    /* ⚠ LES TRANSITIONS SONT COURTES ET NE PORTENT QUE SUR LA COULEUR. Une
+       bascule de 150 ms dit « c'est bien ce que tu viens de toucher » ; au-delà,
+       elle retarde la réponse, et sur une transformation elle ferait bouger une
+       cible qu'un doigt vise encore. */
+    .btn, .btn-mini, .jligne, .jrangee, .agenda-item, .filter-item, .jvu,
+    .news-close, .dispo-mini, .avis-retour, .jseg button {
+      transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
 
     /* ⚠ LA POLICE ET LE FOND SE POSENT ICI, pas dans `public/style.css` : ce
        fichier met `background: var(--bg2)` sur le corps (gris), et la V5 veut
@@ -143,8 +179,15 @@
        La paire rouge manque au systeme (public/style.css n'a que --green et
        --amber) : meme saturation que le vert. */
     .dispo-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    /* ⚠ LE TITRE PREND SA PROPRE LIGNE, et les commandes passent dessous
+       (modernisation du 16 octobre 2026). « Octobre – Novembre 2026 » a besoin
+       de 190 px ; entre deux ronds de 44 et la pilule « Ce mois-ci », il en
+       restait 104, et il se cassait sur trois lignes en poussant tout le
+       calendrier vers le bas. `order: -1` le remonte sans toucher au DOM. */
     .dispo-titre-mois { font-size: var(--fs-body); font-weight: var(--fw-bold);
-                        text-transform: capitalize; flex: 1; }
+                        text-transform: capitalize; flex: 1 0 100%; order: -1;
+                        margin-bottom: 2px; letter-spacing: var(--tracking-tight); }
+    #dispo-auj { margin-left: auto; }
     .dispo-rond { width: var(--control); height: var(--control); border-radius: 50%;
                   border: 1px solid var(--border);
                   background: var(--surface); color: var(--ink); font-size: 16px; line-height: 1;
@@ -501,7 +544,7 @@
     /* ─── Mes 30 prochains jours (refonte v2, lot 3) ──────────────────────── */
     .agenda-jour + .agenda-jour { margin-top: 14px; }
     .agenda-date { font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--ink);
-                  margin-bottom: 8px; }
+                  margin-bottom: 8px; font-variant-numeric: tabular-nums; }
     .agenda-date em { font-style: normal; font-weight: var(--fw-regular); color: var(--muted); }
     /* ⚠ SEUL LE JOUR MEME PORTE UN FOND PLEIN. C'est ce qu'elle fait
        MAINTENANT ; tout mettre en avant, c'est ne rien mettre en avant. */
@@ -595,12 +638,23 @@
                       cursor: pointer; user-select: none; border: 1px solid transparent; }
     .dispo-pastille input { position: absolute; opacity: 0; pointer-events: none; }
     .dispo-pastille:focus-within { box-shadow: 0 0 0 2px var(--ink); }
-    /* ⚠ UN JOUR COCHÉ EST VERT, EN A COMME EN B. La ligne B les peignait en
-       ambre : la même case disait deux choses selon la ligne où elle tombait,
-       et l'ambre ne dit plus que « HôteSmart attend une réponse ». */
+    /* ⚠ UN JOUR COCHÉ PREND UNE COULEUR DU CALENDRIER DES MÉNAGES, PAS LE VERT
+       (demande de Thierry, 16 octobre 2026). Le vert de cette page a un sens
+       précis et il est pris : « fait », « ✓ Vu », un avis qui salue la
+       propreté. L'employer aussi pour « je travaille ce jour-là » lui faisait
+       dire deux choses. Le bleu pâle `--presta-5` vient des pastels dont le
+       calendrier de l'hôte peint les barres de garde (`shared/presta-couleur.js`,
+       theme.css) : les deux écrans parlent du même planning, ils peuvent se
+       partager une palette.
+       ⚠ UN PASTEL NE PORTE PAS SEUL LA SÉLECTION : sur le gris très clair de la
+       carte, l'écart ne suffirait pas. Le bord encre la tient, et le chiffre
+       reste en `--ink` — 13:1 de contraste, là où du blanc sur pastel serait
+       illisible.
+       ⚠ EN A COMME EN B : la ligne B les peignait en ambre, donc la même case
+       disait deux choses selon la ligne où elle tombait. */
     .dispo-pastille.on,
-    .dispo-ligne-ab.b .dispo-pastille.on { background: var(--ok); color: var(--on-ink);
-                                           border-color: var(--ok); }
+    .dispo-ligne-ab.b .dispo-pastille.on { background: var(--presta-5); color: var(--ink);
+                                           border-color: var(--ink); font-weight: var(--fw-bold); }
     .dispo-ligne-ab.fige .dispo-pastille { cursor: default; opacity: .55; }
     /* ⚠ SEPT PASTILLES DE 44 px FONT 308 px : avec l'étiquette « Semaine A »
        sur la même ligne, il en manque soixante, et la rangée se repliait en
@@ -718,7 +772,8 @@
                    border-radius: var(--radius-pill); padding: 3px 10px; font-size: 11px;
                    font-weight: var(--fw-semibold); color: var(--muted); }
 
-    .filter-title { font-size: 10px; color: var(--muted); font-weight: var(--fw-bold); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .filter-title { font-size: 10px; color: var(--muted); font-weight: var(--fw-bold); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+    #carte-biens { padding: 14px 16px; }
     /* ⚠ 44 px DE HAUT, PARCE QUE CE N'EST PLUS UNE BARRE LATERALE DE BUREAU.
        Ces lignes vivaient dans la colonne gauche du planning, masquee sur
        telephone au profit d'une feuille a gros boutons ; la feuille est partie
@@ -729,14 +784,27 @@
        planning ou la meme couleur teintait ses cartes (`.prop-color-*`). Ces
        cartes ont disparu : la pastille ne renvoyait plus a rien. Decision de
        Thierry au meme chantier — la couleur par logement ne revient pas. */
-    .filter-item { display: flex; align-items: center; gap: 12px; min-height: 52px;
-                   padding: 2px 0; cursor: pointer;
-                   border-bottom: 1px solid var(--line); }
-    .filter-item:last-child { border-bottom: none; }
+    /* ⚠ DES PILULES CÔTE À CÔTE, PLUS UNE LISTE VERTICALE (modernisation du
+       16 octobre 2026). Trois logements prenaient trois lignes de 52 px, soit
+       un sixième de l'écran, pour un réglage d'affichage qu'elle touche une
+       fois par mois. En pilules, les mêmes trois tiennent sur deux rangs et le
+       calendrier remonte d'autant.
+       ⚠ LA CASE À COCHER RESTE VISIBLE, ET C'EST UN GARDE-FOU, pas une
+       hésitation de dessin. Peindre la pilule en noir quand elle est cochée
+       demanderait `:has()`, que les navigateurs d'avant 2022 ne connaissent
+       pas : sur un téléphone ancien, l'état du filtre deviendrait INVISIBLE.
+       La case dit l'état partout ; la pilule ne fait que l'habiller. */
+    #filter-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .filter-item { display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+                   padding: 0 16px 0 12px; cursor: pointer;
+                   background: var(--surface); border: 1px solid var(--border);
+                   border-radius: var(--radius-pill); }
+    .filter-item:last-child { border-bottom: 1px solid var(--border); }
+    .filter-item:hover { border-color: var(--ink); }
         /* ⚠ LE NOIR DES CASES COCHÉES : c'est un CHOIX actif, le seul emploi du
        noir plein avec les segments (charte V5). */
     .filter-item input { cursor: pointer; accent-color: var(--ink);
-                         width: 20px; height: 20px; flex-shrink: 0; }
+                         width: 18px; height: 18px; flex-shrink: 0; margin: 0; }
     .filter-label { font-size: var(--fs-small); color: var(--ink);
                     font-weight: var(--fw-medium); }
 
@@ -846,18 +914,27 @@
                   min-height: var(--control); padding: 0 14px; flex-shrink: 0;
                   font-family: var(--font); transition: all 0.15s; }
     .news-close:hover { border-color: var(--ink); background: var(--surface-2); }
-    .news-list { display: flex; flex-direction: column; gap: 8px; }
+    /* ⚠ LE FIL NE PREND PLUS L'ÉCRAN ENTIER. Trois annonces et la carte des
+       biens remplissaient les 844 px d'un téléphone : le calendrier, qui EST
+       la page, commençait sous la ligne de flottaison. Il défile désormais dans
+       sa propre boîte au-delà de deux annonces et demie.
+       ⚠ `overscroll-behavior: contain` : sans lui, arriver au bas de cette
+       liste fait repartir la PAGE derrière — on perd le calendrier en croyant
+       lire la dernière nouvelle. */
+    .news-list { display: flex; flex-direction: column; gap: 8px;
+                 max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; }
     .news-item { background: var(--surface); border: 1px solid var(--line);
-                 border-radius: var(--radius-tile); padding: 12px 14px; display: flex;
+                 border-radius: var(--radius-tile); padding: 10px 12px; display: flex;
                  align-items: flex-start; gap: 10px; cursor: pointer; transition: opacity 0.15s; }
     .news-item:hover { opacity: 0.85; }
     .news-item.unread { border-left: 3px solid var(--ink); background: var(--surface-2); }
     .news-item.read { opacity: 0.55; }
-    .news-icon { font-size: 16px; flex-shrink: 0; }
+    .news-icon { font-size: 14px; line-height: 1.4; flex-shrink: 0; }
     .news-content { flex: 1; min-width: 0; }
     .news-content-title { font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
     .news-content-sub { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
-    .news-time { font-size: 10px; color: var(--muted-2); flex-shrink: 0; white-space: nowrap; }
+    .news-time { font-size: 10px; color: var(--muted-2); flex-shrink: 0; white-space: nowrap;
+                 font-variant-numeric: tabular-nums; }
 
     /* ============================================ */
     /* RESPONSIVE MOBILE - breakpoint 900px         */
@@ -920,13 +997,16 @@
       .topbar {
         padding: 14px 16px;
       }
+      /* ⚠ CE BLOC ÉCRASAIT L'ÉCHANGE : déclaré en dernier et à spécificité
+         égale, il remettait le titre de l'application en 17 px gras et le
+         prénom en 12 px — exactement l'ordre que la modernisation vient
+         d'inverser. Il ne garde donc que l'ajustement de taille, dans le bon
+         sens. */
       .page-title {
-        font-size: 17px;
-        font-weight: var(--fw-bold);
-        letter-spacing: var(--tracking-tight);
+        font-size: 10px;
       }
       .page-sub {
-        font-size: 12px;
+        font-size: 19px;
       }
     }
     /* ⚠ CE BLOC EST DÉCLARÉ EN DERNIER, ET CE N'EST PAS DU RANGEMENT

@@ -4632,6 +4632,58 @@ Restent hors périmètre, à trancher par Thierry : `<meta name="theme-color">` 
 la PWA installée ouvre sur un écran de démarrage terre cuite avant d'afficher
 une page noir et blanc.
 
+### La modernisation du 16 octobre 2026 (toujours CSS seul)
+
+Demande de Thierry après la recette en preview : « optimise l'UI pour
+moderniser l'app, garde les couleurs du calendrier ». Le calendrier n'a donc
+pas été touché — aucune règle `.dispo-case*`, `.dispo-compte`, `.dispo-bulle`
+ni `.dispo-sem`. Quatre gestes ailleurs :
+
+1. **Son prénom passe devant, le nom de l'application derrière.** Le DOM met
+   « Planning ménages » en titre et « Régina » en sous-titre : c'est l'ordre
+   d'un logiciel, pas celui d'une personne qui ouvre SA page. `column-reverse`
+   les échange **à l'œil seulement** — l'ordre de lecture d'un lecteur d'écran
+   ne bouge pas, et il reste juste. ⚠ Le `@media (max-width: 900px)` en fin de
+   feuille écrasait l'échange (déclaré plus tard, à spécificité égale) : il ne
+   porte plus que les tailles, dans le bon sens.
+2. **Le filtre de biens passe en pilules.** Trois logements prenaient trois
+   lignes de 52 px — un sixième de l'écran — pour un réglage touché une fois
+   par mois. ⚠ **La case à cocher reste visible**, et c'est un garde-fou :
+   peindre la pilule en noir à l'état coché demanderait `:has()`, inconnu des
+   navigateurs d'avant 2022, et l'état du filtre deviendrait invisible sur un
+   téléphone ancien.
+3. **Le fil des nouveautés ne prend plus l'écran entier** : il défile dans sa
+   propre boîte au-delà de ~2,5 annonces (`max-height: 38vh`), avec
+   `overscroll-behavior: contain` — sans quoi arriver au bas de la liste fait
+   repartir la PAGE derrière.
+4. **Deux rangs de surfaces, et c'est toute la hiérarchie de la page.** Le fil
+   et le filtre sont des OUTILS : ils passent sur le gris de fond, sans
+   bordure. Le calendrier et la liste des trente jours sont le TRAVAIL : ils
+   gardent la carte blanche.
+
+Au passage, le titre du mois prend sa propre ligne : « Octobre – Novembre
+2026 » demande 190 px, et il en restait 104 entre deux ronds de 44 et la
+pilule « Ce mois-ci » — il se cassait sur trois lignes en poussant le
+calendrier vers le bas.
+
+### ⚠ LE VERT DES JOURS COCHÉS DEVIENT UN BLEU DU CALENDRIER DES MÉNAGES
+
+Décision de Thierry, même jour : « utilise plutôt une des couleurs du
+calendrier général de ménage au lieu du vert ». Le vert de cette page a un sens
+précis et il est **pris** — « fait », « ✓ Vu », un avis qui salue la propreté.
+L'employer aussi pour « je travaille ce jour-là » lui faisait dire deux choses.
+
+Les pastilles de « Mes jours » prennent donc `--presta-5`, l'un des huit
+pastels dont le calendrier de l'hôte peint ses barres de garde
+(`shared/presta-couleur.js`) : les deux écrans parlent du même planning, ils
+peuvent se partager une palette. ⚠ **Un pastel ne porte pas seul une
+sélection** sur un fond déjà très clair : le bord encre la tient, et le chiffre
+reste en `--ink` (13:1), là où du blanc sur pastel serait illisible.
+
+Le vert reste exactement là où la charte le veut : `✓ Vu`, « FAIT », le pouce
+des avis, et le fond du jour qui porte un ménage — ce dernier étant de toute
+façon figé par `tests/pwa-mes-jours-dom.test.js`.
+
 ### Les captures
 
 `docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et
