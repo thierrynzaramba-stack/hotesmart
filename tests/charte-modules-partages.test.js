@@ -33,9 +33,18 @@ const sansCommentaires = (s) => s
   .replace(/\/\*[\s\S]*?\*\//g, '')
   .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
 // Une référence d'icône (`icons.svg#i-check`) n'est pas une couleur.
-const sansAncres = (s) => s.replace(/icons\.svg#[\w-]+/g, '').replace(/#\{?[a-z]/gi, '')
+//
+// ⚠ NE RIEN MANGER AVANT DE CHERCHER. Ce filtre portait une seconde passe,
+// `replace(/#\{?[a-z]/gi, '')`, censée écarter les ancres : elle DÉCAPITAIT du
+// même coup tout hexa commençant par une lettre. Mesuré à la revue de b07d242 :
+// `#eef8f0` → `ef8f0`, `#fff8e6` → `ff8e6`, `#C97B5C` → `97B5C`, `#fff` → `ff`
+// — soit quatre des sept couleurs que ce garde-fou existe précisément pour
+// interdire. Il se serait tu pendant que la pastille verte et le bouton ambre
+// revenaient. La première passe suffit : elle retire l'ancre d'icône entière.
+const sansAncres = (s) => s.replace(/icons\.svg#[\w-]+/g, '')
 
-const HEXA = /#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{3}\b(?![\w-])/g
+// Les quatre longueurs : #abc, #abcd, #aabbcc, #aabbccdd.
+const HEXA = /#[0-9A-Fa-f]{8}\b|#[0-9A-Fa-f]{6}\b|#[0-9A-Fa-f]{4}\b(?![\w-])|#[0-9A-Fa-f]{3}\b(?![\w-])/g
 // Un hexa précédé de « var(--jeton, » est un repli, pas une couleur choisie.
 const sansReplis = (s) => s.replace(/var\(\s*--[\w-]+\s*,\s*[^)]*\)/g, 'var(--x)')
 
@@ -59,9 +68,16 @@ for (const f of ['hs-bus.js', 'compte-courant.js']) {
   })
 }
 
-test('LES JETONS CITES EXISTENT VRAIMENT — c’etait tout le defaut de --bg et --text', () => {
+// ⚠ DEUX CHARTES, DONC DEUX FEUILLES A LIRE. `theme.css` est celle de la V5 ;
+// `public/style.css` est celle d'avant, encore servie par les pages legacy.
+// Un jeton cité par un module partagé doit exister dans l'UNE des deux —
+// sinon son `var()` retombe sur le repli en silence, et la charte ne
+// s'applique jamais. Ne lire que `theme.css` ferait rougir les replis legacy
+// qui, eux, sont voulus (revue de b07d242).
+test('LES JETONS CITES EXISTENT VRAIMENT — dans l’une des deux chartes', () => {
   const theme = fs.readFileSync(path.join(__dirname, '..', 'shared', 'theme.css'), 'utf8')
-  const definis = new Set([...theme.matchAll(/^\s*(--[\w-]+)\s*:/gm)].map(m => m[1]))
+  const legacy = fs.readFileSync(path.join(__dirname, '..', 'public', 'style.css'), 'utf8')
+  const definis = new Set([...(theme + legacy).matchAll(/^\s*(--[\w-]+)\s*:/gm)].map(m => m[1]))
   const manquants = new Set()
   for (const f of ['calendrier-resa.js', 'hs-bus.js', 'compte-courant.js']) {
     for (const m of sansCommentaires(lire(f)).matchAll(/var\(\s*(--[\w-]+)/g)) {
@@ -72,10 +88,20 @@ test('LES JETONS CITES EXISTENT VRAIMENT — c’etait tout le defaut de --bg et
     'un jeton absent de theme.css retombe sur son repli en SILENCE : la charte ne s’applique jamais')
 })
 
-test('la fenetre du coeur suit la charte, variante sombre comprise', () => {
-  const src = lire('hs-bus.js')
+// La fenêtre du cœur s'ouvre sur les DEUX générations de pages. L'ordre de la
+// cascade est donc tout : jeton V5 d'abord, jeton legacy en repli, valeur en
+// dur en dernier. Si le legacy repassait devant, une page V5 en thème sombre
+// retomberait sur du blanc — le défaut d'avant, remis à l'endroit.
+test('la fenetre du coeur lit la charte V5 EN PREMIER, le legacy en repli', () => {
+  const src = lire('hs-bus.js').replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
   for (const jeton of ['--surface', '--ink', '--scrim', '--muted']) {
     assert.ok(src.includes(`var(${jeton}`), `la fenetre doit lire ${jeton}`)
   }
-  assert.ok(!/var\(--(bg|text|text2)\b/.test(src), 'les trois jetons fantomes ne doivent pas revenir')
+  for (const [v5, vieux] of [['--surface', '--bg'], ['--ink', '--text'], ['--muted', '--text2']]) {
+    const nus = (src.match(new RegExp(`var\\(\\s*${vieux}\\b`, 'g')) || []).length
+    const imbriques = (src.match(new RegExp(`var\\(${v5}, var\\(${vieux}\\b`, 'g')) || []).length
+    assert.equal(nus, imbriques,
+      `${vieux} ne doit apparaitre qu'en repli de ${v5}, jamais devant lui`)
+  }
 })

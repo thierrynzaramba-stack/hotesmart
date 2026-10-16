@@ -438,13 +438,19 @@ function lienTelephone (c) {
   if (groupeArrivee(c) > 1 || !c.guestPhone) return ''
   const num = numeroAppelable(c.guestPhone)
   if (num.replace(/\D/g, '').length < 6) return ''
-  // ⚠ 44 PX DE HAUT, SANS GROSSIR LA LIGNE. C'est le geste des arrivées du
-  // jour — on appelle le voyageur qui arrive — et il n'offrait que 18 px au
+  // ⚠ 44 PX DE HAUT, ET ILS PRENNENT LEUR PLACE. C'est le geste des arrivées
+  // du jour — on appelle le voyageur qui arrive — et il n'offrait que 18 px au
   // pouce, contre les 44 de `--control` (constat 6 de l'inventaire des bugs
-  // UI V5). Le `padding` vertical agrandit la ZONE DE FRAPPE pendant que la
-  // marge négative rend la place prise à la liste : le texte ne bouge pas.
-  // Une marge, elle, n'aurait pas été cliquable.
-  return `<a class="link caption row" style="gap: 5px; min-height: var(--control); padding-block: 13px; margin-block: -13px" href="tel:${esc(num)}" data-tel aria-label="${esc(t('messages.call'))}">${icone('i-phone', 'icon icon--tel')}${esc(num)}</a>`
+  // UI V5).
+  //
+  // ⚠ ET SURTOUT PAS PAR UNE MARGE NÉGATIVE. Première tentative : `padding` +
+  // `margin-block: -13px`, pour agrandir sans pousser la liste. Mesuré à la
+  // revue de b07d242 : la boîte du lien remontait de 10 px SUR `.conv__sous`,
+  // la ligne « La bulle · 17–19 oct. », qui est cliquable — taper le nom du
+  // bien d'une arrivée du jour ouvrait le composeur au lieu de la
+  // conversation, et rien à l'écran ne le laissait deviner. Agrandir une
+  // cible, c'est lui donner de la place, jamais la prendre au voisin.
+  return `<a class="link caption row" style="gap: 5px; min-height: var(--control); padding-block: 11px" href="tel:${esc(num)}" data-tel aria-label="${esc(t('messages.call'))}">${icone('i-phone', 'icon icon--tel')}${esc(num)}</a>`
 }
 
 // ─── Rendu : fil ─────────────────────────────────────────────────────────────

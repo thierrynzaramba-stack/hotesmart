@@ -178,22 +178,28 @@ export function fenetreNavigateur (doc = typeof document !== 'undefined' ? docum
     if (doc.getElementById(STYLE_ID)) return
     const s = doc.createElement('style')
     s.id = STYLE_ID
-    // ⚠ CES JETONS N'EXISTAIENT PAS. `--bg`, `--text` et `--text2` ne sont
-    // définis NULLE PART dans le dépôt : la fenêtre du cœur retombait donc
-    // toujours sur ses trois valeurs en dur, et ignorait `theme.css` — y
-    // compris sa variante sombre. Ce sont `--surface`, `--ink` et `--muted`
-    // (constat 5 de l'inventaire des bugs UI V5).
+    // ⚠ DEUX CHARTES SE SUCCÈDENT, ET LA FENÊTRE NE CONNAISSAIT QUE L'ANCIENNE.
+    // `--bg`, `--text` et `--text2` viennent de `public/style.css`, la feuille
+    // d'avant la V5 ; `theme.css` ne les définit pas. Sur une page V5 — qui ne
+    // charge que `theme.css` — la fenêtre du cœur retombait donc sur ses trois
+    // valeurs en dur et ignorait la charte, variante sombre comprise, où elle
+    // serait restée blanche sur fond noir (constat 5 de l'inventaire des bugs
+    // UI V5). Une première version de ce commentaire affirmait que ces jetons
+    // n'existaient nulle part : c'était faux, et la revue de b07d242 l'a
+    // relevé.
     //
-    // ⚠ LE REPLI RESTE, parce que cette fenêtre s'ouvre AUSSI sur des pages
-    // qui ne servent pas `theme.css` : `pages/avis.html` et
-    // `apps/menages/prestataires.html`. Sans lui, elles rendraient une boîte
-    // sans fond. Il tombe quand elles passent à la V5.
+    // ⚠ D'OÙ LA CASCADE, ET DANS CET ORDRE : jeton V5, puis jeton legacy, puis
+    // la valeur en dur. La fenêtre s'ouvre en effet sur les DEUX générations de
+    // pages — `pages/avis.html` et `apps/menages/prestataires.html` ne servent
+    // que `public/style.css`, et elles gardent ainsi EXACTEMENT leurs couleurs
+    // d'avant. Les deux derniers crans tombent quand la dernière page legacy
+    // passe à la V5.
     s.textContent = `
       .hs-fenetre-fond { position: fixed; inset: 0; background: var(--scrim, rgba(0,0,0,.45)); z-index: 2000; display: flex; align-items: flex-end; justify-content: center; }
       @media (min-width: 640px) { .hs-fenetre-fond { align-items: center; } }
-      .hs-fenetre { background: var(--surface, #fff); color: var(--ink, #1d1d1f); width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; border-radius: var(--radius-card, 16px) var(--radius-card, 16px) 0 0; padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); box-shadow: var(--shadow-sheet, 0 -8px 30px rgba(0,0,0,.2)); }
+      .hs-fenetre { background: var(--surface, var(--bg, #fff)); color: var(--ink, var(--text, #1d1d1f)); width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; border-radius: var(--radius-card, 16px) var(--radius-card, 16px) 0 0; padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); box-shadow: var(--shadow-sheet, 0 -8px 30px rgba(0,0,0,.2)); }
       @media (min-width: 640px) { .hs-fenetre { border-radius: var(--radius-card, 14px); padding: 22px; box-shadow: var(--shadow-hover, 0 12px 40px rgba(0,0,0,.25)); } }
-      .hs-fenetre-fermer { float: right; background: none; border: 0; font-size: 20px; line-height: 1; cursor: pointer; color: var(--muted, #6e6e73); padding: 2px 6px; min-width: 44px; min-height: 44px; }
+      .hs-fenetre-fermer { float: right; background: none; border: 0; font-size: 20px; line-height: 1; cursor: pointer; color: var(--muted, var(--text2, #6e6e73)); padding: 2px 6px; min-width: 44px; min-height: 44px; }
       body.hs-fenetre-ouverte { overflow: hidden; }
     `
     doc.head.appendChild(s)

@@ -121,7 +121,7 @@ export function messageCapacite (adultes, enfants, capacite) {
 // UNE fonction pour l'ordinateur et le téléphone (la règle « le mobile suit
 // l'ordinateur ») : après le départ, le cœur dit où en est l'évaluation du
 // séjour — PAR LE BUS, jamais par ses tables ni son endpoint.
-//   - publiée          → « Évaluation publiée ✓ » ;
+//   - publiée          → « Évaluation publiée » et l'icône i-check ;
 //   - à faire + droit  → un bouton « Évaluer ce voyageur » qui ouvre la
 //                        fenêtre du cœur (`avis.evaluer`) ;
 //   - rien à dire      → la zone reste vide (Booking, réservation directe,
