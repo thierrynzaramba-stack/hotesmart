@@ -82,8 +82,24 @@ export function buildStateFromInventory(days, inv, base) {
     // sont sans tarif, et de ce fait FERMEES (fermeture calculee de
     // runFullSync). Zero est un prix, et un prix dangereux ; l'absence de prix
     // est un etat. Les confondre a coute une inquietude legitime.
-    const brut = (r && r.rate != null) ? Number(r.rate) : base
-    const rate = (brut == null || Number.isNaN(Number(brut))) ? null : Number(brut)
+    // ⚠ ET ON FERME LA CLASSE, PAS LES DEUX PRODUCTEURS CONNUS — releve en
+    // review du 18 octobre 2026. Le correctif du jour tarissait les deux
+    // sources d'alors (`Number(null)` dans `loadCalendarData` et dans la page),
+    // mais `rate = 0` venu de la BASE produisait toujours « 0 € ». Zero ligne
+    // en production ce jour-la — et `lib/moteur-reservation.js:180` affirme
+    // l'inverse pour l'avenir : « `rate` peut valoir 0 en base sur des lignes
+    // anciennes ». Pire, sur un bien a 86 €, une telle ligne faisait afficher
+    // 0 € une nuit que le moteur de reservation vend 86 € : plus un defaut
+    // d'affichage, une divergence ecran/moteur.
+    //
+    // Un tarif <= 0 est donc une ABSENCE de tarif, d'ou qu'il vienne — meme
+    // regle que `prixDeBase` ici, que `prixDeBase(ligne, bien)` du moteur de
+    // reservation, et que `tarifAcceptable` (raison `zero`) cote serveur.
+    // Un tarif <= 0 se comporte donc comme un tarif ABSENT : il laisse la main
+    // au prix de base, exactement comme `rate: null`. Sur un bien a 86 €,
+    // l'ecran dit 86 € — le prix que le moteur de reservation vend vraiment.
+    const brut = (r && Number(r.rate) > 0) ? Number(r.rate) : base
+    const rate = Number(brut) > 0 ? Number(brut) : null
     return {
       rate,
       // `true` quand aucun tarif n'est defini, ni pour la nuit ni en prix de
@@ -122,12 +138,17 @@ export function configuredRowParams(selectedBiens, states) {
 // est precisement le prix que les plateformes ignorent, en gardant celui de la
 // grille (docs/kb/prix-plancher.md). Le laisser passer pour un prix de base
 // reconstruirait le meme « 0 € » sous un autre nom.
+// ⚠ LES DEUX FORMES SONT ESSAYEES, PAS CLASSEES — releve en review. Donner la
+// priorite a `base_price` faisait perdre le `base` d'un objet portant les deux,
+// dont `{ base_price: 0, base: 199 }` : la forme choisie decidait du resultat.
 export function prixDeBase (p) {
   if (p == null) return null
-  const brut = (p.base_price !== undefined && p.base_price !== null) ? p.base_price : p.base
-  if (brut === null || brut === undefined || brut === '') return null
-  const n = Number(brut)
-  return Number.isFinite(n) && n > 0 ? n : null
+  for (const brut of [p.base_price, p.base]) {
+    if (brut === null || brut === undefined || brut === '') continue
+    const n = Number(brut)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return null
 }
 
 // --- Chargement (api.calendar.load) + normalisation. Logique VERBATIM de reloadInventory.
