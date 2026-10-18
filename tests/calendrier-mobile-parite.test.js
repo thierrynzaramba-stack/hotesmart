@@ -39,17 +39,21 @@ test('LE TEST QUI COMPTE : la couleur vient de la source de CHAQUE reservation �
   assert.deepEqual([r[0].startISO, r[0].checkout, r[0].span, r[0].name], ['2026-10-01', '2026-10-03', 2, 'Ana'])
 })
 
+// RETARGE le 13 octobre 2026 : les anciennes pages redirigent vers la V5 —
+// UNE page pour les deux ecrans, c'est la parite par CONSTRUCTION. Les
+// proprietes gardees restent : module commun, memes writers, bons
+// identifiants, rien au passe.
 test('LE TEST QUI COMPTE : le telephone ne tire plus la source au sort, et lit les reservations par le module commun', () => {
-  const m = sansCommentaires(lire('pages/calendrier-mobile.html'))
+  const m = sansCommentaires(lire('pages/calendrier.html'))
   assert.ok(!/SRC\s*\[\s*idx\s*%\s*3\s*\]/.test(m), 'plus de SRC[idx % 3] dans le code')
-  assert.ok(!/platformLogo/.test(m), 'plus de logo de plateforme dans la bulle (comme l ordinateur)')
-  assert.match(m, /import \{[^}]*\bmapResa\b[^}]*\} from '\/shared\/calendrier-resa\.js'/)
-  assert.match(m, /resaList=mapResa\(/)
-  assert.match(m, /bar\.className='resa-bar '\+rz\.source/)
+  assert.ok(!/platformLogo/.test(m), 'plus de logo de plateforme dans la bulle')
+  assert.match(m, /import \{[^}]*\bmapResa\b[^}]*\}/)
+  assert.match(m, /mapResa\(\(etat\.bookings && etat\.bookings\[id\]\) \|\| \[\]\)/, 'les resas passent par le module')
+  assert.match(m, /cal-barre--\$\{famille/, 'la couleur vient de familleSource, par resa')
 })
 
 test('LE TEST QUI COMPTE : les deux ecrans suivent la MEME regle — aucun ne la redefinit', () => {
-  for (const f of ['pages/biens-calendrier.html', 'pages/calendrier-mobile.html']) {
+  for (const f of ['pages/calendrier.html']) {
     const s = sansCommentaires(lire(f))
     assert.match(s, /from '\/shared\/calendrier-resa\.js'/, `${f} importe le module commun`)
     for (const def of [/function familleSource\s*\(/, /function mapResa\s*\(/, /function sansMessagerieOta\s*\(/, /function estOffline\s*\(/, /COLORS_BY_SOURCE\s*=/, /LIBELLE_CANAL\s*=/]) {
@@ -78,7 +82,7 @@ test('LE TEST QUI COMPTE : modifiable = reservation directe, bien relie, pas une
 
 test('module : messagerie, capacite, e-mail manquant', async () => {
   const M = await charger()
-  assert.equal(M.urlConversation({ provider_property_id: 'P 1' }, { id: 'B/1' }), '/apps/agent-ai/messagerie?conv=B%2F1&bien=P%201')
+  assert.equal(M.urlConversation({ provider_property_id: 'P 1' }, { id: 'B/1' }), '/messages?conv=B%2F1')
   assert.equal(M.messageCapacite(0, 0, 4), 'Il faut au moins un adulte.')
   assert.equal(M.messageCapacite(3, 2, 4), 'Ce bien accueille 4 personnes au maximum — vous en avez saisi 5.')
   assert.equal(M.messageCapacite(2, 2, 4), null)
@@ -91,42 +95,34 @@ test('module : messagerie, capacite, e-mail manquant', async () => {
   assert.equal(M.badgeSansEmailVisible({ offline: false, sourceBrute: 'AirBNB', aEmail: false }), false, 'une resa Airbnb passe par la messagerie OTA')
 })
 
-test('LE TEST QUI COMPTE : le telephone porte la fiche, « Écrire au voyageur », l ajout, la modification et les indisponibilites — par les memes appels que l ordinateur', () => {
-  const m = sansCommentaires(lire('pages/calendrier-mobile.html'))
-  const d = sansCommentaires(lire('pages/biens-calendrier.html'))
-  for (const appel of ['api.messages.aUneConversation(', 'api.reservationDirecte.creer(', 'api.reservationDirecte.modifier(', 'api.reservationDirecte.annuler(',
-    'api.calendar.fermer(', 'api.calendar.modifierFermeture(', 'api.calendar.rouvrirFermeture(']) {
-    assert.ok(d.includes(appel), `l ordinateur appelle ${appel}`)
-    assert.ok(m.includes(appel), `le telephone appelle ${appel}`)
+test('LE TEST QUI COMPTE : la page unique porte fiche, conversation, ajout, modification et blocages — pour les deux ecrans', () => {
+  const m = sansCommentaires(lire('pages/calendrier.html'))
+  for (const appel of ["/api/messages?booking_id=", "appel('/api/reservation-directe'", "method: 'PUT'", "method: 'DELETE'",
+    'api.calendar.fermer(', 'api.calendar.rouvrirFermeture(']) {
+    assert.ok(m.includes(appel), `la page appelle ${appel}`)
   }
-  assert.match(m, /Écrire au voyageur/)
-  assert.match(m, /id="aj-type-resa"[\s\S]*Réservation[\s\S]*id="aj-type-indispo"[\s\S]*Indisponible/)
-  assert.match(m, /ouvrirFicheResa\(rz\.id\)/, 'le tap sur une bulle ouvre sa fiche')
-  assert.match(m, /ouvrirFicheFermeture\(f\.id\)/, 'le tap sur une indisponibilite ouvre sa fiche')
-  assert.match(m, /pointer-events: auto/, 'les bulles se touchent')
-  assert.match(m, /if\(!peutEcrire\('reservations'\)\)\{ document\.getElementById\('btn-ajout'\)\.style\.display='none'/, 'lecture seule : pas de +')
+  assert.ok(m.includes('cal.open_conversation'), 'ecrire au voyageur, par la conversation')
+  assert.ok(m.includes('cal.type_booking') && m.includes('cal.type_block'), 'ajout : Reservation / Bloquer')
+  assert.match(m, /ouvrirFicheResa\(b\.dataset\.bien, b\.dataset\.resa\)/, 'le tap sur une barre ouvre sa fiche')
+  assert.match(m, /ouvrirFicheBlocage\(b\.dataset\.bien, b\.dataset\.blocage\)/, 'le tap sur un blocage ouvre sa fiche')
+  assert.ok(m.includes('pointer-events: auto') || lire('shared/ui.css').includes('pointer-events: auto'), 'les barres se touchent')
+  assert.match(m, /\$\{mobile && peut \? `<button type="button" class="cal-btn-plus"/, 'lecture seule : pas de +')
 })
 
-test('LE TEST QUI COMPTE : les appels du telephone portent les BONS identifiants (review du 1er octobre 2026)', () => {
-  // Le nom d'un appel ne suffit pas : `propertyId: bien.id` (l'UUID) a la place
-  // du numero provider donnait 400 sur 100 % des reservations directes — c'est
-  // l'incident documente au-dessus de `mapBien` sur l'ordinateur.
-  const m = sansCommentaires(lire('pages/calendrier-mobile.html'))
-  assert.strictEqual((m.match(/propertyId: bien\.provider_property_id/g) || []).length, 3,
+test('LE TEST QUI COMPTE : les appels portent les BONS identifiants (review du 1er octobre 2026)', () => {
+  // `propertyId: bien.id` (l'UUID) a la place du numero provider donnait 400
+  // sur 100 % des reservations directes.
+  const m = sansCommentaires(lire('pages/calendrier.html'))
+  assert.ok((m.match(/propertyId: bien\.provider_property_id/g) || []).length >= 3,
     'creer, modifier, annuler : le numero provider')
   assert.ok(!/propertyId: bien\.id\b/.test(m), 'jamais l UUID pour la reservation directe')
-  for (const appel of ['fermer', 'modifierFermeture', 'rouvrirFermeture']) {
-    assert.match(m, new RegExp('api\\.calendar\\.' + appel + '\\((currentBien|bien)\\.id,'), `${appel} : l UUID du bien`)
-  }
+  assert.match(m, /api\.calendar\.fermer\(bienId,/, 'fermer : l UUID du bien')
+  assert.match(m, /api\.calendar\.rouvrirFermeture\(bienId,/, 'rouvrir : l UUID du bien')
 })
 
-test('LE TEST QUI COMPTE : le telephone ne cree rien dans le passe (review du 1er octobre 2026)', () => {
-  // L'ordinateur ne laisse pas selectionner un jour passe ; le telephone saisit
-  // ses dates, il doit donc les refuser lui-meme.
-  const m = sansCommentaires(lire('pages/calendrier-mobile.html'))
-  const valider = m.slice(m.indexOf('async function validerAjoutM'), m.indexOf('document.getElementById(\'btn-ajout\')'))
-  assert.match(valider, /if\(arrivee<todayISO\)/, 'refus a la validation')
-  assert.ok(valider.indexOf('arrivee<todayISO') < valider.indexOf('api.calendar.fermer('), 'avant l indisponibilite aussi')
-  assert.match(m, /champ\('aj-arrivee','Arrivée','date',arrivee,'min="'\+todayISO/, 'le selecteur de date borne')
-  assert.match(m, /btn-ajout-dates'\)\.style\.display=iso<todayISO\?'none'/, 'pas de bouton sur un jour passe')
+test('LE TEST QUI COMPTE : la page ne cree rien dans le passe (review du 1er octobre 2026)', () => {
+  const m = sansCommentaires(lire('pages/calendrier.html'))
+  assert.match(m, /duV < AUJOURDHUI\) \{ etatEl\.textContent = t\('cal\.range_invalid'\)/, 'refus a la validation')
+  assert.ok((m.match(/min="\$\{AUJOURDHUI\}"/g) || []).length >= 2, 'les selecteurs de date bornent')
+  assert.match(m, /if \(iso < AUJOURDHUI\) return/, 'aucun geste ne demarre sur un jour passe')
 })

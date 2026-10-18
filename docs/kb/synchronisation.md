@@ -188,6 +188,31 @@ sans, plutôt que de deviner un stock ou d'interroger `property_id = 'undefined'
 indéfiniment, avec pour seule trace un avertissement « stock réduit car vendue ».
 À traiter avec la purge des snapshots.
 
+## 8 ter. Détail d'une réservation : `GET /api/calendar?booking=<id>`
+
+Ajouté le 12 octobre 2026 (fiche du calendrier V5). Le LISTING du calendrier ne
+transporte toujours que le booléen `aEmail` (« un booléen, pas l'adresse » —
+minimisation, voir le commentaire du code). Le détail d'UNE réservation vit dans
+une branche dédiée du même GET, servie AVANT le listing :
+
+- même garde de compte (`gardeSurBiens` niveau read) ; lecture
+  `bookings_snapshot` par `user_id` + `booking_id` + `property_id` du compte,
+  `order` + `limit(1)` (un booking_id dupliqué entre deux biens rend toujours la
+  même ligne), repli `colonneRawAbsente` comme le listing ;
+- **les coordonnées (`guestEmail`, `guestPhone`) ne sortent que pour le
+  TITULAIRE du compte** — un délégué, même write, reçoit la fiche sans elles
+  (cohérent avec le reste du dépôt : l'e-mail n'est servi à aucun délégué,
+  api/messages exige messages:write pour le seul téléphone). À élargir
+  uniquement sur décision explicite de Thierry ;
+- `vendueLe` = `dateDeVente` de lib/yield/eclatement (bookingTime Beds24,
+  inserted_at Channex, drapeau « importée : date de migration ») ;
+- `totalVoyageur` = `prixVoyageur` recomposé (valeur + taxe de séjour) — jamais
+  `snapshot.amount` nu (net hôte sur Airbnb : docs/kb/prix-voyageur.md) ;
+- `prixParNuit` = `rooms[].days` du `raw` Channex, seule forme AUDITÉE ; Beds24
+  ne le sert pas → `null`, et la fiche LE DIT (pas de répartition inventée :
+  l'uniforme est une règle du moteur, docs/kb/eclatement-yield.md) ;
+- `factures` = lignes `invoiceItems` de type charge (Beds24).
+
 ## 9. Existence d'une conversation : une réservation à la fois
 
 Ajouté le 15 septembre 2026 avec le bouton « Ouvrir la conversation » de la fiche

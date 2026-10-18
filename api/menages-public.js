@@ -1,12 +1,13 @@
 // ⚠️ DOC : comportement documenté dans docs/kb/menage.md — si tu modifies/ajoutes/supprimes une fonctionnalité ici, mets à jour ce(s) kb (MÊME COMMIT).
 const { createClient } = require('@supabase/supabase-js')
-const { markReady } = require('../lib/cron-property-status')
+const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 // Statut canonique unifie (audit E5) : evite les menages fantomes sur les blocages.
 const { readStatus, STATUS } = require('../lib/bookings-snapshot')
 const { ratioProprete, borneDepuis } = require('../lib/stats-avis')
 const { avisDuPrestataire, filtresAttribution, MAX_IDS } = require('../lib/attribution-prestataire')
 const { alertMenageRefuse, alertReglesModifiees, alertPlageModifiee } = require('../lib/alert-notify')
 const { extraitVerifie } = require('../lib/extrait-verifie')
+const { colonneAbsente } = require('../lib/colonne-absente')
 // Le moteur de garde (lot 3.3) : c'est LUI qui dit qui remplace, jamais un
 // « rang 2 » lu en dur — un rang 2 en conge ou non attitre ce jour-la n'est pas
 // la remplacante de ce jour.
@@ -26,7 +27,8 @@ const { cleJour, lireRrule } = require('../lib/cleaning/availability')
 // importe exactement ce module : deux validations pour la meme regle
 // divergeraient au premier ajustement, et la copie finit toujours par etre la
 // plus permissive des deux.
-const { validerRegle } = require('../lib/cleaning/regles')
+const { validerRegle, remplacerRegles,
+        MAX_REGLES_ACTIVES } = require('../lib/cleaning/regles')
 // ⚠ LE PENDANT DE LA DECISION DU 15 SEPTEMBRE : elle regle ses jours, l'hote
 // l'apprend, et les menages PROPOSES des jours retires reviennent au moteur.
 const { apresChangementDeRegles, unBienDElle } = require('../lib/cleaning/apres-changement-regles')
@@ -49,7 +51,9 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // plafond decrivait exactement le danger qu'il n'ecartait pas.
 // Une lecture tronquee de regles, c'est un calendrier qui montre autre chose que
 // ce que le moteur applique.
-const MAX_REGLES_ACTIVES = 50
+// ⚠ LA BORNE VIENT DU MODULE depuis le 16 octobre 2026 : elle etait declaree
+// ici ET dans `api/disponibilites.js`, avec deux valeurs differentes (50 et
+// 200) passees a la MEME fonction Postgres.
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -189,6 +193,26 @@ async function profilActifDuJeton (userId, token) {
   return { profil }
 }
 
+// ⚠ UNE VALIDATION NE VAUT QUE POUR QUI L'A POSEE (constat de la revue de
+// 20fb83d). Un menage change de main — l'hote reassigne, une collegue accepte,
+// le moteur pose une remplacante apres un refus — et le `vu_le` de la
+// precedente restait colle au menage : la nouvelle porteuse n'avait ni bouton
+// ni relance, et l'hote lisait « A jour » sur quelqu'un qui n'avait rien lu.
+//
+// ⚠ C'EST LA DONNEE QUI PORTE SON PROPRIETAIRE, pas six chemins d'ecriture qui
+// pensent a la remettre a zero : un septieme chemin arrivera, et aucun test ne
+// peut attraper celui qui n'existe pas encore.
+//
+// Rend la date quand elle vaut, `null` sinon. `vu_par` ABSENT de la ligne (le
+// complement de migration n'est pas colle) fait retomber sur `vu_le` seul :
+// l'ancien comportement, pas une panne.
+function validePar (ligne, providerId) {
+  if (!ligne || !ligne.vu_le) return null
+  if (!('vu_par' in ligne)) return ligne.vu_le || null
+  if (!providerId) return null
+  return String(ligne.vu_par || '') === String(providerId) ? ligne.vu_le : null
+}
+
 // Le meme refus, ecrit une seule fois : un lien sans personne derriere lui est
 // invalide, et il le dit comme n'importe quel jeton inconnu — on n'apprend pas
 // a un porteur de lien que la ligne existe encore en base.
@@ -258,6 +282,31 @@ module.exports = async function handler(req, res) {
       }
       return await repondreALOffre(req, res, token, {
         accepte: action === 'accepterMenage',
+        propertyId: property_id, bookingId: booking_id, departureDate: departure_date
+      })
+    }
+
+    // --- VALIDER UN MENAGE QU'ELLE PORTE (« Vu », 14 octobre 2026) ---
+    //
+    // ⚠ CE QUE CE GESTE COMBLE. Une prestataire a qui le menage est ATTRIBUE
+    // D'OFFICE n'a rien a confirmer : son menage nait `accepted`, et personne
+    // ne sait donc si elle l'a lu. L'hote n'avait qu'un indice de remplacement
+    // — « a-t-elle ouvert sa page ? » — qui ne dit rien de CE menage-la.
+    //
+    // ⚠ CE N'EST NI UNE ACCEPTATION NI UN REFUS : il n'y a rien a refuser
+    // d'office, et ce bouton ne transfere aucune responsabilite. Il dit
+    // seulement « je l'ai vu », et c'est ce que l'hote attend.
+    if (action === 'validerMenage') {
+      if (!booking_id || !property_id || !departure_date) {
+        return res.status(400).json({ error: 'Champs requis manquants (booking_id, property_id, departure_date)' })
+      }
+      // ⚠ LE FORMAT SE VERIFIE ICI AUSSI. Une date non normalisee retrouve la
+      // ligne en Postgres tout en passant a cote d'une comparaison de chaines :
+      // c'est le defaut deja ferme sur `prendreMenage`.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(departure_date))) {
+        return res.status(400).json({ error: 'Date invalide' })
+      }
+      return await validerMonMenage(req, res, token, {
         propertyId: property_id, bookingId: booking_id, departureDate: departure_date
       })
     }
@@ -401,33 +450,24 @@ module.exports = async function handler(req, res) {
             : 'Ce ménage ne vous est pas attribué' })
         }
 
-        // Insert dans menage_done. ON CONFLICT DO NOTHING grace a la contrainte unique.
-        // On utilise upsert avec ignoreDuplicates pour rester idempotent.
-        const { error: insertErr } = await supabase
-          .from('menage_done')
-          .upsert({
-            user_id: userId,
-            property_id: String(property_id),
-            booking_id: String(booking_id),
-            departure_date,
-            done_by_token: token
-          }, { onConflict: 'user_id,property_id,booking_id,departure_date', ignoreDuplicates: true })
-
-        if (insertErr) {
-          console.error('[Menage] Erreur insert menage_done:', insertErr.message)
+        // ⚠ LE WRITER PARTAGE (lib/cleaning/menage-fait) : la PWA et l'ecran
+        // de l'hote ecrivent par la MEME porte, chacun derriere SES gardes.
+        // `done_by_token` porte le jeton : c'est la trace qui dit que c'est
+        // la prestataire elle-meme qui a marque.
+        // `majStatut: true` — elle sort du logement : il est propre MAINTENANT.
+        const fait = await marquerFait(supabase, {
+          userId, propertyId: property_id, bookingId: booking_id,
+          departureDate: departure_date, parToken: token, majStatut: true
+        })
+        if (!fait.ok) {
+          console.error('[Menage] Erreur insert menage_done:', fait.message)
           return res.status(500).json({ error: 'Erreur enregistrement menage' })
         }
-
-        // Met a jour property_status.last_menage_at via la fonction existante
-        try {
-          await markReady(userId, String(property_id))
-          console.log(`[Menage] ${property_id} booking ${booking_id} dep ${departure_date} -> ready`)
-        } catch (err) {
-          console.error('[Menage] Erreur markReady:', err.message)
-          // On ne bloque pas la reponse : le menage_done est deja insere,
-          // c'est la verite. property_status est secondaire.
-        }
-
+        // ⚠ LE JOURNAL NE DIT « ready » QUE SI C'EST VRAI : `markReady` peut
+        // échouer en silence (il ne bloque pas), et un log qui l'affirme quand
+        // même fait chercher la panne ailleurs (revue de 7f79406).
+        console.log(`[Menage] ${property_id} booking ${booking_id} dep ${departure_date}` +
+                    (fait.statutMaj ? ' -> ready' : ' (statut NON mis a jour)'))
         return res.json({ success: true, message: 'Menage marque, logement pret' })
       } catch (err) {
         console.error('[Menage] markDone erreur:', err.message)
@@ -474,42 +514,16 @@ module.exports = async function handler(req, res) {
         }
 
         // Suppression de la ligne menage_done
-        const { error: delErr } = await supabase
-          .from('menage_done')
-          .delete()
-          .eq('user_id', userId)
-          .eq('property_id', String(property_id))
-          .eq('booking_id', String(booking_id))
-          .eq('departure_date', departure_date)
-
-        if (delErr) {
-          console.error('[Menage] Erreur delete menage_done:', delErr.message)
+        // ⚠ LE WRITER PARTAGE, comme markDone : il recale `last_menage_at`
+        // sur le ménage fait le plus récent qui RESTE, et ne touche à rien
+        // s'il n'en reste aucun (cette date peut venir d'ailleurs).
+        const defait = await defaireFait(supabase, {
+          userId, propertyId: property_id, bookingId: booking_id, departureDate: departure_date
+        })
+        if (!defait.ok) {
+          console.error('[Menage] Erreur delete menage_done:', defait.message)
           return res.status(500).json({ error: 'Erreur suppression menage' })
         }
-
-        // Recalcul de last_menage_at = MAX(done_at) des menages restants pour ce bien.
-        // Si plus aucun menage : on remet last_menage_at a NULL (ou on laisse tel quel ?
-        // On choisit de laisser tel quel pour ne pas casser un last_menage_at venu d'ailleurs).
-        const { data: latestDone } = await supabase
-          .from('menage_done')
-          .select('done_at')
-          .eq('user_id', userId)
-          .eq('property_id', String(property_id))
-          .order('done_at', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        if (latestDone) {
-          await supabase
-            .from('property_status')
-            .update({ last_menage_at: latestDone.done_at, updated_at: new Date().toISOString() })
-            .eq('user_id', userId)
-            .eq('property_id', String(property_id))
-        }
-        // Si latestDone est null, on ne touche pas a property_status :
-        // last_menage_at peut venir d'autre source (cron, ancien etat) qu'on
-        // ne veut pas effacer aveuglement.
-
         console.log(`[Menage] markUndone ${property_id} booking ${booking_id} dep ${departure_date}`)
         return res.json({ success: true, message: 'Menage decoche' })
       } catch (err) {
@@ -557,7 +571,7 @@ module.exports = async function handler(req, res) {
     // ('black') retomberait sur le fallback 'confirmed' -> menage fantome.
     const { data: propRows, error: errProps } = await supabase
       .from('properties')
-      .select('provider_property_id, name, provider, checkout_time')
+      .select('provider_property_id, name, provider, checkout_time, photo_url')
       .eq('user_id', userId)
       .not('provider_property_id', 'is', null)
     // ⚠ L'ERREUR ETAIT AVALEE, trois instructions avant la garde `errSnaps`.
@@ -575,7 +589,7 @@ module.exports = async function handler(req, res) {
     const properties = (propRows || [])
       .filter(p => !allowedIds.length || allowedIds.includes(String(p.provider_property_id)))
       .map(p => ({ id: String(p.provider_property_id), name: p.name, provider: p.provider,
-                   checkout_time: p.checkout_time }))
+                   checkout_time: p.checkout_time, photo: p.photo_url || null }))
     const propNameById = {}
     const propProviderById = {}
     properties.forEach(p => { propNameById[p.id] = p.name; propProviderById[p.id] = p.provider })
@@ -670,8 +684,16 @@ module.exports = async function handler(req, res) {
     //     Le garder en secours, c'etait garder la faille qu'on venait de fermer.
     // Desormais : pas de profil actif, pas d'acces. La garde elle-meme est posee
     // PLUS HAUT, avant les lectures lourdes — voir `profilActifDuJeton`.
-    let requete = supabase.from('menages')
-      .select('booking_id, property_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at')
+    // ⚠ `vu_le` NE DOIT PAS POUVOIR EMPORTER LE PLANNING (constat de la revue
+    // de 20fb83d). Une migration se colle A LA MAIN apres le push : entre les
+    // deux, un `select` qui nomme la colonne echoue EN ENTIER (42703), et ce
+    // GET rend 503 — la page de CHAQUE prestataire affiche « service
+    // indisponible », pour un bouton de confort. On relit donc sans elle, et
+    // le bouton « Vu » disparait le temps que la colonne arrive.
+    const COLONNES_MENAGE = 'booking_id, property_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at'
+    const COLONNES_VALIDATION = 'vu_le, vu_par'
+    const requeteMenages = (colonnes) => supabase.from('menages')
+      .select(colonnes)
       .eq('user_id', userId)
       .neq('status', 'cancelled')
       .gte('departure_date', dateFrom)
@@ -686,8 +708,13 @@ module.exports = async function handler(req, res) {
     // ⚠ « ON LE LUI PROPOSE » = elle est DANS le tour (`proposee_a` contient
     // son identifiant, spec proposition-par-rang) — ses collegues du meme rang
     // aussi, et chacune ne voit que SA proposition.
-    requete = requete.or(`provider_id.eq.${profilPresta.id},proposee_a.cs.{${profilPresta.id}}`)
-    const { data: mn, error: errMen } = await requete
+    const lireMesMenages = (colonnes) => requeteMenages(colonnes)
+      .or(`provider_id.eq.${profilPresta.id},proposee_a.cs.{${profilPresta.id}}`)
+    let { data: mn, error: errMen } = await lireMesMenages(`${COLONNES_MENAGE}, ${COLONNES_VALIDATION}`)
+    if (errMen && colonneAbsente(errMen)) {
+      console.warn('[menages-public] menages.vu_le absente : migration 2026-10-14-menage-vu-le non appliquee')
+      ;({ data: mn, error: errMen } = await lireMesMenages(COLONNES_MENAGE))
+    }
     // ⚠ Une liste vide par panne serait indiscernable d'« aucun menage », et la
     // prestataire conclurait qu'elle n'a rien a faire aujourd'hui.
     if (errMen) {
@@ -870,6 +897,48 @@ module.exports = async function handler(req, res) {
     if (autrui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
     const delaiRetrait = lu.erreur ? null : lu.heures
 
+    // ─── « VUE IL Y A … » : LA SEULE TRACE D'OUVERTURE DE SA PAGE ───────────
+    // ⚠ WRITER UNIQUE, ET IL EST ICI. L'hote assigne un menage pour
+    // apres-demain sans aucun moyen de savoir si elle l'a vu. Cet horodatage
+    // est ce qui le lui dira — l'en-tete de sa fiche (« Vue il y a … ») et le
+    // type `pas_vu` de la bulle « A traiter » ne lisent que lui.
+    //
+    // ⚠ ECRIT PAR LE SERVEUR, AU SUCCES, ET NULLE PART AILLEURS. Ni le
+    // navigateur, ni un localStorage : une PWA hors ligne peint un cache qui
+    // ne contient pas le menage neuf — elle ne l'a donc pas vu, et l'alerte
+    // doit tenir. Le service worker ne met JAMAIS `/api/` en cache
+    // (`apps/menages/sw.js`), donc arriver ici veut dire qu'elle a bien recu
+    // les donnees fraiches du serveur.
+    //
+    // ⚠ CE CHEMIN NE DOIT ETRE APPELE QUE PAR ELLE. L'ecran de l'hote qui
+    // montre « ce qu'elle voit » peint les donnees que l'HOTE possede deja :
+    // appeler cet endpoint avec son jeton horodaterait une ouverture qu'elle
+    // n'a pas faite, et exposerait son jeton au passage.
+    //
+    // ⚠ UNE PANNE D'ECRITURE NE COUPE PAS SA PAGE. Ne pas savoir quand elle a
+    // regarde est un confort pour l'hote ; ses menages du jour, non.
+    // ⚠ ET LE `try` COMPTE AUTANT QUE LE TEST D'ERREUR : une ecriture qui
+    // LEVE (client indisponible, reseau coupe) ferait tomber tout le GET dans
+    // son `catch` general, donc un 500 — l'ecran de la prestataire noir pour
+    // un horodatage de confort.
+    //
+    // ⚠ ET L'APERCU DE L'HOTE N'HORODATE RIEN (`apercu=1`). Depuis sa fiche,
+    // l'hote ouvre la page de sa prestataire dans un cadre pour voir ce qu'elle
+    // voit : si cette lecture posait la date, elle ferait croire qu'ELLE a
+    // regarde, et l'alerte « Menage non recu » se tairait a tort — juste parce
+    // que l'hote s'est inquiete. On ECRIT MOINS quand on n'est pas sur : le
+    // seul abus possible est qu'une prestataire ajoute `apercu=1` a son propre
+    // lien pour ne pas etre horodatee, ce qui ne lui vaudrait que des rappels.
+    if (String(req.query.apercu || '') !== '1') {
+      try {
+        const { error: errVue } = await supabase.from('public_tokens')
+          .update({ pwa_vue_le: new Date().toISOString() }).eq('token', token)
+        if (errVue) console.error('[menages-public] horodatage de la vue echec:', errVue.message)
+      } catch (eVue) {
+        console.error('[menages-public] horodatage de la vue impossible:', eVue.message)
+      }
+    }
+
     return res.json({
       bookings: allBookings, label: tokenData.label,
       // Les menages que personne ne porte, sur ses biens. Voir le bloc plus haut
@@ -883,6 +952,16 @@ module.exports = async function handler(req, res) {
       // deviner un defaut qui n'est peut-etre pas celui de l'hote.
       retrait_delai_heures: delaiRetrait,
       property_ids: allowedIds, visibility_days: visibilityDays,
+      // ⚠ LES BIENS DE SON PERIMETRE, AVEC LEUR VIGNETTE (16 octobre 2026).
+      // Servis UNE fois, pas recopies dans chaque reservation : la meme photo
+      // revient sur la ligne du menage, dans le fil d'actualites et dans la
+      // feuille du jour. Liste blanche de trois champs — id, nom, photo — et
+      // rien d'autre : c'est la meme discipline que `a_prendre` et `autrui`.
+      // La photo est une URL publique du bien, deja servie a l'hote par
+      // `api/garde.js` ; la prestataire voit ce logement en y entrant.
+      // `properties` est DEJA filtre par `allowedIds` plus haut, donc aucun
+      // bien hors de son perimetre ne peut sortir par ici.
+      biens: properties.map(p => ({ id: p.id, nom: p.name, photo: p.photo })),
       comments, events: eventsData || [],
       done: doneList,
       // Le statut de chaque menage assigne : `offered` = a confirmer (suppleant),
@@ -903,7 +982,16 @@ module.exports = async function handler(req, res) {
         // seulement qu'une proposition est en cours (porteuse) ou qu'on la lui
         // fait (proposee) — jamais a qui d'autre.
         propose: proposeesDe(m).length > 0,
-        expire_le: proposeesDe(m).length ? m.offer_expires_at : null
+        expire_le: proposeesDe(m).length ? m.offer_expires_at : null,
+        // ⚠ `vu_le` EST SERVI MEME QUAND IL EST NUL : c'est ce nul qui fait
+        // apparaitre le bouton « Vu ». Il est en revanche ABSENT quand la
+        // colonne n'a pas pu etre lue (migration pas encore collee), et son
+        // ecran traite `undefined` comme « ne rien demander » — un bouton qui
+        // echouerait ne doit pas etre propose.
+        // ⚠ ET UNE VALIDATION D'UNE AUTRE PERSONNE NE COMPTE PAS (constat de
+        // la revue de 20fb83d) : le menage a change de main, celle qui le
+        // porte maintenant n'a rien lu.
+        ...('vu_le' in m ? { vu_le: validePar(m, m.provider_id) } : {})
       })),
       prenom: profilPresta.first_name,
       // ⚠ UNE LISTE A PART, JAMAIS MELEE A `bookings` NI A `menages` : c'est ce
@@ -1096,6 +1184,13 @@ async function repondreALOffre (req, res, token, { accepte, propertyId, bookingI
                 // recalculerait l'assignation contre sa decision.
                 assignment_reason: `Accepte par ${profil.first_name}.`,
                 accepted_at: new Date().toISOString(),
+                // ⚠ ACCEPTER VAUT VALIDER, et le dire ici evite de lui
+                // demander deux fois la meme chose : elle vient de taper
+                // « J'accepte » sur ce menage precis. Lui afficher ensuite un
+                // bouton « Vu », et lui envoyer deux relances parce qu'elle ne
+                // l'a pas tape, serait absurde — et lui apprendrait a ignorer
+                // les relances.
+                vu_le: new Date().toISOString(), vu_par: profil.id,
                 updated_at: new Date().toISOString() })
       .eq('id', menage.id).contains('proposee_a', [moi])
       .gt('offer_expires_at', new Date().toISOString())
@@ -1732,6 +1827,9 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
               // (« Decision humaine, conservee »).
               assigned_by: 'manual',
               assignment_reason: `Pris par ${profil.first_name}.`,
+              // ⚠ LE PRENDRE VAUT LE VALIDER : elle l'a cherche, choisi et
+              // pris. Meme raison qu'a l'acceptation d'une proposition.
+              vu_le: new Date().toISOString(), vu_par: profil.id,
               accepted_at: new Date().toISOString(),
               updated_at: new Date().toISOString() })
     .eq('id', menage.id)
@@ -1770,6 +1868,90 @@ async function prendreUnMenage (req, res, token, { propertyId, bookingId, depart
     console.error('[menages-public] trace de prise NON ECRITE:', menage.id, errLog.message)
   }
   return res.json({ success: true, status: 'accepted' })
+}
+
+// ─── « VU » : ELLE VALIDE UN MENAGE QU'ELLE PORTE (14 octobre 2026) ─────────
+//
+// ⚠ POURQUOI CE GESTE EXISTE. Un menage ATTRIBUE D'OFFICE nait `accepted` :
+// elle n'a rien a confirmer, et l'hote n'a donc aucun moyen de savoir si elle
+// l'a lu. C'est ce trou que ce bouton ferme, menage par menage — la ou
+// `public_tokens.pwa_vue_le` ne disait que « elle a ouvert sa page un jour ».
+//
+// ⚠ IL NE DECIDE DE RIEN D'AUTRE. Pas d'acceptation (rien a accepter), pas de
+// transfert, pas de refus : le seul effet est de poser une date. C'est
+// pourquoi il n'y a ici ni ecriture conditionnelle atomique ni journal
+// d'assignation — rien ne change de main.
+//
+// ⚠ ET IL EST IDEMPOTENT, PAR `vu_le is null`. Deux taps (reseau lent, file
+// hors ligne rejouee) ne doivent pas deplacer la date : l'hote lirait « vu a
+// 9 h 02 » sur un menage vu a 7 h 40, et la relance de 9 h aurait l'air
+// d'avoir ete declenchee pour rien.
+async function validerMonMenage (req, res, token, { propertyId, bookingId, departureDate }) {
+  const { data: pt, error: errTok } = await supabase.from('public_tokens')
+    .select('user_id').eq('token', token).maybeSingle()
+  if (errTok) {
+    console.error('[menages-public] lecture du token echec:', errTok.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!pt) return res.status(401).json({ error: 'Token invalide' })
+
+  // GARDE 1 — ETRE QUELQU'UN. Un lien sans profil actif ne porte aucun menage :
+  // il n'a rien a valider, et le laisser ecrire poserait une validation au nom
+  // de personne.
+  const porteur = await profilActifDuJeton(pt.user_id, token)
+  if (porteur.statut) return refuserPorteur(res, porteur.statut)
+  const profil = porteur.profil
+
+  // GARDE 2 — C'EST SON MENAGE. L'ecriture porte sur `provider_id = elle` :
+  // valider le menage d'une collegue eteindrait l'alerte de l'hote et les deux
+  // relances sur quelqu'un qui n'a jamais rien lu. C'est la garde qui compte
+  // ici, et elle est DANS l'update, pas testee avant.
+  //
+  // ⚠ ET SEULEMENT CE QU'ELLE PORTE, PAS CE QU'ON LUI PROPOSE : une
+  // proposition se valide en l'acceptant, ce qui pose `vu_le` au meme instant.
+  // Laisser valider une offre lui ferait croire qu'elle a repondu — et le
+  // menage expirerait chez quelqu'un d'autre.
+  const quand = new Date().toISOString()
+  const { data: maj, error: errMaj } = await supabase.from('menages')
+    // ⚠ `vu_par` AVEC `vu_le`, TOUJOURS : une date sans son auteur survivrait
+    // au prochain changement de porteuse et eteindrait l'alerte chez la
+    // suivante (constat de la revue de 20fb83d).
+    .update({ vu_le: quand, vu_par: profil.id, updated_at: quand })
+    .eq('user_id', pt.user_id).eq('property_id', String(propertyId))
+    .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
+    .eq('provider_id', profil.id)
+    // ⚠ IDEMPOTENT POUR ELLE, PAS POUR LA PRECEDENTE. `vu_le is null` seul
+    // refusait d'ecrire sur un menage valide par la porteuse d'AVANT puis
+    // reassigne : elle tapait « Vu » et le serveur lui repondait « deja fait »
+    // sans que rien ne soit a son nom. La condition porte donc sur l'AUTEUR.
+    .or(`vu_le.is.null,vu_par.neq.${profil.id}`)
+    .select('id, vu_le, vu_par')
+  if (errMaj) {
+    console.error('[menages-public] validation echec:', errMaj.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ZERO LIGNE : soit elle l'avait deja valide (le cas courant — deux taps),
+  // soit ce menage n'est pas le sien. Les deux se repondent `success`, avec la
+  // date quand on peut la lire : son ecran doit finir coche dans le premier
+  // cas, et il n'a rien a apprendre du second.
+  if (!maj || !maj.length) {
+    const { data: deja, error: errRelu } = await supabase.from('menages')
+      .select('vu_le, vu_par').eq('user_id', pt.user_id).eq('property_id', String(propertyId))
+      .eq('booking_id', String(bookingId)).eq('departure_date', departureDate)
+      .eq('provider_id', profil.id).maybeSingle()
+    // ⚠ UNE PANNE DE LECTURE N'EST PAS UN MENAGE INTROUVABLE (constat de la
+    // revue de 20fb83d, et regle de ce fichier). Rendre 404 ici annoncerait
+    // « ce menage n'est pas le votre » a quelqu'un qui vient de le valider,
+    // pour un hoquet de la base.
+    if (errRelu) {
+      console.error('[menages-public] relecture de la validation echec:', errRelu.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+    const sienne = validePar(deja, profil.id)
+    if (sienne) return res.json({ success: true, vu_le: sienne })
+    return res.status(404).json({ error: 'Ménage introuvable' })
+  }
+  return res.json({ success: true, vu_le: maj[0].vu_le })
 }
 
 // ─── LE DELAI DE RETRAIT, REGLE PAR L'HOTE (lot 5) ──────────────────────────
@@ -2024,7 +2206,7 @@ async function mesDisponibilites (req, res, token) {
   // ⚠ LE MEME CONTRAT QUE LE CHEMIN NOMINAL, `conges` COMPRIS. Depuis que la
   // reponse porte des conges, une branche qui les omet fait lever le front des
   // qu'il itere `data.conges` : la prestataire sans droit verrait un ecran casse
-  // au lieu du message « gérées par votre employeur ». Une reponse partielle est
+  // au lieu du message « gérées par votre hôte ». Une reponse partielle est
   // un piege pose pour le lot d'apres.
   if (qui.erreur === 403) {
     return res.status(200).json({ autorise: false, exceptions: [], conges: [], regles: [] })
@@ -2058,7 +2240,7 @@ async function mesDisponibilites (req, res, token) {
   // envoyait toujours. Le defaut ne se voyait pas sur un profil SANS regle,
   // c'est-a-dire sur le seul qu'on regardait.
   const { data: regles, error: errR } = await supabase.from('provider_availability_rules')
-    .select('id, label, rrule').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
+    .select('id, label, rrule, source').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
     .eq('active', true).order('created_at', { ascending: true }).limit(MAX_REGLES_ACTIVES)
   if (errR) {
     console.error('[menages-public] lecture regles echec:', errR.message)
@@ -2096,6 +2278,16 @@ async function mesDisponibilites (req, res, token) {
       return {
         id: r.id,
         label: r.label,
+        // ⚠ QUI A POSE CETTE REGLE (17 octobre 2026, precision n° 4 de
+        // Thierry). Ses ABSENCES disaient deja leur source — « Absence posee
+        // par votre hote » — mais pas ses JOURS HABITUELS : son hote pouvait
+        // changer les jours ou elle est candidate sans qu'aucun ecran ne le
+        // lui dise. Elle ouvrait sa page, voyait d'autres cases cochees, et
+        // n'avait aucun moyen de savoir si elle s'etait trompee elle-meme.
+        // ⚠ `|| 'hote'` : le seul writer d'avant le 15 septembre 2026 etait
+        // l'hote, et une valeur absente ne doit pas se lire « elle » — c'est
+        // la meme convention que `api/disponibilites.js`.
+        source: r.source || 'hote',
         jours: forme ? forme.jours : null,
         cadence: forme ? forme.cadence : null,
         ancre: forme ? forme.ancre : null
@@ -2140,81 +2332,47 @@ async function reglerMesJours (req, res, token) {
   if (lotsBruts.length > 2) return res.status(400).json({ error: 'Trop de lignes' })
   const cadence = Number((req.body || {}).toutes_les_n_semaines) || 1
 
-  // ⚠ ON VALIDE TOUT AVANT D'ECRIRE QUOI QUE CE SOIT. Valider lot par lot en
-  // ecrivant au fil de l'eau laisserait la moitie d'un reglage en base sur un
-  // corps a moitie faux.
-  // ⚠ UNE LIGNE VIDE EST LEGITIME — « aucun jour cette semaine-la » — et ne
-  // produit simplement aucune regle. Ce n'est pas une erreur de saisie.
-  const aPoser = []
-  // La FORME de ce qu'on pose, pour le comparer a l'existant en jours de semaine.
-  // ⚠ On ne compare pas des RRULE : l'hote doit lire « elle ne travaille plus le
-  // samedi », pas « regle #a4f2 desactivee ».
-  const formeAPoser = []
-  for (const lot of lotsBruts) {
-    const jours = (lot && lot.jours) || []
-    if (!Array.isArray(jours)) return res.status(400).json({ error: 'Jours invalides' })
-    if (!jours.length) continue
-    const v = validerRegle({ jours, toutes_les_n_semaines: cadence, depuis: lot && lot.depuis })
-    if (v.erreur) return res.status(400).json({ error: v.erreur })
-    // ⚠ `source: 'prestataire'` — c'est ELLE qui pose. La colonne sert a deux
-    // choses que rien d'autre ne porte : la notification a l'instant du
-    // changement, et la TRACE lisible dans sa fiche longtemps apres. Une
-    // notification se rate ; la trace, elle, reste.
-    aPoser.push({ user_id: qui.userId, provider_id: qui.profil.id,
-                  rrule: v.rrule, label: v.label, active: true, source: 'prestataire' })
-    formeAPoser.push({ jours: v.jours, cadence: v.cadence })
-  }
+  // ⚠ LA MECANIQUE VIT DANS `lib/cleaning/regles.js`, AVEC LA VALIDATION
+  // (16 octobre 2026). Elle y est partie le jour ou la fiche de l'hote a eu
+  // besoin du MEME geste : valider tous les lots avant d'ecrire quoi que ce
+  // soit, REMPLACER EN UNE TRANSACTION — la fonction Postgres desactive par id
+  // puis insere, et c'est tout ou rien : il n'y a plus ni union des deux
+  // reglages, ni zero regle active — et rendre la FORME posee pour que
+  // l'appelant puisse annoncer ce qui a change.
+  // Les deux endpoints ne different plus que par leurs gardes et par la
+  // `source` : ici `prestataire`, c'est ELLE qui pose.
+  const r = await remplacerRegles(supabase, {
+    userId: qui.userId, providerId: qui.profil.id, lots: lotsBruts, cadence,
+    source: 'prestataire', maxActives: MAX_REGLES_ACTIVES })
 
-  // Ce qui est actif AUJOURD'HUI : c'est ce qu'on desactivera, et rien d'autre.
-  // ⚠ ON DESIGNE LES LIGNES PAR LEUR ID, PAS PAR UN FILTRE `active = true`.
-  // Un filtre desactiverait aussi ce qu'on vient d'inserer.
-  const { data: avant, error: errLire } = await supabase.from('provider_availability_rules')
-    // ⚠ `rrule` EN PLUS DE `id` : c'est la forme d'AVANT, et sans elle on ne peut
-    // pas dire a l'hote CE QUI a change — seulement que quelque chose a change.
-    .select('id, rrule').eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
-    .eq('active', true).limit(MAX_REGLES_ACTIVES + 1)
-  if (errLire) {
-    console.error('[menages-public] lecture regles avant reglage echec:', errLire.message)
+  // ⚠ LA PHRASE « vos nouveaux jours sont enregistres, mais les anciens n'ont
+  // pas pu etre retires » A DISPARU AVEC SON CAS (16 octobre 2026). Elle
+  // existait parce que le remplacement se faisait en deux ecritures et pouvait
+  // s'arreter au milieu. La fonction Postgres est une transaction : soit tout
+  // est pose, soit rien n'a bouge — et un ecran qui n'a qu'un seul refus a
+  // dire est un ecran qu'on comprend.
+  if (r.erreur === 'rpc_absente') {
+    console.error('[menages-public] migration 2026-10-16-regles-atomiques NON APPLIQUEE', r.detail)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
-  if ((avant || []).length > MAX_REGLES_ACTIVES) {
-    // Ne devrait pas arriver : la lecture et le plafond sont la meme borne.
-    console.error('[menages-public] plus de regles actives que le plafond')
+  // ⚠ LE PLAFOND SE DIT, il ne se tait pas. Et il se dit AVEC LE GESTE QU'ELLE
+  // PEUT FAIRE : elle ne peut pas nettoyer ses propres regles depuis cette
+  // page — c'est son hôte qui le peut.
+  if (r.erreur === 'plafond') {
+    console.error('[menages-public] plafond de regles actives atteint', r.detail || '')
+    return res.status(409).json({
+      // ⚠ LE CODE PART AVEC LA PHRASE (16 octobre 2026) : sa page n'a pas
+      // encore de moteur i18n, elle affiche donc le francais du serveur ; la
+      // fiche de l'hote, elle, traduit `code` par ses propres cles.
+      code: 'trop_de_regles',
+      error: 'Vos jours n\'ont pas pu être enregistrés. Prévenez votre hôte.' })
+  }
+  if (r.erreur) {
+    if (r.status === 400) return res.status(400).json({ error: r.erreur })
+    console.error('[menages-public] reglage des jours echec:', r.erreur, r.detail || '')
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
-
-  // ⚠ ON INSERE AVANT DE DESACTIVER, ET L'ORDRE EST LA GARDE.
-  // L'inverse — desactiver puis inserer — laisse ZERO regle si la seconde
-  // moitie echoue, c'est-a-dire « disponible tous les jours » : le moteur lui
-  // attribue alors des menages n'importe quel jour, et personne ne l'a demande.
-  // Dans cet ordre, un echec laisse l'ANCIEN et le NOUVEAU actifs : elle est
-  // disponible sur l'union des deux, ce que l'ecran AFFICHE fidelement et que le
-  // geste suivant corrige. Entre deux etats degrades, on choisit celui qui se
-  // voit et qui ne dit pas le contraire de ce qui s'est passe.
-  if (aPoser.length) {
-    const { error: errIns } = await supabase.from('provider_availability_rules').insert(aPoser)
-    if (errIns) {
-      console.error('[menages-public] insert regles echec:', errIns.message)
-      return res.status(503).json({ error: 'Service temporairement indisponible' })
-    }
-  }
-
-  const anciens = (avant || []).map(r => r.id)
-  if (anciens.length) {
-    const { error: errMaj } = await supabase.from('provider_availability_rules')
-      .update({ active: false })
-      .in('id', anciens).eq('user_id', qui.userId).eq('provider_id', qui.profil.id)
-    if (errMaj) {
-      console.error('[menages-public] desactivation regles echec:', errMaj.message)
-      // ⚠ ON DIT CE QUI S'EST REELLEMENT PASSE. « Service indisponible » ferait
-      // croire que rien n'est parti, alors que les nouveaux jours SONT poses :
-      // elle est disponible sur l'union des deux reglages, et elle doit le
-      // savoir pour recommencer.
-      return res.status(503).json({
-        error: 'Vos nouveaux jours sont enregistrés, mais les anciens n\'ont pas pu être retirés. ' +
-               'Rouvrez cet onglet et vérifiez.' })
-    }
-  }
+  const avant = r.avant
 
   // ⚠ APRES L'ECRITURE, ET SANS POUVOIR LA DEFAIRE. La notification et la
   // reprise des propositions sont best-effort : la verite est deja en base, et
@@ -2226,10 +2384,10 @@ async function reglerMesJours (req, res, token) {
   const formeAvant = (avant || []).map(r => lireRrule(r.rrule)).filter(Boolean)
   await apresChangementDeRegles({
     userId: qui.userId, providerId: qui.profil.id, prenom: qui.profil.first_name,
-    avant: formeAvant, apres: formeAPoser
+    avant: formeAvant, apres: r.formes
   })
 
-  return res.status(200).json({ success: true, posees: aPoser.length, retirees: anciens.length })
+  return res.status(200).json({ success: true, posees: r.poses, retirees: (avant || []).length })
 }
 
 // Elle pose ou retire un CONGE — une PLAGE (15 septembre 2026).
@@ -2242,7 +2400,7 @@ async function mesConges (req, res, token, { retirer }) {
   const qui = await celleQuiDeclare(token, { ecriture: true })
   if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
   if (qui.erreur === 403) {
-    return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+    return res.status(403).json({ error: 'Vos absences sont gérées par votre hôte' })
   }
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
 
@@ -2269,7 +2427,7 @@ async function mesConges (req, res, token, { retirer }) {
     if (!data || !data.length) {
       // ⚠ « RIEN A SUPPRIMER » N'EST PAS « CE N'EST PAS A VOUS » — meme nuance
       // que sur les absences d'un jour, et pour la meme raison : sur un telephone
-      // en 3G, un double tap ne doit pas accuser l'employeur.
+      // en 3G, un double tap ne doit pas accuser l'hôte.
       const { data: reste, error: errLire } = await supabase.from('conges_plages')
         .select('id').eq('id', String(id))
         .eq('user_id', qui.userId).eq('provider_id', qui.profil.id).maybeSingle()
@@ -2278,7 +2436,7 @@ async function mesConges (req, res, token, { retirer }) {
         return res.status(503).json({ error: 'Service temporairement indisponible' })
       }
       if (!reste) return res.status(200).json({ success: true, retire: true })
-      return res.status(409).json({ error: 'Ce congé a été posé par votre employeur' })
+      return res.status(409).json({ error: 'Ce congé a été posé par votre hôte' })
     }
     return res.status(200).json({ success: true, retire: true })
   }
@@ -2370,7 +2528,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
   const qui = await celleQuiDeclare(token, { ecriture: true })
   if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
   if (qui.erreur === 403) {
-    return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+    return res.status(403).json({ error: 'Vos absences sont gérées par votre hôte' })
   }
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
 
@@ -2411,7 +2569,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
       // ⚠ « RIEN A SUPPRIMER » N'EST PAS « CE N'EST PAS A VOUS ». Zero ligne
       // touchee couvre deux cas tres differents, et le 409 les confondait : sur
       // cette PWA en 3G, un double tap sur « Annuler » annoncait a la
-      // prestataire que son employeur avait pose une absence qu'elle venait
+      // prestataire que son hôte avait pose une absence qu'elle venait
       // elle-meme de retirer. On regarde ce qui occupe reellement ce jour.
       const { data: reste, error: errLire } = await supabase
         .from('provider_availability_exceptions')
@@ -2425,7 +2583,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
       // Plus rien sur ce jour : c'est le resultat qu'elle demandait. Succes
       // idempotent, comme le chemin de declaration.
       if (!reste) return res.status(200).json({ success: true, date: jour, retiree: true })
-      return res.status(409).json({ error: 'Cette absence a été posée par votre employeur' })
+      return res.status(409).json({ error: 'Cette absence a été posée par votre hôte' })
     }
     await annoncerException(qui, jour, data[0].available === true
       ? 'a retiré sa disponibilité exceptionnelle du' : 'a retiré son absence du', { envoyer })
@@ -2480,7 +2638,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
     // pas la sienne (l'update ci-dessus n'a rien touche).
     if (error.code === '23505') {
       return res.status(409).json({
-        error: 'Votre employeur a déjà noté quelque chose sur cette date. Prévenez-le directement.' })
+        error: 'Votre hôte a déjà noté quelque chose sur cette date. Prévenez-le directement.' })
     }
     console.error('[menages-public] declaration indisponibilite echec:', error.message)
     return res.status(503).json({ error: 'Service temporairement indisponible' })
@@ -2500,7 +2658,7 @@ async function mesIndisponibilites (req, res, token, { retirer }) {
 async function annoncerMaPlage (req, res, token) {
   const qui = await celleQuiDeclare(token, { ecriture: true })
   if (qui.erreur === 401) return res.status(401).json({ error: 'Token invalide' })
-  if (qui.erreur === 403) return res.status(403).json({ error: 'Vos absences sont gérées par votre employeur' })
+  if (qui.erreur === 403) return res.status(403).json({ error: 'Vos absences sont gérées par votre hôte' })
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
   let envoye = false
   try {

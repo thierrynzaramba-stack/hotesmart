@@ -53,16 +53,32 @@ function preparer ({ profil = { id: MARIE, first_name: 'Marie', active: true },
                      // masquait tout ce lot (REVIEW.md regle 8).
                      reglesAvant = [{ id: 'r-vieille',
                        rrule: 'DTSTART:20260907T120000Z\nRRULE:FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,SA' }],
-                     erreurInsertRegles = null, erreurMajRegles = null,
-                     erreurLireAvant = null,
+                     // ⚠ DEPUIS LE 16 OCTOBRE 2026, LE REMPLACEMENT EST UNE
+                     // TRANSACTION POSTGRES : il n'y a plus d'insert, d'update
+                     // ni de lecture separes a faire echouer — il y a UN appel,
+                     // qui aboutit ou qui leve. `erreurRpc` remplace donc les
+                     // trois pannes d'avant, et le fait qu'on ne puisse PLUS
+                     // simuler un echec « au milieu » est exactement ce que ce
+                     // lot a ferme.
+                     erreurRpc = null,
                      // Ce qui occupe déjà ce jour-là : rien, sa déclaration, ou
                      // une absence posée par l'hôte.
                      ligneExistante = null } = {}) {
   // ⚠ LA TACHE DU JOUR GARDE SON ETAT d'une ecriture a l'autre (constat de
   // review) : figee d'avance, elle laissait passer un test « 10 jours = 1 SMS »
   // meme si les jours n'ecrivaient rien dans la tache.
-  const etat = { ecritures: [], lectures: [], sms: [], tache: tacheDuJour ? { ...tacheDuJour } : null }
+  const etat = { ecritures: [], lectures: [], sms: [], rpc: [],
+                 tache: tacheDuJour ? { ...tacheDuJour } : null }
   const client = {
+    // La fonction Postgres qui remplace tous les jours habituels d'une
+    // liaison, en une transaction. Le double NOTE l'appel et rend ce que la
+    // vraie fonction rend : ce qui etait actif, et combien de lignes ont ete
+    // posees.
+    async rpc (nom, args) {
+      etat.rpc.push({ nom, args })
+      if (erreurRpc) return { data: null, error: erreurRpc }
+      return { data: { avant: reglesAvant, posees: (args.p_regles || []).length }, error: null }
+    },
     from (table) {
       const a = { table, f: {} }
       etat.lectures.push(a)
@@ -323,12 +339,12 @@ test('un profil DÉSACTIVÉ ne déclare plus rien', async () => {
   assert.strictEqual(etat.ecritures.length, 0)
 })
 
-test('`self_availability` à \'none\' : elle passe par son employeur', async () => {
+test('`self_availability` à \'none\' : elle passe par son hôte', async () => {
   const { handler, etat } = preparer({ droits: { self_availability: 'none' } })
   const res = reponse()
   await handler(ecrire({ date: DEMAIN }), res)
   assert.strictEqual(res.code, 403)
-  assert.match(res.body.error, /employeur/)
+  assert.match(res.body.error, /hôte/)
   assert.strictEqual(etat.ecritures.length, 0)
 })
 
@@ -491,7 +507,7 @@ test('elle ne S\'APPROPRIE PAS une absence posée par l\'hôte', async () => {
   const res = reponse()
   await handler(ecrire({ date: DEMAIN }), res)
   assert.strictEqual(res.code, 409)
-  assert.match(res.body.error, /employeur/)
+  assert.match(res.body.error, /hôte/)
   // L'update n'a touché aucune ligne (il vise `source = 'prestataire'`), et
   // l'insert s'est heurté à la contrainte d'unicité : rien n'a changé de main.
   const maj = etat.ecritures.find(x => x.table === 'provider_availability_exceptions' && x.op === 'update')
@@ -522,13 +538,13 @@ test('elle NE PEUT PAS défaire une absence posée par l\'hôte', async () => {
   await handler({ method: 'POST', query: { token: TOKEN }, headers: {},
                   body: { action: 'retirerIndisponibilite', date: DEMAIN } }, res)
   assert.strictEqual(res.code, 409)
-  assert.match(res.body.error, /employeur/)
+  assert.match(res.body.error, /hôte/)
 })
 
 test('retirer DEUX FOIS la même absence ne ment pas', async () => {
   // ⚠ DÉFAUT TROUVÉ EN REVIEW. « Rien à supprimer » n'est pas « ce n'est pas à
   // vous » : sur cette PWA en 3G, un double tap sur « Annuler » annonçait à la
-  // prestataire que son employeur avait posé une absence qu'elle venait
+  // prestataire que son hôte avait posé une absence qu'elle venait
   // elle-même de retirer. Plus rien sur ce jour = c'est le résultat qu'elle
   // demandait : succès idempotent.
   const { handler } = preparer({ supprime: [], ligneExistante: null })
@@ -606,8 +622,13 @@ test('une règle ILLISIBLE sort avec `jours: null`, elle ne fait pas tomber la l
   const res = reponse()
   await handler(lire(), res)
   assert.strictEqual(res.body.autorise, true)
+  // ⚠ `source` EST SERVI DEPUIS LE 17 OCTOBRE 2026, et l'égalité STRICTE de ce
+  // test est ce qui l'a fait remarquer : une règle illisible la porte comme
+  // les autres, sinon l'écran ne saurait pas dire qui a posé celle-là
+  // précisément — c'est-à-dire celle dont il ne sait rien d'autre.
   assert.deepStrictEqual(res.body.regles,
-    [{ id: 'r1', label: 'Le premier lundi du mois', jours: null, cadence: null, ancre: null }])
+    [{ id: 'r1', label: 'Le premier lundi du mois', source: 'hote',
+       jours: null, cadence: null, ancre: null }])
 })
 
 test('sans le droit, la lecture répond « non autorisé » sans rien fuir', async () => {
@@ -669,7 +690,7 @@ test('elle déclare un congé, marqué à SA source', async () => {
   assert.strictEqual(e.row.provider_id, MARIE)
 })
 
-test('elle ne peut PAS retirer un congé posé par son employeur', async () => {
+test('elle ne peut PAS retirer un congé posé par son hôte', async () => {
   // ⚠ MÊME GARDE QUE LES ABSENCES D'UN JOUR. Un congé posé par l'hôte — « tu ne
   // travailles pas cette semaine-là » — n'est pas le sien à défaire : le lui
   // laisser effacer la remettrait candidate sur des jours dont il l'avait
@@ -678,14 +699,14 @@ test('elle ne peut PAS retirer un congé posé par son employeur', async () => {
   const res = reponse()
   await handler(ecrire({ action: 'retirerConge', id: CONGE_ID }), res)
   assert.strictEqual(res.code, 409)
-  assert.match(res.body.error, /employeur/)
+  assert.match(res.body.error, /hôte/)
   const e = etat.ecritures.find(x => x.table === 'conges_plages' && x.op === 'delete')
   assert.strictEqual(e.f.source, 'prestataire', 'le DELETE filtre sur SA source')
 })
 
 test('retirer deux fois le même congé reste un SUCCÈS, pas une accusation', async () => {
   // ⚠ Sur un téléphone en 3G, un double tap ne doit pas annoncer que
-  // l'employeur a posé un congé qu'elle vient elle-même de retirer.
+  // l'hôte a posé un congé qu'elle vient elle-même de retirer.
   const { handler } = preparer({ congeSupprime: [], congeExistant: null })
   const res = reponse()
   await handler(ecrire({ action: 'retirerConge', id: CONGE_ID }), res)
@@ -739,39 +760,51 @@ test('régler ses jours : elle envoie des JOURS, jamais une RRULE', async () => 
   await handler(ecrire({ action: 'reglerMesJours', toutes_les_n_semaines: 2,
                          lots: [{ jours: [1, 2], depuis: DEMAIN }] }), res)
   assert.strictEqual(res.code, 200)
-  const ins = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'insert')
-  assert.ok(ins, 'la règle est insérée')
-  assert.strictEqual(ins.row.length, 1)
-  assert.match(ins.row[0].rrule, /FREQ=WEEKLY;INTERVAL=2/, 'la chaîne est CONSTRUITE par le serveur')
-  assert.strictEqual(ins.row[0].user_id, U, 'le compte est posé explicitement')
-  assert.strictEqual(ins.row[0].provider_id, MARIE)
-  assert.strictEqual(ins.row[0].active, true)
+  // ⚠ L'ECRITURE EST DANS LA TRANSACTION, donc l'assertion porte sur ce qu'on
+  // DONNE a la fonction. La RRULE reste construite par le serveur : la
+  // fonction Postgres ne la fabrique pas, et c'est voulu — une seconde
+  // construction en SQL finirait par diverger de `validerRegle`.
+  const appel = etat.rpc.find(r => r.nom === 'remplacer_regles_dispo')
+  assert.ok(appel, 'le remplacement passe par la transaction')
+  assert.strictEqual(appel.args.p_regles.length, 1)
+  assert.match(appel.args.p_regles[0].rrule, /FREQ=WEEKLY;INTERVAL=2/,
+    'la chaîne est CONSTRUITE par le serveur')
+  assert.strictEqual(appel.args.p_user_id, U, 'le compte est posé explicitement')
+  assert.strictEqual(appel.args.p_provider_id, MARIE)
+  assert.strictEqual(appel.args.p_source, 'prestataire', 'c\'est ELLE qui pose')
 })
 
-test('UN SEUL ALLER-RETOUR, et on INSÈRE avant de désactiver', async () => {
-  // ⚠ L'ORDRE EST LA GARDE, et c'est le constat majeur de la review.
-  // Désactiver puis insérer laisse ZÉRO règle si la seconde moitié échoue —
-  // c'est-à-dire « disponible tous les jours », l'inverse exact de ce qu'elle
-  // demandait. Dans cet ordre, un échec laisse l'ancien ET le nouveau actifs :
-  // elle est disponible sur l'union, ce que l'écran AFFICHE fidèlement et que le
-  // geste suivant corrige. Entre deux états dégradés, on choisit celui qui se
-  // voit et qui ne dit pas le contraire de ce qui s'est passé.
+test('UN SEUL ALLER-RETOUR, et AUCUNE écriture hors de la transaction', async () => {
+  // ⚠ L'ORDRE ÉTAIT LA GARDE ; IL NE L'EST PLUS, PARCE QU'IL N'Y A PLUS DE
+  // MILIEU (16 octobre 2026). Tant que remplacer était deux écritures, il
+  // fallait choisir laquelle perdre en cas de coupure : désactiver d'abord
+  // laissait ZÉRO règle — « disponible tous les jours », l'inverse exact de ce
+  // qui venait d'être demandé — insérer d'abord laissait l'union des deux. La
+  // fonction Postgres est une transaction : les deux aboutissent ensemble, ou
+  // aucune n'a lieu. Ce test garde donc la chose qui compte désormais : rien
+  // ne s'écrit À CÔTÉ de la transaction.
   const { handler, etat } = preparer({})
   await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), reponse())
-  const ordre = etat.ecritures.filter(x => x.table === 'provider_availability_rules').map(x => x.op)
-  assert.deepStrictEqual(ordre, ['insert', 'update'], 'insert AVANT update')
+  assert.strictEqual(etat.rpc.length, 1, 'un seul aller-retour')
+  assert.deepStrictEqual(
+    etat.ecritures.filter(x => x.table === 'provider_availability_rules'), [],
+    'aucune écriture de table hors transaction')
 })
 
-test('la désactivation vise les ANCIENS ID, pas un filtre `active = true`', async () => {
-  // ⚠ Un filtre `active = true` désactiverait aussi ce qu'on vient d'insérer :
-  // elle se retrouverait sans aucune règle, donc disponible tous les jours.
+test('le cloisonnement part AVEC l\'appel : compte et liaison', async () => {
+  // ⚠ Sans `user_id`, la fonction compterait et désactiverait les règles d'un
+  // autre compte. Le cloisonnement ne peut pas vivre dans la fonction seule :
+  // c'est l'appelant qui dit DE QUI il parle, et il ne peut le dire que de
+  // celle que son jeton désigne.
   const { handler, etat } = preparer({ reglesAvant: [{ id: 'r-a' }, { id: 'r-b' }] })
   await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), reponse())
-  const maj = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'update')
-  assert.deepStrictEqual(maj.f.id_in, ['r-a', 'r-b'])
-  assert.strictEqual(maj.row.active, false)
-  assert.strictEqual(maj.f.user_id, U, 'et le cloisonnement tient quand même')
-  assert.strictEqual(maj.f.provider_id, MARIE)
+  const { args } = etat.rpc[0]
+  assert.strictEqual(args.p_user_id, U)
+  assert.strictEqual(args.p_provider_id, MARIE)
+  // Le plafond descend lui aussi : la borne de lecture et celle d'écriture
+  // sont la même, sinon un remplacement redevient une addition.
+  assert.strictEqual(typeof args.p_max_actives, 'number')
+  assert.ok(args.p_max_actives > 0)
 })
 
 test('une RRULE envoyée par le client est IGNORÉE, pas écrite', async () => {
@@ -780,8 +813,8 @@ test('une RRULE envoyée par le client est IGNORÉE, pas écrite', async () => {
   await handler(ecrire({ action: 'reglerMesJours',
                          lots: [{ jours: [1], rrule: 'RRULE:FREQ=MONTHLY;BYMONTHDAY=1' }] }), res)
   assert.strictEqual(res.code, 200)
-  const ins = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'insert')
-  assert.ok(!/MONTHLY/.test(JSON.stringify(ins.row)), 'la chaîne du client n\'atteint pas la base')
+  assert.ok(!/MONTHLY/.test(JSON.stringify(etat.rpc[0].args)),
+    'la chaîne du client n\'atteint pas la base')
 })
 
 test('un lot VIDE est légitime : il ne pose rien, il n\'échoue pas', async () => {
@@ -791,8 +824,7 @@ test('un lot VIDE est légitime : il ne pose rien, il n\'échoue pas', async () 
   await handler(ecrire({ action: 'reglerMesJours', toutes_les_n_semaines: 2,
                          lots: [{ jours: [1] }, { jours: [] }] }), res)
   assert.strictEqual(res.code, 200)
-  const ins = etat.ecritures.find(x => x.table === 'provider_availability_rules' && x.op === 'insert')
-  assert.strictEqual(ins.row.length, 1, 'une seule règle posée')
+  assert.strictEqual(etat.rpc[0].args.p_regles.length, 1, 'une seule règle posée')
 })
 
 test('TOUT est validé AVANT la moindre écriture', async () => {
@@ -856,7 +888,13 @@ test('LA MÊME VALIDATION QUE L\'HÔTE — éprouvée par le COMPORTEMENT', asyn
     const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
       .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
     assert.match(src, /require\(['"]\.\.\/lib\/cleaning\/regles['"]\)/, f)
-    assert.match(src, /validerRegle\(/, f)
+    // ⚠ `validerRegle(` OU `remplacerRegles(` DEPUIS LE 16 OCTOBRE 2026. La
+    // mécanique d'écriture est partie dans le module avec la validation : un
+    // endpoint qui appelle `remplacerRegles` valide donc par ce chemin, et
+    // n'appelle plus `validerRegle` lui-même. Ce que ce test garde est
+    // inchangé — aucun des deux endpoints ne valide dans son coin — et il le
+    // garde mieux : l'ORDRE d'écriture aussi est désormais commun.
+    assert.match(src, /(validerRegle|remplacerRegles)\(/, f)
   }
 })
 
@@ -866,10 +904,17 @@ test('le PLAFOND et la LECTURE sont la même borne', async () => {
   // ADDITION, et les règles au-delà restaient actives — invisibles à l'écran,
   // appliquées par le moteur, sans aucune issue par l'interface. Le plafond
   // décrivait exactement le danger qu'il n'écartait pas.
+  // ⚠ LA BORNE A DEMENAGE LE 16 OCTOBRE 2026, et pour la même raison qu'elle
+  // existe : elle était déclarée ICI *et* dans `api/disponibilites.js`, avec
+  // deux valeurs différentes — 50 et 200 — passées à la même fonction
+  // Postgres. Une prestataire pouvait donc être réglable depuis un écran et
+  // refusée depuis l'autre. Elle vit maintenant dans `lib/cleaning/regles.js`,
+  // avec la mécanique d'écriture ; ce que ce test garde est inchangé : la
+  // LECTURE de cet endpoint est bornée par la MÊME constante que l'écriture.
   const src = require('node:fs').readFileSync(
     require('node:path').join(__dirname, '..', 'api', 'menages-public.js'), 'utf8')
-  const m = /const MAX_REGLES_ACTIVES = (\d+)/.exec(src)
-  assert.ok(m, 'le plafond est introuvable')
+  assert.match(src, /MAX_REGLES_ACTIVES\s*\}?\s*=\s*require\(['"]\.\.\/lib\/cleaning\/regles['"]\)|MAX_REGLES_ACTIVES\s*\} = require/,
+    'le plafond est IMPORTÉ, plus déclaré ici')
   assert.match(src, /\.limit\(MAX_REGLES_ACTIVES\)/,
     'la lecture des règles doit être bornée par LA MÊME constante')
   assert.ok(!/\.limit\(50\)[\s\S]{0,80}provider_availability_rules/.test(src))
@@ -906,53 +951,43 @@ test('l\'HÔTE EST INFORMÉ quand elle retire un jour — de bout en bout', asyn
   delete require.cache[absA]
 })
 
-test('le comptage des règles est CLOISONNÉ', async () => {
-  // ⚠ Sans `user_id`, la lecture compterait les règles d'un autre compte — un
-  // hôte pourrait empêcher la prestataire d'un autre de régler ses jours.
-  const { handler, etat } = preparer({})
-  await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), reponse())
-  const lecture = etat.lectures.find(l => l.table === 'provider_availability_rules' && l.colonnes === 'id, rrule')
-  assert.ok(lecture, 'la lecture des règles actives a bien lieu')
-  assert.strictEqual(lecture.f.user_id, U)
-  assert.strictEqual(lecture.f.provider_id, MARIE)
-  assert.strictEqual(lecture.f.active, true)
-})
-
-test('une panne d\'INSERTION coupe, et rien n\'est désactivé', async () => {
-  const { handler, etat } = preparer({ erreurInsertRegles: { message: 'timeout' } })
+test('une panne de la transaction coupe, et ne laisse RIEN de change', async () => {
+  // ⚠ CE TEST A REMPLACE TROIS AUTRES, ET C'EST LE SIGNE QUE LE CHANTIER A
+  // ABOUTI. Il y avait une panne d'INSERTION, une panne de DESACTIVATION et
+  // une panne de LECTURE, chacune avec son etat a moitie ecrit et son message.
+  // Il n'en reste qu'une : l'appel aboutit, ou rien n'a bouge.
+  const { handler, etat } = preparer({ erreurRpc: { code: '08006', message: 'connexion perdue' } })
   const res = reponse()
   await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), res)
   assert.strictEqual(res.code, 503)
-  assert.strictEqual(
-    etat.ecritures.filter(x => x.table === 'provider_availability_rules' && x.op === 'update').length, 0,
+  assert.deepStrictEqual(
+    etat.ecritures.filter(x => x.table === 'provider_availability_rules'), [],
     'ses anciens jours sont intacts')
 })
 
-test('si la désactivation échoue, le message DIT que les nouveaux sont posés', async () => {
-  // ⚠ « Service indisponible » ferait croire que rien n'est parti, alors que les
-  // nouveaux jours SONT posés : elle est disponible sur l'union des deux
-  // réglages, et elle doit le savoir pour recommencer.
-  const { handler } = preparer({ erreurMajRegles: { message: 'timeout' } })
+test('la MIGRATION ABSENTE se dit, et ne retombe pas sur l\'ancien chemin', async () => {
+  // ⚠ PAS DE REPLI SILENCIEUX. Retomber sur la mécanique en deux écritures —
+  // celle qu'on vient de juger mauvaise — rendrait le défaut invisible le jour
+  // où la migration manque. On refuse, et le journal nomme la migration.
+  const { handler, etat } = preparer({
+    erreurRpc: { code: '42883', message: 'function public.remplacer_regles_dispo does not exist' } })
   const res = reponse()
   await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), res)
   assert.strictEqual(res.code, 503)
-  assert.match(res.body.error, /nouveaux jours sont enregistrés/)
-  assert.match(res.body.error, /anciens/)
-})
-
-test('une panne de LECTURE des règles actives coupe avant toute écriture', async () => {
-  const { handler, etat } = preparer({ erreurLireAvant: { message: 'timeout' } })
-  const res = reponse()
-  await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), res)
-  assert.strictEqual(res.code, 503)
-  assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
+  assert.deepStrictEqual(
+    etat.ecritures.filter(x => x.table === 'provider_availability_rules'), [])
 })
 
 test('sans le droit `self_availability: write`, elle ne règle RIEN', async () => {
+  // ⚠ LA GARDE RESTE CHEZ L'APPELANT, et c'est voulu : la fonction Postgres ne
+  // connaît ni droits ni jetons. Si elle tombait, la transaction écrirait
+  // obéissamment ce qu'on lui demande — donc le test vérifie qu'aucun APPEL ne
+  // part, pas seulement qu'aucune table n'est touchée.
   const { handler, etat } = preparer({ droits: { self_availability: 'read' } })
   const res = reponse()
   await handler(ecrire({ action: 'reglerMesJours', lots: [{ jours: [1] }] }), res)
   assert.strictEqual(res.code, 403)
+  assert.strictEqual(etat.rpc.length, 0, 'la transaction n\'est même pas appelée')
   assert.strictEqual(etat.ecritures.filter(x => x.table === 'provider_availability_rules').length, 0)
 })
 

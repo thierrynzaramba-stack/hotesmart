@@ -8,9 +8,31 @@ const assert = require('node:assert')
 const { detectChange, numEq, strEq } = require('../lib/booking-changes')
 const { STATUS } = require('../lib/bookings-snapshot-status')
 
+// ⚠ LE SEJOUR PAR DEFAUT EST RELATIF, PARCE QUE CES TESTS-LA N'INJECTENT PAS
+// LE TEMPS (17 octobre 2026). Regle du depot : dates relatives si le test lit
+// l'horloge, dates figees s'il injecte le temps. Les tests de TYPAGE ci-dessous
+// appellent `detectChange(avant, apres, provider)` a trois arguments : le
+// quatrieme — `maintenant` — n'est pas passe, donc la garde d'anciennete lit
+// l'horloge reelle. Avec un sejour fige au 1er-5 septembre 2026, elle a
+// commence a rendre `sejourTermine() === true` le 13 septembre : `detectChange`
+// rendait alors `null`, les tests comparaient `null.type`, et HUIT d'entre eux
+// levaient — sur des regles de typage qui n'ont rien a voir avec le temps.
+//
+// ⚠ UN SEJOUR A VENIR, pas un sejour en cours : c'est l'etat le plus neutre
+// pour eprouver un TYPAGE, et il ne peut jamais etre « termine ».
+// ⚠ ET LES TESTS DE LA GARDE, EUX, GARDENT LEURS DATES FIGEES : ils passent
+// `AUJOURDHUI` en quatrieme argument et surchargent `arrival`/`departure`.
+// C'est la meme regle, lue dans l'autre sens.
+const jour = (n) => {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  d.setDate(d.getDate() + n)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 const snap = (o = {}) => ({
   provider: 'beds24', status: STATUS.CONFIRMED,
-  arrival: '2026-09-01', departure: '2026-09-05',
+  arrival: jour(3), departure: jour(6),
   firstName: 'Jean', lastName: 'Dupont', numAdult: 2, numChild: 0,
   ...o
 })
@@ -47,9 +69,12 @@ test('regle 3 bis : confirmed -> request produit aussi cancelled', () => {
 })
 
 test('regle 4 : confirmed inchange + un des quatre champs bouge -> modified', () => {
+  // Les deux dates bougent d'un jour par rapport au séjour par défaut, et
+  // restent donc à venir : ce test éprouve le TYPAGE d'un changement, pas la
+  // garde d'ancienneté.
   const champs = [
-    ['arrival',   '2026-09-02'],
-    ['departure', '2026-09-06'],
+    ['arrival',   jour(4)],
+    ['departure', jour(7)],
     ['numAdult',  3],
     ['numChild',  2]
   ]
@@ -128,11 +153,11 @@ test('lignes legacy sans provider : le defaut evite un faux "new"', () => {
 })
 
 test('Channex : new et modified sont tous deux des reservations reelles', () => {
-  const chx = o => ({ provider: 'channex', status: 'new', arrival: '2026-09-01', departure: '2026-09-05', numAdult: 2, numChild: 0, ...o })
+  const chx = o => ({ provider: 'channex', status: 'new', arrival: jour(3), departure: jour(6), numAdult: 2, numChild: 0, ...o })
   // new -> modified cote Channex = confirmed -> confirmed : pas d'evenement de statut
   assert.strictEqual(detectChange(chx(), chx({ status: 'modified' }), 'channex'), null)
   // ... mais un changement de dates en produit un
-  assert.strictEqual(detectChange(chx(), chx({ status: 'modified', departure: '2026-09-07' }), 'channex').type, 'modified')
+  assert.strictEqual(detectChange(chx(), chx({ status: 'modified', departure: jour(8) }), 'channex').type, 'modified')
   // et une annulation aussi
   assert.strictEqual(detectChange(chx(), chx({ status: 'cancelled' }), 'channex').type, 'cancelled')
 })

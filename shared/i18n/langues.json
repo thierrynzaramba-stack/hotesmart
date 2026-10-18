@@ -1,0 +1,5 @@
+[
+  { "code": "fr", "nom": "Français", "dir": "ltr" },
+  { "code": "en", "nom": "English", "dir": "ltr" },
+  { "code": "es", "nom": "Español", "dir": "ltr" }
+]

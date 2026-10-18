@@ -62,7 +62,69 @@ module.exports = async (req, res) => {
 
   // ── POST : sauvegarder la config ─────────────
   if (req.method === 'POST') {
-    const { config } = req.body || {};
+    const { config, mode_ref, mode } = req.body || {};
+
+    // Bascule CIBLEE du mode d'un bien (messagerie V5, etape 4) : le merge se
+    // fait ICI, sur le blob relu en base — un POST du blob entier depuis deux
+    // onglets s'ecrasait des configs d'alertes et des modes (releve en
+    // review). La fenetre lecture->ecriture reste, mais en millisecondes
+    // serveur, plus en secondes d'ecran.
+    const { alertes_ref, alertes } = req.body || {};
+    const viseMode = mode_ref !== undefined || mode !== undefined;
+    const viseAlertes = alertes_ref !== undefined || alertes !== undefined;
+    // Une cible par requete : accepter les deux en appliquant la seule
+    // premiere jetterait les alertes sans erreur (releve en review).
+    if (viseMode && viseAlertes) {
+      return res.status(400).json({ error: 'Une cible par requête' });
+    }
+    if (viseMode || viseAlertes) {
+      const cible = viseMode ? 'mode' : 'alertes';
+      const ref = String((cible === 'mode' ? mode_ref : alertes_ref) || '').trim();
+      if (!ref || ref.length > 64) return res.status(400).json({ error: 'Payload invalide' });
+      if (cible === 'mode' && mode !== 'test' && mode !== 'auto') {
+        return res.status(400).json({ error: 'Payload invalide' });
+      }
+      // Les alertes du bien : les DEUX types, chacun borne champ par champ —
+      // jamais un objet libre dans le blob.
+      let alertesPropres = null;
+      if (cible === 'alertes') {
+        if (!alertes || typeof alertes !== 'object') return res.status(400).json({ error: 'Payload invalide' });
+        alertesPropres = {};
+        for (const type of ['intervention', 'info_unknown']) {
+          const a = alertes[type];
+          if (!a || typeof a !== 'object') return res.status(400).json({ error: 'Payload invalide' });
+          const sms = String(a.sms_lines || ''); const email = String(a.email_lines || '');
+          if (sms.length > 2000 || email.length > 2000) return res.status(400).json({ error: 'Destinataires trop longs' });
+          alertesPropres[type] = {
+            sms_enabled: a.sms_enabled === true, sms_lines: sms,
+            email_enabled: a.email_enabled === true, email_lines: email
+          };
+        }
+      }
+      const { data: lu, error: eL } = await supabase
+        .from('agent_alert_config')
+        .select('config').eq('user_id', userId).maybeSingle();
+      if (eL) return res.status(503).json({ error: 'Lecture impossible' });
+      const blob = (lu && lu.config) || {};
+      blob[ref] = cible === 'mode'
+        ? { ...(blob[ref] || {}), mode }
+        : { ...(blob[ref] || {}),
+            intervention: { ...((blob[ref] || {}).intervention || {}), ...alertesPropres.intervention },
+            info_unknown: { ...((blob[ref] || {}).info_unknown || {}), ...alertesPropres.info_unknown } };
+      const { error: eW } = await supabase
+        .from('agent_alert_config')
+        .upsert(
+          { user_id: userId, config: blob, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' }
+        );
+      if (eW) {
+        console.error('[agent-config] POST cible error:', eW);
+        return res.status(500).json({ error: eW.message });
+      }
+      return res.status(200).json(cible === 'mode'
+        ? { ok: true, mode_ref: ref, mode }
+        : { ok: true, alertes_ref: ref, alertes: alertesPropres });
+    }
 
     if (!config || typeof config !== 'object') {
       return res.status(400).json({ error: 'Payload invalide' });

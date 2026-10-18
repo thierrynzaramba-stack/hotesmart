@@ -476,13 +476,13 @@ test('ni porteuse ni personne à solliciter : là, le verrou et l\'alerte', asyn
 test('la PWA ne promet pas une alerte que le serveur n\'envoie pas', async () => {
   // ⚠ DÉFAUT TROUVÉ EN REVIEW, même classe que le commit c6d0553. Le serveur
   // n'alerte l'hôte que si `!porte && !suivante` ; la PWA affichait « votre
-  // employeur est prévenu » dès que `porte` était faux — donc aussi après une
+  // hôte est prévenu » dès que `porte` était faux — donc aussi après une
   // escalade réussie, où personne n'a été prévenu.
   const front = require('node:fs').readFileSync(require('node:path')
     .join(__dirname, '..', 'apps/menages/public.html'), 'utf8')
   assert.ok(front.includes('data.escalade'),
     'le front doit lire `escalade` avant d\'annoncer une alerte')
-  const i = front.indexOf('votre employeur est prévenu')
+  const i = front.indexOf('votre hôte est prévenu')
   assert.ok(i > 0 && front.lastIndexOf('data.escalade', i) > 0,
     'la promesse d\'alerte doit être le dernier cas, après `porte` et `escalade`')
 })

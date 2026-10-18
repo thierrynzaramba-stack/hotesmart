@@ -580,12 +580,12 @@ test('sans le droit d\'écriture, les cases sont VISIBLES mais figées', async (
   const cases = [...w.document.querySelectorAll('#dispo-recur input[data-lot]')]
   assert.strictEqual(cases.length, 7)
   assert.strictEqual(cases.filter(c => c.disabled).length, 7, 'toutes figées')
-  assert.match(w.document.getElementById('dispo-recur-aide').textContent, /votre employeur/)
+  assert.match(w.document.getElementById('dispo-recur-aide').textContent, /votre hôte/)
 })
 
 test('en quinzaine, elle voit A et B — et OÙ ELLE EN EST cette semaine', async () => {
   // ⚠ « Une semaine sur deux » ne désigne rien sans repère. Elle doit pouvoir
-  // vérifier elle-même, sans appeler son employeur.
+  // vérifier elle-même, sans appeler son hôte.
   const lundiB = iso(new Date(new Date(lundiCourant + 'T12:00:00Z').getTime() + 7 * 86400000))
   const { w, t } = monter({ regles: [
     regle('rA', 'A', [6, 0], 2, lundiCourant),
@@ -798,7 +798,7 @@ test('une absence posée par L\'EMPLOYEUR ne s\'annule pas, et l\'écran dit pou
   taperJour(w, j)
   await souffler(60)
   assert.strictEqual(ecritures(t).length, 0, 'rien ne part')
-  assert.match(feuille(w), /votre employeur/)
+  assert.match(feuille(w), /votre hôte/)
 })
 
 test('un jour de CONGÉ ne bouge pas à la tape', async () => {
@@ -1007,9 +1007,9 @@ test('coupure TOTALE : on restitue, et on ne jure de rien', async () => {
     'on n\'affirme plus ce qu\'on ne peut pas savoir')
 })
 
-test('« viens exceptionnellement » ne se lit pas « votre employeur vous a retirée »', async () => {
+test('« viens exceptionnellement » ne se lit pas « votre hôte vous a retirée »', async () => {
   // L'hote peut poser les DEUX sens sur une exception. Un libelle unique
-  // annoncait « cette absence a été posée par votre employeur » à quelqu'un à qui
+  // annoncait « cette absence a été posée par votre hôte » à quelqu'un à qui
   // on venait au contraire de DEMANDER de venir.
   const j = dans(2)
   const { w, t } = monter({ exceptions: [
@@ -1021,7 +1021,7 @@ test('« viens exceptionnellement » ne se lit pas « votre employeur vous a ret
   assert.strictEqual(ecritures(t).length, 0)
   // ⚠ LA NUANCE SURVIT AU DEPLACEMENT : l'hôte peut poser « pas ce samedi » MAIS
   // AUSSI « viens exceptionnellement ». Un libellé unique annonçait « cette
-  // absence a été posée par votre employeur » à quelqu'un à qui on venait au
+  // absence a été posée par votre hôte » à quelqu'un à qui on venait au
   // contraire de DEMANDER de venir.
   assert.match(feuille(w), /demandé de venir/)
   assert.ok(!/[Aa]bsence posée/.test(feuille(w)))
@@ -1230,7 +1230,7 @@ test('un RECHARGEMENT en cours d\'envoi ne fait pas retomber la case', async () 
 test('un rattrapage TARDIF n\'écrase pas des données fraîches', async () => {
   // ⚠ `chargerDisponibilites` remplace `mesJours` EN ENTIER. Un rattrapage qui
   // restituerait son instantané par-dessus effacerait ce que le rechargement
-  // vient d'apprendre — par exemple une absence que l'employeur venait de poser.
+  // vient d'apprendre — par exemple une absence que l'hôte venait de poser.
   // ⚠ L'ÉCRITURE DOIT ÉCHOUER, sinon le rattrapage n'est jamais exercé et le test
   // passe sur du vide — première version de ce test, attrapée en contre-épreuve.
   const j = dans(2), jHote = dans(5)
@@ -1254,11 +1254,11 @@ test('un rattrapage TARDIF n\'écrase pas des données fraîches', async () => {
   basculerDispo(w, j)
   await souffler(20)
 
-  // L'employeur pose une absence ailleurs, et l'écran la reçoit.
+  // L'hôte pose une absence ailleurs, et l'écran la reçoit.
   etat.exceptions = etat.exceptions.concat([
     { id: 'h1', date: jHote, available: false, source: 'hote' }])
   await t.chargerDisponibilites()
-  assert.ok(caseDu(w, jHote).classList.contains('off'), 'l\'absence de l\'employeur est là')
+  assert.ok(caseDu(w, jHote).classList.contains('off'), 'l\'absence de l\'hôte est là')
 
   refuser()                       // l'écriture de `j` est refusée MAINTENANT
   await souffler(60)
@@ -1871,7 +1871,7 @@ test('elle pose un congé en plage, et les champs se vident', async () => {
   assert.ok(caseDu(w, dans(6)).classList.contains('conge'), 'et les jours se verrouillent')
 })
 
-test('elle n\'annule que SES congés — pas ceux de son employeur', async () => {
+test('elle n\'annule que SES congés — pas ceux de son hôte', async () => {
   const { w, t } = monter({ conges: [
     { id: 'c1', debut: dans(3), fin: dans(5), source: 'hote' },
     { id: 'c2', debut: dans(10), fin: dans(12), source: 'prestataire' } ] })
@@ -1880,7 +1880,7 @@ test('elle n\'annule que SES congés — pas ceux de son employeur', async () =>
   const boutons = [...w.document.querySelectorAll('#dispo-conges [data-conge]')]
   assert.deepStrictEqual(boutons.map(b => b.dataset.conge), ['c2'],
     'seul le sien porte un bouton d\'annulation')
-  assert.match(w.document.getElementById('dispo-conges').textContent, /posé par votre employeur/)
+  assert.match(w.document.getElementById('dispo-conges').textContent, /posé par votre hôte/)
 })
 
 // ─── Le droit, et les pannes ──────────────────────────────────────────────
@@ -1889,7 +1889,7 @@ test('sans le droit d\'écriture, elle consulte mais n\'écrit pas', async () =>
   const { w, t } = monter({ modifiable: false })
   t.seed()
   await t.chargerDisponibilites()
-  assert.match(message(w), /votre employeur qui pose/)
+  assert.match(message(w), /votre hôte qui pose/)
   // ⚠ CE TEST NE PROUVAIT PLUS RIEN. Depuis le lot B, un jour vide est INERTE
   // chez qui ne règle rien : la feuille ne s'ouvre pas, `basculerDispo` ne
   // trouve aucun segment et ne clique rien — « zéro écriture » était vrai par
@@ -1977,7 +1977,7 @@ test('sans droit sur ses absences, elle GARDE son calendrier et ses ménages', a
     'le calendrier reste affiché')
   assert.ok(caseDu(w, j), 'et il porte bien ses jours')
   assert.match(w.document.getElementById('dispo-message').textContent,
-    /gérées par votre employeur/, 'la raison est dite, à sa place')
+    /gérées par votre hôte/, 'la raison est dite, à sa place')
 })
 
 test('sans droit, AUCUN jour n\'est barré — le serveur se tait, il ne dit pas « absente »', async () => {
@@ -2357,12 +2357,12 @@ test('droit retiré en cours de route : l\'écran le DIT, et les cases se figent
                                   echecReglage: { status: 403, message: 'Non autorisé' } })
   t.seed()
   await t.chargerDisponibilites()
-  etat.autorise = false                    // l'employeur reprend la main
+  etat.autorise = false                    // l'hôte reprend la main
   taper(w, 2, true)
   await souffler(140)
 
   assert.match(w.document.getElementById('dispo-message').textContent,
-    /gérées par votre employeur/, 'l\'écran dit ce qui se passe')
+    /gérées par votre hôte/, 'l\'écran dit ce qui se passe')
   const avant = ecritures(t).length
   taper(w, 3, true)
   await souffler(80)

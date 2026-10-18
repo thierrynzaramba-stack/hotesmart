@@ -482,6 +482,29 @@
 
     document.getElementById('btn-cancel').addEventListener('click', resetForm)
     document.getElementById('btn-create').onclick = createPrestataire
+
+    // ⚠ OUVERTURE DIRECTE DEPUIS LE VOLET « EQUIPE MENAGE » (13 octobre 2026).
+    // `?presta=<id>` ouvre la fiche de cette personne en MODIFICATION,
+    // `?nouveau=1` ouvre le formulaire vierge : depuis le volet, l'hote a deja
+    // choisi QUI il veut regler — le faire retomber sur la liste lui
+    // demanderait de rechoisir ce qu'il vient de designer.
+    // Lu APRES le chargement : `editPrestataire` a besoin de `prestataires`.
+    const url = new URLSearchParams(location.search)
+    const vise = url.get('presta')
+    if (vise) {
+      // ⚠ UN IDENTIFIANT D'URL NE DESIGNE RIEN PAR LUI-MEME : on n'ouvre que
+      // ce que la liste DEJA CHARGEE (donc deja filtree par le compte et les
+      // droits) contient. Un id etranger ne fait rien — pas d'erreur bruyante,
+      // la liste reste affichee.
+      const carte = prestataires.find(p => String(p.id) === String(vise))
+      if (carte) {
+        editPrestataire(carte.id)
+        document.getElementById('form-section').scrollIntoView({ block: 'start' })
+      }
+    } else if (url.get('nouveau') === '1') {
+      document.getElementById('btn-show-form').click()
+      document.getElementById('form-section').scrollIntoView({ block: 'start' })
+    }
   }
 
   async function loadProperties() {

@@ -35,7 +35,7 @@ function preparer ({ user = PROD, profil = null, permissions = null,
                      biens = [{ provider_property_id: '209413' }, { provider_property_id: '169567' }],
                      apres = [], erreurBiens = null,
                      profilsLien = [], tokens = [], erreurTokens = null,
-                     aRattraper = [], rattrapables = [] } = {}) {
+                     aRattraper = [], rattrapables = [], erreurPerimetre = null } = {}) {
   const etat = { upserts: [], majs: [], requetes: [], journal: [], notifs: [] }
   const client = {
     auth: { getUser: async () => (user ? { data: { user: { id: user } }, error: null }
@@ -78,7 +78,13 @@ function preparer ({ user = PROD, profil = null, permissions = null,
             // Le rattrapage immediat termine par `.select()` pour savoir ce
             // qu'il a touche : le double doit lui rendre des lignes.
             select () { etat.majs.push(q); return Promise.resolve({ data: rattrapables, error: null }) },
-            then (ok) { etat.majs.push(q); return Promise.resolve({ error: null }).then(ok) }
+            then (ok) {
+              etat.majs.push(q)
+              // ⚠ L'ECHEC DE LA SYNCHRO DU PERIMETRE EST UN CHEMIN REEL : sans
+              // lui, on ne saurait pas que l'enregistrement tient quand meme.
+              const err = (table === 'public_tokens') ? erreurPerimetre : null
+              return Promise.resolve({ error: err }).then(ok)
+            }
           }
           return c2
         },
@@ -749,4 +755,109 @@ test('retirer un bien ne rattrape rien', async () => {
   await handler(post({ provider_id: MARIE, liaisons: [] }), res)
   assert.strictEqual(res.body.rattrapes, 0)
   assert.strictEqual(etat.journal.length, 0)
+})
+
+// ─── CE QUE SA PAGE SERT SUIT CE QU'ON LUI CONFIE ──────────────────────────
+//
+// ⚠ LE BUG QUE CECI FERME. Trois représentations portent « ses biens »
+// (inventaire H.1) : les liaisons disent ce que le MOTEUR peut lui attribuer,
+// `public_tokens.property_ids` dit ce que sa PWA SERT. Confier un bien sans
+// toucher la seconde laissait un ménage attribué INVISIBLE chez elle — le bien
+// n'était pas servi, donc la réservation non plus, donc son écran ne montrait
+// rien, et rien ne le laissait deviner.
+//
+// ⚠ ET UN SEUL WRITER : l'app ménage, côté SERVEUR. Le vécu de /settings est
+// gravé en CLAUDE.md — un second writer de `property_ids` a écrasé en silence
+// les biens réglés ici.
+
+const AVEC_JETON = { id: MARIE, first_name: 'Marie', active: true, pwa_token: 'tok-m' }
+
+test('confier des biens synchronise le périmètre que sa page SERT', async () => {
+  // ⚠ LA SOURCE EST L'ÉTAT APRÈS ÉCRITURE (`apres`), pas la liste reçue : voir
+  // le test du délégué plus bas, qui dit pourquoi.
+  const { handler, etat } = preparer({ prestataire: AVEC_JETON, apres: [
+    { property_id: '169567', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: null },
+    { property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, weekdays: null }
+  ] })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE,
+    liaisons: [{ property_id: '169567', rang: 1 }, { property_id: '209413', rang: 2 }] }), res)
+  assert.strictEqual(res.code, 200)
+  const w = etat.majs.find(m => m.table === 'public_tokens')
+  assert.ok(w, 'une écriture part sur public_tokens')
+  assert.deepStrictEqual(w.row.property_ids, ['169567', '209413'], 'les biens confiés, triés')
+  assert.strictEqual(w.f.user_id, PROD, 'filtrée par compte')
+  assert.strictEqual(w.f.token, 'tok-m', 'et par son jeton')
+})
+
+test('une liste VIDE n\'écrit JAMAIS le périmètre : vide = TOUS les biens', async () => {
+  // La convention de `property_ids` est inversée. L'écrire en retirant le
+  // dernier bien OUVRIRAIT son accès au lieu de le fermer.
+  const { handler, etat } = preparer({ prestataire: AVEC_JETON })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons: [] }), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.majs.find(m => m.table === 'public_tokens'), undefined)
+})
+
+test('un profil SANS jeton ne déclenche aucune synchro', async () => {
+  const { handler, etat } = preparer({ prestataire: { id: MARIE, first_name: 'Marie', active: true },
+    apres: [{ property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, weekdays: null }] })
+  const res = reponse()
+  await handler(post(CORPS), res)
+  assert.strictEqual(res.code, 200)
+  assert.strictEqual(etat.majs.find(m => m.table === 'public_tokens'), undefined)
+})
+
+test('le JETON ne sort pas de la réponse, même s\'il a servi', async () => {
+  const { handler } = preparer({ prestataire: AVEC_JETON,
+    apres: [{ property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, weekdays: null }] })
+  const res = reponse()
+  await handler(post(CORPS), res)
+  assert.ok(!JSON.stringify(res.body).includes('tok-m'))
+})
+
+test('une PANNE de synchro le DIT, et n\'annule pas les liaisons enregistrées', async () => {
+  // Les liaisons sont écrites : le moteur attribuera. Mais sa page ne servira
+  // peut-être pas le bien, donc le ménage y serait invisible — l'hôte doit le
+  // savoir, sinon il cherchera la panne chez elle.
+  const { handler, etat } = preparer({ prestataire: AVEC_JETON,
+    apres: [{ property_id: '209413', provider_id: MARIE, rang: 2, requires_ack: true, weekdays: null }],
+    erreurPerimetre: { message: 'timeout' } })
+  const res = reponse()
+  await handler(post(CORPS), res)
+  assert.strictEqual(res.code, 200, 'les liaisons, elles, sont bien enregistrées')
+  assert.strictEqual(res.body.success, true)
+  assert.strictEqual(res.body.perimetre_pwa, false, 'et la réponse le dit')
+  assert.ok(etat.upserts.find(u => u.table === 'property_cleaning_providers'), 'l\'upsert a bien eu lieu')
+})
+
+test('UN DÉLÉGUÉ N\'AMPUTE PAS ce que sa page sert hors de son périmètre', async () => {
+  // ⚠ LE CONSTAT HAUT DE LA REVUE DE ac28b1f. La désactivation des liaisons
+  // est bornée au périmètre : un délégué limité au bien A laisse B et C
+  // ACTIFS. Si `property_ids` suivait la liste REÇUE, il serait écrasé par
+  // `['A']` — et la page de la prestataire cesserait de servir B et C : ses
+  // ménages y disparaîtraient, ses « fait » seraient refusés, pendant que le
+  // moteur continuerait de les lui attribuer. La source est donc l'état APRÈS
+  // écriture, lu sans borne de périmètre.
+  const { handler, etat } = preparer({
+    user: MEMBRE,
+    profil: { id: 'pr1', account_user_id: PROD, member_user_id: MEMBRE, active: true, accepted_at: '2026-01-01' },
+    permissions: { menages: 'read', prestataires: 'write', property_scope: 'selected',
+                   property_ids: ['209413'], property_refs: ['209413'] },
+    prestataire: AVEC_JETON,
+    apres: [
+      { property_id: '209413', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: null },
+      { property_id: '169567', provider_id: MARIE, rang: 1, requires_ack: true, weekdays: null },
+      { property_id: '999999', provider_id: 'autre', rang: 1, requires_ack: true, weekdays: null }
+    ]
+  })
+  const res = reponse()
+  await handler(post({ provider_id: MARIE, liaisons: [{ property_id: '209413', rang: 1 }] },
+                     { 'x-compte': PROD }), res)
+  assert.strictEqual(res.code, 200)
+  const w = etat.majs.find(m => m.table === 'public_tokens')
+  assert.deepStrictEqual(w.row.property_ids, ['169567', '209413'],
+    'le bien hors périmètre reste servi — il garde sa liaison active')
+  assert.ok(!w.row.property_ids.includes('999999'), 'et les biens d\'une AUTRE personne n\'y entrent pas')
 })

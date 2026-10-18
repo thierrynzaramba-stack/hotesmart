@@ -16,7 +16,7 @@ const assert = require('node:assert')
 const fs = require('node:fs')
 const path = require('node:path')
 
-const html = fs.readFileSync(path.join(__dirname, '..', 'pages/biens-calendrier.html'), 'utf8')
+const html = fs.readFileSync(path.join(__dirname, '..', 'pages/calendrier.html'), 'utf8')
 const api  = fs.readFileSync(path.join(__dirname, '..', 'api/calendar.js'), 'utf8')
 // Depuis le chantier calendrier mobile (30 septembre 2026), la transformation
 // des reservations, la regle « sans messagerie OTA » et le texte du badge vivent
@@ -43,9 +43,10 @@ test('LE TEST QUI COMPTE : le badge ne s\'affiche QUE sans messagerie OTA', () =
   // Une resa Airbnb n'a pas d'adresse non plus — la plateforme ne la communique
   // jamais — et ses messages passent tres bien par la messagerie de l'OTA. Le
   // badge y serait faux, et un badge faux apprend a ignorer les vrais.
-  const fn = html.split('function badgeSansEmail(resa){')[1].split('\n    }')[0]
-  assert.ok(/if\(!sansMessagerieOta\(resa\) \|\| resa\.aEmail\) return ''/.test(fn),
-    'sortie sur toute resa OTA, et sur toute directe qui a une adresse')
+  // V5 : la page ne porte plus sa propre fonction — elle consomme la regle
+  // du module (badgeSansEmailVisible), testee ci-dessus sur ses cas.
+  assert.ok(/badgeSansEmailVisible\(r\) \?/.test(html),
+    'le badge est conditionne par LA regle du module, pas une copie')
 })
 
 test('LE TEST QUI COMPTE : la saisie directe Beds24 porte le badge, elle aussi', () => {
@@ -67,9 +68,9 @@ test('LE TEST QUI COMPTE : la saisie directe Beds24 porte le badge, elle aussi',
 })
 
 test('le badge dit la consequence, pas seulement le constat', () => {
-  const fn = html.split('function badgeSansEmail(resa){')[1].split('\n    }')[0]
-  assert.ok(/messages non envoyés/.test(fn), 'le constat')
-  assert.ok(/\+ TEXTE_SANS_EMAIL/.test(fn), 'la suite vient du module commun')
+  const fr = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/fr.json'), 'utf8')
+  assert.ok(/messages non envoyés/.test(fr), 'le constat (cle cal.no_email)')
+  assert.ok(/TEXTE_SANS_EMAIL/.test(html), 'la suite vient du module commun')
   const texte = module_.split('export const TEXTE_SANS_EMAIL = ')[1].split('\n')[0]
   assert.ok(/confirmation/.test(texte) && /code d\\'accès/.test(texte),
     'ce qui ne partira pas, nommement')
@@ -78,17 +79,16 @@ test('le badge dit la consequence, pas seulement le constat', () => {
 
 test('le badge est pose dans la fiche, pas seulement defini', () => {
   // Une fonction jamais appelee est un badge qui n'existe pas.
-  assert.ok(/\+ badgeSansEmail\(resa\)/.test(html))
-  const iDefinition = html.indexOf('function badgeSansEmail')
-  const iAppel = html.indexOf('+ badgeSansEmail(resa)')
-  assert.ok(iAppel > 0 && iDefinition > 0, 'les deux existent')
+  assert.ok(html.includes('badgeSansEmailVisible(r) ?'), 'appel dans la fiche')
+  assert.ok(html.includes('cal.no_email'), 'et son texte')
 })
 
 test('la saisie manuelle collecte deja l\'adresse, et la dit facultative', () => {
-  // Rien a ajouter : le formulaire la porte depuis la phase 2 de la resa
-  // manuelle. C'est le badge qui manquait, pas la collecte.
-  assert.ok(/id="ajout-email"/.test(html))
-  assert.ok(/placeholder="facultatif"/.test(html), 'optionnelle, comme decide')
-  assert.ok(/mail: document\.getElementById\('ajout-email'\)/.test(html),
+  // Rien a ajouter : le formulaire V5 la porte. C'est le badge qui
+  // manquait, pas la collecte.
+  assert.ok(/data-aj="email"/.test(html))
+  const fr = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/fr.json'), 'utf8')
+  assert.ok(/"cal\.guest_email": "E-mail \(facultatif\)"/.test(fr), 'optionnelle, comme decide')
+  assert.ok(/mail: corps\.querySelector\('\[data-aj="email"\]'\)\.value\.trim\(\) \|\| null/.test(html),
     'et elle part bien au provider')
 })

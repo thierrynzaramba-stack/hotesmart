@@ -154,14 +154,36 @@ function reponse () {
   return r
 }
 
-const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', ai_analyzed_at: '2026-08-30T01:00:00Z', property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: '2026-08-30T00:00:00Z',
+// ⚠ DES DATES RELATIVES, PARCE QUE CE TEST LIT L'HORLOGE (17 octobre 2026).
+// Règle du dépôt : dates relatives si le test lit l'horloge, dates figées s'il
+// injecte le temps. `api/avis.js` borne sa lecture par une fenêtre glissante
+// (`periodeNormalisee` → `borneDepuis`, 30 jours par défaut) et n'accepte
+// aucune injection de temps. Ces avis étaient datés du 20 au 30 août 2026 :
+// fin septembre, ils en sont sortis un par un, et six tests de CLOISONNEMENT
+// — « un avis d'un AUTRE compte n'apparaît jamais » — sont devenus rouges sans
+// qu'une ligne de production ait bougé. Une barrière qui change de couleur
+// avec le calendrier n'est plus une barrière.
+//
+// ⚠ LES DATES VOLONTAIREMENT ANCIENNES RESTENT FIGÉES (`2024-01-01`) : elles
+// servent à prouver qu'un avis HORS fenêtre est bien exclu, et elles le
+// resteront toujours. Ce qui doit suivre l'horloge, c'est ce qui doit rester
+// DEDANS.
+const ilYa = (n, h = 0) => {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  d.setDate(d.getDate() - n)
+  return d.toISOString().slice(0, 11) + String(h).padStart(2, '0') + ':00:00Z'
+}
+const jourIlYa = (n) => ilYa(n).slice(0, 10)
+
+const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', ai_analyzed_at: ilYa(3, 1), property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: ilYa(3),
                  // ⚠ De VRAIES dates de sejour en base : sans elles, l'assertion
                  // « aucun `stay_` ne sort » ne peut rien attraper.
-                 stay_start: '2026-08-25', stay_end: '2026-08-28', guest_name: 'Fanny D.' }
-const AVIS_B = { id: 'r2', user_id: PROD, statut: 'confirme', ai_analyzed_at: '2026-08-20T01:00:00Z', property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: '2026-08-20T00:00:00Z' }
+                 stay_start: jourIlYa(8), stay_end: jourIlYa(5), guest_name: 'Fanny D.' }
+const AVIS_B = { id: 'r2', user_id: PROD, statut: 'confirme', ai_analyzed_at: ilYa(10, 1), property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: ilYa(10) }
 // Avis d'un AUTRE compte : il ne doit jamais apparaitre, quel que soit le filtre.
-const AVIS_TIERS = { id: 'r3', statut: 'confirme', ai_analyzed_at: '2026-08-25T01:00:00Z', user_id: '33333333-3333-4333-8333-333333333333',
-                     property_id_ref: REF_A, ai_clean_verdict: 'remarque', received_at: '2026-08-25T00:00:00Z' }
+const AVIS_TIERS = { id: 'r3', statut: 'confirme', ai_analyzed_at: ilYa(5, 1), user_id: '33333333-3333-4333-8333-333333333333',
+                     property_id_ref: REF_A, ai_clean_verdict: 'remarque', received_at: ilYa(5) }
 
 function req (query = {}, body = null, method = 'GET') {
   return { method, query, body, headers: { authorization: 'Bearer jeton' } }
@@ -566,7 +588,10 @@ test('create : une date réelle passe toujours', async () => {
 // ─── Validation d'une détection ─────────────────────────────────────────────
 const DETECTION = { id: '44444444-4444-4444-8444-444444444444', user_id: PROD,
                     statut: 'detecte', property_id_ref: REF_A,
-                    ai_clean_verdict: 'remarque', received_at: '2026-08-29T00:00:00Z' }
+                    // Dans la fenêtre, elle aussi : une détection HORS des
+                    // 30 jours ne prouverait pas qu'elle est visible, seulement
+                    // qu'elle est trop vieille pour l'être.
+                    ai_clean_verdict: 'remarque', received_at: ilYa(4) }
 
 function reqValider (id, statut, extra = {}) {
   return { method: 'POST', query: {}, body: { action: 'valider', id, statut },
@@ -676,7 +701,7 @@ test('list : une détection ignorée disparaît de la liste', async () => {
 const AVIS_AUTO = { id: '55555555-5555-4555-8555-555555555555', user_id: PROD,
                     statut: 'confirme', property_id_ref: REF_A,
                     ai_clean_verdict: 'rien_signale', verdict_source: 'auto',
-                    received_at: '2026-08-01T00:00:00Z' }
+                    received_at: ilYa(7) }
 
 function reqRequalif (id, verdict, extra = {}) {
   return { method: 'POST', query: {}, body: { action: 'requalifier', id, verdict },
@@ -788,7 +813,7 @@ const AVIS_TIERS_CONF = { id: '66666666-6666-4666-8666-666666666666',
                           user_id: '33333333-3333-4333-8333-333333333333',
                           statut: 'confirme', property_id_ref: REF_A,
                           ai_clean_verdict: 'positif', verdict_source: 'auto',
-                          received_at: '2026-08-01T00:00:00Z' }
+                          received_at: ilYa(7) }
 
 test('requalifier : l\'avis d\'un AUTRE compte est introuvable, jamais modifié', async () => {
   const etat = preparer({ avis: [AVIS_TIERS_CONF] })

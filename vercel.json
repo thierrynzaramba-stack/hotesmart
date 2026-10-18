@@ -4,7 +4,9 @@
   "outputDirectory": ".",
   "cleanUrls": true,
   "trailingSlash": false,
-  "regions": ["cdg1"],
+  "regions": [
+    "cdg1"
+  ],
   "functions": {
     "api/cron.js": {
       "maxDuration": 60
@@ -41,6 +43,10 @@
       "destination": "/apps/reservation-directe/paiements"
     },
     {
+      "source": "/messages",
+      "destination": "/pages/messages"
+    },
+    {
       "source": "/avis",
       "destination": "/pages/avis"
     },
@@ -49,16 +55,12 @@
       "destination": "/pages/guide"
     },
     {
-      "source": "/m/calendrier",
-      "destination": "/pages/calendrier-mobile"
-    },
-    {
       "source": "/login",
       "destination": "/pages/login"
     },
     {
       "source": "/dashboard",
-      "destination": "/pages/index"
+      "destination": "/pages/aujourdhui"
     },
     {
       "source": "/apps/yield",
@@ -105,16 +107,20 @@
       "destination": "/pages/biens-nouveau"
     },
     {
-      "source": "/biens/:id/calendrier",
-      "destination": "/pages/biens-calendrier"
-    },
-    {
       "source": "/biens/:id",
       "destination": "/pages/biens-detail"
     },
     {
+      "source": "/calendrier",
+      "destination": "/pages/calendrier"
+    },
+    {
+      "source": "/menages",
+      "destination": "/pages/menages"
+    },
+    {
       "source": "/apps/agent-ai",
-      "destination": "/apps/agent-ai/config"
+      "destination": "/pages/messages"
     },
     {
       "source": "/apps/agent-ai/knowledge",
@@ -142,6 +148,18 @@
           "value": "/"
         }
       ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/m/calendrier",
+      "destination": "/calendrier",
+      "permanent": false
+    },
+    {
+      "source": "/biens/:id/calendrier",
+      "destination": "/calendrier?bien=:id",
+      "permanent": false
     }
   ]
 }

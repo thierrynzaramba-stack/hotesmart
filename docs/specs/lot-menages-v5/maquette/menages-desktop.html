@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>HôteSmart — Ménages (V5)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FFFFFF;font-family:'Plus Jakarta Sans',system-ui,sans-serif;color:#222222;-webkit-font-smoothing:antialiased}
+a{color:#222222;text-decoration:none}
+.tab:hover{background:#F7F7F7}
+button{font-family:inherit;cursor:pointer}
+.ico{width:44px;height:44px;border:1px solid #DDDDDD;border-radius:99px;background:#FFFFFF;display:flex;align-items:center;justify-content:center;flex:none}
+.pad{padding-left:48px;padding-right:48px}
+@media (max-width:1100px){.pad{padding-left:16px;padding-right:16px}}
+.th{border-radius:10px;flex:none}
+.av{width:28px;height:28px;border-radius:99px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex:none}
+.todo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.grp{background:#FFFFFF;border-radius:14px;padding:12px 14px}
+.grp-h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;margin-bottom:6px}
+.grp-h b{margin-left:auto;font-size:18px;font-weight:800}
+.todo{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:13px;border-top:1px solid #F2F2F2}
+.todo .s{font-size:12px;color:#717171}
+.list{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:8px}
+@media (max-width:600px){.list{grid-template-columns:1fr}}
+.row{display:flex;align-items:center;gap:14px;background:#FFFFFF;border-radius:14px;padding:8px 10px 8px 14px}
+.btn{height:36px;padding:0 14px;border:1px solid #222222;border-radius:99px;background:#FFFFFF;font-size:13px;font-weight:600;flex:none}
+.cal{display:grid;grid-template-columns:220px repeat(14,minmax(0,1fr));min-width:1100px}
+.dh{text-align:center;font-size:11px;color:#717171;line-height:1.2;padding:6px 0 8px}
+.dh b{display:block;font-size:14px;color:#222222}
+.today b{background:#222222;color:#FFFFFF;border-radius:99px;width:26px;height:26px;line-height:26px;margin:0 auto}
+.we{background:#F7F7F7}
+.bien{grid-column:1 / -1;display:flex;align-items:center;gap:12px;padding:18px 0 8px;border-top:1px solid #EBEBEB;font-size:15px;font-weight:700}
+.who{grid-column:1;display:flex;align-items:center;gap:10px;font-size:14px;font-weight:500;height:44px;padding-left:12px}
+.lane{height:44px;display:flex;align-items:center;border-left:1px solid #F2F2F2}
+.on{height:30px;width:100%;display:flex;align-items:center;justify-content:center}
+.mk{width:28px;height:28px;border-radius:99px;background:#FFFFFF;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,0.18)}
+.mk.np{border:2px dashed #C13515;box-shadow:none;background:#FCEDEA}
+.mk.f{background:#1A7F4B;box-shadow:none;position:relative}
+.rv{position:absolute;top:-6px;right:-8px;width:16px;height:16px;border-radius:99px;background:#1A7F4B;border:2px solid #FFFFFF;display:flex;align-items:center;justify-content:center}
+.mk.na{border:2px dashed #717171;box-shadow:none}
+.none{grid-column:2 / 16;height:34px;margin:5px 2px;border-radius:99px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:13px;font-weight:700;color:#C13515;border:1.5px dashed #C13515;background:repeating-linear-gradient(135deg,#FCEDEA 0 5px,#FFFFFF 5px 10px)}
+.lg{display:flex;flex-wrap:wrap;gap:20px;font-size:12px;color:#717171}
+.lg span{display:flex;align-items:center;gap:8px}
+</style>
+</helmet>
+<div style="min-height: 1260px; background: #FFFFFF; display: flex; flex-direction: column">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; padding: 18px 48px; border-bottom: 1px solid #EBEBEB">
+    <div style="display: flex; align-items: center; gap: 10px; flex: 1 1 200px">
+      <svg width="34" height="34" viewBox="0 0 32 32" role="img" aria-label="HôteSmart"><rect width="32" height="32" rx="9" fill="#0E1726"/><path d="M9.5 14 16 8.5l6.5 5.5" fill="none" stroke="#F5A524" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="16" cy="20.5" r="4.75" fill="none" stroke="#FFFFFF" stroke-width="3"/></svg>
+      <span style="font-size: 20px; font-weight: 800; letter-spacing: -0.03em">HôteSmart</span>
+    </div>
+    <nav aria-label="Navigation" style="display: flex; flex-wrap: wrap; gap: 4px; justify-content: center">
+      <a href="Accueil-v5.dc.html" class="tab" style="height: 44px; padding: 0 18px; border-radius: 99px; display: flex; align-items: center; font-size: 15px; font-weight: 500">Aujourd’hui</a>
+      <a href="Calendrier-v5.dc.html" class="tab" style="height: 44px; padding: 0 18px; border-radius: 99px; display: flex; align-items: center; font-size: 15px; font-weight: 500">Calendrier</a>
+      <a href="Messages-v5.dc.html" class="tab" style="height: 44px; padding: 0 18px; border-radius: 99px; display: flex; align-items: center; font-size: 15px; font-weight: 500">Messages</a>
+      <a href="#" aria-current="page" style="height: 44px; padding: 0 18px; border-radius: 99px; display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; background: #222222; color: #FFFFFF">Ménages<span style="min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: #F5A524; color: #222222; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">6</span></a>
+      <a href="#" class="tab" style="height: 44px; padding: 0 18px; border-radius: 99px; display: flex; align-items: center; font-size: 15px; font-weight: 500">Logements</a>
+    </nav>
+    <div style="flex: 1 1 200px; display: flex; justify-content: flex-end; align-items: center; gap: 10px">
+      <button class="ico" aria-label="Notifications"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 0 0 4 0"/></svg></button>
+      <button aria-label="Menu et profil" style="height: 44px; padding: 0 8px 0 14px; border: 1px solid #DDDDDD; border-radius: 99px; background: #FFFFFF; display: flex; align-items: center; gap: 10px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg><span style="width: 30px; height: 30px; border-radius: 99px; background: #0E1726; color: #FFFFFF; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center">TH</span></button>
+    </div>
+  </header>
+
+  <div class="pad" style="display: flex; align-items: center; gap: 10px; padding-top: 24px; padding-bottom: 20px">
+    <h1 style="margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.03em; flex: 1">Ménages</h1>
+    <button style="height: 44px; padding: 0 18px 0 14px; border: 1px solid #DDDDDD; border-radius: 99px; background: #FFFFFF; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; flex: none"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="1.75" stroke-linecap="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><circle cx="17" cy="9" r="2.5"/><path d="M17 14c2.4 0 4 1.5 4.6 4"/></svg>Équipe ménage</button>
+  </div>
+
+  <!-- Bulle À traiter (30 jours) : une seule liste, l'icône dit le type -->
+  <section class="pad" aria-label="À traiter, 30 prochains jours" style="padding-bottom: 32px">
+    <div style="background: #FFF4E0; border-radius: 20px; padding: 16px 20px 18px">
+      <div style="display: flex; align-items: center; gap: 10px; padding-bottom: 12px">
+        <h2 style="margin: 0; font-size: 17px; font-weight: 700">À traiter</h2>
+        <span style="min-width: 24px; height: 24px; padding: 0 7px; border-radius: 99px; background: #F5A524; font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center">6</span>
+        <span style="font-size: 13px; color: #717171; margin-left: auto">30 j</span>
+      </div>
+      <div class="list">
+        <div class="row" title="Sans personnel"><span aria-label="Sans personnel" style="display: flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6Z"/><path d="M4 4l16 16"/></svg></span><svg width="48" height="48" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Colomiers" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#D6E6EF"/><rect y="46" width="64" height="18" fill="#8DB07A"/><path d="M12 30 30 18l18 12v20H12Z" fill="#F4F0E8"/><path d="M9 31 30 16l21 15" fill="none" stroke="#C0573E" stroke-width="4" stroke-linejoin="round"/><rect x="18" y="34" width="8" height="7" rx="1" fill="#6D8FA6"/><rect x="33" y="35" width="7" height="15" rx="1" fill="#6B4E3A"/><circle cx="54" cy="40" r="7" fill="#5E8A4F"/><rect x="53" y="44" width="2" height="6" fill="#6B4E3A"/></svg><div style="flex: 1; min-width: 0"><div style="font-size: 15px; font-weight: 600">Colomiers</div><div style="font-size: 13px; color: #717171">29 j</div></div><button class="btn">Assigner</button></div>
+        <div class="row" title="Non assigné"><span aria-label="Non assigné" style="display: flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#717171" stroke-width="2" stroke-dasharray="3 3" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span><svg width="48" height="48" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="La bulle" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#2E3557"/><circle cx="50" cy="13" r="2" fill="#FFFFFF"/><circle cx="14" cy="10" r="1.5" fill="#FFFFFF"/><rect y="48" width="64" height="16" fill="#4E6B4A"/><path d="M10 50a22 22 0 0 1 44 0Z" fill="#CFE3F2" opacity="0.9"/><path d="M18 50a14 14 0 0 1 28 0" fill="none" stroke="#FFFFFF" stroke-width="1.5" opacity="0.7"/><rect x="24" y="42" width="16" height="6" rx="2" fill="#F2C58B"/></svg><div style="flex: 1; min-width: 0"><div style="font-size: 15px; font-weight: 600">La bulle</div><div style="font-size: 13px; color: #717171">dim. 25</div></div><button class="btn">Assigner</button></div>
+        <div class="row" title="Non pris"><span aria-label="Non pris" style="display: flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-dasharray="3 3" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span><svg width="48" height="48" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Ofuro Futari" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#EDE3D3"/><path d="M0 18h64" stroke="#D2C2A8" stroke-width="2"/><path d="M22 14c-3-4 3-6 0-10M32 14c-3-4 3-6 0-10M42 14c-3-4 3-6 0-10" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/><rect x="12" y="24" width="40" height="30" rx="5" fill="#B07A4F"/><rect x="12" y="24" width="40" height="7" rx="3" fill="#8F5F3B"/><path d="M12 36h40M12 45h40" stroke="#8F5F3B" stroke-width="1.5"/><rect x="16" y="27" width="32" height="3" rx="1.5" fill="#9CC9D6"/></svg><div style="flex: 1; min-width: 0"><div style="font-size: 15px; font-weight: 600">Ofuro Futari</div><div style="font-size: 13px; color: #717171">ven. 16 · Lena</div></div><button class="btn">Réassigner</button></div>
+        <div class="row" title="Non pris"><span aria-label="Non pris" style="display: flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-dasharray="3 3" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg></span><svg width="48" height="48" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="La bulle" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#2E3557"/><circle cx="50" cy="13" r="2" fill="#FFFFFF"/><circle cx="14" cy="10" r="1.5" fill="#FFFFFF"/><rect y="48" width="64" height="16" fill="#4E6B4A"/><path d="M10 50a22 22 0 0 1 44 0Z" fill="#CFE3F2" opacity="0.9"/><path d="M18 50a14 14 0 0 1 28 0" fill="none" stroke="#FFFFFF" stroke-width="1.5" opacity="0.7"/><rect x="24" y="42" width="16" height="6" rx="2" fill="#F2C58B"/></svg><div style="flex: 1; min-width: 0"><div style="font-size: 15px; font-weight: 600">La bulle</div><div style="font-size: 13px; color: #717171">sam. 17 · Régina</div></div><button class="btn">Réassigner</button></div>
+        <div class="row" title="Non terminé"><span aria-label="Non terminé" style="display: flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><svg width="48" height="48" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="La bulle" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#2E3557"/><circle cx="50" cy="13" r="2" fill="#FFFFFF"/><circle cx="14" cy="10" r="1.5" fill="#FFFFFF"/><rect y="48" width="64" height="16" fill="#4E6B4A"/><path d="M10 50a22 22 0 0 1 44 0Z" fill="#CFE3F2" opacity="0.9"/><path d="M18 50a14 14 0 0 1 28 0" fill="none" stroke="#FFFFFF" stroke-width="1.5" opacity="0.7"/><rect x="24" y="42" width="16" height="6" rx="2" fill="#F2C58B"/></svg><div style="flex: 1; min-width: 0"><div style="font-size: 15px; font-weight: 600">La bulle</div><div style="font-size: 13px; color: #717171">lun. 12 · Régina</div></div><button class="btn">Fait</button></div>
+        <div class="row" title="Mauvais retour"><span aria-label="Mauvais retour" style="display: flex"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 14V4H4v10ZM7 14l4 7c1.5 0 2.5-1 2.3-2.6L13 14h5.5a2 2 0 0 0 2-2.3l-1.2-6A2 2 0 0 0 17.3 4H7"/></svg></span><svg width="48" height="48" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Cœur de vie 23" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#BFD8E8"/><rect y="44" width="64" height="20" fill="#9DB08A"/><path d="M14 22 32 10l18 12v32H14Z" fill="#EADBC4"/><path d="M11 23 32 8l21 15" fill="none" stroke="#8A5A44" stroke-width="4" stroke-linejoin="round"/><rect x="20" y="27" width="8" height="9" rx="1" fill="#5F7C93"/><rect x="36" y="27" width="8" height="9" rx="1" fill="#5F7C93"/><rect x="28" y="41" width="8" height="13" rx="1" fill="#8A5A44"/></svg><div style="flex: 1; min-width: 0"><div style="font-size: 15px; font-weight: 600">Cœur de vie 23</div><div style="font-size: 13px; color: #717171">dim. 11 · Régina</div></div><button class="btn">Voir</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Navigation dans le temps -->
+  <div class="pad" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-bottom: 8px">
+    <button class="ico" aria-label="Période précédente"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+    <span style="font-size: 15px; font-weight: 600; min-width: 120px; text-align: center">13 → 26 oct.</span>
+    <button class="ico" aria-label="Période suivante"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg></button>
+    <button style="height: 44px; padding: 0 18px; border: 1px solid #DDDDDD; border-radius: 99px; background: #FFFFFF; font-size: 14px; font-weight: 600">Aujourd’hui</button>
+    <span style="flex: 1"></span>
+  </div>
+
+  <!-- Calendrier : un bloc par bien, une ligne par prestataire assignée au bien.
+       Barre = jours où elle est de garde/disponible. Pastille = ménage qu'elle fait ce jour-là. -->
+  <section class="pad" aria-label="Planning par bien et par prestataire" style="padding-bottom: 20px">
+    <div style="overflow-x: auto">
+      <div class="cal">
+        <span></span>
+        <span class="dh today">ma<b>13</b></span><span class="dh">me<b>14</b></span><span class="dh">je<b>15</b></span><span class="dh">ve<b>16</b></span><span class="dh we">sa<b>17</b></span><span class="dh we">di<b>18</b></span><span class="dh">lu<b>19</b></span><span class="dh">ma<b>20</b></span><span class="dh">me<b>21</b></span><span class="dh">je<b>22</b></span><span class="dh">ve<b>23</b></span><span class="dh we">sa<b>24</b></span><span class="dh we">di<b>25</b></span><span class="dh">lu<b>26</b></span>
+
+        <!-- ===== Cœur de vie 23 ===== -->
+        <div class="bien"><svg width="52" height="52" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Cœur de vie 23" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#BFD8E8"/><rect y="44" width="64" height="20" fill="#9DB08A"/><path d="M14 22 32 10l18 12v32H14Z" fill="#EADBC4"/><path d="M11 23 32 8l21 15" fill="none" stroke="#8A5A44" stroke-width="4" stroke-linejoin="round"/><rect x="20" y="27" width="8" height="9" rx="1" fill="#5F7C93"/><rect x="36" y="27" width="8" height="9" rx="1" fill="#5F7C93"/><rect x="28" y="41" width="8" height="13" rx="1" fill="#8A5A44"/></svg>Cœur de vie 23</div>
+        <div class="who"><span class="av" style="background: #DDE4E6">RÉ</span>Régina</div>
+        <div class="lane" style="grid-column: 2 / 16; position: relative"><div style="position: absolute; left: 2px; right: 2px; height: 30px; border-radius: 99px; background: #DDE4E6"></div>
+          <div style="position: relative; width: 100%; display: grid; grid-template-columns: repeat(14,1fr)">
+            <span></span><span class="on"><span class="mk" aria-label="Ménage pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span><span></span><span></span><span></span><span class="on"><span class="mk" aria-label="Ménage pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span>
+          </div>
+        </div>
+
+        <!-- ===== Colomiers ===== -->
+        <div class="bien"><svg width="52" height="52" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Colomiers" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#D6E6EF"/><rect y="46" width="64" height="18" fill="#8DB07A"/><path d="M12 30 30 18l18 12v20H12Z" fill="#F4F0E8"/><path d="M9 31 30 16l21 15" fill="none" stroke="#C0573E" stroke-width="4" stroke-linejoin="round"/><rect x="18" y="34" width="8" height="7" rx="1" fill="#6D8FA6"/><rect x="33" y="35" width="7" height="15" rx="1" fill="#6B4E3A"/><circle cx="54" cy="40" r="7" fill="#5E8A4F"/><rect x="53" y="44" width="2" height="6" fill="#6B4E3A"/></svg>Colomiers</div>
+        <div class="who" style="color: #717171"><span class="av" style="background: #EAE3EE">LO</span>Lola</div>
+        <div class="none" aria-label="Personne de disponible"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 6v6c0 4.5 3.4 8 8 9 4.6-1 8-4.5 8-9V6Z"/><path d="M4 4l16 16"/></svg>Personne<button aria-label="Assigner une garde" style="width: 26px; height: 26px; border-radius: 99px; border: 1.5px solid #C13515; background: #FFFFFF; display: flex; align-items: center; justify-content: center; padding: 0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></div>
+
+        <!-- ===== La bulle ===== -->
+        <div class="bien"><svg width="52" height="52" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="La bulle" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#2E3557"/><circle cx="50" cy="13" r="2" fill="#FFFFFF"/><circle cx="14" cy="10" r="1.5" fill="#FFFFFF"/><rect y="48" width="64" height="16" fill="#4E6B4A"/><path d="M10 50a22 22 0 0 1 44 0Z" fill="#CFE3F2" opacity="0.9"/><path d="M18 50a14 14 0 0 1 28 0" fill="none" stroke="#FFFFFF" stroke-width="1.5" opacity="0.7"/><rect x="24" y="42" width="16" height="6" rx="2" fill="#F2C58B"/></svg>La bulle</div>
+        <div class="who"><span class="av" style="background: #DDE4E6">RÉ</span>Régina</div>
+        <div class="lane" style="grid-column: 2 / 16; position: relative"><div style="position: absolute; left: 2px; right: 2px; height: 30px; border-radius: 99px; background: #DDE4E6"></div>
+          <div style="position: relative; width: 100%; display: grid; grid-template-columns: repeat(14,1fr)">
+            <span></span><span class="on"><span class="mk" aria-label="Ménage pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span><span></span><span></span><span class="on"><span class="mk np" aria-label="Ménage non pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 6v7M12 17.5v.5"/></svg></span></span>
+          </div>
+        </div>
+        <div class="who" style="color: #717171"><span class="av" style="border: 1.5px dashed #717171; background: #FFFFFF">?</span>Sans prestataire</div>
+        <div class="lane" style="grid-column: 2 / 16">
+          <div style="width: 100%; display: grid; grid-template-columns: repeat(14,1fr)">
+            <span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span class="on"><span class="mk na" aria-label="Ménage non assigné"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#717171" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span>
+          </div>
+        </div>
+
+        <!-- ===== Ofuro Futari ===== -->
+        <div class="bien"><svg width="52" height="52" viewBox="0 0 64 64" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Ofuro Futari" style="border-radius: 10px; flex: none; display: block"><rect width="64" height="64" fill="#EDE3D3"/><path d="M0 18h64" stroke="#D2C2A8" stroke-width="2"/><path d="M22 14c-3-4 3-6 0-10M32 14c-3-4 3-6 0-10M42 14c-3-4 3-6 0-10" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round"/><rect x="12" y="24" width="40" height="30" rx="5" fill="#B07A4F"/><rect x="12" y="24" width="40" height="7" rx="3" fill="#8F5F3B"/><path d="M12 36h40M12 45h40" stroke="#8F5F3B" stroke-width="1.5"/><rect x="16" y="27" width="32" height="3" rx="1.5" fill="#9CC9D6"/></svg>Ofuro Futari</div>
+        <div class="who"><span class="av" style="background: #E3EADF">LE</span>Lena</div>
+        <div class="lane" style="grid-column: 2 / 16">
+          <div style="width: 100%; display: grid; grid-template-columns: repeat(14,1fr); align-items: center">
+            <span style="grid-column: 1 / 2; height: 30px; margin: 0 2px; border-radius: 99px; background: #E3EADF; display: flex; align-items: center; justify-content: center"><span class="mk f" aria-label="Ménage fait, bon retour"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg><span class="rv" aria-hidden="true"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v10H4V10ZM7 10l4-7c1.5 0 2.5 1 2.3 2.6L13 10h5.5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 17.3 20H7"/></svg></span></span></span>
+            <span style="grid-column: 4 / 5; height: 30px; margin: 0 2px; border-radius: 99px; background: #E3EADF; display: flex; align-items: center; justify-content: center"><span class="mk np" aria-label="Ménage non pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C13515" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 6v7M12 17.5v.5"/></svg></span></span>
+            <span style="grid-column: 7 / 11; height: 30px; margin: 0 2px; border-radius: 99px; background: #E3EADF"></span>
+            <span style="grid-column: 12 / 13; height: 30px; margin: 0 2px; border-radius: 99px; background: #E3EADF; display: flex; align-items: center; justify-content: center"><span class="mk" aria-label="Ménage pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span>
+          </div>
+        </div>
+        <div class="who"><span class="av" style="background: #F1E6DA">TI</span>Tiphaine</div>
+        <div class="lane" style="grid-column: 2 / 16">
+          <div style="width: 100%; display: grid; grid-template-columns: repeat(14,1fr); align-items: center">
+            <span style="grid-column: 2 / 4; height: 30px; margin: 0 2px; border-radius: 99px; background: #F1E6DA; display: grid; grid-template-columns: 1fr 1fr; align-items: center"><span></span><span class="on"><span class="mk" aria-label="Ménage pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span></span>
+            <span style="grid-column: 5 / 7; height: 30px; margin: 0 2px; border-radius: 99px; background: #F1E6DA; display: grid; grid-template-columns: 1fr 1fr; align-items: center"><span class="on"><span class="mk" aria-label="Ménage pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span><span class="on"><span class="mk" aria-label="Ménage pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span></span>
+            <span style="grid-column: 11 / 12; height: 30px; margin: 0 2px; border-radius: 99px; background: #F1E6DA"></span>
+            <span style="grid-column: 13 / 15; height: 30px; margin: 0 2px; border-radius: 99px; background: #F1E6DA; display: grid; grid-template-columns: 1fr 1fr; align-items: center"><span></span><span class="on"><span class="mk" aria-label="Ménage pris"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#222222" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h16M7 20l2-9h6l2 9M12 11V4"/></svg></span></span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="pad lg" style="padding-bottom: 48px; padding-top: 8px">
+    <span><span style="width: 40px; height: 16px; border-radius: 99px; background: #DDE4E6"></span>De garde</span>
+    <span><span class="mk" style="width: 22px; height: 22px"></span>Ménage pris</span>
+    <span><span class="mk np" style="width: 22px; height: 22px"></span>Non pris</span>
+    <span><span class="mk na" style="width: 22px; height: 22px"></span>Non assigné</span>
+    <span><span class="mk f" style="width: 22px; height: 22px"></span>Fait</span>
+    <span><span class="rv" style="position: static; background: #1A7F4B"></span>Bon retour</span>
+    <span><span class="rv" style="position: static; background: #C13515"></span>Mauvais retour</span>
+    <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#717171" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>Jours à régler</span>
+    <span><span style="width: 40px; height: 16px; border-radius: 99px; border: 1.5px dashed #C13515; background: repeating-linear-gradient(135deg,#FCEDEA 0 4px,#FFFFFF 4px 8px)"></span>Personne</span>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1260}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

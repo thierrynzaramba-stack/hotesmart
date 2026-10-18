@@ -166,7 +166,7 @@ module.exports = async function handler(req, res) {
       // encore `provider = 'beds24'` mais deja pourvu de sa propriete Channex
       // n'apparaissait nulle part — l'hote ne pouvait pas le connecter, et il
       // n'y avait aucun autre chemin dans le produit.
-      .select('id, name, provider, provider_property_id, migration_target_property_id, currency, address, zip_code, city, country, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, pilote_tarifaire, ota_connect_status, ota_requested_at, ota_listing_urls, created_at')
+      .select('id, name, provider, provider_property_id, migration_target_property_id, currency, address, zip_code, city, country, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, inventory_type, rate_sync_mode, pilote_tarifaire, ota_connect_status, ota_requested_at, ota_listing_urls, photo_url, created_at')
       .eq('user_id', compteLecture)
     if (refsPerimetre) {
       // ⚠ LE PIEGE UUID, POUR LA TROISIEME FOIS. `properties.id` est de type

@@ -793,6 +793,77 @@ un appelant qui ne passe pas `conges` obtient exactement le verdict d'avant.
   ⚠️ jsdom n'implémente pas `PointerEvent` — les tests dispatchent l'événement par son **type**,
   ce que la page écoute réellement.
 
+### La fiche V5 : le calendrier se touche, et le SENS vient du serveur (14 oct. 2026)
+
+Étape 1 de la reprise des derniers gestes de `apps/menages/prestataires.html` dans
+`pages/menages.html`. Le calendrier deux mois de la fiche était **en lecture** ; il bascule
+désormais un jour au clic — poser une absence pour elle, ou la remettre au travail.
+
+- ⚠️ **`/api/disponibilites` rend `jours[].sans_exception`** : ce que le jour vaudrait **si on
+  retirait son exception**, calculé par le même `estDisponible` que `dispo`. C'est lui qui décide
+  du geste — **retirer** l'exception quand la récurrence dit déjà ce que l'hôte veut, **poser**
+  sinon. Sans ce champ, l'écran pose toujours : un aller-retour laisse une exception redondante,
+  le jour reste figé « à la main », il survit au retrait de la récurrence, et plus rien ne
+  l'explique. L'ancien écran évitait ce défaut en **recalculant la précédence côté client** —
+  exactement ce que la V5 s'interdit (une seconde implémentation finit par contredire le moteur).
+- **Les congés comptent dans `sans_exception`** : ils priment sur tout, exception comprise. Un
+  jour sous congé vaut donc `false` des deux côtés, et son bouton est inerte — la donnée dit la
+  même chose que l'écran.
+- **`jours[].exception` sort avec son `id`** : `retirerException` n'accepte qu'un identifiant.
+  Sans lui, le second clic ne pourrait qu'empiler l'exception contraire.
+- ⚠️ **`poserException` repose `created_at` à chaque écriture.** L'upsert remplace une ligne
+  existante : sans cela, corriger aujourd'hui une absence qu'elle a déclarée il y a deux semaines
+  gardait la date de SA déclaration, et la fiche affichait « Réglé par vous » avec la date de
+  l'autre. La ligne porte UNE décision, et sa date est celle de cette décision.
+- **Deux traces, le même en-tête** (demande de Thierry) : « Réglé par elle · date » et « Réglé par
+  vous · date », au-dessus de la section. Elles lisent les règles **et** les exceptions — depuis
+  que le calendrier se touche, le geste le plus courant de l'hôte est une absence ponctuelle, et
+  une trace qui ne lirait que les récurrences resterait muette après dix clics. ⚠️ **Elle ne dit
+  pas QUI** : les deux tables portent `source`, pas d'auteur — un délégué apparaît donc comme
+  « vous ». Seule la visibilité nomme le sien (`updated_by`). ⚠️ **Et le plancher du serveur porte
+  sur la DATE de l'exception, pas sur celle du geste** : un geste de l'an dernier sur une date à
+  venir compte dans la trace, un geste d'hier sur une date vieille d'un mois n'y est pas —
+  approximation assumée, ce qui intéresse l'hôte vit dans le futur.
+- **44 px de cible au doigt** (demande de Thierry) : au téléphone, les deux mois s'empilent en
+  pleine largeur et chaque case prend sa part — 48 px mesurés sur 390 px. Une cible de 32 px avec
+  4 px de gouttière fait rater le jour voisin, et **une absence posée sur le mauvais jour ne se
+  voit pas** : elle se découvre quand personne ne vient.
+- **« Corriger pour elle » reste** tant que la récurrence A/B ne se règle pas ici (étape 2) : le
+  retirer fermerait le seul chemin vers elle.
+
+**Et elle le voit dans son application, sans SMS** (décision de Thierry) : le point du calendrier
+de la PWA marque désormais les exceptions des **deux** sources, et le titre dit laquelle —
+« Absence posée par votre employeur » / « Venue demandée par votre employeur ». ⚠️ **La phrase vient
+du SENS de l'exception (`available`), pas de l'état final du jour** : `jourTravaille` porte une
+couche d'affichage qui rend « travaillé » tout jour portant un ménage, et choisir la phrase dessus
+annonçait « Venue demandée » sur un jour où l'hôte venait de poser une **absence** — pendant que la
+feuille du même jour disait l'inverse (constat de la revue de fc6c27d). Il ne marquait que
+les siennes : un jour réglé par l'hôte s'éteignait comme un jour ordinaire hors de ses jours
+habituels, sans aucune marque. **Un seul point pour les deux** — deux points de sens différent
+dans 44 px, c'est un point qu'on ne sait plus lire — et la feuille du jour dit la phrase entière,
+comme elle le faisait déjà.
+
+⚠️ **ON NE RETIRE QUE LES GESTES DE L'HÔTE** (constat de la revue de fc6c27d). Défaire une absence
+que la **prestataire** a déclarée supprimerait sa ligne : le jour redeviendrait un jour ordinaire de
+sa récurrence — sans point, sans phrase, sans SMS — et elle n'apprendrait **nulle part** qu'on
+l'attend. C'est pourtant le geste qui compte le plus : *« je sais que tu t'es déclarée absente,
+viens quand même »*. On **pose** donc une exception `source: 'hote'` par-dessus la sienne, au prix
+d'une exception que la récurrence dirait déjà — **la trace vaut mieux que la pureté**. Rien ne
+s'empile pour autant (contrainte SQL sur `provider_id, date`) et le cycle converge : poser,
+reposer l'absence, puis retirer rend le jour à sa récurrence.
+
+⚠️ **La table de vérité du clic vit dans `shared/presta-etat.js`** (`gesteDuJour`), comme celle des
+jours confiés — éprouvée sans DOM par `tests/presta-etat.test.js`. La revue l'a relevée : quatre
+sorties pour un seul clic, et rien ne les couvrait. C'est aussi la divergence entre le rendu et le
+clic qui avait déjà inversé un geste sur une liaison vierge (re-revue de e528ca1).
+
+⚠️ **`poserException` borne ses dates comme `poserConge`** (J−30 → J+400). `lire()` ne rend les
+exceptions que depuis `jourMoins(30)` : une exception posée plus tôt était insérée avec succès,
+n'apparaissait dans aucune réponse, et `retirerException` — qui n'accepte qu'un `id` — devenait
+inatteignable. Une ligne indélébile, créée par un geste qui annonce « enregistré ». La garde ne
+vivait que dans l'écran, **en heure locale du navigateur** : un hôte à UTC−8 à 18 h est déjà le
+lendemain à Paris.
+
 ### L'écran prestataire : « Mes jours de travail » (lot 2b, 15 sept. 2026)
 
 `apps/menages/public.html`, onglet **« Mes jours »**. Le même calendrier sur un an glissant que
@@ -3577,3 +3648,1500 @@ Tests : section « ÉLARGIR » de `tests/cleaning-sync-menages-entite.test.js`
 Contre `main` : les deux cas positifs rougissent. Mutations, une par garde
 (preuve d'acteur, preuve des membres, déjà sollicitée, plancher, rang,
 plafond, porteuse d'office, filtre `auto`) : chacune fait rougir son test.
+
+## La page « Ménages » V5 lit la garde — étape 1, lecture seule (13 octobre 2026)
+
+Lot 4 de la refonte UI (spec `docs/specs/lot-menages-v5/`, fond :
+`docs/specs/inventaire-menages.md` parties E/F/G). `pages/menages.html`
+(route `/menages`) remplacera à terme l'écran Ménages ET le Planning de
+garde ; à cette étape elle n'écrit RIEN et n'est pas encore dans la
+navigation (bascule et redirections : étape 4).
+
+**`api/garde.js` étendu, lecture seule** (même commit) :
+- `biens[].photo` = `properties.photo_url` (lot photos), `null` sans photo ;
+- `menages[].fait` = présence dans `menage_done` — la vérité SERVEUR du
+  « fait », celle que la PWA écrit ; l'ancien écran hôte, lui, ne lisait que
+  son localStorage (écart D1 de l'inventaire ; l'écriture côté hôte vient à
+  l'étape 3, par un writer partagé). Une panne de `menage_done` ne coupe
+  PAS le planning : sans « fait », l'écran reste juste (défaut visible),
+  même règle que l'annuaire des prénoms.
+
+**Ce que la page dessine** (une ligne par prestataire) : barre = jours où
+elle est LA GARDE CALCULÉE (responsable du jour — pas « disponible » au sens
+large) ; une porteuse hors garde a une ligne TEMPORAIRE sans barre (décision
+§13, remplaçante) ; pastilles = fait (vert + badge retour 👍/👎 serveur) /
+pris / non pris (proposition en cours) / non assigné (ligne « Sans
+prestataire ») / à venir (différé, jamais une alarme) ; « Personne » =
+trous de garde d'un bien GÉRÉ, rouges seulement quand un ménage tombe dedans
+(§12.6), gris sinon ; un bien sans liaison n'affiche aucune ligne (décision
+du 3 septembre).
+
+**Sans `prestataires: read`** : la page rend UNE ligne neutre par bien
+(« quelqu'un »), pas des avatars numérotés P1/P2 — le serveur ne rend AUCUN
+identifiant sans ce droit (un identifiant stable, même anonyme, reconstitue
+le calendrier de présence du personnel sur la fenêtre : c'est précisément ce
+que `nommer()` refuse). Le point est signalé à Thierry : sa décision G8
+(« P1, P2 ») n'est pas implémentable sans affaiblir cette garde.
+
+Tests : `tests/menages-v5.test.js` (règles V5, décisions §13 nommées une à
+une, lecture seule, un seul endpoint) et la section « Lot Ménages V5 » de
+`tests/garde-endpoint.test.js` (photo, fait, panne de menage_done).
+
+### Complément de recette (13 octobre 2026, même étape)
+
+- **Les absences des prestataires sont sur le planning** : `api/garde.js`
+  rend `absences[]` (attitrée ce jour-là mais indisponible — congé,
+  exception, règle illisible), calculées par LES briques du moteur
+  (`attitreeCeJour` + `estDisponible`), jamais une copie. Portée =
+  `prestataires: read` (le calendrier personnel du personnel), avec le
+  prénom pour qu'une semaine d'absence complète ait une ligne nommée.
+  L'écran les dessine en pilule fine hachurée sur la ligne de la personne.
+- **Le sélecteur de fenêtre est celui du calendrier** : 1 m / 3 m / 6 m /
+  12 m. L'endpoint refuse toujours au-delà de `MAX_JOURS = 92` : la page lit
+  par TRANCHES consécutives et fusionne (biens de la première, le reste
+  concaténé, `tronque` en OU). Au-delà d'un mois : colonnes fixes et
+  défilement horizontal, ordinateur comme téléphone, l'en-tête collant suit.
+- Les bulles des biens masqués vivent AU-DESSUS des dates (recette).
+
+### Recette visuelle du 13 octobre 2026 (même commit)
+
+La page `/menages` reprend LE GABARIT du calendrier : bande partagée
+`shared/bande-jours.js` (utilisée par les deux pages), blocs bordés,
+colonnes 46 px, angle/bulles, barre de période. TROIS états de pastille
+(à faire / fait + badge retour / personne pour le faire) ; une absence est
+une case vide (décision de Thierry) ; un jour sans aucune prestataire
+disponible marque la COLONNE du bien en rouge hachuré avec un « ! » — pas
+de ligne « Personne », qui se lisait comme une personne de plus dans
+l'équipe ; désactivée = prénom grisé, ligne vide ; pas de bulle d'initiales
+dans la colonne des prénoms (la couleur vit sur la barre). Bouton de période actif NOIR sur toutes les pages (le calendrier est
+aligné).
+
+**Deux composants PARTAGÉS** (recette : « reprendre, pas imiter ») :
+`shared/bande-jours.js` (bande mois + jours, règle des week-ends) et
+`shared/reordonner-biens.js` (poignée, souris et doigt). La page Ménages
+avait réécrit le second à la main et en avait repayé les quatre défauts que
+le calendrier avait déjà corrigés en review (insertion toujours avant la
+cible, `draggable` jamais désarmé, `dragstart` non gardé, payload non
+filtré) — d'où l'extraction. `api/garde.js` ne calcule plus `absences[]` :
+plus aucun écran ne les lit depuis que l'absence est une case vide ; le jour
+où un écran en aura besoin, elles viendront de `planningDeGarde`, qui
+connaît déjà la disponibilité.
+
+### Étape 2 : « À traiter » (13 octobre 2026)
+
+La règle de l'alerte est un module PUR, `shared/menages-a-traiter.js`, testé
+hors DOM : une proposition qui court normalement n'est PAS une alerte (elle
+n'entre qu'à moins de 48 h du départ), un ménage différé jamais, un bien non
+confié ne produit aucun « sans personnel ». La bulle lit sa PROPRE fenêtre
+(J−30 → J+30), indépendante de la période affichée. Une panne de lecture se
+dit : on n'annonce jamais « rien à traiter » sur une erreur. Badge ambre de
+l'onglet Ménages alimenté par la page (les autres pages : décision de
+Thierry en attente, spec §15).
+
+**Trois trous fermés en revue (c197a10)**, tous dans la règle d'alerte :
+un ménage REFUSÉ (`orphaned`) porte `differe: true` côté serveur — se fier à
+ce seul drapeau le rendait invisible jusqu'à J−7, dans la bulle ET sur le
+planning (pastille blanche « à faire ») ; une offre dont l'échéance est
+dépassée n'alertait pas tant que le départ était lointain (vécu « erreur
+avalée, cron à 200 ») ; et un bien NON CONFIÉ produisait une ligne par
+départ, en permanence — le bruit que la décision du 3 septembre 2026 écarte.
+La règle lit donc `status` et `gere`, pas seulement `differe`.
+
+### Rattrapage de `menage_done` pour Tiphaine et Lena (13 octobre 2026)
+
+Demande de Thierry, pendant la recette de l'étape 2 : leurs ménages passés
+étaient faits mais jamais marqués (elles n'utilisaient pas encore la PWA) —
+ils remontaient donc en « non terminé » dans la bulle « À traiter ».
+
+**14 lignes écrites en production** (15 ménages passés, 1 déjà marqué) :
+Ofuro Futari, du 18 septembre au 11 octobre 2026, Tiphaine 6, Lena 8. Écrites
+par upsert idempotent sur la clé de la PWA
+(`user_id, property_id, booking_id, departure_date`), avec
+`done_at` = le JOUR du ménage (pas l'instant du rattrapage) et
+`done_by_token = NULL` — c'est cette absence de jeton qui distingue le
+rattrapage d'un marquage par la prestataire, si la question se pose plus tard.
+
+`property_status.last_menage_at` n'a PAS été touché : ces ménages sont passés,
+et le cron recalcule cette valeur.
+
+**À partir de maintenant, elles marquent elles-mêmes depuis la PWA** : ce
+geste ne se répète pas. Il contourne sciemment le writer unique
+(`api/menages-public.js`), ce qui est acceptable pour un rattrapage
+d'historique daté, pas comme habitude.
+
+### « Fait » et « Changer » depuis l'écran de l'hôte (13 octobre 2026, étape 3)
+
+**L'écart D1 est soldé.** `lib/cleaning/menage-fait.js` est LE writer de
+`menage_done` : la PWA de la prestataire et l'écran de l'hôte écrivent par la
+même porte, chacun derrière SES gardes (jeton + porteuse + fenêtre pour elle,
+session + `menages: write` + périmètre pour lui). L'ancien écran hôte ne
+marquait que dans `localStorage` — le geste ne quittait pas la machine.
+
+- `POST /api/menages {action:'fait'|'defaire', property_id, booking_id,
+  departure_date}` : garde `menages: write` (compteDelegue), bien dans le
+  périmètre, **ménage existant et non annulé** (sans ce contrôle, un couple
+  inventé créait une ligne orpheline, invisible et indélébile par l'écran).
+- `done_by_token` reste **NULL** quand c'est l'hôte : c'est la seule trace qui
+  distingue « marqué par la personne qui l'a fait » d'un geste de l'hôte.
+- « Annuler » du message rejoue l'INVERSE RÉEL (`defaire`), jamais un simple
+  retrait visuel.
+- **Changer la prestataire** réutilise la réassignation existante (spec §11.6,
+  garde `prestataires: write`), en mode `assigner` : le geste part d'une
+  alerte, donc il est immédiat et elle est notifiée. `api/garde.js` expose
+  l'annuaire qu'il lisait déjà (`prestataires[]`, actives seulement, rien sans
+  `prestataires: read`) — aucune requête de plus.
+- Chaque bouton suit SON droit et est **absent du DOM** sinon : griser
+  promettrait un geste qu'on refuserait.
+
+**Constats de la revue (7f79406), tous fermés.** Le plus grave : le chemin
+hôte acceptait un départ FUTUR, que la PWA refuse — le ménage devenait
+« fait », sortait de la liste à traiter, passait vert au planning et
+disparaissait de la PWA sans avoir été fait. Même garde des deux côtés
+désormais (`todayEnParis`). Les autres :
+- `markReady` n'écrit pas « un ménage a eu lieu » mais « le logement est
+  propre et LIBRE, maintenant » (`status: ready` + `current_booking_id: null`).
+  Régulariser un ménage de la semaine dernière l'aurait annoncé en plein
+  séjour — et `defaireFait` ne sait pas le défaire. Le writer reçoit donc
+  `majStatut`, que l'appelant tranche : toujours pour la PWA (elle sort du
+  logement), seulement pour un départ d'hier ou du jour côté hôte.
+- Le writer rend `insere` : « Annuler » n'est offert que si la ligne est NÉE
+  du geste. Sinon l'hôte aurait effacé la ligne — et la trace — que la
+  prestataire venait de poser.
+- Le journal de la PWA ne dit plus « -> ready » quand `markReady` a échoué
+  en silence (vécu « erreur avalée, cron à 200 »).
+- L'écriture et la relecture ne partagent plus leur `try` : une panne de
+  LECTURE disait « le geste n'a pas pu être enregistré » alors que la
+  prestataire était déjà notifiée — l'hôte en sollicitait une seconde.
+- La personne déjà sur le ménage n'est plus reproposée dans « Changer » :
+  la choisir ne transférait rien (le serveur y lit « retirer la proposition »)
+  et le message annonçait pourtant « confié à … ».
+- `tests/menages-fait-hote.test.js` (11 tests) couvre enfin ce chemin :
+  droits, périmètre, 404, 409, départ futur, trace, idempotence.
+
+### La fiche ménage et la note pour la prestataire (13 octobre 2026, étape 3)
+
+**Le bloquant de l'inventaire E.1 est levé.** La note pour la prestataire —
+« le code de la boîte a changé », « les poubelles sortent le mardi » — vit
+désormais dans la fiche V5, et elle part **par le serveur** :
+`POST /api/menages {action:'note'}`.
+
+- **L'ancien écran l'écrivait depuis le NAVIGATEUR** : upsert `menage_comments`
+  puis INSERT `menage_events` en boucle, sous RLS. Deux writers côté client,
+  dont un journal de notifications.
+- **Deux droits, deux effets** : `menages: write` enregistre la note ; la
+  TRANSMETTRE exige `prestataires: read` (lecture de `public_tokens`). Un
+  membre qui ne l'a pas enregistre bien sa consigne, mais elle ne part pas —
+  et la réponse le DIT (`transmise: false`). Annoncer un succès complet ferait
+  croire à l'hôte que sa prestataire est prévenue.
+- **Le contenu du fil vient du CŒUR** (nom du bien lu dans `properties`,
+  voyageur dans `bookings_snapshot`), jamais du corps de la requête : sans
+  cela, un appel forgé écrirait n'importe quel nom dans son écran.
+- **Une note vide efface sans notifier** : annoncer « note de l'employeur »
+  pour une consigne retirée serait un faux événement.
+- ⚠ **`api/garde.js` rend la note existante** (`menages[].note`). Sans elle, la
+  fiche ouvrait un champ vide sur une consigne existante, et le premier
+  enregistrement l'effaçait.
+
+**Les trois étapes** (Q1) : `api/garde.js` rend `etapes {propose, pris, fait,
+parElle}` — `offered_at`, `accepted_at`, `menage_done.done_at`. `started` et
+`completed` existent au schéma mais **aucun code ne les écrit** : la fiche ne
+montre aucun jalon qu'on ne sait pas dater. `done_by_token` **ne sort pas**
+(c'est le secret d'accès de la prestataire) : seule sort la réponse à « est-ce
+elle qui a marqué ? », que la fiche dit en toutes lettres.
+
+Tests : `tests/menages-note.test.js` (12) et la section « étape 3 » de
+`tests/garde-endpoint.test.js` (5).
+
+**Constats de la revue (6822e47).** Le plus grave n'était visible par aucun
+test : la fiche appelait `heureParis`, **fonction supprimée d'un nettoyage
+précédent**. Elle s'ouvrait VIDE au clic sur un ménage proposé — la pastille
+la plus fréquente — parce que l'erreur survenait avant toute écriture dans le
+DOM. D'où `tests/pages-v5-identifiants.test.js` : *aucune fonction appelée
+n'est inconnue*, sur les pages V5. Il rougit sur ce bug précis
+(contre-épreuve faite), et il attrape la classe entière.
+
+Les autres :
+- **La note ne part plus à toute l'équipe du bien** mais à qui est SUR ce
+  ménage (porteuse + proposées) ; à l'équipe seulement si personne n'est
+  encore dessus. L'événement `note` est exempté du filtre d'appartenance côté
+  PWA : envoyé à tous, il montrait le nom du voyageur et les bornes du séjour
+  à une prestataire qui n'a pas ce ménage. Défaut **repris de l'ancien écran**,
+  fermé ici.
+- Un séjour **annulé** refuse la note, comme il refuse « fait ».
+- `charger()` après une note (et non `chargerATraiter` seul) : sans lui,
+  rouvrir la fiche réaffichait l'ANCIENNE note, et un second enregistrement
+  l'aurait réécrite par-dessus la nouvelle.
+- **Une note illisible se DIT** (`notes_lues: false`) et le champ ne s'ouvre
+  pas : un champ vide sur une consigne existante se fait écraser au premier
+  enregistrement. « Best-effort » n'allait pas pour cette lecture-là.
+- Effacer dit « effacée », plus « transmise ».
+- La pastille chiffrée donne accès à **chaque** ménage du jour (bascule) :
+  le second n'avait aucune fiche, alors que l'ancien écran les listait.
+- Un seul envoi par clic (le fil est un INSERT : deux clics envoyaient la
+  consigne deux fois) ; `.men-case` devenu bouton a sa remise à zéro CSS ;
+  `.men-fiche` passe après `.men-volet` pour que son z-index s'applique.
+
+## « Dernière ouverture de sa page », et l'alerte « Pas vu » (14 octobre 2026)
+
+**Le besoin, mot de Thierry** : *savoir si une prestataire a bien vu ses
+derniers ménages, sans estimation.*
+
+**Inventaire d'avant : rien ne l'enregistrait.** Zéro occurrence de `last_seen`,
+`last_opened`, `seen_at` dans le dépôt. Le seul voisin, `menage_events.read`,
+est un **booléen par notification**, posé quand elle *tape* sur son fil
+(`markRead`), et **sans date** : il dit « elle a acquitté cette notification »,
+pas « elle a ouvert sa page ».
+
+**La colonne** : `public_tokens.pwa_vue_le timestamptz`
+(`migrations/2026-10-14-pwa-vue-le.sql`, vérifiée par
+`scripts/verifier-migration-pwa-vue-le.js`).
+
+**Writer unique, et il est dans le serveur** : le succès du GET planning de
+`api/menages-public.js`, juste avant la réponse. Ni le navigateur, ni un
+`localStorage`, ni un acquittement de notification.
+
+| Décision | Pourquoi |
+|---|---|
+| **Sur le JETON, pas sur le profil** | la page EST le lien. « Nouveau lien » doit repartir de « Pas encore ouverte », et la régénération du jeton le donne gratuitement |
+| **Seule une synchro SERVEUR compte** | le service worker ne met jamais `/api/` en cache (`apps/menages/sw.js`) : arriver dans ce code veut dire qu'elle a bien reçu des données fraîches. Hors ligne, elle peint un cache qui **ne contient pas** le ménage neuf — elle ne l'a donc pas vu, et l'alerte doit tenir |
+| **Une panne d'écriture ne coupe pas sa page** | `try` + test d'erreur : ne pas savoir quand elle a regardé est un confort pour l'hôte, ses ménages du jour non. Une écriture qui **lève** ferait tomber tout le GET dans son `catch` général, donc un 500 — son écran noir pour un horodatage de confort |
+| **Un jeton refusé n'horodate rien** | « pas de profil actif, pas d'écriture » ne souffre pas d'exception, et l'horodatage ferait croire qu'elle a regardé |
+| **Le retour sur l'onglet ne déclenche aucune requête** | `visibilitychange` ne fait qu'un repeint (`public.html`) : un téléphone posé avec la page ouverte ne fabrique pas un faux « vue il y a 2 minutes » |
+
+**Ce qui sort, et par quelle porte.**
+
+- `/api/garde` rend `vues: { profilId: instant | null }` + `vues_lues`, **sous
+  `prestataires: read`** (la carte porte des identifiants stables de personnes,
+  exactement ce que `nommer()` refuse sans ce droit). **Le jeton ne sort pas** :
+  il sert à joindre, et un test le garde.
+- ⚠ **`api/garde.js` refuse les COORDONNÉES**, et son test l'exige depuis
+  l'étape 1 : *« l'écran répond à qui est de garde, pas à qui est ce
+  voyageur »*. Le numéro du bouton « Appeler » vient donc de
+  `/api/menages?equipe=1`, dont l'objet **est** les personnes. *Un même droit ne
+  justifie pas de servir une donnée par deux portes.*
+- `/api/menages?equipe=1` rend `tel` et `vueLe` par personne — **en deux
+  requêtes séparées** de celle des périodes de ratio : grouper ferait dépendre
+  les retours voyageurs, en production depuis le 13 octobre, d'une colonne
+  neuve. Entre le déploiement et l'application de la migration, le volet
+  afficherait « — » partout. **Une nouveauté qui tombe ne doit emporter
+  qu'elle-même.**
+
+**L'alerte, dans `shared/menages-a-traiter.js`** : type `pas_vu`, placé **après**
+les trois alertes de couverture et **avant** le passé — « personne ne viendra »
+est plus grave que « quelqu'un viendra peut-être sans le savoir », qui est plus
+urgent qu'un départ déjà manqué.
+
+Trois conditions, **toutes** nécessaires :
+
+1. elle **porte** le ménage, ou il lui est **proposé** ;
+2. sa dernière ouverture est **antérieure** à son attribution (`etapes.pris` si
+   elle porte, `etapes.propose` sinon) **ou** à la dernière note (`noteLe`) ;
+3. le départ est à **moins de 48 h** — comptés en **jours calendaires**, la même
+   borne que `non_pris`, pour que deux alertes du même écran ne se contredisent
+   pas.
+
+**Une ligne par PERSONNE**, avec son départ le plus proche et le nombre de
+ménages concernés : trois départs qu'elle n'a pas vus sont **un** coup de
+téléphone. L'alerte s'éteint dès qu'elle ouvre sa page, et **appeler est le seul
+geste qui la résout** — rien dans HôteSmart ne peut forcer quelqu'un à ouvrir
+son lien. Le bouton est **absent** sans numéro.
+
+**Quatre silences, et chacun a sa raison** :
+
+| Cas | Ce qui se passe | Pourquoi |
+|---|---|---|
+| `vues_lues: false` (panne) | **rien** | une carte vide voudrait dire « aucune ne l'a jamais ouverte » : un timeout PostgREST fabriquait une pleine page de rouge |
+| personne **absente** de la carte | **rien** | son lien n'existe plus (retirée de l'équipe) : annoncer « page jamais ouverte » sur un lien supprimé serait faux, et aucun geste ne l'éteindrait |
+| aucun **jalon** connu | **rien** | un ménage d'office ancien peut n'avoir aucune date d'attribution : alerter sur une date qu'on ignore accuse au hasard |
+| ménage déjà **marqué fait** | **rien** | elle y est allée |
+
+**Et deux alertes qui ne s'excluent pas** : un ménage proposé, imminent et non
+vu produit **`non_pris` ET `pas_vu`**. Elles disent une chose différente —
+« personne ne l'a pris » et « la personne sollicitée ne l'a peut-être pas lu » —
+et toutes deux sont vraies.
+
+**Ce que je n'ai pas codé, et pourquoi** : « antérieure à l'HORAIRE » n'est pas
+mesurable. Il n'existe **aucun horaire par ménage** — c'est
+`properties.checkout_time`, un réglage **du bien**. Le prendre pour jalon
+ferait sonner l'alerte à chaque modification du bien, y compris un changement
+de nom. La date, elle, est couverte **gratuitement** : elle fait partie de
+l'identité du ménage, donc un départ décalé crée un **autre** ménage, dont le
+`created_at` est postérieur.
+
+## La phrase d'état d'une prestataire : `shared/presta-etat.js` (14 octobre 2026)
+
+**« Est-ce que cette personne recevra des ménages ? »** — la question que
+l'écran de configuration ne posait nulle part, et dont la réponse est **la règle
+du moteur**, pas une approximation d'écran.
+
+**Le cas réel qui l'a fait écrire** (lecture de la production, 14 octobre
+2026) : **Lola est liée ACTIVE à Cœur de vie 23 et La bulle, en « elle
+confirme », avec AUCUN jour confié.** Le moteur ne lui proposera **jamais**
+rien : elle est candidate (jours `null` = tous les jours), mais la file de
+proposition ne retient que les liaisons dont les jours sont **explicitement**
+réglés (décision du 4 septembre 2026). **Aucun écran ne le disait**, et seule
+une alerte de ménage le révélait — à condition que personne d'autre ne porte le
+ménage.
+
+Le module est **pur** et rend des **clés**, jamais du texte (les libellés sont
+i18n, sous `menages.equipe.config.*`). Il est partagé par l'ordinateur et le
+téléphone : une règle commune vit dans un module commun.
+
+**Deux états, pas trois** (demande de Thierry : *« jamais d'ambre ici »*).
+`rien` est réservé au cas où elle ne recevra **aucun** ménage. Un bien mal
+réglé **parmi d'autres qui marchent** ne rougit pas l'en-tête : il porte son
+avertissement sur sa ligne, là où le geste se fait. Sinon la seule alerte
+vraiment grave — « cette personne ne sert à rien » — se noierait dans du rouge
+permanent.
+
+**Le motif commande le geste** : `aucun_bien` → « choisir ses biens » ;
+`aucun_jour` / `jours_a_regler` → « choisir ses jours ». Deux boutons pour deux
+causes différentes.
+
+Et les trois états d'une liaison, repris du moteur sans les réinventer :
+
+| `weekdays` | d'office | elle confirme |
+|---|---|---|
+| `null` / absent | **OK** — elle ne confirme rien, tous les jours lui vont | **`jours_a_regler`** — jamais sollicitée |
+| `[]` | **`aucun_jour`** — jamais candidate | **`aucun_jour`** |
+| `[2,3]` | OK | OK |
+
+Un **rang 3** existant se **lit** même si l'écran n'en propose que deux
+(décision de Thierry) : on ne mentira pas sur une liaison déjà posée. Un bien
+**hors du périmètre** de l'appelant est ignoré, jamais rendu sans nom — et
+jamais compté en défaut : alerter un délégué sur un bien qu'il ne peut même pas
+ouvrir ne lui laisse aucun geste.
+
+
+## Les constats de la revue de ac28b1f (14 octobre 2026)
+
+Six défauts, **aucun de sécurité**. Les trois premiers valent d'être retenus.
+
+**1. La synchro de `public_tokens.property_ids` ignorait le périmètre du
+délégué.** La désactivation des liaisons, elle, est bornée : un délégué limité
+au bien A laisse B et C **actifs**. En écrivant `property_ids` depuis la liste
+REÇUE de l'écran, on l'amputait à `['A']` — et la page de la prestataire
+cessait de servir B et C : **ses ménages y disparaissaient et ses « fait »
+étaient refusés**, pendant que le moteur continuait de les lui attribuer.
+C'était le dommage même que la borne de périmètre existe pour empêcher,
+réintroduit par l'autre représentation de « ses biens ». **La source est
+désormais l'état APRÈS écriture** (`apres`, lu sans borne) : les liaisons
+réellement actives de cette personne, tous périmètres confondus.
+*Leçon générale : quand une décision a deux représentations, une garde posée
+sur l'une ne protège pas l'autre.*
+
+**2. Un périmètre vide tronquait la réponse** (`personne: null`, sans `droits`
+ni `lien`) : les trois onglets levaient un TypeError **hors** du try/catch du
+chargement, et la fenêtre restait figée sur « Chargement… », sans message et
+sans fermeture. Et le cas n'est pas rare : `refsDuPerimetre` rend `[]` pour
+**tout état dégradé de délégation** — invitation non acceptée, profil
+désactivé, comptes discordants — pas seulement pour un périmètre à zéro bien.
+On ne lit rien de plus (aucune requête n'est même construite), **on répond
+complètement**.
+
+**3. `pwa_vue_le` était groupé** avec `visibility_days` et `ratio_periode` dans
+la fiche — alors que le volet Équipe sépare les deux exprès. Tant que la
+migration n'est pas appliquée, le select entier échoue : « Jours visibles »
+devient illisible et « Période du ratio » **disparaît**. Deux réglages
+existants perdus par une colonne neuve. *Une règle qu'on pose à un endroit se
+vérifie à tous les autres : le commentaire du vérificateur de migration
+affirmait la séparation, le code de ce chemin ne la faisait pas.*
+
+Les trois autres : l'aperçu de sa page promettait l'horizon réel (jusqu'à
+90 jours) en ne lisant que la fenêtre de planning de l'hôte (30 par défaut) —
+il annonce maintenant ce qu'il couvre ; `mois=2026-13` passait la validation et
+rendait un calendrier **vide**, lu comme « elle n'a aucun jour » ; et le refus
+« c'est son dernier logement » comptait des liaisons bornées au périmètre, donc
+empêchait un délégué de retirer son seul bien visible — il ne vaut plus que
+pour qui voit l'ensemble (`droits.perimetre_complet`).
+
+## « Vu » : l'accusé de réception d'un ménage attribué d'office (14 octobre 2026)
+
+**La demande de Thierry**, recette du 14 octobre : « pour Régina où les ménages
+sont attribués d'office, créer un bouton vu sur sa page ; s'il n'est pas validé,
+envoie un SMS 24 h avant et le jour J à 9 h. Enlève "Ménage non reçu",
+transforme "Non validé". »
+
+**Le trou qu'il ferme.** Une prestataire **référente** (`requires_ack = false`)
+n'a rien à confirmer : son ménage naît `accepted`, personne ne lui demande rien,
+et rien ne garantit qu'elle l'a lu — alors que l'hôte le croit confié. La
+**proposition**, elle, avait déjà sa boucle complète depuis le lot 3.3 :
+échéance, notification, escalade au refus. L'attribution d'office n'avait
+**rien** entre l'assignation et le départ du voyageur.
+
+`public_tokens.pwa_vue_le` (étape 3 de ce lot) répondait à une question
+**voisine mais plus faible** : « a-t-elle ouvert sa page ? », par **LIEN** et
+pour tous ses ménages à la fois. Elle ouvre sa page lundi, l'hôte lui ajoute un
+ménage mardi, et plus rien ne distingue les deux. La colonne reste — elle sert
+encore la **proposition** non vue et le « Vue il y a … » de sa fiche — mais elle
+ne décide plus de l'alerte.
+
+**La colonne.** `menages.vu_le` (migration `2026-10-14-menage-vu-le`), plus deux
+marqueurs de relance. **Writer unique : `api/menages-public.js`** — le bouton
+« Vu », et les **deux gestes par lesquels elle se saisit déjà d'un ménage**
+(accepter une proposition, prendre un ménage libre), qui valent validation :
+elle a dit oui. Lui réafficher un bouton « Vu » après « J'accepte », et la
+relancer parce qu'elle ne l'a pas tapé, lui apprendrait à ignorer les relances.
+
+**Le rattrapage de la migration ne couvre QUE ces deux gestes**
+(`assignment_reason like 'Accepte par %'` / `'Pris par %'`). Un ménage attribué
+d'office n'a jamais été validé par personne : le dire est exact, et c'est le
+point de départ de la relance. Sans ce rattrapage, un ménage accepté la semaine
+dernière et qui part demain serait annoncé « non validé » et vaudrait deux SMS
+pour un oui déjà donné.
+
+**Le même fait, deux mots.** Elle lit « Vu » sur son bouton ; l'hôte lit
+« Non validé » dans sa bulle et sur la fiche. C'est la même colonne. Le type
+`pas_vu` de `shared/menages-a-traiter.js` est renommé `non_valide` — nommé par
+ce qu'il mesure, et non plus par son indice de remplacement.
+
+**Deux situations, deux sources, dans `nonVuPar`** — et les confondre serait la
+faute :
+- **elle le PORTE** → `vuLe` tranche, et la carte des ouvertures de liens
+  n'entre plus dans la règle. **L'alerte tient donc même quand la lecture de
+  `public_tokens` est en panne** : avant, un timeout PostgREST la faisait taire
+  entièrement, et l'hôte lisait le calme ;
+- **on lui PROPOSE** → il n'y a rien à valider (accepter *est* la validation),
+  donc la seule question reste « sait-elle qu'on lui demande quelque chose ? »,
+  et c'est la dernière ouverture de sa page qui y répond, comme avant.
+
+`vuLe === undefined` **se tait** (une version antérieure de `/api/garde` ne sert
+pas la colonne) : on ne crie pas sur une absence de donnée. Deux tests tiennent
+ce silence par les deux bouts — l'un vérifie qu'on se taise, l'autre que
+`/api/garde` serve bien le champ, `null` compris.
+
+**Deux bornes nouvelles, et chacune a sa raison.**
+1. **Le passé est exclu** (`m.date >= aujourdhui`). Avec `vuLe`, un départ de la
+   semaine dernière jamais validé alerterait pour toujours — alors que
+   `non_termine` le dit déjà, et mieux. Même borne que le bouton de sa page.
+2. **L'en-tête de la fiche prestataire lit désormais LA MÊME FENÊTRE que la
+   bulle** (`limiteDeLImminence`, exportée pour n'exister qu'une fois). Elle
+   regardait tout ce qui est à venir, ce qui se tenait quand la question était
+   « a-t-elle ouvert sa page ? » — une réponse par personne. Un ménage d'office
+   pour dans trois mois n'est validé par personne : sans borne, **chaque
+   prestataire serait rouge en permanence**, et un rouge permanent n'est plus lu.
+
+**Les deux relances** (`lib/cleaning/relance-validation.js`, branché au cron
+après les propositions dues). À **9 h de Paris**, la veille puis le jour même,
+tant que `vu_le` est nul. Trois choses y sont délibérées :
+- **« à partir de 9 h », pas « à 9 h pile »** : un cycle qui échoue à 9 h 00
+  doit rattraper à 9 h 05, et un ménage attribué à 15 h pour demain doit être
+  annoncé tout de suite. Avant 9 h, le module **ne marque rien** — marquer
+  ferait sauter la relance pour toujours ;
+- **deux marqueurs séparés** (`relance_vu_j1_le`, `relance_vu_j0_le`), **par
+  ménage**. Un compteur global relancerait deux fois le même jour dès qu'un
+  cycle échoue au milieu, et une prestataire qui reçoit deux fois le même SMS
+  cesse de les lire. Un seul marqueur ferait sauter le dernier rappel, celui qui
+  précède le départ ;
+- **deux jours seulement, c'est la garde d'envoi de masse** (REVIEW.md règle 2) :
+  la première activation d'un compte ne peut pas produire un SMS par
+  réservation future de l'historique.
+
+**Le marqueur se pose même quand rien n'est parti**, et c'est un choix : un
+profil sans numéro ni e-mail, ou qui a décoché les deux canaux, ne recevra
+jamais rien — réessayer toutes les cinq minutes jusqu'au départ ne lui
+apprendrait rien. Le compte `muettes` le dit dans les logs ; l'hôte, lui, le lit
+dans sa fiche (« Aucun canal actif »).
+
+**Côté sa page**, une seule règle (`estAValider`) pour le badge « À VALIDER » et
+pour le bouton. Les séparer, c'est reproduire en petit le défaut du 14 octobre
+sur les cases de jours : le rendu et le geste avaient chacun leur idée de ce que
+l'écran montrait. Le geste est **idempotent** (`vu_le is null` dans l'update),
+donc rejouable par `fetchWithRetry` ; et il **ne passe jamais par la file hors
+ligne**, parce que `enqueuePending` garde UNE action par ménage — y mettre une
+validation effacerait un « fait » qui attend d'être envoyé, et elle perdrait son
+travail au profit de l'accusé de lecture.
+
+## L'onglet « Ce qu'elle voit » est supprimé (14 octobre 2026)
+
+Décision de Thierry, même recette : « on laisse tomber la page aperçu qu'elle
+voit, on reporte "Envoyer le lien / Ouvrir sa page / Nouveau lien" sur la page
+configuration. »
+
+L'onglet avait vécu deux formes en une journée — un aperçu reconstitué à partir
+des données de l'hôte, puis une **iframe** sur sa vraie page en `?apercu=1`. La
+seconde était juste, et coûtait néanmoins **le jeton de la prestataire dans le
+DOM de l'écran de l'hôte** à chaque ouverture de l'onglet. Les trois gestes du
+lien, eux, servent tous les jours.
+
+Ce qui **reste** : « Ouvrir sa page » en mode lecture seule (`apercu=1`), avec
+sa garde d'origine (`estSaPage` : même origine **et** chemin de sa page, pour ne
+jamais ouvrir une URL d'invitation dans la session de l'hôte). Le mode
+`?apercu=1` de `apps/menages/public.html` reste donc entièrement en place,
+bouton « Vu » compris, qui y est masqué comme les autres gestes.
+
+## Les constats de la revue de 20fb83d (14 octobre 2026)
+
+Aucun constat de sécurité : `validerMonMenage` est cloisonné par jeton → compte
+→ profil, et l'écriture porte `user_id` + `provider_id` + la condition d'auteur.
+Huit défauts réels, dont deux qui rouvraient le trou que le lot vient fermer.
+
+**1. Une colonne neuve ne doit pas pouvoir emporter les colonnes qui marchaient.**
+`api/garde.js` et `api/menages-public.js` nommaient `vu_le` dans leur `select`
+principal, alors que la migration se colle **à la main, après le push**. Entre
+les deux, PostgREST rend 42703 sur le select **entier** — et les deux endpoints
+traitent toute erreur de lecture en 503. La page Ménages de l'hôte (bulle,
+calendrier de garde, fiche prestataire) **et** la page de chaque prestataire
+auraient affiché « service indisponible » jusqu'au collage du SQL. Et ce n'est
+pas la première fois : `pwa_vue_le` groupé avec `visibility_days` avait fait
+exactement cela à la revue de `ac28b1f`. La deuxième occurrence du même défaut
+sur le même lot est ce qui justifie `lib/colonne-absente.js` : le prédicat
+existe pour **dégrader**, jamais pour avaler — l'appelant relit sans la colonne,
+sert le champ **absent** (et non `null` : les deux ne disent pas la même chose),
+et l'alerte se tait au lieu d'accuser tout le monde.
+
+**2. Une validation ne vaut que pour qui l'a posée** (`vu_par`, migration
+`2026-10-14-menage-vu-par`). `vu_le` seul dit QUAND, pas QUI. Or un ménage
+change de main : l'hôte réassigne, une collègue accepte, le moteur pose une
+remplaçante après un refus. La validation d'Anna restait collée au ménage passé
+chez Béa — Béa n'avait **ni badge, ni bouton, ni relance**, et l'hôte lisait
+« À jour » sur quelqu'un qui n'avait jamais rien lu. **Le trou que ce lot existe
+pour fermer, rouvert par le geste le plus courant de l'hôte.**
+
+*Pourquoi `vu_par` plutôt que « remettre `vu_le` à null à chaque
+réassignation ».* Il faudrait le faire dans les **six** chemins qui écrivent
+`provider_id` aujourd'hui, et dans tous ceux qui viendront ; rien ne le
+garantit, et **aucun test ne peut attraper un septième chemin qui n'existe pas
+encore**. La donnée porte donc son propriétaire, et un changement de porteuse
+rend la validation caduque **tout seul**. Même règle lue aux trois endroits
+(`api/garde.js`, `api/menages-public.js`, `lib/cleaning/relance-validation.js`),
+et la garde d'idempotence de l'écriture devient une condition d'**auteur** —
+sinon la nouvelle porteuse tapait « Vu » et s'entendait répondre « déjà fait »
+sans que rien ne soit à son nom.
+
+**3. Le marqueur de relance se pose AVANT l'envoi, et c'est l'ordre qui compte.**
+Posé après, un échec durable de l'UPDATE (droit, verrou, migration passée à
+moitié) laissait la ligne éligible au cycle suivant : le **même SMS repartait
+toutes les cinq minutes**, jusqu'à 288 par jour et par ménage, chez quelqu'un
+qui travaille, sur la clé Brevo de l'hôte — et rien ne sonnait nulle part. Le
+commentaire d'origine annonçait « un SMS de trop au prochain cycle » ; c'était
+une boucle sans sortie. Ce que l'ordre inverse coûte, et c'est assumé : ce
+rappel-là est perdu. Il en reste un second, et l'alerte « Non validé » de l'hôte
+ne dépend pas de l'envoi. Un échec de marquage **arrête le cycle** : il échouera
+sur les lignes suivantes, et continuer n'enverrait que des messages qu'on ne
+sait pas marquer.
+
+**4. Le « fait » vit dans `menage_done`, pas dans `menages.status`.** Sans cette
+lecture, elle finissait son ménage à 8 h et recevait à 9 h « touchez Vu » sur
+une page où le bouton n'existe plus (`estAValider` exclut `m.done`). **Un SMS
+auquel on ne PEUT pas obéir** est le plus sûr moyen de lui apprendre à ne plus
+les lire — exactement ce que ce module dit vouloir éviter.
+
+**5. Le filtre anti-répétition est posé EN BASE, pas en JS.** Il l'était après
+la limite : sur un gros compte, les lignes du jour déjà relancées mangeaient
+toutes les places et les ménages de **demain** n'étaient jamais lus, en silence,
+avec un bilan qui ressemblait à un cycle calme. Une requête **par jour**,
+chacune filtrée sur **son** marqueur ; et la limite atteinte se dit (`lotPlein`).
+
+**6. Une panne de lecture n'est pas un ménage introuvable.** La relecture de
+repli de `validerMonMenage` jetait son erreur : un hoquet de la base annonçait
+« ce ménage n'est pas le vôtre » à quelqu'un qui venait de le valider. 503,
+comme partout dans ce fichier.
+
+**7. Pas de lien, pas d'alerte — même pour la porteuse.** Une personne absente
+d'une carte **lue** n'a aucune ligne `public_tokens` : elle n'a pas de page,
+donc aucun moyen de valider, et la ligne rouge ne pouvait être éteinte par
+aucun geste. *Absente d'une carte lue ≠ carte non lue* : une panne de lecture
+(`vuesLues: false`) ne dit rien de personne, et l'alerte tient alors — c'est
+tout l'intérêt d'avoir déplacé la règle sur le ménage.
+
+**8. On ne relance pas sur un ménage qui n'est pas sur sa page.** Une liaison
+suffit à lui attribuer le ménage, mais c'est `public_tokens.property_ids` qui
+décide de ce que sa **page** affiche — et les deux ont divergé dans ce dépôt
+(ancien second writer). Elle recevait « touchez Vu », ouvrait sa page, n'y
+trouvait rien. Rien n'est marqué dans ce cas : ce n'est pas une relance faite,
+c'est un réglage à réparer, et le crier à chaque cycle est le seul signal qui
+existe.
+
+## « Vu » / « Pas vu » : le vocabulaire et la place du bouton (14 octobre 2026)
+
+**Retour de recette de Thierry, le soir même** : *« page de la prestataire :
+trop de changements. Reviens à la page telle qu'elle était, ajoute UNIQUEMENT
+un petit bouton 👁 Vu. »* Et : *« Vocabulaire partout : Vu / Pas vu, jamais
+valider / validé / non validé. »*
+
+**Ce qui est retiré.** Le badge « À VALIDER » (et son fond ambre) sur chaque
+ligne ; le bouton pleine largeur dans la fiche du ménage ; l'enveloppe `wrap`
+de la barre d'actions. Sa page retrouve exactement la mise en page et les
+couleurs d'avant le lot — le **seul** ajout visible est le bouton.
+
+**Où vit le bouton, et pourquoi là.** Sur la **ligne** du ménage, dans les deux
+surfaces qui listent ses ménages (feuille du jour, liste des jours à venir),
+par une fabrique unique. Il est le **frère** de la ligne, pas son enfant : la
+ligne EST un `<button>` (elle ouvre la fiche), et un bouton dans un bouton est
+invalide — le clic partirait aux deux, elle toucherait « Vu » et la fiche
+s'ouvrirait par-dessus. D'où `.jrangee`, qui n'existe que lorsqu'il y a quelque
+chose à côté : sans bouton, la ligne garde son rendu d'avant, au pixel près.
+
+Le gestionnaire teste `[data-vu]` **avant** `[data-mien]` et coupe la
+propagation : un doigt qui déborde ne doit pas ouvrir la fiche à la place.
+
+**Deux états, une seule règle.** `estPasVu` rend le bouton, `dejaVu` rend la
+mention « ✓ Vu » grise et inerte. Montrer l'état vu, et pas seulement l'absence
+de bouton, lève le doute exact que cet accusé existe pour lever : sans lui, le
+bouton disparaissait au clic et rien ne disait si le geste était parti.
+
+**Une icône, pas un emoji** (demande explicite). `shared/icons.svg` n'a pas
+d'œil, et **cette page ne charge pas le sprite du tout** : elle est hors ligne
+et dessine ses icônes en ligne, comme les deux pouces des avis. Un `<use href>`
+vers un fichier externe serait une dépendance réseau de plus sur un téléphone
+en sous-sol. L'œil est donc un SVG inline, à la convention du fichier.
+
+**Un refus se dit là où elle regarde.** Cette page n'a pas de bandeau général :
+quand le modal est ouvert, c'est lui qui parle ; sinon le bouton lui-même porte
+le mot (« Hors ligne », « Réessayez ») le temps d'être lu. Un échec muet sur un
+accusé de lecture serait le pire des deux : elle croirait avoir prévenu.
+
+**Le vocabulaire, et son périmètre.** Le type redevient `pas_vu` — il avait
+porté le nom `non_valide` quelques heures. Ce qu'il **mesure**, lui, a bien
+changé ce jour-là (le ménage, plus le lien) ; le nom est redevenu le bon.
+Libellés : « Pas vu » dans la bulle et sur l'en-tête de la fiche. Le SMS nomme
+**exactement** le bouton qu'elle cherchera : *« Un menage vous a ete attribue le
+[date] a [bien]. Ouvrez votre page et touchez Vu. »* — un message qui dirait
+« validez » devant un bouton qui dit « Vu » lui ferait chercher autre chose.
+
+⚠ **Le périmètre s'arrête là.** Ailleurs dans l'app, « valider » garde son autre
+sens : l'hôte qui CONSTATE qu'un ménage est fait (`menages.fait_ok`,
+« Ménage validé »), et l'écran `validate.*`. Les renommer confondrait deux
+gestes qui n'ont rien à voir. Un test le garde, borné aux clés `menages.*`.
+
+**Le mécanisme ne bouge pas** : `vu_le`, `vu_par`, la caducité au changement de
+porteuse, les deux relances à 9 h et leurs marqueurs. Seuls l'habillage, la
+place du geste et les mots ont changé.
+
+## Les constats de la revue de 6452d75 (14 octobre 2026)
+
+Aucun constat de sécurité : les gardes serveur de `validerMonMenage` ne sont pas
+touchées par ce commit, et la caducité par `vu_par` est appliquée **à la
+lecture** — le client reçoit déjà `vu_le: null` quand la validation est celle
+d'une porteuse précédente. Quatre défauts d'écran, dont un bloquant.
+
+**1. Un échec rendait le bouton MORT, sur la surface principale.** Le
+réarmement (`bouton.disabled = false`) vivait **après** le `return` de la
+branche « modal ouvert » — or la feuille du jour **est** le modal, et c'est là
+que le bouton vit le plus souvent. Elle touchait « Vu », le POST échouait, elle
+lisait « Réessayez »… et le bouton ne repartait plus jamais : le seul moyen de
+le réarmer était de fermer puis rouvrir la feuille, ce qu'aucun texte ne disait.
+L'accusé n'arrivait donc jamais, l'hôte continuait de lire « Pas vu », et les
+deux relances de 9 h continuaient de sonner — **sur quelqu'un qui avait fait le
+geste**. *Leçon : un `return` anticipé dans une fonction de récupération d'erreur
+est à lire deux fois ; c'est le chemin qu'on teste le moins.*
+
+**2. Le libellé restauré était l'état courant, pas le canonique.**
+`const avant = bouton.innerHTML` capturait ce que le bouton affichait à cet
+instant — qui pouvait déjà être le message du premier échec. Deux échecs
+rapprochés laissaient « Réessayez » à demeure, sur un bouton pourtant cliquable
+et fonctionnel. `LIBELLE_VU` est désormais défini une seule fois, posé par le
+rendu et restauré par `echecVu`, avec un seul minuteur par bouton
+(`clearTimeout`) — deux restaurations qui se croisent écrasaient la bonne.
+
+**3. L'aperçu coupait l'ÉTAT, pas seulement le GESTE.** `.apercu .jvu` masquait
+aussi la mention inerte « ✓ Vu ». L'hôte ouvrait l'aperçu précisément pour
+savoir si elle avait vu le ménage, et la ligne ressemblait à celle d'un ménage
+jamais lu : **l'aperçu mentait sur la seule information que ce lot ajoute à
+cette page**. Le sélecteur ne porte plus que sur `[data-vu]`. C'est mot pour mot
+la leçon déjà gravée treize lignes plus bas dans le même fichier (revue de
+`6d007f3`) : *seules les écritures sont coupées, pas la lecture*. La relire
+n'aurait coûté que de regarder le voisin immédiat.
+
+**4. On repeignait avant de recharger.** Les trois autres gestes du fichier font
+l'inverse. Repeindre sur l'écriture optimiste puis recharger laissait la feuille
+peinte sur une vérité que le rechargement venait de jeter : si l'hôte a changé
+de porteuse entre le rendu et le clic, le serveur ressert `vu_le: null`, et
+l'agenda montrait « Vu » pendant que la feuille ouverte par-dessus montrait
+« ✓ Vu ». Deux surfaces, deux réponses pour le même ménage — exactement ce que
+la fabrique unique `boutonVu` existe pour empêcher. Et le repeint est
+inconditionnel : `rechargerAssignations` sort en silence sur une panne de
+lecture, et sans lui le bouton restait « Vu » alors que l'écriture avait abouti.
+Garde au passage : `ouvrirJour(null)` quand la fiche est ouverte sans feuille.
+
+## Une seule bulle, deux zones (14 octobre 2026)
+
+Demande de Thierry pendant la recette : *« mets Vu dans la bulle avec le nom du
+bien pour simplifier. On le garde à droite. »*
+
+Ce qui change est **l'habillage, pas la structure**. L'enveloppe `.jrangee`
+porte désormais le fond, la bordure et l'arrondi ; la ligne du ménage et le
+bouton les perdent, et un trait fin les sépare. On lit un seul bloc.
+
+Ce qui **ne change pas** : ce sont toujours deux boutons **frères**. La ligne
+est elle-même un `<button>` (elle ouvre la fiche), et un bouton dans un bouton
+ferait partir le clic aux deux — c'est la raison qui avait sorti le bouton de
+la ligne au départ, et elle tient toujours. Le trait de séparation n'est pas
+décoratif : sans lui, « Vu » se lit comme une étiquette et personne ne le
+touche.
+
+Détail attrapé au passage : la coloration du jour courant
+(`.agenda-jour.auj`) portait sur l'item, donc sur la **moitié gauche** de la
+bulle. Elle porte maintenant sur l'enveloppe.
+
+## Les quatre gestes d'assignation reviennent dans la V5 (14 octobre 2026)
+
+Étape 4, premier des deux chantiers qui conditionnent la suppression des anciens
+écrans.
+
+**Ce qui manquait.** La page V5 ne savait qu'**assigner** : un clic sur un
+prénom, et le ménage changeait de main sur-le-champ. L'ancien planning
+(`apps/menages/index.html`) en portait trois autres, que le serveur distingue
+depuis toujours (`api/menages.js`, « DEUX GESTES DISTINCTS ») :
+
+- **« Proposer »** — elle confirme, et le ménage **reste chez sa porteuse** tant
+  que personne n'a accepté. C'est le **défaut du serveur** (`mode` absent ⇒
+  `proposer`), et la raison est écrite dans le code : *engager quelqu'un sans son
+  accord doit rester un choix explicite, pas ce qui arrive par défaut*. L'écran
+  V5 faisait précisément l'inverse.
+- **« Retirer la proposition »** — elle s'efface, le ménage ne bouge pas. Le
+  serveur le reconnaît à ceci : on **re-choisit la porteuse actuelle** en mode
+  `assigner`. Viser la personne sollicitée transférerait le ménage à celle qui
+  n'a jamais répondu.
+- **« Personne »** — `provider_id: null`.
+
+**Une seule fabrique pour les deux surfaces** (le menu de la bulle et la fiche
+ménage) : `htmlGestesAssignation` rend, `gesteAssignation` poste,
+`brancherGestesAssignation` écoute. Deux listes écrites côte à côte finiraient
+par offrir des gestes différents sur le même ménage — c'est le défaut que ce lot
+a déjà payé deux fois (les cases de jours, puis le bouton « Vu »).
+
+**L'écran annonce ce que le serveur a FAIT**, lu dans sa réponse (`assignee`,
+`retiree`), jamais ce qu'on lui a demandé : « proposé » et « assigné » ne se
+disent pas pareil, et le message de proposition dit explicitement ce qui **n'a
+pas** changé (« le ménage reste chez sa porteuse »).
+
+**Détail CSS qui a coûté une capture** : `.men-choix button` met tous les boutons
+du popover en bloc et en pleine largeur. Une classe seule ne pèse pas assez —
+les deux gestes tombaient l'un sous l'autre et le prénom disparaissait sous eux.
+Les règles passent donc par le parent (`.men-chx__p .men-chx__b`) au lieu de
+toucher à la règle d'origine, qui sert encore aux deux boutons du bas.
+
+## L'ancien planning ménage est fermé (14 octobre 2026)
+
+`apps/menages/index.html` devient une redirection vers `/menages`. Il avait
+survécu à l'étape 4 parce qu'il portait trois gestes que la V5 ne reprenait
+pas ; la fiche V5 les porte depuis `241ee10`.
+
+**Ce qu'il faisait d'autre, la V5 le fait mieux** — et c'est ce qui rend la
+fermeture sans regret :
+
+- **la note** partait en **écriture RLS directe** depuis le navigateur
+  (`menage_comments.upsert`), sans passer par aucun endpoint. La V5 passe par
+  `/api/menages action:'note'`, son writer, qui sait aussi la **transmettre** à
+  la prestataire et le dire ;
+- **« Marquer fait » n'écrivait que dans le `localStorage`** (`menages-done`).
+  Il ne quittait pas la machine : la prestataire ne le voyait pas, un autre
+  appareil de l'hôte non plus, et l'hôte croyait pourtant avoir enregistré
+  quelque chose. La V5 écrit en base (`action: 'fait'` → `menage_done`).
+
+**Les tests ont été reportés, pas supprimés.** Le garde-fou « les écritures
+restent derrière un droit » vise désormais `pages/menages.html`, et il s'énonce
+mieux qu'avant : **deux droits distincts**, `menages:write` pour « Valider » et
+`prestataires:write` pour les quatre gestes d'assignation — les confondre
+donnerait à un délégué le droit de changer de prestataire parce qu'il peut
+cocher un ménage fait. Le garde-fou « ne pas lire un élément qu'on vient de
+retirer » devient « aucun **écouteur** posé sur un geste non rendu » : c'est le
+cas qui casse vraiment une page, et la V5 rend ses gestes dans des gabarits
+conditionnels.
+
+`tests/pages-identifiants.test.js` voit sa liste se vider : cet écran était le
+**dernier à appeler l'API en `fetch` brut**. Le test garde sa raison d'être pour
+le prochain qui y reviendrait, et vérifie au passage que la liste est vide parce
+que l'écran a été redirigé — pas parce qu'on l'a perdu de vue.
+
+**Reste `apps/menages/garde.html`** : lecture seule, remplacé à l'écran, mais sa
+suppression emporte 16 garde-fous de rendu à transposer un par un.
+
+## Le planning de garde est fermé : seize garde-fous transposés (14 octobre 2026)
+
+`apps/menages/garde.html` devient une redirection. Il était en **lecture seule**
+— il n'a jamais rien écrit — et son unique appel est celui que la page V5 fait
+déjà. Ce qui le retenait n'était pas une fonction, c'étaient **seize assertions
+de rendu** que `tests/garde-endpoint.test.js` tenait sur lui.
+
+**Un repointage automatique ne marchait pas** : mesuré, 16 échecs sur 18. Ces
+assertions décrivaient un écran précis (`delaiTexte`, `GRAVITE`, `--case`,
+`renderSidebar('menages-garde')`). Chacune a donc été réécrite en visant ce que
+la V5 fait **vraiment**, sous d'autres noms :
+
+| ce qui était gardé | où ça vit en V5 |
+|---|---|
+| délai affiché, en heure de Paris | `menages.tt_expire` + `heureIntl` (`timeZone: 'Europe/Paris'`) |
+| offre périmée signalée | `const expiree` dans `shared/menages-a-traiter.js` |
+| « non confié » jamais en rouge | `men-nonconfie` + `const trous = gere ? … : new Set()` |
+| un refus n'est pas un report | `m.differe && m.status !== 'orphaned'` |
+| la case montre le plus grave | `GRAVITE` + `reduce` sur les ménages du jour |
+| prénom entier, ellipse en CSS | pas de `initialeDe`, `text-overflow` dans `ui.css` |
+| une seule infobulle | `const titres = ms.map(infobulle)` sur la case |
+| largeur de case non recopiée | la grille vient de `shared/calendar-core.js` |
+| le resize ne ramène pas sur aujourd'hui | `if (estLarge() !== large)` |
+| la liste de ce qui ne doit pas se perdre | **clés i18n**, plus des bouts de phrase |
+
+⚠ **Viser les clés i18n, pas les libellés.** L'ancienne liste cherchait
+« personne de garde », « jours à régler », « quelqu'un » dans le HTML. La V5 dit
+les mêmes choses avec d'autres mots : une formulation retouchée aurait fait
+croire qu'une information avait disparu. Le test vérifie maintenant que la clé
+existe **et** qu'elle est employée.
+
+**Deux contrats ont changé, et c'est délibéré :**
+
+1. **La remplaçante du jour n'est plus montrée** — perte assumée, signalée dès
+   l'inventaire (§E.2). L'**endpoint** continue de la rendre, et le test garde
+   ce contrat serveur intact pour le jour où l'écran la reprendra.
+2. **6 et 12 mois sont désormais proposés.** L'ancien écran s'interdisait ces
+   fenêtres : les règles de disponibilité auront changé avant, et il aurait
+   présenté une prévision comme un fait. La V5 les propose parce que ce qu'elle
+   montre loin, ce sont les **ménages et les liaisons**, pas une garde calculée.
+   La borne serveur (92 jours) est respectée par **découpage en tranches**, pas
+   contournée — et le test vérifie que la plus grande tranche passe, pas
+   seulement que 93 jours sont refusés.
+
+**Le sous-menu Ménages tombe à deux entrées** : « Ménages » et « Prestataires ».
+Le doublon que le renommage du 5 septembre cherchait à lever — deux écrans
+appelés « Planning » — se lève tout seul, les deux ayant fusionné dans la V5.
+
+## L'appli prestataire passe à la charte V5 — CSS SEUL (15 octobre 2026)
+
+Demande de Thierry, en une règle : « aucune modification du HTML généré, du JS,
+des textes, des clés i18n, des endpoints ni du comportement. Seuls les styles
+changent. Si un point exige de toucher au DOM ou au JS, tu ne le fais pas : tu
+le listes. » Ce qui suit est donc une refonte **visuelle**, et la preuve en est
+mécanique : tout ce qui suit `</style>` dans `apps/menages/public.html` est
+**octet pour octet identique** à la version d'avant. La seule addition hors CSS
+est le chargement de `shared/theme.css` et de la police.
+
+### Le socle : seize variables, zéro ligne de `public/style.css` touchée
+
+`public.html` charge `public/style.css`, **partagé avec les trois écrans de
+l'hôte** (`index`, `garde`, `prestataires`). Le modifier aurait repeint ces
+trois écrans par ricochet. Or ce fichier est presque entièrement piloté par
+seize variables (`--bg --bg2 --bg3 --text --text2 --text3 --border --border2
+--green --green-bg --amber --amber-bg --radius --radius-lg --primary
+--primary-bg`), déclarées sur `:root`.
+
+**On les remappe sur les tokens, dans le `:root` local de la page**, qui est
+déclaré après : `.btn`, `.topbar`, `.content`, `.modal` suivent sans qu'une
+seule de leurs règles soit réécrite. C'est tout le socle de la bascule.
+
+⚠ **`--border` n'est PAS remappé**, et la raison est une règle du langage :
+`:root` et `html` sont le MÊME nœud. Écrire `--border: var(--line)` puis
+`--border2: var(--border)` aurait rendu la seconde circulaire — les deux
+auraient valu `--line`. Le token `--border` de `theme.css` étant exactement la
+bordure de carte V5, on le laisse passer tel quel.
+
+Deux tokens ont été ajoutés à `theme.css`, qui reste le seul fichier où un hexa
+a le droit d'exister : **`--muted-2`** (texte tertiaire sur fond CLAIR — à ne
+pas confondre avec `--on-ink-muted`, qui se lit sur fond sombre et devient
+illisible ici) et **`--scrim`** / **`--shadow-sheet`** pour les feuilles du bas.
+
+### Ce que la charte a changé, et pourquoi
+
+| Avant | Après | La raison |
+|---|---|---|
+| `.btn-primary` en aplat noir | **blanc, bord noir 1,5 px** | Le noir ne dit plus qu'une chose : « c'est celui-ci qui est choisi » (cases du filtre, faces d'un segment). Un bouton d'ACTION ne se peint pas comme un choix actif |
+| Hors ligne en rouge | **fond noir, texte blanc** | Hors ligne est un ÉTAT, pas une erreur. Rien n'a échoué : elle est dans un sous-sol, et ses gestes partiront en remontant |
+| « À PRENDRE » terre cuite | **pointillé gris, sans couleur** | Ce qui n'est à personne n'a pas à crier plus fort que le travail acquis |
+| Note de l'hôte sur fond jaune | **gris très clair** | Le jaune la mettait au rang d'une alerte : c'est une consigne de travail, qu'on lit |
+| Segment vert / gris | **la face choisie en noir, les deux** | Deux couleurs pour deux faces du même réglage laissaient croire qu'une des réponses était la bonne |
+| Pastilles A/B vertes et ambre | **vertes dans les deux lignes** | La même case disait deux choses selon la ligne où elle tombait, et l'ambre n'a plus droit qu'à deux emplois : « à confirmer » et le compteur des nouveautés |
+| Absence = numéro barré | **barré ET hachuré** | Le barré seul demandait de lire un chiffre de 14 px pour savoir si la journée compte |
+| Aujourd'hui en liseré | **pastille noire pleine** | Et la règle porte `:not(.vide)` pour une raison de CASCADE : `.a-moi` est déclarée plus bas à spécificité égale et reprenait le fond |
+| Avis sur fond teinté | **carte blanche, liseré gauche 4 px** | Le fond mettait tout l'avis en accusation (ou en éloge) ; ce qu'on lit d'abord doit être le texte |
+
+### Deux défauts de mise en page réglés au passage
+
+- **« Ce mois-ci » n'était stylé nulle part** : `.btn-mini` n'existait que sous
+  `.dispo-item`, et ce bouton-là tombait au rendu natif du navigateur — un
+  rectangle système au milieu d'un écran dessiné.
+- **Les sept pastilles de « Mes jours » ne tenaient pas sur une ligne** à
+  390 px (308 px nécessaires, 286 disponibles) : la semaine se repliait en
+  4 + 3. L'étiquette « Semaine A » passe au-dessus, et **les vingt-deux pixels
+  manquants se prennent sur les marges de la feuille, jamais sur la cible
+  tactile** — 44 px sous le pouce reste la règle qui ne se négocie pas.
+
+### ⚠ CE QUE LES TESTS FIGENT, ET QUI A DONC SURVÉCU
+
+`tests/pwa-mes-jours-dom.test.js` lit la feuille de style **mot pour mot** —
+c'est voulu : « un test de structure ne voit pas un bouton qui ressemble à du
+texte mort ». Quatre assertions portent sur des NOMS de variables ou des
+valeurs littérales, et la refonte a dû s'y plier :
+
+1. `.jmarque.fait` doit contenir `var(--green)` — gardé (le vert de « fait »
+   est de toute façon celui que la charte autorise) ;
+2. `.dispo-bulle` doit contenir `background: var(--bg2)` et
+   `border: 1px solid var(--border2)` — gardés, remappés, rendu identique ;
+3. `.agenda-item` doit contenir `min-height: 44px` — gardé : **les 52 px de la
+   charte viennent du padding**, et le plancher reste la cible du pouce le jour
+   où le texte manquerait ;
+4. la liste des fonds de case doit valoir EXACTEMENT
+   `['a-moi -> var(--green-bg)']` — donc **le jour qui porte un ménage reste
+   vert**, là où la charte l'aurait voulu gris. Le passer au gris demandait de
+   toucher un test, c'est-à-dire de sortir du périmètre « CSS seul » : c'est un
+   point remonté à Thierry, pas une décision prise au passage.
+
+Les deux nouveaux fonds (pastille noire d'aujourd'hui, hachures d'absence)
+échappent à cette égalité stricte parce que leurs sélecteurs portent un
+`:not(…)` : la regexp du test s'arrête au premier caractère qui n'est ni une
+lettre, ni un point, ni un tiret. Ce n'est pas une ruse — c'est la même limite
+qui lui évite d'attraper `.dispo-case.manuel::before`, et le test le dit.
+
+### Les dix constats de la revue, et ce qu'ils ont appris
+
+Aucun de sécurité ; tous intégrés dans le commit suivant. Trois méritent d'être
+retenus au-delà de ce lot.
+
+**1. Une pastille noire ne suffit pas : tout ce qui se dessine dessus doit
+s'inverser avec elle.** `.dispo-case.auj` posait bien le fond noir et inversait
+le compteur — mais pas le NUMÉRO. La règle qui le colore
+(`.a-moi:not(.off):not(.conge):not(.passe) .dispo-num`) pèse (0,5,0), chaque
+`:not()` comptant sa classe, contre (0,4,0) pour celle d'aujourd'hui, et elle
+est déclarée après : **un jour où elle a un ménage aujourd'hui — le cas le plus
+fréquent de l'écran — perdait sa date, #222222 sur #222222.** Même famille pour
+le contour de sélection de l'appui long et le pointillé du congé, tous deux
+noirs sur noir.
+
+**2. Une PWA hors ligne ne peut pas dépendre d'une feuille qu'elle ne précache
+pas.** Le remappage fait de `theme.css` une dépendance DURE : il pointe les
+seize variables de `public/style.css` SUR ses tokens, donc sans lui les valeurs
+de repli de l'ancienne feuille sont détruites elles aussi — l'écran n'est pas
+dépouillé, il est inutilisable. Pire, le service worker repliait **toute**
+requête ratée sur `public.html` : le navigateur recevait du `text/html` pour une
+feuille de style. Le repli ne vaut désormais que pour une NAVIGATION
+(`req.mode === 'navigate'`) ; une sous-ressource qui manque échoue comme elle
+échouerait sans service worker. Et les deux feuilles sont entrées dans
+`OFFLINE_URLS`. ⚠ **Corollaire** : une refonte visuelle de cette page oblige à
+bumper `CACHE_VERSION`, sans quoi elle n'atteint jamais une PWA installée — les
+navigations portent toujours un jeton, donc le handler `fetch` ne les remet
+jamais en cache.
+
+**3. Un remappage peut retourner un token contre lui-même.** `--amber:
+var(--amber-text)` faisait lire `var(--amber)` à #B87500, un brun sombre, là où
+la charte veut l'ambre franc : le compteur des nouveautés sortait comme une
+alerte. La leçon est générale — **avant de remapper un nom, chercher qui le
+lit** : si une règle attend la valeur D'ORIGINE du token, le remappage la
+trahit en silence.
+
+Les autres : la cible tactile des pastilles tombée à 40 px (une `margin` est
+hors de la zone de frappe, un `padding` dedans — d'où `background-clip:
+content-box`) ; le contraste de la voie ambre à 3,45:1, sous le seuil AA, en
+9 px gras (passé à `--warn`, 5,1:1) ; un `@media (max-width: 440px)` écrasé par
+le `@media (max-width: 900px)` déclaré plus bas, qui matche aussi à 390 px ; et
+un commentaire qui invoquait une « référence circulaire » qui n'en était pas —
+dans un dépôt où un document a déjà affirmé le contraire du code, **un
+commentaire faux à côté d'une règle juste est de la dette**.
+
+Restent hors périmètre, à trancher par Thierry : `<meta name="theme-color">` et
+`background_color`/`theme_color` de `api/manifest.js` sont encore TERRACOTTA —
+la PWA installée ouvre sur un écran de démarrage terre cuite avant d'afficher
+une page noir et blanc.
+
+### La modernisation du 16 octobre 2026 (toujours CSS seul)
+
+Demande de Thierry après la recette en preview : « optimise l'UI pour
+moderniser l'app, garde les couleurs du calendrier ». Le calendrier n'a donc
+pas été touché — aucune règle `.dispo-case*`, `.dispo-compte`, `.dispo-bulle`
+ni `.dispo-sem`. Quatre gestes ailleurs :
+
+1. **Son prénom passe devant, le nom de l'application derrière.** Le DOM met
+   « Planning ménages » en titre et « Régina » en sous-titre : c'est l'ordre
+   d'un logiciel, pas celui d'une personne qui ouvre SA page. `column-reverse`
+   les échange **à l'œil seulement** — l'ordre de lecture d'un lecteur d'écran
+   ne bouge pas, et il reste juste. ⚠ Le `@media (max-width: 900px)` en fin de
+   feuille écrasait l'échange (déclaré plus tard, à spécificité égale) : il ne
+   porte plus que les tailles, dans le bon sens.
+2. **Le filtre de biens passe en pilules.** Trois logements prenaient trois
+   lignes de 52 px — un sixième de l'écran — pour un réglage touché une fois
+   par mois. ⚠ **La case à cocher reste visible**, et c'est un garde-fou :
+   peindre la pilule en noir à l'état coché demanderait `:has()`, inconnu des
+   navigateurs d'avant 2022, et l'état du filtre deviendrait invisible sur un
+   téléphone ancien.
+3. **Le fil des nouveautés ne prend plus l'écran entier** : il défile dans sa
+   propre boîte au-delà de ~2,5 annonces (`max-height: 38vh`), avec
+   `overscroll-behavior: contain` — sans quoi arriver au bas de la liste fait
+   repartir la PAGE derrière.
+4. **Deux rangs de surfaces, et c'est toute la hiérarchie de la page.** Le fil
+   et le filtre sont des OUTILS : ils passent sur le gris de fond, sans
+   bordure. Le calendrier et la liste des trente jours sont le TRAVAIL : ils
+   gardent la carte blanche.
+
+Au passage, le titre du mois prend sa propre ligne : « Octobre – Novembre
+2026 » demande 190 px, et il en restait 104 entre deux ronds de 44 et la
+pilule « Ce mois-ci » — il se cassait sur trois lignes en poussant le
+calendrier vers le bas.
+
+### ⚠ LE VERT DES JOURS COCHÉS DEVIENT UN BLEU DU CALENDRIER DES MÉNAGES
+
+Décision de Thierry, même jour : « utilise plutôt une des couleurs du
+calendrier général de ménage au lieu du vert ». Le vert de cette page a un sens
+précis et il est **pris** — « fait », « ✓ Vu », un avis qui salue la propreté.
+L'employer aussi pour « je travaille ce jour-là » lui faisait dire deux choses.
+
+Les pastilles de « Mes jours » prennent donc `--presta-5`, l'un des huit
+pastels dont le calendrier de l'hôte peint ses barres de garde
+(`shared/presta-couleur.js`) : les deux écrans parlent du même planning, ils
+peuvent se partager une palette. ⚠ **Un pastel ne porte pas seul une
+sélection** sur un fond déjà très clair : le bord encre la tient, et le chiffre
+reste en `--ink` (13:1), là où du blanc sur pastel serait illisible.
+
+Le vert reste exactement là où la charte le veut : `✓ Vu`, « FAIT », le pouce
+des avis, et le fond du jour qui porte un ménage — ce dernier étant de toute
+façon figé par `tests/pwa-mes-jours-dom.test.js`.
+
+### La recette du 16 octobre : le vert revient, et les biens prennent un visage
+
+Quatre retours de Thierry sur la preview, et le premier revient sur la charte.
+
+**1. « Le jour sous fond noir, ça ne va pas — garde le vert en plus foncé. »**
+La pastille noire d'aujourd'hui faisait du jour courant la tache la plus sombre
+d'une grille par ailleurs claire : elle criait plus fort que le travail. Elle
+passe en `--ok`, le vert foncé — **même famille que le vert pâle du jour qui
+porte un ménage, deux intensités, et l'écart dit lequel est aujourd'hui.**
+
+**2. « Planning ménages, sans le balai. »** L'emoji quitte le titre. C'est du
+HTML, donc hors du périmètre « CSS seul » des deux commits précédents : il a
+été demandé nommément.
+
+**3 et 4. La vignette du bien, dans le fil ET dans la liste des trente jours.**
+Le balai du fil disait le TYPE d'événement — ce que le titre de la ligne écrit
+déjà en toutes lettres — pendant que le logement, lui, ne se lisait qu'en petit
+dessous. La photo du bien identifie le lieu d'un coup d'œil.
+
+Ce qu'il a fallu ajouter pour cela :
+
+- **Côté serveur**, `api/menages-public.js` sert désormais `biens: [{id, nom,
+  photo}]` — une liste blanche de trois champs, **servie une fois** plutôt que
+  recopiée dans chaque réservation, et déjà filtrée par `allowedIds` : aucun
+  bien hors de son périmètre ne peut sortir par là. La photo est l'URL publique
+  que `api/garde.js` sert déjà à l'hôte ; la prestataire voit ce logement en y
+  entrant.
+- **Côté écran**, **une seule fabrique** (`vignetteBien`) pour les deux
+  surfaces — même règle que `boutonVu` et `marquesDuMenage` : deux surfaces qui
+  dessineraient chacune leur miniature finiraient par montrer la photo d'un
+  côté et les initiales de l'autre pour le même logement.
+- ⚠ **Sans photo, les initiales du bien, jamais une maison générique** — elle
+  ne distinguerait aucun logement d'un autre. C'est la règle déjà écrite dans
+  le calendrier de l'hôte, reprise ici.
+- ⚠ **Un événement sans `property_id` garde son emoji** : le writer a produit
+  des lignes `note` sans ce champ, et une vignette vide vaudrait moins qu'un
+  pictogramme.
+- ⚠ La vignette est **décorative** (`alt=""`) : le nom du bien est écrit juste
+  à côté, l'annoncer deux fois ferait lire « La bulle La bulle ».
+
+## « Vu » entre dans le fil d'actualités (16 octobre 2026)
+
+Demande de Thierry, captures d'écran de la production à l'appui : « dans le cas
+de Régina (attribution d'office), le bouton Vu face au ménage programmé **et
+face au nouveau ménage**. Quand elle clique sur Vu sur le nouveau ménage, il
+s'enlève de la liste, et il est marqué vu dans la liste des ménages. »
+
+**Pourquoi c'est juste.** Le fil est l'endroit où elle APPREND le ménage. Lui
+demander de le retrouver trois cartes plus bas, dans la liste des trente jours,
+pour en accuser réception, est un détour qu'on lui impose pour rien — et c'est
+le détour qui fait qu'un accusé n'arrive jamais, donc que les deux relances de
+9 h continuent de sonner.
+
+**La troisième surface, et toujours une seule fabrique.** `boutonVu` est
+appelée par la feuille du jour, la liste des trente jours et maintenant le fil.
+`tests/menages-v5.test.js` compte ces appels : le chiffre est passé de 2 à 3,
+et le commentaire dit ce qu'il garde — **non pas le nombre de surfaces, qui
+grandira encore, mais le fait qu'aucune ne dessine son propre bouton**. Le jour
+où ce compte monte sans que `boutonVu` soit appelée, deux surfaces se mettront
+à dire deux choses du même ménage.
+
+**L'annonce s'éteint quand le ménage est vu.** `annonceEteinte` : une annonce
+de type `new` dont le ménage porte `vu_le` ne s'affiche plus. Elle a fait son
+travail ; la répéter en gris pendant trois jours pousse vers le bas ce qui
+vient vraiment d'arriver.
+- ⚠ **Seulement `new`** : un ménage MODIFIÉ ou ANNULÉ garde son annonce même
+  s'il a été vu, parce que ce qu'elle annonce n'est pas l'attribution mais le
+  changement — et `vu_le`, lui, ne se repose pas.
+- ⚠ **Côté écran seulement**, comme la péremption de 72 h : la ligne reste en
+  base, c'est la trace, et l'hôte la consulte.
+- ⚠ **On valide d'abord, on acquitte ensuite**, et seulement si la validation a
+  abouti : acquitter avant ferait disparaître l'annonce d'un ménage que l'hôte
+  continue de croire non lu — elle aurait perdu la trace du geste ET le geste.
+
+**Une proposition n'en reçoit pas**, et c'est la garde serveur qui le dit
+(`validerMonMenage` écrit sur `provider_id = elle`) : une offre se confirme en
+l'acceptant, ce qui pose `vu_le` au même instant. Laisser valider une offre lui
+ferait croire qu'elle a répondu — et le ménage expirerait chez quelqu'un
+d'autre. La fabrique unique porte déjà cette règle (`estPasVu` exige
+`role === 'porteur'`) : le fil l'hérite sans rien réécrire.
+
+**Le bouton porte ici sa propre forme** (bord encre, pilule), contrairement aux
+deux autres surfaces où il vit DANS la bulle de la ligne : une annonce n'est
+pas un bouton, et sans bord « Vu » s'y lirait comme une étiquette de plus.
+
+### Les cinq constats de la revue, et les deux leçons qui restent
+
+**1. Un filtre doit lire la MÊME règle que la fabrique.** `annonceEteinte`
+testait `assign.vu_le` sans exiger `role === 'porteur'`, là où `estPasVu` et
+`dejaVu` l'exigent. Or le serveur sert `vu_le` **de la porteuse courante**, pas
+de celle qui regarde : sur un ménage dont elle n'a qu'une PROPOSITION, ce champ
+porte la date de quelqu'un d'autre. Marie porte le ménage et clique « Vu » ;
+l'hôte le propose ensuite à Régina ; l'annonce disparaissait du fil de Régina,
+qui n'avait rien vu et à qui il restait une offre à répondre — dans le seul
+endroit où elle l'apprend. Le bouton, lui, était bien refusé : **c'est le
+filtre qui avait sa propre idée de l'état de l'écran**, exactement le défaut
+que la fabrique unique existe pour empêcher.
+
+**2. Un geste qui échoue ne doit pas être acquitté — ni repeint dans la même
+tâche.** Le fil appelait `direVu` puis acquittait l'annonce sans attendre de
+verdict : `direVu` ne rendait rien. Hors ligne, en 503, en 404, `echecVu`
+écrivait « Hors ligne » dans le bouton, puis le `renderNews` suivant remplaçait
+`innerHTML` **dans la même tâche** — le nœud était détaché, le message jamais
+peint, et le minuteur de réarmement sortait sur `isConnected === false`. Elle
+tapait « Vu » dans le métro, rien ne bougeait, l'annonce passait en gris, et
+rien n'était parti. `direVu` rend désormais un booléen et **acquitte
+elle-même**, seulement en cas de succès.
+
+Les trois autres : l'extinction n'atteignait pas le fil quand le geste venait
+d'une autre surface (`routeRender` ne repeint que le calendrier — et l'annonce
+restait `read = false` en base pour toujours, donc sans trace pour l'hôte) ; un
+ménage introuvable sortait en clic mort, sans repeint ; et `opacity` sur une
+carte lue affadissait le bouton qu'on vient d'y mettre pour qu'il soit touché.
+
+### ⚠ L'APERÇU MONTRE LE BOUTON, IL NE LE LAISSE PLUS DISPARAÎTRE (16 oct. 2026)
+
+Vécu en recette, et c'est la leçon du jour. Thierry ouvre la page de Régina
+depuis sa fiche — donc en `?apercu=1` — et signale que **le bouton « Vu »
+manque**. Il ne manquait pas : l'aperçu le MASQUAIT (`display: none`), avec
+« ✓ Tout marquer lu ». Reproduit au banc à l'identique.
+
+**Un aperçu qui retire des éléments ne montre plus « ce qu'elle voit », qui est
+sa seule raison d'être.** L'hôte en tire une conclusion fausse sur l'écran de
+sa prestataire — ici, que le bouton n'existe pas chez elle. C'est la même
+famille de faute que celle corrigée à la revue de `6452d75` : `.jvu` tout court
+masquait aussi la mention inerte « ✓ Vu », et l'hôte, venu savoir si elle avait
+vu le ménage, voyait une ligne de ménage jamais lu.
+
+Les deux boutons sont donc **affichés et inertes** (`pointer-events: none`,
+opacité réduite). Le geste reste coupé deux fois : ici pour ne pas offrir un
+bouton dont on sait qu'il échouera, et par le `fetch` patché, **qui est le vrai
+garde**. Dire « vu » depuis l'écran de l'hôte éteindrait l'alerte et les deux
+relances de 9 h sur quelqu'un qui n'a rien lu.
+
+Ce qui reste MASQUÉ en aperçu, et pourquoi : « Je prends ce ménage », « Je ne
+peux plus le faire », « J'accepte », « Je ne peux pas », « Marquer fait », le
+segment de disponibilité et l'engrenage. Ceux-là n'informent pas l'hôte sur
+l'état de son écran à elle — ce sont des gestes qui n'ont de sens que pour
+celle qui les porte. **La ligne de partage est là** : un accusé de lecture dit
+où elle en est, une action dit ce qu'elle peut faire.
+
+### Le dessin du bouton « Vu » (16 octobre 2026)
+
+Recette de Thierry : « l'œil avec Vu n'est pas très joli », et « peut-être
+enlever Vu quand c'est cliqué ». Deux remarques, deux règles de dessin.
+
+**Un œil demande trois traits ; un cercle en demande un.** Paupière, iris,
+pupille : à 15 px, les trois se referment en pâté. Le cercle vide se lit à
+toutes les tailles — et surtout **il dit ce qu'il attend**. C'est le
+vocabulaire universel de l'accusé de réception, celui des cases à cocher et des
+messageries : on n'a pas besoin d'apprendre qu'un rond vide se coche.
+
+**Une fois le geste fait, le mot n'apprend plus rien.** « Vu » nommait un
+GESTE ; il n'y a plus de geste. La pastille verte cochée dit l'état à elle
+seule, et la ligne s'allège d'autant — c'est visible sur une liste de trente
+jours, où le même mot se répétait autant de fois qu'il y a de ménages.
+⚠ **Le mot ne disparaît pas pour autant** : il reste dans `title` et
+`aria-label`. Un état qui ne se lit qu'à l'œil n'existe pas pour qui utilise un
+lecteur d'écran.
+
+Les trois surfaces suivent, puisqu'elles passent toutes par `boutonVu`.
+
+## ⚠ SA PAGE NE DIT PLUS JAMAIS « EMPLOYEUR » (16 octobre 2026)
+
+Décision de Thierry, et elle tranche un arbitrage resté ouvert depuis le
+14 octobre — je l'avais laissé de côté en gardant « employeur » par cohérence
+interne, ce qui revenait à propager le mauvais mot partout.
+
+**Une prestataire de ménage est INDÉPENDANTE** : elle facture, elle n'est pas
+salariée. « Votre employeur » lui donnait un lien de subordination qui n'existe
+pas — et, accessoirement, faisait décrire à HôteSmart une relation de travail
+qui n'est pas la sienne. Le mot est « votre hôte », partout.
+
+Vingt-neuf occurrences dans `apps/menages/public.html`, onze dans
+`api/menages-public.js`, et vingt-cinq dans les tests qui figeaient les phrases.
+
+⚠ **Les commentaires sont purgés aussi, et c'est voulu** : un mot qui reste
+dans le code revient dans l'écran. La prochaine phrase écrite sous un
+commentaire qui dit « employeur » dira « employeur ».
+
+⚠ **Le serveur de sa page est couvert par le même test.** `api/menages-public.js`
+renvoie des phrases que la PWA affiche TELLES QUELLES — « on affiche la phrase
+du serveur plutôt que d'en inventer une qui dirait moins ». Purger l'écran sans
+purger l'endpoint aurait laissé le mot revenir par la porte de derrière, au
+premier refus.
+
+⚠ **ET TOUT CE QUI LUI PARLE QUAND ELLE N'EST PAS DEVANT L'ÉCRAN** (complément
+de Thierry, même jour). Un SMS de relance qui dirait « votre employeur »
+annulerait tout le travail fait sur la page : **elle lit le message AVANT
+d'ouvrir l'application**, et c'est lui qui donne le ton. Les onze fichiers
+gardés par `tests/menages-v5.test.js` :
+
+| Ce qu'elle voit | Ce qu'elle reçoit |
+|---|---|
+| `apps/menages/public.html` | `lib/cleaning/notifier-prestataire.js` — assignation, proposition, « Vu » attendu |
+| `api/menages-public.js` | `lib/cleaning/relance-validation.js` — les deux relances de 9 h |
+| `shared/i18n/fr.json` | `lib/cleaning/changement-regles.js` — les mots d'un changement de jours |
+| `shared/i18n/en.json` | `lib/cleaning/apres-changement-regles.js` — l'annonce et la reprise |
+| `shared/i18n/es.json` | `lib/cleaning/sync-menages.js` — le writer de son fil |
+| | `api/menages.js` — la note de l'hôte et son événement |
+
+Aucun des six émetteurs ne disait « employeur » au moment du balayage : le test
+les garde désormais **fermés**, et c'est là tout son intérêt — un mot ne revient
+jamais là où on l'a enlevé, il revient là où personne ne regardait.
+
+Le test vérifie en plus que « votre hôte » est bien présent dans la page : sans
+cette seconde moitié, tout supprimer ferait passer le test.
+
+### Un seul nom pour la consigne : « Note de votre hôte »
+
+Elle s'appelait « Note de l'employeur » dans le fil, « Note de l'hôte » dans la
+fiche et « Consigne de votre hôte » sur la marque 📝 — **trois noms pour la même
+chose**, sur le même écran. C'est « Note de votre hôte », aux trois endroits.
+
+### Le plafond se dit, en trois langues
+
+Les deux messages de refus passent par `shared/i18n` (580 clés) :
+`menages.equipe.config.trop_de_regles` pour la fiche, qui reçoit un `code` et
+un `max` plutôt qu'une phrase — l'écran est traduit, lui envoyer du français en
+dur le rendrait bilingue au premier refus — et
+`trop_de_regles_presta` pour sa page.
+
+⚠ **Sa page, elle, n'a pas encore de moteur i18n** (point D13 de l'inventaire :
+tout y est en français en dur, des deux côtés). Elle affiche donc la phrase du
+serveur ; la clé existe en trois langues pour le jour où ce moteur arrivera,
+et le serveur envoie `code: 'trop_de_regles'` à côté de la phrase pour que ce
+jour-là rien n'ait à être réécrit.
+
+### Les captures
+
+`docs/specs/pwa-v5/captures/` (avant), `captures-v5/` (après) et
+`avant-apres/` (les treize paires côte à côte), toutes en 390 × 844.
+
+
+## Étape 2 : ses jours habituels se cochent depuis la fiche (16 octobre 2026)
+
+Le dernier des cinq gestes qui n'existaient que dans l'ancien écran, avec la
+création. La fiche AFFICHAIT la récurrence et renvoyait l'hôte ailleurs pour la
+changer — or c'est le réglage qu'on touche le plus souvent : une prestataire
+qui change de jours, c'est tous les mois.
+
+**Ce que la carte porte** : les sept cases (ou deux lignes A/B en quinzaine),
+le bouton « Une semaine sur deux… » / « Revenir à toutes les semaines », la
+phrase d'ancrage avec ses dates et son numéro de semaine ISO, et le lien
+d'inversion. Captures : `docs/specs/pwa-v5/fiche/`.
+
+**Un seul appel, et c'est la transaction** (`reglerJours`). L'ancien écran
+enchaînait un `retirerRegle` par règle puis un `poserRegle` par ligne.
+
+⚠ **ON NE MONTRE JAMAIS « AUCUNE CASE COCHÉE »** (précision n° 2 de Thierry).
+Une récurrence VIDE ne veut pas dire « elle ne travaille jamais » : elle veut
+dire **disponible tous les jours** (étage 4 de la précédence). Sept cases vides
+disaient donc l'inverse de la vérité — c'est le piège que l'ancien écran
+expliquait par un avertissement. On montre les sept cases **cochées, en gris**,
+avec « Tous les jours (par défaut) » : le piège disparaît au lieu d'être
+commenté. L'avertissement ne reste que pour le GESTE — au moment où l'hôte
+décoche la dernière case — et il dit la vérité : tout décocher la rend
+disponible tous les jours, pas introuvable.
+
+⚠ **ON N'ÉCRIT JAMAIS SUR UNE RÈGLE QU'ON NE SAIT PAS RELIRE.** Remplacer
+efface : une récurrence que cet écran n'affiche pas serait perdue sans que
+personne ne sache ce qu'elle portait. Le geste est alors fermé, et l'écran le
+dit.
+
+⚠ **L'INVERSION ÉCHANGE LE CONTENU DES DEUX LIGNES**, elle ne déplace pas
+l'ancre. Déplacer l'ancre donnerait le même résultat — mais l'écran afficherait
+« semaine A » sur ce qui était B, et l'hôte ne pourrait plus vérifier ce qu'il
+vient de faire.
+
+### ⚠ DEUX DÉFAUTS ANTÉRIEURS, QUE SEUL LE BANC A MONTRÉS
+
+Tous deux invisibles à la lecture du code, et visibles en une capture.
+
+**1. `cadence` est un NOMBRE, pas la chaîne `'quinzaine'`.** `lireRrule` rend
+l'INTERVAL de la RRULE (1, 2, …) ; la fiche le comparait à `'quinzaine'`. La
+comparaison était toujours fausse : **l'alternance A/B ne s'est jamais affichée
+dans cette fiche depuis qu'elle existe.** Et le banc lui-même servait
+`cadence: 'quinzaine'` — c'est ainsi que le défaut a survécu : **le stub
+confirmait le code**. Un banc qui ne dit pas la vérité du serveur ne prouve
+rien ; il a été corrigé en même temps.
+
+**2. `semaineAncree` comptait les semaines depuis l'epoch — un JEUDI.**
+**Mesuré en production le 16 octobre 2026** (`scripts/diagnostic-parite-semaines.js`,
+lecture seule) : **3 règles actives, 0 illisible, 2 de cadence ≥ 2 — et les
+DEUX étaient affichées sur la mauvaise ligne.** Leurs ancres tombent toutes
+deux un **lundi** (28 septembre et 5 octobre), c'est-à-dire exactement le cas
+où le découpage epoch se trompe : 100 % des règles d'alternance du parc.
+Les deux ont été posées par la prestataire depuis sa page — qui, elle,
+affichait juste.
+
+⚠ **Rien à corriger en base.** Le moteur n'a jamais lu ce calcul (mesure
+rejouée : 14 décisions, 7 jours × 2 règles), sa page non plus, l'ancien écran
+non plus. Seule la fiche V5 mentait, et elle était en lecture seule jusqu'au
+16 octobre : aucune écriture n'a pu en découler. Ce qui a été faussé est ce que
+l'hôte **croyait** — il lisait les jours de la semaine B sur la ligne A, et
+inversement.
+
+`Date.parse(iso) / 604800000` découpe le temps en tranches de sept jours à
+partir du 1er janvier 1970. Deux dates de la même semaine civile tombaient donc
+dans deux tranches différentes dès que l'une était un lundi, un mardi ou un
+mercredi : une ancre posée en début de semaine faisait afficher la ligne A sur
+les jours de B. L'hôte lisait « semaine A » sur ce qui est B, cochait en
+conséquence, et **déplaçait la venue de sa prestataire d'une semaine**. On
+ramène chaque date à SON lundi avant de compter — la règle que sa page
+applique déjà.
+
+
+## Étape 2, 3e volet : sa page dit qui a réglé ses jours (17 octobre 2026)
+
+Précision n° 4 de Thierry, et le dernier trou du lot. Ses **absences** disaient
+déjà leur source — « Absence posée par votre hôte » — mais pas ses **jours
+habituels** : son hôte pouvait changer les jours où elle est candidate sans
+qu'aucun écran ne le lui dise. Elle ouvrait sa page, voyait d'autres cases
+cochées, et n'avait aucun moyen de savoir si elle s'était trompée elle-même.
+
+`api/menages-public.js` lit et sert désormais `source` sur les règles — les
+deux moitiés, sinon le champ sort toujours à `undefined` et la mention ne
+s'affiche jamais. Défaut `'hote'`, comme la fiche : le seul writer d'avant le
+15 septembre 2026 était l'hôte, et une valeur absente ne doit pas se lire
+« elle ».
+
+Sa carte « Mes jours de travail » ajoute alors **« Réglés par votre hôte »** ou
+**« Réglés par vous »** — la même forme que ses congés, qui disent « — posé par
+votre hôte » en trois mots.
+- ⚠ **Aussi court que sur ses absences** (recette du 17 octobre). La première
+  version ajoutait « Vous pouvez les changer ; prévenez-le » : le droit de
+  changer se voit à ce que les cases SE COCHENT, et l'écrire en toutes lettres
+  revenait à commenter l'écran plutôt qu'à dire ce qu'il montre.
+- ⚠ **DEUX ÉTATS, PAS UN SEUL.** « Réglés par vous » compte autant que l'autre :
+  sans lui, l'absence de mention voudrait dire deux choses — « c'est vous » ou
+  « on ne sait pas » — et elle ne pourrait pas distinguer ses propres jours
+  d'un réglage qu'elle n'a pas fait.
+- ⚠ **Seulement si elle peut encore y toucher.** Quand elle ne règle rien,
+  l'aide dit déjà « Réglé par votre hôte — pour le changer, dites-le lui » :
+  deux fois la même phrase sur le même écran.
+- ⚠ **Une seule règle de lui suffit à dire « votre hôte ».** C'est le FAIT qui
+  compte — il y a là-dedans quelque chose qu'elle n'a pas décidé — et un
+  décompte (« 1 de vos 3 règles ») ne l'aiderait en rien.
+
+### La recette comparative
+
+`docs/specs/pwa-v5/fiche/03-fiche-et-page-cote-a-cote.png` : la fiche de l'hôte
+et sa page, avec **les deux vraies règles de production**. Les deux écrans
+disent enfin la même chose — ligne A = M · V · S · D, ligne B = V · S · D.
+Jusqu'au 16 octobre, la fiche les affichait inversées.
+
+## Les sept constats de la revue de l'étape 2 (18 octobre 2026)
+
+La revue de `70f805d` n'a trouvé **aucun défaut de sécurité** : le cloisonnement
+des deux endpoints, le plafond unique, l'absence de repli silencieux quand la
+fonction Postgres manque et la migration elle-même sont ressortis conformes.
+Elle a trouvé **sept défauts fonctionnels**, dont trois qui vivent dans ce que
+le DOM devient APRÈS un clic — c'est-à-dire là où aucun des tests de l'étape 2
+ne regardait.
+
+### ⚠ LE PLUS GRAVE : UNE SEMAINE SUR DEUX, LES LIGNES A ET B PARTAIENT ÉCHANGÉES
+
+`ancreConfig()` rendait l'ancre de la **première** règle de quinzaine trouvée,
+sans regarder sa parité. Or les deux règles d'un réglage en quinzaine sont
+posées dans le même geste : rien ne dit laquelle la base rend en premier. Une
+fois sur deux, c'était celle de la ligne **B**. L'écriture envoyait alors les
+jours de A ancrés sur la semaine de B, et réciproquement : **ses venues se
+décalaient de sept jours, sans cause visible à l'écran**.
+
+L'affichage, lui, n'a jamais menti sur ce point — `semaineAncree` compare chaque
+règle à AUJOURD'HUI, et la phrase d'ancrage nomme la semaine A par les dates de
+la semaine en cours. C'est l'ÉCRITURE qui contredisait l'affichage.
+
+Le correctif tient en une ligne : **le lot A est la semaine en cours**, donc son
+ancre est le lundi de cette semaine. Le rythme n'est pas déplacé pour autant —
+les jours de la ligne A sont, par construction, ceux qui tombent cette semaine.
+Le commentaire « on garde l'ancrage existant » décrivait une prudence juste
+(déplacer une ancre inverse un rythme) appliquée au mauvais endroit : ici,
+« garder l'ancrage » et « reprendre la parité d'aujourd'hui » sont la même chose.
+
+⚠ **Sa page portait la même ligne, et elle était juste par accident** :
+`lotsASoumettre` lisait `a.ancre`, que `fusion()` ne pose jamais — la valeur
+retombait donc toujours sur le lundi courant. On l'a écrit explicitement, pour
+que la prochaine version de `fusion` ne réintroduise pas le défaut en ajoutant
+une `ancre`.
+
+### Une règle HEBDOMADAIRE appartient aux DEUX semaines
+
+En mode quinzaine, la fiche rangeait toute règle de cadence 1 dans la seule
+ligne A. La ligne B n'en montrait rien, et le clic suivant réécrivait les deux
+lots en quinzaine : **ces jours-là disparaissaient une semaine sur deux**. Sa
+page garde déjà explicitement ce cas (`lotsPwa`) ; la fiche, non. Le cas est
+atteignable depuis des données anciennes et depuis l'action `poserRegle`,
+toujours vivante.
+
+⚠ **Avant ce lot, la branche était morte** : `cadence` était comparé à la chaîne
+`'quinzaine'`, qui ne vaut jamais un nombre. Corriger la comparaison a donc
+réveillé un code jamais exécuté — c'est le prix normal d'un défaut d'affichage
+qu'on répare, et la raison pour laquelle on le relit en entier plutôt que de
+corriger la seule ligne fautive.
+
+### Cocher trois jours d'affilée est l'usage NORMAL, et il perdait deux gestes
+
+`gesteConfig` commence par `if (cfg.occupe) return` : la seconde case cochée
+pendant que la première vole sortait **en silence** — pas de message, pas de
+réessai. Pire, le repeint du verrou relisait `cfg.dispo`, qui porte encore
+l'état d'AVANT : le premier jour **se décochait sous le doigt**.
+
+Deux pièces, toutes deux empruntées à sa page :
+- **un modèle optimiste**, en un seul endroit (`reglesCourantesConfig`), qui
+  reproduit ce que le serveur fait — il remplace TOUTES les règles actives par
+  les lots reçus — et rien d'autre ;
+- **une file d'attente d'un seul lot**, drainée dans le `finally` de
+  `gesteConfig`. Un seul lot suffit, et c'est un choix : le lot vient du DOM,
+  qui porte déjà tout ce qui est coché à cet instant. Le drain vit dans
+  `gesteConfig` et pas dans `ecrireRegles`, parce que le verrou peut avoir été
+  pris par **n'importe quel** autre geste de la fiche.
+
+⚠ **La garde des règles illisibles, elle, continue de lire `cfg.dispo`** : c'est
+une garde sur ce que la BASE porte. La faire lire le modèle optimiste — qui ne
+contient que des règles qu'on sait relire — l'aurait fait sauter au second clic.
+
+### L'hôte aussi doit rendre au moteur les propositions des jours retirés
+
+`apresChangementDeRegles` n'existait que pour la PWA : quand la prestataire se
+retirait du samedi, les ménages **proposés** le samedi lui étaient repris.
+Depuis l'étape 2, l'hôte remplace les mêmes jours depuis la fiche — et c'est
+devenu le chemin le plus fréquent. Il retirait le samedi pendant qu'une
+proposition du samedi suivant restait chez quelqu'un dont il venait de dire
+qu'elle ne vient plus ce jour-là.
+
+Deux options nouvelles sur le module, et chacune dit son sens :
+- **`annoncer`** — la REPRISE vaut dans les deux sens, l'ANNONCE non. Dire à
+  l'hôte « elle ne travaille plus le samedi » juste après qu'il l'a décidé
+  lui-même est faux, et c'est un message de plus qu'on apprend à ne pas lire.
+- **`raison`** — ce qui s'écrit sur le ménage rendu au moteur nomme le bon
+  auteur : « ce jour a été retiré de ses jours habituels depuis sa fiche ».
+
+⚠ **Ce qui manque encore, et qui est une décision produit, pas un oubli** : rien
+ne prévient la PRESTATAIRE que son hôte a changé ses jours habituels. Le canal
+existe (`notifier-prestataire.js`), le message n'existe pas. À trancher.
+
+### Trois constats mineurs, et celui qui se répète
+
+- **La case restait cochée après un refus** (règle illisible) : le navigateur
+  avait déjà coché, et on sortait sans repeindre. L'écran montrait un jour
+  enregistré qui n'était parti nulle part, jusqu'au prochain chargement.
+- **Le script de diagnostic lisait sans borne** : PostgREST tronque à 1000
+  lignes **sans lever**. Une MESURE qui ne sait pas si elle a tout lu ne mesure
+  rien — c'est la troncature muette déjà payée sur `bookings_snapshot`, pour la
+  troisième fois dans ce dépôt. Le script pagine désormais, avec un ordre stable.
+- **Un commentaire disait l'inverse du code** : `api/menages-public.js` décrivait
+  encore « insérer PUIS désactiver — l'ordre est la garde », alors que la
+  fonction Postgres désactive puis insère dans une transaction. Le commentaire
+  avait survécu au changement qu'il décrivait, et il argumentait contre lui.
+
+### Ce que cette revue a appris sur les tests
+
+Les trois défauts d'écran étaient **invisibles pour tous les tests existants** :
+ils lisaient `pages/menages.html` comme du TEXTE, et ont vu que les cases
+étaient là. Ils ne pouvaient pas voir ce que le DOM devient après un clic.
+
+`tests/menages-fiche-regles-dom.test.js` monte donc la vraie fiche dans jsdom,
+exécute le vrai script de la page, et juge des GESTES. Les sept tests rougissent
+contre `70f805d`, chacun sur l'assertion qui nomme son défaut, et restent verts
+à J+1, J+3, J+15, J+45, J+60, J+75, J+120, J+200 et J+400.

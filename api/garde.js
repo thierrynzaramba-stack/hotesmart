@@ -39,15 +39,30 @@ const { planningDeGarde } = require('../lib/cleaning/garde')
 const { chargerLiaisons, chargerDisponibilites,
         dansLaFenetreDeProposition, proposeesDe } = require('../lib/cleaning/assign')
 const { extraitVerifie } = require('../lib/extrait-verifie')
+const { colonneAbsente } = require('../lib/colonne-absente')
+
+// ⚠ UNE VALIDATION NE VAUT QUE POUR QUI L'A POSEE. Un menage change de main —
+// l'hote reassigne, une collegue accepte, le moteur pose une remplacante apres
+// un refus — et le `vu_le` de la precedente restait colle au menage : l'hote
+// lisait « A jour » sur quelqu'un qui n'avait jamais rien lu (constat de la
+// revue de 20fb83d). `vu_par` ABSENT fait retomber sur `vu_le` seul, soit
+// l'ancien comportement, jamais une panne.
+function valideParLaPorteuse (m) {
+  if (!m || !m.vu_le) return null
+  if (!('vu_par' in m)) return m.vu_le || null
+  if (!m.provider_id) return null
+  return String(m.vu_par || '') === String(m.provider_id) ? m.vu_le : null
+}
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
-// ⚠ FENETRE BORNEE A 92 JOURS — le meme plafond que `planningDeGarde`, et pour
-// la meme raison : il fait tourner la recurrence RRULE par (personne, jour), et
-// une fenetre d'un an demandee par une URL bricolee ferait des dizaines de
-// milliers d'evaluations pour un ecran que personne ne regarde.
-// L'ecran propose 1 mois et 3 mois : au-dela, une garde n'a plus de sens — les
-// regles de disponibilite auront change avant.
+// ⚠ FENETRE BORNEE A 92 JOURS PAR REQUETE — le meme plafond que
+// `planningDeGarde`, qui fait tourner la recurrence RRULE par (personne, jour).
+// Ce n'est PAS un plafond d'ecran : depuis la recette du 13 octobre 2026, la
+// page Menages V5 propose jusqu'a 12 mois et lit alors par TRANCHES de 92
+// jours. Le plafond borne le COUT UNITAIRE d'une requete (et d'une URL
+// bricolee) : une fenetre d'un an se paie en quatre requetes visibles, jamais
+// en une requete silencieusement enorme.
 const MAX_JOURS = 92
 const LOT_MENAGES = 500
 const LOT_BIENS = 200
@@ -119,10 +134,10 @@ module.exports = async function handler (req, res) {
   try {
     // ===== LES BIENS DU PERIMETRE =====
     const filtreRef = filtrePerimetreSql(refsDuPerimetre(garde.contexte), 'provider_property_id')
-    if (filtreRef === '') return res.status(200).json({ jours, biens: [], garde: [], menages: [] })
+    if (filtreRef === '') return res.status(200).json({ jours, biens: [], garde: [], menages: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
 
     let qProps = supabase.from('properties')
-      .select('provider_property_id, name')
+      .select('provider_property_id, name, photo_url')
       .eq('user_id', userId).not('provider_property_id', 'is', null)
     if (filtreRef) qProps = qProps.or(filtreRef)
     const { data: propRows, error: errProps } = await qProps
@@ -132,13 +147,16 @@ module.exports = async function handler (req, res) {
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
     const biens = (propRows || []).map(p => ({
-      id: String(p.provider_property_id), name: p.name || `Bien ${p.provider_property_id}`
+      id: String(p.provider_property_id), name: p.name || `Bien ${p.provider_property_id}`,
+      // La photo de couverture (lot photos) : l'ecran V5 l'affiche en tete de
+      // bloc, repli initiales cote client. `null` est une absence, pas une panne.
+      photo: p.photo_url || null
     }))
     // ⚠ UNE TRONCATURE SE DIT. Elle efface precisement ce que cet ecran existe
     // pour montrer : un menage hors du lot rend son jour « sans menage », donc
     // gris au lieu de rouge — l'alerte devient un silence.
     const tronqueBiens = (propRows || []).length >= LOT_BIENS
-    if (!biens.length) return res.status(200).json({ jours, biens: [], garde: [], menages: [] })
+    if (!biens.length) return res.status(200).json({ jours, biens: [], garde: [], menages: [], avec_noms: avecNoms, avec_avis: avecNoms && avecAvis, tronque: false, trous: [] })
 
     // ===== LE CONTEXTE DE GARDE =====
     // ⚠ UNE PANNE COUPE. Rendre une garde calculee sur des liaisons ou des
@@ -165,8 +183,20 @@ module.exports = async function handler (req, res) {
     })
 
     // ===== LES MENAGES POSES DESSUS =====
-    const { data: menagesRows, error: errMen } = await supabase.from('menages')
-      .select('property_id, booking_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, assignment_reason')
+    //
+    // ⚠ `vu_le` EST DEMANDE A PART, ET SON ABSENCE NE COUPE RIEN (constat de la
+    // revue de 20fb83d). C'est la MEME faute qu'au commit ac28b1f, ou
+    // `pwa_vue_le` avait ete groupe avec `visibility_days` : tant que la
+    // migration n'est pas collee, le select ENTIER echoue en 42703, et cet
+    // endpoint rend 503 — bulle, calendrier de garde et fiche prestataire morts
+    // pour l'hote, entre le push et le geste manuel de Thierry. Une colonne
+    // neuve ne doit jamais pouvoir emporter les colonnes qui marchaient.
+    // ⚠ ET LE REPLI SE TAIT PROPREMENT : sans `vuLe`, `nonVuPar` rend `null`
+    // pour la porteuse (c'est exactement a cela que sert son `undefined`), donc
+    // l'alerte « Non valide » disparait au lieu d'accuser tout le monde.
+    const COLONNES_MENAGE = 'property_id, booking_id, departure_date, status, provider_id, offered_to, proposee_a, offer_expires_at, assignment_reason, offered_at, accepted_at'
+    const lireMenages = (colonnes) => supabase.from('menages')
+      .select(colonnes)
       .eq('user_id', userId)
       .in('property_id', biens.map(b => b.id))
       .gte('departure_date', du).lte('departure_date', au)
@@ -175,25 +205,153 @@ module.exports = async function handler (req, res) {
       .neq('status', 'cancelled')
       .order('departure_date', { ascending: true })
       .limit(LOT_MENAGES)
+    // ⚠ LES DEUX COLONNES ENSEMBLE, et c'est voulu : sans `vu_par`, une
+    // validation ne peut pas etre rattachee a quelqu'un, et le repli doit
+    // alors se taire ENTIEREMENT plutot que de servir une date dont on ne sait
+    // pas de qui elle est.
+    let { data: menagesRows, error: errMen } = await lireMenages(`${COLONNES_MENAGE}, vu_le, vu_par`)
+    if (errMen && colonneAbsente(errMen)) {
+      console.warn('[garde] menages.vu_le / vu_par absente : migrations 2026-10-14-menage-vu-le et -vu-par non appliquees')
+      ;({ data: menagesRows, error: errMen } = await lireMenages(COLONNES_MENAGE))
+    }
     if (errMen) {
       console.error('[garde] lecture menages echec', errMen.message)
       return res.status(503).json({ error: 'Service temporairement indisponible' })
     }
 
+    // ===== LES NOTES DE L'HOTE (fiche menage, etape 3) =====
+    // ⚠ SANS ELLES, LA FICHE EFFACERAIT. Elle ouvre un champ de note ; s'il
+    // s'affiche vide alors qu'une consigne existe, le premier enregistrement
+    // la remplace par du vide — et la prestataire perd « le code a change ».
+    // Best-effort : sans note, l'ecran reste juste (champ vide, visible).
+    // ⚠ `updated_at` SORT AVEC LA NOTE : une consigne changee apres la
+    // derniere ouverture de sa page est exactement ce que l'alerte « Pas vu »
+    // doit attraper (« le code de la boite a change » ecrit hier soir).
+    const notes = {}
+    const notesLe = {}
+    let notesLues = true
+    if ((menagesRows || []).length) {
+      const { data: notesRows, error: eN } = await supabase.from('menage_comments')
+        .select('booking_id, departure_date, comment, updated_at')
+        .eq('user_id', userId)
+        .in('booking_id', [...new Set(menagesRows.map(m => String(m.booking_id)))])
+        .limit(LOT_MENAGES)
+      // ⚠ UNE NOTE ILLISIBLE SE DIT. « Best-effort » n'allait pas ici : la
+      // fiche ouvre un champ pre-rempli, donc un champ vide sur une consigne
+      // existante se fait ECRASER au premier enregistrement. L'ecran coupe le
+      // champ et le dit (revue de 6822e47).
+      if (eN) { console.error('[garde] lecture notes echec', eN.message); notesLues = false }
+      if ((notesRows || []).length >= LOT_MENAGES) notesLues = false
+      for (const n of (notesRows || [])) {
+        const cle = `${String(n.booking_id)}|${String(n.departure_date).slice(0, 10)}`
+        notes[cle] = n.comment || ''
+        // Une note vide a bien ete ECRITE a cette date (l'hote l'a effacee) :
+        // c'est un changement, et il compte comme les autres.
+        notesLe[cle] = n.updated_at || null
+      }
+    }
+
+    // ===== LES MENAGES FAITS (verite serveur `menage_done`, lot Menages V5 D1) =====
+    // ⚠ Best-effort : sans cette lecture, le planning reste JUSTE — un menage
+    // fait redevient « a faire » a l'ecran, defaut visible et sans danger.
+    // C'est la difference avec les liaisons, dont l'absence rendrait la garde
+    // fausse. Le writer de la table est `lib/cleaning/menage-fait.js`, par
+    // lequel passent la PWA et l'ecran de l'hote (un writer par domaine, deux
+    // portes gardees chacune de son cote).
+    const faits = new Set()
+    const detailFait = {}
+    let tronqueFaits = false
+    if ((menagesRows || []).length) {
+      const { data: doneRows, error: errDone } = await supabase.from('menage_done')
+        .select('property_id, booking_id, departure_date, done_at, done_by_token')
+        .eq('user_id', userId)
+        .in('booking_id', [...new Set(menagesRows.map(m => String(m.booking_id)))])
+        .limit(LOT_MENAGES)
+      if (errDone) console.error('[garde] lecture menage_done echec', errDone.message)
+      // ⚠ UNE TRONCATURE SE DIT — celle-ci aussi (revue de 4235a21) : au-delà
+      // du lot, des menages FAITS redeviendraient « a faire » sans bandeau.
+      tronqueFaits = (doneRows || []).length >= LOT_MENAGES
+      for (const d of (doneRows || [])) {
+        const cle = `${String(d.property_id)}|${String(d.booking_id)}|${String(d.departure_date).slice(0, 10)}`
+        faits.add(cle)
+        // ⚠ `done_by_token` NE SORT PAS : c'est le secret d'acces de la
+        // prestataire. On n'en garde que la REPONSE a « est-ce elle qui a
+        // marque ? », que la fiche affiche en toutes lettres.
+        detailFait[cle] = { quand: d.done_at || null, parElle: !!d.done_by_token }
+      }
+    }
+
     // ===== L'ANNUAIRE, ET LES POUCES =====
     const prenoms = {}
+    let prestataires = []
+    // « Vue il y a … » : l'instant de sa derniere synchro serveur reussie, par
+    // PERSONNE. Writer unique : le GET planning de api/menages-public.js.
+    const vues = {}
+    let vuesLues = false
     if (avecNoms) {
       const { data: pr, error: errPr } = await supabase.from('profiles')
-        .select('id, first_name, active')
+        .select('id, first_name, active, pwa_token')
         .eq('account_user_id', userId).eq('access_mode', 'lien')
       // ⚠ Une panne ici ne coupe PAS l'ecran : sans prenoms, il reste juste et
       // lisible (« quelqu'un »). C'est la difference avec les liaisons, dont
       // l'absence rendrait la garde FAUSSE.
       if (errPr) console.error('[garde] lecture annuaire echec', errPr.message)
       for (const p of (pr || [])) prenoms[p.id] = { prenom: p.first_name, actif: p.active !== false }
+      // ⚠ L'ANNUAIRE EST DEJA LU : on l'EXPOSE, pour que l'ecran puisse offrir
+      // « changer la prestataire » sans une requete de plus. Les DESACTIVEES
+      // en sont exclues — on ne propose pas d'assigner quelqu'un qui n'est
+      // plus dans l'equipe. Rien ne sort sans `prestataires: read`.
+      // ⚠ AUCUNE COORDONNEE NE SORT D'ICI, et le test le garde. Cet ecran
+      // repond a « qui est de garde », pas a « comment la joindre » : le
+      // numero de l'alerte « Pas vu » vient de `/api/menages?equipe=1`, dont
+      // l'objet EST les personnes. Un meme droit ne justifie pas de servir une
+      // donnee par deux portes.
+      prestataires = (pr || []).filter(p => p.active !== false)
+        .map(p => ({ id: p.id, prenom: p.first_name }))
+        .sort((a, b) => String(a.prenom || '').localeCompare(String(b.prenom || '')))
 
+      // ⚠ LE JETON NE SORT PAS. Il sert ICI a joindre son horodatage, et c'est
+      // tout : ce qui part est `{ profilId: instant }`. Son lien est son mot de
+      // passe, et cet endpoint sert un ecran d'hote.
+      //
+      // ⚠ `vuesLues` DIT SI ON SAIT. Une panne de lecture laisse la carte vide,
+      // et une carte vide voudrait dire « aucune ne l'a jamais ouverte » —
+      // c'est-a-dire une alerte « Pas vu » sur toute l'equipe. Sans ce
+      // drapeau, un timeout PostgREST fabriquait une pleine page de rouge.
+      const jetons = (pr || []).map(x => x.pwa_token).filter(Boolean)
+      if (!jetons.length) {
+        vuesLues = true   // rien a lire n'est pas une panne
+      } else {
+        const { data: pt, error: errVues } = await supabase.from('public_tokens')
+          .select('token, pwa_vue_le').eq('user_id', userId).in('token', jetons)
+        if (errVues) console.error('[garde] lecture des vues echec', errVues.message)
+        else {
+          vuesLues = true
+          const parJeton = new Map((pt || []).map(x => [String(x.token), x.pwa_vue_le || null]))
+          // ⚠ UN JETON SUPPRIME N'EST PAS « JAMAIS OUVERTE ». Une personne
+          // retiree de l'equipe n'a plus de ligne `public_tokens` : elle reste
+          // donc ABSENTE de la carte, et l'ecran ne dit rien d'elle — plutot
+          // que d'annoncer une page jamais ouverte sur un lien qui n'existe
+          // plus. Seul un jeton PRESENT a `pwa_vue_le = null` veut dire
+          // « jamais ouverte ».
+          for (const x of (pr || [])) {
+            if (x.pwa_token && parJeton.has(String(x.pwa_token))) {
+              vues[x.id] = parJeton.get(String(x.pwa_token))
+            }
+          }
+        }
+      }
     }
 
+    // ===== LES ABSENCES DES PRESTATAIRES : PLUS CALCULEES =====
+    // Servies un temps (recette du 13 octobre), puis RETIREES de l'ecran le
+    // meme jour (« une absence = une case vide, moins de bruit »). Plus aucun
+    // consommateur ne les lisait, et le bloc re-evaluait `attitreeCeJour` +
+    // `estDisponible` — donc re-parsait la RRULE — par bien, par liaison et
+    // par jour, quatre fois en vue 12 mois (la page lit par tranches). Le
+    // jour ou un ecran en aura besoin : les EXPOSER depuis `planningDeGarde`,
+    // qui connait deja la disponibilite jour par jour, au lieu d'une
+    // seconde passe (revue de 742fa7f).
     // ===== LE RETOUR DE PROPRETE DU SEJOUR =====
     //
     // ⚠ ATTACHE A UN MENAGE, PAS A UNE PERSONNE. C'est ce que le voyageur a dit
@@ -323,9 +481,40 @@ module.exports = async function handler (req, res) {
     const menages = (menagesRows || []).map(m => ({
       propertyId: String(m.property_id),
       bookingId: String(m.booking_id),
-      date: m.departure_date,
+      // Normalise comme la cle `fait` ci-dessous : si la colonne devenait un
+      // timestamp, l'ecran filtrerait `date` contre ses jours ISO et perdrait
+      // TOUT en silence (revue de 4235a21).
+      date: String(m.departure_date).slice(0, 10),
       status: m.status,
+      // La consigne de l'hote pour CE menage (vide = aucune).
+      note: notes[`${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || '',
+      // Quand la consigne a change pour la derniere fois (null = aucune note).
+      noteLe: notesLe[`${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || null,
+      // La verite serveur de « fait » — jamais le localStorage de l'ancien ecran.
+      fait: faits.has(`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`),
+      // Les TROIS etapes reellement enregistrees (Q1 de l'inventaire) :
+      // propose, pris, fait. `started` / `completed` existent au schema mais
+      // AUCUN code ne les ecrit — la fiche n'invente pas d'etape.
+      etapes: {
+        propose: m.offered_at || null,
+        pris: m.accepted_at || null,
+        fait: (detailFait[`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || {}).quand || null,
+        parElle: (detailFait[`${String(m.property_id)}|${String(m.booking_id)}|${String(m.departure_date).slice(0, 10)}`] || {}).parElle || false
+      },
       porteur: nommer(m.provider_id),
+      // ⚠ « ELLE L'A VU » SE LIT SUR LE MENAGE, plus par deduction. L'instant
+      // ou la porteuse a dit « vu » depuis sa page (14 octobre 2026) : c'est ce
+      // que l'alerte « Non valide » et la fiche posent comme question, et
+      // `public_tokens.pwa_vue_le` n'y repondait que par procuration — « a-t-
+      // elle ouvert sa page un jour ? », pour tous ses menages a la fois.
+      // ⚠ NULL = NON VALIDE, ET C'EST UNE REPONSE. Ne pas le servir ferait
+      // taire l'alerte, pas l'inverse — et c'est bien pour cela que le champ
+      // est ABSENT (et non `null`) quand les colonnes n'ont pas pu etre lues :
+      // les deux cas ne disent pas la meme chose.
+      // ⚠ ET LA VALIDATION D'UNE AUTRE PERSONNE NE COMPTE PAS (constat de la
+      // revue de 20fb83d) : apres une reassignation, celle qui porte le menage
+      // maintenant n'a rien lu, et c'est exactement ce que l'hote doit voir.
+      ...('vu_le' in m ? { vuLe: valideParLaPorteuse(m) } : {}),
       // ⚠ LE TOUR ENTIER (spec proposition-par-rang) : `proposeesA` nomme
       // toutes les personnes sollicitees en meme temps ; `proposeA` reste la
       // premiere, pour les ecrans qui n'affichent qu'un nom.
@@ -364,7 +553,12 @@ module.exports = async function handler (req, res) {
     }))
 
     return res.status(200).json({
-      jours, biens, garde: gardeParBien, menages,
+      jours, biens, garde: gardeParBien, menages, prestataires,
+      // `{ profilId: instant | null }` — null = ce lien n'a jamais ete ouvert.
+      // Une personne ABSENTE de la carte est une personne dont on ne sait
+      // rien ; `vues_lues: false` dit que la lecture a echoue, et l'ecran se
+      // tait alors au lieu d'alerter sur toute l'equipe.
+      vues, vues_lues: vuesLues,
       avec_noms: avecNoms,
       // ⚠ `avec_avis` DIT CE QUI SORT, pas ce que le droit autorise. Le retour de
       // propreté est une parole de voyageur rapportée à côté d'un nom : sans
@@ -373,7 +567,8 @@ module.exports = async function handler (req, res) {
       avec_avis: avecNoms && avecAvis,
       // L'ecran le DIT a l'hote : mieux vaut « liste incomplete » qu'un jour
       // paisible qui cache un menage sans personne.
-      tronque: tronqueBiens || (menagesRows || []).length >= LOT_MENAGES,
+      tronque: tronqueBiens || (menagesRows || []).length >= LOT_MENAGES || tronqueFaits,
+      notes_lues: notesLues,
       // Les trous BRUTS, tels que la brique les rend — y compris les jours sans
       // ménage. L'écran ne met en rouge que ceux qui portent un ménage (§12.6),
       // mais il doit pouvoir montrer les autres en gris : c'est ce qui permet de

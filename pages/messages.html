@@ -1,0 +1,1514 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « MESSAGES » — refonte UI V5, lot 2, ÉTAPES 1 à 3 : liste + fil,
+     envoi manuel, « Proposer une réponse », propositions dans le fil avec
+     Envoyer / Modifier / Rejeter, pagination serveur, état lu. Spec :
+     docs/specs/spec-refonte-ui-v5-lot-messages.md §3-§6 et §11.
+     Reste l'étape 4 (Test/Auto, tiroir réglages, redirection ancienne page).
+     RÈGLES : aucun hexa, aucun texte en dur, aucune icône dessinée ici,
+     aucun appel provider ; X-Compte sur chaque appel. -->
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- rempli par nav.js --></div>
+  </div>
+</header>
+
+<main class="msg-layout">
+
+  <section class="msg-liste" aria-labelledby="h-liste">
+    <div class="msg-liste__outils">
+      <div class="row" style="gap: 10px">
+        <h1 class="h2" id="h-liste" style="margin-inline-end: auto" data-i18n="messages.title"></h1>
+        <button type="button" class="msg-btnrond" data-ouvre-volet="programmes" hidden
+          data-i18n-attr="aria-label:messages.drawer_scheduled;title:messages.drawer_scheduled;data-legende:messages.drawer_scheduled">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-scheduled"/></svg>
+        </button>
+        <button type="button" class="msg-btnrond" data-ouvre-volet="ia" hidden
+          data-i18n-attr="aria-label:messages.tab_ia;title:messages.tab_ia;data-legende:messages.tab_ia">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
+        </button>
+      </div>
+      <label class="msg-recherche">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-search"/></svg>
+        <input type="search" data-bind="recherche" data-i18n-attr="placeholder:messages.search;aria-label:messages.search">
+      </label>
+      <div class="msg-filtres" role="group" data-i18n-attr="aria-label:messages.filters">
+        <button type="button" class="tab" data-filtre="tous" aria-pressed="true" data-i18n="messages.filter_all"></button>
+        <button type="button" class="tab" data-filtre="nonlus" aria-pressed="false"></button>
+        <button type="button" class="tab" data-filtre="avalider" aria-pressed="false"></button>
+      </div>
+    </div>
+    <div class="msg-deroule" data-list="conversations"><p class="muted" style="padding: 14px" data-i18n="common.loading"></p></div>
+  </section>
+
+  <section class="msg-fil" aria-labelledby="h-fil">
+    <div class="msg-fil__entete" data-bind="fil-entete" hidden>
+      <button type="button" class="btn btn--secondary btn--icon msg-retour" data-bind="retour" data-i18n-attr="aria-label:messages.back">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron" transform="rotate(180 12 12)"/></svg>
+      </button>
+      <span class="conv__avatar" data-bind="fil-avatar"></span>
+      <div class="msg-fil__titre">
+        <h2 class="h2" id="h-fil" style="font-size: 17px" data-bind="fil-nom"></h2>
+        <span class="small muted" data-bind="fil-sous"></span>
+      </div>
+      <span class="row" style="margin-inline-start: auto; gap: 12px">
+        <span class="row caption muted" style="gap: 5px" data-bind="fil-code" hidden>
+          <svg class="icon" style="width:15px;height:15px" aria-hidden="true"><use href="/shared/icons.svg#i-key"/></svg>
+          <span data-bind="fil-code-texte"></span>
+        </span>
+        <span class="row" style="gap: 12px" data-bind="fil-extras"></span>
+        <a class="link caption" data-bind="fil-resa" hidden data-i18n="messages.booking_link"></a>
+        <span data-bind="fil-menu"></span>
+      </span>
+    </div>
+    <div class="msg-fil__deroule" data-list="fil" hidden></div>
+    <div class="msg-vide" data-bind="fil-vide">
+      <svg class="icon" style="width:36px;height:36px" aria-hidden="true"><use href="/shared/icons.svg#i-message"/></svg>
+      <span data-i18n="messages.select"></span>
+    </div>
+    <div class="msg-saisie" data-bind="saisie" hidden>
+      <textarea rows="1" data-bind="texte" data-i18n-attr="placeholder:messages.write;aria-label:messages.write"></textarea>
+      <button type="button" class="btn btn--secondary btn--icon" data-bind="proposer" data-i18n-attr="aria-label:messages.propose;title:messages.propose">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-ai"/></svg>
+      </button>
+      <button type="button" class="btn btn--primary btn--icon" data-bind="envoyer" data-i18n-attr="aria-label:messages.send;title:messages.send">
+        <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-send"/></svg>
+      </button>
+    </div>
+    <p class="caption muted" style="margin: 0; padding: 0 20px 10px" data-bind="saisie-etat" hidden></p>
+  </section>
+</main>
+
+<aside class="msg-tiroir" data-bind="tiroir" hidden aria-labelledby="h-tiroir">
+  <div class="msg-tiroir__entete">
+    <h2 class="h2" id="h-tiroir" style="font-size: 17px; margin: 0" data-bind="tiroir-titre"></h2>
+    <button type="button" class="btn btn--secondary btn--icon" data-bind="tiroir-fermer" data-i18n-attr="aria-label:messages.close">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-close"/></svg>
+    </button>
+  </div>
+  <label class="msg-tiroir__choixbien">
+    <span class="caption muted" data-i18n="messages.drawer_property"></span>
+    <select data-bind="tiroir-bien"></select>
+  </label>
+  <div class="msg-tiroir__corps" data-bind="tiroir-corps"></div>
+  <p class="caption msg-tiroir__note" data-bind="tiroir-note" hidden></p>
+</aside>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- rempli par nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+import { requireAuth } from '/components/auth-guard.js'
+import { supabase, getUser, signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
+  from '/shared/compte-courant.js'
+// La règle « à traiter » est PARTAGÉE avec l'accueil (séjours à venir ou en
+// cours seulement, décision du 11 octobre) : jamais recopiée.
+import { tachesOuvertes, jourParis, ajouterJours, STATUTS_SANS_SEJOUR } from '/shared/aujourdhui.js'
+import { EVENEMENTS_PROGRAMMES, JOURS_PROGRAMMES, HEURES_PROGRAMMES, DEFAUTS_NOUVEAU_PROGRAMME, referenceDe, reinitialiserMoment, libelleJour, libelleHeure, libelleDelai as libelleDelaiBrut }
+  from '/shared/messages-programmes.js'
+import { departEvaluable } from '/shared/calendrier-resa.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (sel) => document.querySelector(sel)
+const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
+
+const PAGE = 50            // conversations affichées, puis « afficher plus » (spec §3.2)
+// Une date illisible ne fait tomber NI la liste NI le fil.
+const valide = (iso) => iso != null && Number.isFinite(new Date(iso).getTime())
+const etat = {
+  aujourdHui: jourParis(),
+  conversations: [], chargementOk: null,
+  taches: [],              // pending_validation OUVERTES, par la règle du lot 1
+  biens: new Map(),        // provider_property_id -> { uuid, name }
+  filtre: 'tous', recherche: '', anciennes: false,
+  hasMore: false, nextBefore: null, nextBeforeId: null,   // pagination SERVEUR (etape 2)
+  pauses: {},                          // provider_property_id -> kill switch
+  envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
+  enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
+  modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
+  configIA: null,          // blob agent_alert_config.config ; null = illisible (volet ferme)
+  prompting: null,         // consignes de l'IA ; null = illisible (bloc ferme)
+  brevo: false,            // cle Brevo presente -> canal SMS ouvert
+  tiroirVolet: 'ia', tiroirBien: null,
+  templates: undefined,    // messages programmes du bien choisi ; null = illisible
+  templatesBien: null, templatesEnCours: false,
+  serrures: [],            // serrures du bien choisi (property_locks -> locks)
+  evaluations: new Map(),  // bookId -> 'evaluable' | 'publiee' | 'rien' (dette 67, via le BUS)
+  modeEnCours: false,      // une bascule a la fois
+  ouverte: null            // bookId de la conversation ouverte
+}
+const peutEcrireMessages = () => { try { return peutEcrire('messages') } catch { return false } }
+// Les reglages IA (mode, pause) sont reserves au TITULAIRE sur SON compte :
+// /api/agent-config et le GET de /api/property-automation n'honorent pas
+// X-Compte (dette 68) — un delegue y lirait et ecrirait SON propre compte en
+// croyant regler celui du titulaire, sans aucune erreur a l'ecran.
+const reglagesIci = () => { try { return estTitulaire() } catch { return false } }
+
+async function appel (chemin, corpsPost) {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (!session || !session.access_token) { const e = new Error(t('messages.load_error')); e.status = 401; throw e }
+  const r = await fetch(chemin, {
+    method: corpsPost ? 'POST' : 'GET',
+    headers: { Authorization: 'Bearer ' + session.access_token, ...(corpsPost ? { 'Content-Type': 'application/json' } : {}), ...enteteCompte() },
+    ...(corpsPost ? { body: JSON.stringify(corpsPost) } : {})
+  })
+  const corps = await r.json().catch(() => ({}))
+  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.error; throw e }
+  return corps
+}
+
+// ─── Lectures ────────────────────────────────────────────────────────────────
+async function charger () {
+  const lectures = [
+    appel(`/api/messages?limit=${PAGE}`).then(r => {
+      etat.conversations = r.conversations || []
+      etat.hasMore = r.has_more === true
+      etat.nextBefore = r.next_before != null ? r.next_before : null
+      etat.nextBeforeId = r.next_before_id || null
+      etat.chargementOk = true
+    })
+      .catch(e => { logger.error('Messages', 'conversations', e); etat.chargementOk = false }),
+    appel('/api/property-automation').then(r => { etat.pauses = r.paused || {} })
+      .catch(() => { etat.pauses = {} }),
+    // Le mode Test/Auto par bien (etape 4) : agent_alert_config, domaine
+    // reglages — un profil sans ce droit n'a ni interrupteur ni tiroir.
+    ...(reglagesIci() ? [
+      appel('/api/agent-config')
+        .then(r => { etat.modes = modesDe(r.config); etat.configIA = r.config || {} })
+        .catch(() => { etat.modes = null; etat.configIA = null }),
+      // Les consignes de l'IA : la table de l'ancienne page, sous RLS.
+      supabase.from('agent_prompting').select('property_id, instructions')
+        .eq('user_id', compteCourant())
+        .then(({ data, error }) => {
+          // Lecture echouee = bloc FERME : des textareas vides enregistres
+          // auraient EFFACE les consignes de la base (releve en review).
+          if (error) { logger.error('Messages', 'consignes', error); etat.prompting = null; return }
+          etat.prompting = { global: '', overrides: {} }
+          for (const ligne of data || []) {
+            if (ligne.property_id === null) etat.prompting.global = ligne.instructions || ''
+            else etat.prompting.overrides[String(ligne.property_id)] = ligne.instructions || ''
+          }
+        }),
+      // La porte SMS : une cle Brevo enregistree, sinon le canal est ferme.
+      appel('/api/sms?action=config')
+        .then(r => { etat.brevo = r.configured === true })
+        .catch(() => { etat.brevo = false })
+    ] : []),
+    // Les noms des biens (la sous-ligne « {bien} · {dates} ») : lecture directe
+    // sous RLS, jamais /api/channel-property (il interroge Beds24 en direct).
+    supabase.from('properties').select('id, name, provider_property_id, photo_url').eq('user_id', compteCourant())
+      .then(({ data, error }) => {
+        if (error) { logger.error('Messages', 'biens', error); return }
+        for (const b of data || []) if (b.provider_property_id) etat.biens.set(String(b.provider_property_id), { uuid: b.id, name: b.name, photo: b.photo_url || null })
+      }),
+    supabase.from('agent_tasks')
+      .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
+      .in('status', ['pending_validation']).eq('user_id', compteCourant())
+      .order('created_at', { ascending: false }).limit(200)
+      .then(({ data, error }) => { if (error) logger.error('Messages', 'taches', error); else etat.taches = data || [] })
+  ]
+  await Promise.all(lectures)
+  // La règle d'ouverture s'évalue sur les SÉJOURS des conversations (départ =
+  // lastNight) et leurs derniers messages — mêmes entrées que le lot 1.
+  // Seuls comptent les sejours A VENIR ou EN COURS (regle du 11 octobre) —
+  // statuts exclus partages avec l'accueil (STATUTS_SANS_SEJOUR). Une tache
+  // dont la conversation n'est pas dans la page chargee survit par ses
+  // propres dates (agent_tasks.departure) : voir tachesOuvertes.
+  const sejoursEnCours = etat.conversations
+    .filter(c => c.lastNight && !STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase()))
+    .map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
+  etat.taches = tachesOuvertes(etat.taches, {
+    bookings: sejoursEnCours, aujourdHui: etat.aujourdHui
+  })
+  indexerTaches()
+}
+
+// ─── Lecture des conversations : tri, filtres, recherche ────────────────────
+// Index reconstruit apres chaque chargement : la recherche re-filtre a chaque
+// frappe, un balayage lineaire par ligne et par comparaison coutait
+// conversations x taches (releve en review).
+let tachesParResa = new Map()
+function indexerTaches () {
+  tachesParResa = new Map()
+  for (const x of etat.taches) {
+    const k = String(x.book_id)
+    if (!tachesParResa.has(k)) tachesParResa.set(k, [])
+    tachesParResa.get(k).push(x)
+  }
+}
+const tachesDe = (c) => tachesParResa.get(String(c.bookId)) || []
+// Non lu = dernier message ENTRANT posterieur a la derniere LECTURE — et
+// repondre vaut lecture : la reference est le plus recent de read_at (pose a
+// l'ouverture du fil, etape 2) et du dernier message sortant. Sans l'un ni
+// l'autre, un entrant est non lu.
+const nonLue = (c) => {
+  const dernierEntrant = [...c.messages].reverse().find(m => m.direction === 'inbound')
+  if (!dernierEntrant) return false
+  const dernierSortant = [...c.messages].reverse().find(m => m.direction === 'outbound')
+  const refs = [c.readAt, dernierSortant && dernierSortant.sent_at].filter(Boolean).map(x => new Date(x).getTime())
+  if (!refs.length) return true
+  return new Date(dernierEntrant.sent_at).getTime() > Math.max(...refs)
+}
+const enCours = (c) => c.lastNight && String(c.lastNight).slice(0, 10) >= etat.aujourdHui
+  && String(c.status || '').toLowerCase() !== 'cancelled'
+// Arrivee du jour (0), de demain (1), autre (2) — fonction CONSERVEE de
+// l'ancienne messagerie (inventaire §12 de la spec) : ces fils priment.
+function groupeArrivee (c) {
+  const arr = String(c.firstNight || '').slice(0, 10)
+  if (!arr || STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase())) return 2
+  if (arr === etat.aujourdHui) return 0
+  if (arr === ajouterJours(etat.aujourdHui, 1)) return 1
+  return 2
+}
+function visibles () {
+  const q = etat.recherche.trim().toLowerCase()
+  let liste = etat.conversations.filter(c => etat.anciennes || !c.archivee)
+  if (etat.filtre === 'nonlus') liste = liste.filter(nonLue)
+  if (etat.filtre === 'avalider') liste = liste.filter(c => tachesDe(c).length)
+  if (q) {
+    liste = liste.filter(c => (c.guestName || '').toLowerCase().includes(q)
+      || (etat.biens.get(String(c.propertyId))?.name || '').toLowerCase().includes(q))
+  }
+  // Tri (décision de Thierry du 11 octobre 2026, qui PRIME sur la spec §3.2) :
+  // les arrivées du JOUR toujours en premières lignes, celles de DEMAIN en
+  // secondes, puis à valider, puis non lus, puis date décroissante.
+  // ⚠ Le rang se calcule UNE fois par conversation, jamais dans le
+  // comparateur (nonLue recopie le fil, la recherche re-trie a chaque frappe
+  // — meme famille que l'index des taches, releve en review).
+  const rang = c => { const g = groupeArrivee(c); return g < 2 ? g : c.epinglee ? 2 : tachesDe(c).length ? 3 : nonLue(c) ? 4 : 5 }
+  return liste
+    .map(c => ({ c, rg: rang(c), t: new Date(c.lastTime || 0).getTime() }))
+    .sort((x, y) => x.rg - y.rg || y.t - x.t)
+    .map(x => x.c)
+}
+
+// ─── Rendu : liste ───────────────────────────────────────────────────────────
+const LETTRE_CANAL = { airbnb: 'A', booking: 'B', direct: 'D' }
+// Un canal inconnu reste NEUTRE : la premiere lettre de « Autre OTA » se
+// lisait Airbnb (releve en review).
+const lettreCanal = (c) => LETTRE_CANAL[c.platform] || '·'
+// La pastille : lettre + COULEUR DE MARQUE (le nom du canal en infobulle),
+// et le grand cercle porte la MINIATURE du logement quand il en a une —
+// repli : les initiales du voyageur (demande de Thierry, 11 octobre 2026).
+const CLASSE_CANAL = { airbnb: 'conv__canal--airbnb', booking: 'conv__canal--booking', direct: 'conv__canal--direct' }
+// Le LOGO du canal (demande de Thierry) : le belo Airbnb (sprite, trace CC0),
+// le « B. » Booking (son logo EST cette lettre), la maison pour le direct ;
+// inconnu = point neutre. Le nom du canal reste en infobulle.
+function pastilleCanal (c) {
+  const dedans = c.platform === 'airbnb' ? icone('i-canal-airbnb', 'icon icon--fill')
+    : c.platform === 'booking' ? 'B.'
+    : c.platform === 'direct' ? icone('i-home')
+    : lettreCanal(c)
+  return `<span class="conv__canal ${CLASSE_CANAL[c.platform] || ''}" title="${esc(c.ota || '')}">${dedans}</span>`
+}
+function avatarConv (c) {
+  const bien = etat.biens.get(String(c.propertyId))
+  const photo = bien?.photo ? `<img src="${esc(bien.photo)}" alt="" loading="lazy">` : ''
+  return `${photo}${photo ? '' : esc(initiales(c.guestName))}${pastilleCanal(c)}`
+}
+const initiales = (nom) => (nom || '').trim().split(/\s+/).slice(0, 2).map(m => m[0] || '').join('').toUpperCase() || '·'
+function periode (c) {
+  const j = x => { const [a, m, d] = String(x).slice(0, 10).split('-').map(Number); return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { day: 'numeric', month: 'short', timeZone: 'UTC' }) }
+  return c.firstNight && c.lastNight ? `${j(c.firstNight)} → ${j(c.lastNight)}` : ''
+}
+function renderFiltres () {
+  // Chargement en echec : pas de compte du tout — un « 0 » calcule sur des
+  // donnees absentes serait un fait invente (releve en review).
+  if (etat.chargementOk === false) { $('.msg-liste__outils').hidden = true; return }
+  const toutes = etat.conversations.filter(c => etat.anciennes || !c.archivee)
+  $('[data-filtre="nonlus"]').textContent = `● ${toutes.filter(nonLue).length}`
+  $('[data-filtre="nonlus"]').setAttribute('aria-label', t('messages.filter_unread'))
+  $('[data-filtre="avalider"]').textContent = `${t('messages.filter_validate')} (${toutes.filter(c => tachesDe(c).length).length})`
+  for (const b of document.querySelectorAll('[data-filtre]')) {
+    b.setAttribute('aria-pressed', String(b.dataset.filtre === etat.filtre))
+  }
+}
+function renderListe () {
+  const zone = $('[data-list="conversations"]')
+  if (etat.chargementOk === false) { zone.innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.load_error'))}</p>`; return }
+  const liste = visibles()
+  if (!liste.length && !etat.hasMore) { zone.innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.empty'))}</p>`; return }
+  const masqueesAnciennes = !etat.anciennes && etat.conversations.some(c => c.archivee)
+  // Étiquettes de groupe et séparation visuelle (demande de Thierry) : les
+  // arrivées du jour, puis celles de demain, puis le reste derrière une
+  // coupure nette.
+  let groupePrecedent = null
+  zone.innerHTML = liste.map(c => {
+    const bien = etat.biens.get(String(c.propertyId))
+    const proposition = tachesDe(c).length > 0
+    const g = groupeArrivee(c)
+    let entete = ''
+    if (g !== groupePrecedent) {
+      if (g === 0) entete = `<div class="msg-groupe">${icone('i-arrival', 'icon')}${esc(t('messages.arrives_today'))}</div>`
+      else if (g === 1) entete = `<div class="msg-groupe">${icone('i-arrival', 'icon')}${esc(t('messages.arrives_tomorrow'))}</div>`
+      else if (groupePrecedent !== null) entete = '<div class="msg-separe" role="presentation"></div>'
+      groupePrecedent = g
+    }
+    return `${entete}<div class="conv" role="button" tabindex="0" data-conv="${esc(c.bookId)}" aria-current="${c.bookId === etat.ouverte}">
+      <span class="conv__avatar">${avatarConv(c)}</span>
+      <span style="min-width: 0">
+        <span class="conv__nom">${esc(c.guestName || t('messages.guest'))}</span>
+        <span class="conv__sous"><span class="conv__etat${enCours(c) ? ' conv__etat--encours' : ''}"></span>${esc([bien?.name, periode(c)].filter(Boolean).join(' · '))}</span>
+        ${badgeArrivee(c)}
+      </span>
+      <span class="conv__droite">${proposition ? icone('i-ai', 'icon icon--robot') : ''}${c.epinglee ? icone('i-pin', 'icon icon--epingle') : ''}${nonLue(c) ? `<span class="conv__nonlu" role="img" data-i18n-attr="aria-label:messages.unread"></span>` : ''}</span>
+    </div>`
+  }).join('')
+    + (etat.hasMore ? `<button type="button" class="btn btn--secondary btn--block" style="margin: 10px auto; width: calc(100% - 28px)" data-plus>${esc(t('messages.show_more_srv'))}</button>` : '')
+    + (masqueesAnciennes ? `<button type="button" class="link small" style="display: block; margin: 8px auto 16px; background: none; border: 0" data-anciennes>${esc(t('messages.show_old'))}</button>` : '')
+  I18n.apply(zone)
+  zone.querySelectorAll('[data-conv]').forEach(b => {
+    b.addEventListener('click', (e) => { if (!e.target.closest('[data-tel]')) ouvrir(b.dataset.conv) })
+    b.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); ouvrir(b.dataset.conv) } })
+  })
+  zone.querySelector('[data-plus]')?.addEventListener('click', chargerPageSuivante)
+  zone.querySelector('[data-anciennes]')?.addEventListener('click', () => { etat.anciennes = true; renderFiltres(); renderListe() })
+}
+
+// Page suivante : le curseur du SERVEUR (etape 2), plus un decoupage client.
+async function chargerPageSuivante () {
+  if (etat.nextBefore == null) { etat.hasMore = false; renderListe(); return }
+  try {
+    const r = await appel(`/api/messages?limit=${PAGE}&before=${encodeURIComponent(etat.nextBefore)}&before_id=${encodeURIComponent(etat.nextBeforeId || '')}`)
+    const connus = new Set(etat.conversations.map(c => String(c.bookId)))
+    for (const c of r.conversations || []) if (!connus.has(String(c.bookId))) etat.conversations.push(c)
+    etat.hasMore = r.has_more === true
+    etat.nextBefore = r.next_before != null ? r.next_before : null
+    etat.nextBeforeId = r.next_before_id || null
+    renderFiltres(); renderListe()
+  } catch (e) { logger.error('Messages', 'page suivante', e) }
+}
+
+// Pastilles d'arrivée (liste) : POSITIVES seulement, l'absence se lit « pas
+// encore » (règle de l'ancienne page). Le TÉLÉPHONE vit dans la ligne pour
+// les arrivées (demande de Thierry du 11 octobre) : l'étiquette de groupe
+// porte déjà « Arrive aujourd'hui / demain », plus de badge par ligne.
+function badgeArrivee (c) {
+  const g = groupeArrivee(c)
+  if (g > 1) return ''
+  const etats = []
+  if (c.arrivee?.menage === 'fait') etats.push(`<span class="row caption" style="gap: 3px">${icone('i-cleaning', 'icon icon--fait')}${esc(t('messages.cleaning_done'))}</span>`)
+  if (c.arrivee?.codeEtat === 'transmis') etats.push(`<span class="row caption" style="gap: 3px">${icone('i-key', 'icon icon--fait')}${esc(t('messages.code_sent'))}</span>`)
+  const tel = lienTelephone(c)
+  if (!etats.length && !tel) return ''
+  return `<span class="row caption muted" style="gap: 12px; margin-top: 3px; flex-wrap: wrap">${etats.join('')}${tel}</span>`
+}
+// Le téléphone en lien d'appel, pour les arrivées du jour et de demain
+// seulement (fonction conservée) : `tel:` n'accepte que chiffres et « + ».
+// Un numéro livré « 33 6… » SANS le plus ne se compose pas : on le rétablit
+// (demande de Thierry du 11 octobre) — 0033 devient +33, 33XXXXXXXXX aussi ;
+// un numéro national (06…) ou déjà international reste tel quel.
+function numeroAppelable (brut) {
+  const premier = String(brut).trim().split(/[\/,;]|\s+ou\s+/)[0].trim()
+  let num = premier.replace(/[^\d+]/g, '')
+  if (num.startsWith('00')) num = '+' + num.slice(2)
+  if (!num.startsWith('+') && /^33\d{8,}$/.test(num)) num = '+' + num
+  return num
+}
+function lienTelephone (c) {
+  if (groupeArrivee(c) > 1 || !c.guestPhone) return ''
+  const num = numeroAppelable(c.guestPhone)
+  if (num.replace(/\D/g, '').length < 6) return ''
+  return `<a class="link caption row" style="gap: 5px" href="tel:${esc(num)}" data-tel aria-label="${esc(t('messages.call'))}">${icone('i-phone', 'icon icon--tel')}${esc(num)}</a>`
+}
+
+// ─── Rendu : fil ─────────────────────────────────────────────────────────────
+function jourDe (iso) { return jourParis(new Date(iso).getTime()) }
+function renderFil () {
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  const entete = $('[data-bind="fil-entete"]'), deroule = $('[data-list="fil"]'), vide = $('[data-bind="fil-vide"]')
+  if (!c) { entete.hidden = true; deroule.hidden = true; vide.hidden = false; delete document.body.dataset.fil; return }
+  document.body.dataset.fil = '1'
+  entete.hidden = false; deroule.hidden = false; vide.hidden = true
+  $('[data-bind="fil-avatar"]').innerHTML = avatarConv(c)
+  $('[data-bind="fil-nom"]').textContent = c.guestName || t('messages.guest')
+  const bien = etat.biens.get(String(c.propertyId))
+  $('[data-bind="fil-sous"]').textContent = [bien?.name, periode(c)].filter(Boolean).join(' · ')
+  const code = $('[data-bind="fil-code"]')
+  if (c.arrivee && (c.arrivee.codeEtat === 'transmis' || c.arrivee.codeEtat === 'cree')) {
+    code.hidden = false
+    $('[data-bind="fil-code-texte"]').textContent = t(c.arrivee.codeEtat === 'transmis' ? 'messages.code_sent' : 'messages.code_pending')
+  } else code.hidden = true
+  // Ménage fait et téléphone (arrivées j / j+1) : fonctions CONSERVÉES.
+  const extras = $('[data-bind="fil-extras"]')
+  extras.innerHTML = [
+    c.arrivee?.menage === 'fait' ? `<span class="row caption muted" style="gap: 5px">${icone('i-cleaning', 'icon')}${esc(t('messages.cleaning_done'))}</span>` : '',
+    lienTelephone(c)
+  ].filter(Boolean).join('')
+  const resa = $('[data-bind="fil-resa"]')
+  if (bien) { resa.hidden = false; resa.href = `/biens/${encodeURIComponent(bien.uuid)}/calendrier` } else resa.hidden = true
+
+  // Le menu du fil (etape 4) : epingler et archiver, PORTES de l'ancienne
+  // page — writers /api/messages (actions epingler/archiver), jamais le RLS
+  // direct. Une epinglee ne s'archive pas : l'entree n'apparait pas (et le
+  // serveur refuse de toute facon, 409 epinglee).
+  const menuFil = $('[data-bind="fil-menu"]')
+  menuFil.innerHTML = peutEcrireMessages() ? `<details class="bulle-menu">
+      <summary aria-label="${esc(t('messages.more_actions'))}" title="${esc(t('messages.more_actions'))}">${icone('i-more')}</summary>
+      <div class="bulle-menu__liste bulle-menu__liste--bas">
+        <button type="button" data-fil-epingle>${esc(t(c.epinglee ? 'messages.unpin' : 'messages.pin'))}</button>
+        ${c.epinglee ? '' : `<button type="button" data-fil-archive>${esc(t(c.archivee ? 'messages.unarchive' : 'messages.archive'))}</button>`}
+      </div>
+    </details>` : ''
+  menuFil.querySelector('[data-fil-epingle]')?.addEventListener('click', () => basculerEpingle(c))
+  menuFil.querySelector('[data-fil-archive]')?.addEventListener('click', () => basculerArchive(c))
+
+  // Les messages et les PROPOSITIONS ouvertes, fondus à leur place
+  // chronologique (spec §3.3), avec Envoyer / Modifier / Rejeter (étape 3) —
+  // Rejeter dans le menu ⋯, boutons RETIRÉS sans droit d'écriture. Une
+  // proposition descendue dans la saisie (« Modifier ») se masque ici.
+  // La proposition sans `created_at` prend la place du dernier message, un
+  // message sans date va en fin de fil.
+  const dernierInstant = c.lastTime && valide(c.lastTime) ? c.lastTime : new Date().toISOString()
+  const entrees = [
+    ...c.messages.map(m => ({ quand: valide(m.sent_at) ? m.sent_at : dernierInstant, type: 'message', m })),
+    ...tachesDe(c)
+      .filter(x => !(etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)))
+      .map(x => ({ quand: valide(x.created_at) ? x.created_at : dernierInstant, type: 'proposition', x }))
+  ].sort((a, b) => new Date(a.quand) - new Date(b.quand))
+  let jour = null
+  deroule.innerHTML = entrees.map(e => {
+    const morceaux = []
+    const j = jourDe(e.quand)
+    if (j !== jour) { jour = j; morceaux.push(`<span class="msg-jour">${esc(dateLongue(j))}</span>`) }
+    if (e.type === 'proposition') {
+      const x = e.x
+      const enCoursEnvoi = x.etatEnvoi === 'en_cours'
+      // Sans texte propose (la bulle montre le resume), NI Envoyer NI
+      // Modifier : un clic posterait un message VIDE au voyageur (releve en
+      // review — api/beds24 sendMessage n'a aucune garde). Rejeter reste.
+      const texteProp = String(x.suggested_reply || '').trim()
+      const boutons = peutEcrireMessages() && !enCoursEnvoi ? `<span class="bulle__actions">
+          <details class="bulle-menu">
+            <summary aria-label="${esc(t('messages.more_actions'))}" title="${esc(t('messages.more_actions'))}">${icone('i-more')}</summary>
+            <div class="bulle-menu__liste"><button type="button" data-rejeter="${esc(String(x.id))}">${esc(t('messages.proposal_reject'))}</button></div>
+          </details>
+          ${texteProp ? `<button type="button" class="btn btn--secondary" data-modifier="${esc(String(x.id))}">${esc(t('messages.proposal_edit'))}</button>
+          <button type="button" class="btn btn--primary" data-envoyer-prop="${esc(String(x.id))}">${icone('i-send')}${esc(t('messages.send'))}</button>` : ''}
+        </span>` : ''
+      morceaux.push(`<div class="bulle bulle--proposition${x.etatEnvoi === 'echec' ? ' bulle--echec' : ''}">
+        <span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.proposal'))}</span>${esc(x.suggested_reply || x.summary || '')}${boutons}</div>
+        <span class="bulle-meta">${enCoursEnvoi ? esc(t('messages.sending'))
+          : x.etatEnvoi === 'echec' ? `<span class="msg-echec">${esc(t('messages.not_sent'))}</span> · <button type="button" class="link caption msg-reessayer" data-envoyer-prop="${esc(String(x.id))}">${esc(t('messages.retry'))}</button>` : ''}</span>`)
+    } else {
+      const m = e.m
+      const voyageur = m.direction === 'inbound'
+      const robot = !voyageur && (m.kind === 'auto' || /^ia_/.test(String(m.origine || '')))
+      morceaux.push(`<div class="bulle ${voyageur ? 'bulle--voyageur' : 'bulle--hote'}">${esc(m.body || '')}</div>
+        <span class="bulle-meta${voyageur ? ' bulle-meta--voyageur' : ''}">${robot ? icone('i-ai') : ''}${esc(valide(m.sent_at) ? I18n.time(new Date(m.sent_at)) : '')}</span>`)
+    }
+    return morceaux.join('')
+  }).join('')
+    // Les envois en cours ou ECHOUES, toujours en bas du fil : le texte ne se
+    // perd jamais (spec §3.4), « Réessayer » rejoue le même envoi.
+    + (etat.envois.get(String(c.bookId)) || []).map((e, i) => `
+      <div class="bulle bulle--hote${e.etatEnvoi === 'echec' ? ' bulle--echec' : ''}">${esc(e.texte)}</div>
+      <span class="bulle-meta">${e.etatEnvoi === 'echec'
+        ? `<span class="msg-echec">${esc(t('messages.not_sent'))}</span> · <button type="button" class="link caption msg-reessayer" data-reessayer="${i}">${esc(t('messages.retry'))}</button>`
+        : esc(t('messages.sending'))}</span>`).join('')
+  deroule.querySelectorAll('[data-reessayer]').forEach(b =>
+    b.addEventListener('click', () => reessayer(c, Number(b.dataset.reessayer))))
+  deroule.querySelectorAll('[data-envoyer-prop]').forEach(b =>
+    b.addEventListener('click', () => envoyerProposition(b.dataset.envoyerProp)))
+  deroule.querySelectorAll('[data-modifier]').forEach(b =>
+    b.addEventListener('click', () => modifierProposition(b.dataset.modifier)))
+  deroule.querySelectorAll('[data-rejeter]').forEach(b =>
+    b.addEventListener('click', () => rejeterProposition(b.dataset.rejeter)))
+  // Dette 67 : au sejour TERMINE, la proposition « Evaluer {prenom} ? » en
+  // fin de fil — par le BUS du coeur seulement (meme writer que la fiche
+  // resa : la fenetre standard avis.evaluer et ses boutons a niveaux).
+  deroule.insertAdjacentHTML('beforeend', `<span data-bind="fil-evaluation"></span>`)
+  peindreEvaluation(c, deroule.querySelector('[data-bind="fil-evaluation"]'))
+  deroule.scrollTop = deroule.scrollHeight
+
+  // La saisie (etape 2) : retiree sans droit d'ecriture, jamais grisee.
+  const saisie = $('[data-bind="saisie"]')
+  saisie.hidden = !peutEcrireMessages()
+  const enPause = etat.pauses[String(c.propertyId)] === true
+  const btnIA = $('[data-bind="proposer"]')
+  btnIA.disabled = enPause
+  btnIA.title = enPause ? t('messages.paused') : t('messages.propose')
+}
+
+// ─── Envoi manuel (etape 2) ──────────────────────────────────────────────────
+// UN SEUL ENDROIT qui choisit l'endpoint, la regle de l'ancienne page : un
+// bien Channex (reference UUID) passe par /api/channel-message — qui route
+// cote serveur par la SOURCE (fil OTA, ou e-mail pour une resa Offline) — et
+// un bien Beds24 (reference numerique) par /api/beds24. JAMAIS un provider
+// depuis la page.
+async function posterMessage (c, texte, origine = 'hote') {
+  const isChannex = String(c.propertyId || '').includes('-')
+  const endpoint = isChannex ? '/api/channel-message' : '/api/beds24'
+  // Dette 66 : l'origine du GESTE part avec l'envoi — posee par le writer,
+  // jamais recalculee.
+  const payload = isChannex
+    ? { bookingId: c.bookId, message: texte, propertyId: c.propertyId || null, origine }
+    : { action: 'sendMessage', bookingId: c.bookId, message: texte, propertyId: c.propertyId || null, origine }
+  return appel(endpoint, payload)
+}
+function envoisDe (bookId) {
+  const k = String(bookId)
+  if (!etat.envois.has(k)) etat.envois.set(k, [])
+  return etat.envois.get(k)
+}
+async function lancerEnvoi (c, entree) {
+  entree.etatEnvoi = 'en_cours'
+  renderFil()
+  try {
+    const origine = entree.valideTache ? 'ia_modifiee' : 'hote'
+    await posterMessage(c, entree.texte, origine)
+    // Parti : la bulle definitive viendra du coeur (double ecriture messages).
+    const liste = envoisDe(c.bookId)
+    liste.splice(liste.indexOf(entree), 1)
+    // Un envoi apres « Modifier » VALIDE la proposition — mais SEULEMENT
+    // l'entree nee du geste de la saisie (entree.valideTache, posee par
+    // envoyer()) : le « Reessayer » d'un vieux message manuel du meme fil ne
+    // doit jamais clore la proposition avec un texte qui n'est pas le sien
+    // (releve en review). La bulle porte l'avatar hote, pas le robot.
+    if (entree.valideTache) {
+      const x = etat.taches.find(v => String(v.id) === String(entree.valideTache))
+      etat.enEdition = null
+      if (x) { await cloreTache(x, 'done', entree.texte, c, 'ia_modifiee'); return }
+    }
+    c.messages.push({ direction: 'outbound', body: entree.texte, sent_at: new Date().toISOString(), kind: 'message', origine })
+    c.lastTime = new Date().toISOString()
+    renderFil(); renderListe()
+  } catch (err) {
+    logger.error('Messages', 'envoi', err)
+    entree.etatEnvoi = 'echec'
+    renderFil()
+  }
+}
+async function envoyer () {
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  const zone = $('[data-bind="texte"]')
+  const texte = zone.value.trim()
+  if (!c || !texte) return
+  zone.value = ''
+  ajusterHauteur(zone)
+  const entree = { texte, etatEnvoi: 'en_cours' }
+  // Le geste de la saisie pendant une edition : CETTE entree-la validera la
+  // proposition a son premier envoi reussi (retry compris), aucune autre.
+  const ed = etat.enEdition
+  if (ed && String(ed.bookId) === String(c.bookId)) entree.valideTache = ed.tacheId
+  envoisDe(c.bookId).push(entree)
+  lancerEnvoi(c, entree)
+}
+function reessayer (c, index) {
+  const entree = (etat.envois.get(String(c.bookId)) || [])[index]
+  if (entree) lancerEnvoi(c, entree)
+}
+
+// ─── Propositions : Envoyer / Modifier / Rejeter (etape 3) ───────────────────
+// « Envoyer » suit LE CHEMIN DE L'ANCIENNE PAGE (messagerie.html) : d'abord
+// posterMessage (routage par source, le meme que l'envoi manuel), PUIS la
+// cloture — statut + journal — par l'action `proposition` de /api/messages.
+// Jamais un second chemin d'envoi.
+const tacheParId = (id) => etat.taches.find(x => String(x.id) === String(id))
+async function envoyerProposition (id) {
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  const x = tacheParId(id)
+  if (!c || !x || x.etatEnvoi === 'en_cours') return
+  const texte = String(x.suggested_reply || '').trim()
+  if (!texte) return
+  x.etatEnvoi = 'en_cours'
+  renderFil()
+  try {
+    // Deux onglets, ou la V5 et l'ancienne page : la tache a pu etre validee
+    // ailleurs APRES notre chargement. Le verrou serveur ne ferme que la
+    // double CLOTURE — relire le statut ici evite le double MESSAGE au
+    // voyageur (releve en review). Lecture illisible = pas d'envoi (Reessayer).
+    const { data: frais, error } = await supabase.from('agent_tasks')
+      .select('status').eq('id', x.id).eq('user_id', compteCourant()).maybeSingle()
+    if (error) throw new Error(error.message)
+    if (!frais || frais.status !== 'pending_validation') { retirerTache(x); return }
+    await posterMessage(c, texte, 'ia_validee')
+    await cloreTache(x, 'done', texte, c)
+  } catch (err) {
+    logger.error('Messages', 'envoi proposition', err)
+    x.etatEnvoi = 'echec'
+    renderFil()
+  }
+}
+function modifierProposition (id) {
+  const x = tacheParId(id)
+  if (!x) return
+  const zone = $('[data-bind="texte"]')
+  // Un brouillon deja tape ne s'ecrase jamais en silence (releve en review).
+  const brouillon = zone.value.trim()
+  if (brouillon && brouillon !== String(x.suggested_reply || '').trim()
+    && !window.confirm(t('messages.draft_replace'))) return
+  zone.value = x.suggested_reply || ''
+  ajusterHauteur(zone)
+  etat.enEdition = { tacheId: x.id, bookId: String(etat.ouverte) }
+  renderFil()
+  zone.focus()
+}
+async function rejeterProposition (id) {
+  const x = tacheParId(id)
+  if (!x || x.etatEnvoi === 'en_cours') return
+  const c = etat.conversations.find(v => String(v.bookId) === String(etat.ouverte))
+  await cloreTache(x, 'ignored', null, c)
+}
+// Cloture cote serveur, puis retrait de l'ecran et badge a jour.
+//  - done : si la cloture echoue APRES un envoi reussi, la bulle part quand
+//    meme (le message EST parti) ; au rechargement la proposition reviendra
+//    au-dessus du message envoye et « Rejeter » la fermera — on ne renvoie
+//    jamais deux fois tout seul.
+//  - ignored : RIEN n'est parti — un rejet que le serveur n'a pas enregistre
+//    ne disparait pas de l'ecran, il se dit et se retente (releve en review).
+async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
+  try {
+    await appel('/api/messages', { action: 'proposition', task_id: String(x.id), statut, ...(texte ? { texte } : {}) })
+  } catch (err) {
+    // 409 deja_close : fermee ailleurs (ancienne page, autre onglet) — meme sortie.
+    if (err.status !== 409) {
+      logger.error('Messages', 'cloture proposition', err)
+      if (statut === 'ignored') {
+        const note = $('[data-bind="saisie-etat"]')
+        note.hidden = false
+        note.textContent = t('messages.reject_failed')
+        return
+      }
+    }
+  }
+  if (statut === 'done' && c) {
+    c.messages.push({ direction: 'outbound', body: texte, sent_at: new Date().toISOString(), kind: 'message', origine })
+    c.lastTime = new Date().toISOString()
+  }
+  retirerTache(x)
+}
+// Retrait local d'une proposition (close ici ou ailleurs) : liste, index,
+// edition en cours, badge, rendus.
+function retirerTache (x) {
+  etat.taches = etat.taches.filter(v => String(v.id) !== String(x.id))
+  indexerTaches()
+  if (etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)) etat.enEdition = null
+  majBadge()
+  renderFiltres(); renderListe(); renderFil()
+}
+function majBadge () {
+  HSNav.render({ badges: { pendingMessages: etat.taches.length }, peutLire })
+}
+
+// ─── « Proposer une reponse » (etape 2) ──────────────────────────────────────
+async function proposer () {
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  if (!c) return
+  const btn = $('[data-bind="proposer"]'), note = $('[data-bind="saisie-etat"]')
+  btn.disabled = true
+  note.hidden = false
+  note.textContent = t('messages.proposing')
+  try {
+    const r = await appel('/api/guestflow-proposer', { bookingId: c.bookId, propertyId: null })
+    if (r.proposition) {
+      note.hidden = true
+      await rechargerTaches()
+      renderFiltres(); renderListe(); renderFil()
+    } else {
+      note.textContent = r.message || t('messages.no_proposal')
+    }
+  } catch (err) {
+    note.textContent = err.message || t('messages.no_proposal')
+  } finally {
+    btn.disabled = etat.pauses[String(c.propertyId)] === true
+  }
+}
+async function rechargerTaches () {
+  const { data, error } = await supabase.from('agent_tasks')
+    .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
+    .in('status', ['pending_validation']).eq('user_id', compteCourant())
+    .order('created_at', { ascending: false }).limit(200)
+  if (error) return
+  const sejours = etat.conversations
+    .filter(c => c.lastNight && !STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase()))
+    .map(c => ({ id: c.bookId, propId: c.propertyId, departure: String(c.lastNight).slice(0, 10) }))
+  etat.taches = tachesOuvertes(data || [], { bookings: sejours, aujourdHui: etat.aujourdHui })
+  indexerTaches()
+  majBadge()
+}
+
+// ─── Test / Auto et tiroir reglages (etape 4) ────────────────────────────────
+// Le mode vit dans agent_alert_config.config[<ref>].mode ('test' par defaut),
+// ecrit par le writer EXISTANT /api/agent-config (domaine reglages) : GET du
+// blob entier, modification du seul mode de CE bien, POST du blob — puis
+// RELECTURE : l'interrupteur montre l'etat reel en base, jamais l'etat
+// suppose (demande de Thierry, 11 octobre 2026).
+function modesDe (config) {
+  const modes = {}
+  for (const [k, v] of Object.entries(config || {})) modes[k] = (v && v.mode === 'auto') ? 'auto' : 'test'
+  return modes
+}
+async function basculerMode (ref, nouveau) {
+  if (etat.modeEnCours || etat.modes === null) return
+  const actuel = etat.modes[ref] || 'test'
+  if (nouveau === actuel) return
+  // Passer en Auto est un geste LOURD : tout ce que l'IA sait part sans
+  // validation. Confirmation explicite ; le retour en Test n'en demande pas.
+  if (nouveau === 'auto' && !window.confirm(t('messages.mode_confirm_auto'))) return
+  etat.modeEnCours = true
+  renderTiroir()
+  let ecritureOk = false
+  try {
+    // POST CIBLE : le serveur merge le seul mode de CE bien dans le blob
+    // relu en base — jamais le blob entier depuis l'ecran, deux onglets
+    // s'ecrasaient des configs d'alertes (releve en review).
+    await appel('/api/agent-config', { mode_ref: ref, mode: nouveau })
+    ecritureOk = true
+  } catch (err) {
+    logger.error('Messages', 'mode', err)
+  }
+  try {
+    const relu = await appel('/api/agent-config')
+    etat.modes = modesDe(relu.config)
+  } catch (err) { logger.error('Messages', 'mode relecture', err) }
+  etat.modeEnCours = false
+  if (!ecritureOk || (etat.modes && (etat.modes[ref] || 'test') !== nouveau)) {
+    noteReglage(t('messages.mode_error'))
+  }
+  renderTiroir()
+}
+// Le kill switch par bien : writer existant /api/property-automation, puis
+// relecture — meme discipline que le mode.
+async function basculerPause (ref, paused) {
+  if (etat.modeEnCours) return
+  etat.modeEnCours = true
+  renderTiroir()
+  let ecritureOk = false
+  try {
+    await appel('/api/property-automation', { provider_property_id: ref, paused })
+    ecritureOk = true
+  } catch (err) { logger.error('Messages', 'pause', err) }
+  try {
+    const relu = await appel('/api/property-automation')
+    etat.pauses = relu.paused || {}
+  } catch (err) { logger.error('Messages', 'pause relecture', err) }
+  etat.modeEnCours = false
+  // Un kill switch qui n'a pas pris DOIT se dire : croire l'IA en pause
+  // pendant qu'elle envoie est le pire des silences (releve en review).
+  if (!ecritureOk || (etat.pauses[ref] === true) !== paused) {
+    noteReglage(t('messages.mode_error'))
+  }
+  renderTiroir(); renderFil()
+}
+// Le retour d'erreur des reglages : dans le TIROIR s'il est ouvert (seul
+// acces sur telephone), sinon sous la saisie.
+function noteReglage (texte, ok = false) {
+  const tiroir = $('[data-bind="tiroir"]')
+  const note = tiroir.hidden ? $('[data-bind="saisie-etat"]') : $('[data-bind="tiroir-note"]')
+  note.hidden = false
+  note.classList.toggle('msg-tiroir__note--ok', ok === true)
+  note.textContent = texte
+}
+// Le tiroir (changement de perimetre du 12 octobre : TOUT GuestFlow vit dans
+// Messages). Deux volets livres a cette recette — « Reponses de l'IA » et
+// « Alertes » — par bien choisi en tete ; « Messages programmes » suivra
+// (recette 2), et l'ancienne config reste en service d'ici la (spec §12 bis).
+function renderTiroir () {
+  const tiroir = $('[data-bind="tiroir"]')
+  if (tiroir.hidden) return
+  sauverTextesProgrammes()
+  $('[data-bind="tiroir-titre"]').textContent =
+    t(etat.tiroirVolet === 'programmes' ? 'messages.drawer_scheduled' : 'messages.tab_ia')
+  const corps = $('[data-bind="tiroir-corps"]')
+  const sel = $('[data-bind="tiroir-bien"]')
+  const refs = [...etat.biens.keys()]
+  if (!etat.tiroirBien || !etat.biens.has(etat.tiroirBien)) etat.tiroirBien = refs[0] || null
+  sel.innerHTML = refs.map(r =>
+    `<option value="${esc(r)}" ${r === etat.tiroirBien ? 'selected' : ''}>${esc(etat.biens.get(r).name || r)}</option>`).join('')
+  const ref = etat.tiroirBien
+  if (!ref) { corps.innerHTML = `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`; return }
+  if (etat.tiroirVolet === 'programmes') {
+    // Les messages programmes du bien se chargent a l'OUVERTURE du volet,
+    // jamais au boot de la page.
+    if (etat.templatesBien !== ref || etat.templates === undefined) {
+      corps.innerHTML = `<p class="muted small" style="padding: 14px 18px">${esc(t('common.loading'))}</p>`
+      chargerProgrammes(ref)
+      return
+    }
+    corps.innerHTML = voletProgrammes(ref)
+    brancherProgrammes(corps, ref)
+    return
+  }
+  corps.innerHTML = voletIA(ref)
+  brancherTiroir(corps, ref)
+}
+
+// ─── Volet « Messages programmes » (recette 2, inventaire §12 bis B) ────────
+// MEMES lectures et MEMES ecritures RLS que l'ancienne app templates
+// (message_templates, property_locks -> locks) : aucun second chemin, et le
+// titulaire seulement (dette 68) — le tiroir n'existe pas pour un delegue.
+async function chargerProgrammes (ref) {
+  if (etat.templatesEnCours) return
+  etat.templatesEnCours = true
+  etat.templatesBien = ref
+  // undefined DES LE DEPART : un render pendant le chargement (fin d'un
+  // enregistrement apres changement de bien) affichait les cartes de
+  // l'ANCIEN bien sous l'etiquette du nouveau (releve en review).
+  etat.templates = undefined
+  const [tpl, verrous] = await Promise.all([
+    supabase.from('message_templates').select('*')
+      .eq('user_id', compteCourant()).eq('property_id', ref).order('created_at'),
+    supabase.from('property_locks').select('lock_id, role, locks(id, label, brand)')
+      .eq('property_id', ref)
+  ])
+  // Lecture echouee = volet FERME, serrures COMPRISES : des serrures
+  // illisibles rendaient un select mensonger qui detruisait lock_id a la
+  // premiere sauvegarde (releve en review de 49c6ad4).
+  if (tpl.error || verrous.error) {
+    logger.error('Messages', 'programmes', tpl.error || verrous.error)
+    etat.templates = null
+    etat.serrures = []
+  } else {
+    etat.templates = tpl.data || []
+    etat.serrures = (verrous.data || []).map(x => x.locks).filter(Boolean)
+  }
+  etat.templatesEnCours = false
+  renderTiroir()
+}
+// AVANT tout re-render du volet : chaque texte en cours de frappe repart
+// dans son template — changer un champ d'une AUTRE carte, basculer Actif ou
+// creer une carte effacait les brouillons (releve en review).
+function sauverTextesProgrammes () {
+  if (!Array.isArray(etat.templates)) return
+  document.querySelectorAll('[data-prog-texte]').forEach(x => {
+    const v = etat.templates.find(w => String(w.id) === String(x.dataset.progTexte))
+    if (v) v.template_text = x.value
+  })
+}
+function resumeMoment (x) {
+  const ev = EVENEMENTS_PROGRAMMES[x.event_type] || EVENEMENTS_PROGRAMMES.arrival
+  if (ev.type === 'apres') return x.offset_value ? libelleDelai(x.offset_value) : t('messages.immediately')
+  return `${libelleJour(x.offset_days, t('messages.prog_day_j'))} · ${libelleHeure(x.send_time || '10:00')}`
+}
+// Les libelles EXACTS de l'ancienne page, via le module partage.
+function libelleDelai (v) {
+  return libelleDelaiBrut(v, { apres: t('messages.after'), immediatement: t('messages.immediately') })
+}
+function voletProgrammes (ref) {
+  if (etat.templates === null) {
+    return `<p class="caption muted" style="padding: 14px 18px">${esc(t('messages.load_error'))}</p>`
+  }
+  const cartes = etat.templates.map(x => carteProgramme(x)).join('')
+  return (cartes || `<p class="caption muted" style="padding: 14px 18px 0">${esc(t('messages.prog_empty'))}</p>`)
+    + `<div class="msg-tiroir__bloc" style="border-bottom: 0">
+      <button type="button" class="btn btn--primary" data-prog-nouveau ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.prog_new'))}</button>
+    </div>`
+}
+function carteProgramme (x) {
+  const ev = EVENEMENTS_PROGRAMMES[x.event_type] || EVENEMENTS_PROGRAMMES.arrival
+  const gele = etat.modeEnCours ? 'disabled' : ''
+  const CLES_EV = { booking_confirmed: 'messages.ev_booking', arrival: 'messages.ev_arrival', departure: 'messages.ev_departure', menage_done: 'messages.ev_cleaning' }
+  const moment = ev.type === 'apres'
+    ? `<label class="caption muted">${esc(t('messages.prog_delay'))}</label>
+      <select data-prog="${esc(x.id)}|offset_value" ${gele}>
+        ${ev.delais.map(d => `<option value="${d}" ${x.offset_value === d ? 'selected' : ''}>${esc(libelleDelai(d))}</option>`).join('')}
+      </select>`
+    : `<span class="row" style="gap: 8px; flex-wrap: wrap">
+      <label class="caption muted">${esc(t('messages.prog_day'))}</label>
+      <select data-prog="${esc(x.id)}|offset_days" ${gele}>
+        ${JOURS_PROGRAMMES.map(j => `<option value="${j}" ${x.offset_days === j ? 'selected' : ''}>${esc(libelleJour(j, t('messages.prog_day_j')))}</option>`).join('')}
+      </select>
+      <label class="caption muted">${esc(t('messages.prog_hour'))}</label>
+      <select data-prog="${esc(x.id)}|send_time" ${gele}>
+        ${HEURES_PROGRAMMES.map(h => `<option value="${h}" ${(x.send_time || '10:00') === h ? 'selected' : ''}>${esc(libelleHeure(h))}</option>`).join('')}
+      </select></span>
+      <label class="row caption" style="gap: 6px">
+        <input type="checkbox" data-prog="${esc(x.id)}|send_anyway" ${x.send_anyway ? 'checked' : ''} ${gele}>
+        ${esc(t('messages.prog_send_anyway'))}
+      </label>`
+  const serrure = `<label class="caption muted">${esc(t('messages.prog_access'))}</label>
+    <span class="row" style="gap: 8px; flex-wrap: wrap">
+      <select data-prog="${esc(x.id)}|lock_id" ${gele}>
+        <option value="">${esc(t('messages.prog_lock_none'))}</option>
+        ${etat.serrures.map(l => `<option value="${esc(l.id)}" ${x.lock_id === l.id ? 'selected' : ''}>${esc(l.label || l.id)}</option>`).join('')}
+      </select>
+      ${x.lock_id ? `<label class="caption muted">${esc(t('messages.prog_not_before'))}</label>
+      <select data-prog="${esc(x.id)}|earliest_send_time" ${gele}>
+        ${HEURES_PROGRAMMES.map(h => `<option value="${h}" ${(x.earliest_send_time || '15:00') === h ? 'selected' : ''}>${esc(libelleHeure(h))}</option>`).join('')}
+      </select>` : ''}
+    </span>
+    <p class="caption muted" style="margin: 0">${esc(t(x.lock_id ? 'messages.prog_lock_hint' : 'messages.prog_lock_none_hint'))}</p>`
+  return `<div class="msg-tiroir__bloc prog-carte${x.active ? '' : ' prog-carte--off'}">
+    <span class="row" style="gap: 8px">
+      <span class="msg-tiroir__nom" style="margin-inline-end: auto">${esc(t(CLES_EV[x.event_type] || 'messages.ev_arrival'))}</span>
+      <span class="caption muted">${esc(resumeMoment(x))}</span>
+      <label class="row caption" style="gap: 5px" title="${esc(t(x.active ? 'messages.prog_active' : 'messages.prog_inactive'))}">
+        <input type="checkbox" data-prog-actif="${esc(x.id)}" ${x.active ? 'checked' : ''} ${gele} aria-label="${esc(t('messages.prog_active'))}">
+      </label>
+      <button type="button" class="link caption" data-prog-suppr="${esc(x.id)}" ${gele} aria-label="${esc(t('messages.prog_delete'))}">${icone('i-close')}</button>
+    </span>
+    <label class="caption muted">${esc(t('messages.prog_event'))}</label>
+    <select data-prog="${esc(x.id)}|event_type" ${gele}>
+      ${Object.keys(EVENEMENTS_PROGRAMMES).map(k => `<option value="${k}" ${x.event_type === k ? 'selected' : ''}>${esc(t(CLES_EV[k]))}</option>`).join('')}
+    </select>
+    ${moment}
+    ${serrure}
+    <textarea rows="4" data-prog-texte="${esc(x.id)}" ${gele} placeholder="${esc(t('messages.prog_placeholder'))}">${esc(x.template_text || '')}</textarea>
+    <p class="caption muted" style="margin: 0">${esc(t('messages.prog_vars'))}</p>
+    <span class="row" style="gap: 8px">
+      <button type="button" class="btn btn--primary" data-prog-save="${esc(x.id)}" ${gele}>${esc(t('messages.prog_save'))}</button>
+      <button type="button" class="btn btn--secondary" data-prog-apercu="${esc(x.id)}" ${gele || (x.apercuEnCours ? 'disabled' : '')}>${esc(t('messages.prog_preview'))}</button>
+    </span>
+    ${x.apercuRendu ? `<p class="caption muted" style="margin: 0; white-space: pre-wrap">${esc(x.apercuRendu)}</p>` : ''}
+  </div>`
+}
+function brancherProgrammes (corps, ref) {
+  const de = (id) => etat.templates.find(v => String(v.id) === String(id))
+  corps.querySelectorAll('[data-prog]').forEach(x => x.addEventListener('change', () => {
+    if (etat.modeEnCours) return
+    const [id, champ] = x.dataset.prog.split('|')
+    const v = de(id)
+    if (!v) return
+    if (champ === 'send_anyway') v.send_anyway = x.checked
+    else if (champ === 'offset_days') v.offset_days = Number.parseInt(x.value, 10)
+    else if (champ === 'lock_id') v.lock_id = x.value || null
+    else v[champ] = x.value
+    // Changer l'evenement REINITIALISE le moment (la regle de l'ancienne
+    // app) : sans quoi un offset null de l'ancien type etait SAUVE pendant
+    // que l'ecran montrait la premiere option (releve en review).
+    if (champ === 'event_type') reinitialiserMoment(v)
+    renderTiroir()
+  }))
+  corps.querySelectorAll('[data-prog-actif]').forEach(x => x.addEventListener('change', () =>
+    basculerActifProgramme(x.dataset.progActif, x.checked)))
+  corps.querySelectorAll('[data-prog-suppr]').forEach(x => x.addEventListener('click', () =>
+    supprimerProgramme(x.dataset.progSuppr)))
+  corps.querySelectorAll('[data-prog-save]').forEach(x => x.addEventListener('click', () =>
+    enregistrerProgramme(corps, x.dataset.progSave)))
+  corps.querySelectorAll('[data-prog-apercu]').forEach(x => x.addEventListener('click', () =>
+    apercuProgramme(corps, x.dataset.progApercu)))
+  corps.querySelector('[data-prog-nouveau]')?.addEventListener('click', () => nouveauProgramme(ref))
+}
+async function enregistrerProgramme (corps, id) {
+  if (etat.modeEnCours) return
+  const v = etat.templates.find(x => String(x.id) === String(id))
+  if (!v) return
+  etat.modeEnCours = true
+  sauverTextesProgrammes()
+  renderTiroir()
+  // L'UPDATE de l'ancienne app, memes colonnes — et la ligne RELUE remplace
+  // l'etat local (l'ecran montre la base, jamais l'etat suppose).
+  const { data: relu, error } = await supabase.from('message_templates').update({
+    event_type: v.event_type, reference: referenceDe(v.event_type),
+    offset_days: v.offset_days, offset_value: v.offset_value,
+    send_time: v.send_time, earliest_send_time: v.earliest_send_time || '15:00',
+    send_anyway: v.send_anyway, active: v.active,
+    template_text: v.template_text, lock_id: v.lock_id || null
+  }).eq('id', id).select().single()
+  etat.modeEnCours = false
+  if (error) { logger.error('Messages', 'programme', error); noteReglage(t('messages.mode_error')) }
+  else {
+    etat.templates = etat.templates.map(x => String(x.id) === String(id)
+      ? { ...relu, apercuRendu: x.apercuRendu } : x)
+    noteReglage(t('messages.saved'), true)
+  }
+  renderTiroir()
+}
+async function basculerActifProgramme (id, actif) {
+  if (etat.modeEnCours) return
+  const v = etat.templates.find(x => String(x.id) === String(id))
+  if (v) v.active = actif
+  etat.modeEnCours = true
+  renderTiroir()
+  const { data: relu, error } = await supabase.from('message_templates')
+    .update({ active: actif }).eq('id', id).select().single()
+  etat.modeEnCours = false
+  if (error) { logger.error('Messages', 'programme actif', error); noteReglage(t('messages.mode_error')) }
+  else etat.templates = etat.templates.map(x => String(x.id) === String(id) ? relu : x)
+  renderTiroir()
+}
+async function supprimerProgramme (id) {
+  if (etat.modeEnCours) return
+  // Geste DESTRUCTIF : confirmation explicite, jamais silencieux.
+  if (!window.confirm(t('messages.prog_delete_confirm'))) return
+  etat.modeEnCours = true
+  renderTiroir()
+  const { error } = await supabase.from('message_templates').delete().eq('id', id)
+  etat.modeEnCours = false
+  if (error) { logger.error('Messages', 'programme suppression', error); noteReglage(t('messages.mode_error')) }
+  else etat.templates = etat.templates.filter(x => String(x.id) !== String(id))
+  renderTiroir()
+}
+async function nouveauProgramme (ref) {
+  if (etat.modeEnCours) return
+  etat.modeEnCours = true
+  renderTiroir()
+  const { data: nee, error } = await supabase.from('message_templates')
+    .insert({ user_id: compteCourant(), property_id: ref, ...DEFAUTS_NOUVEAU_PROGRAMME })
+    .select().single()
+  etat.modeEnCours = false
+  if (error) { logger.error('Messages', 'programme nouveau', error); noteReglage(t('messages.mode_error')) }
+  else etat.templates.push(nee)
+  renderTiroir()
+}
+// « Apercu AI » : bouton EXPLICITE seulement (consigne de Thierry), jamais a
+// l'ouverture ni a la saisie. Le MEME chemin que l'ancienne app : /api/grok,
+// wrapper interne — jamais un provider. Prompt repris a l'identique.
+async function apercuProgramme (corps, id) {
+  const v = etat.templates.find(x => String(x.id) === String(id))
+  if (!v || v.apercuEnCours) return
+  const texte = (corps.querySelector(`[data-prog-texte="${id}"]`)?.value || '').trim()
+  if (!texte) { v.apercuRendu = t('messages.prog_write_first'); renderTiroir(); return }
+  // L'etat de l'apercu vit sur le TEMPLATE (champs locaux, jamais envoyes a
+  // l'update) : un re-render pendant l'attente ne perd plus la reponse, et
+  // le bouton gele empeche les appels IA concurrents (releve en review).
+  v.apercuEnCours = true
+  v.apercuRendu = t('messages.proposing')
+  renderTiroir()
+  try {
+    const r = await appel('/api/grok', {
+      systemPrompt: 'Tu es un assistant de conciergerie LCD. Personnalise ce template pour un voyageur fictif. Remplace : {prenom}→Marie, {nom}→Dupont, {arrivee}→15 avril, {depart}→17 avril, {logement}→le logement, {checkin}→18h, {checkout}→10h, {code_acces}→123456, {wifi_nom}→HoteSmartWifi, {wifi_mdp}→motdepasse123, {telephone_hote}→0660346760.',
+      messages: [{ role: 'user', content: `Template : "${texte}"` }]
+    })
+    v.apercuRendu = r.reply || t('messages.no_proposal')
+  } catch (err) {
+    logger.error('Messages', 'apercu', err)
+    v.apercuRendu = t('messages.mode_error')
+  }
+  v.apercuEnCours = false
+  renderTiroir()
+}
+
+// ── Volet « Reponses de l'IA » : mode, pause, consignes, garde, connaissances.
+function voletIA (ref) {
+  const mode = etat.modes ? (etat.modes[ref] || 'test') : null
+  const enPause = etat.pauses[ref] === true
+  return `<div class="msg-tiroir__bloc">
+      <span class="msg-tiroir__nom">${esc(t('messages.mode_label'))}</span>
+      ${mode !== null ? `<span class="msg-mode" role="group" aria-label="${esc(t('messages.mode_label'))}">
+        <button type="button" class="tab" data-tiroir-mode="test" aria-pressed="${mode === 'test'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_test'))}</button>
+        <button type="button" class="tab" data-tiroir-mode="auto" aria-pressed="${mode === 'auto'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_auto'))}</button>
+      </span>` : `<span class="caption muted">${esc(t('messages.load_error'))}</span>`}
+      <p class="caption muted">${esc(t('messages.auto_scope'))}</p>
+      <label class="row caption" style="gap: 6px">
+        <input type="checkbox" data-tiroir-pause ${enPause ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''}>
+        ${esc(t('messages.pause_label'))}
+      </label>
+    </div>
+    <div class="msg-tiroir__bloc">
+      <span class="msg-tiroir__nom">${esc(t('messages.prompting_title'))}</span>
+      ${etat.prompting === null ? `<p class="caption muted">${esc(t('messages.load_error'))}</p>` : `
+      <label class="caption muted">${esc(t('messages.prompting_global'))}</label>
+      <textarea rows="5" data-consignes="global" ${etat.modeEnCours ? 'disabled' : ''}>${esc(etat.prompting.global)}</textarea>
+      <label class="caption muted">${esc(t('messages.prompting_property'))}</label>
+      <textarea rows="4" data-consignes="bien" ${etat.modeEnCours ? 'disabled' : ''}>${esc(etat.prompting.overrides[ref] || '')}</textarea>
+      <button type="button" class="btn btn--primary" data-consignes-save ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.prompting_save'))}</button>`}
+    </div>
+    <div class="msg-tiroir__bloc">
+      <span class="msg-tiroir__nom">${esc(t('messages.breaker_title'))}</span>
+      <p class="caption muted">${esc(t('messages.breaker_desc'))}</p>
+      <a class="link small" href="/apps/agent-ai/knowledge">${esc(t('messages.knowledge'))}</a>
+    </div>
+    <h3 class="msg-tiroir__section">${esc(t('messages.tab_alerts'))}</h3>` + voletAlertes(ref)
+}
+
+// ── Volet « Alertes » : 2 types x 2 canaux, porte Brevo, test apres
+// enregistrement (le serveur n'accepte que des destinataires EN BASE).
+function voletAlertes (ref) {
+  if (etat.configIA === null) {
+    return `<p class="caption muted" style="padding: 14px 18px">${esc(t('messages.load_error'))}</p>`
+  }
+  const cfg = etat.configIA[ref] || {}
+  const types = [['intervention', 'messages.alert_intervention'], ['info_unknown', 'messages.alert_info']]
+  return types.map(([k, cle]) => {
+    const a = cfg[k] || {}
+    return `<div class="msg-tiroir__bloc">
+      <span class="msg-tiroir__nom">${esc(t(cle))}</span>
+      <div class="msg-tiroir__canal">
+        <label class="row caption" style="gap: 6px">
+          <input type="checkbox" data-alerte="${k}|sms_enabled" ${a.sms_enabled && etat.brevo ? 'checked' : ''} ${etat.brevo && !etat.modeEnCours ? '' : 'disabled'}>
+          ${esc(t('messages.channel_sms'))}
+        </label>
+        ${etat.brevo
+          ? `<textarea rows="2" data-alerte="${k}|sms_lines" ${etat.modeEnCours ? 'disabled' : ''} placeholder="${esc(t('messages.recipients_sms_ph'))}">${esc(a.sms_lines || '')}</textarea>
+            <button type="button" class="link caption" data-tester="${k}|sms">${esc(t('messages.test_send'))}</button>`
+          : `<p class="caption muted">${esc(t('messages.sms_needs_brevo'))} <a class="link" href="/connexions">${esc(t('messages.sms_connect'))}</a></p>`}
+      </div>
+      <div class="msg-tiroir__canal">
+        <label class="row caption" style="gap: 6px">
+          <input type="checkbox" data-alerte="${k}|email_enabled" ${a.email_enabled !== false ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''}>
+          ${esc(t('messages.channel_email'))}
+        </label>
+        <textarea rows="2" data-alerte="${k}|email_lines" ${etat.modeEnCours ? 'disabled' : ''} placeholder="${esc(t('messages.recipients_email_ph'))}">${esc(a.email_lines || '')}</textarea>
+        <button type="button" class="link caption" data-tester="${k}|email">${esc(t('messages.test_send'))}</button>
+      </div>
+    </div>`
+  }).join('') + `<div class="msg-tiroir__bloc" style="border-bottom: 0">
+    <button type="button" class="btn btn--primary" data-alertes-save ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.alerts_save'))}</button>
+    <p class="caption muted" style="margin: 0">${esc(t('messages.alerts_hint'))}</p>
+  </div>`
+}
+
+function brancherTiroir (corps, ref) {
+  corps.querySelectorAll('[data-tiroir-mode]').forEach(x =>
+    x.addEventListener('click', () => basculerMode(ref, x.dataset.tiroirMode)))
+  corps.querySelector('[data-tiroir-pause]')?.addEventListener('change', (e) =>
+    basculerPause(ref, e.target.checked))
+  corps.querySelector('[data-consignes-save]')?.addEventListener('click', () => enregistrerConsignes(corps, ref))
+  corps.querySelector('[data-alertes-save]')?.addEventListener('click', () => enregistrerAlertes(corps, ref))
+  corps.querySelectorAll('[data-tester]').forEach(x => x.addEventListener('click', () => {
+    const [type, canal] = x.dataset.tester.split('|')
+    testerCanal(corps, ref, type, canal)
+  }))
+}
+
+// Les consignes : meme table, meme RLS que l'ancienne page, mais INSERT
+// D'ABORD puis suppression des AUTRES lignes (.neq sur l'id insere) — le
+// delete-puis-insert de l'ancienne page perdait les consignes quand l'insert
+// echouait, et un delete en echec non lu laissait des DOUBLONS que le
+// maybeSingle du cron lisait comme « aucune consigne » (releve en review).
+async function ecrireConsigne (uid, propertyId, texte) {
+  const portee = (q) => propertyId === null ? q.is('property_id', null) : q.eq('property_id', propertyId)
+  if (texte) {
+    const { data: neuve, error: eI } = await supabase.from('agent_prompting')
+      .insert({ user_id: uid, property_id: propertyId, instructions: texte }).select('id').single()
+    if (eI) throw eI
+    const { error: eD } = await portee(supabase.from('agent_prompting').delete().eq('user_id', uid)).neq('id', neuve.id)
+    if (eD) throw eD
+  } else {
+    const { error: eD } = await portee(supabase.from('agent_prompting').delete().eq('user_id', uid))
+    if (eD) throw eD
+  }
+}
+async function enregistrerConsignes (corps, ref) {
+  if (etat.modeEnCours || etat.prompting === null) return
+  etat.modeEnCours = true
+  geler(corps, true)
+  const g = (corps.querySelector('[data-consignes="global"]')?.value || '').trim()
+  const o = (corps.querySelector('[data-consignes="bien"]')?.value || '').trim()
+  const uid = compteCourant()
+  try {
+    await ecrireConsigne(uid, null, g)
+    await ecrireConsigne(uid, ref, o)
+    etat.prompting.global = g
+    if (o) etat.prompting.overrides[ref] = o
+    else delete etat.prompting.overrides[ref]
+    noteReglage(t('messages.saved'), true)
+  } catch (err) {
+    logger.error('Messages', 'consignes', err)
+    noteReglage(t('messages.mode_error'))
+  }
+  etat.modeEnCours = false
+  renderTiroir()
+}
+// Pendant une ecriture, les champs du volet gelent : une frappe pendant le
+// POST serait silencieusement ecartee par le re-render (releve en review).
+function geler (corps, fige) {
+  corps.querySelectorAll('textarea, input, button, select').forEach(x => { x.disabled = fige })
+}
+
+// Les alertes : POST CIBLE (merge serveur des deux types de CE bien), puis
+// RELECTURE — l'ecran montre la base, jamais l'etat suppose.
+async function enregistrerAlertes (corps, ref) {
+  if (etat.modeEnCours || etat.configIA === null) return
+  etat.modeEnCours = true
+  geler(corps, true)
+  const avant = etat.configIA[ref] || {}
+  const lireType = (k) => ({
+    // Sans cle Brevo, les champs SMS n'existent pas a l'ecran : on PRESERVE
+    // ce qui est en base, on n'ecrase pas un reglage qu'on ne montre pas.
+    sms_enabled: etat.brevo
+      ? corps.querySelector(`[data-alerte="${k}|sms_enabled"]`)?.checked === true
+      : (avant[k] && avant[k].sms_enabled) === true,
+    sms_lines: etat.brevo
+      ? (corps.querySelector(`[data-alerte="${k}|sms_lines"]`)?.value || '')
+      : ((avant[k] && avant[k].sms_lines) || ''),
+    email_enabled: corps.querySelector(`[data-alerte="${k}|email_enabled"]`)?.checked === true,
+    email_lines: corps.querySelector(`[data-alerte="${k}|email_lines"]`)?.value || ''
+  })
+  let ecritureOk = false
+  try {
+    await appel('/api/agent-config', {
+      alertes_ref: ref,
+      alertes: { intervention: lireType('intervention'), info_unknown: lireType('info_unknown') }
+    })
+    ecritureOk = true
+  } catch (err) { logger.error('Messages', 'alertes', err) }
+  try {
+    const relu = await appel('/api/agent-config')
+    etat.modes = modesDe(relu.config)
+    etat.configIA = relu.config || {}
+  } catch (err) { logger.error('Messages', 'alertes relecture', err); etat.configIA = null }
+  etat.modeEnCours = false
+  noteReglage(ecritureOk ? t('messages.saved') : t('messages.mode_error'), ecritureOk)
+  renderTiroir()
+}
+
+// Le test part au premier destinataire EN BASE (api/alert-test n'accepte que
+// ceux-la — piege documente par l'ancienne page). Si l'ecran porte une
+// edition NON enregistree, on refuse : le test partirait a l'ANCIEN
+// destinataire en affichant un succes (releve en review).
+async function testerCanal (corps, ref, type, canal) {
+  if (etat.configIA === null) return
+  const cfg = (etat.configIA[ref] || {})[type] || {}
+  const lignes = String(canal === 'sms' ? cfg.sms_lines || '' : cfg.email_lines || '')
+  const champ = canal === 'sms' ? 'sms_lines' : 'email_lines'
+  const ecran = corps.querySelector(`[data-alerte="${type}|${champ}"]`)
+  if (ecran && ecran.value.trim() !== lignes.trim()) { noteReglage(t('messages.test_first_save')); return }
+  const premier = lignes.split('\n').map(l => l.trim()).filter(Boolean)[0] || ''
+  const to = premier.includes(':') ? premier.slice(premier.indexOf(':') + 1).trim() : premier
+  if (!to) { noteReglage(t('messages.test_first_save')); return }
+  try {
+    await appel('/api/alert-test', { channel: canal, to })
+    noteReglage(t('messages.test_sent'), true)
+  } catch (err) {
+    logger.error('Messages', 'test alerte', err)
+    noteReglage(err.message || t('messages.mode_error'))
+  }
+}
+
+function ouvrirTiroir (ouvert) {
+  const tiroir = $('[data-bind="tiroir"]')
+  tiroir.hidden = !ouvert
+  $('[data-bind="tiroir-note"]').hidden = true
+  // L'etat ouvert/ferme s'ANNONCE (les onglets retires portaient
+  // aria-pressed ; les boutons portent aria-expanded — releve en review).
+  document.querySelectorAll('[data-ouvre-volet]').forEach(b =>
+    b.setAttribute('aria-expanded', String(ouvert && etat.tiroirVolet === b.dataset.ouvreVolet)))
+  if (ouvert) renderTiroir()
+}
+
+// ─── Epingle et archivage manuel (etape 4, portes de l'ancienne page) ──────
+// L'etat affiche vient de la REPONSE du writer, pas de l'etat suppose.
+function noteErreur (err) {
+  const note = $('[data-bind="saisie-etat"]')
+  note.hidden = false
+  note.textContent = (err && err.message) || t('messages.load_error')
+}
+async function basculerEpingle (c) {
+  try {
+    const r = await appel('/api/messages', { action: c.epinglee ? 'desepingler' : 'epingler', booking_id: String(c.bookId) })
+    c.epinglee = r.epinglee === true
+  } catch (err) { logger.error('Messages', 'epingle', err); noteErreur(err) }
+  renderListe(); renderFil()
+}
+async function basculerArchive (c) {
+  try {
+    const r = await appel('/api/messages', { action: c.archivee ? 'desarchiver' : 'archiver', booking_id: String(c.bookId) })
+    c.archivee = r.archivee === true
+  } catch (err) { logger.error('Messages', 'archivage', err); noteErreur(err) }
+  renderFiltres(); renderListe(); renderFil()
+}
+
+// ─── « Evaluer {prenom} ? » au depart du voyageur (dette 67) ─────────────────
+// RIEN avant le depart ; silencieux sans bus ou sans droit ; « publiee ✓ »
+// quand c'est fait. Le statut vient du BUS (avis.statut) et le geste OUVRE
+// la fenetre standard du coeur (avis.evaluer, les boutons a niveaux du
+// chantier avis) — meme writer que la fiche resa, rien de duplique.
+function sejourTerminePour (c) {
+  // La regle du « quand » est PARTAGEE avec la fiche resa (des le JOUR du
+  // depart) : jamais recopiee, les deux copies divergeaient d'un jour.
+  return departEvaluable(c.lastNight, etat.aujourdHui)
+    && !STATUTS_SANS_SEJOUR.has(String(c.status || '').toLowerCase())
+}
+function peindreEvaluation (c, cible) {
+  if (!cible || !sejourTerminePour(c)) return
+  const connu = etat.evaluations.get(String(c.bookId))
+  if (connu === 'rien' || connu === 'encours') return
+  if (connu) { peindreEtatEvaluation(c, cible, connu); return }
+  chargerEvaluation(c)
+}
+async function chargerEvaluation (c) {
+  const bookId = String(c.bookId)
+  // 'encours' bloque la redemande PENDANT ce rendu seulement : un echec
+  // transitoire ne se fige jamais (le cache s'invalide a chaque ouverture
+  // du fil — revue de 658d758), une reponse « rien » si.
+  etat.evaluations.set(bookId, 'encours')
+  try {
+    const { hsBus: bus } = await import('/shared/hs-bus.js')
+    if (!bus) { etat.evaluations.delete(bookId); return }
+    const r = await bus.demander('avis.statut', { booking_uid: bookId })
+    if (!r || !r.ok || !r.data) { etat.evaluations.delete(bookId); return }
+    if (r.data.etat === 'publiee') etat.evaluations.set(bookId, 'publiee')
+    else if (r.data.evaluable && peutEcrireMessages() && await bus.disponible('avis.evaluer')) {
+      etat.evaluations.set(bookId, 'evaluable')
+    } else { etat.evaluations.set(bookId, 'rien'); return }
+    if (String(etat.ouverte) === bookId) renderFil()
+  } catch (err) {
+    logger.error('Messages', 'evaluation', err)
+    etat.evaluations.delete(bookId)
+  }
+}
+function peindreEtatEvaluation (c, cible, statut) {
+  if (statut === 'publiee') {
+    cible.outerHTML = `<span class="msg-jour">${icone('i-review', 'icon')} ${esc(t('messages.review_published'))}</span>`
+    return
+  }
+  const prenom = String(c.guestName || '').trim().split(/\s+/)[0] || t('messages.guest')
+  const parent = cible.parentElement
+  cible.outerHTML = `<div class="bulle bulle--proposition">
+      <span class="bulle__entete">${icone('i-review', 'icon icon--robot')}${esc(t('messages.review_ask', { name: prenom }))}</span>
+      <span class="bulle__actions">
+        <button type="button" class="btn btn--primary" data-evaluer>${esc(t('messages.review_open'))}</button>
+      </span>
+    </div>`
+  // Dans le DEROULE seulement : le premier [data-evaluer] du document
+  // pourrait etre ailleurs (revue de 658d758).
+  parent?.querySelector('[data-evaluer]')?.addEventListener('click', () => ouvrirEvaluation(c))
+}
+async function ouvrirEvaluation (c) {
+  let bus = null
+  try { bus = (await import('/shared/hs-bus.js')).hsBus } catch { return }
+  if (!bus) return
+  try {
+    await bus.ouvrir('avis.evaluer', { booking_uid: String(c.bookId) })
+  } catch (err) { logger.error('Messages', 'evaluer', err) }
+  // Au retour de la fenetre : le statut se RELIT (publiee ✓ sans rechargement).
+  etat.evaluations.delete(String(c.bookId))
+  chargerEvaluation(c)
+}
+
+// La zone de texte grandit jusqu'a 6 lignes (spec §3.4).
+function ajusterHauteur (zone) {
+  zone.style.height = 'auto'
+  zone.style.height = Math.min(zone.scrollHeight, 6 * 24 + 16) + 'px'
+}
+function dateLongue (jour) {
+  const [a, m, d] = jour.split('-').map(Number)
+  return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })
+}
+function ouvrir (bookId) {
+  // Le statut d'evaluation se REDEMANDE a chaque ouverture : une publication
+  // faite depuis la fiche resa, ou un echec transitoire, ne fige rien.
+  etat.evaluations.delete(String(bookId))
+  // Changer de fil pendant un « Modifier » : la proposition REVIENT dans son
+  // fil (elle n'est pas close). Le texte descendu NON retouche repart avec
+  // elle (rien n'est perdu, et il n'atterrit pas chez un autre voyageur —
+  // releve en review) ; un texte RETOUCHE reste dans la saisie (on ne jette
+  // jamais ce que l'hote a tape), mais l'envoyer ailleurs ne validera rien.
+  if (etat.enEdition && String(etat.enEdition.bookId) !== String(bookId)) {
+    const zone = $('[data-bind="texte"]')
+    const xEd = tacheParId(etat.enEdition.tacheId)
+    if (xEd && zone.value.trim() === String(xEd.suggested_reply || '').trim()) {
+      zone.value = ''
+      ajusterHauteur(zone)
+    }
+    etat.enEdition = null
+  }
+  etat.ouverte = bookId
+  const c = etat.conversations.find(x => String(x.bookId) === String(bookId))
+  // L'ouverture POSE l'etat lu (etape 2) — optimiste a l'ecran, silencieux en
+  // cas de refus (un profil en lecture seule n'ecrit pas, l'heuristique reste).
+  if (c && nonLue(c) && peutEcrireMessages()) {
+    c.readAt = new Date().toISOString()
+    appel('/api/messages', { action: 'lu', booking_id: String(bookId) })
+      .catch(e => logger.error('Messages', 'read_at', e))
+  }
+  renderListe(); renderFil()
+}
+
+// ─── Démarrage ──────────────────────────────────────────────────────────────
+async function init () {
+  const session = await requireAuth()
+  if (!session) return
+  await I18n.init()
+  document.addEventListener('i18n:changed', () => location.reload())
+  const user = await getUser()
+  $('[data-bind="initials"]').textContent = (user?.email || '').slice(0, 2).toUpperCase()
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis'),
+    outils: [
+      peutLire('reservations') && { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price' },
+      estTitulaire() && { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key' },
+      estTitulaire() && { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send' },
+      estTitulaire() && { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar' },
+      estTitulaire() && { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link' },
+      estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
+    ].filter(Boolean)
+  })
+  if (!peutLire('messages')) {
+    $('.msg-liste__outils').hidden = true
+    $('[data-list="conversations"]').innerHTML = `<p class="muted" style="padding: 14px">${esc(t('messages.no_access'))}</p>`
+    HSNav.render({ peutLire })
+    return
+  }
+  await charger()
+  HSNav.render({ badges: etat.chargementOk ? { pendingMessages: etat.taches.length } : {}, peutLire })
+  renderFiltres(); renderListe()
+
+  // Les deux boutons d'en-tete (retouche du 12 octobre) : un volet par
+  // bouton — Messages programmes, et Reponses de l'IA (alertes en bas).
+  document.querySelectorAll('[data-ouvre-volet]').forEach(b => {
+    b.hidden = !reglagesIci()
+    b.addEventListener('click', () => {
+      const tiroir = $('[data-bind="tiroir"]')
+      const deja = !tiroir.hidden && etat.tiroirVolet === b.dataset.ouvreVolet
+      etat.tiroirVolet = b.dataset.ouvreVolet
+      ouvrirTiroir(!deja)
+    })
+  })
+  $('[data-bind="tiroir-fermer"]').addEventListener('click', () => ouvrirTiroir(false))
+  $('[data-bind="tiroir-bien"]').addEventListener('change', (e) => {
+    etat.tiroirBien = e.target.value
+    renderTiroir()
+  })
+
+  $('[data-bind="recherche"]').addEventListener('input', (e) => { etat.recherche = e.target.value; renderListe() })
+  document.querySelectorAll('[data-filtre]').forEach(b => b.addEventListener('click', () => {
+    etat.filtre = b.dataset.filtre; renderFiltres(); renderListe()
+  }))
+  $('[data-bind="retour"]').addEventListener('click', () => { etat.ouverte = null; renderListe(); renderFil() })
+  // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
+  const zoneTexte = $('[data-bind="texte"]')
+  zoneTexte.addEventListener('input', () => ajusterHauteur(zoneTexte))
+  zoneTexte.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); envoyer() }
+  })
+  $('[data-bind="envoyer"]').addEventListener('click', envoyer)
+  $('[data-bind="proposer"]').addEventListener('click', proposer)
+
+  // Filtre demandé par l'URL (lien « n de plus » de l'accueil, étape 4).
+  const params = new URLSearchParams(location.search)
+  // Volet demandé par les redirections de l'ancienne app (?volet=ia ou
+  // programmes) : le panneau s'ouvre à l'arrivée — titulaire seulement,
+  // comme les boutons qui y mènent.
+  const voletDemande = params.get('volet')
+  if ((voletDemande === 'ia' || voletDemande === 'programmes') && reglagesIci()) {
+    etat.tiroirVolet = voletDemande
+    ouvrirTiroir(true)
+  }
+  const filtreDemande = params.get('filtre')
+  if (filtreDemande === 'nonlus' || filtreDemande === 'avalider') {
+    etat.filtre = filtreDemande
+    renderFiltres(); renderListe()
+  }
+  // Ouverture directe `?conv=` (liens de l'accueil) : seulement si
+  // le fil existe — jamais un écran « introuvable » depuis un lien interne.
+  const demandee = params.get('conv')
+  if (demandee && etat.conversations.some(x => String(x.bookId) === String(demandee))) ouvrir(String(demandee))
+}
+
+init().catch(e => logger.error('Messages', e.message, e))
+</script>
+</body>
+</html>

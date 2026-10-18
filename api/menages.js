@@ -22,10 +22,12 @@
 const { createClient } = require('@supabase/supabase-js')
 const { isActiveStatus } = require('../lib/bookings-snapshot')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
-const { refsDuPerimetre, filtrePerimetreSql, peutLire } = require('../lib/permissions')
+const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
+const { marquerFait, defaireFait } = require('../lib/cleaning/menage-fait')
 const { echeanceOffre, chargerLiaisons, chargerDisponibilites,
-        deciderParGarde } = require('../lib/cleaning/assign')
+        deciderParGarde, lireTout } = require('../lib/cleaning/assign')
 const { notifierAssignation, notifierProposition } = require('../lib/cleaning/notifier-prestataire')
+const { ratioProprete } = require('../lib/stats-avis')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -57,6 +59,9 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST') {
     const action = req.body && req.body.action
     if (action === 'liaisons') return await ecrireLiaisons(req, res)
+    if (action === 'fait' || action === 'defaire') return await marquerDepuisLHote(req, res, action === 'fait')
+    if (action === 'note') return await ecrireNote(req, res)
+    if (action === 'reglages_lien') return await ecrireReglagesLien(req, res)
     return await reassigner(req, res)
   }
   if (req.method !== 'GET') return res.status(405).json({ error: 'Méthode non autorisée' })
@@ -86,6 +91,18 @@ module.exports = async function handler(req, res) {
   if (!garde.ok) { console.log(t.ligne(' -> 403')); return }
   const userId = garde.accountUserId
   const filtreRef = filtrePerimetreSql(refsDuPerimetre(garde.contexte), 'provider_property_id')
+
+  // ⚠ L'EQUIPE SE LIT SEULE, AVANT LES LECTURES LOURDES. Le volet « Equipe
+  // menage » n'a besoin ni des reservations, ni des menages, ni du planning :
+  // les charger pour lui ferait payer un ecran qui ne les montre pas. Branche
+  // posee ICI, apres les droits et avant la premiere requete de donnees.
+  if (String(req.query.equipe || '') === '1') return await equipeMenage(req, res, garde, userId)
+
+  // ⚠ LA FICHE D'UNE PERSONNE, EN UN APPEL, et pour la meme raison. La fenetre
+  // de configuration a besoin de son identite, de ses liaisons, des biens et
+  // des reglages de son lien — d'aucune reservation.
+  if (req.query.presta) return await fichePrestataire(req, res, garde, userId, String(req.query.presta))
+
   if (filtreRef === '') return res.status(200).json({ properties: [], bookings: [] })
 
   try {
@@ -363,6 +380,667 @@ module.exports = async function handler(req, res) {
 // ⚠ Le menage est designe par son IDENTITE, pas par un id opaque venu du client
 // (REVIEW.md regle 11) : on ne fait pas confiance a un identifiant pour dire a
 // quel compte appartient la ressource. Le `user_id` du filtre vient de la garde.
+// ===== L'EQUIPE MENAGE (volet du 13 octobre 2026) =====
+//
+// Rend les personnes de l'equipe, avec les biens qu'elles couvrent et le compte
+// de retours voyageurs qui leur est rattache. Lecture seule.
+//
+// ⚠ TROIS DROITS, TROIS CHOSES (comme api/garde.js) : `menages: read` ouvre
+// l'endpoint, `prestataires: read` donne les PERSONNES (sans lui, pas meme un
+// identifiant), `avis: read` donne les RETOURS. Un membre qui voit la
+// couverture ne voit pas forcement qui compose l'equipe, ni ce que les
+// voyageurs ont dit d'elles.
+//
+// ⚠ LES DESACTIVEES SONT RENDUES (drapeau `actif`) : elles restent dans la
+// liste, grisees — les effacer ferait disparaitre l'historique d'une personne
+// qui a travaille pour l'hote.
+async function equipeMenage (req, res, garde, userId) {
+  if (!peutLire(garde.contexte, 'prestataires', null)) {
+    // ⚠ `avec_personnes: false` DIT la différence : une équipe vide et une
+    // équipe qu'on n'a pas le droit de voir ne se racontent pas pareil — sans
+    // ce drapeau, l'écran affirmait « personne dans l'équipe » à un délégué.
+    return res.status(200).json({ prestataires: [], avec_avis: false, avec_personnes: false })
+  }
+  const avecAvis = peutLire(garde.contexte, 'avis', null)
+
+  const { data: profils, error: eProf } = await supabase.from('profiles')
+    .select('id, first_name, last_name, active, pwa_token, phone')
+    .eq('account_user_id', userId).eq('access_mode', 'lien')
+    .order('first_name', { ascending: true })
+  if (eProf) {
+    console.error('[menages] equipe : lecture profils echec', eProf.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!profils || !profils.length) return res.status(200).json({ prestataires: [], avec_avis: avecAvis, avec_personnes: true })
+
+  // Les biens couverts : liaisons ACTIVES, bornees au perimetre de l'appelant.
+  const refs = refsDuPerimetre(garde.contexte)
+  let qL = supabase.from('property_cleaning_providers')
+    .select('provider_id, property_id, requires_ack, weekdays')
+    .eq('user_id', userId).eq('active', true)
+  if (Array.isArray(refs)) {
+    if (!refs.length) return res.status(200).json({ prestataires: [], avec_avis: avecAvis, avec_personnes: true })
+    qL = qL.in('property_id', refs.map(String))
+  }
+  // ⚠ `lireTout`, PAS UN `limit` : PostgREST plafonne à `db-max-rows` (1000),
+  // qu'aucune borne demandée ne lève — et sans `order`, les lignes retenues
+  // changent d'un appel à l'autre, donc les biens et l'engrenage « jours à
+  // régler » clignoteraient d'un rafraîchissement au suivant.
+  let liaisons
+  try {
+    liaisons = await lireTout(() => qL, 'liaisons equipe', 'property_id')
+  } catch (eL) {
+    console.error('[menages] equipe : lecture liaisons echec', eL.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+
+  // ⚠ UNE PANNE ICI COUPE : sans les noms, chaque personne paraîtrait ne
+  // couvrir AUCUN bien — un écran faux, et faux dans le sens rassurant.
+  // Bornée au périmètre comme les liaisons, et ordonnée (sans `order`, les
+  // lignes servies au-delà du plafond sont arbitraires).
+  let qB = supabase.from('properties')
+    .select('provider_property_id, name, photo_url')
+    .eq('user_id', userId).not('provider_property_id', 'is', null)
+  if (Array.isArray(refs)) qB = qB.in('provider_property_id', refs.map(String))
+  let biens
+  try {
+    biens = await lireTout(() => qB, 'biens equipe', 'provider_property_id')
+  } catch (eB) {
+    console.error('[menages] equipe : lecture biens echec', eB.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  const bienPar = new Map((biens || []).map(b => [String(b.provider_property_id),
+    { id: String(b.provider_property_id), nom: b.name || '', photo: b.photo_url || null }]))
+
+  // ⚠ LA MEME PERIODE QU'ELLE VOIT. Le ratio de son en-tete suit
+  // `public_tokens.ratio_periode` : prendre une autre periode ici afficherait a
+  // l'hote un chiffre different du sien, pour la meme realite.
+  // ⚠ UNE PANNE NE SE DEGUISE PAS EN « toujours ». Retomber sur une période
+  // plus large ferait lire à l'hôte 47 retours là où elle en voit 2 — un
+  // élargissement silencieux, la faute que `api/menages-public.js` a déjà
+  // fermée. Sans les périodes, on ne compte PAS : l'écran affiche « — ».
+  // ⚠ Et la valeur est VALIDÉE, avec le même repli que la PWA (`toujours`,
+  // jamais le `30j` par défaut de `periodeNormalisee`) : deux chiffres
+  // contradictoires pour la même personne seraient pires que pas de chiffre.
+  //
+  // ⚠ LA LECTURE DES JETONS N'EST PLUS CONDITIONNEE AU DROIT `avis` : elle
+  // porte aussi `pwa_vue_le`, la derniere ouverture de sa page, qui n'a rien a
+  // voir avec les avis. On est deja sous `prestataires: read` — le droit des
+  // PERSONNES — et la periode du ratio, elle, ne sert toujours que si `avis`
+  // est accorde.
+  const PERIODES_JETON = ['15j', '30j', '6mois', 'toujours']
+  const periodes = new Map()
+  const vues = new Map()
+  let periodesLues = true
+  //
+  // ⚠ DEUX REQUETES, PAS UNE, ET C'EST VOLONTAIRE. Grouper `ratio_periode` et
+  // `pwa_vue_le` ferait dependre les RETOURS VOYAGEURS — en production depuis
+  // le 13 octobre — d'une colonne neuve : entre le deploiement et
+  // l'application de la migration, la lecture entiere echouerait et le volet
+  // afficherait « — » partout. Une nouveaute qui tombe ne doit emporter
+  // qu'elle-meme.
+  const jetons = profils.map(p => p.pwa_token).filter(Boolean)
+  if (jetons.length) {
+    const { data: pt, error: ePt } = await supabase.from('public_tokens')
+      .select('token, ratio_periode').eq('user_id', userId).in('token', jetons)
+    if (ePt) {
+      console.error('[menages] equipe : lecture periodes echec', ePt.message)
+      periodesLues = false
+    } else {
+      for (const x of (pt || [])) {
+        periodes.set(String(x.token),
+          PERIODES_JETON.includes(x.ratio_periode) ? x.ratio_periode : 'toujours')
+      }
+    }
+    // La derniere ouverture de sa page. Best-effort : sans elle, l'en-tete de
+    // la fiche ne dit rien de sa page — tout le reste de l'ecran tient.
+    const { data: vu, error: eVu } = await supabase.from('public_tokens')
+      .select('token, pwa_vue_le').eq('user_id', userId).in('token', jetons)
+    if (eVu) console.error('[menages] equipe : lecture des vues echec', eVu.message)
+    else {
+      // ⚠ `null` (jamais ouverte) ET « pas de ligne » ne se disent pas pareil :
+      // un jeton PRESENT a `pwa_vue_le = null` n'a jamais ete ouvert ; une
+      // personne SANS ligne a perdu son lien, et l'ecran ne doit rien
+      // affirmer de sa page.
+      for (const x of (vu || [])) vues.set(String(x.token), x.pwa_vue_le || null)
+    }
+  }
+
+  const sortie = []
+  for (const p of profils) {
+    const siennes = (liaisons || []).filter(l => String(l.provider_id) === String(p.id))
+    sortie.push({
+      id: p.id,
+      prenom: p.first_name || null,
+      nom: p.last_name || null,
+      actif: p.active !== false,
+      // ⚠ `aRegler` : la MEME regle que api/garde.js (§12.9c) — elle doit
+      // confirmer, et aucun jour ne lui est confie sur ce bien, donc le moteur
+      // ne lui proposera JAMAIS rien dessus.
+      aRegler: siennes.some(l => l.requires_ack === true &&
+                                 !(Array.isArray(l.weekdays) && l.weekdays.length)),
+      biens: siennes.map(l => bienPar.get(String(l.property_id))).filter(Boolean),
+      // ⚠ LE NUMERO SORT ICI, et nulle part ailleurs. `api/garde.js` le refuse
+      // (« qui est de garde » n'est pas « comment la joindre ») ; cette branche
+      // a les PERSONNES pour objet, et l'ecran propose de les appeler — un
+      // bouton « Appeler » sans numero ne sert a rien. Sous `prestataires:
+      // read`, comme tout le reste de cette reponse.
+      tel: p.phone || null,
+      // La derniere ouverture de SA page : `null` = jamais, ABSENT (undefined)
+      // = on ne sait pas (lien supprime, ou lecture en panne).
+      ...(p.pwa_token && vues.has(String(p.pwa_token)) ? { vueLe: vues.get(String(p.pwa_token)) } : {}),
+      retours: null
+    })
+  }
+
+  // Les retours, un appel par personne (la fonction compte en base, elle ne
+  // rapatrie aucune ligne). ⚠ Une panne ne vide pas la liste : `retours` reste
+  // `null` et l'ecran affiche « — », il n'invente pas un zero.
+  // ⚠ CONCURRENCE BORNEE : chaque comptage fait une resolution d'attribution
+  // plus quatre `count`. Quinze personnes d'un coup, c'est plus de cent
+  // requetes simultanees sur une seule ouverture de volet.
+  if (avecAvis && periodesLues) {
+    const LOT = 4
+    for (let i = 0; i < sortie.length; i += LOT) {
+      await Promise.all(sortie.slice(i, i + LOT).map(async (s, j) => {
+        const p = profils[i + j]
+        try {
+          const r = await ratioProprete(supabase, {
+            userId, prestataireId: s.id,
+            periode: periodes.get(String(p.pwa_token || '')) || 'toujours',
+            refs: Array.isArray(refs) ? refs.map(String) : null
+          })
+          if (r && !r.erreur) s.retours = { positif: r.positif, remarque: r.remarque, total: r.total }
+        } catch (e) {
+          console.error('[menages] equipe : ratio echec', e.message)
+        }
+      }))
+    }
+  }
+
+  return res.status(200).json({ prestataires: sortie, avec_avis: avecAvis, avec_personnes: true })
+}
+
+// ===== LES REGLAGES PORTES PAR SON LIEN (fenetre de configuration V5) =====
+//
+// `visibility_days` (jusqu'ou elle voit son planning) et `ratio_periode` (sur
+// quelle periode son ratio de proprete est compte DANS SON APP).
+//
+// ⚠ PAR LE SERVEUR, PLUS PAR LE NAVIGATEUR. L'ancien ecran les ecrivait en
+// direct dans `public_tokens` sous RLS. Meme mouvement que la note de l'etape
+// 3 : un writer de moins cote client, une garde de plus cote serveur, et le
+// jeton n'a plus besoin de transiter pour ecrire un reglage.
+//
+// ⚠ LES DEUX VALEURS SONT VALIDEES CONTRE LA LISTE, pas contre un intervalle.
+// `ratio_periode` porte un CHECK en base : une valeur hors liste ferait echouer
+// l'ecriture avec un message Postgres, que l'ecran afficherait tel quel.
+async function ecrireReglagesLien (req, res) {
+  const appelant = await verifierSession(req, res)
+  if (!appelant) return
+  const garde = await requirePermission(req, res, {
+    domaine: 'prestataires', niveau: 'write', userId: appelant, compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+
+  const b = req.body || {}
+  if (!b.provider_id) return res.status(400).json({ error: 'Prestataire manquant' })
+
+  // Le profil doit etre un `lien` DE CE COMPTE (REVIEW.md regle 11).
+  const { data: prof, error: eProf } = await supabase.from('profiles')
+    .select('id, pwa_token, active').eq('id', String(b.provider_id))
+    .eq('account_user_id', userId).eq('access_mode', 'lien').maybeSingle()
+  if (eProf) {
+    console.error('[menages] reglages lien : lecture profil echec', eProf.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!prof) return res.status(404).json({ error: 'Profil introuvable' })
+  // ⚠ Un profil desactive n'a plus de ligne `public_tokens` : l'update
+  // toucherait zero ligne et l'ecran annoncerait un succes vide.
+  if (!prof.pwa_token || prof.active === false) {
+    return res.status(409).json({ error: 'Ce profil n’a pas de lien actif' })
+  }
+
+  const JOURS_VISIBLES = [7, 14, 30, 60, 90]
+  const PERIODES = ['15j', '30j', '6mois', 'toujours']
+  const maj = {}
+  if (b.visibility_days !== undefined) {
+    const v = Number(b.visibility_days)
+    if (!JOURS_VISIBLES.includes(v)) return res.status(400).json({ error: 'Nombre de jours invalide' })
+    maj.visibility_days = v
+  }
+  if (b.ratio_periode !== undefined) {
+    if (!PERIODES.includes(String(b.ratio_periode))) {
+      return res.status(400).json({ error: 'Période invalide' })
+    }
+    maj.ratio_periode = String(b.ratio_periode)
+  }
+  // ⚠ UN CORPS VIDE N'EST PAS UN SUCCES : il viendrait d'un ecran qui croit
+  // avoir envoye un reglage, et le lui confirmer cacherait le defaut.
+  if (!Object.keys(maj).length) return res.status(400).json({ error: 'Aucun réglage à enregistrer' })
+
+  // ⚠ LE FILTRE PORTE SUR LE COMPTE **ET** SUR LE JETON : le jeton suffirait,
+  // mais `user_id` est la seule defense de ce chemin servi par la cle de
+  // service, et on ne depend pas d'une colonne unique pour cloisonner.
+  const { error: eUp } = await supabase.from('public_tokens')
+    .update(maj).eq('user_id', userId).eq('token', prof.pwa_token)
+  if (eUp) {
+    console.error('[menages] reglages lien : ecriture echec', eUp.message)
+    return res.status(503).json({ error: 'Enregistrement impossible' })
+  }
+  return res.status(200).json({ ok: true, ...maj })
+}
+
+// ===== LA FICHE D'UNE PRESTATAIRE (fenetre de configuration V5) =====
+//
+// Rend tout ce que la fenetre affiche, SAUF trois choses qui ont deja leur
+// porte et ne se dupliquent pas ici :
+//   - le calendrier (regles, exceptions, conges, « ce qu'elle voit des
+//     autres ») : `GET /api/disponibilites?provider_id=...`, writer unique ;
+//   - les reglages d'evaluation : le bus `avis.reglages_prestataire` ;
+//   - LE LIEN. Il ne sort QUE par `/api/membres action:'lien'`, au clic sur
+//     « Envoyer le lien » ou « Ouvrir sa page ». Son jeton est son mot de
+//     passe : le poser dans le DOM a chaque ouverture de fiche l'exposerait a
+//     toute capture d'ecran et a tout historique de navigation, pour un geste
+//     qui n'est fait qu'une fois.
+//
+// ⚠ LES LIAISONS INACTIVES SORTENT AUSSI (drapeau `active`). L'ecran montre un
+// interrupteur par bien, y compris ceux qu'on ne lui confie pas : sans les
+// lignes inactives, le rang et les jours d'un bien qu'on vient de retirer
+// seraient perdus a la premiere reouverture.
+async function fichePrestataire (req, res, garde, userId, profilId) {
+  if (!peutLire(garde.contexte, 'prestataires', null)) {
+    return res.status(403).json({ error: 'Droit insuffisant' })
+  }
+  const { data: p, error: eP } = await supabase.from('profiles')
+    .select('id, first_name, last_name, active, pwa_token, phone, email, notify_sms, notify_email')
+    .eq('account_user_id', userId).eq('id', profilId).eq('access_mode', 'lien').maybeSingle()
+  if (eP) {
+    console.error('[menages] fiche presta : lecture profil echec', eP.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ⚠ 404, PAS 403 : un identifiant d'un autre compte ne doit pas apprendre
+  // qu'il existe. Meme regle que `/api/membres`.
+  if (!p) return res.status(404).json({ error: 'Profil introuvable' })
+
+  const refs = refsDuPerimetre(garde.contexte)
+  // Les biens que l'APPELANT peut voir : c'est son perimetre qui borne l'ecran,
+  // pas celui de la prestataire.
+  //
+  // ⚠ UN PERIMETRE VIDE NE TRONQUE PAS LA REPONSE (constat de la revue de
+  // ac28b1f). Elle rendait `{ personne: null, biens: [], liaisons: [] }`, sans
+  // `droits` ni `lien` : l'ecran levait un TypeError dans chacun des trois
+  // onglets et la fenetre restait figee sur « Chargement… », sans message et
+  // sans fermeture. Et le cas n'est pas rare : `refsDuPerimetre` rend `[]`
+  // pour TOUT etat degrade de delegation — invitation non acceptee, profil
+  // desactive, comptes discordants — pas seulement pour un perimetre a zero
+  // bien. On ne LIT rien de plus, on REPOND completement.
+  // ⚠ ET ON NE CONSTRUIT MEME PAS LES REQUETES : un perimetre vide ne touche
+  // pas la base, c'est la garde de depart de ce lot.
+  const perimetreVide = Array.isArray(refs) && !refs.length
+  const requeteBiens = () => {
+    let q = supabase.from('properties')
+      .select('provider_property_id, name, photo_url')
+      .eq('user_id', userId).not('provider_property_id', 'is', null)
+    if (Array.isArray(refs) && refs.length) q = q.in('provider_property_id', refs.map(String))
+    return q
+  }
+  let biens = []
+  if (!perimetreVide) {
+    try {
+      biens = await lireTout(requeteBiens, 'biens fiche presta', 'provider_property_id')
+    } catch (eB) {
+      console.error('[menages] fiche presta : lecture biens echec', eB.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+  }
+
+  // ⚠ ACTIVES **ET** INACTIVES, bornees au perimetre de l'appelant.
+  const requeteLiaisons = () => {
+    let q = supabase.from('property_cleaning_providers')
+      .select('property_id, rang, requires_ack, weekdays, active')
+      .eq('user_id', userId).eq('provider_id', profilId)
+    if (Array.isArray(refs) && refs.length) q = q.in('property_id', refs.map(String))
+    return q
+  }
+  let liaisons = []
+  if (!perimetreVide) {
+    try {
+      liaisons = await lireTout(requeteLiaisons, 'liaisons fiche presta', 'property_id')
+    } catch (eL) {
+      console.error('[menages] fiche presta : lecture liaisons echec', eL.message)
+      return res.status(503).json({ error: 'Service temporairement indisponible' })
+    }
+  }
+
+  // Les reglages portes par son LIEN (sa page), et sa derniere ouverture.
+  // ⚠ Best-effort, et l'ecran le DIT : `lien: null` veut dire « non lu », pas
+  // « valeurs par defaut ». Afficher 30 jours sur une panne ferait croire a
+  // l'hote qu'il a regle ce qu'il n'a pas regle — et un enregistrement
+  // ulterieur l'ecrirait pour de bon.
+  //
+  // ⚠ DEUX REQUETES, POUR LA MEME RAISON QU'AU VOLET EQUIPE (constat de la
+  // revue de ac28b1f : ce chemin-ci les avait groupees). `pwa_vue_le` est une
+  // colonne NEUVE, et sa migration s'applique APRES le deploiement : groupee,
+  // elle faisait echouer le select entier, donc `lien: null`, donc
+  // « Jours visibles » illisible et « Periode du ratio » DISPARUE — deux
+  // reglages existants perdus a cause d'une nouveaute. Une nouveaute qui tombe
+  // ne doit emporter qu'elle-meme.
+  let lien = null
+  let vueLe
+  if (p.pwa_token) {
+    const { data: pt, error: ePt } = await supabase.from('public_tokens')
+      .select('visibility_days, ratio_periode')
+      .eq('user_id', userId).eq('token', p.pwa_token).maybeSingle()
+    if (ePt) console.error('[menages] fiche presta : lecture jeton echec', ePt.message)
+    else if (pt) {
+      lien = { visibility_days: pt.visibility_days || 30,
+               ratio_periode: pt.ratio_periode || 'toujours' }
+    }
+    const { data: vu, error: eVu } = await supabase.from('public_tokens')
+      .select('pwa_vue_le').eq('user_id', userId).eq('token', p.pwa_token).maybeSingle()
+    if (eVu) console.error('[menages] fiche presta : lecture de la vue echec', eVu.message)
+    else if (vu) vueLe = vu.pwa_vue_le || null
+  }
+
+  // Le droit « elle declare ses absences ». ⚠ `null` = NON LU : la case se
+  // grise et rien n'est envoye a l'enregistrement. Un simple timeout revoquait
+  // sinon definitivement un droit que personne n'avait touche.
+  let selfDispo = null
+  const { data: perm, error: ePerm } = await supabase.from('profile_permissions')
+    .select('self_availability').eq('profile_id', profilId).maybeSingle()
+  if (ePerm) console.error('[menages] fiche presta : lecture droits echec', ePerm.message)
+  else selfDispo = perm ? (perm.self_availability || 'none') : 'none'
+
+  // Les collegues, pour les puces « Pris par » de « ce qu'elle voit des
+  // autres ». Les DESACTIVEES en font partie quand elles sont deja cochees —
+  // l'ecran le dira — donc on les rend toutes, avec leur drapeau.
+  const { data: autres, error: eA } = await supabase.from('profiles')
+    .select('id, first_name, last_name, active')
+    .eq('account_user_id', userId).eq('access_mode', 'lien').neq('id', profilId)
+    .order('first_name', { ascending: true })
+  if (eA) console.error('[menages] fiche presta : lecture collegues echec', eA.message)
+
+  return res.status(200).json({
+    personne: {
+      id: p.id, prenom: p.first_name || null, nom: p.last_name || null,
+      actif: p.active !== false,
+      tel: p.phone || null, email: p.email || null,
+      notify_sms: p.notify_sms !== false, notify_email: p.notify_email !== false,
+      self_availability: selfDispo,
+      // `null` = jamais ouverte ; absent = on ne sait pas (lien ou lecture).
+      ...(vueLe !== undefined ? { vue_le: vueLe } : {}),
+      // Un lien SANS personne derriere ne peut rien recevoir : l'ecran coupe
+      // alors les champs plutot que de promettre un enregistrement.
+      a_un_lien: !!p.pwa_token
+    },
+    biens: (biens || []).map(b => ({ id: String(b.provider_property_id),
+                                     nom: b.name || '', photo: b.photo_url || null })),
+    liaisons: (liaisons || []).map(l => ({
+      property_id: String(l.property_id),
+      rang: Number.isInteger(l.rang) ? l.rang : 1,
+      requires_ack: l.requires_ack !== false,
+      weekdays: Array.isArray(l.weekdays) ? l.weekdays : null,
+      active: l.active !== false
+    })),
+    lien: lien ? { visibility_days: lien.visibility_days, ratio_periode: lien.ratio_periode } : null,
+    collegues: (autres || []).map(x => ({ id: x.id, prenom: x.first_name || null,
+                                          nom: x.last_name || null, actif: x.active !== false })),
+    // ⚠ CE QUE L'APPELANT PEUT ECRIRE, dit par le serveur et non deduit par
+    // l'ecran : `equipe` est NON DELEGABLE, donc l'identite, les contacts, les
+    // canaux, le droit d'absences et le retrait sont reserves au titulaire.
+    // Les boutons que ces droits ne couvrent pas sont ABSENTS du DOM.
+    droits: {
+      // ⚠ L'ECRAN DOIT SAVOIR S'IL VOIT TOUT. Son garde-fou « c'est son dernier
+      // logement » compte les liaisons RENDUES, donc bornees : un delegue
+      // limite au bien A se voyait refuser le retrait de A sur une prestataire
+      // qui sert aussi B et C (constat de la revue de ac28b1f). Le refus n'a de
+      // sens que pour qui voit l'ensemble.
+      perimetre_complet: !Array.isArray(refs),
+      prestataires: peutEcrire(garde.contexte, 'prestataires', null) ? 'write' : 'read',
+      equipe: peutEcrire(garde.contexte, 'equipe', null) ? 'write' : 'none',
+      avis: peutEcrire(garde.contexte, 'avis', null) ? 'write'
+            : (peutLire(garde.contexte, 'avis', null) ? 'read' : 'none')
+    }
+  })
+}
+
+// ===== LA NOTE POUR LA PRESTATAIRE (fiche menage V5, etape 3) =====
+//
+// ⚠ LA FONCTION QUE LA V5 NE DEVAIT PAS PERDRE. L'ancien ecran l'ecrivait
+// DEPUIS LE NAVIGATEUR (upsert `menage_comments` + INSERT `menage_events` en
+// boucle, sous RLS) : deux writers de plus cote client, dont un JOURNAL de
+// notifications. Ici, le serveur fait les deux, derriere ses gardes — et le
+// contenu du fil vient du COEUR, jamais du corps de la requete : sans cela,
+// un appel force ecrirait n'importe quel nom de voyageur dans l'ecran de la
+// prestataire.
+//
+// ⚠ DEUX DROITS, DEUX EFFETS. `menages: write` enregistre la note. La
+// TRANSMETTRE exige de lire `public_tokens`, qui est sous `prestataires:
+// read` : un membre qui ne l'a pas enregistre bien sa note, mais elle ne
+// part pas — et la reponse le DIT (`transmise: false`), sinon l'ecran
+// afficherait un succes complet pour une note que personne ne lira.
+async function ecrireNote (req, res) {
+  const appelant = await verifierSession(req, res)
+  if (!appelant) return
+  const garde = await requirePermission(req, res, {
+    domaine: 'menages', niveau: 'write', userId: appelant, compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+
+  const { property_id, booking_id, departure_date } = req.body || {}
+  const texte = String(req.body?.texte ?? '').trim()
+  if (!property_id || !booking_id || !departure_date) {
+    return res.status(400).json({ error: 'Champs requis manquants (property_id, booking_id, departure_date)' })
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(departure_date))) {
+    return res.status(400).json({ error: 'Format departure_date invalide, attendu YYYY-MM-DD' })
+  }
+  // ⚠ BORNEE. Le texte part dans un SMS et dans un fil ; sans borne, un
+  // copier-coller malheureux remplirait la base et l'ecran de la prestataire.
+  if (texte.length > 2000) return res.status(400).json({ error: 'Note trop longue (2000 caractères)' })
+
+  const refs = refsDuPerimetre(garde.contexte)
+  if (Array.isArray(refs) && !refs.map(String).includes(String(property_id))) {
+    return res.status(403).json({ error: 'Bien hors périmètre' })
+  }
+  // Le menage doit exister : une note sur un couple invente ne serait lue par
+  // personne et ne pourrait plus etre effacee depuis l'ecran.
+  const { data: men, error: eMen } = await supabase.from('menages')
+    .select('status').eq('user_id', userId)
+    .eq('property_id', String(property_id)).eq('booking_id', String(booking_id))
+    .eq('departure_date', departure_date).maybeSingle()
+  if (eMen) {
+    console.error('[menages] note : lecture menage echec', eMen.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!men) return res.status(404).json({ error: 'Ménage introuvable' })
+  // ⚠ LA MEME GARDE QUE `marquerDepuisLHote` : `api/garde.js` ecarte les
+  // menages annules, donc une note posee sur l'un d'eux ne reviendrait dans
+  // aucune fiche — indelebile depuis l'ecran — et partirait quand meme dans le
+  // fil de la prestataire, pour un sejour qui n'existe plus.
+  if (men.status === 'cancelled') return res.status(409).json({ error: 'Ce séjour est annulé' })
+
+  const { error: eUp } = await supabase.from('menage_comments').upsert({
+    user_id: userId,
+    booking_id: String(booking_id),
+    departure_date,
+    property_id: String(property_id),
+    comment: texte,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'user_id,booking_id,departure_date' })
+  if (eUp) {
+    console.error('[menages] note : ecriture echec', eUp.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+
+  // ⚠ UNE NOTE VIDE EFFACE, elle ne notifie pas : annoncer « note de
+  // l'hote » pour une consigne retiree serait un faux evenement.
+  if (!texte) return res.status(200).json({ ok: true, transmise: true, vide: true })
+
+  // La TRANSMISSION, sous `prestataires: read` seulement.
+  if (!peutLire(garde.contexte, 'prestataires', null)) {
+    return res.status(200).json({ ok: true, transmise: false })
+  }
+  const { data: jetons, error: eJ } = await supabase.from('public_tokens')
+    .select('token, property_ids').eq('user_id', userId)
+  if (eJ) {
+    console.error('[menages] note : lecture jetons echec', eJ.message)
+    return res.status(200).json({ ok: true, transmise: false })
+  }
+  // ⚠ `property_ids` VIDE = TOUS LES BIENS (convention de `public_tokens`,
+  // l'inverse de `profile_permissions`) : la confondre priverait de la note
+  // les prestataires qui couvrent tout le parc.
+  const duBien = (jetons || []).filter(j =>
+    !Array.isArray(j.property_ids) || !j.property_ids.length ||
+    j.property_ids.map(String).includes(String(property_id)))
+
+  // ⚠ LA NOTE NE PART QU'A QUI EST CONCERNE PAR CE MENAGE. L'ancien ecran
+  // l'envoyait a TOUS les jetons du bien, et l'evenement `note` est exempte du
+  // filtre d'appartenance cote PWA : une prestataire qui n'a pas ce menage
+  // lisait le nom du voyageur et les deux bornes de son sejour. Repris tel
+  // quel, ce serait la fuite que `api/menages-public.js` a fermee pour tous
+  // les autres types d'evenement (revue de 6822e47).
+  // Si PERSONNE n'est encore sur le menage, la note part a l'equipe du bien :
+  // c'est le cas ou l'hote prepare une consigne avant d'avoir assigne.
+  const { data: ligne } = await supabase.from('menages')
+    .select('provider_id, proposee_a').eq('user_id', userId)
+    .eq('property_id', String(property_id)).eq('booking_id', String(booking_id))
+    .eq('departure_date', departure_date).maybeSingle()
+  const concernees = new Set([
+    ...(ligne && ligne.provider_id ? [String(ligne.provider_id)] : []),
+    ...((ligne && Array.isArray(ligne.proposee_a)) ? ligne.proposee_a.map(String) : [])
+  ])
+  let vises = duBien
+  if (concernees.size) {
+    const { data: profs } = await supabase.from('profiles')
+      .select('id, pwa_token').eq('account_user_id', userId).eq('access_mode', 'lien')
+      .in('id', [...concernees])
+    const leurs = new Set((profs || []).map(p => String(p.pwa_token)).filter(Boolean))
+    // Un jeton introuvable (profil sans lien) ne doit pas elargir l'envoi :
+    // on retombe sur l'equipe du bien seulement si AUCUN jeton n'est resolu.
+    const filtres = duBien.filter(j => leurs.has(String(j.token)))
+    if (filtres.length) vises = filtres
+  }
+  if (!vises.length) return res.status(200).json({ ok: true, transmise: false })
+
+  // Le contenu du fil vient du COEUR : nom du bien et voyageur lus ici.
+  const { data: bien } = await supabase.from('properties')
+    .select('name').eq('user_id', userId)
+    .eq('provider_property_id', String(property_id)).maybeSingle()
+  const { data: resa } = await supabase.from('bookings_snapshot')
+    .select('snapshot').eq('user_id', userId)
+    .eq('booking_id', String(booking_id)).limit(1).maybeSingle()
+  const s = (resa && resa.snapshot) || {}
+  const voyageur = [s.firstName, s.lastName].filter(Boolean).join(' ').trim()
+
+  const lignes = vises.map(j => ({
+    user_id: userId,
+    booking_id: String(booking_id),
+    property_id: String(property_id),
+    property_name: (bien && bien.name) || '',
+    event_type: 'note',
+    event_data: { guestName: voyageur, arrival: s.arrival || null,
+                  departure: departure_date, comment: texte },
+    token: j.token
+  }))
+  const { error: eEv } = await supabase.from('menage_events').insert(lignes)
+  if (eEv) {
+    console.error('[menages] note : fil echec', eEv.message)
+    // La note EST enregistree : on ne ment pas sur ce point, on dit seulement
+    // qu'elle n'est pas partie.
+    return res.status(200).json({ ok: true, transmise: false })
+  }
+  return res.status(200).json({ ok: true, transmise: true })
+}
+
+// Le jour courant A PARIS : la meme regle que `api/garde.js` et la PWA — un
+// menage se juge sur le calendrier de l'hote, pas sur UTC.
+function todayEnParis () {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit'
+  }).format(new Date())
+}
+
+// ===== « FAIT » DEPUIS L'ECRAN DE L'HOTE (ecart D1 de l'inventaire) =====
+//
+// ⚠ L'ANCIEN ECRAN NE MARQUAIT QUE DANS LE NAVIGATEUR (`localStorage`) : le
+// geste ne quittait pas la machine, la prestataire ne le voyait pas, et il
+// disparaissait au changement d'appareil. Ici, l'hote ecrit dans la MEME
+// table que la PWA, par le MEME writer (`lib/cleaning/menage-fait`), chacun
+// derriere sa garde — `menages: write` pour lui, le jeton et ses gardes de
+// porteuse pour elle.
+//
+// ⚠ `done_by_token` RESTE NULL quand c'est l'hote : c'est la seule trace qui
+// distingue « marque par la personne qui l'a fait » de « marque par l'hote ».
+async function marquerDepuisLHote (req, res, fait) {
+  const appelant = await verifierSession(req, res)
+  if (!appelant) return
+  const garde = await requirePermission(req, res, {
+    domaine: 'menages', niveau: 'write', userId: appelant, compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+
+  const { property_id, booking_id, departure_date } = req.body || {}
+  if (!property_id || !booking_id || !departure_date) {
+    return res.status(400).json({ error: 'Champs requis manquants (property_id, booking_id, departure_date)' })
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(departure_date))) {
+    return res.status(400).json({ error: 'Format departure_date invalide, attendu YYYY-MM-DD' })
+  }
+  // Le bien doit etre DANS LE PERIMETRE : une reference passee dans le corps
+  // ne doit pas suffire a toucher le menage d'un bien qu'on ne voit pas.
+  const refs = refsDuPerimetre(garde.contexte)
+  if (Array.isArray(refs) && !refs.map(String).includes(String(property_id))) {
+    return res.status(403).json({ error: 'Bien hors périmètre' })
+  }
+  // ⚠ LE MENAGE DOIT EXISTER, ET N'ETRE PAS ANNULE. Sans ce controle, un
+  // couple (bien, reservation, date) invente creerait une ligne `menage_done`
+  // qui ne correspond a aucun menage — invisible et indelebile par l'ecran.
+  const { data: men, error: eMen } = await supabase.from('menages')
+    .select('status').eq('user_id', userId)
+    .eq('property_id', String(property_id)).eq('booking_id', String(booking_id))
+    .eq('departure_date', departure_date).maybeSingle()
+  if (eMen) {
+    console.error('[menages] lecture menage echec', eMen.message)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  if (!men) return res.status(404).json({ error: 'Ménage introuvable' })
+  if (men.status === 'cancelled') return res.status(409).json({ error: 'Ce séjour est annulé' })
+
+  // ⚠ UN MENAGE A VENIR NE PEUT PAS ETRE FAIT — la MEME garde que la PWA
+  // (`api/menages-public.js`, markDone). Sans elle, un depart futur marque
+  // produisait une ligne que l'ecran ne montre plus (le menage devient
+  // « fait », donc il sort de la bulle et passe vert au planning), donc
+  // indelebile hors du message de six secondes ; et le menage disparaissait
+  // de la PWA de la prestataire sans avoir ete fait (revue de 7f79406).
+  const aujourdhui = todayEnParis()
+  if (fait && String(departure_date) > aujourdhui) {
+    return res.status(400).json({ error: 'Ce ménage n\'a pas encore eu lieu' })
+  }
+
+  // ⚠ « PRET MAINTENANT » N'EST VRAI QUE POUR UN MENAGE DU JOUR (ou d'hier,
+  // le temps que l'hote regularise au reveil). Regulariser un menage de la
+  // semaine derniere ne dit RIEN de l'etat actuel du logement : passer le
+  // bien `ready` y annoncerait « propre et libre » en plein sejour.
+  const veille = new Date(aujourdhui + 'T12:00:00Z')
+  veille.setUTCDate(veille.getUTCDate() - 1)
+  const recent = String(departure_date) >= veille.toISOString().slice(0, 10)
+
+  const r = fait
+    ? await marquerFait(supabase, { userId, propertyId: property_id, bookingId: booking_id,
+                                    departureDate: departure_date, parToken: null,
+                                    majStatut: recent })
+    : await defaireFait(supabase, { userId, propertyId: property_id, bookingId: booking_id,
+                                    departureDate: departure_date })
+  if (!r.ok) {
+    console.error('[menages] menage_done echec', r.message)
+    return res.status(500).json({ error: 'Enregistrement impossible' })
+  }
+  // `insere` dit si la ligne est NEE de ce geste : l'ecran n'offre « Annuler »
+  // que dans ce cas — sinon il effacerait la ligne de la prestataire.
+  return res.status(200).json({ ok: true, fait, insere: fait ? !!r.insere : true })
+}
+
 async function reassigner (req, res) {
   const appelant = await verifierSession(req, res)
   if (!appelant) return
@@ -590,7 +1268,10 @@ async function ecrireLiaisons (req, res) {
 
   // Le prestataire doit etre un profil `lien` DE CE COMPTE (REVIEW.md regle 11).
   const { data: prof, error: errProf } = await supabase.from('profiles')
-    .select('id, first_name, active').eq('id', String(provider_id))
+    // `pwa_token` sert a synchroniser le perimetre que sa page SERT avec les
+    // biens qu'on lui confie (voir le bloc en fin de fonction). Il ne sort pas
+    // de cette reponse.
+    .select('id, first_name, active, pwa_token').eq('id', String(provider_id))
     .eq('account_user_id', userId).eq('access_mode', 'lien').maybeSingle()
   if (errProf) {
     console.error('[menages] verification profil echec', errProf.message)
@@ -813,6 +1494,54 @@ async function ecrireLiaisons (req, res) {
   // question.
   const rattrapage = await rattraperMenagesSansPersonne(userId, voulues.map(v => v.ref))
   if (rattrapage.erreur) console.error('[menages] rattrapage echec', rattrapage.erreur)
+
+  // ⚠ CE QUE SA PAGE SERT SUIT CE QU'ON LUI CONFIE. Trois representations
+  // portent « ses biens » (inventaire H.1) : les liaisons disent ce que le
+  // MOTEUR peut lui attribuer, `public_tokens.property_ids` dit ce que sa PWA
+  // SERT, et `profile_permissions.property_ids` est son droit. Confier un bien
+  // sans toucher la premiere laissait un menage attribue INVISIBLE dans sa
+  // page : le bien n'etait pas servi, donc la reservation non plus, donc
+  // l'ecran ne montrait rien — et rien ne le laissait deviner.
+  //
+  // ⚠ UN SEUL WRITER, ET C'EST L'APP MENAGE. Le vecu de /settings est grave en
+  // CLAUDE.md : un second writer de `public_tokens.property_ids` a ecrase en
+  // silence les biens regles ici. Cette synchronisation est donc faite par le
+  // SERVEUR de l'app menage, au meme endroit que les liaisons — et l'ecran V5
+  // n'y touche pas.
+  //
+  // ⚠ LA SOURCE EST L'ETAT APRES ECRITURE, PAS CE QUE L'ECRAN A ENVOYE
+  // (constat de la revue de ac28b1f). `voulues` ne contient que les biens du
+  // PERIMETRE de l'appelant : un delegue limite au bien A, reglant une
+  // prestataire liee a A, B et C, aurait ecrit `property_ids = ['A']` — alors
+  // que la desactivation des liaisons, elle, est bornee et laisse B et C
+  // ACTIFS. Sa page cessait alors de servir B et C : ses menages y
+  // disparaissaient et ses « fait » etaient refuses, pendant que le moteur
+  // continuait de les lui attribuer. C'est exactement le dommage que la borne
+  // de perimetre existe pour empecher, par l'autre representation de
+  // « ses biens ». `apres` est lu sans borne de perimetre : il dit les
+  // liaisons REELLEMENT actives de cette personne, tous perimetres confondus.
+  //
+  // ⚠ UNE LISTE VIDE N'EST JAMAIS ECRITE : la convention de `property_ids` est
+  // inversee — vide = AUCUNE RESTRICTION, donc TOUS les biens du compte.
+  // L'ecrire en retirant le dernier bien OUVRIRAIT son acces au lieu de le
+  // fermer. On garde alors le perimetre d'avant : elle voit des biens sans
+  // menage a elle (le filtrage de sa page est par PERSONNE depuis le lot 2.5),
+  // ce qui est inoffensif — et le retrait d'une personne passe par
+  // « Retirer de l'equipe », qui supprime la ligne entiere.
+  const siennesApres = (apres || []).filter(l => String(l.provider_id) === String(provider_id))
+  if (prof.pwa_token && siennesApres.length) {
+    const servis = [...new Set(siennesApres.map(l => String(l.property_id)))].sort()
+    const { error: eTok } = await supabase.from('public_tokens')
+      .update({ property_ids: servis })
+      .eq('user_id', userId).eq('token', prof.pwa_token)
+    // Best-effort, et il se DIT : sans cela, un menage attribue serait
+    // invisible chez elle et l'hote n'aurait aucun moyen de le savoir.
+    if (eTok) {
+      console.error('[menages] liaisons : synchro du perimetre PWA echec', eTok.message)
+      return res.status(200).json({ success: true, sans_referent: sansReferent,
+                                    rattrapes: rattrapage.rattrapes, perimetre_pwa: false })
+    }
+  }
 
   return res.status(200).json({ success: true, sans_referent: sansReferent,
                                 rattrapes: rattrapage.rattrapes })

@@ -35,6 +35,31 @@ function journaliserRepli (ou) {
 }
 
 const { readStatus, colonneRawAbsente } = require('../lib/bookings-snapshot')
+// Regles du prix et de la date de vente : LE module du moteur, jamais une
+// seconde implementation (docs/kb/prix-voyageur.md — amount Airbnb est un
+// net hote, la reconstruction passe par meta.amount_type).
+const { prixVoyageur, dateDeVente } = require('../lib/yield/eclatement')
+const { taxeSejourDe } = require('../lib/taxe-sejour/lecture')
+
+// Le detail par nuit TEL QUE LE CANAL LE SERT (Channex : rooms[].days en
+// objet date -> montant, ou rooms[].meta.days_breakdown en tableau). Beds24
+// ne le fournit pas — on rend null et la fiche LE DIT, plutot que d'inventer
+// une repartition (l'uniforme est une regle du MOTEUR : eclatement-yield.md).
+function prixParNuitDuRaw (raw) {
+  const parDate = {}
+  for (const ro of (raw && raw.rooms) || []) {
+    if (!ro || !ro.days || typeof ro.days !== 'object' || Array.isArray(ro.days)) continue
+    for (const [date, montant] of Object.entries(ro.days)) {
+      const d = typeof date === 'string' ? date.slice(0, 10) : null
+      const m = Number(montant)
+      if (!d || !Number.isFinite(m)) continue
+      parDate[d] = (parDate[d] || 0) + m
+    }
+  }
+  const dates = Object.keys(parDate).sort()
+  if (!dates.length) return null
+  return dates.map(d => ({ date: d, montant: Math.round(parDate[d] * 100) / 100 }))
+}
 const { requirePermission, verifierSession, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 const { peutLire, peutEcrire } = require('../lib/permissions')
 
@@ -179,7 +204,7 @@ module.exports = async function handler(req, res) {
     // Aucun identifiant connu : rien a renvoyer, donc rien a proteger. La session
     // est deja verifiee plus haut ; inutile de charger un profil pour repondre
     // une liste vide.
-    if (!biens.length) return { biens: [], compte: null }
+    if (!biens.length) return { biens: [], compte: null, titulaire: false }
 
     const g = await requirePermission(req, res, {
       domaine: 'reservations', niveau, bien: biens[0].id, bienRequis: true, userId
@@ -199,7 +224,7 @@ module.exports = async function handler(req, res) {
         return null
       }
     }
-    return { biens, compte: g.accountUserId }
+    return { biens, compte: g.accountUserId, titulaire: g.userId === g.accountUserId }
   }
 
   // ===== GET : inventory + reservations =====
@@ -218,7 +243,83 @@ module.exports = async function handler(req, res) {
 
     const owned = gardeGet.biens
     const ownedIds = owned.map(p => p.id)
-    if (!ownedIds.length) return res.status(200).json({ properties: [], inventory: {}, bookings: {} })
+    if (!ownedIds.length && !req.query.booking) return res.status(200).json({ properties: [], inventory: {}, bookings: {} })
+
+    // ===== Detail d'UNE reservation (fiche) =====
+    // Coordonnees, date de vente, prix par nuit et decomposition du total :
+    // JAMAIS dans le listing (minimisation — « un booleen, pas l'adresse »,
+    // cf. plus bas), seulement ici, pour UN booking_id, sous la meme garde.
+    if (req.query.booking) {
+      const provDe = {}
+      owned.forEach(p => { if (p.provider_property_id != null) provDe[String(p.provider_property_id)] = p.provider })
+      const provIdsB = Object.keys(provDe)
+      if (!provIdsB.length) return res.status(404).json({ error: 'Reservation introuvable' })
+      const lireDetail = (avecRaw) => supabase
+        .from('bookings_snapshot')
+        .select('booking_id, property_id, snapshot' + (avecRaw ? ', raw' : ''))
+        .eq('user_id', gardeGet.compte)
+        .eq('booking_id', String(req.query.booking))
+        .in('property_id', provIdsB)
+        .order('property_id', { ascending: true })
+        .order('updated_at', { ascending: false })
+        .limit(1)
+      let { data: rows, error: errD } = await lireDetail(true)
+      // Meme repli que le listing : la colonne raw peut manquer (migration,
+      // cache de schema) — la fiche rend alors ce que le snapshot porte.
+      if (errD && colonneRawAbsente(errD)) ({ data: rows, error: errD } = await lireDetail(false))
+      if (errD) {
+        console.error('[calendar] lecture detail reservation', errD.message)
+        return res.status(500).json({ error: 'Erreur lecture reservation' })
+      }
+      const ligne = rows && rows[0]
+      if (!ligne) return res.status(404).json({ error: 'Reservation introuvable' })
+      const s = ligne.snapshot || {}
+      const raw = ligne.raw || null
+      const provider = provDe[String(ligne.property_id)] || null
+      // prixVoyageur rend la valeur HORS taxe de sejour et la taxe qu'il en a
+      // sortie : le total PAYE se recompose (valeur + taxe) — prixTaxeComprise
+      // n'est pas exporte et lib/yield ne se modifie pas sans go.
+      const pv = prixVoyageur(s, raw, provider)
+      // La taxe de sejour TELLE QUE LE MODULE LA LIT (lib/taxe-sejour) : elle
+      // peut etre incluse dans le prix, collectee EN SUS par la plateforme
+      // (Airbnb la transmet dans le message brut), ou non transmise.
+      const annulee = readStatus(s, provider) === 'cancelled'
+      const ts = annulee ? null : taxeSejourDe(s, raw, provider)
+      // Les « frais Airbnb » transmis par le canal = la retenue hote (Host
+      // Fee), soit total recompose MOINS raw.amount — le MEME operande que
+      // prixVoyageur (snapshot.amount peut porter une autre revision). Le
+      // frais de SERVICE voyageur d'Airbnb n'est transmis par aucun canal —
+      // on ne l'invente pas. Rien de tout ca sur une annulee.
+      const canalFiche = String(s.source || (raw && raw.ota_name) || '').trim().toLowerCase()
+      const netCanal = raw && Number(raw.amount) > 0 ? Number(raw.amount) : null
+      const fraisCanal = (!annulee && canalFiche === 'airbnb' && pv.valeur != null && netCanal != null && pv.valeur > netCanal)
+        ? Math.round((pv.valeur - netCanal) * 100) / 100 : null
+      return res.status(200).json({
+        booking_id: String(ligne.booking_id),
+        guestEmail: gardeGet.titulaire ? (s.guestEmail || null) : null,
+        guestPhone: gardeGet.titulaire ? (s.guestPhone || null) : null,
+        vendueLe: dateDeVente(s, raw, provider),
+        totalVoyageur: pv.valeur != null
+          ? { valeur: Math.round((pv.valeur + (pv.taxe_sejour || 0)) * 100) / 100, source: pv.source }
+          : { valeur: null, raison: pv.raison || null },
+        taxeSejour: pv.taxe_sejour != null && pv.taxe_sejour > 0 ? pv.taxe_sejour : null,
+        taxeSejourInfo: ts ? {
+          montant: ts.montant_cents != null ? ts.montant_cents / 100 : null,
+          collecteur: ts.collecteur || null,
+          incluse: ts.inclus_dans_prix === true
+        } : null,
+        fraisCanal,
+        prixParNuit: prixParNuitDuRaw(raw),
+        factures: (() => {
+          const l = (((raw && raw.invoiceItems) || [])
+            .filter(i => i && i.type === 'charge')
+            .map(i => ({ libelle: String(i.description || ''), montant: Number(i.lineTotal) || 0 }))
+            .filter(f => f.libelle || f.montant)).slice(0, 50)
+          return l.length ? l : null
+        })(),
+        currency: s.currency || null
+      })
+    }
 
     // inventory
     // ⚠ LECTURE PAGINEE. INCIDENT DU 7 SEPTEMBRE 2026, second foyer.

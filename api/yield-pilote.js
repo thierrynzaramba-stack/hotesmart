@@ -43,7 +43,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const {
-  MODES, piloteDuBien, peutPasserEnYieldflow, fenetreDuBien, validerFenetre
+  MODES, piloteDuBien, peutPasserEnYieldflow, fenetreDuBien, validerFenetre, finDeFenetre
 } = require('../lib/pilote-tarifaire')
 const { effacerMarqueur, lireMarqueur, jourParis } = require('../lib/ouverture-marqueur')
 const { recalerPrixHote, compterPrixHote } = require('../lib/prix-hote')
@@ -154,6 +154,11 @@ module.exports = async (req, res) => {
       peut_basculer: possible.ok,
       raison: possible.ok ? null : possible.error,
       fenetre: fenetreDuBien(bien),
+      // La FIN de la fenetre, calculee par LA regle du moteur (decalerMois,
+      // jour de Paris) : le calendrier V5 l'affiche telle quelle — une
+      // approximation client (mois x 30, date locale) divergeait de 5 jours
+      // sur 12 mois (releve en review de c8e7dff).
+      fenetre_fin: finDeFenetre(bien, aujourdHui),
       ouverture: { derniere: marqueur ? marqueur.derniere : null, bilan: marqueur ? marqueur.bilan : null },
       prix_hote: { nuits: nuitsPrixHote },
       ...(prixCalendrier !== undefined ? { prix_calendrier: prixCalendrier } : {}),

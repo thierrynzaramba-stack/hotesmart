@@ -5,7 +5,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HôteSmart Clean</title>
-  <meta name="theme-color" content="#C97B5C">
+  <!-- ⚠ LA BARRE DU TÉLÉPHONE SUIT LA PAGE (refonte V5). Elle est restée
+       terracotta pendant toute la refonte : ouverte en plein écran, l'appli
+       affichait un bandeau orange au-dessus d'un écran blanc. Le terracotta
+       reste la couleur de marque des écrans de l'hôte — il n'a plus cours
+       ici. `--surface` du thème V5, écrit en clair parce qu'un `<meta>` ne
+       lit pas les variables CSS. -->
+  <meta name="theme-color" content="#FFFFFF">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -13,25 +19,163 @@
   <link rel="manifest" id="dynamic-manifest">
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="stylesheet" href="/public/style.css">
+  <!-- ⚠ LES TOKENS V5 APRÈS L'ANCIENNE FEUILLE, ET LE REMAPPAGE APRÈS LES DEUX.
+       `public/style.css` est PARTAGÉ avec les trois écrans de l'hôte
+       (index, garde, prestataires) : on ne le touche pas. Il est presque
+       entièrement piloté par seize variables, redéfinies plus bas sur les
+       tokens — `.btn`, `.topbar`, `.content` et `.modal` suivent sans qu'une
+       seule de leurs règles soit réécrite.
+       ⚠ LA POLICE EST UN CONFORT, PAS UNE DÉPENDANCE : hors ligne (la raison
+       d'être de cette application) elle retombe sur `system-ui`, déclaré dans
+       `--font`. Le service worker ne la met pas en cache — c'est le cache HTTP
+       du navigateur qui la ressert après la première visite. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/shared/theme.css">
   <style>
+    /* ─── V5 : LES SEIZE VARIABLES DE L'ANCIEN SYSTÈME, REMAPPÉES SUR LES
+       TOKENS. C'est tout le socle de la refonte : pas un hexa ici, et pas une
+       ligne de `public/style.css` modifiée.
+       ⚠ `--primary` (terre cuite) DISPARAÎT de la charte : il survit comme
+       alias de `--ink` pour les treize règles qui le nomment encore, chacune
+       revue plus bas. Le garder pointé quelque part évite qu'une règle oubliée
+       retombe sur du noir par accident de cascade. */
     :root {
-      --primary: #C97B5C;
-      --primary-bg: #FAECE7;
+      --bg: var(--surface);
+      --bg2: var(--surface-2);
+      --bg3: var(--line);
+      --text: var(--ink);
+      --text2: var(--muted);
+      --text3: var(--muted-2);
+      /* ⚠ `--border` N'EST PAS REMAPPÉ, ET C'EST VOLONTAIRE : le token
+         `--border` de theme.css est exactement la bordure de carte
+         V5, plus nette que l'ancien `rgba(0,0,0,.1)`. Le redéfinir ICI sur
+         `--line` aurait fait valoir `--border2` la même chose que `--border`,
+         puisque les deux vivent sur le MÊME élément et que la valeur se résout
+         à l'usage : le gris de bordure et le gris de séparateur auraient
+         fusionné. (La première version de ce commentaire parlait de référence
+         circulaire : c'était faux, et un commentaire faux à côté d'une règle
+         juste est de la dette — constat de la revue de 41d4afe.) Les
+         séparateurs fins prennent `var(--line)` nommément, là où ils comptent. */
+      --border2: var(--border);
+      --green: var(--ok);
+      --green-bg: var(--ok-soft);
+      /* ⚠ `--amber` ET `--amber-bg` NE SONT PAS REMAPPÉS (constat de la revue
+         de 41d4afe). Les pointer sur `--amber-text` faisait lire `--amber` à
+         #B87500 — un brun sombre — là où la charte veut l'ambre franc : le
+         compteur des nouveautés sortait comme une alerte, et sous le seuil de
+         contraste. Non remappés, ils prennent la valeur de theme.css, chargé
+         APRÈS `public/style.css`. Personne d'autre ne les lit (vérifié). */
+      --radius: var(--radius-tile);
+      --radius-lg: var(--radius-card);
+      --primary: var(--ink);
+      --primary-bg: var(--surface-2);
     }
 
+    /* ⚠ LA BARRE DU HAUT ET LE CONTENU viennent de `public/style.css`, qui
+       les dessine pour un écran de bureau à barre latérale : 24 px de marge
+       partout et un titre de 15 px. Au téléphone, la marge mange un dixième de
+       la largeur utile.
+       ⚠ ELLE EST DÉJÀ FIXE : `.topbar` est hors du conteneur qui défile
+       (`.content`), donc le ratio des avis — la seule porte vers eux — reste
+       atteignable à tout moment. Rien à rendre « collant ». */
+    .topbar { border-bottom: 1px solid var(--line); background: var(--surface);
+              gap: 12px; }
+    /* ⚠ SON PRÉNOM PASSE DEVANT, ET LE TITRE DE L'APPLICATION DERRIÈRE
+       (modernisation du 16 octobre 2026). Le DOM met « Planning ménages » en
+       titre et « Régina » en sous-titre ; c'est l'ordre d'un logiciel, pas
+       celui d'une personne qui ouvre SA page. `column-reverse` les échange à
+       l'œil sans toucher à un seul nœud — l'ordre de lecture d'un lecteur
+       d'écran, lui, ne change pas, et il reste juste.
+       ⚠ `min-width: 0` : sans lui, un prénom long pousse le ratio hors de la
+       barre au lieu de se couper. */
+    .topbar > div:first-child { display: flex; flex-direction: column-reverse;
+                                align-items: flex-start; min-width: 0; }
+    .page-title { font-size: 11px; font-weight: var(--fw-bold); color: var(--muted);
+                  text-transform: uppercase; letter-spacing: .08em; }
+    .page-sub { font-size: 20px; font-weight: var(--fw-bold); color: var(--ink);
+                margin-top: 0; margin-bottom: 1px; letter-spacing: var(--tracking-tight);
+                max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; }
+    .content { padding: 16px; display: flex; flex-direction: column; }
+
+    /* ⚠ DEUX RANGS DE SURFACES, ET C'EST TOUTE LA HIÉRARCHIE DE LA PAGE.
+       Tout était en carte blanche bordée : le fil des nouveautés, le filtre de
+       biens, le calendrier et la liste des trente jours avaient exactement le
+       même poids. Les deux premiers sont des OUTILS — on les consulte, on les
+       règle — les deux autres sont le TRAVAIL. Les outils passent donc sur le
+       gris de fond, sans bordure ; le travail garde la carte blanche. */
+    .news-panel, #carte-biens { background: var(--surface-2); border-color: transparent; }
+
+    /* ⚠ LES TRANSITIONS SONT COURTES ET NE PORTENT QUE SUR LA COULEUR. Une
+       bascule de 150 ms dit « c'est bien ce que tu viens de toucher » ; au-delà,
+       elle retarde la réponse, et sur une transformation elle ferait bouger une
+       cible qu'un doigt vise encore. */
+    .btn, .btn-mini, .jligne, .jrangee, .agenda-item, .filter-item, .jvu,
+    .news-close, .dispo-mini, .avis-retour, .jseg button {
+      transition: background-color .15s ease, border-color .15s ease, color .15s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ⚠ LA POLICE ET LE FOND SE POSENT ICI, pas dans `public/style.css` : ce
+       fichier met `background: var(--bg2)` sur le corps (gris), et la V5 veut
+       du blanc. Même spécificité, déclarée après : celle-ci gagne. */
+    body { font-family: var(--font); background: var(--surface); color: var(--ink);
+           font-size: var(--fs-small); }
+
+    /* ─── LES BOUTONS (charte V5, 15 octobre 2026) ──────────────────────────
+       ⚠ LE NOIR NE SERT PLUS QU'À DIRE « C'EST CELUI-CI QUI EST CHOISI » :
+       cases du filtre, faces d'un segment. Un bouton d'ACTION — Vu, Je prends,
+       J'accepte, Marquer fait, Poser — est blanc à bord noir. C'est le
+       changement le plus visible de la refonte : `.btn-primary` portait un
+       aplat noir dans `public/style.css`, et ce fichier est partagé avec les
+       trois écrans de l'hôte. On le surcharge ici, on ne le touche pas.
+       ⚠ 44 px DE HAUT PARTOUT : `public/style.css` donne `padding: 8px 16px`
+       sur 13 px de texte, soit 33 px — sous la cible tactile, sur un écran qui
+       ne se tient qu'au pouce. */
+    .btn { display: inline-flex; align-items: center; justify-content: center;
+           min-height: var(--control); padding: 0 18px;
+           border-radius: var(--radius-pill); border: 1px solid var(--border);
+           background: var(--surface); color: var(--ink);
+           font-family: var(--font); font-size: var(--fs-small);
+           font-weight: var(--fw-semibold); }
+    .btn:hover { background: var(--surface-2); }
+    .btn-primary { background: var(--surface); color: var(--ink);
+                   border: 1.5px solid var(--ink); font-weight: var(--fw-bold); }
+    .btn-primary:hover { background: var(--surface-2); opacity: 1; }
+    .btn:disabled { opacity: .4; }
+
     .avis-etat { text-align: center; padding: 40px 20px; color: var(--text2); font-size: 13px; line-height: 1.6; }
-    .dispo-carte { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg);
-                   padding: 16px; margin-bottom: 12px; }
-    .dispo-titre { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+    .dispo-carte { background: var(--surface); border: 1px solid var(--border);
+                   border-radius: var(--radius-card); padding: 16px; margin-bottom: 12px; }
+    .dispo-titre { font-size: var(--fs-caption); font-weight: var(--fw-bold); margin-bottom: 10px; }
     .dispo-saisie { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .dispo-input { flex: 1; min-width: 150px; padding: 10px; font-size: 14px;
-                   border: 0.5px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+    .dispo-input { flex: 1; min-width: 150px; min-height: var(--control); padding: 0 12px;
+                   font-family: var(--font); font-size: var(--fs-small);
+                   border: 1px solid var(--border); border-radius: var(--radius-tile);
+                   background: var(--surface); color: var(--ink); }
     .dispo-aide { font-size: 12px; color: var(--text2); margin-top: 8px; line-height: 1.5; }
     .dispo-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
-                  font-size: 13px; padding: 10px 0; border-bottom: 0.5px solid var(--border); }
+                  font-size: var(--fs-caption); padding: 10px 0; min-height: 52px;
+                  border-bottom: 1px solid var(--line); }
     .dispo-item:last-child { border-bottom: none; }
-    .dispo-item .btn-mini { background: none; border: 0.5px solid var(--border); border-radius: 14px;
-                            font-size: 12px; color: var(--text2); padding: 4px 12px; cursor: pointer; }
+    /* ⚠ `.btn-mini` N'ÉTAIT STYLÉ QUE DANS `.dispo-item` : le bouton
+       « Ce mois-ci » de la barre du calendrier, qui porte la même classe,
+       tombait au rendu natif du navigateur — un rectangle gris système au
+       milieu d'un écran dessiné. Il hérite désormais de la même pilule, et la
+       règle plus spécifique d'en dessous ne fait que la reprendre. */
+    .btn-mini { display: inline-flex; align-items: center; justify-content: center;
+                min-height: var(--control); padding: 0 16px;
+                border: 1px solid var(--border); border-radius: var(--radius-pill);
+                background: var(--surface); color: var(--ink);
+                font-family: var(--font); font-size: 12px;
+                font-weight: var(--fw-semibold); cursor: pointer; }
+    .btn-mini:hover { background: var(--surface-2); }
+    .dispo-item .btn-mini { background: var(--surface); border: 1px solid var(--border);
+                            border-radius: var(--radius-pill); min-height: var(--control);
+                            padding: 0 16px; font-family: var(--font); font-size: 12px;
+                            font-weight: var(--fw-semibold); color: var(--ink); cursor: pointer; }
     .dispo-source { font-size: 11px; color: var(--text2); }
 
     /* ── MON CALENDRIER (lot 2b, 15 septembre 2026) ──
@@ -41,9 +185,18 @@
        La paire rouge manque au systeme (public/style.css n'a que --green et
        --amber) : meme saturation que le vert. */
     .dispo-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-    .dispo-titre-mois { font-size: 14px; font-weight: 600; text-transform: capitalize; flex: 1; }
-    .dispo-rond { width: 34px; height: 34px; border-radius: 50%; border: 0.5px solid var(--border);
-                  background: var(--bg); color: var(--text); font-size: 16px; line-height: 1;
+    /* ⚠ LE TITRE PREND SA PROPRE LIGNE, et les commandes passent dessous
+       (modernisation du 16 octobre 2026). « Octobre – Novembre 2026 » a besoin
+       de 190 px ; entre deux ronds de 44 et la pilule « Ce mois-ci », il en
+       restait 104, et il se cassait sur trois lignes en poussant tout le
+       calendrier vers le bas. `order: -1` le remonte sans toucher au DOM. */
+    .dispo-titre-mois { font-size: var(--fs-body); font-weight: var(--fw-bold);
+                        text-transform: capitalize; flex: 1 0 100%; order: -1;
+                        margin-bottom: 2px; letter-spacing: var(--tracking-tight); }
+    #dispo-auj { margin-left: auto; }
+    .dispo-rond { width: var(--control); height: var(--control); border-radius: 50%;
+                  border: 1px solid var(--border);
+                  background: var(--surface); color: var(--ink); font-size: 16px; line-height: 1;
                   display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
     .dispo-rond[disabled] { opacity: .3; }
     /* ⚠ DEUX MOIS, ET LA MISE EN PAGE SUIT LA LARGEUR, pas le materiel : une
@@ -59,8 +212,13 @@
     .dispo-grille.alt { grid-template-columns: 18px repeat(7, 1fr); }
     .dispo-sem { display: flex; align-items: center; justify-content: center;
                  font-size: 10px; font-weight: 700; color: var(--text3); }
-    .dispo-sem.a { color: var(--green); } .dispo-sem.b { color: var(--amber); }
-    .dispo-dow { font-size: 10px; font-weight: 600; color: var(--text3); text-align: center; padding-bottom: 2px; }
+        /* ⚠ LES DEUX LETTRES SONT DU MÊME GRIS (charte V5). Vert et ambre les
+       mettaient à égalité avec « fait » et « à confirmer », pour un simple
+       repère de quinzaine — et l'ambre n'a plus droit qu'à deux emplois sur
+       cet écran. Ce qui distingue A de B est la LETTRE, pas sa couleur. */
+    .dispo-sem.a, .dispo-sem.b { color: var(--muted); font-weight: var(--fw-bold); }
+    .dispo-dow { font-size: 10px; font-weight: var(--fw-bold); color: var(--muted-2);
+                 text-align: center; padding-bottom: 2px; }
     /* ⚠ 44 px MINIMUM : c'est la cible tactile recommandee, et cet ecran est
        fait pour un pouce, pas pour une souris. */
     /* ⚠ `column` : sans elle, les points ajoutes au lot 2 se posaient A COTE du
@@ -75,7 +233,8 @@
        seule chose se lit sans decodeur.
        Le filet clair ne porte aucune information : il tient la grille, sans quoi
        un mois de cases blanches sur fond blanc n'aurait plus de structure. */
-    .dispo-case { min-height: 44px; aspect-ratio: 1; border: 1px solid var(--border); border-radius: 8px;
+    .dispo-case { min-height: var(--control); aspect-ratio: 1; border: 1px solid var(--line);
+                  border-radius: var(--radius-tile);
                   display: flex; flex-direction: column; gap: 2px;
                   align-items: center; justify-content: center; font-size: 14px;
                   font-variant-numeric: tabular-nums; font-weight: 600; position: relative;
@@ -84,7 +243,7 @@
                   -webkit-touch-callout: none; }
     /* La plage en cours de selection (appui long puis glisser, 1er octobre 2026).
        Un contour, pas un fond : le fond dit deja ce qu'est le jour. */
-    .dispo-case.sel { outline: 2px solid var(--primary); outline-offset: -2px; }
+    .dispo-case.sel { outline: 2px solid var(--ink); outline-offset: -2px; }
     /* ⚠ INDISPONIBLE = LE NUMERO EST BARRE. Absence, repos, conge : une seule
        marque pour les trois, parce qu'elles disent la meme chose a qui regarde —
        « pas ce jour-la ». La nuance (qui l'a posee, pourquoi) vit dans la feuille
@@ -102,7 +261,7 @@
     .dispo-case.passe { opacity: .45; cursor: not-allowed; }
     .dispo-case.conge { cursor: not-allowed; border-style: dashed; border-color: var(--border2); }
     .dispo-case.conge::after { content: "✕"; position: absolute; top: 3px; right: 4px;
-                               font-size: 9px; color: var(--text3); opacity: .8; }
+                               font-size: 9px; color: var(--muted-2); opacity: .8; }
     /* Une case de conge PORTANT une offre redevient actionnable : le curseur
        doit le dire, sinon il annonce « interdit » sur le seul geste possible. */
     .dispo-case.conge.a-prendre { cursor: pointer; }
@@ -117,9 +276,38 @@
        le dire. `not-allowed` ne reste que sur ce qui n'ouvre vraiment rien. */
     .dispo-case.inerte { cursor: not-allowed; }
     .dispo-case.passe:not(.inerte), .dispo-case.conge:not(.inerte) { cursor: pointer; }
-    .dispo-case.auj { box-shadow: inset 0 0 0 2px var(--primary); }
-    /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « cette absence, c'est
-       moi qui l'ai posee » ; le lot 2 en a introduit d'autres, verts et centres
+        /* ⚠ AUJOURD'HUI EST UNE PASTILLE VERTE PLEINE (recette de Thierry,
+       16 octobre 2026 : « le fond noir ne va pas, garde le vert en plus
+       foncé »). Le noir de la charte faisait du jour courant la tache la plus
+       sombre d'une grille par ailleurs claire — il criait plus fort que le
+       travail. Le vert foncé reste de la MÊME famille que le vert pâle du jour
+       qui porte un ménage : une seule couleur, deux intensités, et l'écart dit
+       lequel est aujourd'hui.
+       ⚠ La règle porte `:not(.vide)` pour une raison de CASCADE, pas de style :
+       `.a-moi` est déclarée PLUS BAS à spécificité égale et reprenait le fond.
+       Un jour qui porte un ménage garde sa pastille chiffrée, inversée juste
+       en dessous. */
+    .dispo-case.auj:not(.vide) { background: var(--ok); border-color: var(--ok); }
+    .dispo-case.auj:not(.vide) .dispo-num { color: var(--on-ink); font-weight: var(--fw-bold);
+                                            text-decoration-color: var(--on-ink); }
+    /* Sur la pastille d'aujourd'hui, déjà verte, le compteur s'inverse : fond
+       clair, chiffre vert. Le détacher par le noir y aurait rouvert la tache
+       sombre qu'on vient de retirer. */
+    .dispo-case.auj:not(.vide) .dispo-compte { background: var(--on-ink); color: var(--ok); }
+    .dispo-case.auj:not(.vide).manuel::before { background: var(--on-ink); }
+    /* ⚠ ET TOUT CE QUI SE DESSINE SUR CETTE CASE S'INVERSE AVEC ELLE (constat
+       de la revue de 41d4afe) : le contour de sélection de l'appui long était
+       noir à l'intérieur d'une case noire — elle glissait son doigt depuis
+       aujourd'hui et rien ne s'allumait — et le pointillé du congé disparaissait
+       de la même façon, sa couleur étant écrasée par la règle du jour courant. */
+    .dispo-case.auj:not(.vide).sel { outline-color: var(--on-ink); }
+    .dispo-case.auj:not(.vide).conge { border-color: var(--muted-2); }
+    /* ⚠ DEPLACE EN HAUT A GAUCHE, ET ANCRE. Ce point dit « ce jour-la a ete
+       regle a la main » — par elle OU par son hôte depuis le 14 octobre
+       2026 ; le TITRE de la case dit lequel des deux, et UN SEUL point sert aux
+       deux sources : deux points de sens different dans 44 px, c'est un point
+       qu'on ne sait plus lire. */
+    /* ⚠ ET IL RESTE SEUL DE SON ESPECE ICI ; le lot 2 en a introduit d'autres, verts et centres
        sous le numero, qui disent « j'ai un menage ». Deux points de sens
        different dans 44 px, c'est un seul point qu'on ne sait plus lire. Et sans
        `left`, celui-ci suivait le flux — donc bougeait au passage de la case en
@@ -130,7 +318,7 @@
        l'information la plus accessoire. */
     .dispo-case.manuel::before { content: ""; position: absolute; top: 4px; left: 4px;
                                  width: 4px; height: 4px;
-                                 border-radius: 50%; background: var(--text3); opacity: .8; }
+                                 border-radius: 50%; background: var(--muted); opacity: .9; }
 
     /* ─── MES MENAGES : FOND VERT + PASTILLE CHIFFREE (lot A) ──────────────
        Les points ne disaient qu'une chose — « il y en a » — et il fallait les
@@ -148,10 +336,30 @@
        cocher. Les tests DOM ne pouvaient pas le voir : jsdom lit le
        `textContent`, jamais la cascade. */
     .dispo-compte { display: inline-flex; align-items: center; justify-content: center;
-                    height: 16px; min-width: 16px; padding: 0 4px; border-radius: 8px;
-                    background: var(--green); color: #fff; font-size: 10.5px;
+                    height: 16px; min-width: 16px; padding: 0 4px; border-radius: var(--radius-pill);
+                    /* ⚠ VERT FONCÉ, PAS NOIR (recette de Thierry, 16 octobre
+                       2026). Le noir faisait du compteur la marque la plus
+                       sombre de la grille, pour un chiffre qui ne dit qu'une
+                       quantité ; et il n'avait aucun lien avec le vert pâle de
+                       la case qui le porte. Un cran plus foncé que son fond
+                       suffit à le détacher — c'est la même couleur, deux
+                       intensités, comme le jour courant et le jour à ménage. */
+                    background: var(--ok); color: var(--on-ink); font-size: 10.5px;
                     font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+        /* ⚠ LE FOND NE CODE TOUJOURS QU'UNE CHOSE — « j'ai du travail ce jour-là »
+       — ET IL RESTE VERT, remappé sur `--ok-soft`. La charte V5 l'aurait voulu
+       gris ; `tests/pwa-mes-jours-dom.test.js` (l. 2424) fige ce fond ET son
+       nom de variable, en une égalité STRICTE sur la liste des fonds de case.
+       Le passer au gris demandait de toucher un test, c'est-à-dire de sortir
+       du périmètre « CSS seul » — c'est donc un point remonté à Thierry, pas
+       une décision prise ici. */
     .dispo-case.a-moi { background: var(--green-bg); border-color: transparent; }
+    /* ⚠ UNE ABSENCE SE HACHURE, EN PLUS DU NUMÉRO BARRÉ (charte V5). Le barré
+       seul demandait de lire un chiffre de 14 px pour savoir si la journée
+       compte ; la hachure se voit à la distance où l'on lit un mois entier.
+       Elle ne touche ni aujourd'hui (pastille pleine) ni les cases vides. */
+    .dispo-case.off:not(.auj):not(.vide):not(.a-moi) {
+      background: repeating-linear-gradient(45deg, transparent 0 4px, var(--line) 4px 5px); }
     /* ⚠ UNE PROPOSITION QU'ON LUI FAIT VA DANS LA BULLE, PAS DANS UNE COULEUR
        (decision de Thierry, 1er octobre 2026). Le premier correctif la peignait
        en ambre « a confirmer » ; ce qui n'est porte par personne se dit par la
@@ -160,21 +368,28 @@
        numero barre a specificite egale, cette regle le rallumait en plein noir
        gras sur les cases `conge.a-moi` et `a-moi.passe` — celles qui portent
        deja le plus de marques. */
-    .dispo-case.a-moi:not(.off):not(.conge):not(.passe) .dispo-num {
+    /* ⚠ `:not(.auj)` : SANS LUI, LE JOUR LE PLUS LU DE L'ÉCRAN PERDAIT SA DATE
+       (constat de la revue de 41d4afe). Cette règle pèse (0,5,0) — chaque
+       `:not()` compte sa classe — contre (0,4,0) pour celle qui inverse le
+       numéro sur la pastille noire d'aujourd'hui, et elle est déclarée APRÈS :
+       une case « aujourd'hui + un ménage », c'est-à-dire le cas le plus
+       fréquent, sortait en #222222 sur #222222. La couleur du compteur, elle,
+       avait bien été inversée — c'est le numéro qui manquait. */
+    .dispo-case.a-moi:not(.off):not(.conge):not(.passe):not(.auj) .dispo-num {
       color: var(--text); font-weight: 700; }
     /* ⚠ LE PASSE GARDE SON VERT, et l'opacite fait le travail d'estompe.
        Le repeindre en gris le rendait INDISTINGUABLE d'un jour passe sans
        menage : a 45 % d'opacite, l'ecart entre `--bg2` et le blanc de la carte
        tombe sous 2 % de luminance. Un mois ecoule ne disait plus rien de ce
        qu'elle y avait fait. */
-    .dispo-case.passe .dispo-compte { background: var(--bg3); color: var(--text3); }
+    .dispo-case.passe .dispo-compte { background: var(--line); color: var(--muted); }
     /* PRIS PAR UNE AUTRE (spec visibilite, 2 octobre 2026) : une pastille sur
        fond BLANC, a cote du reste. Elle ne touche ni le fond du jour, ni le vert
        de « a moi », ni la bulle. Pas de legende (decision de Thierry) : le detail
        au toucher suffit a la comprendre. */
-    .dispo-compte.autrui { background: #fff; color: var(--text2); border: 1px solid var(--border2); }
-    .dispo-case.passe .dispo-compte.autrui { background: #fff; color: var(--text3); }
-    .jligne.autrui { cursor: default; background: var(--bg); }
+    .dispo-compte.autrui { background: var(--surface); color: var(--muted); border: 1px solid var(--border); }
+    .dispo-case.passe .dispo-compte.autrui { background: var(--surface); color: var(--muted-2); }
+    .jligne.autrui { cursor: default; background: var(--surface); }
 
     /* A PRENDRE : bulle de dialogue posee AU-DESSUS de la case, avec une pointe
        qui designe la date — forme retenue le 17 septembre 2026. Elle dit « ce
@@ -196,8 +411,11 @@
          chiffre gras flottant au-dessus d'une date, qui se lit comme une
          seconde date. Un gris tres clair suffit a la decoller sans lui rendre
          la couleur qu'on vient de lui retirer. */
-      background: var(--bg2); color: var(--text2); border: 1px solid var(--border2);
-      font-size: 11px; font-weight: 700;
+      /* ⚠ `--bg2` et `--border2`, PAS leurs tokens : les deux valent la même
+         chose depuis le remappage, et `tests/pwa-mes-jours-dom.test.js`
+         (l. 2406) cherche ces noms-là, mot pour mot. */
+      background: var(--bg2); color: var(--ink); border: 1px solid var(--border2);
+      font-size: 11px; font-weight: var(--fw-bold);
       display: inline-flex; align-items: center; justify-content: center;
       font-variant-numeric: tabular-nums; line-height: 1;
       box-shadow: 0 1px 4px rgba(0,0,0,.14);
@@ -227,14 +445,16 @@
                          padding-right: 2px; }
     .dispo-lien-config { background: none; border: 0; padding: 6px 2px; cursor: pointer;
                          display: inline-flex; align-items: center; gap: 6px;
-                         font-size: 12px; color: var(--text3); font-family: inherit;
+                         font-size: 12px; color: var(--muted); font-family: var(--font);
+                         font-weight: var(--fw-semibold);
                          line-height: 1.25; text-align: right; }
     .dispo-lien-config svg { width: 13px; height: 13px; flex-shrink: 0; }
-    .dispo-lien-config:hover { color: var(--text2); }
+    .dispo-lien-config:hover { color: var(--ink); }
     /* ⚠ L'ENGRENAGE SEUL GARDE UNE CIBLE DE 40 px. Sans libelle, le bouton se
        reduirait a l'icone — 13 px a viser au pouce, un tiers du minimum tenu
        partout ailleurs sur cet ecran. */
-    .dispo-lien-config.seul { min-width: 40px; min-height: 40px; justify-content: center; padding: 0; }
+    .dispo-lien-config.seul { min-width: var(--control); min-height: var(--control);
+                              justify-content: center; padding: 0; }
 
     /* ─── LA FEUILLE DU JOUR (lot B) ────────────────────────────────────────
        Un seul geste ouvre TOUT ce qui concerne la journee : ce qu'on lui
@@ -245,53 +465,128 @@
        savoir ce qu'on declenchait. Et sur un jour d'absence portant une offre,
        la bascule de disponibilite etait purement inatteignable. */
     .jsect { margin-bottom: 16px; }
-    .jsect-t { font-size: 11px; font-weight: 700; letter-spacing: .5px;
-               text-transform: uppercase; color: var(--text3); margin-bottom: 8px; }
-    .jsect-vide { font-size: 12.5px; color: var(--text3); padding: 2px 0 4px; }
+    .jsect-t { font-size: 11px; font-weight: var(--fw-bold); letter-spacing: .5px;
+               text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+    .jsect-vide { font-size: 12.5px; color: var(--muted); padding: 2px 0 4px; line-height: 1.5; }
     /* ⚠ 44 px DE HAUT. Depuis que le planning a disparu, cette ligne est le SEUL
        chemin vers la fiche du menage — donc vers « Marquer fait ». `padding:
        10px 12px` sur 13 px de texte donnait 40 px : sous la cible tactile, sur
        le geste le plus frequent de l'ecran. */
     .jligne { display: flex; align-items: center; gap: 10px; width: 100%;
-              background: var(--bg); border: 0.5px solid var(--border);
-              border-radius: var(--radius); padding: 10px 12px; min-height: 44px;
+              background: var(--surface); border: 1px solid var(--line);
+              border-radius: var(--radius-tile); padding: 16px 14px; min-height: 44px;
               text-align: left; cursor: pointer;
-              font-family: inherit; color: inherit; font-size: 13px; }
+              font-family: var(--font); color: var(--ink); font-size: var(--fs-small); }
     .jligne + .jligne { margin-top: 6px; }
-    .jligne.offre { border: 1px dashed var(--primary); }
+        /* ⚠ « À PRENDRE » N'A PLUS DE COULEUR (charte V5) : le pointillé dit déjà
+       « ce n'est à personne ». La terre cuite en faisait la marque la plus
+       criante de l'écran, pour ce qui n'engage justement personne. */
+    .jligne.offre { border: 1px dashed var(--border); }
     /* ⚠ `cursor: pointer` EST DANS LA REGLE DE BASE ci-dessus, pas sur la seule
        `.offre` : depuis ce lot, les lignes de SES menages s'ouvrent aussi, et
        annoncer « rien a faire ici » sur la ligne qui porte son unique geste
        serait exactement l'inverse. */
-    .jmarque { flex-shrink: 0; font-size: 11px; color: var(--text2); margin-left: 6px; }
-    .jmarque.fait { color: var(--green); font-weight: 700; }
+    /* ⚠ LE BOUTON « VU » EST UN FRERE DE LA LIGNE, PAS SON ENFANT. La ligne
+       EST un `<button>` (elle ouvre la fiche) : un bouton dans un bouton est
+       invalide, et le clic partirait aux deux. Ils vivent donc cote a cote
+       dans une rangee, et la ligne garde toute la largeur restante.
+       ⚠ RIEN D'AUTRE NE CHANGE : pas de fond, pas de bordure sur la ligne,
+       pas de badge. Le seul ajout visible de ce lot sur sa page est ce bouton
+       (decision de Thierry, recette du 14 octobre). */
+    /* ⚠ UNE SEULE BULLE A L'OEIL, DEUX ZONES AU DOIGT (demande de Thierry,
+       recette du 14 octobre : « mets Vu dans la bulle avec le nom du bien »).
+       L'enveloppe porte le fond, la bordure et l'arrondi ; la ligne et le
+       bouton les perdent. On lit un seul bloc — mais ce sont toujours deux
+       boutons FRERES, ce qui est la seule structure valide : la ligne EST un
+       `<button>` (elle ouvre la fiche), et un bouton dans un bouton ferait
+       partir le clic aux deux. */
+    .jrangee { display: flex; align-items: stretch; gap: 0;
+               background: var(--surface); border: 1px solid var(--line);
+               border-radius: var(--radius-tile); overflow: hidden; }
+    .jrangee + .jrangee, .jrangee + .jligne, .jligne + .jrangee { margin-top: 6px; }
+    .jrangee .jligne { margin-top: 0; border: none; background: transparent; border-radius: 0; }
+        /* ⚠ C'EST UN BOUTON D'ACTION : noir, gras. Il ne porte pas le bord de la
+       charte parce qu'il vit DANS la bulle de la ligne — c'est l'enveloppe qui
+       porte la forme, et le trait vertical qui sépare les deux zones. */
+    .jvu { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px;
+           background: transparent; border: none; border-radius: 0;
+           padding: 0 16px; min-height: 52px; /* la hauteur de la rangée */
+           font-family: var(--font); font-size: var(--fs-caption);
+           font-weight: var(--fw-bold); color: var(--ink);
+           cursor: pointer; }
+    /* Le trait qui separe les deux zones : sans lui, « Vu » se lit comme une
+       etiquette et personne ne le touche. */
+    .jrangee .jvu[data-vu] { border-inline-start: 1px solid var(--line); }
+    .jvu svg { width: 17px; height: 17px; flex-shrink: 0; }
+    /* Vu : l'etat, pas une action. Gris, sans trait, non cliquable. */
+        /* ✓ Vu : un ÉTAT, et le vert de la charte le dit — c'est fait, il n'y a
+       plus rien à toucher. */
+    /* ⚠ L'ÉTAT N'A PLUS DE MOT, donc plus besoin de graisse : la pastille
+       verte le dit seule, et la ligne s'allège d'autant. */
+    .jvu[disabled] { cursor: default; color: var(--ok); padding: 0 16px; }
+    .jvu.est-vu svg { width: 20px; height: 20px; }
+    /* ⚠ SEUL LE GESTE EST COUPE, PAS L'ETAT (constat de la revue de 6452d75,
+       et c'est la meme lecon que la revue de 6d007f3 treize lignes plus bas).
+       `.jvu` tout court masquait aussi la mention inerte « ✓ Vu » : l'hote
+       ouvrait l'apercu pour savoir si elle avait vu le menage, et sa ligne
+       ressemblait a celle d'un menage jamais lu. L'apercu mentait sur la seule
+       information que ce lot ajoute a cette page.
+       Le garde reel contre l'ecriture est le `fetch` patche ; ceci evite
+       seulement d'offrir un bouton dont on sait qu'il echouera. */
+    /* ⚠ L'APERÇU MONTRE LE BOUTON, IL NE LE LAISSE PAS AGIR (recette de
+       Thierry, 16 octobre 2026). Il le MASQUAIT : l'hôte ouvrait la page de sa
+       prestataire, n'y voyait aucun « Vu », et en concluait que le bouton
+       n'existait pas chez elle — c'est exactement ce qui vient de se produire
+       en recette. Un aperçu qui retire des éléments ne montre plus « ce qu'elle
+       voit », qui est sa seule raison d'être.
+       ⚠ LE GESTE RESTE COUPÉ, par `pointer-events` ici et par le `fetch`
+       patché là-haut — ce dernier est le vrai garde ; celui-ci évite seulement
+       d'offrir un bouton dont on sait qu'il échouera. Dire « vu » depuis
+       l'écran de l'hôte éteindrait l'alerte et les deux relances de 9 h sur
+       quelqu'un qui n'a rien lu. */
+    .apercu .jvu[data-vu],
+    .apercu #news-close { pointer-events: none; opacity: .45; cursor: default; }
+    .jmarque { flex-shrink: 0; font-size: 11px; color: var(--muted); margin-left: 6px; }
+    /* ⚠ `var(--green)`, PAS `var(--ok)` : les deux valent la même couleur
+       depuis le remappage du socle, mais `tests/pwa-mes-jours-dom.test.js`
+       cherche ce nom-là dans le fichier. Le vert de « fait » est de toute
+       façon celui que la charte V5 autorise ici. */
+    .jmarque.fait { color: var(--green); font-weight: var(--fw-bold); }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
        c'est justement la qu'on va lire ce qui a change. */
     .jligne.obsolete { opacity: .55; }
     .jligne.obsolete .jligne-bien { text-decoration: line-through; }
-    .jligne-bien { flex: 1; min-width: 0; font-weight: 600; }
+    .jligne-bien { flex: 1; min-width: 0; font-weight: var(--fw-semibold); }
     /* ⚠ LE CHOIX MONTRE LES DEUX FACES, ET LAQUELLE EST VRAIE. Deux boutons
        d'action (« me declarer absente ») obligeaient a savoir ou on en est pour
        lire ce qu'on allait faire. Un segment dit l'etat ET l'alternative dans la
        meme image. */
-    .jseg { display: flex; border: 1px solid var(--border2); border-radius: var(--radius);
+        /* ⚠ LA FACE CHOISIE EST NOIRE, LES DEUX (charte V5 : le noir ne dit que
+       « c'est celui-ci »). Elles étaient vert et gris : deux couleurs pour deux
+       faces du MÊME réglage, qui laissaient croire qu'une des deux réponses
+       était la bonne. Ce que l'écran doit dire est « voilà où vous en êtes »,
+       pas « voilà ce qu'il faut répondre ». */
+    .jseg { display: flex; border: 1px solid var(--border); border-radius: var(--radius-pill);
             overflow: hidden; }
-    .jseg button { flex: 1; border: 0; background: var(--bg); color: var(--text2);
-                   padding: 11px 8px; font-size: 13px; font-weight: 600;
-                   cursor: pointer; font-family: inherit; line-height: 1.25; }
-    .jseg button + button { border-left: 1px solid var(--border2); }
-    .jseg button[aria-pressed="true"] { background: var(--green-bg); color: var(--green); }
-    .jseg button[aria-pressed="true"].non { background: var(--bg3); color: var(--text); }
+    .jseg button { flex: 1; border: 0; background: var(--surface); color: var(--muted);
+                   padding: 0 10px; min-height: var(--control-lg);
+                   font-size: var(--fs-small); font-weight: var(--fw-semibold);
+                   cursor: pointer; font-family: var(--font); line-height: 1.25; }
+    .jseg button + button { border-left: 1px solid var(--border); }
+    .jseg button[aria-pressed="true"],
+    .jseg button[aria-pressed="true"].non { background: var(--ink); color: var(--on-ink);
+                                            font-weight: var(--fw-bold); }
     .jseg button:disabled { opacity: .45; cursor: not-allowed; }
 
     /* ─── Mes 30 prochains jours (refonte v2, lot 3) ──────────────────────── */
     .agenda-jour + .agenda-jour { margin-top: 14px; }
-    .agenda-date { font-size: 12.5px; font-weight: 600; color: var(--text2); margin-bottom: 6px; }
-    .agenda-date em { font-style: normal; font-weight: 400; color: var(--text3); }
+    .agenda-date { font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--ink);
+                  margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+    .agenda-date em { font-style: normal; font-weight: var(--fw-regular); color: var(--muted); }
     /* ⚠ SEUL LE JOUR MEME PORTE UN FOND PLEIN. C'est ce qu'elle fait
        MAINTENANT ; tout mettre en avant, c'est ne rien mettre en avant. */
-    .agenda-jour.auj .agenda-date { color: var(--primary); }
-    .agenda-jour.auj .agenda-item { background: var(--primary-bg); border-color: rgba(201,123,92,.3); }
+    .agenda-jour.auj .agenda-date { color: var(--ink); }
+    .agenda-jour.auj .agenda-item { background: var(--surface-2); border-color: var(--border); }
     /* ⚠ TOUTE LIGNE EST UN BOUTON, ET FAIT 44 px. Les siennes etaient des
        `<div>` inertes : le commentaire qui suivait renvoyait leur detail « au
        planning » — la page qui a disparu. La ligne de la liste et la case du
@@ -302,12 +597,25 @@
     .agenda-item {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
       width: 100%; text-align: left; font-family: inherit; color: var(--text);
-      background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius);
-      padding: 10px 12px; min-height: 44px; font-size: 13.5px; cursor: pointer;
+      background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-tile);
+      /* ⚠ LA LIGNE FAIT 52 px (charte V5), ET LA RÈGLE DIT QUAND MÊME
+         `min-height: 44px` : les 52 viennent du padding, et le plancher reste
+         la cible du pouce le jour où le texte manquerait. C'est aussi le mot
+         que `tests/pwa-mes-jours-dom.test.js` (l. 1721) cherche ici. */
+      padding: 16px 14px; min-height: 44px; font-size: var(--fs-small); cursor: pointer;
     }
     .agenda-item + .agenda-item { margin-top: 6px; }
-    .agenda-item.offre { border: 1px dashed var(--primary); }
-    .agenda-item.fait .agenda-bien { color: var(--text3); text-decoration: line-through; }
+    /* La rangee porte l'ecart quand le bouton « Vu » accompagne l'item, et
+       l'item perd son fond : c'est l'enveloppe qui le porte.
+       (`.jrangee + .jrangee` est deja declare plus haut, avec les lignes de la
+       feuille du jour : les deux surfaces partagent la rangee.) */
+    .jrangee + .agenda-item, .agenda-item + .jrangee { margin-top: 6px; }
+    .jrangee .agenda-item { margin-top: 0; border: none; background: transparent; border-radius: 0; }
+    /* Le jour courant colore la bulle ENTIERE, pas la moitie gauche. */
+    .agenda-jour.auj .jrangee { background: var(--surface-2); border-color: var(--border); }
+    .agenda-jour.auj .jrangee .agenda-item { background: transparent; }
+    .agenda-item.offre { border: 1px dashed var(--border); }
+    .agenda-item.fait .agenda-bien { color: var(--muted-2); text-decoration: line-through; }
     /* Une reservation qui a bouge : la ligne recule, mais elle reste ouvrable —
        c'est justement la qu'on va lire ce qui a change (meme regle que
        `.jligne.obsolete` dans la feuille du jour). */
@@ -316,6 +624,33 @@
     /* Les marques ⏳ 📝 ⏭ et le badge d'offre sont ceux de la feuille du jour
        (`.jmarque`, `.badge-offre`) : une seule fabrique, donc une seule verite. */
     .agenda-marques { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+
+    /* ─── LA VIGNETTE DU BIEN (16 octobre 2026) ─────────────────────────────
+       ⚠ RONDE ET PETITE : elle identifie le logement d'un coup d'œil, elle ne
+       le montre pas. À 36 px on reconnaît une porte, une façade, une couleur —
+       c'est tout ce qu'on lui demande, et c'est ce qui sépare une liste de
+       noms d'une liste de lieux.
+       ⚠ `flex-shrink: 0` : sans lui, elle se tasse en ovale dès qu'un nom de
+       bien est long, et c'est précisément là qu'on la regarde. */
+    /* ⚠ PAS `--surface-2` POUR LE REPLI, ET UN FILET (constat de la revue de
+       9454cf6). C'est exactement le fond d'une nouveauté non lue et celui de
+       la ligne d'aujourd'hui : sur ces deux surfaces — les plus fréquentes de
+       l'écran — le disque disparaissait, et il ne restait que deux initiales
+       grises flottantes. Or un bien sans photo est le cas par DÉFAUT
+       aujourd'hui : rien n'importe les photos automatiquement. */
+    .pwa-vignette { flex-shrink: 0; width: 36px; height: 36px; border-radius: 50%;
+                    overflow: hidden; background: var(--line);
+                    box-shadow: inset 0 0 0 1px var(--border);
+                    display: inline-flex; align-items: center; justify-content: center; }
+    .pwa-vignette img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    /* Sans photo, les initiales du bien — jamais une maison générique, qui ne
+       distinguerait aucun logement d'un autre. */
+    .pwa-vignette__ini { font-size: 12px; font-weight: var(--fw-bold); color: var(--muted);
+                         letter-spacing: .02em; }
+    /* Dans le fil, la vignette tient la place de l'emoji : un cran plus petite,
+       alignée sur la première ligne du texte. */
+    .news-item .pwa-vignette { width: 32px; height: 32px; }
+    .news-item .pwa-vignette__ini { font-size: 11px; }
     /* ⚠ `flex: 1` ET `nowrap`, COMME `.jligne-bien`. L'ellipse ne se declenche
        jamais sans `white-space: nowrap` : le nom revenait a la ligne au lieu
        d'etre coupe. Inoffensif tant que la droite ne portait qu'une pastille
@@ -323,67 +658,123 @@
        trois glyphes dans un `flex-shrink: 0`, toute la compression retombe sur
        le nom — et une ligne sur trois hauteurs, au telephone, chasse le reste
        de la liste hors de l'ecran. */
-    .agenda-bien { flex: 1; font-weight: 600; min-width: 0;
+    .agenda-bien { flex: 1; font-weight: var(--fw-semibold); min-width: 0;
                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .agenda-tag {
-      font-size: 9.5px; font-weight: 700; letter-spacing: .3px; border-radius: 999px;
-      padding: 2px 8px; flex-shrink: 0;
+      font-size: 9.5px; font-weight: var(--fw-bold); letter-spacing: .3px;
+      border-radius: var(--radius-pill); padding: 3px 9px; flex-shrink: 0;
     }
-    .agenda-tag.offre { background: var(--primary); color: #fff; }
-    .agenda-tag.fait { background: var(--green-bg); color: var(--green); }
-    .agenda-vide { font-size: 12.5px; color: var(--text2); }
+    /* Même règle que la ligne : ce qui n'est à personne se dit en pointillé
+       gris, jamais en aplat de couleur. */
+    .agenda-tag.offre { background: var(--surface); color: var(--muted);
+                        border: 1px dashed var(--border); }
+    .agenda-tag.fait { background: var(--ok-soft); color: var(--ok); }
+    .agenda-vide { font-size: 12.5px; color: var(--muted); }
 
     .dispo-champ { display: flex; flex-direction: column; gap: 4px; font-size: 11px;
-                   color: var(--text2); font-weight: 600; flex: 1; min-width: 120px; }
+                   color: var(--muted); font-weight: var(--fw-semibold); flex: 1; min-width: 120px; }
     .dispo-lignes-ab { display: flex; flex-direction: column; gap: 8px; }
     .dispo-ligne-ab { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
-    .dispo-tag { display: inline-flex; align-items: center; justify-content: center; min-width: 78px;
-                 height: 32px; border-radius: var(--radius); padding: 0 8px;
-                 font-size: 11px; font-weight: 700; }
-    .dispo-tag.a { background: var(--green-bg); color: var(--green); }
-    .dispo-tag.b { background: var(--amber-bg); color: var(--amber); }
-    .dispo-tag.simple { background: none; color: var(--text2); font-weight: 600; justify-content: flex-start; }
+        .dispo-tag { display: inline-flex; align-items: center; justify-content: center; min-width: 78px;
+                 height: 32px; border-radius: var(--radius-pill); padding: 0 10px;
+                 font-size: 11px; font-weight: var(--fw-bold); }
+    /* ⚠ MÊME GRIS POUR A ET POUR B, comme les lettres de la grille : ce sont
+       deux moitiés d'un même réglage, pas deux statuts. L'ambre est réservé à
+       « à confirmer » et au compteur des nouveautés. */
+    .dispo-tag.a, .dispo-tag.b { background: var(--surface-2); color: var(--muted); }
+    .dispo-tag.simple { background: none; color: var(--muted); font-weight: var(--fw-semibold);
+                        justify-content: flex-start; }
     /* ⚠ LES JOURS HABITUELS SE REGLENT ICI (decision du 15 septembre 2026,
        revenant sur celle du meme jour). C'etaient des pastilles d'information ;
        ce sont maintenant de vraies cases a cocher, avec une cible tactile de
        44 px comme le reste de cet ecran. */
+        /* ⚠ RONDES DE 40 px, MAIS CLIQUABLES SUR 44 (constat de la revue de
+       41d4afe). La première version posait `width: 40px` + `margin: 2px` : une
+       marge est HORS de la zone de frappe, et la cible tombait donc à 40 px —
+       la seule entorse à une règle que ce fichier réaffirme six fois. Le
+       `padding` reste dans la zone, et `background-clip: content-box` dessine
+       le rond sur les 40 px intérieurs. */
     .dispo-pastille { display: inline-flex; align-items: center; justify-content: center;
-                      width: 44px; height: 44px; border-radius: var(--radius);
-                      font-size: 13px; font-weight: 600; background: var(--bg2); color: var(--text3);
+                      box-sizing: border-box; width: 44px; height: 44px; padding: 2px;
+                      background-clip: content-box; border-radius: 50%;
+                      font-size: var(--fs-caption); font-weight: var(--fw-semibold);
+                      background: var(--surface-2); color: var(--muted);
                       cursor: pointer; user-select: none; border: 1px solid transparent; }
     .dispo-pastille input { position: absolute; opacity: 0; pointer-events: none; }
-    .dispo-pastille:focus-within { box-shadow: 0 0 0 2px var(--primary); }
-    .dispo-pastille.on { background: var(--green-bg); color: var(--green); border-color: var(--green); }
-    .dispo-ligne-ab.b .dispo-pastille.on { background: var(--amber-bg); color: var(--amber);
-                                           border-color: var(--amber); }
+    .dispo-pastille:focus-within { box-shadow: 0 0 0 2px var(--ink); }
+    /* ⚠ UN JOUR COCHÉ PREND UNE COULEUR DU CALENDRIER DES MÉNAGES, PAS LE VERT
+       (demande de Thierry, 16 octobre 2026). Le vert de cette page a un sens
+       précis et il est pris : « fait », « ✓ Vu », un avis qui salue la
+       propreté. L'employer aussi pour « je travaille ce jour-là » lui faisait
+       dire deux choses. Le bleu pâle `--presta-5` vient des pastels dont le
+       calendrier de l'hôte peint les barres de garde (`shared/presta-couleur.js`,
+       theme.css) : les deux écrans parlent du même planning, ils peuvent se
+       partager une palette.
+       ⚠ UN PASTEL NE PORTE PAS SEUL LA SÉLECTION : sur le gris très clair de la
+       carte, l'écart ne suffirait pas. Le bord encre la tient, et le chiffre
+       reste en `--ink` — 13:1 de contraste, là où du blanc sur pastel serait
+       illisible.
+       ⚠ EN A COMME EN B : la ligne B les peignait en ambre, donc la même case
+       disait deux choses selon la ligne où elle tombait. */
+    .dispo-pastille.on,
+    .dispo-ligne-ab.b .dispo-pastille.on { background: var(--presta-5); color: var(--ink);
+                                           border-color: var(--ink); font-weight: var(--fw-bold); }
     .dispo-ligne-ab.fige .dispo-pastille { cursor: default; opacity: .55; }
-    .dispo-mini { font-size: 12.5px; padding: 8px 12px; border-radius: var(--radius);
-                  border: 0.5px solid var(--border); background: var(--bg); color: var(--text);
+    /* ⚠ SEPT PASTILLES DE 44 px FONT 308 px : avec l'étiquette « Semaine A »
+       sur la même ligne, il en manque soixante, et la rangée se repliait en
+       4 + 3 — les deux lignes A et B perdant alors l'alignement qu'on vient
+       justement y comparer. L'étiquette passe donc au-dessus À TOUTE LARGEUR :
+       cette carte vit dans une feuille de 400 px, sur un téléphone comme sur
+       un ordinateur, et une requête de média sur la FENÊTRE ne voyait pas le
+       repli qui se produisait quand même sur grand écran. */
+    .dispo-tag.a, .dispo-tag.b { flex-basis: 100%; justify-content: flex-start;
+                                 background: none; height: 20px; padding: 0;
+                                 min-width: 0; margin-bottom: 2px; }
+    .dispo-ligne-ab { gap: 0; }
+    /* ⚠ SEPT PASTILLES DE 44 px FONT 308 px : avec l'étiquette « Semaine A »
+       sur la même ligne, il en manque soixante, et la rangée se repliait en
+       4 + 3. Les deux lignes A et B perdaient alors leur alignement — or c'est
+       exactement ce qu'on vient y comparer. L'étiquette passe au-dessus, et la
+       semaine tient d'un seul tenant. (Constat J.11 point 6.) */
+    .dispo-mini { display: inline-flex; align-items: center; min-height: var(--control);
+                  padding: 0 16px; font-family: var(--font); font-size: var(--fs-caption);
+                  font-weight: var(--fw-semibold); border-radius: var(--radius-pill);
+                  border: 1px solid var(--border); background: var(--surface); color: var(--ink);
                   cursor: pointer; }
-    .dispo-lien { background: none; border: 0; color: var(--primary); font-size: 12px;
-                  text-decoration: underline; cursor: pointer; padding: 4px 0; }
+    .dispo-lien { background: none; border: 0; color: var(--ink); font-family: var(--font);
+                  font-size: 12px; font-weight: var(--fw-semibold);
+                  text-decoration: underline; text-underline-offset: 2px;
+                  cursor: pointer; padding: 10px 0; min-height: var(--control); }
     .dispo-ancre { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-                   margin-top: 10px; font-size: 12px; color: var(--text2); }
-    .avis-etat strong { display: block; color: var(--text); font-size: 14px; margin-bottom: 4px; }
+                   margin-top: 10px; font-size: 12px; color: var(--muted); }
+    .avis-etat strong { display: block; color: var(--ink); font-size: var(--fs-body);
+                        font-weight: var(--fw-bold); margin-bottom: 6px; }
     .ratio { display: flex; gap: 14px; align-items: center; }
-    .ratio-item { display: flex; gap: 5px; align-items: center; font-size: 18px; font-weight: 600; }
+    .ratio-item { display: flex; gap: 5px; align-items: center; font-size: 18px;
+                 font-weight: var(--fw-bold); }
     .ratio-item svg { width: 15px; height: 15px; }
-    .ratio-item.pos { color: #1E7B34; }
-    .ratio-item.neg { color: #A85B12; }
-    .avis-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 8px; }
-    .avis-card.neg { border-left: 3px solid #A85B12; }
-    .avis-card.pos { border-left: 3px solid #1E7B34; }
-    .avis-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+    .ratio-item.pos { color: var(--ok); }
+    .ratio-item.neg { color: var(--danger); }
+        /* Carte blanche, et UN SEUL signal de couleur : le liseré de gauche. Le
+       fond teinté mettait tout l'avis en accusation (ou en éloge) ; ce qu'on
+       lit d'abord doit être le texte. */
+    .avis-card { background: var(--surface); border: 1px solid var(--line);
+                 border-radius: var(--radius-card); padding: 14px 16px; margin-bottom: 10px; }
+    .avis-card.neg { border-left: 4px solid var(--danger); }
+    .avis-card.pos { border-left: 4px solid var(--ok); }
+    .avis-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
     .avis-meta svg { width: 13px; height: 13px; }
-    .avis-meta .pos { color: #1E7B34; }
-    .avis-meta .neg { color: #A85B12; }
-    .avis-texte { font-size: 13px; line-height: 1.5; }
+    .avis-meta .pos { color: var(--ok); }
+    .avis-meta .neg { color: var(--danger); }
+    .avis-texte { font-size: var(--fs-small); line-height: 1.55; color: var(--ink); }
     .entete-ratio { text-align: right; line-height: 1.3; cursor: pointer;
-                    border-radius: var(--radius); padding: 4px 6px; margin: -4px -6px; }
-    .entete-ratio:hover { background: var(--bg2); }
-    .entete-ratio:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+                    border-radius: var(--radius-pill); padding: 6px 10px; margin: -6px -10px;
+                    min-height: var(--control); display: flex; flex-direction: column;
+                    justify-content: center; }
+    .entete-ratio:hover { background: var(--surface-2); }
+    .entete-ratio:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
     /* Repli quand les chiffres ne sont pas surs : la porte reste, pas le chiffre. */
-    .ratio-porte { font-size: 13px; font-weight: 600; color: var(--primary); white-space: nowrap; }
+    .ratio-porte { font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--ink); white-space: nowrap; }
     .entete-ratio .ratio { justify-content: flex-end; gap: 10px; }
     .entete-ratio .ratio-item { font-size: 14px; }
     /* ⚠ SOULIGNE, PARCE QUE RIEN D'AUTRE NE DIT QU'ON PEUT LE TOUCHER (lot E).
@@ -395,13 +786,13 @@
        ⚠ SUR LA PHRASE, PAS SUR LES CHIFFRES : souligner « 21 » et « 2 » les
        abimerait — ce sont des donnees qu'on lit, pas un libelle. La phrase, elle,
        nomme la destination. */
-    .entete-ratio .entete-periode { font-size: 11px; color: var(--text2);
+    .entete-ratio .entete-periode { font-size: 11px; color: var(--muted);
                                     text-decoration: underline;
                                     text-decoration-thickness: 1px;
                                     text-underline-offset: 2px;
-                                    text-decoration-color: var(--text3); }
-    .entete-ratio:hover .entete-periode { color: var(--text);
-                                          text-decoration-color: var(--text2); }
+                                    text-decoration-color: var(--muted-2); }
+    .entete-ratio:hover .entete-periode { color: var(--ink);
+                                          text-decoration-color: var(--muted); }
     /* Le repli sans chiffre est deja une phrase-porte : il se souligne aussi. */
     .ratio-porte { text-decoration: underline; text-decoration-thickness: 1px;
                    text-underline-offset: 2px; }
@@ -414,25 +805,39 @@
        n'a pas encore accepte — ou qu'on laisse filer une offre sans repondre. */
     .badge-propose { display: inline-block; font-size: 9px; font-style: italic; opacity: 0.75;
                      margin-top: 3px; }
-    .badge-offre { display: inline-block; font-size: 9px; font-weight: 700; letter-spacing: 0.3px;
-                   border: 1px dashed currentColor; border-radius: 999px; padding: 0 5px; margin-top: 3px; }
+        /* ⚠ L'UN DES DEUX SEULS AMBRES DE L'ÉCRAN (l'autre est le compteur des
+       nouveautés) : « HôteSmart attend votre décision, et un délai court ». */
+    /* ⚠ `--warn`, PAS `--amber-text` : #B87500 sur #FFF4E0 donne 3,45:1, sous
+       le seuil AA — et en 9 px gras, aucune exemption « grand texte » ne joue.
+       `--warn` (#9A5B00) sur le même fond passe à 5,1:1 (constat de la revue
+       de 41d4afe). Le bord garde l'ambre franc, qui ne porte pas de texte. */
+    .badge-offre { display: inline-block; font-size: 9px; font-weight: var(--fw-bold);
+                   letter-spacing: 0.3px; border: 1px solid var(--amber);
+                   background: var(--warn-soft); color: var(--warn);
+                   border-radius: var(--radius-pill); padding: 2px 8px; margin-top: 3px; }
     /* ⚠ 44 px DE HAUT, C'EST LA CIBLE TACTILE, pas une marge decorative. C'est
        le SEUL chemin de retour vers le calendrier depuis que la barre d'onglets
        n'existe plus : rate sur un telephone, il n'y a pas de second essai
        ailleurs sur l'ecran. Meme grammaire que `.dispo-mini` (fond, bordure,
        rayon) pour qu'il se lise comme un bouton et non comme un titre. */
-    .avis-retour { display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
-                   padding: 0 14px; margin-bottom: 12px; font-size: 13px; font-family: inherit;
-                   border: 0.5px solid var(--border); border-radius: var(--radius);
-                   background: var(--bg); color: var(--text); cursor: pointer; }
-    .avis-retour:hover { background: var(--bg2); }
-    .avis-retour:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+    .avis-retour { display: inline-flex; align-items: center; gap: 6px; min-height: var(--control);
+                   padding: 0 18px; margin-bottom: 12px; font-size: var(--fs-small);
+                   font-family: var(--font); font-weight: var(--fw-semibold);
+                   border: 1px solid var(--border); border-radius: var(--radius-pill);
+                   background: var(--surface); color: var(--ink); cursor: pointer; }
+    .avis-retour:hover { background: var(--surface-2); }
+    .avis-retour:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
     .avis-periode { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 12px; color: var(--text2); }
-    .avis-periode select { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 5px 8px; font-size: 12px; color: var(--text); }
-    .avis-sans-detail { color: var(--text2); font-style: italic; }
-    .badge-prive { background: var(--bg2); border: 0.5px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; color: var(--text2); }
+    .avis-periode select { background: var(--surface); border: 1px solid var(--border);
+                           border-radius: var(--radius-pill); min-height: var(--control);
+                           padding: 0 12px; font-family: var(--font); font-size: 12px; color: var(--ink); }
+    .avis-sans-detail { color: var(--muted); font-style: italic; }
+    .badge-prive { background: var(--surface-2); border: 1px solid var(--line);
+                   border-radius: var(--radius-pill); padding: 3px 10px; font-size: 11px;
+                   font-weight: var(--fw-semibold); color: var(--muted); }
 
-    .filter-title { font-size: 10px; color: var(--text2); font-weight: 500; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .filter-title { font-size: 10px; color: var(--muted); font-weight: var(--fw-bold); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
+    #carte-biens { padding: 14px 16px; }
     /* ⚠ 44 px DE HAUT, PARCE QUE CE N'EST PLUS UNE BARRE LATERALE DE BUREAU.
        Ces lignes vivaient dans la colonne gauche du planning, masquee sur
        telephone au profit d'une feuille a gros boutons ; la feuille est partie
@@ -443,58 +848,178 @@
        planning ou la meme couleur teintait ses cartes (`.prop-color-*`). Ces
        cartes ont disparu : la pastille ne renvoyait plus a rien. Decision de
        Thierry au meme chantier — la couleur par logement ne revient pas. */
-    .filter-item { display: flex; align-items: center; gap: 10px; min-height: 44px;
-                   padding: 2px 0; cursor: pointer;
-                   border-bottom: 0.5px solid var(--border); }
-    .filter-item:last-child { border-bottom: none; }
-    .filter-item input { cursor: pointer; accent-color: var(--primary);
-                         width: 18px; height: 18px; flex-shrink: 0; }
-    .filter-label { font-size: 13px; color: var(--text); }
+    /* ⚠ DES PILULES CÔTE À CÔTE, PLUS UNE LISTE VERTICALE (modernisation du
+       16 octobre 2026). Trois logements prenaient trois lignes de 52 px, soit
+       un sixième de l'écran, pour un réglage d'affichage qu'elle touche une
+       fois par mois. En pilules, les mêmes trois tiennent sur deux rangs et le
+       calendrier remonte d'autant.
+       ⚠ LA CASE À COCHER RESTE VISIBLE, ET C'EST UN GARDE-FOU, pas une
+       hésitation de dessin. Peindre la pilule en noir quand elle est cochée
+       demanderait `:has()`, que les navigateurs d'avant 2022 ne connaissent
+       pas : sur un téléphone ancien, l'état du filtre deviendrait INVISIBLE.
+       La case dit l'état partout ; la pilule ne fait que l'habiller. */
+    #filter-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .filter-item { display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+                   padding: 0 16px 0 12px; cursor: pointer;
+                   background: var(--surface); border: 1px solid var(--border);
+                   border-radius: var(--radius-pill); }
+    .filter-item:last-child { border-bottom: 1px solid var(--border); }
+    .filter-item:hover { border-color: var(--ink); }
+        /* ⚠ LE NOIR DES CASES COCHÉES : c'est un CHOIX actif, le seul emploi du
+       noir plein avec les segments (charte V5). */
+    .filter-item input { cursor: pointer; accent-color: var(--ink);
+                         width: 18px; height: 18px; flex-shrink: 0; margin: 0; }
+    .filter-label { font-size: var(--fs-small); color: var(--ink);
+                    font-weight: var(--fw-medium); }
 
     .week-stats { display: flex; gap: 12px; margin-bottom: 16px; }
-    .week-stat { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 14px; font-size: 12px; }
-    .week-stat strong { font-size: 18px; font-weight: 600; display: block; }
+    .week-stat { background: var(--surface); border: 1px solid var(--line);
+                border-radius: var(--radius-card); padding: 14px 16px; font-size: 12px;
+                color: var(--muted); }
+    .week-stat strong { font-size: var(--fs-kpi); font-weight: var(--fw-bold);
+                        color: var(--ink); display: block; letter-spacing: var(--tracking-tight); }
 
-    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; display: flex; align-items: center; justify-content: center; }
-    .modal { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 24px; width: 400px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
-    .modal-title { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
-    .modal-sub { font-size: 12px; color: var(--text2); margin-bottom: 16px; }
-    .modal-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 0.5px solid var(--border); }
-    .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+        .modal-overlay { position: fixed; inset: 0; background: var(--scrim); z-index: 100;
+                     display: flex; align-items: center; justify-content: center; }
+    .modal { background: var(--surface); border: 1px solid var(--line);
+             border-radius: var(--radius-card); padding: 24px;
+             width: 400px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
+    .modal-title { font-size: 19px; font-weight: var(--fw-bold); margin-bottom: 4px;
+                   letter-spacing: var(--tracking-tight); }
+    .modal-sub { font-size: var(--fs-caption); color: var(--muted); margin-bottom: 18px; }
+    .modal-row { display: flex; justify-content: space-between; gap: 16px;
+                 font-size: var(--fs-small); padding: 11px 0;
+                 border-bottom: 1px solid var(--line); }
+    .modal-row span:first-child { color: var(--muted); }
+    .modal-row span:last-child { font-weight: var(--fw-semibold); text-align: right; }
+    .modal-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
+    /* ⚠ `1 1 auto`, PAS `1` : à parts égales, « Je prends ce ménage » (170 px
+       de texte) et « Fermer » (90 px) recevaient la même largeur, et le
+       premier passait sur deux lignes dans un bouton deux fois trop large pour
+       le second. La base `auto` leur laisse leur largeur naturelle, puis
+       partage ce qui reste. */
+    .modal-actions .btn { flex: 1 1 auto; min-width: 110px; }
+    /* ⚠ APERÇU : l'hôte regarde, il n'agit pas. Les gestes qui engagent la
+       prestataire disparaissent — « Fermer » reste, sinon la fenêtre modale
+       devient un piège. Le garde réel est sur `fetch` : ceci évite d'offrir un
+       bouton dont on sait qu'il échouera. */
+    .apercu #modal-prendre, .apercu #modal-retirer, .apercu #modal-accepter,
+    .apercu #modal-refuser, .apercu #modal-done { display: none !important; }
+    /* ⚠ SEULES LES ÉCRITURES SONT COUPÉES, PAS LA LECTURE (constat de la revue
+       de 6d007f3). `pointer-events: none` sur toutes les cases empêchait aussi
+       d'OUVRIR la feuille d'un jour — c'est-à-dire la seule chose que l'hôte
+       vient voir. Le segment « Disponible / Pas disponible », lui, écrit : il
+       disparaît, plutôt que d'échouer en « Connexion impossible » et de faire
+       croire à l'hôte que son réseau est en panne. */
+    .apercu [data-dispo], .apercu #btn-reglages { display: none !important; }
+    .apercu .sync-banner { display: none !important; }
+    .apercu .apercu-bandeau { display: flex; }
+    .apercu-bandeau {
+      display: none; align-items: center; justify-content: center; gap: 6px;
+      padding: 9px 10px; background: var(--ink); color: var(--on-ink);
+      font-size: 12px; font-weight: var(--fw-bold); border-bottom: 1px solid var(--ink);
+    }
 
-    .modal-error   { background: #FEE2E2; border: 0.5px solid #DC2626; color: #991B1B; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
+        .modal-error   { background: var(--danger-soft); border: 1px solid var(--danger);
+                     color: var(--danger); border-radius: var(--radius-tile);
+                     padding: 12px 14px; margin-top: 14px; font-size: var(--fs-caption);
+                     line-height: 1.5; display: none; }
     .modal-error.visible { display: block; }
-    .modal-success { background: #D1FAE5; border: 0.5px solid #059669; color: #065F46; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
+    .modal-success { background: var(--ok-soft); border: 1px solid var(--ok);
+                     color: var(--ok); border-radius: var(--radius-tile);
+                     padding: 12px 14px; margin-top: 14px; font-size: var(--fs-caption);
+                     line-height: 1.5; display: none; }
     .modal-success.visible { display: block; }
-    .modal-warning { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E; border-radius: var(--radius); padding: 10px 12px; margin-top: 12px; font-size: 12px; line-height: 1.5; display: none; }
+    /* Le second et dernier ambre : il porte « à confirmer — 4 h restantes ». */
+    .modal-warning { background: var(--warn-soft); border: 1px solid var(--amber);
+                     color: var(--warn); border-radius: var(--radius-tile);
+                     padding: 12px 14px; margin-top: 14px; font-size: var(--fs-caption);
+                     line-height: 1.5; display: none; }
     .modal-warning.visible { display: block; }
 
-    .admin-note { background: #FFF3CD; border: 0.5px solid #F59E0B; border-radius: var(--radius); padding: 10px 12px; margin-top: 14px; font-size: 12px; color: #92400E; line-height: 1.5; }
-    .admin-note-title { font-weight: 600; margin-bottom: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; }
+    /* ⚠ LA NOTE DE L'HÔTE N'EST PLUS JAUNE (charte V5). Le jaune la mettait au
+       rang d'une alerte : c'est une consigne de travail, qu'on lit, pas une
+       chose à laquelle il faut réagir. Le titre la nomme déjà. */
+    .admin-note { background: var(--surface-2); border: 1px solid var(--line);
+                  border-radius: var(--radius-tile); padding: 12px 14px; margin-top: 16px;
+                  font-size: var(--fs-caption); color: var(--ink); line-height: 1.55; }
+    .admin-note-title { font-weight: var(--fw-bold); margin-bottom: 6px; font-size: 11px;
+                        color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
 
     /* Bandeau global "actions en attente" */
-    .sync-banner { background: #FEF3C7; border: 0.5px solid #D97706; color: #92400E; border-radius: var(--radius); padding: 8px 12px; margin-bottom: 12px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
-    .sync-banner.offline { background: #FEE2E2; border-color: #DC2626; color: #991B1B; }
+    .sync-banner { background: var(--surface-2); border: 1px solid var(--border);
+                   color: var(--ink); border-radius: var(--radius-tile);
+                   padding: 12px 14px; margin-bottom: 12px; font-size: var(--fs-caption);
+                   font-weight: var(--fw-medium); display: flex; align-items: center; gap: 8px; }
+    /* ⚠ HORS LIGNE EST UN ÉTAT, PAS UNE ERREUR (charte V5) : fond noir, texte
+       blanc. Le rouge disait « quelque chose a échoué » — rien n'a échoué, elle
+       est dans un sous-sol et ses gestes partiront tout seuls en remontant. */
+    .sync-banner.offline { background: var(--ink); border-color: var(--ink);
+                           color: var(--on-ink); }
     .sync-banner-spinner { animation: spin 1s linear infinite; display: inline-block; }
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
     /* Fil d'actualités */
-    .news-panel { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 16px; margin-bottom: 16px; }
-    .news-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-    .news-title { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
-    .news-badge { background: #E24B4A; color: white; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 20px; }
-    .news-close { background: none; border: 0.5px solid var(--border); border-radius: var(--radius); cursor: pointer; color: var(--text2); font-size: 12px; padding: 4px 10px; font-family: inherit; transition: all 0.15s; }
-    .news-close:hover { border-color: var(--green); color: var(--green); }
-    .news-list { display: flex; flex-direction: column; gap: 8px; }
-    .news-item { background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 10px 12px; display: flex; align-items: flex-start; gap: 10px; cursor: pointer; transition: opacity 0.15s; }
+    .news-panel { background: var(--surface); border: 1px solid var(--border);
+                  border-radius: var(--radius-card); padding: 16px; margin-bottom: 16px; }
+    .news-header { display: flex; align-items: center; justify-content: space-between;
+                   gap: 10px; margin-bottom: 12px; }
+    .news-title { font-size: var(--fs-caption); font-weight: var(--fw-bold);
+                  display: flex; align-items: center; gap: 8px; }
+    /* ⚠ L'UN DES DEUX SEULS AMBRES DE L'ÉCRAN : « il y a du nouveau ». Le rouge
+       d'avant le faisait lire comme une alerte. */
+    .news-badge { background: var(--amber); color: var(--ink); font-size: 10px;
+                  font-weight: var(--fw-bold); padding: 2px 8px;
+                  border-radius: var(--radius-pill); }
+    .news-close { background: var(--surface); border: 1px solid var(--border);
+                  border-radius: var(--radius-pill); cursor: pointer; color: var(--ink);
+                  font-size: 12px; font-weight: var(--fw-semibold);
+                  min-height: var(--control); padding: 0 14px; flex-shrink: 0;
+                  font-family: var(--font); transition: all 0.15s; }
+    .news-close:hover { border-color: var(--ink); background: var(--surface-2); }
+    /* ⚠ LE FIL NE PREND PLUS L'ÉCRAN ENTIER. Trois annonces et la carte des
+       biens remplissaient les 844 px d'un téléphone : le calendrier, qui EST
+       la page, commençait sous la ligne de flottaison. Il défile désormais dans
+       sa propre boîte au-delà de deux annonces et demie.
+       ⚠ `overscroll-behavior: contain` : sans lui, arriver au bas de cette
+       liste fait repartir la PAGE derrière — on perd le calendrier en croyant
+       lire la dernière nouvelle. */
+    .news-list { display: flex; flex-direction: column; gap: 8px;
+                 max-height: 38vh; overflow-y: auto; overscroll-behavior: contain; }
+    .news-item { background: var(--surface); border: 1px solid var(--line);
+                 border-radius: var(--radius-tile); padding: 10px 12px; display: flex;
+                 align-items: flex-start; gap: 10px; cursor: pointer; transition: opacity 0.15s; }
     .news-item:hover { opacity: 0.85; }
-    .news-item.unread { border-left: 3px solid var(--primary); }
-    .news-item.read { opacity: 0.6; }
-    .news-icon { font-size: 16px; flex-shrink: 0; }
-    .news-content { flex: 1; }
-    .news-content-title { font-size: 12px; font-weight: 500; }
-    .news-content-sub { font-size: 11px; color: var(--text2); margin-top: 2px; line-height: 1.4; }
-    .news-time { font-size: 10px; color: var(--text2); flex-shrink: 0; white-space: nowrap; }
+    .news-item.unread { border-left: 3px solid var(--ink); background: var(--surface-2); }
+    /* ⚠ L'AFFADISSEMENT NE TOUCHE PLUS LA COLONNE DE DROITE (constat de la
+       revue de a218fd6). `opacity` sur la carte entière emportait le bouton
+       « Vu » — qu'on vient justement d'y mettre pour qu'il soit touché : une
+       simple tape sur la carte pour en lire le détail la marquait lue, et le
+       bouton encore actif passait à 55 %. L'opacité se pose donc sur ce qui
+       est lu, pas sur ce qui reste à faire. */
+    .news-item.read > .pwa-vignette,
+    .news-item.read > .news-icon,
+    .news-item.read > .news-content,
+    .news-item.read .news-time { opacity: 0.55; }
+    .news-icon { font-size: 14px; line-height: 1.4; flex-shrink: 0; }
+    .news-content { flex: 1; min-width: 0; }
+    .news-content-title { font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+    .news-content-sub { font-size: 12px; color: var(--muted); margin-top: 3px; line-height: 1.45; }
+    .news-time { font-size: 10px; color: var(--muted-2); flex-shrink: 0; white-space: nowrap;
+                 font-variant-numeric: tabular-nums; }
+    /* ⚠ LA COLONNE DE DROITE D'UNE ANNONCE : l'heure, et sous elle le bouton
+       « Vu » quand l'annonce porte un ménage à elle (16 octobre 2026). */
+    .news-droite { display: flex; flex-direction: column; align-items: flex-end;
+                   gap: 6px; flex-shrink: 0; }
+    /* ⚠ ICI LE BOUTON PORTE SA PROPRE FORME, contrairement aux deux autres
+       surfaces : dans la feuille du jour et dans la liste des trente jours, il
+       vit DANS la bulle de la ligne et c'est l'enveloppe qui la porte. Une
+       annonce n'est pas un bouton : il lui faut son bord, sinon « Vu » se lit
+       comme une étiquette de plus et personne ne le touche. */
+    .news-item .jvu { min-height: var(--control); padding: 0 14px;
+                      border: 1.5px solid var(--ink); border-radius: var(--radius-pill);
+                      background: var(--surface); }
+    .news-item .jvu:hover { background: var(--surface-2); }
 
     /* ============================================ */
     /* RESPONSIVE MOBILE - breakpoint 900px         */
@@ -526,13 +1051,28 @@
         padding: 8px 10px;
       }
 
-      /* Modal : presque plein ecran */
+      /* ─── LA FEUILLE DU BAS (charte V5) ─────────────────────────────────
+         24 px en haut, une poignée, une ombre douce : elle doit se lire comme
+         une feuille qui MONTE depuis le bas, pas comme une boîte posée au
+         milieu. Le voile derrière est le même partout (`--scrim`).
+         ⚠ LA POIGNÉE EST UN `::before`, DONC DU CSS PUR : aucun nœud ajouté,
+         aucune ligne de JavaScript touchée. Elle ne se touche pas (le geste de
+         glissement n'existe pas ici) — c'est une affordance de forme, et
+         `pointer-events: none` l'empêche d'intercepter un doigt. */
       .modal {
         width: 100%;
         max-width: 100%;
         margin: 0;
-        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-        max-height: 85vh;
+        border: none;
+        border-radius: 24px 24px 0 0;
+        padding: 10px 20px calc(20px + env(safe-area-inset-bottom, 0px));
+        max-height: 88vh;
+        box-shadow: var(--shadow-sheet);
+      }
+      .modal::before {
+        content: ''; display: block; width: 36px; height: 4px; flex-shrink: 0;
+        margin: 0 auto 14px; border-radius: var(--radius-pill);
+        background: var(--line); pointer-events: none;
       }
       .modal-overlay {
         align-items: flex-end;
@@ -540,24 +1080,48 @@
 
       /* Topbar plus compacte */
       .topbar {
-        padding: 12px 16px;
+        padding: 14px 16px;
       }
+      /* ⚠ CE BLOC ÉCRASAIT L'ÉCHANGE : déclaré en dernier et à spécificité
+         égale, il remettait le titre de l'application en 17 px gras et le
+         prénom en 12 px — exactement l'ordre que la modernisation vient
+         d'inverser. Il ne garde donc que l'ajustement de taille, dans le bon
+         sens. */
       .page-title {
-        font-size: 16px;
+        font-size: 10px;
       }
       .page-sub {
-        font-size: 11px;
+        font-size: 19px;
       }
     }
+    /* ⚠ CE BLOC EST DÉCLARÉ EN DERNIER, ET CE N'EST PAS DU RANGEMENT
+       (constat de la revue de 41d4afe). Il vivait plus haut, avec les
+       pastilles : le `@media (max-width: 900px)` ci-dessus matche AUSSI à
+       390 px, et son raccourci `padding:` sur `.modal` écrasait, à spécificité
+       égale et plus tard, les marges que ce bloc-ci vient réduire. Les
+       « vingt-deux pixels pris sur les marges » n'existaient donc pas. */
+    @media (max-width: 440px) {
+      /* ⚠ ET LES VINGT-DEUX PIXELS QUI MANQUAIENT SE PRENNENT SUR LES MARGES,
+         PAS SUR LA CIBLE TACTILE. Sept pastilles de 44 px (40 de dessin, 2 de
+         marge de chaque côté) font 308 px ; la feuille n'en offrait que 286.
+         Rétrécir la pastille aurait réglé la mise en page en cassant la règle
+         qui compte — 44 px sous le pouce, partout sur cet écran. */
+      #modal-body > .dispo-carte { padding: 14px 10px; }
+      .modal { padding-left: 14px; padding-right: 14px; }
+    }
+
   </style>
 </head>
 <body>
+<!-- Visible seulement en apercu (classe `apercu` sur <html>) : l'hote doit
+     savoir qu'il regarde l'ecran de quelqu'un d'autre, et qu'il n'agit pas. -->
+<div class="apercu-bandeau">Aperçu — lecture seule</div>
 
 <div class="layout">
   <div class="main" style="margin-left:0">
     <div class="topbar">
       <div>
-        <div class="page-title">🧹 Planning ménages</div>
+        <div class="page-title">Planning ménages</div>
         <div class="page-sub" id="presta-label">Chargement...</div>
       </div>
       <!-- Ratio permanent : visible des l'ouverture et sur tous les onglets,
@@ -666,7 +1230,7 @@
             <div class="dispo-titre">Mes jours de travail</div>
             <!-- ⚠ EN LECTURE SEULE, ET C'EST UNE DECISION PRODUIT (15 sept. 2026).
                  Ses jours habituels sont l'ORGANISATION DU TRAVAIL, reglee par son
-                 employeur. Elle declare ses ABSENCES — un jour, ou une plage — elle
+                 hôte. Elle declare ses ABSENCES — un jour, ou une plage — elle
                  ne redessine pas son planning. Le serveur n'expose d'ailleurs
                  aucune action sur les regles. -->
             <div id="dispo-recur"></div>
@@ -754,8 +1318,83 @@
 </div>
 
 <script type="module">
+// ═══════════════════════════════════════════════════════════════════════════
+// MODE APERÇU (`?apercu=1`) — CETTE PAGE, VUE PAR L'HÔTE, SANS POUVOIR AGIR
+//
+// L'hôte ouvre la page de sa prestataire dans un cadre, depuis sa fiche, pour
+// voir ce qu'elle voit. Quatre choses deviennent alors interdites, et aucune
+// n'est cosmétique :
+//
+//   1. ÉCRIRE. Un clic de l'hôte sur « Je prends » prendrait un ménage À SA
+//      PLACE, sous son identité à elle. Le garde est posé sur `fetch`
+//      lui-même, pas sur les boutons : un bouton qu'on oublie de masquer
+//      reste inoffensif, l'inverse n'est pas vrai.
+//   2. HORODATER SA DERNIÈRE OUVERTURE. C'est le serveur qui refuse (le GET
+//      porte `apercu=1`) : sans cela, l'hôte qui regarde ferait croire qu'ELLE
+//      a regardé, et l'alerte « Ménage non reçu » se tairait à tort.
+//   3. GARDER SON JETON. `getToken()` l'écrit d'ordinaire dans le
+//      `localStorage` — qui est celui du navigateur de l'HÔTE, même origine.
+//      Son lien est son mot de passe : il ne reste pas chez quelqu'un d'autre.
+//   4. S'INSTALLER. Ni service worker, ni manifeste : le navigateur de l'hôte
+//      proposerait d'installer l'application de sa prestataire, et un cache
+//      lui survivrait.
+// ═══════════════════════════════════════════════════════════════════════════
+const APERCU = new URLSearchParams(window.location.search).get('apercu') === '1'
+if (APERCU) {
+  document.documentElement.classList.add('apercu')
+  // ⚠ AUCUNE MÉMOIRE DE SON TRAVAIL CHEZ QUELQU'UN D'AUTRE (constat de
+  // sécurité de la revue de 6d007f3). Le garde ne portait que sur le jeton,
+  // dans `getToken()` — mais cette page range aussi, sous des clés qui ne
+  // portent AUCUN identifiant de personne (`menages-done-server-v2`,
+  // `menages-pending-v2`, `menages-read-v2`), le miroir de ses ménages faits,
+  // sa file d'actions hors ligne et ses notifications acquittées. Dans
+  // l'iframe de l'hôte, qui est la MÊME ORIGINE, ce miroir écrasait le sien
+  // s'il utilise aussi l'application — et laissait dans tous les cas les
+  // données de travail d'un tiers sur sa machine.
+  //
+  // Un stockage EN MÉMOIRE, le temps du cadre : la page fonctionne
+  // normalement, et rien ne survit à sa fermeture. Posé ici, avant tout autre
+  // code, il couvre aussi les clés qu'on ajouterait demain.
+  try {
+    const memoire = new Map()
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (k) => (memoire.has(String(k)) ? memoire.get(String(k)) : null),
+        setItem: (k, v) => { memoire.set(String(k), String(v)) },
+        removeItem: (k) => { memoire.delete(String(k)) },
+        clear: () => memoire.clear(),
+        key: (i) => [...memoire.keys()][i] ?? null,
+        get length () { return memoire.size }
+      }
+    })
+  } catch (e) {
+    // ⚠ UN GARDE DE SÉCURITÉ QUI NE PEUT PAS SE POSER ARRÊTE LA PAGE, il ne la
+    // laisse pas tourner (constat de la re-revue de e528ca1). Sans cela, un
+    // navigateur où `localStorage` n'est pas redéfinissable ramenait le défaut
+    // d'origine EN SILENCE : les données de travail de la prestataire écrites
+    // dans le stockage de l'hôte, et le miroir de ses ménages faits écrasé.
+    console.error('[apercu] stockage local non neutralise — cadre refuse', e)
+    document.documentElement.innerHTML =
+      '<body style="font:14px system-ui;padding:24px;text-align:center;color:#C13515">' +
+      'Aperçu impossible sur ce navigateur.</body>'
+    throw e
+  }
+  const vraiFetch = window.fetch.bind(window)
+  window.fetch = (url, options) => {
+    const m = String((options && options.method) || 'GET').toUpperCase()
+    if (m !== 'GET' && m !== 'HEAD') {
+      console.warn('[apercu] écriture refusée :', m, String(url).split('?')[0])
+      return Promise.reject(new Error('Aperçu : lecture seule'))
+    }
+    // Le serveur n'horodate pas une lecture faite par l'hôte.
+    const u = String(url)
+    return vraiFetch(u.includes('apercu=1') ? u : u + (u.includes('?') ? '&' : '?') + 'apercu=1', options)
+  }
+}
+
 // PWA: enregistrement service worker
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && !APERCU) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch((err) => console.warn("SW registration failed:", err));
   });
@@ -772,6 +1411,11 @@ if ("serviceWorker" in navigator) {
   const LS_READ        = 'menages-read-v2'          // miroir LOCAL des notifs acquittees (event ids) - offline-safe
 
   let properties = []
+  // ⚠ LES BIENS AVEC LEUR VIGNETTE, servis une fois par le GET (16 octobre
+  // 2026). Indexés par identifiant de bien : la même photo sert le fil
+  // d'actualités et la liste des trente jours, et `properties` — reconstruit à
+  // partir des réservations — n'a jamais porté que l'id et le nom.
+  let biensParId = {}
   let bookings = []
   let doneSet = new Set()              // ids menage afficheS comme fait (= union miroir + pending)
   let serverDoneSet = new Set()        // miroir serveur
@@ -823,6 +1467,10 @@ if ("serviceWorker" in navigator) {
 
   function getToken() {
     const fromUrl = new URLSearchParams(window.location.search).get('token');
+    // ⚠ EN APERÇU, LE JETON NE SE RANGE NI NE SE REPÊCHE. Il ne doit pas rester
+    // dans le navigateur de l'hôte (même origine), et un jeton déjà rangé là
+    // ferait afficher la page de QUELQU'UN D'AUTRE dans le cadre.
+    if (APERCU) return fromUrl;
     if (fromUrl) {
       try { localStorage.setItem('hotesmart-clean-token', fromUrl); } catch(e) {}
       return fromUrl;
@@ -831,6 +1479,7 @@ if ("serviceWorker" in navigator) {
   }
   // PWA: injection du manifest dynamique selon le token courant
   (function injectManifest() {
+    if (APERCU) return;   // on n'installe pas l'application de quelqu'un d'autre
     const t = getToken();
     const link = document.getElementById('dynamic-manifest');
     if (link) link.href = t ? '/api/manifest?token=' + encodeURIComponent(t) : '/api/manifest';
@@ -865,6 +1514,16 @@ if ("serviceWorker" in navigator) {
       // Introuvable (prise entre-temps) : la feuille reste, rien ne s'ouvre a
       // la place — et on la repeint pour qu'elle dise l'etat reel.
       if (!ouvrirPriseDeMenage(o.dataset.offre, libres, o.dataset.offreCle)) ouvrirJour(o.dataset.offre)
+      return
+    }
+    // ⚠ AVANT `data-mien` : le bouton « Vu » est le VOISIN de la ligne, pas son
+    // enfant, mais un doigt qui deborde ne doit pas ouvrir la fiche a la place.
+    const bv = e.target.closest('[data-vu]')
+    if (bv && !bv.disabled) {
+      e.stopPropagation()
+      const mv = tousMesMenagesEnrichis().concat(menagesEnrichisDu(jourOuvert || ''))
+        .find(x => x.id === bv.dataset.vu)
+      if (mv) direVu(mv, bv)
       return
     }
     const mi = e.target.closest('[data-mien]')
@@ -1106,6 +1765,12 @@ if ("serviceWorker" in navigator) {
       }
     })
     properties = [...propMap.values()]
+    // ⚠ ON REMPLACE, ON NE FUSIONNE PAS : un bien retiré de son périmètre doit
+    // disparaître de cette table comme il disparaît du reste de l'écran.
+    biensParId = {}
+    ;(Array.isArray(data.biens) ? data.biens : []).forEach(b => {
+      if (b && b.id != null) biensParId[String(b.id)] = { nom: b.nom || '', photo: b.photo || null }
+    })
     activeProps = new Set(properties.map(p => p.id))
     bookings = data.bookings || []
 
@@ -1206,6 +1871,28 @@ if ("serviceWorker" in navigator) {
     return bookings.map(enrichirMenage).filter(Boolean)
   }
 
+  // ⚠ UNE SEULE FABRIQUE DE VIGNETTE, pour le fil et pour la liste des trente
+  // jours — même règle que `boutonVu` et `marquesDuMenage`. Deux surfaces qui
+  // dessineraient chacune leur miniature finiraient par montrer la photo d'un
+  // côté et les initiales de l'autre pour le même logement.
+  //
+  // ⚠ SANS PHOTO, LES INITIALES DU BIEN — jamais une icône de maison générique,
+  // qui ne distinguerait aucun logement d'un autre (c'est la règle déjà écrite
+  // dans le calendrier de l'hôte, `pages/menages.html`).
+  //
+  // ⚠ `loading="lazy"` ET `alt=""` : la vignette est décorative, le nom du bien
+  // est écrit juste à côté. L'annoncer deux fois à un lecteur d'écran ferait
+  // lire « La bulle La bulle ».
+  function vignetteBien (propId, nomSecours) {
+    const b = biensParId[String(propId)] || null
+    const nom = (b && b.nom) || nomSecours || ''
+    const ini = String(nom).trim().slice(0, 2).toUpperCase()
+    return '<span class="pwa-vignette">' + (b && b.photo
+      ? `<img src="${echapper(b.photo)}" alt="" loading="lazy">`
+      : `<span class="pwa-vignette__ini" aria-hidden="true">${echapper(ini)}</span>`) +
+      '</span>'
+  }
+
   function renderFilters() {
     const list = document.getElementById('filter-list')
     // ⚠ LE `<label>` PORTE TOUTE LA LIGNE, l'`<input>` vit dedans. Un `for=` sur
@@ -1242,6 +1929,44 @@ if ("serviceWorker" in navigator) {
   // ⚠ COTE ECRAN, PAS COTE SERVEUR : la ligne reste en base — c'est la trace,
   // et l'hote la consulte. Ce qui perime, c'est son affichage a elle.
   const PEREMPTION_H = 72
+
+  // ⚠ LE MÉNAGE D'UNE ANNONCE (16 octobre 2026). `menage_events` porte
+  // `property_id` et `booking_id` : c'est la même identité que partout ailleurs
+  // sur cet écran, moins la date de départ — qu'on ne compare donc pas, un
+  // séjour pouvant avoir bougé entre l'annonce et aujourd'hui.
+  // `null` quand l'annonce ne désigne aucun ménage à elle : les lignes `note`
+  // des versions antérieures du writer n'ont pas ces champs, et un ménage
+  // annulé a disparu de `bookings`.
+  function menageDeLAnnonce (n) {
+    if (!n || n.property_id == null || n.booking_id == null) return null
+    return tousMesMenagesEnrichis().find(m =>
+      String(m.propId) === String(n.property_id) &&
+      String(m.bookId) === String(n.booking_id)) || null
+  }
+
+  // ⚠ UNE ANNONCE DE NOUVEAU MÉNAGE S'ÉTEINT QUAND LE MÉNAGE EST VU (demande
+  // de Thierry, recette du 16 octobre : « elle clique sur Vu sur le nouveau
+  // ménage, il s'enlève de la liste, et il est marqué vu dans la liste des
+  // ménages »). L'annonce a fait son travail : le répéter en gris pendant
+  // trois jours pousse vers le bas ce qui vient vraiment d'arriver.
+  // ⚠ SEULEMENT `new`, ET C'EST LA LIMITE : un ménage MODIFIÉ ou ANNULÉ garde
+  // son annonce même s'il a été vu, parce que ce qu'elle annonce n'est pas
+  // l'attribution mais le changement — et `vu_le`, lui, ne se repose pas.
+  // ⚠ CÔTÉ ÉCRAN SEULEMENT, comme la péremption : la ligne reste en base,
+  // c'est la trace, et l'hôte la consulte.
+  // ⚠ `role === 'porteur'`, COMME LA FABRIQUE DU BOUTON (constat de la revue
+  // de a218fd6). Le serveur sert `vu_le` de la porteuse COURANTE, pas de celle
+  // qui regarde : sur un ménage dont elle n'a qu'une PROPOSITION, ce champ
+  // porte la date de quelqu'un d'autre. Sans cette condition, Marie porte le
+  // ménage et clique « Vu », l'hôte le propose ensuite à Régina — et l'annonce
+  // disparaît du fil de Régina, qui n'a rien vu et à qui il reste une offre à
+  // répondre. Le fil est précisément l'endroit où elle l'apprend.
+  function annonceEteinte (n) {
+    if (!n || n.event_type !== 'new') return false
+    const m = menageDeLAnnonce(n)
+    return !!(m && m.assign && m.assign.role === 'porteur' && m.assign.vu_le)
+  }
+
   function annonceFraiche (n) {
     const t = Date.parse(n.created_at)
     if (!Number.isFinite(t)) return true   // date illisible : on montre, on ne cache pas
@@ -1255,7 +1980,7 @@ if ("serviceWorker" in navigator) {
     // ⚠ UN SEUL ENDROIT DECIDE DE CE QUI S'AFFICHE : peremption ET acquittement.
     // Deux filtres separes auraient diverge au premier ajout — et le compteur
     // aurait annonce des nouvelles qu'aucune liste ne montre.
-    const visibles = newsItems.filter(annonceFraiche)
+    const visibles = newsItems.filter(n => annonceFraiche(n) && !annonceEteinte(n))
     const unread = visibles.filter(n => !n.read)
     const panel  = document.getElementById('news-panel')
     const count  = document.getElementById('news-count')
@@ -1275,7 +2000,7 @@ if ("serviceWorker" in navigator) {
     // montre ce qu'elle sert.
     const icons  = { new: '🧹', modified: '✏️', cancelled: '❌', note: '📝' }
     const labels = { new: 'Nouveau ménage', modified: 'Ménage modifié',
-                     cancelled: 'Ménage annulé', note: "Note de l'employeur" }
+                     cancelled: 'Ménage annulé', note: 'Note de votre hôte' }
 
     list.innerHTML = visibles.map(n => {
       const d = new Date(n.created_at)
@@ -1284,7 +2009,7 @@ if ("serviceWorker" in navigator) {
       let detail = n.property_name || ''
       if (n.event_data) {
         if (n.event_type === 'note') {
-          detail = `${n.property_name} · ${n.event_data.guestName || ''}\nArrivée : ${n.event_data.arrival || '—'} · Départ : ${n.event_data.departure || '—'}\n📝 ${n.event_data.comment || ''}`
+          detail = `${n.property_name || ''} · ${n.event_data.guestName || ''}\nArrivée : ${n.event_data.arrival || '—'} · Départ : ${n.event_data.departure || '—'}\n📝 ${n.event_data.comment || ''}`
         } else {
           // ⚠ LE LOGEMENT ET LE JOUR, RIEN D'AUTRE. On y mettait le nom du
           // voyageur et les deux bornes du sejour : trois informations dont
@@ -1305,22 +2030,77 @@ if ("serviceWorker" in navigator) {
         }
       }
 
+      // ⚠ `detail` porte le nom du voyageur et la consigne de l'hote (type
+      // `note`) : des donnees du coeur, pas les notres. On echappe AVANT de
+      // poser les `<br>` — dans l'autre ordre, ils seraient echappes a leur
+      // tour et le texte afficherait « <br> » en toutes lettres (D2).
+      // ⚠ LA VIGNETTE DU BIEN REMPLACE L'EMOJI (demande de Thierry, recette du
+      // 16 octobre). Le balai disait le TYPE d'événement — information que le
+      // titre de la ligne écrit déjà en toutes lettres — pendant que le
+      // logement, lui, ne se lisait qu'en petit sous ce titre. Un événement
+      // sans bien du tout garde son emoji : il reste des lignes `note` servies
+      // sans `property_id` par des versions antérieures du writer.
+      // ⚠ LA MÊME RÈGLE QUE LA LISTE DES TRENTE JOURS, ET C'EST LE POINT
+      // (constat de la revue de 9454cf6). Cette garde exigeait AUSSI que le
+      // bien soit présent dans `biens` ; la liste, elle, appelle toujours la
+      // fabrique et retombe sur les initiales. Un bien autorisé mais absent de
+      // `properties` — supprimé, ou dont le `provider_property_id` est passé à
+      // `null` — sortait donc en emoji ici et en initiales là-bas : la
+      // divergence exacte qu'« une seule fabrique » existe pour empêcher.
+      const vign = n.property_id != null
+        ? vignetteBien(n.property_id, n.property_name)
+        : `<div class="news-icon">${icons[n.event_type] || '📋'}</div>`
+      // ⚠ « VU » FACE À UN NOUVEAU MÉNAGE, comme il l'est déjà face à un
+      // ménage programmé (demande de Thierry, recette du 16 octobre). C'est
+      // l'endroit où elle apprend le ménage : lui demander de le retrouver
+      // trois cartes plus bas pour en accuser réception est un détour qu'on lui
+      // impose pour rien.
+      // ⚠ LA MÊME FABRIQUE QUE LES DEUX AUTRES SURFACES (`boutonVu`), donc les
+      // mêmes quatre conditions : à elle, pas encore vu, pas déjà fait, pas
+      // passé. Un ménage proposé n'en reçoit pas — il se confirme en
+      // l'acceptant, et le serveur refuse de le valider autrement.
+      const mAnn = n.event_type === 'new' ? menageDeLAnnonce(n) : null
+      const vuAnn = mAnn ? boutonVu(mAnn) : ''
       return `
-        <div class="news-item ${n.read ? 'read' : 'unread'}" data-id="${n.id}">
-          <div class="news-icon">${icons[n.event_type] || '📋'}</div>
+        <div class="news-item ${n.read ? 'read' : 'unread'}" data-id="${echapper(n.id)}">
+          ${vign}
           <div class="news-content">
-            <div class="news-content-title">${labels[n.event_type] || n.event_type}</div>
-            <div class="news-content-sub">${detail.replace(/\n/g, '<br>')}</div>
+            <div class="news-content-title">${labels[n.event_type] || echapper(n.event_type)}</div>
+            <div class="news-content-sub">${echapper(detail).replace(/\n/g, '<br>')}</div>
           </div>
-          <div class="news-time">${timeStr}</div>
+          <div class="news-droite">
+            <div class="news-time">${timeStr}</div>
+            ${vuAnn}
+          </div>
         </div>
       `
     }).join('')
 
     list.querySelectorAll('.news-item').forEach(item => {
-      item.addEventListener('click', () => {
+      item.addEventListener('click', async (e) => {
         const id = item.dataset.id
         const n = newsItems.find(n => String(n.id) === String(id))
+        // ⚠ LE BOUTON D'ABORD, ET IL NE DOIT PAS OUVRIR L'ANNONCE SOUS LUI.
+        const bv = e.target.closest('[data-vu]')
+        if (bv && !bv.disabled) {
+          e.stopPropagation()
+          const m = tousMesMenagesEnrichis().find(x => x.id === bv.dataset.vu)
+          // ⚠ UN MÉNAGE INTROUVABLE REPEINT, IL NE SORT PAS EN SILENCE
+          // (constat de la revue de a218fd6) : il a pu quitter `bookings`
+          // entre le rendu et la tape — rechargement silencieux, départ sorti
+          // de la fenêtre, réservation annulée. Un bouton qui ne fait RIEN est
+          // ce que cet écran s'interdit ; on lui montre la liste telle qu'elle
+          // est, comme le fait déjà la liste des trente jours.
+          if (!m) { renderNews(); return }
+          // ⚠ `direVu` ACQUITTE L'ANNONCE ELLE-MÊME, et seulement en cas de
+          // succès (constat de la revue de a218fd6). L'acquitter ici était
+          // inconditionnel : sur un échec, l'annonce passait en gris alors que
+          // rien n'était parti, et le `renderNews` détruisait dans la même
+          // tâche le message d'erreur écrit dans le bouton. C'est aussi ce qui
+          // fait que le geste vaut la même chose depuis les trois surfaces.
+          await direVu(m, bv)
+          return
+        }
         if (n && !n.read) markEventsRead([id])
       })
     })
@@ -1368,6 +2148,90 @@ if ("serviceWorker" in navigator) {
   function estUneOffre (m) { return !!(m.assign && m.assign.role === 'propose') }
   function estPropose (m) { return !!(m.assign && m.assign.role === 'porteur' && m.assign.propose) }
 
+  // ⚠ « VU » / « PAS VU », JAMAIS « VALIDER » (vocabulaire fixe par Thierry,
+  // recette du 14 octobre). Elle lit « Vu » sur son bouton, l'hote lit « Pas
+  // vu » dans sa bulle : c'est le meme fait, dit du meme mot des deux cotes.
+  //
+  // ⚠ CE QUE CE BOUTON COMBLE. Un menage ATTRIBUE D'OFFICE nait `accepted` :
+  // elle n'a jamais rien eu a confirmer, et son hote n'avait aucun moyen de
+  // savoir si elle l'avait lu.
+  //
+  // ⚠ UNE SEULE REGLE POUR L'AFFICHAGE ET POUR LE GESTE. Les separer, c'est
+  // exactement le defaut du 14 octobre sur les cases de jours : le rendu et le
+  // clic avaient chacun leur idee de ce que l'ecran montrait.
+  //
+  // Quatre conditions, toutes necessaires :
+  //   - le menage est A ELLE (une offre se confirme en l'acceptant) ;
+  //   - `vu_le` est vide ;
+  //   - il n'est pas deja fait — elle y est allee, l'accuse n'apprend plus rien ;
+  //   - il n'est pas passe : on ne demande pas de lire ce qui est derriere.
+  // ⚠ `vu_le === undefined` NE DEMANDE RIEN : une version anterieure du serveur
+  // ne sert pas ce champ, et peindre le bouton partout sur un ancien
+  // deploiement en ferait un bouton qui echoue.
+  function estPasVu (m) {
+    const a = m && m.assign
+    if (!a || a.role !== 'porteur') return false
+    if (a.vu_le === undefined) return false
+    if (a.vu_le) return false
+    if (m.done) return false
+    return m.dateStr >= jourParis()
+  }
+
+  // ⚠ L'ETAT « VU » SE MONTRE AUSSI, et il ne se confond pas avec son absence :
+  // un menage qu'elle a ouvert garde la mention en gris, sans bouton. Sans
+  // elle, le bouton disparaissait au clic et rien ne disait si le geste etait
+  // parti — exactement le doute que cet accuse existe pour lever.
+  function dejaVu (m) {
+    const a = m && m.assign
+    return !!(a && a.role === 'porteur' && a.vu_le && !m.done && m.dateStr >= jourParis())
+  }
+
+  // ⚠ UNE ICONE, PAS UN EMOJI (decision de Thierry). Le sprite partage
+  // `shared/icons.svg` n'a pas cette icone, et cette page ne le charge pas du
+  // tout — elle est hors ligne et dessine ses icones en ligne, comme les deux
+  // pouces des avis. Un `<use href>` vers un fichier externe serait une
+  // dependance reseau de plus sur un telephone en sous-sol.
+  //
+  // ⚠ UN CERCLE A COCHER, PLUS UN OEIL (recette de Thierry, 16 octobre 2026 :
+  // « l'oeil avec Vu n'est pas tres joli »). Un oeil demande une paupiere, un
+  // iris et une pupille : a 15 px, ces trois traits se referment en pate. Le
+  // cercle vide ne demande qu'un seul trait, il se lit a toutes les tailles,
+  // et il DIT CE QU'IL ATTEND — c'est le vocabulaire universel de l'accuse,
+  // celui des cases a cocher et des messageries.
+  const CERCLE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9"/></svg>'
+
+  // ⚠ ET UNE FOIS COCHE, LE MOT N'APPREND PLUS RIEN (meme recette : « enlever
+  // Vu quand c'est clique »). La pastille pleine et sa coche disent l'etat a
+  // elles seules ; le mot ne servait qu'a nommer un GESTE qui n'est plus a
+  // faire. Il ne disparait pas pour autant : il reste dans `aria-label` et
+  // dans l'infobulle, parce qu'un etat qui ne se lit qu'a l'oeil n'existe pas
+  // pour qui utilise un lecteur d'ecran.
+  const CERCLE_COCHE = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<circle cx="12" cy="12" r="9" fill="currentColor"/>' +
+    '<path d="M8.2 12.3l2.6 2.6 5-5.2" fill="none" stroke="var(--surface)" stroke-width="2.2" ' +
+    'stroke-linecap="round" stroke-linejoin="round"/></svg>'
+
+  // ⚠ LE LIBELLE CANONIQUE, A UN SEUL ENDROIT : le rendu le pose, et `echecVu`
+  // le restaure apres un message d'erreur. Deux ecritures separees auraient
+  // fini par montrer deux boutons differents pour le meme etat.
+  const LIBELLE_VU = `${CERCLE}<span>Vu</span>`
+
+  // Le bouton, ou la mention — ou rien. Rendu A COTE de la ligne, jamais dedans.
+  function boutonVu (m) {
+    if (estPasVu(m)) {
+      return `<button type="button" class="jvu" data-vu="${echapper(m.id)}" ` +
+             `aria-label="J'ai vu le ménage du ${echapper(m.dateStr)}">${LIBELLE_VU}</button>`
+    }
+    // ⚠ L'ETAT SE DIT SANS MOT, MAIS PAS SANS NOM : `title` pour la souris,
+    // `aria-label` pour le lecteur d'ecran. La mention reste une balise INERTE
+    // (pas un `<button>`) : il n'y a plus rien a toucher.
+    if (dejaVu(m)) return '<span class="jvu est-vu" disabled title="Vu" ' +
+      'role="img" aria-label="Vu">' + CERCLE_COCHE + '</span>'
+    return ''
+  }
+
   // Le temps qu'il reste pour repondre, en clair. « Il reste 3 h » se decide
   // mieux qu'une date d'expiration a calculer soi-meme.
   function delaiRestant (m) {
@@ -1402,7 +2266,7 @@ if ("serviceWorker" in navigator) {
     return badgeOffre(m) +
       (m.done ? fait : '') +
       (m.pending ? '<span class="jmarque" title="En attente d’envoi">⏳</span>' : '') +
-      (m.comment ? '<span class="jmarque" title="Consigne de votre hôte">📝</span>' : '') +
+      (m.comment ? '<span class="jmarque" title="Note de votre hôte">📝</span>' : '') +
       (obs ? '<span class="jmarque" title="La réservation a changé">⏭</span>' : '')
   }
 
@@ -1600,9 +2464,13 @@ if ("serviceWorker" in navigator) {
           // le disait encore, mais il fallait deja savoir qu'il y avait quelque
           // chose a y lire.
           const marques = marquesDuMenage(m, obs, '<span class="jmarque fait">✓ FAIT</span>')
-          return `<button class="jligne${obs ? ' obsolete' : ''}" data-mien="${echapper(m.id)}">` +
+          const vu = boutonVu(m)
+          const ligne = `<button class="jligne${obs ? ' obsolete' : ''}" data-mien="${echapper(m.id)}">` +
             `<span class="jligne-bien">${echapper(m.propName || '—')}</span>` +
             marques + '</button>'
+          // ⚠ LA RANGEE N'EXISTE QUE S'IL Y A QUELQUE CHOSE A COTE : sans elle,
+          // la ligne garde EXACTEMENT la mise en page d'avant ce lot.
+          return vu ? `<div class="jrangee">${ligne}${vu}</div>` : ligne
         }).join('') + '</div>'
     }
 
@@ -1645,8 +2513,8 @@ if ("serviceWorker" in navigator) {
                 // C'est la regression que `basculerMonJour` avait deja corrigee
                 // une fois ; la feuille ne doit pas la reintroduire.
                 ? (e.available
-                   ? '<div class="jsect-vide" style="padding-top:8px">Votre employeur vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.</div>'
-                   : '<div class="jsect-vide" style="padding-top:8px">Absence posée par votre employeur — pour la retirer, dites-le lui.</div>')
+                   ? '<div class="jsect-vide" style="padding-top:8px">Votre hôte vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.</div>'
+                   : '<div class="jsect-vide" style="padding-top:8px">Absence posée par votre hôte — pour la retirer, dites-le lui.</div>')
                 : '')) +
         '</div>'
     }
@@ -1897,18 +2765,25 @@ if ("serviceWorker" in navigator) {
     rendreLesCartes()
     document.getElementById('modal-title').textContent = `Ménage — ${m.propName}`
     document.getElementById('modal-sub').textContent = formatDate(m.date)
+    // ⚠ TOUT CE QUI VIENT DU COEUR PASSE PAR `echapper`, ICI AUSSI. Le nom du
+    // voyageur est ecrit par la sync depuis le payload provider, la consigne par
+    // l'hote : aucun des deux n'est a nous. C'etait le seul gabarit du fichier
+    // a interpoler ces champs nus dans `innerHTML` (lot Menages V5, D2).
     document.getElementById('modal-body').innerHTML = `
-      <div class="modal-row"><span>Voyageur</span><span>${m.guestName}</span></div>
-      <div class="modal-row"><span>Adultes</span><span>${m.numAdult || '—'}</span></div>
-      <div class="modal-row"><span>Enfants</span><span>${m.numChild > 0 ? m.numChild + ' enfant(s) 👶' : 'Aucun'}</span></div>
-      <div class="modal-row"><span>Arrivée</span><span>${m.arrival || '—'}</span></div>
-      <div class="modal-row"><span>Départ</span><span>${m.departure || '—'}</span></div>
+      <div class="modal-row"><span>Voyageur</span><span>${echapper(m.guestName)}</span></div>
+      <div class="modal-row"><span>Adultes</span><span>${echapper(m.numAdult || '—')}</span></div>
+      <div class="modal-row"><span>Enfants</span><span>${m.numChild > 0 ? echapper(m.numChild) + ' enfant(s) 👶' : 'Aucun'}</span></div>
+      <div class="modal-row"><span>Arrivée</span><span>${echapper(m.arrival || '—')}</span></div>
+      <div class="modal-row"><span>Départ</span><span>${echapper(m.departure || '—')}</span></div>
       <div class="modal-row"><span>Statut</span><span>${m.done ? '✅ Effectué' : (m.pending ? '⏳ En attente d envoi' : '⏳ À faire')}</span></div>
     `
 
+    // Les retours a la ligne de la consigne restent des retours a la ligne,
+    // comme dans le fil d'actualites : echapper puis poser les <br>, dans cet
+    // ordre (constat de la revue de def72c0 — avant, le \n brut se condensait).
     const noteEl = document.getElementById('modal-note')
     noteEl.innerHTML = m.comment
-      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de l'employeur</div>${m.comment}</div>`
+      ? `<div class="admin-note"><div class="admin-note-title">📝 Note de votre hôte</div>${echapper(m.comment).replace(/\n/g, '<br>')}</div>`
       : ''
 
     hideModalMessages()
@@ -2093,7 +2968,7 @@ if ("serviceWorker" in navigator) {
       //                  decouvert, l'hote n'est pas alerte ;
       //   - `escalade` : la personne suivante de garde vient d'etre sollicitee.
       //                  L'hote n'est PAS alerte non plus (`!porte && !suivante`
-      //                  cote serveur) : lui dire « votre employeur est prevenu »
+      //                  cote serveur) : lui dire « votre hôte est prevenu »
       //                  etait un mensonge, la faute exacte du commit c6d0553 ;
       //   - ni l'un ni l'autre : plus personne ne porte ce menage, et LA l'hote
       //                  recoit une tache in-app plus un SMS/email.
@@ -2103,13 +2978,137 @@ if ("serviceWorker" in navigator) {
             ? 'Réponse enregistrée. Ce ménage reste à la personne qui en a la charge.'
             : (data && data.escalade
                 ? 'Réponse enregistrée. Le ménage est proposé à quelqu\'un d\'autre.'
-                : 'Réponse enregistrée : votre employeur est prévenu.')))
+                : 'Réponse enregistrée : votre hôte est prévenu.')))
       await rechargerAssignations()
       setTimeout(closeModal, 1200)
     } catch (err) {
       showModalError('Connexion impossible. Réessayez.')
     } finally {
       btnOui.disabled = false; btnNon.disabled = false
+    }
+  }
+
+  // ─── « VU » : ELLE ACCUSE RECEPTION D'UN MENAGE QUI EST DEJA LE SIEN ──────
+  //
+  // ⚠ CE GESTE NE DECIDE DE RIEN. Il ne prend pas, ne rend pas, ne marque pas
+  // fait : il dit « je l'ai vu ». C'est ce que son hote attend d'un menage
+  // attribue d'office, qu'elle n'a jamais eu a confirmer.
+  //
+  // ⚠ IL NE PASSE PAS PAR LA FICHE, et donc pas par `selectedMenage` : le
+  // bouton vit sur la LIGNE (decision de Thierry, recette du 14 octobre), et
+  // deux lignes peuvent etre visibles en meme temps. Prendre « le menage
+  // ouvert » aurait valide le voisin.
+  //
+  // ⚠ IDEMPOTENT, DONC REJOUABLE — contrairement a `repondreOffre`. Le serveur
+  // n'ecrit que si personne ne l'a deja vu et rend `success` dans les deux cas :
+  // `fetchWithRetry` peut donc rejouer sans rien casser, et c'est exactement ce
+  // qu'il faut sur un telephone en 4G instable.
+  //
+  // ⚠ AUCUNE FILE HORS LIGNE, ET CE N'EST PAS UN OUBLI. `enqueuePending` garde
+  // UNE action par menage : y mettre un « vu » EFFACERAIT un « fait » qui
+  // attend d'etre envoye — elle perdrait le travail au profit de l'accuse. Hors
+  // ligne, on le dit.
+  // ⚠ UN REFUS SE DIT LA OU ELLE REGARDE, et cette page n'a pas de bandeau
+  // general : elle a un modal, et des messages attaches a chaque feuille. Quand
+  // le modal est ouvert (feuille du jour), c'est lui qui parle ; sinon le
+  // bouton lui-meme porte le mot, le temps de le lire. Un echec muet sur un
+  // accuse de lecture serait le pire des deux : elle croirait avoir prevenu.
+  function echecVu (bouton, texte) {
+    // ⚠ LE REARMEMENT PASSE EN PREMIER, ET SANS CONDITION (constat de la revue
+    // de 6452d75). Il vivait APRES le `return` de la branche modal — or la
+    // feuille du jour EST le modal, et c'est la surface principale du bouton :
+    // sur un echec, elle lisait « Reessayez » et le bouton restait mort, pour
+    // toujours. Le seul moyen de le rearmer etait de fermer puis rouvrir la
+    // feuille, ce qu'aucun texte ne lui disait — et l'accuse n'arrivait jamais,
+    // pendant que les deux relances de 9 h continuaient de sonner.
+    if (bouton) {
+      bouton.disabled = false
+      // ⚠ ON RESTAURE LE LIBELLE CANONIQUE, PAS L'ETAT COURANT. `bouton.innerHTML`
+      // lu a cet instant peut DEJA etre un message d'erreur (second echec avant
+      // la fin du premier minuteur) : le bouton finissait par porter
+      // « Reessayez » a demeure, sans plus nommer le geste qu'il declenche.
+      // ⚠ ET UN SEUL MINUTEUR PAR BOUTON : deux echecs rapproches armaient deux
+      // restaurations qui se croisaient, la derniere ecrasant la bonne.
+      clearTimeout(bouton.__minuteurVu)
+      bouton.innerHTML = `${OEIL}<span>${echapper(texte)}</span>`
+      bouton.__minuteurVu = setTimeout(() => {
+        if (bouton.isConnected) bouton.innerHTML = LIBELLE_VU
+      }, 3500)
+    }
+    // Le modal, quand il est ouvert, dit le refus en toutes lettres : le
+    // bouton seul ne porte que deux mots.
+    if (document.getElementById('modal').style.display === 'flex') showModalError(texte)
+  }
+
+  // ⚠ ELLE REND VRAI OU FAUX, ET CE N'EST PAS DU CONFORT (constat de la revue
+  // de a218fd6). Le fil acquitte l'annonce APRÈS ce geste : sans verdict, il
+  // l'acquittait même sur un échec — et le `renderNews` qui suit détruisait
+  // dans la même tâche le message d'erreur que `echecVu` venait d'écrire dans
+  // un bouton désormais détaché. Elle tapait « Vu » dans le métro, rien ne
+  // bougeait, l'annonce passait en gris et rien n'était parti : exactement
+  // « le pire des deux », qu'`echecVu` existe pour empêcher.
+  let vuEnCours = null
+  async function direVu (menage, bouton) {
+    if (!menage || vuEnCours === menage.id) return false
+    if (navigator.onLine === false) {
+      echecVu(bouton, 'Hors ligne')
+      return false
+    }
+    vuEnCours = menage.id
+    if (bouton) bouton.disabled = true
+    try {
+      const res = await fetchWithRetry(`/api/menages-public?token=${currentToken}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'validerMenage',
+          booking_id: menage.bookId, property_id: menage.propId,
+          departure_date: menage.dateStr })
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        echecVu(bouton, (data && data.error) || 'Réessayez')
+        return false
+      }
+      // ⚠ L'ECRAN SUIT LA DATE DU SERVEUR, pas l'instant du clic : c'est elle
+      // que l'hote lira, et c'est elle qui eteint l'alerte et les relances.
+      if (menage.assign) menage.assign.vu_le = (data && data.vu_le) || new Date().toISOString()
+      // ⚠ ON RECHARGE D'ABORD, ON REPEINT ENSUITE (constat de la revue de
+      // 6452d75, et c'est l'ordre des trois autres gestes de ce fichier).
+      // Repeindre sur l'ecriture optimiste PUIS recharger laissait la feuille
+      // peinte sur une verite que le rechargement venait de jeter : si le
+      // serveur dit autre chose — l'hote a change de porteuse entre le rendu et
+      // le clic, et `validePar` ressert alors `vu_le: null` — l'agenda montrait
+      // « Vu » et la feuille ouverte par-dessus « ✓ Vu ». Deux surfaces, deux
+      // reponses pour le meme menage : exactement ce que la fabrique unique
+      // `boutonVu` existe pour empecher.
+      await rechargerAssignations()
+      // ⚠ ET ON REPEINT MEME SI LE RECHARGEMENT A ECHOUE : il sort en silence
+      // sur une panne de lecture (l'ecran garde ce qu'il a), et sans ce rendu
+      // le bouton resterait « Vu » alors que l'ecriture, elle, a abouti.
+      routeRender()
+      // ⚠ ET LE FIL AVEC (constat de la revue de a218fd6). `routeRender` ne
+      // repeint que le calendrier : un « Vu » posé depuis la liste des trente
+      // jours laissait l'annonce du même ménage dans le fil, avec son bouton
+      // encore actif — deux surfaces qui disent deux choses du même ménage,
+      // ce que la fabrique unique existe pour empêcher.
+      // ⚠ ET SON ANNONCE EST ACQUITTÉE, d'où que vienne le geste : sans cela,
+      // une annonce éteinte à l'écran restait `read = false` en base pour
+      // toujours, et l'hôte n'en voyait jamais la trace.
+      const aAcquitter = newsItems
+        .filter(n => !n.read && n.event_type === 'new' &&
+                     n.property_id != null && n.booking_id != null &&
+                     String(n.property_id) === String(menage.propId) &&
+                     String(n.booking_id) === String(menage.bookId))
+        .map(n => n.id)
+      if (aAcquitter.length) markEventsRead(aAcquitter)
+      else renderNews()
+      if (jourOuvert && feuilleOuverteSur(jourOuvert)) ouvrirJour(jourOuvert)
+      return true
+    } catch (err) {
+      echecVu(bouton, 'Réessayez')
+      return false
+    } finally {
+      vuEnCours = null
     }
   }
 
@@ -2387,13 +3386,13 @@ if ("serviceWorker" in navigator) {
   //
   // ⚠ ELLE DECLARE UNE EXCEPTION D'UN JOUR, DANS LES DEUX SENS (depuis le
   // 1er octobre 2026), mais jamais ses JOURS
-  // ATTITRES : ceux-la sont une decision de son employeur. Pouvoir s'en retirer
+  // ATTITRES : ceux-la sont une decision de son hôte. Pouvoir s'en retirer
   // elle-meme lui permettrait de quitter un bien sans qu'il l'apprenne, alors
   // qu'il compte sur elle pour le preparer.
   //
   // ⚠ AUCUNE FILE HORS LIGNE ICI, contrairement a « marquer fait ». Une absence
   // rejouee deux heures plus tard porterait sur un planning qui a bouge — et
-  // surtout, l'ecran ne peut pas promettre que son employeur l'a vue si rien
+  // surtout, l'ecran ne peut pas promettre que son hôte l'a vue si rien
   // n'est parti. Hors ligne, on le DIT.
   let dispoCharge = false
 
@@ -2689,7 +3688,7 @@ if ("serviceWorker" in navigator) {
     const msg = document.getElementById('dispo-message')
     if (mesJours.panneLecture) {
       // ⚠ QUATRE ETATS, ET CELUI-CI EST LE PLUS DELICAT : ON NE SAIT PAS.
-      // « Vos absences sont gerees par votre employeur » serait FAUX — personne
+      // « Vos absences sont gerees par votre hôte » serait FAUX — personne
       // ne les gere, la lecture a echoue. Le calendrier reste pour ses menages,
       // et la phrase dit exactement ce qui manque.
       msg.textContent = 'Vos absences n\'ont pas pu être lues. Vos ménages, eux, sont à jour — '
@@ -2699,9 +3698,9 @@ if ("serviceWorker" in navigator) {
       // ne disent pas la meme chose : dans le premier cas elle CONSULTE ses
       // jours, dans le second le serveur ne les lui envoie meme pas. Une seule
       // phrase pour les deux lui aurait fait chercher une liste absente.
-      msg.textContent = 'Vos absences sont gérées par votre employeur. Prévenez-le directement.'
+      msg.textContent = 'Vos absences sont gérées par votre hôte. Prévenez-le directement.'
     } else if (!mesJours.modifiable) {
-      msg.textContent = 'Vous pouvez consulter vos jours, mais c\'est votre employeur qui pose vos absences.'
+      msg.textContent = 'Vous pouvez consulter vos jours, mais c\'est votre hôte qui pose vos absences.'
     } else if (!msg.dataset.garde) {
       // ⚠ PLUS DE MODE D'EMPLOI (demande de Thierry, 18 septembre 2026). « Touchez
       // un jour pour voir ce qui s'y passe » decrivait le geste le plus evident
@@ -2735,7 +3734,7 @@ if ("serviceWorker" in navigator) {
   // declaration d'absence »). La carte est donc un FORMULAIRE, pas un resume.
   //
   // ⚠ CE QUE CA OUVRE, ET QUI N'EST PAS FERME ICI : elle peut se retirer d'un
-  // jour sur lequel son employeur compte, et rien ne l'en previent. Noté au KB.
+  // jour sur lequel son hôte compte, et rien ne l'en previent. Noté au KB.
   function peindreMesRegles () {
     const zone = document.getElementById('dispo-recur')
     const aide = document.getElementById('dispo-recur-aide')
@@ -2771,7 +3770,7 @@ if ("serviceWorker" in navigator) {
       // elle-meme ou elle en est.
       aide.innerHTML = fige
         ? `Cette semaine est une <b>semaine ${lettreSemaine(AUJ())}</b>. ` +
-          'Réglé par votre employeur — pour le changer, dites-le lui.'
+          'Réglé par votre hôte — pour le changer, dites-le lui.'
         : 'Cochez les jours où vous travaillez habituellement.'
     } else {
       const tous = fusion(act)
@@ -2781,7 +3780,7 @@ if ("serviceWorker" in navigator) {
           '<div style="margin-top:8px"><button type="button" class="dispo-mini" id="dispo-alterner">' +
           'Une semaine sur deux…</button></div>')
       aide.textContent = fige
-        ? 'Réglé par votre employeur — pour le changer, dites-le lui.'
+        ? 'Réglé par votre hôte — pour le changer, dites-le lui.'
         : 'Cochez les jours où vous travaillez habituellement.'
     }
     // ⚠ LA PHRASE REVIENT, MAIS SEULEMENT QUAND ELLE EST VRAIE ET UTILE.
@@ -2801,12 +3800,51 @@ if ("serviceWorker" in navigator) {
       // Elle coche le mardi, l'ecran le peint vert, et elle n'aura jamais un
       // menage le mardi. C'est le geste naturel de qui veut plus de travail.
       aide.textContent += ' Pour être proposée un jour de plus, dites-le aussi ' +
-        'à votre employeur : c\'est lui qui confie les logements.'
+        'à votre hôte : c\'est lui qui confie les logements.'
     }
     if (opaques.length) {
       aide.innerHTML += '<br>Vous avez aussi ' + opaques.length +
-        ' règle(s) que cet écran ne sait pas afficher. Demandez à votre employeur.'
+        ' règle(s) que cet écran ne sait pas afficher. Demandez à votre hôte.'
     }
+    // ⚠ QUI A REGLE SES JOURS (17 octobre 2026, precision n° 4 de Thierry).
+    // Ses ABSENCES disaient deja leur source — « Absence posee par votre
+    // hote » — mais pas ses JOURS HABITUELS : son hote pouvait changer les
+    // jours ou elle est candidate sans qu'aucun ecran ne le lui dise. Elle
+    // ouvrait sa page, voyait d'autres cases cochees, et n'avait aucun moyen
+    // de savoir si elle s'etait trompee elle-meme.
+    //
+    // ⚠ LA MENTION NE S'AFFICHE QUE SI ELLE PEUT ENCORE Y TOUCHER. Quand elle
+    // ne regle rien, l'aide dit deja « Regle par votre hote — pour le changer,
+    // dites-le lui » : la repeter en dessous ferait deux fois la meme phrase.
+    //
+    // ⚠ ET ELLE NE DIT PAS « votre hote a tout regle ». Une seule regle posee
+    // par lui suffit a l'afficher, parce que c'est le FAIT qui compte — il y a
+    // la-dedans quelque chose qu'elle n'a pas decide — et parce qu'un decompte
+    // (« 1 de vos 3 regles ») ne l'aiderait en rien : ce qu'elle veut savoir,
+    // c'est s'il faut en parler a quelqu'un.
+    // ⚠ LA MEME FORME QUE SES ABSENCES, ET AUSSI COURTE (recette de Thierry,
+    // 17 octobre 2026). Ses conges disent « — pose par votre hote » en trois
+    // mots ; ses jours habituels n'ont aucune raison d'en dire vingt. La
+    // premiere version ajoutait « Vous pouvez les changer ; prevenez-le » :
+    // le droit de changer se voit a ce que les cases SE COCHENT, et le lui
+    // ecrire en toutes lettres revenait a commenter l'ecran plutot qu'a dire
+    // ce qu'il montre.
+    //
+    // ⚠ DEUX ETATS, PAS UN SEUL. « Regles par vous » compte autant que
+    // « Regles par votre hote » : sans lui, l'absence de mention voudrait dire
+    // deux choses — « c'est vous » ou « on ne sait pas » — et elle ne pourrait
+    // pas distinguer ses propres jours d'un reglage qu'elle n'a pas fait.
+    //
+    // ⚠ UNE SEULE REGLE DE LUI SUFFIT A DIRE « votre hote ». C'est le FAIT qui
+    // compte — il y a la-dedans quelque chose qu'elle n'a pas decide — et un
+    // decompte ne l'aiderait en rien.
+    const toutes = act.concat(opaques)
+    if (toutes.length && !fige) {
+      const parLHote = toutes.some(r => r.source && r.source !== 'prestataire')
+      const dit = parLHote ? 'Réglés par votre hôte' : 'Réglés par vous'
+      aide.innerHTML += `<br><span class="dispo-source">${dit}</span>`
+    }
+
     const bAlt = document.getElementById('dispo-alterner')
     if (bAlt) bAlt.addEventListener('click', () => basculerMonAlternance(true))
     const bSimple = document.getElementById('dispo-simple')
@@ -2908,11 +3946,36 @@ if ("serviceWorker" in navigator) {
         const cls = 'dispo-case' + (congeVisible ? ' conge' : (libre ? '' : ' off')) +
                     (j < auj ? ' passe' : '') + (j === auj ? ' auj' : '') +
                     (miens.length ? ' a-moi' : '') +
-                    (exc && exc.source === 'prestataire' ? ' manuel' : '') +
+                    // ⚠ LE POINT MARQUE LES DEUX SOURCES (14 octobre 2026). Il
+                    // ne disait que « c'est moi qui l'ai posee » : un jour
+                    // regle par l'hote s'eteignait donc comme un jour ordinaire
+                    // hors de ses jours habituels, sans aucune marque. Elle
+                    // decouvrait la correction en touchant la case, ou pas du
+                    // tout. UN SEUL point pour les deux — deux points de sens
+                    // different dans 44 px, c'est un point qu'on ne sait plus
+                    // lire — et c'est le TITRE qui dit lequel.
+                    (exc ? ' manuel' : '') +
                     (libres.length || aConfirmer.length ? ' a-prendre' : '')
+        // ⚠ QUI A REGLE CE JOUR-LA. Son hôte peut poser une absence pour
+        // elle, mais aussi lui demander de venir : deux sens, deux phrases —
+        // c'est la meme regle que la feuille du jour, qui le dit en entier.
+        const parLHote = !!(exc && exc.source !== 'prestataire')
+        // ⚠ LA PHRASE DE L'HOTE VIENT DU SENS DE SON EXCEPTION, PAS DE L'ETAT
+        // FINAL DU JOUR. `libre` porte la couche d'affichage de
+        // `jourTravaille` : un jour qui porte un menage est « travaille » quoi
+        // qu'en disent les regles. Choisir la phrase dessus annoncait « Venue
+        // demandee par votre hôte » sur un jour ou l'hote venait au
+        // contraire de poser une ABSENCE, parce qu'un menage y etait deja
+        // attribue — et la feuille du meme jour, qui lit `e.available`, disait
+        // l'inverse. Deux ecrans de la meme application qui se contredisent.
+        // La contradiction entre « absente » et un menage attribue, elle, est
+        // REELLE : elle se lit alors dans la suite du titre, et c'est ce qu'elle
+        // doit voir.
         const titre = [
           congeVisible ? ('Congé' + (c.motif ? ' — ' + c.motif : ''))
-            : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là')),
+            : (parLHote
+                ? (exc.available ? 'Venue demandée par votre hôte' : 'Absence posée par votre hôte')
+                : (libre ? 'Je travaille' : (exc ? 'Je suis absente' : 'Je ne travaille pas ce jour-là'))),
           miens.length ? `${miens.length} ménage${miens.length > 1 ? 's' : ''} à moi` : '',
           aConfirmer.length ? `${aConfirmer.length} ménage${aConfirmer.length > 1 ? 's' : ''} à confirmer` : '',
           libres.length ? `${libres.length} ménage${libres.length > 1 ? 's' : ''} à prendre` : '',
@@ -3085,12 +4148,20 @@ if ("serviceWorker" in navigator) {
                // ⚠ LA MEME FICHE QUE LA FEUILLE DU JOUR, par le meme chemin.
                // Deux fiches du meme menage finiraient par dire deux choses
                // differentes.
-               ? `<button type="button" class="agenda-item${l.fait ? ' fait' : ''}` +
-                 `${l.obsolete ? ' obsolete' : ''}" data-mien="${echapper(l.menage.id)}">` +
-                 `<span class="agenda-bien">${echapper(l.bien)}</span>` +
-                 '<span class="agenda-marques">' +
-                 marquesDuMenage(l.menage, l.obsolete, '<span class="agenda-tag fait">FAIT</span>') +
-                 '</span></button>'
+               ? (() => {
+                   const item = `<button type="button" class="agenda-item${l.fait ? ' fait' : ''}` +
+                     `${l.obsolete ? ' obsolete' : ''}" data-mien="${echapper(l.menage.id)}">` +
+                     vignetteBien(l.menage.propId, l.bien) +
+                     `<span class="agenda-bien">${echapper(l.bien)}</span>` +
+                     '<span class="agenda-marques">' +
+                     marquesDuMenage(l.menage, l.obsolete, '<span class="agenda-tag fait">FAIT</span>') +
+                     '</span></button>'
+                   // ⚠ MEME REGLE, MEME FABRIQUE que la feuille du jour : deux
+                   // surfaces qui decideraient chacune de leur cote finiraient
+                   // par montrer le bouton a l'une et pas a l'autre.
+                   const vu = boutonVu(l.menage)
+                   return vu ? `<div class="jrangee">${item}${vu}</div>` : item
+                 })()
                // ⚠ ECHAPPEE COMME TOUT CE QUI VIENT DU SERVEUR. Ailleurs dans
                // ce fichier, `data-jour` porte une date fabriquee localement ;
                // ici elle vient de `departure_date`, et les bornes de la fenetre
@@ -3108,6 +4179,7 @@ if ("serviceWorker" in navigator) {
                // serveur. L'identifiant, lui, ne depend d'aucun ordre.
                : `<button type="button" class="agenda-item offre" data-jour="${echapper(jour)}"` +
                  ` data-offre-cle="${echapper(cleOffre(l.offre))}">` +
+                 vignetteBien(l.offre.property_id, l.bien) +
                  `<span class="agenda-bien">${echapper(l.bien)}</span>` +
                  '<span class="agenda-tag offre">À PRENDRE</span></button>').join('') +
              '</div>'
@@ -3128,7 +4200,7 @@ if ("serviceWorker" in navigator) {
       <div class="dispo-item">
         <span>✕ du ${echapper(jourLisible(c.debut))} au ${echapper(jourLisible(c.fin))}
           ${c.motif ? '— ' + echapper(c.motif) : ''}
-          ${c.source === 'prestataire' ? '' : '<span class="dispo-source">— posé par votre employeur</span>'}
+          ${c.source === 'prestataire' ? '' : '<span class="dispo-source">— posé par votre hôte</span>'}
         </span>
         ${c.source === 'prestataire' && mesJours.modifiable
           ? `<button class="btn-mini" data-conge="${echapper(c.id)}">Annuler</button>` : ''}
@@ -3217,10 +4289,17 @@ if ("serviceWorker" in navigator) {
     const cette = lundiDe(AUJ())
     const suivante = isoJ(new Date(dJour(cette).getTime() + 7 * 86400000))
     if (!alt) return [{ jours: joursCoches('simple'), depuis: cette }]
-    // ⚠ ON GARDE L'ANCRAGE EXISTANT s'il y en a un : le deplacer a chaque
-    // modification inverserait son rythme une fois sur deux.
-    const { a } = lotsPwa()
-    const d0 = (a && a.ancre) ? lundiDe(a.ancre) : cette
+    // ⚠ LE LOT A EST LA SEMAINE COURANTE, ET SON ANCRE LE DIT (constat de la
+    // revue de 70f805d, trouve sur la fiche de l'hote). Cette ligne lisait
+    // `a.ancre` — que `fusion()` ne pose jamais : elle valait donc toujours
+    // `cette`, et c'etait le bon resultat par accident. La fiche, elle, lisait
+    // l'ancre de la premiere regle de quinzaine trouvee, sans regarder sa
+    // parite : une semaine sur deux, les lots A et B partaient echanges.
+    // On ecrit ici ce que le code faisait deja, pour que la prochaine version
+    // de `fusion` ne reintroduise pas le defaut en ajoutant une `ancre`.
+    // Le rythme n'est pas deplace pour autant : les jours du lot A sont, par
+    // construction, ceux qui tombent CETTE semaine.
+    const d0 = cette
     const d1 = isoJ(new Date(dJour(d0).getTime() + 7 * 86400000))
     return [{ jours: joursCoches('a'), depuis: d0 }, { jours: joursCoches('b'), depuis: d1 }]
   }
@@ -3564,19 +4643,19 @@ if ("serviceWorker" in navigator) {
     }
     const exc = exceptionDuJour(j)
     // ⚠ ELLE N'ANNULE QUE CE QU'ELLE A DECLARE. Une absence posee par son
-    // employeur n'est pas la sienne a defaire : la lui laisser effacer la
+    // hôte n'est pas la sienne a defaire : la lui laisser effacer la
     // remettrait candidate sur un jour dont il l'avait retiree, sans qu'il
     // l'apprenne. L'ecran ne propose donc pas le geste.
     if (exc && exc.source !== 'prestataire') {
       // ⚠ DEUX SENS, DEUX PHRASES. L'hote peut poser « pas ce samedi-la »
       // (`available: false`) MAIS AUSSI « viens exceptionnellement ce samedi »
       // (`available: true`). Un libelle unique annoncait « cette absence a ete
-      // posee par votre employeur » a quelqu'un a qui on venait au contraire de
+      // posee par votre hôte » a quelqu'un a qui on venait au contraire de
       // DEMANDER de venir — elle n'y comprenait rien, et n'avait aucun moyen de
       // dire qu'elle ne pouvait pas.
       direIci(exc.available
-        ? 'Votre employeur vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.'
-        : 'Cette absence a été posée par votre employeur. Pour la retirer, dites-le lui.')
+        ? 'Votre hôte vous a demandé de venir ce jour-là. Si vous ne pouvez pas, dites-le lui.'
+        : 'Cette absence a été posée par votre hôte. Pour la retirer, dites-le lui.')
       return
     }
     // ⚠ UN MENAGE FIXE LA JOURNEE (lot A). Se declarer absente pendant qu'on doit
@@ -3669,7 +4748,7 @@ if ("serviceWorker" in navigator) {
     // Identite de l'objet d'etat, pour reconnaitre un RECHARGEMENT survenu
     // entre-temps (`chargerDisponibilites` remplace `mesJours` en entier).
     // Sans ce reperage, un rattrapage tardif reecrivait des donnees fraiches
-    // par-dessus, effacant a l'ecran une absence que l'employeur venait de poser.
+    // par-dessus, effacant a l'ecran une absence que l'hôte venait de poser.
     const monEtat = mesJours
 
     // ⚠ LE DRAPEAU SE POSE AVANT CE QU'IL GARDE, et avant le redessin qui le LIT.
@@ -3939,7 +5018,7 @@ if ("serviceWorker" in navigator) {
       if (mien !== lectureDispoCourante) return false
       // ⚠ UN DROIT RETIRE N'EST PAS UN ECHEC DE LECTURE. Rendre `false` en
       // silence laissait les cases ACTIVES sous un « Non autorisé » seul :
-      // chaque tape suivante repartait vers le meme 403. Quand l'employeur
+      // chaque tape suivante repartait vers le meme 403. Quand l'hôte
       // reprend la main, l'ecran doit le dire — c'est le seul cas ou le
       // rattrapage a le droit de remplacer le panneau.
       if (data.autorise !== true) { calendrierSansDroit(); return false }
@@ -4053,6 +5132,12 @@ if ("serviceWorker" in navigator) {
   ;(() => {
     const zone = document.getElementById('dispo-months')
     zone.addEventListener('pointerdown', e => {
+      // ⚠ EN APERÇU, L'APPUI LONG N'EXISTE PAS (constat de la re-revue de
+      // e528ca1). C'est un geste d'ÉCRITURE : le garde sur `fetch` le refuse
+      // bien, mais trop tard — la sélection est déjà peinte et l'hôte lit
+      // « pas enregistré », comme si son réseau était en panne. On ne propose
+      // pas un geste dont on sait qu'il sera refusé.
+      if (APERCU) return
       if (e.button > 0 || !mesJours || !mesJours.modifiable) return
       // ⚠ UN SECOND DOIGT NE RELANCE RIEN : il ne termine pas non plus la
       // selection du premier (filtre par `pointerId` plus bas).
@@ -4144,6 +5229,13 @@ if ("serviceWorker" in navigator) {
     // s'affichait sous le calendrier, et le toucher ne faisait rien. Le detour
     // par la case du calendrier puis la feuille du jour restait le seul chemin
     // vers « Marquer fait ».
+    const bv = e.target.closest('[data-vu]')
+    if (bv && !bv.disabled) {
+      e.stopPropagation()
+      const mv = tousMesMenagesEnrichis().find(x => x.id === bv.dataset.vu)
+      if (mv) direVu(mv, bv)
+      return
+    }
     const mi = e.target.closest('.agenda-item[data-mien]')
     if (!mi) return
     // ⚠ SANS LE FILTRE DE BIENS, comme dans la feuille du jour : `openModal`

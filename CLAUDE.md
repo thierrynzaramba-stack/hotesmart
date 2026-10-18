@@ -88,6 +88,22 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
   Le mobile n'avait ni fiche, ni ajout, ni messagerie. Rattrapé par
   `shared/calendrier-resa.js` (docs/kb/reservation-directe.md §12).
 
+## RÈGLE — REFONTE UI : LA FORME NE SUPPRIME JAMAIS LE FOND
+- **Les specs UI (docs/specs/spec-refonte-ui-v5*.md) et la maquette donnent la
+  FORME. Les specs métier (docs/specs/*.md) et les KB (docs/kb/) donnent le
+  FOND.**
+- **Avant chaque lot** : lire les specs métier et la KB de la page refaite, les
+  croiser avec la spec UI, et adapter le template — toute fonction, information
+  ou réglage existant est **conservé, déplacé ou retiré AVEC RAISON**, dans une
+  section « Inventaire » de la spec du lot.
+- **Une spec UI ne supprime jamais une fonction métier par omission.** En cas
+  de conflit entre forme et fond, le fond l'emporte, et on le signale à
+  Thierry.
+- Vécu (11 octobre 2026, lot 2 étape 1) : la nouvelle messagerie avait perdu
+  le badge « Arrive aujourd'hui / demain », le téléphone du voyageur en lien
+  d'appel et l'état du ménage — des affichages que l'ancienne page portait
+  pour les arrivées du jour, repérés par Thierry en recette, pas par la spec.
+
 ## ARCHITECTURE — CONFIG D'APP vs CONFIG GÉNÉRALE
 - **La configuration d'une APP vit DANS l'app.** Prestataires de ménage et leurs
   biens → `apps/menages/prestataires.html`. Modèles de messages → l'app
@@ -328,14 +344,181 @@ AirROI pour octobre : 25 $ par compte sur 30 jours et 25 $ par mois (dette
 - **Staging n'a aucun cron** (docs/STAGING.md §1) : en recette, le pilote se
   lance par `scripts/piloter-yieldflow.js` (à blanc, puis `--go`).
 
-Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
-RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
-remplace `rang === 1` partout, proposition posee a l'approche du depart
-(7 jours) et notifiee, escalade automatique au refus et a l'expiration en
-sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
-(ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
+**Refonte UI V5 — lot 2 « Messages » ÉTAPES 1 À 4 + RECETTE 1 GUESTFLOW EN
+PROD (12 octobre 2026, 38ed719)** : étape 4 = Test/Auto (confirmation avant
+Auto, état RELU en base), épingle et archivage manuel portés (menu ⋯ du fil,
+actions gardées), ancienne MESSAGERIE en redirection (dette 43 soldée) —
+`config.html` RESTE EN SERVICE (URL seule) jusqu'à couverture 100 % de
+l'inventaire GuestFlow (spec lot-messages §12 bis). CHANGEMENT DE PÉRIMÈTRE
+(12 octobre) : tout GuestFlow vit dans Messages, en deux recettes. Recette 1
+LIVRÉE : tiroir par bien à deux volets portés par deux boutons d'en-tête
+(i-scheduled / i-ai) — « Réponses de l'IA » (mode, pause, consignes
+agent_prompting écrites insert-puis-delete, garde IA en état, Connaissances,
+Alertes en bas : 2 types × 2 canaux, porte Brevo, Tester depuis la base) et
+« Messages programmés » (renvoi provisoire). Liste épurée (plus d'extrait ni
+de date). `[hidden]{display:none !important}` en tête de ui.css (classe de
+défauts fermée). Dettes 66 (origine des envois), 67 (évaluation en
+proposition au départ), 68 (réglages IA non délégables, tiroir réservé au
+titulaire). Recette 2 LIVRÉE
+(volet Messages programmés, parité prouvée sur les 11 messages réels — 0
+écart, scripts/verifier-parite-templates.js), puis REDIRECTIONS (go de
+Thierry du 12 octobre) : messagerie, config et templates redirigent vers
+/messages, sidebar réduite à la Base de connaissance, plus aucune écriture
+directe depuis l'ancienne app. **LOT 2 « MESSAGES » CLOS.** Restent au
+registre : dettes 66 (origine des envois) et 67 (évaluation en proposition
+au départ) — à traiter ensemble avant le lot Calendrier — et 68 (délégation
+des réglages IA). étape 3 = Envoyer / Modifier / Rejeter sur les propositions dans
+le fil (Envoyer = chemin de l'ancienne page : posterMessage puis clôture
+statut+journal par POST /api/messages action=proposition ; statuts
+done/ignored, pas de 'rejected' ; statut RELU avant l'envoi — pas de double
+message ; badge décrémenté sans rechargement). Dette 66 ouverte (origine
+ia_validee/ia_modifiee/hote posée par le writer d'envoi — prérequis « Fait
+pour vous », après l'étape 4, avant le lot Calendrier) : d'ici là, bulle
+envoyée SANS robot. étape 1 = pages/messages.html en lecture seule (liste + fil),
+arrivées du jour/demain en tête avec téléphone composable (+33 rétabli), photo
+du bien en avatar, logos de canal aux vraies couleurs (jetons --canal-*),
+« à traiter » = séjours à venir/en cours seulement (règle resserrée, module
+partagé). Étape 2 = envoi manuel (routage par SOURCE, échec « Non envoyé ·
+Réessayer », texte jamais perdu), « Proposer une réponse »
+(api/guestflow-proposer.js : génération et garde de coût DU CRON, clés sur la
+référence provider, refus parlants), pagination serveur (curseur composite
+lastTime+bookId, arrivées j/j+1 toujours en première page), état lu
+(conversation_flags.read_at, migration appliquée staging ET prod, writer
+unique POST /api/messages action=lu). Ancienne messagerie : URL seule, aucun
+menu. Inventaire : spec lot-messages §12. KB : docs/kb/messages-v5.md.
+Étapes 3-4 à venir (Envoyer/Modifier/Rejeter dans le fil ; Test/Auto +
+redirection). Lot photos LIVRÉ le 10-11 octobre
+(properties.photo_url, bucket property-photos, fiche /biens ; dette 65).
 
-## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (a solder avant la cloture V1)
+**Chantier REFONTE UI V5 — lot 1 LIVRÉ (10 octobre 2026, branche
+`lot-ui-v5-1`)** : socle (shared/theme.css seul porteur d'hexas, ui.css,
+icons.svg, nav.js 5 entrées, i18n fr/en/es) et `pages/aujourdhui.html` devenue
+l'accueil (index.html et /dashboard redirigent). Faits comptés seulement :
+« À valider » restreint aux conversations ouvertes (49 → 1 ce jour-là), notes
+affichées /5 (le cœur stocke /10), tuile codes retirée (dette 62, user_id
+absent de l'INSERT serrures), min/max mensuel depuis le premier mois vendu.
+Menu ≡ : section « Outils » PROVISOIRE, retirée lot par lot. Dette 59
+(canaux au cœur) = PRÉREQUIS du lot Logements. Recette du jour : 5 résas de
+test Colomiers annulées par le CRS, deux blocages saisis comme résas passés
+`blocked` (dettes 63-64). KB : docs/kb/aujourdhui.md.
+
+**Refonte UI V5, lot Calendrier : ETAPE 1 + retouches EN PROD le 13 octobre
+2026 (963d05d).** Depuis e8ed91d : barres PLEINES (l'essai contour est
+referme), telephone restructure comme l'ancien mobile (barres en demi-cases
+par semaine, pastille noire aujourd'hui, mois + selecteur STICKY en tete,
+multi-biens EMPILES avec delimitation, bulles = AJOUT), la ligne de donnees
+de l'ordinateur suit le SELECTEUR DE VUE partage (les lignes a cocher ont
+disparu), dates reservees non grisees, ORDRE des biens par glisser (poignee
+du bandeau, tactile + souris) — liste etat.choisis persistee COMMUNE aux
+deux ecrans.
+
+**Redirections FAITES le 13 octobre 2026 (4a108e5, go de Thierry)** :
+biens-calendrier.html et calendrier-mobile.html redirigent vers /calendrier ;
+redirects declaratifs vercel.json (/biens/:id/calendrier -> /calendrier?bien=:id,
+honore par la V5 : le bien demande s'affiche en tete). Les ~96 garde-fous des
+anciennes pages sont RETARGES sur la V5 (11 fichiers de tests — les gardes
+SERVEUR de reservation-directe restaurees apres review). Multi-biens au
+telephone (calendriers EMPILES, bulles = ajout), ordre des biens par GLISSER
+(poignee du bandeau), vue partagee par selecteur, fiche enrichie (detail
+?booking=). Suite : 4988 tests dont 28 rouges attendus. EN SUSPENS (Thierry
+tranche) : le SURVOL DE COLONNE de l'ancien planning (demande du 21/09)
+n'existe pas en V5 — a reporter ou abandonner.
+
+(Bloc d'origine :) `/calendrier` (pages/calendrier.html, contrat partage
+shared/calendrier-contrat.js, orphelines shared/nuits-orphelines.js) : grille
+par blocs de bien (nom hors cadre, 2 lignes de contenu, vignette supprimee puis
+bandeau photo 28), 4 etats en couleur (vendue = la BARRE seule a l'ordinateur,
+le gris reste au telephone), barres en CONTOUR couleur canal (booking = --info,
+direct = --ok ; prenom, total au survol), selecteur de biens masques dans
+l'angle de la bande, lignes optionnelles cochees au menu ... (par defaut
+Reservations + Prix), fiche enrichie par GET /api/calendar?booking=
+(coordonnees TITULAIRE SEUL, date de vente, detail du prix : total voyageur
+via prixVoyageur, taxe de sejour via taxeSejourDe, frais Airbnb = retenue
+hote ; kb synchronisation.md §8 ter). Le frais de SERVICE voyageur Airbnb
+n'est transmis par aucun canal. ANCIENNES pages calendrier INTACTES : la
+redirection viendra sur go explicite de Thierry. Restent : recette mobile a
+poursuivre, etapes 2-4 de la spec (volets Prix/Evenements/Bilan/Marche,
+marques ~ et ✎). Banc local : ~/.cache/hotesmart-banc (hors depot).
+
+Chantier prestataires EN COURS. Lot 3 (assignation par journee) **LIVRE EN
+ENTIER** : 3.1 dispos RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la
+garde** — `requires_ack` remplace `rang === 1` partout, proposition posee a
+l'approche du depart (7 jours) et notifiee, escalade automatique au refus et a
+l'expiration en sautant qui a deja refuse, alerte sur trou de garde seulement ;
+**3.4 l'ecran du planning de garde** et **3.5 les jours attitres + « Mes
+disponibilites »**, tous deux en production le 14 octobre 2026 dans la refonte
+V5. `apps/menages/garde.html` est ferme depuis, ses seize garde-fous transposes
+(voir plus bas).
+
+**LOT MENAGES V5 EN PRODUCTION le 14 octobre 2026 (66064f9).** La page
+`/menages` (bulle « A traiter », calendrier de garde, volet Equipe, fiche
+menage et sa note, fenetre de configuration d'une prestataire a deux onglets)
+et l'ACCUSE DE LECTURE : bouton « Vu » dans la bulle du bien sur la page de la
+prestataire, alerte « Pas vu » chez l'hote, deux relances SMS a 9 h (la veille
+et le jour meme). Migrations `2026-10-14-menage-vu-le` et `-vu-par` appliquees
+staging ET prod, prouvees par `scripts/verifier-migration-menage-vu-le.js`
+(prod : 28 validations rattrapees sur 28, 0 sans auteur).
+
+⚠ **Regle gravee : une validation ne vaut que pour QUI l'a posee**
+(`menages.vu_par = provider_id`). Un menage qui change de main perd la
+validation de la precedente — sinon l'hote lit « A jour » sur quelqu'un qui n'a
+jamais rien lu. C'est la DONNEE qui porte son proprietaire, pas les six chemins
+d'ecriture de `provider_id` qui pensent a la remettre a zero.
+
+⚠ **ETAPE 4 : UN ECRAN FERME, UN RESTE.** La navigation principale
+(`shared/nav.js`, `pages/aujourdhui.html`, sidebar) mene a `/menages`, et
+**`apps/menages/index.html` est une redirection** depuis le 14 octobre 2026 :
+la fiche V5 porte desormais les QUATRE gestes d'assignation (« Proposer » —
+le defaut du serveur —, « Assigner », « Retirer la proposition », « Personne »),
+et ce que l'ancien ecran faisait d'autre, la V5 le fait mieux (la note passait
+en ecriture RLS directe ; « Marquer fait » n'ecrivait que dans le localStorage).
+
+- `apps/menages/garde.html` est **ferme aussi** (14 octobre 2026). Ses SEIZE
+  garde-fous de rendu ont ete transposes un par un vers `pages/menages.html`
+  dans `tests/garde-endpoint.test.js`. **Deux choses ne sont pas reprises, et
+  c'est assume** (l'inventaire les signalait deja) : la REMPLACANTE du jour et
+  le DETAIL DU JOUR agrege — le clic ouvre la fiche d'UN menage. L'endpoint
+  continue de rendre la remplacante, et un test garde ce contrat.
+- `apps/menages/prestataires.html` reste : la saisie de la **recurrence A/B** y
+  vit encore, atteinte par « Corriger pour elle ». C'est le dernier ecran du
+  domaine a reprendre.
+
+## ⚠ DETTE SOLDEE LE 17 OCTOBRE 2026 — LA SUITE EST A ZERO ROUGE
+
+**5249 tests, 5249 verts.** Les quatre familles decrites ci-dessous ont ete
+reparees par la regle qu'elles illustraient : *dates relatives si le test lit
+l'horloge, dates figees s'il injecte le temps.*
+
+| fichier | rouges | ce qui a change |
+|---|---|---|
+| `tests/booking-changes.test.js` | 8 | le sejour par defaut de `snap()` devient a venir ; les tests de la garde gardent leurs dates figees, ils INJECTENT `AUJOURDHUI` |
+| `tests/messages-classify.test.js` | 10 | le message de reference est date d'il y a deux jours |
+| `tests/avis-endpoint.test.js` | 6 | les avis de reference suivent l'horloge ; les avis volontairement ANCIENS (`2024-01-01`) restent figes, c'est leur role |
+| `tests/menages-public-filtre-presta.test.js` | 4 | les deux sejours sont relatifs, l'un partant aujourd'hui |
+
+**Deux pieges trouves par la contre-epreuve, et pas par la suite :**
+`JOURS=N node --require ./tests/outils/horloge-decalee.js --test …` a montre
+que `tests/disponibilites-endpoint.test.js` — vert ce jour-la — rougissait a
+J+30, J+45, J+60 et J+90. Deux causes, toutes deux invisibles a la lecture :
+un **mois demande fige** (`2026-11`) alors que l'endpoint ne calcule que des
+mois a venir, et des jours designes par leur **numero** (« le 16 ») dans des
+tests qui posent une regle « du lundi au vendredi » — le 16 n'est un lundi
+qu'un mois sur sept. Les deux sont ancres : mois courant + 1, et de VRAIS
+lundis calcules. Eprouve a J+15, 45, 60, 75, 120, 200 et 400 : zero rouge.
+
+**La regle de comptage devient donc : ZERO.** Un seul rouge est un vrai rouge.
+Et la contre-epreuve a horloge decalee n'est plus un outil de diagnostic, c'est
+la seule facon de savoir si un test neuf tiendra dans deux mois.
+
+⚠ **IL RESTE UN ROUGE A J+60**, hors du domaine menage :
+`tests/airroi-client.test.js` — « LE TEST QUI COMPTE (SECURITE, review de
+f40ee9e) ». Il calcule pourtant sa fenetre relativement : la cause est
+ailleurs, probablement dans une fixture sur disque qui ne suit pas. C'est le
+chantier marche, donc YieldFlow : a reprendre avec le go de Thierry.
+
+## CE QUI SUIT EST L'HISTOIRE DE CETTE DETTE, gardee pour la lecon
+
+## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (soldee le 17 octobre 2026)
 
 **Constat du 13 septembre 2026.** `tests/booking-changes.test.js` (6) et
 `tests/booking-changes-dispatch.test.js` (2) echouent depuis la nuit du 12 au
@@ -449,6 +632,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 
 ## DOC REPO — LIRE AVANT DE CODER
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
+- docs/kb/aujourdhui.md (accueil V5 : source de chaque chiffre, ce qui n'est PAS affiché et pourquoi ; socle UI V5 dans shared/theme.css, ui.css, icons.svg, nav.js, i18n/ — aucun hexa, aucun texte en dur, aucun emoji, `node scripts/i18n-check.js` avant commit).
 - docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
 - docs/kb/dettes-v1.md (REGISTRE des dettes datées avant la clôture V1 : 28 rouges, migrations à appliquer, vacances 2027, mobile et fermetures — chaque lot lit sa ligne avant merge).
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).

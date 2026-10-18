@@ -1,0 +1,1137 @@
+/* ============================================================
+   HôteSmart — ui.css
+   Composants. N'utilise QUE var(--…) de theme.css.
+   Règle de revue : grep -E '#[0-9A-Fa-f]{3,6}' shared/ui.css → 0 résultat.
+   ============================================================ */
+
+/* ---------- Base ---------- */
+/* L'attribut hidden GAGNE toujours : une classe display:flex/grid l'ecrasait
+   (origine auteur contre origine navigateur) — en-tete de fil vide, saisie,
+   barre d'outils et boutons restaient visibles caches. Releve en review de
+   ddfc88a, ferme ICI pour toute la classe de defauts. */
+[hidden] { display: none !important; }
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--fs-body);
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+button, input, textarea, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+h1, h2, h3, p { margin: 0; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--muted); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- Icônes ---------- */
+.icon {
+  width: var(--icon-size);
+  height: var(--icon-size);
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon--lg { width: var(--icon-size-lg); height: var(--icon-size-lg); }
+.icon--fill { fill: currentColor; stroke: none; }
+
+/* ---------- Typo ---------- */
+.h1 { font-size: var(--fs-h1); font-weight: var(--fw-black); letter-spacing: var(--tracking-tight); }
+.h2 { font-size: var(--fs-h2); font-weight: var(--fw-bold); letter-spacing: -0.02em; }
+.kpi { font-size: var(--fs-kpi); font-weight: var(--fw-black); letter-spacing: var(--tracking-tight); line-height: 1; }
+.small { font-size: var(--fs-small); }
+.caption { font-size: var(--fs-caption); }
+
+/* ---------- Mise en page ---------- */
+.page {
+  max-width: var(--page-max);
+  margin: 0 auto;
+  padding: 36px var(--page-pad) 64px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xl);
+}
+.row { display: flex; align-items: center; gap: var(--gap-s); }
+.stack { display: flex; flex-direction: column; gap: var(--gap-s); }
+.grid-auto { display: grid; gap: var(--gap-m); grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.section-head { display: flex; align-items: baseline; gap: 12px; }
+.section-head .h2 { flex: 1; }
+
+/* ---------- Boutons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--gap-s);
+  height: var(--control); padding: 0 18px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-small); font-weight: var(--fw-semibold);
+  white-space: nowrap; border: 1px solid transparent;
+  transition: box-shadow .15s, background .15s;
+}
+/* Retouche charte du 11 octobre 2026 : le fond noir (--ink) est reserve a la
+   NAVIGATION (.bottombar, .tab[aria-current]). Un bouton principal se
+   distingue par son BORD --ink, comme l'outline. */
+.btn--primary { background: var(--surface); color: var(--ink); border-color: var(--ink); }
+.btn--secondary { background: var(--surface); color: var(--ink); border-color: var(--border); }
+.btn--outline { background: var(--surface); color: var(--ink); border-color: var(--ink); }
+.btn--icon { width: var(--control); padding: 0; }
+.btn--lg { height: var(--control-lg); padding: 0 20px; font-size: var(--fs-body); }
+.btn--block { width: 100%; }
+.btn:hover { box-shadow: var(--shadow-hover); }
+.link { font-weight: var(--fw-semibold); text-decoration: underline; }
+
+/* ---------- Pilule d'onglet ---------- */
+.tab {
+  display: inline-flex; align-items: center; gap: var(--gap-s);
+  height: var(--control); padding: 0 18px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-body); font-weight: var(--fw-medium);
+}
+.tab:hover { background: var(--surface-2); }
+.tab[aria-current="page"] { background: var(--ink); color: var(--on-ink); font-weight: var(--fw-semibold); }
+
+/* ---------- Badges ---------- */
+.badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px;
+  border-radius: var(--radius-pill);
+  font-size: 12px; font-weight: var(--fw-bold);
+}
+.badge--amber { background: var(--amber); color: var(--brand-night); }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: var(--radius-pill);
+  background: var(--surface); font-size: var(--fs-caption); font-weight: var(--fw-semibold);
+}
+
+/* ---------- Cartes ---------- */
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--gap-m);
+  background: var(--surface);
+  display: flex; flex-direction: column; gap: 12px;
+  transition: box-shadow .15s;
+}
+.card:hover { box-shadow: var(--shadow-hover); }
+/* Plus de carte sombre (retouche du 11 octobre) : le modificateur reste pour
+   les pages, la carte redevient normale. */
+.card--dark { background: var(--surface); color: var(--ink); border-color: var(--border); }
+
+/* ---------- Pastille d'icône ---------- */
+.tile-icon {
+  width: 56px; height: 56px; flex: none;
+  border-radius: var(--radius-tile);
+  background: var(--surface-2); color: var(--ink);
+  display: flex; align-items: center; justify-content: center;
+}
+.tile-icon--pending { background: var(--amber-soft); }
+.tile-icon--amber { background: var(--amber); color: var(--brand-night); }
+.tile-icon--s { width: 44px; height: 44px; }
+
+/* ---------- Tuile chiffre (« Fait pour vous ») ---------- */
+.stat {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 18px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.stat .kpi { margin-top: 2px; }
+.stat .caption { color: var(--muted); }
+
+/* ---------- Ligne d'agenda (« Aujourd'hui ») ---------- */
+.event {
+  display: grid; grid-template-columns: 64px 56px 1fr auto;
+  gap: var(--gap-m); align-items: center;
+  padding: 18px 0; border-bottom: 1px solid var(--line);
+}
+.event__time { font-size: 16px; font-weight: var(--fw-bold); }
+.event__title { display: block; font-size: 16px; font-weight: var(--fw-semibold); }
+.event__sub { display: block; font-size: var(--fs-small); color: var(--muted); margin-top: 3px; }
+
+/* ---------- Carte logement ---------- */
+.property { display: flex; flex-direction: column; gap: 10px; }
+.property__photo {
+  position: relative; aspect-ratio: 4 / 3;
+  border-radius: var(--radius-card); overflow: hidden;
+  background: var(--surface-2);
+}
+.property__photo img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .3s; }
+.property:hover .property__photo img { transform: scale(1.02); }
+.property__photo .chip { position: absolute; top: 12px; inset-inline-start: 12px; }
+.property__photo--empty { border: 1px dashed var(--border); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
+.property__name { display: flex; align-items: center; gap: var(--gap-s); font-size: 16px; font-weight: var(--fw-semibold); }
+.property__name > :first-child { flex: 1; }
+.property__rating { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-small); font-weight: var(--fw-medium); }
+.property__rating .icon { width: 13px; height: 13px; }
+.bar { flex: 1; height: 4px; border-radius: var(--radius-pill); background: var(--line); overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--ink); }
+.bar--amber > span { background: var(--amber); }
+
+/* ---------- Messagerie (lot 2, spec-refonte-ui-v5-lot-messages.md) ---------- */
+.msg-layout { display: grid; grid-template-columns: 360px 1fr; min-height: calc(100vh - 81px); }
+.msg-liste { border-inline-end: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.msg-liste__outils { display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 10px; }
+.msg-recherche { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); }
+.msg-recherche input { flex: 1; border: 0; outline: 0; background: none; font-size: var(--fs-small); color: var(--ink); }
+.msg-filtres { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.msg-filtres::-webkit-scrollbar { display: none; }
+.msg-filtres .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; }
+.msg-filtres .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.msg-deroule { overflow-y: auto; flex: 1; }
+.msg-groupe { display: flex; align-items: center; gap: 8px; padding: 12px 14px 6px; font-size: var(--fs-caption); font-weight: var(--fw-bold); letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink); }
+.msg-groupe .icon { width: 14px; height: 14px; }
+.msg-separe { height: 10px; background: var(--surface-2); border-block: 1px solid var(--line); }
+.conv { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; width: 100%; padding: 12px 14px; border: 0; background: none; text-align: start; border-bottom: 1px solid var(--line); cursor: pointer; }
+.conv:hover { background: var(--surface-2); }
+.conv[aria-current="true"] { background: var(--surface-2); }
+.conv__avatar { position: relative; width: 44px; height: 44px; border-radius: var(--radius-pill); background: var(--surface-2); color: var(--ink); font-size: var(--fs-small); font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; }
+.conv__avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: var(--radius-pill); }
+/* La pastille canal porte la COULEUR DE MARQUE du canal (A rose Airbnb,
+   B bleu Booking, D bleu nuit direct) ; un canal inconnu reste neutre. */
+.conv__canal { position: absolute; bottom: -2px; inset-inline-end: -2px; z-index: 1; width: 18px; height: 18px; border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); font-size: 10px; font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); box-shadow: 0 0 0 2px var(--surface); }
+.conv__canal--airbnb { background: var(--canal-airbnb); color: var(--on-canal); border-color: var(--canal-airbnb); }
+.conv__canal--booking { background: var(--canal-booking); color: var(--on-canal); border-color: var(--canal-booking); }
+.conv__canal--direct { background: var(--canal-direct); color: var(--on-canal); border-color: var(--canal-direct); }
+.conv__canal .icon { width: 11px; height: 11px; stroke-width: 2.4; }
+.conv__nom { display: flex; align-items: baseline; gap: 8px; font-weight: var(--fw-semibold); }
+.conv__sous { display: flex; align-items: center; gap: 6px; font-size: var(--fs-caption); color: var(--muted); }
+.conv__etat { width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--border); flex: none; }
+.conv__etat--encours { background: var(--ok); }
+.conv__droite { display: flex; align-items: center; gap: 7px; align-self: center; }
+.conv__nonlu { width: 9px; height: 9px; border-radius: var(--radius-pill); background: var(--info); }
+.conv .icon--robot { width: 15px; height: 15px; color: var(--info); flex: none; }
+.conv .icon--fait { width: 15px; height: 15px; color: var(--ok); flex: none; }
+.icon--tel { width: 13px; height: 13px; }
+.msg-fil { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.msg-fil__entete { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+.msg-fil__titre { min-width: 0; }
+.msg-fil__titre .small { display: block; }
+.msg-fil__deroule { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 4px; }
+.msg-vide[hidden] { display: none; }
+.msg-vide { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--muted); }
+.bulle { max-width: 72%; padding: 10px 14px; border-radius: var(--radius-card); font-size: var(--fs-body); line-height: 1.45; white-space: pre-wrap; overflow-wrap: break-word; }
+.bulle--voyageur { align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-end-start-radius: 4px; }
+/* Retouche du 11 octobre : le noir en fond est reserve a la navigation. */
+.bulle--hote { align-self: flex-end; background: var(--surface-2); color: var(--ink); border-end-end-radius: 4px; }
+.bulle--proposition { align-self: flex-end; background: var(--surface); border: 1.5px dashed var(--ink); border-end-end-radius: 4px; }
+.bulle__entete { display: flex; align-items: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); margin-bottom: 4px; }
+.bulle-meta { align-self: flex-end; display: flex; align-items: center; gap: 5px; font-size: var(--fs-caption); color: var(--muted); margin: 2px 4px 8px; }
+.bulle-meta--voyageur { align-self: flex-start; }
+.bulle-meta .icon { width: 13px; height: 13px; }
+.msg-jour { align-self: center; font-size: var(--fs-caption); color: var(--muted); margin: 14px 0 6px; }
+.msg-saisie { display: flex; align-items: flex-end; gap: 10px; padding: 12px 20px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); }
+.msg-saisie textarea { flex: 1; resize: none; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 11px 14px; font-size: var(--fs-body); line-height: 1.5; background: var(--surface); color: var(--ink); outline: none; max-height: 160px; }
+.msg-saisie textarea:focus { border-color: var(--ink); }
+.bulle--echec { border: 1px solid var(--danger); }
+.msg-echec { color: var(--danger); font-weight: var(--fw-semibold); }
+.msg-reessayer { background: none; border: 0; padding: 0; color: var(--ink); }
+/* Boutons d'une proposition (etape 3) : Modifier + Envoyer alignes a droite,
+   Rejeter dans le menu ⋯ (spec §3.3). */
+.bulle__actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.bulle__actions .btn { padding: 8px 14px; }
+.bulle-menu { position: relative; }
+.bulle-menu summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface); color: var(--ink); }
+.bulle-menu summary::-webkit-details-marker { display: none; }
+.bulle-menu summary .icon { width: 16px; height: 16px; }
+.bulle-menu__liste { position: absolute; inset-inline-end: 0; bottom: calc(100% + 6px); min-width: 130px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); z-index: 5; }
+.bulle-menu__liste button { display: block; width: 100%; text-align: start; background: none; border: 0; padding: 8px 10px; border-radius: 8px; color: var(--ink); font-size: var(--fs-body); font-weight: var(--fw-semibold); cursor: pointer; white-space: nowrap; }
+.bulle-menu__liste button[data-rejeter] { color: var(--danger); }
+.bulle-menu__liste--bas { bottom: auto; top: calc(100% + 6px); }
+.icon--epingle { width: 13px; height: 13px; color: var(--muted); align-self: center; flex: none; }
+.bulle-menu__liste button:hover { background: var(--surface-2); }
+.msg-retour { display: none; }
+/* Test / Auto (etape 4) : segmente a deux positions, et le tiroir reglages. */
+.msg-mode { display: inline-flex; gap: 4px; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
+.msg-mode .tab { padding: 5px 12px; }
+.msg-mode .tab:disabled { opacity: .45; cursor: default; }
+.msg-mode .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); font-weight: var(--fw-semibold); }
+.msg-tiroir { position: fixed; inset-block: 0; inset-inline-end: 0; width: min(360px, 100vw); background: var(--surface); border-inline-start: 1px solid var(--line); box-shadow: var(--shadow-hover); z-index: 40; display: flex; flex-direction: column; overflow-y: auto; }
+.msg-tiroir[hidden] { display: none; }
+.msg-tiroir__entete { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--line); }
+.msg-tiroir__corps { display: flex; flex-direction: column; }
+.msg-btnrond { position: relative; width: 44px; height: 44px; border-radius: var(--radius-pill); border: 1px solid var(--border); background: var(--surface); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+.msg-btnrond:hover { box-shadow: var(--shadow-hover); }
+.msg-btnrond .icon { width: 20px; height: 20px; }
+/* La legende, VISIBLE au survol sur ordinateur (title/aria restent pour le
+   clavier, le tactile et les lecteurs d'ecran) ; inerte au tactile. */
+.msg-btnrond::after { content: attr(data-legende); position: absolute; top: calc(100% + 6px); inset-inline-end: 0; background: var(--ink); color: var(--on-ink); font-size: var(--fs-caption); padding: 4px 9px; border-radius: 7px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 30; }
+@media (hover: hover) {
+  .msg-btnrond:hover::after, .msg-btnrond:focus-visible::after { opacity: 1; }
+}
+.msg-tiroir__section { margin: 16px 18px 4px; font-size: var(--fs-small); font-weight: var(--fw-bold); letter-spacing: var(--tracking-tight); }
+.msg-tiroir__choixbien { display: flex; flex-direction: column; gap: 4px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.msg-tiroir__choixbien select { height: 38px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 10px; font-size: var(--fs-body); }
+.msg-tiroir__bloc { display: flex; flex-direction: column; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--line); }
+.msg-tiroir__bloc textarea { resize: vertical; border: 1px solid var(--border); border-radius: var(--radius-card); padding: 9px 12px; font-size: var(--fs-small); line-height: 1.5; background: var(--surface); color: var(--ink); font-family: inherit; }
+.msg-tiroir__bloc textarea:focus { border-color: var(--ink); outline: none; }
+.msg-tiroir__bloc .btn { align-self: flex-start; }
+.msg-tiroir__canal { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-card); }
+.msg-tiroir__canal .link { align-self: flex-start; background: none; border: 0; padding: 0; cursor: pointer; }
+.msg-tiroir__nom { font-weight: var(--fw-semibold); }
+.msg-tiroir__bloc select { height: 36px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 8px; font-size: var(--fs-small); max-width: 100%; }
+.prog-carte--off { opacity: .55; }
+.prog-carte [data-prog-suppr] { background: none; border: 0; padding: 4px; cursor: pointer; color: var(--muted); }
+.prog-carte [data-prog-suppr]:hover { color: var(--danger); }
+.prog-carte [data-prog-suppr] .icon { width: 15px; height: 15px; }
+.msg-tiroir__note { margin: 10px 18px 0; color: var(--danger); font-weight: var(--fw-semibold); }
+.msg-tiroir__note--ok { color: var(--ok); }
+@media (max-width: 899px) {
+  .msg-retour { display: inline-flex; }
+  /* En-tete du fil COMPACT (spec §4) : nom puis bien · dates, chacun sur sa
+     ligne sans retour a la ligne ; les etats (code, menage, tel, resa)
+     passent dessous, sur une ligne a eux. */
+  .msg-fil__entete { flex-wrap: wrap; gap: 6px 10px; padding: 10px 14px; }
+  .msg-fil__titre { flex: 1 1 0; min-width: 0; }
+  .msg-fil__titre h2, .msg-fil__titre .small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .msg-fil__entete > .row:last-of-type { width: 100%; margin-inline-start: 0; justify-content: flex-start; flex-wrap: wrap; row-gap: 4px; }
+  .msg-layout { grid-template-columns: 1fr; }
+  .msg-fil { display: none; }
+  body[data-fil] .msg-fil { display: flex; position: fixed; inset: 0; background: var(--surface); z-index: 20; }
+  body[data-fil] .msg-liste { display: none; }
+  body[data-fil] .bottombar { display: none; }
+  .bulle { max-width: 86%; }
+  /* Proposition : boutons pleine largeur, Envoyer en premier (spec §4). */
+  .bulle--proposition { max-width: 100%; }
+  .bulle__actions { flex-wrap: wrap; }
+  .bulle__actions .btn { flex: 1 1 100%; justify-content: center; }
+  .bulle__actions [data-envoyer-prop] { order: -1; }
+  .bulle-menu { order: 1; margin-inline-start: auto; }
+}
+
+/* ---------- Barre du haut ---------- */
+.topbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-m);
+  padding: 18px var(--page-pad);
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.topbar__brand { display: flex; align-items: center; gap: 10px; flex: 1 1 200px; font-size: 20px; font-weight: var(--fw-black); letter-spacing: var(--tracking-tight); }
+.topbar__nav { display: flex; flex-wrap: wrap; gap: var(--gap-xs); justify-content: center; }
+.topbar__actions { flex: 1 1 200px; display: flex; justify-content: flex-end; align-items: center; gap: 10px; }
+.avatar {
+  width: 30px; height: 30px; border-radius: var(--radius-pill);
+  background: var(--surface-2); color: var(--ink);
+  font-size: 12px; font-weight: var(--fw-bold);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* ---------- Barre du bas (mobile) ---------- */
+.bottombar { display: none; }
+
+/* ---------- Menu ≡ (spec §3) ---------- */
+.topbar__actions { position: relative; }
+.menu {
+  position: absolute; top: calc(100% + 8px); inset-inline-end: 0; z-index: 20;
+  min-width: 260px; padding: var(--gap-s);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-card); box-shadow: var(--shadow-hover);
+  display: flex; flex-direction: column; gap: var(--gap-xs);
+}
+.menu[hidden] { display: none; }
+.menu__label { padding: var(--gap-s) 12px 0; }
+.menu__item {
+  display: flex; align-items: center; gap: 12px;
+  min-height: var(--control); padding: 0 12px;
+  border: 0; border-radius: var(--radius-tile); background: none;
+  font-size: var(--fs-small); font-weight: var(--fw-medium); text-align: start;
+}
+a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
+
+/* ---------- Alerte bloquante (surréservation) ---------- */
+.alert {
+  border: 1px solid var(--danger); border-radius: var(--radius-card);
+  background: var(--danger-soft); padding: var(--gap-m);
+  display: grid; grid-template-columns: auto 1fr; gap: 6px var(--gap-m); align-items: start;
+}
+.alert > .icon { color: var(--danger); grid-row: span 3; margin-top: 2px; }
+.alert__title { font-weight: var(--fw-bold); color: var(--danger); }
+.alert > :not(.icon) { grid-column: 2; }
+.alert .btn { justify-self: start; margin-top: 6px; }
+
+/* ---------- Divers ---------- */
+.delta { font-size: var(--fs-small); font-weight: var(--fw-semibold); }
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.property__photo--none { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.property__photo--none .icon { width: 36px; height: 36px; }
+.property-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--gap-l); }
+@media (min-width: 721px) { .only-mobile { display: none !important; } }
+
+/* ---------- Mobile ---------- */
+@media (max-width: 720px) {
+  :root { --page-pad: 24px; --fs-h1: 26px; --fs-h2: 20px; --fs-kpi: 24px; }
+  .page { padding-top: 10px; padding-bottom: 96px; gap: 18px; }
+  .topbar { padding: 14px var(--page-pad); border-bottom: 0; }
+  .topbar__nav { display: none; }
+  .event { grid-template-columns: 50px 44px 1fr; padding: 12px 0; gap: 12px; }
+  .event > .icon { display: none; }
+  .event > .btn { grid-column: 3; justify-self: start; }
+  .tile-icon { width: 44px; height: 44px; }
+  .scroll-x { display: flex; gap: 10px; overflow-x: auto; margin: 0 calc(-1 * var(--page-pad)); padding: 0 var(--page-pad) 4px; scroll-snap-type: x mandatory; scroll-padding-inline: var(--page-pad); }
+  /* Le glissement au doigt reste ; la barre, elle, disparaît (retouche du
+     10 octobre 2026). Les deux écritures couvrent Firefox et WebKit. */
+  .scroll-x { scrollbar-width: none; }
+  .scroll-x::-webkit-scrollbar { display: none; }
+  .scroll-x > * { flex: 0 0 auto; scroll-snap-align: start; }
+  .scroll-x .stat { width: 132px; }
+  .scroll-x .property { width: 180px; }
+  /* Barre du bas sur fond noir (retouche charte du 11 octobre 2026) :
+     inactifs en --on-ink-muted, actif en --on-ink, badge ambre inchange. */
+  .bottombar {
+    position: fixed; inset-inline: 0; bottom: 0; z-index: 10;
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+    background: var(--ink); border-top: none;
+    padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+  }
+  .bottombar a { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; color: var(--on-ink-muted); font-size: var(--fs-nav-mobile); font-weight: var(--fw-medium); }
+  .bottombar a[aria-current="page"] { color: var(--on-ink); font-weight: var(--fw-bold); }
+  .bottombar .icon { width: 24px; height: 24px; }
+  .topbar__brand, .topbar__actions { flex: 1 1 auto; }
+  .only-desktop { display: none !important; }
+  .menu { position: fixed; inset-inline: var(--gap-m); top: 64px; min-width: 0; }
+  .bottombar .badge { position: absolute; top: 2px; inset-inline-end: 18px; border: 2px solid var(--ink); }
+}
+
+/* ---------- Calendrier V5 (lot 3, étape 1) ---------- */
+.cal-page { --cal-col: 110px; padding: 14px var(--page-pad) 90px; display: flex; flex-direction: column; gap: 12px; }
+.cal-entete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cal-periode { display: inline-flex; align-items: stretch; height: var(--control); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
+.cal-periode .tab { height: 100%; padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-small); background: transparent; }
+/* Le bouton de periode ACTIF est NOIR sur toutes les pages (decision de
+   Thierry, 13 octobre) : le bleu --info reste au marqueur d'aujourd'hui. */
+.cal-periode .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); }
+/* La bande des dates est STICKY (z5) et l'angle z6 : la liste du menu ...
+   (z5 de .bulle-menu__liste, declaree avant dans le DOM) passait DERRIERE
+   les dates a l'ouverture (constat de recette du 12 octobre). */
+.cal-menu .bulle-menu__liste { z-index: 40; }
+.cal-menu__liste { min-width: 220px; }
+.cal-menu__liste a { display: block; padding: 8px 10px; border-radius: 8px; color: var(--ink); font-weight: var(--fw-semibold); font-size: var(--fs-body); }
+.cal-menu__liste a:hover { background: var(--surface-2); }
+.cal-menu__section { padding: 8px 10px 2px; font-size: var(--fs-caption); color: var(--muted); font-weight: var(--fw-bold); }
+/* Biens non affiches : bulles SOUS la grille (retouche point 4). */
+.cal-bulles { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; padding: 4px 2px 8px; }
+.cal-bulle { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 76px; border: 0; background: none; cursor: pointer; color: var(--ink); padding: 4px; border-radius: var(--radius-card); font-family: inherit; }
+.cal-bulle:hover:not(:disabled) { background: var(--surface-2); }
+.cal-bulle--grise { opacity: .5; cursor: default; }
+.cal-photo { border-radius: 8px; overflow: hidden; background: var(--surface-2); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.cal-photo img { width: 100%; height: 100%; object-fit: cover; }
+.cal-photo .icon { color: var(--muted); }
+.cal-bulle__photo { width: 44px; height: 44px; border-radius: var(--radius-pill); }
+.cal-bulle__photo .icon { width: 20px; height: 20px; }
+.cal-bulle__nom { font-weight: var(--fw-semibold); font-size: var(--fs-caption); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-nav { gap: 8px; }
+.cal-nav__mois { margin: 0 6px; font-size: 17px; }
+.cal-vue { height: 38px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 0 10px; font-size: var(--fs-small); margin-inline-start: auto; }
+.cal-avis { padding: 12px 16px; font-size: var(--fs-small); color: var(--muted); }
+.cal-vide { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 48px 16px; text-align: center; }
+
+/* Planning ordinateur */
+.cal-planning { overflow-x: auto; }
+.cal-bande { position: sticky; top: 0; z-index: 5; display: flex; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); width: max-content; min-width: 100%; }
+.cal-bande__angle { width: var(--cal-col); min-width: var(--cal-col); position: sticky; inset-inline-start: 0; z-index: 6; background: var(--surface); border-inline-end: 1px solid var(--line); border-start-start-radius: var(--radius-card); border-end-start-radius: var(--radius-card); display: flex; align-items: center; padding: 4px 8px; }
+.cal-angle__menu { position: relative; }
+.cal-angle__puce { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 5px; cursor: pointer; list-style: none; font-size: var(--fs-caption); color: var(--info); }
+.cal-angle__puce::-webkit-details-marker { display: none; }
+.cal-angle__pile { display: inline-flex; }
+.cal-angle__mini { width: 24px; height: 24px; border-radius: var(--radius-pill); border: 2px solid var(--surface); }
+.cal-angle__mini .icon { width: 12px; height: 12px; }
+.cal-angle__pile .cal-angle__mini:not(:first-child) { margin-inline-start: -9px; }
+.cal-angle__menu summary { list-style: none; }
+.cal-angle__liste { position: fixed; z-index: 40; min-width: 240px; max-height: 50vh; overflow-y: auto; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); }
+.cal-angle__liste button { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--ink); font-family: inherit; font-size: var(--fs-small); text-align: start; }
+.cal-angle__liste button:hover { background: var(--surface-2); }
+.cal-angle__nom { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.cal-angle__tout { justify-content: center; color: var(--info); font-weight: var(--fw-semibold); border-top: 1px solid var(--line); border-radius: 0; }
+.cal-bande__corps { width: max-content; }
+.cal-bande__l { display: grid; grid-auto-flow: column; grid-auto-columns: 46px; }
+.cal-bande__mois { font-size: var(--fs-caption); font-weight: var(--fw-bold); white-space: nowrap; overflow: visible; height: 18px; }
+.cal-bande__mois--debut { border-inline-start: 2px solid var(--info); padding-inline-start: 4px; }
+.cal-bande__jour { text-align: center; font-size: var(--fs-caption); color: var(--muted); padding: 2px 0 6px; }
+.cal-bande__jour b { display: block; color: var(--ink); font-size: var(--fs-small); }
+.cal-bien { margin-top: 14px; width: max-content; min-width: 100%; }
+.cal-bien__cadre { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); width: max-content; min-width: 100%; }
+/* PAS d'overflow sur .cal-bien : tout overflow != visible en ferait le
+   conteneur de reference des sticky (bandeau, libelles) — c'est
+   .cal-planning qui defile. Les coins s'arrondissent par les enfants. */
+.cal-bien__coin { border-start-start-radius: var(--radius-card); }
+.cal-table tr:last-child .cal-libelle { border-end-start-radius: var(--radius-card); }
+.cal-table tr:last-child td:last-child { border-end-end-radius: var(--radius-card); }
+/* BANDEAU d'identite (ajustement 2 du 12 octobre) : fin, une ligne,
+   au-dessus du bloc ; l'interieur est sticky a gauche pour rester lisible
+   pendant le defilement horizontal. */
+.cal-bien__bandeau { padding-bottom: 4px; }
+.cal-bien__bandeau-int { position: sticky; inset-inline-start: 0; display: inline-flex; align-items: center; gap: 8px; padding: 0 2px; max-width: min(calc(100vw - 2 * var(--page-pad)), 100%); }
+.cal-bien__nom { font-size: var(--fs-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-bien__bandeau--mobile { padding: 0; }
+.cal-bien__bandeau--mobile .cal-bien__bandeau-int { position: static; display: flex; width: 100%; max-width: none; padding: 2px 2px 10px; }
+.cal-bien__bandeau--mobile .cal-bien__nom { font-size: var(--fs-body); }
+.cal-bien__photo { width: 28px; height: 28px; border-radius: var(--radius-pill); }
+.cal-bien__photo .icon { width: 14px; height: 14px; }
+.cal-bien__reduire { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 2px; flex: none; margin-inline-start: auto; border-radius: 6px; }
+.cal-bien__reduire:hover { background: var(--surface-2); color: var(--ink); }
+.cal-bien__reduire .icon { width: 13px; height: 13px; }
+.cal-bien__ligne { display: flex; align-items: stretch; }
+/* Colonne gauche de la ligne Reservations : un COIN vide sticky, meme
+   largeur que les libelles, pour que les barres ne glissent pas dessous. */
+.cal-bien__coin { width: var(--cal-col); min-width: var(--cal-col); position: sticky; inset-inline-start: 0; z-index: 4; background: var(--surface); border-inline-end: 1px solid var(--line); display: flex; align-items: center; padding: 0 10px; }
+.cal-bien__coin .caption { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Barres de resa PLEINE HAUTEUR avec le nom (retouche point 1). */
+.cal-bien { --cal-resas-h: 48px; --cal-nuit-h: 40px; }
+.cal-bien__resas { position: relative; height: var(--cal-resas-h); width: calc(var(--n) * 46px); flex: none; }
+.cal-resas__fond { position: absolute; inset: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 46px; pointer-events: none; border-start-end-radius: var(--radius-card); overflow: hidden; }
+.cal-resas__jour { border-inline-end: 1px solid var(--line); }
+.cal-resas__jour:last-child { border-inline-end: 0; }
+.cal-barre { position: absolute; top: 5px; height: 38px; background: color-mix(in srgb, var(--coul, var(--surface-2)) 82%, black); border: 0; border-radius: 13px; color: var(--on-canal, var(--on-ink)); font-size: var(--fs-small); font-weight: var(--fw-semibold); padding: 0 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: start; cursor: pointer; left: calc((var(--d) + .5) / var(--n) * 100%); width: calc((var(--f) - var(--d)) / var(--n) * 100%); z-index: 2; }
+.cal-barre--airbnb { --coul: var(--canal-airbnb); }
+.cal-barre--booking { --coul: var(--info); }
+.cal-barre--direct { --coul: var(--ok); }
+.cal-barre--blocage { background: var(--surface-2); color: var(--ink); font-style: italic; border: 1px solid var(--border); left: calc(var(--d) / var(--n) * 100%); border-radius: 7px; z-index: 1; }
+.cal-barre--finie { opacity: .6; }
+.cal-barre--finie:hover { opacity: 1; }
+.cal-barre--coupe-g { border-start-start-radius: 0; border-end-start-radius: 0; }
+.cal-barre--coupe-d { border-start-end-radius: 0; border-end-end-radius: 0; }
+.cal-table { border-collapse: collapse; table-layout: fixed; width: max-content; }
+.cal-table td, .cal-table th { width: 46px; border: 1px solid var(--line); }
+.cal-table tr:last-child td, .cal-table tr:last-child th { border-bottom: 0; }
+.cal-table td:last-child { border-inline-end: 0; }
+.cal-libelle { width: var(--cal-col) !important; min-width: var(--cal-col); text-align: start; padding: 0 10px; position: sticky; inset-inline-start: 0; z-index: 3; background: var(--surface); border-inline-start: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-nuit { position: relative; height: var(--cal-nuit-h, 40px); text-align: center; font-size: var(--fs-caption); cursor: pointer; user-select: none; }
+.cal-nuit__prix { font-weight: var(--fw-semibold); font-size: var(--fs-small); color: var(--ink); }
+.cal-nuit:not(.cal-nuit--passe):hover { background-color: color-mix(in srgb, var(--info) 10%, var(--surface)); }
+.cal-param { height: 26px; text-align: center; font-size: var(--fs-caption); color: var(--muted); }
+/* LES QUATRE ÉTATS (§4.1, dette 20) — la couleur EST l'état. Sur
+   l'ORDINATEUR, la nuit VENDUE se lit sur la BARRE de réservation : sa
+   cellule de prix garde sa structure (week-end compris), décision du
+   12 octobre. Au TÉLÉPHONE, la case du mois n'a pas de barre : le gris
+   vendue y reste l'information (la légende le dit). */
+.cal-nuit--ouverte { background: var(--surface); }
+.cal-nuit--fermee { background: repeating-linear-gradient(45deg, var(--amber-soft), var(--amber-soft) 4px, var(--surface) 4px, var(--surface) 8px); }
+.cal-nuit--fermee .cal-nuit__prix { text-decoration: line-through; color: var(--muted); }
+.cal-nuit--attente { background: var(--surface); outline: 1px dashed var(--muted); outline-offset: -3px; }
+.cal-nuit--passe { opacity: .55; cursor: default; }
+.cal-nuit--sel { box-shadow: inset 0 0 0 2px var(--info); }
+.cal-nuit__saisie { width: 42px; border: 1px solid var(--info); border-radius: 6px; font-size: var(--fs-caption); text-align: center; background: var(--surface); color: var(--ink); }
+.cal-we { background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); }
+.cal-we--debut { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+.cal-we--fin { box-shadow: inset -2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+.cal-auj { box-shadow: inset 0 0 0 1px var(--info); }
+/* box-shadow ne se cumule pas entre regles : les combinaisons se declarent. */
+.cal-we--debut.cal-auj { box-shadow: inset 0 0 0 1px var(--info), inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+.cal-we--fin.cal-auj { box-shadow: inset 0 0 0 1px var(--info), inset -2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+.cal-nuit--sel.cal-we--debut, .cal-nuit--sel.cal-we--fin { box-shadow: inset 0 0 0 2px var(--info); }
+/* Cases MOBILES — declarees APRES les combos ci-dessus : a specificite
+   egale l'ordre tranche (selection > week-end). La nuit VENDUE n'est PLUS
+   grisee (13 octobre) : la barre dit la reservation, la case garde son
+   fond ; aujourd'hui = PASTILLE NOIRE sur le numero, pas un cadre. */
+.cal-case.cal-we { background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); box-shadow: none; }
+.cal-mois__jour.cal-we { box-shadow: none; color: var(--ink); font-weight: var(--fw-bold); }
+.cal-case.cal-auj { box-shadow: none; }
+.cal-case.cal-auj .cal-case__num { background: var(--ink); color: var(--on-ink); border-radius: var(--radius-pill); min-width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0 3px; }
+.cal-case.cal-nuit--passe { opacity: .4; }
+.cal-case.cal-case--sel { box-shadow: inset 0 0 0 2px var(--info); }
+.cal-orpheline { position: absolute; top: 2px; inset-inline-end: 2px; }
+.cal-orpheline .icon { width: 11px; height: 11px; color: var(--amber); }
+
+.cal-legende { padding: 8px 2px 0; }
+.cal-legende__pt { display: inline-block; width: 10px; height: 10px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); vertical-align: -1px; margin-inline-end: 4px; }
+.cal-legende__pt--blocage { background: var(--surface-2); border: 1px solid var(--border); }
+
+/* Barre flottante — les CINQ actions */
+.cal-flottante { position: fixed; bottom: calc(76px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); padding: 10px 14px; z-index: 30; max-width: calc(100vw - 24px); flex-wrap: wrap; justify-content: center; }
+
+/* Grille téléphone — structure de l'ancien calendrier mobile (12 octobre) :
+   rendu PAR SEMAINE, chaque semaine porte un calque de barres (blocages en
+   cases entières sous les réservations en demi-cases). */
+/* L'en-tete du telephone (mois + selecteur) reste VISIBLE au defilement
+   des calendriers empiles (recette du 13 octobre). */
+.cal-mois__tete { position: sticky; top: 0; z-index: 10; background: var(--surface); padding: 4px 0 8px; margin: 0 calc(-1 * var(--page-pad)); padding-inline: var(--page-pad); box-shadow: 0 1px 0 var(--line); }
+.cal-mois__nav { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 8px; }
+.cal-mois__nav b { font-size: 17px; text-transform: capitalize; min-width: 150px; text-align: center; }
+.cal-chevron-g { transform: rotate(180deg); }
+.cal-btn-plus { width: 34px; height: 34px; border: 0; border-radius: var(--radius-pill); background: var(--info); color: var(--on-ink); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+.cal-poigne { color: var(--muted); cursor: grab; flex: none; display: inline-flex; padding: 4px 2px; touch-action: none; }
+.cal-poigne .icon { width: 14px; height: 14px; }
+.cal-mois__vue { margin-bottom: 0; }
+.cal-mois__vue select { width: 100%; }
+.cal-bien-mobile { margin-bottom: 18px; }
+/* Delimitation entre les calendriers empiles (recette du 13 octobre). */
+.cal-bien-mobile + .cal-bien-mobile { border-top: 3px solid var(--line); padding-top: 16px; }
+.cal-bien--saisi { opacity: .55; }
+.cal-bien--cible { outline: 2px dashed var(--info); outline-offset: 3px; border-radius: var(--radius-card); }
+.cal-btn-plus .icon { width: 16px; height: 16px; }
+.cal-mois__grille { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-mois__jour { text-align: center; }
+.cal-mois__semaines { display: flex; flex-direction: column; gap: 4px; }
+.cal-sem { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; position: relative; }
+.cal-sem__couche { position: absolute; left: 0; right: 0; top: 26px; pointer-events: none; z-index: 3; }
+.cal-mbar { position: absolute; height: 22px; border: 0; border-radius: 11px; background: color-mix(in srgb, var(--coul, var(--surface-2)) 82%, black); color: var(--on-canal, var(--on-ink)); font-size: var(--fs-caption); font-weight: var(--fw-semibold); display: flex; align-items: center; padding: 0 7px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: start; pointer-events: auto; cursor: pointer; font-family: inherit; }
+.cal-mbar--blocage { background: var(--surface-2); color: var(--ink); font-style: italic; border: 1px solid var(--border); border-radius: 7px; }
+.cal-mbar--finie { opacity: .45; }
+.cal-mbar--coupe-g { border-start-start-radius: 0; border-end-start-radius: 0; }
+.cal-mbar--coupe-d { border-start-end-radius: 0; border-end-end-radius: 0; }
+/* Plus haute que large : la barre (22 px) ne recouvre jamais le prix, qui
+   reste colle en bas (regle de l'ancien mobile). Numero en haut, prix en
+   bas, fond blanc, bord discret. */
+.cal-case { position: relative; aspect-ratio: 1 / 1.7; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); display: flex; flex-direction: column; justify-content: flex-start; align-items: center; padding: 4px 3px 5px; cursor: pointer; font-family: inherit; overflow: hidden; }
+.cal-case--vide { background: transparent; border: 0; cursor: default; }
+.cal-case__num { font-size: var(--fs-small); font-weight: var(--fw-semibold); line-height: 1.1; }
+.cal-case .cal-case__valeur { font-size: var(--fs-caption); font-weight: var(--fw-semibold); margin-top: auto; color: var(--muted); }
+.cal-case--sel { box-shadow: inset 0 0 0 2px var(--info); }
+.cal-mois__legende { margin: 10px 2px; }
+.cal-mois__resas { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.cal-ligne-resa { display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 9px 6px; border-bottom: 1px solid var(--line); cursor: pointer; text-align: start; color: var(--ink); font-family: inherit; font-size: var(--fs-small); }
+.cal-ligne-resa__point { width: 11px; height: 11px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); flex: none; display: inline-block; }
+
+/* Feuille, rubriques, fiche */
+.cal-feuille input[type="date"], .cal-feuille input[type="text"], .cal-feuille input[type="email"], .cal-feuille input[type="tel"], .cal-feuille input[type="number"], .cal-feuille select, .cal-feuille textarea { border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 9px 12px; font-size: var(--fs-small); font-family: inherit; max-width: 100%; }
+.cal-rub { border-bottom: 1px solid var(--line); }
+.cal-rub summary { padding: 12px 18px; font-weight: var(--fw-semibold); cursor: pointer; }
+.cal-rub__corps { display: flex; flex-direction: column; gap: 10px; padding: 0 18px 14px; }
+.cal-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px 9px; font-size: var(--fs-caption); cursor: pointer; }
+.cal-chip:has(input:checked) { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+.cal-chip input { position: absolute; opacity: 0; }
+.cal-fiche__ligne { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: var(--fs-small); }
+
+/* Toasts */
+.cal-toasts { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 60; max-width: min(92vw, 480px); }
+.cal-toast { display: flex; align-items: center; gap: 12px; background: var(--ink); color: var(--on-ink); border-radius: var(--radius-card); padding: 11px 16px; font-size: var(--fs-small); box-shadow: var(--shadow-hover); }
+.cal-toast--erreur { background: var(--danger); }
+.cal-toast .link { color: var(--on-ink); text-decoration: underline; background: none; border: 0; cursor: pointer; font-weight: var(--fw-bold); }
+
+@media (max-width: 899px) {
+  .cal-periode { display: none; }
+  .cal-nav [data-nav] { display: none; }
+  .cal-flottante { bottom: calc(86px + env(safe-area-inset-bottom)); width: calc(100vw - 20px); }
+}
+
+/* ============================================================
+   Page « Ménages » (lot 4, étape 1 : lecture seule)
+   LE GABARIT DU CALENDRIER (recette du 13 octobre) : mêmes largeurs
+   (--cal-col, colonnes 46 px), même bande (shared/bande-jours.js),
+   mêmes blocs bordés par bien, mêmes bulles et angle. Les pastels
+   viennent de theme.css (froids/neutres seulement).
+   ============================================================ */
+.men-page { --cal-col: 110px; padding: 14px var(--page-pad) 90px; display: flex; flex-direction: column; gap: 12px; }
+.men-entete { display: flex; align-items: center; gap: 10px; }
+.men-entete .h2 { flex: 1; margin: 0; }
+.men-nav { flex-wrap: wrap; }
+.men-avis { padding: 12px 16px; color: var(--warn); }
+
+/* « À traiter » : le SEUL moment ambre de l'écran (spec §3.1). */
+.men-bulle { background: var(--amber-soft); border-radius: 20px; padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 10px; }
+.men-bulle--calme { flex-direction: row; align-items: center; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 12px 16px; font-size: var(--fs-small); }
+.men-bulle--muette { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); padding: 12px 16px; }
+.men-bulle__tete { display: flex; align-items: center; gap: 10px; }
+.men-bulle__tete .h2 { margin: 0; font-size: 17px; }
+/* ⚠ `min(440px, 100%)` : avec `auto-fit`, une piste ne descend JAMAIS sous
+   son minimum — 440px en dur débordait de 120px au téléphone, et les deux
+   boutons sortaient de l'écran (revue de 7f79406). */
+.men-atrs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr)); gap: 8px; }
+.men-atr { display: flex; align-items: center; gap: 10px; background: var(--surface); border-radius: var(--radius-card); padding: 8px 12px; min-width: 0; }
+.men-atr__texte { display: flex; flex-direction: column; min-width: 0; }
+.men-atr__texte b { font-size: var(--fs-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.men-atr__photo { width: 36px; height: 36px; border-radius: 10px; }
+.men-atr__ini { font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted); }
+.men-atr__photo .icon { width: 16px; height: 16px; }
+/* L'icône du type porte le SENS ; la couleur ne vient qu'en renfort. */
+.men-atr__type { display: inline-flex; flex: none; color: var(--danger); }
+.men-atr__type--non_assigne { color: var(--muted); }
+.men-atr__type--ok { color: var(--ok); }
+/* « Pas vu » est la SEULE ligne qui garde un pictogramme (téléphone barré) :
+   elle ne dit pas un défaut de couverture — quelqu'un viendra — mais quelqu'un
+   qui n'a peut-être pas lu ce qu'on lui a confié. Le distinguer évite de la
+   lire comme les trois autres. */
+.men-atr__rouge { color: var(--danger); }
+.men-atr { position: relative; }
+.men-atr__actions { display: flex; gap: 6px; margin-inline-start: auto; flex: none; }
+.men-atr__btn { height: 32px; padding: 0 12px; font-size: var(--fs-caption);
+  display: inline-flex; align-items: center; gap: 6px; }
+.men-atr__btn .icon { width: 14px; height: 14px; }
+/* Le choix de la prestataire, posé sous la ligne. */
+.men-choix { position: absolute; top: calc(100% + 4px); inset-inline-end: 8px; z-index: 40; min-width: 180px; max-height: 50vh; overflow-y: auto; padding: 8px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); }
+.men-choix button { display: block; width: 100%; text-align: start; border: 0; background: none; padding: 8px 10px; border-radius: 8px; cursor: pointer; color: var(--ink); font-family: inherit; font-size: var(--fs-small); }
+.men-choix button:hover { background: var(--surface-2); }
+
+/* ─── Les quatre gestes d'assignation (bulle ET fiche, même fabrique) ───────
+   Une ligne par personne : son prénom, puis les DEUX gestes nommés. Un seul
+   bouton par prénom ne pouvait pas exprimer « proposer » et « assigner », et
+   c'est la différence qui compte : l'un demande, l'autre engage. */
+.men-chx__t { margin: 0 0 8px; }
+.men-chx__aide { display: block; opacity: 0.75; }
+.men-chx__p { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+.men-chx__p .men-chx__nom { flex: 1; min-width: 0; font-weight: 600; font-size: var(--fs-small);
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ⚠ DEUX SÉLECTEURS, PAS UN : `.men-choix button` (plus haut) met TOUS les
+   boutons du panneau en bloc et en pleine largeur. Une classe seule ne pèse pas
+   assez — les deux gestes tombaient l'un sous l'autre et le prénom disparaissait
+   sous eux. On passe par le parent pour l'emporter, sans toucher à la règle
+   d'origine, qui sert encore aux boutons pleine largeur du bas. */
+.men-chx__p .men-chx__b { display: inline-flex; align-items: center; justify-content: center;
+              width: auto; flex: none; height: 30px; padding: 0 10px; text-align: center;
+              font-size: var(--fs-caption); border: 1px solid var(--line); }
+.men-choix .men-chx__g, .men-chx .men-chx__g {
+              display: block; width: 100%; margin-block-start: 8px; height: 32px;
+              text-align: center; font-size: var(--fs-caption); border: 1px solid var(--line); }
+/* Dans la fiche, le panneau n'est pas un popover : il prend la largeur. */
+.men-chx .men-chx__p { padding: 4px 0; }
+.men-vide { padding: 30px 0; }
+
+/* La bande des dates : le composant du calendrier, dans un porteur COLLANT
+   (hors du défilement vertical) synchronisé en X avec le planning. */
+.men-tete { position: sticky; top: 0; z-index: 20; background: var(--surface); overflow: hidden; }
+.men-tete .cal-bande { position: static; }
+.men-scroll { overflow-x: auto; }
+
+/* Un bloc par bien : titre HORS cadre (poignée, photo ronde, nom, ×),
+   cadre bordé, une ligne par prestataire avec son libellé en coin. */
+.men-bloc { width: max-content; min-width: 100%; }
+.men-bloc + .men-bloc { margin-top: 14px; }
+.men-bloc--saisi { opacity: .55; }
+.men-bloc--cible { outline: 2px dashed var(--info); outline-offset: 3px; border-radius: var(--radius-card); }
+.men-cadre { border: 1px solid var(--line); border-radius: var(--radius-card); background: var(--surface); width: max-content; min-width: 100%; }
+.men-ligne { display: flex; align-items: stretch; }
+.men-ligne + .men-ligne { border-top: 1px solid var(--line); }
+.men-ligne:first-child .cal-bien__coin { border-start-start-radius: var(--radius-card); }
+.men-ligne:last-child .cal-bien__coin { border-end-start-radius: var(--radius-card); }
+.men-qui { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.men-qui--off { color: var(--muted); }
+.men-prenom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-caption); font-weight: var(--fw-medium); }
+.men-regler { color: var(--muted); display: inline-flex; flex: none; }
+.men-regler .icon { width: 13px; height: 13px; }
+.men-nonconfie { margin: 0; padding: 10px 12px; }
+
+/* La piste d'une ligne : n colonnes de 46 px, fonds (filets, week-ends,
+   aujourd'hui) peints par cellule comme la ligne Réservations du calendrier. */
+.men-lane { position: relative; display: grid; grid-template-columns: repeat(var(--n), 46px); align-items: center; min-height: 44px; width: calc(var(--n) * 46px); flex: none; }
+.men-lane > * { grid-row: 1; }
+/* Le fond (filets, week-ends, aujourd'hui) dans SON conteneur, comme
+   `cal-resas__fond` : sinon `:last-child` ne vise pas le dernier jour. */
+.men-fond { position: absolute; inset: 0; z-index: 0; display: grid; grid-template-columns: repeat(var(--n), 46px); pointer-events: none; }
+/* Le fond est positionné : sans contre-mesure il PEINDRAIT PAR-DESSUS les
+   barres (statiques), qui paraissaient coupées à chaque week-end. */
+.men-barre, .men-case { position: relative; z-index: 1; }
+.men-jj { align-self: stretch; height: 100%; border-inline-end: 1px solid var(--line); }
+.men-jj:last-child { border-inline-end: 0; }
+.men-jj.cal-we { background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); }
+.men-jj.cal-auj { box-shadow: inset 1.5px 0 0 var(--info), inset -1.5px 0 0 var(--info); }
+.men-jj.cal-we--debut.cal-auj { box-shadow: inset 1.5px 0 0 var(--info), inset -1.5px 0 0 var(--info), inset 2px 0 0 color-mix(in srgb, var(--ink) 16%, var(--surface)); }
+
+.men-barre { height: 28px; margin: 0 2px; border-radius: var(--radius-pill); background: var(--coul, var(--surface-2)); }
+/* Jour sans AUCUNE prestataire disponible : la colonne entière du bien, en
+   rouge hachuré, un « ! » en tête de bloc (recette du 13 octobre — une
+   ligne « Personne » laissait croire à une personne de plus dans l'équipe). */
+.men-jj--trou { background: repeating-linear-gradient(135deg, var(--danger-soft) 0 5px, var(--surface) 5px 10px); border-inline-end-color: color-mix(in srgb, var(--danger) 35%, transparent); pointer-events: auto; }
+.men-jj__bang { position: absolute; top: 2px; inset-inline-start: 0; right: 0; text-align: center; font-size: var(--fs-caption); font-weight: var(--fw-black); color: var(--danger); }
+.men-jj { position: relative; }
+
+/* Les TROIS pastilles (décision du 13 octobre) : à faire (blanche, balai),
+   fait (verte, coche + badge retour), personne pour le faire (rouge, !). */
+/* ⚠ .men-case est un BOUTON depuis l'étape 3 : sans remise à zéro, chaque
+   pastille héritait de la bordure outset et du fond du navigateur. */
+.men-case { display: flex; align-items: center; justify-content: center; min-height: 44px; border: 0; background: none; padding: 0; cursor: pointer; font-family: inherit; color: inherit; }
+.men-mk { position: relative; width: 28px; height: 28px; border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); display: inline-flex; align-items: center; justify-content: center; box-shadow: var(--shadow-dot); }
+.men-mk .icon { width: 14px; height: 14px; }
+.men-mk--fait { background: var(--ok); color: var(--surface); box-shadow: none; }
+.men-mk--alerte { background: var(--danger); color: var(--surface); box-shadow: none; }
+.men-mk__n { position: absolute; top: -5px; inset-inline-end: -6px; min-width: 16px; height: 16px; border-radius: var(--radius-pill); background: var(--ink); color: var(--on-ink); font-size: 10px; font-weight: var(--fw-bold); display: flex; align-items: center; justify-content: center; padding: 0 3px; }
+.men-mk__retour { position: absolute; bottom: -5px; inset-inline-end: -6px; width: 16px; height: 16px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; background: var(--ok); color: var(--surface); box-shadow: 0 0 0 2px var(--surface); }
+.men-mk__retour--mauvais { background: var(--danger); }
+.men-mk__retour .icon { width: 10px; height: 10px; }
+
+/* ── Volet « Équipe ménage » ─────────────────────────────────────────────── */
+.men-voile { position: fixed; inset: 0; background: rgba(0, 0, 0, .28); z-index: 50; }
+/* Le verrou de defilement du volet : la classe existait sans regle, donc le
+   planning defilait derriere lui au telephone (revue de dfcf8d4). */
+body.men-volet-ouvert { overflow: hidden; }
+
+.men-fiche { z-index: 70; }
+.men-fiche__corps { flex: 1; overflow-y: auto; padding: 4px 20px 24px; }
+.men-fiche__bloc { padding: 16px 0; border-top: 1px solid var(--line); }
+.men-fiche__note { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--surface); color: var(--ink); padding: 10px 12px; font-size: var(--fs-small); font-family: inherit; resize: vertical; margin-top: 6px; }
+.men-fiche__presta { height: 36px; padding: 0 14px; font-size: var(--fs-caption); }
+.men-fiche__retour { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fs-small); color: var(--ok); }
+.men-fiche__retour--mauvais { color: var(--danger); }
+.men-fiche__extrait { margin: 6px 0 0; font-style: italic; color: var(--muted); }
+/* Les trois étapes, chacune avec SA date. */
+.men-frise { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.men-frise__pas { display: flex; align-items: center; gap: 10px; font-size: var(--fs-small); color: var(--muted); }
+.men-frise__point { width: 22px; height: 22px; border-radius: var(--radius-pill); border: 2px solid var(--border); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.men-frise__point .icon { width: 12px; height: 12px; }
+.men-frise__pas--ok { color: var(--ink); }
+.men-frise__pas--ok .men-frise__point { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.men-frise__nom { flex: 1; font-weight: var(--fw-medium); }
+/* La fiche d'un ménage : même gabarit que le volet, au-dessus de lui.
+   ⚠ APRES .men-volet : l'élément porte les deux classes, à spécificité égale
+   c'est la règle la plus tardive qui gagne (revue de 6822e47). */
+.men-volet { position: fixed; inset-block: 0; inset-inline-end: 0; width: 460px; max-width: 100vw; z-index: 60; background: var(--surface); border-inline-start: 1px solid var(--line); box-shadow: -12px 0 32px rgba(0, 0, 0, .12); display: flex; flex-direction: column; }
+.men-volet__tete { display: flex; align-items: center; gap: 12px; padding: 20px 20px 12px; }
+.men-volet__tete .h2 { flex: 1; margin: 0; font-size: 20px; font-weight: var(--fw-black); }
+.men-volet__liste { flex: 1; overflow-y: auto; padding: 4px 12px; }
+.men-volet__pied { padding: 16px 20px calc(24px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+.men-volet__pied:empty { display: none; }
+/* ⚠ C'EST UN <button>, PAS UN LIEN (il ouvre une fenêtre, il ne navigue pas) —
+   et un bouton arrive avec SES défauts de navigateur : bordure, fond gris,
+   largeur au contenu, police système, texte centré. Sans ces remises à zéro,
+   la ligne ne ressemblait plus à rien (recette du 14 octobre). */
+.men-eq { display: flex; align-items: center; gap: 14px; min-height: 64px; padding: 0 12px; border-radius: 14px; color: var(--ink);
+  width: 100%; background: none; border: 0; font: inherit; text-align: start; cursor: pointer; }
+.men-eq:hover { background: var(--surface-2); }
+.men-eq--off .men-eq__nom, .men-eq--off .men-note { color: var(--muted); }
+.men-eq__id { flex: 1; min-width: 0; }
+.men-eq__nom { display: block; font-size: 16px; font-weight: var(--fw-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.men-eq__manque { color: var(--muted); font-weight: var(--fw-medium); }
+.men-eq__biens { display: flex; align-items: center; flex: none; }
+.men-eq__chevron { color: var(--muted); flex: none; width: 18px; height: 18px; }
+.men-mini { width: 26px; height: 26px; border-radius: var(--radius-pill); border: 2px solid var(--surface); margin-inline-start: -6px; }
+.men-mini__ini { font-size: 9px; font-weight: var(--fw-bold); color: var(--muted); }
+.men-mini__plus { margin-inline-start: 4px; }
+/* Le COMPTE de retours (décision du 13 octobre) : jamais une moyenne étoilée. */
+.men-note { display: flex; align-items: center; gap: 10px; margin-top: 2px; font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.men-note__bon, .men-note__mauvais { display: inline-flex; align-items: center; gap: 4px; }
+.men-note__bon { color: var(--ok); }
+.men-note__mauvais { color: var(--danger); }
+.men-note--vide { color: var(--muted); }
+.men-note .icon { width: 14px; height: 14px; }
+
+@media (max-width: 899px) {
+  .men-page { padding: 10px 16px 100px; }
+  /* Téléphone : le volet prend tout l'écran (la barre du bas reste sous lui). */
+  .men-volet { width: 100vw; border-inline-start: 0; }
+  .men-voile { display: none; }
+  /* Les deux boutons passent SOUS le texte : cote a cote sur 390 px, ils
+     ecrasaient le titre a « Cle… » et le bien sur cinq lignes. */
+  .men-atr { flex-wrap: wrap; }
+  .men-atr__texte { flex: 1 1 100%; }
+  .men-atr__texte b { white-space: normal; }
+  .men-atr__actions { margin-inline-start: 0; width: 100%; }
+  .men-atr__btn { flex: 1; }
+  .men-nav .cal-periode { display: inline-flex; }  /* le calendrier la masque, ici elle sert */
+  .men-scroll { margin: 0 -16px; padding: 0 16px; }
+  .men-tete { margin: 0 -16px; padding: 0 16px; }
+  .men-page { --cal-col: 0px; }
+  .men-tete .cal-bande__angle { display: none; }
+  /* Identités au-dessus de la piste, collantes au bord de départ. */
+  .men-ligne { display: block; }
+  .men-ligne .cal-bien__coin { width: max-content; min-width: 0; max-width: 70vw; border-inline-end: 0; padding: 6px 10px 0; position: sticky; inset-inline-start: 2px; background: none; }
+  .men-bloc .cal-bien__bandeau-int { position: sticky; inset-inline-start: 2px; max-width: 85vw; }
+  .men-bloc .cal-poigne { display: none; }  /* réordonner à la souris seulement — report mobile proposé à Thierry */
+  .men-lane { min-height: 40px; }
+  .men-barre, .men-trou { height: 24px; }
+  .men-mk { width: 22px; height: 22px; }
+  .men-mk .icon { width: 11px; height: 11px; }
+  .men-case { min-width: 44px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CONFIGURATION D'UNE PRESTATAIRE (lot Ménages V5)
+   Une fenêtre à trois onglets, par-dessus le planning. PLEIN ÉCRAN au
+   téléphone : c'est un formulaire, pas un aperçu, et le réduire y rendait les
+   sept cases de jours intouchables au doigt.
+   ⚠ VERT = OK, ROUGE = PROBLÈME, JAMAIS D'AMBRE ICI (décision de Thierry) :
+   l'ambre de la bulle « À traiter » dit « à regarder un jour » ; ici, un
+   réglage marche ou ne marche pas.
+   ⚠ AUCUN HEXA : tout vient de theme.css, donc le mode sombre suit.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.men-cfg__voile {
+  position: fixed; inset: 0; z-index: 60; background: rgb(0 0 0 / 0.4);
+}
+.men-cfg {
+  position: fixed; z-index: 61; inset-block-start: 50%; inset-inline-start: 50%;
+  transform: translate(-50%, -50%);
+  width: min(760px, calc(100vw - 32px)); max-height: min(92vh, 1000px);
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface); border-radius: var(--radius-card);
+  box-shadow: var(--shadow-hover);
+}
+.men-cfg__tete {
+  display: flex; align-items: flex-start; gap: var(--gap-s);
+  padding: var(--gap-l) var(--gap-l) var(--gap-s);
+}
+.men-cfg__id { flex: 1; min-width: 0; }
+.men-cfg__sous {
+  display: flex; align-items: center; gap: var(--gap-m); flex-wrap: wrap;
+  margin-block-start: 6px; font-size: var(--fs-caption); color: var(--muted);
+}
+.men-cfg__actions { display: flex; gap: 6px; flex: none; }
+.men-cfg__vue { display: inline-flex; align-items: center; gap: 5px; }
+.men-cfg__vue .icon { width: 14px; height: 14px; }
+/* Deux états, et deux seulement. Le rouge est réservé au cas qui fait
+   téléphoner : elle porte un ménage qu'elle n'a pas vu. « Lien ouvert il y a
+   trois jours » ne disait rien à l'hôte — ce qu'il veut savoir, c'est si ce
+   qu'il vient de confier est ARRIVÉ chez elle (recette du 14 octobre). */
+.men-cfg__vue--ok { color: var(--ok); }
+.men-cfg__vue--ko { color: var(--danger); font-weight: var(--fw-semibold); }
+
+/* La phrase d'état : elle ne se cache jamais, et elle porte son geste. */
+.men-cfg__etat { padding: 0 var(--gap-l) var(--gap-s); }
+.men-cfg__state {
+  display: flex; align-items: flex-start; gap: var(--gap-s);
+  padding: 12px 14px; border-radius: var(--radius-tile);
+  font-size: var(--fs-body); line-height: 1.45;
+}
+.men-cfg__state .icon { flex: none; margin-block-start: 2px; }
+.men-cfg__state--ok { background: var(--ok-soft); }
+.men-cfg__state--ok .icon { color: var(--ok); }
+.men-cfg__state--ko { background: var(--danger-soft); color: var(--danger); }
+.men-cfg__state--ko .icon { color: var(--danger); }
+.men-cfg__fix { margin-inline-start: auto; flex: none; height: 36px; }
+
+.men-cfg__onglets {
+  display: flex; gap: 4px; padding: 0 var(--gap-l);
+  border-block-end: 1px solid var(--line); flex: none;
+}
+.men-cfg__onglet {
+  height: 48px; padding: 0 14px; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-body); font-weight: var(--fw-medium);
+  color: var(--muted); border-block-end: 2px solid transparent;
+}
+.men-cfg__onglet.is-on { color: var(--ink); font-weight: var(--fw-bold); border-block-end-color: var(--ink); }
+
+.men-cfg__corps { overflow-y: auto; flex: 1; }
+/* Pendant une écriture, l'écran ne se laisse pas recliquer : deux gestes
+   concurrents enverraient deux listes calculées sur le même état d'avant. */
+.men-cfg__corps.is-occupe { opacity: 0.6; pointer-events: none; }
+.men-cfg__sec { padding: var(--gap-m) var(--gap-l); border-block-start: 1px solid var(--line); }
+.men-cfg__sec:first-child { border-block-start: 0; }
+/* ⚠ LES TRACES PASSENT A LA LIGNE PLUTOT QUE DE SE TASSER. Depuis le
+   14 octobre 2026 l'en-tete peut porter DEUX traces — « Réglé par elle » et
+   « Réglé par vous ». Sans `flex-wrap`, trois elements se partageaient une
+   rangee de 390 px et les deux dates se comprimaient ; et avec `auto` sur
+   chacune, l'espace libre se repartissait entre les deux marges, si bien que la
+   premiere ne collait plus a droite. Seule la PREMIERE pousse, les suivantes la
+   suivent. */
+.men-cfg__secTete { display: flex; align-items: center; gap: var(--gap-s); flex-wrap: wrap; }
+.men-cfg__h3 { margin: 0 0 4px; font-size: var(--fs-h2); font-weight: var(--fw-bold); }
+.men-cfg__aide { margin: 0 0 10px; }
+.men-cfg__trace:first-of-type { margin-inline-start: auto; }
+.men-cfg__pied {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 12px var(--gap-l); border-block-start: 1px solid var(--line);
+  font-size: var(--fs-caption); color: var(--muted);
+}
+.men-cfg__pied .icon { width: 15px; height: 15px; color: var(--ok); }
+
+/* Un bien : son nom, son engagement, son rang, son interrupteur, ses jours. */
+.men-cfg__joursTete {
+  display: grid; grid-template-columns: repeat(7, 38px); gap: 6px;
+  margin-inline-start: auto; width: max-content;
+  font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted); text-align: center;
+}
+.men-cfg__bien { padding: 12px 0; border-block-end: 1px solid var(--line); }
+.men-cfg__bien--off { opacity: 0.55; }
+.men-cfg__bienTete { display: flex; align-items: center; gap: var(--gap-s); flex-wrap: wrap; }
+.men-cfg__bienNom { flex: 1; min-width: 120px; font-weight: var(--fw-bold); }
+.men-cfg__cells {
+  display: grid; grid-template-columns: repeat(7, 38px); gap: 6px;
+  margin: 10px 0 0 auto; width: max-content;
+}
+.men-cfg__cell {
+  width: 38px; height: 38px; padding: 0; cursor: pointer;
+  border: 1.5px solid var(--border); border-radius: 10px; background: var(--surface);
+}
+.men-cfg__cell.is-on { background: var(--ok); border-color: var(--ok); }
+/* ⚠ PLUS DE HACHURES ICI (recette du 14 octobre). Elles disaient « elle ne
+   travaille pas ce jour-là » sur les jours que l'hôte CONFIE : deux sujets
+   différents dans la même case. Ses jours à elle vivent dans la section
+   « Quand elle est là », juste en dessous, et séparément. */
+/* Pas encore réglé : ni coché, ni vide — en pointillé. L'hôte doit voir qu'il
+   n'a rien décidé, pas croire qu'il a tout coché. */
+.men-cfg__cell.is-vierge { border-style: dashed; border-color: var(--muted); background: var(--surface); }
+.men-cfg__cell:disabled { cursor: default; }
+.men-cfg__av { margin: 8px 0 0; font-size: var(--fs-caption); color: var(--danger); }
+.men-cfg__libres { margin-block-start: 10px; }
+
+/* Segments et interrupteurs. Le choix actif est NOIR (demande de Thierry) : il
+   ne se confond ni avec le vert d'un état, ni avec le rouge d'un défaut. */
+.men-cfg__seg {
+  display: inline-flex; gap: 2px; padding: 3px; flex: none;
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+}
+.men-cfg__seg button {
+  height: 34px; padding: 0 14px; border: 0; cursor: pointer; background: none;
+  border-radius: var(--radius-pill); font-family: inherit;
+  font-size: var(--fs-caption); font-weight: var(--fw-semibold); color: var(--muted);
+}
+.men-cfg__seg button.is-on { background: var(--ink); color: var(--on-ink); }
+.men-cfg__seg button:disabled { cursor: default; opacity: 0.6; }
+.men-cfg__sw {
+  width: 44px; height: 26px; flex: none; padding: 0; cursor: pointer; position: relative;
+  border: 0; border-radius: var(--radius-pill); background: var(--border);
+}
+.men-cfg__sw::after {
+  content: ""; position: absolute; inset-block-start: 3px; inset-inline-start: 3px;
+  width: 20px; height: 20px; border-radius: var(--radius-pill);
+  background: var(--surface); box-shadow: var(--shadow-dot);
+}
+.men-cfg__sw.is-on { background: var(--ink); }
+.men-cfg__sw.is-on::after { inset-inline-start: 21px; }
+.men-cfg__sw:disabled { cursor: default; opacity: 0.5; }
+.men-cfg__row { display: flex; align-items: center; gap: var(--gap-m); padding: 12px 0; border-block-end: 1px solid var(--line); }
+.men-cfg__rowTxt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+
+/* Ses jours de travail, en lecture. A en VERT, B en BLEU (demande de
+   Thierry) : deux semaines qui se ressemblent se confondent à l'œil. */
+.men-cfg__sem { display: flex; align-items: center; gap: 6px; margin-block-end: 6px; }
+.men-cfg__ab { width: 16px; font-size: var(--fs-caption); font-weight: var(--fw-black); }
+.men-cfg__ab--a { color: var(--ok); }
+.men-cfg__ab--b { color: var(--info); }
+.men-cfg__pastille {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted);
+}
+.men-cfg__pastille.is-on { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+/* ⚠ ELLES SE COCHENT (étape 2, 16 octobre 2026). Le `<label>` porte la cible
+   tactile, l'`<input>` vit dedans et garde le clavier comme le lecteur
+   d'écran : une `<div>` avec un `onclick` aurait perdu les deux.
+   ⚠ 28 px DE DESSIN, 36 DE CIBLE : le padding est dans la zone de frappe, la
+   marge ne l'aurait pas été. */
+label.men-cfg__pastille { cursor: pointer; box-sizing: content-box; padding: 4px; }
+label.men-cfg__pastille:focus-within { box-shadow: 0 0 0 2px var(--ink); }
+.men-cfg__pastille input { position: absolute; opacity: 0; pointer-events: none; }
+/* ⚠ « TOUS LES JOURS (PAR DÉFAUT) » SE VOIT, ET SE VOIT COMME UN DÉFAUT.
+   Une récurrence vide veut dire « disponible tous les jours » : montrer sept
+   cases VIDES disait l'inverse de la vérité. On les montre cochées, mais en
+   gris — pas en vert — parce que personne ne les a cochées. */
+.men-cfg__pastille.is-defaut { background: var(--surface-2); border-color: var(--line);
+                               color: var(--muted); }
+.men-cfg__regles { margin-block-end: var(--gap-m); }
+.men-cfg__h4 { font-size: var(--fs-small); font-weight: var(--fw-bold);
+               margin-block-end: var(--gap-s); }
+.men-cfg__ancre { display: flex; flex-wrap: wrap; align-items: center; gap: var(--gap-s);
+                  margin-block-start: var(--gap-s); font-size: var(--fs-caption);
+                  color: var(--muted); }
+.men-cfg__lien { background: none; border: 0; padding: 4px 0; cursor: pointer;
+                 font: inherit; font-weight: var(--fw-semibold); color: var(--ink);
+                 text-decoration: underline; text-underline-offset: 2px; }
+.men-cfg__secBas { margin-block-start: var(--gap-s); }
+.men-cfg__mini { min-height: 36px; padding-inline: 14px; font-size: var(--fs-caption); }
+/* L'avertissement des règles illisibles : il FERME le geste, il ne le commente
+   pas — d'où l'ambre, qui dit « HôteSmart attend quelque chose de vous ». */
+.men-cfg__avert { color: var(--warn); background: var(--warn-soft);
+                  border-radius: var(--radius-tile); padding: 8px 10px;
+                  margin-block-start: var(--gap-s); }
+
+/* Le calendrier deux mois, en lecture. Chaque jour vient du serveur. */
+.men-cfg__cal { display: flex; flex-wrap: wrap; gap: var(--gap-l); margin-block-start: 12px; }
+.men-cfg__moisNom { font-weight: var(--fw-bold); margin-block-end: 8px; text-transform: capitalize; }
+.men-cfg__moisTete, .men-cfg__grille {
+  display: grid; grid-template-columns: repeat(7, 32px); gap: 4px;
+}
+.men-cfg__moisTete { font-size: var(--fs-caption); color: var(--muted); text-align: center; margin-block-end: 6px; }
+/* ⚠ C'EST UN BOUTON depuis l'étape 1 du 14 octobre 2026 : un clic pose ou
+   retire une absence. Les propriétés du bouton natif sont donc remises à zéro —
+   sans quoi la bordure et la police du système reprenaient la main et le
+   calendrier changeait d'aspect. */
+.men-cfg__jour {
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  position: relative; border-radius: var(--radius-pill);
+  padding: 0; border: 0; background: none; cursor: pointer;
+  font-family: inherit; font-size: var(--fs-caption); font-weight: var(--fw-bold); color: var(--muted);
+}
+/* Passé, sous congé, ou sans le droit : le curseur le dit avant le clic. */
+.men-cfg__jour:disabled { cursor: default; }
+.men-cfg__jour.is-on { background: var(--ok-soft); color: var(--ok); }
+.men-cfg__jour.is-conge {
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 3px, var(--surface) 3px 6px);
+  color: var(--muted);
+}
+.men-cfg__jour.is-passe { opacity: 0.45; }
+.men-cfg__pt {
+  position: absolute; inset-block-end: 3px; inset-inline-start: 50%;
+  width: 4px; height: 4px; margin-inline-start: -2px;
+  border-radius: var(--radius-pill); background: currentColor;
+}
+.men-cfg__pt--lg { position: static; margin: 0; width: 5px; height: 5px; background: var(--ink); }
+.men-cfg__legende {
+  display: flex; align-items: center; gap: var(--gap-m); flex-wrap: wrap;
+  margin-block-start: 12px; font-size: var(--fs-caption); color: var(--muted);
+}
+.men-cfg__legende > span { display: inline-flex; align-items: center; gap: 6px; }
+.men-cfg__lg { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--line); }
+.men-cfg__lg.is-on { background: var(--ok-soft); border-color: var(--ok); }
+.men-cfg__lg.is-conge { background: repeating-linear-gradient(135deg, var(--surface-2) 0 3px, var(--surface) 3px 6px); }
+.men-cfg__corriger { margin-inline-start: auto; height: 36px; }
+
+.men-cfg__conges { margin-block-start: 14px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-tile); }
+.men-cfg__congesTete { display: flex; align-items: center; gap: var(--gap-s); }
+.men-cfg__poser { margin-inline-start: auto; height: 36px; }
+.men-cfg__congesListe { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.men-cfg__conge { display: flex; align-items: center; gap: var(--gap-s); flex-wrap: wrap; }
+
+.men-cfg__puces { display: flex; flex-wrap: wrap; gap: 8px; }
+.men-cfg__puce {
+  height: 38px; padding: 0 14px; cursor: pointer; font-family: inherit;
+  border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--surface); color: var(--muted);
+  font-size: var(--fs-body); font-weight: var(--fw-semibold);
+}
+.men-cfg__puce.is-on { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.men-cfg__puce:disabled { cursor: default; opacity: 0.6; }
+
+.men-cfg__champs { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-s); }
+.men-cfg__champ { display: flex; flex-direction: column; gap: 6px; }
+.men-cfg__champ input {
+  height: 44px; padding: 0 14px; font-family: inherit; font-size: var(--fs-body);
+  color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius-tile);
+}
+.men-cfg__champ input:disabled { opacity: 0.6; }
+.men-cfg__retirer { color: var(--danger); border-color: var(--danger); }
+
+/* Les trois gestes de son lien, dans l'onglet Configuration. En ligne tant
+   qu'ils tiennent, puis repliés : « Envoyer le lien » doit rester le premier
+   lu, c'est celui qu'on cherche. */
+.men-cfg__lienBtns { display: flex; flex-wrap: wrap; gap: 10px; margin-block: 12px; }
+
+/* Téléphone : plein écran, et les colonnes passent en une seule. */
+@media (max-width: 899px) {
+  .men-cfg {
+    inset: 0; transform: none; width: 100%; max-height: none; height: 100%;
+    border-radius: 0;
+  }
+  .men-cfg__tete, .men-cfg__etat, .men-cfg__onglets, .men-cfg__sec, .men-cfg__pied {
+    padding-inline: var(--gap-m);
+  }
+  .men-cfg__champs { grid-template-columns: 1fr; }
+  /* Le nom et son interrupteur sur la MÊME ligne : laissés au fil du flex, le
+     bouton tombait seul sous le nom, à gauche, et ne se lisait plus comme
+     « confier ce bien ». Les deux menus passent dessous, en pleine largeur. */
+  /* Le nom d'abord, son menu dessous et en pleine largeur : les quatre choix
+     portent des phrases entières, qui ne tiennent pas à côté d'un nom de bien
+     sur 390 px. ⚠ Les règles `order` de l'interrupteur d'avant faisaient
+     passer le menu AVANT le nom (recette du 14 octobre). */
+  .men-cfg__bienTete { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+  .men-cfg__bienNom { min-width: 0; }
+  .men-cfg__choix { width: 100%; }
+  /* ⚠ LES SEPT CASES RESTENT ATTEIGNABLES AU DOIGT : elles passent sous le nom
+     du bien et prennent toute la largeur, au lieu de se tasser à droite. */
+  .men-cfg__cells, .men-cfg__joursTete { grid-template-columns: repeat(7, 1fr); width: 100%; margin-inline: 0; }
+  .men-cfg__cell { width: 100%; }
+  /* ⚠ 44 px DE ZONE TAPABLE AU DOIGT (demande de Thierry, 14 octobre 2026).
+     Le calendrier se touche désormais : une cible de 32 px avec 4 px de gouttière
+     fait rater le jour voisin une fois sur trois, et une absence posée sur le
+     mauvais jour ne se voit pas — elle se découvre quand personne ne vient.
+     Les deux mois s'empilent en pleine largeur, et chaque case prend sa part :
+     sur 390 px, une cellule fait ~47 px. `aspect-ratio` garde le rond rond. */
+  .men-cfg__mois { flex: 1 1 100%; min-width: 0; }
+  .men-cfg__moisTete, .men-cfg__grille { grid-template-columns: repeat(7, 1fr); }
+  .men-cfg__jour {
+    width: 100%; height: auto; aspect-ratio: 1; min-height: 44px;
+    font-size: var(--fs-body);
+  }
+  /* Les trois gestes du lien en colonne : trois boutons à libellé entier ne
+     tiennent pas sur une ligne de 390 px. */
+  .men-cfg__lienBtns { flex-direction: column; align-items: stretch; }
+  .men-cfg__fix { margin-inline-start: 0; }
+  .men-cfg__state { flex-wrap: wrap; }
+}
+/* Le voile et la fenêtre couvrent la barre du bas au téléphone. */
+body.men-cfg-ouvert { overflow: hidden; }

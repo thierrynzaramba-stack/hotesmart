@@ -22,13 +22,14 @@ process.env.CHANNEL_API_KEY = process.env.CHANNEL_API_KEY || 'k'
 const { verifierDisponibilite, intentionsEnCours } = require('../lib/reservation-directe')
 
 const lire = (...p) => fs.readFileSync(path.join(__dirname, '..', ...p), 'utf8')
-const PAGE_BRUTE = lire('pages', 'biens-calendrier.html')
+// RETARGE le 13 octobre 2026 : les anciennes pages redirigent vers la V5.
+const PAGE_BRUTE = lire('pages', 'calendrier.html')
 // On teste le CODE, pas les commentaires : ceux-ci citent volontiers ce qu'on a
 // supprime (« l'ancien calcul (span-0.5) »), et les chercher dans le fichier
 // brut ferait echouer un test sur sa propre documentation.
 const sansCommentaires = (s) => s.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
 const PAGE = sansCommentaires(PAGE_BRUTE)
-const MOBILE = lire('pages', 'calendrier-mobile.html')
+const MOBILE = lire('pages', 'calendrier.html')
 // Depuis le chantier calendrier mobile (30 septembre 2026), la regle
 // « modifiable », sa note et l'adresse de la conversation vivent dans le module
 // commun aux deux ecrans : les tests la cherchent la, et verifient que la page
@@ -41,7 +42,7 @@ const CORE = lire('shared', 'calendar-core.js')
 const CAL = sansCommentaires(lire('api', 'calendar.js'))
 const API = lire('api', 'reservation-directe.js')
 const LIB = lire('lib', 'reservation-directe.js')
-const MSG = lire('apps', 'agent-ai', 'messagerie.html')
+const MSG = lire('pages', 'messages.html')   // etape 4 : l'ancienne page est une redirection
 const MSGAPI = lire('api', 'messages.js')
 const CLIENT = lire('shared', 'api-client.js')
 
@@ -233,48 +234,29 @@ test('client : `modifier` existe et emploie la methode PUT', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('bulles : du MILIEU du jour d\'arrivee au MILIEU du jour de depart', () => {
-  // ⚠ REGRESSION FERMEE. L'ancien calcul `width:(span-0.5)*100%` avec
-  // `left:50%` s'arretait a la FIN du dernier jour occupe, soit une
-  // demi-cellule trop tot : la bulle ne touchait jamais le jour de depart, et
-  // deux sejours qui s'enchainent laissaient un blanc la ou ils se croisent.
-  assert.ok(!/\(bk\.span-0\.5\)\*100/.test(PAGE), 'l\'ancien calcul a disparu')
-  assert.match(PAGE, /function barresResa/)
-  const bloc = PAGE.slice(PAGE.indexOf('function barresResa'), PAGE.indexOf('function renderBienBlock'))
-  assert.match(bloc, /iDebut\+0\.5/, 'demarre au milieu de la cellule d\'arrivee')
-  assert.match(bloc, /iFin\+0\.5/, 'finit au milieu de la cellule de depart')
+  // RETARGE 13/10/2026 (V5). Ordinateur : left = (d + .5)/n, width = f - d
+  // (f = index du checkout) ; telephone : demi-cases arrivee/depart.
+  const css = lire('shared', 'ui.css')
+  assert.match(css, /left: calc\(\(var\(--d\) \+ \.5\) \/ var\(--n\) \* 100%\)/)
+  assert.match(PAGE, /commence \? 0\.5 : 0/)
+  assert.match(PAGE, /finit \? 0\.5 : 1/)
 })
 
 test('bulles : un sejour DEJA COMMENCE reste visible', () => {
-  // ⚠ La grille demarre AUJOURD'HUI et l'ancien rendu ne dessinait la barre que
-  // dans la cellule `startISO`. Un sejour commence hier n'avait donc aucune
-  // cellule ou s'afficher : le planning montrait LIBRE la nuit ou quelqu'un dort.
-  const bloc = PAGE.slice(PAGE.indexOf('function barresResa'), PAGE.indexOf('function renderBienBlock'))
-  assert.ok(bloc.includes('bk.startISO<iso0'), 'le debordement a gauche est traite')
-  assert.ok(bloc.includes('bk.checkout>isoN'), 'le debordement a droite aussi')
-  assert.ok(bloc.includes('cont-left') && bloc.includes('cont-right'), 'bords droits quand le sejour est coupe')
-  assert.match(PAGE, /\.resa-bar\.cont-left/, 'le style existe')
+  // Chevauchement par DATES : couvrir toute la plage ne fait pas disparaitre.
+  assert.match(PAGE, /if \(co <= etat\.joursISO\[0\] \|\| r\.startISO > etat\.joursISO\[etat\.joursISO\.length - 1\]\) return ''/)
 })
 
 test('bulles : le nom est tronque par le CSS, avec le nom complet en infobulle', () => {
-  // Une coupe a 16 caracteres ne sait rien de la largeur reelle : elle amputait
-  // un nom long sur une bulle de dix nuits qui avait la place.
-  assert.ok(!/bk\.name\.length>16/.test(PAGE), 'plus de troncature a l\'aveugle')
-  assert.match(PAGE, /\.resa-bar \.nom \{[^}]*text-overflow: ellipsis/)
-  assert.match(PAGE, /\.resa-bar \.nom \{[^}]*min-width: 0/,
-    'sans min-width:0, un enfant flex ne retrecit pas et l\'ellipse ne se declenche jamais')
-  assert.match(PAGE, /title="'\+escapeHtmlLocal\(bk\.name/, 'nom complet en infobulle, echappe')
-  assert.match(PAGE, /const nameShort=escapeHtmlLocal\(/, 'le libelle reste echappe')
+  const css = lire('shared', 'ui.css')
+  assert.match(css, /\.cal-barre \{[^}]*text-overflow: ellipsis/)
+  assert.match(PAGE, /title="\$\{esc\(\(r\.name \|\| ''\)/)
 })
 
-test('bulles : colonne elargie et ligne plus haute, de facon coherente', () => {
-  // La largeur de colonne vit a DEUX endroits : le CSS qui la dessine et CELL_W
-  // qui compte les jours. Les laisser diverger produit une barre de defilement
-  // la ou le remplissage devait tomber juste.
-  assert.match(CORE, /export const CELL_W = 46/)
-  assert.match(PAGE, /table\.cal th, table\.cal td \{[^}]*width: 46px/)
-  assert.ok(!/const COLW = 34/.test(CORE), 'plus de copie en dur du pas de colonne')
-  assert.match(CORE, /const COLW = CELL_W/)
-  assert.match(PAGE, /\.resa-cell \{[^}]*height: 36px/)
+test('bulles : colonne et bande partagent la MEME largeur de jour', () => {
+  const css = lire('shared', 'ui.css')
+  assert.match(css, /grid-auto-columns: 46px/)
+  assert.match(css, /\.cal-table td, \.cal-table th \{ width: 46px/)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -282,18 +264,13 @@ test('bulles : colonne elargie et ligne plus haute, de facon coherente', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('conversation : le bouton existe et vise la messagerie par booking_id', () => {
-  assert.match(PAGE, /id="resa-conversation"/)
-  assert.match(PAGE, /Ouvrir la conversation/)
-  assert.match(MODULE, /messagerie\?conv=' \+ encodeURIComponent\(resa\.id\)/)
-  assert.match(PAGE, /urlConversation\(bien, resa\)/)
+  assert.match(PAGE, /\/api\/messages\?booking_id=/)
+  assert.match(PAGE, /urlConversation\(bien, r\)/)
 })
 
 test('conversation : le bouton nait DESACTIVE et se resout a l\'ouverture', () => {
-  // Naitre actif puis s'eteindre ferait rater un clic parti trop tot vers une
-  // page vide.
-  const bloc = PAGE.slice(PAGE.indexOf('function blocConversation'), PAGE.indexOf('async function resoudreConversation'))
-  assert.ok(bloc.includes('disabled'), 'desactive a la construction')
-  assert.ok(bloc.includes('Recherche du fil'), 'et il le dit')
+  assert.match(PAGE, /data-fiche-conv disabled/)
+  assert.match(PAGE, /btn\.disabled = false/)
 })
 
 test('conversation : l\'existence du fil est lue UNE RESERVATION A LA FOIS', () => {
@@ -315,41 +292,31 @@ test('conversation : l\'existence du fil est lue UNE RESERVATION A LA FOIS', () 
 })
 
 test('conversation : « je ne sais pas » n\'est jamais presente comme « aucun fil »', () => {
-  // Un echec de lecture ne doit pas affirmer au sujet du voyageur quelque chose
-  // qu'on n'a pas pu regarder.
-  const bloc = PAGE.slice(PAGE.indexOf('async function resoudreConversation'), PAGE.indexOf('function champsModifiables'))
-  assert.ok(bloc.includes('Fil indisponible'), 'l\'echec a son propre message')
-  assert.ok(bloc.includes('resaCourante.resa.id'), 'une reponse tardive ne repeint pas une autre fiche')
+  assert.match(PAGE, /cal\.thread_unavailable/)
+  assert.match(PAGE, /cal\.no_thread/)
 })
 
-test('messagerie : `?conv=` ouvre le fil, et n\'est consommee qu\'UNE fois', () => {
-  // Sans cela, chaque rafraichissement ramenerait l'hote de force sur la
-  // conversation d'origine, y compris apres qu'il en a ouvert une autre.
-  assert.match(MSG, /URLSearchParams\(location\.search\)\.get\('conv'\)/)
-  assert.match(MSG, /function ouvrirConversationDemandee/)
-  const bloc = MSG.slice(MSG.indexOf('function ouvrirConversationDemandee'), MSG.indexOf('window.loadConversations ='))
-  assert.ok(bloc.includes('convDemandee = null'), 'la cible est consommee')
-  assert.ok(bloc.includes('introuvable'), 'un fil absent est DIT, pas ignore')
+test('messagerie : `?conv=` ouvre le fil demande par la fiche', () => {
+  // L'integration fiche -> messagerie vit desormais dans /messages (etape 4) :
+  // urlConversation pointe `?conv=` seul, et la page ouvre le fil s'il existe.
+  assert.match(MSG, /params\.get\('conv'\)/)
+  assert.ok(MSG.includes("etat.conversations.some(x => String(x.bookId) === String(demandee))"),
+    'le fil demande n\'ouvre que s\'il existe — jamais un ecran « introuvable » depuis un lien interne (decision de l\'etape 1)')
 })
 
-test('messagerie : une PANNE de chargement ne se dit pas « conversation introuvable »', () => {
-  // ⚠ Les deux chemins de chargement rattrapent leur propre erreur pour peindre
-  // le panneau de gauche : la promesse tient donc meme quand /api/messages est
-  // tombe, et `conversations` reste vide. Sans drapeau, l'hote lisait que le fil
-  // n'existe pas — et la cible etait consommee, donc un rechargement reussi ne
-  // l'ouvrait plus.
-  const bloc = MSG.slice(MSG.indexOf('function ouvrirConversationDemandee'), MSG.indexOf('window.loadConversations ='))
-  assert.ok(bloc.includes('if (!charge) return'), 'on ne conclut rien sans chargement reussi')
-  assert.ok(bloc.indexOf('if (!charge) return') < bloc.indexOf('convDemandee = null'),
-    'et la cible n\'est pas consommee avant d\'avoir pu conclure')
-  // Les deux chemins rendent bien le drapeau.
-  assert.strictEqual((MSG.match(/\n      return true\n/g) || []).length, 2, 'succes des deux chemins')
-  assert.strictEqual((MSG.match(/\n      return false\n/g) || []).length, 2, 'echec des deux chemins')
+test('messagerie : une PANNE de chargement est DITE, pas lue comme une absence de fil', () => {
+  // La fiche n'envoie ici que si has_conversation a dit vrai : si la page
+  // n'ouvre rien, c'est une panne — et elle s'affiche en toutes lettres.
+  assert.ok(MSG.includes('etat.chargementOk = false'), 'le chargement en echec est memorise')
+  assert.ok(MSG.includes("t('messages.load_error')"), 'et il se dit a l\'ecran')
 })
 
-test('messagerie : `?bien=` n\'est applique que si le bien existe', () => {
-  // Une valeur inconnue viderait l'ecran par un filtre qui ne correspond a rien.
-  assert.match(MSG, /window\._props\.some\(p => String\(p\.provider_property_id\) === String\(bienDemande\)\)/)
+test('messagerie : le lien de la fiche ne porte plus `?bien=`', () => {
+  // /messages n'a pas de filtre par bien qui masquerait le fil : le parametre
+  // est mort avec l'ancienne page (sa valeur inconnue vide:ait l'ecran).
+  const module_ = lire('shared', 'calendrier-resa.js')
+  assert.ok(module_.includes("'/messages?conv=' + encodeURIComponent(resa.id)"))
+  assert.ok(!module_.includes('&bien='), 'plus de second parametre')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -357,12 +324,8 @@ test('messagerie : `?bien=` n\'est applique que si le bien existe', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('fiche : l\'edition exige Offline + Channex + droit + pas lecture seule', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('function ouvrirFicheResa'), PAGE.indexOf('function blocConversation'))
-  const regle = MODULE.slice(MODULE.indexOf('export function droitsResa'), MODULE.indexOf('export function sansMessagerieOta'))
-  assert.ok(regle.includes('resa.offline && channex'), 'reserve aux reservations directes des biens Channex')
-  assert.ok(bloc.includes("droitsResa(bien, resa, peutEcrire('reservations') && !LECTURE_SEULE)"),
-    'la page passe le droit ET la lecture seule a la regle commune')
-  assert.ok(bloc.includes('champsModifiables'), 'les champs ne sortent que dans ce cas')
+  assert.match(PAGE, /droitsResa\(bien, r, peutEcrire\('reservations'\) && !etat\.lectureSeule\)/)
+  assert.match(PAGE, /\$\{droits\.modifiable \?/)
 })
 
 test('fiche : une vente du MOTEUR PUBLIC n\'est pas modifiable depuis le planning', () => {
@@ -427,95 +390,61 @@ test('colonne `raw` absente : on DEGRADE, on ne tombe pas', () => {
 
 test('PRIX : ne pas toucher au prix ne doit PAS repricer le sejour', () => {
   // ⚠ 100,00 sur 3 nuits : `amount / nuits` arrondi au centime donne
-  // 33,33 x 3 = 99,99 ; sur 7 nuits, 14,29 x 7 = 100,03. Un hote qui ne corrige
-  // que le nombre de voyageurs changeait ainsi le prix de vente sans le savoir.
+  // 33,33 x 3 = 99,99. Garde SERVEUR (inchangee par le retargage) :
   const put = API.slice(API.indexOf("if (req.method === 'PUT')"))
   assert.ok(put.includes('memeDuree'), 'le cas « meme duree » est distingue')
   assert.match(put, /totalActuelCents - base \* \(listeNuits\.length - 1\)/,
     'montant exact conserve, reliquat sur la derniere nuit')
-  // Cote front : champ vide = prix inchange, et il n'est alors PAS envoye.
-  const envoi = PAGE.slice(PAGE.indexOf('async function enregistrerResaCourante'), PAGE.indexOf('function showToast'))
-  assert.ok(envoi.includes('prixTouche'), 'le front distingue « vide » de « zero »')
-  assert.ok(envoi.includes('if(prixTouche) charge.prixParNuit = prix'),
-    'un prix non touche n\'est pas transmis')
-  // Et le champ n'est pas pre-rempli avec le prix de base quand le montant est inconnu.
-  const form = PAGE.slice(PAGE.indexOf('function champsModifiables'), PAGE.indexOf('function rafraichirFiche'))
-  assert.ok(form.includes('montantConnu'), 'prix inconnu = champ vide, pas le prix de base du bien')
+  // Cote V5 : meme total a l'arrondi pres = prix OMIS du payload.
+  assert.match(PAGE, /Math\.abs\(p \* r\.span - r\.amount\) < 0\.005/)
+  assert.match(PAGE, /charge\.prixParNuit === undefined/)
 })
 
 test('fiche : une resa OTA garde une fiche en CONSULTATION seule', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('function ouvrirFicheResa'), PAGE.indexOf('function blocConversation'))
-  assert.ok(bloc.includes('ligneFiche(\'Arrivée\''), 'les dates restent du texte hors Offline')
-  assert.match(MODULE, /modifiable uniquement chez/)
-  assert.match(bloc, /note\.textContent = droits\.note/)
+  assert.match(PAGE, /droits\.modifiable \? `<div class="msg-tiroir__bloc">/)
+  assert.match(PAGE, /esc\(droits\.note \|\| ''\)/)
 })
 
-test('fiche : les trois champs demandes sont editables', () => {
-  // Dates, prix vendu et nombre de voyageurs. Les champs sont construits par le
-  // helper `champ(id, …)` : on verifie les identifiants qu'il recoit, et qu'ils
-  // sont tous les cinq relus a l'enregistrement.
-  const form = PAGE.slice(PAGE.indexOf('function champsModifiables'), PAGE.indexOf('function rafraichirFiche'))
-  for (const id of ['fiche-arrivee', 'fiche-depart', 'fiche-prix', 'fiche-adultes', 'fiche-enfants']) {
-    assert.ok(form.includes(`'${id}'`), `${id} doit etre rendu`)
+test('fiche : les champs demandes sont editables (dates, voyageurs, prix)', () => {
+  for (const champ of ['data-f="arrivee"', 'data-f="depart"', 'data-f="adultes"', 'data-f="enfants"', 'data-f="prix"']) {
+    assert.ok(PAGE.includes(champ), champ)
   }
-  const envoi = PAGE.slice(PAGE.indexOf('async function enregistrerResaCourante'), PAGE.indexOf('function showToast'))
-  for (const id of ['fiche-arrivee', 'fiche-depart', 'fiche-prix', 'fiche-adultes', 'fiche-enfants']) {
-    assert.ok(envoi.includes(`'${id}'`), `${id} doit etre relu a l'enregistrement`)
-  }
-  assert.match(form, /type="'\+type\+'"/, 'le type du champ vient du helper (date, number)')
-  assert.match(form, /champ\('fiche-arrivee','Arrivée','date'/, 'les dates sont de vrais champs date')
-  assert.match(form, /champ\('fiche-prix','Prix par nuit','number'/)
 })
 
-test('fiche : l\'enregistrement passe par updateBooking, pas par une ecriture locale', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('async function enregistrerResaCourante'), PAGE.indexOf('function showToast'))
-  assert.ok(bloc.includes('api.reservationDirecte.modifier'), 'passe par l\'endpoint garde')
-  assert.ok(bloc.includes('prochain rafraîchissement'),
-    'la resa revient par le feed : on n\'affirme pas qu\'elle est deja a jour')
-  assert.ok(!bloc.includes('bookings_snapshot'), 'aucune ecriture directe du cœur')
+test('fiche : l\'enregistrement passe par le PUT serveur, pas par une ecriture locale', () => {
+  assert.match(PAGE, /fetch\('\/api\/reservation-directe', \{ method: 'PUT'/)
+  assert.ok(!PAGE.includes('bookings_snapshot'), 'le coeur revient par le feed')
 })
 
 test('fiche : une modification vide ne part pas au canal', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('async function enregistrerResaCourante'), PAGE.indexOf('function showToast'))
-  assert.ok(bloc.includes('Aucune modification'))
+  assert.match(PAGE, /cal\.no_change/)
 })
 
 test('stop-sell : action directe depuis la selection, memes gardes que l\'ajout', () => {
-  assert.match(PAGE, /id="btn-stop-sell"/)
-  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
-  assert.ok(bloc.includes("peutEcrire('reservations')"))
-  assert.ok(bloc.includes('LECTURE_SEULE'))
+  // La barre d'actions n'existe pas sans droit ; « Fermer » part en stop_sell.
+  assert.match(PAGE, /if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) \{ barre\.hidden = true/)
+  assert.match(PAGE, /stop_sell: true/)
 })
 
 test('stop-sell : UI SEULEMENT — le chemin serveur est celui qui existe deja', () => {
-  // ⚠ `stop_sell` est une INTENTION memorisee dans calendar_inventory
-  // (docs/kb/reservation-directe.md §8). Ce bouton ne doit rien reinventer :
-  // il envoie les memes segments que la rubrique « Stop vente » de la popup.
-  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
-  assert.ok(bloc.includes('api.calendar.save'), 'meme endpoint que la popup')
-  assert.match(bloc, /stop_sell: fermer/)
-  assert.ok(!bloc.includes('channel-'), 'aucun appel provider depuis la page')
+  assert.match(PAGE, /appel\('\/api\/calendar', \{ action: 'save', property_id: bienId, segments/)
 })
 
 test('stop-sell : les jours contigus partent en PLAGES, pas un segment par jour', () => {
-  // Sur un mois entier, c'est la difference entre un appel et trente.
-  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
-  assert.ok(bloc.includes('plages.push'), 'regroupement en plages contigues')
-  assert.match(bloc, /date_from: toISO\(days\[a\]\), date_to: toISO\(days\[b\]\)/)
+  assert.match(PAGE, /plagesContigues\(/)
+  assert.match(PAGE, /date_from: p\[0\], date_to: p\[1\]/)
 })
 
 test('stop-sell : le libelle dit ce que le clic va faire', () => {
-  assert.match(PAGE, /function selectionToutFermee/)
-  assert.match(PAGE, /selectionToutFermee\(\) \? 'Rouvrir à la vente' : 'Fermer à la vente'/)
+  // Fermer / Rouvrir selon l'etat REEL de la selection (cleInverse du contrat).
+  assert.match(PAGE, /a\.id === 'fermer' && toutFerme \? a\.cleInverse : a\.cle/)
 })
 
-test('stop-sell : les jours fermes se voient sur TOUTES les lignes du bien', () => {
-  // Un bien ferme ne doit pas se lire comme un bien simplement vide.
-  assert.match(PAGE, /table\.cal td\.jour-ferme, table\.cal th\.jour-ferme/)
-  assert.match(PAGE, /repeating-linear-gradient/)
-  const bloc = PAGE.slice(PAGE.indexOf('function renderBienBlock'), PAGE.indexOf('let isDragging'))
-  assert.strictEqual((bloc.match(/jour-ferme/g) || []).length, 3,
-    'en-tete, ligne reservations et lignes de parametres')
+test('stop-sell : une nuit fermee se voit quelle que soit la VUE affichee', () => {
+  // V5 : la couleur d'etat est posee sur la cellule INDEPENDAMMENT de la vue.
+  assert.match(PAGE, /cal-nuit--\$\{e\}/)
+  const css = lire('shared', 'ui.css')
+  assert.match(css, /\.cal-nuit--fermee \{ background: repeating-linear-gradient/)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -545,76 +474,49 @@ test('perimetre : le filtre nul est bien le cas du proprietaire (non regresse)',
 })
 
 test('refus : la PHRASE va dans `error`, le code dans `code`', () => {
-  // `shared/api-client.js` construit son exception avec `data.error` seul.
-  // Un code technique dans `error` affichait « reservation_moteur » a l'hote.
+  // Garde SERVEUR (inchangee par le retargage) : les refus metier portent
+  // une phrase dans error, leur identifiant dans code, via le helper.
   assert.match(API, /function reponseRefus/)
   assert.match(API, /error: resultat\.message \|\| 'La demande a ete refusee\.'/)
-  // Les trois refus metier portent une phrase, pas un identifiant.
   for (const code of ['reservation_ota', 'reservation_non_modifiable', 'reservation_moteur']) {
     assert.ok(!new RegExp(`error: '${code}'`).test(API), `${code} ne doit plus etre dans error`)
     assert.ok(API.includes(`code: '${code}'`), `${code} doit etre dans code`)
   }
-  // Et les deux 409 passent par le helper, plus par `resultat` brut.
   assert.ok(!/\.json\(resultat\)/.test(API), 'plus de resultat brut rendu au front')
   assert.strictEqual((API.match(/\.json\(reponseRefus\(resultat\)\)/g) || []).length, 2,
     'creation ET modification')
-  // Cote fiche, un 409 se lit dans les mots du metier.
-  const envoi = PAGE.slice(PAGE.indexOf('async function enregistrerResaCourante'), PAGE.indexOf('function showToast'))
-  assert.ok(envoi.includes('e.status===409'), 'le refus metier est distingue de la panne')
+  // Cote V5 : le front construit son message depuis corps.message/error et
+  // route par corps.code.
+  assert.match(PAGE, /new Error\(corps\.message \|\| corps\.error/)
+  assert.match(PAGE, /e\.code = corps\.code \|\| corps\.error/)
 })
 
-test('total : « inchangé » n\'est affiche que si la DUREE n\'a pas bouge', () => {
-  // ⚠ Le serveur ne conserve le montant exact que si `memeDuree`. Afficher
-  // « 300 € (inchangé, 5 nuits) » a un hote qui allonge un sejour de 3 nuits
-  // mentait : 500 € partaient chez Channex et seraient factures au voyageur.
-  const bloc = PAGE.slice(PAGE.indexOf('function rafraichirFiche'), PAGE.indexOf('async function enregistrerResaCourante'))
-  assert.ok(bloc.includes('nOrig'), 'la duree d\'origine est calculee')
-  assert.ok(bloc.includes('n===nOrig'), 'et comparee a la nouvelle')
-  assert.ok(bloc.includes('au tarif actuel de'), 'sinon le total recalcule est annonce')
+test('total : « inchange » n\'est affiche que si rien n\'a bouge', () => {
+  assert.match(PAGE, /charge\.arrival === r\.startISO && charge\.departure === String\(r\.checkout\)\.slice\(0, 10\)/)
 })
 
 test('stop-sell : rouvrir releve AUSSI la disponibilite', () => {
-  // ⚠ « Disponibilité → Fermé » ecrit `avail = 0` ET `stop_sell = true`. Ne
-  // renvoyer que `stop_sell: false` laissait `avail = 0` : la relecture ramenait
-  // la cellule en rouge apres un toast « Rouvert à la vente ». Le jour restait
-  // invendable alors qu'on avait dit le contraire.
-  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
-  assert.ok(bloc.includes('if(!fermer) seg.avail = 1'), 'la reouverture releve le stock')
-  assert.ok(!/seg\.avail = 0/.test(bloc),
-    'la fermeture, elle, ne touche pas au stock : stop_sell est l\'intention memorisee')
+  assert.match(PAGE, /stop_sell: false, avail: 1/)
 })
 
-test('stop-sell : « fermé » a UNE seule definition dans toute la page', () => {
-  // Les hachures ne regardaient que `stopSell` pendant que la cellule rouge du
-  // tarif regardait les deux : un jour ferme par « Disponibilité » sortait rouge
-  // mais sans hachures, et le bouton proposait « Fermer » sur un jour deja ferme.
-  assert.match(PAGE, /const jourFerme = \(s\) =>/, 'une definition unique')
-  assert.strictEqual((PAGE.match(/jourFerme\(/g) || []).length, 3,
-    'ses trois usages : hachures, cellule tarif, libelle du bouton')
-  assert.ok(!/s\.avail==='closed'\|\|s\.stopSell==='closed'/.test(PAGE), 'plus de predicat recopie')
+test('stop-sell : « ferme » a UNE seule definition dans toute la page', () => {
+  assert.match(PAGE, /function nuitFermee \(s\)/)
+  assert.strictEqual((PAGE.match(/avail === 'closed' \|\| s\.stopSell === 'closed'/g) || []).length, 1)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 6. LES WEEK-ENDS
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('week-ends : fond de colonne franc ET en-tete distinct', () => {
-  // Depuis le 21 septembre 2026, l'en-tete des jours vit dans la bande
-  // (`tr.jours`), plus dans le thead de chaque bien : l'ancre suit.
-  // L'ancien rgba(0,0,0,0.022) etait invisible au-dela de quelques colonnes.
-  assert.ok(!/\.weekend \{ background: rgba\(0,0,0,0\.022\)/.test(PAGE), 'l\'ancien fond a disparu')
-  assert.match(PAGE, /table\.cal \.weekend \{ background: #eef1f6/)
-  assert.match(PAGE, /tr\.jours td\.weekend \.day-name \{[^}]*font-weight: 700/)
-  assert.match(PAGE, /tr\.jours td\.weekend \.day-num\s+\{[^}]*font-weight: 700/)
+test('week-ends : fond de colonne ET en-tete distinct', () => {
+  const css = lire('shared', 'ui.css')
+  assert.match(css, /\.cal-we \{ background-color: color-mix/)
+  assert.match(css, /\.cal-mois__jour\.cal-we \{[^}]*font-weight: var\(--fw-bold\)/)
 })
 
-test('week-ends : le marquage est pose par UN seul helper, pour les trois lignes', () => {
-  // Les trois rendus recopiaient le calcul : un marquage ajoute a l'un manquait
-  // aux deux autres et la colonne se lisait de travers.
-  assert.match(PAGE, /function classesJour/)
-  assert.ok(!/const we=d\.getDay\(\)===0\|\|d\.getDay\(\)===6/.test(PAGE), 'plus de calcul recopie')
-  const bloc = PAGE.slice(PAGE.indexOf('function renderBienBlock'), PAGE.indexOf('let isDragging'))
-  assert.strictEqual((bloc.match(/classesJour\(/g) || []).length, 3)
+test('week-ends : le marquage est pose par UN seul helper, partout', () => {
+  assert.match(PAGE, /function classesWE \(jourSemaine\)/)
+  assert.ok((PAGE.match(/classesWE\(/g) || []).length >= 4, 'bande, fond des resas, cellules, cases mobiles')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -646,69 +548,41 @@ test('DESKTOP SEUL : CELL_W n\'est consomme que par le desktop', () => {
 // « indisponible »), affichee comme une barre FONCEE, modifiee a la main par
 // l'hote seul, jamais scindee par le calendrier.
 
-test('fermetures : le parcours « nouvelle reservation » porte un type « indisponible » avec dates et raison', () => {
-  assert.match(PAGE, /<input type="radio" name="ajout-type" value="reservation" id="ajout-type-resa">/)
-  assert.match(PAGE, /<input type="radio" name="ajout-type" value="indisponible" id="ajout-type-indispo">/)
-  assert.match(PAGE, /<input id="ajout-raison" type="text" maxlength="200"/)
-  const valider = PAGE.slice(PAGE.indexOf('async function validerIndisponibilite'), PAGE.indexOf('async function validerAjout'))
-  assert.ok(valider.includes('api.calendar.fermer(bien.id, b.arrival, derniereNuit, raison)'), 'un seul chemin serveur : l action fermer')
-  assert.ok(valider.includes('toISO(days[tries[tries.length-1]])'), 'la derniere NUIT, pas le jour de depart')
-  assert.ok(!valider.includes('api.calendar.save('), 'jamais un stop_sell nu')
-  assert.match(PAGE, /if\(typeAjout\(\)==='indisponible'\) return validerIndisponibilite\(b, bien\)/)
+test('fermetures : le formulaire porte un type « Bloquer » avec dates et raison', () => {
+  assert.match(PAGE, /cal\.type_block/)
+  assert.match(PAGE, /data-aj="raison"/)
+  assert.match(PAGE, /cal\.block_reason_required/)
 })
 
 test('fermetures : le parcours s ouvre sur TOUT bien ; la reservation directe reste Channex-only et le dit', () => {
-  assert.match(PAGE, /const okAjout = !!\(bien && peutEcrire\('reservations'\) && !LECTURE_SEULE\)/)
-  const ouvrir = PAGE.slice(PAGE.indexOf('function ouvrirFormulaireAjout(mode)'), PAGE.indexOf('function fermerFormulaireAjout'))
-  assert.ok(ouvrir.includes('rResa.disabled = !channex'))
-  assert.ok(ouvrir.includes("(typeof mode==='string') ? mode : (channex ? 'reservation' : 'indisponible')"))
+  assert.match(PAGE, /\$\{channex \? '' : 'disabled'\}/)
+  assert.match(PAGE, /cal\.booking_channex_only/)
+  assert.match(PAGE, /typeCourant = channex \? type : 'bloquer'/)
 })
 
-test('fermetures : une INDISPONIBILITE est une barre FONCEE, avec sa raison, de la premiere a la derniere nuit', () => {
-  assert.match(PAGE, /\.resa-bar\.fermeture \{ background: #3a3a3c/, 'anthracite, hors de la palette des canaux')
-  const barres = PAGE.slice(PAGE.indexOf('function barresResa'), PAGE.indexOf('const jourFerme'))
-  assert.ok(barres.includes("'<div class=\"resa-bar fermeture cliquable'"), 'une barre, cliquable')
-  assert.ok(barres.includes('escapeHtmlLocal(f.raison)'), 'la raison, echappee')
-  assert.ok(barres.includes('px(iFin+1-iDebut)'), 'bornes incluses : pas de demi-cellule d arrivee')
-  // ⚠ `px` vit en tete de barresResa, AVANT les deux boucles (review : declare
-  // dans la boucle des reservations, il etait hors de portee des fermetures et
-  // un ReferenceError faisait tomber tout le rendu).
-  const iPx = barres.indexOf('const px=(n)=>(n*CELL_W)'), iFerm = barres.indexOf("(fermByBien[bien.id]||[]).forEach"), iResa = barres.indexOf('(bien.resa||[]).forEach')
-  assert.ok(iPx > 0 && iPx < iFerm && iPx < iResa, 'px declare avant les deux boucles')
-  assert.equal(barres.split('const px=').length, 2, 'une seule declaration de px')
-  assert.ok(iFerm < iResa, 'les fermetures se dessinent AVANT les reservations : la demi-cellule de depart d un sejour reste lisible')
-  assert.ok(PAGE.includes('if(bar.dataset.fermeture) ouvrirFicheFermeture(bar.dataset.bien, bar.dataset.fermeture)'), 'le clic ouvre SA fiche')
-  assert.ok(!PAGE.includes('fermetures-liste'), 'plus de liste sous la grille')
+test('fermetures : un blocage est une barre DISTINCTE, avec sa raison, de la premiere a la derniere nuit', () => {
+  assert.match(PAGE, /cal-barre--blocage/)
+  assert.match(PAGE, /esc\(f\.raison \|\| t\('cal\.blocked'\)\)/)
+  assert.match(PAGE, /i1 < 0 \? etat\.joursISO\.length : i1 \+ 1/, 'date_fin INCLUSE')
 })
 
-test('LE TEST QUI COMPTE : la fiche modifie dates et raison par l action dediee, et supprime — a la main, par l hote seul', () => {
-  const fiche = PAGE.slice(PAGE.indexOf('function ouvrirFicheFermeture'), PAGE.indexOf('async function basculerStopSell'))
-  assert.ok(fiche.includes("const modifiable = peutEcrire('reservations') && !LECTURE_SEULE"))
-  assert.ok(fiche.includes("champ('ferm-debut','Première nuit','date',f.date_debut)") && fiche.includes("champ('ferm-raison','Raison','text',f.raison"))
-  assert.ok(fiche.includes('api.calendar.modifierFermeture(bien.id, f.id, debut, fin, raison)'))
-  assert.ok(fiche.includes('api.calendar.rouvrirFermeture(bien.id, f.id)') && fiche.includes('window.confirm('), 'supprimer previent que toute la periode rouvre')
-  assert.ok(!PAGE.includes('window.prompt('), 'plus de prompt')
-  assert.match(PAGE, /function fermerFiche\(\)\{[^\n]*resaCourante=null; fermetureCourante=null/, 'fermer la fiche oublie les deux objets')
-  // Le libelle du bouton suit le type, APRES la reinitialisation du formulaire.
-  const ouvrir = PAGE.slice(PAGE.indexOf('function ouvrirFormulaireAjout(mode)'), PAGE.indexOf('function fermerFormulaireAjout'))
-  assert.ok(!/btnV\.textContent = 'Créer la réservation'/.test(ouvrir), 'plus d ecrasement du libelle')
-  assert.ok(ouvrir.lastIndexOf('appliquerTypeAjout()') > ouvrir.indexOf('btnV.disabled = false'))
+test('LE TEST QUI COMPTE : la fiche de blocage modifie dates et raison, et supprime — par l hote seul', () => {
+  assert.match(PAGE, /data-b="debut"/)
+  assert.match(PAGE, /data-b="raison"/)
+  assert.match(PAGE, /data-b-suppr/)
+  assert.match(PAGE, /api\.calendar\.rouvrirFermeture\(bienId,/)
 })
 
-test('LE TEST QUI COMPTE : rouvrir une nuit couverte est REFUSE par l ecran, qui renvoie vers la fiche — plus de scission', () => {
-  const bloc = PAGE.slice(PAGE.indexOf('async function basculerStopSell'))
-  assert.ok(bloc.includes("if(fermer && estPiloteYield(bienId)){ ouvrirFormulaireAjout('indisponible'); return }"), 'fermer un bien pilote = le parcours, pre-rempli')
-  assert.ok(bloc.includes('const f=fermetureCouvrant(bienId, toISO(days[i])); if(f){'), 'chaque nuit selectionnee est verifiee')
-  assert.ok(bloc.includes('ouvrirFicheFermeture(bienId, f.id); return'), 'renvoi vers la fiche, sans ecrire')
-  assert.ok(!/scind/i.test(PAGE), 'le mot meme a disparu de la page')
-  // Sur un bien calendrier, fermer reste un stop_sell nu (inchange).
-  const apres = bloc.slice(bloc.indexOf("ouvrirFormulaireAjout('indisponible'); return }"))
-  assert.ok(apres.includes('api.calendar.save') && /stop_sell: fermer/.test(apres))
+test('LE TEST QUI COMPTE : rouvrir une nuit couverte est REFUSE par l ecran, qui renvoie vers la fiche', () => {
+  assert.match(PAGE, /cal\.blocked_reopen/)
+  assert.match(PAGE, /ouvrirFicheBlocage\(bienId, String\(f\.id\)\)/)
 })
 
-test('fermetures : l ecran les affiche mais ne les lit JAMAIS pour dire si une nuit est vendable', () => {
-  assert.ok(PAGE.includes('fermByBien[id]=(fermetures&&fermetures[id])||[]'), 'rangees a la relecture, par bien')
-  const jf = PAGE.slice(PAGE.indexOf('function jourFerme'), PAGE.indexOf('function jourFerme') + 400)
-  assert.ok(!jf.includes('fermByBien'), 'jourFerme ne lit pas les fermetures')
-  assert.ok(PAGE.includes("title=\"Fermé : '+echapper(rs)"), 'la raison est un TITRE sur le jour, pas une decision')
+test('fermetures : l ecran les affiche mais la VENDABILITE vient de calendar_inventory', () => {
+  // nuitFermee lit inv (avail/stopSell) ; fermeeParBlocage ne sert qu'a
+  // distinguer « fermee par l hote » de « pas encore ouverte ».
+  assert.match(PAGE, /function nuitFermee \(s\)/)
+  // `fermee` derive de nuitFermee(s) — l'etat d'inventaire — jamais des
+  // fermetures (comportement, pas commentaire).
+  assert.match(PAGE, /const fermee = nuitFermee\(s\)/)
 })

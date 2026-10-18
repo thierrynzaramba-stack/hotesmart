@@ -122,11 +122,19 @@ async function appliquerArchivage(userId, conversations, depuis) {
   const flags = []
   let error = null
   for (let i = 0; i < ids.length && !error; i += 100) {
-    const r = await supabase
+    let r = await supabase
       .from('conversation_flags')
-      .select('book_id, pinned, archived_manual, archive_after, unarchived_manual_at')
+      .select('book_id, pinned, archived_manual, archive_after, unarchived_manual_at, read_at')
       .eq('user_id', userId)
       .in('book_id', ids.slice(i, i + 100))
+    // Repli : migration read_at pas encore appliquee sur cette base.
+    if (r.error && /read_at/.test(r.error.message || '')) {
+      r = await supabase
+        .from('conversation_flags')
+        .select('book_id, pinned, archived_manual, archive_after, unarchived_manual_at')
+        .eq('user_id', userId)
+        .in('book_id', ids.slice(i, i + 100))
+    }
     if (r.error) error = r.error
     else flags.push(...(r.data || []))
   }
@@ -167,8 +175,150 @@ async function appliquerArchivage(userId, conversations, depuis) {
     })
     c.archivee = e.archivee
     c.raisonArchivage = e.raison
+    // L'etat lu (etape 2) : expose tel quel, null = jamais ouvert.
+    c.readAt = f.read_at || null
+    // L'epingle (etape 4, portee de l'ancienne page) : la liste la montre et
+    // la remonte ; une epinglee n'est jamais archivee (etatArchivage le sait).
+    c.epinglee = f.pinned === true
   }
   return true
+}
+
+// ─── L'etat LU (lot 2 etape 2) ───────────────────────────────────────────────
+// SEUL WRITER de conversation_flags.read_at : l'ouverture d'un fil par l'hote.
+// Memes verifications de perimetre que l'archivage ; la ligne est creee avec
+// pinned=false explicite (la colonne nait true par defaut, voir archiverFil).
+async function marquerLu(req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const bookingId = String(req.body.booking_id || '').trim()
+  if (!bookingId || bookingId.length > 200) return res.status(400).json({ error: 'Conversation invalide' })
+  const [m, sn] = await Promise.all([
+    supabase.from('messages').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+    supabase.from('bookings_snapshot').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+  ])
+  if (m.error || sn.error) return res.status(503).json({ error: 'Lecture impossible' })
+  const bien = (m.data && m.data[0] && m.data[0].property_id) || (sn.data && sn.data[0] && sn.data[0].property_id) || null
+  if (bien == null) return res.status(404).json({ error: 'Conversation introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(bien))) {
+    return res.status(404).json({ error: 'Conversation introuvable' })
+  }
+  const maintenant = new Date().toISOString()
+  const { data: flag, error: eF } = await supabase.from('conversation_flags')
+    .select('id').eq('user_id', userId).eq('book_id', bookingId).maybeSingle()
+  if (eF) return res.status(503).json({ error: 'Lecture impossible' })
+  // `property_id_ref` comme l'archivage : la colonne du perimetre par bien ne
+  // doit pas rester nulle sur une ligne nee d'une lecture (releve en review).
+  const ecriture = flag
+    ? supabase.from('conversation_flags').update({ read_at: maintenant, property_id_ref: String(bien) }).eq('id', flag.id)
+    : supabase.from('conversation_flags').insert({ user_id: userId, book_id: bookingId, read_at: maintenant, pinned: false, property_id_ref: String(bien) })
+  const { error: eW } = await ecriture
+  if (eW) {
+    // Migration read_at pas encore appliquee : on le dit, sans casser l'ecran.
+    console.error('[messages] read_at non ecrit :', eW.message)
+    return res.status(503).json({ error: 'Marquage impossible' })
+  }
+  return res.status(200).json({ ok: true, read_at: maintenant })
+}
+
+// ─── Clore une proposition (lot 2 etape 3) ───────────────────────────────────
+// La VALIDATION reste la sequence de l'ancienne page (messagerie.html) : le
+// client envoie d'abord par posterMessage (routage par SOURCE), PUIS cette
+// action pose le statut et le journal `conversations` — ici et pas sous RLS,
+// parce qu'un profil delegue n'ecrit pas ces tables en direct.
+// Statuts : 'done' (envoyee) / 'ignored' (rejetee) — CEUX DE L'ANCIENNE PAGE ;
+// le 'rejected' de la spec n'existe pas en base, on n'ouvre pas une seconde
+// famille (decision du 11 octobre, signalee a Thierry).
+async function cloreProposition(req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const taskId = String(req.body.task_id || '').trim()
+  const statut = req.body.statut === 'done' ? 'done'
+    : req.body.statut === 'ignored' ? 'ignored' : null
+  const texte = typeof req.body.texte === 'string' ? req.body.texte.trim() : ''
+  if (!taskId || taskId.length > 64 || !statut) return res.status(400).json({ error: 'Demande invalide' })
+  // 'done' signifie « cette reponse est partie » : sans texte, pas de journal.
+  if (statut === 'done' && !texte) return res.status(400).json({ error: 'Texte requis' })
+  // Borne comme les autres champs du fichier : le journal n'accueille pas un
+  // payload arbitraire qu'aucun envoi de cette taille ne peut prouver.
+  if (texte.length > 10000) return res.status(400).json({ error: 'Texte trop long' })
+  const { data: tache, error: eT } = await supabase.from('agent_tasks')
+    .select('id, status, property_id, book_id, guest_name, guest_message')
+    .eq('user_id', userId).eq('id', taskId).maybeSingle()
+  if (eT) return res.status(503).json({ error: 'Lecture impossible' })
+  if (!tache) return res.status(404).json({ error: 'Proposition introuvable' })
+  // Perimetre par bien, 404 pas 403 — meme regle qu'archiverFil.
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(tache.property_id))) {
+    return res.status(404).json({ error: 'Proposition introuvable' })
+  }
+  if (tache.status !== 'pending_validation') {
+    // Deja close ailleurs (ancienne page, autre onglet) : on le dit, on ne
+    // re-ecrit pas — l'ecran retire la bulle dans les deux cas.
+    return res.status(409).json({ error: 'deja_close', statut: tache.status })
+  }
+  // La condition de statut dans l'UPDATE ferme la course entre deux clics.
+  const { data: maj, error: eU } = await supabase.from('agent_tasks')
+    .update({ status: statut })
+    .eq('id', tache.id).eq('user_id', userId).eq('status', 'pending_validation')
+    .select('id')
+  if (eU) return res.status(503).json({ error: 'Enregistrement impossible' })
+  if (!maj || !maj.length) return res.status(409).json({ error: 'deja_close' })
+  if (statut === 'done') {
+    // Le journal de l'ancienne page, memes colonnes. Son echec ne defait pas
+    // la cloture (l'ancienne page ne le verifie pas non plus) : il se logge.
+    const { error: eJ } = await supabase.from('conversations').insert({
+      user_id: userId, property_id: tache.property_id, guest_name: tache.guest_name,
+      guest_message: tache.guest_message, agent_reply: texte, book_id: String(tache.book_id)
+    })
+    if (eJ) console.error('[messages] journal conversations non ecrit', eJ.message)
+  }
+  return res.status(200).json({ ok: true, task_id: tache.id, statut })
+}
+
+// ─── L'epingle (lot 2 etape 4) ───────────────────────────────────────────────
+// Portee de l'ancienne messagerie, qui l'ecrivait en direct sous RLS — ici en
+// action gardee, pour qu'un profil delegue `messages = write` epingle aussi.
+// ⚠ UNE MISE A JOUR, PAS UNE SUPPRESSION (lecon du lot 7 avis) : la ligne
+// porte aussi l'archivage et read_at. Creation avec pinned explicite.
+async function epinglerFil(req, res) {
+  const garde = await requirePermission(req, res, {
+    domaine: 'messages', niveau: 'write', compteDelegue: true })
+  if (!garde.ok) return
+  const userId = garde.accountUserId
+  const epingler = req.body.action === 'epingler'
+  const bookingId = String(req.body.booking_id || '').trim()
+  if (!bookingId || bookingId.length > 200 || bookingId === '__SIM_ENABLED__') {
+    return res.status(400).json({ error: 'Conversation invalide' })
+  }
+  // Perimetre par bien, 404 jamais 403 — memes verifications qu'archiverFil.
+  const [m, sn] = await Promise.all([
+    supabase.from('messages').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+    supabase.from('bookings_snapshot').select('property_id').eq('user_id', userId).eq('booking_id', bookingId).limit(1),
+  ])
+  if (m.error || sn.error) return res.status(503).json({ error: 'Lecture impossible' })
+  const bien = (m.data && m.data[0] && m.data[0].property_id) || (sn.data && sn.data[0] && sn.data[0].property_id) || null
+  if (bien == null) return res.status(404).json({ error: 'Conversation introuvable' })
+  const refs = refsDuPerimetre(garde.contexte)
+  if (refs !== null && !refs.map(String).includes(String(bien))) {
+    return res.status(404).json({ error: 'Conversation introuvable' })
+  }
+  // L'upsert d'archiverFil, a l'identique : pas de select-puis-insert (deux
+  // onglets simultanes violaient la contrainte unique — releve en review) ;
+  // les colonnes absentes (archivage, read_at) ne sont pas touchees.
+  const { error: eW } = await supabase.from('conversation_flags').upsert(
+    { user_id: userId, book_id: bookingId, pinned: epingler, property_id_ref: String(bien) },
+    { onConflict: 'user_id,book_id' })
+  if (eW) {
+    console.error('[messages] epingle non ecrite :', eW.message)
+    return res.status(503).json({ error: 'Épingle non enregistrée' })
+  }
+  return res.status(200).json({ ok: true, booking_id: bookingId, epinglee: epingler })
 }
 
 async function archiverFil(req, res) {
@@ -229,6 +379,18 @@ module.exports = async function handler(req, res) {
   if (req.method === 'POST' && req.body && (req.body.action === 'archiver' || req.body.action === 'desarchiver')) {
     return await archiverFil(req, res)
   }
+  // Etape 2 de la messagerie V5 : l'ouverture d'un fil pose read_at.
+  if (req.method === 'POST' && req.body && req.body.action === 'lu') {
+    return await marquerLu(req, res)
+  }
+  // Etape 3 : Envoyer / Rejeter une proposition clot la tache (et le journal).
+  if (req.method === 'POST' && req.body && req.body.action === 'proposition') {
+    return await cloreProposition(req, res)
+  }
+  // Etape 4 : l'epingle, portee de l'ancienne page.
+  if (req.method === 'POST' && req.body && (req.body.action === 'epingler' || req.body.action === 'desepingler')) {
+    return await epinglerFil(req, res)
+  }
 
   // ── Droits ──
   // Endpoint de COLLECTION : aucun identifiant client ne designe le compte, c'est
@@ -253,6 +415,32 @@ module.exports = async function handler(req, res) {
   // Le cas property_id NULL est EXCLU (defaut) : une conversation voyageur sans
   // bien rattache ne doit pas apparaitre a un membre limite a un autre bien.
   const filtreOr = filtrePerimetreSql(refsAutorisees)
+  // ─── La tuile « messages ecrits par l'IA » (dette 66) ──────────────────────
+  // COMPTE SEUL, depuis la COLONNE origine seulement : les envois d'avant la
+  // migration (origine null) ne comptent pas — aucun historique reconstitue
+  // (decision de Thierry du 12 octobre 2026). Migration absente : la tuile
+  // se dit indisponible, elle n'invente pas un zero.
+  if (req.method === 'GET' && req.query && req.query.stats === 'ia') {
+    const brut = typeof req.query.depuis === 'string' ? req.query.depuis : ''
+    const depuis = Number.isFinite(new Date(brut).getTime())
+      ? brut : new Date(Date.now() - 7 * 86400000).toISOString()
+    // Un perimetre vide compte ZERO — jamais la forme {conversations} d'une
+    // autre reponse (revue de 658d758).
+    if (filtreOr === '') return res.status(200).json({ messages_ia: 0, depuis })
+    let q = supabase.from('messages').select('id', { count: 'exact', head: true })
+      .eq('user_id', userId).eq('direction', 'outbound')
+      .in('origine', ['ia_validee', 'ia_modifiee', 'ia_auto'])
+      .gte('sent_at', depuis)
+    if (filtreOr) q = q.or(filtreOr)
+    const { count, error } = await q
+    if (error) {
+      if (/origine/.test(error.message || '')) return res.status(200).json({ indisponible: true })
+      console.error('[messages] stats ia', error.message)
+      return res.status(500).json({ error: 'Lecture impossible' })
+    }
+    return res.status(200).json({ messages_ia: count || 0, depuis })
+  }
+
   if (filtreOr === '') return res.status(200).json({ conversations: [] })
 
   // ─── Existence d'un fil pour UNE reservation ───────────────────────────────
@@ -303,16 +491,24 @@ module.exports = async function handler(req, res) {
 
     // ── 2 SELECT (zero N+1) : messages recents + snapshots du user ──
     const [msgRes, snapRes] = await Promise.all([
-      (() => {
-        let q = supabase
-          .from('messages')
-          .select('booking_id, property_id, provider, ota, sender, direction, body, sent_at, kind')
-          .eq('user_id', userId)
-          .gte('sent_at', since)
-        if (filtreOr) q = q.or(filtreOr)
-        return q
-          .order('sent_at', { ascending: false })   // 2000 plus RECENTS (re-tri asc en memoire)
-          .limit(2000)
+      (async () => {
+        const lire = (colonnes) => {
+          let q = supabase
+            .from('messages')
+            .select(colonnes)
+            .eq('user_id', userId)
+            .gte('sent_at', since)
+          if (filtreOr) q = q.or(filtreOr)
+          return q
+            .order('sent_at', { ascending: false })   // 2000 plus RECENTS (re-tri asc en memoire)
+            .limit(2000)
+        }
+        // `origine` (dette 66) avec repli : migration pas encore posee.
+        let r = await lire('booking_id, property_id, provider, ota, sender, direction, body, sent_at, kind, origine')
+        if (r.error && /origine/.test(r.error.message || '')) {
+          r = await lire('booking_id, property_id, provider, ota, sender, direction, body, sent_at, kind')
+        }
+        return r
       })(),
       (() => {
         let q = supabase
@@ -370,7 +566,8 @@ module.exports = async function handler(req, res) {
         direction: m.direction,
         body:      m.body,
         sent_at:   m.sent_at,
-        kind:      m.kind
+        kind:      m.kind,
+        origine:   m.origine || null
       })
     }
 
@@ -420,6 +617,53 @@ module.exports = async function handler(req, res) {
     // Un echec ici ne prive personne de sa messagerie : les marques manquent, c'est tout.
     try { await etatsDArrivee(userId, conversations, snapByBooking) }
     catch (e) { console.error('[messages] etats d\'arrivee echec', e.message) }
+
+    // ─── Pagination (lot 2 etape 2) ─────────────────────────────────────────
+    // `limit` tronque la reponse APRES le tri par dernier message ; `before`
+    // (un lastTime) demande la page suivante. Sans `limit`, la reponse reste
+    // complete : l'ancienne messagerie et les autres lecteurs ne changent pas.
+    // Les ARRIVEES du jour et de demain sont toujours servies dans la premiere
+    // page (sans `before`) : l'ecran les met en tete, elles ne peuvent pas
+    // attendre la page 2.
+    const limite = Number.parseInt(req.query.limit, 10)
+    if (Number.isInteger(limite) && limite > 0) {
+      // ⚠ CURSEUR COMPOSITE (lastTime, bookId) — releve en review : deux fils
+      // dont les derniers messages partagent la meme seconde (ecrits par le
+      // meme passage de cron) rendaient le second INATTEIGNABLE avec un simple
+      // `< before` ; et un lastTime nul a la frontiere rendait next_before
+      // null avec has_more true, que le client lisait comme la fin.
+      const before = typeof req.query.before === 'string' && req.query.before ? req.query.before : null
+      const beforeId = typeof req.query.before_id === 'string' ? req.query.before_id : ''
+      const cleTri = c => [c.lastTime || '', String(c.bookId)]
+      const apresCurseur = c => {
+        const [t, id] = cleTri(c)
+        return t < before || (t === before && id < beforeId)
+      }
+      const aujourdHui = jourParis(0), demain = jourParis(1)
+      const arrivee = c => {
+        const arr = String(c.firstNight || '').slice(0, 10)
+        const st = String(c.status || '').toLowerCase()
+        return (arr === aujourdHui || arr === demain) && !STATUTS_SANS_ARRIVEE.has(st)
+      }
+      // Tri STABLE sur la cle du curseur (la liste arrive triee par lastTime,
+      // on departage les ex aequo par bookId pour que le curseur soit sur).
+      conversations.sort((a, b) => {
+        const [ta, ia] = cleTri(a); const [tb, ib] = cleTri(b)
+        return tb.localeCompare(ta) || ib.localeCompare(ia)
+      })
+      const fenetre = before ? conversations.filter(apresCurseur) : conversations
+      const page = fenetre.slice(0, limite)
+      if (!before) {
+        for (const c of conversations) if (arrivee(c) && !page.includes(c)) page.push(c)
+      }
+      const hasMore = fenetre.length > limite
+      const bord = hasMore ? fenetre[limite - 1] : null
+      return res.status(200).json({
+        conversations: page, archivage, has_more: hasMore,
+        next_before: bord ? (bord.lastTime || '') : null,
+        next_before_id: bord ? String(bord.bookId) : null
+      })
+    }
 
     return res.status(200).json({ conversations, archivage })
 

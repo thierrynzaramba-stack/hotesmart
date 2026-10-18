@@ -20,7 +20,7 @@ const path = require('node:path')
 // ⚠ pages/avis.html a la MEME structure : un <script type="module"> qui importe,
 // et un <script> classique qui fait tout le travail. C'est exactement la
 // configuration qui a tue la messagerie.
-const PAGES = ['apps/agent-ai/messagerie.html', 'pages/avis.html']
+const PAGES = ['pages/avis.html']   // la messagerie V5 est un module ES, l'ancienne une redirection (etape 4)
 
 // Helpers venus de shared/compte-courant.js, systematiquement en cause.
 const HELPERS = ['compteCourant', 'peutEcrire', 'peutLire', 'enteteCompte', 'estTitulaire']
@@ -68,10 +68,19 @@ test('les pages qui appellent l\'API en fetch brut posent X-Compte', () => {
   // ⚠ `shared/api-client.js` pose l'en-tete tout seul ; un `fetch` direct, non.
   // Sans lui, le serveur travaille sur le compte de l'appelant pendant que le
   // reste de la page lit le compte courant : l'ecran melange deux comptes.
-  const cibles = [
-    ['apps/menages/index.html', '/api/menages'],
-    ['apps/agent-ai/messagerie.html', '/api/messages']
-  ]
+  // ⚠ LA LISTE S'EST VIDÉE À L'ÉTAPE 4 (14 octobre 2026) : `apps/menages/index.html`
+  // était le dernier écran à appeler l'API en `fetch` brut, et il est devenu une
+  // redirection. Les pages V5 passent toutes par `shared/api-client.js`, qui pose
+  // l'en-tête tout seul. Le test garde sa raison d'être pour le prochain écran
+  // qui y reviendrait — et la garde ci-dessous vérifie qu'on ne l'a pas vidé
+  // sans s'en apercevoir.
+  const cibles = []
+  if (!cibles.length) {
+    const brut = fs.readFileSync(path.join(__dirname, '..', 'apps/menages/index.html'), 'utf8')
+    assert.match(brut, /location\.replace\('\/menages'\)/,
+      'la liste est vide parce que l\'écran a été redirigé, pas parce qu\'on l\'a perdu')
+    return
+  }
   for (const [page, endpoint] of cibles) {
     const html = fs.readFileSync(path.join(__dirname, '..', page), 'utf8')
     const i = html.indexOf(`fetch(\`${endpoint}`) >= 0

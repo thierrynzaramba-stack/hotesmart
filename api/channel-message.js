@@ -27,6 +27,10 @@ module.exports = async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Methode non autorisee' })
 
   const { bookingId, message, propertyId } = req.body || {}
+  // Dette 66 : l'origine vient du GESTE a l'ecran — liste fermee, defaut
+  // hote. `ia_auto` est reserve au cron : une page ne peut pas le poser.
+  const ORIGINES_PAGE = new Set(['ia_validee', 'ia_modifiee', 'hote'])
+  const origine = ORIGINES_PAGE.has(req.body && req.body.origine) ? req.body.origine : 'hote'
   if (!message) return res.status(400).json({ error: 'message requis' })
 
   // La reservation designe le compte ET le bien : un bookingId d'un autre compte
@@ -92,7 +96,8 @@ module.exports = async function handler(req, res) {
         ota:           null,
         sentAt:        null,
         kind:          'message',
-        canal:         'email'
+        canal:         'email',
+        origine
       })
       return res.status(200).json({ success: true, canal: 'email' })
     }
@@ -124,7 +129,8 @@ module.exports = async function handler(req, res) {
       providerMsgId: null,
       ota:           null,
       sentAt:        null,
-      kind:          'message'
+      kind:          'message',
+      origine
     })
 
     return res.status(200).json({ success: true })

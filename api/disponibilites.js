@@ -24,10 +24,12 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
-const { lireRrule, cleJour } = require('../lib/cleaning/availability')
+const { lireRrule, cleJour, estDisponible, congeCouvrant } = require('../lib/cleaning/availability')
+const { apresChangementDeRegles } = require('../lib/cleaning/apres-changement-regles')
 // ⚠ LA REGLE RECURRENTE EST VALIDEE EN UN SEUL ENDROIT, partage avec la PWA
 // (`api/menages-public.js`) depuis le 15 septembre 2026.
-const { validerRegle, libelle } = require('../lib/cleaning/regles')
+const { validerRegle, libelle, remplacerRegles,
+        MAX_REGLES_ACTIVES } = require('../lib/cleaning/regles')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -101,7 +103,17 @@ module.exports = async function handler (req, res) {
   if (qui.erreur === 400) return res.status(400).json({ error: 'Prestataire inconnu' })
   if (qui.erreur) return res.status(503).json({ error: 'Service temporairement indisponible' })
 
-  if (lecture) return await lire(res, userId, providerId)
+  if (lecture) {
+    // ⚠ LE MOIS EST VALIDE ICI, et il est le SEUL parametre de fenetre : un
+    // `mois=` libre ferait calculer des annees de calendrier pour rien.
+    // ⚠ LE MOIS EST BORNE A 01-12 (constat de la revue de ac28b1f) : `2026-13`
+    // passait le motif, produisait une date invalide, et la boucle du
+    // calendrier ne tournait pas — 200 avec `jours: []`, que l'ecran lisait
+    // comme « elle n'a aucun jour ». Un mois illisible retombe sur le mois
+    // courant, comme avant, mais il ne fabrique plus un calendrier vide.
+    const m = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query.mois || '')) ? String(req.query.mois) : null
+    return await lire(res, userId, providerId, m)
+  }
   return await ecrire(req, res, userId, providerId, appelant)
 }
 
@@ -110,7 +122,7 @@ module.exports = async function handler (req, res) {
 // Rend les regles telles que l'ECRAN les manipule — des jours et une cadence —
 // pas la chaine RRULE. `label` porte le libelle construit a l'ecriture ; la
 // chaine elle-meme ne sort jamais.
-async function lire (res, userId, providerId) {
+async function lire (res, userId, providerId, moisDemande = null) {
   const { data: regles, error: errR } = await supabase.from('provider_availability_rules')
     // ⚠ `rrule` EST LUE ICI, ET NE SORT PAS D'ICI. L'ecran a besoin des JOURS et
     // de la CADENCE pour recocher ses cases — pas de la chaine, qui reste une
@@ -143,7 +155,11 @@ async function lire (res, userId, providerId) {
   // — de quoi comprendre ce qui vient de se passer — et tout le futur.
   const plancher = jourMoins(30)
   const { data: exceptions, error: errE } = await supabase.from('provider_availability_exceptions')
-    .select('id, date, available, reason, source')
+    // ⚠ `created_at` SORT AUSSI : la fiche en fait une trace lisible, comme
+    // pour les regles. « Reglé par vous le … » a cote de « Reglé par elle
+    // le … » — meme en-tete, deux sources. L'hote qui decouvre une absence
+    // doit pouvoir dire si elle vient d'elle ou de son propre geste.
+    .select('id, date, available, reason, source, created_at')
     .eq('user_id', userId).eq('provider_id', providerId)
     .gte('date', plancher)
     .order('date', { ascending: true }).limit(LOT_EXCEPTIONS)
@@ -211,7 +227,64 @@ async function lire (res, userId, providerId) {
     if (qui) reglePar = [qui.first_name, qui.last_name].filter(Boolean).join(' ').trim() || null
   }
 
+  // ─── LE CALENDRIER, CALCULE PAR LE MOTEUR LUI-MEME ────────────────────────
+  //
+  // ⚠ LA REGLE DE PRECEDENCE NE SE RECOPIE PAS DANS UN NAVIGATEUR. Conge >
+  // exception > regle > « aucune regle = disponible », plus « une regle
+  // illisible rend INDISPONIBLE » : c'est `estDisponible` de
+  // `lib/cleaning/availability.js` — le MEME code que celui qui decide a qui
+  // un menage est attribue. Une seconde implementation cote ecran divergerait
+  // le jour ou le moteur change, et l'hote lirait un calendrier qui n'est pas
+  // celui du moteur.
+  //
+  // ⚠ ON NE REND QUE DEUX MOIS, a partir du premier du mois demande : c'est ce
+  // que la fenetre de configuration affiche. Le client ne choisit pas une
+  // fenetre arbitraire — un `mois=` libre ferait calculer des annees pour rien.
+  const debutCal = moisDemande ? `${moisDemande}-01` : `${cleJour(new Date()).slice(0, 7)}-01`
+  const jours = []
+  {
+    const d = new Date(debutCal + 'T12:00:00Z')
+    const fin = new Date(d); fin.setUTCMonth(fin.getUTCMonth() + 2)
+    const ctx = { regles: regles || [], exceptions: exceptions || [], conges: conges || [] }
+    while (d < fin) {
+      const iso = d.toISOString().slice(0, 10)
+      const conge = congeCouvrant(iso, conges || [])
+      const exc = (exceptions || []).find(e => cleJour(e.date) === iso)
+      const dispo = estDisponible(iso, ctx)
+      jours.push({
+        date: iso,
+        dispo,
+        // ⚠ CE QUE LE JOUR VAUDRAIT SI ON RETIRAIT SON EXCEPTION, calcule par
+        // le MEME `estDisponible`. C'est ce qui permet a l'ecran de choisir
+        // entre RETIRER l'exception et en poser une contraire, sans recopier
+        // la regle de precedence dans un navigateur.
+        //
+        // ⚠ ET CE N'EST PAS UN CONFORT. Sans lui, un clic pose toujours une
+        // exception : basculer un jour puis le rebasculer laissait une
+        // exception redondante — un jour fige que plus rien n'explique, et qui
+        // survit au retrait de la recurrence. C'est le defaut que l'ancien
+        // ecran evitait en recalculant la precedence cote client.
+        //
+        // Les conges comptent : ils priment sur tout, exception comprise. Un
+        // jour sous conge vaut donc `false` ici aussi — l'ecran le laisse
+        // inerte, et c'est la verite du moteur.
+        sans_exception: exc ? estDisponible(iso, { ...ctx, exceptions: [] }) : dispo,
+        // CE QUI a tranche, pour la legende : un conge se verrouille, une
+        // exception porte un point (« regle a la main »), une regle n'a pas
+        // besoin d'etre dite.
+        conge: conge ? { motif: conge.motif || null, source: conge.source || 'hote' } : null,
+        // ⚠ L'IDENTIFIANT SORT : c'est par lui que l'ecran la retire
+        // (`retirerException` n'accepte qu'un id). Sans lui, le second clic ne
+        // pouvait que poser une exception contraire.
+        exception: exc ? { id: exc.id, source: exc.source || 'hote', created_at: exc.created_at || null } : null
+      })
+      d.setUTCDate(d.getUTCDate() + 1)
+    }
+  }
+
   return res.status(200).json({
+    mois: debutCal.slice(0, 7),
+    jours,
     regles: reglesLisibles,
     exceptions: exceptions || [],
     conges: conges || [],
@@ -230,6 +303,7 @@ async function ecrire (req, res, userId, providerId, appelant) {
   const { action } = req.body || {}
 
   if (action === 'reglerVisibilite') return await reglerVisibilite(req, res, userId, providerId, appelant)
+  if (action === 'reglerJours')     return await reglerJours(req, res, userId, providerId)
   if (action === 'poserRegle')      return await poserRegle(req, res, userId, providerId)
   if (action === 'retirerRegle')    return await retirerRegle(req, res, userId, providerId)
   if (action === 'poserException')  return await poserException(req, res, userId, providerId)
@@ -298,6 +372,106 @@ async function reglerVisibilite (req, res, userId, providerId, appelant) {
 // chaine acceptee depuis le client serait une expression executee par la lib
 // `rrule` sur des donnees d'un autre compte, et un `COUNT=100000` suffirait a
 // faire tourner le moteur d'assignation pour rien a chaque cycle.
+// TOUS SES JOURS HABITUELS EN UN SEUL ALLER-RETOUR (fiche V5, 16 octobre 2026).
+//
+// ⚠ POURQUOI CETTE ACTION EXISTE A COTE DE `poserRegle`. L'ancien ecran reglait
+// la recurrence en N appels : un `retirerRegle` par regle active, puis un
+// `poserRegle` par ligne. Le reseau qui lache au milieu — un telephone, un
+// ascenseur — laissait ZERO regle active, c'est-a-dire « disponible tous les
+// jours » : le moteur lui attribue alors des menages n'importe quel jour, et
+// personne ne l'a demande. C'est l'inverse exact de ce que l'hote venait de
+// faire, et rien a l'ecran ne le disait.
+//
+// L'ordre juste — inserer PUIS desactiver — vit dans `lib/cleaning/regles.js`,
+// avec la PWA, parce que c'est une REGLE et non une mecanique d'ecran. Les deux
+// endpoints l'appellent ; ils ne different que par leurs gardes et par la
+// `source` ecrite en base.
+//
+// ⚠ `source: 'hote'` : c'est ce qui permet a sa page de distinguer ce qu'elle a
+// regle elle-meme de ce que son hote a regle pour elle.
+async function reglerJours (req, res, userId, providerId) {
+  const lots = Array.isArray((req.body || {}).lots) ? req.body.lots : null
+  if (!lots) return res.status(400).json({ error: 'Rien à enregistrer' })
+  // Une ligne en semaine simple, deux en quinzaine : au-dela, c'est un corps
+  // forge — l'ecran n'en produit jamais trois.
+  if (lots.length > 2) return res.status(400).json({ error: 'Trop de lignes' })
+  const cadence = Number((req.body || {}).toutes_les_n_semaines) || 1
+
+  // ⚠ LA BORNE VIENT DU MODULE, PAS DE L'ECRAN. `LOT_REGLES` (200) est la
+  // borne de LECTURE de cet endpoint : elle dit combien de regles on accepte
+  // d'AFFICHER, pas combien on accepte d'en remplacer. Les confondre faisait
+  // qu'une prestataire reglable ici etait refusee depuis sa page.
+  const r = await remplacerRegles(supabase, {
+    userId, providerId, lots, cadence, source: 'hote', maxActives: MAX_REGLES_ACTIVES })
+
+  // ⚠ IL N'Y A PLUS D'ETAT INTERMEDIAIRE A ANNONCER. Tant que le remplacement
+  // se faisait en deux ecritures, cette branche disait « les nouveaux jours
+  // sont enregistres, mais les anciens n'ont pas pu etre retires » — une phrase
+  // qui existait parce que le cas existait. La fonction Postgres est une
+  // transaction : soit tout est pose, soit rien n'a bouge, et l'ecran n'a plus
+  // qu'un seul refus a dire.
+  if (r.erreur === 'rpc_absente') {
+    console.error('[disponibilites] migration 2026-10-16-regles-atomiques NON APPLIQUEE', r.detail)
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ⚠ LE PLAFOND N'EST PAS UNE PANNE, ET IL NE DOIT PAS SE LIRE COMME UNE PANNE
+  // (demande de Thierry, 16 octobre 2026 : « un message clair a l'ecran, jamais
+  // un echec silencieux »). « Service temporairement indisponible » ferait
+  // reessayer indefiniment un geste qui echouera toujours. On dit le nombre,
+  // la borne, et quoi faire.
+  if (r.erreur === 'plafond') {
+    console.error('[disponibilites] plafond de regles actives atteint', r.detail || '')
+    // ⚠ UN CODE ET UN MAXIMUM, PAS UNE PHRASE (16 octobre 2026). La fiche est
+    // traduite (fr/en/es) : lui envoyer du francais en dur rendrait l'ecran
+    // bilingue au premier refus. `error` reste en repli, pour les chemins qui
+    // affichent la phrase du serveur telle quelle.
+    return res.status(409).json({
+      code: 'trop_de_regles', max: MAX_REGLES_ACTIVES,
+      error: `Ses jours habituels n'ont pas pu être remplacés : elle a plus de ` +
+             `${MAX_REGLES_ACTIVES} règles de récurrence actives. ` +
+             `Prévenez-nous, il faut en retirer avant.` })
+  }
+  if (r.erreur) {
+    if (r.status === 400) return res.status(400).json({ error: r.erreur })
+    console.error('[disponibilites] reglage des jours echec', r.erreur, r.detail || '')
+    return res.status(503).json({ error: 'Service temporairement indisponible' })
+  }
+  // ⚠ LES MENAGES DEJA PROPOSES SUR LES JOURS RETIRES REVIENNENT AU MOTEUR
+  // (constat de la revue de 70f805d). Ce rattrapage existait pour la PWA
+  // seulement : quand la prestataire se retirait du samedi, les propositions
+  // du samedi lui etaient reprises. L'hote remplace desormais les memes jours
+  // depuis la fiche, et c'est devenu le chemin le plus frequent — sans ce
+  // bloc, il retirait le samedi et une proposition du samedi suivant restait
+  // chez quelqu'un dont il venait de dire qu'elle ne vient plus ce jour-la.
+  //
+  // ⚠ ON REPREND, MAIS ON N'ANNONCE PAS. L'alerte dit a l'hote ce que la
+  // prestataire a change ; la lui envoyer apres SON PROPRE geste serait a la
+  // fois faux et bruyant. La raison ecrite sur le menage, elle, nomme le bon
+  // auteur.
+  //
+  // ⚠ ET ON L'ATTEND, comme sa page : une fonction serverless qui a repondu
+  // peut etre gelee avant d'avoir fini son travail de fond.
+  const prenom = await prenomDuProfil(userId, providerId)
+  await apresChangementDeRegles({
+    userId, providerId, prenom,
+    avant: (r.avant || []).map(x => lireRrule(x.rrule)).filter(Boolean),
+    apres: r.formes,
+    annoncer: false,
+    raison: 'Ce jour a ete retire de ses jours habituels depuis sa fiche : ' +
+            'proposition reprise, a reattribuer.'
+  })
+  return res.status(200).json({ success: true, poses: r.poses })
+}
+
+// Le prenom sert aux phrases du rattrapage. ⚠ IL NE FAIT PAS ECHOUER LE GESTE :
+// les jours sont deja enregistres quand on arrive ici.
+async function prenomDuProfil (userId, providerId) {
+  const { data, error } = await supabase.from('profiles')
+    .select('first_name').eq('id', providerId).eq('account_user_id', userId).maybeSingle()
+  if (error || !data) return null
+  return data.first_name || null
+}
+
 async function poserRegle (req, res, userId, providerId) {
   // ⚠ LA VALIDATION VIT DANS `lib/cleaning/regles.js`, PARTAGEE AVEC LA PWA.
   // Depuis le 15 septembre 2026, la prestataire regle aussi ses jours depuis
@@ -349,15 +523,38 @@ async function poserException (req, res, userId, providerId) {
   if (!jour) return res.status(400).json({ error: 'Date invalide' })
   if (typeof available !== 'boolean') return res.status(400).json({ error: 'Sens de l\'exception manquant' })
 
+  // ⚠ LES MEMES DEUX BORNES QUE `poserConge`, ET POUR LA MEME RAISON.
+  // `lire()` ne rend les exceptions que depuis `gte('date', jourMoins(30))` :
+  // une exception posee plus tot est inseree avec succes, n'apparait dans aucune
+  // reponse, son `id` n'est jamais rendu — et `retirerException`, qui n'accepte
+  // qu'un id, devient inatteignable. Une ligne indelebile, creee par un geste
+  // qui annonce « enregistre ». Par l'autre bout, une date hors de l'horizon de
+  // l'ecran a le meme defaut.
+  // ⚠ LA GARDE ETAIT COTE ECRAN SEULEMENT (un bouton `disabled` sur le passe),
+  // et l'ecran borne en heure LOCALE du navigateur : un hote a UTC-8 a 18 h est
+  // deja le lendemain a Paris. Le serveur, lui, borne en heure de Paris comme
+  // tout ce domaine.
+  if (jour < jourMoins(30)) {
+    return res.status(400).json({ error: 'Cette date est trop ancienne pour être enregistrée' })
+  }
+  if (jour > jourPlus(HORIZON_JOURS)) {
+    return res.status(400).json({ error: 'Cette date est trop loin dans le futur' })
+  }
+
   // ⚠ UNE SEULE DECISION PAR PERSONNE ET PAR JOUR (contrainte SQL). L'upsert
   // remplace : reposer « pas ce samedi » sur un jour deja marque disponible doit
   // corriger, pas echouer — l'hote corrige ce que la prestataire a declare, et
   // c'est le sens meme de ce reglage.
   const { data, error } = await supabase.from('provider_availability_exceptions')
+    // ⚠ `created_at` EST REPOSE A CHAQUE ECRITURE. La ligne porte UNE decision,
+    // et la trace affiche sa date : sans cela, corriger aujourd'hui une absence
+    // declaree par elle le 2 octobre faisait dire a l'ecran « regle par vous le
+    // 2 octobre » — la source changeait, la date restait celle de l'autre.
     .upsert({ user_id: userId, provider_id: providerId, date: jour,
               available, reason: reason ? String(reason).slice(0, 200) : null,
-              source: 'hote' }, { onConflict: 'provider_id,date' })
-    .select('id, date, available, reason, source')
+              source: 'hote', created_at: new Date().toISOString() },
+            { onConflict: 'provider_id,date' })
+    .select('id, date, available, reason, source, created_at')
     .maybeSingle()
   if (error) {
     console.error('[disponibilites] upsert exception echec', error.message)

@@ -1,0 +1,132 @@
+/* ============================================================
+   HôteSmart — theme.css
+   LE SEUL FICHIER où un hexa, une police ou un rayon a le droit
+   d'exister. Tout le reste utilise var(--…).
+   Changer la charte = modifier ce fichier, rien d'autre.
+   ============================================================ */
+
+:root {
+  /* Couleurs */
+  --ink: #222222;          /* texte, boutons principaux, icônes */
+  --muted: #717171;        /* texte secondaire */
+  --muted-2: #9B9B9B;      /* texte TERTIAIRE sur fond clair (mentions, dates,
+                              libellés de grille). Distinct de --on-ink-muted,
+                              qui se lit sur fond --ink et devient illisible ici. */
+  --line: #EBEBEB;         /* séparateurs */
+  --border: #DDDDDD;       /* bordures cartes et boutons secondaires */
+  --surface: #FFFFFF;      /* fond de page */
+  --surface-2: #F7F7F7;    /* fond des pastilles d'icône */
+  --on-ink: #FFFFFF;       /* texte sur fond --ink */
+
+  --brand-night: #0E1726;  /* logo, avatar */
+  --on-ink-muted: #A3A3A3; /* texte/icones INACTIFS sur fond --ink (barre du
+                              bas) : contraste 6,4:1 sur #222222 (seuil 4,5) */
+  --amber: #F5A524;        /* UN seul moment par écran : ce qu'HôteSmart a fait / attend */
+  --amber-soft: #FFF4E0;   /* fond de l'icône d'une action en attente */
+  --amber-text: #B87500;   /* texte ambre lisible sur blanc */
+
+  /* Canaux de réservation : les VRAIES couleurs de marque (demande de
+     Thierry, 11 octobre 2026), portées par la pastille du canal — la lettre
+     A / B / D reste dessus, jamais la couleur seule. Même famille que
+     shared/calendrier-resa.js (rouge Airbnb / bleu Booking au calendrier). */
+  --canal-airbnb: #FF5A5F;
+  --canal-booking: #003580;
+  --canal-direct: #0E1726;   /* la réservation directe est à NOUS : bleu nuit */
+  --on-canal: #FFFFFF;
+
+  /* Prestataires de ménage : pastels des barres de garde (page Ménages V5).
+     FROIDS OU NEUTRES SEULEMENT — jamais de rose ni de rouge, réservés aux
+     alertes (décision de Thierry, 13 octobre 2026). La couleur est STABLE par
+     personne (hash dans shared/presta-couleur.js) et jamais seule. */
+  --presta-1: #DDE4E6;   /* bleu gris */
+  --presta-2: #E3EADF;   /* sauge */
+  --presta-3: #E4E2F0;   /* lavande */
+  --presta-4: #F1E6DA;   /* sable */
+  --presta-5: #DCE8EF;   /* bleu pâle */
+  --presta-6: #DFEAE5;   /* vert d'eau */
+  --presta-7: #E8E7E2;   /* grège */
+  --presta-8: #E2E6EE;   /* bleu lin */
+
+  /* Information neutre (« non lu », proposition en attente dans une liste) :
+     JAMAIS pour une action — l'ambre dit « HôteSmart attend ta décision »,
+     le bleu dit seulement « du nouveau » (spec lot 2 §3.2 et §6). */
+  --info: #2563EB;
+
+  /* Statuts (jamais la couleur seule : toujours icône ou texte avec) */
+  --ok: #0F7A4F;
+  --ok-soft: #E8F5EE;
+  --warn: #9A5B00;
+  --warn-soft: #FFF4E0;
+  --danger: #B42318;
+  --danger-soft: #FEF0EE;
+
+  /* Typographie */
+  --font: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --fs-h1: 32px;
+  --fs-h2: 22px;
+  --fs-kpi: 28px;
+  --fs-body: 15px;
+  --fs-small: 14px;
+  --fs-caption: 13px;
+  --fs-nav-mobile: 10px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --fw-black: 800;
+  --tracking-tight: -0.03em;
+
+  /* Formes */
+  --radius-pill: 99px;     /* boutons, badges, onglets */
+  --radius-card: 16px;     /* cartes, photos */
+  --radius-tile: 12px;     /* pastilles d'icône */
+
+  /* Tailles */
+  --control: 44px;         /* hauteur min d'un élément cliquable */
+  --control-lg: 48px;
+  --icon-size: 20px;
+  --icon-size-lg: 22px;
+  --icon-stroke: 1.75;
+
+  /* Espacements */
+  --gap-xs: 4px;
+  --gap-s: 8px;
+  --gap-m: 16px;
+  --gap-l: 24px;
+  --gap-xl: 40px;
+  --page-pad: 48px;
+  --page-max: 1200px;
+
+  /* Ombres */
+  --shadow-hover: 0 6px 20px rgba(0, 0, 0, .12);
+  --shadow-dot: 0 1px 3px rgba(0, 0, 0, .18);   /* pastilles du planning ménages */
+  --shadow-sheet: 0 -8px 32px rgba(0, 0, 0, .18); /* feuilles du bas (PWA) */
+  --scrim: rgba(0, 0, 0, .45);                  /* voile derrière une feuille */
+}
+
+/* Variante sombre : un bloc de variables, jamais un second fichier.
+   Activée par <html data-theme="dark">. */
+:root[data-theme="dark"] {
+  --ink: #F5F5F5;
+  --on-ink-muted: #595959; /* inactifs sur --ink CLAIR (6,2:1 sur #F5F5F5) ;
+                              la barre claire reste distincte du fond #141414 */
+  --info: #60A5FA;         /* le bleu lisible sur fond sombre */
+  --muted: #A3A3A3;
+  --muted-2: #7A7A7A;
+  --line: #2A2A2A;
+  --border: #3A3A3A;
+  --surface: #141414;
+  --surface-2: #1F1F1F;
+  --on-ink: #141414;
+  --amber-soft: #3A2A0A;
+  --ok-soft: #10301F;
+  --warn-soft: #3A2A0A;
+  --danger-soft: #3A1512;
+  --shadow-hover: 0 6px 20px rgba(0, 0, 0, .5);
+  --shadow-sheet: 0 -8px 32px rgba(0, 0, 0, .6);
+  --scrim: rgba(0, 0, 0, .6);
+}
+
+/* Marque blanche (pages publiques) : l'hôte écrase les jetons sur :root,
+   rien d'autre ne change. Exemple :
+   <style>:root{--ink:#1B3A4B;--amber:#C8963E;--font:'Lora',serif}</style> */

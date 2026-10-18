@@ -22,12 +22,10 @@ const lire = p => fs.readFileSync(path.join(__dirname, '..', p), 'utf8')
 
 // Chaque page delegable, avec le domaine qui commande ses ecritures.
 const PAGES = [
-  ['apps/menages/index.html',        'menages'],
-  ['apps/agent-ai/messagerie.html',  'messages'],
-  ['pages/biens-calendrier.html',    'reservations'],
-  ['pages/calendrier-mobile.html',   'reservations'],
+  ['pages/menages.html',             'menages'],
+  ['pages/calendrier.html',    'reservations'],
   ['pages/biens.html',               'reservations'],
-  ['pages/index.html',               'reservations']
+  ['pages/aujourdhui.html',           'reservations']
 ]
 
 for (const [page, domaine] of PAGES) {
@@ -38,142 +36,138 @@ for (const [page, domaine] of PAGES) {
   })
 }
 
-test('menages : « Marquer fait » disparait en lecture seule', () => {
-  // Le constat exact du test humain.
-  const html = lire('apps/menages/index.html')
-  const i = html.indexOf("if (!peutEcrire('menages'))")
-  assert.ok(i > 0, 'le bloc de lecture seule doit exister')
-  const bloc = html.slice(i, i + 700)
-  assert.ok(bloc.includes("getElementById('modal-done')"),
-    '« Marquer fait » doit etre retire comme le champ de note')
-  assert.ok(bloc.includes("getElementById('btn-save-comment')"),
-    'le bouton d\'enregistrement de note aussi')
+test('menages : les gestes suivent DEUX droits distincts, pas un seul', () => {
+  // ⚠ LE CONSTAT EXACT DU TEST HUMAIN, reporte sur la page V5 (etape 4,
+  // 14 octobre 2026 : l'ancien planning est devenu une redirection). Il
+  // s'enonce desormais mieux qu'avant : « Fait » suit `menages:write`,
+  // « Proposer / Assigner / Retirer » suivent `prestataires:write`. Les
+  // confondre donnerait a un delegue le droit de changer de prestataire parce
+  // qu'il peut cocher un menage fait — deux decisions tres differentes
+  // (docs/specs/inventaire-menages.md §E.1).
+  const html = lire('pages/menages.html')
+  assert.ok(html.includes("peutEcrire('menages')"), 'le droit des menages est consulte')
+  assert.ok(html.includes("peutEcrire('prestataires')"), 'celui des prestataires aussi')
+  // « Valider » (marquer fait) est rendu SOUS le droit menages.
+  assert.match(html, /l\.type === 'non_termine' && peutEcrire\('menages'\)/,
+    '« Valider » n\'est pas rendu sans le droit')
+  // « Changer » (les quatre gestes d'assignation) sous le droit prestataires.
+  assert.match(html, /peutEcrire\('prestataires'\) && offrables/,
+    '« Changer » n\'est pas rendu sans le droit')
 })
 
-test('menages : openModal ne suppose pas le bouton present', () => {
+test('menages : aucun ECOUTEUR n\'est pose sur un geste non rendu', () => {
   // ⚠ Retirer un element sans proteger ce qui le lit ensuite casse la page pour
   // le membre — exactement le genre de regression que ce lot doit eviter.
-  const html = lire('apps/menages/index.html')
-  const i = html.indexOf("const btn = document.getElementById('modal-done')")
-  assert.ok(i > 0)
-  assert.ok(html.slice(i, i + 160).includes('if (btn)'),
-    'le code qui suit doit tolerer un bouton absent')
+  // L'ancien ecran posait la garde sur UN bouton (`if (btn)`) ; la page V5 rend
+  // ses gestes dans des gabarits CONDITIONNELS (droits, note deja lue...), donc
+  // `querySelector` peut rendre `null` pour de bon.
+  //
+  // ⚠ CE QUI EST VISE EST L'ECOUTEUR, pas toute lecture. Un `textContent` lu
+  // dans un gestionnaire ne s'execute que si le bouton qui l'a declenche
+  // existait : exiger `if (x)` partout serait du bruit. `addEventListener` sur
+  // `null`, lui, casse le rendu avant que la page n'affiche quoi que ce soit.
+  const html = lire('pages/menages.html')
+  assert.ok(!/corps\.querySelector\([^)]+\)\.addEventListener/.test(html),
+    'jamais d\'ecouteur pose directement sur le resultat d\'un querySelector')
+  for (const m of html.matchAll(/const (\w+) = corps\.querySelector\([^)]+\)/g)) {
+    const apres = html.slice(m.index, m.index + 400)
+    if (!new RegExp(`${m[1]}\\.addEventListener`).test(apres)) continue
+    assert.match(apres, new RegExp(`if \\(${m[1]}\\)`),
+      `un ecouteur est pose sur « ${m[1]} » sans verifier qu'il a ete rendu`)
+  }
 })
 
+// RETARGE le 13 octobre 2026 : les anciennes pages calendrier redirigent
+// vers la V5 (une page, deux ecrans) — memes PROPRIETES, motifs V5.
 test('calendrier : ni edition en ligne ni barre d\'action en lecture', () => {
-  const html = lire('pages/biens-calendrier.html')
-  assert.ok(html.includes("function startInlineEdit(cell,idx,initial){ if(!peutEcrire('reservations'))return;"),
-    'l\'edition en ligne doit refuser avant d\'ouvrir le champ')
-  assert.ok(html.includes('function appliquerLectureSeule'),
-    'les declencheurs d\'ecriture doivent etre retires')
+  const html = lire('pages/calendrier.html')
+  assert.ok(/mousedown', \(e\) => \{\n      if \(etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) return/.test(html),
+    'la selection (donc l\'edition) refuse avant de demarrer')
+  assert.ok(/if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) \{ barre\.hidden = true/.test(html),
+    'la barre d\'action se masque en lecture')
   assert.ok(html.includes('avis-lecture'), 'et la raison affichee')
 })
 
-test('calendrier mobile : la feuille d\'edition ne s\'ouvre pas', () => {
-  const html = lire('pages/calendrier-mobile.html')
-  const i = html.indexOf('function openSheet(iso, openKey){')
+test('calendrier mobile : la popup d\'edition ne s\'ouvre pas en lecture', () => {
+  const html = lire('pages/calendrier.html')
+  const i = html.indexOf("c.addEventListener('click'")
   assert.ok(i > 0)
-  assert.ok(html.slice(i, i + 220).includes("peutEcrire('reservations')"),
-    'openSheet doit refuser avant de proposer une saisie')
+  assert.ok(html.slice(i, i + 300).includes("etat.lectureSeule || !peutEcrire('reservations')"),
+    'le tap court refuse avant de proposer une saisie')
+  const j = html.indexOf("c.addEventListener('touchstart'")
+  assert.ok(html.slice(j, j + 260).includes("etat.lectureSeule || !peutEcrire('reservations')"),
+    'l\'appui long aussi')
 })
 
-test('messagerie : la zone de composition disparait en lecture', () => {
-  const html = lire('apps/agent-ai/messagerie.html')
-  assert.ok(html.includes("peutEcrire('messages') ?"), 'la composition est conditionnee')
-  assert.ok(html.includes('Lecture seule — vous ne pouvez pas répondre'),
-    'et remplacee par une explication')
-})
+// L'ancienne messagerie est une REDIRECTION depuis l'etape 4 du lot
+// Messages V5 : la lecture seule de la nouvelle page est testee dans
+// tests/messages-v5.test.js (saisie et boutons RETIRES sans droit).
 
 test('calendrier : la barre flottante n\'est PAS supprimee du DOM', () => {
-  // ⚠ La supprimer provoquait un TypeError a chaque clic : `showFloatBar()` et
-  // `btn-clear-sel` la lisent. La selection restait surlignee, sans aucun moyen
-  // de l'effacer. On bloque la selection en amont, on ne retire pas le noeud.
-  const html = lire('pages/biens-calendrier.html')
-  const i = html.indexOf('function appliquerLectureSeule')
-  const bloc = html.slice(i, i + 900)
-  assert.ok(!/float-bar'\)[^\n]*remove\(\)/.test(bloc),
-    'float-bar ne doit pas etre retiree : d\'autres fonctions la lisent')
-  assert.ok(bloc.includes('LECTURE_SEULE = true'), 'un drapeau doit bloquer la selection')
-  // ⚠ On teste la PROPRIETE, pas la forme litterale : depuis l'etape 3, un
-  // ecouteur de consultation (ouverture de la fiche d'une reservation) est pose
-  // AVANT ce return — consulter n'est pas ecrire, et un membre en lecture doit
-  // pouvoir ouvrir une reservation. Ce qui doit rester vrai : le code de
-  // SELECTION (mousedown/mouseenter) ne s'attache pas en lecture seule.
-  const iAttach = html.indexOf('function attachEvents')
-  const blocAttach = html.slice(iAttach, iAttach + 2600)
-  const posReturn = blocAttach.indexOf('if(LECTURE_SEULE) return')
-  const posMousedown = blocAttach.indexOf("addEventListener('mousedown'")
-  assert.ok(posReturn > -1, 'attachEvents doit sortir en lecture seule')
-  assert.ok(posMousedown > -1, 'le code de selection doit exister')
-  assert.ok(posReturn < posMousedown,
-    'la selection ne doit pas demarrer du tout en lecture seule')
-  // Et l'ecouteur de la fiche, lui, doit etre AVANT : la consultation reste
-  // ouverte a tous.
-  const posFiche = blocAttach.indexOf('ouvrirFicheResa')
-  if (posFiche > -1) assert.ok(posFiche < posReturn, 'la fiche doit s\'ouvrir meme en lecture seule')
+  // V5 : la barre vit dans le markup STATIQUE et se MASQUE (hidden), jamais
+  // retiree ; la selection ne demarre pas en lecture (gardes mousedown et
+  // touchstart) ; la CONSULTATION reste ouverte a tous : les fiches se
+  // branchent SANS garde d\'ecriture.
+  const html = lire('pages/calendrier.html')
+  assert.ok(html.includes('data-bind="flottante"'), 'markup statique')
+  assert.ok(!/flottante[^\n]*\.remove\(\)/.test(html), 'jamais retiree du DOM')
+  assert.ok(/barre\.hidden = true/.test(html), 'masquee par drapeau')
+  assert.ok(/\[data-resa\]'\)\.forEach\(b => b\.addEventListener\('click', \(\) => ouvrirFicheResa\(/.test(html),
+    'la fiche s\'ouvre meme en lecture seule')
 })
 
-test('calendrier : showFloatBar tolere un DOM incomplet', () => {
-  const html = lire('pages/biens-calendrier.html')
-  const i = html.indexOf('function showFloatBar()')
-  const ligne = html.slice(i, i + 220)
-  assert.ok(/if\(!floatBar\|\|!c\)return/.test(ligne),
-    'showFloatBar doit sortir plutot que de derefercer null')
+test('calendrier : l\'etat lecture seule est pose AVANT tout rendu', () => {
+  // Un membre sans lecture sort sur no_access ; un membre en lecture a son
+  // drapeau pose avant le premier charger(), et le bandeau le dit.
+  const html = lire('pages/calendrier.html')
+  const iNoAccess = html.indexOf("cal.no_access")
+  const iFlag = html.indexOf("etat.lectureSeule = !peutEcrire('reservations')")
+  const iPrefs = html.indexOf('lirePrefs()', iFlag - 2000)
+  assert.ok(iNoAccess > 0 && iFlag > 0 && iFlag < html.indexOf('lirePrefs()', iFlag),
+    'le drapeau est pose des l init, avant les prefs et tout chargement')
+  assert.ok(/avis-lecture"\]'\)\.hidden = !etat\.lectureSeule/.test(html), 'et le bandeau le dit')
 })
 
-test('calendrier : le masquage precede le return de l\'etat vide', () => {
-  // Un membre dont le perimetre ne resout aucun bien, ou un echec reseau,
-  // gardait sinon les boutons d'ecriture et ne voyait jamais l'avis.
-  const html = lire('pages/biens-calendrier.html')
-  const iGarde = html.indexOf('appliquerLectureSeule()')
-  const iVide  = html.indexOf('Votre calendrier apparaîtra ici')
-  assert.ok(iGarde > 0 && iVide > 0)
-  assert.ok(iGarde < iVide, 'le masquage doit s\'appliquer avant toute sortie anticipee')
-})
-
-test('calendrier mobile : renderGrid tolere un <main> remplace', () => {
-  // #view-select vit dans la topbar et survit au remplacement de <main> : il
-  // rappelle renderGrid() sur un #grid disparu.
-  const html = lire('pages/calendrier-mobile.html')
-  const i = html.indexOf('function renderGrid(){')
-  assert.ok(html.slice(i, i + 260).includes("if(!document.getElementById('grid')) return"),
-    'renderGrid doit sortir quand la grille n\'existe plus')
+test('calendrier mobile : les zones de rendu sont STATIQUES, jamais remplacees', () => {
+  // L\'ancien mobile remplacait <main> dans l\'etat vide et #grid disparaissait
+  // sous #view-select. La V5 ne remplace jamais ses conteneurs : les rendus
+  // ecrivent dans des data-bind fixes du markup.
+  const html = lire('pages/calendrier.html')
+  assert.ok(html.includes('data-bind="grille-mobile"'), 'zone fixe du telephone')
+  const module_ = html.split('<script type="module">')[1] || ''
+  assert.ok(module_.length > 1000, 'le module de la page est bien la')
+  assert.ok(!/main\.innerHTML/.test(module_), 'aucun remplacement de <main>')
 })
 
 test('calendrier mobile : un compte 100% Beds24 n\'est pas invite a se reconnecter', () => {
-  // ⚠ Le bandeau disait « géré dans Beds24 » et l'etat vide, juste dessous,
-  // « connectez votre PMS » — deux messages contradictoires, et un CTA qui pousse
-  // vers une reconnexion inutile.
-  const html = lire('pages/calendrier-mobile.html')
-  assert.ok(html.includes('const queDuBeds24 = beds24.length > 0'),
-    'les deux etats vides doivent etre distingues')
-  assert.ok(html.includes('Rien à piloter ici'), 'le cas Beds24 a son propre message')
-  const i = html.indexOf('Rien à piloter ici')
-  const j = html.indexOf('Votre calendrier apparaîtra ici')
-  assert.ok(i < j, 'le message Beds24 vient en premier dans le ternaire')
-  const messageBeds24 = html.slice(i, j)
-  assert.ok(!messageBeds24.includes('onboarding.html'),
-    'aucun appel a reconnecter un PMS deja connecte')
+  // Deux messages contradictoires sinon : « gere dans Beds24 » et, dessous,
+  // « connectez votre PMS ». V5 : la branche beds24 de l\'etat vide n\'a PAS
+  // le CTA onboarding.
+  const html = lire('pages/calendrier.html')
+  const bloc = html.split("vide.innerHTML = beds.length")[1]
+  assert.ok(bloc, 'les deux etats vides sont distingues')
+  const brancheBeds = bloc.split(':')[0]
+  assert.ok(brancheBeds.includes('cal.empty_beds24'), 'le cas Beds24 a son propre message')
+  assert.ok(!brancheBeds.includes('onboarding'), 'aucun appel a reconnecter un PMS deja connecte')
 })
 
 // ─── La limite Beds24, rendue explicite ─────────────────────────────────────
 
 test('calendrier : les biens Beds24 sont annonces, pas seulement grises', () => {
-  // ⚠ La mention vivait dans le selecteur multiple : il fallait l'OUVRIR pour la
-  // voir. Un hote 100 % Beds24 arrivait sur un calendrier vide sans explication.
-  const html = lire('pages/biens-calendrier.html')
-  assert.ok(html.includes('function annoncerBiensBeds24'), 'une annonce doit exister')
-  assert.ok(html.includes('avis-beds24'), 'et un emplacement pour l\'afficher')
-  assert.ok(html.includes('Aucun bien pilotable ici'),
-    'le cas « que du Beds24 » doit avoir son propre message')
+  // V5 : le bandeau avis-beds24 nomme les biens (cal.beds24_all / some),
+  // visible sans ouvrir quoi que ce soit.
+  const html = lire('pages/calendrier.html')
+  assert.ok(html.includes('avis-beds24'), 'un emplacement pour l\'annonce')
+  assert.ok(html.includes('cal.beds24_all') && html.includes('cal.beds24_some'),
+    'le message nomme les biens, 100 % Beds24 compris')
 })
 
 test('calendrier mobile : les biens Beds24 sont exclus ET annonces', () => {
-  // Cette page les PROPOSAIT : l'hote decouvrait le refus a l'enregistrement.
-  const html = lire('pages/calendrier-mobile.html')
-  assert.ok(html.includes("BIENS = TOUS.filter(b => b.provider !== 'beds24')"),
-    'les biens Beds24 ne doivent plus etre selectionnables')
-  assert.ok(html.includes('avis-beds24'), 'et leur absence doit etre expliquee')
-  assert.ok(html.includes('Aucun bien pilotable ici'),
-    'y compris quand le perimetre ne contient que du Beds24')
+  // V5 : seuls les biens pilotables sont selectionnables ; une bulle Beds24
+  // est grisee et NON cliquable, et le bandeau explique.
+  const html = lire('pages/calendrier.html')
+  assert.ok(html.includes("etat.biens.filter(b => b.provider !== 'beds24')"),
+    'les biens Beds24 ne sont pas selectionnables')
+  assert.ok(/beds24 \? 'disabled' : ''/.test(html), 'bulle grisee non cliquable')
+  assert.ok(html.includes('avis-beds24'), 'et leur absence est expliquee')
 })

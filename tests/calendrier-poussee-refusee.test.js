@@ -172,26 +172,27 @@ test('le handler du calendrier appelle bien le verdict ET la reaction', () => {
 // succes. Le 11 septembre, une poussee refusee se lisait donc « Enregistre »
 // pendant que 69 dates restaient invendables.
 test('les ecrans calendrier distinguent « non publie » de « enregistre »', () => {
+  // RETARGE 13/10/2026 : la V5 n'a plus qu'UN point de verdict pour TOUTES
+  // les ecritures (verdictToast, consomme par saveAvecAnnulation) — c'est
+  // l'invariant renforce : un refus du canal ne peut plus etre « Enregistre »
+  // sur un chemin et pas l'autre.
   const fs = require('node:fs')
   const path = require('node:path')
-  for (const page of ['pages/biens-calendrier.html', 'pages/calendrier-mobile.html']) {
-    const src = fs.readFileSync(path.join(__dirname, '..', page), 'utf8')
-    // ⚠ ON COMPTE, ON NE SE CONTENTE PAS D'UNE OCCURRENCE. Releve en review :
-    // `biens-calendrier.html` a DEUX points de sauvegarde (l'edition de prix en
-    // ligne et la barre d'action). Un `includes` au niveau du fichier restait
-    // vert si l'un des deux perdait sa branche — l'edition de prix redevenait
-    // « Enregistre » sur un refus. L'invariant est : tout point qui sait
-    // traiter `local_only` doit savoir traiter `push_failed`.
-    const pointsDeSauvegarde = (src.match(/resp\s*(?:&&)?\s*\.?local_only/g) || []).length
-      || (src.match(/resp\.local_only/g) || []).length
-    const traitent = (src.match(/resp\.push_failed/g) || []).length
-    assert.ok(pointsDeSauvegarde > 0, `${page} : aucun point de sauvegarde trouve`)
-    assert.strictEqual(traitent, pointsDeSauvegarde,
-      `${page} : ${traitent} point(s) traitent push_failed pour ${pointsDeSauvegarde} `
-      + 'point(s) de sauvegarde — un refus du canal s y afficherait « Enregistre »')
-    assert.match(src, /NON PUBLIE/,
-      `${page} doit le DIRE, pas le noyer dans une liste d'avertissements`)
-  }
+  const src = fs.readFileSync(path.join(__dirname, '..', 'pages/calendrier.html'), 'utf8')
+  const verdict = src.split('function verdictToast')[1].split('\n}')[0]
+  assert.ok(/r\.push_failed/.test(verdict), 'push_failed traite au point unique')
+  assert.ok(/r\.local_only/.test(verdict), 'local_only aussi')
+  // Les DEUX appels de verdictToast vivent dans saveAvecAnnulation (save +
+  // annulation), et toute ecriture calendrier passe par saveAvecAnnulation.
+  assert.ok((src.match(/verdictToast\(/g) || []).length >= 2, 'save et annulation rendent verdict')
+  assert.strictEqual((src.match(/appel\('\/api\/calendar', \{ action: 'save'/g) || []).length, 2,
+    'aucune ecriture calendrier hors de saveAvecAnnulation')
+  assert.ok((src.match(/saveAvecAnnulation\(/g) || []).length >= 4,
+    'les chemins d ecriture consomment le point unique')
+  assert.ok(!/api\.calendar\.save\(/.test(src),
+    'aucun wrapper d ecriture calendar qui contournerait verdictToast')
+  const fr = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/fr.json'), 'utf8')
+  assert.match(fr, /NON PUBLIÉ/, 'et le refus se DIT (cle cal.push_failed)')
 })
 
 test("l'endpoint rend le drapeau push_failed", () => {

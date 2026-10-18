@@ -101,11 +101,11 @@ export function sansMessagerieOta (resa) {
 export const TEXTE_SANS_EMAIL = 'Cette réservation directe n\'a pas d\'adresse : ni confirmation, ni consignes d\'arrivée, ni code d\'accès ne peuvent partir. Transmettez-les vous-même, ou saisissez l\'adresse à la création pour les prochaines.'
 export function badgeSansEmailVisible (resa) { return sansMessagerieOta(resa) && !resa.aEmail }
 
-// La messagerie s'ouvre sur `booking_id` ; `bien` evite qu'un filtre de bien
-// deja actif masque la conversation.
+// La messagerie V5 s'ouvre sur `?conv=` seul (etape 4 du lot Messages :
+// l'ancienne page est une redirection, et /messages n'a pas de filtre par
+// bien qui masquerait le fil).
 export function urlConversation (bien, resa) {
-  return '/apps/agent-ai/messagerie?conv=' + encodeURIComponent(resa.id)
-    + (bien.provider_property_id ? '&bien=' + encodeURIComponent(bien.provider_property_id) : '')
+  return '/messages?conv=' + encodeURIComponent(resa.id)
 }
 
 // Voyageurs plafonnes a la capacite (en PERSONNES), dit AVANT la validation.
@@ -135,13 +135,20 @@ function aujourdhuiLocal () {
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
 }
 
+// La SEULE regle du « quand » : l'evaluation se propose DES LE JOUR du
+// depart (checkout <= aujourd'hui). Partagee entre la fiche resa et le fil
+// de /messages — deux copies divergeaient d'un jour (revue de 658d758).
+export function departEvaluable (depart, aujourdhui) {
+  const d = String(depart || '').slice(0, 10)
+  return !!d && d <= String(aujourdhui)
+}
+
 export async function brancherEvaluation ({ resa, cible, encoreAffichee = () => true, bus = undefined, aujourdhui = aujourdhuiLocal() } = {}) {
   if (!resa || !cible) return 'rien'
   cible.innerHTML = ''
   // Une réservation sans identifiant n'a pas d'évaluation : pas d'appel inutile.
   if (resa.id == null || resa.id === '') return 'rien'
-  const depart = String(resa.checkout || '').slice(0, 10)
-  if (!depart || depart > aujourdhui) return 'avant_depart'
+  if (!departEvaluable(resa.checkout, aujourdhui)) return 'avant_depart'
   let b = bus
   if (b === undefined) {
     try { b = (await import('./hs-bus.js')).hsBus } catch { b = null }
