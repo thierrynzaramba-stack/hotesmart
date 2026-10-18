@@ -866,7 +866,27 @@ function brancherPlanning () {
       if (chiffre && etat.vueMobile !== 'rate') return
       if (e.key === 'Enter' || e.key === 'F2' || chiffre) {
         e.preventDefault()
-        etat.sel = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
+        // ⚠ UNE SELECTION EN COURS NE SE FAIT PAS ECRASER PAR LA TOUCHE.
+        // Constat 10, signale par Thierry le 18 octobre 2026 : « ca fonctionne
+        // pour un prix sur une date mais pas une selection multiple ». Ce
+        // raccourci reduisait `etat.sel` a la SEULE case frappee, meme quand
+        // elle appartenait deja a une selection de plusieurs nuits. Mesure au
+        // navigateur reel sur quatre nuits selectionnees : le bouton « Prix »
+        // envoyait `date_from: 24, date_to: 27`, la frappe directe
+        // `date_from: 24, date_to: 24` — une nuit tarifee sur quatre.
+        //
+        // Et l'ecran ne le disait pas : les quatre cases restaient surlignees
+        // (`cal-nuit--sel` n'est pas repeint ici), donc l'hote lisait quatre
+        // nuits selectionnees pendant qu'une seule changeait de prix. Un
+        // silence pareil est pire qu'un refus.
+        //
+        // La touche ne DEPLACE la selection que si la case est en dehors.
+        const i = Number(td.dataset.i)
+        const bornes = etat.sel && etat.sel.bien === td.dataset.bien
+          ? [Math.min(etat.sel.a, etat.sel.b), Math.max(etat.sel.a, etat.sel.b)] : null
+        if (!bornes || i < bornes[0] || i > bornes[1]) {
+          etat.sel = { bien: td.dataset.bien, a: i, b: i }
+        }
         actionPrix(joursSelection(), chiffre ? e.key : '')
       }
     })

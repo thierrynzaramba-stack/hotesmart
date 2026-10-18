@@ -57,9 +57,15 @@ const CELLULE_REELLE = (iso, { orpheline = false } = {}) =>
   + '<span class="cal-nuit__prix">—</span></td>'
 
 // Une cellule de la ligne Prix, branchee par le VRAI `brancherPlanning`.
-function cellule ({ lectureSeule = false, peutEcrire = () => true, iso = ISO, orpheline = false } = {}) {
+const ISO_N = (n) => {
+  const d = new Date(ISO + 'T12:00:00'); d.setDate(d.getDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+function cellule ({ lectureSeule = false, peutEcrire = () => true, iso = ISO, orpheline = false, nb = 1 } = {}) {
+  const cases = Array.from({ length: nb }, (_, k) =>
+    CELLULE_REELLE(iso === ISO ? ISO_N(k) : iso, { orpheline: orpheline && k === 0 }).replace('data-i="0"', `data-i="${k}"`))
   const dom = new JSDOM('<div data-bind="grilles"><table><tr data-ligne-prix>'
-    + CELLULE_REELLE(iso, { orpheline })
+    + cases.join('')
     + '</tr></table></div>')
   const { window } = dom
   const td = window.document.querySelector('.cal-nuit')
@@ -73,7 +79,17 @@ function cellule ({ lectureSeule = false, peutEcrire = () => true, iso = ISO, or
     peutEcrire, toast: (m) => journal.toasts.push(m), t: (k) => k,
     ouvrirPopup: () => { journal.popup++ },
     saveAvecAnnulation: (_id, segs) => { journal.segments = segs },
-    viderSelection: () => {}, joursSelection: () => [iso], brancherDrag: () => {},
+    viderSelection: () => {},
+    // La vraie regle : les jours COUVERTS par etat.sel, pas une liste figee.
+    joursSelection: () => {
+      const sel = ctx.etat.sel
+      if (!sel) return []
+      const [a, b] = [Math.min(sel.a, sel.b), Math.max(sel.a, sel.b)]
+      return [...dom.window.document.querySelectorAll('[data-ligne-prix] .cal-nuit')]
+        .filter(t => t.dataset.bien === sel.bien && Number(t.dataset.i) >= a && Number(t.dataset.i) <= b)
+        .map(t => t.dataset.iso)
+    },
+    brancherDrag: () => {},
     peindreSelectionDesktop: () => {}, reduireBien: () => {}, ouvrirFicheResa: () => {},
     ouvrirFicheBlocage: () => {}, renderFlottante: () => {},
     Number, String, console
@@ -95,7 +111,10 @@ function cellule ({ lectureSeule = false, peutEcrire = () => true, iso = ISO, or
     return ev
   }
   return { ctx, td, journal, frappe, clic, dom,
-    champ: () => td.querySelector('input'),
+    caseN: (k) => dom.window.document.querySelectorAll('[data-ligne-prix] .cal-nuit')[k],
+    // La saisie s'ouvre dans la PREMIERE case de la selection, qui n'est pas
+    // toujours celle qu'on a frappee : on la cherche dans tout le document.
+    champ: () => dom.window.document.querySelector('.cal-nuit__saisie'),
     prix: () => td.querySelector('.cal-nuit__prix'),
     alerte: () => td.querySelector('.cal-orpheline .icon') }
 }
@@ -320,4 +339,73 @@ test('la lecture seule ne donne pas le curseur non plus', () => {
   seule.clic(seule.td)
   assert.notStrictEqual(seule.dom.window.document.activeElement, seule.td,
     'aucune porte d\'entree vers la saisie sans droit d\'ecriture')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONSTAT 10 — « ca fonctionne pour un prix sur une date mais pas une
+// selection multiple ».
+//
+// Signale par Thierry le 18 octobre 2026. Mesure au NAVIGATEUR REEL, quatre
+// nuits selectionnees au glisser, puis « 199 » :
+//
+//   par le bouton « Prix »  -> POST date_from 10-24, date_to 10-27   (4 nuits)
+//   en tapant directement   -> POST date_from 10-24, date_to 10-24   (1 nuit)
+//
+// Le raccourci clavier reduisait `etat.sel` a la SEULE case frappee, meme
+// quand elle appartenait deja a la selection. Et l'ecran n'en disait rien :
+// les quatre cases restaient surlignees pendant qu'une seule changeait de
+// prix. Un silence pareil est pire qu'un refus.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('CONSTAT 10 : taper DANS une selection multiple garde les quatre nuits', () => {
+  const c = cellule({ nb: 4 })
+  c.ctx.etat.sel = { bien: 'ofuro', a: 0, b: 3 }
+  c.frappe(c.caseN(0), '1')
+  c.champ().value = '199'
+  c.frappe(c.champ(), 'Enter')
+
+  assert.ok(c.journal.segments, 'un enregistrement doit partir')
+  assert.strictEqual(c.journal.segments[0].date_from, ISO_N(0))
+  assert.strictEqual(c.journal.segments[0].date_to, ISO_N(3), 'les QUATRE nuits, pas une')
+  assert.strictEqual(c.journal.segments[0].rate, 199)
+})
+
+test('CONSTAT 10 : taper sur une case du MILIEU garde aussi la selection', () => {
+  const c = cellule({ nb: 4 })
+  c.ctx.etat.sel = { bien: 'ofuro', a: 0, b: 3 }
+  c.frappe(c.caseN(2), '2')
+  assert.deepStrictEqual({ a: c.ctx.etat.sel.a, b: c.ctx.etat.sel.b }, { a: 0, b: 3 })
+})
+
+test('CONSTAT 10 : une selection posee a l\'envers est comprise pareil', () => {
+  // Glisser de droite a gauche : a > b. Les bornes se lisent dans les deux sens.
+  const c = cellule({ nb: 4 })
+  c.ctx.etat.sel = { bien: 'ofuro', a: 3, b: 0 }
+  c.frappe(c.caseN(1), '1')
+  assert.deepStrictEqual({ a: c.ctx.etat.sel.a, b: c.ctx.etat.sel.b }, { a: 3, b: 0 },
+    'la selection n\'a pas bouge')
+})
+
+test('taper HORS de la selection la deplace sur cette case — regle A.5 conservee', () => {
+  const c = cellule({ nb: 4 })
+  c.ctx.etat.sel = { bien: 'ofuro', a: 0, b: 1 }
+  c.frappe(c.caseN(3), '7')
+  assert.deepStrictEqual({ a: c.ctx.etat.sel.a, b: c.ctx.etat.sel.b }, { a: 3, b: 3 },
+    'la case frappee devient la selection')
+  assert.strictEqual(c.champ().value, '7')
+})
+
+test('sans selection du tout, la touche ouvre la saisie sur sa propre case', () => {
+  const c = cellule({ nb: 4 })
+  assert.strictEqual(c.ctx.etat.sel, null)
+  c.frappe(c.caseN(2), '9')
+  assert.deepStrictEqual({ a: c.ctx.etat.sel.a, b: c.ctx.etat.sel.b }, { a: 2, b: 2 })
+})
+
+test('une selection sur un AUTRE bien ne retient pas la touche', () => {
+  const c = cellule({ nb: 4 })
+  c.ctx.etat.sel = { bien: 'un-autre-bien', a: 0, b: 3 }
+  c.frappe(c.caseN(1), '5')
+  assert.deepStrictEqual({ bien: c.ctx.etat.sel.bien, a: c.ctx.etat.sel.a, b: c.ctx.etat.sel.b },
+    { bien: 'ofuro', a: 1, b: 1 }, 'on bascule sur le bien frappe')
 })
