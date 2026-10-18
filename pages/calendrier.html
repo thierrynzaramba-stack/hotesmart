@@ -833,13 +833,6 @@ function brancherPlanning () {
   zone.querySelectorAll('[data-ligne-prix] .cal-nuit').forEach(td => {
     td.addEventListener('mousedown', (e) => {
       if (etat.lectureSeule || !peutEcrire('reservations')) return
-      // ⚠ LA CELLULE REND LA MAIN QUAND ELLE EST EN SAISIE (constat 8).
-      // `e.preventDefault()` plus bas empeche la mise au point : un clic DANS
-      // le champ de prix ne lui donnait donc jamais le focus, et repliait la
-      // selection sur un seul jour. La garde de lecture seule reste EN TETE :
-      // tests/lecture-seule.test.js epingle sa place, et un refus d'ecriture
-      // passe avant toute autre consideration.
-      if (e.target !== td) return
       if (td.dataset.iso < AUJOURDHUI) return
       e.preventDefault()
       glisseEnCours = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
@@ -858,16 +851,6 @@ function brancherPlanning () {
       // Memes gardes que mousedown/touchstart/click : lecture seule et jour
       // passe refusent AUSSI au clavier (revue de 6f3d6af).
       if (etat.lectureSeule || !peutEcrire('reservations')) return
-      // ⚠ CE RACCOURCI OUVRE LA SAISIE ; IL NE DOIT PAS LA PILOTER.
-      // Constat 8, signale par Thierry le 18 octobre 2026 : « on ne peut pas
-      // modifier directement le prix ». Les frappes faites DANS le champ
-      // remontaient jusqu'ici, et chacune etait annulee (`preventDefault`)
-      // puis relancait `actionPrix` — qui reconstruisait le champ avec la
-      // SEULE touche frappee. Taper « 150 » laissait « 0 » : chaque chiffre
-      // effacait le precedent. Et « Entree » etait annulee de meme, donc rien
-      // ne s'enregistrait jamais. Mesure avant correctif : 3 frappes annulees
-      // sur 3, enregistrement declenche 0 fois.
-      if (e.target !== td) return
       if (td.dataset.iso < AUJOURDHUI) return
       const chiffre = /^[0-9]$/.test(e.key)
       if (chiffre && etat.vueMobile !== 'rate') return
@@ -1020,6 +1003,26 @@ function actionPrix (jours, amorce = '') {
   const html = td.innerHTML
   td.innerHTML = `<input class="cal-nuit__saisie" type="text" inputmode="decimal" value="${esc(amorce || (valeurActuelle != null ? String(valeurActuelle) : ''))}">`
   const input = td.querySelector('input')
+  // ⚠ LE CHAMP ARRETE SES EVENEMENTS ; LA CELLULE N'A RIEN A DEVINER.
+  // Constat 8, signale par Thierry le 18 octobre 2026 : « on ne peut pas
+  // modifier directement le prix ». Le champ vit DANS la cellule, qui porte le
+  // raccourci ouvrant la saisie (Entree / F2 / un chiffre, regle A.5) et le
+  // cliquer-glisser. Chaque frappe remontait donc jusqu'a ce raccourci, qui
+  // l'annulait (`preventDefault`) puis relancait `actionPrix` — reconstruisant
+  // le champ avec la SEULE touche frappee. Taper « 150 » laissait « 0 », et
+  // « Entree » n'enregistrait jamais. Un clic dans le champ heritait de meme du
+  // `preventDefault()` du glisser : pas de mise au point, selection repliee.
+  //
+  // ⚠ ET LA GARDE SE POSE ICI, PAS SUR LA CELLULE — releve en review apres un
+  // premier correctif fautif. Juger `e.target !== td` cote cellule paraissait
+  // equivalent ; ca ne l'est pas. La cellule contient TOUJOURS un
+  // `<span class="cal-nuit__prix">`, et parfois l'icone « nuit orpheline » : un
+  // clic sur les chiffres vise le span, pas la cellule. La garde rendait donc
+  // la main et ne demarrait plus aucune selection — 25 a 36 % de la surface de
+  // la case, en plein centre, rendue morte. L'enfant arrete l'evenement,
+  // l'ancetre n'a aucun predicat a tenir : motif deja employe par
+  // apps/yield/prix.html:1893.
+  input.addEventListener('mousedown', (e) => e.stopPropagation())
   input.focus(); input.select()
   let fini = false
   const terminer = (commit) => {
@@ -1038,6 +1041,9 @@ function actionPrix (jours, amorce = '') {
     saveAvecAnnulation(bienId, segments, { valeursAvant, sansPrix: jours.length - valeursAvant.length })
   }
   input.addEventListener('keydown', (e) => {
+    // Toutes les frappes s'arretent ici : le raccourci de la cellule OUVRE la
+    // saisie, il ne la pilote pas.
+    e.stopPropagation()
     if (e.key === 'Enter') terminer(true)
     if (e.key === 'Escape') terminer(false)
   })

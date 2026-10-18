@@ -43,16 +43,29 @@ function bloc (debut, fin) {
 
 const ISO = '2026-12-10'
 
+// ⚠ LA CELLULE DU TEST EST CELLE DU PRODUIT, ENFANTS COMPRIS.
+// La premiere version de ce fichier posait un `<td>` au contenu textuel nu.
+// `grilleBien` n'en produit JAMAIS : il met toujours un `<span
+// class="cal-nuit__prix">`, et parfois l'icone « nuit orpheline ». C'est ce
+// confort qui a laisse passer un correctif fautif — une garde `e.target !== td`
+// cote cellule, qui tuait 25 a 36 % de la surface cliquable (les chiffres, en
+// plein centre). REVIEW.md regle 8 : tester le cas dangereux, pas sa version
+// confortable.
+const CELLULE_REELLE = (iso, { orpheline = false } = {}) =>
+  `<td class="cal-nuit cal-nuit--ouverte" data-bien="ofuro" data-i="0" data-iso="${iso}">`
+  + (orpheline ? '<span class="cal-orpheline" title="x"><svg class="icon"><use href="#i-alert"/></svg></span>' : '')
+  + '<span class="cal-nuit__prix">—</span></td>'
+
 // Une cellule de la ligne Prix, branchee par le VRAI `brancherPlanning`.
-function cellule ({ lectureSeule = false, peutEcrire = () => true, iso = ISO } = {}) {
+function cellule ({ lectureSeule = false, peutEcrire = () => true, iso = ISO, orpheline = false } = {}) {
   const dom = new JSDOM('<div data-bind="grilles"><table><tr data-ligne-prix>'
-    + `<td class="cal-nuit" data-bien="ofuro" data-i="0" data-iso="${iso}">—</td>`
+    + CELLULE_REELLE(iso, { orpheline })
     + '</tr></table></div>')
   const { window } = dom
   const td = window.document.querySelector('.cal-nuit')
   const journal = { segments: null, popup: 0, toasts: [] }
   const ctx = {
-    etat: { sel: { bien: 'ofuro', a: 0, b: 0 }, biens: [{ id: 'ofuro', base_price: null }],
+    etat: { sel: null, biens: [{ id: 'ofuro', base_price: null }],
       vueMobile: 'rate', lectureSeule, states: { ofuro: { [iso]: { rate: null } } }, inv: {} },
     document: window.document, window, CSS: { escape: (v) => String(v) },
     $: (s) => window.document.querySelector(s),
@@ -81,7 +94,10 @@ function cellule ({ lectureSeule = false, peutEcrire = () => true, iso = ISO } =
     cible.dispatchEvent(ev)
     return ev
   }
-  return { ctx, td, journal, frappe, clic, champ: () => td.querySelector('input') }
+  return { ctx, td, journal, frappe, clic, dom,
+    champ: () => td.querySelector('input'),
+    prix: () => td.querySelector('.cal-nuit__prix'),
+    alerte: () => td.querySelector('.cal-orpheline .icon') }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -90,6 +106,7 @@ function cellule ({ lectureSeule = false, peutEcrire = () => true, iso = ISO } =
 
 test('CONSTAT 8 : les frappes DANS le champ ne sont plus annulees ni avalees', () => {
   const c = cellule()
+  c.ctx.etat.sel = { bien: 'ofuro', a: 0, b: 0 }
   c.ctx.actionPrix([ISO])
   assert.ok(c.champ(), 'le bouton « Prix » ouvre bien un champ')
 
@@ -105,6 +122,7 @@ test('CONSTAT 8 : les frappes DANS le champ ne sont plus annulees ni avalees', (
 
 test('CONSTAT 8 : « Entree » dans le champ enregistre le prix tape', () => {
   const c = cellule()
+  c.ctx.etat.sel = { bien: 'ofuro', a: 0, b: 0 }
   c.ctx.actionPrix([ISO])
   c.champ().value = '150'          // ce que l'hote vient de taper
   const ev = c.frappe(c.champ(), 'Enter')
@@ -119,6 +137,7 @@ test('CONSTAT 8 : « Entree » dans le champ enregistre le prix tape', () => {
 
 test('CONSTAT 8 : « Echap » referme sans rien enregistrer', () => {
   const c = cellule()
+  c.ctx.etat.sel = { bien: 'ofuro', a: 0, b: 0 }
   c.ctx.actionPrix([ISO])
   c.champ().value = '150'
   c.frappe(c.champ(), 'Escape')
@@ -182,4 +201,58 @@ test('les gardes de la cellule tiennent : lecture seule et jour passe', () => {
   const passe = cellule({ iso: '2020-01-01' })
   passe.frappe(passe.td, '7')
   assert.strictEqual(passe.champ(), null, 'jour passe : aucune saisie')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LA REGRESSION QUE LE PREMIER CORRECTIF AVAIT INTRODUITE (review du commit)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('un clic SUR LE PRIX demarre la selection, comme sur le reste de la case', () => {
+  // Le defaut qu'ils ferment : une garde `e.target !== td` posee sur la cellule
+  // rendait la main des que le clic visait le `<span>` des chiffres — soit le
+  // centre de la case, la ou le curseur va. Mesure : 25 a 36 % de la surface
+  // devenue morte, selon la longueur du prix affiche.
+  const c = cellule()
+  const ev = c.clic(c.prix())
+  assert.strictEqual(ev.defaultPrevented, true, 'le cliquer-glisser doit demarrer')
+  assert.deepStrictEqual({ a: c.ctx.etat.sel.a, b: c.ctx.etat.sel.b }, { a: 0, b: 0 })
+})
+
+test('un clic sur l\'icone « nuit orpheline » demarre la selection aussi', () => {
+  const c = cellule({ orpheline: true })
+  const ev = c.clic(c.alerte())
+  assert.strictEqual(ev.defaultPrevented, true)
+  assert.deepStrictEqual({ a: c.ctx.etat.sel.a, b: c.ctx.etat.sel.b }, { a: 0, b: 0 })
+})
+
+test('la lecture seule refuse AUSSI le clic, pas seulement les frappes', () => {
+  // Trou releve en review : retirer la garde `lectureSeule` du `mousedown` ne
+  // faisait rougir aucun test EXECUTANT — seulement une expression reguliere
+  // sur le texte du fichier (tests/lecture-seule.test.js:84).
+  for (const cible of ['td', 'prix']) {
+    const seule = cellule({ lectureSeule: true })
+    seule.clic(cible === 'td' ? seule.td : seule.prix())
+    assert.strictEqual(seule.ctx.etat.sel, null, `lecture seule : aucune selection (${cible})`)
+
+    const sansDroit = cellule({ peutEcrire: () => false })
+    sansDroit.clic(cible === 'td' ? sansDroit.td : sansDroit.prix())
+    assert.strictEqual(sansDroit.ctx.etat.sel, null, `sans droit : aucune selection (${cible})`)
+
+    const passe = cellule({ iso: '2020-01-01' })
+    passe.clic(cible === 'td' ? passe.td : passe.prix())
+    assert.strictEqual(passe.ctx.etat.sel, null, `jour passe : aucune selection (${cible})`)
+  }
+})
+
+test('le harnais rend bien ce que la page rend : le prix est un ENFANT de la case', () => {
+  // ⚠ CE TEST LIT LA SOURCE, et c'est son role : il garde la FIDELITE du
+  // harnais ci-dessus, pas un comportement. Si `grilleBien` cesse de poser ces
+  // enfants, ou en pose d'autres, les tests de clic testeraient une cellule qui
+  // n'existe plus — c'est exactement l'angle mort qui a laisse passer le
+  // correctif fautif. Ce qu'il ne voit pas : un enfant ajoute ailleurs que dans
+  // ce bloc de rendu.
+  const rendu = bloc('const cellules = etat.joursISO.map', 'return `<section class="cal-bien"')
+  assert.match(rendu, /<td class="cal-nuit/, 'la case est bien un td.cal-nuit')
+  assert.match(rendu, /<span class="cal-nuit__prix/, 'elle contient toujours le span du prix')
+  assert.match(rendu, /class="cal-orpheline"/, 'et parfois l\'icone « nuit orpheline »')
 })
