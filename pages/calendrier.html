@@ -120,7 +120,7 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { compteCourant, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
-import { toISO, computeDays, buildStateFromInventory, loadCalendarData, PARAMS }
+import { toISO, computeDays, buildStateFromInventory, loadCalendarData, prixDeBase, PARAMS }
   from '/shared/calendar-core.js'
 import { mapResa, familleSource, LIBELLE_CANAL, libelleStatut, droitsResa, badgeSansEmailVisible,
   TEXTE_SANS_EMAIL, urlConversation, messageCapacite, nuitsEntre, brancherEvaluation }
@@ -313,7 +313,10 @@ function construireEtats (start, end) {
   etat.joursISO = joursISO
   for (const id of etat.choisis) {
     const bien = etat.biens.find(b => b.id === id) || {}
-    const base = Number.isFinite(Number(etat.propsById[id]?.base)) ? Number(etat.propsById[id].base) : (Number(bien.base_price) || null)
+    // ⚠ `Number.isFinite(Number(null))` VALAIT TRUE — donc `base = 0`, et toute
+    // nuit sans tarif s'affichait « 0 € » (constat 7, 18 octobre 2026). La
+    // regle vit maintenant dans le module partage, avec sa raison.
+    const base = prixDeBase(etat.propsById[id]) ?? prixDeBase(bien)
     const dates = joursISO.map(iso => new Date(iso + 'T12:00:00'))
     const st = buildStateFromInventory(dates, etat.inv[id], base)
     const parIso = {}
@@ -1285,7 +1288,9 @@ function ouvrirFormulaire (type, jours, bienForce = null) {
   const du = jours[0]
   const auNuit = jours[jours.length - 1]
   const depart = toISO(new Date(new Date(auNuit + 'T12:00:00').getTime() + 86400000))
-  const prixDefaut = etat.states[bienId]?.[du]?.rate ?? Number(bien.base_price) ?? ''
+  // `Number(bien.base_price)` rendait 0 sur un bien sans prix de base : le
+  // formulaire s'ouvrait a « 0 », que le serveur refuse (constat 7).
+  const prixDefaut = etat.states[bienId]?.[du]?.rate ?? prixDeBase(bien) ?? ''
   ouvrirFeuille(t('cal.add_title'), `
     <div class="msg-tiroir__bloc">
       <div class="msg-filtres" role="group">
