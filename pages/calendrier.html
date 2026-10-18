@@ -834,7 +834,17 @@ function brancherPlanning () {
     td.addEventListener('mousedown', (e) => {
       if (etat.lectureSeule || !peutEcrire('reservations')) return
       if (td.dataset.iso < AUJOURDHUI) return
+      // ⚠ `preventDefault` EMPECHE AUSSI LA MISE AU POINT, ET C'EST CE QUI
+      // TUAIT LE GESTE DIRECT (constat 9, signale par Thierry le 18 octobre
+      // 2026 : « impossible de modifier le prix »). Il est indispensable — sans
+      // lui, le glisser selectionne le TEXTE de la page — mais il laissait le
+      // curseur sur `body`. La case porte pourtant `tabIndex = 0` et le
+      // raccourci A.5 « tape un chiffre pour saisir un prix » : ce raccourci
+      // n'etait donc JAMAIS atteignable a la souris. Mesure au navigateur
+      // reel : apres un clic, `document.activeElement` = BODY, et « 150 »
+      // n'ouvrait aucun champ. On rend la mise au point explicitement.
       e.preventDefault()
+      td.focus()
       glisseEnCours = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
       etat.sel = { ...glisseEnCours }
       peindreSelectionDesktop()
@@ -1023,7 +1033,14 @@ function actionPrix (jours, amorce = '') {
   // l'ancetre n'a aucun predicat a tenir : motif deja employe par
   // apps/yield/prix.html:1893.
   input.addEventListener('mousedown', (e) => e.stopPropagation())
-  input.focus(); input.select()
+  input.focus()
+  // ⚠ `select()` SUR UNE AMORCE EFFACAIT LA PREMIERE TOUCHE (constat 9).
+  // Quand la saisie s'ouvre parce que l'hote a tape un chiffre, ce chiffre est
+  // deja dans le champ : tout selectionner le faisait remplacer par la touche
+  // suivante. Mesure au navigateur reel : « 150 » donnait « 50 ». Sur une
+  // amorce, on pose donc le curseur APRES, et on ne selectionne rien.
+  if (amorce) input.setSelectionRange(input.value.length, input.value.length)
+  else input.select()
   let fini = false
   const terminer = (commit) => {
     if (fini) return
