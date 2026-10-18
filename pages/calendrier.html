@@ -833,6 +833,13 @@ function brancherPlanning () {
   zone.querySelectorAll('[data-ligne-prix] .cal-nuit').forEach(td => {
     td.addEventListener('mousedown', (e) => {
       if (etat.lectureSeule || !peutEcrire('reservations')) return
+      // ⚠ LA CELLULE REND LA MAIN QUAND ELLE EST EN SAISIE (constat 8).
+      // `e.preventDefault()` plus bas empeche la mise au point : un clic DANS
+      // le champ de prix ne lui donnait donc jamais le focus, et repliait la
+      // selection sur un seul jour. La garde de lecture seule reste EN TETE :
+      // tests/lecture-seule.test.js epingle sa place, et un refus d'ecriture
+      // passe avant toute autre consideration.
+      if (e.target !== td) return
       if (td.dataset.iso < AUJOURDHUI) return
       e.preventDefault()
       glisseEnCours = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
@@ -851,6 +858,16 @@ function brancherPlanning () {
       // Memes gardes que mousedown/touchstart/click : lecture seule et jour
       // passe refusent AUSSI au clavier (revue de 6f3d6af).
       if (etat.lectureSeule || !peutEcrire('reservations')) return
+      // ⚠ CE RACCOURCI OUVRE LA SAISIE ; IL NE DOIT PAS LA PILOTER.
+      // Constat 8, signale par Thierry le 18 octobre 2026 : « on ne peut pas
+      // modifier directement le prix ». Les frappes faites DANS le champ
+      // remontaient jusqu'ici, et chacune etait annulee (`preventDefault`)
+      // puis relancait `actionPrix` — qui reconstruisait le champ avec la
+      // SEULE touche frappee. Taper « 150 » laissait « 0 » : chaque chiffre
+      // effacait le precedent. Et « Entree » etait annulee de meme, donc rien
+      // ne s'enregistrait jamais. Mesure avant correctif : 3 frappes annulees
+      // sur 3, enregistrement declenche 0 fois.
+      if (e.target !== td) return
       if (td.dataset.iso < AUJOURDHUI) return
       const chiffre = /^[0-9]$/.test(e.key)
       if (chiffre && etat.vueMobile !== 'rate') return
