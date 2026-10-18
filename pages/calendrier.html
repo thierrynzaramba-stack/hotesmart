@@ -922,13 +922,30 @@ function brancherMobile () {
   // selection -> barre d'actions (§9). Jour passe : rien (garde commune).
   // MULTI-BIENS : chaque case porte SON bien — la popup et la selection
   // visent le bien tape, jamais le premier de la liste.
-  let presse = null, long = false
+  // ⚠ UN DOIGT POSE N'EST JAMAIS IMMOBILE (constat 11, signale par Thierry
+  // le 18 octobre 2026 : « la modification multiple fonctionne sur ordinateur
+  // mais pas sur portable »). L'appui long est la SEULE porte vers une
+  // selection de plusieurs nuits au telephone, et le moindre `touchmove`
+  // l'annulait — garde posee en review pour qu'un defilement ne declenche pas
+  // une selection, mais trop stricte d'un cran.
+  //
+  // Mesure au navigateur reel, derive progressive pendant l'appui :
+  //    0 px -> selection | 3 px -> selection | 10 px -> selection
+  //   20 px -> AUCUNE, l'appui long est perdu
+  //
+  // Sur un telephone, une case fait ~44 px et la main bouge : 20 px de derive
+  // en 450 ms est ordinaire. On distingue donc le TREMBLEMENT du DEFILEMENT
+  // par la distance, pas par le simple fait qu'un doigt ait bouge.
+  const SEUIL_GLISSEMENT = 24   // px : au-dela, c'est un defilement, pas une main qui tient
+  let presse = null, long = false, depart = null
   zone.querySelectorAll('[data-case]').forEach(c => {
     const iso = c.dataset.case
     const bienId = c.dataset.bien
-    c.addEventListener('touchstart', () => {
+    c.addEventListener('touchstart', (e) => {
       if (iso < AUJOURDHUI || etat.lectureSeule || !peutEcrire('reservations')) return
       long = false
+      const t = e.touches && e.touches[0]
+      depart = t ? { x: t.clientX, y: t.clientY } : null
       presse = setTimeout(() => {
         long = true
         etat.sel = { bien: bienId, duIso: iso, auIso: iso }
@@ -938,7 +955,12 @@ function brancherMobile () {
     // Le scroll declenchait l'appui long : move et cancel l'annulent aussi
     // (review).
     c.addEventListener('touchend', () => clearTimeout(presse), { passive: true })
-    c.addEventListener('touchmove', () => clearTimeout(presse), { passive: true })
+    c.addEventListener('touchmove', (e) => {
+      const t = e.touches && e.touches[0]
+      // Sans point de depart lisible, on garde l'ancienne prudence : on annule.
+      if (!depart || !t) return clearTimeout(presse)
+      if (Math.hypot(t.clientX - depart.x, t.clientY - depart.y) > SEUIL_GLISSEMENT) clearTimeout(presse)
+    }, { passive: true })
     c.addEventListener('touchcancel', () => clearTimeout(presse), { passive: true })
     c.addEventListener('click', () => {
       if (iso < AUJOURDHUI) return
@@ -975,11 +997,12 @@ function verdictToast (r) {
   if (r.push_failed) return toast(t('cal.push_failed'), { erreur: true, duree: 12000 })
   if (r.local_only) return toast(t('cal.local_only'), { duree: 8000 })
   if (r.warnings && r.warnings.length) toast(String(r.warnings[0]), { duree: 8000 })
-  if (r.task_ids && (r.task_ids.restrictions || r.task_ids.availability)) {
-    const ids = [r.task_ids.restrictions, r.task_ids.availability].filter(Boolean).join(', ')
-    try { navigator.clipboard.writeText(ids) } catch {}
-    toast(t('cal.task_copied', { ids }), { duree: 6000 })
-  }
+  // Les identifiants de tache Channex ne sont PLUS affiches (demande de
+  // Thierry, 18 octobre 2026). Ils servaient a suivre une poussee pendant la
+  // mise au point du canal ; pour l'hote, « enregistre » suffit, et un
+  // identifiant technique copie dans son presse-papier sans qu'il l'ait
+  // demande est du bruit. Le serveur continue de les rendre (`task_ids`) : ils
+  // restent lisibles dans le journal, la ou ils ont un sens.
 }
 // Enregistre des segments et propose « Annuler » : les valeurs PRECEDENTES
 // des dates touchees sont relevees AVANT l'ecriture, et « Annuler » les
