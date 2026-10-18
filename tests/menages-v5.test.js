@@ -688,3 +688,22 @@ test('config : l\'état « À jour » ne se conclut pas sur une lecture manquant
   assert.ok(corps.includes('etat.menagesBulle'),
     'et la fenêtre lue est celle de la bulle, pas le planning que l\'hôte fait varier')
 })
+
+test('l\'appli installée n\'encadre plus la V5 de terracotta', () => {
+  // ⚠ CE QUE LA REFONTE AVAIT OUBLIÉ. Tout l'écran est passé en blanc et noir,
+  // mais la barre du téléphone et l'écran de démarrage de l'appli INSTALLÉE
+  // restaient orange : on ouvrait une appli blanche dans un cadre terracotta.
+  // Ces deux valeurs-là ne vivent pas dans le CSS — un `<meta>` et un manifeste
+  // JSON ne lisent pas les variables — donc rien ne les emportait avec la charte.
+  const pwa = lire('apps/menages/public.html')
+  const meta = /<meta name="theme-color" content="([^"]+)">/.exec(pwa)
+  assert.ok(meta, 'la page déclare une couleur de barre')
+  assert.equal(meta[1].toUpperCase(), '#FFFFFF',
+    'la barre suit `--surface` du thème V5')
+
+  const manifeste = sansCommentaires(lire('api/manifest.js'))
+  assert.ok(!/#C97B5C/i.test(manifeste),
+    'le manifeste de l\'appli de la prestataire ne porte plus le terracotta')
+  assert.match(manifeste, /background_color: SURFACE/)
+  assert.match(manifeste, /theme_color: SURFACE/)
+})

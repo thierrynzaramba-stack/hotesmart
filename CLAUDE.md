@@ -440,12 +440,15 @@ redirection viendra sur go explicite de Thierry. Restent : recette mobile a
 poursuivre, etapes 2-4 de la spec (volets Prix/Evenements/Bilan/Marche,
 marques ~ et ✎). Banc local : ~/.cache/hotesmart-banc (hors depot).
 
-Chantier prestataires EN COURS. Lot 3 (assignation par journee) : 3.1 dispos
-RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la garde** — `requires_ack`
-remplace `rang === 1` partout, proposition posee a l'approche du depart
-(7 jours) et notifiee, escalade automatique au refus et a l'expiration en
-sautant qui a deja refuse, alerte sur trou de garde seulement. Restent 3.4
-(ecran planning de garde) et 3.5 (jours attitres + « Mes disponibilites »).
+Chantier prestataires EN COURS. Lot 3 (assignation par journee) **LIVRE EN
+ENTIER** : 3.1 dispos RRULE, 3.2 `garde.js`, **3.3 le moteur consomme la
+garde** — `requires_ack` remplace `rang === 1` partout, proposition posee a
+l'approche du depart (7 jours) et notifiee, escalade automatique au refus et a
+l'expiration en sautant qui a deja refuse, alerte sur trou de garde seulement ;
+**3.4 l'ecran du planning de garde** et **3.5 les jours attitres + « Mes
+disponibilites »**, tous deux en production le 14 octobre 2026 dans la refonte
+V5. `apps/menages/garde.html` est ferme depuis, ses seize garde-fous transposes
+(voir plus bas).
 
 **LOT MENAGES V5 EN PRODUCTION le 14 octobre 2026 (66064f9).** La page
 `/menages` (bulle « A traiter », calendrier de garde, volet Equipe, fiche

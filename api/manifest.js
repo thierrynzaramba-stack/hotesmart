@@ -6,7 +6,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 )
 
-const TERRACOTTA = '#C97B5C'
+// ⚠ LES COULEURS DE L'APPLI INSTALLÉE SUIVENT LA REFONTE V5. Elles sont
+// restées terracotta pendant toute la refonte : l'écran de démarrage et la
+// barre système encadraient d'orange une appli devenue blanche et noire. Ce
+// c'est le jeton `--surface` de `shared/theme.css`, écrit en clair — un
+// manifeste JSON ne lit pas les variables CSS. Le terracotta reste la couleur
+// de marque des écrans de l'hôte ; il n'a plus cours dans l'appli de la
+// prestataire.
+const SURFACE = '#FFFFFF'
 const SCOPE = '/apps/menages/'
 
 function buildManifest({ name, shortName, token, idSuffix }) {
@@ -19,8 +26,8 @@ function buildManifest({ name, shortName, token, idSuffix }) {
     id: `${SCOPE}?cleaner=${encodeURIComponent(idSuffix || 'default')}`,
     display: 'standalone',
     orientation: 'any',
-    background_color: TERRACOTTA,
-    theme_color: TERRACOTTA,
+    background_color: SURFACE,
+    theme_color: SURFACE,
     lang: 'fr',
     icons: [
       { src: `${SCOPE}icons/icon-192.png`, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
