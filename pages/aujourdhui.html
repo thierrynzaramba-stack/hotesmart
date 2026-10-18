@@ -116,7 +116,7 @@ const etat = {
   aujourdHui: R.jourParis(),
   biens: [], bookings: [], menages: [], prestataires: [],
   menagesOk: null, etatsArrivee: {}, conversations: new Set(),
-  taches: [], tachesOk: null,
+  taches: [], tachesOk: null, tachesTronquees: false,
   alarmes: [],
   parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
   compteurs: []
@@ -316,19 +316,46 @@ async function chargerEtatsArrivee () {
 }
 
 // ─── 3. À valider ───────────────────────────────────────────────────────────
+// Le budget de lignes de la lecture ci-dessous. Nommé, parce qu'un nombre nu
+// au bout d'une requête ne dit pas qu'il peut mordre.
+const LIMITE_TACHES = 200
+
 async function chargerTaches () {
   if (!peutLire('messages')) return
   // Lecture directe, comme la messagerie : agent_tasks a une policy RLS
   // (`can_read(user_id, 'messages', property_id)`), le périmètre s'applique.
-  const { data, error } = await supabase.from('agent_tasks')
-    .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
+  //
+  // ⚠ `departure` EST LU, ET CE N'EST PAS UN DÉTAIL. `tachesOuvertes` s'en sert
+  // comme REPLI quand le séjour n'est pas dans `etat.bookings` — première page
+  // de `/api/menages`, droit `menages` absent, panne. La colonne ne figurait pas
+  // dans le `select` : le repli ne pouvait JAMAIS s'armer ici. Le test qui le
+  // prouve (`tests/aujourdhui.test.js`) passe la date à la main à la fonction
+  // pure — vert pendant que l'écran en était incapable.
+  //
+  // ⚠ ET LE SERVEUR ÉCARTE DÉJÀ CE QUE LA RÈGLE ÉCARTERAIT. Sans ce filtre, les
+  // tâches à séjour TERMINÉ — que rien ne referme jamais — mangeaient le budget :
+  // mesure du 18 octobre 2026 en production, 191 ouvertes pour une limite de 200,
+  // dont 98 à séjour passé, la plus ancienne du 23 mai. Au plafond, la page
+  // n'aurait lu que les 200 plus RÉCENTES, et une tâche ancienne à séjour futur
+  // serait sortie du badge « À valider » sans erreur ni trace.
+  const { data, error, count } = await supabase.from('agent_tasks')
+    .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, departure', { count: 'exact' })
     .eq('user_id', compteCourant())
     .in('status', ['pending', 'pending_validation'])
+    .or(`departure.is.null,departure.gte.${etat.aujourdHui}`)
     .order('created_at', { ascending: false })
-    .limit(200)
+    .limit(LIMITE_TACHES)
   if (error) { logger.error('Aujourdhui', 'taches', error); etat.tachesOk = false; return }
   etat.taches = data || []
   etat.tachesOk = true
+  // ⚠ UNE TRONCATURE NE SE TAIT PAS. `count` est le total RÉEL côté serveur :
+  // s'il dépasse ce qu'on a lu, le badge sous-compte. On le dit au journal au
+  // lieu de rendre un chiffre qui a l'air juste — même discipline que la
+  // lecture bornée de `bookings_snapshot` (CLAUDE.md).
+  etat.tachesTronquees = Number.isFinite(count) && count > etat.taches.length
+  if (etat.tachesTronquees) {
+    logger.warn('Aujourdhui', `taches tronquees : ${etat.taches.length} lues sur ${count}`)
+  }
 }
 function carteTache (tache, sombre) {
   const titre = tache.status === 'pending_validation' && tache.guest_name

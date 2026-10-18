@@ -339,3 +339,53 @@ test('l\'alarme de surreservation et son acquittement sont repris sur l\'accueil
   assert.ok(/method: 'POST'[\s\S]{0,200}\/api\/incidents-acquitter|\/api\/incidents-acquitter'[\s\S]{0,60}method: 'POST'/.test(html))
   assert.ok(html.includes("peutEcrire('reservations')"), 'le bouton d\'acquittement suit le droit de l\'endpoint')
 })
+
+// ─── LE BADGE « À VALIDER » NE PEUT PAS SOUS-COMPTER EN SILENCE ─────────────
+// Trois defauts au meme endroit, mesures en production le 18 octobre 2026 :
+//   1. la requete ne lisait pas `departure`, donc le REPLI de `tachesOuvertes`
+//      — celui que la revue avait fait ajouter — ne pouvait jamais s'armer ;
+//   2. les taches a sejour TERMINE, que rien ne referme, mangeaient le budget
+//      de lignes : 191 ouvertes pour une limite de 200, dont 98 inutiles, la
+//      plus ancienne du 23 mai ;
+//   3. au plafond, la page n'aurait lu que les 200 plus RECENTES, sans un mot.
+//
+// ⚠ LE PREMIER TEST DERIVE SA LISTE DE LA FONCTION ELLE-MEME. Recopier les
+// noms de champs ici ferait un garde-fou qui derive a son tour : le jour ou
+// `tachesOuvertes` lira un champ de plus, c'est ce test qui doit le dire.
+
+function selectDesTaches () {
+  const html = lire('pages/aujourdhui.html')
+  const i = html.indexOf("from('agent_tasks')")
+  assert.ok(i > 0, 'la lecture des taches doit exister')
+  const m = html.slice(i).match(/\.select\(\s*'([^']+)'/)
+  assert.ok(m, 'la lecture des taches doit avoir un select explicite')
+  return { bloc: html.slice(i, i + 1600), champs: m[1].split(',').map(s => s.trim()) }
+}
+
+test('LE TEST QUI COMPTE : la requete lit TOUS les champs que la regle utilise', () => {
+  const { champs } = selectDesTaches()
+  const regle = lire('shared/aujourdhui.js')
+  const d = regle.indexOf('export function tachesOuvertes')
+  const corps = regle.slice(d, regle.indexOf('\n}', d))
+  // Les champs de la tache que la fonction lit vraiment : `t.<champ>`.
+  const lus = [...new Set([...corps.matchAll(/\bt\.(\w+)/g)].map(m => m[1]))]
+  assert.ok(lus.includes('departure'), 'temoin : la regle doit bien lire departure')
+  for (const champ of lus) {
+    assert.ok(champs.includes(champ),
+      `tachesOuvertes lit « ${champ} » que la requete de l'accueil ne demande pas : la regle s'applique sur du vide`)
+  }
+})
+
+test('le serveur ecarte deja les sejours termines, au lieu de remplir le budget', () => {
+  const { bloc } = selectDesTaches()
+  assert.match(bloc, /\.or\(`departure\.is\.null,departure\.gte\.\$\{etat\.aujourdHui\}`\)/,
+    'sans ce filtre, les taches a sejour passe mangent la limite')
+  assert.match(bloc, /\.limit\(LIMITE_TACHES\)/, 'le budget est nomme, pas un nombre nu')
+})
+
+test('une troncature se DIT : le compte exact est demande, et compare', () => {
+  const { bloc } = selectDesTaches()
+  assert.match(bloc, /\{\s*count:\s*'exact'\s*\}/, 'le total reel doit etre demande au serveur')
+  assert.match(bloc, /count\s*>\s*etat\.taches\.length/, 'et compare a ce qu on a lu')
+  assert.match(bloc, /logger\.warn/, 'un badge qui sous-compte ne se tait pas')
+})
