@@ -1343,7 +1343,14 @@ const cfg = {
   dispo: null,        // réponse de /api/disponibilites (null = pas lu)
   eval: null,         // réglages d'évaluation (bus avis), null = pas lu
   erreur: false,
-  occupe: false
+  occupe: false,
+  // ⚠ CE QUI VOLE, ET CE QUI ATTEND (constat de la revue de 70f805d). Les
+  // pastilles de jours s'enregistrent au clic : tant que l'envoi n'est pas
+  // revenu, `dispo` porte encore l'état d'AVANT, et une seconde case cochée
+  // pendant ce temps se perdait en silence. Ces deux champs ferment les deux
+  // trous — l'un peint ce qui part, l'autre garde ce qui n'a pas pu partir.
+  reglesEnVol: null,
+  reglesEnAttente: null
 }
 
 async function ouvrirConfig (profilId) {
@@ -1436,7 +1443,19 @@ async function gesteConfig (fn) {
     await chargerConfig().catch(() => {})
   } finally {
     cfg.occupe = false
+    // ⚠ L'OPTIMISTE RETOMBE AVANT LE REPEINT, pas après : `chargerConfig` vient
+    // de rapporter ce que le serveur a réellement enregistré — ou, en cas de
+    // refus, ce qu'il avait déjà. Laisser le lot en vol par-dessus ferait
+    // afficher un réglage qui n'est parti nulle part.
+    cfg.reglesEnVol = null
     renderConfig()
+    // ⚠ ET LE GESTE MIS EN ATTENTE PART MAINTENANT. Il est drainé ICI, et pas
+    // dans `ecrireRegles`, parce que le verrou peut avoir été pris par
+    // n'importe quel autre geste de la fiche : sans ce drain, une case cochée
+    // pendant l'enregistrement d'un autre réglage ne serait jamais envoyée.
+    const suite = cfg.reglesEnAttente
+    cfg.reglesEnAttente = null
+    if (suite) ecrireRegles(suite.lots, suite.alterne, suite.focus)
   }
 }
 
@@ -1791,7 +1810,7 @@ function htmlSelfDispo () {
 // L'avertissement, lui, n'apparaît qu'au moment où l'hôte décoche la dernière.
 function htmlSemaines () {
   const peut = (cfg.fiche.droits || {}).prestataires === 'write'
-  const regles = ((cfg.dispo || {}).regles || []).filter(r => r.active !== false)
+  const regles = reglesCourantesConfig().filter(r => r.active !== false)
   // ⚠ LES RÈGLES QU'ON NE SAIT PAS RELIRE SE DISENT, ET FERMENT LE GESTE. Les
   // remplacer les effacerait sans que personne ne sache ce qu'elles portaient
   // (même garde que la PWA, qui les signale aussi).
@@ -1834,8 +1853,16 @@ function htmlSemaines () {
   } else {
     const semA = new Set(), semB = new Set()
     for (const r of lues) {
-      const cible = (Number(r.cadence) >= 2 && !semaineAncree(r.ancre)) ? semB : semA
-      for (const j of (r.jours || [])) cible.add(Number(j))
+      // ⚠ UNE RÈGLE HEBDOMADAIRE APPARTIENT AUX DEUX SEMAINES (constat de la
+      // revue de 70f805d) — exactement ce que dit `lotsPwa` sur sa page. La
+      // ranger dans la seule ligne A la faisait disparaître de la ligne B ;
+      // le clic suivant réécrivait les deux lots en quinzaine, et ces jours-là
+      // étaient perdus une semaine sur deux. Le cas vient d'un réglage mixte —
+      // données anciennes, ou l'action `poserRegle` encore vivante.
+      const cibles = Number(r.cadence) >= 2
+        ? [semaineAncree(r.ancre) ? semA : semB]
+        : [semA, semB]
+      for (const j of (r.jours || [])) for (const c of cibles) c.add(Number(j))
     }
     corps = ligne('A', semA, false) + ligne('B', semB, false)
   }
@@ -2521,9 +2548,28 @@ function brancherConfig () {
 // efface : une récurrence que cet écran n'affiche pas serait perdue sans que
 // personne ne sache ce qu'elle portait. Le geste est alors fermé, et l'écran
 // le dit (`reg_opaques`).
+// ⚠ ET CELLE-CI LIT `cfg.dispo`, JAMAIS LE LOT EN VOL. C'est une garde sur ce
+// que la BASE porte : le modèle optimiste, lui, ne contient que des règles
+// qu'on sait relire, donc la lire ferait sauter la garde au second clic.
 function reglesOpaquesConfig () {
   return ((cfg.dispo || {}).regles || [])
     .filter(r => r.active !== false && !Array.isArray(r.jours))
+}
+
+// ⚠ UN SEUL ENDROIT DIT CE QUE LES PASTILLES MONTRENT, et il connaît le lot en
+// vol (constat de la revue de 70f805d). Pendant un envoi, `cfg.dispo` porte
+// encore l'état d'AVANT : repeindre dessus décochait sous le doigt le jour
+// qu'on venait de cocher, et le geste suivant partait d'un écran faux. On
+// reproduit donc ce que le serveur fait — il remplace TOUTES les règles
+// actives par les lots reçus — et rien d'autre. Même geste que sa page
+// (`appliquerRegles`), pour la même raison.
+function reglesCourantesConfig () {
+  const v = cfg.reglesEnVol
+  if (!v) return ((cfg.dispo || {}).regles || [])
+  return (v.lots || []).filter(l => Array.isArray(l.jours) && l.jours.length)
+    .map((l, i) => ({ id: 'vol-' + i, active: true, label: '',
+                      jours: l.jours.slice().sort((a, b) => a - b),
+                      cadence: v.alterne ? 2 : 1, ancre: l.ancre }))
 }
 
 function joursCochesConfig (lot) {
@@ -2531,13 +2577,20 @@ function joursCochesConfig (lot) {
     .map(i => Number(i.value))
 }
 
-// ⚠ ON GARDE L'ANCRAGE EXISTANT. Le déplacer à chaque modification inverserait
-// son rythme : elle viendrait la semaine où elle ne devait pas venir, et
-// personne ne verrait pourquoi.
+// ⚠ LA LIGNE A EST LA SEMAINE COURANTE, ET SON ANCRE DOIT LE DIRE (constat de
+// la revue de 70f805d). Cette fonction rendait l'ancre de la PREMIÈRE règle de
+// quinzaine trouvée, sans regarder sa parité : une semaine sur deux, c'était
+// celle de la ligne B. L'écriture envoyait alors les jours de A sur la semaine
+// de B et inversement — ses venues se décalaient d'une semaine, et rien à
+// l'écran ne disait pourquoi. L'affichage, lui, a toujours été juste :
+// `semaineAncree` compare chaque règle à AUJOURD'HUI, et `reg_ancrage` nomme
+// la semaine A par les dates de la semaine en cours.
+//
+// ⚠ ET LE RYTHME N'EST PAS DÉPLACÉ POUR AUTANT. Les jours de la ligne A sont,
+// par construction, ceux qui tombent CETTE semaine : les réécrire ancrés sur
+// le lundi de cette semaine reproduit la même alternance, à la même parité.
 function ancreConfig () {
-  const r = ((cfg.dispo || {}).regles || [])
-    .find(x => x.active !== false && Number(x.cadence) >= 2 && x.ancre)
-  return lundiDeLaSemaine(r ? r.ancre : AUJOURDHUI)
+  return lundiDeLaSemaine(AUJOURDHUI)
 }
 
 function semaineSuivante (iso) {
@@ -2552,7 +2605,25 @@ function semaineSuivante (iso) {
 // haut du panneau. On note laquelle, et on la lui rend. Même garde que sa page.
 async function ecrireRegles (lots, alterne, focus = null) {
   const opaques = reglesOpaquesConfig()
-  if (opaques.length) { toast(t('menages.equipe.config.reg_opaques', { n: opaques.length })); return }
+  // ⚠ ON REPEINT AVANT DE SORTIR (constat de la revue de 70f805d). Le
+  // navigateur a déjà coché la case : sortir sans repeindre laissait à l'écran
+  // un jour qui a l'air enregistré et qui n'est parti nulle part, jusqu'au
+  // prochain chargement de la fiche.
+  if (opaques.length) {
+    renderConfig()
+    toast(t('menages.equipe.config.reg_opaques', { n: opaques.length }))
+    return
+  }
+  // ⚠ UNE SECONDE CASE PENDANT L'ENVOI NE SE PERD PLUS (constat de la revue de
+  // 70f805d). `gesteConfig` sort en silence quand une écriture est déjà en vol :
+  // cocher lundi puis mardi enregistrait lundi seul, sans un mot — alors que
+  // cocher plusieurs jours d'affilée est l'usage NORMAL de ces cases. On garde
+  // le dernier lot voulu, et un seul suffit : il vient du DOM, qui porte TOUT
+  // ce qui est coché à cet instant.
+  if (cfg.occupe) { cfg.reglesEnAttente = { lots, alterne, focus }; return }
+  // L'écran bascule tout de suite : `reglesCourantesConfig` peint les pastilles
+  // depuis ce lot tant qu'il vole.
+  cfg.reglesEnVol = { lots, alterne }
   await gesteConfig(async () => {
     await poster('/api/disponibilites', {
       action: 'reglerJours', provider_id: cfg.profilId,
@@ -2576,7 +2647,7 @@ function lotsDeLEcran (alterne) {
 }
 
 function enQuinzaineConfig () {
-  return ((cfg.dispo || {}).regles || [])
+  return reglesCourantesConfig()
     .some(r => r.active !== false && Number(r.cadence) >= 2)
 }
 

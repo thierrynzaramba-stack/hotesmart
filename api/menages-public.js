@@ -2335,9 +2335,10 @@ async function reglerMesJours (req, res, token) {
   // ⚠ LA MECANIQUE VIT DANS `lib/cleaning/regles.js`, AVEC LA VALIDATION
   // (16 octobre 2026). Elle y est partie le jour ou la fiche de l'hote a eu
   // besoin du MEME geste : valider tous les lots avant d'ecrire quoi que ce
-  // soit, INSERER PUIS DESACTIVER PAR ID — l'ordre est la garde, un echec
-  // laisse l'union des deux reglages et jamais zero regle — et rendre la FORME
-  // posee pour que l'appelant puisse annoncer ce qui a change.
+  // soit, REMPLACER EN UNE TRANSACTION — la fonction Postgres desactive par id
+  // puis insere, et c'est tout ou rien : il n'y a plus ni union des deux
+  // reglages, ni zero regle active — et rendre la FORME posee pour que
+  // l'appelant puisse annoncer ce qui a change.
   // Les deux endpoints ne different plus que par leurs gardes et par la
   // `source` : ici `prestataire`, c'est ELLE qui pose.
   const r = await remplacerRegles(supabase, {

@@ -56,12 +56,25 @@ const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 's
   console.log(`Projet Supabase : ${PROJET} — lecture seule, aucune écriture`)
   console.log(`Aujourd'hui (Paris) : ${auj}\n`)
 
-  const { data, error } = await supabase.from('provider_availability_rules')
-    .select('id, user_id, provider_id, rrule, label, active, source, created_at')
-    .eq('active', true)
-  if (error) { console.error('Lecture impossible :', error.message); process.exit(2) }
-
-  const actives = data || []
+  // ⚠ ON PAGINE, ET CE N'EST PAS DU ZELE (constat de la revue de 70f805d).
+  // PostgREST borne une lecture sans `range` a 1000 lignes SANS LEVER : le
+  // script aurait annonce « 2 regles sur 2 » en ayant lu la moitie de la base,
+  // et c'est exactement la troncature muette que ce depot a deja payee sur
+  // `bookings_snapshot`. Une MESURE qui ne sait pas si elle a tout lu ne
+  // mesure rien.
+  const actives = []
+  const PAS = 1000
+  for (let de = 0; ; de += PAS) {
+    const { data, error } = await supabase.from('provider_availability_rules')
+      .select('id, user_id, provider_id, rrule, label, active, source, created_at')
+      .eq('active', true)
+      // Un ordre STABLE, sans quoi deux pages peuvent se recouvrir ou se sauter.
+      .order('id', { ascending: true })
+      .range(de, de + PAS - 1)
+    if (error) { console.error('Lecture impossible :', error.message); process.exit(2) }
+    actives.push(...(data || []))
+    if (!data || data.length < PAS) break
+  }
   const lues = actives.map(r => ({ ...r, forme: lireRrule(r.rrule) }))
   const illisibles = lues.filter(r => !r.forme)
   const quinzaine = lues.filter(r => r.forme && Number(r.forme.cadence) >= 2)

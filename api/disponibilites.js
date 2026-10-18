@@ -25,6 +25,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission, verifierSession } = require('../lib/require-permission')
 const { lireRrule, cleJour, estDisponible, congeCouvrant } = require('../lib/cleaning/availability')
+const { apresChangementDeRegles } = require('../lib/cleaning/apres-changement-regles')
 // ⚠ LA REGLE RECURRENTE EST VALIDEE EN UN SEUL ENDROIT, partage avec la PWA
 // (`api/menages-public.js`) depuis le 15 septembre 2026.
 const { validerRegle, libelle, remplacerRegles,
@@ -435,7 +436,40 @@ async function reglerJours (req, res, userId, providerId) {
     console.error('[disponibilites] reglage des jours echec', r.erreur, r.detail || '')
     return res.status(503).json({ error: 'Service temporairement indisponible' })
   }
+  // ⚠ LES MENAGES DEJA PROPOSES SUR LES JOURS RETIRES REVIENNENT AU MOTEUR
+  // (constat de la revue de 70f805d). Ce rattrapage existait pour la PWA
+  // seulement : quand la prestataire se retirait du samedi, les propositions
+  // du samedi lui etaient reprises. L'hote remplace desormais les memes jours
+  // depuis la fiche, et c'est devenu le chemin le plus frequent — sans ce
+  // bloc, il retirait le samedi et une proposition du samedi suivant restait
+  // chez quelqu'un dont il venait de dire qu'elle ne vient plus ce jour-la.
+  //
+  // ⚠ ON REPREND, MAIS ON N'ANNONCE PAS. L'alerte dit a l'hote ce que la
+  // prestataire a change ; la lui envoyer apres SON PROPRE geste serait a la
+  // fois faux et bruyant. La raison ecrite sur le menage, elle, nomme le bon
+  // auteur.
+  //
+  // ⚠ ET ON L'ATTEND, comme sa page : une fonction serverless qui a repondu
+  // peut etre gelee avant d'avoir fini son travail de fond.
+  const prenom = await prenomDuProfil(userId, providerId)
+  await apresChangementDeRegles({
+    userId, providerId, prenom,
+    avant: (r.avant || []).map(x => lireRrule(x.rrule)).filter(Boolean),
+    apres: r.formes,
+    annoncer: false,
+    raison: 'Ce jour a ete retire de ses jours habituels depuis sa fiche : ' +
+            'proposition reprise, a reattribuer.'
+  })
   return res.status(200).json({ success: true, poses: r.poses })
+}
+
+// Le prenom sert aux phrases du rattrapage. ⚠ IL NE FAIT PAS ECHOUER LE GESTE :
+// les jours sont deja enregistres quand on arrive ici.
+async function prenomDuProfil (userId, providerId) {
+  const { data, error } = await supabase.from('profiles')
+    .select('first_name').eq('id', providerId).eq('account_user_id', userId).maybeSingle()
+  if (error || !data) return null
+  return data.first_name || null
 }
 
 async function poserRegle (req, res, userId, providerId) {

@@ -4283,10 +4283,17 @@ if ("serviceWorker" in navigator && !APERCU) {
     const cette = lundiDe(AUJ())
     const suivante = isoJ(new Date(dJour(cette).getTime() + 7 * 86400000))
     if (!alt) return [{ jours: joursCoches('simple'), depuis: cette }]
-    // ⚠ ON GARDE L'ANCRAGE EXISTANT s'il y en a un : le deplacer a chaque
-    // modification inverserait son rythme une fois sur deux.
-    const { a } = lotsPwa()
-    const d0 = (a && a.ancre) ? lundiDe(a.ancre) : cette
+    // ⚠ LE LOT A EST LA SEMAINE COURANTE, ET SON ANCRE LE DIT (constat de la
+    // revue de 70f805d, trouve sur la fiche de l'hote). Cette ligne lisait
+    // `a.ancre` — que `fusion()` ne pose jamais : elle valait donc toujours
+    // `cette`, et c'etait le bon resultat par accident. La fiche, elle, lisait
+    // l'ancre de la premiere regle de quinzaine trouvee, sans regarder sa
+    // parite : une semaine sur deux, les lots A et B partaient echanges.
+    // On ecrit ici ce que le code faisait deja, pour que la prochaine version
+    // de `fusion` ne reintroduise pas le defaut en ajoutant une `ancre`.
+    // Le rythme n'est pas deplace pour autant : les jours du lot A sont, par
+    // construction, ceux qui tombent CETTE semaine.
+    const d0 = cette
     const d1 = isoJ(new Date(dJour(d0).getTime() + 7 * 86400000))
     return [{ jours: joursCoches('a'), depuis: d0 }, { jours: joursCoches('b'), depuis: d1 }]
   }

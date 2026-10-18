@@ -5029,3 +5029,119 @@ votre hôte » en trois mots.
 et sa page, avec **les deux vraies règles de production**. Les deux écrans
 disent enfin la même chose — ligne A = M · V · S · D, ligne B = V · S · D.
 Jusqu'au 16 octobre, la fiche les affichait inversées.
+
+## Les sept constats de la revue de l'étape 2 (18 octobre 2026)
+
+La revue de `70f805d` n'a trouvé **aucun défaut de sécurité** : le cloisonnement
+des deux endpoints, le plafond unique, l'absence de repli silencieux quand la
+fonction Postgres manque et la migration elle-même sont ressortis conformes.
+Elle a trouvé **sept défauts fonctionnels**, dont trois qui vivent dans ce que
+le DOM devient APRÈS un clic — c'est-à-dire là où aucun des tests de l'étape 2
+ne regardait.
+
+### ⚠ LE PLUS GRAVE : UNE SEMAINE SUR DEUX, LES LIGNES A ET B PARTAIENT ÉCHANGÉES
+
+`ancreConfig()` rendait l'ancre de la **première** règle de quinzaine trouvée,
+sans regarder sa parité. Or les deux règles d'un réglage en quinzaine sont
+posées dans le même geste : rien ne dit laquelle la base rend en premier. Une
+fois sur deux, c'était celle de la ligne **B**. L'écriture envoyait alors les
+jours de A ancrés sur la semaine de B, et réciproquement : **ses venues se
+décalaient de sept jours, sans cause visible à l'écran**.
+
+L'affichage, lui, n'a jamais menti sur ce point — `semaineAncree` compare chaque
+règle à AUJOURD'HUI, et la phrase d'ancrage nomme la semaine A par les dates de
+la semaine en cours. C'est l'ÉCRITURE qui contredisait l'affichage.
+
+Le correctif tient en une ligne : **le lot A est la semaine en cours**, donc son
+ancre est le lundi de cette semaine. Le rythme n'est pas déplacé pour autant —
+les jours de la ligne A sont, par construction, ceux qui tombent cette semaine.
+Le commentaire « on garde l'ancrage existant » décrivait une prudence juste
+(déplacer une ancre inverse un rythme) appliquée au mauvais endroit : ici,
+« garder l'ancrage » et « reprendre la parité d'aujourd'hui » sont la même chose.
+
+⚠ **Sa page portait la même ligne, et elle était juste par accident** :
+`lotsASoumettre` lisait `a.ancre`, que `fusion()` ne pose jamais — la valeur
+retombait donc toujours sur le lundi courant. On l'a écrit explicitement, pour
+que la prochaine version de `fusion` ne réintroduise pas le défaut en ajoutant
+une `ancre`.
+
+### Une règle HEBDOMADAIRE appartient aux DEUX semaines
+
+En mode quinzaine, la fiche rangeait toute règle de cadence 1 dans la seule
+ligne A. La ligne B n'en montrait rien, et le clic suivant réécrivait les deux
+lots en quinzaine : **ces jours-là disparaissaient une semaine sur deux**. Sa
+page garde déjà explicitement ce cas (`lotsPwa`) ; la fiche, non. Le cas est
+atteignable depuis des données anciennes et depuis l'action `poserRegle`,
+toujours vivante.
+
+⚠ **Avant ce lot, la branche était morte** : `cadence` était comparé à la chaîne
+`'quinzaine'`, qui ne vaut jamais un nombre. Corriger la comparaison a donc
+réveillé un code jamais exécuté — c'est le prix normal d'un défaut d'affichage
+qu'on répare, et la raison pour laquelle on le relit en entier plutôt que de
+corriger la seule ligne fautive.
+
+### Cocher trois jours d'affilée est l'usage NORMAL, et il perdait deux gestes
+
+`gesteConfig` commence par `if (cfg.occupe) return` : la seconde case cochée
+pendant que la première vole sortait **en silence** — pas de message, pas de
+réessai. Pire, le repeint du verrou relisait `cfg.dispo`, qui porte encore
+l'état d'AVANT : le premier jour **se décochait sous le doigt**.
+
+Deux pièces, toutes deux empruntées à sa page :
+- **un modèle optimiste**, en un seul endroit (`reglesCourantesConfig`), qui
+  reproduit ce que le serveur fait — il remplace TOUTES les règles actives par
+  les lots reçus — et rien d'autre ;
+- **une file d'attente d'un seul lot**, drainée dans le `finally` de
+  `gesteConfig`. Un seul lot suffit, et c'est un choix : le lot vient du DOM,
+  qui porte déjà tout ce qui est coché à cet instant. Le drain vit dans
+  `gesteConfig` et pas dans `ecrireRegles`, parce que le verrou peut avoir été
+  pris par **n'importe quel** autre geste de la fiche.
+
+⚠ **La garde des règles illisibles, elle, continue de lire `cfg.dispo`** : c'est
+une garde sur ce que la BASE porte. La faire lire le modèle optimiste — qui ne
+contient que des règles qu'on sait relire — l'aurait fait sauter au second clic.
+
+### L'hôte aussi doit rendre au moteur les propositions des jours retirés
+
+`apresChangementDeRegles` n'existait que pour la PWA : quand la prestataire se
+retirait du samedi, les ménages **proposés** le samedi lui étaient repris.
+Depuis l'étape 2, l'hôte remplace les mêmes jours depuis la fiche — et c'est
+devenu le chemin le plus fréquent. Il retirait le samedi pendant qu'une
+proposition du samedi suivant restait chez quelqu'un dont il venait de dire
+qu'elle ne vient plus ce jour-là.
+
+Deux options nouvelles sur le module, et chacune dit son sens :
+- **`annoncer`** — la REPRISE vaut dans les deux sens, l'ANNONCE non. Dire à
+  l'hôte « elle ne travaille plus le samedi » juste après qu'il l'a décidé
+  lui-même est faux, et c'est un message de plus qu'on apprend à ne pas lire.
+- **`raison`** — ce qui s'écrit sur le ménage rendu au moteur nomme le bon
+  auteur : « ce jour a été retiré de ses jours habituels depuis sa fiche ».
+
+⚠ **Ce qui manque encore, et qui est une décision produit, pas un oubli** : rien
+ne prévient la PRESTATAIRE que son hôte a changé ses jours habituels. Le canal
+existe (`notifier-prestataire.js`), le message n'existe pas. À trancher.
+
+### Trois constats mineurs, et celui qui se répète
+
+- **La case restait cochée après un refus** (règle illisible) : le navigateur
+  avait déjà coché, et on sortait sans repeindre. L'écran montrait un jour
+  enregistré qui n'était parti nulle part, jusqu'au prochain chargement.
+- **Le script de diagnostic lisait sans borne** : PostgREST tronque à 1000
+  lignes **sans lever**. Une MESURE qui ne sait pas si elle a tout lu ne mesure
+  rien — c'est la troncature muette déjà payée sur `bookings_snapshot`, pour la
+  troisième fois dans ce dépôt. Le script pagine désormais, avec un ordre stable.
+- **Un commentaire disait l'inverse du code** : `api/menages-public.js` décrivait
+  encore « insérer PUIS désactiver — l'ordre est la garde », alors que la
+  fonction Postgres désactive puis insère dans une transaction. Le commentaire
+  avait survécu au changement qu'il décrivait, et il argumentait contre lui.
+
+### Ce que cette revue a appris sur les tests
+
+Les trois défauts d'écran étaient **invisibles pour tous les tests existants** :
+ils lisaient `pages/menages.html` comme du TEXTE, et ont vu que les cases
+étaient là. Ils ne pouvaient pas voir ce que le DOM devient après un clic.
+
+`tests/menages-fiche-regles-dom.test.js` monte donc la vraie fiche dans jsdom,
+exécute le vrai script de la page, et juge des GESTES. Les sept tests rougissent
+contre `70f805d`, chacun sur l'assertion qui nomme son défaut, et restent verts
+à J+1, J+3, J+15, J+45, J+60, J+75, J+120, J+200 et J+400.
