@@ -378,9 +378,21 @@ test('LE TEST QUI COMPTE : la requete lit TOUS les champs que la regle utilise',
 
 test('le serveur ecarte deja les sejours termines, au lieu de remplir le budget', () => {
   const { bloc } = selectDesTaches()
-  assert.match(bloc, /\.or\(`departure\.is\.null,departure\.gte\.\$\{etat\.aujourdHui\}`\)/,
+  assert.match(bloc, /\.or\(`departure\.is\.null,departure\.gte\.\$\{borneDepart\}`\)/,
     'sans ce filtre, les taches a sejour passe mangent la limite')
   assert.match(bloc, /\.limit\(LIMITE_TACHES\)/, 'le budget est nomme, pas un nombre nu')
+  // ⚠ ET IL RESTE MOINS STRICT QUE LA REGLE. `agent_tasks.departure` est un
+  // instantane jamais rafraichi : un sejour prolonge laisse une date perimee,
+  // que la regle cliente ignore (la reservation est en cours) mais qu'un
+  // filtre cale sur le jour meme aurait supprimee. La marge est ce qui rend
+  // cette requete sure (constat 1 de la revue de f0bdfc9).
+  const page = lire('pages/aujourdhui.html')
+  assert.match(page, /const MARGE_DEPART_JOURS = (\d+)/, 'la marge doit etre nommee')
+  const marge = Number(page.match(/const MARGE_DEPART_JOURS = (\d+)/)[1])
+  assert.ok(marge >= 30, `la marge (${marge} j) doit couvrir une prolongation de sejour`)
+  // La borne se calcule JUSTE AVANT la requete, donc hors du bloc lu ci-dessus.
+  assert.match(page, /const borneDepart = R\.ajouterJours\(etat\.aujourdHui, -MARGE_DEPART_JOURS\)/,
+    'la borne se calcule depuis la marge, jamais depuis aujourd hui seul')
 })
 
 test('une troncature se DIT : le compte exact est demande, et compare', () => {

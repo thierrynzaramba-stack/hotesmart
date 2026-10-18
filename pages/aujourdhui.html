@@ -116,7 +116,7 @@ const etat = {
   aujourdHui: R.jourParis(),
   biens: [], bookings: [], menages: [], prestataires: [],
   menagesOk: null, etatsArrivee: {}, conversations: new Set(),
-  taches: [], tachesOk: null, tachesTronquees: false,
+  taches: [], tachesOk: null,
   alarmes: [],
   parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
   compteurs: []
@@ -320,6 +320,26 @@ async function chargerEtatsArrivee () {
 // au bout d'une requête ne dit pas qu'il peut mordre.
 const LIMITE_TACHES = 200
 
+// ⚠ LE FILTRE DU SERVEUR EST VOLONTAIREMENT PLUS LÂCHE QUE LA RÈGLE. C'est
+// `tachesOuvertes` qui décide seule ce qui est ouvert ; le serveur ne fait que
+// jeter ce qui est CERTAINEMENT mort, pour ne pas gâcher le budget de lignes.
+//
+// Pourquoi cette marge existe (constat 1 de la revue de f0bdfc9) : la colonne
+// `agent_tasks.departure` est un INSTANTANÉ posé à l'insertion, et aucun
+// writer ne la rafraîchit — `lib/booking-changes.js` détecte pourtant les
+// changements de dates. Un voyageur qui prolonge du 20 au 25 octobre laisse
+// donc une tâche qui dit encore « 20 octobre ». La règle cliente, elle, la
+// garde : sa réservation est en cours dans `etat.bookings`, et `departure`
+// n'est qu'un repli. Un filtre serveur calé sur le jour même l'aurait
+// supprimée — le voyageur dans le logement, la proposition de l'IA sans
+// réponse, et le badge muet. C'est exactement la sous-estimation que ce
+// chantier ferme, reprise par l'autre bout.
+//
+// 60 jours : au-delà d'une prolongation plausible en courte durée. Mesure du
+// 18 octobre 2026 en production — 149 lignes gardées, 51 de marge sur le
+// budget, et les tâches de mai qui sortent.
+const MARGE_DEPART_JOURS = 60
+
 async function chargerTaches () {
   if (!peutLire('messages')) return
   // Lecture directe, comme la messagerie : agent_tasks a une policy RLS
@@ -332,17 +352,20 @@ async function chargerTaches () {
   // prouve (`tests/aujourdhui.test.js`) passe la date à la main à la fonction
   // pure — vert pendant que l'écran en était incapable.
   //
-  // ⚠ ET LE SERVEUR ÉCARTE DÉJÀ CE QUE LA RÈGLE ÉCARTERAIT. Sans ce filtre, les
+  // ⚠ ET LE SERVEUR JETTE CE QUI EST CERTAINEMENT MORT. Sans ce filtre, les
   // tâches à séjour TERMINÉ — que rien ne referme jamais — mangeaient le budget :
   // mesure du 18 octobre 2026 en production, 191 ouvertes pour une limite de 200,
   // dont 98 à séjour passé, la plus ancienne du 23 mai. Au plafond, la page
   // n'aurait lu que les 200 plus RÉCENTES, et une tâche ancienne à séjour futur
   // serait sortie du badge « À valider » sans erreur ni trace.
+  // La marge de `MARGE_DEPART_JOURS` est ce qui garde ce filtre MOINS strict
+  // que la règle : lire son commentaire avant d'y toucher.
+  const borneDepart = R.ajouterJours(etat.aujourdHui, -MARGE_DEPART_JOURS)
   const { data, error, count } = await supabase.from('agent_tasks')
     .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, departure', { count: 'exact' })
     .eq('user_id', compteCourant())
     .in('status', ['pending', 'pending_validation'])
-    .or(`departure.is.null,departure.gte.${etat.aujourdHui}`)
+    .or(`departure.is.null,departure.gte.${borneDepart}`)
     .order('created_at', { ascending: false })
     .limit(LIMITE_TACHES)
   if (error) { logger.error('Aujourdhui', 'taches', error); etat.tachesOk = false; return }
@@ -352,8 +375,13 @@ async function chargerTaches () {
   // s'il dépasse ce qu'on a lu, le badge sous-compte. On le dit au journal au
   // lieu de rendre un chiffre qui a l'air juste — même discipline que la
   // lecture bornée de `bookings_snapshot` (CLAUDE.md).
-  etat.tachesTronquees = Number.isFinite(count) && count > etat.taches.length
-  if (etat.tachesTronquees) {
+  //
+  // ⚠ RIEN N'EST POSÉ DANS L'ÉTAT POUR AUTANT. Une première version gardait un
+  // `etat.tachesTronquees` que AUCUN rendu ne lisait (constat 3 de la revue de
+  // f0bdfc9) : de l'état mort vaut moins que pas d'état du tout. Le dire à
+  // l'écran demande une phrase, donc une clé i18n dans les trois langues —
+  // fichiers tenus par le lot ménages V5. Noté au registre, dette 70.
+  if (Number.isFinite(count) && count > etat.taches.length) {
     logger.warn('Aujourdhui', `taches tronquees : ${etat.taches.length} lues sur ${count}`)
   }
 }
