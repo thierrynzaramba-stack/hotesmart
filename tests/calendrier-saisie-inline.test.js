@@ -409,3 +409,65 @@ test('une selection sur un AUTRE bien ne retient pas la touche', () => {
   assert.deepStrictEqual({ bien: c.ctx.etat.sel.bien, a: c.ctx.etat.sel.a, b: c.ctx.etat.sel.b },
     { bien: 'ofuro', a: 1, b: 1 }, 'on bascule sur le bien frappe')
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CE QUE LE CURSEUR A OUVERT, ET QUE PERSONNE N'AVAIT NOMME (review de 758bdca)
+//
+// `blur -> terminer(true)` existe depuis l'origine : quitter le champ
+// ENREGISTRE. Tant que les cases avalaient la mise au point, un clic sur une
+// autre case ne declenchait rien — le champ restait ouvert. En rendant cette
+// mise au point, toute la ligne Prix est devenue une surface d'enregistrement.
+//
+// Mesure de la review, au navigateur reel :
+//   AVANT : champ ouvert sur « 103 », clic sur une autre case -> aucun POST
+//   APRES : le champ perd le curseur -> POST /api/calendar {"rate":103}
+//
+// C'EST LA SEMANTIQUE D'UN TABLEUR, et elle se defend : on quitte une case,
+// on valide. Elle a un revers mesure : taper « 1 » (premier chiffre de 199)
+// puis cliquer ailleurs envoie `rate: 1`. La garde du prix plancher
+// (lib/yield/prix-plancher.js) refuse avant toute ecriture sous
+// `prix_minimum`, et le bandeau propose « Annuler » — mais un prefixe
+// AU-DESSUS du plancher (« 199 » pour 1990) part sans bruit.
+//
+// Ces tests ne tranchent pas : ils EPINGLENT le comportement, pour qu'il soit
+// une decision et non une surprise de recette. S'il change, ils rougissent.
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('quitter le champ ENREGISTRE le prix tape — contrat d\'origine, epingle', () => {
+  const c = cellule({ nb: 4 })
+  c.ctx.etat.sel = { bien: 'ofuro', a: 0, b: 0 }
+  c.ctx.actionPrix([ISO_N(0)])
+  c.champ().value = '199'
+  c.champ().dispatchEvent(new c.dom.window.Event('blur'))
+
+  assert.ok(c.journal.segments, 'le prix tape part a l\'enregistrement')
+  assert.strictEqual(c.journal.segments[0].rate, 199)
+})
+
+test('quitter le champ VIDE n\'enregistre rien et ne laisse pas la case cassee', () => {
+  const c = cellule({ nb: 4 })
+  c.ctx.etat.sel = { bien: 'ofuro', a: 0, b: 0 }
+  c.ctx.actionPrix([ISO_N(0)])
+  c.champ().dispatchEvent(new c.dom.window.Event('blur'))
+
+  assert.strictEqual(c.journal.segments, null, 'rien ne part')
+  assert.strictEqual(c.champ(), null, 'le champ est referme')
+  assert.match(c.caseN(0).innerHTML, /cal-nuit__prix/, 'et la case retrouve son affichage')
+})
+
+test('le prix ne part qu\'UNE fois, meme si le champ se ferme deux fois', () => {
+  // `fini` garde l'idempotence : un blur qui suit un Entree ne doit pas
+  // renvoyer le meme prix au canal.
+  const c = cellule({ nb: 4 })
+  c.ctx.etat.sel = { bien: 'ofuro', a: 0, b: 0 }
+  c.ctx.actionPrix([ISO_N(0)])
+  const champ = c.champ()
+  champ.value = '199'
+  c.frappe(champ, 'Enter')
+  const premier = c.journal.segments
+  c.journal.segments = null
+  champ.dispatchEvent(new c.dom.window.Event('blur'))
+
+  assert.ok(premier, 'le premier enregistrement est parti')
+  assert.strictEqual(c.journal.segments, null, 'le second ne part pas')
+})

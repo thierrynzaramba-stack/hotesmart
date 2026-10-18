@@ -844,7 +844,12 @@ function brancherPlanning () {
       // reel : apres un clic, `document.activeElement` = BODY, et « 150 »
       // n'ouvrait aucun champ. On rend la mise au point explicitement.
       e.preventDefault()
-      td.focus()
+      // `preventScroll` : sans lui, mettre la case au point FAIT DEFILER la
+      // page quand elle est rognee par le bord — mesure de la review, 6 px sur
+      // une case coupee de 6 px, jusqu'a une hauteur de case. On ne clique
+      // jamais ce qu'on ne voit pas, et la navigation au clavier (Tab) ne passe
+      // pas par ici : le reglage ne coute aucune accessibilite.
+      td.focus({ preventScroll: true })
       glisseEnCours = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
       etat.sel = { ...glisseEnCours }
       peindreSelectionDesktop()
@@ -1077,13 +1082,15 @@ function actionPrix (jours, amorce = '') {
   // apps/yield/prix.html:1893.
   input.addEventListener('mousedown', (e) => e.stopPropagation())
   input.focus()
+  const poserLeCurseur = () => {
   // ⚠ `select()` SUR UNE AMORCE EFFACAIT LA PREMIERE TOUCHE (constat 9).
   // Quand la saisie s'ouvre parce que l'hote a tape un chiffre, ce chiffre est
   // deja dans le champ : tout selectionner le faisait remplacer par la touche
   // suivante. Mesure au navigateur reel : « 150 » donnait « 50 ». Sur une
   // amorce, on pose donc le curseur APRES, et on ne selectionne rien.
-  if (amorce) input.setSelectionRange(input.value.length, input.value.length)
-  else input.select()
+    if (amorce) input.setSelectionRange(input.value.length, input.value.length)
+    else input.select()
+  }
   let fini = false
   const terminer = (commit) => {
     if (fini) return
@@ -1108,6 +1115,13 @@ function actionPrix (jours, amorce = '') {
     if (e.key === 'Escape') terminer(false)
   })
   input.addEventListener('blur', () => terminer(true))
+  // ⚠ LA SELECTION DU TEXTE SE POSE EN DERNIER — releve en review.
+  // `setSelectionRange` peut lever (`InvalidStateError`) sur certains types de
+  // champ. Posee avant les ecouteurs, une levee laissait le champ ouvert SANS
+  // son `stopPropagation` ni son enregistrement au blur : le constat 8
+  // ressuscite a l'identique, plus un `td.innerHTML` jamais restitue. Ici, le
+  // champ est deja complet quand on y touche.
+  poserLeCurseur()
 }
 // Fermer / Rouvrir a la vente : regles A.5 MOT POUR MOT.
 async function fermer (jours) {
