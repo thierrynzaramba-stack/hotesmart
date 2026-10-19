@@ -199,6 +199,72 @@ l'entrée Calendrier pointe sur `/biens/<premier bien>/calendrier` et a toujours
 
 ## Partie 2 — ce que la base sait d'un bien
 
-À venir : colonnes de `properties`, tables rattachées, et pour chaque donnée son
-origine (partenaire ou nous), qui l'écrit, qui la lit. C'est le relevé qui sert
-la dette 59.
+Relevé sur la base de **recette** (`ortyofzzdsthlhqmzsnq`), en lecture seule,
+plus un balayage de `api/`, `lib/` et `scripts/`. **61 fichiers de `api/` et
+`lib/` touchent `properties`.**
+
+> ⚠ **CE QUE CE RELEVÉ NE VOIT PAS.** Une écriture assemblée dans un objet
+> (`updates.prix_minimum = …`) n'apparaît pas dans un balayage qui cherche des
+> clés littérales. J'ai donc vérifié une par une toutes les colonnes annoncées
+> « sans écrivain », et le tableau ci-dessous porte le résultat vérifié, pas la
+> sortie brute. La leçon vaut pour la suite du chantier : une mesure qui ne sait
+> pas ce qu'elle rate ne mesure rien.
+
+### La table : 55 colonnes
+
+**Ce qui vient de nous — l'hôte le saisit** (fenêtre « Modifier » et création) :
+`name`, `address`, `city`, `zip_code`, `country`, `capacity`, `base_price`,
+`prix_minimum`, `included_guests`, `extra_guest_fee`, `currency`.
+Écrites **uniquement** par `api/channel-property.js` (POST et PATCH), lues
+partout — `name` par 29 fichiers, `base_price` par 7, `prix_minimum` par 3.
+
+**Ce qui vient du partenaire** : `provider`, `provider_property_id`,
+`provider_room_type_id`, `provider_rate_plan_id`, `channel_ready`,
+`channel_ready_at`, `active_at`, `last_fullsync_at`, `messages_backfilled`,
+et — pour les biens hérités — `checkin_time`, `checkout_time` écrits par
+`lib/cron-beds24-props.js`. Écrites par la couche sync
+(`api/channel-events.js`, `lib/cron-channel-sync.js`,
+`lib/migration-provisionner.js`), jamais par l'écran.
+
+**Ce que nos apps écrivent** : `photo_url` (`api/property-photo.js`),
+`automation_paused` / `paused_at` / `paused_reason` (le kill switch,
+`api/property-automation.js`), `rate_sync_mode` (`lib/migration-mode-prix.js`),
+`pilote_tarifaire`, `pilote_fenetre_type`, `pilote_fenetre_valeur`
+(`api/yield-pilote.js`), `zone_scolaire` (import des vacances),
+`orphan_*` (nuits orphelines).
+
+### Les colonnes mortes ou muettes — six, et elles expliquent la dette 59
+
+| Colonne | État vérifié | Conséquence |
+|---|---|---|
+| `ota_connect_status` | **écrite et lue par un seul fichier**, `api/channel-property.js`. L'hôte la passe de `draft` à `requested` ; **rien ne la passe jamais à `live`** | c'est la **dette 59** : la liste des canaux reliés n'existe que chez le partenaire, interrogé en direct à chaque affichage |
+| `airbnb_listing_id` | **ni écrite, ni lue**, nulle part | colonne morte |
+| `cleaning_assignment_mode` | **ni écrite, ni lue**, nulle part | colonne morte, alors que le mode d'affectation existe bel et bien dans l'app ménage — ailleurs |
+| `channel_ready` / `channel_ready_at` | écrites par `api/channel-events.js`, **jamais lues** | on note qu'un bien est prêt, personne ne s'en sert |
+| `inventory_units` | **lue par 6 fichiers**, écrite par aucun | tout le parc vit sur la valeur par défaut ; le jour où un bien aura 2 unités, rien ne saura l'écrire |
+| `timezone`, `property_type` | envoyées **au partenaire** à la création, jamais relues de notre base | notre copie peut diverger de la sienne sans que rien ne le dise |
+
+### Les tables rattachées : 51, et **deux clés différentes**
+
+| Clé | Nombre | Exemples |
+|---|---|---|
+| `property_id` **TEXT** = la clé du partenaire | **25** | `bookings_snapshot`, `menages`, `messages`, `taxes_sejour`, `access_codes`, `property_locks`, `property_cleaning_providers`, `public_tokens` |
+| `property_id` **UUID** = `properties.id`, notre clé | **25** | `calendar_inventory`, `prix_hote`, `grille_hote`, `fermetures`, `ota_reviews`, `yield_*`, `booking_links`, `marche_biens` |
+
+**C'est la cause racine déjà connue** (`docs/kb/` — identité du bien contre clé
+du partenaire) : la moitié du cœur est indexée sur un identifiant qui appartient
+au partenaire. Un bien qui change de partenaire change de clé, et toutes les
+tables TEXT perdent leur rattachement — c'est ce que le re-keying contourne, sans
+le corriger.
+
+**Pour la fiche V5, la conséquence est directe** : afficher « tout ce qu'on sait
+d'un bien » demande de joindre deux familles de tables qui ne se joignent pas de
+la même façon. La fiche ne peut pas se contenter d'un `property_id` ; elle
+portera les deux, ou elle affichera faux.
+
+### Ce que la dette 59 demande, en une phrase
+
+Une table du cœur qui porte **les canaux reliés par bien**, écrite par la couche
+sync (jamais par un écran), lue par la fiche — au lieu d'un appel au partenaire
+à chaque affichage et d'une colonne `ota_connect_status` que personne ne met à
+jour.
