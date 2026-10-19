@@ -142,6 +142,57 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
   prudence. L'ajout réellement nécessaire faisait 17 lignes.
 - Détail et corollaire : REVIEW.md règle 14.
 
+## RÈGLE ABSOLUE — UN MASQUAGE PAR DROIT NE SUFFIT JAMAIS
+
+- **Tout élément masqué parce que l'utilisateur n'y a pas droit se double d'une
+  GARDE SERVEUR.** Le masquage est un confort d'interface, pas une protection :
+  il tombe sur une feuille de style absente, sur un `display` d'auteur, sur un
+  navigateur qui n'applique pas la règle — et il ne tombe jamais devant une
+  requête faite à la main.
+- **Le test qui tranche** : si on retire le masquage et qu'on clique, le serveur
+  refuse-t-il ? Si la réponse n'est pas « oui, en 403 », il n'y a pas de garde.
+- La règle qui fait que `hidden` masque — `[hidden] { display: none !important; }`
+  — est **en tête des trois feuilles du site** (`public/style.css`,
+  `shared/theme.css`, `shared/ui.css`) et **en ligne** sur les quatorze pages
+  qui n'en chargent aucune. Pas d'`@import` : il ajoute une requête bloquante
+  par feuille. Et en ligne plutôt qu'un fichier partagé, parce que
+  `pages/book.html` doit rester autonome (marque blanche, embarquable) et que
+  deux pages de l'app prestataire doivent tenir hors ligne.
+- **C'est `tests/masquage-hidden.test.js` qui tient la cohérence** : il résout
+  les feuilles de chaque page, suit leurs `@import`, ajoute ses blocs `<style>`,
+  et refuse toute page hors de portée — en exigeant une règle *effective*
+  (`!important` ou sélecteur composé ; une règle nue perd contre une classe de
+  même spécificité déclarée après). Il compare aussi les trois copies au
+  caractère, pour qu'une divergence soit un rouge et non une découverte.
+
+**Pourquoi c'est une règle absolue.** `hidden` est un attribut, et le navigateur
+le traduit par une règle de SA feuille — `[hidden] { display: none }`. Toute
+déclaration d'AUTEUR l'emporte sur elle, parce que la spécificité ne se compare
+pas entre origines. Et une règle `[hidden]` nue ne suffit pas non plus :
+`[hidden]` et `.btn` ont la même spécificité, donc l'ordre de déclaration
+tranche, et la règle du composant vient après. D'où le `!important`.
+
+**Vécu, trois fois le même défaut.** `apps/yield/index.html` (relevé en review),
+puis `pages/avis.html` — « le bouton de saisie restait visible, y compris pour
+un membre `avis: read` » —, puis `pages/biens.html` le 19 octobre 2026 :
+« + Ajouter un bien », masqué par `btn.hidden = !estTitulaireCourant` avec en
+commentaire « sinon la création partirait sur le compte du MEMBRE », était
+**visible et cliquable** pour un membre délégué.
+
+**Et la troisième fois, le serveur ne refusait pas non plus.** Mesuré sur
+staging : un POST de création avec le jeton d'un membre rendait 400 — le refus
+de la *validation*, qui vient après la garde — et non 403. La garde était
+`requirePermission({ domaine: 'reglages', niveau: 'write' })` sans
+`compteDelegue` : sans ressource désignée et sans ce drapeau, le compte cible
+retombe sur l'appelant, et tout utilisateur authentifié est titulaire de son
+propre compte. **Elle ne filtrait rien, pour personne.** Coût du geste : un bien
+sur le compte du membre, et une propriété provisionnée chez le partenaire.
+
+Les deux premières occurrences avaient été corrigées page par page, en ajoutant
+la règle manquante — et `shared/ui.css` annonçait même l'avoir « fermé ICI pour
+toute la classe de défauts », dans une feuille que 4 pages sur 45 chargeaient.
+Détail et audit complet : docs/kb/profils-et-droits.md §13.
+
 ## RÈGLE ABSOLUE — UN SECRET NE PASSE JAMAIS PAR LE TERMINAL
 
 - **Un secret s'écrit directement dans son fichier cible.** Il ne s'affiche pas,
