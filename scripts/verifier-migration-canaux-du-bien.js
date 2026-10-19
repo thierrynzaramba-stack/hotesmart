@@ -1,0 +1,144 @@
+#!/usr/bin/env node
+// scripts/verifier-migration-canaux-du-bien.js
+// La migration migrations/2026-10-19-canaux-du-bien.sql est-elle appliquee ?
+//
+// ⚠ IL NE SUFFIT PAS DE DEMANDER « la table existe-t-elle ? ». Une table peut
+// exister sans sa RLS, sans son unicite ou sans sa cle etrangere : l'appel
+// passerait, et la premiere ecriture reelle ferait la difference — en
+// production, sur les canaux de quelqu'un. `create table if not exists`
+// reussit en silence sur une table a la forme differente.
+//
+// ON L'INTERROGE DONC PAR SON COMPORTEMENT :
+//   1. la table se lit, et ses 16 colonnes sont la ;
+//   2. la RLS est posee : la cle PUBLIQUE ne lit rien (elle n'est le
+//      proprietaire d'aucune ligne) et ne peut pas ecrire ;
+//   3. la cle etrangere refuse un bien inconnu ;
+//   4. l'unicite refuse deux fois le meme canal sur le meme bien ;
+//   5. `mappe_pour_ce_bien` accepte `null` — c'est tout le sujet.
+// Les points 3 a 5 ECRIVENT : ce script REFUSE donc la production, et nettoie
+// ce qu'il a pose.
+//
+//   ENV_FILE=/home/thierry/hotesmart/.env.staging \
+//     node scripts/verifier-migration-canaux-du-bien.js
+
+require('dotenv').config({ path: process.env.ENV_FILE || '.env.staging' })
+const { createClient } = require('@supabase/supabase-js')
+
+const URL = process.env.SUPABASE_URL
+const KEY = process.env.SUPABASE_SERVICE_KEY
+const ANON = process.env.SUPABASE_ANON_KEY
+if (!URL || !KEY) {
+  console.error('SUPABASE_URL et SUPABASE_SERVICE_KEY sont requis.')
+  process.exit(2)
+}
+const PROJET = (URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''
+const PROD = 'cjmrizpdyhrcurmgyrhs'
+if (PROJET === PROD) {
+  console.error(`REFUS : ${PROJET} est la PRODUCTION. Ce script ecrit — staging seulement.`)
+  process.exit(2)
+}
+const sb = createClient(URL, KEY)
+
+const COLONNES = ['id', 'user_id', 'property_id', 'provider', 'provider_property_id',
+  'provider_channel_id', 'ota', 'titre', 'actif', 'mappe_pour_ce_bien',
+  'mappings_pour_ce_bien', 'listing_url', 'vu_le', 'disparu_le', 'cree_le', 'mis_a_jour_le']
+const FAUX_UUID = '00000000-0000-0000-0000-000000000000'
+const MARQUE = 'VERIF-MIGRATION'
+
+;(async () => {
+  console.log(`Projet Supabase : ${PROJET} (production refusee)`)
+  let ko = 0
+  let bien = null
+
+  // 1. La table et ses colonnes.
+  {
+    const { error } = await sb.from('canaux_du_bien').select(COLONNES.join(', ')).limit(1)
+    if (error) {
+      console.error('✗ table absente ou colonnes manquantes :', error.message)
+      ko++
+    } else console.log(`✓ la table existe, et ses ${COLONNES.length} colonnes repondent`)
+  }
+
+  // 2. La RLS.
+  if (ANON) {
+    const pub = createClient(URL, ANON)
+    const { data, error } = await pub.from('canaux_du_bien').select('id').limit(1)
+    // ⚠ UNE TABLE ABSENTE N'EST PAS UNE RLS QUI MORD. Sans ce cas, le script
+    // annoncait « la cle publique LIT des lignes : 0 » sur une base ou la
+    // migration n'est tout simplement pas passee — un message faux, sur un
+    // point de securite. Un verificateur qui crie a tort finit ignore.
+    if (error && /schema cache|does not exist/i.test(error.message)) {
+      console.error('✗ RLS non eprouvee : la table est absente')
+      ko++
+    } else if (error && /permission|denied|rls/i.test(error.message)) {
+      console.log('✓ la cle publique est refusee')
+    } else if (!error && (!data || !data.length)) {
+      console.log('✓ la cle publique ne lit aucune ligne (RLS par proprietaire)')
+    } else {
+      console.error('✗ la cle publique LIT des lignes :', (data || []).length)
+      ko++
+    }
+    const { error: eW } = await pub.from('canaux_du_bien')
+      .insert({ user_id: FAUX_UUID, property_id: FAUX_UUID, provider: 'channex',
+                provider_property_id: 'X', provider_channel_id: 'X' })
+    if (eW && /schema cache|does not exist/i.test(eW.message)) {
+      console.error('✗ ecriture publique non eprouvee : la table est absente')
+      ko++
+    } else if (eW) console.log('✓ la cle publique ne peut pas ecrire')
+    else { console.error('✗ la cle publique a ECRIT'); ko++ }
+  } else {
+    console.log('· SUPABASE_ANON_KEY absente : RLS non eprouvee')
+  }
+
+  // 3. La cle etrangere.
+  {
+    const { error } = await sb.from('canaux_du_bien').insert({
+      user_id: FAUX_UUID, property_id: FAUX_UUID, provider: 'channex',
+      provider_property_id: MARQUE, provider_channel_id: MARQUE })
+    if (error && /foreign key|violates/i.test(error.message)) {
+      console.log('✓ un bien inconnu est refuse (cle etrangere)')
+    } else {
+      console.error('✗ un bien inconnu a ete ACCEPTE :', error ? error.message : '(aucune erreur)')
+      ko++
+    }
+  }
+
+  // Un vrai bien, pour les deux derniers points.
+  {
+    const { data } = await sb.from('properties').select('id, user_id').limit(1).maybeSingle()
+    if (!data) { console.log('· aucun bien sur cette base : unicite et null non eprouves') }
+    else bien = data
+  }
+
+  if (bien) {
+    const ligne = {
+      user_id: bien.user_id, property_id: bien.id, provider: 'channex',
+      provider_property_id: MARQUE, provider_channel_id: MARQUE,
+      mappe_pour_ce_bien: null
+    }
+    // 5. `null` est accepte.
+    const { error: e1 } = await sb.from('canaux_du_bien').insert(ligne)
+    if (e1) { console.error('✗ insertion impossible :', e1.message); ko++ }
+    else console.log('✓ `mappe_pour_ce_bien` accepte null')
+
+    // 4. L'unicite.
+    if (!e1) {
+      const { error: e2 } = await sb.from('canaux_du_bien').insert(ligne)
+      if (e2 && /duplicate|unique/i.test(e2.message)) {
+        console.log('✓ le meme canal deux fois sur le meme bien est refuse')
+      } else {
+        console.error('✗ l unicite ne tient pas :', e2 ? e2.message : '(aucune erreur)')
+        ko++
+      }
+    }
+
+    const { error: eC } = await sb.from('canaux_du_bien')
+      .delete().eq('provider_channel_id', MARQUE)
+    console.log(eC ? '⚠ nettoyage incomplet : ' + eC.message : '✓ rien ne reste sur la base')
+  }
+
+  console.log(ko === 0
+    ? `\nMigration 2026-10-19-canaux-du-bien APPLIQUEE sur ${PROJET}.`
+    : `\n${ko} verification(s) en echec sur ${PROJET}.`)
+  process.exit(ko === 0 ? 0 : 1)
+})().catch((e) => { console.error('Erreur :', e.message); process.exit(2) })

@@ -95,12 +95,44 @@ rafraichirTousLesCanaux({ maintenant, maxBiens }) → bilan
 
 | Déclencheur | Fréquence | Pourquoi |
 |---|---|---|
-| **Cycle horaire** du cron | **une fois par heure et par bien** | les canaux changent quand un humain agit, pas toutes les cinq minutes. À 4 biens c'est 96 appels/jour ; à 100 biens, 2 400 — mesuré avant d'ouvrir plus grand |
+| **Cycle horaire** du cron | **une fois par heure et par COMPTE** | un seul appel suffit pour tout le compte — mesuré, voir ci-dessous |
 | **Après un geste qui change le mapping** | **immédiat** | fin du parcours Airbnb ou Booking, création ou retrait d'un mapping, démappage : l'hôte vient d'agir, il regarde l'écran |
-| **Bouton « Actualiser »** sur la fiche | à la demande, **borné à 1 par minute et par bien** | pour l'hôte qui vient de connecter une annonce chez l'OTA |
+| **Bouton « Actualiser »** | **seulement quand l'écran affiche « non vérifié depuis le… »** (plus de 24 h), borné à 1 par minute et par compte | décision de Thierry : pas de bouton en temps normal, il n'apparaît que lorsqu'il sert à quelque chose |
 
 Le cron est à `*/5` : le cycle horaire se tient par un `vu_le` plus vieux
 qu'une heure, pas par un minuteur séparé — rien à planifier de neuf.
+
+### Ce que la mesure a montré (19 octobre 2026, GET seulement)
+
+Question posée : faut-il un appel par bien, ou un par compte ? **Mesuré en
+lecture seule sur le compte réel, aucune écriture :**
+
+```
+GET /channels  ->  200, meta = { total: 3, limit: 10, page: 1 }
+```
+
+- **un seul appel rend tout le compte**, paginé par 10 ;
+- chaque canal porte **`properties[]`** — les biens qui lui sont rattachés chez
+  le partenaire — **et `rate_plans[]`** avec leur `rate_plan_id` ;
+- **aucun en-tête de débit** n'est renvoyé. À un appel par heure et par compte,
+  on est très loin de toute limite, et `lib/channels/` rejoue déjà un 429 en
+  respectant `retry-after` ;
+- la mesure confirme le piège de septembre : le canal Airbnb du compte porte
+  **trois biens** à lui seul. `is_active` est bien une propriété du canal.
+
+**On pagine, et ce n'est pas du zèle** : `limit` vaut 10 par défaut. Trois
+canaux tiennent sur une page aujourd'hui ; le jour où un compte en aura douze,
+une lecture sans pagination en oublierait deux **sans lever**. Ce dépôt a déjà
+payé cette troncature muette sur `bookings_snapshot`.
+
+### Le rattachement canal → bien se lit chez NOUS
+
+`rate_plans[]` ne porte **pas** de `property_id` : seulement des
+`rate_plan_id`. Le lien vers un bien se lit dans
+`property_channel_rate_plans` (12 lignes sur le compte mesuré), qui porte
+`property_id` **UUID** et `provider_rate_plan_id`. C'est déjà la source que
+`api/channel-mapping` utilise, et c'est la bonne : c'est celle qui a **créé**
+les mappings. Le writer ne change donc pas la règle, il la déplace.
 
 ### Si le partenaire ne répond pas
 
@@ -198,8 +230,14 @@ Le déroulé est le vôtre, et il ne change pas :
 | `timezone`, `property_type` | envoyées **au partenaire** à la création, jamais relues | **garder, et les relire** : notre copie peut diverger de la sienne sans que rien ne le dise. Un écart se mesure, il ne se suppose pas |
 | `ota_listing_urls` | écrite et lue par un seul fichier | **garder** jusqu'à ce que `canaux_du_bien.listing_url` la remplace, puis retirer |
 
-**Aucune de ces six ne se touche dans ce lot.** Les retraits se font quand la
-table neuve a fait ses preuves, pas avant.
+**AUCUNE SUPPRESSION NI MODIFICATION DE COLONNE DANS CE CHANTIER** (décision de
+Thierry, 19 octobre 2026). Elles sont listées ici comme **à traiter**, et c'est
+tout :
+
+- **à retirer plus tard**, par une migration à part et après vérification :
+  `cleaning_assignment_mode`, `airbnb_listing_id`, `ota_listing_urls` ;
+- **à brancher dans le lot Logements** : `inventory_units` et `channel_ready` ;
+- **à relire de notre base** : `timezone` et `property_type`.
 
 ### La double clé TEXT / UUID
 
@@ -216,12 +254,29 @@ il faudra le poser.
 
 ---
 
-## 8. Ce que je demande avant d'écrire une ligne
+## 8. Les décisions prises (19 octobre 2026)
 
-1. **le nom de la table** : `canaux_du_bien` vous va, ou vous préférez autre
-   chose ? (jamais une marque, c'est acquis) ;
-2. **la fréquence horaire** : une fois par heure et par bien, plus l'immédiat
-   après un geste — ou plus lent ?
-3. **le bouton « Actualiser »** sur la fiche : utile, ou bruit ?
-4. **les six colonnes mortes** : mon classement garder / retirer / brancher vous
-   convient-il, pour un lot ultérieur ?
+1. **Nom de la table** : `canaux_du_bien`. Validé.
+2. **Fréquence** : un appel **par compte et par heure** — la mesure ci-dessus a
+   montré que `GET /channels` rend tout le compte d'un coup. Plus un
+   rafraîchissement **immédiat** après un geste de mapping. Les limites de débit
+   du partenaire sont respectées : rejeu sur 429 avec `retry-after`, pagination,
+   et aucun appel déclenché par l'affichage d'un écran.
+3. **Bouton « Actualiser »** : **pas en temps normal**. Il n'apparaît qu'avec la
+   mention « non vérifié depuis le… », donc au-delà de 24 h sans confirmation.
+4. **Colonnes mortes** : aucune touchée ici, listées en §7 comme « à traiter ».
+
+**Et une règle qui vaut pour tout le lot : le nom du partenaire n'apparaît
+jamais dans l'interface de l'hôte.** Ni dans une pastille, ni dans un message
+d'erreur, ni dans une infobulle. L'hôte voit « Airbnb », « Booking.com »,
+« vérifié il y a 2 h » — jamais le nom de qui nous les fournit.
+
+## 9. Étape 1 — ce qui s'écrit maintenant
+
+- la migration `canaux_du_bien` **sur staging seulement** ;
+- le writer `lib/canaux-du-bien.js` et son appel depuis la couche sync ;
+- les tests, dont **la garde « GET seulement »** et **« un silence n'est pas une
+  disparition »** ;
+- puis l'écran lit la table au lieu d'appeler le partenaire.
+
+**Preview et recette de Thierry avant la production.**
