@@ -1118,3 +1118,72 @@ sinon), la PWA n'a aucune action sur ces réglages, et la table n'a qu'une
 policy de lecture. Test : « un JETON DE PRESTATAIRE est refusé par le writer de
 visibilité » (`tests/disponibilites-visibilite.test.js`), qui rougit si la
 garde de session est retirée.
+
+---
+
+## §13. Un masquage par droit n'est pas une garde — audit du 19 octobre 2026
+
+**Demandé par Thierry après la découverte suivante.** `pages/biens.html` masquait
+« + Ajouter un bien » par `btn.hidden = !estTitulaireCourant`, avec en
+commentaire la raison : « sinon la création partirait sur le compte du MEMBRE ».
+Le bouton était **visible et cliquable** pour un membre délégué, et **le serveur
+ne refusait pas**.
+
+### Pourquoi le masquage ne masquait pas
+
+`/biens` ne charge que `shared/theme.css` et `public/style.css`. La seule règle
+`[hidden] { display: none }` du dépôt est dans `shared/ui.css`, que cette page
+ne charge pas. Et une déclaration d'**auteur** comme `.btn { display: inline-flex }`
+l'emporte toujours sur le `[hidden]` de la feuille du **navigateur** : la
+spécificité ne se compare pas entre origines.
+
+⚠ **Et une règle `[hidden]` nue ne suffit pas non plus.** `[hidden]` et
+`.bandeau-echec` ont la même spécificité (0,1,0) : c'est l'ordre de déclaration
+qui tranche, et la règle du composant vient après. Il faut soit `!important`,
+soit un sélecteur composé (`.btn[hidden]`, `.msg-vide[hidden]`).
+
+### Pourquoi le serveur ne refusait pas
+
+La garde de la création était `requirePermission({ domaine: 'reglages',
+niveau: 'write' })` **sans `compteDelegue`**. Sans ressource désignée et sans ce
+drapeau, `accountUserId` retombe sur l'**appelant** — et tout utilisateur
+authentifié est titulaire de son propre compte, donc `write` était toujours
+accordé.
+
+**Mesuré sur staging** le 19 octobre : un POST de création avec le jeton d'un
+membre a rendu **400** (le refus de la *validation*, qui vient après la garde),
+pas 403. Sans créer de bien : le corps envoyé était invalide, et la validation
+est après la garde. Coût si le geste avait été fait : un bien sur le compte du
+membre, et une propriété, un type de chambre et un plan tarifaire **provisionnés
+chez le partenaire**.
+
+Correctif : `compteDelegue: true` + `estTitulaireDuCompte` (branche
+`fix-creation-bien-titulaire`, serveur seul).
+
+### L'audit : tous les masquages par droit du dépôt
+
+| élément | page | `[hidden]` effectif ? | garde serveur |
+|---|---|---|---|
+| `+ Ajouter un bien` | `pages/biens.html` | **NON** → visible | **absente** → corrigée |
+| `[data-bind="add-property"]` | `pages/aujourdhui.html` | oui (`ui.css`) | même endpoint, même correctif |
+| barre d'action du calendrier | `pages/calendrier.html` | oui (`ui.css`) | `api/calendar.js` : `reservations:write` + `bienRequis` |
+| zone de saisie d'un message | `pages/messages.html` | oui (`ui.css`) | `api/channel-message.js` : `messages:write` + `bookingRequis` |
+
+**Et les onze pages qui n'ont pas `ui.css` mais utilisent `hidden`** portent
+toutes leur propre règle `[hidden] { display: none !important }` — `biens.html`
+était la seule sans. Deux d'entre elles la portent justement parce que le même
+défaut y avait déjà été relevé en review (`apps/yield/index.html`, commentaire
+en tête de sa feuille).
+
+### La règle qui en sort
+
+**Un élément masqué par droit se double TOUJOURS d'une garde serveur.** Le
+masquage est un confort d'interface ; il tombe sur une feuille de style qui ne
+se charge pas, sur un `display` d'auteur, ou sur un navigateur qui n'applique
+pas la règle. Il ne protège rien.
+
+**Corollaire pour les tests** : jsdom ignore `!important` et ne cascade que par
+ordre de source. Un test qui mesure un masquage doit donc s'appuyer sur un
+sélecteur **composé** — sinon il reste vert quand la règle disparaît. Mesure
+du 19 octobre : en retirant `[hidden] { … !important }`, les 13 tests de
+`tests/canaux-bouton-actualiser.test.js` restaient verts.

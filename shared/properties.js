@@ -155,6 +155,21 @@ export function renderChannelBadges (canaux) {
   ).join('')
 }
 
+// Le mot que l'hote lit quand le releve a ECHOUE. Court, et il ne nomme JAMAIS
+// le partenaire : l'hote n'a pas a savoir par qui nous passons.
+//
+// ⚠ IL S'AFFICHE UNE SEULE FOIS, EN HAUT DE LA PAGE (decision de Thierry,
+// 19 octobre 2026). Le releve est au grain du COMPTE : un seul appel couvre
+// tous les biens. Repeter le meme message sous chacune des cartes dirait dix
+// fois la meme chose et laisserait croire a dix pannes. Le bouton
+// « Actualiser » accompagne ce message, puisqu'il porte la meme action.
+export const MOT_ECHEC = 'Vérification impossible pour l\'instant'
+
+// Un seul echec pour tout le compte : il suffit qu'un bien le porte.
+export function releveEnEchec (biens) {
+  return (biens || []).some(p => p && p.canaux_echec === true)
+}
+
 export function hydrateChannelBadges (p, container) {
   if (!container) return
   const canaux = canauxDuBien(p)

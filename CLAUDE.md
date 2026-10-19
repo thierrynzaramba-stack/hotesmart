@@ -520,6 +520,28 @@ chantier marche, donc YieldFlow : a reprendre avec le go de Thierry.
 
 ## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (soldee le 17 octobre 2026)
 
+⚠ **LE COMPTE ATTENDU EST ZERO. MISE A JOUR DU 19 OCTOBRE 2026, DEMANDEE PAR
+THIERRY.** Le titre disait « soldee » depuis le 17 octobre, mais la regle de
+comptage, plus bas, disait encore « 28, et exactement 28 ». Les deux ne pouvaient
+pas etre vrais, et c'est la version haute que tout le monde lit en premier.
+
+**Mesure du jour**, sur `dette-59-canaux-coeur` (qui contient `main`) : suite
+complete a **5346 tests, 5346 verts, zero rouge** ; et les quatre fichiers des
+quatre familles, lances seuls, a **133/133**. La dette a ete refermee par
+`70f805d` (« Tests : la dette des 28 rouges est soldee »).
+
+**Ce que ca change : TOUT ROUGE EST UNE REGRESSION.** Un compte attendu de 28
+contre zero reels n'etait plus une barriere, c'etait un chiffre qui faisait
+hausser les epaules — exactement le defaut que cette section dit elle-meme de
+ne jamais laisser s'installer. Avant tout push : lire le compte. **Un seul
+rouge = on ne pousse pas** tant qu'on ne l'a pas nomme.
+
+**L'histoire qui suit est conservee**, parce que la maladie peut revenir et que
+savoir la reconnaitre — avec son outil de contre-epreuve calendaire — vaut pour
+tout test a dates figees.
+
+---
+
 **Constat du 13 septembre 2026.** `tests/booking-changes.test.js` (6) et
 `tests/booking-changes-dispatch.test.js` (2) echouent depuis la nuit du 12 au
 13 septembre.
@@ -596,10 +618,12 @@ echecs qui n'ont rien a voir avec le calendrier : mesure du 1er octobre 2026,
 8 et 10 rouges contre 132/132 par l'outil. Il a fallu deux sessions comparant
 leurs mesures pour le voir.
 
-Le nombre attendu est **28, et exactement 28** (8 + 6 + 10 + 4, au 29 septembre
-2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28). Avant tout push : lire le compte,
-pas la couleur. **29 rouges = une regression, on ne pousse pas** tant qu'on ne
-l'a pas nommee ; 27 rouges = une dette s'est refermee, on met ce nombre a jour
+Le nombre attendu **a ete** 28, et exactement 28 (8 + 6 + 10 + 4, au
+29 septembre 2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28), jusqu'a
+ce que `70f805d` solde les quatre familles. ⚠ **IL EST MAINTENANT ZERO** (voir
+l'encadre en tete de cette section). Avant tout push : lire le compte, pas la
+couleur. **Un rouge = une regression, on ne pousse pas** tant qu'on ne l'a pas
+nommee ; et si une famille calendaire reapparait un jour, on remet son compte
 ici pour qu'elle reste protegee. Et un compte qui MONTE sur un commit inchange
 se contre-eprouve avant d'etre pris pour une regression : decaler les fixtures
 d'un mois, relancer, restaurer l'arbre — si tout repasse au vert, c'est le

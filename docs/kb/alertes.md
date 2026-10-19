@@ -315,3 +315,35 @@ plateforme. Voir aussi § « `api_credit` » plus haut.
 **24 septembre** sur Colomiers n'a personne de garde — ni attitrée, ni disponible. Ce ménage
 découle des réservations de test du chantier canal e-mail ; leur annulation l'éteint.
 
+
+---
+
+## Les trois alarmes des canaux d'un bien (dette 59, 19 octobre 2026)
+
+Ajoutées avec le chantier « les canaux au cœur ». Writer unique :
+`lib/canaux-du-bien.js`.
+
+| type | ce qu'il dit | ce qu'on fait |
+|---|---|---|
+| `canaux_releve_en_panne` | le relevé échoue depuis plus de 24 h d'affilée | regarder le motif (`injoignable`, `delai`, `reponse_invalide`, `tronquee`, `plafonnee`) ; l'écran de l'hôte **ne se vide pas**, il vieillit |
+| `canaux_disparition_totale` | une lecture réussie n'annonce plus **aucun** canal d'un compte qui en avait | **rien n'a été effacé.** Si la seconde lecture confirme dans l'heure, les pastilles disparaîtront. C'est le moment de vérifier chez le partenaire |
+| `canaux_lecture_incomplete` | lecture plafonnée, tronquée, ou plus de canaux vivants que la borne de lecture | aucune disparition n'est écrite tant que ça dure |
+
+**Trois choses à savoir avant de lire ces alertes.**
+
+1. **Le message est STABLE, les nombres sont à côté.** `fenetreEscaladee`
+   reconnaît « le même fait » en comparant le message : un message qui porterait
+   le nombre d'heures changerait à chaque cycle et l'escalade 6 h → 12 h → 24 h
+   ne se déclencherait jamais. Les valeurs qui bougent (`heures`,
+   `tentatives`, `motif`, `canaux_concernes`) sont des champs du `detail`.
+2. **L'anti-spam est par TYPE, pas par compte.** `reportIncident` déduplique sur
+   `(type, property_id)`, et ces trois alarmes n'ont pas de bien à désigner —
+   elles sont au grain du compte. Le compte A en panne rend donc l'alarme du
+   compte B muette pendant 6 h, alors que le `detail` ne nomme que A. Connu,
+   acceptable à un seul compte réel, à revoir quand il y en aura plusieurs :
+   le changement est dans `lib/founder-notify.js`, partagé par toutes les
+   alarmes, donc c'est un chantier à lui seul.
+3. **`suspendu` n'est pas une panne.** Le relevé rend `ok: false` avec ce motif
+   quand le disjoncteur reporte un effacement : le cron le voit, le fondateur
+   est averti, et l'hôte, lui, ne lit rien d'anormal — ses pastilles et leur
+   date sont celles d'avant.

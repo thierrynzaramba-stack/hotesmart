@@ -81,11 +81,61 @@
       white-space: nowrap;
     }
     .badge-fraicheur.is-vieux { color: #8a1f1e; }
+    /* ⚠ `hidden` NE MASQUAIT RIEN SUR CETTE PAGE. Elle ne charge que
+       theme.css et style.css ; la seule regle `[hidden]` du depot est dans
+       shared/ui.css, qui n'est pas chargee ici. Or une declaration d'AUTEUR
+       comme `display: flex` l'emporte toujours sur le `[hidden]` de la feuille
+       du NAVIGATEUR — la specificite ne se compare pas entre origines.
+       Consequences mesurees (revue de 6754f48) : le bandeau d'echec restait
+       affiche en permanence, vide, au-dessus de la liste ; et « + Ajouter un
+       bien », masque par droit pour un membre delegue, etait visible et
+       cliquable — un garde-fou de droits qui ne gardait rien. */
+    [hidden] { display: none !important; }
+    /* ⚠ ET LE SELECTEUR COMPOSE AUSSI, pour le bouton masque par droit. La
+       regle globale ci-dessus est juste dans un vrai navigateur — une
+       declaration d'auteur `!important` l'emporte sur une declaration d'auteur
+       normale —, mais jsdom ignore `!important` : AUCUN test de ce depot ne
+       peut la mesurer. Le garde-fou de droits « + Ajouter un bien » reposait
+       donc sur une regle sans filet. Constat de la re-revue. */
+    .btn[hidden] { display: none; }
+    /* Les pastilles et le bouton vivent dans la meme ligne flex : sans
+       `align-items`, la valeur par defaut `stretch` etirait toutes les
+       pastilles a la hauteur du bouton de 44 px — des rectangles verts avec le
+       texte colle en haut, sur chaque carte de plus de 24 h. */
+    .channel-badges { align-items: center; }
+    /* ⚠ ZONE DE CLIC 44 px (regle V5), VISUEL DISCRET. Le bouton faisait
+       74 x 19 px en 11 px de texte : a la limite du cliquable, et c'est le
+       seul geste de cet ecran. La pilule reste petite ; c'est le RECTANGLE
+       SENSIBLE qui fait 44 px, par un remplissage vertical transparent. */
     .btn-actualiser {
-      font-size: 11px; margin-left: 6px; padding: 2px 8px;
-      border: 0.5px solid var(--border); border-radius: 999px;
-      background: var(--bg); cursor: pointer;
+      font-size: 12px; margin-left: 6px;
+      padding: 13px 12px; min-height: 44px;
+      border: 0; background: none; cursor: pointer;
+      color: var(--text2); text-decoration: underline;
+      text-underline-offset: 3px;
     }
+    /* L'etat desactive se VOIT : pendant « Verification… », la seule
+       difference etait la disparition du soulignement. */
+    .btn-actualiser:disabled {
+      color: var(--text2); text-decoration: none; cursor: default; opacity: 0.45;
+    }
+    .bandeau-echec {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 13px; color: var(--danger);
+      background: var(--bg); border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 8px 14px; margin-bottom: 14px;
+    }
+    /* ⚠ ET IL FAUT CE SELECTEUR-LA, PAS LE `[hidden]` NU. `[hidden]` et
+       `.bandeau-echec` ont la MEME specificite (0,1,0) : dans un vrai
+       navigateur, c'est l'ordre de declaration qui tranche, et la regle du
+       composant vient apres. Le `[hidden] { … !important }` ci-dessus sauve le
+       cas, mais une regle `!important` est un aveu ; le selecteur compose,
+       lui, est juste par construction — c'est le motif deja employe trois fois
+       dans shared/ui.css (`.msg-vide[hidden]`). */
+    .bandeau-echec[hidden] { display: none; }
+    /* Le disjoncteur n'est pas une panne : son mot n'est pas rouge. */
+    .bandeau-echec.is-neutre { color: var(--text2); }
     .empty-state {
       background: var(--bg);
       border: 0.5px solid var(--border);
@@ -144,6 +194,12 @@
       <a href="/biens/nouveau" class="btn btn-primary" id="btn-ajouter-bien" hidden>+ Ajouter un bien</a>
     </div>
     <div class="content">
+      <!-- ⚠ UN SEUL MESSAGE POUR TOUT LE COMPTE (decision de Thierry, 19
+           octobre 2026). Le releve des canaux est un seul appel qui couvre
+           tous les biens : repeter le message sous chaque carte dirait dix
+           fois la meme chose et laisserait croire a dix pannes. Le bouton
+           « Actualiser » vit ici avec lui, puisqu'il porte la meme action. -->
+      <div id="canaux-echec" class="bandeau-echec" role="status" aria-live="polite" hidden></div>
       <div id="loader" class="loader">Chargement…</div>
       <div id="empty" class="empty-state" style="display:none;">
         <h2>Vos logements apparaîtront ici</h2>
@@ -310,7 +366,7 @@
   import { peutEcrire, enteteCompte } from '/shared/compte-courant.js'
   import {
     loadAllProperties, provenanceBadge, hydrateChannelBadges, escapeHtml,
-    fraicheurCanaux
+    fraicheurCanaux, MOT_ECHEC, releveEnEchec
   } from '/shared/properties.js'
 
   initErrorHandler()
@@ -338,7 +394,13 @@
       method,
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`
+        'Authorization': `Bearer ${session.access_token}`,
+        // ⚠ LE COMPTE SUR LEQUEL ON TRAVAILLE. Sans cet en-tete, le releve
+        // d'un membre delegue portait sur SON compte et pas sur celui qu'il a
+        // sous les yeux. L'en-tete n'a d'effet que la ou la garde serveur pose
+        // `compteDelegue` : la creation d'un bien, elle, reste sur le compte
+        // de l'appelant, comme son commentaire l'exige.
+        ...enteteCompte()
       },
       body: JSON.stringify(body)
     })
@@ -434,28 +496,121 @@
   // 2026) : pas en temps normal, seulement au-dela de 24 h sans confirmation,
   // quand l'ecran affiche « non verifie depuis … ». Un bouton toujours la
   // invite a cliquer pour rien et appelle le partenaire sans raison.
+  // ⚠ UNE SEULE ACTION DE RELEVE, UN SEUL PORTEUR DE MESSAGE. Le releve est
+  // au grain du COMPTE : qu'il part d'un bouton sous un bien ou du bandeau, il
+  // fait la meme chose. Le resultat, lui, s'affiche toujours au meme endroit.
+  function bandeauEchec () { return document.getElementById('canaux-echec') }
+
+  // ⚠ PAS DE `logger.error` ICI. `shared/error-handler.js` allume une barre
+  // noire en bas de l'ecran a CHAQUE log et la laisse pour un ERROR, en
+  // production : l'hote lisait donc DEUX messages pour une panne — le bandeau,
+  // et « [ERROR] biens → releve canaux: injoignable », le motif technique brut,
+  // a l'oppose de la decision « un seul message ». La trace utile est celle du
+  // serveur, qui part dans nos journaux. Constat de la revue de 6754f48.
+  function direAuBandeau (texte, neutre, motif) {
+    const z = bandeauEchec()
+    if (!z) return
+    z.innerHTML = ''
+    const t = document.createElement('span')
+    t.textContent = texte
+    z.appendChild(t)
+    z.appendChild(boutonActualiser())
+    z.classList.toggle('is-neutre', !!neutre)
+    z.hidden = false
+    console.error('[biens] releve canaux :', motif || 'echec')
+  }
+
+  function montrerEchecDuReleve (motif) { direAuBandeau(MOT_ECHEC, false, motif) }
+
+  function cacherEchecDuReleve () {
+    const z = bandeauEchec()
+    if (z) { z.hidden = true; z.innerHTML = ''; z.classList.remove('is-neutre') }
+  }
+
+  // ⚠ UN SEUL RELEVE EN VOL. Il y a deux boutons — celui d'une carte de plus de
+  // 24 h et celui du bandeau —, et chacun ne desactivait que lui-meme : deux
+  // clics lancaient deux lectures du partenaire hors cadence, et deux
+  // `noterLeReleve` en lecture-puis-ecriture sur la meme ligne, ou l'increment
+  // du compteur d'echecs se perd — le compteur meme du reveil a 24 h. Et comme
+  // chaque echec reconstruit un bouton neuf, la repetition n'avait plus de
+  // frein depuis qu'un echec ne recharge plus la page. Constat de la revue de
+  // 6754f48.
+  let releveEnVol = false
+
+  async function relever (b) {
+    if (releveEnVol) return
+    releveEnVol = true
+    const tous = [...document.querySelectorAll('.btn-actualiser')]
+    for (const x of tous) x.disabled = true
+    const avant = b.textContent
+    b.textContent = 'Vérification…'
+    const rendreLesBoutons = () => {
+      releveEnVol = false
+      b.textContent = avant
+      for (const x of tous) { if (x.isConnected) x.disabled = false }
+    }
+    try {
+      const r = await callApi('POST', { action: 'relever_canaux' })
+      // ⚠ L'ENDPOINT REND 200 MEME EN ECHEC, AVEC SON MOTIF — c'est voulu :
+      // l'ecran a deja ses canaux. Mais recharger sur un echec fait clignoter
+      // la page pour rien et l'hote croit que son geste n'a servi a rien.
+      // C'est exactement ce qu'on a vu en recette le 19 octobre.
+      //
+      // ⚠ SAUF `suspendu`. Le disjoncteur rend `ok: false` pour le cron et
+      // l'alarme, mais la lecture a REUSSI : l'hote n'a rien d'anormal a lire.
+      //
+      // ⚠ ET C'EST `ok === true` QUI AUTORISE LE RECHARGEMENT, pas « pas
+      // false ». Un 200 dont le corps n'est pas du JSON donne `r = {}`, et
+      // `undefined === false` est faux : la page rechargeait en silence — le
+      // defaut corrige, par l'autre porte. Meme famille que le guard de
+      // channelCall, ferme cote serveur et pas ici.
+      // ⚠ UN 200 QUI PORTE UN MOTIF N'EST PAS UN RELEVE QUI A CHANGE QUELQUE
+      // CHOSE. Le plancher de cadence du serveur rend `ok: true, motif:
+      // 'cadence'` : recharger ferait clignoter la page pour rien.
+      if (r && r.ok === true && r.motif === 'cadence') {
+        rendreLesBoutons()
+        return direAuBandeau('Vérification faite', true, 'cadence')
+      }
+      if (!r || r.ok !== true) {
+        rendreLesBoutons()
+        // ⚠ LE DISJONCTEUR N'EST PAS UNE PANNE (decision de Thierry). La
+        // lecture a reussi ; seul l'effacement est reporte, et ca ne concerne
+        // que nous. Mais l'hote vient de cliquer : recharger pour lui rendre
+        // une page identique, sans un mot, c'est exactement le defaut qu'on
+        // corrige. On le lui dit, en neutre, sans parler d'erreur.
+        if (r && r.motif === 'suspendu') {
+          return direAuBandeau('Vérification faite', true, 'suspendu')
+        }
+        return montrerEchecDuReleve(r && r.motif)
+      }
+      location.reload()
+    } catch (e) {
+      rendreLesBoutons()
+      montrerEchecDuReleve(e.message)
+    }
+  }
+
+  function boutonActualiser () {
+    const b = document.createElement('button')
+    b.className = 'btn-actualiser'
+    b.type = 'button'
+    b.textContent = 'Actualiser'
+    b.addEventListener('click', () => relever(b))
+    return b
+  }
+
+  // ⚠ LE BOUTON SOUS UN BIEN N'APPARAIT QUE QUAND IL SERT (decision de
+  // Thierry, 19 octobre 2026) : pas en temps normal, seulement au-dela de 24 h
+  // sans confirmation, quand l'ecran affiche « non verifie depuis … ». Un
+  // bouton toujours la invite a cliquer pour rien et appelle le partenaire
+  // sans raison. Le cas « le releve a echoue » est porte par le BANDEAU, avec
+  // son propre bouton : un message par compte, pas un par carte.
   function bindActualiserCanaux (card, p) {
     const zone = card.querySelector('[data-channels]')
     if (!zone) return
     const f = fraicheurCanaux(p.canaux_vu_le)
     if (!f || !f.vieux) return
-    const b = document.createElement('button')
-    b.className = 'btn-actualiser'
-    b.type = 'button'
-    b.textContent = 'Actualiser'
-    b.addEventListener('click', async () => {
-      b.disabled = true
-      b.textContent = 'Vérification…'
-      try {
-        await callApi('POST', { action: 'relever_canaux' })
-        location.reload()
-      } catch (e) {
-        b.disabled = false
-        b.textContent = 'Réessayer'
-        logger.error('biens', 'releve canaux: ' + e.message)
-      }
-    })
-    zone.appendChild(b)
+    zone.appendChild(boutonActualiser())
   }
 
   function renderProperty(p) {
@@ -705,12 +860,20 @@
 
     if (properties.length === 0) {
       // Refus de droits : etat normal d'un membre, pas un incident a rejouer.
+      // ⚠ LE BANDEAU S'ETEINT AUSSI SUR CES DEUX SORTIES. Sans ca, un hote
+      // lisait « Vous n'avez pas accès aux biens de ce compte » SOUS un bandeau
+      // qui parle d'un compte qu'il ne peut pas lire, et « Erreur de
+      // chargement » sous le bandeau d'un releve anterieur. Une lecture
+      // reussie l'eteignait, une lecture ratee le gardait. Constat de la revue
+      // de 6754f48.
       if (refuse) {
+        cacherEchecDuReleve()
         loader.style.display = 'block'
         loader.textContent = 'Vous n’avez pas accès aux biens de ce compte.'
         return
       }
       if (allFailed) {
+        cacherEchecDuReleve()
         loader.style.display = 'block'
         loader.textContent = 'Erreur de chargement des biens.'
         return
@@ -720,6 +883,13 @@
       grid.style.display = 'grid'
       for (const p of properties) grid.appendChild(renderProperty(p))
     }
+    // ⚠ HORS DU `else` pour une seule raison : le bandeau doit s'ETEINDRE
+    // quand une lecture reussit, y compris sur un compte devenu sans bien.
+    // (Un compte sans bien ne peut pas PORTER le drapeau : `releveEnEchec([])`
+    // rend `false`. Le commentaire d'origine affirmait le contraire — il
+    // aurait ete lu comme une garantie qui n'existe pas.)
+    if (releveEnEchec(properties)) montrerEchecDuReleve('releve precedent')
+    else cacherEchecDuReleve()
   }
 
   // ===== Modification =====
