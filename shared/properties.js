@@ -128,19 +128,71 @@ export function canauxDuBien (p) {
 // le DIT au lieu de laisser croire que c'est a jour — et c'est la seule
 // circonstance ou le bouton « Actualiser » apparait (decision de Thierry).
 const HEURE = 3600000
-export function fraicheurCanaux (vuLe, maintenant = Date.now()) {
+// ⚠ L'ECHELLE EST CELLE DE THIERRY (recette du 19 octobre 2026) : les minutes
+// jusqu'a 59, puis les heures, puis « hier », puis la date. La premiere
+// version disait « non verifie depuis 2 jours » — un decompte en jours qu'on
+// relit mal des qu'il depasse deux, et qui ne dit pas QUAND.
+//
+// ⚠ ET APRES L'HEURE, ON COMPTE EN JOURS CALENDAIRES, pas en tranches de 24 h.
+// « hier » veut dire la veille, meme s'il ne s'est ecoule que quatre-vingt-dix
+// minutes entre 23 h 30 et 1 h du matin : c'est ce qu'un humain lit. Le rouge
+// et le bouton, eux, restent sur les 24 h ecoulees — c'est une mesure de
+// fraicheur, pas une facon de parler.
+const JOURS_ECART = (a, b) => {
+  const jour = (d) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+  return Math.round((jour(a) - jour(b)) / (24 * HEURE))
+}
+
+// ⚠ LA DATE PASSE PAR `Intl`, COMME PARTOUT EN V5 (recette de Thierry) : mois
+// en toutes lettres, et l'annee SEULEMENT si elle differe de l'annee en cours —
+// « le 17 octobre » dans l'annee, « le 3 septembre 2025 » au-dela. Un « 17/10 »
+// ne se lit pas de la meme facon selon le pays, et la V5 n'ecrit aucune date a
+// la main.
+//
+// ⚠ ET LA LANGUE VIENT DU DOCUMENT, PAS D'UN IMPORT. `shared/i18n/i18n.js`
+// pose `document.documentElement.lang` au demarrage ; l'importer ici creerait
+// une dependance — et une initialisation a attendre — dans un module que cinq
+// pages chargent. Le parametre reste injectable, pour les tests.
+const langueDuDocument = () => {
+  try {
+    return (typeof document !== 'undefined' && document.documentElement
+            && document.documentElement.lang) || 'fr'
+  } catch { return 'fr' }
+}
+
+export function dateEnClair (quand, maintenant, langue) {
+  const memeAnnee = quand.getFullYear() === new Date(maintenant).getFullYear()
+  const options = memeAnnee
+    ? { day: 'numeric', month: 'long' }
+    : { day: 'numeric', month: 'long', year: 'numeric' }
+  try {
+    return new Intl.DateTimeFormat(langue || langueDuDocument(), options).format(quand)
+  } catch {
+    // Un `Intl` indisponible ou une langue refusee ne doit pas faire
+    // disparaitre la date : on replie sur une forme numerique lisible.
+    const d = String(quand.getDate()).padStart(2, '0')
+    const m = String(quand.getMonth() + 1).padStart(2, '0')
+    return memeAnnee ? `${d}/${m}` : `${d}/${m}/${quand.getFullYear()}`
+  }
+}
+
+export function fraicheurCanaux (vuLe, maintenant = Date.now(), langue = null) {
   if (!vuLe) return null
-  const ms = maintenant - new Date(vuLe).getTime()
+  const quand = new Date(vuLe)
+  const ms = maintenant - quand.getTime()
   if (!Number.isFinite(ms) || ms < 0) return null
   const vieux = ms >= 24 * HEURE
   if (ms < HEURE) {
     const min = Math.max(1, Math.round(ms / 60000))
     return { texte: `vérifié il y a ${min} min`, vieux }
   }
-  const h = Math.round(ms / HEURE)
-  if (h < 24) return { texte: `vérifié il y a ${h} h`, vieux }
-  const j = Math.floor(ms / (24 * HEURE))
-  return { texte: `non vérifié depuis ${j} jour${j > 1 ? 's' : ''}`, vieux }
+  const jours = JOURS_ECART(new Date(maintenant), quand)
+  if (jours === 0) {
+    const h = Math.max(1, Math.floor(ms / HEURE))
+    return { texte: `vérifié il y a ${h} h`, vieux }
+  }
+  if (jours === 1) return { texte: 'vérifié hier', vieux }
+  return { texte: `vérifié le ${dateEnClair(quand, maintenant, langue)}`, vieux }
 }
 
 // Les pastilles elles-memes. Inchangee depuis l'origine : un canal mappe mais
