@@ -73,6 +73,21 @@ comment on column
   'premiere annonce. Une seconde lecture qui en voit '
   'un autre nombre ne confirme rien.';
 
+-- ⚠ ET LA LISTE DES MOTIFS DE `erreur` CHANGE AUSSI.
+-- Le commentaire pose par la migration du 19 octobre
+-- en annoncait cinq ; il y en a huit, et le huitieme
+-- commande tout l'affichage. Une liste recopiee se
+-- perime en silence : on la remet a jour ici, dans la
+-- migration qui ajoute les motifs.
+comment on column public.canaux_releve.erreur is
+  'Motif NORMALISE, jamais un message de la base : '
+  'injoignable | delai | reponse_invalide | tronquee '
+  '| plafonnee | ecriture | echec | suspendu. '
+  '`suspendu` = la lecture a REUSSI, seul '
+  'l''effacement est reporte par le disjoncteur : '
+  'l''ecran de l''hote ne doit RIEN montrer d''anormal '
+  '(lib/canaux-du-bien.js, echecVisibleParLHote).';
+
 -- ⚠ AUCUNE DE CES COLONNES NE PORTE DE SECRET : ni
 -- jeton, ni cle, ni identifiant interne du partenaire.
 -- Des compteurs et des dates. Elles peuvent donc

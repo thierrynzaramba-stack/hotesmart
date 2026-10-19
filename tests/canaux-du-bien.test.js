@@ -21,7 +21,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const {
   rafraichirCanauxDuCompte, lireCanauxDuPartenaire, lignesDeLaLecture,
-  tarifsDuBienDe, normaliserOta, echecVisibleParLHote
+  tarifsDuBienDe, normaliserOta, echecVisibleParLHote, COLONNES_HORLOGE_ECRAN
 } = require('../lib/canaux-du-bien')
 
 const COMPTE = '11111111-1111-1111-1111-111111111111'
@@ -118,6 +118,23 @@ function baseSimulee ({ existantes = [], liens = [], liensEnEchec = false,
     return q
   }
   return { from: table, trace }
+}
+
+// ⚠ CASSE LA LECTURE DE NOTRE ETAT, PAS L'ECRITURE. Depuis la revue de
+// c6dd690, l'etat d'avant se lit AVANT l'upsert : un harnais qui ne cassait la
+// lecture qu'APRES l'ecriture ne touchait plus rien, et les deux tests qui
+// gardent « un releve partiel avance quand meme vu_le » passaient sans rien
+// eprouver. L'upsert, lui, doit continuer de reussir — c'est tout l'objet de
+// ces tests.
+function etatIllisible (sb) {
+  const vraiFrom = sb.from
+  sb.from = (nom) => {
+    const q = vraiFrom(nom)
+    if (nom !== 'canaux_du_bien') return q
+    q.then = (res) => res({ data: null, error: { message: 'relecture refusee' } })
+    return q
+  }
+  return sb
 }
 
 test('LE TEST QUI COMPTE : le module n envoie QUE des GET au partenaire', async () => {
@@ -345,19 +362,10 @@ test('une relecture en echec ne se declare pas reussie', async () => {
     json: { data: canaux, meta: { total: canaux.length } } })
   const sb = baseSimulee({ liens: [{ property_id: BIEN_A, provider_rate_plan_id: 'RP-A1' }] })
   // On casse la RELECTURE de `canaux_du_bien`, celle qui suit l'upsert.
-  const vraiFrom = sb.from
-  let dejaEcrit = false
-  sb.from = (nom) => {
-    const q = vraiFrom(nom)
-    if (nom !== 'canaux_du_bien') return q
-    const ancienUpsert = q.upsert
-    q.upsert = (l) => { dejaEcrit = true; return ancienUpsert(l) }
-    const ancienThen = q.then
-    q.then = (res) => dejaEcrit
-      ? res({ data: null, error: { message: 'relecture refusee' } })
-      : ancienThen(res)
-    return q
-  }
+  // ⚠ C'EST LA LECTURE DE NOTRE ETAT QUI CASSE, et depuis la revue de c6dd690
+  // elle se fait AVANT l'upsert — l'etat d'AVANT ne peut pas se lire apres
+  // avoir ecrit. On casse donc toute lecture de `canaux_du_bien`.
+  const sansEtat = etatIllisible(sb)
   const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
   assert.equal(bilan.ok, false, 'une relecture en echec a ete comptee comme un succes')
   assert.equal(bilan.partiel, true)
@@ -451,19 +459,10 @@ test('un releve partiel avance quand meme vu_le : l ecran ne ment pas sur sa fra
   const appel = async () => ({ ok: true, status: 200,
     json: { data: canaux, meta: { total: canaux.length } } })
   const sb = baseSimulee({ liens: [{ property_id: BIEN_A, provider_rate_plan_id: 'RP-A1' }] })
-  const vraiFrom = sb.from
-  let dejaEcrit = false
-  sb.from = (nom) => {
-    const q = vraiFrom(nom)
-    if (nom !== 'canaux_du_bien') return q
-    const ancienUpsert = q.upsert
-    q.upsert = (l, o) => { dejaEcrit = true; return ancienUpsert(l, o) }
-    const ancienThen = q.then
-    q.then = (res) => dejaEcrit
-      ? res({ data: null, error: { message: 'relecture refusee' } })
-      : ancienThen(res)
-    return q
-  }
+  // ⚠ C'EST LA LECTURE DE NOTRE ETAT QUI CASSE, et depuis la revue de c6dd690
+  // elle se fait AVANT l'upsert — l'etat d'AVANT ne peut pas se lire apres
+  // avoir ecrit. On casse donc toute lecture de `canaux_du_bien`.
+  const sansEtat = etatIllisible(sb)
   const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
   assert.equal(bilan.partiel, true)
   assert.ok(bilan.ecrits > 0)
@@ -471,16 +470,75 @@ test('un releve partiel avance quand meme vu_le : l ecran ne ment pas sur sa fra
   assert.ok(horloge.lignes.vu_le, 'vu_le est reste en arriere alors que les canaux sont a jour')
 })
 
+// Les huit motifs normalises, et la SEULE liste du fichier de test. Elle est
+// aussi dans le commentaire de colonne de la migration — c'est une liste
+// recopiee, donc elle se perime : le test ci-dessous la mesure sur CHAQUE
+// chemin qui l'ecrit, pas sur un seul (constat de la revue de c6dd690 : elle
+// annoncait cinq motifs, le writer en ecrivait huit, et le test n'exercait que
+// le cas 503).
+const MOTIFS = /^(injoignable|delai|reponse_invalide|tronquee|plafonnee|ecriture|echec|suspendu)$/
+
 test('LE TEST QUI COMPTE : l horloge ne porte jamais un message de base brut', async () => {
-  const appel = async () => ({ ok: false, status: 503, json: {} })
-  const sb = baseSimulee({})
-  await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
-  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
-  assert.ok(horloge, 'aucune horloge posee')
   // La colonne est lisible par tout collaborateur ayant `reservations` en
   // lecture : elle ne doit porter qu'un motif normalise, jamais un message
   // Supabase entier (noms de contraintes, de colonnes, details du moteur).
-  assert.match(String(horloge.lignes.erreur), /^(injoignable|tronquee|plafonnee|ecriture|echec)$/)
+  //
+  // ⚠ ET ON EPROUVE TOUS LES CHEMINS, pas seulement le 503. Chaque reponse
+  // ci-dessous emmene le writer par une branche differente ; aucune ne doit
+  // faire sortir autre chose qu'un mot de la liste.
+  const cas = [
+    ['injoignable', async () => ({ ok: false, status: 503, json: {} })],
+    ['forme sans data', async () => ({ ok: true, status: 200, json: { raw: '<html>' } })],
+    ['data nul', async () => ({ ok: true, status: 200, json: { data: null } })],
+    ['flux tronque', async () => ({ ok: true, status: 200, json: { data: [], meta: { total: 9 } } })],
+    ['upsert refuse', async () => ({ ok: true, status: 200,
+      json: { data: canaux, meta: { total: canaux.length } } })]
+  ]
+  for (const [nom, appel] of cas) {
+    const sb = baseSimulee({ upsertEnEchec: nom === 'upsert refuse' })
+    await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, alarme: () => {} })
+    const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+    assert.ok(horloge, `aucune horloge posee sur le cas « ${nom} »`)
+    assert.match(String(horloge.lignes.erreur), MOTIFS,
+      `le cas « ${nom} » a ecrit un motif hors de la liste`)
+  }
+  // Et le disjoncteur, qui ecrit le huitieme motif.
+  const sb = baseSimulee({
+    existantes: [{ id: 'L1', user_id: COMPTE, property_id: BIEN_A,
+                   provider_channel_id: 'CH-AIR', disparu_le: null }],
+    horloges: [] })
+  await rafraichirCanauxDuCompte({ userId: COMPTE, sb, alarme: () => {},
+    appel: async () => ({ ok: true, status: 200, json: { data: [], meta: { total: 0 } } }) })
+  const h = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.equal(h.lignes.erreur, 'suspendu')
+  assert.match(String(h.lignes.erreur), MOTIFS)
+})
+
+test('LE TEST QUI COMPTE : un partenaire qui RENUMEROTE ses canaux est suspendu', async () => {
+  // ⚠ « UNE CLE QUI CHANGE DE PERIMETRE » est l'une des trois familles que ce
+  // disjoncteur doit fermer, et elle passait a travers : l'etat d'avant etait
+  // relu APRES l'upsert, donc les lignes tout juste ecrites etaient comptees
+  // dans les « vivants », et `partis === vivants` devenait arithmetiquement
+  // impossible des qu'une ligne etait ecrite. L'ancien canal etait efface du
+  // premier coup, sans suspension et sans alarme. Constat de la revue de
+  // c6dd690.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const neuf = [{ id: 'CH-NEUF', attributes: { title: 'T', channel: 'AirBNB',
+    is_active: true, properties: ['P-A'], rate_plans: [{ rate_plan_id: 'RP-A1' }] } }]
+  const sb = baseSimulee({
+    existantes: [{ id: 'L-ANCIEN', user_id: COMPTE, property_id: BIEN_A,
+                   provider_channel_id: 'CH-ANCIEN', disparu_le: null }],
+    liens: [{ property_id: BIEN_A, provider_rate_plan_id: 'RP-A1' }],
+    horloges: [] })
+  const alarmes = []
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, maintenant,
+    appel: async () => ({ ok: true, status: 200, json: { data: neuf, meta: { total: 1 } } }),
+    alarme: (c) => alarmes.push(c) })
+  assert.equal(bilan.disparus, 0, 'l ancien canal a ete efface du premier coup')
+  assert.equal(bilan.motif, 'suspendu')
+  assert.deepEqual(alarmes, ['canaux_disparition_totale'])
+  // Le canal NEUF a bien ete ecrit : on ne suspend que l'effacement.
+  assert.equal(bilan.ecrits, 1, 'le canal neuf n a pas ete ecrit')
 })
 
 test('la lecture des horloges est BORNEE, jamais tronquee en silence', async () => {
@@ -720,4 +778,217 @@ test('LE TEST QUI COMPTE : un effacement SUSPENDU n est pas un echec pour l hote
   assert.equal(echecVisibleParLHote({ ok: true, erreur: null }), false)
   assert.equal(echecVisibleParLHote(null), false,
     'un compte jamais releve est annonce en panne')
+})
+
+// ─── Les trous trouves par la revue de c6dd690 ──────────────────────────────
+
+test('LE TEST QUI COMPTE : la decision d affichage ne depend QUE des colonnes declarees', () => {
+  // ⚠ CE TEST EXISTE PARCE QUE LE `select` DE L'ENDPOINT NE PORTAIT PAS
+  // `erreur`. `echecVisibleParLHote` decide sur cette colonne ; l'endpoint
+  // lisait `vu_le, ok, echecs_consecutifs` — la conception d'origine —, donc
+  // `h.erreur` valait `undefined`, donc tout effacement suspendu s'affichait
+  // comme « verification impossible » : exactement ce que le commentaire de
+  // l'endpoint affirmait fermer. Les anciens tests n'appelaient la fonction
+  // qu'avec des lignes PORTANT `erreur`, forme que l'appelant ne produisait
+  // jamais (REVIEW.md regle 8).
+  //
+  // On PROJETTE donc la ligne sur les colonnes declarees, comme la base le
+  // ferait, et on verifie que la decision tient.
+  const colonnes = COLONNES_HORLOGE_ECRAN.split(',').map(c => c.trim())
+  const projeter = (l) => Object.fromEntries(
+    Object.entries(l).filter(([k]) => colonnes.includes(k)))
+  const complete = { user_id: COMPTE, vu_le: '2026-10-20T11:00:00Z', ok: false,
+                     erreur: 'suspendu', echecs_consecutifs: 1,
+                     premier_echec_le: '2026-10-20T10:00:00Z',
+                     disparition_totale_vue_le: '2026-10-20T10:00:00Z',
+                     disparition_totale_nb: 2 }
+  assert.equal(echecVisibleParLHote(projeter(complete)), false,
+    'projetee sur les colonnes declarees, une suspension redevient une panne')
+  assert.equal(echecVisibleParLHote(projeter({ ...complete, erreur: 'injoignable' })), true,
+    'projetee sur les colonnes declarees, une panne n est plus vue')
+})
+
+test('LE TEST QUI COMPTE : l horloge d un AUTRE compte ne confirme rien', async () => {
+  // ⚠ LE FILTRE DE `lireHorloge` N'ETAIT GARDE PAR AUCUN TEST : contre-epreuve
+  // de la revue, filtre retire, 35/35 VERT — parce qu'aucun jeu d'horloges ne
+  // contenait la ligne d'un autre compte a ecarter. Sans ce filtre, l'annonce
+  // de disparition du compte A confirmerait l'effacement du compte B, et son
+  // compteur d'echecs fuirait.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const AUTRUI = '99999999-9999-9999-9999-999999999999'
+  const horloges = [
+    // L'annonce d'AUTRUI est vieille et concordante : si elle etait lue, elle
+    // confirmerait l'effacement de NOS canaux.
+    { user_id: AUTRUI, ok: false, echecs_consecutifs: 40,
+      disparition_totale_vue_le: '2026-10-18T08:00:00Z', disparition_totale_nb: 2 }
+  ]
+  const sb = baseSimulee({ existantes: deuxCanaux, liens: [], horloges })
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel: VIDE, maintenant,
+                                                 alarme: () => {} })
+  assert.equal(bilan.disparus, 0, 'l annonce d un autre compte a confirme notre effacement')
+  assert.equal(bilan.motif, 'suspendu')
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.equal(horloge.lignes.echecs_consecutifs, 1,
+    'le compteur d un autre compte a ete repris')
+  assert.equal(horloge.lignes.user_id, COMPTE)
+})
+
+test('LE TEST QUI COMPTE : une lecture qui a VU des canaux annule l annonce en attente', async () => {
+  // ⚠ LE CRITERE ETAIT `bilan.ok`, ET IL NE SUFFISAIT PAS. Une lecture qui a
+  // parfaitement vu les canaux rend `ok: false` par deux chemins normaux —
+  // upsert refuse, relecture refusee. L'annonce survivait alors a une lecture
+  // qui la CONTREDISAIT, et la prochaine lecture vide la confirmait avec une
+  // date vieille de trois heures : la « seconde lecture concordante » etait en
+  // fait la premiere de son episode. Constat de la revue de c6dd690.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const horloges = [{ user_id: COMPTE, ok: false, echecs_consecutifs: 1,
+                      disparition_totale_vue_le: '2026-10-20T09:00:00Z',
+                      disparition_totale_nb: 2 }]
+  const appel = async () => ({ ok: true, status: 200,
+                               json: { data: canaux, meta: { total: canaux.length } } })
+  const sb = etatIllisible(baseSimulee({ existantes: [], liens: [], horloges }))
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, maintenant,
+                                                 alarme: () => {} })
+  assert.equal(bilan.partiel, true, 'le scenario n a pas produit le releve partiel attendu')
+  assert.ok(bilan.ecrits > 0, 'la lecture n a rien ecrit : elle ne contredit donc rien')
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.equal(horloge.lignes.disparition_totale_vue_le, null,
+    'l annonce survit a une lecture qui a VU les canaux')
+  assert.equal(horloge.lignes.disparition_totale_nb, null)
+})
+
+test('LE TEST QUI COMPTE : une horloge ILLISIBLE n ecrase aucun compteur', async () => {
+  // Rendre `null` sur une erreur de lecture — ce que faisait la premiere
+  // version, en annoncant en commentaire le contraire — remettait le compteur
+  // d'echecs a 1 et reecrivait la date de la premiere annonce a MAINTENANT :
+  // l'alarme des 24 h repoussee de 24 h, et l'attente du disjoncteur
+  // recommencee, a chaque hoquet de notre base.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const sb = baseSimulee({ existantes: deuxCanaux, liens: [], horloges: [] })
+  const vraiFrom = sb.from
+  sb.from = (nom) => {
+    const q = vraiFrom(nom)
+    if (nom !== 'canaux_releve') return q
+    const ancien = q.then
+    q.then = (res) => res({ data: null, error: { message: 'horloge refusee' } })
+    q.upsertRelle = ancien
+    return q
+  }
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel: VIDE, maintenant,
+                                                 alarme: () => {} })
+  assert.equal(bilan.disparus, 0, 'une horloge illisible a laisse effacer')
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.ok(horloge, 'aucune horloge posee')
+  assert.equal(horloge.lignes.echecs_consecutifs, undefined,
+    'le compteur a ete ecrase alors que sa valeur d avant est inconnue')
+  assert.equal(horloge.lignes.premier_echec_le, undefined,
+    'la date du premier echec a ete ecrasee a l aveugle')
+  assert.equal(horloge.lignes.disparition_totale_vue_le, undefined,
+    'l annonce de disparition a ete reecrite a l aveugle')
+})
+
+test('la confirmation tombe EXACTEMENT a une heure, pas une minute de plus', async () => {
+  // Les autres fixtures sont a 59 et 90 minutes : la borne elle-meme n'etait
+  // pas mesuree, et `>=` contre `>` passait inapercu. Or la cadence du relevé
+  // est d'une heure : la seconde lecture tombe PILE sur la borne.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const horloges = [{ user_id: COMPTE, ok: false, echecs_consecutifs: 1,
+                      disparition_totale_vue_le: '2026-10-20T11:00:00.000Z',
+                      disparition_totale_nb: 2 }]
+  const sb = baseSimulee({ existantes: deuxCanaux, liens: [], horloges })
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel: VIDE, maintenant,
+                                                 alarme: () => {} })
+  assert.equal(bilan.disparus, 2,
+    'a exactement une heure, la confirmation est refusee : le cycle ne se fermerait jamais')
+})
+
+test('une alarme qui leve ne fait pas tomber le releve', async () => {
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const sb = baseSimulee({ existantes: deuxCanaux, liens: [], horloges: [] })
+  const bilan = await rafraichirCanauxDuCompte({
+    userId: COMPTE, sb, appel: VIDE, maintenant,
+    alarme: () => { throw new Error('canal d alerte en panne') }
+  })
+  assert.equal(bilan.motif, 'suspendu', 'le releve est tombe avec son alarme')
+  assert.equal(bilan.disparus, 0)
+})
+
+test('LE TEST QUI COMPTE : un echec de l horloge ne reste pas muet', async () => {
+  // C'est l'ecriture dont tout le reste depend : sans `tente_le`, la cadence
+  // horaire tombe et le partenaire est repris a chaque cycle de cinq minutes.
+  // Et PostgREST refuse la ligne ENTIERE quand une colonne lui manque
+  // (migration non appliquee). Un `console.error` ne suffit pas : la couche
+  // sync journalise sur le bilan.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const sb = baseSimulee({ existantes: [], liens: [], horloges: [] })
+  const vraiFrom = sb.from
+  sb.from = (nom) => {
+    const q = vraiFrom(nom)
+    if (nom !== 'canaux_releve') return q
+    q.upsert = () => Promise.resolve({ error: { message: 'PGRST204 colonne inconnue' } })
+    return q
+  }
+  const appel = async () => ({ ok: true, status: 200,
+                               json: { data: canaux, meta: { total: canaux.length } } })
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, maintenant,
+                                                 alarme: () => {} })
+  assert.match(String(bilan.horlogeEnEchec), /PGRST204/,
+    'l echec de l horloge n est pas remonte dans le bilan')
+})
+
+test('LE TEST QUI COMPTE : l echeance borne le RELEVE, pas chaque page', async () => {
+  // ⚠ POSEE PAR PAGE, la borne autorisait PAGES_MAX x delai pour un seul
+  // compte : 200 s contre 8 s de budget et 60 s de plafond de la fonction cron,
+  // qui serait tuee avant d'ecrire son compte rendu. Et la pagination longue
+  // n'est pas theorique — c'est le cas mesure le 19 octobre, ou le partenaire
+  // plafonne sa propre `limit`. Constat de la revue de c6dd690.
+  //
+  // Chaque page repond en 60 ms, sous le delai : jamais detectee comme lente.
+  // Mais elles s'additionnent, et l'echeance du releve doit mordre.
+  let pages = 0
+  const appel = () => new Promise(r => {
+    pages++
+    // Une page PLEINE sous un total plus grand : la pagination continue.
+    setTimeout(() => r({ ok: true, status: 200,
+      json: { data: Array.from({ length: 50 }, (_, i) => ({ id: 'C' + pages + '-' + i, attributes: {} })),
+              meta: { total: 100000 } } }), 60)
+  })
+  const sb = baseSimulee({ existantes: [], liens: [] })
+  const t0 = Date.now()
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, delaiMs: 200,
+                                                 alarme: () => {} })
+  const ecoule = Date.now() - t0
+  assert.equal(bilan.ok, false)
+  assert.equal(bilan.motif, 'delai')
+  assert.ok(ecoule < 900, `le releve a dure ${ecoule} ms pour une echeance de 200 ms`)
+  assert.ok(pages > 1, 'une seule page lue : le test ne prouve pas que les pages s additionnent')
+  assert.ok(pages < 20, `${pages} pages lues : l echeance n a pas borne la pagination`)
+})
+
+test('LE TEST QUI COMPTE : une page qui se tait n attend pas au-dela de l echeance', async () => {
+  // ⚠ CE CAS SEPARE LES DEUX BORNES, et le test multi-pages ne le fait pas :
+  // tant qu'aucune page ne depasse le delai, un controle en tete de boucle
+  // suffit. Ici, la PREMIERE page consomme presque toute l'echeance et la
+  // SECONDE se tait pour toujours. Borne par page, on attend encore un delai
+  // entier ; borne sur le releve, on rend la main tout de suite.
+  const ECHEANCE = 600
+  let pages = 0
+  const appel = () => new Promise(r => {
+    pages++
+    if (pages === 1) {
+      setTimeout(() => r({ ok: true, status: 200,
+        json: { data: Array.from({ length: 50 }, (_, i) => ({ id: 'C' + i, attributes: {} })),
+                meta: { total: 100000 } } }), ECHEANCE * 0.9)
+    }
+    // page 2 : aucune reponse, jamais.
+  })
+  const sb = baseSimulee({ existantes: [], liens: [] })
+  const t0 = Date.now()
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, delaiMs: ECHEANCE,
+                                                 alarme: () => {} })
+  const ecoule = Date.now() - t0
+  assert.equal(bilan.motif, 'delai')
+  assert.ok(ecoule < ECHEANCE * 1.4,
+    `le releve a dure ${ecoule} ms pour une echeance de ${ECHEANCE} ms : `
+    + 'la borne est posee par page, pas sur le releve')
 })
