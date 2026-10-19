@@ -35,6 +35,13 @@ async function channelCall(method, path, body) {
   const text = await res.text()
   let json
   try { json = JSON.parse(text) } catch { json = { raw: text } }
+  // ⚠ OBSERVATION SEULE (etape 1 du chantier « 200 sans JSON »). Un 2xx
+  // dont le corps n'est pas exploitable est NOTE et sonne, et c'est tout :
+  // la valeur rendue ci-dessous ne change pas d'un caractere. Les chemins
+  // qui en tirent une conclusion destructrice se corrigent ensuite, un par
+  // un. docs/kb/reponse-200-sans-json.md.
+  await surveillerReponse({ fichier: 'api/channel-mapping.js', methode: method, chemin: path,
+                            statut: res.status, texte: text })
   return { ok: res.ok, status: res.status, json }
 }
 
@@ -62,6 +69,7 @@ const redact = (v) => {
 // copies finissent par diverger, et c'est l'une d'elles qui affichera faux.
 const { tarifsDuBienDe } = require('../lib/canaux-du-bien')
 
+const { surveillerReponse } = require('../lib/reponse-partenaire')
 // ─── RESUME DES CANAUX D'UN BIEN ──────────────────────────────────────────
 // Pure et exportee : c'est elle qui repond « ce bien est-il connecte ? », et la
 // reponse decide du parcours entier de l'ecran Airbnb.

@@ -33,6 +33,7 @@ const { preparerAvis, upsertAvis } = require('../lib/cron-channel-reviews')
 // Naissance des evaluations du voyageur : meme chemin que le poll (decision D2).
 const { rattacherObjetsRecus } = require('../lib/avis/naissance')
 
+const { surveillerReponse } = require('../lib/reponse-partenaire')
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
@@ -138,6 +139,13 @@ async function channelCall(method, path, body) {
   const text = await res.text()
   let json
   try { json = JSON.parse(text) } catch { json = { raw: text } }
+  // ⚠ OBSERVATION SEULE (etape 1 du chantier « 200 sans JSON »). Un 2xx
+  // dont le corps n'est pas exploitable est NOTE et sonne, et c'est tout :
+  // la valeur rendue ci-dessous ne change pas d'un caractere. Les chemins
+  // qui en tirent une conclusion destructrice se corrigent ensuite, un par
+  // un. docs/kb/reponse-200-sans-json.md.
+  await surveillerReponse({ fichier: 'api/channel-events.js', methode: method, chemin: path,
+                            statut: res.status, texte: text })
   return { ok: res.ok, status: res.status, json }
 }
 

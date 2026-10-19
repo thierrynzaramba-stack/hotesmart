@@ -11,6 +11,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 
+const { surveillerReponse } = require('../lib/reponse-partenaire')
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
@@ -97,6 +98,26 @@ module.exports = async function handler(req, res) {
     const text = await r.text()
     let json
     try { json = JSON.parse(text) } catch { json = { raw: text } }
+  // ⚠ OBSERVATION SEULE (etape 1 du chantier « 200 sans JSON »). Un 2xx
+  // dont le corps n'est pas exploitable est NOTE et sonne, et c'est tout :
+  // la valeur rendue ci-dessous ne change pas d'un caractere. Les chemins
+  // qui en tirent une conclusion destructrice se corrigent ensuite, un par
+  // un. docs/kb/reponse-200-sans-json.md.
+    // ⚠ ICI, PAS DE `channelCall` : c'est un `fetch` EN LIGNE dans le handler.
+    // Le patch mecanique qui a branche les seize autres copies y avait ecrit
+    // `methode: method, chemin: path, statut: res.status` — et les trois sont
+    // faux, chacun a sa facon :
+    //   · `method` et `path` ne sont declares NULLE PART dans ce fichier :
+    //     `ReferenceError` a chaque appel, donc l'ouverture de l'iframe de
+    //     connexion cassee ;
+    //   · `res` existe, mais c'est la reponse HTTP du handler
+    //     (`handler(req, res)`), pas celle du partenaire : `res.status` y est
+    //     une FONCTION. Un identifiant qui existe sans rien signifier de juste
+    //     est le piege qu'aucun test de syntaxe ne voit.
+    // Les valeurs sont donc litterales, et la reponse du partenaire est `r`.
+    await surveillerReponse({ fichier: 'api/channel-connect.js', methode: 'POST',
+                              chemin: '/auth/one_time_token',
+                              statut: r.status, texte: text })
 
     if (!r.ok || !json?.data?.token) {
       console.error('[channel-connect] one_time_token echec', r.status, json)

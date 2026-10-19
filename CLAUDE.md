@@ -748,6 +748,13 @@ pour un push sur `staging`, `Production – hotesmart` pour `main`.
 **Sortie vide = aucun déploiement = webhook perdu**, et le site continue de
 servir l'ancien code sans que rien ne le signale.
 
+⚠ **ET IL FAUT LAISSER PASSER UNE MINUTE AVANT DE CONCLURE.** Le déploiement
+apparaît en général en dix à quinze secondes, mais pas toujours : mesuré le
+19 octobre 2026, la même commande rendait **vide à 25 secondes** et les deux
+environnements à 45. Un déroulé qui fait crier au loup trop tôt se fait ignorer
+— et la conclusion fausse coûte ici un commit vide sur `staging` pour rien.
+Boucler jusqu'à deux minutes, puis conclure.
+
 ⚠ **LE SHA DOIT ÊTRE COMPLET.** Un SHA abrégé (7 ou 10 caractères) fait rendre
 `[]` **en silence** : on lit « webhook perdu » là où le déploiement existe.
 Mesuré le 19 octobre 2026, sur un déploiement bien présent.
