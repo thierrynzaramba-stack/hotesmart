@@ -102,7 +102,15 @@ function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], enPan
         is (c, v) { a.is[c] = v; return chain },
         or (e) { a.or = e; return chain },
         order (c, o) { a.order = { c, asc: !(o && o.ascending === false) }; return chain },
-        limit (n) { a.limit = n; return Promise.resolve(donnees()) },
+        // Le plafond `max_rows = 1000` du serveur, simule comme dans l'autre
+        // fichier de test : un double plus genereux que la base rend vertes des
+        // gardes qui, en production, ne peuvent pas mordre.
+        range (de, jusqu) {
+          const r = donnees()
+          if (r.error) return Promise.resolve(r)
+          return Promise.resolve({ data: r.data.slice(de, de + Math.min(jusqu - de + 1, 1000)), error: null })
+        },
+        limit (n) { a.limit = n; const r = donnees(); return Promise.resolve(r.error ? r : { data: r.data.slice(0, Math.min(n, 1000)), error: null }) },
         maybeSingle () { const r = donnees(); return Promise.resolve({ data: r.data ? (r.data[0] || null) : null, error: r.error }) },
         then (f, g) { return Promise.resolve(donnees()).then(f, g) }
       }
@@ -141,6 +149,7 @@ const profilDe = (compte, membre, extra = {}) => ({
 })
 const droitsDe = (profileId, extra = {}) => ({
   profile_id: profileId, reservations: 'read', reglages: 'none',
+  prestataires: 'read', avis: 'read', facturation: 'read',
   property_scope: 'all', property_ids: [], property_refs: [], ...extra
 })
 
@@ -227,7 +236,10 @@ test('la fiche du titulaire s affiche, bloc par bloc', async () => {
   assert.equal(r.code, 200)
   assert.equal(r.body.bien.nom, 'La bulle')
   assert.deepEqual(r.body.canaux, [], 'aucun canal releve : lu, et vide')
-  assert.equal(r.body.suppression.possible, true)
+  // ⚠ Et « jamais releve » n'autorise PAS la suppression : aucun canal ET aucune
+  // date de releve ne disent pas « pas relie » (constat M1a).
+  assert.equal(r.body.suppression.possible, null)
+  assert.equal(r.body.suppression.motif, 'jamais_releve')
 })
 
 test('LE TEST QUI COMPTE : aucun identifiant du partenaire ne descend dans la reponse', async () => {
@@ -262,16 +274,66 @@ test('LE TEST QUI COMPTE : une panne APRES la garde rend 503, pas une fiche ampu
   assert.ok(/indisponible/i.test(r.body.error))
 })
 
-test('la reponse interdit le cache du navigateur', async () => {
-  preparer()
-  const r = await appeler({ id: BIEN_A })
-  assert.equal(r.entetes['cache-control'], 'max-age=0, must-revalidate')
-})
-
 test('une reference PARTENAIRE en parametre est acceptee, et resolue en UUID', async () => {
   preparer()
   const r = await appeler({ id: REF_A })
   assert.equal(r.code, 200, 'la garde accepte les deux formes : la fiche doit suivre')
   assert.equal(r.body.bien.id, BIEN_A,
     'lire `.eq(id, <ref texte>)` ferait echouer la requete en 22P02 — le piege UUID')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Les droits par DOMAINE, de bout en bout — constat de SECURITE du 20 octobre
+// ═══════════════════════════════════════════════════════════════════════════
+
+const membre = (extra = {}) => preparer({
+  appelant: MEMBRE,
+  profils: [profilDe(TITULAIRE, MEMBRE)],
+  permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, extra)]
+})
+
+test('LE TEST QUI COMPTE : `reservations: read` seul ne donne PAS les personnes du menage', async () => {
+  // Combinaison que l ecran Equipe permet : le co-hote voit les reservations,
+  // pas les prestataires. api/menages.js lui refuse les personnes, et la RLS
+  // aussi (`can_read(user_id, 'prestataires', property_id)`). Cet endpoint
+  // tourne en service key : sans verification propre, il contournait les deux.
+  const { vus } = membre({ prestataires: 'none', avis: 'none', facturation: 'none' })
+  const r = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.equal(r.code, 200, 'la fiche s affiche : c est le BLOC qui est refuse, pas la page')
+  assert.equal(r.body.menage, null)
+  assert.equal(r.body.avis, null)
+  assert.equal(r.body.taxe, null)
+  assert.deepEqual(r.body.refuses.sort(), ['avis', 'menage', 'taxe'])
+  const tables = vus.map(v => v.table)
+  for (const t of ['property_cleaning_providers', 'ota_reviews', 'taxes_sejour']) {
+    assert.ok(!tables.includes(t), `${t} a ete interrogee sans le droit correspondant`)
+  }
+})
+
+test('un membre qui A le droit `prestataires` recoit le bloc Menage', async () => {
+  membre({ prestataires: 'read' })
+  const r = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.equal(r.code, 200)
+  assert.deepEqual(r.body.menage, [], 'aucune liaison dans ce double : lu, et vide')
+  assert.ok(!r.body.refuses.includes('menage'))
+})
+
+test('sans `reglages: write`, la suppression n est pas PROMISE', async () => {
+  membre({ reglages: 'none' })
+  const r = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.equal(r.body.suppression.possible, null)
+  assert.equal(r.body.suppression.motif, 'droit_refuse')
+})
+
+test('le titulaire n est refuse sur rien', async () => {
+  preparer()
+  const r = await appeler({ id: BIEN_A })
+  assert.deepEqual(r.body.refuses, [])
+})
+
+test('la reponse n est pas mise en cache par un intermediaire, et varie par compte', async () => {
+  preparer()
+  const r = await appeler({ id: BIEN_A })
+  assert.equal(r.entetes['cache-control'], 'private, no-store')
+  assert.equal(r.entetes['vary'], 'authorization, x-compte')
 })

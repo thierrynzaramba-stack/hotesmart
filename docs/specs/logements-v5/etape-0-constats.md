@@ -91,6 +91,50 @@ l'ambre.
 
 ---
 
+---
+
+## Écart 3 — à quel domaine de droits appartient la taxe de séjour ?
+
+La revue a trouvé un **constat de sécurité** : la garde d'entrée est
+`reservations: read`, mais trois blocs appartiennent à d'autres domaines, et
+leurs politiques RLS le disent. L'endpoint tourne en service key, qui contourne
+la RLS par conception — c'est pour ça qu'il doit vérifier lui-même.
+
+| bloc | table | domaine |
+|---|---|---|
+| Ménage | `property_cleaning_providers` | `prestataires` (policy `pcp_select`) |
+| Avis | `ota_reviews` | `avis` (policy `ota_reviews_select`) |
+| Taxe de séjour | `taxes_sejour` | **aucun** — `revoke all from authenticated` |
+
+Les deux premiers sont corrigés sans ambiguïté : le dépôt a déjà le précédent
+(`api/menages.js`, « TROIS DROITS, TROIS CHOSES »).
+
+**Le troisième est un choix que je prends par défaut** : `taxes_sejour` est une
+table de **service**, qu'aucun client ne lit aujourd'hui. Je l'ai rattachée à
+**`facturation: read`** — c'est de l'argent collecté, et c'est le domaine le plus
+proche. **À confirmer ou à corriger** : l'autre candidat est `reglages`.
+
+## Écart 4 — « Libre » ne regarde que les réservations
+
+Le fait daté ne compte que les séjours **confirmés**. Deux choses n'entrent pas :
+- un **blocage propriétaire** (`blocked`) — maintenance, séjour de l'hôte ;
+- les **fermetures de l'hôte** (table `fermetures`, lot 4.6.2).
+
+La spec §2 dit « faits comptés depuis les réservations », donc le choix est
+conforme — mais l'écran dira **« Libre jusqu'au… »** sur une période que l'hôte a
+fermée. Je le nomme ici plutôt que de le découvrir à la recette. Le corriger est
+une lecture de plus (`fermetures`), à décider à l'étape 1.
+
+## Nuance — le drapeau de suppression est un peu plus prudent que le serveur
+
+Le serveur compare les mappings au seul `provider_rate_plan_id` du bien ; le
+cœur, lui, calcule `mappe_pour_ce_bien` sur un ensemble de plans **plus large**.
+Le drapeau peut donc dire « impossible » là où le serveur accepterait. L'écart va
+dans le sens prudent (on ne promet jamais une suppression qui échouera), mais il
+existe : ce n'est pas *exactement* la règle du serveur, c'est la règle du cœur.
+
+---
+
 ## Ce que l'étape 0 ne fait pas
 
 Aucun écran. Aucune écriture. Aucun appel au partenaire. `api/channel-property`

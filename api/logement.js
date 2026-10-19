@@ -22,7 +22,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
-const { refsDuPerimetre } = require('../lib/permissions')
+const { refsDuPerimetre, peutLire, peutEcrire } = require('../lib/permissions')
 const { lireFiche, lireListe } = require('../lib/logement/lecture')
 
 const supabase = createClient(
@@ -30,10 +30,38 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY
 )
 
+// ⚠ LES DROITS PAR DOMAINE, AU-DELA DE LA GARDE D'ENTREE. Constat de SECURITE de
+// la revue du 20 octobre 2026. `reservations: read` ouvre l'endpoint, mais trois
+// blocs appartiennent a d'autres domaines, et leurs policies RLS le disent :
+// `property_cleaning_providers` -> 'prestataires', `ota_reviews` -> 'avis',
+// `taxes_sejour` -> table de service (`revoke all from authenticated`).
+// L'endpoint tourne en service key, qui contourne la RLS par conception : c'est
+// pour ca qu'il doit verifier lui-meme. Sans ces trois lignes, un co-hote invite
+// avec `prestataires: none` recevait le nom de la prestataire de menage, son rang
+// et ses jours de travail — ce que api/menages.js lui refuse.
+//
+// Le precedent est explicite (api/menages.js, equipe du 13 octobre) : « TROIS
+// DROITS, TROIS CHOSES ».
+//
+// ⚠ `reglages_write` N'OUVRE RIEN ICI : il ne sert qu'a ne pas PROMETTRE a un
+// profil en lecture une suppression que le serveur lui refusera en 403.
+function droitsDesBlocs (contexte, cible) {
+  return {
+    prestataires: peutLire(contexte, 'prestataires', cible),
+    avis: peutLire(contexte, 'avis', cible),
+    facturation: peutLire(contexte, 'facturation', cible),
+    reglages_write: peutEcrire(contexte, 'reglages', cible)
+  }
+}
+
 module.exports = async function handler (req, res) {
   // ⚠ Le navigateur ne doit pas servir une fiche en cache : les canaux, le fait
-  // date et le drapeau de suppression changent sans que l'URL change.
-  res.setHeader('cache-control', 'max-age=0, must-revalidate')
+  // date et le drapeau de suppression changent sans que l'URL change. Et la
+  // reponse est PROPRE A UN COMPTE : `private, no-store` dit ce qu'on veut dire,
+  // la ou `must-revalidate` autorise encore un cache partage a la detenir
+  // (constat L1 de la revue).
+  res.setHeader('cache-control', 'private, no-store')
+  res.setHeader('vary', 'authorization, x-compte')
 
   if (req.method !== 'GET') {
     res.setHeader('allow', 'GET')
@@ -60,9 +88,11 @@ module.exports = async function handler (req, res) {
     // — le troisieme passage du piege UUID.
     const bienId = garde.bien ? garde.bien.id : id
 
+    const cible = garde.bien ? { id: garde.bien.id, ref: garde.bien.provider_property_id } : null
     try {
       const fiche = await lireFiche(supabase, {
-        compte: garde.accountUserId, bienId
+        compte: garde.accountUserId, bienId,
+        droits: droitsDesBlocs(garde.contexte, cible)
       })
       // La garde a deja rendu 404 pour un bien inconnu ; ici, c'est un bien
       // connu mais absent du compte proprietaire — on ne renseigne pas plus.
@@ -95,7 +125,11 @@ module.exports = async function handler (req, res) {
 
   try {
     const liste = await lireListe(supabase, {
-      compte: garde.accountUserId, refsPerimetre
+      compte: garde.accountUserId, refsPerimetre,
+      // Sur une collection, le perimetre est deja un filtre : le droit de
+      // domaine, lui, se juge sans bien (comme api/menages.js le fait pour
+      // l'equipe).
+      droits: droitsDesBlocs(garde.contexte, null)
     })
     return res.status(200).json(liste)
   } catch (e) {
