@@ -25,6 +25,14 @@
 -- nom du partenaire ne sort JAMAIS vers l'hote. RLS
 -- active, AUCUNE policy : seule la cle de service lit.
 --
+-- ⚠ PAS DE COLONNE `user_id`, ET C'EST DELIBERE.
+-- Une premiere version en portait une : l'unique
+-- writer ne l'ecrivait JAMAIS — le compte n'est pas
+-- connu au site d'appel, qui est `channelCall`. Une
+-- colonne morte suggere un filtre par compte qui
+-- n'existe pas, et quelqu'un finira par s'y fier.
+-- Constat de la revue de 4dada3e.
+--
 -- ⚠ `chemin` EST NORMALISE, PAS BRUT. Un chemin reel
 -- porte des identifiants du partenaire
 -- (`/channels/<uuid>/mappings/<uuid>`) : on les
@@ -42,7 +50,6 @@ create table if not exists
   code text not null,
   extrait text,
   occurrences int not null default 1,
-  user_id uuid,
   vu_le timestamptz not null default now(),
   cree_le timestamptz not null default now(),
   constraint reponses_partenaire_code

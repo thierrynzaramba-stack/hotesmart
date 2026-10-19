@@ -8,7 +8,7 @@
 // passerait, et la premiere ecriture reelle ferait la difference.
 //
 // ON L'INTERROGE DONC PAR SON COMPORTEMENT :
-//   1. la table se lit, et ses 11 colonnes sont la ;
+//   1. la table se lit, et ses 10 colonnes sont la ;
 //   2. la contrainte refuse un `code` inconnu — c'est elle qui garantit que la
 //      colonne ne porte que les trois motifs du writer ;
 //   3. les trois motifs legitimes sont acceptes ;
@@ -59,7 +59,7 @@ const anon = createClient(URL, process.env.SUPABASE_ANON_KEY, { global: { fetch:
 
 const TABLE = 'reponses_partenaire_invalides'
 const COLONNES = ['id', 'fichier', 'methode', 'chemin', 'statut', 'code',
-                  'extrait', 'occurrences', 'user_id', 'vu_le', 'cree_le']
+                  'extrait', 'occurrences', 'vu_le', 'cree_le']
 const MOTIFS = ['reponse_non_json', 'forme_inattendue', 'reponse_vide']
 const MARQUE = 'VERIF-MIGRATION'
 

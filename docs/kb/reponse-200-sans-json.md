@@ -44,6 +44,29 @@ Ce n'est pas une hypothèse : l'environnement de staging a déjà vécu l'URL sa
 La règle du dépôt — « tout code canal via `lib/channels/` » — est donc enfreinte
 par dix-sept fichiers, et c'est **cette duplication** qui rend le défaut large.
 
+### ⚠ CE COMPTE EST CELUI DES COPIES DE `channelCall`, PAS DE CE QUI PARLE AU PARTENAIRE
+
+**Corrigé le 19 octobre 2026, à l'étape 1 du chantier.** Le tableau ci-dessus a
+été établi en cherchant les fichiers portant la ligne de repli
+`json = { raw: text }`. Un balayage plus large — « ce fichier envoie-t-il
+`user-api-key` et lit-il un corps ? » — en a trouvé **huit de plus**, qui
+appellent le partenaire autrement :
+
+`scripts/_tmp-restore.js`, `scripts/audit-stop-sell.js`,
+`scripts/etat-bascule-la-bulle.js`, `scripts/mapper-airbnb-second-bien.js`,
+`scripts/mapper-booking-la-bulle.js`, `scripts/reconcilier-stop-sell.js`,
+`scripts/staging-tarifs.js`, `scripts/supprimer-residus-phase0.js`.
+
+Les neuf outils de `scripts/` (ces huit plus `check-webhooks`) ne sont **pas**
+surveillés, et c'est une décision assumée : ils sont lancés à la main, leur
+sortie est lue par un humain au moment où il les lance, et **aucun n'est
+déployé** — Vercel ne sert que `api/` et le site statique, `lib/` n'arrive
+qu'embarqué par `api/`. Ils sont exemptés **nommément** dans
+`tests/reponse-partenaire-detection.test.js`, qui refuse qu'un fichier de
+`api/` ou `lib/` le soit, et qui refuse aussi une exemption devenue inutile.
+
+Le code **déployé** compte donc **17 copies**, toutes surveillées.
+
 ## 3. Ce que chaque famille d'appelants conclut d'un 200 + HTML
 
 ### a. Conclusion DESTRUCTRICE — une donnée est effacée ou un objet supprimé

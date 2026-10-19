@@ -125,9 +125,12 @@ test('LE TEST QUI COMPTE : la surveillance ne change RIEN et ne leve JAMAIS', as
     fichier: 'lib/essai.js', methode: 'GET', chemin: '/channels',
     statut: 200, texte: HTML, sb, alarme: () => { throw new Error('alarme cassee') }
   })
-  // Elle rend un simple compte rendu, jamais la reponse de l'appelant.
+  // ⚠ L'ASSERTION D'ORIGINE ETAIT CREUSE : `assert.equal(r.leve, undefined)`
+  // passait quoi que fasse le code, puisque `leve` n'est jamais une cle de la
+  // valeur rendue. Constat de la revue de 4dada3e. On asserte ce qui existe.
   assert.equal(typeof r, 'object')
-  assert.equal(r.leve, undefined, 'la surveillance a leve')
+  assert.equal(r.signale, false, 'une base en panne a quand meme ete declaree signalee')
+  assert.equal(r.cadenceIllisible, true, 'le motif de l abandon n est pas rendu')
 })
 
 test('un 2xx sans JSON pose UNE ligne, et sonne', async () => {
@@ -281,7 +284,12 @@ test('LE TEST QUI COMPTE : les dix-huit copies de channelCall sont surveillees',
   const RACINE = path.join(__dirname, '..')
   const sans = []
   for (const f of COPIES) {
+    // ⚠ UN APPEL COMMENTE NE COMPTE PAS. Le grep d'origine acceptait
+    // `// await surveillerReponse({…})`. On retire donc les commentaires avant
+    // de chercher. Constat de la revue de 4dada3e.
     const s = fs.readFileSync(path.join(RACINE, f), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n')
     if (!/surveillerReponse\s*\(/.test(s)) sans.push(f)
   }
   assert.deepEqual(sans, [],
@@ -311,9 +319,15 @@ test('LE TEST QUI COMPTE : aucune DIX-NEUVIEME copie n est apparue', () => {
       const s = fs.readFileSync(path.join(RACINE, r), 'utf8')
       // La signature : un appel au partenaire avec sa cle, et une lecture du
       // corps en texte. C'est ce qui definit une copie de `channelCall`.
-      if (/user-api-key/.test(s) && /await\s+res\.text\(\)|await\s+r\.text\(\)/.test(s)) {
-        trouves.push(r)
-      }
+      // ⚠ LA SIGNATURE DOIT ETRE LARGE. Une premiere version exigeait le
+      // litteral `user-api-key` ET `await res.text()` ou `await r.text()` :
+      // une copie nommant sa reponse autrement (`await reponse.text()`), ou
+      // mettant l'en-tete dans une constante, lui etait invisible. Constat de
+      // la revue de 4dada3e.
+      const parleAuPartenaire = /user-api-key/.test(s)
+        || /CHANNEL_API_KEY/.test(s) && /fetch\s*\(/.test(s)
+      const litLeCorps = /await\s+[\w$.]+\.text\s*\(\)/.test(s)
+      if (parleAuPartenaire && litLeCorps) trouves.push(r)
     }
   }
   for (const d of ['api', 'lib', 'scripts']) parcourir(d)
@@ -361,11 +375,17 @@ test('LE TEST QUI COMPTE : chaque appel de surveillance ne nomme que des variabl
 
   for (const f of COPIES) {
     const src = fs.readFileSync(path.join(RACINE, f), 'utf8')
-    const i = src.indexOf('surveillerReponse({')
-    if (i === -1) { fautes.push(`${f} : appel introuvable`); continue }
-    const argus = src.slice(i, src.indexOf('})', i))
-    const nommes = [...argus.matchAll(/:\s*([A-Za-z_$][\w$]*)(?:\.[\w$]+)?/g)]
-      .map(m => m[1])
+    // ⚠ TOUS LES APPELS DU FICHIER, PAS LE PREMIER. `indexOf` seul laissait
+    // passer un second `surveillerReponse({…})` ajoute plus bas. Constat de la
+    // revue de 4dada3e.
+    const appels = []
+    for (let i = src.indexOf('surveillerReponse({'); i !== -1;
+         i = src.indexOf('surveillerReponse({', i + 1)) {
+      appels.push(src.slice(i, src.indexOf('})', i)))
+    }
+    if (!appels.length) { fautes.push(`${f} : appel introuvable`); continue }
+    const nommes = appels.flatMap(a =>
+      [...a.matchAll(/:\s*([A-Za-z_$][\w$]*)(?:\.[\w$]+)?/g)].map(m => m[1]))
       .filter(v => !['true', 'false', 'null', 'undefined'].includes(v))
     for (const v of new Set(nommes)) {
       const enParametre = new RegExp(
@@ -377,4 +397,149 @@ test('LE TEST QUI COMPTE : chaque appel de surveillance ne nomme que des variabl
     }
   }
   assert.deepEqual(fautes, [], '\n  ' + fautes.join('\n  '))
+})
+
+// ─── Les constats de la revue de 4dada3e ───────────────────────────────────
+
+test('LE TEST QUI COMPTE : l alerte porte le fichier, le code et le chemin', async () => {
+  // ⚠ BLOQUANT DE LA REVUE. Le paquet etait passe A PLAT a `reportIncident`,
+  // qui destructure `{ userId, propertyId, detail, threshold, fenetreMs }` :
+  // `detail` valait donc `null`, et l'alerte partait SANS le fichier, sans le
+  // code, sans le chemin — c'est-a-dire sans la seule information pour laquelle
+  // cette etape existe. Et `docs/kb/alertes.md`, livre dans le MEME commit,
+  // decrivait un contenu qui n'existait pas.
+  const sb = baseSimulee()
+  const recus = []
+  await surveillerReponse({
+    fichier: 'lib/calendrier-writer.js', methode: 'POST', chemin: '/availability',
+    statut: 200, texte: HTML, sb, alarme: (c, p) => recus.push([c, p])
+  })
+  assert.equal(recus.length, 1)
+  const [clef, paquet] = recus[0]
+  assert.equal(clef, 'reponse_partenaire_invalide')
+  // ⚠ C'est la FORME que `reportIncident` sait lire qui est verifiee ici, pas
+  // seulement la presence des valeurs.
+  assert.ok(paquet.detail, 'le paquet n a pas de cle `detail` : reportIncident la jettera')
+  assert.equal(paquet.detail.fichier, 'lib/calendrier-writer.js')
+  assert.equal(paquet.detail.code, 'reponse_non_json')
+  assert.equal(paquet.detail.statut, 200)
+  assert.equal(paquet.detail.chemin, '/availability')
+  // Le fichier est DANS le message : `founder-notify` reconnait « le meme
+  // fait » par le message, et sans lui deux pannes distinctes n en feraient
+  // qu une, la seconde etouffee six heures.
+  assert.match(paquet.detail.message, /lib\/calendrier-writer\.js/)
+  assert.equal(paquet.fenetreMs, 6 * 3600 * 1000)
+})
+
+test('LE TEST QUI COMPTE : le corps du partenaire n atteint JAMAIS l alerte', async () => {
+  // `reportIncident` ecrit son detail dans `automation_incidents`, qui est lue
+  // par un ecran. Les 300 caracteres du corps restent dans
+  // `reponses_partenaire_invalides`, fermee a tout client.
+  const sb = baseSimulee()
+  const recus = []
+  const corps = '<html>Channex est en maintenance, contactez support@…</html>'
+  await surveillerReponse({
+    fichier: 'lib/essai.js', methode: 'GET', chemin: '/channels',
+    statut: 200, texte: corps, sb, alarme: (c, p) => recus.push(p)
+  })
+  const envoye = JSON.stringify(recus[0])
+  assert.ok(!envoye.includes('maintenance'), 'le corps du partenaire part dans l alerte')
+  assert.ok(!envoye.includes('html'), 'le corps du partenaire part dans l alerte')
+  // Mais il est bien garde dans la table, lui.
+  assert.ok(sb.trace.insertions[0].ligne.extrait.includes('maintenance'))
+})
+
+test('LE TEST QUI COMPTE : une ECRITURE hors forme JSON:API n est PAS signalee', async () => {
+  // ⚠ CONSTAT DE LA REVUE. Le verdict exigeait `data`/`meta`/`errors` de TOUTES
+  // les methodes, alors que le guard de reference ne l'exige que d'une LECTURE —
+  // asymetrie deliberee et documentee. `POST /applications/install`,
+  // `/channels/:id/activate`, `/deactivate`, `/action/load_future_reservations`
+  // et `DELETE /channels/:id` rendent des formes jamais mesurees : une creation
+  // de bien PARFAITEMENT REUSSIE faisait sonner une alarme.
+  for (const [methode, corps] of [
+    ['POST', '{}'], ['POST', '{"success":true}'], ['POST', '{"message":"Ok"}'],
+    ['PUT', '{"ok":1}'], ['DELETE', '{}']
+  ]) {
+    const v = verdictDeLaReponse({ statut: 200, texte: corps, methode })
+    assert.equal(v.valide, true,
+      `${methode} ${corps} signale a tort -> ${v.code}`)
+  }
+  // Et la LECTURE, elle, l'exige toujours.
+  assert.equal(verdictDeLaReponse({ statut: 200, texte: '{}', methode: 'GET' }).code,
+    'forme_inattendue')
+  // Un corps non-JSON reste refuse pour TOUT LE MONDE : c'est lui, et non la
+  // forme, qui signe la page d'erreur.
+  assert.equal(verdictDeLaReponse({ statut: 200, texte: HTML, methode: 'POST' }).code,
+    'reponse_non_json')
+})
+
+test('LE TEST QUI COMPTE : une cadence illisible n ecrit RIEN et ne sonne pas', async () => {
+  // ⚠ CONSTAT DE LA REVUE. La premiere version concluait « rien de recent » et
+  // inserait : tant que la table n'existe pas — c'est-a-dire aujourd'hui en
+  // prod — c'etait UNE LIGNE ET UNE ALARME PAR APPEL, l'exact contraire de la
+  // promesse. Et `reportIncident` insere systematiquement dans
+  // `automation_incidents`, qui a sa propre alarme de croissance.
+  const sb = baseSimulee({ lectureEnEchec: true })
+  const alarmes = []
+  const r = await surveillerReponse({
+    fichier: 'lib/essai.js', methode: 'GET', chemin: '/channels',
+    statut: 200, texte: HTML, sb, alarme: (c) => alarmes.push(c)
+  })
+  assert.deepEqual(sb.trace.insertions, [], 'une lecture ratee a quand meme insere')
+  assert.deepEqual(alarmes, [], 'une lecture ratee a quand meme sonne')
+  assert.equal(r.cadenceIllisible, true)
+})
+
+test('LE TEST QUI COMPTE : la base qui pend ne bloque pas l appelant', async () => {
+  // ⚠ CONSTAT DE LA REVUE. `supabase-js` n'a aucun delai par defaut : un
+  // `select` qui pend ferait pendre `channelCall`, donc l'appelant, donc la
+  // fonction. Avant cette etape, `channelCall` RENDAIT sa valeur — a tort, mais
+  // il rendait. Une etape qui pretend observer ne doit pas bloquer ce qu'elle
+  // observe.
+  const jamais = { from: () => ({
+    select () { return this }, eq () { return this }, gte () { return this },
+    order () { return this }, limit () { return this },
+    then () { return new Promise(() => {}) }   // ne se regle JAMAIS
+  }) }
+  const t0 = Date.now()
+  const r = await surveillerReponse({
+    fichier: 'lib/essai.js', methode: 'GET', chemin: '/channels',
+    statut: 200, texte: HTML, sb: jamais, alarme: () => {}, delaiMs: 120
+  })
+  const ecoule = Date.now() - t0
+  assert.ok(ecoule < 900, `la surveillance a attendu ${ecoule} ms pour un delai de 120 ms`)
+  assert.equal(r.signale, false)
+  assert.equal(r.cadenceIllisible, true)
+})
+
+test('LE TEST QUI COMPTE : la fenetre se FERME, et une panne qui dure re-sonne', async () => {
+  // ⚠ CONSTAT DE LA REVUE. `vu_le` etait repousse a chaque occurrence : la
+  // fenetre ne se fermait donc jamais tant que la panne durait — aucune
+  // nouvelle ligne, donc aucune nouvelle alarme. Une panne de trois jours
+  // produisait UN seul avertissement.
+  const debut = new Date(Date.now() - 9 * 60000).toISOString()
+  const sb = baseSimulee({ dernieres: [{
+    id: 'L1', fichier: 'lib/essai.js', code: 'reponse_non_json',
+    occurrences: 40, vu_le: debut }] })
+  await surveillerReponse({
+    fichier: 'lib/essai.js', methode: 'GET', chemin: '/channels',
+    statut: 200, texte: HTML, sb, alarme: () => {}
+  })
+  assert.equal(sb.trace.majs.length, 1)
+  assert.equal(sb.trace.majs[0].maj.occurrences, 41)
+  assert.equal(sb.trace.majs[0].maj.vu_le, undefined,
+    '`vu_le` a ete repousse : la fenetre ne se fermera jamais et la panne ne re-sonnera pas')
+})
+
+test('un nom d endpoint reel n est pas pris pour un identifiant', async () => {
+  // `load_future_reservations` fait 24 caracteres : la regle « au moins 20 »
+  // l'ecrasait en `:id`, et on perdait de vue QUEL appel de
+  // api/channel-mapping.js — l'un des quatre chemins destructeurs — avait
+  // echoue.
+  assert.equal(cheminNormalise('/channels/0db6b39b-b8f6-4bbf-bb20-4c73e3e769d4/action/load_future_reservations'),
+    '/channels/:id/action/load_future_reservations')
+  assert.equal(cheminNormalise('/applications/install'), '/applications/install')
+  assert.equal(cheminNormalise('/reviews/abc/guest_review'), '/reviews/abc/guest_review')
+  // Et un jeton opaque long SANS tiret bas reste un identifiant.
+  assert.equal(cheminNormalise('/x/abcdefghijklmnopqrstuvwxyz'), '/x/:id')
 })
