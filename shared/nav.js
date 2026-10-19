@@ -11,14 +11,19 @@
    distinct.
 
    ⚠ CE QUE LE MÉCANISME `liens` A COÛTÉ, ET POURQUOI IL N'EST PLUS LÀ.
-   Au lot 1, l'écran calendrier V5 n'existait pas : l'entrée retombait
-   sur `/biens` et chaque page pouvait fournir le lien exact (`liens`),
-   par exemple le calendrier du premier bien. Le lot 3 a livré
-   `/calendrier` (c8e7dff) sans revenir ici : pendant huit jours, en
-   production, « Calendrier » et « Mes biens » ont mené AU MÊME ÉCRAN
-   depuis Ménages, Messages et Calendrier — deux onglets sur cinq au
-   même endroit, et aucun vers le calendrier. Seule « Aujourd'hui »,
-   qui passait `liens`, était juste.
+   Au lot 1 (257b59d, 10 octobre 2026), l'écran calendrier V5 n'existait
+   pas : l'entrée retombait sur `/biens`, et chaque page pouvait fournir
+   le lien exact (`liens`) — le calendrier du premier bien. UNE SEULE le
+   faisait, « Aujourd'hui ». Le lot 3 a livré `/calendrier` (c8e7dff,
+   12 octobre) sans revenir ici.
+   Le défaut a donc vécu EN PRODUCTION du 12 au 19 octobre : depuis
+   Messages (livrée le 11) et Calendrier, puis depuis Ménages (livrée le
+   13), « Calendrier » et « Mes biens » menaient AU MÊME ÉCRAN — deux
+   onglets sur cinq au même endroit, et aucun vers le calendrier.
+   Le téléphone n'a jamais pointé sur `/biens`, mais il n'était pas juste
+   pour autant : `/m/calendrier` a mené à l'ANCIEN calendrier téléphone
+   jusqu'à 6f3d6af (13 octobre), qui a fait des anciennes pages des
+   redirections vers `/calendrier`.
    La leçon n'est pas « il fallait y penser » : un repli que UNE SEULE
    page corrige est un piège qui attend. L'entrée porte maintenant sa
    vraie destination, la même pour toutes les pages, et
@@ -48,7 +53,14 @@
     const bottom = document.querySelector('.bottombar');
     const items = NAV.filter(n => !n.domaine || peutLire(n.domaine)).map(n => {
       const href = n.href;
-      const cur = n.id === 'today' && isCurrent(n.href) ? ' aria-current="page"' : '';
+      // ⚠ L'ONGLET COURANT SE MARQUE SUR TOUTES LES ENTRÉES (constat de la
+      // revue de 5de081b). La restriction à « Aujourd'hui » n'était pas un
+      // choix de design : elle existait PARCE QUE `calendar` et `properties`
+      // menaient tous deux à `/biens` — la lever alors aurait marqué DEUX
+      // onglets courants. Le repli parti, la cause l'est aussi, et l'hôte
+      // retrouve sur Calendrier, Messages et Ménages la pastille que
+      // `shared/ui.css` dessine depuis le socle et que personne ne voyait.
+      const cur = isCurrent(n.href) ? ' aria-current="page"' : '';
       const count = n.badge ? badges[n.badge] : 0;
       const badge = count ? `<span class="badge badge--amber">${esc(count)}</span>` : '';
       return { n, href, hrefMobile: n.hrefMobile || href, cur, badge };

@@ -2,12 +2,13 @@
 // CHAQUE ENTRÉE DU MENU MÈNE À SON ÉCRAN, ET DEUX ENTRÉES NE MÈNENT JAMAIS
 // AU MÊME.
 //
-// ⚠ CE QUI EST ARRIVÉ, ET QUE RIEN NE VOYAIT. Au lot 1, l'écran calendrier V5
-// n'existait pas : l'entrée « Calendrier » retombait sur `/biens`, et une page
-// pouvait fournir le vrai lien par l'option `liens`. Une seule le faisait.
-// Le lot 3 a livré `/calendrier` (c8e7dff) sans revenir changer ce repli :
-// pendant huit jours, EN PRODUCTION, « Calendrier » et « Mes biens » ont mené
-// au même écran depuis Ménages, Messages et Calendrier.
+// ⚠ CE QUI EST ARRIVÉ, ET QUE RIEN NE VOYAIT. Au lot 1 (257b59d, 10 octobre
+// 2026), l'écran calendrier V5 n'existait pas : l'entrée « Calendrier »
+// retombait sur `/biens`, et une page pouvait fournir le vrai lien par
+// l'option `liens`. Une seule le faisait. Le lot 3 a livré `/calendrier`
+// (c8e7dff, 12 octobre) sans revenir changer ce repli : du 12 au 19 octobre,
+// EN PRODUCTION, « Calendrier » et « Mes biens » ont mené au même écran depuis
+// Messages et Calendrier, puis depuis Ménages à partir du 13.
 //
 // Aucun test ne pouvait le voir : le menu se dessinait parfaitement, aux cinq
 // entrées, avec le bon libellé et la bonne icône. Seule la DESTINATION était
@@ -65,21 +66,86 @@ test('téléphone : chaque entrée porte sa destination', () => {
   assert.deepEqual(mobile, ATTENDU.map(e => e.mobile))
 })
 
+// ⚠ ON COMPARE L'ÉCRAN D'ARRIVÉE, PAS L'URL (constat de la revue de 5de081b).
+// Deux URL différentes peuvent aboutir au même endroit par une redirection :
+// `/m/calendrier` mène à `/calendrier`. Chercher les doublons sur les chaînes
+// brutes laisserait repasser le défaut exact que ce fichier existe pour
+// attraper — il suffirait que le lot Logements fasse de `/biens` une
+// redirection vers une page déjà ciblée.
+function destinationFinale (href, vercel) {
+  const redirects = vercel.redirects || []
+  const rewrites = vercel.rewrites || []
+  let cible = href
+  for (let i = 0; i < 5; i++) {               // borne : une boucle de redirections ne doit pas pendre
+    const r = redirects.find(x => x.source === cible)
+    if (!r) break
+    cible = String(r.destination).split('?')[0]
+  }
+  const w = rewrites.find(x => x.source === cible)
+  return w ? String(w.destination).split('?')[0] : cible
+}
+
 // ⚠ L'ASSERTION QUI NOMME LE DÉFAUT. Elle rougit contre le code d'avant :
 // `/biens` y apparaissait DEUX fois sur la barre du haut.
 test('LE TEST QUI COMPTE : deux entrées ne mènent jamais au même écran (ordinateur)', () => {
+  const vercel = JSON.parse(lire('vercel.json'))
   const { bureau } = rendre()
-  const doublons = bureau.filter((h, i) => bureau.indexOf(h) !== i)
+  const ecrans = bureau.map(h => destinationFinale(h, vercel))
+  const doublons = ecrans.filter((h, i) => ecrans.indexOf(h) !== i)
   assert.deepEqual(doublons, [],
-    `deux onglets mènent au même écran : ${doublons.join(', ')}`)
+    `deux onglets aboutissent au même écran : ${doublons.join(', ')}`)
 })
 
-// ⚠ SUR TÉLÉPHONE, « Calendrier » A SA PROPRE ROUTE. Les autres entrées
-// partagent leur destination avec l'ordinateur, et c'est voulu.
-test('téléphone : seule l entrée Calendrier a une destination distincte', () => {
+test('deux entrées ne mènent jamais au même écran (téléphone)', () => {
+  const vercel = JSON.parse(lire('vercel.json'))
+  const { mobile } = rendre()
+  const ecrans = mobile.map(h => destinationFinale(h, vercel))
+  const doublons = ecrans.filter((h, i) => ecrans.indexOf(h) !== i)
+  assert.deepEqual(doublons, [],
+    `deux onglets aboutissent au même écran : ${doublons.join(', ')}`)
+})
+
+// ⚠ « SA PROPRE ROUTE » N'EST PAS « SON PROPRE ÉCRAN ». `/m/calendrier` est une
+// URL distincte qui aboutit au MÊME écran que `/calendrier` depuis que les
+// anciennes pages calendrier sont devenues des redirections (6f3d6af,
+// 13 octobre 2026). Le test dit donc ce qui est vrai : une URL distincte,
+// un écran commun.
+test('téléphone : seule l entrée Calendrier a une URL distincte, et elle mène au même écran', () => {
+  const vercel = JSON.parse(lire('vercel.json'))
   const { bureau, mobile } = rendre()
   const distinctes = ATTENDU.filter((e, i) => bureau[i] !== mobile[i]).map(e => e.id)
   assert.deepEqual(distinctes, ['calendar'])
+  const i = ATTENDU.findIndex(e => e.id === 'calendar')
+  assert.equal(destinationFinale(mobile[i], vercel), destinationFinale(bureau[i], vercel))
+})
+
+// ⚠ ET L'ONGLET COURANT SE VOIT (constat de la revue de 5de081b). `ui.css`
+// dessine `.tab[aria-current="page"]` depuis le socle ; tant que seul
+// « Aujourd'hui » le portait, l'hôte arrivait sur le calendrier sans que rien
+// ne lui dise où il était.
+test('l onglet de la page courante est marqué, sur les deux barres', () => {
+  for (const { page, id } of [{ page: '/calendrier', id: 'calendar' },
+                              { page: '/menages', id: 'cleaning' },
+                              { page: '/pages/messages', id: 'messages' },
+                              { page: '/pages/aujourdhui', id: 'today' }]) {
+    const dom = new JSDOM(
+      `<!doctype html><html><body>
+         <header class="topbar"><nav class="topbar__nav"></nav></header>
+         <nav class="bottombar"></nav>
+       </body></html>`,
+      { runScripts: 'outside-only', url: 'https://exemple.test' + page })
+    dom.window.eval(lire('shared/nav.js'))
+    dom.window.HSNav.render()
+    for (const barre of ['.topbar__nav', '.bottombar']) {
+      const marques = [...dom.window.document.querySelectorAll(barre + ' a[aria-current="page"]')]
+      assert.equal(marques.length, 1,
+        `${page} ${barre} : ${marques.length} onglet(s) marqué(s) courant, 1 attendu`)
+    }
+    const i = ATTENDU.findIndex(e => e.id === id)
+    const marque = dom.window.document.querySelector('.topbar__nav a[aria-current="page"]')
+    assert.equal(marque.getAttribute('href'), ATTENDU[i].bureau,
+      `${page} : le mauvais onglet est marqué courant`)
+  }
 })
 
 // ⚠ UN LIEN QUI NE MÈNE NULLE PART EST PIRE QU'UNE ENTRÉE ABSENTE : l'hôte
@@ -122,9 +188,21 @@ test('les quatre pages V5 montent le menu, et aucune ne pose son propre lien', (
     const src = lire(f)
     assert.match(src, /class="topbar__nav"/, `${f} : pas de barre du haut`)
     assert.match(src, /class="bottombar"/, `${f} : pas de barre du bas`)
-    assert.match(src, /HSNav\.render\(/, `${f} : n appelle pas HSNav.render`)
-    assert.ok(!/\bliens\s*:/.test(src),
-      `${f} : repasse un lien de navigation à elle — la destination doit vivre dans shared/nav.js`)
+    // ⚠ UN APPEL COMMENTÉ N'EST PAS UN APPEL (constat de la revue de 5de081b).
+    // On retire les commentaires avant de chercher : sinon, commenter le
+    // montage du menu laisse le test vert et la page sans navigation.
+    const vif = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    assert.match(vif, /HSNav\.render\(/, `${f} : n appelle pas HSNav.render (hors commentaires)`)
+    // ⚠ ANCRÉ SUR L'APPEL, PAS SUR LE MOT (constat de la revue de 5de081b).
+    // `/\bliens\s*:/` scannait la prose : une phrase de commentaire écrite
+    // « plus de liens : … » rougissait, avec un message faux. Un test qui crie
+    // à tort finit ignoré — c'est l'argument de ce fichier même.
+    const appels = [...src.matchAll(/HSNav\.render\(([\s\S]{0,400}?)\)\s*$/gm)]
+      .map(m => m[1])
+    for (const args of appels) {
+      assert.ok(!/\bliens\s*:/.test(args),
+        `${f} : repasse un lien de navigation à elle — la destination doit vivre dans shared/nav.js`)
+    }
   }
 })
 
