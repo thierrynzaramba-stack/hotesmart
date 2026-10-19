@@ -343,8 +343,21 @@ module.exports = async function handler(req, res) {
         // compte que pour un bien SANS canal, ou c'est la seule date qui
         // existe.
         const { data: h } = await supabase.from('canaux_releve')
-          .select('vu_le').eq('user_id', compteLecture).maybeSingle()
+          .select('vu_le, ok, echecs_consecutifs')
+          .eq('user_id', compteLecture).maybeSingle()
         const horloge = h ? h.vu_le : null
+        // ⚠ UN ECHEC DE RELEVE DESCEND JUSQU'A L'ECRAN. Sans ce drapeau,
+        // l'hote voyait sa date de verification vieillir sans jamais savoir
+        // POURQUOI — et nous non plus : le 19 octobre, une heure de diagnostic
+        // pour une panne qui ne laissait aucune trace lisible. Le releve est
+        // au grain du COMPTE : le drapeau vaut donc pour tous ses biens.
+        // ⚠ UN EFFACEMENT SUSPENDU N'EST PAS UN ECHEC DE LECTURE. Le
+        // disjoncteur rend `ok: false` pour que le cron et l'alarme le voient,
+        // mais la lecture a reussi : l'hote ne doit RIEN lire d'anormal. Sans
+        // ce `!== 'suspendu'`, le mot « verification impossible » s'afficherait
+        // sur une lecture qui a parfaitement fonctionne.
+        const { echecVisibleParLHote } = require('../lib/canaux-du-bien')
+        const releveEnEchec = echecVisibleParLHote(h)
         const { fraicheurDuBien } = require('../lib/canaux-du-bien')
         const datesParBien = new Map()
         for (const l of lignes || []) {
@@ -355,11 +368,12 @@ module.exports = async function handler(req, res) {
         for (const b of tous) {
           b.canaux = parBien.get(String(b.id)) || []
           b.canaux_vu_le = fraicheurDuBien(datesParBien.get(String(b.id)), horloge)
+          b.canaux_echec = releveEnEchec
         }
       }
     } catch (e) {
       console.error('[channel-property] canaux illisibles :', e.message)
-      for (const b of tous) { b.canaux = null; b.canaux_vu_le = null }
+      for (const b of tous) { b.canaux = null; b.canaux_vu_le = null; b.canaux_echec = false }
     }
     return res.status(200).json({ properties: tous })
   }

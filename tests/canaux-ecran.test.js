@@ -32,9 +32,19 @@ const bac = new Function(`
   const logger = { error () {}, info () {} }
   const api = {}
   ${sansImports}
-  return { canauxDuBien, fraicheurCanaux, renderChannelBadges, escapeHtml }
+  return { canauxDuBien, fraicheurCanaux, renderChannelBadges, escapeHtml,
+           hydrateChannelBadges, MOT_ECHEC, releveEnEchec }
 `)()
-const { canauxDuBien, fraicheurCanaux, renderChannelBadges } = bac
+const { canauxDuBien, fraicheurCanaux, renderChannelBadges,
+        hydrateChannelBadges, MOT_ECHEC, escapeHtml, releveEnEchec } = bac
+// Le mot est ECHAPPE a l'affichage (il porte une apostrophe) : on le compare
+// sous la forme ou il arrive vraiment dans la page.
+const MOT_AFFICHE = escapeHtml(MOT_ECHEC)
+
+// Un conteneur minimal : ce que `hydrateChannelBadges` touche reellement.
+function conteneur () {
+  return { innerHTML: '', retire: false, remove () { this.retire = true } }
+}
 
 // ─── Les trois etats, qui ne doivent jamais se confondre ────────────────────
 
@@ -121,4 +131,45 @@ test('LE TEST QUI COMPTE : la fraicheur affichee est celle DU BIEN', () => {
   // ⚠ L'HORLOGE DU COMPTE NE DOIT PAS ECRASER LA DATE DU BIEN, meme si elle
   // est plus recente : c'est exactement le defaut qu'on ferme.
   assert.equal(fraicheurDuBien([{ vu_le: vieux }], horloge), vieux)
+})
+
+// ─── UN ECHEC SE DIT, UNE SEULE FOIS (demande de Thierry, 19 octobre 2026) ──
+//
+// ⚠ LE DEFAUT MESURE EN RECETTE. Un releve a echoue et l'ecran n'a rien dit :
+// la date vieillissait en silence, le bouton se contentait de « Reessayer »
+// sans motif, et `shared/logger.js` n'ecrit dans la console que sur localhost.
+// Une heure de diagnostic pour une panne qui aurait du se lire d'un coup d'oeil.
+//
+// ⚠ ET UNE SEULE FOIS. Le releve est au grain du COMPTE : un seul appel couvre
+// tous les biens. Le message vit donc en haut de la page, pas sous chaque carte.
+
+test('LE TEST QUI COMPTE : un echec de compte se lit sur UN bien, donc sur le compte', () => {
+  assert.equal(releveEnEchec([{ canaux_echec: false }, { canaux_echec: true }]), true)
+  assert.equal(releveEnEchec([{ canaux_echec: false }, {}]), false)
+  assert.equal(releveEnEchec([]), false, 'un compte sans bien ne declare pas de panne')
+  assert.equal(releveEnEchec(null), false)
+})
+
+test('LE TEST QUI COMPTE : les cartes ne portent AUCUN message d echec', () => {
+  // ⚠ CONTRE-EPREUVE DU DEPLACEMENT. Une premiere version mettait le mot sous
+  // chaque bien : dix cartes disaient dix fois la meme panne. Si ce test
+  // rougit, le message est redescendu dans les cartes.
+  const c = conteneur()
+  hydrateChannelBadges({
+    canaux: [{ ota: 'airbnb', titre: 'T', actif: true, mappe: true }],
+    canaux_vu_le: new Date(Date.now() - 2 * 3600000).toISOString(),
+    canaux_echec: true
+  }, c)
+  assert.ok(!c.innerHTML.includes(MOT_AFFICHE), 'le message est revenu sous la carte')
+  // Et ce que la carte doit montrer, elle le montre toujours.
+  assert.ok(/badge-channel/.test(c.innerHTML), 'les pastilles ont disparu sur un echec')
+  assert.ok(/vérifié il y a/.test(c.innerHTML),
+    'la date de derniere confirmation a disparu : l hote ne sait plus de quand date ce qu il voit')
+  assert.equal(c.retire, false, 'le conteneur a ete supprime sur un echec')
+})
+
+test('LE TEST QUI COMPTE : le mot d echec ne nomme jamais le partenaire', () => {
+  assert.ok(!/channex/i.test(MOT_ECHEC), 'le nom du partenaire est dans le message de l hote')
+  assert.ok(!/beds24/i.test(MOT_ECHEC))
+  assert.ok(MOT_ECHEC.length <= 45, 'le message n est plus court : ' + MOT_ECHEC.length + ' car.')
 })

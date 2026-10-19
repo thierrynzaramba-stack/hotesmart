@@ -81,10 +81,24 @@
       white-space: nowrap;
     }
     .badge-fraicheur.is-vieux { color: #8a1f1e; }
+    /* ⚠ ZONE DE CLIC 44 px (regle V5), VISUEL DISCRET. Le bouton faisait
+       74 x 19 px en 11 px de texte : a la limite du cliquable, et c'est le
+       seul geste de cet ecran. La pilule reste petite ; c'est le RECTANGLE
+       SENSIBLE qui fait 44 px, par un remplissage vertical transparent. */
     .btn-actualiser {
-      font-size: 11px; margin-left: 6px; padding: 2px 8px;
-      border: 0.5px solid var(--border); border-radius: 999px;
-      background: var(--bg); cursor: pointer;
+      font-size: 12px; margin-left: 6px;
+      padding: 13px 12px; min-height: 44px;
+      border: 0; background: none; cursor: pointer;
+      color: var(--text2); text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .btn-actualiser:disabled { color: var(--text2); text-decoration: none; cursor: default; }
+    .bandeau-echec {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 13px; color: #8a1f1e;
+      background: var(--bg); border: 0.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 8px 14px; margin-bottom: 14px;
     }
     .empty-state {
       background: var(--bg);
@@ -144,6 +158,12 @@
       <a href="/biens/nouveau" class="btn btn-primary" id="btn-ajouter-bien" hidden>+ Ajouter un bien</a>
     </div>
     <div class="content">
+      <!-- ⚠ UN SEUL MESSAGE POUR TOUT LE COMPTE (decision de Thierry, 19
+           octobre 2026). Le releve des canaux est un seul appel qui couvre
+           tous les biens : repeter le message sous chaque carte dirait dix
+           fois la meme chose et laisserait croire a dix pannes. Le bouton
+           « Actualiser » vit ici avec lui, puisqu'il porte la meme action. -->
+      <div id="canaux-echec" class="bandeau-echec" hidden></div>
       <div id="loader" class="loader">Chargement…</div>
       <div id="empty" class="empty-state" style="display:none;">
         <h2>Vos logements apparaîtront ici</h2>
@@ -310,7 +330,7 @@
   import { peutEcrire, enteteCompte } from '/shared/compte-courant.js'
   import {
     loadAllProperties, provenanceBadge, hydrateChannelBadges, escapeHtml,
-    fraicheurCanaux
+    fraicheurCanaux, MOT_ECHEC, releveEnEchec
   } from '/shared/properties.js'
 
   initErrorHandler()
@@ -434,28 +454,78 @@
   // 2026) : pas en temps normal, seulement au-dela de 24 h sans confirmation,
   // quand l'ecran affiche « non verifie depuis … ». Un bouton toujours la
   // invite a cliquer pour rien et appelle le partenaire sans raison.
+  // ⚠ UNE SEULE ACTION DE RELEVE, UN SEUL PORTEUR DE MESSAGE. Le releve est
+  // au grain du COMPTE : qu'il part d'un bouton sous un bien ou du bandeau, il
+  // fait la meme chose. Le resultat, lui, s'affiche toujours au meme endroit.
+  function bandeauEchec () { return document.getElementById('canaux-echec') }
+
+  function montrerEchecDuReleve (motif) {
+    const z = bandeauEchec()
+    if (!z) return
+    z.innerHTML = ''
+    const t = document.createElement('span')
+    t.textContent = MOT_ECHEC
+    z.appendChild(t)
+    z.appendChild(boutonActualiser())
+    z.hidden = false
+    // ⚠ ET ON LE JOURNALISE AUSSI. `shared/logger.js` n'ecrit dans la console
+    // que sur localhost : en ligne, ce journal ne laisse aucune trace, c'est
+    // pourquoi le motif doit AUSSI etre lisible a l'ecran.
+    logger.error('biens', 'releve canaux: ' + (motif || 'echec'))
+  }
+
+  function cacherEchecDuReleve () {
+    const z = bandeauEchec()
+    if (z) { z.hidden = true; z.innerHTML = '' }
+  }
+
+  async function relever (b) {
+    b.disabled = true
+    const avant = b.textContent
+    b.textContent = 'Vérification…'
+    try {
+      const r = await callApi('POST', { action: 'relever_canaux' })
+      // ⚠ L'ENDPOINT REND 200 MEME EN ECHEC, AVEC SON MOTIF — c'est voulu :
+      // l'ecran a deja ses canaux. Mais recharger sur un echec fait clignoter
+      // la page pour rien et l'hote croit que son geste n'a servi a rien.
+      // C'est exactement ce qu'on a vu en recette le 19 octobre.
+      //
+      // ⚠ SAUF `suspendu`. Le disjoncteur rend `ok: false` pour le cron et
+      // l'alarme, mais la lecture a REUSSI : l'hote n'a rien d'anormal a lire.
+      if (r && r.ok === false && r.motif !== 'suspendu') {
+        b.disabled = false
+        b.textContent = avant
+        return montrerEchecDuReleve(r.motif)
+      }
+      location.reload()
+    } catch (e) {
+      b.disabled = false
+      b.textContent = avant
+      montrerEchecDuReleve(e.message)
+    }
+  }
+
+  function boutonActualiser () {
+    const b = document.createElement('button')
+    b.className = 'btn-actualiser'
+    b.type = 'button'
+    b.textContent = 'Actualiser'
+    b.addEventListener('click', () => relever(b))
+    return b
+  }
+
+  // ⚠ LE BOUTON SOUS UN BIEN N'APPARAIT QUE QUAND IL SERT (decision de
+  // Thierry, 19 octobre 2026) : pas en temps normal, seulement au-dela de 24 h
+  // sans confirmation, quand l'ecran affiche « non verifie depuis … ». Un
+  // bouton toujours la invite a cliquer pour rien et appelle le partenaire
+  // sans raison. Le cas « le releve a echoue » est porte par le BANDEAU, avec
+  // son propre bouton : un message par compte, pas un par carte.
   function bindActualiserCanaux (card, p) {
     const zone = card.querySelector('[data-channels]')
     if (!zone) return
     const f = fraicheurCanaux(p.canaux_vu_le)
     if (!f || !f.vieux) return
-    const b = document.createElement('button')
-    b.className = 'btn-actualiser'
-    b.type = 'button'
-    b.textContent = 'Actualiser'
-    b.addEventListener('click', async () => {
-      b.disabled = true
-      b.textContent = 'Vérification…'
-      try {
-        await callApi('POST', { action: 'relever_canaux' })
-        location.reload()
-      } catch (e) {
-        b.disabled = false
-        b.textContent = 'Réessayer'
-        logger.error('biens', 'releve canaux: ' + e.message)
-      }
-    })
-    zone.appendChild(b)
+    zone.appendChild(boutonActualiser())
   }
 
   function renderProperty(p) {
@@ -720,6 +790,11 @@
       grid.style.display = 'grid'
       for (const p of properties) grid.appendChild(renderProperty(p))
     }
+    // ⚠ HORS DU `else` : un compte sans bien peut aussi avoir un releve en
+    // echec, et le bandeau doit disparaitre des qu'une lecture reussit —
+    // sinon il resterait affiche jusqu'au prochain rechargement complet.
+    if (releveEnEchec(properties)) montrerEchecDuReleve('releve precedent')
+    else cacherEchecDuReleve()
   }
 
   // ===== Modification =====
