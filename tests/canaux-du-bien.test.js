@@ -21,7 +21,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const {
   rafraichirCanauxDuCompte, lireCanauxDuPartenaire, lignesDeLaLecture,
-  tarifsDuBienDe, normaliserOta
+  tarifsDuBienDe, normaliserOta, echecVisibleParLHote
 } = require('../lib/canaux-du-bien')
 
 const COMPTE = '11111111-1111-1111-1111-111111111111'
@@ -295,8 +295,16 @@ test('LE TEST QUI COMPTE : les canaux d un autre compte ne sont jamais touches',
       property_id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
       provider_channel_id: 'CH-AUTRUI', disparu_le: null }
   ]
+  // ⚠ UNE ANNONCE DEJA VUE, CONCORDANTE. Depuis le disjoncteur du 19 octobre,
+  // une premiere annonce de disparition TOTALE n'efface rien : elle est notee et
+  // attend une seconde lecture. Ce test juge le filtre de l'effacement, pas le
+  // disjoncteur — on le place donc dans l'etat ou l'effacement est legitime.
+  // Date RELATIVE : ce test lit l'horloge, il n'injecte pas `maintenant`.
+  const dejaVue = [{ user_id: COMPTE, ok: true, echecs_consecutifs: 0,
+                     disparition_totale_vue_le: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+                     disparition_totale_nb: 1 }]
   const appel = async () => ({ ok: true, status: 200, json: { data: [], meta: { total: 0 } } })
-  const sb = baseSimulee({ existantes, liens: [] })
+  const sb = baseSimulee({ existantes, liens: [], horloges: dejaVue })
   await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
   const maj = sb.trace.updates.filter(u => u.nom === 'canaux_du_bien')
   assert.equal(maj.length, 1)
@@ -366,8 +374,16 @@ test('LE TEST QUI COMPTE : l ecriture des disparitions porte son filtre de compt
     { id: 'L-PARTI', user_id: COMPTE, property_id: BIEN_A,
       provider_channel_id: 'CH-PARTI', disparu_le: null }
   ]
+  // ⚠ UNE ANNONCE DEJA VUE, CONCORDANTE. Depuis le disjoncteur du 19 octobre,
+  // une premiere annonce de disparition TOTALE n'efface rien : elle est notee et
+  // attend une seconde lecture. Ce test juge le filtre de l'effacement, pas le
+  // disjoncteur — on le place donc dans l'etat ou l'effacement est legitime.
+  // Date RELATIVE : ce test lit l'horloge, il n'injecte pas `maintenant`.
+  const dejaVue = [{ user_id: COMPTE, ok: true, echecs_consecutifs: 0,
+                     disparition_totale_vue_le: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+                     disparition_totale_nb: 1 }]
   const appel = async () => ({ ok: true, status: 200, json: { data: [], meta: { total: 0 } } })
-  const sb = baseSimulee({ existantes, liens: [] })
+  const sb = baseSimulee({ existantes, liens: [], horloges: dejaVue })
   await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
   const maj = sb.trace.updates.find(u => u.nom === 'canaux_du_bien')
   assert.ok(maj, 'aucune disparition ecrite')
@@ -486,4 +502,222 @@ test('la lecture des horloges est BORNEE, jamais tronquee en silence', async () 
     'les horloges sont lues sans borne sur les comptes connus')
   assert.ok(conditions.some(c => c.quoi === 'limit'),
     'aucune limite explicite : PostgREST tronquera a 1000 sans lever')
+})
+
+// ─── UN ECHEC SE VOIT (demande de Thierry, 19 octobre 2026) ────────────────
+//
+// ⚠ POURQUOI CES TROIS TESTS. Pendant la recette du 19 octobre, un releve a
+// echoue et PERSONNE n'a pu le savoir : `shared/logger.js` n'ecrit dans la
+// console que sur localhost, l'ecran se contentait de remettre « Reessayer »,
+// et l'horloge ne distinguait pas un compte vide d'un partenaire qui repond de
+// travers. Une heure de diagnostic pour une panne qui aurait du se lire d'un
+// coup d'oeil.
+
+test('LE TEST QUI COMPTE : un 200 sans JSON n est PAS un compte sans canal', async () => {
+  // ⚠ LE PIEGE DEJA PAYE SUR CET ENVIRONNEMENT. Une URL de partenaire mal
+  // reglee (sans `/api/v1`) rend 200 + une page HTML. `channelCall` la range
+  // en `{ raw: '<html>…' }` et garde `ok: true` ; la lecture y voyait zero
+  // canal, et le writer ecrivait `disparu_le` sur TOUT le compte.
+  const existantes = [{ id: 'L1', user_id: COMPTE, property_id: BIEN_A,
+                        provider_channel_id: 'CH-AIR', disparu_le: null }]
+  const appel = async () => ({ ok: true, status: 200,
+                               json: { raw: '<!DOCTYPE html><html>erreur</html>' } })
+  const sb = baseSimulee({ existantes, liens: [] })
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
+  assert.equal(bilan.ok, false, 'une page HTML a ete lue comme une reponse valide')
+  assert.equal(bilan.motif, 'reponse_invalide')
+  assert.equal(bilan.disparus, 0, 'une reponse illisible a fait disparaitre un canal')
+  assert.deepEqual(sb.trace.updates, [], 'un disparu_le a ete pose sur une reponse illisible')
+})
+
+test('LE TEST QUI COMPTE : un partenaire qui ne repond jamais est borne dans le temps', async () => {
+  // ⚠ `channelCall` n'a AUCUN delai d'expiration. Un partenaire qui accepte la
+  // connexion puis se tait bloquait le releve — et avec lui la fonction entiere.
+  const existantes = [{ id: 'L1', user_id: COMPTE, property_id: BIEN_A,
+                        provider_channel_id: 'CH-AIR', disparu_le: null }]
+  const appel = () => new Promise(r => setTimeout(
+    () => r({ ok: true, status: 200, json: { data: [], meta: { total: 0 } } }), 3000))
+  const sb = baseSimulee({ existantes, liens: [] })
+  const t0 = Date.now()
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, delaiMs: 120 })
+  const ecoule = Date.now() - t0
+  assert.ok(ecoule < 1500, `le releve a attendu ${ecoule} ms malgre un delai de 120 ms`)
+  assert.equal(bilan.ok, false)
+  assert.equal(bilan.motif, 'delai')
+  assert.equal(bilan.disparus, 0, 'un delai depasse a fait disparaitre un canal')
+})
+
+test('LE TEST QUI COMPTE : des echecs qui durent plus de 24 h reveillent le fondateur', async () => {
+  // ⚠ UN `console.error` NE REVEILLE PERSONNE. Un releve en panne depuis la
+  // veille est invisible : les pastilles restent (c'est voulu), la mention
+  // vieillit doucement, et rien ne sonne. On compte les echecs CONSECUTIFS et
+  // on retient la date du premier.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const horloges = [{ user_id: COMPTE, ok: false, erreur: 'injoignable',
+                      echecs_consecutifs: 11,
+                      premier_echec_le: '2026-10-19T09:00:00Z',
+                      tente_le: '2026-10-20T11:00:00Z' }]
+  const appel = async () => ({ ok: false, status: 503, json: {} })
+  const sb = baseSimulee({ existantes: [], liens: [], horloges })
+  const alarmes = []
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, maintenant,
+                                                 alarme: (clef, det) => alarmes.push([clef, det]) })
+  assert.equal(bilan.ok, false)
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.ok(horloge, 'aucune horloge posee')
+  assert.equal(horloge.lignes.echecs_consecutifs, 12, 'le compteur d echecs n a pas avance')
+  assert.equal(horloge.lignes.premier_echec_le, '2026-10-19T09:00:00.000Z',
+    'la date du premier echec a ete ecrasee')
+  assert.equal(alarmes.length, 1, `${alarmes.length} alarme(s) levee(s) au lieu d une`)
+  assert.equal(alarmes[0][0], 'canaux_releve_en_panne')
+})
+
+test('un seul echec, ou des echecs recents, ne sonnent pas', async () => {
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const horloges = [{ user_id: COMPTE, ok: false, erreur: 'injoignable',
+                      echecs_consecutifs: 3,
+                      premier_echec_le: '2026-10-20T06:00:00Z',
+                      tente_le: '2026-10-20T11:00:00Z' }]
+  const appel = async () => ({ ok: false, status: 503, json: {} })
+  const sb = baseSimulee({ existantes: [], liens: [], horloges })
+  const alarmes = []
+  await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, maintenant,
+                                   alarme: (clef, det) => alarmes.push([clef, det]) })
+  assert.deepEqual(alarmes, [], 'six heures d echecs ont deja sonne')
+})
+
+test('une lecture reussie remet le compteur d echecs a zero', async () => {
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const horloges = [{ user_id: COMPTE, ok: false, erreur: 'injoignable',
+                      echecs_consecutifs: 11,
+                      premier_echec_le: '2026-10-19T09:00:00Z' }]
+  const appel = async () => ({ ok: true, status: 200,
+                               json: { data: canaux, meta: { total: canaux.length } } })
+  const sb = baseSimulee({ existantes: [], liens: [], horloges })
+  await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, maintenant })
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.equal(horloge.lignes.echecs_consecutifs, 0)
+  assert.equal(horloge.lignes.premier_echec_le, null,
+    'la date du premier echec survit a une lecture reussie')
+})
+
+// ─── LE DISJONCTEUR (demande de Thierry, 19 octobre 2026) ──────────────────
+//
+// ⚠ POURQUOI IL EXISTE. Le 19 octobre, on a decouvert qu'un `200` portant une
+// page HTML etait lu « ce compte n'a aucun canal » : le writer effacait tout.
+// Le guard de `channelCall` ferme ce cas precis, pas la FAMILLE — une liste
+// vide rendue par erreur, une cle qui change de perimetre, un compte vu vide un
+// instant. Une disparition TOTALE est trop grave pour etre crue du premier coup.
+
+const VIDE = async () => ({ ok: true, status: 200, json: { data: [], meta: { total: 0 } } })
+const deuxCanaux = [
+  { id: 'L1', user_id: COMPTE, property_id: BIEN_A, provider_channel_id: 'CH-AIR', disparu_le: null },
+  { id: 'L2', user_id: COMPTE, property_id: BIEN_B, provider_channel_id: 'CH-BOOK', disparu_le: null }
+]
+
+test('LE TEST QUI COMPTE : la PREMIERE annonce de disparition totale n efface rien', async () => {
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const sb = baseSimulee({ existantes: deuxCanaux, liens: [], horloges: [] })
+  const alarmes = []
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel: VIDE, maintenant,
+                                                 alarme: (c, d) => alarmes.push([c, d]) })
+  assert.equal(bilan.disparus, 0, 'une premiere annonce a efface des canaux')
+  assert.deepEqual(sb.trace.updates, [], 'un disparu_le a ete pose sans confirmation')
+  assert.equal(bilan.motif, 'suspendu')
+  assert.equal(bilan.ok, false, 'un effacement suspendu s est declare reussi : la sync n en saura rien')
+  // L'annonce est NOTEE, sinon la seconde lecture n aurait rien a confirmer.
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.ok(horloge, 'aucune horloge posee')
+  assert.equal(horloge.lignes.disparition_totale_nb, 2)
+  assert.equal(horloge.lignes.disparition_totale_vue_le, '2026-10-20T12:00:00.000Z')
+  assert.equal(alarmes.length, 1, `${alarmes.length} trace(s) au lieu d une`)
+  assert.equal(alarmes[0][0], 'canaux_disparition_totale')
+})
+
+test('LE TEST QUI COMPTE : une SECONDE lecture concordante, 1 h plus tard, efface', async () => {
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const horloges = [{ user_id: COMPTE, ok: false, echecs_consecutifs: 1,
+                      disparition_totale_vue_le: '2026-10-20T10:30:00Z',
+                      disparition_totale_nb: 2 }]
+  const sb = baseSimulee({ existantes: deuxCanaux, liens: [], horloges })
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel: VIDE, maintenant,
+                                                 alarme: () => {} })
+  assert.equal(bilan.disparus, 2, 'la confirmation n a pas efface')
+  assert.equal(bilan.ok, true)
+  const maj = sb.trace.updates.find(u => u.nom === 'canaux_du_bien')
+  assert.ok(maj, 'aucune disparition ecrite apres confirmation')
+  assert.ok(maj.conditions.some(c => c.k === 'user_id' && String(c.v) === COMPTE),
+    'l effacement confirme part sans filtre de compte')
+})
+
+test('LE TEST QUI COMPTE : une seconde lecture TROP TOT n efface pas', async () => {
+  // 59 minutes : l'attente est une MESURE, pas un geste symbolique. Deux
+  // lectures du meme cycle de cron ne valent pas confirmation.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const horloges = [{ user_id: COMPTE, ok: false, echecs_consecutifs: 1,
+                      disparition_totale_vue_le: '2026-10-20T11:01:00Z',
+                      disparition_totale_nb: 2 }]
+  const sb = baseSimulee({ existantes: deuxCanaux, liens: [], horloges })
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel: VIDE, maintenant,
+                                                 alarme: () => {} })
+  assert.equal(bilan.disparus, 0, '59 minutes ont suffi a confirmer')
+  assert.deepEqual(sb.trace.updates, [])
+  // Et la date de la PREMIERE annonce ne se deplace pas : sinon l'attente
+  // recommencerait a chaque cycle et la confirmation n'arriverait jamais.
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.equal(horloge.lignes.disparition_totale_vue_le, '2026-10-20T11:01:00.000Z')
+})
+
+test('LE TEST QUI COMPTE : une annonce qui ne porte pas sur le MEME nombre ne confirme rien', async () => {
+  // Hier le compte avait 5 canaux et l'annonce en comptait 5 ; aujourd'hui il
+  // en a 2. Ce n'est pas la meme disparition : on repart d'une premiere annonce.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const horloges = [{ user_id: COMPTE, ok: false, echecs_consecutifs: 1,
+                      disparition_totale_vue_le: '2026-10-19T08:00:00Z',
+                      disparition_totale_nb: 5 }]
+  const sb = baseSimulee({ existantes: deuxCanaux, liens: [], horloges })
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel: VIDE, maintenant,
+                                                 alarme: () => {} })
+  assert.equal(bilan.disparus, 0, 'une annonce portant sur 5 canaux a confirme la perte de 2')
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.equal(horloge.lignes.disparition_totale_nb, 2)
+  assert.equal(horloge.lignes.disparition_totale_vue_le, '2026-10-20T12:00:00.000Z',
+    'la premiere annonce aurait du etre REMISE a aujourd hui')
+})
+
+test('LE TEST QUI COMPTE : une disparition PARTIELLE s ecrit tout de suite', async () => {
+  // ⚠ LA CONTRE-EPREUVE DU DISJONCTEUR. S'il bloquait aussi les disparitions
+  // partielles, un canal reellement coupe resterait affiche comme relie —
+  // l'inverse du defaut qu'on corrige. Un seul canal rendu sur deux : l'autre
+  // est parti, et ca s'ecrit sans attendre.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const unSeul = [{ id: 'CH-AIR', attributes: { title: 'T', channel: 'AirBNB',
+    is_active: true, properties: ['P-A'], rate_plans: [{ rate_plan_id: 'RP-A1' }] } }]
+  const appel = async () => ({ ok: true, status: 200, json: { data: unSeul, meta: { total: 1 } } })
+  const sb = baseSimulee({ existantes: deuxCanaux,
+                           liens: [{ property_id: BIEN_A, provider_rate_plan_id: 'RP-A1' }],
+                           horloges: [] })
+  const alarmes = []
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, maintenant,
+                                                 alarme: (c, d) => alarmes.push([c, d]) })
+  assert.equal(bilan.ok, true)
+  assert.equal(bilan.disparus, 1, 'la disparition partielle a ete suspendue')
+  assert.deepEqual(alarmes, [], 'une disparition partielle a sonne')
+})
+
+test('LE TEST QUI COMPTE : un effacement SUSPENDU n est pas un echec pour l hote', () => {
+  // ⚠ DEUX ETATS RENDENT `ok: false` ET NE VEULENT PAS DIRE LA MEME CHOSE
+  // (decision de Thierry, 19 octobre 2026). Un vrai echec de lecture doit se
+  // lire a l'ecran : la date de l'hote vieillit, il doit savoir pourquoi. Un
+  // effacement suspendu par le disjoncteur, non : la lecture a REUSSI, et c'est
+  // nous que ca concerne. Sans cette distinction, le mot « verification
+  // impossible » s'affichait sur une lecture parfaitement reussie.
+  assert.equal(echecVisibleParLHote({ ok: false, erreur: 'injoignable' }), true)
+  assert.equal(echecVisibleParLHote({ ok: false, erreur: 'delai' }), true)
+  assert.equal(echecVisibleParLHote({ ok: false, erreur: 'reponse_invalide' }), true)
+  assert.equal(echecVisibleParLHote({ ok: false, erreur: 'suspendu' }), false,
+    'un effacement suspendu est montre a l hote comme une panne')
+  assert.equal(echecVisibleParLHote({ ok: true, erreur: null }), false)
+  assert.equal(echecVisibleParLHote(null), false,
+    'un compte jamais releve est annonce en panne')
 })
