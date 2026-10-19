@@ -13,7 +13,7 @@ l'endroit change) · *transformée* (le geste change de forme) · *retirée*.
 |---|---|---|---|---|
 | 1 | Voir ses biens | liste, carte par bien | liste V5, 4 colonnes / lignes mobile | **conservée** |
 | 2 | Ajouter / remplacer la photo | zone photo de la carte | **fiche**, bouton « Changer la photo » ; la liste n'affiche que le repli « Ajouter une photo » | **déplacée** — la carte devient entièrement cliquable (§2), un second geste cliquable dedans se dispute le clic |
-| 3 | Lire la provenance du bien | pastille `provider` sous le nom | **retirée de l'écran**, sauf le cas Beds24 de l'hôte (§6 : « Géré depuis votre compte Beds24 ») | **retirée** — « provenance » est notre vocabulaire interne ; §6 interdit de nommer le partenaire |
+| 3 | Lire la provenance du bien | pastille `provider` sous le nom | **fiche** : « Géré depuis votre compte Beds24 » pour un bien du compte Beds24 de l'hôte (§6), sans lien ; **aucune mention** pour tous les autres biens | **transformée** (correction de Thierry, 19 octobre 2026) — ce n'est pas une suppression : le fait est conservé là où il est légitime ; ce qui disparaît est le mot « provenance » et le nom du partenaire partout ailleurs |
 | 4 | Lire les canaux reliés | 2ᵉ ligne, **appel partenaire en direct** | pastilles lues dans `canaux_du_bien` (dette 59, en prod) ; détail par canal sur la fiche | **transformée** — plus aucun appel partenaire à l'affichage (§4) |
 | 5 | Voir « IA en pause » | pastille rouge | liste : **un seul signal**, « Assistant en pause », gris neutre ; fiche : l'interrupteur | **transformée** — le rouge est réservé à la suppression et aux erreurs (§7) |
 | 6 | Couper l'IA / Réactiver | bouton de la carte | **fiche**, interrupteur « Assistant HôteSmart » | **déplacée** — idem fonction 2 : la carte est un lien |
@@ -46,10 +46,17 @@ l'endroit change) · *transformée* (le geste change de forme) · *retirée*.
 
 ## Le compte
 
-**22 fonctions : 6 conservées, 7 déplacées, 7 transformées, 2 retirées.**
+**22 fonctions : 6 conservées, 7 déplacées, 8 transformées, 1 retirée.**
 
-Les deux retirées sont la **pastille de provenance** (notre vocabulaire, et §6
-interdit de nommer le partenaire) et l'**iframe dormante** (§1 l'ordonne).
+La seule retirée est l'**iframe dormante** (§1 l'ordonne).
+
+**La pastille de provenance n'est PAS retirée** — correction de Thierry du
+19 octobre 2026, et elle est juste : pour un bien du compte Beds24 de l'hôte, le
+fait reste dit sur la fiche (« Géré depuis votre compte Beds24 », §6, sans lien).
+Ce qui disparaît est le mot « provenance », notre vocabulaire interne, et le nom
+du partenaire **partout ailleurs**. J'avais compté une information utile comme
+supprimée parce que son étiquette était mauvaise.
+
 Aucune fonction n'est perdue par omission : les sept « déplacées » le sont
 parce que la carte de la liste devient **un lien**, et qu'un bouton dans un lien
 se dispute le clic.

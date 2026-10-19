@@ -1,12 +1,13 @@
-# §4 — Proposition : l'endpoint de lecture de la fiche
+# §4 — L'endpoint de lecture : la liste et la fiche
 
-**À valider avant tout code** (étape 0 de §8). Rien n'est écrit dans ce
-document : c'est une proposition.
+**Tranché par Thierry le 19 octobre 2026** (voir la dernière section). Ce
+document était une proposition ; il est devenu la spec de l'étape 0.
 
-## Ce que je propose, en une phrase
+## En une phrase
 
-**Un endpoint neuf, `GET /api/logement?id=<uuid>`**, et non un paramètre de plus
-sur `api/channel-property`.
+**Un endpoint neuf, `GET /api/logement`** : **sans `id`** il rend la **liste
+V5**, **avec `id=<uuid>`** il rend la **fiche** d'un bien. `api/channel-property`
+GET **reste inchangé** pour ses autres appelants.
 
 **Pourquoi pas `channel-property`.** Ce fichier porte déjà GET (la liste), POST
 (création **et** relevé des canaux), PATCH, DELETE, et il fait 1 100 lignes. Y
@@ -14,6 +15,25 @@ ajouter un sixième chemin, c'est multiplier les gardes dans un fichier qui en
 porte déjà quatre, différentes — et c'est exactement le fichier où un patch
 mécanique a cassé l'iframe de connexion ce matin. Un endpoint de lecture, seul,
 avec une garde, se relit.
+
+**Et la liste passe par le même fichier** (décision de Thierry, point 2) : le
+« fait daté » de la liste est une lecture de `bookings_snapshot`, et la poser
+dans `api/channel-property` GET aurait fait porter à **tous ses appelants** —
+dont les écrans qui ne montrent pas de fait daté — une lecture dont ils n'ont
+pas besoin, dans le fichier le plus chargé du dépôt. L'ancien GET garde donc
+exactement sa réponse d'aujourd'hui, et la liste V5 lit `/api/logement`.
+
+### La liste (`GET /api/logement`, sans `id`)
+
+Par bien : nom, ville, capacité, photo, `automation_paused`, les pastilles de
+canaux (`canaux_du_bien`), et **le fait daté**. Les mêmes **trois états** que la
+fiche s'appliquent bien par bien : un `bookings_snapshot` illisible donne un
+fait daté `null` — « Information indisponible » — **jamais « Libre »**, qui
+serait un mensonge commercial. **Borné et ordonné** : les biens du compte triés
+par nom, `.limit()` explicite, et la lecture des réservations bornée à la
+fenêtre utile (départ ≥ aujourd'hui) — PostgREST tronque à 1000 lignes sans
+lever. Le droit est celui du compte, pas d'un bien : `reservations:read` sans
+`bienRequis`, et la liste ne contient que les biens visibles par le profil.
 
 ## Ce qu'il assemble, bloc par bloc
 
@@ -102,16 +122,15 @@ lecture), `message_sent_log`, serrure + taxe. Soit **un aller-retour réseau pou
 la page**, là où la fiche d'aujourd'hui en ferait sept depuis le navigateur —
 et un appel partenaire en direct, qu'on supprime.
 
-## Ce que je demande à Thierry de trancher
+## Tranché par Thierry, le 19 octobre 2026
 
-1. **`GET /api/logement` plutôt qu'un paramètre de plus sur
-   `channel-property`** — c'est ma recommandation, dis-moi si tu préfères
-   l'inverse.
-2. **Le fait daté de la liste** : la liste affiche « prochaine arrivée / Occupé /
-   Libre jusqu'au ». Si je le calcule pour les N biens dans le GET de la liste,
-   c'est une lecture de `bookings_snapshot` pour tout le compte. Je propose de
-   le faire **dans le GET de la liste**, borné et ordonné — mais ça touche
-   `api/channel-property` GET, donc un commit à part, avec sa review.
-3. **Les blocs Ménage, Serrure et Taxe** sont en lecture seule dans ce lot
-   (§3.7). Confirme que je lis bien les mêmes tables que leurs écrans, sans en
-   réinventer la règle : je lirai leurs modules existants plutôt que la base.
+1. **`GET /api/logement` neuf** — accordé.
+2. **Le fait daté ne passe PAS par `channel-property`.** `GET /api/logement`
+   sans `id` **est** la liste V5 (bornée, ordonnée, mêmes trois états) ;
+   `channel-property` GET reste inchangé pour ses autres appelants. C'est mieux
+   que ce que je proposais : aucun appelant existant ne change, donc le lot
+   n'emporte aucun risque de régression sur les écrans d'aujourd'hui.
+3. **Ménage, Serrure et Taxe se lisent par leurs modules existants**, confirmé.
+   Je n'écris aucune règle métier dans cet endpoint : s'il faut décider ce qu'est
+   « une prestataire assignée » ou « la serrure est posée », c'est le module du
+   domaine qui le dit, pas moi.
