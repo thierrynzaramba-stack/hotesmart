@@ -734,3 +734,36 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
   outillage, est en **format libre** : la contrainte ne la concerne pas.
   Origine de la règle : docs/specs/spec-yieldflow-v1.md §470.
 - Après push : attendre que le Deployment ID Vercel change avant de tester le cron prod.
+
+### APRÈS CHAQUE PUSH — VÉRIFIER QU'UN DÉPLOIEMENT EXISTE POUR CE SHA
+
+```bash
+SHA=$(git rev-parse <branche>)      # ⚠ le SHA COMPLET, 40 caractères
+gh api "repos/thierrynzaramba-stack/hotesmart/deployments?sha=$SHA" \
+  --jq '.[].environment'
+```
+
+La sortie doit contenir l'environnement visé — `Production – hotesmart-staging`
+pour un push sur `staging`, `Production – hotesmart` pour `main`.
+**Sortie vide = aucun déploiement = webhook perdu**, et le site continue de
+servir l'ancien code sans que rien ne le signale.
+
+⚠ **LE SHA DOIT ÊTRE COMPLET.** Un SHA abrégé (7 ou 10 caractères) fait rendre
+`[]` **en silence** : on lit « webhook perdu » là où le déploiement existe.
+Mesuré le 19 octobre 2026, sur un déploiement bien présent.
+
+**Vécu (19 octobre 2026).** Le push de `ddeb7cf` sur `staging` n'a produit
+**aucun** déploiement, sur aucun des deux projets : zéro déploiement, zéro
+statut, zéro check-run. Les quatre pushes précédents de `staging` avaient
+chacun le leur, et le push *suivant* — sur une autre branche, neuf minutes plus
+tard — a bien déclenché les siens. Le webhook de ce push précis n'a jamais été
+reçu. Coût : six minutes à croire à un build lent, puis à un build en échec,
+avant de découvrir qu'il n'y avait pas de build — et une recette qu'on allait
+lancer sur l'ancien écran.
+
+**Comment le rattraper.** Un re-push à l'identique ne met à jour aucune ref,
+donc ne réveille rien : il faut un SHA neuf. Soit un « Redeploy » depuis le
+tableau de bord Vercel (aucune trace dans l'historique), soit un commit vide —
+qui est un commit **direct sur `staging`**, donc interdit par la règle du clone
+partagé : il exige l'autorisation explicite de Thierry, au cas par cas, et son
+message porte la mesure qui le justifie (voir `306de95`).
