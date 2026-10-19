@@ -342,9 +342,17 @@ module.exports = async function handler(req, res) {
         // canaux du bien — le plus prudent — et on ne retombe sur l'horloge du
         // compte que pour un bien SANS canal, ou c'est la seule date qui
         // existe.
-        const { data: h } = await supabase.from('canaux_releve')
-          .select('vu_le, ok, echecs_consecutifs')
+        const { echecVisibleParLHote, COLONNES_HORLOGE_ECRAN,
+                fraicheurDuBien } = require('../lib/canaux-du-bien')
+        const { data: h, error: eH } = await supabase.from('canaux_releve')
+          .select(COLONNES_HORLOGE_ECRAN)
           .eq('user_id', compteLecture).maybeSingle()
+        // ⚠ ET CET ECHEC SE DIT. `const { data: h }` jetait l'erreur : un refus
+        // de privilege ou un hoquet rendait `h` nul, donc aucun bandeau et
+        // aucune trace — le poste qui doit DIRE les pannes se taisait sur la
+        // sienne. Famille « erreur avalee, cron a 200 ». Constat de la revue
+        // de 6754f48.
+        if (eH) console.error('[channel-property] horloge des canaux illisible :', eH.message)
         const horloge = h ? h.vu_le : null
         // ⚠ UN ECHEC DE RELEVE DESCEND JUSQU'A L'ECRAN. Sans ce drapeau,
         // l'hote voyait sa date de verification vieillir sans jamais savoir
@@ -356,9 +364,13 @@ module.exports = async function handler(req, res) {
         // mais la lecture a reussi : l'hote ne doit RIEN lire d'anormal. Sans
         // ce `!== 'suspendu'`, le mot « verification impossible » s'afficherait
         // sur une lecture qui a parfaitement fonctionne.
-        const { echecVisibleParLHote } = require('../lib/canaux-du-bien')
-        const releveEnEchec = echecVisibleParLHote(h)
-        const { fraicheurDuBien } = require('../lib/canaux-du-bien')
+        // ⚠ ET SEULEMENT SI LE RELEVE CONCERNE CE COMPTE. Un compte sans
+        // aucun bien chez ce partenaire n'est plus releve du tout : sa ligne
+        // `canaux_releve` reste a `ok: false` pour toujours, et le bandeau
+        // serait affiche a vie sans qu'aucun bouton puisse l'eteindre — le
+        // bouton appelle precisement le chemin qui n'ecrit rien. Vaut aussi
+        // pour un compte entierement Beds24. Constat de la revue de 6754f48.
+        const releveEnEchec = channexProps.length > 0 && echecVisibleParLHote(h)
         const datesParBien = new Map()
         for (const l of lignes || []) {
           const k = String(l.property_id)
@@ -819,8 +831,31 @@ module.exports = async function handler(req, res) {
     // reste borne par le writer (8 s, 5 comptes) et il ne lit QUE le
     // partenaire.
     if ((req.body || {}).action === 'relever_canaux') {
-      const garde = await requirePermission(req, res, { domaine: 'reservations', niveau: 'read' })
+      // ⚠ `compteDelegue` COMME LE GET. Sans lui, `requirePermission` retombe
+      // sur le compte de l'APPELANT : un membre qui travaille sur le compte du
+      // titulaire voyait le bandeau du titulaire, cliquait, et relevait SON
+      // propre compte — lecture du partenaire, ecriture de SES canaux, 200, et
+      // le bandeau du titulaire toujours la. Geste inoperant, aucun mot : la
+      // panne meme que ce chantier corrige. Constat de la revue de 6754f48.
+      const garde = await requirePermission(req, res,
+        { domaine: 'reservations', niveau: 'read', compteDelegue: true })
       if (!garde.ok) return
+      // ⚠ UN PLANCHER DE CADENCE, MEME SUR LE CHEMIN FORCE. Ce chemin ignore
+      // volontairement la cadence horaire — c'est son interet —, mais il
+      // n'avait AUCUNE borne : chaque clic valait un appel au partenaire et,
+      // pendant une suspension, une ligne `automation_incidents`
+      // (`reportIncident` insere toujours, seul l'envoi est amorti). Un hote
+      // qui s'acharne sur le bouton remplissait la table. Soixante secondes
+      // n'enlevent rien a son geste. Constat de la revue de 6754f48.
+      const { data: hAvant } = await supabase.from('canaux_releve')
+        .select('tente_le').eq('user_id', garde.accountUserId).maybeSingle()
+      const depuis = hAvant && hAvant.tente_le
+        ? Date.now() - new Date(hAvant.tente_le).getTime() : null
+      if (depuis !== null && depuis < 60000) {
+        // Rien a dire a l'hote : la verification vient d'avoir lieu.
+        return res.status(200).json({ ok: true, motif: null, canaux: 0, disparus: 0,
+                                      cadence: true })
+      }
       const { rafraichirCanauxDuCompte } = require('../lib/canaux-du-bien')
       const bilan = await rafraichirCanauxDuCompte({ userId: garde.accountUserId })
       // ⚠ ON REND 200 MEME EN ECHEC, AVEC LE MOTIF. L'ecran a deja ses canaux :

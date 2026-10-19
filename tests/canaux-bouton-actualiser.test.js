@@ -40,20 +40,39 @@ function fonctionDeLaPage (nom) {
   throw new Error(`accolades non refermees pour ${nom}`)
 }
 
-// Les six fonctions du geste, telles qu'elles sont dans la page.
-const SOURCE = ['bandeauEchec', 'montrerEchecDuReleve', 'cacherEchecDuReleve',
-                'relever', 'boutonActualiser', 'bindActualiserCanaux']
-  .map(fonctionDeLaPage).join('\n\n')
+// Le verrou de la page, extrait lui aussi : le redeclarer dans le test en
+// ferait une copie, et le test resterait vert si la page le perdait.
+function declarationDeLaPage (nom) {
+  const m = PAGE.match(new RegExp('^\\s*let\\s+' + nom + '\\s*=.*$', 'm'))
+  assert.ok(m, `declaration de ${nom} introuvable dans pages/biens.html`)
+  return m[0].trim()
+}
+
+// Les fonctions du geste, telles qu'elles sont dans la page.
+const SOURCE = [declarationDeLaPage('releveEnVol')].concat(
+  ['bandeauEchec', 'direAuBandeau', 'montrerEchecDuReleve',
+   'cacherEchecDuReleve', 'relever', 'boutonActualiser',
+   'bindActualiserCanaux'].map(fonctionDeLaPage)).join('\n\n')
+
+// ⚠ ET LA FEUILLE DE STYLE DE LA PAGE, DANS LE DOM DE TEST. Sans elle, un test
+// qui asserte `bandeau.hidden === true` est vert alors que le bandeau est
+// VISIBLE : `/biens` ne charge pas shared/ui.css, donc rien n'y applique
+// `[hidden] { display: none }`, et une declaration d'auteur comme
+// `display: flex` l'emporte sur la feuille du navigateur. Mesure de la revue de
+// 6754f48 : un cadre vide affiche en permanence au-dessus de la liste.
+const STYLE = (PAGE.match(/<style>([\s\S]*?)<\/style>/) || [, ''])[1]
 
 function monter ({ reponse, leve = null, vuLe = 'frais' }) {
-  const dom = new JSDOM(`<div id="canaux-echec" class="bandeau-echec" hidden></div>
-    <div class="property-card"><div data-channels></div></div>`)
+  const dom = new JSDOM(`<html><head><style>${STYLE}</style></head><body>
+    <div id="canaux-echec" class="bandeau-echec" role="status" aria-live="polite" hidden></div>
+    <div class="property-card"><div class="channel-badges" data-channels></div></div>
+    </body></html>`)
   const { document } = dom.window
   const appels = []
   const journal = []
   let recharge = 0
   const bac = new Function('document', 'fraicheurCanaux', 'MOT_ECHEC', 'callApi',
-                           'logger', 'location', `
+                           'console', 'location', `
     ${SOURCE}
     return { montrerEchecDuReleve, cacherEchecDuReleve, bindActualiserCanaux,
              boutonActualiser }
@@ -68,12 +87,17 @@ function monter ({ reponse, leve = null, vuLe = 'frais' }) {
       if (leve) throw new Error(leve)
       return reponse
     },
+    // ⚠ `console`, PAS `logger`. `shared/error-handler.js` allume une barre
+    // noire a chaque appel du logger et la LAISSE pour un ERROR, en
+    // production : l'hote lisait deux messages pour une panne, dont le motif
+    // technique brut.
     { error: (...a) => journal.push(a) },
     { reload: () => { recharge++ } }
   )
   const card = document.querySelector('.property-card')
   return { ...bac, document, card, zone: card.querySelector('[data-channels]'),
            bandeau: document.getElementById('canaux-echec'),
+           visible: (el) => dom.window.getComputedStyle(el).display !== 'none',
            appels, journal, recharges: () => recharge }
 }
 
@@ -141,9 +165,16 @@ test('LE TEST QUI COMPTE : un effacement `suspendu` ne montre AUCUNE erreur a l 
   m.bindActualiserCanaux(m.card, { canaux_vu_le: 'x' })
   m.zone.querySelector('.btn-actualiser').click()
   await attendre()
-  assert.equal(m.bandeau.hidden, true, 'un effacement suspendu a affiche une erreur a l hote')
-  assert.deepEqual(m.journal, [], 'un effacement suspendu a ete journalise comme un echec')
-  assert.equal(m.recharges(), 1, 'la page n a pas recharge : l hote ne voit pas son geste aboutir')
+  // ⚠ ET L'HOTE N'EST PAS LAISSE SANS REPONSE. Dans ce cas, `vu_le` n'avance
+  // pas — la lecture a reussi mais elle ne CONFIRME pas les pastilles
+  // affichees. Recharger lui rendait donc une page identique, sans un mot :
+  // exactement le defaut qu'on corrige. On le lui dit, en neutre.
+  assert.equal(m.recharges(), 0, 'la page a recharge pour revenir a l identique, sans un mot')
+  assert.equal(m.bandeau.hidden, false, 'l hote n a aucun retour a son geste')
+  assert.ok(!/impossible/.test(m.bandeau.textContent),
+    'un effacement suspendu est annonce comme une panne')
+  assert.ok(m.bandeau.classList.contains('is-neutre'),
+    'le mot du disjoncteur est affiche comme une erreur')
 })
 
 test('un 200 qui dit `ok: true` recharge, et ne laisse aucun message', async () => {
@@ -189,4 +220,68 @@ test('LE TEST QUI COMPTE : la zone de clic du bouton fait au moins 44 px', () =>
   const hauteur = Math.max(minH || 0, padV + 14)   // 14 px : hauteur de ligne du texte
   assert.ok(hauteur >= 44,
     `zone de clic declaree a ${hauteur} px, il en faut 44 (min-height=${minH}, padding vertical=${padV})`)
+})
+
+// ─── Les trous trouves par la revue de 6754f48 ──────────────────────────────
+
+test('LE TEST QUI COMPTE : le bandeau est VRAIMENT masque quand il est vide', () => {
+  // ⚠ CE TEST EXISTE PARCE QUE `hidden` NE MASQUAIT RIEN. `/biens` ne charge
+  // pas shared/ui.css, seule feuille du depot a porter
+  // `[hidden] { display: none }`, et une declaration d'auteur comme
+  // `display: flex` l'emporte toujours sur la feuille du NAVIGATEUR : la
+  // specificite ne se compare pas entre origines. L'hote voyait donc un cadre
+  // borde VIDE au-dessus de sa liste, a chaque visite, et
+  // `cacherEchecDuReleve` ne le faisait pas partir.
+  //
+  // Asserter `bandeau.hidden === true` ne prouve RIEN : c'est l'attribut. On
+  // mesure le `display` effectif, feuille de la page chargee.
+  const m = monter({ reponse: { ok: true } })
+  assert.equal(m.visible(m.bandeau), false, 'le bandeau vide est visible')
+  m.montrerEchecDuReleve('injoignable')
+  assert.equal(m.visible(m.bandeau), true, 'le bandeau ne s affiche pas quand il porte un message')
+  m.cacherEchecDuReleve()
+  assert.equal(m.visible(m.bandeau), false, 'le bandeau reste visible apres avoir ete vide')
+})
+
+test('LE TEST QUI COMPTE : un 200 SANS `ok` ne recharge pas', async () => {
+  // Un 200 dont le corps n'est pas du JSON donne `{}` au client : la garde
+  // `r.ok === false` ne mordait pas, et la page rechargeait en silence. Le
+  // defaut du guard de channelCall, par la porte du navigateur.
+  for (const reponse of [{}, { motif: 'x' }, { ok: null }]) {
+    const m = monter({ vuLe: 'vieux', reponse })
+    m.bindActualiserCanaux(m.card, { canaux_vu_le: 'x' })
+    m.zone.querySelector('.btn-actualiser').click()
+    await attendre()
+    assert.equal(m.recharges(), 0,
+      `la page a recharge sur ${JSON.stringify(reponse)}`)
+    assert.equal(m.bandeau.hidden, false, 'aucun message sur une reponse sans `ok`')
+  }
+})
+
+test('LE TEST QUI COMPTE : deux boutons, un seul releve en vol', async () => {
+  // Il y a deux boutons — celui d'une carte de plus de 24 h et celui du
+  // bandeau — et chacun ne desactivait que lui-meme : deux clics lancaient
+  // deux lectures du partenaire hors cadence, et deux `noterLeReleve` en
+  // lecture-puis-ecriture sur la meme ligne, ou l'increment du compteur
+  // d'echecs se perd.
+  const m = monter({ vuLe: 'vieux', reponse: { ok: false, motif: 'injoignable' } })
+  m.bindActualiserCanaux(m.card, { canaux_vu_le: 'x' })
+  m.montrerEchecDuReleve('injoignable')
+  const deux = [...m.document.querySelectorAll('.btn-actualiser')]
+  assert.equal(deux.length, 2, 'le decor du test n a pas deux boutons')
+  deux[0].click()
+  deux[1].click()
+  await attendre()
+  assert.equal(m.appels.length, 1,
+    `${m.appels.length} appels au partenaire pour deux clics simultanes`)
+})
+
+test('le bouton du bandeau est reactive apres un echec, celui de la carte aussi', async () => {
+  const m = monter({ vuLe: 'vieux', reponse: { ok: false, motif: 'injoignable' } })
+  m.bindActualiserCanaux(m.card, { canaux_vu_le: 'x' })
+  m.zone.querySelector('.btn-actualiser').click()
+  await attendre()
+  for (const b of m.document.querySelectorAll('.btn-actualiser')) {
+    assert.equal(b.disabled, false, 'un bouton est reste desactive apres l echec')
+  }
 })
