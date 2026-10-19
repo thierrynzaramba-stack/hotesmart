@@ -347,3 +347,48 @@ Ajoutées avec le chantier « les canaux au cœur ». Writer unique :
    quand le disjoncteur reporte un effacement : le cron le voit, le fondateur
    est averti, et l'hôte, lui, ne lit rien d'anormal — ses pastilles et leur
    date sont celles d'avant.
+
+---
+
+## `reponse_partenaire_invalide` — détection seule (19 octobre 2026)
+
+Posée par `lib/reponse-partenaire.js`, branchée sur les **17 copies de
+`channelCall` du code déployé**. Elle dit une seule chose : le partenaire a
+répondu **2xx avec un corps inexploitable** — pas du JSON, ou du JSON sans
+`data`/`meta`/`errors`, ou un corps vide sur une lecture.
+
+**⚠ Aucun comportement n'en dépend.** C'est l'étape 1 du chantier : on mesure
+d'abord si le cas se produit et où, parce qu'**aucune trace n'existait** — le
+défaut est muet par construction. Les quatre chemins qui en tirent une
+conclusion destructrice se corrigent ensuite, un par un, chacun avec sa recette.
+Inventaire : `docs/kb/reponse-200-sans-json.md`.
+
+**Ce que l'alerte vous dit, et ce qu'il faut regarder.**
+
+| champ du détail | à quoi il sert |
+|---|---|
+| `fichier` | **le plus important** : c'est lui qui dit quel chemin est touché, donc ce que le code a conclu de cette réponse |
+| `code` | `reponse_non_json`, `forme_inattendue` ou `reponse_vide` |
+| `statut` | le code HTTP rendu — toujours un 2xx, sinon l'appelant le verrait déjà |
+| `chemin` | **normalisé** : les identifiants du partenaire y sont remplacés par `:id` |
+
+La table `reponses_partenaire_invalides` garde le détail, avec 300 caractères du
+corps reçu. **Elle n'est lue par aucun client** : RLS active sans aucune policy,
+et les privilèges de table retirés — une page d'erreur porte plausiblement la
+marque du partenaire.
+
+**Trois choses à savoir.**
+
+1. **Une panne qui dure ne fabrique pas mille lignes.** `channelCall` est appelé
+   des dizaines de fois par cycle de cron. Les répétitions sont regroupées par
+   `(fichier, code)` dans une fenêtre de 10 minutes, avec un compteur
+   `occurrences` — et une seule alarme par fenêtre.
+2. **Le chemin normal ne coûte rien.** La base n'est touchée que sur une réponse
+   inexploitable ; une réponse saine ne provoque aucune lecture.
+3. **La surveillance ne lève jamais et ne change rien.** Un appelant ne doit pas
+   tomber parce que l'observation a échoué — trois tests le tiennent.
+
+**Neuf outils de `scripts/` sont exemptés, nommément**, dans
+`tests/reponse-partenaire-detection.test.js` : ils sont lancés à la main, leur
+sortie est lue par un humain au moment où il les lance, et aucun n'est déployé.
+Le même test refuse qu'un fichier de `api/` ou `lib/` soit exempté.
