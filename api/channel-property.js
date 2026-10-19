@@ -334,11 +334,27 @@ module.exports = async function handler(req, res) {
             mappe: l.mappe_pour_ce_bien, listing_url: l.listing_url || null
           })
         }
+        // ⚠ LA FRAICHEUR EST CELLE DU BIEN, PAS CELLE DU COMPTE. L'horloge
+        // `canaux_releve` tient la cadence du releve ; elle ne dit pas de
+        // quand datent LES CANAUX DE CE BIEN-LA. Poser la meme date sur toutes
+        // les cartes ferait dire a chacune « verifie il y a 7 min » en parlant
+        // d'autre chose qu'elle. On prend donc le `vu_le` le PLUS ANCIEN des
+        // canaux du bien — le plus prudent — et on ne retombe sur l'horloge du
+        // compte que pour un bien SANS canal, ou c'est la seule date qui
+        // existe.
         const { data: h } = await supabase.from('canaux_releve')
           .select('vu_le').eq('user_id', compteLecture).maybeSingle()
+        const horloge = h ? h.vu_le : null
+        const { fraicheurDuBien } = require('../lib/canaux-du-bien')
+        const datesParBien = new Map()
+        for (const l of lignes || []) {
+          const k = String(l.property_id)
+          if (!datesParBien.has(k)) datesParBien.set(k, [])
+          datesParBien.get(k).push({ vu_le: l.vu_le })
+        }
         for (const b of tous) {
           b.canaux = parBien.get(String(b.id)) || []
-          b.canaux_vu_le = h ? h.vu_le : null
+          b.canaux_vu_le = fraicheurDuBien(datesParBien.get(String(b.id)), horloge)
         }
       }
     } catch (e) {
