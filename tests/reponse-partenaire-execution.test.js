@@ -48,6 +48,27 @@ const COPIES = [
 // construction : contre-epreuve faite, elle ne rougissait pas. Le temoin juste
 // est la fonction telle qu'elle etait AVANT le branchement, lue dans git.
 const AVANT = '4dada3e^'
+
+// ⚠ UN TEMOIN FIGE DANS GIT INTERDIT TOUTE EVOLUTION, ET C'EST CE QUI EST
+// ARRIVE. Ce test comparait la fonction de CHAQUE copie a sa version d'avant le
+// branchement. Des que `lib/channel-availability.js` a legitimement change — a
+// l'etape 2 du chantier, qui lui pose les gardes de l'original —, il a rougi
+// sans qu'aucun defaut existe.
+//
+// On garde donc les DEUX comparaisons, chacune pour ce qu'elle prouve :
+//   · AVEC contre SANS la ligne de surveillance : la surveillance est inerte.
+//     Vaut pour toutes les copies, toujours, et survit aux evolutions ;
+//   · contre le temoin git : la valeur rendue n'a pas bouge depuis le
+//     branchement. Vaut pour les copies qu'AUCUN chantier n'a touchees, et une
+//     copie qui evolue sort de cette liste NOMMEMENT, avec sa raison.
+const EVOLUEES = {
+  'lib/channel-availability.js':
+    'etape 2 du chantier : les gardes de l original (panne reseau, verdict de '
+    + 'forme) lui ont ete posees, donc sa valeur rendue CHANGE volontairement — '
+    + 'un 2xx inexploitable y rend desormais `ok: false`. '
+    + 'tests/stop-sell-non-confirme.test.js la tient.'
+}
+
 function sourceDAvant (fichier) {
   const { execFileSync } = require('node:child_process')
   return execFileSync('git', ['-C', RACINE, 'show', `${AVANT}:${fichier}`],
@@ -70,10 +91,15 @@ function fonctionChannelCall (fichier, texte) {
 
 // Monte la fonction avec ses dependances simulees. `avecSurveillance: false`
 // retire la ligne d'observation : c'est le code d'AVANT, notre temoin.
-function monter (fichier, { reponse, dAvant = false }) {
-  const source = dAvant
+function monter (fichier, { reponse, dAvant = false, sansSurveillance = false }) {
+  let source = dAvant
     ? fonctionChannelCall(fichier, sourceDAvant(fichier))
     : fonctionChannelCall(fichier)
+  if (sansSurveillance) {
+    source = source
+      .replace(/\s*await surveillerReponse\(\{[\s\S]*?\}\)\n/, '\n')
+      .replace(/\s*await noter\([^)]*\)\n/, '\n')
+  }
   const incidents = []
   const appels = []
   const faux = async (url, opts) => {
@@ -86,8 +112,14 @@ function monter (fichier, { reponse, dAvant = false }) {
   // ⚠ LES DEPENDANCES SONT INJECTEES PAR LE MEME NOM QUE DANS LE FICHIER.
   // `require` est fourni pour que `channex.js`, qui charge la surveillance
   // paresseusement, tombe sur notre espion et non sur le vrai module.
+  // ⚠ LE MODULE SIMULE DOIT PORTER TOUTE SA SURFACE. Il ne rendait que
+  // `surveillerReponse` : des que `lib/channel-availability.js` a demande aussi
+  // `verdictDeLaReponse` — a l'etape 2 du chantier —, les trois tests sont
+  // tombes sur un `TypeError` qui n'avait rien a voir avec ce qu'ils mesurent.
+  // On garde donc le vrai module, et on ne remplace QUE l'observation.
+  const vrai = require('../lib/reponse-partenaire')
   const faireRequire = (chemin) => {
-    if (/reponse-partenaire/.test(chemin)) return { surveillerReponse: espion }
+    if (/reponse-partenaire/.test(chemin)) return { ...vrai, surveillerReponse: espion }
     return require(chemin)
   }
   // ⚠ LES COPIES APPELLENT LA SURVEILLANCE SANS CONDITION : c'est le MODULE qui
@@ -165,11 +197,21 @@ test('LE TEST QUI COMPTE : JSON sain — valeur IDENTIQUE et AUCUN incident, pou
   const fautes = []
   for (const f of COPIES) {
     const avec = monter(f, { reponse: SAIN })
-    const sans = monter(f, { reponse: SAIN, dAvant: true })
+    // La surveillance est-elle inerte ? Toujours verifiable.
+    const inerte = monter(f, { reponse: SAIN, sansSurveillance: true })
+    const rI = await inerte.fn('GET', '/channels')
+    // Et la valeur a-t-elle bouge depuis le branchement ? Seulement pour les
+    // copies qu'aucun chantier n'a touchees.
+    const sans = EVOLUEES[f] ? null : monter(f, { reponse: SAIN, dAvant: true })
     const rA = await avec.fn('GET', '/channels')
-    const rS = await sans.fn('GET', '/channels')
-    if (JSON.stringify(rA) !== JSON.stringify(rS)) {
-      fautes.push(`${f} : valeur CHANGEE sur un JSON sain, par rapport au code d avant\n      avec = ${JSON.stringify(rA)}\n      avant = ${JSON.stringify(rS)}`)
+    if (JSON.stringify(rA) !== JSON.stringify(rI)) {
+      fautes.push(`${f} : la SURVEILLANCE change la valeur rendue (JSON sain)\n      avec = ${JSON.stringify(rA)}\n      sans = ${JSON.stringify(rI)}`)
+    }
+    if (sans) {
+      const rS = await sans.fn('GET', '/channels')
+      if (JSON.stringify(rA) !== JSON.stringify(rS)) {
+        fautes.push(`${f} : valeur CHANGEE sur un JSON sain, par rapport au code d avant\n      avec = ${JSON.stringify(rA)}\n      avant = ${JSON.stringify(rS)}\n      -> si c est volontaire, inscrire ce fichier dans EVOLUEES avec sa raison`)
+      }
     }
     if (avec.incidents.length !== 0) {
       fautes.push(`${f} : ${avec.incidents.length} incident(s) sur un JSON SAIN`)
@@ -182,11 +224,21 @@ test('LE TEST QUI COMPTE : 200 + HTML — valeur IDENTIQUE et UN incident, pour 
   const fautes = []
   for (const f of COPIES) {
     const avec = monter(f, { reponse: HTML })
-    const sans = monter(f, { reponse: HTML, dAvant: true })
+    // La surveillance est-elle inerte ? Toujours verifiable.
+    const inerte = monter(f, { reponse: HTML, sansSurveillance: true })
+    const rI = await inerte.fn('GET', '/channels')
+    // Et la valeur a-t-elle bouge depuis le branchement ? Seulement pour les
+    // copies qu'aucun chantier n'a touchees.
+    const sans = EVOLUEES[f] ? null : monter(f, { reponse: HTML, dAvant: true })
     const rA = await avec.fn('GET', '/channels')
-    const rS = await sans.fn('GET', '/channels')
-    if (JSON.stringify(rA) !== JSON.stringify(rS)) {
-      fautes.push(`${f} : valeur CHANGEE sur un 200 + HTML, par rapport au code d avant\n      avec = ${JSON.stringify(rA)}\n      avant = ${JSON.stringify(rS)}`)
+    if (JSON.stringify(rA) !== JSON.stringify(rI)) {
+      fautes.push(`${f} : la SURVEILLANCE change la valeur rendue (200 + HTML)\n      avec = ${JSON.stringify(rA)}\n      sans = ${JSON.stringify(rI)}`)
+    }
+    if (sans) {
+      const rS = await sans.fn('GET', '/channels')
+      if (JSON.stringify(rA) !== JSON.stringify(rS)) {
+        fautes.push(`${f} : valeur CHANGEE sur un 200 + HTML, par rapport au code d avant\n      avec = ${JSON.stringify(rA)}\n      avant = ${JSON.stringify(rS)}\n      -> si c est volontaire, inscrire ce fichier dans EVOLUEES avec sa raison`)
+      }
     }
     if (avec.incidents.length !== 1) {
       fautes.push(`${f} : ${avec.incidents.length} incident(s) au lieu d un sur un 200 + HTML`)

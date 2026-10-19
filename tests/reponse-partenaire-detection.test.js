@@ -390,7 +390,14 @@ test('LE TEST QUI COMPTE : chaque appel de surveillance ne nomme que des variabl
     for (const v of new Set(nommes)) {
       const enParametre = new RegExp(
         `(?:function[^(]*|=>\\s*)?\\(([^)]*\\b${v}\\b[^)]*)\\)\\s*(?:=>|\\{)`).test(src)
-      const enVariable = new RegExp(`\\b(?:const|let|var)\\s+(?:\\{[^}]*\\b${v}\\b[^}]*\\}|${v}\\b)`).test(src)
+      // ⚠ ET UNE DECLARATION EN LISTE COMPTE : `let res, text` declare les DEUX.
+      // La premiere version n'acceptait que le nom immediatement apres le
+      // mot-cle, et a rougi des que `lib/channel-availability.js` a pris la
+      // forme de l'original (`let res, text`) a l'etape 2 du chantier.
+      const enVariable = new RegExp(
+        `\\b(?:const|let|var)\\s+(?:\\{[^}]*\\b${v}\\b[^}]*\\}`      // destructuration
+        + `|[\\w$\\s,]*\\b${v}\\b)`                                   // nom, seul ou en liste
+      ).test(src)
       if (!enParametre && !enVariable) {
         fautes.push(`${f} : « ${v} » n'est declare nulle part dans le fichier`)
       }
