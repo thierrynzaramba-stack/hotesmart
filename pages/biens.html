@@ -91,6 +91,13 @@
        bien », masque par droit pour un membre delegue, etait visible et
        cliquable — un garde-fou de droits qui ne gardait rien. */
     [hidden] { display: none !important; }
+    /* ⚠ ET LE SELECTEUR COMPOSE AUSSI, pour le bouton masque par droit. La
+       regle globale ci-dessus est juste dans un vrai navigateur — une
+       declaration d'auteur `!important` l'emporte sur une declaration d'auteur
+       normale —, mais jsdom ignore `!important` : AUCUN test de ce depot ne
+       peut la mesurer. Le garde-fou de droits « + Ajouter un bien » reposait
+       donc sur une regle sans filet. Constat de la re-revue. */
+    .btn[hidden] { display: none; }
     /* Les pastilles et le bouton vivent dans la meme ligne flex : sans
        `align-items`, la valeur par defaut `stretch` etirait toutes les
        pastilles a la hauteur du bouton de 44 px — des rectangles verts avec le
@@ -557,6 +564,13 @@
       // `undefined === false` est faux : la page rechargeait en silence — le
       // defaut corrige, par l'autre porte. Meme famille que le guard de
       // channelCall, ferme cote serveur et pas ici.
+      // ⚠ UN 200 QUI PORTE UN MOTIF N'EST PAS UN RELEVE QUI A CHANGE QUELQUE
+      // CHOSE. Le plancher de cadence du serveur rend `ok: true, motif:
+      // 'cadence'` : recharger ferait clignoter la page pour rien.
+      if (r && r.ok === true && r.motif === 'cadence') {
+        rendreLesBoutons()
+        return direAuBandeau('Vérification faite', true, 'cadence')
+      }
       if (!r || r.ok !== true) {
         rendreLesBoutons()
         // ⚠ LE DISJONCTEUR N'EST PAS UNE PANNE (decision de Thierry). La
@@ -565,7 +579,7 @@
         // une page identique, sans un mot, c'est exactement le defaut qu'on
         // corrige. On le lui dit, en neutre, sans parler d'erreur.
         if (r && r.motif === 'suspendu') {
-          return direAuBandeau('Vérification faite, rien n’a changé', true, 'suspendu')
+          return direAuBandeau('Vérification faite', true, 'suspendu')
         }
         return montrerEchecDuReleve(r && r.motif)
       }

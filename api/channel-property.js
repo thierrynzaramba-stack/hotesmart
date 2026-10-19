@@ -847,14 +847,20 @@ module.exports = async function handler(req, res) {
       // (`reportIncident` insere toujours, seul l'envoi est amorti). Un hote
       // qui s'acharne sur le bouton remplissait la table. Soixante secondes
       // n'enlevent rien a son geste. Constat de la revue de 6754f48.
-      const { data: hAvant } = await supabase.from('canaux_releve')
+      const { data: hAvant, error: eAvant } = await supabase.from('canaux_releve')
         .select('tente_le').eq('user_id', garde.accountUserId).maybeSingle()
+      // Fail-open : sans cette date, le releve a lieu. Mais l'echec se dit —
+      // c'est le motif que ce meme commit corrige plus haut.
+      if (eAvant) console.error('[channel-property] cadence du releve illisible :', eAvant.message)
       const depuis = hAvant && hAvant.tente_le
         ? Date.now() - new Date(hAvant.tente_le).getTime() : null
       if (depuis !== null && depuis < 60000) {
-        // Rien a dire a l'hote : la verification vient d'avoir lieu.
-        return res.status(200).json({ ok: true, motif: null, canaux: 0, disparus: 0,
-                                      cadence: true })
+        // ⚠ UN MOTIF, PAS UN SILENCE. Rendu sans motif, ce 200 faisait
+        // RECHARGER la page pour la rendre identique, sans un mot : le defaut
+        // meme que ce chantier corrige, par la porte du plancher de cadence.
+        // Avec son motif, l'ecran dit « Verification faite ». Constat de la
+        // re-revue.
+        return res.status(200).json({ ok: true, motif: 'cadence', canaux: 0, disparus: 0 })
       }
       const { rafraichirCanauxDuCompte } = require('../lib/canaux-du-bien')
       const bilan = await rafraichirCanauxDuCompte({ userId: garde.accountUserId })

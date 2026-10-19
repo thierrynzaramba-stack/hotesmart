@@ -408,3 +408,38 @@ test('l’hote, lui, publie son evaluation complete', async () => {
   const r = await publier({ evaluation: evaluation(), parProfil: null, provider: p })
   assert.strictEqual(r.statut, 'publiee')
 })
+
+test('LE TEST QUI COMPTE : un 2xx dont le corps est ILLISIBLE rend « incertain »', async () => {
+  // ⚠ CE QUE LE GUARD DE channelCall A CHANGE, ET QUE RIEN NE GARDAIT. Depuis
+  // le 19 octobre 2026, une reponse 200 portant une page HTML rend
+  // `ok: false` en GARDANT son statut 200 (docs/kb/reponse-200-sans-json.md).
+  // Or un 200 veut precisement dire que le POST est ARRIVE, et peut avoir ete
+  // applique chez Airbnb, ou un avis ne se reprend pas.
+  //
+  // Le seul marqueur d'incertitude etait `status === 0` : l'ecran affirmait
+  // donc « l'envoi a echoue, c'est sur » et le verrou tombait, dans le seul cas
+  // ou ce n'est pas sur. Contre-epreuve de la re-revue : en remettant
+  // `incertain: r?.status === 0`, ce fichier restait a 40/40 vert.
+  for (const code of ['reponse_non_json', 'forme_inattendue', 'reponse_vide']) {
+    for (const status of [200, 201, 204]) {
+      const p = provider({ post: { ok: false, status, json: { errors: { code } } } })
+      const r = await publier({ evaluation: evaluation(), provider: p })
+      assert.strictEqual(r.statut, 'echec_publication')
+      assert.strictEqual(r.incertain, true,
+        `un ${status} « ${code} » est annonce comme un echec CERTAIN : `
+        + 'un second avis pourrait partir chez Airbnb, ou il ne se reprend pas')
+    }
+  }
+})
+
+test('un corps illisible sur un code d ECHEC reste un echec certain', async () => {
+  // ⚠ LA CONTRE-EPREUVE. Un 502 + HTML, c'est une passerelle qui n'a rien
+  // transmis : l'appel n'a PAS abouti, et le dire incertain ferait retenir un
+  // avis qui n'est jamais parti.
+  for (const status of [400, 422, 500, 502, 503]) {
+    const p = provider({ post: { ok: false, status, json: { errors: { code: 'reponse_non_json' } } } })
+    const r = await publier({ evaluation: evaluation(), provider: p })
+    assert.strictEqual(r.incertain, false,
+      `un ${status} illisible est annonce incertain : l avis ne partira jamais`)
+  }
+})

@@ -64,6 +64,7 @@ const STYLE = (PAGE.match(/<style>([\s\S]*?)<\/style>/) || [, ''])[1]
 
 function monter ({ reponse, leve = null, vuLe = 'frais' }) {
   const dom = new JSDOM(`<html><head><style>${STYLE}</style></head><body>
+    <a class="btn btn-primary" id="btn-ajouter-bien" hidden>+ Ajouter un bien</a>
     <div id="canaux-echec" class="bandeau-echec" role="status" aria-live="polite" hidden></div>
     <div class="property-card"><div class="channel-badges" data-channels></div></div>
     </body></html>`)
@@ -283,5 +284,56 @@ test('le bouton du bandeau est reactive apres un echec, celui de la carte aussi'
   await attendre()
   for (const b of m.document.querySelectorAll('.btn-actualiser')) {
     assert.equal(b.disabled, false, 'un bouton est reste desactive apres l echec')
+  }
+})
+
+// ─── Les constats de la re-revue ────────────────────────────────────────────
+
+test('LE TEST QUI COMPTE : le bouton masque par DROIT est vraiment masque', () => {
+  // ⚠ CE GARDE-FOU N'AVAIT AUCUN FILET. « + Ajouter un bien » est masque par
+  // `btn.hidden = !estTitulaireCourant` — « sinon la creation partirait sur le
+  // compte du MEMBRE » —, et `.btn { display: inline-flex }` le rendait
+  // VISIBLE et cliquable pour un membre delegue, faute de regle `[hidden]` sur
+  // une page qui ne charge pas shared/ui.css.
+  //
+  // La regle globale `[hidden] { … !important }` corrige le vrai navigateur
+  // mais jsdom ignore `!important` : seul le selecteur compose `.btn[hidden]`
+  // est mesurable ici. Constat de la re-revue.
+  const m = monter({ reponse: { ok: true } })
+  const b = m.document.getElementById('btn-ajouter-bien')
+  assert.equal(m.visible(b), false,
+    'le bouton reserve au titulaire est visible : un membre delegue peut cliquer')
+  b.hidden = false
+  assert.equal(m.visible(b), true, 'le bouton ne reapparait pas pour un titulaire')
+})
+
+test('LE TEST QUI COMPTE : le plancher de cadence ne recharge pas pour rien', async () => {
+  // Le serveur refuse un second relevé dans la minute. Rendu sans motif, ce
+  // 200 faisait recharger la page pour la rendre identique, sans un mot : le
+  // defaut meme qu'on corrige, par la porte du plancher de cadence.
+  const m = monter({ vuLe: 'vieux', reponse: { ok: true, motif: 'cadence', canaux: 0, disparus: 0 } })
+  m.bindActualiserCanaux(m.card, { canaux_vu_le: 'x' })
+  m.zone.querySelector('.btn-actualiser').click()
+  await attendre()
+  assert.equal(m.recharges(), 0, 'la page a recharge sur un refus de cadence')
+  assert.equal(m.bandeau.hidden, false, 'l hote n a aucun retour a son geste')
+  assert.ok(m.bandeau.classList.contains('is-neutre'),
+    'un refus de cadence est annonce comme une panne')
+  assert.equal(m.bandeau.textContent.includes('Vérification faite'), true,
+    'le mot neutre attendu n est pas affiche : ' + m.bandeau.textContent)
+})
+
+test('le mot neutre dit « Vérification faite », et rien de plus', async () => {
+  // ⚠ DEMANDE DE THIERRY : « rien n'a change » n'est pas exact — on ne sait pas
+  // si quelque chose a change, on sait que la verification a eu lieu.
+  for (const motif of ['suspendu', 'cadence']) {
+    const reponse = motif === 'suspendu'
+      ? { ok: false, motif } : { ok: true, motif }
+    const m = monter({ vuLe: 'vieux', reponse })
+    m.bindActualiserCanaux(m.card, { canaux_vu_le: 'x' })
+    m.zone.querySelector('.btn-actualiser').click()
+    await attendre()
+    assert.equal(m.bandeau.textContent.replace('Actualiser', '').trim(), 'Vérification faite',
+      `le mot du cas « ${motif} » n est pas celui attendu`)
   }
 })

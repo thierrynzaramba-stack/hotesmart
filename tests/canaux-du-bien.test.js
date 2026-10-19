@@ -992,3 +992,27 @@ test('LE TEST QUI COMPTE : une page qui se tait n attend pas au-dela de l echean
     `le releve a dure ${ecoule} ms pour une echeance de ${ECHEANCE} ms : `
     + 'la borne est posee par page, pas sur le releve')
 })
+
+test('LE TEST QUI COMPTE : une lecture qui a VU les canaux mais dont l upsert ECHOUE annule l annonce', async () => {
+  // ⚠ LE SECOND DES DEUX CHEMINS, QUE LE PREMIER CORRECTIF NOMMAIT SANS LE
+  // FERMER. Le critere portait sur `bilan.ecrits`, pose seulement APRES un
+  // upsert reussi : sur le chemin `ecriture`, il restait a 0 et l'annonce
+  // survivait a une lecture qui l'avait pourtant contredite. Le critere porte
+  // maintenant sur `vus` — ce que la lecture a VU. Constat de la re-revue.
+  const maintenant = new Date('2026-10-20T12:00:00Z')
+  const horloges = [{ user_id: COMPTE, ok: false, echecs_consecutifs: 1,
+                      disparition_totale_vue_le: '2026-10-20T09:00:00Z',
+                      disparition_totale_nb: 2 }]
+  const appel = async () => ({ ok: true, status: 200,
+                               json: { data: canaux, meta: { total: canaux.length } } })
+  const sb = baseSimulee({ existantes: [], liens: [], horloges, upsertEnEchec: true })
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel, maintenant,
+                                                 alarme: () => {} })
+  assert.equal(bilan.motif, 'ecriture', 'le scenario n a pas produit l echec d ecriture attendu')
+  assert.ok(bilan.vus > 0, 'la lecture n a rien vu : elle ne contredit donc rien')
+  assert.equal(bilan.ecrits, 0, 'l upsert aurait du echouer')
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.equal(horloge.lignes.disparition_totale_vue_le, null,
+    'l annonce survit a une lecture qui a VU les canaux : la prochaine lecture vide l effacera')
+  assert.equal(horloge.lignes.disparition_totale_nb, null)
+})
