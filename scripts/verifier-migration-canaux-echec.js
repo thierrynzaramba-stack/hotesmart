@@ -35,9 +35,34 @@ if (!URL || !KEY) {
 }
 const PROJET = (URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''
 const PROD = 'cjmrizpdyhrcurmgyrhs'
-if (PROJET === PROD) {
+
+// ⚠ LE REFUS DE LA PRODUCTION RESTE LE DEFAUT, ET IL N'EST PAS RETIRE
+// (condition de Thierry, 19 octobre 2026). Mais la regle du depot veut qu'une
+// migration de prod soit PROUVEE CONTRE LA PROD, pas sur la foi d'un texte
+// identique a celui de staging — la table `fermetures` a ete absente de la
+// prod un jour entier parce qu'on s'en etait tenu au texte.
+//
+// D'ou ce passage EXPLICITE, qui ne s'ouvre pas par accident : il faut nommer
+// soi-meme le projet de production dans `CONFIRMER_PROD`. Une variable a `1`,
+// `true` ou `oui` ne suffit pas, et une faute de frappe referme la porte.
+//
+// Ce que le script ecrit alors, et rien d'autre : UNE ligne dans
+// `canaux_releve`, sur un `user_id` qui n'appartient a aucun compte (cette
+// table n'a pas de cle etrangere), trois `update` sur cette seule ligne, puis
+// son `delete` — suivi d'une relecture qui verifie qu'elle est partie.
+const CONFIRME = String(process.env.CONFIRMER_PROD || '').trim() === PROD
+if (PROJET === PROD && !CONFIRME) {
   console.error(`REFUS : ${PROJET} est la PRODUCTION. Ce script ecrit — staging seulement.`)
+  console.error('Pour un passage unique et assume, relancer avec '
+                + `CONFIRMER_PROD=${PROD} (le nom du projet, pas un drapeau).`)
   process.exit(2)
+}
+if (PROJET === PROD) {
+  console.log('⚠ PASSAGE EN PRODUCTION ASSUME — ' + new Date().toISOString())
+  console.log('  confirme par CONFIRMER_PROD, et journalise ici.')
+  console.log('  ecrit : 1 ligne d essai dans canaux_releve (user_id hors de tout compte),')
+  console.log('          3 update sur cette ligne, puis son delete et sa relecture.')
+  console.log('  ne touche : aucune autre table, aucune ligne existante, jamais le partenaire.\n')
 }
 // ⚠ UN HOQUET RESEAU NE DOIT PAS SE LIRE « MIGRATION ABSENTE ». Mesure du
 // 19 octobre : un `TypeError: fetch failed` sur un POST supabase-js a fait
