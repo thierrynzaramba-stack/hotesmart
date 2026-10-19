@@ -271,6 +271,28 @@ jamais dans l'interface de l'hôte.** Ni dans une pastille, ni dans un message
 d'erreur, ni dans une infobulle. L'hôte voit « Airbnb », « Booking.com »,
 « vérifié il y a 2 h » — jamais le nom de qui nous les fournit.
 
+## 8 bis. Ce que la revue de `21e0794` a change
+
+Huit constats, **dont un bloquant et deux qui touchent la securite**. Tous
+corriges avant le push.
+
+| # | Constat | Ce qui a change |
+|---|---|---|
+| 1 | **Bloquant.** La pagination sortait sur une page courte **avant** de regarder `meta.total`. Le partenaire plafonne sa propre `limit` : on demande 50, il rend 10, douze existent. La lecture se declarait **reussie** avec dix canaux — et les deux manquants, n'etant plus « vus », se faisaient poser `disparu_le`. **Une troncature muette devenait une disparition ecrite**, exactement ce que ce module existe pour empecher | l'ordre de `listeComplete` : `total` d'abord, page vide ensuite, page courte **sans** `total` en dernier |
+| 2 | Le plafond de pages rendait `ok: true` avec une liste partielle, sans un mot | il rend `ok: false` et le journalise — on ne rend pas une liste qu'on sait peut-etre tronquee |
+| 3 | **Securite.** Le verificateur inserait un `property_id` bidon : la cle etrangere le refusait **avant** que la RLS n'ait son mot a dire, et le script imprimait « la cle publique ne peut pas ecrire » meme si les `revoke` n'avaient jamais ete appliques | l'ecriture s'eprouve sur une ligne **valide**, et le refus doit porter un motif de **droit** |
+| 4 | **Securite / delegation.** La policy `user_id = auth.uid()` fait lire **zero ligne** a un collaborateur delegue : l'ecran lui aurait affiche « aucun canal » — le symptome meme qu'on corrige — et la limitation par bien n'etait pas appliquee | `can_read(user_id, 'reservations', property_id)`, comme toutes les tables creees depuis le chantier profils-et-droits. (Le domaine `logements` propose par la revue **n'existe pas** : les domaines sont `reservations, menages, prestataires, messages, avis, reglages, facturation, equipe`) |
+| 5 | La cadence horaire ne tenait pas : elle se lisait dans `canaux_du_bien.vu_le`, or un compte **sans aucun canal** — tout hote en onboarding — n'a aucune ligne. Il etait releve a **chaque** cycle, douze fois par heure au lieu d'une | une table d'horloge, `canaux_releve`, ecrite a chaque tentative. `tente_le` tient la cadence, `vu_le` ne bouge que sur une reponse reussie et c'est elle que l'ecran montre |
+| 6 | **La base simulee des tests ignorait les filtres** : en retirant les trois `user_id` du writer, la suite restait **verte**. Le cloisonnement n'etait garde par rien | la base applique `eq`/`in`/`is`/`gt`, **et retient les conditions posees** — un filtre absent se voit meme quand le resultat serait juste par ricochet |
+| 7 | `ok: true` pose en meme temps qu'une `erreur` : la couche sync, qui journalise sur `!ok`, aurait ete muette (lecon « erreur avalee, cron a 200 ») | `ok: false` et un champ `partiel` |
+| 8 | Un identifiant de bien **repete** dans `properties[]` produisait deux lignes de meme cle de conflit : Postgres rejette l'upsert **entier**, donc zero ligne ecrite, donc aucune horloge, donc le compte echouait a l'identique a chaque cycle | `new Set(...)` |
+
+**Contre-epreuve par mutation, apres correctifs : six mutations, six morsures.**
+La sixieme — retirer le `user_id` de l'`update` des disparitions — ne mordait
+pas : la relecture etant deja filtree, le resultat restait juste. Une garde qui
+tient par ricochet ne tient pas. Un test juge donc desormais **la requete**, pas
+son resultat : l'ecriture doit porter son filtre de compte (REVIEW.md regle 1).
+
 ## 9. Étape 1 — ce qui s'écrit maintenant
 
 - la migration `canaux_du_bien` **sur staging seulement** ;

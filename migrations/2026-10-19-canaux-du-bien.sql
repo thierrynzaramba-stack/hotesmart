@@ -100,15 +100,75 @@ create index if not exists
 alter table public.canaux_du_bien
   enable row level security;
 
+-- ⚠ `can_read`, PAS `user_id = auth.uid()` (constat de la
+-- revue de 21e0794). Avec l'egalite stricte, un
+-- collaborateur delegue sur le compte lit ZERO ligne :
+-- l'ecran lui affiche « aucun canal » — le symptome
+-- meme que ce lot corrige — et la limitation par bien
+-- n'est pas appliquee non plus. Toutes les tables
+-- creees depuis le chantier profils-et-droits passent
+-- par can_read ; celle-ci n'avait aucune raison d'y
+-- deroger.
+-- Le domaine est `reservations` : c'est celui qu'exige
+-- deja api/channel-property GET pour lire la liste des
+-- biens, donc le meme ecran. (Il n'existe pas de
+-- domaine `logements`.)
 drop policy if exists canaux_du_bien_select
   on public.canaux_du_bien;
 create policy canaux_du_bien_select
   on public.canaux_du_bien
   for select to authenticated
-  using (user_id = auth.uid());
+  using (can_read(user_id, 'reservations',
+                  property_id));
 
 -- Le writer ecrit avec la cle de service : aucun role
 -- client ne doit pouvoir ecrire ici.
 revoke insert, update, delete
   on table public.canaux_du_bien
+  from anon, authenticated;
+
+-- ─── L'HORLOGE DU RELEVE ────────────────────────────
+-- (constat de la revue de 21e0794)
+--
+-- POURQUOI UNE TABLE SEPAREE. La cadence « un releve
+-- par compte et par heure » se lisait dans
+-- `canaux_du_bien.vu_le`. Mais un compte qui n'a encore
+-- connecte AUCUN canal — tout hote en onboarding — n'a
+-- aucune ligne : il n'avait donc aucune horloge, et le
+-- cron le relevait a CHAQUE passage, soit douze fois
+-- par heure au lieu d'une. Meme effet apres un echec.
+--
+-- DEUX DATES, ET ELLES NE DISENT PAS LA MEME CHOSE :
+--   · `tente_le` : la derniere tentative, reussie ou
+--     non. C'est elle qui tient la cadence, sinon un
+--     partenaire en panne se fait marteler ;
+--   · `vu_le`    : la derniere reponse REUSSIE. C'est
+--     elle que l'ecran montre (« verifie il y a … »),
+--     et elle ne bouge pas quand le partenaire se tait.
+create table if not exists public.canaux_releve (
+  user_id uuid primary key,
+  tente_le timestamptz not null default now(),
+  vu_le timestamptz,
+  ok boolean not null default false,
+  erreur text,
+  mis_a_jour_le timestamptz not null default now()
+);
+
+comment on table public.canaux_releve is
+  'Horloge du releve des canaux, un compte par ligne. '
+  'tente_le tient la cadence, vu_le dit a l''ecran de '
+  'quand date l''information. Dette 59.';
+
+alter table public.canaux_releve
+  enable row level security;
+
+drop policy if exists canaux_releve_select
+  on public.canaux_releve;
+create policy canaux_releve_select
+  on public.canaux_releve
+  for select to authenticated
+  using (can_read(user_id, 'reservations'));
+
+revoke insert, update, delete
+  on table public.canaux_releve
   from anon, authenticated;

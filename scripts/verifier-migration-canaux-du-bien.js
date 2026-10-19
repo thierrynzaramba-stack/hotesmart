@@ -59,6 +59,14 @@ const MARQUE = 'VERIF-MIGRATION'
     } else console.log(`✓ la table existe, et ses ${COLONNES.length} colonnes repondent`)
   }
 
+  // Un vrai bien d'abord : il sert a eprouver l'ecriture publique sur une
+  // ligne que SEULE la RLS peut refuser.
+  {
+    const { data } = await sb.from('properties').select('id, user_id').limit(1).maybeSingle()
+    if (data) bien = data
+    else console.log('· aucun bien sur cette base : plusieurs points non eprouves')
+  }
+
   // 2. La RLS.
   if (ANON) {
     const pub = createClient(URL, ANON)
@@ -71,21 +79,39 @@ const MARQUE = 'VERIF-MIGRATION'
       console.error('✗ RLS non eprouvee : la table est absente')
       ko++
     } else if (error && /permission|denied|rls/i.test(error.message)) {
-      console.log('✓ la cle publique est refusee')
+      console.log('✓ la cle publique est refusee en lecture')
     } else if (!error && (!data || !data.length)) {
-      console.log('✓ la cle publique ne lit aucune ligne (RLS par proprietaire)')
+      console.log('✓ la cle publique ne lit aucune ligne (RLS par droit)')
     } else {
       console.error('✗ la cle publique LIT des lignes :', (data || []).length)
       ko++
     }
-    const { error: eW } = await pub.from('canaux_du_bien')
-      .insert({ user_id: FAUX_UUID, property_id: FAUX_UUID, provider: 'channex',
-                provider_property_id: 'X', provider_channel_id: 'X' })
-    if (eW && /schema cache|does not exist/i.test(eW.message)) {
-      console.error('✗ ecriture publique non eprouvee : la table est absente')
-      ko++
-    } else if (eW) console.log('✓ la cle publique ne peut pas ecrire')
-    else { console.error('✗ la cle publique a ECRIT'); ko++ }
+
+    // ⚠ L'ECRITURE S'EPROUVE SUR UNE LIGNE VALIDE (constat de la revue de
+    // 21e0794). La premiere version inserait un `property_id` bidon : la cle
+    // etrangere la refusait AVANT que la RLS n'ait son mot a dire, et le
+    // script imprimait « la cle publique ne peut pas ecrire » meme si les
+    // `revoke` n'avaient jamais ete appliques. Il ne prouvait rien.
+    if (!bien) {
+      console.log('· ecriture publique non eprouvee : aucun bien sur cette base')
+    } else {
+      const { error: eW } = await pub.from('canaux_du_bien').insert({
+        user_id: bien.user_id, property_id: bien.id, provider: 'channex',
+        provider_property_id: MARQUE + '-PUB', provider_channel_id: MARQUE + '-PUB' })
+      if (eW && /schema cache|does not exist/i.test(eW.message)) {
+        console.error('✗ ecriture publique non eprouvee : la table est absente')
+        ko++
+      } else if (eW && /permission|denied|rls|row-level|policy/i.test(eW.message)) {
+        console.log('✓ la cle publique ne peut pas ecrire (refus de DROIT)')
+      } else if (eW) {
+        console.error('✗ refus obtenu, mais pas pour un motif de droit :', eW.message)
+        ko++
+      } else {
+        console.error('✗ la cle publique a ECRIT')
+        ko++
+        await sb.from('canaux_du_bien').delete().eq('provider_channel_id', MARQUE + '-PUB')
+      }
+    }
   } else {
     console.log('· SUPABASE_ANON_KEY absente : RLS non eprouvee')
   }
@@ -101,13 +127,6 @@ const MARQUE = 'VERIF-MIGRATION'
       console.error('✗ un bien inconnu a ete ACCEPTE :', error ? error.message : '(aucune erreur)')
       ko++
     }
-  }
-
-  // Un vrai bien, pour les deux derniers points.
-  {
-    const { data } = await sb.from('properties').select('id, user_id').limit(1).maybeSingle()
-    if (!data) { console.log('· aucun bien sur cette base : unicite et null non eprouves') }
-    else bien = data
   }
 
   if (bien) {
@@ -135,6 +154,14 @@ const MARQUE = 'VERIF-MIGRATION'
     const { error: eC } = await sb.from('canaux_du_bien')
       .delete().eq('provider_channel_id', MARQUE)
     console.log(eC ? '⚠ nettoyage incomplet : ' + eC.message : '✓ rien ne reste sur la base')
+  }
+
+  // 6. L'horloge du releve, table du meme lot.
+  {
+    const { error } = await sb.from('canaux_releve')
+      .select('user_id, tente_le, vu_le, ok, erreur').limit(1)
+    if (error) { console.error('✗ table canaux_releve absente :', error.message); ko++ }
+    else console.log('✓ l horloge du releve (canaux_releve) existe')
   }
 
   console.log(ko === 0

@@ -45,33 +45,48 @@ const canaux = [
       rate_plans: [{ rate_plan_id: 'RP-A1' }] } }
 ]
 
-// Une base simulee : on retient ce qui est ecrit, on sert ce qu'on nous donne.
-function baseSimulee ({ existantes = [], liens = [], liensEnEchec = false } = {}) {
+// ⚠ UNE BASE SIMULEE QUI APPLIQUE REELLEMENT LES FILTRES (constat de la revue
+// de 21e0794). La premiere version aiguillait sur le seul NOM de la table :
+// `eq`, `in`, `is` rendaient la requete et etaient jetes. Mesure faite en
+// revue : en retirant les TROIS `user_id` du writer, la suite restait a 10/10
+// VERT. Le cloisonnement par compte n'etait garde par aucun test.
+function baseSimulee ({ existantes = [], liens = [], liensEnEchec = false,
+                        biensEnBase = null, horloges = [] } = {}) {
   const trace = { upserts: [], updates: [] }
+  const JEUX = {
+    properties: biensEnBase || biens,
+    property_channel_rate_plans: liens,
+    canaux_du_bien: existantes,
+    canaux_releve: horloges
+  }
   const table = (nom) => {
+    const filtres = []
+    // ⚠ ON RETIENT LES CONDITIONS, PAS SEULEMENT LEUR EFFET. Un filtre qui
+    // n'est pas pose se voit alors meme quand le resultat serait juste par
+    // ailleurs — c'est la regle 1 de REVIEW.md : le filtre a CHAQUE ecriture,
+    // jamais la confiance dans l'etape d'avant.
+    const conditions = []
     const q = {
-      _nom: nom, _filtres: {},
       select () { return q },
-      eq (k, v) { q._filtres[k] = v; return q },
-      in (k, v) { q._filtres[k] = v; return q },
-      is () { return q },
-      gt () { return q },
+      eq (k, v) { conditions.push({ k, v }); filtres.push(r => String(r[k]) === String(v)); return q },
+      in (k, v) { filtres.push(r => v.map(String).includes(String(r[k]))); return q },
+      is (k, v) { filtres.push(r => (v === null ? r[k] == null : r[k] === v)); return q },
+      gt (k, v) { filtres.push(r => r[k] != null && r[k] > v); return q },
       limit () { return q },
       upsert (lignes) { trace.upserts.push({ nom, lignes }); return Promise.resolve({ error: null }) },
       update (maj) {
-        const o = { maj, ids: null,
-          in (_k, v) { o.ids = v; return o }, eq () { return o },
+        const o = { nom, maj, ids: null, filtres: [...filtres], conditions: [...conditions],
+          in (_k, v) { o.ids = v; return o },
+          eq (k, v) { o.conditions.push({ k, v }); o.filtres.push(r => String(r[k]) === String(v)); return o },
           then (res) { trace.updates.push(o); return res({ error: null }) } }
         return o
       },
       then (res) {
-        if (nom === 'properties') return res({ data: biens, error: null })
-        if (nom === 'property_channel_rate_plans') {
-          return res(liensEnEchec ? { data: null, error: { message: 'lecture refusee' } }
-                                  : { data: liens, error: null })
+        if (nom === 'property_channel_rate_plans' && liensEnEchec) {
+          return res({ data: null, error: { message: 'lecture refusee' } })
         }
-        if (nom === 'canaux_du_bien') return res({ data: existantes, error: null })
-        return res({ data: [], error: null })
+        const lignes = (JEUX[nom] || []).filter(r => filtres.every(f => f(r)))
+        return res({ data: lignes, error: null })
       }
     }
     return q
@@ -93,7 +108,8 @@ test('LE TEST QUI COMPTE : le module n envoie QUE des GET au partenaire', async 
 })
 
 test('LE TEST QUI COMPTE : un silence n est pas une disparition', async () => {
-  const existantes = [{ id: 'L1', property_id: BIEN_A, provider_channel_id: 'CH-AIR' }]
+  const existantes = [{ id: 'L1', user_id: COMPTE, property_id: BIEN_A,
+                        provider_channel_id: 'CH-AIR', disparu_le: null }]
   const appel = async () => ({ ok: false, status: 503, json: {} })
   const sb = baseSimulee({ existantes, liens: [] })
   const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
@@ -101,14 +117,29 @@ test('LE TEST QUI COMPTE : un silence n est pas une disparition', async () => {
   assert.match(bilan.erreur, /injoignable/)
   assert.equal(bilan.ecrits, 0, 'le partenaire muet a declenche une ecriture')
   assert.equal(bilan.disparus, 0, 'le partenaire muet a fait disparaitre un canal')
-  assert.deepEqual(sb.trace.upserts, [], 'une ecriture est partie malgre l echec')
+  const dansLesCanaux = sb.trace.upserts.filter(u => u.nom === 'canaux_du_bien')
+  assert.deepEqual(dansLesCanaux, [], 'une ecriture de canal est partie malgre l echec')
   assert.deepEqual(sb.trace.updates, [], 'un disparu_le a ete pose sur un silence')
+  // ⚠ MAIS L'HORLOGE, ELLE, EST POSEE — sinon le partenaire en panne se fait
+  // marteler a chaque cycle (constat de la revue de 21e0794).
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.ok(horloge, 'aucune horloge posee : le compte sera repris au cycle suivant')
+  assert.equal(horloge.lignes.ok, false)
+  assert.equal(horloge.lignes.vu_le, undefined, 'vu_le a bouge sur un echec')
 })
 
 test('un canal qu une lecture REUSSIE ne rend plus porte disparu_le', async () => {
   const existantes = [
-    { id: 'L1', property_id: BIEN_A, provider_channel_id: 'CH-AIR' },
-    { id: 'L-PARTI', property_id: BIEN_A, provider_channel_id: 'CH-DISPARU' }
+    { id: 'L1', user_id: COMPTE, property_id: BIEN_A,
+      provider_channel_id: 'CH-AIR', disparu_le: null },
+    { id: 'L-PARTI', user_id: COMPTE, property_id: BIEN_A,
+      provider_channel_id: 'CH-DISPARU', disparu_le: null },
+    // ⚠ LA LIGNE D'UN AUTRE COMPTE. Si le writer cessait de filtrer par
+    // `user_id`, elle serait vue comme « disparue » et marquee — une ecriture
+    // sur le bien de quelqu'un d'autre.
+    { id: 'L-AUTRUI', user_id: '99999999-9999-9999-9999-999999999999',
+      property_id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+      provider_channel_id: 'CH-AUTRUI', disparu_le: null }
   ]
   const appel = async () => ({ ok: true, status: 200,
     json: { data: canaux, meta: { total: canaux.length } } })
@@ -199,4 +230,121 @@ test('aucun compte, aucune ecriture', async () => {
   assert.equal(bilan.ok, false)
   assert.match(bilan.erreur, /compte manquant/)
   assert.deepEqual(sb.trace.upserts, [])
+})
+
+// ─── Les tests nes de la revue de 21e0794 ───────────────────────────────────
+
+test('LE TEST QUI COMPTE : une page courte avec un `total` plus grand n est PAS la fin', async () => {
+  // Le partenaire plafonne sa propre `limit` : on demande 50, il rend 10, et
+  // il en existe 12. C'etait le constat BLOQUANT : la lecture se declarait
+  // reussie avec 10 canaux, et les 2 manquants se faisaient poser `disparu_le`.
+  let page = 0
+  const appel = async () => {
+    page++
+    const reste = page === 1 ? 10 : 2
+    return { ok: true, status: 200,
+      json: { data: Array.from({ length: reste }, (_, i) => ({ id: `C${page}-${i}`, attributes: {} })),
+              meta: { total: 12 } } }
+  }
+  const r = await lireCanauxDuPartenaire({ appel })
+  assert.equal(r.ok, true)
+  assert.equal(r.canaux.length, 12, 'la lecture s est arretee sur une page courte')
+  assert.equal(page, 2)
+})
+
+test('le plafond de pages ne rend JAMAIS une liste qu on sait tronquee', async () => {
+  const appel = async () => ({ ok: true, status: 200,
+    json: { data: Array.from({ length: 50 }, (_, i) => ({ id: 'X' + i, attributes: {} })),
+            meta: { total: 100000 } } })
+  const r = await lireCanauxDuPartenaire({ appel })
+  assert.equal(r.ok, false, 'une lecture plafonnee s est declaree reussie')
+  assert.deepEqual(r.canaux, [])
+})
+
+test('LE TEST QUI COMPTE : les canaux d un autre compte ne sont jamais touches', async () => {
+  const existantes = [
+    { id: 'L-MIEN', user_id: COMPTE, property_id: BIEN_A,
+      provider_channel_id: 'CH-PARTI', disparu_le: null },
+    { id: 'L-AUTRUI', user_id: '99999999-9999-9999-9999-999999999999',
+      property_id: 'cccccccc-cccc-cccc-cccc-cccccccccccc',
+      provider_channel_id: 'CH-AUTRUI', disparu_le: null }
+  ]
+  const appel = async () => ({ ok: true, status: 200, json: { data: [], meta: { total: 0 } } })
+  const sb = baseSimulee({ existantes, liens: [] })
+  await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
+  const maj = sb.trace.updates.filter(u => u.nom === 'canaux_du_bien')
+  assert.equal(maj.length, 1)
+  assert.deepEqual(maj[0].ids, ['L-MIEN'],
+    'une ligne d un autre compte a ete marquee disparue')
+})
+
+test('un identifiant de bien repete chez le partenaire ne fait pas une ligne en double', () => {
+  const canalDouble = [{ id: 'CH-DBL', attributes: { title: 'T', channel: 'AirBNB',
+    is_active: true, properties: ['P-A', 'P-A', 'P-A'], rate_plans: [] } }]
+  const lignes = lignesDeLaLecture({
+    canaux: canalDouble, biens, liensParBien: new Map(),
+    liensLisibles: true, maintenant: new Date() })
+  // Deux lignes de meme cle de conflit font rejeter l'upsert ENTIER par
+  // Postgres, donc zero canal ecrit et un echec qui se repete a chaque cycle.
+  assert.equal(lignes.length, 1)
+  const cles = lignes.map(l => `${l.property_id}|${l.provider_channel_id}`)
+  assert.equal(new Set(cles).size, cles.length)
+})
+
+test('l horloge tient la cadence, meme pour un compte sans aucun canal', async () => {
+  const { comptesARelever } = require('../lib/canaux-du-bien')
+  const maintenant = new Date('2026-10-19T12:00:00Z')
+  const ilYaDixMinutes = new Date('2026-10-19T11:50:00Z').toISOString()
+  // Le compte a ete tente il y a dix minutes et n'a AUCUN canal : sans
+  // horloge, il repassait a chaque cycle de cinq minutes.
+  const sb = baseSimulee({ horloges: [{ user_id: COMPTE, tente_le: ilYaDixMinutes }] })
+  assert.deepEqual(await comptesARelever({ maintenant, sb }), [])
+  // Deux heures plus tard, il est de nouveau du.
+  const sb2 = baseSimulee({ horloges: [{ user_id: COMPTE, tente_le: ilYaDixMinutes }] })
+  assert.deepEqual(
+    await comptesARelever({ maintenant: new Date('2026-10-19T14:00:00Z'), sb: sb2 }),
+    [COMPTE])
+})
+
+test('une relecture en echec ne se declare pas reussie', async () => {
+  const appel = async () => ({ ok: true, status: 200,
+    json: { data: canaux, meta: { total: canaux.length } } })
+  const sb = baseSimulee({ liens: [{ property_id: BIEN_A, provider_rate_plan_id: 'RP-A1' }] })
+  // On casse la RELECTURE de `canaux_du_bien`, celle qui suit l'upsert.
+  const vraiFrom = sb.from
+  let dejaEcrit = false
+  sb.from = (nom) => {
+    const q = vraiFrom(nom)
+    if (nom !== 'canaux_du_bien') return q
+    const ancienUpsert = q.upsert
+    q.upsert = (l) => { dejaEcrit = true; return ancienUpsert(l) }
+    const ancienThen = q.then
+    q.then = (res) => dejaEcrit
+      ? res({ data: null, error: { message: 'relecture refusee' } })
+      : ancienThen(res)
+    return q
+  }
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
+  assert.equal(bilan.ok, false, 'une relecture en echec a ete comptee comme un succes')
+  assert.equal(bilan.partiel, true)
+  assert.match(bilan.erreur, /relecture impossible/)
+})
+
+test('LE TEST QUI COMPTE : l ecriture des disparitions porte son filtre de compte', async () => {
+  // ⚠ CE TEST NE JUGE PAS LE RESULTAT, IL JUGE LA REQUETE. La relecture etant
+  // deja filtree par compte, retirer le `user_id` de cet `update` ne changeait
+  // RIEN au resultat — et aucune mutation ne mordait (constat de la revue de
+  // 21e0794). Mais une garde qui tient par ricochet ne tient pas : le jour ou
+  // la relecture change, l'ecriture part sans borne. REVIEW.md regle 1.
+  const existantes = [
+    { id: 'L-PARTI', user_id: COMPTE, property_id: BIEN_A,
+      provider_channel_id: 'CH-PARTI', disparu_le: null }
+  ]
+  const appel = async () => ({ ok: true, status: 200, json: { data: [], meta: { total: 0 } } })
+  const sb = baseSimulee({ existantes, liens: [] })
+  await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
+  const maj = sb.trace.updates.find(u => u.nom === 'canaux_du_bien')
+  assert.ok(maj, 'aucune disparition ecrite')
+  assert.ok(maj.conditions.some(c => c.k === 'user_id' && String(c.v) === COMPTE),
+    'l update des disparitions ne porte pas de filtre user_id')
 })
