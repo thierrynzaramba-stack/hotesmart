@@ -175,10 +175,36 @@ test("l ecran Connexions ne confond plus « un canal existe » et « ce bien est
 })
 
 test('le badge de la fiche bien ne verdit pas sur un canal seulement rattache', () => {
-  const src = fs.readFileSync(path.join(__dirname, '..', 'shared/properties.js'), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
-  assert.match(src, /active: c\.is_active === true && c\.mappe_pour_ce_bien === true/,
+  // ⚠ CE TEST JUGEAIT UNE CHAINE DE CARACTERES, MAINTENANT IL JUGE LE
+  // COMPORTEMENT (dette 59, 19 octobre 2026). Il cherchait
+  // `active: c.is_active === true && c.mappe_pour_ce_bien === true` dans le
+  // source — et il a rougi le jour ou les canaux sont entres dans le coeur
+  // avec leurs propres noms de champs (`actif`, `mappe`), alors que
+  // l'invariant, lui, n'avait pas bouge d'un pouce.
+  // Un test qui lit du texte rougit sur un renommage et reste vert si l'on
+  // vide la fonction. Celui-ci appelle la vraie fonction.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'shared/properties.js'), 'utf8')
+  const bac = new Function(`
+    const logger = { error () {}, info () {} }
+    const api = {}
+    ${source.replace(/^\s*import\s+[\s\S]*?from\s*'[^']*'\s*$/gm, '').replace(/^\s*export\s+/gm, '')}
+    return { canauxDuBien }
+  `)()
+  // Le canal est ACTIF — il porte d'autres logements — mais aucun tarif de CE
+  // bien n'y est mappe. C'est le defaut du 11 septembre 2026.
+  const rattacheSeulement = bac.canauxDuBien({
+    canaux: [{ ota: 'airbnb', titre: 'Airbnb', actif: true, mappe: false }] })
+  assert.equal(rattacheSeulement[0].active, false,
     'le badge doit exiger un mapping POUR CE BIEN')
+  // Et une incertitude ne verdit pas davantage.
+  const incertain = bac.canauxDuBien({
+    canaux: [{ ota: 'airbnb', actif: true, mappe: null }] })
+  assert.equal(incertain[0].active, false,
+    "un `null` (on n'a pas pu conclure) ne doit jamais verdir")
+  // Le cas qui DOIT verdir, sans quoi ce test passerait sur une fonction vide.
+  const relie = bac.canauxDuBien({
+    canaux: [{ ota: 'airbnb', actif: true, mappe: true }] })
+  assert.equal(relie[0].active, true)
 })
 
 test('un `null` arrete le parcours au lieu de le laisser deviner', () => {

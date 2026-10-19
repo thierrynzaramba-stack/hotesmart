@@ -300,7 +300,52 @@ module.exports = async function handler(req, res) {
     } catch (e) {
       console.warn('[channel-property] Beds24 list skipped:', e.message)
     }
-    return res.status(200).json({ properties: [...beds24Props, ...channexProps] })
+    // ⚠ LES CANAUX DESCENDENT AVEC LES BIENS, LUS DANS LE COEUR (dette 59).
+    // Avant, l'ecran les demandait au partenaire EN DIRECT, un appel par bien,
+    // a chaque affichage — et quand le partenaire se taisait, les pastilles
+    // disparaissaient sans un mot : l'hote lisait « aucun canal » la ou il en
+    // a deux. Ici, un seul aller-retour, et la date du dernier releve descend
+    // avec, pour que l'ecran puisse dire de quand date ce qu'il montre.
+    //
+    // ⚠ UNE LECTURE DE CANAUX EN ECHEC NE VIDE PAS LA LISTE DES BIENS. Les
+    // biens sont la vraie reponse ; les canaux sont un ornement. On les laisse
+    // vides et on le journalise.
+    const tous = [...beds24Props, ...channexProps]
+    try {
+      const ids = tous.map(b => String(b.id)).filter(Boolean)
+      if (ids.length) {
+        const { data: lignes, error: eC } = await supabase
+          .from('canaux_du_bien')
+          .select('property_id, ota, titre, actif, mappe_pour_ce_bien, listing_url, vu_le')
+          .eq('user_id', compteLecture)
+          .in('property_id', ids)
+          .is('disparu_le', null)
+          .limit(ids.length * 20)
+        if (eC) throw new Error(eC.message)
+        const parBien = new Map()
+        for (const l of lignes || []) {
+          const k = String(l.property_id)
+          if (!parBien.has(k)) parBien.set(k, [])
+          parBien.get(k).push({
+            // ⚠ AUCUN IDENTIFIANT DU PARTENAIRE NE DESCEND, ni son nom : la
+            // requete ne les demande meme pas, et le privilege par colonne les
+            // refuserait de toute facon a un client.
+            ota: l.ota, titre: l.titre, actif: l.actif === true,
+            mappe: l.mappe_pour_ce_bien, listing_url: l.listing_url || null
+          })
+        }
+        const { data: h } = await supabase.from('canaux_releve')
+          .select('vu_le').eq('user_id', compteLecture).maybeSingle()
+        for (const b of tous) {
+          b.canaux = parBien.get(String(b.id)) || []
+          b.canaux_vu_le = h ? h.vu_le : null
+        }
+      }
+    } catch (e) {
+      console.error('[channel-property] canaux illisibles :', e.message)
+      for (const b of tous) { b.canaux = null; b.canaux_vu_le = null }
+    }
+    return res.status(200).json({ properties: tous })
   }
 
   // ===== PATCH : modification d'un bien =====
@@ -737,6 +782,25 @@ module.exports = async function handler(req, res) {
 
   // ===== POST : creation d'un bien complet =====
   if (req.method === 'POST') {
+    // ⚠ UN RELEVE A LA DEMANDE, ET SEULEMENT QUAND L'ECRAN LE PROPOSE (dette
+    // 59). L'ecran n'affiche « Actualiser » qu'au-dela de 24 h sans
+    // confirmation : ce chemin n'existe donc pas en temps normal. Il force le
+    // releve en ignorant la cadence horaire — c'est tout son interet — mais il
+    // reste borne par le writer (8 s, 5 comptes) et il ne lit QUE le
+    // partenaire.
+    if ((req.body || {}).action === 'relever_canaux') {
+      const garde = await requirePermission(req, res, { domaine: 'reservations', niveau: 'read' })
+      if (!garde.ok) return
+      const { rafraichirCanauxDuCompte } = require('../lib/canaux-du-bien')
+      const bilan = await rafraichirCanauxDuCompte({ userId: garde.accountUserId })
+      // ⚠ ON REND 200 MEME EN ECHEC, AVEC LE MOTIF. L'ecran a deja ses canaux :
+      // un releve qui rate ne doit pas lui faire croire que la page est cassee.
+      return res.status(200).json({
+        ok: bilan.ok, motif: bilan.motif,
+        canaux: bilan.ecrits, disparus: bilan.disparus
+      })
+    }
+
     // Creation : aucun bien existant a designer, le compte cible est celui de
     // l'appelant. La garde verifie donc `reglages` en ecriture sur son compte —
     // un titulaire passe, un membre sans le droit est refuse.

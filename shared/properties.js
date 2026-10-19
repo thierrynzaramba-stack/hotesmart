@@ -96,58 +96,75 @@ const OTA_LABELS = [
   { match: /booking/i, label: 'Booking.com' }
 ]
 
-// Canaux de distribution REELS du bien, lus chez Channex.
-// Renvoie [] (jamais une erreur) pour tout bien qui ne peut pas en avoir :
-// bien Beds24, ou bien channel pas encore provisionne (provider_property_id null).
-// Un [] est donc un resultat legitime, pas un echec silencieux.
-export async function fetchPropertyChannels(p) {
-  if (p._source !== 'channel') return []
-  const pid = p.provider_property_id
-  if (!pid) return []
-
-  // ATTENTION : channel-mapping attend le provider_property_id (UUID Channex),
-  // surtout pas le `id` HoteSmart. Voir shared/api-client.js.
-  const r = await api.channel.mapping.channels(pid)
-  const rows = Array.isArray(r?.channels) ? r.channels : []
-
-  return rows.map(c => ({
+// Les canaux de distribution du bien, LUS DANS LE COEUR (dette 59).
+//
+// ⚠ CE QUI A CHANGE, ET POURQUOI. Cette fonction interrogeait le partenaire EN
+// DIRECT, un appel par bien, a chaque affichage de la page — et quand il ne
+// repondait pas, `hydrateChannelBadges` faisait `container.remove()` : les
+// pastilles disparaissaient SANS UN MOT, et l'hote lisait « aucun canal » la
+// ou il en a deux. Les canaux descendent maintenant avec le bien, releves par
+// la couche sync, et la date du dernier releve descend avec eux.
+//
+// Trois etats, et ils ne se confondent pas :
+//   · `canaux` absent ou null  -> on n'a pas pu lire le coeur : on ne dit rien
+//   · `canaux` vide            -> ce bien n'a aucun canal, et c'est une reponse
+//   · `canaux` rempli          -> on les montre, avec leur fraicheur
+export function canauxDuBien (p) {
+  if (!p || !Array.isArray(p.canaux)) return null
+  return p.canaux.map(c => ({
     label: OTA_LABELS.find(o => o.match.test(c.ota || ''))?.label
-        || c.title || c.ota || 'Canal',
-    // Un canal mappe mais inactif reste affiche (grise) : le masquer rendrait
-    // une activation ratee invisible, donc indebuggable cote utilisateur.
-    //
-    // ⚠ MAIS `is_active` EST UNE PROPRIETE DU CANAL, PAS DU BIEN. Un canal
-    // Airbnb porte plusieurs logements et devient actif des qu'UN seul y est
-    // mappe : un bien neuf, seulement RATTACHE, portait un badge vert.
-    // `mappe_pour_ce_bien === null` = le serveur n'a pas pu conclure : on
-    // n'affiche pas un badge vert sur une incertitude.
-    active: c.is_active === true && c.mappe_pour_ce_bien === true
+        || c.titre || c.ota || 'Canal',
+    // ⚠ `mappe === null` = le serveur n'a pas pu conclure : on n'affiche pas un
+    // badge vert sur une incertitude. Et `actif` est une propriete du CANAL,
+    // pas du bien — un canal Airbnb porte plusieurs logements et devient actif
+    // des qu'UN seul y est mappe (defaut du 11 septembre 2026, bien neuf avec
+    // pastille verte).
+    active: c.actif === true && c.mappe === true,
+    url: c.listing_url || null
   }))
 }
 
-// Rendu commun des badges canaux. Retourne '' si aucun canal : l'appelant
-// decide quoi afficher a la place (rien, ou un libelle "aucun canal").
-export function renderChannelBadges(channels) {
-  if (!channels.length) return ''
-  return channels.map(c =>
+// « verifie il y a … » : la fraicheur de ce qu'on montre. Au-dela de 24 h, on
+// le DIT au lieu de laisser croire que c'est a jour — et c'est la seule
+// circonstance ou le bouton « Actualiser » apparait (decision de Thierry).
+const HEURE = 3600000
+export function fraicheurCanaux (vuLe, maintenant = Date.now()) {
+  if (!vuLe) return null
+  const ms = maintenant - new Date(vuLe).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  const vieux = ms >= 24 * HEURE
+  if (ms < HEURE) {
+    const min = Math.max(1, Math.round(ms / 60000))
+    return { texte: `vérifié il y a ${min} min`, vieux }
+  }
+  const h = Math.round(ms / HEURE)
+  if (h < 24) return { texte: `vérifié il y a ${h} h`, vieux }
+  const j = Math.floor(ms / (24 * HEURE))
+  return { texte: `non vérifié depuis ${j} jour${j > 1 ? 's' : ''}`, vieux }
+}
+
+// Les pastilles elles-memes. Inchangee depuis l'origine : un canal mappe mais
+// INACTIF reste affiche, grise — le masquer rendrait une activation ratee
+// invisible, donc indebuggable pour qui regarde l'ecran.
+export function renderChannelBadges (canaux) {
+  if (!canaux.length) return ''
+  return canaux.map(c =>
     `<span class="badge badge-channel${c.active ? '' : ' is-inactive'}"`
-    + `${c.active ? '' : ' title="Canal mappé mais non activé"'}>`
+    + `${c.active ? '' : ' title="Canal relié mais non activé"'}>`
     + `${escapeHtml(c.label)}${c.active ? '' : ' — inactif'}</span>`
   ).join('')
 }
 
-// Charge les canaux en differe et les injecte dans la carte deja rendue.
-// Lazy-load assume : 1 requete par bien. Si ca rame au-dela de quelques biens,
-// c'est le signal pour ajouter un endpoint batch cote API.
-export async function hydrateChannelBadges(p, container) {
+export function hydrateChannelBadges (p, container) {
   if (!container) return
-  try {
-    const channels = await fetchPropertyChannels(p)
-    const html = renderChannelBadges(channels)
-    if (html) container.innerHTML = html
-    else container.remove()
-  } catch (err) {
-    logger.error('properties', `canaux illisibles (${p.id}): ${err.message}`)
-    container.remove()
-  }
+  const canaux = canauxDuBien(p)
+  // ⚠ ON NE SUPPRIME PLUS LE CONTENEUR SUR UNE ABSENCE DE REPONSE. C'etait le
+  // defaut : une lecture en echec se lisait « aucun canal ».
+  if (canaux === null) { container.remove(); return }
+  const html = renderChannelBadges(canaux)
+  const f = fraicheurCanaux(p.canaux_vu_le)
+  if (!html && !f) { container.remove(); return }
+  container.innerHTML = html +
+    (f ? `<span class="badge-fraicheur${f.vieux ? ' is-vieux' : ''}">${escapeHtml(f.texte)}</span>` : '')
 }
+

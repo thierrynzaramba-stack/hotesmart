@@ -4,16 +4,35 @@
    Ajouter une rubrique = une ligne ici (mais la navigation est
    définitive : 5 entrées, voir spec §3).
 
-   ⚠ LOT 1 DE LA REFONTE : seule « Aujourd'hui » existe en V5. Les
-   quatre autres entrées mènent aux écrans ACTUELS jusqu'à leur lot
-   (spec §7) ; la page peut fournir le lien exact (`liens`), par
-   exemple le calendrier du premier bien. `hrefMobile` : l'écran
-   téléphone quand il en existe un distinct.
+   ⚠ UNE ENTRÉE MÈNE À SON ÉCRAN V5 DÈS QU'IL EXISTE. « Aujourd'hui »,
+   « Calendrier », « Messages » et « Ménages » sont refondus ; seule
+   « Mes biens » mène encore à l'écran ACTUEL, jusqu'au lot Logements
+   (spec §7). `hrefMobile` : l'écran téléphone quand il en existe un
+   distinct.
+
+   ⚠ CE QUE LE MÉCANISME `liens` A COÛTÉ, ET POURQUOI IL N'EST PLUS LÀ.
+   Au lot 1 (257b59d, 10 octobre 2026), l'écran calendrier V5 n'existait
+   pas : l'entrée retombait sur `/biens`, et chaque page pouvait fournir
+   le lien exact (`liens`) — le calendrier du premier bien. UNE SEULE le
+   faisait, « Aujourd'hui ». Le lot 3 a livré `/calendrier` (c8e7dff,
+   12 octobre) sans revenir ici.
+   Le défaut a donc vécu EN PRODUCTION du 12 au 19 octobre : depuis
+   Messages (livrée le 11) et Calendrier, puis depuis Ménages (livrée le
+   13), « Calendrier » et « Mes biens » menaient AU MÊME ÉCRAN — deux
+   onglets sur cinq au même endroit, et aucun vers le calendrier.
+   Le téléphone n'a jamais pointé sur `/biens`, mais il n'était pas juste
+   pour autant : `/m/calendrier` a mené à l'ANCIEN calendrier téléphone
+   jusqu'à 6f3d6af (13 octobre), qui a fait des anciennes pages des
+   redirections vers `/calendrier`.
+   La leçon n'est pas « il fallait y penser » : un repli que UNE SEULE
+   page corrige est un piège qui attend. L'entrée porte maintenant sa
+   vraie destination, la même pour toutes les pages, et
+   `tests/nav-v5-destinations.test.js` le tient.
    ============================================================ */
 (() => {
   const NAV = [
     { id: 'today',      href: '/pages/aujourdhui',          key: 'nav.today',      icon: 'i-today' },
-    { id: 'calendar',   href: '/biens',                     key: 'nav.calendar',   icon: 'i-calendar', hrefMobile: '/m/calendrier', domaine: 'reservations' },
+    { id: 'calendar',   href: '/calendrier',                key: 'nav.calendar',   icon: 'i-calendar', hrefMobile: '/m/calendrier', domaine: 'reservations' },
     { id: 'messages',   href: '/pages/messages',            key: 'nav.messages',   icon: 'i-message', badge: 'pendingMessages', domaine: 'messages' },
     { id: 'cleaning',   href: '/menages',                   key: 'nav.cleaning',   icon: 'i-cleaning', badge: 'menagesATraiter', domaine: 'menages' },
     { id: 'properties', href: '/biens',                     key: 'nav.properties', icon: 'i-home', domaine: 'reservations' },
@@ -25,18 +44,23 @@
   const isCurrent = (href) => location.pathname.replace(/\/$/, '').endsWith(href.replace(/\/$/, ''));
 
   // options.badges : { pendingMessages: n, menagesATraiter: n }
-  // options.liens  : { calendar: '/biens/<id>/calendrier' } — remplace href
   // options.peutLire(domaine) : masque une entrée sans droit (jamais une
   //   entrée qui mène à une page vide ou à un refus).
   function render(options = {}) {
     const badges = options.badges || {};
-    const liens = options.liens || {};
     const peutLire = options.peutLire || (() => true);
     const top = document.querySelector('.topbar__nav');
     const bottom = document.querySelector('.bottombar');
     const items = NAV.filter(n => !n.domaine || peutLire(n.domaine)).map(n => {
-      const href = liens[n.id] || n.href;
-      const cur = n.id === 'today' && isCurrent(n.href) ? ' aria-current="page"' : '';
+      const href = n.href;
+      // ⚠ L'ONGLET COURANT SE MARQUE SUR TOUTES LES ENTRÉES (constat de la
+      // revue de 5de081b). La restriction à « Aujourd'hui » n'était pas un
+      // choix de design : elle existait PARCE QUE `calendar` et `properties`
+      // menaient tous deux à `/biens` — la lever alors aurait marqué DEUX
+      // onglets courants. Le repli parti, la cause l'est aussi, et l'hôte
+      // retrouve sur Calendrier, Messages et Ménages la pastille que
+      // `shared/ui.css` dessine depuis le socle et que personne ne voyait.
+      const cur = isCurrent(n.href) ? ' aria-current="page"' : '';
       const count = n.badge ? badges[n.badge] : 0;
       const badge = count ? `<span class="badge badge--amber">${esc(count)}</span>` : '';
       return { n, href, hrefMobile: n.hrefMobile || href, cur, badge };

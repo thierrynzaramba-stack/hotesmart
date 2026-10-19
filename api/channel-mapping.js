@@ -57,12 +57,10 @@ const redact = (v) => {
 // `mappe_pour_ce_bien: false` et repartirait dans le parcours de connexion.
 // Releve en review : la mutation « supprimer cette ligne » laissait les tests
 // verts tant que le `Set` etait construit dans le handler.
-function tarifsDuBienDe (prop, liens) {
-  const s = new Set()
-  if (prop && prop.provider_rate_plan_id) s.add(String(prop.provider_rate_plan_id))
-  for (const l of liens || []) if (l && l.provider_rate_plan_id) s.add(String(l.provider_rate_plan_id))
-  return s
-}
+// ⚠ LA REGLE VIT DANS `lib/canaux-du-bien.js`, ELLE N'EST PLUS RECOPIEE ICI
+// (dette 59). Cette fonction decide si une pastille de canal est verte : deux
+// copies finissent par diverger, et c'est l'une d'elles qui affichera faux.
+const { tarifsDuBienDe } = require('../lib/canaux-du-bien')
 
 // ─── RESUME DES CANAUX D'UN BIEN ──────────────────────────────────────────
 // Pure et exportee : c'est elle qui repond « ce bien est-il connecte ? », et la

@@ -124,6 +124,7 @@ const { channelCall } = require('../lib/channel-fullsync')
 const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
 const { executerAutoValidations } = require('../lib/avis/auto-validation')
+const { releverLesComptesDus } = require('../lib/canaux-du-bien')
 
 // ─── Chrono d'etape ──────────────────────────────────────────────────────────
 // Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
@@ -584,6 +585,27 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur dispatch changements:', err.message)
       results.errors.push({ context: 'booking_changes_dispatch', error: err.message })
+    }
+
+    // 5 bis. Relevé des canaux de distribution par bien (dette 59).
+    // ⚠ EN DERNIER, ET C'EST UN CHOIX. C'est le poste le MOINS urgent du
+    // cycle : un canal change quand un humain agit — connecter une annonce,
+    // couper un canal —, jamais tout seul. Il prend donc ce qui reste du
+    // budget 60 s, et les comptes non relevés restent dus au cycle suivant.
+    // Il ne peut ni faire échouer ni retarder ce qui précède : la fonction ne
+    // lève jamais, s'arrête d'elle-même au bout de 8 s et ne traite que
+    // 5 comptes par passage. Son erreur se lit dans results.errors, jamais
+    // dans un code HTTP — leçon « erreur avalée, cron à 200 ».
+    try {
+      const bilanCanaux = await chrono.mesure('releve_canaux', () => releverLesComptesDus())
+      results.canaux = bilanCanaux
+      if (bilanCanaux.echecs) {
+        results.errors.push({ context: 'canaux_du_bien',
+          error: `${bilanCanaux.echecs} relevé(s) en échec sur ${bilanCanaux.comptes}` })
+      }
+    } catch (err) {
+      console.error('[Cron] Erreur relevé canaux:', err.message)
+      results.errors.push({ context: 'canaux_du_bien', error: err.message })
     }
 
     // 6. Log du run
