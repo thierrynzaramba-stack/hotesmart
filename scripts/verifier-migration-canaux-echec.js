@@ -39,7 +39,20 @@ if (PROJET === PROD) {
   console.error(`REFUS : ${PROJET} est la PRODUCTION. Ce script ecrit — staging seulement.`)
   process.exit(2)
 }
-const sb = createClient(URL, KEY)
+// ⚠ UN HOQUET RESEAU NE DOIT PAS SE LIRE « MIGRATION ABSENTE ». Mesure du
+// 19 octobre : un `TypeError: fetch failed` sur un POST supabase-js a fait
+// rougir un point que la base aurait accepte. Un faux rouge fait chercher une
+// panne la ou il n'y en a pas — l'exact pendant du faux vert. Meme reessai
+// qu'ailleurs dans le depot.
+const fetchTenace = async (u, o) => {
+  let derniere
+  for (let i = 0; i < 5; i++) {
+    try { return await fetch(u, o) }
+    catch (e) { derniere = e; await new Promise(r => setTimeout(r, 300 * (i + 1))) }
+  }
+  throw derniere
+}
+const sb = createClient(URL, KEY, { global: { fetch: fetchTenace } })
 
 const NEUVES = ['echecs_consecutifs', 'premier_echec_le',
                 'disparition_totale_vue_le', 'disparition_totale_nb']
@@ -73,10 +86,17 @@ const ESSAI = '00000000-0000-4000-8000-0000000000ec'
     else ratE('`echecs_consecutifs` vaut ' + JSON.stringify(v) + ' au lieu de 0')
   }
 
+  // ⚠ UN REFUS NE SUFFIT PAS : IL FAUT LE BON REFUS. Mesure du 19 octobre,
+  // AVANT la migration : ce point passait au vert parce que la colonne
+  // n'existait pas — l'update echouait, donc « la contrainte tient ». Un ✓ pour
+  // la mauvaise raison est un faux vert. On exige le code Postgres de la
+  // violation NOT NULL (23502).
   const { error: e3 } = await sb.from('canaux_releve')
     .update({ echecs_consecutifs: null }).eq('user_id', ESSAI)
-  if (e3) ok('`echecs_consecutifs` refuse `null` (NOT NULL)')
-  else ratE('`echecs_consecutifs` a accepte `null` : la contrainte NOT NULL manque')
+  if (!e3) ratE('`echecs_consecutifs` a accepte `null` : la contrainte NOT NULL manque')
+  else if (e3.code === '23502') ok('`echecs_consecutifs` refuse `null` (NOT NULL, 23502)')
+  else ratE('`echecs_consecutifs` a bien refuse, mais pour une AUTRE raison : '
+            + (e3.code || '?') + ' ' + e3.message)
 
   // 3. Les trois autres acceptent `null` — leur etat normal.
   const { error: e4 } = await sb.from('canaux_releve')
@@ -113,11 +133,19 @@ const ESSAI = '00000000-0000-4000-8000-0000000000ec'
   const { data: tout } = await sb.from('canaux_releve')
     .select('*').eq('user_id', ESSAI).limit(1)
   const ligne = (tout && tout[0]) || {}
-  const suspect = Object.entries(ligne).filter(([k, v]) =>
-    typeof v === 'string' && v.length > 25 && !/^\d{4}-\d{2}-\d{2}T/.test(v)
-    && k !== 'user_id')
-  if (suspect.length) ratE('valeur longue non datee dans ' + suspect.map(([k]) => k).join(', '))
-  else ok('aucune colonne ne porte de chaine longue : des compteurs et des dates')
+  // ⚠ ET CE POINT N'A DE SENS QUE SI LES QUATRE COLONNES SONT LA. Avant la
+  // migration, la ligne n'en portait aucune : « aucune chaine longue » etait
+  // vrai et ne prouvait rien. Meme faux vert que ci-dessus.
+  const presentes = NEUVES.filter(c => c in ligne)
+  if (presentes.length !== NEUVES.length) {
+    ratE(`controle des secrets impossible : ${presentes.length}/${NEUVES.length} colonnes presentes`)
+  } else {
+    const suspect = Object.entries(ligne).filter(([k, v]) =>
+      typeof v === 'string' && v.length > 25 && !/^\d{4}-\d{2}-\d{2}T/.test(v)
+      && k !== 'user_id')
+    if (suspect.length) ratE('valeur longue non datee dans ' + suspect.map(([k]) => k).join(', '))
+    else ok('aucune colonne ne porte de chaine longue : des compteurs et des dates')
+  }
   console.log('    colonnes rendues : ' + Object.keys(ligne).join(', '))
 
   await sb.from('canaux_releve').delete().eq('user_id', ESSAI)
