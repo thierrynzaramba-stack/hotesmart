@@ -872,12 +872,40 @@ module.exports = async function handler(req, res) {
       })
     }
 
-    // Creation : aucun bien existant a designer, le compte cible est celui de
-    // l'appelant. La garde verifie donc `reglages` en ecriture sur son compte —
-    // un titulaire passe, un membre sans le droit est refuse.
+
+    // ⚠ CETTE GARDE NE FILTRAIT RIEN, ET C'EST MESURE (19 octobre 2026, sur
+    // staging). Sans ressource designee et SANS `compteDelegue`,
+    // `requirePermission` fait retomber `accountUserId` sur l'APPELANT
+    // (lib/require-permission.js) — et tout utilisateur authentifie est
+    // titulaire de son propre compte, donc `reglages:write` etait toujours
+    // accorde. Mesure : un POST de creation avec le jeton d'un membre a rendu
+    // 400, le refus de la VALIDATION qui vient apres, et non 403.
+    //
+    // Le seul garde-fou etait le masquage du bouton « + Ajouter un bien » dans
+    // pages/biens.html — et il ne masquait rien, faute de regle `[hidden]` sur
+    // une page qui ne charge pas shared/ui.css.
+    //
+    // Ce que ca coutait : un membre creait un bien sur SON compte, et ce
+    // chemin provisionne une propriete, un type de chambre et un plan tarifaire
+    // CHEZ LE PARTENAIRE. Aucune fuite entre comptes — mais une ecriture chez
+    // le partenaire, et un bien hors de tout suivi.
+    //
+    // DEUX CHANGEMENTS, ET IL FAUT LES DEUX :
+    //   · `compteDelegue: true` fait venir le compte cible de l'en-tete de
+    //     compte, verifie (membre actif, invitation acceptee) ;
+    //   · et on exige que l'appelant soit TITULAIRE de ce compte. Sans en-tete,
+    //     le compte cible est l'appelant lui-meme : le parcours normal — un
+    //     hote qui cree son premier bien — passe sans changement.
     {
-      const garde = await requirePermission(req, res, { domaine: 'reglages', niveau: 'write' })
+      const garde = await requirePermission(req, res,
+        { domaine: 'reglages', niveau: 'write', compteDelegue: true })
       if (!garde.ok) return
+      const { estTitulaireDuCompte } = require('../lib/permissions')
+      if (!estTitulaireDuCompte({ userId: garde.userId, accountUserId: garde.accountUserId })) {
+        console.log('[channel-property] refus creation : membre non titulaire du compte vise')
+        return res.status(403).json({
+          error: 'Seul le titulaire du compte peut ajouter un logement.' })
+      }
     }
 
     const { name, capacity, currency, address, city, country, zip_code, base_price, included_guests, extra_guest_fee, ota_connect_status } = req.body || {}
