@@ -49,7 +49,13 @@ function droitsDesBlocs (contexte, cible) {
   return {
     prestataires: peutLire(contexte, 'prestataires', cible),
     avis: peutLire(contexte, 'avis', cible),
-    facturation: peutLire(contexte, 'facturation', cible),
+    // ⚠ `reglages` COUVRE DEUX BLOCS : les serrures (`property_locks_select` et
+    // `locks_select` font tous deux `can_read(user_id, 'reglages', …)`, et
+    // api/serrures.js declare `locks: ['reglages', 'read']`) et le BAREME de la
+    // taxe de sejour — decision de Thierry du 20 octobre 2026 : la fiche ne
+    // montre que le bareme, les montants collectes restent sous `facturation`
+    // et hors de cette fiche.
+    reglages: peutLire(contexte, 'reglages', cible),
     reglages_write: peutEcrire(contexte, 'reglages', cible)
   }
 }
@@ -124,12 +130,11 @@ module.exports = async function handler (req, res) {
   const refsPerimetre = refsDuPerimetre(garde.contexte)
 
   try {
+    // ⚠ AUCUN DROIT DE DOMAINE A PASSER : la liste ne lit que `properties`,
+    // `canaux_*`, `bookings_snapshot` et `fermetures` — tout le domaine
+    // `reservations`, deja verifie par la garde. Le perimetre, lui, est un filtre.
     const liste = await lireListe(supabase, {
-      compte: garde.accountUserId, refsPerimetre,
-      // Sur une collection, le perimetre est deja un filtre : le droit de
-      // domaine, lui, se juge sans bien (comme api/menages.js le fait pour
-      // l'equipe).
-      droits: droitsDesBlocs(garde.contexte, null)
+      compte: garde.accountUserId, refsPerimetre
     })
     return res.status(200).json(liste)
   } catch (e) {

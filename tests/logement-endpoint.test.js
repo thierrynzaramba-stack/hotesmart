@@ -79,7 +79,7 @@ function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], enPan
   const client = {
     auth: { getUser: async (t) => t ? ({ data: { user: { id: appelant } }, error: null }) : ({ data: null, error: { message: 'no' } }) },
     from (table) {
-      const a = { table, f: {}, ins: [], or: null, limit: null, order: null, gte: {}, is: {} }
+      const a = { table, f: {}, ins: [], or: null, limit: null, order: null, ordres: [], gte: {}, lte: {}, is: {} }
       vus.push(a)
       const donnees = () => {
         if (enPanne[table]) return { data: null, error: { message: enPanne[table] } }
@@ -99,9 +99,10 @@ function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], enPan
         eq (c, v) { a.f[c] = v; return chain },
         in (c, v) { a.ins.push({ c, v: (v || []).map(String) }); return chain },
         gte (c, v) { a.gte[c] = v; return chain },
+        lte (c, v) { a.lte[c] = v; return chain },
         is (c, v) { a.is[c] = v; return chain },
         or (e) { a.or = e; return chain },
-        order (c, o) { a.order = { c, asc: !(o && o.ascending === false) }; return chain },
+        order (c, o) { a.ordres.push({ c, asc: !(o && o.ascending === false) }); a.order = a.ordres[0]; return chain },
         // Le plafond `max_rows = 1000` du serveur, simule comme dans l'autre
         // fichier de test : un double plus genereux que la base rend vertes des
         // gardes qui, en production, ne peuvent pas mordre.
@@ -148,7 +149,7 @@ const profilDe = (compte, membre, extra = {}) => ({
   active: true, accepted_at: '2026-01-01T00:00:00Z', ...extra
 })
 const droitsDe = (profileId, extra = {}) => ({
-  profile_id: profileId, reservations: 'read', reglages: 'none',
+  profile_id: profileId, reservations: 'read', reglages: 'read',
   prestataires: 'read', avis: 'read', facturation: 'read',
   property_scope: 'all', property_ids: [], property_refs: [], ...extra
 })
@@ -292,20 +293,26 @@ const membre = (extra = {}) => preparer({
   permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, extra)]
 })
 
-test('LE TEST QUI COMPTE : `reservations: read` seul ne donne PAS les personnes du menage', async () => {
+test('LE TEST QUI COMPTE : `reservations: read` seul ne donne ni les personnes, ni les avis, ni les serrures', async () => {
   // Combinaison que l ecran Equipe permet : le co-hote voit les reservations,
   // pas les prestataires. api/menages.js lui refuse les personnes, et la RLS
   // aussi (`can_read(user_id, 'prestataires', property_id)`). Cet endpoint
   // tourne en service key : sans verification propre, il contournait les deux.
-  const { vus } = membre({ prestataires: 'none', avis: 'none', facturation: 'none' })
+  //
+  // ⚠ `serrures` a ete AJOUTE apres la re-revue : `property_locks_select` et
+  // `locks_select` font tous deux `can_read(user_id, 'reglages', …)`, et
+  // api/serrures.js declare `locks: ['reglages', 'read']`. La premiere version
+  // avait les branches de refus, pas l entree qui les rend atteignables.
+  const { vus } = membre({ prestataires: 'none', avis: 'none', reglages: 'none' })
   const r = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
   assert.equal(r.code, 200, 'la fiche s affiche : c est le BLOC qui est refuse, pas la page')
   assert.equal(r.body.menage, null)
   assert.equal(r.body.avis, null)
   assert.equal(r.body.taxe, null)
-  assert.deepEqual(r.body.refuses.sort(), ['avis', 'menage', 'taxe'])
+  assert.equal(r.body.serrures, null)
+  assert.deepEqual(r.body.refuses.sort(), ['avis', 'menage', 'serrures', 'taxe'])
   const tables = vus.map(v => v.table)
-  for (const t of ['property_cleaning_providers', 'ota_reviews', 'taxes_sejour']) {
+  for (const t of ['property_cleaning_providers', 'ota_reviews', 'taxes_sejour', 'property_locks', 'locks']) {
     assert.ok(!tables.includes(t), `${t} a ete interrogee sans le droit correspondant`)
   }
 })
@@ -336,4 +343,29 @@ test('la reponse n est pas mise en cache par un intermediaire, et varie par comp
   const r = await appeler({ id: BIEN_A })
   assert.equal(r.entetes['cache-control'], 'private, no-store')
   assert.equal(r.entetes['vary'], 'authorization, x-compte')
+})
+
+test('LE TEST QUI COMPTE (M1) : `reglages: read` LIT la taxe et les serrures, mais ne PROMET pas la suppression', async () => {
+  // ⚠ Ce test existe parce que la contre-epreuve a montre que remplacer
+  // `peutEcrire` par `peutLire` dans l endpoint laissait la suite VERTE. Le cas
+  // `reglages: 'none'` echoue des deux cotes : il faut le cas INTERMEDIAIRE,
+  // celui ou la lecture passe et l ecriture non.
+  membre({ reglages: 'read' })
+  const r = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.equal(r.code, 200)
+  // Le droit de LECTURE est accorde : les deux blocs `reglages` sont servis.
+  assert.deepEqual(r.body.refuses, [])
+  assert.deepEqual(r.body.taxe, { connue: false })
+  assert.deepEqual(r.body.serrures, [])
+  // Mais la garde DELETE exige `reglages: write` : on ne promet rien.
+  assert.equal(r.body.suppression.possible, null)
+  assert.equal(r.body.suppression.motif, 'droit_refuse',
+    'promettre une suppression a un profil en lecture annonce un 403, et la spec §5 veut aucun bouton dans le DOM')
+})
+
+test('`reglages: write` : la suppression est jugee sur les canaux, plus sur le droit', async () => {
+  membre({ reglages: 'write' })
+  const r = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.notEqual(r.body.suppression.motif, 'droit_refuse')
+  assert.equal(r.body.suppression.motif, 'jamais_releve', 'aucun canal releve dans ce double')
 })

@@ -65,14 +65,14 @@ const bienDe = (extra = {}) => ({
 function base (d = {}) {
   const {
     biens = [], canaux = [], horloge = null, migrees = [], sejours = [],
-    avis = [], liaisons = [], profils = [], serrures = [], taxes = [],
+    avis = [], liaisons = [], profils = [], serrures = [], taxes = [], fermetures = [],
     enPanne = {}   // { nomDeTable: 'message' }
   } = d
   const vus = []
   return {
     _vus: vus,
     from (table) {
-      const a = { table, f: {}, ins: [], gte: {}, is: {}, limit: null, order: null }
+      const a = { table, f: {}, ins: [], gte: {}, lte: {}, is: {}, limit: null, order: null, ordres: [] }
       vus.push(a)
       const donnees = () => {
         if (enPanne[table]) return { data: null, error: { message: enPanne[table] } }
@@ -80,12 +80,13 @@ function base (d = {}) {
           properties: biens, canaux_du_bien: canaux, canaux_releve: horloge ? [horloge] : [],
           provider_keys_migrated: migrees, bookings_snapshot: sejours, ota_reviews: avis,
           property_cleaning_providers: liaisons, profiles: profils,
-          property_locks: serrures, taxes_sejour: taxes
+          property_locks: serrures, taxes_sejour: taxes, fermetures: fermetures
         }[table] || []
         let c = source.filter(l =>
           Object.entries(a.f).every(([k, v]) => String(l[k]) === String(v)) &&
           a.ins.every(f => f.v.includes(String(l[f.c]))) &&
           Object.entries(a.is).every(([k, v]) => v === null ? (l[k] == null) : l[k] === v) &&
+          Object.entries(a.lte).every(([k, v]) => String(l[k] == null ? '' : l[k]) <= String(v)) &&
           Object.entries(a.gte).every(([k, v]) => {
             // `snapshot->>departure` : le filtre jsonb que la base applique.
             const lu = k.includes('->>')
@@ -93,11 +94,13 @@ function base (d = {}) {
               : l[k]
             return String(lu || '') >= String(v)
           }))
-        if (a.order) {
-          const k = a.order.c
+        if (a.ordres.length) {
           c = [...c].sort((x, y) => {
-            const r = String(x[k] == null ? '' : x[k]).localeCompare(String(y[k] == null ? '' : y[k]))
-            return a.order.asc ? r : -r
+            for (const { c: k, asc } of a.ordres) {
+              const r = String(x[k] == null ? '' : x[k]).localeCompare(String(y[k] == null ? '' : y[k]))
+              if (r !== 0) return asc ? r : -r
+            }
+            return 0
           })
         }
         if (a.limit != null) c = c.slice(0, a.limit)
@@ -114,9 +117,13 @@ function base (d = {}) {
         eq (c, v) { a.f[c] = v; return chain },
         in (c, v) { a.ins.push({ c, v: (v || []).map(String) }); return chain },
         gte (c, v) { a.gte[c] = v; return chain },
+        lte (c, v) { a.lte[c] = v; return chain },
         is (c, v) { a.is[c] = v; return chain },
         or (expr) { a.or = expr; return chain },
-        order (c, o) { a.order = { c, asc: !(o && o.ascending === false) }; return chain },
+        // ⚠ LES ORDRES S ACCUMULENT, comme chez PostgREST (`order=a.asc,b.asc`) :
+        // un double qui ne garde que le dernier ne peut pas voir qu un ordre
+        // d affichage a ete remplace par la cle de pagination (constat R1).
+        order (c, o) { a.ordres.push({ c, asc: !(o && o.ascending === false) }); a.order = a.ordres[0]; return chain },
         limit (n) {
           a.limit = n
           const r = donnees()
@@ -152,34 +159,42 @@ const sejour = (arrival, departure, extra = {}) => ({
 })
 
 test('occupe aujourd hui : arrivee <= jour < depart', () => {
-  const f = L.faitDate([sejour('2026-10-18', '2026-10-22')], '2026-10-19')
+  const f = L.faitDate([sejour('2026-10-18', '2026-10-22')], [], '2026-10-19')
+  assert.equal(f.type, 'occupe')
   assert.equal(f.occupe, true)
   assert.equal(f.depart, '2026-10-22')
+  assert.equal(f.au, '2026-10-22')
   assert.equal(f.prochaine_arrivee, null)
 })
 
 test('LE JOUR DU DEPART, LE LOGEMENT EST LIBRE — convention des nuitees de tout le depot', () => {
-  const f = L.faitDate([sejour('2026-10-15', '2026-10-19')], '2026-10-19')
+  const f = L.faitDate([sejour('2026-10-15', '2026-10-19')], [], '2026-10-19')
   assert.equal(f.occupe, false, 'un depart le jour meme libere la nuit : compter occupe cacherait une nuit vendable')
   assert.equal(f.depart, null)
 })
 
 test('la prochaine arrivee est la PLUS PROCHE, pas la premiere lue', () => {
-  const f = L.faitDate([sejour('2026-12-01', '2026-12-05'), sejour('2026-10-25', '2026-10-28')], '2026-10-19')
+  const f = L.faitDate([sejour('2026-12-01', '2026-12-05'), sejour('2026-10-25', '2026-10-28')], [], '2026-10-19')
   assert.equal(f.prochaine_arrivee, '2026-10-25')
+  assert.equal(f.type, 'arrivee')
+  assert.equal(f.du, '2026-10-25')
 })
 
 test('UNE RESERVATION ANNULEE N OCCUPE RIEN — sinon « Occupe » s affiche sur un bien a vendre', () => {
-  const f = L.faitDate([sejour('2026-10-18', '2026-10-22', { status: 'cancelled' })], '2026-10-19')
-  assert.deepEqual(f, { occupe: false, depart: null, prochaine_arrivee: null })
+  const f = L.faitDate([sejour('2026-10-18', '2026-10-22', { status: 'cancelled' })], [], '2026-10-19')
+  assert.equal(f.type, 'libre')
+  assert.equal(f.occupe, false)
 })
 
-test('aucun sejour : des faits vides, pas une panne', () => {
-  assert.deepEqual(L.faitDate([], '2026-10-19'), { occupe: false, depart: null, prochaine_arrivee: null })
+test('aucun sejour, aucune fermeture : « libre », et ce n est pas une panne', () => {
+  const f = L.faitDate([], [], '2026-10-19')
+  assert.equal(f.type, 'libre')
+  assert.equal(f.du, null)
+  assert.equal(f.au, null)
 })
 
 test('un sejour sans dates est ignore sans lever', () => {
-  const f = L.faitDate([{ snapshot: { status: 'new', arrival: null, departure: null } }], '2026-10-19')
+  const f = L.faitDate([{ snapshot: { status: 'new', arrival: null, departure: null } }], [], '2026-10-19')
   assert.equal(f.occupe, false)
 })
 
@@ -364,11 +379,16 @@ test('LE TEST QUI COMPTE : cles migrees illisibles => AUCUN bloc TEXT n est lu',
   for (const t of ['property_cleaning_providers', 'property_locks', 'bookings_snapshot']) {
     assert.ok(!tables.includes(t), `${t} a ete interrogee alors que la cle n est pas sure`)
   }
-  // ⚠ ET LES BLOCS PAR UUID RESTENT SERVIS : avis ET taxe ne dependent d aucune
-  // migration (constat M6). Les joindre en TEXT les faisait disparaitre avec les
-  // cles, sans aucune raison.
+  // ⚠ ET LES BLOCS PAR UUID RESTENT SERVIS : avis, taxe et FERMETURES ne
+  // dependent d aucune migration. Les joindre en TEXT les faisait disparaitre
+  // avec les cles, sans aucune raison.
   assert.ok(tables.includes('taxes_sejour'), 'la taxe se lit par UUID : elle ne doit pas tomber avec les cles')
   assert.equal(f.taxe.commune, 'Bagnères')
+  assert.ok(tables.includes('fermetures'), 'les fermetures sont par UUID : un bien sans cle peut etre ferme')
+  // ⚠ Aucune fermeture dans ce double, et les sejours sont illisibles : on ne
+  // sait RIEN, donc `null`. Rendre « libre » serait le mensonge commercial.
+  assert.equal(f.fait_date, null)
+  assert.ok(f.indisponibles.includes('fait_date'))
   // Les blocs UUID, eux, restent servis.
   assert.equal(f.bien.nom, 'La bulle')
   assert.equal(f.canaux.length, 2)
@@ -472,7 +492,7 @@ test('LE TEST QUI COMPTE : une liste de biens ILLISIBLE LEVE — jamais un 200 a
 
 test('un compte sans bien : une liste vide, et aucune panne', async () => {
   const r = await L.lireListe(base({ biens: [] }), { compte: COMPTE })
-  assert.deepEqual(r, { biens: [], indisponibles: [], refuses: [] })
+  assert.deepEqual(r, { biens: [], indisponibles: [] })
 })
 
 test('PERIMETRE VIDE : on echoue FERME, on n elargit pas', async () => {
@@ -503,8 +523,9 @@ test('toutes les lectures multi-lignes sont PAGINEES, aucune ne se contente d un
   const sansPagination = sb._vus.filter(v =>
     v.table !== 'provider_keys_migrated' &&   // module tiers, borne chez lui
     v.table !== 'canaux_releve' &&            // maybeSingle
-    v.table !== 'properties' &&               // maybeSingle
+    v.table !== 'properties' &&               // maybeSingle (la fiche)
     v.table !== 'taxes_sejour' &&             // une seule ligne, `limit(1)`
+    v.table !== 'fermetures' &&               // bornee par sa FENETRE de dates, chez lib/fermetures.js
     !v.pages)
   assert.deepEqual(sansPagination.map(v => v.table), [],
     'une lecture `.limit(n)` avec n > 1000 est ramenee a 1000 par le serveur, SANS erreur : la garde ne peut plus mordre')
@@ -543,7 +564,7 @@ test('au-dela de 20 pages, la lecture LEVE au lieu de decider sur un morceau', a
 // 8. Les droits par DOMAINE — le constat de sécurité de la revue du 20 octobre
 // ═══════════════════════════════════════════════════════════════════════════
 
-const TOUS_DROITS = { prestataires: true, avis: true, facturation: true, reglages_write: true }
+const TOUS_DROITS = { prestataires: true, avis: true, reglages: true, reglages_write: true }
 
 test('LE TEST QUI COMPTE (S1) : sans `prestataires`, le bloc Menage n est pas lu DU TOUT', async () => {
   const sb = ficheComplete()
@@ -573,18 +594,48 @@ test('S1 : sans `avis`, la classification de proprete n est pas lue', async () =
   assert.ok(!sb._vus.map(v => v.table).includes('ota_reviews'))
 })
 
-test('S1 : sans `facturation`, la taxe de sejour n est pas lue — c est une table de SERVICE', async () => {
-  // `taxes_sejour` porte `revoke all from anon, authenticated` : aucun client ne
-  // la lit aujourd hui. L endpoint tourne en service key, qui contourne la RLS :
-  // c est a lui de verifier.
+test('S1 : sans `reglages`, ni la taxe ni les serrures ne sont lues', async () => {
+  // `taxes_sejour` porte `revoke all from anon, authenticated`, et
+  // `property_locks_select` / `locks_select` font tous deux
+  // `can_read(user_id, 'reglages', …)`. Decision de Thierry du 20 octobre : sur
+  // cette fiche, la taxe est le BAREME, donc `reglages`.
   const sb = ficheComplete()
   const f = await L.lireFiche(sb, {
     compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT,
-    droits: { ...TOUS_DROITS, facturation: false }
+    droits: { ...TOUS_DROITS, reglages: false }
   })
   assert.equal(f.taxe, null)
-  assert.ok(f.refuses.includes('taxe'))
-  assert.ok(!sb._vus.map(v => v.table).includes('taxes_sejour'))
+  assert.equal(f.serrures, null)
+  assert.deepEqual(f.refuses.sort(), ['serrures', 'taxe'])
+  const tables = sb._vus.map(v => v.table)
+  assert.ok(!tables.includes('taxes_sejour'))
+  assert.ok(!tables.includes('property_locks'), 'SEC-1 de la re-revue : les serrures sortent du domaine reservations')
+})
+
+test('LE TEST QUI COMPTE (bareme) : la fiche ne porte AUCUN montant de taxe collecte', async () => {
+  // Decision de Thierry : « les montants collectes restent sous facturation,
+  // hors de cette fiche ». `communale_cents` & co sont des montants PAR
+  // RESERVATION, pas un bareme.
+  const f = await L.lireFiche(ficheComplete(), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  for (const interdit of ['communale_cents', 'departementale_cents', 'regionale_cents', 'montant_cents']) {
+    assert.equal(f.taxe[interdit], undefined, `${interdit} est un montant collecte : il n a rien a faire sur la fiche`)
+  }
+  assert.equal(f.taxe.commune, 'Bagnères')
+  assert.equal(f.taxe.collecteur, 'plateforme')
+})
+
+test('R2 : un bien EN MIGRATION retrouve sa taxe par la cle TEXTE', async () => {
+  // `taxes_sejour.property_uuid` est NULLABLE, et le writer ne la remplit que si
+  // `provider_property_id` resout — ce qui n est pas le cas pendant une bascule.
+  // Lire par le seul UUID repondait « on a lu, il n y a rien ».
+  const sb = ficheComplete({
+    biens: [bienDe({ migration_target_property_id: REF2 })],
+    taxes: [{ user_id: COMPTE, property_uuid: null, property_id: REF2, commune: 'Colomiers',
+      collecteur: 'hote', origine: 'calcule', inclus_dans_prix: false, updated_at: '2026-10-01T00:00:00Z' }]
+  })
+  const f = await L.lireFiche(sb, { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(f.taxe.connue, true, 'la taxe existe au coeur : la taire serait « je ne sais pas » confondu avec « rien »')
+  assert.equal(f.taxe.commune, 'Colomiers')
 })
 
 test('S1 : le titulaire (aucun droit refuse) voit tout, et `refuses` est vide', async () => {
@@ -595,24 +646,31 @@ test('S1 : le titulaire (aucun droit refuse) voit tout, et `refuses` est vide', 
   assert.equal(f.menage[0].nom, 'Marie Dupont')
 })
 
-test('S1 : les trois domaines sont ceux des policies RLS, pas une liste inventee', () => {
-  // pcp_select -> can_read(user_id, 'prestataires', property_id)
+test('S1 : les QUATRE domaines sont ceux des policies RLS, pas une liste inventee', () => {
+  // pcp_select       -> can_read(user_id, 'prestataires', property_id)
   // ota_reviews_select -> can_read(user_id, 'avis', property_id_ref)
+  // property_locks_select / locks_select -> can_read(user_id, 'reglages', …)
+  // taxes_sejour     -> table de service ; bareme = reglages (Thierry, 20/10)
   assert.equal(L.DROITS_DES_BLOCS.menage, 'prestataires')
   assert.equal(L.DROITS_DES_BLOCS.avis, 'avis')
-  assert.equal(L.DROITS_DES_BLOCS.taxe, 'facturation')
-  assert.deepEqual(L.blocsRefuses({ prestataires: false, avis: true, facturation: true }), ['menage'])
+  assert.equal(L.DROITS_DES_BLOCS.serrures, 'reglages')
+  assert.equal(L.DROITS_DES_BLOCS.taxe, 'reglages')
+  assert.deepEqual(L.blocsRefuses({ prestataires: false, avis: true, reglages: true }), ['menage'])
   assert.deepEqual(L.blocsRefuses(null), [], 'aucun droit fourni = lecture interne, rien n est refuse')
+  // ⚠ AUCUNE BRANCHE MORTE : tout bloc qui se teste `refuses.includes(...)` doit
+  // pouvoir etre refuse. C est l absence de `serrures` ici qui avait cree le trou.
+  assert.deepEqual(Object.keys(L.DROITS_DES_BLOCS).sort(), ['avis', 'menage', 'serrures', 'taxe'])
 })
 
-test('S1 : sur la LISTE aussi, un droit refuse ne fait pas lire la table', async () => {
+test('M4 : la LISTE ne porte pas de `refuses` — elle ne lit aucun bloc d un autre domaine', async () => {
   const sb = listeDe()
-  const r = await L.lireListe(sb, {
-    compte: COMPTE, maintenant: MAINTENANT, droits: { ...TOUS_DROITS, prestataires: false, avis: false }
-  })
-  assert.deepEqual(r.refuses.sort(), ['avis', 'menage'])
-  assert.ok(!sb._vus.map(v => v.table).includes('property_cleaning_providers'))
-  // Le fait date, lui, releve des reservations : il reste servi.
+  const r = await L.lireListe(sb, { compte: COMPTE, maintenant: MAINTENANT })
+  assert.equal(r.refuses, undefined,
+    'annoncer un refus pour un bloc jamais demande ferait croire a l ecran qu on lui cache quelque chose')
+  const tables = sb._vus.map(v => v.table)
+  for (const t of ['property_cleaning_providers', 'ota_reviews', 'taxes_sejour', 'property_locks']) {
+    assert.ok(!tables.includes(t), `la liste ne doit pas lire ${t}`)
+  }
   assert.equal(r.biens.find(b => b.nom === 'La bulle').fait_date.occupe, true)
 })
 
@@ -643,7 +701,7 @@ test('LE TEST QUI COMPTE (H2) : les prestataires se lisent dans `profiles`, par 
   const sb = ficheComplete()
   const f = await L.lireFiche(sb, { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
   assert.equal(f.menage[0].nom, 'Marie Dupont')
-  assert.equal(f.menage[0].nom_lu, true)
+  assert.equal(f.menage[0].nom_motif, null)
   const q = sb._vus.find(v => v.table === 'profiles')
   assert.ok(q, '`profiles` doit etre interrogee : `provider_id` est une FK vers profiles(id)')
   assert.equal(q.f['account_user_id'], COMPTE,
@@ -657,7 +715,8 @@ test('H2 : un profil illisible laisse la liaison VISIBLE, et le dit', async () =
     { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
   assert.equal(f.menage.length, 1, 'la liaison existe : la taire ferait lire « personne au menage »')
   assert.equal(f.menage[0].nom, null)
-  assert.equal(f.menage[0].nom_lu, false, 'sans ce drapeau, l ecran affiche une ligne d equipe sans personne dessus')
+  assert.equal(f.menage[0].nom_motif, 'lecture_impossible',
+    'sans ce motif, l ecran affiche une ligne d equipe sans personne dessus')
 })
 
 test('M6 : la taxe se lit par `property_uuid`, son seul index par bien', async () => {
@@ -698,4 +757,139 @@ test('LE TEST QUI COMPTE (M2) : les motifs d identifiant sont ceux de la GARDE, 
   const trop = 'a'.repeat(65)
   const r = await L.lireListe(base({ biens: [bienDe()] }), { compte: COMPTE, refsPerimetre: [trop] })
   assert.deepEqual(r.biens, [], 'une reference hors borne doit etre ecartee, pas transmise a la base')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 10. Les fermetures de l'hôte comptent (décision de Thierry, 20 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const fermeture = (debut, fin, bien = BIEN) => ({
+  id: `f-${debut}`, user_id: COMPTE, property_id: bien,
+  date_debut: debut, date_fin: fin, raison: 'travaux', created_at: '2026-10-01T00:00:00Z'
+})
+
+test('LE TEST QUI COMPTE : une fermeture pendant la periode => JAMAIS « Libre »', () => {
+  // La demande exacte de Thierry. Aucune reservation, une fermeture a venir :
+  // l ecran ne doit pas annoncer « Libre jusqu au… » sans borne.
+  const f = L.faitDate([], [fermeture('2026-11-02', '2026-11-10')], '2026-10-19')
+  assert.notEqual(f.type, 'libre')
+  assert.equal(f.type, 'fermeture')
+  assert.equal(f.du, '2026-11-02')
+  assert.equal(f.au, '2026-11-10')
+})
+
+test('ferme AUJOURD HUI : bornes INCLUSES, contrairement au depart d une reservation', () => {
+  // « Une fermeture du 12 au 20 couvre neuf nuits » : le 20 est encore ferme,
+  // alors qu un depart le 20 libere la nuit. Deux conventions, et elles different.
+  assert.equal(L.faitDate([], [fermeture('2026-10-12', '2026-10-20')], '2026-10-20').type, 'ferme')
+  assert.equal(L.faitDate([], [fermeture('2026-10-12', '2026-10-20')], '2026-10-21').type, 'libre')
+  const f = L.faitDate([], [fermeture('2026-10-12', '2026-10-20')], '2026-10-19')
+  assert.equal(f.ferme, true)
+  assert.equal(f.fermeture_jusqu_au, '2026-10-20')
+  assert.equal(f.au, '2026-10-20')
+})
+
+test('le prochain evenement est le PLUS PROCHE, reservation ou fermeture', () => {
+  const resaProche = L.faitDate([sejour('2026-10-25', '2026-10-28')], [fermeture('2026-11-02', '2026-11-10')], '2026-10-19')
+  assert.equal(resaProche.type, 'arrivee')
+  assert.equal(resaProche.du, '2026-10-25')
+
+  const fermetureProche = L.faitDate([sejour('2026-12-01', '2026-12-05')], [fermeture('2026-10-22', '2026-10-30')], '2026-10-19')
+  assert.equal(fermetureProche.type, 'fermeture')
+  assert.equal(fermetureProche.du, '2026-10-22')
+  // Les deux faits restent lisibles a cote du type.
+  assert.equal(fermetureProche.prochaine_arrivee, '2026-12-01')
+})
+
+test('si une reservation ET une fermeture couvrent aujourd hui, l OCCUPATION gagne', () => {
+  // C est le symptome de l incident stop_sell : un fait plus fort qu une
+  // intention, et l hote doit le voir.
+  const f = L.faitDate([sejour('2026-10-18', '2026-10-22')], [fermeture('2026-10-15', '2026-10-25')], '2026-10-19')
+  assert.equal(f.type, 'occupe')
+  assert.equal(f.occupe, true)
+  assert.equal(f.ferme, true, 'la fermeture reste dite : les deux faits coexistent')
+})
+
+test('la fiche lit les fermetures par UUID, dans une fenetre bornee', async () => {
+  const sb = ficheComplete({ sejours: [], fermetures: [fermeture('2026-11-02', '2026-11-10')] })
+  const f = await L.lireFiche(sb, { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(f.fait_date.type, 'fermeture')
+  const q = sb._vus.find(v => v.table === 'fermetures')
+  assert.ok(q.ins.some(i => i.c === 'property_id' && i.v.includes(BIEN)), 'par UUID, pas par cle partenaire')
+  assert.ok(q.lte['date_debut'] > '2028-10', `la fenetre doit couvrir ${L.FENETRE_FERMETURES_JOURS} jours`)
+})
+
+test('la LISTE compte aussi les fermetures, bien par bien', async () => {
+  const r = await L.lireListe(listeDe({ sejours: [], fermetures: [fermeture('2026-10-15', '2026-10-25')] }),
+    { compte: COMPTE, maintenant: MAINTENANT })
+  assert.equal(r.biens.find(b => b.nom === 'La bulle').fait_date.type, 'ferme')
+  assert.equal(r.biens.find(b => b.nom === 'Cœur de vie 23').fait_date.type, 'libre',
+    'la fermeture de l un ne ferme pas l autre')
+})
+
+test('fermetures illisibles : fait_date `null`, jamais « Libre »', async () => {
+  const r = await L.lireListe(listeDe({ enPanne: { fermetures: 'timeout' } }), { compte: COMPTE, maintenant: MAINTENANT })
+  for (const b of r.biens) assert.equal(b.fait_date, null)
+  assert.ok(r.indisponibles.includes('fait_date'))
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 11. Quatre corrections qui n'avaient aucun filet (constats M1, M2, M3, M5)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('M1 : `reglages: read` ne suffit pas a PROMETTRE une suppression — il faut `write`', () => {
+  // ⚠ La contre-epreuve par mutation a montre que `peutEcrire → peutLire` sur
+  // l endpoint laissait la suite VERTE : le test d avant utilisait
+  // `reglages: none`, qui echoue des deux cotes. Il faut le cas intermediaire.
+  const vu = { vuLe: '2026-10-19T08:00:00Z' }
+  assert.equal(L.suppressionPossible(bienDe(), [{ mappe: false }], { ...vu, peutSupprimer: true }).possible, true)
+  assert.equal(L.suppressionPossible(bienDe(), [{ mappe: false }], { ...vu, peutSupprimer: false }).motif, 'droit_refuse')
+})
+
+test('M2 : une horloge des canaux EN PANNE n est pas « jamais relevee »', async () => {
+  // `lib/canaux-du-bien` l a deja appris : « les trois etats ne se confondent
+  // pas, et la premiere version les confondait ». Mesure : cette correction
+  // n etait protegee par aucun test.
+  const f = await L.lireFiche(ficheComplete({ enPanne: { canaux_releve: 'timeout' } }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(f.canaux.length, 2, 'les pastilles restent servies : l horloge est un ornement')
+  assert.equal(f.canaux_echec, true, 'mais l echec se DIT — sinon la date vieillit sans que personne sache pourquoi')
+})
+
+test('M3 : cles illisibles ET droit refuse : le bloc est `refuse`, pas `indisponible`', async () => {
+  const f = await L.lireFiche(ficheComplete({ enPanne: { provider_keys_migrated: 'timeout' } }), {
+    compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT,
+    droits: { ...TOUS_DROITS, prestataires: false }
+  })
+  assert.equal(f.menage, null)
+  assert.ok(f.refuses.includes('menage'))
+  assert.ok(!f.indisponibles.includes('menage'),
+    'un bloc qu on n a pas le droit de voir ne doit pas etre compte comme une panne de lecture')
+  // Les autres blocs TEXT, eux, sont bien des pannes.
+  assert.ok(f.indisponibles.includes('serrures'))
+})
+
+test('M5 : un avis MASQUE ne compte pas', async () => {
+  const f = await L.lireFiche(ficheComplete({
+    avis: [
+      { id: 'a1', user_id: COMPTE, property_id: BIEN, is_hidden: false, ai_clean_verdict: 'positif', ai_analyzed_at: '2026-10-10T00:00:00Z', received_at: '2026-10-10T00:00:00Z' },
+      { id: 'a2', user_id: COMPTE, property_id: BIEN, is_hidden: true, ai_clean_verdict: 'remarque', ai_analyzed_at: '2026-10-10T00:00:00Z', received_at: '2026-10-10T00:00:00Z' }
+    ]
+  }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(f.avis.total, 1)
+  assert.equal(f.avis.remarque, 0, 'un avis masque par l hote ne doit pas peser sur ses pouces')
+})
+
+test('R1 : la liste est servie dans l ordre ALPHABETIQUE, avec un departiteur unique', async () => {
+  // La pagination avait chasse l ordre d affichage : la liste sortait triee par
+  // UUID. Invisible a l etape 0 (pas d ecran), heritee telle quelle a l etape 1.
+  const sb = base({ biens: [
+    bienDe({ id: BIEN2, name: 'Zanzibar', provider_property_id: REF2 }),
+    bienDe({ id: BIEN, name: 'Abricot' })
+  ] })
+  const r = await L.lireListe(sb, { compte: COMPTE, maintenant: MAINTENANT })
+  assert.deepEqual(r.biens.map(b => b.nom), ['Abricot', 'Zanzibar'])
+  const q = sb._vus.find(v => v.table === 'properties')
+  assert.deepEqual(q.ordres.map(o => o.c), ['name', 'id'],
+    'le nom pour l ecran, l id pour que la pagination soit deterministe')
 })

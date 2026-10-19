@@ -93,7 +93,42 @@ l'ambre.
 
 ---
 
-## Écart 3 — à quel domaine de droits appartient la taxe de séjour ?
+## Tranché par Thierry le 20 octobre 2026
+
+1. **Taxe de séjour sur la fiche = le barème seulement**, sous `reglages:read`.
+   Les montants collectés restent sous `facturation`, **hors de cette fiche**.
+   Conséquence directe : `communale_cents`, `departementale_cents`,
+   `regionale_cents` ne descendent plus du tout — ce sont des montants **par
+   réservation**, pas un barème. Il reste la commune, qui collecte, l'origine
+   (transmis par le canal / calculé) et « inclus dans le prix ». Un test
+   l'interdit nommément.
+2. **Le fait daté compte les fermetures de l'hôte.** Prochain événement réel
+   parmi occupation, fermeture, arrivée, prochaine fermeture ; « Libre »
+   seulement si ni réservation ni fermeture. Fait.
+3. **Un bloc « refusé » n'est pas rendu à l'écran** — le JSON le porte
+   (`refuses`), l'écran le cache. Règle d'affichage pour l'étape 1 : on ne montre
+   jamais ce qui mène à un refus.
+
+### Ce que les fermetures ont appris
+
+**Deux conventions de bornes, et elles diffèrent.** Une réservation libère le
+logement **le jour du départ** ; une fermeture a ses bornes **incluses** — « une
+fermeture du 12 au 20 couvre neuf nuits ». Les traiter pareil décalerait d'un
+jour.
+
+**Si une réservation et une fermeture couvrent le même jour, l'occupation
+gagne** — c'est le symptôme de l'incident stop_sell, un fait plus fort qu'une
+intention, et l'hôte doit le voir. Les deux restent dits côte à côte.
+
+**Et « Libre » ne se dit jamais par défaut.** Première version fausse de ma
+part : quand les clés partenaire sont illisibles, je rendais `type: 'libre'`
+calculé sur les seules fermetures. Une fermeture reste affirmable sans les
+réservations (elle est par UUID) ; « libre », non. Sans fermeture et sans
+séjours, le fait daté vaut `null`.
+
+---
+
+## Écart 3 (TRANCHÉ) — le domaine de droits de la taxe de séjour
 
 La revue a trouvé un **constat de sécurité** : la garde d'entrée est
 `reservations: read`, mais trois blocs appartiennent à d'autres domaines, et
@@ -109,10 +144,17 @@ la RLS par conception — c'est pour ça qu'il doit vérifier lui-même.
 Les deux premiers sont corrigés sans ambiguïté : le dépôt a déjà le précédent
 (`api/menages.js`, « TROIS DROITS, TROIS CHOSES »).
 
-**Le troisième est un choix que je prends par défaut** : `taxes_sejour` est une
-table de **service**, qu'aucun client ne lit aujourd'hui. Je l'ai rattachée à
-**`facturation: read`** — c'est de l'argent collecté, et c'est le domaine le plus
-proche. **À confirmer ou à corriger** : l'autre candidat est `reglages`.
+**Tranché par Thierry** : la fiche ne montre que le **barème**, donc
+**`reglages: read`**. Les montants collectés restent sous `facturation` et hors
+de cette fiche.
+
+⚠ **Un quatrième bloc manquait, et c'était un constat de sécurité** : les
+**serrures**. `property_locks_select` et `locks_select` font tous deux
+`can_read(user_id, 'reglages', …)`, et `api/serrures.js` déclare
+`locks: ['reglages', 'read']`. Le plus gênant : les deux branches de refus
+étaient **déjà écrites** dans le fichier — l'intention était là, l'entrée dans la
+table des domaines ne l'était pas, donc les branches étaient **mortes**. Un co-hôte
+avec `reglages: none` recevait le nom et la marque de la serrure du bien.
 
 ## Écart 4 — « Libre » ne regarde que les réservations
 
@@ -132,6 +174,31 @@ cœur, lui, calcule `mappe_pour_ce_bien` sur un ensemble de plans **plus large**
 Le drapeau peut donc dire « impossible » là où le serveur accepterait. L'écart va
 dans le sens prudent (on ne promet jamais une suppression qui échouera), mais il
 existe : ce n'est pas *exactement* la règle du serveur, c'est la règle du cœur.
+
+---
+
+---
+
+## Trois dettes que l'étape 0 laisse derrière elle
+
+**D-a — le writer de la taxe ne résout pas un bien en migration.**
+`taxes_sejour.property_uuid` est **nullable**, et `uuidDuBien`
+(`lib/taxe-sejour/writer.js`) cherche `properties.provider_property_id = <clé de
+la réservation>`. Pendant une bascule, les réservations arrivent sous la clé
+**cible** : la colonne reste donc `NULL`. La lecture de la fiche compense en
+interrogeant aussi la clé TEXTE, mais **le correctif propre est dans le writer**.
+Tant qu'il n'est pas fait, toute lecture par le seul `property_uuid` rate ces
+lignes.
+
+**D-b — `property_locks.user_id` est nullable**, et le dépôt porte déjà cette
+dette (`CLAUDE.md`, bloquant pré-lancement « (d) user_id dans INSERT serrures »).
+Mon `.eq('user_id', compte)` écarte donc les lignes à `user_id` NULL : le bloc
+Serrures dira « il n'y a rien » sur un bien qui porte une serrure. Je **garde**
+le filtre — le cloisonnement passe avant l'exhaustivité — et je le nomme ici.
+
+**D-c — un blocage propriétaire (`blocked`) n'occupe rien.** `isActiveStatus` ne
+retient que `confirmed`. Les fermetures de l'hôte sont maintenant comptées, les
+blocages du provider non.
 
 ---
 
