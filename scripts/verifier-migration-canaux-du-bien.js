@@ -116,6 +116,47 @@ const MARQUE = 'VERIF-MIGRATION'
     console.log('· SUPABASE_ANON_KEY absente : RLS non eprouvee')
   }
 
+  // 2 bis. Les colonnes du partenaire sortent de la lecture client.
+  //
+  // ⚠ IL FAUT UNE SESSION AUTHENTIFIEE, PAS LA CLE PUBLIQUE. Le privilege est
+  // accorde au role `authenticated` ; la cle anonyme, elle, n'a AUCUN acces a
+  // cette table. L'eprouver avec elle rendait trois « ✓ » qui ne prouvaient
+  // rien d'autre que « anon ne lit pas » — le faux vert deja paye une fois sur
+  // ce meme script.
+  if (ANON && process.env.TEST_EMAIL && process.env.TEST_PASSWORD) {
+    const client = createClient(URL, ANON)
+    const { data: session, error: eAuth } = await client.auth.signInWithPassword({
+      email: process.env.TEST_EMAIL, password: process.env.TEST_PASSWORD })
+    if (eAuth || !session || !session.session) {
+      console.error('✗ colonnes non eprouvees : connexion de recette impossible',
+        eAuth ? '(' + eAuth.message + ')' : '')
+      ko++
+    } else {
+      for (const col of ['provider', 'provider_property_id', 'provider_channel_id']) {
+        const { error } = await client.from('canaux_du_bien').select(col).limit(1)
+        if (error && /permission denied/i.test(error.message)) {
+          console.log(`✓ la colonne ${col} est hors de portee d un client authentifie`)
+        } else {
+          console.error(`✗ la colonne ${col} est LISIBLE par un client authentifie :`,
+            error ? error.message : '(aucune erreur)')
+          ko++
+        }
+      }
+      // ⚠ ET LES COLONNES SURES RESTENT LISIBLES — sinon le `revoke` a tout
+      // emporte et l'ecran n'aurait plus rien a lire. Une garde qui ferme tout
+      // n'est pas une garde, c'est une panne.
+      const { error: eOk } = await client.from('canaux_du_bien')
+        .select('ota, titre, actif, vu_le').limit(1)
+      if (eOk && /permission denied/i.test(eOk.message)) {
+        console.error('✗ le revoke a emporte les colonnes sures :', eOk.message)
+        ko++
+      } else console.log('✓ les colonnes sures restent lisibles par un client authentifie')
+      await client.auth.signOut()
+    }
+  } else {
+    console.log('· TEST_EMAIL/TEST_PASSWORD absents : colonnes non eprouvees')
+  }
+
   // 3. La cle etrangere.
   {
     const { error } = await sb.from('canaux_du_bien').insert({

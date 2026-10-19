@@ -127,6 +127,32 @@ revoke insert, update, delete
   on table public.canaux_du_bien
   from anon, authenticated;
 
+-- ⚠ TROIS COLONNES SORTENT DE LA LECTURE CLIENT
+-- (demande de Thierry, 19 octobre 2026). Elles portent
+-- le nom du partenaire et ses identifiants internes :
+--   · `provider`             = son nom
+--   · `provider_property_id` = son id de bien
+--   · `provider_channel_id`  = son id de canal
+-- La regle du produit est que ce nom n'apparait JAMAIS
+-- cote hote. La RLS protege les LIGNES ; le privilege
+-- par colonne protege les COLONNES, et c'est une garde
+-- differente — un `select *` depuis le navigateur ne
+-- doit pas pouvoir les ramener.
+-- Le writer passe par la cle de service : il n'est pas
+-- concerne. L'ecran lit par l'endpoint, qui choisit
+-- ses colonnes.
+revoke select
+  on table public.canaux_du_bien
+  from anon, authenticated;
+
+grant select (
+    id, user_id, property_id, ota, titre, actif,
+    mappe_pour_ce_bien, mappings_pour_ce_bien,
+    listing_url, vu_le, disparu_le, cree_le,
+    mis_a_jour_le)
+  on table public.canaux_du_bien
+  to authenticated;
+
 -- ─── L'HORLOGE DU RELEVE ────────────────────────────
 -- (constat de la revue de 21e0794)
 --
