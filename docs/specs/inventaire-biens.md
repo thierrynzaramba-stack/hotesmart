@@ -151,6 +151,32 @@ qui suit est de l'interface et de la donnée.
 | D8 | **Pas de fiche par bien** : `/biens/:id` redirige, et 60 lignes dormantes attendent dans le fichier. | `pages/biens-detail.html` | du code mort qui donne l'illusion d'un écran existant |
 | D9 | **Le nom du partenaire reste masqué — c'est conforme.** « Channex » n'apparaît que dans 6 commentaires, jamais à l'écran. En revanche **« Beds24 » est visible** (« Réservations, tarifs et calendrier gérés via Beds24 », bouton « Ouvrir Beds24 »). | cartes | à trancher : Beds24 est un compte que l'hôte possède, pas un sous-traitant masqué |
 | D10 | **« ancien channel manager » est montré à l'hôte** dans la ligne des prix. | carte, fenêtre du mode des prix | vocabulaire de métier, jamais expliqué nulle part |
+| D11 | **Les textes des canaux ne sont pas traduits** — nés avec la dette 59 le 19 octobre 2026, ils n'ont jamais passé l'i18n. Liste complète ci-dessous. | `shared/properties.js`, `pages/biens.html` | la date, elle, est traduite par `Intl` : un hôte anglophone lit donc **« vérifié le October 17 »**, moitié français moitié anglais |
+
+### D11 — les chaînes en dur des canaux, à traduire à la refonte
+
+**Décision de Thierry, 19 octobre 2026 : l'i18n de ces textes part avec la
+refonte V5 de cet écran, pas avec le lot de la dette 59.** Les traduire
+aujourd'hui pour les réécrire dans deux semaines coûte deux fois. La note est
+ici pour qu'ils ne soient pas oubliés — c'est le seul endroit qui les liste.
+
+| chaîne | où | remarque pour la traduction |
+|---|---|---|
+| `vérifié il y a {n} min` | `shared/properties.js` → `fraicheurCanaux` | pluriel ICU : `min` est invariable en français, pas en anglais |
+| `vérifié il y a {n} h` | idem | idem |
+| `vérifié hier` | idem | jour calendaire **local**, pas « il y a 24 h » |
+| `vérifié le {date}` | idem | la date est **déjà** faite par `Intl` (`dateEnClair`), avec l'année seulement si elle diffère de l'année en cours. Seul le « vérifié le » reste à traduire — et l'ordre des mots change selon la langue |
+| `— inactif` | `shared/properties.js` → `renderChannelBadges` | ⚠ **et le mot est à revoir, pas seulement à traduire** : le canal est actif, c'est *ce bien* qui n'y est pas en vente. Le mot dit la bonne couleur pour la mauvaise raison |
+| `Canal relié mais non activé` (infobulle) | idem | même remarque |
+| `Vérification impossible pour l'instant` | `shared/properties.js` → `MOT_ECHEC` | ne nomme jamais le partenaire — à préserver dans toutes les langues |
+| `Vérification faite` | `pages/biens.html` → `relever` | mot **neutre**, pas une erreur : il répond à un geste qui n'a rien changé |
+| `Vérification…` | idem, état du bouton | |
+| `Actualiser` | `pages/biens.html` → `boutonActualiser` | |
+
+**Dix chaînes, deux pluriels.** Et un piège à ne pas reproduire : la zone photo
+de cet écran a bien ses 6 clés (`T('photo.bad_type', …)`), avec un **repli en
+français écrit en dur** dans l'appel — ce qui fait qu'un dictionnaire incomplet
+passe inaperçu.
 
 ---
 
