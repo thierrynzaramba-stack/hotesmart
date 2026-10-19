@@ -1,3 +1,17 @@
+/* ⚠ `hidden` DOIT MASQUER — ET SANS CETTE LIGNE, IL NE MASQUE PAS.
+   C'est un attribut, et le navigateur le traduit par une regle de SA feuille :
+   `[hidden] { display: none }`. Toute declaration d'AUTEUR — `.btn
+   { display: inline-flex }` — l'emporte sur elle, parce que la specificite ne se
+   compare pas entre origines. Et une regle `[hidden]` NUE ne suffit pas non
+   plus : meme specificite que `.btn`, donc l'ordre tranche, et la regle du
+   composant vient apres. D'ou le `!important`.
+   Trois fois le meme defaut : apps/yield/index.html, pages/avis.html, puis
+   « + Ajouter un bien » masque par DROIT et visible pour un membre delegue
+   (19 octobre 2026). La ligne est donc dans les TROIS feuilles du site et sur
+   chaque page qui n'en charge aucune ; tests/masquage-hidden.test.js refuse
+   toute page hors de portee. Regle et vecu : CLAUDE.md. */
+[hidden] { display: none !important; }
+
 /* ============================================================
    HôteSmart — theme.css
    LE SEUL FICHIER où un hexa, une police ou un rayon a le droit
