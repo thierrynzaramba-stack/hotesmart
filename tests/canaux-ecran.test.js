@@ -8,6 +8,14 @@
 // « aucun canal », « canaux connus ». Ils se distinguent maintenant, et ce
 // test les tient.
 
+// `lib/canaux-du-bien.js` passe par lib/channels, qui construit un client au
+// chargement : on lui donne de quoi se construire, jamais de quoi atteindre
+// une base reelle.
+process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'cle-de-test'
+process.env.CHANNEL_BASE_URL = process.env.CHANNEL_BASE_URL || 'http://localhost:1/api/v1'
+process.env.CHANNEL_API_KEY = process.env.CHANNEL_API_KEY || 'cle-de-test'
+
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('fs')
@@ -91,4 +99,26 @@ test('le rendu echappe ce qui vient du partenaire', () => {
   const html = renderChannelBadges([{ label: '<img onerror=alert(1)>', active: true }])
   assert.ok(!html.includes('<img'), 'le titre du partenaire est injecte tel quel')
   assert.ok(html.includes('&lt;img'))
+})
+
+// ─── Ne dis pas « ce bien » quand tu parles du compte ───────────────────────
+
+test('LE TEST QUI COMPTE : la fraicheur affichee est celle DU BIEN', () => {
+  const { fraicheurDuBien } = require('../lib/canaux-du-bien')
+  const vieux = '2026-10-17T08:00:00Z'
+  const frais = '2026-10-19T11:55:00Z'
+  const horloge = '2026-10-19T11:59:00Z'
+  // Deux canaux, l'un reconfirme a l'instant, l'autre pas depuis deux jours :
+  // c'est le plus ancien qui donne le ton, sinon l'ecran annonce une fraicheur
+  // qu'il n'a pas.
+  assert.equal(fraicheurDuBien([{ vu_le: frais }, { vu_le: vieux }], horloge), vieux)
+  // Un bien SANS canal n'a aucune date a lui : l'horloge du compte est la
+  // seule qui existe, et c'est le seul cas ou elle sert.
+  assert.equal(fraicheurDuBien([], horloge), horloge)
+  assert.equal(fraicheurDuBien(undefined, horloge), horloge)
+  // Et sans rien du tout, on n'invente pas une date.
+  assert.equal(fraicheurDuBien([], null), null)
+  // ⚠ L'HORLOGE DU COMPTE NE DOIT PAS ECRASER LA DATE DU BIEN, meme si elle
+  // est plus recente : c'est exactement le defaut qu'on ferme.
+  assert.equal(fraicheurDuBien([{ vu_le: vieux }], horloge), vieux)
 })
