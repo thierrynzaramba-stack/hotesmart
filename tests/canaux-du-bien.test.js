@@ -51,7 +51,8 @@ const canaux = [
 // revue : en retirant les TROIS `user_id` du writer, la suite restait a 10/10
 // VERT. Le cloisonnement par compte n'etait garde par aucun test.
 function baseSimulee ({ existantes = [], liens = [], liensEnEchec = false,
-                        biensEnBase = null, horloges = [] } = {}) {
+                        biensEnBase = null, horloges = [], biensEnEchec = false,
+                        upsertEnEchec = false } = {}) {
   const trace = { upserts: [], updates: [] }
   const JEUX = {
     properties: biensEnBase || biens,
@@ -73,7 +74,29 @@ function baseSimulee ({ existantes = [], liens = [], liensEnEchec = false,
       is (k, v) { filtres.push(r => (v === null ? r[k] == null : r[k] === v)); return q },
       gt (k, v) { filtres.push(r => r[k] != null && r[k] > v); return q },
       limit () { return q },
-      upsert (lignes) { trace.upserts.push({ nom, lignes }); return Promise.resolve({ error: null }) },
+      // ⚠ UN UPSERT PEUT ECHOUER, ET LA CLE DE CONFLIT COMPTE (constat de la
+      // RE-revue de b181192). La premiere version rendait toujours
+      // `{ error: null }` et ignorait `onConflict` : la branche « ecriture
+      // impossible » n'etait exercee par aucun test, et deux lignes de meme
+      // cle — le defaut qui fait rejeter l'upsert ENTIER par Postgres —
+      // passaient inapercues.
+      upsert (lignes, opts) {
+        const lot = Array.isArray(lignes) ? lignes : [lignes]
+        trace.upserts.push({ nom, lignes: Array.isArray(lignes) ? lot : lignes, opts })
+        const cle = (opts && opts.onConflict ? opts.onConflict : '').split(',').map(x => x.trim()).filter(Boolean)
+        if (cle.length) {
+          const vues = new Set()
+          for (const l of lot) {
+            const k = cle.map(c => String(l[c])).join('|')
+            if (vues.has(k)) {
+              return Promise.resolve({ error: {
+                message: 'ON CONFLICT DO UPDATE command cannot affect row a second time' } })
+            }
+            vues.add(k)
+          }
+        }
+        return Promise.resolve({ error: upsertEnEchec ? { message: 'ecriture refusee' } : null })
+      },
       update (maj) {
         const o = { nom, maj, ids: null, filtres: [...filtres], conditions: [...conditions],
           in (_k, v) { o.ids = v; return o },
@@ -84,6 +107,9 @@ function baseSimulee ({ existantes = [], liens = [], liensEnEchec = false,
       then (res) {
         if (nom === 'property_channel_rate_plans' && liensEnEchec) {
           return res({ data: null, error: { message: 'lecture refusee' } })
+        }
+        if (nom === 'properties' && biensEnEchec) {
+          return res({ data: null, error: { message: 'biens refuses' } })
         }
         const lignes = (JEUX[nom] || []).filter(r => filtres.every(f => f(r)))
         return res({ data: lignes, error: null })
@@ -347,4 +373,117 @@ test('LE TEST QUI COMPTE : l ecriture des disparitions porte son filtre de compt
   assert.ok(maj, 'aucune disparition ecrite')
   assert.ok(maj.conditions.some(c => c.k === 'user_id' && String(c.v) === COMPTE),
     'l update des disparitions ne porte pas de filtre user_id')
+})
+
+// ─── Les tests nes de la RE-revue de b181192 ────────────────────────────────
+
+test('LE TEST QUI COMPTE : un `total` annonce SEULEMENT page 1 est retenu', async () => {
+  // Le partenaire plafonne sa `limit` a 10 et ne met `meta.total` que sur la
+  // premiere page. Relu a chaque tour, il redevenait indefini page 2, et la
+  // regle « page courte sans total » concluait a la fin de liste : 20 canaux
+  // lus sur 25, et cinq disparitions ecrites.
+  let page = 0
+  const appel = async () => {
+    page++
+    const n = page <= 2 ? 10 : 5
+    return { ok: true, status: 200,
+      json: { data: Array.from({ length: n }, (_, i) => ({ id: `C${page}-${i}`, attributes: {} })),
+              meta: page === 1 ? { total: 25 } : {} } }
+  }
+  const r = await lireCanauxDuPartenaire({ appel })
+  assert.equal(r.ok, true)
+  assert.equal(r.canaux.length, 25, `lecture tronquee a ${r.canaux.length} sur 25`)
+})
+
+test('LE TEST QUI COMPTE : un flux qui s arrete SOUS le total annonce est refuse', async () => {
+  let page = 0
+  const appel = async () => {
+    page++
+    return { ok: true, status: 200,
+      json: { data: page === 1 ? Array.from({ length: 10 }, (_, i) => ({ id: 'C' + i, attributes: {} })) : [],
+              meta: { total: 12 } } }
+  }
+  const r = await lireCanauxDuPartenaire({ appel })
+  assert.equal(r.ok, false, 'une lecture interrompue s est declaree reussie')
+  assert.equal(r.motif, 'tronquee')
+  assert.deepEqual(r.canaux, [])
+})
+
+test('le meme canal rendu deux fois ne fait pas rejeter tout l upsert', async () => {
+  const appel = async () => ({ ok: true, status: 200,
+    json: { data: [canaux[0], canaux[0]], meta: { total: 2 } } })
+  const sb = baseSimulee({ liens: [{ property_id: BIEN_A, provider_rate_plan_id: 'RP-A1' }] })
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
+  assert.equal(bilan.erreur, null, `l upsert a ete rejete : ${bilan.erreur}`)
+  const ecriture = sb.trace.upserts.find(u => u.nom === 'canaux_du_bien')
+  const cles = ecriture.lignes.map(l => `${l.user_id}|${l.property_id}|${l.provider_channel_id}`)
+  assert.equal(new Set(cles).size, cles.length, 'deux lignes de meme cle de conflit')
+})
+
+test('LE TEST QUI COMPTE : une panne de NOTRE base ne suspend pas le releve une heure', async () => {
+  const sb = baseSimulee({ biensEnEchec: true })
+  const bilan = await rafraichirCanauxDuCompte({
+    userId: COMPTE, sb, appel: async () => { throw new Error('appel interdit') } })
+  assert.equal(bilan.ok, false)
+  assert.equal(bilan.aParle, false)
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.equal(horloge, undefined,
+    'l horloge a ete posee alors qu on n a jamais parle au partenaire')
+})
+
+test('un releve partiel avance quand meme vu_le : l ecran ne ment pas sur sa fraicheur', async () => {
+  const appel = async () => ({ ok: true, status: 200,
+    json: { data: canaux, meta: { total: canaux.length } } })
+  const sb = baseSimulee({ liens: [{ property_id: BIEN_A, provider_rate_plan_id: 'RP-A1' }] })
+  const vraiFrom = sb.from
+  let dejaEcrit = false
+  sb.from = (nom) => {
+    const q = vraiFrom(nom)
+    if (nom !== 'canaux_du_bien') return q
+    const ancienUpsert = q.upsert
+    q.upsert = (l, o) => { dejaEcrit = true; return ancienUpsert(l, o) }
+    const ancienThen = q.then
+    q.then = (res) => dejaEcrit
+      ? res({ data: null, error: { message: 'relecture refusee' } })
+      : ancienThen(res)
+    return q
+  }
+  const bilan = await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
+  assert.equal(bilan.partiel, true)
+  assert.ok(bilan.ecrits > 0)
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.ok(horloge.lignes.vu_le, 'vu_le est reste en arriere alors que les canaux sont a jour')
+})
+
+test('LE TEST QUI COMPTE : l horloge ne porte jamais un message de base brut', async () => {
+  const appel = async () => ({ ok: false, status: 503, json: {} })
+  const sb = baseSimulee({})
+  await rafraichirCanauxDuCompte({ userId: COMPTE, sb, appel })
+  const horloge = sb.trace.upserts.find(u => u.nom === 'canaux_releve')
+  assert.ok(horloge, 'aucune horloge posee')
+  // La colonne est lisible par tout collaborateur ayant `reservations` en
+  // lecture : elle ne doit porter qu'un motif normalise, jamais un message
+  // Supabase entier (noms de contraintes, de colonnes, details du moteur).
+  assert.match(String(horloge.lignes.erreur), /^(injoignable|tronquee|plafonnee|ecriture|echec)$/)
+})
+
+test('la lecture des horloges est BORNEE, jamais tronquee en silence', async () => {
+  const { comptesARelever } = require('../lib/canaux-du-bien')
+  const conditions = []
+  const sb = baseSimulee({ horloges: [] })
+  const vraiFrom = sb.from
+  sb.from = (nom) => {
+    const q = vraiFrom(nom)
+    if (nom !== 'canaux_releve') return q
+    const ancienIn = q.in
+    const ancienLimit = q.limit
+    q.in = (k, v) => { conditions.push({ quoi: 'in', k, n: v.length }); return ancienIn(k, v) }
+    q.limit = (n) => { conditions.push({ quoi: 'limit', n }); return ancienLimit(n) }
+    return q
+  }
+  await comptesARelever({ maintenant: new Date(), sb })
+  assert.ok(conditions.some(c => c.quoi === 'in' && c.k === 'user_id'),
+    'les horloges sont lues sans borne sur les comptes connus')
+  assert.ok(conditions.some(c => c.quoi === 'limit'),
+    'aucune limite explicite : PostgREST tronquera a 1000 sans lever')
 })

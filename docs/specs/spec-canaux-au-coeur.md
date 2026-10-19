@@ -293,6 +293,38 @@ pas : la relecture etant deja filtree, le resultat restait juste. Une garde qui
 tient par ricochet ne tient pas. Un test juge donc desormais **la requete**, pas
 son resultat : l'ecriture doit porter son filtre de compte (REVIEW.md regle 1).
 
+## 8 ter. Ce que la RE-revue de `b181192` a change
+
+**Le constat bloquant n'etait pas referme**, et c'etait la meme faute par une
+autre porte : j'avais corrige l'ORDRE des tests de pagination, mais `total`
+etait **relu a chaque page**. Un partenaire qui ne met `meta.total` que sur la
+premiere page le faisait redevenir indefini page 2, et la regle « page courte
+sans total » concluait a la fin de liste. Mesure de la revue : **20 canaux lus
+sur 25 annonces, et cinq `disparu_le` ecrits.**
+
+| # | Constat | Ce qui a change |
+|---|---|---|
+| 1 | **Bloquant, non referme.** `total` relu a chaque page au lieu d'etre retenu | `totalAnnonce` est memorise des qu'il est vu une fois |
+| 2 | Une **page vide** avant d'avoir atteint `total` se declarait reussie | une interruption sous le total annonce rend `ok: false`, motif `tronquee` : c'est une incoherence du partenaire, pas une fin de liste |
+| 3 | Le dedoublonnage ne couvrait que `properties[]` **dans un canal**, pas le meme canal rendu deux fois (pagination instable, ou `pagination[page]` ignore) | les **lignes** sont dedoublonnees sur leur cle de conflit juste avant l'upsert |
+| 4 | **La nouvelle horloge se lisait sans borne** : au-dela de 1000 comptes, PostgREST tronque sans lever, et des comptes deja releves repassaient — le martelement que l'horloge existe pour empecher | `in('user_id', comptes)` + `limit()` explicite |
+| 5 | Le plafond rendait `http: 0`, donc le journal disait « partenaire injoignable » alors qu'il avait repondu 200 vingt fois. Et l'etat ne se reparait jamais tout seul | motif `plafonnee`, message qui le dit, et **alarme au fondateur** — un `console.error` ne reveille personne |
+| 6 | **L'horloge etait posee sans qu'on ait parle au partenaire** : un hoquet de NOTRE base suspendait le releve du compte une heure, pour une panne qui n'etait pas la sienne | `bilan.aParle` : l'horloge ne se pose qu'apres l'appel |
+| 7 | Un releve **partiel** laissait `vu_le` en arriere : l'ecran aurait affiche « verifie il y a une heure » sur une information d'il y a une seconde | `vu_le` avance des que des canaux ont ete ecrits |
+| 8 | **Securite.** `canaux_releve.erreur` recevait des messages Supabase bruts — noms de contraintes, de colonnes, details du moteur — lisibles par tout collaborateur ayant `reservations` en lecture | un **motif normalise** : `injoignable`, `tronquee`, `plafonnee`, `ecriture`, `echec` |
+| 9 | La base simulee ne pouvait voir ni l'echec d'upsert, ni la cle de conflit en double, ni la troncature | elle applique `onConflict`, peut echouer, et retient ce qu'on lui demande |
+
+**Contre-epreuve par mutation : sept mutations, sept morsures.**
+
+### Une decision produit reste a acter
+
+La policy ouvre les canaux a `reservations` **en lecture**. Jusqu'ici, la meme
+donnee n'etait servie que par `api/channel-mapping.js`, garde en `reglages`
+**write**. Concretement : un collaborateur en lecture seule sur les
+reservations verra desormais le titre du canal, son etat actif et son
+`listing_url`. C'est coherent avec l'ecran qui l'affiche — mais c'est un
+elargissement, et il se decide, il ne se subit pas.
+
 ## 9. Étape 1 — ce qui s'écrit maintenant
 
 - la migration `canaux_du_bien` **sur staging seulement** ;

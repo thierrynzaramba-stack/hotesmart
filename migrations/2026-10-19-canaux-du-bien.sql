@@ -159,6 +159,19 @@ comment on table public.canaux_releve is
   'tente_le tient la cadence, vu_le dit a l''ecran de '
   'quand date l''information. Dette 59.';
 
+-- ⚠ UN MOTIF NORMALISE, JAMAIS UN MESSAGE DE BASE
+-- (constat de la re-revue de b181192). Cette colonne
+-- est lisible par tout collaborateur ayant
+-- `reservations` en lecture : un message Supabase brut
+-- y exposerait des noms de contraintes, de colonnes et
+-- des details du moteur. Le writer n'y ecrit qu'un mot
+-- parmi : injoignable, tronquee, plafonnee, ecriture,
+-- echec.
+comment on column public.canaux_releve.erreur is
+  'Motif NORMALISE, jamais un message de la base : '
+  'injoignable | tronquee | plafonnee | ecriture | '
+  'echec.';
+
 alter table public.canaux_releve
   enable row level security;
 
