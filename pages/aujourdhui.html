@@ -615,10 +615,11 @@ async function init () {
     if (error) logger.error('Aujourdhui', 'biens', error)
     etat.biens = data || []
   }
-  const premier = etat.biens.find(b => b.provider_property_id)
+  // ⚠ PLUS DE `liens` : l'entrée Calendrier mène à l'écran V5 `/calendrier`,
+  // le même depuis toutes les pages. Épingler ici le premier bien donnait à
+  // cet onglet deux comportements selon la page d'où on cliquait.
   const nav = (badge) => HSNav.render({
     badges: { pendingMessages: badge },
-    liens: premier ? { calendar: `/biens/${encodeURIComponent(premier.id)}/calendrier` } : {},
     peutLire
   })
   nav(0)
