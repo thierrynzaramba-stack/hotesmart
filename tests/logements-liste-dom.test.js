@@ -530,3 +530,26 @@ test('LE TEST QUI COMPTE (M2) : l ECHELLE de la note se dit, a la souris et a la
   assert.equal(sans.getAttribute('title'), null)
   assert.equal(sans.querySelector('.sr-only'), null)
 })
+
+test('LE TEST QUI COMPTE (règle V5) : l étoile est une ICÔNE du sprite, jamais un symbole texte', () => {
+  // Rappel de Thierry, 20 octobre 2026 : « icône du sprite, pas le caractère ».
+  // Un ★ écrit en dur ne suit ni la couleur du thème, ni la taille, ni le mode
+  // sombre, et se lit « étoile noire » par un lecteur d écran — la ligne dirait
+  // alors deux fois la note.
+  const l = ligneAvis({ total: 336, notes: 332, note_sur_5: 4.9 })
+  const svg = l.querySelector('[data-icone="i-review"]')
+  assert.ok(svg, 'l étoile vient du sprite')
+  assert.doesNotMatch(l.textContent, /[★☆⭐✩✪✫✬✭✮✯]/, 'aucun symbole texte dans la ligne')
+  // Et nulle part dans le module, pour qu un futur rendu ne l introduise pas.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'shared', 'logements-liste.js'), 'utf8')
+  assert.doesNotMatch(source, /[★☆⭐✩✪✫✬✭✮✯]/)
+  // Ni dans les trois dictionnaires : un symbole glissé dans une traduction
+  // passerait toutes les gardes de rendu.
+  for (const lang of ['fr', 'en', 'es']) {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', `${lang}.json`), 'utf8'))
+    for (const [cle, texte] of Object.entries(d)) {
+      if (!cle.startsWith('logements.')) continue
+      assert.doesNotMatch(String(texte), /[★☆⭐✩✪✫✬✭✮✯]/, `${lang} : ${cle}`)
+    }
+  }
+})

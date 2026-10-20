@@ -11,7 +11,13 @@ staging :
 ## Ce qui change à l'écran
 
 La carte portait une ligne de **fait daté**. Elle porte désormais **la note du
-logement et son nombre total d'avis** : `★ 4,9 / 5 · 336 avis`.
+logement et son nombre total d'avis** : une étoile, puis `4,9 / 5 · 336 avis`.
+
+⚠ **L'étoile est l'icône `i-review` du sprite, jamais le caractère `★`** (règle
+V5 : pas de symbole texte — rappel de Thierry du 20 octobre 2026). Elle est
+rendue par `icone('i-review', 'icon icon--fill')` et porte `aria-hidden`, parce
+que le texte dit déjà la note. Les tableaux de ce document écrivaient le
+caractère par commodité : c'était trompeur, ils ne le font plus.
 
 **Ce qui disparaît de la carte avec la fermeture**, et c'est à signaler :
 « Occupé · départ le … », « Libre jusqu'au … », « Fermé du … au … » et
@@ -53,10 +59,10 @@ lignes d'`ota_reviews` :
 
 | bien | avis visibles | notés | affiché |
 |---|---|---|---|
-| La bulle | 336 | 332 | ★ 4,9 / 5 · 336 avis |
-| Cœur de vie 23 | 245 | 244 | ★ 4,7 / 5 · 245 avis |
-| Colomiers | 69 | 69 | ★ 4,8 / 5 · 69 avis |
-| Ofuro Futari | 19 | 19 | ★ 5,0 / 5 · 19 avis |
+| La bulle | 336 | 332 | 4,9 / 5 · 336 avis |
+| Cœur de vie 23 | 245 | 244 | 4,7 / 5 · 245 avis |
+| Colomiers | 69 | 69 | 4,8 / 5 · 69 avis |
+| Ofuro Futari | 19 | 19 | 5,0 / 5 · 19 avis |
 
 Les avis qui manquent à l'appel des `notes` sont ceux **sans note** : cinq
 lignes en production, toutes des **détections dans les messages**
@@ -153,7 +159,7 @@ révèle un de ces objets, il devient visible avec une note à 0.
 
 | état | à l'écran |
 |---|---|
-| des avis | `★ 4,9 / 5 · 336 avis` |
+| des avis | `4,9 / 5 · 336 avis` |
 | `total: 0` — lu, et vide | *Aucun avis* |
 | `null` + `indisponibles: ['avis']` — pas pu lire | *Avis non lus* |
 | `null` + `refuses: ['avis']` — pas le droit | **rien du tout** |
