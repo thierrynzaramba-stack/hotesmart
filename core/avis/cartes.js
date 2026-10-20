@@ -85,7 +85,12 @@ function blocSonAvis (a, peutEcrire, i) {
   const long = texte.length > 220
   return `<div class="hs-carte-bloc${a.detecte ? ' detecte' : ''}">${detection}`
     + `<div class="hs-carte-ligne"><span class="hs-carte-libelle">Son avis</span>`
-    + (a.note != null ? `<span class="hs-carte-note">${ECHAPPER(a.note)}/10</span>` : '')
+    // ⚠ SUR 5, ET LA NOTE DESCEND DEJA CONVERTIE (decision de Thierry,
+    // 20 octobre 2026 : « plus aucun /10 affiche »). L'ecran ne divise rien :
+    // la conversion et l'unique arrondi vivent dans `lib/avis/echelle.js`.
+    // Juxtaposer « 9/10 » sur chaque avis et « 4,8 sur 5 » dans la tuile etait
+    // la derniere incoherence d'echelle de cette page.
+    + (a.note_sur_5 != null ? `<span class="hs-carte-note">${ECHAPPER(Number(a.note_sur_5).toFixed(1).replace('.', ','))} / 5</span>` : '')
     + `${proprete(a, peutEcrire)}</div>`
     + (a.extrait ? `<div class="avis-extrait">« ${ECHAPPER(a.extrait)} »</div>` : '')
     + (texte

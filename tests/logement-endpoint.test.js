@@ -374,9 +374,13 @@ test('`reglages: write` : la suppression est jugee sur les canaux, plus sur le d
 // Les avis sur la liste — le droit de DOMAINE, verifie par l'endpoint lui-meme
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ⚠ `ota` ET `content` COMME EN BASE : depuis le 20 octobre 2026, une source
+// hors table n'est pas convertie (dette 76) et un objet sans note ni texte
+// n'est pas un avis. Une fixture sans ces deux champs decrit un cas que les
+// writers ne produisent pas.
 const avisDe = (property_id, overall_score, extra = {}) => ({
   id: `av-${property_id}-${overall_score}`, user_id: TITULAIRE, property_id,
-  statut: 'confirme', is_hidden: false, overall_score,
+  statut: 'confirme', is_hidden: false, overall_score, ota: 'airbnb', content: 'Sejour parfait',
   received_at: '2026-10-10T00:00:00Z', ...extra
 })
 
