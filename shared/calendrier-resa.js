@@ -117,11 +117,23 @@ export function messageCapacite (adultes, enfants, capacite) {
     : null
 }
 
+// ⚠ LES PICTOGRAMMES VIENNENT DU SPRITE, JAMAIS D'UN EMOJI (règle V5, rappel de
+// Thierry du 20 octobre 2026). Ces deux blocs affichaient « ⭐ » et « ✓ » : un
+// emoji ne suit ni la couleur du thème ni le mode sombre, il change de dessin
+// selon le système d'exploitation, et un lecteur d'écran l'annonce (« étoile
+// blanche moyenne ») avant un libellé qui se suffit à lui-même.
+//
+// Dimensions et `fill` EN LIGNE : ce module est chargé par des pages qui ne
+// chargent pas toutes `shared/ui.css`, où vivent `.icon` et `.icon--fill`.
+// `aria-hidden` parce que le texte à côté dit déjà la même chose.
+const picto = (id) =>
+  `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style="flex:none"><use href="/shared/icons.svg#${id}"/></svg>`
+
 // ─── L'évaluation du voyageur, sur la fiche (lot 5 du chantier avis) ────────
 // UNE fonction pour l'ordinateur et le téléphone (la règle « le mobile suit
 // l'ordinateur ») : après le départ, le cœur dit où en est l'évaluation du
 // séjour — PAR LE BUS, jamais par ses tables ni son endpoint.
-//   - publiée          → « Évaluation publiée ✓ » ;
+//   - publiée          → « Évaluation publiée », avec l'icône du sprite ;
 //   - à faire + droit  → un bouton « Évaluer ce voyageur » qui ouvre la
 //                        fenêtre du cœur (`avis.evaluer`) ;
 //   - rien à dire      → la zone reste vide (Booking, réservation directe,
@@ -158,13 +170,13 @@ export async function brancherEvaluation ({ resa, cible, encoreAffichee = () => 
   const r = await b.demander('avis.statut', { booking_uid: bookingUid })
   if (!encoreAffichee() || !r || !r.ok || !r.data) return 'rien'
   const peindrePubliee = () => {
-    cible.innerHTML = '<div style="margin:0 0 12px;padding:8px 12px;border-radius:8px;background:#eef8f0;color:#1E7B34;font-size:13px">⭐ Évaluation publiée ✓</div>'
+    cible.innerHTML = `<div style="display:flex;align-items:center;gap:6px;margin:0 0 12px;padding:8px 12px;border-radius:8px;background:var(--ok-soft, #eef8f0);color:var(--ok, #1E7B34);font-size:13px">${picto('i-review')}<span>Évaluation publiée</span>${picto('i-check')}</div>`
   }
   if (r.data.etat === 'publiee') { peindrePubliee(); return 'publiee' }
   if (!r.data.evaluable) return 'rien'
   if (!(await b.disponible('avis.evaluer')) || !encoreAffichee()) return 'sans_droit'
   // 44 px de haut au moins : la cible tactile d'un doigt, dans la feuille du téléphone.
-  cible.innerHTML = '<button type="button" style="width:100%;min-height:44px;margin:0 0 12px;padding:12px;border:0;border-radius:8px;background:#fff8e6;color:#7a5200;font-weight:600;font-size:14px;cursor:pointer;font-family:inherit">⭐ Évaluer ce voyageur</button>'
+  cible.innerHTML = `<button type="button" style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:44px;margin:0 0 12px;padding:12px;border:0;border-radius:8px;background:var(--warn-soft, #fff8e6);color:var(--warn, #7a5200);font-weight:600;font-size:14px;cursor:pointer;font-family:inherit">${picto('i-review')}<span>Évaluer ce voyageur</span></button>`
   cible.querySelector('button').addEventListener('click', () => b.ouvrir('avis.evaluer', { booking_uid: bookingUid }))
   // ⚠ PUBLIÉE PENDANT QUE LA FICHE EST OUVERTE : elle le dit tout de suite,
   // au lieu de garder un bouton qui mènerait à « déjà publiée ».
