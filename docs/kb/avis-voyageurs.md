@@ -920,3 +920,194 @@ Réparation des évaluations déjà nées : `scripts/corriger-echeance-avis.js`
   évalué sur Airbnb), après en `expiree`. Le script arrête tout sur une lecture
   en échec. Limite : un objet reçu longtemps après le départ (rattrapage) donne
   une échéance trop tardive, bornée par celle de Channex.
+
+---
+
+## §12 — La note globale : sur 5, convertie et arrondie à un seul endroit (20 octobre 2026)
+
+**Décision de Thierry**, après la recette de la liste V5 des logements :
+
+> « Tout sur 5. Les notes Booking (/10) sont divisées par 2 avant la moyenne,
+> pondérée par le nombre d'avis de chaque canal. Affichage : "4,8 / 5 · 336
+> avis". Un arrondi à une décimale, jamais d'arrondi intermédiaire. Même règle
+> partout où une note globale s'affiche (accueil, /avis). »
+
+### Ce que la mesure dit des échelles
+
+Relevé du 20 octobre 2026 sur les 702 avis de production, en lecture seule :
+
+| source | notes | min | max | au-dessus de 5 |
+|---|---|---|---|---|
+| channex / airbnb | 598 | 0 | 10 | **563** |
+| beds24 / booking | 94 | 3 | 10 | 90 |
+| channex / booking | 5 | 1 | 10 | 3 |
+
+Airbnb note ses séjours **sur 5 étoiles**, mais livre la note **déjà ramenée sur
+10** : 563 notes sur 598 dépassent 5, ce qui est impossible sur une échelle à 5,
+et les catégories d'un séjour parfait valent 10. **Les deux canaux sont stockés
+sur la même échelle** — « diviser Booking par 2 mais pas Airbnb » afficherait des
+notes Airbnb à 9,8 sur 5.
+
+Le cœur ne normalise rien à l'ingestion, et c'est voulu (migration
+`2026-09-02-ota-reviews` : « convertir ici graverait l'erreur dans le cœur »).
+La mise à l'échelle est un calcul d'app, et elle vit dans **`lib/avis/echelle.js`**.
+
+### Les deux défauts fermés
+
+**1. Le double arrondi.** `noteMoyenne` arrondissait la moyenne sur 10, puis
+l'écran divisait par 2 et arrondissait encore. Mesuré sur la production :
+Colomiers, 653 points sur 69 avis = 9,4638 sur 10, soit exactement **4,732 sur
+5** — affiché **4,8**, alors que la valeur juste est **4,7**.
+
+**2. L'objet d'avis vide.** La population était « une note non nulle »
+(`.not('overall_score','is',null)`), ce qui laissait passer les **zéros**.
+L'objet Channex naît au départ, caché et vide, et Airbnb le révèle au bout de
+14 jours **même si le voyageur n'a rien écrit** : la ligne arrive alors avec
+`is_hidden: false` et `overall_score: 0`, et entrait à 0/10 dans la note. Ce
+qui ferme le cas, c'est `microSurCinq` et son **`v > 0`** — pas un filtre de
+population.
+
+⚠ **CE N'EST PAS `voyageurAEcrit`, et cette ligne a dit le contraire pendant
+une journée.** La première version appelait bien ce prédicat (« une note > 0
+OU un texte »), et la revue l'a mesuré **inerte** : la requête force déjà
+`is_hidden = false`, donc sa première condition ne mord jamais ; une note > 0
+passe quel que soit le texte, et une note <= 0 est de toute façon écartée par
+`microSurCinq`. Le retirer ne faisait rougir aucun test, et il obligeait à
+rapatrier **deux colonnes de texte** — un millier de lignes par page. Il a donc
+été retiré du code le jour même ; cette phrase, elle, était restée. La
+corriger est le genre de dette que `rotation-secret-webhook.md` a déjà coûtée
+au dépôt : un document qui affirme le contraire du code se fait implémenter.
+Là où le prédicat compte vraiment, c'est dans `lib/logement/lecture.js`, qui
+calcule un **total** d'avis : un objet vide y fausserait le compte, et
+`microSurCinq` ne le verrait pas.
+
+⚠ **Les 33 zéros d'Airbnb en production sont exactement les 33 avis masqués** :
+le cas est réel, le chemin tourne tous les jours, et zéro ligne est concernée
+aujourd'hui.
+
+### L'arrondi se fait en entiers
+
+Avec des flottants, l'arrondi d'un ex æquo à `.x5` dépendait du **nombre
+d'avis** : pour une population dont la moyenne exacte vaut 4,85, le calcul
+rendait 4,9 à n=1, 4,8 à n=20, 4,9 à n=100, 4,8 à n=332. **Un avis de plus,
+identique aux autres, faisait bouger la note de 0,1.** La somme se fait en
+micro-unités entières — exacte pour toute note multiple de 0,000002, donc pour
+toutes les notes réelles — et la règle de demi est écrite : **au plus proche, le
+demi vers le haut**.
+
+### Avant / après, mesuré sur la production
+
+Les deux implémentations réelles jouées côte à côte (celle de `main` extraite
+par `git archive`, celle de la branche), sur les quatre périodes et bien par
+bien :
+
+| période | bien | avant | après |
+|---|---|---|---|
+| toujours | **Colomiers** | **4,8 / 5** · 69 avis | **4,7 / 5** · 69 avis |
+| toujours | les trois autres, et le compte entier | inchangé | inchangé |
+| 15 j / 30 j / 6 mois | tous | inchangé | inchangé |
+
+**Un seul chiffre bouge, et c'est l'arrondi.** Le nombre d'avis est identique
+partout (664 → 664) : aucun objet vide en production aujourd'hui — le correctif
+ferme le chemin, il ne répare pas un dégât existant.
+
+### Ce qui change à l'écran
+
+- `/aujourdhui` : la note du compte et celle de chaque bien ne sont plus
+  divisées par l'écran ; `noteSur5` a été **retirée** de `shared/aujourdhui.js`.
+- `/avis` : la tuile affiche « **4,8** — note moyenne **sur 5** » là où elle
+  affichait « 9,6 — note moyenne sur 10 ».
+- `/logements` (lot V5) : « ★ 4,9 / 5 · 336 avis ».
+
+Les endpoints descendent `note_sur_5` et **plus `moyenne`** : un champ sur 10
+qui subsisterait inviterait un écran à le rediviser, et c'est exactement le
+défaut refermé ici.
+
+### Ce qui reste différent d'un écran à l'autre, et pourquoi
+
+L'accueil lit la note des **30 derniers jours** (`periode=30j`) ; la liste des
+logements lit **tous** les avis du logement. Les deux sont justes et ne mesurent
+pas la même chose — un même bien peut afficher « 5,0 / 5 · 2 avis » sur
+l'accueil et « 4,9 / 5 · 336 avis » sur sa carte. À trancher si l'écart gêne.
+
+## 15. `notes` — les deux nombres de l'accueil, sans les cartes (20 octobre 2026)
+
+**Trois actions lisent les mêmes avis, et il faut savoir laquelle appeler.**
+
+| action | ce qu'elle rend | ce qu'elle coûte |
+|---|---|---|
+| `cartes` | les cartes par séjour, les trois sections, les biens, le ratio **et** les notes | jusqu'à 5000 avis + 2000 évaluations + séjours + ménages, cartes assemblées **deux fois** |
+| `list` | la liste des avis | une lecture paginée |
+| **`notes`** | **`note_sur_5` et le nombre d'avis — global ET par bien** | **une lecture paginée de `ota_reviews`, quatre colonnes** |
+
+⚠ **POURQUOI `notes` EXISTE.** `pages/aujourdhui` appelait `cartes` une fois
+pour le compte **puis une fois par bien**, pour n'en garder que la note et le
+nombre d'avis. Mesure de Thierry en production :
+**4 appels, 10,7 s puis 3 × 4–5 s, environ 75 % des ~20 s** de la page. Tout le
+reste — les cartes, les séjours, le ratio — était calculé puis jeté.
+Détail et mesures : `docs/kb/performance.md` §4.5.
+
+⚠ **ELLE REND `note_sur_5`, COMME `noteMoyenne`** (§12) : la conversion et
+l'unique arrondi passent par `lib/avis/echelle.js`, en **micro-unités
+entières**, et aucun écran ne redivise. Le groupement par bien somme ces
+micro-unités, donc chaque avis pèse 1 — on ne moyenne **jamais** des moyennes
+de biens, ce qui donnerait le même poids à un bien de 332 avis et à un bien
+de 2.
+
+⚠ **ET ELLE LIT EXACTEMENT LES MÊMES LIGNES QUE `noteMoyenne`, PAR
+CONSTRUCTION.** `noteMoyenne` **est** la vue globale de `notesDuPerimetre` :
+une seule requête (`requeteDesNotes`, bâtie sur `avisQuiComptent`), une seule
+boucle, une seule branche d'erreur. Conséquence à dire en face : la parité
+entre les deux est **structurelle**, donc un test qui les compare l'une à
+l'autre ne prouve rien. Ce qui prouve : les chiffres écrits en clair dans les
+tests, et `scripts/verifier-parite-notes.js`, qui compare au `noteMoyenne` du
+**lot Avis** extrait par `git archive`.
+
+⚠ **LE GLOBAL N'EST PAS LA SOMME DES BIENS AFFICHÉS.**
+`ota_reviews.property_id_ref` est `text NOT NULL` **sans clé étrangère**
+(`migrations/2026-09-02-ota-reviews.sql:27` ; seul `property_id` porte la FK).
+Un re-keying Beds24 → Channex, un bien dont `provider_property_id` repasse à
+NULL pendant une bascule, ou un bien supprimé laissent donc des avis dont la
+référence ne désigne plus aucun bien du compte : ils comptent **au global** —
+ils comptaient déjà dans l'appel global d'avant — et dans aucun groupe que
+l'écran sache afficher. `scripts/verifier-parite-notes.js` les **signale sans
+bloquer** : c'est une donnée réelle, pas une fuite de périmètre.
+(Le garde `property_id_ref == null` dans `notesDuPerimetre` est une ceinture :
+la colonne est `not null`, zéro ligne nulle en production.)
+
+⚠ **LES GARDES SONT CELLES DE `cartes`, PAS UNE VERSION ALLÉGÉE.** Domaine
+`avis` en lecture avec `compteDelegue`, périmètre appliqué **en SQL**, 403 pour
+un bien hors périmètre, et un périmètre **vide** rend zéro — jamais « tous »,
+qui donnerait à un membre révoqué le compte entier. Un endpoint rapide qui
+garde moins n'est pas rapide, c'est une fuite.
+
+**Une panne se dit** : la lecture en échec rend **503**, pas
+`{ note_sur_5: null, notes: 0 }`, qui se lirait « aucun avis ». Et une lecture
+**rognée** se dit aussi : le compte exact est demandé avec la première page,
+dans la même requête, et `tronque` dit qu'on a lu moins que le total — une
+page plus courte que demandée veut dire « fin des données », mais aussi
+« `db-max-rows` a rogné », et les deux sont indistinguables sans total. Côté page, la tuile se masque — comme
+avant. Ce qui change : c'était N+1 lectures indépendantes, c'est maintenant tout
+ou rien. Assumé — une seule lecture, une seule vérité.
+
+**`cartesLister` et la page `/avis` ne sont pas touchées.** `notes` est une
+action de plus.
+
+**Parité prouvée sur les données réelles** : `scripts/verifier-parite-notes.js`,
+production du 20 octobre 2026, **28 comparaisons, 0 divergence**, 1570 notes
+comptées de chaque côté, sur les quatre périodes. Sur « toujours » : global
+**4,8/5 sur 664 avis**, Colomiers **4,7/5 sur 69**, La bulle 4,9/5 sur 332,
+Cœur de vie 23 4,7/5 sur 244, Ofuro Futari 5/5 sur 19.
+La référence est le `noteMoyenne` du **lot Avis** (`fix-note-globale-sur-5`),
+extrait par `git archive` — pas l'état d'avant ce lot-ci, qui rendait encore
+`moyenne` sur 10. Le script refuse de tourner si ce qu'il a extrait ne rend pas
+`note_sur_5`, ou s'il contient déjà `notesDuPerimetre`.
+
+⚠ **ET UN PIÈGE TROUVÉ EN ÉCRIVANT CE LOT, qui vaut pour tout le dépôt.**
+`sb.from('t').eq(...).select(...)` **ne compile pas** : `from()` rend un
+QueryBuilder qui n'expose que `select`/`insert`/`update`/`upsert`/`delete`, et
+`eq` n'apparaît qu'**après** `select`. Écrit dans cet ordre, le code lève un
+`TypeError` en production — pendant que les doubles de test, dont la chaîne
+accepte tout dans n'importe quel ordre, restent **verts**.
+`tests/stats-avis.test.js` porte désormais un double qui a la **forme** du vrai
+client et refuse cet ordre.

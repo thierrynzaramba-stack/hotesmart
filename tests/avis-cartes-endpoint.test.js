@@ -39,6 +39,10 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         neq (c, v) { q._neq[c] = v; return chain },
         or (e) { q._or = e; return chain },
         gte (c, v) { q._gte = [c, v]; return chain },
+        // ⚠ `gt` EST HONORE : `requeteDesNotes` filtre les notes exploitables
+        // en SQL (`.gt('overall_score', 0)`, meme predicat que `microSurCinq`).
+        // Sans cette ligne, le double levait et l'action rendait 500.
+        gt (c, v) { (q._gts = q._gts || []).push([c, v]); return chain },
         in (c, v) { q._ins.push([c, (v || []).map(String)]); return chain },
         is () { return chain }, not (c, op, v) { if (op === 'is' && v === null) q._nonNul = c; return chain },
         order () { return chain }, limit () { return chain },
@@ -50,6 +54,11 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         && q._ins.every(([c, vs]) => vs.includes(String(l[c])))
         && Object.entries(q._neq).every(([c, v]) => (c === 'statut' ? (l.statut || 'confirme') : l[c]) !== v)
         && (!q._gte || String(l[q._gte[0]] || '') >= String(q._gte[1]))
+        && (q._gts || []).every(([c, v]) => {
+          const a = Number(l[c]); const b = Number(v)
+          if (Number.isFinite(a) && Number.isFinite(b)) return a > b
+          return l[c] != null && String(l[c]) > String(v)
+        })
         && (!q._or || String(q._or).includes(String(l.property_id_ref || l.provider_property_id)))
         && (!q._nonNul || l[q._nonNul] != null)
       function rep () {
@@ -95,7 +104,7 @@ const MASQUE = avisDe('m', { is_hidden: true, overall_score: 0, content: null, c
 const EVAL = { id: 'e1', user_id: PROD, booking_uid: 'u-masque', property_id: BIEN_A.id, property_id_ref: REF_A, ota: 'airbnb', status: 'a_remplir', deadline_at: jour(5), published_at: null, public_text: null, ota_review_id: 'm', created_at: jour(-3) }
 const SNAP = { user_id: PROD, booking_id: 'u-masque', property_id: REF_A, snapshot: { firstName: 'Angela', lastName: 'X', arrival: j10(-4), departure: j10(-3) } }
 
-test('LE TEST QUI COMPTE (points A, C, E) : le titulaire — une carte par sejour, trois sections, et le masque ne compte ni au total ni a la moyenne', async () => {
+test('LE TEST QUI COMPTE (points A, C, E) : le titulaire — une carte par sejour, trois sections, et le masque ne compte ni au total ni a la note', async () => {
   preparer({ avis: [avisDe('a1', { overall_score: 8 }), MASQUE, avisDe('vieux', { received_at: jour(-90), overall_score: 10 })], evaluations: [EVAL], snapshots: [SNAP] })
   const r = await appeler({ periode: 'toujours' })
   assert.equal(r.code, 200)
@@ -108,7 +117,11 @@ test('LE TEST QUI COMPTE (points A, C, E) : le titulaire — une carte par sejou
   assert.equal(r.body.cartes.anciens, null, 'les anciens ne partent que sur demande')
   assert.equal(r.body.anciens_total, 1)
   assert.equal(r.body.stats.total, 2, 'le masque est hors du total')
-  assert.equal(r.body.stats.moyenne, 9, 'moyenne de 8 et 10 : ni le 0 du masque')
+  // ⚠ SUR 5 (decision de Thierry, 20 octobre 2026) : 8 et 10 sur l echelle du
+  // coeur font 4,0 et 5,0, donc 4,5. Et le 0 du masque ne compte toujours pas —
+  // ni comme avis masque, ni comme objet vide.
+  assert.equal(r.body.stats.note_sur_5, 4.5, 'note de 8 et 10 : ni le 0 du masque')
+  assert.equal(r.body.stats.moyenne, undefined, 'plus de moyenne sur 10 : elle invitait a rediviser')
   const avec = await appeler({ periode: 'toujours', anciens: '1' })
   assert.deepEqual(avec.body.cartes.anciens.map(x => x.cle), ['avis:vieux'])
 })
