@@ -6,7 +6,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { ratioProprete, noteMoyenne, borneDepuis, PERIODES } = require('../lib/stats-avis')
+const { ratioProprete, noteMoyenne, notesDuPerimetre, borneDepuis, PERIODES } = require('../lib/stats-avis')
 // La semantique PostgREST que ce double doit honorer — une seule implementation
 // pour les trois fichiers qui montent un double d'`ota_reviews`.
 const FAUX = require('./faux-postgrest')
@@ -69,7 +69,16 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
         not (c, op, v) { if (op === 'is' && v === null) (appel.nonNuls = appel.nonNuls || []).push(c); return chain },
         order () { return chain },
         // La moyenne lit par pages : `range` resout comme `limit`.
-        range (a, z) { return Promise.resolve({ data: lignes.filter(retenir).filter(l => (appel.nonNuls || []).every(c => l[c] != null)).slice(a, z + 1), error: null }) },
+        // ⚠ ET IL HONORE `erreur`, comme `then`. Jusqu'au 20 octobre 2026 il
+        // resolvait toujours sans erreur : les deux fonctions qui lisent par
+        // pages (`noteMoyenne`, `notesDuPerimetre`) etaient les seules dont le
+        // chemin de PANNE ne pouvait etre eprouve par ce double. Une panne qui
+        // se lirait « aucun avis » est precisement ce qu'elles promettent
+        // d'eviter.
+        range (a, z) {
+          if (erreur) return Promise.resolve({ data: null, error: erreur })
+          return Promise.resolve({ data: lignes.filter(retenir).filter(l => (appel.nonNuls || []).every(c => l[c] != null)).slice(a, z + 1), error: null })
+        },
         // `avisDuPrestataire` borne ses lectures : le double doit resoudre.
         limit () {
           if (AUTRES.includes(table)) {
@@ -568,4 +577,132 @@ test('noteMoyenne : TOUTES les pages, jamais les 500 premieres lignes ; perimetr
   assert.deepStrictEqual(m, { moyenne: 9.2, notes: 2500 })
   assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: 'U', refs: [] }), { moyenne: null, notes: 0 })
   assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: null }), { moyenne: null, notes: 0 })
+})
+
+// ─── notesDuPerimetre : la même population, groupée par bien ────────────────
+//
+// ⚠ CE QU'ELLE DOIT GARANTIR. L'accueil demandait `cartes` une fois pour le
+// compte puis une fois par bien, pour n'en lire que `moyenne` et `notes` : 4
+// appels, 10,7 s puis 3 x 4-5 s en production le 20 octobre 2026. La nouvelle
+// lecture ne vaut QUE si elle rend les mêmes chiffres — règle 8 de REVIEW.md.
+// Ces tests comparent les deux fonctions ligne à ligne ; `scripts/verifier-
+// parite-notes.js` refait la comparaison sur les données réelles.
+
+const PARITE = [
+  { user_id: 'U', overall_score: 10, property_id_ref: 'A', received_at: '2026-10-01T00:00:00Z' },
+  { user_id: 'U', overall_score: 9,  property_id_ref: 'A', received_at: '2026-10-02T00:00:00Z' },
+  { user_id: 'U', overall_score: 8,  property_id_ref: 'B', received_at: '2026-10-02T00:00:00Z' },
+  { user_id: 'U', overall_score: 7,  property_id_ref: 'C', received_at: '2026-10-03T00:00:00Z' },
+  // Ni l'un ni l'autre ne doit compter : masqué par Airbnb, et note absente.
+  { user_id: 'U', overall_score: 0,  property_id_ref: 'A', is_hidden: true, received_at: '2026-10-03T00:00:00Z' },
+  { user_id: 'U', overall_score: null, property_id_ref: 'B', received_at: '2026-10-03T00:00:00Z' },
+  // Un autre compte : jamais.
+  { user_id: 'AUTRE', overall_score: 1, property_id_ref: 'A', received_at: '2026-10-03T00:00:00Z' },
+]
+
+test('LE TEST QUI COMPTE : notesDuPerimetre rend EXACTEMENT ce que noteMoyenne rendait, bien par bien', async () => {
+  const opts = { userId: 'U', periode: 'toujours' }
+  const une = await notesDuPerimetre(fauxClient(PARITE), opts)
+
+  // Le global, contre l'appel sans bien que faisait l'accueil.
+  assert.deepStrictEqual(une.global, await noteMoyenne(fauxClient(PARITE), opts),
+    'le global ne vaut plus ce que rendait l appel pour le compte')
+
+  // Chaque bien, contre l'appel par bien qu'il remplace.
+  for (const ref of ['A', 'B', 'C']) {
+    assert.deepStrictEqual(une.par_bien[ref], await noteMoyenne(fauxClient(PARITE), { ...opts, refs: [ref] }),
+      `le bien ${ref} ne vaut plus ce que rendait son appel`)
+  }
+  // Et les chiffres eux-memes, ecrits en clair : un test qui ne compare que
+  // deux fonctions reste vert si les DEUX se trompent de la meme facon.
+  assert.deepStrictEqual(une.global, { moyenne: 8.5, notes: 4 })
+  assert.deepStrictEqual(une.par_bien, {
+    A: { moyenne: 9.5, notes: 2 }, B: { moyenne: 8, notes: 1 }, C: { moyenne: 7, notes: 1 }
+  })
+})
+
+test('un avis SANS bien compte dans le global et dans aucun bien', async () => {
+  // C'est deja ce que faisait l'appel par bien : il filtrait
+  // `.in('property_id_ref', [ref])`, donc une ligne a ref nulle n'y entrait pas.
+  const lignes = [...PARITE, { user_id: 'U', overall_score: 2, property_id_ref: null, received_at: '2026-10-04T00:00:00Z' }]
+  const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
+  assert.strictEqual(r.global.notes, 5, 'la note sans bien est perdue pour le global')
+  assert.deepStrictEqual(r.global, await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' }))
+  assert.deepStrictEqual(Object.keys(r.par_bien).sort(), ['A', 'B', 'C'], 'une cle de bien est apparue pour une ref nulle')
+})
+
+test('LE TEST QUI COMPTE : le perimetre d un membre est applique, et un perimetre VIDE rend zero', async () => {
+  const restreint = await notesDuPerimetre(fauxClient(PARITE), { userId: 'U', periode: 'toujours', refs: ['A'] })
+  assert.deepStrictEqual(restreint.par_bien, { A: { moyenne: 9.5, notes: 2 } },
+    'un membre limite au bien A voit les notes des autres biens')
+  assert.deepStrictEqual(restreint.global, { moyenne: 9.5, notes: 2 },
+    'le global d un membre restreint porte sur tout le compte')
+
+  // Perimetre vide = aucun bien. JAMAIS « tous » : c'est le distinguo qui
+  // empeche un membre revoque de voir le compte entier.
+  const vide = await notesDuPerimetre(fauxClient(PARITE), { userId: 'U', refs: [] })
+  assert.deepStrictEqual(vide.global, { moyenne: null, notes: 0 })
+  assert.deepStrictEqual(vide.par_bien, {})
+  assert.deepStrictEqual((await notesDuPerimetre(fauxClient(PARITE), { userId: null })).global, { moyenne: null, notes: 0 })
+})
+
+test('notesDuPerimetre lit TOUTES les pages, et une panne se DIT', async () => {
+  // Une lecture non bornee serait tronquee a 1000 lignes sans erreur
+  // (db-max-rows) : la moyenne porterait sur une fraction, en silence.
+  const lignes = Array.from({ length: 2500 }, (_, i) => ({
+    user_id: 'U', overall_score: i < 2000 ? 10 : 6, property_id_ref: i % 2 ? 'A' : 'B',
+    received_at: '2026-10-01T00:00:00Z'
+  }))
+  const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
+  assert.strictEqual(r.global.notes, 2500, 'la lecture est tronquee')
+  assert.deepStrictEqual(r.global, await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' }))
+
+  const panne = await notesDuPerimetre(fauxClient(lignes, [], { message: 'boom' }), { userId: 'U', periode: 'toujours' })
+  assert.strictEqual(panne.erreur, true, 'une panne de lecture passe pour « aucun avis »')
+  assert.deepStrictEqual(panne.global, { moyenne: null, notes: 0 })
+})
+
+test('la periode borne les deux fonctions de la meme facon', async () => {
+  const maintenant = Date.parse('2026-10-20T00:00:00Z')
+  const lignes = [
+    { user_id: 'U', overall_score: 10, property_id_ref: 'A', received_at: '2026-10-18T00:00:00Z' },
+    { user_id: 'U', overall_score: 2,  property_id_ref: 'A', received_at: '2026-05-01T00:00:00Z' },
+  ]
+  const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: '30j', maintenant })
+  assert.deepStrictEqual(r.global, { moyenne: 10, notes: 1 }, 'l avis hors periode est compte')
+  assert.deepStrictEqual(r.global, await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: '30j', maintenant }))
+  assert.strictEqual(r.periode, '30j')
+})
+
+test("LE TEST QUI COMPTE : l'ordre PostgREST est respecte — select AVANT les filtres", async () => {
+  // ⚠ CE QUE LES DOUBLES DE CE FICHIER NE PEUVENT PAS VOIR. Leur chaine accepte
+  // tout, dans n'importe quel ordre. Le vrai client, non : `from()` rend un
+  // QueryBuilder qui n'expose que select/insert/update/upsert/delete, et `eq`
+  // n'existe qu'APRES `select`. Ecrit `from().eq(...).select(...)`, le code
+  // leve un TypeError en production avec la suite entierement verte — c'est
+  // arrive le 20 octobre 2026, en ecrivant `requeteDesNotes`.
+  // Ce double a la FORME du vrai, et c'est tout ce qu'on lui demande.
+  const vus = []
+  const strict = {
+    from (table) {
+      return {
+        select (colonnes) {
+          vus.push(colonnes)
+          assert.ok(typeof colonnes === 'string' && colonnes.length,
+            `select() appele sans colonnes sur ${table}`)
+          const f = {
+            eq: () => f, gte: () => f, in: () => f, not: () => f, order: () => f,
+            range: () => Promise.resolve({ data: [], error: null })
+          }
+          return f
+        },
+        insert () {}, update () {}, upsert () {}, delete () {}
+      }
+    }
+  }
+  // Les DEUX fonctions : elles partagent `requeteDesNotes`, donc le defaut.
+  await noteMoyenne(strict, { userId: 'U', periode: 'toujours' })
+  await notesDuPerimetre(strict, { userId: 'U', periode: 'toujours', refs: ['A'] })
+  assert.deepStrictEqual(vus, ['id, overall_score', 'id, overall_score, property_id_ref'],
+    'les colonnes demandees ont change : verifier que la moyenne lit toujours de quoi grouper')
 })

@@ -14,7 +14,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
-const { ratioProprete, noteMoyenne, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
+const { ratioProprete, noteMoyenne, notesDuPerimetre, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 const { assemblerCartes } = require('../lib/avis/cartes')
 const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origine')
 const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
@@ -698,6 +698,47 @@ async function cartesLister (req, res, garde) {
     periodes: Object.keys(PERIODES),
     stats: { ...ratio, moyenne: moy.moyenne, notes: moy.notes, ...(moy.erreur ? { erreur: true } : {}) },
   })
+}
+
+// ─── `notes` : les deux nombres de l'accueil, et rien d'autre ─────────────
+//
+// ⚠ CE QU'ELLE REMPLACE. `pages/aujourdhui` appelait `cartes` une fois pour le
+// compte puis UNE FOIS PAR BIEN, pour n'en lire que `stats.moyenne` et
+// `stats.notes`. Chaque appel lisait jusqu'a 5000 avis et 2000 evaluations,
+// leurs sejours, leurs menages, et assemblait les cartes DEUX fois — tout cela
+// jete. Mesure de Thierry en production le 20 octobre 2026 : quatre appels,
+// 10,7 s puis 3 x 4-5 s, environ 75 % des ~20 s de la page.
+//
+// ⚠ LES GARDES SONT CELLES DE `cartes`, PAS UNE VERSION ALLEGEE. Le domaine
+// `avis` en lecture (pose par le routeur, `compteDelegue`), le perimetre par
+// bien applique EN SQL, et le 403 pour un bien hors perimetre. Un endpoint
+// rapide qui garde moins n'est pas un endpoint rapide, c'est une fuite.
+//
+// Elle ne touche ni `cartesLister` ni la page Avis : c'est une action de plus,
+// pas une modification de l'existante.
+async function notesLister (req, res, garde) {
+  const userId = garde.accountUserId
+  const periode = periodeNormalisee(String(req.query?.periode || ''))
+  const refs = refsDuPerimetre(garde.contexte)
+
+  // Perimetre vide ou inexploitable : zero, jamais « tous ». Meme porte que
+  // `cartes` — `filtrePerimetreSql` rend '' dans ce cas, et on echoue ferme.
+  if (filtrePerimetreSql(refs, 'property_id_ref') === '') {
+    return res.status(200).json({ global: { moyenne: null, notes: 0 }, par_bien: {},
+      periode, depuis: borneDepuis(periode) })
+  }
+
+  const bienDemande = req.query?.bien ? String(req.query.bien) : null
+  if (bienDemande && refs !== null && !refs.map(String).includes(bienDemande)) {
+    return res.status(403).json({ error: 'Bien hors de votre périmètre' })
+  }
+  const refsLues = bienDemande ? [bienDemande] : (refs === null ? null : refs.map(String))
+
+  const out = await notesDuPerimetre(supabase, { userId, periode, refs: refsLues })
+  // ⚠ Une panne se DIT. Rendre `{ moyenne: null, notes: 0 }` la ferait lire
+  // comme « aucun avis », et l'accueil afficherait 0 avis avec aplomb.
+  if (out.erreur) return res.status(503).json({ error: 'Notes illisibles' })
+  return res.status(200).json(out)
 }
 
 const ETATS_LISTE = ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
@@ -2382,6 +2423,7 @@ async function router (req, res) {
   if (action === 'auto-validation') return await autoValidationLire(req, res, garde)
   if (action === 'list') return await lister(req, res, garde)
   if (action === 'cartes') return await cartesLister(req, res, garde)
+  if (action === 'notes') return await notesLister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })
 }
 

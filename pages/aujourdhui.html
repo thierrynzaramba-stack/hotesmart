@@ -462,17 +462,31 @@ async function chargerChiffresBien (b) {
 }
 async function chargerNotes () {
   if (!peutLire('avis')) return
-  const lire = async (bien) => {
-    try {
-      const r = await appel(`/api/avis?action=cartes&periode=30j${bien ? `&bien=${encodeURIComponent(bien)}` : ''}`)
-      return r.stats && !r.stats.erreur ? { moyenne: r.stats.moyenne, notes: r.stats.notes } : null
-    } catch (e) { logger.error('Aujourdhui', 'avis', e); return null }
+  // ⚠ UN SEUL APPEL, PLUS 1 + N. Cette fonction demandait
+  // `/api/avis?action=cartes` une fois pour le compte PUIS UNE FOIS PAR BIEN,
+  // pour n'en garder que deux nombres. Chaque appel lisait jusqu'à 5000 avis et
+  // 2000 évaluations, leurs séjours et leurs ménages, et assemblait les cartes
+  // deux fois. Mesure de Thierry en production le 20 octobre 2026 : 10,7 s puis
+  // 3 x 4-5 s, environ 75 % des ~20 s de la page. `action=notes` fait la même
+  // lecture une fois et rend le global ET chaque bien (lib/stats-avis.js).
+  //
+  // ⚠ CE QUI CHANGE EN CAS DE PANNE : c'était N+1 lectures indépendantes, dont
+  // l'une pouvait réussir quand l'autre échouait ; c'est maintenant tout ou
+  // rien. Assumé — une seule lecture, une seule vérité — et l'échec reste
+  // silencieux à l'écran, comme avant : la tuile de note se masque.
+  let r = null
+  try {
+    r = await appel('/api/avis?action=notes&periode=30j')
+  } catch (e) { logger.error('Aujourdhui', 'avis', e) }
+  etat.noteGlobale = (r && r.global) || null
+  const parBien = (r && r.par_bien) || {}
+  for (const b of etat.biens) {
+    if (!b.provider_property_id) continue
+    // Un bien sans avis sur la période n'a pas de clé : c'est zéro, et c'est
+    // exactement ce que rendait l'appel par bien qu'on remplace.
+    etat.notesParBien.set(b.id, r ? (parBien[String(b.provider_property_id)] || { moyenne: null, notes: 0 }) : null)
   }
-  etat.noteGlobale = await lire(null)
   renderKpis()
-  await parPaquets(etat.biens.filter(b => b.provider_property_id).map(b => async () => {
-    etat.notesParBien.set(b.id, await lire(b.provider_property_id))
-  }), 3)
   renderBiens()
 }
 

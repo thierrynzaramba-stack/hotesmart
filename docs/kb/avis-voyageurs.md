@@ -920,3 +920,61 @@ Réparation des évaluations déjà nées : `scripts/corriger-echeance-avis.js`
   évalué sur Airbnb), après en `expiree`. Le script arrête tout sur une lecture
   en échec. Limite : un objet reçu longtemps après le départ (rattrapage) donne
   une échéance trop tardive, bornée par celle de Channex.
+
+## 15. `notes` — les deux nombres de l'accueil, sans les cartes (20 octobre 2026)
+
+**Trois actions lisent les mêmes avis, et il faut savoir laquelle appeler.**
+
+| action | ce qu'elle rend | ce qu'elle coûte |
+|---|---|---|
+| `cartes` | les cartes par séjour, les trois sections, les biens, le ratio **et** les notes | jusqu'à 5000 avis + 2000 évaluations + séjours + ménages, cartes assemblées **deux fois** |
+| `list` | la liste des avis | une lecture paginée |
+| **`notes`** | **la note moyenne et le nombre d'avis — global ET par bien** | **une lecture paginée de `ota_reviews`, trois colonnes** |
+
+⚠ **POURQUOI `notes` EXISTE.** `pages/aujourdhui` appelait `cartes` une fois
+pour le compte **puis une fois par bien**, pour n'en garder que
+`stats.moyenne` et `stats.notes`. Mesure de Thierry en production :
+**4 appels, 10,7 s puis 3 × 4–5 s, environ 75 % des ~20 s** de la page. Tout le
+reste — les cartes, les séjours, le ratio — était calculé puis jeté.
+Détail et mesures : `docs/kb/performance.md` §4.5.
+
+⚠ **ELLE COMPTE LA MÊME POPULATION QUE `noteMoyenne`, ET CE N'EST PAS UNE
+PROMESSE.** Les deux vivent dans `lib/stats-avis.js` et partagent
+`requeteDesNotes`, qui écrit les filtres **une seule fois** : `user_id`,
+`statut = 'confirme'`, `is_hidden = false`, `overall_score` non nul, la borne
+de période, et le périmètre. Deux listes de filtres côte à côte auraient
+divergé un jour, et la divergence aurait été invisible — deux chiffres
+plausibles pour la même chose, sur le même écran.
+
+⚠ **UN AVIS SANS `property_id_ref` COMPTE DANS LE GLOBAL ET DANS AUCUN BIEN.**
+Ce n'est pas un oubli : c'est exactement ce que faisait l'appel par bien, qui
+filtrait `.in('property_id_ref', [ref])`. Le global n'est donc pas toujours la
+somme des biens, et il ne doit pas l'être.
+
+⚠ **LES GARDES SONT CELLES DE `cartes`, PAS UNE VERSION ALLÉGÉE.** Domaine
+`avis` en lecture avec `compteDelegue`, périmètre appliqué **en SQL**, 403 pour
+un bien hors périmètre, et un périmètre **vide** rend zéro — jamais « tous »,
+qui donnerait à un membre révoqué le compte entier. Un endpoint rapide qui
+garde moins n'est pas rapide, c'est une fuite.
+
+**Une panne se dit** : la lecture en échec rend **503**, pas `{ moyenne: null,
+notes: 0 }`, qui se lirait « aucun avis ». Côté page, la tuile se masque — comme
+avant. Ce qui change : c'était N+1 lectures indépendantes, c'est maintenant tout
+ou rien. Assumé — une seule lecture, une seule vérité.
+
+**`cartesLister` et la page `/avis` ne sont pas touchées.** `notes` est une
+action de plus.
+
+**Parité prouvée sur les données réelles** : `scripts/verifier-parite-notes.js`,
+production du 20 octobre 2026, 5 biens et 702 avis, **28 comparaisons, 0
+divergence** sur les quatre périodes. Le script rejoue l'ancien chemin avec les
+**fonctions de production**, pas une copie.
+
+⚠ **ET UN PIÈGE TROUVÉ EN ÉCRIVANT CE LOT, qui vaut pour tout le dépôt.**
+`sb.from('t').eq(...).select(...)` **ne compile pas** : `from()` rend un
+QueryBuilder qui n'expose que `select`/`insert`/`update`/`upsert`/`delete`, et
+`eq` n'apparaît qu'**après** `select`. Écrit dans cet ordre, le code lève un
+`TypeError` en production — pendant que les doubles de test, dont la chaîne
+accepte tout dans n'importe quel ordre, restent **verts**.
+`tests/stats-avis.test.js` porte désormais un double qui a la **forme** du vrai
+client et refuse cet ordre.
