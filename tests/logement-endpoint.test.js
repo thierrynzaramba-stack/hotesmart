@@ -384,7 +384,7 @@ test('la note et le nombre d avis descendent sur chaque carte de la liste', asyn
   preparer({ avis: [avisDe(BIEN_A, 10), avisDe(BIEN_A, 9), avisDe(BIEN_B, 8)] })
   const r = await appeler()
   assert.equal(r.code, 200)
-  assert.deepEqual(r.body.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 2, moyenne: 9.5 })
+  assert.deepEqual(r.body.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 2, note_sur_5: 4.8 })
   assert.deepEqual(r.body.refuses, [])
 })
 
@@ -419,6 +419,6 @@ test('un membre QUI A le droit `avis` recoit bien les notes de son perimetre', a
   })
   const r = await appeler({}, { 'x-compte': TITULAIRE })
   assert.deepEqual(r.body.biens.map(b => b.nom), ['La bulle'])
-  assert.deepEqual(r.body.biens[0].avis, { total: 1, notes: 1, moyenne: 10 })
+  assert.deepEqual(r.body.biens[0].avis, { total: 1, notes: 1, note_sur_5: 5 })
   assert.deepEqual(r.body.refuses, [])
 })

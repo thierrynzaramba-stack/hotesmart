@@ -616,9 +616,9 @@
   "logements.vide_aide_membre": "Aucun logement ne vous est confié sur ce compte.",
   "logements.fraicheur": "Canaux vérifiés {quand}",
   "logements.fraicheur_vieille": "Canaux non vérifiés depuis {quand}",
-  "logements.avis": "{note} · {n, plural, one {# avis} other {# avis}}",
+  "logements.avis": "{note} / 5 · {n, plural, one {# avis} other {# avis}}",
   "logements.avis_sans_note": "{n, plural, one {# avis} other {# avis}}",
   "logements.avis_aucun": "Aucun avis",
   "logements.avis_non_lus": "Avis non lus",
-  "logements.avis_echelle": "Note moyenne sur 5"
+  "logements.avis_echelle": "moyenne sur 5, notes Booking ramenées sur 5"
 }

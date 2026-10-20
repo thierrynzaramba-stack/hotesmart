@@ -616,9 +616,9 @@
   "logements.vide_aide_membre": "No property is shared with you on this account.",
   "logements.fraicheur": "Channels checked {quand}",
   "logements.fraicheur_vieille": "Channels not checked since {quand}",
-  "logements.avis": "{note} · {n, plural, one {# review} other {# reviews}}",
+  "logements.avis": "{note} / 5 · {n, plural, one {# review} other {# reviews}}",
   "logements.avis_sans_note": "{n, plural, one {# review} other {# reviews}}",
   "logements.avis_aucun": "No reviews",
   "logements.avis_non_lus": "Reviews not loaded",
-  "logements.avis_echelle": "Average rating out of 5"
+  "logements.avis_echelle": "average out of 5, Booking ratings converted to a 5-point scale"
 }

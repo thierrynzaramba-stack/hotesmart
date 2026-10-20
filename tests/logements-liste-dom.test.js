@@ -69,7 +69,7 @@ const bien = (extra = {}) => ({
   capacite: 2, photo_url: null, assistant_en_pause: false, canaux_echec: false,
   canaux: [{ ota: 'airbnb', titre: 'x', actif: true, mappe: true, listing_url: null }],
   fait_date: { type: 'libre', du: null, au: null, occupe: false, ferme: false },
-  avis: { total: 0, notes: 0, moyenne: null },
+  avis: { total: 0, notes: 0, note_sur_5: null },
   ...extra
 })
 
@@ -114,7 +114,7 @@ test('LE TEST QUI COMPTE : le fait daté a QUITTE la carte, remplacé par les av
   // fiche (étape 2) l'affiche.
   const d = doc(M.carteHtml(bien({
     fait_date: { type: 'ferme', du: null, au: '2026-10-21' },
-    avis: { total: 336, notes: 332, moyenne: 9.8 }
+    avis: { total: 336, notes: 332, note_sur_5: 4.9 }
   }), OUTILS()))
   assert.equal(d.querySelector('[data-fait]'), null)
   const carte = d.querySelector('.log-carte').textContent
@@ -346,8 +346,8 @@ test('LE TEST QUI COMPTE : aucun texte en dur — toute chaîne visible vient de
   RENDUS.clear()
   const html = [
     M.carteHtml(bien({ assistant_en_pause: true, canaux: null, fait_date: null, avis: null }), OUTILS({ avisIndisponibles: true })),
-    M.carteHtml(bien({ canaux: [], avis: { total: 336, notes: 332, moyenne: 9.8 } }), OUTILS()),
-    M.carteHtml(bien({ avis: { total: 3, notes: 0, moyenne: null } }), OUTILS()),
+    M.carteHtml(bien({ canaux: [], avis: { total: 336, notes: 332, note_sur_5: 4.9 } }), OUTILS()),
+    M.carteHtml(bien({ avis: { total: 3, notes: 0, note_sur_5: null } }), OUTILS()),
     // Les quatre etats de canal, pour que la garde couvre TOUT le rendu.
     M.carteHtml(bien({ canaux: [
       { ota: 'airbnb', mappe: true, actif: true }, { ota: 'booking', mappe: true, actif: false },
@@ -454,7 +454,7 @@ test('LE TEST QUI COMPTE : la note s affiche SUR 5, pas sur 10', () => {
   // montent à 10 sur les 702 avis de production) ; l écran divise par 2,
   // « partout » — décision de Thierry du lot 1, portée par `noteSur5`. Afficher
   // 9,8 ici et 4,9 sur l accueil pour le même logement serait deux vérités.
-  const l = ligneAvis({ total: 336, notes: 332, moyenne: 9.8 })
+  const l = ligneAvis({ total: 336, notes: 332, note_sur_5: 4.9 })
   assert.match(l.textContent, /4,9/)
   assert.doesNotMatch(l.textContent, /9,8/)
   assert.match(l.textContent, /336 avis/, 'le TOTAL des avis, c est la demande')
@@ -462,18 +462,18 @@ test('LE TEST QUI COMPTE : la note s affiche SUR 5, pas sur 10', () => {
 })
 
 test('un avis unique ne dit pas « 1 avis » au pluriel', () => {
-  assert.match(ligneAvis({ total: 1, notes: 1, moyenne: 10 }).textContent, /5,0 · 1 avis/)
+  assert.match(ligneAvis({ total: 1, notes: 1, note_sur_5: 5 }).textContent, /^5,0 \/ 5 · 1 avis/)
 })
 
 test('des avis SANS NOTE : le compte, sans étoile — jamais une moyenne de zéro', () => {
-  const l = ligneAvis({ total: 3, notes: 0, moyenne: null })
+  const l = ligneAvis({ total: 3, notes: 0, note_sur_5: null })
   assert.match(l.textContent, /3 avis/)
   assert.doesNotMatch(l.textContent, /0,0/)
   assert.equal(l.querySelector('[data-icone="i-review"]'), null)
 })
 
 test('aucun avis : on le DIT — « lu, et vide » est une réponse', () => {
-  const l = ligneAvis({ total: 0, notes: 0, moyenne: null })
+  const l = ligneAvis({ total: 0, notes: 0, note_sur_5: null })
   assert.equal(l.textContent.trim(), 'Aucun avis')
   assert.ok(l.classList.contains('log-avis--muet'))
 })
@@ -507,7 +507,7 @@ test('une valeur non numerique ne devient ni un compte, ni du HTML', () => {
   // resterait vert sans `esc`. Rien de `bien.avis` ne descend en texte : ce ne
   // sont que des nombres. Ce qu il mesure vraiment — et qui compte — c est qu une
   // reponse mal formee retombe sur « non lu », jamais sur « Aucun avis ».
-  const l = ligneAvis({ total: '<img src=x onerror=alert(1)>', notes: 0, moyenne: null })
+  const l = ligneAvis({ total: '<img src=x onerror=alert(1)>', notes: 0, note_sur_5: null })
   assert.equal(l.dataset.avis, 'inconnu')
   assert.equal(doc(l.outerHTML).querySelectorAll('img').length, 0)
   // L echappement des DONNEES, lui, est eprouve la ou elles descendent vraiment :
@@ -519,11 +519,14 @@ test('LE TEST QUI COMPTE (M2) : l ECHELLE de la note se dit, a la souris et a la
   // avis » sans dire sur quelle echelle — et 4,9 sur 10 serait une mauvaise note
   // au lieu d une excellente. La revue a trouve que le commentaire promettait
   // les deux et que le rendu n en portait aucun.
-  const l = ligneAvis({ total: 336, notes: 332, moyenne: 9.8 })
-  assert.equal(l.getAttribute('title'), 'Note moyenne sur 5')
-  assert.match(l.querySelector('.sr-only').textContent, /Note moyenne sur 5/)
+  const l = ligneAvis({ total: 336, notes: 332, note_sur_5: 4.9 })
+  // ⚠ LE LIBELLE EST CELUI DE THIERRY, MOT POUR MOT (20 octobre 2026) : il dit
+  // l'echelle ET ce qu'on a fait des notes Booking.
+  assert.equal(l.getAttribute('title'), 'moyenne sur 5, notes Booking ramenées sur 5')
+  assert.match(l.querySelector('.sr-only').textContent, /moyenne sur 5, notes Booking ramenées sur 5/)
+  assert.match(l.textContent, /^4,9 \/ 5 · 336 avis/, 'la note porte son echelle a l ecran')
   // Pas d echelle la ou il n y a pas de note : « 3 avis » n est pas sur 5.
-  const sans = ligneAvis({ total: 3, notes: 0, moyenne: null })
+  const sans = ligneAvis({ total: 3, notes: 0, note_sur_5: null })
   assert.equal(sans.getAttribute('title'), null)
   assert.equal(sans.querySelector('.sr-only'), null)
 })

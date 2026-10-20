@@ -11,7 +11,7 @@ staging :
 ## Ce qui change à l'écran
 
 La carte portait une ligne de **fait daté**. Elle porte désormais **la note du
-logement et son nombre total d'avis** : `★ 4,9 · 336 avis`.
+logement et son nombre total d'avis** : `★ 4,9 / 5 · 336 avis`.
 
 **Ce qui disparaît de la carte avec la fermeture**, et c'est à signaler :
 « Occupé · départ le … », « Libre jusqu'au … », « Fermé du … au … » et
@@ -46,17 +46,17 @@ mesurent pas la même chose. À trancher si l'écart gêne en recette.
 |---|---|
 | `total` | les avis **confirmés et non masqués** du logement |
 | `notes` | ceux qui portent une note |
-| `moyenne` | la moyenne de ces derniers, **sur l'échelle du cœur (/10)** |
+| `note_sur_5` | la note de ces derniers, **déjà sur 5, arrondie une seule fois** |
 
 **Mesure de production du 20 octobre 2026**, en lecture seule, sur les 702
 lignes d'`ota_reviews` :
 
-| bien | avis visibles | notés | moyenne /10 | affiché |
-|---|---|---|---|---|
-| La bulle | 336 | 332 | 9,8 | ★ 4,9 · 336 avis |
-| Cœur de vie 23 | 245 | 244 | 9,3 | ★ 4,7 · 245 avis |
-| Colomiers | 69 | 69 | 9,5 | ★ 4,8 · 69 avis |
-| Ofuro Futari | 19 | 19 | 10 | ★ 5,0 · 19 avis |
+| bien | avis visibles | notés | affiché |
+|---|---|---|---|
+| La bulle | 336 | 332 | ★ 4,9 / 5 · 336 avis |
+| Cœur de vie 23 | 245 | 244 | ★ 4,7 / 5 · 245 avis |
+| Colomiers | 69 | 69 | ★ 4,8 / 5 · 69 avis |
+| Ofuro Futari | 19 | 19 | ★ 5,0 / 5 · 19 avis |
 
 Les avis qui manquent à l'appel des `notes` sont ceux **sans note** : cinq
 lignes en production, toutes des **détections dans les messages**
@@ -73,20 +73,67 @@ et le prédicat du code ne retire rien de plus aujourd'hui.
 leçon de la recette du 7 octobre, portée par `avisQuiComptent`
 (`lib/stats-avis.js`), désormais **partagée** avec la liste plutôt que recopiée.
 
-## L'échelle : /10 dans le cœur, /5 à l'écran
+## L'échelle — question de Thierry, et ce que la mesure répond
 
-Le cœur ne normalise rien à l'ingestion (migration `2026-09-02-ota-reviews` :
-« convertir ici graverait l'erreur dans le cœur »). La mise à l'échelle est une
-décision d'affichage, et elle vit à **un seul endroit** — `noteSur5` de
-`shared/aujourdhui.js`, « partout », décision de Thierry au lot 1. La liste
-l'importe. Mesuré ce jour : Airbnb comme Booking montent à 10, l'échelle est
-bien commune.
+**La question posée :** « comment est calculée la note quand un bien a des avis
+Airbnb (/5) et Booking (/10) ? Si les échelles sont mélangées, affiche la note
+de chaque canal séparément. »
+
+**La mesure dit qu'elles ne le sont pas.** Relevé du 20 octobre 2026 sur les
+702 avis de production, en lecture seule :
+
+| source | notes | min | max | au-dessus de 5 |
+|---|---|---|---|---|
+| channex / airbnb | 598 | 0 | 10 | **563** |
+| beds24 / booking | 94 | 3 | 10 | 90 |
+| channex / booking | 5 | 1 | 10 | 3 |
+
+Airbnb note bien ses séjours **sur 5 étoiles**, mais ce n'est pas ce qui arrive
+dans le cœur : le partenaire livre la note **déjà ramenée sur 10**. 563 notes
+Airbnb sur 598 dépassent 5 — impossible sur une échelle à 5 — et les catégories
+d'un séjour parfait valent 10. Les deux canaux sont donc stockés sur la **même
+échelle**, et « diviser Booking par 2 mais pas Airbnb » afficherait des notes
+Airbnb à **9,8 sur 5**.
+
+**La décision de Thierry est appliquée telle quelle**, sur l'échelle réelle :
+tout est ramené sur 5, pondéré par avis, **un seul arrondi**.
+
+| ce qui est demandé | ce qui est fait |
+|---|---|
+| tout sur 5 | `lib/avis/echelle.js`, le seul endroit qui convertit |
+| notes /10 divisées par 2 avant la moyenne | chaque note est ramenée sur 5 **selon l'échelle de sa source**, avant la somme |
+| pondérée par le nombre d'avis de chaque canal | chaque avis pèse 1 après conversion : un canal qui apporte 300 avis pèse 300 |
+| un arrondi à une décimale, jamais intermédiaire | somme et division en flottant, **un seul** `Math.round` à la fin |
+| affichage « 4,8 / 5 · 336 avis » | tel quel |
+| infobulle et lecteur d'écran | « moyenne sur 5, notes Booking ramenées sur 5 », mot pour mot |
+
+**Le test posé par Thierry est écrit et il passe** : 10 avis Airbnb à 5 étoiles
+(donc 10 en base) + 10 avis Booking à 8/10 → **4,5 / 5**. Les deux lectures de
+l'énoncé donnent le même chiffre, parce que « 5 étoiles » et « 10/10 » sont la
+même note.
+
+**Et l'arrondi intermédiaire existait vraiment.** La version d'avant arrondissait
+la moyenne sur 10 côté serveur, puis l'écran divisait et arrondissait encore :
+9,65 s'affichait **4,9** au lieu de 4,8. Deux avis à 9,9 et 9,7 affichaient
+**5,0 / 5** — une note parfaite sur deux séjours qui ne le sont pas. L'endpoint
+descend désormais `note_sur_5`, et l'écran ne divise plus rien.
+
+**La table des échelles existe quand même**, et c'est tout son intérêt : le jour
+où une source livre vraiment du /5 — un canal nouveau, un import, une saisie à
+la main — une ligne suffit et tous les écrans suivent. ⚠ Une source ne s'y
+ajoute **pas sans avoir été mesurée** : se tromper d'échelle divise ou double la
+note d'un logement, et personne ne le verra, parce que 4,9 comme 9,8 ont l'air
+d'une note.
+
+**Les 33 zéros d'Airbnb sont exactement les 33 avis masqués** — la preuve, par la
+donnée, que le constat G1 ci-dessous portait sur un cas réel : le jour où Airbnb
+révèle un de ces objets, il devient visible avec une note à 0.
 
 ## Quatre états, et ils ne se confondent pas
 
 | état | à l'écran |
 |---|---|
-| des avis | `★ 4,9 · 336 avis` |
+| des avis | `★ 4,9 / 5 · 336 avis` |
 | `total: 0` — lu, et vide | *Aucun avis* |
 | `null` + `indisponibles: ['avis']` — pas pu lire | *Avis non lus* |
 | `null` + `refuses: ['avis']` — pas le droit | **rien du tout** |

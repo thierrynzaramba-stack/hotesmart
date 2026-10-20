@@ -117,7 +117,7 @@ const bien = (extra = {}) => ({
   assistant_en_pause: false, canaux_echec: false, canaux: [{ ota: 'airbnb', mappe: true, actif: true }],
   canaux_vu_le: new Date().toISOString(),
   fait_date: { type: 'occupe', du: null, au: '2026-10-22' },
-  avis: { total: 336, notes: 332, moyenne: 9.8 }, ...extra
+  avis: { total: 336, notes: 332, note_sur_5: 4.9 }, ...extra
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

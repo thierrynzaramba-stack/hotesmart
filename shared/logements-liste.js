@@ -17,13 +17,11 @@
 // la page traduit et met en forme. Un module qui rendrait « Occupé · départ
 // vendredi » serait intraduisible (c'est le défaut D1 de l'inventaire).
 
-// ⚠ L'ECHELLE DE LA NOTE VIENT DE `shared/aujourdhui.js`, ELLE NE SE RECOPIE
-// PAS. Le cœur stocke sur 10, l'ecran affiche sur 5 « partout » (decision de
-// Thierry, lot 1) : deux divisions par deux dans deux fichiers finiraient par
-// afficher 9,8 ici et 4,9 sur l'accueil pour le meme logement. Chemin RELATIF —
-// le reste du depot ecrit `/shared/…`, qui ne se resout pas sous Node, et ce
-// module doit se tester sans navigateur.
-import { noteSur5 } from './aujourdhui.js'
+// ⚠ CE MODULE NE CONVERTIT PLUS RIEN. L'endpoint descend `note_sur_5`, deja
+// ramenee sur 5 et arrondie UNE SEULE FOIS par `lib/avis/echelle.js` (decision
+// de Thierry du 20 octobre 2026). La version d'avant importait `noteSur5` et
+// divisait ici une moyenne deja arrondie la-bas : deux arrondis, donc 9,65
+// affichait 4,9 au lieu de 4,8. Une note se calcule a un seul endroit.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Le fait daté
@@ -160,11 +158,10 @@ export function libelleDuCanal (c) {
 // logement qui en a 336 est le même mensonge que « Libre » sur un bien complet :
 // c'est la règle qui tient tout ce lot.
 //
-// ⚠ ET UNE MOYENNE ABSENTE N'EST PAS UNE MOYENNE DE ZÉRO. Mesuré en production
-// le 20 octobre 2026 : les cinq avis DIRECTS n'ont pas de note (le cœur stocke
-// `overall_score` brut, et un avis direct n'en porte pas). La bulle a 336 avis
-// visibles pour 332 notés — on montre le total, et l'étoile seulement si une
-// note existe.
+// ⚠ ET UNE NOTE ABSENTE N'EST PAS UNE NOTE DE ZÉRO. Mesuré en production le
+// 20 octobre 2026 : cinq avis n'ont pas de note — ce sont des détections dans
+// les messages, validées par l'hôte. La bulle a 336 avis visibles pour 332
+// notés : on montre le total, et l'étoile seulement si une note existe.
 export function avisAffiche (avis, { indisponible = false } = {}) {
   if (avis == null) {
     return indisponible
@@ -178,8 +175,12 @@ export function avisAffiche (avis, { indisponible = false } = {}) {
     return { etat: 'inconnu', cle: 'logements.avis_non_lus', valeurs: null, muet: true }
   }
   if (!total) return { etat: 'aucun', cle: 'logements.avis_aucun', valeurs: null, muet: true }
-  const note = noteSur5(avis.moyenne)
-  if (note == null) return { etat: 'sans-note', cle: 'logements.avis_sans_note', valeurs: { n: total } }
+  // ⚠ ON PREND LA NOTE TELLE QU'ELLE DESCEND. La diviser, l'arrondir ou la
+  // mettre a l'echelle ici referait le calcul une seconde fois.
+  const note = Number(avis.note_sur_5)
+  if (avis.note_sur_5 == null || !Number.isFinite(note)) {
+    return { etat: 'sans-note', cle: 'logements.avis_sans_note', valeurs: { n: total } }
+  }
   return { etat: 'note', cle: 'logements.avis', valeurs: { n: total, note } }
 }
 

@@ -943,25 +943,65 @@ const avisDe = (property_id, overall_score, extra = {}) => ({
   received_at: '2026-10-10T00:00:00Z', ...extra
 })
 
-test('la liste : le total des avis et la moyenne, bien par bien', async () => {
+test('la liste : le total des avis et la note, bien par bien', async () => {
   const r = await L.lireListe(listeDe({
     avis: [avisDe(BIEN, 10), avisDe(BIEN, 9), avisDe(BIEN2, 8)]
   }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
   const bulle = r.biens.find(b => b.nom === 'La bulle')
   const coeur = r.biens.find(b => b.nom === 'Cœur de vie 23')
-  assert.deepEqual(bulle.avis, { total: 2, notes: 2, moyenne: 9.5 })
-  assert.deepEqual(coeur.avis, { total: 1, notes: 1, moyenne: 8 },
+  assert.deepEqual(bulle.avis, { total: 2, notes: 2, note_sur_5: 4.8 })
+  assert.deepEqual(coeur.avis, { total: 1, notes: 1, note_sur_5: 4 },
     'les avis d un bien ne comptent jamais pour un autre')
 })
 
-test('LE TEST QUI COMPTE : la moyenne descend sur l ECHELLE DU COEUR (/10), la mise a /5 est a l ecran', async () => {
-  // Deux normalisations valent deux chiffres differents pour la meme note. Le
-  // coeur stocke brut (Airbnb comme Booking montent a 10, mesure du 20 octobre
-  // 2026 sur les 702 avis de production) et `shared/aujourdhui.js` divise par 2
-  // a l affichage, « partout » (decision de Thierry).
+test('LE TEST QUI COMPTE : la note descend DEJA SUR 5, arrondie UNE SEULE FOIS', async () => {
+  // Decision de Thierry du 20 octobre 2026. L'ecran n'a plus rien a diviser :
+  // deux conversions dans deux fichiers affichent deux notes pour le meme
+  // logement, et deux arrondis en affichent une troisieme.
   const r = await L.lireListe(listeDe({ avis: [avisDe(BIEN, 9.8)] }),
     { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
-  assert.equal(r.biens.find(b => b.nom === 'La bulle').avis.moyenne, 9.8)
+  assert.equal(r.biens.find(b => b.nom === 'La bulle').avis.note_sur_5, 4.9)
+  assert.equal(r.biens.find(b => b.nom === 'La bulle').avis.moyenne, undefined,
+    'la moyenne sur 10 ne descend plus : elle invitait a rediviser')
+})
+
+test('LE TEST QUI COMPTE (decision de Thierry) : 10 avis Airbnb a 5 etoiles + 10 Booking a 8 => 4,5 / 5', async () => {
+  // L'enonce de Thierry, a la lettre — en ecrivant les notes COMME LA BASE LES
+  // PORTE. Airbnb note sur 5 etoiles chez lui, mais livre la note deja ramenee
+  // sur 10 : « 5 etoiles » arrive a 10 (mesure du 20 octobre 2026, 563 notes
+  // Airbnb sur 598 depassent 5, ce qui est impossible sur une echelle a 5).
+  // Les deux lectures donnent le meme resultat, parce que 5 etoiles et 10/10
+  // sont la meme note.
+  const r = await L.lireListe(listeDe({
+    avis: [
+      ...Array.from({ length: 10 }, (_, i) => avisDe(BIEN, 10, { id: `ab${i}`, ota: 'airbnb' })),
+      ...Array.from({ length: 10 }, (_, i) => avisDe(BIEN, 8, { id: `bk${i}`, ota: 'booking' }))
+    ]
+  }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis,
+    { total: 20, notes: 20, note_sur_5: 4.5 })
+})
+
+test('LA PONDERATION EST PAR AVIS, PAS PAR CANAL — un canal a 300 avis pese 300', async () => {
+  // Moyenner les moyennes de chaque canal donnerait (5,0 + 2,5) / 2 = 3,8 ;
+  // ponderer par le nombre d'avis donne (5,0 x 10 + 2,5 x 1) / 11 = 4,8.
+  const r = await L.lireListe(listeDe({
+    avis: [
+      ...Array.from({ length: 10 }, (_, i) => avisDe(BIEN, 10, { id: `a${i}`, ota: 'airbnb' })),
+      avisDe(BIEN, 5, { id: 'b0', ota: 'booking' })
+    ]
+  }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(r.biens.find(b => b.nom === 'La bulle').avis.note_sur_5, 4.8)
+})
+
+test('LE TEST QUI COMPTE : AUCUN ARRONDI INTERMEDIAIRE', async () => {
+  // Trois notes dont la moyenne exacte sur 10 vaut 9,65 : arrondir la moyenne
+  // sur 10 (9,7) PUIS diviser donnerait 4,9. Le calcul exact donne 4,825, donc
+  // 4,8. C'est le defaut de la premiere version, et la raison de la consigne.
+  const r = await L.lireListe(listeDe({
+    avis: [avisDe(BIEN, 9.5, { id: 'x1' }), avisDe(BIEN, 9.8, { id: 'x2' }), avisDe(BIEN, 9.65, { id: 'x3' })]
+  }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(r.biens.find(b => b.nom === 'La bulle').avis.note_sur_5, 4.8)
 })
 
 test('LE TEST QUI COMPTE (SECURITE) : sans le droit `avis`, rien n est lu et rien n est rendu', async () => {
@@ -988,15 +1028,15 @@ test('LE TEST QUI COMPTE : avis illisibles => `null`, JAMAIS zero', async () => 
 test('un bien SANS avis : lu, et vide — ce n est pas une panne', async () => {
   const r = await L.lireListe(listeDe({ avis: [] }),
     { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
-  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 0, notes: 0, moyenne: null })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 0, notes: 0, note_sur_5: null })
   assert.deepEqual(r.indisponibles, [])
 })
 
-test('un avis SANS NOTE compte dans le total, pas dans la moyenne (les avis directs, 5 en production)', async () => {
+test('un avis SANS NOTE compte dans le total, pas dans la note (5 detections de messages en production)', async () => {
   const r = await L.lireListe(listeDe({
     avis: [avisDe(BIEN, 10), avisDe(BIEN, null, { ota: 'direct' })]
   }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
-  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 1, moyenne: 10 })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 1, note_sur_5: 5 })
 })
 
 test('un avis MASQUE ou NON CONFIRME ne compte pas', async () => {
@@ -1007,7 +1047,7 @@ test('un avis MASQUE ou NON CONFIRME ne compte pas', async () => {
       avisDe(BIEN, 2, { statut: 'detecte' })           // detection en attente de validation humaine
     ]
   }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
-  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 1, notes: 1, moyenne: 10 })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 1, notes: 1, note_sur_5: 5 })
 })
 
 test('le total est de TOUJOURS, pas de 30 jours — aucune borne de date n est posee', async () => {
@@ -1048,7 +1088,7 @@ test('LE TEST QUI COMPTE (G1) : un objet d avis VIDE mais visible n est pas un a
         is_hidden: false, overall_score: null, content: null, content_public: null, received_at: '2026-10-10T00:00:00Z' }
     ]
   }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
-  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 1, notes: 1, moyenne: 10 },
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 1, notes: 1, note_sur_5: 5 },
     'deux objets vides ne sont ni deux avis, ni deux zeros dans la moyenne')
 })
 
@@ -1060,14 +1100,14 @@ test('G1 : un avis NOTE A ZERO mais qui porte un TEXTE est un avis — sans pese
   const r = await L.lireListe(listeDe({
     avis: [avisDe(BIEN, 10), avisDe(BIEN, 0, { content: 'Rien a redire, mais la cle etait difficile a trouver' })]
   }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
-  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 1, moyenne: 10 })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 1, note_sur_5: 5 })
 })
 
 test('G1 : un avis SANS NOTE mais avec texte compte (les 5 detections de messages en production)', async () => {
   const r = await L.lireListe(listeDe({
     avis: [avisDe(BIEN, 9), avisDe(BIEN, null, { content_public: 'Merci pour tout !' })]
   }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
-  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 1, moyenne: 9 })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 1, note_sur_5: 4.5 })
 })
 
 test('LE TEST QUI COMPTE (M3) : sans `droits`, la liste echoue FERME sur les avis', async () => {
