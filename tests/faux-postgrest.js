@@ -37,6 +37,8 @@ const BORNE_HAUTE = /^and\(stay_end\.not\.is\.null,stay_end\.lte\.([^)]+)\),and\
 const BORNE_BASSE = /^and\(stay_end\.not\.is\.null,stay_end\.gte\.([^)]+)\),and\(stay_end\.is\.null,received_at\.gte\.([^)]+)\)$/
 const A_UNE_DATE = 'stay_end.not.is.null,received_at.not.is.null'
 
+const VOYAGEUR_A_ECRIT = 'overall_score.gt.0,content.not.is.null,content_public.not.is.null'
+
 function evaluerOr (ligne, expression) {
   const e = String(expression)
 
@@ -58,6 +60,20 @@ function evaluerOr (ligne, expression) {
   // ⚠ Un avis SANS aucune date n'est dans aucune periode, meme non bornee :
   // `dansLaPeriode` rend `false` quand la date de rattachement est nulle.
   if (e === A_UNE_DATE) return !!(ligne.stay_end || ligne.received_at)
+
+  // « Le voyageur a ecrit » : une note > 0 OU un texte. C'est la jumelle SQL de
+  // `voyageurAEcrit` (lib/avis/naissance.js), et un test compare les deux.
+  //
+  // ⚠ ECRITE D'APRES LA SEMANTIQUE DE POSTGREST, terme a terme, et pas d'apres
+  // la fonction JS : un double copie sur le code qu'il doit eprouver ne prouve
+  // rien. Un `or` est vrai des qu'un terme l'est ; `gt.0` sur NULL vaut NULL,
+  // donc faux ; `not.is.null` est vrai pour toute valeur non NULL, chaine vide
+  // comprise.
+  if (e === VOYAGEUR_A_ECRIT) {
+    const n = Number(ligne.overall_score)
+    return (ligne.overall_score != null && Number.isFinite(n) && n > 0) ||
+           ligne.content != null || ligne.content_public != null
+  }
 
   throw new Error('faux-postgrest : expression or() non modelisee -> ' + e)
 }

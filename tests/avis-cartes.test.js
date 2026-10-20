@@ -58,7 +58,14 @@ test('LE TEST QUI COMPTE (point C) : trois sections — en attente triee par del
 test('LE TEST QUI COMPTE (point E) : un avis MASQUE par Airbnb se montre comme tel — jamais 0/10, ni texte ni classement', () => {
   const r = assembler({ evaluations: [ev('u1', { ota_review_id: 'm' })], avis: [av('m', { cache: true, overall_score: 0, content: null, content_public: null, ai_clean_verdict: 'rien_signale' })] })
   const a = r.attente[0].avis[0]
-  assert.deepEqual({ masque: a.masque, note: a.note, texte: a.texte, verdict: a.verdict }, { masque: true, note: null, texte: null, verdict: null })
+  // ⚠ `note_sur_5` ET PLUS `note` : la note descend convertie et arrondie une
+  // seule fois (decision de Thierry du 20 octobre 2026, « plus aucun /10
+  // affiche »). Un champ sur 10 qui subsisterait inviterait l'ecran a le
+  // reconvertir.
+  assert.deepEqual(
+    { masque: a.masque, note_sur_5: a.note_sur_5, texte: a.texte, verdict: a.verdict },
+    { masque: true, note_sur_5: null, texte: null, verdict: null })
+  assert.equal(a.note, undefined, 'le champ sur 10 ne descend plus : il invitait a reconvertir')
   // Un champ absent n'est pas « visible » (lecture stricte du brut).
   assert.equal(assembler({ avis: [av('x', { cache: undefined })] }).recents[0].avis[0].masque, true)
   // Booking et la saisie manuelle n'ont pas de double aveugle.
