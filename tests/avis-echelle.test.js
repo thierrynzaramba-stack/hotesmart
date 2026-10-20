@@ -80,6 +80,37 @@ test('LE TEST QUI COMPTE : un avis SANS NOTE ne descend pas la note a zero', () 
   assert.equal(r.notes, 10, 'seuls les avis NOTES comptent dans le diviseur')
 })
 
+test('LE TEST QUI COMPTE (dette 76) : la source se reconnait par EGALITE EXACTE, jamais par sous-chaine', () => {
+  // `includes` faisait qu'un canal dont le nom CONTIENT celui d'un canal connu
+  // heritait de son echelle — `bookingsync` prenait celle de `booking` — et
+  // l'alarme utilisait le MEME test, donc ne se declenchait pas sur ces cas :
+  // la seule classe d'erreur contre laquelle elle existait passait en silence.
+  assert.equal(E.echelleDe('booking'), 10)
+  for (const faux of ['bookingsync', 'booking.com.br', 'airbnb-clone', 'myairbnb', 'bookings']) {
+    assert.equal(E.echelleDe(faux), null, `${faux} ne doit PAS heriter d une echelle`)
+  }
+  // La casse et les espaces, eux, ne sont pas une autre source.
+  assert.equal(E.echelleDe('  AirBnB  '), 10)
+})
+
+test('LE TEST QUI COMPTE (dette 76) : une source INCONNUE n est pas convertie — jamais de division par defaut', () => {
+  // Vrbo, HomeAway et Expedia notent sur 5 : supposer /10 aurait affiche leurs
+  // avis a la MOITIE de leur valeur, sans un mot. Une note fausse est pire
+  // qu'une note absente — elle a l'air d'une note.
+  for (const source of ['vrbo', 'expedia', 'homeaway', 'bookingsync', 'tripadvisor', 'direct']) {
+    assert.equal(E.surCinq(10, source), null, `${source} : pas d echelle connue, pas de conversion`)
+    assert.equal(E.surCinq(4.5, source), null)
+  }
+  // Et ses notes ne comptent pas dans la moyenne, sans faire disparaitre celles
+  // des sources connues.
+  const r = E.noteSur5Des([
+    { ota: 'airbnb', overall_score: 10 },
+    { ota: 'vrbo', overall_score: 5 }
+  ])
+  assert.equal(r.note_sur_5, 5)
+  assert.equal(r.notes, 1, 'la note de la source inconnue ne compte pas dans le diviseur')
+})
+
 test('une note absente, vide ou illisible ne compte pas — et ne vaut jamais zero', () => {
   for (const v of [null, undefined, '', 'bien', NaN, -2]) {
     assert.equal(E.surCinq(v, 'airbnb'), null, `${String(v)} n est pas une note`)
@@ -98,19 +129,25 @@ test('LE TEST QUI COMPTE : la table des echelles correspond a la MESURE', () => 
   // defaut n'a qu'un effet : eteindre l'alarme de source inconnue, pile pour le
   // canal pour lequel elle a ete construite (constat m4 de la revue).
   assert.deepEqual(E.ECHELLE_PAR_CANAL, { airbnb: 10, booking: 10 })
-  assert.equal(E.ECHELLE_PAR_DEFAUT, 10)
+  // ⚠ IL N'Y A PLUS DE DEFAUT (dette 76) : une source hors table n'est pas
+  // convertie. Le garder exporte inviterait a s'en servir.
+  assert.equal(E.ECHELLE_PAR_DEFAUT, undefined)
 })
 
-test('un canal inconnu prend l echelle du coeur, il ne fait pas disparaitre ses notes', () => {
-  assert.equal(E.echelleDe('un-canal-de-demain'), 10)
-  assert.equal(E.echelleDe(null), 10)
-  assert.equal(E.surCinq(9, 'un-canal-de-demain'), 4.5)
+test('un canal inconnu, un `ota` absent : aucune echelle, donc aucune conversion', () => {
+  for (const o of ['un-canal-de-demain', null, undefined, '']) {
+    assert.equal(E.echelleDe(o), null)
+    assert.equal(E.surCinq(9, o), null)
+  }
 })
 
-test('le nom du canal se lit sans se soucier de la casse ni des variantes', () => {
+test('le nom du canal se lit sans se soucier de la casse ni des espaces', () => {
   assert.equal(E.echelleDe('Airbnb'), 10)
-  assert.equal(E.echelleDe('booking.com'), 10)
   assert.equal(E.echelleDe('BOOKING'), 10)
+  assert.equal(E.echelleDe(' booking '), 10)
+  // Mais une VARIANTE est une autre source : `booking.com` ne parvient jamais
+  // en base, `normaliserOta` l ayant deja ramene a `booking`.
+  assert.equal(E.echelleDe('booking.com'), null)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -164,8 +201,12 @@ test('LE TEST QUI COMPTE (M3) : la resolution par NOM fonctionne — eprouvee pa
   // supprime la boucle reste verte. Avec une table injectee, elle rougit.
   const table = { airbnb: 5, booking: 10 }
   assert.equal(E.echelleDe('airbnb', table), 5)
-  assert.equal(E.echelleDe('booking.com', table), 10)
-  assert.equal(E.echelleDe('inconnu', table), 10, 'le defaut reste celui du coeur')
+  // ⚠ `booking.com` n'arrive JAMAIS en base : `normaliserOta` le ramene a
+  // `booking` (lib/cron-channel-reviews.js). La table porte ce que le writer
+  // ecrit, pas ce que le partenaire appelle son canal.
+  assert.equal(E.echelleDe('booking.com', table), null)
+  assert.equal(E.echelleDe('booking', table), 10)
+  assert.equal(E.echelleDe('inconnu', table), null, 'hors table = pas d echelle')
   assert.equal(E.surCinq(5, 'airbnb', table), 5, '5 / 5 sur une source en /5')
   assert.equal(E.surCinq(5, 'booking', table), 2.5, '5 / 10 sur une source en /10')
   // Et l enonce de Thierry, dans SA lecture : Airbnb vraiment sur 5.
@@ -181,18 +222,123 @@ test('m2 : une cle ajoutee doit etre celle que le WRITER ecrit, pas celle qu on 
   // bookingcom et booking.com, et laisse passer le reste en minuscules :
   // « HomeAway » devient `homeaway`, jamais `vrbo`. Une table qui ne porterait
   // que `vrbo` ne matcherait donc rien.
-  assert.equal(E.echelleDe('homeaway', { vrbo: 5 }), E.ECHELLE_PAR_DEFAUT,
+  assert.equal(E.echelleDe('homeaway', { vrbo: 5 }), null,
     'la cle `vrbo` ne rattrape pas ce que le writer ecrit')
   assert.equal(E.echelleDe('homeaway', { homeaway: 7 }), 7)
 })
 
-test('m4 : une source NON MESUREE declenche l alarme, et ne l eteint pas', () => {
-  // Le defaut : une cle « au cas ou » valant 10 faisait taire le signal pour un
-  // canal qu on n a jamais vu. On verifie par le comportement observable —
-  // `echelleDe` rend le defaut, et la source n est pas dans la table.
+test('m4 : une source NON MESUREE n est pas dans la table, et ne l est pas « au cas ou »', () => {
+  // Une cle « au cas ou » valant la meme chose que le defaut faisait taire le
+  // signal pour un canal qu on n a jamais vu. Il n y a plus de defaut, et la
+  // table ne porte que ce qui a ete mesure.
   for (const source of ['expedia', 'homeaway', 'vrbo', 'tripadvisor']) {
-    assert.equal(E.echelleDe(source), E.ECHELLE_PAR_DEFAUT, `${source} prend le defaut`)
-    assert.ok(!Object.keys(E.ECHELLE_PAR_CANAL).some(k => source.includes(k)),
-      `${source} ne doit pas etre dans la table tant qu elle n est pas mesuree`)
+    assert.equal(E.echelleDe(source), null, `${source} n a pas d echelle connue`)
   }
+})
+
+test('LE TEST QUI COMPTE (GRAVE 2) : une source hors table SONNE, elle ne se contente pas d un console.warn', async () => {
+  // « UN `console.error` NE REVEILLE PERSONNE » — regle gravee en tete de
+  // `lib/canaux-du-bien.js`, et que le registre prescrivait deja pour cette
+  // dette. Le silence coute plus cher depuis la correspondance exacte : la
+  // consequence d une source hors table est passee de « note divisee par deux »
+  // (fausse, mais VISIBLE) a « note absente » (juste, mais INVISIBLE).
+  const sonneries = []
+  const alarme = async (clef, detail) => { sonneries.push({ clef, detail }) }
+  // ⚠ L ARDOISE EST PARTAGEE PAR LE MODULE : les tests precedents de ce fichier
+  // ont deja rencontre vrbo, expedia et les autres. On la vide pour partir d un
+  // etat connu — un test qui herite de l etat d un autre mesure les deux.
+  await E.sonnerSourcesInconnues(() => {})
+
+  // Rien rencontre : rien ne sonne. Une alarme qui sonne a vide ne se lit plus.
+  await E.sonnerSourcesInconnues(alarme)
+  assert.deepEqual(sonneries, [])
+
+  // Une source hors table, rencontree pendant une conversion.
+  E.noteSur5Des([{ ota: 'vrbo', overall_score: 5 }, { ota: 'airbnb', overall_score: 10 }])
+  const vues = await E.sonnerSourcesInconnues(alarme)
+  assert.deepEqual(vues, ['vrbo'])
+  assert.equal(sonneries.length, 1)
+  assert.equal(sonneries[0].clef, 'avis_echelle_inconnue')
+  assert.deepEqual(sonneries[0].detail.sources, ['vrbo'])
+  assert.match(sonneries[0].detail.effet, /ne sont pas converties/)
+  assert.match(sonneries[0].detail.geste, /ECHELLE_PAR_CANAL/)
+
+  // ⚠ L ARDOISE SE VIDE : sinon la meme source sonnerait a chaque lecture, et
+  // l alarme deviendrait le bruit qu on apprend a ignorer.
+  await E.sonnerSourcesInconnues(alarme)
+  assert.equal(sonneries.length, 1)
+
+  // Une source CONNUE ne declenche rien, meme apres coup.
+  E.noteSur5Des([{ ota: 'booking', overall_score: 8 }])
+  await E.sonnerSourcesInconnues(alarme)
+  assert.equal(sonneries.length, 1, 'une alarme qui sonne sur du normal ne se lit plus')
+
+  // Un `ota` absent est signale lui aussi : c est le symptome d un SELECT
+  // auquel il manque la colonne, et il ferait disparaitre TOUTES les notes.
+  E.noteSur5Des([{ overall_score: 9 }])
+  await E.sonnerSourcesInconnues(alarme)
+  assert.deepEqual(sonneries[1].detail.sources, ['(vide)'])
+})
+
+test('LE TEST QUI COMPTE (GRAVE 1) : les TROIS lecteurs demandent `ota` dans leur SELECT', () => {
+  // ⚠ CE TEST EXISTE PARCE QUE DEUX MUTATIONS SURVIVAIENT. Avant la
+  // correspondance exacte, oublier `ota` dans un SELECT etait INERTE : le
+  // defaut /10 etait justement l echelle reelle des deux canaux. Depuis, c est
+  // une perte TOTALE et silencieuse — `/logements` perd l etoile de tous les
+  // biens, `/avis` perd la note de chaque carte et sa tuile passe a « — ».
+  // Aucun rouge, aucun 500, aucune alerte : seulement un warn « (vide) ».
+  // Mesure de la revue : retirer `ota` du select de `lib/logement/lecture.js`
+  // ou de `CHAMPS` d `api/avis.js` laissait 5684 tests sur 5684 au vert.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const racine = path.join(__dirname, '..')
+  // ⚠ LES LECTEURS SE DECOUVRENT, ILS NE S ENUMERENT PAS. Une liste en dur
+  // vieillit de deux facons : elle rate le lecteur ajoute demain, et elle
+  // rougit a tort sur une branche ou l un des fichiers n existe pas encore (le
+  // lot Logements n est pas sur toutes les branches). On cherche donc qui
+  // convertit une note, et on exige de chacun qu il demande la colonne.
+  const { execSync } = require('node:child_process')
+  const trouves = execSync(
+    'grep -rl "microSurCinq\\|noteSur5Des\\|assemblerCartes" --include=*.js lib api core 2>/dev/null || true',
+    { encoding: 'utf8', cwd: racine }).trim()
+  // ⚠ `assemblerCartes` EN FAIT PARTIE : son appelant lit la base pour elle, et
+  // oublier `ota` dans CE select a exactement le meme effet — c'est l'une des
+  // deux mutations que la revue a vues survivre.
+  const lecteurs = (trouves ? trouves.split('\n') : [])
+    .filter(f => !f.startsWith('lib/avis/echelle.js'))   // le module lui-meme
+  assert.ok(lecteurs.length >= 2, `${lecteurs.length} lecteur(s) trouve(s) : la recherche ne mesure plus rien`)
+  for (const fichier of lecteurs) {
+    const src = fs.readFileSync(path.join(racine, fichier), 'utf8')
+    // Le select qui alimente la conversion doit porter `ota`. On cherche la
+    // liste de colonnes la plus proche : toute chaine de colonnes citant
+    // `overall_score` doit aussi citer `ota`.
+    // Une LISTE DE COLONNES, et pas n importe quelle chaine : des identifiants
+    // separes par des virgules. Sans ce resserrement, `overall_score: 0` —
+    // un objet litteral — passait pour un select.
+    const selects = (src.match(/['`][^'`]*\boverall_score\b[^'`]*['`]/g) || [])
+      .filter(x => /^['`][a-z_0-9,\s`$]+['`]$/i.test(x) && x.includes(','))
+    if (selects.length) {
+      // Famille 1 : il LIT la base. Sa liste de colonnes doit porter `ota`.
+      for (const sel of selects) {
+        assert.match(sel, /\bota\b/,
+          `${fichier} : ${sel} ne demande pas \`ota\` — sans elle, TOUTES les notes disparaissent en silence`)
+      }
+    } else {
+      // Famille 2 : il CONVERTIT des lignes qu'on lui passe (lib/avis/cartes.js
+      // en est). Il doit alors transmettre la source a la conversion — l'oubli
+      // a exactement le meme effet, et il est tout aussi muet.
+      assert.match(src, /(microSurCinq|surCinq)\([^)]*\.ota\b|noteSur5Des\(/,
+        `${fichier} convertit une note sans transmettre \`ota\``)
+    }
+  }
+})
+
+test('GRAVE 1 : sans `ota`, la note est perdue — et c est bien ce qu on veut qu il arrive', () => {
+  // La contre-epreuve du test precedent : on verifie que l absence de la
+  // colonne a bien l effet redoute, pour que le garde-fou ci-dessus ne soit pas
+  // une incantation.
+  const sansOta = E.noteSur5Des([{ overall_score: 10 }, { overall_score: 9 }])
+  assert.deepEqual(sansOta, { note_sur_5: null, notes: 0 })
+  const avecOta = E.noteSur5Des([{ ota: 'airbnb', overall_score: 10 }, { ota: 'airbnb', overall_score: 9 }])
+  assert.deepEqual(avecOta, { note_sur_5: 4.8, notes: 2 })
 })

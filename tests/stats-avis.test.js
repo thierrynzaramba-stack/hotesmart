@@ -159,8 +159,14 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
   }
 }
 
+// ⚠ UN AVIS PAR DEFAUT PORTE UNE NOTE, comme en base. Depuis le 20 octobre
+// 2026, un objet d'avis VIDE — ni note ni texte — ne compte nulle part
+// (decision de Thierry) : une fixture sans note ni texte decrivait donc un cas
+// qui n'est plus un avis, et faisait rougir les comptages pour la mauvaise
+// raison. Les tests qui veulent un objet vide l'ecrivent explicitement.
 const L = (o) => ({ user_id: 'u1', statut: 'confirme', ai_analyzed_at: '2026-09-01T00:00:00Z',
-                    received_at: '2026-09-01T00:00:00Z', property_id_ref: '209413', ...o })
+                    received_at: '2026-09-01T00:00:00Z', property_id_ref: '209413',
+                    overall_score: 9, content: 'Séjour agréable', ...o })
 
 // ─── Les périodes ───────────────────────────────────────────────────────────
 test('borneDepuis : les quatre périodes, et « toujours » sans borne', () => {
@@ -619,7 +625,10 @@ test('recette du 7 octobre : un avis MASQUE par Airbnb ne compte ni dans le tota
     { user_id: 'U', ai_clean_verdict: null, ota: 'direct', overall_score: null, is_hidden: false, content: null, received_at: '2026-10-02T00:00:00Z' },
   ]
   const r = await ratioProprete(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
-  assert.strictEqual(r.total, 3, 'le masque est exclu du total')
+  // ⚠ 2, ET PLUS 3 : depuis le 20 octobre 2026 la quatrieme ligne — ni note ni
+  // texte — n'est pas un avis non plus. Elle etait comptee « 1 avis recu » sur
+  // /avis pendant que /logements disait « Aucun avis » pour le meme bien.
+  assert.strictEqual(r.total, 2, 'ni le masque, ni l objet vide')
   const m = await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
   // 10 et 8 sur l echelle du coeur => 5,0 et 4,0 sur 5 => 4,5.
   assert.deepStrictEqual(m, { note_sur_5: 4.5, notes: 2 },
@@ -697,13 +706,13 @@ test('LE TEST QUI COMPTE : UN SEUL ARRONDI, et il ne depend pas du nombre d avis
 // parite-notes.js` refait la comparaison sur les données réelles.
 
 const PARITE = [
-  { user_id: 'U', overall_score: 10, property_id_ref: 'A', received_at: '2026-10-01T00:00:00Z' },
-  { user_id: 'U', overall_score: 9,  property_id_ref: 'A', received_at: '2026-10-02T00:00:00Z' },
-  { user_id: 'U', overall_score: 8,  property_id_ref: 'B', received_at: '2026-10-02T00:00:00Z' },
-  { user_id: 'U', overall_score: 7,  property_id_ref: 'C', received_at: '2026-10-03T00:00:00Z' },
+  { user_id: 'U', ota: 'airbnb', overall_score: 10, property_id_ref: 'A', received_at: '2026-10-01T00:00:00Z' },
+  { user_id: 'U', ota: 'airbnb', overall_score: 9,  property_id_ref: 'A', received_at: '2026-10-02T00:00:00Z' },
+  { user_id: 'U', ota: 'airbnb', overall_score: 8,  property_id_ref: 'B', received_at: '2026-10-02T00:00:00Z' },
+  { user_id: 'U', ota: 'airbnb', overall_score: 7,  property_id_ref: 'C', received_at: '2026-10-03T00:00:00Z' },
   // Ni l'un ni l'autre ne doit compter : masqué par Airbnb, et note absente.
-  { user_id: 'U', overall_score: 0,  property_id_ref: 'A', is_hidden: true, received_at: '2026-10-03T00:00:00Z' },
-  { user_id: 'U', overall_score: null, property_id_ref: 'B', received_at: '2026-10-03T00:00:00Z' },
+  { user_id: 'U', ota: 'airbnb', overall_score: 0,  property_id_ref: 'A', is_hidden: true, received_at: '2026-10-03T00:00:00Z' },
+  { user_id: 'U', ota: 'airbnb', overall_score: null, property_id_ref: 'B', received_at: '2026-10-03T00:00:00Z' },
   // Un autre compte : jamais.
   { user_id: 'AUTRE', overall_score: 1, property_id_ref: 'A', received_at: '2026-10-03T00:00:00Z' },
 ]
@@ -766,7 +775,7 @@ test('un avis dont la reference ne designe aucun bien compte au global', async (
   // Dans les deux cas la regle est la meme, et c'est elle qu'on fige : ils
   // comptent au GLOBAL, exactement comme dans l'appel global d'avant le lot, et
   // dans aucun groupe que l'ecran sache afficher.
-  const lignes = [...PARITE, { user_id: 'U', overall_score: 2, property_id_ref: null, received_at: '2026-10-04T00:00:00Z' }]
+  const lignes = [...PARITE, { user_id: 'U', ota: 'airbnb', overall_score: 2, property_id_ref: null, received_at: '2026-10-04T00:00:00Z' }]
   const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
   assert.strictEqual(r.global.notes, 5, 'la note orpheline est perdue pour le global')
   assert.deepStrictEqual(r.global, await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' }))
@@ -795,7 +804,7 @@ test('notesDuPerimetre lit TOUTES les pages, et une panne se DIT', async () => {
   // (db-max-rows) : la note porterait sur une fraction, en silence.
   // 2000 notes a 10 (soit 5/5) et 500 a 6 (soit 3/5) : 11,5 / 2500 = 4,6.
   const lignes = Array.from({ length: 2500 }, (_, i) => ({
-    id: i, user_id: 'U', overall_score: i < 2000 ? 10 : 6, property_id_ref: i % 2 ? 'A' : 'B',
+    id: i, user_id: 'U', ota: 'airbnb', overall_score: i < 2000 ? 10 : 6, property_id_ref: i % 2 ? 'A' : 'B',
     received_at: '2026-10-01T00:00:00Z'
   }))
   const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
@@ -811,8 +820,8 @@ test('notesDuPerimetre lit TOUTES les pages, et une panne se DIT', async () => {
 test('la periode borne les deux fonctions de la meme facon', async () => {
   const maintenant = Date.parse('2026-10-20T00:00:00Z')
   const lignes = [
-    { user_id: 'U', overall_score: 10, property_id_ref: 'A', received_at: '2026-10-18T00:00:00Z' },
-    { user_id: 'U', overall_score: 2,  property_id_ref: 'A', received_at: '2026-05-01T00:00:00Z' },
+    { user_id: 'U', ota: 'airbnb', overall_score: 10, property_id_ref: 'A', received_at: '2026-10-18T00:00:00Z' },
+    { user_id: 'U', ota: 'airbnb', overall_score: 2,  property_id_ref: 'A', received_at: '2026-05-01T00:00:00Z' },
   ]
   const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: '30j', maintenant })
   assert.deepStrictEqual(r.global, { note_sur_5: 5, notes: 1 }, 'l avis hors periode est compte')
@@ -888,7 +897,7 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE se dit, elle ne rend pas une moyen
         const f = {
           eq: () => f, gte: () => f, gt: () => f, in: () => f, not: () => f, order: () => f,
           limit: () => Promise.resolve({
-            data: Array.from({ length: plafond }, (_, i) => ({ id: i, overall_score: 10, property_id_ref: 'A' })),
+            data: Array.from({ length: plafond }, (_, i) => ({ id: i, ota: 'airbnb', overall_score: 10, property_id_ref: 'A' })),
             count: compte ? 3000 : null,
             error: null
           })
@@ -928,11 +937,19 @@ test("LE TEST QUI COMPTE : l'echelle est resolue PAR SOURCE, pas supposee", asyn
   }, 'l echelle de la source n est pas appliquee : la note est supposee, pas convertie')
   assert.deepStrictEqual(r.global, { note_sur_5: 4, notes: 2 })
 
-  // Et la preuve que l'echelle MORD : sans elle, le 4 de « surcinq » serait
-  // divise par deux et vaudrait 2.
+  // Et la preuve que l'echelle MORD : sans elle, ces deux sources sont
+  // INCONNUES de la table reelle.
+  //
+  // ⚠ CETTE ASSERTION A CHANGE AVEC LA DETTE 76 (decision de Thierry du
+  // 20 octobre 2026). Elle disait : « sans echelle, le 4 de surcinq serait
+  // divise par deux et vaudrait 2 » — c'etait vrai, et c'etait precisement le
+  // defaut : supposer /10 pour une source inconnue affiche a la MOITIE de sa
+  // valeur la note d'un canal qui note sur 5, sans un mot. Une source hors
+  // table n'est plus convertie du tout, et l'alarme le dit.
   const sansEchelle = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
-  assert.strictEqual(sansEchelle.par_bien.A.note_sur_5, 2,
-    'la table par defaut ne s applique plus : ce test ne distingue plus rien')
+  assert.strictEqual(sansEchelle.par_bien.A, undefined,
+    'une source inconnue ne doit plus etre convertie « au defaut »')
+  assert.deepStrictEqual(sansEchelle.global, { note_sur_5: null, notes: 0 })
 })
 
 test("LE TEST QUI COMPTE : les avis SANS note ne consomment pas le budget d'une page", async () => {
@@ -945,7 +962,7 @@ test("LE TEST QUI COMPTE : les avis SANS note ne consomment pas le budget d'une 
   // Les lignes sans note sont reelles et sans borne : la saisie manuelle et la
   // detection dans les messages en ecrivent, toutes deux confirmees et visibles.
   const lignes = [
-    ...Array.from({ length: 990 }, (_, i) => ({ id: i, user_id: 'U', overall_score: 10, property_id_ref: 'A', received_at: '2026-10-01T00:00:00Z' })),
+    ...Array.from({ length: 990 }, (_, i) => ({ id: i, user_id: 'U', ota: 'airbnb', overall_score: 10, property_id_ref: 'A', received_at: '2026-10-01T00:00:00Z' })),
     ...Array.from({ length: 30 }, (_, i) => ({ id: 1000 + i, user_id: 'U', overall_score: null, property_id_ref: 'A', received_at: '2026-10-01T00:00:00Z' })),
   ]
   const journal = []
@@ -992,4 +1009,64 @@ test("LE TEST QUI COMPTE : une lecture COMPLETE au plafond n'est pas dite incomp
     'une lecture complete de MAX_NOTES lignes pile est declaree incomplete')
   assert.strictEqual(servies, MAX)
   assert.strictEqual(PAGE, 1000)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// L'objet d'avis VIDE ne compte nulle part (décision de Thierry, 20 oct. 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE : un objet d avis VIDE ne compte pas dans le RATIO', async () => {
+  // L'objet Channex nait au depart, cache et vide ; Airbnb le revele au bout de
+  // 14 jours MEME si le voyageur n'a rien ecrit. Il arrive alors avec
+  // `is_hidden = false`, sans note et sans texte.
+  const vide = { user_id: 'u1', statut: 'confirme', is_hidden: false, overall_score: null,
+                 content: null, content_public: null, received_at: '2026-09-01T00:00:00Z',
+                 property_id_ref: '209413' }
+  const r = await ratioProprete(fauxClient([L({ ai_clean_verdict: 'positif' }), vide]),
+    { userId: 'u1', periode: 'toujours', maintenant: T0 })
+  assert.strictEqual(r.total, 1, '« 1 avis recu » pour un objet vide etait le defaut')
+  assert.strictEqual(r.positif, 1)
+
+  // Contre-epreuve, les trois formes d'un avis REEL : une note, un texte
+  // public, un texte prive. Une garde qui ecarterait tout n'est pas une garde.
+  for (const reel of [{ overall_score: 8 }, { content: 'Merci !' }, { content_public: 'Parfait' }]) {
+    const q = await ratioProprete(fauxClient([{ ...vide, ...reel, ai_clean_verdict: 'positif' }]),
+      { userId: 'u1', periode: 'toujours', maintenant: T0 })
+    assert.strictEqual(q.total, 1, `un avis avec ${Object.keys(reel)[0]} compte`)
+  }
+  // Et une note a ZERO sans texte reste un objet vide.
+  const zero = await ratioProprete(fauxClient([{ ...vide, overall_score: 0 }]),
+    { userId: 'u1', periode: 'toujours', maintenant: T0 })
+  assert.strictEqual(zero.total, 0)
+})
+
+test('LE TEST QUI COMPTE : la regle SQL et la regle JS disent la MEME chose', async () => {
+  // Deux expressions d'une meme regle divergent. Celle de `ratioProprete` est
+  // en SQL (elle compte sans rapatrier les lignes), celle des cartes et de
+  // `lib/logement/lecture.js` est en JS. On les compare sur les cas limites.
+  const { voyageurAEcrit, OR_VOYAGEUR_A_ECRIT } = require('../lib/avis/naissance')
+  const { evaluerOr } = require('./faux-postgrest')
+  const cas = [
+    { overall_score: 10, content: null, content_public: null },
+    { overall_score: 0, content: null, content_public: null },
+    { overall_score: -1, content: null, content_public: null },
+    { overall_score: null, content: null, content_public: null },
+    { overall_score: null, content: 'Merci', content_public: null },
+    { overall_score: null, content: null, content_public: 'Parfait' },
+    { overall_score: 0, content: 'La clé était difficile à trouver', content_public: null },
+    { overall_score: 9.5, content: 'Top', content_public: 'Top' },
+    // ⚠ LA CHAINE VIDE, LE SEUL CAS OU LES DEUX LANGUES SE CONTREDISAIENT
+    // (constat MOYEN-2 de la revue). `not.is.null` etait VRAI pour `''` quand
+    // `Boolean('')` est FAUX : la ligne comptait en base et n'avait pas de
+    // carte. Le prédicat SQL est passé a `neq.`, qui dit la meme chose que JS.
+    { overall_score: null, content: '', content_public: null },
+    { overall_score: null, content: '', content_public: '' },
+    { overall_score: null, content: '   ', content_public: null },
+    { overall_score: 0, content: '', content_public: null }
+  ]
+  for (const c of cas) {
+    const parSql = evaluerOr({ ...c }, OR_VOYAGEUR_A_ECRIT)
+    const parJs = voyageurAEcrit({ is_hidden: false, overall_score: c.overall_score, content: c.content || c.content_public })
+    assert.strictEqual(parSql, parJs, `desaccord sur ${JSON.stringify(c)} : SQL ${parSql}, JS ${parJs}`)
+  }
 })
