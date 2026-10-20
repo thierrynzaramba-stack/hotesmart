@@ -30,6 +30,13 @@ export async function requireAuth() {
   }
   sessionStorage.setItem(SESSION_USER_KEY, userId)
 
+  // ⚠ LES DEUX LECTURES PARTENT ENSEMBLE, LA DECISION ATTEND LES DEUX.
+  // Le contexte de compte et l'etat d'onboarding ne dependent pas l'un de
+  // l'autre : les enchainer coutait un aller-retour pour rien. Ce qui doit
+  // rester ordonne, c'est la DECISION de redirection ci-dessous — elle ne se
+  // prend qu'une fois les deux resultats connus. La regle qui suit est donc
+  // intacte.
+  //
   // ⚠ LE CONTEXTE DE COMPTE SE CHARGE AVANT LA REDIRECTION D'ONBOARDING.
   // Un invite qui n'a jamais eu de compte a lui est exactement dans l'etat que
   // le forcage vise (`!completed && current_step === 0`) : il partait donc dans
@@ -38,12 +45,25 @@ export async function requireAuth() {
   //
   // Tolerant a la panne : sur echec, `chargerContexte` retombe sur le compte
   // propre — un incident ne doit pas empecher un hote seul d'utiliser son app.
+  // Chacune porte son propre echec : un rejet ne doit pas emporter l'autre
+  // lecture, et surtout pas laisser une promesse non traitee derriere lui.
+  const pContexte = chargerContexte(userId)
+    .then(ctx => ({ ctx }), e => ({ e }))
+  const pOnboarding = supabase
+    .from('onboarding_state')
+    .select('current_step, completed')
+    .eq('user_id', userId)
+    .maybeSingle()
+    .then(r => ({ r }), e => ({ e }))
+
+  const [rContexte, rOnboarding] = await Promise.all([pContexte, pOnboarding])
+
   let membreAilleurs = false
-  try {
-    const ctx = await chargerContexte(userId)
+  if (rContexte.e) {
+    console.error('[auth-guard] contexte de compte indisponible:', rContexte.e)
+  } else {
+    const ctx = rContexte.ctx
     membreAilleurs = (ctx?.comptes || []).some(c => String(c.user_id) !== String(userId))
-  } catch (e) {
-    console.error('[auth-guard] contexte de compte indisponible:', e)
   }
 
   // BETA : l'onboarding ET l'abonnement ne BLOQUENT PLUS l'acces a l'app.
@@ -54,11 +74,8 @@ export async function requireAuth() {
   let step = 0
   let completed = false
   try {
-    const { data: onboarding } = await supabase
-      .from('onboarding_state')
-      .select('current_step, completed')
-      .eq('user_id', userId)
-      .maybeSingle()
+    if (rOnboarding.e) throw rOnboarding.e
+    const onboarding = rOnboarding.r && rOnboarding.r.data
     if (!onboarding) {
       await supabase.from('onboarding_state').insert({ user_id: userId, current_step: 0, completed: false })
     } else {

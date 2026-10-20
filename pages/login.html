@@ -95,17 +95,20 @@
   // Seul un chemin absolu du meme site est retenu :
   //   commence par '/', ne commence pas par '//' (qui vaut https://autre-site),
   //   ne contient ni '\' ni de schema.
+  // La destination par defaut est l'accueil de l'app. `/pages/index.html` n'y
+  // menait que par une redirection de plus (une navigation entiere pour rien).
+  // `next` est inchange : meme filtre, meme refus de tout ce qui sort du site.
   function destination () {
     const brut = new URLSearchParams(location.search).get('next')
-    if (!brut) return '/pages/index.html'
+    if (!brut) return '/pages/aujourdhui'
     if (!brut.startsWith('/') || brut.startsWith('//') || brut.includes('\\')) {
-      return '/pages/index.html'
+      return '/pages/aujourdhui'
     }
     try {
       // Verification finale : l'URL resolue doit rester sur cette origine.
       const u = new URL(brut, location.origin)
-      return u.origin === location.origin ? u.pathname + u.search : '/pages/index.html'
-    } catch { return '/pages/index.html' }
+      return u.origin === location.origin ? u.pathname + u.search : '/pages/aujourdhui'
+    } catch { return '/pages/aujourdhui' }
   }
   const APRES_CONNEXION = destination()
 

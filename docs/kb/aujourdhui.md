@@ -103,3 +103,27 @@ choix), Réglages (titulaire), Avis, Aide, la langue (construite depuis `langues
 Deux appels à `/api/yield` par bien, deux biens à la fois. Chacun relit tout l'historique du compte.
 La note : un appel `/api/avis?action=cartes` global puis un par bien, qui assemble toutes les cartes pour ne lire que `stats`.
 Les chiffres arrivent après le reste de la page. Dette 61.
+
+## 7. Le chemin critique de l'ouverture (20 octobre 2026)
+
+`init()` enchaînait ses lectures en file : 8 niveaux d'aller-retours avant le
+premier rendu, pour un titulaire. Il en fait **3**. Ce qui a changé, et
+pourquoi, est dans `docs/kb/performance.md` §4.4 — ici, ce qu'il faut savoir
+en relisant la page :
+
+- **`I18n.init()` part en même temps que `requireAuth()`.** La promesse reçoit
+  un `.catch` vide AVANT le `await` : il n'avale rien (le `await i18nPret`
+  lèvera quand même), il évite seulement une promesse non traitée si
+  `requireAuth` redirige entre-temps.
+- **Plus de `getUser()`.** L'utilisateur vient de `session.user`, que
+  `requireAuth` renvoie déjà.
+- **Le prénom et la liste des biens partent ensemble.** Les deux ne dépendent
+  que du contexte de compte, déjà chargé. `lireBiens()` rend `[]` quand le
+  profil ne lit ni les réservations ni les ménages — exactement la valeur
+  initiale de `etat.biens`, donc aucun changement d'affichage.
+- **Le menu se rend avant ces deux lectures**, plus après : il ne dépend que du
+  contexte. Le prénom et les initiales s'écrivent ensuite, sur des ancres du
+  HTML statique (`data-bind="greeting"`, `data-bind="initials"`).
+
+L'ordre des rendus qui suivent — le lot des 5 chargeurs, puis les notes, puis
+les chiffres par bien — n'a pas bougé (§6, dette 61).

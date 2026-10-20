@@ -95,7 +95,7 @@
 <script src="/shared/nav.js"></script>
 <script type="module">
 import { requireAuth } from '/components/auth-guard.js'
-import { supabase, getUser, signOut } from '/shared/supabase.js'
+import { supabase, signOut } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
@@ -572,18 +572,19 @@ async function prenom (user) {
 }
 
 async function init () {
+  // I18n ne dépend pas de la session : les deux partent ENSEMBLE. Le `.catch`
+  // vide n'avale rien — `await i18nPrêt` lèvera quand même plus bas ; il évite
+  // seulement une promesse non traitée si `requireAuth` redirige entre-temps.
+  const i18nPret = I18n.init()
+  i18nPret.catch(() => {})
   const session = await requireAuth()
   if (!session) return
-  await I18n.init()
+  await i18nPret
   document.addEventListener('i18n:changed', () => location.reload())
 
-  const user = await getUser()
-  const brut = await prenom(user)
-  // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
-  // la partie locale de l'e-mail, en minuscules.
-  const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
-  $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
-  $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
+  // `session.user` vient de `requireAuth` : plus de `getUser()`, qui refaisait
+  // un aller-retour vers /auth/v1/user pour le même objet.
+  const user = session.user
   // La création de bien n'est pas déléguée (cf. pages/biens.html).
   $('[data-bind="add-property"]').hidden = !estTitulaire()
 
@@ -605,16 +606,29 @@ async function init () {
     ].filter(Boolean)
   })
 
+  // Le prénom et les biens ne dépendent que du contexte de compte, déjà chargé
+  // par `requireAuth` : les deux requêtes partent ENSEMBLE, elles s'attendaient
+  // l'une l'autre pour rien.
+  //
   // Les biens : lecture directe sous RLS (`properties_select` = périmètre du
   // profil). Pas /api/channel-property, qui interroge Beds24 en direct.
-  if (peutLire('reservations') || peutLire('menages')) {
+  const lireBiens = async () => {
+    if (!peutLire('reservations') && !peutLire('menages')) return []
     const { data, error } = await supabase.from('properties')
       .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency, photo_url')
       .eq('user_id', compteCourant())
       .order('name', { ascending: true })
     if (error) logger.error('Aujourdhui', 'biens', error)
-    etat.biens = data || []
+    return data || []
   }
+  const [brut, biens] = await Promise.all([prenom(user), lireBiens()])
+  etat.biens = biens
+
+  // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
+  // la partie locale de l'e-mail, en minuscules.
+  const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
+  $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
+  $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
   // ⚠ PLUS DE `liens` : l'entrée Calendrier mène à l'écran V5 `/calendrier`,
   // le même depuis toutes les pages. Épingler ici le premier bien donnait à
   // cet onglet deux comportements selon la page d'où on cliquait.
