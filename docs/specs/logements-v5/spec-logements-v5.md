@@ -4,6 +4,13 @@ Maquette : planches `Logements-v5`, `Logements-mobile-v5`, `Fiche-bien-v5`, `Fic
 de l'artefact « HôteSmart — Refonte UI ».
 Base métier : `docs/specs/inventaire-biens.md` (22 fonctions, D1 à D11) et
 `docs/specs/spec-canaux-au-coeur.md` (dette 59, en prod).
+
+⚠ **`docs/specs/inventaire-biens.md` ne vit PAS sur cette branche** : il est sur
+`inventaire-biens`, au commit `da5219d`. Comme c'est lui qui « fait foi sur le
+fond », le croiser depuis ce worktree demande de l'extraire :
+`git show da5219d:docs/specs/inventaire-biens.md`. À merger dans `main`, ou à
+citer par ce SHA — sans quoi la règle « la forme ne supprime jamais le fond »
+est invérifiable depuis ici.
 **La spec donne la forme ; l'inventaire fait foi sur le fond.** Avant tout code :
 tableau de conformité (§9), chaque fonction → conservée / déplacée / retirée.
 

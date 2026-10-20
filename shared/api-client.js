@@ -67,6 +67,14 @@ async function apiCall(endpoint, method = 'GET', body = null) {
 }
 
 export const api = {
+  // La liste V5 des logements et la fiche d'un bien (lot Logements V5, etape 0).
+  // ⚠ LECTURE SEULE : cet endpoint n'ecrit rien, n'appelle aucun partenaire, et
+  // ne descend aucun identifiant du partenaire. Les actions passent par les
+  // endpoints existants (channel-property PATCH/DELETE, photo, automation).
+  logement: {
+    liste: () => apiCall('logement', 'GET'),
+    fiche: (id) => apiCall(`logement?id=${encodeURIComponent(id)}`, 'GET')
+  },
   beds24: {
     getProperties: () => apiCall('beds24', 'POST', { action: 'getProperties' }),
     getBookings: (propertyId) => apiCall('beds24', 'POST', { action: 'getBookings', propertyId }),

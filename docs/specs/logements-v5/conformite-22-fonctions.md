@@ -61,6 +61,22 @@ Aucune fonction n'est perdue par omission : les sept « déplacées » le sont
 parce que la carte de la liste devient **un lien**, et qu'un bouton dans un lien
 se dispute le clic.
 
+## Ce que l'ÉTAPE 1 retire de la liste, et pourquoi
+
+Le tableau ci-dessus décrit le lot entier. L'étape 1 — la liste en lecture seule
+— en retire trois choses, et la règle du dépôt veut que chacune soit nommée
+plutôt qu'omise :
+
+| ce qui manque à l'étape 1 | motif | quand ça revient |
+|---|---|---|
+| le repli **« Ajouter une photo »** sur une carte sans photo (§2) | c'est une action d'**écriture** ; l'étape 1 n'en porte aucune. La carte montre la vignette neutre, sans le bouton | étape 3 (actions de la fiche) |
+| la **carte cliquable** vers la fiche (§2) | la fiche V5 est l'étape 2, et `/biens/:id` mène aujourd'hui à l'**iframe dormante** que §1 ordonne de supprimer. Un clic qui dépose l'hôte dans du code mort est pire que pas de clic | étape 2 |
+| le bouton **« Actualiser »** du relevé des canaux | le relevé est une **écriture** (`POST relever_canaux`). La liste dit donc la **fraîcheur** (« Canaux non vérifiés depuis le … ») sans promettre un geste qui n'existe pas encore : afficher une alarme sans son remède est la seule combinaison à écarter | étape 3 |
+
+⚠ **Et `indisponibles` n'est pas lu par l'écran.** L'endpoint le descend ; la
+liste s'appuie sur les `null` de chaque bien, qui portent la même information au
+bon grain. À reprendre à l'étape 2, où la fiche a des blocs entiers à masquer.
+
 ## Les onze défauts, et où ils se ferment
 
 | défaut | où il se ferme |
