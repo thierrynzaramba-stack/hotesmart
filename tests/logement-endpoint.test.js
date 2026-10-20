@@ -73,7 +73,7 @@ function passeOr (ligne, expr) {
   })
 }
 
-function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], enPanne = {}, enPanneApres = {} } = {}) {
+function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], avis = [], enPanne = {}, enPanneApres = {} } = {}) {
   const vus = []
   const passages = {}
   const client = {
@@ -87,7 +87,7 @@ function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], enPan
           passages[table] = (passages[table] || 0) + 1
           if (passages[table] > enPanneApres[table]) return { data: null, error: { message: 'timeout' } }
         }
-        const source = { properties: BIENS, profiles: profils, profile_permissions: permissions }[table] || []
+        const source = { properties: BIENS, profiles: profils, profile_permissions: permissions, ota_reviews: avis }[table] || []
         const c = source.filter(l =>
           Object.entries(a.f).every(([k, v]) => String(l[k]) === String(v)) &&
           a.ins.every(f => f.v.includes(String(l[f.c]))) &&
@@ -368,4 +368,57 @@ test('`reglages: write` : la suppression est jugee sur les canaux, plus sur le d
   const r = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
   assert.notEqual(r.body.suppression.motif, 'droit_refuse')
   assert.equal(r.body.suppression.motif, 'jamais_releve', 'aucun canal releve dans ce double')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Les avis sur la liste — le droit de DOMAINE, verifie par l'endpoint lui-meme
+// ═══════════════════════════════════════════════════════════════════════════
+
+const avisDe = (property_id, overall_score, extra = {}) => ({
+  id: `av-${property_id}-${overall_score}`, user_id: TITULAIRE, property_id,
+  statut: 'confirme', is_hidden: false, overall_score,
+  received_at: '2026-10-10T00:00:00Z', ...extra
+})
+
+test('la note et le nombre d avis descendent sur chaque carte de la liste', async () => {
+  preparer({ avis: [avisDe(BIEN_A, 10), avisDe(BIEN_A, 9), avisDe(BIEN_B, 8)] })
+  const r = await appeler()
+  assert.equal(r.code, 200)
+  assert.deepEqual(r.body.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 2, note_sur_5: 4.8 })
+  assert.deepEqual(r.body.refuses, [])
+})
+
+test('LE TEST QUI COMPTE (SECURITE) : un membre sans le droit `avis` ne recoit AUCUNE note', async () => {
+  // `ota_reviews` est gardee par `can_read(user_id, 'avis', …)`, et cet endpoint
+  // tourne en service key, qui contourne la RLS par conception. Sans cette
+  // garde, un co-hote invite avec `avis: none` recevait la note de chaque
+  // logement du portefeuille — ce que api/avis.js lui refuse.
+  const { vus } = preparer({
+    appelant: MEMBRE,
+    profils: [profilDe(TITULAIRE, MEMBRE)],
+    permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, { avis: 'none' })],
+    avis: [avisDe(BIEN_A, 10)]
+  })
+  const r = await appeler({}, { 'x-compte': TITULAIRE })
+  assert.equal(r.code, 200)
+  assert.ok(r.body.biens.length >= 1)
+  assert.ok(r.body.biens.every(b => b.avis === null))
+  assert.deepEqual(r.body.refuses, ['avis'])
+  assert.ok(!vus.map(v => v.table).includes('ota_reviews'),
+    'le droit se verifie AVANT la lecture : une fois sortie de la base, la donnee a deja fuite')
+})
+
+test('un membre QUI A le droit `avis` recoit bien les notes de son perimetre', async () => {
+  // Contre-epreuve du test precedent : une garde qui refuse tout le monde n est
+  // pas une garde, c est une panne.
+  preparer({
+    appelant: MEMBRE,
+    profils: [profilDe(TITULAIRE, MEMBRE)],
+    permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, { property_scope: 'selected', property_refs: [REF_A] })],
+    avis: [avisDe(BIEN_A, 10)]
+  })
+  const r = await appeler({}, { 'x-compte': TITULAIRE })
+  assert.deepEqual(r.body.biens.map(b => b.nom), ['La bulle'])
+  assert.deepEqual(r.body.biens[0].avis, { total: 1, notes: 1, note_sur_5: 5 })
+  assert.deepEqual(r.body.refuses, [])
 })

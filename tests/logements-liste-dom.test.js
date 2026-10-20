@@ -24,10 +24,23 @@ test.before(async () => { M = await import('../shared/logements-liste.js') })
 // textes ne dirait rien sur les clés que la page demande.
 const FR = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', 'fr.json'), 'utf8'))
 const CLES_DEMANDEES = new Set()
+// ⚠ ON GARDE AUSSI LE TEXTE RENDU, pas seulement la cle. La garde « aucun texte
+// en dur » comparait le texte affiche a la chaine BRUTE du dictionnaire : une
+// cle a pluriel ICU (`{n, plural, one {# avis} other {# avis}}`) n'y survit pas
+// — ses mots litteraux sont dans les accolades que la garde efface. Comparer au
+// RENDU est a la fois plus simple et plus exigeant.
+const RENDUS = new Set()
 const esc = (s) => String(s == null ? '' : s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 const t = (cle, vars = {}) => {
   CLES_DEMANDEES.add(cle)
+  // ⚠ LE DOUBLE EST AUSSI STRICT QUE LE MOTEUR. `shared/i18n/i18n.js` declare
+  // `t(key, vars = {})` — un defaut qui ne couvre que `undefined` — et reduit
+  // les pluriels en lisant `vars[cle]` SANS GARDE. Passer `null` y leve, et
+  // faisait tomber toute la liste dans l'etat « panne » sur une carte dont les
+  // avis ne sont pas lus. Un double plus permissif que le produit laisse passer
+  // exactement ce defaut-la.
+  assert.notEqual(vars, null, `t('${cle}') appele avec \`null\` : le moteur reel leve`)
   let s = FR[cle]
   assert.ok(s != null, `clé i18n absente de fr.json : ${cle}`)
   // Pluriels ICU, réduits à ce que le moteur du dépôt fait.
@@ -38,11 +51,16 @@ const t = (cle, vars = {}) => {
     const choisi = cas[`=${n}`] ?? cas[new Intl.PluralRules('fr').select(n)] ?? cas.other ?? ''
     return choisi.replace(/#/g, String(n))
   })
-  return s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`))
+  const rendu = s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`))
+  RENDUS.add(rendu)
+  return rendu
 }
 const dateEnClair = (iso) => `le-${iso}`
 const icone = (id) => `<svg data-icone="${id}"></svg>`
-const OUTILS = () => ({ t, esc, dateEnClair, icone })
+// `I18n.num`, reduit a ce que le moteur du depot fait en francais : la virgule
+// decimale. Un test qui formaterait en anglais laisserait passer « 4.9 ».
+const nombre = (x) => new Intl.NumberFormat('fr', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(x)
+const OUTILS = (extra = {}) => ({ t, esc, dateEnClair, icone, nombre, ...extra })
 
 const doc = (html) => new JSDOM(`<!doctype html><body><div id="c">${html}</div></body>`).window.document
 
@@ -51,6 +69,7 @@ const bien = (extra = {}) => ({
   capacite: 2, photo_url: null, assistant_en_pause: false, canaux_echec: false,
   canaux: [{ ota: 'airbnb', titre: 'x', actif: true, mappe: true, listing_url: null }],
   fait_date: { type: 'libre', du: null, au: null, occupe: false, ferme: false },
+  avis: { total: 0, notes: 0, note_sur_5: null },
   ...extra
 })
 
@@ -58,18 +77,21 @@ const bien = (extra = {}) => ({
 // 1. Le fait daté
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ⚠ LA CARTE NE PORTE PLUS LE FAIT DATE (demande de Thierry, 20 octobre 2026 :
+// « au lieu de Fermé jusqu'au mercredi 21 octobre, met les avis total sur le
+// logement »). La REGLE, elle, reste eprouvee ici : c'est elle qui compte, et la
+// fiche (etape 2) la consomme.
+
 test('LE TEST QUI COMPTE : un fait daté NON LU ne devient jamais « Libre »', () => {
-  const d = doc(M.carteHtml(bien({ fait_date: null }), OUTILS()))
-  const ligne = d.querySelector('[data-fait]')
-  assert.equal(ligne.dataset.fait, 'indisponible')
-  assert.equal(ligne.textContent, 'Information indisponible')
-  assert.ok(ligne.classList.contains('log-fait--muet'), 'il se lit comme une absence, pas comme un fait')
-  assert.doesNotMatch(d.querySelector('.log-carte').textContent, /Libre/,
+  const dit = M.faitDateAffiche(null)
+  assert.equal(dit.cle, 'logements.fait_indisponible')
+  assert.equal(dit.muet, true)
+  assert.doesNotMatch(t(dit.cle), /Libre/,
     'afficher « Libre » sur un bien dont on n a pas pu lire les réservations est un mensonge commercial')
 })
 
 test('les cinq types de fait daté donnent cinq phrases distinctes', () => {
-  const phrase = (fait) => doc(M.carteHtml(bien({ fait_date: fait }), OUTILS())).querySelector('[data-fait]').textContent
+  const phrase = (fait) => { const d = M.faitDateAffiche(fait); return t(d.cle, Object.fromEntries(Object.entries(d.valeurs || {}).map(([k, v]) => [k, dateEnClair(v)]))) }
   assert.equal(phrase({ type: 'occupe', du: null, au: '2026-10-22' }), 'Occupé · départ le le-2026-10-22')
   assert.equal(phrase({ type: 'ferme', du: null, au: '2026-10-21' }), 'Fermé jusqu’au le-2026-10-21')
   assert.equal(phrase({ type: 'arrivee', du: '2026-10-25', au: null }), 'Libre jusqu’au le-2026-10-25')
@@ -82,15 +104,22 @@ test('les cinq types de fait daté donnent cinq phrases distinctes', () => {
 })
 
 test('un type de fait INCONNU se tait, il ne se devine pas', () => {
-  const d = doc(M.carteHtml(bien({ fait_date: { type: 'teleportation' } }), OUTILS()))
-  assert.equal(d.querySelector('[data-fait]').textContent, 'Information indisponible')
+  assert.equal(M.faitDateAffiche({ type: 'teleportation' }).cle, 'logements.fait_indisponible')
 })
 
-test('la décision de Thierry, en bout de chaîne : une fermeture à venir n affiche pas « Libre »', () => {
-  const d = doc(M.carteHtml(bien({ fait_date: { type: 'fermeture', du: '2026-11-02', au: '2026-11-10' } }), OUTILS()))
-  const texte = d.querySelector('[data-fait]').textContent
-  assert.match(texte, /^Fermé du /)
-  assert.doesNotMatch(texte, /Libre/)
+test('LE TEST QUI COMPTE : le fait daté a QUITTE la carte, remplacé par les avis', () => {
+  // Demande de Thierry du 20 octobre 2026. Ce qui disparaît de la carte avec la
+  // fermeture : « Occupé · départ le … », « Libre jusqu'au … » et « Libre ·
+  // aucune arrivée prévue ». Le fait reste dans le JSON de l'endpoint, et la
+  // fiche (étape 2) l'affiche.
+  const d = doc(M.carteHtml(bien({
+    fait_date: { type: 'ferme', du: null, au: '2026-10-21' },
+    avis: { total: 336, notes: 332, note_sur_5: 4.9 }
+  }), OUTILS()))
+  assert.equal(d.querySelector('[data-fait]'), null)
+  const carte = d.querySelector('.log-carte').textContent
+  assert.doesNotMatch(carte, /Fermé/)
+  assert.match(carte, /336 avis/)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -314,9 +343,11 @@ test('LE TEST QUI COMPTE : aucun texte en dur — toute chaîne visible vient de
   // affiché est COUVERT par les clés demandées. Un libellé écrit en dur dans le
   // module passerait tous les autres tests sans jamais être traduit (défaut D1).
   CLES_DEMANDEES.clear()
+  RENDUS.clear()
   const html = [
-    M.carteHtml(bien({ assistant_en_pause: true, canaux: null, fait_date: null }), OUTILS()),
-    M.carteHtml(bien({ canaux: [], fait_date: { type: 'fermeture', du: '2026-11-02', au: '2026-11-10' } }), OUTILS()),
+    M.carteHtml(bien({ assistant_en_pause: true, canaux: null, fait_date: null, avis: null }), OUTILS({ avisIndisponibles: true })),
+    M.carteHtml(bien({ canaux: [], avis: { total: 336, notes: 332, note_sur_5: 4.9 } }), OUTILS()),
+    M.carteHtml(bien({ avis: { total: 3, notes: 0, note_sur_5: null } }), OUTILS()),
     // Les quatre etats de canal, pour que la garde couvre TOUT le rendu.
     M.carteHtml(bien({ canaux: [
       { ota: 'airbnb', mappe: true, actif: true }, { ota: 'booking', mappe: true, actif: false },
@@ -326,8 +357,8 @@ test('LE TEST QUI COMPTE : aucun texte en dur — toute chaîne visible vient de
     M.etatHtml('refus'), M.etatHtml('panne')
   ].join('')
   const d = doc(html)
-  const traductions = [...CLES_DEMANDEES].map(c => FR[c])
-  for (const noeud of d.querySelectorAll('.log-pastille, .log-fait, .log-signal, .log-sous')) {
+  const traductions = [...RENDUS]
+  for (const noeud of d.querySelectorAll('.log-pastille, .log-avis, .log-signal, .log-sous')) {
     const texte = noeud.textContent.trim()
     if (!texte) continue
     const couvert = traductions.some(tr => {
@@ -407,4 +438,118 @@ test('la page sert /logements, et l ancienne liste reste intacte', () => {
   // deux écrans en recette. La redirection est l étape 4.
   assert.ok(rewrites.some(r => r.source === '/biens' && r.destination === '/pages/biens'))
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'pages', 'biens.html')))
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 8. Les avis sur la carte (demande de Thierry, 20 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ligneAvis = (avis, extra = {}) => {
+  const d = doc(M.carteHtml(bien({ avis }), OUTILS(extra)))
+  return d.querySelector('.log-avis')
+}
+
+test('LE TEST QUI COMPTE : la note s affiche SUR 5, pas sur 10', () => {
+  // Le cœur stocke sur 10 (mesuré le 20 octobre 2026 : Airbnb comme Booking
+  // montent à 10 sur les 702 avis de production) ; l écran divise par 2,
+  // « partout » — décision de Thierry du lot 1, portée par `noteSur5`. Afficher
+  // 9,8 ici et 4,9 sur l accueil pour le même logement serait deux vérités.
+  const l = ligneAvis({ total: 336, notes: 332, note_sur_5: 4.9 })
+  assert.match(l.textContent, /4,9/)
+  assert.doesNotMatch(l.textContent, /9,8/)
+  assert.match(l.textContent, /336 avis/, 'le TOTAL des avis, c est la demande')
+  assert.equal(l.querySelector('[data-icone="i-review"]') != null, true, 'une étoile, comme sur l accueil')
+})
+
+test('un avis unique ne dit pas « 1 avis » au pluriel', () => {
+  assert.match(ligneAvis({ total: 1, notes: 1, note_sur_5: 5 }).textContent, /^5,0 \/ 5 · 1 avis/)
+})
+
+test('des avis SANS NOTE : le compte, sans étoile — jamais une moyenne de zéro', () => {
+  const l = ligneAvis({ total: 3, notes: 0, note_sur_5: null })
+  assert.match(l.textContent, /3 avis/)
+  assert.doesNotMatch(l.textContent, /0,0/)
+  assert.equal(l.querySelector('[data-icone="i-review"]'), null)
+})
+
+test('aucun avis : on le DIT — « lu, et vide » est une réponse', () => {
+  const l = ligneAvis({ total: 0, notes: 0, note_sur_5: null })
+  assert.equal(l.textContent.trim(), 'Aucun avis')
+  assert.ok(l.classList.contains('log-avis--muet'))
+})
+
+test('LE TEST QUI COMPTE : `avis: null` ne devient JAMAIS « Aucun avis »', () => {
+  // Les deux causes de `null` sont indiscernables au grain du bien : pas pu lire,
+  // ou pas le droit. « Aucun avis » sur un logement qui en a 336 est le même
+  // mensonge que « Libre » sur un bien complet.
+  assert.equal(ligneAvis(null), null, 'rien du tout : on ne montre pas ce qui mène à un refus')
+  assert.equal(ligneAvis(undefined), null, 'un champ absent se traite comme un `null`')
+})
+
+test('avis non lus pour TOUT LE COMPTE : la carte le dit, muet', () => {
+  // Là, le motif est connu et il n est pas un refus : la réponse porte
+  // `indisponibles: ['avis']`. On le dit une fois par carte, en muet.
+  const l = ligneAvis(null, { avisIndisponibles: true })
+  assert.equal(l.textContent.trim(), 'Avis non lus')
+  assert.ok(l.classList.contains('log-avis--muet'))
+})
+
+test('un refus de droit reste muet MEME quand une autre carte est en panne', () => {
+  // `avisIndisponibles` est un fait du COMPTE : si la réponse dit « refusé », la
+  // page ne passe pas le drapeau, et rien ne s affiche.
+  assert.equal(ligneAvis(null, { avisIndisponibles: false }), null)
+})
+
+test('une valeur non numerique ne devient ni un compte, ni du HTML', () => {
+  // ⚠ CE TEST NE MESURE PAS L ECHAPPEMENT, et son ancien nom le pretendait
+  // (constat m3) : `Number('<img …>')` est NaN, donc la charge est ecartee par
+  // la branche « reponse mal formee » AVANT d atteindre le HTML, et le test
+  // resterait vert sans `esc`. Rien de `bien.avis` ne descend en texte : ce ne
+  // sont que des nombres. Ce qu il mesure vraiment — et qui compte — c est qu une
+  // reponse mal formee retombe sur « non lu », jamais sur « Aucun avis ».
+  const l = ligneAvis({ total: '<img src=x onerror=alert(1)>', notes: 0, note_sur_5: null })
+  assert.equal(l.dataset.avis, 'inconnu')
+  assert.equal(doc(l.outerHTML).querySelectorAll('img').length, 0)
+  // L echappement des DONNEES, lui, est eprouve la ou elles descendent vraiment :
+  // le nom du bien et le libelle des canaux (tests de la section 6).
+})
+
+test('LE TEST QUI COMPTE (M2) : l ECHELLE de la note se dit, a la souris et a la voix', () => {
+  // L icone est `aria-hidden` : sans ca, un lecteur d ecran annonce « 4,9 · 336
+  // avis » sans dire sur quelle echelle — et 4,9 sur 10 serait une mauvaise note
+  // au lieu d une excellente. La revue a trouve que le commentaire promettait
+  // les deux et que le rendu n en portait aucun.
+  const l = ligneAvis({ total: 336, notes: 332, note_sur_5: 4.9 })
+  // ⚠ LE LIBELLE EST CELUI DE THIERRY, MOT POUR MOT (20 octobre 2026) : il dit
+  // l'echelle ET ce qu'on a fait des notes Booking.
+  assert.equal(l.getAttribute('title'), 'moyenne sur 5, notes Booking ramenées sur 5')
+  assert.match(l.querySelector('.sr-only').textContent, /moyenne sur 5, notes Booking ramenées sur 5/)
+  assert.match(l.textContent, /^4,9 \/ 5 · 336 avis/, 'la note porte son echelle a l ecran')
+  // Pas d echelle la ou il n y a pas de note : « 3 avis » n est pas sur 5.
+  const sans = ligneAvis({ total: 3, notes: 0, note_sur_5: null })
+  assert.equal(sans.getAttribute('title'), null)
+  assert.equal(sans.querySelector('.sr-only'), null)
+})
+
+test('LE TEST QUI COMPTE (règle V5) : l étoile est une ICÔNE du sprite, jamais un symbole texte', () => {
+  // Rappel de Thierry, 20 octobre 2026 : « icône du sprite, pas le caractère ».
+  // Un ★ écrit en dur ne suit ni la couleur du thème, ni la taille, ni le mode
+  // sombre, et se lit « étoile noire » par un lecteur d écran — la ligne dirait
+  // alors deux fois la note.
+  const l = ligneAvis({ total: 336, notes: 332, note_sur_5: 4.9 })
+  const svg = l.querySelector('[data-icone="i-review"]')
+  assert.ok(svg, 'l étoile vient du sprite')
+  assert.doesNotMatch(l.textContent, /[★☆⭐✩✪✫✬✭✮✯]/, 'aucun symbole texte dans la ligne')
+  // Et nulle part dans le module, pour qu un futur rendu ne l introduise pas.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'shared', 'logements-liste.js'), 'utf8')
+  assert.doesNotMatch(source, /[★☆⭐✩✪✫✬✭✮✯]/)
+  // Ni dans les trois dictionnaires : un symbole glissé dans une traduction
+  // passerait toutes les gardes de rendu.
+  for (const lang of ['fr', 'en', 'es']) {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', `${lang}.json`), 'utf8'))
+    for (const [cle, texte] of Object.entries(d)) {
+      if (!cle.startsWith('logements.')) continue
+      assert.doesNotMatch(String(texte), /[★☆⭐✩✪✫✬✭✮✯]/, `${lang} : ${cle}`)
+    }
+  }
 })

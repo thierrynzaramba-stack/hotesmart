@@ -17,6 +17,12 @@
 // la page traduit et met en forme. Un module qui rendrait « Occupé · départ
 // vendredi » serait intraduisible (c'est le défaut D1 de l'inventaire).
 
+// ⚠ CE MODULE NE CONVERTIT PLUS RIEN. L'endpoint descend `note_sur_5`, deja
+// ramenee sur 5 et arrondie UNE SEULE FOIS par `lib/avis/echelle.js` (decision
+// de Thierry du 20 octobre 2026). La version d'avant importait `noteSur5` et
+// divisait ici une moyenne deja arrondie la-bas : deux arrondis, donc 9,65
+// affichait 4,9 au lieu de 4,8. Une note se calcule a un seul endroit.
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Le fait daté
 // ─────────────────────────────────────────────────────────────────────────────
@@ -24,6 +30,13 @@
 // L'endpoint rend des FAITS (`type`, `du`, `au`) ; ici on choisit la phrase.
 // Cinq cas, et un sixième qui n'est pas une phrase : `null` = on n'a pas pu
 // lire, et ça ne se dit pas « Libre ».
+//
+// ⚠ LA CARTE DE LA LISTE NE L'AFFICHE PLUS (demande de Thierry, 20 octobre
+// 2026 : « au lieu de Fermé jusqu'au mercredi 21 octobre, met les avis total
+// sur le logement »). Ce qui a disparu de la carte avec la fermeture :
+// « Occupé · départ le … », « Libre jusqu'au … » et « Libre · aucune arrivée
+// prévue ». Le fait reste dans la réponse de l'endpoint, et la FICHE (étape 2)
+// l'affiche — c'est pour ça que la règle reste ici, et qu'elle garde ses tests.
 //
 // ⚠ `null` NE DEVIENT JAMAIS « Libre ». C'est la règle qui tient tout le lot :
 // afficher « Libre jusqu'au… » sur un bien dont on n'a pas pu lire les
@@ -119,6 +132,56 @@ const OTA_LABELS = [
 export function libelleDuCanal (c) {
   return OTA_LABELS.find(o => o.match.test(c.ota || ''))?.label
     || c.titre || c.ota || 'Canal'
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Les avis du logement — la note et le nombre TOTAL
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Demande de Thierry du 20 octobre 2026. « TOTAL » qualifie la PÉRIODE : tous
+// les avis du logement, pas la fenêtre de 30 jours de la fiche. L'endpoint rend
+// trois nombres (`total`, `notes`, `moyenne`) et c'est ici qu'on choisit la
+// phrase — quatre cas, et ils ne se confondent pas :
+//
+//   · `null` ET rien d'autre      on ne dit RIEN. Deux causes mènent à `null`,
+//                                 et elles sont indiscernables au grain du
+//                                 bien : on n'a pas pu lire, ou on n'a pas le
+//                                 DROIT. « On ne montre jamais ce qui mène à un
+//                                 refus » (règle de Thierry du 20 octobre) ;
+//   · `null` + `indisponible`     là, le motif est connu et ce n'est pas un
+//                                 refus : la réponse porte `indisponibles:
+//                                 ['avis']`, un fait du COMPTE. On le dit, muet ;
+//   · `total: 0`                  lu, et vide. « Aucun avis » est une RÉPONSE ;
+//   · des avis                    la note sur 5 et le compte.
+//
+// ⚠ `total: 0` NE SE CONFOND PAS AVEC `null`. Afficher « Aucun avis » sur un
+// logement qui en a 336 est le même mensonge que « Libre » sur un bien complet :
+// c'est la règle qui tient tout ce lot.
+//
+// ⚠ ET UNE NOTE ABSENTE N'EST PAS UNE NOTE DE ZÉRO. Mesuré en production le
+// 20 octobre 2026 : cinq avis n'ont pas de note — ce sont des détections dans
+// les messages, validées par l'hôte. La bulle a 336 avis visibles pour 332
+// notés : on montre le total, et l'étoile seulement si une note existe.
+export function avisAffiche (avis, { indisponible = false } = {}) {
+  if (avis == null) {
+    return indisponible
+      ? { etat: 'inconnu', cle: 'logements.avis_non_lus', valeurs: null, muet: true }
+      : null
+  }
+  const total = Number(avis.total)
+  // Une réponse mal formée se traite comme « non lu », jamais comme « aucun » :
+  // c'est le même raisonnement que `Array.isArray` dans `etatDeLaPage`.
+  if (!Number.isFinite(total)) {
+    return { etat: 'inconnu', cle: 'logements.avis_non_lus', valeurs: null, muet: true }
+  }
+  if (!total) return { etat: 'aucun', cle: 'logements.avis_aucun', valeurs: null, muet: true }
+  // ⚠ ON PREND LA NOTE TELLE QU'ELLE DESCEND. La diviser, l'arrondir ou la
+  // mettre a l'echelle ici referait le calcul une seconde fois.
+  const note = Number(avis.note_sur_5)
+  if (avis.note_sur_5 == null || !Number.isFinite(note)) {
+    return { etat: 'sans-note', cle: 'logements.avis_sans_note', valeurs: { n: total } }
+  }
+  return { etat: 'note', cle: 'logements.avis', valeurs: { n: total, note } }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -222,15 +285,15 @@ export function etatDeLaPage ({ erreur = null, biens = null } = {}) {
 // tranché cette question pour les avis (`core/avis/cartes.js`, éprouvé en
 // jsdom), et c'est le même choix ici.
 //
-// ⚠ LES OUTILS SONT INJECTÉS (`t`, `esc`, `dateEnClair`, `icone`) : ce module ne
+// ⚠ LES OUTILS SONT INJECTÉS (`t`, `esc`, `icone`, `nombre`) : ce module ne
 // connaît ni `window.I18n`, ni le DOM. Il rend une chaîne, et c'est tout — donc
 // il se teste sans navigateur et sans monter la page.
-
-// Les dates du fait daté passent par `dateEnClair` ; le reste est déjà du texte.
-function valeursEnClair (valeurs, dateEnClair) {
-  if (!valeurs) return {}
-  return Object.fromEntries(Object.entries(valeurs).map(([k, v]) => [k, dateEnClair(v)]))
-}
+//
+// ⚠ `dateEnClair` A QUITTÉ LE RENDU avec le fait daté, et son utilitaire
+// (`valeursEnClair`) aussi : une fonction que plus personne n'appelle est du
+// code dormant, et ce lot en SUPPRIME (spec §1). `faitDateAffiche`, elle, reste
+// — elle porte une règle métier éprouvée (« `null` ne devient jamais Libre »)
+// que la fiche consomme à l'étape 2, et la réécrire serait la perdre.
 
 export function canauxHtml (bien, { t, esc }) {
   const pastilles = pastillesDesCanaux(bien.canaux)
@@ -255,9 +318,38 @@ export function canauxHtml (bien, { t, esc }) {
     + `<span class="sr-only"> — ${esc(t(p.titre))}</span></span>`).join('')
 }
 
+// ⚠ L'ETOILE SEULEMENT S'IL Y A UNE NOTE — et l'ECHELLE SE DIT. L'icone est
+// `aria-hidden`, donc « 4,9 · 336 avis » se lit « quatre virgule neuf, trois
+// cent trente-six avis » : rien ne dit que 4,9 est sur 5, et 4,9 sur 10 serait
+// une mauvaise note au lieu d'une excellente. `title` porte l'echelle pour la
+// souris, `.sr-only` pour la voix — comme les pastilles de canaux le font deja.
+//
+// ⚠ CE COMMENTAIRE A ETE FAUX (constat M2 de la revue) : il annonçait les deux
+// alors que le rendu n'en portait aucun. Un commentaire qui affirme le
+// contraire du code est pire que pas de commentaire.
+export function avisHtml (bien, outils) {
+  const { t, esc, icone, nombre } = outils
+  const dit = avisAffiche(bien.avis, { indisponible: outils.avisIndisponibles === true })
+  if (!dit) return ''
+  // ⚠ `{}`, JAMAIS `null`. Le moteur du depot declare `t(key, vars = {})` : le
+  // defaut ne couvre que `undefined`, et sa reduction des pluriels lit
+  // `vars[cle]` sans garde. Passer `null` levait « Cannot convert undefined or
+  // null to object » — donc une carte dont les avis ne sont pas lus faisait
+  // tomber TOUTE la liste dans l'etat « panne ». Trouve par le test de la page.
+  const valeurs = dit.valeurs
+    ? { ...dit.valeurs, ...(dit.valeurs.note != null ? { note: nombre(dit.valeurs.note) } : {}) }
+    : {}
+  const avecNote = dit.etat === 'note'
+  const echelle = avecNote ? esc(t('logements.avis_echelle')) : ''
+  const etoile = avecNote ? icone('i-review', 'icon icon--fill') : ''
+  return `<div class="log-avis${dit.muet ? ' log-avis--muet' : ''} caption" data-avis="${dit.etat}"`
+    + `${avecNote ? ` title="${echelle}"` : ''}>`
+    + `${etoile}${esc(t(dit.cle, valeurs))}`
+    + `${avecNote ? `<span class="sr-only"> — ${echelle}</span>` : ''}</div>`
+}
+
 export function carteHtml (bien, outils) {
-  const { t, esc, dateEnClair, icone } = outils
-  const fait = faitDateAffiche(bien.fait_date)
+  const { t, esc, icone } = outils
   const signal = signalDuBien(bien)
   const sous = sousTitre(bien)
     .map(x => x.texte != null ? esc(x.texte) : esc(t(x.cle, x.valeurs)))
@@ -268,13 +360,13 @@ export function carteHtml (bien, outils) {
 
   return `<article class="log-carte" data-bien="${esc(bien.id)}">
     <div class="log-photo">${photo}</div>
-    <div>
+    <div class="log-texte">
       <div class="log-nom">${esc(bien.nom || '')}</div>
       ${sous ? `<div class="log-sous caption">${sous}</div>` : ''}
     </div>
     <div class="log-canaux">${canauxHtml(bien, outils)}</div>
-    <div class="log-fait${fait.muet ? ' log-fait--muet' : ''} caption" data-fait="${bien.fait_date ? bien.fait_date.type : 'indisponible'}">${esc(t(fait.cle, valeursEnClair(fait.valeurs, dateEnClair)))}</div>
-    ${signal ? `<div><span class="log-signal" data-signal>${icone(signal.icone, 'icon')}${esc(t(signal.cle))}</span></div>` : ''}
+    ${avisHtml(bien, outils)}
+    ${signal ? `<div class="log-signal-ligne"><span class="log-signal" data-signal>${icone(signal.icone, 'icon')}${esc(t(signal.cle))}</span></div>` : ''}
   </article>`
 }
 

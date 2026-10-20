@@ -615,5 +615,10 @@
   "logements.canal_eteint": "Canal desactivado",
   "logements.vide_aide_membre": "No tiene ningún alojamiento asignado en esta cuenta.",
   "logements.fraicheur": "Canales verificados {quand}",
-  "logements.fraicheur_vieille": "Canales sin verificar desde {quand}"
+  "logements.fraicheur_vieille": "Canales sin verificar desde {quand}",
+  "logements.avis": "{note} / 5 · {n, plural, one {# reseña} other {# reseñas}}",
+  "logements.avis_sans_note": "{n, plural, one {# reseña} other {# reseñas}}",
+  "logements.avis_aucun": "Sin reseñas",
+  "logements.avis_non_lus": "Reseñas no leídas",
+  "logements.avis_echelle": "media sobre 5, notas de Booking convertidas a escala de 5"
 }

@@ -11,9 +11,13 @@
 <link rel="stylesheet" href="/shared/ui.css">
 <!-- PAGE « LOGEMENTS » — refonte UI V5, lot Logements, ÉTAPE 1 : LECTURE SEULE.
      Une carte par logement : photo, nom, ville · capacité, pastilles de canaux
-     lues DANS LE CŒUR (dette 59 — aucun appel partenaire à l'affichage), un
-     fait daté compté depuis les réservations ET les fermetures de l'hôte, et un
-     seul signal.
+     lues DANS LE CŒUR (dette 59 — aucun appel partenaire à l'affichage), la
+     note et le nombre TOTAL d'avis du logement, et un seul signal.
+     ⚠ LA CARTE N'AFFICHE PLUS LE FAIT DATÉ (demande de Thierry du 20 octobre
+     2026 : « au lieu de Fermé jusqu'au mercredi 21 octobre, met les avis total
+     sur le logement »). Le fait reste dans la réponse de l'endpoint — compté
+     depuis les réservations ET les fermetures de l'hôte — et c'est la FICHE
+     (étape 2) qui l'affiche.
      Spec : docs/specs/logements-v5/spec-logements-v5.md (§2 pour cette liste) ;
      fond : docs/specs/inventaire-biens.md et le tableau de conformité §9.
      Données : GET /api/logement (étape 0), lecture seule, aucun identifiant du
@@ -81,8 +85,14 @@
   .log-pastille--pas-ce-bien .log-point { border: 1.5px solid var(--muted-2); }
   .log-pastille--indetermine .log-point { border: 1.5px dashed var(--muted-2); }
 
-  .log-fait { color: var(--ink); }
-  .log-fait--muet { color: var(--muted); font-style: italic; }
+  /* Les avis du logement : la note sur 5 et le nombre TOTAL d'avis (demande de
+     Thierry du 20 octobre 2026, à la place du fait daté). L'étoile prend la
+     couleur d'encre normale — la charte §7 réserve l'ambre au badge de
+     navigation et le rouge à la suppression, et une note n'est ni l'un ni
+     l'autre. */
+  .log-avis { display: flex; align-items: center; gap: 5px; color: var(--ink); }
+  .log-avis--muet { color: var(--muted); font-style: italic; }
+  .log-avis svg { width: 14px; height: 14px; flex: none; }
 
   /* Un seul signal, en gris neutre : la charte réserve le rouge à la
      suppression et aux erreurs, et l'ambre au badge de navigation. */
@@ -109,14 +119,21 @@
     .log-entete { align-items: stretch; }
     .log-entete .btn { width: 100%; }
     .log-grille { gap: var(--gap-s); }
+    /* ⚠ LES ZONES SE DÉSIGNENT PAR CLASSE, PAS PAR POSITION. Ma première
+       version plaçait les blocs par `:nth-child`, et c'était juste tant que la
+       carte avait toujours ses cinq enfants. La ligne des avis, elle, DISPARAÎT
+       quand on n'a pas pu les lire (ou qu'on n'a pas le droit) : le signal
+       devenait alors le 4e enfant, donc prenait la zone des avis, et la carte
+       d'un bien en pause se décalait d'une ligne. Un sélecteur positionnel
+       décrit l'ordre du HTML, pas le rôle des blocs. */
     .log-carte { display: grid; grid-template-columns: 84px 1fr;
-      grid-template-areas: "photo texte" "photo canaux" "photo fait" "signal signal";
+      grid-template-areas: "photo texte" "photo canaux" "photo avis" "signal signal";
       column-gap: var(--gap-m); row-gap: 4px; align-items: start; padding: var(--gap-s); }
-    .log-carte > :nth-child(1) { grid-area: photo; }
-    .log-carte > :nth-child(2) { grid-area: texte; }
-    .log-carte > :nth-child(3) { grid-area: canaux; }
-    .log-carte > :nth-child(4) { grid-area: fait; }
-    .log-carte > :nth-child(5) { grid-area: signal; }
+    .log-photo { grid-area: photo; }
+    .log-texte { grid-area: texte; }
+    .log-canaux { grid-area: canaux; }
+    .log-avis { grid-area: avis; }
+    .log-signal-ligne { grid-area: signal; }
     .log-photo { aspect-ratio: 1; width: 84px; }
     .log-photo svg { width: var(--icon-size); height: var(--icon-size); }
   }
@@ -211,7 +228,16 @@ function dateEnClair (iso) {
   try { return I18n.date(d, opts) } catch { return iso }
 }
 
-const OUTILS = { t, esc, dateEnClair, icone }
+// ⚠ LE FORMAT DU NOMBRE PAR `I18n.num`, PAS A LA MAIN. « 4.9 » se lit mal en
+// francais, et `toFixed(1)` donne un point decimal quelle que soit la langue.
+// Meme geste que l'accueil (`pages/aujourdhui.html`, la note du bien).
+const nombre = (x) => { try { return I18n.num(x, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) } catch { return String(x) } }
+
+// ⚠ PLUS DE `dateEnClair` ICI (constat m4) : `carteHtml` ne le destructure plus
+// depuis que le fait date a quitte la carte. `dateEnClair` reste utilise par le
+// bandeau de fraicheur, en direct. Un outil passe a un module qui ne le lit pas
+// est du cablage dormant, et ce lot en supprime.
+const OUTILS = { t, esc, icone, nombre }
 
 function montrerEtat (quoi) {
   const zone = $('[data-bind="etat"]')
@@ -267,7 +293,14 @@ async function charger () {
     if (etat !== 'liste') { montrerEtat(etat); return }
     $('[data-bind="etat"]').hidden = true
     $('[data-bind="chargement"]').hidden = true
-    grille.innerHTML = r.biens.map(b => carteHtml(b, OUTILS)).join('')
+    // ⚠ « PAS PU LIRE » ET « PAS LE DROIT » NE SE DISENT PAS PAREIL, et les deux
+    // valent `avis: null` sur le bien. Le motif, lui, est au grain du COMPTE :
+    // `indisponibles` dit la panne, `refuses` dit le refus. On ne passe le
+    // drapeau que pour la panne — « on ne montre jamais ce qui mene a un refus »
+    // (regle de Thierry du 20 octobre), et la panne, elle, se dit.
+    const outils = { ...OUTILS,
+      avisIndisponibles: Array.isArray(r.indisponibles) && r.indisponibles.includes('avis') }
+    grille.innerHTML = r.biens.map(b => carteHtml(b, outils)).join('')
     grille.removeAttribute('aria-busy')
     montrerFraicheur(r.biens)
     // ⚠ Les cartes portent des `data-i18n` dans leurs sous-éléments d'état :
