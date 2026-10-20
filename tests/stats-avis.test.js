@@ -32,6 +32,13 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
       // prestataire sans attribution voit zéro » ne testait rien de réel.
       const AUTRES = ['profiles', 'prestataire_periodes', 'menage_events']
 
+      // Compare comme PostgREST sur la colonne : numerique si les deux le sont
+      // (les fixtures numerotent leurs lignes), lexicographique sinon.
+      const cmp = (a, b) => {
+        const na = Number(a); const nb = Number(b)
+        if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb
+        return String(a) < String(b) ? -1 : String(a) > String(b) ? 1 : 0
+      }
       const evaluerOr = (l, e) => FAUX.evaluerOr(l, e)
       const passeEmbed = (l) =>
         FAUX.passeEmbed(l, appel.filtres, (fauxClient.attribution || {}).menage_events)
@@ -49,11 +56,19 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
         passeEmbed(l) &&
         (!appel.gte || String(l[appel.gte.colonne] || '') >= String(appel.gte.valeur)) &&
         appel.ins.every(f => f.valeurs.includes(String(l[f.colonne]))) &&
+        (appel.gts || []).every(f => cmp(l[f.colonne], f.valeur) > 0) &&
         (appel.ors || []).every(e => evaluerOr(l, e))
       // Jeu d'attribution optionnel : sans lui, `avisDuPrestataire` sort tout de
       // suite et la ligne `.in('id', idsAttribues)` n'est JAMAIS exercee — le
       // test de l'invariant central du §6 ne testait donc rien.
       const attrib = fauxClient.attribution || null
+      // Les lignes retenues, TRIEES comme la requete le demande : un curseur
+      // sur une liste non triee ne partitionne rien.
+      const retenues = () => {
+        const out = lignes.filter(retenir).filter(l => (appel.nonNuls || []).every(c => l[c] != null))
+        if (appel.tri) out.sort((a, b) => cmp(a[appel.tri], b[appel.tri]))
+        return out
+      }
       const chain = {
         select (c, opts) { appel.select = c; appel.head = !!(opts && opts.head); appel.count = opts && opts.count; return chain },
         eq (c, v) { appel.filtres[c] = v; return chain },
@@ -65,9 +80,13 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
         // leve, et c'est voulu.
         or (expr) { (appel.ors = appel.ors || []).push(String(expr)); return chain },
         gte (c, v) { appel.gte = { colonne: c, valeur: v }; return chain },
+        // ⚠ `gt` EST HONORE : c'est le CURSEUR de la pagination des notes. Un
+        // double qui l'ignore rendrait la premiere page indefiniment, et le
+        // test de pagination tournerait en boucle ou mentirait.
+        gt (c, v) { (appel.gts = appel.gts || []).push({ colonne: c, valeur: v }); return chain },
         in (c, v) { appel.ins.push({ colonne: c, valeurs: (v || []).map(String) }); return chain },
         not (c, op, v) { if (op === 'is' && v === null) (appel.nonNuls = appel.nonNuls || []).push(c); return chain },
-        order () { return chain },
+        order (c) { appel.tri = c; return chain },
         // La moyenne lit par pages : `range` resout comme `limit`.
         // ⚠ ET IL HONORE `erreur`, comme `then`. Jusqu'au 20 octobre 2026 il
         // resolvait toujours sans erreur : les deux fonctions qui lisent par
@@ -83,9 +102,17 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
         // `n` resterait a 0 et l'accueil n'afficherait plus de note, en silence,
         // pour tout le monde. Le `count` est celui de TOUT le filtre, pas de la
         // page : c'est ce qui permet de voir une lecture incomplete.
+        // ⚠ `range` EST REFUSE SUR `ota_reviews`. La lecture des notes pagine
+        // par CURSEUR depuis le 20 octobre 2026 : un decalage sur un ensemble
+        // qui gagne des lignes en cours de lecture saute des lignes reelles, et
+        // `ota_reviews.id` est un uuid ALEATOIRE, donc une insertion se place
+        // n'importe ou. Revenir a `range()` doit rougir, pas passer.
         range (a, z) {
+          if (table === 'ota_reviews') {
+            throw new Error('range() sur ota_reviews : la lecture des notes pagine par curseur (.gt(id).limit())')
+          }
           if (erreur) return Promise.resolve({ data: null, count: null, error: erreur })
-          const tous = lignes.filter(retenir).filter(l => (appel.nonNuls || []).every(c => l[c] != null))
+          const tous = retenues()
           return Promise.resolve({
             data: appel.head ? null : tous.slice(a, z + 1),
             count: appel.count === 'exact' ? tous.length : null,
@@ -93,12 +120,22 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
           })
         },
         // `avisDuPrestataire` borne ses lectures : le double doit resoudre.
-        limit () {
+        // ⚠ ET IL BORNE VRAIMENT, sur `ota_reviews` : c'est `limit(PAGE_NOTES)`
+        // qui pagine les notes depuis le passage au curseur. Un `limit` qui rend
+        // tout d'un coup ferait passer le test de pagination sans qu'aucune
+        // seconde page ne soit jamais demandee.
+        limit (n) {
           if (AUTRES.includes(table)) {
             const d = attrib && attrib[table] ? attrib[table] : []
             return Promise.resolve({ data: d, error: null })
           }
-          return Promise.resolve({ data: lignes.filter(retenir), error: null })
+          if (erreur) return Promise.resolve({ data: null, count: null, error: erreur })
+          const tous = retenues()
+          return Promise.resolve({
+            data: appel.head ? null : (n == null ? tous : tous.slice(0, n)),
+            count: appel.count === 'exact' ? tous.length : null,
+            error: null
+          })
         },
         maybeSingle () {
           if (AUTRES.includes(table)) {
@@ -617,7 +654,7 @@ test('LE TEST QUI COMPTE : un objet d avis VIDE mais VISIBLE ne compte pas', asy
 
 test('noteMoyenne : TOUTES les pages, jamais les 500 premieres lignes ; perimetre vide = rien', async () => {
   const lignes = Array.from({ length: 2500 }, (_, i) => ({
-    user_id: 'U', ota: 'airbnb', overall_score: i < 2000 ? 10 : 6,
+    id: i, user_id: 'U', ota: 'airbnb', overall_score: i < 2000 ? 10 : 6,
     is_hidden: false, content: 'ok', received_at: '2026-10-01T00:00:00Z'
   }))
   const m = await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
@@ -758,7 +795,7 @@ test('notesDuPerimetre lit TOUTES les pages, et une panne se DIT', async () => {
   // (db-max-rows) : la note porterait sur une fraction, en silence.
   // 2000 notes a 10 (soit 5/5) et 500 a 6 (soit 3/5) : 11,5 / 2500 = 4,6.
   const lignes = Array.from({ length: 2500 }, (_, i) => ({
-    user_id: 'U', overall_score: i < 2000 ? 10 : 6, property_id_ref: i % 2 ? 'A' : 'B',
+    id: i, user_id: 'U', overall_score: i < 2000 ? 10 : 6, property_id_ref: i % 2 ? 'A' : 'B',
     received_at: '2026-10-01T00:00:00Z'
   }))
   const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
@@ -804,10 +841,11 @@ test("LE TEST QUI COMPTE : l'ordre PostgREST est respecte — select AVANT les f
           const f = {
             eq: () => f, gte: () => f, in: () => f, not: () => f,
             order: (c, o) => { trie = true; tris.push([c, o]); return f },
-            // ⚠ `range` EXIGE d'avoir ete trie. C'est la seule facon de voir
+            gt: () => f,
+            // ⚠ LA PAGE EXIGE D'AVOIR ETE TRIEE. C'est la seule facon de voir
             // disparaitre un `.order('id')` : aucun autre double ne l'observe.
-            range: () => {
-              assert.ok(trie, 'range() appele sans order() : la pagination n est pas une partition')
+            limit: () => {
+              assert.ok(trie, 'la page est demandee sans order() : ce n est pas une partition')
               return Promise.resolve({ data: [], count: 0, error: null })
             }
           }
@@ -844,9 +882,12 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE se dit, elle ne rend pas une moyen
     from: () => ({
       select (colonnes, opts) {
         const compte = !!(opts && opts.count === 'exact')
+        // ⚠ CHAQUE PAGE REND LE MEME PLAFOND, comme `db-max-rows` le ferait :
+        // 500 lignes la ou 1000 sont demandees, donc la boucle s'arrete apres
+        // la premiere — et le total, lui, en annonce 3000.
         const f = {
-          eq: () => f, gte: () => f, in: () => f, not: () => f, order: () => f,
-          range: () => Promise.resolve({
+          eq: () => f, gte: () => f, gt: () => f, in: () => f, not: () => f, order: () => f,
+          limit: () => Promise.resolve({
             data: Array.from({ length: plafond }, (_, i) => ({ id: i, overall_score: 10, property_id_ref: 'A' })),
             count: compte ? 3000 : null,
             error: null
@@ -863,4 +904,92 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE se dit, elle ne rend pas une moyen
   // Et la vue globale porte le meme drapeau : c'est la MEME lecture.
   const m = await noteMoyenne(rogne, { userId: 'U', periode: 'toujours' })
   assert.strictEqual(m.tronque, true)
+})
+
+test("LE TEST QUI COMPTE : l'echelle est resolue PAR SOURCE, pas supposee", async () => {
+  // ⚠ CE QUE CE TEST FERME. Toutes les sources mesurees valent /10 aujourd'hui,
+  // donc le passage de `l.ota` a `microSurCinq` est INOBSERVABLE : mutation
+  // faite hors de l'arbre, remplacer `microSurCinq(l.overall_score, l.ota)` par
+  // `microSurCinq(l.overall_score)` laissait 85 tests sur 85 au VERT. Le jour
+  // ou un canal en /5 entrera dans `lib/avis/echelle.js` — la raison d'etre de
+  // la table — perdre `l.ota` ou la colonne doublerait ses notes, en silence.
+  // Avec une echelle injectee, la resolution par source s'eprouve pour de bon.
+  const lignes = [
+    // Deja sur 5 : a convertir par 1, pas par 2.
+    { id: 1, user_id: 'U', ota: 'surcinq', overall_score: 4, property_id_ref: 'A', received_at: '2026-10-01T00:00:00Z' },
+    // Sur 10 : a diviser par 2.
+    { id: 2, user_id: 'U', ota: 'surdix', overall_score: 8, property_id_ref: 'B', received_at: '2026-10-01T00:00:00Z' },
+  ]
+  const echelle = { surcinq: 5, surdix: 10 }
+  const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours', echelle })
+  assert.deepEqual({ ...r.par_bien }, {
+    A: { note_sur_5: 4, notes: 1 },   // 4 sur 5 reste 4
+    B: { note_sur_5: 4, notes: 1 },   // 8 sur 10 vaut 4
+  }, 'l echelle de la source n est pas appliquee : la note est supposee, pas convertie')
+  assert.deepStrictEqual(r.global, { note_sur_5: 4, notes: 2 })
+
+  // Et la preuve que l'echelle MORD : sans elle, le 4 de « surcinq » serait
+  // divise par deux et vaudrait 2.
+  const sansEchelle = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
+  assert.strictEqual(sansEchelle.par_bien.A.note_sur_5, 2,
+    'la table par defaut ne s applique plus : ce test ne distingue plus rien')
+})
+
+test("LE TEST QUI COMPTE : les avis SANS note ne consomment pas le budget d'une page", async () => {
+  // ⚠ CE QUE LE FILTRE SQL ACHETE. `.gt('overall_score', 0)` est exactement le
+  // predicat de `microSurCinq`, pose en base. Le laisser en JS seul faisait
+  // compter des LIGNES la ou le code croit compter des NOTES : 990 notes plus
+  // 30 lignes sans note remplissent une page de 1000, donc la boucle demande
+  // une SECONDE page — un aller-retour serie de plus sur le chemin critique de
+  // l'accueil, pour trente lignes qui seront jetees.
+  // Les lignes sans note sont reelles et sans borne : la saisie manuelle et la
+  // detection dans les messages en ecrivent, toutes deux confirmees et visibles.
+  const lignes = [
+    ...Array.from({ length: 990 }, (_, i) => ({ id: i, user_id: 'U', overall_score: 10, property_id_ref: 'A', received_at: '2026-10-01T00:00:00Z' })),
+    ...Array.from({ length: 30 }, (_, i) => ({ id: 1000 + i, user_id: 'U', overall_score: null, property_id_ref: 'A', received_at: '2026-10-01T00:00:00Z' })),
+  ]
+  const journal = []
+  const r = await notesDuPerimetre(fauxClient(lignes, journal), { userId: 'U', periode: 'toujours' })
+  assert.deepStrictEqual(r.global, { note_sur_5: 5, notes: 990 })
+  const pages = journal.filter(a => a.table === 'ota_reviews').length
+  assert.strictEqual(pages, 1,
+    `${pages} allers-retours pour 990 notes : les lignes sans note remplissent la page`)
+})
+
+test("LE TEST QUI COMPTE : une lecture COMPLETE au plafond n'est pas dite incomplete", async () => {
+  // ⚠ L'OFF-BY-ONE QUE LA REVUE A TROUVE. Le plafond etait teste AVANT la
+  // sortie normale : une lecture de MAX_NOTES lignes PILE — donc complete —
+  // se declarait « incomplete », journalisait « la note porte sur une
+  // fraction » avec un compte qui disait le contraire, et faisait echouer
+  // `scripts/verifier-parite-notes.js` sur un calcul juste.
+  const MAX = 50000
+  const PAGE = 1000
+  let servies = 0
+  const auPlafond = {
+    from: () => ({
+      select (colonnes, opts) {
+        const compte = !!(opts && opts.count === 'exact')
+        const f = {
+          eq: () => f, gte: () => f, gt: () => f, in: () => f, not: () => f, order: () => f,
+          limit: (n) => {
+            const reste = Math.max(0, MAX - servies)
+            const taille = Math.min(n, reste)
+            servies += taille
+            return Promise.resolve({
+              data: Array.from({ length: taille }, (_, i) => ({ id: servies - taille + i, ota: 'airbnb', overall_score: 10, property_id_ref: 'A' })),
+              count: compte ? MAX : null,
+              error: null
+            })
+          }
+        }
+        return f
+      }
+    })
+  }
+  const r = await notesDuPerimetre(auPlafond, { userId: 'U', periode: 'toujours' })
+  assert.strictEqual(r.global.notes, MAX, 'toutes les notes ne sont pas lues')
+  assert.strictEqual(r.tronque, undefined,
+    'une lecture complete de MAX_NOTES lignes pile est declaree incomplete')
+  assert.strictEqual(servies, MAX)
+  assert.strictEqual(PAGE, 1000)
 })

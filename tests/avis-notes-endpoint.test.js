@@ -49,10 +49,13 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         neq (c, v) { q._neq[c] = v; return chain },
         or (e) { q._or = e; return chain },
         gte (c, v) { q._gte = [c, v]; return chain },
+        // Le CURSEUR de la pagination des notes, et le filtre de note en SQL.
+        gt (c, v) { (q._gts = q._gts || []).push([c, v]); return chain },
         in (c, v) { q._ins.push([c, (v || []).map(String)]); return chain },
         is () { return chain },
         not (c, op, v) { if (op === 'is' && v === null) q._nonNul = c; return chain },
-        order () { return chain }, limit () { return chain },
+        order (c) { q._tri = c; return chain },
+        limit (n) { q._limite = n; return rep() },
         range (a, z) { q._range = [a, z]; return rep() },
         maybeSingle: async () => { const r = await rep(); return { data: (r.data || [])[0] || null, error: r.error } },
         then (ok, ko) { return rep().then(ok, ko) },
@@ -64,6 +67,11 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
           : String(l[c]) === String(v))
         && q._ins.every(([c, vs]) => vs.includes(String(l[c])))
         && (!q._gte || String(l[q._gte[0]] || '') >= String(q._gte[1]))
+        && (q._gts || []).every(([c, v]) => {
+          const a = Number(l[c]); const b = Number(v)
+          if (Number.isFinite(a) && Number.isFinite(b)) return a > b
+          return l[c] != null && String(l[c]) > String(v)
+        })
         && (!q._nonNul || l[q._nonNul] != null)
       function rep () {
         if (nom === 'ota_reviews' && erreur) return Promise.resolve({ data: null, error: erreur })
@@ -87,7 +95,9 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         // TOUT le filtre, pas de la page : c'est lui qui revele une lecture
         // incomplete.
         const tous = lignes.filter(garde)
-        const page = q._range ? tous.slice(q._range[0], q._range[1] + 1) : tous
+        if (q._tri) tous.sort((a, b) => (Number(a[q._tri]) - Number(b[q._tri])) || String(a[q._tri] ?? '').localeCompare(String(b[q._tri] ?? '')))
+        const page = q._range ? tous.slice(q._range[0], q._range[1] + 1)
+          : q._limite != null ? tous.slice(0, q._limite) : tous
         return Promise.resolve({
           data: q._head ? null : page,
           count: q._count === 'exact' ? tous.length : null,

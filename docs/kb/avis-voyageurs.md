@@ -963,11 +963,27 @@ Colomiers, 653 points sur 69 avis = 9,4638 sur 10, soit exactement **4,732 sur
 (`.not('overall_score','is',null)`), ce qui laissait passer les **zéros**.
 L'objet Channex naît au départ, caché et vide, et Airbnb le révèle au bout de
 14 jours **même si le voyageur n'a rien écrit** : la ligne arrive alors avec
-`is_hidden: false` et `overall_score: 0`, et entrait à 0/10 dans la note. La
-population est désormais « le voyageur a écrit » — `voyageurAEcrit`, la règle
-que `lib/avis/naissance.js` portait déjà. ⚠ **Les 33 zéros d'Airbnb en
-production sont exactement les 33 avis masqués** : le cas est réel, le chemin
-tourne tous les jours, et zéro ligne est concernée aujourd'hui.
+`is_hidden: false` et `overall_score: 0`, et entrait à 0/10 dans la note. Ce
+qui ferme le cas, c'est `microSurCinq` et son **`v > 0`** — pas un filtre de
+population.
+
+⚠ **CE N'EST PAS `voyageurAEcrit`, et cette ligne a dit le contraire pendant
+une journée.** La première version appelait bien ce prédicat (« une note > 0
+OU un texte »), et la revue l'a mesuré **inerte** : la requête force déjà
+`is_hidden = false`, donc sa première condition ne mord jamais ; une note > 0
+passe quel que soit le texte, et une note <= 0 est de toute façon écartée par
+`microSurCinq`. Le retirer ne faisait rougir aucun test, et il obligeait à
+rapatrier **deux colonnes de texte** — un millier de lignes par page. Il a donc
+été retiré du code le jour même ; cette phrase, elle, était restée. La
+corriger est le genre de dette que `rotation-secret-webhook.md` a déjà coûtée
+au dépôt : un document qui affirme le contraire du code se fait implémenter.
+Là où le prédicat compte vraiment, c'est dans `lib/logement/lecture.js`, qui
+calcule un **total** d'avis : un objet vide y fausserait le compte, et
+`microSurCinq` ne le verrait pas.
+
+⚠ **Les 33 zéros d'Airbnb en production sont exactement les 33 avis masqués** :
+le cas est réel, le chemin tourne tous les jours, et zéro ligne est concernée
+aujourd'hui.
 
 ### L'arrondi se fait en entiers
 

@@ -488,7 +488,15 @@ async function chargerNotes () {
   // 0 bien silencieux » — donne `r = {}`, qui est VRAI. Tester la véracité de
   // `r` d'un côté et la clé de l'autre disait alors « inconnu » au global et
   // « zéro avis », un FAIT, à chaque bien. On exige donc la clé des deux côtés.
-  const lu = r && r.global && typeof r.global === 'object' ? r : null
+  // ⚠ UNE LECTURE ROGNÉE N'EST PAS UNE NOTE. L'endpoint pose `tronque` quand
+  // il a lu moins de lignes que le total annoncé (`db-max-rows`, ou le plafond
+  // de 50 000) : la note porte alors sur une fraction. L'afficher avec l'aplomb
+  // des autres serait affirmer un chiffre faux — règle du dépôt, un résultat
+  // non calculable ne s'affiche jamais comme un fait. On la traite donc comme
+  // une panne : tuile masquée, étoiles absentes, et la cause au journal.
+  // Inatteignable aujourd'hui (669 avis confirmés, une seule page).
+  if (r && r.tronque) logger.error('Aujourdhui', 'avis', 'lecture des notes incomplete')
+  const lu = r && !r.tronque && r.global && typeof r.global === 'object' ? r : null
   const parBien = (lu && lu.par_bien) || {}
   etat.noteGlobale = lu ? lu.global : null
   for (const b of etat.biens) {

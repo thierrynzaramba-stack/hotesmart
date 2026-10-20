@@ -808,3 +808,21 @@ test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redi
   const liste = p.html('[data-list="properties"]')
   assert.ok(liste.includes('4.8'), `l etoile du bien n affiche pas la note descendue : ${liste}`)
 })
+
+test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note", async () => {
+  // L'endpoint pose `tronque` quand il a lu moins de lignes que le total
+  // annonce (db-max-rows, ou le plafond). La note porte alors sur une
+  // fraction : l'afficher avec l'aplomb des autres serait affirmer un chiffre
+  // faux. Regle du depot : un resultat non calculable ne s'affiche jamais
+  // comme un fait.
+  const p = ouvrirAujourdhui({ sansInit: true, corps: {
+    global: { note_sur_5: 4.8, notes: 500 },
+    par_bien: { REF_A: { note_sur_5: 4.9, notes: 300 } },
+    tronque: true
+  } })
+  p.interne.etat.biens = biensDeTest
+  await p.interne.chargerNotes()
+  assert.strictEqual(p.interne.etat.noteGlobale, null,
+    'une note calculee sur une fraction est affichee comme un fait')
+  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
+})

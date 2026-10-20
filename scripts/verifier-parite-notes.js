@@ -54,7 +54,15 @@ const git = (...a) => execFileSync('git', a, { cwd: racine, encoding: 'utf8', ma
 
 // ─── L'ancien comptage, extrait hors de l'arbre ─────────────────────────────
 // `git archive`, jamais `git show > fichier` (regle 19 du depot).
-const REF_PAR_DEFAUT = 'origin/fix-note-globale-sur-5'
+// ⚠ UN SHA, PAS UN NOM DE BRANCHE. `fix-note-globale-sur-5` a ete mergee :
+// elle sera elaguee au prochain menage, et `git archive` sortirait alors en
+// exception brute (`fatal: not a valid object name`), sans passer par aucun
+// des « ECHEC … » ecrits plus bas — donc sans dire que la preuve de parite
+// est devenue inexecutable. Elle manque deja sur un clone neuf, en CI, et sur
+// le second poste. Ce SHA est le DEUXIEME PARENT du merge f56e207 : il reste
+// joignable depuis l'historique de main pour toujours.
+// 3225479 = « Avis : les constats de la revue de 6a5475e », tete du lot Avis.
+const REF_PAR_DEFAUT = '3225479'
 function noteMoyenneDeReference (refDemandee) {
   const ref = refDemandee || REF_PAR_DEFAUT
   const dossier = fs.mkdtempSync(path.join(os.tmpdir(), 'parite-notes-'))
