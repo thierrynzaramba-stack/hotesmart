@@ -292,14 +292,44 @@ test('LE TEST QUI COMPTE (GRAVE 1) : les TROIS lecteurs demandent `ota` dans leu
   const fs = require('node:fs')
   const path = require('node:path')
   const racine = path.join(__dirname, '..')
-  const lecteurs = [
-    ['lib/stats-avis.js', /select: 'id, ota, overall_score, property_id_ref'/],
-    ['lib/logement/lecture.js', /\.select\('id, property_id, ota, overall_score/],
-    ['api/avis.js', /^const CHAMPS = `id, provider, source, ota,/m]
-  ]
-  for (const [fichier, motif] of lecteurs) {
+  // ⚠ LES LECTEURS SE DECOUVRENT, ILS NE S ENUMERENT PAS. Une liste en dur
+  // vieillit de deux facons : elle rate le lecteur ajoute demain, et elle
+  // rougit a tort sur une branche ou l un des fichiers n existe pas encore (le
+  // lot Logements n est pas sur toutes les branches). On cherche donc qui
+  // convertit une note, et on exige de chacun qu il demande la colonne.
+  const { execSync } = require('node:child_process')
+  const trouves = execSync(
+    'grep -rl "microSurCinq\\|noteSur5Des\\|assemblerCartes" --include=*.js lib api core 2>/dev/null || true',
+    { encoding: 'utf8', cwd: racine }).trim()
+  // ⚠ `assemblerCartes` EN FAIT PARTIE : son appelant lit la base pour elle, et
+  // oublier `ota` dans CE select a exactement le meme effet — c'est l'une des
+  // deux mutations que la revue a vues survivre.
+  const lecteurs = (trouves ? trouves.split('\n') : [])
+    .filter(f => !f.startsWith('lib/avis/echelle.js'))   // le module lui-meme
+  assert.ok(lecteurs.length >= 2, `${lecteurs.length} lecteur(s) trouve(s) : la recherche ne mesure plus rien`)
+  for (const fichier of lecteurs) {
     const src = fs.readFileSync(path.join(racine, fichier), 'utf8')
-    assert.match(src, motif, `${fichier} doit demander \`ota\` : sans elle, TOUTES les notes disparaissent en silence`)
+    // Le select qui alimente la conversion doit porter `ota`. On cherche la
+    // liste de colonnes la plus proche : toute chaine de colonnes citant
+    // `overall_score` doit aussi citer `ota`.
+    // Une LISTE DE COLONNES, et pas n importe quelle chaine : des identifiants
+    // separes par des virgules. Sans ce resserrement, `overall_score: 0` —
+    // un objet litteral — passait pour un select.
+    const selects = (src.match(/['`][^'`]*\boverall_score\b[^'`]*['`]/g) || [])
+      .filter(x => /^['`][a-z_0-9,\s`$]+['`]$/i.test(x) && x.includes(','))
+    if (selects.length) {
+      // Famille 1 : il LIT la base. Sa liste de colonnes doit porter `ota`.
+      for (const sel of selects) {
+        assert.match(sel, /\bota\b/,
+          `${fichier} : ${sel} ne demande pas \`ota\` — sans elle, TOUTES les notes disparaissent en silence`)
+      }
+    } else {
+      // Famille 2 : il CONVERTIT des lignes qu'on lui passe (lib/avis/cartes.js
+      // en est). Il doit alors transmettre la source a la conversion — l'oubli
+      // a exactement le meme effet, et il est tout aussi muet.
+      assert.match(src, /(microSurCinq|surCinq)\([^)]*\.ota\b|noteSur5Des\(/,
+        `${fichier} convertit une note sans transmettre \`ota\``)
+    }
   }
 })
 
