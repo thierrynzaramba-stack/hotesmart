@@ -549,23 +549,81 @@ test('ratio : deux biens aux MÊMES bornes tiennent en une seule voie', async ()
 // Double aveugle : le voyageur a depose son avis, Airbnb le cache (ni texte ni
 // note) tant que l'hote n'a pas evalue. Ils entraient dans le total (688 au
 // lieu de 664) et a 0/10 dans la moyenne (9,0 au lieu de 9,57).
-test('recette du 7 octobre : un avis MASQUE par Airbnb ne compte ni dans le total ni dans la moyenne', async () => {
+test('recette du 7 octobre : un avis MASQUE par Airbnb ne compte ni dans le total ni dans la note', async () => {
+  // ⚠ `is_hidden` EST ECRIT SUR CHAQUE FIXTURE : la colonne est `not null
+  // default false` en base, donc une ligne lue porte toujours un booleen. Le
+  // laisser absent faisait mesurer un cas qui n'existe pas.
   const lignes = [
-    { user_id: 'U', ai_clean_verdict: 'positif', overall_score: 10, received_at: '2026-10-01T00:00:00Z' },
-    { user_id: 'U', ai_clean_verdict: 'positif', overall_score: 8, received_at: '2026-10-01T00:00:00Z' },
-    { user_id: 'U', ai_clean_verdict: 'rien_signale', overall_score: 0, is_hidden: true, received_at: '2026-10-02T00:00:00Z' },
-    { user_id: 'U', ai_clean_verdict: null, overall_score: null, received_at: '2026-10-02T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'positif', ota: 'airbnb', overall_score: 10, is_hidden: false, content: 'Parfait', received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'positif', ota: 'booking', overall_score: 8, is_hidden: false, content: 'Tres bien', received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'rien_signale', ota: 'airbnb', overall_score: 0, is_hidden: true, content: null, received_at: '2026-10-02T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: null, ota: 'direct', overall_score: null, is_hidden: false, content: null, received_at: '2026-10-02T00:00:00Z' },
   ]
   const r = await ratioProprete(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
   assert.strictEqual(r.total, 3, 'le masque est exclu du total')
   const m = await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
-  assert.deepStrictEqual(m, { moyenne: 9, notes: 2 }, 'la moyenne : 10 et 8, ni le 0 du masque ni la note absente')
+  // 10 et 8 sur l echelle du coeur => 5,0 et 4,0 sur 5 => 4,5.
+  assert.deepStrictEqual(m, { note_sur_5: 4.5, notes: 2 },
+    'ni le 0 du masque, ni la ligne sans note ni texte')
+})
+
+test('LE TEST QUI COMPTE : un objet d avis VIDE mais VISIBLE ne compte pas', async () => {
+  // Le cas que `.not('overall_score','is',null)` laissait passer : l objet
+  // Channex nait cache et vide, Airbnb le revele au bout de 14 jours meme si le
+  // voyageur n a rien ecrit. Il arrive alors avec `is_hidden: false` et une note
+  // a 0 — et il entrait a 0/10 dans la note du compte.
+  const lignes = [
+    { user_id: 'U', ota: 'airbnb', overall_score: 10, is_hidden: false, content: 'Parfait', received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ota: 'airbnb', overall_score: 0, is_hidden: false, content: null, content_public: null, received_at: '2026-10-02T00:00:00Z' }
+  ]
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' }),
+    { note_sur_5: 5, notes: 1 })
+  // ⚠ ET C'EST LA NOTE QUI TRANCHE, PAS LE TEXTE. Ma premiere version appelait
+  // ici `voyageurAEcrit` (note > 0 OU texte) en croyant que c'etait lui qui
+  // fermait le defaut ; la revue a prouve par mutation qu'il etait INERTE a cet
+  // endroit. Un zero AVEC un texte ne compte pas davantage dans la note : zero
+  // n est une note chez aucun canal. (Il compte en revanche dans le TOTAL
+  // d avis d un logement, que `lib/logement/lecture.js` calcule, lui, avec
+  // `voyageurAEcrit`.)
+  const avecTexte = [lignes[0], { ...lignes[1], content: 'La cle etait difficile a trouver' }]
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(avecTexte), { userId: 'U', periode: 'toujours' }),
+    { note_sur_5: 5, notes: 1 })
+  // Et la requete ne rapatrie plus les colonnes de texte, qui ne servaient a rien.
+  assert.doesNotMatch(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'stats-avis.js'), 'utf8'),
+    /select\('id, ota, overall_score, is_hidden, content/)
 })
 
 test('noteMoyenne : TOUTES les pages, jamais les 500 premieres lignes ; perimetre vide = rien', async () => {
-  const lignes = Array.from({ length: 2500 }, (_, i) => ({ user_id: 'U', overall_score: i < 2000 ? 10 : 6, received_at: '2026-10-01T00:00:00Z' }))
+  const lignes = Array.from({ length: 2500 }, (_, i) => ({
+    user_id: 'U', ota: 'airbnb', overall_score: i < 2000 ? 10 : 6,
+    is_hidden: false, content: 'ok', received_at: '2026-10-01T00:00:00Z'
+  }))
   const m = await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
-  assert.deepStrictEqual(m, { moyenne: 9.2, notes: 2500 })
-  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: 'U', refs: [] }), { moyenne: null, notes: 0 })
-  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: null }), { moyenne: null, notes: 0 })
+  // (2000 x 5,0 + 500 x 3,0) / 2500 = 4,6
+  assert.deepStrictEqual(m, { note_sur_5: 4.6, notes: 2500 })
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: 'U', refs: [] }), { note_sur_5: null, notes: 0 })
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: null }), { note_sur_5: null, notes: 0 })
+})
+
+test('LE TEST QUI COMPTE : UN SEUL ARRONDI, et il ne depend pas du nombre d avis', async () => {
+  // Le defaut d avant : la moyenne sur 10 etait arrondie ici, puis l ecran
+  // divisait et arrondissait encore. Mesure de production : Colomiers, 653
+  // points sur 69 avis = 9,4638 sur 10, soit 4,732 sur 5 — affiche 4,8 par le
+  // double arrondi, 4,7 par le calcul juste.
+  const colomiers = []
+  // 69 avis dont la somme fait exactement 653 sur l echelle du coeur.
+  for (let i = 0; i < 69; i++) colomiers.push({ user_id: 'U', ota: 'airbnb', overall_score: 10, is_hidden: false, content: 'ok', received_at: '2026-10-01T00:00:00Z' })
+  let reste = 690 - 653
+  for (let i = 0; reste > 0 && i < colomiers.length; i++) { const d = Math.min(reste, 9); colomiers[i].overall_score = 10 - d; reste -= d }
+  const m = await noteMoyenne(fauxClient(colomiers), { userId: 'U', periode: 'toujours' })
+  assert.equal(m.notes, 69)
+  assert.equal(m.note_sur_5, 4.7, 'le double arrondi affichait 4,8')
+
+  // Et un ex aequo s arrondit pareil quel que soit le nombre d avis.
+  const vus = new Set()
+  for (const n of [1, 20, 100, 332]) {
+    const l = Array.from({ length: n }, () => ({ user_id: 'U', ota: 'airbnb', overall_score: 9.7, is_hidden: false, content: 'ok', received_at: '2026-10-01T00:00:00Z' }))
+    vus.add((await noteMoyenne(fauxClient(l), { userId: 'U', periode: 'toujours' })).note_sur_5)
+  }
+  assert.deepEqual([...vus], [4.9])
 })
