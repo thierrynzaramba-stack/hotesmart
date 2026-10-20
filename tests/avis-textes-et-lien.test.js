@@ -73,7 +73,7 @@ test('les cartes par séjour, rendues, sont accentuées (toutes les sortes de ca
     anciens: [c('s:3', 'anciens', [], ev('a_remplir', 'expiree', { evaluable: false })), c('a:4', 'anciens', [{ id: 'd', masque: false, detecte: true, analyse: true, verdict: 'remarque' }], null)],
   }, anciens_total: 2 }, { peutEcrire: true, avecBus: true, anciensOuverts: true }).replace(/<[^>]+>/g, ' ')
   verifierTexte('cartes pleines', pleine)
-  verifierTexte('compteurs', rendreStats({ total: 3, moyenne: 9.6, notes: 3, positif: 1, remarque: 0, periode: '30j' }).replace(/<[^>]+>/g, ' '))
+  verifierTexte('compteurs', rendreStats({ total: 3, note_sur_5: 4.8, notes: 3, positif: 1, remarque: 0, periode: '30j' }).replace(/<[^>]+>/g, ' '))
 })
 
 test('« Moi » devient « L’hôte » dans le choix de qui remplit', async () => {

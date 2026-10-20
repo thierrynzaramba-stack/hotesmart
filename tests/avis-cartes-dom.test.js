@@ -81,12 +81,14 @@ test('monter : les ANCIENS ne se lisent qu a l ouverture, et une correction de p
   const appels = []
   const appel = async (chemin, methode, corps) => {
     appels.push(corps ? `${methode} ${corps.action}` : chemin)
-    return donnees({ recents: [carte()], anciens: chemin.includes('anciens=1') ? [] : null }, { anciens_total: 3, stats: { total: 1, moyenne: 9.6, notes: 1, positif: 1, remarque: 0, periode: '30j' } })
+    return donnees({ recents: [carte()], anciens: chemin.includes('anciens=1') ? [] : null }, { anciens_total: 3, stats: { total: 1, note_sur_5: 4.8, notes: 1, positif: 1, remarque: 0, periode: '30j' } })
   }
   const c = dom.window.document.getElementById('c')
   await monter(c, { appel, peutEcrire: true, filtres: () => ({ periode: '30j' }), zoneStats: dom.window.document.getElementById('s') })
   assert.deepEqual(appels, ['avis?action=cartes&periode=30j'])
-  assert.match(dom.window.document.getElementById('s').textContent, /9,6/)
+  // ⚠ SUR 5, et le libelle le dit (decision de Thierry du 20 octobre 2026).
+  assert.match(dom.window.document.getElementById('s').textContent, /4,8/)
+  assert.match(dom.window.document.getElementById('s').textContent, /note moyenne sur 5/)
   const details = c.querySelector('details[data-anciens]')
   details.open = true
   details.dispatchEvent(new dom.window.Event('toggle'))

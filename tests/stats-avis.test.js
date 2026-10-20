@@ -571,25 +571,83 @@ test('ratio : deux biens aux MÊMES bornes tiennent en une seule voie', async ()
 // Double aveugle : le voyageur a depose son avis, Airbnb le cache (ni texte ni
 // note) tant que l'hote n'a pas evalue. Ils entraient dans le total (688 au
 // lieu de 664) et a 0/10 dans la moyenne (9,0 au lieu de 9,57).
-test('recette du 7 octobre : un avis MASQUE par Airbnb ne compte ni dans le total ni dans la moyenne', async () => {
+test('recette du 7 octobre : un avis MASQUE par Airbnb ne compte ni dans le total ni dans la note', async () => {
+  // ⚠ `is_hidden` EST ECRIT SUR CHAQUE FIXTURE : la colonne est `not null
+  // default false` en base, donc une ligne lue porte toujours un booleen. Le
+  // laisser absent faisait mesurer un cas qui n'existe pas.
   const lignes = [
-    { user_id: 'U', ai_clean_verdict: 'positif', overall_score: 10, received_at: '2026-10-01T00:00:00Z' },
-    { user_id: 'U', ai_clean_verdict: 'positif', overall_score: 8, received_at: '2026-10-01T00:00:00Z' },
-    { user_id: 'U', ai_clean_verdict: 'rien_signale', overall_score: 0, is_hidden: true, received_at: '2026-10-02T00:00:00Z' },
-    { user_id: 'U', ai_clean_verdict: null, overall_score: null, received_at: '2026-10-02T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'positif', ota: 'airbnb', overall_score: 10, is_hidden: false, content: 'Parfait', received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'positif', ota: 'booking', overall_score: 8, is_hidden: false, content: 'Tres bien', received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'rien_signale', ota: 'airbnb', overall_score: 0, is_hidden: true, content: null, received_at: '2026-10-02T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: null, ota: 'direct', overall_score: null, is_hidden: false, content: null, received_at: '2026-10-02T00:00:00Z' },
   ]
   const r = await ratioProprete(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
   assert.strictEqual(r.total, 3, 'le masque est exclu du total')
   const m = await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
-  assert.deepStrictEqual(m, { moyenne: 9, notes: 2 }, 'la moyenne : 10 et 8, ni le 0 du masque ni la note absente')
+  // 10 et 8 sur l echelle du coeur => 5,0 et 4,0 sur 5 => 4,5.
+  assert.deepStrictEqual(m, { note_sur_5: 4.5, notes: 2 },
+    'ni le 0 du masque, ni la ligne sans note ni texte')
+})
+
+test('LE TEST QUI COMPTE : un objet d avis VIDE mais VISIBLE ne compte pas', async () => {
+  // Le cas que `.not('overall_score','is',null)` laissait passer : l objet
+  // Channex nait cache et vide, Airbnb le revele au bout de 14 jours meme si le
+  // voyageur n a rien ecrit. Il arrive alors avec `is_hidden: false` et une note
+  // a 0 — et il entrait a 0/10 dans la note du compte.
+  const lignes = [
+    { user_id: 'U', ota: 'airbnb', overall_score: 10, is_hidden: false, content: 'Parfait', received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ota: 'airbnb', overall_score: 0, is_hidden: false, content: null, content_public: null, received_at: '2026-10-02T00:00:00Z' }
+  ]
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' }),
+    { note_sur_5: 5, notes: 1 })
+  // ⚠ ET C'EST LA NOTE QUI TRANCHE, PAS LE TEXTE. Ma premiere version appelait
+  // ici `voyageurAEcrit` (note > 0 OU texte) en croyant que c'etait lui qui
+  // fermait le defaut ; la revue a prouve par mutation qu'il etait INERTE a cet
+  // endroit. Un zero AVEC un texte ne compte pas davantage dans la note : zero
+  // n est une note chez aucun canal. (Il compte en revanche dans le TOTAL
+  // d avis d un logement, que `lib/logement/lecture.js` calcule, lui, avec
+  // `voyageurAEcrit`.)
+  const avecTexte = [lignes[0], { ...lignes[1], content: 'La cle etait difficile a trouver' }]
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(avecTexte), { userId: 'U', periode: 'toujours' }),
+    { note_sur_5: 5, notes: 1 })
+  // Et la requete ne rapatrie plus les colonnes de texte, qui ne servaient a rien.
+  assert.doesNotMatch(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'stats-avis.js'), 'utf8'),
+    /select\('id, ota, overall_score, is_hidden, content/)
 })
 
 test('noteMoyenne : TOUTES les pages, jamais les 500 premieres lignes ; perimetre vide = rien', async () => {
-  const lignes = Array.from({ length: 2500 }, (_, i) => ({ user_id: 'U', overall_score: i < 2000 ? 10 : 6, received_at: '2026-10-01T00:00:00Z' }))
+  const lignes = Array.from({ length: 2500 }, (_, i) => ({
+    user_id: 'U', ota: 'airbnb', overall_score: i < 2000 ? 10 : 6,
+    is_hidden: false, content: 'ok', received_at: '2026-10-01T00:00:00Z'
+  }))
   const m = await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
-  assert.deepStrictEqual(m, { moyenne: 9.2, notes: 2500 })
-  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: 'U', refs: [] }), { moyenne: null, notes: 0 })
-  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: null }), { moyenne: null, notes: 0 })
+  // (2000 x 5,0 + 500 x 3,0) / 2500 = 4,6
+  assert.deepStrictEqual(m, { note_sur_5: 4.6, notes: 2500 })
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: 'U', refs: [] }), { note_sur_5: null, notes: 0 })
+  assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: null }), { note_sur_5: null, notes: 0 })
+})
+
+test('LE TEST QUI COMPTE : UN SEUL ARRONDI, et il ne depend pas du nombre d avis', async () => {
+  // Le defaut d avant : la moyenne sur 10 etait arrondie ici, puis l ecran
+  // divisait et arrondissait encore. Mesure de production : Colomiers, 653
+  // points sur 69 avis = 9,4638 sur 10, soit 4,732 sur 5 — affiche 4,8 par le
+  // double arrondi, 4,7 par le calcul juste.
+  const colomiers = []
+  // 69 avis dont la somme fait exactement 653 sur l echelle du coeur.
+  for (let i = 0; i < 69; i++) colomiers.push({ user_id: 'U', ota: 'airbnb', overall_score: 10, is_hidden: false, content: 'ok', received_at: '2026-10-01T00:00:00Z' })
+  let reste = 690 - 653
+  for (let i = 0; reste > 0 && i < colomiers.length; i++) { const d = Math.min(reste, 9); colomiers[i].overall_score = 10 - d; reste -= d }
+  const m = await noteMoyenne(fauxClient(colomiers), { userId: 'U', periode: 'toujours' })
+  assert.equal(m.notes, 69)
+  assert.equal(m.note_sur_5, 4.7, 'le double arrondi affichait 4,8')
+
+  // Et un ex aequo s arrondit pareil quel que soit le nombre d avis.
+  const vus = new Set()
+  for (const n of [1, 20, 100, 332]) {
+    const l = Array.from({ length: n }, () => ({ user_id: 'U', ota: 'airbnb', overall_score: 9.7, is_hidden: false, content: 'ok', received_at: '2026-10-01T00:00:00Z' }))
+    vus.add((await noteMoyenne(fauxClient(l), { userId: 'U', periode: 'toujours' })).note_sur_5)
+  }
+  assert.deepEqual([...vus], [4.9])
 })
 
 // ─── notesDuPerimetre : la même population, groupée par bien ────────────────
@@ -628,9 +686,13 @@ test('LE TEST QUI COMPTE : notesDuPerimetre rend EXACTEMENT ce que noteMoyenne r
   }
   // Et les chiffres eux-memes, ecrits en clair : un test qui ne compare que
   // deux fonctions reste vert si les DEUX se trompent de la meme facon.
-  assert.deepStrictEqual(une.global, { moyenne: 8.5, notes: 4 })
+  // Les chiffres EN CLAIR : 10, 9, 8, 7 sur l'echelle du coeur valent 5, 4,5, 4
+  // et 3,5 sur 5. Global = 17/4 = 4,25, arrondi au plus proche, demi vers le
+  // haut : 4,3. A = 9,5/2 = 4,75 -> 4,8. Un test qui ne compare que deux
+  // fonctions reste vert si les DEUX se trompent de la meme facon.
+  assert.deepStrictEqual(une.global, { note_sur_5: 4.3, notes: 4 })
   assert.deepEqual({ ...une.par_bien }, {
-    A: { moyenne: 9.5, notes: 2 }, B: { moyenne: 8, notes: 1 }, C: { moyenne: 7, notes: 1 }
+    A: { note_sur_5: 4.8, notes: 2 }, B: { note_sur_5: 4, notes: 1 }, C: { note_sur_5: 3.5, notes: 1 }
   })
 })
 
@@ -669,42 +731,44 @@ test('un avis dont la reference ne designe aucun bien compte au global', async (
   // dans aucun groupe que l'ecran sache afficher.
   const lignes = [...PARITE, { user_id: 'U', overall_score: 2, property_id_ref: null, received_at: '2026-10-04T00:00:00Z' }]
   const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
-  assert.strictEqual(r.global.notes, 5, 'la note sans bien est perdue pour le global')
+  assert.strictEqual(r.global.notes, 5, 'la note orpheline est perdue pour le global')
   assert.deepStrictEqual(r.global, await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' }))
   assert.deepStrictEqual(Object.keys(r.par_bien).sort(), ['A', 'B', 'C'], 'une cle de bien est apparue pour une ref nulle')
 })
 
 test('LE TEST QUI COMPTE : le perimetre d un membre est applique, et un perimetre VIDE rend zero', async () => {
   const restreint = await notesDuPerimetre(fauxClient(PARITE), { userId: 'U', periode: 'toujours', refs: ['A'] })
-  assert.deepEqual({ ...restreint.par_bien }, { A: { moyenne: 9.5, notes: 2 } },
+  assert.deepEqual({ ...restreint.par_bien }, { A: { note_sur_5: 4.8, notes: 2 } },
     'un membre limite au bien A voit les notes des autres biens')
-  assert.deepStrictEqual(restreint.global, { moyenne: 9.5, notes: 2 },
+  assert.deepStrictEqual(restreint.global, { note_sur_5: 4.8, notes: 2 },
     'le global d un membre restreint porte sur tout le compte')
 
   // Perimetre vide = aucun bien. JAMAIS « tous » : c'est le distinguo qui
   // empeche un membre revoque de voir le compte entier.
   const vide = await notesDuPerimetre(fauxClient(PARITE), { userId: 'U', refs: [] })
-  assert.deepStrictEqual(vide.global, { moyenne: null, notes: 0 })
+  assert.deepStrictEqual(vide.global, { note_sur_5: null, notes: 0 })
   assert.deepEqual({ ...vide.par_bien }, {})
   assert.strictEqual(Object.getPrototypeOf(vide.par_bien), null,
     'par_bien a de nouveau un prototype : une reference `__proto__` l ecrirait')
-  assert.deepStrictEqual((await notesDuPerimetre(fauxClient(PARITE), { userId: null })).global, { moyenne: null, notes: 0 })
+  assert.deepStrictEqual((await notesDuPerimetre(fauxClient(PARITE), { userId: null })).global, { note_sur_5: null, notes: 0 })
 })
 
 test('notesDuPerimetre lit TOUTES les pages, et une panne se DIT', async () => {
   // Une lecture non bornee serait tronquee a 1000 lignes sans erreur
-  // (db-max-rows) : la moyenne porterait sur une fraction, en silence.
+  // (db-max-rows) : la note porterait sur une fraction, en silence.
+  // 2000 notes a 10 (soit 5/5) et 500 a 6 (soit 3/5) : 11,5 / 2500 = 4,6.
   const lignes = Array.from({ length: 2500 }, (_, i) => ({
     user_id: 'U', overall_score: i < 2000 ? 10 : 6, property_id_ref: i % 2 ? 'A' : 'B',
     received_at: '2026-10-01T00:00:00Z'
   }))
   const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
   assert.strictEqual(r.global.notes, 2500, 'la lecture est tronquee')
+  assert.strictEqual(r.global.note_sur_5, 4.6)
   assert.deepStrictEqual(r.global, await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' }))
 
   const panne = await notesDuPerimetre(fauxClient(lignes, [], { message: 'boom' }), { userId: 'U', periode: 'toujours' })
   assert.strictEqual(panne.erreur, true, 'une panne de lecture passe pour « aucun avis »')
-  assert.deepStrictEqual(panne.global, { moyenne: null, notes: 0 })
+  assert.deepStrictEqual(panne.global, { note_sur_5: null, notes: 0 })
 })
 
 test('la periode borne les deux fonctions de la meme facon', async () => {
@@ -714,7 +778,7 @@ test('la periode borne les deux fonctions de la meme facon', async () => {
     { user_id: 'U', overall_score: 2,  property_id_ref: 'A', received_at: '2026-05-01T00:00:00Z' },
   ]
   const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: '30j', maintenant })
-  assert.deepStrictEqual(r.global, { moyenne: 10, notes: 1 }, 'l avis hors periode est compte')
+  assert.deepStrictEqual(r.global, { note_sur_5: 5, notes: 1 }, 'l avis hors periode est compte')
   assert.deepStrictEqual(r.global, await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: '30j', maintenant }))
   assert.strictEqual(r.periode, '30j')
 })
@@ -757,8 +821,10 @@ test("LE TEST QUI COMPTE : l'ordre PostgREST est respecte — select AVANT les f
   await noteMoyenne(strict, { userId: 'U', periode: 'toujours' })
   await notesDuPerimetre(strict, { userId: 'U', periode: 'toujours', refs: ['A'] })
   // Une seule lecture existe desormais : `noteMoyenne` en est la vue globale.
-  assert.deepStrictEqual(vus, ['id, overall_score, property_id_ref', 'id, overall_score, property_id_ref'],
-    'les colonnes demandees ont change : verifier que la lecture a toujours de quoi grouper')
+  // `ota` EN FAIT PARTIE : c'est lui qui donne l'echelle (lib/avis/echelle.js).
+  // Le perdre ferait supposer l'echelle par defaut a toutes les sources.
+  assert.deepStrictEqual(vus, ['id, ota, overall_score, property_id_ref', 'id, ota, overall_score, property_id_ref'],
+    'les colonnes demandees ont change : verifier que la lecture a toujours l echelle et de quoi grouper')
   // ⚠ ET LE TRI EST DANS LA REQUETE PARTAGEE. Sans ORDER BY, PostgREST ne
   // garantit aucun ordre : deux `range()` peuvent se chevaucher ou sauter des
   // lignes, et la moyenne porte sur autre chose qu'une partition. Aucun autre
@@ -793,6 +859,7 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE se dit, elle ne rend pas une moyen
   const r = await notesDuPerimetre(rogne, { userId: 'U', periode: 'toujours' })
   assert.strictEqual(r.tronque, true, '500 lignes lues sur 3000 annoncees, et la reponse ne le dit pas')
   assert.strictEqual(r.global.notes, 500)
+  assert.strictEqual(r.global.note_sur_5, 5)
   // Et la vue globale porte le meme drapeau : c'est la MEME lecture.
   const m = await noteMoyenne(rogne, { userId: 'U', periode: 'toujours' })
   assert.strictEqual(m.tronque, true)

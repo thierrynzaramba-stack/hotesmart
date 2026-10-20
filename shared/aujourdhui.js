@@ -136,14 +136,15 @@ export function tachesOuvertes (taches = [], { bookings = [],
   })
 }
 
-// ─── La note affichee : UNE echelle, sur 5 ──────────────────────────────────
-// Le coeur stocke toutes les notes sur 10 (Booking nativement, Airbnb
-// normalise — verifie le 10 octobre 2026 : max observe 10 pour les deux).
-// Decision de Thierry : l'ecran affiche sur 5, partout, en divisant par 2.
-export function noteSur5 (moyenne) {
-  if (moyenne == null || !Number.isFinite(Number(moyenne))) return null
-  return Math.round((Number(moyenne) / 2) * 10) / 10
-}
+// ⚠ `noteSur5` A ETE RETIREE D'ICI LE 20 OCTOBRE 2026, et ce n'est pas un
+// oubli. Elle divisait par deux une moyenne que `lib/stats-avis.js` avait DEJA
+// arrondie : deux arrondis pour une note, donc Colomiers affichait 4,8 la ou le
+// calcul juste donne 4,7 (mesure de production, 653 points sur 69 avis =
+// 4,732 / 5). Et elle ignorait la source de la note, donc supposait l'echelle.
+//
+// La conversion vit desormais a UN SEUL endroit, cote serveur :
+// `lib/avis/echelle.js`. Les endpoints descendent `note_sur_5`, deja ramenee
+// sur 5 et arrondie une seule fois ; aucun ecran ne divise plus rien.
 
 // ─── Etat de chaque bien ce soir, et sa prochaine arrivee ───────────────────
 export function etatDesBiens ({ bookings = [], biens = [], aujourdHui }) {

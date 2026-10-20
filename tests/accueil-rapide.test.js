@@ -592,17 +592,18 @@ function ouvrirAujourdhui (options = {}) {
   const rien = () => {}
   // `shared/aujourdhui.js` : des fonctions pures, dont on n'a besoin ici que de
   // la FORME de retour. `etatDesBiens` rend une Map, que `renderBiens` interroge.
-  // ⚠ `noteSur5` EST LA VRAIE FORMULE, pas l'identite. Le coeur stocke les
-  // notes sur 10, l'ecran les affiche sur 5 (shared/aujourdhui.js, decision de
-  // Thierry) : c'est le SEUL travail de cette fonction. Stubbee en identite,
-  // une regression qui retire `R.noteSur5(...)` de la page — donc 9,4 affiche
-  // sur 5 — rendait a l'identique dans tous les tests de ce fichier, pour
-  // toujours.
-  const noteSur5 = (n) => Math.round((Number(n) / 2) * 10) / 10
-  const R = new Proxy({}, { get: (_, cle) => (
-    cle === 'etatDesBiens' ? (() => new Map())
-    : cle === 'noteSur5' ? noteSur5
-    : (() => [])) })
+  // ⚠ `noteSur5` A ETE RETIREE DE `shared/aujourdhui.js` LE 20 OCTOBRE 2026 :
+  // l'endpoint descend `note_sur_5`, deja ramenee sur 5 et arrondie UNE SEULE
+  // fois (lib/avis/echelle.js). Une page qui rediviserait arrondirait deux fois
+  // — Colomiers affichait 4,8 pour un calcul juste a 4,7. Le double LEVE donc
+  // si la page y touche : c'est la seule facon de voir revenir une division.
+  const R = new Proxy({}, { get: (_, cle) => {
+    if (cle === 'noteSur5') {
+      throw new Error('pages/aujourdhui.html appelle R.noteSur5 : la note descend DEJA sur 5, '
+        + 'la rediviser arrondit deux fois (lib/avis/echelle.js)')
+    }
+    return cle === 'etatDesBiens' ? (() => new Map()) : (() => [])
+  } })
 
   const sorti = new Function(
     'requireAuth', 'supabase', 'signOut', 'initErrorHandler', 'logger', 'esc',
@@ -695,8 +696,8 @@ const biensDeTest = [
 
 test('LE TEST QUI COMPTE : l accueil demande les notes UNE fois, pas une fois par bien', async () => {
   const p = ouvrirAujourdhui({ sansInit: true, corps: {
-    global: { moyenne: 9.4, notes: 42 },
-    par_bien: { REF_A: { moyenne: 9.6, notes: 30 } },
+    global: { note_sur_5: 4.7, notes: 42 },
+    par_bien: { REF_A: { note_sur_5: 4.8, notes: 30 } },
     periode: '30j'
   } })
   p.interne.etat.biens = biensDeTest
@@ -716,18 +717,18 @@ test('LE TEST QUI COMPTE : l accueil demande les notes UNE fois, pas une fois pa
 
 test('LE TEST QUI COMPTE : chaque bien recoit la meme chose qu avant, zero compris', async () => {
   const p = ouvrirAujourdhui({ sansInit: true, corps: {
-    global: { moyenne: 9.4, notes: 42 },
+    global: { note_sur_5: 4.7, notes: 42 },
     // REF_B n'a aucune note sur la periode : la reponse n'a pas sa cle.
-    par_bien: { REF_A: { moyenne: 9.6, notes: 30 } },
+    par_bien: { REF_A: { note_sur_5: 4.8, notes: 30 } },
   } })
   p.interne.etat.biens = biensDeTest
   await p.interne.chargerNotes()
 
-  assert.deepEqual(p.interne.etat.noteGlobale, { moyenne: 9.4, notes: 42 })
-  assert.deepEqual(p.interne.etat.notesParBien.get('b1'), { moyenne: 9.6, notes: 30 })
+  assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.7, notes: 42 })
+  assert.deepEqual(p.interne.etat.notesParBien.get('b1'), { note_sur_5: 4.8, notes: 30 })
   // Un bien absent de la reponse vaut zero, pas `undefined` : c'est ce que
   // rendait son appel par bien, et `renderBiens` lit `note.moyenne`.
-  assert.deepEqual(p.interne.etat.notesParBien.get('b2'), { moyenne: null, notes: 0 })
+  assert.deepEqual(p.interne.etat.notesParBien.get('b2'), { note_sur_5: null, notes: 0 })
   // Un bien sans canal n'etait pas interroge : il n'a toujours pas d'entree.
   assert.strictEqual(p.interne.etat.notesParBien.has('b3'), false,
     'un bien sans cle provider recoit une note alors qu aucun avis ne peut lui etre rattache')
@@ -775,33 +776,35 @@ test("LE TEST QUI COMPTE : une cle de bien heritee d'Object ne devient pas une n
   // `constructor`, `toString` ou `valueOf`, une lecture directe rendrait une
   // FONCTION heritee — vraie, donc le repli `{ moyenne: null, notes: 0 }` ne
   // serait jamais pris, et `etat.notesParBien` porterait une fonction.
-  const p = ouvrirAujourdhui({ sansInit: true, corps: { global: { moyenne: 9, notes: 3 }, par_bien: {} } })
+  const p = ouvrirAujourdhui({ sansInit: true, corps: { global: { note_sur_5: 4.5, notes: 3 }, par_bien: {} } })
   p.interne.etat.biens = [
     { id: 'bc', name: 'Piege', provider_property_id: 'constructor' },
     { id: 'bt', name: 'Piege 2', provider_property_id: 'toString' },
   ]
   await p.interne.chargerNotes()
   for (const id of ['bc', 'bt']) {
-    assert.deepEqual(p.interne.etat.notesParBien.get(id), { moyenne: null, notes: 0 },
+    assert.deepEqual(p.interne.etat.notesParBien.get(id), { note_sur_5: null, notes: 0 },
       `le bien ${id} recoit un membre herite d Object au lieu de sa note`)
   }
 })
 
-test("LE TEST QUI COMPTE : la note s'affiche SUR 5, pas sur 10", async () => {
-  // Le cœur stocke sur 10, l'ecran affiche sur 5 (`noteSur5`, decision de
-  // Thierry). C'est le seul travail de cette fonction, et le seul endroit ou
-  // un lot sur les notes peut casser l'affichage sans toucher aux chiffres.
+test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redivise pas", async () => {
+  // ⚠ L'endpoint descend `note_sur_5`, deja ramenee sur 5 et arrondie UNE
+  // SEULE fois. La version d'avant le 20 octobre 2026 divisait ici une moyenne
+  // elle-meme arrondie : deux arrondis, et Colomiers affichait 4,8 la ou le
+  // calcul juste donne 4,7. Le double de `R` LEVE si la page appelle encore
+  // `noteSur5`, donc ce test echoue aussi par ce chemin-la.
   const p = ouvrirAujourdhui({ sansInit: true, corps: {
-    global: { moyenne: 9.4, notes: 42 },
-    par_bien: { REF_A: { moyenne: 9.6, notes: 30 } },
+    global: { note_sur_5: 4.7, notes: 42 },
+    par_bien: { REF_A: { note_sur_5: 4.8, notes: 30 } },
   } })
   p.interne.etat.biens = biensDeTest
   await p.interne.chargerNotes()
 
   const tuile = p.html('[data-bind="rating"]')
-  assert.ok(tuile.includes('4.7'), `la tuile n affiche pas 9,4/10 converti en 4,7/5 : ${tuile}`)
-  assert.ok(!tuile.includes('9.4'), `la tuile affiche la note brute sur 10 : ${tuile}`)
+  assert.ok(tuile.includes('4.7'), `la tuile n affiche pas la note descendue par l endpoint : ${tuile}`)
+  assert.ok(!tuile.includes('2.3') && !tuile.includes('2.4'), `la tuile a redivise la note : ${tuile}`)
 
   const liste = p.html('[data-list="properties"]')
-  assert.ok(liste.includes('4.8'), `l etoile du bien n affiche pas 9,6/10 converti en 4,8/5 : ${liste}`)
+  assert.ok(liste.includes('4.8'), `l etoile du bien n affiche pas la note descendue : ${liste}`)
 })

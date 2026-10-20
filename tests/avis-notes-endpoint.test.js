@@ -136,10 +136,12 @@ test('LE TEST QUI COMPTE : le global ET chaque bien, en UNE lecture', async () =
   ] })
   const r = await appeler({ periode: 'toujours' })
   assert.equal(r.code, 200)
-  assert.deepEqual(r.body.global, { moyenne: 8, notes: 3 })
+  // Sur 5, via lib/avis/echelle.js : 8 et 10 valent 4 et 5, 6 vaut 3.
+  // Global = 12/3 = 4,0 ; REF_A = 9/2 = 4,5 ; REF_B = 3,0.
+  assert.deepEqual(r.body.global, { note_sur_5: 4, notes: 3 })
   assert.deepEqual(r.body.par_bien, {
-    [REF_A]: { moyenne: 9, notes: 2 },
-    [REF_B]: { moyenne: 6, notes: 1 },
+    [REF_A]: { note_sur_5: 4.5, notes: 2 },
+    [REF_B]: { note_sur_5: 3, notes: 1 },
   })
   // UNE seule lecture d'avis, c'est tout l'objet du lot.
   const lectures = etat.requetes.filter(q => q.table === 'ota_reviews')
@@ -154,7 +156,7 @@ test('LE TEST QUI COMPTE : le global ET chaque bien, en UNE lecture', async () =
 test('SECURITE : un avis d un AUTRE compte n entre ni dans le global ni dans un bien', async () => {
   preparer({ avis: [avisDe('a1'), avisDe('tiers', { user_id: TIERS, overall_score: 1 })] })
   const r = await appeler({ periode: 'toujours' })
-  assert.deepEqual(r.body.global, { moyenne: 10, notes: 1 })
+  assert.deepEqual(r.body.global, { note_sur_5: 5, notes: 1 })
 })
 
 test('SECURITE : un membre limite a un bien ne voit que le sien, et l autre est REFUSE', async () => {
@@ -163,7 +165,7 @@ test('SECURITE : un membre limite a un bien ne voit que le sien, et l autre est 
   const r = await enTantQueMembre({ periode: 'toujours' })
   assert.equal(r.code, 200)
   assert.deepEqual(Object.keys(r.body.par_bien), [REF_A], 'un bien hors perimetre apparait')
-  assert.deepEqual(r.body.global, { moyenne: 8, notes: 1 },
+  assert.deepEqual(r.body.global, { note_sur_5: 4, notes: 1 },
     'le global d un membre restreint porte sur des biens qu il ne voit pas')
   assert.equal((await enTantQueMembre({ bien: REF_B })).code, 403)
   assert.equal((await enTantQueMembre({ bien: REF_A })).code, 200)
@@ -187,7 +189,7 @@ test('SECURITE : un perimetre VIDE rend zero, jamais tout le compte', async () =
     avis: [avisDe('a1'), avisDe('b1', { property_id_ref: REF_B })] })
   const r = await enTantQueMembre({ periode: 'toujours' })
   assert.equal(r.code, 200)
-  assert.deepEqual(r.body.global, { moyenne: null, notes: 0 })
+  assert.deepEqual(r.body.global, { note_sur_5: null, notes: 0 })
   assert.deepEqual(r.body.par_bien, {})
 })
 
@@ -200,7 +202,7 @@ test('un avis MASQUE par Airbnb, une note absente et un avis hors periode ne com
     avisDe('ignore', { overall_score: 0, statut: 'ignore' }),
   ] })
   const r = await appeler({ periode: '30j' })
-  assert.deepEqual(r.body.global, { moyenne: 8, notes: 1 })
+  assert.deepEqual(r.body.global, { note_sur_5: 4, notes: 1 })
   assert.equal(r.body.periode, '30j')
 })
 
@@ -226,7 +228,7 @@ test('SECURITE : un perimetre dont les references sont toutes MALFORMEES rend ze
     avis: [avisDe('a1'), avisDe('b1', { property_id_ref: REF_B })] })
   const r = await enTantQueMembre({ periode: 'toujours' })
   assert.equal(r.code, 200)
-  assert.deepEqual(r.body.global, { moyenne: null, notes: 0 },
+  assert.deepEqual(r.body.global, { note_sur_5: null, notes: 0 },
     'un perimetre inexploitable donne les chiffres de tout le compte')
   assert.deepEqual(r.body.par_bien, {})
 })

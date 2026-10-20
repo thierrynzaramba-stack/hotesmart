@@ -348,8 +348,11 @@ séjours pour savoir lesquels lire, une passe avec), calcule le ratio de
 propreté — et tout cela est jeté. Seul `noteMoyenne` servait.
 
 **Le correctif.** Une action `notes`, qui fait **une** lecture paginée de
-`ota_reviews` (`id, overall_score, property_id_ref`) et rend le global **et**
-chaque bien en une passe. `chargerNotes` fait un seul appel.
+`ota_reviews` (`id, ota, overall_score, property_id_ref`) et rend le global
+**et** chaque bien en une passe. `chargerNotes` fait un seul appel.
+Elle descend `note_sur_5`, le contrat posé le même jour par le lot Avis
+(`avis-voyageurs.md` §12) : conversion et unique arrondi dans
+`lib/avis/echelle.js`, en micro-unités entières, aucun écran ne redivise.
 
 | | avant | après |
 |---|---|---|
@@ -371,12 +374,15 @@ une fois sans bien, puis une fois par bien) contre le **nouveau**, avec les
 fonctions de production — pas une réimplémentation. Production, 20 octobre
 2026 — 702 avis dans la table, 5 biens sur **deux** comptes, dont 4 biens et
 664 notes comptées sur le compte principal : **28 comparaisons, 0 divergence**
-sur les quatre périodes, 1570 notes comptées de chaque côté. Exemple sur
-« toujours » : 9,6/10 sur 664 avis au global, et 244 + 69 + 332 + 19 = 664 par
-bien.
+sur les quatre périodes, 1570 notes comptées de chaque côté. Sur
+« toujours » : global **4,8/5 sur 664 avis**, et par bien Colomiers 4,7/5 sur
+69, La bulle 4,9/5 sur 332, Cœur de vie 23 4,7/5 sur 244, Ofuro Futari 5/5 sur
+19 — soit 244 + 69 + 332 + 19 = 664.
 
-⚠ **ET L'ANCIEN CÔTÉ VIENT DE `git archive`, PAS DE L'ARBRE.** La première
-version du script comparait `noteMoyenne` à `notesDuPerimetre` — or le lot a
+⚠ **ET LA RÉFÉRENCE VIENT DE `git archive`, PAS DE L'ARBRE** — c'est le
+`noteMoyenne` du **lot Avis** (`fix-note-globale-sur-5`), celui qui a posé le
+contrat `note_sur_5`, et non l'état d'avant ce lot-ci. La première version du
+script comparait `noteMoyenne` à `notesDuPerimetre` — or le lot a
 fait de la première une **vue** de la seconde : les deux côtés étaient le même
 code, et la comparaison était tautologique. Si l'extraction avait perdu
 `.eq('is_hidden', false)`, les deux auraient sur-compté à l'identique et le

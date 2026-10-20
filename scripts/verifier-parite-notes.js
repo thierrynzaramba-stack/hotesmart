@@ -3,19 +3,26 @@
 // (20 octobre 2026). REVIEW.md regle 8 : une optimisation ne vaut que si elle
 // rend EXACTEMENT les memes chiffres.
 //
-// ⚠ L'ANCIEN COTE VIENT DE `git archive`, PAS DE L'ARBRE. Premiere version de
+// ⚠ LA REFERENCE VIENT DE `git archive`, PAS DE L'ARBRE. Premiere version de
 // ce script : elle comparait `noteMoyenne` a `notesDuPerimetre`. Or le lot a
 // fait de la premiere une VUE de la seconde — les deux cotes etaient devenus
 // le meme code, et la comparaison etait tautologique. Si l'extraction avait
-// perdu `.eq('is_hidden', false)` — le filtre de la recette du 7 octobre, dont
-// l'absence faisait entrer les avis masques a 0/10 et affichait 9,0 au lieu de
-// 9,57 — les deux cotes auraient sur-compte a l'identique et le script aurait
-// imprime « PARITE COMPLETE » sur des chiffres faux.
-// Il extrait donc le `lib/stats-avis.js` d'AVANT le lot et s'en sert comme
-// reference, puis VERIFIE que ce qu'il a extrait est bien l'ancien code.
+// perdu `.eq('is_hidden', false)` — le filtre de la recette du 7 octobre — les
+// deux cotes auraient sur-compte a l'identique et le script aurait imprime
+// « PARITE COMPLETE » sur des chiffres faux.
+//
+// ⚠ ET LA REFERENCE EST LE LOT AVIS (`fix-note-globale-sur-5`), PAS L'ETAT
+// D'AVANT CE LOT-CI. C'est lui qui a pose le contrat : `note_sur_5` cote
+// serveur, micro-unites entieres, un seul arrondi, notes <= 0 ecartees. Ce
+// qu'on prouve ici n'est donc pas « rien n'a bouge depuis main » — les
+// chiffres ONT bouge, et c'est voulu — mais « lire une fois et grouper rend
+// exactement ce que rend la lecture de reference, bien par bien ».
+// Le script VERIFIE ce qu'il a extrait : un `noteMoyenne`, qui rend
+// `note_sur_5`, et qui ne connait pas `notesDuPerimetre`.
 //
 // Usage : node --env-file=.env.local   scripts/verifier-parite-notes.js
 //         node --env-file=.env.staging scripts/verifier-parite-notes.js [ref-git]
+//         (ref-git par defaut : origin/fix-note-globale-sur-5)
 //
 // ⚠ EMPREINTE DE LA BASE EN TETE. Un resultat qui ne dit pas OU il a ete
 // obtenu ne prouve rien, et « c'est conforme » sur la mauvaise base est pire
@@ -47,35 +54,33 @@ const git = (...a) => execFileSync('git', a, { cwd: racine, encoding: 'utf8', ma
 
 // ─── L'ancien comptage, extrait hors de l'arbre ─────────────────────────────
 // `git archive`, jamais `git show > fichier` (regle 19 du depot).
-function ancienNoteMoyenne (refDemandee) {
-  let ref = refDemandee
-  if (!ref) {
-    // Le commit qui a INTRODUIT `notesDuPerimetre` ; son parent porte l'ancien
-    // code. Trouve, pas devine — et verifie juste apres.
-    const commits = git('log', '--format=%H', '-S', 'notesDuPerimetre', '--', 'lib/stats-avis.js')
-      .trim().split('\n').filter(Boolean)
-    if (!commits.length) {
-      console.error('ECHEC : aucun commit n introduit `notesDuPerimetre`. Passer la ref en argument.')
-      process.exit(1)
-    }
-    ref = commits[commits.length - 1] + '^'
-  }
+const REF_PAR_DEFAUT = 'origin/fix-note-globale-sur-5'
+function noteMoyenneDeReference (refDemandee) {
+  const ref = refDemandee || REF_PAR_DEFAUT
   const dossier = fs.mkdtempSync(path.join(os.tmpdir(), 'parite-notes-'))
   execFileSync('bash', ['-c', `git archive ${JSON.stringify(ref)} lib/ | tar -x -C ${JSON.stringify(dossier)}`],
     { cwd: racine })
   const fichier = path.join(dossier, 'lib', 'stats-avis.js')
   const source = fs.readFileSync(fichier, 'utf8')
 
-  // ⚠ ON VERIFIE QUE C'EST BIEN L'ANCIEN. Une ref qui pointerait sur l'arbre
+  // ⚠ ON VERIFIE CE QU'ON A EXTRAIT. Une ref qui pointerait sur l'arbre
   // d'aujourd'hui rendrait la comparaison tautologique en silence — le defaut
   // meme que cette extraction corrige.
   if (source.includes('notesDuPerimetre')) {
     console.error(`ECHEC : le code extrait de ${ref} contient deja \`notesDuPerimetre\`.`)
-    console.error('Ce n\'est pas l\'etat d\'AVANT le lot : la comparaison serait tautologique.')
+    console.error('Ce n\'est pas une reference independante : la comparaison serait tautologique.')
     process.exit(1)
   }
   if (!/async function noteMoyenne/.test(source)) {
     console.error(`ECHEC : pas de \`noteMoyenne\` dans le code extrait de ${ref}.`)
+    process.exit(1)
+  }
+  // ⚠ ET QU'ELLE PORTE LE BON CONTRAT. Un `noteMoyenne` d'avant le lot Avis
+  // rend `moyenne` sur 10 : compare a `note_sur_5`, tout serait « divergent »
+  // et on chercherait un defaut la ou il n'y a qu'une mauvaise reference.
+  if (!source.includes('note_sur_5')) {
+    console.error(`ECHEC : le \`noteMoyenne\` extrait de ${ref} ne rend pas \`note_sur_5\`.`)
+    console.error('Ce n\'est pas la reference du contrat en vigueur (lot Avis du 20 octobre 2026).')
     process.exit(1)
   }
   const mod = require(fichier)
@@ -94,13 +99,13 @@ let notesNouveau = 0
 const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++ }
 const attention = (m) => { console.warn(`  note  ${m}`); avertissements++ }
 
-const dire = (x) => (x.moyenne == null ? 'aucune note' : `${x.moyenne}/10 sur ${x.notes} avis`)
+const dire = (x) => (x.note_sur_5 == null ? 'aucune note' : `${x.note_sur_5}/5 sur ${x.notes} avis`)
 
 // ⚠ `erreur` FAIT PARTIE DE LA COMPARAISON. Une lecture en ECHEC rend
 // `{ moyenne: null, notes: 0, erreur: true }`, qui est egal a « aucune note »
 // sur les deux seuls champs qu'on comparait : le script imprimait alors `ok`
 // pour un cote qui n'avait rien lu. C'est le faux vert que le depot combat.
-const egal = (a, b) => a.moyenne === b.moyenne && a.notes === b.notes && !a.erreur && !b.erreur
+const egal = (a, b) => a.note_sur_5 === b.note_sur_5 && a.notes === b.notes && !a.erreur && !b.erreur
 const pourquoi = (a, b) => (a.erreur || b.erreur ? ' (une des deux lectures a ECHOUE)' : '')
 
 // Les biens, PAGINES. Une lecture non bornee est tronquee a 1000 lignes sans
@@ -121,9 +126,9 @@ async function tousLesBiens () {
 }
 
 async function main () {
-  const ancien = ancienNoteMoyenne(process.argv[2])
+  const ancien = noteMoyenneDeReference(process.argv[2])
   console.log(`\nBase       : ${projet}`)
-  console.log(`Reference  : noteMoyenne extrait de ${ancien.ref} (hors de l'arbre)`)
+  console.log(`Reference  : noteMoyenne extrait de ${ancien.ref} (hors de l'arbre, contrat note_sur_5)`)
 
   const biens = await tousLesBiens()
   if (!biens.length) { console.error('ECHEC : aucun bien lu. Rien a comparer.'); process.exit(1) }
@@ -169,7 +174,7 @@ async function main () {
         // Un bien sans avis n'a PAS de cle dans la reponse groupee : c'est
         // zero, et c'est ce que rendait son appel.
         const nouveau = Object.prototype.hasOwnProperty.call(neuf.par_bien, ref)
-          ? neuf.par_bien[ref] : { moyenne: null, notes: 0 }
+          ? neuf.par_bien[ref] : { note_sur_5: null, notes: 0 }
         comparaisons++
         notesAncien += refBien.notes || 0
         notesNouveau += nouveau.notes || 0
