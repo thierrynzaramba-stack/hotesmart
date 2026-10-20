@@ -491,8 +491,11 @@ test('LE TEST QUI COMPTE : une liste de biens ILLISIBLE LEVE — jamais un 200 a
 })
 
 test('un compte sans bien : une liste vide, et aucune panne', async () => {
-  const r = await L.lireListe(base({ biens: [] }), { compte: COMPTE })
+  const r = await L.lireListe(base({ biens: [] }), { compte: COMPTE, droits: TOUS_DROITS })
   assert.deepEqual(r, { biens: [], indisponibles: [], refuses: [] })
+  // Sans droits, meme forme — mais le bloc d'un autre domaine est refuse.
+  const sansDroits = await L.lireListe(base({ biens: [] }), { compte: COMPTE })
+  assert.deepEqual(sansDroits, { biens: [], indisponibles: [], refuses: ['avis'] })
 })
 
 test('PERIMETRE VIDE : on echoue FERME, on n elargit pas', async () => {
@@ -936,7 +939,8 @@ test('LE TEST QUI COMPTE : `origine: absent` n est PAS un bareme (recette stagin
 const avisDe = (property_id, overall_score, extra = {}) => ({
   id: `av-${property_id}-${overall_score}-${Math.random().toString(36).slice(2, 7)}`,
   user_id: COMPTE, property_id, property_id_ref: REF, statut: 'confirme',
-  is_hidden: false, overall_score, received_at: '2026-10-10T00:00:00Z', ...extra
+  is_hidden: false, overall_score, content: 'Sejour parfait',
+  received_at: '2026-10-10T00:00:00Z', ...extra
 })
 
 test('la liste : le total des avis et la moyenne, bien par bien', async () => {
@@ -1000,7 +1004,7 @@ test('un avis MASQUE ou NON CONFIRME ne compte pas', async () => {
     avis: [
       avisDe(BIEN, 10),
       avisDe(BIEN, 2, { is_hidden: true }),            // masque par l OTA : 33 en production
-      avisDe(BIEN, 2, { statut: 'a_valider' })         // detection en attente de validation humaine
+      avisDe(BIEN, 2, { statut: 'detecte' })           // detection en attente de validation humaine
     ]
   }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
   assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 1, notes: 1, moyenne: 10 })
@@ -1025,4 +1029,54 @@ test('les avis de la liste sont PAGINES et cloisonnes par compte', async () => {
   // ⚠ UNE REQUETE NEUVE PAR PAGE (constat M6) : `lirePagine` est une fabrique,
   // donc deux pages lues font deux acces a la table, pas un objet a deux pages.
   assert.ok(acces.length >= 2, `une seule page lue : ${acces.length}`)
+})
+
+// ⚠ LE CAS QUE PERSONNE NE COUVRAIT (constat G1 de la revue du 20 octobre 2026).
+
+test('LE TEST QUI COMPTE (G1) : un objet d avis VIDE mais visible n est pas un avis', async () => {
+  // L'objet Channex nait au depart, cache et vide ; Airbnb le revele au bout de
+  // 14 jours MEME si le voyageur n'a rien ecrit (lib/avis/naissance.js). Il a
+  // alors `is_hidden: false`, pas de texte, et une note a 0 ou absente. Le
+  // compter gonflerait le total ET entrerait a 0/10 dans la moyenne — le defaut
+  // de la recette du 7 octobre, arrive par l'autre porte.
+  const r = await L.lireListe(listeDe({
+    avis: [
+      avisDe(BIEN, 10),
+      { id: 'vide-1', user_id: COMPTE, property_id: BIEN, property_id_ref: REF, statut: 'confirme',
+        is_hidden: false, overall_score: 0, content: null, content_public: null, received_at: '2026-10-10T00:00:00Z' },
+      { id: 'vide-2', user_id: COMPTE, property_id: BIEN, property_id_ref: REF, statut: 'confirme',
+        is_hidden: false, overall_score: null, content: null, content_public: null, received_at: '2026-10-10T00:00:00Z' }
+    ]
+  }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 1, notes: 1, moyenne: 10 },
+    'deux objets vides ne sont ni deux avis, ni deux zeros dans la moyenne')
+})
+
+test('G1 : un avis NOTE A ZERO mais qui porte un TEXTE est un avis — sans peser sur la moyenne', async () => {
+  // Contre-epreuve : la regle du depot est « une note > 0 OU un texte ». Ecarter
+  // tout ce qui vaut zero ferait disparaitre un avis que le voyageur a bien
+  // ecrit. Il compte dans le total, pas dans la moyenne : zero n'est une note
+  // chez aucun canal (Booking part de 1, Airbnb de 1/5 normalise a 2/10).
+  const r = await L.lireListe(listeDe({
+    avis: [avisDe(BIEN, 10), avisDe(BIEN, 0, { content: 'Rien a redire, mais la cle etait difficile a trouver' })]
+  }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 1, moyenne: 10 })
+})
+
+test('G1 : un avis SANS NOTE mais avec texte compte (les 5 detections de messages en production)', async () => {
+  const r = await L.lireListe(listeDe({
+    avis: [avisDe(BIEN, 9), avisDe(BIEN, null, { content_public: 'Merci pour tout !' })]
+  }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 1, moyenne: 9 })
+})
+
+test('LE TEST QUI COMPTE (M3) : sans `droits`, la liste echoue FERME sur les avis', async () => {
+  // Le seul appelant les passe — mais un script, ou un endpoint de demain, qui
+  // les oublierait servirait les notes EN SERVICE KEY, donc sans RLS. Le
+  // voisinage fait deja ce choix : perimetre vide => ferme.
+  const sb = listeDe({ avis: [avisDe(BIEN, 10)] })
+  const r = await L.lireListe(sb, { compte: COMPTE, maintenant: MAINTENANT })
+  assert.ok(r.biens.every(b => b.avis === null))
+  assert.deepEqual(r.refuses, ['avis'])
+  assert.ok(!sb._vus.map(v => v.table).includes('ota_reviews'))
 })

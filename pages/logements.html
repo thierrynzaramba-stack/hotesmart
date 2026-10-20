@@ -233,7 +233,11 @@ function dateEnClair (iso) {
 // Meme geste que l'accueil (`pages/aujourdhui.html`, la note du bien).
 const nombre = (x) => { try { return I18n.num(x, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) } catch { return String(x) } }
 
-const OUTILS = { t, esc, dateEnClair, icone, nombre }
+// ⚠ PLUS DE `dateEnClair` ICI (constat m4) : `carteHtml` ne le destructure plus
+// depuis que le fait date a quitte la carte. `dateEnClair` reste utilise par le
+// bandeau de fraicheur, en direct. Un outil passe a un module qui ne le lit pas
+// est du cablage dormant, et ce lot en supprime.
+const OUTILS = { t, esc, icone, nombre }
 
 function montrerEtat (quoi) {
   const zone = $('[data-bind="etat"]')

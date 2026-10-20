@@ -317,11 +317,15 @@ export function canauxHtml (bien, { t, esc }) {
     + `<span class="sr-only"> — ${esc(t(p.titre))}</span></span>`).join('')
 }
 
-// ⚠ L'ETOILE SEULEMENT S'IL Y A UNE NOTE, et le libelle complet pour le lecteur
-// d'ecran : une icone `aria-hidden` suivie de « 4,9 · 336 avis » se lit
-// « quatre virgule neuf, trois cent trente-six avis », ce qui est juste. Mais
-// une note SANS son unite ne dit pas sur quelle echelle elle est : `title`
-// porte l'echelle pour la souris, `.sr-only` pour la voix.
+// ⚠ L'ETOILE SEULEMENT S'IL Y A UNE NOTE — et l'ECHELLE SE DIT. L'icone est
+// `aria-hidden`, donc « 4,9 · 336 avis » se lit « quatre virgule neuf, trois
+// cent trente-six avis » : rien ne dit que 4,9 est sur 5, et 4,9 sur 10 serait
+// une mauvaise note au lieu d'une excellente. `title` porte l'echelle pour la
+// souris, `.sr-only` pour la voix — comme les pastilles de canaux le font deja.
+//
+// ⚠ CE COMMENTAIRE A ETE FAUX (constat M2 de la revue) : il annonçait les deux
+// alors que le rendu n'en portait aucun. Un commentaire qui affirme le
+// contraire du code est pire que pas de commentaire.
 export function avisHtml (bien, outils) {
   const { t, esc, icone, nombre } = outils
   const dit = avisAffiche(bien.avis, { indisponible: outils.avisIndisponibles === true })
@@ -334,9 +338,13 @@ export function avisHtml (bien, outils) {
   const valeurs = dit.valeurs
     ? { ...dit.valeurs, ...(dit.valeurs.note != null ? { note: nombre(dit.valeurs.note) } : {}) }
     : {}
-  const etoile = dit.etat === 'note' ? icone('i-review', 'icon icon--fill') : ''
-  return `<div class="log-avis${dit.muet ? ' log-avis--muet' : ''} caption" data-avis="${dit.etat}">`
-    + `${etoile}${esc(t(dit.cle, valeurs))}</div>`
+  const avecNote = dit.etat === 'note'
+  const echelle = avecNote ? esc(t('logements.avis_echelle')) : ''
+  const etoile = avecNote ? icone('i-review', 'icon icon--fill') : ''
+  return `<div class="log-avis${dit.muet ? ' log-avis--muet' : ''} caption" data-avis="${dit.etat}"`
+    + `${avecNote ? ` title="${echelle}"` : ''}>`
+    + `${etoile}${esc(t(dit.cle, valeurs))}`
+    + `${avecNote ? `<span class="sr-only"> — ${echelle}</span>` : ''}</div>`
 }
 
 export function carteHtml (bien, outils) {

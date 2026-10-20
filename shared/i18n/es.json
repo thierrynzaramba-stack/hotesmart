@@ -619,5 +619,6 @@
   "logements.avis": "{note} · {n, plural, one {# reseña} other {# reseñas}}",
   "logements.avis_sans_note": "{n, plural, one {# reseña} other {# reseñas}}",
   "logements.avis_aucun": "Sin reseñas",
-  "logements.avis_non_lus": "Reseñas no leídas"
+  "logements.avis_non_lus": "Reseñas no leídas",
+  "logements.avis_echelle": "Nota media sobre 5"
 }

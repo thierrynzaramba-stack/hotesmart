@@ -500,7 +500,30 @@ test('un refus de droit reste muet MEME quand une autre carte est en panne', () 
   assert.equal(ligneAvis(null, { avisIndisponibles: false }), null)
 })
 
-test('la ligne des avis ne se laisse pas injecter', () => {
+test('une valeur non numerique ne devient ni un compte, ni du HTML', () => {
+  // ⚠ CE TEST NE MESURE PAS L ECHAPPEMENT, et son ancien nom le pretendait
+  // (constat m3) : `Number('<img …>')` est NaN, donc la charge est ecartee par
+  // la branche « reponse mal formee » AVANT d atteindre le HTML, et le test
+  // resterait vert sans `esc`. Rien de `bien.avis` ne descend en texte : ce ne
+  // sont que des nombres. Ce qu il mesure vraiment — et qui compte — c est qu une
+  // reponse mal formee retombe sur « non lu », jamais sur « Aucun avis ».
   const l = ligneAvis({ total: '<img src=x onerror=alert(1)>', notes: 0, moyenne: null })
+  assert.equal(l.dataset.avis, 'inconnu')
   assert.equal(doc(l.outerHTML).querySelectorAll('img').length, 0)
+  // L echappement des DONNEES, lui, est eprouve la ou elles descendent vraiment :
+  // le nom du bien et le libelle des canaux (tests de la section 6).
+})
+
+test('LE TEST QUI COMPTE (M2) : l ECHELLE de la note se dit, a la souris et a la voix', () => {
+  // L icone est `aria-hidden` : sans ca, un lecteur d ecran annonce « 4,9 · 336
+  // avis » sans dire sur quelle echelle — et 4,9 sur 10 serait une mauvaise note
+  // au lieu d une excellente. La revue a trouve que le commentaire promettait
+  // les deux et que le rendu n en portait aucun.
+  const l = ligneAvis({ total: 336, notes: 332, moyenne: 9.8 })
+  assert.equal(l.getAttribute('title'), 'Note moyenne sur 5')
+  assert.match(l.querySelector('.sr-only').textContent, /Note moyenne sur 5/)
+  // Pas d echelle la ou il n y a pas de note : « 3 avis » n est pas sur 5.
+  const sans = ligneAvis({ total: 3, notes: 0, moyenne: null })
+  assert.equal(sans.getAttribute('title'), null)
+  assert.equal(sans.querySelector('.sr-only'), null)
 })
