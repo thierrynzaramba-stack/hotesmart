@@ -130,11 +130,20 @@ module.exports = async function handler (req, res) {
   const refsPerimetre = refsDuPerimetre(garde.contexte)
 
   try {
-    // ⚠ AUCUN DROIT DE DOMAINE A PASSER : la liste ne lit que `properties`,
-    // `canaux_*`, `bookings_snapshot` et `fermetures` — tout le domaine
-    // `reservations`, deja verifie par la garde. Le perimetre, lui, est un filtre.
+    // ⚠ LES DROITS DE DOMAINE PASSENT AUSSI SUR LA LISTE, DEPUIS LE 20 OCTOBRE
+    // 2026. Elle ne lisait que `properties`, `canaux_*`, `bookings_snapshot` et
+    // `fermetures` — tout le domaine `reservations`, deja verifie par la garde.
+    // Elle lit desormais `ota_reviews` (la note et le nombre d'avis sur chaque
+    // carte, demande de Thierry), dont la policy RLS est
+    // `can_read(user_id, 'avis', …)`. Cet endpoint tourne en service key, qui
+    // contourne la RLS par conception : la garde doit donc etre ici.
+    //
+    // ⚠ `cible` EST `null`, ET C'EST VOULU : sur une collection, le perimetre ne
+    // se verifie pas bien par bien — c'est `refsPerimetre` qui le filtre, plus
+    // haut. Ce qu'on verifie ici est le droit de DOMAINE.
     const liste = await lireListe(supabase, {
-      compte: garde.accountUserId, refsPerimetre
+      compte: garde.accountUserId, refsPerimetre,
+      droits: droitsDesBlocs(garde.contexte, null)
     })
     return res.status(200).json(liste)
   } catch (e) {

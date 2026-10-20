@@ -492,7 +492,7 @@ test('LE TEST QUI COMPTE : une liste de biens ILLISIBLE LEVE — jamais un 200 a
 
 test('un compte sans bien : une liste vide, et aucune panne', async () => {
   const r = await L.lireListe(base({ biens: [] }), { compte: COMPTE })
-  assert.deepEqual(r, { biens: [], indisponibles: [] })
+  assert.deepEqual(r, { biens: [], indisponibles: [], refuses: [] })
 })
 
 test('PERIMETRE VIDE : on echoue FERME, on n elargit pas', async () => {
@@ -662,13 +662,19 @@ test('S1 : les QUATRE domaines sont ceux des policies RLS, pas une liste invente
   assert.deepEqual(Object.keys(L.DROITS_DES_BLOCS).sort(), ['avis', 'menage', 'serrures', 'taxe'])
 })
 
-test('M4 : la LISTE ne porte pas de `refuses` — elle ne lit aucun bloc d un autre domaine', async () => {
+test('M4 : le `refuses` de la LISTE ne porte QUE `avis` — les blocs jamais demandes n y figurent pas', async () => {
+  // Version d'avant : « la liste ne porte pas de `refuses` ». Depuis le
+  // 20 octobre 2026 elle porte les avis, donc un refus possible — mais UN SEUL.
+  // Annoncer le refus de menage, taxe ou serrures ferait croire a l ecran qu on
+  // lui cache un bloc qu il n a jamais demande, et c est le constat M4 intact.
   const sb = listeDe()
-  const r = await L.lireListe(sb, { compte: COMPTE, maintenant: MAINTENANT })
-  assert.equal(r.refuses, undefined,
-    'annoncer un refus pour un bloc jamais demande ferait croire a l ecran qu on lui cache quelque chose')
+  const r = await L.lireListe(sb, {
+    compte: COMPTE, maintenant: MAINTENANT,
+    droits: { prestataires: false, avis: false, reglages: false, reglages_write: false }
+  })
+  assert.deepEqual(r.refuses, ['avis'])
   const tables = sb._vus.map(v => v.table)
-  for (const t of ['property_cleaning_providers', 'ota_reviews', 'taxes_sejour', 'property_locks']) {
+  for (const t of ['property_cleaning_providers', 'taxes_sejour', 'property_locks']) {
     assert.ok(!tables.includes(t), `la liste ne doit pas lire ${t}`)
   }
   assert.equal(r.biens.find(b => b.nom === 'La bulle').fait_date.occupe, true)
@@ -910,4 +916,113 @@ test('LE TEST QUI COMPTE : `origine: absent` n est PAS un bareme (recette stagin
   const g = await L.lireFiche(ficheComplete(), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
   assert.equal(g.taxe.connue, true)
   assert.equal(g.taxe.commune, 'Bagnères')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 12. Les avis sur la LISTE (demande de Thierry, 20 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// « Au lieu de Fermé jusqu'au mercredi 21 octobre, met les avis total sur le
+// logement. » La carte portait un fait date ; elle porte desormais la note et le
+// NOMBRE TOTAL d'avis du logement — tous, pas une fenetre de 30 jours comme la
+// fiche. `fait_date` reste dans la reponse : la fiche (etape 2) l'affiche.
+//
+// ⚠ ET C'EST UN BLOC D'UN AUTRE DOMAINE SUR LA LISTE, LE PREMIER. Le commentaire
+// de `lireListe` l'annonçait : « le jour ou la liste portera un tel bloc, le
+// parametre revient AVEC sa garde ». `ota_reviews` est gardee par
+// `can_read(user_id, 'avis', …)` — c'est le constat de SECURITE de la revue du
+// 20 octobre, applique a la liste.
+
+const avisDe = (property_id, overall_score, extra = {}) => ({
+  id: `av-${property_id}-${overall_score}-${Math.random().toString(36).slice(2, 7)}`,
+  user_id: COMPTE, property_id, property_id_ref: REF, statut: 'confirme',
+  is_hidden: false, overall_score, received_at: '2026-10-10T00:00:00Z', ...extra
+})
+
+test('la liste : le total des avis et la moyenne, bien par bien', async () => {
+  const r = await L.lireListe(listeDe({
+    avis: [avisDe(BIEN, 10), avisDe(BIEN, 9), avisDe(BIEN2, 8)]
+  }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  const bulle = r.biens.find(b => b.nom === 'La bulle')
+  const coeur = r.biens.find(b => b.nom === 'Cœur de vie 23')
+  assert.deepEqual(bulle.avis, { total: 2, notes: 2, moyenne: 9.5 })
+  assert.deepEqual(coeur.avis, { total: 1, notes: 1, moyenne: 8 },
+    'les avis d un bien ne comptent jamais pour un autre')
+})
+
+test('LE TEST QUI COMPTE : la moyenne descend sur l ECHELLE DU COEUR (/10), la mise a /5 est a l ecran', async () => {
+  // Deux normalisations valent deux chiffres differents pour la meme note. Le
+  // coeur stocke brut (Airbnb comme Booking montent a 10, mesure du 20 octobre
+  // 2026 sur les 702 avis de production) et `shared/aujourdhui.js` divise par 2
+  // a l affichage, « partout » (decision de Thierry).
+  const r = await L.lireListe(listeDe({ avis: [avisDe(BIEN, 9.8)] }),
+    { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(r.biens.find(b => b.nom === 'La bulle').avis.moyenne, 9.8)
+})
+
+test('LE TEST QUI COMPTE (SECURITE) : sans le droit `avis`, rien n est lu et rien n est rendu', async () => {
+  const sb = listeDe({ avis: [avisDe(BIEN, 10)] })
+  const r = await L.lireListe(sb, {
+    compte: COMPTE, maintenant: MAINTENANT, droits: { ...TOUS_DROITS, avis: false }
+  })
+  assert.ok(r.biens.every(b => b.avis === null))
+  assert.ok(r.refuses.includes('avis'))
+  assert.ok(!r.indisponibles.includes('avis'),
+    'un refus de droit n est pas une panne : les deux ne se confondent pas')
+  assert.ok(!sb._vus.map(v => v.table).includes('ota_reviews'),
+    'le droit se verifie AVANT la lecture, sinon la donnee a deja quitte la base')
+})
+
+test('LE TEST QUI COMPTE : avis illisibles => `null`, JAMAIS zero', async () => {
+  const r = await L.lireListe(listeDe({ enPanne: { ota_reviews: 'timeout' } }),
+    { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.ok(r.biens.every(b => b.avis === null),
+    'afficher « Aucun avis » a un hote qui en a 336 est le meme mensonge que « Libre » sur un bien complet')
+  assert.ok(r.indisponibles.includes('avis'))
+})
+
+test('un bien SANS avis : lu, et vide — ce n est pas une panne', async () => {
+  const r = await L.lireListe(listeDe({ avis: [] }),
+    { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 0, notes: 0, moyenne: null })
+  assert.deepEqual(r.indisponibles, [])
+})
+
+test('un avis SANS NOTE compte dans le total, pas dans la moyenne (les avis directs, 5 en production)', async () => {
+  const r = await L.lireListe(listeDe({
+    avis: [avisDe(BIEN, 10), avisDe(BIEN, null, { ota: 'direct' })]
+  }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 2, notes: 1, moyenne: 10 })
+})
+
+test('un avis MASQUE ou NON CONFIRME ne compte pas', async () => {
+  const r = await L.lireListe(listeDe({
+    avis: [
+      avisDe(BIEN, 10),
+      avisDe(BIEN, 2, { is_hidden: true }),            // masque par l OTA : 33 en production
+      avisDe(BIEN, 2, { statut: 'a_valider' })         // detection en attente de validation humaine
+    ]
+  }), { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.deepEqual(r.biens.find(b => b.nom === 'La bulle').avis, { total: 1, notes: 1, moyenne: 10 })
+})
+
+test('le total est de TOUJOURS, pas de 30 jours — aucune borne de date n est posee', async () => {
+  const sb = listeDe({ avis: [avisDe(BIEN, 10, { received_at: '2024-01-01T00:00:00Z' })] })
+  const r = await L.lireListe(sb, { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(r.biens.find(b => b.nom === 'La bulle').avis.total, 1,
+    'un avis de 2024 compte dans le total du logement')
+  const q = sb._vus.filter(v => v.table === 'ota_reviews').pop()
+  assert.equal(q.gte['received_at'], undefined, 'la liste ne borne pas : c est un TOTAL')
+})
+
+test('les avis de la liste sont PAGINES et cloisonnes par compte', async () => {
+  const sb = listeDe({ avis: Array.from({ length: 1200 }, (_, i) => avisDe(BIEN, 10, { id: `a${String(i).padStart(5, '0')}` })) })
+  const r = await L.lireListe(sb, { compte: COMPTE, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(r.biens.find(b => b.nom === 'La bulle').avis.total, 1200,
+    'une lecture bornee a 1000 aurait rendu 1000 sans erreur (constat H3)')
+  const acces = sb._vus.filter(v => v.table === 'ota_reviews')
+  assert.equal(acces[0].f['user_id'], COMPTE)
+  // ⚠ UNE REQUETE NEUVE PAR PAGE (constat M6) : `lirePagine` est une fabrique,
+  // donc deux pages lues font deux acces a la table, pas un objet a deux pages.
+  assert.ok(acces.length >= 2, `une seule page lue : ${acces.length}`)
 })

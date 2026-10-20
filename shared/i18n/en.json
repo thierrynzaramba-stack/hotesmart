@@ -615,5 +615,9 @@
   "logements.canal_eteint": "Channel disabled",
   "logements.vide_aide_membre": "No property is shared with you on this account.",
   "logements.fraicheur": "Channels checked {quand}",
-  "logements.fraicheur_vieille": "Channels not checked since {quand}"
+  "logements.fraicheur_vieille": "Channels not checked since {quand}",
+  "logements.avis": "{note} · {n, plural, one {# review} other {# reviews}}",
+  "logements.avis_sans_note": "{n, plural, one {# review} other {# reviews}}",
+  "logements.avis_aucun": "No reviews",
+  "logements.avis_non_lus": "Reviews not loaded"
 }

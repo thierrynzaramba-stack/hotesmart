@@ -62,12 +62,27 @@ function monter ({ reponse = null, erreur = null, titulaire = true } = {}) {
     lang: 'fr',
     t: (k, v = {}) => `[${k}]${Object.entries(v).map(([a, b]) => `${a}=${b}`).join(',')}`,
     date: (d, o) => `EN-CLAIR(${d.toISOString().slice(0, 10)}${o && o.year ? '+an' : ''})`,
+    // ⚠ `num` EXISTE DANS LE VRAI MOTEUR, et le double doit l'avoir : sans lui,
+    // le repli `String(x)` de la page rendait « 4.9 » et le test mesurait son
+    // propre double, pas la page.
+    num: (x, o) => new Intl.NumberFormat('fr', o).format(x),
     apply: () => {}
   }
   const api = { logement: { liste: async () => { etat.appels++; if (erreur) throw erreur; return reponse } } }
   const logger = { error: () => {}, info: () => {} }
   const contexte = {
     window, document: window.document, I18n, api, logger,
+    // ⚠ L'HORLOGE DU TEST, PAS CELLE DU REALM `vm`. `vm.createContext` cree un
+    // TROISIEME realm, avec son propre `Date` : le code de la page y lisait une
+    // horloge differente de celle des fixtures, et la contre-epreuve calendaire
+    // rendait un faux rouge a J+180.
+    //
+    // ⚠ ET C'EST LE `Date` DE NODE, PAS `window.Date`. Mon premier correctif
+    // passait celui de la fenetre jsdom — qui est DEJA le global de Node, que
+    // `tests/outils/horloge-decalee.js` patche a la construction : il etait donc
+    // decale DEUX FOIS, et le faux rouge se deplaçait a J+60 au lieu de
+    // disparaitre. Une horloge pour tout le monde, celle que le test lit.
+    Date,
     estTitulaire: () => titulaire,
     carteHtml: M.carteHtml, etatHtml: M.etatHtml, etatDeLaPage: M.etatDeLaPage,
     fraicheurDuCompte: M.fraicheurDuCompte,
@@ -80,7 +95,8 @@ function monter ({ reponse = null, erreur = null, titulaire = true } = {}) {
     const t = (k, v) => I18n.t(k, v)
     const $ = (s) => document.querySelector(s)
     ${fonctionDeLaPage('dateEnClair')}
-    const OUTILS = { t, esc, dateEnClair, icone }
+    ${ligneDeLaPage(/^\s*const nombre = .*$/m, 'le formateur de nombre')}
+    ${ligneDeLaPage(/^\s*const OUTILS = .*$/m, 'les outils du rendu')}
     ${fonctionDeLaPage('montrerEtat')}
     ${fonctionDeLaPage('montrerFraicheur')}
     ${ligneDeLaPage(/^let enVol = .*$/m, 'le verrou enVol')}
@@ -100,7 +116,8 @@ const bien = (extra = {}) => ({
   id: 'b1', nom: 'La bulle', ville: 'Bagnères', capacite: 2, photo_url: null,
   assistant_en_pause: false, canaux_echec: false, canaux: [{ ota: 'airbnb', mappe: true, actif: true }],
   canaux_vu_le: new Date().toISOString(),
-  fait_date: { type: 'occupe', du: null, au: '2026-10-22' }, ...extra
+  fait_date: { type: 'occupe', du: null, au: '2026-10-22' },
+  avis: { total: 336, notes: 332, moyenne: 9.8 }, ...extra
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -242,4 +259,61 @@ test('une réponse mal formée est une PANNE, pas un compte vide', async () => {
   await ctx.__charger()
   const cles = [...doc.querySelectorAll('[data-bind="etat"] [data-i18n]')].map(x => x.dataset.i18n)
   assert.ok(cles.includes('logements.panne'))
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Les avis sur la page (demande de Thierry, 20 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE : la carte rend la note et le nombre d avis, pas le fait daté', async () => {
+  const { doc, ctx } = monter({ reponse: { biens: [bien()], indisponibles: [], refuses: [] } })
+  await ctx.__charger()
+  const carte = doc.querySelector('.log-carte')
+  assert.ok(carte.querySelector('.log-avis'), 'la ligne des avis est rendue')
+  assert.equal(carte.querySelector('[data-fait]'), null, 'le fait daté a quitté la carte')
+  // `I18n.t` est ici un double qui rend `[clé]var=valeur` : on lit les VALEURS
+  // passées, ce qui prouve la note sur 5 et le total — pas une chaîne de hasard.
+  assert.match(carte.querySelector('.log-avis').textContent, /logements\.avis\].*n=336/)
+  assert.match(carte.querySelector('.log-avis').textContent, /note=4,9/,
+    'la note est divisée par deux ET formatée dans la langue de l hôte')
+})
+
+test('LE TEST QUI COMPTE (MU) : avis non lus => la page passe le drapeau, et la carte le DIT', async () => {
+  // La mutation qui doit rougir : ne pas passer `avisIndisponibles`. La carte
+  // tomberait alors dans le cas « refus » et n afficherait RIEN — une panne
+  // silencieuse, là où l hôte doit savoir que la note manque.
+  const { doc, ctx } = monter({
+    reponse: { biens: [bien({ avis: null })], indisponibles: ['avis'], refuses: [] }
+  })
+  await ctx.__charger()
+  const ligne = doc.querySelector('.log-avis')
+  assert.ok(ligne, 'une panne de lecture se dit')
+  assert.equal(ligne.dataset.avis, 'inconnu')
+})
+
+test('LE TEST QUI COMPTE (SECURITE) : un bloc REFUSE n est pas rendu du tout', async () => {
+  // Règle de Thierry du 20 octobre : « on ne montre jamais ce qui mène à un
+  // refus. Le JSON peut le porter, l écran le cache. »
+  const { doc, ctx } = monter({
+    reponse: { biens: [bien({ avis: null })], indisponibles: [], refuses: ['avis'] }
+  })
+  await ctx.__charger()
+  // ⚠ LA CARTE DOIT EXISTER. Sans cette ligne, le test etait VERT quand la
+  // grille entiere etait vide — et c'est exactement ce qui est arrive : passer
+  // `null` a `I18n.t` faisait tomber la liste en « panne », et l'assertion
+  // « pas de ligne d'avis » restait verte pour la pire des raisons.
+  assert.ok(doc.querySelector('.log-carte'), 'la carte est rendue')
+  assert.equal(doc.querySelector('.log-avis'), null)
+  assert.doesNotMatch(doc.querySelector('.log-carte').textContent, /avis/i)
+})
+
+test('les zones de la grille au téléphone ne dépendent pas de la POSITION des enfants', async () => {
+  // La ligne des avis DISPARAÎT sur un refus : un `:nth-child(4)` ferait alors
+  // prendre la zone des avis par le signal, et la carte se décalerait.
+  const style = PAGE.slice(PAGE.indexOf('@media (max-width: 560px)'))
+  assert.doesNotMatch(style, /:nth-child\(\d\)\s*\{\s*grid-area/,
+    'une zone de grille se désigne par classe, jamais par position')
+  for (const classe of ['log-photo', 'log-texte', 'log-canaux', 'log-avis', 'log-signal-ligne']) {
+    assert.match(style, new RegExp(`\\.${classe} \\{ grid-area:`), `${classe} doit porter sa zone`)
+  }
 })
