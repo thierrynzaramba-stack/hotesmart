@@ -373,7 +373,33 @@ module.exports = async (req, res) => {
       const b = bornesDePeriode(cle)
       if (!b) return null
       return joursOuverts(supabase, bien, b[0], b[1], {
-        aujourdHui: auj, estimerLePasse: true, lignes: lignesCalendrier
+        aujourdHui: auj, estimerLePasse: true, lignes: lignesCalendrier,
+        // ⚠ DETTE 78 : LE DENOMINATEUR SUIT LE NUMERATEUR. `eclater` retire deja
+        // des nuits de REFERENCE celles qu'une exception ou une fermeture
+        // declaree couvre (`nuitees_hors_reference`, pose ligne 280), et
+        // `calculerIndicateurs` fait `nuiteesRef = nuitees - hors_reference`
+        // puis divise par `jours_ouverts` — sous le commentaire « ce qui DIVISE
+        // se calcule des deux cotes sur le meme perimetre ». Les deux moities
+        // n'etaient pas branchees sur le meme perimetre : AUCUN appelant du
+        // depot ne passait `joursExclus`, donc `estimesFermes` et
+        // `jours_estimes_fermes_par_exception` de capacite.js etaient du code
+        // mort a l'echelle du depot.
+        //
+        // Mesure du 20 octobre 2026 sur les 4 biens reels : la dette ne mord
+        // que la ou un jour declare ferme est PAR AILLEURS compte ouvert —
+        // c'est-a-dire le passe ancien sans memoire d'intention, ou la
+        // convention « un jour passe sans ligne est repute ouvert »
+        // s'applique. Coeur de vie 23, du 20 septembre au 15 octobre 2025
+        // (exception declaree de 17 jours) : TO 23,1 % au lieu de 66,7 %,
+        // RevPAR 21,77 EUR au lieu de 62,88 EUR, denominateur 26 au lieu de 9.
+        // Dans le futur et le passe recent, `calendar_inventory` porte une vraie
+        // ligne qui dit « ferme » : ces jours etaient deja hors du
+        // denominateur, et la correction n'y change rien (0 ecart mesure).
+        //
+        // ⚠ ET LE DRAPEAU NE BOUGE PAS : `estimee` vaut `estimes > 0`, donc les
+        // jours fermes par declaration ne font PAS passer un chiffre mesure
+        // pour un estime. Verifie dans capacite.js.
+        joursExclus: exclus
       }).then(r => [cle, r])
     }).filter(Boolean))
     for (const [cle, r] of classees) capacites.set(cle, r)

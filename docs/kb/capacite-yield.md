@@ -303,3 +303,71 @@ laisser l'erreur remonter, jamais rendre une plage vide : chaque jour
 tomberait en « sans ligne », donc **fermé**, et le dénominateur serait faux,
 crédible et muet. C'est la règle que ce module défend depuis l'origine — « un
 dénominateur inventé est pire qu'un trou déclaré ».
+
+## `joursExclus` — le dénominateur suit le numérateur (dette 78, 20 octobre 2026)
+
+**Décision de Thierry : « une nuit fermée n'est pas une nuit invendue. »**
+
+`eclater` retire déjà des nuits de **référence** celles qu'une exception ou une
+fermeture déclarée couvre (`nuitees_hors_reference`), et `calculerIndicateurs`
+fait `nuiteesRef = nuitees − hors_reference` puis divise par `jours_ouverts` —
+sous son propre commentaire « ce qui DIVISE se calcule des deux côtés sur le
+même périmètre ». Les deux moitiés n'étaient pas branchées sur le même
+périmètre : **aucun appelant du dépôt ne passait `joursExclus`**, donc
+`estimesFermes` et `jours_estimes_fermes_par_exception` étaient du code mort à
+l'échelle du dépôt.
+
+⚠ **ET CE COMPTE ÉTAIT IMBRIQUÉ SOUS `estimee`.** `indicateurs.js` ne le rendait
+que si, *par ailleurs*, au moins un jour passé était réputé ouvert par
+convention. Les deux choses n'ont rien à voir : un mois entièrement ligné au
+calendrier, avec dix jours déclarés fermés, retire bien ces dix jours du
+dénominateur et n'en disait **rien**. C'est le seul chiffre qui explique un taux
+d'occupation qui bouge, et il était inatteignable. Il est désormais rendu
+indépendamment. Le **nom reste historique** (« estimés ») : ces jours sont
+*déclarés*, pas estimés, mais le nom est déjà dans le contrat de la réponse.
+
+⚠ **LE DRAPEAU `estimee` NE BOUGE PAS** : il vaut `estimes > 0`, donc un jour
+fermé par déclaration ne fait **pas** passer un chiffre mesuré pour un estimé.
+
+### Où la dette mord, et où elle ne mord pas
+
+Mesuré sur les 4 biens réels (`scripts/verifier-dette-78.js`) : **elle ne mord
+que là où un jour déclaré fermé est *par ailleurs* compté ouvert.**
+
+| fenêtre | jours retirés | effet |
+|---|---|---|
+| 30 derniers jours | 0 | aucun — rien de déclaré |
+| fermetures à venir (futur) | 0 | aucun — `calendar_inventory` porte déjà une ligne « fermé » |
+| passé ancien sans mémoire d'intention | **17 / 26** | Cœur de vie 23 : **TO 23,1 % → 66,7 %**, RevPAR 21,77 € → 62,88 € |
+
+Dans le futur et le passé récent, la mémoire d'intention existe : le jour est
+déjà hors du dénominateur. C'est dans le **passé ancien**, où la convention
+« un jour passé sans ligne est réputé ouvert » s'applique, que l'écart se creuse
+— et cette fenêtre est précisément le **N-1** auquel `comparerAN1` compare le
+mois courant, donc la comparaison annuelle était flattée.
+`tests/api-yield.test.js` garde les deux.
+
+### ⚠ CE QUI N'EST PAS BRANCHÉ, ET POURQUOI
+
+`joursExclus` est une affaire de **dénominateur**. Sur les sept appels à
+`joursOuverts` du dépôt, **deux seulement** en sont un :
+
+| appel | ce que la capacité sert | branché ? |
+|---|---|---|
+| `api/yield.js` | dénominateur du TO / RevPAR affichés | **oui** |
+| `lib/yield/contexte-du-bien.js:154` (`capacitesMois`) | dénominateur de la **pression**, qui déplace les **prix** | **non — décision produit** |
+| `api/yield-prix.js` ×2 | l'état « ouverte / fermée à la vente » affiché par nuit | non |
+| `lib/yield/contexte-du-bien.js:183` | l'ensemble des nuits **à tarifer** | non |
+| `lib/pilote-quotidien.js` | les nuits **à tarifer et à pousser** au canal | non |
+
+Y passer les exclusions confondrait **« hors référence »** et **« fermée à la
+vente »** : une nuit en exception peut parfaitement être ouverte et se vendre.
+Pour les trois derniers, la conséquence est une **poussée OTA** — on cesserait
+de tarifer des nuits que l'hôte vend. Et `lib/moteur-prix.js` honore **déjà**
+les fermetures de l'hôte via `nuitsFermees` : seule la moitié `yield_exceptions`
+changerait, dans le sens d'une vente en moins.
+
+Le cas de `capacitesMois` est le plus délicat : c'est bien la même asymétrie, et
+`grilleDuBien` construit bien son numérateur **avec** `joursExclus` — mais son
+dénominateur nourrit la pression, donc les prix recommandés. Le corriger est
+juste **et** change les prix. À trancher séparément.

@@ -677,3 +677,105 @@ test('LE TEST QUI COMPTE : une fenetre qui commence un 29 fevrier ne fait pas to
       assert.ok(lectures.length, 'le calendrier n a pas ete lu du tout')
     })
 })
+
+// ─── DETTE 78 : le denominateur suit le numerateur ───────────────────────────
+//
+// ⚠ L'ASYMETRIE QUE CE LOT FERME. `eclater` retire des nuits de REFERENCE
+// celles qu'une exception ou une fermeture declaree couvre, et
+// `calculerIndicateurs` fait `nuiteesRef = nuitees - hors_reference` puis
+// divise par `jours_ouverts` — sous le commentaire « ce qui DIVISE se calcule
+// des deux cotes sur le meme perimetre ». Les deux moities n'etaient pas
+// branchees sur le meme perimetre : AUCUN appelant du depot ne passait
+// `joursExclus` a `joursOuverts`, donc `estimesFermes` et
+// `jours_estimes_fermes_par_exception` de capacite.js etaient du code mort.
+//
+// Une nuit fermee n'est pas une nuit invendue (decision de Thierry).
+
+const MOIS78 = `${AN}-06`
+const joursDuMois78 = Array.from({ length: 30 }, (_, i) => `${MOIS78}-${String(i + 1).padStart(2, '0')}`)
+
+test('LE TEST QUI COMPTE (dette 78) : une nuit DECLAREE FERMEE sort du denominateur', () => {
+  // 30 jours lignes et tarifes, donc 30 ouverts. 6 nuits vendues, dont 2 dans
+  // une exception declaree de 10 jours.
+  //   AVANT : numerateur 4 (les 2 nuits en exception sont retirees),
+  //           denominateur 30  -> TO 13,3 %
+  //   APRES : numerateur 4, denominateur 20                -> TO 20,0 %
+  const etat = preparer({
+    inventaire: joursDuMois78.map(j => nuit(j)),
+    snapshots: [
+      resa('V1', `${MOIS78}-02`, `${MOIS78}-06`, 400, `${AN}-05-01`),   // 4 nuits hors exception
+      resa('V2', `${MOIS78}-12`, `${MOIS78}-14`, 200, `${AN}-05-01`)    // 2 nuits DANS l exception
+    ],
+    exceptions: [{ id: 'e78', user_id: PROD, property_id: BIEN.id,
+      date_debut: `${MOIS78}-10`, date_fin: `${MOIS78}-19`, motif: 'travaux' }]
+  })
+  const res = reponse()
+  return require('../api/yield')(req({ query: {
+    property_id: BIEN.id, debut: `${MOIS78}-01`, fin: `${MOIS78}-30`, granularite: 'mois' } }), res)
+    .then(() => {
+      assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+      const p = (res.body.realise || []).find(x => x.periode === MOIS78)
+      assert.ok(p, `periode ${MOIS78} absente : ${JSON.stringify((res.body.realise || []).map(x => x.periode))}`)
+      assert.strictEqual(p.jours_ouverts, 20,
+        `${p.jours_ouverts} jours ouverts : les 10 jours declares fermes sont encore au denominateur`)
+      assert.strictEqual(p.jours_estimes_fermes_par_exception, 10,
+        'le compte des jours fermes par declaration n est pas rendu')
+      // Le numerateur, lui, ne bouge pas : 6 nuitees vendues, 2 hors reference.
+      assert.strictEqual(p.nuitees, 6, 'le realise doit garder TOUT ce qui est vendu')
+      assert.strictEqual(p.nuitees_exclues_du_taux, 2)
+      assert.strictEqual(p.taux_occupation, 0.2,
+        `TO ${p.taux_occupation} : 4 nuitees de reference sur 20 jours ouverts = 0,2`)
+    })
+})
+
+test('LE TEST QUI COMPTE (dette 78) : la comparaison avec l AN DERNIER n est plus flattee', () => {
+  // ⚠ LA CONSEQUENCE QUI COUTE LE PLUS CHER, et que la mesure du 20 octobre
+  // 2026 a mise en evidence : la fenetre ou la dette mord — le passe ancien,
+  // sans memoire d intention — est PRECISEMENT le N-1 auquel `comparerAN1`
+  // compare le mois courant. Une fermeture declaree l an dernier faisait
+  // sous-estimer le TO de reference, donc affichait une amelioration qui
+  // n existait pas.
+  //
+  // Les deux mois vendent EXACTEMENT la meme chose (4 nuits de reference sur
+  // 20 jours ouverts) ; seul le mois N-1 porte la declaration de fermeture.
+  // La variation juste est donc ZERO.
+  const an1 = AN - 1
+  const mois1 = `${an1}-06`
+  const joursN1 = Array.from({ length: 30 }, (_, i) => `${mois1}-${String(i + 1).padStart(2, '0')}`)
+  preparer({
+    inventaire: [...joursDuMois78, ...joursN1].map(j => nuit(j)),
+    snapshots: [
+      // Le mois courant : 4 nuits, et 10 jours fermes declares.
+      resa('A1', `${MOIS78}-02`, `${MOIS78}-06`, 400, `${AN}-05-01`),
+      // Le mois N-1 : les memes 4 nuits, et les memes 10 jours fermes.
+      resa('A0', `${mois1}-02`, `${mois1}-06`, 400, `${an1}-05-01`)
+    ],
+    exceptions: [
+      { id: 'e78a', user_id: PROD, property_id: BIEN.id,
+        date_debut: `${MOIS78}-10`, date_fin: `${MOIS78}-19`, motif: 'travaux' },
+      { id: 'e78b', user_id: PROD, property_id: BIEN.id,
+        date_debut: `${mois1}-10`, date_fin: `${mois1}-19`, motif: 'travaux' }
+    ]
+  })
+  const res = reponse()
+  return require('../api/yield')(req({ query: {
+    property_id: BIEN.id, debut: `${MOIS78}-01`, fin: `${MOIS78}-30`, granularite: 'mois' } }), res)
+    .then(() => {
+      assert.strictEqual(res.code, 200, JSON.stringify(res.body))
+      const p = (res.body.realise || []).find(x => x.periode === MOIS78)
+      assert.ok(p && p.vs_n1, `pas de comparaison N-1 : ${JSON.stringify(p && Object.keys(p))}`)
+      assert.strictEqual(p.vs_n1.periode_n1, mois1)
+      assert.strictEqual(p.vs_n1.disponible, true,
+        'le N-1 n est pas trouve : la comparaison ne peut rien dire')
+      // Les deux mois sont identiques : la variation du TO doit etre NULLE.
+      // Sans le correctif, le denominateur du N-1 valait 30 au lieu de 20,
+      // son TO 13,3 % au lieu de 20 %, et la variation annoncait +50 %.
+      assert.strictEqual(p.taux_occupation, 0.2)
+      const v = p.vs_n1.taux_occupation
+      assert.ok(v, `pas de variation de taux_occupation : ${JSON.stringify(p.vs_n1)}`)
+      assert.strictEqual(v.n1, 0.2,
+        `le TO de l an dernier vaut ${v.n1} au lieu de 0,2 : son denominateur garde les jours fermes`)
+      assert.strictEqual(v.variation, 0,
+        `la comparaison annonce ${v.variation} au lieu de 0 sur deux mois identiques`)
+    })
+})
