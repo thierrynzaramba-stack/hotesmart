@@ -114,9 +114,16 @@ même note.
 
 **Et l'arrondi intermédiaire existait vraiment.** La version d'avant arrondissait
 la moyenne sur 10 côté serveur, puis l'écran divisait et arrondissait encore :
-9,65 s'affichait **4,9** au lieu de 4,8. Deux avis à 9,9 et 9,7 affichaient
-**5,0 / 5** — une note parfaite sur deux séjours qui ne le sont pas. L'endpoint
-descend désormais `note_sur_5`, et l'écran ne divise plus rien.
+9,65 s'affichait **4,9** au lieu de 4,8. L'endpoint descend désormais
+`note_sur_5`, et l'écran ne divise plus rien.
+
+⚠ **Correction : j'ai affirmé ici et dans le message de `c9fa086` que « deux
+avis à 9,9 et 9,7 affichaient 5,0 / 5 ». C'est faux**, et la revue l'a prouvé en
+rejouant l'ancienne chaîne depuis `e667736` : elle donnait 9,8 puis **4,9**. Le
+5,0 venait de la *mutation* (arrondir chaque note avant de sommer), pas du code
+qui tournait. L'exemple vrai, mesuré sur la production, est **Colomiers** :
+653 points sur 69 avis font 9,4638 sur 10, soit exactement **4,732 sur 5** —
+affiché **4,8** par le double arrondi, **4,7** après correction.
 
 **La table des échelles existe quand même**, et c'est tout son intérêt : le jour
 où une source livre vraiment du /5 — un canal nouveau, un import, une saisie à
@@ -124,6 +131,19 @@ la main — une ligne suffit et tous les écrans suivent. ⚠ Une source ne s'y
 ajoute **pas sans avoir été mesurée** : se tromper d'échelle divise ou double la
 note d'un logement, et personne ne le verra, parce que 4,9 comme 9,8 ont l'air
 d'une note.
+
+**Et une source peut arriver sans passer par cette table** : elle arrive par le
+writer, qui accepte n'importe quel libellé de canal. Deux garde-fous, posés
+après la revue : une source hors table est **journalisée une fois** par canal,
+et une note qui **dépasse 5 après conversion** est écartée plutôt qu'affichée
+(« 50,0 / 5 ») ou plafonnée (ce qui affirmerait une note parfaite inconnue).
+
+**L'arrondi, lui, se fait en entiers.** Avec des flottants, l'arrondi d'un ex
+æquo à `.x5` dépendait du **nombre d'avis** : pour une population dont la
+moyenne exacte vaut 4,85, le calcul rendait 4,9 à n=1, 4,8 à n=20, 4,9 à n=100,
+4,8 à n=332 — donc **un avis de plus, identique aux autres, faisait bouger la
+note de 0,1**. La bulle a 332 notes. La règle est désormais écrite et tenue par
+un test : au plus proche, **le demi vers le haut**.
 
 **Les 33 zéros d'Airbnb sont exactement les 33 avis masqués** — la preuve, par la
 donnée, que le constat G1 ci-dessous portait sur un cas réel : le jour où Airbnb

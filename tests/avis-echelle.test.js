@@ -94,7 +94,7 @@ test('LE TEST QUI COMPTE : la table des echelles correspond a la MESURE', () => 
   // Se tromper d echelle divise ou double la note d un logement, et personne ne
   // le verra : 4,9 comme 9,8 ont l air d une note. Ce test fige ce qui a ete
   // mesure le 20 octobre 2026 — l ajout d une source sans mesure le fera rougir.
-  assert.deepEqual(E.ECHELLE_PAR_CANAL, { airbnb: 10, booking: 10, expedia: 10, vrbo: 10 })
+  assert.deepEqual(E.ECHELLE_PAR_CANAL, { airbnb: 10, booking: 10, expedia: 10, vrbo: 10, homeaway: 10 })
   assert.equal(E.ECHELLE_PAR_DEFAUT, 10)
 })
 
@@ -108,4 +108,77 @@ test('le nom du canal se lit sans se soucier de la casse ni des variantes', () =
   assert.equal(E.echelleDe('Airbnb'), 10)
   assert.equal(E.echelleDe('booking.com'), 10)
   assert.equal(E.echelleDe('BOOKING'), 10)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Les constats de la revue de c9fa086
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE (M1) : un EX AEQUO a .x5 s arrondit pareil, quel que soit le NOMBRE d avis', () => {
+  // Le defaut mesure : toutes les notes a 9,7 font une moyenne exacte de 4,85,
+  // et l arrondi flottant rendait 4,9 a n=1, 4,8 a n=20, 4,9 a n=100, 4,8 a
+  // n=332. Autrement dit UN AVIS DE PLUS, identique aux autres, faisait bouger
+  // la note de 0,1. La bulle a 332 notes.
+  const notes = (n) => Array.from({ length: n }, () => ({ ota: 'airbnb', overall_score: 9.7 }))
+  const vus = new Set()
+  for (const n of [1, 2, 3, 5, 10, 20, 33, 50, 99, 100, 200, 332, 400, 1000, 5000]) {
+    vus.add(E.noteSur5Des(notes(n)).note_sur_5)
+  }
+  assert.deepEqual([...vus], [4.9], `quatre bascules pour la meme moyenne : ${[...vus].join(', ')}`)
+})
+
+test('M1 : la regle de demi est AU PLUS PROCHE, LE DEMI VERS LE HAUT, et elle est ecrite', () => {
+  const une = (note) => E.noteSur5Des([{ ota: 'airbnb', overall_score: note }]).note_sur_5
+  assert.equal(une(9.7), 4.9, '4,85 monte')
+  assert.equal(une(9.5), 4.8, '4,75 monte')
+  assert.equal(une(9.3), 4.7, '4,65 monte')
+  assert.equal(une(9.1), 4.6, '4,55 monte')
+  // Et juste en dessous d un demi, on descend.
+  assert.equal(E.noteSur5Des([{ ota: 'airbnb', overall_score: 9.699 }]).note_sur_5, 4.8)
+})
+
+test('M1 : la somme reste exacte sur un gros volume — 5 000 avis ne derivent pas', () => {
+  const l = [
+    ...Array.from({ length: 2500 }, () => ({ ota: 'airbnb', overall_score: 10 })),
+    ...Array.from({ length: 2500 }, () => ({ ota: 'booking', overall_score: 7.5 }))
+  ]
+  // (5,0 + 3,75) / 2 = 4,375 -> 4,4 (le demi monte)
+  assert.equal(E.noteSur5Des(l).note_sur_5, 4.4)
+})
+
+test('LE TEST QUI COMPTE (M2) : une note HORS ECHELLE est ecartee, jamais affichee ni plafonnee', () => {
+  // Une source sur 100 non mesuree rendait « 50,0 / 5 ». La plafonner a 5
+  // serait pire : on affirmerait une note parfaite qu on ne connait pas.
+  assert.equal(E.surCinq(50, 'une-source-sur-100'), null)
+  const r = E.noteSur5Des([{ ota: 'airbnb', overall_score: 10 }, { ota: 'une-source-sur-100', overall_score: 50 }])
+  assert.equal(r.note_sur_5, 5)
+  assert.equal(r.notes, 1, 'la note hors echelle ne compte pas dans le diviseur')
+})
+
+test('LE TEST QUI COMPTE (M3) : la resolution par NOM fonctionne — eprouvee par une table injectee', () => {
+  // Toutes les sources mesurees valent 10 : tant que c est le cas, aucun test
+  // ne peut distinguer `echelleDe` d un `return 10`, et la mutation qui
+  // supprime la boucle reste verte. Avec une table injectee, elle rougit.
+  const table = { airbnb: 5, booking: 10 }
+  assert.equal(E.echelleDe('airbnb', table), 5)
+  assert.equal(E.echelleDe('booking.com', table), 10)
+  assert.equal(E.echelleDe('inconnu', table), 10, 'le defaut reste celui du coeur')
+  assert.equal(E.surCinq(5, 'airbnb', table), 5, '5 / 5 sur une source en /5')
+  assert.equal(E.surCinq(5, 'booking', table), 2.5, '5 / 10 sur une source en /10')
+  // Et l enonce de Thierry, dans SA lecture : Airbnb vraiment sur 5.
+  const r = E.noteSur5Des([
+    ...Array.from({ length: 10 }, () => ({ ota: 'airbnb', overall_score: 5 })),
+    ...Array.from({ length: 10 }, () => ({ ota: 'booking', overall_score: 8 }))
+  ], { table })
+  assert.equal(r.note_sur_5, 4.5, 'meme resultat que sur les donnees reelles')
+})
+
+test('m2 : la cle du canal est celle que le WRITER ecrit, pas celle qu on aimerait', () => {
+  // `normaliserOta` de lib/cron-channel-reviews.js ne connait que airbnb,
+  // bookingcom et booking.com, et laisse passer le reste en minuscules :
+  // « HomeAway » devient `homeaway`, jamais `vrbo`.
+  const table = { vrbo: 5, homeaway: 7 }
+  assert.equal(E.echelleDe('homeaway', table), 7, 'c est `homeaway` qui arrive en base')
+  assert.ok(Object.prototype.hasOwnProperty.call(E.ECHELLE_PAR_CANAL, 'homeaway'),
+    'la table doit porter la cle reellement ecrite')
 })
