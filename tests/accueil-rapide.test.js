@@ -12,8 +12,16 @@
 //     repasse devant ;
 //   - y coder la ref du projet en dur : la redirection marche en prod et
 //     RATE EN STAGING, ou l'inverse, en silence ;
-//   - retirer le `try` : `localStorage` inaccessible (navigation privee,
-//     cookies tiers bloques) ferait une landing blanche.
+//   - partager UN SEUL `try` entre le test du fragment et la lecture du
+//     stockage : quand `localStorage` leve, l'exception emporte le retour
+//     d'authentification avec elle et les jetons meurent en silence ;
+//   - masquer `documentElement` AVANT de naviguer : si la navigation est
+//     refusee, le `catch` avale l'echec et la page reste blanche pour de bon.
+// ⚠ Ce qu'il ne faut PAS croire : que retirer le `try` du stockage blanchirait
+// la landing. Le seul masquage vient APRES l'acces qui leve, et une exception
+// non capturee dans un script de tete laisse le parsing continuer : la landing
+// s'affiche. Le vrai cout de retirer ce `try`, c'est la regression que le lot
+// combat — un connecte revoit la page commerciale.
 // La sonde est donc EXECUTEE ici, pas relue.
 //
 // Mesures et methode : docs/kb/performance.md §4.
@@ -58,7 +66,13 @@ function lancerLaSonde (cles, url = {}) {
   const localStorage = cles === null
     ? { get length () { throw new Error('localStorage indisponible') }, key () { throw new Error('idem') } }
     : { get length () { return cles.length }, key: i => cles[i] }
-  const location = { search: url.search || '', hash: url.hash || '', replace: u => vus.push(u) }
+  const location = {
+    search: url.search || '',
+    hash: url.hash || '',
+    // `replace` peut etre REFUSE : frame sandboxee, extension, navigation de
+    // haut niveau bloquee. On sait alors ce que la page montre.
+    replace: u => { if (url.replaceLeve) throw new Error('navigation refusee'); vus.push(u) }
+  }
   const documentElement = { style: {} }
   const document = { documentElement }
   new Function('localStorage', 'location', 'document', SONDE().corps)(localStorage, location, document)
@@ -123,11 +137,16 @@ test("LE TEST QUI COMPTE : le retour d'authentification n'est pas perdu", () => 
 
 test("un fragment d'ERREUR laisse la landing, comme avant", () => {
   // ⚠ TEST DE NON-REGRESSION, et il faut le savoir en le lisant (regle 19 de
-  // REVIEW.md, point 2). Contrairement aux treize autres, celui-ci reste VERT
-  // contre le code d'avant le lot : il ne garde pas un correctif, il garde une
-  // DECISION — ne PAS elargir le motif a `error`. Il a ete eprouve contre la
-  // version fautive plausible (motif `/[#&](access_token|refresh_token|error)=/`,
-  // celle que suggerait la review) : il rougit contre elle.
+  // REVIEW.md, point 2). Il ne garde pas un correctif, il garde une DECISION :
+  // ne PAS elargir le motif a `error`.
+  // Compte rendu exact de la contre-epreuve, corrige le 20 octobre 2026 : contre
+  // `git archive HEAD~1`, les tests de la sonde rougissent TOUS, celui-ci
+  // compris — la sonde n'existe pas dans HEAD~1, l'extraction leve avant tout
+  // jugement. Une version anterieure de ce commentaire annoncait « reste vert
+  // contre le code d'avant » : c'etait faux, et invérifiable par le relecteur
+  // suivant. Ce qui est vrai et se verifie : contre la version fautive plausible
+  // (motif elargi `/[#&](access_token|refresh_token|error)=/`, celle que
+  // suggerait la review), il est le SEUL a rougir.
   //
   // `#error=access_denied` n'est pas un retour exploitable : aucun jeton a
   // sauver, et rien ne justifie d'envoyer un visiteur sans session vers /login.
@@ -136,6 +155,43 @@ test("un fragment d'ERREUR laisse la landing, comme avant", () => {
   const r = lancerLaSonde([], { hash: '#error=access_denied&error_description=expired' })
   assert.deepEqual(r.redirections, [])
   assert.ok(!r.masque)
+})
+
+test("mais un CONNECTE avec un fragment d'erreur part quand meme, fragment compris", () => {
+  // ⚠ LA DECISION CI-DESSUS NE VAUT QUE POUR UN VISITEUR SANS SESSION. Des
+  // qu'une cle de session existe, c'est elle qui fait partir, et `hash` voyage
+  // avec le reste — exactement comme le faisait `pages/index.html`, qui
+  // concatenait `location.hash` sans le lire. Le fragment d'erreur n'est pas
+  // filtre : il ne declenche rien a lui seul, et le filtrer couterait une regle
+  // de plus sur le chemin le plus chaud du site.
+  // Ce test existe parce que le commentaire de la sonde a dit l'inverse pendant
+  // une journee : la decision ecrite doit etre celle que le code applique.
+  const r = lancerLaSonde([`sb-${REFS.prod}-auth-token`],
+    { hash: '#error=access_denied&error_code=otp_expired' })
+  assert.deepEqual(r.redirections, ['/pages/aujourdhui#error=access_denied&error_code=otp_expired'])
+})
+
+test("LE TEST QUI COMPTE : localStorage qui LEVE ne fait pas perdre le retour d'authentification", () => {
+  // ⚠ LE CONSTAT LE PLUS CHER DE LA REVUE DU 20 OCTOBRE 2026. Les deux calculs
+  // partageaient un seul `try` : quand `localStorage` levait — cookies de site
+  // bloques, navigation privee, webview, iframe sans allow-same-origin —
+  // l'exception emportait le fragment avec elle. Un hote qui confirmait son
+  // inscription ou son changement d'e-mail voyait la landing, ses jetons tout
+  // juste emis morts en silence, et PLUS AUCUNE page pour les consommer : ce lot
+  // a supprime le module de fin de page qui le faisait.
+  const r = lancerLaSonde(null, { hash: '#access_token=abc&refresh_token=def&type=signup' })
+  assert.deepEqual(r.redirections,
+    ['/pages/aujourdhui#access_token=abc&refresh_token=def&type=signup'],
+    'le fragment d authentification meurt avec l exception de localStorage')
+})
+
+test("LE TEST QUI COMPTE : une navigation REFUSEE laisse la landing visible", () => {
+  // Masquer puis naviguer : si la navigation levait, le catch avalait l'echec
+  // et la page restait BLANCHE — definitivement, et reproductible a chaque
+  // rechargement puisque la cle de session est toujours la. On navigue donc
+  // d'abord, on masque ensuite.
+  const r = lancerLaSonde([`sb-${REFS.prod}-auth-token`], { replaceLeve: true })
+  assert.ok(!r.masque, 'la landing reste masquee alors que la navigation a ete refusee : page blanche')
 })
 
 test("LE TEST QUI COMPTE : search et hash sont EMPORTES", () => {
@@ -166,6 +222,25 @@ test('LE TEST QUI COMPTE : supabase-js est epingle sur une version', () => {
   assert.ok(m, 'shared/supabase.js ne charge plus supabase-js depuis le CDN')
   assert.match(m[1] || '', /^@\d+\.\d+\.\d+$/,
     'la version de supabase-js n est pas epinglee : ' + JSON.stringify(m[0]))
+})
+
+test('LE TEST QUI COMPTE : le prechargement vise la version EPINGLEE', () => {
+  // La landing ne rechauffe plus jsdelivr pour personne : /pages/aujourdhui paie
+  // le cout a froid, et ne decouvrait l'URL qu'apres avoir lu shared/supabase.js.
+  // Le `modulepreload` la demande des le <head> — mais une URL qui s'ecarte de
+  // celle du module, c'est DEUX telechargements de supabase-js au lieu d'un.
+  const src = lire('shared/supabase.js')
+  const voulue = src.match(/https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@[^'"]+/)
+  assert.ok(voulue, 'shared/supabase.js ne charge plus supabase-js depuis jsdelivr')
+  const page = lire('pages/aujourdhui.html')
+  const pre = page.match(/<link[^>]*rel="modulepreload"[^>]*>/)
+  assert.ok(pre, 'pages/aujourdhui.html ne precharge plus supabase-js : le CDN repart a froid, en serie')
+  assert.ok(pre[0].includes(voulue[0]),
+    'le prechargement et shared/supabase.js ne visent pas la meme version : ' + pre[0])
+  assert.ok(pre[0].includes('crossorigin'),
+    'sans crossorigin, le prechargement est ignore pour un module et la requete est faite deux fois')
+  assert.ok(/<link rel="preconnect" href="https:\/\/cdn\.jsdelivr\.net"/.test(page),
+    'plus de preconnexion a jsdelivr : la poignee de main DNS/TLS reste sur le chemin critique')
 })
 
 // ─── Les lectures qui partent ensemble ───────────────────────────────────────
@@ -207,18 +282,339 @@ test('LE TEST QUI COMPTE : i18n demande la liste et le repli EN MEME TEMPS', asy
   assert.strictEqual(await promesse, 'fr')
 })
 
-test('LE TEST QUI COMPTE : requireAuth ne met plus ses deux lectures en file', () => {
+// ─── requireAuth, EXECUTE ────────────────────────────────────────────────────
+//
+// ⚠ POURQUOI PAR EXECUTION, ET PLUS PAR LECTURE DU SOURCE. Jusqu'au 20 octobre
+// 2026, les deux garde-fous de cette section comparaient des expressions
+// regulieres au TEXTE de auth-guard.js et de aujourdhui.html. Mesure faite sur
+// des copies extraites par `git archive` : deplacer la construction de
+// `pOnboarding` APRES `await pContexte` — une vraie re-serialisation — les
+// laissait VERTS, pendant qu'un simple renommage `pContexte` -> `pCtx` les
+// faisait rougir. Ils gardaient l'orthographe du lot, pas son effet.
+// REVIEW.md regle 20 : appeler, pas lire.
+
+// Le module est execute hors navigateur : on retire ses `import` et on injecte
+// leurs symboles. Rien d'autre n'est reecrit — c'est le code de la page.
+function batirRequireAuth () {
   const src = lire('components/auth-guard.js')
-  assert.ok(!/await\s+chargerContexte\s*\(/.test(src),
-    'chargerContexte est de nouveau attendu seul : onboarding_state repart apres lui')
-  assert.ok(/Promise\.all\(\s*\[\s*pContexte\s*,\s*pOnboarding\s*\]\s*\)/.test(src),
-    'les deux lectures ne sont plus attendues ensemble')
-  // ⚠ CE QUE CE TEST NE PROUVE PAS, et qu'il faut relire a la main : que la
-  // DECISION de redirection d'onboarding attend toujours les deux resultats.
+    .replace(/^import[\s\S]*?from\s+'[^']*'\s*$/gm, '')
+    .replace(/^export\s+/gm, '')
+  return src + '\n;return { requireAuth }'
+}
+
+function faireStockage () {
+  const m = new Map()
+  return {
+    getItem: k => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => m.set(k, String(v)),
+    removeItem: k => m.delete(k)
+  }
+}
+
+// `branchements.contexte` et `.onboarding` sont les deux promesses que le test
+// pilote. `appels` enregistre QUAND chaque lecture part.
+function lancerRequireAuth (branchements, options = {}) {
+  const appels = []
+  const redirections = []
+  const journal = []
+  const window = {
+    location: {
+      pathname: options.pathname || '/pages/aujourdhui',
+      replace: u => redirections.push(u)
+    }
+  }
+  const chaine = {
+    select: () => chaine,
+    eq: () => chaine,
+    maybeSingle: () => branchements.onboarding,
+    insert: () => { appels.push('onboarding:insert'); return Promise.resolve({ error: null }) }
+  }
+  const supabase = {
+    from: (table) => {
+      appels.push('from:' + table)
+      if (table === 'onboarding_state' && !appels.includes('onboarding:lance')) {
+        appels.push('onboarding:lance')
+      }
+      return chaine
+    }
+  }
+  const getSession = async () => {
+    if (options.getSessionLeve) throw new Error('lecture de session impossible')
+    return options.session === undefined ? { user: { id: 'u1' } } : options.session
+  }
+  // Stockage qui leve : la meme configuration de navigateur que pour la sonde.
+  const leve = () => { throw new Error('SecurityError: acces au stockage refuse') }
+  const stockageMort = { getItem: leve, setItem: leve, removeItem: leve }
+  const chargerContexte = () => { appels.push('contexte:lance'); return branchements.contexte }
+  const console_ = { error: (...a) => journal.push(a.map(String).join(' ')), warn: () => {}, log: () => {} }
+
+  const sorti = new Function(
+    'supabase', 'getSession', 'chargerContexte', 'reinitialiser',
+    'window', 'sessionStorage', 'localStorage', 'console',
+    batirRequireAuth()
+  )(supabase, getSession, chargerContexte, () => {},
+    window,
+    options.sessionStorageLeve ? stockageMort : faireStockage(),
+    options.localStorage || faireStockage(),
+    console_)
+
+  return { appels, redirections, journal, promesse: sorti.requireAuth() }
+}
+
+const tours = async (n = 30) => { for (let i = 0; i < n; i++) await Promise.resolve() }
+
+test("i18n : une langues.json en erreur est NOMMEE, pas parsee", async () => {
+  // Sans le controle `r.ok`, un 404 renvoie la page d'erreur HTML au parseur
+  // JSON : l'hote lit « Unexpected token < » au lieu du fichier manquant.
+  // `load()` portait deja cette garde ; la lecture en ligne de langues.json, non.
+  const src = lire('shared/i18n/i18n.js')
+  const fetchFaux = url => Promise.resolve(String(url).endsWith('langues.json')
+    ? { ok: false, status: 404, json: async () => { throw new SyntaxError('Unexpected token <') } }
+    : { ok: true, json: async () => ({}) })
+  const faux = {
+    documentElement: { dataset: {}, style: {} },
+    querySelectorAll: () => [], dispatchEvent: () => {}, addEventListener: () => {}
+  }
+  const fenetre = {}
+  new Function('window', 'document', 'navigator', 'localStorage', 'fetch', 'console',
+    src)(fenetre, faux, { language: 'fr' }, { getItem: () => null, setItem: () => {} }, fetchFaux, console)
+  await assert.rejects(fenetre.I18n.init(), /langues\.json introuvable/)
+})
+
+test('LE TEST QUI COMPTE : requireAuth lance ses DEUX lectures avant que l une reponde', async () => {
+  // Preuve par l'execution : `onboarding_state` est demande alors que
+  // `chargerContexte` n'a toujours pas repondu. En file, on n'y arriverait pas.
+  let resoudreContexte, resoudreOnboarding
+  const r = lancerRequireAuth({
+    contexte: new Promise(res => { resoudreContexte = res }),
+    onboarding: new Promise(res => { resoudreOnboarding = res })
+  })
+  await tours()
+  assert.ok(r.appels.includes('contexte:lance'), 'chargerContexte n est jamais appele')
+  assert.ok(r.appels.includes('onboarding:lance'),
+    'onboarding_state attend la reponse de chargerContexte : les deux lectures sont de nouveau en file')
+  resoudreContexte({ comptes: [{ user_id: 'u1' }] })
+  resoudreOnboarding({ data: { current_step: 3, completed: true }, error: null })
+  assert.ok(await r.promesse, 'requireAuth ne rend pas la session')
+})
+
+test('LE TEST QUI COMPTE : la DECISION d onboarding attend les deux resultats', async () => {
+  // ⚠ TEST DE NON-REGRESSION (regle 19 de REVIEW.md, point 2) : avec ce lui-ci
+  // et « premier login », ce sont les deux seuls de ce fichier qui restent VERTS
+  // contre `git archive origin/main`. C'est leur role : avant le lot les deux
+  // lectures etaient EN FILE, donc la decision attendait les deux a fortiori.
+  // Ils gardent l'invariant que la parallelisation ne devait pas casser.
+  //
   // Paralleliser des lectures n'autorise pas a paralleliser des decisions.
-  const iAll = src.indexOf('Promise.all([pContexte, pOnboarding])')
-  const iRedir = src.indexOf("window.location.replace('/pages/onboarding.html')")
-  assert.ok(iAll !== -1 && iRedir > iAll, 'la redirection d onboarding precede l attente des deux lectures')
+  // L'etat d'onboarding (« jamais commence ») repond tout de suite ; c'est le
+  // CONTEXTE, plus lent, qui dit que cet hote est membre d'un AUTRE compte et
+  // n'a donc rien a faire dans « connectez votre logement ». Si la decision se
+  // prenait sans l'attendre, il y partirait.
+  let resoudreContexte
+  const r = lancerRequireAuth({
+    contexte: new Promise(res => { resoudreContexte = res }),
+    onboarding: Promise.resolve({ data: { current_step: 0, completed: false }, error: null })
+  })
+  await tours()
+  assert.deepEqual(r.redirections, [],
+    'la redirection d onboarding est partie avant de savoir si l hote est membre d un autre compte')
+  resoudreContexte({ comptes: [{ user_id: 'u1' }, { user_id: 'u2' }] })
+  await r.promesse
+  assert.deepEqual(r.redirections, [], 'un membre invite ailleurs est envoye dans l assistant')
+})
+
+test('premier login : l assistant est force une fois (le cas nominal tient)', async () => {
+  // ⚠ TEST DE NON-REGRESSION, vert contre origin/main comme contre 5655e78 : il
+  // existe pour que le durcissement d'`etatConnu` juste en dessous ne se paie
+  // pas en supprimant le forcage pour tout le monde.
+  const r = lancerRequireAuth({
+    contexte: Promise.resolve({ comptes: [{ user_id: 'u1' }] }),
+    onboarding: Promise.resolve({ data: null, error: null })
+  })
+  assert.strictEqual(await r.promesse, null)
+  assert.deepEqual(r.redirections, ['/pages/onboarding.html'])
+  assert.ok(r.appels.includes('onboarding:insert'), 'la ligne onboarding_state n est plus creee au 1er login')
+})
+
+test('LE TEST QUI COMPTE : une lecture onboarding en ECHEC ne force pas l assistant', async () => {
+  // Un builder PostgREST ne REJETTE pas : sans `.throwOnError()`, un 503, un
+  // refus RLS ou un navigateur hors ligne RESOLVENT en
+  // `{ data: null, error, status: 0 }`. Lire `data` seul rendait la panne
+  // indistinguable de « pas de ligne » : un hote qui a fini son onboarding il y
+  // a des mois, sur un appareil neuf (donc sans la garde localStorage), etait
+  // jete dans l'assistant par un incident passager.
+  const r = lancerRequireAuth({
+    contexte: Promise.resolve({ comptes: [{ user_id: 'u1' }] }),
+    onboarding: Promise.resolve({ data: null, error: { message: 'service unavailable' }, status: 503 })
+  })
+  assert.ok(await r.promesse, 'requireAuth doit laisser entrer : la panne n est pas un refus d authentification')
+  assert.deepEqual(r.redirections, [],
+    'une lecture d onboarding_state en echec vaut « jamais commence » : l hote est renvoye dans l assistant')
+  assert.ok(!r.appels.includes('onboarding:insert'), 'un INSERT aveugle part sur une lecture en echec')
+})
+
+test('une raison de rejet FALSY est un echec, pas un succes', async () => {
+  // `.then(ok, e => ({ e }))` capture n'importe quelle raison, `undefined`
+  // comprise. Teste par la VERACITE (`if (r.e)`), elle prenait le chemin du
+  // succes avec des donnees `undefined` — ce que le try/catch remplace par ce
+  // lot ne pouvait pas faire.
+  const r = lancerRequireAuth({
+    contexte: Promise.reject(undefined),
+    onboarding: Promise.resolve({ data: { current_step: 3, completed: true }, error: null })
+  })
+  await r.promesse
+  assert.ok(r.journal.some(l => l.includes('contexte de compte indisponible')),
+    'un rejet falsy du contexte de compte passe pour un succes, en silence')
+})
+
+test('une construction de requete qui LEVE ne fait pas rejeter requireAuth', async () => {
+  // Les appelants font tous `const session = await requireAuth()` sans catch :
+  // un throw synchrone a la construction laissait la page sur son ecran de
+  // chargement, sans meme renvoyer vers /login.
+  const r = lancerRequireAuth({
+    contexte: Promise.resolve({ comptes: [{ user_id: 'u1' }] }),
+    get onboarding () { throw new Error('client en mauvais etat') }
+  })
+  assert.ok(await r.promesse, 'requireAuth rejette au lieu de laisser entrer avec un etat inconnu')
+  assert.deepEqual(r.redirections, [])
+})
+
+test("LE TEST QUI COMPTE : sessionStorage qui LEVE ne fait pas rejeter requireAuth", async () => {
+  // ⚠ C'EST LA MEME CONFIGURATION DE NAVIGATEUR QUE CELLE DE LA SONDE — donnees
+  // de site bloquees, iframe sans allow-same-origin, webview : `localStorage` ET
+  // `sessionStorage` levent tous les deux. Depuis ce lot, l'hote qui confirme
+  // son inscription dans cette configuration est AIGUILLE ICI par la sonde.
+  // Hors garde, les quatre acces au cache faisaient rejeter `requireAuth`, que
+  // personne n'attrape : squelette de page indefini, pas meme un /login.
+  const r = lancerRequireAuth({
+    contexte: Promise.resolve({ comptes: [{ user_id: 'u1' }] }),
+    onboarding: Promise.resolve({ data: { current_step: 3, completed: true }, error: null })
+  }, { sessionStorageLeve: true })
+  const session = await r.promesse
+  assert.ok(session, 'requireAuth rejette quand le cache de session est inaccessible')
+  assert.deepEqual(r.redirections, [], 'un stockage inaccessible ne doit pas deplacer l hote')
+})
+
+test("une lecture de session impossible renvoie vers /login, elle ne rejette pas", async () => {
+  const r = lancerRequireAuth({ contexte: Promise.resolve({}), onboarding: Promise.resolve({ data: null, error: null }) },
+    { getSessionLeve: true })
+  assert.strictEqual(await r.promesse, null)
+  assert.deepEqual(r.redirections, ['/pages/login.html'],
+    'une session illisible laisse la page sur son squelette au lieu de renvoyer vers /login')
+})
+
+// ─── L'ouverture d'Aujourd'hui, EXECUTEE ─────────────────────────────────────
+
+// Le module de la page, prive de ses `import`, avec ses dependances injectees.
+function batirAujourdhui () {
+  const html = lire('pages/aujourdhui.html')
+  const ouvre = html.indexOf('<script type="module">')
+  assert.notStrictEqual(ouvre, -1, 'pages/aujourdhui.html n a plus de module')
+  const corps = html.slice(html.indexOf('>', ouvre) + 1, html.indexOf('</script>', ouvre))
+  const depart = corps.indexOf('initErrorHandler()')
+  assert.notStrictEqual(depart, -1, 'initErrorHandler() a disparu : le decoupage des imports ne tient plus')
+  return corps.slice(depart)
+}
+
+function ouvrirAujourdhui () {
+  const lectures = []
+  const stubs = new Map()
+  const elem = () => ({
+    hidden: false, textContent: '', innerHTML: '', value: '', style: {}, dataset: {},
+    classList: { add () {}, remove () {}, toggle () {}, contains: () => false },
+    addEventListener () {}, removeAttribute () {}, setAttribute () {}, remove () {},
+    appendChild () {}, closest: () => null, querySelector: () => null, querySelectorAll: () => []
+  })
+  const document_ = {
+    documentElement: elem(),
+    body: elem(),
+    querySelector: sel => (stubs.has(sel) ? stubs.get(sel) : (stubs.set(sel, elem()), stubs.get(sel))),
+    querySelectorAll: () => [],
+    addEventListener () {}, createElement: () => elem()
+  }
+  // Chaque `.from(table)` cree une lecture que le test resout quand il veut.
+  const supabase = {
+    from: (table) => {
+      let resoudre
+      const p = new Promise(res => { resoudre = res })
+      lectures.push({ table, resoudre })
+      const chaine = new Proxy({}, {
+        get (_, prop) {
+          if (prop === 'then') return p.then.bind(p)
+          if (prop === 'catch') return p.catch.bind(p)
+          if (prop === 'finally') return p.finally.bind(p)
+          return () => chaine
+        }
+      })
+      return chaine
+    }
+  }
+  let resoudreSession, resoudreI18n
+  const requireAuth = () => new Promise(res => { resoudreSession = res })
+  const I18n = {
+    appels: 0,
+    init () { this.appels++; return new Promise(res => { resoudreI18n = res }) },
+    t: (k) => k, date: () => '', time: () => '', money: () => '', pct: () => '', num: () => '',
+    lang: 'fr', langues: []
+  }
+  const rien = () => {}
+  const R = new Proxy({}, { get: () => (() => []) })
+
+  new Function(
+    'requireAuth', 'supabase', 'signOut', 'initErrorHandler', 'logger', 'esc',
+    'compteCourant', 'moi', 'peutLire', 'peutEcrire', 'estTitulaire', 'comptes',
+    'basculerVers', 'enteteCompte', 'R',
+    'I18n', 'HSNav', 'document', 'window', 'location', 'fetch', 'localStorage', 'console',
+    batirAujourdhui()
+  )(requireAuth, supabase, rien, rien, { error: rien, warn: rien, info: rien }, String,
+    () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
+    rien, () => ({}), R,
+    I18n, { renderMenu: rien, render: rien }, document_, {}, { search: '', hash: '' },
+    () => new Promise(() => {}), faireStockage(), { error: rien, warn: rien, log: rien })
+
+  return {
+    lectures,
+    I18n,
+    bonjour: () => document_.querySelector('[data-bind="greeting"]').textContent,
+    ouvrirSession: () => resoudreSession({ user: { id: 'u1', email: 'thierry@exemple.fr', user_metadata: {} } }),
+    repondreI18n: () => resoudreI18n('fr'),
+    resoudre: (table, charge) => {
+      const l = lectures.find(x => x.table === table)
+      assert.ok(l, 'aucune lecture de ' + table)
+      l.resoudre(charge)
+    }
+  }
+}
+
+test("LE TEST QUI COMPTE : I18n.init part AVANT que requireAuth reponde", async () => {
+  const p = ouvrirAujourdhui()
+  await tours()
+  assert.strictEqual(p.I18n.appels, 1,
+    'I18n.init attend la session : les deux partaient en file, soit un aller-retour de plus')
+})
+
+test("LE TEST QUI COMPTE : le prenom et les biens partent ENSEMBLE", async () => {
+  const p = ouvrirAujourdhui()
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  const tables = p.lectures.map(l => l.table)
+  assert.ok(tables.includes('profiles'), 'le prenom n est jamais demande')
+  assert.ok(tables.includes('properties'),
+    'les biens attendent la reponse du prenom : les deux lectures sont de nouveau en file')
+})
+
+test("LE TEST QUI COMPTE : le bonjour s affiche sans attendre la lecture des biens", async () => {
+  // `properties` est la plus lourde des deux (9 colonnes, toutes les lignes du
+  // compte, sans limite) et le bonjour n'en a aucun besoin. Dans un
+  // `Promise.all` sur les RESULTATS, l'element le plus visible de la page
+  // attendait la requete la plus lente.
+  const p = ouvrirAujourdhui()
+  p.ouvrirSession(); p.repondreI18n()
+  await tours()
+  p.resoudre('profiles', { data: [{ first_name: 'thierry' }] })
+  await tours()
+  assert.notStrictEqual(p.bonjour(), '',
+    'le bonjour attend la lecture des biens pour s afficher')
 })
 
 test("l accueil ne refait plus d aller-retour pour l utilisateur deja connu", () => {
@@ -231,6 +627,4 @@ test("l accueil ne refait plus d aller-retour pour l utilisateur deja connu", ()
   assert.ok(!/import\s*\{[^}]*\bgetUser\b[^}]*\}/.test(code),
     'getUser est de nouveau importe dans pages/aujourdhui.html')
   assert.ok(src.includes('const user = session.user'), 'l utilisateur ne vient plus de la session')
-  assert.ok(/Promise\.all\(\s*\[\s*prenom\(user\)\s*,\s*lireBiens\(\)\s*\]\s*\)/.test(src),
-    'le prenom et les biens ne partent plus ensemble')
 })

@@ -6,6 +6,17 @@
 <title>HôteSmart</title>
 <link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<!-- ⚠ LA LANDING NE RECHAUFFE PLUS LE CDN. Avant le 20 octobre 2026, un hote
+     connecte passait par `/`, qui chargeait supabase-js : la poignee de main
+     jsdelivr et le cache HTTP etaient deja faits en arrivant ici. La sonde de la
+     landing part maintenant AVANT tout contact avec le CDN — cette page paie
+     donc le cout a froid, et elle ne decouvrait l'URL qu'apres avoir lu
+     shared/supabase.js, soit un niveau d'aller-retour de plus.
+     Le prechargement est sur l'URL EPINGLEE : c'est l'epinglage qui le rend sur.
+     `tests/accueil-rapide.test.js` refuse qu'elle s'ecarte de shared/supabase.js
+     — deux versions divergentes, ce serait deux telechargements. -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/+esm" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shared/theme.css">
 <link rel="stylesheet" href="/shared/ui.css">
@@ -583,7 +594,14 @@ async function init () {
   document.addEventListener('i18n:changed', () => location.reload())
 
   // `session.user` vient de `requireAuth` : plus de `getUser()`, qui refaisait
-  // un aller-retour vers /auth/v1/user pour le même objet.
+  // un aller-retour vers /auth/v1/user.
+  // ⚠ CE N'EST PAS TOUT A FAIT LE MÊME OBJET. `getUser()` lisait la ligne
+  // COURANTE ; `session.user` est celle qui a été figée dans la session stockée,
+  // et elle ne se rafraîchit qu'au renouvellement du jeton. Un e-mail changé
+  // depuis un autre appareil, ou un `user_metadata` mis à jour, met donc jusqu'à
+  // la durée de vie d'un jeton à apparaître dans le bonjour et les initiales.
+  // Affichage seul : toute lecture de données passe par RLS, avec un jeton
+  // vérifié à chaque requête. Dette 72.
   const user = session.user
   // La création de bien n'est pas déléguée (cf. pages/biens.html).
   $('[data-bind="add-property"]').hidden = !estTitulaire()
@@ -621,14 +639,22 @@ async function init () {
     if (error) logger.error('Aujourdhui', 'biens', error)
     return data || []
   }
-  const [brut, biens] = await Promise.all([prenom(user), lireBiens()])
-  etat.biens = biens
-
-  // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
-  // la partie locale de l'e-mail, en minuscules.
-  const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
-  $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
-  $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
+  // ⚠ ILS PARTENT ENSEMBLE, ILS N'ARRIVENT PAS ENSEMBLE. Un `Promise.all` sur
+  // les deux resultats faisait attendre au bonjour et aux initiales — qui ne
+  // dependent que de `prenom()` — la lecture `properties`, la plus lourde des
+  // deux et sans limite de lignes. Dans un lot dont l'objet est le premier
+  // affichage, c'est l'element le plus visible de la page qu'on retardait.
+  // Chacun ecrit donc a SA resolution ; l'attente commune ne sert plus qu'a la
+  // suite, qui a besoin de `etat.biens`.
+  const pNom = prenom(user).then(brut => {
+    // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
+    // la partie locale de l'e-mail, en minuscules.
+    const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
+    $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
+    $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
+  })
+  const pBiens = lireBiens().then(biens => { etat.biens = biens })
+  await Promise.all([pNom, pBiens])
   // ⚠ PLUS DE `liens` : l'entrée Calendrier mène à l'écran V5 `/calendrier`,
   // le même depuis toutes les pages. Épingler ici le premier bien donnait à
   // cet onglet deux comportements selon la page d'où on cliquait.

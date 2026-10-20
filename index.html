@@ -17,35 +17,62 @@
        /login. C'est le comportement voulu. -->
   <script>
     (function () {
+      // ⚠ LE RETOUR D'AUTHENTIFICATION SE DECIDE AVANT DE TOUCHER AU STOCKAGE.
+      // La confirmation d'inscription (`signUp`, pages/login.html) et le
+      // changement d'e-mail (`updateUser({ email })`, pages/compte.html) ne
+      // passent AUCUN `redirectTo` : leur lien part vers l'URL de site du projet
+      // Supabase, donc ICI. Jusqu'au 20 octobre 2026, le module de fin de page
+      // creait un client qui consommait `#access_token=…` tout seul
+      // (`detectSessionInUrl`, actif par defaut). Il n'y a plus de client sur la
+      // landing : le fragment est EMPORTE vers /pages/aujourdhui, qui en cree un.
+      //
+      // ⚠ ET C'EST POURQUOI IL NE PARTAGE PAS LE try DU STOCKAGE. `localStorage`
+      // LEVE en mode prive, cookies de site bloques, webview, ou iframe sans
+      // allow-same-origin. Dans le meme try, l'exception emportait le fragment
+      // avec elle : les jetons tout juste emis mouraient en silence, et c'est la
+      // DERNIERE page qui pouvait encore les transporter.
+      var retourAuth = /[#&](access_token|refresh_token)=/.test(location.hash)
+
+      // ⚠ LA REF DU PROJET N'EST PAS CODEE EN DUR : prod et staging en ont une
+      // differente (shared/config.js), et une ref en dur ferait rater la
+      // redirection sur l'autre environnement, en silence. Revers assume : la
+      // cle d'un AUTRE projet Supabase, posee sur ce domaine par un autre site,
+      // compte comme une session (dette 71).
+      var connecte = false
       try {
-        // ⚠ UN RETOUR D'AUTHENTIFICATION ARRIVE SUR CETTE PAGE, DANS LE
-        // FRAGMENT. La confirmation d'inscription (`signUp`, pages/login.html)
-        // et le changement d'e-mail (`updateUser({ email })`, pages/compte.html)
-        // ne passent AUCUN `redirectTo` : leur lien part vers l'URL de site du
-        // projet Supabase, donc ici. Jusqu'au 20 octobre 2026, le module de fin
-        // de page creait un client, qui consommait `#access_token=…` tout seul
-        // (`detectSessionInUrl`, actif par defaut). Il n'y a plus de client sur
-        // la landing : le fragment est EMPORTE vers /pages/aujourdhui, qui en
-        // cree un. Sans ca, les jetons tout juste emis sont perdus en silence.
-        // Un fragment d'ERREUR (#error=…) n'est pas un retour exploitable : on
-        // reste sur la landing, comme avant.
-        var retourAuth = /[#&](access_token|refresh_token)=/.test(location.hash)
-        var connecte = false
         for (var i = 0; i < localStorage.length; i++) {
           if (/^sb-.+-auth-token$/.test(localStorage.key(i))) { connecte = true; break }
         }
-        if (connecte || retourAuth) {
-          document.documentElement.style.display = 'none'
-          // ⚠ `search` ET `hash` SONT EMPORTES. C'est ce que faisait la page
-          // qu'on remplace (pages/index.html), et c'est la derniere occasion de
-          // le faire : un `?bien=…` ou un `#access_token=…` perdu ici est perdu.
-          location.replace('/pages/aujourdhui' + location.search + location.hash)
-          return
-        }
       } catch (e) {
-        // localStorage inaccessible (mode prive, cookies tiers bloques) : la
-        // landing s'affiche normalement. Un visiteur connecte verra la landing,
-        // ce qui est strictement l'ancien comportement en cas de panne.
+        // Stockage inaccessible : la landing s'affiche normalement. Un visiteur
+        // connecte la verra, ce qui est strictement l'ancien comportement en cas
+        // de panne — mais le retour d'authentification, lui, passe quand meme.
+      }
+
+      if (connecte || retourAuth) {
+        try {
+          // ⚠ ON NAVIGUE AVANT DE MASQUER. `location.replace` peut etre refuse
+          // EN LEVANT (frame sandboxee, extension, navigation de haut niveau
+          // bloquee) : s'il levait apres le masquage, le catch avalait l'echec et
+          // la page restait BLANCHE pour de bon, reproductible a chaque
+          // rechargement puisque la cle est toujours la. Dans cet ordre, un refus
+          // qui LEVE laisse la landing lisible. Un contexte qui ignore la
+          // navigation sans lever n'est couvert ni par un ordre ni par l'autre.
+          //
+          // ⚠ `search` ET `hash` SONT EMPORTES. C'est ce que faisait la page qu'on
+          // remplace (pages/index.html), et c'est la derniere occasion de le faire :
+          // un `?bien=…` ou un `#access_token=…` perdu ici est perdu. Un fragment
+          // d'ERREUR (#error=…) part donc AUSSI quand une session existe — il n'est
+          // pas un retour exploitable, il ne declenche rien a lui seul, mais il
+          // voyage avec le reste plutot que d'etre filtre. Sans session, il ne
+          // declenche aucun depart : la landing reste.
+          location.replace('/pages/aujourdhui' + location.search + location.hash)
+          document.documentElement.style.display = 'none'
+        } catch (e) {
+          // Navigation refusee : on rend la landing visible plutot qu'une page
+          // blanche definitive.
+          document.documentElement.style.display = ''
+        }
       }
     })()
   </script>

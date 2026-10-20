@@ -91,7 +91,10 @@ window.I18n = (() => {
     // l'autre : les deux partaient en FILE, soit deux allers-retours la ou un
     // seul suffit. `detect()` a besoin des deux, il attend donc les deux.
     const [liste, repli] = await Promise.all([
-      fetch(`${BASE}langues.json`, { cache: 'no-cache' }).then(r => r.json()),
+      fetch(`${BASE}langues.json`, { cache: 'no-cache' }).then(r => {
+        if (!r.ok) throw new Error('i18n: langues.json introuvable');
+        return r.json();
+      }),
       load(FALLBACK)
     ]);
     langues = liste;
