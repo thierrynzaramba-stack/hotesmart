@@ -332,3 +332,70 @@ paralléliser des décisions.
 
 Hors lot et toujours vrai : `/api/yield` par bien passe après le premier
 rendu (dette 61).
+
+### 4.5 `/api/avis` appelé quatre fois pour deux nombres (lot 2, 20 octobre 2026)
+
+**Mesure de Thierry, en production, connecté.** La page d'accueil appelait
+`/api/avis` **quatre fois** : 10,7 s, puis 3 × 4–5 s. Environ **75 % des ~20 s**
+de la page complète.
+
+**La cause, lue dans le code.** `chargerNotes` (pages/aujourdhui.html) demandait
+`/api/avis?action=cartes&periode=30j` une fois pour le compte, **puis une fois
+par bien**, pour n'en garder que `stats.moyenne` et `stats.notes`. Or
+`cartesLister` lit jusqu'à **5000 avis** et **2000 évaluations**, puis leurs
+séjours et leurs ménages, **assemble les cartes deux fois** (une passe sans les
+séjours pour savoir lesquels lire, une passe avec), calcule le ratio de
+propreté — et tout cela est jeté. Seul `noteMoyenne` servait.
+
+**Le correctif.** Une action `notes`, qui fait **une** lecture paginée de
+`ota_reviews` (`id, ota, overall_score, property_id_ref`) et rend le global
+**et** chaque bien en une passe. `chargerNotes` fait un seul appel.
+Elle descend `note_sur_5`, le contrat posé le même jour par le lot Avis
+(`avis-voyageurs.md` §12) : conversion et unique arrondi dans
+`lib/avis/echelle.js`, en micro-unités entières, aucun écran ne redivise.
+
+| | avant | après |
+|---|---|---|
+| appels `/api/avis` à l'ouverture | **1 + N** (4 ici) | **1** |
+| lecture de la base, compte réel (4 biens, 664 notes comptées) | **4293 ms** | **97 ms** |
+| tables lues | `guest_evaluations`, `ota_reviews`, `properties`, `bookings_snapshot`, `menages` | `ota_reviews` |
+
+⚠ **Ce que ce 4293 ms est, et ce qu'il n'est pas.** Mesuré depuis la machine de
+développement, pas depuis une fonction Vercel : les latences absolues ne sont
+pas celles de la production (§1 — un aller-retour vaut ~20-40 ms depuis `cdg1`,
+~300 ms depuis `iad1`). C'est le **rapport** qui se lit, et il **minore**
+l'ancien chemin : le chronomètre ne compte ni `sejoursDe`, ni `ratioProprete`,
+ni le double assemblage des cartes, qui s'ajoutent tous aux 10,7 s vues par
+Thierry.
+
+⚠ **LA PARITÉ EST PROUVÉE SUR LES DONNÉES RÉELLES, PAS PROMISE.**
+`scripts/verifier-parite-notes.js` rejoue l'**ancien** chemin (`noteMoyenne`
+une fois sans bien, puis une fois par bien) contre le **nouveau**, avec les
+fonctions de production — pas une réimplémentation. Production, 20 octobre
+2026 — 702 avis dans la table, 5 biens sur **deux** comptes, dont 4 biens et
+664 notes comptées sur le compte principal : **28 comparaisons, 0 divergence**
+sur les quatre périodes, 1570 notes comptées de chaque côté. Sur
+« toujours » : global **4,8/5 sur 664 avis**, et par bien Colomiers 4,7/5 sur
+69, La bulle 4,9/5 sur 332, Cœur de vie 23 4,7/5 sur 244, Ofuro Futari 5/5 sur
+19 — soit 244 + 69 + 332 + 19 = 664.
+
+⚠ **ET LA RÉFÉRENCE VIENT DE `git archive`, PAS DE L'ARBRE** — c'est le
+`noteMoyenne` du **lot Avis** (`fix-note-globale-sur-5`), celui qui a posé le
+contrat `note_sur_5`, et non l'état d'avant ce lot-ci. La première version du
+script comparait `noteMoyenne` à `notesDuPerimetre` — or le lot a
+fait de la première une **vue** de la seconde : les deux côtés étaient le même
+code, et la comparaison était tautologique. Si l'extraction avait perdu
+`.eq('is_hidden', false)`, les deux auraient sur-compté à l'identique et le
+script aurait imprimé « PARITÉ COMPLÈTE » sur des chiffres faux. Il extrait
+désormais le `lib/stats-avis.js` d'**avant** le lot et **vérifie** que ce qu'il
+a extrait ne contient pas `notesDuPerimetre`. Il fixe aussi l'horloge : trois
+périodes sur quatre sont bornées, l'ancien chemin est le lent, et une borne qui
+glisse entre les deux côtés inventerait une divergence sur du code exact.
+
+Sur **staging**, le même script **échoue volontairement** : 3 biens, zéro avis.
+Une parité entre deux zéros ne prouve rien, et un vérificateur qui n'a rien lu
+doit échouer plutôt que rassurer.
+
+**Reste au compteur de la page**, hors de ce lot : `/api/yield` deux fois par
+bien (dette 61), et `/api/membres` mesuré à 1,67 s — à reprendre **à chaud**,
+pour séparer le démarrage à froid de la fonction d'une requête réellement lente.

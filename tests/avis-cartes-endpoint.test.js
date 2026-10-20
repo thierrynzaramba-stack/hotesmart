@@ -39,6 +39,10 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         neq (c, v) { q._neq[c] = v; return chain },
         or (e) { q._or = e; return chain },
         gte (c, v) { q._gte = [c, v]; return chain },
+        // ⚠ `gt` EST HONORE : `requeteDesNotes` filtre les notes exploitables
+        // en SQL (`.gt('overall_score', 0)`, meme predicat que `microSurCinq`).
+        // Sans cette ligne, le double levait et l'action rendait 500.
+        gt (c, v) { (q._gts = q._gts || []).push([c, v]); return chain },
         in (c, v) { q._ins.push([c, (v || []).map(String)]); return chain },
         is () { return chain }, not (c, op, v) { if (op === 'is' && v === null) q._nonNul = c; return chain },
         order () { return chain }, limit () { return chain },
@@ -50,6 +54,11 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         && q._ins.every(([c, vs]) => vs.includes(String(l[c])))
         && Object.entries(q._neq).every(([c, v]) => (c === 'statut' ? (l.statut || 'confirme') : l[c]) !== v)
         && (!q._gte || String(l[q._gte[0]] || '') >= String(q._gte[1]))
+        && (q._gts || []).every(([c, v]) => {
+          const a = Number(l[c]); const b = Number(v)
+          if (Number.isFinite(a) && Number.isFinite(b)) return a > b
+          return l[c] != null && String(l[c]) > String(v)
+        })
         && (!q._or || String(q._or).includes(String(l.property_id_ref || l.provider_property_id)))
         && (!q._nonNul || l[q._nonNul] != null)
       function rep () {

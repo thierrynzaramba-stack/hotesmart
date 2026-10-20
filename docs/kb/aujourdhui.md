@@ -31,7 +31,7 @@ Aucune lecture provider. Tout vient du cœur, par un endpoint existant ou une ta
 | À valider | `agent_tasks`, statut `pending` ou `pending_validation` | Même population que la messagerie, **restreinte aux séjours À VENIR ou EN COURS** (décision de Thierry du 11 octobre 2026, qui resserre celle du 10 — la clause « dernier message < 7 jours » est retirée : un séjour terminé ne produit plus de « message à traiter », même si l'échange est récent). Le badge Messages compte les seules `pending_validation` ouvertes. |
 | Fait pour vous, 7 jours | comptes `head` sur `menages` (`accepted_at`, hors annulés : « ménages attribués », pas « confirmés par vos prestataires » — une attribution par l'hôte ou d'office pose aussi `accepted_at`), `price_display_log` (`source = 'engine'`), `automation_incidents` (`overbooking`) | Une tuile par source lisible. `price_display_log` n'est lisible que par le titulaire (RLS `auth.uid()`). **Pas de tuile codes d'accès** : dette 62. |
 | Revenus et occupation sur 30 j | `GET /api/yield?granularite=jour`, 60 jours, par bien, sommés | CA réparti par nuit, au prix voyageur. Variation par rapport aux 30 jours précédents (infobulle). L'occupation varie en points ; son numérateur exclut les nuits vendues un jour en exception (`nuitees_hors_reference`), comme le moteur. Fenêtres calculées sur la date de Paris, jamais par pas de 24 h. |
-| Note sur 30 j | `GET /api/avis?action=cartes&periode=30j` (global, puis `&bien=` par bien) | `stats.note_sur_5` / `stats.notes` : la même fonction que la page Avis (`lib/stats-avis.js`). ⚠ **La note descend DÉJÀ sur 5, et l'écran ne la convertit plus** (20 octobre 2026) : la conversion et l'unique arrondi vivent dans `lib/avis/echelle.js`. `noteSur5` a été retirée de `shared/aujourdhui.js` — elle divisait une moyenne elle-même arrondie, donc arrondissait deux fois, et Colomiers affichait 4,8 au lieu de 4,7. Détail et avant/après : `docs/kb/avis-voyageurs.md` §12. |
+| Note sur 30 j | `GET /api/avis?action=notes&periode=30j`, **un seul appel** | `global` et `par_bien` dans la même réponse, comptés par `lib/stats-avis.js` — la même population que la page Avis. ⚠ **La note descend DÉJÀ sur 5, et l'écran ne la convertit plus** (20 octobre 2026) : la conversion et l'unique arrondi vivent dans `lib/avis/echelle.js`, en micro-unités entières. `noteSur5` a été retirée de `shared/aujourdhui.js` — elle divisait une moyenne elle-même arrondie, donc arrondissait deux fois, et Colomiers affichait 4,8 au lieu de 4,7. ⚠ Jusqu'au 20 octobre 2026 c'était `action=cartes`, **une fois en global puis une fois par bien** : 4 appels, 10,7 s puis 3 × 4-5 s en production. Un bien absent de `par_bien` vaut zéro ; le global n'est pas toujours la somme des biens affichés — `property_id_ref` est `not null` mais sans clé étrangère, donc un re-keying ou un bien supprimé laisse des avis dont la référence ne désigne plus aucun bien. Détail : `avis-voyageurs.md` §12 et §15, `performance.md` §4.5. |
 | Min et max mensuels, par bien | `GET /api/yield?granularite=mois`, les 12 mois complets précédents | Un mois compte **depuis le premier mois vendu**, s'il était ouvert (`jours_ouverts > 0`) et si toutes ses nuits ont un prix. Format court : « ▼ min · ▲ max/mois ». |
 
 **Par bien, jamais en global** (règle de la spec) : CA 30 j, note 30 j, min et max mensuels. Le bloc
@@ -101,8 +101,16 @@ choix), Réglages (titulaire), Avis, Aide, la langue (construite depuis `langues
 ## 6. Coût
 
 Deux appels à `/api/yield` par bien, deux biens à la fois. Chacun relit tout l'historique du compte.
-La note : un appel `/api/avis?action=cartes` global puis un par bien, qui assemble toutes les cartes pour ne lire que `stats`.
-Les chiffres arrivent après le reste de la page. Dette 61.
+Les chiffres arrivent après le reste de la page. **Dette 61**, moitié `yield` : toujours ouverte.
+
+⚠ **LA MOITIÉ « note » EST SOLDÉE** (20 octobre 2026, lot 2 du chantier
+chargement). Elle coûtait un appel `/api/avis?action=cartes` en global **puis
+un par bien**, chacun assemblant toutes les cartes pour ne lire que `stats` :
+mesuré en production, 4 appels, 10,7 s puis 3 × 4-5 s, environ 75 % des ~20 s
+de la page. C'est désormais **un seul** `action=notes`, une lecture paginée de
+`ota_reviews` — 4293 ms → 97 ms sur le compte réel. Parité prouvée sur les
+données de production (`scripts/verifier-parite-notes.js`, 28 comparaisons, 0
+divergence). Détail : `performance.md` §4.5, `avis-voyageurs.md` §15.
 
 ## 7. Le chemin critique de l'ouverture (20 octobre 2026)
 

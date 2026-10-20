@@ -462,17 +462,57 @@ async function chargerChiffresBien (b) {
 }
 async function chargerNotes () {
   if (!peutLire('avis')) return
-  const lire = async (bien) => {
-    try {
-      const r = await appel(`/api/avis?action=cartes&periode=30j${bien ? `&bien=${encodeURIComponent(bien)}` : ''}`)
-      return r.stats && !r.stats.erreur ? { note_sur_5: r.stats.note_sur_5, notes: r.stats.notes } : null
-    } catch (e) { logger.error('Aujourdhui', 'avis', e); return null }
+  // ⚠ UN SEUL APPEL, PLUS 1 + N. Cette fonction demandait
+  // `/api/avis?action=cartes` une fois pour le compte PUIS UNE FOIS PAR BIEN,
+  // pour n'en garder que deux nombres. Chaque appel lisait jusqu'à 5000 avis et
+  // 2000 évaluations, leurs séjours et leurs ménages, et assemblait les cartes
+  // deux fois. Mesure de Thierry en production le 20 octobre 2026 : 10,7 s puis
+  // 3 x 4-5 s, environ 75 % des ~20 s de la page. `action=notes` fait la même
+  // lecture une fois et rend le global ET chaque bien (lib/stats-avis.js).
+  //
+  // ⚠ CE QUI CHANGE EN CAS DE PANNE, ET CE N'EST PAS « comme avant ». C'étaient
+  // N+1 lectures INDÉPENDANTES : un global en échec ne coûtait que la tuile, et
+  // chaque bien gardait son étoile ; un bien en échec ne coûtait que la sienne.
+  // C'est maintenant tout ou rien — un seul 503 efface la tuile ET les N
+  // étoiles. Il n'y a pas de reprise : `chargerNotes()` est lancé une fois
+  // depuis `init()`, sans `await`, donc l'hôte n'a que le rechargement de page.
+  // Assumé (une seule lecture, une seule vérité), mais dit.
+  let r = null
+  try {
+    r = await appel('/api/avis?action=notes&periode=30j')
+  } catch (e) { logger.error('Aujourdhui', 'avis', e) }
+
+  // ⚠ LES DEUX CÔTÉS JUGENT LA MÊME CHOSE. `appel()` avale un corps illisible
+  // (`r.json().catch(() => ({}))`) : un 200 vide ou en HTML — la panne que la
+  // mémoire du projet enregistre déjà sous « URL sans /api/v1 : 200 + HTML =
+  // 0 bien silencieux » — donne `r = {}`, qui est VRAI. Tester la véracité de
+  // `r` d'un côté et la clé de l'autre disait alors « inconnu » au global et
+  // « zéro avis », un FAIT, à chaque bien. On exige donc la clé des deux côtés.
+  // ⚠ UNE LECTURE ROGNÉE N'EST PAS UNE NOTE. L'endpoint pose `tronque` quand
+  // il a lu moins de lignes que le total annoncé (`db-max-rows`, ou le plafond
+  // de 50 000) : la note porte alors sur une fraction. L'afficher avec l'aplomb
+  // des autres serait affirmer un chiffre faux — règle du dépôt, un résultat
+  // non calculable ne s'affiche jamais comme un fait. On la traite donc comme
+  // une panne : tuile masquée, étoiles absentes, et la cause au journal.
+  // Inatteignable aujourd'hui (669 avis confirmés, une seule page).
+  if (r && r.tronque) logger.error('Aujourdhui', 'avis', 'lecture des notes incomplete')
+  const lu = r && !r.tronque && r.global && typeof r.global === 'object' ? r : null
+  const parBien = (lu && lu.par_bien) || {}
+  etat.noteGlobale = lu ? lu.global : null
+  for (const b of etat.biens) {
+    if (!b.provider_property_id) continue
+    const ref = String(b.provider_property_id)
+    // ⚠ `hasOwnProperty`, pas `parBien[ref]`. `par_bien` vient de `JSON.parse` :
+    // pour un bien dont la clé provider vaudrait `constructor`, `toString` ou
+    // `valueOf`, une lecture directe rendrait une FONCTION héritée d'Object —
+    // vraie, donc le repli ne serait jamais pris, et `etat.notesParBien`
+    // porterait une fonction au lieu d'une note.
+    const sienne = Object.prototype.hasOwnProperty.call(parBien, ref) ? parBien[ref] : null
+    // Un bien sans avis sur la période n'a pas de clé : c'est zéro, et c'est
+    // exactement ce que rendait l'appel par bien qu'on remplace.
+    etat.notesParBien.set(b.id, lu ? (sienne || { note_sur_5: null, notes: 0 }) : null)
   }
-  etat.noteGlobale = await lire(null)
   renderKpis()
-  await parPaquets(etat.biens.filter(b => b.provider_property_id).map(b => async () => {
-    etat.notesParBien.set(b.id, await lire(b.provider_property_id))
-  }), 3)
   renderBiens()
 }
 
