@@ -80,6 +80,37 @@ test('LE TEST QUI COMPTE : un avis SANS NOTE ne descend pas la note a zero', () 
   assert.equal(r.notes, 10, 'seuls les avis NOTES comptent dans le diviseur')
 })
 
+test('LE TEST QUI COMPTE (dette 76) : la source se reconnait par EGALITE EXACTE, jamais par sous-chaine', () => {
+  // `includes` faisait qu'un canal dont le nom CONTIENT celui d'un canal connu
+  // heritait de son echelle — `bookingsync` prenait celle de `booking` — et
+  // l'alarme utilisait le MEME test, donc ne se declenchait pas sur ces cas :
+  // la seule classe d'erreur contre laquelle elle existait passait en silence.
+  assert.equal(E.echelleDe('booking'), 10)
+  for (const faux of ['bookingsync', 'booking.com.br', 'airbnb-clone', 'myairbnb', 'bookings']) {
+    assert.equal(E.echelleDe(faux), null, `${faux} ne doit PAS heriter d une echelle`)
+  }
+  // La casse et les espaces, eux, ne sont pas une autre source.
+  assert.equal(E.echelleDe('  AirBnB  '), 10)
+})
+
+test('LE TEST QUI COMPTE (dette 76) : une source INCONNUE n est pas convertie — jamais de division par defaut', () => {
+  // Vrbo, HomeAway et Expedia notent sur 5 : supposer /10 aurait affiche leurs
+  // avis a la MOITIE de leur valeur, sans un mot. Une note fausse est pire
+  // qu'une note absente — elle a l'air d'une note.
+  for (const source of ['vrbo', 'expedia', 'homeaway', 'bookingsync', 'tripadvisor', 'direct']) {
+    assert.equal(E.surCinq(10, source), null, `${source} : pas d echelle connue, pas de conversion`)
+    assert.equal(E.surCinq(4.5, source), null)
+  }
+  // Et ses notes ne comptent pas dans la moyenne, sans faire disparaitre celles
+  // des sources connues.
+  const r = E.noteSur5Des([
+    { ota: 'airbnb', overall_score: 10 },
+    { ota: 'vrbo', overall_score: 5 }
+  ])
+  assert.equal(r.note_sur_5, 5)
+  assert.equal(r.notes, 1, 'la note de la source inconnue ne compte pas dans le diviseur')
+})
+
 test('une note absente, vide ou illisible ne compte pas — et ne vaut jamais zero', () => {
   for (const v of [null, undefined, '', 'bien', NaN, -2]) {
     assert.equal(E.surCinq(v, 'airbnb'), null, `${String(v)} n est pas une note`)
@@ -98,19 +129,25 @@ test('LE TEST QUI COMPTE : la table des echelles correspond a la MESURE', () => 
   // defaut n'a qu'un effet : eteindre l'alarme de source inconnue, pile pour le
   // canal pour lequel elle a ete construite (constat m4 de la revue).
   assert.deepEqual(E.ECHELLE_PAR_CANAL, { airbnb: 10, booking: 10 })
-  assert.equal(E.ECHELLE_PAR_DEFAUT, 10)
+  // ⚠ IL N'Y A PLUS DE DEFAUT (dette 76) : une source hors table n'est pas
+  // convertie. Le garder exporte inviterait a s'en servir.
+  assert.equal(E.ECHELLE_PAR_DEFAUT, undefined)
 })
 
-test('un canal inconnu prend l echelle du coeur, il ne fait pas disparaitre ses notes', () => {
-  assert.equal(E.echelleDe('un-canal-de-demain'), 10)
-  assert.equal(E.echelleDe(null), 10)
-  assert.equal(E.surCinq(9, 'un-canal-de-demain'), 4.5)
+test('un canal inconnu, un `ota` absent : aucune echelle, donc aucune conversion', () => {
+  for (const o of ['un-canal-de-demain', null, undefined, '']) {
+    assert.equal(E.echelleDe(o), null)
+    assert.equal(E.surCinq(9, o), null)
+  }
 })
 
-test('le nom du canal se lit sans se soucier de la casse ni des variantes', () => {
+test('le nom du canal se lit sans se soucier de la casse ni des espaces', () => {
   assert.equal(E.echelleDe('Airbnb'), 10)
-  assert.equal(E.echelleDe('booking.com'), 10)
   assert.equal(E.echelleDe('BOOKING'), 10)
+  assert.equal(E.echelleDe(' booking '), 10)
+  // Mais une VARIANTE est une autre source : `booking.com` ne parvient jamais
+  // en base, `normaliserOta` l ayant deja ramene a `booking`.
+  assert.equal(E.echelleDe('booking.com'), null)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -164,8 +201,12 @@ test('LE TEST QUI COMPTE (M3) : la resolution par NOM fonctionne — eprouvee pa
   // supprime la boucle reste verte. Avec une table injectee, elle rougit.
   const table = { airbnb: 5, booking: 10 }
   assert.equal(E.echelleDe('airbnb', table), 5)
-  assert.equal(E.echelleDe('booking.com', table), 10)
-  assert.equal(E.echelleDe('inconnu', table), 10, 'le defaut reste celui du coeur')
+  // ⚠ `booking.com` n'arrive JAMAIS en base : `normaliserOta` le ramene a
+  // `booking` (lib/cron-channel-reviews.js). La table porte ce que le writer
+  // ecrit, pas ce que le partenaire appelle son canal.
+  assert.equal(E.echelleDe('booking.com', table), null)
+  assert.equal(E.echelleDe('booking', table), 10)
+  assert.equal(E.echelleDe('inconnu', table), null, 'hors table = pas d echelle')
   assert.equal(E.surCinq(5, 'airbnb', table), 5, '5 / 5 sur une source en /5')
   assert.equal(E.surCinq(5, 'booking', table), 2.5, '5 / 10 sur une source en /10')
   // Et l enonce de Thierry, dans SA lecture : Airbnb vraiment sur 5.
@@ -181,18 +222,16 @@ test('m2 : une cle ajoutee doit etre celle que le WRITER ecrit, pas celle qu on 
   // bookingcom et booking.com, et laisse passer le reste en minuscules :
   // « HomeAway » devient `homeaway`, jamais `vrbo`. Une table qui ne porterait
   // que `vrbo` ne matcherait donc rien.
-  assert.equal(E.echelleDe('homeaway', { vrbo: 5 }), E.ECHELLE_PAR_DEFAUT,
+  assert.equal(E.echelleDe('homeaway', { vrbo: 5 }), null,
     'la cle `vrbo` ne rattrape pas ce que le writer ecrit')
   assert.equal(E.echelleDe('homeaway', { homeaway: 7 }), 7)
 })
 
-test('m4 : une source NON MESUREE declenche l alarme, et ne l eteint pas', () => {
-  // Le defaut : une cle « au cas ou » valant 10 faisait taire le signal pour un
-  // canal qu on n a jamais vu. On verifie par le comportement observable —
-  // `echelleDe` rend le defaut, et la source n est pas dans la table.
+test('m4 : une source NON MESUREE n est pas dans la table, et ne l est pas « au cas ou »', () => {
+  // Une cle « au cas ou » valant la meme chose que le defaut faisait taire le
+  // signal pour un canal qu on n a jamais vu. Il n y a plus de defaut, et la
+  // table ne porte que ce qui a ete mesure.
   for (const source of ['expedia', 'homeaway', 'vrbo', 'tripadvisor']) {
-    assert.equal(E.echelleDe(source), E.ECHELLE_PAR_DEFAUT, `${source} prend le defaut`)
-    assert.ok(!Object.keys(E.ECHELLE_PAR_CANAL).some(k => source.includes(k)),
-      `${source} ne doit pas etre dans la table tant qu elle n est pas mesuree`)
+    assert.equal(E.echelleDe(source), null, `${source} n a pas d echelle connue`)
   }
 })
