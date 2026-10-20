@@ -354,7 +354,7 @@ chaque bien en une passe. `chargerNotes` fait un seul appel.
 | | avant | après |
 |---|---|---|
 | appels `/api/avis` à l'ouverture | **1 + N** (4 ici) | **1** |
-| lecture de la base, compte réel (4 biens, 702 avis) | **4293 ms** | **97 ms** |
+| lecture de la base, compte réel (4 biens, 664 notes comptées) | **4293 ms** | **97 ms** |
 | tables lues | `guest_evaluations`, `ota_reviews`, `properties`, `bookings_snapshot`, `menages` | `ota_reviews` |
 
 ⚠ **Ce que ce 4293 ms est, et ce qu'il n'est pas.** Mesuré depuis la machine de
@@ -369,9 +369,22 @@ Thierry.
 `scripts/verifier-parite-notes.js` rejoue l'**ancien** chemin (`noteMoyenne`
 une fois sans bien, puis une fois par bien) contre le **nouveau**, avec les
 fonctions de production — pas une réimplémentation. Production, 20 octobre
-2026, 5 biens et 702 avis : **28 comparaisons, 0 divergence**, sur les quatre
-périodes. Exemple sur « toujours » : 9,6/10 sur 664 avis au global, et
-244 + 69 + 332 + 19 = 664 par bien.
+2026 — 702 avis dans la table, 5 biens sur **deux** comptes, dont 4 biens et
+664 notes comptées sur le compte principal : **28 comparaisons, 0 divergence**
+sur les quatre périodes, 1570 notes comptées de chaque côté. Exemple sur
+« toujours » : 9,6/10 sur 664 avis au global, et 244 + 69 + 332 + 19 = 664 par
+bien.
+
+⚠ **ET L'ANCIEN CÔTÉ VIENT DE `git archive`, PAS DE L'ARBRE.** La première
+version du script comparait `noteMoyenne` à `notesDuPerimetre` — or le lot a
+fait de la première une **vue** de la seconde : les deux côtés étaient le même
+code, et la comparaison était tautologique. Si l'extraction avait perdu
+`.eq('is_hidden', false)`, les deux auraient sur-compté à l'identique et le
+script aurait imprimé « PARITÉ COMPLÈTE » sur des chiffres faux. Il extrait
+désormais le `lib/stats-avis.js` d'**avant** le lot et **vérifie** que ce qu'il
+a extrait ne contient pas `notesDuPerimetre`. Il fixe aussi l'horloge : trois
+périodes sur quatre sont bornées, l'ancien chemin est le lent, et une borne qui
+glisse entre les deux côtés inventerait une divergence sur du code exact.
 
 Sur **staging**, le même script **échoue volontairement** : 3 biens, zéro avis.
 Une parité entre deux zéros ne prouve rien, et un vérificateur qui n'a rien lu

@@ -75,9 +75,22 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
         // chemin de PANNE ne pouvait etre eprouve par ce double. Une panne qui
         // se lirait « aucun avis » est precisement ce qu'elles promettent
         // d'eviter.
+        // ⚠ ET IL HONORE `head` ET `count`, comme PostgREST. Mesure du 20 octobre
+        // 2026 : un double qui ENREGISTRE `head` sans l'appliquer laissait passer
+        // `select(select, { count: 'exact', head: true })` — l'idiome que
+        // `ratioProprete` vante justement, dans un lot dont le sujet est le cout
+        // des lectures. En production, `head: true` ne transfere AUCUNE ligne :
+        // `n` resterait a 0 et l'accueil n'afficherait plus de note, en silence,
+        // pour tout le monde. Le `count` est celui de TOUT le filtre, pas de la
+        // page : c'est ce qui permet de voir une lecture incomplete.
         range (a, z) {
-          if (erreur) return Promise.resolve({ data: null, error: erreur })
-          return Promise.resolve({ data: lignes.filter(retenir).filter(l => (appel.nonNuls || []).every(c => l[c] != null)).slice(a, z + 1), error: null })
+          if (erreur) return Promise.resolve({ data: null, count: null, error: erreur })
+          const tous = lignes.filter(retenir).filter(l => (appel.nonNuls || []).every(c => l[c] != null))
+          return Promise.resolve({
+            data: appel.head ? null : tous.slice(a, z + 1),
+            count: appel.count === 'exact' ? tous.length : null,
+            error: null
+          })
         },
         // `avisDuPrestataire` borne ses lectures : le double doit resoudre.
         limit () {
@@ -616,14 +629,44 @@ test('LE TEST QUI COMPTE : notesDuPerimetre rend EXACTEMENT ce que noteMoyenne r
   // Et les chiffres eux-memes, ecrits en clair : un test qui ne compare que
   // deux fonctions reste vert si les DEUX se trompent de la meme facon.
   assert.deepStrictEqual(une.global, { moyenne: 8.5, notes: 4 })
-  assert.deepStrictEqual(une.par_bien, {
+  assert.deepEqual({ ...une.par_bien }, {
     A: { moyenne: 9.5, notes: 2 }, B: { moyenne: 8, notes: 1 }, C: { moyenne: 7, notes: 1 }
   })
 })
 
-test('un avis SANS bien compte dans le global et dans aucun bien', async () => {
-  // C'est deja ce que faisait l'appel par bien : il filtrait
-  // `.in('property_id_ref', [ref])`, donc une ligne a ref nulle n'y entrait pas.
+test("LE TEST QUI COMPTE : une reference `__proto__` ne fait pas disparaitre un bien", () => {
+  // `property_id_ref` est une colonne TEXT alimentee par un provider. Avec un
+  // objet litteral, `par_bien['__proto__'] = x` ecrit le PROTOTYPE au lieu de
+  // creer une cle : le bien disparait de la reponse sans erreur, et ni
+  // `Object.keys` ni `JSON.stringify` ne le montrent. D'ou `Object.create(null)`.
+  const vide = Object.create(null)
+  vide['__proto__'] = { moyenne: 9, notes: 1 }
+  assert.deepEqual(Object.keys(vide), ['__proto__'],
+    'le prototype nul ne protege plus : la cle est avalee')
+})
+
+test("LE TEST QUI COMPTE : les options d'attribution sont REFUSEES, pas ignorees", async () => {
+  // `ratioProprete` les honore et restreint aux avis attribuables a une
+  // prestataire. Les notes ne savent pas faire : les ignorer rendrait la
+  // moyenne de l'HOTE sur l'ecran d'une femme de menage, sans erreur ni test
+  // rouge. La fiche prestataire est le prochain consommateur annonce.
+  for (const inconnue of ['prestataireId', 'menageEventIds', 'voies']) {
+    await assert.rejects(
+      () => notesDuPerimetre(fauxClient(PARITE), { userId: 'U', periode: 'toujours', [inconnue]: 'x' }),
+      new RegExp(inconnue), `\`${inconnue}\` est accepte en silence`)
+  }
+})
+
+test('un avis dont la reference ne designe aucun bien compte au global', async () => {
+  // ⚠ CE QUE CE TEST EPROUVE VRAIMENT. `property_id_ref` est `text NOT NULL`
+  // (migrations/2026-09-02-ota-reviews.sql:27) : la ligne a ref NULLE de ce jeu
+  // n'existe pas en base, et le garde du code est une ceinture. Ce qui existe,
+  // et que ce test represente, c'est la reference ORPHELINE — la colonne n'a
+  // pas de cle etrangere, donc un re-keying Beds24 -> Channex, une bascule ou
+  // un bien supprime laissent des avis dont la ref ne designe plus aucun bien.
+  // Dans les deux cas la regle est la meme, et c'est elle qu'on fige : ils
+  // comptent au GLOBAL, exactement comme dans l'appel global d'avant le lot, et
+  // dans aucun groupe que l'ecran sache afficher.
   const lignes = [...PARITE, { user_id: 'U', overall_score: 2, property_id_ref: null, received_at: '2026-10-04T00:00:00Z' }]
   const r = await notesDuPerimetre(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
   assert.strictEqual(r.global.notes, 5, 'la note sans bien est perdue pour le global')
@@ -633,7 +676,7 @@ test('un avis SANS bien compte dans le global et dans aucun bien', async () => {
 
 test('LE TEST QUI COMPTE : le perimetre d un membre est applique, et un perimetre VIDE rend zero', async () => {
   const restreint = await notesDuPerimetre(fauxClient(PARITE), { userId: 'U', periode: 'toujours', refs: ['A'] })
-  assert.deepStrictEqual(restreint.par_bien, { A: { moyenne: 9.5, notes: 2 } },
+  assert.deepEqual({ ...restreint.par_bien }, { A: { moyenne: 9.5, notes: 2 } },
     'un membre limite au bien A voit les notes des autres biens')
   assert.deepStrictEqual(restreint.global, { moyenne: 9.5, notes: 2 },
     'le global d un membre restreint porte sur tout le compte')
@@ -642,7 +685,9 @@ test('LE TEST QUI COMPTE : le perimetre d un membre est applique, et un perimetr
   // empeche un membre revoque de voir le compte entier.
   const vide = await notesDuPerimetre(fauxClient(PARITE), { userId: 'U', refs: [] })
   assert.deepStrictEqual(vide.global, { moyenne: null, notes: 0 })
-  assert.deepStrictEqual(vide.par_bien, {})
+  assert.deepEqual({ ...vide.par_bien }, {})
+  assert.strictEqual(Object.getPrototypeOf(vide.par_bien), null,
+    'par_bien a de nouveau un prototype : une reference `__proto__` l ecrirait')
   assert.deepStrictEqual((await notesDuPerimetre(fauxClient(PARITE), { userId: null })).global, { moyenne: null, notes: 0 })
 })
 
@@ -683,6 +728,7 @@ test("LE TEST QUI COMPTE : l'ordre PostgREST est respecte — select AVANT les f
   // arrive le 20 octobre 2026, en ecrivant `requeteDesNotes`.
   // Ce double a la FORME du vrai, et c'est tout ce qu'on lui demande.
   const vus = []
+  const tris = []
   const strict = {
     from (table) {
       return {
@@ -690,9 +736,16 @@ test("LE TEST QUI COMPTE : l'ordre PostgREST est respecte — select AVANT les f
           vus.push(colonnes)
           assert.ok(typeof colonnes === 'string' && colonnes.length,
             `select() appele sans colonnes sur ${table}`)
+          let trie = false
           const f = {
-            eq: () => f, gte: () => f, in: () => f, not: () => f, order: () => f,
-            range: () => Promise.resolve({ data: [], error: null })
+            eq: () => f, gte: () => f, in: () => f, not: () => f,
+            order: (c, o) => { trie = true; tris.push([c, o]); return f },
+            // ⚠ `range` EXIGE d'avoir ete trie. C'est la seule facon de voir
+            // disparaitre un `.order('id')` : aucun autre double ne l'observe.
+            range: () => {
+              assert.ok(trie, 'range() appele sans order() : la pagination n est pas une partition')
+              return Promise.resolve({ data: [], count: 0, error: null })
+            }
           }
           return f
         },
@@ -703,6 +756,44 @@ test("LE TEST QUI COMPTE : l'ordre PostgREST est respecte — select AVANT les f
   // Les DEUX fonctions : elles partagent `requeteDesNotes`, donc le defaut.
   await noteMoyenne(strict, { userId: 'U', periode: 'toujours' })
   await notesDuPerimetre(strict, { userId: 'U', periode: 'toujours', refs: ['A'] })
-  assert.deepStrictEqual(vus, ['id, overall_score', 'id, overall_score, property_id_ref'],
-    'les colonnes demandees ont change : verifier que la moyenne lit toujours de quoi grouper')
+  // Une seule lecture existe desormais : `noteMoyenne` en est la vue globale.
+  assert.deepStrictEqual(vus, ['id, overall_score, property_id_ref', 'id, overall_score, property_id_ref'],
+    'les colonnes demandees ont change : verifier que la lecture a toujours de quoi grouper')
+  // ⚠ ET LE TRI EST DANS LA REQUETE PARTAGEE. Sans ORDER BY, PostgREST ne
+  // garantit aucun ordre : deux `range()` peuvent se chevaucher ou sauter des
+  // lignes, et la moyenne porte sur autre chose qu'une partition. Aucun autre
+  // double du depot n'observe `order()`.
+  assert.deepStrictEqual(tris, [['id', { ascending: true }], ['id', { ascending: true }]],
+    'la lecture paginee n est plus triee : `range()` devient un tirage, pas une pagination')
+})
+
+test("LE TEST QUI COMPTE : une lecture ROGNEE se dit, elle ne rend pas une moyenne partielle", async () => {
+  // Une page plus courte que demandee veut dire « fin des donnees »… ou
+  // « db-max-rows a rogne ». Les deux sont indistinguables SANS le total, et
+  // rogner en silence donne une moyenne sur une fraction sans la moindre
+  // erreur — exactement ce que le bloc de `ratioProprete` raconte avoir vecu.
+  // Le compte exact est demande avec la PREMIERE page, dans la meme requete.
+  const plafond = 500
+  const rogne = {
+    from: () => ({
+      select (colonnes, opts) {
+        const compte = !!(opts && opts.count === 'exact')
+        const f = {
+          eq: () => f, gte: () => f, in: () => f, not: () => f, order: () => f,
+          range: () => Promise.resolve({
+            data: Array.from({ length: plafond }, (_, i) => ({ id: i, overall_score: 10, property_id_ref: 'A' })),
+            count: compte ? 3000 : null,
+            error: null
+          })
+        }
+        return f
+      }
+    })
+  }
+  const r = await notesDuPerimetre(rogne, { userId: 'U', periode: 'toujours' })
+  assert.strictEqual(r.tronque, true, '500 lignes lues sur 3000 annoncees, et la reponse ne le dit pas')
+  assert.strictEqual(r.global.notes, 500)
+  // Et la vue globale porte le meme drapeau : c'est la MEME lecture.
+  const m = await noteMoyenne(rogne, { userId: 'U', periode: 'toujours' })
+  assert.strictEqual(m.tronque, true)
 })

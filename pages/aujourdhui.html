@@ -470,21 +470,39 @@ async function chargerNotes () {
   // 3 x 4-5 s, environ 75 % des ~20 s de la page. `action=notes` fait la même
   // lecture une fois et rend le global ET chaque bien (lib/stats-avis.js).
   //
-  // ⚠ CE QUI CHANGE EN CAS DE PANNE : c'était N+1 lectures indépendantes, dont
-  // l'une pouvait réussir quand l'autre échouait ; c'est maintenant tout ou
-  // rien. Assumé — une seule lecture, une seule vérité — et l'échec reste
-  // silencieux à l'écran, comme avant : la tuile de note se masque.
+  // ⚠ CE QUI CHANGE EN CAS DE PANNE, ET CE N'EST PAS « comme avant ». C'étaient
+  // N+1 lectures INDÉPENDANTES : un global en échec ne coûtait que la tuile, et
+  // chaque bien gardait son étoile ; un bien en échec ne coûtait que la sienne.
+  // C'est maintenant tout ou rien — un seul 503 efface la tuile ET les N
+  // étoiles. Il n'y a pas de reprise : `chargerNotes()` est lancé une fois
+  // depuis `init()`, sans `await`, donc l'hôte n'a que le rechargement de page.
+  // Assumé (une seule lecture, une seule vérité), mais dit.
   let r = null
   try {
     r = await appel('/api/avis?action=notes&periode=30j')
   } catch (e) { logger.error('Aujourdhui', 'avis', e) }
-  etat.noteGlobale = (r && r.global) || null
-  const parBien = (r && r.par_bien) || {}
+
+  // ⚠ LES DEUX CÔTÉS JUGENT LA MÊME CHOSE. `appel()` avale un corps illisible
+  // (`r.json().catch(() => ({}))`) : un 200 vide ou en HTML — la panne que la
+  // mémoire du projet enregistre déjà sous « URL sans /api/v1 : 200 + HTML =
+  // 0 bien silencieux » — donne `r = {}`, qui est VRAI. Tester la véracité de
+  // `r` d'un côté et la clé de l'autre disait alors « inconnu » au global et
+  // « zéro avis », un FAIT, à chaque bien. On exige donc la clé des deux côtés.
+  const lu = r && r.global && typeof r.global === 'object' ? r : null
+  const parBien = (lu && lu.par_bien) || {}
+  etat.noteGlobale = lu ? lu.global : null
   for (const b of etat.biens) {
     if (!b.provider_property_id) continue
+    const ref = String(b.provider_property_id)
+    // ⚠ `hasOwnProperty`, pas `parBien[ref]`. `par_bien` vient de `JSON.parse` :
+    // pour un bien dont la clé provider vaudrait `constructor`, `toString` ou
+    // `valueOf`, une lecture directe rendrait une FONCTION héritée d'Object —
+    // vraie, donc le repli ne serait jamais pris, et `etat.notesParBien`
+    // porterait une fonction au lieu d'une note.
+    const sienne = Object.prototype.hasOwnProperty.call(parBien, ref) ? parBien[ref] : null
     // Un bien sans avis sur la période n'a pas de clé : c'est zéro, et c'est
     // exactement ce que rendait l'appel par bien qu'on remplace.
-    etat.notesParBien.set(b.id, r ? (parBien[String(b.provider_property_id)] || { moyenne: null, notes: 0 }) : null)
+    etat.notesParBien.set(b.id, lu ? (sienne || { moyenne: null, notes: 0 }) : null)
   }
   renderKpis()
   renderBiens()

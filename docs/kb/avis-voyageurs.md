@@ -946,10 +946,17 @@ de période, et le périmètre. Deux listes de filtres côte à côte auraient
 divergé un jour, et la divergence aurait été invisible — deux chiffres
 plausibles pour la même chose, sur le même écran.
 
-⚠ **UN AVIS SANS `property_id_ref` COMPTE DANS LE GLOBAL ET DANS AUCUN BIEN.**
-Ce n'est pas un oubli : c'est exactement ce que faisait l'appel par bien, qui
-filtrait `.in('property_id_ref', [ref])`. Le global n'est donc pas toujours la
-somme des biens, et il ne doit pas l'être.
+⚠ **LE GLOBAL N'EST PAS LA SOMME DES BIENS AFFICHÉS.**
+`ota_reviews.property_id_ref` est `text NOT NULL` **sans clé étrangère**
+(`migrations/2026-09-02-ota-reviews.sql:27` ; seul `property_id` porte la FK).
+Un re-keying Beds24 → Channex, un bien dont `provider_property_id` repasse à
+NULL pendant une bascule, ou un bien supprimé laissent donc des avis dont la
+référence ne désigne plus aucun bien du compte : ils comptent **au global** —
+ils comptaient déjà dans l'appel global d'avant — et dans aucun groupe que
+l'écran sache afficher. `scripts/verifier-parite-notes.js` les **signale sans
+bloquer** : c'est une donnée réelle, pas une fuite de périmètre.
+(Le garde `property_id_ref == null` dans `notesDuPerimetre` est une ceinture :
+la colonne est `not null`, zéro ligne nulle en production.)
 
 ⚠ **LES GARDES SONT CELLES DE `cartes`, PAS UNE VERSION ALLÉGÉE.** Domaine
 `avis` en lecture avec `compteDelegue`, périmètre appliqué **en SQL**, 403 pour

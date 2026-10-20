@@ -79,9 +79,20 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
           if (permissions && profil) table.push({ ...permissions, profile_id: profil.id })
           return Promise.resolve({ data: table.filter(r => q._f.profile_id == null || r.profile_id === q._f.profile_id), error: null })
         } else lignes = []
-        let c = lignes.filter(garde)
-        if (q._range) c = c.slice(q._range[0], q._range[1] + 1)
-        return Promise.resolve({ data: c, count: c.length, error: null })
+        // ⚠ `head` ET `count` SONT HONORES. Un double qui les enregistre sans les
+        // appliquer laisse passer `select(select, { count: 'exact', head: true })`
+        // — l'idiome que `ratioProprete` vante — avec la suite entierement verte,
+        // alors qu'en production aucune ligne ne serait transferee et que
+        // l'accueil n'afficherait plus aucune note. Et le `count` est celui de
+        // TOUT le filtre, pas de la page : c'est lui qui revele une lecture
+        // incomplete.
+        const tous = lignes.filter(garde)
+        const page = q._range ? tous.slice(q._range[0], q._range[1] + 1) : tous
+        return Promise.resolve({
+          data: q._head ? null : page,
+          count: q._count === 'exact' ? tous.length : null,
+          error: null
+        })
       }
       return chain
     },
@@ -98,6 +109,11 @@ const appeler = async (query = {}, headers = {}) => {
   const res = reponse()
   await require('../api/avis')({ method: 'GET', query: { action: 'notes', ...query }, body: null,
     headers: { authorization: 'Bearer jeton', ...headers } }, res)
+  // ⚠ CE QUE LE NAVIGATEUR RECOIT, pas l'objet en memoire : `par_bien` est un
+  // `Object.create(null)` (protection contre une reference `__proto__`), et
+  // c'est la SERIALISATION qui est le contrat de l'endpoint. Juger l'objet
+  // donnerait des egalites qui n'ont pas cours sur le reseau.
+  if (res.body != null) res.body = JSON.parse(JSON.stringify(res.body))
   return res
 }
 
@@ -199,4 +215,18 @@ test('LE TEST QUI COMPTE : une panne se DIT, elle ne se lit pas « aucun avis »
   preparer({ avis: [avisDe('a1')], erreur: { message: 'timeout' } })
   const r = await appeler({ periode: 'toujours' })
   assert.equal(r.code, 503, 'une lecture en echec rend 200 avec des compteurs a zero')
+})
+
+test('SECURITE : un perimetre dont les references sont toutes MALFORMEES rend zero', async () => {
+  // Cas que `refs: []` ne couvre pas : la liste n'est pas vide, mais aucune
+  // reference n'est exploitable. C'est ce que `filtrePerimetreSql` signale par
+  // '' — et quoi qu'il arrive, le resultat doit etre ZERO, jamais le compte.
+  preparer({ ...membre({ avis: 'read', property_scope: 'some',
+    property_ids: ['pas une ref'], property_refs: ['encore, pire'] }),
+    avis: [avisDe('a1'), avisDe('b1', { property_id_ref: REF_B })] })
+  const r = await enTantQueMembre({ periode: 'toujours' })
+  assert.equal(r.code, 200)
+  assert.deepEqual(r.body.global, { moyenne: null, notes: 0 },
+    'un perimetre inexploitable donne les chiffres de tout le compte')
+  assert.deepEqual(r.body.par_bien, {})
 })

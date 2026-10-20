@@ -506,7 +506,7 @@ test("une lecture de session impossible renvoie vers /login, elle ne rejette pas
 // ─── L'ouverture d'Aujourd'hui, EXECUTEE ─────────────────────────────────────
 
 // Le module de la page, prive de ses `import`, avec ses dependances injectees.
-function batirAujourdhui () {
+function batirAujourdhui (sansInit = false) {
   const html = lire('pages/aujourdhui.html')
   const ouvre = html.indexOf('<script type="module">')
   assert.notStrictEqual(ouvre, -1, 'pages/aujourdhui.html n a plus de module')
@@ -516,7 +516,19 @@ function batirAujourdhui () {
   // ⚠ On rend aussi la poignee sur les internes : `chargerNotes` et `etat` sont
   // des declarations de haut niveau du module, et les eprouver DIRECTEMENT evite
   // de faire traverser a `init()` les cinq chargeurs qui n'ont rien a voir.
-  return corps.slice(depart) + '\n;return { chargerNotes, etat }'
+  const corpsUtile = sansInit
+    // ⚠ ON RETIRE LE DEMARRAGE. `init().catch(...)` est la derniere ligne du
+    // module : construire celui-ci le LANCE. L'assertion « un seul appel a
+    // /api/avis » n'etait alors vraie que parce que `init()` restait coince sur
+    // `await requireAuth()` — un accident, que rien dans le test ne disait.
+    // Pour eprouver une fonction isolee, on n'allume pas la page entiere.
+    ? corps.slice(depart).replace(/\n\s*init\(\)\.catch\([^\n]*\)\s*$/, '\n')
+    : corps.slice(depart)
+  if (sansInit) {
+    assert.ok(!/\binit\(\)\.catch\(/.test(corpsUtile),
+      "le demarrage `init().catch(...)` n'a pas pu etre retire : sa forme a change")
+  }
+  return corpsUtile + '\n;return { chargerNotes, etat }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -526,7 +538,13 @@ function ouvrirAujourdhui (options = {}) {
   const fetchFaux = (url) => {
     urls.push(String(url))
     if (options.fetchLeve) return Promise.reject(new Error('reseau'))
-    return Promise.resolve({ ok: true, status: 200, json: async () => (options.corps || {}) })
+    const statut = options.statut || 200
+    return Promise.resolve({
+      ok: statut >= 200 && statut < 300,
+      status: statut,
+      // Un corps illisible : c'est `appel()` qui le transforme en `{}`.
+      json: async () => { if (options.corpsIllisible) throw new SyntaxError('<'); return options.corps || {} }
+    })
   }
   const stubs = new Map()
   const elem = () => ({
@@ -566,15 +584,24 @@ function ouvrirAujourdhui (options = {}) {
   const I18n = {
     appels: 0,
     init () { this.appels++; return new Promise(res => { resoudreI18n = res }) },
-    t: (k) => k, date: () => '', time: () => '', money: () => '', pct: () => '', num: () => '',
+    t: (k) => k, date: () => '', time: () => '', money: () => '', pct: () => '',
+    // Formate reellement : sans cela, rien ne peut asserter la note affichee.
+    num: (n) => String(n),
     lang: 'fr', langues: []
   }
   const rien = () => {}
   // `shared/aujourdhui.js` : des fonctions pures, dont on n'a besoin ici que de
   // la FORME de retour. `etatDesBiens` rend une Map, que `renderBiens` interroge.
+  // ⚠ `noteSur5` EST LA VRAIE FORMULE, pas l'identite. Le coeur stocke les
+  // notes sur 10, l'ecran les affiche sur 5 (shared/aujourdhui.js, decision de
+  // Thierry) : c'est le SEUL travail de cette fonction. Stubbee en identite,
+  // une regression qui retire `R.noteSur5(...)` de la page — donc 9,4 affiche
+  // sur 5 — rendait a l'identique dans tous les tests de ce fichier, pour
+  // toujours.
+  const noteSur5 = (n) => Math.round((Number(n) / 2) * 10) / 10
   const R = new Proxy({}, { get: (_, cle) => (
     cle === 'etatDesBiens' ? (() => new Map())
-    : cle === 'noteSur5' ? ((n) => n)
+    : cle === 'noteSur5' ? noteSur5
     : (() => [])) })
 
   const sorti = new Function(
@@ -582,7 +609,7 @@ function ouvrirAujourdhui (options = {}) {
     'compteCourant', 'moi', 'peutLire', 'peutEcrire', 'estTitulaire', 'comptes',
     'basculerVers', 'enteteCompte', 'R',
     'I18n', 'HSNav', 'document', 'window', 'location', 'fetch', 'localStorage', 'console',
-    batirAujourdhui()
+    batirAujourdhui(options.sansInit)
   )(requireAuth, supabase, rien, rien, { error: rien, warn: rien, info: rien }, String,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
     rien, () => ({}), R,
@@ -595,6 +622,7 @@ function ouvrirAujourdhui (options = {}) {
     lectures,
     I18n,
     bonjour: () => document_.querySelector('[data-bind="greeting"]').textContent,
+    html: (sel) => document_.querySelector(sel).innerHTML,
     ouvrirSession: () => resoudreSession({ user: { id: 'u1', email: 'thierry@exemple.fr', user_metadata: {} } }),
     repondreI18n: () => resoudreI18n('fr'),
     resoudre: (table, charge) => {
@@ -666,7 +694,7 @@ const biensDeTest = [
 ]
 
 test('LE TEST QUI COMPTE : l accueil demande les notes UNE fois, pas une fois par bien', async () => {
-  const p = ouvrirAujourdhui({ corps: {
+  const p = ouvrirAujourdhui({ sansInit: true, corps: {
     global: { moyenne: 9.4, notes: 42 },
     par_bien: { REF_A: { moyenne: 9.6, notes: 30 } },
     periode: '30j'
@@ -674,6 +702,9 @@ test('LE TEST QUI COMPTE : l accueil demande les notes UNE fois, pas une fois pa
   p.interne.etat.biens = biensDeTest
   await p.interne.chargerNotes()
 
+  // ⚠ `sansInit` : le module est construit SANS lancer `init()`. Sinon le
+  // compte d'appels ne serait juste que parce que la page reste coincee sur
+  // `await requireAuth()` — vrai par accident, et muet le jour ou ca change.
   const avis = p.urls.filter(u => u.includes('/api/avis'))
   assert.strictEqual(avis.length, 1,
     `${avis.length} appels a /api/avis au lieu d un seul : le 1 + N est revenu`)
@@ -684,7 +715,7 @@ test('LE TEST QUI COMPTE : l accueil demande les notes UNE fois, pas une fois pa
 })
 
 test('LE TEST QUI COMPTE : chaque bien recoit la meme chose qu avant, zero compris', async () => {
-  const p = ouvrirAujourdhui({ corps: {
+  const p = ouvrirAujourdhui({ sansInit: true, corps: {
     global: { moyenne: 9.4, notes: 42 },
     // REF_B n'a aucune note sur la periode : la reponse n'a pas sa cle.
     par_bien: { REF_A: { moyenne: 9.6, notes: 30 } },
@@ -708,9 +739,69 @@ test('une panne de lecture des notes ne fait pas afficher zero avis', async () =
   // deja `null` sur echec. Il ne garde pas un correctif, il garde l'invariant
   // que le passage de N+1 lectures a UNE ne devait pas casser : une panne reste
   // une panne, elle ne devient pas « 0 avis ».
-  const p = ouvrirAujourdhui({ fetchLeve: true })
+  const p = ouvrirAujourdhui({ sansInit: true, fetchLeve: true })
   p.interne.etat.biens = biensDeTest
   await p.interne.chargerNotes()
   assert.strictEqual(p.interne.etat.noteGlobale, null, 'une panne se lit « 0 avis » sur la tuile')
   assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
+})
+
+test("LE TEST QUI COMPTE : un 200 au corps ILLISIBLE n'est pas lu comme « zero avis »", async () => {
+  // `appel()` avale un corps non-JSON : `await r.json().catch(() => ({}))`.
+  // La panne existe pour de vrai — la memoire du projet la porte deja sous
+  // « URL sans /api/v1 : 200 + HTML = 0 bien silencieux ». L'objet vide est
+  // VRAI : tester la veracite de la reponse d'un cote et la cle de l'autre
+  // disait « inconnu » au global et « zero avis », un FAIT, a chaque bien.
+  const p = ouvrirAujourdhui({ sansInit: true, corpsIllisible: true })
+  p.interne.etat.biens = biensDeTest
+  await p.interne.chargerNotes()
+  assert.strictEqual(p.interne.etat.noteGlobale, null)
+  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null,
+    'un corps illisible fait annoncer « 0 avis » bien par bien')
+})
+
+test('un 503 de l endpoint ne fait pas afficher zero avis non plus', async () => {
+  // Le lot a invente ce 503 : une lecture en echec se DIT, elle ne rend pas
+  // des compteurs a zero. Encore faut-il que la page le traite comme un echec.
+  const p = ouvrirAujourdhui({ sansInit: true, statut: 503, corps: { error: 'Notes illisibles' } })
+  p.interne.etat.biens = biensDeTest
+  await p.interne.chargerNotes()
+  assert.strictEqual(p.interne.etat.noteGlobale, null)
+  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
+})
+
+test("LE TEST QUI COMPTE : une cle de bien heritee d'Object ne devient pas une note", async () => {
+  // `par_bien` vient de `JSON.parse`. Pour un bien dont la cle provider vaudrait
+  // `constructor`, `toString` ou `valueOf`, une lecture directe rendrait une
+  // FONCTION heritee — vraie, donc le repli `{ moyenne: null, notes: 0 }` ne
+  // serait jamais pris, et `etat.notesParBien` porterait une fonction.
+  const p = ouvrirAujourdhui({ sansInit: true, corps: { global: { moyenne: 9, notes: 3 }, par_bien: {} } })
+  p.interne.etat.biens = [
+    { id: 'bc', name: 'Piege', provider_property_id: 'constructor' },
+    { id: 'bt', name: 'Piege 2', provider_property_id: 'toString' },
+  ]
+  await p.interne.chargerNotes()
+  for (const id of ['bc', 'bt']) {
+    assert.deepEqual(p.interne.etat.notesParBien.get(id), { moyenne: null, notes: 0 },
+      `le bien ${id} recoit un membre herite d Object au lieu de sa note`)
+  }
+})
+
+test("LE TEST QUI COMPTE : la note s'affiche SUR 5, pas sur 10", async () => {
+  // Le cœur stocke sur 10, l'ecran affiche sur 5 (`noteSur5`, decision de
+  // Thierry). C'est le seul travail de cette fonction, et le seul endroit ou
+  // un lot sur les notes peut casser l'affichage sans toucher aux chiffres.
+  const p = ouvrirAujourdhui({ sansInit: true, corps: {
+    global: { moyenne: 9.4, notes: 42 },
+    par_bien: { REF_A: { moyenne: 9.6, notes: 30 } },
+  } })
+  p.interne.etat.biens = biensDeTest
+  await p.interne.chargerNotes()
+
+  const tuile = p.html('[data-bind="rating"]')
+  assert.ok(tuile.includes('4.7'), `la tuile n affiche pas 9,4/10 converti en 4,7/5 : ${tuile}`)
+  assert.ok(!tuile.includes('9.4'), `la tuile affiche la note brute sur 10 : ${tuile}`)
+
+  const liste = p.html('[data-list="properties"]')
+  assert.ok(liste.includes('4.8'), `l etoile du bien n affiche pas 9,6/10 converti en 4,8/5 : ${liste}`)
 })

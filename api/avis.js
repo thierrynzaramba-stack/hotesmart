@@ -721,8 +721,18 @@ async function notesLister (req, res, garde) {
   const periode = periodeNormalisee(String(req.query?.periode || ''))
   const refs = refsDuPerimetre(garde.contexte)
 
-  // Perimetre vide ou inexploitable : zero, jamais « tous ». Meme porte que
-  // `cartes` — `filtrePerimetreSql` rend '' dans ce cas, et on echoue ferme.
+  // Perimetre vide ou inexploitable : zero, jamais « tous ».
+  //
+  // ⚠ ICI, C'EST UN RACCOURCI, PAS LA GARDE — et il faut le savoir, parce que
+  // le supprimer ne fait rougir aucun test (REVIEW.md regle 20 : « si je
+  // supprime cette garde-ci, lequel de mes tests rougit ? »). Ce qui PROTEGE,
+  // c'est que `refsLues` plus bas reste la liste du perimetre et part en
+  // `.in(...)`, parametre par postgrest-js : un perimetre vide rend `[]`, que
+  // `notesDuPerimetre` traite en zero, et une reference malformee ne matche
+  // simplement rien. Contrairement a `cartes`, cette action n'interpole aucune
+  // expression `.or(...)`, donc le tamis `REF_SQL_SURE` n'a rien a filtrer.
+  // Ce que le raccourci apporte : un aller-retour en moins pour un membre
+  // revoque, et la meme porte d'entree que `cartes`, qui en a besoin.
   if (filtrePerimetreSql(refs, 'property_id_ref') === '') {
     return res.status(200).json({ global: { moyenne: null, notes: 0 }, par_bien: {},
       periode, depuis: borneDepuis(periode) })
