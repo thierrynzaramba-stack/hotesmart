@@ -345,3 +345,81 @@ test('l\'alarme de surreservation et son acquittement sont repris sur l\'accueil
   assert.ok(/method: 'POST'[\s\S]{0,200}\/api\/incidents-acquitter|\/api\/incidents-acquitter'[\s\S]{0,60}method: 'POST'/.test(html))
   assert.ok(html.includes("peutEcrire('reservations')"), 'le bouton d\'acquittement suit le droit de l\'endpoint')
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// La note affichée sur l'accueil — le constat M2 de la revue du 20 octobre 2026
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠ CE BLOC EXISTE PARCE QUE DEUX MUTATIONS SURVIVAIENT. La revue a mesuré que
+// remplacer `note.note_sur_5` par `note.moyenne` dans les DEUX endroits faisait
+// disparaître la note du bandeau ET l'étoile de chaque logement — en silence,
+// avec 33 tests sur 33 au vert. Le seul garde-fou était un `assert.match` sur
+// la chaîne `note_sur_5`, que la ligne 457 satisfaisait à elle seule.
+//
+// On exerce donc les DEUX expressions telles qu'elles sont écrites dans la
+// page, et pas une copie : les réécrire ici ferait un test qui reste vert le
+// jour où la page les perd.
+const { JSDOM } = require('jsdom')
+
+// Extrait une expression de la page, de son ancre jusqu'à la fin de la ligne
+// suivante — la forme des deux ternaires de la page.
+function expressionDeLaPage (ancre, lignes) {
+  const src = lire('pages/aujourdhui.html').split('\n')
+  const i = src.findIndex(l => l.includes(ancre))
+  assert.notEqual(i, -1, `ancre introuvable dans pages/aujourdhui.html : ${ancre}`)
+  return src.slice(i, i + lignes).join('\n')
+}
+
+function contexteDeRendu (dom) {
+  return {
+    document: dom.window.document, window: dom.window,
+    $: (s) => dom.window.document.querySelector(s),
+    esc: (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])),
+    icone: (id, cls = 'icon') => `<svg class="${cls}" data-icone="${id}"></svg>`,
+    t: (k, v = {}) => `[${k}]${Object.entries(v).map(([a, b]) => `${a}=${b}`).join(',')}`,
+    // ⚠ Le VRAI format du moteur : « 4,7 » et pas « 4.7 ».
+    I18n: { num: (x, o) => new Intl.NumberFormat('fr', o).format(x) }
+  }
+}
+
+test('LE TEST QUI COMPTE (M2) : le bandeau de l accueil affiche la note TELLE QU ELLE DESCEND', async () => {
+  const dom = new JSDOM('<!doctype html><body><span data-bind="rating"></span><span data-bind="kpi-rating" hidden></span></body>')
+  const ctx = contexteDeRendu(dom)
+  ctx.n = { note_sur_5: 4.7, notes: 69 }
+  ctx.visible = false
+  const vm = require('node:vm')
+  vm.createContext(ctx)
+  vm.runInContext(expressionDeLaPage('$(\'[data-bind="rating"]\').innerHTML = n.', 3), ctx)
+  const zone = dom.window.document.querySelector('[data-bind="rating"]')
+  assert.match(zone.textContent, /4,7/, 'la note descend deja sur 5 : l ecran l affiche sans la diviser')
+  assert.doesNotMatch(zone.textContent, /2,4|9,4/, 'ni redivisee, ni laissee sur 10')
+  assert.match(zone.textContent, /n=69/, 'le nombre d avis notes accompagne la note')
+  assert.ok(zone.querySelector('[data-icone="i-review"]'), 'l etoile est une icone du sprite')
+
+  // Sans note : on ne dit pas « 0 », on dit le compte a zero.
+  ctx.n = { note_sur_5: null, notes: 0 }
+  vm.runInContext(expressionDeLaPage('$(\'[data-bind="rating"]\').innerHTML = n.', 3), ctx)
+  assert.doesNotMatch(zone.textContent, /0,0/)
+  assert.match(zone.textContent, /n=0/)
+})
+
+test('LE TEST QUI COMPTE (M2) : l etoile de CHAQUE logement affiche la meme note, sans la reconvertir', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>')
+  const ctx = contexteDeRendu(dom)
+  const vm = require('node:vm')
+  vm.createContext(ctx)
+  // ⚠ ENVELOPPE DANS UN BLOC : `const` ne se redeclare pas dans un meme
+  // contexte vm, et on execute l expression plusieurs fois.
+  const source = '{ ' + expressionDeLaPage('const etoile = note && note.', 2) + '\n globalThis.__etoile = etoile }'
+  ctx.note = { note_sur_5: 4.9, notes: 332 }
+  vm.runInContext(source, ctx)
+  assert.match(ctx.__etoile, /4,9/)
+  assert.match(ctx.__etoile, /data-icone="i-review"/)
+  // Un bien sans note n affiche pas d etoile — pas une etoile a zero.
+  ctx.note = { note_sur_5: null, notes: 0 }
+  vm.runInContext(source, ctx)
+  assert.equal(ctx.__etoile, '')
+  ctx.note = null
+  vm.runInContext(source, ctx)
+  assert.equal(ctx.__etoile, '')
+})

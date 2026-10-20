@@ -578,11 +578,19 @@ test('LE TEST QUI COMPTE : un objet d avis VIDE mais VISIBLE ne compte pas', asy
   ]
   assert.deepStrictEqual(await noteMoyenne(fauxClient(lignes), { userId: 'U', periode: 'toujours' }),
     { note_sur_5: 5, notes: 1 })
-  // Contre-epreuve : le meme zero AVEC un texte est un avis — il compte dans le
-  // total, mais zero n est une note chez aucun canal, donc pas dans la note.
+  // ⚠ ET C'EST LA NOTE QUI TRANCHE, PAS LE TEXTE. Ma premiere version appelait
+  // ici `voyageurAEcrit` (note > 0 OU texte) en croyant que c'etait lui qui
+  // fermait le defaut ; la revue a prouve par mutation qu'il etait INERTE a cet
+  // endroit. Un zero AVEC un texte ne compte pas davantage dans la note : zero
+  // n est une note chez aucun canal. (Il compte en revanche dans le TOTAL
+  // d avis d un logement, que `lib/logement/lecture.js` calcule, lui, avec
+  // `voyageurAEcrit`.)
   const avecTexte = [lignes[0], { ...lignes[1], content: 'La cle etait difficile a trouver' }]
   assert.deepStrictEqual(await noteMoyenne(fauxClient(avecTexte), { userId: 'U', periode: 'toujours' }),
     { note_sur_5: 5, notes: 1 })
+  // Et la requete ne rapatrie plus les colonnes de texte, qui ne servaient a rien.
+  assert.doesNotMatch(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'stats-avis.js'), 'utf8'),
+    /select\('id, ota, overall_score, is_hidden, content/)
 })
 
 test('noteMoyenne : TOUTES les pages, jamais les 500 premieres lignes ; perimetre vide = rien', async () => {

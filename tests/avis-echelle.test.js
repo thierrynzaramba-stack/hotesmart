@@ -94,7 +94,10 @@ test('LE TEST QUI COMPTE : la table des echelles correspond a la MESURE', () => 
   // Se tromper d echelle divise ou double la note d un logement, et personne ne
   // le verra : 4,9 comme 9,8 ont l air d une note. Ce test fige ce qui a ete
   // mesure le 20 octobre 2026 — l ajout d une source sans mesure le fera rougir.
-  assert.deepEqual(E.ECHELLE_PAR_CANAL, { airbnb: 10, booking: 10, expedia: 10, vrbo: 10, homeaway: 10 })
+  // ⚠ SEULES LES SOURCES MESUREES. Une cle « au cas ou » dont la valeur egale le
+  // defaut n'a qu'un effet : eteindre l'alarme de source inconnue, pile pour le
+  // canal pour lequel elle a ete construite (constat m4 de la revue).
+  assert.deepEqual(E.ECHELLE_PAR_CANAL, { airbnb: 10, booking: 10 })
   assert.equal(E.ECHELLE_PAR_DEFAUT, 10)
 })
 
@@ -173,12 +176,23 @@ test('LE TEST QUI COMPTE (M3) : la resolution par NOM fonctionne — eprouvee pa
   assert.equal(r.note_sur_5, 4.5, 'meme resultat que sur les donnees reelles')
 })
 
-test('m2 : la cle du canal est celle que le WRITER ecrit, pas celle qu on aimerait', () => {
+test('m2 : une cle ajoutee doit etre celle que le WRITER ecrit, pas celle qu on aimerait', () => {
   // `normaliserOta` de lib/cron-channel-reviews.js ne connait que airbnb,
   // bookingcom et booking.com, et laisse passer le reste en minuscules :
-  // « HomeAway » devient `homeaway`, jamais `vrbo`.
-  const table = { vrbo: 5, homeaway: 7 }
-  assert.equal(E.echelleDe('homeaway', table), 7, 'c est `homeaway` qui arrive en base')
-  assert.ok(Object.prototype.hasOwnProperty.call(E.ECHELLE_PAR_CANAL, 'homeaway'),
-    'la table doit porter la cle reellement ecrite')
+  // « HomeAway » devient `homeaway`, jamais `vrbo`. Une table qui ne porterait
+  // que `vrbo` ne matcherait donc rien.
+  assert.equal(E.echelleDe('homeaway', { vrbo: 5 }), E.ECHELLE_PAR_DEFAUT,
+    'la cle `vrbo` ne rattrape pas ce que le writer ecrit')
+  assert.equal(E.echelleDe('homeaway', { homeaway: 7 }), 7)
+})
+
+test('m4 : une source NON MESUREE declenche l alarme, et ne l eteint pas', () => {
+  // Le defaut : une cle « au cas ou » valant 10 faisait taire le signal pour un
+  // canal qu on n a jamais vu. On verifie par le comportement observable —
+  // `echelleDe` rend le defaut, et la source n est pas dans la table.
+  for (const source of ['expedia', 'homeaway', 'vrbo', 'tripadvisor']) {
+    assert.equal(E.echelleDe(source), E.ECHELLE_PAR_DEFAUT, `${source} prend le defaut`)
+    assert.ok(!Object.keys(E.ECHELLE_PAR_CANAL).some(k => source.includes(k)),
+      `${source} ne doit pas etre dans la table tant qu elle n est pas mesuree`)
+  }
 })
