@@ -148,17 +148,87 @@ test('le pluriel suit le nombre', () => {
   assert.match(un.querySelector('.log-sous').textContent, /1 voyageur$/)
 })
 
-test('UN SEUL signal par carte, et la pause passe avant la vérification', () => {
+test('UN SEUL signal par carte, et l échec du relevé n en fait PAS partie', () => {
   const pause = doc(M.carteHtml(bien({ assistant_en_pause: true, canaux_echec: true }), OUTILS()))
   const signaux = pause.querySelectorAll('[data-signal]')
   assert.equal(signaux.length, 1, 'une carte qui crie trois fois ne dit plus rien')
   assert.equal(signaux[0].textContent, 'Assistant en pause')
 
+  // ⚠ L ÉCHEC DU RELEVÉ A QUITTÉ LA CARTE (constat de la revue du 20 octobre).
+  // Il est au grain du COMPTE — une seule ligne `canaux_releve` — donc il
+  // s affichait à l identique sur chaque carte, et sans son bouton. Pire : « un
+  // seul signal » faisait que la pause le MASQUAIT sur les biens en pause, donc
+  // le même fait de compte apparaissait sur certaines cartes seulement.
   const echec = doc(M.carteHtml(bien({ canaux_echec: true }), OUTILS()))
-  assert.equal(echec.querySelector('[data-signal]').textContent, 'Vérification impossible pour l’instant')
+  assert.equal(echec.querySelector('[data-signal]'), null)
 
   const rien = doc(M.carteHtml(bien(), OUTILS()))
   assert.equal(rien.querySelector('[data-signal]'), null)
+})
+
+test('LE TEST QUI COMPTE : le relevé en échec est un fait de COMPTE, dit une seule fois', () => {
+  assert.equal(M.releveDuCompteEnEchec([bien(), bien({ canaux_echec: true })]), true)
+  assert.equal(M.releveDuCompteEnEchec([bien(), bien()]), false)
+  assert.equal(M.releveDuCompteEnEchec([]), false)
+  assert.equal(M.releveDuCompteEnEchec(null), false)
+})
+
+test('la fraîcheur du compte est la PLUS ANCIENNE, et la règle des 24 h est celle du dépôt', async () => {
+  const maintenant = Date.parse('2026-10-20T12:00:00Z')
+  const recent = '2026-10-20T11:00:00Z'
+  const vieux = '2026-10-18T12:00:00Z'
+  const f = M.fraicheurDuCompte([bien({ canaux_vu_le: recent }), bien({ canaux_vu_le: vieux })], maintenant)
+  assert.equal(f.quand, new Date(vieux).toISOString(),
+    'montrer la plus récente ferait passer pour frais un relevé dont la moitié date')
+  assert.equal(f.vieux, true)
+  assert.equal(M.fraicheurDuCompte([bien({ canaux_vu_le: recent })], maintenant).vieux, false)
+  assert.equal(M.fraicheurDuCompte([bien({ canaux_vu_le: null })], maintenant), null)
+  // ⚠ LA MÊME VALEUR QUE `shared/properties.js`, pour qu elles ne divergent pas.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'shared', 'properties.js'), 'utf8')
+  assert.match(source, /ms >= 24 \* HEURE/, 'la règle des 24 h du dépôt a changé : aligner VIEUX_MS')
+  assert.equal(M.VIEUX_MS, 24 * 3600 * 1000)
+})
+
+test('LE TEST QUI COMPTE : un canal relié mais ÉTEINT ne s affiche pas « En vente »', () => {
+  // L écran d aujourd hui exige les DEUX (`actif === true && mappe === true`),
+  // et son commentaire dit pourquoi — défaut du 11 septembre 2026. Un canal
+  // éteint chez le partenaire sur un bien mappé ne vend RIEN : un point vert
+  // ferait croire à l hôte qu il vend pendant que rien ne part.
+  assert.equal(M.etatDuCanal({ mappe: true, actif: true }), 'vente')
+  assert.equal(M.etatDuCanal({ mappe: true, actif: false }), 'canal-eteint')
+  assert.equal(M.etatDuCanal({ mappe: false, actif: true }), 'pas-ce-bien')
+  assert.equal(M.etatDuCanal({ mappe: null, actif: true }), 'indetermine')
+  // `actif` absent : on ne dégrade pas, `mappe` porte l information principale.
+  assert.equal(M.etatDuCanal({ mappe: true }), 'vente')
+
+  const d = doc(M.carteHtml(bien({ canaux: [{ ota: 'airbnb', mappe: true, actif: false }] }), OUTILS()))
+  const p = d.querySelector('[data-ota]')
+  assert.equal(p.dataset.etat, 'canal-eteint')
+  assert.equal(p.getAttribute('title'), 'Canal désactivé')
+})
+
+test('LE TEST QUI COMPTE : les canaux portent leur LIBELLÉ, pas leur slug technique', () => {
+  // `canaux_du_bien.ota` est normalisé en minuscules par le writer : afficher
+  // le slug donnait « airbnb », « booking », et « open » pour un canal direct.
+  const d = doc(M.carteHtml(bien({ canaux: [
+    { ota: 'airbnb', mappe: true, actif: true }, { ota: 'booking', mappe: true, actif: true },
+    { ota: 'open', titre: 'Réservation directe', mappe: true, actif: true }
+  ] }), OUTILS()))
+  const textes = [...d.querySelectorAll('[data-ota]')].map(x => x.firstChild.nextSibling.textContent.trim())
+  assert.deepEqual(textes, ['Airbnb', 'Booking.com', 'Réservation directe'])
+  // Repli ultime : ni table, ni titre.
+  assert.equal(M.libelleDuCanal({ ota: 'inconnu' }), 'inconnu')
+  assert.equal(M.libelleDuCanal({}), 'Canal')
+})
+
+test('l état d un canal se lit SANS la couleur ni le survol', () => {
+  // À 8 px, un rond en pointillés et un rond plein sont indiscernables, et il
+  // n y a pas de survol au doigt : le quatrième état n était lisible par
+  // personne sur un téléphone.
+  const d = doc(M.carteHtml(bien({ canaux: [{ ota: 'airbnb', mappe: null }] }), OUTILS()))
+  const sr = d.querySelector('[data-ota] .sr-only')
+  assert.ok(sr, 'chaque pastille doit porter son libellé pour le lecteur d écran')
+  assert.match(sr.textContent, /Vérification impossible/)
 })
 
 test('la photo a un repli, et il n est pas une image cassée', () => {
@@ -221,8 +291,17 @@ test('une panne propose de RÉESSAYER ; un refus de droit ne propose rien', () =
     ['logements.refus'])
 })
 
-test('l état vide mène au formulaire EXISTANT, pas à un écran qui n existe pas', () => {
-  const liens = [...doc(M.etatHtml('vide')).querySelectorAll('a')].map(a => a.getAttribute('href'))
+test('LE TEST QUI COMPTE : l état vide ne propose RIEN à qui n a pas le droit', () => {
+  // Les deux actions mènent à `/pages/connexions` et `/biens/nouveau`, deux
+  // pages classées NON DÉLÉGABLES, et le POST de création refuse en 403. « On
+  // ne montre jamais ce qui mène à un refus » (Thierry, 20 octobre).
+  const membre = doc(M.etatHtml('vide'))
+  assert.equal(membre.querySelectorAll('a').length, 0, 'défaut sans droit : aucune action')
+  assert.ok([...membre.querySelectorAll('[data-i18n]')].map(x => x.dataset.i18n)
+    .includes('logements.vide_aide_membre'))
+
+  const titulaire = doc(M.etatHtml('vide', { peutAjouter: true }))
+  const liens = [...titulaire.querySelectorAll('a')].map(a => a.getAttribute('href'))
   assert.deepEqual(liens, ['/pages/connexions', '/biens/nouveau'])
 })
 
@@ -238,7 +317,13 @@ test('LE TEST QUI COMPTE : aucun texte en dur — toute chaîne visible vient de
   const html = [
     M.carteHtml(bien({ assistant_en_pause: true, canaux: null, fait_date: null }), OUTILS()),
     M.carteHtml(bien({ canaux: [], fait_date: { type: 'fermeture', du: '2026-11-02', au: '2026-11-10' } }), OUTILS()),
-    M.etatHtml('vide'), M.etatHtml('refus'), M.etatHtml('panne')
+    // Les quatre etats de canal, pour que la garde couvre TOUT le rendu.
+    M.carteHtml(bien({ canaux: [
+      { ota: 'airbnb', mappe: true, actif: true }, { ota: 'booking', mappe: true, actif: false },
+      { ota: 'expedia', mappe: false }, { ota: 'vrbo', mappe: null }
+    ], fait_date: { type: 'arrivee', du: '2026-11-02' } }), OUTILS()),
+    M.etatHtml('vide'), M.etatHtml('vide', { peutAjouter: true }),
+    M.etatHtml('refus'), M.etatHtml('panne')
   ].join('')
   const d = doc(html)
   const traductions = [...CLES_DEMANDEES].map(c => FR[c])
@@ -248,7 +333,12 @@ test('LE TEST QUI COMPTE : aucun texte en dur — toute chaîne visible vient de
     const couvert = traductions.some(tr => {
       const motif = String(tr).replace(/\{[^}]*\}/g, '').split(/\s+/).filter(m => m.length > 3)
       return motif.length ? motif.every(m => texte.includes(m)) : false
-    }) || /^(Bagnères|airbnb|booking|direct)/.test(texte)
+      // ⚠ PLUS D EXEMPTION POUR LES SLUGS. Ma première version bénissait
+      // nommément « airbnb » et « booking » — c est-à-dire exactement ce que
+      // cette garde devait refuser : un test qui mesure son propre double. Les
+      // canaux portent désormais leur libellé, et seules les DONNÉES de la
+      // fixture (le nom de la ville, le libellé d un canal) sont exemptées.
+    }) || /^(Bagnères|Airbnb|Booking\.com|Expedia|Vrbo)/.test(texte)
     assert.ok(couvert, `texte non traduit dans le rendu : « ${texte} »`)
   }
   // ⚠ DEUX CHEMINS DE TRADUCTION, ET LES DEUX SE VÉRIFIENT. Les cartes passent

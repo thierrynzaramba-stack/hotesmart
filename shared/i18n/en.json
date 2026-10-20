@@ -592,7 +592,6 @@
   "logements.title": "Properties",
   "logements.add": "Add a property",
   "logements.capacite": "{n, plural, one {# guest} other {# guests}}",
-  "logements.open": "Open {nom}",
   "logements.fait_occupe": "Occupied · checkout {date}",
   "logements.fait_ferme": "Closed until {date}",
   "logements.fait_arrivee": "Free until {date}",
@@ -605,7 +604,6 @@
   "logements.aucun_canal": "No channel connected",
   "logements.canaux_non_lus": "Channels not checked",
   "logements.signal_pause": "Assistant paused",
-  "logements.signal_canaux": "Cannot be checked right now",
   "logements.vide_titre": "Add your first property",
   "logements.vide_aide": "Connect your listings, or enter a property manually.",
   "logements.vide_connecter": "Connect Airbnb or Booking.com",
@@ -613,5 +611,9 @@
   "logements.refus": "You do not have access to this account’s properties.",
   "logements.panne": "Your properties cannot be read right now.",
   "logements.reessayer": "Try again",
-  "logements.chargement": "Loading your properties…"
+  "logements.chargement": "Loading your properties…",
+  "logements.canal_eteint": "Channel disabled",
+  "logements.vide_aide_membre": "No property is shared with you on this account.",
+  "logements.fraicheur": "Channels checked {quand}",
+  "logements.fraicheur_vieille": "Channels not checked since {quand}"
 }

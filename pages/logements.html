@@ -56,8 +56,19 @@
   .log-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .log-photo svg { width: var(--icon-size-lg); height: var(--icon-size-lg); color: var(--muted-2); }
 
-  .log-nom { font-weight: var(--fw-semibold); letter-spacing: var(--tracking-tight); }
-  .log-sous { color: var(--muted); }
+  /* ⚠ UN NOM SANS ESPACE NE DOIT PAS POUSSER LA CARTE. C'est le défaut D7 que
+     ce lot ferme : sans ça, un seul logement mal nommé provoque un défilement
+     horizontal sur tout l'écran. */
+  .log-nom { font-weight: var(--fw-semibold); letter-spacing: var(--tracking-tight);
+    overflow-wrap: anywhere; }
+  .log-sous { color: var(--muted); overflow-wrap: anywhere; }
+
+  .log-fraicheur { margin: calc(-1 * var(--gap-s)) 0 var(--gap-m); }
+  /* ⚠ PAS D'AMBRE : la charte §7 le réserve au badge de navigation, et le rouge
+     à la suppression et aux erreurs. Un relevé vieux n'est ni l'un ni l'autre —
+     c'est un fait à lire. On le rend simplement plus lisible : l'encre normale
+     au lieu du gris, et le poids d'un texte qu'on veut voir. */
+  .log-fraicheur--vieille { color: var(--ink); font-weight: var(--fw-medium); }
 
   /* Les pastilles de canaux. ⚠ COULEURS NEUTRES : les couleurs de canal
      (--canal-*) restent réservées au Calendrier. Trois formes, trois états. */
@@ -87,9 +98,27 @@
   /* Zones de clic ≥ 44 px (D7 / charte §7), y compris au téléphone. */
   .log-page .btn { min-height: 44px; }
 
-  @media (max-width: 480px) {
+  /* ⚠ AU TÉLÉPHONE, UNE LIGNE — PAS UNE CARTE (spec §2 : « desktop 4 colonnes,
+     mobile en lignes »). Ma première version empilait des cartes à photo pleine
+     largeur : deux logements remplissaient l'écran à 390 px, et il fallait
+     faire défiler pour voir le troisième. Une vignette à gauche, le texte à
+     droite : six logements tiennent dans un écran.
+     La règle de mise en page reste UNIQUE — c'est le même module de rendu, et
+     seule la forme change ici. */
+  @media (max-width: 560px) {
     .log-entete { align-items: stretch; }
     .log-entete .btn { width: 100%; }
+    .log-grille { gap: var(--gap-s); }
+    .log-carte { display: grid; grid-template-columns: 84px 1fr;
+      grid-template-areas: "photo texte" "photo canaux" "photo fait" "signal signal";
+      column-gap: var(--gap-m); row-gap: 4px; align-items: start; padding: var(--gap-s); }
+    .log-carte > :nth-child(1) { grid-area: photo; }
+    .log-carte > :nth-child(2) { grid-area: texte; }
+    .log-carte > :nth-child(3) { grid-area: canaux; }
+    .log-carte > :nth-child(4) { grid-area: fait; }
+    .log-carte > :nth-child(5) { grid-area: signal; }
+    .log-photo { aspect-ratio: 1; width: 84px; }
+    .log-photo svg { width: var(--icon-size); height: var(--icon-size); }
   }
 </style>
 </head>
@@ -119,14 +148,30 @@
          ci-dessous est un confort, pas la protection — et il ne masque que
          parce que `[hidden] { display: none !important }` est en tête de
          theme.css, chargé par cette page. -->
-    <a class="btn btn--secondary" href="/biens/nouveau" data-bind="ajouter" hidden>
+    <!-- `btn--primary` : « bouton blanc bord noir » (spec §2). `btn--secondary`
+         prend un bord gris, et l'action principale de l'écran ne se distingue
+         plus de rien. -->
+    <a class="btn btn--primary" href="/biens/nouveau" data-bind="ajouter" hidden>
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg>
       <span data-i18n="logements.add"></span>
     </a>
   </div>
 
+  <!-- ⚠ LA FRAÎCHEUR DU RELEVÉ, UNE SEULE FOIS, EN HAUT. C'est la décision de
+       Thierry du 19 octobre 2026 : le relevé est au grain du COMPTE, donc
+       répéter le message sous chaque carte « dirait dix fois la même chose et
+       laisserait croire à dix pannes ». On montre la date la PLUS ANCIENNE du
+       compte — la plus récente ferait passer pour frais un relevé dont la
+       moitié date. -->
+  <p class="caption muted log-fraicheur" data-bind="fraicheur" hidden></p>
+
   <!-- Vide / refus / panne : une seule zone, un seul message à la fois. -->
   <section class="card log-etat" data-bind="etat" hidden role="status" aria-live="polite"></section>
+
+  <!-- Le chargement se DIT. Un `aria-busy` sur une grille vide n'est annoncé
+       par presque aucun lecteur d'écran, et à l'œil une zone blanche est
+       indiscernable de « aucun logement ». -->
+  <p class="caption muted" data-bind="chargement" data-i18n="logements.chargement"></p>
 
   <div class="log-grille" data-bind="grille" aria-busy="true"></div>
 </main>
@@ -137,34 +182,33 @@
 <script src="/shared/nav.js"></script>
 <script type="module">
 import { requireAuth } from '/components/auth-guard.js'
-import { getUser } from '/shared/supabase.js'
+import { getUser, signOut } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
-import { chargerContexte, peutLire, estTitulaire } from '/shared/compte-courant.js'
+import { chargerContexte, peutLire, estTitulaire, comptes, compteCourant, basculerVers }
+  from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
-import { carteHtml, etatHtml, etatDeLaPage } from '/shared/logements-liste.js'
+import { carteHtml, etatHtml, etatDeLaPage, fraicheurDuCompte } from '/shared/logements-liste.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
 const $ = (s) => document.querySelector(s)
 const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
 
-// ⚠ DATES EN TOUTES LETTRES, PAR `Intl` (spec §6). L'année n'apparaît que si
-// elle diffère de l'année courante : « samedi 25 octobre » se lit, « samedi
-// 25 octobre 2026 » encombre une carte, et sur une date lointaine l'année est
-// au contraire indispensable.
+// ⚠ PAR `I18n.date`, PAS A LA MAIN (constat de la revue : c'etait la TROISIEME
+// copie de la meme regle). Le moteur du depot le dit lui-meme : « Formats :
+// jamais a la main ». On ne garde ici que la decision d'AFFICHAGE — l'annee
+// n'apparait que si elle diffère de l'annee courante : « samedi 25 octobre » se
+// lit, « samedi 25 octobre 2026 » encombre une carte, et sur une date lointaine
+// l'annee est au contraire indispensable.
 function dateEnClair (iso) {
   if (!iso) return ''
   const d = new Date(`${iso}T12:00:00`)
   if (Number.isNaN(d.getTime())) return iso
-  const memeAnnee = d.getFullYear() === new Date().getFullYear()
-  try {
-    return new Intl.DateTimeFormat(I18n.lang || 'fr', {
-      weekday: 'long', day: 'numeric', month: 'long',
-      ...(memeAnnee ? {} : { year: 'numeric' })
-    }).format(d)
-  } catch { return iso }
+  const opts = { weekday: 'long', day: 'numeric', month: 'long' }
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric'
+  try { return I18n.date(d, opts) } catch { return iso }
 }
 
 const OUTILS = { t, esc, dateEnClair, icone }
@@ -174,12 +218,40 @@ function montrerEtat (quoi) {
   const grille = $('[data-bind="grille"]')
   grille.innerHTML = ''
   grille.removeAttribute('aria-busy')
+  $('[data-bind="chargement"]').hidden = true
+  $('[data-bind="fraicheur"]').hidden = true
   if (quoi === 'liste') { zone.hidden = true; return }
   zone.hidden = false
-  zone.innerHTML = etatHtml(quoi)
+  // ⚠ `peutAjouter` : les deux actions de l'état vide mènent à des pages NON
+  // DÉLÉGABLES, et leur geste est refusé en 403 à un membre. On ne montre
+  // jamais ce qui mène à un refus (décision de Thierry, 20 octobre).
+  zone.innerHTML = etatHtml(quoi, { peutAjouter: estTitulaire() })
   I18n.apply(zone)
   const bouton = zone.querySelector('[data-bind="reessayer"]')
-  if (bouton) bouton.addEventListener('click', () => charger())
+  if (bouton) {
+    bouton.addEventListener('click', () => charger())
+    // ⚠ LE FOCUS SUIT. `innerHTML` détruit le bouton cliqué : sans ça, le
+    // clavier repart du début du document à chaque tentative.
+    bouton.focus()
+  }
+}
+
+// La fraîcheur du compte, dite une seule fois.
+//
+// ⚠ SANS BOUTON « ACTUALISER » À L'ÉTAPE 1, ET DONC SANS ALARME. Le relevé est
+// une ÉCRITURE (POST `relever_canaux`), et l'étape 1 est en lecture seule : le
+// bouton arrive avec les actions, à l'étape 3. La revue a posé la bonne règle —
+// « afficher l'alarme sans le remède est la seule combinaison à écarter » — donc
+// on informe (« non vérifiés depuis le … ») sans promettre un geste qui
+// n'existe pas encore. Noté aux constats de l'étape.
+function montrerFraicheur (biens) {
+  const zone = $('[data-bind="fraicheur"]')
+  const f = fraicheurDuCompte(biens)
+  if (!f) { zone.hidden = true; return }
+  zone.hidden = false
+  zone.textContent = t(f.vieux ? 'logements.fraicheur_vieille' : 'logements.fraicheur',
+    { quand: dateEnClair(String(f.quand).slice(0, 10)) })
+  zone.classList.toggle('log-fraicheur--vieille', f.vieux)
 }
 
 let enVol = false
@@ -188,13 +260,16 @@ async function charger () {
   enVol = true
   const grille = $('[data-bind="grille"]')
   grille.setAttribute('aria-busy', 'true')
+  $('[data-bind="chargement"]').hidden = false
   try {
     const r = await api.logement.liste()
     const etat = etatDeLaPage({ biens: r.biens })
     if (etat !== 'liste') { montrerEtat(etat); return }
     $('[data-bind="etat"]').hidden = true
+    $('[data-bind="chargement"]').hidden = true
     grille.innerHTML = r.biens.map(b => carteHtml(b, OUTILS)).join('')
     grille.removeAttribute('aria-busy')
+    montrerFraicheur(r.biens)
     // ⚠ Les cartes portent des `data-i18n` dans leurs sous-éléments d'état :
     // il faut les traduire APRÈS insertion.
     I18n.apply(grille)
@@ -217,7 +292,32 @@ async function init () {
   if (pastilleInitiales) pastilleInitiales.textContent = initiales
 
   HSNav.render({ peutLire })
-  HSNav.renderMenu({ peutLire, estTitulaire, moiEmail: user.email })
+  // ⚠ LE JEU COMPLET, et c'est un constat de la revue du 20 octobre : ma
+  // premiere version passait `{ peutLire, estTitulaire, moiEmail }` — TROIS
+  // options qui n'existent pas dans `shared/nav.js`. Le menu ne contenait donc
+  // que l'aide, la langue et une « Deconnexion » MORTE (`options.onDeconnexion?.()`
+  // sur `undefined` est un no-op).
+  //
+  // Sur une page DELEGABLE, c'est le pire endroit pour ca : le compte consulte
+  // est memorise en localStorage, donc un hote bascule sur le compte d'un autre
+  // arrivait ici sans selecteur de compte, sans la mention « compte partage »,
+  // et SANS AUCUN MOYEN DE REVENIR — exactement le contresens que
+  // `tests/pages-non-delegables.test.js` decrit en tete.
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis'),
+    // PROVISOIRE (decision de Thierry du 10 octobre 2026) : les outils sans
+    // onglet V5, retires lot par lot. Memes droits que la barre laterale.
+    outils: [
+      peutLire('reservations') && { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price' },
+      estTitulaire() && { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key' },
+      estTitulaire() && { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send' },
+      estTitulaire() && { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar' },
+      estTitulaire() && { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link' },
+      estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
+    ].filter(Boolean)
+  })
 
   // ⚠ MASQUAGE PAR DROIT — DOUBLÉ D'UNE GARDE SERVEUR (règle absolue). Ajouter
   // un logement est un geste de titulaire, et le serveur refuse en 403 depuis

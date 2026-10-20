@@ -592,7 +592,6 @@
   "logements.title": "Alojamientos",
   "logements.add": "Añadir un alojamiento",
   "logements.capacite": "{n, plural, one {# huésped} other {# huéspedes}}",
-  "logements.open": "Abrir {nom}",
   "logements.fait_occupe": "Ocupado · salida el {date}",
   "logements.fait_ferme": "Cerrado hasta el {date}",
   "logements.fait_arrivee": "Libre hasta el {date}",
@@ -605,7 +604,6 @@
   "logements.aucun_canal": "Ningún canal conectado",
   "logements.canaux_non_lus": "Canales sin verificar",
   "logements.signal_pause": "Asistente en pausa",
-  "logements.signal_canaux": "No se puede verificar ahora mismo",
   "logements.vide_titre": "Añada su primer alojamiento",
   "logements.vide_aide": "Conecte sus anuncios o añada un alojamiento a mano.",
   "logements.vide_connecter": "Conectar Airbnb o Booking.com",
@@ -613,5 +611,9 @@
   "logements.refus": "No tiene acceso a los alojamientos de esta cuenta.",
   "logements.panne": "Sus alojamientos no se pueden leer ahora mismo.",
   "logements.reessayer": "Reintentar",
-  "logements.chargement": "Cargando sus alojamientos…"
+  "logements.chargement": "Cargando sus alojamientos…",
+  "logements.canal_eteint": "Canal desactivado",
+  "logements.vide_aide_membre": "No tiene ningún alojamiento asignado en esta cuenta.",
+  "logements.fraicheur": "Canales verificados {quand}",
+  "logements.fraicheur_vieille": "Canales sin verificar desde {quand}"
 }

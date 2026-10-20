@@ -592,7 +592,6 @@
   "logements.title": "Logements",
   "logements.add": "Ajouter un logement",
   "logements.capacite": "{n, plural, one {# voyageur} other {# voyageurs}}",
-  "logements.open": "Ouvrir la fiche de {nom}",
   "logements.fait_occupe": "Occupé · départ le {date}",
   "logements.fait_ferme": "Fermé jusqu’au {date}",
   "logements.fait_arrivee": "Libre jusqu’au {date}",
@@ -605,7 +604,6 @@
   "logements.aucun_canal": "Aucun canal relié",
   "logements.canaux_non_lus": "Canaux non vérifiés",
   "logements.signal_pause": "Assistant en pause",
-  "logements.signal_canaux": "Vérification impossible pour l’instant",
   "logements.vide_titre": "Ajoutez votre premier logement",
   "logements.vide_aide": "Reliez vos annonces, ou saisissez un logement à la main.",
   "logements.vide_connecter": "Relier Airbnb ou Booking.com",
@@ -613,5 +611,9 @@
   "logements.refus": "Vous n’avez pas accès aux logements de ce compte.",
   "logements.panne": "Vos logements ne sont pas lisibles pour l’instant.",
   "logements.reessayer": "Réessayer",
-  "logements.chargement": "Chargement de vos logements…"
+  "logements.chargement": "Chargement de vos logements…",
+  "logements.canal_eteint": "Canal désactivé",
+  "logements.vide_aide_membre": "Aucun logement ne vous est confié sur ce compte.",
+  "logements.fraicheur": "Canaux vérifiés {quand}",
+  "logements.fraicheur_vieille": "Canaux non vérifiés depuis {quand}"
 }

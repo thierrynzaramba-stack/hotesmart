@@ -63,17 +63,62 @@ export function faitDateAffiche (fait) {
 // ⚠ COULEURS NEUTRES. Les couleurs Airbnb/Booking/Direct (`--canal-*`) restent
 // réservées au Calendrier : ici, deux pastilles de la même forme ne doivent pas
 // se lire comme deux canaux différents par la couleur.
+// ⚠ `actif` COMPTE AUTANT QUE `mappe`, et l'oublier etait un FAUX POSITIF
+// COMMERCIAL. L'ecran d'aujourd'hui exige les deux (`shared/properties.js` :
+// `active: c.actif === true && c.mappe === true`), et son commentaire dit
+// pourquoi — defaut du 11 septembre 2026, un bien neuf affichait une pastille
+// verte. Un canal eteint chez le partenaire (OAuth expire, canal desactive) sur
+// un bien pourtant mappe ne vend RIEN : afficher « En vente » ferait croire a
+// l'hote qu'il vend pendant que rien ne part. C'est le meme registre de mensonge
+// que « Libre » sur un fait date non lu.
+//
+// QUATRE etats, donc, et c'est un de plus que la spec : elle n'avait pas prevu
+// le canal eteint, parce que l'ecran d'aujourd'hui le nomme « — inactif » (D11)
+// et que ce libelle devait disparaitre. Le FAIT, lui, reste.
+const LIBELLES = {
+  vente: 'logements.canal_en_vente',
+  'canal-eteint': 'logements.canal_eteint',
+  'pas-ce-bien': 'logements.canal_pas_ce_bien',
+  indetermine: 'logements.canal_indetermine'
+}
+
+export function etatDuCanal (c) {
+  if (c.mappe == null) return 'indetermine'
+  if (c.mappe !== true) return 'pas-ce-bien'
+  // `actif` absent de la reponse = on ne le sait pas : on ne degrade pas pour
+  // autant, c'est `mappe` qui porte l'information principale.
+  return c.actif === false ? 'canal-eteint' : 'vente'
+}
+
 export function pastillesDesCanaux (canaux) {
   if (canaux == null) return null       // on n'a pas pu lire
-  return canaux.map(c => ({
-    ota: c.ota,
-    etat: c.mappe === true ? 'vente'
-      : c.mappe === false ? 'pas-ce-bien'
-      : 'indetermine',
-    titre: c.mappe === true ? 'logements.canal_en_vente'
-      : c.mappe === false ? 'logements.canal_pas_ce_bien'
-      : 'logements.canal_indetermine'
-  }))
+  return canaux.map(c => {
+    const etat = etatDuCanal(c)
+    return {
+      ota: c.ota,
+      // ⚠ LE LIBELLE DU CANAL, PAS SON SLUG. `canaux_du_bien.ota` est normalise
+      // en minuscules par le writer : afficher `esc(c.ota)` donnait « airbnb »,
+      // « booking », et « open » pour un canal direct. L'ecran d'aujourd'hui
+      // traduit par une table, avec repli sur le TITRE que l'endpoint descend.
+      label: libelleDuCanal(c),
+      etat,
+      titre: LIBELLES[etat]
+    }
+  })
+}
+
+// Les noms des canaux, tels que l'hote les connait. Meme table que
+// `shared/properties.js` : deux copies divergeraient, donc celle-ci est
+// comparee a l'autre par un test.
+const OTA_LABELS = [
+  { match: /airbnb/i, label: 'Airbnb' },
+  { match: /booking/i, label: 'Booking.com' },
+  { match: /expedia/i, label: 'Expedia' },
+  { match: /vrbo|homeaway/i, label: 'Vrbo' }
+]
+export function libelleDuCanal (c) {
+  return OTA_LABELS.find(o => o.match.test(c.ota || ''))?.label
+    || c.titre || c.ota || 'Canal'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -88,10 +133,44 @@ export function pastillesDesCanaux (canaux) {
 // ⚠ GRIS NEUTRE, PAS ROUGE. La charte réserve le rouge à la suppression et aux
 // erreurs (§7) : un assistant en pause est un CHOIX de l'hôte — Ofuro Futari
 // l'est volontairement depuis le 6 octobre — pas une panne.
+// ⚠ L'ECHEC DU RELEVE N'EST PLUS UN SIGNAL DE CARTE (constat de la revue du
+// 20 octobre). Il est au grain du COMPTE — une seule ligne `canaux_releve` —
+// donc il s'affichait a l'identique sur les quatre cartes, et sans son bouton.
+// C'est la decision de Thierry du 19 octobre, ecrite en tete de
+// `shared/properties.js` : « IL S'AFFICHE UNE SEULE FOIS, EN HAUT DE LA PAGE.
+// Repeter le meme message sous chacune des cartes dirait dix fois la meme chose
+// et laisserait croire a dix pannes. Le bouton « Actualiser » accompagne ce
+// message, puisqu'il porte la meme action. »
+//
+// Effet de bord qui achevait de le rendre faux : « un seul signal » faisait que
+// la pause MASQUAIT l'echec sur les biens en pause et pas sur les autres — le
+// meme fait de compte apparaissait donc sur certaines cartes seulement.
 export function signalDuBien (bien) {
-  if (bien.assistant_en_pause === true) return { cle: 'logements.signal_pause', icone: 'i-shield-off' }
-  if (bien.canaux_echec === true) return { cle: 'logements.signal_canaux', icone: 'i-alert' }
+  if (bien.assistant_en_pause === true) return { cle: 'logements.signal_pause', icone: 'i-pause' }
   return null
+}
+
+// Un seul echec pour tout le compte : il suffit qu'un bien le porte. Meme
+// regle que `releveEnEchec` de `shared/properties.js`.
+export function releveDuCompteEnEchec (biens) {
+  return (biens || []).some(b => b && b.canaux_echec === true)
+}
+
+// ⚠ LA MEME REGLE DES 24 HEURES que `shared/properties.js` (dette 59, decision
+// de Thierry) : au-dela, on DIT que la verification est vieille au lieu de
+// laisser croire que c'est a jour — et c'est la seule circonstance ou le bouton
+// « Actualiser » apparait. Un test compare les deux valeurs, pour qu'elles ne
+// divergent pas.
+export const VIEUX_MS = 24 * 3600 * 1000
+
+// La fraicheur la plus ANCIENNE du compte : c'est elle qui decide. Montrer la
+// plus recente ferait passer pour frais un releve dont la moitie date.
+export function fraicheurDuCompte (biens, maintenant = Date.now()) {
+  const dates = (biens || []).map(b => b && b.canaux_vu_le).filter(Boolean)
+    .map(d => Date.parse(d)).filter(Number.isFinite)
+  if (!dates.length) return null
+  const plusAncien = Math.min(...dates)
+  return { quand: new Date(plusAncien).toISOString(), vieux: (maintenant - plusAncien) >= VIEUX_MS }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -126,7 +205,10 @@ export function sousTitre (bien) {
 // le canal. L'endpoint lève (503) pour cette raison ; l'écran doit le dire.
 export function etatDeLaPage ({ erreur = null, biens = null } = {}) {
   if (erreur) return erreur.status === 403 ? 'refus' : 'panne'
-  if (biens == null) return 'panne'
+  // ⚠ `Array.isArray`, pas `== null` : une reponse mal formee (`{}`, un objet,
+  // une chaine) retombait sur « vide », donc sur « Ajoutez votre premier
+  // logement ». C'est le dernier trou de la regle qui fait tout ce lot.
+  if (!Array.isArray(biens)) return 'panne'
   return biens.length ? 'liste' : 'vide'
 }
 
@@ -162,9 +244,15 @@ export function canauxHtml (bien, { t, esc }) {
   if (!pastilles.length) {
     return `<span class="caption muted" data-canaux="aucun">${esc(t('logements.aucun_canal'))}</span>`
   }
+  // ⚠ L'ETAT SE LIT SANS LA COULEUR NI LE SURVOL (constat de la revue). A 8 px,
+  // un rond en pointilles et un rond en trait plein sont indiscernables, et il
+  // n'y a pas de survol au doigt : le quatrieme etat — celui que la dette 59 a
+  // ouvert — n'etait donc pas lisible sur un telephone, ni pour un lecteur
+  // d'ecran. `.sr-only` porte le libelle, `title` reste pour la souris.
   return pastilles.map(p =>
     `<span class="log-pastille log-pastille--${p.etat}" data-ota="${esc(p.ota)}" data-etat="${p.etat}" title="${esc(t(p.titre))}">`
-    + `<span class="log-point"></span>${esc(p.ota)}</span>`).join('')
+    + `<span class="log-point"></span>${esc(p.label)}`
+    + `<span class="sr-only"> — ${esc(t(p.titre))}</span></span>`).join('')
 }
 
 export function carteHtml (bien, outils) {
@@ -176,7 +264,7 @@ export function carteHtml (bien, outils) {
     .join(' · ')
   const photo = bien.photo_url
     ? `<img src="${esc(bien.photo_url)}" alt="" loading="lazy">`
-    : icone('i-home', '')
+    : icone('i-home', 'icon')
 
   return `<article class="log-carte" data-bien="${esc(bien.id)}">
     <div class="log-photo">${photo}</div>
@@ -186,25 +274,32 @@ export function carteHtml (bien, outils) {
     </div>
     <div class="log-canaux">${canauxHtml(bien, outils)}</div>
     <div class="log-fait${fait.muet ? ' log-fait--muet' : ''} caption" data-fait="${bien.fait_date ? bien.fait_date.type : 'indisponible'}">${esc(t(fait.cle, valeursEnClair(fait.valeurs, dateEnClair)))}</div>
-    ${signal ? `<div><span class="log-signal" data-signal>${icone(signal.icone, '')}${esc(t(signal.cle))}</span></div>` : ''}
+    ${signal ? `<div><span class="log-signal" data-signal>${icone(signal.icone, 'icon')}${esc(t(signal.cle))}</span></div>` : ''}
   </article>`
 }
 
 // Le contenu de la zone d'état, pour les trois situations qui ne sont pas une
 // liste. Les textes passent par `data-i18n` : la page les traduit après
 // insertion, comme partout dans la V5.
-export function etatHtml (quoi) {
+export function etatHtml (quoi, { peutAjouter = false } = {}) {
   if (quoi === 'vide') {
     // ⚠ CE MESSAGE NE S'AFFICHE QUE SUR UNE LECTURE RÉUSSIE. Le dire sur une
     // panne ferait lire « Ajoutez votre premier logement » à un hôte qui en a
     // quatre — et, à l'onboarding, une réconciliation contre une liste amputée
     // CRÉE des biens en double chez le canal.
+    // ⚠ LES DEUX ACTIONS SONT GARDEES PAR LE DROIT (constat de la revue). Elles
+    // menent a `/pages/connexions` et `/biens/nouveau`, DEUX pages classees NON
+    // DELEGABLES : un membre delegue dont le perimetre est vide y verrait ses
+    // PROPRES cles en croyant regler le compte consulte, et le POST de creation
+    // le refuserait en 403. La regle de Thierry du 20 octobre : « on ne montre
+    // jamais ce qui mene a un refus » — et c'est l'argument que ce meme fichier
+    // applique deja au bouton « Reessayer » d'un refus de droit.
     return `<h2 class="h2" data-i18n="logements.vide_titre"></h2>
-      <p class="muted" data-i18n="logements.vide_aide"></p>
-      <div class="log-etat__actions">
+      <p class="muted" data-i18n="${peutAjouter ? 'logements.vide_aide' : 'logements.vide_aide_membre'}"></p>
+      ${peutAjouter ? `<div class="log-etat__actions">
         <a class="btn btn--primary" href="/pages/connexions" data-i18n="logements.vide_connecter"></a>
         <a class="btn btn--secondary" href="/biens/nouveau" data-i18n="logements.vide_manuel"></a>
-      </div>`
+      </div>` : ''}`
   }
   if (quoi === 'refus') return `<p data-i18n="logements.refus"></p>`
   return `<p data-i18n="logements.panne"></p>
