@@ -353,7 +353,7 @@ test('LE TEST QUI COMPTE : un bloc vide n est pas un bloc en panne', async () =>
   assert.deepEqual(f.menage, [], 'lu, et il n y a personne : c est une REPONSE')
   assert.deepEqual(f.serrures, [])
   assert.deepEqual(f.taxe, { connue: false }, 'un seul type, trois etats : `[]` obligeait l ecran a un Array.isArray')
-  assert.equal(f.avis.total, 0)
+  assert.equal(f.avis.total_proprete, 0)
   assert.equal(f.avis.positif, 0)
   assert.deepEqual(f.indisponibles, [], 'un vide ne doit JAMAIS compter comme indisponible')
 })
@@ -430,7 +430,7 @@ test('un avis NON ANALYSE se compte a part, jamais en « rien signale »', async
   assert.equal(f.avis.non_analyses, 1)
   assert.equal(f.avis.rien_signale, 0, 'un pouce vert sur un avis qu on n a pas lu')
   assert.equal(f.avis.remarque, 1)
-  assert.equal(f.avis.total, 2)
+  assert.equal(f.avis.total_proprete, 2)
 })
 
 test('la fenetre des avis est bien de 30 jours, bornee cote base', async () => {
@@ -885,7 +885,7 @@ test('M5 : un avis MASQUE ne compte pas', async () => {
       { id: 'a2', user_id: COMPTE, property_id: BIEN, is_hidden: true, ai_clean_verdict: 'remarque', ai_analyzed_at: '2026-10-10T00:00:00Z', received_at: '2026-10-10T00:00:00Z' }
     ]
   }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
-  assert.equal(f.avis.total, 1)
+  assert.equal(f.avis.total_proprete, 1)
   assert.equal(f.avis.remarque, 0, 'un avis masque par l hote ne doit pas peser sur ses pouces')
 })
 

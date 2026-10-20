@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « FICHE D'UN LOGEMENT » — refonte UI V5, lot Logements, ÉTAPE 2 :
+     LECTURE SEULE. Sept blocs : en-tête, « Où il est en vente », Prix, Le
+     logement, Supprimer, Ménage, Avis, Réglages.
+     Spec : docs/specs/logements-v5/spec-logements-v5.md §3.
+     Données : GET /api/logement?id= (étape 0), lecture seule, aucun appel
+     partenaire, aucun identifiant du partenaire dans la réponse.
+
+     ⚠ LA ROUTE EST `/logements/:id`, PAS `/biens/:id` (décision de Thierry du
+     21 octobre 2026). `/biens/:id` mène aujourd'hui à l'IFRAME DORMANTE que la
+     spec §1 ordonne de supprimer ; la redirection viendra à l'étape 4, et
+     l'ancien écran reste intact pendant toute la recette.
+
+     ⚠ CE QUE L'ÉTAPE 2 NE FAIT PAS : aucune action n'agit. Ni photo, ni
+     interrupteur d'assistant, ni sélecteur de mode des prix, ni édition sur
+     place, ni suppression — c'est l'étape 3. Le bouton Supprimer est rendu
+     parce que son ÉTAT est une information (« Déconnectez d'abord ses
+     canaux »), mais il ne déclenche rien.
+
+     RÈGLES : aucun hexa (jetons de theme.css), aucun texte en dur (i18n
+     `fiche.*`), icônes du sprite, zones de clic ≥ 44 px, pas de défilement
+     horizontal à 390 px, `X-Compte` posé par api-client. -->
+<style>
+  /* .fic-page (conteneur et marge basse) vit dans shared/ui.css : il est commun
+     aux deux écrans du lot, et son `padding` raccourci écrasait ici la marge
+     qui dégage la barre du bas. */
+
+  .fic-retour { display: inline-flex; align-items: center; gap: 6px; min-height: 44px;
+    color: var(--muted); text-decoration: none; font-size: var(--fs-caption); }
+  .fic-retour:hover { color: var(--ink); }
+  .fic-retour svg { width: 14px; height: 14px; transform: rotate(180deg); }
+
+  /* ⚠ L'EN-TÊTE EST UNE GRILLE À DEUX COLONNES, pas un flex : la photo garde
+     sa largeur quand le nom est long, et le texte passe dessous au téléphone
+     sans qu'on ait à redire la mise en page. */
+  .fic-entete { display: grid; grid-template-columns: 160px 1fr; gap: var(--gap-l);
+    align-items: start; margin: var(--gap-s) 0 var(--gap-l); }
+  .fic-photo { aspect-ratio: 3 / 2; border-radius: var(--radius-tile);
+    background: var(--surface-2); display: grid; place-items: center; overflow: hidden; }
+  .fic-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .fic-photo svg { width: var(--icon-size-lg); height: var(--icon-size-lg); color: var(--muted-2); }
+
+  /* ⚠ UN NOM SANS ESPACE NE DOIT PAS POUSSER LA PAGE — même défaut D7 qu'en
+     liste, et il se voit davantage ici où le nom est en titre. */
+  .fic-nom { overflow-wrap: anywhere; margin: 0; }
+  .fic-sous { color: var(--muted); margin: 4px 0 0; overflow-wrap: anywhere; }
+  .fic-canaux { display: flex; align-items: center; gap: var(--gap-xs);
+    flex-wrap: wrap; margin-top: var(--gap-s); }
+  .fic-fait { color: var(--ink); margin: var(--gap-s) 0 0; }
+
+  .fic-colonnes { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-l);
+    align-items: start; }
+  .fic-col { display: flex; flex-direction: column; gap: var(--gap-m); }
+
+  .fic-bloc { padding: var(--gap-m); background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius-card); }
+  .fic-bloc__titre { margin: 0 0 var(--gap-s); }
+
+  /* Une ligne « clé → valeur », la forme de quatre blocs sur sept. */
+  .fic-ligne { display: flex; align-items: baseline; justify-content: space-between;
+    gap: var(--gap-m); padding: 6px 0; border-top: 1px solid var(--line); }
+  .fic-ligne:first-child { border-top: 0; }
+  .fic-ligne__cle { color: var(--muted); flex: none; }
+  .fic-ligne__val { text-align: right; overflow-wrap: anywhere; }
+
+  .fic-muet { color: var(--muted); font-style: italic; }
+  /* ⚠ QUAND LES CANAUX ONT ÉTÉ RELEVÉS, sous leurs pastilles. En vieux ou en
+     échec, le texte passe en encre normale : la même règle que le bandeau de
+     la liste (`.log-fraicheur--vieille`) — on DIT que la vérification date,
+     au lieu de laisser croire que c'est à jour. */
+  .fic-fraicheur { color: var(--muted); margin: var(--gap-xs) 0 0; }
+  .fic-fraicheur--alerte { color: var(--ink); font-weight: var(--fw-medium); }
+
+  /* L'assistant en pause : un ÉTAT, dit comme sur les cartes de la liste. */
+  .fic-signal { display: inline-flex; align-items: center; gap: 6px;
+    color: var(--muted); margin: var(--gap-xs) 0 0; }
+  .fic-signal svg { width: 14px; height: 14px; }
+  .fic-liens { margin: var(--gap-s) 0 0; }
+  .fic-vide { color: var(--muted); margin: 0; }
+
+  .fic-liste { list-style: none; margin: 0; padding: 0; display: flex;
+    flex-direction: column; gap: var(--gap-xs); }
+  .fic-personne { display: flex; align-items: baseline; justify-content: space-between; gap: var(--gap-s); }
+  .fic-personne__nom { overflow-wrap: anywhere; }
+
+  /* Les avis : la note est rendue par le module commun (.log-avis), les pouces
+     sont propres à la fiche.
+     ⚠ NEUTRES, JAMAIS ROUGES : la charte §7 réserve le rouge à la suppression
+     et aux erreurs, et une remarque de ménage n'est ni l'une ni l'autre
+     (décision de Thierry du 21 octobre 2026). */
+  .fic-avis { display: flex; flex-direction: column; gap: var(--gap-s); }
+  .fic-pouces { display: flex; align-items: center; gap: var(--gap-m); flex-wrap: wrap; }
+  .fic-pouce { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+  .fic-pouce svg { width: 15px; height: 15px; }
+  .fic-pouce__n { color: var(--ink); font-weight: var(--fw-medium); }
+  .fic-pouce.fic-muet .fic-pouce__n { color: var(--muted); }
+
+  /* Supprimer : discret, et le rouge n'apparaît que sur le bouton — la charte
+     le réserve à cette action-là. */
+  .fic-supprimer { display: flex; flex-direction: column; gap: var(--gap-xs); align-items: flex-start; }
+  .fic-supprimer .btn { min-height: 44px; }
+  .fic-supprimer .btn[disabled] { opacity: 0.55; cursor: not-allowed; }
+
+  .fic-etat { display: flex; flex-direction: column; gap: var(--gap-m); align-items: flex-start; }
+  .fic-etat__actions { display: flex; gap: var(--gap-s); flex-wrap: wrap; }
+  .fic-page .btn { min-height: 44px; }
+
+  /* ⚠ AU TÉLÉPHONE, UNE SEULE COLONNE, et la photo passe pleine largeur
+     (spec §3). Les sept blocs se lisent à la suite : la spec prévoit des pages
+     séparées par ligne, mais c'est l'étape 3 qui les ouvrira — une ligne qui
+     mène à une page inexistante est un clic dans le vide. */
+  @media (max-width: 760px) {
+    .fic-colonnes { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 560px) {
+    .fic-entete { grid-template-columns: 1fr; gap: var(--gap-m); }
+    .fic-photo { aspect-ratio: 16 / 9; }
+    .fic-ligne { flex-wrap: wrap; gap: 2px var(--gap-s); }
+    .fic-ligne__val { text-align: left; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- nav.js --></div>
+  </div>
+</header>
+
+<main class="fic-page">
+  <a class="fic-retour" href="/logements">
+    <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+    <span data-i18n="fiche.retour"></span>
+  </a>
+
+  <!-- Refus / introuvable / panne : une seule zone, un seul message. -->
+  <section class="card fic-etat" data-bind="etat" hidden role="status" aria-live="polite"></section>
+
+  <!-- Le chargement se DIT : une zone blanche est indiscernable d'une fiche
+       vide, et presque aucun lecteur d'écran n'annonce un `aria-busy` seul. -->
+  <p class="caption muted" data-bind="chargement" data-i18n="logements.chargement"></p>
+
+  <div data-bind="fiche" aria-busy="true"></div>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+import { requireAuth } from '/components/auth-guard.js'
+import { getUser, signOut } from '/shared/supabase.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { escapeHtml as esc } from '/shared/properties.js'
+import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCourant, basculerVers }
+  from '/shared/compte-courant.js'
+import { api } from '/shared/api-client.js'
+import { ficheHtml, etatHtml, etatDeLaPage } from '/shared/logement-fiche.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (s) => document.querySelector(s)
+const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`
+
+// ⚠ L'IDENTIFIANT VIENT DU CHEMIN, et il peut être une référence partenaire —
+// `resoudreBien` l'accepte côté serveur. On ne tente pas de le valider ici :
+// la garde le fait, et rend 404 sans distinguer « n'existe pas » de « ne vous
+// appartient pas ».
+const idDuBien = decodeURIComponent((location.pathname.split('/').filter(Boolean)[1] || '').trim())
+
+// ⚠ PAR `I18n.date` ET `I18n.num`, JAMAIS À LA MAIN. Même règle qu'en liste :
+// « Formats : jamais à la main ». L'année n'apparaît que si elle diffère de
+// l'année courante.
+function dateEnClair (iso) {
+  if (!iso) return ''
+  const d = new Date(`${iso}T12:00:00`)
+  if (Number.isNaN(d.getTime())) return iso
+  const opts = { weekday: 'long', day: 'numeric', month: 'long' }
+  if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric'
+  try { return I18n.date(d, opts) } catch { return iso }
+}
+const nombre = (x, dec = 1) => {
+  try { return I18n.num(x, { minimumFractionDigits: dec, maximumFractionDigits: dec }) }
+  catch { return String(x) }
+}
+// ⚠ LA DEVISE VIENT DU BIEN, elle n'est pas supposée : un compte peut tenir
+// des biens en euros et en francs suisses, et `Intl` place le symbole là où la
+// langue l'exige — « 95 € » en français, « €95 » en anglais.
+const argent = (x, devise) => {
+  try { return I18n.num(x, { style: 'currency', currency: devise || 'EUR', maximumFractionDigits: 0 }) }
+  catch { return `${x} ${devise || ''}`.trim() }
+}
+
+const OUTILS = { t, esc, icone, nombre, argent, dateEnClair }
+
+function montrerEtat (quoi) {
+  const zone = $('[data-bind="etat"]')
+  const cible = $('[data-bind="fiche"]')
+  cible.innerHTML = ''
+  cible.removeAttribute('aria-busy')
+  $('[data-bind="chargement"]').hidden = true
+  if (quoi === 'fiche') { zone.hidden = true; return }
+  zone.hidden = false
+  zone.innerHTML = etatHtml(quoi)
+  I18n.apply(zone)
+  const bouton = zone.querySelector('[data-bind="reessayer"]')
+  if (bouton) {
+    bouton.addEventListener('click', () => charger())
+    // Le focus suit : `innerHTML` détruit le bouton cliqué, et sans ça le
+    // clavier repart du début du document à chaque tentative.
+    bouton.focus()
+  }
+}
+
+let enVol = false
+async function charger () {
+  if (enVol) return
+  enVol = true
+  const cible = $('[data-bind="fiche"]')
+  cible.setAttribute('aria-busy', 'true')
+  $('[data-bind="chargement"]').hidden = false
+  try {
+    const f = await api.logement.fiche(idDuBien)
+    const etat = etatDeLaPage({ fiche: f })
+    if (etat !== 'fiche') { montrerEtat(etat); return }
+    $('[data-bind="etat"]').hidden = true
+    $('[data-bind="chargement"]').hidden = true
+    // ⚠ MASQUAGE PAR DROIT **ET** GARDE SERVEUR (règle absolue). Le DELETE est
+    // gardé par `reglages: write` ; ici on ne fait que ne pas le proposer.
+    cible.innerHTML = ficheHtml(f, OUTILS, { peutSupprimer: peutEcrire('reglages') })
+    cible.removeAttribute('aria-busy')
+    document.title = `HôteSmart — ${f.bien.nom || t('fiche.retour')}`
+    I18n.apply(cible)
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    montrerEtat(etatDeLaPage({ erreur: e }))
+  } finally {
+    enVol = false
+  }
+}
+
+async function init () {
+  await requireAuth()
+  await I18n.init()
+  const user = await getUser()
+  await chargerContexte(user.id)
+
+  const initiales = (user.email || '?').slice(0, 2).toUpperCase()
+  const pastilleInitiales = $('[data-bind="initials"]')
+  if (pastilleInitiales) pastilleInitiales.textContent = initiales
+
+  HSNav.render({ peutLire })
+  // ⚠ LE JEU COMPLET (constat de la revue de l'étape 1). Un menu réduit laisse
+  // un hôte basculé sur le compte d'un autre sans sélecteur de compte et sans
+  // moyen de revenir — et cette page est DÉLÉGABLE.
+  HSNav.renderMenu({
+    comptes: comptes(), compteActif: compteCourant(),
+    onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+    reglages: estTitulaire(), avis: peutLire('avis'),
+    outils: [
+      peutLire('reservations') && { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price' },
+      estTitulaire() && { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key' },
+      estTitulaire() && { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send' },
+      estTitulaire() && { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar' },
+      estTitulaire() && { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link' },
+      estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
+    ].filter(Boolean)
+  })
+
+  await charger()
+}
+
+init().catch(e => logger.error('Logement', e.message, e))
+</script>
+</body>
+</html>

@@ -37,7 +37,9 @@
      `logements.*`), icônes du sprite, zones de clic ≥ 44 px, pas de
      défilement horizontal à 390 px, `X-Compte` posé par api-client. -->
 <style>
-  .log-page { max-width: var(--page-max); margin-inline: auto; padding: var(--page-pad); }
+  /* .log-page (conteneur et marge basse) vit dans shared/ui.css : il est commun
+     aux deux écrans du lot, et son `padding` raccourci écrasait ici la marge
+     qui dégage la barre du bas. */
   .log-entete { display: flex; align-items: center; justify-content: space-between;
     gap: var(--gap-m); margin-bottom: var(--gap-l); flex-wrap: wrap; }
 
@@ -74,25 +76,12 @@
      au lieu du gris, et le poids d'un texte qu'on veut voir. */
   .log-fraicheur--vieille { color: var(--ink); font-weight: var(--fw-medium); }
 
-  /* Les pastilles de canaux. ⚠ COULEURS NEUTRES : les couleurs de canal
-     (--canal-*) restent réservées au Calendrier. Trois formes, trois états. */
-  .log-canaux { display: flex; align-items: center; gap: var(--gap-xs); flex-wrap: wrap; }
-  .log-pastille { display: inline-flex; align-items: center; gap: 4px;
-    padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border);
-    font-size: var(--fs-caption); color: var(--muted); }
-  .log-point { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .log-pastille--vente .log-point { background: var(--ok); }
-  .log-pastille--pas-ce-bien .log-point { border: 1.5px solid var(--muted-2); }
-  .log-pastille--indetermine .log-point { border: 1.5px dashed var(--muted-2); }
-
-  /* Les avis du logement : la note sur 5 et le nombre TOTAL d'avis (demande de
-     Thierry du 20 octobre 2026, à la place du fait daté). L'étoile prend la
-     couleur d'encre normale — la charte §7 réserve l'ambre au badge de
-     navigation et le rouge à la suppression, et une note n'est ni l'un ni
-     l'autre. */
-  .log-avis { display: flex; align-items: center; gap: 5px; color: var(--ink); }
-  .log-avis--muet { color: var(--muted); font-style: italic; }
-  .log-avis svg { width: 14px; height: 14px; flex: none; }
+  /* ⚠ LES PASTILLES DE CANAUX ET LA NOTE ONT MIGRÉ DANS `shared/ui.css`
+     (21 octobre 2026, étape 2 du lot). Leur RENDU est partagé — `canauxHtml`
+     et `avisHtml` de `shared/logements-liste.js` — et la fiche l'appelle. Leur
+     FORME vivait ici seule : la fiche affichait donc trois noms de canaux
+     collés, sans pastille ni point d'état. Une règle partagée par deux écrans
+     vit dans un module commun (CLAUDE.md), sinon les deux copies divergent. */
 
   /* Un seul signal, en gris neutre : la charte réserve le rouge à la
      suppression et aux erreurs, et l'ambre au badge de navigation. */
