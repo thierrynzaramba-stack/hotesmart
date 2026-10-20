@@ -268,8 +268,9 @@ en-tête le documente avec sa mesure : le radar douze mois l'appelait 24 fois,
 
 ⚠ **`api/yield.js` NE S'EN SERVAIT PAS, et c'était le goulot de l'accueil.**
 L'appel quotidien vise 60 jours mais calcule **120 périodes** (chaque période
-plus la précédente, pour le N-1), et chacune faisait sa propre lecture : **584
-requêtes** pour une ouverture de page sur un compte à 4 biens. Mesure de
+plus la précédente, pour le N-1), et chacune faisait sa propre lecture :
+**4 × (120 + 24) = 576 requêtes** pour une ouverture de page sur un compte à
+4 biens. Mesure de
 Thierry dans son navigateur : `/api/yield` de 1,6 s à 5,6 s par appel.
 Depuis, l'endpoint lit la plage **une fois** et passe ses lignes.
 
@@ -280,10 +281,22 @@ Depuis, l'endpoint lit la plage **une fois** et passe ses lignes.
   `property_id`, ce qui **arme** ce garde-fou au lieu de le laisser inerte ;
 - un test du module compare les deux chemins sur les mêmes données ;
 - `scripts/verifier-parite-capacites.js` le rejoue sur les données réelles —
-  730 périodes, 0 divergence, deux fenêtres, 5 biens ;
-- `tests/api-yield.test.js` exige **une seule** lecture de `calendar_inventory`
-  pour une fenêtre au jour, et vérifie qu'elle classe encore (une lecture
-  unique qui ne classerait rien passerait le compte en vidant les capacités).
+  855 périodes, 0 divergence, **trois** fenêtres dont une à cheval sur
+  aujourd'hui, 5 biens — et il **importe** `lignesDuCalendrier` au lieu de la
+  recopier ; deux couples bien × fenêtre y sont déclarés **non vérifiables**
+  (aucune ligne de calendrier : les deux chemins rendent alors le même objet par
+  construction) ;
+- `tests/api-yield.test.js` exige que le nombre de lectures **ne dépende pas du
+  nombre de périodes** — compter « 1 » compterait des *pages*, et une plage de
+  plus de 1000 lignes en demande légitimement deux — et qu'**aucune période ne
+  soit en capacité estimée** alors que chaque jour a sa ligne : c'est la seule
+  assertion qui exige que la lecture ait trouvé ses lignes **et** les ait
+  classées sur le bon bien. Mesuré : `jours_ouverts > 0` ne prouvait rien,
+  l'estimation du passé le satisfaisant même si la lecture ne rend rien — muter
+  la clé de lecture en `provider_property_id` laissait les 5486 tests verts.
+  Deux autres tests gardent le **500** d'une lecture en échec et la fenêtre qui
+  commence un **29 février** (`periodePrecedente` fait de l'arithmétique de
+  chaîne et peut rendre un 2023-02-29, que Postgres refuse).
 
 ⚠ **ET UNE LECTURE EN ÉCHEC SE PROPAGE.** L'appelant qui hisse la lecture doit
 laisser l'erreur remonter, jamais rendre une plage vide : chaque jour

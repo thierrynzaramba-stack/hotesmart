@@ -32,10 +32,16 @@ const BIEN_TIERS = { ...BIEN, id: '9f3c0000-3333-4444-9999-bbbbbbbbbbbb',
 const BIENS = [BIEN, BIEN_TIERS]
 
 const MODULES = ['../lib/require-permission', '../lib/permissions', '../api/yield']
+// Le MEME validateur que le module : une date impossible ne doit pas passer
+// plus facilement dans le double que dans Postgres.
+const { estJourISO } = require('../lib/yield/capacite')
 
 function preparer ({ user = PROD, profil = null, permissions = null,
   colonnesBien = null, snapshots = [], inventaire = [], vacances = [],
-  exceptions = [] } = {}) {
+  // ⚠ `echecTable` fait LEVER la lecture d'une table nommee, apres la garde.
+  // Sans lui, aucun test ne pouvait eprouver qu'une lecture de
+  // `calendar_inventory` en echec rend 500 plutot qu'un denominateur invente.
+  exceptions = [], echecTable = null } = {}) {
   const etat = { ecritures: [], lectures: [], pages: 0 }
   const fiche = colonnesBien
     ? Object.fromEntries(Object.entries(BIEN).filter(([k]) => colonnesBien.includes(k)))
@@ -59,6 +65,24 @@ function preparer ({ user = PROD, profil = null, permissions = null,
         // `data.length < 1000` du lecteur.
         range (a, b) {
           etat.pages++
+          // ⚠ LE DOUBLE REFUSE UNE DATE QUI N'EXISTE PAS, comme Postgres.
+          // `calendar_inventory.date` est de type `date` : une borne
+          // « 2023-02-29 » rend l'erreur 22008, pas un resultat vide. Sans
+          // cette fidelite, le double acceptait une borne impossible et la
+          // regression du 20 octobre 2026 — 500 sur toute la reponse pour une
+          // fenetre commencant un 29 fevrier — restait invisible.
+          for (const borne of [q._gte, q._lte]) {
+            if (borne && String(borne.c) === 'date' && !estJourISO(String(borne.v))) {
+              return Promise.resolve({ data: null, error: {
+                code: '22008',
+                message: `date/time field value out of range: "${borne.v}"`
+              } })
+            }
+          }
+          if (echecTable && nom === echecTable) {
+            etat.lectures.push({ table: nom, filtres: { ...q._f } })
+            return Promise.resolve({ data: null, error: { message: 'panne simulee' } })
+          }
           const tout = rep(nom, q, true).data || []
           return Promise.resolve({ data: tout.slice(a, b + 1), error: null })
         },
@@ -554,9 +578,102 @@ test('LE TEST QUI COMPTE : le calendrier est lu UNE fois, pas une fois par perio
       assert.strictEqual(lectures.length, 1,
         `${lectures.length} lectures de calendar_inventory pour ${jours.length} jours demandes`
         + ' : le chemin « une requete par periode » est revenu')
-      // Et le resultat est bien rendu : une lecture unique qui ne classerait
-      // rien passerait ce compte tout en vidant les capacites.
-      assert.ok((res.body.realise || []).some(p => p.jours_ouverts > 0),
+      // ⚠ ET LA LECTURE DOIT AVOIR TROUVE SES LIGNES. `jours_ouverts > 0` ne
+      // prouvait RIEN : la fenetre est passee et `estimerLePasse` compte ouvert
+      // tout jour passe sans ligne, donc ce compte tenait meme si la lecture ne
+      // rendait rien. Mesure a l'appui : muter la cle de lecture en
+      // `provider_property_id` (le piege UUID / cle provider, paye quatre fois
+      // par ce depot) laissait les 5486 tests VERTS — la lecture repartait a
+      // vide, toutes les periodes passaient en ESTIMEES, et l'accueil affichait
+      // un denominateur estime comme s'il etait mesure.
+      // L'absence de `capacite_estimee` est la seule assertion qui exige que
+      // les lignes aient ete trouvees, et classees sur le bon bien.
+      const periodes = res.body.realise || []
+      assert.ok(periodes.length, 'aucune periode rendue')
+      assert.ok(periodes.some(p => p.jours_ouverts > 0),
         'aucune periode ne porte de jour ouvert : la lecture unique ne classe plus rien')
+      const estimees = periodes.filter(p => p.capacite_estimee)
+      assert.strictEqual(estimees.length, 0,
+        `${estimees.length} periode(s) sur ${periodes.length} en capacite ESTIMEE`
+        + ' alors que chaque jour a sa ligne : la lecture n a pas trouve ses lignes'
+        + ' (mauvaise cle de lecture ?)')
+    })
+})
+
+test("LE TEST QUI COMPTE : le nombre de lectures ne depend pas du nombre de periodes", () => {
+  // ⚠ L'INVARIANT, PAS LE CHIFFRE. Compter « 1 » compte des PAGES : une plage
+  // de plus de 1000 lignes en demande legitimement deux, et le garde-fou
+  // rougirait sur du code juste. La prochaine session monterait alors le nombre
+  // attendu, ce qui desarmerait la detection du chemin « une requete par
+  // periode » pour tout nombre de periodes inferieur a la nouvelle borne.
+  // Ce qui doit tenir, c'est que le compte NE BOUGE PAS avec les periodes.
+  const serie = (n) => {
+    const jours = Array.from({ length: n }, (_, i) => `${AN}-06-${String(1 + i).padStart(2, '0')}`)
+    const etat = preparer({ inventaire: jours.map(j => nuit(j)) })
+    const res = reponse()
+    return require('../api/yield')(req({ query: {
+      property_id: BIEN.id, debut: jours[0], fin: jours[jours.length - 1], granularite: 'jour' } }), res)
+      .then(() => {
+        assert.strictEqual(res.code, 200, `${n} jours : ${JSON.stringify(res.body)}`)
+        return etat.lectures.filter(l => l.table === 'calendar_inventory').length
+      })
+  }
+  return serie(5).then(court => serie(25).then(long => {
+    assert.strictEqual(long, court,
+      `${court} lecture(s) pour 5 jours mais ${long} pour 25 : le compte suit les periodes`)
+  }))
+})
+
+test("LE TEST QUI COMPTE : une lecture du CALENDRIER en echec rend 500, jamais un denominateur invente", () => {
+  // ⚠ TEST DE NON-REGRESSION (regle 19 de REVIEW.md, point 2) : vert contre le
+  // code d'avant ce lot, ou le `throw` vivait dans `joursOuverts` lui-meme. Il
+  // ne garde pas un correctif, il garde la propriete que le lot deplace — la
+  // lecture est hissee, mais son echec doit toujours remonter.
+  // ⚠ LA PROPRIETE SUR LAQUELLE TOUT LE LOT REPOSE, et elle n'etait affirmee
+  // qu'en commentaire. Si le `throw` devenait un `console.error` + `data || []`
+  // — la forme la plus courante du depot — chaque jour passe tomberait en
+  // « sans ligne » donc estime ouvert : 200, denominateur faux, aucun bruit.
+  // Et les deux assertions du test precedent ne le verraient pas toutes seules.
+  const jours = Array.from({ length: 10 }, (_, i) => `${AN}-06-${String(10 + i).padStart(2, '0')}`)
+  preparer({ inventaire: jours.map(j => nuit(j)), echecTable: 'calendar_inventory' })
+  const res = reponse()
+  return require('../api/yield')(req({ query: {
+    property_id: BIEN.id, debut: jours[0], fin: jours[jours.length - 1], granularite: 'jour' } }), res)
+    .then(() => {
+      assert.strictEqual(res.code, 500,
+        'une lecture du calendrier en echec passe pour une plage vide')
+    })
+})
+
+test('LE TEST QUI COMPTE : une fenetre qui commence un 29 fevrier ne fait pas tomber la reponse', () => {
+  // ⚠ TEST DE NON-REGRESSION (regle 19, point 2) : vert contre le code d'avant
+  // ce lot, qui n'emettait jamais cette borne. Il garde le correctif du lot —
+  // eprouve rouge contre la version sans le filtre `estJourISO`.
+  // ⚠ REGRESSION DU 20 OCTOBRE 2026, trouvee en review et reproduite dans les
+  // deux sens. `periodePrecedente` fait de l arithmetique de CHAINE :
+  // `periodePrecedente('2024-02-29')` rend « 2023-02-29 », qui n existe pas, et
+  // `bornesDePeriode` ne verifie que la FORME. Comme c est le minimum
+  // lexicographique, cette date devenait le debut de la plage hissee et partait
+  // dans le `.gte('date', …)` : Postgres refuse (22008), la lecture leve, et
+  // TOUTE la reponse tombe en 500. L ancien chemin par periode ne l emettait
+  // jamais — `joursOuverts` ecartait la cle avant de lire.
+  //
+  // Le test precedent (« un 29 fevrier ne met pas l app en panne ») ne pouvait
+  // pas l attraper : il ne passe pas de `granularite`, donc « mois », ou
+  // `bornesDePeriode` calcule une vraie fin de mois.
+  //
+  // Atteignable a la main depuis « Exploration » (date libre + « Par jour »), et
+  // TOUT SEUL depuis l accueil le 29 avril 2028 : il demande
+  // `debut = aujourd hui - 60`, soit 2028-02-29.
+  const etat = preparer({ inventaire: [nuit('2024-02-29'), nuit('2024-03-01')] })
+  const res = reponse()
+  return require('../api/yield')(req({ query: {
+    property_id: BIEN.id, debut: '2024-02-29', fin: '2024-03-05', granularite: 'jour' } }), res)
+    .then(() => {
+      assert.strictEqual(res.code, 200,
+        `la fenetre du 29 fevrier rend ${res.code} : ${JSON.stringify(res.body)}`)
+      // Et aucune borne impossible n est partie : le double aurait rendu 22008.
+      const lectures = etat.lectures.filter(l => l.table === 'calendar_inventory')
+      assert.ok(lectures.length, 'le calendrier n a pas ete lu du tout')
     })
 })

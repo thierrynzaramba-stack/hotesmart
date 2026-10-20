@@ -31,25 +31,45 @@
 //
 // LECTURE SEULE : ce script n'ecrit rien.
 
-const { createClient } = require('@supabase/supabase-js')
-const { joursOuverts } = require('../lib/yield/capacite')
-const { periodePrecedente } = require('../lib/yield/indicateurs')
-const { outilsPeriodes } = require('../api/yield')
-const { clesDePeriode, bornesDePeriode } = outilsPeriodes
-
+// ⚠ LE GARDE D'ENVIRONNEMENT PASSE AVANT LES `require` APPLICATIFS, et ce
+// n'etait pas le cas : `require('../api/yield')` construit un client Supabase
+// AU CHARGEMENT (via lib/require-permission.js), donc sept lignes avant ce
+// controle. Lance sans `--env-file` — l'oubli que ce message existe pour
+// rattraper — le script mourait sur « Error: supabaseUrl is required. » et dix
+// lignes de pile pointant dans node_modules. Le product owner n'est pas
+// developpeur : il recevait une trace Node a la place du nom de la variable
+// manquante. Meme ordre que `scripts/prouver-lots-5-7-avis.js`, qui requiert
+// son endpoint TARDIVEMENT.
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
 if (!URL || !KEY) {
   console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY absents. Passer --env-file.')
   process.exit(1)
 }
+
+const { createClient } = require('@supabase/supabase-js')
+// ⚠ `lignesDuCalendrier` EST IMPORTEE, PAS RECOPIEE — et c'est le coeur de la
+// preuve. La premiere version de ce script recopiait la lecture hissee de
+// l'endpoint : il comparait donc SA copie au chemin par periode, et prouvait la
+// parite de la copie. Une borne impossible, ou la perte de `property_id` dans
+// la projection, auraient affecte les DEUX colonnes et le script aurait encore
+// affiche « 0 divergence ».
+const { joursOuverts, lignesDuCalendrier, estJourISO } = require('../lib/yield/capacite')
+const { periodePrecedente } = require('../lib/yield/indicateurs')
+const { clesDePeriode, bornesDePeriode } = require('../api/yield').outilsPeriodes
 const sb = createClient(URL, KEY)
 const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
 
 let echecs = 0
 let comparees = 0
 let lignesVues = 0
-const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++ }
+let nonVerifiables = 0
+// ⚠ `echecs` COMPTE TOUT, l'affichage seul est borne. La premiere version
+// n'incrementait que sous `if (divergentes <= 3)` : 730 periodes divergentes
+// auraient affiche « 30 DIVERGENCE(S) », un chiffre faux d'un facteur 24, et
+// c'est ce chiffre qu'on recopie au commit et au KB. Regle du depot : une
+// exemption se COMPTE, elle ne se decrit pas.
+const ko = (m, afficher = true) => { if (afficher) console.error(`  ECHEC ${m}`); echecs++ }
 
 const jourLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const ajouter = (j, n) => {
@@ -67,24 +87,17 @@ function clesCommeLEndpoint (debut, fin, granularite) {
   }))].sort()
 }
 
-// La lecture hissee, a l'identique de celle que l'endpoint fait maintenant.
+// La plage lue, exactement comme l'endpoint la calcule : les bornes de toutes
+// les periodes, et le MEME filtre `estJourISO` — `periodePrecedente` fait de
+// l'arithmetique de chaine et peut rendre un 29 fevrier d'annee non bissextile,
+// que Postgres refuse.
 async function lireLaPlage (bienId, cles) {
-  const bornes = cles.map(bornesDePeriode).filter(Boolean)
+  const bornes = cles.map(bornesDePeriode)
+    .filter(b => b && estJourISO(b[0]) && estJourISO(b[1]))
   if (!bornes.length) return []
-  const spanDebut = bornes.map(b => b[0]).sort()[0]
-  const spanFin = bornes.map(b => b[1]).sort().slice(-1)[0]
-  const out = []
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from('calendar_inventory')
-      .select('date, stop_sell, avail, rate, property_id')
-      .eq('property_id', bienId)
-      .gte('date', spanDebut).lte('date', spanFin)
-      .order('date').range(from, from + 999)
-    if (error) throw new Error(`calendar_inventory : ${error.message}`)
-    out.push(...(data || []))
-    if (!data || data.length < 1000) break
-  }
-  return out
+  return lignesDuCalendrier(sb, bienId,
+    bornes.map(b => b[0]).sort()[0],
+    bornes.map(b => b[1]).sort().slice(-1)[0])
 }
 
 const chrono = async (f) => { const t = Date.now(); const r = await f(); return [Date.now() - t, r] }
@@ -101,11 +114,26 @@ async function main () {
   // `aujourdHui` pour decider ce qui est estimable. Deux horloges a quelques
   // secondes d'ecart suffiraient a inventer une divergence a minuit.
   const auj = jourLocal(new Date())
+  // ⚠ LES FENETRES SONT NOMMEES PAR CE QU'ELLES SONT. La seconde etait
+  // annoncee « celle du radar, douze mois » : elle joue 400 jours, soit
+  // 14 mois et 26 periodes, mois COURANT inclus — alors que l'accueil demande
+  // `douzeMoisComplets`, 12 mois et 24 periodes, mois courant EXCLU. Qui
+  // voulait rejouer la mesure de la page croyait l'avoir fait.
+  //
+  // ⚠ ET LA TROISIEME EST A CHEVAL SUR AUJOURD'HUI, parce que c'est la que
+  // l'asymetrie compte. Dans le PASSE, une ligne manquante devient « estime
+  // ouvert » : le jour reste au denominateur, seul un drapeau bouge. Dans le
+  // FUTUR, la meme ligne manquante devient `jours_fermes` avec
+  // `calculable: true` et AUCUN drapeau — le « denominateur faux, credible et
+  // muet » que le module dit refuser. Les deux premieres fenetres finissent
+  // hier : la preuve avait ete faite la ou un manque est le moins visible.
+  // Celle-ci est la fenetre de la vue « Pilotage » (mois courant -> +12 mois).
   const fenetres = [
-    // Celle de l'accueil : 60 jours, granularite jour.
-    { nom: 'accueil, 60 jours (jour)', debut: ajouter(auj, -60), fin: ajouter(auj, -1), granularite: 'jour' },
-    // Celle du radar : douze mois, granularite mois.
-    { nom: 'radar, 12 mois (mois)', debut: ajouter(auj, -400), fin: ajouter(auj, -1), granularite: 'mois' },
+    { nom: "accueil, 60 jours (jour)", debut: ajouter(auj, -60), fin: ajouter(auj, -1), granularite: 'jour' },
+    { nom: '400 jours, 14 mois (mois) — PAS les 12 mois complets de la page',
+      debut: ajouter(auj, -400), fin: ajouter(auj, -1), granularite: 'mois' },
+    { nom: 'pilotage, A CHEVAL sur aujourd hui (mois)',
+      debut: ajouter(auj, -30), fin: ajouter(auj, 330), granularite: 'mois' },
   ]
 
   let totalAncien = 0
@@ -129,6 +157,7 @@ async function main () {
         const lignes = await lireLaPlage(bien.id, cles)
         lignesVues += lignes.length
         const m = new Map()
+        m.lignes = lignes.length
         for (const cle of cles) {
           const b = bornesDePeriode(cle)
           if (!b) continue
@@ -141,23 +170,42 @@ async function main () {
 
       let divergentes = 0
       for (const cle of cles) {
-        comparees++
         const a = ancien.get(cle)
         const n = neuf.get(cle)
+        // ⚠ UNE PAIRE OU LES DEUX COTES SONT ABSENTS N'EST PAS UNE COMPARAISON.
+        // `JSON.stringify(undefined) !== JSON.stringify(undefined)` vaut FAUX,
+        // donc elle passait pour « identique » et gonflait le compteur qui sert
+        // de preuve de non-vacuite.
+        if (a === undefined && n === undefined) continue
+        comparees++
         if (JSON.stringify(a) !== JSON.stringify(n)) {
           divergentes++
-          if (divergentes <= 3) {
-            ko(`${bien.name} / ${cle} :\n      ancien  ${JSON.stringify(a)}\n      nouveau ${JSON.stringify(n)}`)
-          }
+          ko(`${bien.name} / ${cle} :\n      ancien  ${JSON.stringify(a)}\n      nouveau ${JSON.stringify(n)}`,
+            divergentes <= 3)
         }
       }
-      const verdict = divergentes ? `${divergentes} DIVERGENTE(S)` : 'identiques'
-      console.log(`  ${divergentes ? 'ECHEC' : 'ok   '} ${String(bien.name).padEnd(22)} ${verdict}`
+      // ⚠ LA NON-VACUITE SE COMPTE PAR BIEN ET PAR FENETRE, pas globalement.
+      // Un seul bien pourvu de lignes faisait passer le test pour tous les
+      // autres — et le cas est le cas reel : le bien de test `colomier` n'a
+      // AUCUNE ligne de calendrier, un bien Beds24 n'en a que quelques-unes.
+      // Sur une fenetre passee, un bien sans ligne fait rendre aux DEUX chemins
+      // le meme objet PAR CONSTRUCTION (`lignes = []` des deux cotes, donc la
+      // meme estimation du passe) : « identiques » n'y prouve rien, et ses
+      // periodes entraient quand meme dans le total cite au commit et au KB.
+      const vues = neuf.lignes
+      if (!vues) nonVerifiables++
+      const verdict = divergentes ? `${divergentes} DIVERGENTE(S)`
+        : vues ? 'identiques' : 'NON VERIFIABLE (aucune ligne de calendrier)'
+      console.log(`  ${divergentes ? 'ECHEC' : vues ? 'ok   ' : 'note '} ${String(bien.name).padEnd(22)} ${verdict}`
         + `  ${String(tAncien).padStart(6)} ms -> ${String(tNeuf).padStart(5)} ms`)
     }
   }
 
   console.log(`\n${comparees} periode(s) comparee(s), ${lignesVues} ligne(s) de calendrier lue(s).`)
+  if (nonVerifiables) {
+    console.log(`${nonVerifiables} couple(s) bien x fenetre NON VERIFIABLE(S) : aucune ligne de`
+      + ' calendrier, donc les deux chemins rendent le meme objet par construction.')
+  }
   console.log(`Temps cumule : ancien ${totalAncien} ms, nouveau ${totalNeuf} ms`
     + ` (x${(totalAncien / Math.max(totalNeuf, 1)).toFixed(1)}).`)
   if (!comparees || !lignesVues) {

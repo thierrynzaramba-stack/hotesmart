@@ -414,8 +414,16 @@ appel, `clesDePeriode` ajoute la période **précédente** de chacune : l'appel
 quotidien vise 60 jours mais calcule **120 périodes**, et chaque période faisait
 sa **propre lecture** de `calendar_inventory`, par vagues de 6.
 
-Compte de production, 4 biens raccordés : **4 × (120 + 26) = 584 requêtes**
+Compte de production, 4 biens raccordés : **4 × (120 + 24) = 576 requêtes**
 `calendar_inventory` pour une ouverture de page.
+
+⚠ **UN SEUL CHIFFRE, ET IL EST PAIR.** Chaque jour visé apporte exactement un
+N-1 distinct, donc le compte des périodes est toujours pair : une première
+version de cette section disait « 121 », arithmétiquement impossible, et
+« 120 + 26 = 584 » — le 26 venait de la fenêtre du **vérificateur** (400 jours,
+14 mois), recopié comme s'il décrivait la page, qui demande 12 mois complets,
+soit 24 périodes. Compté en instrumentant le code d'avant : **120 + 24 = 144
+par bien, 576 pour la page.**
 
 ⚠ **ET LA FACILITÉ POUR L'ÉVITER EXISTAIT DEPUIS LE LOT 4.6.** `joursOuverts`
 accepte `options.lignes` et le documente avec sa propre mesure — « le radar
@@ -428,9 +436,9 @@ ses lignes.
 | | avant | après |
 |---|---|---|
 | requêtes `calendar_inventory` par appel (60 jours) | **120** | **1** |
-| idem, par ouverture de page (4 biens) | **584** | **8** |
+| idem, par ouverture de page (4 biens) | **576** | **8** |
 | classement des 120 périodes d'un bien | 20 652 ms | **148 ms** |
-| les 10 couples bien × fenêtre du vérificateur | 242 582 ms | **1 777 ms** |
+| les 15 couples bien × fenêtre du vérificateur | 426 686 ms | **4 455 ms** |
 
 ⚠ **La colonne « avant » du vérificateur est SÉRIE**, une période après
 l'autre ; l'endpoint, lui, faisait des vagues de 6. Diviser par ~6 pour
@@ -443,8 +451,20 @@ sur la fenêtre ET sur le bien**, et un test du module compare les deux chemins
 sur les mêmes données. Seule la **source** des lignes change.
 `scripts/verifier-parite-capacites.js` le rejoue sur les données réelles, avec
 les périodes de l'endpoint (`outilsPeriodes`) et la `joursOuverts` de
-production : **730 périodes, 0 divergence**, sur les deux fenêtres et les
-5 biens.
+production : **855 périodes, 0 divergence**, sur **trois** fenêtres et les
+5 biens. Il **importe** `lignesDuCalendrier` au lieu de la recopier — sa
+première version recopiait la lecture hissée, donc comparait sa propre copie au
+chemin par période et prouvait la parité de la copie.
+
+⚠ **ET IL DIT CE QU'IL NE PROUVE PAS.** Deux couples bien × fenêtre sont
+déclarés **NON VÉRIFIABLES** : le bien de test `colomier` n'a aucune ligne de
+calendrier, et sur une fenêtre passée les deux chemins rendent alors le même
+objet **par construction** (`lignes = []` des deux côtés, donc la même
+estimation du passé). La non-vacuité se compte par bien et par fenêtre, pas
+globalement. La troisième fenêtre est **à cheval sur aujourd'hui**, parce que
+c'est là que l'asymétrie compte : dans le passé une ligne manquante devient
+« estimé ouvert » et un drapeau bouge ; dans le **futur** elle devient
+`jours_fermes` avec `calculable: true` et **aucun** drapeau.
 
 ⚠ **UNE LECTURE EN ÉCHEC SE PROPAGE, elle ne rend pas une plage vide.** Un
 tableau vide ferait tomber chaque jour en « sans ligne », donc **fermé** : un
@@ -461,8 +481,20 @@ du compte** depuis `bookings_snapshot`, colonne `raw` comprise :
 
 Soit **~4,9 s par ouverture de page** en 8 lectures identiques. Deux leviers
 restent, dans cet ordre : **regrouper les biens** en un appel (8 lectures → 1),
-et **ne pas lire `raw`** quand l'appelant n'a pas besoin des dates de vente —
-`raw` ne sert qu'au pont demapped et au « à date », dont l'accueil ne lit rien.
+puis **ne sélectionner de `raw` que les champs dont l'appelant a besoin**.
+
+⚠ **ET SURTOUT PAS « NE PAS LIRE `raw` »**, qui a figuré ici le 20 octobre 2026
+et qui est **faux**. `raw` est la **seule** source du prix voyageur, donc du CA :
+`prixTaxeComprise` (`lib/yield/eclatement.js`) y lit `r.price` et
+`r.invoiceItems` pour Beds24, `r.amount` + `r.meta.amount_type` + `r.notes` pour
+Channex/Airbnb, `r.rooms[].meta.price_details.guest_view.total` pour
+Booking.com — **aucun repli sur `snapshot`**, qui ne fournit que `source` et
+`provider`. Appliqué à la lettre sur l'accueil (qui ne lit aucun « à date »,
+donc satisfait la condition écrite), le prix devenait `null` sur chaque ligne :
+`eclater` garde les nuits sans prix, donc **le CA de la page tombait à zéro
+pendant que le taux d'occupation restait juste** — un chiffre faux, crédible et
+silencieux, inscrit au KB comme la prochaine chose à faire.
+
 Dette 61, moitié `yield` : **réduite, pas soldée**.
 
 Et deux postes hors yield, ~2 s chacun : le **rafraîchissement du jeton
