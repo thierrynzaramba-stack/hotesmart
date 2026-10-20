@@ -104,3 +104,22 @@ test('monter : les ANCIENS ne se lisent qu a l ouverture, et une correction de p
   assert.equal(appels[3], 'avis?action=cartes&periode=30j&anciens=1', 'relue, anciens toujours ouverts')
   delete global.window
 })
+
+test('LE TEST QUI COMPTE : plus aucun « /10 » nulle part — ni sur une carte, ni dans le guide', () => {
+  // Decision de Thierry du 20 octobre 2026. La tuile disait « note moyenne sur
+  // 5 » et chaque carte juste en dessous affichait encore « 9/10 » : un ecran
+  // portait DEUX echelles, et le guide en annoncait une troisieme fois la
+  // premiere.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const racine = path.join(__dirname, '..')
+  const d = doc(rendre(donnees({ recents: [carte()] }), { peutEcrire: false }))
+  assert.doesNotMatch(d.querySelector('.hs-carte').textContent, /\/\s*10\b/)
+  assert.match(d.querySelector('.hs-carte-note').textContent, /\/ 5$/)
+  // Et dans ce qui s'ecrit a l'ecran, pas seulement dans ce rendu-ci.
+  for (const f of ['core/avis/cartes.js', 'pages/guide.html', 'pages/avis.html']) {
+    const src = fs.readFileSync(path.join(racine, f), 'utf8')
+    const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+    assert.doesNotMatch(code, /\d\s*\/\s*10\b|sur 10\b/, `${f} affiche encore une note sur 10`)
+  }
+})

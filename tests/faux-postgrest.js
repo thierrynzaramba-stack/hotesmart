@@ -37,7 +37,7 @@ const BORNE_HAUTE = /^and\(stay_end\.not\.is\.null,stay_end\.lte\.([^)]+)\),and\
 const BORNE_BASSE = /^and\(stay_end\.not\.is\.null,stay_end\.gte\.([^)]+)\),and\(stay_end\.is\.null,received_at\.gte\.([^)]+)\)$/
 const A_UNE_DATE = 'stay_end.not.is.null,received_at.not.is.null'
 
-const VOYAGEUR_A_ECRIT = 'overall_score.gt.0,content.not.is.null,content_public.not.is.null'
+const VOYAGEUR_A_ECRIT = 'overall_score.gt.0,content.neq.,content_public.neq.'
 
 function evaluerOr (ligne, expression) {
   const e = String(expression)
@@ -71,8 +71,11 @@ function evaluerOr (ligne, expression) {
   // comprise.
   if (e === VOYAGEUR_A_ECRIT) {
     const n = Number(ligne.overall_score)
+    // `colonne <> ''` : faux pour `''`, faux pour NULL (`NULL <> ''` vaut
+    // NULL), vrai pour toute vraie chaine. C'est exactement `Boolean(colonne)`.
+    const nonVide = (v) => v != null && String(v) !== ''
     return (ligne.overall_score != null && Number.isFinite(n) && n > 0) ||
-           ligne.content != null || ligne.content_public != null
+           nonVide(ligne.content) || nonVide(ligne.content_public)
   }
 
   throw new Error('faux-postgrest : expression or() non modelisee -> ' + e)
