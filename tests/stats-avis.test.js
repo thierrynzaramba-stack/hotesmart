@@ -619,10 +619,10 @@ test('recette du 7 octobre : un avis MASQUE par Airbnb ne compte ni dans le tota
   // default false` en base, donc une ligne lue porte toujours un booleen. Le
   // laisser absent faisait mesurer un cas qui n'existe pas.
   const lignes = [
-    { user_id: 'U', ota: 'airbnb', ai_clean_verdict: 'positif', ota: 'airbnb', overall_score: 10, is_hidden: false, content: 'Parfait', received_at: '2026-10-01T00:00:00Z' },
-    { user_id: 'U', ota: 'airbnb', ai_clean_verdict: 'positif', ota: 'booking', overall_score: 8, is_hidden: false, content: 'Tres bien', received_at: '2026-10-01T00:00:00Z' },
-    { user_id: 'U', ota: 'airbnb', ai_clean_verdict: 'rien_signale', ota: 'airbnb', overall_score: 0, is_hidden: true, content: null, received_at: '2026-10-02T00:00:00Z' },
-    { user_id: 'U', ota: 'airbnb', ai_clean_verdict: null, ota: 'direct', overall_score: null, is_hidden: false, content: null, received_at: '2026-10-02T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'positif', ota: 'airbnb', overall_score: 10, is_hidden: false, content: 'Parfait', received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'positif', ota: 'booking', overall_score: 8, is_hidden: false, content: 'Tres bien', received_at: '2026-10-01T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: 'rien_signale', ota: 'airbnb', overall_score: 0, is_hidden: true, content: null, received_at: '2026-10-02T00:00:00Z' },
+    { user_id: 'U', ai_clean_verdict: null, ota: 'direct', overall_score: null, is_hidden: false, content: null, received_at: '2026-10-02T00:00:00Z' },
   ]
   const r = await ratioProprete(fauxClient(lignes), { userId: 'U', periode: 'toujours' })
   // ⚠ 2, ET PLUS 3 : depuis le 20 octobre 2026 la quatrieme ligne — ni note ni
