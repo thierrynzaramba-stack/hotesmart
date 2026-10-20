@@ -138,7 +138,16 @@
   <div class="main">
     <div class="topbar">
       <div>
-        <div class="page-title">⭐ Avis voyageurs</div>
+        <!-- ⚠ L'ICONE DU SPRITE, PAS UN EMOJI (regle V5, rappel de Thierry du
+             20 octobre 2026). Un emoji ne suit ni la couleur du theme, ni le
+             mode sombre, il change de dessin selon le systeme, et un lecteur
+             d'ecran l'annonce (« etoile blanche moyenne ») avant un titre qui
+             se suffit. Styles en ligne : cette page ne charge que
+             /public/style.css, ou `.icon` n'existe pas. -->
+        <div class="page-title" style="display:flex;align-items:center;gap:8px">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><use href="/shared/icons.svg#i-review"/></svg>
+          <span>Avis voyageurs</span>
+        </div>
         <div class="page-sub" id="sous-titre">Chargement…</div>
         <!-- L'auto-validation de l'evaluation (spec §10 bis) : activee ou non,
              et son delai. Lue sur la config du compte. -->
