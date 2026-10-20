@@ -1,7 +1,10 @@
 // ⚠ ÉVALUÉE À L'APPEL, comme dans `shared/error-handler.js` : en constante de
 // module, elle fige la décision avant qu'un test ait pu poser son URL.
-const HOTES_DEV = ['localhost', '127.0.0.1']
-const estDev = () => HOTES_DEV.includes(window.location.hostname)
+// ⚠ UNE SEULE DEFINITION, exportee. Elle etait recopiee dans
+// `shared/error-handler.js` : deux copies divergent, et celle-ci decide si une
+// trace part en console pendant que l'autre decide si elle s'affiche.
+const HOTES_DEV = ['localhost', '127.0.0.1', '[::1]', '0.0.0.0']
+export const estDev = () => HOTES_DEV.includes(window.location.hostname)
 
 const LEVELS = { INFO: 'INFO', WARN: 'WARN', ERROR: 'ERROR' }
 

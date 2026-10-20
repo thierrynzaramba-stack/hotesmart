@@ -589,5 +589,6 @@
   "menages.note_effacee": "Note cleared.",
   "menages.note_illisible": "Notes can't be read right now — don't write, you would erase the previous one.",
   "menages.menage_n": "Cleaning {n}",
-  "erreur.bandeau": "Something went wrong. Please try again in a moment."
+  "erreur.bandeau": "Something went wrong. Please try again in a moment.",
+  "erreur.fermer": "Close"
 }

@@ -589,5 +589,6 @@
   "menages.note_effacee": "Nota borrada.",
   "menages.note_illisible": "Las notas no se pueden leer ahora: no escribas, borrarías la anterior.",
   "menages.menage_n": "Limpieza {n}",
-  "erreur.bandeau": "Se ha producido un error. Vuelva a intentarlo en un momento."
+  "erreur.bandeau": "Se ha producido un error. Vuelva a intentarlo en un momento.",
+  "erreur.fermer": "Cerrar"
 }

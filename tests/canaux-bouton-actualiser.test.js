@@ -88,10 +88,13 @@ function monter ({ reponse, leve = null, vuLe = 'frais' }) {
       if (leve) throw new Error(leve)
       return reponse
     },
-    // ⚠ `console`, PAS `logger`. `shared/error-handler.js` allume une barre
-    // noire a chaque appel du logger et la LAISSE pour un ERROR, en
-    // production : l'hote lisait deux messages pour une panne, dont le motif
-    // technique brut.
+        // ⚠ `console`, PAS `logger`, ET LA RAISON A CHANGE. Elle etait : « le
+    // gestionnaire d'erreurs allume une barre noire dont le motif technique
+    // brut, et l'hote lisait deux messages pour une panne ». Depuis le
+    // 20 octobre 2026, cette barre ne montre plus qu'une phrase generique, et
+    // elle ignore les 401/403/404 attendus. On garde `console` ici pour une
+    // autre raison, plus simple : ce fichier eprouve le RENDU, et un double de
+    // `logger` y ajouterait une dependance sans rien mesurer de plus.
     { error: (...a) => journal.push(a) },
     { reload: () => { recharge++ } }
   )
