@@ -588,5 +588,6 @@
   "menages.retour_prive": "retour privé",
   "menages.note_effacee": "Note effacée.",
   "menages.note_illisible": "Les consignes ne sont pas lisibles pour l'instant — n'écrivez pas, vous effaceriez la précédente.",
-  "menages.menage_n": "Ménage {n}"
+  "menages.menage_n": "Ménage {n}",
+  "erreur.bandeau": "Une erreur est survenue. Réessayez dans un instant."
 }
