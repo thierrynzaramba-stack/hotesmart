@@ -164,3 +164,46 @@ test('LE TEST QUI COMPTE (regle de Thierry du 9 octobre 2026, vecu Julien Darmon
   const p = assembler({ evaluations: [ev('u1', { ota_review_id: 'a1', status: 'publiee', published_at: '2026-10-01T10:00:00Z', public_text: 'Merci' })], avis: [av('a1', { cache: false })] })
   assert.equal([...p.recents, ...p.anciens][0].evaluation.etat, 'publiee')
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Les constats de la revue de aec053c
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE (MOYEN-1) : un avis SANS NOTE rend `null`, jamais `NaN` ni zero', () => {
+  // `arrondiDixiemes(NaN, 1)` rend `NaN`, et ca touchait TOUT avis sans note
+  // exploitable : saisie manuelle, detection de message, avis Booking sans
+  // score, note hors echelle. L'ecran s'en sortait par accident — `JSON.stringify`
+  // serialise `NaN` en `null` — mais compose sans passer par JSON,
+  // `core/avis/cartes.js` teste `note_sur_5 != null`, VRAI pour `NaN`, et ecrit
+  // « NaN / 5 ». Et la mutation `?? 0` restait verte sur toute la suite, en
+  // affichant « 0,0 / 5 » : le defaut « jamais 0/10 », par l'autre porte.
+  const cas = [
+    ['saisie manuelle', av('m', { provider: 'manuel', ota: 'direct', overall_score: null })],
+    ['note absente', av('n', { overall_score: null })],
+    ['note a zero', av('z', { overall_score: 0 })],
+    ['note hors echelle', av('h', { ota: 'une-source-sur-100', overall_score: 90 })],
+    ['note illisible', av('i', { overall_score: 'bien' })]
+  ]
+  for (const [quoi, ligne] of cas) {
+    const a = assembler({ avis: [ligne] }).recents[0].avis[0]
+    assert.equal(a.note_sur_5, null, `${quoi} : note_sur_5 doit etre null`)
+    assert.ok(!Number.isNaN(a.note_sur_5), `${quoi} : jamais NaN`)
+    assert.notEqual(a.note_sur_5, 0, `${quoi} : jamais zero`)
+  }
+  // Contre-epreuve : une vraie note descend bien, convertie sur 5.
+  assert.equal(assembler({ avis: [av('ok', { overall_score: 9 })] }).recents[0].avis[0].note_sur_5, 4.5)
+})
+
+test('LE TEST QUI COMPTE (MOYEN-3) : un avis dont le texte ne vit que dans `content_public` garde sa carte', () => {
+  // Le writer Channex pose `content: at.content || null` (le champ plat) et
+  // `content_public` depuis `raw_content.public_review`. Un avis Airbnb dont le
+  // texte public ne vit que dans le brut a donc `content = NULL` et
+  // `content_public` rempli : le lire seul par `content` l'aurait fait passer
+  // pour un objet vide — carte perdue, mais toujours compte dans la tuile.
+  const r = assembler({ avis: [av('pub', { overall_score: null, content: null, content_public: 'Tout etait parfait' })] })
+  assert.deepEqual(r.recents.flatMap(c => c.avis.map(x => x.id)), ['pub'])
+  assert.equal(r.recents[0].avis[0].texte, 'Tout etait parfait')
+  // Et sans NI l'un NI l'autre, c'est bien un objet vide : pas de carte.
+  const vide = assembler({ avis: [av('vide', { overall_score: null, content: null, content_public: null })] })
+  assert.deepEqual([...vide.attente, ...vide.recents, ...vide.anciens], [])
+})
