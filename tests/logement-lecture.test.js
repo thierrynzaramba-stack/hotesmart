@@ -893,3 +893,21 @@ test('R1 : la liste est servie dans l ordre ALPHABETIQUE, avec un departiteur un
   assert.deepEqual(q.ordres.map(o => o.c), ['name', 'id'],
     'le nom pour l ecran, l id pour que la pagination soit deterministe')
 })
+
+test('LE TEST QUI COMPTE : `origine: absent` n est PAS un bareme (recette staging du 20 octobre)', async () => {
+  // Mesure reelle : Loft Pilotable rendait `connue: true` avec `commune: null`
+  // et `origine: 'absent'` — c est-a-dire « aucune taxe de sejour transmise ».
+  // L ecran aurait affiche un bloc « Taxe de sejour » avec un collecteur et
+  // rien d autre : un bloc vide qui a l air plein.
+  const f = await L.lireFiche(ficheComplete({
+    taxes: [{ user_id: COMPTE, property_uuid: BIEN, property_id: REF, commune: null,
+      collecteur: 'plateforme', origine: 'absent', inclus_dans_prix: null, updated_at: '2026-10-09T08:08:56.222+00:00' }]
+  }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(f.taxe.connue, false)
+  assert.equal(f.taxe.motif, 'aucune_taxe_transmise')
+  assert.equal(f.taxe.commune, undefined, 'rien d autre ne descend : il n y a pas de bareme a montrer')
+  // Contre-epreuve : une vraie ligne, elle, reste connue.
+  const g = await L.lireFiche(ficheComplete(), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(g.taxe.connue, true)
+  assert.equal(g.taxe.commune, 'Bagnères')
+})

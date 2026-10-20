@@ -99,6 +99,10 @@
       "destination": "/pages/connexions"
     },
     {
+      "source": "/logements",
+      "destination": "/pages/logements"
+    },
+    {
       "source": "/biens",
       "destination": "/pages/biens"
     },

@@ -63,6 +63,11 @@ const NON_DELEGABLES = [
 const DELEGABLES = [
   'pages/aujourdhui.html',          // accueil V5 : endpoints compteDelegue + tables sous RLS, compteCourant()
   'pages/biens.html',               // idem
+  // ⚠ DÉLÉGABLE (lot Logements V5, étape 1, 20 octobre 2026). `GET /api/logement`
+  // sans `id` porte `compteDelegue: true` ET le filtre de périmètre : un membre
+  // invité sur un bien voit ce bien, et rien d'autre. Lui poser le garde-fou lui
+  // retirerait le premier écran du produit.
+  'pages/logements.html',
   'pages/biens-calendrier.html',    // listProperties + calendrier par ressource
   'pages/calendrier-mobile.html',   // idem
   'apps/menages/index.html',        // délégué en vague 1
