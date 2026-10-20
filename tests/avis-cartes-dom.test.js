@@ -13,7 +13,7 @@ test.before(async () => { ({ rendre, monter } = await import('../core/avis/carte
 const carte = (extra = {}) => ({
   cle: 'sejour:u1', section: 'recents', bien: 'La bulle', plateforme: { cle: 'airbnb' },
   voyageur: { prenom: 'Angela', nom: 'X' }, arrivee: '2026-10-01', depart: '2026-10-03', menage_par: 'Regina',
-  avis: [{ id: 'a1', masque: false, note: 10, texte: 'Parfait', extrait: null, verdict: 'positif', verdict_source: null, analyse: true, detecte: false }],
+  avis: [{ id: 'a1', masque: false, note_sur_5: 5, texte: 'Parfait', extrait: null, verdict: 'positif', verdict_source: null, analyse: true, detecte: false }],
   evaluation: { booking_uid: 'u1', status: 'publiee', etat: 'publiee', echeance: null, jours_restants: null, publie_le: '2026-10-04T10:00:00Z', texte: 'Merci Angela', origine: { cle: 'ia_valide', libelle: 'rédigé par l’IA, validé par vous' }, evaluable: false },
   ...extra,
 })
@@ -28,7 +28,9 @@ test('LE TEST QUI COMPTE (point A) : la carte dit le sejour en tete, puis « Son
   assert.match(li.querySelector('.hs-carte-infos').textContent, /La bulle · du 1 oct\. au 3 oct\. 2026 · ménage : Regina/)
   const blocs = [...li.querySelectorAll('.hs-carte-libelle')].map(x => x.textContent)
   assert.deepEqual(blocs, ['Son avis', 'Notre avis'])
-  assert.match(li.textContent, /10\/10/)
+  // ⚠ SUR 5, et jamais « /10 » (decision de Thierry du 20 octobre 2026).
+  assert.match(li.textContent, /5,0 \/ 5/)
+  assert.doesNotMatch(li.textContent, /\/10/)
   assert.match(li.textContent, /« Merci Angela »/)
 })
 
@@ -52,7 +54,7 @@ test('LE TEST QUI COMPTE (point E) : un avis masque par Airbnb se dit, sans 0/10
   const d = doc(rendre(donnees({ attente: [{ ...masque, section: 'attente' }] }), { avecBus: true }))
   const t = d.querySelector('.hs-carte').textContent
   assert.match(t, /Avis déposé, masqué par Airbnb jusqu’à votre évaluation\./)
-  assert.doesNotMatch(t, /0\/10/)
+  assert.doesNotMatch(t, /0 \/ 5|\/10/)
   assert.match(t, /2 jours restants/)
   const dernier = rendre(donnees({ attente: [{ ...masque, section: 'attente', evaluation: { ...masque.evaluation, jours_restants: 1 } }] }))
   assert.match(dernier, /dernier jour/)
