@@ -620,5 +620,7 @@
   "logements.avis_sans_note": "{n, plural, one {# reseña} other {# reseñas}}",
   "logements.avis_aucun": "Sin reseñas",
   "logements.avis_non_lus": "Reseñas no leídas",
-  "logements.avis_echelle": "media sobre 5, notas de Booking convertidas a escala de 5"
+  "logements.avis_echelle": "media sobre 5, notas de Booking convertidas a escala de 5",
+  "erreur.bandeau": "Se ha producido un error. Vuelva a intentarlo en un momento.",
+  "erreur.fermer": "Cerrar"
 }

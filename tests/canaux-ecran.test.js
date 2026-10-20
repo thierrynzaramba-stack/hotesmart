@@ -226,7 +226,7 @@ test('LE TEST QUI COMPTE : la fraicheur affichee est celle DU BIEN', () => {
 //
 // ⚠ LE DEFAUT MESURE EN RECETTE. Un releve a echoue et l'ecran n'a rien dit :
 // la date vieillissait en silence, le bouton se contentait de « Reessayer »
-// sans motif, et `shared/logger.js` n'ecrit dans la console que sur localhost.
+// sans motif, et `shared/logger.js` ecrit en console partout depuis le 20 octobre 2026 (debug/warn/error), et en clair stylise sur localhost.
 // Une heure de diagnostic pour une panne qui aurait du se lire d'un coup d'oeil.
 //
 // ⚠ ET UNE SEULE FOIS. Le releve est au grain du COMPTE : un seul appel couvre
