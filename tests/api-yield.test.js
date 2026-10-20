@@ -524,3 +524,39 @@ test('un pivot dans le FUTUR est ramene a aujourd hui', () => {
       assert.strictEqual(res.body.fenetre.pivot, res.body.fenetre.aujourdhui)
     })
 })
+
+test('LE TEST QUI COMPTE : le calendrier est lu UNE fois, pas une fois par periode', () => {
+  // ⚠ MESURE DU 20 OCTOBRE 2026, accueil connecte sur le compte de production.
+  // L appel quotidien demande 60 jours, et `cles` y ajoute la periode
+  // PRECEDENTE de chacun : 120 periodes, donc 120 lectures de
+  // `calendar_inventory`, par vagues de 6 — 20 allers-retours en serie pour un
+  // seul bien. Pour la page entiere : 4 biens x (120 + 26) = 584 requetes.
+  // Releve par Thierry dans son navigateur : /api/yield de 1,6 s a 5,6 s par
+  // appel, le dernier fini a ~15,7 s apres l ouverture de la page.
+  //
+  // `joursOuverts` porte la facilite pour l eviter depuis le lot 4.6
+  // (`options.lignes`, avec sa propre mesure : « 2 673 ms de requetes » -> une
+  // lecture). Cet endpoint ne s en servait pas.
+  //
+  // Parite prouvee sur les donnees REELLES, pas seulement ici :
+  // `scripts/verifier-parite-capacites.js` rejoue les deux chemins avec les
+  // memes fonctions de production — 730 periodes, 0 divergence, 242 582 ms ->
+  // 1 777 ms (la colonne « ancien » y est serie, l endpoint faisait des vagues
+  // de 6 : diviser par ~6 pour comparer a l endpoint).
+  const jours = Array.from({ length: 10 }, (_, i) => `${AN}-06-${String(10 + i).padStart(2, '0')}`)
+  const etat = preparer({ inventaire: jours.map(j => nuit(j)) })
+  const res = reponse()
+  return require('../api/yield')(req({ query: {
+    property_id: BIEN.id, debut: jours[0], fin: jours[jours.length - 1], granularite: 'jour' } }), res)
+    .then(() => {
+      assert.strictEqual(res.code, 200)
+      const lectures = etat.lectures.filter(l => l.table === 'calendar_inventory')
+      assert.strictEqual(lectures.length, 1,
+        `${lectures.length} lectures de calendar_inventory pour ${jours.length} jours demandes`
+        + ' : le chemin « une requete par periode » est revenu')
+      // Et le resultat est bien rendu : une lecture unique qui ne classerait
+      // rien passerait ce compte tout en vidant les capacites.
+      assert.ok((res.body.realise || []).some(p => p.jours_ouverts > 0),
+        'aucune periode ne porte de jour ouvert : la lecture unique ne classe plus rien')
+    })
+})

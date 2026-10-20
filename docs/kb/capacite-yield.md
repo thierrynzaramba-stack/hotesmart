@@ -258,3 +258,35 @@ calendaire (constaté en balayant la suite à horloge décalée, J+30). Corrigé
 injectant l'horloge comme les tests voisins (`opts()`), dates figées conservées :
 règle du dépôt, *dates figées si le temps est injecté*. Mutation de la garde
 provider : 2 rouges avec le nouveau test comme avec l'ancien.
+
+## `options.lignes` — une lecture pour toutes les périodes (20 octobre 2026)
+
+`joursOuverts` porte depuis le lot 4.6 un paramètre `lignes` qui lui fait
+**classer** des lignes de `calendar_inventory` au lieu de les **lire**. Son
+en-tête le documente avec sa mesure : le radar douze mois l'appelait 24 fois,
+« 2 673 ms de requêtes pour une page qui s'ouvre chaque matin ».
+
+⚠ **`api/yield.js` NE S'EN SERVAIT PAS, et c'était le goulot de l'accueil.**
+L'appel quotidien vise 60 jours mais calcule **120 périodes** (chaque période
+plus la précédente, pour le N-1), et chacune faisait sa propre lecture : **584
+requêtes** pour une ouverture de page sur un compte à 4 biens. Mesure de
+Thierry dans son navigateur : `/api/yield` de 1,6 s à 5,6 s par appel.
+Depuis, l'endpoint lit la plage **une fois** et passe ses lignes.
+
+**Ce qui rend la bascule sûre, et qui ne doit pas disparaître** :
+- le chemin `fournies` **refiltre sur la fenêtre ET sur le bien** — sans le
+  second filtre, les jours ouverts d'un autre bien gonfleraient le
+  dénominateur, en silence ; c'est pour cela que l'appelant sélectionne
+  `property_id`, ce qui **arme** ce garde-fou au lieu de le laisser inerte ;
+- un test du module compare les deux chemins sur les mêmes données ;
+- `scripts/verifier-parite-capacites.js` le rejoue sur les données réelles —
+  730 périodes, 0 divergence, deux fenêtres, 5 biens ;
+- `tests/api-yield.test.js` exige **une seule** lecture de `calendar_inventory`
+  pour une fenêtre au jour, et vérifie qu'elle classe encore (une lecture
+  unique qui ne classerait rien passerait le compte en vidant les capacités).
+
+⚠ **ET UNE LECTURE EN ÉCHEC SE PROPAGE.** L'appelant qui hisse la lecture doit
+laisser l'erreur remonter, jamais rendre une plage vide : chaque jour
+tomberait en « sans ligne », donc **fermé**, et le dénominateur serait faux,
+crédible et muet. C'est la règle que ce module défend depuis l'origine — « un
+dénominateur inventé est pire qu'un trou déclaré ».

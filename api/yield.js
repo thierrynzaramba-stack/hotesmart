@@ -297,18 +297,69 @@ module.exports = async (req, res) => {
           + ` : réduisez la fenêtre ou choisissez un détail moins fin`
       })
     }
-    const capacites = new Map()
-    const LOT = 6
-    for (let i = 0; i < cles.length; i += LOT) {
-      const tranche = cles.slice(i, i + LOT).map(cle => {
-        const b = bornesDePeriode(cle)
-        if (!b) return null
-        return joursOuverts(supabase, bien, b[0], b[1], {
-          aujourdHui: auj, estimerLePasse: true
-        }).then(r => [cle, r])
-      }).filter(Boolean)
-      for (const [cle, r] of await Promise.all(tranche)) capacites.set(cle, r)
+    // ⚠ UNE SEULE LECTURE DU CALENDRIER POUR TOUTES LES PERIODES.
+    //
+    // `joursOuverts` porte cette facilite depuis le lot 4.6 (`options.lignes`)
+    // et la documente avec sa mesure — « le radar douze mois appelle cette
+    // fonction 24 fois […] 2 673 ms de requetes […] avec les lignes fournies,
+    // c'est UNE lecture et 24 classifications en memoire ». Cet endpoint ne
+    // s'en servait pas : il appelait la fonction une fois par periode, chacune
+    // avec sa propre requete, par paquets de 6.
+    //
+    // Mesure du 20 octobre 2026, accueil connecte sur le compte de production
+    // (4 biens raccordes) : l'appel quotidien demande 60 jours, et `cles` y
+    // ajoute la periode PRECEDENTE de chacun — 121 periodes, donc 121 requetes
+    // en 21 vagues SERIES ; l'appel mensuel en demande 24, soit 4 vagues.
+    // Par bien : 25 allers-retours en serie. Pour la page : 4 x (121 + 24) =
+    // **580 requetes** sur `calendar_inventory`. Releve par Thierry dans son
+    // navigateur : /api/yield de 1,6 s a 5,6 s par appel, le dernier fini a
+    // ~15,7 s apres l'ouverture.
+    //
+    // ⚠ LA REGLE NE BOUGE PAS D'UN IOTA, et ce n'est pas une promesse : c'est
+    // le contrat que `lib/yield/capacite.js` ecrit en tete de son chemin
+    // `fournies` — il REFILTRE sur la fenetre ET sur le bien, et un test du
+    // module compare les deux chemins sur les memes donnees. Seule la SOURCE
+    // des lignes change.
+    //
+    // ⚠ ET UNE LECTURE EN ECHEC SE PROPAGE, elle ne rend pas une plage vide.
+    // Un tableau vide ferait tomber chaque jour en « sans ligne », donc ferme :
+    // un denominateur faux, credible et silencieux — exactement ce que le
+    // module refuse de deviner (« un denominateur invente est pire qu'un trou
+    // declare »). Le `throw` rejoint le `catch` de l'enveloppe, qui rend 500.
+    const bornes = cles.map(bornesDePeriode).filter(Boolean)
+    const lignesCalendrier = []
+    if (bornes.length) {
+      const spanDebut = bornes.map(b => b[0]).sort()[0]
+      const spanFin = bornes.map(b => b[1]).sort().slice(-1)[0]
+      // Paginee : PostgREST plafonne a 1000 lignes, et la granularite « mois »
+      // peut couvrir plusieurs annees de dates.
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('calendar_inventory')
+          // `property_id` EST demande : le chemin `fournies` de `joursOuverts`
+          // s'en sert pour refuser une ligne d'un autre bien. Le selectionner
+          // arme ce garde-fou au lieu de le laisser inerte.
+          .select('date, stop_sell, avail, rate, property_id')
+          .eq('property_id', bien.id)      // UUID : calendar_inventory est clee dessus
+          .gte('date', spanDebut).lte('date', spanFin)
+          .order('date')
+          .range(from, from + 999)
+        if (error) throw new Error(`calendar_inventory : ${error.message}`)
+        lignesCalendrier.push(...(data || []))
+        if (!data || data.length < 1000) break
+      }
     }
+    const capacites = new Map()
+    // Plus de lot : il bornait les requetes CONCURRENTES, et il n'y a plus de
+    // requete. Ce qui reste est du classement en memoire.
+    const classees = await Promise.all(cles.map(cle => {
+      const b = bornesDePeriode(cle)
+      if (!b) return null
+      return joursOuverts(supabase, bien, b[0], b[1], {
+        aujourdHui: auj, estimerLePasse: true, lignes: lignesCalendrier
+      }).then(r => [cle, r])
+    }).filter(Boolean))
+    for (const [cle, r] of classees) capacites.set(cle, r)
 
     // ─── Realise, et sa comparaison N-1 ─────────────────────────────────────
     const indicateurs = comparerAN1(calculerIndicateurs(eclatements, {
@@ -497,3 +548,11 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'Lecture des indicateurs impossible' })
   }
 }
+
+// ⚠ EXPORTES POUR ETRE EPROUVES, PAS POUR ETRE RECOPIES.
+// `scripts/verifier-parite-capacites.js` doit construire EXACTEMENT les memes
+// periodes que cet endpoint pour comparer l'ancien chemin (une requete par
+// periode) au nouveau (une lecture, puis `options.lignes`). Les recopier dans
+// le script aurait prouve la copie, pas le chemin — regle du depot. Meme forme
+// que `module.exports.outilsAutoValidation` dans api/avis.js.
+module.exports.outilsPeriodes = { clesDePeriode, bornesDePeriode, JOURS_MAX, PERIODES_MAX }
