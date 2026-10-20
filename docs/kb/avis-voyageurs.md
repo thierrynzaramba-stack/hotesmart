@@ -920,3 +920,96 @@ Réparation des évaluations déjà nées : `scripts/corriger-echeance-avis.js`
   évalué sur Airbnb), après en `expiree`. Le script arrête tout sur une lecture
   en échec. Limite : un objet reçu longtemps après le départ (rattrapage) donne
   une échéance trop tardive, bornée par celle de Channex.
+
+---
+
+## §12 — La note globale : sur 5, convertie et arrondie à un seul endroit (20 octobre 2026)
+
+**Décision de Thierry**, après la recette de la liste V5 des logements :
+
+> « Tout sur 5. Les notes Booking (/10) sont divisées par 2 avant la moyenne,
+> pondérée par le nombre d'avis de chaque canal. Affichage : "4,8 / 5 · 336
+> avis". Un arrondi à une décimale, jamais d'arrondi intermédiaire. Même règle
+> partout où une note globale s'affiche (accueil, /avis). »
+
+### Ce que la mesure dit des échelles
+
+Relevé du 20 octobre 2026 sur les 702 avis de production, en lecture seule :
+
+| source | notes | min | max | au-dessus de 5 |
+|---|---|---|---|---|
+| channex / airbnb | 598 | 0 | 10 | **563** |
+| beds24 / booking | 94 | 3 | 10 | 90 |
+| channex / booking | 5 | 1 | 10 | 3 |
+
+Airbnb note ses séjours **sur 5 étoiles**, mais livre la note **déjà ramenée sur
+10** : 563 notes sur 598 dépassent 5, ce qui est impossible sur une échelle à 5,
+et les catégories d'un séjour parfait valent 10. **Les deux canaux sont stockés
+sur la même échelle** — « diviser Booking par 2 mais pas Airbnb » afficherait des
+notes Airbnb à 9,8 sur 5.
+
+Le cœur ne normalise rien à l'ingestion, et c'est voulu (migration
+`2026-09-02-ota-reviews` : « convertir ici graverait l'erreur dans le cœur »).
+La mise à l'échelle est un calcul d'app, et elle vit dans **`lib/avis/echelle.js`**.
+
+### Les deux défauts fermés
+
+**1. Le double arrondi.** `noteMoyenne` arrondissait la moyenne sur 10, puis
+l'écran divisait par 2 et arrondissait encore. Mesuré sur la production :
+Colomiers, 653 points sur 69 avis = 9,4638 sur 10, soit exactement **4,732 sur
+5** — affiché **4,8**, alors que la valeur juste est **4,7**.
+
+**2. L'objet d'avis vide.** La population était « une note non nulle »
+(`.not('overall_score','is',null)`), ce qui laissait passer les **zéros**.
+L'objet Channex naît au départ, caché et vide, et Airbnb le révèle au bout de
+14 jours **même si le voyageur n'a rien écrit** : la ligne arrive alors avec
+`is_hidden: false` et `overall_score: 0`, et entrait à 0/10 dans la note. La
+population est désormais « le voyageur a écrit » — `voyageurAEcrit`, la règle
+que `lib/avis/naissance.js` portait déjà. ⚠ **Les 33 zéros d'Airbnb en
+production sont exactement les 33 avis masqués** : le cas est réel, le chemin
+tourne tous les jours, et zéro ligne est concernée aujourd'hui.
+
+### L'arrondi se fait en entiers
+
+Avec des flottants, l'arrondi d'un ex æquo à `.x5` dépendait du **nombre
+d'avis** : pour une population dont la moyenne exacte vaut 4,85, le calcul
+rendait 4,9 à n=1, 4,8 à n=20, 4,9 à n=100, 4,8 à n=332. **Un avis de plus,
+identique aux autres, faisait bouger la note de 0,1.** La somme se fait en
+micro-unités entières — exacte pour toute note multiple de 0,000002, donc pour
+toutes les notes réelles — et la règle de demi est écrite : **au plus proche, le
+demi vers le haut**.
+
+### Avant / après, mesuré sur la production
+
+Les deux implémentations réelles jouées côte à côte (celle de `main` extraite
+par `git archive`, celle de la branche), sur les quatre périodes et bien par
+bien :
+
+| période | bien | avant | après |
+|---|---|---|---|
+| toujours | **Colomiers** | **4,8 / 5** · 69 avis | **4,7 / 5** · 69 avis |
+| toujours | les trois autres, et le compte entier | inchangé | inchangé |
+| 15 j / 30 j / 6 mois | tous | inchangé | inchangé |
+
+**Un seul chiffre bouge, et c'est l'arrondi.** Le nombre d'avis est identique
+partout (664 → 664) : aucun objet vide en production aujourd'hui — le correctif
+ferme le chemin, il ne répare pas un dégât existant.
+
+### Ce qui change à l'écran
+
+- `/aujourdhui` : la note du compte et celle de chaque bien ne sont plus
+  divisées par l'écran ; `noteSur5` a été **retirée** de `shared/aujourdhui.js`.
+- `/avis` : la tuile affiche « **4,8** — note moyenne **sur 5** » là où elle
+  affichait « 9,6 — note moyenne sur 10 ».
+- `/logements` (lot V5) : « ★ 4,9 / 5 · 336 avis ».
+
+Les endpoints descendent `note_sur_5` et **plus `moyenne`** : un champ sur 10
+qui subsisterait inviterait un écran à le rediviser, et c'est exactement le
+défaut refermé ici.
+
+### Ce qui reste différent d'un écran à l'autre, et pourquoi
+
+L'accueil lit la note des **30 derniers jours** (`periode=30j`) ; la liste des
+logements lit **tous** les avis du logement. Les deux sont justes et ne mesurent
+pas la même chose — un même bien peut afficher « 5,0 / 5 · 2 avis » sur
+l'accueil et « 4,9 / 5 · 336 avis » sur sa carte. À trancher si l'écart gêne.

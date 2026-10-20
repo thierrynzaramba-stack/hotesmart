@@ -619,7 +619,7 @@ async function cartesLister (req, res, garde) {
   const vide = { attente: [], recents: [], anciens: [] }
   if (filtre === '') {
     return res.status(200).json({ cartes: vide, anciens_total: 0, biens: [], periodes: Object.keys(PERIODES),
-      stats: { total: 0, positif: 0, remarque: 0, moyenne: null, notes: 0, periode, depuis: borneDepuis(periode) } })
+      stats: { total: 0, positif: 0, remarque: 0, note_sur_5: null, notes: 0, periode, depuis: borneDepuis(periode) } })
   }
   const bienDemande = req.query?.bien ? String(req.query.bien) : null
   if (bienDemande && refs !== null && !refs.map(String).includes(bienDemande)) {
@@ -696,7 +696,12 @@ async function cartesLister (req, res, garde) {
     biens: (biens || []).filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
       .map(b => ({ name: b.name, provider_property_id: b.provider_property_id })),
     periodes: Object.keys(PERIODES),
-    stats: { ...ratio, moyenne: moy.moyenne, notes: moy.notes, ...(moy.erreur ? { erreur: true } : {}) },
+    // ⚠ `note_sur_5` ET PLUS `moyenne` (decision de Thierry, 20 octobre 2026 :
+    // « tout sur 5 … meme regle partout ou une note globale s'affiche »). Un
+    // champ sur 10 qui subsisterait inviterait un ecran a le rediviser : c'est
+    // exactement le defaut qu'on referme — la page divisait une moyenne DEJA
+    // arrondie, donc arrondissait deux fois.
+    stats: { ...ratio, note_sur_5: moy.note_sur_5, notes: moy.notes, ...(moy.erreur ? { erreur: true } : {}) },
   })
 }
 

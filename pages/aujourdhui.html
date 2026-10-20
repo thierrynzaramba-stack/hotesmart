@@ -454,7 +454,7 @@ async function chargerNotes () {
   const lire = async (bien) => {
     try {
       const r = await appel(`/api/avis?action=cartes&periode=30j${bien ? `&bien=${encodeURIComponent(bien)}` : ''}`)
-      return r.stats && !r.stats.erreur ? { moyenne: r.stats.moyenne, notes: r.stats.notes } : null
+      return r.stats && !r.stats.erreur ? { note_sur_5: r.stats.note_sur_5, notes: r.stats.notes } : null
     } catch (e) { logger.error('Aujourdhui', 'avis', e); return null }
   }
   etat.noteGlobale = await lire(null)
@@ -491,8 +491,12 @@ function renderKpis () {
   }
   if (etat.noteGlobale) {
     const n = etat.noteGlobale
-    $('[data-bind="rating"]').innerHTML = n.moyenne != null
-      ? `<span class="kpi num row" style="gap: 6px">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(R.noteSur5(n.moyenne), { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span><span class="small muted">${esc(t('kpi.reviews', { n: n.notes }))}</span>`
+    // ⚠ PLUS DE DIVISION ICI. L'endpoint descend `note_sur_5`, deja ramenee sur
+    // 5 et arrondie UNE SEULE FOIS. La version d'avant divisait une moyenne
+    // elle-meme arrondie : deux arrondis, donc Colomiers affichait 4,8 la ou le
+    // calcul juste donne 4,7 (mesure du 20 octobre 2026).
+    $('[data-bind="rating"]').innerHTML = n.note_sur_5 != null
+      ? `<span class="kpi num row" style="gap: 6px">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(n.note_sur_5, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span><span class="small muted">${esc(t('kpi.reviews', { n: n.notes }))}</span>`
       : `<span class="small muted">${esc(t('kpi.reviews', { n: 0 }))}</span>`
     $('[data-bind="kpi-rating"]').hidden = false
     visible = true
@@ -535,8 +539,8 @@ function renderBiens () {
     const mm = chiffres && chiffres.mois
       ? `<span class="caption muted num">${esc(t('properties.range', { min: monnaie(chiffres.mois.min, b.currency), max: monnaie(chiffres.mois.max, b.currency) }))}</span>`
       : ''
-    const etoile = note && note.moyenne != null
-      ? `<span class="property__rating">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(R.noteSur5(note.moyenne), { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>` : ''
+    const etoile = note && note.note_sur_5 != null
+      ? `<span class="property__rating">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(note.note_sur_5, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>` : ''
     const puce = etat.menagesOk
       ? `<span class="chip">${esc(t(e.occupeCeSoir ? 'properties.occupied' : 'properties.free'))}</span>` : ''
     // La photo de couverture (properties.photo_url, lot photos) ; sans elle,

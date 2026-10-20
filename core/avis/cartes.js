@@ -151,9 +151,13 @@ export function rendreStats (s) {
       + '<div class="stat-lab">Les compteurs n’ont pas pu être calculés. Rechargez pour réessayer.</div></div>'
   }
   const p = LIB_COURT[s.periode] || ''
-  const moy = s.moyenne == null ? '—' : String(s.moyenne).replace('.', ',')
+  // ⚠ SUR 5, comme partout ailleurs (decision de Thierry, 20 octobre 2026). La
+  // note descend DEJA convertie et arrondie une seule fois : on l'affiche, on
+  // ne la recalcule pas. Un chiffre a une decimale s'ecrit « 4,8 » et non
+  // « 4.8 » — le point decimal etait deja remplace ici.
+  const moy = s.note_sur_5 == null ? '—' : Number(s.note_sur_5).toFixed(1).replace('.', ',')
   return `<div class="stat-card"><div class="stat-val">${ECHAPPER(s.total)}</div><div class="stat-lab">avis reçus ${ECHAPPER(p)}</div></div>`
-    + `<div class="stat-card"><div class="stat-val">${ECHAPPER(moy)}</div><div class="stat-lab">note moyenne sur 10${s.notes ? ` (${ECHAPPER(s.notes)} notes)` : ''}</div></div>`
+    + `<div class="stat-card"><div class="stat-val">${ECHAPPER(moy)}</div><div class="stat-lab">note moyenne sur 5${s.notes ? ` (${ECHAPPER(s.notes)} notes)` : ''}</div></div>`
     + `<div class="stat-card ${s.remarque > 0 ? 'alerte' : ''}"><div class="stat-val ratio"><span class="ratio-item pos">${POUCE_HAUT}${ECHAPPER(s.positif)}</span>`
     + `<span class="ratio-item neg">${POUCE_BAS}${ECHAPPER(s.remarque)}</span></div><div class="stat-lab">propreté saluée / remarques ${ECHAPPER(p)}</div></div>`
 }

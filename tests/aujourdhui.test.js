@@ -214,12 +214,18 @@ test('tachesOuvertes : seulement les sejours A VENIR ou EN COURS (regle du 11 oc
     'le depart a venir porte par la tache suffit ; passe ou inconnu, non')
 })
 
-test('noteSur5 : le coeur stocke sur 10, l\'ecran affiche sur 5', async () => {
+test('LE TEST QUI COMPTE : l ecran ne convertit plus la note — plus de `noteSur5` ici', async () => {
+  // Retiree le 20 octobre 2026. Elle divisait par deux une moyenne que
+  // `lib/stats-avis.js` avait DEJA arrondie : deux arrondis pour une note, donc
+  // Colomiers affichait 4,8 la ou le calcul juste donne 4,7. La conversion vit
+  // desormais cote serveur, dans `lib/avis/echelle.js`, et les endpoints
+  // descendent `note_sur_5`.
   const R = await charger()
-  assert.equal(R.noteSur5(9.4), 4.7)
-  assert.equal(R.noteSur5(10), 5)
-  assert.equal(R.noteSur5(9.57), 4.8)
-  assert.equal(R.noteSur5(null), null)
+  assert.equal(R.noteSur5, undefined,
+    'une seconde conversion a l ecran reintroduirait le double arrondi')
+  const source = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  assert.doesNotMatch(source, /noteSur5/, 'la page ne doit plus convertir')
+  assert.match(source, /note_sur_5/, 'elle affiche la note telle qu elle descend')
 })
 
 test('douzeMoisComplets : les 12 mois qui precedent le mois en cours', async () => {
