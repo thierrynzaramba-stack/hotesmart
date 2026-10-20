@@ -235,3 +235,80 @@ test('m4 : une source NON MESUREE n est pas dans la table, et ne l est pas « au
     assert.equal(E.echelleDe(source), null, `${source} n a pas d echelle connue`)
   }
 })
+
+test('LE TEST QUI COMPTE (GRAVE 2) : une source hors table SONNE, elle ne se contente pas d un console.warn', async () => {
+  // « UN `console.error` NE REVEILLE PERSONNE » — regle gravee en tete de
+  // `lib/canaux-du-bien.js`, et que le registre prescrivait deja pour cette
+  // dette. Le silence coute plus cher depuis la correspondance exacte : la
+  // consequence d une source hors table est passee de « note divisee par deux »
+  // (fausse, mais VISIBLE) a « note absente » (juste, mais INVISIBLE).
+  const sonneries = []
+  const alarme = async (clef, detail) => { sonneries.push({ clef, detail }) }
+  // ⚠ L ARDOISE EST PARTAGEE PAR LE MODULE : les tests precedents de ce fichier
+  // ont deja rencontre vrbo, expedia et les autres. On la vide pour partir d un
+  // etat connu — un test qui herite de l etat d un autre mesure les deux.
+  await E.sonnerSourcesInconnues(() => {})
+
+  // Rien rencontre : rien ne sonne. Une alarme qui sonne a vide ne se lit plus.
+  await E.sonnerSourcesInconnues(alarme)
+  assert.deepEqual(sonneries, [])
+
+  // Une source hors table, rencontree pendant une conversion.
+  E.noteSur5Des([{ ota: 'vrbo', overall_score: 5 }, { ota: 'airbnb', overall_score: 10 }])
+  const vues = await E.sonnerSourcesInconnues(alarme)
+  assert.deepEqual(vues, ['vrbo'])
+  assert.equal(sonneries.length, 1)
+  assert.equal(sonneries[0].clef, 'avis_echelle_inconnue')
+  assert.deepEqual(sonneries[0].detail.sources, ['vrbo'])
+  assert.match(sonneries[0].detail.effet, /ne sont pas converties/)
+  assert.match(sonneries[0].detail.geste, /ECHELLE_PAR_CANAL/)
+
+  // ⚠ L ARDOISE SE VIDE : sinon la meme source sonnerait a chaque lecture, et
+  // l alarme deviendrait le bruit qu on apprend a ignorer.
+  await E.sonnerSourcesInconnues(alarme)
+  assert.equal(sonneries.length, 1)
+
+  // Une source CONNUE ne declenche rien, meme apres coup.
+  E.noteSur5Des([{ ota: 'booking', overall_score: 8 }])
+  await E.sonnerSourcesInconnues(alarme)
+  assert.equal(sonneries.length, 1, 'une alarme qui sonne sur du normal ne se lit plus')
+
+  // Un `ota` absent est signale lui aussi : c est le symptome d un SELECT
+  // auquel il manque la colonne, et il ferait disparaitre TOUTES les notes.
+  E.noteSur5Des([{ overall_score: 9 }])
+  await E.sonnerSourcesInconnues(alarme)
+  assert.deepEqual(sonneries[1].detail.sources, ['(vide)'])
+})
+
+test('LE TEST QUI COMPTE (GRAVE 1) : les TROIS lecteurs demandent `ota` dans leur SELECT', () => {
+  // ⚠ CE TEST EXISTE PARCE QUE DEUX MUTATIONS SURVIVAIENT. Avant la
+  // correspondance exacte, oublier `ota` dans un SELECT etait INERTE : le
+  // defaut /10 etait justement l echelle reelle des deux canaux. Depuis, c est
+  // une perte TOTALE et silencieuse — `/logements` perd l etoile de tous les
+  // biens, `/avis` perd la note de chaque carte et sa tuile passe a « — ».
+  // Aucun rouge, aucun 500, aucune alerte : seulement un warn « (vide) ».
+  // Mesure de la revue : retirer `ota` du select de `lib/logement/lecture.js`
+  // ou de `CHAMPS` d `api/avis.js` laissait 5684 tests sur 5684 au vert.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const racine = path.join(__dirname, '..')
+  const lecteurs = [
+    ['lib/stats-avis.js', /select: 'id, ota, overall_score, property_id_ref'/],
+    ['lib/logement/lecture.js', /\.select\('id, property_id, ota, overall_score/],
+    ['api/avis.js', /^const CHAMPS = `id, provider, source, ota,/m]
+  ]
+  for (const [fichier, motif] of lecteurs) {
+    const src = fs.readFileSync(path.join(racine, fichier), 'utf8')
+    assert.match(src, motif, `${fichier} doit demander \`ota\` : sans elle, TOUTES les notes disparaissent en silence`)
+  }
+})
+
+test('GRAVE 1 : sans `ota`, la note est perdue — et c est bien ce qu on veut qu il arrive', () => {
+  // La contre-epreuve du test precedent : on verifie que l absence de la
+  // colonne a bien l effet redoute, pour que le garde-fou ci-dessus ne soit pas
+  // une incantation.
+  const sansOta = E.noteSur5Des([{ overall_score: 10 }, { overall_score: 9 }])
+  assert.deepEqual(sansOta, { note_sur_5: null, notes: 0 })
+  const avecOta = E.noteSur5Des([{ ota: 'airbnb', overall_score: 10 }, { ota: 'airbnb', overall_score: 9 }])
+  assert.deepEqual(avecOta, { note_sur_5: 4.8, notes: 2 })
+})
