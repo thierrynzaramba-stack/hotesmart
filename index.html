@@ -5,6 +5,77 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HôteSmart — L'IA qui répond à vos voyageurs pendant que vous dormez</title>
   <meta name="description" content="L'IA française qui gère les messages voyageurs, les codes d'accès et les ménages. Connectée à Airbnb et Booking. De 1 bien à toute une conciergerie. Essai gratuit 15 jours.">
+  <!-- ⚠ SYNCHRONE, EN TETE DU HEAD, AVANT LA FEUILLE DE STYLE. Un visiteur deja
+       connecte ne doit pas voir la landing. Le test porte sur le SEUL
+       localStorage : charger supabase-js pour le poser coutait 9 requetes et
+       350 ms a froid (152 a 168 ms a chaud) de landing peinte et lisible,
+       plus un saut par /pages/index.html.
+       LA REF DU PROJET N'EST PAS CODEE EN DUR : prod et staging en ont une
+       differente (shared/config.js), et une ref en dur ferait rater la
+       redirection sur l'autre environnement, en silence.
+       Session perimee : on part quand meme, et requireAuth renvoie vers
+       /login. C'est le comportement voulu. -->
+  <script>
+    (function () {
+      // ⚠ LE RETOUR D'AUTHENTIFICATION SE DECIDE AVANT DE TOUCHER AU STOCKAGE.
+      // La confirmation d'inscription (`signUp`, pages/login.html) et le
+      // changement d'e-mail (`updateUser({ email })`, pages/compte.html) ne
+      // passent AUCUN `redirectTo` : leur lien part vers l'URL de site du projet
+      // Supabase, donc ICI. Jusqu'au 20 octobre 2026, le module de fin de page
+      // creait un client qui consommait `#access_token=…` tout seul
+      // (`detectSessionInUrl`, actif par defaut). Il n'y a plus de client sur la
+      // landing : le fragment est EMPORTE vers /pages/aujourdhui, qui en cree un.
+      //
+      // ⚠ ET C'EST POURQUOI IL NE PARTAGE PAS LE try DU STOCKAGE. `localStorage`
+      // LEVE en mode prive, cookies de site bloques, webview, ou iframe sans
+      // allow-same-origin. Dans le meme try, l'exception emportait le fragment
+      // avec elle : les jetons tout juste emis mouraient en silence, et c'est la
+      // DERNIERE page qui pouvait encore les transporter.
+      var retourAuth = /[#&](access_token|refresh_token)=/.test(location.hash)
+
+      // ⚠ LA REF DU PROJET N'EST PAS CODEE EN DUR : prod et staging en ont une
+      // differente (shared/config.js), et une ref en dur ferait rater la
+      // redirection sur l'autre environnement, en silence. Revers assume : la
+      // cle d'un AUTRE projet Supabase, posee sur ce domaine par un autre site,
+      // compte comme une session (dette 71).
+      var connecte = false
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          if (/^sb-.+-auth-token$/.test(localStorage.key(i))) { connecte = true; break }
+        }
+      } catch (e) {
+        // Stockage inaccessible : la landing s'affiche normalement. Un visiteur
+        // connecte la verra, ce qui est strictement l'ancien comportement en cas
+        // de panne — mais le retour d'authentification, lui, passe quand meme.
+      }
+
+      if (connecte || retourAuth) {
+        try {
+          // ⚠ ON NAVIGUE AVANT DE MASQUER. `location.replace` peut etre refuse
+          // EN LEVANT (frame sandboxee, extension, navigation de haut niveau
+          // bloquee) : s'il levait apres le masquage, le catch avalait l'echec et
+          // la page restait BLANCHE pour de bon, reproductible a chaque
+          // rechargement puisque la cle est toujours la. Dans cet ordre, un refus
+          // qui LEVE laisse la landing lisible. Un contexte qui ignore la
+          // navigation sans lever n'est couvert ni par un ordre ni par l'autre.
+          //
+          // ⚠ `search` ET `hash` SONT EMPORTES. C'est ce que faisait la page qu'on
+          // remplace (pages/index.html), et c'est la derniere occasion de le faire :
+          // un `?bien=…` ou un `#access_token=…` perdu ici est perdu. Un fragment
+          // d'ERREUR (#error=…) part donc AUSSI quand une session existe — il n'est
+          // pas un retour exploitable, il ne declenche rien a lui seul, mais il
+          // voyage avec le reste plutot que d'etre filtre. Sans session, il ne
+          // declenche aucun depart : la landing reste.
+          location.replace('/pages/aujourdhui' + location.search + location.hash)
+          document.documentElement.style.display = 'none'
+        } catch (e) {
+          // Navigation refusee : on rend la landing visible plutot qu'une page
+          // blanche definitive.
+          document.documentElement.style.display = ''
+        }
+      }
+    })()
+  </script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -1164,17 +1235,6 @@
   if (startBtn) startBtn.addEventListener("click", play);
   if (replayBtn) replayBtn.addEventListener("click", play);
 })();
-</script>
-
-<!-- Redirect vers app si déjà connecté -->
-<script type="module">
-  import { getSession } from '/shared/supabase.js'
-  const session = await getSession()
-  if (session) {
-    // Si user est connecté, rediriger vers son dashboard plutôt que rester sur la landing
-    // Décommente si tu veux que la landing redirige les users connectés
-    window.location.href = '/pages/index.html'
-  }
 </script>
 
 </body>

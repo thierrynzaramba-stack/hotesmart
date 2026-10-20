@@ -87,8 +87,18 @@ window.I18n = (() => {
   }
 
   async function init() {
-    langues = await (await fetch(`${BASE}langues.json`, { cache: 'no-cache' })).json();
-    fallbackDict = await load(FALLBACK);
+    // La liste des langues et le dictionnaire de repli ne dependent pas l'un de
+    // l'autre : les deux partaient en FILE, soit deux allers-retours la ou un
+    // seul suffit. `detect()` a besoin des deux, il attend donc les deux.
+    const [liste, repli] = await Promise.all([
+      fetch(`${BASE}langues.json`, { cache: 'no-cache' }).then(r => {
+        if (!r.ok) throw new Error('i18n: langues.json introuvable');
+        return r.json();
+      }),
+      load(FALLBACK)
+    ]);
+    langues = liste;
+    fallbackDict = repli;
     current = detect();
     dict = current === FALLBACK ? fallbackDict : await load(current);
     apply();

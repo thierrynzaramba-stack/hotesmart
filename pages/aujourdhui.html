@@ -6,6 +6,17 @@
 <title>HôteSmart</title>
 <link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<!-- ⚠ LA LANDING NE RECHAUFFE PLUS LE CDN. Avant le 20 octobre 2026, un hote
+     connecte passait par `/`, qui chargeait supabase-js : la poignee de main
+     jsdelivr et le cache HTTP etaient deja faits en arrivant ici. La sonde de la
+     landing part maintenant AVANT tout contact avec le CDN — cette page paie
+     donc le cout a froid, et elle ne decouvrait l'URL qu'apres avoir lu
+     shared/supabase.js, soit un niveau d'aller-retour de plus.
+     Le prechargement est sur l'URL EPINGLEE : c'est l'epinglage qui le rend sur.
+     `tests/accueil-rapide.test.js` refuse qu'elle s'ecarte de shared/supabase.js
+     — deux versions divergentes, ce serait deux telechargements. -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/+esm" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shared/theme.css">
 <link rel="stylesheet" href="/shared/ui.css">
@@ -95,7 +106,7 @@
 <script src="/shared/nav.js"></script>
 <script type="module">
 import { requireAuth } from '/components/auth-guard.js'
-import { supabase, getUser, signOut } from '/shared/supabase.js'
+import { supabase, signOut } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
@@ -572,18 +583,26 @@ async function prenom (user) {
 }
 
 async function init () {
+  // I18n ne dépend pas de la session : les deux partent ENSEMBLE. Le `.catch`
+  // vide n'avale rien — `await i18nPrêt` lèvera quand même plus bas ; il évite
+  // seulement une promesse non traitée si `requireAuth` redirige entre-temps.
+  const i18nPret = I18n.init()
+  i18nPret.catch(() => {})
   const session = await requireAuth()
   if (!session) return
-  await I18n.init()
+  await i18nPret
   document.addEventListener('i18n:changed', () => location.reload())
 
-  const user = await getUser()
-  const brut = await prenom(user)
-  // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
-  // la partie locale de l'e-mail, en minuscules.
-  const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
-  $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
-  $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
+  // `session.user` vient de `requireAuth` : plus de `getUser()`, qui refaisait
+  // un aller-retour vers /auth/v1/user.
+  // ⚠ CE N'EST PAS TOUT A FAIT LE MÊME OBJET. `getUser()` lisait la ligne
+  // COURANTE ; `session.user` est celle qui a été figée dans la session stockée,
+  // et elle ne se rafraîchit qu'au renouvellement du jeton. Un e-mail changé
+  // depuis un autre appareil, ou un `user_metadata` mis à jour, met donc jusqu'à
+  // la durée de vie d'un jeton à apparaître dans le bonjour et les initiales.
+  // Affichage seul : toute lecture de données passe par RLS, avec un jeton
+  // vérifié à chaque requête. Dette 72.
+  const user = session.user
   // La création de bien n'est pas déléguée (cf. pages/biens.html).
   $('[data-bind="add-property"]').hidden = !estTitulaire()
 
@@ -605,16 +624,37 @@ async function init () {
     ].filter(Boolean)
   })
 
+  // Le prénom et les biens ne dépendent que du contexte de compte, déjà chargé
+  // par `requireAuth` : les deux requêtes partent ENSEMBLE, elles s'attendaient
+  // l'une l'autre pour rien.
+  //
   // Les biens : lecture directe sous RLS (`properties_select` = périmètre du
   // profil). Pas /api/channel-property, qui interroge Beds24 en direct.
-  if (peutLire('reservations') || peutLire('menages')) {
+  const lireBiens = async () => {
+    if (!peutLire('reservations') && !peutLire('menages')) return []
     const { data, error } = await supabase.from('properties')
       .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency, photo_url')
       .eq('user_id', compteCourant())
       .order('name', { ascending: true })
     if (error) logger.error('Aujourdhui', 'biens', error)
-    etat.biens = data || []
+    return data || []
   }
+  // ⚠ ILS PARTENT ENSEMBLE, ILS N'ARRIVENT PAS ENSEMBLE. Un `Promise.all` sur
+  // les deux resultats faisait attendre au bonjour et aux initiales — qui ne
+  // dependent que de `prenom()` — la lecture `properties`, la plus lourde des
+  // deux et sans limite de lignes. Dans un lot dont l'objet est le premier
+  // affichage, c'est l'element le plus visible de la page qu'on retardait.
+  // Chacun ecrit donc a SA resolution ; l'attente commune ne sert plus qu'a la
+  // suite, qui a besoin de `etat.biens`.
+  const pNom = prenom(user).then(brut => {
+    // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
+    // la partie locale de l'e-mail, en minuscules.
+    const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
+    $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
+    $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
+  })
+  const pBiens = lireBiens().then(biens => { etat.biens = biens })
+  await Promise.all([pNom, pBiens])
   // ⚠ PLUS DE `liens` : l'entrée Calendrier mène à l'écran V5 `/calendrier`,
   // le même depuis toutes les pages. Épingler ici le premier bien donnait à
   // cet onglet deux comportements selon la page d'où on cliquait.

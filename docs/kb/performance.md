@@ -100,3 +100,235 @@ gain, et il est désormais mesurable.
 3. `apps/menages/public.html` pèse 231 Ko avant compression : c'est le seul
    poids notable, et il concerne la PWA prestataire, chargée une fois puis
    servie par le service worker.
+
+## 4. L'ouverture de l'app (20 octobre 2026, lot `fix-accueil-rapide`)
+
+Demande de Thierry : supprimer le flash de la landing chez un utilisateur déjà
+connecté, et accélérer le premier affichage de `/pages/aujourdhui`.
+
+### 4.1 La méthode, et ce qu'elle ne couvre pas
+
+Banc local : le worktree servi par un petit serveur Node sur `127.0.0.1` qui
+**horodate chaque requête**, Chrome `chrome-headless-shell` avec un
+`--user-data-dir` persistant, et une session semée en `localStorage` par une
+page `/seed` de la même origine. Les fichiers premier-tiers sont servis
+`no-store` (équivalent « cache désactivé » pour eux) ; `cdn.jsdelivr.net` garde
+son vrai cache, donc ses deux colonnes froid / chaud.
+
+Le chiffre lu est **l'écart entre la requête `/` et la requête de la page
+suivante**.
+
+⚠ **Et ce chiffre ne veut pas dire la même chose avant et après.** AVANT, le
+test de session était un module de FIN de page : la landing était mise en page,
+peinte et lisible pendant tout cet écart — là, l'écart EST la durée d'affichage.
+APRÈS, la sonde est synchrone dans le `<head>`, avant le `<style>` et avant tout
+`<body>` : **rien n'est jamais mis en page ni peint**. ⚠ Ce n'est pas
+`location.replace` qui l'assure — la navigation est asynchrone par
+spécification, le parseur continue jusqu'au commit. Ce qui l'assure, c'est que
+le `display:none` est posé dans le **même bloc synchrone**, avant que le
+navigateur puisse peindre quoi que ce soit, et qu'aucune boîte de rendu
+n'existe encore à ce moment. La landing visible est alors à **zéro**, pas à 17 ms ; les
+17 ms sont de la latence de navigation. Le tableau du §4.2 compare donc une
+durée d'affichage à un délai de navigation — c'est la comparaison utile (ce que
+l'hôte attend avant de voir son app), mais elle **sous-vend** le correctif,
+qui supprime l'affichage, pas seulement sa durée.
+
+⚠ **Ce banc ne mesure PAS `/pages/aujourdhui` connecté.** Son jeton est
+factice : les `/api` et la base répondent faux. Pour cette page, le §4.4 donne
+la **profondeur sérialisée relevée dans le code**, pas un chrono. Le chrono
+réel se prend sur la preview staging, connecté ; §1 rappelle qu'un aller-retour
+vers Supabase vaut ~300 ms depuis `iad1` et 20-40 ms depuis `cdg1`.
+
+### 4.2 La landing : mesuré avant et après
+
+`index.html` testait la session par un `<script type="module">` en FIN de page
+qui importait `shared/supabase.js`. Conséquence : la landing était parsée,
+peinte et lisible, **puis** le navigateur allait chercher `supabase-js` et ses
+5 sous-paquets chez jsdelivr pour découvrir qu'il fallait partir.
+
+Le correctif est un script **synchrone en tête du `<head>`, avant le
+`<style>`** : si `localStorage` porte une clé qui matche `/^sb-.+-auth-token$/`,
+on masque `documentElement` et on `location.replace('/pages/aujourdhui')`.
+
+Les lignes disent l'écart `/` → page suivante. Dans la colonne « avant », cet
+écart est du temps de landing PEINTE ; dans la colonne « après », c'est de la
+latence de navigation et la landing n'est jamais peinte (§4.1).
+
+| | avant (landing peinte) | après (rien n'est peint) |
+|---|---|---|
+| écart `/` → page suivante, cache CDN froid | 350 ms | **21 ms** |
+| écart `/` → page suivante, cache CDN chaud (1) | 152 ms | **17 ms** |
+| écart `/` → page suivante, cache CDN chaud (2) | 168 ms | **19 ms** |
+| requêtes avant la décision | 9 | **1** (le HTML seul) |
+| navigations | 2 | **1** |
+
+Les 9 requêtes : `/`, `shared/supabase.js`, `shared/config.js`, puis
+`supabase-js/+esm` et ses 5 sous-paquets (`auth-js`, `postgrest-js`,
+`realtime-js`, `storage-js`, `functions-js`), plus une poignée de main DNS/TLS
+vers un tiers. À froid, les 179 ms entre `config.js` (342 ms) et la redirection
+(521 ms) sont **entièrement** ce graphe de modules.
+
+Les 2 navigations : la redirection visait `/pages/index.html`, qui redirige à
+son tour vers `/pages/aujourdhui`. Elle vise désormais la destination finale.
+Même correction dans `pages/login.html`, dont la destination par défaut après
+connexion était `/pages/index.html` (le filtre de `?next=` est inchangé).
+
+**Huit choses à savoir sur cette sonde.** Les cinq dernières viennent des deux
+reviews du 20 octobre 2026 ; quatre d'entre elles étaient de vraies pertes, et
+la sonde a été réécrite une fois pour les fermer.
+- **La ref du projet n'est pas codée en dur.** Prod et staging ont deux refs
+  Supabase différentes (`shared/config.js`) : une ref en dur ferait rater la
+  redirection sur l'autre environnement, en silence. D'où le motif. Revers
+  assumé : la clé d'un projet Supabase **étranger** posée sur ce domaine compte
+  pour une session (dette 71).
+- **⚠ DEUX `try` SÉPARÉS, ET C'EST LE POINT DE LA SECONDE REVIEW.** Le test du
+  fragment d'authentification et la lecture de `localStorage` partageaient un
+  seul `try`. Mesuré en exécutant la sonde avec un stockage qui lève : le
+  fragment `#access_token=…` était **perdu en silence** — l'exception sortait
+  avant la décision. Cookies de site bloqués, navigation privée, webview,
+  iframe sans `allow-same-origin` : ce sont exactement les cas que nomme le
+  `catch`. Le retour d'authentification se décide donc **avant** toute lecture
+  de stockage, et c'est la dernière page qui peut encore le transporter.
+  Garde-fou : « localStorage qui LÈVE ne fait pas perdre le retour
+  d'authentification ».
+- **Stockage inaccessible : la landing s'affiche normalement** — strictement
+  l'ancien comportement en cas de panne. Le retour d'authentification, lui,
+  passe quand même (point précédent).
+- **⚠ ON NAVIGUE AVANT DE MASQUER.** `document.documentElement.style.display =
+  'none'` était posé **avant** `location.replace`. Si la navigation est refusée
+  **en levant** (frame sandboxée, extension, navigation de haut niveau
+  bloquée), le `catch` avale l'échec et la page reste **blanche définitivement** — reproductible à
+  chaque rechargement, puisque la clé est toujours là. Dans l'ordre inverse, un
+  refus laisse la landing lisible, et le `catch` rétablit `display`. Garde-fou :
+  « une navigation REFUSÉE laisse la landing visible ».
+  ⚠ **Ne couvre que les refus qui LÈVENT.** Un contexte qui ignore la navigation
+  de haut niveau **sans** lever laisse la page masquée : le `catch` ne se
+  déclenche que sur un throw synchrone. Trou résiduel, inchangé par ce lot,
+  et qu'aucun des deux ordres ne ferme.
+- **Une session périmée part quand même**, et `requireAuth` renvoie vers
+  `/login`. C'est voulu : la sonde ne valide pas le jeton, elle constate
+  qu'il y en a un. Valider coûterait précisément les 9 requêtes retirées.
+- **⚠ LA RACINE EST UNE PAGE DE RETOUR D'AUTHENTIFICATION, et rien ne le dit.**
+  `signUp` (`pages/login.html`) et `updateUser({ email })` (`pages/compte.html`)
+  ne passent **aucun** `redirectTo` : leurs liens de confirmation partent vers
+  l'URL de site du projet Supabase, donc sur `/`, jetons dans le **fragment**.
+  Le module de fin de page créait un client, qui consommait ce fragment tout
+  seul (`detectSessionInUrl`, actif par défaut) — personne ne l'avait écrit
+  nulle part, ça marchait par effet de bord. Retirer le module retirait donc
+  aussi la confirmation d'inscription et le changement d'e-mail, **en silence**.
+  La sonde part désormais aussi sur `#access_token=` / `#refresh_token=`, et
+  emporte le fragment vers `/pages/aujourdhui`, qui crée un client. Un fragment
+  d'**erreur** (`#error=…`) ne fait pas partir : rien à sauver.
+  Le seul `redirectTo` du dépôt est celui de `pages/forgot-password.html`.
+- **⚠ LE FRAGMENT D'ERREUR NE RETIENT QUE QUI N'A PAS DE SESSION.** La phrase
+  ci-dessus a été fausse pendant une journée : la condition est
+  `connecte || retourAuth`, donc dès qu'une clé de session existe, c'est elle
+  qui fait partir et `hash` voyage avec le reste, `#error=…` compris — comme le
+  faisait `pages/index.html`, qui concaténait `location.hash` sans le lire. Un
+  hôte connecté qui clique un lien de confirmation expiré arrive donc sur
+  l'accueil avec un fragment parasite. Vérifié dans le build 2.118.0 réellement
+  servi : `auth-js` classe ce chargement en callback implicite en échec et sort
+  tôt, **sans** supprimer la session. On ne filtre pas : une règle de plus sur
+  le chemin le plus chaud du site, pour un fragment qui ne déclenche rien.
+  Garde-fou : « mais un CONNECTÉ avec un fragment d'erreur part quand même ».
+- **⚠ `search` ET `hash` sont emportés.** `pages/index.html`, la page que la
+  sonde court-circuite, faisait
+  `location.replace('/pages/aujourdhui' + location.search + location.hash)`.
+  En visant directement la destination finale, la sonde devient la **dernière**
+  occasion de les transmettre, et c'est le **fragment d'authentification** qui
+  l'exige — point précédent. Le `search` suit par symétrie avec la page
+  remplacée, et pour les paramètres de campagne qu'un lien externe pose sur la
+  racine. ⚠ Ne pas justifier le `search` par « les redirects de `vercel.json`
+  produisent des `?bien=` » : c'est faux, le seul
+  (`/biens/:id/calendrier` → `/calendrier?bien=:id`) atterrit sur `/calendrier`,
+  jamais sur `/`. Une justification fausse se vérifie un jour, et le `search`
+  saute avec elle.
+- **Ce qu'on n'a PAS corrigé, et qu'on assume.** Pendant une panne Supabase, un
+  rafraîchissement de jeton qui échoue sur une erreur **réseau** ne supprime pas
+  la clé de `localStorage` (`auth-js` ne la retire que sur un refus du serveur).
+  La sonde voit donc une clé, part, `requireAuth` ne trouve pas de session et
+  renvoie vers `/login` : un hôte qui ouvre `/` pendant la panne n'atteint plus
+  la landing. Avant, elle s'affichait. C'est la même décision que la session
+  périmée (la sonde constate, elle ne valide pas) et ça ne touche que
+  quelqu'un qui a déjà un compte — un prospect n'a pas de clé. Si ça gêne un
+  jour : ne pas rediriger quand `navigator.onLine === false`.
+  ⚠ **ET SURTOUT PAS « renvoyer vers `/` plutôt que vers `/login` »**, qui a
+  figuré ici le 20 octobre 2026 et qui BOUCLE : la prémisse est une clé
+  `sb-…-auth-token` périmée qu'`auth-js` n'a pas supprimée, donc
+  `/` → sonde → `/pages/aujourdhui` → `requireAuth` sans session → `/` → sonde
+  → … en `location.replace`, sans entrée d'historique pour en sortir, et
+  précisément pendant une panne Supabase. Tout remède doit **casser le cycle** :
+  supprimer la clé avant de renvoyer, ou poser un drapeau de session que la
+  sonde lit.
+
+**Effet de bord mesuré, non demandé** : un visiteur **anonyme** ne fait plus
+qu'une seule requête, `/`. La landing ne télécharge plus `supabase-js` du tout.
+8 requêtes et une poignée de main DNS/TLS vers jsdelivr en moins sur chaque
+première visite d'un prospect.
+
+**⚠ ET LE TABLEAU CI-DESSUS NE DIT PAS OÙ VONT LES 9 REQUÊTES.** Elles ne sont
+pas supprimées pour un hôte connecté : elles sont **déplacées** sur
+`/pages/aujourdhui`. Avant, la landing réchauffait jsdelivr — poignée de main
+DNS/TLS faite, cache HTTP rempli — et l'app résolvait `shared/supabase.js` sur
+une socket vivante. La sonde part maintenant avant tout contact avec le CDN :
+l'app paie le coût à froid, et elle ne découvrait l'URL qu'après avoir lu
+`shared/supabase.js`, soit un niveau d'aller-retour de plus. Le gain net reste
+franc — ces requêtes ne bloquent plus l'affichage de la landing, et un prospect
+anonyme ne les fait plus du tout — mais il est plus petit que 350 ms.
+Correctif posé dans la même passe, dans `pages/aujourdhui.html` :
+
+```html
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/+esm" crossorigin>
+```
+
+C'est **l'épinglage du §4.3 qui le rend sûr** : sans version, le préchargement
+et le module pourraient viser deux URL différentes, donc deux téléchargements.
+`tests/accueil-rapide.test.js` refuse qu'ils divergent, et exige le
+`crossorigin` (sans lui, un module préchargé est redemandé).
+**Les autres pages d'app n'ont pas ces deux lignes** : dette 75, qui porte aussi
+l'asymétrie neuve — une panne jsdelivr donne désormais un site commercial
+parfait et une app qui ne démarre pas.
+
+### 4.3 `shared/supabase.js` épinglé
+
+`@supabase/supabase-js/+esm` → `@supabase/supabase-js@2.118.0/+esm`.
+**2.118.0 est la version que jsdelivr servait déjà** (`x-jsd-version`, mesuré le
+20 octobre) : le lot fige l'existant, il ne change aucun comportement.
+
+Au passage, `cache-control` : sans version `max-age=604800` révalidable,
+épinglé `max-age=31536000, immutable`. Le vrai gain n'est pas là — il est que
+la version cesse de changer toute seule. L'écart avec `package.json` (2.102.1)
+est la **dette 70**.
+
+### 4.4 `/pages/aujourdhui` : la profondeur sérialisée
+
+Relevé dans le code (`init()`), pour un **titulaire** — un délégué ajoute les
+deux lectures dépendantes de `chargerPermissions` (`profiles` puis
+`profile_permissions`), des deux côtés.
+
+AVANT, 8 niveaux d'aller-retours en file :
+`getSession` (local) → `/api/membres` → `onboarding_state` → `langues.json` →
+`fr.json` → `getUser` → `profiles` (prénom) → `properties` → le lot des 5
+chargeurs → premier rendu.
+
+APRÈS, **3 niveaux** :
+
+1. `/api/membres`, `onboarding_state`, `langues.json` et le dictionnaire de
+   repli partent **ensemble** (`requireAuth` et `I18n.init()` sont lancés en
+   parallèle) ;
+2. `profiles` (prénom) et `properties` partent **ensemble** ;
+3. le lot des 5 chargeurs, inchangé.
+
+`getUser()` a disparu : il refaisait un aller-retour vers `/auth/v1/user` pour
+un objet que `requireAuth` renvoyait déjà (`session.user`).
+
+⚠ **Ce qui n'a PAS bougé, et ne doit pas bouger.** Dans `requireAuth`, la règle
+« le contexte de compte se charge avant la redirection d'onboarding » est
+intacte : ce sont les **requêtes** qui partent ensemble, la **décision** de
+redirection attend toujours les deux résultats. C'est la distinction à garder
+en tête en relisant ce fichier — paralléliser des lectures n'autorise pas à
+paralléliser des décisions.
+
+Hors lot et toujours vrai : `/api/yield` par bien passe après le premier
+rendu (dette 61).
