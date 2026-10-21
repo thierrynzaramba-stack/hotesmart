@@ -596,7 +596,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 /* Plus haute que large : la barre (22 px) ne recouvre jamais le prix, qui
    reste colle en bas (regle de l'ancien mobile). Numero en haut, prix en
    bas, fond blanc, bord discret. */
-.cal-case { position: relative; aspect-ratio: 1 / 1.7; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); display: flex; flex-direction: column; justify-content: flex-start; align-items: center; padding: 4px 3px 5px; cursor: pointer; font-family: inherit; overflow: hidden; }
+/* `user-select: none` : le glisser de selection a la souris, en vue etroite,
+   ne doit pas selectionner le numero du jour (la ligne Prix de l'ordinateur
+   l'a depuis toujours, les cases du mois ne l'avaient pas). */
+.cal-case { user-select: none; position: relative; aspect-ratio: 1 / 1.7; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); display: flex; flex-direction: column; justify-content: flex-start; align-items: center; padding: 4px 3px 5px; cursor: pointer; font-family: inherit; overflow: hidden; }
 .cal-case--vide { background: transparent; border: 0; cursor: default; }
 .cal-case__num { font-size: var(--fs-small); font-weight: var(--fw-semibold); line-height: 1.1; }
 .cal-case .cal-case__valeur { font-size: var(--fs-caption); font-weight: var(--fw-semibold); margin-top: auto; color: var(--muted); }

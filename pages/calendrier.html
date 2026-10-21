@@ -802,35 +802,95 @@ let glisse = null
 // Le geste du TELEPHONE (et de la vue etroite a la souris) vit lui aussi au
 // module : `brancherMobile` est rappele a chaque rendu, un ecouteur de
 // document pose la-dedans s'empilerait a chaque fois.
-let glisseMobile = null, presseLongue = null, appuiLongFait = false
-document.addEventListener('pointerup', () => {
-  if (!glisseMobile) return
+let glisseMobile = null, presseLongue = null
+// ⚠ UN STYLET N'EST PAS UNE SOURIS. `=== 'touch'` rangeait le stylet (`'pen'`)
+// et le pointeur indetermine (`''`, que la spec autorise) du cote de la
+// SOURIS : le glisser posait alors une selection sans aucun appui long, et
+// l'hote qui voulait faire defiler le mois au stylet se retrouvait avec trois
+// nuits selectionnees, a un geste d'une ecriture de prix. La question n'est pas
+// « est-ce un doigt » mais « est-ce une manipulation DIRECTE » — doigt, stylet,
+// ou inconnu —, auquel cas l'appui long est necessaire pour ne pas voler le
+// defilement.
+const manipulationDirecte = (e) => (e.pointerType || '') !== 'mouse'
+// ⚠ UN GESTE PERIME NE DOIT PAS SE REVEILLER SUR LE CLIC SUIVANT. Si le bouton
+// est relache hors de la page (barre des taches, alt-tab, menu contextuel), le
+// `mouseup`/`pointerup` ne nous parvient jamais et le geste reste arme : le
+// prochain clic n'importe ou le cloturait, et la saisie de prix s'ouvrait
+// toute seule. On jette donc le geste en cours au DEBUT de chaque nouvel
+// appui — en phase de CAPTURE, donc avant le gestionnaire de la cellule, qui
+// en pose un neuf juste apres. Releve en review de b238432.
+document.addEventListener('mousedown', () => { glisse = null }, true)
+// Le geste du telephone se cloture ICI, pour les deux sorties (relachement et
+// annulation par le navigateur quand il prend la main pour faire defiler).
+function finirGesteMobile (e) {
+  if (!glisseMobile) return null
+  // ⚠ UN SECOND DOIGT NE VOLE PAS LE GESTE DU PREMIER (constat 10) : seul le
+  // pointeur qui a commence le geste peut le finir. Sans ce test, une pince ou
+  // une paume posee a cote ouvrait la popup sur un jour jamais touche.
+  if (e && e.pointerId != null && e.pointerId !== glisseMobile.id) return null
   const g = glisseMobile
   glisseMobile = null
   clearTimeout(presseLongue)
-  const long = appuiLongFait
-  appuiLongFait = false
+  return g
+}
+// ⚠ UN APPUI ABANDONNE N'EST PAS UN CLIC. `click` offrait gratuitement l'ancre
+// « appuyer et relacher sur le MEME element » ; en passant au pointeur au
+// niveau du document, on l'a perdue. L'hote qui appuie sur la mauvaise date,
+// s'en apercoit, glisse hors de la grille et relache ailleurs voyait donc
+// s'ouvrir la fiche du jour qu'il venait d'abandonner. On exige que le
+// relachement atterrisse sur une case DU MEME BIEN.
+const caseSousLeRelachement = (e, sel) =>
+  (e && e.target && e.target.closest) ? e.target.closest(sel) : null
+document.addEventListener('pointerup', (e) => {
+  const g = finirGesteMobile(e)
+  if (!g) return
   // Le geste a POSE une plage (glisser, ou appui long) : il n'ouvre rien.
-  if (g.bouge || long) { renderFlottante(); return }
-  // Sinon c'est un CLIC SIMPLE (ou un tap court) : il ETEND la selection
-  // ouverte sur ce bien, et n'ouvre la popup du jour que s'il n'y en a pas.
-  if (etat.sel && etat.sel.bien === g.bien && etat.sel.duIso) {
-    if (g.depuis < etat.sel.duIso) etat.sel.duIso = g.depuis
-    else etat.sel.auIso = g.depuis
+  if (g.bouge || g.long) { renderFlottante(); return }
+  const sur = caseSousLeRelachement(e, '.cal-case[data-case]')
+  if (!sur || sur.dataset.bien !== g.bien || sur.dataset.case !== g.depuis) return
+  agirSurLaCaseTapee(g.bien, g.depuis)
+})
+document.addEventListener('pointercancel', (e) => { finirGesteMobile(e) })
+// ⚠ ET UN DEPLACEMENT ANNULE L'APPUI LONG (garde posee par une review
+// anterieure sur `touchmove`, et qu'il ne faut pas perdre au passage aux
+// pointeurs : sans elle, un defilement du doigt armait une selection).
+document.addEventListener('pointermove', () => {
+  if (glisseMobile && !glisseMobile.long) clearTimeout(presseLongue)
+})
+// UN TAP COURT, ET LES TROIS CAS — le meme enonce pour le doigt et pour le
+// clavier, qui passe par `click` et non par le pointeur.
+// ⚠ LE MOBILE SUIT L'ORDINATEUR (constat 11) : un tap DANS la selection ouvre
+// la saisie de prix pour TOUTE la selection, exactement comme le clic de
+// l'ordinateur. Avant, il tombait dans la branche d'extension et RETRECISSAIT
+// la selection en silence — quatre nuits perdues sans un mot.
+function agirSurLaCaseTapee (bienId, iso) {
+  const s = etat.sel
+  const dansSel = !!s && s.bien === bienId && !!s.duIso && iso >= s.duIso && iso <= s.auIso
+  if (dansSel) return actionPrix(joursSelection())
+  if (s && s.bien === bienId && s.duIso) {
+    // Hors de la plage, sur le meme bien : le tap l'ETEND (demande du
+    // 21 octobre, point 5).
+    if (iso < s.duIso) s.duIso = iso
+    else s.auIso = iso
     peindreSelectionMobile(); renderFlottante()
     return
   }
   // une selection sur un AUTRE bien se vide : un seul contexte d'action
-  if (etat.sel && etat.sel.duIso) { etat.sel = null; peindreSelectionMobile(); renderFlottante() }
-  ouvrirPopup([g.depuis], null, g.bien)
-})
-document.addEventListener('pointercancel', () => { clearTimeout(presseLongue); glisseMobile = null })
-document.addEventListener('mouseup', () => {
+  if (s && s.duIso) { etat.sel = null; peindreSelectionMobile(); renderFlottante() }
+  ouvrirPopup([iso], null, bienId)
+}
+document.addEventListener('mouseup', (e) => {
   if (!glisse) return
+  if (e.button !== 0) return
   const g = glisse
   glisse = null
   renderFlottante()
-  if (!g.bouge && g.dansSel) actionPrix(joursSelection())
+  if (g.bouge || !g.dansSel) return
+  // Meme ancre qu'au telephone : un appui abandonne hors de la ligne du bien
+  // n'ouvre pas la saisie sur la selection precedente.
+  const sur = caseSousLeRelachement(e, '[data-ligne-prix] .cal-nuit')
+  if (!sur || sur.dataset.bien !== g.bien) return
+  actionPrix(joursSelection())
 })
 
 function brancherPlanning () {
@@ -843,23 +903,45 @@ function brancherPlanning () {
     td.addEventListener('mousedown', (e) => {
       if (etat.lectureSeule || !peutEcrire('reservations')) return
       if (venuDeLaSaisie(e)) return
+      // ⚠ LE BOUTON DROIT ET LE BOUTON DU MILIEU NE GESTENT RIEN (constat 7).
+      // Sans ce test, un clic droit dans la selection ouvrait la saisie de prix
+      // DERRIERE le menu contextuel du navigateur, et refermer ce menu
+      // enregistrait le prix pre-rempli.
+      if (e.button !== 0) return
       if (td.dataset.iso < AUJOURDHUI) return
-      e.preventDefault()
       const i = Number(td.dataset.i)
       glisse = { bien: td.dataset.bien, a: i, b: i, bouge: false, dansSel: dansSelectionDesktop(td.dataset.bien, i) }
       // Un clic DANS la selection ne la detruit pas : on attend de savoir si
       // le geste bouge. Hors selection, on selectionne tout de suite — l'hote
       // voit ou il en est.
       if (!glisse.dansSel) { etat.sel = { bien: glisse.bien, a: i, b: i }; peindreSelectionDesktop() }
-      // Le `preventDefault()` prive la cellule du focus par defaut : on le
-      // pose a la main, sinon Entree / F2 / un chiffre ne peuvent JAMAIS
-      // partir apres un geste de souris.
-      td.focus()
+      // ⚠ AUCUN `preventDefault()` ICI, ET AUCUN `focus()` A LA MAIN.
+      // La version du 21 octobre en posait un pour que le glisser ne
+      // selectionne pas de texte — role que `.cal-nuit { user-select: none }`
+      // (shared/ui.css) tient DEJA, et le glisser de reordonnancement est
+      // ferme de son cote par `shared/reordonner-biens.js`, qui annule tout
+      // `dragstart` non arme par la poignee.
+      // Ce `preventDefault()` ne gagnait donc rien, et coutait trois defauts
+      // mesures en review : il fallait rendre le focus a la main, ce focus
+      // volait celui de la case de saisie ouverte, et le `blur` de cette case
+      // ENREGISTRAIT le prix pre-rempli — un double-clic poussait quatre
+      // nuits au canal sans que personne ait rien tape. Laisser le navigateur
+      // faire : il donne le focus a la cellule, et la case de saisie garde le
+      // sien.
     })
-    td.addEventListener('mouseenter', () => {
-      if (!glisse || td.dataset.bien !== glisse.bien) return
-      if (td.dataset.iso < AUJOURDHUI) return
+    td.addEventListener('mouseenter', (e) => {
+      if (!glisse) return
+      // ⚠ PLUS DE BOUTON TENU, PLUS DE GESTE (constat 6). Un survol sans
+      // bouton faisait suivre la selection au curseur nu, apres un
+      // relachement que la page n'avait jamais recu.
+      if (e.buttons === 0) { glisse = null; return }
+      // ⚠ `bouge` SE POSE AVANT LES REFUS (constat 8). Un glisser qui ne
+      // traverse que des cases refusees — jours passes, autre bien — A BOUGE :
+      // le compter comme un clic simple rouvrait la saisie sur l'ancienne
+      // selection, et le `blur` suivant l'enregistrait.
       glisse.bouge = true
+      if (td.dataset.bien !== glisse.bien) return
+      if (td.dataset.iso < AUJOURDHUI) return
       glisse.b = Number(td.dataset.i)
       etat.sel = { bien: glisse.bien, a: glisse.a, b: glisse.b }
       peindreSelectionDesktop()
@@ -963,29 +1045,57 @@ function brancherMobile () {
     const bienId = c.dataset.bien
     c.addEventListener('pointerdown', (e) => {
       if (iso < AUJOURDHUI || etat.lectureSeule || !peutEcrire('reservations')) return
-      clearTimeout(presseLongue)
-      appuiLongFait = false
-      glisseMobile = { bien: bienId, depuis: iso, bouge: false, tactile: (e.pointerType || 'mouse') === 'touch' }
-      if (!glisseMobile.tactile) return
+      // Bouton droit ou milieu : rien (constat 7). Un doigt n'a pas de bouton.
+      if (manipulationDirecte(e) === false && e.button !== 0) return
+      if (glisseMobile) {
+        // Un second DOIGT ne vole pas le geste du premier (constat 10) ; un
+        // geste de SOURIS perime — bouton relache hors de la page — se
+        // remplace.
+        if (glisseMobile.direct) return
+        finirGesteMobile(null)
+      }
+      glisseMobile = { id: e.pointerId, bien: bienId, depuis: iso, bouge: false, long: false,
+        direct: manipulationDirecte(e) }
+      if (!glisseMobile.direct) return
       presseLongue = setTimeout(() => {
-        appuiLongFait = true
+        if (!glisseMobile) return
+        glisseMobile.long = true
         etat.sel = { bien: bienId, duIso: iso, auIso: iso }
         peindreSelectionMobile(); renderFlottante()
       }, 450)
     })
-    // Le scroll declenchait l'appui long : un deplacement l'annule (review).
-    c.addEventListener('pointerenter', () => {
-      if (!glisseMobile || glisseMobile.bien !== bienId) return
-      if (iso < AUJOURDHUI) return
-      // Au doigt, on n'etend qu'APRES l'appui long, sinon on vole le scroll.
-      if (glisseMobile.tactile && !appuiLongFait) { clearTimeout(presseLongue); return }
+    c.addEventListener('pointerenter', (e) => {
+      // ⚠ A LA SOURIS SEULEMENT, ET C'EST UNE LIMITE ASSUMEE. Un pointeur
+      // TACTILE est capture implicitement par la case ou il a commence :
+      // `pointerenter` n'atteint JAMAIS ses voisines. Le commentaire du
+      // 21 octobre promettait « appui long puis glisser » au doigt — ce geste
+      // n'a jamais pu fonctionner, ni avant ni apres. Au doigt, l'extension se
+      // fait par TAP sur une seconde date (agirSurLaCaseTapee) ; l'etendre au
+      // glisser demanderait `pointermove` + `elementFromPoint`, donc de la
+      // geometrie, que jsdom ne sait pas rendre — on ne livre pas un geste
+      // qu'aucun test ne peut prouver.
+      if (!glisseMobile || glisseMobile.direct) return
+      if (e.buttons === 0) { finirGesteMobile(null); return }
       glisseMobile.bouge = true
+      if (glisseMobile.bien !== bienId) return
+      if (iso < AUJOURDHUI) return
       const [du, au] = [glisseMobile.depuis, iso].sort()
       etat.sel = { bien: bienId, duIso: du, auIso: au }
       // Peindre, JAMAIS re-rendre : un innerHTML sous le pointeur arreterait
-      // le geste en detruisant la case que le pointeur est en train de
-      // survoler (l'ancien appui long appelait `renderGrilleMobile`).
+      // le geste en detruisant la case survolee.
       peindreSelectionMobile(); renderFlottante()
+    })
+    // ⚠ LES CASES SONT DES BOUTONS FOCALISABLES, DONC ELLES DOIVENT REPONDRE
+    // AU CLAVIER (constat 5, et c'est deja grave dans
+    // apps/menages/prestataires.html). Entree et Espace produisent un `click`
+    // SANS aucun evenement de pointeur : en remplacant `click` par le
+    // pointeur, la version du 21 octobre avait rendu chaque case muette au
+    // clavier et a la technologie d'assistance. `detail === 0` distingue le
+    // clic synthetique du clavier de celui qui suit un geste de pointeur.
+    c.addEventListener('click', (e) => {
+      if (iso < AUJOURDHUI || etat.lectureSeule || !peutEcrire('reservations')) return
+      if (e.detail > 0) return
+      agirSurLaCaseTapee(bienId, iso)
     })
   })
   zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
@@ -994,7 +1104,10 @@ function brancherMobile () {
   // ‹ mois › global, bouton + PAR BIEN (arrivee aujourd'hui par defaut),
   // et reordonnancement par la poignee du bandeau.
   zone.querySelectorAll('[data-mois-nav]').forEach(b => b.addEventListener('click', () => naviguerMois(Number(b.dataset.moisNav))))
-  zone.querySelectorAll('[data-plus]').forEach(b => b.addEventListener('click', () => { etat.sel = null; ouvrirFormulaire('reservation', [AUJOURDHUI], b.dataset.plus) }))
+  // ⚠ `viderSelection()`, PAS `etat.sel = null` (constat 9). Le raccourci
+  // laissait la barre d'actions AFFICHEE, annoncant deux nuits, avec tous ses
+  // boutons inertes — le defaut exact que le point 6 dit fermer ailleurs.
+  zone.querySelectorAll('[data-plus]').forEach(b => b.addEventListener('click', () => { viderSelection(); ouvrirFormulaire('reservation', [AUJOURDHUI], b.dataset.plus) }))
   brancherDrag(zone)
 }
 
@@ -1130,8 +1243,16 @@ function plagesContigues (jours) {
 // les deux écrans (constat 5). Garde YieldFlow : le tarif est retiré des
 // segments AVANT toute mutation (défaut de recette du 20/09/2026).
 const JOURS_SEMAINE = [1, 2, 3, 4, 5, 6, 0]
+// ⚠ LA POPUP VIENT-ELLE DE LA SELECTION ? C'est ce qui decide si enregistrer
+// doit la vider. Le tiroir n'a PAS de voile : la grille reste vivante a cote,
+// l'hote peut taper une date (popup sur UNE nuit), puis selectionner quatre
+// nuits a cote, puis enregistrer — et le vidage inconditionnel faisait
+// disparaitre ses quatre nuits sous un toast « Enregistre » qui n'avait ecrit
+// que la premiere.
+let popupDepuisSelection = false
 function ouvrirPopup (jours, rubriqueOuverte = null, bienForce = null) {
   const bienId = bienForce || (etat.sel && etat.sel.bien) || etat.choisis[0]
+  popupDepuisSelection = !bienForce && !!etat.sel
   const bien = etat.biens.find(b => b.id === bienId) || {}
   const du = jours[0], au = jours[jours.length - 1]
   const pp = etat.pp[bienId] || { included: bien.included_guests || bien.capacity || 1, extraFee: Number(bien.extra_guest_fee) || 0 }
@@ -1321,7 +1442,16 @@ async function enregistrerPopup (bienId, corps) {
   // La selection a fait son office : elle se vide, et la barre d'actions avec
   // elle (point 6 du 21 octobre). Sinon l'hote enregistre, et la barre reste
   // la a proposer d'agir sur des nuits qu'il croit deja traitees.
-  viderSelection()
+  // ⚠ MAIS SEULEMENT SI CE SONT BIEN SES NUITS. On exige deux choses : que la
+  // popup ait ete ouverte DEPUIS la selection, et que la plage enregistree
+  // soit encore celle de la selection — l'hote a pu corriger « du / au » a la
+  // main avant d'enregistrer.
+  const sel = etat.sel
+  const memePlage = !!sel && sel.bien === bienId && (sel.duIso
+    ? (dates[0] === sel.duIso && dates[dates.length - 1] === sel.auIso)
+    : (dates[0] === joursSelection()[0] && dates[dates.length - 1] === joursSelection().slice(-1)[0]))
+  if (popupDepuisSelection && memePlage) viderSelection()
+  popupDepuisSelection = false
   await saveAvecAnnulation(bienId, finaux, { valeursAvant: null })
 }
 function plagesParJours (dates, jours) {

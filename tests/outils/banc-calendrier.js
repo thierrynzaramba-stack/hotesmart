@@ -122,6 +122,9 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
     }
   }
 
+  // Les DOUBLES, et rien d'autre : authentification, reseau, droits, journal.
+  // ⚠ CE BLOC EST UN GABARIT DE CHAINE : aucun backtick ne peut y vivre, les
+  // commentaires compris. Les references de code y sont donc entre guillemets.
   const doubles = `
     const requireAuth = async () => ({ user: { id: 'U1' } })
     const getUser = async () => ({ id: 'U1' })
@@ -129,14 +132,23 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
     const initErrorHandler = () => {}
     const logger = { error: (...a) => { window.__journal.push(a) }, warn () {}, info () {} }
     const supabase = { auth: { getSession: async () => ({ data: { session: { access_token: 'jeton' } } }) } }
-    const api = { get: async () => ({}), post: async () => ({}) }
+    // ⚠ « shared/calendar-core.js » appelle « api.calendar.load ». Sans cette
+    // branche, « charger() » levait a CHAQUE ecriture : la relecture d'apres
+    // ecriture, « construireEtats », « renderTout() » et la garde de course du
+    // jeton de lecture n'etaient jamais exerces, et le journal du banc etait
+    // pollue par une erreur que personne n'affirmait (constat 12).
+    const api = { get: async () => ({}), post: async () => ({}),
+      calendar: { load: async () => window.__chargement() } }
     const compteCourant = () => 'U1'
     const peutLire = () => true
-    const peutEcrire = () => ${ecriture ? 'true' : 'false'}
+    // ⚠ AVEUGLE A SON ARGUMENT, LE DOUBLE NE PROUVE QUE « UN BOOLEEN GARDE »,
+    // PAS « LEQUEL » : une faute de frappe sur le domaine passait au vert. Le
+    // double enregistre donc les domaines demandes, et les tests les affirment.
+    const peutEcrire = (domaine) => { window.__domaines.push(domaine); return ${ecriture ? 'true' : 'false'} }
     const estTitulaire = () => true
     const comptes = () => []
     const basculerVers = () => {}
-    const enteteCompte = () => ({})
+    const enteteCompte = () => ({ 'x-hs-compte': 'U1' })
   `
   // LE POINT D'OBSERVATION EST `fetch`, PAS `appel`. Le test traverse ainsi le
   // vrai `appel()` de la page : le jeton, l'en-tete de compte, la lecture du
@@ -149,6 +161,9 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
     }
   `
   window.__journal = []
+  window.__domaines = []
+  // Ce que rend la relecture d'apres ecriture ; un test peut la remplacer.
+  window.__chargement = () => ({ properties: [], inventory: {}, bookings: {}, fermetures: {} })
   try {
     window.eval(PARTAGES.map(scriptPartage).join('\n') + '\n' + doubles + '\n' + aliasDesImports() + '\n'
       + corpsDeLaPage() + '\n' + queue)
@@ -157,7 +172,12 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
   }
   window.fetch = async (chemin, options = {}) => {
     const corps = options.body ? JSON.parse(options.body) : null
-    envois.push({ chemin, methode: options.method || 'GET', corps })
+    // Les EN-TETES sont gardees : c'est la seule facon de prouver que le jeton
+    // et l'en-tete de compte partent. Les jeter rendait vrai le commentaire
+    // ci-dessus pour `appel()`, et faux pour ce que le test peut verifier
+    // (constat 13) : supprimer `enteteCompte()` laissait les 18 tests verts,
+    // et un compte delegue aurait ecrit ses prix sur le MAUVAIS compte.
+    envois.push({ chemin, methode: options.method || 'GET', corps, entetes: options.headers || {} })
     const r = await appel(chemin, corps)
     const statut = r && r.__statut ? r.__statut : 200
     const charge = r && r.__statut ? (r.__corps || {}) : (r || {})
@@ -166,7 +186,9 @@ function monter ({ large = true, appel = async () => ({ saved: 1, pushed: true }
   const cal = window.__cal
   // Les toasts : on les lit dans le DOM, la ou l'hote les lit.
   const lireToasts = () => [...window.document.querySelectorAll('.cal-toast')].map(e => e.textContent.trim())
-  return { dom, window, doc: window.document, cal, envois, toasts, lireToasts, journal: window.__journal }
+  return { dom, window, doc: window.document, cal, envois, toasts, lireToasts,
+    journal: window.__journal, domaines: window.__domaines,
+    fermer: () => { try { window.close() } catch {} } }
 }
 
 // ─── Peupler : l'etat du calendrier, construit par le code de la PAGE ──────
@@ -206,16 +228,30 @@ function peupler (banc, { biens, inv = {}, jours = 1, mois = null, decalage = 0 
 // exactement ce que le navigateur donne au gestionnaire, et c'est tout ce que
 // le code de la page lit. Si le code se mettait a appeler `setPointerCapture`
 // — absent de jsdom —, ce banc le dirait tout de suite.
-function geste (banc, el, type, { pointerType = 'mouse', bouton = 0 } = {}) {
+// ⚠ `boutons` EST UNE INFORMATION DU GESTE, PAS UN DETAIL. Le code de la page
+// refuse d'etendre une selection quand aucun bouton n'est tenu — un
+// relachement hors de la page laissait sinon la selection suivre le curseur
+// nu. Le banc doit donc simuler le bouton TENU pendant l'appui et le glisser,
+// et RELACHE au relachement, sinon il prouve un geste qui n'existe pas. Un
+// test peut forcer `boutons: 0` sur un survol : c'est precisement le cas du
+// relachement perdu.
+const BOUTONS_PAR_DEFAUT = (type) => /up$|cancel$|^click$/.test(type) ? 0 : 1
+function geste (banc, el, type, { pointerType = 'mouse', bouton = 0, boutons = null, pointerId = 1, detail = null } = {}) {
   const { window } = banc
   const bulle = !/enter$|leave$/.test(type)
-  const e = new window.MouseEvent(type, { bubbles: bulle, cancelable: true, button: bouton, view: window })
+  const e = new window.MouseEvent(type, {
+    bubbles: bulle, cancelable: true, button: bouton, view: window,
+    buttons: boutons == null ? BOUTONS_PAR_DEFAUT(type) : boutons,
+    detail: detail == null ? (/^click$/.test(type) ? 1 : 0) : detail
+  })
   Object.defineProperty(e, 'pointerType', { value: pointerType })
-  Object.defineProperty(e, 'pointerId', { value: 1 })
-  Object.defineProperty(e, 'isPrimary', { value: true })
+  Object.defineProperty(e, 'pointerId', { value: pointerId })
+  Object.defineProperty(e, 'isPrimary', { value: pointerId === 1 })
   el.dispatchEvent(e)
   return e
 }
+// Le clic du CLAVIER : un `click` sans geste de pointeur, donc `detail === 0`.
+const clicClavier = (banc, el) => geste(banc, el, 'click', { detail: 0 })
 const touche = (banc, el, key) =>
   el.dispatchEvent(new banc.window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
 
@@ -227,4 +263,4 @@ const casesTelephone = (banc, bienId) => [...banc.doc.querySelectorAll(
 const barreVisible = (banc) => !banc.doc.querySelector('[data-bind="flottante"]').hidden
 const saisie = (banc) => banc.doc.querySelector('input.cal-nuit__saisie')
 
-module.exports = { monter, peupler, geste, touche, casesBureau, casesTelephone, barreVisible, saisie, FR }
+module.exports = { monter, peupler, geste, clicClavier, touche, casesBureau, casesTelephone, barreVisible, saisie, FR }
