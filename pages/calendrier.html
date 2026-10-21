@@ -1176,13 +1176,39 @@ function actionPrix (jours, amorce = '') {
   const html = td.innerHTML
   td.innerHTML = `<input class="cal-nuit__saisie" type="text" inputmode="decimal" value="${esc(amorce || (valeurActuelle != null ? String(valeurActuelle) : ''))}">`
   const input = td.querySelector('input')
-  input.focus(); input.select()
+  input.focus()
+  // ⚠ RECETTE DU 21 OCTOBRE : `select()` SUR UNE AMORCE PERDAIT LE CHIFFRE.
+  // Selection puis touche « 1 » : la saisie s'ouvrait avec « 1 » DEJA
+  // SELECTIONNE, donc la frappe suivante le remplacait — taper 175 donnait 75,
+  // et 75 partait au canal. Sur une amorce, le curseur va donc en FIN de
+  // texte ; sur une valeur existante, `select()` reste juste, c'est ce qui
+  // permet de retaper un prix par-dessus l'ancien.
+  if (amorce) { const n = input.value.length; input.setSelectionRange(n, n) } else { input.select() }
+  // ⚠ LA BARRE FLOTTANTE RECOUVRAIT LA SAISIE (meme recette) : elle est fixee
+  // en bas au centre, et quand la ligne selectionnee tombe dessous, la case en
+  // cours d'edition est invisible. On la retire pendant la saisie — elle n'y
+  // sert a rien, et c'est une cible de clic en moins, donc un `blur` en moins.
+  const barre = $('[data-bind="flottante"]')
+  const barreEtaitVisible = barre && !barre.hidden
+  if (barre) barre.hidden = true
+  // ⚠ ET LE `blur` N'ENREGISTRE QUE CE QUE QUELQU'UN A TAPE. Thierry a demande
+  // la validation « par clic ailleurs » : elle reste. Mais la saisie est
+  // pre-remplie avec le prix du PREMIER jour et vaut pour TOUTE la plage —
+  // donc un clic ailleurs sans frappe poussait le prix du jour 1 sur les jours
+  // 2 a N, que personne n'avait tape. Mesure de la recette : saisie ouverte sur
+  // 180, clic sur une autre cellule, POST rate 180 et toast « Enregistre ».
+  // Mon test ne l'avait pas vu parce que sa fixture n'avait AUCUN prix
+  // pre-rempli : le refus « prix invalide » rendait le vert pour la mauvaise
+  // raison. Un test doit contenir la condition que son nom annonce.
+  let touche = !!amorce
+  input.addEventListener('input', () => { touche = true })
   let fini = false
   const terminer = (commit) => {
     if (fini) return
     fini = true
     const brut = input.value
     td.innerHTML = html
+    if (barreEtaitVisible && barre) barre.hidden = false
     if (!commit) return
     const prix = Number(String(brut).replace(',', '.'))
     if (!Number.isFinite(prix) || prix <= 0) return toast(t('cal.price_invalid'), { erreur: true })
@@ -1197,7 +1223,7 @@ function actionPrix (jours, amorce = '') {
     if (e.key === 'Enter') terminer(true)
     if (e.key === 'Escape') terminer(false)
   })
-  input.addEventListener('blur', () => terminer(true))
+  input.addEventListener('blur', () => terminer(touche))
 }
 // Fermer / Rouvrir a la vente : regles A.5 MOT POUR MOT.
 async function fermer (jours) {
