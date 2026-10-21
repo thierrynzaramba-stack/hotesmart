@@ -621,6 +621,8 @@
   "logements.avis_aucun": "Aucun avis",
   "logements.avis_non_lus": "Avis non lus",
   "logements.avis_echelle": "moyenne sur 5, notes Booking ramenées sur 5",
+  "erreur.bandeau": "Une erreur est survenue. Réessayez dans un instant.",
+  "erreur.fermer": "Fermer",
   "fiche.retour": "Logements",
   "fiche.voir_calendrier": "Voir le calendrier",
   "fiche.bloc_vente": "Où il est en vente",

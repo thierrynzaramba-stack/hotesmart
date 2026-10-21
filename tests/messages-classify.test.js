@@ -402,3 +402,28 @@ test('un message sans bien rattachable se voit dans les erreurs du cycle', async
   assert.ok(results.errors.some(e => /sans bien/.test(e.error)),
     'un compte dont les property_id ne résolvent jamais perdrait tout en silence')
 })
+
+test('LE TEST QUI COMPTE : un corps vide ou blanc n ecrit JAMAIS une chaine vide en base', async () => {
+  // `ota_reviews.content` est `text` nullable SANS CHECK : une ligne a `''` est
+  // acceptee par la base. Elle serait alors comptee comme un avis par le
+  // predicat SQL du ratio et refusee par la regle JS des cartes — le meme bien
+  // dirait « 1 avis recu » d'un cote et « Aucun avis » de l'autre.
+  //
+  // Le cas ne survenait pas, mais pour une raison qui n'etait PAS au point
+  // d'ecriture : la boucle saute plus haut tout message vide apres `trim()`.
+  // On eprouve donc `versLigne` DIRECTEMENT, sans cette garde lointaine.
+  const { versLigne } = require('../lib/cron-messages-classify')
+  const bien = { id: 'p', provider_property_id: 'R1' }
+  const resa = { booking_id: 'b1' }
+  const verdict = { extrait: null, gravite: 'gene' }
+  const msg = (body) => ({ id: 'm1', user_id: 'u', property_id: 'p', booking_id: 'b1', body, sent_at: '2026-10-01T00:00:00Z' })
+  for (const corps of ['', '   ', '\n\t ', null, undefined]) {
+    const l = versLigne(msg(corps), bien, resa, verdict)
+    assert.strictEqual(l.content, null, `corps ${JSON.stringify(corps)} : content doit etre null`)
+    assert.strictEqual(l.content_public, null)
+  }
+  // Contre-epreuve : un vrai texte passe, et il est conserve — debarrasse de
+  // ses espaces de bord, comme les trois autres writers le font.
+  const ok = versLigne(msg('  Le menage laissait a desirer  '), bien, resa, verdict)
+  assert.strictEqual(ok.content, 'Le menage laissait a desirer')
+})

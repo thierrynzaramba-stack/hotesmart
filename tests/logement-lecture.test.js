@@ -947,9 +947,15 @@ test('LE TEST QUI COMPTE : `origine: absent` n est PAS un bareme (recette stagin
 // `can_read(user_id, 'avis', …)` — c'est le constat de SECURITE de la revue du
 // 20 octobre, applique a la liste.
 
+// ⚠ `ota` EST TOUJOURS RENSEIGNE EN BASE, et depuis la dette 76 il DECIDE :
+// une source hors table n'est plus convertie du tout (decision de Thierry du
+// 20 octobre 2026 — supposer /10 pour un canal qui note sur 5 affichait ses
+// avis a la moitie de leur valeur, sans un mot). Une fixture sans `ota`
+// decrivait donc un cas que les writers ne produisent pas : ils ecrivent
+// `airbnb`, `booking` ou `direct`, jamais rien.
 const avisDe = (property_id, overall_score, extra = {}) => ({
   id: `av-${property_id}-${overall_score}-${Math.random().toString(36).slice(2, 7)}`,
-  user_id: COMPTE, property_id, property_id_ref: REF, statut: 'confirme',
+  user_id: COMPTE, property_id, property_id_ref: REF, statut: 'confirme', ota: 'airbnb',
   is_hidden: false, overall_score, content: 'Sejour parfait',
   received_at: '2026-10-10T00:00:00Z', ...extra
 })
@@ -1155,7 +1161,7 @@ test('LE TEST QUI COMPTE : le prix plancher est rendu en EUROS, pas en centimes'
 })
 
 test('LE TEST QUI COMPTE : `cles_motif` NE FIGURE PLUS dans le contrat de l API', async () => {
-  // ⚠ DETTE 71, TRANCHEE PAR THIERRY LE 21 OCTOBRE 2026. Ce champ etait
+  // ⚠ DETTE 80, TRANCHEE PAR THIERRY LE 21 OCTOBRE 2026. Ce champ etait
   // descendu dans la reponse publique et lu par AUCUN ecran. La spec §1 du lot
   // interdit le code dormant, et une donnee que personne ne consomme finit par
   // etre gardee « au cas ou » par la prochaine lecture — puis par la suivante.

@@ -14,7 +14,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, filtrePerimetreSql, peutLire, peutEcrire } = require('../lib/permissions')
 const { classerUnAvis } = require('../lib/cron-reviews-classify')
-const { ratioProprete, noteMoyenne, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
+const { ratioProprete, noteMoyenne, notesDuPerimetre, periodeNormalisee, borneDepuis, PERIODES } = require('../lib/stats-avis')
 const { assemblerCartes } = require('../lib/avis/cartes')
 const { origineALaPublication, ecrireAvecOrigine } = require('../lib/avis/origine')
 const { chargerGrille, criteresPour, deciderStatut, enregistrerReponses, abandonner, journaliser, hoteARepondu, marquerEvalueeAilleurs } = require('../lib/avis/evaluations')
@@ -619,7 +619,7 @@ async function cartesLister (req, res, garde) {
   const vide = { attente: [], recents: [], anciens: [] }
   if (filtre === '') {
     return res.status(200).json({ cartes: vide, anciens_total: 0, biens: [], periodes: Object.keys(PERIODES),
-      stats: { total: 0, positif: 0, remarque: 0, moyenne: null, notes: 0, periode, depuis: borneDepuis(periode) } })
+      stats: { total: 0, positif: 0, remarque: 0, note_sur_5: null, notes: 0, periode, depuis: borneDepuis(periode) } })
   }
   const bienDemande = req.query?.bien ? String(req.query.bien) : null
   if (bienDemande && refs !== null && !refs.map(String).includes(bienDemande)) {
@@ -696,8 +696,64 @@ async function cartesLister (req, res, garde) {
     biens: (biens || []).filter(b => refs === null || refs.map(String).includes(String(b.provider_property_id)))
       .map(b => ({ name: b.name, provider_property_id: b.provider_property_id })),
     periodes: Object.keys(PERIODES),
-    stats: { ...ratio, moyenne: moy.moyenne, notes: moy.notes, ...(moy.erreur ? { erreur: true } : {}) },
+    // ⚠ `note_sur_5` ET PLUS `moyenne` (decision de Thierry, 20 octobre 2026 :
+    // « tout sur 5 … meme regle partout ou une note globale s'affiche »). Un
+    // champ sur 10 qui subsisterait inviterait un ecran a le rediviser : c'est
+    // exactement le defaut qu'on referme — la page divisait une moyenne DEJA
+    // arrondie, donc arrondissait deux fois.
+    stats: { ...ratio, note_sur_5: moy.note_sur_5, notes: moy.notes, ...(moy.erreur ? { erreur: true } : {}) },
   })
+}
+
+// ─── `notes` : les deux nombres de l'accueil, et rien d'autre ─────────────
+//
+// ⚠ CE QU'ELLE REMPLACE. `pages/aujourdhui` appelait `cartes` une fois pour le
+// compte puis UNE FOIS PAR BIEN, pour n'en lire que `stats.moyenne` et
+// `stats.notes`. Chaque appel lisait jusqu'a 5000 avis et 2000 evaluations,
+// leurs sejours, leurs menages, et assemblait les cartes DEUX fois — tout cela
+// jete. Mesure de Thierry en production le 20 octobre 2026 : quatre appels,
+// 10,7 s puis 3 x 4-5 s, environ 75 % des ~20 s de la page.
+//
+// ⚠ LES GARDES SONT CELLES DE `cartes`, PAS UNE VERSION ALLEGEE. Le domaine
+// `avis` en lecture (pose par le routeur, `compteDelegue`), le perimetre par
+// bien applique EN SQL, et le 403 pour un bien hors perimetre. Un endpoint
+// rapide qui garde moins n'est pas un endpoint rapide, c'est une fuite.
+//
+// Elle ne touche ni `cartesLister` ni la page Avis : c'est une action de plus,
+// pas une modification de l'existante.
+async function notesLister (req, res, garde) {
+  const userId = garde.accountUserId
+  const periode = periodeNormalisee(String(req.query?.periode || ''))
+  const refs = refsDuPerimetre(garde.contexte)
+
+  // Perimetre vide ou inexploitable : zero, jamais « tous ».
+  //
+  // ⚠ ICI, C'EST UN RACCOURCI, PAS LA GARDE — et il faut le savoir, parce que
+  // le supprimer ne fait rougir aucun test (REVIEW.md regle 20 : « si je
+  // supprime cette garde-ci, lequel de mes tests rougit ? »). Ce qui PROTEGE,
+  // c'est que `refsLues` plus bas reste la liste du perimetre et part en
+  // `.in(...)`, parametre par postgrest-js : un perimetre vide rend `[]`, que
+  // `notesDuPerimetre` traite en zero, et une reference malformee ne matche
+  // simplement rien. Contrairement a `cartes`, cette action n'interpole aucune
+  // expression `.or(...)`, donc le tamis `REF_SQL_SURE` n'a rien a filtrer.
+  // Ce que le raccourci apporte : un aller-retour en moins pour un membre
+  // revoque, et la meme porte d'entree que `cartes`, qui en a besoin.
+  if (filtrePerimetreSql(refs, 'property_id_ref') === '') {
+    return res.status(200).json({ global: { note_sur_5: null, notes: 0 }, par_bien: {},
+      periode, depuis: borneDepuis(periode) })
+  }
+
+  const bienDemande = req.query?.bien ? String(req.query.bien) : null
+  if (bienDemande && refs !== null && !refs.map(String).includes(bienDemande)) {
+    return res.status(403).json({ error: 'Bien hors de votre périmètre' })
+  }
+  const refsLues = bienDemande ? [bienDemande] : (refs === null ? null : refs.map(String))
+
+  const out = await notesDuPerimetre(supabase, { userId, periode, refs: refsLues })
+  // ⚠ Une panne se DIT. Rendre `{ moyenne: null, notes: 0 }` la ferait lire
+  // comme « aucun avis », et l'accueil afficherait 0 avis avec aplomb.
+  if (out.erreur) return res.status(503).json({ error: 'Notes illisibles' })
+  return res.status(200).json(out)
 }
 
 const ETATS_LISTE = ['a_remplir', 'soumise_prestataire', 'a_valider', 'publiee',
@@ -2382,6 +2438,7 @@ async function router (req, res) {
   if (action === 'auto-validation') return await autoValidationLire(req, res, garde)
   if (action === 'list') return await lister(req, res, garde)
   if (action === 'cartes') return await cartesLister(req, res, garde)
+  if (action === 'notes') return await notesLister(req, res, garde)
   return res.status(400).json({ error: 'Action inconnue' })
 }
 

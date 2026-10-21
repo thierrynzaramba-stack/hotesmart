@@ -9,6 +9,8 @@ process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
 process.env.CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || 'cle-test'
 
+const { evaluerOr } = require('./faux-postgrest')
+const { OR_VOYAGEUR_A_ECRIT } = require('../lib/avis/naissance')
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const path = require('node:path')
@@ -37,8 +39,17 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         select (c, o) { q._col = c; q._count = o && o.count; q._head = !!(o && o.head); return chain },
         eq (c, v) { q._f[c] = v; return chain },
         neq (c, v) { q._neq[c] = v; return chain },
-        or (e) { q._or = e; return chain },
+        // ⚠ LES `or` S'ACCUMULENT. Il n'y en avait qu'un — le perimetre — et le
+        // double le traitait comme tel. Depuis le 20 octobre 2026,
+        // `ratioProprete` en pose un second (« le voyageur a ecrit ») : garder
+        // un seul champ faisait que le dernier ecrasait le premier, et toutes
+        // les lignes etaient filtrees.
+        or (e) { (q._ors = q._ors || []).push(String(e)); q._or = e; return chain },
         gte (c, v) { q._gte = [c, v]; return chain },
+        // ⚠ `gt` EST HONORE : `requeteDesNotes` filtre les notes exploitables
+        // en SQL (`.gt('overall_score', 0)`, meme predicat que `microSurCinq`).
+        // Sans cette ligne, le double levait et l'action rendait 500.
+        gt (c, v) { (q._gts = q._gts || []).push([c, v]); return chain },
         in (c, v) { q._ins.push([c, (v || []).map(String)]); return chain },
         is () { return chain }, not (c, op, v) { if (op === 'is' && v === null) q._nonNul = c; return chain },
         order () { return chain }, limit () { return chain },
@@ -50,7 +61,20 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         && q._ins.every(([c, vs]) => vs.includes(String(l[c])))
         && Object.entries(q._neq).every(([c, v]) => (c === 'statut' ? (l.statut || 'confirme') : l[c]) !== v)
         && (!q._gte || String(l[q._gte[0]] || '') >= String(q._gte[1]))
-        && (!q._or || String(q._or).includes(String(l.property_id_ref || l.provider_property_id)))
+        && (q._gts || []).every(([c, v]) => {
+          const a = Number(l[c]); const b = Number(v)
+          if (Number.isFinite(a) && Number.isFinite(b)) return a > b
+          return l[c] != null && String(l[c]) > String(v)
+        })
+        // ⚠ LES DEUX APPORTS : le curseur (`_gts`) vient du lot « notes en un
+        // appel », l'accumulation des `or` du lot « objet vide ». Garder un
+        // seul `_or` faisait ecraser le perimetre par la population, et toutes
+        // les lignes etaient filtrees.
+        && (q._ors || []).every(e => e === OR_VOYAGEUR_A_ECRIT
+          // La population : evaluee par le meme modele que les autres tests.
+          ? evaluerOr(l, e)
+          // Le perimetre : la liste des references autorisees.
+          : e.includes(String(l.property_id_ref || l.provider_property_id)))
         && (!q._nonNul || l[q._nonNul] != null)
       function rep () {
         let lignes
@@ -95,20 +119,24 @@ const MASQUE = avisDe('m', { is_hidden: true, overall_score: 0, content: null, c
 const EVAL = { id: 'e1', user_id: PROD, booking_uid: 'u-masque', property_id: BIEN_A.id, property_id_ref: REF_A, ota: 'airbnb', status: 'a_remplir', deadline_at: jour(5), published_at: null, public_text: null, ota_review_id: 'm', created_at: jour(-3) }
 const SNAP = { user_id: PROD, booking_id: 'u-masque', property_id: REF_A, snapshot: { firstName: 'Angela', lastName: 'X', arrival: j10(-4), departure: j10(-3) } }
 
-test('LE TEST QUI COMPTE (points A, C, E) : le titulaire — une carte par sejour, trois sections, et le masque ne compte ni au total ni a la moyenne', async () => {
+test('LE TEST QUI COMPTE (points A, C, E) : le titulaire — une carte par sejour, trois sections, et le masque ne compte ni au total ni a la note', async () => {
   preparer({ avis: [avisDe('a1', { overall_score: 8 }), MASQUE, avisDe('vieux', { received_at: jour(-90), overall_score: 10 })], evaluations: [EVAL], snapshots: [SNAP] })
   const r = await appeler({ periode: 'toujours' })
   assert.equal(r.code, 200)
   assert.deepEqual(r.body.cartes.attente.map(c => c.cle), ['sejour:u-masque'])
   const c = r.body.cartes.attente[0]
   assert.equal(c.avis[0].masque, true)
-  assert.equal(c.avis[0].note, null)
+  assert.equal(c.avis[0].note_sur_5, null)
   assert.deepEqual(c.voyageur, { prenom: 'Angela', nom: 'X' })
   assert.deepEqual(r.body.cartes.recents.map(x => x.cle), ['avis:a1'])
   assert.equal(r.body.cartes.anciens, null, 'les anciens ne partent que sur demande')
   assert.equal(r.body.anciens_total, 1)
   assert.equal(r.body.stats.total, 2, 'le masque est hors du total')
-  assert.equal(r.body.stats.moyenne, 9, 'moyenne de 8 et 10 : ni le 0 du masque')
+  // ⚠ SUR 5 (decision de Thierry, 20 octobre 2026) : 8 et 10 sur l echelle du
+  // coeur font 4,0 et 5,0, donc 4,5. Et le 0 du masque ne compte toujours pas —
+  // ni comme avis masque, ni comme objet vide.
+  assert.equal(r.body.stats.note_sur_5, 4.5, 'note de 8 et 10 : ni le 0 du masque')
+  assert.equal(r.body.stats.moyenne, undefined, 'plus de moyenne sur 10 : elle invitait a rediviser')
   const avec = await appeler({ periode: 'toujours', anciens: '1' })
   assert.deepEqual(avec.body.cartes.anciens.map(x => x.cle), ['avis:vieux'])
 })
@@ -162,4 +190,43 @@ test('SECURITE : une EVALUATION d un autre bien n apparait pas chez un membre li
   const r = await enTantQueMembre({ anciens: '1' })
   const toutes = [...r.body.cartes.attente, ...r.body.cartes.recents, ...r.body.cartes.anciens]
   assert.deepEqual(toutes.map(c => c.cle), ['sejour:u-masque'])
+})
+
+test('LE TEST QUI COMPTE : un objet d avis VIDE ne fait PAS de carte, et ne compte pas', async () => {
+  // Decision de Thierry du 20 octobre 2026 : « un objet d'avis vide ne compte
+  // nulle part (compte, ratio, cartes), meme regle que Logements ». L'objet
+  // Channex nait cache et vide ; Airbnb le revele a 14 jours MEME si le
+  // voyageur n'a rien ecrit. Il avait jusqu'ici une carte a lui, « 1 avis
+  // recu » dans la tuile, et « 0/10 » affiche — pendant que /logements disait
+  // « Aucun avis » pour le meme bien.
+  const VIDE = avisDe('objet-vide', { overall_score: null, content: null, content_public: null, is_hidden: false })
+  preparer({ avis: [avisDe('a1', { overall_score: 8 }), VIDE] })
+  const r = await appeler({ periode: 'toujours', anciens: '1' })
+  assert.equal(r.code, 200)
+  const toutes = [...r.body.cartes.attente, ...r.body.cartes.recents, ...(r.body.cartes.anciens || [])]
+  assert.deepEqual(toutes.flatMap(c => c.avis.map(a => a.id)), ['a1'],
+    'l objet vide ne fait pas de carte')
+  assert.equal(r.body.stats.total, 1, '« 1 avis recu » pour un objet vide etait le defaut')
+  assert.equal(r.body.stats.note_sur_5, 4, '8 / 10 = 4 / 5')
+})
+
+test('un avis MASQUE, lui, garde sa carte : c est un avis DEPOSE', async () => {
+  // La contre-epreuve du test precedent. Masque et vide n'ont ni note ni texte
+  // VISIBLES — mais le masque est un avis bel et bien depose, que la carte dit
+  // « masque par Airbnb jusqu a votre evaluation ». Ecarter les deux ferait
+  // disparaitre une evaluation a faire.
+  preparer({ avis: [MASQUE], evaluations: [EVAL], snapshots: [SNAP] })
+  const r = await appeler({ periode: 'toujours' })
+  assert.deepEqual(r.body.cartes.attente.map(c => c.cle), ['sejour:u-masque'])
+  assert.equal(r.body.cartes.attente[0].avis[0].masque, true)
+  assert.equal(r.body.cartes.attente[0].avis[0].note_sur_5, null, 'jamais « 0 / 5 » sur un masque')
+})
+
+test('LE TEST QUI COMPTE : plus AUCUN « /10 » ne descend vers l ecran', async () => {
+  preparer({ avis: [avisDe('a1', { overall_score: 9 })] })
+  const r = await appeler({ periode: 'toujours' })
+  const brut = JSON.stringify(r.body)
+  assert.ok(!/"note":/.test(brut), 'le champ `note` sur 10 ne descend plus : il invitait a reconvertir')
+  const carte = [...r.body.cartes.recents, ...r.body.cartes.attente][0]
+  assert.equal(carte.avis[0].note_sur_5, 4.5)
 })

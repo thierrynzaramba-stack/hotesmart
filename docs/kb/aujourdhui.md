@@ -31,7 +31,7 @@ Aucune lecture provider. Tout vient du cœur, par un endpoint existant ou une ta
 | À valider | `agent_tasks`, statut `pending` ou `pending_validation` | Même population que la messagerie, **restreinte aux séjours À VENIR ou EN COURS** (décision de Thierry du 11 octobre 2026, qui resserre celle du 10 — la clause « dernier message < 7 jours » est retirée : un séjour terminé ne produit plus de « message à traiter », même si l'échange est récent). Le badge Messages compte les seules `pending_validation` ouvertes. |
 | Fait pour vous, 7 jours | comptes `head` sur `menages` (`accepted_at`, hors annulés : « ménages attribués », pas « confirmés par vos prestataires » — une attribution par l'hôte ou d'office pose aussi `accepted_at`), `price_display_log` (`source = 'engine'`), `automation_incidents` (`overbooking`) | Une tuile par source lisible. `price_display_log` n'est lisible que par le titulaire (RLS `auth.uid()`). **Pas de tuile codes d'accès** : dette 62. |
 | Revenus et occupation sur 30 j | `GET /api/yield?granularite=jour`, 60 jours, par bien, sommés | CA réparti par nuit, au prix voyageur. Variation par rapport aux 30 jours précédents (infobulle). L'occupation varie en points ; son numérateur exclut les nuits vendues un jour en exception (`nuitees_hors_reference`), comme le moteur. Fenêtres calculées sur la date de Paris, jamais par pas de 24 h. |
-| Note sur 30 j | `GET /api/avis?action=cartes&periode=30j` (global, puis `&bien=` par bien) | `stats.moyenne` / `stats.notes` : la même fonction que la page Avis (`lib/stats-avis.js`). **Affichée sur 5** (`noteSur5` : le cœur stocke sur 10, Booking nativement et Airbnb normalisé — vérifié le 10 octobre 2026, max observé 10 des deux côtés), le nombre d'avis inchangé. |
+| Note sur 30 j | `GET /api/avis?action=notes&periode=30j`, **un seul appel** | `global` et `par_bien` dans la même réponse, comptés par `lib/stats-avis.js` — la même population que la page Avis. ⚠ **La note descend DÉJÀ sur 5, et l'écran ne la convertit plus** (20 octobre 2026) : la conversion et l'unique arrondi vivent dans `lib/avis/echelle.js`, en micro-unités entières. `noteSur5` a été retirée de `shared/aujourdhui.js` — elle divisait une moyenne elle-même arrondie, donc arrondissait deux fois, et Colomiers affichait 4,8 au lieu de 4,7. ⚠ Jusqu'au 20 octobre 2026 c'était `action=cartes`, **une fois en global puis une fois par bien** : 4 appels, 10,7 s puis 3 × 4-5 s en production. Un bien absent de `par_bien` vaut zéro ; le global n'est pas toujours la somme des biens affichés — `property_id_ref` est `not null` mais sans clé étrangère, donc un re-keying ou un bien supprimé laisse des avis dont la référence ne désigne plus aucun bien. Détail : `avis-voyageurs.md` §12 et §15, `performance.md` §4.5. |
 | Min et max mensuels, par bien | `GET /api/yield?granularite=mois`, les 12 mois complets précédents | Un mois compte **depuis le premier mois vendu**, s'il était ouvert (`jours_ouverts > 0`) et si toutes ses nuits ont un prix. Format court : « ▼ min · ▲ max/mois ». |
 
 **Par bien, jamais en global** (règle de la spec) : CA 30 j, note 30 j, min et max mensuels. Le bloc
@@ -101,5 +101,83 @@ choix), Réglages (titulaire), Avis, Aide, la langue (construite depuis `langues
 ## 6. Coût
 
 Deux appels à `/api/yield` par bien, deux biens à la fois. Chacun relit tout l'historique du compte.
-La note : un appel `/api/avis?action=cartes` global puis un par bien, qui assemble toutes les cartes pour ne lire que `stats`.
-Les chiffres arrivent après le reste de la page. Dette 61.
+Les chiffres arrivent après le reste de la page. **Dette 61**, moitié `yield` : toujours ouverte.
+
+⚠ **LA MOITIÉ « note » EST SOLDÉE** (20 octobre 2026, lot 2 du chantier
+chargement). Elle coûtait un appel `/api/avis?action=cartes` en global **puis
+un par bien**, chacun assemblant toutes les cartes pour ne lire que `stats` :
+mesuré en production, 4 appels, 10,7 s puis 3 × 4-5 s, environ 75 % des ~20 s
+de la page. C'est désormais **un seul** `action=notes`, une lecture paginée de
+`ota_reviews` — 4293 ms → 97 ms sur le compte réel. Parité prouvée sur les
+données de production (`scripts/verifier-parite-notes.js`, 28 comparaisons, 0
+divergence). Détail : `performance.md` §4.5, `avis-voyageurs.md` §15.
+
+## 7. Le chemin critique de l'ouverture (20 octobre 2026)
+
+`init()` enchaînait ses lectures en file : 8 niveaux d'aller-retours avant le
+premier rendu, pour un titulaire. Il en fait **3**. Ce qui a changé, et
+pourquoi, est dans `docs/kb/performance.md` §4.4 — ici, ce qu'il faut savoir
+en relisant la page :
+
+- **`I18n.init()` part en même temps que `requireAuth()`.** La promesse reçoit
+  un `.catch` vide AVANT le `await` : il n'avale rien (le `await i18nPret`
+  lèvera quand même), il évite seulement une promesse non traitée si
+  `requireAuth` redirige entre-temps.
+- **Plus de `getUser()`.** L'utilisateur vient de `session.user`, que
+  `requireAuth` renvoie déjà. ⚠ **Ce n'est pas tout à fait le même objet** :
+  `getUser()` lisait la ligne courante, `session.user` est celle qui a été
+  figée dans la session stockée. Un e-mail changé depuis un autre appareil met
+  jusqu'à la durée de vie d'un jeton à apparaître dans le bonjour. Affichage
+  seul — les données passent par RLS. Dette 72.
+- **Le prénom et la liste des biens partent ensemble.** Les deux ne dépendent
+  que du contexte de compte, déjà chargé. `lireBiens()` rend `[]` quand le
+  profil ne lit ni les réservations ni les ménages — exactement la valeur
+  initiale de `etat.biens`, donc aucun changement d'affichage.
+- **⚠ MAIS ILS N'ARRIVENT PAS ENSEMBLE, ET C'EST LE POINT DE LA REVIEW.** Un
+  `Promise.all` sur les deux RÉSULTATS faisait attendre au bonjour et aux
+  initiales la lecture `properties` — 9 colonnes, toutes les lignes du compte,
+  sans limite — dont ils n'ont aucun besoin. Dans un lot dont l'objet est le
+  premier affichage, c'était l'élément le plus visible de la page qu'on
+  retardait. Chacun écrit donc à **sa** résolution ; l'attente commune ne sert
+  plus qu'à la suite, qui a besoin de `etat.biens`. Second effet : `prenom()`
+  protège son appel par un `try`, `lireBiens()` non — dans une paire, le rejet
+  de l'un emportait l'en-tête de l'autre.
+  Le bonjour redemande encore à `profiles` ce que `/api/membres` a déjà rendu
+  dans `requireAuth` : dette 73.
+- **`HSNav.renderMenu` est passé devant la lecture du prénom** — et devant elle
+  seule. ⚠ Ne pas lire « le menu se rend avant les deux lectures, plus après » :
+  à `HEAD~1` il tournait **déjà** avant la lecture `properties`, et
+  `HSNav.render()` (via `nav(0)`), qui remplit `.topbar__nav` et `.bottombar`,
+  tourne **toujours après les deux**. Le lot a gagné un aller-retour sur le
+  menu, pas un déplacement complet. Le prénom et les initiales s'écrivent sur
+  des ancres du HTML statique (`data-bind="greeting"`, `data-bind="initials"`).
+
+**Et dans `requireAuth` (components/auth-guard.js), trois durcissements de la
+même review** — les lectures restent parallèles, la décision attend toujours
+les deux :
+- **Un état d'onboarding INCONNU ne vaut pas « jamais commencé ».** Un builder
+  PostgREST ne rejette pas : sans `.throwOnError()`, un 503, un refus RLS ou un
+  navigateur hors ligne **résolvent** en `{ data: null, error, status: 0 }`.
+  Lire `data` seul rendait la panne indistinguable de « pas de ligne » : INSERT
+  aveugle, puis `step = 0`, puis un hôte qui a fini son onboarding il y a des
+  mois — sur un appareil neuf, donc sans la garde `localStorage` — jeté dans
+  l'assistant par un incident passager. `etatConnu` garde le forçage : dans le
+  doute, on ne force rien.
+- **L'échec se lit à la présence de la clé, pas à sa véracité.** Une raison de
+  rejet peut être falsy (`Promise.reject()`, `throw undefined`) : `if (r.e)`
+  prenait alors le chemin du succès avec des données `undefined`, ce que le
+  `try/catch` remplacé par ce lot ne pouvait pas faire. D'où `'e' in r`.
+- **La CONSTRUCTION de la requête est dans l'enveloppe, pas seulement
+  l'attente.** Fabriquer la chaîne peut lever de façon synchrone ; hors
+  enveloppe, le throw sortait de `requireAuth` lui-même, qu'aucun appelant
+  n'attrape — la page restait sur son écran de chargement, sans même renvoyer
+  vers `/login`.
+
+Les cinq sont **éprouvés par exécution** dans `tests/accueil-rapide.test.js` :
+le module est privé de ses `import`, ses dépendances injectées, et le test
+pilote les promesses. Les garde-fous précédents comparaient des expressions
+régulières au texte source : mesuré hors de l'arbre, une vraie re-sérialisation
+les laissait verts et un renommage les faisait rougir (REVIEW.md règle 20).
+
+L'ordre des rendus qui suivent — le lot des 5 chargeurs, puis les notes, puis
+les chiffres par bien — n'a pas bougé (§6, dette 61).

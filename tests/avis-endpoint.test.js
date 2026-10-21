@@ -9,6 +9,8 @@ process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
 process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key'
 process.env.CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || 'cle-test'
 
+const { evaluerOr } = require('./faux-postgrest')
+const { OR_VOYAGEUR_A_ECRIT } = require('../lib/avis/naissance')
 const test = require('node:test')
 const assert = require('node:assert')
 const path = require('node:path')
@@ -45,7 +47,9 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
         // elle ne testait plus que la fixture.
         select (c, opts) { q._colonnes = c; q._count = opts?.count; q._head = !!(opts && opts.head); return chain },
         eq (c, v) { q._f[c] = v; return chain },
-        or (e) { q._or = e; return chain },
+        // ⚠ LES `or` S'ACCUMULENT (voir tests/avis-cartes-endpoint.test.js) :
+        // `ratioProprete` en pose un second depuis le 20 octobre 2026.
+        or (e) { (q._ors = q._ors || []).push(String(e)); q._or = e; return chain },
         gte (c, v) { q._gte = { colonne: c, valeur: v }; return chain },
         order () { return chain }, limit () { return chain },
         neq (c, v) { q._neq = q._neq || {}; q._neq[c] = v; return chain },
@@ -67,7 +71,8 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
           let c = [BIEN_A, BIEN_B].filter(b =>
             (q._f.user_id == null || b.user_id === q._f.user_id) &&
             (q._f.provider_property_id == null || b.provider_property_id === q._f.provider_property_id))
-          if (q._or) c = c.filter(b => String(q._or).includes(b.provider_property_id))
+          // Sur `properties`, le seul `or` possible est celui du perimetre.
+          for (const e of (q._ors || [])) c = c.filter(b => e.includes(b.provider_property_id))
           return Promise.resolve({ data: c, error: null })
         }
         if (nom === 'ota_reviews') {
@@ -88,7 +93,12 @@ function preparer ({ user = PROD, profil = null, permissions = null, avis = [], 
             (!q._ins || q._ins.every(f => f.valeurs.includes(String(a[f.colonne])))) &&
             (!q._gte || String(a[q._gte.colonne] || '') >= String(q._gte.valeur)) &&
             (!q._neq || !q._neq.statut || (a.statut || 'confirme') !== q._neq.statut))
-          if (q._or) c = c.filter(a => String(q._or).includes(a.property_id_ref))
+          for (const e of (q._ors || [])) {
+            c = e === OR_VOYAGEUR_A_ECRIT
+              // La population « le voyageur a ecrit », evaluee par le modele commun.
+              ? c.filter(a => evaluerOr(a, e))
+              : c.filter(a => e.includes(a.property_id_ref))
+          }
           if (q._count === 'exact') return Promise.resolve({ data: q._head ? null : c, count: c.length, error: null })
           return Promise.resolve({ data: c.map(a => projeter(a, q._colonnes)), error: null })
         }
@@ -176,14 +186,22 @@ const ilYa = (n, h = 0) => {
 }
 const jourIlYa = (n) => ilYa(n).slice(0, 10)
 
+// ⚠ CHAQUE FIXTURE PORTE UNE NOTE OU UN TEXTE, comme en base. Depuis le
+// 20 octobre 2026, un objet d'avis VIDE — ni note ni texte — ne compte nulle
+// part (decision de Thierry) : une fixture sans l'un ni l'autre decrivait un
+// cas qui n'est plus un avis, et faisait rougir les comptages pour la mauvaise
+// raison. Les tests qui veulent un objet vide l'ecrivent explicitement.
 const AVIS_A = { id: 'r1', user_id: PROD, statut: 'confirme', ai_analyzed_at: ilYa(3, 1), property_id_ref: REF_A, ai_clean_verdict: 'positif', received_at: ilYa(3),
+                 overall_score: 9, content: 'Séjour parfait',
                  // ⚠ De VRAIES dates de sejour en base : sans elles, l'assertion
                  // « aucun `stay_` ne sort » ne peut rien attraper.
                  stay_start: jourIlYa(8), stay_end: jourIlYa(5), guest_name: 'Fanny D.' }
-const AVIS_B = { id: 'r2', user_id: PROD, statut: 'confirme', ai_analyzed_at: ilYa(10, 1), property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: ilYa(10) }
+const AVIS_B = { id: 'r2', user_id: PROD, statut: 'confirme', ai_analyzed_at: ilYa(10, 1), property_id_ref: REF_B, ai_clean_verdict: 'remarque', received_at: ilYa(10),
+                 overall_score: 7, content: 'La clé était difficile à trouver' }
 // Avis d'un AUTRE compte : il ne doit jamais apparaitre, quel que soit le filtre.
 const AVIS_TIERS = { id: 'r3', statut: 'confirme', ai_analyzed_at: ilYa(5, 1), user_id: '33333333-3333-4333-8333-333333333333',
-                     property_id_ref: REF_A, ai_clean_verdict: 'remarque', received_at: ilYa(5) }
+                     property_id_ref: REF_A, ai_clean_verdict: 'remarque', received_at: ilYa(5),
+                     overall_score: 6, content: 'Correct' }
 
 function req (query = {}, body = null, method = 'GET') {
   return { method, query, body, headers: { authorization: 'Bearer jeton' } }

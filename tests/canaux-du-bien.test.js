@@ -565,8 +565,9 @@ test('la lecture des horloges est BORNEE, jamais tronquee en silence', async () 
 // ─── UN ECHEC SE VOIT (demande de Thierry, 19 octobre 2026) ────────────────
 //
 // ⚠ POURQUOI CES TROIS TESTS. Pendant la recette du 19 octobre, un releve a
-// echoue et PERSONNE n'a pu le savoir : `shared/logger.js` n'ecrit dans la
-// console que sur localhost, l'ecran se contentait de remettre « Reessayer »,
+// echoue et PERSONNE n'a pu le savoir : `shared/logger.js` n'ecrivait alors
+// dans la console que sur localhost (il ecrit partout depuis le 20 octobre
+// 2026), l'ecran se contentait de remettre « Reessayer »,
 // et l'horloge ne distinguait pas un compte vide d'un partenaire qui repond de
 // travers. Une heure de diagnostic pour une panne qui aurait du se lire d'un
 // coup d'oeil.

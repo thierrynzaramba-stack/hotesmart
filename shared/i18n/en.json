@@ -621,6 +621,8 @@
   "logements.avis_aucun": "No reviews",
   "logements.avis_non_lus": "Reviews not loaded",
   "logements.avis_echelle": "average out of 5, Booking ratings converted to a 5-point scale",
+  "erreur.bandeau": "Something went wrong. Please try again in a moment.",
+  "erreur.fermer": "Close",
   "fiche.retour": "Properties",
   "fiche.voir_calendrier": "View calendar",
   "fiche.bloc_vente": "Where it is listed",

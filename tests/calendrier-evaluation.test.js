@@ -53,7 +53,7 @@ test('évaluable et droit d’écriture : le bouton ouvre la fenêtre du cœur P
 test('publiée : le dit, sans bouton', async () => {
   const z = zone()
   assert.strictEqual(await brancherEvaluation({ resa: RESA, cible: z, bus: bus({ statut: { ok: true, data: { etat: 'publiee' } } }), aujourdhui: AUJ }), 'publiee')
-  assert.match(z.textContent, /Évaluation publiée ✓/)
+  assert.match(z.textContent, /Évaluation publiée/)
   assert.strictEqual(z.querySelector('button'), null)
 })
 
@@ -106,7 +106,7 @@ test('publiée pendant que la fiche est ouverte : la fiche le dit tout de suite'
   ecouteurs[0].fn({ booking_uid: 'AUTRE' })
   assert.ok(z.querySelector('button'), 'un autre séjour ne change rien')
   ecouteurs[0].fn({ booking_uid: 'BK-9' })
-  assert.match(z.textContent, /Évaluation publiée ✓/)
+  assert.match(z.textContent, /Évaluation publiée/)
   assert.strictEqual(ecouteurs.length, 0, 'l’écoute s’arrête')
 })
 
@@ -114,4 +114,31 @@ test('le bouton fait 44 px de haut au moins', async () => {
   const z = zone()
   await brancherEvaluation({ resa: RESA, cible: z, bus: bus({ statut: { ok: true, data: { etat: 'a_remplir', evaluable: true } } }), aujourdhui: AUJ })
   assert.match(z.querySelector('button').getAttribute('style'), /min-height:44px/)
+})
+
+test('LE TEST QUI COMPTE (règle V5) : les pictogrammes viennent du SPRITE, jamais d un emoji', async () => {
+  // Rappel de Thierry, 20 octobre 2026. Un emoji ne suit ni la couleur du
+  // thème ni le mode sombre, il change de dessin selon le système, et un
+  // lecteur d écran l annonce (« étoile blanche moyenne ») avant un libellé qui
+  // se suffit. Les deux blocs affichaient « ⭐ » et « ✓ ».
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const source = fs.readFileSync(path.join(__dirname, '..', 'shared', 'calendrier-resa.js'), 'utf8')
+  // Le code RENDU, commentaires exclus : c est lui qui atteint l écran.
+  const code = source.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.doesNotMatch(code, /[\u{1F300}-\u{1FAFF}\u{2B50}\u{2705}✓✔]/u,
+    'aucun pictogramme en dur dans ce qui est rendu')
+  // ⚠ LE HELPER COMPOSE L URL : on cherche donc l appel, et le fait que le
+  // helper pointe bien le sprite. Chercher « icons.svg#i-review » en dur
+  // echouerait sur un code pourtant juste — un test qui lit la forme et non le
+  // comportement.
+  assert.match(code, /picto\('i-review'\)/, 'l étoile vient du sprite')
+  assert.match(code, /picto\('i-check'\)/, 'la coche aussi')
+  assert.match(code, /const picto = \(id\) =>[\s\S]{0,200}icons\.svg#\$\{id\}/,
+    'et le helper reference bien le sprite partagé')
+  // Et dans la page Avis, dont le titre portait le même emoji.
+  const avis = fs.readFileSync(path.join(__dirname, '..', 'pages', 'avis.html'), 'utf8')
+  const titre = avis.slice(avis.indexOf('class="page-title"'), avis.indexOf('class="page-title"') + 400)
+  assert.doesNotMatch(titre, /[\u{1F300}-\u{1FAFF}\u{2B50}]/u)
+  assert.match(titre, /icons\.svg#i-review/)
 })

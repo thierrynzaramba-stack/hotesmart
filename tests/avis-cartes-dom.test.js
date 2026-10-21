@@ -13,7 +13,7 @@ test.before(async () => { ({ rendre, monter } = await import('../core/avis/carte
 const carte = (extra = {}) => ({
   cle: 'sejour:u1', section: 'recents', bien: 'La bulle', plateforme: { cle: 'airbnb' },
   voyageur: { prenom: 'Angela', nom: 'X' }, arrivee: '2026-10-01', depart: '2026-10-03', menage_par: 'Regina',
-  avis: [{ id: 'a1', masque: false, note: 10, texte: 'Parfait', extrait: null, verdict: 'positif', verdict_source: null, analyse: true, detecte: false }],
+  avis: [{ id: 'a1', masque: false, note_sur_5: 5, texte: 'Parfait', extrait: null, verdict: 'positif', verdict_source: null, analyse: true, detecte: false }],
   evaluation: { booking_uid: 'u1', status: 'publiee', etat: 'publiee', echeance: null, jours_restants: null, publie_le: '2026-10-04T10:00:00Z', texte: 'Merci Angela', origine: { cle: 'ia_valide', libelle: 'rédigé par l’IA, validé par vous' }, evaluable: false },
   ...extra,
 })
@@ -28,7 +28,9 @@ test('LE TEST QUI COMPTE (point A) : la carte dit le sejour en tete, puis « Son
   assert.match(li.querySelector('.hs-carte-infos').textContent, /La bulle · du 1 oct\. au 3 oct\. 2026 · ménage : Regina/)
   const blocs = [...li.querySelectorAll('.hs-carte-libelle')].map(x => x.textContent)
   assert.deepEqual(blocs, ['Son avis', 'Notre avis'])
-  assert.match(li.textContent, /10\/10/)
+  // ⚠ SUR 5, et jamais « /10 » (decision de Thierry du 20 octobre 2026).
+  assert.match(li.textContent, /5,0 \/ 5/)
+  assert.doesNotMatch(li.textContent, /\/10/)
   assert.match(li.textContent, /« Merci Angela »/)
 })
 
@@ -52,7 +54,7 @@ test('LE TEST QUI COMPTE (point E) : un avis masque par Airbnb se dit, sans 0/10
   const d = doc(rendre(donnees({ attente: [{ ...masque, section: 'attente' }] }), { avecBus: true }))
   const t = d.querySelector('.hs-carte').textContent
   assert.match(t, /Avis déposé, masqué par Airbnb jusqu’à votre évaluation\./)
-  assert.doesNotMatch(t, /0\/10/)
+  assert.doesNotMatch(t, /0 \/ 5|\/10/)
   assert.match(t, /2 jours restants/)
   const dernier = rendre(donnees({ attente: [{ ...masque, section: 'attente', evaluation: { ...masque.evaluation, jours_restants: 1 } }] }))
   assert.match(dernier, /dernier jour/)
@@ -81,12 +83,14 @@ test('monter : les ANCIENS ne se lisent qu a l ouverture, et une correction de p
   const appels = []
   const appel = async (chemin, methode, corps) => {
     appels.push(corps ? `${methode} ${corps.action}` : chemin)
-    return donnees({ recents: [carte()], anciens: chemin.includes('anciens=1') ? [] : null }, { anciens_total: 3, stats: { total: 1, moyenne: 9.6, notes: 1, positif: 1, remarque: 0, periode: '30j' } })
+    return donnees({ recents: [carte()], anciens: chemin.includes('anciens=1') ? [] : null }, { anciens_total: 3, stats: { total: 1, note_sur_5: 4.8, notes: 1, positif: 1, remarque: 0, periode: '30j' } })
   }
   const c = dom.window.document.getElementById('c')
   await monter(c, { appel, peutEcrire: true, filtres: () => ({ periode: '30j' }), zoneStats: dom.window.document.getElementById('s') })
   assert.deepEqual(appels, ['avis?action=cartes&periode=30j'])
-  assert.match(dom.window.document.getElementById('s').textContent, /9,6/)
+  // ⚠ SUR 5, et le libelle le dit (decision de Thierry du 20 octobre 2026).
+  assert.match(dom.window.document.getElementById('s').textContent, /4,8/)
+  assert.match(dom.window.document.getElementById('s').textContent, /note moyenne sur 5/)
   const details = c.querySelector('details[data-anciens]')
   details.open = true
   details.dispatchEvent(new dom.window.Event('toggle'))
@@ -99,4 +103,23 @@ test('monter : les ANCIENS ne se lisent qu a l ouverture, et une correction de p
   assert.equal(appels[2], 'POST requalifier')
   assert.equal(appels[3], 'avis?action=cartes&periode=30j&anciens=1', 'relue, anciens toujours ouverts')
   delete global.window
+})
+
+test('LE TEST QUI COMPTE : plus aucun « /10 » nulle part — ni sur une carte, ni dans le guide', () => {
+  // Decision de Thierry du 20 octobre 2026. La tuile disait « note moyenne sur
+  // 5 » et chaque carte juste en dessous affichait encore « 9/10 » : un ecran
+  // portait DEUX echelles, et le guide en annoncait une troisieme fois la
+  // premiere.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const racine = path.join(__dirname, '..')
+  const d = doc(rendre(donnees({ recents: [carte()] }), { peutEcrire: false }))
+  assert.doesNotMatch(d.querySelector('.hs-carte').textContent, /\/\s*10\b/)
+  assert.match(d.querySelector('.hs-carte-note').textContent, /\/ 5$/)
+  // Et dans ce qui s'ecrit a l'ecran, pas seulement dans ce rendu-ci.
+  for (const f of ['core/avis/cartes.js', 'pages/guide.html', 'pages/avis.html']) {
+    const src = fs.readFileSync(path.join(racine, f), 'utf8')
+    const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+    assert.doesNotMatch(code, /\d\s*\/\s*10\b|sur 10\b/, `${f} affiche encore une note sur 10`)
+  }
 })

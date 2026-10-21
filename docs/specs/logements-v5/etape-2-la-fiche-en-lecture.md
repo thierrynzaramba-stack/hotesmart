@@ -336,7 +336,7 @@ dégénérée depuis l'étape 0 — je l'avais prise pour une distinction exista
 **Correctif défait**, et l'impossibilité est désormais **gardée par un test** qui
 mesure `fraicheurDuBien` directement, pour qu'on ne refasse pas l'erreur. La
 distinction est un fait de **compte** (`canaux_releve`) que l'endpoint ne
-descend pas : **dette 70**.
+descend pas : **dette 79**.
 
 ## Les deux tests qui couvraient ce correctif mesuraient leur propre double
 
@@ -355,7 +355,7 @@ dénonçait trois heures plus tôt. Retirés.
 - Le texte du motif `jamais_releve` disait « jamais relevés ». Il dit maintenant
   ce qui est **vrai** — « Aucun canal n'est relié à ce logement » — puisque
   c'est sur cela qu'il se déclenche. Le nom du motif se corrige côté serveur :
-  dette 70.
+  dette 79.
 
 ## Les douze autres correctifs ont tenu
 

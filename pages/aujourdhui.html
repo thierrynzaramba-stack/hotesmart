@@ -6,6 +6,17 @@
 <title>HôteSmart</title>
 <link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
+<!-- ⚠ LA LANDING NE RECHAUFFE PLUS LE CDN. Avant le 20 octobre 2026, un hote
+     connecte passait par `/`, qui chargeait supabase-js : la poignee de main
+     jsdelivr et le cache HTTP etaient deja faits en arrivant ici. La sonde de la
+     landing part maintenant AVANT tout contact avec le CDN — cette page paie
+     donc le cout a froid, et elle ne decouvrait l'URL qu'apres avoir lu
+     shared/supabase.js, soit un niveau d'aller-retour de plus.
+     Le prechargement est sur l'URL EPINGLEE : c'est l'epinglage qui le rend sur.
+     `tests/accueil-rapide.test.js` refuse qu'elle s'ecarte de shared/supabase.js
+     — deux versions divergentes, ce serait deux telechargements. -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.118.0/+esm" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/shared/theme.css">
 <link rel="stylesheet" href="/shared/ui.css">
@@ -95,7 +106,7 @@
 <script src="/shared/nav.js"></script>
 <script type="module">
 import { requireAuth } from '/components/auth-guard.js'
-import { supabase, getUser, signOut } from '/shared/supabase.js'
+import { supabase, signOut } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
@@ -451,17 +462,57 @@ async function chargerChiffresBien (b) {
 }
 async function chargerNotes () {
   if (!peutLire('avis')) return
-  const lire = async (bien) => {
-    try {
-      const r = await appel(`/api/avis?action=cartes&periode=30j${bien ? `&bien=${encodeURIComponent(bien)}` : ''}`)
-      return r.stats && !r.stats.erreur ? { moyenne: r.stats.moyenne, notes: r.stats.notes } : null
-    } catch (e) { logger.error('Aujourdhui', 'avis', e); return null }
+  // ⚠ UN SEUL APPEL, PLUS 1 + N. Cette fonction demandait
+  // `/api/avis?action=cartes` une fois pour le compte PUIS UNE FOIS PAR BIEN,
+  // pour n'en garder que deux nombres. Chaque appel lisait jusqu'à 5000 avis et
+  // 2000 évaluations, leurs séjours et leurs ménages, et assemblait les cartes
+  // deux fois. Mesure de Thierry en production le 20 octobre 2026 : 10,7 s puis
+  // 3 x 4-5 s, environ 75 % des ~20 s de la page. `action=notes` fait la même
+  // lecture une fois et rend le global ET chaque bien (lib/stats-avis.js).
+  //
+  // ⚠ CE QUI CHANGE EN CAS DE PANNE, ET CE N'EST PAS « comme avant ». C'étaient
+  // N+1 lectures INDÉPENDANTES : un global en échec ne coûtait que la tuile, et
+  // chaque bien gardait son étoile ; un bien en échec ne coûtait que la sienne.
+  // C'est maintenant tout ou rien — un seul 503 efface la tuile ET les N
+  // étoiles. Il n'y a pas de reprise : `chargerNotes()` est lancé une fois
+  // depuis `init()`, sans `await`, donc l'hôte n'a que le rechargement de page.
+  // Assumé (une seule lecture, une seule vérité), mais dit.
+  let r = null
+  try {
+    r = await appel('/api/avis?action=notes&periode=30j')
+  } catch (e) { logger.error('Aujourdhui', 'avis', e) }
+
+  // ⚠ LES DEUX CÔTÉS JUGENT LA MÊME CHOSE. `appel()` avale un corps illisible
+  // (`r.json().catch(() => ({}))`) : un 200 vide ou en HTML — la panne que la
+  // mémoire du projet enregistre déjà sous « URL sans /api/v1 : 200 + HTML =
+  // 0 bien silencieux » — donne `r = {}`, qui est VRAI. Tester la véracité de
+  // `r` d'un côté et la clé de l'autre disait alors « inconnu » au global et
+  // « zéro avis », un FAIT, à chaque bien. On exige donc la clé des deux côtés.
+  // ⚠ UNE LECTURE ROGNÉE N'EST PAS UNE NOTE. L'endpoint pose `tronque` quand
+  // il a lu moins de lignes que le total annoncé (`db-max-rows`, ou le plafond
+  // de 50 000) : la note porte alors sur une fraction. L'afficher avec l'aplomb
+  // des autres serait affirmer un chiffre faux — règle du dépôt, un résultat
+  // non calculable ne s'affiche jamais comme un fait. On la traite donc comme
+  // une panne : tuile masquée, étoiles absentes, et la cause au journal.
+  // Inatteignable aujourd'hui (669 avis confirmés, une seule page).
+  if (r && r.tronque) logger.error('Aujourdhui', 'avis', 'lecture des notes incomplete')
+  const lu = r && !r.tronque && r.global && typeof r.global === 'object' ? r : null
+  const parBien = (lu && lu.par_bien) || {}
+  etat.noteGlobale = lu ? lu.global : null
+  for (const b of etat.biens) {
+    if (!b.provider_property_id) continue
+    const ref = String(b.provider_property_id)
+    // ⚠ `hasOwnProperty`, pas `parBien[ref]`. `par_bien` vient de `JSON.parse` :
+    // pour un bien dont la clé provider vaudrait `constructor`, `toString` ou
+    // `valueOf`, une lecture directe rendrait une FONCTION héritée d'Object —
+    // vraie, donc le repli ne serait jamais pris, et `etat.notesParBien`
+    // porterait une fonction au lieu d'une note.
+    const sienne = Object.prototype.hasOwnProperty.call(parBien, ref) ? parBien[ref] : null
+    // Un bien sans avis sur la période n'a pas de clé : c'est zéro, et c'est
+    // exactement ce que rendait l'appel par bien qu'on remplace.
+    etat.notesParBien.set(b.id, lu ? (sienne || { note_sur_5: null, notes: 0 }) : null)
   }
-  etat.noteGlobale = await lire(null)
   renderKpis()
-  await parPaquets(etat.biens.filter(b => b.provider_property_id).map(b => async () => {
-    etat.notesParBien.set(b.id, await lire(b.provider_property_id))
-  }), 3)
   renderBiens()
 }
 
@@ -491,8 +542,12 @@ function renderKpis () {
   }
   if (etat.noteGlobale) {
     const n = etat.noteGlobale
-    $('[data-bind="rating"]').innerHTML = n.moyenne != null
-      ? `<span class="kpi num row" style="gap: 6px">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(R.noteSur5(n.moyenne), { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span><span class="small muted">${esc(t('kpi.reviews', { n: n.notes }))}</span>`
+    // ⚠ PLUS DE DIVISION ICI. L'endpoint descend `note_sur_5`, deja ramenee sur
+    // 5 et arrondie UNE SEULE FOIS. La version d'avant divisait une moyenne
+    // elle-meme arrondie : deux arrondis, donc Colomiers affichait 4,8 la ou le
+    // calcul juste donne 4,7 (mesure du 20 octobre 2026).
+    $('[data-bind="rating"]').innerHTML = n.note_sur_5 != null
+      ? `<span class="kpi num row" style="gap: 6px">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(n.note_sur_5, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span><span class="small muted">${esc(t('kpi.reviews', { n: n.notes }))}</span>`
       : `<span class="small muted">${esc(t('kpi.reviews', { n: 0 }))}</span>`
     $('[data-bind="kpi-rating"]').hidden = false
     visible = true
@@ -535,8 +590,8 @@ function renderBiens () {
     const mm = chiffres && chiffres.mois
       ? `<span class="caption muted num">${esc(t('properties.range', { min: monnaie(chiffres.mois.min, b.currency), max: monnaie(chiffres.mois.max, b.currency) }))}</span>`
       : ''
-    const etoile = note && note.moyenne != null
-      ? `<span class="property__rating">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(R.noteSur5(note.moyenne), { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>` : ''
+    const etoile = note && note.note_sur_5 != null
+      ? `<span class="property__rating">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(note.note_sur_5, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>` : ''
     const puce = etat.menagesOk
       ? `<span class="chip">${esc(t(e.occupeCeSoir ? 'properties.occupied' : 'properties.free'))}</span>` : ''
     // La photo de couverture (properties.photo_url, lot photos) ; sans elle,
@@ -572,18 +627,26 @@ async function prenom (user) {
 }
 
 async function init () {
+  // I18n ne dépend pas de la session : les deux partent ENSEMBLE. Le `.catch`
+  // vide n'avale rien — `await i18nPrêt` lèvera quand même plus bas ; il évite
+  // seulement une promesse non traitée si `requireAuth` redirige entre-temps.
+  const i18nPret = I18n.init()
+  i18nPret.catch(() => {})
   const session = await requireAuth()
   if (!session) return
-  await I18n.init()
+  await i18nPret
   document.addEventListener('i18n:changed', () => location.reload())
 
-  const user = await getUser()
-  const brut = await prenom(user)
-  // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
-  // la partie locale de l'e-mail, en minuscules.
-  const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
-  $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
-  $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
+  // `session.user` vient de `requireAuth` : plus de `getUser()`, qui refaisait
+  // un aller-retour vers /auth/v1/user.
+  // ⚠ CE N'EST PAS TOUT A FAIT LE MÊME OBJET. `getUser()` lisait la ligne
+  // COURANTE ; `session.user` est celle qui a été figée dans la session stockée,
+  // et elle ne se rafraîchit qu'au renouvellement du jeton. Un e-mail changé
+  // depuis un autre appareil, ou un `user_metadata` mis à jour, met donc jusqu'à
+  // la durée de vie d'un jeton à apparaître dans le bonjour et les initiales.
+  // Affichage seul : toute lecture de données passe par RLS, avec un jeton
+  // vérifié à chaque requête. Dette 72.
+  const user = session.user
   // La création de bien n'est pas déléguée (cf. pages/biens.html).
   $('[data-bind="add-property"]').hidden = !estTitulaire()
 
@@ -605,16 +668,37 @@ async function init () {
     ].filter(Boolean)
   })
 
+  // Le prénom et les biens ne dépendent que du contexte de compte, déjà chargé
+  // par `requireAuth` : les deux requêtes partent ENSEMBLE, elles s'attendaient
+  // l'une l'autre pour rien.
+  //
   // Les biens : lecture directe sous RLS (`properties_select` = périmètre du
   // profil). Pas /api/channel-property, qui interroge Beds24 en direct.
-  if (peutLire('reservations') || peutLire('menages')) {
+  const lireBiens = async () => {
+    if (!peutLire('reservations') && !peutLire('menages')) return []
     const { data, error } = await supabase.from('properties')
       .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency, photo_url')
       .eq('user_id', compteCourant())
       .order('name', { ascending: true })
     if (error) logger.error('Aujourdhui', 'biens', error)
-    etat.biens = data || []
+    return data || []
   }
+  // ⚠ ILS PARTENT ENSEMBLE, ILS N'ARRIVENT PAS ENSEMBLE. Un `Promise.all` sur
+  // les deux resultats faisait attendre au bonjour et aux initiales — qui ne
+  // dependent que de `prenom()` — la lecture `properties`, la plus lourde des
+  // deux et sans limite de lignes. Dans un lot dont l'objet est le premier
+  // affichage, c'est l'element le plus visible de la page qu'on retardait.
+  // Chacun ecrit donc a SA resolution ; l'attente commune ne sert plus qu'a la
+  // suite, qui a besoin de `etat.biens`.
+  const pNom = prenom(user).then(brut => {
+    // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
+    // la partie locale de l'e-mail, en minuscules.
+    const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
+    $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
+    $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
+  })
+  const pBiens = lireBiens().then(biens => { etat.biens = biens })
+  await Promise.all([pNom, pBiens])
   // ⚠ PLUS DE `liens` : l'entrée Calendrier mène à l'écran V5 `/calendrier`,
   // le même depuis toutes les pages. Épingler ici le premier bien donnait à
   // cet onglet deux comportements selon la page d'où on cliquait.

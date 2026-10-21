@@ -35,6 +35,52 @@ Ce qui ne se répare pas, c'est la ligne de journal : elle dira faux à qui la
 lira dans six mois, et l'historique est la seule chose qu'on ne peut pas
 corriger sans réécrire ce que deux branches ont déjà tiré.
 
+## COORDINATION DES SESSIONS
+
+**UNE SEULE SESSION TIENT `staging` ET `main` : le CHEF DE FILE.** Les autres ne
+mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
+
+1. **Une seule session merge.** Les autres lui envoient « branche X prête », avec
+   les cinq choses sans lesquelles il ne peut pas décider : elle est **poussée**,
+   la **review** est passée, les **tests sont verts** (le compte attendu est
+   zéro), les **fichiers touchés**, et ses **dépendances** — de quelle branche
+   elle part, et laquelle doit passer avant elle.
+2. **Le chef de file merge UN PAR UN, dans l'ordre des dépendances.** Entre deux
+   merges : il vérifie le déploiement pour le **SHA complet** (voir la section
+   dédiée plus bas) et **observe un cycle de cron**. Un cycle, c'est 5 minutes :
+   c'est là que se voient les erreurs qu'aucun test ne montre.
+3. **Vers `main`, uniquement des branches parties de `main`.** Jamais une branche
+   partie de `staging` : elle emporterait dans `main` les lots des autres
+   sessions, dont la recette n'est pas faite — et l'historique ne se corrige pas
+   sans réécrire ce que d'autres ont tiré.
+4. **Le go prod vient de Thierry, et il l'ouvre LUI-MÊME au chef de file**, en
+   listant les branches dans l'ordre. Le chef de file exécute alors la file
+   **sans redemander à chaque session**. ⚠ Un go **relayé** par une autre
+   session n'est pas un go : une session ne peut pas autoriser ce qu'elle n'a pas
+   reçu, et la session qui pousse est celle qui répond du push.
+5. **Authentification, argent, envois aux voyageurs : on attend que Thierry soit
+   là** pour tester juste après le merge. Ces trois domaines ont en commun qu'un
+   défaut ne se voit pas à l'écran du développeur — il se voit sur le téléphone
+   d'un voyageur, sur un relevé, ou dans une session qui ne s'ouvre plus.
+6. **Au moindre écart, le chef de file ARRÊTE la file et prévient Thierry** : un
+   test rouge, un conflit non trivial, un cron en erreur, un déploiement absent.
+   Il n'enchaîne pas « pour voir ». Une file arrêtée se reprend ; un `main` dans
+   lequel on a poussé par-dessus un doute, non.
+7. **On ne sollicite Thierry que pour trois choses** : les **décisions produit**,
+   la **recette**, et l'**ouverture d'un go prod**. Tout le reste — l'ordre des
+   merges, les conflits triviaux, la vérification des déploiements — se règle
+   entre sessions.
+
+**Pourquoi cette section existe.** Le 18 septembre 2026, deux sessions ont
+travaillé dans le même clone et l'une a emporté 220 lignes de correctifs de
+sécurité non relues dans un commit qui annonçait « aucune de code » (voir la
+section sur le clone partagé). Le 20 octobre 2026, le problème a changé
+d'échelle : quatre branches de trois sessions attendaient `staging` et `main` en
+même temps, deux d'entre elles touchaient les mêmes fichiers avec des contrats
+différents, et un « go prod » a été relayé d'une session à l'autre. Ce qui coûte
+cher n'est plus l'écriture simultanée — les worktrees l'ont réglée — c'est
+**l'ordre des merges et l'origine de l'autorisation**.
+
 ## RÉFLEXE MACHINE (multi-machines Mac bureau / PC portable)
 - AVANT toute modif quand on change d'ordi : `git checkout main && git pull origin main`.
 - Workflow commit : checkout main && pull && add && commit && push origin main && checkout channex-phase1 && merge main && push origin channex-phase1.

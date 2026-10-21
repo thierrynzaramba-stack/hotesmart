@@ -26,7 +26,7 @@ const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
 const {
   calculerIndicateurs, comparerAN1, clePeriode, periodePrecedente
 } = require('../lib/yield/indicateurs')
-const { joursOuverts, estJourISO, joursDeLaPeriode } = require('../lib/yield/capacite')
+const { joursOuverts, lignesDuCalendrier, estJourISO, joursDeLaPeriode } = require('../lib/yield/capacite')
 const { joursExclus, exceptionsDuBien } = require('../lib/yield/exceptions')
 const { pickup } = require('../lib/yield/pickup')
 const { lireVacances, couverture, etendueSource } = require('../lib/yield/vacances')
@@ -46,6 +46,12 @@ const JOURS_MAX = 800
 // reponse de 1,2 Mo. Mesure en review. Sur la fenetre maximale : 1 896 appels
 // et 2,6 Mo, soit plus de 300 allers-retours reseau — au-dela du temps
 // d'execution d'une fonction. L'ecran restait sur « Lecture… » puis tombait.
+//
+// ⚠ DEPUIS LE 20 OCTOBRE 2026, CE N'EST PLUS LE RESEAU QUI BORNE, c'est la
+// taille de la REPONSE et le classement en memoire : la lecture du calendrier
+// est hissee, donc 1 461 periodes ne font plus 1 461 requetes mais une seule.
+// La borne reste — 1,2 Mo de reponse et 1 461 classements restent de trop —
+// mais sa justification par les allers-retours ne vaut plus.
 const PERIODES_MAX = 200
 
 // ⚠ ET UNE BORNE SUR LA LECTURE DU SNAPSHOT. La colonne `raw` porte le payload
@@ -275,10 +281,11 @@ module.exports = async (req, res) => {
     }))
 
     // ─── Capacites, periode par periode ─────────────────────────────────────
-    // ⚠ EN PARALLELE, PAR LOTS. Trois ans en mois font 36 lectures de
-    // `calendar_inventory` : en serie, la reponse mettait 7 secondes. Par lots
-    // de 6, elle passe sous la seconde et demie sans ouvrir 36 connexions d'un
-    // coup — ce qui ferait tomber le pool sur un compte a plusieurs biens.
+    // ⚠ LE LOT DE 6 A DISPARU LE 20 OCTOBRE 2026, et ce commentaire disait le
+    // contraire. Il justifiait des lectures PARALLELES par la taille du pool de
+    // connexions — or il n'y a plus qu'une lecture a faire. Le laisser en tete
+    // de section, c'est inviter la prochaine session a « restaurer » un
+    // LOT = 6 qui n'a plus rien a borner.
     // ⚠ LES CAPACITES NE SERVENT QUE POUR LES PERIODES DEMANDEES ET LEURS N-1.
     // Premiere version : toutes les periodes de l'historique de trois ans. En
     // granularite « jour » cela faisait 1 096 lectures de `calendar_inventory`
@@ -297,18 +304,79 @@ module.exports = async (req, res) => {
           + ` : réduisez la fenêtre ou choisissez un détail moins fin`
       })
     }
-    const capacites = new Map()
-    const LOT = 6
-    for (let i = 0; i < cles.length; i += LOT) {
-      const tranche = cles.slice(i, i + LOT).map(cle => {
-        const b = bornesDePeriode(cle)
-        if (!b) return null
-        return joursOuverts(supabase, bien, b[0], b[1], {
-          aujourdHui: auj, estimerLePasse: true
-        }).then(r => [cle, r])
-      }).filter(Boolean)
-      for (const [cle, r] of await Promise.all(tranche)) capacites.set(cle, r)
+    // ⚠ UNE SEULE LECTURE DU CALENDRIER POUR TOUTES LES PERIODES.
+    //
+    // `joursOuverts` porte cette facilite depuis le lot 4.6 (`options.lignes`)
+    // et la documente avec sa mesure — « le radar douze mois appelle cette
+    // fonction 24 fois […] 2 673 ms de requetes […] avec les lignes fournies,
+    // c'est UNE lecture et 24 classifications en memoire ». Cet endpoint ne
+    // s'en servait pas : il appelait la fonction une fois par periode, chacune
+    // avec sa propre requete, par paquets de 6.
+    //
+    // Mesure du 20 octobre 2026, accueil connecte sur le compte de production
+    // (4 biens raccordes), comptee en instrumentant le code d'avant :
+    // l'appel quotidien demande 60 jours, et `cles` y ajoute la periode
+    // PRECEDENTE de chacun — **120** periodes, donc 120 requetes en 20 vagues
+    // de 6 ; l'appel mensuel (douze mois complets) en demande **24**, soit
+    // 4 vagues. Par bien : 144 requetes en 24 allers-retours series. Pour la
+    // page : 4 x (120 + 24) = **576 requetes** sur `calendar_inventory`.
+    // Releve par Thierry dans son navigateur : /api/yield de 1,6 s a 5,6 s par
+    // appel, le dernier fini a ~15,7 s apres l'ouverture.
+    //
+    // ⚠ CHAQUE JOUR VISE APPORTE EXACTEMENT UN N-1 DISTINCT, donc le compte est
+    // toujours PAIR : une premiere version de ce commentaire disait « 121 », un
+    // nombre arithmetiquement impossible, et « 580 » s'en deduisait.
+    //
+    // ⚠ LA REGLE NE BOUGE PAS D'UN IOTA, et ce n'est pas une promesse : c'est
+    // le contrat que `lib/yield/capacite.js` ecrit en tete de son chemin
+    // `fournies` — il REFILTRE sur la fenetre ET sur le bien, et un test du
+    // module compare les deux chemins sur les memes donnees. Seule la SOURCE
+    // des lignes change.
+    //
+    // ⚠ ET UNE LECTURE EN ECHEC SE PROPAGE, elle ne rend pas une plage vide.
+    // Un tableau vide ferait tomber chaque jour en « sans ligne », donc ferme :
+    // un denominateur faux, credible et silencieux — exactement ce que le
+    // module refuse de deviner (« un denominateur invente est pire qu'un trou
+    // declare »). Le `throw` rejoint le `catch` de l'enveloppe, qui rend 500.
+    // ⚠ LES BORNES SONT FILTREES PAR `estJourISO`, ET C'EST UNE REGRESSION QUE
+    // CE FILTRE FERME. `periodePrecedente` fait de l'arithmetique de CHAINE :
+    // `periodePrecedente('2024-02-29')` rend « 2023-02-29 », qui n'existe pas,
+    // et `bornesDePeriode` ne verifie que la FORME, donc la laisse passer. Comme
+    // c'est le minimum lexicographique, elle devenait le debut de la plage et
+    // partait telle quelle dans le `.gte('date', …)` — Postgres refuse
+    // (`date NOT NULL`, 22008), la lecture leve, et TOUTE la reponse tombe en
+    // 500. L'ancien chemin par periode ne l'emettait jamais : `joursOuverts`
+    // ecartait cette cle avant toute lecture (`estJourISO` faux -> aucun jour).
+    //
+    // Atteignable a la main en permanence depuis « Exploration » (date libre +
+    // « Par jour »), et TOUT SEUL depuis l'accueil, qui demande
+    // `debut = aujourd'hui - 60` : le 29 avril 2028, `debut` vaut 2028-02-29 et
+    // la periode precedente « 2027-02-29 ». Les tuiles des quatre biens
+    // seraient tombees en erreur ce jour-la.
+    const bornes = cles.map(bornesDePeriode)
+      .filter(b => b && estJourISO(b[0]) && estJourISO(b[1]))
+    let lignesCalendrier = []
+    if (bornes.length) {
+      // ⚠ LA LECTURE VIENT DE `lib/yield/capacite.js`, elle n'est pas recopiee
+      // ici : c'est le module qui definit la projection (dont `property_id`,
+      // qui ARME le refus d'une ligne d'un autre bien dans son chemin
+      // `fournies`) et la pagination. Sept copies de cette requete existaient
+      // dans le seul chemin yield, avec trois ordres de colonnes.
+      lignesCalendrier = await lignesDuCalendrier(supabase, bien.id,
+        bornes.map(b => b[0]).sort()[0],
+        bornes.map(b => b[1]).sort().slice(-1)[0])
     }
+    const capacites = new Map()
+    // Plus de lot : il bornait les requetes CONCURRENTES, et il n'y a plus de
+    // requete. Ce qui reste est du classement en memoire.
+    const classees = await Promise.all(cles.map(cle => {
+      const b = bornesDePeriode(cle)
+      if (!b) return null
+      return joursOuverts(supabase, bien, b[0], b[1], {
+        aujourdHui: auj, estimerLePasse: true, lignes: lignesCalendrier
+      }).then(r => [cle, r])
+    }).filter(Boolean))
+    for (const [cle, r] of classees) capacites.set(cle, r)
 
     // ─── Realise, et sa comparaison N-1 ─────────────────────────────────────
     const indicateurs = comparerAN1(calculerIndicateurs(eclatements, {
@@ -497,3 +565,11 @@ module.exports = async (req, res) => {
     return res.status(500).json({ error: 'Lecture des indicateurs impossible' })
   }
 }
+
+// ⚠ EXPORTES POUR ETRE EPROUVES, PAS POUR ETRE RECOPIES.
+// `scripts/verifier-parite-capacites.js` doit construire EXACTEMENT les memes
+// periodes que cet endpoint pour comparer l'ancien chemin (une requete par
+// periode) au nouveau (une lecture, puis `options.lignes`). Les recopier dans
+// le script aurait prouve la copie, pas le chemin — regle du depot. Meme forme
+// que `module.exports.outilsAutoValidation` dans api/avis.js.
+module.exports.outilsPeriodes = { clesDePeriode, bornesDePeriode, JOURS_MAX, PERIODES_MAX }
