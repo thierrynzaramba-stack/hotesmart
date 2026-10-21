@@ -322,9 +322,18 @@ test('LE TEST QUI COMPTE (SÉCURITÉ) : sans le droit d écriture, le bloc Suppr
   assert.ok(![...d.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent).includes('Supprimer ce logement'))
 })
 
-// ═══════════════════════════════════════════════════════════════════════════
-// 6. Avis — la même note que la liste, des pouces neutres
-// ═══════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════
+// 6. Les avis, et le compteur de propreté qui est dans le MÉNAGE
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Correction de Thierry du 21 octobre 2026 : « les pouces de propreté vont dans
+// le bloc Ménage (pas Avis), en vert/rouge comme l'écran Ménages. Le bloc
+// Avis = note sur 5 + nombre d'avis seulement. »
+
+// Le corps d'un bloc, désigné par son titre — pour ne pas confondre
+// « présent dans la fiche » et « présent dans LE BON bloc ».
+const blocNomme = (d, titre) => [...d.querySelectorAll('.fic-bloc')]
+  .find(b => b.querySelector('.fic-bloc__titre').textContent === titre)
 
 test('LE TEST QUI COMPTE : la fiche dit la MÊME note que la carte de la liste', () => {
   // Décision de Thierry du 21 octobre : « les deux écrans doivent dire la même
@@ -336,25 +345,111 @@ test('LE TEST QUI COMPTE : la fiche dit la MÊME note que la carte de la liste',
   assert.ok(note.querySelector('[data-icone="i-review"]'), 'la même étoile du sprite')
 })
 
-test('LE TEST QUI COMPTE : les pouces sont NEUTRES, et il n y a aucune légende sous les chiffres', () => {
-  // « Les pouces servent uniquement à la propreté, en couleur neutre, jamais en
-  // rouge — juste le compteur, sans légende » (Thierry, 21 octobre). La charte
-  // §7 réserve le rouge à la suppression et aux erreurs.
+test('LE TEST QUI COMPTE : les pouces sont dans le bloc MÉNAGE, et le bloc Avis ne porte QUE la note', () => {
+  // « Les pouces de propreté vont dans le bloc Ménage (pas Avis) [...] Le bloc
+  // Avis = note sur 5 + nombre d'avis seulement » (Thierry, 21 octobre 2026).
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
+  const menage = blocNomme(d, 'Ménage')
+  const avis = blocNomme(d, 'Avis des voyageurs')
+
+  assert.ok(menage.querySelector('[data-proprete]'), 'le compteur appartient au bloc Ménage')
+  assert.equal(avis.querySelector('[data-proprete]'), null, 'et il n est plus dans les Avis')
+  assert.equal(avis.querySelectorAll('[data-pouce]').length, 0)
+  // Le bloc Avis ne dit QUE la note : rien d autre que la ligne partagée.
+  assert.deepEqual([...avis.querySelector('.fic-avis').children].map(x => x.className),
+    ['log-avis caption'])
+  // Et le bloc Ménage garde sa prestataire : le compteur s ajoute, il ne remplace pas.
+  assert.match(menage.querySelector('[data-presta]').textContent, /Regina/)
+})
+
+test('LE TEST QUI COMPTE : VERT et ROUGE, par les classes de l écran Ménages — pas une copie', () => {
+  // « En vert/rouge comme l écran Ménages (charte : vert OK, rouge problème) ».
+  // Le rendu porte les MÊMES classes que la note d une prestataire, et c est
+  // shared/ui.css qui les colore une seule fois.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
+  const bon = d.querySelector('[data-pouce="positif"]')
+  const mauvais = d.querySelector('[data-pouce="remarque"]')
+  assert.ok(bon.classList.contains('men-note__bon'))
+  assert.ok(mauvais.classList.contains('men-note__mauvais'))
+  assert.equal(bon.querySelector('b').textContent, '3')
+  assert.equal(mauvais.querySelector('b').textContent, '1')
+  assert.ok(d.querySelector('[data-proprete]').classList.contains('men-note'))
+
+  // La couleur vit dans la feuille PARTAGÉE, aux deux endroits à la fois.
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  assert.match(ui, /^\.men-note__bon \{ color: var\(--ok\); \}$/m)
+  assert.match(ui, /^\.men-note__mauvais \{ color: var\(--danger\); \}$/m)
+})
+
+test('LE TEST QUI COMPTE : le troisième compteur garde sa MISE EN FORME, pas seulement sa couleur', () => {
+  // ⚠ RISQUE SIGNALÉ PAR LE CHEF DE FILE (21 octobre 2026), et il est réel :
+  // `.men-note__attente` n'a pas de règle de mise en forme à lui — il est AJOUTÉ
+  // à une liste de sélecteurs partagée avec `__bon` et `__mauvais`. Une
+  // résolution de conflit sur `shared/ui.css` qui prendrait un seul côté le
+  // ferait disparaître de cette liste en lui laissant sa couleur : le compteur
+  // s'afficherait gris ET mal aligné, sans qu'une ligne rougisse nulle part.
+  // Une divergence doit être un rouge, pas une découverte.
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const regles = [...ui.matchAll(/^([^\n{}]*)\{([^}]*)\}/gm)]
+    .filter(m => /(^|,)\s*\.men-note__attente\s*(,|$)/.test(m[1].trim()))
+  assert.ok(regles.length, '.men-note__attente n a plus aucune règle')
+  const dit = regles.map(m => m[2]).join(' ')
+  for (const d of ['display: inline-flex', 'align-items: center', 'gap:', 'color: var(--muted)']) {
+    assert.ok(dit.includes(d), `.men-note__attente a perdu « ${d} »`)
+  }
+  // Et il est bien RENDU par ce nom-là : une règle sans porteur ne protège rien.
+  const d = doc(M.ficheHtml(
+    fiche({ avis: { ...fiche().avis, non_analyses: 2 } }), OUTILS(), {}))
+  assert.ok(d.querySelector('.men-note__attente'))
+})
+
+test('LE TEST QUI COMPTE : un ZÉRO reste muet — zéro remarque n est pas un problème', () => {
+  // La règle que l écran Ménages porte déjà (`men-note--vide`) : un compteur à
+  // zéro est gris. Peindre « 0 » en rouge ferait crier une fiche irréprochable.
+  const d = doc(M.ficheHtml(fiche({ avis: { ...fiche().avis, positif: 2, remarque: 0 } }), OUTILS(), {}))
+  const mauvais = d.querySelector('[data-pouce="remarque"]')
+  assert.ok(mauvais.classList.contains('men-note--vide'), 'zéro remarque : gris, pas rouge')
+  assert.ok(!d.querySelector('[data-pouce="positif"]').classList.contains('men-note--vide'))
+
+  // ⚠ ET L ORDRE DE DÉCLARATION TRANCHE, pas la spécificité : `.men-note--vide`
+  // et `.men-note__mauvais` ont le même poids (une classe). Le gris ne gagne que
+  // parce qu il est déclaré APRÈS. C est la leçon de `[hidden]` du CLAUDE.md,
+  // au grain d une couleur : une règle placée avant ne s applique pas.
+  // ⚠ ANCRÉ SUR LA DÉCLARATION DE COULEUR, ET PAS SUR LE NOM DE LA CLASSE
+  // (contre-épreuve du 21 octobre 2026) : `.men-note__mauvais` apparaît d'abord
+  // dans un sélecteur GROUPÉ de mise en forme, plus haut dans la feuille. Un
+  // `indexOf` sur le nom seul y tombait, et la mutation « gris déclaré avant les
+  // couleurs » survivait — le test lisait la bonne classe au mauvais endroit.
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const ou = (re) => { const m = ui.match(re); assert.ok(m, `${re} absent de shared/ui.css`); return m.index }
+  assert.ok(ou(/^\.men-note--vide \{ color:/m) > ou(/^\.men-note__mauvais \{ color:/m),
+    'la couleur grise doit être déclarée APRÈS le rouge, sinon le zéro reste rouge')
+  assert.ok(ou(/^\.men-note--vide \{ color:/m) > ou(/^\.men-note__bon \{ color:/m),
+    'la couleur grise doit être déclarée APRÈS le vert')
+})
+
+test('LE TEST QUI COMPTE : aucune légende sous les chiffres', () => {
+  // « Juste le compteur, sans légende » (Thierry, 21 octobre). Le libellé
+  // existe POUR LA VOIX, pas à l écran.
   const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
   const pouces = d.querySelector('[data-proprete]')
-  assert.equal(pouces.querySelector('[data-pouce="positif"] .fic-pouce__n').textContent, '3')
-  assert.equal(pouces.querySelector('[data-pouce="remarque"] .fic-pouce__n').textContent, '1')
-  // Le libellé existe POUR LA VOIX, pas à l écran.
   assert.ok(pouces.querySelector('[data-pouce="remarque"] .sr-only').textContent.includes('remarques'))
-  const visible = [...pouces.querySelectorAll('.fic-pouce')]
-    .map(x => { const c = x.cloneNode(true); c.querySelectorAll('.sr-only').forEach(s => s.remove()); return c.textContent.trim() })
+  const visible = [...pouces.querySelectorAll('[data-pouce]')]
+    .map(x => { const c = x.cloneNode(true); c.querySelectorAll('.sr-only').forEach(sr => sr.remove()); return c.textContent.trim() })
   assert.deepEqual(visible, ['3', '1'], 'juste le compteur, sans légende')
 })
 
-test('« pas encore analysé » ne se range pas dans « rien signalé »', () => {
+test('« pas encore analysé » ne se range ni dans le vert ni dans le rouge', () => {
   const d = doc(M.ficheHtml(
     fiche({ avis: { ...fiche().avis, positif: 1, remarque: 0, non_analyses: 2 } }), OUTILS(), {}))
-  assert.equal(d.querySelector('[data-pouce="attente"] .fic-pouce__n').textContent, '2')
+  const attente = d.querySelector('[data-pouce="attente"]')
+  assert.equal(attente.querySelector('b').textContent, '2')
+  // Ni OK, ni problème : sa propre classe, grise.
+  assert.ok(attente.classList.contains('men-note__attente'))
+  assert.ok(!attente.classList.contains('men-note__bon'))
+  assert.ok(!attente.classList.contains('men-note__mauvais'))
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  assert.match(ui, /^\.men-note__attente \{[^}]*color: var\(--muted\)/m)
 })
 
 test('LE TEST QUI COMPTE : « rien signalé » et « aucun avis » ne disent pas la même phrase', () => {
@@ -368,6 +463,8 @@ test('LE TEST QUI COMPTE : « rien signalé » et « aucun avis » ne disent pas
   const z1 = lus.querySelector('[data-proprete]')
   assert.equal(z1.dataset.proprete, 'rien-signale')
   assert.equal(z1.textContent, 'Rien signalé sur 30 jours.')
+  // Et la phrase est dans le bloc Ménage, comme le compteur qu elle remplace.
+  assert.ok(blocNomme(lus, 'Ménage').querySelector('[data-proprete]'))
 
   const rien = doc(M.ficheHtml(fiche({ avis: { ...fiche().avis,
     positif: 0, remarque: 0, non_analyses: 0, rien_signale: 0 } }), OUTILS(), {}))
@@ -376,9 +473,150 @@ test('LE TEST QUI COMPTE : « rien signalé » et « aucun avis » ne disent pas
   assert.equal(z2.textContent, 'Aucun avis sur 30 jours.')
 
   // Et dans les deux cas, pas de trois zéros à l écran.
-  for (const d of [lus, rien]) assert.equal(d.querySelector('.fic-pouces'), null)
+  for (const d of [lus, rien]) assert.equal(d.querySelector('.men-note'), null)
 })
 
+test('LE TEST QUI COMPTE (SÉCURITÉ) : sans le droit AVIS, le compteur de propreté n existe pas non plus', () => {
+  // ⚠ LE COMPTEUR A CHANGÉ DE BLOC, PAS DE DROIT. Il lit `fiche.avis`, donc le
+  // domaine `avis` : le déplacer dans un bloc gardé par `menage` aurait pu le
+  // faire survivre à un refus du domaine dont il vient — c est précisément ce
+  // que l étape 0 interdit, « on ne montre jamais ce qui mient d un refus ».
+  // ⚠ ET LE JSON PEUT PORTER LA DONNÉE QUAND MÊME. « Le JSON peut le porter,
+  // l'écran le cache » (règle de Thierry du 20 octobre) : le compteur ne doit pas
+  // dépendre du fait que le serveur ait AUSSI vidé le champ. Contre-épreuve du
+  // 21 octobre : sans cette moitié du test, retirer la garde `refuses` du rendu
+  // ne faisait rougir personne — `avis: null` suffisait à masquer l'oubli.
+  const porte = doc(M.ficheHtml(
+    fiche({ refuses: ['avis'] }), OUTILS(), {}))
+  assert.equal(porte.querySelector('[data-proprete]'), null,
+    'droit refusé : même avec les chiffres dans la réponse, l écran ne les montre pas')
+  assert.equal(porte.querySelector('[data-pouce]'), null)
+  assert.ok(blocNomme(porte, 'Ménage'), 'et le bloc Ménage reste')
+
+  const d = doc(M.ficheHtml(
+    fiche({ avis: null, refuses: ['avis'] }), OUTILS(), {}))
+  const menage = blocNomme(d, 'Ménage')
+  assert.ok(menage, 'le bloc Ménage, lui, reste : son droit n est pas refusé')
+  assert.match(menage.textContent, /Regina/)
+  assert.equal(d.querySelector('[data-proprete]'), null, 'aucun compteur')
+  assert.equal(d.querySelector('[data-pouce]'), null)
+  // Et le refus ne se dit pas : un bloc refusé n est pas rendu.
+  assert.doesNotMatch(d.querySelector('#c').textContent, /propreté|avis/i)
+})
+
+test('LE TEST QUI COMPTE : chaque compteur porte SON pouce — vers le haut, vers le bas, en attente', () => {
+  // ⚠ DEUX MUTATIONS SURVIVAIENT (revue de f1d6cbd) : rendre `i-thumb-up` pour
+  // les DEUX compteurs, ou ne rendre aucune icône, ne faisait rougir personne.
+  // C'est pourtant l'inverse exact de la demande — et pour qui ne perçoit pas la
+  // couleur, l'icône est la seule marque VISIBLE qui distingue les deux chiffres.
+  const d = doc(M.ficheHtml(
+    fiche({ avis: { ...fiche().avis, positif: 3, remarque: 1, non_analyses: 2 } }), OUTILS(), {}))
+  const ic = (id) => d.querySelector(`[data-pouce="${id}"] [data-icone]`).dataset.icone
+  assert.equal(ic('positif'), 'i-thumb-up')
+  assert.equal(ic('remarque'), 'i-thumb-down')
+  assert.equal(ic('attente'), 'i-circle-dashed')
+})
+
+test('LE TEST QUI COMPTE (ACCESSIBILITÉ) : le libellé est là pour la VOIX et pour la SOURIS', () => {
+  // « Sans légende » vaut pour le TEXTE à l'écran. Qui ne perçoit pas la couleur
+  // n'a, à la souris, aucun moyen d'apprendre ce que valent « 3 » et « 1 » :
+  // c'est la leçon déjà écrite pour les pastilles de la liste (`.sr-only` pour
+  // la voix, `title` pour la souris), et le compteur ne portait que la moitié.
+  const d = doc(M.ficheHtml(
+    fiche({ avis: { ...fiche().avis, positif: 3, remarque: 1, non_analyses: 2 } }), OUTILS(), {}))
+  for (const [id, mot] of [['positif', 'propreté saluée'], ['remarque', 'remarques'], ['attente', 'pas encore analysés']]) {
+    const el = d.querySelector(`[data-pouce="${id}"]`)
+    assert.equal(el.getAttribute('title'), mot, `${id} : le titre pour la souris`)
+    assert.ok(el.querySelector('.sr-only').textContent.includes(mot), `${id} : le libellé pour la voix`)
+  }
+})
+
+test('LE TEST QUI COMPTE : la séparation du compteur existe, et sa règle aussi', () => {
+  // La décision « mesurée sur le banc » du 21 octobre : collé sous la dernière
+  // prestataire, le compteur se lisait comme SA note. Deux mutations
+  // survivaient — retirer la classe de l'une ou l'autre des deux formes.
+  const avec = doc(M.ficheHtml(fiche(), OUTILS(), {}))
+  assert.ok(avec.querySelector('[data-proprete]').classList.contains('fic-proprete'))
+  const vide = doc(M.ficheHtml(fiche({ avis: { ...fiche().avis,
+    positif: 0, remarque: 0, non_analyses: 0, rien_signale: 4 } }), OUTILS(), {}))
+  assert.ok(vide.querySelector('[data-proprete]').classList.contains('fic-proprete'))
+  // Et la règle MORD : déclarée dans la page, APRÈS shared/ui.css, donc elle
+  // l'emporte sur le `margin-top: 2px` de `.men-note` et sur `.fic-vide`.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'logement.html'), 'utf8')
+  assert.match(page, /^\s*\.fic-proprete \{[^}]*margin-top/m, '.fic-proprete doit avoir sa règle')
+  assert.ok(page.indexOf('<style') < page.indexOf('.fic-proprete'))
+  assert.ok(page.indexOf('shared/ui.css') < page.indexOf('<style'),
+    'la feuille partagée doit être chargée AVANT le style de la page')
+})
+
+test('LE TEST QUI COMPTE : un `avis` MAL FORMÉ ne fait rien AFFIRMER au bloc Ménage', () => {
+  // ⚠ REVUE DE f1d6cbd. `Number(x) || 0` ramenait tout à zéro : avec `{}`,
+  // `'oui'` ou `42`, le bloc Ménage disait « Aucun avis sur 30 jours » pendant
+  // que le bloc Avis disait « pas lisibles ». Deux états pour une seule source,
+  // et c'est le Ménage qui inventait. Même garde que `avisAffiche` pour la note.
+  for (const malForme of [{}, 'oui', 42, true, [], { positif: 3 }]) {
+    const d = doc(M.ficheHtml(fiche({ avis: malForme }), OUTILS(), {}))
+    const menage = blocNomme(d, 'Ménage')
+    assert.equal(menage.querySelector('[data-proprete]'), null, `avis=${JSON.stringify(malForme)}`)
+    assert.doesNotMatch(menage.textContent, /Aucun avis|Rien signalé/,
+      `avis=${JSON.stringify(malForme)} : rien d'affirmé sur une réponse illisible`)
+    assert.doesNotMatch(d.querySelector('#c').textContent, /null|undefined|NaN/)
+  }
+})
+
+test('LE TEST QUI COMPTE : un `avis` tordu ne fait pas TOMBER la fiche', () => {
+  // `poucesAffiches` rend `null` sur tout ce qui n'est pas lisible, et le
+  // compteur lisait `p.vide` sans garde : `avis: 0` levait, et la page entraînait
+  // tout l'écran dans l'état « panne », avec un « Réessayer » qui ne pouvait
+  // pas réussir. Une fiche se rend quand même : c'est un bloc qui se tait.
+  for (const tordu of [0, false, NaN, '']) {
+    const html = M.ficheHtml(fiche({ avis: tordu }), OUTILS(), {})
+    assert.match(html, /fic-bloc__titre/, `avis=${String(tordu)} : la fiche doit se rendre`)
+    assert.ok(doc(html).querySelector('[data-proprete]') == null)
+  }
+})
+
+test('les deux fonctions exportées encaissent un `refuses` qui n est pas un tableau', () => {
+  // `menageHtml` et `propreteHtml` sont `export` : un appelant futur peut leur
+  // passer autre chose qu'un tableau. On NORMALISE à l'entrée plutôt que de
+  // tester en chemin — `refuses || []` lançait sur un objet, et une garde de
+  // droit qui lève ou qui s'efface penche toujours du mauvais côté.
+  for (const tordu of [undefined, null, {}, 'avis', 42]) {
+    // ⚠ DIRECTEMENT SUR `propreteHtml` : appelée par `menageHtml`, la valeur est
+    // déjà normalisée en chemin, et la mutation `refuses || []` survivait à un
+    // test qui passait par le bloc. On éprouve la fonction, pas son appelant.
+    assert.match(String(M.propreteHtml(fiche(), OUTILS(), tordu)), /data-proprete/,
+      `refuses=${JSON.stringify(tordu)} : rien n'est refusé, le compteur se rend`)
+    assert.match(M.menageHtml(fiche(), OUTILS(), tordu), /data-proprete/)
+  }
+  // Et le vrai refus, lui, efface.
+  assert.equal(M.propreteHtml(fiche(), OUTILS(), ['avis']), null)
+})
+
+test('le compteur SUIT le bloc Ménage : sans le droit prestataires, il n est plus visible', () => {
+  // ⚠ CE TEST DÉCRIT UNE CONSÉQUENCE, PAS UNE RÈGLE VOULUE (constat 11 de la
+  // revue de f1d6cbd, à trancher par Thierry). Le compteur est désormais gardé
+  // par DEUX domaines : `menage`, parce que le bloc l'est, et `avis`, parce que
+  // la donnée l'est. Un membre « avis: read, prestataires: none » le voyait la
+  // veille dans le bloc Avis ; il ne le voit plus nulle part. Si Thierry tranche
+  // l'inverse, c'est ICI qu'on le lira.
+  const d = doc(M.ficheHtml(fiche({ menage: null, refuses: ['menage'] }), OUTILS(), {}))
+  assert.equal(blocNomme(d, 'Ménage'), undefined, 'le bloc Ménage est refusé')
+  assert.ok(blocNomme(d, 'Avis des voyageurs'), 'les avis, eux, restent lisibles')
+  assert.equal(d.querySelector('[data-proprete]'), null, 'et le compteur part avec son bloc')
+  // Et rien d'un `null` recollé dans le HTML.
+  assert.doesNotMatch(d.querySelector('#c').textContent, /null/)
+})
+
+test('des avis NON LUS se disent UNE fois, dans le bloc Avis — pas deux fois pour une seule source', () => {
+  // Le bloc Avis porte déjà « pas lisible ». Répéter la phrase dans le bloc
+  // Ménage ferait croire à deux pannes là où une seule lecture a échoué.
+  const d = doc(M.ficheHtml(fiche({ avis: null, indisponibles: ['avis'] }), OUTILS(), {}))
+  const dits = [...d.querySelectorAll('[data-non-lu]')].filter(x => /avis/i.test(x.textContent))
+  assert.equal(dits.length, 1)
+  assert.ok(blocNomme(d, 'Avis des voyageurs').contains(dits[0]))
+  assert.equal(blocNomme(d, 'Ménage').querySelector('[data-proprete], [data-non-lu]'), null)
+})
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 7. Réglages
@@ -440,7 +678,7 @@ test('LE TEST QUI COMPTE : aucun texte en dur — toute chaîne visible vient de
   ].join('')
   const d = doc(html)
   const rendus = [...RENDUS]
-  for (const n of d.querySelectorAll('.fic-ligne__cle, .fic-bloc__titre, .fic-vide, [data-non-lu], [data-raison], [data-proprete="vide"]')) {
+  for (const n of d.querySelectorAll('.fic-ligne__cle, .fic-bloc__titre, .fic-vide, [data-non-lu], [data-raison], [data-proprete]')) {
     const texte = n.textContent.trim()
     if (!texte) continue
     const couvert = rendus.some(tr => {
@@ -470,7 +708,15 @@ test('LE TEST QUI COMPTE (SÉCURITÉ) : rien de ce que le partenaire écrit ne s
     taxe: { connue: true, commune: '<svg onload=alert(4)>' }
   })
   const d = doc(M.ficheHtml(piege, OUTILS(), { peutSupprimer: true }))
-  assert.equal(d.querySelectorAll('img, script, b, svg:not([data-icone])').length, 0)
+  assert.equal(d.querySelectorAll('img, script, svg:not([data-icone])').length, 0)
+  // ⚠ `<b>` N'EST PLUS INTERDIT EN BLOC, IL EST SITUÉ : le compteur de
+  // propreté en porte un par chiffre, comme l'écran Ménages. Le piège de la
+  // fixture est `'"><b>x</b>'` sur la ville : s'il s'exécutait un jour, il
+  // produirait un `<b>` HORS du compteur — et c'est ce que ce test mesure.
+  for (const b of d.querySelectorAll('b')) {
+    assert.ok(b.parentElement.hasAttribute('data-pouce'),
+      `« ${b.outerHTML} » : un \`<b>\` hors du compteur, donc du balisage injecté`)
+  }
   assert.match(d.querySelector('.fic-nom').textContent, /^<img src=x/)
 })
 
@@ -578,7 +824,11 @@ test('LE TEST QUI COMPTE : la FORME des rendus partagés vit dans shared/ui.css,
   const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
   const PARTAGEES = ['.log-canaux', '.log-pastille', '.log-point',
     '.log-pastille--vente', '.log-pastille--pas-ce-bien', '.log-pastille--indetermine',
-    '.log-avis', '.log-avis--muet']
+    '.log-avis', '.log-avis--muet',
+    // La famille du compteur de propreté, partagée avec l'écran Ménages depuis
+    // la correction du 21 octobre 2026 : deux écrans, une seule charte.
+    '.men-note', '.men-note__bon', '.men-note__mauvais', '.men-note--vide',
+    '.men-note__attente']
   for (const sel of PARTAGEES) {
     assert.ok(new RegExp(`^${sel.replace('.', '\\.')}[\\s,{]`, 'm').test(ui),
       `${sel} absent de shared/ui.css`)

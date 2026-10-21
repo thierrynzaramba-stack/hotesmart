@@ -91,17 +91,20 @@
   .fic-personne { display: flex; align-items: baseline; justify-content: space-between; gap: var(--gap-s); }
   .fic-personne__nom { overflow-wrap: anywhere; }
 
-  /* Les avis : la note est rendue par le module commun (.log-avis), les pouces
-     sont propres à la fiche.
-     ⚠ NEUTRES, JAMAIS ROUGES : la charte §7 réserve le rouge à la suppression
-     et aux erreurs, et une remarque de ménage n'est ni l'une ni l'autre
-     (décision de Thierry du 21 octobre 2026). */
+  /* Les avis : la note vient du module commun (.log-avis). Le bloc ne dit plus
+     que ça — les pouces de propreté comptent le travail de ménage, et sont
+     partis dans le bloc Ménage (correction de Thierry du 21 octobre 2026). */
   .fic-avis { display: flex; flex-direction: column; gap: var(--gap-s); }
-  .fic-pouces { display: flex; align-items: center; gap: var(--gap-m); flex-wrap: wrap; }
-  .fic-pouce { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
-  .fic-pouce svg { width: 15px; height: 15px; }
-  .fic-pouce__n { color: var(--ink); font-weight: var(--fw-medium); }
-  .fic-pouce.fic-muet .fic-pouce__n { color: var(--muted); }
+
+  /* Le compteur de propreté, sous l'équipe. Sa COULEUR n'a pas de règle ici :
+     il porte les classes `.men-note*` de shared/ui.css, celles de l'écran
+     Ménages (« vert OK, rouge problème »). Les redéfinir ferait deux copies
+     d'une même charte, et elles divergeraient.
+     ⚠ CE QUI EST À NOUS, C'EST LA SÉPARATION (mesurée sur le banc le 21 octobre
+     2026) : collé sous la dernière prestataire, le compteur se lisait comme SA
+     note, alors qu'il parle du LOGEMENT sur 30 jours. */
+  .fic-proprete { margin-top: var(--gap-s); padding-top: var(--gap-s);
+    border-top: 1px solid var(--border); }
 
   /* Supprimer : discret, et le rouge n'apparaît que sur le bouton — la charte
      le réserve à cette action-là. */

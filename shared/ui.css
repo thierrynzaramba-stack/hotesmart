@@ -809,9 +809,20 @@ body.men-volet-ouvert { overflow: hidden; }
 .men-mini__plus { margin-inline-start: 4px; }
 /* Le COMPTE de retours (décision du 13 octobre) : jamais une moyenne étoilée. */
 .men-note { display: flex; align-items: center; gap: 10px; margin-top: 2px; font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
-.men-note__bon, .men-note__mauvais { display: inline-flex; align-items: center; gap: 4px; }
+/* « Pas encore analysé » n'est ni un OK ni un problème : ni vert, ni rouge.
+   `__attente` est posé pour la fiche d'un logement (21 octobre 2026), où le
+   compteur de propreté vit dans le bloc Ménage et porte ces mêmes classes.
+   ⚠ LA MISE EN FORME EST GROUPÉE, LA COULEUR SEULE EST SÉPARÉE : recopier
+   `display/align-items/gap` pour le troisième compteur faisait trois lignes en
+   double dans la feuille qu'on vient de désigner comme l'unique porteuse de la
+   charte (revue de f1d6cbd).
+   ⚠ ET L'ORDRE TRANCHE : `--vide` a le même poids que `__bon` et `__mauvais`
+   (une classe), donc le gris d'un compteur à zéro ne gagne que parce qu'il est
+   déclaré APRÈS. Ne pas remonter cette ligne. */
+.men-note__bon, .men-note__mauvais, .men-note__attente { display: inline-flex; align-items: center; gap: 4px; }
 .men-note__bon { color: var(--ok); }
 .men-note__mauvais { color: var(--danger); }
+.men-note__attente { color: var(--muted); }
 .men-note--vide { color: var(--muted); }
 .men-note .icon { width: 14px; height: 14px; }
 

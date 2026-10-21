@@ -73,19 +73,31 @@ Colonne gauche :
    > l'**étape 3**, l'étape 2 n'affichant que l'état et la raison.
 
 Colonne droite :
-5. **Ménage** — prestataires assignées au bien (nom prénom, mode : d'office / proposé en Nᵉ, pouces), lien « Gérer l'équipe ménage » (ouvre le volet existant).
-6. **Avis des voyageurs** — la **même note sur 5, avec l'étoile, que sur la liste**.
+5. **Ménage** — prestataires assignées au bien (nom prénom, mode : d'office /
+   proposé en Nᵉ), **puis le compteur de propreté sur 30 jours** : pouce
+   **vert** pour la propreté saluée, pouce **rouge** pour les remarques, et un
+   troisième compteur gris pour les avis **pas encore analysés**. Lien
+   « Gérer l'équipe ménage » (ouvre le volet existant).
+6. **Avis des voyageurs** — la **même note sur 5, avec l'étoile, que sur la
+   liste**, et **rien d'autre**.
 
-   > ⚠ **Corrigé le 21 octobre 2026 (décision de Thierry).** Cette spec disait
-   > « pouces vert / rouge sur 30 jours (jamais d'étoiles) ». Deux écrans du
-   > même lot auraient alors dit les avis de deux façons — et le rouge est
-   > réservé par le §7 à la suppression et aux erreurs, or une remarque de
-   > propreté n'est ni l'une ni l'autre.
+   > ⚠ **Corrigé DEUX FOIS le 21 octobre 2026 (décisions de Thierry).**
    >
-   > · **la note** : identique à la carte de la liste, étoile du sprite comprise
-   >   (`4,9 / 5 · 336 avis`). Les deux écrans doivent dire la même chose ;
-   > · **les pouces** : réservés à la **propreté** seule, en couleur **neutre**,
-   >   jamais en rouge. **Juste le compteur, sans légende.**
+   > **D'abord**, cette spec disait « pouces vert / rouge sur 30 jours (jamais
+   > d'étoiles) » à la place de la note : deux écrans du même lot auraient dit
+   > les avis de deux façons. · **la note** est donc identique à la carte de la
+   > liste, étoile du sprite comprise (`4,9 / 5 · 336 avis`).
+   >
+   > **Ensuite**, les pouces livrés en couleur neutre dans ce bloc sont partis
+   > dans le bloc **Ménage**, **en vert et rouge** : « ce que comptent ces deux
+   > chiffres, c'est le travail de ménage », et la charte de l'écran Ménages dit
+   > **vert OK, rouge problème**. Ce ne sont pas des couleurs recopiées : la
+   > fiche porte les **mêmes classes** `.men-note*` que la note d'une
+   > prestataire, déclarées une seule fois dans `shared/ui.css`.
+   > · un compteur à **zéro reste gris** — zéro remarque n'est pas un problème ;
+   > · **juste le compteur, sans légende** (le libellé n'existe que pour la voix) ;
+   > · le compteur lit le domaine **avis** : un refus de ce droit l'efface, même
+   >   si le JSON porte encore les chiffres.
 7. **Réglages** — Serrure (état + lien vers son réglage), Taxe de séjour (barème + lien). Lecture et lien seulement dans ce lot.
 
 Mobile : en-tête photo pleine largeur, Calendrier, interrupteur, « Où il est en vente », puis lignes « Prix », « Ménage », « Le logement », « Avis », « Réglages » qui ouvrent chacune une page.
