@@ -66,6 +66,8 @@ function base (d = {}) {
   const {
     biens = [], canaux = [], horloge = null, migrees = [], sejours = [],
     avis = [], liaisons = [], profils = [], serrures = [], taxes = [], fermetures = [],
+    // Les tables que la purge de suppression efface, pour le COMPTAGE.
+    messages = [], menages = [], codes = [],
     enPanne = {}   // { nomDeTable: 'message' }
   } = d
   const vus = []
@@ -80,7 +82,8 @@ function base (d = {}) {
           properties: biens, canaux_du_bien: canaux, canaux_releve: horloge ? [horloge] : [],
           provider_keys_migrated: migrees, bookings_snapshot: sejours, ota_reviews: avis,
           property_cleaning_providers: liaisons, profiles: profils,
-          property_locks: serrures, taxes_sejour: taxes, fermetures: fermetures
+          property_locks: serrures, taxes_sejour: taxes, fermetures: fermetures,
+          messages: messages, menage_events: menages, access_codes: codes
         }[table] || []
         let c = source.filter(l =>
           Object.entries(a.f).every(([k, v]) => String(l[k]) === String(v)) &&
@@ -113,7 +116,11 @@ function base (d = {}) {
       // peut pas mordre. Le double doit donc etre aussi avare que la base.
       const MAX_ROWS = 1000
       const chain = {
-        select () { return chain },
+        // ⚠ `count` ET `head` SONT HONORÉS, comme chez PostgREST : le comptage de
+        // la suppression ne lit AUCUNE ligne (`head: true`) et ne regarde que
+        // `count`. Un double qui ignorerait l'option rendrait `count: undefined`
+        // et le code le lirait comme « illisible » — vert pour la mauvaise raison.
+        select (cols, opts) { if (opts && opts.count) { a.compte = true; a.head = opts.head === true } return chain },
         eq (c, v) { a.f[c] = v; return chain },
         in (c, v) { a.ins.push({ c, v: (v || []).map(String) }); return chain },
         gte (c, v) { a.gte[c] = v; return chain },
@@ -137,7 +144,13 @@ function base (d = {}) {
           return Promise.resolve({ data: r.data.slice(de, de + taille), error: null })
         },
         maybeSingle () { const r = donnees(); return Promise.resolve({ data: r.data ? (r.data[0] || null) : null, error: r.error }) },
-        then (f, g) { return Promise.resolve(donnees()).then(f, g) }
+        then (f, g) {
+          const r = donnees()
+          if (!a.compte) return Promise.resolve(r).then(f, g)
+          return Promise.resolve(r.error
+            ? { data: null, error: r.error, count: null }
+            : { data: a.head ? null : r.data, error: null, count: r.data.length }).then(f, g)
+        }
       }
       return chain
     }
@@ -1177,4 +1190,90 @@ test('LE TEST QUI COMPTE : `cles_motif` NE FIGURE PLUS dans le contrat de l API'
     assert.equal(panne[bloc], null, bloc)
     assert.ok(panne.indisponibles.includes(bloc), bloc)
   }
+})
+
+// ════════════════════════════════════════════════════════════════════════
+// 12. Ce que la suppression va effacer, en nombres (étape 3)
+// ════════════════════════════════════════════════════════════════════════
+
+const lignesDe = (n, cle, extra = {}) => Array.from({ length: n }, (_, i) =>
+  ({ id: `x${i}`, user_id: COMPTE, property_id: cle, ...extra }))
+
+test('LE TEST QUI COMPTE : le comptage annonce ce que la purge efface VRAIMENT', async () => {
+  // « La confirmation dit ce qui sera effacé, avec les nombres » (Thierry,
+  // 21 octobre 2026).
+  const sb = base({
+    sejours: lignesDe(3, REF, { booking_id: 'b' }),
+    messages: lignesDe(7, REF),
+    menages: lignesDe(2, REF),
+    codes: lignesDe(1, REF)
+  })
+  const r = await L.compterPourSuppression(sb, { compte: COMPTE, bien: bienDe() })
+  assert.deepEqual(r, { cle_absente: false, reservations: 3, messages: 7, menages: 2, codes: 1 })
+})
+
+test('LE TEST QUI COMPTE : on compte sur la clé DE LA PURGE, pas sur celle de l affichage', async () => {
+  // ⚠ `DELETE /api/channel-property` purge sur `provider_property_id` SEUL.
+  // `clesTextDuBien`, qui sert à AFFICHER, fait deux choses de plus : elle ajoute
+  // la clé CIBLE d'une migration et elle écarte les clés migrées. Compter avec
+  // elle annoncerait des lignes qui resteront, ou tairait celles qui partiront.
+  const sb = base({
+    sejours: [...lignesDe(2, REF, { booking_id: 'b' }), ...lignesDe(5, REF2, { booking_id: 'c' })],
+    messages: lignesDe(4, REF2)
+  })
+  const r = await L.compterPourSuppression(sb, {
+    compte: COMPTE, bien: bienDe({ migration_target_property_id: REF2 })
+  })
+  assert.equal(r.reservations, 2, 'seules les lignes de la clé que la purge utilise')
+  assert.equal(r.messages, 0, 'la clé cible n est pas comptée : elle ne sera pas purgée')
+})
+
+test('LE TEST QUI COMPTE : un bien SANS clé partenaire le DIT, il n affiche pas quatre zéros', async () => {
+  // La purge entière est sous `if (providerId)` : sans clé, rien de lié n est
+  // effacé. Quatre zéros se liraient « on a regardé, il n y a rien ».
+  const sb = base({ sejours: lignesDe(9, REF, { booking_id: 'b' }) })
+  for (const sans of [null, '', '   ']) {
+    const r = await L.compterPourSuppression(sb, {
+      compte: COMPTE, bien: bienDe({ provider_property_id: sans })
+    })
+    assert.equal(r.cle_absente, true, JSON.stringify(sans))
+    assert.equal(r.reservations, 0)
+  }
+})
+
+test('LE TEST QUI COMPTE : une lecture ratée rend `null`, JAMAIS zéro', async () => {
+  // La règle de tout le lot, au moment où elle coûte le plus cher : « on n a pas
+  // pu lire » affiché comme « il n y en a pas » ferait supprimer un bien en
+  // croyant ne rien perdre.
+  const sb = base({
+    messages: lignesDe(3, REF), menages: lignesDe(1, REF),
+    enPanne: { bookings_snapshot: 'timeout' }
+  })
+  const r = await L.compterPourSuppression(sb, { compte: COMPTE, bien: bienDe() })
+  assert.equal(r.reservations, null, 'illisible : `null`, pas 0')
+  assert.equal(r.messages, 3, 'et les autres comptes tiennent quand même')
+  assert.equal(r.menages, 1)
+})
+
+test('le comptage ne lit que des nombres : rien du partenaire n en sort', async () => {
+  const sb = base({ sejours: lignesDe(1, REF, { booking_id: 'b' }) })
+  const r = await L.compterPourSuppression(sb, { compte: COMPTE, bien: bienDe() })
+  const texte = JSON.stringify(r)
+  assert.doesNotMatch(texte, new RegExp(REF), 'la clé partenaire ne doit pas sortir')
+  for (const v of Object.values(r)) {
+    assert.ok(typeof v === 'number' || typeof v === 'boolean' || v === null, texte)
+  }
+})
+
+test('le comptage NE LIT AUCUNE LIGNE : il demande un compte, pas des données', async () => {
+  // ⚠ `head: true` + `count: 'exact'`. Compter en ramenant les lignes
+  // retomberait dans le plafond à 1000 de PostgREST — le défaut que la purge
+  // elle-même a payé en revue du 7 septembre 2026 : 1000 lignes rendues SANS
+  // erreur, et un chiffre faux à partir de la 1001e.
+  const sb = base({ sejours: lignesDe(1500, REF, { booking_id: 'b' }) })
+  const r = await L.compterPourSuppression(sb, { compte: COMPTE, bien: bienDe() })
+  assert.equal(r.reservations, 1500, 'le compte doit être exact au-delà de 1000')
+  const vu = sb._vus.find(v => v.table === 'bookings_snapshot')
+  assert.equal(vu.compte, true, 'la requête doit demander un `count`')
+  assert.equal(vu.head, true, 'et ne ramener AUCUNE ligne')
 })
