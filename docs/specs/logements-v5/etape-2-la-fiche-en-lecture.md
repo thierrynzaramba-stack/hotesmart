@@ -450,3 +450,61 @@ jet**, ce qui a fait écrire deux tests de plus :
 - `node scripts/i18n-check.js` : **674 clés** dans les trois langues, **aucune
   clé neuve** — la correction ne déplace que du rendu, et le compte attendu
   après merge (676) ne bouge pas.
+
+## La revue de f1d6cbd — aucun constat de sécurité, six correctifs
+
+La chaîne du droit `avis` a été éprouvée de bout en bout : garde serveur
+(`lecture.js` met `fiche.avis = null` et n'interroge même pas `ota_reviews`),
+garde écran, chemin d'appel unique, et les deux mutations qui comptent
+rougissent. Ce qu'elle a trouvé d'autre, corrigé ici sans seconde revue (règle
+« une revue par commit ») :
+
+1. **Une réponse mal formée faisait AFFIRMER au bloc Ménage ce que le bloc Avis
+   disait ignorer.** Avec `avis = {}`, `'oui'` ou `42`, `Number(x) || 0` ramenait
+   tout à zéro : Ménage annonçait « Aucun avis sur 30 jours » pendant qu'Avis
+   disait « pas lisibles ». Deux états pour une seule source, et c'est le Ménage
+   qui inventait. `poucesAffiches` porte désormais la même garde que
+   `avisAffiche` pour la note — elle lui manquait depuis le début.
+2. **Et `avis: 0` faisait TOMBER la fiche entière** en « panne », avec un
+   « Réessayer » qui ne pouvait pas réussir. Le compteur lisait `p.vide` sans
+   garde. Défaut antérieur au déplacement, mais le déplacement l'avait emmené
+   dans le bloc Ménage.
+3. **Le libellé est maintenant sur le `title` aussi, pas seulement pour la
+   voix.** À l'écran, ce qui distingue le vert du rouge, c'est la couleur et un
+   pouce de 14 px : qui ne perçoit pas la couleur, à la souris, n'avait aucun
+   moyen d'apprendre ce que valent « 3 » et « 1 ». La leçon était déjà écrite
+   dans ce lot pour les pastilles de la liste. Un `title` n'est pas une légende :
+   rien ne s'ajoute à l'écran.
+4. **Six mutations survivaient, dont deux inversaient la demande** : rendre
+   `i-thumb-up` pour les DEUX compteurs, ou n'en rendre aucun, ne faisait rougir
+   personne — et avec le point 3, l'icône était la seule marque visible qui
+   distingue les deux chiffres pour qui ne voit pas la couleur. Sept tests de
+   plus : l'identité des trois icônes, `title` + `.sr-only` sur chacun,
+   `.fic-proprete` sur les deux formes **et** sa règle présente dans la page.
+5. **`.men-note__attente` recopiait trois déclarations** du sélecteur groupé
+   juste au-dessus, dans la feuille qu'on venait de désigner comme l'unique
+   porteuse de la charte. Il rejoint le groupe ; seule sa couleur est à part.
+6. **Une garde de droit qui s'efface sur une entrée inattendue penche du mauvais
+   côté** : `refuses` est normalisé à l'entrée de `propreteHtml`, et la seconde
+   normalisation de `menageHtml` est retirée — la mutation « retire-la »
+   survivait, faute d'être observable de l'extérieur.
+
+**Resté ouvert : dette 82** — la couleur est partagée, le **balisage** du
+compteur est écrit deux fois (ici et dans `/menages`), et les deux copies
+divergent déjà : `/menages` n'a ni `.sr-only` ni `title`, pas de troisième
+compteur, et rend `—` là où la fiche fait une phrase. Le correctif — un
+`compteurProprete()` partagé — touche l'écran Ménages, hors du périmètre de
+cette correction.
+
+**À trancher par Thierry** : le compteur est désormais gardé par **deux**
+domaines, `menage` (parce que le bloc l'est) et `avis` (parce que la donnée
+l'est). Un membre « avis: read, prestataires: none » le voyait la veille dans le
+bloc Avis ; il ne le voit plus nulle part. Un test décrit cette conséquence et
+dit qu'elle est à arbitrer, pour qu'elle ne passe pas pour une règle voulue.
+
+- **Suite complète : 5666 tests, 5666 verts, zéro rouge.**
+- **Neuf mutations de plus, neuf tuées** (deux équivalentes retirées du code
+  plutôt que testées : un `join` qui absorbe déjà un `null`, et la garde
+  doublée).
+- `node scripts/i18n-check.js` : 674 clés dans les trois langues, toujours
+  aucune clé neuve.
