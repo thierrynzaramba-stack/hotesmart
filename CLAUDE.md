@@ -783,10 +783,29 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 
 ### APRÈS CHAQUE PUSH — VÉRIFIER QU'UN DÉPLOIEMENT EXISTE POUR CE SHA
 
-⚠⚠ **ÉTAT DU 21 OCTOBRE 2026 : UN MERGE VERS `main` NE SE DÉPLOIE PAS TOUT
-SEUL. IL FAUT UN « Create Deployment » MANUEL.** Tant que cette ligne est là,
-le déroulé d'un merge prod se termine par ce geste, et la vérification du SHA
-vient APRÈS lui — pas après le push.
+⚠⚠ **AVANT DE DIAGNOSTIQUER UN WEBHOOK PERDU : LIRE LES DEUX PAGES D'ÉTAT.**
+`githubstatus.com` et `vercel-status.com`. Une sortie vide n'est pas forcément
+notre dépôt, ni un réglage : le 21 octobre 2026 c'était un incident GitHub
+ouvert — *Delays for Pull Requests and Webhook deliveries*, composant
+**Webhooks en Degraded Performance**. Trois heures de diagnostic côté dépôt
+pour une panne qui était affichée en ligne. **Ce coup d'œil coûte dix secondes
+et se fait AVANT tout le reste.**
+
+⚠ **ET UNE LIVRAISON RETARDÉE N'EST PAS UNE LIVRAISON PERDUE.** Les webhooks du
+21 octobre sont tous arrivés, avec deux à trois heures de retard, et Vercel a
+promu la production **dans l'ordre des pushes** : `a73b905` à 15:27, `8551264` à
+15:31, `76d1791` à 15:35, `707af03` à 15:38. Conséquence à surveiller : pendant
+un rattrapage, **un push ancien peut être livré après un récent** et promouvoir
+un ANCIEN commit en production. Après un incident de ce type, vérifier que le
+dernier déploiement de production porte bien la tête de `main`, et pas un SHA
+d'avant.
+
+⚠⚠ **ÉTAT DU 21 OCTOBRE 2026, À RETIRER QUAND L'INCIDENT SERA CLOS : UN MERGE
+NE SE DÉPLOIE PAS TOUT SEUL, IL FAUT UN « Create Deployment » MANUEL.** Tant que
+cette ligne est là, le déroulé d'un merge prod se termine par ce geste, et la
+vérification du SHA vient APRÈS lui — pas après le push. **Condition de retrait
+de ces trois lignes** : `githubstatus.com` au vert ET un push qui se déploie de
+nouveau tout seul en moins d'une minute.
 
 **Mesuré, trois pushes de suite sur `main`, chacun bouclé 120 secondes puis
 réinterrogé à 5 et 8 minutes : ZÉRO déploiement.** `981d453` (lot logements),
@@ -814,13 +833,23 @@ ordinaire, pas `main` — n'a rien produit non plus.
 | ~15:15 | `main` **et `channex-phase1`** (`76d1791`) | 0 |
 
 **Tout push postérieur à 12:51 n'a rien produit, quelle que soit la ref.** Ce
-n'est donc pas un réglage de branche : c'est **l'intégration GitHub ↔ Vercel du
-dépôt entier** qui ne répond plus. À regarder dans cet ordre : l'installation de
-l'application GitHub de Vercel (suspendue, autorisation révoquée, dépôt retiré
-de sa portée), puis l'état de la plateforme Vercel, puis les limites du compte.
-**Ticket Vercel à ouvrir** ; d'ici là, le geste manuel est le déroulé, pas un
-rattrapage — **et il vaut aussi pour `staging`**, donc une recette aussi se
-déploie à la main.
+n'était donc pas un réglage de branche.
+
+⚠ **ET MA DEUXIÈME CAUSE ÉTAIT FAUSSE AUSSI.** J'avais écrit ici qu'il fallait
+regarder « l'installation de l'application GitHub de Vercel, puis l'état de la
+plateforme Vercel, puis les limites du compte », et j'avais conclu à un ticket
+Vercel. **C'était un incident GitHub**, trouvé par Thierry sur
+`githubstatus.com` : *Delays for Pull Requests and Webhook deliveries*, composant
+Webhooks en Degraded Performance. Ni Vercel, ni notre dépôt, ni un réglage — et
+aucun ticket à ouvrir. Les livraisons sont arrivées d'elles-mêmes deux à trois
+heures plus tard.
+
+**Deux fois de suite j'ai cherché la cause dans le système que je pouvais
+inspecter** — d'abord la branche, puis le dépôt et Vercel — au lieu de regarder
+d'abord si le fournisseur annonçait une panne. D'où la règle en tête de cette
+section. Pendant l'incident, le geste manuel est le déroulé, pas un rattrapage,
+**et il vaut aussi pour `staging`** : une recette se déploie à la main elle
+aussi.
 
 ⚠ **LA LEÇON DE MÉTHODE, PARCE QU'ELLE SE REJOUERA.** Trois pushes sur `main`
 sans déploiement et cinq pushes d'avant avec, ça dessine une asymétrie par
