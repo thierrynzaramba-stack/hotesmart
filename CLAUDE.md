@@ -794,14 +794,40 @@ réinterrogé à 5 et 8 minutes : ZÉRO déploiement.** `981d453` (lot logements
 check-run, sur les trois. La ref, elle, avançait bien à chaque fois —
 `git ls-remote` le confirmait.
 
-⚠ **ET C'EST PROPRE À `main`.** Le même jour, à la même heure, les pushes sur
-`staging` (`34969a2`, `a2ec6f1`) et sur les branches de lot (`113e273`,
-`813b732`, `c7be709`) ont produit leurs **deux** déploiements chacun en 35
-secondes — `Preview – hotesmart` et le projet staging. Le webhook du dépôt
-fonctionne donc ; c'est la réaction à `main` qui manque. L'asymétrie désigne un
-réglage du projet Vercel (branche de production, *Ignored Build Step*,
-auto-deploy de `main`) plutôt qu'un aléa. **Ticket Vercel à ouvrir** ; d'ici là,
-le geste manuel est le déroulé, pas un rattrapage.
+⚠ **ET CE N'EST PAS PROPRE À `main` — PREMIÈRE CONCLUSION, FAUSSE, CORRIGÉE UNE
+HEURE PLUS TARD.** J'avais écrit ici que `main` seul était touché, parce que les
+pushes de `staging` et des branches de lot avaient tous eu leurs deux
+déploiements en 35 secondes. L'asymétrie était réelle, mais elle n'était pas la
+cause : elle était **chronologique**. Le push de `channex-phase1` — une branche
+ordinaire, pas `main` — n'a rien produit non plus.
+
+**La vraie chronologie, telle que l'API la donne :**
+
+| heure | ref poussée | déploiements |
+|---|---|---|
+| 12:01 | branche de lot (`c7be709`) | 2, en 35 s |
+| 12:48 | `staging` (`34969a2`) | 2, en 35 s |
+| **12:51** | `staging` (`a2ec6f1`) | **2 — le dernier qui a marché** |
+| ~14:35 | `main` (`981d453`) | 0 |
+| ~14:55 | `main` (`a73b905`) | 0 |
+| ~15:05 | `main` (`8551264`) | 0 |
+| ~15:15 | `main` **et `channex-phase1`** (`76d1791`) | 0 |
+
+**Tout push postérieur à 12:51 n'a rien produit, quelle que soit la ref.** Ce
+n'est donc pas un réglage de branche : c'est **l'intégration GitHub ↔ Vercel du
+dépôt entier** qui ne répond plus. À regarder dans cet ordre : l'installation de
+l'application GitHub de Vercel (suspendue, autorisation révoquée, dépôt retiré
+de sa portée), puis l'état de la plateforme Vercel, puis les limites du compte.
+**Ticket Vercel à ouvrir** ; d'ici là, le geste manuel est le déroulé, pas un
+rattrapage — **et il vaut aussi pour `staging`**, donc une recette aussi se
+déploie à la main.
+
+⚠ **LA LEÇON DE MÉTHODE, PARCE QU'ELLE SE REJOUERA.** Trois pushes sur `main`
+sans déploiement et cinq pushes d'avant avec, ça dessine une asymétrie par
+BRANCHE qui saute aux yeux — et qui était un artefact. La variable cachée était
+le TEMPS : tous les succès étaient avant 12:51, tous les échecs après. Le
+contre-test qui l'a montré coûtait un push sur une branche ordinaire. **Avant de
+conclure « c'est propre à X », pousser une fois sur non-X.**
 
 ⚠ **LA SONDE QUI TRANCHE N'EST PAS L'API, C'EST LA PRODUCTION.** `981d453`
 avait sa ref en place et `https://hotesmart.vercel.app/logements` rendait **404**
