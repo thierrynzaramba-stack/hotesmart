@@ -55,7 +55,7 @@ export async function renderSidebar(activePage = '') {
       </a>
 
       ${siLire('reservations', `
-      <a class="nav-item ${activePage === 'biens' || activePage === 'biens-detail' || activePage === 'biens-nouveau' ? 'active' : ''}" href="/biens">
+      <a class="nav-item ${activePage === 'biens' || activePage === 'biens-detail' || activePage === 'biens-nouveau' ? 'active' : ''}" href="/logements">
         <span class="nav-icon">🏠</span>
         <span class="nav-label">Mes biens</span>
       </a>`)}

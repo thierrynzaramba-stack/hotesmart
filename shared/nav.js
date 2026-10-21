@@ -4,11 +4,13 @@
    Ajouter une rubrique = une ligne ici (mais la navigation est
    définitive : 5 entrées, voir spec §3).
 
-   ⚠ UNE ENTRÉE MÈNE À SON ÉCRAN V5 DÈS QU'IL EXISTE. « Aujourd'hui »,
-   « Calendrier », « Messages » et « Ménages » sont refondus ; seule
-   « Mes biens » mène encore à l'écran ACTUEL, jusqu'au lot Logements
-   (spec §7). `hrefMobile` : l'écran téléphone quand il en existe un
-   distinct.
+   ⚠ UNE ENTRÉE MÈNE À SON ÉCRAN V5 DÈS QU'IL EXISTE. Les CINQ y sont depuis
+   le 21 octobre 2026 : « Logements » a basculé de `/biens` vers `/logements`
+   avec l'étape 3 du lot, celle qui donne à la fiche ses actions. Avant elle,
+   la V5 montrait MOINS que l'ancien écran — et on ne ferme un écran que
+   lorsque son remplaçant fait au moins autant. `hrefMobile` : l'écran
+   téléphone quand il en existe un distinct ; « Logements » n'en a pas, la
+   même page s'adapte.
 
    ⚠ CE QUE LE MÉCANISME `liens` A COÛTÉ, ET POURQUOI IL N'EST PLUS LÀ.
    Au lot 1 (257b59d, 10 octobre 2026), l'écran calendrier V5 n'existait
@@ -35,7 +37,7 @@
     { id: 'calendar',   href: '/calendrier',                key: 'nav.calendar',   icon: 'i-calendar', hrefMobile: '/m/calendrier', domaine: 'reservations' },
     { id: 'messages',   href: '/pages/messages',            key: 'nav.messages',   icon: 'i-message', badge: 'pendingMessages', domaine: 'messages' },
     { id: 'cleaning',   href: '/menages',                   key: 'nav.cleaning',   icon: 'i-cleaning', badge: 'menagesATraiter', domaine: 'menages' },
-    { id: 'properties', href: '/biens',                     key: 'nav.properties', icon: 'i-home', domaine: 'reservations' },
+    { id: 'properties', href: '/logements',                 key: 'nav.properties', icon: 'i-home', domaine: 'reservations' },
   ];
 
   const icon = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use href="/shared/icons.svg#${id}"/></svg>`;

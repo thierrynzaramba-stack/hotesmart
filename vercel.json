@@ -103,20 +103,12 @@
       "destination": "/pages/logements"
     },
     {
-      "source": "/logements/:id",
-      "destination": "/pages/logement"
-    },
-    {
-      "source": "/biens",
-      "destination": "/pages/biens"
-    },
-    {
-      "source": "/biens/nouveau",
+      "source": "/logements/nouveau",
       "destination": "/pages/biens-nouveau"
     },
     {
-      "source": "/biens/:id",
-      "destination": "/pages/biens-detail"
+      "source": "/logements/:id",
+      "destination": "/pages/logement"
     },
     {
       "source": "/calendrier",
@@ -167,6 +159,21 @@
     {
       "source": "/biens/:id/calendrier",
       "destination": "/calendrier?bien=:id",
+      "permanent": false
+    },
+    {
+      "source": "/biens",
+      "destination": "/logements",
+      "permanent": false
+    },
+    {
+      "source": "/biens/nouveau",
+      "destination": "/logements/nouveau",
+      "permanent": false
+    },
+    {
+      "source": "/biens/:id",
+      "destination": "/logements/:id",
       "permanent": false
     }
   ]

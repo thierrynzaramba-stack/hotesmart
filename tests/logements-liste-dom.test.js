@@ -356,7 +356,7 @@ test('une panne propose de RÉESSAYER ; un refus de droit ne propose rien', () =
 })
 
 test('LE TEST QUI COMPTE : l état vide ne propose RIEN à qui n a pas le droit', () => {
-  // Les deux actions mènent à `/pages/connexions` et `/biens/nouveau`, deux
+  // Les deux actions mènent à `/pages/connexions` et `/logements/nouveau`, deux
   // pages classées NON DÉLÉGABLES, et le POST de création refuse en 403. « On
   // ne montre jamais ce qui mène à un refus » (Thierry, 20 octobre).
   const membre = doc(M.etatHtml('vide'))
@@ -366,7 +366,7 @@ test('LE TEST QUI COMPTE : l état vide ne propose RIEN à qui n a pas le droit'
 
   const titulaire = doc(M.etatHtml('vide', { peutAjouter: true }))
   const liens = [...titulaire.querySelectorAll('a')].map(a => a.getAttribute('href'))
-  assert.deepEqual(liens, ['/pages/connexions', '/biens/nouveau'])
+  assert.deepEqual(liens, ['/pages/connexions', '/logements/nouveau'])
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -464,15 +464,34 @@ test('la page ne charge AUCUN script tiers et n appelle aucun partenaire', () =>
   assert.ok(!/channex|beds24/i.test(page), 'aucun nom de partenaire dans la page (spec §6)')
 })
 
-test('la page sert /logements, et l ancienne liste reste intacte', () => {
+test('LE TEST QUI COMPTE : l ancienne liste REDIRIGE vers la V5, et la création garde une URL', () => {
+  // ⚠ BASCULÉ LE 21 OCTOBRE 2026 (go de Thierry), avec l étape 3 : à l étape 1,
+  // `/biens` restait intact pour qu il puisse comparer les deux écrans. La V5
+  // fait maintenant au moins autant, donc l ancien ferme.
   const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'))
   const rewrites = vercel.rewrites || []
+  const redirects = vercel.redirects || []
   assert.ok(rewrites.some(r => r.source === '/logements' && r.destination === '/pages/logements'),
     'le rewrite doit exister, SANS .html (cleanUrls)')
-  // ⚠ `/biens` N EST PAS TOUCHÉ à l étape 1 : Thierry doit pouvoir comparer les
-  // deux écrans en recette. La redirection est l étape 4.
-  assert.ok(rewrites.some(r => r.source === '/biens' && r.destination === '/pages/biens'))
-  assert.ok(fs.existsSync(path.join(__dirname, '..', 'pages', 'biens.html')))
+  // Plus aucune route ne SERT l ancien écran.
+  assert.equal(rewrites.filter(r => r.source === '/biens' || r.source === '/biens/:id').length, 0)
+  assert.ok(redirects.some(r => r.source === '/biens' && r.destination === '/logements'))
+  assert.ok(redirects.some(r => r.source === '/biens/:id' && r.destination === '/logements/:id'))
+
+  // ⚠ L ORDRE DES REDIRECTIONS TRANCHE : `/biens/nouveau` doit passer AVANT
+  // `/biens/:id`, sinon la création partirait vers une fiche nommée « nouveau ».
+  const iNouveau = redirects.findIndex(r => r.source === '/biens/nouveau')
+  const iFiche = redirects.findIndex(r => r.source === '/biens/:id')
+  assert.ok(iNouveau !== -1 && iNouveau < iFiche, 'la création doit être résolue en premier')
+  // ⚠ ET DU CÔTÉ DES REWRITES AUSSI : `/logements/nouveau` avant `/logements/:id`,
+  // sinon la fiche tenterait de charger un bien nommé « nouveau ».
+  const jNouveau = rewrites.findIndex(r => r.source === '/logements/nouveau')
+  const jFiche = rewrites.findIndex(r => r.source === '/logements/:id')
+  assert.ok(jNouveau !== -1 && jNouveau < jFiche, 'la création doit être servie avant la fiche')
+
+  // La création existe toujours : son écran V5 est l étape 4, son URL est déjà V5.
+  assert.ok(rewrites.some(r => r.source === '/logements/nouveau' && r.destination === '/pages/biens-nouveau'))
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'pages', 'biens-nouveau.html')))
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -172,7 +172,7 @@ test('LE TEST QUI COMPTE : l état VIDE ne propose rien à un membre délégué'
   const titulaire = monter({ titulaire: true, reponse: { biens: [] } })
   await titulaire.ctx.__charger()
   const liens = [...titulaire.doc.querySelectorAll('[data-bind="etat"] a')].map(a => a.getAttribute('href'))
-  assert.deepEqual(liens, ['/pages/connexions', '/biens/nouveau'])
+  assert.deepEqual(liens, ['/pages/connexions', '/logements/nouveau'])
 })
 
 test('LE TEST QUI COMPTE (MU-D) : « Réessayer » rappelle la lecture, et prend le focus', async () => {

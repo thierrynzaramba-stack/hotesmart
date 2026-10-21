@@ -442,7 +442,7 @@ export function etatHtml (quoi, { peutAjouter = false } = {}) {
       <p class="muted" data-i18n="${peutAjouter ? 'logements.vide_aide' : 'logements.vide_aide_membre'}"></p>
       ${peutAjouter ? `<div class="log-etat__actions">
         <a class="btn btn--primary" href="/pages/connexions" data-i18n="logements.vide_connecter"></a>
-        <a class="btn btn--secondary" href="/biens/nouveau" data-i18n="logements.vide_manuel"></a>
+        <a class="btn btn--secondary" href="/logements/nouveau" data-i18n="logements.vide_manuel"></a>
       </div>` : ''}`
   }
   if (quoi === 'refus') return `<p data-i18n="logements.refus"></p>`
