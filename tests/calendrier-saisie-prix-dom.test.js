@@ -24,6 +24,18 @@ const BIEN = {
   included_guests: 2, extra_guest_fee: 0
 }
 // Un inventaire ouvert et tarife : les nuits sont « ouvertes », donc selectionnables.
+// Ce que le navigateur fait et que jsdom ne fait pas : perdre le focus.
+const quitterLaSaisie = (b, input) => {
+  input.dispatchEvent(new b.window.Event('blur'))
+}
+// Ce que fait une frappe humaine : inserer au curseur, pas remplacer.
+const frapper = (b, input, texte) => {
+  const d = input.selectionStart, f = input.selectionEnd
+  input.value = input.value.slice(0, d) + texte + input.value.slice(f)
+  input.setSelectionRange(d + texte.length, d + texte.length)
+  input.dispatchEvent(new b.window.Event('input', { bubbles: true }))
+}
+
 const inventaire = (jours, prix = 199) =>
   ({ B1: Object.fromEntries(jours.map(iso => [iso, { date: iso, rate: prix, avail: 1, stop_sell: false }])) })
 
@@ -166,7 +178,12 @@ test('taper un chiffre juste apres une selection ouvre la saisie SANS perdre les
   assert.ok(input, 'un chiffre ouvre la saisie')
   assert.equal(input.value, '1', 'le chiffre tape amorce la valeur')
   assert.equal(b.cal.joursSelection().length, 4, 'les quatre nuits sont toujours visees')
-  input.value = '150'
+  // ⚠ CE TEST POSAIT `input.value = '150'`, donc il affirmait ensuite un POST
+  // a 150 qu'il avait ecrit de sa main — la frappe humaine n'etait jamais
+  // eprouvee, et c'est ce qui a laisse passer le defaut de l'amorce
+  // selectionnee (recette du 21 octobre). Il frappe maintenant comme un doigt.
+  frapper(b, input, '50')
+  assert.equal(input.value, '150')
   B.touche(b, input, 'Enter')
   return new Promise(r => setTimeout(r, 0)).then(() => {
     const p = b.envois.filter(e => e.methode === 'POST')[0]
@@ -560,8 +577,15 @@ test('un clic sur une AUTRE cellule pendant la saisie n enregistre pas la valeur
   const cases = B.casesBureau(b, 'B1')
   glisser(b, cases, 2, 5)
   clicCase(b, cases[2])
-  assert.ok(B.saisie(b))
+  const input = B.saisie(b)
+  assert.ok(input)
+  assert.equal(input.value, '199', 'la fixture porte bien la valeur PRE-REMPLIE que le nom annonce')
   clicCase(b, cases[9])
+  // ⚠ JSDOM NE RETIRE PAS LE FOCUS AU CLIC. Sans cette ligne, aucun `blur`
+  // n'etait emis et ce test ne touchait pas le chemin qu'il pretend garder :
+  // il etait vert sur rien. Le banc note deja l'inverse (jsdom ne DONNE pas le
+  // focus au mousedown) ; il fallait poser les deux.
+  quitterLaSaisie(b, input)
   await new Promise(r => setTimeout(r, 0))
   assert.equal(b.envois.filter(e => e.methode === 'POST').length, 0, 'rien n est parti')
 })
@@ -762,4 +786,108 @@ test('ADDENDUM C bis : un pointeur INDETERMINE est traite comme direct, pas comm
   B.geste(b, caseM(b, jourDuMois(MOIS_A_VENIR, 5)), 'pointerdown', { pointerType: '' })
   B.geste(b, caseM(b, jourDuMois(MOIS_A_VENIR, 8)), 'pointerenter', { pointerType: '' })
   assert.equal(b.cal.etat.sel, null, 'aucune selection sans appui long')
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// RECETTE DU 21 OCTOBRE 2026 SUR STAGING — TROIS DEFAUTS REELS, ET DEUX DE MES
+// TESTS QUI ETAIENT VERTS POUR LA MAUVAISE RAISON.
+//
+// ⚠ POURQUOI ILS MENTAIENT, parce que c'est la lecon :
+//   · « taper un chiffre … SANS perdre les jours » posait `input.value = '150'`
+//     lui-meme. Il n'a donc JAMAIS eprouve la frappe humaine qui suit l'amorce,
+//     et il affirmait un POST a 150 qu'il avait ecrit de sa main.
+//   · « un clic sur une AUTRE cellule … n'enregistre pas » cliquait ailleurs et
+//     constatait zero POST. Mais JSDOM NE RETIRE PAS LE FOCUS AU CLIC : aucun
+//     `blur` n'etait emis, donc le chemin teste n'existait pas. Le banc note
+//     deja que jsdom ne DONNE pas le focus au mousedown ; j'avais oublie son
+//     inverse.
+// Regle qui en sort : un test doit CONTENIR la condition que son nom annonce,
+// et un geste du navigateur que jsdom n'implemente pas se pose a la main.
+// ════════════════════════════════════════════════════════════════════════════
+
+
+test('RECETTE 1 : le chiffre d amorce N EST PAS SELECTIONNE, donc taper 75 donne 175', async () => {
+  const { b, jours } = banc({})
+  const cases = B.casesBureau(b, 'B1')
+  glisser(b, cases, 2, 5)
+  cases[2].focus()
+  B.touche(b, cases[2], '1')
+  const input = B.saisie(b)
+  assert.ok(input, 'un chiffre ouvre la saisie')
+  assert.equal(input.value, '1')
+  // LE TEST QUI COMPTE : le curseur est APRES le chiffre, rien n est selectionne.
+  assert.equal(input.selectionStart, 1, 'le curseur doit etre en fin de texte')
+  assert.equal(input.selectionEnd, 1, 'l amorce ne doit pas etre selectionnee')
+  frapper(b, input, '75')
+  assert.equal(input.value, '175', 'la frappe COMPLETE l amorce, elle ne la remplace pas')
+  B.touche(b, input, 'Enter')
+  await new Promise(r => setTimeout(r, 0))
+  const p = b.envois.filter(e => e.methode === 'POST')[0]
+  assert.deepEqual(p.corps.segments, [{ date_from: jours[2], date_to: jours[5], rate: 175 }])
+})
+
+test('RECETTE 1 bis : sur une valeur EXISTANTE, le texte reste selectionne (on retape par-dessus)', () => {
+  const { b } = banc({})
+  const cases = B.casesBureau(b, 'B1')
+  glisser(b, cases, 2, 5)
+  clicCase(b, cases[2])
+  const input = B.saisie(b)
+  assert.equal(input.value, '199', 'la saisie s ouvre pre-remplie')
+  assert.equal(input.selectionStart, 0)
+  assert.equal(input.selectionEnd, 3, 'tout est selectionne : retaper remplace')
+})
+
+test('LE TEST QUI COMPTE (RECETTE 2) : perdre le focus SANS AVOIR TAPE n enregistre RIEN', async () => {
+  const { b } = banc({})
+  const cases = B.casesBureau(b, 'B1')
+  glisser(b, cases, 2, 5)
+  clicCase(b, cases[2])
+  const input = B.saisie(b)
+  assert.equal(input.value, '199', 'la fixture PORTE bien un prix pre-rempli')
+  quitterLaSaisie(b, input)
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(b.envois.filter(e => e.methode === 'POST').length, 0,
+    'le prix du PREMIER jour ne doit pas partir sur toute la plage sans frappe')
+})
+
+test('RECETTE 2 bis : perdre le focus APRES avoir tape enregistre bien (« validation par clic ailleurs »)', async () => {
+  const { b, jours } = banc({})
+  const cases = B.casesBureau(b, 'B1')
+  glisser(b, cases, 2, 5)
+  clicCase(b, cases[2])
+  const input = B.saisie(b)
+  input.setSelectionRange(0, input.value.length)
+  frapper(b, input, '210')
+  quitterLaSaisie(b, input)
+  await new Promise(r => setTimeout(r, 0))
+  const p = b.envois.filter(e => e.methode === 'POST')[0]
+  assert.ok(p, 'la validation par clic ailleurs reste une demande de Thierry')
+  assert.deepEqual(p.corps.segments, [{ date_from: jours[2], date_to: jours[5], rate: 210 }])
+})
+
+test('RECETTE 2 ter : une amorce compte comme une frappe, meme sans autre touche', async () => {
+  const { b, jours } = banc({})
+  const cases = B.casesBureau(b, 'B1')
+  glisser(b, cases, 2, 5)
+  cases[2].focus()
+  B.touche(b, cases[2], '8')
+  const input = B.saisie(b)
+  quitterLaSaisie(b, input)
+  await new Promise(r => setTimeout(r, 0))
+  const p = b.envois.filter(e => e.methode === 'POST')[0]
+  assert.ok(p, 'le chiffre tape EST une frappe')
+  assert.equal(p.corps.segments[0].rate, 8)
+})
+
+test('LE TEST QUI COMPTE (RECETTE 3) : la barre flottante se retire pendant la saisie', () => {
+  const { b } = banc({})
+  const cases = B.casesBureau(b, 'B1')
+  glisser(b, cases, 2, 5)
+  assert.equal(B.barreVisible(b), true, 'la barre est la apres la selection')
+  clicCase(b, cases[2])
+  assert.ok(B.saisie(b))
+  assert.equal(B.barreVisible(b), false,
+    'la barre est fixee en bas au centre et recouvrait la case en cours d edition')
+  B.touche(b, B.saisie(b), 'Escape')
+  assert.equal(B.barreVisible(b), true, 'elle revient quand la saisie se referme')
 })
