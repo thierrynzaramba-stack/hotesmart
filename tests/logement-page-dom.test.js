@@ -111,6 +111,7 @@ function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, che
     ${fonctionDeLaPage('dateEnClair')}
     ${ligneDeLaPage(/^const nombre = [\s\S]*?^\}$/m, 'le formateur de nombre')}
     ${ligneDeLaPage(/^const argent = [\s\S]*?^\}$/m, 'le formateur de montant')}
+    ${ligneDeLaPage(/^const liste = [\s\S]*?^\}$/m, 'la conjonction de la langue')}
     ${ligneDeLaPage(/^const OUTILS = .*$/m, 'les outils du rendu')}
     ${fonctionDeLaPage('montrerEtat')}
     ${ligneDeLaPage(/^let enVol = .*$/m, 'le verrou enVol')}

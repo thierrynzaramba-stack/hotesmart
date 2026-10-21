@@ -22,6 +22,7 @@
 //   · `[]` / `{connue:false}` / `0`      lu, et vide. C'est une RÉPONSE ;
 //   · données                            on affiche.
 import { canauxHtml, faitDateAffiche, avisHtml, sousTitre, fraicheurDuCompte, releveDuCompteEnEchec,
+  pastillesDesCanaux,
   signalDuBien } from './logements-liste.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -390,6 +391,23 @@ export function valeurDeSaisie (champ, bien) {
   return String(v)
 }
 
+// À qui l'envoi va vraiment — LES CANAUX DU BIEN, pas une phrase écrite une
+// fois pour toutes (décision de Thierry du 21 octobre 2026).
+//
+// ⚠ LA RÈGLE D'ÉTAT EST IMPORTÉE, PAS RECOPIÉE : `pastillesDesCanaux` dit déjà
+// ce qu'est « en vente », et c'est elle que les pastilles affichent juste
+// au-dessus. Deux définitions finiraient par désigner deux ensembles
+// différents, et la phrase promettrait un canal que l'écran dit éteint.
+//
+// ⚠ TROIS RÉPONSES, PAS DEUX. `null` = on n'a pas pu lire les canaux ; `[]` =
+// lu, et aucun n'est en vente ; sinon leurs noms. C'est la règle de tout le lot,
+// et ici elle décide d'une phrase qui annonce une écriture chez un tiers.
+export function canauxDeVente (canaux) {
+  const pastilles = pastillesDesCanaux(canaux)
+  if (pastilles === null) return null
+  return pastilles.filter(p => p.etat === 'vente').map(p => p.label)
+}
+
 // Le bouton d'envoi d'un bloc qui porte des champs de GRILLE.
 //
 // ⚠ PAS D'ENREGISTREMENT AUTOMATIQUE SUR CES CHAMPS-LÀ (décision de Thierry du
@@ -403,7 +421,25 @@ export function valeurDeSaisie (champ, bien) {
 // bougé obligerait à cliquer DEUX fois : le premier clic sort de la case (donc
 // active le bouton) sans l'atteindre. Il est toujours cliquable, et il dit
 // « aucun changement à envoyer » quand il n'y a rien à faire.
-function envoiHtml (bloc, outils) {
+// ⚠ UN BIEN SANS CANAL EN VENTE N'A PAS DE PHRASE (décision de Thierry) :
+// rien ne part chez personne, et l'annoncer serait faux. L'envoi, lui, reste
+// possible — il écrit notre base et le plan tarifaire du bien.
+//
+// ⚠ ET DES CANAUX ILLISIBLES NE SE TAISENT PAS. Ne rien dire ferait croire
+// qu'aucune annonce n'est touchée, alors qu'on ne sait pas : on nomme ce qu'on
+// sait — « vos plateformes connectées » — sans inventer lesquelles.
+function aideDEnvoiHtml (fiche, outils) {
+  const { t, esc, liste } = outils
+  const noms = canauxDeVente(fiche && fiche.canaux)
+  if (noms === null) {
+    return `<p class="caption fic-muet" data-envoi-aide="inconnu">${esc(t('fiche.envoi_inconnu'))}</p>`
+  }
+  if (!noms.length) return ''
+  return `<p class="caption fic-muet" data-envoi-aide="canaux">`
+    + `${esc(t('fiche.envoi_canaux', { canaux: liste ? liste(noms) : noms.join(', ') }))}</p>`
+}
+
+function envoiHtml (bloc, fiche, outils) {
   const { t, esc } = outils
   // DÉFENSIF : aujourd'hui les deux seuls appelants sont les deux blocs qui
   // PORTENT des champs de grille, donc cette garde ne mord jamais (mutation
@@ -414,7 +450,7 @@ function envoiHtml (bloc, outils) {
     <button type="button" class="btn" data-bind="enregistrer" data-bloc="${esc(bloc)}">
       ${esc(t('fiche.enregistrer'))}
     </button>
-    <p class="caption fic-muet" data-envoi-aide>${esc(t('fiche.envoi_partenaire'))}</p>
+    ${aideDEnvoiHtml(fiche, outils)}
     <span class="fic-etat caption" data-etat aria-live="polite"></span>
     <p class="fic-erreur caption" data-erreur hidden></p>
   </div>`
@@ -469,7 +505,7 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
       ${champsDuBloc('prix').map(c => ligneSaisieHtml(c, fiche.bien, outils)
         + (c.nom === 'prix_minimum' ? vide : '')).join('')}
       ${ligne('fiche.champ_devise', `${esc(p.devise)} <span class="fic-muet caption">${esc(t('fiche.devise_fixe'))}</span>`, ' data-devise')}
-      ${envoiHtml('prix', outils)}
+      ${envoiHtml('prix', fiche, outils)}
     </div>`
   }
 
@@ -493,7 +529,7 @@ export function logementHtml (fiche, outils, { peutModifier = false } = {}) {
     return `<div class="fic-champs">`
       + champsDuBloc('logement').map(c => ligneSaisieHtml(c, b, outils)).join('')
       + `<p class="fic-aide caption" data-aide>${esc(t('fiche.modifier_aide'))}</p>`
-      + envoiHtml('logement', outils) + `</div>`
+      + envoiHtml('logement', fiche, outils) + `</div>`
   }
   const champs = [
     ['fiche.champ_nom', b.nom],

@@ -238,7 +238,14 @@ const argent = (x, devise) => {
   catch { return `${x} ${devise || ''}`.trim() }
 }
 
-const OUTILS = { t, esc, icone, nombre, argent, dateEnClair }
+// ⚠ LA CONJONCTION VIENT DE LA LANGUE, pas d'un « et » écrit en dur : « A, B
+// et C » en français, « A, B, and C » en anglais, « A, B y C » en espagnol.
+// Elle sert à nommer les canaux vers lesquels un envoi part.
+const liste = (xs) => {
+  try { return new Intl.ListFormat(I18n.lang || 'fr', { style: 'long', type: 'conjunction' }).format(xs) }
+  catch { return (xs || []).join(', ') }
+}
+const OUTILS = { t, esc, icone, nombre, argent, dateEnClair, liste }
 
 function montrerEtat (quoi) {
   const zone = $('[data-bind="etat"]')

@@ -135,9 +135,21 @@ const OTA_LABELS = [
   { match: /expedia/i, label: 'Expedia' },
   { match: /vrbo|homeaway/i, label: 'Vrbo' }
 ]
+// ⚠ LE REPLI NE DOIT JAMAIS LAISSER SORTIR LE NOM DU PARTENAIRE TECHNIQUE
+// (trouve le 21 octobre 2026, en ecrivant la phrase d'envoi de l'etape 3).
+// `c.titre` et `c.ota` viennent du partenaire : rien n'interdisait a une ligne
+// de `canaux_du_bien` de porter « Channex » en titre ou en `ota`, et l'ecran
+// l'aurait AFFICHE — sur la carte de la liste comme sur la fiche, les deux
+// passant par ici. La regle du lot est absolue : « jamais le nom du partenaire
+// a l'ecran ». On retombe sur le libelle generique plutot que sur un nom qu'on
+// s'interdit de montrer.
+const PARTENAIRES = /channex|beds24|hotesmart[-_ ]?pms/i
+
 export function libelleDuCanal (c) {
-  return OTA_LABELS.find(o => o.match.test(c.ota || ''))?.label
-    || c.titre || c.ota || 'Canal'
+  const connu = OTA_LABELS.find(o => o.match.test(c.ota || ''))?.label
+  if (connu) return connu
+  const repli = c.titre || c.ota || ''
+  return (repli && !PARTENAIRES.test(repli)) ? repli : 'Canal'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

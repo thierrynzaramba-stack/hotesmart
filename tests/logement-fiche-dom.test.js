@@ -51,7 +51,10 @@ const icone = (id) => `<svg data-icone="${id}"></svg>`
 const nombre = (x, dec = 1) => new Intl.NumberFormat('fr', { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(x)
 const argent = (x, d) => new Intl.NumberFormat('fr', { style: 'currency', currency: d || 'EUR', maximumFractionDigits: 0 }).format(x)
 const dateEnClair = (iso) => `le-${iso}`
-const OUTILS = (extra = {}) => ({ t, esc, icone, nombre, argent, dateEnClair, ...extra })
+// `liste` : la conjonction de la langue (« A et B »), par `Intl.ListFormat`
+// comme la page la pose. Sans elle, le module replie sur une virgule.
+const liste = (xs) => new Intl.ListFormat('fr', { style: 'long', type: 'conjunction' }).format(xs)
+const OUTILS = (extra = {}) => ({ t, esc, icone, nombre, argent, dateEnClair, liste, ...extra })
 
 const doc = (html) => new JSDOM(`<!doctype html><body><div id="c">${html}</div></body>`).window.document
 
@@ -1131,7 +1134,7 @@ test('LE TEST QUI COMPTE : les quatre champs de GRILLE ont un bouton, et il dit 
     'les deux blocs qui portent un champ de grille, et eux seuls')
   for (const zone of d.querySelectorAll('.fic-envoi')) {
     assert.ok(zone.querySelector('[data-bind="enregistrer"]'))
-    assert.match(zone.querySelector('[data-envoi-aide]').textContent, /Airbnb et Booking\.com/)
+    assert.match(zone.querySelector('[data-envoi-aide]').textContent, /Sera envoyé à Airbnb/)
     assert.ok(zone.querySelector('[data-etat]'), 'le bloc dit son \u00e9tat, comme une case')
     assert.ok(zone.querySelector('[data-erreur]').hasAttribute('hidden'))
   }
@@ -1155,5 +1158,64 @@ test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : sans droit d \u00e9criture, aucu
   const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: false }))
   assert.equal(d.querySelector('.fic-envoi'), null)
   assert.equal(d.querySelector('[data-bind="enregistrer"]'), null)
-  assert.doesNotMatch(d.querySelector('#c').textContent, /Airbnb et Booking\.com/)
+  assert.doesNotMatch(d.querySelector('#c').textContent, /Sera envoyé/)
+})
+
+test('LE TEST QUI COMPTE : la phrase nomme les canaux R\u00c9ELS du bien, pas un texte fixe', () => {
+  // D\u00e9cision de Thierry du 21 octobre 2026. Un texte \u00e9crit une fois pour toutes
+  // promettrait Booking.com \u00e0 un bien qui n'y est pas \u2014 et c'est la phrase qui
+  // pr\u00e9vient avant une \u00e9criture chez un tiers.
+  const trois = fiche({ canaux: [
+    { ota: 'airbnb', titre: null, actif: true, mappe: true },
+    { ota: 'booking', titre: null, actif: true, mappe: true },
+    { ota: 'open', titre: 'R\u00e9servation directe', actif: true, mappe: true }
+  ] })
+  const d = doc(M.ficheHtml(trois, OUTILS(), { peutSupprimer: true }))
+  const aide = d.querySelector('[data-envoi-aide]')
+  assert.equal(aide.dataset.envoiAide, 'canaux')
+  assert.equal(aide.textContent.trim(), 'Sera envoy\u00e9 \u00e0 Airbnb, Booking.com et R\u00e9servation directe')
+
+  // Et un canal qui n'est PAS en vente n'y figure pas : la phrase dit o\u00f9 \u00e7a part,
+  // pas ce qui existe. La r\u00e8gle d'\u00e9tat est celle des pastilles, import\u00e9e.
+  const mixte = fiche({ canaux: [
+    { ota: 'airbnb', titre: null, actif: true, mappe: true },
+    { ota: 'booking', titre: null, actif: true, mappe: false },
+    { ota: 'open', titre: null, actif: false, mappe: true }
+  ] })
+  const d2 = doc(M.ficheHtml(mixte, OUTILS(), { peutSupprimer: true }))
+  assert.equal(d2.querySelector('[data-envoi-aide]').textContent.trim(), 'Sera envoy\u00e9 \u00e0 Airbnb')
+})
+
+test('LE TEST QUI COMPTE : un bien SANS canal en vente n a pas de phrase du tout', () => {
+  // \u00ab Un bien sans canal : pas de phrase \u00bb (Thierry). Rien ne part chez
+  // personne, et l'annoncer serait faux. Le bouton, lui, reste : l'envoi \u00e9crit
+  // notre base et le plan tarifaire du bien.
+  for (const canaux of [[], [{ ota: 'airbnb', titre: null, actif: true, mappe: false }]]) {
+    const d = doc(M.ficheHtml(fiche({ canaux }), OUTILS(), { peutSupprimer: true }))
+    assert.equal(d.querySelector('[data-envoi-aide]'), null, JSON.stringify(canaux))
+    assert.ok(d.querySelector('[data-bind="enregistrer"]'), 'le bouton reste')
+    assert.doesNotMatch(d.querySelector('#c').textContent, /Sera envoy\u00e9/)
+  }
+})
+
+test('LE TEST QUI COMPTE : des canaux ILLISIBLES ne se taisent pas, et n inventent pas de noms', () => {
+  // Ne rien dire ferait croire qu'aucune annonce n'est touch\u00e9e, alors qu'on ne
+  // sait pas. On nomme ce qu'on sait, sans inventer lesquelles.
+  for (const canaux of [null, {}, 'oui', 42]) {
+    const d = doc(M.ficheHtml(fiche({ canaux }), OUTILS(), { peutSupprimer: true }))
+    const aide = d.querySelector('[data-envoi-aide]')
+    assert.ok(aide, JSON.stringify(canaux))
+    assert.equal(aide.dataset.envoiAide, 'inconnu')
+    assert.match(aide.textContent, /plateformes connect\u00e9es/)
+    assert.doesNotMatch(aide.textContent, /Airbnb|Booking/)
+  }
+})
+
+test('jamais le nom du partenaire technique dans la phrase d envoi', () => {
+  // La r\u00e8gle du lot : les OTA se nomment, le partenaire technique jamais.
+  const d = doc(M.ficheHtml(fiche({ canaux: [
+    { ota: 'channex', titre: 'Channex', actif: true, mappe: true }
+  ] }), OUTILS(), { peutSupprimer: true }))
+  const txt = d.querySelector('#c').textContent
+  assert.doesNotMatch(txt, /channex|beds24/i)
 })

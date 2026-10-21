@@ -604,3 +604,25 @@ test('LE TEST QUI COMPTE : un bien mal formé n emporte pas la LISTE ENTIÈRE', 
   // Et un vrai tableau continue de se rendre.
   assert.equal(M.pastillesDesCanaux([]).length, 0)
 })
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : le nom du partenaire technique ne sort jamais par le REPLI', () => {
+  // \u26a0 TROUV\u00c9 LE 21 OCTOBRE 2026 en \u00e9crivant la phrase d'envoi de l'\u00e9tape 3.
+  // `libelleDuCanal` repliait sur `c.titre` puis `c.ota`, deux champs \u00e9crits
+  // d'apr\u00e8s le partenaire. Une ligne de `canaux_du_bien` portant \u00ab Channex \u00bb
+  // l'aurait affich\u00e9 \u2014 sur la carte de la liste ET sur la fiche, qui passent
+  // toutes deux par ici. \u00ab Jamais le nom du partenaire \u00e0 l'\u00e9cran \u00bb est une
+  // r\u00e8gle du lot, pas une pr\u00e9f\u00e9rence.
+  for (const c of [
+    { ota: 'channex', titre: 'Channex' },
+    { ota: 'autre', titre: 'Channex (PMS)' },
+    { ota: 'beds24', titre: null },
+    { ota: null, titre: 'HoteSmart PMS' }
+  ]) {
+    const vu = M.libelleDuCanal(c)
+    assert.doesNotMatch(vu, /channex|beds24|pms/i, JSON.stringify(c))
+  }
+  // Et un titre ordinaire reste affich\u00e9 : la garde ne doit pas tout aplatir.
+  assert.equal(M.libelleDuCanal({ ota: 'direct', titre: 'R\u00e9servation directe' }), 'R\u00e9servation directe')
+  assert.equal(M.libelleDuCanal({ ota: 'airbnb', titre: 'Channex Airbnb' }), 'Airbnb',
+    'un OTA connu passe par sa table, le titre ne compte pas')
+})
