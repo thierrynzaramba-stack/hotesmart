@@ -98,16 +98,19 @@ test('la fiche rend ses blocs, titrés et dans l ordre', () => {
   ])
 })
 
-test('l en-tête porte le nom, la ville · capacité, les canaux et le FAIT DATÉ', () => {
+test('l en-tête porte le nom, la ville · capacité et le FAIT DATÉ — mais PAS les pastilles', () => {
   const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
   assert.equal(d.querySelector('.fic-nom').textContent, 'La bulle')
   assert.match(d.querySelector('.fic-sous').textContent, /Bagnères · 2 voyageurs/)
-  // ⚠ LA MÊME CLASSE QUE LA LISTE, pas une copie sous un autre nom : les
-  // pastilles tiennent leur gouttière de `.log-canaux` (revue de 5c0d759 —
-  // le bloc « Où il est en vente » utilisait `.fic-vente`, déclaré nulle
-  // part, et rendait trois pastilles bord à bord).
-  assert.equal(d.querySelectorAll('.log-canaux .log-pastille').length, 2,
-    'un canal, rendu à deux endroits : l en-tête et le bloc')
+  // ⚠ LES PASTILLES NE SONT PLUS DANS L EN-TÊTE (décision de Thierry du
+  // 21 octobre 2026, après la capture de recette). La spec §3 les y mettait,
+  // et le bloc « Où il est en vente » les porte AUSSI, à cent pixels d écart :
+  // la même information deux fois, dont une sans son état ni sa date.
+  assert.equal(d.querySelector('.fic-entete .log-canaux'), null,
+    'l en-tête ne redit pas ce que le bloc dit mieux')
+  assert.equal(d.querySelector('.fic-entete .log-pastille'), null)
+  // Et elles sont bien DANS le bloc, avec la classe du module commun.
+  assert.equal(d.querySelectorAll('.log-canaux .log-pastille').length, 1)
   assert.equal(d.querySelector('.fic-canaux, .fic-vente'), null,
     'aucune classe de pastilles propre à la fiche : une copie diverge')
   // ⚠ LE FAIT DATÉ A QUITTÉ LA CARTE POUR VENIR ICI (décision du 20 octobre).
@@ -687,20 +690,24 @@ test('LE TEST QUI COMPTE : un fait daté PARTIEL le dit, il ne passe pas pour v�
   assert.equal(vide.querySelector('[data-fait]').textContent, 'Information indisponible')
 })
 
-test('LE TEST QUI COMPTE : les pastilles ont la MÊME forme aux deux endroits de la fiche', () => {
-  // L en-tête et le bloc « Où il est en vente » rendent tous deux les canaux.
-  // Deux conteneurs, deux classes, deux apparences à cent pixels d écart :
-  // c est ce que la revue de 5c0d759 a mesuré. Une seule classe, celle du
-  // module commun.
+test('LE TEST QUI COMPTE : les canaux sont dits UNE SEULE FOIS, dans leur bloc', () => {
+  // Décision de Thierry du 21 octobre 2026. Avant elle, l en-tête et le bloc
+  // rendaient tous deux les pastilles — la même information deux fois, dont
+  // une sans son état ni sa date de relevé.
   const d = doc(M.ficheHtml(fiche({ canaux: [
     { ota: 'airbnb', titre: 'a', actif: true, mappe: true },
     { ota: 'booking', titre: 'b', actif: true, mappe: true },
     { ota: 'open', titre: 'c', actif: true, mappe: true }
   ] }), OUTILS(), {}))
   const zones = [...d.querySelectorAll('.log-canaux')]
-  assert.equal(zones.length, 2, 'l en-tête et le bloc rendent les canaux')
-  for (const z of zones) assert.equal(z.querySelectorAll('.log-pastille').length, 3)
-  // Et la classe vient bien de la feuille commune, avec sa gouttière.
+  assert.equal(zones.length, 1, 'un seul endroit dit les canaux')
+  assert.equal(zones[0].querySelectorAll('.log-pastille').length, 3)
+  // Et c est bien celui qui porte AUSSI la date du relevé : l information
+  // complète, ou rien.
+  assert.ok(zones[0].closest('.fic-bloc'), 'les pastilles vivent dans un bloc titré')
+  assert.ok(zones[0].parentElement.querySelector('[data-fraicheur]'),
+    'le bloc qui garde les pastilles est celui qui dit de quand elles datent')
+  // La classe vient de la feuille commune, avec sa gouttière.
   const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
   assert.match(ui, /^\.log-canaux \{[^}]*gap:/m)
 })

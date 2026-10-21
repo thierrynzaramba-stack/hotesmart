@@ -228,6 +228,12 @@ export function calendrierHtml (fiche, { t, esc, icone }) {
     + `${icone('i-calendar', 'icon')}<span>${esc(t('fiche.voir_calendrier'))}</span></a></p>`
 }
 
+// ⚠ PAS DE PASTILLES DANS L'EN-TETE (decision de Thierry, 21 octobre 2026).
+// La spec §3 les y mettait, et le bloc « Ou il est en vente » les porte AUSSI,
+// a cent pixels d'ecart : la meme information deux fois, dont une sans son
+// etat ni sa date. Le bloc garde l'information COMPLETE — pastilles, etat et
+// « Canaux verifies le … » —, l'en-tete garde le nom, le sous-titre et le fait
+// date. Point signale en recette, tranche par Thierry.
 export function enTeteHtml (fiche, outils) {
   const { t, esc, icone } = outils
   const b = fiche.bien
@@ -255,7 +261,6 @@ export function enTeteHtml (fiche, outils) {
     <div class="fic-entete__texte">
       <h1 class="h2 fic-nom">${esc(b.nom || '')}</h1>
       ${sous ? `<p class="fic-sous caption">${sous}</p>` : ''}
-      <div class="log-canaux">${canauxHtml(fiche, outils)}</div>
       <p class="fic-fait${fait.muet || partiel ? ' fic-muet' : ''} caption" data-fait="${esc(fait.muet ? 'indisponible' : fiche.fait_date.type)}"${partiel ? ' data-partiel' : ''}>${esc(faitTexte)}${partiel ? ` ${esc(t('fiche.fait_partiel'))}` : ''}</p>
       ${signalHtml(fiche, outils)}
       ${calendrierHtml(fiche, outils)}

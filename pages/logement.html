@@ -55,13 +55,6 @@
   .fic-nom { overflow-wrap: anywhere; margin: 0; }
   .fic-sous { color: var(--muted); margin: 4px 0 0; overflow-wrap: anywhere; }
   .fic-fait { color: var(--ink); margin: var(--gap-s) 0 0; }
-  /* ⚠ LA MARGE QUE `.fic-canaux` PORTAIT. En fusionnant vers `.log-canaux`
-     (classe commune aux deux écrans), les pastilles de l'en-tête ont perdu
-     leur `margin-top` : elles collaient à la ligne « ville · capacité ». La
-     carte ne le voyait pas — sa grille a sa propre gouttière. Relevé en
-     re-revue de 3dddb14. La marge est propre à CET endroit, donc elle vit ici,
-     pas dans la feuille commune. */
-  .fic-entete__texte > .log-canaux { margin-top: var(--gap-s); }
 
   .fic-colonnes { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-l);
     align-items: start; }
