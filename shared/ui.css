@@ -420,7 +420,12 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 }
 
 /* ---------- Calendrier V5 (lot 3, étape 1) ---------- */
-.cal-page { --cal-col: 110px; padding: 14px var(--page-pad) 90px; display: flex; flex-direction: column; gap: 12px; }
+/* ⚠ LE BAS DE PAGE SE REGLE SUR LA HAUTEUR REELLE DE LA BARRE FLOTTANTE.
+   Les 90px d'origine ne suffisaient pas : la barre fait jusqu'a 234px quand ses
+   cinq boutons passent sur deux lignes, et elle decolle de 76px du bas — donc
+   elle montait a plus de 300px et recouvrait les lignes Prix. `--cal-reserve`
+   est posee par `reserverLaPlaceDeLaBarre()` a chaque rendu de la barre. */
+.cal-page { --cal-col: 110px; padding: 14px var(--page-pad) calc(90px + var(--cal-reserve, 0px)); display: flex; flex-direction: column; gap: 12px; }
 .cal-entete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .cal-periode { display: inline-flex; align-items: stretch; height: var(--control); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 3px; }
 .cal-periode .tab { height: 100%; padding: 0 12px; border: 0; border-radius: var(--radius-pill); font-size: var(--fs-small); background: transparent; }

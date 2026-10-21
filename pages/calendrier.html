@@ -764,7 +764,15 @@ function joursSelection () {
 function renderFlottante () {
   const barre = $('[data-bind="flottante"]')
   const jours = joursSelection()
-  if (!jours.length || etat.lectureSeule || !peutEcrire('reservations')) { barre.hidden = true; return }
+  // ⚠ LE RETOUR ANTICIPE DOIT LIBERER LA PLACE, SINON ELLE RESTE RESERVEE.
+  // Trouve par le test de la reserve : vider la selection passait par ici et
+  // laissait le bas de page degage pour une barre absente.
+  if (!jours.length || etat.lectureSeule || !peutEcrire('reservations')) {
+    barre.hidden = true
+    reserverLaPlaceDeLaBarre(barre)
+    degagerLaSelection()
+    return
+  }
   barre.hidden = false
   $('[data-bind="flottante-compte"]').textContent = t('cal.n_days', { n: jours.length })
   const bienId = etat.sel.bien
@@ -790,6 +798,44 @@ function renderFlottante () {
     note.hidden = !pilote
   }
   barre.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => actionBarre(b.dataset.action, toutFerme)))
+  reserverLaPlaceDeLaBarre(barre)
+  degagerLaSelection()
+}
+
+// ⚠ LA BARRE EST ANCREE AU BAS DE LA FENETRE, PAS A LA SELECTION
+// (`position: fixed; bottom: 76px`). Sur une fenetre peu haute elle remonte
+// jusqu'au milieu de la page et tombe sur les lignes Prix : la case qu'il faut
+// CLIQUER pour saisir est dessous. Mesure de la recette du 21 octobre, fenetre
+// de 666 px : la barre atteignait y ~ 355, pile sur la ligne selectionnee —
+// invisible sur un grand ecran, systematique sur un portable ou console
+// ouverte. Le premier correctif masquait la barre PENDANT la saisie ; il ne
+// reglait donc que le symptome d'apres, pas l'ACCES a la case.
+//
+// ⚠ ET ON N'ANCRE PAS LA BARRE A LA SELECTION, bien que ce soit le
+// comportement « popover » attendu : il se calcule par `getBoundingClientRect`,
+// que jsdom rend a zero — on livrerait de la geometrie qu'aucun test ne garde.
+// C'est la meme raison qui a fait abandonner le glisser au doigt. A trancher
+// par Thierry comme un lot a lui, avec un banc a mise en page reelle.
+function reserverLaPlaceDeLaBarre (barre) {
+  const page = document.querySelector('.cal-page')
+  if (!page) return
+  const h = barre && !barre.hidden ? (barre.offsetHeight || 0) : 0
+  // la barre decolle de 76px du bas : on degage sa hauteur PLUS son decalage
+  page.style.setProperty('--cal-reserve', h ? `${h + 88}px` : '0px')
+}
+// On ne defile qu'au CHANGEMENT de selection : sinon chaque rendu de la barre
+// ramenerait la page sous le curseur de l'hote en pleine manipulation.
+let derniereSelPeinte = null
+function degagerLaSelection () {
+  const jours = joursSelection()
+  const signature = jours.length && etat.sel ? `${etat.sel.bien}|${jours[0]}|${jours[jours.length - 1]}` : null
+  if (signature === derniereSelPeinte) return
+  derniereSelPeinte = signature
+  if (!signature) return
+  const cible = document.querySelector(`[data-ligne-prix] .cal-nuit[data-bien="${CSS.escape(etat.sel.bien)}"][data-iso="${jours[0]}"]`)
+    || document.querySelector(`.cal-case[data-bien="${CSS.escape(etat.sel.bien)}"][data-case="${jours[0]}"]`)
+  if (!cible || typeof cible.scrollIntoView !== 'function') return
+  try { cible.scrollIntoView({ block: 'center', behavior: 'auto' }) } catch {}
 }
 function actionBarre (id, toutFerme) {
   const jours = joursSelection()
