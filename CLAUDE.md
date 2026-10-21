@@ -70,6 +70,49 @@ mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
    la **recette**, et l'**ouverture d'un go prod**. Tout le reste — l'ordre des
    merges, les conflits triviaux, la vérification des déploiements — se règle
    entre sessions.
+8. ⚠ **UN CORRECTIF NÉ D'UNE RECETTE SE COMMITE SUR LA BRANCHE DU LOT, puis la
+   branche se merge dans `staging`. JAMAIS DE COMMIT DIRECT SUR `staging`.**
+   C'est tentant pendant une recette : la boucle est courte, l'hôte attend, et
+   `staging` est déjà sorti dans son worktree. Mais un correctif qui ne vit que
+   sur `staging` **n'est dans aucune branche**, donc il ne part jamais en
+   production — et il ne part pas en silence : la branche, elle, porte toujours
+   le défaut. **Vécu le 21 octobre 2026** : deux passes de recette sur le lot
+   calendrier ont produit trois correctifs, commités directement sur `staging`.
+   Au go prod, la branche `fix-calendrier-saisie-prix` s'arrêtait au commit
+   d'avant, et la merger aurait mis en production les trois défauts que la
+   recette venait de trouver — dont un prix que personne n'avait tapé, poussé au
+   canal. Rattrapé par `cherry-pick -x` vers la branche, mais c'est un
+   rattrapage, pas un déroulé.
+9. ⚠ **AVANT TOUT MERGE PROD, LE CHEF DE FILE VÉRIFIE QUE CHAQUE FICHIER DU LOT
+   EST IDENTIQUE À L'ÉTAT RECETTÉ SUR `staging`** — au blob, pas à l'œil, et sur
+   la liste COMPLÈTE des fichiers de l'index, jamais sur un échantillon :
+
+   ```bash
+   # dans l'arbre du merge, avant de commiter
+   git diff --name-only --cached <main-avant> | while read f; do
+     a=$(git rev-parse ":$f"); b=$(git rev-parse <sha-recette>:"$f" 2>/dev/null || echo ABSENT)
+     [ "$a" != "$b" ] && echo "DIFFERE : $f"
+   done
+   ```
+
+   Une ligne de sortie est une question à se poser, pas forcément un défaut : un
+   fichier partagé par deux lots **doit** différer, puisque `staging` en porte
+   un que `main` n'a pas encore. Mais chaque écart doit être **nommé et
+   expliqué** avant le commit.
+   **Vécu le 21 octobre 2026, deux fois dans la soirée.** Au merge du lot
+   logements, quatre fichiers n'étaient PAS en conflit, donc git a pris la
+   version de la branche sans un mot — et la suite rendait **8 rouges** : la
+   branche précédait la dette 76, et son `lib/logement/lecture.js` n'appelait
+   plus l'alarme des sources d'avis inconnues. Au merge du lot calendrier, le
+   même contrôle a confirmé l'inverse : les neuf fichiers du lot étaient
+   byte-identiques au recetté, et le seul écart — `shared/ui.css` — était le lot
+   logements, attendu et vérifié. **Le contrôle sert autant à valider qu'à
+   alerter.**
+   ⚠ **Et un merge vers `main` n'est jamais le merge vers `staging` rejoué** :
+   sur `staging`, le lot arrive dans un arbre qui contient déjà les autres lots,
+   donc git a peu à faire ; sur `main`, il arrive seul, et tout ce que les autres
+   lots ont ajouté PAR-DESSUS ses fichiers n'existe pas — sans conflit, sans
+   avertissement.
 
 **Pourquoi cette section existe.** Le 18 septembre 2026, deux sessions ont
 travaillé dans le même clone et l'une a emporté 220 lignes de correctifs de
