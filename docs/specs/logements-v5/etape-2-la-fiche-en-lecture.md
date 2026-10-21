@@ -508,3 +508,22 @@ dit qu'elle est à arbitrer, pour qu'elle ne passe pas pour une règle voulue.
   doublée).
 - `node scripts/i18n-check.js` : 674 clés dans les trois langues, toujours
   aucune clé neuve.
+
+### Correction d'un chiffre de compte rendu
+
+Le message du commit `813b732` dit « retirer le sélecteur de la liste groupée
+fait rougir 3 tests ». **C'est faux : il en fait rougir UN**, et c'est le bon —
+celui qui garde la mise en forme du troisième compteur. Trois est le compte de
+l'autre perturbation (retirer la règle de COULEUR).
+
+La cause est une erreur de mesure qui a entaché toutes les contre-épreuves de
+cette journée : `node --test … | grep -c "^✖"` compte des **lignes**, et le
+runner en imprime **trois pour un seul test rouge** (la ligne en vol, l'en-tête
+« failing tests », la ligne du récapitulatif) ; deux tests rouges en donnent
+cinq. Les conclusions tuée/survivante tiennent — elles ne reposent que sur
+« zéro ou pas zéro » — mais les chiffres rapportés étaient faux.
+
+**La règle : pour compter des rouges, on lit `ℹ fail N`.** Un chiffre dans un
+compte rendu est fait pour être recoupé ; attaché au mauvais geste, il fait
+croire à une régression à celui qui le vérifie. Relevé par le chef de file, qui
+a remesuré les quatre perturbations une par une.
