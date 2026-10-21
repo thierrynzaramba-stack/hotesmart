@@ -529,7 +529,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-nuit--fermee { background: repeating-linear-gradient(45deg, var(--amber-soft), var(--amber-soft) 4px, var(--surface) 4px, var(--surface) 8px); }
 .cal-nuit--fermee .cal-nuit__prix { text-decoration: line-through; color: var(--muted); }
 .cal-nuit--attente { background: var(--surface); outline: 1px dashed var(--muted); outline-offset: -3px; }
-.cal-nuit--passe { opacity: .55; cursor: default; }
+/* Un jour passe est INACTIONNABLE, et ca doit se voir : le curseur le dit
+   avant le clic (point 7 du 21 octobre 2026). `cursor: default` laissait
+   croire a une case ordinaire, et le clic ne faisait rien, sans un mot. */
+.cal-nuit--passe { opacity: .55; cursor: not-allowed; }
 .cal-nuit--sel { box-shadow: inset 0 0 0 2px var(--info); }
 .cal-nuit__saisie { width: 42px; border: 1px solid var(--info); border-radius: 6px; font-size: var(--fs-caption); text-align: center; background: var(--surface); color: var(--ink); }
 .cal-we { background-color: color-mix(in srgb, var(--ink) 4%, var(--surface)); }
@@ -548,7 +551,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-mois__jour.cal-we { box-shadow: none; color: var(--ink); font-weight: var(--fw-bold); }
 .cal-case.cal-auj { box-shadow: none; }
 .cal-case.cal-auj .cal-case__num { background: var(--ink); color: var(--on-ink); border-radius: var(--radius-pill); min-width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0 3px; }
-.cal-case.cal-nuit--passe { opacity: .4; }
+.cal-case.cal-nuit--passe { opacity: .4; cursor: not-allowed; }
 .cal-case.cal-case--sel { box-shadow: inset 0 0 0 2px var(--info); }
 .cal-orpheline { position: absolute; top: 2px; inset-inline-end: 2px; }
 .cal-orpheline .icon { width: 11px; height: 11px; color: var(--amber); }

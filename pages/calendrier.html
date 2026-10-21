@@ -616,7 +616,7 @@ function grilleBien (bienId, fonds) {
     const valeur = valeurDeVue(e, s, bien)
     const we = classesWE(new Date(iso + 'T12:00:00').getDay())
     return `<td class="cal-nuit cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${we}"
-      data-bien="${esc(bienId)}" data-i="${i}" data-iso="${iso}">
+      data-bien="${esc(bienId)}" data-i="${i}" data-iso="${iso}"${passe ? ' aria-disabled="true"' : ''}>
       ${orphelines.has(iso) ? `<span class="cal-orpheline" title="${esc(t('cal.orphan_hint'))}">${icone('i-alert')}</span>` : ''}
       <span class="cal-nuit__prix${etat.vueMobile === 'rate' && s.sansPrix && e !== 'attente' ? ' muted' : ''}">${esc(valeur)}</span>
     </td>`
@@ -702,7 +702,7 @@ function blocBienMobile (bienId) {
       const valeur = valeurDeVue(e, s, bien)
       const selection = etat.sel && etat.sel.bien === bienId && etat.sel.duIso && iso >= etat.sel.duIso && iso <= etat.sel.auIso
       return `<button type="button" class="cal-case cal-nuit--${e}${passe ? ' cal-nuit--passe' : ''}${classesWE(c.dow)}${iso === AUJOURDHUI ? ' cal-auj' : ''}${selection ? ' cal-case--sel' : ''}"
-        data-case="${iso}" data-bien="${esc(bienId)}" ${passe ? 'data-passe="1"' : ''}>
+        data-case="${iso}" data-bien="${esc(bienId)}" ${passe ? 'data-passe="1" aria-disabled="true"' : ''}>
         <span class="cal-case__num">${j}</span>
         ${orphelines.has(iso) ? `<span class="cal-orpheline">${icone('i-alert')}</span>` : ''}
         <span class="cal-case__valeur">${esc(valeur)}</span>
@@ -751,7 +751,7 @@ function blocBienMobile (bienId) {
 }
 
 // ─── Sélection (les DEUX écrans) et barre flottante ─────────────────────────
-function viderSelection () { etat.sel = null; renderFlottante() }
+function viderSelection () { etat.sel = null; peindreSelection(); renderFlottante() }
 function joursSelection () {
   if (!etat.sel) return []
   if (etat.sel.a != null) {
@@ -787,42 +787,99 @@ function actionBarre (id, toutFerme) {
   if (id === 'plus') { return ouvrirPopup(jours) }
 }
 
-let glisseEnCours = null
-document.addEventListener('mouseup', () => { if (glisseEnCours) { glisseEnCours = null; renderFlottante() } })
+// ⚠ TROIS INFORMATIONS, PAS UNE : d'ou part le geste, s'il a BOUGE, et s'il
+// est parti DANS la selection deja posee. C'est la troisieme qui separe les
+// deux gestes que l'hote attend — un GLISSER refait une selection, un CLIC
+// SIMPLE dans la selection ouvre la saisie pour TOUTE la selection.
+//
+// Vecu (21 octobre 2026, « Ofuro Futari », rapporte par Thierry) : « je
+// selectionne des jours, je clique dans la case, impossible d'ecrire
+// dedans ». Aucun clic n'ouvrait la saisie — seul le bouton « Prix » de la
+// barre flottante le faisait — et le `preventDefault()` du glisser empechait
+// en plus la cellule de prendre le focus, donc la saisie au clavier ne
+// partait jamais a la souris. Rien n'etait ecrit, et l'ecran ne disait rien.
+let glisse = null
+// Le geste du TELEPHONE (et de la vue etroite a la souris) vit lui aussi au
+// module : `brancherMobile` est rappele a chaque rendu, un ecouteur de
+// document pose la-dedans s'empilerait a chaque fois.
+let glisseMobile = null, presseLongue = null, appuiLongFait = false
+document.addEventListener('pointerup', () => {
+  if (!glisseMobile) return
+  const g = glisseMobile
+  glisseMobile = null
+  clearTimeout(presseLongue)
+  const long = appuiLongFait
+  appuiLongFait = false
+  // Le geste a POSE une plage (glisser, ou appui long) : il n'ouvre rien.
+  if (g.bouge || long) { renderFlottante(); return }
+  // Sinon c'est un CLIC SIMPLE (ou un tap court) : il ETEND la selection
+  // ouverte sur ce bien, et n'ouvre la popup du jour que s'il n'y en a pas.
+  if (etat.sel && etat.sel.bien === g.bien && etat.sel.duIso) {
+    if (g.depuis < etat.sel.duIso) etat.sel.duIso = g.depuis
+    else etat.sel.auIso = g.depuis
+    peindreSelectionMobile(); renderFlottante()
+    return
+  }
+  // une selection sur un AUTRE bien se vide : un seul contexte d'action
+  if (etat.sel && etat.sel.duIso) { etat.sel = null; peindreSelectionMobile(); renderFlottante() }
+  ouvrirPopup([g.depuis], null, g.bien)
+})
+document.addEventListener('pointercancel', () => { clearTimeout(presseLongue); glisseMobile = null })
+document.addEventListener('mouseup', () => {
+  if (!glisse) return
+  const g = glisse
+  glisse = null
+  renderFlottante()
+  if (!g.bouge && g.dansSel) actionPrix(joursSelection())
+})
 
 function brancherPlanning () {
   const zone = $('[data-bind="grilles"]')
   // Selection cliquer-glisser sur la ligne Prix, un bien a la fois ; jours
-  // passes exclus cellule par cellule (A.3, conserve). `glisseEnCours` vit au
+  // passes exclus cellule par cellule (A.3, conserve). `glisse` vit au
   // module : le mouseup qui la clot est PERMANENT et pose UNE fois (un
   // { once: true } par render etait consomme par le premier clic — review).
   zone.querySelectorAll('[data-ligne-prix] .cal-nuit').forEach(td => {
     td.addEventListener('mousedown', (e) => {
       if (etat.lectureSeule || !peutEcrire('reservations')) return
+      if (venuDeLaSaisie(e)) return
       if (td.dataset.iso < AUJOURDHUI) return
       e.preventDefault()
-      glisseEnCours = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
-      etat.sel = { ...glisseEnCours }
-      peindreSelectionDesktop()
+      const i = Number(td.dataset.i)
+      glisse = { bien: td.dataset.bien, a: i, b: i, bouge: false, dansSel: dansSelectionDesktop(td.dataset.bien, i) }
+      // Un clic DANS la selection ne la detruit pas : on attend de savoir si
+      // le geste bouge. Hors selection, on selectionne tout de suite — l'hote
+      // voit ou il en est.
+      if (!glisse.dansSel) { etat.sel = { bien: glisse.bien, a: i, b: i }; peindreSelectionDesktop() }
+      // Le `preventDefault()` prive la cellule du focus par defaut : on le
+      // pose a la main, sinon Entree / F2 / un chiffre ne peuvent JAMAIS
+      // partir apres un geste de souris.
+      td.focus()
     })
     td.addEventListener('mouseenter', () => {
-      if (!glisseEnCours || td.dataset.bien !== glisseEnCours.bien) return
+      if (!glisse || td.dataset.bien !== glisse.bien) return
       if (td.dataset.iso < AUJOURDHUI) return
-      glisseEnCours.b = Number(td.dataset.i)
-      etat.sel = { ...glisseEnCours }
+      glisse.bouge = true
+      glisse.b = Number(td.dataset.i)
+      etat.sel = { bien: glisse.bien, a: glisse.a, b: glisse.b }
       peindreSelectionDesktop()
     })
     // Clavier : Entree / F2 / chiffre = saisie inline (A.5, conserve).
     td.addEventListener('keydown', (e) => {
-      // Memes gardes que mousedown/touchstart/click : lecture seule et jour
-      // passe refusent AUSSI au clavier (revue de 6f3d6af).
+      // Memes gardes que le pointeur : lecture seule et jour passe refusent
+      // AUSSI au clavier (revue de 6f3d6af).
       if (etat.lectureSeule || !peutEcrire('reservations')) return
+      if (venuDeLaSaisie(e)) return
       if (td.dataset.iso < AUJOURDHUI) return
       const chiffre = /^[0-9]$/.test(e.key)
       if (chiffre && etat.vueMobile !== 'rate') return
       if (e.key === 'Enter' || e.key === 'F2' || chiffre) {
         e.preventDefault()
-        etat.sel = { bien: td.dataset.bien, a: Number(td.dataset.i), b: Number(td.dataset.i) }
+        // ⚠ NE PAS ECRASER UNE SELECTION QUI CONTIENT DEJA CETTE CELLULE :
+        // taper un chiffre juste apres un glisser doit viser les nuits
+        // selectionnees, pas la seule case sous le curseur.
+        const i = Number(td.dataset.i)
+        if (!dansSelectionDesktop(td.dataset.bien, i)) etat.sel = { bien: td.dataset.bien, a: i, b: i }
         actionPrix(joursSelection(), chiffre ? e.key : '')
       }
     })
@@ -844,12 +901,48 @@ function naviguerMois (sens) {
   }
   viderSelection(); ecrirePrefs(); charger()
 }
+// Peindre, pas re-rendre : un innerHTML au milieu d'un glisser detruit
+// l'element sous le pointeur, et le geste s'arrete net.
+// ⚠ ET LA PEINTURE DOIT SAVOIR EFFACER. `viderSelection` l'appelle avec
+// `etat.sel` a null : sans ce cas, la selection restait DESSINEE apres un
+// enregistrement, sur un etat qui n'existait plus (point 6 du 21 octobre).
 function peindreSelectionDesktop () {
-  const [a, b] = [Math.min(etat.sel.a, etat.sel.b), Math.max(etat.sel.a, etat.sel.b)]
+  const s = etat.sel
+  const pose = !!s && s.a != null
+  const a = pose ? Math.min(s.a, s.b) : -1
+  const b = pose ? Math.max(s.a, s.b) : -1
   document.querySelectorAll('[data-ligne-prix] .cal-nuit').forEach(td => {
-    const dans = td.dataset.bien === etat.sel.bien && Number(td.dataset.i) >= a && Number(td.dataset.i) <= b && td.dataset.iso >= AUJOURDHUI
+    const dans = pose && td.dataset.bien === s.bien
+      && Number(td.dataset.i) >= a && Number(td.dataset.i) <= b && td.dataset.iso >= AUJOURDHUI
     td.classList.toggle('cal-nuit--sel', dans)
   })
+}
+function peindreSelectionMobile () {
+  const s = etat.sel
+  const pose = !!s && !!s.duIso
+  document.querySelectorAll('[data-bind="grille-mobile"] .cal-case[data-case]').forEach(c => {
+    const iso = c.dataset.case
+    const dans = pose && c.dataset.bien === s.bien && iso >= s.duIso && iso <= s.auIso && iso >= AUJOURDHUI
+    c.classList.toggle('cal-case--sel', dans)
+  })
+}
+const peindreSelection = () => (estLarge() ? peindreSelectionDesktop() : peindreSelectionMobile())
+// La selection contient-elle DEJA cette nuit ? C'est ce qui distingue
+// « je refais une selection » de « j'ouvre la saisie sur celle-ci ».
+// ⚠ UN EVENEMENT NE DU CHAMP DE SAISIE N'EST PAS UN EVENEMENT DE LA CELLULE,
+// meme s'il remonte jusqu'a elle. Le champ vit DANS la cellule : son
+// `mousedown` et son `keydown` bulent. Sans cette sortie :
+//   - cliquer dans le champ pour placer le curseur refaisait une selection
+//     d'un jour, et le `preventDefault()` empechait la frappe (le defaut
+//     rapporte par Thierry le 21 octobre) ;
+//   - valider par Entree rouvrait IMMEDIATEMENT une nouvelle saisie, parce
+//     que le `keydown` de la cellule voyait passer la meme touche — trouve
+//     par le banc DOM, pas a la lecture.
+const venuDeLaSaisie = (e) => !!(e.target && e.target.closest && e.target.closest('.cal-nuit__saisie'))
+function dansSelectionDesktop (bienId, i) {
+  const s = etat.sel
+  return !!s && s.a != null && s.bien === bienId
+    && i >= Math.min(s.a, s.b) && i <= Math.max(s.a, s.b)
 }
 function brancherMobile () {
   const zone = $('[data-bind="grille-mobile"]')
@@ -858,40 +951,41 @@ function brancherMobile () {
   // selection -> barre d'actions (§9). Jour passe : rien (garde commune).
   // MULTI-BIENS : chaque case porte SON bien — la popup et la selection
   // visent le bien tape, jamais le premier de la liste.
-  let presse = null, long = false
+  // ⚠ POINTEUR, PLUS TOUCHER (point 5 du 21 octobre 2026, constate en prod).
+  // `touchstart` n'existe pas a la souris : sous 900 px avec une souris — une
+  // fenetre d'ordinateur reduite —, AUCUNE selection n'etait possible et
+  // chaque clic rouvrait la popup du jour. Les evenements de pointeur servent
+  // les deux entrees, et c'est `pointerType` qui decide de l'appui long : au
+  // doigt il est NECESSAIRE (sinon le scroll selectionnerait), a la souris il
+  // n'a pas de sens — le bouton tenu suffit.
   zone.querySelectorAll('[data-case]').forEach(c => {
     const iso = c.dataset.case
     const bienId = c.dataset.bien
-    c.addEventListener('touchstart', () => {
+    c.addEventListener('pointerdown', (e) => {
       if (iso < AUJOURDHUI || etat.lectureSeule || !peutEcrire('reservations')) return
-      long = false
-      presse = setTimeout(() => {
-        long = true
+      clearTimeout(presseLongue)
+      appuiLongFait = false
+      glisseMobile = { bien: bienId, depuis: iso, bouge: false, tactile: (e.pointerType || 'mouse') === 'touch' }
+      if (!glisseMobile.tactile) return
+      presseLongue = setTimeout(() => {
+        appuiLongFait = true
         etat.sel = { bien: bienId, duIso: iso, auIso: iso }
-        renderGrilleMobile(); renderFlottante()
+        peindreSelectionMobile(); renderFlottante()
       }, 450)
-    }, { passive: true })
-    // Le scroll declenchait l'appui long : move et cancel l'annulent aussi
-    // (review).
-    c.addEventListener('touchend', () => clearTimeout(presse), { passive: true })
-    c.addEventListener('touchmove', () => clearTimeout(presse), { passive: true })
-    c.addEventListener('touchcancel', () => clearTimeout(presse), { passive: true })
-    c.addEventListener('click', () => {
+    })
+    // Le scroll declenchait l'appui long : un deplacement l'annule (review).
+    c.addEventListener('pointerenter', () => {
+      if (!glisseMobile || glisseMobile.bien !== bienId) return
       if (iso < AUJOURDHUI) return
-      // Meme garde que l'appui long : en lecture, la popup d'edition ne
-      // s'ouvre pas (la consultation passe par les fiches, ouvertes a tous).
-      if (etat.lectureSeule || !peutEcrire('reservations')) return
-      if (long) { long = false; return }
-      if (etat.sel && etat.sel.bien === bienId && etat.sel.duIso) {
-        // une selection est ouverte SUR CE BIEN : le tap l'etend
-        if (iso < etat.sel.duIso) etat.sel.duIso = iso
-        else etat.sel.auIso = iso
-        renderGrilleMobile(); renderFlottante()
-        return
-      }
-      // une selection sur un AUTRE bien se vide : un seul contexte d'action
-      if (etat.sel && etat.sel.duIso) { etat.sel = null; renderFlottante(); renderGrilleMobile() }
-      ouvrirPopup([iso], null, bienId)
+      // Au doigt, on n'etend qu'APRES l'appui long, sinon on vole le scroll.
+      if (glisseMobile.tactile && !appuiLongFait) { clearTimeout(presseLongue); return }
+      glisseMobile.bouge = true
+      const [du, au] = [glisseMobile.depuis, iso].sort()
+      etat.sel = { bien: bienId, duIso: du, auIso: au }
+      // Peindre, JAMAIS re-rendre : un innerHTML sous le pointeur arreterait
+      // le geste en detruisant la case que le pointeur est en train de
+      // survoler (l'ancien appui long appelait `renderGrilleMobile`).
+      peindreSelectionMobile(); renderFlottante()
     })
   })
   zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
@@ -1224,6 +1318,10 @@ async function enregistrerPopup (bienId, corps) {
     if (!finaux.length) return
   }
   fermerFeuille()
+  // La selection a fait son office : elle se vide, et la barre d'actions avec
+  // elle (point 6 du 21 octobre). Sinon l'hote enregistre, et la barre reste
+  // la a proposer d'agir sur des nuits qu'il croit deja traitees.
+  viderSelection()
   await saveAvecAnnulation(bienId, finaux, { valeursAvant: null })
 }
 function plagesParJours (dates, jours) {
