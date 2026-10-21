@@ -99,7 +99,12 @@ export const api = {
     // l'UUID : la fiche ne descend aucun identifiant du partenaire, et ce lot ne
     // commencera pas a en faire sortir un pour un nom de parametre.
     pause: (id, paused) =>
-      apiCall('property-automation', 'POST', { provider_property_id: id, paused })
+      apiCall('property-automation', 'POST', { provider_property_id: id, paused }),
+    // La photo part en base64 dans du JSON, comme l'ecran d'aujourd'hui :
+    // `api/property-photo.js` lit `{ property_id, data }`, SEUL writer du
+    // bucket et de `properties.photo_url`.
+    photo: (id, base64) =>
+      apiCall('property-photo', 'POST', { property_id: id, data: base64 })
   },
   beds24: {
     getProperties: () => apiCall('beds24', 'POST', { action: 'getProperties' }),

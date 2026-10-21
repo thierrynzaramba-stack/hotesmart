@@ -122,6 +122,35 @@
   .fic-erreur { flex: 1 0 100%; margin: 0; color: var(--danger); }
   .fic-aide { margin: var(--gap-xs) 0 0; color: var(--muted); }
 
+  /* L'interrupteur de l'assistant. La piste et le rond sont dessinés en CSS :
+     aucune forme SVG dans la page, et la couleur vient des jetons. */
+  .fic-assistant { display: flex; align-items: center; gap: var(--gap-xs); margin: var(--gap-xs) 0 0; }
+  .fic-bascule { display: inline-flex; align-items: center; gap: var(--gap-xs);
+    min-height: 44px; padding: 0; border: 0; background: none; color: inherit;
+    font: inherit; cursor: pointer; }
+  .fic-bascule__piste { width: 38px; height: 22px; flex: none; border-radius: var(--radius-pill);
+    background: var(--ok); position: relative; transition: background .15s; }
+  .fic-bascule__rond { position: absolute; inset-block-start: 3px; inset-inline-start: 19px;
+    width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: inset-inline-start .15s; }
+  .fic-bascule[aria-checked="false"] .fic-bascule__piste { background: var(--muted-2); }
+  .fic-bascule[aria-checked="false"] .fic-bascule__rond { inset-inline-start: 3px; }
+  .fic-bascule:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: var(--radius-s); }
+
+  /* La photo : le déclencheur sous le cadre, son état à côté. */
+  .fic-photo__action { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-xs); }
+  .fic-photo__btn { min-height: 44px; cursor: pointer; }
+
+  /* Le dialogue, un seul pour les trois confirmations. */
+  .fic-dlg { max-width: 420px; width: calc(100vw - 32px); padding: 0;
+    border: 1px solid var(--border); border-radius: var(--radius-m);
+    background: var(--surface); color: var(--ink); }
+  .fic-dlg::backdrop { background: rgba(0, 0, 0, .45); }
+  .fic-dlg__corps { display: flex; flex-direction: column; gap: var(--gap-s); padding: var(--gap-m); margin: 0; }
+  .fic-dlg__liste { margin: 0; padding-inline-start: 1.1em; color: var(--muted); }
+  .fic-dlg__frappe { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+  .fic-dlg__pied { display: flex; justify-content: flex-end; gap: var(--gap-xs); flex-wrap: wrap; }
+  .fic-dlg__pied .btn { min-height: 44px; }
+
   /* Le bouton d'envoi d'un bloc : ce qui part d'ici atteint les annonces, et la
      phrase le dit AVANT le clic. */
   .fic-envoi { display: flex; align-items: center; flex-wrap: wrap;
@@ -203,6 +232,10 @@ import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCou
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
 import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie } from '/shared/logement-fiche.js'
+// ⚠ LA PRÉPARATION DE LA PHOTO EST PARTAGÉE avec l'écran d'aujourd'hui : elle
+// porte deux leçons de revue (une image sans dimensions, l'échelle de qualité
+// qui décide « trop lourde ») et une seconde copie les perdrait.
+import { preparerJpeg, PhotoRefusee } from '/shared/photo-bien-client.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -454,13 +487,160 @@ function majNom (nom) {
 // grille du partenaire à chaque lettre. `change` part à la sortie du champ.
 $('[data-bind="fiche"]').addEventListener('change', (ev) => {
   const input = ev.target.closest('[data-champ]')
-  if (input) enregistrerChamp(input)
+  if (input) { enregistrerChamp(input); return }
+  const photo = ev.target.closest('[data-bind="photo"]')
+  if (photo) envoyerPhoto(photo)
 })
 
 $('[data-bind="fiche"]').addEventListener('click', (ev) => {
   const bouton = ev.target.closest('[data-bind="enregistrer"]')
-  if (bouton) envoyerBloc(bouton)
+  if (bouton) { envoyerBloc(bouton); return }
+  const bascule = ev.target.closest('[data-bind="assistant"]')
+  if (bascule) basculerAssistant(bascule)
 })
+
+// ─── Le dialogue partagé : couper l'assistant, publier, supprimer ─────────
+//
+// ⚠ UNE SEULE FONCTION POUR LES TROIS. Elle rend `true` seulement si l'hôte a
+// validé ; Échap, « Annuler » et un clic à côté rendent `false`. Le défaut
+// sûr est le refus.
+function demander ({ titre, texte, ok, liste = null, frappe = null }) {
+  const dlg = $('[data-bind="dialogue"]')
+  if (!dlg || !dlg.showModal) return Promise.resolve(false)
+  const part = (nom) => dlg.querySelector(`[data-dlg="${nom}"]`)
+  part('titre').textContent = titre
+  part('texte').textContent = texte
+  part('ok').textContent = ok
+  const ul = part('liste')
+  ul.innerHTML = ''
+  ul.hidden = !liste || !liste.length
+  for (const ligne of (liste || [])) {
+    const li = document.createElement('li')
+    li.textContent = ligne
+    ul.appendChild(li)
+  }
+  const zoneFrappe = part('frappe')
+  const saisie = part('saisie')
+  zoneFrappe.hidden = !frappe
+  saisie.value = ''
+  if (frappe) part('frappe-aide').textContent = frappe.aide
+  part('erreur').hidden = true
+
+  return new Promise((resolve) => {
+    const fin = () => {
+      dlg.removeEventListener('close', fin)
+      // ⚠ LA FRAPPE SE VÉRIFIE ICI, pas au clic : un `Entrée` dans le champ
+      // soumet le formulaire avec la valeur du bouton par défaut.
+      const valide = dlg.returnValue === 'ok'
+        && (!frappe || saisie.value.trim() === String(frappe.attendu))
+      resolve(valide)
+    }
+    dlg.addEventListener('close', fin)
+    dlg.returnValue = 'annuler'
+    dlg.showModal()
+    // Le focus part sur « Annuler », jamais sur l'action.
+    part('annuler').focus()
+  })
+}
+
+// ─── L'assistant (interrupteur) ───────────────────────────────────
+//
+// ⚠ ON DEMANDE POUR COUPER, PAS POUR REPRENDRE. Couper arrête les messages et
+// les codes d'accès : c'est la décision. Reprendre rétablit l'état normal, et
+// faire confirmer l'inoffensif apprend à valider sans lire.
+async function basculerAssistant (bouton) {
+  const enPause = bouton.dataset.enPause === '1'
+  if (!enPause) {
+    const ok = await demander({
+      titre: t('fiche.assistant_titre'), texte: t('fiche.assistant_texte'),
+      ok: t('fiche.assistant_ok')
+    })
+    if (!ok) return
+  }
+  bouton.disabled = true
+  try {
+    // ⚠ L'UUID, PAS LA CLÉ DU PARTENAIRE : le paramètre s'appelle
+    // `provider_property_id` mais `resoudreBien` accepte l'`id`. La fiche ne
+    // descend aucun identifiant du partenaire, et ce lot n'en fera pas sortir
+    // un pour un nom de paramètre.
+    await api.bien.pause(idDuBien, !enPause)
+    bienCourant = { ...bienCourant, assistant_en_pause: !enPause }
+    majAssistant(!enPause)
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    direEtatBrut($('.fic-assistant'), 'erreur', e.details || e.message)
+  } finally {
+    bouton.disabled = false
+  }
+}
+
+// L'interrupteur se remet à jour SUR PLACE : recharger la fiche entière
+// emporterait une saisie en cours dans un autre bloc.
+function majAssistant (enPause) {
+  const ligne = $('.fic-assistant')
+  if (!ligne) return
+  const bouton = ligne.querySelector('[data-bind="assistant"]')
+  ligne.dataset.assistant = enPause ? 'pause' : 'actif'
+  bouton.setAttribute('aria-checked', enPause ? 'false' : 'true')
+  bouton.dataset.enPause = enPause ? '1' : ''
+  ligne.querySelector('[data-assistant-etat]').textContent =
+    t(enPause ? 'fiche.assistant_pause' : 'fiche.assistant_actif')
+}
+
+// Un état posé sur un conteneur quelconque (en-tête, photo) : même grammaire
+// que `direEtat`, mais sans passer par le nom d'un champ.
+function direEtatBrut (zone, quoi, texte = '') {
+  if (!zone) return
+  const etat = zone.querySelector('[data-etat]')
+  const err = zone.querySelector('[data-erreur]')
+  if (err) { err.hidden = quoi !== 'erreur'; err.textContent = quoi === 'erreur' ? texte : '' }
+  if (etat) etat.textContent = quoi === 'erreur' ? '' : texte
+}
+
+// ─── La photo ─────────────────────────────────────────────
+//
+// ⚠ L'APERÇU NE SURVIT PAS À UN ÉCHEC (leçon de revue de l'écran
+// d'aujourd'hui) : une image affichée après un envoi raté ferait croire la
+// photo enregistrée.
+async function envoyerPhoto (champ) {
+  const fichier = champ.files && champ.files[0]
+  if (!fichier) return
+  const zone = $('.fic-photo__action')
+  const cadre = $('.fic-photo')
+  const avant = cadre ? cadre.innerHTML : ''
+  let apercu = null
+  try {
+    let blob
+    try { blob = await preparerJpeg(fichier) }
+    catch (e) {
+      if (e instanceof PhotoRefusee) {
+        direEtatBrut(zone, 'erreur', t(e.code === 'taille' ? 'fiche.photo_trop_lourde' : 'fiche.photo_type'))
+        return
+      }
+      throw e
+    }
+    apercu = URL.createObjectURL(blob)
+    if (cadre) cadre.innerHTML = `<img src="${esc(apercu)}" alt="">`
+    direEtatBrut(zone, 'encours', t('fiche.photo_envoi'))
+    const base64 = await new Promise((ok, ko) => {
+      const r = new FileReader()
+      r.onload = () => ok(String(r.result).split(',')[1])
+      r.onerror = () => ko(new Error('lecture impossible'))
+      r.readAsDataURL(blob)
+    })
+    const rep = await api.bien.photo(idDuBien, base64)
+    if (cadre) cadre.innerHTML = `<img src="${esc(rep.photo_url)}" alt="">`
+    bienCourant = { ...bienCourant, photo_url: rep.photo_url }
+    direEtatBrut(zone, 'enregistre', t('fiche.enregistre'))
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    if (cadre) cadre.innerHTML = avant
+    direEtatBrut(zone, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+  } finally {
+    if (apercu) URL.revokeObjectURL(apercu)
+    champ.value = ''
+  }
+}
 
 let enVol = false
 async function charger () {
@@ -478,7 +658,12 @@ async function charger () {
     // ⚠ MASQUAGE PAR DROIT **ET** GARDE SERVEUR (règle absolue). Le DELETE est
     // gardé par `reglages: write` ; ici on ne fait que ne pas le proposer.
     bienCourant = f.bien
-    cible.innerHTML = ficheHtml(f, OUTILS, { peutSupprimer: peutEcrire('reglages') })
+    cible.innerHTML = ficheHtml(f, OUTILS, {
+      peutSupprimer: peutEcrire('reglages'),
+      // ⚠ PAS LE MÊME DROIT : le serveur garde le full sync par
+      // `reservations:write`, pas par `reglages:write`.
+      peutPublier: peutEcrire('reservations')
+    })
     cible.removeAttribute('aria-busy')
     // ⚠ PAS DE REPLI SUR `fiche.retour` : il vaut « Logements », donc l'onglet
     // annonçait le nom de la LISTE pour une fiche (revue de 5c0d759). Un bien

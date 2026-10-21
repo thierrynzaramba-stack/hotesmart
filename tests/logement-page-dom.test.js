@@ -60,7 +60,7 @@ test.before(async () => { M = await import('../shared/logement-fiche.js') })
 
 const FR = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', 'fr.json'), 'utf8'))
 
-function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, chemin = '/logements/b1' } = {}) {
+function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, chemin = '/logements/b1', peutEcrireReservations = true } = {}) {
   const dom = new JSDOM(
     `<!doctype html><html><head><style>[hidden]{display:none !important}</style></head>
      <body>${MAIN}</body></html>`,
@@ -94,9 +94,14 @@ function monter ({ reponse = null, erreur = null, peutEcrireReglages = true, che
     I18n, api, logger: { error: () => {}, info: () => {} },
     Date, decodeURIComponent, Number, Intl, String, JSON, setTimeout,
     ficheHtml: M.ficheHtml, etatHtml: M.etatHtml, etatDeLaPage: M.etatDeLaPage,
+    // ⚠ DEUX DOMAINES DEPUIS L'ÉTAPE 3, ET C'EST LE FOND DU SUJET : la
+    // suppression et les champs dépendent de `reglages`, mais « Publier mes
+    // prix » est gardé côté serveur par `reservations`. Un double qui
+    // répondrait la même chose aux deux masquerait une confusion de droits.
     peutEcrire: (domaine) => {
-      assert.equal(domaine, 'reglages', 'la suppression dépend du domaine `reglages`')
-      return peutEcrireReglages
+      assert.ok(['reglages', 'reservations'].includes(domaine),
+        `droit demandé hors des deux domaines de la fiche : ${domaine}`)
+      return domaine === 'reglages' ? peutEcrireReglages : peutEcrireReservations
     },
     etatTest: etat
   }
@@ -381,7 +386,13 @@ test('LE TEST QUI COMPTE : la page écrit PAR LE CLIENT D API, jamais par un app
   // de méthode écrite en dur), elle passe par `shared/api-client.js`, qui pose
   // le jeton, l'en-tête de compte et la lecture des refus. Un appel à la main
   // les oublierait, et c'est ainsi qu'un écran finit par parler au partenaire.
+  // ⚠ HORS COMMENTAIRES, comme l'épreuve des emoji le fait déjà plus bas : la
+  // règle vise ce que la page FAIT, pas ce qu'elle explique. Un commentaire qui
+  // nomme `provider_property_id` pour dire qu'on envoie l'UUID à la place est
+  // exactement ce qu'on veut lire dans six mois.
   const script = PAGE.slice(PAGE.indexOf('<script type="module">'))
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
   for (const motif of [/\bfetch\s*\(/, /method:\s*'(POST|PATCH|DELETE|PUT)'/,
     /\/api\//, /beds24/i, /channex/i, /provider_property_id/]) {
     assert.doesNotMatch(script, motif, `la page ne doit pas porter : ${motif}`)
@@ -390,7 +401,7 @@ test('LE TEST QUI COMPTE : la page écrit PAR LE CLIENT D API, jamais par un app
   // test la fait lire à quelqu'un.
   const appels = [...script.matchAll(/api\.(\w+)\.(\w+)\s*\(/g)].map(m => `${m[1]}.${m[2]}`)
   const connus = new Set(['logement.fiche', 'logement.compterSuppression',
-    'bien.modifier', 'bien.supprimer', 'bien.pause', 'calendar.fullsync'])
+    'bien.modifier', 'bien.supprimer', 'bien.pause', 'bien.photo', 'calendar.fullsync'])
   for (const a of appels) assert.ok(connus.has(a), `appel non prévu par l'étape 3 : ${a}`)
 })
 
@@ -653,4 +664,68 @@ test('LE TEST QUI COMPTE : un refus d envoi remet les cases \u00e0 la valeur enr
   assert.match(fn, /input\.value = valeurDeSaisie\(champ, bienCourant\)/)
   // Et le bouton redevient cliquable quoi qu il arrive.
   assert.match(fn, /finally \{\s*bouton\.disabled = false/)
+})
+
+// \u2500\u2500\u2500 L'interrupteur de l'assistant, ex\u00e9cut\u00e9 pour de vrai \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+function lancerBascule ({ enPause, accepte = true, erreur = null }) {
+  const demandes = []
+  const appels = []
+  const sandbox = {
+    bienCourant: { assistant_en_pause: enPause },
+    idDuBien: 'b1',
+    t: (cle) => cle,
+    logger: { error: () => {} },
+    $: () => null,
+    majAssistant: (v) => appels.push(['maj', v]),
+    direEtatBrut: (zone, quoi, texte) => appels.push(['etat', quoi, texte]),
+    demander: async (opts) => { demandes.push(opts); return accepte },
+    api: { bien: { pause: async (id, paused) => {
+      appels.push(['pause', id, paused])
+      if (erreur) throw erreur
+      return { ok: true }
+    } } }
+  }
+  const ctx = vm.createContext(sandbox)
+  vm.runInContext(fonctionDeLaPage('basculerAssistant'), ctx)
+  const bouton = { dataset: { enPause: enPause ? '1' : '' }, disabled: false }
+  sandbox.__bouton = bouton
+  return { demandes, appels, bouton,
+    lancer: () => vm.runInContext('basculerAssistant(__bouton)', ctx) }
+}
+
+test('LE TEST QUI COMPTE : COUPER l assistant se confirme, et un refus n appelle RIEN', async () => {
+  // Couper arr\u00eate les messages et les codes d acc\u00e8s : c est une d\u00e9cision.
+  const refuse = lancerBascule({ enPause: false, accepte: false })
+  await refuse.lancer()
+  assert.equal(refuse.demandes.length, 1, 'la confirmation doit \u00eatre demand\u00e9e')
+  assert.equal(refuse.appels.filter(a => a[0] === 'pause').length, 0,
+    'un refus ne doit RIEN envoyer')
+
+  const accepte = lancerBascule({ enPause: false, accepte: true })
+  await accepte.lancer()
+  assert.equal(accepte.appels.filter(a => a[0] === 'pause').length, 1)
+  assert.equal(accepte.appels.find(a => a[0] === 'pause')[2], true, 'on demande bien la PAUSE')
+})
+
+test('LE TEST QUI COMPTE : REPRENDRE ne se confirme pas \u2014 l inoffensif n apprend pas \u00e0 valider sans lire', async () => {
+  const e = lancerBascule({ enPause: true })
+  await e.lancer()
+  assert.equal(e.demandes.length, 0, 'aucune question pour r\u00e9tablir l \u00e9tat normal')
+  assert.equal(e.appels.find(a => a[0] === 'pause')[2], false)
+  assert.ok(e.appels.some(a => a[0] === 'maj' && a[1] === false), 'l interrupteur suit')
+})
+
+test('LE TEST QUI COMPTE : un refus du serveur ne fait pas mentir l interrupteur', async () => {
+  // Si le serveur refuse, l \u00e9tat affich\u00e9 ne doit pas bouger : un interrupteur
+  // qui bascule sans que rien n ait chang\u00e9 est un mensonge qui survit au
+  // rechargement suivant.
+  const e = lancerBascule({ enPause: false, accepte: true,
+    erreur: Object.assign(new Error('409'), { details: 'Bien pas encore synchronis\u00e9.' }) })
+  await e.lancer()
+  assert.equal(e.appels.filter(a => a[0] === 'maj').length, 0, 'l interrupteur ne bascule pas')
+  const etat = e.appels.find(a => a[0] === 'etat')
+  assert.equal(etat[1], 'erreur')
+  assert.equal(etat[2], 'Bien pas encore synchronis\u00e9.')
+  assert.equal(e.bouton.disabled, false, 'et le bouton redevient cliquable')
 })

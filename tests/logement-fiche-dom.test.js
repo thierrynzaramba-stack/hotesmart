@@ -1219,3 +1219,95 @@ test('jamais le nom du partenaire technique dans la phrase d envoi', () => {
   const txt = d.querySelector('#c').textContent
   assert.doesNotMatch(txt, /channex|beds24/i)
 })
+
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// \u00c9TAPE 3 \u2014 les deux actions de l'en-t\u00eate, et le dialogue partag\u00e9
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+test('LE TEST QUI COMPTE : l interrupteur REMPLACE la ligne d \u00e9tat, il ne la double pas', () => {
+  // `signalHtml` dit d\u00e9j\u00e0 \u00ab Assistant en pause \u00bb \u2014 la m\u00eame phrase que la carte
+  // de la liste. L'interrupteur porte cet \u00e9tat dans son `aria-checked` : les
+  // deux ensemble diraient la m\u00eame chose deux fois dans le m\u00eame en-t\u00eate.
+  const enPause = fiche({ bien: { ...fiche().bien, assistant_en_pause: true } })
+  const avec = doc(M.ficheHtml(enPause, OUTILS(), { peutSupprimer: true }))
+  assert.ok(avec.querySelector('[data-bind="assistant"]'))
+  assert.equal(avec.querySelector('[data-signal="pause"]'), null, 'pas de doublon')
+
+  // Sans le droit, c est la LECTURE qui reste : la ligne d \u00e9tat, pas l action.
+  const sans = doc(M.ficheHtml(enPause, OUTILS(), { peutSupprimer: false }))
+  assert.equal(sans.querySelector('[data-bind="assistant"]'), null)
+  assert.ok(sans.querySelector('[data-signal="pause"]'), 'l \u00e9tat reste lisible')
+})
+
+test('LE TEST QUI COMPTE : l interrupteur dit son \u00e9tat \u00c0 LA VOIX, pas seulement par sa couleur', () => {
+  // `role="switch"` + `aria-checked` : un lecteur d \u00e9cran annonce \u00ab activ\u00e9 \u00bb ou
+  // \u00ab d\u00e9sactiv\u00e9 \u00bb et le changement. Deux boutons qui s \u00e9changent l obligeraient
+  // \u00e0 deviner.
+  const actif = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+    .querySelector('[data-bind="assistant"]')
+  assert.equal(actif.getAttribute('role'), 'switch')
+  assert.equal(actif.getAttribute('aria-checked'), 'true')
+
+  const pause = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, assistant_en_pause: true } }),
+    OUTILS(), { peutSupprimer: true })).querySelector('[data-bind="assistant"]')
+  assert.equal(pause.getAttribute('aria-checked'), 'false')
+  assert.equal(pause.dataset.enPause, '1', 'la page lit cet \u00e9tat pour savoir quoi demander')
+})
+
+test('LE TEST QUI COMPTE : le d\u00e9clencheur de photo est une \u00c9TIQUETTE sur un vrai champ', () => {
+  // \u26a0 Un bouton qui ouvre le s\u00e9lecteur par `click()` sur un champ absent du DOM
+  // ne s ouvre pas au clavier, et sur iOS pas du tout hors geste direct.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const champ = d.querySelector('[data-bind="photo"]')
+  assert.ok(champ, 'le champ fichier doit exister dans le DOM')
+  assert.equal(champ.getAttribute('type'), 'file')
+  const label = d.querySelector(`label[for="${champ.id}"]`)
+  assert.ok(label, 'une \u00e9tiquette doit d\u00e9signer le champ')
+  assert.match(label.textContent, /photo/i)
+  // Le libell\u00e9 suit l \u00e9tat. La fixture n a PAS de photo : c est donc
+  // \u00ab Ajouter \u00bb qu on doit lire, et \u00ab Changer \u00bb d\u00e8s qu il y en a une.
+  assert.match(label.textContent, /Ajouter/)
+  const avec = doc(M.ficheHtml(
+    fiche({ bien: { ...fiche().bien, photo_url: 'https://x/p.jpg' } }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.match(avec.querySelector('label[for="fic-photo-champ"]').textContent, /Changer/)
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : sans droit, ni interrupteur, ni photo, ni dialogue', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
+  for (const sel of ['[data-bind="assistant"]', '[data-bind="photo"]', '[data-bind="dialogue"]',
+    '[data-bind="enregistrer"]', '[data-champ]']) {
+    assert.equal(d.querySelector(sel), null, sel)
+  }
+  assert.equal(d.querySelectorAll('input, dialog, button').length, 0,
+    'aucun \u00e9l\u00e9ment d action dans le DOM')
+})
+
+test('LE TEST QUI COMPTE : le dialogue est UNIQUE, et son d\u00e9faut est \u00ab Annuler \u00bb', () => {
+  // Trois confirmations \u2014 couper l assistant, publier, supprimer \u2014 une seule
+  // fen\u00eatre. Trois fen\u00eatres finiraient par ne pas rendre le focus pareil.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const dlgs = d.querySelectorAll('[data-bind="dialogue"]')
+  assert.equal(dlgs.length, 1)
+  const form = dlgs[0].querySelector('form')
+  assert.equal(form.getAttribute('method'), 'dialog', '\u00c9chap et la soumission ferment la fen\u00eatre')
+  const boutons = [...form.querySelectorAll('button')].map(b => b.value)
+  assert.deepEqual(boutons, ['annuler', 'ok'],
+    '\u00ab Annuler \u00bb vient EN PREMIER : c est lui qui prend le focus \u00e0 l ouverture')
+  // Les trois zones variables existent, vides et muettes au d\u00e9part.
+  for (const nom of ['titre', 'texte', 'liste', 'frappe', 'saisie', 'erreur', 'ok']) {
+    assert.ok(form.querySelector(`[data-dlg="${nom}"]`) || dlgs[0].querySelector(`[data-dlg="${nom}"]`), nom)
+  }
+  assert.ok(form.querySelector('[data-dlg="frappe"]').hasAttribute('hidden'))
+  assert.ok(form.querySelector('[data-dlg="liste"]').hasAttribute('hidden'))
+})
+
+test('LE TEST QUI COMPTE : le droit de PUBLIER n ouvre pas les champs, mais garde le dialogue', () => {
+  // Deux droits, deux portes. `reservations:write` publie les prix ;
+  // `reglages:write` modifie le bien. Un membre peut avoir l un sans l autre.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: false, peutPublier: true }))
+  assert.ok(d.querySelector('[data-bind="dialogue"]'), 'la confirmation lui servira')
+  assert.equal(d.querySelector('[data-champ]'), null, 'mais il ne modifie aucun champ')
+  assert.equal(d.querySelector('[data-bind="enregistrer"]'), null)
+  assert.equal(d.querySelector('[data-bind="assistant"]'), null)
+})

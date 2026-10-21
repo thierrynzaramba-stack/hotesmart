@@ -248,7 +248,50 @@ export function calendrierHtml (fiche, { t, esc, icone }) {
 // etat ni sa date. Le bloc garde l'information COMPLETE — pastilles, etat et
 // « Canaux verifies le … » —, l'en-tete garde le nom, le sous-titre et le fait
 // date. Point signale en recette, tranche par Thierry.
-export function enTeteHtml (fiche, outils) {
+// ─── Les deux actions de l'en-tête ─────────────────────────────────
+//
+// ⚠ L'INTERRUPTEUR REMPLACE LA LIGNE D'ÉTAT, il ne s'y ajoute pas. `signalHtml`
+// dit déjà « Assistant en pause » — la même phrase que la carte de la liste — et
+// l'interrupteur porte cet état dans son `aria-checked` et son libellé. Les deux
+// ensemble diraient la même chose deux fois dans le même en-tête.
+//
+// ⚠ UN VRAI INTERRUPTEUR (`role="switch"`), pas deux boutons qui s'échangent :
+// un lecteur d'écran annonce alors « Assistant HôteSmart, activé » et le
+// changement d'état, là où un bouton qui change de nom l'oblige à deviner.
+export function assistantHtml (fiche, outils, { peutModifier = false } = {}) {
+  const { t, esc, icone } = outils
+  if (!peutModifier) return signalHtml(fiche, outils)
+  const enPause = (fiche.bien || {}).assistant_en_pause === true
+  return `<p class="fic-assistant caption" data-assistant="${enPause ? 'pause' : 'actif'}">
+    <button type="button" class="fic-bascule" role="switch" aria-checked="${enPause ? 'false' : 'true'}"
+      data-bind="assistant" data-en-pause="${enPause ? '1' : ''}">
+      <span class="fic-bascule__piste" aria-hidden="true"><span class="fic-bascule__rond"></span></span>
+      <span>${esc(t('fiche.assistant'))}</span>
+    </button>
+    <span class="fic-muet" data-assistant-etat>${esc(t(enPause ? 'fiche.assistant_pause' : 'fiche.assistant_actif'))}</span>
+    ${enPause ? `<span class="fic-muet">${icone('i-pause', 'icon')}</span>` : ''}
+  </p>`
+}
+
+// ⚠ LE DÉCLENCHEUR EST UN `<label>` SUR UN `<input type=file>`, et le champ
+// reste dans le DOM (hors de l'œil) : un bouton qui ouvre le sélecteur par
+// `click()` sur un champ absent ne s'ouvre pas au clavier, et sur iOS il ne
+// s'ouvre pas du tout hors geste direct.
+export function photoHtml (fiche, outils, { peutModifier = false } = {}) {
+  const { t, esc, icone } = outils
+  if (!peutModifier) return ''
+  const aUnePhoto = !!(fiche.bien || {}).photo_url
+  return `<div class="fic-photo__action">
+    <label class="btn btn--secondary fic-photo__btn" for="fic-photo-champ">
+      ${icone('i-photo', 'icon')}<span>${esc(t(aUnePhoto ? 'fiche.photo_changer' : 'fiche.photo_ajouter'))}</span>
+    </label>
+    <input type="file" id="fic-photo-champ" accept="image/*" class="sr-only" data-bind="photo">
+    <span class="fic-etat caption" data-etat aria-live="polite"></span>
+    <p class="fic-erreur caption" data-erreur hidden></p>
+  </div>`
+}
+
+export function enTeteHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, icone } = outils
   const b = fiche.bien
   const sous = sousTitre(b)
@@ -272,11 +315,12 @@ export function enTeteHtml (fiche, outils) {
 
   return `<header class="fic-entete">
     <div class="fic-photo">${photo}</div>
+    ${photoHtml(fiche, outils, { peutModifier })}
     <div class="fic-entete__texte">
       <h1 class="h2 fic-nom">${esc(b.nom || '')}</h1>
       ${sous ? `<p class="fic-sous caption">${sous}</p>` : ''}
       <p class="fic-fait${fait.muet || partiel ? ' fic-muet' : ''} caption" data-fait="${esc(fait.muet ? 'indisponible' : fiche.fait_date.type)}"${partiel ? ' data-partiel' : ''}>${esc(faitTexte)}${partiel ? ` ${esc(t('fiche.fait_partiel'))}` : ''}</p>
-      ${signalHtml(fiche, outils)}
+      ${assistantHtml(fiche, outils, { peutModifier })}
       ${calendrierHtml(fiche, outils)}
     </div>
   </header>`
@@ -731,6 +775,42 @@ export function reglagesHtml (fiche, outils, refuses = []) {
   return `<div class="fic-reglages">${morceaux.join('')}</div>`
 }
 
+// ─── Le dialogue, un seul pour les trois confirmations ─────────────────
+//
+// ⚠ UN SEUL, RÉUTILISÉ : couper l'assistant, publier les prix, supprimer le
+// logement. Trois fenêtres écrites séparément finiraient par ne pas se fermer
+// pareil, ne pas rendre le focus pareil, et ne pas dire « Annuler » au même
+// endroit.
+//
+// ⚠ `<dialog>` NATIF, et pas `window.confirm` comme les autres écrans V5 : la
+// suppression exige de FRAPPER LE NOM du logement, ce qu'une boîte du navigateur
+// ne sait pas faire. Le natif apporte en prime le piège de focus, Échap, et le
+// retour du focus au bouton d'origine — trois choses qu'une fenêtre maison
+// oublie.
+//
+// ⚠ LE DÉFAUT SÛR EST « ANNULER » : il est en premier dans le DOM, donc c'est
+// lui qui prend le focus à l'ouverture, et Échap revient à lui. Jamais l'action
+// destructrice.
+export function dialogueHtml (outils) {
+  const { t, esc } = outils
+  return `<dialog class="fic-dlg" data-bind="dialogue" aria-labelledby="fic-dlg-titre">
+    <form method="dialog" class="fic-dlg__corps">
+      <h2 class="h3" id="fic-dlg-titre" data-dlg="titre"></h2>
+      <p data-dlg="texte"></p>
+      <ul class="fic-dlg__liste" data-dlg="liste" hidden></ul>
+      <p class="fic-dlg__frappe" data-dlg="frappe" hidden>
+        <label class="caption" for="fic-dlg-saisie" data-dlg="frappe-aide"></label>
+        <input class="fic-saisie" id="fic-dlg-saisie" data-dlg="saisie" autocomplete="off">
+      </p>
+      <p class="fic-erreur caption" data-dlg="erreur" hidden></p>
+      <div class="fic-dlg__pied">
+        <button type="submit" value="annuler" class="btn btn--secondary" data-dlg="annuler">${esc(t('fiche.annuler'))}</button>
+        <button type="submit" value="ok" class="btn" data-dlg="ok"></button>
+      </div>
+    </form>
+  </dialog>`
+}
+
 // ─── L'assemblage ───────────────────────────────────────────────────────────
 //
 // ⚠ UN BLOC REFUSÉ N'EST PAS RENDU, et c'est `bloc()` qui le décide sur un
@@ -742,6 +822,13 @@ export function ficheHtml (fiche, outils, droits = {}) {
   // l'appelant le fournit.
   const peutModifier = droits.peutModifier === true
     || (droits.peutModifier === undefined && droits.peutSupprimer === true)
+  // ⚠ DEUX DROITS, PAS UN. « Publier mes prix » est gardé côté serveur par
+  // `reservations:write` et non par `reglages:write` (voir §5 de la spec,
+  // corrigé à l'ouverture de l'étape 3) : un membre peut tenir le calendrier
+  // sans reconfigurer le bien, et l'inverse. Le dialogue sert les deux, donc il
+  // existe dès que l'un des deux est là.
+  const peutPublier = droits.peutPublier === true
+  const avecActions = peutModifier || peutPublier
   const inds = Array.isArray(fiche.indisponibles) ? fiche.indisponibles : []
   const refs = Array.isArray(fiche.refuses) ? fiche.refuses : []
   const o = { ...outils,
@@ -769,7 +856,7 @@ export function ficheHtml (fiche, outils, droits = {}) {
     bloc('fiche.bloc_reglages', reglagesHtml(fiche, o, refs), o)
   ].join('')
 
-  return `${enTeteHtml(fiche, o)}
+  return `${avecActions ? dialogueHtml(o) : ''}${enTeteHtml(fiche, o, { peutModifier })}
     <div class="fic-colonnes">
       <div class="fic-col fic-col--gauche">${gauche}</div>
       <div class="fic-col fic-col--droite">${droite}</div>

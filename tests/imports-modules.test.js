@@ -26,7 +26,14 @@ const racine = path.join(__dirname, '..')
 // posee par le test des non delegables, elle vaut ici aussi.
 function sansCommentaires (src) {
   return src
-    .replace(/\/\*[\s\S]*?\*\//g, m => ' '.repeat(m.length))
+    // ⚠ UN `/*` NE COMMENCE UN COMMENTAIRE QUE S'IL COMMENCE UN JETON (trouvé
+    // le 21 octobre 2026, étape 3 du lot Logements). `accept="image/*"` dans un
+    // gabarit faisait avaler TOUT ce qui suivait jusqu'au prochain `*/` — ici
+    // 470 lignes et quatorze `export` — et le test accusait la page d'importer
+    // un nom « que le module n'exporte pas ». L'erreur allait dans le sens
+    // prudent (elle crie, elle ne se tait pas), mais un test qui crie à tort se
+    // fait ignorer, et il aurait fallu un quart d'heure pour le croire.
+    .replace(/(^|[\s(,;={}[\]])\/\*[\s\S]*?\*\//g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
     .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + ' '.repeat(m.length - p1.length))
 }
 
@@ -146,3 +153,23 @@ for (const page of CIBLES) {
     }
   })
 }
+
+test('LE TEST QUI COMPTE : un `/*` DANS UNE CHA\u00ceNE n avale pas la suite du fichier', () => {
+  // Contre-\u00e9preuve du d\u00e9faut trouv\u00e9 le 21 octobre 2026 : `accept="image/*"`
+  // dans un gabarit faisait dispara\u00eetre quatorze `export` du fichier, et le
+  // test accusait une page d importer un nom inexistant.
+  const src = [
+    'export const A = 1',
+    'const html = `<input accept="image/*">`',
+    'export function B () {}',
+    '/* un vrai commentaire, lui, dispara\u00eet */',
+    'export const C = 3'
+  ].join('\n')
+  const vu = sansCommentaires(src)
+  assert.match(vu, /export const A/)
+  assert.match(vu, /export function B/)
+  assert.match(vu, /export const C/, 'tout ce qui suit la cha\u00eene doit survivre')
+  assert.doesNotMatch(vu, /un vrai commentaire/)
+  // Et la longueur est pr\u00e9serv\u00e9e : les positions servent ailleurs dans ce test.
+  assert.equal(vu.length, src.length)
+})
