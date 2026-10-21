@@ -815,8 +815,38 @@ avant de découvrir qu'il n'y avait pas de build — et une recette qu'on allait
 lancer sur l'ancien écran.
 
 **Comment le rattraper.** Un re-push à l'identique ne met à jour aucune ref,
-donc ne réveille rien : il faut un SHA neuf. Soit un « Redeploy » depuis le
-tableau de bord Vercel (aucune trace dans l'historique), soit un commit vide —
-qui est un commit **direct sur `staging`**, donc interdit par la règle du clone
-partagé : il exige l'autorisation explicite de Thierry, au cas par cas, et son
-message porte la mesure qui le justifie (voir `306de95`).
+donc ne réveille rien.
+
+**Le geste, c'est « Create Deployment » depuis le tableau de bord Vercel**, en
+désignant la **branche** (ou le SHA). Il construit le commit de tête et le
+promeut : la production rattrape, sans nouveau commit et sans toucher à
+l'historique.
+
+⚠ **PAS « Redeploy », ET C'EST LE PIÈGE** (corrigé par Thierry le 21 octobre
+2026) : « Redeploy » reconstruit le déploiement qu'on a sous les yeux, donc
+**l'ANCIEN commit**. On obtient un build tout neuf, vert, horodaté de l'instant
+— et la production sert toujours le code d'avant. C'est le pire des résultats :
+le symptôme disparaît de l'écran sans que le défaut soit réparé.
+
+Un **commit vide** reste possible quand on veut que le webhook refasse le
+chemin complet, mais ce n'est plus le premier recours. C'est un commit **direct
+sur la branche**, donc soumis à la règle du clone partagé : autorisation
+explicite de Thierry au cas par cas, et son message porte la mesure qui le
+justifie (voir `306de95`).
+
+**Vécu une seconde fois le 21 octobre 2026, sur `main` et donc en PRODUCTION.**
+Le merge du lot logements (`981d453`) a été poussé, `git ls-remote` confirmait
+la ref avancée — et **aucun déploiement**, bouclé 120 secondes puis réinterrogé
+à 4 minutes : zéro. Statut GitHub `pending`, zéro check-run. La sonde qui
+tranche n'est pas l'API, c'est **la production elle-même** :
+`https://hotesmart.vercel.app/logements` rendait **404** alors que la route
+venait d'entrer dans `vercel.json`. Après « Create Deployment » sur `main` :
+déploiement `Production – hotesmart` enregistré pour le SHA complet, et
+`/logements` à **200**.
+
+⚠ **ET LA FORME DU PUSH N'Y EST POUR RIEN.** Ce push-là visait
+`<SHA>:refs/heads/main` plutôt qu'un nom de branche, parce que `main` est sorti
+dans le clone partagé et qu'on n'y touche pas. C'est tentant d'y voir la cause :
+c'en est une fausse. GitHub ne voit que **la mise à jour de la ref** ; le
+refspec du côté local ne lui est pas transmis. Ne pas perdre de temps là-dessus
+le jour où ça se reproduit.
