@@ -91,6 +91,7 @@
 <div class="cal-flottante" data-bind="flottante" hidden>
   <span class="small" data-bind="flottante-compte"></span>
   <span class="row" style="gap: 8px; flex-wrap: wrap" data-bind="flottante-actions"></span>
+  <span class="caption muted" data-bind="flottante-note" hidden></span>
   <button type="button" class="link small" data-bind="flottante-annuler" data-i18n="cal.cancel_selection"></button>
 </div>
 
@@ -769,17 +770,36 @@ function renderFlottante () {
   const bienId = etat.sel.bien
   const st = etat.states[bienId] || {}
   const toutFerme = jours.every(iso => nuitFermee(st[iso] || {}))
+  // ⚠ BIEN PILOTE : LE REFUS SE VOIT AVANT LE GESTE, PAS APRES (decision de
+  // Thierry du 21 octobre 2026, apres sa recette). La SELECTION reste — Fermer
+  // et Bloquer en ont besoin sur un bien pilote — mais le bouton Prix s'affiche
+  // grise des la selection, et la barre porte le message. Avant, on laissait
+  // cliquer pour refuser ensuite : l'hote apprenait son droit par l'echec.
+  const bienSel = etat.biens.find(b => b.id === bienId) || {}
+  const pilote = bienSel.pilote_tarifaire === 'yieldflow'
   // LES CINQ ACTIONS, depuis le CONTRAT partagé (§14) — jamais une copie.
   $('[data-bind="flottante-actions"]').innerHTML = ACTIONS_BARRE.map(a => {
     const cle = a.id === 'fermer' && toutFerme ? a.cleInverse : a.cle
-    return `<button type="button" class="btn ${a.id === 'prix' ? 'btn--primary' : 'btn--secondary'}" data-action="${a.id}">
-      ${icone(a.icone)}${esc(t(cle))}</button>`
+    const off = pilote && a.id === 'prix'
+    return `<button type="button" class="btn ${a.id === 'prix' ? 'btn--primary' : 'btn--secondary'}" data-action="${a.id}"${off ? ` disabled aria-disabled="true" title="${esc(t('cal.piloted_price'))}"` : ''}>
+      ${icone(a.icone)}${esc(t(cle))}${off ? `<span class="sr-only"> ${esc(t('cal.piloted_price'))}</span>` : ''}</button>`
   }).join('')
+  const note = $('[data-bind="flottante-note"]')
+  if (note) {
+    note.textContent = pilote ? t('cal.piloted_price') : ''
+    note.hidden = !pilote
+  }
   barre.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', () => actionBarre(b.dataset.action, toutFerme)))
 }
 function actionBarre (id, toutFerme) {
   const jours = joursSelection()
   if (!jours.length) return
+  // ⚠ UN BOUTON GRISE EST UN CONFORT, PAS UNE PROTECTION (regle absolue du
+  // depot). `actionPrix` garde son refus, et celui-ci le double : un clic
+  // programme sur le bouton desactive ne doit rien tenter.
+  if (id === 'prix' && (etat.biens.find(b => b.id === etat.sel?.bien) || {}).pilote_tarifaire === 'yieldflow') {
+    return toast(t('cal.piloted_price'), { duree: 7000 })
+  }
   if (id === 'prix') { return actionPrix(jours) }
   if (id === 'fermer') { return toutFerme ? rouvrir(jours) : fermer(jours) }
   if (id === 'bloquer') { return ouvrirFormulaire('bloquer', jours) }
