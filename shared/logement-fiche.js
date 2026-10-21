@@ -314,8 +314,10 @@ export function enTeteHtml (fiche, outils, { peutModifier = false } = {}) {
     : t(fait.cle)
 
   return `<header class="fic-entete">
-    <div class="fic-photo">${photo}</div>
-    ${photoHtml(fiche, outils, { peutModifier })}
+    <div class="fic-entete__visuel">
+      <div class="fic-photo">${photo}</div>
+      ${photoHtml(fiche, outils, { peutModifier })}
+    </div>
     <div class="fic-entete__texte">
       <h1 class="h2 fic-nom">${esc(b.nom || '')}</h1>
       ${sous ? `<p class="fic-sous caption">${sous}</p>` : ''}

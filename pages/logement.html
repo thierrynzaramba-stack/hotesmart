@@ -109,12 +109,20 @@
   /* Étape 3 — l'édition sur place. Une ligne de saisie garde la MÊME grille que
      la ligne de lecture : l'œil ne doit pas voir deux tableaux différents selon
      qu'on a le droit d'écrire ou non. */
-  .fic-ligne--saisie { flex-wrap: wrap; align-items: center; gap: var(--gap-xs) var(--gap-s); }
+  /* ⚠ LES CASES S'ALIGNENT, ET POUR ÇA LA COLONNE DES ÉTIQUETTES EST FIXE
+     (mesuré à la capture du 22 octobre 2026). En `flex`, chaque case commençait
+     où finissait son étiquette : « Prix de base » et « Par voyageur en plus »
+     donnaient deux bords gauches différents, et la colonne paraissait de
+     travers. La ligne de LECTURE, elle, garde son flex : son rôle est de
+     pousser la valeur à droite. */
+  .fic-ligne--saisie { display: grid; grid-template-columns: minmax(7em, 10em) 1fr auto;
+    align-items: center; gap: var(--gap-xs) var(--gap-s); }
+  .fic-ligne--saisie .fic-erreur { grid-column: 1 / -1; }
   .fic-saisie { width: 100%; min-height: 44px; padding: 8px 10px; font: inherit;
     color: var(--ink); background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius-s); }
   .fic-saisie:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
-  .fic-ligne--saisie .fic-ligne__val { flex: 1 1 180px; min-width: 0; }
+  .fic-ligne--saisie .fic-ligne__val { min-width: 0; }
   /* « Enregistré » : discret, et il ne POUSSE RIEN quand il apparaît — sa place
      est réservée, sinon la ligne sauterait sous le doigt à chaque sauvegarde. */
   .fic-etat { flex: none; min-width: 7.5em; text-align: end; color: var(--muted); }
@@ -137,6 +145,11 @@
   .fic-bascule:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: var(--radius-s); }
 
   /* La photo : le déclencheur sous le cadre, son état à côté. */
+  /* ⚠ LA PHOTO ET SON ACTION NE FONT QU'UNE COLONNE. Posé à côté d'elles, le
+     déclencheur devenait un TROISIÈME enfant de la grille à deux colonnes : le
+     nom et le fait daté passaient sous la photo, dans une colonne de 160 px.
+     Mesuré à la capture, pas à la lecture. */
+  .fic-entete__visuel { display: flex; flex-direction: column; gap: var(--gap-xs); }
   .fic-photo__action { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-xs); }
   .fic-photo__btn { min-height: 44px; cursor: pointer; }
 
@@ -187,6 +200,11 @@
   }
   @media (max-width: 560px) {
     .fic-entete { grid-template-columns: 1fr; gap: var(--gap-m); }
+    /* Au téléphone, l'étiquette passe AU-DESSUS : une colonne fixe y mangerait
+       la moitié de la case. */
+    .fic-ligne--saisie { grid-template-columns: 1fr auto; }
+    .fic-ligne--saisie .fic-ligne__cle { grid-column: 1 / -1; }
+    .fic-ligne--saisie .fic-ligne__val { grid-column: 1 / -1; }
     .fic-photo { aspect-ratio: 16 / 9; }
     .fic-ligne { flex-wrap: wrap; gap: 2px var(--gap-s); }
     .fic-ligne__val { text-align: left; }
