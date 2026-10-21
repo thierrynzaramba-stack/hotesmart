@@ -83,7 +83,14 @@ test('calendrier : ni edition en ligne ni barre d\'action en lecture', () => {
   const html = lire('pages/calendrier.html')
   assert.ok(/mousedown', \(e\) => \{\n      if \(etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) return/.test(html),
     'la selection (donc l\'edition) refuse avant de demarrer')
-  assert.ok(/if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) \{ barre\.hidden = true/.test(html),
+    // ⚠ MOTIF ASSOUPLI LE 21 OCTOBRE 2026. Il exigeait la ligne SUR UNE SEULE
+    // LIGNE : reformater le retour anticipe de `renderFlottante` — pour qu'il
+    // libere aussi la place reservee a la barre — faisait rougir ce test et
+    // deux autres, sans qu'aucune regle n'ait bouge. Un test doit tenir la
+    // CONDITION, pas sa typographie. La preuve dans le DOM, elle, vit dans
+    // tests/calendrier-saisie-prix-dom.test.js (« sans droit d'ecriture :
+    // aucun geste ne selectionne » et « en lecture seule : meme refus »).
+  assert.ok(/if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\)[\s\S]{0,40}barre\.hidden = true/.test(html),
     'la barre d\'action se masque en lecture')
   assert.ok(html.includes('avis-lecture'), 'et la raison affichee')
 })

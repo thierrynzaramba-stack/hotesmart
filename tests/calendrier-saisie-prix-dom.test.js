@@ -964,3 +964,57 @@ test('le style « desactive » existe vraiment dans la feuille partagee', () => 
   assert.ok(css.indexOf('.btn:disabled') > css.indexOf('.btn:hover'),
     'declaree avant `.btn:hover`, elle perdrait l ombre au survol')
 })
+
+// ── La barre recouvrait la case qu'il fallait CLIQUER (recette, 2e passe) ────
+// Mon premier correctif la masquait PENDANT la saisie : il reglait le symptome
+// d'apres, pas l'acces. La barre est ancree au bas de la FENETRE, donc sur une
+// fenetre peu haute elle monte sur les lignes Prix.
+const reserve = (b) => b.doc.querySelector('.cal-page').style.getPropertyValue('--cal-reserve')
+
+test('LE TEST QUI COMPTE : la page RESERVE la place de la barre quand elle est visible', () => {
+  const { b } = banc({})
+  assert.equal(reserve(b), '0px', 'rien a reserver sans selection')
+  glisser(b, B.casesBureau(b, 'B1'), 2, 5)
+  assert.equal(B.barreVisible(b), true)
+  // jsdom n'a pas de mise en page : `offsetHeight` vaut 0, donc la valeur
+  // reservee est 0px. Ce qui est garde ici, c'est que la RESERVE est posee a
+  // chaque rendu et remise a zero quand la barre part — le pixel, lui, se voit
+  // a l'ecran. Le padding de .cal-page le consomme par `calc()`.
+  assert.ok(reserve(b) !== '', 'la reserve est posee des que la barre parait')
+  B.touche(b, B.casesBureau(b, 'B1')[2], 'Escape')
+})
+
+test('la reserve retombe a zero quand la selection se vide', () => {
+  const { b } = banc({})
+  glisser(b, B.casesBureau(b, 'B1'), 2, 5)
+  b.cal.viderSelection()
+  assert.equal(reserve(b), '0px', 'plus de barre, plus de reserve')
+})
+
+test('le padding de .cal-page CONSOMME bien la reserve', () => {
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  assert.match(css, /\.cal-page \{[^}]*padding:[^;]*var\(--cal-reserve/,
+    'sans ce calc(), la variable ne degage rien')
+})
+
+test('LE TEST QUI COMPTE : une selection NEUVE degage la ligne, et un re-rendu ne la redegage pas', () => {
+  const { b } = banc({})
+  const cases = B.casesBureau(b, 'B1')
+  let appels = 0
+  b.window.Element.prototype.scrollIntoView = function () { appels++ }
+  glisser(b, cases, 2, 5)
+  assert.equal(appels, 1, 'la selection neuve sort la ligne de dessous la barre')
+  b.cal.renderFlottante()
+  b.cal.renderFlottante()
+  assert.equal(appels, 1, 'un re-rendu ne doit PAS ramener la page sous le curseur')
+  glisser(b, cases, 8, 10)
+  assert.equal(appels, 2, 'une AUTRE selection degage de nouveau')
+})
+
+test('un defilement impossible ne fait pas tomber le geste', () => {
+  const { b } = banc({})
+  b.window.Element.prototype.scrollIntoView = function () { throw new Error('indisponible') }
+  glisser(b, B.casesBureau(b, 'B1'), 2, 5)
+  assert.equal(B.barreVisible(b), true, 'la selection tient malgre l echec du defilement')
+  assert.equal(b.journal.length, 0, 'et rien ne part au journal')
+})
