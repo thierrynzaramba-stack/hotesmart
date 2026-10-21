@@ -825,3 +825,96 @@ test('LE TEST QUI COMPTE : passer en « H\u00f4teSmart envoie mes prix » se con
   // Et on recharge : le s\u00e9lecteur doit dispara\u00eetre, le bouton Publier appara\u00eetre.
   assert.match(fn, /await charger\(\)/)
 })
+
+// \u2500\u2500\u2500 Supprimer, ex\u00e9cut\u00e9 pour de vrai \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+function lancerSuppression ({ compte = null, erreurComptage = null, erreurSuppr = null, accepte = true }) {
+  const demandes = []
+  const etats = []
+  const appels = []
+  const sandbox = {
+    bienCourant: { nom: 'La bulle' },
+    idDuBien: 'b1',
+    t: (cle, vars) => (vars && vars.n != null) ? `${cle}:${vars.n}` : cle,
+    listeDeSuppression: M.listeDeSuppression,
+    logger: { error: () => {} },
+    Number, String,
+    $: () => ({}),
+    location: { replace: (u) => appels.push(['quitte', u]) },
+    direEtatBrut: (zone, quoi, texte) => etats.push([quoi, texte]),
+    demander: async (o) => { demandes.push(o); return accepte },
+    api: {
+      logement: { compterSuppression: async (id) => {
+        appels.push(['compte', id])
+        if (erreurComptage) throw erreurComptage
+        return { suppression: compte }
+      } },
+      bien: { supprimer: async (id) => {
+        appels.push(['supprime', id])
+        if (erreurSuppr) throw erreurSuppr
+        return { deleted: true }
+      } }
+    }
+  }
+  const ctx = vm.createContext(sandbox)
+  vm.runInContext(fonctionDeLaPage('supprimerLogement'), ctx)
+  sandbox.__b = { disabled: false }
+  return { demandes, etats, appels, bouton: sandbox.__b,
+    lancer: () => vm.runInContext('supprimerLogement(__b)', ctx) }
+}
+
+test('LE TEST QUI COMPTE : la confirmation \u00c9NUM\u00c8RE ce qui sera effac\u00e9, avec les nombres', async () => {
+  // Demande de Thierry : « la confirmation dit ce qui sera effac\u00e9, avec les
+  // nombres ». Et le logement lui-m\u00eame est TOUJOURS dans la liste.
+  const e = lancerSuppression({ compte: {
+    cle_absente: false, reservations: 3, messages: 12, menages: 0, codes: 1 } })
+  await e.lancer()
+  const liste = e.demandes[0].liste
+  assert.deepEqual([...liste], [
+    'fiche.supprimer_le_bien',
+    'fiche.supprimer_reservations:3',
+    'fiche.supprimer_messages:12',
+    'fiche.supprimer_codes:1'
+  ], 'un compte \u00e0 z\u00e9ro ne s \u00e9crit pas : on \u00e9num\u00e8re ce qu on PERD')
+  // Et la frappe du nom est exig\u00e9e.
+  assert.equal(e.demandes[0].frappe.attendu, 'La bulle')
+})
+
+test('LE TEST QUI COMPTE : un comptage ILLISIBLE le dit, et n emp\u00eache pas de supprimer', async () => {
+  // Refuser d ouvrir rendrait un bien insupprimable \u00e0 cause d une lecture
+  // rat\u00e9e ; annoncer z\u00e9ro serait pire.
+  const e = lancerSuppression({ erreurComptage: new Error('503') })
+  await e.lancer()
+  assert.ok(e.demandes.length, 'la fen\u00eatre s ouvre quand m\u00eame')
+  assert.ok([...e.demandes[0].liste].includes('fiche.supprimer_illisible'))
+  assert.ok(e.appels.some(a => a[0] === 'supprime'), 'et la suppression reste possible')
+})
+
+test('LE TEST QUI COMPTE : refuser la confirmation ne supprime RIEN', async () => {
+  const e = lancerSuppression({ compte: { reservations: 0, messages: 0, menages: 0, codes: 0 }, accepte: false })
+  await e.lancer()
+  assert.equal(e.appels.filter(a => a[0] === 'supprime').length, 0)
+  assert.equal(e.appels.filter(a => a[0] === 'quitte').length, 0, 'et on reste sur la fiche')
+})
+
+test('LE TEST QUI COMPTE : apr\u00e8s la suppression, on QUITTE la fiche', async () => {
+  // Le bien n existe plus : rester dessus afficherait une panne au prochain
+  // rafra\u00eechissement.
+  const e = lancerSuppression({ compte: { reservations: 0, messages: 0, menages: 0, codes: 0 } })
+  await e.lancer()
+  assert.deepEqual(e.appels.at(-1), ['quitte', '/logements'])
+  assert.match(fonctionDeLaPage('supprimerLogement'), /location\.replace/,
+    '`replace`, pour qu un retour arri\u00e8re ne ram\u00e8ne pas sur une fiche morte')
+})
+
+test('un refus du serveur laisse la fiche en place, et le bouton cliquable', async () => {
+  const e = lancerSuppression({
+    compte: { reservations: 0, messages: 0, menages: 0, codes: 0 },
+    erreurSuppr: Object.assign(new Error('409'), { details: 'Ce logement est encore reli\u00e9.' })
+  })
+  await e.lancer()
+  assert.equal(e.appels.filter(a => a[0] === 'quitte').length, 0)
+  assert.equal(e.etats.at(-1)[0], 'erreur')
+  assert.equal(e.etats.at(-1)[1], 'Ce logement est encore reli\u00e9.')
+  assert.equal(e.bouton.disabled, false)
+})

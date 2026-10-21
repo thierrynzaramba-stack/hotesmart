@@ -700,21 +700,57 @@ export function logementHtml (fiche, outils, { peutModifier = false } = {}) {
 export function supprimerHtml (fiche, outils, { peutSupprimer = false } = {}) {
   const s = suppressionAffiche(fiche.suppression)
   if (!peutSupprimer || MOTIFS_QUI_EFFACENT.includes(s.motif)) return null
-  // ⚠ ET LE BLOC NE SE REND QUE S'IL A QUELQUE CHOSE À DIRE (constat de la
-  // revue de 5c0d759). Quand la suppression est POSSIBLE, l'étape 2 n'a aucune
-  // information à donner : un bouton rouge actif qui ne part pas est un leurre,
-  // et son aide promettait une confirmation qui n'existe pas encore. Quand elle
-  // est refusée ou incertaine, son ÉTAT est l'information, et il se lit AVANT
-  // le clic — c'est ce que Thierry a demandé. Le bouton revient à l'étape 3,
-  // câblé.
-  if (s.active) return null
+  // ⚠ À L'ÉTAPE 2, LE BLOC NE SE RENDAIT PAS QUAND LA SUPPRESSION ÉTAIT
+  // POSSIBLE : un bouton rouge actif qui ne part pas est un leurre. À l'étape 3
+  // il part, donc il se rend — et quand la suppression est REFUSÉE, c'est son
+  // ÉTAT qui reste l'information, lisible AVANT le clic.
   const { t, esc, icone } = outils
+  const bouton = (actif) => `<button type="button" class="btn btn--danger" data-bind="supprimer"${actif ? '' : ' disabled'}>`
+    + `${icone('i-close', 'icon')}<span>${esc(t('fiche.supprimer'))}</span></button>`
+  if (s.active) {
+    return `<div class="fic-supprimer">
+      ${bouton(true)}
+      <span class="fic-etat caption" data-etat aria-live="polite"></span>
+      <p class="fic-erreur caption" data-erreur hidden></p>
+    </div>`
+  }
   return `<div class="fic-supprimer">
-    <button type="button" class="btn btn--danger" data-bind="supprimer" disabled>
-      ${icone('i-close', 'icon')}<span>${esc(t('fiche.supprimer'))}</span>
-    </button>
+    ${bouton(false)}
     <p class="caption fic-muet" data-raison data-motif="${esc(s.motif || 'inconnu')}">${esc(t(s.cle))}</p>
   </div>`
+}
+
+// Ce que la confirmation ÉNUMÈRE, à partir des nombres du serveur.
+//
+// ⚠ LE LOGEMENT LUI-MÊME EST TOUJOURS DANS LA LISTE, même quand il n'a aucune
+// donnée liée : une fenêtre qui n'énumère rien ferait croire qu'on ne perd rien.
+//
+// ⚠ UN COMPTE À ZÉRO NE S'ÉCRIT PAS. « 0 message » dans une liste de ce qui sera
+// effacé est du bruit — on énumère ce qu'on PERD, pas ce qu'on n'a pas.
+//
+// ⚠ ET UN COMPTE ILLISIBLE (`null`) SE DIT, en toutes lettres. C'est la règle de
+// tout ce lot au moment où elle coûte le plus cher : taire une lecture ratée
+// ferait supprimer un bien en croyant ne rien perdre.
+export const COMPTES_SUPPRESSION = [
+  ['reservations', 'fiche.supprimer_reservations'],
+  ['messages', 'fiche.supprimer_messages'],
+  ['menages', 'fiche.supprimer_menages'],
+  ['codes', 'fiche.supprimer_codes']
+]
+
+export function listeDeSuppression (compte, t) {
+  const lignes = [t('fiche.supprimer_le_bien')]
+  const c = compte || {}
+  let illisible = false
+  for (const [nom, cle] of COMPTES_SUPPRESSION) {
+    const v = c[nom]
+    if (v === null || v === undefined) { illisible = true; continue }
+    const n = Number(v)
+    if (!Number.isFinite(n) || n <= 0) continue
+    lignes.push(t(cle, { n }))
+  }
+  if (illisible) lignes.push(t('fiche.supprimer_illisible'))
+  return lignes
 }
 
 // ─── 5. Ménage ──────────────────────────────────────────────────────────────

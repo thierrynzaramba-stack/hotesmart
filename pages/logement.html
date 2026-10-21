@@ -239,7 +239,8 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCourant, basculerVers }
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
-import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie, canauxDeVente } from '/shared/logement-fiche.js'
+import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie, canauxDeVente,
+  listeDeSuppression } from '/shared/logement-fiche.js'
 // ⚠ LA PRÉPARATION DE LA PHOTO EST PARTAGÉE avec l'écran d'aujourd'hui : elle
 // porte deux leçons de revue (une image sans dimensions, l'échelle de qualité
 // qui décide « trop lourde ») et une seconde copie les perdrait.
@@ -511,7 +512,9 @@ $('[data-bind="fiche"]').addEventListener('click', (ev) => {
   const bascule = ev.target.closest('[data-bind="assistant"]')
   if (bascule) { basculerAssistant(bascule); return }
   const pub = ev.target.closest('[data-bind="publier"]')
-  if (pub) publierPrix(pub)
+  if (pub) { publierPrix(pub); return }
+  const sup = ev.target.closest('[data-bind="supprimer"]')
+  if (sup) supprimerLogement(sup)
 })
 
 // ─── Le dialogue partagé : couper l'assistant, publier, supprimer ─────────
@@ -732,6 +735,60 @@ async function envoyerPhoto (champ) {
   } finally {
     if (apercu) URL.revokeObjectURL(apercu)
     champ.value = ''
+  }
+}
+
+// ─── Supprimer ────────────────────────────────────────────────
+//
+// ⚠ LES NOMBRES SE DEMANDENT AU MOMENT DU CLIC, pas à l'ouverture de la fiche :
+// on ne fait pas payer à chaque lecture le comptage d'un geste qu'on ne fera
+// presque jamais. Et ils viennent du SERVEUR, gardés par le même droit que la
+// suppression elle-même.
+//
+// ⚠ SI LE COMPTAGE ÉCHOUE, ON N'ABANDONNE PAS LA SUPPRESSION : on ouvre la
+// fenêtre en disant qu'on n'a pas pu compter. Refuser d'ouvrir rendrait un bien
+// insupprimable à cause d'une lecture ratée ; annoncer zéro serait pire.
+async function supprimerLogement (bouton) {
+  const zone = $('.fic-supprimer')
+  const nom = (bienCourant && bienCourant.nom) || ''
+  bouton.disabled = true
+  direEtatBrut(zone, 'encours', t('fiche.enregistrement'))
+  let compte = null
+  try {
+    const r = await api.logement.compterSuppression(idDuBien)
+    compte = (r && r.suppression) || null
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    // `null` partout : `listeDeSuppression` le dira « nous n'avons pas pu
+    // compter », ce qui est exactement vrai.
+    compte = { reservations: null, messages: null, menages: null, codes: null }
+  }
+  direEtatBrut(zone, '', '')
+  bouton.disabled = false
+
+  const ok = await demander({
+    titre: t('fiche.supprimer_titre'),
+    texte: t('fiche.supprimer_texte'),
+    liste: listeDeSuppression(compte, t),
+    ok: t('fiche.supprimer_ok'),
+    // ⚠ LA FRAPPE DU NOM EST CONSERVÉE (décision de Thierry, étape 2) : c'est
+    // la seule garde qui demande de LIRE ce qu'on supprime.
+    frappe: { aide: t('fiche.supprimer_frappe'), attendu: nom }
+  })
+  if (!ok) return
+
+  bouton.disabled = true
+  direEtatBrut(zone, 'encours', t('fiche.enregistrement'))
+  try {
+    await api.bien.supprimer(idDuBien)
+    // ⚠ ON QUITTE LA FICHE : le bien n'existe plus, et rester dessus
+    // afficherait une panne au prochain rafraîchissement. `replace` empêche le
+    // retour arrière vers une fiche morte.
+    location.replace('/logements')
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    direEtatBrut(zone, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+    bouton.disabled = false
   }
 }
 

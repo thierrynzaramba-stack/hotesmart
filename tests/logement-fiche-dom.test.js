@@ -84,13 +84,13 @@ const fiche = (extra = {}) => ({
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('la fiche rend ses blocs, titrés et dans l ordre', () => {
-  // ⚠ SIX BLOCS QUAND LA SUPPRESSION EST POSSIBLE : il n y a alors rien à dire
-  // en lecture seule, et un bouton qui ne part pas serait un leurre. Le
-  // septième apparaît quand la suppression est REFUSÉE — c est son état qui
-  // est l information.
+  // ⚠ SEPT BLOCS DEPUIS L'ÉTAPE 3 : la suppression existe, donc son bloc aussi,
+  // qu'elle soit possible (bouton actif) ou refusée (bouton éteint et sa
+  // raison). À l'étape 2, un bien supprimable n'en rendait aucun.
   const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
   assert.deepEqual([...d.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent), [
-    'Où il est en vente', 'Prix', 'Le logement', 'Ménage', 'Avis des voyageurs', 'Réglages'
+    'Où il est en vente', 'Prix', 'Le logement', 'Supprimer ce logement',
+    'Ménage', 'Avis des voyageurs', 'Réglages'
   ])
 
   const refuse = doc(M.ficheHtml(
@@ -290,15 +290,21 @@ test('LE TEST QUI COMPTE (SÉCURITÉ) : `droit_refuse` du SERVEUR efface le bloc
     .includes('Supprimer ce logement'))
 })
 
-test('LE TEST QUI COMPTE : un bien SUPPRIMABLE ne rend aucun bouton à l étape 2', () => {
-  // Un bouton rouge actif qui ne part pas est un leurre, et son aide promettait
-  // une confirmation qui n existe pas encore. Quand la suppression est
-  // possible, l étape 2 n a rien à dire ; le bouton revient à l étape 3,
-  // câblé. Quand elle est refusée, son ÉTAT est l information.
+test('LE TEST QUI COMPTE : un bien SUPPRIMABLE rend un bouton ACTIF (étape 3)', () => {
+  // ⚠ CE TEST A CHANGÉ DE CONTRAT À L'ÉTAPE 3, sur go de Thierry. À l'étape 2,
+  // un bien supprimable ne rendait AUCUN bouton : un bouton rouge actif qui ne
+  // part pas est un leurre. Maintenant il part — donc il se rend, actif, et la
+  // confirmation existe.
   const d = doc(M.ficheHtml(fiche({ suppression: { possible: true, motif: null } }),
     OUTILS(), { peutSupprimer: true }))
-  assert.equal(d.querySelector('[data-bind="supprimer"]'), null)
-  assert.doesNotMatch(d.querySelector('#c').textContent, /confirmerez en saisissant/)
+  const b = d.querySelector('[data-bind="supprimer"]')
+  assert.ok(b, 'le bouton existe')
+  assert.equal(b.hasAttribute('disabled'), false)
+  // Et aucune raison ne s affiche : il n y en a pas.
+  assert.equal(d.querySelector('[data-raison]'), null)
+  // Sa place pour dire l état et l erreur, comme partout ailleurs.
+  assert.ok(d.querySelector('.fic-supprimer [data-etat]'))
+  assert.ok(d.querySelector('.fic-supprimer [data-erreur]').hasAttribute('hidden'))
 })
 
 test('LE TEST QUI COMPTE : `possible: null` DÉSACTIVE aussi — une lecture ratée n ouvre pas la suppression', () => {
@@ -1459,4 +1465,18 @@ test('LE TEST QUI COMPTE : la page des connexions SAIT ouvrir l assistant sur le
     'elle r\u00e9sout l UUID en propri\u00e9t\u00e9 avant d ouvrir')
   assert.match(page, /if \(cible\) openConnexions\(cible, null\)/,
     'un identifiant inconnu n ouvre rien et laisse la liste')
+})
+
+test('LE TEST QUI COMPTE : la liste de suppression n \u00e9crit pas de z\u00e9ro, et dit ce qu elle ignore', () => {
+  const t2 = (cle, vars) => (vars && vars.n != null) ? `${cle}:${vars.n}` : cle
+  // Le logement lui-m\u00eame est TOUJOURS l\u00e0 : une fen\u00eatre qui n \u00e9num\u00e8re rien
+  // ferait croire qu on ne perd rien.
+  assert.deepEqual(M.listeDeSuppression({ reservations: 0, messages: 0, menages: 0, codes: 0 }, t2),
+    ['fiche.supprimer_le_bien'])
+  // Un compte illisible se DIT.
+  assert.deepEqual(M.listeDeSuppression({ reservations: 2, messages: null, menages: 0, codes: 0 }, t2),
+    ['fiche.supprimer_le_bien', 'fiche.supprimer_reservations:2', 'fiche.supprimer_illisible'])
+  // Et une r\u00e9ponse absente vaut « on ne sait pas », pas « rien ».
+  assert.deepEqual(M.listeDeSuppression(null, t2),
+    ['fiche.supprimer_le_bien', 'fiche.supprimer_illisible'])
 })
