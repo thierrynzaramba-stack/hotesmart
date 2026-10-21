@@ -122,6 +122,15 @@
   .fic-erreur { flex: 1 0 100%; margin: 0; color: var(--danger); }
   .fic-aide { margin: var(--gap-xs) 0 0; color: var(--muted); }
 
+  /* Le bouton d'envoi d'un bloc : ce qui part d'ici atteint les annonces, et la
+     phrase le dit AVANT le clic. */
+  .fic-envoi { display: flex; align-items: center; flex-wrap: wrap;
+    gap: var(--gap-xs) var(--gap-s); margin-top: var(--gap-s);
+    padding-top: var(--gap-s); border-top: 1px solid var(--border); }
+  .fic-envoi .btn { min-height: 44px; }
+  .fic-envoi [data-envoi-aide] { margin: 0; flex: 1 1 auto; }
+  .fic-envoi .fic-etat { min-width: 0; }
+
   /* Supprimer : discret, et le rouge n'apparaît que sur le bouton — la charte
      le réserve à cette action-là. */
   .fic-supprimer { display: flex; flex-direction: column; gap: var(--gap-xs); align-items: flex-start; }
@@ -267,11 +276,14 @@ let file = Promise.resolve()
 const enfiler = (travail) => { file = file.then(travail, travail); return file }
 
 function ligneDuChamp (nom) { return $(`.fic-ligne--saisie[data-ligne="${CSS.escape(nom)}"]`) }
+function zoneDuBloc (bloc) { return $(`.fic-envoi[data-envoi="${CSS.escape(bloc)}"]`) }
 
 // L'état d'une ligne : « Enregistrement… », « Enregistré », ou une erreur SOUS
 // le champ (spec §3.3). L'erreur ne remplace jamais l'état : les deux se lisent.
 function direEtat (nom, quoi, texte = '') {
-  const ligne = ligneDuChamp(nom)
+  // Le même état pour une case (« nom du champ ») et pour un bloc
+  // (« bloc:prix ») : deux rendus de la même chose divergeraient.
+  const ligne = String(nom).startsWith('bloc:') ? zoneDuBloc(String(nom).slice(5)) : ligneDuChamp(nom)
   if (!ligne) return
   const etat = ligne.querySelector('[data-etat]')
   const err = ligne.querySelector('[data-erreur]')
@@ -284,7 +296,12 @@ function direEtat (nom, quoi, texte = '') {
   }
   err.hidden = true
   err.textContent = ''
-  etat.textContent = quoi ? t(quoi === 'enregistre' ? 'fiche.enregistre' : 'fiche.enregistrement') : ''
+  etat.textContent = quoi ? t({
+    enregistre: 'fiche.enregistre',
+    encours: 'fiche.enregistrement',
+    envoi: 'fiche.envoi_en_cours',
+    rien: 'fiche.aucun_changement'
+  }[quoi] || 'fiche.enregistrement') : ''
   if (quoi) etat.setAttribute('data-etat', quoi); else etat.setAttribute('data-etat', '')
 }
 
@@ -307,6 +324,10 @@ function valeurAEnvoyer (champ, brut) {
 async function enregistrerChamp (input) {
   const champ = CHAMPS.find(c => c.nom === input.dataset.champ)
   if (!champ || !bienCourant) return
+  // ⚠ LES CHAMPS DE GRILLE NE S'ENREGISTRENT PAS TOUT SEULS (décision de
+  // Thierry du 21 octobre 2026) : ils partent chez Airbnb et Booking.com, et un
+  // geste pareil se décide. C'est le bouton du bloc qui les envoie.
+  if (champ.grille) return
   const avant = valeurDeSaisie(champ, bienCourant)
   const saisi = String(input.value == null ? '' : input.value).trim()
   if (saisi === String(avant)) { direEtat(champ.nom, null); return }
@@ -349,6 +370,57 @@ async function enregistrerChamp (input) {
   })
 }
 
+// L'envoi d'un bloc : les champs de grille QUI ONT BOUGÉ, en UN SEUL appel.
+//
+// ⚠ UN SEUL `PATCH` POUR LES QUATRE. Le serveur reconstruit le plan tarifaire
+// une fois par appel : quatre appels feraient quatre reconstructions, et la
+// troisième lirait l'état laissé par la deuxième.
+async function envoyerBloc (bouton) {
+  const bloc = bouton.dataset.bloc
+  if (!bloc || !bienCourant) return
+  const cible = `bloc:${bloc}`
+  const corps = {}
+  const saisies = []
+  for (const champ of CHAMPS.filter(c => c.bloc === bloc && c.grille)) {
+    const input = $(`[data-champ="${CSS.escape(champ.nom)}"]`)
+    if (!input) continue
+    const saisi = String(input.value == null ? '' : input.value).trim()
+    if (saisi === String(valeurDeSaisie(champ, bienCourant))) continue
+    const valeur = valeurAEnvoyer(champ, saisi)
+    if (valeur === undefined) {
+      direEtat(cible, 'erreur', t('fiche.nombre_invalide'))
+      return
+    }
+    corps[champ.nom] = valeur
+    saisies.push([champ, saisi])
+  }
+  if (!saisies.length) { direEtat(cible, 'rien'); return }
+
+  direEtat(cible, 'envoi')
+  bouton.disabled = true
+  await enfiler(async () => {
+    try {
+      const r = await api.bien.modifier(idDuBien, corps)
+      for (const [champ, saisi] of saisies) {
+        bienCourant = { ...bienCourant, ...vuDuChamp(champ, saisi) }
+      }
+      direEtat(cible, 'enregistre')
+      if (r && r.note) direEtat(cible, 'erreur', r.note)
+    } catch (e) {
+      logger.error('Logement', e.message, { status: e.status, bloc })
+      direEtat(cible, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+      // Les cases reprennent les valeurs enregistrées : un refus laissé à
+      // l'écran se lirait comme un envoi réussi.
+      for (const [champ] of saisies) {
+        const input = $(`[data-champ="${CSS.escape(champ.nom)}"]`)
+        if (input) input.value = valeurDeSaisie(champ, bienCourant)
+      }
+    } finally {
+      bouton.disabled = false
+    }
+  })
+}
+
 // La vue de l'écran, côté fiche : `CHAMPS.depuis` lit ces noms-là.
 function vuDuChamp (champ, saisi) {
   const v = saisi === '' ? null : saisi
@@ -376,6 +448,11 @@ function majNom (nom) {
 $('[data-bind="fiche"]').addEventListener('change', (ev) => {
   const input = ev.target.closest('[data-champ]')
   if (input) enregistrerChamp(input)
+})
+
+$('[data-bind="fiche"]').addEventListener('click', (ev) => {
+  const bouton = ev.target.closest('[data-bind="enregistrer"]')
+  if (bouton) envoyerBloc(bouton)
 })
 
 let enVol = false

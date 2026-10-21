@@ -527,3 +527,129 @@ test('LE TEST QUI COMPTE : ce que le serveur n a PAS fait se dit', () => {
   // prix de base). Le taire laisserait croire que les prix ont suivi.
   assert.match(fonctionDeLaPage('enregistrerChamp'), /r\.note/)
 })
+
+test('LE TEST QUI COMPTE : un champ de GRILLE ne s enregistre pas tout seul', () => {
+  // Les six autres gardent l enregistrement automatique : c est la d\u00e9cision de
+  // Thierry, et elle ne vise que ce qui part chez Airbnb et Booking.com.
+  const fn = fonctionDeLaPage('enregistrerChamp')
+  assert.match(fn, /if \(champ\.grille\) return/,
+    'l enregistrement automatique doit sauter les champs de grille')
+  // Et le d\u00e9part est AVANT le moindre appel : un `return` plac\u00e9 apr\u00e8s laisserait
+  // partir le PATCH.
+  assert.ok(fn.indexOf('if (champ.grille) return') < fn.indexOf('api.bien.modifier'))
+})
+
+// \u26a0 ON FAIT TOURNER `envoyerBloc` POUR DE VRAI, dans un contexte isol\u00e9.
+// Compter les occurrences de `api.bien.modifier` dans le TEXTE ne prouve rien :
+// un appel plac\u00e9 dans une boucle n'en fait toujours qu'une (contre-\u00e9preuve du
+// 21 octobre 2026, la mutation survivait). Ici on compte les appels R\u00c9ELS.
+function lancerEnvoi ({ bien, saisies, reponse = {}, erreur = null }) {
+  const appels = []
+  const etats = []
+  const cases = {}
+  for (const [nom, valeur] of Object.entries(saisies)) cases[nom] = { value: valeur }
+  const sandbox = {
+    CHAMPS: M.CHAMPS,
+    valeurDeSaisie: M.valeurDeSaisie,
+    valeurAEnvoyer,
+    vuDuChamp: null,
+    bienCourant: bien,
+    idDuBien: 'b1',
+    CSS: { escape: (x) => x },
+    $: (sel) => {
+      const m = sel.match(/data-champ="([^"]+)"/)
+      return m ? (cases[m[1]] || null) : null
+    },
+    direEtat: (cible, quoi, texte) => etats.push([cible, quoi, texte]),
+    enfiler: (f) => f(),
+    t: (cle) => cle,
+    logger: { error: () => {} },
+    api: { bien: { modifier: async (id, corps) => {
+      appels.push({ id, corps })
+      if (erreur) throw erreur
+      return reponse
+    } } }
+  }
+  const src = `${fonctionDeLaPage('vuDuChamp')}\nvuDuChamp = vuDuChamp\n${fonctionDeLaPage('envoyerBloc')}`
+  const ctx = vm.createContext(sandbox)
+  vm.runInContext(src, ctx)
+  // \u26a0 PAR COPIE, PAS PAR R\u00c9F\u00c9RENCE. Un objet n\u00e9 dans le contexte `vm` a le
+  // prototype de CE realm : `deepEqual` le refuse contre un objet d'ici avec
+  // \u00ab same structure but not reference-equal \u00bb, alors que tout est juste.
+  const copie = (x) => JSON.parse(JSON.stringify(x))
+  return { appels, etats, ctx, copie, lancer: (bloc) =>
+    vm.runInContext('envoyerBloc({ dataset: { bloc: BLOC }, disabled: false })'
+      .replace('BLOC', JSON.stringify(bloc)), ctx) }
+}
+
+const BIEN_PAGE = {
+  nom: 'La bulle', capacite: 2, adresse: 'a', code_postal: '65200', ville: 'B', pays: 'FR',
+  prix_de_base: 120, prix_plancher: 130, voyageurs_inclus: 2, supplement_voyageur: 15
+}
+
+test('LE TEST QUI COMPTE : le bloc part en UN SEUL appel, avec les champs CHANG\u00c9S', async () => {
+  // Le serveur reconstruit le plan tarifaire une fois par appel : trois appels
+  // feraient trois reconstructions, et la troisi\u00e8me lirait ce que la deuxi\u00e8me
+  // a laiss\u00e9.
+  const e = lancerEnvoi({ bien: BIEN_PAGE,
+    saisies: { base_price: '149', included_guests: '3', extra_guest_fee: '15' } })
+  await e.lancer('prix')
+  assert.equal(e.appels.length, 1, 'UN seul appel pour tout le bloc')
+  // Et le suppl\u00e9ment, inchang\u00e9, n'en fait pas partie : l'envoyer pour rien
+  // reconstruirait la grille sans raison.
+  assert.deepEqual(e.copie(e.appels[0].corps), { base_price: 149, included_guests: 3 })
+  assert.equal(e.etats.at(-1)[1], 'enregistre')
+})
+
+test('LE TEST QUI COMPTE : un bloc ne touche QUE ses champs', async () => {
+  // Le bouton de \u00ab Le logement \u00bb n'envoie pas les prix, et r\u00e9ciproquement.
+  const e = lancerEnvoi({ bien: BIEN_PAGE, saisies: { capacity: '4', base_price: '149' } })
+  await e.lancer('logement')
+  assert.deepEqual(e.copie(e.appels[0].corps), { capacity: 4 })
+})
+
+test('cliquer sans rien avoir chang\u00e9 n appelle RIEN, et le dit', async () => {
+  const e = lancerEnvoi({ bien: BIEN_PAGE, saisies: { base_price: '120', included_guests: '2' } })
+  await e.lancer('prix')
+  assert.equal(e.appels.length, 0)
+  assert.deepEqual(e.copie(e.etats.at(-1).map(x => x === undefined ? null : x)), ['bloc:prix', 'rien', null])
+})
+
+test('LE TEST QUI COMPTE : une saisie qui n est pas un nombre n appelle pas le serveur', async () => {
+  const e = lancerEnvoi({ bien: BIEN_PAGE, saisies: { base_price: 'cent', included_guests: '3' } })
+  await e.lancer('prix')
+  assert.equal(e.appels.length, 0, 'rien ne part tant qu une case est illisible')
+  assert.equal(e.etats.at(-1)[1], 'erreur')
+})
+
+test('LE TEST QUI COMPTE : un refus remet les cases \u00e0 la valeur enregistr\u00e9e', async () => {
+  const refus = Object.assign(new Error('grille_non_reconstructible'),
+    { details: 'Ce logement n a pas de prix de base.' })
+  const e = lancerEnvoi({ bien: BIEN_PAGE, saisies: { base_price: '149' }, erreur: refus })
+  await e.lancer('prix')
+  assert.equal(e.etats.at(-1)[2], 'Ce logement n a pas de prix de base.',
+    'le DETAIL du refus, pas le code machine')
+  // La case a repris la valeur du serveur : un refus laiss\u00e9 \u00e0 l'\u00e9cran se lirait
+  // comme un envoi r\u00e9ussi.
+  assert.equal(vm.runInContext('$(\'[data-champ="base_price"]\').value', e.ctx), '120')
+})
+
+test('LE TEST QUI COMPTE : ce que le serveur n a pas fait se dit, m\u00eame sur un 200', async () => {
+  const e = lancerEnvoi({ bien: BIEN_PAGE, saisies: { base_price: '149' },
+    reponse: { note: 'La grille n a pas ete reconstruite.' } })
+  await e.lancer('prix')
+  assert.equal(e.etats.at(-1)[2], 'La grille n a pas ete reconstruite.')
+})
+
+test('cliquer sans rien avoir chang\u00e9 le DIT, au lieu d appeler pour rien', () => {
+  const fn = fonctionDeLaPage('envoyerBloc')
+  assert.match(fn, /if \(!saisies\.length\) \{ direEtat\(cible, 'rien'\); return \}/)
+})
+
+test('LE TEST QUI COMPTE : un refus d envoi remet les cases \u00e0 la valeur enregistr\u00e9e', () => {
+  const fn = fonctionDeLaPage('envoyerBloc')
+  assert.match(fn, /direEtat\(cible, 'erreur', e\.details \|\| e\.message/)
+  assert.match(fn, /input\.value = valeurDeSaisie\(champ, bienCourant\)/)
+  // Et le bouton redevient cliquable quoi qu il arrive.
+  assert.match(fn, /finally \{\s*bouton\.disabled = false/)
+})

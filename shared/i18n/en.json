@@ -681,6 +681,10 @@
   "fiche.prix_euros": "in euros",
   "fiche.nom_requis": "The name cannot be empty.",
   "fiche.nombre_invalide": "This is not a number.",
+  "fiche.enregistrer": "Save",
+  "fiche.envoi_partenaire": "Will be sent to Airbnb and Booking.com",
+  "fiche.aucun_changement": "Nothing to send.",
+  "fiche.envoi_en_cours": "Sending…",
   "fiche.refus": "You do not have access to this property.",
   "fiche.introuvable": "This property does not exist, or it is not part of this account.",
   "fiche.panne": "This page cannot be read right now."

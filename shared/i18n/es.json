@@ -681,6 +681,10 @@
   "fiche.prix_euros": "en euros",
   "fiche.nom_requis": "El nombre no puede estar vacío.",
   "fiche.nombre_invalide": "Esto no es un número.",
+  "fiche.enregistrer": "Guardar",
+  "fiche.envoi_partenaire": "Se enviará a Airbnb y Booking.com",
+  "fiche.aucun_changement": "Nada que enviar.",
+  "fiche.envoi_en_cours": "Enviando…",
   "fiche.refus": "No tiene acceso a este alojamiento.",
   "fiche.introuvable": "Este alojamiento no existe, o no pertenece a esta cuenta.",
   "fiche.panne": "Esta ficha no se puede leer ahora mismo."

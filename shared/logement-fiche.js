@@ -390,6 +390,36 @@ export function valeurDeSaisie (champ, bien) {
   return String(v)
 }
 
+// Le bouton d'envoi d'un bloc qui porte des champs de GRILLE.
+//
+// ⚠ PAS D'ENREGISTREMENT AUTOMATIQUE SUR CES CHAMPS-LÀ (décision de Thierry du
+// 21 octobre 2026). Les quatre champs marqués `grille` font reconstruire le plan
+// tarifaire CHEZ LE PARTENAIRE, en bloquant : ce qui part de cet écran ne
+// s'arrête pas à notre base, il atteint les annonces. Un geste pareil se décide,
+// il ne se déclenche pas en sortant d'une case — et la phrase sous le bouton le
+// DIT, avant le clic.
+//
+// ⚠ LE BOUTON N'EST JAMAIS DÉSACTIVÉ. Un bouton grisé tant qu'aucun champ n'a
+// bougé obligerait à cliquer DEUX fois : le premier clic sort de la case (donc
+// active le bouton) sans l'atteindre. Il est toujours cliquable, et il dit
+// « aucun changement à envoyer » quand il n'y a rien à faire.
+function envoiHtml (bloc, outils) {
+  const { t, esc } = outils
+  // DÉFENSIF : aujourd'hui les deux seuls appelants sont les deux blocs qui
+  // PORTENT des champs de grille, donc cette garde ne mord jamais (mutation
+  // vérifiée le 21 octobre 2026 : la retirer ne change rien). Elle reste pour
+  // qu'un troisième bloc, un jour, n'affiche pas un bouton sans objet.
+  if (!champsDuBloc(bloc).some(c => c.grille)) return ''
+  return `<div class="fic-envoi" data-envoi="${esc(bloc)}">
+    <button type="button" class="btn" data-bind="enregistrer" data-bloc="${esc(bloc)}">
+      ${esc(t('fiche.enregistrer'))}
+    </button>
+    <p class="caption fic-muet" data-envoi-aide>${esc(t('fiche.envoi_partenaire'))}</p>
+    <span class="fic-etat caption" data-etat aria-live="polite"></span>
+    <p class="fic-erreur caption" data-erreur hidden></p>
+  </div>`
+}
+
 // Une ligne modifiable. Hors droit d'écriture, c'est la ligne de LECTURE de
 // l'étape 2 qui est rendue — aucune case, aucun bouton, rien dans le DOM.
 function ligneSaisieHtml (champ, bien, outils) {
@@ -439,6 +469,7 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
       ${champsDuBloc('prix').map(c => ligneSaisieHtml(c, fiche.bien, outils)
         + (c.nom === 'prix_minimum' ? vide : '')).join('')}
       ${ligne('fiche.champ_devise', `${esc(p.devise)} <span class="fic-muet caption">${esc(t('fiche.devise_fixe'))}</span>`, ' data-devise')}
+      ${envoiHtml('prix', outils)}
     </div>`
   }
 
@@ -461,7 +492,8 @@ export function logementHtml (fiche, outils, { peutModifier = false } = {}) {
   if (peutModifier) {
     return `<div class="fic-champs">`
       + champsDuBloc('logement').map(c => ligneSaisieHtml(c, b, outils)).join('')
-      + `<p class="fic-aide caption" data-aide>${esc(t('fiche.modifier_aide'))}</p></div>`
+      + `<p class="fic-aide caption" data-aide>${esc(t('fiche.modifier_aide'))}</p>`
+      + envoiHtml('logement', outils) + `</div>`
   }
   const champs = [
     ['fiche.champ_nom', b.nom],

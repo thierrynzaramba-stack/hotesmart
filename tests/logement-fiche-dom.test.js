@@ -1119,3 +1119,41 @@ test('LE TEST QUI COMPTE (SÉCURITÉ) : ce que le partenaire écrit ne s exécut
   assert.equal(d.querySelectorAll('img, script').length, 0)
   assert.equal(d.querySelector('[data-champ="name"]').value, '"><img src=x onerror=alert(1)>')
 })
+
+test('LE TEST QUI COMPTE : les quatre champs de GRILLE ont un bouton, et il dit o\u00f9 \u00e7a part', () => {
+  // D\u00e9cision de Thierry du 21 octobre 2026 : \u00ab pas d'enregistrement automatique
+  // [pour ces quatre-l\u00e0]. Ils passent par un bouton Enregistrer propre au bloc,
+  // avec la phrase Sera envoy\u00e9 \u00e0 Airbnb et Booking.com. \u00bb Ce qui part d'ici
+  // n'atteint pas que notre base : il atteint les annonces.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const blocs = [...d.querySelectorAll('.fic-envoi')].map(x => x.dataset.envoi).sort()
+  assert.deepEqual(blocs, ['logement', 'prix'],
+    'les deux blocs qui portent un champ de grille, et eux seuls')
+  for (const zone of d.querySelectorAll('.fic-envoi')) {
+    assert.ok(zone.querySelector('[data-bind="enregistrer"]'))
+    assert.match(zone.querySelector('[data-envoi-aide]').textContent, /Airbnb et Booking\.com/)
+    assert.ok(zone.querySelector('[data-etat]'), 'le bloc dit son \u00e9tat, comme une case')
+    assert.ok(zone.querySelector('[data-erreur]').hasAttribute('hidden'))
+  }
+  // Et chaque bouton d\u00e9signe SON bloc : un bouton sans cible enverrait les
+  // quatre champs depuis n'importe o\u00f9.
+  assert.deepEqual([...d.querySelectorAll('[data-bind="enregistrer"]')].map(b => b.dataset.bloc).sort(),
+    ['logement', 'prix'])
+})
+
+test('LE TEST QUI COMPTE : le bouton d envoi n est JAMAIS d\u00e9sactiv\u00e9 au rendu', () => {
+  // \u26a0 Un bouton gris\u00e9 tant qu'aucun champ n'a boug\u00e9 oblige \u00e0 cliquer DEUX
+  // fois : le premier clic sort de la case \u2014 donc l'activerait \u2014 sans
+  // l'atteindre. Il reste cliquable et dit \u00ab aucun changement \u00e0 envoyer \u00bb.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  for (const b of d.querySelectorAll('[data-bind="enregistrer"]')) {
+    assert.equal(b.hasAttribute('disabled'), false)
+  }
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : sans droit d \u00e9criture, aucun bouton d envoi non plus', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: false }))
+  assert.equal(d.querySelector('.fic-envoi'), null)
+  assert.equal(d.querySelector('[data-bind="enregistrer"]'), null)
+  assert.doesNotMatch(d.querySelector('#c').textContent, /Airbnb et Booking\.com/)
+})
