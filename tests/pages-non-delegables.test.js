@@ -63,6 +63,18 @@ const NON_DELEGABLES = [
 const DELEGABLES = [
   'pages/aujourdhui.html',          // accueil V5 : endpoints compteDelegue + tables sous RLS, compteCourant()
   'pages/biens.html',               // idem
+  // ⚠ DÉLÉGABLE (lot Logements V5, étape 1, 20 octobre 2026). `GET /api/logement`
+  // sans `id` porte `compteDelegue: true` ET le filtre de périmètre : un membre
+  // invité sur un bien voit ce bien, et rien d'autre. Lui poser le garde-fou lui
+  // retirerait le premier écran du produit.
+  'pages/logements.html',
+  // ⚠ DÉLÉGABLE AUSSI (étape 2, 21 octobre 2026). La FICHE est gardée par la
+  // ressource : `GET /api/logement?id=` passe `bien: id, bienRequis: true`, et
+  // c'est LE BIEN qui désigne le compte — `X-Compte` y est ignoré, donc un
+  // membre ne peut pas lire la fiche d'un bien d'un autre compte en posant un
+  // en-tête. Un membre invité sur ce bien doit pouvoir l'ouvrir : lui poser le
+  // garde-fou de compte propre lui fermerait la fiche de son propre bien.
+  'pages/logement.html',
   'pages/biens-calendrier.html',    // listProperties + calendrier par ressource
   'pages/calendrier-mobile.html',   // idem
   'apps/menages/index.html',        // délégué en vague 1
