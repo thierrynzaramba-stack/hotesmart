@@ -50,7 +50,7 @@ const REF2   = '552211'
 const bienDe = (extra = {}) => ({
   user_id: COMPTE, id: BIEN, name: 'La bulle', city: 'Bagnères', country: 'FR', address: '1 rue X',
   zip_code: '65200', capacity: 4, photo_url: null, currency: 'EUR', base_price: 120,
-  prix_minimum: 60, included_guests: 2, extra_guest_fee: 15, rate_sync_mode: 'managed',
+  prix_minimum: 13000, included_guests: 2, extra_guest_fee: 15, rate_sync_mode: 'managed',
   pilote_tarifaire: 'yieldflow', automation_paused: false, inventory_type: 'whole',
   ota_listing_urls: null, created_at: '2026-01-01T00:00:00Z',
   provider: 'channex', provider_property_id: REF, migration_target_property_id: null,
@@ -353,7 +353,7 @@ test('LE TEST QUI COMPTE : un bloc vide n est pas un bloc en panne', async () =>
   assert.deepEqual(f.menage, [], 'lu, et il n y a personne : c est une REPONSE')
   assert.deepEqual(f.serrures, [])
   assert.deepEqual(f.taxe, { connue: false }, 'un seul type, trois etats : `[]` obligeait l ecran a un Array.isArray')
-  assert.equal(f.avis.total, 0)
+  assert.equal(f.avis.total_proprete, 0)
   assert.equal(f.avis.positif, 0)
   assert.deepEqual(f.indisponibles, [], 'un vide ne doit JAMAIS compter comme indisponible')
 })
@@ -373,7 +373,6 @@ test('LE TEST QUI COMPTE : cles migrees illisibles => AUCUN bloc TEXT n est lu',
     assert.equal(f[bloc], null, `${bloc} a ete lu sans cle sure`)
     assert.ok(f.indisponibles.includes(bloc))
   }
-  assert.equal(f.cles_motif, 'cles_illisibles')
   // Contre-epreuve : la base n a vu AUCUNE lecture des tables TEXT.
   const tables = sb._vus.map(v => v.table)
   for (const t of ['property_cleaning_providers', 'property_locks', 'bookings_snapshot']) {
@@ -399,7 +398,6 @@ test('un bien sans aucune cle partenaire : des blocs VIDES, pas des pannes', asy
     { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
   assert.deepEqual(f.menage, [])
   assert.deepEqual(f.indisponibles, [], 'un bien jamais provisionne n a rien a montrer : ce n est pas une panne')
-  assert.equal(f.cles_motif, 'aucune_cle')
 })
 
 test('bien inconnu : `null`, et la panne de lecture LEVE — les deux ne se confondent pas', async () => {
@@ -430,7 +428,7 @@ test('un avis NON ANALYSE se compte a part, jamais en « rien signale »', async
   assert.equal(f.avis.non_analyses, 1)
   assert.equal(f.avis.rien_signale, 0, 'un pouce vert sur un avis qu on n a pas lu')
   assert.equal(f.avis.remarque, 1)
-  assert.equal(f.avis.total, 2)
+  assert.equal(f.avis.total_proprete, 2)
 })
 
 test('la fenetre des avis est bien de 30 jours, bornee cote base', async () => {
@@ -885,7 +883,7 @@ test('M5 : un avis MASQUE ne compte pas', async () => {
       { id: 'a2', user_id: COMPTE, property_id: BIEN, is_hidden: true, ai_clean_verdict: 'remarque', ai_analyzed_at: '2026-10-10T00:00:00Z', received_at: '2026-10-10T00:00:00Z' }
     ]
   }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
-  assert.equal(f.avis.total, 1)
+  assert.equal(f.avis.total_proprete, 1)
   assert.equal(f.avis.remarque, 0, 'un avis masque par l hote ne doit pas peser sur ses pouces')
 })
 
@@ -1125,4 +1123,64 @@ test('LE TEST QUI COMPTE (M3) : sans `droits`, la liste echoue FERME sur les avi
   assert.ok(r.biens.every(b => b.avis === null))
   assert.deepEqual(r.refuses, ['avis'])
   assert.ok(!sb._vus.map(v => v.table).includes('ota_reviews'))
+})
+
+test('LE TEST QUI COMPTE : le prix plancher est rendu en EUROS, pas en centimes', async () => {
+  // ⚠ `properties.prix_minimum` EST EN CENTIMES — seule de ses quatre voisines
+  // du bloc Prix (`base_price`, `included_guests`, `extra_guest_fee` sont en
+  // euros). Sans division, la fiche affichait « 13 000 € » pour le plancher de
+  // 130 € d'un bien, juste sous un prix de base juste : la ligne la plus
+  // sensible du bloc (la garde anti-nuit-a-0) etait fausse exactement quand
+  // elle etait renseignee. Releve en revue de 5c0d759 ; rien ne le gardait.
+  const f = await L.lireFiche(ficheComplete(), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f.bien.prix_plancher, 130)
+
+  // Un plancher d'un euro cinquante ne se perd pas dans l'arrondi.
+  const f2 = await L.lireFiche(ficheComplete({ biens: [bienDe({ prix_minimum: 150 })] }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f2.bien.prix_plancher, 1.5)
+
+  // Absent reste absent : c'est l'ECRAN qui dit « 10 € (par defaut) », pas le
+  // coeur — le plancher global vit dans le code, pas dans la donnee.
+  const f3 = await L.lireFiche(ficheComplete({ biens: [bienDe({ prix_minimum: null })] }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f3.bien.prix_plancher, null)
+})
+
+test('LE TEST QUI COMPTE : `cles_motif` NE FIGURE PLUS dans le contrat de l API', async () => {
+  // ⚠ DETTE 80, TRANCHEE PAR THIERRY LE 21 OCTOBRE 2026. Ce champ etait
+  // descendu dans la reponse publique et lu par AUCUN ecran. La spec §1 du lot
+  // interdit le code dormant, et une donnee que personne ne consomme finit par
+  // etre gardee « au cas ou » par la prochaine lecture — puis par la suivante.
+  //
+  // Le diagnostic qu'il portait n'est pas perdu : il part au JOURNAL serveur,
+  // ou le support le lit. Ce qui disparait, c'est sa presence dans ce que
+  // l'hote recoit.
+  //
+  // Ce test garde une ABSENCE, et c'est voulu : le remettre demain se verrait.
+  const cas = [
+    ['bien ordinaire', ficheComplete()],
+    ['cles illisibles', ficheComplete({ enPanne: { provider_keys_migrated: 'timeout' } })],
+    ['bien jamais provisionne', base({ biens: [bienDe({ provider_property_id: null })] })]
+  ]
+  for (const [nom, sb] of cas) {
+    // ⚠ LE CACHE DES CLES MIGREES SE VIDE ENTRE DEUX CAS : sans ca, le cas
+    // « cles illisibles » retrouve les cles lues par le cas precedent, et
+    // mesure un etat qui n'est pas le sien.
+    _vider()
+    const f = await L.lireFiche(sb, { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+    assert.ok(f, nom)
+    assert.equal('cles_motif' in f, false, `${nom} : \`cles_motif\` est revenu dans le contrat`)
+  }
+
+  // ⚠ ET LA REGLE QU'IL SERVAIT A MESURER TIENT TOUJOURS, par `indisponibles` :
+  // c'est ce tableau que l'ecran lit, et lui seul. Retirer un champ ne doit pas
+  // retirer la garde.
+  _vider()
+  const panne = await L.lireFiche(ficheComplete({ enPanne: { provider_keys_migrated: 'timeout' } }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  for (const bloc of ['menage', 'serrures', 'fait_date']) {
+    assert.equal(panne[bloc], null, bloc)
+    assert.ok(panne.indisponibles.includes(bloc), bloc)
+  }
 })

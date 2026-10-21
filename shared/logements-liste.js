@@ -104,7 +104,13 @@ export function etatDuCanal (c) {
 }
 
 export function pastillesDesCanaux (canaux) {
-  if (canaux == null) return null       // on n'a pas pu lire
+  // ⚠ `Array.isArray`, PAS `!= null` (contre-epreuve du 21 octobre, etape 2).
+  // Avec `== null`, un `{}` — reponse tronquee, champ renomme cote serveur —
+  // passait la garde et `canaux.map` LEVAIT : la carte, puis la LISTE ENTIERE,
+  // tombaient dans « panne », pour un seul bien mal forme. Tout ce qui n'est
+  // pas un tableau vaut « on n'a pas pu lire » : c'est la reponse honnete, et
+  // elle n'emporte pas les autres biens.
+  if (!Array.isArray(canaux)) return null
   return canaux.map(c => {
     const etat = etatDuCanal(c)
     return {
@@ -305,6 +311,27 @@ export function canauxHtml (bien, { t, esc }) {
       + `<span class="log-point"></span>${esc(t('logements.canaux_non_lus'))}</span>`
   }
   if (!pastilles.length) {
+    // ⚠ CORRECTIF DEFAIT LE 21 OCTOBRE 2026, RE-REVUE DE 3dddb14. J'avais
+    // voulu distinguer « jamais releve » de « aucun canal relie » sur la marque
+    // `canaux_vu_le == null`. MESURE : cette marque ne peut JAMAIS valoir
+    // `false` ici. `fraicheurDuBien` rend `null` des qu'un bien n'a aucun canal
+    // — decision explicite de Thierry du 19 octobre : « un bien sans canal ne
+    // dit rien du tout » — et cette branche n'est atteinte QUE si `canaux` est
+    // vide. « Aucun canal relie » devenait donc inatteignable, et un bien
+    // parfaitement normal (Beds24, ou neuf) annoncait une verification qui
+    // n'avait jamais eu lieu alors qu'elle avait eu lieu dix minutes plus tot.
+    // Le correctif remplacait un mensonge par un pire, sur un ecran DEJA en
+    // recette.
+    //
+    // ⚠ ET MA PREMISSE ETAIT FAUSSE. J'avais ecrit, en commentaire et dans le
+    // message de commit, que « le serveur distingue deja les deux ». Non :
+    // `suppressionPossible` teste `!canaux.length && !vuLe` avec le MEME
+    // `vuLe`, donc sa condition se reduit a `!canaux.length`. Sa branche
+    // `jamais_releve` est degeneree depuis l'etape 0.
+    //
+    // La distinction est un fait de COMPTE (`canaux_releve.vu_le` / `tente_le`)
+    // que l'endpoint ne descend pas. Tant qu'il ne la descend pas, l'ecran n'a
+    // pas la donnee qu'il pretendrait lire. Note en dette.
     return `<span class="caption muted" data-canaux="aucun">${esc(t('logements.aucun_canal'))}</span>`
   }
   // ⚠ L'ETAT SE LIT SANS LA COULEUR NI LE SURVOL (constat de la revue). A 8 px,

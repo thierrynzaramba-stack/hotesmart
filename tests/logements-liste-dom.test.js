@@ -140,6 +140,41 @@ test('LE TEST QUI COMPTE : « aucun canal » et « non vérifiés » sont DEUX r
     'lire « aucun canal » quand on en a deux est exactement le défaut que la dette 59 a fermé')
 })
 
+test('LE TEST QUI COMPTE : « jamais relevé » N EST PAS DISTINGUABLE ICI, et on le prouve', () => {
+  // ⚠ CE TEST GARDE UNE IMPOSSIBILITÉ, pour qu'on ne refasse pas l'erreur du
+  // 21 octobre 2026. J'avais ajouté un troisième rendu — « ses canaux n'ont
+  // jamais été relevés » — sur la marque `canaux_vu_le == null`, et je l'ai
+  // défait : cette marque ne peut PAS valoir autre chose quand un bien n'a
+  // aucun canal.
+  //
+  // `fraicheurDuBien` rend `null` dès qu'un bien n'a aucun canal (décision de
+  // Thierry du 19 octobre : « un bien sans canal ne dit rien du tout »). Une
+  // carte sans pastille a donc TOUJOURS `canaux_vu_le: null`, et distinguer
+  // là-dessus rendait « Aucun canal relié » inatteignable — un bien Beds24,
+  // ou neuf, annonçait une vérification jamais faite alors qu'elle avait eu
+  // lieu dix minutes plus tôt.
+  // `lib/canaux-du-bien` construit son client au chargement : sans ces
+  // variables, le require lève avant la première assertion.
+  process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+  process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'cle-de-test'
+  process.env.CHANNEL_BASE_URL = process.env.CHANNEL_BASE_URL || 'http://localhost:1/api/v1'
+  process.env.CHANNEL_API_KEY = process.env.CHANNEL_API_KEY || 'cle-de-test'
+  const { fraicheurDuBien } = require('../lib/canaux-du-bien')
+  const maintenant = new Date().toISOString()
+  assert.equal(fraicheurDuBien([], maintenant), null,
+    'si ceci change, la distinction « jamais relevé » devient possible — voir la dette')
+  assert.equal(fraicheurDuBien(null, maintenant), null)
+  // Avec un canal, la fraîcheur existe : c'est bien l'absence de canal qui
+  // efface la date, pas l'horloge.
+  assert.equal(fraicheurDuBien([{ vu_le: null }], maintenant), maintenant)
+
+  // La distinction demanderait l'horloge du COMPTE (`canaux_releve`), que
+  // l'endpoint ne descend pas. Tant qu'il ne la descend pas, l'écran n'a pas
+  // la donnée qu'il prétendrait lire.
+  const sansCanal = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null }), OUTILS()))
+  assert.equal(sansCanal.querySelector('[data-canaux]').dataset.canaux, 'aucun')
+})
+
 test('les trois états d un canal sont distincts, `mappe: null` compris', () => {
   const d = doc(M.carteHtml(bien({ canaux: [
     { ota: 'airbnb', mappe: true }, { ota: 'booking', mappe: false }, { ota: 'direct', mappe: null }
@@ -552,4 +587,20 @@ test('LE TEST QUI COMPTE (règle V5) : l étoile est une ICÔNE du sprite, jamai
       assert.doesNotMatch(String(texte), /[★☆⭐✩✪✫✬✭✮✯]/, `${lang} : ${cle}`)
     }
   }
+})
+
+test('LE TEST QUI COMPTE : un bien mal formé n emporte pas la LISTE ENTIÈRE', () => {
+  // ⚠ TROUVÉ LE 21 OCTOBRE 2026 par la contre-épreuve de l'étape 2.
+  // `pastillesDesCanaux` gardait `canaux == null` : un `{}` — réponse
+  // tronquée, champ renommé côté serveur — passait la garde, `canaux.map`
+  // levait, et la carte faisait tomber la liste entière dans « panne ».
+  // Quatre biens invisibles à cause d'un seul mal formé.
+  for (const malForme of [{}, 'oui', 42, true]) {
+    assert.equal(M.pastillesDesCanaux(malForme), null, JSON.stringify(malForme))
+    const d = doc(M.carteHtml(bien({ canaux: malForme }), OUTILS()))
+    assert.equal(d.querySelector('[data-canaux]').dataset.canaux, 'non-lus',
+      'tout ce qui n est pas un tableau vaut « on n a pas pu lire »')
+  }
+  // Et un vrai tableau continue de se rendre.
+  assert.equal(M.pastillesDesCanaux([]).length, 0)
 })

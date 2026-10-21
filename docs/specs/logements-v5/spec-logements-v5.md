@@ -36,7 +36,15 @@ En-tête : titre « Logements » + « Ajouter un logement » (bouton blanc bord 
 
 États : vide (« Ajoutez votre premier logement » + Connecter / Ajouter manuellement), refus de droit, erreur de lecture — même forme que Ménages, i18n, pas de « PMS ».
 
-## 3. Fiche d'un bien `/biens/:id`
+## 3. Fiche d'un bien `/logements/:id`
+
+> ⚠ **Route corrigée le 21 octobre 2026 (décision de Thierry).** La spec disait
+> `/biens/:id` — c'est aujourd'hui l'IFRAME DORMANTE que le §1 ordonne de
+> supprimer, et c'est la raison pour laquelle la carte de la liste n'est pas
+> encore cliquable : un clic y déposerait l'hôte dans du code mort. La fiche V5
+> vit donc sur `/logements/:id`, cohérente avec `/logements` ; `/biens/:id`
+> redirigera à l'étape 4, et l'ancien écran reste **intact** pendant toute la
+> recette.
 
 Retour « ‹ Logements ». En-tête : photo (bouton « Changer la photo » si droit), nom, ville · capacité,
 pastilles, bouton **Calendrier**, interrupteur **Assistant HôteSmart** (kill switch, titulaire / `reglages:write`).
@@ -45,14 +53,47 @@ Colonne gauche :
 1. **Où il est en vente** — Airbnb, Booking.com, Réservation directe au même rang. Par ligne : état (« En vente » vert / « Pas en vente sur ce logement » gris), « vérifié il y a… » (règles de la dette 59 : « non vérifié depuis le … » + Actualiser au-delà de 24 h), et l'action Connecter / Activer (assistant de connexion existant, reprise OAuth Airbnb conservée — fonction 21).
 2. **Prix** — mode des prix en sélecteur : « HôteSmart envoie mes prix » / « Je garde mes prix actuels ». **Le second n'apparaît que si le bien est en mode `keep`** (migration) ; une fois en `managed`, le sélecteur disparaît. Champs : prix de base, prix plancher (défaut 10 €), devise, voyageurs inclus, supplément par voyageur. Bouton **Publier mes prix** (seulement en `managed`) → confirmation courte : « Vos prix remplaceront ceux d'Airbnb et Booking.com pour toutes les dates à venir. » [Annuler] [Remplacer mes prix].
 3. **Le logement** — nom, capacité, adresse, code postal, ville, pays. Édition sur place, enregistrement automatique avec « Enregistré » (pas de bouton Enregistrer), erreurs serveur affichées sous le champ.
-4. **Supprimer ce logement** — en bas, discret rouge. La condition est dite **avant** le clic : si le bien a des réservations ou des messages, bouton désactivé + « Impossible tant qu'il a des réservations ou des messages. » (fonction 20 rendue visible). Sinon : confirmation par frappe du nom (conservée).
+4. **Supprimer ce logement** — en bas, discret rouge. La condition est dite **avant** le clic.
+
+   > ⚠ **Règle corrigée le 21 octobre 2026 (décision de Thierry).** Cette spec
+   > disait « bouton désactivé si le bien a des réservations ou des messages ».
+   > **Ce n'est pas ce que le serveur refuse.** `api/channel-property.js` DELETE
+   > purge les réservations et les messages ; ce qu'il refuse, c'est un bien
+   > **encore relié à une annonce**. Écrire la règle d'origine aurait affiché
+   > une phrase que le serveur dément — et promis un refus là où il accepte.
+   >
+   > **On s'aligne sur le serveur : c'est lui la vraie protection**, et c'est la
+   > même règle que pour la suppression de compte. Donc :
+   > · bouton **désactivé tant que le bien est relié à une annonce**, avec la
+   >   raison « Déconnectez d'abord ses canaux » ;
+   > · quand il est actif, la **confirmation dit ce qui sera effacé, avec les
+   >   nombres** (réservations, messages…), puis la frappe du nom (conservée).
+   >
+   > ⚠ Les nombres supposent que l'endpoint les compte : c'est une dépendance de
+   > l'**étape 3**, l'étape 2 n'affichant que l'état et la raison.
 
 Colonne droite :
 5. **Ménage** — prestataires assignées au bien (nom prénom, mode : d'office / proposé en Nᵉ, pouces), lien « Gérer l'équipe ménage » (ouvre le volet existant).
-6. **Avis des voyageurs** — pouces vert / rouge sur 30 jours (jamais d'étoiles).
+6. **Avis des voyageurs** — la **même note sur 5, avec l'étoile, que sur la liste**.
+
+   > ⚠ **Corrigé le 21 octobre 2026 (décision de Thierry).** Cette spec disait
+   > « pouces vert / rouge sur 30 jours (jamais d'étoiles) ». Deux écrans du
+   > même lot auraient alors dit les avis de deux façons — et le rouge est
+   > réservé par le §7 à la suppression et aux erreurs, or une remarque de
+   > propreté n'est ni l'une ni l'autre.
+   >
+   > · **la note** : identique à la carte de la liste, étoile du sprite comprise
+   >   (`4,9 / 5 · 336 avis`). Les deux écrans doivent dire la même chose ;
+   > · **les pouces** : réservés à la **propreté** seule, en couleur **neutre**,
+   >   jamais en rouge. **Juste le compteur, sans légende.**
 7. **Réglages** — Serrure (état + lien vers son réglage), Taxe de séjour (barème + lien). Lecture et lien seulement dans ce lot.
 
 Mobile : en-tête photo pleine largeur, Calendrier, interrupteur, « Où il est en vente », puis lignes « Prix », « Ménage », « Le logement », « Avis », « Réglages » qui ouvrent chacune une page.
+
+> ⚠ À l'**étape 2**, la fiche est en **lecture seule** : aucun bouton d'action
+> n'agit (ni photo, ni interrupteur, ni sélecteur de prix, ni suppression). Ce
+> qui est masqué par droit garde sa garde serveur, et ce qui mène à un refus
+> n'est pas montré — règles de Thierry du 20 octobre.
 
 ## 4. Données
 

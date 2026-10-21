@@ -411,6 +411,7 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .only-desktop { display: none !important; }
   .menu { position: fixed; inset-inline: var(--gap-m); top: 64px; min-width: 0; }
   .bottombar .badge { position: absolute; top: 2px; inset-inline-end: 18px; border: 2px solid var(--ink); }
+
 }
 
 /* ---------- Calendrier V5 (lot 3, étape 1) ---------- */
@@ -1149,3 +1150,59 @@ label.men-cfg__pastille:focus-within { box-shadow: 0 0 0 2px var(--ink); }
 }
 /* Le voile et la fenêtre couvrent la barre du bas au téléphone. */
 body.men-cfg-ouvert { overflow: hidden; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   LOGEMENTS — le conteneur de page, commun à la liste et à la fiche
+   ───────────────────────────────────────────────────────────────────────────── */
+.log-page, .fic-page { max-width: var(--page-max); margin-inline: auto; padding: var(--page-pad); }
+
+/* ⚠ LA BARRE DU BAS EST `fixed` : SANS CETTE MARGE, ELLE COUVRE LA FIN DE LA
+   PAGE. Mesuré au banc le 21 octobre 2026, à 390 px : la dernière ligne du
+   bloc « Réglages » de la fiche passait sous la barre de 23 px, et rien ne le
+   signalait — on croit la page finie. `.page` et `.cal-page` dégageaient déjà
+   la barre chacune de leur côté ; les deux écrans du lot le font ici, en un
+   seul endroit, pour que la liste ne redécouvre pas le même défaut le jour où
+   un hôte aura huit biens.
+   ⚠ ET LA RÈGLE EST ICI, PAS DANS LA PAGE : le `padding` raccourci déclaré
+   par la page écrasait le `padding-bottom` de cette feuille. */
+/* ⚠ LE MÊME POINT DE RUPTURE QUE LA BARRE (720 px), pas un voisin. Il était
+   à 860 px : entre 721 et 860, les deux pages finissaient sur 96 px de vide
+   sans barre à dégager, et la couverture du vrai défaut ne tenait que parce
+   que 860 > 720. Une remontée du point de rupture de la barre au-dessus de
+   860 aurait fait revenir les 23 px — un garde-fou qui tient par hasard n'en
+   est pas un. */
+@media (max-width: 720px) {
+  .log-page, .fic-page { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   LOGEMENTS — la forme des rendus PARTAGÉS entre la liste et la fiche
+   ─────────────────────────────────────────────────────────────────────────────
+   `canauxHtml` et `avisHtml` (shared/logements-liste.js) sont appelés par
+   `pages/logements.html` ET par `pages/logement.html` : leur forme vit donc
+   ici, pas dans l'une des deux pages.
+
+   ⚠ CE DÉPLACEMENT RÉPARE UN DÉFAUT MESURÉ (21 octobre 2026, capture 1440 de
+   l'étape 2) : les règles vivaient dans `pages/logements.html`, et la fiche
+   rendait « AirbnbBooking.comReservation directe » — trois noms collés, sans
+   pastille, sans point d'état et sans la gouttière. Le rendu était le bon ;
+   c'est la feuille qui manquait.
+
+   ⚠ COULEURS NEUTRES : les couleurs de canal (--canal-*) restent réservées au
+   Calendrier. Trois formes, trois états. */
+.log-canaux { display: flex; align-items: center; gap: var(--gap-xs); flex-wrap: wrap; }
+.log-pastille { display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border);
+  font-size: var(--fs-caption); color: var(--muted); }
+.log-point { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.log-pastille--vente .log-point { background: var(--ok); }
+.log-pastille--pas-ce-bien .log-point { border: 1.5px solid var(--muted-2); }
+.log-pastille--indetermine .log-point { border: 1.5px dashed var(--muted-2); }
+
+/* La note sur 5 et le nombre TOTAL d'avis (demande de Thierry du 20 octobre
+   2026). L'étoile prend la couleur d'encre normale — la charte §7 réserve
+   l'ambre au badge de navigation et le rouge à la suppression, et une note
+   n'est ni l'un ni l'autre. */
+.log-avis { display: flex; align-items: center; gap: 5px; color: var(--ink); }
+.log-avis--muet { color: var(--muted); font-style: italic; }
+.log-avis svg { width: 14px; height: 14px; flex: none; }
