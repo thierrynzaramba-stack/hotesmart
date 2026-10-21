@@ -709,6 +709,9 @@
   "fiche.mode_titre": "¿Dejar que HôteSmart envíe sus precios?",
   "fiche.mode_texte": "HôteSmart enviará sus precios a sus anuncios. Ya no podrá modificarlos allí.",
   "fiche.mode_ok": "Activar",
+  "fiche.prix_automatique": "HôteSmart ajusta y envía sus precios automáticamente.",
+  "fiche.connecter": "Conectar mis plataformas",
+  "fiche.connexions_gerer": "Gestionar mis conexiones",
   "fiche.refus": "No tiene acceso a este alojamiento.",
   "fiche.introuvable": "Este alojamiento no existe, o no pertenece a esta cuenta.",
   "fiche.panne": "Esta ficha no se puede leer ahora mismo."

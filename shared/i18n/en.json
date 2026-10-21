@@ -709,6 +709,9 @@
   "fiche.mode_titre": "Let HôteSmart send your prices?",
   "fiche.mode_texte": "HôteSmart will send your prices to your listings. You will no longer be able to change them there.",
   "fiche.mode_ok": "Turn on",
+  "fiche.prix_automatique": "Your prices are adjusted and sent automatically by HôteSmart.",
+  "fiche.connecter": "Connect my platforms",
+  "fiche.connexions_gerer": "Manage my connections",
   "fiche.refus": "You do not have access to this property.",
   "fiche.introuvable": "This property does not exist, or it is not part of this account.",
   "fiche.panne": "This page cannot be read right now."

@@ -1377,3 +1377,86 @@ test('le bouton Publier existe m\u00eame sans le droit de MODIFIER : deux droits
   assert.equal(d.querySelector('[data-champ]'), null)
   assert.equal(d.querySelector('[data-bind="mode"]'), null)
 })
+
+test('LE TEST QUI COMPTE : un bien PILOT\u00c9 dit que ses prix partent tout seuls', () => {
+  // D\u00e9cision de Thierry du 21 octobre 2026. L'absence de bouton, seule, se
+  // lirait comme un oubli ou comme un droit manquant. Et la phrase ne nomme ni
+  // l'app de tarification ni le partenaire technique : ce sont des noms de
+  // l'int\u00e9rieur.
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'yieldflow' }),
+    OUTILS(), { peutPublier: true, peutSupprimer: true }))
+  const phrase = d.querySelector('[data-publier="automatique"]')
+  assert.ok(phrase, 'la phrase doit remplacer le bouton')
+  assert.equal(phrase.textContent.trim(), 'Vos prix sont ajust\u00e9s et envoy\u00e9s automatiquement par H\u00f4teSmart.')
+  assert.equal(d.querySelector('[data-bind="publier"]'), null)
+  assert.doesNotMatch(d.querySelector('#c').textContent, /yield|channex|beds24/i)
+})
+
+test('la phrase des prix automatiques est un \u00c9TAT, pas une action : elle ne d\u00e9pend d aucun droit', () => {
+  // La taire \u00e0 un profil en lecture lui laisserait croire que ses prix dorment.
+  for (const droits of [{}, { peutPublier: false }, { peutSupprimer: true, peutPublier: false }]) {
+    const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'yieldflow' }), OUTILS(), droits))
+    assert.ok(d.querySelector('[data-publier="automatique"]'), JSON.stringify(droits))
+    assert.equal(d.querySelector('[data-bind="publier"]'), null)
+  }
+  // Et un bien NON pilot\u00e9 ne la porte pas : elle serait fausse.
+  const normal = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutPublier: true }))
+  assert.equal(normal.querySelector('[data-publier="automatique"]'), null)
+  assert.ok(normal.querySelector('[data-bind="publier"]'))
+})
+
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// \u00c9TAPE 3 \u2014 Connecter
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+test('LE TEST QUI COMPTE : Connecter m\u00e8ne \u00e0 l assistant EXISTANT, avec l UUID du bien', () => {
+  // Spec \u00a73.1 : « assistant de connexion existant, reprise OAuth Airbnb
+  // conserv\u00e9e ». \u26a0 Et c'est un LIEN : l'assistant a besoin de la cl\u00e9 du
+  // partenaire pour lister les canaux, que la fiche ne descend pas. La page des
+  // connexions la conna\u00eet d\u00e9j\u00e0 ; on lui passe l'UUID.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const a = d.querySelector('[data-bind="connecter"]')
+  assert.ok(a, 'le bloc « O\u00f9 il est en vente » doit porter l action')
+  assert.equal(a.getAttribute('href'), '/pages/connexions?bien=b1')
+  assert.equal(a.tagName, 'A', 'un lien, pas un bouton : il change de page')
+  // UNE SEULE action pour le bloc, pas une par canal.
+  assert.equal(d.querySelectorAll('[data-bind="connecter"]').length, 1)
+})
+
+test('le libell\u00e9 suit l \u00e9tat : connecter quand rien n est en vente, g\u00e9rer sinon', () => {
+  const avec = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  assert.match(avec.querySelector('[data-bind="connecter"]').textContent, /G\u00e9rer/)
+  const sans = doc(M.ficheHtml(fiche({ canaux: [] }), OUTILS(), { peutSupprimer: true }))
+  assert.match(sans.querySelector('[data-bind="connecter"]').textContent, /Connecter/)
+  // M\u00eame sans canal lisible, l action reste : c'est par l\u00e0 qu'on en relie un.
+  const illisible = doc(M.ficheHtml(fiche({ canaux: null, indisponibles: ['canaux'] }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.ok(illisible.querySelector('[data-bind="connecter"]'))
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : sans droit d \u00e9criture, aucun chemin vers l assistant', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: false }))
+  assert.equal(d.querySelector('[data-bind="connecter"]'), null)
+  assert.doesNotMatch(d.querySelector('#c').innerHTML, /pages\/connexions/)
+})
+
+test('LE TEST QUI COMPTE : un identifiant \u00e0 caract\u00e8res sp\u00e9ciaux ne casse pas le lien', () => {
+  const d = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, id: 'a b&c' } }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('[data-bind="connecter"]').getAttribute('href'),
+    '/pages/connexions?bien=a%20b%26c')
+})
+
+test('LE TEST QUI COMPTE : la page des connexions SAIT ouvrir l assistant sur le bien demand\u00e9', () => {
+  // Le lien de la fiche ne vaut que si l'autre bout l'honore. \u26a0 Et la
+  // r\u00e9solution se fait L\u00c0-BAS, o\u00f9 la cl\u00e9 du partenaire est connue : la fiche
+  // n'envoie qu'un UUID.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'connexions.html'), 'utf8')
+  assert.match(page, /URLSearchParams\(location\.search\)\.get\('bien'\)/,
+    'la page doit lire le param\u00e8tre que la fiche lui envoie')
+  assert.match(page, /otaProps\.find\(x => String\(x\.id\) === String\(bienDemande\)\)/,
+    'elle r\u00e9sout l UUID en propri\u00e9t\u00e9 avant d ouvrir')
+  assert.match(page, /if \(cible\) openConnexions\(cible, null\)/,
+    'un identifiant inconnu n ouvre rien et laisse la liste')
+})

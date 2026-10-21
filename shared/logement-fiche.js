@@ -355,14 +355,41 @@ export function fraicheurAffichee (fiche, maintenant = Date.now()) {
   }
 }
 
-export function venteHtml (fiche, outils) {
+// ⚠ UN LIEN VERS L'ASSISTANT EXISTANT, PAS UN ASSISTANT DE PLUS (spec §3.1 :
+// « assistant de connexion existant, reprise OAuth Airbnb conservée »).
+//
+// ⚠ ET C'EST UN LIEN, PAS UN BOUTON QUI OUVRIRAIT LA FENÊTRE ICI. L'assistant a
+// besoin de la CLÉ DU PARTENAIRE pour lister les canaux ; la fiche ne la descend
+// pas, et ce lot ne commencera pas à la faire circuler. La page des connexions,
+// elle, la connaît déjà : on lui passe l'UUID du bien, et elle ouvre l'assistant
+// sur le bon logement.
+//
+// ⚠ UNE SEULE ACTION POUR LE BLOC, pas une par canal : l'assistant traite déjà
+// chaque plateforme à l'intérieur, et une action par ligne ferait trois chemins
+// vers la même fenêtre.
+export function connecterHtml (fiche, outils, { peutModifier = false } = {}) {
+  const { t, esc, icone } = outils
+  if (!peutModifier) return ''
+  const noms = canauxDeVente(fiche.canaux)
+  const cle = (noms && noms.length) ? 'fiche.connexions_gerer' : 'fiche.connecter'
+  const id = encodeURIComponent((fiche.bien || {}).id || '')
+  return `<p class="fic-liens"><a class="btn btn--secondary" data-bind="connecter"
+    href="/pages/connexions?bien=${esc(id)}">${icone('i-link', 'icon')}<span>${esc(t(cle))}</span></a></p>`
+}
+
+export function venteHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, dateEnClair } = outils
   // ⚠ `Array.isArray`, PAS `!= null` (revue de 5c0d759). Un `{}` — réponse
   // tronquée, champ renommé côté serveur — passe `!= null`, son `.length` vaut
   // `undefined`, et « Aucun canal relié » s'affiche sur un bien qui en a deux.
   // C'est le trou que `etatDeLaPage` ferme au niveau de la PAGE ; il descend
   // ici, au grain du bloc.
-  if (!Array.isArray(fiche.canaux)) return nonLu('fiche.canaux_non_lus', outils)
+  // ⚠ L'ACTION EXISTE MÊME QUAND LES CANAUX NE SE LISENT PAS : c'est par là
+  // qu'on en relie un, et son utilité ne dépend pas de la réussite d'une
+  // lecture. La taire sur une panne enfermerait l'hôte dans un écran qui ne
+  // propose rien.
+  const connecter = connecterHtml(fiche, outils, { peutModifier })
+  if (!Array.isArray(fiche.canaux)) return `${nonLu('fiche.canaux_non_lus', outils)}${connecter}`
   const f = fraicheurAffichee(fiche)
   const ligne = !f ? ''
     : `<p class="fic-fraicheur caption${f.echec || f.vieux ? ' fic-fraicheur--alerte' : ''}"`
@@ -371,13 +398,13 @@ export function venteHtml (fiche, outils) {
   // ⚠ « Aucun canal relié » est rendu par `canauxHtml`, le module commun : le
   // redire ici laisserait la CARTE mentir le jour où l'une des deux
   // changerait.
-  if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(fiche, outils)}</p>${ligne}`
+  if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(fiche, outils)}</p>${ligne}${connecter}`
   // ⚠ `log-canaux`, LA CLASSE DU MODULE COMMUN (revue de 5c0d759). Le bloc
   // utilisait `fic-vente`, qui n'était déclaré NULLE PART : trois pastilles
   // bord à bord, bordures jointives, là où l'en-tête les espaçait. Le correctif
   // du commit précédent n'avait réparé que la moitié du défaut — et l'en-tête,
   // lui, recopiait les quatre propriétés sous un autre nom.
-  return `<div class="log-canaux">${canauxHtml(fiche, outils)}</div>${ligne}`
+  return `<div class="log-canaux">${canauxHtml(fiche, outils)}</div>${ligne}${connecter}`
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -567,14 +594,26 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
       </div>`
     : ''
 
+  // ⚠ UN BIEN PILOTÉ N'A PAS DE BOUTON, MAIS IL A UNE PHRASE (décision de
+  // Thierry du 21 octobre 2026). L'absence seule se lirait comme un oubli, ou
+  // comme un droit manquant ; la phrase dit que les prix PARTENT, et qu'ils
+  // partent tout seuls. Elle ne nomme ni l'app de tarification ni le partenaire
+  // technique — ce sont des noms de l'intérieur, et l'hôte n'a pas à les
+  // connaître pour comprendre ce qui se passe sur ses annonces.
+  //
+  // ⚠ ET ELLE S'AFFICHE SANS CONDITION DE DROIT : c'est un ÉTAT du bien, pas
+  // une action. La taire à un profil en lecture lui laisserait croire que ses
+  // prix dorment.
   const pub = publierAffiche(fiche.bien)
-  const publierHtml = (outils.peutPublier === true && pub.montre)
-    ? `<div class="fic-publier" data-publier>
-        <button type="button" class="btn" data-bind="publier">${esc(t('fiche.publier'))}</button>
-        <span class="fic-etat caption" data-etat aria-live="polite"></span>
-        <p class="fic-erreur caption" data-erreur hidden></p>
-      </div>`
-    : ''
+  const publierHtml = pub.motif === 'pilote'
+    ? `<p class="fic-publier caption fic-muet" data-publier="automatique">${esc(t('fiche.prix_automatique'))}</p>`
+    : ((outils.peutPublier === true && pub.montre)
+      ? `<div class="fic-publier" data-publier>
+          <button type="button" class="btn" data-bind="publier">${esc(t('fiche.publier'))}</button>
+          <span class="fic-etat caption" data-etat aria-live="polite"></span>
+          <p class="fic-erreur caption" data-erreur hidden></p>
+        </div>`
+      : '')
 
   if (peutModifier) {
     // ⚠ LA DEVISE RESTE EN LECTURE, MÊME AVEC LE DROIT D'ÉCRITURE. `PATCH` ne
@@ -891,7 +930,7 @@ export function ficheHtml (fiche, outils, droits = {}) {
   const refuse = (nom) => refs.includes(nom)
 
   const gauche = [
-    bloc('fiche.bloc_vente', venteHtml(fiche, o), o),
+    bloc('fiche.bloc_vente', venteHtml(fiche, o, { peutModifier }), o),
     bloc('fiche.bloc_prix', prixHtml(fiche, o, { peutModifier }), o),
     bloc('fiche.bloc_logement', logementHtml(fiche, o, { peutModifier }), o),
     bloc('fiche.bloc_supprimer', supprimerHtml(fiche, o, droits), o)
