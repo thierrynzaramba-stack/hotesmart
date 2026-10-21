@@ -729,3 +729,99 @@ test('LE TEST QUI COMPTE : un refus du serveur ne fait pas mentir l interrupteur
   assert.equal(etat[2], 'Bien pas encore synchronis\u00e9.')
   assert.equal(e.bouton.disabled, false, 'et le bouton redevient cliquable')
 })
+
+// \u2500\u2500\u2500 Publier : la mise en file, et les refus qui arrivent en 200 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+
+function lancerPublication ({ reponse = { enqueued: true }, erreur = null, canaux = null, accepte = true }) {
+  const demandes = []
+  const etats = []
+  const appels = []
+  const sandbox = {
+    ficheCourante: { canaux },
+    idDuBien: 'b1',
+    t: (cle, vars) => (vars && vars.canaux) ? `${cle}:${vars.canaux}`
+      : (vars && vars.quand) ? `${cle}:${vars.quand}` : cle,
+    liste: (xs) => xs.join(' et '),
+    canauxDeVente: M.canauxDeVente,
+    logger: { error: () => {} },
+    I18n: { date: (d) => `le-${d.toISOString().slice(0, 10)}` },
+    Date, Number, String,
+    $: () => ({}),
+    direEtatBrut: (zone, quoi, texte) => etats.push([quoi, texte]),
+    enfiler: (f) => f(),
+    demander: async (o) => { demandes.push(o); return accepte },
+    api: { calendar: { fullsync: async (id) => {
+      appels.push(id)
+      if (erreur) throw erreur
+      return reponse
+    } } }
+  }
+  const src = `${fonctionDeLaPage('quandEnClair')}\n${fonctionDeLaPage('publierPrix')}`
+  const ctx = vm.createContext(sandbox)
+  vm.runInContext(src, ctx)
+  sandbox.__bouton = { disabled: false }
+  return { demandes, etats, appels,
+    lancer: () => vm.runInContext('publierPrix(__bouton)', ctx) }
+}
+
+test('LE TEST QUI COMPTE : la confirmation NOMME les canaux, et l envoi est une MISE EN FILE', async () => {
+  const e = lancerPublication({ canaux: [
+    { ota: 'airbnb', titre: null, actif: true, mappe: true },
+    { ota: 'booking', titre: null, actif: true, mappe: true }
+  ] })
+  await e.lancer()
+  assert.equal(e.demandes.length, 1)
+  assert.equal(e.demandes[0].texte, 'fiche.publier_texte_canaux:Airbnb et Booking.com')
+  assert.deepEqual(e.appels, ['b1'])
+  // \u26a0 \u00ab Dans les prochaines minutes \u00bb, pas \u00ab c est fait \u00bb : le travail r\u00e9el
+  // est fait par le cron, un bien \u00e0 la fois.
+  assert.equal(e.etats.at(-1)[1], 'fiche.publier_en_file')
+})
+
+test('sans canal nommable, la confirmation reste vraie sans inventer de noms', async () => {
+  for (const canaux of [null, [], [{ ota: 'airbnb', titre: null, actif: true, mappe: false }]]) {
+    const e = lancerPublication({ canaux })
+    await e.lancer()
+    assert.equal(e.demandes[0].texte, 'fiche.publier_texte', JSON.stringify(canaux))
+  }
+})
+
+test('LE TEST QUI COMPTE : un REFUS arrive en 200, et il ne doit pas se lire « envoy\u00e9 »', async () => {
+  // `{ enqueued: false, reason, message }` n est pas une erreur HTTP. Un \u00e9cran
+  // qui ne regarde que le code de statut afficherait \u00ab envoy\u00e9 \u00bb sur un refus.
+  const e = lancerPublication({ reponse: {
+    enqueued: false, reason: 'mode_keep',
+    message: 'Publication refusee : ce bien est en mode "Je garde mes prix".'
+  } })
+  await e.lancer()
+  assert.equal(e.etats.at(-1)[0], 'erreur')
+  assert.match(e.etats.at(-1)[1], /Je garde mes prix/, 'la phrase du SERVEUR, pas la n\u00f4tre')
+})
+
+test('LE TEST QUI COMPTE : le d\u00e9lai de 24 h dit QUAND on pourra republier', async () => {
+  const e = lancerPublication({ reponse: {
+    enqueued: false, reason: 'cooldown', next_allowed_at: '2026-10-22T14:00:00Z'
+  } })
+  await e.lancer()
+  assert.equal(e.etats.at(-1)[0], 'erreur')
+  assert.match(e.etats.at(-1)[1], /^fiche\.publier_cooldown:le-2026-10-22/,
+    'une date sans heure ne dirait pas \u00e0 partir de quand')
+})
+
+test('LE TEST QUI COMPTE : refuser la confirmation n envoie RIEN', async () => {
+  const e = lancerPublication({ accepte: false })
+  await e.lancer()
+  assert.equal(e.demandes.length, 1, 'la question est bien pos\u00e9e')
+  assert.deepEqual(e.appels, [], 'et rien ne part')
+  assert.deepEqual(e.etats, [], 'aucun \u00e9tat annonc\u00e9 non plus')
+})
+
+test('LE TEST QUI COMPTE : passer en « H\u00f4teSmart envoie mes prix » se confirme, et un refus remet le choix', async () => {
+  const fn = fonctionDeLaPage('changerMode')
+  assert.match(fn, /if \(select\.value !== 'managed'\) return/, 'un seul sens existe \u00e0 l \u00e9cran')
+  assert.match(fn, /if \(!ok\) \{ select\.value = 'keep'; return \}/)
+  assert.ok(fn.indexOf('demander(') < fn.indexOf('api.bien.modifier'),
+    'on demande AVANT d \u00e9crire')
+  // Et on recharge : le s\u00e9lecteur doit dispara\u00eetre, le bouton Publier appara\u00eetre.
+  assert.match(fn, /await charger\(\)/)
+})

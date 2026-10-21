@@ -151,6 +151,14 @@
   .fic-dlg__pied { display: flex; justify-content: flex-end; gap: var(--gap-xs); flex-wrap: wrap; }
   .fic-dlg__pied .btn { min-height: 44px; }
 
+  /* « Publier mes prix » : une action à part, séparée des champs par un filet,
+     parce qu'elle n'enregistre rien — elle ENVOIE. */
+  .fic-publier { display: flex; align-items: center; flex-wrap: wrap;
+    gap: var(--gap-xs) var(--gap-s); margin-top: var(--gap-s);
+    padding-top: var(--gap-s); border-top: 1px solid var(--border); }
+  .fic-publier .btn { min-height: 44px; }
+  .fic-publier .fic-etat { min-width: 0; }
+
   /* Le bouton d'envoi d'un bloc : ce qui part d'ici atteint les annonces, et la
      phrase le dit AVANT le clic. */
   .fic-envoi { display: flex; align-items: center; flex-wrap: wrap;
@@ -231,7 +239,7 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCourant, basculerVers }
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
-import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie } from '/shared/logement-fiche.js'
+import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie, canauxDeVente } from '/shared/logement-fiche.js'
 // ⚠ LA PRÉPARATION DE LA PHOTO EST PARTAGÉE avec l'écran d'aujourd'hui : elle
 // porte deux leçons de revue (une image sans dimensions, l'échelle de qualité
 // qui décide « trop lourde ») et une seconde copie les perdrait.
@@ -308,6 +316,9 @@ function montrerEtat (quoi) {
 // valeur, et un champ de grille reconstruirait le plan tarifaire chez le
 // partenaire pour rien — un appel bloquant, à chaque clic à côté.
 let bienCourant = null
+// ⚠ ET LA FICHE ENTIÈRE, pas seulement le bien : la confirmation de
+// publication nomme les CANAUX, qui vivent à côté de `bien` dans la réponse.
+let ficheCourante = null
 
 // ⚠ UN ENREGISTREMENT À LA FOIS. `PATCH` reconstruit la grille EN BLOQUANT ;
 // deux appels qui se croisent sur le même bien se liraient l'un l'autre à
@@ -489,14 +500,18 @@ $('[data-bind="fiche"]').addEventListener('change', (ev) => {
   const input = ev.target.closest('[data-champ]')
   if (input) { enregistrerChamp(input); return }
   const photo = ev.target.closest('[data-bind="photo"]')
-  if (photo) envoyerPhoto(photo)
+  if (photo) { envoyerPhoto(photo); return }
+  const mode = ev.target.closest('[data-bind="mode"]')
+  if (mode) changerMode(mode)
 })
 
 $('[data-bind="fiche"]').addEventListener('click', (ev) => {
   const bouton = ev.target.closest('[data-bind="enregistrer"]')
   if (bouton) { envoyerBloc(bouton); return }
   const bascule = ev.target.closest('[data-bind="assistant"]')
-  if (bascule) basculerAssistant(bascule)
+  if (bascule) { basculerAssistant(bascule); return }
+  const pub = ev.target.closest('[data-bind="publier"]')
+  if (pub) publierPrix(pub)
 })
 
 // ─── Le dialogue partagé : couper l'assistant, publier, supprimer ─────────
@@ -540,6 +555,84 @@ function demander ({ titre, texte, ok, liste = null, frappe = null }) {
     dlg.showModal()
     // Le focus part sur « Annuler », jamais sur l'action.
     part('annuler').focus()
+  })
+}
+
+// ─── Le mode des prix, et la publication ────────────────────────────
+//
+// ⚠ UN SEUL SENS EXISTE À L'ÉCRAN : « Je garde mes prix » → « HôteSmart envoie
+// mes prix ». Le retour en arrière est refusé par le serveur dès qu'un canal est
+// actif (409 qui dit pourquoi), et le sélecteur DISPARAÎT une fois le bien en
+// `managed` — c'est la spec §3.2.
+async function changerMode (select) {
+  if (select.value !== 'managed') return
+  const ok = await demander({
+    titre: t('fiche.mode_titre'), texte: t('fiche.mode_texte'), ok: t('fiche.mode_ok')
+  })
+  // Refus : la case revient à l'état du serveur, sinon l'écran montre un choix
+  // que personne n'a enregistré.
+  if (!ok) { select.value = 'keep'; return }
+  direEtat('mode', 'encours')
+  await enfiler(async () => {
+    try {
+      await api.bien.modifier(idDuBien, { rate_sync_mode: 'managed' })
+      bienCourant = { ...bienCourant, mode_des_prix: 'managed' }
+      // ⚠ ON RECHARGE, et c'est voulu : le sélecteur doit disparaître et le
+      // bouton « Publier » apparaître. Les reconstruire à la main ici ferait une
+      // seconde définition de la règle §3.2, à côté de celle du module.
+      await charger()
+    } catch (e) {
+      logger.error('Logement', e.message, { status: e.status })
+      select.value = 'keep'
+      direEtat('mode', 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+    }
+  })
+}
+
+// Une date AVEC son heure : le délai de publication se compte en heures, et
+// « jeudi 22 octobre » ne dirait pas à partir de quand on peut republier.
+function quandEnClair (iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return String(iso)
+  try { return I18n.date(d, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) }
+  catch { return String(iso) }
+}
+
+// ⚠ PUBLIER N'EST PAS UNE POUSSÉE IMMÉDIATE : c'est une MISE EN FILE. Le travail
+// réel (500 jours) est fait par le cron, un bien à la fois. L'écran ne doit donc
+// pas dire « c'est fait » — l'ancien écran disait déjà « dans les prochaines
+// minutes ».
+//
+// ⚠ ET LES REFUS ARRIVENT EN 200. `{ enqueued: false, reason, message }` n'est
+// pas une erreur HTTP : un écran qui ne lit que le code de statut afficherait
+// « envoyé » sur un refus. C'est le défaut que ce lot ferme partout ailleurs.
+async function publierPrix (bouton) {
+  const zone = $('[data-publier]')
+  const noms = canauxDeVente(ficheCourante && ficheCourante.canaux)
+  const texte = (noms && noms.length)
+    ? t('fiche.publier_texte_canaux', { canaux: liste(noms) })
+    : t('fiche.publier_texte')
+  const ok = await demander({
+    titre: t('fiche.publier_titre'), texte, ok: t('fiche.publier_ok')
+  })
+  if (!ok) return
+  bouton.disabled = true
+  direEtatBrut(zone, 'encours', t('fiche.envoi_en_cours'))
+  await enfiler(async () => {
+    try {
+      const r = await api.calendar.fullsync(idDuBien)
+      if (r && r.enqueued) { direEtatBrut(zone, 'enregistre', t('fiche.publier_en_file')); return }
+      const refus = r && r.reason === 'cooldown'
+        ? t('fiche.publier_cooldown', { quand: quandEnClair(r.next_allowed_at) })
+        : ((r && r.message) || t('fiche.non_enregistre'))
+      direEtatBrut(zone, 'erreur', refus)
+    } catch (e) {
+      logger.error('Logement', e.message, { status: e.status })
+      direEtatBrut(zone, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+    } finally {
+      bouton.disabled = false
+    }
   })
 }
 
@@ -658,6 +751,7 @@ async function charger () {
     // ⚠ MASQUAGE PAR DROIT **ET** GARDE SERVEUR (règle absolue). Le DELETE est
     // gardé par `reglages: write` ; ici on ne fait que ne pas le proposer.
     bienCourant = f.bien
+    ficheCourante = f
     cible.innerHTML = ficheHtml(f, OUTILS, {
       peutSupprimer: peutEcrire('reglages'),
       // ⚠ PAS LE MÊME DROIT : le serveur garde le full sync par

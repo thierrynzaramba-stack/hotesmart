@@ -1311,3 +1311,69 @@ test('LE TEST QUI COMPTE : le droit de PUBLIER n ouvre pas les champs, mais gard
   assert.equal(d.querySelector('[data-bind="enregistrer"]'), null)
   assert.equal(d.querySelector('[data-bind="assistant"]'), null)
 })
+
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// \u00c9TAPE 3 \u2014 le mode des prix, et \u00ab Publier mes prix \u00bb
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+const enMode = (mode, extra = {}) =>
+  fiche({ bien: { ...fiche().bien, mode_des_prix: mode, ...extra } })
+
+test('LE TEST QUI COMPTE : le choix du mode ne s affiche que tant qu il reste \u00e0 faire', () => {
+  // Spec \u00a73.2 : le second choix n appara\u00eet que si le bien est en `keep` ; une
+  // fois en `managed`, le s\u00e9lecteur DISPARA\u00ceT. Le retour en arri\u00e8re est refus\u00e9
+  // par le serveur d\u00e8s qu un canal est actif : montrer un choix qui sera refus\u00e9
+  // est ce que ce lot s interdit.
+  const keep = doc(M.ficheHtml(enMode('keep'), OUTILS(), { peutSupprimer: true }))
+  const sel = keep.querySelector('[data-bind="mode"]')
+  assert.ok(sel, 'en « Je garde mes prix », le choix existe')
+  assert.deepEqual([...sel.options].map(o => o.value), ['keep', 'managed'])
+  assert.equal(sel.value, 'keep', 'le mode courant est s\u00e9lectionn\u00e9')
+  assert.ok(keep.querySelector('label[for="fic-mode"]'), 'le s\u00e9lecteur porte son \u00e9tiquette')
+
+  const managed = doc(M.ficheHtml(enMode('managed'), OUTILS(), { peutSupprimer: true }))
+  assert.equal(managed.querySelector('[data-bind="mode"]'), null, 'plus de choix en « managed »')
+  assert.match(managed.querySelector('[data-mode]').textContent, /H\u00f4teSmart/, 'mais l \u00e9tat se lit')
+})
+
+test('LE TEST QUI COMPTE : \u00ab Publier \u00bb n appara\u00eet qu en « managed », et jamais sur un bien pilot\u00e9', () => {
+  // \u26a0 DEUX \u00c9CRIVAINS DE PRIX SUR LA M\u00caME NUIT, c est ce que ce garde-fou
+  // emp\u00eache. L endpoint de lecture le dit d\u00e9j\u00e0 dans son commentaire : proposer
+  // la publication sur un bien pilot\u00e9 par l app de tarification ferait \u00e9crire
+  // deux sources sur la m\u00eame date.
+  const ok = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutPublier: true }))
+  assert.ok(ok.querySelector('[data-bind="publier"]'))
+
+  const pilote = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'yieldflow' }),
+    OUTILS(), { peutPublier: true }))
+  assert.equal(pilote.querySelector('[data-bind="publier"]'), null, 'bien pilot\u00e9 : pas de bouton')
+
+  const keep = doc(M.ficheHtml(enMode('keep', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutPublier: true }))
+  assert.equal(keep.querySelector('[data-bind="publier"]'), null,
+    'en « Je garde mes prix », le serveur refuserait la mise en file')
+
+  // Et la r\u00e8gle est lisible hors du rendu, pour qu on puisse l \u00e9prouver seule.
+  assert.deepEqual(M.publierAffiche({ mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' }),
+    { montre: true, motif: null })
+  assert.equal(M.publierAffiche({ mode_des_prix: 'managed', pilote_tarifaire: 'yieldflow' }).motif, 'pilote')
+  assert.equal(M.publierAffiche({ mode_des_prix: 'keep' }).motif, 'mode_keep')
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : sans le droit CALENDRIER, aucun bouton Publier', () => {
+  // Le serveur garde le full sync par `reservations:write`, pas par
+  // `reglages:write` : un membre qui modifie le bien ne publie pas forc\u00e9ment.
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutSupprimer: true, peutPublier: false }))
+  assert.equal(d.querySelector('[data-bind="publier"]'), null)
+  assert.ok(d.querySelector('[data-champ]'), 'alors qu il modifie bien les champs')
+})
+
+test('le bouton Publier existe m\u00eame sans le droit de MODIFIER : deux droits, deux portes', () => {
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutSupprimer: false, peutPublier: true }))
+  assert.ok(d.querySelector('[data-bind="publier"]'))
+  assert.equal(d.querySelector('[data-champ]'), null)
+  assert.equal(d.querySelector('[data-bind="mode"]'), null)
+})

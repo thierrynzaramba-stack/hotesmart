@@ -524,6 +524,25 @@ function ligneSaisieHtml (champ, bien, outils) {
   </div>`
 }
 
+// « Publier mes prix » : quand, et pourquoi pas.
+//
+// ⚠ JAMAIS SUR UN BIEN PILOTÉ PAR YIELDFLOW. C'est écrit dans l'endpoint de
+// lecture, et c'est la raison d'être de `piloteDuBien` : proposer la
+// publication sur un bien piloté mettrait DEUX écrivains de prix sur la même
+// nuit. L'app de tarification pousse déjà ses prix ; ce bouton-là n'a rien à
+// faire ici.
+//
+// ⚠ ET JAMAIS EN MODE « JE GARDE MES PRIX » : le serveur refuse la mise en file
+// (`RATE_PUSH_BLOCKED`), donc le bouton mènerait à un refus certain.
+export function publierAffiche (bien) {
+  const mode = String((bien && bien.mode_des_prix) || '').toLowerCase()
+  if (mode !== 'managed') return { montre: false, motif: 'mode_keep' }
+  if (((bien && bien.pilote_tarifaire) || '') === 'yieldflow') {
+    return { montre: false, motif: 'pilote' }
+  }
+  return { montre: true, motif: null }
+}
+
 // ─── 2. Prix ────────────────────────────────────────────────────────────────
 export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, argent, nombre } = outils
@@ -531,6 +550,31 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
   const ligne = (cle, valeur, extra = '') =>
     `<div class="fic-ligne"${extra}><span class="fic-ligne__cle caption">${esc(t(cle))}</span>`
     + `<span class="fic-ligne__val">${valeur}</span></div>`
+
+  // ⚠ LE CHOIX NE S'AFFICHE QUE TANT QU'IL RESTE À FAIRE (spec §3.2) : une fois
+  // le bien en « HôteSmart envoie mes prix », le sélecteur DISPARAÎT. Le retour
+  // en arrière est refusé par le serveur dès qu'un canal est actif, et montrer
+  // un choix qui sera refusé est ce que ce lot s'interdit.
+  const modeHtml = (peutModifier && p.choixPossible)
+    ? `<div class="fic-ligne fic-ligne--saisie" data-ligne="mode">
+        <label class="fic-ligne__cle caption" for="fic-mode">${esc(t('fiche.prix_mode_choix'))}</label>
+        <span class="fic-ligne__val"><select class="fic-saisie" id="fic-mode" data-bind="mode">
+          <option value="keep" selected>${esc(t('fiche.prix_mode_keep'))}</option>
+          <option value="managed">${esc(t('fiche.prix_mode_managed'))}</option>
+        </select></span>
+        <span class="fic-etat caption" data-etat aria-live="polite"></span>
+        <p class="fic-erreur caption" data-erreur hidden></p>
+      </div>`
+    : ''
+
+  const pub = publierAffiche(fiche.bien)
+  const publierHtml = (outils.peutPublier === true && pub.montre)
+    ? `<div class="fic-publier" data-publier>
+        <button type="button" class="btn" data-bind="publier">${esc(t('fiche.publier'))}</button>
+        <span class="fic-etat caption" data-etat aria-live="polite"></span>
+        <p class="fic-erreur caption" data-erreur hidden></p>
+      </div>`
+    : ''
 
   if (peutModifier) {
     // ⚠ LA DEVISE RESTE EN LECTURE, MÊME AVEC LE DROIT D'ÉCRITURE. `PATCH` ne
@@ -545,11 +589,12 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
         { montant: argent(p.plancher, p.devise) }))}</p>`
       : ''
     return `<div class="fic-prix">
-      ${ligne('fiche.prix_mode', esc(t(p.modeCle)), ' data-mode')}
+      ${modeHtml || ligne('fiche.prix_mode', esc(t(p.modeCle)), ' data-mode')}
       ${champsDuBloc('prix').map(c => ligneSaisieHtml(c, fiche.bien, outils)
         + (c.nom === 'prix_minimum' ? vide : '')).join('')}
       ${ligne('fiche.champ_devise', `${esc(p.devise)} <span class="fic-muet caption">${esc(t('fiche.devise_fixe'))}</span>`, ' data-devise')}
       ${envoiHtml('prix', fiche, outils)}
+      ${publierHtml}
     </div>`
   }
 
@@ -562,6 +607,7 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
         : argent(p.plancher, p.devise)), ' data-plancher')}
     ${p.voyageursInclus != null ? ligne('fiche.prix_inclus', esc(nombre(p.voyageursInclus, 0))) : ''}
     ${p.supplement != null ? ligne('fiche.prix_supplement', esc(argent(p.supplement, p.devise))) : ''}
+    ${publierHtml}
   </div>`
 }
 
@@ -832,6 +878,7 @@ export function ficheHtml (fiche, outils, droits = {}) {
   const inds = Array.isArray(fiche.indisponibles) ? fiche.indisponibles : []
   const refs = Array.isArray(fiche.refuses) ? fiche.refuses : []
   const o = { ...outils,
+    peutPublier,
     avisIndisponibles: inds.includes('avis'),
     // ⚠ UN FAIT DATÉ PARTIEL SE DIT (revue de 5c0d759). Le serveur pose
     // `indisponibles: ['fait_date']` quand il a pu affirmer une FERMETURE mais
