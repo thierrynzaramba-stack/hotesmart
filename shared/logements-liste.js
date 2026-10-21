@@ -397,10 +397,23 @@ export function carteHtml (bien, outils) {
     ? `<img src="${esc(bien.photo_url)}" alt="" loading="lazy">`
     : icone('i-home', 'icon')
 
+  // ⚠ LA CARTE MENE A LA FICHE, ET LE LIEN PORTE LE NOM (constat de Thierry du
+  // 21 octobre 2026 : « les liens vers les pages des logements ne fonctionnent
+  // pas »). Il n'y avait pas de lien casse : il n'y en avait AUCUN. La carte
+  // etait un `<article>` inerte depuis l'etape 1, ou la fiche n'existait pas.
+  //
+  // ⚠ UN SEUL LIEN, SUR LE NOM, ET C'EST LUI QUI S'ETEND A LA CARTE (par
+  // `::after` dans la feuille). Envelopper la carte entiere ferait lire au
+  // lecteur d'ecran « Airbnb Booking.com 4,9 sur 5 336 avis » comme nom du
+  // lien ; le nom du logement suffit, et la zone cliquable reste la carte.
+  //
+  // ⚠ `encodeURIComponent` : l'identifiant va dans un CHEMIN. Un bien dont la
+  // reference porte une barre oblique couperait l'URL en deux (le meme piege
+  // que le lien du calendrier, ferme a l'etape 2).
   return `<article class="log-carte" data-bien="${esc(bien.id)}">
     <div class="log-photo">${photo}</div>
     <div class="log-texte">
-      <div class="log-nom">${esc(bien.nom || '')}</div>
+      <div class="log-nom"><a class="log-lien" href="/logements/${esc(encodeURIComponent(bien.id))}">${esc(bien.nom || '')}</a></div>
       ${sous ? `<div class="log-sous caption">${sous}</div>` : ''}
     </div>
     <div class="log-canaux">${canauxHtml(bien, outils)}</div>

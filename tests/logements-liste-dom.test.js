@@ -626,3 +626,35 @@ test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : le nom du partenaire technique n
   assert.equal(M.libelleDuCanal({ ota: 'airbnb', titre: 'Channex Airbnb' }), 'Airbnb',
     'un OTA connu passe par sa table, le titre ne compte pas')
 })
+
+test('LE TEST QUI COMPTE : la carte M\u00c8NE \u00c0 LA FICHE du logement', () => {
+  // Constat de Thierry du 21 octobre 2026 : « les liens vers les pages des
+  // logements ne fonctionnent pas ». Il n'y avait pas de lien cass\u00e9 : il n'y
+  // en avait AUCUN. La carte \u00e9tait inerte depuis l'\u00e9tape 1, o\u00f9 la fiche
+  // n'existait pas encore.
+  const d = doc(M.carteHtml(bien(), OUTILS()))
+  const a = d.querySelector('a.log-lien')
+  assert.ok(a, 'la carte doit porter un lien')
+  assert.equal(a.getAttribute('href'), '/logements/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+  // Le lien porte LE NOM, pas la carte enti\u00e8re : sinon le lecteur d'\u00e9cran
+  // annonce les pastilles et la note comme nom du lien.
+  assert.equal(a.textContent, 'La bulle')
+  assert.equal(d.querySelector('a.log-lien .log-pastille'), null)
+})
+
+test('LE TEST QUI COMPTE : un identifiant \u00e0 caract\u00e8res sp\u00e9ciaux ne coupe pas l URL', () => {
+  // M\u00eame pi\u00e8ge que le lien du calendrier, ferm\u00e9 \u00e0 l'\u00e9tape 2 : l'identifiant
+  // part dans un CHEMIN. Une barre oblique couperait l'URL en deux et m\u00e8nerait
+  // ailleurs.
+  const d = doc(M.carteHtml(bien({ id: 'a b/c?d' }), OUTILS()))
+  assert.equal(d.querySelector('a.log-lien').getAttribute('href'), '/logements/a%20b%2Fc%3Fd')
+})
+
+test('la carte reste cliquable en entier, et le lien le reste au clavier', () => {
+  // Le lien s'\u00e9tend \u00e0 la carte par `::after` : c'est la feuille de la page qui
+  // le fait, et elle a besoin du rep\u00e8re `position: relative` sur la carte.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'logements.html'), 'utf8')
+  assert.match(page, /\.log-lien::after \{[^}]*position: absolute/)
+  assert.match(page, /\.log-carte \{[^}]*position: relative/s)
+  assert.match(page, /log-lien:focus-visible/, 'le parcours au clavier doit se voir')
+})
