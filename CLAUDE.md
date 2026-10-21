@@ -783,6 +783,33 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 
 ### APRÈS CHAQUE PUSH — VÉRIFIER QU'UN DÉPLOIEMENT EXISTE POUR CE SHA
 
+⚠⚠ **ÉTAT DU 21 OCTOBRE 2026 : UN MERGE VERS `main` NE SE DÉPLOIE PAS TOUT
+SEUL. IL FAUT UN « Create Deployment » MANUEL.** Tant que cette ligne est là,
+le déroulé d'un merge prod se termine par ce geste, et la vérification du SHA
+vient APRÈS lui — pas après le push.
+
+**Mesuré, trois pushes de suite sur `main`, chacun bouclé 120 secondes puis
+réinterrogé à 5 et 8 minutes : ZÉRO déploiement.** `981d453` (lot logements),
+`a73b905` (lot i18n), `8551264` (ce document). Statut GitHub `pending`, zéro
+check-run, sur les trois. La ref, elle, avançait bien à chaque fois —
+`git ls-remote` le confirmait.
+
+⚠ **ET C'EST PROPRE À `main`.** Le même jour, à la même heure, les pushes sur
+`staging` (`34969a2`, `a2ec6f1`) et sur les branches de lot (`113e273`,
+`813b732`, `c7be709`) ont produit leurs **deux** déploiements chacun en 35
+secondes — `Preview – hotesmart` et le projet staging. Le webhook du dépôt
+fonctionne donc ; c'est la réaction à `main` qui manque. L'asymétrie désigne un
+réglage du projet Vercel (branche de production, *Ignored Build Step*,
+auto-deploy de `main`) plutôt qu'un aléa. **Ticket Vercel à ouvrir** ; d'ici là,
+le geste manuel est le déroulé, pas un rattrapage.
+
+⚠ **LA SONDE QUI TRANCHE N'EST PAS L'API, C'EST LA PRODUCTION.** `981d453`
+avait sa ref en place et `https://hotesmart.vercel.app/logements` rendait **404**
+alors que la route venait d'entrer dans `vercel.json`. Après le
+« Create Deployment » : **200**. Interroger une URL que le lot vient d'ajouter
+coûte une seconde et ne ment pas.
+
+
 ```bash
 SHA=$(git rev-parse <branche>)      # ⚠ le SHA COMPLET, 40 caractères
 gh api "repos/thierrynzaramba-stack/hotesmart/deployments?sha=$SHA" \
