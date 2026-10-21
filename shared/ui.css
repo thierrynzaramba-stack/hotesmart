@@ -99,6 +99,12 @@ h1, h2, h3, p { margin: 0; }
 .btn--lg { height: var(--control-lg); padding: 0 20px; font-size: var(--fs-body); }
 .btn--block { width: 100%; }
 .btn:hover { box-shadow: var(--shadow-hover); }
+/* ⚠ UN BOUTON DESACTIVE N'AVAIT AUCUN STYLE : `disabled` ne grisait rien, donc
+   un refus annonce a l'avance ne se voyait pas (recette du 21 octobre, bouton
+   Prix d'un bien pilote). ⚠ ET L'ORDRE TRANCHE : `.btn:hover` a le meme poids,
+   donc ces regles doivent rester APRES lui, sinon l'ombre revient au survol. */
+.btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+.btn:disabled:hover, .btn[aria-disabled="true"]:hover { box-shadow: none; }
 .link { font-weight: var(--fw-semibold); text-decoration: underline; }
 
 /* ---------- Pilule d'onglet ---------- */

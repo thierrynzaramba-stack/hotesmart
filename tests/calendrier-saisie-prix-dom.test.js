@@ -891,3 +891,76 @@ test('LE TEST QUI COMPTE (RECETTE 3) : la barre flottante se retire pendant la s
   B.touche(b, B.saisie(b), 'Escape')
   assert.equal(B.barreVisible(b), true, 'elle revient quand la saisie se referme')
 })
+
+// ── Bien pilote : le refus se VOIT des la selection (decision de Thierry) ────
+const bancPilote = () => {
+  const b = B.monter({})
+  const pilote = { ...BIEN, pilote_tarifaire: 'yieldflow' }
+  const jours = B.peupler(b, { biens: [pilote], jours: 1 })
+  B.peupler(b, { biens: [pilote], inv: inventaire(jours), jours: 1 })
+  return { b, jours }
+}
+const boutonBarre = (b, id) => b.doc.querySelector(`[data-bind="flottante-actions"] [data-action="${id}"]`)
+
+test('LE TEST QUI COMPTE : bien pilote, le bouton Prix est GRISE des la selection', () => {
+  const { b } = bancPilote()
+  glisser(b, B.casesBureau(b, 'B1'), 2, 5)
+  assert.equal(B.barreVisible(b), true, 'la selection reste : Fermer et Bloquer en ont besoin')
+  const prix = boutonBarre(b, 'prix')
+  assert.ok(prix, 'le bouton Prix est bien la')
+  assert.equal(prix.disabled, true, 'il est desactive AVANT tout clic')
+  assert.equal(prix.getAttribute('aria-disabled'), 'true')
+  assert.match(prix.getAttribute('title') || '', /pilot/i, 'le message est au survol')
+  assert.match(prix.textContent, /pilot/i, 'et lisible a la voix (sr-only)')
+})
+
+test('bien pilote : la barre PORTE le message, visible sans survol', () => {
+  const { b } = bancPilote()
+  glisser(b, B.casesBureau(b, 'B1'), 2, 5)
+  const note = b.doc.querySelector('[data-bind="flottante-note"]')
+  assert.ok(note)
+  assert.equal(note.hidden, false, 'le message est affiche des la selection')
+  assert.match(note.textContent, /pilot/i)
+})
+
+test('bien pilote : les AUTRES actions restent ouvertes', () => {
+  const { b } = bancPilote()
+  glisser(b, B.casesBureau(b, 'B1'), 2, 5)
+  for (const id of ['fermer', 'bloquer', 'reservation', 'plus']) {
+    const bt = boutonBarre(b, id)
+    assert.ok(bt, `le bouton ${id} est la`)
+    assert.equal(bt.disabled, false, `${id} ne doit pas etre desactive`)
+  }
+})
+
+test('bien NON pilote : le bouton Prix est actif et la barre ne porte aucune note', () => {
+  const { b } = banc({})
+  glisser(b, B.casesBureau(b, 'B1'), 2, 5)
+  assert.equal(boutonBarre(b, 'prix').disabled, false)
+  const note = b.doc.querySelector('[data-bind="flottante-note"]')
+  assert.equal(note.hidden, true, 'pas de message quand il n y a rien a dire')
+})
+
+// ⚠ UN BOUTON GRISE EST UN CONFORT, PAS UNE PROTECTION : on retire le masquage
+// et on clique. C'est le test qui tranche de la regle absolue du depot.
+test('LE TEST QUI COMPTE : on RETIRE le grisage et on clique — rien ne part', async () => {
+  const { b } = bancPilote()
+  glisser(b, B.casesBureau(b, 'B1'), 2, 5)
+  const prix = boutonBarre(b, 'prix')
+  prix.disabled = false
+  prix.removeAttribute('aria-disabled')
+  prix.click()
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(B.saisie(b), null, 'aucune saisie ne s ouvre')
+  assert.equal(b.envois.filter(e => e.methode === 'POST').length, 0, 'aucune ecriture')
+  assert.match(b.lireToasts().join(' '), /pilot/i, 'et l ecran le dit quand meme')
+})
+
+test('le style « desactive » existe vraiment dans la feuille partagee', () => {
+  const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  assert.match(css, /\.btn:disabled[^{]*\{[^}]*cursor:\s*not-allowed/)
+  assert.match(css, /\.btn:disabled[^{]*\{[^}]*opacity/)
+  // l'ordre tranche : la regle doit venir APRES `.btn:hover`, sinon l'ombre revient
+  assert.ok(css.indexOf('.btn:disabled') > css.indexOf('.btn:hover'),
+    'declaree avant `.btn:hover`, elle perdrait l ombre au survol')
+})
