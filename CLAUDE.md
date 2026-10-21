@@ -800,12 +800,20 @@ un ANCIEN commit en production. Après un incident de ce type, vérifier que le
 dernier déploiement de production porte bien la tête de `main`, et pas un SHA
 d'avant.
 
-⚠⚠ **ÉTAT DU 21 OCTOBRE 2026, À RETIRER QUAND L'INCIDENT SERA CLOS : UN MERGE
-NE SE DÉPLOIE PAS TOUT SEUL, IL FAUT UN « Create Deployment » MANUEL.** Tant que
-cette ligne est là, le déroulé d'un merge prod se termine par ce geste, et la
-vérification du SHA vient APRÈS lui — pas après le push. **Condition de retrait
-de ces trois lignes** : `githubstatus.com` au vert ET un push qui se déploie de
-nouveau tout seul en moins d'une minute.
+**INCIDENT CLOS LE 21 OCTOBRE 2026 À 16:57, et l'alerte qui vivait ici est
+retirée** — le déroulé normal est revenu : on pousse, le déploiement sort tout
+seul, on vérifie le SHA. Les deux moitiés de la condition de retrait ont été
+mesurées : `githubstatus.com` *All Systems Operational* (Webhooks repassé
+`operational`), ET le push de `19945bd` déployé **tout seul en 33 secondes**,
+la cadence d'avant l'incident.
+
+⚠ **ET LES DEUX NE SONT PAS ARRIVÉES ENSEMBLE : le chronomètre a précédé la page
+de 17 minutes.** Les livraisons étaient déjà normales (33 s) alors que la page
+annonçait encore Webhooks en `degraded_performance`. « Degraded » veut dire que
+CERTAINES livraisons traînent, pas toutes. Donc le vert de la page dit la fin de
+l'incident, pas ce qui nous arrive : **ce qui mesure notre cas, c'est le
+chronomètre sur notre propre push.** Lire la page pour savoir s'il faut chercher
+chez nous ; lire le chronomètre pour savoir si on peut avancer.
 
 **Mesuré, trois pushes de suite sur `main`, chacun bouclé 120 secondes puis
 réinterrogé à 5 et 8 minutes : ZÉRO déploiement.** `981d453` (lot logements),
