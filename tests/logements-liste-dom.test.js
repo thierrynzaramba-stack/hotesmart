@@ -126,17 +126,26 @@ test('LE TEST QUI COMPTE : le fait daté a QUITTE la carte, remplacé par les av
 // 2. Les pastilles de canaux — quatre rendus, pas deux
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('LE TEST QUI COMPTE : « aucun canal » et « non vérifiés » sont DEUX rendus différents', () => {
-  const lu = doc(M.carteHtml(bien({ canaux: [] }), OUTILS()))
+test('LE TEST QUI COMPTE : « aucun canal », « jamais relevé » et « non vérifiés » sont TROIS rendus', () => {
+  // ⚠ TROIS, PAS DEUX, DEPUIS LA REVUE DE 5c0d759. Le serveur distingue déjà
+  // « jamais relevé » de « pas relié » (branche `jamais_releve` de
+  // `suppressionPossible`), et la carte les confondait : un bien neuf dont le
+  // relevé n'a jamais abouti se lisait comme un bien délibérément non
+  // connecté. C'est la dette 59 sous une autre forme.
+  const lu = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: new Date().toISOString() }), OUTILS()))
   assert.equal(lu.querySelector('[data-canaux]').dataset.canaux, 'aucun')
   assert.equal(lu.querySelector('[data-canaux]').textContent, 'Aucun canal relié')
+
+  const jamais = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null }), OUTILS()))
+  assert.equal(jamais.querySelector('[data-canaux]').dataset.canaux, 'jamais-releve')
+  assert.match(jamais.querySelector('[data-canaux]').textContent, /jamais été relevés/)
 
   const nonLu = doc(M.carteHtml(bien({ canaux: null }), OUTILS()))
   assert.equal(nonLu.querySelector('[data-canaux]').dataset.canaux, 'non-lus')
   assert.equal(nonLu.querySelector('[data-canaux]').textContent, 'Canaux non vérifiés')
 
-  assert.notEqual(lu.querySelector('[data-canaux]').textContent,
-    nonLu.querySelector('[data-canaux]').textContent,
+  const textes = [lu, jamais, nonLu].map(d => d.querySelector('[data-canaux]').textContent)
+  assert.equal(new Set(textes).size, 3,
     'lire « aucun canal » quand on en a deux est exactement le défaut que la dette 59 a fermé')
 })
 
@@ -552,4 +561,20 @@ test('LE TEST QUI COMPTE (règle V5) : l étoile est une ICÔNE du sprite, jamai
       assert.doesNotMatch(String(texte), /[★☆⭐✩✪✫✬✭✮✯]/, `${lang} : ${cle}`)
     }
   }
+})
+
+test('LE TEST QUI COMPTE : un bien mal formé n emporte pas la LISTE ENTIÈRE', () => {
+  // ⚠ TROUVÉ LE 21 OCTOBRE 2026 par la contre-épreuve de l'étape 2.
+  // `pastillesDesCanaux` gardait `canaux == null` : un `{}` — réponse
+  // tronquée, champ renommé côté serveur — passait la garde, `canaux.map`
+  // levait, et la carte faisait tomber la liste entière dans « panne ».
+  // Quatre biens invisibles à cause d'un seul mal formé.
+  for (const malForme of [{}, 'oui', 42, true]) {
+    assert.equal(M.pastillesDesCanaux(malForme), null, JSON.stringify(malForme))
+    const d = doc(M.carteHtml(bien({ canaux: malForme }), OUTILS()))
+    assert.equal(d.querySelector('[data-canaux]').dataset.canaux, 'non-lus',
+      'tout ce qui n est pas un tableau vaut « on n a pas pu lire »')
+  }
+  // Et un vrai tableau continue de se rendre.
+  assert.equal(M.pastillesDesCanaux([]).length, 0)
 })

@@ -104,7 +104,13 @@ export function etatDuCanal (c) {
 }
 
 export function pastillesDesCanaux (canaux) {
-  if (canaux == null) return null       // on n'a pas pu lire
+  // ⚠ `Array.isArray`, PAS `!= null` (contre-epreuve du 21 octobre, etape 2).
+  // Avec `== null`, un `{}` — reponse tronquee, champ renomme cote serveur —
+  // passait la garde et `canaux.map` LEVAIT : la carte, puis la LISTE ENTIERE,
+  // tombaient dans « panne », pour un seul bien mal forme. Tout ce qui n'est
+  // pas un tableau vaut « on n'a pas pu lire » : c'est la reponse honnete, et
+  // elle n'emporte pas les autres biens.
+  if (!Array.isArray(canaux)) return null
   return canaux.map(c => {
     const etat = etatDuCanal(c)
     return {
@@ -305,7 +311,19 @@ export function canauxHtml (bien, { t, esc }) {
       + `<span class="log-point"></span>${esc(t('logements.canaux_non_lus'))}</span>`
   }
   if (!pastilles.length) {
-    return `<span class="caption muted" data-canaux="aucun">${esc(t('logements.aucun_canal'))}</span>`
+    // ⚠ « JAMAIS RELEVE » N'EST PAS « PAS RELIE » (revue de 5c0d759, etape 2).
+    // Le serveur distingue deja les deux — `suppressionPossible` a sa branche
+    // `jamais_releve`, avec ce commentaire exact — et les DEUX ecrans
+    // affirmaient « Aucun canal relie » dans les deux cas. Un bien neuf dont le
+    // releve n'a jamais abouti se lisait comme un bien delibere­ment non
+    // connecte : le registre meme du mensonge que ce lot interdit.
+    //
+    // La marque est `canaux_vu_le == null` : aucun releve n'a abouti. Elle est
+    // descendue par la liste ET par la fiche, donc la regle vit ICI — la
+    // recopier dans la fiche seule laisserait la carte mentir.
+    const jamais = bien.canaux_vu_le == null
+    return `<span class="caption muted" data-canaux="${jamais ? 'jamais-releve' : 'aucun'}">`
+      + `${esc(t(jamais ? 'logements.canaux_jamais_releves' : 'logements.aucun_canal'))}</span>`
   }
   // ⚠ L'ETAT SE LIT SANS LA COULEUR NI LE SURVOL (constat de la revue). A 8 px,
   // un rond en pointilles et un rond en trait plein sont indiscernables, et il

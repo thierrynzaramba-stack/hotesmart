@@ -412,13 +412,6 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .menu { position: fixed; inset-inline: var(--gap-m); top: 64px; min-width: 0; }
   .bottombar .badge { position: absolute; top: 2px; inset-inline-end: 18px; border: 2px solid var(--ink); }
 
-  /* ⚠ LA BARRE DU BAS EST `fixed` : SANS MARGE, ELLE COUVRE LA FIN DE LA PAGE.
-     Mesuré au banc le 21 octobre 2026, à 390 px : la dernière ligne du bloc
-     « Réglages » de la fiche passait sous la barre de 23 px, et rien ne le
-     signalait — on croit la page finie. `.page` et `.cal-page` dégageaient
-     déjà la barre chacune de leur côté ; les deux écrans du lot Logements le
-     font ici, en un seul endroit, pour que la liste ne redécouvre pas le même
-     défaut le jour où un hôte aura huit biens. */
 }
 
 /* ---------- Calendrier V5 (lot 3, étape 1) ---------- */
@@ -1172,7 +1165,13 @@ body.men-cfg-ouvert { overflow: hidden; }
    un hôte aura huit biens.
    ⚠ ET LA RÈGLE EST ICI, PAS DANS LA PAGE : le `padding` raccourci déclaré
    par la page écrasait le `padding-bottom` de cette feuille. */
-@media (max-width: 860px) {
+/* ⚠ LE MÊME POINT DE RUPTURE QUE LA BARRE (720 px), pas un voisin. Il était
+   à 860 px : entre 721 et 860, les deux pages finissaient sur 96 px de vide
+   sans barre à dégager, et la couverture du vrai défaut ne tenait que parce
+   que 860 > 720. Une remontée du point de rupture de la barre au-dessus de
+   860 aurait fait revenir les 23 px — un garde-fou qui tient par hasard n'en
+   est pas un. */
+@media (max-width: 720px) {
   .log-page, .fic-page { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
 }
 

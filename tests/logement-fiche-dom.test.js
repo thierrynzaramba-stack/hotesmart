@@ -60,7 +60,7 @@ const fiche = (extra = {}) => ({
   bien: {
     id: 'b1', nom: 'La bulle', ville: 'Bagnères', pays: 'FR', adresse: '1 rue X',
     code_postal: '65200', capacite: 2, photo_url: null, devise: 'EUR',
-    prix_de_base: 120, prix_plancher: 60, voyageurs_inclus: 2, supplement_voyageur: 15,
+    prix_de_base: 120, prix_plancher: 130, voyageurs_inclus: 2, supplement_voyageur: 15,
     mode_des_prix: 'managed', pilote_tarifaire: 'yieldflow', assistant_en_pause: false
   },
   canaux: [{ ota: 'airbnb', titre: 'x', actif: true, mappe: true, listing_url: null }],
@@ -80,10 +80,19 @@ const fiche = (extra = {}) => ({
 // 1. Les sept blocs
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('la fiche rend ses sept blocs, titrés', () => {
+test('la fiche rend ses blocs, titrés et dans l ordre', () => {
+  // ⚠ SIX BLOCS QUAND LA SUPPRESSION EST POSSIBLE : il n y a alors rien à dire
+  // en lecture seule, et un bouton qui ne part pas serait un leurre. Le
+  // septième apparaît quand la suppression est REFUSÉE — c est son état qui
+  // est l information.
   const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
-  const titres = [...d.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent)
-  assert.deepEqual(titres, [
+  assert.deepEqual([...d.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent), [
+    'Où il est en vente', 'Prix', 'Le logement', 'Ménage', 'Avis des voyageurs', 'Réglages'
+  ])
+
+  const refuse = doc(M.ficheHtml(
+    fiche({ suppression: { possible: false, motif: 'annonce_reliee' } }), OUTILS(), { peutSupprimer: true }))
+  assert.deepEqual([...refuse.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent), [
     'Où il est en vente', 'Prix', 'Le logement', 'Supprimer ce logement',
     'Ménage', 'Avis des voyageurs', 'Réglages'
   ])
@@ -93,7 +102,14 @@ test('l en-tête porte le nom, la ville · capacité, les canaux et le FAIT DAT�
   const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
   assert.equal(d.querySelector('.fic-nom').textContent, 'La bulle')
   assert.match(d.querySelector('.fic-sous').textContent, /Bagnères · 2 voyageurs/)
-  assert.ok(d.querySelector('.fic-canaux .log-pastille'), 'les pastilles viennent du module commun')
+  // ⚠ LA MÊME CLASSE QUE LA LISTE, pas une copie sous un autre nom : les
+  // pastilles tiennent leur gouttière de `.log-canaux` (revue de 5c0d759 —
+  // le bloc « Où il est en vente » utilisait `.fic-vente`, déclaré nulle
+  // part, et rendait trois pastilles bord à bord).
+  assert.equal(d.querySelectorAll('.log-canaux .log-pastille').length, 2,
+    'un canal, rendu à deux endroits : l en-tête et le bloc')
+  assert.equal(d.querySelector('.fic-canaux, .fic-vente'), null,
+    'aucune classe de pastilles propre à la fiche : une copie diverge')
   // ⚠ LE FAIT DATÉ A QUITTÉ LA CARTE POUR VENIR ICI (décision du 20 octobre).
   const fait = d.querySelector('[data-fait]')
   assert.equal(fait.dataset.fait, 'occupe')
@@ -159,7 +175,7 @@ test('LE TEST QUI COMPTE : un plancher vide dit « 10 € (par défaut) », il n
   // Un plancher réglé s affiche nu, sans la mention.
   const avec = doc(M.ficheHtml(fiche(), OUTILS(), {}))
   assert.doesNotMatch(avec.querySelector('[data-plancher]').textContent, /par défaut/)
-  assert.match(avec.querySelector('[data-plancher] .fic-ligne__val').textContent, /60\s*€/)
+  assert.match(avec.querySelector('[data-plancher] .fic-ligne__val').textContent, /130\s*€/)
 })
 
 test('le mode des prix se dit en clair, et le CHOIX ne se propose qu en mode `keep`', () => {
@@ -199,12 +215,77 @@ test('LE TEST QUI COMPTE : relié à une annonce => bouton DÉSACTIVÉ, et la ra
   // serveur, lui, les PURGE et refuse un bien encore relié. Décision de
   // Thierry du 21 octobre : on s aligne sur le serveur, c est lui la vraie
   // protection.
+  //
+  // ⚠ LE MOTIF EST `annonce_reliee`, pas `relie`. Mes trois premiers tests
+  // posaient eux-mêmes la fixture `relie` — un motif que le serveur n écrit
+  // nulle part — donc ils mesuraient leur propre double, et la seule raison
+  // que Thierry avait demandée ne s affichait JAMAIS en vrai.
   const d = doc(M.ficheHtml(
-    fiche({ suppression: { possible: false, motif: 'relie' } }), OUTILS(), { peutSupprimer: true }))
+    fiche({ suppression: { possible: false, motif: 'annonce_reliee' } }), OUTILS(), { peutSupprimer: true }))
   const b = d.querySelector('[data-bind="supprimer"]')
   assert.ok(b.hasAttribute('disabled'))
   assert.equal(d.querySelector('[data-raison]').textContent, 'Déconnectez d’abord ses canaux.')
+  assert.equal(d.querySelector('[data-raison]').dataset.motif, 'annonce_reliee')
   assert.doesNotMatch(d.querySelector('.fic-supprimer').textContent, /réservations ou des messages/)
+})
+
+test('LE TEST QUI COMPTE : les motifs sont ceux du SERVEUR, découverts dans son source', () => {
+  // ⚠ LISTE DÉCOUVERTE, PAS RECOPIÉE. C est ce test qui aurait vu `relie`
+  // contre `annonce_reliee` : une table d affichage écrite à la main dérive du
+  // serveur sans qu une seule ligne ait l air fausse, et le fourre-tout
+  // « Impossible de vérifier ses canaux » absorbe l écart en silence.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'logement', 'lecture.js'), 'utf8')
+  const corps = src.slice(src.indexOf('function suppressionPossible'))
+  const motifs = [...new Set([...corps.slice(0, corps.indexOf('\n}')).matchAll(/motif:\s*'([a-z_]+)'/g)]
+    .map(m => m[1]))]
+  assert.ok(motifs.length >= 4, `${motifs.length} motif(s) découvert(s) : la découverte a échoué`)
+
+  for (const motif of motifs) {
+    const d = doc(M.ficheHtml(
+      fiche({ suppression: { possible: motif === 'annonce_reliee' ? false : null, motif } }),
+      OUTILS(), { peutSupprimer: true }))
+    if (M.MOTIFS_QUI_EFFACENT.includes(motif)) {
+      assert.equal(d.querySelector('.fic-supprimer'), null,
+        `${motif} doit EFFACER le bloc : on ne montre pas ce qui mène à un refus`)
+      continue
+    }
+    const r = d.querySelector('[data-raison]')
+    assert.ok(r, `${motif} ne rend aucune raison`)
+    assert.equal(r.dataset.motif, motif)
+    // ⚠ ET LE FOURRE-TOUT NE DOIT PAS ABSORBER UN MOTIF QUI A SA PROPRE
+    // PHRASE : `annonce_reliee` et `jamais_releve` disent des choses
+    // différentes, et parler des canaux « illisibles » à qui n en a jamais
+    // fait relever est faux.
+    if (motif === 'annonce_reliee') assert.match(r.textContent, /Déconnectez/)
+    if (motif === 'jamais_releve') assert.match(r.textContent, /jamais été relevés/)
+  }
+})
+
+test('LE TEST QUI COMPTE (SÉCURITÉ) : `droit_refuse` du SERVEUR efface le bloc, même si le navigateur dit oui', () => {
+  // ⚠ LA CLASSE DE DÉFAUT GRAVÉE AU CLAUDE.md. La page passait
+  // `peutEcrire('reglages')`, qui répond pour le COMPTE COURANT et rend `true`
+  // par `estTitulaire()` dès que le sélecteur est resté sur mon compte. Or
+  // cette fiche IGNORE `X-Compte` : le BIEN désigne le compte. J ouvre donc la
+  // fiche d un bien d un autre compte où je suis invité en lecture, et le bloc
+  // s affichait — alors que le serveur avait tranché dans la MÊME réponse.
+  const d = doc(M.ficheHtml(
+    fiche({ suppression: { possible: null, motif: 'droit_refuse' } }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('.fic-supprimer'), null)
+  assert.equal(d.querySelector('[data-bind="supprimer"]'), null)
+  assert.ok(![...d.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent)
+    .includes('Supprimer ce logement'))
+})
+
+test('LE TEST QUI COMPTE : un bien SUPPRIMABLE ne rend aucun bouton à l étape 2', () => {
+  // Un bouton rouge actif qui ne part pas est un leurre, et son aide promettait
+  // une confirmation qui n existe pas encore. Quand la suppression est
+  // possible, l étape 2 n a rien à dire ; le bouton revient à l étape 3,
+  // câblé. Quand elle est refusée, son ÉTAT est l information.
+  const d = doc(M.ficheHtml(fiche({ suppression: { possible: true, motif: null } }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('[data-bind="supprimer"]'), null)
+  assert.doesNotMatch(d.querySelector('#c').textContent, /confirmerez en saisissant/)
 })
 
 test('LE TEST QUI COMPTE : `possible: null` DÉSACTIVE aussi — une lecture ratée n ouvre pas la suppression', () => {
@@ -216,6 +297,8 @@ test('LE TEST QUI COMPTE : `possible: null` DÉSACTIVE aussi — une lecture rat
     const d = doc(M.ficheHtml(fiche({ suppression: s }), OUTILS(), { peutSupprimer: true }))
     assert.ok(d.querySelector('[data-bind="supprimer"]').hasAttribute('disabled'), JSON.stringify(s))
   }
+  // Une suppression impossible N'EST PAS une suppression refusée par droit :
+  // le bloc existe, il dit pourquoi.
   const d = doc(M.ficheHtml(fiche({ suppression: { possible: null } }), OUTILS(), { peutSupprimer: true }))
   assert.equal(d.querySelector('[data-raison]').textContent, 'Impossible de vérifier ses canaux pour l’instant.')
 })
@@ -264,11 +347,54 @@ test('« pas encore analysé » ne se range pas dans « rien signalé »', () =>
   assert.equal(d.querySelector('[data-pouce="attente"] .fic-pouce__n').textContent, '2')
 })
 
-test('aucune propreté signalée sur la fenêtre : on le DIT, on n affiche pas trois zéros', () => {
-  const d = doc(M.ficheHtml(
-    fiche({ avis: { ...fiche().avis, positif: 0, remarque: 0, non_analyses: 0 } }), OUTILS(), {}))
-  assert.equal(d.querySelector('[data-proprete="vide"]').textContent, 'Rien signalé sur 30 jours.')
-  assert.equal(d.querySelector('[data-proprete]:not([data-proprete="vide"])'), null)
+test('LE TEST QUI COMPTE : « rien signalé » et « aucun avis » ne disent pas la même phrase', () => {
+  // ⚠ Revue de 5c0d759 : `rien_signale` n entrait dans aucune somme, donc
+  // quatre avis lus et tous sans remarque disaient la MÊME chose qu une
+  // fenêtre sans aucun avis. « Lu, et vide » est une RÉPONSE, distincte de
+  // « on n a rien » — c est la règle de tout ce lot, et elle ne s arrêtait pas
+  // à ce bloc par hasard, mais par oubli.
+  const lus = doc(M.ficheHtml(fiche({ avis: { ...fiche().avis,
+    positif: 0, remarque: 0, non_analyses: 0, rien_signale: 4 } }), OUTILS(), {}))
+  const z1 = lus.querySelector('[data-proprete]')
+  assert.equal(z1.dataset.proprete, 'rien-signale')
+  assert.equal(z1.textContent, 'Rien signalé sur 30 jours.')
+
+  const rien = doc(M.ficheHtml(fiche({ avis: { ...fiche().avis,
+    positif: 0, remarque: 0, non_analyses: 0, rien_signale: 0 } }), OUTILS(), {}))
+  const z2 = rien.querySelector('[data-proprete]')
+  assert.equal(z2.dataset.proprete, 'aucun')
+  assert.equal(z2.textContent, 'Aucun avis sur 30 jours.')
+
+  // Et dans les deux cas, pas de trois zéros à l écran.
+  for (const d of [lus, rien]) assert.equal(d.querySelector('.fic-pouces'), null)
+})
+
+test('LE TEST QUI COMPTE : « jamais relevé » n est pas « aucun canal relié »', () => {
+  // ⚠ Revue de 5c0d759. Le serveur distingue déjà les deux — sa branche
+  // `jamais_releve` porte le commentaire « jamais relevé n est pas pas
+  // relié » — et l écran affirmait « Aucun canal relié » dans les deux cas :
+  // un bien neuf dont le relevé n a jamais abouti se lisait comme un bien
+  // délibérément non connecté.
+  // ⚠ ET LA RÈGLE VIT DANS LE MODULE COMMUN : les DEUX endroits qui rendent
+  // les canaux — l en-tête et le bloc « Où il est en vente » — doivent dire la
+  // même chose, et la CARTE de la liste aussi.
+  const jamais = doc(M.ficheHtml(
+    fiche({ canaux: [], canaux_vu_le: null, canaux_echec: false }), OUTILS(), {}))
+  const zones = [...jamais.querySelectorAll('[data-canaux]')]
+  assert.equal(zones.length, 2, 'l en-tête et le bloc rendent tous deux les canaux')
+  for (const z of zones) {
+    assert.equal(z.dataset.canaux, 'jamais-releve')
+    assert.match(z.textContent, /jamais été relevés/)
+    assert.doesNotMatch(z.textContent, /Aucun canal relié/)
+  }
+
+  // Relevé abouti, et vraiment aucun canal : là, c est une RÉPONSE.
+  const aucun = doc(M.ficheHtml(
+    fiche({ canaux: [], canaux_vu_le: '2026-10-20T08:00:00Z', canaux_echec: false }), OUTILS(), {}))
+  for (const z of aucun.querySelectorAll('[data-canaux]')) {
+    assert.equal(z.dataset.canaux, 'aucun')
+    assert.match(z.textContent, /Aucun canal relié/)
+  }
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -324,7 +450,7 @@ test('LE TEST QUI COMPTE : aucun texte en dur — toute chaîne visible vient de
   const html = [
     M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }),
     M.ficheHtml(fiche({ menage: [], serrures: [], canaux: [], taxe: { connue: false },
-      suppression: { possible: false, motif: 'relie' },
+      suppression: { possible: false, motif: 'annonce_reliee' },
       avis: { ...fiche().avis, positif: 0, remarque: 0, non_analyses: 0 } }), OUTILS(), { peutSupprimer: true }),
     M.ficheHtml(fiche({ menage: null, serrures: null, canaux: null, taxe: null, fait_date: null,
       indisponibles: ['menage', 'serrures', 'canaux', 'taxe'] }), OUTILS(), {})
@@ -366,13 +492,38 @@ test('LE TEST QUI COMPTE (SÉCURITÉ) : rien de ce que le partenaire écrit ne s
 })
 
 test('LE TEST QUI COMPTE : aucun identifiant du partenaire ne peut atteindre l écran', () => {
-  // L endpoint ne les descend pas (liste blanche de `publier`), mais si une
-  // colonne `provider_*` y entrait un jour, ce test le dirait.
-  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
-  const txt = d.querySelector('#c').innerHTML
-  for (const mot of ['channex', 'beds24', 'provider_property_id', 'rate_plan', 'room_type']) {
-    assert.doesNotMatch(txt, new RegExp(mot, 'i'), `« ${mot} » ne doit jamais atteindre l écran`)
+  // ⚠ CE TEST ÉTAIT INERTE (revue de 5c0d759) : il rendait la fixture par
+  // défaut, qui ne porte AUCUN champ `provider_*`, et cherchait cinq mots. Si
+  // `publier()` se mettait à descendre `provider_property_id`, le rendu
+  // afficherait sa VALEUR — un UUID chez Channex, un nombre chez Beds24 — et
+  // aucun des cinq mots. Le test ne pouvait pas rougir.
+  //
+  // On empoisonne donc la fiche avec les champs interdits, porteurs d une
+  // valeur RECONNAISSABLE, et on exige qu elle n atteigne pas l écran.
+  const MARQUEUR = 'ZZIDPARTENAIREZZ'
+  const piege = fiche()
+  for (const champ of ['provider', 'provider_property_id', 'provider_rate_plan_id',
+    'provider_room_type_id', 'migration_target_property_id']) {
+    piege.bien[champ] = MARQUEUR
   }
+  piege.canaux = piege.canaux.map(c => ({ ...c, provider_property_id: MARQUEUR, rate_plan_id: MARQUEUR }))
+  piege.menage = piege.menage.map(m => ({ ...m, provider_id: MARQUEUR }))
+  const d = doc(M.ficheHtml(piege, OUTILS(), { peutSupprimer: true }))
+  assert.doesNotMatch(d.querySelector('#c').innerHTML, new RegExp(MARQUEUR),
+    'un identifiant du partenaire descendu par erreur ne doit pas se rendre')
+
+  // Et les NOMS de colonne non plus, au cas où l un deviendrait un attribut.
+  for (const mot of ['channex', 'beds24', 'provider_property_id', 'rate_plan', 'room_type']) {
+    assert.doesNotMatch(d.querySelector('#c').innerHTML, new RegExp(mot, 'i'),
+      `« ${mot} » ne doit jamais atteindre l écran`)
+  }
+
+  // ⚠ CE QUE CE TEST NE COUVRE PAS, ET IL FAUT LE DIRE : `libelleDuCanal`
+  // retombe sur `c.titre`, le titre que le PARTENAIRE rend. Un hôte qui a
+  // nommé son annonce « Airbnb compte Éric » chez le partenaire le verra tel
+  // quel dans la pastille. Ce n est pas un identifiant au sens de la règle
+  // (« jamais le nom du partenaire à l écran »), c est le texte de l hôte —
+  // mais ce n est pas un hasard non plus, et ça se décide, pas se découvre.
 })
 
 test('toute icône demandée par le module existe au sprite — liste DÉCOUVERTE, pas recopiée', () => {
@@ -497,6 +648,22 @@ test('LE TEST QUI COMPTE : la barre du bas ne couvre pas la fin des deux écrans
   const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
   const m = ui.match(/\.log-page,\s*\.fic-page\s*\{[^}]*padding-bottom:\s*calc\(96px \+ env\(safe-area-inset-bottom\)\)/)
   assert.ok(m, 'la marge qui dégage la barre doit vivre dans shared/ui.css, pour les DEUX écrans')
+
+  // ⚠ ET AU MÊME POINT DE RUPTURE QUE LA BARRE (revue de 5c0d759). La marge
+  // était à 860 px, la barre à 720 : entre les deux, 96 px de vide sans barre
+  // à dégager, et la couverture du vrai défaut ne tenait que parce que
+  // 860 > 720. Un garde-fou qui tient par hasard n'en est pas un.
+  const rupture = (sel) => {
+    const blocs = [...ui.matchAll(/@media \(max-width:\s*(\d+)px\)\s*\{/g)]
+    let dernier = null
+    for (const b of blocs) {
+      const fin = ui.indexOf('\n}', b.index)
+      if (ui.slice(b.index, fin).includes(sel)) dernier = Number(b[1])
+    }
+    return dernier
+  }
+  assert.equal(rupture('.log-page, .fic-page'), rupture('.bottombar {'),
+    'la marge et la barre doivent apparaître à la même largeur')
   // ⚠ ET AUCUNE PAGE NE REDÉCLARE LE CONTENEUR : un `padding` raccourci
   // déclaré après la feuille commune écrase son `padding-bottom`, et le
   // défaut revient sans qu'une seule règle ait l'air fausse.
@@ -506,5 +673,102 @@ test('LE TEST QUI COMPTE : la barre du bas ne couvre pas la fin des deux écrans
     const bloc = src.slice(src.indexOf('<style'), src.lastIndexOf('</style>'))
     assert.equal(bloc.match(/^\s*\.(log|fic)-page\s*\{[^}]*\bpadding\s*:/m), null,
       `${f} redéclare le padding du conteneur : il écraserait la marge commune`)
+  }
+})
+
+test('LE TEST QUI COMPTE : un fait daté PARTIEL le dit, il ne passe pas pour vérifié', () => {
+  // ⚠ Revue de 5c0d759. Quand les clés partenaire sont illisibles, le serveur
+  // peut encore affirmer une FERMETURE (calculée par UUID) mais pas lire les
+  // réservations : il pose `indisponibles: ['fait_date']` et son commentaire
+  // dit « l'écran doit savoir qu'une réservation pourrait s'y ajouter ».
+  // L'écran ne lisait ce tableau que pour `avis` : il rendait « Fermé jusqu'au
+  // … » en encre normale, sans réserve, là où la moitié de la source était
+  // illisible.
+  const d = doc(M.ficheHtml(fiche({
+    fait_date: { type: 'ferme', du: null, au: '2026-12-01' },
+    indisponibles: ['fait_date']
+  }), OUTILS(), {}))
+  const f = d.querySelector('[data-fait]')
+  assert.ok(f.hasAttribute('data-partiel'), 'le fait doit se déclarer incomplet')
+  assert.match(f.textContent, /réservations n’ont pas pu être lues/)
+  assert.ok(f.classList.contains('fic-muet'), 'l encre normale est la marque d un fait vérifié')
+  // Le fait reste AFFICHÉ : il est vrai, il est seulement incomplet.
+  assert.match(f.textContent, /Fermé/)
+
+  // Sans le drapeau, aucune réserve inventée.
+  const net = doc(M.ficheHtml(fiche(), OUTILS(), {}))
+  assert.equal(net.querySelector('[data-fait]').hasAttribute('data-partiel'), false)
+  assert.doesNotMatch(net.querySelector('[data-fait]').textContent, /pas pu être lues/)
+
+  // Et un fait ABSENT ne devient pas « partiel » : il est déjà muet et dit
+  // « Information indisponible » — y ajouter une réserve dirait deux fois.
+  const vide = doc(M.ficheHtml(fiche({ fait_date: null, indisponibles: ['fait_date'] }), OUTILS(), {}))
+  assert.equal(vide.querySelector('[data-fait]').hasAttribute('data-partiel'), false)
+  assert.equal(vide.querySelector('[data-fait]').textContent, 'Information indisponible')
+})
+
+test('LE TEST QUI COMPTE : les pastilles ont la MÊME forme aux deux endroits de la fiche', () => {
+  // L en-tête et le bloc « Où il est en vente » rendent tous deux les canaux.
+  // Deux conteneurs, deux classes, deux apparences à cent pixels d écart :
+  // c est ce que la revue de 5c0d759 a mesuré. Une seule classe, celle du
+  // module commun.
+  const d = doc(M.ficheHtml(fiche({ canaux: [
+    { ota: 'airbnb', titre: 'a', actif: true, mappe: true },
+    { ota: 'booking', titre: 'b', actif: true, mappe: true },
+    { ota: 'open', titre: 'c', actif: true, mappe: true }
+  ] }), OUTILS(), {}))
+  const zones = [...d.querySelectorAll('.log-canaux')]
+  assert.equal(zones.length, 2, 'l en-tête et le bloc rendent les canaux')
+  for (const z of zones) assert.equal(z.querySelectorAll('.log-pastille').length, 3)
+  // Et la classe vient bien de la feuille commune, avec sa gouttière.
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  assert.match(ui, /^\.log-canaux \{[^}]*gap:/m)
+})
+
+test('LE TEST QUI COMPTE : dans Réglages, un REFUS et une INDISPONIBILITÉ ne se disent pas pareil', () => {
+  // ⚠ Revue de 5c0d759 : ce bloc ne lisait pas `refuses`, et la règle « un
+  // bloc refusé n'est pas rendu » n'y tenait que par la coïncidence que
+  // `serrures` ET `taxe` dépendent du même domaine. Qu'un seul soit refusé, et
+  // l'écran disait « La serrure n'est pas lisible pour l'instant » — le message
+  // de l'indisponibilité posé sur un refus de droit.
+  const refuseUn = doc(M.ficheHtml(
+    fiche({ serrures: null, refuses: ['serrures'] }), OUTILS(), {}))
+  const bloc = refuseUn.querySelector('.fic-reglages')
+  assert.ok(bloc, 'la taxe reste, donc le bloc reste')
+  assert.doesNotMatch(bloc.textContent, /Serrure/, 'un refus ne se nomme pas')
+  assert.doesNotMatch(bloc.textContent, /n’est pas lisible/)
+  assert.match(bloc.textContent, /Taxe de séjour/)
+
+  // Les deux refusés : plus rien à dire, donc plus de bloc du tout.
+  const refuseDeux = doc(M.ficheHtml(
+    fiche({ serrures: null, taxe: null, refuses: ['serrures', 'taxe'] }), OUTILS(), {}))
+  assert.equal(refuseDeux.querySelector('.fic-reglages'), null)
+  assert.ok(![...refuseDeux.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent)
+    .includes('Réglages'))
+
+  // Et une INDISPONIBILITÉ, elle, se dit — c'est tout l'écart.
+  const nonLue = doc(M.ficheHtml(
+    fiche({ serrures: null, indisponibles: ['serrures'] }), OUTILS(), {}))
+  assert.match(nonLue.querySelector('.fic-reglages').textContent, /serrure n’est pas lisible/)
+})
+
+test('LE TEST QUI COMPTE : une réponse MAL FORMÉE ne devient pas « Aucune prestataire »', () => {
+  // ⚠ CETTE MUTATION SURVIVAIT (contre-épreuve du 21 octobre) : remplacer
+  // `Array.isArray(x)` par `x != null` ne faisait rougir aucun test. Un `{}`
+  // — réponse tronquée, champ renommé côté serveur — passe `!= null`, son
+  // `.length` vaut `undefined`, et l'écran affirme « Aucune prestataire sur ce
+  // logement » sur un bien qui en a deux. C'est le trou que `etatDeLaPage`
+  // ferme au niveau de la PAGE ; il doit descendre au grain du bloc.
+  for (const malForme of [{}, 'oui', 42, true]) {
+    const d = doc(M.ficheHtml(fiche({
+      menage: malForme, serrures: malForme, canaux: malForme
+    }), OUTILS(), {}))
+    const txt = d.querySelector('#c').textContent
+    assert.doesNotMatch(txt, /Aucune prestataire/, `menage=${JSON.stringify(malForme)}`)
+    assert.doesNotMatch(txt, /Aucun canal relié/, `canaux=${JSON.stringify(malForme)}`)
+    assert.doesNotMatch(txt, /Aucune serrure|Aucun code/, `serrures=${JSON.stringify(malForme)}`)
+    // Et on le DIT : « on n'a pas pu lire » est la seule réponse honnête.
+    assert.ok(d.querySelectorAll('[data-non-lu]').length >= 3,
+      `${JSON.stringify(malForme)} : les trois blocs doivent se déclarer non lus`)
   }
 })

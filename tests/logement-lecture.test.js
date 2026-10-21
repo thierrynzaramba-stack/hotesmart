@@ -50,7 +50,7 @@ const REF2   = '552211'
 const bienDe = (extra = {}) => ({
   user_id: COMPTE, id: BIEN, name: 'La bulle', city: 'Bagnères', country: 'FR', address: '1 rue X',
   zip_code: '65200', capacity: 4, photo_url: null, currency: 'EUR', base_price: 120,
-  prix_minimum: 60, included_guests: 2, extra_guest_fee: 15, rate_sync_mode: 'managed',
+  prix_minimum: 13000, included_guests: 2, extra_guest_fee: 15, rate_sync_mode: 'managed',
   pilote_tarifaire: 'yieldflow', automation_paused: false, inventory_type: 'whole',
   ota_listing_urls: null, created_at: '2026-01-01T00:00:00Z',
   provider: 'channex', provider_property_id: REF, migration_target_property_id: null,
@@ -1119,4 +1119,26 @@ test('LE TEST QUI COMPTE (M3) : sans `droits`, la liste echoue FERME sur les avi
   assert.ok(r.biens.every(b => b.avis === null))
   assert.deepEqual(r.refuses, ['avis'])
   assert.ok(!sb._vus.map(v => v.table).includes('ota_reviews'))
+})
+
+test('LE TEST QUI COMPTE : le prix plancher est rendu en EUROS, pas en centimes', async () => {
+  // ⚠ `properties.prix_minimum` EST EN CENTIMES — seule de ses quatre voisines
+  // du bloc Prix (`base_price`, `included_guests`, `extra_guest_fee` sont en
+  // euros). Sans division, la fiche affichait « 13 000 € » pour le plancher de
+  // 130 € d'un bien, juste sous un prix de base juste : la ligne la plus
+  // sensible du bloc (la garde anti-nuit-a-0) etait fausse exactement quand
+  // elle etait renseignee. Releve en revue de 5c0d759 ; rien ne le gardait.
+  const f = await L.lireFiche(ficheComplete(), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f.bien.prix_plancher, 130)
+
+  // Un plancher d'un euro cinquante ne se perd pas dans l'arrondi.
+  const f2 = await L.lireFiche(ficheComplete({ biens: [bienDe({ prix_minimum: 150 })] }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f2.bien.prix_plancher, 1.5)
+
+  // Absent reste absent : c'est l'ECRAN qui dit « 10 € (par defaut) », pas le
+  // coeur — le plancher global vit dans le code, pas dans la donnee.
+  const f3 = await L.lireFiche(ficheComplete({ biens: [bienDe({ prix_minimum: null })] }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f3.bien.prix_plancher, null)
 })

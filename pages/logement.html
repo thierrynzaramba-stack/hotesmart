@@ -54,8 +54,6 @@
      liste, et il se voit davantage ici où le nom est en titre. */
   .fic-nom { overflow-wrap: anywhere; margin: 0; }
   .fic-sous { color: var(--muted); margin: 4px 0 0; overflow-wrap: anywhere; }
-  .fic-canaux { display: flex; align-items: center; gap: var(--gap-xs);
-    flex-wrap: wrap; margin-top: var(--gap-s); }
   .fic-fait { color: var(--ink); margin: var(--gap-s) 0 0; }
 
   .fic-colonnes { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap-l);
@@ -250,7 +248,10 @@ async function charger () {
     // gardé par `reglages: write` ; ici on ne fait que ne pas le proposer.
     cible.innerHTML = ficheHtml(f, OUTILS, { peutSupprimer: peutEcrire('reglages') })
     cible.removeAttribute('aria-busy')
-    document.title = `HôteSmart — ${f.bien.nom || t('fiche.retour')}`
+    // ⚠ PAS DE REPLI SUR `fiche.retour` : il vaut « Logements », donc l'onglet
+    // annonçait le nom de la LISTE pour une fiche (revue de 5c0d759). Un bien
+    // sans nom garde le titre du produit, et rien d'autre.
+    document.title = f.bien.nom ? `HôteSmart — ${f.bien.nom}` : 'HôteSmart'
     I18n.apply(cible)
   } catch (e) {
     logger.error('Logement', e.message, { status: e.status })

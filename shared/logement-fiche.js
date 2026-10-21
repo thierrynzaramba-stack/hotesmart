@@ -83,17 +83,37 @@ export function prixAffiche (bien) {
 // on n'a pas pu lire les canaux, on ne sait pas si le bien est en vente. Ouvrir
 // l'action la plus destructrice du produit sur une lecture ratée est le seul
 // cas qu'on ne peut pas se permettre.
+// ⚠ LES MOTIFS SONT CEUX DU SERVEUR, AU CARACTÈRE PRÈS (revue de 5c0d759).
+// Cette table disait `relie` ; `suppressionPossible` de lib/logement/lecture.js
+// écrit `annonce_reliee`. La seule raison que Thierry avait demandée —
+// « Déconnectez d'abord ses canaux » — ne s'affichait donc JAMAIS : elle
+// tombait dans le fourre-tout « Impossible de vérifier ses canaux », qui est
+// faux. Et les trois tests passaient, parce qu'ils posaient eux-mêmes la
+// fixture `relie` : ils mesuraient leur propre double.
+//
+// `tests/logement-fiche-dom.test.js` DÉCOUVRE désormais les motifs dans le
+// source du serveur et refuse qu'un seul tombe dans le fourre-tout.
+const MOTIFS = {
+  annonce_reliee: 'fiche.supprimer_relie',       // le bien est encore en vente
+  canaux_illisibles: 'fiche.supprimer_inconnu',  // on n'a pas pu lire
+  mapping_inconnu: 'fiche.supprimer_inconnu',    // un canal au mappage incertain
+  jamais_releve: 'fiche.supprimer_jamais_releve' // aucun relevé n'a abouti
+}
+
+// `droit_refuse` n'a PAS de message : il EFFACE le bloc. On ne montre jamais
+// ce qui mène à un refus — a fortiori l'action la plus destructrice du produit.
+export const MOTIFS_QUI_EFFACENT = ['droit_refuse']
+
 export function suppressionAffiche (suppression) {
   if (!suppression || suppression.possible !== true) {
     const motif = suppression && suppression.motif
     return {
       active: false,
-      cle: motif === 'relie'
-        ? 'fiche.supprimer_relie'
-        : 'fiche.supprimer_inconnu'
+      motif: motif || null,
+      cle: MOTIFS[motif] || 'fiche.supprimer_inconnu'
     }
   }
-  return { active: true, cle: 'fiche.supprimer_aide' }
+  return { active: true, motif: null, cle: 'fiche.supprimer_aide' }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,7 +138,14 @@ export function poucesAffiches (avis) {
     enAttente: n(avis.non_analyses),
     jours: n(avis.proprete_sur_jours) || n(avis.fenetre_jours) || 30,
     // Lu, et rien à montrer : on le dit plutôt que d'afficher trois zéros.
-    vide: n(avis.positif) + n(avis.remarque) + n(avis.non_analyses) === 0
+    vide: n(avis.positif) + n(avis.remarque) + n(avis.non_analyses) === 0,
+    // ⚠ ET « RIEN SIGNALÉ » N'EST PAS « AUCUN AVIS » (revue de 5c0d759).
+    // `rien_signale` n'entrait dans aucune somme : quatre avis lus, tous sans
+    // remarque, disaient la MÊME phrase qu'une fenêtre sans aucun avis. C'est
+    // le pli que tout ce lot refuse ailleurs — « lu, et vide » est une
+    // RÉPONSE, distincte de « on n'a rien ».
+    rienSignale: n(avis.rien_signale),
+    aucunAvis: n(avis.positif) + n(avis.remarque) + n(avis.non_analyses) + n(avis.rien_signale) === 0
   }
 }
 
@@ -209,6 +236,10 @@ export function enTeteHtml (fiche, outils) {
   // qui le porte. La règle d'affichage est celle du module commun — `null` ne
   // devient JAMAIS « Libre ».
   const fait = faitDateAffiche(fiche.fait_date)
+  // Un fait partiel reste affiché — il est VRAI, il est seulement incomplet —
+  // mais il le dit, et il passe en muet : l'encre normale est la marque d'un
+  // fait vérifié.
+  const partiel = outils.faitPartiel === true && !fait.muet && fiche.fait_date != null
   const faitTexte = fait.valeurs
     ? t(fait.cle, Object.fromEntries(Object.entries(fait.valeurs).map(([k, v]) => [k, outils.dateEnClair(v)])))
     : t(fait.cle)
@@ -218,8 +249,8 @@ export function enTeteHtml (fiche, outils) {
     <div class="fic-entete__texte">
       <h1 class="h2 fic-nom">${esc(b.nom || '')}</h1>
       ${sous ? `<p class="fic-sous caption">${sous}</p>` : ''}
-      <div class="fic-canaux">${canauxHtml(fiche, outils)}</div>
-      <p class="fic-fait${fait.muet ? ' fic-muet' : ''} caption" data-fait="${b && fiche.fait_date ? fiche.fait_date.type : 'indisponible'}">${esc(faitTexte)}</p>
+      <div class="log-canaux">${canauxHtml(fiche, outils)}</div>
+      <p class="fic-fait${fait.muet || partiel ? ' fic-muet' : ''} caption" data-fait="${esc(fait.muet ? 'indisponible' : fiche.fait_date.type)}"${partiel ? ' data-partiel' : ''}>${esc(faitTexte)}${partiel ? ` ${esc(t('fiche.fait_partiel'))}` : ''}</p>
       ${signalHtml(fiche, outils)}
       ${calendrierHtml(fiche, outils)}
     </div>
@@ -257,16 +288,27 @@ export function fraicheurAffichee (fiche, maintenant = Date.now()) {
 
 export function venteHtml (fiche, outils) {
   const { t, esc, dateEnClair } = outils
-  if (fiche.canaux == null) return nonLu('fiche.canaux_non_lus', outils)
+  // ⚠ `Array.isArray`, PAS `!= null` (revue de 5c0d759). Un `{}` — réponse
+  // tronquée, champ renommé côté serveur — passe `!= null`, son `.length` vaut
+  // `undefined`, et « Aucun canal relié » s'affiche sur un bien qui en a deux.
+  // C'est le trou que `etatDeLaPage` ferme au niveau de la PAGE ; il descend
+  // ici, au grain du bloc.
+  if (!Array.isArray(fiche.canaux)) return nonLu('fiche.canaux_non_lus', outils)
   const f = fraicheurAffichee(fiche)
   const ligne = !f ? ''
     : `<p class="fic-fraicheur caption${f.echec || f.vieux ? ' fic-fraicheur--alerte' : ''}"`
       + ` data-fraicheur="${f.echec ? 'echec' : (f.vieux ? 'vieille' : 'fraiche')}">`
       + `${esc(t(f.cle, f.valeurs ? { quand: dateEnClair(f.valeurs.quand) } : {}))}</p>`
-  if (!fiche.canaux.length) {
-    return `<p class="fic-vide caption">${esc(t('logements.aucun_canal'))}</p>${ligne}`
-  }
-  return `<div class="fic-vente">${canauxHtml(fiche, outils)}</div>${ligne}`
+  // ⚠ « Aucun canal relié » contre « jamais relevé » : la règle vit dans
+  // `canauxHtml`, le module commun — la redire ici laisserait la CARTE mentir
+  // le jour où l'une des deux changerait.
+  if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(fiche, outils)}</p>${ligne}`
+  // ⚠ `log-canaux`, LA CLASSE DU MODULE COMMUN (revue de 5c0d759). Le bloc
+  // utilisait `fic-vente`, qui n'était déclaré NULLE PART : trois pastilles
+  // bord à bord, bordures jointives, là où l'en-tête les espaçait. Le correctif
+  // du commit précédent n'avait réparé que la moitié du défaut — et l'en-tête,
+  // lui, recopiait les quatre propriétés sous un autre nom.
+  return `<div class="log-canaux">${canauxHtml(fiche, outils)}</div>${ligne}`
 }
 
 // ─── 2. Prix ────────────────────────────────────────────────────────────────
@@ -315,15 +357,37 @@ export function logementHtml (fiche, outils) {
 // Règle absolue du dépôt : « un masquage par droit ne suffit jamais ». Ici le
 // masquage n'est qu'un confort — `requirePermission({ reglages, write })` garde
 // le DELETE, et c'est lui le test qui tranche.
+// ⚠ LE DROIT VIENT DU SERVEUR, PAS DU NAVIGATEUR (constat de SÉCURITÉ de la
+// revue de 5c0d759, et c'est la classe de défaut gravée au CLAUDE.md).
+// La page passait `peutEcrire('reglages')` — qui répond pour le COMPTE
+// COURANT, et rend `true` par `estTitulaire()` dès que le sélecteur est resté
+// sur mon compte. Or cette fiche est justement l'endpoint qui IGNORE
+// `X-Compte` : « le bien désigne le compte ». J'ouvre donc la fiche d'un bien
+// d'un autre compte où je suis invité en lecture, et le bloc « Supprimer »
+// s'affichait — alors que le serveur avait déjà tranché l'inverse DANS LA MÊME
+// RÉPONSE : `{ possible: null, motif: 'droit_refuse' }`.
+//
+// C'est exactement l'alignement que Thierry a demandé le 21 octobre : « on
+// s'aligne sur le serveur, c'est lui la vraie protection ». `peutSupprimer`
+// reste accepté et intersecté — deux gardes valent mieux qu'une —, mais le
+// refus du serveur est SOUVERAIN.
 export function supprimerHtml (fiche, outils, { peutSupprimer = false } = {}) {
-  if (!peutSupprimer) return null
-  const { t, esc, icone } = outils
   const s = suppressionAffiche(fiche.suppression)
+  if (!peutSupprimer || MOTIFS_QUI_EFFACENT.includes(s.motif)) return null
+  // ⚠ ET LE BLOC NE SE REND QUE S'IL A QUELQUE CHOSE À DIRE (constat de la
+  // revue de 5c0d759). Quand la suppression est POSSIBLE, l'étape 2 n'a aucune
+  // information à donner : un bouton rouge actif qui ne part pas est un leurre,
+  // et son aide promettait une confirmation qui n'existe pas encore. Quand elle
+  // est refusée ou incertaine, son ÉTAT est l'information, et il se lit AVANT
+  // le clic — c'est ce que Thierry a demandé. Le bouton revient à l'étape 3,
+  // câblé.
+  if (s.active) return null
+  const { t, esc, icone } = outils
   return `<div class="fic-supprimer">
-    <button type="button" class="btn btn--danger" data-bind="supprimer"${s.active ? '' : ' disabled'}>
+    <button type="button" class="btn btn--danger" data-bind="supprimer" disabled>
       ${icone('i-close', 'icon')}<span>${esc(t('fiche.supprimer'))}</span>
     </button>
-    <p class="caption fic-muet" data-raison>${esc(t(s.cle))}</p>
+    <p class="caption fic-muet" data-raison data-motif="${esc(s.motif || 'inconnu')}">${esc(t(s.cle))}</p>
   </div>`
 }
 
@@ -336,7 +400,9 @@ export function supprimerHtml (fiche, outils, { peutSupprimer = false } = {}) {
 // dans lib/cleaning/garde.js.
 export function menageHtml (fiche, outils) {
   const { t, esc } = outils
-  if (fiche.menage == null) return nonLu('fiche.menage_non_lu', outils)
+  // ⚠ `Array.isArray` : un `{}` passerait `!= null` et afficherait « Aucune
+  // prestataire » sur un bien qui en a deux (revue de 5c0d759).
+  if (!Array.isArray(fiche.menage)) return nonLu('fiche.menage_non_lu', outils)
   if (!fiche.menage.length) return `<p class="fic-vide caption">${esc(t('fiche.menage_vide'))}</p>`
   return `<ul class="fic-liste">${fiche.menage.map(m => {
     const nom = [m.prenom, m.nom].filter(Boolean).join(' ').trim()
@@ -371,7 +437,9 @@ export function avisBlocHtml (fiche, outils) {
   return `<div class="fic-avis">
     ${note}
     ${p.vide
-      ? `<p class="fic-vide caption" data-proprete="vide">${esc(t('fiche.proprete_vide', { jours: p.jours }))}</p>`
+      ? `<p class="fic-vide caption" data-proprete="${p.aucunAvis ? 'aucun' : 'rien-signale'}">`
+        + `${esc(t(p.aucunAvis ? 'fiche.proprete_aucun_avis' : 'fiche.proprete_vide',
+          { jours: p.jours, n: p.rienSignale }))}</p>`
       : `<div class="fic-pouces" data-proprete>
           ${pouce('fiche.proprete_positif', p.positif, 'positif')}
           ${pouce('fiche.proprete_remarque', p.remarque, 'remarque')}
@@ -389,20 +457,33 @@ export function avisBlocHtml (fiche, outils) {
 // montants collectés restent sous `facturation`, hors de cette fiche.
 // `origine: 'absent'` vaut `connue: false` — un bloc « Taxe de séjour » avec un
 // collecteur et rien d'autre est un bloc vide qui a l'air plein.
-export function reglagesHtml (fiche, outils) {
+// ⚠ CE BLOC LIT `refuses`, DEPUIS LA REVUE DE 5c0d759. Il ne le lisait pas, et
+// la règle « un bloc refusé n'est pas rendu » n'y tenait que par la
+// coïncidence que `serrures` ET `taxe` dépendent tous deux du domaine
+// `reglages` : qu'un seul des deux soit refusé un jour, et l'écran aurait dit
+// « La serrure n'est pas lisible pour l'instant » — le message de
+// l'INDISPONIBILITÉ posé sur un REFUS DE DROIT. Les deux ne se confondent pas :
+// l'un dit « on n'a pas pu », l'autre « vous n'y avez pas droit », et le
+// second ne se dit pas du tout.
+export function reglagesHtml (fiche, outils, refuses = []) {
   const { t, esc } = outils
   const morceaux = []
+  const refuse = (nom) => Array.isArray(refuses) && refuses.includes(nom)
 
-  if (fiche.serrures == null) morceaux.push(nonLu('fiche.serrure_non_lue', outils))
+  if (refuse('serrures')) { /* refusé : rien, pas même un message */ }
+  else if (!Array.isArray(fiche.serrures)) morceaux.push(nonLu('fiche.serrure_non_lue', outils))
   else if (!fiche.serrures.length) morceaux.push(`<div class="fic-ligne"><span class="fic-ligne__cle caption">${esc(t('fiche.serrure'))}</span><span class="fic-ligne__val fic-muet">${esc(t('fiche.serrure_aucune'))}</span></div>`)
   else morceaux.push(`<div class="fic-ligne"><span class="fic-ligne__cle caption">${esc(t('fiche.serrure'))}</span>`
     + `<span class="fic-ligne__val">${esc(t('fiche.serrure_n', { n: fiche.serrures.length }))}</span></div>`)
 
-  if (fiche.taxe == null) morceaux.push(nonLu('fiche.taxe_non_lue', outils))
+  if (refuse('taxe')) { /* refusé : rien */ }
+  else if (fiche.taxe == null) morceaux.push(nonLu('fiche.taxe_non_lue', outils))
   else if (fiche.taxe.connue !== true) morceaux.push(`<div class="fic-ligne"><span class="fic-ligne__cle caption">${esc(t('fiche.taxe'))}</span><span class="fic-ligne__val fic-muet">${esc(t('fiche.taxe_aucune'))}</span></div>`)
   else morceaux.push(`<div class="fic-ligne"><span class="fic-ligne__cle caption">${esc(t('fiche.taxe'))}</span>`
     + `<span class="fic-ligne__val">${esc(fiche.taxe.commune || t('fiche.taxe_connue'))}</span></div>`)
 
+  // Les deux moitiés refusées : plus rien à dire, donc pas de bloc.
+  if (!morceaux.length) return null
   return `<div class="fic-reglages">${morceaux.join('')}</div>`
 }
 
@@ -413,7 +494,16 @@ export function reglagesHtml (fiche, outils) {
 export function ficheHtml (fiche, outils, droits = {}) {
   const inds = Array.isArray(fiche.indisponibles) ? fiche.indisponibles : []
   const refs = Array.isArray(fiche.refuses) ? fiche.refuses : []
-  const o = { ...outils, avisIndisponibles: inds.includes('avis') }
+  const o = { ...outils,
+    avisIndisponibles: inds.includes('avis'),
+    // ⚠ UN FAIT DATÉ PARTIEL SE DIT (revue de 5c0d759). Le serveur pose
+    // `indisponibles: ['fait_date']` quand il a pu affirmer une FERMETURE mais
+    // pas lire les réservations — son commentaire le dit : « l'écran doit
+    // savoir qu'une réservation pourrait s'y ajouter ». L'écran ne lisait ce
+    // tableau que pour `avis`, et rendait « Fermé jusqu'au 1er décembre » en
+    // encre normale, sans réserve, là où la moitié de la source était
+    // illisible.
+    faitPartiel: inds.includes('fait_date') }
   const refuse = (nom) => refs.includes(nom)
 
   const gauche = [
@@ -426,7 +516,7 @@ export function ficheHtml (fiche, outils, droits = {}) {
   const droite = [
     refuse('menage') ? '' : bloc('fiche.bloc_menage', menageHtml(fiche, o), o),
     refuse('avis') ? '' : bloc('fiche.bloc_avis', avisBlocHtml(fiche, o), o),
-    (refuse('serrures') && refuse('taxe')) ? '' : bloc('fiche.bloc_reglages', reglagesHtml(fiche, o), o)
+    bloc('fiche.bloc_reglages', reglagesHtml(fiche, o, refs), o)
   ].join('')
 
   return `${enTeteHtml(fiche, o)}

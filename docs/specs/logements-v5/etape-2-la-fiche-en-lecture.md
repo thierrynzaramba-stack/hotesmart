@@ -194,3 +194,112 @@ les perd : le bloc porte l'information complète.
 | `tests/logement-fiche-dom.test.js` | 33 tests du module |
 | `tests/logement-page-dom.test.js` | 20 tests de la page |
 | `tests/pages-non-delegables.test.js` | la fiche classée **déléguable**, avec sa raison |
+
+---
+
+# Les constats de la revue de `5c0d759`, et ce qu'ils ont coûté
+
+La revue adversariale a trouvé **treize constats**, dont deux graves. Tous ont
+été vérifiés par mesure avant correction — aucun n'a été pris pour argent
+comptant, et un s'est révélé **plus grave que la revue ne le disait**.
+
+## 1. GRAVE — le prix plancher s'affichait en centimes, donc ×100
+
+`properties.prix_minimum` est **en centimes** — seule de ses quatre voisines du
+bloc Prix. Son commentaire de colonne le dit, `api/channel-property.js` l'écrit
+ainsi, et **tous** les autres lecteurs divisent par 100 : `pages/biens.html`,
+`apps/yield/index.html`, `lib/marche/etude.js`.
+
+`publier()` la traitait comme ses voisines. La fiche affichait donc
+**« 13 000 € »** pour le plancher de 130 € d'un bien, juste sous un prix de
+base juste. La ligne la plus sensible du bloc — la garde qui empêche une nuit
+de partir à zéro — était fausse exactement quand elle était renseignée.
+
+Le défaut est né à l'étape 0, mais **c'est l'étape 2 qui l'amenait à l'écran** :
+`prix_plancher` n'avait aucun lecteur avant elle. Et **les fixtures le
+figeaient** : `prix_minimum: 60` est une valeur impossible en base pour 60 €
+(ce serait 6000), et l'assertion `/60\s*€/` validait l'unité fausse — un test
+qui passe contre le bug et rougirait contre le correctif.
+
+## 2. GRAVE (sécurité) — le droit était évalué sur le mauvais compte
+
+La page passait `peutEcrire('reglages')`. Cette fonction répond pour le **compte
+courant**, et `estTitulaire()` rend `true` dès que le sélecteur est resté sur
+mon compte. Or cette fiche est justement l'endpoint qui **ignore `X-Compte`** :
+le bien désigne le compte.
+
+Scénario : Alice m'invite avec `reglages: read`. Mon sélecteur est sur mon
+compte. J'ouvre `/logements/<bien d'Alice>` par un lien direct : la garde
+serveur m'autorise la lecture, `peutEcrire` rend `true`, et le bloc
+« Supprimer » s'affiche — alors que le serveur avait déjà tranché l'inverse
+**dans la même réponse** : `{ possible: null, motif: 'droit_refuse' }`.
+
+C'est la classe de défaut gravée au CLAUDE.md (« tout utilisateur authentifié
+est titulaire de son propre compte »). Rien n'agissait à l'étape 2 et le
+`DELETE` est gardé par la ressource, donc ce n'était pas exploitable — mais
+l'étape 3 aurait câblé un bouton qui 403, et la règle « on ne montre jamais ce
+qui mène à un refus » était déjà violée.
+
+**Le refus du serveur est désormais souverain.** `peutEcrire` reste intersecté :
+deux gardes valent mieux qu'une.
+
+## 3. PLUS GRAVE QUE LA REVUE NE LE DISAIT — le motif n'existait pas
+
+La revue signalait que les quatre motifs autres que `relie` tombaient dans le
+fourre-tout. La mesure dit pire : **le serveur n'écrit jamais `relie`**. Il
+écrit `annonce_reliee`.
+
+Donc la seule raison que Thierry avait demandée — « Déconnectez d'abord ses
+canaux » — **ne s'affichait jamais**. Elle tombait sur « Impossible de vérifier
+ses canaux pour l'instant », qui est faux : c'est exactement le reproche que ce
+lot adresse à la spec d'origine.
+
+Et **mes trois tests posaient eux-mêmes la fixture `relie`** : ils mesuraient
+leur propre double. Le test découvre désormais les motifs **dans le source du
+serveur** et refuse qu'un seul tombe dans le fourre-tout.
+
+## 4 à 13 — les constats corrigés dans la foulée
+
+| # | constat | ce qui a changé |
+|---|---|---|
+| 4 | un bouton rouge actif, inerte, promettant une confirmation inexistante | le bloc ne se rend que s'il a une raison à dire ; le bouton revient à l'étape 3, câblé |
+| 5 | « Aucun canal relié » affirmé sur un bien **jamais relevé** | trois rendus distincts, et la règle vit dans le module **commun** : la carte de la liste mentait aussi |
+| 6 | `indisponibles: ['fait_date']` ignoré : une fermeture passait pour un fait vérifié | le fait reste affiché, en muet, avec « les réservations n'ont pas pu être lues » |
+| 7 | le test « aucun identifiant partenaire » ne pouvait pas échouer | il empoisonne la fiche avec un marqueur reconnaissable |
+| 8 | `data-fait` : seule interpolation non échappée du module | échappée ; non atteignable, mais c'était le seul trou de la chaîne |
+| 9 | `.fic-vente` n'existait nulle part : trois pastilles bord à bord | une seule classe, celle du module commun — le correctif du commit précédent n'en réparait que la moitié |
+| 10 | un commentaire de sept lignes sans règle, et la marge basse au mauvais point de rupture | commentaire retiré, rupture alignée sur celle de la barre (720 px, pas 860) |
+| 11 | « Rien signalé » et « aucun avis » disaient la même phrase | deux phrases ; `rien_signale` entre enfin dans la somme |
+| 12 | `menage`/`serrures`/`canaux` : `!= null` au lieu de `Array.isArray` | durci — et la contre-épreuve a trouvé **pire**, voir ci-dessous |
+| 13 | le bloc Réglages ignorait `refuses` | il le lit : un refus ne se nomme pas, une indisponibilité se dit |
+
+## Et un défaut que la revue n'a pas vu, trouvé par la contre-épreuve
+
+En écrivant le test du constat 12, `pastillesDesCanaux` a **levé** sur `canaux: {}`.
+Sa garde était `canaux == null` : un `{}` la passait, `canaux.map` levait, et
+**la liste entière tombait en panne** — quatre biens invisibles à cause d'un
+seul mal formé. Durci dans le module commun, avec son test.
+
+C'est la leçon du dépôt, vérifiée une fois de plus : *tout test neuf rougit
+contre le code d'avant*. Celui-ci a rougi contre le code d'**aujourd'hui**.
+
+## Mesures après correction
+
+- **Suite complète : 5653 tests, 5653 verts, zéro rouge.**
+- **Contre-épreuve par mutation, douze gardes, douze tuées** — dont les trois
+  `Array.isArray` et le plancher en centimes.
+- **Contre-épreuve calendaire** à J+30, 60 et 90 : 100/100 à chaque fois.
+- `node scripts/i18n-check.js` : 675 clés dans les trois langues.
+
+## Ce qui reste, noté et non corrigé
+
+- **`fiche.cles_motif`** est descendu par l'endpoint et lu par personne. Le
+  retirer touche le contrat de l'API et deux tests de l'étape 0 : c'est une
+  décision de Thierry, pas un correctif de revue.
+- **`libelleDuCanal` retombe sur le titre que le partenaire rend.** Un hôte qui
+  a nommé son annonce « Airbnb compte Éric » chez le partenaire le verra tel
+  quel dans la pastille. Ce n'est pas un identifiant au sens de la règle, c'est
+  le texte de l'hôte — mais ça se décide, ça ne se découvre pas.
+- **Deux doctrines pour un champ vide** : « Le logement » affiche « — » (la
+  ligne doit rester, elle devient éditable à l'étape 3) ; « Prix » supprime la
+  ligne. Le bloc Prix devient éditable à la même étape, par le même argument.

@@ -129,7 +129,7 @@ const fiche = (extra = {}) => ({
   bien: {
     id: 'b1', nom: 'La bulle', ville: 'Bagnères', pays: 'FR', adresse: '1 rue X',
     code_postal: '65200', capacite: 2, photo_url: null, devise: 'EUR',
-    prix_de_base: 120, prix_plancher: 60, voyageurs_inclus: 2, supplement_voyageur: 15,
+    prix_de_base: 120, prix_plancher: 130, voyageurs_inclus: 2, supplement_voyageur: 15,
     mode_des_prix: 'managed', pilote_tarifaire: 'yieldflow', assistant_en_pause: false
   },
   canaux: [{ ota: 'airbnb', titre: 'x', actif: true, mappe: true, listing_url: null }],
@@ -155,8 +155,11 @@ test('LE TEST QUI COMPTE : l identifiant vient du CHEMIN, et il est décodé', (
   assert.equal(monter({ chemin: '/logements/b1' }).ctx.__id, 'b1')
   assert.equal(monter({ chemin: '/logements/209413' }).ctx.__id, '209413')
   assert.equal(monter({ chemin: '/logements/a%20b' }).ctx.__id, 'a b')
-  // Pas d'identifiant : la lecture part quand même et le serveur rend 404 —
-  // on ne devine pas un bien à la place de l'hôte.
+  // ⚠ PAS D'IDENTIFIANT : CE N'EST PAS UN 404 (revue de 5c0d759 — mon
+  // commentaire décrivait un comportement que le code ne produit pas).
+  // `GET /api/logement?id=` part dans la branche LISTE côté serveur, qui rend
+  // 200 avec le portefeuille. L'écran le jette et affiche « panne ».
+  // Aucune fuite — même compte, même garde —, mais il faut le dire juste.
   assert.equal(monter({ chemin: '/logements' }).ctx.__id, '')
   assert.equal(monter({ chemin: '/logements/' }).ctx.__id, '')
 })
@@ -268,18 +271,33 @@ test('revenir d une panne à une fiche REFERME la zone d état', async () => {
 test('LE TEST QUI COMPTE (SÉCURITÉ) : la garde du bouton Supprimer n est pas INVERSÉE', async () => {
   // La mutation qui survivrait sans ce test : `peutSupprimer: !peutEcrire(…)`.
   // Chercher la CHAÎNE dans le source la laisserait intacte.
-  assert.match(GARDE_SUPPRIMER, /peutSupprimer: peutEcrire\('reglages'\)/)
+  //
+  // ⚠ ET CE N EST PLUS LA SEULE GARDE. Revue de 5c0d759 : `peutEcrire` répond
+  // pour le COMPTE COURANT, alors que cette fiche est gardée par la RESSOURCE
+  // — le bien désigne le compte, `X-Compte` y est ignoré. Le refus du SERVEUR
+  // (`motif: 'droit_refuse'`) est souverain ; ce test vérifie les deux, et le
+  // test du module vérifie que le motif efface le bloc.
+  const reliee = () => fiche({ suppression: { possible: false, motif: 'annonce_reliee' } })
 
-  const ecrit = monter({ reponse: fiche(), peutEcrireReglages: true })
+  const ecrit = monter({ reponse: reliee(), peutEcrireReglages: true })
   await ecrit.ctx.__charger()
   assert.ok(ecrit.doc.querySelector('[data-bind="supprimer"]'),
-    'un profil en écriture doit voir le bouton')
+    'un profil en écriture doit lire la raison du refus')
 
-  const lecture = monter({ reponse: fiche(), peutEcrireReglages: false })
+  const lecture = monter({ reponse: reliee(), peutEcrireReglages: false })
   await lecture.ctx.__charger()
   assert.equal(lecture.doc.querySelector('[data-bind="supprimer"]'), null,
     'on ne propose pas une action que le serveur refusera en 403')
   assert.doesNotMatch(lecture.doc.body.textContent, /\[fiche\.supprimer/)
+
+  // Le navigateur dit oui, le serveur dit non : c est le serveur qui gagne.
+  const divergent = monter({
+    reponse: fiche({ suppression: { possible: null, motif: 'droit_refuse' } }),
+    peutEcrireReglages: true
+  })
+  await divergent.ctx.__charger()
+  assert.equal(divergent.doc.querySelector('.fic-supprimer'), null,
+    'le refus du serveur est souverain, même quand peutEcrire rend true')
 })
 
 test('LE TEST QUI COMPTE (SÉCURITÉ) : avec le VRAI échappement, rien ne s exécute', async () => {
@@ -303,6 +321,9 @@ test('le titre du document porte le nom du bien, et ne tombe pas sur un bien san
   const sans = monter({ reponse: fiche({ bien: { ...fiche().bien, nom: null } }) })
   await sans.ctx.__charger()
   assert.doesNotMatch(sans.doc.title, /null|undefined/)
+  // ⚠ ET PAS LE NOM DE LA LISTE : le repli était `t('fiche.retour')`, qui vaut
+  // « Logements » — l'onglet annonçait la liste pour une fiche.
+  assert.equal(sans.doc.title, 'HôteSmart')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
