@@ -373,12 +373,24 @@ test('la page n invente aucun texte : toute clé qu elle pose existe en françai
 // 6. Les gardes de forme de la page
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('LECTURE SEULE : la page n appelle aucune écriture, et aucun endpoint partenaire', () => {
+test('LE TEST QUI COMPTE : la page écrit PAR LE CLIENT D API, jamais par un appel direct', () => {
+  // ⚠ CE TEST A CHANGÉ DE CONTRAT À L'ÉTAPE 3, sur go de Thierry : la fiche
+  // n'est plus en lecture seule. Ce qu'il garde désormais est plus étroit et
+  // plus utile — la page ne fabrique AUCUN appel à la main (pas de `fetch`, pas
+  // de méthode écrite en dur), elle passe par `shared/api-client.js`, qui pose
+  // le jeton, l'en-tête de compte et la lecture des refus. Un appel à la main
+  // les oublierait, et c'est ainsi qu'un écran finit par parler au partenaire.
   const script = PAGE.slice(PAGE.indexOf('<script type="module">'))
-  for (const motif of [/api\.\w+\.(creer|modifier|supprimer|patch|post|delete)/i,
-    /method:\s*'(POST|PATCH|DELETE|PUT)'/, /channel-property/, /beds24/i, /channex/i]) {
-    assert.doesNotMatch(script, motif, `l étape 2 est en lecture seule : ${motif}`)
+  for (const motif of [/\bfetch\s*\(/, /method:\s*'(POST|PATCH|DELETE|PUT)'/,
+    /\/api\//, /beds24/i, /channex/i, /provider_property_id/]) {
+    assert.doesNotMatch(script, motif, `la page ne doit pas porter : ${motif}`)
   }
+  // Et les écritures qu'elle fait sont NOMMÉES : si une sixième apparaît, ce
+  // test la fait lire à quelqu'un.
+  const appels = [...script.matchAll(/api\.(\w+)\.(\w+)\s*\(/g)].map(m => `${m[1]}.${m[2]}`)
+  const connus = new Set(['logement.fiche', 'logement.compterSuppression',
+    'bien.modifier', 'bien.supprimer', 'bien.pause', 'calendar.fullsync'])
+  for (const a of appels) assert.ok(connus.has(a), `appel non prévu par l'étape 3 : ${a}`)
 })
 
 test('aucun hexa et aucun emoji dans la page : jetons de theme.css et sprite', () => {
@@ -416,4 +428,102 @@ test('la route /logements/:id est déclarée dans vercel.json', () => {
   const r = (v.rewrites || []).find(x => x.source === '/logements/:id')
   assert.ok(r, 'sans la réécriture, /logements/b1 rend 404')
   assert.equal(r.destination, '/pages/logement')
+})
+
+// ════════════════════════════════════════════════════════════════════════
+// ÉTAPE 3 — ce que la page ENVOIE quand on sort d'une case
+// ════════════════════════════════════════════════════════════════════════
+
+// La vraie fonction de la page, pas une copie.
+const VALEUR_A_ENVOYER = fonctionDeLaPage('valeurAEnvoyer')
+const valeurAEnvoyer = vm.runInNewContext(`(${VALEUR_A_ENVOYER.replace('function valeurAEnvoyer', 'function')})`)
+
+const CH = (nom) => ({ nom, type: nom === 'name' ? 'texte' : 'montant' })
+
+test('LE TEST QUI COMPTE : le plancher part en CENTIMES, saisi en euros', () => {
+  // Le défaut ×100 trouvé en revue de l'étape 2 était dans l'autre sens : la
+  // lecture. Ici c'est l'écriture, et le serveur attend des CENTIMES
+  // (`prix_minimum invalide (centimes, > 0)`).
+  const euros = { nom: 'prix_minimum', type: 'montant', euros: true }
+  assert.equal(valeurAEnvoyer(euros, '130'), 13000)
+  assert.equal(valeurAEnvoyer(euros, '95,50'), 9550, 'la virgule décimale est ce que tape un francophone')
+  assert.equal(valeurAEnvoyer(euros, ''), null, 'vide = pas de plancher propre, et le serveur l accepte')
+})
+
+test('LE TEST QUI COMPTE : une virgule ne doit JAMAIS devenir `null` en silence', () => {
+  // `Number('1,5')` vaut `NaN`, et `NaN` sérialisé en JSON devient `null` : le
+  // champ serait EFFACÉ au lieu d être refusé. Le serveur a déjà payé ce
+  // défaut sur le supplément par voyageur (sa garde `Number.isFinite` le dit).
+  assert.equal(valeurAEnvoyer(CH('base_price'), '149,90'), 149.9)
+  // Et ce qui n est pas un nombre ne part pas du tout : `undefined` = on
+  // n envoie rien, l écran dit pourquoi.
+  for (const brut of ['abc', '12 euros', '--', '1.2.3']) {
+    assert.equal(valeurAEnvoyer(CH('base_price'), brut), undefined, brut)
+  }
+})
+
+test('un texte vidé part à vide, un nombre vidé part à `null`', () => {
+  // Ce sont deux contrats différents côté serveur : `address` accepte la chaîne
+  // vide (il la range en `null`), `extra_guest_fee` attend `null`.
+  assert.equal(valeurAEnvoyer({ nom: 'address', type: 'texte' }, '  '), '')
+  assert.equal(valeurAEnvoyer(CH('extra_guest_fee'), '  '), null)
+})
+
+test('un entier reste entier : la capacité ne part pas à 2,5', () => {
+  assert.equal(valeurAEnvoyer({ nom: 'capacity', type: 'entier' }, '2,5'), 3)
+  assert.equal(valeurAEnvoyer({ nom: 'capacity', type: 'entier' }, '4'), 4)
+})
+
+test('LE TEST QUI COMPTE : un NOM VIDÉ est refusé par l écran — le serveur, lui, se tait', () => {
+  // ⚠ `PATCH` n écrit le nom que `if (name !== undefined && String(name).trim())`.
+  // Effacé, le champ est ignoré EN SILENCE, avec un 200 : l écran dirait
+  // « Enregistré » sur un geste sans effet. On vérifie les deux bouts — la
+  // garde dans la page, et la condition dans le serveur qui la justifie.
+  const fn = fonctionDeLaPage('enregistrerChamp')
+  assert.match(fn, /champ\.nom === 'name' && saisi === ''/,
+    'la page doit refuser un nom vide avant d appeler')
+  assert.match(fn, /fiche\.nom_requis/)
+  const serveur = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-property.js'), 'utf8')
+  assert.match(serveur, /if \(name !== undefined && String\(name\)\.trim\(\)\)/,
+    'si le serveur se met à refuser un nom vide, cette garde d écran peut disparaître')
+})
+
+test('LE TEST QUI COMPTE : un champ INCHANGÉ ne part pas', () => {
+  // Un champ de grille renvoyé pour rien reconstruit le plan tarifaire chez le
+  // partenaire, EN BLOQUANT — à chaque clic à côté d une case.
+  const fn = fonctionDeLaPage('enregistrerChamp')
+  assert.match(fn, /if \(saisi === String\(avant\)\) \{ direEtat\(champ\.nom, null\); return \}/)
+  assert.match(fn, /valeurDeSaisie\(champ, bienCourant\)/,
+    'la référence doit venir du bien courant, pas de la case elle-même')
+})
+
+test('LE TEST QUI COMPTE : les enregistrements sont MIS EN FILE, pas lancés en parallèle', () => {
+  // `PATCH` reconstruit la grille en bloquant : deux appels croisés sur le même
+  // bien se liraient l un l autre à moitié écrits.
+  assert.match(PAGE, /let file = Promise\.resolve\(\)/)
+  assert.match(PAGE, /const enfiler =/)
+  assert.match(fonctionDeLaPage('enregistrerChamp'), /await enfiler\(/)
+})
+
+test('LE TEST QUI COMPTE : l écouteur est DÉLÉGUÉ, et il écoute `change`', () => {
+  // Posé case par case, il disparaîtrait au rechargement de la fiche (la page
+  // réécrit tout son `innerHTML`). Et sur `input`, il partirait à chaque lettre.
+  const ligne = ligneDeLaPage(/\$\('\[data-bind="fiche"\]'\)\.addEventListener\([^)]*/, 'l écouteur de saisie')
+  assert.match(ligne, /'change'/)
+  assert.doesNotMatch(PAGE, /addEventListener\('input'/)
+})
+
+test('l erreur du serveur s affiche SOUS le champ, et la case reprend la valeur enregistrée', () => {
+  // Spec §3.3 : « erreurs serveur affichées sous le champ ». Et laisser la
+  // saisie refusée à l écran ferait croire qu elle est enregistrée.
+  const fn = fonctionDeLaPage('enregistrerChamp')
+  assert.match(fn, /direEtat\(champ\.nom, 'erreur', e\.details \|\| e\.message/,
+    'le DETAIL du refus passe avant le code machine')
+  assert.match(fn, /input\.value = valeurDeSaisie\(champ, bienCourant\)/)
+})
+
+test('LE TEST QUI COMPTE : ce que le serveur n a PAS fait se dit', () => {
+  // `PATCH` rend `note` quand il n a pas pu reconstruire la grille (bien sans
+  // prix de base). Le taire laisserait croire que les prix ont suivi.
+  assert.match(fonctionDeLaPage('enregistrerChamp'), /r\.note/)
 })

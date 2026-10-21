@@ -1009,3 +1009,113 @@ test('LE TEST QUI COMPTE : une réponse MAL FORMÉE ne devient pas « Aucune pre
       `${JSON.stringify(malForme)} : les trois blocs doivent se déclarer non lus`)
   }
 })
+
+// ════════════════════════════════════════════════════════════════════════
+// ÉTAPE 3 — l'édition sur place
+// ════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE (SÉCURITÉ) : sans droit d écriture, AUCUNE case dans le DOM', () => {
+  // Spec §5 : « profil en lecture : la fiche s affiche, champs en lecture seule,
+  // aucun bouton d action dans le DOM ». Le masquage est un confort ; la vraie
+  // protection est le `reglages:write` du PATCH, et un test de l endpoint le
+  // garde. Mais on ne propose pas ce qui mène à un 403.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: false }))
+  assert.equal(d.querySelectorAll('input, textarea, select').length, 0)
+  assert.equal(d.querySelectorAll('[data-champ]').length, 0)
+  // Et la fiche dit quand même tout ce qu elle disait à l étape 2.
+  assert.match(d.querySelector('.fic-champs').textContent, /La bulle/)
+  assert.match(d.querySelector('.fic-prix').textContent, /130/)
+})
+
+test('LE TEST QUI COMPTE : chaque case porte le nom du champ CÔTÉ SERVEUR', () => {
+  // ⚠ Le nom rendu et le nom envoyé viennent de la MÊME table (`CHAMPS`) : une
+  // case nommée autrement que ce que `PATCH` accepte s enregistrerait dans le
+  // vide, en 400, ou — pire — en silence si le serveur ignore l inconnu.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  // ⚠ L'ORDRE DU DOM N'EST PAS L'ORDRE DE LA TABLE : la colonne gauche rend
+  // Prix AVANT Le logement. On éprouve donc la couverture, puis l'ordre DANS
+  // chaque bloc — comparer à plat ferait rougir pour une raison de mise en page.
+  const noms = [...d.querySelectorAll('[data-champ]')].map(x => x.getAttribute('name'))
+  assert.deepEqual([...noms].sort(), M.CHAMPS.map(c => c.nom).sort())
+  const dansLeBloc = (sel) => [...d.querySelectorAll(`${sel} [data-champ]`)].map(x => x.getAttribute('name'))
+  assert.deepEqual(dansLeBloc('.fic-champs'), M.champsDuBloc('logement').map(c => c.nom))
+  assert.deepEqual(dansLeBloc('.fic-prix'), M.champsDuBloc('prix').map(c => c.nom))
+  // Les dix noms sont ceux du contrat de PATCH, lu dans le code du serveur.
+  const serveur = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-property.js'), 'utf8')
+  const contrat = serveur.slice(serveur.indexOf("if (req.method === 'PATCH')"))
+    .slice(0, 400)
+  for (const c of M.CHAMPS) {
+    assert.ok(contrat.includes(c.nom), `${c.nom} n est pas dans le contrat du PATCH`)
+  }
+})
+
+test('LE TEST QUI COMPTE : chaque case a son étiquette, et elle la DÉSIGNE', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  for (const input of d.querySelectorAll('[data-champ]')) {
+    const lab = d.querySelector(`label[for="${input.id}"]`)
+    assert.ok(input.id, 'une case sans id ne peut pas être étiquetée')
+    assert.ok(lab, `aucune étiquette ne désigne ${input.getAttribute('name')}`)
+    assert.ok(lab.textContent.trim().length > 1)
+  }
+})
+
+test('LE TEST QUI COMPTE : la DEVISE n est jamais une case — le serveur ne la prend pas', () => {
+  // `PATCH` n accepte pas la devise (absente de son contrat), et l ancien écran
+  // le disait : « devise non editable ». Une case qu on ne peut pas enregistrer
+  // est un leurre.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('[data-champ="currency"], [data-champ="devise"]'), null)
+  const ligne = d.querySelector('[data-devise]')
+  assert.ok(ligne, 'la devise reste AFFICHÉE')
+  assert.equal(ligne.querySelector('input'), null)
+  assert.match(ligne.textContent, /EUR/)
+})
+
+test('LE TEST QUI COMPTE : le plancher par défaut ne se PRÉREMPLIT pas', () => {
+  // ⚠ 10 € est une garde du moteur, pas une valeur du bien. L écrire dans la
+  // case la ferait ENREGISTRER au premier passage, et le bien porterait un
+  // plancher que personne n a choisi — avec, derrière, un refus du serveur si
+  // le prix de base est plus bas.
+  const d = doc(M.ficheHtml(
+    fiche({ bien: { ...fiche().bien, prix_plancher: null } }), OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('[data-champ="prix_minimum"]').value, '')
+  // Et le défaut se dit SOUS la case, pas dedans.
+  assert.match(d.querySelector('[data-plancher-defaut]').textContent, /10/)
+
+  // Un plancher réel, lui, se préremplit — en euros.
+  const avec = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  assert.equal(avec.querySelector('[data-champ="prix_minimum"]').value, '130')
+  assert.equal(avec.querySelector('[data-plancher-defaut]'), null)
+})
+
+test('LE TEST QUI COMPTE : les champs qui reconstruisent la grille sont MARQUÉS', () => {
+  // `PATCH` reconstruit le plan tarifaire chez le partenaire, EN BLOQUANT, dès
+  // que l un d eux est dans le corps — même inchangé. La page ne les envoie donc
+  // que s ils ont bougé, et c est cette marque qui le lui dit.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const marques = [...d.querySelectorAll('[data-grille]')].map(x => x.getAttribute('name')).sort()
+  assert.deepEqual(marques, ['base_price', 'capacity', 'extra_guest_fee', 'included_guests'])
+  // Et le plancher n en est PAS : c est un refus, pas un tarif — aucune
+  // poussée n en découle (commentaire du serveur).
+  assert.equal(d.querySelector('[data-champ="prix_minimum"]').hasAttribute('data-grille'), false)
+  assert.equal(d.querySelector('[data-champ="prix_minimum"]').getAttribute('data-euros'), '1')
+})
+
+test('chaque case a sa place pour l état et pour l erreur, et l erreur est MUETTE au départ', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  for (const ligne of d.querySelectorAll('.fic-ligne--saisie')) {
+    const etat = ligne.querySelector('[data-etat]')
+    assert.ok(etat, 'il faut une place pour « Enregistré »')
+    assert.equal(etat.getAttribute('aria-live'), 'polite', 'et la voix doit l annoncer')
+    assert.equal(etat.textContent, '', 'rien n est annoncé avant le premier enregistrement')
+    const err = ligne.querySelector('[data-erreur]')
+    assert.ok(err && err.hasAttribute('hidden'))
+  }
+})
+
+test('LE TEST QUI COMPTE (SÉCURITÉ) : ce que le partenaire écrit ne s exécute pas, même dans une case', () => {
+  const piege = fiche({ bien: { ...fiche().bien, nom: '"><img src=x onerror=alert(1)>' } })
+  const d = doc(M.ficheHtml(piege, OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelectorAll('img, script').length, 0)
+  assert.equal(d.querySelector('[data-champ="name"]').value, '"><img src=x onerror=alert(1)>')
+})

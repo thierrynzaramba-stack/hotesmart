@@ -335,13 +335,112 @@ export function venteHtml (fiche, outils) {
   return `<div class="log-canaux">${canauxHtml(fiche, outils)}</div>${ligne}`
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Les champs modifiables — une seule table, lue par l'écran ET par la page
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// ⚠ UNE SEULE DÉFINITION. Le nom du champ côté serveur, son libellé, son type,
+// ses bornes et sa conversion vivent ICI. La page ne les redéclare pas : deux
+// copies divergent, et c'est la règle du dépôt. C'est aussi ce qui garantit que
+// le champ rendu et le champ envoyé portent le même nom.
+//
+// ⚠ `grille: true` MARQUE LES CHAMPS QUI RECONSTRUISENT LA GRILLE CHEZ LE
+// PARTENAIRE. `PATCH /api/channel-property` reconstruit le plan tarifaire EN
+// BLOQUANT dès que l'un d'eux est présent dans le corps — même inchangé. On ne
+// les envoie donc QUE s'ils ont bougé : l'ancien écran le faisait déjà, et c'est
+// la raison pour laquelle il les comparait un par un.
+//
+// ⚠ `euros: true` : à l'écran en EUROS, en base en CENTIMES. La conversion se
+// fait aux deux bouts — c'est le défaut ×100 trouvé en revue de l'étape 2.
+export const CHAMPS = [
+  { nom: 'name', bloc: 'logement', cle: 'fiche.champ_nom', type: 'texte', max: 100,
+    depuis: (b) => b.nom },
+  { nom: 'capacity', bloc: 'logement', cle: 'fiche.champ_capacite', type: 'entier',
+    min: 1, borne: 20, grille: true, depuis: (b) => b.capacite },
+  { nom: 'address', bloc: 'logement', cle: 'fiche.champ_adresse', type: 'texte', max: 200,
+    depuis: (b) => b.adresse },
+  { nom: 'zip_code', bloc: 'logement', cle: 'fiche.champ_cp', type: 'texte', max: 20,
+    depuis: (b) => b.code_postal },
+  { nom: 'city', bloc: 'logement', cle: 'fiche.champ_ville', type: 'texte', max: 100,
+    depuis: (b) => b.ville },
+  { nom: 'country', bloc: 'logement', cle: 'fiche.champ_pays', type: 'texte', max: 2,
+    depuis: (b) => b.pays },
+  { nom: 'base_price', bloc: 'prix', cle: 'fiche.prix_base', type: 'montant',
+    grille: true, depuis: (b) => b.prix_de_base },
+  // ⚠ LE PLANCHER NE SE PRÉREMPLIT PAS À 10. Son défaut est une garde du moteur,
+  // pas une valeur du bien : l'écrire dans la case le ferait ENREGISTRER au
+  // premier passage, et le bien porterait un plancher que personne n'a voulu.
+  { nom: 'prix_minimum', bloc: 'prix', cle: 'fiche.prix_plancher', type: 'montant',
+    euros: true, depuis: (b) => (b.prix_plancher != null ? b.prix_plancher : null) },
+  { nom: 'included_guests', bloc: 'prix', cle: 'fiche.prix_inclus', type: 'entier',
+    min: 1, grille: true, depuis: (b) => b.voyageurs_inclus },
+  { nom: 'extra_guest_fee', bloc: 'prix', cle: 'fiche.prix_supplement', type: 'montant',
+    grille: true, depuis: (b) => b.supplement_voyageur }
+]
+
+export function champsDuBloc (bloc) {
+  return CHAMPS.filter(c => c.bloc === bloc)
+}
+
+// La valeur telle qu'elle s'affiche DANS LA CASE : jamais une valeur par
+// défaut, jamais un montant formaté (une case se réécrit, elle ne se lit pas).
+export function valeurDeSaisie (champ, bien) {
+  const v = champ.depuis(bien || {})
+  if (v == null || v === '') return ''
+  return String(v)
+}
+
+// Une ligne modifiable. Hors droit d'écriture, c'est la ligne de LECTURE de
+// l'étape 2 qui est rendue — aucune case, aucun bouton, rien dans le DOM.
+function ligneSaisieHtml (champ, bien, outils) {
+  const { t, esc } = outils
+  const id = `ch-${champ.nom}`
+  const val = valeurDeSaisie(champ, bien)
+  const numerique = champ.type === 'entier' || champ.type === 'montant'
+  const attrs = [
+    `id="${id}"`, `name="${esc(champ.nom)}"`, `data-champ="${esc(champ.nom)}"`,
+    `value="${esc(val)}"`, 'class="fic-saisie"', 'autocomplete="off"',
+    numerique ? 'inputmode="decimal"' : '',
+    champ.type === 'entier' ? 'inputmode="numeric"' : '',
+    champ.max != null && !numerique ? `maxlength="${champ.max}"` : '',
+    champ.grille ? 'data-grille="1"' : '',
+    champ.euros ? 'data-euros="1"' : ''
+  ].filter(Boolean).join(' ')
+  return `<div class="fic-ligne fic-ligne--saisie" data-ligne="${esc(champ.nom)}">
+    <label class="fic-ligne__cle caption" for="${id}">${esc(t(champ.cle))}</label>
+    <span class="fic-ligne__val"><input ${attrs}></span>
+    <span class="fic-etat caption" data-etat aria-live="polite"></span>
+    <p class="fic-erreur caption" data-erreur hidden></p>
+  </div>`
+}
+
 // ─── 2. Prix ────────────────────────────────────────────────────────────────
-export function prixHtml (fiche, outils) {
+export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, argent, nombre } = outils
   const p = prixAffiche(fiche.bien)
   const ligne = (cle, valeur, extra = '') =>
     `<div class="fic-ligne"${extra}><span class="fic-ligne__cle caption">${esc(t(cle))}</span>`
     + `<span class="fic-ligne__val">${valeur}</span></div>`
+
+  if (peutModifier) {
+    // ⚠ LA DEVISE RESTE EN LECTURE, MÊME AVEC LE DROIT D'ÉCRITURE. `PATCH` ne
+    // l'accepte pas — elle n'est pas dans son contrat — et l'ancien écran le
+    // disait déjà : « devise non editable ». Une case qu'on ne peut pas
+    // enregistrer est un leurre.
+    //
+    // ⚠ ET LE PLANCHER DIT SON DÉFAUT SOUS LA CASE, pas DANS la case : le
+    // préremplir l'enregistrerait au premier passage.
+    const vide = p.plancherParDefaut
+      ? `<p class="fic-aide caption" data-plancher-defaut>${esc(t('fiche.prix_plancher_defaut',
+        { montant: argent(p.plancher, p.devise) }))}</p>`
+      : ''
+    return `<div class="fic-prix">
+      ${ligne('fiche.prix_mode', esc(t(p.modeCle)), ' data-mode')}
+      ${champsDuBloc('prix').map(c => ligneSaisieHtml(c, fiche.bien, outils)
+        + (c.nom === 'prix_minimum' ? vide : '')).join('')}
+      ${ligne('fiche.champ_devise', `${esc(p.devise)} <span class="fic-muet caption">${esc(t('fiche.devise_fixe'))}</span>`, ' data-devise')}
+    </div>`
+  }
 
   return `<div class="fic-prix">
     ${ligne('fiche.prix_mode', esc(t(p.modeCle)), ' data-mode')}
@@ -356,9 +455,14 @@ export function prixHtml (fiche, outils) {
 }
 
 // ─── 3. Le logement ─────────────────────────────────────────────────────────
-export function logementHtml (fiche, outils) {
+export function logementHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, nombre } = outils
   const b = fiche.bien
+  if (peutModifier) {
+    return `<div class="fic-champs">`
+      + champsDuBloc('logement').map(c => ligneSaisieHtml(c, b, outils)).join('')
+      + `<p class="fic-aide caption" data-aide>${esc(t('fiche.modifier_aide'))}</p></div>`
+  }
   const champs = [
     ['fiche.champ_nom', b.nom],
     ['fiche.champ_capacite', b.capacite != null ? nombre(b.capacite, 0) : null],
@@ -367,8 +471,9 @@ export function logementHtml (fiche, outils) {
     ['fiche.champ_ville', b.ville],
     ['fiche.champ_pays', b.pays]
   ]
-  // ⚠ UN CHAMP VIDE SE DIT « — », il ne disparaît pas : à l'étape 3 il devient
-  // éditable sur place, et une ligne absente n'offrirait nulle part où écrire.
+  // ⚠ UN CHAMP VIDE SE DIT « — », il ne disparaît pas : il est éditable sur
+  // place dès qu'on en a le droit, et une ligne absente n'offrirait nulle part
+  // où écrire.
   return `<div class="fic-champs">${champs.map(([cle, val]) =>
     `<div class="fic-ligne"><span class="fic-ligne__cle caption">${esc(t(cle))}</span>`
     + `<span class="fic-ligne__val${val ? '' : ' fic-muet'}">${val ? esc(val) : '—'}</span></div>`
@@ -563,6 +668,12 @@ export function reglagesHtml (fiche, outils, refuses = []) {
 // ⚠ UN BLOC REFUSÉ N'EST PAS RENDU, et c'est `bloc()` qui le décide sur un
 // corps `null`. Le JSON peut porter le refus, l'écran le cache.
 export function ficheHtml (fiche, outils, droits = {}) {
+  // ⚠ UN SEUL DROIT POUR LES CHAMPS : `reglages:write`, celui que `PATCH`
+  // exige. Il arrive déjà sous le nom `peutSupprimer` depuis l'étape 2 — le
+  // DELETE demande le même — et `peutModifier` le dit à sa place quand
+  // l'appelant le fournit.
+  const peutModifier = droits.peutModifier === true
+    || (droits.peutModifier === undefined && droits.peutSupprimer === true)
   const inds = Array.isArray(fiche.indisponibles) ? fiche.indisponibles : []
   const refs = Array.isArray(fiche.refuses) ? fiche.refuses : []
   const o = { ...outils,
@@ -579,8 +690,8 @@ export function ficheHtml (fiche, outils, droits = {}) {
 
   const gauche = [
     bloc('fiche.bloc_vente', venteHtml(fiche, o), o),
-    bloc('fiche.bloc_prix', prixHtml(fiche, o), o),
-    bloc('fiche.bloc_logement', logementHtml(fiche, o), o),
+    bloc('fiche.bloc_prix', prixHtml(fiche, o, { peutModifier }), o),
+    bloc('fiche.bloc_logement', logementHtml(fiche, o, { peutModifier }), o),
     bloc('fiche.bloc_supprimer', supprimerHtml(fiche, o, droits), o)
   ].join('')
 

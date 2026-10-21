@@ -106,6 +106,22 @@
   .fic-proprete { margin-top: var(--gap-s); padding-top: var(--gap-s);
     border-top: 1px solid var(--border); }
 
+  /* Étape 3 — l'édition sur place. Une ligne de saisie garde la MÊME grille que
+     la ligne de lecture : l'œil ne doit pas voir deux tableaux différents selon
+     qu'on a le droit d'écrire ou non. */
+  .fic-ligne--saisie { flex-wrap: wrap; align-items: center; gap: var(--gap-xs) var(--gap-s); }
+  .fic-saisie { width: 100%; min-height: 44px; padding: 8px 10px; font: inherit;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-s); }
+  .fic-saisie:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .fic-ligne--saisie .fic-ligne__val { flex: 1 1 180px; min-width: 0; }
+  /* « Enregistré » : discret, et il ne POUSSE RIEN quand il apparaît — sa place
+     est réservée, sinon la ligne sauterait sous le doigt à chaque sauvegarde. */
+  .fic-etat { flex: none; min-width: 7.5em; text-align: end; color: var(--muted); }
+  .fic-etat[data-etat="enregistre"] { color: var(--ok); }
+  .fic-erreur { flex: 1 0 100%; margin: 0; color: var(--danger); }
+  .fic-aide { margin: var(--gap-xs) 0 0; color: var(--muted); }
+
   /* Supprimer : discret, et le rouge n'apparaît que sur le bouton — la charte
      le réserve à cette action-là. */
   .fic-supprimer { display: flex; flex-direction: column; gap: var(--gap-xs); align-items: flex-start; }
@@ -177,7 +193,7 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCourant, basculerVers }
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
-import { ficheHtml, etatHtml, etatDeLaPage } from '/shared/logement-fiche.js'
+import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie } from '/shared/logement-fiche.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -234,6 +250,134 @@ function montrerEtat (quoi) {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// L'édition sur place (étape 3)
+// ──────────────────────────────────────────────────────────────────────────
+//
+// ⚠ LE BIEN TEL QUE LE SERVEUR LE PORTE, gardé ici. C'est lui qui dit si un
+// champ a BOUGÉ : sans référence, chaque sortie de case renverrait la même
+// valeur, et un champ de grille reconstruirait le plan tarifaire chez le
+// partenaire pour rien — un appel bloquant, à chaque clic à côté.
+let bienCourant = null
+
+// ⚠ UN ENREGISTREMENT À LA FOIS. `PATCH` reconstruit la grille EN BLOQUANT ;
+// deux appels qui se croisent sur le même bien se liraient l'un l'autre à
+// moitié écrits. La file coûte trois lignes et ferme la course.
+let file = Promise.resolve()
+const enfiler = (travail) => { file = file.then(travail, travail); return file }
+
+function ligneDuChamp (nom) { return $(`.fic-ligne--saisie[data-ligne="${CSS.escape(nom)}"]`) }
+
+// L'état d'une ligne : « Enregistrement… », « Enregistré », ou une erreur SOUS
+// le champ (spec §3.3). L'erreur ne remplace jamais l'état : les deux se lisent.
+function direEtat (nom, quoi, texte = '') {
+  const ligne = ligneDuChamp(nom)
+  if (!ligne) return
+  const etat = ligne.querySelector('[data-etat]')
+  const err = ligne.querySelector('[data-erreur]')
+  if (quoi === 'erreur') {
+    etat.textContent = ''
+    etat.removeAttribute('data-etat-valeur')
+    err.textContent = texte
+    err.hidden = false
+    return
+  }
+  err.hidden = true
+  err.textContent = ''
+  etat.textContent = quoi ? t(quoi === 'enregistre' ? 'fiche.enregistre' : 'fiche.enregistrement') : ''
+  if (quoi) etat.setAttribute('data-etat', quoi); else etat.setAttribute('data-etat', '')
+}
+
+// Ce que la case contient, dans l'unité du SERVEUR. `null` = « vide », que le
+// PATCH accepte pour les champs facultatifs ; `undefined` = « ne rien envoyer ».
+function valeurAEnvoyer (champ, brut) {
+  const v = String(brut == null ? '' : brut).trim()
+  if (champ.type === 'texte') return v
+  if (v === '') return null
+  // La virgule décimale est ce que tape un francophone ; `Number('1,5')` vaut
+  // `NaN`, et `NaN` sérialisé en JSON devient `null` — le champ serait EFFACÉ
+  // en silence. C'est le défaut que le serveur a déjà payé sur le supplément.
+  const n = Number(v.replace(',', '.'))
+  if (!Number.isFinite(n)) return undefined
+  if (champ.type === 'entier') return Math.round(n)
+  // ⚠ EN CENTIMES POUR LA BASE, en euros à l'écran.
+  return champ.euros ? Math.round(n * 100) : n
+}
+
+async function enregistrerChamp (input) {
+  const champ = CHAMPS.find(c => c.nom === input.dataset.champ)
+  if (!champ || !bienCourant) return
+  const avant = valeurDeSaisie(champ, bienCourant)
+  const saisi = String(input.value == null ? '' : input.value).trim()
+  if (saisi === String(avant)) { direEtat(champ.nom, null); return }
+
+  // ⚠ UN NOM VIDE NE S'ENREGISTRE PAS, ET LE SERVEUR NE LE DIT PAS. Son PATCH
+  // n'écrit le nom que `if (name !== undefined && String(name).trim())` : effacé,
+  // le champ est ignoré en SILENCE, avec un 200. L'écran dirait « Enregistré »
+  // sur un geste sans effet. On refuse ici, puisque le serveur refuse en se
+  // taisant.
+  if (champ.nom === 'name' && saisi === '') {
+    direEtat(champ.nom, 'erreur', t('fiche.nom_requis'))
+    return
+  }
+  const valeur = valeurAEnvoyer(champ, saisi)
+  if (valeur === undefined) {
+    direEtat(champ.nom, 'erreur', t('fiche.nombre_invalide'))
+    return
+  }
+
+  direEtat(champ.nom, 'encours')
+  await enfiler(async () => {
+    try {
+      const r = await api.bien.modifier(idDuBien, { [champ.nom]: valeur })
+      // La référence suit la saisie : sans ça, la sortie de case suivante
+      // renverrait le même champ, donc un appel bloquant pour rien.
+      bienCourant = { ...bienCourant, ...vuDuChamp(champ, saisi) }
+      direEtat(champ.nom, 'enregistre')
+      if (champ.nom === 'name') majNom(saisi)
+      // ⚠ CE QUI N'A PAS ÉTÉ FAIT SE DIT. Le serveur prévient quand il n'a pas pu
+      // reconstruire la grille (`note`) : le taire laisserait croire que les
+      // prix ont suivi.
+      if (r && r.note) direEtat(champ.nom, 'erreur', r.note)
+    } catch (e) {
+      logger.error('Logement', e.message, { status: e.status, champ: champ.nom })
+      direEtat(champ.nom, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+      // La case reprend la valeur du serveur : laisser un refus à l'écran ferait
+      // croire qu'il est enregistré.
+      input.value = valeurDeSaisie(champ, bienCourant)
+    }
+  })
+}
+
+// La vue de l'écran, côté fiche : `CHAMPS.depuis` lit ces noms-là.
+function vuDuChamp (champ, saisi) {
+  const v = saisi === '' ? null : saisi
+  const n = v == null ? null : Number(String(v).replace(',', '.'))
+  return {
+    name: { nom: v }, capacity: { capacite: n }, address: { adresse: v },
+    zip_code: { code_postal: v }, city: { ville: v }, country: { pays: v },
+    base_price: { prix_de_base: n }, prix_minimum: { prix_plancher: n },
+    included_guests: { voyageurs_inclus: n }, extra_guest_fee: { supplement_voyageur: n }
+  }[champ.nom] || {}
+}
+
+function majNom (nom) {
+  const h1 = $('.fic-nom')
+  if (h1) h1.textContent = nom
+  document.title = nom ? `HôteSmart — ${nom}` : 'HôteSmart'
+}
+
+// ⚠ DÉLÉGUÉ SUR LE CONTENEUR, pas posé case par case : la fiche est
+// re-rendue entièrement à chaque chargement, et des écouteurs posés sur les
+// anciennes cases ne reviendraient pas.
+//
+// ⚠ ET SUR `change`, PAS SUR `input` : un appel par frappe reconstruirait la
+// grille du partenaire à chaque lettre. `change` part à la sortie du champ.
+$('[data-bind="fiche"]').addEventListener('change', (ev) => {
+  const input = ev.target.closest('[data-champ]')
+  if (input) enregistrerChamp(input)
+})
+
 let enVol = false
 async function charger () {
   if (enVol) return
@@ -249,6 +393,7 @@ async function charger () {
     $('[data-bind="chargement"]').hidden = true
     // ⚠ MASQUAGE PAR DROIT **ET** GARDE SERVEUR (règle absolue). Le DELETE est
     // gardé par `reglages: write` ; ici on ne fait que ne pas le proposer.
+    bienCourant = f.bien
     cible.innerHTML = ficheHtml(f, OUTILS, { peutSupprimer: peutEcrire('reglages') })
     cible.removeAttribute('aria-busy')
     // ⚠ PAS DE REPLI SUR `fiche.retour` : il vaut « Logements », donc l'onglet

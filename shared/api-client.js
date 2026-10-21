@@ -54,6 +54,15 @@ async function apiCall(endpoint, method = 'GET', body = null) {
       // « vous n'avez pas accès à ce compte ».
       const erreur = new Error(data.error || 'Erreur serveur')
       erreur.status = res.status
+      // ⚠ CERTAINS REFUS PORTENT UN CODE DANS `error` ET LA PHRASE DANS
+      // `message`. `PATCH /api/channel-property` rend par exemple
+      // `{ error: 'plancher_au_dessus_du_prix_de_base', message: 'Le prix
+      // plancher (120 €) depasse…' }` : un ecran qui n'affiche que `error`
+      // montre un identifiant machine a l'hote. On ATTACHE, sans rien changer a
+      // `message` (d'autres ecrans le lisent) : `code` pour decider, `details`
+      // pour afficher.
+      erreur.code = data.error || null
+      erreur.details = typeof data.message === 'string' ? data.message : null
       throw erreur
     }
 
@@ -73,7 +82,24 @@ export const api = {
   // endpoints existants (channel-property PATCH/DELETE, photo, automation).
   logement: {
     liste: () => apiCall('logement', 'GET'),
-    fiche: (id) => apiCall(`logement?id=${encodeURIComponent(id)}`, 'GET')
+    fiche: (id) => apiCall(`logement?id=${encodeURIComponent(id)}`, 'GET'),
+    // Ce que la suppression effacerait, en nombres. Garde par `reglages:write`
+    // sur le bien, comme le DELETE lui-meme : ces nombres sont ceux d'une
+    // action, pas d'une lecture.
+    compterSuppression: (id) =>
+      apiCall(`logement?id=${encodeURIComponent(id)}&compter=suppression`, 'GET')
+  },
+  // Les ECRITURES de la fiche passent par les endpoints existants, inchanges.
+  bien: {
+    modifier: (id, champs) =>
+      apiCall('channel-property', 'PATCH', { property_id: id, ...champs }),
+    supprimer: (id) => apiCall('channel-property', 'DELETE', { property_id: id }),
+    // ⚠ `provider_property_id` ACCEPTE L'UUID (`resoudreBien` resout `id`,
+    // `provider_property_id` et `migration_target_property_id`). On envoie donc
+    // l'UUID : la fiche ne descend aucun identifiant du partenaire, et ce lot ne
+    // commencera pas a en faire sortir un pour un nom de parametre.
+    pause: (id, paused) =>
+      apiCall('property-automation', 'POST', { provider_property_id: id, paused })
   },
   beds24: {
     getProperties: () => apiCall('beds24', 'POST', { action: 'getProperties' }),
