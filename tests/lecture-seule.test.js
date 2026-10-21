@@ -83,20 +83,33 @@ test('calendrier : ni edition en ligne ni barre d\'action en lecture', () => {
   const html = lire('pages/calendrier.html')
   assert.ok(/mousedown', \(e\) => \{\n      if \(etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) return/.test(html),
     'la selection (donc l\'edition) refuse avant de demarrer')
-  assert.ok(/if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) \{ barre\.hidden = true/.test(html),
+    // ⚠ MOTIF ASSOUPLI LE 21 OCTOBRE 2026. Il exigeait la ligne SUR UNE SEULE
+    // LIGNE : reformater le retour anticipe de `renderFlottante` — pour qu'il
+    // libere aussi la place reservee a la barre — faisait rougir ce test et
+    // deux autres, sans qu'aucune regle n'ait bouge. Un test doit tenir la
+    // CONDITION, pas sa typographie. La preuve dans le DOM, elle, vit dans
+    // tests/calendrier-saisie-prix-dom.test.js (« sans droit d'ecriture :
+    // aucun geste ne selectionne » et « en lecture seule : meme refus »).
+  assert.ok(/if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\)[\s\S]{0,40}barre\.hidden = true/.test(html),
     'la barre d\'action se masque en lecture')
   assert.ok(html.includes('avis-lecture'), 'et la raison affichee')
 })
 
-test('calendrier mobile : la popup d\'edition ne s\'ouvre pas en lecture', () => {
+// RETARGE le 21 octobre 2026 : le telephone est passe du TOUCHER au POINTEUR
+// (`touchstart`/`click` -> `pointerdown`), parce qu'a la souris, sous 900 px,
+// aucune selection n'etait possible. La PROPRIETE testee ne bouge pas — le
+// geste refuse avant de commencer —, seul le nom de l'evenement change.
+// ⚠ ET LA GARDE EST DESORMAIS PROUVEE PAR LE GESTE, pas par la source :
+// tests/calendrier-saisie-prix-dom.test.js rejoue un glisser et un tap sans
+// droit d'ecriture, et verifie qu'aucune selection, aucune popup et aucune
+// ecriture n'en sortent. Une regex sur le nom d'un ecouteur aurait suivi le
+// renommage sans rien prouver.
+test('calendrier mobile : le geste d\'edition ne demarre pas en lecture', () => {
   const html = lire('pages/calendrier.html')
-  const i = html.indexOf("c.addEventListener('click'")
-  assert.ok(i > 0)
+  const i = html.indexOf("c.addEventListener('pointerdown'")
+  assert.ok(i > 0, 'le telephone ecoute le pointeur')
   assert.ok(html.slice(i, i + 300).includes("etat.lectureSeule || !peutEcrire('reservations')"),
-    'le tap court refuse avant de proposer une saisie')
-  const j = html.indexOf("c.addEventListener('touchstart'")
-  assert.ok(html.slice(j, j + 260).includes("etat.lectureSeule || !peutEcrire('reservations')"),
-    'l\'appui long aussi')
+    'le geste refuse avant de proposer une saisie')
 })
 
 // L'ancienne messagerie est une REDIRECTION depuis l'etape 4 du lot
@@ -106,7 +119,7 @@ test('calendrier mobile : la popup d\'edition ne s\'ouvre pas en lecture', () =>
 test('calendrier : la barre flottante n\'est PAS supprimee du DOM', () => {
   // V5 : la barre vit dans le markup STATIQUE et se MASQUE (hidden), jamais
   // retiree ; la selection ne demarre pas en lecture (gardes mousedown et
-  // touchstart) ; la CONSULTATION reste ouverte a tous : les fiches se
+  // pointerdown) ; la CONSULTATION reste ouverte a tous : les fiches se
   // branchent SANS garde d\'ecriture.
   const html = lire('pages/calendrier.html')
   assert.ok(html.includes('data-bind="flottante"'), 'markup statique')

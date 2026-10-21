@@ -422,7 +422,14 @@ test('fiche : une modification vide ne part pas au canal', () => {
 
 test('stop-sell : action directe depuis la selection, memes gardes que l\'ajout', () => {
   // La barre d'actions n'existe pas sans droit ; « Fermer » part en stop_sell.
-  assert.match(PAGE, /if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) \{ barre\.hidden = true/)
+    // ⚠ MOTIF ASSOUPLI LE 21 OCTOBRE 2026. Il exigeait la ligne SUR UNE SEULE
+    // LIGNE : reformater le retour anticipe de `renderFlottante` — pour qu'il
+    // libere aussi la place reservee a la barre — faisait rougir ce test et
+    // deux autres, sans qu'aucune regle n'ait bouge. Un test doit tenir la
+    // CONDITION, pas sa typographie. La preuve dans le DOM, elle, vit dans
+    // tests/calendrier-saisie-prix-dom.test.js (« sans droit d'ecriture :
+    // aucun geste ne selectionne » et « en lecture seule : meme refus »).
+  assert.match(PAGE, /if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\)[\s\S]{0,40}barre\.hidden = true/)
   assert.match(PAGE, /stop_sell: true/)
 })
 

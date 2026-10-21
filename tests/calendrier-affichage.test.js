@@ -127,7 +127,18 @@ test('colonne figee : libelles et coin AU-DESSUS des barres', () => {
 
 test('mise en page : le dernier bien n\'est pas cache par la barre flottante', () => {
   const css = sansCommentaires(lire('shared', 'ui.css'))
-  assert.match(css, /\.cal-page \{[^}]*padding: 14px var\(--page-pad\) 90px/)
+  // ⚠ CE TEST FIGEAIT LE REMEDE, PAS LA PROPRIETE : il exigeait le litteral
+  // « 90px ». Or 90px ne suffisait pas — la barre monte jusqu'a plus de 300px
+  // quand ses cinq boutons passent sur deux lignes (recette du 21 octobre : la
+  // barre recouvrait les lignes Prix sur une fenetre de 666px). Le remede juste
+  // est une reserve CALCULEE sur la hauteur reelle de la barre, et l'ancien
+  // motif aurait rougi contre lui — exactement le defaut du test qui
+  // verrouillait `td.focus()`. La propriete gardee est donc : le bas de page
+  // degage la barre, et il le fait par une reserve variable.
+  assert.match(css, /\.cal-page \{[^}]*padding: 14px var\(--page-pad\) calc\(90px \+ var\(--cal-reserve/,
+    'le bas de page doit consommer la reserve, sinon la barre recouvre la grille')
+  const page = sansCommentaires(lire('pages', 'calendrier.html'))
+  assert.match(page, /setProperty\('--cal-reserve'/, 'et quelqu un doit la POSER')
 })
 
 test('LES JOURS DU MOIS NE SONT RENDUS QU\'UNE FOIS, sous le mois', () => {

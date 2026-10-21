@@ -103,7 +103,14 @@ test('fiche : une reservation OTA explique POURQUOI elle n\'est pas modifiable',
 test('ajout : la reservation reste fermee hors Channex, et tout l\'ajout sans droit', () => {
   assert.match(PAGE, /\$\{channex \? '' : 'disabled'\}/)
   assert.match(PAGE, /cal\.booking_channex_only/)
-  assert.match(PAGE, /if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\) \{ barre\.hidden = true/)
+    // ⚠ MOTIF ASSOUPLI LE 21 OCTOBRE 2026. Il exigeait la ligne SUR UNE SEULE
+    // LIGNE : reformater le retour anticipe de `renderFlottante` — pour qu'il
+    // libere aussi la place reservee a la barre — faisait rougir ce test et
+    // deux autres, sans qu'aucune regle n'ait bouge. Un test doit tenir la
+    // CONDITION, pas sa typographie. La preuve dans le DOM, elle, vit dans
+    // tests/calendrier-saisie-prix-dom.test.js (« sans droit d'ecriture :
+    // aucun geste ne selectionne » et « en lecture seule : meme refus »).
+  assert.match(PAGE, /if \(!jours\.length \|\| etat\.lectureSeule \|\| !peutEcrire\('reservations'\)\)[\s\S]{0,40}barre\.hidden = true/)
   assert.match(PAGE, /\$\{mobile && peut \? `<button type="button" class="cal-btn-plus"/)
 })
 
