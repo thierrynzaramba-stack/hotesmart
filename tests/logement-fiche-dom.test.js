@@ -381,6 +381,28 @@ test('LE TEST QUI COMPTE : VERT et ROUGE, par les classes de l écran Ménages �
   assert.match(ui, /^\.men-note__mauvais \{ color: var\(--danger\); \}$/m)
 })
 
+test('LE TEST QUI COMPTE : le troisième compteur garde sa MISE EN FORME, pas seulement sa couleur', () => {
+  // ⚠ RISQUE SIGNALÉ PAR LE CHEF DE FILE (21 octobre 2026), et il est réel :
+  // `.men-note__attente` n'a pas de règle de mise en forme à lui — il est AJOUTÉ
+  // à une liste de sélecteurs partagée avec `__bon` et `__mauvais`. Une
+  // résolution de conflit sur `shared/ui.css` qui prendrait un seul côté le
+  // ferait disparaître de cette liste en lui laissant sa couleur : le compteur
+  // s'afficherait gris ET mal aligné, sans qu'une ligne rougisse nulle part.
+  // Une divergence doit être un rouge, pas une découverte.
+  const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const regles = [...ui.matchAll(/^([^\n{}]*)\{([^}]*)\}/gm)]
+    .filter(m => /(^|,)\s*\.men-note__attente\s*(,|$)/.test(m[1].trim()))
+  assert.ok(regles.length, '.men-note__attente n a plus aucune règle')
+  const dit = regles.map(m => m[2]).join(' ')
+  for (const d of ['display: inline-flex', 'align-items: center', 'gap:', 'color: var(--muted)']) {
+    assert.ok(dit.includes(d), `.men-note__attente a perdu « ${d} »`)
+  }
+  // Et il est bien RENDU par ce nom-là : une règle sans porteur ne protège rien.
+  const d = doc(M.ficheHtml(
+    fiche({ avis: { ...fiche().avis, non_analyses: 2 } }), OUTILS(), {}))
+  assert.ok(d.querySelector('.men-note__attente'))
+})
+
 test('LE TEST QUI COMPTE : un ZÉRO reste muet — zéro remarque n est pas un problème', () => {
   // La règle que l écran Ménages porte déjà (`men-note--vide`) : un compteur à
   // zéro est gris. Peindre « 0 » en rouge ferait crier une fiche irréprochable.
