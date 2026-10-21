@@ -126,9 +126,11 @@ export function suppressionAffiche (suppression) {
 // Les pouces de propreté
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// ⚠ NEUTRES, JAMAIS ROUGES, ET SANS LÉGENDE (décision de Thierry du 21 octobre
-// 2026). La charte §7 réserve le rouge à la suppression et aux erreurs : une
-// remarque de ménage n'est ni l'une ni l'autre. « Juste le compteur, sans
+// ⚠ VERT ET ROUGE, COMME L'ÉCRAN MÉNAGES, ET SANS LÉGENDE (correction de
+// Thierry du 21 octobre 2026, qui remplace la couleur neutre livrée la veille) :
+// « vert OK, rouge problème ». Ces deux chiffres comptent le travail de ménage,
+// pas la satisfaction générale : ils vivent donc dans le bloc Ménage, avec les
+// classes de cet écran-là (voir `propreteHtml`). « Juste le compteur, sans
 // légende » — le libellé des pouces suffit, une phrase d'explication sous
 // chaque chiffre encombre une colonne déjà dense.
 //
@@ -409,13 +411,14 @@ export function supprimerHtml (fiche, outils, { peutSupprimer = false } = {}) {
 // descend — le nom, le rang, et si elle doit accuser réception — sans le
 // réduire à « assignée / proposée », ce qui recopierait ici une règle qui vit
 // dans lib/cleaning/garde.js.
-export function menageHtml (fiche, outils) {
+export function menageHtml (fiche, outils, refuses = []) {
   const { t, esc } = outils
+  const morceaux = []
   // ⚠ `Array.isArray` : un `{}` passerait `!= null` et afficherait « Aucune
   // prestataire » sur un bien qui en a deux (revue de 5c0d759).
-  if (!Array.isArray(fiche.menage)) return nonLu('fiche.menage_non_lu', outils)
-  if (!fiche.menage.length) return `<p class="fic-vide caption">${esc(t('fiche.menage_vide'))}</p>`
-  return `<ul class="fic-liste">${fiche.menage.map(m => {
+  if (!Array.isArray(fiche.menage)) morceaux.push(nonLu('fiche.menage_non_lu', outils))
+  else if (!fiche.menage.length) morceaux.push(`<p class="fic-vide caption">${esc(t('fiche.menage_vide'))}</p>`)
+  else morceaux.push(`<ul class="fic-liste">${fiche.menage.map(m => {
     const nom = [m.prenom, m.nom].filter(Boolean).join(' ').trim()
     const rang = m.rang != null && Number(m.rang) > 1
       ? t('fiche.menage_rang', { n: Number(m.rang) })
@@ -423,40 +426,70 @@ export function menageHtml (fiche, outils) {
     return `<li class="fic-personne" data-presta>`
       + `<span class="fic-personne__nom">${esc(nom || t('fiche.menage_sans_nom'))}</span>`
       + `<span class="caption fic-muet">${esc(rang)}</span></li>`
-  }).join('')}</ul>`
+  }).join('')}</ul>`)
+
+  const proprete = propreteHtml(fiche, outils, refuses)
+  if (proprete) morceaux.push(proprete)
+  return morceaux.join('')
 }
 
-// ─── 6. Avis ────────────────────────────────────────────────────────────────
+// Le compteur de propreté — DANS LE BLOC MÉNAGE.
+//
+// ⚠ VERT ET ROUGE, PAR LES CLASSES DE L'ÉCRAN MÉNAGES (correction de Thierry
+// du 21 octobre 2026) : « vert OK, rouge problème ». Ce sont les MÊMES
+// déclarations que la note d'une prestataire — `.men-note*`, dans
+// shared/ui.css — et pas une copie : la charte bouge aux deux endroits à la
+// fois, et c'est la règle du dépôt (« une règle partagée vit dans un module
+// commun »).
+//
+// ⚠ UN ZÉRO RESTE MUET (`men-note--vide`, la règle que l'écran Ménages porte
+// déjà) : zéro remarque n'est pas un problème, donc n'est pas rouge.
+//
+// ⚠ ET AUCUNE LÉGENDE SOUS LES CHIFFRES (décision de Thierry) : le libellé
+// n'existe que pour la voix.
+//
+// ⚠ UN REFUS DU DOMAINE `avis` EFFACE LE COMPTEUR, et une INDISPONIBILITÉ le
+// TAIT ici : c'est le bloc Avis qui dit « pas lisible », une seule fois pour
+// une seule source. Le dire deux fois ferait croire à deux pannes.
+export function propreteHtml (fiche, outils, refuses = []) {
+  const { t, esc, icone } = outils
+  if (Array.isArray(refuses) && refuses.includes('avis')) return null
+  if (fiche.avis == null) return null
+  const p = poucesAffiches(fiche.avis)
+  if (p.vide) {
+    return `<p class="fic-vide fic-proprete caption" data-proprete="${p.aucunAvis ? 'aucun' : 'rien-signale'}">`
+      + `${esc(t(p.aucunAvis ? 'fiche.proprete_aucun_avis' : 'fiche.proprete_vide',
+        { jours: p.jours, n: p.rienSignale }))}</p>`
+  }
+  const compte = (cle, n, id, classe) =>
+    `<span class="${classe}${n ? '' : ' men-note--vide'}" data-pouce="${id}">`
+    + `${icone(id === 'remarque' ? 'i-thumb-down' : 'i-thumb-up', 'icon')}<b>${esc(String(n))}</b>`
+    + `<span class="sr-only"> ${esc(t(cle))}</span></span>`
+  return `<div class="men-note fic-proprete" data-proprete>
+    ${compte('fiche.proprete_positif', p.positif, 'positif', 'men-note__bon')}
+    ${compte('fiche.proprete_remarque', p.remarque, 'remarque', 'men-note__mauvais')}
+    ${p.enAttente ? `<span class="men-note__attente" data-pouce="attente">${icone('i-circle-dashed', 'icon')}<b>${esc(String(p.enAttente))}</b><span class="sr-only"> ${esc(t('fiche.proprete_attente'))}</span></span>` : ''}
+  </div>`
+}
+
+// ─── 6. Avis ──────────────────────────────────────────────────
 //
 // ⚠ LA MÊME NOTE QUE LA CARTE DE LA LISTE (décision de Thierry du 21 octobre
 // 2026) : « les deux écrans doivent dire la même chose ». Elle passe donc par
 // `avisHtml` du module commun, et non par un rendu propre à la fiche.
-// Les pouces, eux, ne parlent QUE de propreté, en couleur neutre, et sans
-// légende sous les chiffres.
+//
+// ⚠ ET LA NOTE SEULE (correction de Thierry du 21 octobre 2026) : « le bloc
+// Avis = note sur 5 + nombre d'avis seulement ». Les pouces de propreté sont
+// partis dans le bloc Ménage, dont ils mesurent le travail.
 export function avisBlocHtml (fiche, outils) {
-  const { t, esc, icone } = outils
   if (fiche.avis == null) {
     return outils.avisIndisponibles === true ? nonLu('logements.avis_non_lus', outils) : null
   }
   const note = avisHtml(fiche, outils)
-  const p = poucesAffiches(fiche.avis)
-  const pouce = (cle, n, id) =>
-    `<span class="fic-pouce" data-pouce="${id}">${icone(id === 'positif' ? 'i-thumb-up' : 'i-thumb-down', 'icon')}`
-    + `<span class="fic-pouce__n">${esc(String(n))}</span>`
-    + `<span class="sr-only"> ${esc(t(cle))}</span></span>`
-
-  return `<div class="fic-avis">
-    ${note}
-    ${p.vide
-      ? `<p class="fic-vide caption" data-proprete="${p.aucunAvis ? 'aucun' : 'rien-signale'}">`
-        + `${esc(t(p.aucunAvis ? 'fiche.proprete_aucun_avis' : 'fiche.proprete_vide',
-          { jours: p.jours, n: p.rienSignale }))}</p>`
-      : `<div class="fic-pouces" data-proprete>
-          ${pouce('fiche.proprete_positif', p.positif, 'positif')}
-          ${pouce('fiche.proprete_remarque', p.remarque, 'remarque')}
-          ${p.enAttente ? `<span class="fic-pouce fic-muet" data-pouce="attente">${icone('i-circle-dashed', 'icon')}<span class="fic-pouce__n">${esc(String(p.enAttente))}</span><span class="sr-only"> ${esc(t('fiche.proprete_attente'))}</span></span>` : ''}
-        </div>`}
-  </div>`
+  // `avisHtml` rend '' quand il n'a rien à dire : rendre le bloc quand même
+  // donnerait un bloc titré, vide, et qui a l'air plein.
+  if (!note) return null
+  return `<div class="fic-avis">${note}</div>`
 }
 
 // ─── 7. Réglages ────────────────────────────────────────────────────────────
@@ -525,7 +558,7 @@ export function ficheHtml (fiche, outils, droits = {}) {
   ].join('')
 
   const droite = [
-    refuse('menage') ? '' : bloc('fiche.bloc_menage', menageHtml(fiche, o), o),
+    refuse('menage') ? '' : bloc('fiche.bloc_menage', menageHtml(fiche, o, refs), o),
     refuse('avis') ? '' : bloc('fiche.bloc_avis', avisBlocHtml(fiche, o), o),
     bloc('fiche.bloc_reglages', reglagesHtml(fiche, o, refs), o)
   ].join('')

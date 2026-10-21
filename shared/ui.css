@@ -813,6 +813,10 @@ body.men-volet-ouvert { overflow: hidden; }
 .men-note__bon { color: var(--ok); }
 .men-note__mauvais { color: var(--danger); }
 .men-note--vide { color: var(--muted); }
+/* « Pas encore analysé » n'est ni un OK ni un problème : ni vert, ni rouge.
+   Posé pour la fiche d'un logement (21 octobre 2026), où le compteur de
+   propreté vit dans le bloc Ménage et porte ces mêmes classes. */
+.men-note__attente { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); }
 .men-note .icon { width: 14px; height: 14px; }
 
 @media (max-width: 899px) {

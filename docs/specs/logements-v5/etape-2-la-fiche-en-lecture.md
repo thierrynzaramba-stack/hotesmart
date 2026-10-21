@@ -55,11 +55,14 @@ La fiche appelle `avisHtml` — **le rendu de la liste**, pas une copie. Même
 étoile du sprite (`i-review`), même `4,9 / 5 · 336 avis`, même infobulle qui
 dit l'échelle. `lireFiche` réutilise `lireAvisParBien`, le lecteur de la liste.
 
-Les **pouces** sont à part : ils ne disent que la **propreté sur 30 jours**, en
-couleur neutre, jamais en rouge, et **sans légende** — juste le compteur. Le
-libellé existe pour le lecteur d'écran (`.sr-only`), pas à l'écran. Un troisième
-compteur, en pointillés, dit « pas encore analysé » : ce n'est pas « rien
-signalé », et les confondre inventerait une propreté qu'on n'a pas mesurée.
+Les **pouces** sont à part : ils ne disent que la **propreté sur 30 jours**, et
+**sans légende** — juste le compteur. Le libellé existe pour le lecteur d'écran
+(`.sr-only`), pas à l'écran. Un troisième compteur, en pointillés, dit « pas
+encore analysé » : ce n'est pas « rien signalé », et les confondre inventerait
+une propreté qu'on n'a pas mesurée.
+
+⚠ **Et ils ne sont plus dans ce bloc : voir la correction du 21 octobre, en fin
+de document.**
 
 ⚠ `lireAvis` rend désormais `total_proprete` et non `total` : la note porte son
 propre `total` (le nombre d'avis), et la collision aurait fait afficher le
@@ -378,3 +381,72 @@ tests écrits exprès — et il était faux, parce que ses deux tests posaient u
 donnée que le serveur ne produit pas. Ce qui l'a attrapé n'est ni la lecture ni
 les tests : c'est d'avoir **fait tourner la fonction du serveur** pour voir ce
 qu'elle rend.
+
+---
+
+# Correction du 21 octobre 2026 — les pouces vont au MÉNAGE, en vert et rouge
+
+> « Les pouces de propreté vont dans le bloc Ménage (pas Avis), en vert/rouge
+> comme l'écran Ménages (charte : vert OK, rouge problème). Le bloc Avis = note
+> sur 5 + nombre d'avis seulement. »
+
+Ce qui était livré la veille — pouces **neutres**, dans le bloc **Avis** — était
+une lecture trop littérale de la charte : le §7 réserve le rouge à la
+suppression et aux erreurs, et j'en avais conclu qu'une remarque de propreté ne
+pouvait pas être rouge. **L'écran Ménages, lui, les peint en vert et en rouge
+depuis le 13 octobre.** Deux écrans du même produit disaient donc la même chose
+de deux façons — exactement le défaut que l'étape 2 corrigeait déjà sur la note.
+
+## Ce qui change
+
+- **Le compteur vit dans le bloc Ménage**, sous l'équipe : ces deux chiffres
+  comptent le **travail de ménage**, pas la satisfaction générale.
+- **Le bloc Avis ne porte plus que la note** sur 5 et le nombre d'avis.
+- **Vert et rouge par les CLASSES de l'écran Ménages**, pas par des couleurs
+  recopiées : `men-note__bon`, `men-note__mauvais`, `men-note--vide`,
+  déclarées une seule fois dans `shared/ui.css`. Les cinq règles `.fic-pouce*`
+  de `pages/logement.html` ont disparu. Seul `men-note__attente` est neuf — gris,
+  posé dans la même famille, parce que « pas encore analysé » n'est ni un OK ni
+  un problème.
+- **Un zéro reste gris** (`men-note--vide`, la règle que l'écran Ménages portait
+  déjà) : zéro remarque n'est pas un problème, et une fiche irréprochable ne
+  doit pas crier en rouge.
+- **La séparation est à nous** (`.fic-proprete`) : mesurée sur le banc, collée
+  sous la dernière prestataire, la ligne se lisait comme **sa** note alors
+  qu'elle parle du **logement** sur 30 jours.
+
+## Ce qui ne change pas
+
+Le compteur lit toujours le domaine **avis**. Un refus de ce droit l'efface,
+**même si le JSON porte encore les chiffres** — un bloc gardé par `menage` ne
+doit pas faire survivre une donnée refusée ailleurs. Et une **indisponibilité**
+des avis se dit **une seule fois**, dans le bloc Avis : deux phrases pour une
+seule lecture ratée feraient croire à deux pannes.
+
+## Mesuré, pas déduit
+
+Couleurs **rendues** relevées sur le banc (1440 et 390), pas lues dans la
+feuille : `rgb(15, 122, 79)` pour le vert, `rgb(180, 35, 24)` pour le rouge,
+`rgb(113, 113, 113)` pour l'attente — soit exactement `--ok`, `--danger` et
+`--muted`. Compteur présent dans le bloc Ménage, absent du bloc Avis, aucun
+débordement, les trois cas du banc (plein, creux, blocs refusés).
+
+**Sept mutations, sept tuées** — et **deux d'entre elles ont survécu au premier
+jet**, ce qui a fait écrire deux tests de plus :
+
+1. retirer la garde `refuses.includes('avis')` ne faisait rougir personne, parce
+   que mon test posait **aussi** `avis: null`. La fixture du refus porte
+   désormais **les chiffres** : « le JSON peut le porter, l'écran le cache » se
+   teste avec un JSON qui le porte.
+2. déclarer le gris **avant** les couleurs dans `ui.css` ne faisait rougir
+   personne non plus : mon `indexOf('.men-note__mauvais {')` tombait sur un
+   sélecteur **groupé** de mise en forme, plus haut dans la feuille. Le test
+   s'ancre maintenant sur la déclaration de **couleur**. L'ordre compte
+   vraiment : `.men-note--vide` et `.men-note__mauvais` ont le même poids, donc
+   c'est la position qui tranche — la leçon de `[hidden]`, au grain d'une
+   couleur.
+
+- **Suite complète : 5659 tests, 5659 verts, zéro rouge.**
+- `node scripts/i18n-check.js` : **674 clés** dans les trois langues, **aucune
+  clé neuve** — la correction ne déplace que du rendu, et le compte attendu
+  après merge (676) ne bouge pas.
