@@ -93,11 +93,17 @@ export function prixAffiche (bien) {
 //
 // `tests/logement-fiche-dom.test.js` DÉCOUVRE désormais les motifs dans le
 // source du serveur et refuse qu'un seul tombe dans le fourre-tout.
-const MOTIFS = {
+export const MOTIFS = {
   annonce_reliee: 'fiche.supprimer_relie',       // le bien est encore en vente
   canaux_illisibles: 'fiche.supprimer_inconnu',  // on n'a pas pu lire
   mapping_inconnu: 'fiche.supprimer_inconnu',    // un canal au mappage incertain
-  jamais_releve: 'fiche.supprimer_jamais_releve' // aucun relevé n'a abouti
+  // ⚠ CE MOTIF S'APPELLE `jamais_releve` MAIS SE DÉCLENCHE SUR « AUCUN
+  // CANAL ». Sa condition serveur — `!canaux.length && !vuLe` — dégénère en
+  // `!canaux.length`, puisque `fraicheurDuBien` rend `null` dès qu'un bien
+  // n'a aucun canal. Le texte dit donc ce qui est VRAI, pas ce que le nom
+  // suggère. Mesuré en re-revue de 3dddb14 ; le nom se corrige côté serveur,
+  // c'est une dette.
+  jamais_releve: 'fiche.supprimer_jamais_releve'
 }
 
 // `droit_refuse` n'a PAS de message : il EFFACE le bloc. On ne montre jamais
@@ -299,9 +305,9 @@ export function venteHtml (fiche, outils) {
     : `<p class="fic-fraicheur caption${f.echec || f.vieux ? ' fic-fraicheur--alerte' : ''}"`
       + ` data-fraicheur="${f.echec ? 'echec' : (f.vieux ? 'vieille' : 'fraiche')}">`
       + `${esc(t(f.cle, f.valeurs ? { quand: dateEnClair(f.valeurs.quand) } : {}))}</p>`
-  // ⚠ « Aucun canal relié » contre « jamais relevé » : la règle vit dans
-  // `canauxHtml`, le module commun — la redire ici laisserait la CARTE mentir
-  // le jour où l'une des deux changerait.
+  // ⚠ « Aucun canal relié » est rendu par `canauxHtml`, le module commun : le
+  // redire ici laisserait la CARTE mentir le jour où l'une des deux
+  // changerait.
   if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(fiche, outils)}</p>${ligne}`
   // ⚠ `log-canaux`, LA CLASSE DU MODULE COMMUN (revue de 5c0d759). Le bloc
   // utilisait `fic-vente`, qui n'était déclaré NULLE PART : trois pastilles

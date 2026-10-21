@@ -303,3 +303,78 @@ contre le code d'avant*. Celui-ci a rougi contre le code d'**aujourd'hui**.
 - **Deux doctrines pour un champ vide** : « Le logement » affiche « — » (la
   ligne doit rester, elle devient éditable à l'étape 3) ; « Prix » supprime la
   ligne. Le bloc Prix devient éditable à la même étape, par le même argument.
+
+---
+
+# La re-revue de `3dddb14` : un de mes correctifs était faux
+
+La règle du dépôt veut une seule re-review après un constat de sécurité. Elle a
+trouvé **une régression, et c'est l'un des correctifs eux-mêmes.**
+
+## Le correctif « jamais relevé » rendait « Aucun canal relié » INATTEIGNABLE
+
+J'avais distingué les deux cas sur la marque `canaux_vu_le == null`. **Mesure :
+cette marque ne peut jamais valoir autre chose dans cette branche.**
+`fraicheurDuBien` rend `null` dès qu'un bien n'a aucun canal — décision
+explicite de Thierry du 19 octobre : *« un bien sans canal ne dit rien du
+tout »* — et la branche n'est atteinte que si la liste des canaux est vide.
+
+Conséquence : un bien **Beds24, ou neuf, parfaitement normal**, annonçait « ses
+canaux n'ont jamais été relevés » alors que le relevé avait tourné dix minutes
+plus tôt. J'avais remplacé un mensonge par un pire, **sur un écran déjà en
+recette**.
+
+**Et ma prémisse était fausse.** J'avais écrit, en commentaire et dans le
+message de commit, que « le serveur distingue déjà les deux ». Non :
+`suppressionPossible` teste `!canaux.length && !vuLe` avec le **même** `vuLe`,
+donc sa condition se réduit à `!canaux.length`. Sa branche `jamais_releve` est
+dégénérée depuis l'étape 0 — je l'avais prise pour une distinction existante.
+
+**Correctif défait**, et l'impossibilité est désormais **gardée par un test** qui
+mesure `fraicheurDuBien` directement, pour qu'on ne refasse pas l'erreur. La
+distinction est un fait de **compte** (`canaux_releve`) que l'endpoint ne
+descend pas : **dette 70**.
+
+## Les deux tests qui couvraient ce correctif mesuraient leur propre double
+
+Ils posaient `{ canaux: [], canaux_vu_le: '<une date>' }` — un payload que le
+serveur **ne peut pas produire**. C'est mot pour mot le défaut que le constat 3
+dénonçait trois heures plus tôt. Retirés.
+
+## Deux mineurs, corrigés aussi
+
+- En fusionnant `.fic-canaux` vers `.log-canaux`, les pastilles de l'en-tête
+  avaient perdu leur `margin-top` : elles collaient à la ligne « ville ·
+  capacité ». La carte ne le voyait pas — sa grille a sa propre gouttière.
+- Le test « découvre les motifs » n'exigeait que deux noms codés en dur : un
+  motif ajouté demain serait tombé en silence dans le fourre-tout. `MOTIFS` est
+  exporté, et le test exige que **chaque** motif découvert y figure.
+- Le texte du motif `jamais_releve` disait « jamais relevés ». Il dit maintenant
+  ce qui est **vrai** — « Aucun canal n'est relié à ce logement » — puisque
+  c'est sur cela qu'il se déclenche. Le nom du motif se corrige côté serveur :
+  dette 70.
+
+## Les douze autres correctifs ont tenu
+
+La re-revue les a éprouvés un par un et n'a rien trouvé contre eux : unité du
+plancher vérifiée de façon indépendante (migration, écrivain, trois autres
+lecteurs), couverture exacte des cinq motifs, garde `peutEcrire` non affaiblie,
+aucune régression de `Array.isArray` sur la liste, `faitPartiel` correspondant à
+un état serveur réel, et la marge basse qui **mord** (même spécificité, déclarée
+après, aucune page ne redéclare le conteneur).
+
+## Mesures finales
+
+- **Suite complète : 5653 tests, 5653 verts, zéro rouge.**
+- **Deux mutations de plus, deux tuées** : refaire la distinction impossible, et
+  retirer un motif de la table d'affichage.
+- `node scripts/i18n-check.js` : 674 clés dans les trois langues.
+
+## La leçon, pour le KB
+
+**Un correctif de revue est du code neuf, et il se mesure comme tel.** Celui-ci
+est passé par une suite verte, une revue qui l'a approuvé en le lisant, et deux
+tests écrits exprès — et il était faux, parce que ses deux tests posaient une
+donnée que le serveur ne produit pas. Ce qui l'a attrapé n'est ni la lecture ni
+les tests : c'est d'avoir **fait tourner la fonction du serveur** pour voir ce
+qu'elle rend.

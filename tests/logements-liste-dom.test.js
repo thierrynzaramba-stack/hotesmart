@@ -126,27 +126,53 @@ test('LE TEST QUI COMPTE : le fait daté a QUITTE la carte, remplacé par les av
 // 2. Les pastilles de canaux — quatre rendus, pas deux
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('LE TEST QUI COMPTE : « aucun canal », « jamais relevé » et « non vérifiés » sont TROIS rendus', () => {
-  // ⚠ TROIS, PAS DEUX, DEPUIS LA REVUE DE 5c0d759. Le serveur distingue déjà
-  // « jamais relevé » de « pas relié » (branche `jamais_releve` de
-  // `suppressionPossible`), et la carte les confondait : un bien neuf dont le
-  // relevé n'a jamais abouti se lisait comme un bien délibérément non
-  // connecté. C'est la dette 59 sous une autre forme.
-  const lu = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: new Date().toISOString() }), OUTILS()))
+test('LE TEST QUI COMPTE : « aucun canal » et « non vérifiés » sont DEUX rendus différents', () => {
+  const lu = doc(M.carteHtml(bien({ canaux: [] }), OUTILS()))
   assert.equal(lu.querySelector('[data-canaux]').dataset.canaux, 'aucun')
   assert.equal(lu.querySelector('[data-canaux]').textContent, 'Aucun canal relié')
-
-  const jamais = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null }), OUTILS()))
-  assert.equal(jamais.querySelector('[data-canaux]').dataset.canaux, 'jamais-releve')
-  assert.match(jamais.querySelector('[data-canaux]').textContent, /jamais été relevés/)
 
   const nonLu = doc(M.carteHtml(bien({ canaux: null }), OUTILS()))
   assert.equal(nonLu.querySelector('[data-canaux]').dataset.canaux, 'non-lus')
   assert.equal(nonLu.querySelector('[data-canaux]').textContent, 'Canaux non vérifiés')
 
-  const textes = [lu, jamais, nonLu].map(d => d.querySelector('[data-canaux]').textContent)
-  assert.equal(new Set(textes).size, 3,
+  assert.notEqual(lu.querySelector('[data-canaux]').textContent,
+    nonLu.querySelector('[data-canaux]').textContent,
     'lire « aucun canal » quand on en a deux est exactement le défaut que la dette 59 a fermé')
+})
+
+test('LE TEST QUI COMPTE : « jamais relevé » N EST PAS DISTINGUABLE ICI, et on le prouve', () => {
+  // ⚠ CE TEST GARDE UNE IMPOSSIBILITÉ, pour qu'on ne refasse pas l'erreur du
+  // 21 octobre 2026. J'avais ajouté un troisième rendu — « ses canaux n'ont
+  // jamais été relevés » — sur la marque `canaux_vu_le == null`, et je l'ai
+  // défait : cette marque ne peut PAS valoir autre chose quand un bien n'a
+  // aucun canal.
+  //
+  // `fraicheurDuBien` rend `null` dès qu'un bien n'a aucun canal (décision de
+  // Thierry du 19 octobre : « un bien sans canal ne dit rien du tout »). Une
+  // carte sans pastille a donc TOUJOURS `canaux_vu_le: null`, et distinguer
+  // là-dessus rendait « Aucun canal relié » inatteignable — un bien Beds24,
+  // ou neuf, annonçait une vérification jamais faite alors qu'elle avait eu
+  // lieu dix minutes plus tôt.
+  // `lib/canaux-du-bien` construit son client au chargement : sans ces
+  // variables, le require lève avant la première assertion.
+  process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
+  process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'cle-de-test'
+  process.env.CHANNEL_BASE_URL = process.env.CHANNEL_BASE_URL || 'http://localhost:1/api/v1'
+  process.env.CHANNEL_API_KEY = process.env.CHANNEL_API_KEY || 'cle-de-test'
+  const { fraicheurDuBien } = require('../lib/canaux-du-bien')
+  const maintenant = new Date().toISOString()
+  assert.equal(fraicheurDuBien([], maintenant), null,
+    'si ceci change, la distinction « jamais relevé » devient possible — voir la dette')
+  assert.equal(fraicheurDuBien(null, maintenant), null)
+  // Avec un canal, la fraîcheur existe : c'est bien l'absence de canal qui
+  // efface la date, pas l'horloge.
+  assert.equal(fraicheurDuBien([{ vu_le: null }], maintenant), maintenant)
+
+  // La distinction demanderait l'horloge du COMPTE (`canaux_releve`), que
+  // l'endpoint ne descend pas. Tant qu'il ne la descend pas, l'écran n'a pas
+  // la donnée qu'il prétendrait lire.
+  const sansCanal = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null }), OUTILS()))
+  assert.equal(sansCanal.querySelector('[data-canaux]').dataset.canaux, 'aucun')
 })
 
 test('les trois états d un canal sont distincts, `mappe: null` compris', () => {

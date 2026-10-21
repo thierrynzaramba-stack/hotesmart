@@ -239,6 +239,10 @@ test('LE TEST QUI COMPTE : les motifs sont ceux du SERVEUR, découverts dans son
   const motifs = [...new Set([...corps.slice(0, corps.indexOf('\n}')).matchAll(/motif:\s*'([a-z_]+)'/g)]
     .map(m => m[1]))]
   assert.ok(motifs.length >= 4, `${motifs.length} motif(s) découvert(s) : la découverte a échoué`)
+  // ⚠ ET LE CAS GÉNÉRAL, PAS SEULEMENT LES DEUX NOMS EN DUR (re-revue de
+  // 3dddb14) : un motif ajouté demain au serveur tomberait en silence dans le
+  // fourre-tout, et ce test serait resté vert — exactement le défaut qu'il
+  // existe pour empêcher.
 
   for (const motif of motifs) {
     const d = doc(M.ficheHtml(
@@ -256,8 +260,11 @@ test('LE TEST QUI COMPTE : les motifs sont ceux du SERVEUR, découverts dans son
     // PHRASE : `annonce_reliee` et `jamais_releve` disent des choses
     // différentes, et parler des canaux « illisibles » à qui n en a jamais
     // fait relever est faux.
+    assert.ok(Object.prototype.hasOwnProperty.call(M.MOTIFS, motif),
+      `${motif} n est pas dans la table d affichage : il tomberait en silence ` +
+      'dans « Impossible de vérifier ses canaux », qui est faux')
     if (motif === 'annonce_reliee') assert.match(r.textContent, /Déconnectez/)
-    if (motif === 'jamais_releve') assert.match(r.textContent, /jamais été relevés/)
+    if (motif === 'jamais_releve') assert.match(r.textContent, /Aucun canal n’est relié/)
   }
 })
 
@@ -369,33 +376,6 @@ test('LE TEST QUI COMPTE : « rien signalé » et « aucun avis » ne disent pas
   for (const d of [lus, rien]) assert.equal(d.querySelector('.fic-pouces'), null)
 })
 
-test('LE TEST QUI COMPTE : « jamais relevé » n est pas « aucun canal relié »', () => {
-  // ⚠ Revue de 5c0d759. Le serveur distingue déjà les deux — sa branche
-  // `jamais_releve` porte le commentaire « jamais relevé n est pas pas
-  // relié » — et l écran affirmait « Aucun canal relié » dans les deux cas :
-  // un bien neuf dont le relevé n a jamais abouti se lisait comme un bien
-  // délibérément non connecté.
-  // ⚠ ET LA RÈGLE VIT DANS LE MODULE COMMUN : les DEUX endroits qui rendent
-  // les canaux — l en-tête et le bloc « Où il est en vente » — doivent dire la
-  // même chose, et la CARTE de la liste aussi.
-  const jamais = doc(M.ficheHtml(
-    fiche({ canaux: [], canaux_vu_le: null, canaux_echec: false }), OUTILS(), {}))
-  const zones = [...jamais.querySelectorAll('[data-canaux]')]
-  assert.equal(zones.length, 2, 'l en-tête et le bloc rendent tous deux les canaux')
-  for (const z of zones) {
-    assert.equal(z.dataset.canaux, 'jamais-releve')
-    assert.match(z.textContent, /jamais été relevés/)
-    assert.doesNotMatch(z.textContent, /Aucun canal relié/)
-  }
-
-  // Relevé abouti, et vraiment aucun canal : là, c est une RÉPONSE.
-  const aucun = doc(M.ficheHtml(
-    fiche({ canaux: [], canaux_vu_le: '2026-10-20T08:00:00Z', canaux_echec: false }), OUTILS(), {}))
-  for (const z of aucun.querySelectorAll('[data-canaux]')) {
-    assert.equal(z.dataset.canaux, 'aucun')
-    assert.match(z.textContent, /Aucun canal relié/)
-  }
-})
 
 // ═══════════════════════════════════════════════════════════════════════════
 // 7. Réglages
