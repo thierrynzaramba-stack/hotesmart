@@ -315,7 +315,13 @@ test('le cron l’execute apres les relances, avec les outils de api/avis.js', (
   const fs = require('node:fs'); const path = require('node:path')
   const cron = fs.readFileSync(path.join(__dirname, '..', 'api', 'cron.js'), 'utf8')
   const r = cron.indexOf("chrono.mesure('relances_avis'")
-  const a = cron.indexOf("chrono.mesure('auto_validation_avis', () => executerAutoValidations(supabase, {")
+  // ⚠ LE MOTIF PORTE LE NOM DE L'ETAPE, PAS LA FORME DE SON APPEL. Il figeait
+  // `chrono.mesure('auto_validation_avis', () => executerAutoValidations(supabase, …))` : le lot de mesure du
+  // 22 octobre 2026 a du passer l'affectation du bilan DANS la callback — pour
+  // que le travail fait soit attribue a la tache — et ce test rougissait sans
+  // qu'aucune regle n'ait bouge. L'ordre des etapes, lui, est la propriete, et
+  // il est garde.
+  const a = cron.indexOf("chrono.mesure('auto_validation_avis'")
   assert.match(cron, /outils: outilsAutoValidation, resteMs: \(\) => 55000 - chrono.total\(\)/)
   assert.ok(r > 0 && a > r)
   const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'avis.js'), 'utf8')

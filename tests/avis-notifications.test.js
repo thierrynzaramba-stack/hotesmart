@@ -147,7 +147,13 @@ test('api/avis.js prévient l’hôte quand la prestataire a fini et que l’év
 
 test('le cron appelle les relances, avant la distribution des changements', () => {
   const cron = fs.readFileSync(path.join(__dirname, '..', 'api', 'cron.js'), 'utf8')
-  const relances = cron.indexOf("chrono.mesure('relances_avis', () => relancerEvaluations(supabase))")
+  // ⚠ LE MOTIF PORTE LE NOM DE L'ETAPE, PAS LA FORME DE SON APPEL. Il figeait
+  // `chrono.mesure('relances_avis', () => relancerEvaluations(supabase))` : le lot de mesure du
+  // 22 octobre 2026 a du passer l'affectation du bilan DANS la callback — pour
+  // que le travail fait soit attribue a la tache — et ce test rougissait sans
+  // qu'aucune regle n'ait bouge. L'ordre des etapes, lui, est la propriete, et
+  // il est garde.
+  const relances = cron.indexOf("chrono.mesure('relances_avis'")
   const dispatch = cron.indexOf("chrono.mesure('dispatch_changements'")
   assert.ok(relances > 0, 'étape présente')
   assert.ok(relances < dispatch, 'avant le dispatch, le poste le plus lourd')

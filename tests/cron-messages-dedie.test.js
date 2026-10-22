@@ -31,7 +31,7 @@ const BIENS = [
 
 function preparer ({ biens = BIENS, erreurBiens = null, importJette = false,
                      surImport = null } = {}) {
-  const etat = { imports: [], budgets: [], filtres: {}, table: null, colonnes: null, borne: null }
+  const etat = { imports: [], budgets: [], filtres: {}, tables: [], colonnes: null, borne: null }
   // ⚠ LE DOUBLE MEMORISE LES FILTRES, et son mutisme a laisse passer le
   // retrecissement du perimetre : il resolvait `not()` quel que soit le
   // `select`, donc retirer le filtre de provider n'aurait fait rougir aucun
@@ -39,7 +39,15 @@ function preparer ({ biens = BIENS, erreurBiens = null, importJette = false,
   // requete, il teste la plomberie (REVIEW.md regle 8).
   const client = {
     from (table) {
-      etat.table = table
+      // ⚠ TOUTES LES TABLES TOUCHEES, PAS « LA DERNIERE ». Le double gardait
+      // `etat.table = table`, donc la derniere table vue — ce qui tenait tant
+      // que la lecture des biens etait la seule requete de la passe. Le lot de
+      // mesure du 22 octobre 2026 en a ajoute deux APRES (`cron_stats`,
+      // `cron_logs`), et l'assertion « on a bien lu `properties` » est devenue
+      // fausse sans qu'aucune regle n'ait bouge. Un test tient la PROPRIETE —
+      // la table a ete lue, avec ces filtres —, pas l'ordre des requetes
+      // autour d'elle.
+      etat.tables.push(table)
       const chain = {
         select (cols) { etat.colonnes = cols; return chain },
         eq (c, v) { etat.filtres[c] = v; return chain },
@@ -211,7 +219,7 @@ test('le PERIMETRE couvre la marque blanche, pas seulement `channex`', async () 
   // et `messages_import_suspendu` n'aurait pas pu partir.
   const { etat, handler } = preparer({})
   await handler(req(), reponse())
-  assert.strictEqual(etat.table, 'properties')
+  assert.ok(etat.tables.includes('properties'), `tables lues : ${etat.tables.join(', ')}`)
   assert.deepStrictEqual(etat.filtres.provider_in, ['channex', 'channel'],
     'les deux valeurs du couple channel-manager')
   assert.strictEqual(etat.filtres.provider, undefined,
