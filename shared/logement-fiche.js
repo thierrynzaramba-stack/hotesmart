@@ -22,6 +22,7 @@
 //   · `[]` / `{connue:false}` / `0`      lu, et vide. C'est une RÉPONSE ;
 //   · données                            on affiche.
 import { canauxHtml, faitDateAffiche, avisHtml, sousTitre, fraicheurDuCompte, releveDuCompteEnEchec,
+  pastillesDesCanaux,
   signalDuBien } from './logements-liste.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,7 +248,52 @@ export function calendrierHtml (fiche, { t, esc, icone }) {
 // etat ni sa date. Le bloc garde l'information COMPLETE — pastilles, etat et
 // « Canaux verifies le … » —, l'en-tete garde le nom, le sous-titre et le fait
 // date. Point signale en recette, tranche par Thierry.
-export function enTeteHtml (fiche, outils) {
+// ─── Les deux actions de l'en-tête ─────────────────────────────────
+//
+// ⚠ L'INTERRUPTEUR REMPLACE LA LIGNE D'ÉTAT, il ne s'y ajoute pas. `signalHtml`
+// dit déjà « Assistant en pause » — la même phrase que la carte de la liste — et
+// l'interrupteur porte cet état dans son `aria-checked` et son libellé. Les deux
+// ensemble diraient la même chose deux fois dans le même en-tête.
+//
+// ⚠ UN VRAI INTERRUPTEUR (`role="switch"`), pas deux boutons qui s'échangent :
+// un lecteur d'écran annonce alors « Assistant HôteSmart, activé » et le
+// changement d'état, là où un bouton qui change de nom l'oblige à deviner.
+export function assistantHtml (fiche, outils, { peutModifier = false } = {}) {
+  const { t, esc, icone } = outils
+  if (!peutModifier) return signalHtml(fiche, outils)
+  const enPause = (fiche.bien || {}).assistant_en_pause === true
+  return `<p class="fic-assistant caption" data-assistant="${enPause ? 'pause' : 'actif'}">
+    <button type="button" class="fic-bascule" role="switch" aria-checked="${enPause ? 'false' : 'true'}"
+      data-bind="assistant" data-en-pause="${enPause ? '1' : ''}">
+      <span class="fic-bascule__piste" aria-hidden="true"><span class="fic-bascule__rond"></span></span>
+      <span>${esc(t('fiche.assistant'))}</span>
+    </button>
+    <span class="fic-muet" data-assistant-etat>${esc(t(enPause ? 'fiche.assistant_pause' : 'fiche.assistant_actif'))}</span>
+    ${enPause ? `<span class="fic-muet">${icone('i-pause', 'icon')}</span>` : ''}
+    <span class="fic-sauve caption" data-etat aria-live="polite"></span>
+    <span class="fic-erreur caption" data-erreur hidden></span>
+  </p>`
+}
+
+// ⚠ LE DÉCLENCHEUR EST UN `<label>` SUR UN `<input type=file>`, et le champ
+// reste dans le DOM (hors de l'œil) : un bouton qui ouvre le sélecteur par
+// `click()` sur un champ absent ne s'ouvre pas au clavier, et sur iOS il ne
+// s'ouvre pas du tout hors geste direct.
+export function photoHtml (fiche, outils, { peutModifier = false } = {}) {
+  const { t, esc, icone } = outils
+  if (!peutModifier) return ''
+  const aUnePhoto = !!(fiche.bien || {}).photo_url
+  return `<div class="fic-photo__action">
+    <label class="btn btn--secondary fic-photo__btn" for="fic-photo-champ">
+      ${icone('i-photo', 'icon')}<span>${esc(t(aUnePhoto ? 'fiche.photo_changer' : 'fiche.photo_ajouter'))}</span>
+    </label>
+    <input type="file" id="fic-photo-champ" accept="image/*" class="sr-only" data-bind="photo">
+    <span class="fic-sauve caption" data-etat aria-live="polite"></span>
+    <p class="fic-erreur caption" data-erreur hidden></p>
+  </div>`
+}
+
+export function enTeteHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, icone } = outils
   const b = fiche.bien
   const sous = sousTitre(b)
@@ -270,12 +316,15 @@ export function enTeteHtml (fiche, outils) {
     : t(fait.cle)
 
   return `<header class="fic-entete">
-    <div class="fic-photo">${photo}</div>
+    <div class="fic-entete__visuel">
+      <div class="fic-photo">${photo}</div>
+      ${photoHtml(fiche, outils, { peutModifier })}
+    </div>
     <div class="fic-entete__texte">
       <h1 class="h2 fic-nom">${esc(b.nom || '')}</h1>
       ${sous ? `<p class="fic-sous caption">${sous}</p>` : ''}
       <p class="fic-fait${fait.muet || partiel ? ' fic-muet' : ''} caption" data-fait="${esc(fait.muet ? 'indisponible' : fiche.fait_date.type)}"${partiel ? ' data-partiel' : ''}>${esc(faitTexte)}${partiel ? ` ${esc(t('fiche.fait_partiel'))}` : ''}</p>
-      ${signalHtml(fiche, outils)}
+      ${assistantHtml(fiche, outils, { peutModifier })}
       ${calendrierHtml(fiche, outils)}
     </div>
   </header>`
@@ -310,14 +359,41 @@ export function fraicheurAffichee (fiche, maintenant = Date.now()) {
   }
 }
 
-export function venteHtml (fiche, outils) {
+// ⚠ UN LIEN VERS L'ASSISTANT EXISTANT, PAS UN ASSISTANT DE PLUS (spec §3.1 :
+// « assistant de connexion existant, reprise OAuth Airbnb conservée »).
+//
+// ⚠ ET C'EST UN LIEN, PAS UN BOUTON QUI OUVRIRAIT LA FENÊTRE ICI. L'assistant a
+// besoin de la CLÉ DU PARTENAIRE pour lister les canaux ; la fiche ne la descend
+// pas, et ce lot ne commencera pas à la faire circuler. La page des connexions,
+// elle, la connaît déjà : on lui passe l'UUID du bien, et elle ouvre l'assistant
+// sur le bon logement.
+//
+// ⚠ UNE SEULE ACTION POUR LE BLOC, pas une par canal : l'assistant traite déjà
+// chaque plateforme à l'intérieur, et une action par ligne ferait trois chemins
+// vers la même fenêtre.
+export function connecterHtml (fiche, outils, { peutModifier = false } = {}) {
+  const { t, esc, icone } = outils
+  if (!peutModifier) return ''
+  const noms = canauxDeVente(fiche.canaux)
+  const cle = (noms && noms.length) ? 'fiche.connexions_gerer' : 'fiche.connecter'
+  const id = encodeURIComponent((fiche.bien || {}).id || '')
+  return `<p class="fic-liens"><a class="btn btn--secondary" data-bind="connecter"
+    href="/pages/connexions?bien=${esc(id)}">${icone('i-link', 'icon')}<span>${esc(t(cle))}</span></a></p>`
+}
+
+export function venteHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, dateEnClair } = outils
   // ⚠ `Array.isArray`, PAS `!= null` (revue de 5c0d759). Un `{}` — réponse
   // tronquée, champ renommé côté serveur — passe `!= null`, son `.length` vaut
   // `undefined`, et « Aucun canal relié » s'affiche sur un bien qui en a deux.
   // C'est le trou que `etatDeLaPage` ferme au niveau de la PAGE ; il descend
   // ici, au grain du bloc.
-  if (!Array.isArray(fiche.canaux)) return nonLu('fiche.canaux_non_lus', outils)
+  // ⚠ L'ACTION EXISTE MÊME QUAND LES CANAUX NE SE LISENT PAS : c'est par là
+  // qu'on en relie un, et son utilité ne dépend pas de la réussite d'une
+  // lecture. La taire sur une panne enfermerait l'hôte dans un écran qui ne
+  // propose rien.
+  const connecter = connecterHtml(fiche, outils, { peutModifier })
+  if (!Array.isArray(fiche.canaux)) return `${nonLu('fiche.canaux_non_lus', outils)}${connecter}`
   const f = fraicheurAffichee(fiche)
   const ligne = !f ? ''
     : `<p class="fic-fraicheur caption${f.echec || f.vieux ? ' fic-fraicheur--alerte' : ''}"`
@@ -326,22 +402,267 @@ export function venteHtml (fiche, outils) {
   // ⚠ « Aucun canal relié » est rendu par `canauxHtml`, le module commun : le
   // redire ici laisserait la CARTE mentir le jour où l'une des deux
   // changerait.
-  if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(fiche, outils)}</p>${ligne}`
+  if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(fiche, outils)}</p>${ligne}${connecter}`
   // ⚠ `log-canaux`, LA CLASSE DU MODULE COMMUN (revue de 5c0d759). Le bloc
   // utilisait `fic-vente`, qui n'était déclaré NULLE PART : trois pastilles
   // bord à bord, bordures jointives, là où l'en-tête les espaçait. Le correctif
   // du commit précédent n'avait réparé que la moitié du défaut — et l'en-tête,
   // lui, recopiait les quatre propriétés sous un autre nom.
-  return `<div class="log-canaux">${canauxHtml(fiche, outils)}</div>${ligne}`
+  return `<div class="log-canaux">${canauxHtml(fiche, outils)}</div>${ligne}${connecter}`
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Les champs modifiables — une seule table, lue par l'écran ET par la page
+// ──────────────────────────────────────────────────────────────────────────────
+//
+// ⚠ UNE SEULE DÉFINITION. Le nom du champ côté serveur, son libellé, son type,
+// ses bornes et sa conversion vivent ICI. La page ne les redéclare pas : deux
+// copies divergent, et c'est la règle du dépôt. C'est aussi ce qui garantit que
+// le champ rendu et le champ envoyé portent le même nom.
+//
+// ⚠ `grille: true` MARQUE LES CHAMPS QUI RECONSTRUISENT LA GRILLE CHEZ LE
+// PARTENAIRE. `PATCH /api/channel-property` reconstruit le plan tarifaire EN
+// BLOQUANT dès que l'un d'eux est présent dans le corps — même inchangé. On ne
+// les envoie donc QUE s'ils ont bougé : l'ancien écran le faisait déjà, et c'est
+// la raison pour laquelle il les comparait un par un.
+//
+// ⚠ `euros: true` : à l'écran en EUROS, en base en CENTIMES. La conversion se
+// fait aux deux bouts — c'est le défaut ×100 trouvé en revue de l'étape 2.
+export const CHAMPS = [
+  { nom: 'name', bloc: 'logement', cle: 'fiche.champ_nom', type: 'texte', max: 100,
+    depuis: (b) => b.nom },
+  { nom: 'capacity', bloc: 'logement', cle: 'fiche.champ_capacite', type: 'entier',
+    min: 1, borne: 20, grille: true, depuis: (b) => b.capacite },
+  { nom: 'address', bloc: 'logement', cle: 'fiche.champ_adresse', type: 'texte', max: 200,
+    depuis: (b) => b.adresse },
+  { nom: 'zip_code', bloc: 'logement', cle: 'fiche.champ_cp', type: 'texte', max: 20,
+    depuis: (b) => b.code_postal },
+  { nom: 'city', bloc: 'logement', cle: 'fiche.champ_ville', type: 'texte', max: 100,
+    depuis: (b) => b.ville },
+  { nom: 'country', bloc: 'logement', cle: 'fiche.champ_pays', type: 'texte', max: 2,
+    depuis: (b) => b.pays },
+  { nom: 'base_price', bloc: 'prix', cle: 'fiche.prix_base', type: 'montant',
+    grille: true, depuis: (b) => b.prix_de_base },
+  // ⚠ LE PLANCHER NE SE PRÉREMPLIT PAS À 10. Son défaut est une garde du moteur,
+  // pas une valeur du bien : l'écrire dans la case le ferait ENREGISTRER au
+  // premier passage, et le bien porterait un plancher que personne n'a voulu.
+  { nom: 'prix_minimum', bloc: 'prix', cle: 'fiche.prix_plancher', type: 'montant',
+    euros: true, depuis: (b) => (b.prix_plancher != null ? b.prix_plancher : null) },
+  { nom: 'included_guests', bloc: 'prix', cle: 'fiche.prix_inclus', type: 'entier',
+    min: 1, grille: true, depuis: (b) => b.voyageurs_inclus },
+  { nom: 'extra_guest_fee', bloc: 'prix', cle: 'fiche.prix_supplement', type: 'montant',
+    grille: true, depuis: (b) => b.supplement_voyageur }
+]
+
+export function champsDuBloc (bloc) {
+  return CHAMPS.filter(c => c.bloc === bloc)
+}
+
+// La valeur telle qu'elle s'affiche DANS LA CASE : jamais une valeur par
+// défaut, jamais un montant formaté (une case se réécrit, elle ne se lit pas).
+export function valeurDeSaisie (champ, bien) {
+  const v = champ.depuis(bien || {})
+  if (v == null || v === '') return ''
+  return String(v)
+}
+
+// À qui l'envoi va vraiment — LES CANAUX DU BIEN, pas une phrase écrite une
+// fois pour toutes (décision de Thierry du 21 octobre 2026).
+//
+// ⚠ LA RÈGLE D'ÉTAT EST IMPORTÉE, PAS RECOPIÉE : `pastillesDesCanaux` dit déjà
+// ce qu'est « en vente », et c'est elle que les pastilles affichent juste
+// au-dessus. Deux définitions finiraient par désigner deux ensembles
+// différents, et la phrase promettrait un canal que l'écran dit éteint.
+//
+// ⚠ TROIS RÉPONSES, PAS DEUX. `null` = on n'a pas pu lire les canaux ; `[]` =
+// lu, et aucun n'est en vente ; sinon leurs noms. C'est la règle de tout le lot,
+// et ici elle décide d'une phrase qui annonce une écriture chez un tiers.
+export function canauxDeVente (canaux) {
+  const pastilles = pastillesDesCanaux(canaux)
+  if (pastilles === null) return null
+  return pastilles.filter(p => p.etat === 'vente').map(p => p.label)
+}
+
+// Le bouton d'envoi d'un bloc qui porte des champs de GRILLE.
+//
+// ⚠ PAS D'ENREGISTREMENT AUTOMATIQUE SUR CES CHAMPS-LÀ (décision de Thierry du
+// 21 octobre 2026). Les quatre champs marqués `grille` font reconstruire le plan
+// tarifaire CHEZ LE PARTENAIRE, en bloquant : ce qui part de cet écran ne
+// s'arrête pas à notre base, il atteint les annonces. Un geste pareil se décide,
+// il ne se déclenche pas en sortant d'une case — et la phrase sous le bouton le
+// DIT, avant le clic.
+//
+// ⚠ LE BOUTON N'EST JAMAIS DÉSACTIVÉ. Un bouton grisé tant qu'aucun champ n'a
+// bougé obligerait à cliquer DEUX fois : le premier clic sort de la case (donc
+// active le bouton) sans l'atteindre. Il est toujours cliquable, et il dit
+// « aucun changement à envoyer » quand il n'y a rien à faire.
+// ⚠ UN BIEN SANS CANAL EN VENTE N'A PAS DE PHRASE (décision de Thierry) :
+// rien ne part chez personne, et l'annoncer serait faux. L'envoi, lui, reste
+// possible — il écrit notre base et le plan tarifaire du bien.
+//
+// ⚠ ET DES CANAUX ILLISIBLES NE SE TAISENT PAS. Ne rien dire ferait croire
+// qu'aucune annonce n'est touchée, alors qu'on ne sait pas : on nomme ce qu'on
+// sait — « vos plateformes connectées » — sans inventer lesquelles.
+function aideDEnvoiHtml (fiche, outils) {
+  const { t, esc, liste } = outils
+  const noms = canauxDeVente(fiche && fiche.canaux)
+  // ⚠ EN « JE GARDE MES PRIX », LA PHRASE DIT AUSSI CE QUI NE BOUGE PAS
+  // (demande de Thierry du 22 octobre 2026). Ce qu'on envoie est la GRILLE
+  // tarifaire — le serveur la reconstruit chez les plateformes quel que soit le
+  // mode — mais la poussée nuit par nuit, elle, reste suspendue. Sans la
+  // seconde phrase, l'hôte qui a choisi de garder ses prix lit « sera envoyé à
+  // Airbnb » et croit qu'on écrase ses tarifs.
+  const keep = String(((fiche || {}).bien || {}).mode_des_prix || '').toLowerCase() === 'keep'
+  if (noms === null) {
+    return `<p class="caption fic-muet" data-envoi-aide="inconnu">`
+      + `${esc(t(keep ? 'fiche.envoi_inconnu_keep' : 'fiche.envoi_inconnu'))}</p>`
+  }
+  if (!noms.length) return ''
+  return `<p class="caption fic-muet" data-envoi-aide="canaux">`
+    + `${esc(t(keep ? 'fiche.envoi_canaux_keep' : 'fiche.envoi_canaux',
+      { canaux: liste ? liste(noms) : noms.join(', ') }))}</p>`
+}
+
+function envoiHtml (bloc, fiche, outils) {
+  const { t, esc } = outils
+  // DÉFENSIF : aujourd'hui les deux seuls appelants sont les deux blocs qui
+  // PORTENT des champs de grille, donc cette garde ne mord jamais (mutation
+  // vérifiée le 21 octobre 2026 : la retirer ne change rien). Elle reste pour
+  // qu'un troisième bloc, un jour, n'affiche pas un bouton sans objet.
+  if (!champsDuBloc(bloc).some(c => c.grille)) return ''
+  return `<div class="fic-envoi" data-envoi="${esc(bloc)}">
+    <button type="button" class="btn" data-bind="enregistrer" data-bloc="${esc(bloc)}">
+      ${esc(t('fiche.enregistrer'))}
+    </button>
+    ${aideDEnvoiHtml(fiche, outils)}
+    <span class="fic-sauve caption" data-etat aria-live="polite"></span>
+    <p class="fic-erreur caption" data-erreur hidden></p>
+  </div>`
+}
+
+// Une ligne modifiable. Hors droit d'écriture, c'est la ligne de LECTURE de
+// l'étape 2 qui est rendue — aucune case, aucun bouton, rien dans le DOM.
+function ligneSaisieHtml (champ, bien, outils) {
+  const { t, esc } = outils
+  const id = `ch-${champ.nom}`
+  const val = valeurDeSaisie(champ, bien)
+  const numerique = champ.type === 'entier' || champ.type === 'montant'
+  const attrs = [
+    `id="${id}"`, `name="${esc(champ.nom)}"`, `data-champ="${esc(champ.nom)}"`,
+    `value="${esc(val)}"`, 'class="fic-saisie"', 'autocomplete="off"',
+    numerique ? 'inputmode="decimal"' : '',
+    champ.type === 'entier' ? 'inputmode="numeric"' : '',
+    champ.max != null && !numerique ? `maxlength="${champ.max}"` : '',
+    champ.grille ? 'data-grille="1"' : '',
+    champ.euros ? 'data-euros="1"' : ''
+  ].filter(Boolean).join(' ')
+  return `<div class="fic-ligne fic-ligne--saisie" data-ligne="${esc(champ.nom)}">
+    <label class="fic-ligne__cle caption" for="${id}">${esc(t(champ.cle))}</label>
+    <span class="fic-ligne__val"><input ${attrs}></span>
+    <span class="fic-sauve caption" data-etat aria-live="polite"></span>
+    <p class="fic-erreur caption" data-erreur hidden></p>
+  </div>`
+}
+
+// « Publier mes prix » : quand, et pourquoi pas.
+//
+// ⚠ JAMAIS SUR UN BIEN PILOTÉ PAR YIELDFLOW. C'est écrit dans l'endpoint de
+// lecture, et c'est la raison d'être de `piloteDuBien` : proposer la
+// publication sur un bien piloté mettrait DEUX écrivains de prix sur la même
+// nuit. L'app de tarification pousse déjà ses prix ; ce bouton-là n'a rien à
+// faire ici.
+//
+// ⚠ ET JAMAIS EN MODE « JE GARDE MES PRIX » : le serveur refuse la mise en file
+// (`RATE_PUSH_BLOCKED`), donc le bouton mènerait à un refus certain.
+// ⚠ LA RÉPONSE DU SERVEUR D'ABORD (constat de la recette de Thierry du
+// 22 octobre 2026). L'écran déduisait « publiable » du mode et du pilote — les
+// deux seules choses qu'il voit — et proposait le bouton sur un bien SANS
+// AUCUN CANAL : le serveur rendait alors 400 « Bien non connecté au canal (ids
+// manquants) », un message interne, pour un geste qu'on n'aurait pas dû offrir.
+// Les identifiants du partenaire, qui tranchent, ne descendent pas ici — et ne
+// doivent pas. `fiche.publication` porte donc la réponse, calculée là où la
+// donnée est.
+//
+// La déduction locale reste en REPLI, pour une réponse qui ne porterait pas
+// encore le champ : elle est moins bonne, pas fausse.
+export function publierAffiche (bien, publication = null) {
+  if (publication && typeof publication === 'object' && 'possible' in publication) {
+    return { montre: publication.possible === true, motif: publication.motif || null }
+  }
+  const mode = String((bien && bien.mode_des_prix) || '').toLowerCase()
+  if (mode !== 'managed') return { montre: false, motif: 'mode_keep' }
+  if (((bien && bien.pilote_tarifaire) || '') === 'yieldflow') {
+    return { montre: false, motif: 'pilote' }
+  }
+  return { montre: true, motif: null }
 }
 
 // ─── 2. Prix ────────────────────────────────────────────────────────────────
-export function prixHtml (fiche, outils) {
+export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, argent, nombre } = outils
   const p = prixAffiche(fiche.bien)
   const ligne = (cle, valeur, extra = '') =>
     `<div class="fic-ligne"${extra}><span class="fic-ligne__cle caption">${esc(t(cle))}</span>`
     + `<span class="fic-ligne__val">${valeur}</span></div>`
+
+  // ⚠ LE CHOIX NE S'AFFICHE QUE TANT QU'IL RESTE À FAIRE (spec §3.2) : une fois
+  // le bien en « HôteSmart envoie mes prix », le sélecteur DISPARAÎT. Le retour
+  // en arrière est refusé par le serveur dès qu'un canal est actif, et montrer
+  // un choix qui sera refusé est ce que ce lot s'interdit.
+  const modeHtml = (peutModifier && p.choixPossible)
+    ? `<div class="fic-ligne fic-ligne--saisie" data-ligne="mode">
+        <label class="fic-ligne__cle caption" for="fic-mode">${esc(t('fiche.prix_mode_choix'))}</label>
+        <span class="fic-ligne__val"><select class="fic-saisie" id="fic-mode" data-bind="mode">
+          <option value="keep" selected>${esc(t('fiche.prix_mode_keep'))}</option>
+          <option value="managed">${esc(t('fiche.prix_mode_managed'))}</option>
+        </select></span>
+        <span class="fic-sauve caption" data-etat aria-live="polite"></span>
+        <p class="fic-erreur caption" data-erreur hidden></p>
+      </div>`
+    : ''
+
+  // ⚠ UN BIEN PILOTÉ N'A PAS DE BOUTON, MAIS IL A UNE PHRASE (décision de
+  // Thierry du 21 octobre 2026). L'absence seule se lirait comme un oubli, ou
+  // comme un droit manquant ; la phrase dit que les prix PARTENT, et qu'ils
+  // partent tout seuls. Elle ne nomme ni l'app de tarification ni le partenaire
+  // technique — ce sont des noms de l'intérieur, et l'hôte n'a pas à les
+  // connaître pour comprendre ce qui se passe sur ses annonces.
+  //
+  // ⚠ ET ELLE S'AFFICHE SANS CONDITION DE DROIT : c'est un ÉTAT du bien, pas
+  // une action. La taire à un profil en lecture lui laisserait croire que ses
+  // prix dorment.
+  const pub = publierAffiche(fiche.bien, fiche.publication)
+  const publierHtml = pub.motif === 'pilote'
+    ? `<p class="fic-publier caption fic-muet" data-publier="automatique">${esc(t('fiche.prix_automatique'))}</p>`
+    : ((outils.peutPublier === true && pub.montre)
+      ? `<div class="fic-publier" data-publier>
+          <button type="button" class="btn" data-bind="publier">${esc(t('fiche.publier'))}</button>
+          <span class="fic-sauve caption" data-etat aria-live="polite"></span>
+          <p class="fic-erreur caption" data-erreur hidden></p>
+        </div>`
+      : '')
+
+  if (peutModifier) {
+    // ⚠ LA DEVISE RESTE EN LECTURE, MÊME AVEC LE DROIT D'ÉCRITURE. `PATCH` ne
+    // l'accepte pas — elle n'est pas dans son contrat — et l'ancien écran le
+    // disait déjà : « devise non editable ». Une case qu'on ne peut pas
+    // enregistrer est un leurre.
+    //
+    // ⚠ ET LE PLANCHER DIT SON DÉFAUT SOUS LA CASE, pas DANS la case : le
+    // préremplir l'enregistrerait au premier passage.
+    const vide = p.plancherParDefaut
+      ? `<p class="fic-aide caption" data-plancher-defaut>${esc(t('fiche.prix_plancher_defaut',
+        { montant: argent(p.plancher, p.devise) }))}</p>`
+      : ''
+    return `<div class="fic-prix">
+      ${modeHtml || ligne('fiche.prix_mode', esc(t(p.modeCle)), ' data-mode')}
+      ${champsDuBloc('prix').map(c => ligneSaisieHtml(c, fiche.bien, outils)
+        + (c.nom === 'prix_minimum' ? vide : '')).join('')}
+      ${ligne('fiche.champ_devise', `${esc(p.devise)} <span class="fic-muet caption">${esc(t('fiche.devise_fixe'))}</span>`, ' data-devise')}
+      ${envoiHtml('prix', fiche, outils)}
+      ${publierHtml}
+    </div>`
+  }
 
   return `<div class="fic-prix">
     ${ligne('fiche.prix_mode', esc(t(p.modeCle)), ' data-mode')}
@@ -352,13 +673,25 @@ export function prixHtml (fiche, outils) {
         : argent(p.plancher, p.devise)), ' data-plancher')}
     ${p.voyageursInclus != null ? ligne('fiche.prix_inclus', esc(nombre(p.voyageursInclus, 0))) : ''}
     ${p.supplement != null ? ligne('fiche.prix_supplement', esc(argent(p.supplement, p.devise))) : ''}
+    ${publierHtml}
   </div>`
 }
 
 // ─── 3. Le logement ─────────────────────────────────────────────────────────
-export function logementHtml (fiche, outils) {
+export function logementHtml (fiche, outils, { peutModifier = false } = {}) {
   const { t, esc, nombre } = outils
   const b = fiche.bien
+  if (peutModifier) {
+    return `<div class="fic-champs">`
+      + champsDuBloc('logement').map(c => ligneSaisieHtml(c, b, outils)).join('')
+      // ⚠ DEUX PHRASES CONTRADICTOIRES, COLLÉES (revue de l'étape 3) : ce bloc
+      // disait « il s'enregistre tout seul » puis montrait un bouton
+      // « Enregistrer » juste en dessous — parce que la capacité, elle, part chez
+      // les plateformes et attend le bouton. L'aide le dit maintenant.
+      + `<p class="fic-aide caption" data-aide>${esc(t(
+        champsDuBloc('logement').some(c => c.grille) ? 'fiche.modifier_aide_grille' : 'fiche.modifier_aide'))}</p>`
+      + envoiHtml('logement', fiche, outils) + `</div>`
+  }
   const champs = [
     ['fiche.champ_nom', b.nom],
     ['fiche.champ_capacite', b.capacite != null ? nombre(b.capacite, 0) : null],
@@ -367,8 +700,9 @@ export function logementHtml (fiche, outils) {
     ['fiche.champ_ville', b.ville],
     ['fiche.champ_pays', b.pays]
   ]
-  // ⚠ UN CHAMP VIDE SE DIT « — », il ne disparaît pas : à l'étape 3 il devient
-  // éditable sur place, et une ligne absente n'offrirait nulle part où écrire.
+  // ⚠ UN CHAMP VIDE SE DIT « — », il ne disparaît pas : il est éditable sur
+  // place dès qu'on en a le droit, et une ligne absente n'offrirait nulle part
+  // où écrire.
   return `<div class="fic-champs">${champs.map(([cle, val]) =>
     `<div class="fic-ligne"><span class="fic-ligne__cle caption">${esc(t(cle))}</span>`
     + `<span class="fic-ligne__val${val ? '' : ' fic-muet'}">${val ? esc(val) : '—'}</span></div>`
@@ -398,21 +732,64 @@ export function logementHtml (fiche, outils) {
 export function supprimerHtml (fiche, outils, { peutSupprimer = false } = {}) {
   const s = suppressionAffiche(fiche.suppression)
   if (!peutSupprimer || MOTIFS_QUI_EFFACENT.includes(s.motif)) return null
-  // ⚠ ET LE BLOC NE SE REND QUE S'IL A QUELQUE CHOSE À DIRE (constat de la
-  // revue de 5c0d759). Quand la suppression est POSSIBLE, l'étape 2 n'a aucune
-  // information à donner : un bouton rouge actif qui ne part pas est un leurre,
-  // et son aide promettait une confirmation qui n'existe pas encore. Quand elle
-  // est refusée ou incertaine, son ÉTAT est l'information, et il se lit AVANT
-  // le clic — c'est ce que Thierry a demandé. Le bouton revient à l'étape 3,
-  // câblé.
-  if (s.active) return null
+  // ⚠ À L'ÉTAPE 2, LE BLOC NE SE RENDAIT PAS QUAND LA SUPPRESSION ÉTAIT
+  // POSSIBLE : un bouton rouge actif qui ne part pas est un leurre. À l'étape 3
+  // il part, donc il se rend — et quand la suppression est REFUSÉE, c'est son
+  // ÉTAT qui reste l'information, lisible AVANT le clic.
   const { t, esc, icone } = outils
+  const bouton = (actif) => `<button type="button" class="btn btn--danger" data-bind="supprimer"${actif ? '' : ' disabled'}>`
+    + `${icone('i-close', 'icon')}<span>${esc(t('fiche.supprimer'))}</span></button>`
+  if (s.active) {
+    return `<div class="fic-supprimer">
+      ${bouton(true)}
+      <span class="fic-sauve caption" data-etat aria-live="polite"></span>
+      <p class="fic-erreur caption" data-erreur hidden></p>
+    </div>`
+  }
   return `<div class="fic-supprimer">
-    <button type="button" class="btn btn--danger" data-bind="supprimer" disabled>
-      ${icone('i-close', 'icon')}<span>${esc(t('fiche.supprimer'))}</span>
-    </button>
+    ${bouton(false)}
     <p class="caption fic-muet" data-raison data-motif="${esc(s.motif || 'inconnu')}">${esc(t(s.cle))}</p>
   </div>`
+}
+
+// Ce que la confirmation ÉNUMÈRE, à partir des nombres du serveur.
+//
+// ⚠ LE LOGEMENT LUI-MÊME EST TOUJOURS DANS LA LISTE, même quand il n'a aucune
+// donnée liée : une fenêtre qui n'énumère rien ferait croire qu'on ne perd rien.
+//
+// ⚠ UN COMPTE À ZÉRO NE S'ÉCRIT PAS. « 0 message » dans une liste de ce qui sera
+// effacé est du bruit — on énumère ce qu'on PERD, pas ce qu'on n'a pas.
+//
+// ⚠ ET UN COMPTE ILLISIBLE (`null`) SE DIT, en toutes lettres. C'est la règle de
+// tout ce lot au moment où elle coûte le plus cher : taire une lecture ratée
+// ferait supprimer un bien en croyant ne rien perdre.
+export const COMPTES_SUPPRESSION = [
+  ['reservations', 'fiche.supprimer_reservations'],
+  ['messages', 'fiche.supprimer_messages'],
+  ['menages', 'fiche.supprimer_menages'],
+  ['codes', 'fiche.supprimer_codes']
+]
+
+export function listeDeSuppression (compte, t) {
+  const lignes = [t('fiche.supprimer_le_bien')]
+  const c = compte || {}
+  // ⚠ `cle_absente` EST UNE RÉPONSE, pas un champ décoratif (revue de l'étape
+  // 3 : il descendait du serveur et personne ne le lisait). Il dit « ce bien
+  // n'a pas de clé partenaire, donc la purge n'efface rien de lié » — et dans
+  // ce cas, les quatre zéros ne sont pas une lecture vide, ce sont des zéros
+  // CERTAINS. Rien de plus à énumérer, et surtout pas « nous n'avons pas pu
+  // compter ».
+  if (c.cle_absente === true) return lignes
+  let illisible = false
+  for (const [nom, cle] of COMPTES_SUPPRESSION) {
+    const v = c[nom]
+    if (v === null || v === undefined) { illisible = true; continue }
+    const n = Number(v)
+    if (!Number.isFinite(n) || n <= 0) continue
+    lignes.push(t(cle, { n }))
+  }
+  if (illisible) lignes.push(t('fiche.supprimer_illisible'))
+  return lignes
 }
 
 // ─── 5. Ménage ──────────────────────────────────────────────────────────────
@@ -558,14 +935,64 @@ export function reglagesHtml (fiche, outils, refuses = []) {
   return `<div class="fic-reglages">${morceaux.join('')}</div>`
 }
 
+// ─── Le dialogue, un seul pour les trois confirmations ─────────────────
+//
+// ⚠ UN SEUL, RÉUTILISÉ : couper l'assistant, publier les prix, supprimer le
+// logement. Trois fenêtres écrites séparément finiraient par ne pas se fermer
+// pareil, ne pas rendre le focus pareil, et ne pas dire « Annuler » au même
+// endroit.
+//
+// ⚠ `<dialog>` NATIF, et pas `window.confirm` comme les autres écrans V5 : la
+// suppression exige de FRAPPER LE NOM du logement, ce qu'une boîte du navigateur
+// ne sait pas faire. Le natif apporte en prime le piège de focus, Échap, et le
+// retour du focus au bouton d'origine — trois choses qu'une fenêtre maison
+// oublie.
+//
+// ⚠ LE DÉFAUT SÛR EST « ANNULER » : il est en premier dans le DOM, donc c'est
+// lui qui prend le focus à l'ouverture, et Échap revient à lui. Jamais l'action
+// destructrice.
+export function dialogueHtml (outils) {
+  const { t, esc } = outils
+  return `<dialog class="fic-dlg" data-bind="dialogue" aria-labelledby="fic-dlg-titre">
+    <form method="dialog" class="fic-dlg__corps">
+      <h2 class="h3" id="fic-dlg-titre" data-dlg="titre"></h2>
+      <p data-dlg="texte"></p>
+      <ul class="fic-dlg__liste" data-dlg="liste" hidden></ul>
+      <p class="fic-dlg__frappe" data-dlg="frappe" hidden>
+        <label class="caption" for="fic-dlg-saisie" data-dlg="frappe-aide"></label>
+        <input class="fic-saisie" id="fic-dlg-saisie" data-dlg="saisie" autocomplete="off">
+      </p>
+      <p class="fic-erreur caption" data-dlg="erreur" hidden></p>
+      <div class="fic-dlg__pied">
+        <button type="submit" value="annuler" class="btn btn--secondary" data-dlg="annuler">${esc(t('fiche.annuler'))}</button>
+        <button type="submit" value="ok" class="btn" data-dlg="ok"></button>
+      </div>
+    </form>
+  </dialog>`
+}
+
 // ─── L'assemblage ───────────────────────────────────────────────────────────
 //
 // ⚠ UN BLOC REFUSÉ N'EST PAS RENDU, et c'est `bloc()` qui le décide sur un
 // corps `null`. Le JSON peut porter le refus, l'écran le cache.
 export function ficheHtml (fiche, outils, droits = {}) {
+  // ⚠ UN SEUL DROIT POUR LES CHAMPS : `reglages:write`, celui que `PATCH`
+  // exige. Il arrive déjà sous le nom `peutSupprimer` depuis l'étape 2 — le
+  // DELETE demande le même — et `peutModifier` le dit à sa place quand
+  // l'appelant le fournit.
+  const peutModifier = droits.peutModifier === true
+    || (droits.peutModifier === undefined && droits.peutSupprimer === true)
+  // ⚠ DEUX DROITS, PAS UN. « Publier mes prix » est gardé côté serveur par
+  // `reservations:write` et non par `reglages:write` (voir §5 de la spec,
+  // corrigé à l'ouverture de l'étape 3) : un membre peut tenir le calendrier
+  // sans reconfigurer le bien, et l'inverse. Le dialogue sert les deux, donc il
+  // existe dès que l'un des deux est là.
+  const peutPublier = droits.peutPublier === true
+  const avecActions = peutModifier || peutPublier
   const inds = Array.isArray(fiche.indisponibles) ? fiche.indisponibles : []
   const refs = Array.isArray(fiche.refuses) ? fiche.refuses : []
   const o = { ...outils,
+    peutPublier,
     avisIndisponibles: inds.includes('avis'),
     // ⚠ UN FAIT DATÉ PARTIEL SE DIT (revue de 5c0d759). Le serveur pose
     // `indisponibles: ['fait_date']` quand il a pu affirmer une FERMETURE mais
@@ -578,10 +1005,9 @@ export function ficheHtml (fiche, outils, droits = {}) {
   const refuse = (nom) => refs.includes(nom)
 
   const gauche = [
-    bloc('fiche.bloc_vente', venteHtml(fiche, o), o),
-    bloc('fiche.bloc_prix', prixHtml(fiche, o), o),
-    bloc('fiche.bloc_logement', logementHtml(fiche, o), o),
-    bloc('fiche.bloc_supprimer', supprimerHtml(fiche, o, droits), o)
+    bloc('fiche.bloc_vente', venteHtml(fiche, o, { peutModifier }), o),
+    bloc('fiche.bloc_prix', prixHtml(fiche, o, { peutModifier }), o),
+    bloc('fiche.bloc_logement', logementHtml(fiche, o, { peutModifier }), o)
   ].join('')
 
   const droite = [
@@ -590,11 +1016,21 @@ export function ficheHtml (fiche, outils, droits = {}) {
     bloc('fiche.bloc_reglages', reglagesHtml(fiche, o, refs), o)
   ].join('')
 
-  return `${enTeteHtml(fiche, o)}
+  // ⚠ SUPPRIMER SORT DES COLONNES, ET VIENT EN DERNIER (constat de la recette
+  // de Thierry du 22 octobre 2026). Il vivait au bas de la colonne GAUCHE : à
+  // l'ordinateur il était bien en bas à gauche, mais au téléphone, où les deux
+  // colonnes s'empilent, il arrivait AU MILIEU de la fiche — avant Ménage, Avis
+  // et Réglages. L'action la plus destructrice du produit se lisait entre deux
+  // blocs de lecture. La spec le veut « en bas » : hors colonnes, il l'est sur
+  // les deux écrans.
+  const supprimer = bloc('fiche.bloc_supprimer', supprimerHtml(fiche, o, droits), o)
+
+  return `${avecActions ? dialogueHtml(o) : ''}${enTeteHtml(fiche, o, { peutModifier })}
     <div class="fic-colonnes">
       <div class="fic-col fic-col--gauche">${gauche}</div>
       <div class="fic-col fic-col--droite">${droite}</div>
-    </div>`
+    </div>
+    ${supprimer}`
 }
 
 // Les états qui ne sont pas une fiche. Comme en liste : les textes passent par

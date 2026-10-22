@@ -356,7 +356,7 @@ test('une panne propose de RÉESSAYER ; un refus de droit ne propose rien', () =
 })
 
 test('LE TEST QUI COMPTE : l état vide ne propose RIEN à qui n a pas le droit', () => {
-  // Les deux actions mènent à `/pages/connexions` et `/biens/nouveau`, deux
+  // Les deux actions mènent à `/pages/connexions` et `/logements/nouveau`, deux
   // pages classées NON DÉLÉGABLES, et le POST de création refuse en 403. « On
   // ne montre jamais ce qui mène à un refus » (Thierry, 20 octobre).
   const membre = doc(M.etatHtml('vide'))
@@ -366,7 +366,7 @@ test('LE TEST QUI COMPTE : l état vide ne propose RIEN à qui n a pas le droit'
 
   const titulaire = doc(M.etatHtml('vide', { peutAjouter: true }))
   const liens = [...titulaire.querySelectorAll('a')].map(a => a.getAttribute('href'))
-  assert.deepEqual(liens, ['/pages/connexions', '/biens/nouveau'])
+  assert.deepEqual(liens, ['/pages/connexions', '/logements/nouveau'])
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -464,15 +464,34 @@ test('la page ne charge AUCUN script tiers et n appelle aucun partenaire', () =>
   assert.ok(!/channex|beds24/i.test(page), 'aucun nom de partenaire dans la page (spec §6)')
 })
 
-test('la page sert /logements, et l ancienne liste reste intacte', () => {
+test('LE TEST QUI COMPTE : l ancienne liste REDIRIGE vers la V5, et la création garde une URL', () => {
+  // ⚠ BASCULÉ LE 21 OCTOBRE 2026 (go de Thierry), avec l étape 3 : à l étape 1,
+  // `/biens` restait intact pour qu il puisse comparer les deux écrans. La V5
+  // fait maintenant au moins autant, donc l ancien ferme.
   const vercel = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'vercel.json'), 'utf8'))
   const rewrites = vercel.rewrites || []
+  const redirects = vercel.redirects || []
   assert.ok(rewrites.some(r => r.source === '/logements' && r.destination === '/pages/logements'),
     'le rewrite doit exister, SANS .html (cleanUrls)')
-  // ⚠ `/biens` N EST PAS TOUCHÉ à l étape 1 : Thierry doit pouvoir comparer les
-  // deux écrans en recette. La redirection est l étape 4.
-  assert.ok(rewrites.some(r => r.source === '/biens' && r.destination === '/pages/biens'))
-  assert.ok(fs.existsSync(path.join(__dirname, '..', 'pages', 'biens.html')))
+  // Plus aucune route ne SERT l ancien écran.
+  assert.equal(rewrites.filter(r => r.source === '/biens' || r.source === '/biens/:id').length, 0)
+  assert.ok(redirects.some(r => r.source === '/biens' && r.destination === '/logements'))
+  assert.ok(redirects.some(r => r.source === '/biens/:id' && r.destination === '/logements/:id'))
+
+  // ⚠ L ORDRE DES REDIRECTIONS TRANCHE : `/biens/nouveau` doit passer AVANT
+  // `/biens/:id`, sinon la création partirait vers une fiche nommée « nouveau ».
+  const iNouveau = redirects.findIndex(r => r.source === '/biens/nouveau')
+  const iFiche = redirects.findIndex(r => r.source === '/biens/:id')
+  assert.ok(iNouveau !== -1 && iNouveau < iFiche, 'la création doit être résolue en premier')
+  // ⚠ ET DU CÔTÉ DES REWRITES AUSSI : `/logements/nouveau` avant `/logements/:id`,
+  // sinon la fiche tenterait de charger un bien nommé « nouveau ».
+  const jNouveau = rewrites.findIndex(r => r.source === '/logements/nouveau')
+  const jFiche = rewrites.findIndex(r => r.source === '/logements/:id')
+  assert.ok(jNouveau !== -1 && jNouveau < jFiche, 'la création doit être servie avant la fiche')
+
+  // La création existe toujours : son écran V5 est l étape 4, son URL est déjà V5.
+  assert.ok(rewrites.some(r => r.source === '/logements/nouveau' && r.destination === '/pages/biens-nouveau'))
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'pages', 'biens-nouveau.html')))
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -603,4 +622,58 @@ test('LE TEST QUI COMPTE : un bien mal formé n emporte pas la LISTE ENTIÈRE', 
   }
   // Et un vrai tableau continue de se rendre.
   assert.equal(M.pastillesDesCanaux([]).length, 0)
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : le nom du partenaire technique ne sort jamais par le REPLI', () => {
+  // \u26a0 TROUV\u00c9 LE 21 OCTOBRE 2026 en \u00e9crivant la phrase d'envoi de l'\u00e9tape 3.
+  // `libelleDuCanal` repliait sur `c.titre` puis `c.ota`, deux champs \u00e9crits
+  // d'apr\u00e8s le partenaire. Une ligne de `canaux_du_bien` portant \u00ab Channex \u00bb
+  // l'aurait affich\u00e9 \u2014 sur la carte de la liste ET sur la fiche, qui passent
+  // toutes deux par ici. \u00ab Jamais le nom du partenaire \u00e0 l'\u00e9cran \u00bb est une
+  // r\u00e8gle du lot, pas une pr\u00e9f\u00e9rence.
+  for (const c of [
+    { ota: 'channex', titre: 'Channex' },
+    { ota: 'autre', titre: 'Channex (PMS)' },
+    { ota: 'beds24', titre: null },
+    { ota: null, titre: 'HoteSmart PMS' }
+  ]) {
+    const vu = M.libelleDuCanal(c)
+    assert.doesNotMatch(vu, /channex|beds24|pms/i, JSON.stringify(c))
+  }
+  // Et un titre ordinaire reste affich\u00e9 : la garde ne doit pas tout aplatir.
+  assert.equal(M.libelleDuCanal({ ota: 'direct', titre: 'R\u00e9servation directe' }), 'R\u00e9servation directe')
+  assert.equal(M.libelleDuCanal({ ota: 'airbnb', titre: 'Channex Airbnb' }), 'Airbnb',
+    'un OTA connu passe par sa table, le titre ne compte pas')
+})
+
+test('LE TEST QUI COMPTE : la carte M\u00c8NE \u00c0 LA FICHE du logement', () => {
+  // Constat de Thierry du 21 octobre 2026 : « les liens vers les pages des
+  // logements ne fonctionnent pas ». Il n'y avait pas de lien cass\u00e9 : il n'y
+  // en avait AUCUN. La carte \u00e9tait inerte depuis l'\u00e9tape 1, o\u00f9 la fiche
+  // n'existait pas encore.
+  const d = doc(M.carteHtml(bien(), OUTILS()))
+  const a = d.querySelector('a.log-lien')
+  assert.ok(a, 'la carte doit porter un lien')
+  assert.equal(a.getAttribute('href'), '/logements/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
+  // Le lien porte LE NOM, pas la carte enti\u00e8re : sinon le lecteur d'\u00e9cran
+  // annonce les pastilles et la note comme nom du lien.
+  assert.equal(a.textContent, 'La bulle')
+  assert.equal(d.querySelector('a.log-lien .log-pastille'), null)
+})
+
+test('LE TEST QUI COMPTE : un identifiant \u00e0 caract\u00e8res sp\u00e9ciaux ne coupe pas l URL', () => {
+  // M\u00eame pi\u00e8ge que le lien du calendrier, ferm\u00e9 \u00e0 l'\u00e9tape 2 : l'identifiant
+  // part dans un CHEMIN. Une barre oblique couperait l'URL en deux et m\u00e8nerait
+  // ailleurs.
+  const d = doc(M.carteHtml(bien({ id: 'a b/c?d' }), OUTILS()))
+  assert.equal(d.querySelector('a.log-lien').getAttribute('href'), '/logements/a%20b%2Fc%3Fd')
+})
+
+test('la carte reste cliquable en entier, et le lien le reste au clavier', () => {
+  // Le lien s'\u00e9tend \u00e0 la carte par `::after` : c'est la feuille de la page qui
+  // le fait, et elle a besoin du rep\u00e8re `position: relative` sur la carte.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'logements.html'), 'utf8')
+  assert.match(page, /\.log-lien::after \{[^}]*position: absolute/)
+  assert.match(page, /\.log-carte \{[^}]*position: relative/s)
+  assert.match(page, /log-lien:focus-visible/, 'le parcours au clavier doit se voir')
 })

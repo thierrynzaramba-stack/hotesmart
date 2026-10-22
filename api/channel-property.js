@@ -10,6 +10,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { peutCouperLaPousseeDesPrix } = require('../lib/pilote-tarifaire')
 const { requirePermission, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
+const { refusPlancher, valeurEffective } = require('../lib/plancher-vs-base')
 const { refsDuPerimetre } = require('../lib/permissions')
 const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
 const { clesMigrees } = require('../lib/cles-migrees')
@@ -418,6 +419,14 @@ module.exports = async function handler(req, res) {
     })
     if (!gardePatch.ok) return
     const compteBien = gardePatch.accountUserId
+    // ⚠ L'UUID RESOLU PAR LA GARDE, PAS LE PARAMETRE BRUT (revue de l'etape 3
+    // du lot Logements, 22 octobre 2026). `resoudreBien` accepte une reference
+    // PARTENAIRE, et quatre endpoints sur cinq repartent deja de `garde.bien.id`.
+    // Ici on repartait de `pid` : depuis `/logements/209413`, la fiche
+    // s'affichait entierement, et toute sauvegarde rendait 404 « Bien
+    // introuvable » sur un bien manifestement present (`.eq('id', '209413')`
+    // sur une colonne uuid -> 22P02). C'est le quatrieme passage du piege UUID.
+    const bienPid = gardePatch.bien ? gardePatch.bien.id : pid
 
     const { data: prop, error: propErr } = await supabase
       .from('properties')
@@ -425,8 +434,16 @@ module.exports = async function handler(req, res) {
       // garde qui juge sur une colonne non selectionnee est une garde ouverte
       // (lecon deja payee sur `base_price` et le cran d'arret). Un bien en
       // cours de bascule porte ses canaux sous sa cle CIBLE.
-      .select('id, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, included_guests, extra_guest_fee, pilote_tarifaire')
-      .eq('id', pid)
+      // ⚠ `prix_minimum` A ETE AJOUTE LE 22 OCTOBRE 2026, ET SON ABSENCE AVAIT
+      // ROUVERT LA GARDE DU PLANCHER. Mesure de recette de Thierry : plancher
+      // 50 EUR en base, prix de base passe a 20 EUR -> 200, « Enregistre »,
+      // valeur persistee, aucun refus. La garde lisait `prop.prix_minimum`, qui
+      // valait `undefined` faute d'etre SELECTIONNE : elle ne pouvait pas
+      // mordre. C'est mot pour mot la lecon ecrite deux lignes plus haut pour
+      // `migration_target_property_id` — « une garde qui juge sur une colonne
+      // non selectionnee est une garde ouverte » — et je l'ai repayee.
+      .select('id, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, pilote_tarifaire')
+      .eq('id', bienPid)
       .eq('user_id', compteBien)
       .single()
     if (propErr || !prop) return res.status(404).json({ error: 'Bien introuvable' })
@@ -450,27 +467,33 @@ module.exports = async function handler(req, res) {
       } else {
         const cents = Math.round(Number(prix_minimum))
         if (!Number.isFinite(cents) || cents <= 0 || cents > 10000000) {
-          return res.status(400).json({ error: 'prix_minimum invalide (centimes, > 0)' })
-        }
-        updates.prix_minimum = cents
-        // ⚠ UN PLANCHER AU-DESSUS DU PRIX DE BASE REND LE BIEN INVENDABLE.
-        // Releve en review : rien n'empechait un plancher a 120 EUR sur un bien
-        // dont le prix de base vaut 80. Le PATCH rendait 200, puis le full sync
-        // suivant fermait les 500 jours et declenchait l'incident — l'hote
-        // decouvrait son logement invendable sans lien avec sa saisie.
-        // On REFUSE, plutot que d'avertir : c'est une saisie, elle se corrige
-        // sur-le-champ.
-        const baseActuelle = base_price !== undefined ? Number(base_price) : Number(prop.base_price)
-        if (Number.isFinite(baseActuelle) && baseActuelle > 0 && cents > Math.round(baseActuelle * 100)) {
+          // ⚠ UNE PHRASE, PAS UN NOM DE COLONNE ET UNE UNITE INTERNE (revue de
+          // l'etape 3). L'hote saisit des EUROS dans un champ libelle
+          // « Prix plancher » : lui rendre « prix_minimum invalide (centimes,
+          // > 0) » lui parle d'une colonne et d'une unite qu'il n'a jamais vues.
           return res.status(400).json({
-            error: 'plancher_au_dessus_du_prix_de_base',
-            message: `Le prix plancher (${(cents / 100).toFixed(2)} €) depasse le prix de base `
-              + `(${baseActuelle.toFixed(2)} €) : toutes les nuits seraient fermees. `
-              + `Baissez le plancher, ou montez le prix de base.`
+            error: 'prix_minimum_invalide',
+            message: 'Le prix plancher doit etre un montant superieur a zero.'
           })
         }
+        updates.prix_minimum = cents
       }
     }
+
+    // ⚠ UN PLANCHER AU-DESSUS DU PRIX DE BASE REND LE BIEN INVENDABLE, et la
+    // regle vit maintenant dans `lib/plancher-vs-base.js` : elle se juge sur les
+    // deux valeurs EFFECTIVES, et plus seulement sur ce que porte le corps.
+    // Son en-tete raconte pourquoi (l'ecran V5 a separe les deux champs).
+    {
+      const refus = refusPlancher({
+        plancherCents: valeurEffective(updates.prix_minimum,
+          prop.prix_minimum != null ? Number(prop.prix_minimum) : null),
+        basePriceEuros: valeurEffective(
+          base_price !== undefined ? Number(base_price) : undefined, Number(prop.base_price))
+      })
+      if (refus) return res.status(400).json(refus)
+    }
+
     // Mode de prix : reserve aux biens OTA/Channex (un bien Beds24 n'a pas de rate_sync_mode
     // pertinent). Valeurs contraintes en base, revalidees ici.
     if (rate_sync_mode !== undefined) {
@@ -556,7 +579,7 @@ module.exports = async function handler(req, res) {
       pricingTouched = true
       // Valeur effective = nouvelle valeur si fournie, sinon valeur actuelle en base.
       effCap = capacity !== undefined ? parseInt(capacity, 10) : Number(prop.capacity)
-      if (!effCap || effCap < 1 || effCap > 20) return res.status(400).json({ error: 'Capacite invalide (1-20)' })
+      if (!effCap || effCap < 1 || effCap > 20) return res.status(400).json({ error: 'capacite_invalide', message: 'La capacite doit etre un nombre entre 1 et 20.' })
       // ⚠ `base_price` PEUT ETRE ABSENT, ET CE N'EST PLUS UNE ERREUR.
       // Constat de review du 8 septembre 2026 : `Number(null)` vaut 0, donc un
       // bien sans prix de base voyait sa fiche VERROUILLEE — impossible de
@@ -571,7 +594,7 @@ module.exports = async function handler(req, res) {
       if (base_price !== undefined && base_price !== null && base_price !== '') {
         effBase = parseFloat(base_price)
         if (!effBase || effBase <= 0 || effBase > 100000) {
-          return res.status(400).json({ error: 'Prix de base invalide (>0)' })
+          return res.status(400).json({ error: 'prix_de_base_invalide', message: 'Le prix de base doit etre un montant superieur a zero.' })
         }
       } else {
         const enBase = prop.base_price != null ? Number(prop.base_price) : null
@@ -580,7 +603,7 @@ module.exports = async function handler(req, res) {
       effInc = included_guests !== undefined
         ? ((included_guests === null || included_guests === '') ? effCap : parseInt(included_guests, 10))
         : (prop.included_guests != null ? Number(prop.included_guests) : effCap)
-      if (!effInc || effInc < 1 || effInc > effCap) return res.status(400).json({ error: 'Voyageurs inclus invalide (1 a capacite)' })
+      if (!effInc || effInc < 1 || effInc > effCap) return res.status(400).json({ error: 'inclus_invalide', message: 'Le nombre de voyageurs inclus doit aller de 1 a la capacite du logement.' })
       effExtra = extra_guest_fee !== undefined
         ? ((extra_guest_fee === null || extra_guest_fee === '') ? null : parseFloat(extra_guest_fee))
         : (prop.extra_guest_fee != null ? Number(prop.extra_guest_fee) : null)
@@ -589,7 +612,7 @@ module.exports = async function handler(req, res) {
       // passer, puis supabase-js serialisait NaN en `null` : le supplement etait
       // efface en silence au lieu de rendre un 400.
       if (effExtra != null && (!Number.isFinite(effExtra) || effExtra < 0 || effExtra > 100000)) {
-        return res.status(400).json({ error: 'Supplement invalide' })
+        return res.status(400).json({ error: 'supplement_invalide', message: 'Le supplement par voyageur doit etre un montant positif.' })
       }
 
       // ⚠ SANS PRIX DE BASE, LA GRILLE NE PEUT PAS ETRE RECONSTRUITE — et alors
@@ -670,7 +693,7 @@ module.exports = async function handler(req, res) {
     const { data: updated, error: updErr } = await supabase
       .from('properties')
       .update(updates)
-      .eq('id', pid)
+      .eq('id', bienPid)
       .eq('user_id', compteBien)
       .select()
       .single()
@@ -708,11 +731,14 @@ module.exports = async function handler(req, res) {
     })
     if (!gardeDelete.ok) return
     const compteBien = gardeDelete.accountUserId
+    // ⚠ L'UUID RESOLU, comme au PATCH : une reference partenaire dans l'URL
+    // rendait 404 sur un bien bien present (le piege UUID, quatrieme passage).
+    const bienPid = gardeDelete.bien ? gardeDelete.bien.id : pid
 
     const { data: prop, error: propErr } = await supabase
       .from('properties')
       .select('id, name, provider, provider_property_id, provider_rate_plan_id')
-      .eq('id', pid)
+      .eq('id', bienPid)
       .eq('user_id', compteBien)
       .single()
     if (propErr || !prop) return res.status(404).json({ error: 'Bien introuvable' })
@@ -819,7 +845,7 @@ module.exports = async function handler(req, res) {
     const { error: delPropErr } = await supabase
       .from('properties')
       .delete()
-      .eq('id', pid)
+      .eq('id', bienPid)
       .eq('user_id', compteBien)
     if (delPropErr) {
       console.error('[channel-property] DELETE properties error', delPropErr.message)

@@ -617,10 +617,16 @@
       const props = (data.properties || []).filter(p =>
         p.provider === 'channex' || p.provider === 'channel' || p.migration_target_property_id)
 
+      // ⚠ LE PARAMETRE SE LIT AVANT TOUT DEPART (revue de l'etape 3). Quand le
+      // compte n'a aucun bien eligible, ce `return` partait AVANT la lecture de
+      // `?bien` : l'hote arrivait depuis la fiche et ne voyait rien, ni fenetre
+      // ni explication.
+      const bienDemande = new URLSearchParams(location.search).get('bien')
+
       if (!props.length) {
         box.innerHTML = `<div style="font-size:13px;color:var(--text2)">
-          Aucun bien éligible pour le moment.
-          <a href="/pages/biens-nouveau" style="color:var(--green)">Créez d'abord un bien</a>
+          ${bienDemande ? 'Ce logement n\'est pas encore éligible à la connexion des plateformes.' : 'Aucun bien éligible pour le moment.'}
+          <a href="/logements/nouveau" style="color:var(--green)">Créez d'abord un bien</a>
           pour connecter vos plateformes.</div>`
         setStatus('ota', 'off', 'Aucun bien')
         return
@@ -644,6 +650,25 @@
           const p = otaProps.find(x => String(x.id) === String(b.dataset.connect))
           if (p) openConnexions(p, b)
         }))
+
+      // ⚠ ARRIVEE DEPUIS LA FICHE D'UN LOGEMENT (lot Logements V5, etape 3) :
+      // `?bien=<uuid>` ouvre l'assistant sur CE bien. La fiche ne descend aucune
+      // cle du partenaire ; c'est cette page qui la connait deja, et elle resout
+      // l'UUID en propriete avant d'ouvrir.
+      // ⚠ ET UN IDENTIFIANT QU'ELLE NE CONNAIT PAS SE DIT (revue de l'etape 3) :
+      // un bien Beds24 sans propriete cible, ou le bien d'un autre compte, sont
+      // absents de cette liste. Ne rien faire laissait l'hote devant une page
+      // qui ignorait sa demande, sans un mot.
+      if (bienDemande) {
+        const cible = otaProps.find(x => String(x.id) === String(bienDemande))
+        if (cible) openConnexions(cible, null)
+        else {
+          box.insertAdjacentHTML('afterbegin',
+            `<div style="font-size:13px;color:var(--text2);margin-bottom:10px" data-bien-inconnu>
+              Ce logement n'est pas éligible à la connexion des plateformes. Choisissez-en un ci-dessous.
+            </div>`)
+        }
+      }
     } catch (e) {
       box.innerHTML = `<div style="font-size:13px;color:#E24B4A">Erreur de chargement des biens.</div>`
       setStatus('ota', 'off', 'Erreur')

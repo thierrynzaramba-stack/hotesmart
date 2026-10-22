@@ -73,7 +73,10 @@ function passeOr (ligne, expr) {
   })
 }
 
-function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], avis = [], enPanne = {}, enPanneApres = {} } = {}) {
+function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], avis = [],
+  // Les tables que la purge de suppression efface, pour le COMPTAGE (étape 3).
+  sejours = [], messages = [], menages = [], codes = [],
+  enPanne = {}, enPanneApres = {} } = {}) {
   const vus = []
   const passages = {}
   const client = {
@@ -87,7 +90,9 @@ function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], avis 
           passages[table] = (passages[table] || 0) + 1
           if (passages[table] > enPanneApres[table]) return { data: null, error: { message: 'timeout' } }
         }
-        const source = { properties: BIENS, profiles: profils, profile_permissions: permissions, ota_reviews: avis }[table] || []
+        const source = { properties: BIENS, profiles: profils, profile_permissions: permissions,
+          ota_reviews: avis, bookings_snapshot: sejours, messages: messages,
+          menage_events: menages, access_codes: codes }[table] || []
         const c = source.filter(l =>
           Object.entries(a.f).every(([k, v]) => String(l[k]) === String(v)) &&
           a.ins.every(f => f.v.includes(String(l[f.c]))) &&
@@ -95,7 +100,9 @@ function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], avis 
         return { data: a.limit != null ? c.slice(0, a.limit) : c, error: null }
       }
       const chain = {
-        select () { return chain },
+        // `count` / `head` honorés comme chez PostgREST (voir l'autre fichier) :
+        // le comptage de la suppression ne lit aucune ligne.
+        select (cols, opts) { if (opts && opts.count) { a.compte = true; a.head = opts.head === true } return chain },
         eq (c, v) { a.f[c] = v; return chain },
         in (c, v) { a.ins.push({ c, v: (v || []).map(String) }); return chain },
         gte (c, v) { a.gte[c] = v; return chain },
@@ -113,7 +120,13 @@ function preparer ({ appelant = TITULAIRE, profils = [], permissions = [], avis 
         },
         limit (n) { a.limit = n; const r = donnees(); return Promise.resolve(r.error ? r : { data: r.data.slice(0, Math.min(n, 1000)), error: null }) },
         maybeSingle () { const r = donnees(); return Promise.resolve({ data: r.data ? (r.data[0] || null) : null, error: r.error }) },
-        then (f, g) { return Promise.resolve(donnees()).then(f, g) }
+        then (f, g) {
+          const r = donnees()
+          if (!a.compte) return Promise.resolve(r).then(f, g)
+          return Promise.resolve(r.error
+            ? { data: null, error: r.error, count: null }
+            : { data: a.head ? null : r.data, error: null, count: r.data.length }).then(f, g)
+        }
       }
       return chain
     }
@@ -425,4 +438,124 @@ test('un membre QUI A le droit `avis` recoit bien les notes de son perimetre', a
   assert.deepEqual(r.body.biens.map(b => b.nom), ['La bulle'])
   assert.deepEqual(r.body.biens[0].avis, { total: 1, notes: 1, note_sur_5: 5 })
   assert.deepEqual(r.body.refuses, [])
+})
+
+// ════════════════════════════════════════════════════════════════════════
+// Le comptage de la suppression (étape 3) : gardé comme la SUPPRESSION
+// ════════════════════════════════════════════════════════════════════════
+
+const ligne = (n, cle, compte, extra = {}) => Array.from({ length: n }, (_, i) =>
+  ({ id: `l${i}-${cle}`, user_id: compte, property_id: cle, ...extra }))
+
+test('le titulaire obtient les nombres de ce que la suppression effacerait', async () => {
+  preparer({
+    sejours: ligne(3, REF_A, TITULAIRE, { booking_id: 'b' }),
+    messages: ligne(5, REF_A, TITULAIRE),
+    menages: ligne(2, REF_A, TITULAIRE),
+    codes: ligne(1, REF_A, TITULAIRE)
+  })
+  const r = await appeler({ id: BIEN_A, compter: 'suppression' })
+  assert.equal(r.code, 200)
+  assert.deepEqual(r.body.suppression,
+    { cle_absente: false, reservations: 3, messages: 5, menages: 2, codes: 1 })
+})
+
+test('LE TEST QUI COMPTE (SÉCURITÉ) : sans le droit d ÉCRITURE, pas de nombres — 403', async () => {
+  // ⚠ CES NOMBRES SONT CEUX D UNE ACTION, PAS D UNE LECTURE. Le DELETE est
+  // gardé par `reglages:write` sur le bien : servir le détail de ce qu il
+  // effacerait à un profil en LECTURE montrerait ce qui mène à un refus — et la
+  // fiche, elle, s ouvre dès `reservations:read`. Deux droits, deux réponses.
+  preparer({
+    appelant: MEMBRE,
+    profils: [profilDe(TITULAIRE, MEMBRE)],
+    permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, { reglages: 'read' })],
+    sejours: ligne(3, REF_A, TITULAIRE, { booking_id: 'b' })
+  })
+  const r = await appeler({ id: BIEN_A, compter: 'suppression' }, { 'x-compte': TITULAIRE })
+  assert.equal(r.code, 403)
+  assert.equal(r.body && r.body.suppression, undefined, 'aucun nombre ne doit fuir')
+  // Et la FICHE, elle, reste lisible pour ce même membre : c est bien le droit
+  // d écriture qui tranche, pas l accès à l écran.
+  const fiche = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.equal(fiche.code, 200)
+})
+
+test('LE TEST QUI COMPTE (SÉCURITÉ) : le bien d un AUTRE compte ne se compte pas', async () => {
+  preparer({ sejours: ligne(4, REF_X, ETRANGER, { booking_id: 'b' }) })
+  // Le même contrat que la fiche, mesuré plus haut dans ce fichier : un bien
+  // d'un AUTRE compte rend 403, un bien INCONNU rend 404. Le comptage suit, il
+  // n'invente pas sa propre grammaire de refus.
+  const r = await appeler({ id: BIEN_X, compter: 'suppression' })
+  assert.equal(r.code, 403)
+  assert.equal(r.body && r.body.suppression, undefined, 'aucun nombre ne doit fuir')
+  assert.doesNotMatch(JSON.stringify(r.body), /Chez un autre/, 'ni le nom du bien')
+
+  const inconnu = await appeler({ id: 'dddddddd-dddd-dddd-dddd-dddddddddddd', compter: 'suppression' })
+  assert.equal(inconnu.code, 404)
+  assert.equal(inconnu.body && inconnu.body.suppression, undefined)
+})
+
+test('un membre délégué avec `reglages: write` obtient bien les nombres', async () => {
+  preparer({
+    appelant: MEMBRE,
+    profils: [profilDe(TITULAIRE, MEMBRE)],
+    permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, { reglages: 'write' })],
+    messages: ligne(2, REF_A, TITULAIRE)
+  })
+  const r = await appeler({ id: BIEN_A, compter: 'suppression' }, { 'x-compte': TITULAIRE })
+  assert.equal(r.code, 200)
+  assert.equal(r.body.suppression.messages, 2)
+})
+
+test('le comptage ne rend QUE des nombres : aucun identifiant du partenaire', async () => {
+  preparer({ sejours: ligne(1, REF_A, TITULAIRE, { booking_id: 'b' }) })
+  const r = await appeler({ id: BIEN_A, compter: 'suppression' })
+  const texte = JSON.stringify(r.body)
+  for (const ref of [REF_A, REF_B, REF_X]) {
+    assert.doesNotMatch(texte, new RegExp(ref), `la référence ${ref} ne doit pas sortir`)
+  }
+  assert.doesNotMatch(texte, /provider|channex|beds24/i)
+})
+
+test('une valeur inattendue de `compter` rend la FICHE, elle n ouvre aucun chemin', async () => {
+  preparer()
+  for (const v of ['', 'oui', 'suppression2', '1']) {
+    const r = await appeler({ id: BIEN_A, compter: v })
+    assert.equal(r.code, 200, JSON.stringify(v))
+    assert.ok(r.body.bien, 'c est la fiche qui est rendue')
+    assert.equal(r.body.suppression && r.body.suppression.reservations, undefined)
+  }
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : la fiche DESCEND les deux droits d \u00e9criture', async () => {
+  // \u26a0 SANS EUX, L \u00c9CRAN D\u00c9CIDE SEUL (constat de la revue de l \u00e9tape 3).
+  // `peutEcrire`, c\u00f4t\u00e9 navigateur, r\u00e9pond pour le compte du S\u00c9LECTEUR et
+  // commence par « si je suis titulaire, oui » ; cette fiche est gard\u00e9e par la
+  // RESSOURCE. Le serveur sait, lui : il envoie ce qu il autorisera.
+  preparer({
+    appelant: MEMBRE,
+    profils: [profilDe(TITULAIRE, MEMBRE)],
+    permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, { reglages: 'read', reservations: 'read' })]
+  })
+  const lecture = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.equal(lecture.code, 200)
+  assert.deepEqual(JSON.parse(JSON.stringify(lecture.body.droits)),
+    { modifier: false, publier: false })
+
+  // Les deux se d\u00e9cident S\u00c9PAR\u00c9MENT : le calendrier et les r\u00e9glages sont deux
+  // domaines, et le serveur garde \u00ab Publier \u00bb par le premier.
+  preparer({
+    appelant: MEMBRE,
+    profils: [profilDe(TITULAIRE, MEMBRE)],
+    permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, { reglages: 'read', reservations: 'write' })]
+  })
+  const mixte = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.deepEqual(JSON.parse(JSON.stringify(mixte.body.droits)),
+    { modifier: false, publier: true })
+
+  // Et le titulaire a les deux.
+  preparer()
+  const titulaire = await appeler({ id: BIEN_A })
+  assert.deepEqual(JSON.parse(JSON.stringify(titulaire.body.droits)),
+    { modifier: true, publier: true })
 })

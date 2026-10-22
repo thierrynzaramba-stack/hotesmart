@@ -51,7 +51,10 @@ const icone = (id) => `<svg data-icone="${id}"></svg>`
 const nombre = (x, dec = 1) => new Intl.NumberFormat('fr', { minimumFractionDigits: dec, maximumFractionDigits: dec }).format(x)
 const argent = (x, d) => new Intl.NumberFormat('fr', { style: 'currency', currency: d || 'EUR', maximumFractionDigits: 0 }).format(x)
 const dateEnClair = (iso) => `le-${iso}`
-const OUTILS = (extra = {}) => ({ t, esc, icone, nombre, argent, dateEnClair, ...extra })
+// `liste` : la conjonction de la langue (« A et B »), par `Intl.ListFormat`
+// comme la page la pose. Sans elle, le module replie sur une virgule.
+const liste = (xs) => new Intl.ListFormat('fr', { style: 'long', type: 'conjunction' }).format(xs)
+const OUTILS = (extra = {}) => ({ t, esc, icone, nombre, argent, dateEnClair, liste, ...extra })
 
 const doc = (html) => new JSDOM(`<!doctype html><body><div id="c">${html}</div></body>`).window.document
 
@@ -81,20 +84,26 @@ const fiche = (extra = {}) => ({
 // ═══════════════════════════════════════════════════════════════════════════
 
 test('la fiche rend ses blocs, titrés et dans l ordre', () => {
-  // ⚠ SIX BLOCS QUAND LA SUPPRESSION EST POSSIBLE : il n y a alors rien à dire
-  // en lecture seule, et un bouton qui ne part pas serait un leurre. Le
-  // septième apparaît quand la suppression est REFUSÉE — c est son état qui
-  // est l information.
+  // ⚠ SEPT BLOCS DEPUIS L'ÉTAPE 3 : la suppression existe, donc son bloc aussi,
+  // qu'elle soit possible (bouton actif) ou refusée (bouton éteint et sa
+  // raison). À l'étape 2, un bien supprimable n'en rendait aucun.
+  // ⚠ SUPPRIMER EST LE DERNIER, ET IL EST HORS DES COLONNES (constat de la
+  // recette du 22 octobre 2026). Au bas de la colonne gauche, il arrivait AU
+  // MILIEU de la fiche au téléphone, où les colonnes s'empilent : l'action la
+  // plus destructrice du produit se lisait entre deux blocs de lecture.
   const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
   assert.deepEqual([...d.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent), [
-    'Où il est en vente', 'Prix', 'Le logement', 'Ménage', 'Avis des voyageurs', 'Réglages'
+    'Où il est en vente', 'Prix', 'Le logement',
+    'Ménage', 'Avis des voyageurs', 'Réglages', 'Supprimer ce logement'
   ])
+  assert.equal(d.querySelector('.fic-col .fic-supprimer'), null,
+    'il ne doit plus vivre dans une colonne')
 
   const refuse = doc(M.ficheHtml(
     fiche({ suppression: { possible: false, motif: 'annonce_reliee' } }), OUTILS(), { peutSupprimer: true }))
   assert.deepEqual([...refuse.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent), [
-    'Où il est en vente', 'Prix', 'Le logement', 'Supprimer ce logement',
-    'Ménage', 'Avis des voyageurs', 'Réglages'
+    'Où il est en vente', 'Prix', 'Le logement',
+    'Ménage', 'Avis des voyageurs', 'Réglages', 'Supprimer ce logement'
   ])
 })
 
@@ -287,15 +296,21 @@ test('LE TEST QUI COMPTE (SÉCURITÉ) : `droit_refuse` du SERVEUR efface le bloc
     .includes('Supprimer ce logement'))
 })
 
-test('LE TEST QUI COMPTE : un bien SUPPRIMABLE ne rend aucun bouton à l étape 2', () => {
-  // Un bouton rouge actif qui ne part pas est un leurre, et son aide promettait
-  // une confirmation qui n existe pas encore. Quand la suppression est
-  // possible, l étape 2 n a rien à dire ; le bouton revient à l étape 3,
-  // câblé. Quand elle est refusée, son ÉTAT est l information.
+test('LE TEST QUI COMPTE : un bien SUPPRIMABLE rend un bouton ACTIF (étape 3)', () => {
+  // ⚠ CE TEST A CHANGÉ DE CONTRAT À L'ÉTAPE 3, sur go de Thierry. À l'étape 2,
+  // un bien supprimable ne rendait AUCUN bouton : un bouton rouge actif qui ne
+  // part pas est un leurre. Maintenant il part — donc il se rend, actif, et la
+  // confirmation existe.
   const d = doc(M.ficheHtml(fiche({ suppression: { possible: true, motif: null } }),
     OUTILS(), { peutSupprimer: true }))
-  assert.equal(d.querySelector('[data-bind="supprimer"]'), null)
-  assert.doesNotMatch(d.querySelector('#c').textContent, /confirmerez en saisissant/)
+  const b = d.querySelector('[data-bind="supprimer"]')
+  assert.ok(b, 'le bouton existe')
+  assert.equal(b.hasAttribute('disabled'), false)
+  // Et aucune raison ne s affiche : il n y en a pas.
+  assert.equal(d.querySelector('[data-raison]'), null)
+  // Sa place pour dire l état et l erreur, comme partout ailleurs.
+  assert.ok(d.querySelector('.fic-supprimer [data-etat]'))
+  assert.ok(d.querySelector('.fic-supprimer [data-erreur]').hasAttribute('hidden'))
 })
 
 test('LE TEST QUI COMPTE : `possible: null` DÉSACTIVE aussi — une lecture ratée n ouvre pas la suppression', () => {
@@ -1008,4 +1023,603 @@ test('LE TEST QUI COMPTE : une réponse MAL FORMÉE ne devient pas « Aucune pre
     assert.ok(d.querySelectorAll('[data-non-lu]').length >= 3,
       `${JSON.stringify(malForme)} : les trois blocs doivent se déclarer non lus`)
   }
+})
+
+// ════════════════════════════════════════════════════════════════════════
+// ÉTAPE 3 — l'édition sur place
+// ════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE (SÉCURITÉ) : sans droit d écriture, AUCUNE case dans le DOM', () => {
+  // Spec §5 : « profil en lecture : la fiche s affiche, champs en lecture seule,
+  // aucun bouton d action dans le DOM ». Le masquage est un confort ; la vraie
+  // protection est le `reglages:write` du PATCH, et un test de l endpoint le
+  // garde. Mais on ne propose pas ce qui mène à un 403.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: false }))
+  assert.equal(d.querySelectorAll('input, textarea, select').length, 0)
+  assert.equal(d.querySelectorAll('[data-champ]').length, 0)
+  // Et la fiche dit quand même tout ce qu elle disait à l étape 2.
+  assert.match(d.querySelector('.fic-champs').textContent, /La bulle/)
+  assert.match(d.querySelector('.fic-prix').textContent, /130/)
+})
+
+test('LE TEST QUI COMPTE : chaque case porte le nom du champ CÔTÉ SERVEUR', () => {
+  // ⚠ Le nom rendu et le nom envoyé viennent de la MÊME table (`CHAMPS`) : une
+  // case nommée autrement que ce que `PATCH` accepte s enregistrerait dans le
+  // vide, en 400, ou — pire — en silence si le serveur ignore l inconnu.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  // ⚠ L'ORDRE DU DOM N'EST PAS L'ORDRE DE LA TABLE : la colonne gauche rend
+  // Prix AVANT Le logement. On éprouve donc la couverture, puis l'ordre DANS
+  // chaque bloc — comparer à plat ferait rougir pour une raison de mise en page.
+  const noms = [...d.querySelectorAll('[data-champ]')].map(x => x.getAttribute('name'))
+  assert.deepEqual([...noms].sort(), M.CHAMPS.map(c => c.nom).sort())
+  const dansLeBloc = (sel) => [...d.querySelectorAll(`${sel} [data-champ]`)].map(x => x.getAttribute('name'))
+  assert.deepEqual(dansLeBloc('.fic-champs'), M.champsDuBloc('logement').map(c => c.nom))
+  assert.deepEqual(dansLeBloc('.fic-prix'), M.champsDuBloc('prix').map(c => c.nom))
+  // Les dix noms sont ceux du contrat de PATCH, lu dans le code du serveur.
+  const serveur = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-property.js'), 'utf8')
+  const contrat = serveur.slice(serveur.indexOf("if (req.method === 'PATCH')"))
+    .slice(0, 400)
+  for (const c of M.CHAMPS) {
+    assert.ok(contrat.includes(c.nom), `${c.nom} n est pas dans le contrat du PATCH`)
+  }
+})
+
+test('LE TEST QUI COMPTE : chaque case a son étiquette, et elle la DÉSIGNE', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  for (const input of d.querySelectorAll('[data-champ]')) {
+    const lab = d.querySelector(`label[for="${input.id}"]`)
+    assert.ok(input.id, 'une case sans id ne peut pas être étiquetée')
+    assert.ok(lab, `aucune étiquette ne désigne ${input.getAttribute('name')}`)
+    assert.ok(lab.textContent.trim().length > 1)
+  }
+})
+
+test('LE TEST QUI COMPTE : la DEVISE n est jamais une case — le serveur ne la prend pas', () => {
+  // `PATCH` n accepte pas la devise (absente de son contrat), et l ancien écran
+  // le disait : « devise non editable ». Une case qu on ne peut pas enregistrer
+  // est un leurre.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('[data-champ="currency"], [data-champ="devise"]'), null)
+  const ligne = d.querySelector('[data-devise]')
+  assert.ok(ligne, 'la devise reste AFFICHÉE')
+  assert.equal(ligne.querySelector('input'), null)
+  assert.match(ligne.textContent, /EUR/)
+})
+
+test('LE TEST QUI COMPTE : le plancher par défaut ne se PRÉREMPLIT pas', () => {
+  // ⚠ 10 € est une garde du moteur, pas une valeur du bien. L écrire dans la
+  // case la ferait ENREGISTRER au premier passage, et le bien porterait un
+  // plancher que personne n a choisi — avec, derrière, un refus du serveur si
+  // le prix de base est plus bas.
+  const d = doc(M.ficheHtml(
+    fiche({ bien: { ...fiche().bien, prix_plancher: null } }), OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('[data-champ="prix_minimum"]').value, '')
+  // Et le défaut se dit SOUS la case, pas dedans.
+  assert.match(d.querySelector('[data-plancher-defaut]').textContent, /10/)
+
+  // Un plancher réel, lui, se préremplit — en euros.
+  const avec = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  assert.equal(avec.querySelector('[data-champ="prix_minimum"]').value, '130')
+  assert.equal(avec.querySelector('[data-plancher-defaut]'), null)
+})
+
+test('LE TEST QUI COMPTE : les champs qui reconstruisent la grille sont MARQUÉS', () => {
+  // `PATCH` reconstruit le plan tarifaire chez le partenaire, EN BLOQUANT, dès
+  // que l un d eux est dans le corps — même inchangé. La page ne les envoie donc
+  // que s ils ont bougé, et c est cette marque qui le lui dit.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const marques = [...d.querySelectorAll('[data-grille]')].map(x => x.getAttribute('name')).sort()
+  assert.deepEqual(marques, ['base_price', 'capacity', 'extra_guest_fee', 'included_guests'])
+  // Et le plancher n en est PAS : c est un refus, pas un tarif — aucune
+  // poussée n en découle (commentaire du serveur).
+  assert.equal(d.querySelector('[data-champ="prix_minimum"]').hasAttribute('data-grille'), false)
+  assert.equal(d.querySelector('[data-champ="prix_minimum"]').getAttribute('data-euros'), '1')
+})
+
+test('chaque case a sa place pour l état et pour l erreur, et l erreur est MUETTE au départ', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  for (const ligne of d.querySelectorAll('.fic-ligne--saisie')) {
+    const etat = ligne.querySelector('[data-etat]')
+    assert.ok(etat, 'il faut une place pour « Enregistré »')
+    assert.equal(etat.getAttribute('aria-live'), 'polite', 'et la voix doit l annoncer')
+    assert.equal(etat.textContent, '', 'rien n est annoncé avant le premier enregistrement')
+    const err = ligne.querySelector('[data-erreur]')
+    assert.ok(err && err.hasAttribute('hidden'))
+  }
+})
+
+test('LE TEST QUI COMPTE (SÉCURITÉ) : ce que le partenaire écrit ne s exécute pas, même dans une case', () => {
+  const piege = fiche({ bien: { ...fiche().bien, nom: '"><img src=x onerror=alert(1)>' } })
+  const d = doc(M.ficheHtml(piege, OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelectorAll('img, script').length, 0)
+  assert.equal(d.querySelector('[data-champ="name"]').value, '"><img src=x onerror=alert(1)>')
+})
+
+test('LE TEST QUI COMPTE : les quatre champs de GRILLE ont un bouton, et il dit o\u00f9 \u00e7a part', () => {
+  // D\u00e9cision de Thierry du 21 octobre 2026 : \u00ab pas d'enregistrement automatique
+  // [pour ces quatre-l\u00e0]. Ils passent par un bouton Enregistrer propre au bloc,
+  // avec la phrase Sera envoy\u00e9 \u00e0 Airbnb et Booking.com. \u00bb Ce qui part d'ici
+  // n'atteint pas que notre base : il atteint les annonces.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const blocs = [...d.querySelectorAll('.fic-envoi')].map(x => x.dataset.envoi).sort()
+  assert.deepEqual(blocs, ['logement', 'prix'],
+    'les deux blocs qui portent un champ de grille, et eux seuls')
+  for (const zone of d.querySelectorAll('.fic-envoi')) {
+    assert.ok(zone.querySelector('[data-bind="enregistrer"]'))
+    assert.match(zone.querySelector('[data-envoi-aide]').textContent, /Sera envoyé à Airbnb/)
+    assert.ok(zone.querySelector('[data-etat]'), 'le bloc dit son \u00e9tat, comme une case')
+    assert.ok(zone.querySelector('[data-erreur]').hasAttribute('hidden'))
+  }
+  // Et chaque bouton d\u00e9signe SON bloc : un bouton sans cible enverrait les
+  // quatre champs depuis n'importe o\u00f9.
+  assert.deepEqual([...d.querySelectorAll('[data-bind="enregistrer"]')].map(b => b.dataset.bloc).sort(),
+    ['logement', 'prix'])
+})
+
+test('LE TEST QUI COMPTE : le bouton d envoi n est JAMAIS d\u00e9sactiv\u00e9 au rendu', () => {
+  // \u26a0 Un bouton gris\u00e9 tant qu'aucun champ n'a boug\u00e9 oblige \u00e0 cliquer DEUX
+  // fois : le premier clic sort de la case \u2014 donc l'activerait \u2014 sans
+  // l'atteindre. Il reste cliquable et dit \u00ab aucun changement \u00e0 envoyer \u00bb.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  for (const b of d.querySelectorAll('[data-bind="enregistrer"]')) {
+    assert.equal(b.hasAttribute('disabled'), false)
+  }
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : sans droit d \u00e9criture, aucun bouton d envoi non plus', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: false }))
+  assert.equal(d.querySelector('.fic-envoi'), null)
+  assert.equal(d.querySelector('[data-bind="enregistrer"]'), null)
+  assert.doesNotMatch(d.querySelector('#c').textContent, /Sera envoyé/)
+})
+
+test('LE TEST QUI COMPTE : la phrase nomme les canaux R\u00c9ELS du bien, pas un texte fixe', () => {
+  // D\u00e9cision de Thierry du 21 octobre 2026. Un texte \u00e9crit une fois pour toutes
+  // promettrait Booking.com \u00e0 un bien qui n'y est pas \u2014 et c'est la phrase qui
+  // pr\u00e9vient avant une \u00e9criture chez un tiers.
+  const trois = fiche({ canaux: [
+    { ota: 'airbnb', titre: null, actif: true, mappe: true },
+    { ota: 'booking', titre: null, actif: true, mappe: true },
+    { ota: 'open', titre: 'R\u00e9servation directe', actif: true, mappe: true }
+  ] })
+  const d = doc(M.ficheHtml(trois, OUTILS(), { peutSupprimer: true }))
+  const aide = d.querySelector('[data-envoi-aide]')
+  assert.equal(aide.dataset.envoiAide, 'canaux')
+  assert.equal(aide.textContent.trim(), 'Sera envoy\u00e9 \u00e0 Airbnb, Booking.com et R\u00e9servation directe')
+
+  // Et un canal qui n'est PAS en vente n'y figure pas : la phrase dit o\u00f9 \u00e7a part,
+  // pas ce qui existe. La r\u00e8gle d'\u00e9tat est celle des pastilles, import\u00e9e.
+  const mixte = fiche({ canaux: [
+    { ota: 'airbnb', titre: null, actif: true, mappe: true },
+    { ota: 'booking', titre: null, actif: true, mappe: false },
+    { ota: 'open', titre: null, actif: false, mappe: true }
+  ] })
+  const d2 = doc(M.ficheHtml(mixte, OUTILS(), { peutSupprimer: true }))
+  assert.equal(d2.querySelector('[data-envoi-aide]').textContent.trim(), 'Sera envoy\u00e9 \u00e0 Airbnb')
+})
+
+test('LE TEST QUI COMPTE : un bien SANS canal en vente n a pas de phrase du tout', () => {
+  // \u00ab Un bien sans canal : pas de phrase \u00bb (Thierry). Rien ne part chez
+  // personne, et l'annoncer serait faux. Le bouton, lui, reste : l'envoi \u00e9crit
+  // notre base et le plan tarifaire du bien.
+  for (const canaux of [[], [{ ota: 'airbnb', titre: null, actif: true, mappe: false }]]) {
+    const d = doc(M.ficheHtml(fiche({ canaux }), OUTILS(), { peutSupprimer: true }))
+    assert.equal(d.querySelector('[data-envoi-aide]'), null, JSON.stringify(canaux))
+    assert.ok(d.querySelector('[data-bind="enregistrer"]'), 'le bouton reste')
+    assert.doesNotMatch(d.querySelector('#c').textContent, /Sera envoy\u00e9/)
+  }
+})
+
+test('LE TEST QUI COMPTE : des canaux ILLISIBLES ne se taisent pas, et n inventent pas de noms', () => {
+  // Ne rien dire ferait croire qu'aucune annonce n'est touch\u00e9e, alors qu'on ne
+  // sait pas. On nomme ce qu'on sait, sans inventer lesquelles.
+  for (const canaux of [null, {}, 'oui', 42]) {
+    const d = doc(M.ficheHtml(fiche({ canaux }), OUTILS(), { peutSupprimer: true }))
+    const aide = d.querySelector('[data-envoi-aide]')
+    assert.ok(aide, JSON.stringify(canaux))
+    assert.equal(aide.dataset.envoiAide, 'inconnu')
+    assert.match(aide.textContent, /plateformes connect\u00e9es/)
+    assert.doesNotMatch(aide.textContent, /Airbnb|Booking/)
+  }
+})
+
+test('jamais le nom du partenaire technique dans la phrase d envoi', () => {
+  // La r\u00e8gle du lot : les OTA se nomment, le partenaire technique jamais.
+  const d = doc(M.ficheHtml(fiche({ canaux: [
+    { ota: 'channex', titre: 'Channex', actif: true, mappe: true }
+  ] }), OUTILS(), { peutSupprimer: true }))
+  const txt = d.querySelector('#c').textContent
+  assert.doesNotMatch(txt, /channex|beds24/i)
+})
+
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// \u00c9TAPE 3 \u2014 les deux actions de l'en-t\u00eate, et le dialogue partag\u00e9
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+test('LE TEST QUI COMPTE : l interrupteur REMPLACE la ligne d \u00e9tat, il ne la double pas', () => {
+  // `signalHtml` dit d\u00e9j\u00e0 \u00ab Assistant en pause \u00bb \u2014 la m\u00eame phrase que la carte
+  // de la liste. L'interrupteur porte cet \u00e9tat dans son `aria-checked` : les
+  // deux ensemble diraient la m\u00eame chose deux fois dans le m\u00eame en-t\u00eate.
+  const enPause = fiche({ bien: { ...fiche().bien, assistant_en_pause: true } })
+  const avec = doc(M.ficheHtml(enPause, OUTILS(), { peutSupprimer: true }))
+  assert.ok(avec.querySelector('[data-bind="assistant"]'))
+  assert.equal(avec.querySelector('[data-signal="pause"]'), null, 'pas de doublon')
+
+  // Sans le droit, c est la LECTURE qui reste : la ligne d \u00e9tat, pas l action.
+  const sans = doc(M.ficheHtml(enPause, OUTILS(), { peutSupprimer: false }))
+  assert.equal(sans.querySelector('[data-bind="assistant"]'), null)
+  assert.ok(sans.querySelector('[data-signal="pause"]'), 'l \u00e9tat reste lisible')
+})
+
+test('LE TEST QUI COMPTE : l interrupteur dit son \u00e9tat \u00c0 LA VOIX, pas seulement par sa couleur', () => {
+  // `role="switch"` + `aria-checked` : un lecteur d \u00e9cran annonce \u00ab activ\u00e9 \u00bb ou
+  // \u00ab d\u00e9sactiv\u00e9 \u00bb et le changement. Deux boutons qui s \u00e9changent l obligeraient
+  // \u00e0 deviner.
+  const actif = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+    .querySelector('[data-bind="assistant"]')
+  assert.equal(actif.getAttribute('role'), 'switch')
+  assert.equal(actif.getAttribute('aria-checked'), 'true')
+
+  const pause = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, assistant_en_pause: true } }),
+    OUTILS(), { peutSupprimer: true })).querySelector('[data-bind="assistant"]')
+  assert.equal(pause.getAttribute('aria-checked'), 'false')
+  assert.equal(pause.dataset.enPause, '1', 'la page lit cet \u00e9tat pour savoir quoi demander')
+})
+
+test('LE TEST QUI COMPTE : le d\u00e9clencheur de photo est une \u00c9TIQUETTE sur un vrai champ', () => {
+  // \u26a0 Un bouton qui ouvre le s\u00e9lecteur par `click()` sur un champ absent du DOM
+  // ne s ouvre pas au clavier, et sur iOS pas du tout hors geste direct.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const champ = d.querySelector('[data-bind="photo"]')
+  assert.ok(champ, 'le champ fichier doit exister dans le DOM')
+  assert.equal(champ.getAttribute('type'), 'file')
+  const label = d.querySelector(`label[for="${champ.id}"]`)
+  assert.ok(label, 'une \u00e9tiquette doit d\u00e9signer le champ')
+  assert.match(label.textContent, /photo/i)
+  // Le libell\u00e9 suit l \u00e9tat. La fixture n a PAS de photo : c est donc
+  // \u00ab Ajouter \u00bb qu on doit lire, et \u00ab Changer \u00bb d\u00e8s qu il y en a une.
+  assert.match(label.textContent, /Ajouter/)
+  const avec = doc(M.ficheHtml(
+    fiche({ bien: { ...fiche().bien, photo_url: 'https://x/p.jpg' } }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.match(avec.querySelector('label[for="fic-photo-champ"]').textContent, /Changer/)
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : sans droit, ni interrupteur, ni photo, ni dialogue', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), {}))
+  for (const sel of ['[data-bind="assistant"]', '[data-bind="photo"]', '[data-bind="dialogue"]',
+    '[data-bind="enregistrer"]', '[data-champ]']) {
+    assert.equal(d.querySelector(sel), null, sel)
+  }
+  assert.equal(d.querySelectorAll('input, dialog, button').length, 0,
+    'aucun \u00e9l\u00e9ment d action dans le DOM')
+})
+
+test('LE TEST QUI COMPTE : le dialogue est UNIQUE, et son d\u00e9faut est \u00ab Annuler \u00bb', () => {
+  // Trois confirmations \u2014 couper l assistant, publier, supprimer \u2014 une seule
+  // fen\u00eatre. Trois fen\u00eatres finiraient par ne pas rendre le focus pareil.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const dlgs = d.querySelectorAll('[data-bind="dialogue"]')
+  assert.equal(dlgs.length, 1)
+  const form = dlgs[0].querySelector('form')
+  assert.equal(form.getAttribute('method'), 'dialog', '\u00c9chap et la soumission ferment la fen\u00eatre')
+  const boutons = [...form.querySelectorAll('button')].map(b => b.value)
+  assert.deepEqual(boutons, ['annuler', 'ok'],
+    '\u00ab Annuler \u00bb vient EN PREMIER : c est lui qui prend le focus \u00e0 l ouverture')
+  // Les trois zones variables existent, vides et muettes au d\u00e9part.
+  for (const nom of ['titre', 'texte', 'liste', 'frappe', 'saisie', 'erreur', 'ok']) {
+    assert.ok(form.querySelector(`[data-dlg="${nom}"]`) || dlgs[0].querySelector(`[data-dlg="${nom}"]`), nom)
+  }
+  assert.ok(form.querySelector('[data-dlg="frappe"]').hasAttribute('hidden'))
+  assert.ok(form.querySelector('[data-dlg="liste"]').hasAttribute('hidden'))
+})
+
+test('LE TEST QUI COMPTE : le droit de PUBLIER n ouvre pas les champs, mais garde le dialogue', () => {
+  // Deux droits, deux portes. `reservations:write` publie les prix ;
+  // `reglages:write` modifie le bien. Un membre peut avoir l un sans l autre.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: false, peutPublier: true }))
+  assert.ok(d.querySelector('[data-bind="dialogue"]'), 'la confirmation lui servira')
+  assert.equal(d.querySelector('[data-champ]'), null, 'mais il ne modifie aucun champ')
+  assert.equal(d.querySelector('[data-bind="enregistrer"]'), null)
+  assert.equal(d.querySelector('[data-bind="assistant"]'), null)
+})
+
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// \u00c9TAPE 3 \u2014 le mode des prix, et \u00ab Publier mes prix \u00bb
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+const enMode = (mode, extra = {}) =>
+  fiche({ bien: { ...fiche().bien, mode_des_prix: mode, ...extra } })
+
+test('LE TEST QUI COMPTE : le choix du mode ne s affiche que tant qu il reste \u00e0 faire', () => {
+  // Spec \u00a73.2 : le second choix n appara\u00eet que si le bien est en `keep` ; une
+  // fois en `managed`, le s\u00e9lecteur DISPARA\u00ceT. Le retour en arri\u00e8re est refus\u00e9
+  // par le serveur d\u00e8s qu un canal est actif : montrer un choix qui sera refus\u00e9
+  // est ce que ce lot s interdit.
+  const keep = doc(M.ficheHtml(enMode('keep'), OUTILS(), { peutSupprimer: true }))
+  const sel = keep.querySelector('[data-bind="mode"]')
+  assert.ok(sel, 'en « Je garde mes prix », le choix existe')
+  assert.deepEqual([...sel.options].map(o => o.value), ['keep', 'managed'])
+  assert.equal(sel.value, 'keep', 'le mode courant est s\u00e9lectionn\u00e9')
+  assert.ok(keep.querySelector('label[for="fic-mode"]'), 'le s\u00e9lecteur porte son \u00e9tiquette')
+
+  const managed = doc(M.ficheHtml(enMode('managed'), OUTILS(), { peutSupprimer: true }))
+  assert.equal(managed.querySelector('[data-bind="mode"]'), null, 'plus de choix en « managed »')
+  assert.match(managed.querySelector('[data-mode]').textContent, /H\u00f4teSmart/, 'mais l \u00e9tat se lit')
+})
+
+test('LE TEST QUI COMPTE : \u00ab Publier \u00bb n appara\u00eet qu en « managed », et jamais sur un bien pilot\u00e9', () => {
+  // \u26a0 DEUX \u00c9CRIVAINS DE PRIX SUR LA M\u00caME NUIT, c est ce que ce garde-fou
+  // emp\u00eache. L endpoint de lecture le dit d\u00e9j\u00e0 dans son commentaire : proposer
+  // la publication sur un bien pilot\u00e9 par l app de tarification ferait \u00e9crire
+  // deux sources sur la m\u00eame date.
+  const ok = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutPublier: true }))
+  assert.ok(ok.querySelector('[data-bind="publier"]'))
+
+  const pilote = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'yieldflow' }),
+    OUTILS(), { peutPublier: true }))
+  assert.equal(pilote.querySelector('[data-bind="publier"]'), null, 'bien pilot\u00e9 : pas de bouton')
+
+  const keep = doc(M.ficheHtml(enMode('keep', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutPublier: true }))
+  assert.equal(keep.querySelector('[data-bind="publier"]'), null,
+    'en « Je garde mes prix », le serveur refuserait la mise en file')
+
+  // Et la r\u00e8gle est lisible hors du rendu, pour qu on puisse l \u00e9prouver seule.
+  assert.deepEqual(M.publierAffiche({ mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' }),
+    { montre: true, motif: null })
+  assert.equal(M.publierAffiche({ mode_des_prix: 'managed', pilote_tarifaire: 'yieldflow' }).motif, 'pilote')
+  assert.equal(M.publierAffiche({ mode_des_prix: 'keep' }).motif, 'mode_keep')
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : sans le droit CALENDRIER, aucun bouton Publier', () => {
+  // Le serveur garde le full sync par `reservations:write`, pas par
+  // `reglages:write` : un membre qui modifie le bien ne publie pas forc\u00e9ment.
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutSupprimer: true, peutPublier: false }))
+  assert.equal(d.querySelector('[data-bind="publier"]'), null)
+  assert.ok(d.querySelector('[data-champ]'), 'alors qu il modifie bien les champs')
+})
+
+test('le bouton Publier existe m\u00eame sans le droit de MODIFIER : deux droits, deux portes', () => {
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutSupprimer: false, peutPublier: true }))
+  assert.ok(d.querySelector('[data-bind="publier"]'))
+  assert.equal(d.querySelector('[data-champ]'), null)
+  assert.equal(d.querySelector('[data-bind="mode"]'), null)
+})
+
+test('LE TEST QUI COMPTE : un bien PILOT\u00c9 dit que ses prix partent tout seuls', () => {
+  // D\u00e9cision de Thierry du 21 octobre 2026. L'absence de bouton, seule, se
+  // lirait comme un oubli ou comme un droit manquant. Et la phrase ne nomme ni
+  // l'app de tarification ni le partenaire technique : ce sont des noms de
+  // l'int\u00e9rieur.
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'yieldflow' }),
+    OUTILS(), { peutPublier: true, peutSupprimer: true }))
+  const phrase = d.querySelector('[data-publier="automatique"]')
+  assert.ok(phrase, 'la phrase doit remplacer le bouton')
+  assert.equal(phrase.textContent.trim(), 'Vos prix sont ajust\u00e9s et envoy\u00e9s automatiquement par H\u00f4teSmart.')
+  assert.equal(d.querySelector('[data-bind="publier"]'), null)
+  assert.doesNotMatch(d.querySelector('#c').textContent, /yield|channex|beds24/i)
+})
+
+test('la phrase des prix automatiques est un \u00c9TAT, pas une action : elle ne d\u00e9pend d aucun droit', () => {
+  // La taire \u00e0 un profil en lecture lui laisserait croire que ses prix dorment.
+  for (const droits of [{}, { peutPublier: false }, { peutSupprimer: true, peutPublier: false }]) {
+    const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'yieldflow' }), OUTILS(), droits))
+    assert.ok(d.querySelector('[data-publier="automatique"]'), JSON.stringify(droits))
+    assert.equal(d.querySelector('[data-bind="publier"]'), null)
+  }
+  // Et un bien NON pilot\u00e9 ne la porte pas : elle serait fausse.
+  const normal = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutPublier: true }))
+  assert.equal(normal.querySelector('[data-publier="automatique"]'), null)
+  assert.ok(normal.querySelector('[data-bind="publier"]'))
+})
+
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// \u00c9TAPE 3 \u2014 Connecter
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+test('LE TEST QUI COMPTE : Connecter m\u00e8ne \u00e0 l assistant EXISTANT, avec l UUID du bien', () => {
+  // Spec \u00a73.1 : « assistant de connexion existant, reprise OAuth Airbnb
+  // conserv\u00e9e ». \u26a0 Et c'est un LIEN : l'assistant a besoin de la cl\u00e9 du
+  // partenaire pour lister les canaux, que la fiche ne descend pas. La page des
+  // connexions la conna\u00eet d\u00e9j\u00e0 ; on lui passe l'UUID.
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  const a = d.querySelector('[data-bind="connecter"]')
+  assert.ok(a, 'le bloc « O\u00f9 il est en vente » doit porter l action')
+  assert.equal(a.getAttribute('href'), '/pages/connexions?bien=b1')
+  assert.equal(a.tagName, 'A', 'un lien, pas un bouton : il change de page')
+  // UNE SEULE action pour le bloc, pas une par canal.
+  assert.equal(d.querySelectorAll('[data-bind="connecter"]').length, 1)
+})
+
+test('le libell\u00e9 suit l \u00e9tat : connecter quand rien n est en vente, g\u00e9rer sinon', () => {
+  const avec = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
+  assert.match(avec.querySelector('[data-bind="connecter"]').textContent, /G\u00e9rer/)
+  const sans = doc(M.ficheHtml(fiche({ canaux: [] }), OUTILS(), { peutSupprimer: true }))
+  assert.match(sans.querySelector('[data-bind="connecter"]').textContent, /Connecter/)
+  // M\u00eame sans canal lisible, l action reste : c'est par l\u00e0 qu'on en relie un.
+  const illisible = doc(M.ficheHtml(fiche({ canaux: null, indisponibles: ['canaux'] }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.ok(illisible.querySelector('[data-bind="connecter"]'))
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : sans droit d \u00e9criture, aucun chemin vers l assistant', () => {
+  const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: false }))
+  assert.equal(d.querySelector('[data-bind="connecter"]'), null)
+  assert.doesNotMatch(d.querySelector('#c').innerHTML, /pages\/connexions/)
+})
+
+test('LE TEST QUI COMPTE : un identifiant \u00e0 caract\u00e8res sp\u00e9ciaux ne casse pas le lien', () => {
+  const d = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, id: 'a b&c' } }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('[data-bind="connecter"]').getAttribute('href'),
+    '/pages/connexions?bien=a%20b%26c')
+})
+
+test('LE TEST QUI COMPTE : la page des connexions SAIT ouvrir l assistant sur le bien demand\u00e9', () => {
+  // Le lien de la fiche ne vaut que si l'autre bout l'honore. \u26a0 Et la
+  // r\u00e9solution se fait L\u00c0-BAS, o\u00f9 la cl\u00e9 du partenaire est connue : la fiche
+  // n'envoie qu'un UUID.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'connexions.html'), 'utf8')
+  assert.match(page, /URLSearchParams\(location\.search\)\.get\('bien'\)/,
+    'la page doit lire le param\u00e8tre que la fiche lui envoie')
+  assert.match(page, /otaProps\.find\(x => String\(x\.id\) === String\(bienDemande\)\)/,
+    'elle r\u00e9sout l UUID en propri\u00e9t\u00e9 avant d ouvrir')
+  assert.match(page, /if \(cible\) openConnexions\(cible, null\)/)
+  // \u26a0 ET LES TROIS CAS MORTS SE DISENT (revue de l'\u00e9tape 3) : un bien que
+  // l'assistant ne sait pas traiter, et un compte sans aucun bien \u00e9ligible.
+  // Ne rien faire laissait l'h\u00f4te devant une page qui ignorait sa demande.
+  assert.match(page, /data-bien-inconnu/, 'un identifiant inconnu doit le DIRE')
+  // Le param\u00e8tre se lit AVANT le d\u00e9part sur liste vide, sinon il n'est jamais lu.
+  const iLecture = page.indexOf("get('bien')")
+  const iDepart = page.indexOf('if (!props.length)')
+  assert.ok(iLecture !== -1 && iLecture < iDepart,
+    'le param\u00e8tre doit \u00eatre lu avant le `return` de la liste vide')
+})
+
+test('LE TEST QUI COMPTE : la liste de suppression n \u00e9crit pas de z\u00e9ro, et dit ce qu elle ignore', () => {
+  const t2 = (cle, vars) => (vars && vars.n != null) ? `${cle}:${vars.n}` : cle
+  // Le logement lui-m\u00eame est TOUJOURS l\u00e0 : une fen\u00eatre qui n \u00e9num\u00e8re rien
+  // ferait croire qu on ne perd rien.
+  assert.deepEqual(M.listeDeSuppression({ reservations: 0, messages: 0, menages: 0, codes: 0 }, t2),
+    ['fiche.supprimer_le_bien'])
+  // Un compte illisible se DIT.
+  assert.deepEqual(M.listeDeSuppression({ reservations: 2, messages: null, menages: 0, codes: 0 }, t2),
+    ['fiche.supprimer_le_bien', 'fiche.supprimer_reservations:2', 'fiche.supprimer_illisible'])
+  // Et une r\u00e9ponse absente vaut « on ne sait pas », pas « rien ».
+  assert.deepEqual(M.listeDeSuppression(null, t2),
+    ['fiche.supprimer_le_bien', 'fiche.supprimer_illisible'])
+})
+
+test('LE TEST QUI COMPTE : en « Je garde mes prix », la phrase dit AUSSI ce qui ne bouge pas', () => {
+  // Demande de Thierry du 22 octobre 2026. Ce qui part est la GRILLE tarifaire
+  // \u2014 le serveur la reconstruit chez les plateformes quel que soit le mode \u2014
+  // mais la pouss\u00e9e nuit par nuit reste suspendue. Sans la seconde phrase,
+  // l'h\u00f4te qui a choisi de garder ses prix lit « sera envoy\u00e9 \u00e0 Airbnb » et
+  // croit qu'on \u00e9crase ses tarifs.
+  const d = doc(M.ficheHtml(enMode('keep'), OUTILS(), { peutSupprimer: true }))
+  const aide = d.querySelector('[data-envoi-aide]')
+  assert.equal(aide.textContent.trim(),
+    'Sera envoy\u00e9 \u00e0 Airbnb. Vos prix par nuit, eux, ne sont pas modifi\u00e9s.')
+
+  // En « H\u00f4teSmart envoie mes prix », la phrase reste celle d'avant : la
+  // seconde moiti\u00e9 y serait fausse.
+  const managed = doc(M.ficheHtml(enMode('managed'), OUTILS(), { peutSupprimer: true }))
+  assert.equal(managed.querySelector('[data-envoi-aide]').textContent.trim(),
+    'Sera envoy\u00e9 \u00e0 Airbnb')
+
+  // Et les canaux restent ceux DU BIEN, dans les deux modes.
+  const troisCanaux = fiche({ bien: { ...fiche().bien, mode_des_prix: 'keep' },
+    canaux: [{ ota: 'airbnb', titre: null, actif: true, mappe: true },
+      { ota: 'booking', titre: null, actif: true, mappe: true }] })
+  assert.match(doc(M.ficheHtml(troisCanaux, OUTILS(), { peutSupprimer: true }))
+    .querySelector('[data-envoi-aide]').textContent, /Airbnb et Booking\.com\. Vos prix par nuit/)
+})
+
+test('un bien SANS canal n a pas de phrase, m\u00eame en « Je garde mes prix »', () => {
+  // « Un bien sans canal : pas de phrase » (Thierry, 21 octobre) vaut dans les
+  // deux modes : rien ne part chez personne, et l'annoncer serait faux.
+  const d = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, mode_des_prix: 'keep' }, canaux: [] }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('[data-envoi-aide]'), null)
+})
+
+test('des canaux illisibles, en « Je garde mes prix », disent les deux moiti\u00e9s sans inventer de noms', () => {
+  const d = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, mode_des_prix: 'keep' }, canaux: null }),
+    OUTILS(), { peutSupprimer: true }))
+  const aide = d.querySelector('[data-envoi-aide]')
+  assert.equal(aide.dataset.envoiAide, 'inconnu')
+  assert.match(aide.textContent, /plateformes connect\u00e9es\. Vos prix par nuit/)
+  assert.doesNotMatch(aide.textContent, /Airbnb|Booking/)
+})
+
+test('LE TEST QUI COMPTE : un bien SANS cl\u00e9 partenaire n \u00e9num\u00e8re que lui-m\u00eame', () => {
+  // `cle_absente` descendait du serveur et personne ne le lisait (revue de
+  // l'\u00e9tape 3). Il dit que la purge n'efface rien de li\u00e9 : les quatre z\u00e9ros
+  // sont alors CERTAINS, et surtout pas \u00ab nous n'avons pas pu compter \u00bb.
+  const t2 = (cle, vars) => (vars && vars.n != null) ? `${cle}:${vars.n}` : cle
+  assert.deepEqual(
+    M.listeDeSuppression({ cle_absente: true, reservations: 0, messages: 0, menages: 0, codes: 0 }, t2),
+    ['fiche.supprimer_le_bien'])
+  // M\u00eame avec des comptes manquants : sans cl\u00e9, il n'y a rien \u00e0 lire.
+  assert.deepEqual(M.listeDeSuppression({ cle_absente: true }, t2), ['fiche.supprimer_le_bien'])
+})
+
+test('LE TEST QUI COMPTE : CHAQUE action a sa place pour dire son \u00e9tat et son erreur', () => {
+  // \u26a0 L'INTERRUPTEUR N'EN AVAIT AUCUNE (revue de l'\u00e9tape 3), et
+  // `direEtatBrut` ne fait rien sans ces crochets : un bien Beds24 pas encore
+  // synchronis\u00e9 rend 409, l'interrupteur ne bouge pas \u2014 ce qui est juste \u2014 et
+  // AUCUN message n'appara\u00eet nulle part. L'h\u00f4te reclique, toujours rien.
+  //
+  // \u26a0 ET LE TEST QUI PR\u00c9TENDAIT LE COUVRIR \u00c9TAIT INERTE : son bac \u00e0 sable
+  // remplace `direEtatBrut` par un espion. Il prouve qu'on l'appelle, jamais
+  // qu'il a o\u00f9 \u00e9crire. On v\u00e9rifie donc le RENDU.
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutSupprimer: true, peutPublier: true }))
+  const zones = [
+    ['.fic-assistant', 'l interrupteur de l assistant'],
+    ['.fic-photo__action', 'la photo'],
+    ['[data-publier]', 'Publier mes prix'],
+    ['.fic-envoi[data-envoi="prix"]', 'l envoi du bloc Prix'],
+    ['.fic-ligne--saisie[data-ligne="name"]', 'une case de saisie']
+  ]
+  for (const [sel, quoi] of zones) {
+    const zone = d.querySelector(sel)
+    assert.ok(zone, `${quoi} : zone absente`)
+    assert.ok(zone.querySelector('[data-etat]'), `${quoi} : nulle part o\u00f9 dire « Enregistr\u00e9 »`)
+    assert.ok(zone.querySelector('[data-erreur]'), `${quoi} : nulle part o\u00f9 dire le refus`)
+    assert.ok(zone.querySelector('[data-erreur]').hasAttribute('hidden'),
+      `${quoi} : l erreur doit \u00eatre muette au d\u00e9part`)
+  }
+  // Et sur un bien supprimable, le bloc Supprimer aussi.
+  const sup = doc(M.ficheHtml(fiche({ suppression: { possible: true, motif: null } }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.ok(sup.querySelector('.fic-supprimer [data-etat]'))
+  assert.ok(sup.querySelector('.fic-supprimer [data-erreur]'))
+})
+
+test('LE TEST QUI COMPTE : la r\u00e9ponse du SERVEUR d\u00e9cide de « Publier », pas la d\u00e9duction locale', () => {
+  // \u26a0 CONSTAT DE LA RECETTE DE THIERRY (22 octobre 2026) : le bouton
+  // s'affichait sur un bien SANS AUCUN CANAL, et le serveur rendait 400
+  // « Bien non connect\u00e9 au canal (ids manquants) ». Les identifiants du
+  // partenaire, qui tranchent, ne descendent pas ici \u2014 et ne doivent pas.
+  const nonConnecte = fiche({
+    bien: { ...fiche().bien, mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' },
+    publication: { possible: false, motif: 'pas_connecte' }
+  })
+  const d = doc(M.ficheHtml(nonConnecte, OUTILS(), { peutPublier: true }))
+  assert.equal(d.querySelector('[data-bind="publier"]'), null,
+    'le bouton ne doit pas \u00eatre propos\u00e9 : il m\u00e8nerait \u00e0 un 400')
+  // Et pas de phrase « prix automatiques » non plus : ce n'est pas le cas.
+  assert.equal(d.querySelector('[data-publier="automatique"]'), null)
+
+  // Le serveur dit oui : le bouton revient.
+  const connecte = fiche({
+    bien: { ...fiche().bien, mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' },
+    publication: { possible: true, motif: null }
+  })
+  assert.ok(doc(M.ficheHtml(connecte, OUTILS(), { peutPublier: true }))
+    .querySelector('[data-bind="publier"]'))
+
+  // Et la phrase des prix automatiques suit le motif du SERVEUR.
+  const pilote = fiche({
+    bien: { ...fiche().bien, mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' },
+    publication: { possible: false, motif: 'pilote' }
+  })
+  assert.ok(doc(M.ficheHtml(pilote, OUTILS(), { peutPublier: true }))
+    .querySelector('[data-publier="automatique"]'))
+})
+
+test('sans r\u00e9ponse du serveur, la d\u00e9duction locale reste en REPLI', () => {
+  // Moins bonne, pas fausse : une r\u00e9ponse qui ne porte pas encore le champ ne
+  // doit pas faire dispara\u00eetre le bouton \u00e0 qui y a droit.
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutPublier: true }))
+  assert.ok(d.querySelector('[data-bind="publier"]'))
+  assert.deepEqual(M.publierAffiche({ mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' }, null),
+    { montre: true, motif: null })
 })
