@@ -156,9 +156,14 @@ test('RECENSEMENT : toute lecture de bookings_snapshot est bornee', () => {
   // maintenant. Ils n'ont plus d'exemption.)
   const ATTENDU = {
     'api/messages.js': 1,                // a borner par les booking_id des messages charges
-    'lib/cron-channel-reviews.js': 1,    // a paginer : une fenetre de dates serait FAUSSE
+    'lib/cron-channel-reviews.js': 1     // a paginer : une fenetre de dates serait FAUSSE
                                          // (un avis peut porter sur un sejour ancien)
-    'lib/cron-classify.js': 1            // a borner par les booking_id references
+    // `lib/cron-classify.js` EST SORTI DE CETTE LISTE LE 22 OCTOBRE 2026.
+    // Sa lecture est bornee par `.in('booking_id', ...)` — les reservations des
+    // fils en main — et cloisonnee par `user_id`. Elle le valait : mesure du
+    // jour en production, 827 lignes pour La bulle et 651 pour Coeur de vie 23,
+    // a 173 lignes du plafond. Elle est desormais PROTEGEE par ce filet : la
+    // remettre sans borne fait rougir ce test.
   }
 
   const constate = {}
