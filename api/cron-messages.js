@@ -50,9 +50,10 @@ const {
 const MAX_BIENS_PAR_PASSE = 500
 
 const { demarrerPassage } = require('../lib/metriques-cron')
-const { ecrireLePassage, purgerSiDue: purgerLesMesures } = require('../lib/cron-stats')
-// Meme mur de 60 s que le cycle principal (vercel.json).
-const BUDGET_MESURE_MS = 57000
+const { ecrireLePassage, purgerSiDue: purgerLesMesures,
+        ECRITURE_MAX_MS, PURGE_MAX_MS } = require('../lib/cron-stats')
+// Meme mur que le cycle principal (`maxDuration` 60 s, vercel.json).
+const MUR_MESURE_MS = 59000
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -99,10 +100,16 @@ module.exports = async function handler (req, res) {
       // casse ce qu'elle observe. On lui laisse donc le reliquat du budget, et
       // la purge, poste le moins urgent du lot, attend le passage suivant si
       // le cycle est deja en retard.
-      const reste = BUDGET_MESURE_MS - detail.duree_ms
+      // ⚠ DEUX BORNES, ET IL FAUT LES DEUX. `reste` dit ce qu'il reste avant le
+      // mur ; les plafonds de `lib/cron-stats.js` disent ce qu'une ecriture
+      // saine met. Ne garder que `reste` rendait l'attente PLUS LONGUE sur un
+      // cycle rapide : a 5 s de cycle, une insertion qui pend etait attendue
+      // 54 s — exactement le defaut que la review venait de fermer, reintroduit
+      // par son correctif. C'est toujours le minimum des deux.
+      const reste = MUR_MESURE_MS - detail.duree_ms
       if (reste > 300) {
-        await ecrireLePassage(supabase, detail, { delaiMs: reste })
-        if (detail.duree_ms < 50000) await purgerLesMesures(supabase, { delaiMs: reste })
+        await ecrireLePassage(supabase, detail, { delaiMs: Math.min(ECRITURE_MAX_MS, reste) })
+        if (detail.duree_ms < 50000) await purgerLesMesures(supabase, { delaiMs: Math.min(PURGE_MAX_MS, reste) })
       } else {
         console.error(`[cron-messages] mesure non ecrite : cycle a ${detail.duree_ms} ms, plus de budget`)
       }

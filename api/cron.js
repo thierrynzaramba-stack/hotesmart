@@ -126,10 +126,17 @@ const { naitreAuDepart } = require('../lib/avis/naissance')
 const { executerAutoValidations } = require('../lib/avis/auto-validation')
 const { releverLesComptesDus } = require('../lib/canaux-du-bien')
 const { demarrerPassage } = require('../lib/metriques-cron')
-const { ecrireLePassage, purgerSiDue: purgerLesMesures } = require('../lib/cron-stats')
-// Le mur de `maxDuration` est a 60 s (vercel.json) : la mesure n'ecrit que dans
-// ce qui reste avant 57, pour laisser partir la reponse.
-const BUDGET_MESURE_MS = 57000
+const { ecrireLePassage, purgerSiDue: purgerLesMesures,
+        ECRITURE_MAX_MS, PURGE_MAX_MS } = require('../lib/cron-stats')
+// ⚠ LE MUR EST A 60 s (`maxDuration`, vercel.json) : la mesure n'ecrit que dans
+// ce qui reste avant 59, et jamais plus longtemps que ses propres plafonds.
+// ⚠ ET UN CYCLE AU-DELA DE ~58,7 s NE LAISSE AUCUNE LIGNE. C'est assume et
+// c'est dit dans docs/kb/cout-du-cron.md : ce sont les cycles que la
+// plateforme tue de toute facon, et leurs lignes de chrono au fil de l'eau
+// (stdout) restent le seul temoin. Le mur etait a 57 s, ce qui privait de
+// mesure la tranche 57-60 s — justement les cycles les plus lourds, ceux qu'on
+// cherche.
+const MUR_MESURE_MS = 59000
 
 // ─── Chrono d'etape, devenu LE COMPTEUR DU PASSAGE ──────────────────────────
 // Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
@@ -241,10 +248,16 @@ module.exports = async function handler(req, res) {
       // casse ce qu'elle observe. On lui laisse donc le reliquat du budget, et
       // la purge, poste le moins urgent du lot, attend le passage suivant si
       // le cycle est deja en retard.
-      const reste = BUDGET_MESURE_MS - detail.duree_ms
+      // ⚠ DEUX BORNES, ET IL FAUT LES DEUX. `reste` dit ce qu'il reste avant le
+      // mur ; les plafonds de `lib/cron-stats.js` disent ce qu'une ecriture
+      // saine met. Ne garder que `reste` rendait l'attente PLUS LONGUE sur un
+      // cycle rapide : a 5 s de cycle, une insertion qui pend etait attendue
+      // 54 s — exactement le defaut que la review venait de fermer, reintroduit
+      // par son correctif. C'est toujours le minimum des deux.
+      const reste = MUR_MESURE_MS - detail.duree_ms
       if (reste > 300) {
-        await ecrireLePassage(supabase, detail, { delaiMs: reste })
-        if (detail.duree_ms < 50000) await purgerLesMesures(supabase, { delaiMs: reste })
+        await ecrireLePassage(supabase, detail, { delaiMs: Math.min(ECRITURE_MAX_MS, reste) })
+        if (detail.duree_ms < 50000) await purgerLesMesures(supabase, { delaiMs: Math.min(PURGE_MAX_MS, reste) })
       } else {
         console.error(`[Cron] mesure non ecrite : cycle a ${detail.duree_ms} ms, plus de budget`)
       }
