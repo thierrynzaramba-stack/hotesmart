@@ -256,43 +256,38 @@ place d'un non-calculable transforme une absence en fait.
 affiche (« chiffres de 02:14 »), et c'est ce qui rend une table de résumé
 honnête. Un résumé sans son heure est un chiffre dont personne ne sait l'âge.
 
-### 4.2 Les déclencheurs — et la décision qui reste à prendre
+### 4.2 Les déclencheurs — TRANCHÉ PAR THIERRY LE 22 OCTOBRE 2026
 
-⚠ **IL Y A UNE TENSION ENTRE TES DEUX ÉNONCÉS, ET JE NE LA TRANCHE PAS SEUL.**
+**Version simple d'abord.** Le cron recalcule les résumés de **tous les biens
+deux fois par jour**, avec un **writer unique**, et l'écran affiche **l'heure du
+calcul**. Seule exception : le **premier calcul immédiat** d'un logement
+nouveau (§4.3).
 
-- Le **principe 1** dit : « recalculées **par le dispatcher de changements**
-  quand une réservation ou un avis change ».
-- La **règle d'architecture** dit : « calculées **par le cron quotidien**, une
-  à deux fois par jour ».
+**Pas de marquage par le dispatcher pour l'instant.**
 
-Les deux sont justes, et ils ne disent pas la même chose. Ma proposition :
+Ce que cette décision coûte, nommé pour qu'on le reconnaisse si ça arrive : un
+CA ou une note peuvent avoir **jusqu'à douze heures de retard** après une
+réservation ou un avis. `calcule_le` le dit à l'écran, donc le retard est
+visible et non trompeur — mais il est là.
 
-**Le cron quotidien est le PLANCHER, et il est obligatoire.** Une fenêtre
-glissante de 30 jours change de valeur **même quand rien ne change** : le
-30ᵉ jour sort de la fenêtre à minuit. Un résumé qui ne serait recalculé que sur
-changement vieillirait tout seul, en silence, sur les biens les plus calmes —
-exactement ceux dont l'hôte regarde le CA parce qu'il s'inquiète.
-
-**Le dispatcher donne la fraîcheur, et il MARQUE au lieu de calculer.** Sur un
-changement réel (réservation, avis), il pose `resume_bien_jour.a_recalculer =
-true` ; la passe suivante du cron recalcule en priorité les lignes marquées.
-
-**Pourquoi marquer plutôt que calculer tout de suite, et c'est ma
-recommandation :**
+⚠ **ÉVOLUTION POSSIBLE, SI LA FRAÎCHEUR DEVIENT UN PROBLÈME** (et pas avant) :
+le dispatcher de changements pose `a_recalculer = true` sur la ligne de résumé
+du bien touché, et la passe suivante du cron traite les lignes marquées en
+priorité. Il **marque**, il ne calcule pas — pour trois raisons qui resteront
+vraies ce jour-là :
 
 1. **Un writer unique.** C'est la règle du dépôt, et elle a déjà été payée :
    deux writers de `public_tokens.property_ids` ont donné l'écrasement
-   silencieux des biens réglés dans l'app ménage. Le cron seul écrit les
-   résumés.
+   silencieux des biens réglés dans l'app ménage.
 2. **L'amplification d'écriture est bornée.** Un plein sync de réservations
-   touche des centaines de lignes : recalculer à chaque dispatch ferait des
+   touche des centaines de lignes ; recalculer à chaque dispatch ferait des
    centaines de recalculs de CA pour une valeur finale unique.
-3. **Le délai est connu et affiché.** Avec le marqueur, la fraîcheur vaut « au
-   pire la prochaine passe » ; `calcule_le` le dit à l'écran.
+3. **Le délai reste connu et affiché.** Avec le marqueur, la fraîcheur vaut
+   « au pire la prochaine passe ».
 
-**Ce que tu dois trancher** : marqueur + cron (ma recommandation, fraîcheur à
-la passe suivante), ou recalcul immédiat par le dispatcher (fraîcheur à la
-seconde, deux writers, amplification à borner). Rien ne se code avant.
+Le signe qu'il faut y venir : un hôte qui dit « mon CA n'a pas bougé alors que
+j'ai une réservation de ce matin ». Tant que personne ne le dit, la version
+simple suffit, et elle a un writer de moins.
 
 ### 4.3 Le cas du logement neuf
 
@@ -303,14 +298,35 @@ rien faire. Le writer de création appelle donc le calcul de ses cinq résumés 
 synchrone, et **son échec n'empêche pas la création** — c'est un résumé, pas
 un état critique.
 
-### 4.4 Heure du cron
+### 4.4 Les deux heures — proposition
 
-Le cron quotidien tourne **après** la synchronisation des réservations du jour
-et **après** le poll des avis, sinon il résume des données qu'il va recevoir
-dix minutes plus tard. Position proposée : juste après le pilote quotidien
-(22 h Paris aujourd'hui), à confirmer au lot (c) avec la mesure du cron.
+**04:00 et 16:00, heure de Paris.** Douze heures d'écart, donc un retard
+maximal de douze heures, ce qui est exactement ce que « une à deux fois par
+jour » veut dire.
 
----
+Pourquoi ces deux-là, et pas 02:00 et 14:00 :
+
+- **04:00** est après minuit, donc **après que la fenêtre glissante de 30 jours
+  a tourné** : le chiffre du matin est celui du bon jour. C'est aussi après la
+  synchronisation de nuit et loin du pilote tarifaire quotidien (22:00 Paris),
+  qui est déjà la tâche la plus lourde de la journée. Et c'est avant que l'hôte
+  se lève : à 08:00 ses chiffres ont au plus quatre heures.
+- **16:00** rattrape les réservations et les avis de la journée. À 20:00, ses
+  chiffres ont au plus quatre heures.
+
+**Forme d'implémentation** : deux marqueurs quotidiens dans le cron de cinq
+minutes, chacun déclenché au **premier passage à son heure ou après** — c'est
+l'idiome que le dépôt utilise déjà pour ses tâches quotidiennes. Le recalcul
+étant **idempotent** (recalculer rend la même valeur), un déclenchement en
+retard est sans conséquence.
+
+⚠ **ET CES HEURES SONT À CONFIRMER SUR LA MESURE, PAS SUR CE RAISONNEMENT.**
+Mesure du 22 octobre 2026 : la série `cron_stats` ne couvre que 10:30 → 15:00,
+soit 50 passages — de quoi voir que le cycle coûte 121 requêtes médianes après
+le lot `biens_channel` contre 236 avant, mais **pas** de quoi désigner les
+heures creuses d'une journée entière. La série de 48 h (23 octobre) donnera la
+répartition horaire ; si 04:00 ou 16:00 tombe sur un cycle déjà chargé, on
+déplace le marqueur — c'est une ligne.
 
 ## 5. Les interdits
 
@@ -487,15 +503,25 @@ est une option à mesurer plus tard, pas un lot.
 
 ---
 
-## 9. Ce qui reste à trancher par Thierry
+## 9. Décisions prises, et ce qui reste
 
-1. **Le déclencheur des résumés** (§4.2) : marqueur + cron (ma
-   recommandation) ou recalcul immédiat par le dispatcher. **Le lot (c) ne
-   démarre pas sans cette décision.**
-2. **L'heure du cron quotidien** (§4.4) : après la synchro et après le poll des
-   avis — position exacte à confirmer avec la mesure du cron.
-3. **La métrique du premier affichage perçu** (§7.3) : faut-il la mesurer côté
-   navigateur, et comment.
+**Prises par Thierry le 22 octobre 2026 :**
+
+| Décision | Valeur |
+|---|---|
+| Déclencheur des résumés | **version simple** : cron, tous les biens, deux fois par jour, writer unique, heure du calcul affichée. Pas de marquage par le dispatcher (§4.2) |
+| Logement nouveau | **premier calcul immédiat** — seule exception (§4.3) |
+| `dub1` | **en dernier** (§8) |
+| Ordre des lots | **(a) (b) (c) (d)** tel qu'écrit au §6, et (b) **ne passe pas par `/api/messages`** |
+| Branches | spec et lots **partis de `main`**, recette sur `staging` |
+
+**Reste à trancher :**
+
+1. **Les deux heures du cron** (§4.4) : 04:00 et 16:00 Paris proposées sur
+   raisonnement, à confirmer sur la répartition horaire que donnera la série de
+   48 h du 23 octobre.
+2. **La métrique du premier affichage perçu** (§7.3) : faut-il la mesurer côté
+   navigateur, et comment. Ne bloque aucun lot.
 
 ## 10. Ce que cette spec ne couvre pas
 
