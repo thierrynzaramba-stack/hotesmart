@@ -239,6 +239,21 @@
     <button class="btn diag-btn" data-run="19">Lire</button>
     <pre class="diag-out"></pre>
   </div>
+
+  <div class="diag-card" data-test="20">
+    <div class="diag-head">
+      <h3>20. Coût du cron — classement des tâches</h3>
+      <span class="diag-status idle">En attente</span>
+    </div>
+    <p>Pour chaque tâche du cycle : le nombre de passages, les requêtes Supabase, les appels aux partenaires, le temps et le travail fait. Trié par requêtes puis par temps, avec le total par jour. Lecture pure de <code>cron_stats</code> — <b>réservé au fondateur</b> (le serveur refuse en 403 pour tout autre compte).</p>
+    <select class="form-input" id="cron-fenetre" style="margin-bottom:10px">
+      <option value="24h">Sur 24 heures</option>
+      <option value="7j">Sur 7 jours</option>
+    </select>
+    <input class="form-input" id="cron-limite" type="number" min="1" max="200" value="10" placeholder="Nombre de lignes" style="margin-bottom:10px">
+    <button class="btn diag-btn" data-run="20">Lire le classement</button>
+    <pre class="diag-out"></pre>
+  </div>
 </div>
 
 <script type="module">
@@ -506,7 +521,79 @@
       const body = await res.json().catch(() => ({}))
       setOut(19, body)
       return res.ok && !!body.ok
+    },
+
+    // 20. Le cout du cron : le classement des taches sur 24 h ou 7 jours.
+    //
+    // ⚠ UN TABLEAU, PAS DU JSON. C'est le seul ecran de ce lot, et il sert a
+    // DECIDER d'un decoupage : des colonnes alignees se lisent d'un coup
+    // d'oeil, un JSON de quarante taches ne se lit pas du tout.
+    async '20'() {
+      const t = await token()
+      const fenetre = document.getElementById('cron-fenetre').value
+      const limite = document.getElementById('cron-limite').value || '10'
+      const res = await fetch('/api/diagnostic?check=cron_stats&fenetre=' + encodeURIComponent(fenetre)
+        + '&limite=' + encodeURIComponent(limite), { headers: { Authorization: 'Bearer ' + t } })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || !body.ok) {
+        setOut(20, { http: res.status, ...body })
+        return false
+      }
+      setOut(20, tableauDuCout(body))
+      return true
     }
+  }
+
+  // Le rendu du classement. `ms` est le temps PROPRE d'une tache (sans ses
+  // sous-taches) : c'est le seul dont la somme vaut la duree du passage.
+  function tableauDuCout (body) {
+    const col = (v, n, droite) => {
+      const s = String(v)
+      return droite ? s.padStart(n) : s.padEnd(n)
+    }
+    const secondes = (ms) => (ms / 1000).toFixed(1) + ' s'
+    const l = []
+    l.push(`Fenêtre ${body.fenetre} — depuis ${body.depuis}`)
+    l.push(`${body.taches_mesurees} tâche(s) mesurée(s), ${body.classement.length} affichée(s)`)
+    l.push('')
+    l.push(col('#', 3) + col('cron', 15) + col('tâche', 26)
+      + col('passages', 10, true) + col('requêtes', 10, true) + col('req/pass', 10, true)
+      + col('externes', 10, true) + col('temps', 12, true) + col('travail', 9, true))
+    l.push('-'.repeat(105))
+    body.classement.forEach((t, i) => {
+      l.push(col(i + 1, 3) + col(t.cron, 15) + col(String(t.tache).slice(0, 25), 26)
+        + col(t.passages, 10, true) + col(t.requetes, 10, true)
+        + col(t.passages ? (t.requetes / t.passages).toFixed(1) : '—', 10, true)
+        + col(t.externes, 10, true) + col(secondes(t.ms), 12, true) + col(t.travail, 9, true))
+    })
+    l.push('')
+    if (body.par_jour_erreur) {
+      // Un bloc vide se lirait « aucun passage ». Il dit sa panne.
+      l.push('TOTAL PAR JOUR : ILLISIBLE — ' + body.par_jour_erreur)
+      l.push('(le classement ci-dessus reste valable)')
+      return l.join('\n')
+    }
+    l.push('TOTAL PAR JOUR (heure de Paris)')
+    l.push(col('jour', 13) + col('cron', 15) + col('passages', 10, true)
+      + col('requêtes', 10, true) + col('externes', 10, true) + col('temps', 12, true)
+      + col('moy./pass.', 12, true))
+    l.push('-'.repeat(82))
+    for (const j of (body.par_jour || [])) {
+      l.push(col(j.jour, 13) + col(j.cron, 15) + col(j.passages, 10, true)
+        + col(j.requetes, 10, true) + col(j.externes, 10, true) + col(secondes(j.ms), 12, true)
+        + col(j.passages ? secondes(j.ms / j.passages) : '—', 12, true))
+    }
+    for (const p of (body.derniers_passages || [])) {
+      l.push('')
+      l.push(`DERNIER PASSAGE ${p.cron} — ${p.commence_le} — ${secondes(p.duree_ms)}, `
+        + `${p.requetes} requête(s), ${p.appels_externes} appel(s) externe(s)`)
+      for (const t of (p.taches || []).slice(0, 12)) {
+        l.push('  ' + col(String(t.nom).slice(0, 30), 32) + col(t.req, 6, true)
+          + col(secondes(t.ms_seul), 10, true)
+          + '  ' + JSON.stringify(t.travail || {}))
+      }
+    }
+    return l.join('\n')
   }
 
   // Case "exécution réelle" -> bascule l'avertissement rouge de sa carte.

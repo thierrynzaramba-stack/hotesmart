@@ -20,6 +20,7 @@ const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 
 const { surveillerReponse } = require('../lib/reponse-partenaire')
+const { classement, derniersPassages } = require('../lib/cron-stats')
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
@@ -27,6 +28,11 @@ const supabase = createClient(
 
 const CHANNEL_API = process.env.CHANNEL_BASE_URL
 const CHANNEL_KEY = process.env.CHANNEL_API_KEY
+
+// ⚠ LU A CHAQUE APPEL, PAS AU CHARGEMENT. Une garde dont la valeur est figee
+// au demarrage a froid se trompe pendant toute la vie de l'instance si la
+// variable change — et elle devient intestable sans recharger le module.
+const fondateur = () => String(process.env.FOUNDER_EMAIL || '').trim().toLowerCase()
 
 // ⚠ UN DIAGNOSTIC QUI PLANTE N'EST PAS UN DIAGNOSTIC.
 // Vecu du 30 septembre 2026 : `CHANNEL_BASE_URL` venait d'etre reecrite sur le
@@ -150,6 +156,62 @@ async function router(req, res) {
       channel_status: list.status,
       channel_count: rows.length,
       channels
+    })
+  }
+
+  // ?check=cron_stats&fenetre=24h|7j[&limite=N][&cron=cron|cron-messages]
+  // LE COUT DU CRON : le classement des taches, trie par requetes puis par
+  // temps, avec le total par jour. Lot de mesure du 22 octobre 2026.
+  if (check === 'cron_stats') {
+    // ⚠ RESERVE AU FONDATEUR, ET C'EST UNE GARDE SERVEUR, PAS UN MASQUAGE
+    // (regle absolue du depot). La carte de la page est cachee aux autres,
+    // mais c'est ici que ca se refuse : le cout de la plateforme — quelles
+    // taches tournent, a quelle cadence, pour quel volume — n'est pas une
+    // donnee de client, et `domaine: 'titulaire'` SANS ressource designee ne
+    // filtre rien (tout utilisateur est titulaire de son propre compte).
+    const garde = await requirePermission(req, res, { domaine: 'titulaire' })
+    if (!garde.ok) return
+    if (!fondateur()) {
+      // ⚠ LE REFUS DIT SA CAUSE. Sans cette distinction, une variable absente
+      // sur un projet se lit « je n'ai pas le droit » et on cherche du cote
+      // des droits pendant une heure. Un diagnostic qui ne diagnostique pas
+      // sa propre porte est inutile.
+      return res.status(403).json({ error: 'Réservé au fondateur', motif: 'FOUNDER_EMAIL absent de la configuration' })
+    }
+    if (String(garde.email || '').trim().toLowerCase() !== fondateur()) {
+      return res.status(403).json({ error: 'Réservé au fondateur' })
+    }
+
+    const fenetre = req.query.fenetre === '7j' ? '7j' : '24h'
+    const heures = fenetre === '7j' ? 168 : 24
+    // Borne explicite : une limite venant du client ne choisit pas la taille
+    // d'une reponse sans plafond.
+    const demandee = parseInt(req.query.limite, 10)
+    const limite = Number.isFinite(demandee) ? Math.min(Math.max(demandee, 1), 200) : 10
+    const quelCron = ['cron', 'cron-messages'].includes(req.query.cron) ? req.query.cron : null
+
+    const cl = await classement(supabase, { heures, limite, cron: quelCron })
+    if (!cl.ok) {
+      return res.status(503).json({
+        ok: false, fenetre,
+        error: cl.raison === 'migration_non_appliquee'
+          ? 'Table de mesure absente : migration 2026-10-22-cron-stats non appliquée'
+          : 'Classement illisible',
+        detail: cl.detail,
+      })
+    }
+    const der = await derniersPassages(supabase)
+    return res.status(200).json({
+      ok: true, fenetre, depuis: cl.depuis,
+      taches_mesurees: cl.taches,
+      classement: cl.classement,
+      par_jour: cl.par_jour,
+      // ⚠ TRANSMIS (constat de review). Sans lui, une panne de
+      // `cron_stats_par_jour` affichait un bloc « total par jour » VIDE et
+      // muet, qui se lit « aucun passage » — la conclusion inverse.
+      par_jour_erreur: cl.par_jour_erreur,
+      derniers_passages: der.ok ? der.passages : undefined,
+      derniers_passages_erreur: der.ok ? undefined : der.raison,
     })
   }
 

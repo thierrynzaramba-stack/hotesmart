@@ -70,6 +70,49 @@ mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
    la **recette**, et l'**ouverture d'un go prod**. Tout le reste — l'ordre des
    merges, les conflits triviaux, la vérification des déploiements — se règle
    entre sessions.
+8. ⚠ **UN CORRECTIF NÉ D'UNE RECETTE SE COMMITE SUR LA BRANCHE DU LOT, puis la
+   branche se merge dans `staging`. JAMAIS DE COMMIT DIRECT SUR `staging`.**
+   C'est tentant pendant une recette : la boucle est courte, l'hôte attend, et
+   `staging` est déjà sorti dans son worktree. Mais un correctif qui ne vit que
+   sur `staging` **n'est dans aucune branche**, donc il ne part jamais en
+   production — et il ne part pas en silence : la branche, elle, porte toujours
+   le défaut. **Vécu le 21 octobre 2026** : deux passes de recette sur le lot
+   calendrier ont produit trois correctifs, commités directement sur `staging`.
+   Au go prod, la branche `fix-calendrier-saisie-prix` s'arrêtait au commit
+   d'avant, et la merger aurait mis en production les trois défauts que la
+   recette venait de trouver — dont un prix que personne n'avait tapé, poussé au
+   canal. Rattrapé par `cherry-pick -x` vers la branche, mais c'est un
+   rattrapage, pas un déroulé.
+9. ⚠ **AVANT TOUT MERGE PROD, LE CHEF DE FILE VÉRIFIE QUE CHAQUE FICHIER DU LOT
+   EST IDENTIQUE À L'ÉTAT RECETTÉ SUR `staging`** — au blob, pas à l'œil, et sur
+   la liste COMPLÈTE des fichiers de l'index, jamais sur un échantillon :
+
+   ```bash
+   # dans l'arbre du merge, avant de commiter
+   git diff --name-only --cached <main-avant> | while read f; do
+     a=$(git rev-parse ":$f"); b=$(git rev-parse <sha-recette>:"$f" 2>/dev/null || echo ABSENT)
+     [ "$a" != "$b" ] && echo "DIFFERE : $f"
+   done
+   ```
+
+   Une ligne de sortie est une question à se poser, pas forcément un défaut : un
+   fichier partagé par deux lots **doit** différer, puisque `staging` en porte
+   un que `main` n'a pas encore. Mais chaque écart doit être **nommé et
+   expliqué** avant le commit.
+   **Vécu le 21 octobre 2026, deux fois dans la soirée.** Au merge du lot
+   logements, quatre fichiers n'étaient PAS en conflit, donc git a pris la
+   version de la branche sans un mot — et la suite rendait **8 rouges** : la
+   branche précédait la dette 76, et son `lib/logement/lecture.js` n'appelait
+   plus l'alarme des sources d'avis inconnues. Au merge du lot calendrier, le
+   même contrôle a confirmé l'inverse : les neuf fichiers du lot étaient
+   byte-identiques au recetté, et le seul écart — `shared/ui.css` — était le lot
+   logements, attendu et vérifié. **Le contrôle sert autant à valider qu'à
+   alerter.**
+   ⚠ **Et un merge vers `main` n'est jamais le merge vers `staging` rejoué** :
+   sur `staging`, le lot arrive dans un arbre qui contient déjà les autres lots,
+   donc git a peu à faire ; sur `main`, il arrive seul, et tout ce que les autres
+   lots ont ajouté PAR-DESSUS ses fichiers n'existe pas — sans conflit, sans
+   avertissement.
 
 **Pourquoi cette section existe.** Le 18 septembre 2026, deux sessions ont
 travaillé dans le même clone et l'une a emporté 220 lignes de correctifs de
@@ -755,6 +798,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
 - docs/kb/aujourdhui.md (accueil V5 : source de chaque chiffre, ce qui n'est PAS affiché et pourquoi ; socle UI V5 dans shared/theme.css, ui.css, icons.svg, nav.js, i18n/ — aucun hexa, aucun texte en dur, aucun emoji, `node scripts/i18n-check.js` avant commit).
 - docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
+- docs/kb/cout-du-cron.md (le COUT du cron par tache et par passage : compteur pose sur `fetch` — une exception mesuree, le SDK Anthropic ; `ms` contre `ms_seul` ; table `cron_stats` purgee a 30 jours ; carte 20 du diagnostic et `scripts/classement-cron.js`).
 - docs/kb/dettes-v1.md (REGISTRE des dettes datées avant la clôture V1 : 28 rouges, migrations à appliquer, vacances 2027, mobile et fermetures — chaque lot lit sa ligne avant merge).
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).
 - docs/kb/prix-plancher.md (garde anti nuit a 0 : `properties.prix_minimum` par bien, repli 10 € ; on FERME la date, on ne remonte jamais le prix ; `rate: 0` n'est pas applique par Channex, il garde le prix de la grille).
@@ -782,6 +826,96 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - Après push : attendre que le Deployment ID Vercel change avant de tester le cron prod.
 
 ### APRÈS CHAQUE PUSH — VÉRIFIER QU'UN DÉPLOIEMENT EXISTE POUR CE SHA
+
+⚠⚠ **AVANT DE DIAGNOSTIQUER UN WEBHOOK PERDU : LIRE LES DEUX PAGES D'ÉTAT.**
+`githubstatus.com` et `vercel-status.com`. Une sortie vide n'est pas forcément
+notre dépôt, ni un réglage : le 21 octobre 2026 c'était un incident GitHub
+ouvert — *Delays for Pull Requests and Webhook deliveries*, composant
+**Webhooks en Degraded Performance**. Trois heures de diagnostic côté dépôt
+pour une panne qui était affichée en ligne. **Ce coup d'œil coûte dix secondes
+et se fait AVANT tout le reste.**
+
+⚠ **ET UNE LIVRAISON RETARDÉE N'EST PAS UNE LIVRAISON PERDUE.** Les webhooks du
+21 octobre sont tous arrivés, avec deux à trois heures de retard, et Vercel a
+promu la production **dans l'ordre des pushes** : `a73b905` à 15:27, `8551264` à
+15:31, `76d1791` à 15:35, `707af03` à 15:38. Conséquence à surveiller : pendant
+un rattrapage, **un push ancien peut être livré après un récent** et promouvoir
+un ANCIEN commit en production. Après un incident de ce type, vérifier que le
+dernier déploiement de production porte bien la tête de `main`, et pas un SHA
+d'avant.
+
+**INCIDENT CLOS LE 21 OCTOBRE 2026 À 16:57, et l'alerte qui vivait ici est
+retirée** — le déroulé normal est revenu : on pousse, le déploiement sort tout
+seul, on vérifie le SHA. Les deux moitiés de la condition de retrait ont été
+mesurées : `githubstatus.com` *All Systems Operational* (Webhooks repassé
+`operational`), ET le push de `19945bd` déployé **tout seul en 33 secondes**,
+la cadence d'avant l'incident.
+
+⚠ **ET LES DEUX NE SONT PAS ARRIVÉES ENSEMBLE : le chronomètre a précédé la page
+de 17 minutes.** Les livraisons étaient déjà normales (33 s) alors que la page
+annonçait encore Webhooks en `degraded_performance`. « Degraded » veut dire que
+CERTAINES livraisons traînent, pas toutes. Donc le vert de la page dit la fin de
+l'incident, pas ce qui nous arrive : **ce qui mesure notre cas, c'est le
+chronomètre sur notre propre push.** Lire la page pour savoir s'il faut chercher
+chez nous ; lire le chronomètre pour savoir si on peut avancer.
+
+**Mesuré, trois pushes de suite sur `main`, chacun bouclé 120 secondes puis
+réinterrogé à 5 et 8 minutes : ZÉRO déploiement.** `981d453` (lot logements),
+`a73b905` (lot i18n), `8551264` (ce document). Statut GitHub `pending`, zéro
+check-run, sur les trois. La ref, elle, avançait bien à chaque fois —
+`git ls-remote` le confirmait.
+
+⚠ **ET CE N'EST PAS PROPRE À `main` — PREMIÈRE CONCLUSION, FAUSSE, CORRIGÉE UNE
+HEURE PLUS TARD.** J'avais écrit ici que `main` seul était touché, parce que les
+pushes de `staging` et des branches de lot avaient tous eu leurs deux
+déploiements en 35 secondes. L'asymétrie était réelle, mais elle n'était pas la
+cause : elle était **chronologique**. Le push de `channex-phase1` — une branche
+ordinaire, pas `main` — n'a rien produit non plus.
+
+**La vraie chronologie, telle que l'API la donne :**
+
+| heure | ref poussée | déploiements |
+|---|---|---|
+| 12:01 | branche de lot (`c7be709`) | 2, en 35 s |
+| 12:48 | `staging` (`34969a2`) | 2, en 35 s |
+| **12:51** | `staging` (`a2ec6f1`) | **2 — le dernier qui a marché** |
+| ~14:35 | `main` (`981d453`) | 0 |
+| ~14:55 | `main` (`a73b905`) | 0 |
+| ~15:05 | `main` (`8551264`) | 0 |
+| ~15:15 | `main` **et `channex-phase1`** (`76d1791`) | 0 |
+
+**Tout push postérieur à 12:51 n'a rien produit, quelle que soit la ref.** Ce
+n'était donc pas un réglage de branche.
+
+⚠ **ET MA DEUXIÈME CAUSE ÉTAIT FAUSSE AUSSI.** J'avais écrit ici qu'il fallait
+regarder « l'installation de l'application GitHub de Vercel, puis l'état de la
+plateforme Vercel, puis les limites du compte », et j'avais conclu à un ticket
+Vercel. **C'était un incident GitHub**, trouvé par Thierry sur
+`githubstatus.com` : *Delays for Pull Requests and Webhook deliveries*, composant
+Webhooks en Degraded Performance. Ni Vercel, ni notre dépôt, ni un réglage — et
+aucun ticket à ouvrir. Les livraisons sont arrivées d'elles-mêmes deux à trois
+heures plus tard.
+
+**Deux fois de suite j'ai cherché la cause dans le système que je pouvais
+inspecter** — d'abord la branche, puis le dépôt et Vercel — au lieu de regarder
+d'abord si le fournisseur annonçait une panne. D'où la règle en tête de cette
+section. Pendant l'incident, le geste manuel est le déroulé, pas un rattrapage,
+**et il vaut aussi pour `staging`** : une recette se déploie à la main elle
+aussi.
+
+⚠ **LA LEÇON DE MÉTHODE, PARCE QU'ELLE SE REJOUERA.** Trois pushes sur `main`
+sans déploiement et cinq pushes d'avant avec, ça dessine une asymétrie par
+BRANCHE qui saute aux yeux — et qui était un artefact. La variable cachée était
+le TEMPS : tous les succès étaient avant 12:51, tous les échecs après. Le
+contre-test qui l'a montré coûtait un push sur une branche ordinaire. **Avant de
+conclure « c'est propre à X », pousser une fois sur non-X.**
+
+⚠ **LA SONDE QUI TRANCHE N'EST PAS L'API, C'EST LA PRODUCTION.** `981d453`
+avait sa ref en place et `https://hotesmart.vercel.app/logements` rendait **404**
+alors que la route venait d'entrer dans `vercel.json`. Après le
+« Create Deployment » : **200**. Interroger une URL que le lot vient d'ajouter
+coûte une seconde et ne ment pas.
+
 
 ```bash
 SHA=$(git rev-parse <branche>)      # ⚠ le SHA COMPLET, 40 caractères
@@ -815,8 +949,38 @@ avant de découvrir qu'il n'y avait pas de build — et une recette qu'on allait
 lancer sur l'ancien écran.
 
 **Comment le rattraper.** Un re-push à l'identique ne met à jour aucune ref,
-donc ne réveille rien : il faut un SHA neuf. Soit un « Redeploy » depuis le
-tableau de bord Vercel (aucune trace dans l'historique), soit un commit vide —
-qui est un commit **direct sur `staging`**, donc interdit par la règle du clone
-partagé : il exige l'autorisation explicite de Thierry, au cas par cas, et son
-message porte la mesure qui le justifie (voir `306de95`).
+donc ne réveille rien.
+
+**Le geste, c'est « Create Deployment » depuis le tableau de bord Vercel**, en
+désignant la **branche** (ou le SHA). Il construit le commit de tête et le
+promeut : la production rattrape, sans nouveau commit et sans toucher à
+l'historique.
+
+⚠ **PAS « Redeploy », ET C'EST LE PIÈGE** (corrigé par Thierry le 21 octobre
+2026) : « Redeploy » reconstruit le déploiement qu'on a sous les yeux, donc
+**l'ANCIEN commit**. On obtient un build tout neuf, vert, horodaté de l'instant
+— et la production sert toujours le code d'avant. C'est le pire des résultats :
+le symptôme disparaît de l'écran sans que le défaut soit réparé.
+
+Un **commit vide** reste possible quand on veut que le webhook refasse le
+chemin complet, mais ce n'est plus le premier recours. C'est un commit **direct
+sur la branche**, donc soumis à la règle du clone partagé : autorisation
+explicite de Thierry au cas par cas, et son message porte la mesure qui le
+justifie (voir `306de95`).
+
+**Vécu une seconde fois le 21 octobre 2026, sur `main` et donc en PRODUCTION.**
+Le merge du lot logements (`981d453`) a été poussé, `git ls-remote` confirmait
+la ref avancée — et **aucun déploiement**, bouclé 120 secondes puis réinterrogé
+à 4 minutes : zéro. Statut GitHub `pending`, zéro check-run. La sonde qui
+tranche n'est pas l'API, c'est **la production elle-même** :
+`https://hotesmart.vercel.app/logements` rendait **404** alors que la route
+venait d'entrer dans `vercel.json`. Après « Create Deployment » sur `main` :
+déploiement `Production – hotesmart` enregistré pour le SHA complet, et
+`/logements` à **200**.
+
+⚠ **ET LA FORME DU PUSH N'Y EST POUR RIEN.** Ce push-là visait
+`<SHA>:refs/heads/main` plutôt qu'un nom de branche, parce que `main` est sorti
+dans le clone partagé et qu'on n'y touche pas. C'est tentant d'y voir la cause :
+c'en est une fausse. GitHub ne voit que **la mise à jour de la ref** ; le
+refspec du côté local ne lui est pas transmis. Ne pas perdre de temps là-dessus
+le jour où ça se reproduit.
