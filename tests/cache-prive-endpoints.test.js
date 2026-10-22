@@ -235,3 +235,39 @@ test('RECENSEMENT : la surface des reponses precoces est CHIFFREE', () => {
     'Si ce compte s effondre, ce n est pas la surface qui a disparu, c est le ' +
     'recensement.')
 })
+
+test('LE TEST QUI COMPTE : api/sms.js n ouvre plus CORS a tous les sites', () => {
+  // ⚠ Le raisonnement est celui de `api/book-public.js`, qui le porte depuis
+  // son ecriture : « La page est servie par le meme domaine : le navigateur n a
+  // besoin d aucune permission croisee. `Access-Control-Allow-Origin: *`
+  // laisserait n importe quel site lire le calendrier de n importe quel bien
+  // depuis le navigateur de ses visiteurs. »
+  // Recensement des appelants HTTP de /api/sms, 22 octobre 2026 : trois pages,
+  // toutes sur notre domaine.
+  const src = code(lire('api/sms.js'))
+  assert.ok(!/Access-Control-Allow-Origin/.test(src),
+    'api/sms.js rend une configuration Brevo et un historique sms_logs : il ne ' +
+    'doit accorder aucune permission croisee')
+  // Et l en-tete prive, lui, doit rester : c est l autre moitie du meme sujet.
+  assert.match(src, /posterEnTetesPrives\(res\)/,
+    'ses reponses portent des donnees de compte et ne passent pas par la garde ' +
+    'partagee : l en-tete se pose a la main, en tete du handler')
+})
+
+test('RECENSEMENT : les endpoints qui ouvrent CORS a tous les sites sont COMPTES', () => {
+  // ⚠ CINQ RESTENT, ET ILS ATTENDENT UNE DECISION DE THIERRY. Le raisonnement
+  // de `book-public.js` leur vaut a tous — mais retirer CORS d un endpoint
+  // change ce que peut faire une page d un autre domaine, et deux d entre eux
+  // servent des parcours que je n ai pas eprouves (Stripe, l app prestataire).
+  // On les COMPTE donc, au lieu de les decrire ou de les oublier.
+  const ouverts = fichiersApi().filter(f => /Access-Control-Allow-Origin/.test(code(lire(f))))
+  assert.deepEqual(ouverts.sort(), [
+    'api/agent-config.js',      // authentifie — candidat
+    'api/beds24-setup.js',      // authentifie — candidat
+    'api/extract-kb.js',        // authentifie — candidat
+    'api/menages-public.js',    // public PAR JETON : `*` laisse lire un planning a qui connait le jeton
+    'api/stripe.js'             // a verifier : un webhook n applique pas CORS, une page de retour si
+  ].sort(),
+    'un de plus : justifiez pourquoi ce endpoint accorde une permission croisee.\n' +
+    'un de moins : il a ete ferme, retirez-le pour qu il soit protege.')
+})

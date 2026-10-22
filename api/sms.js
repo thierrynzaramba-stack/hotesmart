@@ -158,10 +158,26 @@ module.exports = async (req, res) => {
   // methode, un parametre ou un jeton refuses, et un `public` sur une reponse
   // qui ne porte rien n'expose rien.
   posterEnTetesPrives(res);
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // ⚠ PLUS D'EN-TETE CORS — VOLONTAIRE, ET C'EST LE RAISONNEMENT DEJA ECRIT
+  // DANS `api/book-public.js`, applique ici.
+  //
+  // Recensement des appelants HTTP de cet endpoint, 22 octobre 2026 :
+  // `apps/sms/index.html`, `pages/connexions.html`, `pages/messages.html` —
+  // les trois sur NOTRE domaine. Tout le reste (`lib/alert-notify.js`,
+  // `lib/cleaning/notifier-prestataire.js`, `lib/cron-overbooking.js`) importe
+  // `sendSms` par `require` : du serveur vers le serveur, que CORS ne concerne
+  // pas. Une page servie par le meme domaine n'a besoin d'AUCUNE permission
+  // croisee : le navigateur ne fait meme pas de preflight.
+  //
+  // Ce que `Access-Control-Allow-Origin: '*'` ouvrait : n'importe quel site
+  // pouvait lire, depuis le navigateur d'un visiteur, la configuration Brevo et
+  // l'historique `sms_logs` d'un compte — s'il disposait du jeton. Il ne l'a
+  // pas, donc ce n'etait pas exploitable ; mais un `*` sur un endpoint
+  // authentifie est une permission qu'on accorde sans raison.
+  //
+  // ⚠ ET RETIRER CORS NE CASSE AUCUN CLIENT NON NAVIGATEUR. `curl`, un script,
+  // un appel serveur a serveur n'appliquent pas CORS : seule une page servie
+  // par un AUTRE domaine perdrait l'acces, et il n'en existe pas.
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   // Auth Supabase — nécessaire pour rattacher l'envoi au propriétaire (sa clé Brevo)
