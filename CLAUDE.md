@@ -165,6 +165,45 @@ cher n'est plus l'écriture simultanée — les worktrees l'ont réglée — c'e
 - Corollaire pratique : une nouvelle donnée provider se traite dans cet ordre —
   table du cœur, writer dans `lib/`, puis lecture par l'app. Jamais l'inverse.
 
+## ARCHITECTURE — DONNÉE NON URGENTE = CALCULÉE 1 À 2 FOIS PAR JOUR, SERVIE PRÊTE
+
+- **Les données NON URGENTES** — CA, TO, notes moyennes, min/max, comparaisons
+  N-1, marché, statistiques — **sont calculées par le cron quotidien, une à
+  deux fois par jour, dans des tables de résumé, et servies par une API qui ne
+  fait que LIRE.**
+- **Les données TEMPS RÉEL** — réservations, disponibilités, messages, codes,
+  ménages du jour, paiements, surréservation — **ne passent JAMAIS par un
+  résumé.**
+- **TOUT NOUVEL AFFICHAGE déclare sa catégorie dans sa spec AVANT d'être codé.**
+  Non urgent = résumé obligatoire.
+- **Un test refuse un endpoint d'écran qui calcule une donnée non urgente à la
+  lecture.**
+- **L'écran affiche l'heure du calcul.** Un résumé sans son heure est un chiffre
+  dont personne ne sait l'âge.
+- **Un logement nouvellement créé déclenche son premier calcul immédiatement** —
+  sinon sa fiche dit « non calculable » jusqu'au lendemain, et l'hôte conclut
+  que le produit ne sait rien faire.
+
+**Pourquoi c'est une règle d'architecture et pas une optimisation.** Un chiffre
+non urgent calculé à la lecture est payé à CHAQUE ouverture d'écran par CHAQUE
+hôte, pour une valeur qui n'a pas changé depuis la nuit. Le coût ne se voit pas
+en développement — il se voit quand les logements se multiplient, et il croît
+avec eux.
+
+**Vécu, mesuré le 22 octobre 2026 en production, compte réel à 4 logements.**
+L'écran d'accueil coûtait **13 appels HTTP, 100 requêtes Supabase et
+1 047 556 octets**. `/api/yield`, appelé **deux fois par bien**, en portait
+**72 requêtes et 586 Ko** — à lui seul 72 % des requêtes de la page, pour du CA
+et du TO sur 30 jours, c'est-à-dire exactement de la donnée non urgente. Et
+`/api/messages` en portait 437 Ko **pour un seul champ** : l'état du code
+d'accès d'une arrivée. Détail et ordre des lots :
+docs/specs/spec-performance-pages.md.
+
+**Corollaire, et c'est la moitié qu'on oublie** : une table de résumé stocke un
+`null` AVEC son motif, jamais un 0. Un résumé qui écrit 0 là où le calcul
+répond « non calculable » transforme une absence en fait, et l'écran l'affiche
+avec l'aplomb des vrais chiffres (docs/kb/restitution-yield.md).
+
 ## RÈGLE — LE MOBILE SUIT L'ORDINATEUR
 - **Toute spec livrée sur la version ordinateur d'un écran est reportée sur sa
   version mobile — ou le report est PROPOSÉ à Thierry en fin de chantier.**
@@ -813,6 +852,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/kb/reference-yield.md (un jour = UN segment par priorite ; cascade de repli a 4 niveaux, plancher = jour de semaine ; deux seuils, 8 nuits ET 3 resas ; `part_vendue` est une part de VENTES, on extrapole le final, on ne multiplie jamais la capacite).
 - docs/kb/prix-voyageur.md (QUEL champ = prix paye par le voyageur : `amount` Channex/Airbnb est un NET HOTE (ecart +22,85 %), reconstruire via `meta.amount_type` — jamais via le nom du canal ; dates de vente : comparer les JOURS, pas les instants).
 - docs/kb/avis-voyageurs.md (ota_reviews : clé Channex unique = cloisonnement par properties, dette 11/70 levée par l'historique des réservations ; classification propreté en 2 étages, règle avant IA).
+- docs/specs/spec-performance-pages.md (**la mesure de chaque ecran, et l'ordre des lots** : les categories de chaque donnee affichee, les 5 tables de resume et leurs declencheurs, les deux interdits de cache, le budget par ecran. ⚠ Une decision y attend Thierry : marqueur + cron, ou recalcul immediat par le dispatcher — le lot (c) ne demarre pas sans elle.)
 - docs/specs/rotation-deroule.md (**LE DÉROULÉ QUI FAIT FOI pendant une rotation de secret** : `CRON_SECRET` puis `CHANNEL_WEBHOOK_SECRET`, geste par geste, avec la vérification que je fais à chaque pas et la fenêtre de refus d'une minute).
 - docs/specs/rotation-secret-webhook.md (le POURQUOI de la rotation du secret de webhook, et l'historique du piège : une version de ce document a affirmé le contraire du code. **En cas de divergence, le déroulé ci-dessus gagne, et celui-ci se corrige dans le même mouvement.**)
 
