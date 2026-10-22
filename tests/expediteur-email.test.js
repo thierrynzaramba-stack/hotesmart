@@ -41,7 +41,7 @@ Module._load = function (d, ...reste) {
       }
     })
   }
-  if (d === '../lib/require-permission') return { requirePermission: async () => ({ ok: true }) }
+  if (d === '../lib/require-permission') return { posterEnTetesPrives: () => {}, requirePermission: async () => ({ ok: true }) }
   return origine.apply(this, [d, ...reste])
 }
 

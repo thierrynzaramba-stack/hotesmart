@@ -10,7 +10,7 @@
 // nul — un renommage n'est pas une correction.
 
 const { createClient } = require('@supabase/supabase-js');
-const { requirePermission } = require('../lib/require-permission');
+const { requirePermission, posterEnTetesPrives } = require('../lib/require-permission');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -145,6 +145,19 @@ function normalizePhone(phone) {
 
 // ─── Handler Vercel ───────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
+  // ⚠ L'EN-TETE PRIVE EST POSE ICI, ET SUR CE SEUL ENDPOINT.
+  // `api/sms.js` ne passe pas par la garde partagee pour ses lectures : il
+  // resout `user` lui-meme (`auth.getUser`) et borne chaque requete par
+  // `user_id`. L'autorisation est donc bien la — mais l'en-tete prive, pose par
+  // `requirePermission`, ne l'etait pas, et SES REPONSES PORTENT DES DONNEES DE
+  // COMPTE : la configuration Brevo (`configured`, `brevo_enabled`, les
+  // expediteurs verifies) et l'historique `sms_logs`. Verification HTTPS du
+  // 22 octobre 2026 : `public, max-age=0, must-revalidate`.
+  // C'est le SEUL des trente endpoints qui repondent avant leur garde dont le
+  // corps ne soit pas un libelle generique — les autres ne rendent qu'une
+  // methode, un parametre ou un jeton refuses, et un `public` sur une reponse
+  // qui ne porte rien n'expose rien.
+  posterEnTetesPrives(res);
   // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
