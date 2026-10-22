@@ -96,6 +96,14 @@ total, et ce sont des requêtes qu'un découpage devra porter.
   enchaînées par `await`, donc le cas ne se produit pas aujourd'hui — mais un
   module qui se mettrait à lancer du travail en arrière-plan brouillerait son
   voisin, pas lui-même.
+- ⚠ **Un cycle au-delà de ~58,7 s ne laisse AUCUNE ligne**, et ce sont
+  précisément les cycles les plus lourds — ceux qu'on cherche. Le mur de
+  `maxDuration` est à 60 s : au-delà de 58,7 s, il ne reste pas de quoi écrire,
+  et la plateforme tue l'invocation de toute façon. Leur seul témoin reste les
+  lignes de chrono au fil de l'eau (`[Cron][chrono] <tâche> <ms>` sur stdout),
+  qui sont écrites *pendant* le cycle et survivent donc à sa mort. Le seuil a
+  d'abord été posé à 57 s, ce qui privait de mesure toute la tranche 57-60 s
+  sans raison.
 - **Deux passages simultanés dans la même instance se mélangeraient.** Le
   passage courant est une variable de module, pas un contexte par invocation.
   Le cas n'existe pas aujourd'hui : `/api/cron` et `/api/cron-messages` sont
