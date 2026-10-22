@@ -125,34 +125,22 @@ const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
 const { executerAutoValidations } = require('../lib/avis/auto-validation')
 const { releverLesComptesDus } = require('../lib/canaux-du-bien')
+const { demarrerPassage } = require('../lib/metriques-cron')
+const { ecrireLePassage, purgerSiDue: purgerLesMesures } = require('../lib/cron-stats')
 
-// ─── Chrono d'etape ──────────────────────────────────────────────────────────
+// ─── Chrono d'etape, devenu LE COMPTEUR DU PASSAGE ──────────────────────────
 // Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
-// d'alerting et le heartbeat cron_logs avant qu'ils ne tournent. On mesure chaque
-// etape, on loge AU FIL DE L'EAU (un cycle tue n'ecrit jamais sa ligne finale) et
-// on recapitule a la fin. Instrumentation seule : aucun changement de comportement.
-function chronoCycle() {
-  const t0 = Date.now()
-  const etapes = []
-  return {
-    async mesure(nom, fn) {
-      const a = Date.now()
-      try { return await fn() }
-      finally {
-        const d = Date.now() - a
-        etapes.push({ nom, ms: d })
-        // Loge immediatement : si l'invocation est tuee, on sait ou elle en etait.
-        console.log(`[Cron][chrono] ${nom} ${d}ms (cumul ${Date.now() - t0}ms)`)
-      }
-    },
-    total() { return Date.now() - t0 },
-    resume() {
-      const tri = [...etapes].sort((a, b) => b.ms - a.ms)
-      return `[Cron][chrono] TOTAL ${Date.now() - t0}ms | ` +
-             tri.map(e => `${e.nom}=${e.ms}ms`).join(' ')
-    }
-  }
-}
+// d'alerting et le heartbeat cron_logs avant qu'elles ne tournent. On mesure
+// chaque etape, on loge AU FIL DE L'EAU (un cycle tue n'ecrit jamais sa ligne
+// finale) et on recapitule a la fin. Instrumentation seule : aucun changement
+// de comportement.
+//
+// ⚠ DEPUIS LE 22 OCTOBRE 2026, LE CHRONO COMPTE AUSSI LE COUT (demande de
+// Thierry, lot de mesure avant decoupage) : requetes Supabase, appels aux
+// partenaires et travail fait, par tache. Le code vit dans
+// `lib/metriques-cron.js` — l'interface (`mesure`, `total`, `resume`) n'a pas
+// bouge d'un caractere, exactement pour que les quarante points d'appel
+// ci-dessous restent le code qu'on mesure.
 
 module.exports = async function handler(req, res) {
   // Auth stricte : le cron Vercel natif envoie automatiquement
@@ -181,7 +169,6 @@ module.exports = async function handler(req, res) {
     return res.status(401).json({ error: 'Non autorisé' })
   }
   console.log('[Cron] Démarrage', new Date().toISOString())
-  const chrono = chronoCycle()
   const results = {
     timestamp: new Date().toISOString(),
     properties: [],
@@ -208,6 +195,27 @@ module.exports = async function handler(req, res) {
     totalAvisAutoPubliees: 0,
     circuitBreakerTriggered: 0,
     errors: []
+  }
+  // ⚠ LE PASSAGE S'OUVRE AVANT LA PREMIERE REQUETE, et c'est ce qui fait que
+  // les lectures faites hors de toute tache (les cles Beds24, les jetons
+  // publics, le heartbeat final) apparaissent au lieu de disparaitre.
+  // `resultats` est une FONCTION : le travail fait par chaque tache se lit sur
+  // les compteurs que le cycle remplit deja, sans en ajouter un seul dans les
+  // modules.
+  const chrono = demarrerPassage({ cron: 'cron', resultats: () => results })
+
+  // ⚠ LA MESURE SURVIT A L'ECHEC DU CYCLE. Un passage qui casse est
+  // precisement celui qu'on veut lire — et sans cet appel, une instance Vercel
+  // tiede continuerait de compter dans un passage mort, melangeant deux
+  // invocations.
+  // ⚠ ET ELLE NE PEUT PAS FAIRE ECHOUER LE CRON (exigence explicite de
+  // Thierry) : `ecrireLePassage` ne leve jamais et n'attend pas plus de 2,5 s.
+  const journaliserLePassage = async () => {
+    try {
+      const detail = chrono.terminer()
+      await ecrireLePassage(supabase, detail)
+      await purgerLesMesures(supabase)
+    } catch (e) { console.error('[Cron] mesure non journalisee :', e && e.message) }
   }
   try {
     // 1. Refresh tokens Beds24 (indispensable avant tout fetch)
@@ -618,11 +626,17 @@ module.exports = async function handler(req, res) {
     })
 
     console.log(chrono.resume())
+    // ⚠ APRES le heartbeat, pour que la ligne de mesure porte le cycle entier.
+    // Son propre cout — un `insert`, et un `delete` par jour — n'est donc PAS
+    // dans ses chiffres : c'est une requete de plus par passage, dite ici et
+    // dans docs/kb/cout-du-cron.md plutot que cachee dans un total.
+    await journaliserLePassage()
     console.log('[Cron] Terminé', results)
     return res.json(results)
 
   } catch (err) {
     console.error('[Cron] Erreur globale:', err)
+    await journaliserLePassage()
     return res.status(500).json({ error: err.message })
   }
 }

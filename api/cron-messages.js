@@ -49,6 +49,9 @@ const {
 // nommee au CLAUDE.md (« une lecture ajoutee sans borne dans un script neuf »).
 const MAX_BIENS_PAR_PASSE = 500
 
+const { demarrerPassage } = require('../lib/metriques-cron')
+const { ecrireLePassage, purgerSiDue: purgerLesMesures } = require('../lib/cron-stats')
+
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
 module.exports = async function handler (req, res) {
@@ -72,6 +75,20 @@ module.exports = async function handler (req, res) {
   const results = { errors: [] }
   console.log('[cron-messages] demarrage', new Date().toISOString())
 
+  // ⚠ MEME COMPTEUR QUE LE CYCLE PRINCIPAL (lot de mesure du 22 octobre 2026).
+  // Il s'ouvre AVANT la premiere requete : les lectures faites hors de toute
+  // tache apparaissent au lieu de disparaitre, et c'est la moitie du sujet
+  // d'un import qui s'affamait sans qu'on sache sur quoi.
+  // ⚠ L'ecriture de la mesure ne peut pas faire echouer la passe : elle ne
+  // leve jamais et n'attend pas plus de 2,5 s (lib/cron-stats.js).
+  const chrono = demarrerPassage({ cron: 'cron-messages', resultats: () => results })
+  const journaliserLePassage = async () => {
+    try {
+      await ecrireLePassage(supabase, chrono.terminer())
+      await purgerLesMesures(supabase)
+    } catch (e) { console.error('[cron-messages] mesure non journalisee :', e && e.message) }
+  }
+
   // ⚠ LES DEUX VALEURS, COMME LE CYCLE DONT CET IMPORT SORT. `'channel'` est la
   // valeur MARQUE BLANCHE, traitee en paire partout dans le depot, et
   // `properties.provider` n'a AUCUNE contrainte qui l'empeche. Filtrer sur le
@@ -83,14 +100,17 @@ module.exports = async function handler (req, res) {
   // ⚠ Beds24 reste ecarte a dessein : son `importMessages` est un no-op.
   // ⚠ BORNE EXPLICITE : Supabase tronque a 1000 lignes SANS erreur. La regle du
   // depot est de borner, meme quand le parc en compte cinq.
-  const { data: props, error } = await supabase
+  const { data: props, error } = await chrono.mesure('lecture_biens', () => supabase
     .from('properties')
     .select('id, user_id, provider_property_id, name')
     .in('provider', ['channex', 'channel'])
     .not('provider_property_id', 'is', null)
-    .limit(MAX_BIENS_PAR_PASSE)
+    .limit(MAX_BIENS_PAR_PASSE))
   if (error) {
     console.error('[cron-messages] lecture des biens echec:', error.message)
+    // ⚠ MESURE ECRITE MEME ICI : une passe qui n'a RIEN pu lire est
+    // exactement celle qu'on cherchera dans le classement.
+    await journaliserLePassage()
     return res.status(503).json({ error: 'Lecture des biens impossible' })
   }
 
@@ -100,7 +120,7 @@ module.exports = async function handler (req, res) {
   // dans le cycle principal.
   let aImporter = props || []
   try {
-    aImporter = await ordonnerPourImport(supabase, props || [])
+    aImporter = await chrono.mesure('ordre_import', () => ordonnerPourImport(supabase, props || []))
   } catch (err) {
     console.error('[cron-messages] ordre illisible, ordre d origine :', err.message)
   }
@@ -131,9 +151,13 @@ module.exports = async function handler (req, res) {
     // ⚠ SON PROPRE `try`, PAR BIEN. Une panne sur un bien ne doit pas priver les
     // suivants de leur import — meme regle que dans le cycle principal.
     try {
-      const r = await importerMessagesDuBien(supabase, p, {
+      // ⚠ UN SEUL NOM POUR TOUS LES BIENS, et c'est voulu : `MAX_BIENS_PAR_PASSE`
+      // vaut 500, et un nom de tache par bien ferait une colonne JSON qui
+      // grandit avec le parc. Le compteur agrege par nom et garde `n`, le
+      // nombre de biens traites dans le passage.
+      const r = await chrono.mesure('import_bien', () => importerMessagesDuBien(supabase, p, {
         echeance, results, budgetBienMs: BUDGET_BIEN_DEDIE_MS
-      })
+      }))
       if (r && !r.abstenu) aboutis++
     } catch (err) {
       console.error(`[cron-messages] ${p.provider_property_id}:`, err.message)
@@ -180,6 +204,7 @@ module.exports = async function handler (req, res) {
     ms: Date.now() - t0
   }
   console.log('[cron-messages] fin', JSON.stringify(bilan))
+  await journaliserLePassage()
   // ⚠ 200 MEME AVEC DES ERREURS, ET ELLES SONT DANS LE CORPS. Un cron qui rend
   // 500 fait retenter Vercel ; ici une panne par bien est deja absorbee, et le
   // diagnostic se lit dans `errors` — jamais dans le code HTTP. Lecon du
