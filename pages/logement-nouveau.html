@@ -40,6 +40,14 @@
 
      Spec : docs/specs/logements-v5/spec-logements-v5.md. -->
 <style>
+  /* ⚠ LA REGLE EN LIGNE, EN PLUS DES FEUILLES. `.nou-form` declare
+     `display: flex` sur l'element qui porte `hidden` : si theme.css ET ui.css
+     echouaient au chargement, cette declaration d'AUTEUR l'emporterait sur le
+     `[hidden] { display: none }` du NAVIGATEUR — les origines ne se comparent
+     pas — et le formulaire deviendrait visible. Quarante caracteres ferment le
+     cas, comme sur les quatorze pages autonomes du depot. */
+  [hidden] { display: none !important; }
+
   /* La colonne de saisie : une largeur de lecture, pas la page entière. */
   .nou-page { max-width: 680px; }
 
@@ -76,6 +84,10 @@
      d'accessibilité) : le bord rouge est doublé du message sous le champ. */
   .nou-champ input[aria-invalid="true"] { border-color: var(--danger); }
   .nou-aide { font-size: var(--fs-caption); color: var(--muted); }
+  /* ⚠ LE MESSAGE EST RELIE A SON CHAMP PAR `aria-describedby`. Sans ce lien,
+     un lecteur d'ecran focalise sur le champ annonce « Capacite maximale,
+     invalide » et JAMAIS la phrase qui dit pourquoi — ni la ligne d'aide.
+     Releve en review le 22 octobre 2026 : la page n'en portait aucun. */
   .nou-erreur-champ { font-size: var(--fs-caption); color: var(--danger); }
 
   .nou-actions { display: flex; gap: var(--gap-m); align-items: center;
@@ -94,6 +106,11 @@
      d'erreur en couleur de texte normale, donc un echec qui ne se voit pas. */
   .nou-message { margin-top: var(--gap-m); }
   .nou-message--faute { color: var(--danger); }
+  /* ⚠ LE SUCCES AUSSI DOIT SE VOIR. L'ancien ecran avait un bloc vert ; ma
+     premiere version posait la confirmation en `.caption`, qui ne declare
+     qu'une taille de police — la phrase la plus importante de l'ecran n'avait
+     plus aucune affordance. */
+  .nou-message--fait { color: var(--ok); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -134,16 +151,18 @@
     <div class="nou-champ">
       <label for="nom" data-i18n="nouveau.nom"></label>
       <input type="text" id="nom" name="nom" required maxlength="100"
-             autocomplete="off" data-i18n-attr="placeholder:nouveau.nom_exemple">
-      <span class="nou-aide" data-i18n="nouveau.nom_aide"></span>
-      <span class="nou-erreur-champ" data-erreur="nom" hidden></span>
+             autocomplete="off" aria-describedby="nom-aide nom-faute"
+             data-i18n-attr="placeholder:nouveau.nom_exemple">
+      <span class="nou-aide" id="nom-aide" data-i18n="nouveau.nom_aide"></span>
+      <span class="nou-erreur-champ" id="nom-faute" data-erreur="nom" hidden></span>
     </div>
 
     <div class="nou-duo">
       <div class="nou-champ">
         <label for="capacite" data-i18n="nouveau.capacite"></label>
-        <input type="number" id="capacite" name="capacite" required min="1" max="20" value="2" inputmode="numeric">
-        <span class="nou-erreur-champ" data-erreur="capacite" hidden></span>
+        <input type="number" id="capacite" name="capacite" required min="1" max="20" value="2"
+               inputmode="numeric" aria-describedby="capacite-faute">
+        <span class="nou-erreur-champ" id="capacite-faute" data-erreur="capacite" hidden></span>
       </div>
       <div class="nou-champ">
         <label for="devise" data-i18n="nouveau.devise"></label>
@@ -158,51 +177,66 @@
 
     <div class="nou-champ">
       <label for="prix_base" data-i18n="nouveau.prix_base"></label>
-      <input type="number" id="prix_base" name="prix_base" required min="1" max="100000" step="1" inputmode="numeric"
+      <input type="number" id="prix_base" name="prix_base" required min="1" max="100000" step="1"
+             inputmode="decimal" aria-describedby="prix_base-aide prix_base-faute"
              data-i18n-attr="placeholder:nouveau.prix_base_exemple">
-      <span class="nou-aide" data-i18n="nouveau.prix_base_aide"></span>
-      <span class="nou-erreur-champ" data-erreur="prix_base" hidden></span>
+      <span class="nou-aide" id="prix_base-aide" data-i18n="nouveau.prix_base_aide"></span>
+      <span class="nou-erreur-champ" id="prix_base-faute" data-erreur="prix_base" hidden></span>
     </div>
 
     <div class="nou-duo">
       <div class="nou-champ">
         <label for="voyageurs_inclus" data-i18n="nouveau.voyageurs_inclus"></label>
         <input type="number" id="voyageurs_inclus" name="voyageurs_inclus" min="1" max="20" inputmode="numeric"
+               aria-describedby="voyageurs_inclus-aide voyageurs_inclus-faute"
                data-i18n-attr="placeholder:nouveau.voyageurs_inclus_defaut">
-        <span class="nou-aide" data-i18n="nouveau.voyageurs_inclus_aide"></span>
+        <span class="nou-aide" id="voyageurs_inclus-aide" data-i18n="nouveau.voyageurs_inclus_aide"></span>
+        <span class="nou-erreur-champ" id="voyageurs_inclus-faute" data-erreur="voyageurs_inclus" hidden></span>
       </div>
       <div class="nou-champ">
         <label for="supplement" data-i18n="nouveau.supplement"></label>
-        <input type="number" id="supplement" name="supplement" min="0" max="100000" step="1" inputmode="numeric" placeholder="0">
-        <span class="nou-aide" data-i18n="nouveau.supplement_aide"></span>
+        <input type="number" id="supplement" name="supplement" min="0" max="100000" step="1"
+               inputmode="decimal" placeholder="0" aria-describedby="supplement-aide supplement-faute">
+        <span class="nou-aide" id="supplement-aide" data-i18n="nouveau.supplement_aide"></span>
+        <span class="nou-erreur-champ" id="supplement-faute" data-erreur="supplement" hidden></span>
       </div>
     </div>
 
     <div class="nou-champ">
       <label for="adresse" data-i18n="nouveau.adresse"></label>
-      <input type="text" id="adresse" name="adresse" maxlength="200" autocomplete="street-address">
-    </div>
+      <input type="text" id="adresse" name="adresse" maxlength="200" autocomplete="street-address" aria-describedby="adresse-faute"
+             data-i18n-attr="placeholder:nouveau.adresse_exemple">
+          <span class="nou-erreur-champ" id="adresse-faute" data-erreur="adresse" hidden></span>
+</div>
 
     <div class="nou-duo">
       <div class="nou-champ">
         <label for="code_postal" data-i18n="nouveau.code_postal"></label>
-        <input type="text" id="code_postal" name="code_postal" maxlength="20" autocomplete="postal-code">
-      </div>
+        <input type="text" id="code_postal" name="code_postal" maxlength="20" autocomplete="postal-code" aria-describedby="code_postal-faute"
+               data-i18n-attr="placeholder:nouveau.code_postal_exemple">
+            <span class="nou-erreur-champ" id="code_postal-faute" data-erreur="code_postal" hidden></span>
+</div>
       <div class="nou-champ">
         <label for="ville" data-i18n="nouveau.ville"></label>
-        <input type="text" id="ville" name="ville" maxlength="100" autocomplete="address-level2">
-      </div>
+        <input type="text" id="ville" name="ville" maxlength="100" autocomplete="address-level2" aria-describedby="ville-faute"
+               data-i18n-attr="placeholder:nouveau.ville_exemple">
+            <span class="nou-erreur-champ" id="ville-faute" data-erreur="ville" hidden></span>
+</div>
     </div>
 
     <div class="nou-champ">
       <label for="pays" data-i18n="nouveau.pays"></label>
       <select id="pays" name="pays" autocomplete="country">
-        <option value="FR" selected>France</option>
-        <option value="BE">Belgique</option>
-        <option value="CH">Suisse</option>
-        <option value="ES">España</option>
-        <option value="IT">Italia</option>
-        <option value="PT">Portugal</option>
+        <!-- ⚠ TRADUITS, comme le reste. Ecrits en dur, ils affichaient
+             « Belgique » et « Suisse » en francais au milieu d'une page en
+             anglais — et le test d'i18n ne les voyait pas, puisqu'il ne releve
+             que les cles. -->
+        <option value="FR" selected data-i18n="nouveau.pays_fr"></option>
+        <option value="BE" data-i18n="nouveau.pays_be"></option>
+        <option value="CH" data-i18n="nouveau.pays_ch"></option>
+        <option value="ES" data-i18n="nouveau.pays_es"></option>
+        <option value="IT" data-i18n="nouveau.pays_it"></option>
+        <option value="PT" data-i18n="nouveau.pays_pt"></option>
       </select>
     </div>
 
@@ -234,7 +268,9 @@ await exigerCompteProprePage({ nomPage: 'L’ajout d’un logement' })
 import { requireAuth } from '/components/auth-guard.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
-import { chargerContexte, estTitulaire } from '/shared/compte-courant.js'
+import { getUser, signOut } from '/shared/supabase.js'
+import { chargerContexte, estTitulaire, peutLire, comptes, compteCourant, basculerVers }
+  from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
 import { valeursDuFormulaire, refusDeSaisie } from '/shared/logement-nouveau.js'
 
@@ -254,7 +290,12 @@ if (!session) throw new Error('Non authentifié')
 // main que sur un fragment qu'on vient d'injecter, et cette page n'en injecte
 // aucun.
 await I18n.init()
-await chargerContexte()
+// ⚠ AVEC L'IDENTIFIANT, TOUJOURS. Sans lui, `chargerContexte` reinitialisait
+// le contexte et `estTitulaire()` rendait `false` pour tout le monde : l'ecran
+// n'affichait que son refus (releve en review, 22 octobre 2026). Les deux
+// autres pages du lot passent `user.id` ; celle-ci fait pareil.
+const user = await getUser()
+await chargerContexte(user.id)
 
 const form = $('[data-bind="form"]')
 const message = $('[data-bind="message"]')
@@ -274,10 +315,40 @@ if (!estTitulaire()) {
 // blanche sans explication.
 $('[data-bind="chargement"]').hidden = true
 
+// ⚠ LA NAVIGATION NE SE REND PAS TOUTE SEULE. `shared/nav.js` se termine par
+// `window.HSNav = { render, renderLangSelector, renderMenu }` : charger le
+// script ne remplit rien. Omise, la page perdait les cinq entrées de la barre
+// du haut, le menu — donc la DECONNEXION, la langue et le sélecteur de compte —,
+// les initiales, et laissait au téléphone un bandeau NOIR VIDE collé en bas,
+// pendant que la page réservait 96 px de marge pour lui. L'ancien écran, lui,
+// rendait sa navigation (`renderSidebar`). Relevé en review le 22 octobre 2026.
+const initiales = (user.email || '?').slice(0, 2).toUpperCase()
+const pastille = $('[data-bind="initials"]')
+if (pastille) pastille.textContent = initiales
+
+HSNav.render({ peutLire })
+HSNav.renderMenu({
+  comptes: comptes(), compteActif: compteCourant(),
+  onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+  reglages: estTitulaire(), avis: peutLire('avis'),
+  // Mêmes outils que la liste : la section est PROVISOIRE, retirée lot par lot.
+  outils: [
+    peutLire('reservations') && { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price' },
+    estTitulaire() && { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key' },
+    estTitulaire() && { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send' },
+    estTitulaire() && { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar' },
+    estTitulaire() && { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link' },
+    estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
+  ].filter(Boolean)
+})
+
+document.title = `HôteSmart — ${t('nouveau.title')}`
+
 function direMessage (texte, fautif) {
   message.hidden = false
   message.textContent = texte
   message.classList.toggle('nou-message--faute', !!fautif)
+  message.classList.toggle('nou-message--fait', !fautif)
 }
 
 function montrerRefus (refus) {
@@ -302,6 +373,7 @@ form.addEventListener('submit', async (e) => {
   if (enVol) return
   message.hidden = true
   message.classList.remove('nou-message--faute')
+  message.classList.remove('nou-message--fait')
 
   // ⚠ LA VALIDATION VIT DANS UN MODULE COMMUN, pas dans la page : c'est la
   // règle du dépôt (« une règle partagée vit dans un module partagé »), et les

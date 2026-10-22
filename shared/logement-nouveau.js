@@ -39,14 +39,13 @@ function valeurDuChamp (form, champ) {
   if (!el) return null
   const brut = String(el.value == null ? '' : el.value).trim()
   if (brut === '') return null
-  if (champ.type === 'entier') {
-    const n = parseInt(brut, 10)
-    return Number.isNaN(n) ? brut : n
-  }
-  if (champ.type === 'nombre') {
-    const n = parseFloat(brut)
-    return Number.isNaN(n) ? brut : n
-  }
+  // ⚠ ON NE CONVERTIT QUE CE QUI EST VRAIMENT DU TYPE ATTENDU, et on rend la
+  // saisie TELLE QUELLE sinon. `parseInt('2.5')` rend 2 : l'hote tapait 2,5
+  // voyageurs et obtenait 2, sans un mot — l'ancien ecran, lui, refusait
+  // (validation native du navigateur). Rendre la chaine laisse `refusDeSaisie`
+  // la voir et la refuser, au lieu de la tronquer en silence.
+  if (champ.type === 'entier') return /^-?\d+$/.test(brut) ? parseInt(brut, 10) : brut
+  if (champ.type === 'nombre') return /^-?\d+(\.\d+)?$/.test(brut) ? parseFloat(brut) : brut
   return brut
 }
 
@@ -59,36 +58,48 @@ function valeursDuFormulaire (form) {
 // Le premier refus seulement : on ne montre pas dix messages a la fois, et le
 // focus va sur le champ nomme. Rend `null` quand la saisie est acceptable.
 //
-// ⚠ `voyageurs_inclus <= capacite` EST UNE REGLE DU SERVEUR QUE L'ECRAN
-// IGNORAIT. L'ancien formulaire bornait ce champ a 20 ; l'endpoint, lui, refuse
-// « Voyageurs inclus invalide (1 a capacite) ». Un hote qui saisissait 10
-// inclus pour 2 voyageurs remplissait ses dix champs et recevait un 400 sans
-// savoir lequel etait en cause.
+// ⚠ LES BORNES SONT LUES DANS `CHAMPS`, PAS RECOPIEES. Avant, `CHAMPS.min` et
+// `CHAMPS.max` n'etaient lus par personne : changer `min` de 1 a 99 ne changeait
+// RIEN, et un test qui relisait ces litteraux se croyait une confrontation.
+// Mesure de la review (22 octobre 2026) : la mutation passait, 19 tests verts.
+// Une seule source, donc, et le HTML est confronte a elle par un test.
+//
+// ⚠ ET LE PRIX DE BASE EST REFUSE SOUS 1. L'ecran declare `min="1"` mais porte
+// `novalidate` — le navigateur n'applique plus rien. Mesure : un logement a
+// 0,50 EUR la nuit se creait, et le plan tarifaire partait chez le partenaire
+// a 50 centimes. Le prix de base est le PLANCHER du plan provisionne
+// (docs/kb/prix-plancher.md) : c'est la derniere valeur a laisser filer.
 function refusDeSaisie (valeurs) {
   const v = valeurs || {}
 
-  if (!v.name || String(v.name).length < 1 || String(v.name).length > 100) {
-    return { champ: 'nom', cle: 'nouveau.faute_nom' }
-  }
-  const cap = Number(v.capacity)
-  if (!Number.isInteger(cap) || cap < 1 || cap > 20) {
-    return { champ: 'capacite', cle: 'nouveau.faute_capacite' }
-  }
-  const prix = Number(v.base_price)
-  if (!Number.isFinite(prix) || prix <= 0 || prix > 100000) {
-    return { champ: 'prix_base', cle: 'nouveau.faute_prix_base' }
-  }
-  if (v.included_guests != null) {
-    const inc = Number(v.included_guests)
-    if (!Number.isInteger(inc) || inc < 1 || inc > cap) {
-      return { champ: 'voyageurs_inclus', cle: 'nouveau.faute_voyageurs_inclus' }
+  for (const champ of CHAMPS) {
+    const brut = v[champ.api]
+    if (brut == null || brut === '') {
+      if (champ.requis) return { champ: champ.id, cle: 'nouveau.faute_' + champ.id }
+      continue
     }
-  }
-  if (v.extra_guest_fee != null) {
-    const sup = Number(v.extra_guest_fee)
-    if (!Number.isFinite(sup) || sup < 0 || sup > 100000) {
-      return { champ: 'supplement', cle: 'nouveau.faute_supplement' }
+    if (champ.type === 'texte') {
+      if (champ.max && String(brut).length > champ.max) {
+        return { champ: champ.id, cle: champ.requis ? 'nouveau.faute_' + champ.id : 'nouveau.faute_trop_long' }
+      }
+      continue
     }
+    const n = Number(brut)
+    const cle = 'nouveau.faute_' + champ.id
+    if (!Number.isFinite(n)) return { champ: champ.id, cle }
+    if (champ.type === 'entier' && !Number.isInteger(n)) return { champ: champ.id, cle }
+    if (champ.min != null && n < champ.min) return { champ: champ.id, cle }
+    if (champ.max != null && n > champ.max) return { champ: champ.id, cle }
+  }
+
+  // ⚠ LA SEULE REGLE CROISEE, ET ELLE EXISTAIT AU SERVEUR SANS EXISTER A
+  // L'ECRAN : « Voyageurs inclus invalide (1 a capacite) ». L'ancien formulaire
+  // bornait ce champ a 20 ; un hote qui saisissait 10 inclus pour 2 voyageurs
+  // remplissait ses dix champs et recevait un 400 sans savoir lequel etait en
+  // cause.
+  if (v.included_guests != null && v.included_guests !== '' &&
+      Number(v.included_guests) > Number(v.capacity)) {
+    return { champ: 'voyageurs_inclus', cle: 'nouveau.faute_voyageurs_inclus' }
   }
   return null
 }

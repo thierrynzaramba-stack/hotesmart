@@ -136,19 +136,93 @@ test('les bornes du nom, de la capacite, du prix et du supplement', () => {
     'zero est un supplement valide : il dit « pas de supplement »')
 })
 
-test('les bornes de l ecran sont celles du serveur, pas d autres', () => {
-  // Confrontation litterale : si le serveur change une borne, ce test rougit et
-  // oblige a changer les deux.
+test('LE TEST QUI COMPTE : l ecran n est JAMAIS plus permissif que le serveur', () => {
+  // ⚠ CE TEST ETAIT UNE TAUTOLOGIE (review du 22 octobre 2026) : il relisait les
+  // litteraux de `CHAMPS` — une metadonnee que `refusDeSaisie` n'utilisait meme
+  // pas — et cherchait quatre motifs dans le texte de l'endpoint. Mutation
+  // `CHAMPS.base_price.min` 1 -> 99 : 19 tests, 19 verts. Il ne confrontait rien.
+  //
+  // Ce qui compte n'est pas que les deux bornes soient EGALES — l'ecran a le
+  // droit d'etre plus strict, et il l'est : il refuse `capacity: 2.5` que le
+  // serveur tronque a 2. Ce qui est interdit est l'inverse : accepter ici ce
+  // que le serveur refusera, car l'hote remplit alors dix champs pour un 400.
+  //
+  // On rejoue donc la validation du serveur sur un jeu de cas limites, et on
+  // exige : accepte par l'ecran => accepte par le serveur.
+  const duServeur = (v) => {
+    // Recopie ligne a ligne du bloc POST de api/channel-property.js. Les
+    // assertions qui suivent cette fonction verifient que la recopie est encore
+    // fidele : si le serveur change une borne, elles rougissent.
+    if (!v.name || typeof v.name !== 'string' || v.name.length < 1 || v.name.length > 100) return 'nom'
+    const cap = parseInt(v.capacity, 10)
+    if (!cap || cap < 1 || cap > 20) return 'capacite'
+    const prix = parseFloat(v.base_price)
+    if (!prix || prix <= 0 || prix > 100000) return 'prix_base'
+    const inc = parseInt(v.included_guests, 10) || cap
+    if (inc < 1 || inc > cap) return 'voyageurs_inclus'
+    const sup = v.extra_guest_fee != null && v.extra_guest_fee !== '' ? parseFloat(v.extra_guest_fee) : null
+    if (sup != null && (sup < 0 || sup > 100000)) return 'supplement'
+    return null
+  }
+
+  const cas = []
+  for (const name of ['Studio', '', 'x'.repeat(101)]) {
+    for (const capacity of [2, 0, 21, '2.5', 'abc']) {
+      for (const base_price of [80, 0, 0.5, 100001, 'abc']) {
+        for (const included_guests of [null, 1, 10, 0, '2.5']) {
+          for (const extra_guest_fee of [null, 0, -1, 'abc']) {
+            cas.push({ ...saisie, name, capacity, base_price, included_guests, extra_guest_fee })
+          }
+        }
+      }
+    }
+  }
+  assert.ok(cas.length >= 300, `${cas.length} cas : le balayage s est referme`)
+
+  const fautes = []
+  let acceptesParLesDeux = 0
+  for (const v of cas) {
+    const ecran = M.refusDeSaisie(v)
+    const serveur = duServeur(v)
+    if (!ecran && serveur) fautes.push(`${JSON.stringify(v)} : l ecran accepte, le serveur refuse (${serveur})`)
+    if (!ecran && !serveur) acceptesParLesDeux++
+  }
+  assert.deepEqual(fautes.slice(0, 5), [], `${fautes.length} cas passent l ecran et echouent au serveur`)
+  assert.ok(acceptesParLesDeux > 0, 'et au moins un cas doit passer les deux : sinon on ne mesure rien')
+})
+
+test('la recopie des bornes du serveur est encore fidele', () => {
+  // Si l une de ces lignes bouge, le test ci-dessus mesure un serveur qui
+  // n existe plus. C est le seul endroit ou lire le texte de l endpoint se
+  // justifie : on verifie que notre COPIE est a jour, pas la garde elle-meme.
   assert.match(endpoint, /cap < 1 \|\| cap > 20/)
   assert.match(endpoint, /basePrice <= 0 \|\| basePrice > 100000/)
   assert.match(endpoint, /extraFee < 0 \|\| extraFee > 100000/)
   assert.match(endpoint, /name\.length < 1 \|\| name\.length > 100/)
-  const bornes = M.CHAMPS.reduce((o, c) => (o[c.api] = c, o), {})
-  assert.equal(bornes.capacity.min, 1)
-  assert.equal(bornes.capacity.max, 20)
-  assert.equal(bornes.base_price.max, 100000)
-  assert.equal(bornes.extra_guest_fee.max, 100000)
-  assert.equal(bornes.name.max, 100)
+  assert.match(endpoint, /incGuests < 1 \|\| incGuests > cap/)
+})
+
+test('LE TEST QUI COMPTE : les bornes declarees dans le HTML sont celles qui MORDENT', () => {
+  // ⚠ UNE SEULE SOURCE. Le HTML declare `min="1"` sur le prix, le module declare
+  // `min: 1`, et `refusDeSaisie` lit le module. Trois ecritures de la meme
+  // regle, c est trois occasions de diverger — et la page porte `novalidate`,
+  // donc le navigateur n applique PLUS les attributs. Mesure du 22 octobre
+  // 2026 : un logement a 0,50 EUR la nuit se creait, et le plan tarifaire
+  // partait chez le partenaire a 50 centimes.
+  const d = doc(page)
+  for (const c of M.CHAMPS) {
+    const el = d.querySelector('#' + c.id)
+    if (c.min != null) assert.equal(el.getAttribute('min'), String(c.min),
+      `#${c.id} : le HTML dit min=${el.getAttribute('min')}, le module dit ${c.min}`)
+    if (c.max != null && c.type !== 'texte') assert.equal(el.getAttribute('max'), String(c.max),
+      `#${c.id} : le HTML dit max=${el.getAttribute('max')}, le module dit ${c.max}`)
+    if (c.max != null && c.type === 'texte' && el.tagName === 'INPUT') {
+      assert.equal(el.getAttribute('maxlength'), String(c.max), `#${c.id} : maxlength`)
+    }
+  }
+  // Et la borne MORD vraiment, puisque `refusDeSaisie` lit `CHAMPS`.
+  assert.ok(M.refusDeSaisie({ ...saisie, base_price: 0.5 }), 'un prix sous le minimum doit etre refuse')
+  assert.ok(M.refusDeSaisie({ ...saisie, capacity: '2.5' }), 'une capacite non entiere doit etre refusee, pas tronquee')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -214,14 +288,20 @@ test('LE TEST QUI COMPTE : le formulaire est masque tant que le droit n est pas 
     'le message de refus aussi : un seul des deux s affiche')
 })
 
-test('le masquage est double d une garde SERVEUR qui refuse en 403', () => {
-  // La regle absolue du depot : « si on retire le masquage et qu on clique, le
-  // serveur refuse-t-il ? Si la reponse n est pas oui, en 403, il n y a pas de
-  // garde. » Mesure du 19 octobre 2026 : la garde d alors ne filtrait rien.
-  assert.match(endpoint, /compteDelegue: true/)
-  assert.match(endpoint, /estTitulaireDuCompte/)
-  assert.match(endpoint, /Seul le titulaire du compte peut ajouter un logement/)
-  assert.match(endpoint, /res\.status\(403\)/)
+test('le masquage est double d une garde serveur — PROUVEE AILLEURS, PAR APPEL', () => {
+  // ⚠ CE TEST ETAIT UN FAUX VERT DE SECURITE (review du 22 octobre 2026) :
+  // quatre `assert.match` sur le texte de l endpoint, satisfaits ailleurs dans
+  // le meme fichier. Neutraliser la garde titulaire, ou retirer
+  // `compteDelegue` — le defaut exact du 19 octobre —, laissait 106 tests
+  // verts. REVIEW.md regle 20 : « appeler, pas lire ».
+  //
+  // La preuve vit donc dans tests/creation-bien-garde-appelee.test.js, qui
+  // APPELLE le handler et exige 403. Ici, on verifie seulement que cette preuve
+  // existe toujours — un garde-fou deplace puis supprime ne laisse aucune trace.
+  const preuve = fs.readFileSync(path.join(racine, 'tests/creation-bien-garde-appelee.test.js'), 'utf8')
+  assert.match(preuve, /require\('\.\.\/api\/channel-property\.js'\)/,
+    'la preuve doit charger le vrai endpoint')
+  assert.match(preuve, /assert\.equal\(res\.code, 403/, 'et exiger le refus')
 })
 
 test('la page est NON DELEGABLE, et la garde est sa premiere instruction', () => {
@@ -248,12 +328,35 @@ test('aucun hexa, aucun emoji, aucun nom de partenaire', () => {
   assert.ok(!/channex|beds24/i.test(page), 'aucun nom de partenaire')
 })
 
+// Toutes les cles de refus que `refusDeSaisie` peut reellement rendre : on les
+// provoque, une par champ, plutot que de les deviner.
+function clesQueLeModulePeutRendre () {
+  const vues = new Set()
+  const essais = [
+    { ...saisie, name: null }, { ...saisie, name: 'x'.repeat(200) },
+    { ...saisie, capacity: 0 }, { ...saisie, capacity: '2.5' },
+    { ...saisie, base_price: 0 }, { ...saisie, base_price: 0.5 },
+    { ...saisie, included_guests: 99 }, { ...saisie, included_guests: 0 },
+    { ...saisie, extra_guest_fee: -1 }, { ...saisie, extra_guest_fee: 'abc' },
+    { ...saisie, city: 'x'.repeat(200) }, { ...saisie, address: 'x'.repeat(500) },
+    { ...saisie, zip_code: 'x'.repeat(50) }
+  ]
+  for (const v of essais) {
+    const r = M.refusDeSaisie(v)
+    if (r) vues.add(r.cle)
+  }
+  return [...vues]
+}
+
 test('toutes les cles i18n de la page et du module existent dans les TROIS langues', () => {
   const cles = new Set([
     ...[...page.matchAll(/data-i18n="([^"]+)"/g)].map(m => m[1]),
     ...[...page.matchAll(/data-i18n-attr="[^"]*:([^";]+)"/g)].map(m => m[1].trim()),
     ...[...page.matchAll(/\bt\('([^']+)'/g)].map(m => m[1]),
-    ...[...module_.matchAll(/cle: '([^']+)'/g)].map(m => m[1])
+    // ⚠ LES CLES DU MODULE SE COLLECTENT EN L EXECUTANT, pas en lisant son
+    // texte : il les CONSTRUIT (`'nouveau.faute_' + champ.id`), donc un motif
+    // n y relevait que le prefixe. On le fait donc parler.
+    ...clesQueLeModulePeutRendre()
   ])
   assert.ok(cles.size >= 25, `${cles.size} cles relevees : le balayage s est referme`)
   for (const lang of ['fr', 'en', 'es']) {
@@ -283,11 +386,25 @@ test('LE TEST QUI COMPTE : le dictionnaire est charge avant d etre lu', () => {
     'appliquer au document entier au demarrage tamponne les cles brutes')
 })
 
-test('les zones de clic font au moins 44 px', () => {
-  // Charte §7, et c est au doigt que ca se juge.
-  assert.match(page, /\.nou-champ input, \.nou-champ select \{[\s\S]*?min-height: 44px/)
-  assert.match(page, /\.nou-actions \.btn \{ min-height: 44px; \}/)
-  assert.match(page, /\.nou-retour \{[\s\S]*?min-height: 44px/)
+test('les zones de clic declarent au moins 44 px', () => {
+  // ⚠ CE TEST LISAIT LE CSS AU CARACTERE PRES (`/\.nou-actions \.btn \{ min-height: 44px; \}/`) :
+  // un reformatage le faisait rougir, une regle posee plus bas qui ecrase
+  // `min-height` le laissait vert. Il affirmait que le fichier contient la
+  // chaine qu il contient.
+  //
+  // On ne peut pas calculer une hauteur rendue sans navigateur ; on verifie
+  // donc la DERNIERE declaration de `min-height` pour chaque selecteur — c est
+  // elle qui gagne a specificite egale — et qu aucune ne descend sous 44.
+  const style = page.slice(page.indexOf('<style>'), page.indexOf('</style>'))
+  const cibles = ['.nou-champ input, .nou-champ select', '.nou-actions .btn', '.nou-retour']
+  for (const sel of cibles) {
+    const blocs = [...style.matchAll(new RegExp(sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s*\\{([^}]*)\\}', 'g'))]
+    assert.ok(blocs.length, `aucune regle pour \`${sel}\``)
+    const hauteurs = blocs.flatMap(b => [...b[1].matchAll(/min-height:\s*(\d+)px/g)].map(m => Number(m[1])))
+    assert.ok(hauteurs.length, `\`${sel}\` ne declare aucune min-height`)
+    assert.ok(hauteurs[hauteurs.length - 1] >= 44,
+      `\`${sel}\` finit a ${hauteurs[hauteurs.length - 1]}px : sous le doigt`)
+  }
 })
 
 test('la classe d erreur du message existe VRAIMENT dans la page', () => {
@@ -298,5 +415,132 @@ test('la classe d erreur du message existe VRAIMENT dans la page', () => {
   for (const c of classes) {
     assert.match(page, new RegExp('\\.' + c.replace(/-/g, '-') + '\\s*\\{'),
       `la classe \`${c}\` est posee par le script mais n est declaree nulle part`)
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 6. LES CORRECTIFS DE LA REVIEW DU 22 OCTOBRE 2026
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE : le contexte est charge AVEC l identifiant', () => {
+  // ⚠ LE BLOQUANT DE LA REVIEW. `chargerContexte()` sans argument
+  // REINITIALISAIT le contexte avec `moi: undefined` ; `estTitulaire()`
+  // commence par `if (!contexte.charge || !contexte.moi) return false`.
+  // L ecran n affichait donc QUE son refus — pour tout le monde, titulaire
+  // compris — et ne montrait jamais son formulaire. Les tests etaient verts.
+  const script = page.slice(page.indexOf('<script type="module">'))
+  const appels = [...script.matchAll(/chargerContexte\(([^)]*)\)/g)].map(m => m[1].trim())
+  assert.ok(appels.length, 'la page doit charger le contexte')
+  for (const a of appels) {
+    assert.notEqual(a, '', 'un appel sans identifiant efface le contexte au lieu de le charger')
+  }
+})
+
+test('LE TEST QUI COMPTE : la cause racine est fermee dans le module partage', () => {
+  // Le correctif de la page ne suffit pas : la fonction ACCEPTAIT silencieusement
+  // un argument manquant et detruisait l etat. La prochaine page refera l appel.
+  const cc = fs.readFileSync(path.join(racine, 'shared/compte-courant.js'), 'utf8')
+  const i = cc.indexOf('export async function chargerContexte')
+  const j = cc.indexOf('contexte = { moi: userId', i)
+  assert.ok(i !== -1 && j > i)
+  assert.match(cc.slice(i, j), /if \(userId == null\)[\s\S]*?return contexte/,
+    'un appel sans identifiant doit rendre le contexte EN L ETAT, pas l effacer')
+})
+
+test('LE TEST QUI COMPTE : la navigation est rendue', () => {
+  // ⚠ `shared/nav.js` NE S AUTO-REND PAS : il se termine par
+  // `window.HSNav = { render, renderLangSelector, renderMenu }`. Omise, la page
+  // perdait les cinq entrees du haut, le menu — donc la DECONNEXION, la langue
+  // et le selecteur de compte —, les initiales, et laissait au telephone un
+  // bandeau NOIR VIDE colle en bas, pendant qu elle reservait 96 px pour lui.
+  // L ancien ecran rendait sa navigation (`renderSidebar`).
+  const script = page.slice(page.indexOf('<script type="module">'))
+  assert.match(script, /HSNav\.render\(/, 'la barre du haut doit etre rendue')
+  assert.match(script, /HSNav\.renderMenu\(/, 'le menu aussi : il porte la deconnexion')
+  assert.match(script, /onDeconnexion:/, 'une deconnexion absente est un no-op silencieux')
+  assert.match(script, /data-bind="initials"/, 'les initiales doivent etre posees')
+})
+
+test('toute page V5 qui porte une barre du bas rend sa navigation', () => {
+  // ⚠ LE FILET, pour que le prochain ecran V5 ne refasse pas l omission : une
+  // `.bottombar` vide devient un bandeau noir au telephone.
+  const dossier = path.join(racine, 'pages')
+  const oublis = []
+  for (const f of fs.readdirSync(dossier)) {
+    if (!f.endsWith('.html')) continue
+    const html = fs.readFileSync(path.join(dossier, f), 'utf8')
+    if (!/<nav class="bottombar"/.test(html)) continue
+    if (!/HSNav\.render\(/.test(html)) oublis.push('pages/' + f)
+  }
+  assert.deepEqual(oublis, [], 'ces pages affichent une barre du bas qu elles ne remplissent jamais')
+})
+
+test('LE TEST QUI COMPTE : chaque message d erreur est RELIE a son champ', () => {
+  // ⚠ Sans `aria-describedby`, un lecteur d ecran focalise sur le champ annonce
+  // « Capacite maximale, invalide » et JAMAIS la phrase qui dit pourquoi, ni la
+  // ligne d aide. La page n en portait aucun (review du 22 octobre 2026).
+  const d = doc(page)
+  const manques = []
+  for (const el of d.querySelectorAll('input')) {
+    const ids = (el.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean)
+    if (!ids.length) { manques.push(`#${el.id} : aucun lien`); continue }
+    for (const id of ids) {
+      if (!d.getElementById(id)) manques.push(`#${el.id} renvoie a #${id}, qui n existe pas`)
+    }
+  }
+  assert.deepEqual(manques, [])
+
+  // ⚠ ET LE MESSAGE D ENVOI DOIT ETRE ANNONCE. Il apparait APRES le geste, sans
+  // que le focus bouge : sans region vivante, un lecteur d ecran ne dit ni
+  // « Logement cree » ni la raison d un echec — l hote attend devant un ecran
+  // qui a deja repondu.
+  const zone = d.querySelector('[data-bind="message"]')
+  assert.ok(zone, 'la zone de message doit exister')
+  assert.equal(zone.getAttribute('role'), 'status')
+  assert.equal(zone.getAttribute('aria-live'), 'polite')
+  const refus = d.querySelector('[data-bind="refus"]')
+  assert.equal(refus.getAttribute('role'), 'status', 'le refus de droit aussi')
+
+  // Et chaque champ que le module peut refuser a une zone pour le dire.
+  for (const c of M.CHAMPS) {
+    if (c.type === 'texte' && !c.max) continue
+    assert.ok(d.querySelector(`[data-erreur="${c.id}"]`),
+      `#${c.id} peut etre refuse, mais aucune zone ne porte son message`)
+  }
+})
+
+test('le masquage ne depend pas des feuilles externes', () => {
+  // ⚠ `.nou-form` declare `display: flex` sur l element qui porte `hidden`. Si
+  // theme.css ET ui.css echouaient, cette declaration d AUTEUR l emporterait
+  // sur le `[hidden] { display: none }` du NAVIGATEUR — les origines ne se
+  // comparent pas — et le formulaire deviendrait visible.
+  const style = page.slice(page.indexOf('<style>'), page.indexOf('</style>'))
+  assert.match(style, /\[hidden\]\s*\{\s*display:\s*none\s*!important/,
+    'la regle doit etre EN LIGNE, comme sur les quatorze pages autonomes du depot')
+})
+
+test('le succes se voit autrement que par la taille de police', () => {
+  // L ancien ecran avait un bloc vert. La confirmation posee en `.caption` —
+  // qui ne declare qu une taille — n avait plus aucune affordance.
+  assert.match(page, /\.nou-message--fait \{[^}]*var\(--ok\)/)
+  assert.match(page, /classList\.toggle\('nou-message--fait'/)
+})
+
+test('les trois exemples de saisie de l ancien ecran sont revenus', () => {
+  // Adresse, code postal et ville etaient les trois seuls champs sans aucun
+  // exemple : ils en avaient un avant.
+  for (const champ of ['adresse', 'code_postal', 'ville']) {
+    assert.match(page, new RegExp(`id="${champ}"[^>]*[\\s\\S]{0,200}?placeholder:nouveau\\.${champ}_exemple`),
+      `#${champ} a perdu son exemple`)
+  }
+})
+
+test('aucun libelle en dur, pays compris', () => {
+  // « Belgique » et « Suisse » s affichaient en francais au milieu d une page
+  // en anglais, et le test d i18n ne les voyait pas : il ne releve que les cles.
+  const d = doc(page)
+  for (const opt of d.querySelectorAll('#pays option')) {
+    assert.ok(opt.getAttribute('data-i18n'), `le pays « ${opt.textContent} » est ecrit en dur`)
+    assert.equal(opt.textContent.trim(), '', 'le libelle vient de la cle, pas du HTML')
   }
 })
