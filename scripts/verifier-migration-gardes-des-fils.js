@@ -116,17 +116,26 @@ const appels = (userId, propertyId, bookIds) => ([
     const n = Math.min(nT, nR)
     if (n > score) { bien = b; cle = k; ids = liste; score = n; detailScore = `${nT} avec tache, ${nR} avec reponse` }
   }
-  if (!bien || !ids.length) {
-    console.error('KO  aucun bien channex ne porte de fil : les fonctions ne seraient interrogees')
-    console.error('    qu avec une liste vide, ce qui ne prouve rien.')
-    process.exit(1)
-  }
-  console.log(`Bien temoin : ${cle} — ${ids.length} reservation(s) dans ses fils (${detailScore})`)
-  if (score === 0) {
-    console.error('KO  aucun bien ne porte A LA FOIS une tache de classification et une')
-    console.error('    conversation repondue : les deux fonctions « derniere » ne peuvent pas')
-    console.error('    etre eprouvees sur cette base, et un vert ne voudrait rien dire.')
-    process.exit(1)
+  // ⚠ UNE BASE SANS DONNEES NE REND PAS CE SCRIPT INUTILE, ET MA PREMIERE
+  // VERSION RENDAIT LA MAIN TOUT DE SUITE. Mesure du 22 octobre 2026 : staging
+  // ne porte AUCUN fil de messagerie, donc le script sortait en 1 sans avoir
+  // teste une seule des quatre choses — alors que TROIS d'entre elles ne
+  // demandent aucune donnee : les fonctions repondent-elles, sont-elles fermees
+  // a la cle publique, et une liste vide ne leve-t-elle pas. Seul le point 2
+  // — « au plus une ligne par reservation » — a besoin d'un temoin.
+  // On distingue donc trois etats, et le troisieme n'est NI un vert NI un
+  // echec : sortie 2, « la forme de la reponse n'a pas pu etre eprouvee ici ».
+  const temoinUtile = !!(bien && ids.length && score > 0)
+  if (temoinUtile) {
+    console.log(`Bien temoin : ${cle} — ${ids.length} reservation(s) dans ses fils (${detailScore})`)
+  } else if (bien && ids.length) {
+    console.log(`Bien temoin : ${cle} — ${ids.length} reservation(s), mais aucune ne porte A LA FOIS`)
+    console.log('              une tache de classification et une conversation repondue.')
+  } else {
+    console.log('Aucun bien channex ne porte de fil de messagerie sur cette base.')
+    bien = biens[0]
+    cle = String(bien.provider_property_id)
+    ids = []
   }
 
   // 1. Les trois fonctions repondent, avec la bonne signature.
@@ -153,7 +162,12 @@ const appels = (userId, propertyId, bookIds) => ([
   // disait « migration appliquee et fermee ». Une reponse vide est desormais un
   // KO : c'est le troisieme faux vert de ce script, et le troisieme de la meme
   // famille dans ce depot.
-  for (const nom of ['cron_derniere_tache_classif', 'cron_derniere_reponse_hote']) {
+  if (!temoinUtile) {
+    console.log('--  POINT 2 NON VERIFIE : sans temoin portant des taches ET des reponses,')
+    console.log('    « au plus une ligne par reservation » ne peut pas etre eprouve ici.')
+    console.log('    Relancez ce script contre une base qui porte des fils (la production).')
+  }
+  for (const nom of temoinUtile ? ['cron_derniere_tache_classif', 'cron_derniere_reponse_hote'] : []) {
     const lignes = reponses[nom]
     if (!lignes) continue
     if (!lignes.length) {
@@ -213,6 +227,15 @@ const appels = (userId, propertyId, bookIds) => ([
   if (ko) {
     console.error(`VERDICT : ${ko} point(s) en echec. La migration n est PAS en etat.`)
     process.exit(1)
+  }
+  if (!temoinUtile) {
+    // ⚠ NI VERT NI ECHEC. Un code de sortie 0 ici se lirait « tout va bien »
+    // dans un enchainement de commandes, alors que le controle qui compte le
+    // plus n'a pas eu lieu.
+    console.error('VERDICT PARTIEL : les fonctions REPONDENT et sont FERMEES a la cle')
+    console.error('publique, mais la FORME de leur reponse n a pas pu etre eprouvee faute')
+    console.error('de donnees. Ce n est pas un vert. Sortie 2.')
+    process.exit(2)
   }
   console.log('VERDICT : migration 2026-10-22-gardes-des-fils appliquee et fermee.')
 })().catch(e => { console.error('ECHEC :', e.message); process.exit(1) })
