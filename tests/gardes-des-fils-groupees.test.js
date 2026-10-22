@@ -24,28 +24,50 @@ const Module = require('node:module')
 
 const USER = '11111111-1111-4111-8111-111111111111'
 const PROP = 'P1'
-const PREFIXE = '[AUTO:'
-const FENETRE = 20
+// ⚠ UN AUTRE COMPTE ET UN AUTRE BIEN, AVEC LES MEMES IDENTIFIANTS DE
+// RESERVATION. Constat 13 : le faux client enregistrait `user_id` et
+// `property_id` sans jamais les appliquer, ni dans les lectures par fil ni dans
+// les doublures de RPC. On pouvait retirer `.eq('user_id', userId)` du code —
+// ou `and t.user_id = p_user_id` de la fonction SQL — sans faire rougir une
+// seule assertion, alors que c'est la fuite inter-comptes que ce lot dit
+// refermer. `property_id` est une cle PROVIDER : elle n'a aucune unicite
+// globale, et `book_id` non plus.
+const AUTRE_USER = '22222222-2222-4222-8222-222222222222'
+const AUTRE_PROP = 'P2'
+// Les valeurs du module, pas des litteraux : le lot les a sorties pour ca.
+const {
+  PREFIXE_AUTO: PREFIXE,
+  FENETRE_CONVERSATIONS: FENETRE,
+  MOTIF_PAUSE: MOTIF,
+  PLAFOND_POSTGREST
+} = require('../lib/gardes-des-fils')
 
 // Une base en memoire. Les MEMES lignes servent les deux branches : les RPC
 // (semantique SQL rejouee ici) et les lectures par fil.
 function base ({ taches = [], conversations = [], rpcEnPanne = null }) {
   const compte = { rpc: 0, taches: 0, conversations: 0 }
+  // Par defaut une ligne appartient au compte et au bien du test ; une fixture
+  // qui veut l'AUTRE compte le dit explicitement.
+  const mien = (x) => ({ user_id: USER, property_id: PROP, ...x })
+  taches = taches.map(mien)
+  conversations = conversations.map(mien)
 
-  const derniereTache = (bookIds, types) => {
+  // Les doublures appliquent les TROIS cles, comme les fonctions SQL.
+  const aMoi = (x, u, pr) => x.user_id === u && x.property_id === pr
+  const derniereTache = (bookIds, types, u, pr) => {
     const out = []
     for (const b of bookIds) {
-      const l = taches.filter(t => t.book_id === b && types.includes(t.task_type))
+      const l = taches.filter(t => aMoi(t, u, pr) && t.book_id === b && types.includes(t.task_type))
         .sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at))[0]
       if (l) out.push({ book_id: b, created_at: l.created_at })
     }
     return out
   }
-  const derniereReponse = (bookIds) => {
+  const derniereReponse = (bookIds, u, pr) => {
     const out = []
     for (const b of bookIds) {
       // la fenetre D'ABORD, le filtre ENSUITE — comme le JS et comme le SQL
-      const fenetre = conversations.filter(c => c.book_id === b && c.agent_reply != null)
+      const fenetre = conversations.filter(c => aMoi(c, u, pr) && c.book_id === b && c.agent_reply != null)
         .sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at))
         .slice(0, FENETRE)
       const l = fenetre.filter(c => !String(c.guest_message || '').startsWith(PREFIXE))[0]
@@ -53,10 +75,10 @@ function base ({ taches = [], conversations = [], rpcEnPanne = null }) {
     }
     return out
   }
-  const tachesPause = (bookIds, motif) => {
+  const tachesPause = (bookIds, motif, u, pr) => {
     const out = []
     for (const b of bookIds) {
-      taches.filter(t => t.book_id === b && t.status === 'pending' && t.summary === motif)
+      taches.filter(t => aMoi(t, u, pr) && t.book_id === b && t.status === 'pending' && t.summary === motif)
         .sort((x, y) => Date.parse(x.created_at) - Date.parse(y.created_at))
         .slice(0, FENETRE)
         .forEach(t => out.push({ book_id: b, id: t.id, created_at: t.created_at }))
@@ -68,9 +90,10 @@ function base ({ taches = [], conversations = [], rpcEnPanne = null }) {
     rpc: async (nom, args) => {
       compte.rpc++
       if (rpcEnPanne) return { data: null, error: { message: rpcEnPanne } }
-      if (nom === 'cron_derniere_tache_classif') return { data: derniereTache(args.p_book_ids, args.p_types), error: null }
-      if (nom === 'cron_derniere_reponse_hote') return { data: derniereReponse(args.p_book_ids), error: null }
-      if (nom === 'cron_taches_pause_ouvertes') return { data: tachesPause(args.p_book_ids, args.p_motif), error: null }
+      const u = args.p_user_id, pr = args.p_property_id
+      if (nom === 'cron_derniere_tache_classif') return { data: derniereTache(args.p_book_ids, args.p_types, u, pr), error: null }
+      if (nom === 'cron_derniere_reponse_hote') return { data: derniereReponse(args.p_book_ids, u, pr), error: null }
+      if (nom === 'cron_taches_pause_ouvertes') return { data: tachesPause(args.p_book_ids, args.p_motif, u, pr), error: null }
       return { data: null, error: { message: `rpc inconnue ${nom}` } }
     },
     from: (nom) => {
@@ -82,15 +105,23 @@ function base ({ taches = [], conversations = [], rpcEnPanne = null }) {
         not () { f.eq.__agent_reply = 'non nul'; return q },
         order () { return q },
         update () { return { in: () => ({ eq: async () => ({ error: null }) }) } },
-        limit () { return rendre() },
+        // ⚠ LE FAUX CLIENT HONORE L'ARGUMENT DE `limit`, ET C'EST CE QUI
+        // PERMET AU TEST DE VOIR LE CONSTAT 3. Ma premiere version l'ignorait
+        // et decoupait avec SA PROPRE constante : les deux branches
+        // recevaient donc la meme fenetre quelle qu'elle soit, et un litteral
+        // fige dans la branche de repli etait indetectable. Contre-eprouve :
+        // la mutation « la fenetre passe de 20 a 3 » ne faisait rougir aucun
+        // test.
+        limit (n) { f.limite = n; return rendre() },
         then (r, j) { return rendre().then(r, j) }
       }
       function rendre () {
         if (nom === 'agent_tasks') {
           compte.taches++
-          const lignes = taches.filter(t => t.book_id === f.eq.book_id)
+          const lignes = taches.filter(t => t.book_id === f.eq.book_id &&
+            t.user_id === f.eq.user_id && t.property_id === f.eq.property_id)
           if (f.eq.status === 'pending') {
-            return Promise.resolve({ data: lignes.filter(t => t.status === 'pending' && t.summary === f.eq.summary).slice(0, FENETRE), error: null })
+            return Promise.resolve({ data: lignes.filter(t => t.status === 'pending' && t.summary === f.eq.summary).slice(0, f.limite), error: null })
           }
           const types = f.in.task_type || []
           const l = lignes.filter(t => types.includes(t.task_type))
@@ -99,8 +130,9 @@ function base ({ taches = [], conversations = [], rpcEnPanne = null }) {
         }
         if (nom === 'conversations') {
           compte.conversations++
-          const l = conversations.filter(c => c.book_id === f.eq.book_id && c.agent_reply != null)
-            .sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at)).slice(0, FENETRE)
+          const l = conversations.filter(c => c.book_id === f.eq.book_id && c.agent_reply != null &&
+            c.user_id === f.eq.user_id && c.property_id === f.eq.property_id)
+            .sort((x, y) => Date.parse(y.created_at) - Date.parse(x.created_at)).slice(0, f.limite)
           return Promise.resolve({ data: l, error: null })
         }
         return Promise.resolve({ data: [], error: null })
@@ -120,7 +152,6 @@ function base ({ taches = [], conversations = [], rpcEnPanne = null }) {
 
 const t0 = Date.parse('2026-10-21T10:00:00Z')
 const a = (min) => new Date(t0 + min * 60000).toISOString()
-const MOTIF = 'Reçu pendant la pause : aucune réponse automatique n’est partie. Répondez au voyageur si besoin.'
 
 // Les six cas qui couvrent les deux gardes, bornes comprises.
 const CAS = [
@@ -208,4 +239,87 @@ test('LE TEST QUI COMPTE : sans gardes, fermerTachesPause relit — et ferme la 
   await mod.fermerTachesPause(USER, PROP, 'B', fil, res, null)
   assert.ok(compte.taches >= 1, 'la branche de repli lit bien la base')
   assert.deepEqual(res.errors, [], 'et elle n a rien casse')
+})
+
+// ─── Les constats de la review du 22 octobre 2026 ────────────────────────────
+
+test('les deux branches s accordent AUSSI sur un fil sans reservation', async () => {
+  // ⚠ CE TEST NE PROUVE PAS LE CONSTAT 1, ET IL NE FAUT PAS LE CROIRE.
+  // Il appelle `chargerLesGardesDesFils` avec 'unknown' DEJA dans la liste :
+  // le defaut etait chez l'APPELANT, qui ne l'y mettait pas. Contre-eprouve le
+  // 22 octobre 2026 contre le code d'avant le correctif — il reste VERT.
+  // Ce qui garde le constat 1 est l'assertion d'integration de
+  // `tests/classify-snapshots-bornes.test.js` (« les gardes couvrent AUSSI le
+  // fil sans reservation »), qui lit la liste REELLEMENT passee aux fonctions.
+  // Celui-ci garde autre chose, qui vaut d'etre garde : que les deux branches
+  // traitent cette cle de la meme facon.
+  //
+  // Le defaut qu'il accompagne, pour memoire :
+  // Un message entrant sans `messages.booking_id` (un e-mail non rattache) fait
+  // une cle 'unknown' dans le fil. La lecture du COEUR l'ecarte a juste titre —
+  // il n'y a pas de snapshot a chercher — mais les GARDES l'ecartaient aussi,
+  // alors que `classifyAndHandle` ecrit bel et bien `book_id = 'unknown'` et
+  // que la boucle traite ce fil comme les autres. Verdict toujours « pas encore
+  // traite » : reclassification IA toutes les 5 minutes, et en Mode Auto un
+  // SECOND message au meme voyageur.
+  const { mod } = base({
+    taches: [{ id: '1', book_id: 'unknown', task_type: 'sympathy', created_at: a(10) }]
+  })
+  const gardes = await mod.chargerLesGardesDesFils(USER, PROP, ['unknown'], null)
+  const groupe = await mod.hasNewerTaskOrConv(USER, PROP, 'unknown', new Date(t0), gardes)
+  const parFil = await mod.hasNewerTaskOrConv(USER, PROP, 'unknown', new Date(t0), null)
+  assert.equal(parFil, true, 'la lecture par fil voit la tache du fil non rattache')
+  assert.equal(groupe, parFil, 'et la lecture groupee doit dire la MEME chose')
+})
+
+test('LE TEST QUI COMPTE : les gardes sont CLOISONNEES par compte et par bien', async () => {
+  // ⚠ CONSTAT 13. `property_id` est une cle PROVIDER et `book_id` n'a aucune
+  // unicite globale : la tache d'un AUTRE compte sur les memes identifiants ne
+  // doit jamais faire taire ce fil-ci.
+  const { mod } = base({
+    taches: [{ id: '1', book_id: 'B', task_type: 'sympathy', created_at: a(10), user_id: AUTRE_USER }],
+    conversations: [{ id: 'c1', book_id: 'B', agent_reply: 'ok', guest_message: 'Bonjour', created_at: a(10), property_id: AUTRE_PROP }]
+  })
+  const gardes = await mod.chargerLesGardesDesFils(USER, PROP, ['B'], null)
+  const groupe = await mod.hasNewerTaskOrConv(USER, PROP, 'B', new Date(t0), gardes)
+  const parFil = await mod.hasNewerTaskOrConv(USER, PROP, 'B', new Date(t0), null)
+  assert.equal(groupe, false, 'ni la tache d un autre compte, ni la reponse d un autre bien')
+  assert.equal(parFil, false)
+})
+
+test('LE TEST QUI COMPTE : au plafond de PostgREST, les taches de pause RAMENENT la lecture par fil', async () => {
+  // ⚠ CONSTAT 2. `cron_taches_pause_ouvertes` est la SEULE des trois a rendre
+  // plusieurs lignes par reservation : elle peut donc etre coupee a 1000 lignes
+  // sans erreur, et les taches des fils tombes hors de la reponse ne se
+  // fermeraient jamais alors que l'hote a repondu. L'en-tete de la migration
+  // affirmait « la troncature devient impossible par construction » : c'etait
+  // vrai des deux autres, pas de celle-la.
+  const trop = []
+  for (let i = 0; i < PLAFOND_POSTGREST; i++) {
+    trop.push({ id: `p${i}`, book_id: `B${i % 50}`, status: 'pending', summary: MOTIF, task_type: 'sympathy', created_at: a(-60) })
+  }
+  const { mod } = base({ taches: trop })
+  const res = { errors: [] }
+  const fils = Array.from({ length: 50 }, (_, i) => `B${i}`)
+  const gardes = await mod.chargerLesGardesDesFils(USER, PROP, fils, res)
+  assert.equal(gardes, null, 'une reponse au plafond n est pas une reponse')
+  assert.equal(res.gardesParFil, 1, 'et le repli est compte')
+})
+
+test('LE TEST QUI COMPTE : les deux branches lisent la MEME fenetre et le MEME prefixe', async () => {
+  // ⚠ CONSTAT 3. La branche de repli gardait `'[AUTO:'` et `.limit(20)` en
+  // litteraux la ou la branche groupee passait les constantes. Ce test fixe la
+  // propriete au lieu du nombre : la fenetre vient du module, et les deux
+  // branches doivent s accorder exactement a sa borne.
+  const auFond = []
+  for (let i = 0; i < FENETRE; i++) {
+    auFond.push({ id: `auto${i}`, book_id: 'B', agent_reply: 'ok', guest_message: `${PREFIXE} arrival]`, created_at: a(20 + i) })
+  }
+  auFond.push({ id: 'vraie', book_id: 'B', agent_reply: 'ok', guest_message: 'Bonjour', created_at: a(5) })
+  const { mod } = base({ conversations: auFond })
+  const gardes = await mod.chargerLesGardesDesFils(USER, PROP, ['B'], null)
+  const groupe = await mod.hasNewerTaskOrConv(USER, PROP, 'B', new Date(t0), gardes)
+  const parFil = await mod.hasNewerTaskOrConv(USER, PROP, 'B', new Date(t0), null)
+  assert.equal(groupe, false, 'la vraie reponse est HORS de la fenetre : le fil n est pas tenu pour repondu')
+  assert.equal(groupe, parFil, 'et les deux branches le disent pareil')
 })

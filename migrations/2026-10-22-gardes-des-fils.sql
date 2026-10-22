@@ -16,9 +16,22 @@
 -- recente, dans une fenetre). En JS il faudrait
 -- ramener toutes les lignes puis trier — 52 fils x 20
 -- conversations = 1040, et PostgREST coupe a 1000
--- SANS ERREUR. `distinct on` et le `limit` lateral
--- rendent exactement une ligne par reservation : la
--- troncature devient impossible par construction.
+-- SANS ERREUR. `distinct on` et le `limit 1` lateral
+-- rendent exactement une ligne par reservation.
+--
+-- ⚠ MAIS CELA NE VAUT QUE DES DEUX PREMIERES, ET LA
+-- PREMIERE VERSION DE CET EN-TETE DISAIT LE
+-- CONTRAIRE (constat 2 de la review du 22 octobre).
+-- `cron_taches_pause_ouvertes` rend jusqu'a
+-- p_fenetre lignes PAR reservation : 300 fils
+-- porteurs de taches de pause font 6000 lignes, donc
+-- une reponse coupee a 1000, en silence. Les taches
+-- des fils tombes hors de la reponse ne se
+-- fermeraient jamais alors que l'hote a repondu.
+-- C'est pourquoi `chargerLesGardesDesFils` CONSTATE
+-- le plafond sur cette fonction-la et retombe sur la
+-- lecture par fil, qui demande fil par fil et ne
+-- peut pas etre coupee.
 --
 -- LES VALEURS METIER SONT DES PARAMETRES, PAS DU SQL.
 -- Les types de tache, le prefixe `[AUTO:`, le motif de
@@ -104,14 +117,20 @@ $$;
 -- ── 3. Les taches « recu pendant la pause » ─────────
 -- Remplace la lecture de `fermerTachesPause`.
 --
--- ⚠ L'ORDRE DEVIENT DETERMINISTE, ET C'EST UN GAIN.
--- Le JS demande 20 lignes SANS `order by` : les 20
--- rendues sont arbitraires. Or l'appelant ne garde
--- que celles ANTERIEURES a la derniere reponse de
--- l'hote — donc les plus ANCIENNES. On les trie donc
--- par date croissante : jamais moins de taches
--- eligibles qu'avant, et deux passages font le meme
--- geste dans le meme ordre.
+-- ⚠ L'ORDRE EST LE MEME DES DEUX COTES, ET IL A FALLU
+-- CORRIGER LE JS POUR CELA (constat 7). La lecture
+-- par fil demandait 20 lignes SANS `order by` : les
+-- 20 rendues etaient arbitraires, donc les deux
+-- branches fermaient des taches differentes selon
+-- que le RPC avait abouti — et le script de parite
+-- comptait cet ecart comme une divergence
+-- BLOQUANTE. Les deux trient maintenant par date
+-- croissante, ce qui est aussi le bon choix : seules
+-- les taches ANTERIEURES a la derniere reponse de
+-- l'hote sont eligibles.
+--
+-- ⚠ ET C'EST LA SEULE DES TROIS QUI PEUT ETRE
+-- TRONQUEE : voir l'en-tete du fichier.
 create or replace function cron_taches_pause_ouvertes (
   p_user_id uuid,
   p_property_id text,

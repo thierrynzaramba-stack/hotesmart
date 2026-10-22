@@ -30,18 +30,32 @@ if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
   console.error('SUPABASE_URL et SUPABASE_SERVICE_KEY sont requis.')
   process.exit(2)
 }
+// ⚠ CE SCRIPT APPELLE LES VRAIES FONCTIONS DU CRON, DONC IL CHARGE
+// `lib/cron-shared.js`, QUI CONSTRUIT LE CLIENT ANTHROPIC. Il n'emet aucun
+// appel au modele — mais sans la variable, le `require` plus bas leverait une
+// trace de pile brute au lieu d'un message. Constat 15 de la review. (Le
+// verificateur de migration, lui, n'a plus cette dependance du tout.)
+if (!process.env.CLAUDE_API_KEY) {
+  console.error('CLAUDE_API_KEY doit etre PRESENTE (aucun appel n est emis) :')
+  console.error('ce script traverse lib/cron-shared.js, qui construit le client.')
+  process.exit(2)
+}
 const PROJET = (process.env.SUPABASE_URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''
 const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
 // Les VRAIES fonctions du cron, pas une copie.
 const {
-  chargerLesGardesDesFils, hasNewerTaskOrConv,
-  MOTIF_PAUSE, FENETRE_TACHES_PAUSE
+  chargerLesGardesDesFils, hasNewerTaskOrConv, REPONSES_HOTE
 } = require('../lib/cron-classify')
-
-const JOURS_DE_FIL = 30
-const MESSAGES_MAX = 500
-const REPONSES_HOTE = ['host', 'ai']
+const { MOTIF_PAUSE, FENETRE_TACHES_PAUSE } = require('../lib/gardes-des-fils')
+// ⚠ LE FIL VIENT DE `getPropertyMessages`, PAS D'UNE COPIE DE SA REQUETE.
+// Constat 6 : ma premiere version recopiait la fenetre de 30 jours, le plafond
+// de 500 messages, et la table de correspondance `direction`/`sender` ->
+// `source`. Le jour ou l'une des trois change — le mapping de `sender` a deja
+// change le 2 octobre 2026 pour distinguer 'auto' —, le script comparerait des
+// FILS QUE LE CRON NE VOIT PAS, et imprimerait quand meme « zero divergence ».
+// La preuve qui conditionne la recette serait fausse sans rougir.
+const { getProvider } = require('../lib/channels')
 
 ;(async () => {
   console.log(`Projet Supabase : ${PROJET} (lecture seule)\n`)
@@ -52,33 +66,29 @@ const REPONSES_HOTE = ['host', 'ai']
   if (error) { console.error('ECHEC lecture properties :', error.message); process.exit(1) }
 
   let filsVus = 0, divergences = 0, replis = 0
-  const depuis = new Date(Date.now() - JOURS_DE_FIL * 864e5).toISOString()
+  const provider = getProvider('channex')
 
   for (const b of biens) {
     const cle = String(b.provider_property_id)
-    // Le MEME fil que celui que voit le cron : getPropertyMessages.
-    const { data: msgs } = await sb.from('messages')
-      .select('booking_id, direction, sender, sent_at')
-      .eq('user_id', b.user_id).eq('property_id', cle).gte('sent_at', depuis)
-      .order('sent_at', { ascending: false }).limit(MESSAGES_MAX)
+    // Le MEME fil que celui que voit le cron, par la MEME fonction.
+    const msgs = await provider.getPropertyMessages({ userId: b.user_id, providerPropertyId: cle })
 
     const fils = {}
     ;(msgs || []).forEach(m => {
-      const bid = m.booking_id || 'unknown'
+      const bid = m.bookingId || 'unknown'
       if (!fils[bid]) fils[bid] = []
-      fils[bid].push({
-        source: m.direction === 'inbound' ? 'guest'
-          : (m.sender === 'auto' || m.sender === 'ai' ? m.sender : 'host'),
-        time: m.sent_at
-      })
+      fils[bid].push({ source: m.sender, time: m.time })
     })
-    const ids = Object.keys(fils).filter(x => x && x !== 'unknown')
+    // ⚠ 'unknown' EST COMPARE LUI AUSSI. Constat 1 : c'est precisement le fil
+    // que la lecture groupee oubliait, et un script de parite qui l'ecarte ne
+    // peut pas voir ce defaut-la.
+    const ids = Object.keys(fils)
 
     const resultats = { errors: [] }
     const gardes = await chargerLesGardesDesFils(b.user_id, cle, ids, resultats)
     if (!gardes) {
       replis++
-      console.error(`REPLI  ${b.name} (${cle}) : la lecture groupee n a pas abouti — rien a comparer`)
+      console.error(`REPLI  ${String(b.name || cle)} (${cle}) : la lecture groupee n a pas abouti — rien a comparer`)
       continue
     }
 
@@ -116,7 +126,10 @@ const REPONSES_HOTE = ['host', 'ai']
         }
       }
     }
-    console.log(`${b.name.padEnd(18)} ${String(filsDuBien).padStart(3)} fil(s) compare(s)  ${ecartsDuBien.length ? `${ecartsDuBien.length} ECART(S)` : 'zero ecart'}`)
+    // `properties.name` n'est pas NOT NULL : un bien de test sans nom faisait
+    // tomber toute la campagne sur un TypeError (constat 14).
+    const etiquette = String(b.name || b.provider_property_id || '(sans nom)')
+    console.log(`${etiquette.padEnd(18)} ${String(filsDuBien).padStart(3)} fil(s) compare(s)  ${ecartsDuBien.length ? `${ecartsDuBien.length} ECART(S)` : 'zero ecart'}`)
     ecartsDuBien.forEach(l => console.log(l))
   }
 

@@ -40,7 +40,7 @@ const FILS = [
 // Double de `lib/cron-shared` + de `lib/channels`. `snapshots` decide ce que
 // rend la lecture du coeur : des lignes, une erreur, ou le plafond.
 function charger ({ snapshots }) {
-  const vu = { snapshotQueries: [], tables: [] }
+  const vu = { snapshotQueries: [], tables: [], rpc: [] }
 
   const table = (nom) => {
     const f = { eq: {}, in: null }
@@ -51,7 +51,7 @@ function charger ({ snapshots }) {
       is () { return q }, not () { return q }, neq () { return q },
       gte () { return q }, lte () { return q }, gt () { return q },
       order () { return q },
-      update () { return q },
+      update () { vu.majAgentTasks = (vu.majAgentTasks || 0) + 1; return q },
       insert () { return Promise.resolve({ error: null }) },
       limit () { return rendre() },
       maybeSingle: async () => ({ data: null, error: null }),
@@ -62,8 +62,15 @@ function charger ({ snapshots }) {
       if (nom === 'bookings_snapshot') {
         vu.snapshotQueries.push({ eq: { ...f.eq }, in: f.in })
         if (snapshots === 'erreur') return Promise.resolve({ data: null, error: { message: 'panne transitoire' } })
-        if (snapshots === 'plafond') {
-          return Promise.resolve({ data: Array.from({ length: 1000 }, (_, i) => ({ booking_id: `X${i}`, snapshot: {} })), error: null })
+        if (snapshots === 'doublons') {
+          // Plus de lignes que d identifiants demandes : l unicite
+          // (user_id, booking_id) ne tiendrait pas, et la suite ne serait plus
+          // fiable. C est ce qui se CONSTATE — le plafond de PostgREST, lui,
+          // est arithmetiquement hors d atteinte sur un lot de 100 (constat 9).
+          return Promise.resolve({ data: [
+            { booking_id: 'B1', snapshot: {} }, { booking_id: 'B1', snapshot: {} },
+            { booking_id: 'B2', snapshot: {} }
+          ], error: null })
         }
         return Promise.resolve({ data: snapshots, error: null })
       }
@@ -79,7 +86,29 @@ function charger ({ snapshots }) {
   const absShared = require.resolve(path.join(__dirname, '..', 'lib/cron-shared.js'))
   const mShared = new Module(absShared)
   mShared.exports = {
-    supabase: { from: table },
+    // ⚠ `rpc` EXISTE ICI, ET C'ETAIT LE CONSTAT 4 DE LA REVIEW.
+    // Mon faux client n'en avait pas : `chargerLesGardesDesFils` levait, son
+    // `catch` ramenait la lecture par fil, et ce fichier — cense garder la
+    // nouvelle lecture — n'exercait JAMAIS la branche groupee. La suite etait
+    // verte et la sortie imprimait « appel tombe, retour a la lecture par fil :
+    // supabase.rpc is not a function », que personne ne lisait.
+    supabase: {
+      from: table,
+      rpc: async (nom, args) => {
+        vu.rpc.push({ nom, ids: (args.p_book_ids || []).slice() })
+        // Une tache de classification recente : les fils sont « deja traites »
+        // et s arretent avant le modele. Ce fichier garde la LECTURE DU COEUR.
+        if (nom === 'cron_derniere_tache_classif') {
+          return { data: (args.p_book_ids || []).map(b => ({ book_id: b, created_at: '2026-10-22T00:00:00Z' })), error: null }
+        }
+        // Une tache « recu pendant la pause » ANTERIEURE a la reponse de l hote
+        // sur le fil B1 : elle doit se fermer meme quand le coeur est illisible.
+        if (nom === 'cron_taches_pause_ouvertes') {
+          return { data: [{ book_id: 'B1', id: 'pause-1', created_at: '2026-10-20T00:00:00Z' }], error: null }
+        }
+        return { data: [], error: null }
+      }
+    },
     getPropertyMode: async () => 'test',
     isAutomationPaused: async () => false,
     surAppel: () => {}
@@ -111,10 +140,30 @@ test('LE TEST QUI COMPTE : la lecture du coeur porte user_id ET la liste des fil
   assert.equal(q.eq.property_id, PROP)
   assert.ok(Array.isArray(q.in), 'BORNEE : la lecture demande des identifiants, pas tout l historique')
   assert.deepEqual(q.in.slice().sort(), ['B1', 'B2'], 'les fils en main, et le fil sans reservation ecarte')
+
+  // ⚠ DEUX LISTES, UNE PAR USAGE (constat 1). Le coeur n'a pas de fiche pour
+  // un fil sans reservation ; les GARDES, elles, doivent le couvrir, sinon
+  // elles repondent « pas encore traite » a chaque cycle.
+  assert.ok(vu.rpc.length >= 3, 'la branche GROUPEE a bien tourne — trois appels, pas un repli')
+  assert.deepEqual(vu.rpc[0].ids.slice().sort(), ['B1', 'B2', 'unknown'],
+    'les gardes couvrent AUSSI le fil sans reservation')
+})
+
+test('LE TEST QUI COMPTE : la branche groupee tourne, aucun repli silencieux', async () => {
+  // Le compteur de repli doit rester vide : un repli PERMANENT — nom de RPC
+  // mal tape, droit oublie, migration defaite — ferait tourner le cron plus
+  // cher, pour toujours, et `results.gardesParFil` est le seul signal.
+  const { mod, vu } = charger({ snapshots: [{ booking_id: 'B1', snapshot: { firstName: 'Ana' } }] })
+  const res = resultats()
+  await mod.processChannelPropertyMessages(USER, bien, res)
+  assert.equal(res.gardesParFil, undefined, 'aucun repli vers la lecture par fil')
+  assert.deepEqual(vu.rpc.map(x => x.nom).sort(),
+    ['cron_derniere_reponse_hote', 'cron_derniere_tache_classif', 'cron_taches_pause_ouvertes'],
+    'les trois gardes ont bien ete demandees, par leur nom')
 })
 
 test('LE TEST QUI COMPTE : une lecture du coeur en echec n emporte PAS les codes d acces', async () => {
-  const { mod } = charger({ snapshots: 'erreur' })
+  const { mod, vu } = charger({ snapshots: 'erreur' })
   const res = resultats()
   // Ne LEVE pas : l appelant enveloppe cette fonction et processArrivalCodes
   // dans le MEME try. Une exception ici couterait le PIN du voyageur.
@@ -122,13 +171,23 @@ test('LE TEST QUI COMPTE : une lecture du coeur en echec n emporte PAS les codes
   assert.equal(res.totalMessages, 0, 'rien n est classifie sur une fiche qu on n a pas lue')
   assert.equal(res.errors.length, 1, 'et l echec est COMPTE, pas avale')
   assert.equal(res.errors[0].context, 'classify_snapshots')
+  // ⚠ CONSTAT 11 : ET LA FERMETURE DES TACHES DE PAUSE A QUAND MEME EU LIEU.
+  // Mon premier correctif rendait la main tout de suite, ce qui emportait une
+  // decision du 9 octobre 2026 qui ne lit NI snapshot NI fiche : l hote avait
+  // repondu au voyageur et sa tache restait ouverte dans « A valider ».
+  assert.equal(vu.majAgentTasks, 1, 'la tache « recu pendant la pause » s est fermee malgre la panne')
 })
 
-test('LE TEST QUI COMPTE : au plafond de PostgREST, on refuse au lieu de nommer a l aveugle', async () => {
-  const { mod } = charger({ snapshots: 'plafond' })
+test('LE TEST QUI COMPTE : plus de lignes que d identifiants, on refuse de nommer a l aveugle', async () => {
+  // ⚠ CONSTAT 9 : MA PREMIERE VERSION COMPARAIT AU PLAFOND DE POSTGREST (1000).
+  // Avec des lots de 100 identifiants et l unicite (user_id, booking_id) de
+  // `bookings_snapshot`, ce seuil est INATTEIGNABLE : c etait du code mort, qui
+  // donnait l impression que la classe de defauts etait fermee partout. Ce qui
+  // se verifie vraiment, c est l HYPOTHESE sur laquelle le lot repose.
+  const { mod } = charger({ snapshots: 'doublons' })
   const res = resultats()
   await mod.processChannelPropertyMessages(USER, bien, res)
   assert.equal(res.errors.length, 1)
-  assert.equal(res.errors[0].context, 'classify_snapshots_tronques')
-  assert.match(res.errors[0].error, /1000 lignes/)
+  assert.equal(res.errors[0].context, 'classify_snapshots_en_double')
+  assert.match(res.errors[0].error, /3 lignes pour 2 identifiants/)
 })

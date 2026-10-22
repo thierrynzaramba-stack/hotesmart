@@ -37,17 +37,21 @@ if (!URL || !KEY) {
 const PROJET = (URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''
 const sb = createClient(URL, KEY)
 const absente = (m) => /(does not exist|schema cache|not find|could not find)/i.test(String(m || ''))
-
-// ⚠ LES VALEURS VIENNENT DU MODULE, PAS D'UNE COPIE. Un verificateur qui
-// recopie les arguments verifie sa propre copie : il verdirait sur une base ou
-// les fonctions attendent autre chose.
 const {
   TYPES_CLASSIFICATION: TYPES,
   MOTIF_PAUSE: MOTIF,
   PREFIXE_AUTO,
   FENETRE_CONVERSATIONS,
   FENETRE_TACHES_PAUSE
-} = require('../lib/cron-classify')
+} = require('../lib/gardes-des-fils')
+
+// ⚠ LES VALEURS VIENNENT DU MODULE, PAS D'UNE COPIE. Un verificateur qui
+// recopie les arguments verifie sa propre copie : il verdirait sur une base ou
+// les fonctions attendent autre chose.
+// ⚠ ET DE `lib/gardes-des-fils.js`, PAS DE `lib/cron-classify.js` : charger
+// celui-la construit le client Anthropic de `lib/cron-shared.js`, donc exige
+// `CLAUDE_API_KEY` — en production, la cle FACTURABLE. Un script de lecture
+// seule n'a aucune raison de la charger (constat 15 de la review).
 
 // Les trois fonctions, avec les arguments EXACTS que le cron leur passe.
 const appels = (userId, propertyId, bookIds) => ([
@@ -74,20 +78,38 @@ const appels = (userId, propertyId, bookIds) => ([
     console.error(`KO  aucun bien channex lisible : ${eB?.message || 'liste vide'}`)
     process.exit(1)
   }
-  let bien = null, cle = null, ids = []
+  // ⚠ LE TEMOIN DOIT PORTER DES LIGNES A TROUVER, PAS SEULEMENT DES FILS.
+  // Un bien dont les 500 messages lus portent tous des reservations sans la
+  // moindre ligne `agent_tasks` ni `conversations` ferait rendre `[]` aux
+  // fonctions — et le point 2 n'eprouverait rien (constat 5). On classe donc
+  // les biens par le nombre de reservations qui ont AU MOINS une tache de
+  // classification, et c'est ce bien-la qu'on interroge.
+  // Le `order by` explicite : sans lui, les 500 lignes rendues sont arbitraires.
+  let bien = null, cle = null, ids = [], score = -1
   for (const b of biens) {
     const k = String(b.provider_property_id)
-    const { data: msgs } = await sb.from('messages').select('booking_id')
-      .eq('user_id', b.user_id).eq('property_id', k).not('booking_id', 'is', null).limit(500)
+    const { data: msgs } = await sb.from('messages').select('booking_id, sent_at')
+      .eq('user_id', b.user_id).eq('property_id', k).not('booking_id', 'is', null)
+      .order('sent_at', { ascending: false }).limit(500)
     const liste = [...new Set((msgs || []).map(m => String(m.booking_id)))]
-    if (liste.length > ids.length) { bien = b; cle = k; ids = liste }
+    if (!liste.length) continue
+    const { data: avecTache } = await sb.from('agent_tasks').select('book_id')
+      .eq('user_id', b.user_id).eq('property_id', k).in('book_id', liste.slice(0, 200))
+      .in('task_type', TYPES).limit(1000)
+    const n = new Set((avecTache || []).map(x => String(x.book_id))).size
+    if (n > score) { bien = b; cle = k; ids = liste; score = n }
   }
   if (!bien || !ids.length) {
     console.error('KO  aucun bien channex ne porte de fil : les fonctions ne seraient interrogees')
     console.error('    qu avec une liste vide, ce qui ne prouve rien.')
     process.exit(1)
   }
-  console.log(`Bien temoin : ${cle} — ${ids.length} reservation(s) dans ses fils`)
+  console.log(`Bien temoin : ${cle} — ${ids.length} reservation(s) dans ses fils, dont ${score} avec une tache de classification`)
+  if (score === 0) {
+    console.error('KO  aucune reservation ne porte de tache de classification :')
+    console.error('    les fonctions rendraient [] et la forme de leur reponse ne serait pas eprouvee.')
+    process.exit(1)
+  }
 
   // 1. Les trois fonctions repondent, avec la bonne signature.
   const reponses = {}
@@ -105,9 +127,23 @@ const appels = (userId, propertyId, bookIds) => ([
   }
 
   // 2. Au plus une ligne par reservation pour les deux gardes « derniere ».
+  //
+  // ⚠ ZERO LIGNE NE PROUVE RIEN, ET C'ETAIT LE CONSTAT 5 : ma version d'avant
+  // se gardait d'une liste d'identifiants vide, pas d'une REPONSE vide. Une
+  // fonction qui rendrait deux lignes par reservation, ou les reservations d'un
+  // autre compte, passait ce point sans etre interrogee — et le verdict final
+  // disait « migration appliquee et fermee ». Une reponse vide est desormais un
+  // KO : c'est le troisieme faux vert de ce script, et le troisieme de la meme
+  // famille dans ce depot.
   for (const nom of ['cron_derniere_tache_classif', 'cron_derniere_reponse_hote']) {
     const lignes = reponses[nom]
     if (!lignes) continue
+    if (!lignes.length) {
+      ko++
+      console.error(`KO  ${nom} rend ZERO ligne pour ${ids.length} reservation(s) :`)
+      console.error('    la forme de sa reponse n a donc pas pu etre verifiee.')
+      continue
+    }
     const vus = new Map()
     lignes.forEach(l => vus.set(String(l.book_id), (vus.get(String(l.book_id)) || 0) + 1))
     const fautifs = [...vus.entries()].filter(([, n]) => n > 1)
