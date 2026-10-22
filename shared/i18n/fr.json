@@ -723,6 +723,8 @@
   "fiche.supprimer_frappe": "Tapez le nom du logement pour confirmer :",
   "fiche.supprimer_ok": "Supprimer définitivement",
   "fiche.supprimer_fait": "Logement supprimé.",
+  "fiche.envoi_canaux_keep": "Sera envoyé à {canaux}. Vos prix par nuit, eux, ne sont pas modifiés.",
+  "fiche.envoi_inconnu_keep": "Sera envoyé à vos plateformes connectées. Vos prix par nuit, eux, ne sont pas modifiés.",
   "fiche.refus": "Vous n’avez pas accès à ce logement.",
   "fiche.introuvable": "Ce logement n’existe pas, ou il ne fait pas partie de ce compte.",
   "fiche.panne": "Cette fiche n’est pas lisible pour l’instant."

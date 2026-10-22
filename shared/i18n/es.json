@@ -723,6 +723,8 @@
   "fiche.supprimer_frappe": "Escriba el nombre del alojamiento para confirmar:",
   "fiche.supprimer_ok": "Eliminar definitivamente",
   "fiche.supprimer_fait": "Alojamiento eliminado.",
+  "fiche.envoi_canaux_keep": "Se enviará a {canaux}. Sus precios por noche no se modifican.",
+  "fiche.envoi_inconnu_keep": "Se enviará a sus plataformas conectadas. Sus precios por noche no se modifican.",
   "fiche.refus": "No tiene acceso a este alojamiento.",
   "fiche.introuvable": "Este alojamiento no existe, o no pertenece a esta cuenta.",
   "fiche.panne": "Esta ficha no se puede leer ahora mismo."

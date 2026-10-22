@@ -1480,3 +1480,45 @@ test('LE TEST QUI COMPTE : la liste de suppression n \u00e9crit pas de z\u00e9ro
   assert.deepEqual(M.listeDeSuppression(null, t2),
     ['fiche.supprimer_le_bien', 'fiche.supprimer_illisible'])
 })
+
+test('LE TEST QUI COMPTE : en « Je garde mes prix », la phrase dit AUSSI ce qui ne bouge pas', () => {
+  // Demande de Thierry du 22 octobre 2026. Ce qui part est la GRILLE tarifaire
+  // \u2014 le serveur la reconstruit chez les plateformes quel que soit le mode \u2014
+  // mais la pouss\u00e9e nuit par nuit reste suspendue. Sans la seconde phrase,
+  // l'h\u00f4te qui a choisi de garder ses prix lit « sera envoy\u00e9 \u00e0 Airbnb » et
+  // croit qu'on \u00e9crase ses tarifs.
+  const d = doc(M.ficheHtml(enMode('keep'), OUTILS(), { peutSupprimer: true }))
+  const aide = d.querySelector('[data-envoi-aide]')
+  assert.equal(aide.textContent.trim(),
+    'Sera envoy\u00e9 \u00e0 Airbnb. Vos prix par nuit, eux, ne sont pas modifi\u00e9s.')
+
+  // En « H\u00f4teSmart envoie mes prix », la phrase reste celle d'avant : la
+  // seconde moiti\u00e9 y serait fausse.
+  const managed = doc(M.ficheHtml(enMode('managed'), OUTILS(), { peutSupprimer: true }))
+  assert.equal(managed.querySelector('[data-envoi-aide]').textContent.trim(),
+    'Sera envoy\u00e9 \u00e0 Airbnb')
+
+  // Et les canaux restent ceux DU BIEN, dans les deux modes.
+  const troisCanaux = fiche({ bien: { ...fiche().bien, mode_des_prix: 'keep' },
+    canaux: [{ ota: 'airbnb', titre: null, actif: true, mappe: true },
+      { ota: 'booking', titre: null, actif: true, mappe: true }] })
+  assert.match(doc(M.ficheHtml(troisCanaux, OUTILS(), { peutSupprimer: true }))
+    .querySelector('[data-envoi-aide]').textContent, /Airbnb et Booking\.com\. Vos prix par nuit/)
+})
+
+test('un bien SANS canal n a pas de phrase, m\u00eame en « Je garde mes prix »', () => {
+  // « Un bien sans canal : pas de phrase » (Thierry, 21 octobre) vaut dans les
+  // deux modes : rien ne part chez personne, et l'annoncer serait faux.
+  const d = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, mode_des_prix: 'keep' }, canaux: [] }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.equal(d.querySelector('[data-envoi-aide]'), null)
+})
+
+test('des canaux illisibles, en « Je garde mes prix », disent les deux moiti\u00e9s sans inventer de noms', () => {
+  const d = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, mode_des_prix: 'keep' }, canaux: null }),
+    OUTILS(), { peutSupprimer: true }))
+  const aide = d.querySelector('[data-envoi-aide]')
+  assert.equal(aide.dataset.envoiAide, 'inconnu')
+  assert.match(aide.textContent, /plateformes connect\u00e9es\. Vos prix par nuit/)
+  assert.doesNotMatch(aide.textContent, /Airbnb|Booking/)
+})

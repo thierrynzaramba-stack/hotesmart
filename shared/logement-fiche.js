@@ -504,12 +504,21 @@ export function canauxDeVente (canaux) {
 function aideDEnvoiHtml (fiche, outils) {
   const { t, esc, liste } = outils
   const noms = canauxDeVente(fiche && fiche.canaux)
+  // ⚠ EN « JE GARDE MES PRIX », LA PHRASE DIT AUSSI CE QUI NE BOUGE PAS
+  // (demande de Thierry du 22 octobre 2026). Ce qu'on envoie est la GRILLE
+  // tarifaire — le serveur la reconstruit chez les plateformes quel que soit le
+  // mode — mais la poussée nuit par nuit, elle, reste suspendue. Sans la
+  // seconde phrase, l'hôte qui a choisi de garder ses prix lit « sera envoyé à
+  // Airbnb » et croit qu'on écrase ses tarifs.
+  const keep = String(((fiche || {}).bien || {}).mode_des_prix || '').toLowerCase() === 'keep'
   if (noms === null) {
-    return `<p class="caption fic-muet" data-envoi-aide="inconnu">${esc(t('fiche.envoi_inconnu'))}</p>`
+    return `<p class="caption fic-muet" data-envoi-aide="inconnu">`
+      + `${esc(t(keep ? 'fiche.envoi_inconnu_keep' : 'fiche.envoi_inconnu'))}</p>`
   }
   if (!noms.length) return ''
   return `<p class="caption fic-muet" data-envoi-aide="canaux">`
-    + `${esc(t('fiche.envoi_canaux', { canaux: liste ? liste(noms) : noms.join(', ') }))}</p>`
+    + `${esc(t(keep ? 'fiche.envoi_canaux_keep' : 'fiche.envoi_canaux',
+      { canaux: liste ? liste(noms) : noms.join(', ') }))}</p>`
 }
 
 function envoiHtml (bloc, fiche, outils) {

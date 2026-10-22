@@ -723,6 +723,8 @@
   "fiche.supprimer_frappe": "Type the property name to confirm:",
   "fiche.supprimer_ok": "Delete permanently",
   "fiche.supprimer_fait": "Property deleted.",
+  "fiche.envoi_canaux_keep": "Will be sent to {canaux}. Your nightly prices are not changed.",
+  "fiche.envoi_inconnu_keep": "Will be sent to your connected platforms. Your nightly prices are not changed.",
   "fiche.refus": "You do not have access to this property.",
   "fiche.introuvable": "This property does not exist, or it is not part of this account.",
   "fiche.panne": "This page cannot be read right now."
