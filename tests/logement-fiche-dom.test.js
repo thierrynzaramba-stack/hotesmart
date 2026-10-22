@@ -247,9 +247,22 @@ test('LE TEST QUI COMPTE : les motifs sont ceux du SERVEUR, découverts dans son
   // serveur sans qu une seule ligne ait l air fausse, et le fourre-tout
   // « Impossible de vérifier ses canaux » absorbe l écart en silence.
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'logement', 'lecture.js'), 'utf8')
-  const corps = src.slice(src.indexOf('function suppressionPossible'))
-  const motifs = [...new Set([...corps.slice(0, corps.indexOf('\n}')).matchAll(/motif:\s*'([a-z_]+)'/g)]
-    .map(m => m[1]))]
+  // ⚠ LE CORPS SE DELIMITE PAR APPARIEMENT D ACCOLADES, PAS AU PREMIER `\n}`.
+  // Mesure du 22 octobre 2026 : une signature ecrite sur trois lignes commence
+  // une ligne par `}` — la tranche devenait VIDE, zero motif decouvert, et ce
+  // test rougissait pour une raison qui n avait rien a voir avec ce qu il
+  // garde. Le depot a deja paye ce defaut deux fois (un `slice` coupe au
+  // premier `{`, un autre sur un nombre d octets).
+  const debut = src.indexOf('function suppressionPossible')
+  const ouvre = src.indexOf('{', src.indexOf(')', debut))
+  let prof = 0
+  let fin = ouvre
+  for (; fin < src.length; fin++) {
+    if (src[fin] === '{') prof++
+    else if (src[fin] === '}') { prof--; if (prof === 0) break }
+  }
+  const corps = src.slice(ouvre, fin)
+  const motifs = [...new Set([...corps.matchAll(/motif:\s*'([a-z_]+)'/g)].map(m => m[1]))]
   assert.ok(motifs.length >= 4, `${motifs.length} motif(s) découvert(s) : la découverte a échoué`)
   // ⚠ ET LE CAS GÉNÉRAL, PAS SEULEMENT LES DEUX NOMS EN DUR (re-revue de
   // 3dddb14) : un motif ajouté demain au serveur tomberait en silence dans le

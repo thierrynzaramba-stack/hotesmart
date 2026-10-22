@@ -251,7 +251,7 @@ test('une annonce encore reliee refuse la suppression, avec son motif', () => {
 })
 
 test('aucune annonce reliee, et le releve a bien eu lieu : la suppression est possible', () => {
-  const vu = { vuLe: '2026-10-19T08:00:00Z' }
+  const vu = { releveDuCompte: '2026-10-19T08:00:00Z' }
   assert.equal(L.suppressionPossible(bienDe(), [{ ota: 'airbnb', mappe: false }], vu).possible, true)
   assert.equal(L.suppressionPossible(bienDe(), [], vu).possible, true)
 })
@@ -260,7 +260,7 @@ test('LE TEST QUI COMPTE (H4) : `mappe === null` ne vaut PAS « pas relie »', (
   // Le writer pose `null` quand il n'a pas pu conclure, et jamais `false` par
   // defaut. Le lire comme « pas relie » ouvrait le bouton Supprimer sur un bien
   // encore en vente sur Airbnb.
-  const r = L.suppressionPossible(bienDe(), [{ ota: 'airbnb', mappe: null }], { vuLe: '2026-10-19T08:00:00Z' })
+  const r = L.suppressionPossible(bienDe(), [{ ota: 'airbnb', mappe: null }], { releveDuCompte: '2026-10-19T08:00:00Z' })
   assert.equal(r.possible, null)
   assert.equal(r.motif, 'mapping_inconnu')
 })
@@ -268,8 +268,51 @@ test('LE TEST QUI COMPTE (H4) : `mappe === null` ne vaut PAS « pas relie »', (
 test('LE TEST QUI COMPTE (M1a) : « jamais releve » ne vaut pas « pas relie »', () => {
   // La dette 59 n'est en prod que depuis le 19 octobre : un compte jamais releve
   // a `canaux = []`, ce qui n'autorise rien.
-  const r = L.suppressionPossible(bienDe(), [], { vuLe: null })
+  const r = L.suppressionPossible(bienDe(), [], { releveDuCompte: null })
   assert.equal(r.possible, null)
+  assert.equal(r.motif, 'jamais_releve')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE RELEVE EST UN FAIT DE COMPTE — decision de Thierry, 22 octobre 2026
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠ CE QUE CES TESTS FERMENT : un logement NEUF etait insupprimable. La
+// fonction recevait `vuLe`, la FRAICHEUR AFFICHEE du bien — et
+// `fraicheurDuBien` rend `null` pour un bien sans aucun canal, VOLONTAIREMENT
+// (« une date qui parle de rien » a l'ecran). La condition `!canaux.length &&
+// !vuLe` se reduisait donc a `!canaux.length` : tout bien sans canal passait
+// pour inconnu, et la fiche V5 n'a aucun bouton pour lancer un releve.
+//
+// La dette etait ECRITE dans shared/logements-liste.js depuis l'etape 0 :
+// « sa branche `jamais_releve` est degeneree ». Elle se ferme ici.
+
+test('LE TEST QUI COMPTE : un logement NEUF se supprime, si le compte a ete releve', () => {
+  // Aucun canal pour ce bien + un releve de COMPTE qui a reussi = « aucun canal
+  // relie ». C'est un FAIT, pas une ignorance.
+  const r = L.suppressionPossible(bienDe(), [], { releveDuCompte: '2026-10-22T08:00:00Z' })
+  assert.equal(r.possible, true, 'un logement qu on vient de creer doit pouvoir etre efface')
+  assert.equal(r.motif, null)
+})
+
+test('LE TEST QUI COMPTE : un releve de compte EN ECHEC ne conclut rien', () => {
+  // « On ne sait pas » reste reserve a deux cas, et a eux seuls : le releve du
+  // compte n'a jamais reussi, ou il a echoue. Un echec silencieux qui
+  // ouvrirait la suppression est exactement ce que la regle interdit.
+  const r = L.suppressionPossible(bienDe(), [], {
+    releveDuCompte: '2026-10-22T08:00:00Z', releveEnEchec: true
+  })
+  assert.equal(r.possible, null)
+  assert.equal(r.motif, 'jamais_releve')
+})
+
+test('la fraicheur AFFICHEE du bien ne decide plus de la suppression', () => {
+  // ⚠ LES DEUX QUESTIONS SE SEPARENT, et c'est tout l'objet du correctif :
+  // « quelle est la fraicheur de CE bien ? » (null pour un bien sans canal,
+  // volontairement) et « un releve a-t-il eu lieu sur ce COMPTE ? ».
+  // Passer l'ancien nom ne doit plus rien autoriser.
+  const r = L.suppressionPossible(bienDe(), [], { vuLe: '2026-10-22T08:00:00Z' })
+  assert.equal(r.possible, null,
+    'l ancienne option ne doit pas suffire : sinon les deux questions restent confondues')
   assert.equal(r.motif, 'jamais_releve')
 })
 
@@ -277,7 +320,7 @@ test('LE TEST QUI COMPTE (M1b) : sans `reglages: write`, on ne PROMET pas une su
   // La garde DELETE exige reglages:write. Rendre `true` a un profil en lecture
   // lui promettrait une action refusee en 403, et la spec §5 veut « aucun bouton
   // d action dans le DOM » pour ce profil.
-  const r = L.suppressionPossible(bienDe(), [{ mappe: false }], { vuLe: 'x', peutSupprimer: false })
+  const r = L.suppressionPossible(bienDe(), [{ mappe: false }], { releveDuCompte: 'x', peutSupprimer: false })
   assert.equal(r.possible, null)
   assert.equal(r.motif, 'droit_refuse')
 })
@@ -883,7 +926,7 @@ test('M1 : `reglages: read` ne suffit pas a PROMETTRE une suppression — il fau
   // ⚠ La contre-epreuve par mutation a montre que `peutEcrire → peutLire` sur
   // l endpoint laissait la suite VERTE : le test d avant utilisait
   // `reglages: none`, qui echoue des deux cotes. Il faut le cas intermediaire.
-  const vu = { vuLe: '2026-10-19T08:00:00Z' }
+  const vu = { releveDuCompte: '2026-10-19T08:00:00Z' }
   assert.equal(L.suppressionPossible(bienDe(), [{ mappe: false }], { ...vu, peutSupprimer: true }).possible, true)
   assert.equal(L.suppressionPossible(bienDe(), [{ mappe: false }], { ...vu, peutSupprimer: false }).motif, 'droit_refuse')
 })
@@ -1378,4 +1421,52 @@ test('LE TEST QUI COMPTE : la fiche DESCEND la r\u00e9ponse de publication', () 
       const f2 = await L.lireFiche(sb2, { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
       assert.deepEqual(f2.publication, { possible: true, motif: null })
     })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOUT EN BOUT : un logement NEUF est supprimable (Thierry, 22 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE : la fiche d un logement NEUF autorise la suppression', async () => {
+  // ⚠ LE CAS REEL : on vient de creer le logement. Il est provisionne chez le
+  // partenaire — il a donc `provider_property_id` ET `provider_rate_plan_id` —
+  // mais AUCUNE ligne de `canaux_du_bien` ne le porte, puisqu'il n'est en vente
+  // nulle part. Le releve du COMPTE, lui, a bien eu lieu.
+  //
+  // Avant le correctif, la fiche rendait `possible: null` : le bouton Supprimer
+  // restait en « on ne sait pas », et la fiche V5 n'a aucun bouton pour lancer
+  // un releve. Le logement etait INSUPPRIMABLE depuis l'ecran.
+  const f = await L.lireFiche(ficheComplete({ canaux: [] }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.deepEqual(f.canaux, [], 'aucun canal ne porte ce bien')
+  assert.equal(f.suppression.possible, true, 'aucun canal relie est un FAIT, pas une ignorance')
+  assert.equal(f.suppression.motif, null)
+})
+
+test('LE TEST QUI COMPTE : sans releve de compte, la fiche ne conclut toujours rien', async () => {
+  // La contre-epreuve du test ci-dessus : c'est bien le releve du COMPTE qui
+  // decide. Sans lui, « on ne sait pas » — et c'est le seul cas qui reste.
+  const f = await L.lireFiche(ficheComplete({ canaux: [], horloge: null }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f.suppression.possible, null)
+  assert.equal(f.suppression.motif, 'jamais_releve')
+})
+
+test('LE TEST QUI COMPTE : un releve de compte en ECHEC ne conclut rien non plus', async () => {
+  const f = await L.lireFiche(ficheComplete({
+    canaux: [],
+    horloge: { user_id: COMPTE, vu_le: '2026-10-19T08:00:00Z', ok: false, erreur: 'timeout' }
+  }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f.suppression.possible, null)
+  assert.equal(f.suppression.motif, 'jamais_releve')
+})
+
+test('et un releve SUSPENDU n est pas un echec visible par l hote', async () => {
+  // `echecVisibleParLHote` ecarte `suspendu` : un compte sans aucun bien chez
+  // ce partenaire n'est plus releve, et son drapeau resterait allume a vie.
+  const f = await L.lireFiche(ficheComplete({
+    canaux: [],
+    horloge: { user_id: COMPTE, vu_le: '2026-10-19T08:00:00Z', ok: false, erreur: 'suspendu' }
+  }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f.suppression.possible, true)
 })

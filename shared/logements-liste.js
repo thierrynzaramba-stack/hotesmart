@@ -337,13 +337,21 @@ export function canauxHtml (bien, { t, esc }) {
     //
     // ⚠ ET MA PREMISSE ETAIT FAUSSE. J'avais ecrit, en commentaire et dans le
     // message de commit, que « le serveur distingue deja les deux ». Non :
-    // `suppressionPossible` teste `!canaux.length && !vuLe` avec le MEME
-    // `vuLe`, donc sa condition se reduit a `!canaux.length`. Sa branche
-    // `jamais_releve` est degeneree depuis l'etape 0.
+    // `suppressionPossible` testait `!canaux.length && !vuLe` avec le MEME
+    // `vuLe`, donc sa condition se reduisait a `!canaux.length`. Sa branche
+    // `jamais_releve` etait degeneree depuis l'etape 0.
     //
-    // La distinction est un fait de COMPTE (`canaux_releve.vu_le` / `tente_le`)
-    // que l'endpoint ne descend pas. Tant qu'il ne la descend pas, l'ecran n'a
-    // pas la donnee qu'il pretendrait lire. Note en dette.
+    // ⚠ CORRIGE LE 22 OCTOBRE 2026, cote SUPPRESSION seulement (decision de
+    // Thierry) : `suppressionPossible` recoit desormais le fait de COMPTE —
+    // `canaux_releve.vu_le` et l'etat d'echec — et non plus la fraicheur
+    // affichee du bien. Un logement neuf, sur un compte releve, est donc
+    // supprimable ; il etait insupprimable, et la fiche V5 n'a aucun bouton
+    // pour lancer un releve.
+    //
+    // CETTE CARTE-CI, elle, ne recoit toujours pas la distinction : `lireListe`
+    // ne descend pas le fait de compte par bien. Elle dit donc « aucun canal
+    // relie » dans les deux cas. Reste en dette, et c'est maintenant le SEUL
+    // endroit ou les deux etats se confondent.
     return `<span class="caption muted" data-canaux="aucun">${esc(t('logements.aucun_canal'))}</span>`
   }
   // ⚠ L'ETAT SE LIT SANS LA COULEUR NI LE SURVOL (constat de la revue). A 8 px,
