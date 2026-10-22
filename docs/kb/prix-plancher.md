@@ -136,3 +136,95 @@ ailleurs**, et elle est corrigée : `loadOwnedProperties` ne sélectionnait pas
 ouvertures** de la poussée. C'est l'incident du 11 septembre — « 69 dates
 tarifées mais invendables » — dont on avait ajouté les avertissements sans
 jamais trouver la cause.
+
+## 8. La classe de défauts est fermée pour les lectures d'une ligne (22 octobre 2026)
+
+**Troisième occurrence dans le seul `api/channel-property.js`**, et la première
+à traverser une recette. Thierry, sur staging : plancher 50 € en base, prix de
+base passé à 20 € depuis la fiche, « Enregistré », valeur persistée, **aucun
+refus**. La garde lisait `prop.prix_minimum`, absente du `.select(...)` du bloc
+PATCH : elle valait `undefined`, et `undefined` passe toutes les comparaisons
+qu'une garde écrit naturellement — `!= null` est faux, `<` est faux. Elle ne
+filtrait rien, pour personne. La leçon était écrite en commentaire **deux lignes
+au-dessus**, pour `migration_target_property_id`.
+
+Une règle qu'on relit à l'œil se perd. Elle se mesure désormais :
+
+- **l'outil** — `tests/outils/colonnes-selectionnees.js` ;
+- **le test** — `tests/garde-colonne-selectionnee.test.js`, sur `api`, `lib`,
+  `scripts` et `shared`.
+
+### Sa plage, parce qu'une mesure dit sur quoi elle rassure
+
+**361 lectures d'une ligne** (`.single()` / `.maybeSingle()`), dont **285
+analysées** sur 126 fichiers, **zéro constat**. Les **705 lectures de
+collection** des mêmes dossiers sont **hors de portée** : il faudrait suivre
+l'alias du callback, donc une analyse de portée. C'est la plus grande surface
+non couverte, et le test la chiffre — pour que « 285 lectures analysées » ne se
+lise pas comme « le dépôt est couvert ».
+
+### Ce qui tient vraiment : l'invariant de totalité
+
+Les plafonds d'angles morts, seuls, ne valaient rien : ils n'attrapent qu'un
+effondrement, alors que les trois défauts vécus faisaient **une** lecture
+chacun. Le test exige donc l'**égalité** « analysées + angles morts = lectures
+trouvées ». Une lecture qui sort du balayage devient un rouge, et non une
+disparition.
+
+C'est une **mesure** qui l'a imposé, pas un principe : une liste de colonnes
+**concaténée** — `api/channel-bcom-write.js`, dont la ligne suivante porte
+`if (!prop.provider_rate_plan_id)` — n'était ni analysée ni comptée. En retirer
+la colonne laissait 282 lectures analysées, 0 constat, angles morts inchangés.
+
+### Ce que l'outil voit
+
+Les listes en **chaîne**, en **tableau** (`const COLONNES_BIEN = [...]` de
+`lib/logement/lecture.js`), **concaténées** (union des morceaux) et en
+**ternaire** — et là, l'**intersection** des branches, parce qu'une colonne
+absente d'une seule branche suffit à ouvrir la garde. Côté lectures : l'accès
+direct, la **destructuration**, un **alias**, et la ligne passée à une
+**fonction auxiliaire** — la forme de l'occurrence
+`migration_target_property_id`, où la garde lit depuis le paramètre de
+`canauxActifsDuBien(prop)`.
+
+Il ne retient, dans une auxiliaire, que les lectures qui **jugent** : un
+utilitaire de normalisation qui lit une colonne en repli rendait un constat sur
+du code juste, et un garde-fou qui rougit sur du code correct pousse à déformer
+ce code pour le faire taire.
+
+### Les pièges d'analyse, chacun payé une fois et gardé par un test
+
+- Un **retrait de commentaires qui ne connaît pas les chaînes efface du code** :
+  `const _e = 'voir /* la doc'` injecté dans `api/channel-property.js` faisait
+  sortir **le fichier entier** du balayage — 125 fichiers devenaient 124, zéro
+  constat, test entièrement vert. Même famille que `accept="image/*"`, qui
+  avalait 470 lignes de l'outil `imports-modules`. D'où un scanner à états, et
+  une liste de **fichiers sentinelles** qui doivent être dans le balayage.
+- `alias:source` — la clé lue est l'**alias** ; prendre l'après du deux-points
+  faisait passer `objetOta.cache` pour un oubli.
+- Un paramètre de callback (`m => m.token`) est un autre `m`.
+- Un **repli** qui sélectionne moins n'est pas un défaut (`api/sms.js` relit deux
+  colonnes si la migration du 17 septembre n'est pas passée) : les colonnes
+  connues sont l'union des `select` **proches**, pas de tout le fichier — unir à
+  l'échelle du fichier faisait survivre deux mutations.
+- Le `\b` d'une expression régulière **ne s'applique qu'aux mots** : mis devant
+  `&&`, il ne matche jamais, et la ligne
+  `const cle = prop && (prop.migration_target_property_id)` n'était pas reconnue
+  comme un jugement.
+
+### Contre-épreuves (REVIEW.md règles 19 et 20)
+
+Le test rougit contre l'arbre `e016d24`, celui d'avant le correctif, en nommant
+`prop.prix_minimum`. Campagne sur les **douze** colonnes du `select` du PATCH :
+**dix** le font rougir ; les deux survivantes, `id` et `pilote_tarifaire`,
+survivent **à bon droit** — aucune n'est lue dans ce bloc, donc leur retrait
+n'ouvre aucune garde.
+
+### Ce qui reste dû
+
+Un test de **comportement** plutôt que textuel, recommandé en review et conforme
+à REVIEW.md règle 20 : un double de `supabase` qui **honore le select** — une
+ligne rendue par `Proxy` qui lève sur toute propriété hors de la liste reçue.
+Il couvrirait d'un coup les collections, `select('*')` et toutes les formes
+d'écriture, parce qu'il travaille sur l'objet réel à l'exécution. Le balayage
+textuel reste en complément.
