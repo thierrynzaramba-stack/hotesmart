@@ -243,6 +243,16 @@ test('LE TEST QUI COMPTE : le prechargement vise la version EPINGLEE', () => {
     'plus de preconnexion a jsdelivr : la poignee de main DNS/TLS reste sur le chemin critique')
 })
 
+// ⚠ LE FICHIER, PAS LA FORME DE L'URL. Ces deux tests comparaient l'URL avec
+// `endsWith('langues.json')`. Le lot (a) de la spec performance y a ajoute une
+// version (`?v=<empreinte>`) pour pouvoir cacher les dictionnaires un an : les
+// deux tests ont rougi sans qu'aucune regle n'ait bouge. Ils figeaient le
+// REMEDE — la forme exacte de l'URL — au lieu de la PROPRIETE qu'ils gardent :
+// que les deux lectures partent ensemble, et qu'une erreur soit nommee. On
+// reconnait donc le fichier demande, quelle que soit sa chaine de requete.
+const estLeFichier = (url, nom) =>
+  new RegExp(`/${nom.replace('.', '\\.')}(\\?|$)`).test(String(url))
+
 // ─── Les lectures qui partent ensemble ───────────────────────────────────────
 
 test('LE TEST QUI COMPTE : i18n demande la liste et le repli EN MEME TEMPS', async () => {
@@ -254,7 +264,7 @@ test('LE TEST QUI COMPTE : i18n demande la liste et le repli EN MEME TEMPS', asy
   const rep = corps => ({ ok: true, json: async () => corps })
   const fetchFaux = url => {
     demandes.push(String(url))
-    if (String(url).endsWith('langues.json')) {
+    if (estLeFichier(url, 'langues.json')) {
       return new Promise(r => { repondreLangues = () => r(rep([{ code: 'fr', dir: 'ltr' }])) })
     }
     return Promise.resolve(rep({ 'today.greeting': 'Bonjour {name}' }))
@@ -274,8 +284,8 @@ test('LE TEST QUI COMPTE : i18n demande la liste et le repli EN MEME TEMPS', asy
   // toujours demande que le premier fichier.
   for (let i = 0; i < 20; i++) await Promise.resolve()
 
-  assert.ok(demandes.some(u => u.endsWith('langues.json')), 'langues.json jamais demande')
-  assert.ok(demandes.some(u => u.endsWith('fr.json')),
+  assert.ok(demandes.some(u => estLeFichier(u, 'langues.json')), 'langues.json jamais demande')
+  assert.ok(demandes.some(u => estLeFichier(u, 'fr.json')),
     'fr.json attend la reponse de langues.json : les deux lectures sont en file')
 
   repondreLangues()
@@ -368,7 +378,7 @@ test("i18n : une langues.json en erreur est NOMMEE, pas parsee", async () => {
   // JSON : l'hote lit « Unexpected token < » au lieu du fichier manquant.
   // `load()` portait deja cette garde ; la lecture en ligne de langues.json, non.
   const src = lire('shared/i18n/i18n.js')
-  const fetchFaux = url => Promise.resolve(String(url).endsWith('langues.json')
+  const fetchFaux = url => Promise.resolve(estLeFichier(url, 'langues.json')
     ? { ok: false, status: 404, json: async () => { throw new SyntaxError('Unexpected token <') } }
     : { ok: true, json: async () => ({}) })
   const faux = {
