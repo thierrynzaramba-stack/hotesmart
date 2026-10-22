@@ -434,7 +434,15 @@ module.exports = async function handler(req, res) {
       // garde qui juge sur une colonne non selectionnee est une garde ouverte
       // (lecon deja payee sur `base_price` et le cran d'arret). Un bien en
       // cours de bascule porte ses canaux sous sa cle CIBLE.
-      .select('id, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, included_guests, extra_guest_fee, pilote_tarifaire')
+      // ⚠ `prix_minimum` A ETE AJOUTE LE 22 OCTOBRE 2026, ET SON ABSENCE AVAIT
+      // ROUVERT LA GARDE DU PLANCHER. Mesure de recette de Thierry : plancher
+      // 50 EUR en base, prix de base passe a 20 EUR -> 200, « Enregistre »,
+      // valeur persistee, aucun refus. La garde lisait `prop.prix_minimum`, qui
+      // valait `undefined` faute d'etre SELECTIONNE : elle ne pouvait pas
+      // mordre. C'est mot pour mot la lecon ecrite deux lignes plus haut pour
+      // `migration_target_property_id` — « une garde qui juge sur une colonne
+      // non selectionnee est une garde ouverte » — et je l'ai repayee.
+      .select('id, provider, provider_property_id, migration_target_property_id, provider_room_type_id, provider_rate_plan_id, capacity, base_price, prix_minimum, included_guests, extra_guest_fee, pilote_tarifaire')
       .eq('id', bienPid)
       .eq('user_id', compteBien)
       .single()

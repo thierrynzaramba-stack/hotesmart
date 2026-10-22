@@ -574,7 +574,21 @@ function ligneSaisieHtml (champ, bien, outils) {
 //
 // ⚠ ET JAMAIS EN MODE « JE GARDE MES PRIX » : le serveur refuse la mise en file
 // (`RATE_PUSH_BLOCKED`), donc le bouton mènerait à un refus certain.
-export function publierAffiche (bien) {
+// ⚠ LA RÉPONSE DU SERVEUR D'ABORD (constat de la recette de Thierry du
+// 22 octobre 2026). L'écran déduisait « publiable » du mode et du pilote — les
+// deux seules choses qu'il voit — et proposait le bouton sur un bien SANS
+// AUCUN CANAL : le serveur rendait alors 400 « Bien non connecté au canal (ids
+// manquants) », un message interne, pour un geste qu'on n'aurait pas dû offrir.
+// Les identifiants du partenaire, qui tranchent, ne descendent pas ici — et ne
+// doivent pas. `fiche.publication` porte donc la réponse, calculée là où la
+// donnée est.
+//
+// La déduction locale reste en REPLI, pour une réponse qui ne porterait pas
+// encore le champ : elle est moins bonne, pas fausse.
+export function publierAffiche (bien, publication = null) {
+  if (publication && typeof publication === 'object' && 'possible' in publication) {
+    return { montre: publication.possible === true, motif: publication.motif || null }
+  }
   const mode = String((bien && bien.mode_des_prix) || '').toLowerCase()
   if (mode !== 'managed') return { montre: false, motif: 'mode_keep' }
   if (((bien && bien.pilote_tarifaire) || '') === 'yieldflow') {
@@ -617,7 +631,7 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
   // ⚠ ET ELLE S'AFFICHE SANS CONDITION DE DROIT : c'est un ÉTAT du bien, pas
   // une action. La taire à un profil en lecture lui laisserait croire que ses
   // prix dorment.
-  const pub = publierAffiche(fiche.bien)
+  const pub = publierAffiche(fiche.bien, fiche.publication)
   const publierHtml = pub.motif === 'pilote'
     ? `<p class="fic-publier caption fic-muet" data-publier="automatique">${esc(t('fiche.prix_automatique'))}</p>`
     : ((outils.peutPublier === true && pub.montre)
@@ -993,8 +1007,7 @@ export function ficheHtml (fiche, outils, droits = {}) {
   const gauche = [
     bloc('fiche.bloc_vente', venteHtml(fiche, o, { peutModifier }), o),
     bloc('fiche.bloc_prix', prixHtml(fiche, o, { peutModifier }), o),
-    bloc('fiche.bloc_logement', logementHtml(fiche, o, { peutModifier }), o),
-    bloc('fiche.bloc_supprimer', supprimerHtml(fiche, o, droits), o)
+    bloc('fiche.bloc_logement', logementHtml(fiche, o, { peutModifier }), o)
   ].join('')
 
   const droite = [
@@ -1003,11 +1016,21 @@ export function ficheHtml (fiche, outils, droits = {}) {
     bloc('fiche.bloc_reglages', reglagesHtml(fiche, o, refs), o)
   ].join('')
 
+  // ⚠ SUPPRIMER SORT DES COLONNES, ET VIENT EN DERNIER (constat de la recette
+  // de Thierry du 22 octobre 2026). Il vivait au bas de la colonne GAUCHE : à
+  // l'ordinateur il était bien en bas à gauche, mais au téléphone, où les deux
+  // colonnes s'empilent, il arrivait AU MILIEU de la fiche — avant Ménage, Avis
+  // et Réglages. L'action la plus destructrice du produit se lisait entre deux
+  // blocs de lecture. La spec le veut « en bas » : hors colonnes, il l'est sur
+  // les deux écrans.
+  const supprimer = bloc('fiche.bloc_supprimer', supprimerHtml(fiche, o, droits), o)
+
   return `${avecActions ? dialogueHtml(o) : ''}${enTeteHtml(fiche, o, { peutModifier })}
     <div class="fic-colonnes">
       <div class="fic-col fic-col--gauche">${gauche}</div>
       <div class="fic-col fic-col--droite">${droite}</div>
-    </div>`
+    </div>
+    ${supprimer}`
 }
 
 // Les états qui ne sont pas une fiche. Comme en liste : les textes passent par

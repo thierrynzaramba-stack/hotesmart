@@ -282,11 +282,33 @@ test('LE TEST QUI COMPTE (M1b) : sans `reglages: write`, on ne PROMET pas une su
   assert.equal(r.motif, 'droit_refuse')
 })
 
-test('la garde OTA ne vaut que pour un bien du canal POURVU d un plan tarifaire — c est la regle du serveur', () => {
-  // Sans plan tarifaire, la garde DELETE ne verifie rien : le bouton est actif,
-  // meme si les canaux sont illisibles.
-  assert.equal(L.suppressionPossible(bienDe({ provider_rate_plan_id: null }), null).possible, true)
-  assert.equal(L.suppressionPossible(bienDe({ provider: 'beds24' }), null).possible, true)
+test('LE TEST QUI COMPTE : un bien EN VENTE ne se supprime pas, MEME sans plan tarifaire', () => {
+  // ⚠ CONSTAT DE LA RECETTE DE THIERRY, 22 octobre 2026. Un bien dont Airbnb
+  // etait « en vente » montrait un bouton ACTIF et proposait d'effacer
+  // 77 reservations. La garde ne regardait les canaux QU'APRES avoir exige
+  // `provider_rate_plan_id`, parce que le serveur interroge le partenaire PAR
+  // ce plan. Sans plan, il ne verifiait rien — et l'ecran n'annoncait rien.
+  //
+  // Le COEUR, lui, porte le mappage sans aucun appel au partenaire. C'est la
+  // question que l'hote se pose : « ce logement est-il en vente ? »
+  const enVente = [{ ota: 'airbnb', mappe: true, actif: true }]
+  for (const bien of [
+    bienDe({ provider_rate_plan_id: null }),
+    bienDe({ provider: 'beds24' }),
+    bienDe({ provider_property_id: null })
+  ]) {
+    const r = L.suppressionPossible(bien, enVente)
+    assert.equal(r.possible, false, JSON.stringify(bien.provider))
+    assert.equal(r.motif, 'annonce_reliee')
+  }
+
+  // Et sans canal relie, le bouton reste actif : il n'y a rien a casser.
+  assert.equal(L.suppressionPossible(bienDe({ provider_rate_plan_id: null }), []).possible, true)
+  assert.equal(L.suppressionPossible(bienDe({ provider: 'beds24' }), []).possible, true)
+
+  // Des canaux ILLISIBLES n'ouvrent jamais l'action la plus destructrice,
+  // quel que soit le plan tarifaire (constat H4 de l'etape 0).
+  assert.equal(L.suppressionPossible(bienDe({ provider_rate_plan_id: null }), null).possible, null)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1282,4 +1304,78 @@ test('le comptage NE LIT AUCUNE LIGNE : il demande un compte, pas des données',
   const vu = sb._vus.find(v => v.table === 'bookings_snapshot')
   assert.equal(vu.compte, true, 'la requête doit demander un `count`')
   assert.equal(vu.head, true, 'et ne ramener AUCUNE ligne')
+})
+
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// 13. Ce que le serveur accepterait de PUBLIER (recette du 22 octobre 2026)
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+test('LE TEST QUI COMPTE : un bien NON CONNECTE ne se publie pas', () => {
+  // Le bouton s'affichait sur un bien sans aucun canal, et le serveur rendait
+  // 400 « Bien non connecte au canal (ids manquants) » — un message interne,
+  // pour un geste que l'ecran n'aurait pas du proposer. L'ecran ne peut pas en
+  // juger seul : il ne descend AUCUN identifiant du partenaire, et c'est
+  // justement ce qu'il faut regarder.
+  const complet = { provider: 'channex', provider_property_id: 'P', provider_rate_plan_id: 'R',
+    provider_room_type_id: 'RT', rate_sync_mode: 'managed', pilote_tarifaire: 'calendrier' }
+  assert.deepEqual(L.publicationPossible(complet), { possible: true, motif: null })
+
+  // Les trois identifiants sont exiges : le serveur les exige tous les trois.
+  for (const manquant of ['provider_property_id', 'provider_rate_plan_id', 'provider_room_type_id']) {
+    const r = L.publicationPossible({ ...complet, [manquant]: null })
+    assert.equal(r.possible, false, manquant)
+    assert.equal(r.motif, 'pas_connecte', manquant)
+  }
+  // Un bien qui n'est pas du canal non plus.
+  assert.equal(L.publicationPossible({ ...complet, provider: 'beds24' }).motif, 'pas_connecte')
+})
+
+test('LE TEST QUI COMPTE : les trois refus de publication ne se confondent pas', () => {
+  const complet = { provider: 'channex', provider_property_id: 'P', provider_rate_plan_id: 'R',
+    provider_room_type_id: 'RT', rate_sync_mode: 'managed', pilote_tarifaire: 'calendrier' }
+  // « Je garde mes prix » : le serveur refuse la mise en file (RATE_PUSH_BLOCKED).
+  assert.equal(L.publicationPossible({ ...complet, rate_sync_mode: 'keep' }).motif, 'mode_keep')
+  // Bien pilote : deux ecrivains de prix sur la meme nuit.
+  assert.equal(L.publicationPossible({ ...complet, pilote_tarifaire: 'yieldflow' }).motif, 'pilote')
+  // L'ORDRE compte : un bien NON CONNECTE et en keep dit d'abord « pas connecte »,
+  // parce que c'est ce que le serveur opposerait en premier (400 avant le 200).
+  assert.equal(L.publicationPossible({ ...complet, provider_property_id: null, rate_sync_mode: 'keep' }).motif,
+    'pas_connecte')
+})
+
+test('LE TEST QUI COMPTE : les colonnes que la regle LIT sont SELECTIONNEES', () => {
+  // La lecon payee trois fois dans ce depot, dont une le 22 octobre 2026 en
+  // recette : une garde qui juge sur une colonne non selectionnee est une garde
+  // ouverte. On confronte les colonnes lues par les regles de ce module a la
+  // liste qu'il demande a `properties`.
+  // Ce fichier n'importe ni `fs` ni `path` : on les prend ici, au plus pres.
+  const fs2 = require('node:fs')
+  const src = fs2.readFileSync(path.join(__dirname, '..', 'lib', 'logement', 'lecture.js'), 'utf8')
+  const m = src.match(/const COLONNES_BIEN = \[([\s\S]*?)\]\.join/)
+  assert.ok(m, 'la liste des colonnes doit \u00eatre lisible')
+  const colonnes = new Set([...m[1].matchAll(/'([a-z_]+)'/g)].map(x => x[1]))
+  for (const col of ['prix_minimum', 'base_price', 'provider_property_id',
+    'provider_rate_plan_id', 'provider_room_type_id', 'rate_sync_mode', 'pilote_tarifaire']) {
+    assert.ok(colonnes.has(col), `${col} est lu par une garde et doit \u00eatre s\u00e9lectionn\u00e9`)
+  }
+})
+
+test('LE TEST QUI COMPTE : la fiche DESCEND la r\u00e9ponse de publication', () => {
+  // `publicationPossible` ne sert \u00e0 rien si la r\u00e9ponse ne la porte pas :
+  // l'\u00e9cran retomberait sur sa d\u00e9duction locale, celle qui proposait le bouton
+  // sur un bien sans canal (recette du 22 octobre 2026).
+  const sb = base({ biens: [bienDe({ provider_room_type_id: null })] })
+  return L.lireFiche(sb, { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+    .then(async (f) => {
+      assert.ok(f.publication, 'la r\u00e9ponse doit porter `publication`')
+      assert.equal(f.publication.possible, false)
+      assert.equal(f.publication.motif, 'pas_connecte',
+        'sans `provider_room_type_id`, le serveur refuserait la mise en file')
+
+      // Et un bien complet, lui, est publiable.
+      const sb2 = base({ biens: [bienDe({ provider_room_type_id: 'RT', provider_rate_plan_id: 'RP-1',
+        rate_sync_mode: 'managed', pilote_tarifaire: 'calendrier' })] })
+      const f2 = await L.lireFiche(sb2, { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+      assert.deepEqual(f2.publication, { possible: true, motif: null })
+    })
 })
