@@ -72,7 +72,7 @@
       // Mode PLEINE PAGE (repli) : stocke et redirige vers l'assistant.
       try { sessionStorage.setItem('airbnb_return', JSON.stringify(payload)) } catch (e) {}
       done(ok, ok ? 'Compte autorisé' : 'Connexion refusée', 'Redirection vers HôteSmart…')
-      setTimeout(function () { location.replace('/pages/biens.html?airbnb_return=1') }, 800)
+      setTimeout(function () { location.replace('/logements?airbnb_return=1') }, 800)
     })()
   </script>
 </body>

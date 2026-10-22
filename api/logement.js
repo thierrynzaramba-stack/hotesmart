@@ -23,7 +23,7 @@
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
 const { refsDuPerimetre, peutLire, peutEcrire } = require('../lib/permissions')
-const { lireFiche, lireListe } = require('../lib/logement/lecture')
+const { lireFiche, lireListe, compterPourSuppression } = require('../lib/logement/lecture')
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -56,7 +56,13 @@ function droitsDesBlocs (contexte, cible) {
     // montre que le bareme, les montants collectes restent sous `facturation`
     // et hors de cette fiche.
     reglages: peutLire(contexte, 'reglages', cible),
-    reglages_write: peutEcrire(contexte, 'reglages', cible)
+    reglages_write: peutEcrire(contexte, 'reglages', cible),
+    // ⚠ `reservations_write` N'OUVRE RIEN NON PLUS, et il ne garde pas les
+    // memes actions : le serveur garde le full sync des prix par ce domaine
+    // (api/calendar.js, action `fullsync`), pas par `reglages`. Un membre peut
+    // tenir le calendrier sans reconfigurer le bien, et l'inverse. Il descend
+    // pour que l'ecran ne propose pas « Publier mes prix » a qui recevra 403.
+    reservations_write: peutEcrire(contexte, 'reservations', cible)
   }
 }
 
@@ -78,6 +84,37 @@ module.exports = async function handler (req, res) {
 
   // ─── La fiche d'un bien ───
   if (id) {
+    // ─── Ce que la suppression effacerait ───
+    //
+    // ⚠ GARDÉ COMME LA SUPPRESSION ELLE-MÊME, pas comme la fiche. Ces nombres
+    // n'existent que pour la confirmation d'un DELETE, que le serveur garde par
+    // `reglages:write` sur ce bien : les servir à un profil en lecture lui
+    // montrerait le détail d'une action qu'on ne lui propose pas, et la règle du
+    // lot est « on ne montre jamais ce qui mène à un refus ».
+    //
+    // ⚠ ET ÇA RESTE UNE LECTURE : aucun appel au partenaire, aucune écriture,
+    // aucun identifiant du partenaire en sortie — seulement des nombres.
+    if (String((req.query && req.query.compter) || '') === 'suppression') {
+      const gardeEcr = await requirePermission(req, res, {
+        domaine: 'reglages', niveau: 'write', bien: id, bienRequis: true
+      })
+      if (!gardeEcr.ok) return
+      const { data: bien, error } = await supabase
+        .from('properties')
+        .select('id, name, provider_property_id')
+        .eq('id', gardeEcr.bien ? gardeEcr.bien.id : id)
+        .eq('user_id', gardeEcr.accountUserId)
+        .maybeSingle()
+      if (error) {
+        console.error('[logement] bien illisible pour le comptage :', error.message)
+        return res.status(503).json({ error: 'Impossible de vérifier ce logement pour l\'instant. Réessayez dans un instant.' })
+      }
+      if (!bien) return res.status(404).json({ error: 'Bien introuvable' })
+      const compte = await compterPourSuppression(supabase, { compte: gardeEcr.accountUserId, bien })
+      return res.status(200).json({ suppression: compte })
+    }
+
+
     // ⚠ LE BIEN DESIGNE LE COMPTE. C'est la regle du depot : `X-Compte` est
     // ignore ici, puisque la ressource fait foi — un membre ne peut donc pas
     // lire la fiche d'un bien d'un autre compte en passant un en-tete.

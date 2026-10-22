@@ -182,12 +182,62 @@ test('un plancher au-dessus du prix de base est REFUSE', () => {
   // Rien n empechait un plancher a 120 € sur un bien a 80 € : le PATCH rendait
   // 200, puis le full sync fermait les 500 jours. L hote decouvrait son
   // logement invendable sans lien avec sa saisie.
+  //
+  // ⚠ LA REGLE S EPROUVE MAINTENANT EN L EXECUTANT, pas en cherchant un nom de
+  // variable dans le source : la version precedente de ce test exigeait
+  // `cents > Math.round(baseActuelle * 100)`, et serait restee verte si la
+  // garde avait cesse de tourner — ce qui est EXACTEMENT ce qui est arrive par
+  // l autre bout (voir le test suivant).
+  const { refusPlancher } = require('../lib/plancher-vs-base')
+  assert.equal(refusPlancher({ plancherCents: 12000, basePriceEuros: 80 }).error,
+    'plancher_au_dessus_du_prix_de_base')
+  assert.match(refusPlancher({ plancherCents: 12000, basePriceEuros: 80 }).message,
+    /120\.00 €.*80\.00 €/, 'le refus DIT les deux montants, en euros')
+  // Egal : accepte. Le plancher ferme une nuit SOUS lui, pas a lui.
+  assert.equal(refusPlancher({ plancherCents: 8000, basePriceEuros: 80 }), null)
+  assert.equal(refusPlancher({ plancherCents: 7999, basePriceEuros: 80 }), null)
+  // « Pas de plancher propre » est une valeur legitime : rien a refuser.
+  for (const p of [null, undefined, 0, -1, NaN]) {
+    assert.equal(refusPlancher({ plancherCents: p, basePriceEuros: 80 }), null, String(p))
+  }
+  // Un bien SANS prix de base ne se juge pas : il n y a rien a comparer.
+  for (const b of [null, undefined, 0, NaN]) {
+    assert.equal(refusPlancher({ plancherCents: 12000, basePriceEuros: b }), null, String(b))
+  }
+  // Et l endpoint l appelle bien.
   const src = fs.readFileSync(path.join(__dirname, '..', 'api/channel-property.js'), 'utf8')
-  assert.ok(/plancher_au_dessus_du_prix_de_base/.test(src))
-  assert.ok(/cents > Math\.round\(baseActuelle \* 100\)/.test(src),
-    'comparaison en centimes des deux cotes')
-  assert.ok(/base_price !== undefined \? Number\(base_price\) : Number\(prop\.base_price\)/.test(src),
-    'compare au prix de base ENVOYE dans la meme requete, sinon a celui en base')
+  assert.match(src, /refusPlancher\(\{/)
+  assert.match(src, /require\('\.\.\/lib\/plancher-vs-base'\)/)
+})
+
+test('LE TEST QUI COMPTE : BAISSER LE PRIX DE BASE sous un plancher existant est refuse aussi', () => {
+  // ⚠ LE CHEMIN SYMETRIQUE, trouve a la revue de l etape 3 (22 octobre 2026).
+  // La garde vivait DANS `if (prix_minimum !== undefined)` : elle ne tournait
+  // que si le plancher etait dans le corps. L ancien ecran envoyait les deux
+  // champs ensemble, d une seule fenetre ; la fiche V5 les a separes. Baisser
+  // le prix de base seul rendait donc 200, reconstruisait la grille chez les
+  // plateformes, et fermait les 500 nuits au full sync suivant.
+  const { refusPlancher, valeurEffective } = require('../lib/plancher-vs-base')
+  // Le corps ne porte QUE `base_price` ; le plancher vient de la base.
+  const refus = refusPlancher({
+    plancherCents: valeurEffective(undefined, 13000),   // 130 € en base
+    basePriceEuros: valeurEffective(80, 150)            // 80 € envoye, 150 € en base
+  })
+  assert.ok(refus, 'un prix de base envoye SEUL doit etre confronte au plancher en base')
+  assert.match(refus.message, /130\.00 €.*80\.00 €/)
+
+  // Et la garde ne mord pas quand la nouvelle valeur repasse au-dessus.
+  assert.equal(refusPlancher({
+    plancherCents: valeurEffective(undefined, 13000),
+    basePriceEuros: valeurEffective(140, 150)
+  }), null)
+
+  // La garde de l endpoint lit bien les DEUX valeurs effectives.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/channel-property.js'), 'utf8')
+  const bloc = src.slice(src.indexOf('const refus = refusPlancher'), src.indexOf('if (refus) return'))
+  assert.match(bloc, /valeurEffective\(updates\.prix_minimum/)
+  assert.match(bloc, /prop\.prix_minimum/, 'le plancher EN BASE entre dans le calcul')
+  assert.match(bloc, /prop\.base_price/, 'et le prix de base en base aussi')
 })
 
 test('les dates sous plancher ne sont pas comptees comme tarifees', () => {
@@ -299,4 +349,21 @@ test('LE TEST QUI COMPTE : `user_id` est selectionne — sans lui, AUCUNE ouvert
     assert.ok(/userId: (bien\.user_id|compte)/.test(a),
       `appel a nuitsOccupees sans compte : ${a.slice(0, 90)}…`)
   }
+})
+
+test('LE TEST QUI COMPTE : PATCH et DELETE repartent de l UUID R\u00c9SOLU, pas du param\u00e8tre brut', () => {
+  // \u26a0 LE PI\u00c8GE UUID, QUATRI\u00c8ME PASSAGE (revue de l \u00e9tape 3, 22 octobre 2026).
+  // `resoudreBien` accepte une r\u00e9f\u00e9rence PARTENAIRE, et la fiche V5 le dit dans
+  // son propre commentaire. Quatre endpoints sur cinq repartent de
+  // `garde.bien.id` ; `channel-property` repartait de `pid`. Depuis
+  // `/logements/209413`, la fiche s affichait enti\u00e8rement et toute sauvegarde
+  // rendait 404 sur un bien manifestement pr\u00e9sent (`.eq('id', '209413')` sur
+  // une colonne uuid \u2192 22P02).
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/channel-property.js'), 'utf8')
+  assert.equal((src.match(/\.eq\('id', pid\)/g) || []).length, 0,
+    'plus aucune requ\u00eate ne doit filtrer sur le param\u00e8tre brut')
+  assert.match(src, /const bienPid = gardePatch\.bien \? gardePatch\.bien\.id : pid/)
+  assert.match(src, /const bienPid = gardeDelete\.bien \? gardeDelete\.bien\.id : pid/)
+  assert.equal((src.match(/\.eq\('id', bienPid\)/g) || []).length, 4,
+    'le select et l update du PATCH, le select et le delete du DELETE')
 })

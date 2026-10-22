@@ -106,6 +106,87 @@
   .fic-proprete { margin-top: var(--gap-s); padding-top: var(--gap-s);
     border-top: 1px solid var(--border); }
 
+  /* Étape 3 — l'édition sur place. Une ligne de saisie garde la MÊME grille que
+     la ligne de lecture : l'œil ne doit pas voir deux tableaux différents selon
+     qu'on a le droit d'écrire ou non. */
+  /* ⚠ LES CASES S'ALIGNENT, ET POUR ÇA LA COLONNE DES ÉTIQUETTES EST FIXE
+     (mesuré à la capture du 22 octobre 2026). En `flex`, chaque case commençait
+     où finissait son étiquette : « Prix de base » et « Par voyageur en plus »
+     donnaient deux bords gauches différents, et la colonne paraissait de
+     travers. La ligne de LECTURE, elle, garde son flex : son rôle est de
+     pousser la valeur à droite. */
+  .fic-ligne--saisie { display: grid; grid-template-columns: minmax(7em, 10em) 1fr auto;
+    align-items: center; gap: var(--gap-xs) var(--gap-s); }
+  .fic-ligne--saisie .fic-erreur { grid-column: 1 / -1; }
+  .fic-saisie { width: 100%; min-height: 44px; padding: 8px 10px; font: inherit;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-s); }
+  .fic-saisie:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .fic-ligne--saisie .fic-ligne__val { min-width: 0; }
+  /* « Enregistré » : discret, et il ne POUSSE RIEN quand il apparaît — sa place
+     est réservée, sinon la ligne sauterait sous le doigt à chaque sauvegarde. */
+  /* ⚠ `.fic-sauve` ET PAS `.fic-etat` : ce dernier est déjà la SECTION de
+     refus / introuvable / panne, déclarée plus bas avec `display: flex;
+     flex-direction: column`. Le même nom pour les deux faisait s'appliquer les
+     deux règles aux deux éléments : le message de panne passait en gris et
+     aligné à droite, et « Enregistré » devenait une colonne. Trouvé à la revue
+     de l'étape 3. */
+  .fic-sauve { flex: none; min-width: 7.5em; text-align: end; color: var(--muted); }
+  .fic-sauve[data-etat="enregistre"] { color: var(--ok); }
+  .fic-erreur { flex: 1 0 100%; margin: 0; color: var(--danger); }
+  .fic-aide { margin: var(--gap-xs) 0 0; color: var(--muted); }
+
+  /* L'interrupteur de l'assistant. La piste et le rond sont dessinés en CSS :
+     aucune forme SVG dans la page, et la couleur vient des jetons. */
+  .fic-assistant { display: flex; align-items: center; gap: var(--gap-xs); margin: var(--gap-xs) 0 0; }
+  .fic-bascule { display: inline-flex; align-items: center; gap: var(--gap-xs);
+    min-height: 44px; padding: 0; border: 0; background: none; color: inherit;
+    font: inherit; cursor: pointer; }
+  .fic-bascule__piste { width: 38px; height: 22px; flex: none; border-radius: var(--radius-pill);
+    background: var(--ok); position: relative; transition: background .15s; }
+  .fic-bascule__rond { position: absolute; inset-block-start: 3px; inset-inline-start: 19px;
+    width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: inset-inline-start .15s; }
+  .fic-bascule[aria-checked="false"] .fic-bascule__piste { background: var(--muted-2); }
+  .fic-bascule[aria-checked="false"] .fic-bascule__rond { inset-inline-start: 3px; }
+  .fic-bascule:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: var(--radius-s); }
+
+  /* La photo : le déclencheur sous le cadre, son état à côté. */
+  /* ⚠ LA PHOTO ET SON ACTION NE FONT QU'UNE COLONNE. Posé à côté d'elles, le
+     déclencheur devenait un TROISIÈME enfant de la grille à deux colonnes : le
+     nom et le fait daté passaient sous la photo, dans une colonne de 160 px.
+     Mesuré à la capture, pas à la lecture. */
+  .fic-entete__visuel { display: flex; flex-direction: column; gap: var(--gap-xs); }
+  .fic-photo__action { display: flex; align-items: center; flex-wrap: wrap; gap: var(--gap-xs); }
+  .fic-photo__btn { min-height: 44px; cursor: pointer; }
+
+  /* Le dialogue, un seul pour les trois confirmations. */
+  .fic-dlg { max-width: 420px; width: calc(100vw - 32px); padding: 0;
+    border: 1px solid var(--border); border-radius: var(--radius-m);
+    background: var(--surface); color: var(--ink); }
+  .fic-dlg::backdrop { background: rgba(0, 0, 0, .45); }
+  .fic-dlg__corps { display: flex; flex-direction: column; gap: var(--gap-s); padding: var(--gap-m); margin: 0; }
+  .fic-dlg__liste { margin: 0; padding-inline-start: 1.1em; color: var(--muted); }
+  .fic-dlg__frappe { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+  .fic-dlg__pied { display: flex; justify-content: flex-end; gap: var(--gap-xs); flex-wrap: wrap; }
+  .fic-dlg__pied .btn { min-height: 44px; }
+
+  /* « Publier mes prix » : une action à part, séparée des champs par un filet,
+     parce qu'elle n'enregistre rien — elle ENVOIE. */
+  .fic-publier { display: flex; align-items: center; flex-wrap: wrap;
+    gap: var(--gap-xs) var(--gap-s); margin-top: var(--gap-s);
+    padding-top: var(--gap-s); border-top: 1px solid var(--border); }
+  .fic-publier .btn { min-height: 44px; }
+  .fic-publier .fic-sauve { min-width: 0; }
+
+  /* Le bouton d'envoi d'un bloc : ce qui part d'ici atteint les annonces, et la
+     phrase le dit AVANT le clic. */
+  .fic-envoi { display: flex; align-items: center; flex-wrap: wrap;
+    gap: var(--gap-xs) var(--gap-s); margin-top: var(--gap-s);
+    padding-top: var(--gap-s); border-top: 1px solid var(--border); }
+  .fic-envoi .btn { min-height: 44px; }
+  .fic-envoi [data-envoi-aide] { margin: 0; flex: 1 1 auto; }
+  .fic-envoi .fic-sauve { min-width: 0; }
+
   /* Supprimer : discret, et le rouge n'apparaît que sur le bouton — la charte
      le réserve à cette action-là. */
   .fic-supprimer { display: flex; flex-direction: column; gap: var(--gap-xs); align-items: flex-start; }
@@ -125,6 +206,11 @@
   }
   @media (max-width: 560px) {
     .fic-entete { grid-template-columns: 1fr; gap: var(--gap-m); }
+    /* Au téléphone, l'étiquette passe AU-DESSUS : une colonne fixe y mangerait
+       la moitié de la case. */
+    .fic-ligne--saisie { grid-template-columns: 1fr auto; }
+    .fic-ligne--saisie .fic-ligne__cle { grid-column: 1 / -1; }
+    .fic-ligne--saisie .fic-ligne__val { grid-column: 1 / -1; }
     .fic-photo { aspect-ratio: 16 / 9; }
     .fic-ligne { flex-wrap: wrap; gap: 2px var(--gap-s); }
     .fic-ligne__val { text-align: left; }
@@ -177,7 +263,12 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCourant, basculerVers }
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
-import { ficheHtml, etatHtml, etatDeLaPage } from '/shared/logement-fiche.js'
+import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie, canauxDeVente,
+  listeDeSuppression } from '/shared/logement-fiche.js'
+// ⚠ LA PRÉPARATION DE LA PHOTO EST PARTAGÉE avec l'écran d'aujourd'hui : elle
+// porte deux leçons de revue (une image sans dimensions, l'échelle de qualité
+// qui décide « trop lourde ») et une seconde copie les perdrait.
+import { preparerJpeg, PhotoRefusee } from '/shared/photo-bien-client.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -213,7 +304,14 @@ const argent = (x, devise) => {
   catch { return `${x} ${devise || ''}`.trim() }
 }
 
-const OUTILS = { t, esc, icone, nombre, argent, dateEnClair }
+// ⚠ LA CONJONCTION VIENT DE LA LANGUE, pas d'un « et » écrit en dur : « A, B
+// et C » en français, « A, B, and C » en anglais, « A, B y C » en espagnol.
+// Elle sert à nommer les canaux vers lesquels un envoi part.
+const liste = (xs) => {
+  try { return new Intl.ListFormat(I18n.lang || 'fr', { style: 'long', type: 'conjunction' }).format(xs) }
+  catch { return (xs || []).join(', ') }
+}
+const OUTILS = { t, esc, icone, nombre, argent, dateEnClair, liste }
 
 function montrerEtat (quoi) {
   const zone = $('[data-bind="etat"]')
@@ -234,6 +332,522 @@ function montrerEtat (quoi) {
   }
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// L'édition sur place (étape 3)
+// ──────────────────────────────────────────────────────────────────────────
+//
+// ⚠ LE BIEN TEL QUE LE SERVEUR LE PORTE, gardé ici. C'est lui qui dit si un
+// champ a BOUGÉ : sans référence, chaque sortie de case renverrait la même
+// valeur, et un champ de grille reconstruirait le plan tarifaire chez le
+// partenaire pour rien — un appel bloquant, à chaque clic à côté.
+let bienCourant = null
+// ⚠ ET LA FICHE ENTIÈRE, pas seulement le bien : la confirmation de
+// publication nomme les CANAUX, qui vivent à côté de `bien` dans la réponse.
+let ficheCourante = null
+
+// ⚠ UN ENREGISTREMENT À LA FOIS. `PATCH` reconstruit la grille EN BLOQUANT ;
+// deux appels qui se croisent sur le même bien se liraient l'un l'autre à
+// moitié écrits. La file coûte trois lignes et ferme la course.
+let file = Promise.resolve()
+const enfiler = (travail) => { file = file.then(travail, travail); return file }
+
+function ligneDuChamp (nom) { return $(`.fic-ligne--saisie[data-ligne="${CSS.escape(nom)}"]`) }
+function zoneDuBloc (bloc) { return $(`.fic-envoi[data-envoi="${CSS.escape(bloc)}"]`) }
+
+// L'état d'une ligne : « Enregistrement… », « Enregistré », ou une erreur SOUS
+// le champ (spec §3.3). L'erreur ne remplace jamais l'état : les deux se lisent.
+function direEtat (nom, quoi, texte = '') {
+  // Le même état pour une case (« nom du champ ») et pour un bloc
+  // (« bloc:prix ») : deux rendus de la même chose divergeraient.
+  const ligne = String(nom).startsWith('bloc:') ? zoneDuBloc(String(nom).slice(5)) : ligneDuChamp(nom)
+  if (!ligne) return
+  const etat = ligne.querySelector('[data-etat]')
+  const err = ligne.querySelector('[data-erreur]')
+  if (quoi === 'erreur') {
+    etat.textContent = ''
+    err.textContent = texte
+    err.hidden = false
+    return
+  }
+  err.hidden = true
+  err.textContent = ''
+  etat.textContent = quoi ? t({
+    enregistre: 'fiche.enregistre',
+    encours: 'fiche.enregistrement',
+    envoi: 'fiche.envoi_en_cours',
+    rien: 'fiche.aucun_changement'
+  }[quoi] || 'fiche.enregistrement') : ''
+  if (quoi) etat.setAttribute('data-etat', quoi); else etat.setAttribute('data-etat', '')
+}
+
+// Ce que la case contient, dans l'unité du SERVEUR. `null` = « vide », que le
+// PATCH accepte pour les champs facultatifs ; `undefined` = « ne rien envoyer ».
+function valeurAEnvoyer (champ, brut) {
+  const v = String(brut == null ? '' : brut).trim()
+  if (champ.type === 'texte') return v
+  if (v === '') return null
+  // La virgule décimale est ce que tape un francophone ; `Number('1,5')` vaut
+  // `NaN`, et `NaN` sérialisé en JSON devient `null` — le champ serait EFFACÉ
+  // en silence. C'est le défaut que le serveur a déjà payé sur le supplément.
+  const n = Number(v.replace(',', '.'))
+  if (!Number.isFinite(n)) return undefined
+  if (champ.type === 'entier') return Math.round(n)
+  // ⚠ EN CENTIMES POUR LA BASE, en euros à l'écran.
+  return champ.euros ? Math.round(n * 100) : n
+}
+
+async function enregistrerChamp (input) {
+  const champ = CHAMPS.find(c => c.nom === input.dataset.champ)
+  if (!champ || !bienCourant) return
+  // ⚠ LES CHAMPS DE GRILLE NE S'ENREGISTRENT PAS TOUT SEULS (décision de
+  // Thierry du 21 octobre 2026) : ils partent chez Airbnb et Booking.com, et un
+  // geste pareil se décide. C'est le bouton du bloc qui les envoie.
+  if (champ.grille) return
+  const avant = valeurDeSaisie(champ, bienCourant)
+  const saisi = String(input.value == null ? '' : input.value).trim()
+  if (saisi === String(avant)) { direEtat(champ.nom, null); return }
+
+  // ⚠ UN NOM VIDE NE S'ENREGISTRE PAS, ET LE SERVEUR NE LE DIT PAS. Son PATCH
+  // n'écrit le nom que `if (name !== undefined && String(name).trim())` : effacé,
+  // le champ est ignoré en SILENCE, avec un 200. L'écran dirait « Enregistré »
+  // sur un geste sans effet. On refuse ici, puisque le serveur refuse en se
+  // taisant.
+  // ⚠ `country` PARTAGE LE DÉFAUT DE `name` (revue de l'étape 3) : le serveur
+  // ne l'écrit que `if (country !== undefined && country)`. Vidé, le champ est
+  // ignoré, `updates` reste vide, et le refus qui arrive est
+  // « Aucun champ a modifier » — qui ne parle pas du pays.
+  const videRefuse = { name: 'fiche.nom_requis', country: 'fiche.pays_requis' }[champ.nom]
+  if (videRefuse && saisi === '') {
+    direEtat(champ.nom, 'erreur', t(videRefuse))
+    return
+  }
+  const valeur = valeurAEnvoyer(champ, saisi)
+  if (valeur === undefined) {
+    direEtat(champ.nom, 'erreur', t('fiche.nombre_invalide'))
+    return
+  }
+
+  direEtat(champ.nom, 'encours')
+  await enfiler(async () => {
+    try {
+      const r = await api.bien.modifier(idDuBien, { [champ.nom]: valeur })
+      // La référence suit la saisie : sans ça, la sortie de case suivante
+      // renverrait le même champ, donc un appel bloquant pour rien.
+      bienCourant = { ...bienCourant, ...vuDuChamp(champ, saisi) }
+      direEtat(champ.nom, 'enregistre')
+      if (champ.nom === 'name') majNom(saisi)
+      // ⚠ CE QUI N'A PAS ÉTÉ FAIT SE DIT. Le serveur prévient quand il n'a pas pu
+      // reconstruire la grille (`note`) : le taire laisserait croire que les
+      // prix ont suivi.
+      if (r && r.note) direEtat(champ.nom, 'erreur', r.note)
+    } catch (e) {
+      logger.error('Logement', e.message, { status: e.status, champ: champ.nom })
+      direEtat(champ.nom, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+      // La case reprend la valeur du serveur : laisser un refus à l'écran ferait
+      // croire qu'il est enregistré.
+      input.value = valeurDeSaisie(champ, bienCourant)
+    }
+  })
+}
+
+// L'envoi d'un bloc : les champs de grille QUI ONT BOUGÉ, en UN SEUL appel.
+//
+// ⚠ UN SEUL `PATCH` POUR LES QUATRE. Le serveur reconstruit le plan tarifaire
+// une fois par appel : quatre appels feraient quatre reconstructions, et la
+// troisième lirait l'état laissé par la deuxième.
+async function envoyerBloc (bouton) {
+  const bloc = bouton.dataset.bloc
+  if (!bloc || !bienCourant) return
+  const cible = `bloc:${bloc}`
+  const corps = {}
+  const saisies = []
+  for (const champ of CHAMPS.filter(c => c.bloc === bloc && c.grille)) {
+    const input = $(`[data-champ="${CSS.escape(champ.nom)}"]`)
+    if (!input) continue
+    const saisi = String(input.value == null ? '' : input.value).trim()
+    if (saisi === String(valeurDeSaisie(champ, bienCourant))) continue
+    const valeur = valeurAEnvoyer(champ, saisi)
+    if (valeur === undefined) {
+      direEtat(cible, 'erreur', t('fiche.nombre_invalide'))
+      return
+    }
+    corps[champ.nom] = valeur
+    saisies.push([champ, saisi])
+  }
+  if (!saisies.length) { direEtat(cible, 'rien'); return }
+
+  direEtat(cible, 'envoi')
+  bouton.disabled = true
+  await enfiler(async () => {
+    try {
+      const r = await api.bien.modifier(idDuBien, corps)
+      for (const [champ, saisi] of saisies) {
+        bienCourant = { ...bienCourant, ...vuDuChamp(champ, saisi) }
+      }
+      direEtat(cible, 'enregistre')
+      if (r && r.note) direEtat(cible, 'erreur', r.note)
+      // ⚠ LE SERVEUR ÉCRIT PLUS LARGE QUE LE CORPS (revue de l'étape 3). Dès
+      // qu'un champ de grille est présent, il pose AUSSI `capacity`,
+      // `base_price`, `included_guests` et `extra_guest_fee`, en comblant
+      // depuis la base — et `included_guests` retombe sur la capacité quand il
+      // est nul. L'hôte qui passe la capacité à 6 voyait « Enregistré » avec
+      // « Voyageurs inclus » toujours VIDE, sans savoir qu'un champ qu'il n'a pas
+      // touché venait de partir chez les plateformes. On relit donc la fiche :
+      // ce qui s'affiche vient du serveur, pas de ce qu'on croit avoir envoyé.
+      await charger()
+    } catch (e) {
+      logger.error('Logement', e.message, { status: e.status, bloc })
+      direEtat(cible, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+      // Les cases reprennent les valeurs enregistrées : un refus laissé à
+      // l'écran se lirait comme un envoi réussi.
+      for (const [champ] of saisies) {
+        const input = $(`[data-champ="${CSS.escape(champ.nom)}"]`)
+        if (input) input.value = valeurDeSaisie(champ, bienCourant)
+      }
+    } finally {
+      bouton.disabled = false
+    }
+  })
+}
+
+// La vue de l'écran, côté fiche : `CHAMPS.depuis` lit ces noms-là.
+function vuDuChamp (champ, saisi) {
+  const v = saisi === '' ? null : saisi
+  const n = v == null ? null : Number(String(v).replace(',', '.'))
+  return {
+    name: { nom: v }, capacity: { capacite: n }, address: { adresse: v },
+    zip_code: { code_postal: v }, city: { ville: v }, country: { pays: v },
+    base_price: { prix_de_base: n }, prix_minimum: { prix_plancher: n },
+    included_guests: { voyageurs_inclus: n }, extra_guest_fee: { supplement_voyageur: n }
+  }[champ.nom] || {}
+}
+
+function majNom (nom) {
+  const h1 = $('.fic-nom')
+  if (h1) h1.textContent = nom
+  document.title = nom ? `HôteSmart — ${nom}` : 'HôteSmart'
+}
+
+// ⚠ DÉLÉGUÉ SUR LE CONTENEUR, pas posé case par case : la fiche est
+// re-rendue entièrement à chaque chargement, et des écouteurs posés sur les
+// anciennes cases ne reviendraient pas.
+//
+// ⚠ ET SUR `change`, PAS SUR `input` : un appel par frappe reconstruirait la
+// grille du partenaire à chaque lettre. `change` part à la sortie du champ.
+$('[data-bind="fiche"]').addEventListener('change', (ev) => {
+  const input = ev.target.closest('[data-champ]')
+  if (input) { enregistrerChamp(input); return }
+  const photo = ev.target.closest('[data-bind="photo"]')
+  if (photo) { envoyerPhoto(photo); return }
+  const mode = ev.target.closest('[data-bind="mode"]')
+  if (mode) changerMode(mode)
+})
+
+$('[data-bind="fiche"]').addEventListener('click', (ev) => {
+  const bouton = ev.target.closest('[data-bind="enregistrer"]')
+  if (bouton) { envoyerBloc(bouton); return }
+  const bascule = ev.target.closest('[data-bind="assistant"]')
+  if (bascule) { basculerAssistant(bascule); return }
+  const pub = ev.target.closest('[data-bind="publier"]')
+  if (pub) { publierPrix(pub); return }
+  const sup = ev.target.closest('[data-bind="supprimer"]')
+  if (sup) supprimerLogement(sup)
+})
+
+// ─── Le dialogue partagé : couper l'assistant, publier, supprimer ─────────
+//
+// ⚠ UNE SEULE FONCTION POUR LES TROIS. Elle rend `true` seulement si l'hôte a
+// validé ; Échap, « Annuler » et un clic à côté rendent `false`. Le défaut
+// sûr est le refus.
+function demander ({ titre, texte, ok, liste = null, frappe = null }) {
+  const dlg = $('[data-bind="dialogue"]')
+  if (!dlg || !dlg.showModal) return Promise.resolve(false)
+  const part = (nom) => dlg.querySelector(`[data-dlg="${nom}"]`)
+  part('titre').textContent = titre
+  part('texte').textContent = texte
+  part('ok').textContent = ok
+  const ul = part('liste')
+  ul.innerHTML = ''
+  ul.hidden = !liste || !liste.length
+  for (const ligne of (liste || [])) {
+    const li = document.createElement('li')
+    li.textContent = ligne
+    ul.appendChild(li)
+  }
+  const zoneFrappe = part('frappe')
+  const saisie = part('saisie')
+  zoneFrappe.hidden = !frappe
+  saisie.value = ''
+  if (frappe) part('frappe-aide').textContent = frappe.aide
+  part('erreur').hidden = true
+
+  return new Promise((resolve) => {
+    const form = dlg.querySelector('form')
+    // ⚠ LA FRAPPE SE VÉRIFIE À LA SOUMISSION, ET ELLE EMPÊCHE LA FERMETURE
+    // (revue de l'étape 3). Elle se vérifiait AVANT sur l'événement `close` :
+    // un nom mal frappé fermait la fenêtre, ne supprimait rien, et ne disait
+    // RIEN — l'hôte devait tout recommencer sans savoir ce qui avait échoué.
+    // Et la zone d'erreur du dialogue n'était jamais montrée : du code dormant.
+    const surEnvoi = (ev) => {
+      const bouton = ev.submitter
+      if (!bouton || bouton.value !== 'ok') return
+      if (!frappe) return
+      if (saisie.value.trim() === String(frappe.attendu)) return
+      ev.preventDefault()
+      part('erreur').textContent = t('fiche.supprimer_nom_faux')
+      part('erreur').hidden = false
+      saisie.focus()
+      saisie.select()
+    }
+    const fin = () => {
+      dlg.removeEventListener('close', fin)
+      form.removeEventListener('submit', surEnvoi)
+      resolve(dlg.returnValue === 'ok')
+    }
+    form.addEventListener('submit', surEnvoi)
+    dlg.addEventListener('close', fin)
+    dlg.returnValue = 'annuler'
+    dlg.showModal()
+    // Le focus part sur « Annuler », jamais sur l'action.
+    part('annuler').focus()
+  })
+}
+
+// ─── Le mode des prix, et la publication ────────────────────────────
+//
+// ⚠ UN SEUL SENS EXISTE À L'ÉCRAN : « Je garde mes prix » → « HôteSmart envoie
+// mes prix ». Le retour en arrière est refusé par le serveur dès qu'un canal est
+// actif (409 qui dit pourquoi), et le sélecteur DISPARAÎT une fois le bien en
+// `managed` — c'est la spec §3.2.
+async function changerMode (select) {
+  if (select.value !== 'managed') return
+  const ok = await demander({
+    titre: t('fiche.mode_titre'), texte: t('fiche.mode_texte'), ok: t('fiche.mode_ok')
+  })
+  // Refus : la case revient à l'état du serveur, sinon l'écran montre un choix
+  // que personne n'a enregistré.
+  if (!ok) { select.value = 'keep'; return }
+  direEtat('mode', 'encours')
+  await enfiler(async () => {
+    try {
+      await api.bien.modifier(idDuBien, { rate_sync_mode: 'managed' })
+      bienCourant = { ...bienCourant, mode_des_prix: 'managed' }
+      // ⚠ ON RECHARGE, et c'est voulu : le sélecteur doit disparaître et le
+      // bouton « Publier » apparaître. Les reconstruire à la main ici ferait une
+      // seconde définition de la règle §3.2, à côté de celle du module.
+      await charger()
+    } catch (e) {
+      logger.error('Logement', e.message, { status: e.status })
+      select.value = 'keep'
+      direEtat('mode', 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+    }
+  })
+}
+
+// Une date AVEC son heure : le délai de publication se compte en heures, et
+// « jeudi 22 octobre » ne dirait pas à partir de quand on peut republier.
+function quandEnClair (iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return String(iso)
+  try { return I18n.date(d, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) }
+  catch { return String(iso) }
+}
+
+// ⚠ PUBLIER N'EST PAS UNE POUSSÉE IMMÉDIATE : c'est une MISE EN FILE. Le travail
+// réel (500 jours) est fait par le cron, un bien à la fois. L'écran ne doit donc
+// pas dire « c'est fait » — l'ancien écran disait déjà « dans les prochaines
+// minutes ».
+//
+// ⚠ ET LES REFUS ARRIVENT EN 200. `{ enqueued: false, reason, message }` n'est
+// pas une erreur HTTP : un écran qui ne lit que le code de statut afficherait
+// « envoyé » sur un refus. C'est le défaut que ce lot ferme partout ailleurs.
+async function publierPrix (bouton) {
+  const zone = $('[data-publier]')
+  const noms = canauxDeVente(ficheCourante && ficheCourante.canaux)
+  const texte = (noms && noms.length)
+    ? t('fiche.publier_texte_canaux', { canaux: liste(noms) })
+    : t('fiche.publier_texte')
+  const ok = await demander({
+    titre: t('fiche.publier_titre'), texte, ok: t('fiche.publier_ok')
+  })
+  if (!ok) return
+  bouton.disabled = true
+  direEtatBrut(zone, 'encours', t('fiche.envoi_en_cours'))
+  await enfiler(async () => {
+    try {
+      const r = await api.calendar.fullsync(idDuBien)
+      if (r && r.enqueued) { direEtatBrut(zone, 'enregistre', t('fiche.publier_en_file')); return }
+      const refus = r && r.reason === 'cooldown'
+        ? t('fiche.publier_cooldown', { quand: quandEnClair(r.next_allowed_at) })
+        : ((r && r.message) || t('fiche.non_enregistre'))
+      direEtatBrut(zone, 'erreur', refus)
+    } catch (e) {
+      logger.error('Logement', e.message, { status: e.status })
+      direEtatBrut(zone, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+    } finally {
+      bouton.disabled = false
+    }
+  })
+}
+
+// ─── L'assistant (interrupteur) ───────────────────────────────────
+//
+// ⚠ ON DEMANDE POUR COUPER, PAS POUR REPRENDRE. Couper arrête les messages et
+// les codes d'accès : c'est la décision. Reprendre rétablit l'état normal, et
+// faire confirmer l'inoffensif apprend à valider sans lire.
+async function basculerAssistant (bouton) {
+  const enPause = bouton.dataset.enPause === '1'
+  if (!enPause) {
+    const ok = await demander({
+      titre: t('fiche.assistant_titre'), texte: t('fiche.assistant_texte'),
+      ok: t('fiche.assistant_ok')
+    })
+    if (!ok) return
+  }
+  bouton.disabled = true
+  try {
+    // ⚠ L'UUID, PAS LA CLÉ DU PARTENAIRE : le paramètre s'appelle
+    // `provider_property_id` mais `resoudreBien` accepte l'`id`. La fiche ne
+    // descend aucun identifiant du partenaire, et ce lot n'en fera pas sortir
+    // un pour un nom de paramètre.
+    await api.bien.pause(idDuBien, !enPause)
+    bienCourant = { ...bienCourant, assistant_en_pause: !enPause }
+    majAssistant(!enPause)
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    direEtatBrut($('.fic-assistant'), 'erreur', e.details || e.message)
+  } finally {
+    bouton.disabled = false
+  }
+}
+
+// L'interrupteur se remet à jour SUR PLACE : recharger la fiche entière
+// emporterait une saisie en cours dans un autre bloc.
+function majAssistant (enPause) {
+  const ligne = $('.fic-assistant')
+  if (!ligne) return
+  const bouton = ligne.querySelector('[data-bind="assistant"]')
+  ligne.dataset.assistant = enPause ? 'pause' : 'actif'
+  bouton.setAttribute('aria-checked', enPause ? 'false' : 'true')
+  bouton.dataset.enPause = enPause ? '1' : ''
+  ligne.querySelector('[data-assistant-etat]').textContent =
+    t(enPause ? 'fiche.assistant_pause' : 'fiche.assistant_actif')
+}
+
+// Un état posé sur un conteneur quelconque (en-tête, photo) : même grammaire
+// que `direEtat`, mais sans passer par le nom d'un champ.
+function direEtatBrut (zone, quoi, texte = '') {
+  if (!zone) return
+  const etat = zone.querySelector('[data-etat]')
+  const err = zone.querySelector('[data-erreur]')
+  if (err) { err.hidden = quoi !== 'erreur'; err.textContent = quoi === 'erreur' ? texte : '' }
+  if (etat) etat.textContent = quoi === 'erreur' ? '' : texte
+}
+
+// ─── La photo ─────────────────────────────────────────────
+//
+// ⚠ L'APERÇU NE SURVIT PAS À UN ÉCHEC (leçon de revue de l'écran
+// d'aujourd'hui) : une image affichée après un envoi raté ferait croire la
+// photo enregistrée.
+async function envoyerPhoto (champ) {
+  const fichier = champ.files && champ.files[0]
+  if (!fichier) return
+  const zone = $('.fic-photo__action')
+  const cadre = $('.fic-photo')
+  const avant = cadre ? cadre.innerHTML : ''
+  let apercu = null
+  try {
+    let blob
+    try { blob = await preparerJpeg(fichier) }
+    catch (e) {
+      if (e instanceof PhotoRefusee) {
+        direEtatBrut(zone, 'erreur', t(e.code === 'taille' ? 'fiche.photo_trop_lourde' : 'fiche.photo_type'))
+        return
+      }
+      throw e
+    }
+    apercu = URL.createObjectURL(blob)
+    if (cadre) cadre.innerHTML = `<img src="${esc(apercu)}" alt="">`
+    direEtatBrut(zone, 'encours', t('fiche.photo_envoi'))
+    const base64 = await new Promise((ok, ko) => {
+      const r = new FileReader()
+      r.onload = () => ok(String(r.result).split(',')[1])
+      r.onerror = () => ko(new Error('lecture impossible'))
+      r.readAsDataURL(blob)
+    })
+    const rep = await api.bien.photo(idDuBien, base64)
+    if (cadre) cadre.innerHTML = `<img src="${esc(rep.photo_url)}" alt="">`
+    bienCourant = { ...bienCourant, photo_url: rep.photo_url }
+    direEtatBrut(zone, 'enregistre', t('fiche.enregistre'))
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    if (cadre) cadre.innerHTML = avant
+    direEtatBrut(zone, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+  } finally {
+    if (apercu) URL.revokeObjectURL(apercu)
+    champ.value = ''
+  }
+}
+
+// ─── Supprimer ────────────────────────────────────────────────
+//
+// ⚠ LES NOMBRES SE DEMANDENT AU MOMENT DU CLIC, pas à l'ouverture de la fiche :
+// on ne fait pas payer à chaque lecture le comptage d'un geste qu'on ne fera
+// presque jamais. Et ils viennent du SERVEUR, gardés par le même droit que la
+// suppression elle-même.
+//
+// ⚠ SI LE COMPTAGE ÉCHOUE, ON N'ABANDONNE PAS LA SUPPRESSION : on ouvre la
+// fenêtre en disant qu'on n'a pas pu compter. Refuser d'ouvrir rendrait un bien
+// insupprimable à cause d'une lecture ratée ; annoncer zéro serait pire.
+async function supprimerLogement (bouton) {
+  const zone = $('.fic-supprimer')
+  const nom = (bienCourant && bienCourant.nom) || ''
+  bouton.disabled = true
+  direEtatBrut(zone, 'encours', t('fiche.enregistrement'))
+  let compte = null
+  try {
+    const r = await api.logement.compterSuppression(idDuBien)
+    compte = (r && r.suppression) || null
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    // `null` partout : `listeDeSuppression` le dira « nous n'avons pas pu
+    // compter », ce qui est exactement vrai.
+    compte = { reservations: null, messages: null, menages: null, codes: null }
+  }
+  direEtatBrut(zone, '', '')
+  bouton.disabled = false
+
+  const ok = await demander({
+    titre: t('fiche.supprimer_titre'),
+    texte: t('fiche.supprimer_texte'),
+    liste: listeDeSuppression(compte, t),
+    ok: t('fiche.supprimer_ok'),
+    // ⚠ LA FRAPPE DU NOM EST CONSERVÉE (décision de Thierry, étape 2) : c'est
+    // la seule garde qui demande de LIRE ce qu'on supprime.
+    // ⚠ PAS DE FRAPPE SANS NOM À FRAPPER (revue de l'étape 3) : avec un bien
+    // sans nom, l'attendu valait la chaîne vide et un champ VIDE validait — la
+    // seule garde qui oblige à LIRE ce qu'on supprime ne demandait plus rien.
+    // On s'en remet alors à la liste de ce qui sera effacé, et au bouton rouge.
+    frappe: nom ? { aide: t('fiche.supprimer_frappe'), attendu: nom } : null
+  })
+  if (!ok) return
+
+  bouton.disabled = true
+  direEtatBrut(zone, 'encours', t('fiche.enregistrement'))
+  try {
+    await api.bien.supprimer(idDuBien)
+    // ⚠ ON QUITTE LA FICHE : le bien n'existe plus, et rester dessus
+    // afficherait une panne au prochain rafraîchissement. `replace` empêche le
+    // retour arrière vers une fiche morte.
+    location.replace('/logements')
+  } catch (e) {
+    logger.error('Logement', e.message, { status: e.status })
+    direEtatBrut(zone, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
+    bouton.disabled = false
+  }
+}
+
 let enVol = false
 async function charger () {
   if (enVol) return
@@ -249,7 +863,26 @@ async function charger () {
     $('[data-bind="chargement"]').hidden = true
     // ⚠ MASQUAGE PAR DROIT **ET** GARDE SERVEUR (règle absolue). Le DELETE est
     // gardé par `reglages: write` ; ici on ne fait que ne pas le proposer.
-    cible.innerHTML = ficheHtml(f, OUTILS, { peutSupprimer: peutEcrire('reglages') })
+    bienCourant = f.bien
+    ficheCourante = f
+    // ⚠ LE REFUS DU SERVEUR EST SOUVERAIN, `peutEcrire` est la SECONDE garde
+    // (constat de sécurité de la revue de l'étape 3, même famille que celui du
+    // 21 octobre sur Supprimer). `peutEcrire` répond pour le COMPTE COURANT du
+    // sélecteur ; cette fiche, elle, est gardée par la RESSOURCE — le bien
+    // désigne le compte, `X-Compte` y est ignoré. Un membre en lecture sur le
+    // compte d'un autre, sélecteur resté sur le sien, voyait dix cases et
+    // quatre actions qui finissent toutes en 403.
+    //
+    // ⚠ `!== false` ET PAS `=== true` : une réponse d'un serveur qui ne porte
+    // pas encore `droits` ne doit pas fermer l'écran à son titulaire. L'absence
+    // vaut « pas d'avis », et c'est alors `peutEcrire` qui tranche.
+    const droitsServeur = f.droits || {}
+    cible.innerHTML = ficheHtml(f, OUTILS, {
+      peutSupprimer: peutEcrire('reglages') && droitsServeur.modifier !== false,
+      // ⚠ PAS LE MÊME DROIT : le serveur garde le full sync par
+      // `reservations:write`, pas par `reglages:write`.
+      peutPublier: peutEcrire('reservations') && droitsServeur.publier !== false
+    })
     cible.removeAttribute('aria-busy')
     // ⚠ PAS DE REPLI SUR `fiche.retour` : il vaut « Logements », donc l'onglet
     // annonçait le nom de la LISTE pour une fiche (revue de 5c0d759). Un bien

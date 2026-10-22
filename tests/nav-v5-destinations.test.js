@@ -34,7 +34,11 @@ const ATTENDU = [
   { id: 'calendar',   bureau: '/calendrier',       mobile: '/m/calendrier' },
   { id: 'messages',   bureau: '/pages/messages',   mobile: '/pages/messages' },
   { id: 'cleaning',   bureau: '/menages',          mobile: '/menages' },
-  { id: 'properties', bureau: '/biens',            mobile: '/biens' }
+  // ⚠ BASCULÉ LE 21 OCTOBRE 2026, avec l'étape 3 du lot Logements — celle qui
+  // donne à la fiche ses actions. Avant elle, la V5 montrait MOINS que l'ancien
+  // écran, et on ne ferme un écran que lorsque son remplaçant fait au moins
+  // autant. Les cinq entrées mènent désormais à leur écran V5.
+  { id: 'properties', bureau: '/logements',        mobile: '/logements' }
 ]
 
 // Les quatre pages refondues : elles montent le menu V5.

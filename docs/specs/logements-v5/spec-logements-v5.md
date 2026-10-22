@@ -117,7 +117,20 @@ Un endpoint de lecture unique pour la fiche, `GET /api/channel-property?id=` (ou
 
 ## 5. Droits (règle absolue)
 
-Chaque action masquée par droit garde sa garde serveur (D2). Modifier / Supprimer / Mode des prix / Publier / Photo / Connecter : `reglages:write` ; ajout de logement : titulaire. Profil en lecture : la fiche s'affiche, champs en lecture seule, aucun bouton d'action dans le DOM. Test : retirer le masquage → le serveur répond 403.
+Chaque action masquée par droit garde sa garde serveur (D2). Modifier /
+Supprimer / Mode des prix / Photo / Connecter : `reglages:write` ;
+**Publier mes prix : `reservations:write`** ; ajout de logement : titulaire.
+
+> ⚠ **Corrigé le 21 octobre 2026, à l'ouverture de l'étape 3.** Cette spec
+> rangeait les sept actions sous `reglages:write`. **Le serveur garde le full
+> sync par `reservations:write`**, et il dit pourquoi : « ce qui s'écrit dans
+> `calendar_inventory` et se pousse en ARI relève de `reservations` — c'est le
+> métier du calendrier ; ce qui s'écrit dans `properties` relève de `reglages`
+> ». Un membre peut tenir le calendrier sans reconfigurer le bien, et l'inverse.
+>
+> **On s'aligne sur le serveur**, comme pour Supprimer : masquer sur `reglages`
+> cacherait le bouton à qui a le droit de publier, et le montrerait à qui
+> recevra un 403. Profil en lecture : la fiche s'affiche, champs en lecture seule, aucun bouton d'action dans le DOM. Test : retirer le masquage → le serveur répond 403.
 
 ## 6. Textes
 

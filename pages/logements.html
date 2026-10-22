@@ -53,7 +53,21 @@
 
   .log-carte { display: flex; flex-direction: column; gap: var(--gap-s);
     padding: var(--gap-m); background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius-card); }
+    border-radius: var(--radius-card);
+    /* Le repère du lien étendu ci-dessous : sans lui, le lien couvrirait la
+       page entière au lieu de la carte. */
+    position: relative; }
+  .log-carte:hover { border-color: var(--muted-2); }
+  .log-carte:has(.log-lien:focus-visible) { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  /* ⚠ LE LIEN PORTE LE NOM ET S'ÉTEND À LA CARTE. Un `<a>` autour de toute la
+     carte ferait lire au lecteur d'écran les pastilles et la note comme nom du
+     lien ; ici il annonce le logement, et le doigt garde la carte entière.
+     Le `::after` passe SOUS les autres contenus (z-index 0) pour ne pas
+     recouvrir un élément cliquable qu'on ajouterait demain. */
+  .log-lien { color: inherit; text-decoration: none; }
+  .log-lien:hover { text-decoration: underline; }
+  .log-lien::after { content: ''; position: absolute; inset: 0; z-index: 0; }
 
   /* La photo : rapport fixe, pour que la grille ne saute pas pendant le
      chargement des images — et un fond neutre quand il n'y en a pas. */
@@ -157,7 +171,7 @@
     <!-- `btn--primary` : « bouton blanc bord noir » (spec §2). `btn--secondary`
          prend un bord gris, et l'action principale de l'écran ne se distingue
          plus de rien. -->
-    <a class="btn btn--primary" href="/biens/nouveau" data-bind="ajouter" hidden>
+    <a class="btn btn--primary" href="/logements/nouveau" data-bind="ajouter" hidden>
       <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg>
       <span data-i18n="logements.add"></span>
     </a>

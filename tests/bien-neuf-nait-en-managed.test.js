@@ -112,8 +112,14 @@ test('la garde lit `migration_target_property_id`, donc elle le SELECTIONNE', ()
   // Un bien en cours de bascule porte ses canaux sous sa cle CIBLE.
   const f = src.indexOf('async function canauxActifsDuBien')
   assert.match(src.slice(f, f + 400), /migration_target_property_id/)
+  // ⚠ LA TRANCHE VA JUSQU'AU BLOC SUIVANT, pas jusqu'a un nombre d'octets
+  // (corrige le 22 octobre 2026) : `src.slice(i, i + 2200)` rougissait des
+  // qu'un commentaire s'ajoutait au-dessus du `select`, pour une raison qui n'a
+  // rien a voir avec ce qu'il garde.
   const i = src.indexOf("// ===== PATCH : modification d'un bien =====")
-  assert.match(src.slice(i, i + 2200), /\.select\('id, provider, provider_property_id, migration_target_property_id/)
+  const j = src.indexOf("if (req.method === 'DELETE')", i)
+  assert.ok(i !== -1 && j > i, 'les deux reperes du bloc PATCH doivent exister')
+  assert.match(src.slice(i, j), /\.select\('id, provider, provider_property_id, migration_target_property_id/)
 })
 
 test('le libelle dit ce qui EST, et nomme la consequence', () => {

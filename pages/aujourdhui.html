@@ -56,7 +56,7 @@
       <h1 class="h1" data-bind="greeting"></h1>
       <p class="muted" style="margin-top: 6px; font-size: 16px" data-bind="summary" data-i18n="common.loading"></p>
     </div>
-    <a class="btn btn--outline btn--lg" href="/biens/nouveau" data-bind="add-property" hidden>
+    <a class="btn btn--outline btn--lg" href="/logements/nouveau" data-bind="add-property" hidden>
       <svg class="icon" style="width:16px;height:16px" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg>
       <span data-i18n="today.add_property"></span>
     </a>
@@ -95,7 +95,7 @@
 
   <!-- 6. Logements -->
   <section class="stack" style="gap: 20px" aria-labelledby="h-props" data-bind="props-section" hidden>
-    <div class="section-head"><h2 class="h2" id="h-props" data-i18n="properties.title"></h2><a class="link small" href="/biens" data-i18n="properties.see_all"></a></div>
+    <div class="section-head"><h2 class="h2" id="h-props" data-i18n="properties.title"></h2><a class="link small" href="/logements" data-i18n="properties.see_all"></a></div>
     <div class="property-grid scroll-x" data-list="properties"></div>
   </section>
 </main>
@@ -274,7 +274,7 @@ function renderEvenements () {
     // Le fil seulement s'il EXISTE : sinon la messagerie répond « conversation
     // introuvable » (constat de revue). À défaut, la fiche du bien.
     const href = arrivee
-      ? (etat.conversations.has(e.bookingId) ? lienConversation(e) : `/biens/${encodeURIComponent(e.bienId)}`)
+      ? (etat.conversations.has(e.bookingId) ? lienConversation(e) : `/logements/${encodeURIComponent(e.bienId)}`)
       : '/menages'
     // Un code à envoyer porte son geste en toutes lettres (demande de
     // Thierry) ; le bouton ouvre le fil, où l'envoi se valide.
@@ -564,7 +564,7 @@ function renderBiens () {
   section.hidden = !etat.biens.length
   const etats = R.etatDesBiens({ bookings: etat.bookings, biens: etat.biens, aujourdHui: etat.aujourdHui })
   $('[data-list="properties"]').innerHTML = etat.biens.map(b => {
-    const href = `/biens/${encodeURIComponent(b.id)}`
+    const href = `/logements/${encodeURIComponent(b.id)}`
     if (!b.provider_property_id) {
       // Pas de clé provider = aucun canal relié : un FAIT de la base, contrairement
       // à `ota_connect_status`, que rien ne rafraîchit (KB aujourdhui.md §3).

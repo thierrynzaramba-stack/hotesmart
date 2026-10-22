@@ -86,7 +86,7 @@
     <div class="topbar">
       <div>
         <div class="page-title">🏠 Ajouter un bien</div>
-        <div class="page-sub"><a href="/biens" style="color:var(--green);text-decoration:none">← Retour à Mes biens</a></div>
+        <div class="page-sub"><a href="/logements" style="color:var(--green);text-decoration:none">← Retour aux logements</a></div>
       </div>
     </div>
     <div class="content">
@@ -224,7 +224,7 @@
       logger.info('biens-nouveau', 'Bien créé', { id: result.property?.id })
       showFeedback('Bien créé avec succès. Redirection…', 'success')
       setTimeout(() => {
-        window.location.href = '/biens'
+        window.location.href = '/logements'
       }, 1200)
     } catch (err) {
       logger.error('biens-nouveau', err.message)

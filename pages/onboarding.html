@@ -217,7 +217,7 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     markOnboardingCompleted();
     // Plus de paywall en fin d'onboarding : on va directement au tableau de bord des biens.
     // L'incitation abonnement (hors beta) passe par le bandeau persistant.
-    window.location.replace('/biens');
+    window.location.replace('/logements');
     return;
   }
 
@@ -299,7 +299,7 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
     try { await seedAlertConfig(); } catch (e) { console.error('[onboarding] seed alertes:', e); }
     markOnboardingCompleted();
     // Plus aucune demande de paiement en fin d'onboarding : acces direct au tableau de bord.
-    window.location.replace('/biens');
+    window.location.replace('/logements');
   }
 
   // Prerempli agent_alert_config pour chaque bien : email d'alerte = email du compte,
@@ -458,7 +458,7 @@ import { markOnboardingCompleted } from '/components/auth-guard.js';
       '<p class="lead">Dernière étape : connectez vos annonces Airbnb et Booking à vos biens. C\'est rapide et guidé — vos réservations et votre calendrier se synchronisent ensuite automatiquement.</p>',
       '<p>Rendez-vous dans « Mes biens » : pour chaque logement, cliquez sur <strong>Connexions</strong> et laissez-vous guider.</p>',
       '<div class="ob-actions"><span></span>',
-      '<a class="ob-btn ob-btn-primary" href="/biens" style="display:inline-block; text-decoration:none;">Connecter mes annonces →</a>',
+      '<a class="ob-btn ob-btn-primary" href="/logements" style="display:inline-block; text-decoration:none;">Connecter mes annonces →</a>',
       '</div>'
     ].join('');
   }

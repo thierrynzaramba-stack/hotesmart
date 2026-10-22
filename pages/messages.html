@@ -463,7 +463,7 @@ function renderFil () {
     lienTelephone(c)
   ].filter(Boolean).join('')
   const resa = $('[data-bind="fil-resa"]')
-  if (bien) { resa.hidden = false; resa.href = `/biens/${encodeURIComponent(bien.uuid)}/calendrier` } else resa.hidden = true
+  if (bien) { resa.hidden = false; resa.href = `/calendrier?bien=${encodeURIComponent(bien.uuid)}` } else resa.hidden = true
 
   // Le menu du fil (etape 4) : epingler et archiver, PORTES de l'ancienne
   // page — writers /api/messages (actions epingler/archiver), jamais le RLS

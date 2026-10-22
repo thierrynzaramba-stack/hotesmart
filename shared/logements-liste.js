@@ -135,9 +135,21 @@ const OTA_LABELS = [
   { match: /expedia/i, label: 'Expedia' },
   { match: /vrbo|homeaway/i, label: 'Vrbo' }
 ]
+// ⚠ LE REPLI NE DOIT JAMAIS LAISSER SORTIR LE NOM DU PARTENAIRE TECHNIQUE
+// (trouve le 21 octobre 2026, en ecrivant la phrase d'envoi de l'etape 3).
+// `c.titre` et `c.ota` viennent du partenaire : rien n'interdisait a une ligne
+// de `canaux_du_bien` de porter « Channex » en titre ou en `ota`, et l'ecran
+// l'aurait AFFICHE — sur la carte de la liste comme sur la fiche, les deux
+// passant par ici. La regle du lot est absolue : « jamais le nom du partenaire
+// a l'ecran ». On retombe sur le libelle generique plutot que sur un nom qu'on
+// s'interdit de montrer.
+const PARTENAIRES = /channex|beds24|hotesmart[-_ ]?pms/i
+
 export function libelleDuCanal (c) {
-  return OTA_LABELS.find(o => o.match.test(c.ota || ''))?.label
-    || c.titre || c.ota || 'Canal'
+  const connu = OTA_LABELS.find(o => o.match.test(c.ota || ''))?.label
+  if (connu) return connu
+  const repli = c.titre || c.ota || ''
+  return (repli && !PARTENAIRES.test(repli)) ? repli : 'Canal'
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -385,10 +397,23 @@ export function carteHtml (bien, outils) {
     ? `<img src="${esc(bien.photo_url)}" alt="" loading="lazy">`
     : icone('i-home', 'icon')
 
+  // ⚠ LA CARTE MENE A LA FICHE, ET LE LIEN PORTE LE NOM (constat de Thierry du
+  // 21 octobre 2026 : « les liens vers les pages des logements ne fonctionnent
+  // pas »). Il n'y avait pas de lien casse : il n'y en avait AUCUN. La carte
+  // etait un `<article>` inerte depuis l'etape 1, ou la fiche n'existait pas.
+  //
+  // ⚠ UN SEUL LIEN, SUR LE NOM, ET C'EST LUI QUI S'ETEND A LA CARTE (par
+  // `::after` dans la feuille). Envelopper la carte entiere ferait lire au
+  // lecteur d'ecran « Airbnb Booking.com 4,9 sur 5 336 avis » comme nom du
+  // lien ; le nom du logement suffit, et la zone cliquable reste la carte.
+  //
+  // ⚠ `encodeURIComponent` : l'identifiant va dans un CHEMIN. Un bien dont la
+  // reference porte une barre oblique couperait l'URL en deux (le meme piege
+  // que le lien du calendrier, ferme a l'etape 2).
   return `<article class="log-carte" data-bien="${esc(bien.id)}">
     <div class="log-photo">${photo}</div>
     <div class="log-texte">
-      <div class="log-nom">${esc(bien.nom || '')}</div>
+      <div class="log-nom"><a class="log-lien" href="/logements/${esc(encodeURIComponent(bien.id))}">${esc(bien.nom || '')}</a></div>
       ${sous ? `<div class="log-sous caption">${sous}</div>` : ''}
     </div>
     <div class="log-canaux">${canauxHtml(bien, outils)}</div>
@@ -417,7 +442,7 @@ export function etatHtml (quoi, { peutAjouter = false } = {}) {
       <p class="muted" data-i18n="${peutAjouter ? 'logements.vide_aide' : 'logements.vide_aide_membre'}"></p>
       ${peutAjouter ? `<div class="log-etat__actions">
         <a class="btn btn--primary" href="/pages/connexions" data-i18n="logements.vide_connecter"></a>
-        <a class="btn btn--secondary" href="/biens/nouveau" data-i18n="logements.vide_manuel"></a>
+        <a class="btn btn--secondary" href="/logements/nouveau" data-i18n="logements.vide_manuel"></a>
       </div>` : ''}`
   }
   if (quoi === 'refus') return `<p data-i18n="logements.refus"></p>`
