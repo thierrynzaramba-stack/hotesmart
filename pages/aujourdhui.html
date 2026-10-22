@@ -274,7 +274,7 @@ function renderEvenements () {
     // Le fil seulement s'il EXISTE : sinon la messagerie répond « conversation
     // introuvable » (constat de revue). À défaut, la fiche du bien.
     const href = arrivee
-      ? (etat.conversations.has(e.bookingId) ? lienConversation(e) : `/biens/${encodeURIComponent(e.bienId)}`)
+      ? (etat.conversations.has(e.bookingId) ? lienConversation(e) : `/logements/${encodeURIComponent(e.bienId)}`)
       : '/menages'
     // Un code à envoyer porte son geste en toutes lettres (demande de
     // Thierry) ; le bouton ouvre le fil, où l'envoi se valide.

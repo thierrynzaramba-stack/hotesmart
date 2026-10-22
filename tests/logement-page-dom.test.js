@@ -23,8 +23,19 @@ const PAGE = fs.readFileSync(FICHIER, 'utf8')
 function extraire (source, debut, quoi) {
   assert.notEqual(debut, -1, `${quoi} introuvable`)
   if (source.slice(Math.max(0, debut - 6), debut) === 'async ') debut -= 6
+  // ⚠ LE CORPS COMMENCE APRÈS LA LISTE DE PARAMÈTRES, et pas à la première
+  // accolade (corrigé le 22 octobre 2026). `function demander ({ titre, ok })`
+  // ouvre une accolade DANS ses paramètres : le comptage s'arrêtait à sa
+  // fermeture et rendait une fonction tronquée — `SyntaxError: Unexpected end
+  // of input` au moment de l'exécuter, loin de la cause.
+  let i = source.indexOf('(', debut)
+  let par = 0
+  for (; i < source.length; i++) {
+    if (source[i] === '(') par++
+    else if (source[i] === ')') { par--; if (par === 0) { i++; break } }
+  }
   let p = 0
-  for (let j = source.indexOf('{', debut); j < source.length; j++) {
+  for (let j = source.indexOf('{', i); j < source.length; j++) {
     if (source[j] === '{') p++
     else if (source[j] === '}') { p--; if (p === 0) return source.slice(debut, j + 1) }
   }
@@ -492,9 +503,15 @@ test('LE TEST QUI COMPTE : un NOM VIDÉ est refusé par l écran — le serveur,
   // « Enregistré » sur un geste sans effet. On vérifie les deux bouts — la
   // garde dans la page, et la condition dans le serveur qui la justifie.
   const fn = fonctionDeLaPage('enregistrerChamp')
-  assert.match(fn, /champ\.nom === 'name' && saisi === ''/,
+  assert.match(fn, /name: 'fiche\.nom_requis'/,
     'la page doit refuser un nom vide avant d appeler')
-  assert.match(fn, /fiche\.nom_requis/)
+  assert.match(fn, /if \(videRefuse && saisi === ''\)/)
+  // ⚠ ET `country` PARTAGE LE DÉFAUT (revue de l'étape 3) : même condition côté
+  // serveur, même silence, donc même garde d'écran.
+  assert.match(fn, /country: 'fiche\.pays_requis'/)
+  const serveurPays = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-property.js'), 'utf8')
+  assert.match(serveurPays, /if \(country !== undefined && country\)/,
+    'si le serveur se met à refuser un pays vide, cette garde d écran peut disparaître')
   const serveur = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-property.js'), 'utf8')
   assert.match(serveur, /if \(name !== undefined && String\(name\)\.trim\(\)\)/,
     'si le serveur se met à refuser un nom vide, cette garde d écran peut disparaître')
@@ -573,6 +590,10 @@ function lancerEnvoi ({ bien, saisies, reponse = {}, erreur = null }) {
       return m ? (cases[m[1]] || null) : null
     },
     direEtat: (cible, quoi, texte) => etats.push([cible, quoi, texte]),
+    // ⚠ `envoyerBloc` RELIT LA FICHE après un envoi (revue de l'étape 3 : le
+    // serveur écrit plus large que le corps). Le double la compte, pour qu'un
+    // retrait de ce rechargement se voie.
+    charger: async () => { appels.push({ recharge: true }) },
     enfiler: (f) => f(),
     t: (cle) => cle,
     logger: { error: () => {} },
@@ -606,10 +627,14 @@ test('LE TEST QUI COMPTE : le bloc part en UN SEUL appel, avec les champs CHANG\
   const e = lancerEnvoi({ bien: BIEN_PAGE,
     saisies: { base_price: '149', included_guests: '3', extra_guest_fee: '15' } })
   await e.lancer('prix')
-  assert.equal(e.appels.length, 1, 'UN seul appel pour tout le bloc')
+  const ecritures = e.appels.filter(a => a.corps)
+  assert.equal(ecritures.length, 1, 'UN seul appel pour tout le bloc')
   // Et le suppl\u00e9ment, inchang\u00e9, n'en fait pas partie : l'envoyer pour rien
   // reconstruirait la grille sans raison.
-  assert.deepEqual(e.copie(e.appels[0].corps), { base_price: 149, included_guests: 3 })
+  assert.deepEqual(e.copie(ecritures[0].corps), { base_price: 149, included_guests: 3 })
+  // \u26a0 ET LA FICHE SE RELIT : ce qui s'affiche doit venir du serveur, pas de ce
+  // qu'on croit avoir envoy\u00e9 (le serveur \u00e9crit plus large que le corps).
+  assert.ok(e.appels.some(a => a.recharge), 'la fiche doit \u00eatre relue apr\u00e8s un envoi')
   assert.equal(e.etats.at(-1)[1], 'enregistre')
 })
 
@@ -617,7 +642,7 @@ test('LE TEST QUI COMPTE : un bloc ne touche QUE ses champs', async () => {
   // Le bouton de \u00ab Le logement \u00bb n'envoie pas les prix, et r\u00e9ciproquement.
   const e = lancerEnvoi({ bien: BIEN_PAGE, saisies: { capacity: '4', base_price: '149' } })
   await e.lancer('logement')
-  assert.deepEqual(e.copie(e.appels[0].corps), { capacity: 4 })
+  assert.deepEqual(e.copie(e.appels.find(a => a.corps).corps), { capacity: 4 })
 })
 
 test('cliquer sans rien avoir chang\u00e9 n appelle RIEN, et le dit', async () => {
@@ -917,4 +942,153 @@ test('un refus du serveur laisse la fiche en place, et le bouton cliquable', asy
   assert.equal(e.etats.at(-1)[0], 'erreur')
   assert.equal(e.etats.at(-1)[1], 'Ce logement est encore reli\u00e9.')
   assert.equal(e.bouton.disabled, false)
+})
+
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+// S\u00c9CURIT\u00c9 \u2014 le refus du SERVEUR est souverain (revue de l'\u00e9tape 3)
+// \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : `droits.modifier: false` ferme TOUTES les actions, pas seulement Supprimer', async () => {
+  // \u26a0 LE D\u00c9FAUT QUE CE TEST FERME : `peutEcrire` r\u00e9pond pour le compte du
+  // S\u00c9LECTEUR, et commence par « si je suis titulaire, oui ». Cette fiche, elle,
+  // est gard\u00e9e par la RESSOURCE. Un membre en lecture sur le compte d'un autre,
+  // s\u00e9lecteur rest\u00e9 sur le sien, voyait dix cases, la photo, l'interrupteur et
+  // le s\u00e9lecteur de mode. Le serveur refusait bien les dix en 403 \u2014 donc aucune
+  // fuite \u2014 mais la spec \u00a75 dit « aucun bouton d'action dans le DOM ».
+  const { doc, ctx } = monter({
+    reponse: fiche({ droits: { modifier: false, publier: false },
+      suppression: { possible: null, motif: 'droit_refuse' } }),
+    peutEcrireReglages: true, peutEcrireReservations: true
+  })
+  await ctx.__charger()
+  for (const sel of ['[data-champ]', '[data-bind="enregistrer"]', '[data-bind="assistant"]',
+    '[data-bind="photo"]', '[data-bind="mode"]', '[data-bind="supprimer"]',
+    '[data-bind="publier"]', '[data-bind="connecter"]']) {
+    assert.equal(doc.querySelector(sel), null, `${sel} ne doit pas exister`)
+  }
+  assert.equal(doc.querySelectorAll('input, select, dialog').length, 0)
+  // Et la fiche se lit quand m\u00eame : c'est une LECTURE refus\u00e9e, pas la page.
+  assert.ok(doc.querySelector('.fic-entete'))
+})
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : les deux droits se ferment S\u00c9PAR\u00c9MENT', async () => {
+  // Un membre peut tenir le calendrier sans reconfigurer le bien, et l'inverse.
+  const sansPublier = monter({
+    reponse: fiche({ droits: { modifier: true, publier: false },
+      bien: { ...fiche().bien, mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' } }),
+    peutEcrireReglages: true, peutEcrireReservations: true
+  })
+  await sansPublier.ctx.__charger()
+  assert.equal(sansPublier.doc.querySelector('[data-bind="publier"]'), null)
+  assert.ok(sansPublier.doc.querySelector('[data-champ]'), 'les champs restent ouverts')
+
+  const sansModifier = monter({
+    reponse: fiche({ droits: { modifier: false, publier: true },
+      bien: { ...fiche().bien, mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' } }),
+    peutEcrireReglages: true, peutEcrireReservations: true
+  })
+  await sansModifier.ctx.__charger()
+  assert.ok(sansModifier.doc.querySelector('[data-bind="publier"]'), 'publier reste')
+  assert.equal(sansModifier.doc.querySelector('[data-champ]'), null)
+})
+
+test('une r\u00e9ponse SANS `droits` laisse `peutEcrire` trancher \u2014 l absence n est pas un refus', async () => {
+  // `!== false` et pas `=== true` : un serveur qui ne porte pas encore ce champ
+  // ne doit pas fermer l \u00e9cran \u00e0 son titulaire.
+  const { doc, ctx } = monter({ reponse: fiche(), peutEcrireReglages: true })
+  await ctx.__charger()
+  assert.ok(doc.querySelector('[data-champ]'))
+  // Et l inverse tient : sans le droit local, rien, m\u00eame si le serveur se tait.
+  const b = monter({ reponse: fiche(), peutEcrireReglages: false, peutEcrireReservations: false })
+  await b.ctx.__charger()
+  assert.equal(b.doc.querySelector('[data-champ]'), null)
+})
+
+// \u2500\u2500\u2500 Le dialogue, EX\u00c9CUT\u00c9 en JSDOM (revue de l'\u00e9tape 3) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+//
+// \u26a0 AUCUN TEST NE L'EX\u00c9CUTAIT : les quatre bacs \u00e0 sable remplacent `demander`
+// par un espion. Ils prouvent qu'on l'appelle, jamais qu'elle garde quoi que ce
+// soit. Trois mutations y survivaient \u2014 retirer la v\u00e9rification de la frappe,
+// r\u00e9soudre `true` sur \u00ab Annuler \u00bb, poser le focus sur l'action.
+
+function monterDialogue () {
+  const dom = new JSDOM('<!doctype html><body></body>', { pretendToBeVisual: true })
+  const w = dom.window
+  // JSDOM ne sait pas ouvrir un `<dialog>` : on bouchonne l'ouverture et la
+  // fermeture, PAS la logique qu'on veut \u00e9prouver.
+  w.HTMLDialogElement.prototype.showModal = function () { this.open = true }
+  w.HTMLDialogElement.prototype.close = function (v) {
+    this.open = false
+    if (v !== undefined) this.returnValue = v
+    this.dispatchEvent(new w.Event('close'))
+  }
+  const outils = { t: (k) => k, esc: (x) => String(x == null ? '' : x) }
+  w.document.body.innerHTML = M.dialogueHtml(outils)
+  const ctx = vm.createContext({
+    document: w.document, t: (k) => k, CSS: { escape: (x) => x },
+    $: (sel) => w.document.querySelector(sel), Promise, String
+  })
+  vm.runInContext(fonctionDeLaPage('demander'), ctx)
+  const envoyer = (valeur) => {
+    const dlg = w.document.querySelector('[data-bind="dialogue"]')
+    const form = dlg.querySelector('form')
+    const ev = new w.Event('submit', { cancelable: true, bubbles: true })
+    ev.submitter = form.querySelector(`[value="${valeur}"]`)
+    form.dispatchEvent(ev)
+    if (!ev.defaultPrevented) dlg.close(valeur)
+    return ev
+  }
+  return { w, doc: w.document, ctx, envoyer,
+    demander: (o) => vm.runInContext(`demander(${JSON.stringify(o)})`, ctx) }
+}
+
+test('LE TEST QUI COMPTE : une frappe FAUSSE ne ferme pas la fen\u00eatre, et elle le DIT', async () => {
+  const d = monterDialogue()
+  const p = d.demander({ titre: 'T', texte: 'X', ok: 'OK',
+    frappe: { aide: 'tapez', attendu: 'La bulle' } })
+  d.doc.querySelector('[data-dlg="saisie"]').value = 'la bulle'
+  const ev = d.envoyer('ok')
+  assert.equal(ev.defaultPrevented, true, 'la soumission doit \u00eatre emp\u00each\u00e9e')
+  assert.equal(d.doc.querySelector('[data-dlg="erreur"]').hidden, false,
+    'la zone d erreur du dialogue \u00e9tait du code dormant : elle sert maintenant')
+  assert.equal(d.doc.querySelector('[data-bind="dialogue"]').open, true, 'la fen\u00eatre reste')
+
+  // Et la bonne frappe passe.
+  d.doc.querySelector('[data-dlg="saisie"]').value = '  La bulle  '
+  d.envoyer('ok')
+  assert.equal(await p, true)
+})
+
+test('LE TEST QUI COMPTE : \u00ab Annuler \u00bb rend FAUX, et c est lui qui a le focus', async () => {
+  const d = monterDialogue()
+  const p = d.demander({ titre: 'T', texte: 'X', ok: 'OK' })
+  assert.equal(d.doc.activeElement, d.doc.querySelector('[data-dlg="annuler"]'),
+    'le d\u00e9faut s\u00fbr est le refus : c est lui qui prend le focus')
+  d.envoyer('annuler')
+  assert.equal(await p, false)
+})
+
+test('LE TEST QUI COMPTE : la liste de ce qui sera effac\u00e9 est \u00c9CRITE comme du TEXTE', async () => {
+  // Les lignes viennent de nombres et de cl\u00e9s, mais le nom du bien, lui, vient
+  // du partenaire : `textContent` et jamais `innerHTML`.
+  const d = monterDialogue()
+  d.demander({ titre: 'T', texte: 'X', ok: 'OK',
+    liste: ['<img src=x onerror=alert(1)>', '3 r\u00e9servations'] })
+  const ul = d.doc.querySelector('[data-dlg="liste"]')
+  assert.equal(ul.hidden, false)
+  assert.equal(ul.querySelectorAll('img').length, 0)
+  assert.equal(ul.querySelectorAll('li').length, 2)
+  assert.equal(ul.querySelector('li').textContent, '<img src=x onerror=alert(1)>')
+})
+
+test('sans frappe demand\u00e9e, le champ reste cach\u00e9 et ne bloque rien', async () => {
+  // Un bien SANS NOM : l attendu valait la cha\u00eene vide, et un champ vide
+  // validait \u2014 la garde ne demandait plus rien. On ne demande plus la frappe.
+  const d = monterDialogue()
+  const p = d.demander({ titre: 'T', texte: 'X', ok: 'OK' })
+  assert.equal(d.doc.querySelector('[data-dlg="frappe"]').hidden, true)
+  d.envoyer('ok')
+  assert.equal(await p, true)
+  assert.match(fonctionDeLaPage('supprimerLogement'), /frappe: nom \?/,
+    'la page ne doit pas demander une frappe sans nom \u00e0 frapper')
 })

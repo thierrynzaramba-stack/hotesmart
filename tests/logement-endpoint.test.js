@@ -526,3 +526,36 @@ test('une valeur inattendue de `compter` rend la FICHE, elle n ouvre aucun chemi
     assert.equal(r.body.suppression && r.body.suppression.reservations, undefined)
   }
 })
+
+test('LE TEST QUI COMPTE (S\u00c9CURIT\u00c9) : la fiche DESCEND les deux droits d \u00e9criture', async () => {
+  // \u26a0 SANS EUX, L \u00c9CRAN D\u00c9CIDE SEUL (constat de la revue de l \u00e9tape 3).
+  // `peutEcrire`, c\u00f4t\u00e9 navigateur, r\u00e9pond pour le compte du S\u00c9LECTEUR et
+  // commence par « si je suis titulaire, oui » ; cette fiche est gard\u00e9e par la
+  // RESSOURCE. Le serveur sait, lui : il envoie ce qu il autorisera.
+  preparer({
+    appelant: MEMBRE,
+    profils: [profilDe(TITULAIRE, MEMBRE)],
+    permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, { reglages: 'read', reservations: 'read' })]
+  })
+  const lecture = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.equal(lecture.code, 200)
+  assert.deepEqual(JSON.parse(JSON.stringify(lecture.body.droits)),
+    { modifier: false, publier: false })
+
+  // Les deux se d\u00e9cident S\u00c9PAR\u00c9MENT : le calendrier et les r\u00e9glages sont deux
+  // domaines, et le serveur garde \u00ab Publier \u00bb par le premier.
+  preparer({
+    appelant: MEMBRE,
+    profils: [profilDe(TITULAIRE, MEMBRE)],
+    permissions: [droitsDe(`prof-${MEMBRE}-${TITULAIRE}`, { reglages: 'read', reservations: 'write' })]
+  })
+  const mixte = await appeler({ id: BIEN_A }, { 'x-compte': TITULAIRE })
+  assert.deepEqual(JSON.parse(JSON.stringify(mixte.body.droits)),
+    { modifier: false, publier: true })
+
+  // Et le titulaire a les deux.
+  preparer()
+  const titulaire = await appeler({ id: BIEN_A })
+  assert.deepEqual(JSON.parse(JSON.stringify(titulaire.body.droits)),
+    { modifier: true, publier: true })
+})

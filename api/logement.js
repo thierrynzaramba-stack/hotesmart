@@ -56,7 +56,13 @@ function droitsDesBlocs (contexte, cible) {
     // montre que le bareme, les montants collectes restent sous `facturation`
     // et hors de cette fiche.
     reglages: peutLire(contexte, 'reglages', cible),
-    reglages_write: peutEcrire(contexte, 'reglages', cible)
+    reglages_write: peutEcrire(contexte, 'reglages', cible),
+    // ⚠ `reservations_write` N'OUVRE RIEN NON PLUS, et il ne garde pas les
+    // memes actions : le serveur garde le full sync des prix par ce domaine
+    // (api/calendar.js, action `fullsync`), pas par `reglages`. Un membre peut
+    // tenir le calendrier sans reconfigurer le bien, et l'inverse. Il descend
+    // pour que l'ecran ne propose pas « Publier mes prix » a qui recevra 403.
+    reservations_write: peutEcrire(contexte, 'reservations', cible)
   }
 }
 

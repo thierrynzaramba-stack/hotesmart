@@ -1463,8 +1463,16 @@ test('LE TEST QUI COMPTE : la page des connexions SAIT ouvrir l assistant sur le
     'la page doit lire le param\u00e8tre que la fiche lui envoie')
   assert.match(page, /otaProps\.find\(x => String\(x\.id\) === String\(bienDemande\)\)/,
     'elle r\u00e9sout l UUID en propri\u00e9t\u00e9 avant d ouvrir')
-  assert.match(page, /if \(cible\) openConnexions\(cible, null\)/,
-    'un identifiant inconnu n ouvre rien et laisse la liste')
+  assert.match(page, /if \(cible\) openConnexions\(cible, null\)/)
+  // \u26a0 ET LES TROIS CAS MORTS SE DISENT (revue de l'\u00e9tape 3) : un bien que
+  // l'assistant ne sait pas traiter, et un compte sans aucun bien \u00e9ligible.
+  // Ne rien faire laissait l'h\u00f4te devant une page qui ignorait sa demande.
+  assert.match(page, /data-bien-inconnu/, 'un identifiant inconnu doit le DIRE')
+  // Le param\u00e8tre se lit AVANT le d\u00e9part sur liste vide, sinon il n'est jamais lu.
+  const iLecture = page.indexOf("get('bien')")
+  const iDepart = page.indexOf('if (!props.length)')
+  assert.ok(iLecture !== -1 && iLecture < iDepart,
+    'le param\u00e8tre doit \u00eatre lu avant le `return` de la liste vide')
 })
 
 test('LE TEST QUI COMPTE : la liste de suppression n \u00e9crit pas de z\u00e9ro, et dit ce qu elle ignore', () => {
@@ -1521,4 +1529,49 @@ test('des canaux illisibles, en « Je garde mes prix », disent les deux moiti\u
   assert.equal(aide.dataset.envoiAide, 'inconnu')
   assert.match(aide.textContent, /plateformes connect\u00e9es\. Vos prix par nuit/)
   assert.doesNotMatch(aide.textContent, /Airbnb|Booking/)
+})
+
+test('LE TEST QUI COMPTE : un bien SANS cl\u00e9 partenaire n \u00e9num\u00e8re que lui-m\u00eame', () => {
+  // `cle_absente` descendait du serveur et personne ne le lisait (revue de
+  // l'\u00e9tape 3). Il dit que la purge n'efface rien de li\u00e9 : les quatre z\u00e9ros
+  // sont alors CERTAINS, et surtout pas \u00ab nous n'avons pas pu compter \u00bb.
+  const t2 = (cle, vars) => (vars && vars.n != null) ? `${cle}:${vars.n}` : cle
+  assert.deepEqual(
+    M.listeDeSuppression({ cle_absente: true, reservations: 0, messages: 0, menages: 0, codes: 0 }, t2),
+    ['fiche.supprimer_le_bien'])
+  // M\u00eame avec des comptes manquants : sans cl\u00e9, il n'y a rien \u00e0 lire.
+  assert.deepEqual(M.listeDeSuppression({ cle_absente: true }, t2), ['fiche.supprimer_le_bien'])
+})
+
+test('LE TEST QUI COMPTE : CHAQUE action a sa place pour dire son \u00e9tat et son erreur', () => {
+  // \u26a0 L'INTERRUPTEUR N'EN AVAIT AUCUNE (revue de l'\u00e9tape 3), et
+  // `direEtatBrut` ne fait rien sans ces crochets : un bien Beds24 pas encore
+  // synchronis\u00e9 rend 409, l'interrupteur ne bouge pas \u2014 ce qui est juste \u2014 et
+  // AUCUN message n'appara\u00eet nulle part. L'h\u00f4te reclique, toujours rien.
+  //
+  // \u26a0 ET LE TEST QUI PR\u00c9TENDAIT LE COUVRIR \u00c9TAIT INERTE : son bac \u00e0 sable
+  // remplace `direEtatBrut` par un espion. Il prouve qu'on l'appelle, jamais
+  // qu'il a o\u00f9 \u00e9crire. On v\u00e9rifie donc le RENDU.
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutSupprimer: true, peutPublier: true }))
+  const zones = [
+    ['.fic-assistant', 'l interrupteur de l assistant'],
+    ['.fic-photo__action', 'la photo'],
+    ['[data-publier]', 'Publier mes prix'],
+    ['.fic-envoi[data-envoi="prix"]', 'l envoi du bloc Prix'],
+    ['.fic-ligne--saisie[data-ligne="name"]', 'une case de saisie']
+  ]
+  for (const [sel, quoi] of zones) {
+    const zone = d.querySelector(sel)
+    assert.ok(zone, `${quoi} : zone absente`)
+    assert.ok(zone.querySelector('[data-etat]'), `${quoi} : nulle part o\u00f9 dire « Enregistr\u00e9 »`)
+    assert.ok(zone.querySelector('[data-erreur]'), `${quoi} : nulle part o\u00f9 dire le refus`)
+    assert.ok(zone.querySelector('[data-erreur]').hasAttribute('hidden'),
+      `${quoi} : l erreur doit \u00eatre muette au d\u00e9part`)
+  }
+  // Et sur un bien supprimable, le bloc Supprimer aussi.
+  const sup = doc(M.ficheHtml(fiche({ suppression: { possible: true, motif: null } }),
+    OUTILS(), { peutSupprimer: true }))
+  assert.ok(sup.querySelector('.fic-supprimer [data-etat]'))
+  assert.ok(sup.querySelector('.fic-supprimer [data-erreur]'))
 })

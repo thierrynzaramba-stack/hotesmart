@@ -270,6 +270,8 @@ export function assistantHtml (fiche, outils, { peutModifier = false } = {}) {
     </button>
     <span class="fic-muet" data-assistant-etat>${esc(t(enPause ? 'fiche.assistant_pause' : 'fiche.assistant_actif'))}</span>
     ${enPause ? `<span class="fic-muet">${icone('i-pause', 'icon')}</span>` : ''}
+    <span class="fic-sauve caption" data-etat aria-live="polite"></span>
+    <span class="fic-erreur caption" data-erreur hidden></span>
   </p>`
 }
 
@@ -286,7 +288,7 @@ export function photoHtml (fiche, outils, { peutModifier = false } = {}) {
       ${icone('i-photo', 'icon')}<span>${esc(t(aUnePhoto ? 'fiche.photo_changer' : 'fiche.photo_ajouter'))}</span>
     </label>
     <input type="file" id="fic-photo-champ" accept="image/*" class="sr-only" data-bind="photo">
-    <span class="fic-etat caption" data-etat aria-live="polite"></span>
+    <span class="fic-sauve caption" data-etat aria-live="polite"></span>
     <p class="fic-erreur caption" data-erreur hidden></p>
   </div>`
 }
@@ -533,7 +535,7 @@ function envoiHtml (bloc, fiche, outils) {
       ${esc(t('fiche.enregistrer'))}
     </button>
     ${aideDEnvoiHtml(fiche, outils)}
-    <span class="fic-etat caption" data-etat aria-live="polite"></span>
+    <span class="fic-sauve caption" data-etat aria-live="polite"></span>
     <p class="fic-erreur caption" data-erreur hidden></p>
   </div>`
 }
@@ -557,7 +559,7 @@ function ligneSaisieHtml (champ, bien, outils) {
   return `<div class="fic-ligne fic-ligne--saisie" data-ligne="${esc(champ.nom)}">
     <label class="fic-ligne__cle caption" for="${id}">${esc(t(champ.cle))}</label>
     <span class="fic-ligne__val"><input ${attrs}></span>
-    <span class="fic-etat caption" data-etat aria-live="polite"></span>
+    <span class="fic-sauve caption" data-etat aria-live="polite"></span>
     <p class="fic-erreur caption" data-erreur hidden></p>
   </div>`
 }
@@ -600,7 +602,7 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
           <option value="keep" selected>${esc(t('fiche.prix_mode_keep'))}</option>
           <option value="managed">${esc(t('fiche.prix_mode_managed'))}</option>
         </select></span>
-        <span class="fic-etat caption" data-etat aria-live="polite"></span>
+        <span class="fic-sauve caption" data-etat aria-live="polite"></span>
         <p class="fic-erreur caption" data-erreur hidden></p>
       </div>`
     : ''
@@ -621,7 +623,7 @@ export function prixHtml (fiche, outils, { peutModifier = false } = {}) {
     : ((outils.peutPublier === true && pub.montre)
       ? `<div class="fic-publier" data-publier>
           <button type="button" class="btn" data-bind="publier">${esc(t('fiche.publier'))}</button>
-          <span class="fic-etat caption" data-etat aria-live="polite"></span>
+          <span class="fic-sauve caption" data-etat aria-live="polite"></span>
           <p class="fic-erreur caption" data-erreur hidden></p>
         </div>`
       : '')
@@ -668,7 +670,12 @@ export function logementHtml (fiche, outils, { peutModifier = false } = {}) {
   if (peutModifier) {
     return `<div class="fic-champs">`
       + champsDuBloc('logement').map(c => ligneSaisieHtml(c, b, outils)).join('')
-      + `<p class="fic-aide caption" data-aide>${esc(t('fiche.modifier_aide'))}</p>`
+      // ⚠ DEUX PHRASES CONTRADICTOIRES, COLLÉES (revue de l'étape 3) : ce bloc
+      // disait « il s'enregistre tout seul » puis montrait un bouton
+      // « Enregistrer » juste en dessous — parce que la capacité, elle, part chez
+      // les plateformes et attend le bouton. L'aide le dit maintenant.
+      + `<p class="fic-aide caption" data-aide>${esc(t(
+        champsDuBloc('logement').some(c => c.grille) ? 'fiche.modifier_aide_grille' : 'fiche.modifier_aide'))}</p>`
       + envoiHtml('logement', fiche, outils) + `</div>`
   }
   const champs = [
@@ -721,7 +728,7 @@ export function supprimerHtml (fiche, outils, { peutSupprimer = false } = {}) {
   if (s.active) {
     return `<div class="fic-supprimer">
       ${bouton(true)}
-      <span class="fic-etat caption" data-etat aria-live="polite"></span>
+      <span class="fic-sauve caption" data-etat aria-live="polite"></span>
       <p class="fic-erreur caption" data-erreur hidden></p>
     </div>`
   }
@@ -752,6 +759,13 @@ export const COMPTES_SUPPRESSION = [
 export function listeDeSuppression (compte, t) {
   const lignes = [t('fiche.supprimer_le_bien')]
   const c = compte || {}
+  // ⚠ `cle_absente` EST UNE RÉPONSE, pas un champ décoratif (revue de l'étape
+  // 3 : il descendait du serveur et personne ne le lisait). Il dit « ce bien
+  // n'a pas de clé partenaire, donc la purge n'efface rien de lié » — et dans
+  // ce cas, les quatre zéros ne sont pas une lecture vide, ce sont des zéros
+  // CERTAINS. Rien de plus à énumérer, et surtout pas « nous n'avons pas pu
+  // compter ».
+  if (c.cle_absente === true) return lignes
   let illisible = false
   for (const [nom, cle] of COMPTES_SUPPRESSION) {
     const v = c[nom]

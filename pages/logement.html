@@ -125,8 +125,14 @@
   .fic-ligne--saisie .fic-ligne__val { min-width: 0; }
   /* « Enregistré » : discret, et il ne POUSSE RIEN quand il apparaît — sa place
      est réservée, sinon la ligne sauterait sous le doigt à chaque sauvegarde. */
-  .fic-etat { flex: none; min-width: 7.5em; text-align: end; color: var(--muted); }
-  .fic-etat[data-etat="enregistre"] { color: var(--ok); }
+  /* ⚠ `.fic-sauve` ET PAS `.fic-etat` : ce dernier est déjà la SECTION de
+     refus / introuvable / panne, déclarée plus bas avec `display: flex;
+     flex-direction: column`. Le même nom pour les deux faisait s'appliquer les
+     deux règles aux deux éléments : le message de panne passait en gris et
+     aligné à droite, et « Enregistré » devenait une colonne. Trouvé à la revue
+     de l'étape 3. */
+  .fic-sauve { flex: none; min-width: 7.5em; text-align: end; color: var(--muted); }
+  .fic-sauve[data-etat="enregistre"] { color: var(--ok); }
   .fic-erreur { flex: 1 0 100%; margin: 0; color: var(--danger); }
   .fic-aide { margin: var(--gap-xs) 0 0; color: var(--muted); }
 
@@ -170,7 +176,7 @@
     gap: var(--gap-xs) var(--gap-s); margin-top: var(--gap-s);
     padding-top: var(--gap-s); border-top: 1px solid var(--border); }
   .fic-publier .btn { min-height: 44px; }
-  .fic-publier .fic-etat { min-width: 0; }
+  .fic-publier .fic-sauve { min-width: 0; }
 
   /* Le bouton d'envoi d'un bloc : ce qui part d'ici atteint les annonces, et la
      phrase le dit AVANT le clic. */
@@ -179,7 +185,7 @@
     padding-top: var(--gap-s); border-top: 1px solid var(--border); }
   .fic-envoi .btn { min-height: 44px; }
   .fic-envoi [data-envoi-aide] { margin: 0; flex: 1 1 auto; }
-  .fic-envoi .fic-etat { min-width: 0; }
+  .fic-envoi .fic-sauve { min-width: 0; }
 
   /* Supprimer : discret, et le rouge n'apparaît que sur le bouton — la charte
      le réserve à cette action-là. */
@@ -359,7 +365,6 @@ function direEtat (nom, quoi, texte = '') {
   const err = ligne.querySelector('[data-erreur]')
   if (quoi === 'erreur') {
     etat.textContent = ''
-    etat.removeAttribute('data-etat-valeur')
     err.textContent = texte
     err.hidden = false
     return
@@ -407,8 +412,13 @@ async function enregistrerChamp (input) {
   // le champ est ignoré en SILENCE, avec un 200. L'écran dirait « Enregistré »
   // sur un geste sans effet. On refuse ici, puisque le serveur refuse en se
   // taisant.
-  if (champ.nom === 'name' && saisi === '') {
-    direEtat(champ.nom, 'erreur', t('fiche.nom_requis'))
+  // ⚠ `country` PARTAGE LE DÉFAUT DE `name` (revue de l'étape 3) : le serveur
+  // ne l'écrit que `if (country !== undefined && country)`. Vidé, le champ est
+  // ignoré, `updates` reste vide, et le refus qui arrive est
+  // « Aucun champ a modifier » — qui ne parle pas du pays.
+  const videRefuse = { name: 'fiche.nom_requis', country: 'fiche.pays_requis' }[champ.nom]
+  if (videRefuse && saisi === '') {
+    direEtat(champ.nom, 'erreur', t(videRefuse))
     return
   }
   const valeur = valeurAEnvoyer(champ, saisi)
@@ -476,6 +486,15 @@ async function envoyerBloc (bouton) {
       }
       direEtat(cible, 'enregistre')
       if (r && r.note) direEtat(cible, 'erreur', r.note)
+      // ⚠ LE SERVEUR ÉCRIT PLUS LARGE QUE LE CORPS (revue de l'étape 3). Dès
+      // qu'un champ de grille est présent, il pose AUSSI `capacity`,
+      // `base_price`, `included_guests` et `extra_guest_fee`, en comblant
+      // depuis la base — et `included_guests` retombe sur la capacité quand il
+      // est nul. L'hôte qui passe la capacité à 6 voyait « Enregistré » avec
+      // « Voyageurs inclus » toujours VIDE, sans savoir qu'un champ qu'il n'a pas
+      // touché venait de partir chez les plateformes. On relit donc la fiche :
+      // ce qui s'affiche vient du serveur, pas de ce qu'on croit avoir envoyé.
+      await charger()
     } catch (e) {
       logger.error('Logement', e.message, { status: e.status, bloc })
       direEtat(cible, 'erreur', e.details || e.message || t('fiche.non_enregistre'))
@@ -563,14 +582,29 @@ function demander ({ titre, texte, ok, liste = null, frappe = null }) {
   part('erreur').hidden = true
 
   return new Promise((resolve) => {
+    const form = dlg.querySelector('form')
+    // ⚠ LA FRAPPE SE VÉRIFIE À LA SOUMISSION, ET ELLE EMPÊCHE LA FERMETURE
+    // (revue de l'étape 3). Elle se vérifiait AVANT sur l'événement `close` :
+    // un nom mal frappé fermait la fenêtre, ne supprimait rien, et ne disait
+    // RIEN — l'hôte devait tout recommencer sans savoir ce qui avait échoué.
+    // Et la zone d'erreur du dialogue n'était jamais montrée : du code dormant.
+    const surEnvoi = (ev) => {
+      const bouton = ev.submitter
+      if (!bouton || bouton.value !== 'ok') return
+      if (!frappe) return
+      if (saisie.value.trim() === String(frappe.attendu)) return
+      ev.preventDefault()
+      part('erreur').textContent = t('fiche.supprimer_nom_faux')
+      part('erreur').hidden = false
+      saisie.focus()
+      saisie.select()
+    }
     const fin = () => {
       dlg.removeEventListener('close', fin)
-      // ⚠ LA FRAPPE SE VÉRIFIE ICI, pas au clic : un `Entrée` dans le champ
-      // soumet le formulaire avec la valeur du bouton par défaut.
-      const valide = dlg.returnValue === 'ok'
-        && (!frappe || saisie.value.trim() === String(frappe.attendu))
-      resolve(valide)
+      form.removeEventListener('submit', surEnvoi)
+      resolve(dlg.returnValue === 'ok')
     }
+    form.addEventListener('submit', surEnvoi)
     dlg.addEventListener('close', fin)
     dlg.returnValue = 'annuler'
     dlg.showModal()
@@ -791,7 +825,11 @@ async function supprimerLogement (bouton) {
     ok: t('fiche.supprimer_ok'),
     // ⚠ LA FRAPPE DU NOM EST CONSERVÉE (décision de Thierry, étape 2) : c'est
     // la seule garde qui demande de LIRE ce qu'on supprime.
-    frappe: { aide: t('fiche.supprimer_frappe'), attendu: nom }
+    // ⚠ PAS DE FRAPPE SANS NOM À FRAPPER (revue de l'étape 3) : avec un bien
+    // sans nom, l'attendu valait la chaîne vide et un champ VIDE validait — la
+    // seule garde qui oblige à LIRE ce qu'on supprime ne demandait plus rien.
+    // On s'en remet alors à la liste de ce qui sera effacé, et au bouton rouge.
+    frappe: nom ? { aide: t('fiche.supprimer_frappe'), attendu: nom } : null
   })
   if (!ok) return
 
@@ -827,11 +865,23 @@ async function charger () {
     // gardé par `reglages: write` ; ici on ne fait que ne pas le proposer.
     bienCourant = f.bien
     ficheCourante = f
+    // ⚠ LE REFUS DU SERVEUR EST SOUVERAIN, `peutEcrire` est la SECONDE garde
+    // (constat de sécurité de la revue de l'étape 3, même famille que celui du
+    // 21 octobre sur Supprimer). `peutEcrire` répond pour le COMPTE COURANT du
+    // sélecteur ; cette fiche, elle, est gardée par la RESSOURCE — le bien
+    // désigne le compte, `X-Compte` y est ignoré. Un membre en lecture sur le
+    // compte d'un autre, sélecteur resté sur le sien, voyait dix cases et
+    // quatre actions qui finissent toutes en 403.
+    //
+    // ⚠ `!== false` ET PAS `=== true` : une réponse d'un serveur qui ne porte
+    // pas encore `droits` ne doit pas fermer l'écran à son titulaire. L'absence
+    // vaut « pas d'avis », et c'est alors `peutEcrire` qui tranche.
+    const droitsServeur = f.droits || {}
     cible.innerHTML = ficheHtml(f, OUTILS, {
-      peutSupprimer: peutEcrire('reglages'),
+      peutSupprimer: peutEcrire('reglages') && droitsServeur.modifier !== false,
       // ⚠ PAS LE MÊME DROIT : le serveur garde le full sync par
       // `reservations:write`, pas par `reglages:write`.
-      peutPublier: peutEcrire('reservations')
+      peutPublier: peutEcrire('reservations') && droitsServeur.publier !== false
     })
     cible.removeAttribute('aria-busy')
     // ⚠ PAS DE REPLI SUR `fiche.retour` : il vaut « Logements », donc l'onglet

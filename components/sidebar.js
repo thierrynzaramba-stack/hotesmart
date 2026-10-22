@@ -25,9 +25,12 @@ export async function renderSidebar(activePage = '') {
 
   // Lien Calendrier : pointe vers le calendrier du premier bien ;
   // sans bien, mène à la liste pour en créer un.
+  // ⚠ LA DESTINATION DIRECTE, pas l'ancienne URL qui y rebondit (bascule du
+  // 22 octobre 2026) : `/biens/:id/calendrier` redirige vers `/calendrier?bien=`,
+  // et une redirection de moins, c'est un aller-retour de moins.
   const calendrierHref = apiStatus.firstPropertyId
-    ? `/biens/${apiStatus.firstPropertyId}/calendrier`
-    : '/biens'
+    ? `/calendrier?bien=${encodeURIComponent(apiStatus.firstPropertyId)}`
+    : '/logements'
 
   // ⚠ MASQUAGE PAR DROIT. Un membre ne doit jamais voir une entree qui le
   // menerait a une page vide ou a un refus. `peutLire` renvoie toujours vrai
