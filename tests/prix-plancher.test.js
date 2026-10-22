@@ -388,16 +388,19 @@ test('LE TEST QUI COMPTE : la garde du plancher LIT une colonne SELECTIONNEE', (
   assert.ok(m, 'le bloc PATCH doit s\u00e9lectionner des colonnes')
   const selectionnees = new Set(m[1].split(',').map(x => x.trim()))
 
-  // Toutes les colonnes lues sur l objet du bien, hors commentaires.
-  const sansCommentaires = bloc
-    .replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/^\s*\/\/.*$/gm, '')
-  const lues = new Set([...sansCommentaires.matchAll(/\bprop\.([a-z_]+)/g)].map(x => x[1]))
-  for (const col of lues) {
-    assert.ok(selectionnees.has(col),
-      `le PATCH lit \`prop.${col}\` sans le s\u00e9lectionner : la garde qui s en sert est OUVERTE`)
-  }
-  // Et les deux colonnes de la garde du plancher y sont, nomm\u00e9ment.
-  assert.ok(selectionnees.has('prix_minimum'))
-  assert.ok(selectionnees.has('base_price'))
+  // \u26a0 LA BOUCLE GENERIQUE A DEMENAGE, ET C'EST VOULU (22 octobre 2026).
+  // Elle confrontait ici les colonnes LUES par ce bloc a celles qu'il
+  // SELECTIONNE — pour ce fichier seulement. Elle couvre maintenant tout le
+  // depot : tests/garde-colonne-selectionnee.test.js, 282 lectures sur
+  // 125 fichiers, avec son outil dans tests/outils/colonnes-selectionnees.js.
+  //
+  // La garder ICI en plus serait « la meme garde prouvee deux fois » (REVIEW.md
+  // regle 20) : les deux rougissaient sur la MEME mutation, le retrait de
+  // `prix_minimum` de ce select. Ce qui reste est ce que le test generique ne
+  // dit PAS — les deux colonnes de la garde du plancher, exigees NOMMEMENT,
+  // pour que leur retrait soit un rouge meme si plus personne ne les lit.
+  assert.ok(selectionnees.has('prix_minimum'),
+    'sans elle la garde du plancher lit `undefined` et n ouvre aucun refus')
+  assert.ok(selectionnees.has('base_price'),
+    'sans elle le prix de base effectif ne peut pas etre compare au plancher')
 })
