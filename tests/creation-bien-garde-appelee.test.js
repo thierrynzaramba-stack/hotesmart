@@ -64,9 +64,15 @@ Module._load = function (demande, parent) {
         garde.vues = garde.vues || []
         garde.vues.push(opts)
         if (!garde.ok) { res.status(403).json({ error: 'refus de la garde' }); return { ok: false } }
-        // Sans `compteDelegue`, la resolution reelle ferait retomber le compte
-        // cible sur l'appelant. On la rejoue fidelement.
-        const compte = opts && opts.compteDelegue ? garde.accountUserId : garde.userId
+        // ⚠ LE COMPTE CIBLE VIENT DE L'EN-TETE DE LA REQUETE, PAS D'UNE VARIABLE.
+        // Premiere version : il etait injecte par `garde.accountUserId`, donc le
+        // test prouvait « le handler DEMANDE compteDelegue et refuse un non
+        // titulaire », mais pas « la requete qui porte l'en-tete atteint la
+        // garde ». Un handler qui appellerait la garde avec un `x-compte`
+        // efface restait vert (angle mort releve a la re-review du 22 octobre
+        // 2026). On rejoue donc `compteDemande()` sur les VRAIS en-tetes.
+        const entete = req && req.headers && req.headers['x-compte']
+        const compte = opts && opts.compteDelegue && entete ? entete : garde.userId
         return { ok: true, userId: garde.userId, accountUserId: compte, contexte: {} }
       }
     }
@@ -105,7 +111,13 @@ async function creer ({ appelant, compteVise }) {
   garde.vues = []
   appelsPartenaire.length = 0
   const res = fausseReponse()
-  await handler({ method: 'POST', query: {}, headers: { authorization: 'Bearer jeton-de-test' }, body: { ...corpsValide } }, res)
+  await handler({
+    method: 'POST',
+    query: {},
+    // L'en-tete de compte, comme le navigateur l'envoie en mode delegue.
+    headers: { authorization: 'Bearer jeton-de-test', 'x-compte': compteVise },
+    body: { ...corpsValide }
+  }, res)
   return res
 }
 

@@ -544,3 +544,43 @@ test('aucun libelle en dur, pays compris', () => {
     assert.equal(opt.textContent.trim(), '', 'le libelle vient de la cle, pas du HTML')
   }
 })
+
+test('LE TEST QUI COMPTE : « 1e1 » n est pas dix pour l un et un pour l autre', () => {
+  // ⚠ RELEVE A LA RE-REVIEW DU 22 OCTOBRE 2026. Un champ `type="number"`
+  // CONSERVE « 1e1 » dans sa valeur — c est un nombre flottant valide, et c est
+  // l accident classique de la touche « e ». `Number('1e1')` vaut 10 : l ecran
+  // acceptait, en silence. Le serveur, lui, lit `parseInt('1e1', 10)` = 1.
+  //
+  // Ce que ca coutait : l hote voyait son 10 valide sans un mot, et le bien
+  // partait chez le partenaire — propriete, type de chambre, plan tarifaire —
+  // avec une capacite de UN.
+  const d = doc(page)
+  d.querySelector('#nom').value = 'Studio'
+  d.querySelector('#prix_base').value = '80'
+  d.querySelector('#capacite').value = '1e1'
+  assert.equal(d.querySelector('#capacite').value, '1e1',
+    'le DOM garde bien cette saisie : si ce jour vient ou il la rejette, ce test perd son objet')
+
+  const v = M.valeursDuFormulaire(d.querySelector('[data-bind="form"]'))
+  const r = M.refusDeSaisie(v)
+  assert.ok(r, 'une saisie que l ecran et le serveur ne lisent pas pareil doit etre refusee')
+  assert.equal(r.champ, 'capacite')
+
+  // Et c est bien la DIVERGENCE qui est en cause, pas la valeur :
+  assert.notEqual(Number(v.capacity), parseInt(v.capacity, 10),
+    'Number et parseInt ne donnent pas le meme nombre ici — c est tout le probleme')
+})
+
+test('aucune saisie restee TEXTE ne passe sur un champ numerique', () => {
+  // La regle generale derriere le cas ci-dessus : `valeurDuChamp` ne convertit
+  // que ce qui est vraiment du type attendu ; ce qui reste une chaine n a donc
+  // pas passe ce filtre, et personne ne doit le reinterpreter.
+  for (const champ of M.CHAMPS.filter(c => c.type !== 'texte')) {
+    for (const brut of ['1e1', ' 4 ', '4,5', '0x10', '']) {
+      const v = { ...saisie, [champ.api]: brut }
+      if (brut === '' && !champ.requis) continue
+      const r = M.refusDeSaisie(v)
+      assert.ok(r, `${champ.id} = ${JSON.stringify(brut)} doit etre refuse`)
+    }
+  }
+})

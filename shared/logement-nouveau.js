@@ -84,8 +84,22 @@ function refusDeSaisie (valeurs) {
       }
       continue
     }
-    const n = Number(brut)
     const cle = 'nouveau.faute_' + champ.id
+    // ⚠ UNE SAISIE RESTEE TEXTE SUR UN CHAMP NUMERIQUE EST REFUSEE, et c'est
+    // `1e1` qui l'impose. Un champ `type="number"` CONSERVE « 1e1 » dans sa
+    // valeur — c'est un nombre flottant valide, et c'est l'accident classique
+    // de la touche « e ». `Number('1e1')` vaut 10, entier, dans les bornes :
+    // l'ecran acceptait. Le serveur, lui, lit `parseInt('1e1', 10)` = 1.
+    // L'hote voyait son 10 valide sans message, et le bien partait chez le
+    // partenaire — propriete, type de chambre, plan tarifaire — avec une
+    // capacite de 1. Releve a la re-review du 22 octobre 2026.
+    //
+    // `valeurDuChamp` ne convertit que ce qui est vraiment du type attendu : ce
+    // qui reste une chaine ici n'a donc pas passe ce filtre, et personne ne
+    // doit le reinterpreter — surtout pas avec une autre fonction que le
+    // serveur.
+    if (typeof brut === 'string') return { champ: champ.id, cle }
+    const n = Number(brut)
     if (!Number.isFinite(n)) return { champ: champ.id, cle }
     if (champ.type === 'entier' && !Number.isInteger(n)) return { champ: champ.id, cle }
     if (champ.min != null && n < champ.min) return { champ: champ.id, cle }
