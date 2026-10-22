@@ -16,6 +16,20 @@
    ============================================================ */
 window.I18n = (() => {
   const BASE = '/shared/i18n/';
+  // ⚠ LA VERSION DES DICTIONNAIRES, ET POURQUOI ELLE EST ECRITE A LA MAIN.
+  // Les quatre fichiers d'i18n etaient charges avec `cache: 'no-cache'`, donc
+  // REVALIDES a chaque ouverture de page : 42 Ko pour le francais, 82 Ko pour
+  // un hote anglophone ou hispanophone (fr.json sert de repli), un aller-retour
+  // a chaque fois. Mesure du 22 octobre 2026 en production : l'en-tete servi
+  // etait `public, max-age=0, must-revalidate`, `x-vercel-cache: MISS`.
+  // Ils sont desormais caches UN AN, et c'est cette version qui les invalide :
+  // elle entre dans l'URL, donc un dictionnaire change = une URL neuve.
+  // ⚠ ET ELLE EST TENUE PAR UN TEST, PAS PAR LA MEMOIRE DE QUI TRADUIT.
+  // `tests/i18n-version.test.js` recalcule l'empreinte des quatre fichiers et
+  // ROUGIT si elle ne correspond pas. Sans lui, une traduction corrigee
+  // resterait invisible un an chez l'hote — le defaut exact que le cache long
+  // rend possible.
+  const VERSION = 'f064db5b5f2a';
   const FALLBACK = 'fr';
   const STORAGE_KEY = 'hs.lang';
 
@@ -25,7 +39,7 @@ window.I18n = (() => {
   let fallbackDict = {};
 
   async function load(code) {
-    const r = await fetch(`${BASE}${code}.json`, { cache: 'no-cache' });
+    const r = await fetch(`${BASE}${code}.json?v=${VERSION}`);
     if (!r.ok) throw new Error(`i18n: ${code}.json introuvable`);
     return r.json();
   }
@@ -91,7 +105,7 @@ window.I18n = (() => {
     // l'autre : les deux partaient en FILE, soit deux allers-retours la ou un
     // seul suffit. `detect()` a besoin des deux, il attend donc les deux.
     const [liste, repli] = await Promise.all([
-      fetch(`${BASE}langues.json`, { cache: 'no-cache' }).then(r => {
+      fetch(`${BASE}langues.json?v=${VERSION}`).then(r => {
         if (!r.ok) throw new Error('i18n: langues.json introuvable');
         return r.json();
       }),
