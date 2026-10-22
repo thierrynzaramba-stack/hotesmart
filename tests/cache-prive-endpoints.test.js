@@ -160,31 +160,78 @@ test('LE TEST QUI COMPTE : la garde de CANAL pose l en-tete avant ses quatre ref
   assert.equal(res.code, 400, 'et c est bien le premier refus, avant toute lecture')
 })
 
-test('RECENSEMENT : les endpoints qui repondent AVANT toute garde sont comptes', () => {
-  // ⚠ CE QUE LE RECENSEMENT DU DESSUS NE DIT PAS, et la review l a releve.
-  // « Passer par une garde » ne veut pas dire « toutes ses reponses portent
-  // l en-tete » : plusieurs endpoints refusent une methode ou un parametre
-  // AVANT d appeler leur garde, et ces reponses-la gardent le defaut Vercel.
-  // Aucune ne porte de donnee de compte aujourd hui — ce sont des corps
-  // d erreur generiques — mais l invariant annonce etait plus large que
-  // l invariant reel, et un compte vaut mieux qu une description.
+test('LE TEST QUI COMPTE : ce qui repond AVANT la garde ne porte aucune donnee de compte', () => {
+  // ⚠ L'INVARIANT EXACT, ET POURQUOI CE N'EST PAS « tous les endpoints posent
+  // l'en-tete ».
+  //
+  // Verification HTTPS du 22 octobre 2026 demandee par Thierry, apres le merge
+  // prod du lot (a) : 8 endpoints sur 12 rendaient `private, no-store`, et
+  // QUATRE rendaient encore `public, max-age=0, must-revalidate` —
+  // `/api/membres`, `/api/yield`, `/api/channel-property`,
+  // `/api/guestflow-proposer`. Tous les quatre repondaient AVANT leur garde
+  // (methode refusee, action inconnue, jeton absent).
+  //
+  // ⚠ J'AI D'ABORD VOULU POSER L'EN-TETE EN TETE DES 29 HANDLERS CONCERNES.
+  // Mesure : 27 tests rouges d'un coup. TRENTE-SIX fichiers de test doublent
+  // `lib/require-permission`, et ceux qui construisent un double PARTIEL
+  // n'exportent pas la fonction — `posterEnTetesPrives is not a function`. Une
+  // fonction que 29 handlers doivent appeler et que 36 doubles doivent fournir
+  // n'est pas un « point unique » : c'est 29 couplages de plus. Correctif
+  // defait.
+  //
+  // ⚠ ET DECLARER LES 49 ENDPOINTS DANS `vercel.json` AURAIT COUTE ~300 LIGNES
+  // DE CONFIGURATION pour des corps d'erreur generiques. Un en-tete `public`
+  // sur une reponse qui ne porte rien n'expose rien.
+  //
+  // L'INVARIANT QUI EST VRAI, ET QUE CE TEST TIENT : toute reponse qui porte
+  // une donnee de compte passe par une garde, et la garde pose
+  // `private, no-store`. Ce qui repond AVANT la garde ne porte que des corps
+  // GENERIQUES — une methode, un parametre, un jeton. C'est verifiable, et
+  // c'est ce qu'on verifie.
+  const fautifs = []
+  for (const f of fichiersApi()) {
+    const src = code(lire(f))
+    const h = src.search(/module\.exports\s*=\s*(?:async\s+)?(?:function\s*\w*\s*)?\(\s*\w+\s*,\s*\w+\s*\)\s*(?:=>\s*)?\{/)
+    const g = src.search(/posterEnTetesPrives\(|await (requirePermission|verifierSession|requirePermissionPourCanal)\(/)
+    if (h < 0 || g < 0 || h > g) continue
+    const entre = src.slice(h, g)
+    // Chaque reponse emise avant la garde : son corps doit etre un libelle
+    // generique, jamais une variable ni une lecture.
+    for (const m of entre.matchAll(/res\s*\.status\(\s*\d+\s*\)\s*\.json\(\s*\{([^}]*)\}/g)) {
+      const corps = m[1]
+      // Un corps generique ne contient que des chaines litterales et des clefs.
+      const sansChaines = corps.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""').replace(/`[^`]*`/g, '``')
+      if (/\b(data|rows|bien|booking|compte|user|profil|perms|snapshot|liste)\b/.test(sansChaines)) {
+        fautifs.push(`${f} : ${corps.trim().slice(0, 70)}`)
+      }
+    }
+  }
+  assert.deepEqual(fautifs, [],
+    'ces reponses partent AVANT la garde, donc avec le defaut Vercel `public`,\n' +
+    'et leur corps n est pas un libelle generique : il peut porter une donnee de\n' +
+    'compte. Posez `posterEnTetesPrives(res)` en tete de ce handler — et ajoutez\n' +
+    'la fonction aux doubles de test de `lib/require-permission` qui la cassent.')
+})
+
+test('RECENSEMENT : la surface des reponses precoces est CHIFFREE', () => {
+  // Un plafond ne ferme rien, il compte — et ce compte-la est la seule raison
+  // pour laquelle le test du dessus suffit. S il explose, la surface a change
+  // et l invariant doit etre re-examine.
   const avant = []
   for (const f of fichiersApi()) {
     const src = code(lire(f))
-    const g = src.search(/requirePermission|verifierSession|requirePermissionPourCanal/)
-    if (g < 0) continue
-    // Un `res.status(...)` qui precede le premier appel de garde, dans le
-    // handler et non dans une fonction auxiliaire : on approxime par la
-    // position, ce qui suffit a COMPTER la surface.
-    const h = src.search(/module\.exports\s*=\s*async function|module\.exports\s*=\s*function/)
-    if (h < 0 || h > g) continue
-    const entre = src.slice(h, g)
-    if (/res\.status\(/.test(entre)) avant.push(f)
+    const h = src.search(/module\.exports\s*=\s*(?:async\s+)?(?:function\s*\w*\s*)?\(\s*\w+\s*,\s*\w+\s*\)\s*(?:=>\s*)?\{/)
+    const g = src.search(/posterEnTetesPrives\(|await (requirePermission|verifierSession|requirePermissionPourCanal)\(/)
+    if (h < 0 || g < 0 || h > g) continue
+    if (/res\s*\.status\(/.test(src.slice(h, g))) avant.push(f)
   }
-  // Mesure du 22 octobre 2026 : 9 endpoints (les 8 de la review + la garde de
-  // canal, desormais corrigee).
-  assert.ok(avant.length <= 12,
-    `${avant.length} endpoints repondent avant leur garde :\n  ` + avant.join('\n  ') +
-    '\nUn de plus : verifiez que sa reponse precoce ne porte AUCUNE donnee de ' +
-    'compte, ou posez posterEnTetesPrives(res) en tete du handler.')
+  // Mesure du 22 octobre 2026 : 41 endpoints, les deux formes de handler
+  // confondues. ⚠ Un balayage au `grep` n'en voyait que 27, et un autre 30 :
+  // c'est CE motif-ci qui fait foi, et c'est par un motif plus etroit que
+  // `api/yield.js` avait echappe au recensement alors que la production le
+  // montrait en `public`.
+  assert.ok(avant.length >= 35 && avant.length <= 48,
+    `${avant.length} endpoints repondent avant leur garde (41 le 22 octobre 2026).\n` +
+    'Si ce compte s effondre, ce n est pas la surface qui a disparu, c est le ' +
+    'recensement.')
 })
