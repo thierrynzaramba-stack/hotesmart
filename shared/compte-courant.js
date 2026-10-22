@@ -39,6 +39,61 @@ let contexte = {
  * retombe sur le compte propre plutot que de bloquer : un incident reseau ne
  * doit pas empecher un hote seul d'utiliser son application.
  */
+// ─── Le cache court de la LISTE DES COMPTES ──────────────────────────────────
+//
+// `chargerContexte` part a chaque ouverture de page, et son seul cout reseau
+// est `api.membres.mesComptes()` — un appel qui precede TOUTE lecture metier,
+// sur TOUS les ecrans. Le principe 3 de la spec performance autorise a garder
+// le contexte de compte « quelques minutes ».
+//
+// ⚠ ON NE GARDE QUE LA LISTE, PAS LES DROITS, ET C'EST LA DECISION QUI COMPTE.
+// `chargerPermissions()` reste appelee a chaque fois : elle coute ZERO lecture
+// pour un titulaire sur son compte, et deux pour un membre delegue. Garder les
+// droits aurait fait survivre un droit REVOQUE pendant la duree du cache, sur
+// l'interface meme qui s'en sert pour masquer. Le masquage est doublé d'une
+// garde serveur (regle absolue du depot), donc ce ne serait pas une faille —
+// mais ce serait un ecran qui propose un geste que le serveur refusera, et
+// c'est exactement le defaut que le depot a paye trois fois.
+//
+// ⚠ ET LA CLE PORTE L'UTILISATEUR. Deux personnes sur le meme poste, ou un
+// changement de compte Supabase dans le meme onglet : une cle sans
+// l'utilisateur servirait la liste de comptes de l'autre. C'est la meme regle
+// que pour le cache d'ecran a venir — cle = utilisateur + compte.
+//
+// `sessionStorage` et pas `localStorage` : il meurt avec l'onglet, donc il ne
+// traverse pas une session navigateur. La deconnexion l'efface aussi,
+// explicitement (`reinitialiser`), pour le cas ou l'onglet reste ouvert.
+const CACHE_CLE = 'hs.ctx.comptes'
+const CACHE_MS = 3 * 60 * 1000
+
+function lireCacheComptes (userId) {
+  try {
+    const brut = sessionStorage.getItem(CACHE_CLE)
+    if (!brut) return null
+    const o = JSON.parse(brut)
+    if (!o || String(o.moi) !== String(userId)) return null
+    if (!Array.isArray(o.comptes) || !o.comptes.length) return null
+    if (!(Date.now() - Number(o.ts) < CACHE_MS)) return null
+    return o.comptes
+  } catch { return null }
+}
+
+function ecrireCacheComptes (userId, comptes) {
+  try {
+    sessionStorage.setItem(CACHE_CLE, JSON.stringify({
+      moi: String(userId), ts: Date.now(), comptes
+    }))
+  } catch { /* quota, navigation privee : on s'en passe */ }
+}
+
+// ⚠ APPELEE SUR UN 403, et c'est le filet de la fenetre de trois minutes. Un
+// acces revoque il y a moins de trois minutes laisse la personne sur un compte
+// que le serveur refuse : plutot que d'afficher un ecran casse jusqu'a
+// expiration du cache, on jette la liste et le prochain chargement la relit.
+export function oublierCacheComptes () {
+  try { sessionStorage.removeItem(CACHE_CLE) } catch { /* rien a faire */ }
+}
+
 export async function chargerContexte (userId) {
   if (contexte.charge && contexte.moi === userId) return contexte
 
@@ -50,9 +105,18 @@ export async function chargerContexte (userId) {
   // secondes. On garde la memoire intacte et on retombe sur le compte propre
   // pour cette session — le prochain chargement reussi restaurera le choix.
   let listeFiable = true
-  try {
+  const duCache = lireCacheComptes(userId)
+  if (duCache) {
+    contexte.comptes = duCache
+  } else try {
     const { comptes } = await api.membres.mesComptes()
     contexte.comptes = Array.isArray(comptes) ? comptes : []
+    // ⚠ On n'ecrit au cache qu'une liste VENUE DU SERVEUR. Garder le repli de
+    // panne ci-dessous figerait « Mon compte » seul pendant trois minutes, et
+    // le selecteur disparaitrait pour un membre delegue — le defaut que le
+    // commentaire d'en dessous decrit, mais pour trois minutes au lieu d'un
+    // chargement.
+    if (contexte.comptes.length) ecrireCacheComptes(userId, contexte.comptes)
   } catch (e) {
     logger.error('compte', 'liste des comptes indisponible : ' + (e?.message || e))
     contexte.comptes = [{ user_id: userId, nom: 'Mon compte', titulaire: true }]
@@ -327,5 +391,9 @@ function oublierMemoire () {
 /** Appele a la deconnexion : le compte choisi ne doit pas survivre a l'utilisateur. */
 export function reinitialiser () {
   oublierMemoire()
+  // ⚠ ET LE CACHE DE LA LISTE AUSSI. `sessionStorage` meurt avec l'onglet, mais
+  // une deconnexion sans fermer l'onglet y laisserait la liste des comptes de
+  // la personne precedente — visible dans le selecteur de la suivante.
+  oublierCacheComptes()
   contexte = { moi: null, compte: null, comptes: [], permissions: null, charge: false }
 }
