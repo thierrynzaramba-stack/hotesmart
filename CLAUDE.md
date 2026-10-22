@@ -798,6 +798,7 @@ voyageur, étiqueté « retour privé » quand il en vient, et coupé par
 - docs/CALENDRIER_TECH.md (calendrier) | docs/CHANNEL_TECH.md (Channex) | pages/guide.html (guide user, alimenter à chaque feature).
 - docs/kb/aujourdhui.md (accueil V5 : source de chaque chiffre, ce qui n'est PAS affiché et pourquoi ; socle UI V5 dans shared/theme.css, ui.css, icons.svg, nav.js, i18n/ — aucun hexa, aucun texte en dur, aucun emoji, `node scripts/i18n-check.js` avant commit).
 - docs/kb/coeur-de-donnees.md (règle d'architecture : provider → cœur → apps ; config d'app vs config générale).
+- docs/kb/cout-du-cron.md (le COUT du cron par tache et par passage : compteur pose sur `fetch` — une exception mesuree, le SDK Anthropic ; `ms` contre `ms_seul` ; table `cron_stats` purgee a 30 jours ; carte 20 du diagnostic et `scripts/classement-cron.js`).
 - docs/kb/dettes-v1.md (REGISTRE des dettes datées avant la clôture V1 : 28 rouges, migrations à appliquer, vacances 2027, mobile et fermetures — chaque lot lit sa ligne avant merge).
 - docs/kb/profils-et-droits.md (droits, délégation, dettes) | docs/kb/audit-user-id-front.md (identité vs compte, endpoints délégables).
 - docs/kb/prix-plancher.md (garde anti nuit a 0 : `properties.prix_minimum` par bien, repli 10 € ; on FERME la date, on ne remonte jamais le prix ; `rate: 0` n'est pas applique par Channex, il garde le prix de la grille).
