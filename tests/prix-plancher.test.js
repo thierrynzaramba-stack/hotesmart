@@ -367,3 +367,37 @@ test('LE TEST QUI COMPTE : PATCH et DELETE repartent de l UUID R\u00c9SOLU, pas 
   assert.equal((src.match(/\.eq\('id', bienPid\)/g) || []).length, 4,
     'le select et l update du PATCH, le select et le delete du DELETE')
 })
+
+test('LE TEST QUI COMPTE : la garde du plancher LIT une colonne SELECTIONNEE', () => {
+  // \u26a0 DEFAUT TROUVE PAR LA RECETTE DE THIERRY (22 octobre 2026) : plancher
+  // 50 \u20ac en base, prix de base passe \u00e0 20 \u20ac \u2192 200, « Enregistr\u00e9 », valeur
+  // persist\u00e9e, aucun refus. La garde lisait `prop.prix_minimum`, qui valait
+  // `undefined` faute d \u00eatre dans le SELECT : elle ne pouvait pas mordre.
+  //
+  // C est la le\u00e7on que ce fichier porte d\u00e9j\u00e0 pour `migration_target_property_id`
+  // — « une garde qui juge sur une colonne non s\u00e9lectionn\u00e9e est une garde
+  // ouverte ». On ne la v\u00e9rifie plus \u00e0 l \u0153il : ce test confronte les colonnes
+  // LUES par le bloc PATCH \u00e0 celles qu il SELECTIONNE.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/channel-property.js'), 'utf8')
+  const i = src.indexOf("// ===== PATCH : modification d'un bien =====")
+  const j = src.indexOf("if (req.method === 'DELETE')", i)
+  assert.ok(i !== -1 && j > i)
+  const bloc = src.slice(i, j)
+
+  const m = bloc.match(/\.select\('([^']+)'\)/)
+  assert.ok(m, 'le bloc PATCH doit s\u00e9lectionner des colonnes')
+  const selectionnees = new Set(m[1].split(',').map(x => x.trim()))
+
+  // Toutes les colonnes lues sur l objet du bien, hors commentaires.
+  const sansCommentaires = bloc
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/^\s*\/\/.*$/gm, '')
+  const lues = new Set([...sansCommentaires.matchAll(/\bprop\.([a-z_]+)/g)].map(x => x[1]))
+  for (const col of lues) {
+    assert.ok(selectionnees.has(col),
+      `le PATCH lit \`prop.${col}\` sans le s\u00e9lectionner : la garde qui s en sert est OUVERTE`)
+  }
+  // Et les deux colonnes de la garde du plancher y sont, nomm\u00e9ment.
+  assert.ok(selectionnees.has('prix_minimum'))
+  assert.ok(selectionnees.has('base_price'))
+})

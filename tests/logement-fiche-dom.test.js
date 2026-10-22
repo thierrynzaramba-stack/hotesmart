@@ -87,17 +87,23 @@ test('la fiche rend ses blocs, titrés et dans l ordre', () => {
   // ⚠ SEPT BLOCS DEPUIS L'ÉTAPE 3 : la suppression existe, donc son bloc aussi,
   // qu'elle soit possible (bouton actif) ou refusée (bouton éteint et sa
   // raison). À l'étape 2, un bien supprimable n'en rendait aucun.
+  // ⚠ SUPPRIMER EST LE DERNIER, ET IL EST HORS DES COLONNES (constat de la
+  // recette du 22 octobre 2026). Au bas de la colonne gauche, il arrivait AU
+  // MILIEU de la fiche au téléphone, où les colonnes s'empilent : l'action la
+  // plus destructrice du produit se lisait entre deux blocs de lecture.
   const d = doc(M.ficheHtml(fiche(), OUTILS(), { peutSupprimer: true }))
   assert.deepEqual([...d.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent), [
-    'Où il est en vente', 'Prix', 'Le logement', 'Supprimer ce logement',
-    'Ménage', 'Avis des voyageurs', 'Réglages'
+    'Où il est en vente', 'Prix', 'Le logement',
+    'Ménage', 'Avis des voyageurs', 'Réglages', 'Supprimer ce logement'
   ])
+  assert.equal(d.querySelector('.fic-col .fic-supprimer'), null,
+    'il ne doit plus vivre dans une colonne')
 
   const refuse = doc(M.ficheHtml(
     fiche({ suppression: { possible: false, motif: 'annonce_reliee' } }), OUTILS(), { peutSupprimer: true }))
   assert.deepEqual([...refuse.querySelectorAll('.fic-bloc__titre')].map(x => x.textContent), [
-    'Où il est en vente', 'Prix', 'Le logement', 'Supprimer ce logement',
-    'Ménage', 'Avis des voyageurs', 'Réglages'
+    'Où il est en vente', 'Prix', 'Le logement',
+    'Ménage', 'Avis des voyageurs', 'Réglages', 'Supprimer ce logement'
   ])
 })
 
@@ -1574,4 +1580,46 @@ test('LE TEST QUI COMPTE : CHAQUE action a sa place pour dire son \u00e9tat et s
     OUTILS(), { peutSupprimer: true }))
   assert.ok(sup.querySelector('.fic-supprimer [data-etat]'))
   assert.ok(sup.querySelector('.fic-supprimer [data-erreur]'))
+})
+
+test('LE TEST QUI COMPTE : la r\u00e9ponse du SERVEUR d\u00e9cide de « Publier », pas la d\u00e9duction locale', () => {
+  // \u26a0 CONSTAT DE LA RECETTE DE THIERRY (22 octobre 2026) : le bouton
+  // s'affichait sur un bien SANS AUCUN CANAL, et le serveur rendait 400
+  // « Bien non connect\u00e9 au canal (ids manquants) ». Les identifiants du
+  // partenaire, qui tranchent, ne descendent pas ici \u2014 et ne doivent pas.
+  const nonConnecte = fiche({
+    bien: { ...fiche().bien, mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' },
+    publication: { possible: false, motif: 'pas_connecte' }
+  })
+  const d = doc(M.ficheHtml(nonConnecte, OUTILS(), { peutPublier: true }))
+  assert.equal(d.querySelector('[data-bind="publier"]'), null,
+    'le bouton ne doit pas \u00eatre propos\u00e9 : il m\u00e8nerait \u00e0 un 400')
+  // Et pas de phrase « prix automatiques » non plus : ce n'est pas le cas.
+  assert.equal(d.querySelector('[data-publier="automatique"]'), null)
+
+  // Le serveur dit oui : le bouton revient.
+  const connecte = fiche({
+    bien: { ...fiche().bien, mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' },
+    publication: { possible: true, motif: null }
+  })
+  assert.ok(doc(M.ficheHtml(connecte, OUTILS(), { peutPublier: true }))
+    .querySelector('[data-bind="publier"]'))
+
+  // Et la phrase des prix automatiques suit le motif du SERVEUR.
+  const pilote = fiche({
+    bien: { ...fiche().bien, mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' },
+    publication: { possible: false, motif: 'pilote' }
+  })
+  assert.ok(doc(M.ficheHtml(pilote, OUTILS(), { peutPublier: true }))
+    .querySelector('[data-publier="automatique"]'))
+})
+
+test('sans r\u00e9ponse du serveur, la d\u00e9duction locale reste en REPLI', () => {
+  // Moins bonne, pas fausse : une r\u00e9ponse qui ne porte pas encore le champ ne
+  // doit pas faire dispara\u00eetre le bouton \u00e0 qui y a droit.
+  const d = doc(M.ficheHtml(enMode('managed', { pilote_tarifaire: 'calendrier' }),
+    OUTILS(), { peutPublier: true }))
+  assert.ok(d.querySelector('[data-bind="publier"]'))
+  assert.deepEqual(M.publierAffiche({ mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' }, null),
+    { montre: true, motif: null })
 })
