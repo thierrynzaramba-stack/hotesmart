@@ -216,6 +216,21 @@ test('une passe de cron-messages ecrit UNE ligne de mesure, avec ses taches', as
   assert.equal(ligne.requetes >= 1, true)
 })
 
+test('⚠ UNE BASE QUI PEND NE RETIENT PAS LA PASSE PLUS DE QUELQUES SECONDES', async () => {
+  // ⚠ DEFAUT QUE J'AI INTRODUIT EN CORRIGEANT LA REVIEW, et c'est pour ca que
+  // ce test existe en REEL et pas en structurel. Le correctif donnait a
+  // l'ecriture « le reliquat du budget » — 59 s moins la duree du cycle. Sur
+  // une passe rapide, ca fait 58 s d'attente pour une insertion qui pend :
+  // PLUS LONG qu'avant la review, dont le constat 2 venait justement de borner
+  // cette attente. La borne est le MINIMUM des deux : ce qui reste avant le
+  // mur, et ce qu'une ecriture saine met.
+  const avant = Date.now()
+  const { res } = await passer({ insert: () => new Promise(() => {}) })
+  const mis = Date.now() - avant
+  assert.equal(res.code, 200)
+  assert.ok(mis < 6000, `la passe a rendu en ${mis} ms — l attente n est pas bornee`)
+})
+
 test('⚠ UNE MESURE QUI NE PEUT PAS S ECRIRE NE CHANGE RIEN A LA PASSE', async () => {
   // L'exigence de Thierry, eprouvee au point de montage : la base refuse
   // l'insertion, et la passe rend exactement la meme chose.
