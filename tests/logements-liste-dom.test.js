@@ -489,9 +489,14 @@ test('LE TEST QUI COMPTE : l ancienne liste REDIRIGE vers la V5, et la création
   const jFiche = rewrites.findIndex(r => r.source === '/logements/:id')
   assert.ok(jNouveau !== -1 && jNouveau < jFiche, 'la création doit être servie avant la fiche')
 
-  // La création existe toujours : son écran V5 est l étape 4, son URL est déjà V5.
-  assert.ok(rewrites.some(r => r.source === '/logements/nouveau' && r.destination === '/pages/biens-nouveau'))
-  assert.ok(fs.existsSync(path.join(__dirname, '..', 'pages', 'biens-nouveau.html')))
+  // ⚠ L ÉCRAN V5 DE CRÉATION EXISTE DEPUIS L ÉTAPE 4 : l URL était V5 depuis
+  // l étape 3, mais elle servait encore `pages/biens-nouveau.html`. Elle sert
+  // maintenant `pages/logement-nouveau.html`, et plus aucune route ne mène à
+  // l ancien formulaire.
+  assert.ok(rewrites.some(r => r.source === '/logements/nouveau' && r.destination === '/pages/logement-nouveau'))
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'pages', 'logement-nouveau.html')))
+  const versAncien = [...rewrites, ...redirects].filter(r => String(r.destination).includes('biens-nouveau'))
+  assert.deepEqual(versAncien, [], 'plus aucune route ne doit servir l ancien formulaire')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
