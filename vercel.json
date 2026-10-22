@@ -150,7 +150,7 @@
       ]
     },
     {
-      "source": "/shared/i18n/(.*)",
+      "source": "/shared/i18n/(.*\\.json)",
       "headers": [
         {
           "key": "Cache-Control",

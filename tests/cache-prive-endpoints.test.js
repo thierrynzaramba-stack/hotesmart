@@ -125,6 +125,9 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   // ⚠ C'est cet invariant qui fait tenir le reste. L'en-tete vit dans les
   // gardes : un endpoint qui lirait une donnee de compte SANS garde n aurait ni
   // l en-tete, ni le controle de droits — et le premier defaut serait le second.
+  // ⚠ ET IL NE DIT PAS « toutes ses reponses portent l en-tete » : un endpoint
+  // peut refuser une methode AVANT d appeler sa garde. Cette surface est
+  // comptee par le test suivant, pas supposee nulle (constat de review).
   // Les endpoints LEGITIMEMENT sans garde sont comptes ici, un par un.
   const SANS_GARDE_ATTENDU = fichiersApi().filter(f => {
     const src = code(lire(f))
@@ -139,4 +142,49 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   assert.ok(avecGarde >= 45,
     `${avecGarde} endpoints gardes (49 le 22 octobre 2026) : si ce compte s effondre, ` +
     'ce n est pas la surface qui a disparu, c est le recensement')
+})
+
+// ─── Les constats de la review du 22 octobre 2026 ────────────────────────────
+
+test('LE TEST QUI COMPTE : la garde de CANAL pose l en-tete avant ses quatre refus', async () => {
+  // ⚠ CONSTAT DE REVIEW : « un point unique ne peut pas etre oublie » n est
+  // vrai que si TOUTES les sorties passent par lui.
+  // `requirePermissionPourCanal` refusait quatre fois — 400 `channel_id
+  // requis`, 502 lecture canal, 404 canal introuvable, 403 canal rattache a un
+  // autre bien — AVANT de deleguer a `requirePermission`, donc avant l en-tete.
+  const { requirePermissionPourCanal } = require('../lib/require-permission')
+  const res = fausseReponse()
+  await requirePermissionPourCanal({ headers: {} }, res, { channelId: null })
+  assert.equal(res.entetes['cache-control'], 'private, no-store',
+    'le refus `channel_id requis` doit porter l en-tete comme les autres')
+  assert.equal(res.code, 400, 'et c est bien le premier refus, avant toute lecture')
+})
+
+test('RECENSEMENT : les endpoints qui repondent AVANT toute garde sont comptes', () => {
+  // ⚠ CE QUE LE RECENSEMENT DU DESSUS NE DIT PAS, et la review l a releve.
+  // « Passer par une garde » ne veut pas dire « toutes ses reponses portent
+  // l en-tete » : plusieurs endpoints refusent une methode ou un parametre
+  // AVANT d appeler leur garde, et ces reponses-la gardent le defaut Vercel.
+  // Aucune ne porte de donnee de compte aujourd hui — ce sont des corps
+  // d erreur generiques — mais l invariant annonce etait plus large que
+  // l invariant reel, et un compte vaut mieux qu une description.
+  const avant = []
+  for (const f of fichiersApi()) {
+    const src = code(lire(f))
+    const g = src.search(/requirePermission|verifierSession|requirePermissionPourCanal/)
+    if (g < 0) continue
+    // Un `res.status(...)` qui precede le premier appel de garde, dans le
+    // handler et non dans une fonction auxiliaire : on approxime par la
+    // position, ce qui suffit a COMPTER la surface.
+    const h = src.search(/module\.exports\s*=\s*async function|module\.exports\s*=\s*function/)
+    if (h < 0 || h > g) continue
+    const entre = src.slice(h, g)
+    if (/res\.status\(/.test(entre)) avant.push(f)
+  }
+  // Mesure du 22 octobre 2026 : 9 endpoints (les 8 de la review + la garde de
+  // canal, desormais corrigee).
+  assert.ok(avant.length <= 12,
+    `${avant.length} endpoints repondent avant leur garde :\n  ` + avant.join('\n  ') +
+    '\nUn de plus : verifiez que sa reponse precoce ne porte AUCUNE donnee de ' +
+    'compte, ou posez posterEnTetesPrives(res) en tete du handler.')
 })

@@ -62,7 +62,17 @@ async function apiCall(endpoint, method = 'GET', body = null) {
       // Import PARESSEUX : `shared/api-client.js` est charge par des pages qui
       // n'ont pas de contexte de compte, et un import en tete creerait un cycle
       // (compte-courant importe api-client).
-      if (res.status === 403) {
+      // ⚠ SEULEMENT LE REFUS DU COMPTE DEMANDE, ET C'EST UN CONSTAT DE REVIEW.
+      // Ma premiere version jetait le cache sur TOUT 403. Or le depot traite
+      // certains 403 comme un etat NORMAL d'un membre delegue — `properties.js`
+      // (« un refus de droits n'est pas une panne »), `settings.html` (domaine
+      // `equipe` non accorde), `logements-liste.js`, `logement-fiche.js`,
+      // `menages.html`. Un membre sans `reservations` aurait donc vide le cache
+      // a CHAQUE chargement de page : le gain du lot disparaissait pour les
+      // comptes multiples, c'est-a-dire pour la seule population que l'appel
+      // sert. Le refus qui dit vraiment « ta liste de comptes est perimee » est
+      // celui que pose `lib/require-permission.js` sur l'en-tete X-Compte.
+      if (res.status === 403 && data.error === 'Droits insuffisants sur ce compte') {
         import('/shared/compte-courant.js')
           .then(m => m.oublierCacheComptes && m.oublierCacheComptes())
           .catch(() => { /* module indisponible : le cache expirera seul */ })

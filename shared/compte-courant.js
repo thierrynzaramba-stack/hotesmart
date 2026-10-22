@@ -73,7 +73,13 @@ function lireCacheComptes (userId) {
     const o = JSON.parse(brut)
     if (!o || String(o.moi) !== String(userId)) return null
     if (!Array.isArray(o.comptes) || !o.comptes.length) return null
-    if (!(Date.now() - Number(o.ts) < CACHE_MS)) return null
+    // ⚠ L'ECART DOIT ETRE POSITIF, et c'est un constat de review. Avec un `ts`
+    // dans le FUTUR — horloge de la machine en avance, puis corrigee en arriere
+    // par NTP — l'ecart est negatif, donc toujours inferieur a la borne : le
+    // cache ne reexpirait plus pour la duree de l'onglet, et la fenetre d'un
+    // acces revoque cessait d'etre bornee a trois minutes.
+    const ecoule = Date.now() - Number(o.ts)
+    if (!(ecoule >= 0 && ecoule < CACHE_MS)) return null
     return o.comptes
   } catch { return null }
 }

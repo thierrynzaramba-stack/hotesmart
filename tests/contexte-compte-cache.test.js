@@ -144,3 +144,58 @@ test('LE TEST QUI COMPTE : un 403 jette le cache, et api-client le fait', () => 
   assert.ok(/import\('\/shared\/compte-courant\.js'\)/.test(net),
     'import paresseux, sinon cycle de modules')
 })
+
+// ─── Les constats de la review du 22 octobre 2026 ────────────────────────────
+
+test('LE TEST QUI COMPTE : un ts dans le FUTUR ne rend pas le cache permanent', () => {
+  // ⚠ CONSTAT DE REVIEW. `Date.now() - ts < CACHE_MS` est VRAI quand l ecart
+  // est negatif : avec une horloge machine en avance, puis corrigee en arriere
+  // par NTP, la liste ne reexpirait plus pour la duree de l onglet — et la
+  // fenetre d un acces revoque cessait d etre bornee a trois minutes.
+  const src = fs.readFileSync(path.join(racine, 'shared/compte-courant.js'), 'utf8')
+  const net = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+  assert.match(net, /ecoule >= 0/, 'la borne basse doit etre explicite')
+  // Et par EXECUTION, pas par lecture : un `ts` dans le futur n est pas servi.
+  let t = 1_700_000_000_000
+  const h = harnais({ horloge: () => t })
+  h.magasin.set('hs.ctx.comptes', JSON.stringify({ moi: MOI, ts: t + 3600_000, comptes: COMPTES }))
+  return h.mod.chargerContexte(MOI).then(() => {
+    assert.equal(h.compte.mesComptes, 1,
+      'une liste datee du futur doit etre ecartee, pas servie indefiniment')
+  })
+})
+
+test('LE TEST QUI COMPTE : le filet du 403 ne mord QUE sur le refus du compte', () => {
+  // ⚠ CONSTAT DE REVIEW, et il annulait le lot pour sa propre population.
+  // Le depot traite certains 403 comme un etat NORMAL d un membre delegue
+  // (`shared/properties.js` « un refus de droits n est pas une panne »,
+  // `pages/settings.html` domaine `equipe`, `logements-liste.js`,
+  // `logement-fiche.js`, `pages/menages.html`). Jeter le cache sur tout 403
+  // le vidait a CHAQUE chargement de page pour un membre sans `reservations` —
+  // c est-a-dire pour les comptes multiples, la seule raison d etre de l appel.
+  const net = SOURCE_API.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+  assert.match(net, /res\.status === 403 && data\.error === 'Droits insuffisants sur ce compte'/,
+    'le filet doit reconnaitre le refus X-Compte, pas n importe quel 403')
+  // Et le libelle doit etre CELUI que pose la garde : deux chaines qui divergent
+  // feraient un filet qui ne se declenche jamais.
+  const garde = fs.readFileSync(path.join(racine, 'lib/require-permission.js'), 'utf8')
+  assert.match(garde, /'Droits insuffisants sur ce compte'/,
+    'le libelle du filet doit exister cote serveur, sinon il ne mord jamais')
+})
+
+test('LE TEST QUI COMPTE : accepter une invitation jette le cache', () => {
+  // ⚠ CONSTAT DE REVIEW. « Continuer » renvoie sur l app DANS LE MEME ONGLET :
+  // sans ce geste, le compte qu on vient de rejoindre serait absent du
+  // selecteur pendant trois minutes — juste apres avoir lu « vous avez rejoint
+  // le compte de X ». Et `membreAilleurs` de `components/auth-guard.js`, calcule
+  // sur cette liste perimee, peut jeter l invite dans l onboarding en
+  // consommant son forcage a un coup.
+  const page = fs.readFileSync(path.join(racine, 'pages/invitation.html'), 'utf8')
+  const net = page.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+  const i = net.indexOf('api.membres.accepter')
+  assert.ok(i > 0, 'la page accepte bien l invitation')
+  // Le geste doit suivre l acceptation, pas la preceder.
+  const j = net.indexOf('oublierCacheComptes')
+  assert.ok(j > i,
+    'le cache de la liste des comptes doit etre jete APRES api.membres.accepter')
+})
