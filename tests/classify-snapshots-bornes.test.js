@@ -99,7 +99,18 @@ function charger ({ snapshots }) {
         // Une tache de classification recente : les fils sont « deja traites »
         // et s arretent avant le modele. Ce fichier garde la LECTURE DU COEUR.
         if (nom === 'cron_derniere_tache_classif') {
-          return { data: (args.p_book_ids || []).map(b => ({ book_id: b, created_at: '2026-10-22T00:00:00Z' })), error: null }
+          // ⚠ B2 N'A PAS DE TACHE RECENTE, ET C'EST VOLONTAIRE (constat 5 de la
+          // re-review). En rendant une tache pour TOUS les fils, mon double les
+          // faisait tous sortir sur `hasNewerTaskOrConv` : retirer
+          // `if (ficheIllisible) continue` laissait le fichier a 4/4 — mesure
+          // faite. La moitie « on ne batit pas un prompt sur une fiche qu'on
+          // n'a pas lue » n'etait donc gardee par rien. B2 n'est arrete que par
+          // elle.
+          return {
+            data: (args.p_book_ids || []).filter(b => b !== 'B2')
+              .map(b => ({ book_id: b, created_at: '2026-10-22T00:00:00Z' })),
+            error: null
+          }
         }
         // Une tache « recu pendant la pause » ANTERIEURE a la reponse de l hote
         // sur le fil B1 : elle doit se fermer meme quand le coeur est illisible.
@@ -176,6 +187,11 @@ test('LE TEST QUI COMPTE : une lecture du coeur en echec n emporte PAS les codes
   // decision du 9 octobre 2026 qui ne lit NI snapshot NI fiche : l hote avait
   // repondu au voyageur et sa tache restait ouverte dans « A valider ».
   assert.equal(vu.majAgentTasks, 1, 'la tache « recu pendant la pause » s est fermee malgre la panne')
+  // ⚠ ET L'AUTRE MOITIE : B2 n'a aucune tache recente, donc SEULE la garde de
+  // la fiche l'empeche de partir chez le modele. Si elle disparait, le fil
+  // atteint `classifyAndHandle`, le client Anthropic absent leve, et une
+  // SECONDE erreur apparait ici.
+  assert.equal(res.errors.length, 1, 'aucun fil n est parti chez le modele sans sa fiche')
 })
 
 test('LE TEST QUI COMPTE : plus de lignes que d identifiants, on refuse de nommer a l aveugle', async () => {

@@ -36,9 +36,11 @@
 -- LES VALEURS METIER SONT DES PARAMETRES, PAS DU SQL.
 -- Les types de tache, le prefixe `[AUTO:`, le motif de
 -- la tache de pause et la taille des fenetres vivent
--- dans lib/cron-classify.js. Les recopier ici ferait
--- deux sources de verite, et la copie SQL ne rougirait
--- nulle part le jour ou le JS change.
+-- dans lib/gardes-des-fils.js — un module sans effet
+-- de bord, pour que les scripts de controle les lisent
+-- sans charger le client Anthropic. Les recopier ici
+-- ferait deux sources de verite, et la copie SQL ne
+-- rougirait nulle part le jour ou le JS change.
 
 -- ── 1. La derniere tache de classification ──────────
 -- Remplace la 1re requete de `hasNewerTaskOrConv`

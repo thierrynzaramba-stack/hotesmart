@@ -85,29 +85,47 @@ const appels = (userId, propertyId, bookIds) => ([
   // les biens par le nombre de reservations qui ont AU MOINS une tache de
   // classification, et c'est ce bien-la qu'on interroge.
   // Le `order by` explicite : sans lui, les 500 lignes rendues sont arbitraires.
-  let bien = null, cle = null, ids = [], score = -1
+  // ⚠ LE SCORE PORTE SUR LE MEME ENSEMBLE QUE LA LISTE INTERROGEE (constat 3
+  // de la re-review) : je notais 200 identifiants et j'en interrogeais 500. Un
+  // bien dont les reservations porteuses de taches tombent au-dela du 200e
+  // marquait zero, et le script refusait une migration saine.
+  // ⚠ ET IL COMPTE LES DEUX FAMILLES, PAS UNE (constat 2). Le point 2 exige une
+  // reponse non vide des DEUX fonctions « derniere ». Noter le temoin sur les
+  // seules taches laissait passer un bien a taches SANS conversation repondue —
+  // la forme normale d'un `info_unknown` en Mode Test — et `rend ZERO ligne`
+  // devenait un faux bloquant sur une migration correcte.
+  const LOT_IDS = 200
+  let bien = null, cle = null, ids = [], score = -1, detailScore = ''
   for (const b of biens) {
     const k = String(b.provider_property_id)
     const { data: msgs } = await sb.from('messages').select('booking_id, sent_at')
       .eq('user_id', b.user_id).eq('property_id', k).not('booking_id', 'is', null)
-      .order('sent_at', { ascending: false }).limit(500)
+      .order('sent_at', { ascending: false }).limit(LOT_IDS)
     const liste = [...new Set((msgs || []).map(m => String(m.booking_id)))]
     if (!liste.length) continue
     const { data: avecTache } = await sb.from('agent_tasks').select('book_id')
-      .eq('user_id', b.user_id).eq('property_id', k).in('book_id', liste.slice(0, 200))
+      .eq('user_id', b.user_id).eq('property_id', k).in('book_id', liste)
       .in('task_type', TYPES).limit(1000)
-    const n = new Set((avecTache || []).map(x => String(x.book_id))).size
-    if (n > score) { bien = b; cle = k; ids = liste; score = n }
+    const nT = new Set((avecTache || []).map(x => String(x.book_id))).size
+    const { data: avecReponse } = await sb.from('conversations').select('book_id')
+      .eq('user_id', b.user_id).eq('property_id', k).in('book_id', liste)
+      .not('agent_reply', 'is', null).limit(1000)
+    const nR = new Set((avecReponse || []).map(x => String(x.book_id))).size
+    // Le temoin doit nourrir LES DEUX fonctions : on prend le minimum, pas la
+    // somme — un bien fort d'un cote et vide de l'autre ne vaut rien ici.
+    const n = Math.min(nT, nR)
+    if (n > score) { bien = b; cle = k; ids = liste; score = n; detailScore = `${nT} avec tache, ${nR} avec reponse` }
   }
   if (!bien || !ids.length) {
     console.error('KO  aucun bien channex ne porte de fil : les fonctions ne seraient interrogees')
     console.error('    qu avec une liste vide, ce qui ne prouve rien.')
     process.exit(1)
   }
-  console.log(`Bien temoin : ${cle} — ${ids.length} reservation(s) dans ses fils, dont ${score} avec une tache de classification`)
+  console.log(`Bien temoin : ${cle} — ${ids.length} reservation(s) dans ses fils (${detailScore})`)
   if (score === 0) {
-    console.error('KO  aucune reservation ne porte de tache de classification :')
-    console.error('    les fonctions rendraient [] et la forme de leur reponse ne serait pas eprouvee.')
+    console.error('KO  aucun bien ne porte A LA FOIS une tache de classification et une')
+    console.error('    conversation repondue : les deux fonctions « derniere » ne peuvent pas')
+    console.error('    etre eprouvees sur cette base, et un vert ne voudrait rien dire.')
     process.exit(1)
   }
 

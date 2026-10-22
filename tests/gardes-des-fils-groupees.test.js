@@ -75,12 +75,18 @@ function base ({ taches = [], conversations = [], rpcEnPanne = null }) {
     }
     return out
   }
-  const tachesPause = (bookIds, motif, u, pr) => {
+  // ⚠ LA FENETRE VIENT DE L'ARGUMENT, PAS D'UNE CONSTANTE DU TEST (constat 6
+  // de la re-review). En decoupant avec `FENETRE_CONVERSATIONS`, cette doublure
+  // laissait la mutation « FENETRE_TACHES_PAUSE passe de 20 a 3 » a 13/13 : la
+  // propriete « les deux branches lisent la meme fenetre » n'etait prouvee que
+  // pour UNE des deux fenetres — dans le fichier meme qui honore `limit(n)`
+  // cote REST pour pouvoir le prouver.
+  const tachesPause = (bookIds, motif, u, pr, fenetre) => {
     const out = []
     for (const b of bookIds) {
       taches.filter(t => aMoi(t, u, pr) && t.book_id === b && t.status === 'pending' && t.summary === motif)
         .sort((x, y) => Date.parse(x.created_at) - Date.parse(y.created_at))
-        .slice(0, FENETRE)
+        .slice(0, fenetre)
         .forEach(t => out.push({ book_id: b, id: t.id, created_at: t.created_at }))
     }
     return out
@@ -93,7 +99,7 @@ function base ({ taches = [], conversations = [], rpcEnPanne = null }) {
       const u = args.p_user_id, pr = args.p_property_id
       if (nom === 'cron_derniere_tache_classif') return { data: derniereTache(args.p_book_ids, args.p_types, u, pr), error: null }
       if (nom === 'cron_derniere_reponse_hote') return { data: derniereReponse(args.p_book_ids, u, pr), error: null }
-      if (nom === 'cron_taches_pause_ouvertes') return { data: tachesPause(args.p_book_ids, args.p_motif, u, pr), error: null }
+      if (nom === 'cron_taches_pause_ouvertes') return { data: tachesPause(args.p_book_ids, args.p_motif, u, pr, args.p_fenetre), error: null }
       return { data: null, error: { message: `rpc inconnue ${nom}` } }
     },
     from: (nom) => {
@@ -287,25 +293,6 @@ test('LE TEST QUI COMPTE : les gardes sont CLOISONNEES par compte et par bien', 
   assert.equal(parFil, false)
 })
 
-test('LE TEST QUI COMPTE : au plafond de PostgREST, les taches de pause RAMENENT la lecture par fil', async () => {
-  // ⚠ CONSTAT 2. `cron_taches_pause_ouvertes` est la SEULE des trois a rendre
-  // plusieurs lignes par reservation : elle peut donc etre coupee a 1000 lignes
-  // sans erreur, et les taches des fils tombes hors de la reponse ne se
-  // fermeraient jamais alors que l'hote a repondu. L'en-tete de la migration
-  // affirmait « la troncature devient impossible par construction » : c'etait
-  // vrai des deux autres, pas de celle-la.
-  const trop = []
-  for (let i = 0; i < PLAFOND_POSTGREST; i++) {
-    trop.push({ id: `p${i}`, book_id: `B${i % 50}`, status: 'pending', summary: MOTIF, task_type: 'sympathy', created_at: a(-60) })
-  }
-  const { mod } = base({ taches: trop })
-  const res = { errors: [] }
-  const fils = Array.from({ length: 50 }, (_, i) => `B${i}`)
-  const gardes = await mod.chargerLesGardesDesFils(USER, PROP, fils, res)
-  assert.equal(gardes, null, 'une reponse au plafond n est pas une reponse')
-  assert.equal(res.gardesParFil, 1, 'et le repli est compte')
-})
-
 test('LE TEST QUI COMPTE : les deux branches lisent la MEME fenetre et le MEME prefixe', async () => {
   // ⚠ CONSTAT 3. La branche de repli gardait `'[AUTO:'` et `.limit(20)` en
   // litteraux la ou la branche groupee passait les constantes. Ce test fixe la
@@ -322,4 +309,52 @@ test('LE TEST QUI COMPTE : les deux branches lisent la MEME fenetre et le MEME p
   const parFil = await mod.hasNewerTaskOrConv(USER, PROP, 'B', new Date(t0), null)
   assert.equal(groupe, false, 'la vraie reponse est HORS de la fenetre : le fil n est pas tenu pour repondu')
   assert.equal(groupe, parFil, 'et les deux branches le disent pareil')
+})
+
+test('LE TEST QUI COMPTE : la fenetre des taches de pause est la MEME des deux cotes', async () => {
+  // ⚠ CONSTAT 6 DE LA RE-REVIEW. La fenetre des conversations etait gardee,
+  // celle des taches de pause non : la mutation « 20 -> 3 » laissait tout vert.
+  // Deux fenetres, deux tests.
+  const { FENETRE_TACHES_PAUSE } = require('../lib/gardes-des-fils')
+  const nombreuses = []
+  for (let i = 0; i < FENETRE_TACHES_PAUSE + 3; i++) {
+    nombreuses.push({ id: `p${i}`, book_id: 'B', status: 'pending', summary: MOTIF, task_type: 'sympathy', created_at: a(-100 + i) })
+  }
+  const { mod } = base({ taches: nombreuses })
+  const gardes = await mod.chargerLesGardesDesFils(USER, PROP, ['B'], null)
+  const fil = [{ source: 'host', message: 'Je reponds', time: a(0) }]
+  const ferme = async (g) => {
+    const vus = []
+    await mod.fermerTachesPause(USER, PROP, 'B', fil, { errors: [] }, g, { surFermeture: (ids) => vus.push(...ids) })
+    return vus.map(String).sort()
+  }
+  const groupe = await ferme(gardes)
+  const parFil = await ferme(null)
+  assert.equal(groupe.length, FENETRE_TACHES_PAUSE, 'la fenetre borne bien les deux cotes')
+  assert.deepEqual(groupe, parFil, 'et les deux branches ferment EXACTEMENT les memes taches')
+})
+
+test('LE TEST QUI COMPTE : au plafond, SEULE la garde des taches de pause retombe par fil', async () => {
+  // ⚠ CONSTAT 7 DE LA RE-REVIEW. Jeter les trois gardes parce que l une touche
+  // le plafond fait payer les 3 requetes par fil pour toujours a un bien qui y
+  // stationne — et une tache de pause ne se ferme QUE si l hote repond. Les
+  // deux gardes « derniere » ne peuvent pas etre tronquees : elles restent.
+  const trop = []
+  for (let i = 0; i < PLAFOND_POSTGREST; i++) {
+    trop.push({ id: `p${i}`, book_id: `B${i % 50}`, status: 'pending', summary: MOTIF, task_type: 'sympathy', created_at: a(-60) })
+  }
+  trop.push({ id: 'recente', book_id: 'B0', task_type: 'sympathy', created_at: a(10) })
+  const { mod, compte } = base({ taches: trop })
+  const res = { errors: [] }
+  const fils = Array.from({ length: 50 }, (_, i) => `B${i}`)
+  const gardes = await mod.chargerLesGardesDesFils(USER, PROP, fils, res)
+  assert.ok(gardes, 'les gardes ne sont PAS jetees en bloc')
+  assert.equal(gardes.pause, null, 'seule celle qui peut etre coupee retombe par fil')
+  assert.equal(res.gardesPauseParFil, 1, 'et ce repli PARTIEL a son propre compteur')
+  assert.equal(res.gardesParFil, undefined, 'ce n est pas le repli total')
+  // Les deux gardes saines servent toujours, sans une requete de plus.
+  const avant = compte.taches
+  assert.equal(await mod.hasNewerTaskOrConv(USER, PROP, 'B0', new Date(t0), gardes), true,
+    'la tache recente est vue par la lecture GROUPEE')
+  assert.equal(compte.taches, avant, 'et sans relire fil par fil')
 })

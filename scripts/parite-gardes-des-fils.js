@@ -45,9 +45,8 @@ const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_K
 
 // Les VRAIES fonctions du cron, pas une copie.
 const {
-  chargerLesGardesDesFils, hasNewerTaskOrConv, REPONSES_HOTE
+  chargerLesGardesDesFils, hasNewerTaskOrConv, fermerTachesPause, REPONSES_HOTE
 } = require('../lib/cron-classify')
-const { MOTIF_PAUSE, FENETRE_TACHES_PAUSE } = require('../lib/gardes-des-fils')
 // ⚠ LE FIL VIENT DE `getPropertyMessages`, PAS D'UNE COPIE DE SA REQUETE.
 // Constat 6 : ma premiere version recopiait la fenetre de 30 jours, le plafond
 // de 500 messages, et la table de correspondance `direction`/`sender` ->
@@ -108,18 +107,25 @@ const { getProvider } = require('../lib/channels')
         ecartsDuBien.push(`    reservation ${bid} : groupe=${groupe} parFil=${parFil} (dernier message voyageur ${guestAt.toISOString()})`)
       }
 
-      // La garde de la pause : on compare la LISTE des taches a fermer, pas
-      // un booleen — c'est elle qui decide d un UPDATE.
+      // La garde de la pause : on compare la LISTE des taches a fermer, pas un
+      // booleen — c'est elle qui decide d'un UPDATE.
+      //
+      // ⚠ ET ON LA DEMANDE AUX DEUX BRANCHES DE `fermerTachesPause`, SANS
+      // RECOPIER SA LECTURE. Ma version d'avant refaisait la requete a la main
+      // — et avait justement oublie le `order by` que le constat 7 venait
+      // d'ajouter au module. Elle comparait donc les 20 PLUS ANCIENNES du SQL a
+      // 20 lignes ARBITRAIRES de PostgREST : au-dela de 20 taches de pause sur
+      // un fil, elle aurait refuse la recette sur le faux defaut qu'elle etait
+      // censee avoir supprime. C'est la lecon du constat 6, une seconde fois.
       const reponses = th.filter(m => REPONSES_HOTE.includes(m.source) && Number.isFinite(Date.parse(m.time)))
       if (reponses.length) {
-        const derniere = Math.max(...reponses.map(m => Date.parse(m.time)))
-        const aFermerGroupe = (gardes.pause.get(String(bid)) || [])
-          .filter(t => Date.parse(t.created_at) < derniere).map(t => String(t.id)).sort()
-        const { data: lu } = await sb.from('agent_tasks').select('id, created_at')
-          .eq('user_id', b.user_id).eq('property_id', cle).eq('book_id', String(bid))
-          .eq('status', 'pending').eq('summary', MOTIF_PAUSE).limit(FENETRE_TACHES_PAUSE)
-        const aFermerParFil = (lu || [])
-          .filter(t => Date.parse(t.created_at) < derniere).map(t => String(t.id)).sort()
+        const ferme = async (g) => {
+          const vus = []
+          await fermerTachesPause(b.user_id, cle, bid, th, { errors: [] }, g, { surFermeture: (ids) => vus.push(...ids) })
+          return vus.map(String).sort()
+        }
+        const aFermerGroupe = await ferme(gardes)
+        const aFermerParFil = await ferme(null)
         if (JSON.stringify(aFermerGroupe) !== JSON.stringify(aFermerParFil)) {
           divergences++
           ecartsDuBien.push(`    reservation ${bid} : taches de pause a fermer groupe=${JSON.stringify(aFermerGroupe)} parFil=${JSON.stringify(aFermerParFil)}`)
