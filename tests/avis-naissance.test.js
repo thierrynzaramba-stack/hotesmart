@@ -320,7 +320,13 @@ test('LE TEST QUI COMPTE : le rattachement de l’objet Channex ne déplace PAS 
 test('le cron fait naître au départ, avant les relances', () => {
   const fs = require('node:fs'); const path = require('node:path')
   const cron = fs.readFileSync(path.join(__dirname, '..', 'api', 'cron.js'), 'utf8')
-  const n = cron.indexOf("chrono.mesure('naissances_avis', () => naitreAuDepart(supabase))")
+  // ⚠ LE MOTIF PORTE LE NOM DE L'ETAPE, PAS LA FORME DE SON APPEL. Il figeait
+  // `chrono.mesure('naissances_avis', () => naitreAuDepart(supabase))` : le lot de mesure du
+  // 22 octobre 2026 a du passer l'affectation du bilan DANS la callback — pour
+  // que le travail fait soit attribue a la tache — et ce test rougissait sans
+  // qu'aucune regle n'ait bouge. L'ordre des etapes, lui, est la propriete, et
+  // il est garde.
+  const n = cron.indexOf("chrono.mesure('naissances_avis'")
   const r = cron.indexOf("chrono.mesure('relances_avis'")
   assert.ok(n > 0 && n < r)
 })

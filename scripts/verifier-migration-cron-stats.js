@@ -117,8 +117,15 @@ const absente = (m) => /(does not exist|schema cache|not find)/i.test(String(m |
         console.error('✗ porte des fonctions non eprouvee : elles sont absentes'); ko++
       } else if (error) console.log('✓ les fonctions sont fermees a la cle publique')
       else if ((data || []).length === 0) {
-        console.log('· les fonctions repondent a la cle publique mais ne rendent RIEN (la RLS'
-          + ' mord) — le `revoke execute` n a pas ete applique, defense en profondeur incomplete')
+        // ⚠ C'EST UN ECHEC, PAS UNE NOTE. La RLS tient, donc rien ne fuit —
+        // mais la migration annonce DEUX gardes et il n'y en a qu'une. Un
+        // verificateur qui dit « · » sur une garde absente laisse partir en
+        // production une defense en profondeur imaginaire. Cause probable :
+        // `revoke … from public` sans `anon, authenticated`, que les default
+        // privileges de Supabase posent NOMINATIVEMENT.
+        console.error('✗ les fonctions repondent a la cle publique (0 ligne, la RLS mord) :'
+          + ' le `revoke execute from public, anon, authenticated` n a pas ete applique')
+        ko++
       } else {
         console.error(`✗ LA CLE PUBLIQUE AGREGE ${data.length} LIGNE(S) par la fonction`)
         ko++

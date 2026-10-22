@@ -206,6 +206,10 @@ async function router(req, res) {
       taches_mesurees: cl.taches,
       classement: cl.classement,
       par_jour: cl.par_jour,
+      // ⚠ TRANSMIS (constat de review). Sans lui, une panne de
+      // `cron_stats_par_jour` affichait un bloc « total par jour » VIDE et
+      // muet, qui se lit « aucun passage » — la conclusion inverse.
+      par_jour_erreur: cl.par_jour_erreur,
       derniers_passages: der.ok ? der.passages : undefined,
       derniers_passages_erreur: der.ok ? undefined : der.raison,
     })

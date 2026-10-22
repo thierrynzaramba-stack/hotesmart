@@ -567,6 +567,12 @@
         + col(t.externes, 10, true) + col(secondes(t.ms), 12, true) + col(t.travail, 9, true))
     })
     l.push('')
+    if (body.par_jour_erreur) {
+      // Un bloc vide se lirait « aucun passage ». Il dit sa panne.
+      l.push('TOTAL PAR JOUR : ILLISIBLE — ' + body.par_jour_erreur)
+      l.push('(le classement ci-dessus reste valable)')
+      return l.join('\n')
+    }
     l.push('TOTAL PAR JOUR (heure de Paris)')
     l.push(col('jour', 13) + col('cron', 15) + col('passages', 10, true)
       + col('requêtes', 10, true) + col('externes', 10, true) + col('temps', 12, true)

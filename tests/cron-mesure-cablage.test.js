@@ -63,7 +63,12 @@ test('⚠ api/cron.js journalise son passage dans la sortie NORMALE et dans le c
   assert.match(catchGlobal, /journaliserLePassage\(\)/,
     'un cycle qui casse est celui qu on veut lire')
   // ⚠ Et l'ecriture est protegee : elle ne peut pas lever vers le handler.
-  const bloc = src.slice(src.indexOf('const journaliserLePassage'), src.indexOf('const journaliserLePassage') + 500)
+  // ⚠ LE BLOC SE DELIMITE PAR SA FERMETURE, PAS PAR UN NOMBRE DE CARACTERES.
+  // La premiere version coupait a 500 caracteres : ajouter un commentaire de
+  // dix lignes dans la fonction faisait rougir ce test sans qu'aucune regle
+  // n'ait bouge — le defaut que ce fichier reproche aux autres.
+  const debut = src.indexOf('const journaliserLePassage')
+  const bloc = src.slice(debut, src.indexOf('\n  }\n', debut))
   assert.match(bloc, /try\s*\{[\s\S]*catch/, 'l ecriture de la mesure vit sous un try')
 })
 
@@ -71,6 +76,29 @@ test('api/cron-messages.js journalise aussi la passe qui n a rien pu lire', () =
   const src = lire('api/cron-messages.js')
   const avant503 = src.slice(0, src.indexOf("'Lecture des biens impossible'"))
   assert.match(avant503.slice(-400), /journaliserLePassage\(\)/)
+})
+
+test('⚠ UNE SEULE LIGNE PAR PASSAGE, meme si la journalisation est appelee deux fois', () => {
+  // CONSTAT DE REVIEW : `journaliserLePassage()` est appele dans la sortie
+  // normale ET dans le `catch` global. Si quelque chose levait APRES la sortie
+  // normale — un `res.json` sur un corps non serialisable, des en-tetes deja
+  // envoyes —, le `catch` rappelait `terminer()` et inserait une SECONDE
+  // ligne avec le meme `commence_le` : le classement comptait le passage deux
+  // fois, dans `count(*)` et dans toutes ses sommes.
+  //
+  // ⚠ CE TEST EST STRUCTUREL, ET JE LE DIS. Le chemin qui l'exerce demande une
+  // levee entre la sortie normale et la fin du handler : l'atteindre sous test
+  // voudrait dire rejouer le cycle complet (trente modules, appels partenaires
+  // compris). On garde donc la PRESENCE du drapeau et son usage, et la
+  // semantique — « deux appels, une ecriture » — est eprouvee sur la fonction
+  // elle-meme dans tests/cron-stats.test.js.
+  for (const f of ['api/cron.js', 'api/cron-messages.js']) {
+    const src = lire(f)
+    const bloc = src.slice(src.indexOf('let mesureEcrite'), src.indexOf('journaliserLePassage = async') + 220)
+    assert.match(bloc, /let mesureEcrite = false/, f)
+    assert.match(bloc, /if \(mesureEcrite\) return/, f)
+    assert.match(bloc, /mesureEcrite = true/, f)
+  }
 })
 
 // ─── 3. Le compteur reste a un seul endroit ─────────────────────────────────

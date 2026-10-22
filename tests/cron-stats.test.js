@@ -143,6 +143,42 @@ test('⚠ la purge ne repart pas a chaque tick : un marqueur du jour la saute', 
   assert.equal(b.appels.filter(a => a.op === 'delete').length, 0)
 })
 
+test('⚠ LE MARQUEUR SE POSE AVANT LE DELETE, pas apres', async () => {
+  // CONSTAT DE REVIEW : la purge n'avait aucun garde-temps et le cycle
+  // l'attendait. Une fois par jour, le `delete` porte sur ~13 000 lignes a
+  // colonne JSON : une base lente bloquait le handler jusqu'au couperet des
+  // 60 s. On peut desormais ABANDONNER l'attente — et c'est sans danger
+  // UNIQUEMENT parce que le marqueur est deja pose : sinon la purge
+  // repartirait au tick suivant, puis au suivant.
+  const b = fausseBase({ marqueur: { data: null, error: null } })
+  await S.purgerSiDue(b.client, { maintenant: () => Date.parse('2026-10-22T09:00:00.000Z') })
+  const ordre = b.appels.filter(a => a.op === 'upsert' || a.op === 'delete').map(a => a.op)
+  assert.deepEqual(ordre, ['upsert', 'delete'])
+})
+
+test('⚠ LE CRON N ATTEND PAS UNE PURGE LENTE', async () => {
+  const b = fausseBase({ marqueur: { data: null, error: null }, delete: () => new Promise(() => {}) })
+  const avant = Date.now()
+  const r = await S.purgerSiDue(b.client, { delaiMs: 40, maintenant: () => Date.parse('2026-10-22T09:00:00.000Z') })
+  assert.equal(r.raison, 'en_retard')
+  assert.ok(Date.now() - avant < 2000)
+  // Le marqueur est quand meme pose : la purge ne repartira pas au tick suivant.
+  assert.ok(b.appels.find(a => a.op === 'upsert'))
+})
+
+test('⚠ UN MARQUEUR ILLISIBLE FAIT SAUTER LA PURGE, il ne la declenche pas', async () => {
+  // CONSTAT DE REVIEW : l'erreur de lecture n'etait pas distinguee de
+  // l'absence de ligne. Une base qui refuse la lecture rendait `dernier =
+  // null`, donc « purge due », donc un `delete` a CHACUN des 288 ticks
+  // quotidiens — l'inverse exact de ce que le marqueur sert a empecher.
+  // Perdre un jour de purge sur 30 jours de conservation ne coute rien.
+  const b = fausseBase({ marqueur: { data: null, error: { message: 'timeout' } } })
+  const r = await S.purgerSiDue(b.client, { maintenant: () => Date.parse('2026-10-22T09:00:00.000Z') })
+  assert.equal(r.raison, 'marqueur_illisible')
+  assert.equal(b.appels.filter(a => a.op === 'delete').length, 0)
+  assert.equal(b.appels.filter(a => a.op === 'upsert').length, 0)
+})
+
 test('⚠ une purge qui echoue ne fait pas echouer le cron', async () => {
   const b = fausseBase({ marqueur: { data: null, error: null }, delete: () => { throw new Error('timeout') } })
   const r = await S.purgerSiDue(b.client, { maintenant: () => Date.parse('2026-10-22T09:00:00.000Z') })

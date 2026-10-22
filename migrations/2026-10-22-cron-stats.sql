@@ -145,17 +145,28 @@ as $$
   group by 1, 2
 $$;
 
--- ⚠ ET LES FONCTIONS SE FERMENT AUSSI. Sans ces deux
--- lignes, tout role recoit EXECUTE par defaut : la RLS
--- suffirait a ne rien rendre, mais une garde qui tient
--- par une seule raison n'est pas une garde. Le cout de
--- la plateforme n'est pas une donnee de client.
+-- ⚠ ET LES FONCTIONS SE FERMENT AUSSI. La RLS
+-- suffirait a ne rien rendre (SECURITY INVOKER, aucune
+-- policy), mais une garde qui tient par une seule
+-- raison n'est pas une garde. Le cout de la plateforme
+-- n'est pas une donnee de client.
+--
+-- ⚠ ET « FROM PUBLIC » NE SUFFIT PAS, constat de
+-- review. Supabase pose des DEFAULT PRIVILEGES qui
+-- donnent EXECUTE a `anon` et `authenticated`
+-- NOMINATIVEMENT sur toute fonction creee par
+-- `postgres` — et ce SQL est colle dans l'editeur,
+-- donc cree par `postgres`. Revoquer a `public`
+-- n'enleve pas un grant nominatif : la cle publique
+-- pouvait encore appeler les deux fonctions. Aucune
+-- donnee ne fuyait (la RLS tenait), mais la defense en
+-- profondeur annoncee juste au-dessus n'existait pas.
 revoke execute on function
   public.cron_stats_classement(timestamptz, text)
-  from public;
+  from public, anon, authenticated;
 revoke execute on function
   public.cron_stats_par_jour(timestamptz)
-  from public;
+  from public, anon, authenticated;
 grant execute on function
   public.cron_stats_classement(timestamptz, text)
   to service_role;

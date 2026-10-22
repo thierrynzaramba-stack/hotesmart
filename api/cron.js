@@ -127,6 +127,9 @@ const { executerAutoValidations } = require('../lib/avis/auto-validation')
 const { releverLesComptesDus } = require('../lib/canaux-du-bien')
 const { demarrerPassage } = require('../lib/metriques-cron')
 const { ecrireLePassage, purgerSiDue: purgerLesMesures } = require('../lib/cron-stats')
+// Le mur de `maxDuration` est a 60 s (vercel.json) : la mesure n'ecrit que dans
+// ce qui reste avant 57, pour laisser partir la reponse.
+const BUDGET_MESURE_MS = 57000
 
 // ─── Chrono d'etape, devenu LE COMPTEUR DU PASSAGE ──────────────────────────
 // Le cycle depasse regulierement les 60 s (maxDuration), ce qui tue les sondes
@@ -137,7 +140,15 @@ const { ecrireLePassage, purgerSiDue: purgerLesMesures } = require('../lib/cron-
 //
 // ⚠ DEPUIS LE 22 OCTOBRE 2026, LE CHRONO COMPTE AUSSI LE COUT (demande de
 // Thierry, lot de mesure avant decoupage) : requetes Supabase, appels aux
-// partenaires et travail fait, par tache. Le code vit dans
+// partenaires et travail fait, par tache.
+//
+// ⚠ ET LES BILANS S'AFFECTENT DANS LA CALLBACK MESUREE, PAS APRES ELLE
+// (constat de review). Le travail fait se lit sur la DIFFERENCE des compteurs
+// de `results` entre l'entree et la sortie de la tache : une ligne
+// `results.totalPrixChanges = bilan.prix_changes` placee APRES le retour de
+// `mesure` tombe entre deux photographies, et la tache affiche zero travail
+// alors que le pilote vient de changer quarante prix. Huit taches etaient dans
+// ce cas. Rien d'autre n'a bouge : memes appels, meme ordre, memes `catch`. Le code vit dans
 // `lib/metriques-cron.js` — l'interface (`mesure`, `total`, `resume`) n'a pas
 // bouge d'un caractere, exactement pour que les quarante points d'appel
 // ci-dessous restent le code qu'on mesure.
@@ -210,11 +221,33 @@ module.exports = async function handler(req, res) {
   // invocations.
   // ⚠ ET ELLE NE PEUT PAS FAIRE ECHOUER LE CRON (exigence explicite de
   // Thierry) : `ecrireLePassage` ne leve jamais et n'attend pas plus de 2,5 s.
+  // ⚠ UNE SEULE LIGNE PAR PASSAGE, MEME APPELE DEUX FOIS (constat de review).
+  // Il est appele dans la sortie normale ET dans le `catch` global : si
+  // quelque chose levait APRES la sortie normale — un `res.json` sur un corps
+  // non serialisable, des en-tetes deja envoyes —, le `catch` rappelait
+  // `terminer()` et inserait une SECONDE ligne avec le meme `commence_le`. Le
+  // classement comptait alors ce passage deux fois, dans `count(*)` et dans
+  // toutes ses sommes.
+  let mesureEcrite = false
   const journaliserLePassage = async () => {
+    if (mesureEcrite) return
+    mesureEcrite = true
     try {
       const detail = chrono.terminer()
-      await ecrireLePassage(supabase, detail)
-      await purgerLesMesures(supabase)
+      // ⚠ LA MESURE PREND CE QU'IL RESTE, JAMAIS PLUS. Les deux courses de
+      // `lib/cron-stats.js` (2,5 s et 3 s) s'additionnent : sur un cycle deja
+      // a 55 s, les attendre toutes les deux depasserait les 60 s de
+      // `maxDuration` et tuerait la REPONSE du cron — la mesure aurait alors
+      // casse ce qu'elle observe. On lui laisse donc le reliquat du budget, et
+      // la purge, poste le moins urgent du lot, attend le passage suivant si
+      // le cycle est deja en retard.
+      const reste = BUDGET_MESURE_MS - detail.duree_ms
+      if (reste > 300) {
+        await ecrireLePassage(supabase, detail, { delaiMs: reste })
+        if (detail.duree_ms < 50000) await purgerLesMesures(supabase, { delaiMs: reste })
+      } else {
+        console.error(`[Cron] mesure non ecrite : cycle a ${detail.duree_ms} ms, plus de budget`)
+      }
     } catch (e) { console.error('[Cron] mesure non journalisee :', e && e.message) }
   }
   try {
@@ -404,8 +437,10 @@ module.exports = async function handler(req, res) {
     // la priver de budget.
     // ⚠ Idempotente : deux passages sans changement n'écrivent rien.
     try {
-      const bilanMenages = await chrono.mesure('sync_menages', () => synchroniserMenages(results))
-      results.totalMenagesCrees = bilanMenages?.crees || 0
+      await chrono.mesure('sync_menages', async () => {
+        const bilanMenages = await synchroniserMenages(results)
+        results.totalMenagesCrees = bilanMenages?.crees || 0
+      })
     }
     catch (err) {
       console.error('[Cron] Erreur synchronisation ménages:', err.message)
@@ -477,8 +512,10 @@ module.exports = async function handler(req, res) {
     // une fois par tentative, et un humain tranche en cherchant le code
     // déterministe `HSM-…` chez le provider.
     try {
-      const bilanBloquees = await chrono.mesure('tentatives_bloquees', () => rattraperBloquees(supabase))
-      results.totalTentativesBloquees = bilanBloquees?.signalees || 0
+      await chrono.mesure('tentatives_bloquees', async () => {
+        const bilanBloquees = await rattraperBloquees(supabase)
+        results.totalTentativesBloquees = bilanBloquees?.signalees || 0
+      })
     }
     catch (err) {
       console.error('[Cron] Erreur rattrapage tentatives bloquées:', err.message)
@@ -496,8 +533,10 @@ module.exports = async function handler(req, res) {
     // Cadence quotidienne : le module porte son propre marqueur cron_logs, le
     // cycle tournant toutes les 5 minutes.
     try {
-      const bilanPurge = await chrono.mesure('purge_tentatives', () => purgerSiDue(supabase))
-      results.totalTentativesAnonymisees = bilanPurge?.anonymisees || 0
+      await chrono.mesure('purge_tentatives', async () => {
+        const bilanPurge = await purgerSiDue(supabase)
+        results.totalTentativesAnonymisees = bilanPurge?.anonymisees || 0
+      })
     }
     catch (err) {
       console.error('[Cron] Erreur purge tentatives:', err.message)
@@ -518,10 +557,12 @@ module.exports = async function handler(req, res) {
     // ⚠ Placé AVANT le dispatch (le poste le plus couteux) et APRES les
     // sondes : il ecrit, et les filets anti-boucle doivent le voir.
     try {
-      const bilanPilote = await chrono.mesure('pilote_yieldflow', () => piloterLesBiens(supabase, { appel: channelCall }))
-      results.totalNuitsOuvertes = bilanPilote?.ouvertes || 0
-      results.totalPrixChanges = bilanPilote?.prix_changes || 0
-      for (const e of (bilanPilote?.erreurs || [])) results.errors.push({ context: 'pilote_yieldflow', ...e })
+      await chrono.mesure('pilote_yieldflow', async () => {
+        const bilanPilote = await piloterLesBiens(supabase, { appel: channelCall })
+        results.totalNuitsOuvertes = bilanPilote?.ouvertes || 0
+        results.totalPrixChanges = bilanPilote?.prix_changes || 0
+        for (const e of (bilanPilote?.erreurs || [])) results.errors.push({ context: 'pilote_yieldflow', ...e })
+      })
     }
     catch (err) {
       console.error('[Cron] Erreur pilote YieldFlow:', err.message)
@@ -533,9 +574,11 @@ module.exports = async function handler(req, res) {
     // `menages.departure_date` : pas un balayage. Idempotente — une évaluation
     // née n'est jamais réécrite. Placée AVANT les relances, qui la suivent.
     try {
-      const bilanNes = await chrono.mesure('naissances_avis', () => naitreAuDepart(supabase))
-      results.totalAvisNes = bilanNes?.crees || 0
-      if (bilanNes?.erreurs) results.errors.push({ context: 'naissances_avis', error: bilanNes.erreurs + ' erreur(s)' })
+      await chrono.mesure('naissances_avis', async () => {
+        const bilanNes = await naitreAuDepart(supabase)
+        results.totalAvisNes = bilanNes?.crees || 0
+        if (bilanNes?.erreurs) results.errors.push({ context: 'naissances_avis', error: bilanNes.erreurs + ' erreur(s)' })
+      })
     }
     catch (err) {
       console.error('[Cron] Erreur naissances avis:', err.message)
@@ -549,9 +592,11 @@ module.exports = async function handler(req, res) {
     // plafonnée à 200 — pas de balayage. Placée AVANT le dispatch, comme les
     // autres tâches légères : elle ne coûte que deux ou trois requêtes.
     try {
-      const bilanRelances = await chrono.mesure('relances_avis', () => relancerEvaluations(supabase))
-      results.totalAvisRelances = bilanRelances?.relancees || 0
-      if (bilanRelances?.erreurs) results.errors.push({ context: 'relances_avis', error: bilanRelances.erreurs + ' erreur(s)' })
+      await chrono.mesure('relances_avis', async () => {
+        const bilanRelances = await relancerEvaluations(supabase)
+        results.totalAvisRelances = bilanRelances?.relancees || 0
+        if (bilanRelances?.erreurs) results.errors.push({ context: 'relances_avis', error: bilanRelances.erreurs + ' erreur(s)' })
+      })
     }
     catch (err) {
       console.error('[Cron] Erreur relances avis:', err.message)
@@ -568,11 +613,13 @@ module.exports = async function handler(req, res) {
       // ⚠ Le temps restant du cycle (maxDuration 60 s) : sous 20 s, plus aucune
       // publication ne commence — tuée entre la prise et le statut, elle
       // laisserait un avis parti sans trace (revue de 59243cb, S2).
-      const bilanAuto = await chrono.mesure('auto_validation_avis', () => executerAutoValidations(supabase, {
-        outils: outilsAutoValidation, resteMs: () => 55000 - chrono.total(),
-      }))
-      results.totalAvisAutoPubliees = bilanAuto?.publiees || 0
-      if (bilanAuto?.erreurs) results.errors.push({ context: 'auto_validation_avis', error: bilanAuto.erreurs + ' erreur(s)' })
+      await chrono.mesure('auto_validation_avis', async () => {
+        const bilanAuto = await executerAutoValidations(supabase, {
+          outils: outilsAutoValidation, resteMs: () => 55000 - chrono.total(),
+        })
+        results.totalAvisAutoPubliees = bilanAuto?.publiees || 0
+        if (bilanAuto?.erreurs) results.errors.push({ context: 'auto_validation_avis', error: bilanAuto.erreurs + ' erreur(s)' })
+      })
     }
     catch (err) {
       console.error('[Cron] Erreur auto-validation avis:', err.message)
@@ -605,12 +652,14 @@ module.exports = async function handler(req, res) {
     // 5 comptes par passage. Son erreur se lit dans results.errors, jamais
     // dans un code HTTP — leçon « erreur avalée, cron à 200 ».
     try {
-      const bilanCanaux = await chrono.mesure('releve_canaux', () => releverLesComptesDus())
-      results.canaux = bilanCanaux
-      if (bilanCanaux.echecs) {
-        results.errors.push({ context: 'canaux_du_bien',
-          error: `${bilanCanaux.echecs} relevé(s) en échec sur ${bilanCanaux.comptes}` })
-      }
+      await chrono.mesure('releve_canaux', async () => {
+        const bilanCanaux = await releverLesComptesDus()
+        results.canaux = bilanCanaux
+        if (bilanCanaux.echecs) {
+          results.errors.push({ context: 'canaux_du_bien',
+            error: `${bilanCanaux.echecs} relevé(s) en échec sur ${bilanCanaux.comptes}` })
+        }
+      })
     } catch (err) {
       console.error('[Cron] Erreur relevé canaux:', err.message)
       results.errors.push({ context: 'canaux_du_bien', error: err.message })

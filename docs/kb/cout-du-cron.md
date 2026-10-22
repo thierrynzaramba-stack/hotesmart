@@ -67,6 +67,14 @@ module s'incrémente lui-même, la mesure redevient une collection de convention
   (`results.totalMessages`, `totalPrixChanges`, `errors`…), photographiés avant
   et après chaque tâche. Aucun compteur n'a été ajouté dans un module : un
   module neuf qui remplit `results` est mesuré sans l'avoir demandé.
+  ⚠ **Le corollaire a coûté un constat de review** : un bilan affecté *après* le
+  retour de `chrono.mesure` tombe entre deux photographies, et la tâche affiche
+  **zéro travail**. Huit tâches de `api/cron.js` étaient dans ce cas, dont
+  `pilote_yieldflow` — la colonne « travail » aurait lu 0 le jour où le pilote
+  change quarante prix, exactement là où le volume devait décider. Les
+  affectations sont passées **dans** la callback mesurée ; et ce qui échappe
+  malgré tout tombe désormais dans `(hors tache)`, jamais dans le vide : pour un
+  lot de mesure, un total qui mente est le pire résultat possible.
 
 La ligne `(hors tache)` porte ce qui se fait en dehors de toute tâche —
 `api/cron.js` lit les clés Beds24 et les jetons publics avant la première, et
@@ -75,9 +83,13 @@ total, et ce sont des requêtes qu'un découpage devra porter.
 
 ## 4. Ce que la mesure ne dit PAS
 
-- **Son propre coût n'est pas dans ses chiffres.** La ligne s'écrit après la
-  fermeture du passage : un `insert` par passage, plus un `delete` et un
-  marqueur par jour. C'est écrit ici plutôt que caché dans un total.
+- **Son propre coût n'est pas dans ses chiffres**, et le voici en entier :
+  **par passage**, un `insert` dans `cron_stats` et une lecture du marqueur de
+  purge ; **par jour**, un `upsert` de ce marqueur et un `delete`. La ligne
+  s'écrit après la fermeture du passage, donc rien de tout cela n'apparaît dans
+  les compteurs. Deux requêtes par passage, dites ici plutôt que cachées dans un
+  total — le premier jet de ce document disait « un `insert` par passage » et
+  oubliait la lecture du marqueur, relevé en review.
 - **Une promesse lâchée sans `await` est comptée dans la tâche en cours au
   moment où elle se résout**, pas dans celle qui l'a lancée. Le compteur suit
   une pile synchrone, pas un contexte asynchrone. Les tâches du cycle sont
@@ -95,9 +107,16 @@ total, et ce sont des requêtes qu'un découpage devra porter.
 - **Le coût en euros de l'IA n'est pas ici** : il vit dans `ia_appels`
   (tokens et coût par appel, `docs/specs/spec-journal-ia`). Le classement ne
   compte que le **nombre** d'appels.
-- **Les tâches sont plafonnées à 40 par passage** dans le JSON ; au-delà, les
-  moins coûteuses sont **agrégées** en une ligne `(N autres taches)` — jamais
+- **Les tâches sont plafonnées à 80 par passage** dans le JSON ; au-delà, les
+  moins coûteuses sont **agrégées** en une ligne `(autres taches)` — jamais
   jetées : le total porte tout.
+  ⚠ Le plafond était à 40, et **il aurait mordu dès aujourd'hui** (constat de
+  review) : `api/cron.js` pose 27 tâches de premier niveau, plus `(hors tache)`,
+  plus trois étapes et **quatre sous-tâches par bien** pour chaque compte
+  Beds24 — un seul compte à trois biens fait déjà 43 tâches. Et le nom de la
+  ligne agrégée est **fixe** : `cron_stats_classement` groupe par le nom, donc
+  « (3 autres taches) » et « (5 autres taches) » devenaient deux lignes
+  distinctes du classement, capables d'occuper le top 10 à elles seules.
 
 ## 5. La table
 
@@ -119,10 +138,25 @@ qui attendrait une base lente causerait la panne qu'elle sert à prévenir.
 `tests/cron-mesure-cablage.test.js` l'éprouve au point de montage : base qui
 refuse l'insertion, réponse de la passe **identique**.
 
+⚠ **La purge non plus n'est pas attendue au-delà de 3 s**, et son marqueur est
+posé **avant** le `delete` — pas après. C'est ce qui rend l'abandon sans
+danger : un `delete` lent ou abandonné ne fait pas repartir la purge au tick
+suivant. Et une lecture de marqueur **en erreur** fait *sauter* la purge au lieu
+de la déclencher (perdre un jour sur 30 de conservation ne coûte rien, un
+`delete` à chacun des 288 ticks quotidiens, si).
+
 ⚠ **RLS activée, aucune policy.** Cette table n'a pas de propriétaire : elle ne
 porte la donnée de personne, seulement le coût de la plateforme. Seule la clé
 service lit et écrit. Les deux fonctions d'agrégation sont en SECURITY INVOKER
-et fermées à la clé publique (`revoke execute`).
+et fermées à la clé publique.
+⚠ **Et `revoke … from public` ne suffisait pas** (constat de review) : Supabase
+pose des *default privileges* qui donnent EXECUTE à `anon` et `authenticated`
+**nominativement** sur toute fonction créée par `postgres` — et ce SQL est collé
+dans l'éditeur, donc créé par `postgres`. Révoquer à `public` n'enlève pas un
+grant nominatif. Aucune donnée ne fuyait (la RLS tenait seule), mais la défense
+en profondeur annoncée n'existait pas. Le vérificateur **compte maintenant un
+échec** quand les fonctions répondent à la clé publique, même en rendant zéro
+ligne.
 
 ## 6. Comment lire le classement
 

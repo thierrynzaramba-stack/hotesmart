@@ -69,6 +69,19 @@ const col = (v, n, droite) => (droite ? String(v).padStart(n) : String(v).padEnd
       + col(t.externes, 10, true) + col(sec(t.ms), 12, true) + col(t.travail, 9, true))
   })
 
+  // ⚠ UNE PANNE DE `cron_stats_par_jour` NE DOIT PAS SE LIRE « FENETRE VIDE »
+  // (constat de review). `classement()` avale son erreur et rend `par_jour:
+  // []` : le script imprimait alors le top 10 puis « 0 passage(s) vus sur 576
+  // attendus ⚠ fenetre incomplete ». La conclusion du protocole des 48 h
+  // etait fausse dans les deux sens — on croyait la fenetre vide, ou le
+  // classement non representatif.
+  if (r.par_jour_erreur) {
+    console.log(`\nTOTAL PAR JOUR : ILLISIBLE — ${r.par_jour_erreur}`)
+    console.log('COUVERTURE : NON CALCULABLE (elle se compte sur le total par jour).')
+    console.log('Le classement ci-dessus reste valable.')
+    process.exit(1)
+  }
+
   console.log('\nTOTAL PAR JOUR (heure de Paris)')
   console.log(col('jour', 13) + col('cron', 15) + col('passages', 10, true)
     + col('requetes', 10, true) + col('externes', 10, true) + col('temps', 12, true)

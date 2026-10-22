@@ -51,6 +51,8 @@ const MAX_BIENS_PAR_PASSE = 500
 
 const { demarrerPassage } = require('../lib/metriques-cron')
 const { ecrireLePassage, purgerSiDue: purgerLesMesures } = require('../lib/cron-stats')
+// Meme mur de 60 s que le cycle principal (vercel.json).
+const BUDGET_MESURE_MS = 57000
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -82,10 +84,28 @@ module.exports = async function handler (req, res) {
   // ⚠ L'ecriture de la mesure ne peut pas faire echouer la passe : elle ne
   // leve jamais et n'attend pas plus de 2,5 s (lib/cron-stats.js).
   const chrono = demarrerPassage({ cron: 'cron-messages', resultats: () => results })
+  // ⚠ Une seule ligne par passage, meme appele deux fois (la sortie 503 et la
+  // sortie normale) : sinon le classement compte le passage deux fois.
+  let mesureEcrite = false
   const journaliserLePassage = async () => {
+    if (mesureEcrite) return
+    mesureEcrite = true
     try {
-      await ecrireLePassage(supabase, chrono.terminer())
-      await purgerLesMesures(supabase)
+      const detail = chrono.terminer()
+      // ⚠ LA MESURE PREND CE QU'IL RESTE, JAMAIS PLUS. Les deux courses de
+      // `lib/cron-stats.js` (2,5 s et 3 s) s'additionnent : sur un cycle deja
+      // a 55 s, les attendre toutes les deux depasserait les 60 s de
+      // `maxDuration` et tuerait la REPONSE du cron — la mesure aurait alors
+      // casse ce qu'elle observe. On lui laisse donc le reliquat du budget, et
+      // la purge, poste le moins urgent du lot, attend le passage suivant si
+      // le cycle est deja en retard.
+      const reste = BUDGET_MESURE_MS - detail.duree_ms
+      if (reste > 300) {
+        await ecrireLePassage(supabase, detail, { delaiMs: reste })
+        if (detail.duree_ms < 50000) await purgerLesMesures(supabase, { delaiMs: reste })
+      } else {
+        console.error(`[cron-messages] mesure non ecrite : cycle a ${detail.duree_ms} ms, plus de budget`)
+      }
     } catch (e) { console.error('[cron-messages] mesure non journalisee :', e && e.message) }
   }
 

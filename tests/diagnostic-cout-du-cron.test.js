@@ -179,6 +179,23 @@ test('⚠ la migration non appliquee se dit en clair, pas en « erreur serveur �
   assert.match(res.body.error, /migration 2026-10-22-cron-stats/)
 })
 
+test('⚠ une panne du total par jour est DITE, pas affichee comme « aucun passage »', async () => {
+  // CONSTAT DE REVIEW : `classement()` avale l'erreur de `cron_stats_par_jour`
+  // et rend `par_jour: []`. Sans transmettre le motif, le bloc « total par
+  // jour » s'affichait VIDE et muet — ce qui se lit « aucun passage », la
+  // conclusion inverse. Et le script en tirait « fenetre incomplete, 0 % ».
+  let n = 0
+  const { res } = await appeler({}, { rpc: (nom) => {
+    n++
+    if (nom === 'cron_stats_classement') return { data: LIGNES, error: null }
+    return { data: null, error: { message: 'permission denied for function cron_stats_par_jour' } }
+  } })
+  assert.equal(res.code, 200)
+  assert.equal(res.body.classement.length, 3, 'le classement reste lisible')
+  assert.deepEqual(res.body.par_jour, [])
+  assert.match(res.body.par_jour_erreur, /permission denied/)
+})
+
 test('un check inconnu reste refuse', async () => {
   const etat = preparer()
   const handler = require('../api/diagnostic')

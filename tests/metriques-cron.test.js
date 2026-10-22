@@ -307,6 +307,61 @@ test('les appels Haiku arrivent par compterAppelExterne, et seulement dans un pa
   } finally { C.retirerLeCompteur() }
 })
 
+test('⚠ LE TRAVAIL FAIT ENTRE DEUX TACHES N EST PAS PERDU : il tombe dans « hors tache »', async () => {
+  // CONSTAT DE REVIEW, ET C'ETAIT LE PLUS COUTEUX DU LOT. Huit taches de
+  // `api/cron.js` affectaient leur bilan APRES le retour de `mesure`
+  // (`results.totalPrixChanges = bilan.prix_changes`), donc entre deux
+  // photographies : le delta n'etait attribue a personne, et le total du
+  // passage disait ZERO la ou le pilote venait de changer quarante prix. Les
+  // affectations sont passees dans la callback ; cette ligne-ci garde le
+  // filet, pour que plus aucun chiffre ne puisse disparaitre.
+  const h = horlogeFigee()
+  const results = { totalPrixChanges: 0 }
+  const p = C.demarrerPassage({ horloge: h, resultats: () => results, compteurDeFetch: false })
+  try {
+    await p.mesure('pilote', async () => { h.pas(10) })
+    results.totalPrixChanges += 40   // « apres le retour de mesure »
+    const d = p.terminer()
+    assert.deepEqual(d.taches.find(t => t.nom === 'pilote').travail, {})
+    const hors = d.taches.find(t => t.nom === C.HORS_TACHE)
+    assert.deepEqual(hors.travail, { totalPrixChanges: 40 })
+    assert.equal(hors.travail_total, 40)
+  } finally { C.retirerLeCompteur() }
+})
+
+test('le travail d une tache ne se retrouve PAS en double dans « hors tache »', async () => {
+  const h = horlogeFigee()
+  const results = { totalMessages: 0 }
+  const p = C.demarrerPassage({ horloge: h, resultats: () => results, compteurDeFetch: false })
+  try {
+    await p.mesure('messages', async () => { results.totalMessages += 7; h.pas(10) })
+    const d = p.terminer()
+    const hors = d.taches.find(t => t.nom === C.HORS_TACHE)
+    assert.deepEqual(hors ? hors.travail : {}, {})
+    assert.equal(d.totaux.travail.totalMessages, 7)
+  } finally { C.retirerLeCompteur() }
+})
+
+test('⚠ une enveloppe TIERCE posee par-dessus la notre ne fait pas compter deux fois', async () => {
+  // CONSTAT DE REVIEW : le marqueur n'etait lu que sur le `fetch` le plus
+  // EXTERIEUR. Un tiers qui s'installe au-dessus du notre entre deux passages
+  // faisait reposer un second compteur, et chaque requete comptait DOUBLE, en
+  // silence, pour toute la vie de l'instance.
+  const f = fauxFetch()
+  const p1 = C.demarrerPassage({ horloge: horlogeFigee() })
+  p1.terminer()
+  // Un tiers s'installe par-dessus, en gardant la chaine.
+  const notre = globalThis.fetch
+  const tiers = function (...args) { return notre.apply(this, args) }
+  tiers.__hs_vrai = notre
+  globalThis.fetch = tiers
+  const p2 = C.demarrerPassage({ horloge: horlogeFigee() })
+  try {
+    await p2.mesure('t', async () => { await fetch('https://projet.supabase.co/rest/v1/x') })
+    assert.equal(p2.terminer().requetes, 1, 'une requete compte UNE fois, pas deux')
+  } finally { C.retirerLeCompteur(); f.restaurer() }
+})
+
 // ─── 5. Le detail reste borne ───────────────────────────────────────────────
 
 test('⚠ le detail d un passage est PLAFONNE, et le reste est agrege, pas jete', async () => {
@@ -322,7 +377,13 @@ test('⚠ le detail d un passage est PLAFONNE, et le reste est agrege, pas jete'
     assert.equal(d.taches.length, C.TACHES_MAX)
     assert.equal(d.totaux.tronquees, 26)
     const agregee = d.taches[d.taches.length - 1]
-    assert.match(agregee.nom, /autres taches/)
+    // ⚠ LE NOM EST FIXE, ET LE NOMBRE DANS UN CHAMP (constat de review) :
+    // `cron_stats_classement` groupe par le nom, donc « (3 autres taches) » et
+    // « (5 autres taches) » devenaient deux lignes distinctes du classement,
+    // capables d'occuper le top 10 a elles seules.
+    assert.equal(agregee.nom, C.AUTRES_TACHES)
+    assert.equal(agregee.nom, '(autres taches)')
+    assert.equal(agregee.autres, 26)
     assert.equal(agregee.n, 26)
     // Le total, lui, porte TOUT : 65 appels externes, pas 39.
     assert.equal(d.appels_externes, C.TACHES_MAX + 25)
