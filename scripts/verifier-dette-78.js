@@ -12,8 +12,13 @@
 // correction sur les donnees reelles : il appelle `joursOuverts` deux fois,
 // avec et sans `joursExclus`, et compare. Il ne prouve PAS que la production
 // passe l'option — supprimer `joursExclus: exclus` d'api/yield.js le laisserait
-// vert. Le CABLAGE est prouve par `tests/api-yield.test.js`, dont six
-// garde-fous rougissent contre le commit precedent (regle 19). Les deux
+// vert. Le CABLAGE est prouve par les tests, et par L'INVARIANT DES TROIS
+// BLOCS en particulier (`tests/api-yield.test.js`) : dans une seule reponse,
+// `realise`, le « a date » et la projection doivent diviser par le MEME
+// denominateur et citer le MEME TO N-1. Le compte annonce ici etait « six
+// garde-fous dans api-yield » : faux, mesure par contre-epreuve — 4 dans
+// `api-yield` et 3 dans `capacite-yield`. Un compte faux dans un en-tete se lit
+// comme une mesure. Les deux
 // artefacts repondent a deux questions ; aucun ne remplace l'autre, et le KB
 // ne doit pas citer celui-ci comme « la preuve » du cablage.
 //
@@ -58,6 +63,16 @@ const { eclater, construirePontDemapped } = require('../lib/yield/eclatement')
 const { calculerIndicateurs } = require('../lib/yield/indicateurs')
 const { joursOuverts, lignesDuCalendrier, joursDeLaPeriode } = require('../lib/yield/capacite')
 const { joursExclus, exceptionsDuBien } = require('../lib/yield/exceptions')
+// ⚠ LE LECTEUR DU DEPOT, PAS UNE TROISIEME COPIE — releve en re-review.
+// Les cinq lignes de pagination recopiees ici etaient `lireReservations` mot
+// pour mot, MOINS sa borne `RESERVATIONS_MAX` : les deux autres copies REFUSENT
+// au-dela (l'endpoint rend 413), celle-ci continuait de paginer et imprimait un
+// TO/RevPAR calcule sur un historique que l'endpoint qu'elle pretend prouver
+// aurait refuse de calculer. C'est le mode de defaillance que le registre
+// enregistre pour le neuvieme rouge du 14 septembre. Et la chaine de projection
+// vivait dans trois fichiers : en retirer `user_id` dans un seul ferait clef
+// `construirePontDemapped` sur `undefined`, en silence.
+const { lireReservations } = require('../lib/yield/grille-du-bien')
 
 const sb = createClient(URL, KEY)
 const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
@@ -90,46 +105,68 @@ function agreger (periodes) {
   }
 }
 
+// ⚠ LE COMPTE SE DESIGNE, IL NE SE DEVINE PAS — releve en re-review, deux
+// defauts dans le meme geste. (a) La lecture de decouverte n'avait aucun
+// `.eq('user_id', ...)` : REVIEW.md regle 1 l'exige sur tout traitement par
+// lot, et son pourquoi est litteral — « la RLS ne protege pas le service key,
+// qui la contourne par conception ». (b) Le compte etait choisi par
+// heuristique, « celui qui a le plus de biens » : ce lot vient de FIGER la
+// fenetre temoin pour la rendre reproductible, et le compte restait mobile —
+// le jour ou un CLIENT a cinq biens, la recette publiee au KB mesure un autre
+// hote, et le garde-fou casse sur un evenement de CROISSANCE.
+// La decouverte ne lit donc QUE `user_id` (aucune donnee de bien), elle
+// s'annonce, et elle ne MESURE rien : elle rend la main avec le code 2.
+const compteDemande = (process.argv.find(a => a.startsWith('--compte=')) || '').slice(9) || null
+const positionnels = process.argv.slice(2).filter(a => !a.startsWith('--'))
+
+async function decouvrir () {
+  const { data, error } = await sb.from('properties')
+    .select('user_id').not('provider_property_id', 'is', null).limit(1000)
+  if (error) { console.error('Lecture impossible :', error.message); process.exit(1) }
+  const compte = {}
+  for (const b of (data || [])) compte[b.user_id] = (compte[b.user_id] || 0) + 1
+  console.error('\nAUCUN COMPTE DESIGNE. La recette nomme le compte qu elle mesure.')
+  console.error('Comptes porteurs de biens raccordes, sur ce projet :')
+  for (const [id, n] of Object.entries(compte).sort((a, c) => c[1] - a[1])) {
+    console.error(`  --compte=${id}   (${n} bien(s))`)
+  }
+  console.error('\nRelancer avec --compte=<uuid>.')
+  process.exit(2)
+}
+
 async function main () {
   const auj = jourLocal(new Date())
+  if (!compteDemande) return decouvrir()
   // ⚠ LE COMPTE EST CHOISI PUIS TOUT EST FILTRE DESSUS. La premiere version
   // lisait `properties` pour TOUS les comptes, sans `user_id` et sans
   // pagination — en service key, donc RLS contournee (regle 1 du depot), et
   // tronque a 1000 lignes en silence. Elle prenait ensuite « le compte qui a le
   // plus de biens » : sur staging, c'est la plus grosse fixture de recette,
   // mesuree et presentee comme une preuve sur les biens reels.
+  const compte = compteDemande
+  // Les fiches COMPLETES du seul compte designe : `joursOuverts` depend de
+  // `base_price`, `capacity`, `zone_scolaire`, `pilote_*`. ET PAGINEE : le
+  // commentaire d'a cote declarait refuser la troncature silencieuse de
+  // PostgREST a 1000 lignes, et cette lecture-la n'avait pas de `.range()`.
   const PAGE = 1000
-  const tous = []
+  const lesSiens = []
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await sb.from('properties')
-      .select('id, user_id').not('provider_property_id', 'is', null)
+    const { data, error } = await sb.from('properties').select('*')
+      .eq('user_id', compte).not('provider_property_id', 'is', null)
       .order('id').range(from, from + PAGE - 1)
     if (error) { console.error('Lecture des biens impossible :', error.message); process.exit(1) }
-    tous.push(...(data || []))
+    lesSiens.push(...(data || []))
     if (!data || data.length < PAGE) break
   }
-  if (!tous.length) { console.error('ECHEC : aucun bien lu.'); process.exit(1) }
-  const parCompte = {}
-  for (const b of tous) (parCompte[b.user_id] = parCompte[b.user_id] || []).push(b)
-  const compte = Object.keys(parCompte).sort((a, c) => parCompte[c].length - parCompte[a].length)[0]
-  // Et on relit les fiches COMPLETES du seul compte retenu : `joursOuverts`
-  // depend de `base_price`, `capacity`, `zone_scolaire`, `pilote_*`.
-  const { data: lesSiens, error: eB } = await sb.from('properties').select('*')
-    .eq('user_id', compte).not('provider_property_id', 'is', null).order('name')
-  if (eB) { console.error('Lecture des biens impossible :', eB.message); process.exit(1) }
-  console.log(`\nBase    : ${projet}`)
-  console.log(`Compte  : ${compte.slice(0, 8)}, ${lesSiens.length} bien(s) raccorde(s)`
-    + ` sur ${tous.length} du projet`)
-
-  let lignes = []
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb.from('bookings_snapshot')
-      .select('user_id, booking_id, property_id, snapshot, raw')
-      .eq('user_id', compte).order('booking_id').range(from, from + 999)
-    if (error) throw new Error(`bookings_snapshot : ${error.message}`)
-    lignes = lignes.concat(data || [])
-    if (!data || data.length < 1000) break
+  if (!lesSiens.length) {
+    console.error(`ECHEC : aucun bien raccorde sur le compte ${compte.slice(0, 8)}.`)
+    process.exit(1)
   }
+  lesSiens.sort((a, b) => String(a.name).localeCompare(String(b.name)))
+  console.log(`\nBase    : ${projet}`)
+  console.log(`Compte  : ${compte.slice(0, 8)}, ${lesSiens.length} bien(s) raccorde(s)`)
+
+  const lignes = await lireReservations(sb, compte)
 
   // Les trois fenetres de la mesure du 20 octobre 2026, ou celle passee en
   // arguments. La troisieme est celle ou la dette MORD : le passe ancien, sans
@@ -151,8 +188,8 @@ async function main () {
     nom: 'TEMOIN — passe ancien SANS memoire d intention',
     debut: '2025-09-20', fin: '2025-10-15', temoin: true
   }
-  const fenetres = process.argv[2] && process.argv[3]
-    ? [{ nom: 'fenetre demandee', debut: process.argv[2], fin: process.argv[3] }]
+  const fenetres = positionnels[0] && positionnels[1]
+    ? [{ nom: 'fenetre demandee', debut: positionnels[0], fin: positionnels[1] }]
     : [
       { nom: '30 derniers jours', debut: ajouter(auj, -30), fin: ajouter(auj, -1) },
       { nom: 'fermetures a venir (futur)', debut: auj, fin: ajouter(auj, 42) },
@@ -173,6 +210,9 @@ async function main () {
       const exceptions = await exceptionsDuBien(sb, bien.id, f.debut, f.fin)
       const exclus = await joursExclus(sb, bien.id, f.debut, f.fin, { exceptions })
       const eclatements = duBien.map(x => eclater(x, { pont, joursExclus: exclus, defaultProvider: bien.provider }))
+      // Le MEME portefeuille eclate SANS les exclusions : seul temoin possible
+      // du fait que le numerateur est net (voir l'assertion plus bas).
+      const eclatementsBruts = duBien.map(x => eclater(x, { pont, defaultProvider: bien.provider }))
       const jours = joursDeLaPeriode(f.debut, f.fin) || []
       const nbExclus = jours.filter(j => (exclus.has ? exclus.has(j) : !!exclus[j])).length
       if (nbExclus) { avecFermeture++; fermeturesDeLaFenetre++ }
@@ -187,14 +227,46 @@ async function main () {
       const dans = (ps) => ps.filter(p => p.periode >= f.debut && p.periode <= f.fin)
       const A = agreger(dans(calculerIndicateurs(eclatements, { granularite: 'jour', capacites: capa, capacitePersonnes: bien.capacity })))
       const B = agreger(dans(calculerIndicateurs(eclatements, { granularite: 'jour', capacites: capb, capacitePersonnes: bien.capacity })))
+      const brut = agreger(dans(calculerIndicateurs(eclatementsBruts, { granularite: 'jour', capacites: capa, capacitePersonnes: bien.capacity })))
       const retires = A.ouverts - B.ouverts
-      // L'ECART, au sens de la recette : le taux a reellement bouge sur ce bien.
-      if (retires > 0 && A.to != null && B.to != null && B.to > A.to) ecartsDeLaFenetre++
+      // ⚠ L'ECART SE MESURE SUR LE DENOMINATEUR, PAS SUR LE TAUX — releve en
+      // re-review, et mon garde-fou echouait PRECISEMENT quand la correction
+      // marche le mieux. Il exigeait `B.to > A.to`, donc deux taux non nuls :
+      // (a) si la declaration couvre TOUS les jours ouverts, `B.ouverts` vaut
+      // 0, `agreger` rend `to: null`, et le script sortait en erreur en
+      // accusant le cablage de production — alors que le denominateur est passe
+      // a zero exactement comme voulu, ce que `tests/api-yield.test.js` asserte
+      // par ailleurs ; (b) si la fenetre n'a rien vendu en reference, les deux
+      // taux valent 0 et l'ecart etait declare nul. Le temoin de la dette 78
+      // est le DENOMINATEUR qui se retrecit ; le taux n'en est qu'une
+      // consequence, et une consequence qui n'existe pas toujours.
+      if (retires > 0) ecartsDeLaFenetre++
 
       // ⚠ LES ASSERTIONS, pas seulement l'affichage.
-      if (A.nuiteesRef !== B.nuiteesRef || Math.abs(A.caRef - B.caRef) > 0.005) {
-        ko(`${bien.name} / ${f.nom} : le NUMERATEUR a bouge (${A.nuiteesRef} -> ${B.nuiteesRef} nuitees,`
-          + ` ${A.caRef.toFixed(2)} -> ${B.caRef.toFixed(2)} EUR) : seul le denominateur devait changer`)
+      //
+      // ⚠ CE QUE L'ANCIENNE ASSERTION 1 NE POUVAIT PAS VOIR — releve en
+      // re-review, et c'est un faux garde-fou de manuel. Elle comparait
+      // `A.nuiteesRef` a `B.nuiteesRef` « pour verifier que seul le
+      // denominateur bouge » : or `eclatements` est construit UNE fois, avec le
+      // meme `exclus`, et partage par les deux calculs. Les deux numerateurs
+      // etaient donc identiques PAR CONSTRUCTION, et le `ko()` ne pouvait pas
+      // tirer — y compris si `eclater` et `joursOuverts` etaient cables sur des
+      // ensembles d'exclusion DIFFERENTS, qui est precisement le defaut
+      // `finPeriodes` que ce lot corrige. Une tolerance flottante sur deux
+      // valeurs egales par construction, c'est une assertion decorative.
+      //
+      // Ce qui est VRAI et falsifiable : le numerateur doit etre NET. On le
+      // prouve en eclatant une seconde fois SANS les exclusions — si le
+      // netting disparaissait, les deux numerateurs se rejoindraient.
+      if (nbExclus > 0 && !(brut.nuiteesRef >= A.nuiteesRef)) {
+        ko(`${bien.name} / ${f.nom} : numerateur brut ${brut.nuiteesRef} < net ${A.nuiteesRef}`
+          + ' : incoherent, le netting ne peut qu enlever des nuits')
+      }
+      if (retires > 0 && brut.nuiteesRef === A.nuiteesRef && A.nuiteesRef > 0) {
+        ko(`${bien.name} / ${f.nom} : le numerateur n est PAS net — ${A.nuiteesRef} nuitees`
+          + ' des deux cotes alors que des nuits vendues tombent dans la declaration.'
+          + ' `eclater` ne marque plus `hors_reference`, et le denominateur retire seul :'
+          + ' la dette 78 inversee.')
       }
       if (retires < 0) ko(`${bien.name} / ${f.nom} : ${retires} jours retires, le denominateur a GRANDI`)
       if (retires > nbExclus) {
@@ -203,14 +275,25 @@ async function main () {
       if (retires > 0 && A.to != null && B.to != null && B.to < A.to) {
         ko(`${bien.name} / ${f.nom} : le taux BAISSE (${pct(A.to)} -> ${pct(B.to)})`)
       }
-      // ⚠ UNE INEGALITE, PAS UNE EGALITE — et l'egalite faisait echouer le
-      // script sur des donnees SAINES. `retirerDeLaVente` enregistre la
-      // fermeture ET ferme la nuit au calendrier : la forme NORMALE d'une
-      // fermeture d'hote donne donc des jours declares qui n'avaient plus rien
-      // a quitter. L'ordre juste est : retires <= annonces <= declares.
-      if (!(retires <= B.declaresFermes && B.declaresFermes <= nbExclus)) {
-        ko(`${bien.name} / ${f.nom} : ${retires} retires, ${B.declaresFermes} annonces,`
-          + ` ${nbExclus} declares — l'ordre retires <= annonces <= declares est rompu`)
+      // ⚠ UNE EGALITE SUR LE COMPTEUR, UNE INEGALITE SUR LES DECLARES — et
+      // c'est la correction d'un garde-fou TROP FAIBLE, relevee en re-review.
+      // L'ordre `retires <= annonces <= declares` est satisfait par le compteur
+      // D'AVANT le correctif : celui-la posait `annonces = tous les jours
+      // COUVERTS`, donc `annonces == nbExclus`, et l'ordre tenait encore. Le
+      // script aurait donc sorti « AVANT/APRES CONFORME » en code 0 avec le
+      // compteur menteur rebranche — sur l'artefact que le KB cite comme preuve
+      // d'ampleur et que Thierry lance sur la PRODUCTION.
+      // Ce qui est vrai : le compteur annonce EXACTEMENT ce que le denominateur
+      // a perdu. `retires === annonces`, et seule la comparaison aux DECLARES
+      // reste une inegalite — parce que `retirerDeLaVente` ferme deja la nuit
+      // au calendrier, donc un jour declare peut n'avoir rien eu a quitter.
+      if (retires !== B.declaresFermes) {
+        ko(`${bien.name} / ${f.nom} : ${retires} jours quittent le denominateur mais`
+          + ` ${B.declaresFermes} sont annonces — le compteur ne dit pas ce qui a ete retire`)
+      }
+      if (B.declaresFermes > nbExclus) {
+        ko(`${bien.name} / ${f.nom} : ${B.declaresFermes} annonces pour ${nbExclus} declares :`
+          + ' on retire plus que ce que l hote a declare')
       }
 
       console.log('  ' + l(bien.name, 22) + l(pct(A.to), 13) + l(pct(B.to), 13)
@@ -234,7 +317,7 @@ async function main () {
         ko(`${f.nom} : ${fermeturesDeLaFenetre} bien(s) avec fermeture declaree,`
           + ' mais AUCUN ecart de taux. Le temoin ne temoigne plus.')
       } else {
-        console.log(`  → temoin : ${ecartsDeLaFenetre} bien(s) dont le taux MONTE.`)
+        console.log(`  → temoin : ${ecartsDeLaFenetre} bien(s) dont le DENOMINATEUR se retrecit.`)
       }
     }
   }
@@ -251,8 +334,9 @@ async function main () {
     console.log('  La recette est le lancement sans argument, qui porte la fenetre temoin.')
   }
   if (echecs) { console.error(`\n${echecs} ECHEC(S). Le lot ne doit pas partir.`); process.exit(1) }
-  console.log('AVANT/APRES CONFORME : le numerateur est intact, seul le denominateur retire les')
-  console.log('jours declares fermes, et il ne retire jamais plus qu il n y en a de declares.')
+  console.log('AVANT/APRES CONFORME : le numerateur est NET (prouve contre un eclatement sans')
+  console.log('exclusions), le denominateur retire exactement ce que le compteur annonce, et')
+  console.log('jamais plus que ce que l hote a declare.')
 }
 
 main().catch(e => { console.error('Erreur :', e.message); process.exit(1) })

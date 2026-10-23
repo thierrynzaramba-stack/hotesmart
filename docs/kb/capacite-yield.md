@@ -452,16 +452,30 @@ mois courant, donc la comparaison annuelle était flattée.
 
 ### ⚠ CE QUI N'EST PAS BRANCHÉ, ET POURQUOI
 
-`joursExclus` est une affaire de **dénominateur**. Sur les sept appels à
-`joursOuverts` du dépôt, **deux seulement** en sont un :
+`joursExclus` est une affaire de **dénominateur**. Sur les **huit** appels à
+`joursOuverts` du dépôt — `api/yield.js` en fait **deux** depuis ce lot, et la
+première version de cette table en annonçait sept en marquant ce fichier d'un
+« oui » unique — voici ce que chacun sert :
 
 | appel | ce que la capacité sert | branché ? |
 |---|---|---|
-| `api/yield.js` | dénominateur du TO / RevPAR affichés | **oui** |
+| `api/yield.js`, carte de **référence** | dénominateur du TO / RevPAR affichés, et de la projection | **oui** |
+| `api/yield.js`, carte de **vente** | les DRAPEAUX du « à date » (`periode_fermee_a_la_vente`) | **non, et délibérément** |
 | `lib/yield/contexte-du-bien.js:154` (`capacitesMois`) | dénominateur de la **pression**, qui déplace les **prix** | **non — décision produit** |
-| `api/yield-prix.js` ×2 | l'état « ouverte / fermée à la vente » affiché par nuit | non |
+| `api/yield-prix.js:218` (`capacite`) | ⚠ **un RevPAR AFFICHÉ** (`pied.a_date.revpar`), le compte de nuits ouvertes affiché, et la capacité passée à `projeter` | **non — dette ouverte** |
+| `api/yield-prix.js:226` (`capaciteRadar`) | l'état « ouverte / fermée à la vente » affiché par nuit | non |
 | `lib/yield/contexte-du-bien.js:183` | l'ensemble des nuits **à tarifer** | non |
 | `lib/pilote-quotidien.js` | les nuits **à tarifer et à pousser** au canal | non |
+
+⚠ **ET LA LIGNE `api/yield-prix.js` ÉTAIT MAL CLASSÉE, CE QUI CACHAIT UNE
+DETTE.** La première version rangeait ses deux appels sous « l'état ouverte /
+fermée affiché par nuit » — vrai de `capaciteRadar`, faux de `capacite`, qui
+nourrit un **RevPAR affiché**. Conséquence mesurée : sur un mois portant une
+exception, le pied de l'écran Prédiction de prix sous-estime le RevPAR du poids
+entier des nuits déclarées — le 21,77 € contre 62,88 € de ce lot — pendant que
+le Réalisé de `/api/yield` montre le chiffre corrigé **pour le même mois**. Deux
+RevPAR, deux écrans, aucun drapeau. C'est pour cela que la dette 78 n'est
+**pas** « soldée pour les indicateurs affichés ».
 
 Y passer les exclusions confondrait **« hors référence »** et **« fermée à la
 vente »** : une nuit en exception peut parfaitement être ouverte et se vendre.

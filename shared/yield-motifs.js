@@ -26,6 +26,14 @@ export const MOTIFS = {
     titre: 'Fermé à la vente',
     quoi: 'Aucune nuit n’était ouverte sur cette période. Un taux d’occupation n’existe pas : ce n’est pas 0 %, il n’y a rien à occuper.'
   },
+  // ⚠ LE MOTIF QUI EVITE DE DIRE « FERME » D'UN MOIS QUI A VENDU.
+  // `jours_ouverts: 0` a deux causes depuis la dette 78, et une seule est une
+  // fermeture. L'autre est une periode ouverte dont l'hote a declare toutes
+  // les nuits hors reference : le logement a pu vendre, et il a souvent vendu.
+  tous_les_jours_retires_par_declaration: {
+    titre: 'Hors référence',
+    quoi: 'Vous avez déclaré toutes les nuits de cette période en exception ou en fermeture. Le logement a pu vendre — le chiffre d’affaires est compté ailleurs —, mais ces nuits ne servent pas de comparaison : il ne reste rien à diviser.'
+  },
   provider_sans_memoire_intention: {
     titre: 'Capacité inconnue',
     quoi: 'Ce logement n’est pas relié au canal de distribution : nous n’avons aucune trace de ce qui était ouvert.'

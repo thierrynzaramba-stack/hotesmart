@@ -452,11 +452,20 @@ module.exports = async (req, res) => {
 
     // ─── « A date » : une entree par periode demandee ───────────────────────
     const aDate = [...clesDemandees].sort().map(cle => pickup(eclatements, {
-      // ⚠ LA CARTE DE VENTE, PAS CELLE DE REFERENCE : `pickup` se demande si la
-      // periode etait ouverte A LA VENTE, et leve `periode_fermee_a_la_vente`
-      // sur un denominateur a zero. Lui donner la carte de reference faisait
-      // dire « le logement ne POUVAIT pas vendre » d'un mois qui avait vendu.
-      periode: cle, pivot, granularite, capacites: capacitesVente, capacitePersonnes: bien.capacity
+      // ⚠ LES DEUX CARTES, ET C'EST LE CORRECTIF DE LA RE-REVIEW. `pickup` pose
+      // deux questions distinctes et il lui faut les deux perimetres :
+      //   - « que faut-il DIVISER ? »  -> la carte de REFERENCE. Son numerateur
+      //     est deja net (`nuitees - nuitees_hors_reference`), donc un
+      //     denominateur de vente remettait l'asymetrie que ce lot corrige :
+      //     mesure, `realise` a 20 % et `a_date` a 13,33 % pour le MEME mois
+      //     dans la MEME reponse.
+      //   - « la periode etait-elle OUVERTE A LA VENTE ? » -> la carte de
+      //     VENTE, pour les drapeaux seulement, sinon `periode_n1_fermee` se
+      //     levait sur un mois qui avait vendu 400 EUR.
+      // Une seule carte ne pouvait donc PAS le servir : c'est ce que la
+      // premiere version de ce lot avait manque, dans les deux sens.
+      periode: cle, pivot, granularite, capacitePersonnes: bien.capacity,
+      capacites, capacitesVente
     }))
 
     // ─── Reference par segment, sur 3 ans ───────────────────────────────────
@@ -493,10 +502,23 @@ module.exports = async (req, res) => {
     // ─── Projection : une par periode demandee ──────────────────────────────
     const projection = [...clesDemandees].sort().map(cle => {
       const b = bornesDePeriode(cle)
-      // ⚠ IDEM POUR LA PROJECTION : son numerateur est `pk.a_date.nuitees`,
-      // BRUT. Avec un denominateur retreci, le taux extrapole gonflait et
-      // « Avance / retard » basculait de rouge a vert, sans aucun motif.
-      const cap = capacitesVente.get(cle)
+      // ⚠ LES QUATRE ENTREES DE `projeter` SUR LE MEME PERIMETRE — releve en
+      // re-review, et c'etait le constat le plus couteux du lot.
+      // `reference.js` fait `nuitees_de_reference = capacite.jours_ouverts x
+      // occupationReference`, puis `avance_retard = extrapolees -
+      // nuitees_de_reference`. Avec `capacite` pris dans la carte de VENTE et
+      // `occupationReference` lu dans `indicateurs` — bati sur la carte de
+      // REFERENCE —, le produit multipliait un taux de reference par une
+      // capacite de vente : sur le temoin du lot (TO N-1 23,1 % -> 66,7 %) le
+      // facteur est 2,9. L'ecran colore « Avance / retard » sur le SIGNE : un
+      // mois a l'heure affichait un retard de plusieurs nuits, en rouge, sans
+      // aucun motif. C'est le miroir exact du defaut que le commentaire de la
+      // ligne precedente disait avoir ferme.
+      // Donc : capacite, jours, numerateur et occupation de reference viennent
+      // TOUS de la reference. Et `jours` surtout : le contrat de `projeter` dit
+      // qu'il ne projette que des jours ouverts, et la carte de vente lui
+      // faisait tarifer des nuits que l'hote a declarees fermees.
+      const cap = capacites.get(cle)
       const pk = aDate.find(x => x.periode === cle)
       // ⚠ ON NE PROJETTE QUE LES JOURS OUVERTS. Le contrat de `projeter` est
       // explicite : il ne peut pas verifier ce qu'on lui passe.
@@ -507,7 +529,15 @@ module.exports = async (req, res) => {
         courbe,
         contexte,
         delaiJours: pk ? pk.delai_jours : null,
-        nuiteesVendues: pk && pk.a_date ? pk.a_date.nuitees : 0,
+        // ⚠ LE NUMERATEUR NET, PAS LE BRUT. `pk.a_date.nuitees` compte les
+        // nuits vendues y compris celles qu'une declaration retire de la
+        // reference : sur un denominateur de reference, le brut faisait monter
+        // le taux extrapole jusqu'a son plafond — le defaut du lot 3.3
+        // (« 3 nuits vendues dont 2 en exception, 1 jour ouvert -> 300 % »)
+        // rouvert une fonction plus loin.
+        nuiteesVendues: pk && pk.a_date
+          ? (pk.a_date.nuitees || 0) - (pk.a_date.nuitees_exclues_du_taux || 0)
+          : 0,
         capacite: cap,
         // L'occupation de reference est celle du N-1 REALISE, quand elle
         // existe : sans elle, `projeter` refuse de dire une avance ou un
@@ -621,7 +651,21 @@ module.exports = async (req, res) => {
       sources: {
         reservations: lignes.length,
         reservations_du_bien: duBien.length,
-        jours_hors_reference: exclus ? (exclus.size ?? Object.keys(exclus).length) : 0,
+        // ⚠ BORNE A LA FENETRE DEMANDEE — releve en re-review. `exclus` est
+        // desormais lu jusqu'a `finPeriodes`, qui DEPASSE la fenetre des que la
+        // granularite est « mois » ou « annee ». Mesure, memes donnees du 1er
+        // au 12 juin, en ne changeant que la granularite : 12, 30, 30 — et
+        // l'ecran affiche ce chiffre en tete de page, « 30 jour(s) hors
+        // reference. Periodes que vous avez declarees exceptionnelles ».
+        // 30 jours exclus dans une fenetre de 12 est arithmetiquement
+        // impossible pour qui recoupe, et l'hote cherche une declaration de
+        // 18 jours qu'il n'a pas faite. En granularite « annee », le compteur
+        // absorbait jusqu'a 364 jours que l'appelant n'avait pas demandes.
+        jours_hors_reference: (() => {
+          if (!exclus) return 0
+          const tous = exclus.keys ? [...exclus] : Object.keys(exclus)
+          return tous.filter(j => j >= debut && j <= finDemandee).length
+        })(),
         // ⚠ LA DETTE DATEE, VISIBLE. `school_holidays` s'arrete a la derniere
         // annee scolaire publiee : au-dela, chaque jour serait classe « hors
         // vacances » — un ete entier en basse saison, sans la moindre erreur.

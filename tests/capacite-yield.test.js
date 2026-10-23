@@ -361,8 +361,38 @@ test('LE TEST QUI COMPTE : le compteur compte les jours RETIRES, pas les jours C
   const r = await joursOuverts(fausseBase(lignes), BIEN, '2025-03-01', '2025-03-02',
     opts({ joursExclus: exclus }))
   assert.equal(r.jours_ouverts, 0)
+  // ⚠ LE MESSAGE DISAIT L'INVERSE DE CE QUE LE TEST PROUVE — releve en
+  // re-review. Il annonçait « la nuit deja fermee au calendrier est comptee
+  // comme retiree » alors que le 1 attendu est l'autre nuit, celle qui etait
+  // OUVERTE. Un message d'assertion faux est pire qu'absent : il sera lu comme
+  // la regle le jour ou le test rougira.
   assert.equal(r.jours_retires_par_declaration, 1,
-    'la nuit deja fermee au calendrier est comptee comme retiree par la declaration')
+    'une seule des deux nuits etait ouverte : la declaration ne retire que celle-la,'
+    + ' celle qui etait deja fermee au calendrier n est pas comptee')
+})
+
+test("LE TEST QUI COMPTE : le drapeau `estimee` TOMBE quand tous les jours estimes sont declares", async () => {
+  // ⚠ LE KB AFFIRMAIT CECI « DESORMAIS TESTE », ET AUCUN TEST NE LE COUVRAIT —
+  // releve en re-review, mutation a l'appui : zero rouge. C'est pourtant une
+  // consequence VOULUE et visible a l'ecran — le badge « Estime » disparait, la
+  // legende ne compte plus la periode, et sur l'accueil un « non calculable »
+  // devient un taux COMPTE. Elle est juste : le denominateur qui reste est fait
+  // de lignes reelles. Mais une affirmation de KB sans test est une dette qui
+  // se presente comme une garantie.
+  const jours = ['2025-03-01', '2025-03-02', '2025-03-03']
+  // Aucune ligne de calendrier : passe, donc repute ouvert PAR CONVENTION.
+  const sansDeclaration = await joursOuverts(fausseBase([]), BIEN,
+    jours[0], jours[2], opts({}))
+  assert.equal(sansDeclaration.jours_estimes_ouverts, 3, 'les trois jours sont estimes')
+  assert.equal(sansDeclaration.estimee, true, 'le drapeau doit etre leve')
+
+  const toutDeclare = await joursOuverts(fausseBase([]), BIEN, jours[0], jours[2],
+    opts({ joursExclus: new Set(jours) }))
+  assert.equal(toutDeclare.jours_retires_par_declaration, 3)
+  assert.equal(toutDeclare.jours_estimes_ouverts, 0,
+    'un jour declare ne doit plus s incrementer dans les estimes')
+  assert.equal(toutDeclare.estimee, false,
+    'le drapeau « estime » reste leve alors qu aucun jour du denominateur ne l est')
 })
 
 test('LE TEST QUI COMPTE : au-dela de la fenetre, une nuit declaree reste « pas encore ouverte »', async () => {
