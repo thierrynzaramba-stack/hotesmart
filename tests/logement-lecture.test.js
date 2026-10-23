@@ -1470,3 +1470,34 @@ test('et un releve SUSPENDU n est pas un echec visible par l hote', async () => 
   }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
   assert.equal(f.suppression.possible, true)
 })
+
+test('LE TEST QUI COMPTE : la liste DESCEND le fait de compte jusqu a la carte', async () => {
+  // ⚠ SANS CETTE DESCENTE, LA CARTE LIT `undefined`. Et `undefined !== true`
+  // la ferait basculer en « non verifies » pour TOUS les logements : le
+  // correctif se retournerait en mensonge generalise. C'est pour ca que ce
+  // test porte sur l'endpoint, pas sur le rendu.
+  const r = await L.lireListe(listeDe(), { compte: COMPTE, maintenant: MAINTENANT })
+  for (const b of r.biens) {
+    assert.equal(b.canaux_releve_fait, true, `${b.nom} : le releve du compte a bien eu lieu`)
+  }
+})
+
+test('LE TEST QUI COMPTE : sans releve de compte, la liste le dit — elle n invente pas', async () => {
+  const r = await L.lireListe(listeDe({ horloge: null }), { compte: COMPTE, maintenant: MAINTENANT })
+  for (const b of r.biens) assert.equal(b.canaux_releve_fait, false)
+})
+
+test('un releve de compte en ECHEC ne vaut pas un releve', async () => {
+  const r = await L.lireListe(listeDe({
+    horloge: { user_id: COMPTE, vu_le: '2026-10-19T08:00:00Z', ok: false, erreur: 'timeout' }
+  }), { compte: COMPTE, maintenant: MAINTENANT })
+  for (const b of r.biens) assert.equal(b.canaux_releve_fait, false)
+})
+
+test('et des canaux ILLISIBLES rendent `null`, jamais `false`', async () => {
+  // « On n'a pas pu lire » n'est pas « on n'a jamais releve » : la carte montre
+  // deja « non verifies » dans ce cas, et une valeur inventee la contredirait.
+  const r = await L.lireListe(listeDe({ enPanne: { canaux_du_bien: 'timeout' } }),
+    { compte: COMPTE, maintenant: MAINTENANT })
+  for (const b of r.biens) assert.equal(b.canaux_releve_fait, null)
+})

@@ -60,6 +60,9 @@ const doc = (html) => new JSDOM(`<!doctype html><body><div id="c">${html}</div><
 
 // Une fiche complète, telle que `GET /api/logement?id=` la rend.
 const fiche = (extra = {}) => ({
+  // Le defaut est « le compte a ete releve » : c'est le cas courant, et c'est
+  // ce que l'endpoint descend depuis le 23 octobre 2026.
+  canaux_releve_fait: true,
   bien: {
     id: 'b1', nom: 'La bulle', ville: 'Bagnères', pays: 'FR', adresse: '1 rue X',
     code_postal: '65200', capacite: 2, photo_url: null, devise: 'EUR',
@@ -1635,4 +1638,22 @@ test('sans r\u00e9ponse du serveur, la d\u00e9duction locale reste en REPLI', ()
   assert.ok(d.querySelector('[data-bind="publier"]'))
   assert.deepEqual(M.publierAffiche({ mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' }, null),
     { montre: true, motif: null })
+})
+
+test('LE TEST QUI COMPTE : la fiche recoit le MEME fait de compte que la carte', () => {
+  // ⚠ UNE REGLE PARTAGEE VIT DANS UN MODULE COMMUN — mais elle doit alors
+  // recevoir la meme donnee des DEUX cotes. `canauxHtml` est partage avec la
+  // carte de la liste : le jour ou la carte a appris a distinguer « aucun canal
+  // relie » de « jamais releve » (23 octobre 2026), la fiche a herite du
+  // changement SANS recevoir le fait, et annoncait « canaux non verifies » sur
+  // un logement dont le compte venait d etre releve. C est la suite complete
+  // qui l a vu, pas moi.
+  // ⚠ `document.textContent` vaut `null` par specification : on lit le corps.
+  const texte = (f) => doc(M.ficheHtml(f, OUTILS(), {})).body.textContent
+
+  assert.match(texte(fiche({ canaux: [], canaux_releve_fait: true })), /Aucun canal relié/)
+
+  const jamais = texte(fiche({ canaux: [], canaux_releve_fait: false }))
+  assert.match(jamais, /Canaux non vérifiés/)
+  assert.doesNotMatch(jamais, /Aucun canal relié/)
 })

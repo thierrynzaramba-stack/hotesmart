@@ -67,6 +67,10 @@ const doc = (html) => new JSDOM(`<!doctype html><body><div id="c">${html}</div><
 const bien = (extra = {}) => ({
   id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', nom: 'La bulle', ville: 'Bagnères',
   capacite: 2, photo_url: null, assistant_en_pause: false, canaux_echec: false,
+  // ⚠ LE DEFAUT EST « LE COMPTE A ETE RELEVE » : c'est le cas courant, et c'est
+  // ce que l'endpoint descend depuis le 23 octobre 2026. Les tests qui veulent
+  // l'autre cas le posent explicitement.
+  canaux_releve_fait: true, beds24_de_l_hote: false,
   canaux: [{ ota: 'airbnb', titre: 'x', actif: true, mappe: true, listing_url: null }],
   fait_date: { type: 'libre', du: null, au: null, occupe: false, ferme: false },
   avis: { total: 0, notes: 0, note_sur_5: null },
@@ -138,23 +142,25 @@ test('LE TEST QUI COMPTE : « aucun canal » et « non vérifiés » sont DEUX r
   assert.notEqual(lu.querySelector('[data-canaux]').textContent,
     nonLu.querySelector('[data-canaux]').textContent,
     'lire « aucun canal » quand on en a deux est exactement le défaut que la dette 59 a fermé')
+
+  // ⚠ ET UN TROISIÈME CAS, depuis le 23 octobre 2026 : aucune ligne de canal
+  // ET aucun relevé de compte. On n'a pas regardé, donc on ne dit pas « aucun ».
+  const jamais = doc(M.carteHtml(bien({ canaux: [], canaux_releve_fait: false }), OUTILS()))
+  assert.equal(jamais.querySelector('[data-canaux]').dataset.canaux, 'non-lus')
+  assert.equal(jamais.querySelector('[data-canaux]').textContent, 'Canaux non vérifiés')
 })
 
-test('LE TEST QUI COMPTE : « jamais relevé » N EST PAS DISTINGUABLE ICI, et on le prouve', () => {
-  // ⚠ CE TEST GARDE UNE IMPOSSIBILITÉ, pour qu'on ne refasse pas l'erreur du
-  // 21 octobre 2026. J'avais ajouté un troisième rendu — « ses canaux n'ont
-  // jamais été relevés » — sur la marque `canaux_vu_le == null`, et je l'ai
-  // défait : cette marque ne peut PAS valoir autre chose quand un bien n'a
-  // aucun canal.
+test('LE TEST QUI COMPTE : « jamais relevé » se distingue, par le fait de COMPTE', () => {
+  // ⚠ CE TEST FIGEAIT UN DÉFAUT COMME COMPORTEMENT ATTENDU (REVIEW.md règle 17).
+  // Il s'appelait « N EST PAS DISTINGUABLE ICI, et on le prouve » et gardait une
+  // impossibilité — celle de distinguer « aucun canal relié » de « jamais
+  // relevé » sur la marque `canaux_vu_le`.
   //
-  // `fraicheurDuBien` rend `null` dès qu'un bien n'a aucun canal (décision de
-  // Thierry du 19 octobre : « un bien sans canal ne dit rien du tout »). Une
-  // carte sans pastille a donc TOUJOURS `canaux_vu_le: null`, et distinguer
-  // là-dessus rendait « Aucun canal relié » inatteignable — un bien Beds24,
-  // ou neuf, annonçait une vérification jamais faite alors qu'elle avait eu
-  // lieu dix minutes plus tôt.
-  // `lib/canaux-du-bien` construit son client au chargement : sans ces
-  // variables, le require lève avant la première assertion.
+  // La prémisse restait juste : `fraicheurDuBien` rend `null` dès qu'un bien
+  // n'a aucun canal (décision de Thierry du 19 octobre : « un bien sans canal
+  // ne dit rien du tout »), donc cette marque-là ne pouvait pas trancher. Mais
+  // la conclusion était fausse : il fallait une AUTRE donnée, pas renoncer.
+  // L'endpoint descend désormais le fait de COMPTE.
   process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
   process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'cle-de-test'
   process.env.CHANNEL_BASE_URL = process.env.CHANNEL_BASE_URL || 'http://localhost:1/api/v1'
@@ -162,17 +168,36 @@ test('LE TEST QUI COMPTE : « jamais relevé » N EST PAS DISTINGUABLE ICI, et o
   const { fraicheurDuBien } = require('../lib/canaux-du-bien')
   const maintenant = new Date().toISOString()
   assert.equal(fraicheurDuBien([], maintenant), null,
-    'si ceci change, la distinction « jamais relevé » devient possible — voir la dette')
-  assert.equal(fraicheurDuBien(null, maintenant), null)
-  // Avec un canal, la fraîcheur existe : c'est bien l'absence de canal qui
-  // efface la date, pas l'horloge.
+    'la fraîcheur du BIEN reste muette sans canal : ce n est pas elle qui tranche')
   assert.equal(fraicheurDuBien([{ vu_le: null }], maintenant), maintenant)
 
-  // La distinction demanderait l'horloge du COMPTE (`canaux_releve`), que
-  // l'endpoint ne descend pas. Tant qu'il ne la descend pas, l'écran n'a pas
-  // la donnée qu'il prétendrait lire.
-  const sansCanal = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null }), OUTILS()))
-  assert.equal(sansCanal.querySelector('[data-canaux]').dataset.canaux, 'aucun')
+  // Ce qui tranche, c est le fait de COMPTE, et il tranche DANS LES DEUX SENS.
+  const releve = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null, canaux_releve_fait: true }), OUTILS()))
+  assert.equal(releve.querySelector('[data-canaux]').dataset.canaux, 'aucun',
+    'on a regardé, et ce logement n est en vente nulle part : c est un fait')
+
+  const jamais = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null, canaux_releve_fait: false }), OUTILS()))
+  assert.equal(jamais.querySelector('[data-canaux]').dataset.canaux, 'non-lus',
+    'on n a jamais regardé : on ne dit pas « aucun »')
+
+  // ⚠ ET UN RELEVÉ ILLISIBLE N EST PAS UN RELEVÉ RÉUSSI (`null`, pas `false`).
+  const illisible = doc(M.carteHtml(bien({ canaux: [], canaux_releve_fait: null }), OUTILS()))
+  assert.equal(illisible.querySelector('[data-canaux]').dataset.canaux, 'non-lus')
+})
+
+test('LE TEST QUI COMPTE : un bien BEDS24 de l hôte ne dépend pas du relevé du canal', () => {
+  // ⚠ LE PIÈGE QUE CE LOT ÉVITE, et il a déjà été payé une fois : la re-revue
+  // de 3dddb14 avait fait DÉFAIRE un correctif de cette carte parce qu il
+  // « remplaçait un mensonge par un pire, sur un écran DÉJÀ en recette ».
+  //
+  // Le relevé est celui du CANAL. Un compte entièrement Beds24 n a aucune
+  // raison d en avoir un : sans cette garde, TOUTES ses cartes annonceraient
+  // « canaux non vérifiés », à vie. Pour ces biens-là, « aucun canal relié »
+  // reste la phrase juste.
+  const b24 = doc(M.carteHtml(
+    bien({ canaux: [], canaux_releve_fait: false, beds24_de_l_hote: true }), OUTILS()))
+  assert.equal(b24.querySelector('[data-canaux]').dataset.canaux, 'aucun')
+  assert.equal(b24.querySelector('[data-canaux]').textContent, 'Aucun canal relié')
 })
 
 test('les trois états d un canal sont distincts, `mappe: null` compris', () => {

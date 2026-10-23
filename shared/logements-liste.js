@@ -348,10 +348,22 @@ export function canauxHtml (bien, { t, esc }) {
     // supprimable ; il etait insupprimable, et la fiche V5 n'a aucun bouton
     // pour lancer un releve.
     //
-    // CETTE CARTE-CI, elle, ne recoit toujours pas la distinction : `lireListe`
-    // ne descend pas le fait de compte par bien. Elle dit donc « aucun canal
-    // relie » dans les deux cas. Reste en dette, et c'est maintenant le SEUL
-    // endroit ou les deux etats se confondent.
+    // ⚠ ET CETTE CARTE-CI SE CORRIGE LE 23 OCTOBRE 2026, avec la MEME donnee :
+    // `lireListe` descend desormais `canaux_releve_fait`, le fait de COMPTE.
+    // « Aucune ligne de canal » se lisait « aucun canal relie » dans les deux
+    // cas — celui ou on a regarde, et celui ou on n'a jamais regarde.
+    //
+    // ⚠ MAIS LE RELEVE EST CELUI DU CANAL, ET IL NE DIT RIEN D'UN BIEN BEDS24
+    // DE L'HOTE. Sans cette garde, un compte entierement Beds24 — qui n'a
+    // aucune raison d'avoir un releve Channex — verrait TOUTES ses cartes
+    // annoncer « canaux non verifies », a vie. C'est exactement la forme du
+    // defaut que la re-revue de 3dddb14 avait fait defaire : remplacer un
+    // mensonge par un pire. Pour ces biens-la, « aucun canal relie » reste la
+    // phrase juste.
+    if (bien.beds24_de_l_hote !== true && bien.canaux_releve_fait !== true) {
+      return `<span class="log-pastille log-pastille--indetermine" data-canaux="non-lus">`
+        + `<span class="log-point"></span>${esc(t('logements.canaux_non_lus'))}</span>`
+    }
     return `<span class="caption muted" data-canaux="aucun">${esc(t('logements.aucun_canal'))}</span>`
   }
   // ⚠ L'ETAT SE LIT SANS LA COULEUR NI LE SURVOL (constat de la revue). A 8 px,
