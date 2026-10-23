@@ -90,13 +90,12 @@ test('LE TEST QUI COMPTE : les DEUX gardes la posent, et avant tout refus', asyn
 // `bookings_snapshot` — table qu'il lit.
 // Trois autres fichiers portaient la meme cecite ; ils sont corriges dans le
 // meme commit.
-function fichiersApi (d = path.join(racine, 'api'), prefixe = 'api') {
-  const out = []
-  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-    if (e.isDirectory()) out.push(...fichiersApi(path.join(d, e.name), `${prefixe}/${e.name}`))
-    else if (e.name.endsWith('.js')) out.push(`${prefixe}/${e.name}`)
-  }
-  return out
+// Le parcours vit dans `tests/outils/source.js` : cinq copies du meme
+// balayage recursif ont ete ecrites le meme jour dans cinq fichiers, et une
+// sixieme aurait eu le meme angle mort que les cinq autres.
+const { fichiersJs } = require('./outils/source')
+function fichiersApi () {
+  return fichiersJs(path.join(racine, 'api'), 'api')
 }
 const lire = (f) => fs.readFileSync(path.join(racine, f), 'utf8')
 // Sans les commentaires : une mention dans une explication ne compte pas.
@@ -125,17 +124,23 @@ test('LE TEST QUI COMPTE : le recensement voit TOUT api/**/*.js, sous-repertoire
   // `api/ecran/` est le domicile DECLARE de tous les endpoints d'ecran des
   // lots (c) et (d) : un filet aveugle a ce repertoire se vide a mesure que le
   // chantier avance, sans jamais casser.
-  const attendus = []
-  const descendre = (abs, prefixe) => {
-    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
-      if (e.isDirectory()) descendre(path.join(abs, e.name), `${prefixe}/${e.name}`)
-      else if (e.name.endsWith('.js')) attendus.push(`${prefixe}/${e.name}`)
-    }
+  // ⚠ ET PAS CONTRE UNE DEUXIEME COPIE DU MEME PARCOURS — CE SERAIT UNE
+  // TAUTOLOGIE : deux implementations identiques partagent leurs angles morts,
+  // et le test resterait vert. On compare au SYSTEME DE FICHIERS par un autre
+  // chemin (`fs.globSync`), et on exige en plus le fichier nomme.
+  const parGlob = fs.globSync
+    ? fs.globSync('**/*.js', { cwd: path.join(racine, 'api') }).map(f => `api/${f.split(path.sep).join('/')}`)
+    : null
+  const vus = fichiersApi()
+  if (parGlob) {
+    assert.deepEqual(vus.slice().sort(), parGlob.slice().sort(),
+      'le recensement des endpoints ne voit pas les memes fichiers que le systeme')
   }
-  descendre(path.join(racine, 'api'), 'api')
-  assert.deepEqual(fichiersApi().sort(), attendus.sort(),
-    'le recensement des endpoints ne descend pas dans les sous-repertoires de api/')
-  assert.ok(attendus.some(f => f.includes('/')),
+  // Le fichier NOMME : un balayage a plat le perd, et c'est le seul endpoint
+  // d'ecran existant — donc le temoin de toute la famille a venir.
+  assert.ok(vus.includes('api/ecran/aujourdhui.js'),
+    "api/ecran/aujourdhui.js echappe au recensement : balayage a plat ?")
+  assert.ok(vus.some(f => f.split('/').length > 2),
     'aucun endpoint en sous-repertoire : ce test ne prouve plus rien')
 })
 
@@ -181,8 +186,11 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
     // faux.
     return !/requirePermission|verifierSession|requirePermissionPourCanal|contexteDEcran/.test(src)
   })
-  // Le compte attendu est mesure, pas suppose : 22 octobre 2026.
-  assert.ok(SANS_GARDE_ATTENDU.length <= 12,
+  // ⚠ LE PLAFOND SERRE SUR LA MESURE. Il etait a 12 pour 9 reels (mesure du
+  // 23 octobre 2026, recensement RECURSIF) : trois endpoints sans garde
+  // pouvaient atterrir en silence. Un plafond mou est un plafond qui ne sert
+  // qu'une fois.
+  assert.ok(SANS_GARDE_ATTENDU.length <= 9,
     `${SANS_GARDE_ATTENDU.length} endpoints sans garde :\n  ` + SANS_GARDE_ATTENDU.join('\n  ') +
     '\nUn de plus qu attendu : soit il est public par nature (webhook, cron, manifest,\n' +
     'page publique), soit il lui manque sa garde. Nommez-le avant de lever le plafond.')

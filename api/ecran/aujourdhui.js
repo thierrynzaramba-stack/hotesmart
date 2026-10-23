@@ -36,6 +36,7 @@ const { contexteDEcran } = require('../../lib/require-permission')
 const { refsDuPerimetre, peutLire, estTitulaireDuCompte } = require('../../lib/permissions')
 const { UUID_RE } = require('../../lib/require-permission')
 const { colonneAbsente } = require('../../lib/colonne-absente')
+const { readStatus } = require('../../lib/bookings-snapshot-status')
 const {
   arriveesProches, verdictDuCode, codesParReservation, lireLesCodes
 } = require('../../lib/ecran/etat-du-code')
@@ -65,6 +66,8 @@ const jourParis = (decalage = 0) => {
 }
 
 const TACHES_MAX = 200
+// Deux jours d'arrivees : 200 est large, mais un plafond se DIT.
+const ARRIVEES_MAX = 200
 // ⚠ LE PLAFOND DE POSTGREST EST 1000, ET IL NE S'ANNONCE PAS.
 // J'avais ecrit `CONVERSATIONS_MAX = 5000` en pensant plafonner au-dessus du
 // besoin. `db-max-rows` coupe a 1000 SANS erreur : la mesure du 23 octobre
@@ -143,6 +146,17 @@ module.exports = async (req, res) => {
   const perimetreVide = Array.isArray(refs) && refs.length === 0
   const refsUuid = refs === null ? null : refs.map(String).filter(r => UUID_RE.test(r))
   const refsTexte = refs === null ? null : refs.map(String)
+  // ⚠ UNE BORNE QUI SE VIDE APRES TRI N'EST PAS UN PERIMETRE VIDE, ET ELLE
+  // DOIT SE DIRE. Si le perimetre ne porte que des cles provider — possible,
+  // `property_refs` et `property_ids` sont deux colonnes distinctes et c'est un
+  // TRIGGER qui les garde d'accord —, `refsUuid` vaut `[]` alors que
+  // `perimetreVide` est faux. `.in('id', [])` rend alors zero ligne SANS
+  // erreur : l'ecran disait « vous n'avez aucun logement » comme un fait,
+  // pendant que tous les blocs a cle TEXTE etaient correctement remplis.
+  // Avant ce lot, le meme cas rendait un 22P02 — bruyant, mais au moins pousse
+  // dans `indisponibles`. Echanger une panne visible contre un faux fait
+  // silencieux serait une regression, pas un correctif.
+  const uuidIntrouvable = Array.isArray(refsUuid) && refsUuid.length === 0 && !perimetreVide
   const bornerUuid = (q, colonne) =>
     (refsUuid === null ? q : q.in(colonne, refsUuid))
   const bornerRef = (q, colonne) =>
@@ -167,8 +181,11 @@ module.exports = async (req, res) => {
   // serait pire que pas d'instrument.
   let requetes = 0
   const compter = async (p) => { requetes++; return p }
-  // Mesure : `awk '/async function etatMenage/,/^}/' lib/cron-arrival-code.js`
-  // compte 4 `.from(`. J'avais ecrit 2.
+  // ⚠ C'EST UN MAJORANT, PAS UN PLANCHER, ET L'ANNONCER « plancher » ETAIT
+  // FAUX DANS L'AUTRE SENS. `awk '/async function etatMenage/,/^}/'` compte 4
+  // `.from(` — j'avais d'abord ecrit 2 —, mais la fonction a trois sorties
+  // anticipees : elle en fait souvent moins. Le compte annonce est donc un
+  // ORDRE DE GRANDEUR, et le mot le dit.
   const LECTURES_ETAT_MENAGE = 4
 
   const jour = jourParis(0)
@@ -216,22 +233,41 @@ module.exports = async (req, res) => {
   }
 
   const lireBiens = async () => {
-    if (!droits.reservations && !droits.menages) return []
+    if (!droits.reservations && !droits.menages) return null
     if (perimetreVide) return []
+    if (uuidIntrouvable) {
+      console.error('[ecran/aujourdhui]', 'perimetre sans cle UUID', { refs: refsTexte })
+      indisponibles.push('biens')
+      return null
+    }
     let q = supabase.from('properties')
       .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency, photo_url')
       .eq('user_id', compte)
     q = bornerUuid(q, 'id')
     const { data, error } = await compter(q.order('name', { ascending: true }))
-    if (error) { indisponibles.push('biens'); return [] }
+    // ⚠ `null`, PAS `[]`. Une liste vide dit « cet hote n'a aucun logement »,
+    // un FAIT ; l'ecran masquait alors la section des biens, les notes et les
+    // indicateurs sans explication, en laissant « + Ajouter un bien ». C'est
+    // exactement le defaut que le commentaire du perimetre, vingt lignes plus
+    // haut, condamne.
+    if (error) { console.error('[ecran/aujourdhui]', 'biens', error.message); indisponibles.push('biens'); return null }
     return data || []
   }
 
   const lireTaches = async () => {
     if (!droits.messages) return null
     if (perimetreVide) return []
+    // ⚠ `arrival` ET `departure` SONT DANS LE SELECT, ET ELLES MANQUAIENT.
+    // `shared/aujourdhui.js` (`tachesOuvertes`) porte un REPLI documente :
+    // quand les sejours ne sont pas lus, il garde une tache par
+    // `t.departure >= aujourd'hui`. Sans la colonne, ce repli valait
+    // TOUJOURS faux. Les deux cas qu'il couvre laissent justement
+    // `etat.bookings` vide : un profil `messages: read` / `menages: none`, et
+    // tout hote dont `/api/menages` echoue. Dans les deux, « A valider »
+    // affichait « aucune tache » — un FAIT — sur un compte qui en porte 222.
     let q = supabase.from('agent_tasks')
-      .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
+      .select('id, book_id, property_id, guest_name, task_type, summary, '
+        + 'suggested_reply, status, created_at, arrival, departure')
       .eq('user_id', compte)
       .in('status', ['pending', 'pending_validation'])
     q = bornerRef(q, 'property_id')
@@ -292,20 +328,35 @@ module.exports = async (req, res) => {
       .gte('snapshot->>arrival', jour)
       .lte('snapshot->>arrival', demain)
     q = bornerRef(q, 'property_id')
-    const { data, error } = await compter(q.limit(200))
+    const { data, error } = await compter(q.limit(ARRIVEES_MAX))
     if (error) { indisponibles.push('arrivees'); return [] }
+    // Un plafond qui ne s'annonce pas est un compte faux : au-dela, des
+    // arrivees du jour n'auraient pas d'etat de code, sans que rien ne le dise.
+    if ((data || []).length >= ARRIVEES_MAX) tronquees.push('arrivees')
     return (data || []).map(r => ({
       bookId: String(r.booking_id),
       propertyId: String(r.property_id),
       firstNight: (r.snapshot || {}).arrival || null,
-      // ⚠ `|| null`, COMME `api/messages.js:585` — ET J'AVAIS MIS `'confirmed'`.
-      // `arriveesProches` filtre par `arr && st && !STATUTS_SANS_ARRIVEE.has(st)`
-      // : un snapshot sans `status` est donc EXCLU chez l'autre appelant et
-      // etait INCLUS ici. Les deux ecrans auraient dit le contraire l'un de
-      // l'autre sur la meme reservation le meme jour — et la banniere du
-      // module promet que le verdict ne bouge pas d'un iota. Une extraction qui
-      // modifie la regle est pire que pas d'extraction.
-      status: (r.snapshot || {}).status || null,
+      // ⚠ PAR LE LECTEUR CANONIQUE, ET C'EST LA TROISIEME VALEUR QUE J'ECRIS ICI.
+      // J'avais mis `|| 'confirmed'`, la premiere review a demande `|| null`
+      // pour s'aligner sur `api/messages.js`, et la seconde a montre que les
+      // DEUX etaient faux — pour des raisons opposees :
+      //   · `null` fait sortir la reservation du filtre `arr && st && …` de
+      //     `arriveesProches`. Or `lib/bookings-snapshot-status.js` dit
+      //     explicitement « valeur vide/absente -> confirmed (comportement
+      //     historique des 5 writers) », et `api/menages.js` filtre par
+      //     `isActiveStatus`, donc cette reservation EST affichee comme arrivee
+      //     du jour. Elle l'aurait ete sans etat de code et sans invite
+      //     « Envoyer le code » : le voyageur arrive, l'hote ne voit rien.
+      //   · `'confirmed'` en dur recopiait la regle au lieu de l'appeler, donc
+      //     divergeait au premier correctif — et ne traduisait pas le
+      //     vocabulaire BRUT des providers (`inquiry`, `black` sont des mots
+      //     Beds24) que `canonicalStatus` sait mapper.
+      // `readStatus` est la primitive, et elle tolere les lignes ecrites AVANT
+      // ce module — c'est ce qui evite un backfill. `api/messages.js` l'utilise
+      // aussi, donc les deux appelants de `arriveesProches` partagent enfin la
+      // meme regle, ce que l'extraction promettait.
+      status: readStatus(r.snapshot || {}, (r.snapshot || {}).provider),
       provider: (r.snapshot || {}).provider || null,
       snapshot: r.snapshot || {}
     }))
@@ -326,19 +377,37 @@ module.exports = async (req, res) => {
   const lireConversations = async () => {
     if (!droits.messages) return null
     if (perimetreVide) return []
+    // ⚠ PAR CURSEUR, PAS PAR DECALAGE — ET J'AVAIS ECRIT `.range()`.
+    // `messages.id` est un `gen_random_uuid()` : l'ordre est stable mais
+    // ARBITRAIRE, et `.range` se traduit en `offset`. Un message entrant insere
+    // entre deux pages prend une cle aleatoire qui peut tomber DANS la page
+    // deja lue : toutes les lignes suivantes glissent d'un rang, et celle qui
+    // etait a l'index 1000 n'est jamais rendue. Son `booking_id` manque alors
+    // de `conversations`, donc la page envoie cette arrivee vers la fiche du
+    // bien au lieu de sa conversation — differemment a chaque rechargement.
+    // C'est le « defaut muet » que ce lot pretendait fermer, re-introduit par
+    // son propre correctif. Un curseur (`.gt('id', dernier)`) ne peut pas
+    // sauter une ligne qui existait au depart.
+    // Le depot porte deja ce motif : `lirePagine` de `lib/logement/lecture.js`.
     const vus = new Set()
+    let dernier = null
     for (let page = 0; page < CONVERSATIONS_PAGES_MAX; page++) {
       let q = supabase.from('messages').select('id, booking_id')
         .eq('user_id', compte).not('booking_id', 'is', null)
       q = bornerRef(q, 'property_id')
-      // ⚠ UN ORDRE STABLE EST OBLIGATOIRE POUR PAGINER. Sans `.order`, deux
-      // pages peuvent rendre la meme ligne et en sauter une autre.
+      if (dernier) q = q.gt('id', dernier)
       const { data, error } = await compter(
-        q.order('id', { ascending: true })
-          .range(page * PAGE_POSTGREST, page * PAGE_POSTGREST + PAGE_POSTGREST - 1))
+        q.order('id', { ascending: true }).limit(PAGE_POSTGREST))
       if (error) { indisponibles.push('conversations'); return null }
-      for (const r of data || []) vus.add(String(r.booking_id))
-      if ((data || []).length < PAGE_POSTGREST) return [...vus]
+      const lot = data || []
+      for (const r of lot) vus.add(String(r.booking_id))
+      // ⚠ LE PLAFOND DU SERVEUR PEUT ETRE PLUS BAS QUE LE NOTRE. `db-max-rows`
+      // est un reglage : si on en recoit MOINS que demande, c'est peut-etre la
+      // fin, peut-etre le plafond. On ne conclut « fin » que sur un lot VIDE ou
+      // strictement plus petit que ce que le serveur nous a deja rendu.
+      if (!lot.length) return [...vus]
+      dernier = String(lot[lot.length - 1].id)
+      if (lot.length < PAGE_POSTGREST) return [...vus]
       if (page === CONVERSATIONS_PAGES_MAX - 1) tronquees.push('conversations')
     }
     return [...vus]
@@ -400,13 +469,16 @@ module.exports = async (req, res) => {
       if (!colonneAbsente(error)) indisponibles.push('messages_ia')
       return null
     }
-    return count || 0
+    // ⚠ `?? null`, PAS `|| 0` : un `count` absent est un INCONNU. Rendre 0
+    // afficherait « l'IA n'a rien ecrit cette semaine », un fait — le faux zero
+    // que la dette 66 interdit, a un caractere pres de son voisin `compterSi`.
+    return count ?? null
   }
 
   const tDebutLectures = Date.now()
   const [biens, taches, alarmes, arrivees, notes, conversations, nMenages, nPrix, nSurresa, nIa] =
     await Promise.all([
-      sur('biens', lireBiens, []),
+      sur('biens', lireBiens, null),
       sur('taches', lireTaches, null),
       sur('alarmes', lireAlarmes, null),
       sur('arrivees', lireArrivees, []),
@@ -438,13 +510,32 @@ module.exports = async (req, res) => {
   // `api/messages.js`. Le recopier aurait fait deux regles qui divergent au
   // premier correctif.
   let etatsArrivee = null
-  try {
+  const assemblerEtatsDuCode = async () => {
   if (droits.messages && arrivees.length) {
-    const proches = arriveesProches(arrivees, (d) => jourParis(d))
+    // ⚠ ON PASSE LES JOURS DEJA CALCULES, ON NE RELIT PAS L'HORLOGE.
+    // `(d) => jourParis(d)` reconstruisait la date APRES la phase de lecture :
+    // une requete commencee a 23 h 59 min 59 s interrogeait `bookings_snapshot`
+    // pour [J, J+1] puis filtrait ses lignes sur [J+1, J+2]. Les lignes de J+1
+    // survivaient, celles de J+2 n'avaient jamais ete lues, et la reponse
+    // annoncait `jour: J`. Le meme decalage d'un jour que le correctif de
+    // `jourParis` venait de fermer, laisse ouvert a l'interieur du correctif.
+    const proches = arriveesProches(arrivees, (d) => (d === 0 ? jour : demain))
     if (proches.length) {
       const { lignes, erreur } = await compter(lireLesCodes(supabase,
         proches.map(a => a.bookId), proches.map(a => a.propertyId)))
-      if (erreur) indisponibles.push('etats_arrivee')
+      // ⚠ UNE LECTURE EN ECHEC N'AUTORISE PAS UN VERDICT. `indisponibles` etait
+      // bien pousse, et le code CONTINUAIT : `codesParReservation([])` rend
+      // `{}`, donc `verdictDuCode(undefined, …)` rend « aucun » — un verdict
+      // DEFINITIF — pour CHAQUE arrivee du jour. La page ne traduit que « cree »
+      // en invite « Envoyer le code » : la pastille et l'invite disparaissaient
+      // en silence alors qu'un code existe. On s'arrete, et l'ecran dit qu'il
+      // ne sait pas.
+      if (erreur) {
+        console.error('[ecran/aujourdhui]', 'access_codes', erreur)
+        indisponibles.push('etats_arrivee')
+        etatsArrivee = null
+        return
+      }
       const parResa = codesParReservation(lignes)
       // Les messages SORTANTS de ces seules reservations : la preuve de
       // transmission du code. Borne aux reservations en main, pas au compte.
@@ -467,7 +558,14 @@ module.exports = async (req, res) => {
         .eq('direction', 'outbound'), 'property_id')
         .order('sent_at', { ascending: false })
         .limit(PAGE_POSTGREST))
-      if (eMsg) indisponibles.push('etats_arrivee')
+      // Meme regle : sans les messages sortants, « transmis » est indecidable,
+      // et rendre « cree » ferait renvoyer un code deja envoye.
+      if (eMsg) {
+        console.error('[ecran/aujourdhui]', 'messages (preuve de transmission)', eMsg.message)
+        indisponibles.push('etats_arrivee')
+        etatsArrivee = null
+        return
+      }
       // ⚠ LE SAC EST CLE SUR LE COUPLE `bien|reservation`, comme
       // `codesParReservation` l'est deja — et sur un objet SANS PROTOTYPE :
       // une reservation nommee `constructor` faisait lever `.push` sur la
@@ -501,6 +599,9 @@ module.exports = async (req, res) => {
       etatsArrivee = Object.create(null)
     }
   }
+  }
+  try {
+    await assemblerEtatsDuCode()
   } catch (e) {
     // Meme regle que les dix blocs : un echec ici ne rend pas l'ecran entier.
     console.error('[ecran/aujourdhui]', 'etats_arrivee', (e && e.message) || e)
@@ -522,9 +623,13 @@ module.exports = async (req, res) => {
   // `db;dur` est le temps de MUR de la phase de lecture (les dix blocs en
   // parallele, puis l'etat du code) — pas la somme des requetes, qui n'est pas
   // mesurable d'ici. `db;desc` reste un PLANCHER (voir `requetes`).
-  const msDb = tFinLectures - tDebutLectures
+  // ⚠ LA PHASE DE LECTURE COMMENCE A LA GARDE, PAS APRES ELLE. `contexteDEcran`
+  // fait un a trois allers-retours reseau — dont `chargerProfil` pour un membre
+  // delegue — et ils tombaient dans `calc;dur` : la requete la plus lente du
+  // produit, celle d'un membre delegue, se lisait « JavaScript lent ».
+  const msDb = tFinLectures - t0
   res.setHeader('Server-Timing',
-    `db;dur=${msDb};desc="${requetes} req (plancher)", `
+    `db;dur=${msDb};desc="${requetes} req (ordre de grandeur)", `
     + `calc;dur=${Math.max(0, total - msDb)}, total;dur=${total}`)
 
   return res.status(200).json({

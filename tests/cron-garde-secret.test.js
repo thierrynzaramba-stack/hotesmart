@@ -138,15 +138,8 @@ test('LE TEST QUI COMPTE : tout endpoint qui lit CRON_SECRET REFUSE quand il est
   // d'ecran des lots (c) et (d) : un filet aveugle a ce repertoire se vide a
   // mesure que le chantier avance.
   const dossier = path.join(__dirname, '..', 'api')
-  const tous = []
-  const descendre = (abs, rel) => {
-    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
-      if (e.isDirectory()) descendre(path.join(abs, e.name), `${rel}${e.name}/`)
-      else if (e.name.endsWith('.js')) tous.push(rel + e.name)
-    }
-  }
-  descendre(dossier, '')
-  const concernes = tous
+  const { fichiersJs } = require('./outils/source')
+  const concernes = fichiersJs(dossier, '.').map(f => f.replace(/^\.\//, ''))
     .filter(f => /process\.env\.CRON_SECRET/.test(fs.readFileSync(path.join(dossier, f), 'utf8')))
 
   // ⚠ SI LA LISTE SE VIDE, LE TEST NE PROUVE PLUS RIEN. Un renommage de la

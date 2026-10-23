@@ -49,12 +49,15 @@ sur 16) :
   `22P02`, donc un écran vide affirmé comme un fait.
 
 ⚠ **ET UN CACHE D'AFFICHAGE INSTANTANÉ** (`shared/cache-ecran.js`, clé = écran
-+ utilisateur + compte, péremption 12 h, effacé sur les quatre chemins de
-sortie). Il ne garde QUE la liste des biens, les notes et les quatre
++ utilisateur + compte, péremption 12 h, effacé sur les **cinq** chemins de
+sortie par un seul geste partagé, `purgerCachesLocaux` : déconnexion, autre
+utilisateur sur le poste, suppression de compte, et les deux boutons de la page
+d'invitation — « rejoindre » et « ce n'est pas moi »). Il ne garde QUE la liste des biens, les notes et les quatre
 compteurs — ce qui ne périme pas en une heure. Sont retirés **à l'écriture** :
 l'état du code d'accès, les alarmes, **les tâches** (elles portent le code
-d'accès en clair dans `summary` et `suggested_reply`), les arrivées et les
-fils. Le premier affichage ne rend donc ni « À valider » ni le sous-titre
+d'accès en clair dans `summary` et `suggested_reply`), les arrivées, les fils,
+et **le compte de surréservation** — un champ à l'intérieur d'un bloc gardé,
+que l'interdit 2 nomme. Le premier affichage ne rend donc ni « À valider » ni le sous-titre
 compté : sans les séjours, ils afficheraient « 0 arrivée · 0 départ », un fait
 faux.
 

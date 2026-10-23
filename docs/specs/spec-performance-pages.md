@@ -435,7 +435,12 @@ la conversation, différemment à chaque rechargement.
    la même donnée, et l'extraire maintenant obligerait à refaire ce travail au
    lot (d), quand `/api/menages` deviendra `/api/ecran/menages`.
 2. **Le cache d'écran ne garde que ce qui ne périme pas en une heure** : la
-   liste des biens, les notes, les quatre compteurs. Retirés **à l'écriture**,
+   liste des biens, les notes, trois des quatre compteurs.
+   ⚠ **`fait_pour_vous.surreservation` en sort aussi** : l'interdit 2 nomme la
+   surréservation, et retirer le bloc `alarmes` ne suffisait pas — le compte des
+   incidents des 7 derniers jours vivait dans un CHAMP d'un bloc gardé. Même
+   famille que `taches` : j'avais raisonné par bloc là où la donnée critique
+   vit dans un champ. Retirés **à l'écriture**,
    pas filtrés à la lecture (interdit 2) : `etats_arrivee`, `alarmes`,
    **`taches`**, `arrivees`, `conversations`. Clé =
    `hs.ecran.<écran>.<utilisateur>.<compte>`, péremption 12 h, effacée sur les
@@ -475,6 +480,28 @@ la conversation, différemment à chaque rechargement.
    l'endpoint, l'appel à `renderAlarmes()` avait disparu du code : la bannière
    ne pouvait plus s'afficher, et avec elle le bouton « Acquitter », seul moyen
    d'arrêter la réémission des SMS au fondateur.
+7. **Le statut d'une arrivée passe par `readStatus`**, le lecteur canonique.
+   Trois valeurs ont été écrites pour ce champ : `'confirmed'` en dur, puis
+   `null` pour s'aligner sur `api/messages.js`, et les deux étaient fausses —
+   `lib/bookings-snapshot-status.js` dit qu'un statut **absent vaut
+   `confirmed`**, et `api/menages.js` liste donc cette réservation comme
+   arrivée du jour. Avec `null`, elle sortait du filtre de `arriveesProches` :
+   le voyageur arrive, et l'hôte n'a ni état de code ni invite « Envoyer le
+   code ». **Une règle ne se recopie pas, elle s'appelle.**
+8. **`jourParis` existait en TROIS copies**, et le premier correctif n'en avait
+   touché qu'une. `api/messages.js` est l'autre injecteur du même
+   `arriveesProches` — ces nuits-là, les deux écrans auraient désigné des
+   arrivées « proches » différentes pour la même réservation le même jour.
+9. **La pagination des fils est par CURSEUR, pas par décalage.** `messages.id`
+   est un `gen_random_uuid()` : avec `.range()` (donc `offset`), un message
+   inséré entre deux pages prend une clé aléatoire qui peut tomber dans la page
+   déjà lue, et la ligne de l'index 1000 n'est jamais rendue. Le défaut muet
+   que le lot venait de fermer, réintroduit par son propre correctif.
+10. **Les signaux sont CONSOMMÉS.** `indisponibles` et `tronquees` étaient
+   produits et lus par personne : `biens` vaut maintenant `null` (et l'écran dit
+   « Logements indisponibles » au lieu de masquer la section), et une liste de
+   tâches plafonnée s'affiche avec un « + ». Un signal qu'on ne lit pas est un
+   signal qu'on n'a pas.
 
 **La preuve d'isolation, sur les données réelles** :
 `scripts/verifier-isolation-ecran.js` (lecture seule, aucune session fabriquée,
@@ -493,10 +520,30 @@ le filet censé attraper le `22P02` sur `properties.id`. Corrigé : il exige
 désormais le code HTTP 200, un titulaire non vide, un membre qui voit
 exactement son périmètre, et **aucun bloc `indisponibles`** — une lecture en
 échec se lit « rien à voir », pas « rien ». Le tamis regarde aussi les **clés**
-(`notes.par_bien` est indexé PAR la référence du bien), et le client de lecture
-seule enveloppe le client entier au lieu de quatre noms de méthodes : `rest`,
-`storage`, `auth.admin` et `rpc` s'en échappaient, avec la clé de service
-contre la production.
+(`notes.par_bien` est indexé PAR la référence du bien), et son arithmétique de
+périmètre connaît les deux formes de clé **et** le cas `property_scope: 'all'`
+— sans quoi elle échouait sur un passage correct et passait sur un écran vide.
+
+⚠ **ET LE CLIENT DE LECTURE SEULE A DÛ ÊTRE REFAIT DEUX FOIS.** Ce paragraphe a
+d'abord annoncé au passé que `rest`, `storage`, `auth.admin` et `rpc` ne
+s'échappaient plus. **C'était faux quand c'était écrit.** La deuxième version
+posait bien un proxy sur le client, mais elle rendait les propriétés **non
+fonctions telles quelles** — donc `auth.admin` restait à nu — et gardait une
+liste **noire** de quatre noms, qui ne pouvait pas nommer `upload`,
+`createUser`, `invoke` ni `rpc`. Mesure : **dix** chemins d'écriture
+atteignaient le SDK, dont `auth.admin.deleteUser()`, qui a levé depuis
+l'intérieur de `GoTrueAdminApi`.
+
+La version qui tient est une **liste blanche** : seul le vocabulaire de lecture
+PostgREST est autorisé, à toute profondeur, et tout le reste lève. Une liste
+noire doit tout prévoir, y compris ce qu'un SDK ajoutera demain ; une liste
+blanche n'a qu'à autoriser ce qu'on utilise. Les dix chemins et la lecture qui
+doit continuer de passer sont tenus par
+`tests/verificateur-lecture-seule.test.js`.
+
+**Leçon, et elle vaut au-delà de ce lot** : une promesse de sécurité écrite au
+passé dans une spec est une affirmation à mesurer, pas un compte rendu. Les
+deux fois, le code était plausible à la lecture.
 
 ### Lot (c) — les tables de résumé qui suppriment les appels `yield` par bien
 

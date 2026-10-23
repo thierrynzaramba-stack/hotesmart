@@ -260,15 +260,14 @@
         return
       }
       // ⚠ LE COMPTE EST SUPPRIME : RIEN NE DOIT RESTER SUR LE DISQUE.
-      // `signOut()` est appele ici en direct, donc il ne passe pas par le
-      // `signOut` de `shared/supabase.js` qui vide le cache d'ecran. Sans ce
-      // nettoyage, les logements, les notes et les compteurs de l'hote
-      // restaient en `localStorage` apres la suppression de son compte —
-      // jusqu'a 12 h, ou indefiniment, puisqu'une cle perimee est refusee a la
-      // lecture mais n'est pas effacee. Releve par la review du lot (b).
+      // `supabase.auth.signOut()` est appele ici en direct, donc il ne passe
+      // pas par le `signOut` de `shared/supabase.js`. Ma premiere correction
+      // n'avait recopie que la moitie « cache d'ecran » et laissait
+      // `hs_compte_courant` — le defaut meme que le `signOut` partage existe
+      // pour empecher. On appelle donc le geste PARTAGE.
       try {
-        const c = await import('/shared/cache-ecran.js')
-        if (c.oublierTout) c.oublierTout()
+        const m = await import('/shared/supabase.js')
+        if (m.purgerCachesLocaux) await m.purgerCachesLocaux()
       } catch { /* module indisponible : on continue, la sortie prime */ }
       await supabase.auth.signOut()
       window.location.href = '/pages/login.html?deleted=1'

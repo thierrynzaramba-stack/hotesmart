@@ -198,18 +198,35 @@ const deltaPoints = v => delta(v, v == null ? '' : t('kpi.points', { v: I18n.num
 
 // ─── 1. Titre et sous-titre comptés ─────────────────────────────────────────
 function renderTitre () {
+  // ⚠ « 0 arrivée · 0 départ · rien à faire » EST UN FAIT, et il demande
+  // d'avoir lu les séjours. `renderEvenements` et `renderBiens` étaient gardés
+  // par `etat.menagesOk` ; ce sous-titre ne l'était pas. L'hôte lisait donc
+  // « indisponible » dans la liste des événements ET « 0 arrivée · 0 départ »
+  // dans le titre du même écran — et « rien à faire » alors qu'une
+  // surréservation non acquittée pouvait exister. Le KB de cette page
+  // l'interdit nommément.
   const evts = evenements()
-  const arrivees = evts.filter(e => e.type === 'arrivee').length
-  const departs = evts.filter(e => e.type === 'depart').length
-  const todos = evts.filter(e => e.action).length + tachesVisibles().length + etat.alarmes.length
+  const lu = etat.menagesOk === true
+  const todos = (lu ? evts.filter(e => e.action).length : 0)
+    + tachesVisibles().length + etat.alarmes.length
   const el = $('[data-bind="summary"]')
   el.removeAttribute('data-i18n')
-  el.textContent = t('today.summary', {
-    date: dateDuJour(etat.aujourdHui, { weekday: 'long', day: 'numeric', month: 'long' }),
-    arrivals: t('today.arrivals', { n: arrivees }),
-    departures: t('today.departures', { n: departs }),
-    todos: t('today.todos', { n: todos })
-  })
+  const date = dateDuJour(etat.aujourdHui, { weekday: 'long', day: 'numeric', month: 'long' })
+  el.textContent = lu
+    ? t('today.summary', {
+      date,
+      arrivals: t('today.arrivals', { n: evts.filter(e => e.type === 'arrivee').length }),
+      departures: t('today.departures', { n: evts.filter(e => e.type === 'depart').length }),
+      todos: t('today.todos', { n: todos })
+    })
+    // Sans les séjours : on dit la date, ce qu'on sait compter, et que le
+    // reste manque. Jamais un zéro.
+    : t('today.summary', {
+      date,
+      arrivals: t('today.counts_unavailable'),
+      departures: '',
+      todos: t('today.todos', { n: todos })
+    }).replace(' ·  ·', ' ·')
 }
 
 // ─── Alarmes de surréservation ──────────────────────────────────────────────
@@ -392,6 +409,16 @@ function tachesVisibles () {
     bookings: etat.bookings, aujourdHui: etat.aujourdHui
   })
 }
+// ⚠ LA LISTE DES TACHES EST PLAFONNEE A 200 CHEZ LE SERVEUR, ET ELLE L'EST
+// DEJA : le compte de Thierry porte 222 taches ouvertes. L'endpoint l'annonce
+// dans `tronquees` — un signal que ce lot produisait et que PERSONNE ne lisait,
+// si bien que l'ecran affichait un nombre exact que le serveur avait lui-meme
+// marque comme un minorant.
+function tachesPlafonnees () {
+  const tr = etat.ecran && etat.ecran.tronquees
+  return Array.isArray(tr) && tr.includes('taches')
+}
+
 function renderTaches () {
   const section = $('[data-bind="validate-section"]')
   const mobile = $('[data-bind="validate-mobile"]')
@@ -412,7 +439,10 @@ function renderTaches () {
       <a class="btn btn--primary" style="height: 40px" href="${esc(c.href)}">${esc(t('validate.view'))}</a>
     </div>`
   }).join('') + (visibles.length > 3
-    ? `<a class="link small" href="/messages?filtre=avalider">${esc(t('validate.more', { n: visibles.length - 3 }))}</a>` : '')
+    ? `<a class="link small" href="/messages?filtre=avalider">${
+      esc(tachesPlafonnees()
+        ? t('validate.capped', { n: visibles.length - 3 })
+        : t('validate.more', { n: visibles.length - 3 }))}</a>` : '')
   const premiere = carteTache(visibles[0])
   mobile.hidden = false
   mobile.href = premiere.href
@@ -567,6 +597,16 @@ function quand (jour) {
 }
 function renderBiens () {
   const section = $('[data-bind="props-section"]')
+  // ⚠ `null` N'EST PAS UNE LISTE VIDE. L'endpoint rend `null` quand il n'a PAS
+  // pu lire : masquer la section revenait à affirmer « cet hôte n'a aucun
+  // logement » — avec les notes et les indicateurs disparus, et
+  // « + Ajouter un bien » resté visible.
+  if (etat.biens === null) {
+    section.hidden = false
+    $('[data-list="properties"]').innerHTML =
+      `<p class="muted">${esc(t('properties.unavailable'))}</p>`
+    return
+  }
   section.hidden = !etat.biens.length
   const etats = R.etatDesBiens({ bookings: etat.bookings, biens: etat.biens, aujourdHui: etat.aujourdHui })
   $('[data-list="properties"]').innerHTML = etat.biens.map(b => {
@@ -745,8 +785,12 @@ async function init () {
   if (duCache) {
     etat.ecran = duCache.donnees
     etat.ageCache = duCache.age_ms
-    await Promise.all([chargerCompteurs(), chargerNotes()])
+    // ⚠ LES BIENS D'ABORD : `chargerNotes` boucle SUR `etat.biens` pour remplir
+    // `notesParBien`. En l'appelant avant, la boucle tournait sur `[]` et les
+    // étoiles manquaient au premier affichage — celui que ce lot, le KB et la
+    // spec promettent tous les trois.
     etat.biens = await lireBiens()
+    await Promise.all([chargerCompteurs(), chargerNotes()])
     renderCompteurs(); renderBiens()
   }
 
@@ -772,7 +816,15 @@ async function init () {
   // continue de voir les chiffres du compte dont il vient d'être retiré.
   let ecranFrais = false
   await Promise.all([
-    chargerEcran().then(() => { ecranFrais = true })
+    // ⚠ « RESOLUE » NE VEUT PAS DIRE « REPONDUE ». `appel()` fait
+    // `r.json().catch(() => ({}))` : un 200 qui porte du HTML — la panne que la
+    // mémoire du projet décrit sous « URL sans /api/v1 : 200 + HTML = 0 bien
+    // silencieux » — rend `{}` et RÉSOUT. On aurait alors effacé l'âge,
+    // affiché un écran vide, et ÉCRASÉ un bon cache par `{}` pour 12 h. La
+    // règle du dépôt, citée par le vérificateur de ce même lot, est
+    // « asserter HTTP + non-vacuité » : `jour` est le champ que l'endpoint rend
+    // toujours, et son absence signe une réponse qui n'en est pas une.
+    chargerEcran().then(r => { ecranFrais = !!(r && r.jour) })
       .catch(e => { logger.error('Aujourdhui', 'ecran', e) }),
     chargerReservations()
   ])
@@ -780,6 +832,10 @@ async function init () {
   await Promise.all([chargerTaches(), chargerAlarmes(), chargerCompteurs(), chargerEtatsArrivee(), chargerNotes()])
   // L'âge ne repasse à « rien » que si les données viennent VRAIMENT du serveur.
   if (ecranFrais) etat.ageCache = null
+  // ⚠ UN COMPTE PLAFONNE SE DIT. L'endpoint annonce `tronquees: ['taches']` dès
+  // aujourd'hui (222 tâches ouvertes pour un plafond de 200) : afficher « 200 »
+  // serait un nombre faux avec aplomb. Le badge et le sous-titre portent donc
+  // le « + ».
   nav(tachesVisibles().filter(x => x.status === 'pending_validation').length)
   // ⚠ `renderAlarmes()` EST DANS CETTE LISTE, ET IL N'Y ÉTAIT PLUS.
   // L'ancienne `chargerAlarmes()` finissait par `renderAlarmes(); renderTitre()` ;
@@ -793,8 +849,9 @@ async function init () {
   // plus être éteinte.
   renderEvenements(); renderTaches(); renderAlarmes(); renderCompteurs(); renderBiens(); renderTitre()
   // ⚠ ON GARDE CE QU'ON VIENT D'AFFICHER. Le cache ne sert qu'à un premier
-  // affichage instantané au prochain chargement ; les trois états critiques en
-  // sont retirés à l'écriture par le module lui-même.
+  // affichage instantané au prochain chargement ; les cinq blocs critiques ET
+  // le compte de surréservation en sont retirés à l'écriture par le module
+  // lui-même.
   if (ecranFrais && etat.ecran) CacheEcran.ecrire('aujourdhui', moi(), compteCourant(), etat.ecran)
 
   if (peutLire('reservations')) {

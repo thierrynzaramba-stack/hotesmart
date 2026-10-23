@@ -14,6 +14,15 @@
 // boucle compte pour un. Ce qu'il garde est l'INVENTAIRE — quels endpoints une
 // page s'autorise a joindre — et c'est exactement ce qui derive.
 //
+// ⚠ REGLE 19 DE REVIEW.md : CE FICHIER EST UN TEST DE NON-REGRESSION, PAS LE
+// GARDE-FOU D'UN CORRECTIF — et il faut le dire, parce qu'il est VERT contre le
+// commit precedent (mesure : 3 tests, 3 verts sur `bf811b3`). Il ne pouvait pas
+// rougir contre « le code d'avant » : la version fautive qu'il garde n'est pas
+// un etat passe du depot, c'est tout etat FUTUR ou un appel serait remis. Sa
+// contre-epreuve se fait donc par mutation, et elle est faite : ajouter un
+// repli `|| await appel('/api/avis?action=notes')` dans `chargerNotes` le fait
+// rougir en nommant l'endpoint fautif.
+//
 // ⚠ ET L'ATTENDU EST CHIFFRE, PAS BORNE. « <= 4 » laisse passer la quatrieme
 // sans rien dire. Une de plus OU une de moins, et le test parle : c'est la
 // discipline du depot (`ATTENDU` de bookings-snapshot-troncature, exemptions

@@ -84,6 +84,7 @@ function tient (ligne, f) {
   if (op === 'in')  return f[2].includes(String(v))
   if (op === 'is')  return f[2] === null ? (v === null || v === undefined) : v === f[2]
   if (op === 'not') return f[2] === 'is' && f[3] === null ? (v !== null && v !== undefined) : true
+  if (op === 'gt')  return String(v) > f[2]
   if (op === 'gte') return String(v) >= f[2]
   if (op === 'lte') return String(v) <= f[2]
   return true
@@ -120,9 +121,18 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
         in (c, v)  { r.filtres.push(['in', c, (v || []).map(String)]); return q },
         is (c, v)  { r.filtres.push(['is', c, v]); return q },
         not (c, o, v) { r.filtres.push(['not', c, o, v]); return q },
+        gt (c, v)  { r.filtres.push(['gt', c, String(v)]); return q },
         gte (c, v) { r.filtres.push(['gte', c, String(v)]); return q },
         lte (c, v) { r.filtres.push(['lte', c, String(v)]); return q },
-        order () { return q },
+        // ⚠ L'ORDRE EST ENREGISTRE, ET IL NE L'ETAIT PAS. `order () { return q }`
+        // n'ecrivait rien : la contre-epreuve a montre qu'on pouvait retirer
+        // `.order('id')` de la pagination ET retourner la preuve de
+        // transmission de DESC en ASC sans faire rougir un seul test. Le
+        // second est le pire : avec plus de 1000 messages sortants sur les
+        // reservations proches, ASC garde les PLUS ANCIENS, donc le message
+        // qui porte le code n'est jamais lu et « transmis » devient « cree » —
+        // l'hote renvoie un code deja envoye.
+        order (colonne, opts) { (r.ordres = r.ordres || []).push([colonne, !!(opts && opts.ascending)]); return q },
         range (a, b) { r.plage = [a, b]; return q },
         limit (n) { r.limite = n; return q },
         then (ok, ko) {
@@ -148,14 +158,20 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
           }
           // Une base qui rend des PAGES PLEINES : de quoi eprouver la
           // pagination sans fabriquer mille lignes a la main.
-          // Seules les lectures PAGINEES (celles qui portent un `range`) sont
-          // servies par pages : la preuve de transmission, elle, est bornee par
-          // `.limit`, et la compter ici fausserait la mesure.
-          if (pages && pages[table] && r.plage) {
-            const page = Math.floor(r.plage[0] / 1000)
+          // ⚠ LES PAGES SE SERVENT PAR CURSEUR, comme le code les demande
+          // maintenant : une lecture paginee est celle qui ordonne par `id` et
+          // porte une `limit`, et sa page suivante se reconnait a son
+          // `.gt('id', <dernier>)`. Un banc qui servirait encore des decalages
+          // laisserait passer un retour a `.range`.
+          const estPaginee = pages && pages[table] && r.limite === 1000
+            && (r.ordres || []).some(o => o[0] === 'id')
+          if (estPaginee) {
+            const curseur = (r.filtres.find(f => f[0] === 'gt' && f[1] === 'id') || [])[2]
+            const page = curseur ? Number(String(curseur).split('-')[0]) + 1 : 0
             const plein = page < pages[table]
             const lot = Array.from({ length: plein ? 1000 : 3 },
-              (_, i) => ({ id: `${page}-${i}`, booking_id: `B${page}-${i}`,
+              (_, i) => ({ id: `${page}-${String(i).padStart(4, '0')}`,
+                           booking_id: `B${page}-${i}`,
                            property_id: String(BULLE_REF), user_id: TITULAIRE }))
             return Promise.resolve({ data: lot, count: lot.length, error: null }).then(ok, ko)
           }
@@ -517,8 +533,13 @@ test('le cout s annonce : `Server-Timing` et le bloc `cout`', async () => {
   assert.match(st, /db;dur=\d+/, 'la part BASE manque')
   assert.match(st, /calc;dur=\d+/, 'la part CALCUL manque')
   assert.match(st, /total;dur=\d+/)
-  assert.match(st, /desc="\d+ req \(plancher\)"/,
-    'le compte de requetes doit s annoncer comme un plancher, pas comme un exact')
+  // ⚠ « ORDRE DE GRANDEUR », PAS « PLANCHER » — ET J'AVAIS ECRIT « plancher ».
+  // Le mot etait faux dans l'autre sens : `LECTURES_ETAT_MENAGE = 4` est un
+  // MAJORANT (la fonction a trois sorties anticipees), donc le compte peut
+  // aussi SURESTIMER. Un instrument pose pour designer la cause ne doit pas
+  // mentir sur son propre sens d'erreur.
+  assert.match(st, /desc="\d+ req \(ordre de grandeur\)"/,
+    'le compte de requetes doit annoncer son incertitude')
   assert.ok(Number.isInteger(corps.cout.requetes) && corps.cout.requetes > 0)
   assert.ok(typeof corps.calcule_le === 'string' && corps.calcule_le.endsWith('Z'),
     'l heure du calcul est exigee par la regle d architecture')
@@ -581,14 +602,32 @@ test('LE TEST QUI COMPTE : les fils se lisent en PAGES, parce que PostgREST coup
   // au lieu de sa conversation, differemment a chaque rechargement.
   // Apres correctif, le titulaire de production passe de 137 a 221 fils.
   const { requetes, corps } = await banc({ titulaire: true, pages: { messages: 2 } })()
-  const lectures = requetes.filter(r => r.table === 'messages' && r.plage)
+  const lectures = requetes.filter(r => r.table === 'messages' && r.limite === 1000)
   assert.strictEqual(lectures.length, 3,
     `${lectures.length} lecture(s) paginees de fils : la pagination ne tourne pas`)
-  assert.deepEqual(lectures.map(r => r.plage), [[0, 999], [1000, 1999], [2000, 2999]],
-    'les pages ne se suivent pas')
+  // ⚠ PAR CURSEUR, PAS PAR DECALAGE. `messages.id` est un `gen_random_uuid()`
+  // et `.range` se traduit en `offset` : un message insere entre deux pages
+  // prend une cle aleatoire qui peut tomber DANS la page deja lue, toutes les
+  // lignes suivantes glissent d'un rang, et celle de l'index 1000 n'est jamais
+  // rendue. Son fil manque alors de `conversations`, donc l'arrivee renvoie
+  // vers la fiche du bien au lieu de la conversation — differemment a chaque
+  // rechargement. Un ordre stable est NECESSAIRE mais pas suffisant.
+  for (const r of lectures) {
+    assert.ok((r.ordres || []).some(o => o[0] === 'id' && o[1] === true),
+      'une page de fils n est pas ordonnee par `id` croissant : deux pages peuvent se recouvrir')
+    assert.strictEqual(r.plage, undefined,
+      'la pagination est repassee a `.range()` (decalage) : une ligne peut etre sautee')
+  }
+  assert.deepEqual(lectures.slice(1).map(r => !!r.filtres.find(f => f[0] === 'gt' && f[1] === 'id')),
+    [true, true], 'les pages suivantes ne portent pas de curseur `.gt(id, dernier)`')
   assert.ok(Array.isArray(corps.conversations) && corps.conversations.length > 1000,
     `${(corps.conversations || []).length} fils : la deuxieme page n a pas ete lue`)
   assert.deepEqual(corps.tronquees, [], 'la troncature est annoncee a tort')
+
+  // Et au-dela du nombre de pages, la troncature SE DIT.
+  const bcp = await banc({ titulaire: true, pages: { messages: 99 } })()
+  assert.ok(bcp.corps.tronquees.includes('conversations'),
+    'au plafond de pages, la liste des fils passe pour complete')
 })
 
 test("LE TEST QUI COMPTE : une colonne absente masque la tuile SANS la dire en panne", async () => {
@@ -624,18 +663,203 @@ test("LE TEST QUI COMPTE : un bloc qui LEVE n'emporte pas les neuf autres", asyn
   assert.ok(Array.isArray(corps.alarmes), 'l alarme de surreservation est partie avec les notes')
 })
 
-test("LE TEST QUI COMPTE : le statut d'une arrivee suit la MEME regle que la messagerie", () => {
-  // `api/messages.js:585` ecrit `status: snap.status || null`, et
-  // `arriveesProches` filtre par `arr && st && …` : un snapshot SANS statut est
-  // donc exclu la-bas. J'avais mis `|| 'confirmed'` ici, donc inclus. Les deux
-  // ecrans auraient dit le contraire l'un de l'autre sur la meme reservation,
-  // le meme jour — et le module promet que le verdict ne bouge pas d'un iota.
+test("LE TEST QUI COMPTE : le statut d'une arrivee passe par le LECTEUR CANONIQUE", () => {
+  // ⚠ TROISIEME VALEUR POUR CE CHAMP, ET LES DEUX PREMIERES ETAIENT FAUSSES.
+  // J'avais ecrit `|| 'confirmed'`, la premiere review a demande `|| null`
+  // pour s'aligner sur `api/messages.js`, et la seconde a montre que
+  // `api/messages.js` avait TORT :
+  //   `lib/bookings-snapshot-status.js` dit « valeur vide/absente -> confirmed
+  //   (comportement historique des 5 writers) », et `api/menages.js` filtre par
+  //   `isActiveStatus`. Une reservation sans statut EST donc affichee comme
+  //   arrivee du jour — mais `arriveesProches` exige `arr && st && …`, donc
+  //   `null` la faisait sortir : le voyageur arrive, et l'hote n'a ni etat de
+  //   code ni invite « Envoyer le code ».
+  // La regle ne se recopie pas, elle s'APPELLE : les deux appelants de
+  // `arriveesProches` passent par `readStatus`, qui traduit en plus le
+  // vocabulaire brut des providers (`inquiry`, `black` sont des mots Beds24).
   const fs = require('node:fs')
   const path = require('node:path')
   const lu = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
-  const ici = (lu('api/ecran/aujourdhui.js').match(/status: \(r\.snapshot \|\| \{\}\)\.status \|\| (\w+)/) || [])[1]
-  const ailleurs = (lu('api/messages.js').match(/status:\s*snap\.status\s*\|\|\s*(\w+)/) || [])[1]
-  assert.strictEqual(ici, 'null', 'le defaut du statut n est pas `null`')
-  assert.strictEqual(ici, ailleurs,
-    `les deux appelants de arriveesProches ne construisent pas le meme statut : ${ici} vs ${ailleurs}`)
+  for (const f of ['api/ecran/aujourdhui.js', 'api/messages.js']) {
+    const src = lu(f)
+    assert.match(src, /require\('[^']*bookings-snapshot-status'\)/,
+      `${f} ne charge pas le lecteur canonique du statut`)
+    assert.match(src, /status:\s*readStatus\(/,
+      `${f} recopie la regle du statut au lieu de l appeler`)
+    assert.ok(!/status:[^\n]*\|\|\s*(null|'confirmed')/.test(src),
+      `${f} porte encore un defaut de statut en dur`)
+  }
+  // Et la primitive dit bien ce qu'on attend d'elle.
+  const { canonicalStatus } = require('../lib/bookings-snapshot-status')
+  assert.strictEqual(canonicalStatus(undefined), 'confirmed',
+    'un statut absent doit valoir `confirmed`, sinon l arrivee sort du filtre')
+  assert.strictEqual(canonicalStatus(''), 'confirmed')
+})
+
+// ─── Les garanties que la contre-epreuve a trouvees SANS AUCUN TEST ──────────
+
+test("LE TEST QUI COMPTE : la preuve « transmis » est cle sur le COUPLE bien + reservation", async () => {
+  // ⚠ CETTE GARANTIE N'AVAIT AUCUN TEST, et la contre-epreuve l'a montre :
+  // revenir a une cle `booking_id` seule laissait la suite ENTIERE au vert.
+  // Un identifiant de reservation Beds24 est numerique et n'est unique QUE par
+  // bien : reutilise sur un autre logement du meme compte, il melangeait les
+  // messages sortants de cet autre logement dans le sac de celui-ci. Si l'un
+  // d'eux contient les chiffres du code bornes par des non-chiffres (un prix,
+  // un autre code de porte), le verdict passe a « transmis » pour une arrivee
+  // dont le code n'a jamais ete envoye.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/ecran/aujourdhui.js'), 'utf8')
+  const bloc = (src.match(/const parBooking = Object\.create\(null\)[\s\S]*?\n      \}/) || [''])[0]
+  assert.ok(bloc, 'le sac des messages sortants a disparu')
+  assert.match(bloc, /\$\{String\(m\.property_id\)\}\|\$\{String\(m\.booking_id\)\}/,
+    'le sac est cle sur la reservation seule : deux biens partageant un numero se melangent')
+  assert.match(src, /parBooking\[`\$\{a\.propertyId\}\|\$\{a\.bookId\}`\]/,
+    'la lecture du sac n utilise pas le couple')
+  // Et la lecture est ordonnee du PLUS RECENT au plus ancien : avec plus de
+  // 1000 sortants sur ces reservations, l'ordre croissant garderait les plus
+  // ANCIENS, donc jamais celui qui porte le code.
+  const { requetes } = await banc({ titulaire: true, lignes: {
+    bookings_snapshot: [{ booking_id: 'B1', property_id: BULLE_REF,
+      snapshot: { arrival: new Date().toISOString().slice(0, 10), status: 'confirmed' } }]
+  } })()
+  const preuve = requetes.find(r => r.table === 'messages'
+    && r.filtres.some(f => f[0] === 'in' && f[1] === 'booking_id'))
+  assert.ok(preuve, 'la preuve de transmission ne se lit plus')
+  assert.deepEqual((preuve.ordres || [])[0], ['sent_at', false],
+    'la preuve de transmission n est plus ordonnee du plus RECENT au plus ancien')
+})
+
+test("LE TEST QUI COMPTE : une lecture de codes en echec ne rend AUCUN verdict", async () => {
+  // ⚠ `indisponibles` ETAIT POUSSE, ET LE CODE CONTINUAIT. `codesParReservation([])`
+  // rend `{}`, donc `verdictDuCode(undefined, …)` rendait « aucun » — un
+  // verdict DEFINITIF — pour chaque arrivee du jour. La page ne traduit que
+  // « cree » en invite « Envoyer le code » : la pastille et l'invite
+  // disparaissaient en silence alors qu'un code existe.
+  const jour = new Date().toISOString().slice(0, 10)
+  const arrivee = { bookings_snapshot: [{ booking_id: 'R1', property_id: BULLE_REF,
+    snapshot: { arrival: jour, status: 'confirmed' } }] }
+  for (const table of ['access_codes', 'messages']) {
+    const { corps } = await banc({ titulaire: true, lignes: arrivee, pannes: [table] })()
+    assert.strictEqual(corps.etats_arrivee, null,
+      `${table} illisible, et un verdict est quand meme rendu : ` + JSON.stringify(corps.etats_arrivee))
+    assert.ok(corps.indisponibles.includes('etats_arrivee'),
+      `${table} illisible n est pas annonce`)
+  }
+})
+
+test("LE TEST QUI COMPTE : un perimetre sans cle UUID se DIT, il ne rend pas un ecran vide", async () => {
+  // ⚠ LE CORRECTIF DU 22P02 POUVAIT ECHANGER UNE PANNE BRUYANTE CONTRE UN FAUX
+  // FAIT SILENCIEUX. `property_ids` et `property_refs` sont deux colonnes
+  // distinctes, tenues d'accord par un TRIGGER : si le perimetre ne porte que
+  // des cles provider, `refsUuid` vaut `[]` alors que `perimetreVide` est faux.
+  // `.in('id', [])` rend alors zero ligne SANS erreur — « vous n'avez aucun
+  // logement », affirme, pendant que tous les blocs a cle TEXTE sont remplis.
+  const { corps } = await banc({ refs: [BULLE_REF] })()
+  assert.strictEqual(corps.biens, null, 'un ecran vide est rendu comme un fait')
+  assert.ok(corps.indisponibles.includes('biens'),
+    'le perimetre sans cle UUID ne laisse aucune trace')
+  assert.strictEqual(corps.perimetre_vide, false, 'le perimetre n est pas vide, il est illisible')
+})
+
+test("LE TEST QUI COMPTE : les taches portent les colonnes que la regle de repli LIT", async () => {
+  // `shared/aujourdhui.js` garde une tache par `t.departure >= aujourd'hui`
+  // quand les sejours ne sont pas lus. Sans la colonne au select, ce repli
+  // valait TOUJOURS faux, et « A valider » affichait « aucune tache » — un
+  // fait — sur un compte qui en porte 222. Les deux cas du repli laissent
+  // justement les sejours vides : un profil `messages: read` / `menages: none`,
+  // et tout hote dont `/api/menages` echoue.
+  const { requetes } = await banc({ titulaire: true })()
+  const r = requetes.find(x => x.table === 'agent_tasks')
+  assert.ok(r, 'les taches ne sont plus lues')
+  for (const col of ['arrival', 'departure', 'book_id', 'status']) {
+    assert.ok(String(r.select).includes(col), `la colonne \`${col}\` manque au select des taches`)
+  }
+})
+
+test("LE TEST QUI COMPTE : `biens` en echec vaut `null`, jamais une liste vide", async () => {
+  const { corps } = await banc({ titulaire: true, pannes: ['properties'] })()
+  assert.strictEqual(corps.biens, null,
+    'une lecture de biens en echec rend `[]` : l ecran dit « aucun logement », un fait')
+  assert.ok(corps.indisponibles.includes('biens'))
+})
+
+test("LE TEST QUI COMPTE : les TROIS copies de `jourParis` comptent en jours calendaires", async () => {
+  // ⚠ LE PREMIER CORRECTIF N'EN AVAIT TOUCHE QU'UNE. `api/messages.js` est
+  // l'AUTRE injecteur du meme `arriveesProches` — tout l'interet de
+  // `lib/ecran/etat-du-code.js` est qu'une seule regle serve les deux ecrans, et
+  // `jourParis` est justement la piece restee injectee. Ces nuits-la,
+  // `/messages` et `/aujourdhui` auraient designe des arrivees « proches »
+  // differentes pour la meme reservation le meme jour : la divergence exacte
+  // que l'extraction a ete ecrite pour empecher.
+  // Et `shared/aujourdhui.js` portait la sienne DEUX LIGNES au-dessus
+  // d'`ajouterJours`, qui porte deja l'avertissement.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  for (const f of ['api/ecran/aujourdhui.js', 'api/messages.js', 'shared/aujourdhui.js']) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    const bloc = (src.match(/(?:const|export function) jourParis[\s\S]*?\n\}/) || [''])[0]
+    assert.ok(bloc, `${f} : jourParis introuvable`)
+    assert.ok(!/\*\s*86400000/.test(bloc) && !/86400000\s*\*/.test(bloc),
+      `${f} avance encore par pas de 24 h : il glisse d un jour au changement d heure`)
+    assert.ok(/Date\.UTC|ajouterJours/.test(bloc),
+      `${f} ne fait pas d arithmetique calendaire`)
+  }
+
+  // Et la mesure, sur la copie qui est importable depuis un test.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'shared/aujourdhui.js'), 'utf8')
+  const mod = { exports: {} }
+  const code = src.replace(/^export (function|const)/gm, '$1')
+    + '\n;module.exports = { jourParis, ajouterJours }'
+  new Function('module', code)(mod)
+  for (const [instant, jour, demain] of [
+    ['2026-10-24T22:30:00Z', '2026-10-25', '2026-10-26'],
+    ['2027-03-27T22:30:00Z', '2027-03-27', '2027-03-28'],
+    ['2026-12-31T23:30:00Z', '2027-01-01', '2027-01-02']
+  ]) {
+    const t = new Date(instant).getTime()
+    assert.strictEqual(mod.exports.jourParis(t, 0), jour, `jour faux a ${instant}`)
+    assert.strictEqual(mod.exports.jourParis(t, 1), demain, `lendemain faux a ${instant}`)
+  }
+})
+
+test("LE TEST QUI COMPTE : la fenetre des arrivees ne se recalcule pas APRES la lecture", () => {
+  // ⚠ LE CORRECTIF DE `jourParis` LAISSAIT UN DECALAGE D'UN JOUR A L'INTERIEUR
+  // DE LUI-MEME. `arriveesProches(arrivees, (d) => jourParis(d))` reconstruit
+  // la date a l'appel : une requete commencee a 23 h 59 min 59 s interroge
+  // `bookings_snapshot` pour [J, J+1], puis — la phase de lecture ayant pris
+  // quelques centaines de millisecondes — filtre ses lignes sur [J+1, J+2].
+  // Les lignes de J+1 survivent, celles de J+2 n'ont JAMAIS ete lues, et la
+  // reponse annonce `jour: J`. Le voyageur du lendemain perd son etat de code.
+  // Les deux jours sont deja calcules en tete du handler : on les PASSE.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/ecran/aujourdhui.js'), 'utf8')
+  assert.match(src, /arriveesProches\(arrivees, \(d\) => \(d === 0 \? jour : demain\)\)/,
+    'la fenetre des arrivees est recalculee sur l horloge apres la phase de lecture')
+  // Et `jourParis` n'est appele qu'au DEBUT, pour poser `jour` et `demain`.
+  // ⚠ HORS COMMENTAIRES : trois des six occurrences sont dans l'explication du
+  // defaut, et c'est la TROISIEME fois que je compte des mentions pour des
+  // appels. D'ou `tests/outils/source.js`.
+  const { compterDansLeCode } = require('./outils/source')
+  const appels = compterDansLeCode(src, /jourParis\(/)
+  // Deux, et deux seulement : `jour` et `demain`. La definition est une
+  // flechee (`const jourParis = (decalage = 0) => {`), donc elle ne compte pas.
+  assert.strictEqual(appels, 2,
+    `${appels} appels a jourParis dans le CODE : seules les deux bornes du `
+    + 'handler doivent en faire un — tout appel plus loin relit l horloge')
+})
+
+test("LE TEST QUI COMPTE : `db;dur` couvre la GARDE, qui fait jusqu'a trois lectures", () => {
+  // `contexteDEcran` lit la session, le compte demande et — pour un membre
+  // delegue — son profil et ses droits : un a trois allers-retours reseau.
+  // Mesures en dehors de `db;dur`, ils tombaient dans `calc;dur` : la requete
+  // la plus lente du produit, celle d'un membre delegue, se lisait
+  // « JavaScript lent ». C'est l'inverse de ce que la coupe sert a dire.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api/ecran/aujourdhui.js'), 'utf8')
+  assert.match(src, /const msDb = tFinLectures - t0/,
+    'la part BASE exclut la garde, dont les lectures sont les plus lentes du chemin')
+  assert.ok(!/const msDb = tFinLectures - tDebutLectures/.test(src))
 })

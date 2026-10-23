@@ -48,28 +48,27 @@ function exportsDe (fichier) {
   return noms
 }
 
-// ⚠ RECURSIF : voir la note des trois autres recensements du meme commit.
+// ⚠ RECURSIF, ET LE PARCOURS EST PARTAGE (`tests/outils/source.js`).
 // `api/ecran/` est le premier sous-repertoire de `api/`, et un fichier non
 // examine par ce test est un `require` manquant qui ne se voit qu'en
 // production, au premier appel.
-function fichiersJs (dossier) {
-  const out = []
-  for (const e of fs.readdirSync(dossier, { withFileTypes: true })) {
-    if (e.isDirectory()) out.push(...fichiersJs(path.join(dossier, e.name)))
-    else if (e.name.endsWith('.js')) out.push(path.join(dossier, e.name))
-  }
-  return out
-}
+const { fichiersJs } = require('./outils/source')
 
 test('tout identifiant appele et exporte par un module de lib/ est importe', () => {
   const libDir = path.join(RACINE, 'lib')
   // Table : nom exporte -> modules qui l'exportent.
   const proprietaire = new Map()
+  // ⚠ LA CLE EST LE CHEMIN, PAS LE NOM DE FICHIER. En rendant le balayage
+  // recursif, deux modules ont pris le meme nom de base : `lib/logement/lecture.js`
+  // et `lib/taxe-sejour/lecture.js`. Avec une cle par BASENAME, chacun passait
+  // pour « celui qui exporte » les noms de l'autre (`proprios.has(base)`), donc
+  // un import manquant entre eux etait invisible — la seule collision
+  // aujourd'hui, mais elle se multipliera a chaque sous-repertoire.
   for (const f of fichiersJs(libDir)) {
-    const base = path.basename(f, '.js')
+    const cle = path.relative(RACINE, f).replace(/\.js$/, '').split(path.sep).join('/')
     for (const nom of exportsDe(f)) {
       if (!proprietaire.has(nom)) proprietaire.set(nom, new Set())
-      proprietaire.get(nom).add(base)
+      proprietaire.get(nom).add(cle)
     }
   }
 
@@ -77,7 +76,7 @@ test('tout identifiant appele et exporte par un module de lib/ est importe', () 
   const manquants = []
 
   for (const f of aExaminer) {
-    const base = path.basename(f, '.js')
+    const base = path.relative(RACINE, f).replace(/\.js$/, '').split(path.sep).join('/')
     const src = fs.readFileSync(f, 'utf8')
     // Sans les commentaires ni les chaines : un nom cite dans un commentaire
     // (ils sont nombreux et detailles ici) n'est pas un appel.
@@ -145,9 +144,25 @@ test('tout identifiant appele et exporte par un module de lib/ est importe', () 
     // litteral. `api/avis.js` definit `lireAvis` et `publierAvisVoyageur`
     // ainsi, et les appelle par `canal.lireAvis` — ce ne sont pas des appels
     // de fonction libre, donc pas des imports manquants.
-    for (const m of src.matchAll(/(?:^|[,{]|\basync\s+)\s*([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*\{/gm)) {
-      importes.add(m[1])
+    // ⚠ ET LA MEME PASSE COLLECTE LES PARAMETRES : ce qui suit un `(` dans une
+    // SIGNATURE est une declaration locale, ce qui suit un `(` dans un APPEL
+    // n'en est pas une. La distinction se fait sur le `{` qui suit la
+    // parenthese fermante — pas sur la parenthese elle-meme.
+    const parametres = new Set()
+    const noterParams = (liste) => {
+      for (const part of String(liste).split(',')) {
+        const n = part.trim().match(/^\.{0,3}\s*([A-Za-z_$][\w$]*)/)
+        if (n) parametres.add(n[1])
+      }
     }
+    for (const m of src.matchAll(/(?:^|[,{]|\basync\s+)\s*([A-Za-z_$][\w$]*)\s*\(([^()]*)\)\s*\{/gm)) {
+      importes.add(m[1])
+      noterParams(m[2])
+    }
+    // Les fonctions flechees et les `function` classiques.
+    for (const m of src.matchAll(/\bfunction\s*[A-Za-z_$][\w$]*\s*\(([^()]*)\)/g)) noterParams(m[1])
+    for (const m of src.matchAll(/\(([^()]*)\)\s*=>/g)) noterParams(m[1])
+    for (const m of src.matchAll(/(?:^|[^\w$.])([A-Za-z_$][\w$]*)\s*=>/gm)) parametres.add(m[1])
 
     for (const [nom, proprios] of proprietaire) {
       if (importes.has(nom)) continue
@@ -156,15 +171,24 @@ test('tout identifiant appele et exporte par un module de lib/ est importe', () 
       const appel = new RegExp(`(^|[^\\w$.])${nom}\\s*\\(`, 'm')
       if (!appel.test(code)) continue
       // declare localement (fonction, const, let, var, parametre destructure) ?
-      // ⚠ `)` EST DANS LA CLASSE DE FIN, ET IL N'Y ETAIT PAS : un PARAMETRE de
-      // fonction est une declaration locale. `arriveesProches (conversations,
-      // jourParis)` faisait signaler `jourParis` comme non importe, alors
-      // qu'il est INJECTE — et que la fonction documente pourquoi.
+      // ⚠ ET LE `(` A ETE RETIRE DE LA CLASSE — IL OUVRAIT UN TROU PROUVE.
+      // J'avais ajoute `(` et `)` pour reconnaitre un PARAMETRE de fonction
+      // (`arriveesProches (conversations, jourParis)`), qui est bien une
+      // declaration locale. Mais la regex ne distingue pas une liste de
+      // PARAMETRES d'une liste d'ARGUMENTS : `console.log(colonneAbsente)`
+      // satisfaisait aussi `([{,(]\s*nom\s*[,}=:)])`. Mesure : retirer le
+      // `require` de `colonneAbsente` dans `api/ecran/aujourdhui.js` faisait
+      // rougir le test, et ajouter UNE ligne `if (false) console.log(colonneAbsente)`
+      // le remettait au VERT. Le filet exemptait donc tout export de `lib/`
+      // passe en argument nu — c'est-a-dire le cas le plus courant.
+      // Les parametres se collectent donc explicitement, sur les SIGNATURES
+      // (`parametres`, plus haut), et la classe revient a ce qu'elle etait.
       const declare = new RegExp(
-        `(function\\s+${nom}\\b)|((?:const|let|var)\\s+${nom}\\b)|([{,(]\\s*${nom}\\s*[,}=:)])`, 'm')
+        `(function\\s+${nom}\\b)|((?:const|let|var)\\s+${nom}\\b)|([{,]\\s*${nom}\\s*[,}=:])`, 'm')
+      if (parametres.has(nom)) continue
       if (declare.test(code)) continue
       manquants.push(`${path.relative(RACINE, f)} appelle ${nom}() `
-        + `sans l'importer (exporte par lib/${[...proprios].join(', lib/')})`)
+        + `sans l'importer (exporte par ${[...proprios].join(', ')})`)
     }
   }
 

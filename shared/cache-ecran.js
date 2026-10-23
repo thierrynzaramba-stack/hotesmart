@@ -12,7 +12,7 @@
    les chiffres du compte précédent — une fuite entre comptes, dans un produit
    qui a déjà fermé dix fuites de ce type (docs/kb/profils-et-droits.md §12).
 
-   ⚠ TROIS ÉTATS CRITIQUES NE SONT JAMAIS GARDÉS : codes d'accès, paiements,
+   ⚠ CINQ BLOCS ET UN CHAMP NE SONT JAMAIS GARDÉS : codes d'accès, paiements,
    surréservation. C'est l'interdit 2 de la spec, et il n'est pas négociable —
    un code affiché depuis le cache ferait croire à l'hôte qu'un voyageur l'a
    reçu. Le reste de l'écran peut s'afficher instantanément ; ces trois-là
@@ -46,6 +46,10 @@
 // `arrivees` portait en plus le snapshot intégral du voyageur (courriel,
 // téléphone, nom, montant) — l'endpoint ne le rend plus du tout.
 //
+// ⚠ `arrivees` EST UNE CEINTURE : l'endpoint ne rend plus ce bloc du tout
+// (il rend `arrivees_nombre`, un compte). On le garde dans la liste pour le
+// jour où quelqu'un le remettrait.
+//
 // Ce qu'il reste à garder, et c'est l'essentiel du premier affichage : la
 // LISTE DES BIENS avec leurs photos, les notes, et les quatre compteurs de
 // « Fait pour vous », tous à l'échelle de la semaine ou du mois. Rien qui
@@ -66,11 +70,27 @@ function cle (ecran, moi, compte) {
   return `${PREFIXE}${ecran}.${moi}.${compte}`
 }
 
+// ⚠ ET UN CHAMP À L'INTÉRIEUR D'UN BLOC, PARCE QU'UN BLOC NE SUFFIT PAS.
+// L'interdit 2 nomme trois états : codes d'accès, paiements, SURRÉSERVATION.
+// Retirer `alarmes` ne suffisait pas : `fait_pour_vous.surreservation` est le
+// compte des incidents `overbooking` des 7 derniers jours, et il était gardé —
+// donc repeint instantanément, jusqu'à 12 h périmé. C'est la même famille que
+// `taches` : j'ai raisonné par BLOC alors que la donnée critique vit dans un
+// CHAMP. Et mon propre test gravait l'omission en contrat.
+const CHAMPS_JAMAIS_GARDES = { fait_pour_vous: ['surreservation'] }
+
 function sansLesCritiques (donnees) {
   if (!donnees || typeof donnees !== 'object') return donnees
   const out = {}
   for (const [k, v] of Object.entries(donnees)) {
     if (JAMAIS_GARDES.includes(k)) continue
+    const champs = CHAMPS_JAMAIS_GARDES[k]
+    if (champs && v && typeof v === 'object' && !Array.isArray(v)) {
+      const bloc = {}
+      for (const [ck, cv] of Object.entries(v)) if (!champs.includes(ck)) bloc[ck] = cv
+      out[k] = bloc
+      continue
+    }
     out[k] = v
   }
   return out
@@ -117,4 +137,4 @@ export function oublierTout () {
   } catch { return 0 }
 }
 
-export const _interne = { JAMAIS_GARDES, PEREMPTION_MS, PREFIXE, cle, sansLesCritiques }
+export const _interne = { JAMAIS_GARDES, CHAMPS_JAMAIS_GARDES, PEREMPTION_MS, PREFIXE, cle, sansLesCritiques }

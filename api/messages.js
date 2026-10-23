@@ -18,10 +18,26 @@ const { refsDuPerimetre, filtrePerimetreSql } = require('../lib/permissions')
 const { etatMenage } = require('../lib/cron-arrival-code')
 // Lot 7 du chantier avis : l'archivage des fils (spec §9), une fonction pure.
 const { etatArchivage } = require('../lib/archivage-conversations')
+const { readStatus } = require('../lib/bookings-snapshot-status')
 
 // Jour de Paris (celui des biens), YYYY-MM-DD, a un decalage de jours pres.
-const jourParis = (decalage = 0) =>
-  new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date(Date.now() + decalage * 86400000))
+//
+// ⚠ LE DECALAGE EST CALENDAIRE, PAS 24 h — ET CETTE COPIE AVAIT ETE OUBLIEE.
+// Le correctif du lot (b) n'avait touche que celle de `api/ecran/aujourdhui.js`,
+// alors que CET endpoint est l'AUTRE injecteur du meme `arriveesProches` : tout
+// l'interet de `lib/ecran/etat-du-code.js` est qu'une seule regle serve les
+// deux ecrans, et `jourParis` est justement la piece restee injectee.
+// Mesure : le 24 octobre 2026 a 22 h 30 UTC (Paris 25 octobre 00 h 30, jour de
+// 25 heures), `jourParis(0)` et `jourParis(1)` rendaient tous deux
+// « 2026-10-25 » ; le 27 mars 2027, le lendemain SAUTAIT au 29. Ces nuits-la,
+// `/messages` et `/aujourdhui` auraient designe des arrivees « proches »
+// differentes pour la meme reservation le meme jour — la divergence exacte que
+// l'extraction a ete ecrite pour empecher.
+const jourParis = (decalage = 0) => {
+  const [a, m, j] = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' })
+    .format(new Date()).split('-').map(Number)
+  return new Date(Date.UTC(a, m - 1, j + decalage)).toISOString().slice(0, 10)
+}
 // `STATUTS_SANS_ARRIVEE` vit dans lib/ecran/etat-du-code.js : une seule
 // definition, partagee par cet endpoint et par l'endpoint d'ecran.
 
@@ -582,7 +598,13 @@ module.exports = async function handler(req, res) {
         guestName,
         firstNight:   snap.arrival   || null,
         lastNight:    snap.departure || null,
-        status:       snap.status    || null,
+        // ⚠ PAR LE LECTEUR CANONIQUE : un statut absent VAUT `confirmed`
+        // (`lib/bookings-snapshot-status.js` : « comportement historique des
+        // 5 writers »), et le vocabulaire brut des providers (`inquiry`,
+        // `black`) se traduit. `|| null` faisait sortir ces reservations du
+        // filtre `arr && st && …` de `arriveesProches`, alors qu'elles sont
+        // bien listees comme arrivees du jour par `api/menages.js`.
+        status:       readStatus(snap, snap.provider || conv.provider),
         // Le telephone du voyageur, tel que le snapshot le porte (Channex comme
         // Beds24 le nomment `guestPhone`). L'ecran messagerie en fait un lien
         // d'appel : le jour de l'arrivee, c'est souvent le seul canal qui reste.

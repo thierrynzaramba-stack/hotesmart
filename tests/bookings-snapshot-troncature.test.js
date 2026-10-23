@@ -142,16 +142,12 @@ test('RECENSEMENT : toute lecture de bookings_snapshot est bornee', () => {
   // mesure que le chantier avance.
   // La liste des dossiers etait FIGEE (`['api', 'lib', 'lib/cleaning', 'scripts']`),
   // donc chaque nouveau sous-dossier devait etre ajoute a la main. On descend.
+  const { fichiersJs } = require('./outils/source')
   const fichiers = []
-  const descendre = (rel) => {
-    const abs = path.join(racine, rel)
-    if (!fs.existsSync(abs)) return
-    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
-      if (e.isDirectory()) descendre(`${rel}/${e.name}`)
-      else if (e.name.endsWith('.js')) fichiers.push(`${rel}/${e.name}`)
-    }
+  for (const dossier of ['api', 'lib', 'scripts']) {
+    const abs = path.join(racine, dossier)
+    if (fs.existsSync(abs)) fichiers.push(...fichiersJs(abs, dossier))
   }
-  for (const dossier of ['api', 'lib', 'scripts']) descendre(dossier)
 
   // ⚠ LES EXEMPTIONS COMPTENT LES REQUETES, PAS LES FICHIERS.
   // Constat de review : exempter un fichier entier rendait INVISIBLE toute

@@ -103,6 +103,9 @@ if (!jeton) {
             const c = await import('/shared/cache-ecran.js')
             if (c.oublierTout) c.oublierTout()
           } catch { /* module indisponible : la peremption de 12 h rattrapera */ }
+          // (Ce bouton-ci n'efface pas `hs_compte_courant` : il vient
+          // justement de REJOINDRE un compte, et la liste des comptes a deja
+          // ete oubliee juste au-dessus.)
           sessionStorage.removeItem('invitation_token')
           afficher(`<div class="ok">Vous avez rejoint le compte de ${esc(r.compte.nom)}.</div>
             <button class="btn" style="margin-top:14px" onclick="location.href='/pages/index.html'">Continuer</button>`)
@@ -112,6 +115,16 @@ if (!jeton) {
         }
       }
       $('b-non').onclick = async () => {
+        // ⚠ « CE N'EST PAS MOI » EST UNE SORTIE DE SESSION, ET ELLE N'EFFACAIT
+        // RIEN. C'est le cinquieme chemin, et l'inventaire du commit precedent
+        // disait « quatre ». Le geste typique : un hote ouvre un lien
+        // d'invitation sur la tablette partagee du bureau, voit qu'il est
+        // connecte sous un autre compte, clique « ce n'est pas moi » — et
+        // `hs.ecran.*` comme `hs_compte_courant` restaient sur le disque.
+        try {
+          const m = await import('/shared/supabase.js')
+          if (m.purgerCachesLocaux) await m.purgerCachesLocaux()
+        } catch { /* module indisponible : on continue, la sortie prime */ }
         await supabase.auth.signOut()
         location.reload()
       }

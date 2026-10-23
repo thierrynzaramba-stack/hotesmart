@@ -76,7 +76,11 @@ const ECRAN = {
   alarmes: [{ id: 9, type: 'overbooking', detail: 'deux resas sur la meme nuit' }],
   conversations: ['B1', 'B2'],
   notes: { global: { note_sur_5: 4.7 } },
-  fait_pour_vous: { messages_ia: 10 }
+  // ⚠ `surreservation` EST DANS CETTE FIXTURE, et il n'y etait pas : ma
+  // premiere version assertait `deepEqual(fait_pour_vous, { messages_ia: 10 })`
+  // sur un objet qui ne portait QUE cette cle — elle gravait donc l'omission
+  // en contrat, exactement comme `taches` y etait entre.
+  fait_pour_vous: { messages_ia: 10, surreservation: 2, menages: 5, prix: 7 }
 }
 
 // ─── Interdit 2 : les etats critiques ─────────────────────────────────────────
@@ -126,7 +130,8 @@ test("LE TEST QUI COMPTE : l'etat du code et l'alarme ne sont JAMAIS ecrits", ()
   // une heure, rien qu'un hote puisse prendre pour un fait du jour.
   assert.deepEqual(relu.biens, [{ id: 'b1', name: 'La bulle' }])
   assert.deepEqual(relu.notes, { global: { note_sur_5: 4.7 } })
-  assert.deepEqual(relu.fait_pour_vous, { messages_ia: 10 })
+  assert.strictEqual('surreservation' in (relu.fait_pour_vous || {}), false,
+    'le compte de surreservation est garde : l interdit 2 le nomme')
   assert.strictEqual(relu.jour, '2026-10-23')
 })
 
@@ -139,6 +144,9 @@ test('la liste des blocs jamais gardes couvre les deux etats critiques de cet ec
   for (const bloc of ['etats_arrivee', 'alarmes', 'taches', 'arrivees', 'conversations']) {
     assert.ok(_interne.JAMAIS_GARDES.includes(bloc), `${bloc} n'est plus protege`)
   }
+  // Et le champ critique a l'interieur d'un bloc garde.
+  assert.deepEqual(_interne.CHAMPS_JAMAIS_GARDES.fait_pour_vous, ['surreservation'],
+    'le compte de surreservation n est plus retire de « Fait pour vous »')
 })
 
 // ─── Interdit 1 : la cle porte l'utilisateur ET le compte ─────────────────────
@@ -243,7 +251,7 @@ test('un localStorage indisponible ne fait pas planter la page', () => {
 
 // ─── Le cablage de la page ────────────────────────────────────────────────────
 
-test("LE TEST QUI COMPTE : les QUATRE sorties effacent le cache, pas seulement la deconnexion", () => {
+test("LE TEST QUI COMPTE : les CINQ sorties effacent le cache, par un seul geste partage", () => {
   // ⚠ UN SEUL DES QUATRE CHEMINS LE FAISAIT, ET LA REVIEW LES A COMPTES.
   // Le module a choisi `localStorage` plutot que `sessionStorage` POUR qu'il
   // survive a l'onglet ; la contrepartie explicite est l'effacement a la
@@ -259,17 +267,51 @@ test("LE TEST QUI COMPTE : les QUATRE sorties effacent le cache, pas seulement l
   //     cle perimee est refusee a la lecture mais n'est pas effacee.
   //   · `pages/invitation.html` — l'invite arrive sur un compte NEUF dans le
   //     meme onglet.
-  const chemins = [
-    ['shared/supabase.js', 'la deconnexion'],
-    ['components/auth-guard.js', 'un autre utilisateur sur ce navigateur'],
-    ['pages/compte.html', 'la suppression de compte'],
-    ['pages/invitation.html', 'l arrivee d un invite']
+  // ⚠ CINQ, PAS QUATRE — ET LE CINQUIEME N'EFFACAIT RIEN DU TOUT.
+  // `pages/invitation.html` a DEUX boutons : « rejoindre » et « ce n'est pas
+  // moi ». Le second est une sortie de session (`supabase.auth.signOut()` en
+  // direct), et mon inventaire l'avait manque — un hote qui ouvre un lien
+  // d'invitation sur la tablette partagee du bureau et clique « ce n'est pas
+  // moi » laissait `hs.ecran.*` ET `hs_compte_courant` sur le disque.
+  //
+  // ⚠ ET LE TEST PRECEDENT NE POUVAIT PAS LE VOIR : il cherchait
+  // `/cache-ecran/` et `/oublierTout/` dans le FICHIER ENTIER, et la branche
+  // « rejoindre », onze lignes plus haut, satisfaisait les deux. Il serait
+  // aussi passe sur un appel mort ou commente. On teste donc chaque GESTE,
+  // dans son bloc.
+  //
+  // ⚠ ET LES CINQ APPELLENT LE MEME GESTE PARTAGE. Chaque recopie oubliait une
+  // moitie differente : `compte.html` ne vidait que le cache d'ecran et
+  // laissait le compte courant ; `auth-guard` ne vidait que le compte courant.
+  // Un seul `purgerCachesLocaux` ferme la classe.
+  const geste = /purgerCachesLocaux\(\)/
+  const blocs = [
+    ['shared/supabase.js', 'la deconnexion', /export async function signOut[\s\S]*?\n\}/],
+    ['components/auth-guard.js', 'un autre utilisateur sur ce navigateur',
+      /if \(cachedUserId && cachedUserId !== userId\)[\s\S]*?\n    \}/],
+    ['pages/compte.html', 'la suppression de compte',
+      /btnDeleteFinal[\s\S]*?login\.html\?deleted=1/],
+    ['pages/invitation.html', "« ce n'est pas moi »",
+      /\$\('b-non'\)\.onclick[\s\S]*?\n      \}/]
   ]
-  for (const [f, quand] of chemins) {
+  for (const [f, quand, borne] of blocs) {
     const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
-    assert.match(src, /cache-ecran/, `${f} (${quand}) ne connait pas le cache des ecrans`)
-    assert.match(src, /oublierTout/, `${f} (${quand}) n efface pas le cache des ecrans`)
+    const bloc = (src.match(borne) || [''])[0]
+    assert.ok(bloc, `${f} : le bloc de ${quand} est introuvable`)
+    assert.match(bloc, geste, `${f} (${quand}) n appelle pas la purge partagee`)
   }
+  // Le cinquieme geste : « rejoindre » un compte, qui oublie la LISTE des
+  // comptes et le cache d'ecran, mais garde le compte qu'on vient de rejoindre.
+  const inv = fs.readFileSync(path.join(__dirname, '..', 'pages/invitation.html'), 'utf8')
+  assert.match(inv, /oublierCacheComptes\(\)/, 'rejoindre un compte ne rafraichit pas la liste')
+  assert.match(inv, /cache-ecran[\s\S]{0,200}oublierTout/,
+    'rejoindre un compte ne vide pas le cache d ecran')
+
+  // Et le geste partage vide bien LES DEUX caches.
+  const sb = fs.readFileSync(path.join(__dirname, '..', 'shared/supabase.js'), 'utf8')
+  const purge = (sb.match(/export async function purgerCachesLocaux[\s\S]*?\n\}/) || [''])[0]
+  assert.match(purge, /reinitialiser\(\)/, 'la purge partagee ne vide pas le compte courant')
+  assert.match(purge, /oublierTout\(\)/, 'la purge partagee ne vide pas le cache d ecran')
 })
 
 test("LE TEST QUI COMPTE : la page efface le cache a la deconnexion", () => {

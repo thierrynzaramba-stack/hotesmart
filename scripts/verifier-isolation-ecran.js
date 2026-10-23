@@ -29,36 +29,59 @@ const path = require('node:path')
 const Module = require('node:module')
 const vrai = require('@supabase/supabase-js')
 
-const INTERDITS = ['insert', 'upsert', 'update', 'delete']
+// ⚠ LISTE BLANCHE, PAS LISTE NOIRE — ET LA REVIEW A MESURE POURQUOI.
+// Mes deux premieres versions refusaient quatre NOMS de methodes
+// (`insert`, `upsert`, `update`, `delete`). Mesure contre supabase-js : avec
+// elles, `schema('public').rpc('rekey_property')`, `rest.rpc(...)`,
+// `storage.from(b).upload()`, `storage.createBucket()`,
+// `auth.admin.createUser()`, `auth.admin.deleteUser()`, `functions.invoke()` et
+// `channel().send()` atteignaient TOUS l'implementation reelle — l'une d'elles
+// a leve depuis l'interieur de `GoTrueAdminApi.deleteUser`, ce qui prouve que
+// l'appel avait quitte l'enveloppe. Pendant ce temps l'en-tete du fichier
+// annoncait « toute ecriture LEVE », et la spec l'ecrivait au passe.
+// Cause : le proxy rendait les proprietes NON fonctions telles quelles, donc
+// `auth.admin` n'etait pas enveloppe, et aucune liste noire ne peut nommer a
+// l'avance toutes les methodes d'ecriture d'un SDK qui evolue.
+//
+// Une liste noire doit TOUT prevoir ; une liste blanche n'a qu'a autoriser ce
+// qu'on utilise. Ce script ne fait que des LECTURES PostgREST : on autorise
+// exactement ce vocabulaire, et tout le reste leve, a n'importe quelle
+// profondeur. Le sens de l'erreur est le bon : un refus arrete le script au
+// lieu de laisser passer une ecriture contre la PRODUCTION.
+const LECTURES_AUTORISEES = new Set([
+  // Le point d'entree, et le choix de schema.
+  'from', 'schema',
+  // La construction d'une requete de lecture.
+  'select', 'eq', 'neq', 'in', 'is', 'not', 'gt', 'gte', 'lt', 'lte',
+  'like', 'ilike', 'match', 'filter', 'or', 'and', 'contains', 'overlaps',
+  'order', 'range', 'limit', 'single', 'maybeSingle', 'csv', 'abortSignal',
+  'returns', 'throwOnError', 'setHeader', 'explain', 'textSearch',
+  // Une requete est un thenable.
+  'then', 'catch', 'finally'
+])
+
 function lectureSeule (client) {
   const env = (o) => new Proxy(o, {
     get (c, p) {
-      if (INTERDITS.includes(p)) return () => { throw new Error(`ECRITURE REFUSEE : .${String(p)}()`) }
-      const v = c[p]
-      if (typeof v === 'function') return (...a) => { const r = v.apply(c, a); return (r && typeof r === 'object') ? env(r) : r }
-      return v
-    }
-  })
-  // ⚠ ON ENVELOPPE LE CLIENT ENTIER, PAS QUATRE NOMS DE METHODES. La version
-  // precedente faisait `{ ...client, from, rpc }` : le spread recopiait `rest`
-  // et `storage` tels quels, passait `auth` brut, et PERDAIT les methodes du
-  // prototype (`schema`, `channel`, `functions`). `client.rest.from(t).delete()`,
-  // `client.storage.from(b).upload()` et `client.auth.admin.createUser()`
-  // s'echappaient donc, et un `rpc` mutant (`rekey_property`,
-  // `claim_availability_push`…) ne touche aucun des quatre noms gardes.
-  // Un proxy sur le client lui-meme enveloppe tout ce qui en sort.
-  return new Proxy(client, {
-    get (c, p) {
-      if (INTERDITS.includes(p)) return () => { throw new Error(`ECRITURE REFUSEE : .${String(p)}()`) }
-      if (p === 'rpc') return (...a) => { throw new Error('RPC REFUSE : ' + String(a[0])) }
+      // Les symboles (`Symbol.toStringTag`, l'iterateur async…) passent : ils
+      // ne portent pas d'ecriture, et les bloquer casse `await`.
+      if (typeof p === 'symbol') return c[p]
       const v = c[p]
       if (typeof v === 'function') {
+        if (!LECTURES_AUTORISEES.has(p)) {
+          return () => { throw new Error(`ECRITURE OU APPEL NON AUTORISE : .${String(p)}()`) }
+        }
         return (...a) => { const r = v.apply(c, a); return (r && typeof r === 'object') ? env(r) : r }
       }
+      // ⚠ ET LES OBJETS AUSSI SONT ENVELOPPES, A TOUTE PROFONDEUR. C'est la
+      // ligne qui manquait : `return v` laissait `auth.admin`, `rest` et
+      // `storage` a nu.
       return (v && typeof v === 'object') ? env(v) : v
     }
   })
+  return env(client)
 }
+
 const absSdk = require.resolve('@supabase/supabase-js')
 require.cache[absSdk].exports = { ...vrai, createClient: (u, k, o) => lectureSeule(vrai.createClient(u, k, o)) }
 
@@ -172,7 +195,20 @@ async function appeler (contexte, compte) {
   console.log(`     refuses : ${JSON.stringify(c.refuses)}`)
 
   // ── 3. LE VERDICT : aucune reference hors perimetre, nulle part
-  const autorises = new Set((perms.property_ids || []).map(String))
+  // ⚠ LES DEUX FORMES DE CLE, ET LE CAS `all` — SANS QUOI CE CONTROLE SE TROMPE
+  // DANS LES DEUX SENS. Il ne lisait que `property_ids` : un profil
+  // `property_scope: 'all'` (qui voit TOUT le compte) faisait echouer le script
+  // sur un passage parfaitement correct, et un perimetre exprime en
+  // `property_refs` seules rendait le controle vide — donc satisfait par
+  // l'ecran a zero bien qu'on cherche justement a detecter.
+  const refsDeclarees = [...(perms.property_ids || []), ...(perms.property_refs || [])].map(String)
+  const attendus = perms.property_scope === 'all'
+    ? (biens || []).filter(b => String(b.user_id) === TITULAIRE).map(b => String(b.id))
+    : (biens || []).filter(b => String(b.user_id) === TITULAIRE
+        && (refsDeclarees.includes(String(b.id))
+            || refsDeclarees.includes(String(b.provider_property_id))))
+        .map(b => String(b.id))
+  const autorises = new Set(attendus.map(String))
   const autorisesRef = new Set([...autorises].map(i => {
     const b = biens.find(x => String(x.id) === i); return b ? String(b.provider_property_id) : null
   }).filter(Boolean))
@@ -200,8 +236,6 @@ async function appeler (contexte, compte) {
     `le titulaire a des blocs indisponibles (${JSON.stringify(refTitulaire.indisponibles)})`)
   // Le membre doit voir EXACTEMENT son perimetre, intersecte avec les biens du
   // compte — ni plus (fuite), ni moins (un ecran vide qui passerait le tamis).
-  const attendus = (perms.property_ids || []).map(String)
-    .filter(i => (biens || []).some(b => String(b.id) === i && String(b.user_id) === TITULAIRE))
   exige(Array.isArray(c.biens) && c.biens.length === attendus.length,
     `le membre rend ${(c.biens || []).length} bien(s) pour un perimetre de ${attendus.length}`)
   exige((c.indisponibles || []).length === 0,
