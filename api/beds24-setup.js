@@ -1,5 +1,34 @@
 // api/beds24-setup.js — Échange l'invite code Beds24 contre un token
 const { createClient } = require('@supabase/supabase-js')
+// ⚠ LES CHAMPS DU JETON VIENNENT D'UN POINT UNIQUE. Trois writers ecrivent
+// `api_keys.api_key` — l'installation et le bouton « Renouvellement » ici, le
+// cron dans lib/cron-beds24.js — et un seul maintenait l'expiration. Des que
+// `token_expire_le` fait AUTORITE sur « le jeton est-il vivant », un writer qui
+// ne la met pas a jour la rend MENTEUSE : le cron sauterait le renouvellement
+// sur un jeton mort, et la synchro de l'hote tomberait en silence (constat de
+// review du 23 octobre 2026).
+const { champsDuJeton } = require('../lib/cron-beds24')
+const { colonneAbsente } = require('../lib/colonne-absente')
+
+// Ecrit le jeton ET son expiration. Si la migration 2026-10-23 n'est pas
+// appliquee, on retombe sur le seul `api_key` : nommer une colonne absente
+// ferait echouer l'ecriture EN ENTIER, donc perdre le jeton neuf.
+async function enregistrerLeJeton (supabase, userId, reponse, { upsert = false, refreshToken = undefined } = {}) {
+  const { champs } = champsDuJeton(reponse, Date.now())
+  const avecRefresh = refreshToken !== undefined ? { ...champs, refresh_token: refreshToken } : champs
+  const ecrire = (c) => upsert
+    ? supabase.from('api_keys').upsert({ user_id: userId, ...c }, { onConflict: 'user_id' })
+    : supabase.from('api_keys').update(c).eq('user_id', userId)
+  let { error } = await ecrire(avecRefresh)
+  if (error && colonneAbsente(error)) {
+    console.warn('[Beds24Setup] token_expire_le absente (migration 2026-10-23) : on n ecrit que le jeton')
+    const nu = refreshToken !== undefined
+      ? { api_key: reponse.token, refresh_token: refreshToken }
+      : { api_key: reponse.token }
+    ;({ error } = await ecrire(nu))
+  }
+  return error
+}
 const { requirePermission } = require('../lib/require-permission')
 
 const supabase = createClient(
@@ -54,11 +83,8 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: d.error || 'Token non reçu', detail: d })
       }
 
-      const { error } = await supabase.from('api_keys').upsert({
-        user_id:       user.id,
-        api_key:       d.token,
-        refresh_token: d.refreshToken || null
-      }, { onConflict: 'user_id' })
+      const error = await enregistrerLeJeton(supabase, user.id, d,
+        { upsert: true, refreshToken: d.refreshToken || null })
 
       if (error) return res.status(500).json({ error: error.message })
 
@@ -98,8 +124,13 @@ module.exports = async function handler(req, res) {
         return res.status(400).json({ error: d.error || 'Refresh échoué', detail: d })
       }
 
-      await supabase.from('api_keys').update({ api_key: d.token })
-        .eq('user_id', user.id)
+      const eMaj = await enregistrerLeJeton(supabase, user.id, d)
+      // ⚠ UNE ECRITURE RATEE NE DOIT PAS RENDRE `success: true`. L'hote lirait
+      // « renouvele » sur un jeton que la base n'a pas garde.
+      if (eMaj) {
+        console.error('[Beds24Setup] jeton renouvele mais NON ENREGISTRE :', eMaj.message)
+        return res.status(500).json({ error: 'Jeton obtenu mais non enregistré' })
+      }
 
       return res.json({ success: true, expiresIn: d.expiresIn })
 

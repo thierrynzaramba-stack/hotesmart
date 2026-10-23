@@ -80,9 +80,22 @@ test('LE TEST QUI COMPTE : les DEUX gardes la posent, et avant tout refus', asyn
 // LE FILET : aucun endpoint ne doit reouvrir ce que la garde ferme
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ⚠ RECURSIF, ET IL NE L'ETAIT PAS. Le lot (b) du chantier performance a cree
+// le PREMIER sous-repertoire de `api/` — `api/ecran/`, qui est le domicile
+// declare de tous les endpoints d'ecran des lots (c) et (d). Mesure du
+// 23 octobre 2026 : 58 fichiers a plat, 59 en recursif, et le seul manquant
+// etait `api/ecran/aujourdhui.js`. Il echappait donc a CE filet (l'interdit 1
+// de la spec : aucune donnee d'hote dans un cache partage), aux deux
+// recensements de garde, et au filet des lectures non bornees de
+// `bookings_snapshot` — table qu'il lit.
+// Trois autres fichiers portaient la meme cecite ; ils sont corriges dans le
+// meme commit.
+// Le parcours vit dans `tests/outils/source.js` : cinq copies du meme
+// balayage recursif ont ete ecrites le meme jour dans cinq fichiers, et une
+// sixieme aurait eu le meme angle mort que les cinq autres.
+const { fichiersJs } = require('./outils/source')
 function fichiersApi () {
-  const d = path.join(racine, 'api')
-  return fs.readdirSync(d).filter(f => f.endsWith('.js')).map(f => `api/${f}`)
+  return fichiersJs(path.join(racine, 'api'), 'api')
 }
 const lire = (f) => fs.readFileSync(path.join(racine, f), 'utf8')
 // Sans les commentaires : une mention dans une explication ne compte pas.
@@ -100,6 +113,36 @@ const PUBLIC_ATTENDU = {
   // desactivee garde son manifeste pendant cinq minutes.
   'api/manifest.js': 'public, max-age=300'
 }
+
+test('LE TEST QUI COMPTE : le recensement voit TOUT api/**/*.js, sous-repertoires compris', () => {
+  // ⚠ CE TEST GARDE LE FILET LUI-MEME. Le lot (b) a cree `api/ecran/`, le
+  // premier sous-repertoire de `api/`, et le balayage A PLAT ne le voyait pas :
+  // 58 fichiers contre 59 (mesure du 23 octobre 2026). L'endpoint d'ecran
+  // echappait donc a l'interdit 1 de la spec (aucune donnee d'hote dans un
+  // cache partage), aux deux recensements de garde, et au filet des lectures
+  // non bornees de `bookings_snapshot` — table qu'il lit.
+  // `api/ecran/` est le domicile DECLARE de tous les endpoints d'ecran des
+  // lots (c) et (d) : un filet aveugle a ce repertoire se vide a mesure que le
+  // chantier avance, sans jamais casser.
+  // ⚠ ET PAS CONTRE UNE DEUXIEME COPIE DU MEME PARCOURS — CE SERAIT UNE
+  // TAUTOLOGIE : deux implementations identiques partagent leurs angles morts,
+  // et le test resterait vert. On compare au SYSTEME DE FICHIERS par un autre
+  // chemin (`fs.globSync`), et on exige en plus le fichier nomme.
+  const parGlob = fs.globSync
+    ? fs.globSync('**/*.js', { cwd: path.join(racine, 'api') }).map(f => `api/${f.split(path.sep).join('/')}`)
+    : null
+  const vus = fichiersApi()
+  if (parGlob) {
+    assert.deepEqual(vus.slice().sort(), parGlob.slice().sort(),
+      'le recensement des endpoints ne voit pas les memes fichiers que le systeme')
+  }
+  // Le fichier NOMME : un balayage a plat le perd, et c'est le seul endpoint
+  // d'ecran existant — donc le temoin de toute la famille a venir.
+  assert.ok(vus.includes('api/ecran/aujourdhui.js'),
+    "api/ecran/aujourdhui.js echappe au recensement : balayage a plat ?")
+  assert.ok(vus.some(f => f.split('/').length > 2),
+    'aucun endpoint en sous-repertoire : ce test ne prouve plus rien')
+})
 
 test('LE TEST QUI COMPTE : aucun endpoint ne pose un cache-control PUBLIC', () => {
   const fautifs = []
@@ -131,10 +174,23 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   // Les endpoints LEGITIMEMENT sans garde sont comptes ici, un par un.
   const SANS_GARDE_ATTENDU = fichiersApi().filter(f => {
     const src = code(lire(f))
-    return !/requirePermission|verifierSession|requirePermissionPourCanal/.test(src)
+    // ⚠ `contexteDEcran` EST UNE TROISIEME GARDE, ET LE DETECTEUR L'IGNORAIT.
+    // C'est la garde des endpoints `/api/ecran/*` : un ecran traverse
+    // plusieurs domaines, donc `requirePermission` — qui verifie UN domaine et
+    // refuse en 403 — ne peut pas lui servir. Elle appelle `verifierSession` et
+    // `posterEnTetesPrives` comme les deux autres.
+    // Sans ce nom, rendre le recensement recursif aurait ajoute
+    // `api/ecran/aujourdhui.js` a la liste des endpoints SANS garde — un FAUX
+    // POSITIF, qui invite a lever le plafond au lieu d'apprendre le nom. C'est
+    // la facon dont un filet se perd : non pas en cassant, mais en criant
+    // faux.
+    return !/requirePermission|verifierSession|requirePermissionPourCanal|contexteDEcran/.test(src)
   })
-  // Le compte attendu est mesure, pas suppose : 22 octobre 2026.
-  assert.ok(SANS_GARDE_ATTENDU.length <= 12,
+  // ⚠ LE PLAFOND SERRE SUR LA MESURE. Il etait a 12 pour 9 reels (mesure du
+  // 23 octobre 2026, recensement RECURSIF) : trois endpoints sans garde
+  // pouvaient atterrir en silence. Un plafond mou est un plafond qui ne sert
+  // qu'une fois.
+  assert.ok(SANS_GARDE_ATTENDU.length <= 9,
     `${SANS_GARDE_ATTENDU.length} endpoints sans garde :\n  ` + SANS_GARDE_ATTENDU.join('\n  ') +
     '\nUn de plus qu attendu : soit il est public par nature (webhook, cron, manifest,\n' +
     'page publique), soit il lui manque sa garde. Nommez-le avant de lever le plafond.')
@@ -160,31 +216,114 @@ test('LE TEST QUI COMPTE : la garde de CANAL pose l en-tete avant ses quatre ref
   assert.equal(res.code, 400, 'et c est bien le premier refus, avant toute lecture')
 })
 
-test('RECENSEMENT : les endpoints qui repondent AVANT toute garde sont comptes', () => {
-  // ⚠ CE QUE LE RECENSEMENT DU DESSUS NE DIT PAS, et la review l a releve.
-  // « Passer par une garde » ne veut pas dire « toutes ses reponses portent
-  // l en-tete » : plusieurs endpoints refusent une methode ou un parametre
-  // AVANT d appeler leur garde, et ces reponses-la gardent le defaut Vercel.
-  // Aucune ne porte de donnee de compte aujourd hui — ce sont des corps
-  // d erreur generiques — mais l invariant annonce etait plus large que
-  // l invariant reel, et un compte vaut mieux qu une description.
+test('LE TEST QUI COMPTE : ce qui repond AVANT la garde ne porte aucune donnee de compte', () => {
+  // ⚠ L'INVARIANT EXACT, ET POURQUOI CE N'EST PAS « tous les endpoints posent
+  // l'en-tete ».
+  //
+  // Verification HTTPS du 22 octobre 2026 demandee par Thierry, apres le merge
+  // prod du lot (a) : 8 endpoints sur 12 rendaient `private, no-store`, et
+  // QUATRE rendaient encore `public, max-age=0, must-revalidate` —
+  // `/api/membres`, `/api/yield`, `/api/channel-property`,
+  // `/api/guestflow-proposer`. Tous les quatre repondaient AVANT leur garde
+  // (methode refusee, action inconnue, jeton absent).
+  //
+  // ⚠ J'AI D'ABORD VOULU POSER L'EN-TETE EN TETE DES 29 HANDLERS CONCERNES.
+  // Mesure : 27 tests rouges d'un coup. TRENTE-SIX fichiers de test doublent
+  // `lib/require-permission`, et ceux qui construisent un double PARTIEL
+  // n'exportent pas la fonction — `posterEnTetesPrives is not a function`. Une
+  // fonction que 29 handlers doivent appeler et que 36 doubles doivent fournir
+  // n'est pas un « point unique » : c'est 29 couplages de plus. Correctif
+  // defait.
+  //
+  // ⚠ ET DECLARER LES 49 ENDPOINTS DANS `vercel.json` AURAIT COUTE ~300 LIGNES
+  // DE CONFIGURATION pour des corps d'erreur generiques. Un en-tete `public`
+  // sur une reponse qui ne porte rien n'expose rien.
+  //
+  // L'INVARIANT QUI EST VRAI, ET QUE CE TEST TIENT : toute reponse qui porte
+  // une donnee de compte passe par une garde, et la garde pose
+  // `private, no-store`. Ce qui repond AVANT la garde ne porte que des corps
+  // GENERIQUES — une methode, un parametre, un jeton. C'est verifiable, et
+  // c'est ce qu'on verifie.
+  const fautifs = []
+  for (const f of fichiersApi()) {
+    const src = code(lire(f))
+    const h = src.search(/module\.exports\s*=\s*(?:async\s+)?(?:function\s*\w*\s*)?\(\s*\w+\s*,\s*\w+\s*\)\s*(?:=>\s*)?\{/)
+    const g = src.search(/posterEnTetesPrives\(|await (requirePermission|verifierSession|requirePermissionPourCanal)\(/)
+    if (h < 0 || g < 0 || h > g) continue
+    const entre = src.slice(h, g)
+    // Chaque reponse emise avant la garde : son corps doit etre un libelle
+    // generique, jamais une variable ni une lecture.
+    for (const m of entre.matchAll(/res\s*\.status\(\s*\d+\s*\)\s*\.json\(\s*\{([^}]*)\}/g)) {
+      const corps = m[1]
+      // Un corps generique ne contient que des chaines litterales et des clefs.
+      const sansChaines = corps.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""').replace(/`[^`]*`/g, '``')
+      if (/\b(data|rows|bien|booking|compte|user|profil|perms|snapshot|liste)\b/.test(sansChaines)) {
+        fautifs.push(`${f} : ${corps.trim().slice(0, 70)}`)
+      }
+    }
+  }
+  assert.deepEqual(fautifs, [],
+    'ces reponses partent AVANT la garde, donc avec le defaut Vercel `public`,\n' +
+    'et leur corps n est pas un libelle generique : il peut porter une donnee de\n' +
+    'compte. Posez `posterEnTetesPrives(res)` en tete de ce handler — et ajoutez\n' +
+    'la fonction aux doubles de test de `lib/require-permission` qui la cassent.')
+})
+
+test('RECENSEMENT : la surface des reponses precoces est CHIFFREE', () => {
+  // Un plafond ne ferme rien, il compte — et ce compte-la est la seule raison
+  // pour laquelle le test du dessus suffit. S il explose, la surface a change
+  // et l invariant doit etre re-examine.
   const avant = []
   for (const f of fichiersApi()) {
     const src = code(lire(f))
-    const g = src.search(/requirePermission|verifierSession|requirePermissionPourCanal/)
-    if (g < 0) continue
-    // Un `res.status(...)` qui precede le premier appel de garde, dans le
-    // handler et non dans une fonction auxiliaire : on approxime par la
-    // position, ce qui suffit a COMPTER la surface.
-    const h = src.search(/module\.exports\s*=\s*async function|module\.exports\s*=\s*function/)
-    if (h < 0 || h > g) continue
-    const entre = src.slice(h, g)
-    if (/res\.status\(/.test(entre)) avant.push(f)
+    const h = src.search(/module\.exports\s*=\s*(?:async\s+)?(?:function\s*\w*\s*)?\(\s*\w+\s*,\s*\w+\s*\)\s*(?:=>\s*)?\{/)
+    const g = src.search(/posterEnTetesPrives\(|await (requirePermission|verifierSession|requirePermissionPourCanal)\(/)
+    if (h < 0 || g < 0 || h > g) continue
+    if (/res\s*\.status\(/.test(src.slice(h, g))) avant.push(f)
   }
-  // Mesure du 22 octobre 2026 : 9 endpoints (les 8 de la review + la garde de
-  // canal, desormais corrigee).
-  assert.ok(avant.length <= 12,
-    `${avant.length} endpoints repondent avant leur garde :\n  ` + avant.join('\n  ') +
-    '\nUn de plus : verifiez que sa reponse precoce ne porte AUCUNE donnee de ' +
-    'compte, ou posez posterEnTetesPrives(res) en tete du handler.')
+  // Mesure du 22 octobre 2026 : 41 endpoints, les deux formes de handler
+  // confondues. ⚠ Un balayage au `grep` n'en voyait que 27, et un autre 30 :
+  // c'est CE motif-ci qui fait foi, et c'est par un motif plus etroit que
+  // `api/yield.js` avait echappe au recensement alors que la production le
+  // montrait en `public`.
+  assert.ok(avant.length >= 35 && avant.length <= 48,
+    `${avant.length} endpoints repondent avant leur garde (41 le 22 octobre 2026).\n` +
+    'Si ce compte s effondre, ce n est pas la surface qui a disparu, c est le ' +
+    'recensement.')
+})
+
+test('LE TEST QUI COMPTE : api/sms.js n ouvre plus CORS a tous les sites', () => {
+  // ⚠ Le raisonnement est celui de `api/book-public.js`, qui le porte depuis
+  // son ecriture : « La page est servie par le meme domaine : le navigateur n a
+  // besoin d aucune permission croisee. `Access-Control-Allow-Origin: *`
+  // laisserait n importe quel site lire le calendrier de n importe quel bien
+  // depuis le navigateur de ses visiteurs. »
+  // Recensement des appelants HTTP de /api/sms, 22 octobre 2026 : trois pages,
+  // toutes sur notre domaine.
+  const src = code(lire('api/sms.js'))
+  assert.ok(!/Access-Control-Allow-Origin/.test(src),
+    'api/sms.js rend une configuration Brevo et un historique sms_logs : il ne ' +
+    'doit accorder aucune permission croisee')
+  // Et l en-tete prive, lui, doit rester : c est l autre moitie du meme sujet.
+  assert.match(src, /posterEnTetesPrives\(res\)/,
+    'ses reponses portent des donnees de compte et ne passent pas par la garde ' +
+    'partagee : l en-tete se pose a la main, en tete du handler')
+})
+
+test('RECENSEMENT : les endpoints qui ouvrent CORS a tous les sites sont COMPTES', () => {
+  // ⚠ CINQ RESTENT, ET ILS ATTENDENT UNE DECISION DE THIERRY. Le raisonnement
+  // de `book-public.js` leur vaut a tous — mais retirer CORS d un endpoint
+  // change ce que peut faire une page d un autre domaine, et deux d entre eux
+  // servent des parcours que je n ai pas eprouves (Stripe, l app prestataire).
+  // On les COMPTE donc, au lieu de les decrire ou de les oublier.
+  const ouverts = fichiersApi().filter(f => /Access-Control-Allow-Origin/.test(code(lire(f))))
+  assert.deepEqual(ouverts.sort(), [
+    'api/agent-config.js',      // authentifie — candidat
+    'api/beds24-setup.js',      // authentifie — candidat
+    'api/extract-kb.js',        // authentifie — candidat
+    'api/menages-public.js',    // public PAR JETON : `*` laisse lire un planning a qui connait le jeton
+    'api/stripe.js'             // a verifier : un webhook n applique pas CORS, une page de retour si
+  ].sort(),
+    'un de plus : justifiez pourquoi ce endpoint accorde une permission croisee.\n' +
+    'un de moins : il a ete ferme, retirez-le pour qu il soit protege.')
 })

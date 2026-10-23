@@ -340,8 +340,22 @@ test('l\'ancien accueil redirige vers /pages/aujourdhui, et la connexion y mene'
 })
 
 test('l\'alarme de surreservation et son acquittement sont repris sur l\'accueil', () => {
+  // ⚠ RETARGE AU LOT (b) : LA LECTURE A DEMENAGE, L'ACQUITTEMENT NON.
+  // La page faisait `GET /api/incidents-acquitter?type=overbooking` ; cette
+  // lecture est maintenant un bloc de l'appel d'ecran. L'ACQUITTEMENT, lui,
+  // reste un POST depuis la page — c'est un geste de l'hote, pas un
+  // chargement — et il garde son droit d'ecriture.
   const html = lire('pages/aujourdhui.html')
-  assert.ok(html.includes("/api/incidents-acquitter?type=overbooking"))
+  const endpoint = lire('api/ecran/aujourdhui.js')
+  // La lecture, cote serveur, et sur le bon type d'incident.
+  assert.ok(/from\('automation_incidents'\)/.test(endpoint),
+    'l endpoint d ecran ne lit plus les incidents : l alarme disparaitrait de l accueil')
+  assert.ok(/'overbooking'/.test(endpoint), 'il lit les incidents sans filtrer la surreservation')
+  // ⚠ ET SEULS LES NON ACQUITTES : sans ce filtre, une alarme eteinte
+  // reapparaitrait a chaque chargement, et l acquittement ne servirait a rien.
+  assert.ok(/is\('acquitted_at', null\)/.test(endpoint),
+    'l endpoint ne filtre pas les alarmes deja acquittees')
+  // L acquittement, cote page.
   assert.ok(/method: 'POST'[\s\S]{0,200}\/api\/incidents-acquitter|\/api\/incidents-acquitter'[\s\S]{0,60}method: 'POST'/.test(html))
   assert.ok(html.includes("peutEcrire('reservations')"), 'le bouton d\'acquittement suit le droit de l\'endpoint')
 })
@@ -422,4 +436,165 @@ test('LE TEST QUI COMPTE (M2) : l etoile de CHAQUE logement affiche la meme note
   ctx.note = null
   vm.runInContext(source, ctx)
   assert.equal(ctx.__etoile, '')
+})
+
+// ─── Les correctifs de la review max du lot (b) ───────────────────────────────
+
+test("LE TEST QUI COMPTE : la banniere de surreservation est RENDUE, pas seulement lue", () => {
+  // ⚠ LE CONSTAT LE PLUS GRAVE DE LA REVIEW. En deplacant la lecture des
+  // alarmes vers l'appel d'ecran, j'ai emporte l'appel de rendu avec elle :
+  // l'ancienne `chargerAlarmes()` finissait par `renderAlarmes(); renderTitre()`.
+  // Mesure : `grep -rn renderAlarmes` ne trouvait QUE sa definition, dans tout
+  // le depot. La banniere ne pouvait donc plus jamais s'afficher — et avec
+  // elle le bouton « Acquitter », que cette page designe comme « le SEUL moyen
+  // d'arreter la reemission des SMS » (spec-reservation-manuelle.md §4).
+  // L'alarme comptait dans le total « a traiter » sans que rien ne la montre,
+  // et l'alerte au fondateur ne pouvait plus etre eteinte.
+  // ⚠ HORS COMMENTAIRES — ET MA PREMIERE VERSION COMPTAIT LES MENTIONS.
+  // J'avais ecrit un long commentaire expliquant le defaut, qui citait
+  // `renderAlarmes()` DEUX fois : `assert.ok(appels >= 2)` etait donc satisfait
+  // par mon propre commentaire. Le garde-fou du constat le plus grave de la
+  // review precedente aurait survecu a la suppression de l'appel reel.
+  const html = lire('pages/aujourdhui.html')
+  // ⚠ PAS DE PASSE `/* */` SUR CETTE PAGE : elle en detruit presque tout le
+  // script (un `/*` de CSS, un `*/` dans une chaine, et le depouilleur avale
+  // le fichier — mesure du 23 octobre 2026 : la definition elle-meme
+  // disparaissait). Les lignes ENTIEREMENT commentees suffisent : c'est la
+  // forme de tous les commentaires de ce depot.
+  const code = html.split('\n')
+    .filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  const definitions = (code.match(/function renderAlarmes\s*\(/g) || []).length
+  const appels = (code.match(/renderAlarmes\(\)/g) || []).length
+  assert.strictEqual(definitions, 1, 'renderAlarmes doit etre defini une fois')
+  assert.ok(appels >= 2,
+    `renderAlarmes n'est appele ${appels - 0} fois hors de sa definition : la banniere `
+    + 'de surreservation ne peut pas s afficher, et le bouton d acquittement est injoignable')
+  // Il doit etre dans la liste de rendu du chargement, pas seulement ailleurs.
+  assert.match(code, /renderEvenements\(\);[^\n]*renderAlarmes\(\)/,
+    'renderAlarmes n est pas dans la liste de rendu du chargement')
+})
+
+test("LE TEST QUI COMPTE : l'acquittement retire l'alarme et REND, sans relire le reseau", () => {
+  // `chargerAlarmes()` ne fait plus d'appel reseau depuis ce lot : elle relit
+  // `etat.ecran.alarmes`, la reponse CAPTUREE au chargement, qui contient
+  // encore l'incident qu'on vient d'acquitter — et aucun rendu ne suivait.
+  // L'hote voyait le bouton rester sur « Acquittement… », l'alarme rester a
+  // l'ecran, puis, en recliquant, un ECHEC : le POST est idempotent
+  // (`.is('acquitted_at', null)`), donc le second part en 404 et le bouton
+  // bascule sur « Reessayer ». Un acquittement reussi rapporte comme un echec.
+  const html = lire('pages/aujourdhui.html')
+  const bloc = (html.match(/async function acquitter[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, 'la fonction acquitter a disparu')
+  assert.ok(!/await chargerAlarmes\(\)/.test(bloc),
+    'acquitter relit `etat.ecran.alarmes`, qui contient encore l alarme acquittee')
+  assert.match(bloc, /etat\.alarmes\s*=\s*\(etat\.alarmes \|\| \[\]\)\.filter/,
+    'l alarme acquittee n est pas retiree de l etat')
+  assert.match(bloc, /etat\.ecran\.alarmes\s*=\s*etat\.ecran\.alarmes\.filter/,
+    'la reponse gardee en etat garde l alarme : un rechargement partiel la ferait revenir')
+  assert.match(bloc, /renderAlarmes\(\);\s*renderTitre\(\)/,
+    'rien ne re-rend apres l acquittement')
+})
+
+test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", () => {
+  // ⚠ LE LOT VENDAIT CE PREMIER AFFICHAGE, ET IL AFFICHAIT FAUX. Le cache ne
+  // porte pas les sejours (`/api/menages`, hors de l'appel d'ecran) : a ce
+  // point `etat.bookings` est VIDE. Rendre « A valider », le sous-titre compte
+  // et les cartes de biens depuis cet etat donnait « 0 arrivee · 0 depart ·
+  // 0 a traiter » et « Aucune arrivee prevue » sur chaque bien — des FAITS,
+  // affirmes, puis dementis une seconde plus tard.
+  const html = lire('pages/aujourdhui.html')
+  const bloc = (html.match(/const duCache = CacheEcran\.lire[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'la branche du cache a disparu')
+  assert.ok(!/renderTitre\(\)/.test(bloc),
+    'le premier affichage rend le sous-titre compte : « 0 arrivee · 0 depart » sans avoir lu les sejours')
+  assert.ok(!/renderTaches\(\)/.test(bloc),
+    'le premier affichage rend « A valider » : la regle des taches a besoin des sejours, '
+    + 'et les taches ne sont plus dans le cache (elles portent le code d acces)')
+  assert.match(bloc, /renderCompteurs\(\); renderBiens\(\)/,
+    'le premier affichage ne rend plus rien : le cache ne sert alors a rien')
+  // Et la ligne du bien n'affirme « aucune arrivee » que si on a lu les sejours.
+  assert.match(html, /etat\.menagesOk === true\s*\n?\s*\?\s*\(e\.prochaineArrivee/,
+    'la carte du bien affirme « Aucune arrivee prevue » sans avoir lu les sejours')
+})
+
+test("LE TEST QUI COMPTE : un echec de l'appel d'ecran ne re-date pas le cache", () => {
+  // Sans ce garde, le cache ne perimait JAMAIS : `etat.ecran` garde l'objet
+  // restaure du cache quand l'appel echoue, et la suite le reecrivait avec un
+  // horodatage NEUF. Deux jours de 503 et l'hote lisait les chiffres de lundi,
+  // re-dates a chaque ouverture, le plafond de 12 h hors d'atteinte. Pire cas :
+  // un membre revoque en cours de session recoit 403 de la garde et continue
+  // de voir les chiffres du compte dont il vient d'etre retire.
+  const html = lire('pages/aujourdhui.html')
+  // ⚠ « RESOLUE » N'EST PAS « REPONDUE », et ma premiere version se contentait
+  // de la promesse tenue. `appel()` fait `r.json().catch(() => ({}))` : un 200
+  // porteur de HTML — la panne que la memoire du projet decrit sous « URL sans
+  // /api/v1 : 200 + HTML = 0 bien silencieux » — rend `{}` et RESOUT. On
+  // effacait alors l'age, on affichait un ecran vide, et on ECRASAIT un bon
+  // cache par `{}` pour 12 h. `jour` est le champ que l'endpoint rend toujours.
+  assert.match(html, /chargerEcran\(\)\.then\(r => \{ ecranFrais = !!\(r && r\.jour\) \}\)/,
+    'une reponse vide ou illisible passe pour une reponse du serveur')
+  assert.match(html, /if \(ecranFrais && etat\.ecran\) CacheEcran\.ecrire/,
+    'le cache est reecrit meme quand l appel d ecran a echoue')
+  assert.match(html, /if \(ecranFrais\) etat\.ageCache = null/,
+    'l age repasse a « frais » alors que les donnees viennent du cache')
+})
+
+test("LE TEST QUI COMPTE : le sous-titre n'affirme « 0 arrivee · 0 depart » qu'apres avoir LU", () => {
+  // ⚠ LE PREMIER CORRECTIF A GARDE LA BRANCHE DU CACHE ET LES CARTES DE BIENS,
+  // ET A OUBLIE LE TITRE. `renderEvenements` etait garde (il affiche
+  // « Lecture impossible »), `renderBiens` l'a ete par ce lot — mais
+  // `renderTitre` comptait toujours sur `etat.bookings`, vide quand
+  // `/api/menages` echoue. L'hote lisait donc « indisponible » dans la liste
+  // des evenements ET « 0 arrivee · 0 depart · rien a faire » dans le titre du
+  // MEME ecran ; et « rien a faire » alors qu'une surreservation non acquittee
+  // pouvait exister. Le KB de cette page, ecrit par ce lot, l'interdit
+  // nommement.
+  const html = lire('pages/aujourdhui.html')
+  const bloc = (html.match(/function renderTitre[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, 'renderTitre a disparu')
+  assert.match(bloc, /etat\.menagesOk === true/,
+    'le sous-titre compte les arrivees sans savoir si les sejours ont ete lus')
+  assert.match(bloc, /today\.counts_unavailable/,
+    'sans les sejours, le sous-titre doit le DIRE, pas afficher zero')
+  // Les taches et les alarmes, elles, ne dependent pas des sejours : elles
+  // restent comptees dans les deux cas.
+  assert.match(bloc, /tachesVisibles\(\)\.length \+ etat\.alarmes\.length/,
+    'les taches et les alarmes ne sont plus comptees quand les sejours manquent')
+})
+
+test("LE TEST QUI COMPTE : des biens ILLISIBLES ne s'affichent pas comme « aucun bien »", () => {
+  // L'endpoint rend `null` quand il n'a pas pu lire. `section.hidden = !length`
+  // faisait disparaitre la section, les notes et les indicateurs sans
+  // explication — en laissant « + Ajouter un bien » visible.
+  const html = lire('pages/aujourdhui.html')
+  const bloc = (html.match(/function renderBiens[\s\S]*?\n  section\.hidden = !etat\.biens\.length/) || [''])[0]
+  assert.ok(bloc, 'renderBiens a change de forme')
+  assert.match(bloc, /etat\.biens === null/,
+    'une lecture de biens en echec est traitee comme une liste vide')
+  assert.match(bloc, /properties\.unavailable/, 'rien ne dit a l hote que la lecture a echoue')
+})
+
+test("LE TEST QUI COMPTE : une liste de taches PLAFONNEE s'affiche avec un « + »", () => {
+  // L'endpoint annonce `tronquees: ['taches']` des aujourd'hui — 222 taches
+  // ouvertes pour un plafond de 200. Afficher le nombre exact serait un compte
+  // faux avec aplomb, et `tronquees` etait un signal que PERSONNE ne lisait.
+  const html = lire('pages/aujourdhui.html')
+  assert.match(html, /function tachesPlafonnees/, 'rien ne lit le drapeau de troncature')
+  assert.match(html, /tronquees[\s\S]{0,120}includes\('taches'\)/,
+    'le drapeau de troncature des taches n est pas lu')
+  assert.match(html, /tachesPlafonnees\(\)\s*\n?\s*\?\s*t\('validate\.capped'/,
+    "le compte affiche ne porte pas le « + » quand la liste est plafonnee")
+})
+
+test("LE TEST QUI COMPTE : au premier affichage, les biens arrivent AVANT les notes", () => {
+  // `chargerNotes` boucle SUR `etat.biens` pour remplir `notesParBien` : appele
+  // avant, il tourne sur `[]` et les etoiles manquent au premier affichage —
+  // celui que ce lot, le KB et la spec promettent tous les trois.
+  const html = lire('pages/aujourdhui.html')
+  const bloc = (html.match(/const duCache = CacheEcran\.lire[\s\S]*?\n  \}/) || [''])[0]
+  const iBiens = bloc.indexOf('etat.biens = await lireBiens()')
+  const iNotes = bloc.indexOf('chargerNotes()')
+  assert.ok(iBiens >= 0 && iNotes >= 0, 'la branche du cache a change de forme')
+  assert.ok(iBiens < iNotes,
+    'les notes sont chargees avant les biens : leur boucle tourne sur une liste vide')
 })
