@@ -54,7 +54,12 @@ async function runBackfill({ dryRun = true } = {}) {
   console.log('[backfill] CUTOFF', CUTOFF, '| MODE', dryRun ? 'DRY-RUN' : 'REEL')
 
   // Token Beds24 frais avant tout fetch (comme api/cron.js). Non bloquant.
-  try { await refreshBeds24Tokens() }
+  try { // ⚠ `forcer` : CE SCRIPT TOURNE DES HEURES (constat de review). Depuis que le
+// renouvellement est conditionnel, un appel nu peut SAUTER et laisser le script
+// demarrer sur un jeton qui n'a plus que trente minutes de vie — il tomberait
+// en 401 au milieu d'un backfill. Avant le lot, il repartait toujours sur un
+// jeton neuf. On le force donc, explicitement.
+await refreshBeds24Tokens({ forcer: true }) }
   catch (err) { console.error('[backfill] refresh tokens echec (on continue):', err.message) }
 
   const { data: apiKeys, error: keyErr } = await supabase
