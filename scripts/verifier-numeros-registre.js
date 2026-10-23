@@ -39,7 +39,10 @@
 //      soldee SE BARRE. Un controle de non-vacuite ne suffit donc pas — il faut
 //      un controle de COUVERTURE, qui refuse toute ligne de forme tableau non
 //      comptee, en la nommant ;
-//   3. aucune entree lue du tout — un verificateur qui n'a rien lu doit
+//   3. une SUITE QUI DESCEND — une entree rangee au mauvais endroit, sans
+//      doublon, donc invisible aux deux controles precedents (cas reel du
+//      24 octobre, detaille plus bas) ;
+//   4. aucune entree lue du tout — un verificateur qui n'a rien lu doit
 //      ECHOUER, sinon il rend un vert qui ne mesure rien.
 //
 // ⚠ ET LE CONTROLE EST BORNE AU TABLEAU DU REGISTRE, pas au fichier entier
@@ -119,6 +122,33 @@ function lignesNonComptees (texte) {
     .map(l => ({ ligne: l.ligne, apercu: l.texte.trim().slice(0, 60) }))
 }
 
+// ⚠ L'ORDRE, ET LA TROISIEME FORME DU MEME PHENOMENE (cas reel du 24 octobre
+// 2026, merge de `dette-90-refus-avant-garde`). Git se tait quand les deux
+// cotes touchent des regions DISJOINTES, et parle quand elles se chevauchent.
+// Trois occurrences dans la meme journee : la dette 84 ecrite deux fois a des
+// endroits differents (DUPLICATION, muette), la dette 78 ou les deux cotes
+// ajoutaient en fin de table (CONFLIT FRANC, donc signale), et la dette 90
+// RANGEE ENTRE LA 83 ET LA 84 — parce que sa branche partait d'un `main` dont
+// le registre s'arretait a 83, et que `staging` portait deja 84 a 89 au meme
+// endroit. Muette aussi.
+//
+// ⚠ ET CE TROISIEME CAS NE PRODUIT AUCUN DOUBLON : 1 a 90, chacun une fois.
+// La detection de doublons sort 0 a juste titre sur un registre dont une entree
+// est au mauvais endroit. Or l'ordre est ce qui fait qu'un registre se lit, et
+// « le prochain numero libre » se deduit de la fin de table.
+//
+// ⚠ UN TROU N'EST PAS UNE RUPTURE. Le registre saute de 38 a 40 — la dette 39
+// ne vit que sur une branche non mergee — et c'est legitime : on ne reutilise
+// jamais un numero mort. Ce qui est refuse, c'est une suite qui DESCEND.
+function ruptures (texte) {
+  const e = entreesDuRegistre(texte)
+  const r = []
+  for (let i = 1; i < e.length; i++) {
+    if (e[i].numero <= e[i - 1].numero) r.push({ precedent: e[i - 1], suivant: e[i] })
+  }
+  return r
+}
+
 // Rend un tableau — vide quand tout va bien. Chaque element porte le numero
 // fautif ET les lignes ou il apparait : sans les lignes, le message oblige a
 // rechercher a la main ce que le verificateur vient de trouver.
@@ -144,7 +174,7 @@ function prochainLibre (texte) {
   return n.length ? Math.max(...n) + 1 : 1
 }
 
-module.exports = { entreesDuRegistre, lignesNonComptees, doublons, prochainLibre, PAR_DEFAUT }
+module.exports = { entreesDuRegistre, lignesNonComptees, ruptures, doublons, prochainLibre, PAR_DEFAUT }
 
 if (require.main === module) {
   const cibles = process.argv.slice(2)
@@ -178,7 +208,16 @@ if (require.main === module) {
       }
       console.error('  (un numero gras, barre, indente ou suivi de « bis » n est PAS compte : il passerait en double sans un mot)')
     }
-    if (propre) console.log('  ok    aucun numero en double, et toutes les rangees sont comptees')
+    const desordre = ruptures(texte)
+    if (desordre.length) {
+      propre = false
+      for (const { precedent, suivant } of desordre) {
+        console.error(`  ECHEC la suite descend : ${precedent.numero} (ligne ${precedent.ligne})`
+          + ` puis ${suivant.numero} (ligne ${suivant.ligne})`)
+      }
+      console.error('  (un TROU est normal — on ne reutilise jamais un numero mort ; une entree rangee au mauvais endroit, non)')
+    }
+    if (propre) console.log('  ok    aucun doublon, aucune rangee perdue, suite croissante')
     else echecs++
     console.log(`  prochain numero libre : ${prochainLibre(texte)}`)
   }

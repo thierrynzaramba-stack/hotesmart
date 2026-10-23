@@ -183,6 +183,32 @@ test('LE TEST QUI COMPTE : le CODE DE SORTIE du script, sur trois fixtures', () 
   assert.equal(lancer(CHEMIN), 0)
 })
 
+test('LE TEST QUI COMPTE : une entree rangee au mauvais endroit est REFUSEE, un TROU non', () => {
+  // ⚠ LA TROISIEME FORME DU MEME PHENOMENE, cas reel du 24 octobre 2026 : le
+  // merge de `dette-90-refus-avant-garde` a range l'entree 90 ENTRE la 83 et la
+  // 84, sans conflit et sans un mot, parce que sa branche partait d'un `main`
+  // dont le registre s'arretait a 83. Aucun doublon : 1 a 90, chacun une fois.
+  // La detection de doublons sort 0 a juste titre — et le registre est faux.
+  const deplacee = faux(RANGEE(83), RANGEE(90, 'rangee au mauvais endroit'), RANGEE(84))
+  assert.deepEqual(V.doublons(deplacee), [], 'ce cas ne produit AUCUN doublon : c est tout le probleme')
+  assert.deepEqual(V.lignesNonComptees(deplacee), [], 'et aucune rangee perdue non plus')
+  const r = V.ruptures(deplacee)
+  assert.equal(r.length, 1)
+  assert.deepEqual([r[0].precedent.numero, r[0].suivant.numero], [90, 84],
+    'la rupture nomme les DEUX numeros : sans eux, il faut relire la table entiere')
+  assert.deepEqual([r[0].precedent.ligne, r[0].suivant.ligne], [6, 7])
+  assert.equal(lancer(dansUnFichier(deplacee)), 1, 'et le script sort en erreur')
+
+  // ⚠ UN TROU N'EST PAS UNE RUPTURE, et le registre en a un vrai : il saute de
+  // 38 a 40, la dette 39 ne vivant que sur une branche non mergee. Une garde
+  // qui refuserait les trous pousserait a reutiliser un numero mort, donc a
+  // faire pointer deux decisions vers la meme ligne de journal.
+  assert.deepEqual(V.ruptures(faux(RANGEE(38), RANGEE(40), RANGEE(41))), [],
+    'un trou est legitime')
+  assert.deepEqual(V.ruptures(REGISTRE), [],
+    'le registre lui-meme : suite croissante — l inversion « 13 puis 12 », qui precedait ce lot, est corrigee dans ce commit')
+})
+
 test('le prochain numero libre se CALCULE, et c est max + 1', () => {
   // ⚠ PAS « nombre d entrees + 1 ». Le registre a un vrai trou — la dette 39 ne
   // vit que sur une branche non mergee —, donc il compte 82 entrees pour un
