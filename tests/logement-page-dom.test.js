@@ -1114,3 +1114,100 @@ test('LE TEST QUI COMPTE : la note « votre annonce reste » arrive JUSQU AU dia
   assert.equal(canal.demandes[0].note, null,
     'promettre que l annonce reste serait faux pour un bien du canal')
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CHANGER LE PAYS ENVOIE { country: "BE" } — recette de Thierry, 23 octobre 2026
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠ LE DÉFAUT QUE CE TEST FERME, ET POURQUOI AUCUN AUTRE NE L A VU. Le pays est
+// devenu une liste déroulante le matin même ; `valeurAEnvoyer` testait
+// `if (champ.type === 'texte') return v` — « tout ce qui n est pas du texte est
+// un nombre ». « BE » est donc parti dans `Number()`, qui rend `NaN` : l hôte
+// lisait « Ce n est pas un nombre. » sous une liste déroulante, AUCUN PATCH ne
+// partait, et le pays revenait à France au rechargement.
+//
+// Les tests d alors lisaient le SOURCE de `enregistrerChamp` (REVIEW.md
+// règle 20 : « appeler, pas lire »). Celui-ci exécute la fonction et regarde ce
+// que le client d API a REÇU.
+
+function lancerChamp ({ bien, nom, valeur, reponse = {}, erreur = null }) {
+  const appels = []
+  const etats = []
+  const cases = { [nom]: { value: valeur, dataset: { champ: nom } } }
+  const sandbox = {
+    CHAMPS: M.CHAMPS,
+    valeurDeSaisie: M.valeurDeSaisie,
+    valeurAEnvoyer,
+    vuDuChamp: null,
+    bienCourant: bien,
+    idDuBien: 'b1',
+    CSS: { escape: (x) => x },
+    $: (sel) => {
+      const m = sel.match(/data-champ="([^"]+)"/)
+      return m ? (cases[m[1]] || null) : null
+    },
+    direEtat: (cible, quoi, texte) => etats.push([cible, quoi, texte]),
+    majNom: () => {},
+    enfiler: (f) => f(),
+    t: (cle) => cle,
+    logger: { error: () => {} },
+    api: { bien: { modifier: async (id, corps) => {
+      appels.push({ id, corps })
+      if (erreur) throw erreur
+      return reponse
+    } } }
+  }
+  const src = `${fonctionDeLaPage('vuDuChamp')}\nvuDuChamp = vuDuChamp\n${fonctionDeLaPage('enregistrerChamp')}`
+  const ctx = vm.createContext(sandbox)
+  vm.runInContext(src, ctx)
+  return {
+    appels,
+    etats,
+    copie: (x) => JSON.parse(JSON.stringify(x)),
+    // L input tel que l écouteur de la page le passe : sa valeur et son nom.
+    lancer: () => vm.runInContext(
+      `enregistrerChamp({ dataset: { champ: ${JSON.stringify(nom)} }, value: ${JSON.stringify(valeur)} })`,
+      ctx)
+  }
+}
+
+test('LE TEST QUI COMPTE : changer le pays envoie { country: "BE" }', async () => {
+  const e = lancerChamp({ bien: { ...BIEN_PAGE, pays: 'FR' }, nom: 'country', valeur: 'BE' })
+  await e.lancer()
+  assert.equal(e.appels.length, 1, `aucun PATCH n est parti : ${JSON.stringify(e.etats)}`)
+  assert.deepEqual(e.copie(e.appels[0].corps), { country: 'BE' })
+  // Et l écran dit « Enregistré », pas « Ce n est pas un nombre ».
+  const dits = e.etats.map(x => x[1])
+  assert.ok(dits.includes('enregistre'), `états vus : ${JSON.stringify(e.etats)}`)
+  assert.ok(!e.etats.some(x => x[1] === 'erreur'), JSON.stringify(e.etats))
+})
+
+test('LE TEST QUI COMPTE : aucun type NON numérique ne part dans Number()', () => {
+  // ⚠ LA CLASSE, PAS LE CAS. La condition était « tout ce qui n est pas du
+  // texte est un nombre » : le prochain type ajouté retomberait dans le même
+  // piège. Écrite dans l autre sens, elle n a pas d angle mort.
+  for (const champ of M.CHAMPS) {
+    if (champ.type === 'entier' || champ.type === 'montant') continue
+    const rendu = valeurAEnvoyer(champ, 'BE')
+    assert.equal(rendu, 'BE',
+      `le champ \`${champ.nom}\` (type ${champ.type}) passe par la validation numérique`)
+  }
+  // Les numériques, eux, refusent toujours ce qui n est pas un nombre.
+  const cap = M.CHAMPS.find(c => c.nom === 'capacity')
+  assert.equal(valeurAEnvoyer(cap, 'BE'), undefined)
+  assert.equal(valeurAEnvoyer(cap, '4'), 4)
+})
+
+test('le titre d onglet suit le changement de langue', () => {
+  // ⚠ `document.title` N EST PAS DANS LE DOM QUE `I18n.apply` TRADUIT. Sans
+  // écouteur, le h1 passait en anglais et l onglet restait en français
+  // (recette du 23 octobre 2026). Les deux écrans traduits du lot sont tenus.
+  for (const f of ['pages/logement-nouveau.html', 'pages/logements.html']) {
+    const html = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    assert.match(html, /document\.addEventListener\('i18n:changed', poserTitre\)/,
+      `${f} ne repose pas son titre au changement de langue`)
+    assert.match(html, /poserTitre\s*\(\)/, `${f} doit poser le titre au chargement aussi`)
+  }
+  // Et l événement existe bien : sinon l écouteur serait du code dormant.
+  const i18n = fs.readFileSync(path.join(__dirname, '..', 'shared/i18n/i18n.js'), 'utf8')
+  assert.match(i18n, /dispatchEvent\(new CustomEvent\('i18n:changed'/)
+})

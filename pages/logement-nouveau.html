@@ -294,7 +294,14 @@ await I18n.init()
 // rendu de la navigation : toute panne entre les deux le laissait a « HôteSmart »
 // — et c'est ce que la recette du 23 octobre 2026 a vu. Pose juste apres le
 // chargement du dictionnaire, il ne depend plus que de lui.
-document.title = `HôteSmart — ${t('nouveau.title')}`
+// ⚠ ET IL SUIT LA LANGUE. `I18n.set` réapplique le DOM et émet `i18n:changed`,
+// mais `document.title` n'est pas dans le DOM traduit : sans cet écouteur, le
+// h1 passait en anglais et l'onglet restait en français (recette du 23 octobre
+// 2026). Le titre se repose donc à chaque changement, et une seule fonction le
+// pose dans les deux cas.
+function poserTitre () { document.title = `HôteSmart — ${t('nouveau.title')}` }
+poserTitre()
+document.addEventListener('i18n:changed', poserTitre)
 
 // ⚠ AVEC L'IDENTIFIANT, TOUJOURS. Sans lui, `chargerContexte` reinitialisait
 // le contexte et `estTitulaire()` rendait `false` pour tout le monde : l'ecran

@@ -361,7 +361,12 @@ async function init () {
   const ajouter = $('[data-bind="ajouter"]')
   if (ajouter) ajouter.hidden = !estTitulaire()
 
-  document.title = `HôteSmart — ${t('logements.title')}`
+  // ⚠ LE MÊME DÉFAUT QU'À LA CRÉATION, LA MÊME LIGNE : `document.title` n'est
+  // pas dans le DOM que `I18n.apply` traduit. Sans cet écouteur, l'onglet reste
+  // dans la langue d'ouverture.
+  const poserTitre = () => { document.title = `HôteSmart — ${t('logements.title')}` }
+  poserTitre()
+  document.addEventListener('i18n:changed', poserTitre)
   await charger()
 }
 
