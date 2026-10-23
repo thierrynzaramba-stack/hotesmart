@@ -45,7 +45,8 @@ const jourParis = (decalage = 0) =>
 async function etatsDArrivee(userId, conversations, snapByBooking) {
   const proches = arriveesProches(conversations, jourParis)
   if (!proches.length) return
-  const { lignes, erreur } = await lireLesCodes(supabase, proches.map(c => c.bookId))
+  const { lignes, erreur } = await lireLesCodes(supabase,
+    proches.map(c => c.bookId), proches.map(c => c.propertyId))
   if (erreur) console.error('[messages] lecture access_codes echec', erreur)
   const codeParBooking = codesParReservation(lignes)
   for (const c of proches) {

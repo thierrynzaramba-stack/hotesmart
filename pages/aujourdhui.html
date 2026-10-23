@@ -116,6 +116,7 @@ import { escapeHtml as esc } from '/shared/properties.js'
 import { compteCourant, moi, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
   from '/shared/compte-courant.js'
 import * as R from '/shared/aujourdhui.js'
+import * as CacheEcran from '/shared/cache-ecran.js'
 
 initErrorHandler()
 const t = (k, v) => I18n.t(k, v)
@@ -130,7 +131,31 @@ const etat = {
   taches: [], tachesOk: null,
   alarmes: [],
   parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
-  compteurs: []
+  compteurs: [],
+  // La réponse de `/api/ecran/aujourdhui` — un seul appel pour six blocs.
+  ecran: null,
+  // L'âge des données affichées, quand elles viennent du cache. `null` = elles
+  // viennent du serveur.
+  ageCache: null
+}
+
+// ⚠ UN SEUL APPEL POUR SIX BLOCS — lot (b) du chantier performance.
+// Il remplace CINQ appels (`incidents-acquitter`, `messages`,
+// `messages?stats=ia`, `avis?action=notes`) et CINQ lectures directes du
+// navigateur sous RLS (`properties`, `agent_tasks`, et trois comptages).
+//
+// ⚠ ET IL NE PASSE PLUS PAR `/api/messages`. Mesure du 22 octobre 2026 contre
+// la production : cet appel coûtait 18 requêtes et 437 212 octets — 42 % du
+// poids de la page — pour deux champs (`arrivee.codeEtat` et la liste des
+// réservations qui ont un fil). L'endpoint d'écran les lit directement :
+// 1 requête et 3 244 octets pour les fils, 2 requêtes pour l'état du code.
+//
+// ⚠ CE QU'IL NE REMPLACE PAS, ET C'EST ASSUMÉ : `/api/menages` (la fenêtre de
+// 400 jours, domaine ménage, repliée au lot (d)) et `/api/yield` (le CA et le
+// TO, remplacés par des tables de résumé au lot (c)).
+async function chargerEcran () {
+  etat.ecran = await appel('/api/ecran/aujourdhui')
+  return etat.ecran
 }
 
 // fetch d'un endpoint, avec la session et le compte consulté.
@@ -209,12 +234,13 @@ function renderAlarmes () {
   zone.querySelectorAll('[data-acquitter]').forEach(b => b.addEventListener('click', () => acquitter(b)))
 }
 async function chargerAlarmes () {
-  try {
-    const { alarmes } = await appel('/api/incidents-acquitter?type=overbooking')
-    etat.alarmes = alarmes || []
-  } catch (e) { logger.error('Aujourdhui', 'alarmes', e) }
-  renderAlarmes(); renderTitre()
+  // Vient de l'appel d'écran. `null` = droit refusé ou lecture indisponible —
+  // dans les deux cas on n'affiche aucune alarme, et on ne prétend pas qu'il
+  // n'y en a pas.
+  const a = etat.ecran && etat.ecran.alarmes
+  etat.alarmes = Array.isArray(a) ? a : []
 }
+
 async function acquitter (b) {
   b.disabled = true
   b.textContent = t('alarm.acking')
@@ -317,30 +343,25 @@ async function chargerReservations () {
 // dernier message date l'ouverture d'une conversation (règle des tâches).
 async function chargerEtatsArrivee () {
   if (!peutLire('messages')) return
-  try {
-    const { conversations } = await appel('/api/messages')
-    for (const c of conversations || []) {
-      etat.conversations.add(String(c.bookId))
-      if (c.arrivee) etat.etatsArrivee[String(c.bookId)] = c.arrivee
-    }
-  } catch (e) { logger.error('Aujourdhui', 'etats d\'arrivee', e) }
+  const e = etat.ecran || {}
+  // ⚠ LES DEUX MOITIÉS VIENNENT DU MÊME APPEL, mais elles ne portent pas la
+  // même chose : `conversations` dit quelles réservations ont un fil (pour la
+  // cible du lien), `etats_arrivee` dit l'état du code des seules arrivées du
+  // jour et du lendemain.
+  etat.conversations = new Set(Array.isArray(e.conversations) ? e.conversations.map(String) : [])
+  etat.etatsArrivee = (e.etats_arrivee && typeof e.etats_arrivee === 'object') ? e.etats_arrivee : {}
 }
 
-// ─── 3. À valider ───────────────────────────────────────────────────────────
 async function chargerTaches () {
   if (!peutLire('messages')) return
-  // Lecture directe, comme la messagerie : agent_tasks a une policy RLS
-  // (`can_read(user_id, 'messages', property_id)`), le périmètre s'applique.
-  const { data, error } = await supabase.from('agent_tasks')
-    .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
-    .eq('user_id', compteCourant())
-    .in('status', ['pending', 'pending_validation'])
-    .order('created_at', { ascending: false })
-    .limit(200)
-  if (error) { logger.error('Aujourdhui', 'taches', error); etat.tachesOk = false; return }
-  etat.taches = data || []
+  const t = etat.ecran && etat.ecran.taches
+  // ⚠ `null` N'EST PAS `[]`. L'endpoint rend `null` quand il n'a PAS pu lire :
+  // afficher « aucune tâche » serait affirmer un fait qu'on ignore.
+  if (!Array.isArray(t)) { etat.tachesOk = false; return }
+  etat.taches = t
   etat.tachesOk = true
 }
+
 function carteTache (tache, sombre) {
   const titre = tache.status === 'pending_validation' && tache.guest_name
     ? t('validate.reply_to', { name: tache.guest_name }) : t('validate.task')
@@ -391,36 +412,32 @@ function renderTaches () {
 // profil a le droit de lire la table (sinon la RLS rendrait 0, un faux zéro).
 // « Messages envoyés » n'y est PAS : message_sent_log est aussi écrit en Mode
 // Test et ne dit pas si le voyageur a reçu le message (KB aujourdhui.md §3).
-async function compter (table, filtre) {
-  let q = supabase.from(table).select('id', { count: 'exact', head: true }).eq('user_id', compteCourant())
-  q = filtre(q)
-  const { count, error } = await q
-  if (error) { logger.error('Aujourdhui', `compte ${table}`, error); return null }
-  return count
-}
+// ⚠ `compter()` A DISPARU, ET AVEC LUI QUATRE LECTURES DU NAVIGATEUR.
+// Les trois comptages de « Fait pour vous » — ménages acceptés, prix poussés
+// par le moteur, surréservations — étaient des `head: true` faits en direct
+// sous RLS, plus un appel à `/api/messages?stats=ia`. Ils viennent maintenant
+// de l'appel d'écran, où ils tournent en parallèle avec le reste.
+//
+// ⚠ ET LE DROIT SE VÉRIFIE DÉSORMAIS CÔTÉ SERVEUR, ce qui est un durcissement
+// et pas une simple économie : `price_display_log` a une RLS
+// `user_id = auth.uid()`, donc le navigateur ne pouvait de toute façon lire
+// que le sien. L'endpoint, lui, travaille en clé de service — qui CONTOURNE la
+// RLS — donc il vérifie `estTitulaireDuCompte` explicitement. C'est la raison
+// d'être de `requirePermission`, et la règle absolue du dépôt : un masquage
+// par droit se double d'une garde serveur.
 async function chargerCompteurs () {
-  const depuis = new Date(Date.now() - 7 * 86400000).toISOString()
-  // ⚠ PAS de tuile « codes d'accès » : l'INSERT du cron serrures ne pose pas
-  // `user_id` (bloquant pré-lancement (d) ; 122 lignes sur 145 le 10 octobre
-  // 2026, dont les 5 des 7 derniers jours) — la RLS rend donc 0, un faux zéro
-  // qui contredit la ligne d'arrivée. Dette 62 : la tuile revient avec lui.
+  const f = (etat.ecran && etat.ecran.fait_pour_vous) || {}
+  // ⚠ `null` = refusé ou illisible, et la tuile se masque. Un `0` affiché là
+  // où on ne sait pas dirait « rien ne s'est passé cette semaine », ce qui est
+  // un fait — et c'est précisément ce que la dette 62 interdit (la tuile des
+  // codes d'accès est masquée pour cette raison, pas affichée à zéro).
   const defs = [
-    // « Messages ecrits par l'IA » (dette 66) : compte SERVEUR depuis la
-    // colonne origine seulement ; indisponible (migration absente) = tuile
-    // masquee, jamais un faux zero.
-    peutLire('messages') && {
-      icon: 'i-ai', cle: 'done.ia_messages',
-      f: () => appel(`/api/messages?stats=ia&depuis=${encodeURIComponent(depuis)}`)
-        .then(r => (r && !r.indisponible && Number.isFinite(r.messages_ia)) ? r.messages_ia : null)
-        .catch(() => null)
-    },
-    peutLire('menages') && { icon: 'i-cleaning', cle: 'done.cleanings', f: () => compter('menages', q => q.gte('accepted_at', depuis).neq('status', 'cancelled')) },
-    // price_display_log : RLS `user_id = auth.uid()` — lisible du seul titulaire.
-    estTitulaire() && { icon: 'i-price', cle: 'done.prices', f: () => compter('price_display_log', q => q.eq('source', 'engine').gte('created_at', depuis)) },
-    peutLire('reglages') && { icon: 'i-shield', cle: 'done.overbooking', f: () => compter('automation_incidents', q => q.eq('type', 'overbooking').gte('created_at', depuis)) }
-  ].filter(Boolean)
-  const valeurs = await Promise.all(defs.map(d => d.f()))
-  etat.compteurs = defs.map((d, i) => ({ ...d, n: valeurs[i] })).filter(d => d.n != null)
+    { icon: 'i-ai', cle: 'done.ia_messages', n: f.messages_ia },
+    { icon: 'i-cleaning', cle: 'done.cleanings', n: f.menages },
+    { icon: 'i-price', cle: 'done.prices', n: f.prix },
+    { icon: 'i-shield', cle: 'done.overbooking', n: f.surreservation }
+  ]
+  etat.compteurs = defs.filter(d => d.n != null)
 }
 function renderCompteurs () {
   const section = $('[data-bind="done-section"]')
@@ -462,39 +479,13 @@ async function chargerChiffresBien (b) {
 }
 async function chargerNotes () {
   if (!peutLire('avis')) return
-  // ⚠ UN SEUL APPEL, PLUS 1 + N. Cette fonction demandait
-  // `/api/avis?action=cartes` une fois pour le compte PUIS UNE FOIS PAR BIEN,
-  // pour n'en garder que deux nombres. Chaque appel lisait jusqu'à 5000 avis et
-  // 2000 évaluations, leurs séjours et leurs ménages, et assemblait les cartes
-  // deux fois. Mesure de Thierry en production le 20 octobre 2026 : 10,7 s puis
-  // 3 x 4-5 s, environ 75 % des ~20 s de la page. `action=notes` fait la même
-  // lecture une fois et rend le global ET chaque bien (lib/stats-avis.js).
-  //
-  // ⚠ CE QUI CHANGE EN CAS DE PANNE, ET CE N'EST PAS « comme avant ». C'étaient
-  // N+1 lectures INDÉPENDANTES : un global en échec ne coûtait que la tuile, et
-  // chaque bien gardait son étoile ; un bien en échec ne coûtait que la sienne.
-  // C'est maintenant tout ou rien — un seul 503 efface la tuile ET les N
-  // étoiles. Il n'y a pas de reprise : `chargerNotes()` est lancé une fois
-  // depuis `init()`, sans `await`, donc l'hôte n'a que le rechargement de page.
-  // Assumé (une seule lecture, une seule vérité), mais dit.
-  let r = null
-  try {
-    r = await appel('/api/avis?action=notes&periode=30j')
-  } catch (e) { logger.error('Aujourdhui', 'avis', e) }
-
-  // ⚠ LES DEUX CÔTÉS JUGENT LA MÊME CHOSE. `appel()` avale un corps illisible
-  // (`r.json().catch(() => ({}))`) : un 200 vide ou en HTML — la panne que la
-  // mémoire du projet enregistre déjà sous « URL sans /api/v1 : 200 + HTML =
-  // 0 bien silencieux » — donne `r = {}`, qui est VRAI. Tester la véracité de
-  // `r` d'un côté et la clé de l'autre disait alors « inconnu » au global et
-  // « zéro avis », un FAIT, à chaque bien. On exige donc la clé des deux côtés.
-  // ⚠ UNE LECTURE ROGNÉE N'EST PAS UNE NOTE. L'endpoint pose `tronque` quand
-  // il a lu moins de lignes que le total annoncé (`db-max-rows`, ou le plafond
-  // de 50 000) : la note porte alors sur une fraction. L'afficher avec l'aplomb
-  // des autres serait affirmer un chiffre faux — règle du dépôt, un résultat
-  // non calculable ne s'affiche jamais comme un fait. On la traite donc comme
-  // une panne : tuile masquée, étoiles absentes, et la cause au journal.
-  // Inatteignable aujourd'hui (669 avis confirmés, une seule page).
+  // ⚠ LA SOURCE CHANGE, LES GARDES RESTENT — et c'est délibéré. Ce bloc venait
+  // de `/api/avis?action=notes` ; il vient maintenant de l'appel d'écran, qui
+  // appelle la MÊME fonction `notesDuPerimetre` côté serveur. Tout le
+  // raisonnement ci-dessous sur `tronque` et sur « les deux côtés jugent la
+  // même chose » reste valable mot pour mot, et il a été payé par deux
+  // mesures : il ne se jette pas parce que la source a changé.
+  const r = (etat.ecran && etat.ecran.notes) || null
   if (r && r.tronque) logger.error('Aujourdhui', 'avis', 'lecture des notes incomplete')
   const lu = r && !r.tronque && r.global && typeof r.global === 'object' ? r : null
   const parBien = (lu && lu.par_bien) || {}
@@ -674,15 +665,17 @@ async function init () {
   //
   // Les biens : lecture directe sous RLS (`properties_select` = périmètre du
   // profil). Pas /api/channel-property, qui interroge Beds24 en direct.
+  // ⚠ LES BIENS VIENNENT DE L'APPEL D'ÉCRAN, PLUS D'UNE LECTURE DIRECTE.
+  // C'était une lecture `properties` sous RLS depuis le navigateur — 9
+  // colonnes, toutes les lignes du compte, sans limite. Elle part maintenant
+  // avec les cinq autres blocs, en parallèle côté serveur, et son périmètre est
+  // appliqué EXPLICITEMENT par `refsDuPerimetre` : la clé de service CONTOURNE
+  // la RLS, donc le filtre ne peut plus être implicite.
   const lireBiens = async () => {
-    if (!peutLire('reservations') && !peutLire('menages')) return []
-    const { data, error } = await supabase.from('properties')
-      .select('id, name, provider, provider_property_id, city, checkin_time, checkout_time, currency, photo_url')
-      .eq('user_id', compteCourant())
-      .order('name', { ascending: true })
-    if (error) logger.error('Aujourdhui', 'biens', error)
-    return data || []
+    const b = etat.ecran && etat.ecran.biens
+    return Array.isArray(b) ? b : []
   }
+
   // ⚠ ILS PARTENT ENSEMBLE, ILS N'ARRIVENT PAS ENSEMBLE. Un `Promise.all` sur
   // les deux resultats faisait attendre au bonjour et aux initiales — qui ne
   // dependent que de `prenom()` — la lecture `properties`, la plus lourde des
@@ -702,6 +695,25 @@ async function init () {
   // ⚠ PLUS DE `liens` : l'entrée Calendrier mène à l'écran V5 `/calendrier`,
   // le même depuis toutes les pages. Épingler ici le premier bien donnait à
   // cet onglet deux comportements selon la page d'où on cliquait.
+  // ⚠ L'AFFICHAGE INSTANTANÉ — principe 3 de la spec performance.
+  // On montre les dernières données connues AVANT le premier aller-retour, puis
+  // on rafraîchit. L'écran n'est jamais vide au deuxième chargement de la
+  // journée.
+  //
+  // ⚠ ET IL NE MONTRE JAMAIS UN ÉTAT CRITIQUE. Le module retire `etats_arrivee`
+  // (l'état du code d'accès) et `alarmes` (la surréservation) à l'ÉCRITURE :
+  // ce qui n'est pas écrit ne peut pas fuiter par un lecteur distrait. C'est
+  // l'interdit 2 de la spec, et il n'est pas négociable — un code affiché
+  // depuis le cache ferait croire à l'hôte qu'un voyageur l'a reçu.
+  const duCache = CacheEcran.lire('aujourdhui', moi(), compteCourant())
+  if (duCache) {
+    etat.ecran = duCache.donnees
+    etat.ageCache = duCache.age_ms
+    await Promise.all([chargerTaches(), chargerCompteurs(), chargerNotes()])
+    etat.biens = await lireBiens()
+    renderTaches(); renderCompteurs(); renderBiens(); renderTitre()
+  }
+
   const nav = (badge) => HSNav.render({
     badges: { pendingMessages: badge },
     peutLire
@@ -710,11 +722,24 @@ async function init () {
 
   // /api/messages dans le même lot : la règle des tâches et l'état des codes
   // en dépendent — un premier rendu sans lui afficherait un compte faux.
-  await Promise.all([chargerReservations(), chargerTaches(), chargerAlarmes(), chargerCompteurs(), chargerEtatsArrivee()])
+  // ⚠ L'APPEL D'ÉCRAN ET LA FENÊTRE MÉNAGE PARTENT ENSEMBLE. Deux appels, pas
+  // treize — et pas en file : `/api/menages` ne dépend pas de l'écran.
+  // `chargerTaches`, `chargerAlarmes`, `chargerCompteurs`, `chargerEtatsArrivee`
+  // et `chargerNotes` ne font plus de réseau : ils lisent `etat.ecran`.
+  await Promise.all([
+    chargerEcran().catch(e => { logger.error('Aujourdhui', 'ecran', e) }),
+    chargerReservations()
+  ])
+  etat.biens = await lireBiens()
+  await Promise.all([chargerTaches(), chargerAlarmes(), chargerCompteurs(), chargerEtatsArrivee(), chargerNotes()])
+  etat.ageCache = null
   nav(tachesVisibles().filter(x => x.status === 'pending_validation').length)
   renderEvenements(); renderTaches(); renderCompteurs(); renderBiens(); renderTitre()
+  // ⚠ ON GARDE CE QU'ON VIENT D'AFFICHER. Le cache ne sert qu'à un premier
+  // affichage instantané au prochain chargement ; les trois états critiques en
+  // sont retirés à l'écriture par le module lui-même.
+  if (etat.ecran) CacheEcran.ecrire('aujourdhui', moi(), compteCourant(), etat.ecran)
 
-  chargerNotes()
   if (peutLire('reservations')) {
     await parPaquets(etat.biens.map(b => async () => { await chargerChiffresBien(b); renderBiens() }), 2)
     renderKpis()

@@ -340,8 +340,22 @@ test('l\'ancien accueil redirige vers /pages/aujourdhui, et la connexion y mene'
 })
 
 test('l\'alarme de surreservation et son acquittement sont repris sur l\'accueil', () => {
+  // ⚠ RETARGE AU LOT (b) : LA LECTURE A DEMENAGE, L'ACQUITTEMENT NON.
+  // La page faisait `GET /api/incidents-acquitter?type=overbooking` ; cette
+  // lecture est maintenant un bloc de l'appel d'ecran. L'ACQUITTEMENT, lui,
+  // reste un POST depuis la page — c'est un geste de l'hote, pas un
+  // chargement — et il garde son droit d'ecriture.
   const html = lire('pages/aujourdhui.html')
-  assert.ok(html.includes("/api/incidents-acquitter?type=overbooking"))
+  const endpoint = lire('api/ecran/aujourdhui.js')
+  // La lecture, cote serveur, et sur le bon type d'incident.
+  assert.ok(/from\('automation_incidents'\)/.test(endpoint),
+    'l endpoint d ecran ne lit plus les incidents : l alarme disparaitrait de l accueil')
+  assert.ok(/'overbooking'/.test(endpoint), 'il lit les incidents sans filtrer la surreservation')
+  // ⚠ ET SEULS LES NON ACQUITTES : sans ce filtre, une alarme eteinte
+  // reapparaitrait a chaque chargement, et l acquittement ne servirait a rien.
+  assert.ok(/is\('acquitted_at', null\)/.test(endpoint),
+    'l endpoint ne filtre pas les alarmes deja acquittees')
+  // L acquittement, cote page.
   assert.ok(/method: 'POST'[\s\S]{0,200}\/api\/incidents-acquitter|\/api\/incidents-acquitter'[\s\S]{0,60}method: 'POST'/.test(html))
   assert.ok(html.includes("peutEcrire('reservations')"), 'le bouton d\'acquittement suit le droit de l\'endpoint')
 })

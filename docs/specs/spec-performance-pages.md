@@ -401,6 +401,48 @@ Supabase restent, mais **en parallèle** : de ~11,9 s en série à l'ordre de
 l'obtenir, soit 42 % des octets de la page. `/api/ecran/aujourdhui` lit l'état
 du code directement, sans traverser l'endpoint de la messagerie.
 
+#### ✅ LIVRÉ — mesuré le 23 octobre 2026 contre la production
+
+| | avant | après |
+|---|---|---|
+| appels HTTP de l'écran | 13 | **3** (`/api/ecran/aujourdhui`, `/api/menages`, `/api/yield`) |
+| requêtes Supabase, titulaire 4 biens | 100 | **22** dans l'appel d'écran |
+| poids de l'appel d'écran | — | **141 996 octets** |
+| première peinture | après la 1re réponse | **immédiate** (cache d'écran) |
+
+**Le bloc qui reste lourd, et il est nommé** : `taches` pèse 132 629 octets des
+141 996 — **93 %**. Il rend `suggested_reply`, la réponse proposée par l'IA,
+pour 200 tâches. L'écran n'en affiche que les premières. Le réduire demande de
+décider ce que la carte montre vraiment : c'est du lot (d), avec Messages.
+
+**Trois décisions prises au lot (b)**, et leur raison :
+
+1. **Le domaine ménage n'est pas touché** (décision de Thierry). La fenêtre de
+   400 jours reste dans `api/menages.js` : la dupliquer ferait deux lecteurs de
+   la même donnée, et l'extraire maintenant obligerait à refaire ce travail au
+   lot (d), quand `/api/menages` deviendra `/api/ecran/menages`.
+2. **Le cache d'écran ne garde jamais `etats_arrivee` ni `alarmes`** — retirés
+   **à l'écriture**, pas filtrés à la lecture (interdit 2). Clé =
+   `hs.ecran.<écran>.<utilisateur>.<compte>`, péremption 12 h, effacée à la
+   déconnexion. Garanti par `tests/cache-ecran.test.js` (10 mutations attrapées
+   sur 10).
+3. **`lireLesCodes` est borné au BIEN autant qu'à la réservation.** La table
+   `access_codes` n'a pas de `user_id` renseigné (bloquant (d) de CLAUDE.md :
+   50 des 65 codes de La bulle sont sans compte), donc un `.eq('user_id', …)`
+   ferait disparaître la majorité des codes de l'écran. Le cloisonnement passe
+   par le couple `property_id` + `booking_id` — et il était trié **en mémoire**
+   seulement : la requête ne demandait que `booking_id`, alors que les
+   identifiants Beds24 sont numériques et sans unicité globale. Les deux
+   appelants (`api/messages.js` et l'appel d'écran) passent maintenant les biens.
+
+**La preuve d'isolation, sur les données réelles** :
+`scripts/verifier-isolation-ecran.js` (lecture seule, aucune session fabriquée,
+toute écriture lève). Mesure du 23 octobre 2026 — titulaire 4 biens / 22
+requêtes ; membre restreint à La bulle 1 bien / 12 requêtes, `notes` et
+`alarmes` REFUSÉS, ménages 12 contre 19, messages IA 10 contre 14, `prix` et
+`surreservation` `null` (RLS titulaire) : **zéro référence hors périmètre, et
+aucun comptage supérieur à celui du titulaire**.
+
 ### Lot (c) — les tables de résumé qui suppriment les appels `yield` par bien
 
 **Ce qu'il change** : `resume_bien_jour` et `resume_bien_avis`, leur calcul par

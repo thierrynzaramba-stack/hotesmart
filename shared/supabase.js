@@ -23,6 +23,17 @@ export async function signOut() {
     const m = await import('/shared/compte-courant.js')
     m.reinitialiser()
   } catch { /* module indisponible : la revalidation au chargement rattrapera */ }
+  // ⚠ ET LE CACHE D'AFFICHAGE INSTANTANÉ DES ÉCRANS. Il vit en `localStorage`,
+  // qui traverse les sessions navigateur : sans ce nettoyage, la personne
+  // suivante sur ce poste verrait, le temps d'un battement, les chiffres de la
+  // précédente — ses logements, ses tâches, ses notes. C'est la contrepartie
+  // explicite du choix de `localStorage` plutôt que `sessionStorage` (principe 3
+  // de docs/specs/spec-performance-pages.md : la deuxième visite de la journée
+  // doit être immédiate, donc le cache survit à l'onglet).
+  try {
+    const c = await import('/shared/cache-ecran.js')
+    c.oublierTout()
+  } catch { /* module indisponible : la péremption de 12 h rattrapera */ }
   await supabase.auth.signOut()
   window.location.href = '/pages/login.html'
 }

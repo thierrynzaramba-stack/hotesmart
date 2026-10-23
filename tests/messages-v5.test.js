@@ -568,8 +568,31 @@ test('dette 66 : la tuile IA compte la COLONNE seule, au serveur, jamais un faux
     && /\.in\('origine', \['ia_validee', 'ia_modifiee', 'ia_auto'\]\)/.test(api)
     && /indisponible: true/.test(api),
     'compte serveur sur origine, indisponible si migration absente')
+  // ⚠ RETARGE AU LOT (b) : LE COMPTE A DEMENAGE, LA DETTE 66 TIENT.
+  // La page appelait `/api/messages?stats=ia` ; ce comptage est maintenant un
+  // bloc de `/api/ecran/aujourdhui`. Ce que la dette 66 exige n'a pas change :
+  // le compte se fait au SERVEUR sur la colonne `origine` seule, et une colonne
+  // absente rend « indisponible » — JAMAIS un faux zero, qui dirait « l'IA n'a
+  // rien ecrit cette semaine », un fait.
+  // ⚠ ET J'AVAIS OUBLIE CE BLOC EN ECRIVANT L'ENDPOINT : la tuile disparaissait
+  // en silence, parce que `fait_pour_vous.messages_ia` valait `undefined` et
+  // que la page filtre les compteurs nuls. C'est CE test qui l'a trouve.
+  const ecran = lire('api/ecran/aujourdhui.js')
+  assert.ok(/\.in\('origine', \['ia_validee', 'ia_modifiee', 'ia_auto'\]\)/.test(ecran),
+    'l endpoint d ecran ne compte plus les messages de l IA : la tuile disparait')
+  // ⚠ ANCRE SUR LE BLOC, PAS SUR LE FICHIER, ET LA CONTRE-EPREUVE L'A EXIGE.
+  // `/head: true/` sur le fichier entier etait satisfait par un AUTRE bloc de
+  // comptage : retirer `head: true` du compte IA — donc rapatrier les lignes
+  // pour les compter — ne faisait rougir personne.
+  const blocIa = (ecran.match(/const lireMessagesIa = async[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(blocIa, 'le bloc `lireMessagesIa` a disparu de l endpoint d ecran')
+  assert.ok(/head: true/.test(blocIa),
+    'le compte IA doit etre un COMPTAGE (`head: true`), pas une lecture de lignes')
+  assert.ok(/\{ count: 'exact'/.test(blocIa), 'le compte IA ne demande plus de compte exact')
+  assert.ok(/\/origine\/\.test\(error\.message/.test(ecran),
+    'une colonne `origine` absente doit rendre `null` (tuile masquee), jamais 0')
   const accueil = lire('pages/aujourdhui.html')
-  assert.ok(/stats=ia/.test(accueil) && /r\.indisponible/.test(accueil),
+  assert.ok(/f\.messages_ia/.test(accueil) && /d\.n != null/.test(accueil),
     'la tuile se masque quand le compte est indisponible (faits comptes seulement)')
 })
 
