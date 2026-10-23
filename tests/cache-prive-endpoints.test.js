@@ -80,9 +80,22 @@ test('LE TEST QUI COMPTE : les DEUX gardes la posent, et avant tout refus', asyn
 // LE FILET : aucun endpoint ne doit reouvrir ce que la garde ferme
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ⚠ RECURSIF, ET IL NE L'ETAIT PAS. Le lot (b) du chantier performance a cree
+// le PREMIER sous-repertoire de `api/` — `api/ecran/`, qui est le domicile
+// declare de tous les endpoints d'ecran des lots (c) et (d). Mesure du
+// 23 octobre 2026 : 58 fichiers a plat, 59 en recursif, et le seul manquant
+// etait `api/ecran/aujourdhui.js`. Il echappait donc a CE filet (l'interdit 1
+// de la spec : aucune donnee d'hote dans un cache partage), aux deux
+// recensements de garde, et au filet des lectures non bornees de
+// `bookings_snapshot` — table qu'il lit.
+// Trois autres fichiers portaient la meme cecite ; ils sont corriges dans le
+// meme commit.
+// Le parcours vit dans `tests/outils/source.js` : cinq copies du meme
+// balayage recursif ont ete ecrites le meme jour dans cinq fichiers, et une
+// sixieme aurait eu le meme angle mort que les cinq autres.
+const { fichiersJs } = require('./outils/source')
 function fichiersApi () {
-  const d = path.join(racine, 'api')
-  return fs.readdirSync(d).filter(f => f.endsWith('.js')).map(f => `api/${f}`)
+  return fichiersJs(path.join(racine, 'api'), 'api')
 }
 const lire = (f) => fs.readFileSync(path.join(racine, f), 'utf8')
 // Sans les commentaires : une mention dans une explication ne compte pas.
@@ -100,6 +113,36 @@ const PUBLIC_ATTENDU = {
   // desactivee garde son manifeste pendant cinq minutes.
   'api/manifest.js': 'public, max-age=300'
 }
+
+test('LE TEST QUI COMPTE : le recensement voit TOUT api/**/*.js, sous-repertoires compris', () => {
+  // ⚠ CE TEST GARDE LE FILET LUI-MEME. Le lot (b) a cree `api/ecran/`, le
+  // premier sous-repertoire de `api/`, et le balayage A PLAT ne le voyait pas :
+  // 58 fichiers contre 59 (mesure du 23 octobre 2026). L'endpoint d'ecran
+  // echappait donc a l'interdit 1 de la spec (aucune donnee d'hote dans un
+  // cache partage), aux deux recensements de garde, et au filet des lectures
+  // non bornees de `bookings_snapshot` — table qu'il lit.
+  // `api/ecran/` est le domicile DECLARE de tous les endpoints d'ecran des
+  // lots (c) et (d) : un filet aveugle a ce repertoire se vide a mesure que le
+  // chantier avance, sans jamais casser.
+  // ⚠ ET PAS CONTRE UNE DEUXIEME COPIE DU MEME PARCOURS — CE SERAIT UNE
+  // TAUTOLOGIE : deux implementations identiques partagent leurs angles morts,
+  // et le test resterait vert. On compare au SYSTEME DE FICHIERS par un autre
+  // chemin (`fs.globSync`), et on exige en plus le fichier nomme.
+  const parGlob = fs.globSync
+    ? fs.globSync('**/*.js', { cwd: path.join(racine, 'api') }).map(f => `api/${f.split(path.sep).join('/')}`)
+    : null
+  const vus = fichiersApi()
+  if (parGlob) {
+    assert.deepEqual(vus.slice().sort(), parGlob.slice().sort(),
+      'le recensement des endpoints ne voit pas les memes fichiers que le systeme')
+  }
+  // Le fichier NOMME : un balayage a plat le perd, et c'est le seul endpoint
+  // d'ecran existant — donc le temoin de toute la famille a venir.
+  assert.ok(vus.includes('api/ecran/aujourdhui.js'),
+    "api/ecran/aujourdhui.js echappe au recensement : balayage a plat ?")
+  assert.ok(vus.some(f => f.split('/').length > 2),
+    'aucun endpoint en sous-repertoire : ce test ne prouve plus rien')
+})
 
 test('LE TEST QUI COMPTE : aucun endpoint ne pose un cache-control PUBLIC', () => {
   const fautifs = []
@@ -131,10 +174,23 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   // Les endpoints LEGITIMEMENT sans garde sont comptes ici, un par un.
   const SANS_GARDE_ATTENDU = fichiersApi().filter(f => {
     const src = code(lire(f))
-    return !/requirePermission|verifierSession|requirePermissionPourCanal/.test(src)
+    // ⚠ `contexteDEcran` EST UNE TROISIEME GARDE, ET LE DETECTEUR L'IGNORAIT.
+    // C'est la garde des endpoints `/api/ecran/*` : un ecran traverse
+    // plusieurs domaines, donc `requirePermission` — qui verifie UN domaine et
+    // refuse en 403 — ne peut pas lui servir. Elle appelle `verifierSession` et
+    // `posterEnTetesPrives` comme les deux autres.
+    // Sans ce nom, rendre le recensement recursif aurait ajoute
+    // `api/ecran/aujourdhui.js` a la liste des endpoints SANS garde — un FAUX
+    // POSITIF, qui invite a lever le plafond au lieu d'apprendre le nom. C'est
+    // la facon dont un filet se perd : non pas en cassant, mais en criant
+    // faux.
+    return !/requirePermission|verifierSession|requirePermissionPourCanal|contexteDEcran/.test(src)
   })
-  // Le compte attendu est mesure, pas suppose : 22 octobre 2026.
-  assert.ok(SANS_GARDE_ATTENDU.length <= 12,
+  // ⚠ LE PLAFOND SERRE SUR LA MESURE. Il etait a 12 pour 9 reels (mesure du
+  // 23 octobre 2026, recensement RECURSIF) : trois endpoints sans garde
+  // pouvaient atterrir en silence. Un plafond mou est un plafond qui ne sert
+  // qu'une fois.
+  assert.ok(SANS_GARDE_ATTENDU.length <= 9,
     `${SANS_GARDE_ATTENDU.length} endpoints sans garde :\n  ` + SANS_GARDE_ATTENDU.join('\n  ') +
     '\nUn de plus qu attendu : soit il est public par nature (webhook, cron, manifest,\n' +
     'page publique), soit il lui manque sa garde. Nommez-le avant de lever le plafond.')

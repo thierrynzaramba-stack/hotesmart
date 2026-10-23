@@ -12,10 +12,17 @@
 // « non calculable », pas un chiffre faux et credible.
 
 // Jour calendaire de Paris (celui des biens), YYYY-MM-DD, a `decalage` jours.
-// Meme regle que api/messages.js (`jourParis`).
+// Meme regle que api/messages.js (`jourParis`) et api/ecran/aujourdhui.js.
+//
+// ⚠ LE DECALAGE PASSE PAR `ajouterJours`, deux lignes plus bas, QUI PORTAIT
+// DEJA L'AVERTISSEMENT : « jamais « maintenant + n x 24 h », qui glisse d'un
+// jour au changement d'heure pres de minuit ». Cette fonction faisait
+// exactement ce que sa voisine interdit. Trois copies de la meme regle
+// existaient, et le correctif du lot (b) n'en avait touche qu'une.
 export function jourParis (maintenant = Date.now(), decalage = 0) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' })
-    .format(new Date(maintenant + decalage * 86400000))
+  const aujourdHui = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' })
+    .format(new Date(maintenant))
+  return decalage === 0 ? aujourdHui : ajouterJours(aujourdHui, decalage)
 }
 
 // YYYY-MM-DD decale de n jours, par arithmetique UTC sur la DATE : jamais

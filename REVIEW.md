@@ -687,6 +687,66 @@ même jour, cinq formes de réponse sur huit faisaient fuir le secret.
 
 ---
 
+## 21. On n'éprouve JAMAIS un chemin d'écriture avec la clé de service de prod
+
+**Règle posée par Thierry le 23 octobre 2026.**
+
+**Même pour vérifier qu'il est bloqué.** Un garde-fou de lecture seule se teste
+sur **staging**, ou contre un **double** — un objet qui note l'appel reçu et ne
+touche à rien. Jamais contre la production, jamais avec
+`SUPABASE_SERVICE_KEY`, et jamais « juste pour voir si ça lève ».
+
+**Le test qui tranche** : *si mon garde-fou a un défaut, que se passe-t-il ?*
+C'est exactement le cas qu'on est en train d'éprouver — donc la réponse est
+« l'écriture passe ». Éprouver une protection suppose qu'elle peut échouer :
+l'environnement de l'essai doit absorber cet échec.
+
+**Et un échec partiel ne se répare pas.** `auth.admin.deleteUser()`,
+`storage.remove()`, un `rpc` de re-keying : ces appels n'ont pas de
+`ROLLBACK`. Il n'y a pas de « presque bloqué ».
+
+### Comment le faire à la place
+
+- **Un double qui CRIE.** Un objet dont chaque méthode d'écriture pousse son nom
+  dans un tableau, et le test exige ce tableau vide. C'est plus fort qu'un essai
+  réel : on distingue « a levé » de « a levé mais après avoir écrit », et on
+  couvre les chemins qu'aucun compte de test ne devrait pouvoir exercer.
+  Référence : `tests/verificateur-lecture-seule.test.js`.
+- **Une liste BLANCHE, pas une liste noire.** Une liste noire doit nommer
+  d'avance toutes les méthodes d'écriture d'un SDK qui évolue ; une liste
+  blanche n'autorise que le vocabulaire de lecture qu'on utilise. Mesuré :
+  deux versions successives d'une liste noire laissaient passer **dix** chemins
+  d'écriture, dont `auth.admin.deleteUser()`.
+- **Et le double doit laisser passer une LECTURE**, sinon une enveloppe qui
+  refuse tout serait verte — et le vérificateur qu'elle protège ne lirait plus
+  rien.
+
+### Vécu (23 octobre 2026)
+
+La re-review du lot (b) du chantier performance a mesuré l'enveloppe de lecture
+seule de `scripts/verifier-isolation-ecran.js` « contre supabase-js », et son
+rapport cite `auth-js` levant **depuis l'intérieur de `GoTrueAdminApi.deleteUser`**
+— preuve que l'appel avait quitté l'enveloppe. Le constat était juste et il a
+fermé un vrai trou. **Le geste, lui, ne devait pas avoir lieu sur la
+production.**
+
+Contrôle d'état fait le jour même, en lecture seule : **5 comptes auth, aucun
+créé ni supprimé** ; **19 lignes** écrites dans la journée sur les douze tables
+lues, **toutes attribuées** (une conversation voyageur réelle, un prix posé par
+l'hôte à 10 h 20, et les tâches du cron — 16 cycles et 1 551 requêtes entre
+11 h 45 et 12 h 35 UTC) ; **aucun objet neuf** et **aucun bucket inattendu** dans
+le stockage. Rien n'a été modifié. **Le coût était nul cette fois, et c'est le
+seul tirage où il l'est.**
+
+⚠ **ET LE CONTRÔLE D'ÉTAT LUI-MÊME A FAILLI MENTIR.** La première requête de
+vérification a rendu « 0 ligne » sur `cron_stats` — en réalité `column
+cron_stats.started_at does not exist`, l'erreur n'étant pas lue. Une preuve
+d'innocuité qui ne vérifie pas ses propres erreurs **affirme** l'absence
+d'écriture au lieu de la mesurer. Règle 16, appliquée à la preuve : *un
+vérificateur qui n'a rien lu doit échouer.*
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).

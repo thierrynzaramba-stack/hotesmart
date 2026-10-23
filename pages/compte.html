@@ -259,6 +259,16 @@
         btnDeleteFinal.disabled = false; btnDeleteFinal.textContent = 'Supprimer definitivement'
         return
       }
+      // ⚠ LE COMPTE EST SUPPRIME : RIEN NE DOIT RESTER SUR LE DISQUE.
+      // `supabase.auth.signOut()` est appele ici en direct, donc il ne passe
+      // pas par le `signOut` de `shared/supabase.js`. Ma premiere correction
+      // n'avait recopie que la moitie « cache d'ecran » et laissait
+      // `hs_compte_courant` — le defaut meme que le `signOut` partage existe
+      // pour empecher. On appelle donc le geste PARTAGE.
+      try {
+        const m = await import('/shared/supabase.js')
+        if (m.purgerCachesLocaux) await m.purgerCachesLocaux()
+      } catch { /* module indisponible : on continue, la sortie prime */ }
       await supabase.auth.signOut()
       window.location.href = '/pages/login.html?deleted=1'
     } catch (err) {

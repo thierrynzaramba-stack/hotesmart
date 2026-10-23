@@ -1,4 +1,4 @@
-import { supabase, getSession } from '/shared/supabase.js'
+import { supabase, getSession, purgerCachesLocaux } from '/shared/supabase.js'
 import { chargerContexte, reinitialiser } from '/shared/compte-courant.js'
 
 const CACHE_KEY = 'hs_onboarding_completed'
@@ -47,7 +47,27 @@ export async function requireAuth() {
       // Autre utilisateur sur ce navigateur : son compte memorise n'a rien a faire
       // ici. `chargerContexte` le revaliderait de toute facon, mais le nettoyer
       // tout de suite evite une bascule visible sur un compte etranger.
-      reinitialiser()
+      // (`purgerCachesLocaux` appelle `reinitialiser()` : un seul geste.)
+      // ⚠ ET LE CACHE D'ECRAN, QUI VIT EN `localStorage` — DONC HORS DE PORTEE
+      // DE `reinitialiser()`, qui ne touche que la memoire et le
+      // `sessionStorage`.
+      //
+      // ⚠ ET ON L'ATTEND. Ma premiere version laissait la promesse tomber :
+      // `requireAuth` continue, pose la cle de session, et peut REDIRIGER
+      // (`window.location.replace` vers l'onboarding) — une navigation annule
+      // un `import()` dynamique en vol. Sur un poste au cache froid, la purge
+      // ne tournait donc jamais ; et au chargement suivant
+      // `cachedUserId === userId`, donc cette branche n'est plus prise : les
+      // cles `hs.ecran.*` de A restaient indefiniment sur la machine (une cle
+      // perimee est refusee a la LECTURE, elle n'est pas effacee).
+      //
+      // ⚠ ET LA JUSTIFICATION QUE J'AVAIS ECRITE ETAIT FAUSSE : la cle porte
+      // `moi()`, donc B ne peut PAS lire l'entree de A. Le risque reel n'est
+      // pas l'affichage croise, c'est la DONNEE AU REPOS sur un poste partage —
+      // et c'etait justement la moitie mal corrigee.
+      // Import STATIQUE, en tete de ce fichier : rien a charger au moment du
+      // geste, donc rien qu'une navigation puisse annuler.
+      await purgerCachesLocaux()
     }
     sessionStorage.setItem(SESSION_USER_KEY, userId)
   } catch (e) {
