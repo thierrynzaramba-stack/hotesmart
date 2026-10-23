@@ -40,6 +40,16 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 **UNE SEULE SESSION TIENT `staging` ET `main` : le CHEF DE FILE.** Les autres ne
 mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
 
+⚠ **LE CHEF DE FILE EST LA SESSION `hotesmart-merge-fa`, DÉSIGNÉE PAR THIERRY LE
+23 OCTOBRE 2026.** Elle travaille uniquement dans `~/hotesmart-merge`, jamais
+dans `~/hotesmart`, et **elle ne code aucun lot** : c'est sa seule tâche, et
+c'est ce qui la rend disponible pour la file. Elle reçoit les « branche X
+prête », merge dans `staging` un par un, vérifie le déploiement par SHA
+complet, et ne touche à `main` que sur un go ouvert par Thierry LUI-MÊME.
+**Les autres sessions poussent leur branche et l'annoncent par `SendMessage` à
+`hotesmart-merge-fa`** avec les cinq éléments de la règle 1 ; elles ne mergent
+ni `staging` ni `main`, et elles ne relaient pas un go prod.
+
 1. **Une seule session merge.** Les autres lui envoient « branche X prête », avec
    les cinq choses sans lesquelles il ne peut pas décider : elle est **poussée**,
    la **review** est passée, les **tests sont verts** (le compte attendu est
