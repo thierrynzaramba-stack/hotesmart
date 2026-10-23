@@ -353,6 +353,23 @@ test('LE TEST QUI COMPTE : un bien EN VENTE ne se supprime pas, MEME sans plan t
   // Des canaux ILLISIBLES n'ouvrent jamais l'action la plus destructrice,
   // quel que soit le plan tarifaire (constat H4 de l'etape 0).
   assert.equal(L.suppressionPossible(bienDe({ provider_rate_plan_id: null }), null).possible, null)
+
+  // ⚠ ET LA SECONDE MOITIE DU MEME CORRECTIF (constat de la revue du
+  // 23 octobre 2026). Le 22, le refus sur un canal MAPPE est passe au-dessus du
+  // test du plan tarifaire ; la garde du mappage INDETERMINE est restee
+  // dessous. Un bien sans plan tarifaire dont un canal porte `mappe == null`
+  // rendait `possible: true` : la fiche montrait une pastille « indetermine »
+  // et, juste en dessous, un Supprimer ACTIF.
+  const incertain = [{ ota: 'airbnb', mappe: null, actif: true }]
+  for (const bien of [
+    bienDe({ provider_rate_plan_id: null }),
+    bienDe({ provider_property_id: null }),
+    bienDe()
+  ]) {
+    const r = L.suppressionPossible(bien, incertain, { releveDuCompte: '2026-10-19T08:00:00Z' })
+    assert.equal(r.possible, null, `plan ${bien.provider_rate_plan_id} / ref ${bien.provider_property_id}`)
+    assert.equal(r.motif, 'mapping_inconnu')
+  }
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -940,6 +957,35 @@ test('M2 : une horloge des canaux EN PANNE n est pas « jamais relevee »', asyn
     { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
   assert.equal(f.canaux.length, 2, 'les pastilles restent servies : l horloge est un ornement')
   assert.equal(f.canaux_echec, true, 'mais l echec se DIT — sinon la date vieillit sans que personne sache pourquoi')
+})
+
+test('LE TEST QUI COMPTE : la FICHE descend le fait de compte, dans ses trois etats', async () => {
+  // ⚠ FAUX VERT MESURE LE 23 OCTOBRE 2026 (constat de la revue) : muter
+  // `fiche.canaux_releve_fait = false` dans lib/logement/lecture.js laissait
+  // 139 tests sur 139 au vert. Les quatre assertions qui existaient portaient
+  // sur `lireListe` (`r.biens[].canaux_releve_fait`) ; la FICHE, elle, n'en
+  // avait aucune — et c'est le champ dont `canauxHtml` se sert pour ne pas
+  // confondre « aucun canal relie » avec « jamais releve ».
+  //
+  // Les trois etats, parce qu'ils ne se confondent pas : releve fait, releve
+  // jamais fait (ou en echec), lecture impossible.
+  const fait = await L.lireFiche(ficheComplete(),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(fait.canaux_releve_fait, true, 'horloge posee et `ok` : le compte a bien ete releve')
+
+  const jamais = await L.lireFiche(ficheComplete({ horloge: null }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(jamais.canaux_releve_fait, false, 'aucune ligne de releve : l ecran doit pouvoir le dire')
+
+  const echec = await L.lireFiche(ficheComplete({ enPanne: { canaux_releve: 'timeout' } }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(echec.canaux_releve_fait, false,
+    'un releve en echec n est pas un releve : « aucun canal relie » serait une affirmation sans preuve')
+
+  const illisible = await L.lireFiche(ficheComplete({ enPanne: { canaux_du_bien: 'timeout' } }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(illisible.canaux_releve_fait, null,
+    '`null`, pas `false` : on ne sait pas, et l ecran ne doit pas conclure')
 })
 
 test('M3 : cles illisibles ET droit refuse : le bloc est `refuse`, pas `indisponible`', async () => {

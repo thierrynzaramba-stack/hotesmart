@@ -292,7 +292,25 @@ test('LE TEST QUI COMPTE : les motifs sont ceux du SERVEUR, découverts dans son
       `${motif} n est pas dans la table d affichage : il tomberait en silence ` +
       'dans « Impossible de vérifier ses canaux », qui est faux')
     if (motif === 'annonce_reliee') assert.match(r.textContent, /Déconnectez/)
-    if (motif === 'jamais_releve') assert.match(r.textContent, /Aucun canal n’est relié/)
+    // ⚠ CE TEST A FIGÉ UNE PHRASE FAUSSE (constat GRAVE de la revue du
+    // 23 octobre 2026 ; règle 17 de REVIEW.md, « un test peut figer un bug »).
+    // Il exigeait « Aucun canal n'est relié à ce logement » sur une branche
+    // qui, depuis le correctif du 22 octobre, ne se déclenche QUE quand le
+    // relevé du compte n'a jamais abouti ou échoue. Corriger la phrase faisait
+    // rougir la suite : le test protégeait le défaut au lieu du contrat.
+    //
+    // Il garde maintenant la PROPRIÉTÉ, et il la lit dans le dictionnaire
+    // RÉEL, pas dans un littéral de test : la raison a sa propre phrase, et
+    // cette phrase n'AFFIRME RIEN sur les canaux de ce logement — c'est
+    // justement ce que le serveur ignore ici. Reformuler le texte demain ne
+    // touche pas ce test ; y remettre une affirmation, si.
+    if (motif === 'jamais_releve') {
+      assert.equal(r.textContent.trim(), FR['fiche.supprimer_jamais_releve'])
+      assert.notEqual(FR['fiche.supprimer_jamais_releve'], FR['fiche.supprimer_inconnu'],
+        'une panne de lecture et un relevé jamais abouti sont deux causes : deux phrases')
+      assert.doesNotMatch(FR['fiche.supprimer_jamais_releve'], /[Aa]ucun canal/,
+        'le serveur ne sait pas si ce logement est en vente : l écran ne peut pas l affirmer')
+    }
   }
 })
 
@@ -1656,6 +1674,37 @@ test('LE TEST QUI COMPTE : la fiche recoit le MEME fait de compte que la carte',
   const jamais = texte(fiche({ canaux: [], canaux_releve_fait: false }))
   assert.match(jamais, /Canaux non vérifiés/)
   assert.doesNotMatch(jamais, /Aucun canal relié/)
+})
+
+test('LE TEST QUI COMPTE : un bien Beds24 dit la MEME chose sur la fiche et sur la carte', async () => {
+  // ⚠ CONSTAT DE LA REVUE DU 23 OCTOBRE 2026, mesure a l'appui. `canauxHtml`
+  // lit `beds24_de_l_hote`, que `publier()` range dans `fiche.bien` ; la fiche
+  // lui passait l'objet RACINE, ou ce champ n'existe pas. Resultat sur le MEME
+  // bien : la carte « Gere depuis votre compte Beds24 », la fiche « Canaux non
+  // verifies ». Et ce n'etait pas un cas de bord — un bien Beds24 n'a JAMAIS de
+  // ligne de releve chez l'autre partenaire, donc la fiche l'alarmait a vie.
+  //
+  // ⚠ CE TEST COMPARE LES DEUX RENDUS, il ne verifie pas une phrase. Une
+  // assertion sur le texte de la fiche seule repasserait au vert le jour ou la
+  // carte changerait d'avis sans la fiche : c'est exactement le defaut qu'on
+  // repare, et c'est la DIVERGENCE qui doit rougir.
+  const liste = await import('../shared/logements-liste.js')
+  const beds24 = fiche({
+    bien: { ...fiche().bien, beds24_de_l_hote: true },
+    canaux: [], canaux_vu_le: null, canaux_echec: false, canaux_releve_fait: false
+  })
+  const d = doc(M.ficheHtml(beds24, OUTILS(), {}))
+  const surLaCarte = doc(liste.canauxHtml(
+    { beds24_de_l_hote: true, canaux: [], canaux_releve_fait: false }, { t, esc }))
+
+  const marque = (x) => x.querySelector('[data-canaux]').dataset.canaux
+  assert.equal(marque(d), marque(surLaCarte),
+    'la fiche et la carte doivent rendre la MEME marque pour le meme bien')
+  assert.equal(marque(d), 'beds24')
+  assert.match(d.body.textContent, /Géré depuis votre compte Beds24/)
+  // Et surtout : ni l'une ni l'autre des deux phrases fausses.
+  assert.doesNotMatch(d.body.textContent, /Canaux non vérifiés/)
+  assert.doesNotMatch(d.body.textContent, /Aucun canal relié/)
 })
 
 test('LE TEST QUI COMPTE : la confirmation dit ce qui RESTE, pour un bien Beds24', () => {
