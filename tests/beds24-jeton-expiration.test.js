@@ -244,3 +244,110 @@ test('LE TEST QUI COMPTE : sans la migration, on renouvelle comme AVANT le lot',
     }
   }
 })
+
+// ─── Les constats de la review du 23 octobre 2026 ────────────────────────────
+
+test('LE TEST QUI COMPTE : le CHEMIN REEL honore une duree de vie courte', async () => {
+  // ⚠ CONSTAT 1, ET C'EST LE PLUS DUR DE CETTE REVIEW.
+  // Mon garde-fou « une duree de vie courte ne restaure pas les 288 appels »
+  // etait INERTE en production : le site d'appel faisait
+  // `doitRenouveler(expire_le, maintenant)` — deux arguments — donc la marge
+  // retombait toujours a 30 minutes. Et mon test du dessus passe le troisieme
+  // argument A LA MAIN : il certifiait un chemin que le code ne prenait pas.
+  // Un test vert au-dessus d un defaut vivant.
+  // Mesure de la review : avec `expiresIn: 1800`, 12 appels sur 12 passages —
+  // exactement le defaut que ce lot existe pour supprimer.
+  //
+  // Ici on traverse `refreshBeds24Tokens`, et la duree de vie se RETROUVE par
+  // difference entre les deux colonnes.
+  const vie = 30 * MIN                       // marge = min(30 min, 15 min) = 15 min
+  const h = charger({
+    lignes: [{
+      user_id: 'u', refresh_token: 'r',
+      token_renouvele_le: dans(-10 * MIN),   // renouvele il y a 10 min
+      token_expire_le: dans(20 * MIN)        // il reste 20 min sur une vie de 30
+    }]
+  })
+  try {
+    const bilan = await h.mod.refreshBeds24Tokens({ maintenant: T0 })
+    assert.equal(h.vu.fetchs, 0,
+      'il reste 20 min sur une vie de 30 : plus que la mi-vie, on n appelle PAS. ' +
+      'Avec la marge de 30 min par defaut, ce cas appelait a chaque cycle.')
+    assert.equal(bilan.sautes, 1)
+  } finally { h.restaurer() }
+  // Et la contre-partie : sous la mi-vie, on renouvelle bien.
+  const h2 = charger({
+    lignes: [{
+      user_id: 'u', refresh_token: 'r',
+      token_renouvele_le: dans(-20 * MIN),
+      token_expire_le: dans(10 * MIN)        // il reste 10 min sur 30
+    }]
+  })
+  try {
+    await h2.mod.refreshBeds24Tokens({ maintenant: T0 })
+    assert.equal(h2.vu.fetchs, 1, 'sous la mi-vie, on renouvelle')
+  } finally { h2.restaurer() }
+  assert.ok(vie > 0)
+})
+
+test('LE TEST QUI COMPTE : `forcer` renouvelle meme un jeton tout neuf', () => {
+  // ⚠ CONSTAT 5. `scripts/backfill-beds24-host.js` tient un jeton frais AVANT
+  // un parcours de plusieurs heures. Depuis que le renouvellement est
+  // conditionnel, un appel nu peut SAUTER et laisser le script demarrer sur un
+  // jeton qui n a plus que trente minutes : il tomberait en 401 au milieu.
+  const h = charger({ lignes: [{ user_id: 'u', refresh_token: 'r', token_expire_le: dans(20 * H) }] })
+  return h.mod.refreshBeds24Tokens({ maintenant: T0, forcer: true })
+    .then(bilan => {
+      assert.equal(h.vu.fetchs, 1, 'forcer ignore l expiration')
+      assert.equal(bilan.renouveles, 1)
+    })
+    .finally(() => h.restaurer())
+})
+
+test('LE TEST QUI COMPTE : le backfill FORCE, et le cron non', () => {
+  // La propriete, pas la ligne : le script doit passer `forcer`, et api/cron.js
+  // ne doit jamais le faire — ce serait annuler le lot.
+  const fs = require('node:fs')
+  const net = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+  assert.match(net('scripts/backfill-beds24-host.js'), /refreshBeds24Tokens\(\s*\{[^}]*forcer:\s*true/,
+    'le backfill tourne des heures : il lui faut un jeton vraiment frais')
+  assert.ok(!/refreshBeds24Tokens\(\s*\{[^}]*forcer/.test(net('api/cron.js')),
+    'le cron ne force JAMAIS : ce serait annuler le lot')
+})
+
+test('LE TEST QUI COMPTE : une duree de vie au-dela du contrat retombe sur le repli', () => {
+  // ⚠ CONSTAT 3. Si Beds24 rendait la duree de vie du jeton de RENOUVELLEMENT
+  // (604 800 s, une semaine), on aurait enregistre une expiration a une
+  // semaine, saute le renouvellement pendant sept jours alors que le jeton
+  // d ACCES meurt a 24 h, et laisse le jeton de renouvellement deriver vers sa
+  // mort par inactivite.
+  assert.equal(dureeDeVieMs(604800).mesuree, false, 'une semaine n est pas un contrat annonce')
+  assert.equal(dureeDeVieMs(604800).ms, VIE_DE_REPLI_MS)
+  assert.equal(dureeDeVieMs(86400).mesuree, true, '24 h reste accepte')
+  assert.equal(dureeDeVieMs(25 * 3600).mesuree, true, 'et une marge de tolerance au-dela')
+})
+
+test('LE TEST QUI COMPTE : les TROIS writers de api_key ecrivent l expiration', () => {
+  // ⚠ CONSTAT 2, ET IL ETAIT UNE REGRESSION DE CE LOT. Des que
+  // `token_expire_le` fait autorite sur « le jeton est-il vivant », un writer
+  // qui ne la met pas a jour la rend MENTEUSE : le cron sauterait le
+  // renouvellement sur un jeton mort pendant 22 h, chaque fetch Beds24
+  // repondrait 401, et la synchro de l hote tomberait EN SILENCE. Avant le lot,
+  // le renouvellement inconditionnel toutes les cinq minutes le masquait.
+  const fs = require('node:fs')
+  const net = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+  const setup = net('api/beds24-setup.js')
+  // Aucune ecriture NUE de api_key : tout passe par le point unique.
+  const nues = [...setup.matchAll(/\.(update|upsert)\(\s*\{[^}]*api_key[^}]*\}/g)]
+    .map(m => m[0].replace(/\s+/g, ' ').slice(0, 80))
+  assert.deepEqual(nues, [],
+    'ces ecritures nomment api_key sans passer par champsDuJeton :\n  ' + nues.join('\n  '))
+  assert.match(setup, /champsDuJeton/, 'le point unique est bien utilise')
+  // Et le point unique produit TOUJOURS les trois champs.
+  const { champsDuJeton } = require('../lib/cron-beds24')
+  const { champs } = champsDuJeton({ token: 'x', expiresIn: 3600 }, T0)
+  assert.deepEqual(Object.keys(champs).sort(),
+    ['api_key', 'token_expire_le', 'token_renouvele_le'])
+})
