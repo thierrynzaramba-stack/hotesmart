@@ -8,6 +8,9 @@
 const { createClient } = require('@supabase/supabase-js')
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 const { requirePermission } = require('../lib/require-permission')
+const {
+  arriveesProches, verdictDuCode, codesParReservation, lireLesCodes, STATUTS_SANS_ARRIVEE
+} = require('../lib/ecran/etat-du-code')
 const { refsDuPerimetre, filtrePerimetreSql } = require('../lib/permissions')
 // La MEME regle que le cron des codes d'arrivee : le menage est « fait » quand
 // le dernier menage du bien est posterieur au depart precedent. Ne pas la
@@ -19,7 +22,8 @@ const { etatArchivage } = require('../lib/archivage-conversations')
 // Jour de Paris (celui des biens), YYYY-MM-DD, a un decalage de jours pres.
 const jourParis = (decalage = 0) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date(Date.now() + decalage * 86400000))
-const STATUTS_SANS_ARRIVEE = new Set(['cancelled', 'demapped', 'request', 'blocked', 'inquiry', 'black'])
+// `STATUTS_SANS_ARRIVEE` vit dans lib/ecran/etat-du-code.js : une seule
+// definition, partagee par cet endpoint et par l'endpoint d'ecran.
 
 // ─── Etat d'arrivee : menage fait ? code transmis ? ────────────────────────
 // Demande de Thierry (23 septembre 2026) : sur les arrivees du jour et du
@@ -31,28 +35,19 @@ const STATUTS_SANS_ARRIVEE = new Set(['cancelled', 'demapped', 'request', 'block
 // Ni `access_codes.status` (qui passe a 'active' meme en Mode Test, quand le
 // message n'est qu'une tache a valider), ni `message_sent_log` (ecrit aussi
 // en Mode Test) ne disent que le voyageur l'a recu.
+// ⚠ LE VERDICT A QUITTE CE FICHIER, IL N'A PAS CHANGE.
+// `lib/ecran/etat-du-code.js` le porte maintenant, et `/api/ecran/aujourdhui`
+// l'appelle avec une lecture BORNEE aux arrivees du jour et du lendemain — au
+// lieu d'appeler CET endpoint pour un seul champ, ce qui coutait 18 requetes et
+// 437 212 octets (mesure du 22 octobre 2026, 42 % du poids de l'accueil).
+// Ici, rien ne bouge : memes entrees, meme sortie, et un test de PARITE
+// compare les deux chemins sur les memes donnees.
 async function etatsDArrivee(userId, conversations, snapByBooking) {
-  const aujourdHui = jourParis(0), demain = jourParis(1)
-  const proches = conversations.filter(c => {
-    const st = String(c.status || '').toLowerCase()
-    const arr = String(c.firstNight || '').slice(0, 10)
-    return arr && st && !STATUTS_SANS_ARRIVEE.has(st) && (arr === aujourdHui || arr === demain)
-  })
+  const proches = arriveesProches(conversations, jourParis)
   if (!proches.length) return
-  // Comme tous les lecteurs d'access_codes (cron-arrival-code, cron-access) :
-  // jamais une ligne 'deleted' (elle garde son code), et la plus recente d'abord
-  // — une reservation en a souvent plusieurs apres un changement de serrure.
-  const { data: codes, error } = await supabase
-    .from('access_codes')
-    .select('booking_id, property_id, code, status, created_at')
-    .in('booking_id', proches.map(c => c.bookId))
-    .neq('status', 'deleted')
-    .order('created_at', { ascending: false })
-  if (error) console.error('[messages] lecture access_codes echec', error.message)
-  // ⚠ Cle composite : un identifiant Beds24 n'est unique que par bien. La
-  // premiere ligne rencontree est la plus recente : on la garde.
-  const codeParBooking = {}
-  for (const r of codes || []) { const k = `${r.property_id}|${r.booking_id}`; if (!codeParBooking[k]) codeParBooking[k] = r }
+  const { lignes, erreur } = await lireLesCodes(supabase, proches.map(c => c.bookId))
+  if (erreur) console.error('[messages] lecture access_codes echec', erreur)
+  const codeParBooking = codesParReservation(lignes)
   for (const c of proches) {
     const snap = snapByBooking[c.bookId] || {}
     let menage = 'inconnu'
@@ -60,15 +55,7 @@ async function etatsDArrivee(userId, conversations, snapByBooking) {
       menage = await etatMenage(userId, c.propertyId, { arrival: c.firstNight, id: c.bookId }, snap.provider || c.provider || 'beds24')
     } catch (e) { console.error('[messages] etatMenage echec', c.bookId, e.message) }
     const row = codeParBooking[`${c.propertyId}|${c.bookId}`]
-    const code = row && row.code ? String(row.code).replace(/\D/g, '') : ''
-    // Preuve stricte : le code, ENTIER (borne par des non-chiffres), dans un
-    // message sortant POSTERIEUR a la creation de ce code. Un numero de
-    // telephone qui le contient, ou un prix, ne vaut pas un code envoye.
-    const motif = code ? new RegExp(`(^|\\D)${code}(\\D|$)`) : null
-    const depuis = row && row.created_at ? new Date(row.created_at).getTime() : 0
-    const transmis = !!motif && c.messages.some(m => m.direction === 'outbound'
-      && new Date(m.sent_at).getTime() >= depuis && motif.test(String(m.body || '')))
-    c.arrivee = { menage, codeEtat: transmis ? 'transmis' : row ? 'cree' : 'aucun' }
+    c.arrivee = { menage, codeEtat: verdictDuCode(row, c.messages) }
   }
 }
 
