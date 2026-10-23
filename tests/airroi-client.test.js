@@ -457,6 +457,27 @@ test('LE TEST QUI COMPTE (SECURITE, review de f40ee9e) : sans cle dans l environ
     { script: 'scripts/capturer-occupation-airroi.js', prefixe: 'occupation-bagneres-', endpoint: 'POST /markets/metrics/occupancy',
       params: { market, num_months: 60, currency: 'native' }, reponse: '{"results":[{"date":"2026-01-01"}]}' }
   ]
+  // ⚠ LE DECALAGE D'HORLOGE NE TRAVERSE PAS `execFileSync`, ET CE TEST SEME UNE
+  // CLE DE CACHE QUI DEPEND DE LA DATE. Le preexistant : ce test etait le
+  // dernier rouge calendaire du depot (CLAUDE.md, « IL RESTE UN ROUGE A J+60 »,
+  // cause supposee « une fixture sur disque qui ne suit pas » — ce n'etait pas
+  // ça). Mesure du 23 octobre 2026 : a J+60, le test calcule la fenetre du
+  // relief sur l'horloge DECALEE (1er janvier 2027) et seme le cache sur cette
+  // cle, tandis que le processus ENFANT, qui ne recoit pas le prechargement,
+  // calcule 2026-11-01 -> 2028-10-30 sur l'horloge reelle. Cache manque, donc le
+  // script refuse de PAYER (« Rien n est paye : relancer avec --confirmer »),
+  // sort en 0, et l'assertion « refus attendu (code 6) » tombe — sur un script
+  // qui s'est comporte correctement. Le test et le script doivent vivre dans le
+  // MEME temps.
+  //
+  // ⚠ ET LE PRECHARGEMENT EST CONDITIONNEL A `JOURS`, ce n'est pas une
+  // precaution de style : `horloge-decalee.js` fait `Number(process.env.JOURS
+  // || 10)`, donc le passer toujours avancerait l'enfant de DIX JOURS dans une
+  // suite normale, alors que ce fichier dit lui-meme ne faire partie d'aucune
+  // suite.
+  const prechargeHorloge = process.env.JOURS
+    ? ['--require', path.join(__dirname, 'outils', 'horloge-decalee.js')]
+    : []
   // Le relief : meme fenetre que le script (1er du mois suivant, 730 jours).
   const { jourLocalParis } = require('../lib/yield/zones-scolaires')
   const [an, mo] = jourLocalParis(new Date().toISOString()).slice(0, 7).split('-').map(Number)
@@ -488,10 +509,21 @@ test('LE TEST QUI COMPTE (SECURITE, review de f40ee9e) : sans cle dans l environ
     const env = { ...process.env }
     delete env.AIRROI_API_KEY
     let code = 0
+    let dit = ''
     // `--fixtures` isole l'ECRITURE : meme si le script regresse, le depot
     // n'est pas sali (re-review de 9b47690).
-    try { execFileSync(process.execPath, [path.join(racine, c.script), `--cache=${d}`, `--fixtures=${sortie}`], { env, stdio: 'pipe' }) } catch (e) { code = e.status }
-    assert.equal(code, 6, `${c.script} : refus attendu (code 6)`)
+    try {
+      dit = String(execFileSync(process.execPath,
+        [...prechargeHorloge, path.join(racine, c.script), `--cache=${d}`, `--fixtures=${sortie}`],
+        { env, stdio: 'pipe' }) || '')
+    } catch (e) { code = e.status; dit = String((e.stdout || '')) + String((e.stderr || '')) }
+    // ⚠ L'ECHEC DOIT NOMMER SA CAUSE. « 0 !== 6 » a coute une enquete : il ne
+    // disait pas que le script n'avait meme pas ete servi par le cache.
+    assert.ok(!/Rien n est paye|Rien n'est paye/.test(dit),
+      `${c.script} : le script n a PAS ete servi par le cache (il a refuse de payer),`
+      + ' donc il n a jamais atteint l ecriture de fixture : la cle semee ne correspond pas a'
+      + ` celle qu il demande — fenetre ou parametres. Sortie : ${dit.trim().split('\n').slice(-2).join(' | ')}`)
+    assert.equal(code, 6, `${c.script} : refus attendu (code 6). Sortie : ${dit.trim().split('\n').slice(-2).join(' | ')}`)
     assert.deepEqual(fs.readdirSync(sortie), [], `${c.script} : rien d ecrit dans le dossier de sortie`)
     assert.deepEqual(etat(c.prefixe), avant, `${c.script} : aucune fixture ecrite ni reecrite`)
   }
