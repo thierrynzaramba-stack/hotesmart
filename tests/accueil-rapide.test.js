@@ -628,6 +628,10 @@ function ouvrirAujourdhui (options = {}) {
     fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien })
 
   return {
+    // Le corps que le test a fourni. Depuis le lot (b), les tests nourrissent
+    // `etat.ecran` avec lui au lieu de compter sur le faux `fetch` : la page ne
+    // fait plus l'appel, l'endpoint d'ecran le fait pour elle.
+    corpsDonne: options.corps || {},
     interne: sorti,
     urls,
     lectures,
@@ -651,14 +655,38 @@ test("LE TEST QUI COMPTE : I18n.init part AVANT que requireAuth reponde", async 
     'I18n.init attend la session : les deux partaient en file, soit un aller-retour de plus')
 })
 
-test("LE TEST QUI COMPTE : le prenom et les biens partent ENSEMBLE", async () => {
+test("LE TEST QUI COMPTE : la page ne lit plus `properties` elle-meme", async () => {
+  // ⚠ LA GARANTIE EST DEVENUE PLUS FORTE, ET LE TEST A DU SUIVRE. Ce test
+  // exigeait que `profiles` et `properties` partent ENSEMBLE — parce que la
+  // page lisait les biens en direct, sous RLS, 9 colonnes et toutes les lignes
+  // du compte sans limite. Le lot (b) a deplace cette lecture dans l appel
+  // d ecran, ou son perimetre est applique EXPLICITEMENT (la cle de service
+  // contourne la RLS). La page ne lit donc plus `properties` du tout, ce qui
+  // rend l ancienne assertion impossible a satisfaire — et c est un progres,
+  // pas une regression.
   const p = ouvrirAujourdhui()
   p.ouvrirSession(); p.repondreI18n()
   await tours()
   const tables = p.lectures.map(l => l.table)
   assert.ok(tables.includes('profiles'), 'le prenom n est jamais demande')
-  assert.ok(tables.includes('properties'),
-    'les biens attendent la reponse du prenom : les deux lectures sont de nouveau en file')
+  assert.ok(!tables.includes('properties'),
+    'la page relit `properties` en direct : le lot (b) l a replie dans l appel d ecran, '
+    + 'ou le perimetre est applique explicitement')
+  assert.ok(!tables.includes('agent_tasks'),
+    'la page relit `agent_tasks` en direct : meme raison')
+
+  // ⚠ ET LA LISTE OBSERVEE NE SUFFIT PAS — LA CONTRE-EPREUVE L'A MONTRE.
+  // A ce point du chargement, la page est arretee sur une lecture que le test
+  // ne resout pas : une lecture de `properties` AJOUTEE PLUS LOIN (dans
+  // `chargerEcran`, par exemple) n'apparaitrait jamais dans `tables`, et
+  // l'assertion ci-dessus resterait verte. Elle dit « pas encore », pas
+  // « jamais ». C'est la SOURCE qui dit « jamais ».
+  const src = lire('pages/aujourdhui.html')
+  const tablesLues = [...src.matchAll(/supabase\.from\('([^']+)'\)/g)].map(m => m[1])
+  assert.deepEqual(tablesLues, ['profiles'],
+    'la page lit une table en direct, sous RLS, hors du perimetre applique par '
+    + 'l appel d ecran : ' + tablesLues.join(', ') + '. Seul `profiles` (le prenom, '
+    + 'dette connue) reste autorise ici.')
 })
 
 test("LE TEST QUI COMPTE : le bonjour s affiche sans attendre la lecture des biens", async () => {
@@ -687,6 +715,14 @@ test("l accueil ne refait plus d aller-retour pour l utilisateur deja connu", ()
   assert.ok(src.includes('const user = session.user'), 'l utilisateur ne vient plus de la session')
 })
 
+// ⚠ CES TESTS ONT ETE RETARGES AU LOT (b) DU CHANTIER PERFORMANCE, et il faut
+// savoir ce qui a bouge : la SOURCE, pas la regle. `chargerNotes` ne fait plus
+// d'appel reseau — les notes arrivent dans `etat.ecran.notes`, remplies par
+// `/api/ecran/aujourdhui`, qui appelle la MEME fonction `notesDuPerimetre`
+// cote serveur. Tout ce que ces tests gardent — un bien absent vaut zero, une
+// cle heritee d'Object ne devient pas une note, la page ne redivise pas —
+// reste vrai mot pour mot, et a ete paye par deux mesures. On nourrit donc
+// `etat.ecran` au lieu du faux `fetch`.
 // ─── Lot 2 du chantier chargement : les notes en UN appel ────────────────────
 //
 // ⚠ CE QUE CE LOT A CHANGE. `chargerNotes` appelait `/api/avis?action=cartes`
@@ -704,25 +740,52 @@ const biensDeTest = [
   { id: 'b3', name: 'Sans canal', provider_property_id: null },
 ]
 
-test('LE TEST QUI COMPTE : l accueil demande les notes UNE fois, pas une fois par bien', async () => {
-  const p = ouvrirAujourdhui({ sansInit: true, corps: {
-    global: { note_sur_5: 4.7, notes: 42 },
-    par_bien: { REF_A: { note_sur_5: 4.8, notes: 30 } },
-    periode: '30j'
-  } })
+test('LE TEST QUI COMPTE : l accueil ne demande PLUS les notes lui-meme', async () => {
+  // ⚠ LA GARANTIE S'EST DEPLACEE, ELLE NE S'EST PAS PERDUE. Le 1 + N
+  // (`action=cartes` une fois par compte puis une fois par bien, 10,7 s puis
+  // 3 x 4-5 s en production) avait ete ramene a UN appel `action=notes` au lot 2
+  // du chantier chargement. Le lot (b) va plus loin : la page n'appelle plus
+  // `/api/avis` DU TOUT — les notes arrivent dans l'appel d'ecran, ou elles
+  // coutent une lecture parmi 22.
+  // Ce test garde donc l'absence, et le suivant garde que l'ENDPOINT, lui, ne
+  // lit les notes qu'une fois.
+  const p = ouvrirAujourdhui({ sansInit: true, corps: {} })
   p.interne.etat.biens = biensDeTest
+  p.interne.etat.ecran = { notes: { global: { note_sur_5: 4.7, notes: 42 }, par_bien: {} } }
   await p.interne.chargerNotes()
-
-  // ⚠ `sansInit` : le module est construit SANS lancer `init()`. Sinon le
-  // compte d'appels ne serait juste que parce que la page reste coincee sur
-  // `await requireAuth()` — vrai par accident, et muet le jour ou ca change.
   const avis = p.urls.filter(u => u.includes('/api/avis'))
-  assert.strictEqual(avis.length, 1,
-    `${avis.length} appels a /api/avis au lieu d un seul : le 1 + N est revenu`)
-  assert.ok(avis[0].includes('action=notes'),
-    'l accueil redemande action=cartes, qui assemble les cartes pour deux nombres : ' + avis[0])
-  assert.ok(!avis[0].includes('bien='),
-    'l accueil demande encore un bien precis : il en faudra donc un par bien')
+  assert.deepEqual(avis, [],
+    'la page redemande /api/avis : le lot (b) l a replie dans l appel d ecran')
+  // Et la note est bien arrivee, donc le test ne passe pas par vacuite.
+  assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.7, notes: 42 })
+
+  // ⚠ ET SURTOUT : PAS DE REPLI RESEAU QUAND LES NOTES MANQUENT.
+  // La contre-epreuve par mutation l'a exige. Un `|| await appel('/api/avis')`
+  // en repli — la forme la plus naturelle d'une rechute — laissait ce test
+  // vert, parce qu'il nourrissait toujours `etat.ecran.notes`. Un bloc absent
+  // de l'appel d'ecran (droit refuse, panne de lecture) doit s'afficher
+  // « non calculable », JAMAIS declencher l'ancien appel : ce serait le 1 + N
+  // qui revient par la porte de service, et seulement chez les comptes dont
+  // le bloc a echoue — donc invisible en recette.
+  const q = ouvrirAujourdhui({ sansInit: true, corps: {} })
+  q.interne.etat.biens = biensDeTest
+  q.interne.etat.ecran = {}
+  await q.interne.chargerNotes()
+  assert.deepEqual(q.urls.filter(u => u.includes('/api/avis')), [],
+    'les notes absentes de l appel d ecran declenchent un repli vers /api/avis')
+  assert.strictEqual(q.interne.etat.noteGlobale, null, 'un bloc absent s affiche comme un fait')
+  assert.strictEqual(q.interne.etat.notesParBien.get('b1'), null)
+})
+
+test('LE TEST QUI COMPTE : l endpoint d ecran ne lit les notes qu UNE fois', () => {
+  // La garantie du 1 + N, cote serveur maintenant. Un appel par bien y serait
+  // invisible a l ecran et couterait autant qu avant.
+  const src = lire('api/ecran/aujourdhui.js').replace(/^\s*\/\/.*$/gm, '')
+  const appels = (src.match(/notesDuPerimetre\(/g) || []).length
+  assert.strictEqual(appels, 1,
+    `${appels} appels a notesDuPerimetre dans l endpoint : le 1 + N est revenu, cote serveur`)
+  assert.ok(!/for\s*\([^)]*\)\s*\{[^}]*notesDuPerimetre/.test(src),
+    'notesDuPerimetre est appele dans une boucle')
 })
 
 test('LE TEST QUI COMPTE : chaque bien recoit la meme chose qu avant, zero compris', async () => {
@@ -732,6 +795,7 @@ test('LE TEST QUI COMPTE : chaque bien recoit la meme chose qu avant, zero compr
     par_bien: { REF_A: { note_sur_5: 4.8, notes: 30 } },
   } })
   p.interne.etat.biens = biensDeTest
+  p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
 
   assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.7, notes: 42 })
@@ -744,42 +808,37 @@ test('LE TEST QUI COMPTE : chaque bien recoit la meme chose qu avant, zero compr
     'un bien sans cle provider recoit une note alors qu aucun avis ne peut lui etre rattache')
 })
 
-test('une panne de lecture des notes ne fait pas afficher zero avis', async () => {
-  // ⚠ TEST DE NON-REGRESSION (regle 19 de REVIEW.md, point 2) : il est VERT
-  // contre le code d'avant ce lot, parce que l'ancien `chargerNotes` rendait
-  // deja `null` sur echec. Il ne garde pas un correctif, il garde l'invariant
-  // que le passage de N+1 lectures a UNE ne devait pas casser : une panne reste
-  // une panne, elle ne devient pas « 0 avis ».
-  const p = ouvrirAujourdhui({ sansInit: true, fetchLeve: true })
-  p.interne.etat.biens = biensDeTest
-  await p.interne.chargerNotes()
-  assert.strictEqual(p.interne.etat.noteGlobale, null, 'une panne se lit « 0 avis » sur la tuile')
-  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
-})
+// ⚠ CES TROIS TESTS PASSAIENT PAR VACUITE, ET LA REVIEW L'A VU.
+// Ils reglaient `fetchLeve`, `corpsIllisible` ou `statut: 503` sur le faux
+// `fetch` — alors que `chargerNotes` ne fait plus AUCUN appel reseau depuis le
+// lot (b). Les trois options etaient donc inertes : les tests prouvaient
+// seulement qu'un bloc `notes` vide ne devient pas zero, en decrivant dans
+// leurs commentaires une panne qu'ils ne provoquaient plus.
+// Ce qu'il faut garder est le meme invariant — « une lecture en echec se DIT,
+// elle ne rend pas des compteurs a zero » — mais contre les formes que
+// l'endpoint produit VRAIMENT : `notes: null` (droit refuse ou lecture
+// indisponible), un bloc illisible, et l'appel d'ecran entierement absent.
+const casSansNote = [
+  ['le bloc est `null` : droit `avis` refuse, ou lecture indisponible', { notes: null }],
+  ['le bloc est illisible : ni global, ni par_bien', { notes: { parasite: 1 } }],
+  ["l'appel d'ecran a echoue : aucun bloc du tout", {}],
+  ["l'appel d'ecran a rendu un corps vide", { notes: {} }]
+]
 
-test("LE TEST QUI COMPTE : un 200 au corps ILLISIBLE n'est pas lu comme « zero avis »", async () => {
-  // `appel()` avale un corps non-JSON : `await r.json().catch(() => ({}))`.
-  // La panne existe pour de vrai — la memoire du projet la porte deja sous
-  // « URL sans /api/v1 : 200 + HTML = 0 bien silencieux ». L'objet vide est
-  // VRAI : tester la veracite de la reponse d'un cote et la cle de l'autre
-  // disait « inconnu » au global et « zero avis », un FAIT, a chaque bien.
-  const p = ouvrirAujourdhui({ sansInit: true, corpsIllisible: true })
-  p.interne.etat.biens = biensDeTest
-  await p.interne.chargerNotes()
-  assert.strictEqual(p.interne.etat.noteGlobale, null)
-  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null,
-    'un corps illisible fait annoncer « 0 avis » bien par bien')
-})
-
-test('un 503 de l endpoint ne fait pas afficher zero avis non plus', async () => {
-  // Le lot a invente ce 503 : une lecture en echec se DIT, elle ne rend pas
-  // des compteurs a zero. Encore faut-il que la page le traite comme un echec.
-  const p = ouvrirAujourdhui({ sansInit: true, statut: 503, corps: { error: 'Notes illisibles' } })
-  p.interne.etat.biens = biensDeTest
-  await p.interne.chargerNotes()
-  assert.strictEqual(p.interne.etat.noteGlobale, null)
-  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
-})
+for (const [quoi, ecran] of casSansNote) {
+  test(`LE TEST QUI COMPTE : ${quoi} — « 0 avis » n est jamais affirme`, async () => {
+    const p = ouvrirAujourdhui({ sansInit: true, corps: {} })
+    p.interne.etat.biens = biensDeTest
+    p.interne.etat.ecran = ecran
+    await p.interne.chargerNotes()
+    assert.strictEqual(p.interne.etat.noteGlobale, null,
+      'la tuile affiche un nombre d avis alors que rien n a ete lu')
+    assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null,
+      'un bien recoit « 0 avis », un FAIT, alors que rien n a ete lu')
+    assert.deepEqual(p.urls.filter(u => u.includes('/api/')), [],
+      'la page part en reseau pour se rattraper : le 1 + N reviendrait par la porte de service')
+  })
+}
 
 test("LE TEST QUI COMPTE : une cle de bien heritee d'Object ne devient pas une note", async () => {
   // `par_bien` vient de `JSON.parse`. Pour un bien dont la cle provider vaudrait
@@ -791,6 +850,7 @@ test("LE TEST QUI COMPTE : une cle de bien heritee d'Object ne devient pas une n
     { id: 'bc', name: 'Piege', provider_property_id: 'constructor' },
     { id: 'bt', name: 'Piege 2', provider_property_id: 'toString' },
   ]
+  p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
   for (const id of ['bc', 'bt']) {
     assert.deepEqual(p.interne.etat.notesParBien.get(id), { note_sur_5: null, notes: 0 },
@@ -809,6 +869,7 @@ test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redi
     par_bien: { REF_A: { note_sur_5: 4.8, notes: 30 } },
   } })
   p.interne.etat.biens = biensDeTest
+  p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
 
   const tuile = p.html('[data-bind="rating"]')
@@ -831,6 +892,7 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note"
     tronque: true
   } })
   p.interne.etat.biens = biensDeTest
+  p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
   assert.strictEqual(p.interne.etat.noteGlobale, null,
     'une note calculee sur une fraction est affichee comme un fait')

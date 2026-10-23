@@ -401,6 +401,150 @@ Supabase restent, mais **en parallèle** : de ~11,9 s en série à l'ordre de
 l'obtenir, soit 42 % des octets de la page. `/api/ecran/aujourdhui` lit l'état
 du code directement, sans traverser l'endpoint de la messagerie.
 
+#### ✅ LIVRÉ — mesuré le 23 octobre 2026 contre la production
+
+| | avant | après |
+|---|---|---|
+| appels HTTP de l'écran | 13 | **3** (`/api/ecran/aujourdhui`, `/api/menages`, `/api/yield`) |
+| requêtes Supabase, titulaire 4 biens | 100 | **33** dans l'appel d'écran |
+| poids de l'appel d'écran | — | **141 275 octets** |
+| première peinture | après la 1re réponse | **immédiate**, sur la liste des biens et les 4 compteurs |
+
+**Le bloc qui reste lourd, et il est nommé** : `taches` pèse 132 629 octets des
+141 275 — **94 %**. Il rend `suggested_reply`, la réponse proposée par l'IA,
+pour 200 tâches. L'écran n'en affiche que les premières. Le réduire demande de
+décider ce que la carte montre vraiment : c'est du lot (d), avec Messages.
+
+⚠ **33 REQUÊTES, PAS 22, ET C'EST UN PROGRÈS.** Le premier chiffre mesuré était
+faux de trois façons, toutes relevées par la review : le coût d'`etatMenage`
+était codé en dur à 2 alors qu'il fait 4 lectures ; la lecture des fils tenait
+dans une requête parce qu'elle était **silencieusement tronquée** à 1000 lignes
+(1843 réelles) et en demande maintenant trois ; et `db;desc` annonce désormais
+son compte comme un **plancher**, parce que `notesDuPerimetre` pagine et
+qu'`etatMenage` a son propre client. Le gain réel reste 100 → 33, et le chiffre
+ne ment plus.
+
+**Ce que la pagination a révélé** : le titulaire passe de **137 à 221 fils**
+reconnus. Les 84 manquants envoyaient l'hôte vers la fiche du bien au lieu de
+la conversation, différemment à chaque rechargement.
+
+**Trois décisions prises au lot (b)**, et leur raison :
+
+1. **Le domaine ménage n'est pas touché** (décision de Thierry). La fenêtre de
+   400 jours reste dans `api/menages.js` : la dupliquer ferait deux lecteurs de
+   la même donnée, et l'extraire maintenant obligerait à refaire ce travail au
+   lot (d), quand `/api/menages` deviendra `/api/ecran/menages`.
+2. **Le cache d'écran ne garde que ce qui ne périme pas en une heure** : la
+   liste des biens, les notes, trois des quatre compteurs.
+   ⚠ **`fait_pour_vous.surreservation` en sort aussi** : l'interdit 2 nomme la
+   surréservation, et retirer le bloc `alarmes` ne suffisait pas — le compte des
+   incidents des 7 derniers jours vivait dans un CHAMP d'un bloc gardé. Même
+   famille que `taches` : j'avais raisonné par bloc là où la donnée critique
+   vit dans un champ. Retirés **à l'écriture**,
+   pas filtrés à la lecture (interdit 2) : `etats_arrivee`, `alarmes`,
+   **`taches`**, `arrivees`, `conversations`. Clé =
+   `hs.ecran.<écran>.<utilisateur>.<compte>`, péremption 12 h, effacée sur les
+   **quatre** chemins de sortie (déconnexion, autre utilisateur sur le poste,
+   suppression de compte, arrivée d'un invité).
+   ⚠ **`taches` a été ajouté par la review, et c'est le constat le plus cher du
+   lot.** Une tâche d'arrivée porte le code d'accès EN CLAIR :
+   `lib/cron-arrival-code.js` écrit `summary: "Code d'accès généré pour <nom> :
+   <code> — …"` et `suggested_reply: <le message d'arrivée rendu>`. Le code du
+   voyageur partait donc sur le disque pour 12 h et se repeignait au premier
+   affichage même après un re-codage de la serrure — le motif exact de
+   l'interdit 2. Et le premier affichage ne rend donc plus « À valider » ni le
+   sous-titre compté : sans les séjours (qui viennent de `/api/menages`, hors
+   cache), ils affichaient « 0 arrivée · 0 départ · 0 à traiter », des faits
+   faux, démentis une seconde plus tard.
+3. **`lireLesCodes` est borné au BIEN autant qu'à la réservation.** La table
+   `access_codes` n'a pas de `user_id` renseigné (bloquant (d) de CLAUDE.md :
+   50 des 65 codes de La bulle sont sans compte), donc un `.eq('user_id', …)`
+   ferait disparaître la majorité des codes de l'écran. Le cloisonnement passe
+   par le couple `property_id` + `booking_id` — et il était trié **en mémoire**
+   seulement : la requête ne demandait que `booking_id`, alors que les
+   identifiants Beds24 sont numériques et sans unicité globale. Les deux
+   appelants (`api/messages.js` et l'appel d'écran) passent maintenant les biens.
+
+4. **`jourParis` compte en jours calendaires, pas en pas de 24 h.** Le code
+   faisait `Date.now() + n × 86400000` sous un commentaire qui promettait
+   l'inverse. Mesuré : le **25 octobre 2026** — deux jours après le commit —
+   `jour` et `demain` valaient tous deux `2026-10-25`, donc aucune arrivée du 26
+   n'avait d'état de code, donc aucune invite « Envoyer le code » pour le
+   voyageur du lendemain. Au printemps, le miroir : le 27 mars 2027, `demain`
+   sautait au 29.
+5. **Chaque bloc est enveloppé** : les dix lectures sont dans un `Promise.all`,
+   où une seule exception rejetait le handler, rendait 500 et faisait dégrader
+   tout l'écran d'un coup — alarme de surréservation comprise. Les vingt lignes
+   de conception d'`indisponibles` étaient annulées par une levée.
+6. **La bannière de surréservation est rendue.** En déplaçant la lecture vers
+   l'endpoint, l'appel à `renderAlarmes()` avait disparu du code : la bannière
+   ne pouvait plus s'afficher, et avec elle le bouton « Acquitter », seul moyen
+   d'arrêter la réémission des SMS au fondateur.
+7. **Le statut d'une arrivée passe par `readStatus`**, le lecteur canonique.
+   Trois valeurs ont été écrites pour ce champ : `'confirmed'` en dur, puis
+   `null` pour s'aligner sur `api/messages.js`, et les deux étaient fausses —
+   `lib/bookings-snapshot-status.js` dit qu'un statut **absent vaut
+   `confirmed`**, et `api/menages.js` liste donc cette réservation comme
+   arrivée du jour. Avec `null`, elle sortait du filtre de `arriveesProches` :
+   le voyageur arrive, et l'hôte n'a ni état de code ni invite « Envoyer le
+   code ». **Une règle ne se recopie pas, elle s'appelle.**
+8. **`jourParis` existait en TROIS copies**, et le premier correctif n'en avait
+   touché qu'une. `api/messages.js` est l'autre injecteur du même
+   `arriveesProches` — ces nuits-là, les deux écrans auraient désigné des
+   arrivées « proches » différentes pour la même réservation le même jour.
+9. **La pagination des fils est par CURSEUR, pas par décalage.** `messages.id`
+   est un `gen_random_uuid()` : avec `.range()` (donc `offset`), un message
+   inséré entre deux pages prend une clé aléatoire qui peut tomber dans la page
+   déjà lue, et la ligne de l'index 1000 n'est jamais rendue. Le défaut muet
+   que le lot venait de fermer, réintroduit par son propre correctif.
+10. **Les signaux sont CONSOMMÉS.** `indisponibles` et `tronquees` étaient
+   produits et lus par personne : `biens` vaut maintenant `null` (et l'écran dit
+   « Logements indisponibles » au lieu de masquer la section), et une liste de
+   tâches plafonnée s'affiche avec un « + ». Un signal qu'on ne lit pas est un
+   signal qu'on n'a pas.
+
+**La preuve d'isolation, sur les données réelles** :
+`scripts/verifier-isolation-ecran.js` (lecture seule, aucune session fabriquée,
+toute écriture lève). Mesure du 23 octobre 2026 — titulaire 4 biens / 33
+requêtes ; membre restreint à La bulle 1 bien / 18 requêtes, `notes` REFUSÉ,
+ménages 11 contre 18, messages IA 10 contre 15, `prix` `null` (RLS titulaire) :
+**zéro référence hors périmètre, et aucun comptage supérieur à celui du
+titulaire**.
+
+⚠ **ET CE SCRIPT NE POUVAIT PAS ÉCHOUER, CE QUI EN FAISAIT UN FAUX VERT.** Son
+verdict ne vérifiait que deux choses — aucune référence interdite, aucun
+comptage au-dessus du titulaire — et une réponse **entièrement vide** les
+satisfait toutes les deux. Il aurait donc affiché « biens : 0 » puis
+« VERDICT : aucune référence hors périmètre », et sorti 0 : c'était précisément
+le filet censé attraper le `22P02` sur `properties.id`. Corrigé : il exige
+désormais le code HTTP 200, un titulaire non vide, un membre qui voit
+exactement son périmètre, et **aucun bloc `indisponibles`** — une lecture en
+échec se lit « rien à voir », pas « rien ». Le tamis regarde aussi les **clés**
+(`notes.par_bien` est indexé PAR la référence du bien), et son arithmétique de
+périmètre connaît les deux formes de clé **et** le cas `property_scope: 'all'`
+— sans quoi elle échouait sur un passage correct et passait sur un écran vide.
+
+⚠ **ET LE CLIENT DE LECTURE SEULE A DÛ ÊTRE REFAIT DEUX FOIS.** Ce paragraphe a
+d'abord annoncé au passé que `rest`, `storage`, `auth.admin` et `rpc` ne
+s'échappaient plus. **C'était faux quand c'était écrit.** La deuxième version
+posait bien un proxy sur le client, mais elle rendait les propriétés **non
+fonctions telles quelles** — donc `auth.admin` restait à nu — et gardait une
+liste **noire** de quatre noms, qui ne pouvait pas nommer `upload`,
+`createUser`, `invoke` ni `rpc`. Mesure : **dix** chemins d'écriture
+atteignaient le SDK, dont `auth.admin.deleteUser()`, qui a levé depuis
+l'intérieur de `GoTrueAdminApi`.
+
+La version qui tient est une **liste blanche** : seul le vocabulaire de lecture
+PostgREST est autorisé, à toute profondeur, et tout le reste lève. Une liste
+noire doit tout prévoir, y compris ce qu'un SDK ajoutera demain ; une liste
+blanche n'a qu'à autoriser ce qu'on utilise. Les dix chemins et la lecture qui
+doit continuer de passer sont tenus par
+`tests/verificateur-lecture-seule.test.js`.
+
+**Leçon, et elle vaut au-delà de ce lot** : une promesse de sécurité écrite au
+passé dans une spec est une affirmation à mesurer, pas un compte rendu. Les
+deux fois, le code était plausible à la lecture.
+
 ### Lot (c) — les tables de résumé qui suppriment les appels `yield` par bien
 
 **Ce qu'il change** : `resume_bien_jour` et `resume_bien_avis`, leur calcul par

@@ -135,13 +135,18 @@ test('RECENSEMENT : toute lecture de bookings_snapshot est bornee', () => {
   // ⚠ C'est ce test qui empeche la rechute. Une lecture ajoutee demain sans
   // borne le fait echouer — on ne redecouvre pas le probleme au prochain seuil
   // de 1000 lignes, en production, la veille d'un depart.
+  // ⚠ RECURSIF : LE LOT (b) A CREE `api/ecran/`, LE PREMIER SOUS-REPERTOIRE DE
+  // `api/`, ET CE BALAYAGE A PLAT NE LE VOYAIT PAS (mesure du 23 octobre 2026 :
+  // 58 fichiers contre 59). `api/ecran/` est le domicile declare des endpoints
+  // d'ecran des lots (c) et (d) : un filet aveugle a ce repertoire se vide a
+  // mesure que le chantier avance.
+  // La liste des dossiers etait FIGEE (`['api', 'lib', 'lib/cleaning', 'scripts']`),
+  // donc chaque nouveau sous-dossier devait etre ajoute a la main. On descend.
+  const { fichiersJs } = require('./outils/source')
   const fichiers = []
-  for (const dossier of ['api', 'lib', 'lib/cleaning', 'scripts']) {
+  for (const dossier of ['api', 'lib', 'scripts']) {
     const abs = path.join(racine, dossier)
-    if (!fs.existsSync(abs)) continue
-    for (const f of fs.readdirSync(abs)) {
-      if (f.endsWith('.js')) fichiers.push(`${dossier}/${f}`)
-    }
+    if (fs.existsSync(abs)) fichiers.push(...fichiersJs(abs, dossier))
   }
 
   // ⚠ LES EXEMPTIONS COMPTENT LES REQUETES, PAS LES FICHIERS.
