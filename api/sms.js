@@ -10,7 +10,7 @@
 // nul — un renommage n'est pas une correction.
 
 const { createClient } = require('@supabase/supabase-js');
-const { requirePermission } = require('../lib/require-permission');
+const { requirePermission, posterEnTetesPrives } = require('../lib/require-permission');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -145,10 +145,39 @@ function normalizePhone(phone) {
 
 // ─── Handler Vercel ───────────────────────────────────────────────────────────
 module.exports = async (req, res) => {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // ⚠ L'EN-TETE PRIVE EST POSE ICI, ET SUR CE SEUL ENDPOINT.
+  // `api/sms.js` ne passe pas par la garde partagee pour ses lectures : il
+  // resout `user` lui-meme (`auth.getUser`) et borne chaque requete par
+  // `user_id`. L'autorisation est donc bien la — mais l'en-tete prive, pose par
+  // `requirePermission`, ne l'etait pas, et SES REPONSES PORTENT DES DONNEES DE
+  // COMPTE : la configuration Brevo (`configured`, `brevo_enabled`, les
+  // expediteurs verifies) et l'historique `sms_logs`. Verification HTTPS du
+  // 22 octobre 2026 : `public, max-age=0, must-revalidate`.
+  // C'est le SEUL des trente endpoints qui repondent avant leur garde dont le
+  // corps ne soit pas un libelle generique — les autres ne rendent qu'une
+  // methode, un parametre ou un jeton refuses, et un `public` sur une reponse
+  // qui ne porte rien n'expose rien.
+  posterEnTetesPrives(res);
+  // ⚠ PLUS D'EN-TETE CORS — VOLONTAIRE, ET C'EST LE RAISONNEMENT DEJA ECRIT
+  // DANS `api/book-public.js`, applique ici.
+  //
+  // Recensement des appelants HTTP de cet endpoint, 22 octobre 2026 :
+  // `apps/sms/index.html`, `pages/connexions.html`, `pages/messages.html` —
+  // les trois sur NOTRE domaine. Tout le reste (`lib/alert-notify.js`,
+  // `lib/cleaning/notifier-prestataire.js`, `lib/cron-overbooking.js`) importe
+  // `sendSms` par `require` : du serveur vers le serveur, que CORS ne concerne
+  // pas. Une page servie par le meme domaine n'a besoin d'AUCUNE permission
+  // croisee : le navigateur ne fait meme pas de preflight.
+  //
+  // Ce que `Access-Control-Allow-Origin: '*'` ouvrait : n'importe quel site
+  // pouvait lire, depuis le navigateur d'un visiteur, la configuration Brevo et
+  // l'historique `sms_logs` d'un compte — s'il disposait du jeton. Il ne l'a
+  // pas, donc ce n'etait pas exploitable ; mais un `*` sur un endpoint
+  // authentifie est une permission qu'on accorde sans raison.
+  //
+  // ⚠ ET RETIRER CORS NE CASSE AUCUN CLIENT NON NAVIGATEUR. `curl`, un script,
+  // un appel serveur a serveur n'appliquent pas CORS : seule une page servie
+  // par un AUTRE domaine perdrait l'acces, et il n'en existe pas.
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   // Auth Supabase — nécessaire pour rattacher l'envoi au propriétaire (sa clé Brevo)
