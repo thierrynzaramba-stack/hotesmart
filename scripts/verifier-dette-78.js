@@ -8,8 +8,16 @@
 // AUCUN appelant ne passait `joursExclus` a `joursOuverts`. Le numerateur
 // retirait, le denominateur gardait.
 //
-// CE QU'IL COMPARE, bien par bien et fenetre par fenetre, avec les fonctions de
-// PRODUCTION : seule l'option `joursExclus` de `joursOuverts` change.
+// ⚠ CE QU'IL PROUVE, ET CE QU'IL NE PROUVE PAS. Il mesure l'AMPLEUR de la
+// correction sur les donnees reelles : il appelle `joursOuverts` deux fois,
+// avec et sans `joursExclus`, et compare. Il ne prouve PAS que la production
+// passe l'option — supprimer `joursExclus: exclus` d'api/yield.js le laisserait
+// vert. Le CABLAGE est prouve par `tests/api-yield.test.js`, dont six
+// garde-fous rougissent contre le commit precedent (regle 19). Les deux
+// artefacts repondent a deux questions ; aucun ne remplace l'autre, et le KB
+// ne doit pas citer celui-ci comme « la preuve » du cablage.
+//
+// CE QU'IL COMPARE, bien par bien et fenetre par fenetre :
 //   A (avant) : denominateur qui garde les jours declares fermes
 //   B (apres) : denominateur qui les retire, comme le numerateur
 //
@@ -59,7 +67,7 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++ }
 function agreger (periodes) {
   let nuiteesRef = 0, caRef = 0, ouverts = 0, estimee = false, declaresFermes = 0
   for (const p of periodes) {
-    declaresFermes += p.jours_estimes_fermes_par_exception || 0
+    declaresFermes += p.jours_retires_par_declaration || 0
     if (p.jours_ouverts == null) continue
     nuiteesRef += (p.nuitees || 0) - (p.nuitees_exclues_du_taux || 0)
     caRef += (p.ca || 0) - (p.ca_exclu_du_revpar || 0)
@@ -75,17 +83,34 @@ function agreger (periodes) {
 
 async function main () {
   const auj = jourLocal(new Date())
-  const { data: biens, error: eB } = await sb.from('properties').select('*')
-    .not('provider_property_id', 'is', null).order('name')
-  if (eB) { console.error('Lecture des biens impossible :', eB.message); process.exit(1) }
-  if (!biens || !biens.length) { console.error('ECHEC : aucun bien lu.'); process.exit(1) }
-
+  // ⚠ LE COMPTE EST CHOISI PUIS TOUT EST FILTRE DESSUS. La premiere version
+  // lisait `properties` pour TOUS les comptes, sans `user_id` et sans
+  // pagination — en service key, donc RLS contournee (regle 1 du depot), et
+  // tronque a 1000 lignes en silence. Elle prenait ensuite « le compte qui a le
+  // plus de biens » : sur staging, c'est la plus grosse fixture de recette,
+  // mesuree et presentee comme une preuve sur les biens reels.
+  const PAGE = 1000
+  const tous = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await sb.from('properties')
+      .select('id, user_id').not('provider_property_id', 'is', null)
+      .order('id').range(from, from + PAGE - 1)
+    if (error) { console.error('Lecture des biens impossible :', error.message); process.exit(1) }
+    tous.push(...(data || []))
+    if (!data || data.length < PAGE) break
+  }
+  if (!tous.length) { console.error('ECHEC : aucun bien lu.'); process.exit(1) }
   const parCompte = {}
-  for (const b of biens) (parCompte[b.user_id] = parCompte[b.user_id] || []).push(b)
+  for (const b of tous) (parCompte[b.user_id] = parCompte[b.user_id] || []).push(b)
   const compte = Object.keys(parCompte).sort((a, c) => parCompte[c].length - parCompte[a].length)[0]
-  const lesSiens = parCompte[compte]
+  // Et on relit les fiches COMPLETES du seul compte retenu : `joursOuverts`
+  // depend de `base_price`, `capacity`, `zone_scolaire`, `pilote_*`.
+  const { data: lesSiens, error: eB } = await sb.from('properties').select('*')
+    .eq('user_id', compte).not('provider_property_id', 'is', null).order('name')
+  if (eB) { console.error('Lecture des biens impossible :', eB.message); process.exit(1) }
   console.log(`\nBase    : ${projet}`)
-  console.log(`Compte  : ${compte.slice(0, 8)}, ${lesSiens.length} bien(s) raccorde(s)`)
+  console.log(`Compte  : ${compte.slice(0, 8)}, ${lesSiens.length} bien(s) raccorde(s)`
+    + ` sur ${tous.length} du projet`)
 
   let lignes = []
   for (let from = 0; ; from += 1000) {
@@ -148,9 +173,14 @@ async function main () {
       if (retires > 0 && A.to != null && B.to != null && B.to < A.to) {
         ko(`${bien.name} / ${f.nom} : le taux BAISSE (${pct(A.to)} -> ${pct(B.to)})`)
       }
-      if (retires > 0 && B.declaresFermes !== retires) {
-        ko(`${bien.name} / ${f.nom} : ${retires} jours retires mais ${B.declaresFermes} annonces`
-          + ' : le compte des jours fermes par declaration ne suit pas')
+      // ⚠ UNE INEGALITE, PAS UNE EGALITE — et l'egalite faisait echouer le
+      // script sur des donnees SAINES. `retirerDeLaVente` enregistre la
+      // fermeture ET ferme la nuit au calendrier : la forme NORMALE d'une
+      // fermeture d'hote donne donc des jours declares qui n'avaient plus rien
+      // a quitter. L'ordre juste est : retires <= annonces <= declares.
+      if (!(retires <= B.declaresFermes && B.declaresFermes <= nbExclus)) {
+        ko(`${bien.name} / ${f.nom} : ${retires} retires, ${B.declaresFermes} annonces,`
+          + ` ${nbExclus} declares — l'ordre retires <= annonces <= declares est rompu`)
       }
 
       console.log('  ' + l(bien.name, 22) + l(pct(A.to), 13) + l(pct(B.to), 13)

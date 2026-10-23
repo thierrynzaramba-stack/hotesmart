@@ -342,8 +342,48 @@ test('LE TEST QUI COMPTE : une exception declaree PRIME, meme sur une ligne reel
   const r = await joursOuverts(fausseBase(lignes), BIEN, '2025-03-01', '2025-03-02',
     opts({ joursExclus: exclus }))
   assert.equal(r.jours_ouverts, 1, 'la nuit declaree fermee ne compte pas')
-  assert.equal(r.jours_estimes_fermes_par_exception, 1)
+  assert.equal(r.jours_retires_par_declaration, 1)
   assert.deepEqual(r.detail, ['2025-03-01'])
+})
+
+test('LE TEST QUI COMPTE : le compteur compte les jours RETIRES, pas les jours COUVERTS', async () => {
+  // ⚠ C EST LA FORME NORMALE D UNE FERMETURE D HOTE : `retirerDeLaVente`
+  // enregistre la fermeture ET ferme la nuit dans `calendar_inventory`. Le
+  // compteur s incrementait pour chaque jour COUVERT par une declaration,
+  // avant meme d avoir regarde le calendrier : il annonçait 2 jours retires
+  // quand la nuit etait DEJA fermee et qu aucun n avait quitte le
+  // denominateur. Or c est le seul chiffre qui explique un TO qui bouge.
+  const lignes = [
+    { date: '2025-03-01', stop_sell: true, avail: 0, rate: 100 },   // deja fermee
+    { date: '2025-03-02', stop_sell: false, avail: 1, rate: 100 }   // ouverte
+  ]
+  const exclus = new Set(['2025-03-01', '2025-03-02'])  // les DEUX declarees
+  const r = await joursOuverts(fausseBase(lignes), BIEN, '2025-03-01', '2025-03-02',
+    opts({ joursExclus: exclus }))
+  assert.equal(r.jours_ouverts, 0)
+  assert.equal(r.jours_retires_par_declaration, 1,
+    'la nuit deja fermee au calendrier est comptee comme retiree par la declaration')
+})
+
+test('LE TEST QUI COMPTE : au-dela de la fenetre, une nuit declaree reste « pas encore ouverte »', async () => {
+  // ⚠ CE FICHIER AVAIT PREDIT LE DEFAUT : « le jour ou un appelant passe
+  // `joursExclus`, la tuile compte une fermee pendant que la ligne dit "pas
+  // encore ouverte" ». La declaration etait testee AVANT la fenetre
+  // glissante : une nuit au-dela partait en `fermes`, ce qui reconstitue la
+  // dette 20 par le bas, et `jours_hors_fenetre` sous-comptait.
+  const bienFenetre = { ...BIEN, pilote_tarifaire: 'yieldflow', pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 10 }
+  const auj = '2026-06-01'
+  // Une ligne DANS la fenetre, pour que la capacite soit calculable, et une
+  // nuit declaree bien AU-DELA.
+  const lignes = [{ date: '2026-06-05', stop_sell: false, avail: 1, rate: 100 }]
+  const exclus = new Set(['2026-06-25'])
+  const r = await joursOuverts(fausseBase(lignes), bienFenetre, '2026-06-05', '2026-06-25',
+    opts({ joursExclus: exclus, aujourdHui: auj, estimerLePasse: false }))
+  assert.equal(r.calculable, true, `capacite non calculable : ${r.raison}`)
+  assert.equal(r.jours_retires_par_declaration, 0,
+    'une nuit pas encore ouverte est comptee comme retiree par declaration')
+  assert.ok(r.detail_hors_fenetre.includes('2026-06-25'),
+    'la nuit declaree au-dela de la fenetre n est plus « pas encore ouverte »')
 })
 
 test('la bascule est automatique : une ligne reelle fait foi', async () => {

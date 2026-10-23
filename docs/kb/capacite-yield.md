@@ -326,8 +326,17 @@ d'occupation qui bouge, et il était inatteignable. Il est désormais rendu
 indépendamment. Le **nom reste historique** (« estimés ») : ces jours sont
 *déclarés*, pas estimés, mais le nom est déjà dans le contrat de la réponse.
 
-⚠ **LE DRAPEAU `estimee` NE BOUGE PAS** : il vaut `estimes > 0`, donc un jour
-fermé par déclaration ne fait **pas** passer un chiffre mesuré pour un estimé.
+⚠ **ET LE DRAPEAU `estimee` BOUGE — dans le bon sens, mais il bouge.** Une
+première version de cette section affirmait le contraire ; c'est faux, et la
+revue l'a mesuré. `estimee` vaut `estimes > 0`, et un jour passé sans ligne que
+l'hôte déclare fermé ne s'incrémente plus dans `estimes` : il part en *retiré
+par déclaration*. Donc un mois dont **tous** les jours estimés ouverts sont
+déclarés fermés passe de `estimee: true` à `estimee: false` — et c'est **juste**,
+puisque le dénominateur qui reste est fait de lignes réelles. Conséquences
+assumées et désormais testées : le badge « Estimé » disparaît, la légende ne
+compte plus la période, et sur l'accueil `chiffresFenetre` passe de « non
+calculable » à un taux **compté** — ce qu'il doit faire quand plus aucun jour du
+dénominateur n'est estimé.
 
 ### Où la dette mord, et où elle ne mord pas
 

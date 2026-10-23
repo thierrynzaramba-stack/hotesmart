@@ -271,11 +271,34 @@ module.exports = async (req, res) => {
     // L'ecran a besoin des periodes ELLES-MEMES (pour les lister et les
     // supprimer), le moteur des jours qu'elles excluent : on lit une fois, on
     // derive les deux.
-    const exceptions = await exceptionsDuBien(supabase, bien.id, debutHistorique, finDemandee)
+    // ⚠ LA FENETRE DES EXCLUSIONS VA JUSQU'A LA FIN DE LA DERNIERE PERIODE,
+    // PAS JUSQU'A `finDemandee` — releve en review, et c'est la moitie du
+    // correctif de la dette 78 qui manquait. `bornesDePeriode` DEPASSE la
+    // fenetre demandee des que la granularite est « mois » ou « annee » :
+    // debut=2026-06-01 fin=2026-06-20 en mois donne une borne au 2026-06-30.
+    // Or `joursExclus` borne son Set a la fenetre qu'on lui donne. Mesure :
+    // avec `fin=2026-06-12` et une exception couvrant tout juin, la derniere
+    // periode rendait `jours_ouverts: 18` et un TO de 22,2 % sur des jours que
+    // l'hote avait declares fermes, `calculable: true`, sans aucun motif — le
+    // defaut d'origine, intact, et le compte des jours declares (12)
+    // contredisait la declaration (30). Le perimetre du calcul dependait d'un
+    // parametre de requete.
+    // `api/yield.js` avait deja appris cette lecon pour `finContexte` (« LE
+    // CONTEXTE COUVRE LES PERIODES ENTIERES, PAS LA FENETRE DEMANDEE ») ;
+    // `exclus` n'avait pas eu le meme traitement.
+    const finPeriodes = (() => {
+      const bs = clesDePeriode(debut, finDemandee, granularite)
+        .flatMap(c => { const p = periodePrecedente(c); return p ? [p, c] : [c] })
+        .map(bornesDePeriode)
+        .filter(b => b && estJourISO(b[0]) && estJourISO(b[1]))
+      const max = bs.map(b => b[1]).sort().slice(-1)[0]
+      return max && max > finDemandee ? max : finDemandee
+    })()
+    const exceptions = await exceptionsDuBien(supabase, bien.id, debutHistorique, finPeriodes)
     // ⚠ PAR `joursExclus`, PAS PAR UN Set MAISON : c'est lui qui sait que les
     // FERMETURES de l'hote (lot 4.6.2) sortent aussi de la reference. Les
     // exceptions deja lues lui sont passees — une lecture, deux usages.
-    const exclus = await joursExclus(supabase, bien.id, debutHistorique, finDemandee, { exceptions })
+    const exclus = await joursExclus(supabase, bien.id, debutHistorique, finPeriodes, { exceptions })
     const eclatements = duBien.map(l => eclater(l, {
       pont, joursExclus: exclus, defaultProvider: bien.provider
     }))
@@ -366,43 +389,59 @@ module.exports = async (req, res) => {
         bornes.map(b => b[0]).sort()[0],
         bornes.map(b => b[1]).sort().slice(-1)[0])
     }
-    const capacites = new Map()
-    // Plus de lot : il bornait les requetes CONCURRENTES, et il n'y a plus de
-    // requete. Ce qui reste est du classement en memoire.
-    const classees = await Promise.all(cles.map(cle => {
+    // ⚠ DEUX CARTES DE CAPACITES, ET C'EST LE POINT LE PLUS IMPORTANT DE CE
+    // LOT — releve en review. `joursExclus` repond a « faut-il compter cette
+    // nuit dans la REFERENCE ? ». Il ne repond PAS a « cette nuit etait-elle
+    // ouverte a la vente ? ». Ce sont deux questions, et une seule carte les
+    // confondait : la meme `capacites` nourrit `calculerIndicateurs` (ou l'on
+    // veut l'exclusion, c'est la dette 78), `pickup` et `R.projeter` (ou on ne
+    // la veut pas).
+    //
+    // Ce que la carte unique produisait, dans UNE SEULE reponse HTTP :
+    //  - `pickup` voyait `jours_ouverts: 0` sur un mois entierement declare et
+    //    levait `periode_n1_fermee_a_la_vente`, qui DISQUALIFIE tout le N-1 du
+    //    « a date ». L'ecran affichait « +0 % » dans un bloc et « l'an dernier,
+    //    le logement ne POUVAIT pas vendre » dans l'autre, a propos d'un mois
+    //    ouvert qui avait vendu 400 EUR. Et l'alerte de haut de page invitait
+    //    l'hote a rouvrir les jours qu'il venait de declarer fermes.
+    //  - `R.projeter` recevait un numerateur BRUT (`pk.a_date.nuitees`) et un
+    //    denominateur retreci : le taux extrapole montait jusqu'a son plafond,
+    //    et la cellule « Avance / retard » basculait de -1 (rouge) a +6 (vert).
+    //    C'est litteralement le defaut du lot 3.3 (« 3 nuits vendues dont 2 en
+    //    exception, 1 jour ouvert -> 300 % ») reouvert une fonction plus loin.
+    //
+    // Les deux cartes sortent de la MEME lecture de calendrier : classer deux
+    // fois est du calcul en memoire, pas un aller-retour de plus.
+    const capacites = new Map()        // reference : les jours declares fermes RETIRES
+    const capacitesVente = new Map()   // vente : ce que le canal savait, sans declaration
+    const classer = (cle, options) => {
       const b = bornesDePeriode(cle)
       if (!b) return null
-      return joursOuverts(supabase, bien, b[0], b[1], {
-        aujourdHui: auj, estimerLePasse: true, lignes: lignesCalendrier,
-        // ⚠ DETTE 78 : LE DENOMINATEUR SUIT LE NUMERATEUR. `eclater` retire deja
-        // des nuits de REFERENCE celles qu'une exception ou une fermeture
-        // declaree couvre (`nuitees_hors_reference`, pose ligne 280), et
-        // `calculerIndicateurs` fait `nuiteesRef = nuitees - hors_reference`
-        // puis divise par `jours_ouverts` — sous le commentaire « ce qui DIVISE
-        // se calcule des deux cotes sur le meme perimetre ». Les deux moities
-        // n'etaient pas branchees sur le meme perimetre : AUCUN appelant du
-        // depot ne passait `joursExclus`, donc `estimesFermes` et
-        // `jours_estimes_fermes_par_exception` de capacite.js etaient du code
-        // mort a l'echelle du depot.
-        //
-        // Mesure du 20 octobre 2026 sur les 4 biens reels : la dette ne mord
-        // que la ou un jour declare ferme est PAR AILLEURS compte ouvert —
-        // c'est-a-dire le passe ancien sans memoire d'intention, ou la
-        // convention « un jour passe sans ligne est repute ouvert »
-        // s'applique. Coeur de vie 23, du 20 septembre au 15 octobre 2025
-        // (exception declaree de 17 jours) : TO 23,1 % au lieu de 66,7 %,
-        // RevPAR 21,77 EUR au lieu de 62,88 EUR, denominateur 26 au lieu de 9.
-        // Dans le futur et le passe recent, `calendar_inventory` porte une vraie
-        // ligne qui dit « ferme » : ces jours etaient deja hors du
-        // denominateur, et la correction n'y change rien (0 ecart mesure).
-        //
-        // ⚠ ET LE DRAPEAU NE BOUGE PAS : `estimee` vaut `estimes > 0`, donc les
-        // jours fermes par declaration ne font PAS passer un chiffre mesure
-        // pour un estime. Verifie dans capacite.js.
-        joursExclus: exclus
-      }).then(r => [cle, r])
-    }).filter(Boolean))
+      return joursOuverts(supabase, bien, b[0], b[1], options).then(r => [cle, r])
+    }
+    const communes = {
+      aujourdHui: auj, estimerLePasse: true, lignes: lignesCalendrier
+    }
+    const classees = await Promise.all(cles.map(cle => classer(cle, {
+      ...communes,
+      // ⚠ DETTE 78 : LE DENOMINATEUR SUIT LE NUMERATEUR. `eclater` retire deja
+      // des nuits de REFERENCE celles qu'une exception ou une fermeture
+      // declaree couvre (`nuitees_hors_reference`), et `calculerIndicateurs`
+      // fait `nuiteesRef = nuitees - hors_reference` puis divise par
+      // `jours_ouverts` — sous le commentaire « ce qui DIVISE se calcule des
+      // deux cotes sur le meme perimetre ». Les deux moities n'etaient pas
+      // branchees sur le meme perimetre.
+      //
+      // Mesure du 20 octobre 2026 sur les 4 biens reels : la dette ne mord que
+      // la ou un jour declare ferme est PAR AILLEURS compte ouvert — le passe
+      // ancien sans memoire d'intention. Coeur de vie 23, 20 septembre au
+      // 15 octobre 2025 (exception de 17 jours) : TO 23,1 % au lieu de 66,7 %,
+      // RevPAR 21,77 EUR au lieu de 62,88 EUR, denominateur 26 au lieu de 9.
+      joursExclus: exclus
+    })).filter(Boolean))
     for (const [cle, r] of classees) capacites.set(cle, r)
+    const classeesVente = await Promise.all(cles.map(cle => classer(cle, communes)).filter(Boolean))
+    for (const [cle, r] of classeesVente) capacitesVente.set(cle, r)
 
     // ─── Realise, et sa comparaison N-1 ─────────────────────────────────────
     const indicateurs = comparerAN1(calculerIndicateurs(eclatements, {
@@ -413,7 +452,11 @@ module.exports = async (req, res) => {
 
     // ─── « A date » : une entree par periode demandee ───────────────────────
     const aDate = [...clesDemandees].sort().map(cle => pickup(eclatements, {
-      periode: cle, pivot, granularite, capacites, capacitePersonnes: bien.capacity
+      // ⚠ LA CARTE DE VENTE, PAS CELLE DE REFERENCE : `pickup` se demande si la
+      // periode etait ouverte A LA VENTE, et leve `periode_fermee_a_la_vente`
+      // sur un denominateur a zero. Lui donner la carte de reference faisait
+      // dire « le logement ne POUVAIT pas vendre » d'un mois qui avait vendu.
+      periode: cle, pivot, granularite, capacites: capacitesVente, capacitePersonnes: bien.capacity
     }))
 
     // ─── Reference par segment, sur 3 ans ───────────────────────────────────
@@ -450,7 +493,10 @@ module.exports = async (req, res) => {
     // ─── Projection : une par periode demandee ──────────────────────────────
     const projection = [...clesDemandees].sort().map(cle => {
       const b = bornesDePeriode(cle)
-      const cap = capacites.get(cle)
+      // ⚠ IDEM POUR LA PROJECTION : son numerateur est `pk.a_date.nuitees`,
+      // BRUT. Avec un denominateur retreci, le taux extrapole gonflait et
+      // « Avance / retard » basculait de rouge a vert, sans aucun motif.
+      const cap = capacitesVente.get(cle)
       const pk = aDate.find(x => x.periode === cle)
       // ⚠ ON NE PROJETTE QUE LES JOURS OUVERTS. Le contrat de `projeter` est
       // explicite : il ne peut pas verifier ce qu'on lui passe.
