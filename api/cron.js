@@ -265,8 +265,28 @@ module.exports = async function handler(req, res) {
   }
   try {
     // 1. Refresh tokens Beds24 (indispensable avant tout fetch)
-    try { await chrono.mesure('refresh_tokens', () => refreshBeds24Tokens()) }
-    catch (err) { console.error('[Cron] Erreur refresh tokens:', err.message) }
+    // ⚠ LE BILAN DOIT ATTEINDRE `results`, ET IL NE L'ATTEIGNAIT PAS (constat de
+    // review). `refreshBeds24Tokens` rend desormais `{ erreur }` quand la
+    // lecture des cles tombe, et `sansExpiration` quand la migration manque —
+    // mais le retour etait JETE. Or la regle du depot est qu'un cron se
+    // diagnostique par `results.errors`, pas par son code HTTP : une panne de
+    // trente jours y serait restee invisible, et le jeton de renouvellement
+    // serait mort sans un mot.
+    try {
+      const bilan = await chrono.mesure('refresh_tokens', () => refreshBeds24Tokens())
+      if (bilan && bilan.erreur) {
+        results.errors.push({ context: 'refresh_tokens', error: bilan.erreur })
+      }
+      if (bilan && bilan.sansExpiration) {
+        results.beds24TokenSansExpiration = (results.beds24TokenSansExpiration || 0) + 1
+      }
+      if (bilan && Number.isFinite(bilan.renouveles)) {
+        results.beds24TokensRenouveles = (results.beds24TokensRenouveles || 0) + bilan.renouveles
+      }
+    } catch (err) {
+      console.error('[Cron] Erreur refresh tokens:', err.message)
+      results.errors.push({ context: 'refresh_tokens', error: err.message })
+    }
     // 2. Récupère les clés Beds24 actives et les tokens publics
     //    (hôtes ayant un vrai token ; ignore les lignes sans api_key, ex. brevo-only)
     const { data: apiKeys } = await supabase
