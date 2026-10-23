@@ -353,6 +353,23 @@ test('LE TEST QUI COMPTE : un bien EN VENTE ne se supprime pas, MEME sans plan t
   // Des canaux ILLISIBLES n'ouvrent jamais l'action la plus destructrice,
   // quel que soit le plan tarifaire (constat H4 de l'etape 0).
   assert.equal(L.suppressionPossible(bienDe({ provider_rate_plan_id: null }), null).possible, null)
+
+  // ⚠ ET LA SECONDE MOITIE DU MEME CORRECTIF (constat de la revue du
+  // 23 octobre 2026). Le 22, le refus sur un canal MAPPE est passe au-dessus du
+  // test du plan tarifaire ; la garde du mappage INDETERMINE est restee
+  // dessous. Un bien sans plan tarifaire dont un canal porte `mappe == null`
+  // rendait `possible: true` : la fiche montrait une pastille « indetermine »
+  // et, juste en dessous, un Supprimer ACTIF.
+  const incertain = [{ ota: 'airbnb', mappe: null, actif: true }]
+  for (const bien of [
+    bienDe({ provider_rate_plan_id: null }),
+    bienDe({ provider_property_id: null }),
+    bienDe()
+  ]) {
+    const r = L.suppressionPossible(bien, incertain, { releveDuCompte: '2026-10-19T08:00:00Z' })
+    assert.equal(r.possible, null, `plan ${bien.provider_rate_plan_id} / ref ${bien.provider_property_id}`)
+    assert.equal(r.motif, 'mapping_inconnu')
+  }
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
