@@ -27,6 +27,15 @@
 //   3. la correction ne peut que FAIRE MONTER le taux, jamais le baisser ;
 //   4. au moins une fenetre doit porter une fermeture declaree, sinon la preuve
 //      est vide — un verificateur qui n'a rien lu doit echouer.
+//   5. ⚠ ET LA FENETRE TEMOIN DOIT MONTRER UN ECART. L'assertion 4 ne suffit
+//      pas : une fermeture declaree que `retirerDeLaVente` a DEJA fermee au
+//      calendrier donne un ecart NUL, legitimement (c'est la forme normale).
+//      Les trois fenetres pouvaient donc toutes porter des fermetures et le
+//      script conclure « AVANT/APRES CONFORME » sans qu'un seul chiffre ait
+//      bouge — un vert qui ne mesure rien, et sur un taux d'occupation c'est
+//      pire que pas de mesure. La fenetre TEMOIN exige donc un ecart STRICT sur
+//      au moins un bien : si l'exception est supprimee en base ou si la fenetre
+//      la manque, le script echoue au lieu de verdir a vide.
 //
 // Usage : node --env-file=.env.local   scripts/verifier-dette-78.js
 //         node --env-file=.env.staging scripts/verifier-dette-78.js [debut] [fin]
@@ -126,16 +135,35 @@ async function main () {
   // arguments. La troisieme est celle ou la dette MORD : le passe ancien, sans
   // memoire d'intention, ou la convention « un jour passe sans ligne est repute
   // ouvert » s'applique.
+  //
+  // ⚠ LES DEUX PREMIERES SONT RELATIVES, LA TROISIEME EST FIGEE, ET C'EST LA
+  // REGLE DU DEPOT APPLIQUEE DANS LES DEUX SENS : « dates relatives si on lit
+  // l'horloge, dates figees si on injecte le temps ». Les deux premieres
+  // interrogent un etat qui suit l'horloge (le passe recent, le futur proche) :
+  // relatives. La troisieme designe un FAIT HISTORIQUE — l'exception de
+  // 17 jours declaree sur Coeur de vie 23 du 20 septembre au 15 octobre 2025 —
+  // qui ne bouge plus : la figer est la seule façon qu'elle reste reproductible.
+  // Elle etait relative (auj-395 -> auj-370), donc elle DERIVAIT d'un jour par
+  // jour : lancee le 23 octobre 2026 elle couvrait le 23 septembre au
+  // 18 octobre 2025, soit trois jours de l'exception hors fenetre, et le temoin
+  // de Thierry (66,7 %) n'etait deja plus reproductible.
+  const TEMOIN = {
+    nom: 'TEMOIN — passe ancien SANS memoire d intention',
+    debut: '2025-09-20', fin: '2025-10-15', temoin: true
+  }
   const fenetres = process.argv[2] && process.argv[3]
     ? [{ nom: 'fenetre demandee', debut: process.argv[2], fin: process.argv[3] }]
     : [
       { nom: '30 derniers jours', debut: ajouter(auj, -30), fin: ajouter(auj, -1) },
       { nom: 'fermetures a venir (futur)', debut: auj, fin: ajouter(auj, 42) },
-      { nom: 'passe ancien SANS memoire d intention', debut: ajouter(auj, -395), fin: ajouter(auj, -370) }
+      TEMOIN
     ]
+  const avecTemoin = fenetres.some(f => f.temoin)
 
   for (const f of fenetres) {
     console.log(`\n── ${f.nom} : ${f.debut} -> ${f.fin} ──────────────────────`)
+    let ecartsDeLaFenetre = 0
+    let fermeturesDeLaFenetre = 0
     const l = (s, n) => String(s).padEnd(n)
     console.log('  ' + l('bien', 22) + l('TO avant', 13) + l('TO apres', 13)
       + l('RevPAR avant', 15) + l('RevPAR apres', 15) + 'jours retires')
@@ -147,7 +175,7 @@ async function main () {
       const eclatements = duBien.map(x => eclater(x, { pont, joursExclus: exclus, defaultProvider: bien.provider }))
       const jours = joursDeLaPeriode(f.debut, f.fin) || []
       const nbExclus = jours.filter(j => (exclus.has ? exclus.has(j) : !!exclus[j])).length
-      if (nbExclus) avecFermeture++
+      if (nbExclus) { avecFermeture++; fermeturesDeLaFenetre++ }
       const lignesCal = await lignesDuCalendrier(sb, bien.id, f.debut, f.fin)
 
       const capa = new Map()
@@ -160,6 +188,8 @@ async function main () {
       const A = agreger(dans(calculerIndicateurs(eclatements, { granularite: 'jour', capacites: capa, capacitePersonnes: bien.capacity })))
       const B = agreger(dans(calculerIndicateurs(eclatements, { granularite: 'jour', capacites: capb, capacitePersonnes: bien.capacity })))
       const retires = A.ouverts - B.ouverts
+      // L'ECART, au sens de la recette : le taux a reellement bouge sur ce bien.
+      if (retires > 0 && A.to != null && B.to != null && B.to > A.to) ecartsDeLaFenetre++
 
       // ⚠ LES ASSERTIONS, pas seulement l'affichage.
       if (A.nuiteesRef !== B.nuiteesRef || Math.abs(A.caRef - B.caRef) > 0.005) {
@@ -189,6 +219,24 @@ async function main () {
         + (nbExclus ? `  (${nbExclus} jour(s) declare(s) ferme(s))` : '')
         + (A.estimee || B.estimee ? '  [capacite ESTIMEE]' : ''))
     }
+
+    // ⚠ LE TEMOIN TEMOIGNE, OU LE SCRIPT ECHOUE. C'est la seule fenetre dont on
+    // SAIT ce qu'elle doit montrer : une exception declaree sur un passe ancien
+    // sans ligne de calendrier, donc des jours reputes ouverts par convention
+    // que la correction retire. Zero ecart ici ne veut pas dire « rien a
+    // corriger », ça veut dire que la mesure ne mesure plus — exception
+    // supprimee, fenetre qui la manque, ou correction debranchee.
+    if (f.temoin) {
+      if (!fermeturesDeLaFenetre) {
+        ko(`${f.nom} : aucune fermeture declaree sur la fenetre temoin.`
+          + ' La preuve est vide : verifier que l exception existe encore en base.')
+      } else if (!ecartsDeLaFenetre) {
+        ko(`${f.nom} : ${fermeturesDeLaFenetre} bien(s) avec fermeture declaree,`
+          + ' mais AUCUN ecart de taux. Le temoin ne temoigne plus.')
+      } else {
+        console.log(`  → temoin : ${ecartsDeLaFenetre} bien(s) dont le taux MONTE.`)
+      }
+    }
   }
 
   console.log('')
@@ -198,6 +246,10 @@ async function main () {
     process.exit(1)
   }
   console.log(`${avecFermeture} couple(s) bien x fenetre portant au moins une fermeture declaree.`)
+  if (!avecTemoin) {
+    console.log('⚠ FENETRE PASSEE EN ARGUMENT : c est une MESURE, pas la recette.')
+    console.log('  La recette est le lancement sans argument, qui porte la fenetre temoin.')
+  }
   if (echecs) { console.error(`\n${echecs} ECHEC(S). Le lot ne doit pas partir.`); process.exit(1) }
   console.log('AVANT/APRES CONFORME : le numerateur est intact, seul le denominateur retire les')
   console.log('jours declares fermes, et il ne retire jamais plus qu il n y en a de declares.')
