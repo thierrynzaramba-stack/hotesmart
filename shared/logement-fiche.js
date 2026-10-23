@@ -350,6 +350,15 @@ export function enTeteHtml (fiche, outils, { peutModifier = false } = {}) {
 // par aucun écran. La spec §1 interdit le code dormant ; la fiche est son
 // appelant.
 export function fraicheurAffichee (fiche, maintenant = Date.now()) {
+  // ⚠ UN BIEN SANS CANAL NE DIT RIEN DU TOUT — décision de Thierry du 19 octobre
+  // 2026, et ce garde-fou la rend vraie PAR CONSTRUCTION. Recette du 23 octobre :
+  // sur un logement neuf, « Canaux non vérifiés depuis … » s'affichait sous
+  // « Aucun canal relié » — deux phrases qui se contredisent, dont l'une parle
+  // d'une vérification qui n'avait pas ce logement à vérifier.
+  //
+  // La règle vaut AVANT l'échec : un relevé en panne ne dit rien non plus d'un
+  // bien qu'il n'avait pas à regarder.
+  if (Array.isArray(fiche && fiche.canaux) && fiche.canaux.length === 0) return null
   if (releveDuCompteEnEchec([fiche])) return { cle: 'fiche.canaux_echec', valeurs: null, echec: true }
   const f = fraicheurDuCompte([fiche], maintenant)
   if (!f) return null
@@ -439,7 +448,13 @@ export const CHAMPS = [
     depuis: (b) => b.code_postal },
   { nom: 'city', bloc: 'logement', cle: 'fiche.champ_ville', type: 'texte', max: 100,
     depuis: (b) => b.ville },
-  { nom: 'country', bloc: 'logement', cle: 'fiche.champ_pays', type: 'texte', max: 2,
+  // ⚠ UN CHOIX, PAS UN CODE A TAPER (recette de Thierry, 23 octobre 2026). La
+  // case affichait « FR » : l'hote lit un code ISO la ou l'ecran de creation lui
+  // propose « France ». Et il devait CONNAITRE le code pour en changer.
+  // Memes six pays que la creation, memes cles.
+  { nom: 'country', bloc: 'logement', cle: 'fiche.champ_pays', type: 'choix', max: 2,
+    choix: [['FR', 'nouveau.pays_fr'], ['BE', 'nouveau.pays_be'], ['CH', 'nouveau.pays_ch'],
+      ['ES', 'nouveau.pays_es'], ['IT', 'nouveau.pays_it'], ['PT', 'nouveau.pays_pt']],
     depuis: (b) => b.pays },
   { nom: 'base_price', bloc: 'prix', cle: 'fiche.prix_base', type: 'montant',
     grille: true, depuis: (b) => b.prix_de_base },
@@ -556,9 +571,19 @@ function ligneSaisieHtml (champ, bien, outils) {
     champ.grille ? 'data-grille="1"' : '',
     champ.euros ? 'data-euros="1"' : ''
   ].filter(Boolean).join(' ')
+  // ⚠ UN CHOIX SE REND EN `select`, ET IL PORTE LES MEMES REPERES QUE L'INPUT
+  // (`data-champ`, `fic-saisie`) : la page ecoute `change` sur `[data-champ]`,
+  // et un `select` emet `change` comme un champ de texte. Le cablage
+  // d'enregistrement ne bouge donc pas.
+  const saisie = champ.type === 'choix'
+    ? `<select id="${id}" name="${esc(champ.nom)}" data-champ="${esc(champ.nom)}" class="fic-saisie">`
+      + champ.choix.map(([code, cle]) =>
+        `<option value="${esc(code)}"${String(val) === code ? ' selected' : ''}>${esc(t(cle))}</option>`).join('')
+      + '</select>'
+    : `<input ${attrs}>`
   return `<div class="fic-ligne fic-ligne--saisie" data-ligne="${esc(champ.nom)}">
     <label class="fic-ligne__cle caption" for="${id}">${esc(t(champ.cle))}</label>
-    <span class="fic-ligne__val"><input ${attrs}></span>
+    <span class="fic-ligne__val">${saisie}</span>
     <span class="fic-sauve caption" data-etat aria-live="polite"></span>
     <p class="fic-erreur caption" data-erreur hidden></p>
   </div>`

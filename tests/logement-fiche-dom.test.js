@@ -1688,3 +1688,45 @@ test('la classe de la note est déclarée dans la page', () => {
   const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'logement.html'), 'utf8')
   assert.match(page, /\.fic-dlg__note\s*\{/)
 })
+
+test('LE TEST QUI COMPTE : le pays se CHOISIT, et s affiche en clair', () => {
+  // ⚠ RECETTE DE THIERRY, 23 octobre 2026 : la case affichait « FR ». L hôte
+  // lisait un code ISO là où l écran de création lui propose « France » — et il
+  // devait CONNAÎTRE le code pour en changer.
+  const d = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, pays: 'BE' } }), OUTILS(), { peutSupprimer: true }))
+  const sel = d.querySelector('[data-champ="country"]')
+  assert.ok(sel, 'le champ pays doit exister')
+  assert.equal(sel.tagName, 'SELECT', 'un choix, pas une saisie libre')
+  assert.equal(sel.value, 'BE', 'la valeur envoyée reste le CODE : c est ce que le serveur attend')
+  const choisi = [...sel.options].find(o => o.selected)
+  assert.equal(choisi.value, 'BE')
+  assert.equal(choisi.textContent, 'Belgique',
+    'le libellé est le NOM du pays, traduit — pas le code ISO que la case montrait')
+  assert.equal(sel.options.length, 6, 'les six pays de l écran de création')
+  // ⚠ LES MÊMES REPÈRES QUE LES AUTRES CASES : la page écoute `change` sur
+  // `[data-champ]`, et un `select` émet `change`. Le câblage ne bouge pas.
+  assert.ok(sel.classList.contains('fic-saisie'))
+})
+
+test('LE TEST QUI COMPTE : un logement SANS canal ne porte aucune ligne de fraîcheur', () => {
+  // ⚠ RECETTE DE THIERRY, 23 octobre 2026 : sur un logement neuf,
+  // « Canaux non vérifiés depuis … » s affichait sous « Aucun canal relié » —
+  // deux phrases qui se contredisent, dont l une parle d une vérification qui
+  // n avait pas ce logement à vérifier. C est sa décision du 19 octobre, rendue
+  // vraie par construction : « un bien sans canal ne dit rien du tout ».
+  assert.equal(M.fraicheurAffichee({ canaux: [], canaux_vu_le: '2026-10-01T00:00:00Z' }), null)
+  // ⚠ ET LA RÈGLE PASSE AVANT L ÉCHEC : un relevé en panne ne dit rien non plus
+  // d un bien qu il n avait pas à regarder.
+  assert.equal(M.fraicheurAffichee({ canaux: [], canaux_echec: true }), null)
+  // Avec un canal, la ligne revient : c est bien l absence de canal qui l efface.
+  assert.ok(M.fraicheurAffichee({ canaux: [{ ota: 'airbnb' }], canaux_vu_le: '2026-10-01T00:00:00Z' }))
+})
+
+test('et le rendu de la fiche ne montre pas les deux phrases ensemble', () => {
+  const d = doc(M.ficheHtml(
+    fiche({ canaux: [], canaux_vu_le: '2026-10-01T00:00:00Z', canaux_echec: false }), OUTILS(), {}))
+  const texte = d.body.textContent
+  assert.match(texte, /Aucun canal relié/)
+  assert.equal(d.querySelector('.fic-fraicheur'), null,
+    'aucune ligne de fraîcheur sous un logement qui n a aucun canal')
+})
