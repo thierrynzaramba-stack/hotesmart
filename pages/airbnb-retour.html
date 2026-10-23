@@ -36,7 +36,16 @@
     // Deux modes :
     //   POPUP  : fenetre ouverte par l'assistant -> postMessage vers l'opener puis close.
     //   PLEINE PAGE (repli popup bloquee) : on stocke le retour en sessionStorage et on
-    //   renvoie vers biens.html?airbnb_return=1 qui rouvre l'assistant a l'ecran B.
+    //   renvoie vers la page qui PORTE l'assistant, laquelle le rouvre a l'ecran B.
+    //
+    //   ⚠ CE REPLI ETAIT ORPHELIN DEPUIS LA BASCULE V5, ET C'EST MESURE
+    //   (22 octobre 2026) : il renvoyait vers `/logements`, mais
+    //   `bootstrapAirbnbReturn()` n'etait appele que depuis `pages/biens.html`,
+    //   que cette URL ne sert plus. Un hote dont le navigateur bloque les
+    //   popups revenait donc sur la liste, sans assistant et sans message : sa
+    //   connexion Airbnb etait faite chez le partenaire, et perdue ici.
+    //   On revient sur `/pages/connexions`, qui porte l'assistant et qui est
+    //   NON DELEGABLE — rouvrir une connexion est un geste `reglages`.
     (function () {
       var q = new URLSearchParams(location.search)
       var failure = q.get('failure') === '1' || q.get('success') === 'false'
@@ -72,7 +81,7 @@
       // Mode PLEINE PAGE (repli) : stocke et redirige vers l'assistant.
       try { sessionStorage.setItem('airbnb_return', JSON.stringify(payload)) } catch (e) {}
       done(ok, ok ? 'Compte autorisé' : 'Connexion refusée', 'Redirection vers HôteSmart…')
-      setTimeout(function () { location.replace('/logements?airbnb_return=1') }, 800)
+      setTimeout(function () { location.replace('/pages/connexions?airbnb_return=1') }, 800)
     })()
   </script>
 </body>

@@ -60,6 +60,9 @@ const doc = (html) => new JSDOM(`<!doctype html><body><div id="c">${html}</div><
 
 // Une fiche complète, telle que `GET /api/logement?id=` la rend.
 const fiche = (extra = {}) => ({
+  // Le defaut est « le compte a ete releve » : c'est le cas courant, et c'est
+  // ce que l'endpoint descend depuis le 23 octobre 2026.
+  canaux_releve_fait: true,
   bien: {
     id: 'b1', nom: 'La bulle', ville: 'Bagnères', pays: 'FR', adresse: '1 rue X',
     code_postal: '65200', capacite: 2, photo_url: null, devise: 'EUR',
@@ -247,9 +250,22 @@ test('LE TEST QUI COMPTE : les motifs sont ceux du SERVEUR, découverts dans son
   // serveur sans qu une seule ligne ait l air fausse, et le fourre-tout
   // « Impossible de vérifier ses canaux » absorbe l écart en silence.
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'logement', 'lecture.js'), 'utf8')
-  const corps = src.slice(src.indexOf('function suppressionPossible'))
-  const motifs = [...new Set([...corps.slice(0, corps.indexOf('\n}')).matchAll(/motif:\s*'([a-z_]+)'/g)]
-    .map(m => m[1]))]
+  // ⚠ LE CORPS SE DELIMITE PAR APPARIEMENT D ACCOLADES, PAS AU PREMIER `\n}`.
+  // Mesure du 22 octobre 2026 : une signature ecrite sur trois lignes commence
+  // une ligne par `}` — la tranche devenait VIDE, zero motif decouvert, et ce
+  // test rougissait pour une raison qui n avait rien a voir avec ce qu il
+  // garde. Le depot a deja paye ce defaut deux fois (un `slice` coupe au
+  // premier `{`, un autre sur un nombre d octets).
+  const debut = src.indexOf('function suppressionPossible')
+  const ouvre = src.indexOf('{', src.indexOf(')', debut))
+  let prof = 0
+  let fin = ouvre
+  for (; fin < src.length; fin++) {
+    if (src[fin] === '{') prof++
+    else if (src[fin] === '}') { prof--; if (prof === 0) break }
+  }
+  const corps = src.slice(ouvre, fin)
+  const motifs = [...new Set([...corps.matchAll(/motif:\s*'([a-z_]+)'/g)].map(m => m[1]))]
   assert.ok(motifs.length >= 4, `${motifs.length} motif(s) découvert(s) : la découverte a échoué`)
   // ⚠ ET LE CAS GÉNÉRAL, PAS SEULEMENT LES DEUX NOMS EN DUR (re-revue de
   // 3dddb14) : un motif ajouté demain au serveur tomberait en silence dans le
@@ -1622,4 +1638,53 @@ test('sans r\u00e9ponse du serveur, la d\u00e9duction locale reste en REPLI', ()
   assert.ok(d.querySelector('[data-bind="publier"]'))
   assert.deepEqual(M.publierAffiche({ mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' }, null),
     { montre: true, motif: null })
+})
+
+test('LE TEST QUI COMPTE : la fiche recoit le MEME fait de compte que la carte', () => {
+  // ⚠ UNE REGLE PARTAGEE VIT DANS UN MODULE COMMUN — mais elle doit alors
+  // recevoir la meme donnee des DEUX cotes. `canauxHtml` est partage avec la
+  // carte de la liste : le jour ou la carte a appris a distinguer « aucun canal
+  // relie » de « jamais releve » (23 octobre 2026), la fiche a herite du
+  // changement SANS recevoir le fait, et annoncait « canaux non verifies » sur
+  // un logement dont le compte venait d etre releve. C est la suite complete
+  // qui l a vu, pas moi.
+  // ⚠ `document.textContent` vaut `null` par specification : on lit le corps.
+  const texte = (f) => doc(M.ficheHtml(f, OUTILS(), {})).body.textContent
+
+  assert.match(texte(fiche({ canaux: [], canaux_releve_fait: true })), /Aucun canal relié/)
+
+  const jamais = texte(fiche({ canaux: [], canaux_releve_fait: false }))
+  assert.match(jamais, /Canaux non vérifiés/)
+  assert.doesNotMatch(jamais, /Aucun canal relié/)
+})
+
+test('LE TEST QUI COMPTE : la confirmation dit ce qui RESTE, pour un bien Beds24', () => {
+  // ⚠ DÉCISION DE THIERRY, 23 octobre 2026. Le serveur ne touche à rien chez le
+  // partenaire pour ces biens — la garde du `DELETE` au channel manager est
+  // réservée aux biens du canal — mais rien ne le disait à l'hôte, qui pouvait
+  // croire qu'il efface son annonce en même temps que son logement.
+  const t2 = (k) => k
+  assert.equal(M.noteDeSuppression({ beds24_de_l_hote: true }, t2), 'fiche.supprimer_annonce_reste')
+  assert.equal(M.noteDeSuppression({ beds24_de_l_hote: false }, t2), null)
+  assert.equal(M.noteDeSuppression({}, t2), null)
+  assert.equal(M.noteDeSuppression(null, t2), null)
+})
+
+test('la note est une NOTE, pas un élément de la liste des pertes', () => {
+  // La liste énumère ce qui sera effacé ; cette phrase dit l'inverse. L'écrire
+  // parmi les pertes se lirait comme une perte de plus.
+  const d = doc(M.dialogueHtml(OUTILS()))
+  const note = d.querySelector('[data-dlg="note"]')
+  assert.ok(note, 'le dialogue doit porter une zone de note')
+  assert.ok(note.hasAttribute('hidden'), 'masquée tant qu il n y a rien à dire')
+  assert.equal(note.tagName, 'P', 'un paragraphe, pas un `li`')
+  assert.ok(!d.querySelector('[data-dlg="liste"]').contains(note),
+    'et elle vit HORS de la liste des effacements')
+})
+
+test('la classe de la note est déclarée dans la page', () => {
+  // Même règle que sur l écran de création : une classe posée sans être
+  // déclarée donne un texte qu on ne distingue de rien.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'logement.html'), 'utf8')
+  assert.match(page, /\.fic-dlg__note\s*\{/)
 })

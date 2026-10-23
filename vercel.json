@@ -104,7 +104,7 @@
     },
     {
       "source": "/logements/nouveau",
-      "destination": "/pages/biens-nouveau"
+      "destination": "/pages/logement-nouveau"
     },
     {
       "source": "/logements/:id",

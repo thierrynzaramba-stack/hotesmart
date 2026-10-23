@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="fr" dir="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HôteSmart</title>
+<link rel="icon" href="/shared/logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/shared/theme.css">
+<link rel="stylesheet" href="/shared/ui.css">
+<!-- PAGE « AJOUTER UN LOGEMENT » — refonte UI V5, lot Logements, ÉTAPE 4.
+     Elle remplace `pages/biens-nouveau.html`, que `/logements/nouveau` servait
+     jusqu'ici : l'étape 3 avait livré l'URL V5 sur l'ancien écran, en attendant
+     celui-ci.
+
+     INVENTAIRE (règle « la forme ne supprime jamais le fond »). Les DIX champs
+     de l'ancien écran sont conservés, dans le même ordre et avec les mêmes
+     bornes : nom, capacité, devise, prix de base, voyageurs inclus, supplément
+     par voyageur, adresse, code postal, ville, pays. Trois sont obligatoires —
+     nom, capacité, prix de base — et le prix de base l'est pour deux raisons
+     que l'hôte ne voit pas : il sert de plancher au plan tarifaire provisionné
+     et il autorise l'activation d'un canal (`lib/garde-activation.js`). Rien
+     n'est retiré, rien n'est ajouté.
+
+     CE QUE L'ANCIEN ÉCRAN N'AVAIT PAS :
+     · l'i18n (il était en texte dur, en français seulement) ;
+     · les jetons de `theme.css` — il portait cinq hexas en dur, dont deux
+       rouges qui n'étaient pas ceux de la charte ;
+     · le refus DIT au membre délégué. Il montrait le formulaire à tout le
+       monde, et le serveur refusait en 403 à l'envoi : l'hôte remplissait dix
+       champs pour rien.
+
+     ⚠ PAGE NON DÉLÉGABLE, ET GARDÉE DEUX FOIS. Créer un logement est un geste
+     de TITULAIRE : `api/channel-property.js` exige `compteDelegue` ET
+     `estTitulaireDuCompte`, et refuse en 403 depuis le 19 octobre 2026 (mesuré
+     sur staging — avant, la garde ne filtrait rien, pour personne, et ce chemin
+     provisionne une propriété chez le partenaire). Le masquage ci-dessous est un
+     confort d'interface, pas la protection.
+
+     Spec : docs/specs/logements-v5/spec-logements-v5.md. -->
+<style>
+  /* ⚠ LA REGLE EN LIGNE, EN PLUS DES FEUILLES. `.nou-form` declare
+     `display: flex` sur l'element qui porte `hidden` : si theme.css ET ui.css
+     echouaient au chargement, cette declaration d'AUTEUR l'emporterait sur le
+     `[hidden] { display: none }` du NAVIGATEUR — les origines ne se comparent
+     pas — et le formulaire deviendrait visible. Quarante caracteres ferment le
+     cas, comme sur les quatorze pages autonomes du depot. */
+  [hidden] { display: none !important; }
+
+  /* La colonne de saisie : une largeur de lecture, pas la page entière. */
+  .nou-page { max-width: 680px; }
+
+  .nou-entete { display: flex; flex-direction: column; gap: 4px;
+    margin-bottom: var(--gap-l); }
+  .nou-retour { display: inline-flex; align-items: center; gap: 6px;
+    color: var(--muted); text-decoration: none; font-size: var(--fs-caption);
+    /* Zone de clic ≥ 44 px (charte §7) : un lien de retour au doigt. */
+    min-height: 44px; }
+  .nou-retour:hover { color: var(--ink); text-decoration: underline; }
+  /* Le chevron du sprite pointe a DROITE : la fiche V5 le tourne, on fait
+     pareil plutot que d'ajouter une icone de plus au sprite. */
+  .nou-retour svg { width: 14px; height: 14px; transform: rotate(180deg); }
+
+  .nou-form { display: flex; flex-direction: column; gap: var(--gap-m); }
+
+  /* ⚠ DEUX COLONNES PAR `auto-fit`, PAS PAR PALIER DE MÉDIA. Même règle que la
+     grille de la liste : la largeur minimale d'un champ décide du nombre de
+     colonnes, donc une seule description de la mise en page. À 390 px les deux
+     champs passent l'un sous l'autre sans requête de média. */
+  .nou-duo { display: grid; gap: var(--gap-m);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr)); }
+
+  .nou-champ { display: flex; flex-direction: column; gap: 6px; }
+  .nou-champ label { font-size: var(--fs-caption); font-weight: 600; color: var(--ink); }
+  .nou-champ input, .nou-champ select {
+    width: 100%; box-sizing: border-box; min-height: 44px;
+    padding: 10px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius); background: var(--surface);
+    color: var(--ink); font: inherit; font-size: var(--fs-body); }
+  .nou-champ input:focus-visible, .nou-champ select:focus-visible {
+    outline: 2px solid var(--ink); outline-offset: 1px; border-color: var(--ink); }
+  /* ⚠ L'ÉTAT FAUTIF SE VOIT AUTREMENT QUE PAR LA COULEUR (charte
+     d'accessibilité) : le bord rouge est doublé du message sous le champ. */
+  .nou-champ input[aria-invalid="true"] { border-color: var(--danger); }
+  .nou-aide { font-size: var(--fs-caption); color: var(--muted); }
+  /* ⚠ LE MESSAGE EST RELIE A SON CHAMP PAR `aria-describedby`. Sans ce lien,
+     un lecteur d'ecran focalise sur le champ annonce « Capacite maximale,
+     invalide » et JAMAIS la phrase qui dit pourquoi — ni la ligne d'aide.
+     Releve en review le 22 octobre 2026 : la page n'en portait aucun. */
+  .nou-erreur-champ { font-size: var(--fs-caption); color: var(--danger); }
+
+  .nou-actions { display: flex; gap: var(--gap-m); align-items: center;
+    flex-wrap: wrap; margin-top: var(--gap-s); }
+  .nou-actions .btn { min-height: 44px; }
+  @media (max-width: 560px) {
+    /* Au téléphone, l'action principale prend la largeur : elle est sous le
+       pouce, et rien d'autre ne la concurrence. */
+    .nou-actions { flex-direction: column; align-items: stretch; }
+    .nou-actions .btn { width: 100%; }
+  }
+
+  /* Une seule zone de message, un seul message à la fois.
+     ⚠ `.nou-message--faute` et non `.danger` : cette derniere n'existe dans
+     aucune des trois feuilles du site — l'ecrire aurait donne un message
+     d'erreur en couleur de texte normale, donc un echec qui ne se voit pas. */
+  .nou-message { margin-top: var(--gap-m); }
+  .nou-message--faute { color: var(--danger); }
+  /* ⚠ LE SUCCES AUSSI DOIT SE VOIR. L'ancien ecran avait un bloc vert ; ma
+     premiere version posait la confirmation en `.caption`, qui ne declare
+     qu'une taille de police — la phrase la plus importante de l'ecran n'avait
+     plus aucune affordance. */
+  .nou-message--fait { color: var(--ok); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a class="topbar__brand" href="/pages/aujourdhui">
+    <img src="/shared/logo.svg" width="34" height="34" alt="">
+    <span>HôteSmart</span>
+  </a>
+  <nav class="topbar__nav" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
+  <div class="topbar__actions">
+    <button type="button" class="btn btn--secondary" style="padding-inline: 14px 8px" data-menu-toggle aria-expanded="false" data-i18n-attr="aria-label:nav.menu">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-menu"/></svg>
+      <span class="avatar" data-bind="initials"></span>
+    </button>
+    <div class="menu" data-menu hidden><!-- nav.js --></div>
+  </div>
+</header>
+
+<main class="log-page nou-page">
+  <div class="nou-entete">
+    <a class="nou-retour" href="/logements">
+      <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+      <span data-i18n="nouveau.retour"></span>
+    </a>
+    <h1 class="h2" data-i18n="nouveau.title"></h1>
+  </div>
+
+  <!-- ⚠ LE REFUS SE DIT AVANT LE FORMULAIRE, pas après dix champs remplis. Un
+       membre délégué recevra 403 à l'envoi : on ne montre jamais ce qui mène à
+       un refus (décision de Thierry, 20 octobre 2026). -->
+  <section class="card nou-message" data-bind="refus" hidden role="status">
+    <p data-i18n="nouveau.refus"></p>
+    <a class="btn btn--secondary" href="/logements" data-i18n="nouveau.retour"></a>
+  </section>
+
+  <form class="nou-form" data-bind="form" hidden novalidate>
+    <div class="nou-champ">
+      <label for="nom" data-i18n="nouveau.nom"></label>
+      <input type="text" id="nom" name="nom" required maxlength="100"
+             autocomplete="off" aria-describedby="nom-aide nom-faute"
+             data-i18n-attr="placeholder:nouveau.nom_exemple">
+      <span class="nou-aide" id="nom-aide" data-i18n="nouveau.nom_aide"></span>
+      <span class="nou-erreur-champ" id="nom-faute" data-erreur="nom" hidden></span>
+    </div>
+
+    <div class="nou-duo">
+      <div class="nou-champ">
+        <label for="capacite" data-i18n="nouveau.capacite"></label>
+        <input type="number" id="capacite" name="capacite" required min="1" max="20" value="2"
+               inputmode="numeric" aria-describedby="capacite-faute">
+        <span class="nou-erreur-champ" id="capacite-faute" data-erreur="capacite" hidden></span>
+      </div>
+      <div class="nou-champ">
+        <label for="devise" data-i18n="nouveau.devise"></label>
+        <select id="devise" name="devise">
+          <option value="EUR" selected>EUR</option>
+          <option value="USD">USD</option>
+          <option value="GBP">GBP</option>
+          <option value="CHF">CHF</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="nou-champ">
+      <label for="prix_base" data-i18n="nouveau.prix_base"></label>
+      <input type="number" id="prix_base" name="prix_base" required min="1" max="100000" step="1"
+             inputmode="decimal" aria-describedby="prix_base-aide prix_base-faute"
+             data-i18n-attr="placeholder:nouveau.prix_base_exemple">
+      <span class="nou-aide" id="prix_base-aide" data-i18n="nouveau.prix_base_aide"></span>
+      <span class="nou-erreur-champ" id="prix_base-faute" data-erreur="prix_base" hidden></span>
+    </div>
+
+    <div class="nou-duo">
+      <div class="nou-champ">
+        <label for="voyageurs_inclus" data-i18n="nouveau.voyageurs_inclus"></label>
+        <input type="number" id="voyageurs_inclus" name="voyageurs_inclus" min="1" max="20" inputmode="numeric"
+               aria-describedby="voyageurs_inclus-aide voyageurs_inclus-faute"
+               data-i18n-attr="placeholder:nouveau.voyageurs_inclus_defaut">
+        <span class="nou-aide" id="voyageurs_inclus-aide" data-i18n="nouveau.voyageurs_inclus_aide"></span>
+        <span class="nou-erreur-champ" id="voyageurs_inclus-faute" data-erreur="voyageurs_inclus" hidden></span>
+      </div>
+      <div class="nou-champ">
+        <label for="supplement" data-i18n="nouveau.supplement"></label>
+        <input type="number" id="supplement" name="supplement" min="0" max="100000" step="1"
+               inputmode="decimal" placeholder="0" aria-describedby="supplement-aide supplement-faute">
+        <span class="nou-aide" id="supplement-aide" data-i18n="nouveau.supplement_aide"></span>
+        <span class="nou-erreur-champ" id="supplement-faute" data-erreur="supplement" hidden></span>
+      </div>
+    </div>
+
+    <div class="nou-champ">
+      <label for="adresse" data-i18n="nouveau.adresse"></label>
+      <input type="text" id="adresse" name="adresse" maxlength="200" autocomplete="street-address" aria-describedby="adresse-faute"
+             data-i18n-attr="placeholder:nouveau.adresse_exemple">
+          <span class="nou-erreur-champ" id="adresse-faute" data-erreur="adresse" hidden></span>
+</div>
+
+    <div class="nou-duo">
+      <div class="nou-champ">
+        <label for="code_postal" data-i18n="nouveau.code_postal"></label>
+        <input type="text" id="code_postal" name="code_postal" maxlength="20" autocomplete="postal-code" aria-describedby="code_postal-faute"
+               data-i18n-attr="placeholder:nouveau.code_postal_exemple">
+            <span class="nou-erreur-champ" id="code_postal-faute" data-erreur="code_postal" hidden></span>
+</div>
+      <div class="nou-champ">
+        <label for="ville" data-i18n="nouveau.ville"></label>
+        <input type="text" id="ville" name="ville" maxlength="100" autocomplete="address-level2" aria-describedby="ville-faute"
+               data-i18n-attr="placeholder:nouveau.ville_exemple">
+            <span class="nou-erreur-champ" id="ville-faute" data-erreur="ville" hidden></span>
+</div>
+    </div>
+
+    <div class="nou-champ">
+      <label for="pays" data-i18n="nouveau.pays"></label>
+      <select id="pays" name="pays" autocomplete="country">
+        <!-- ⚠ TRADUITS, comme le reste. Ecrits en dur, ils affichaient
+             « Belgique » et « Suisse » en francais au milieu d'une page en
+             anglais — et le test d'i18n ne les voyait pas, puisqu'il ne releve
+             que les cles. -->
+        <option value="FR" selected data-i18n="nouveau.pays_fr"></option>
+        <option value="BE" data-i18n="nouveau.pays_be"></option>
+        <option value="CH" data-i18n="nouveau.pays_ch"></option>
+        <option value="ES" data-i18n="nouveau.pays_es"></option>
+        <option value="IT" data-i18n="nouveau.pays_it"></option>
+        <option value="PT" data-i18n="nouveau.pays_pt"></option>
+      </select>
+    </div>
+
+    <div class="nou-actions">
+      <button type="submit" class="btn btn--primary" data-bind="envoyer">
+        <span data-i18n="nouveau.creer"></span>
+      </button>
+      <a class="btn btn--secondary" href="/logements" data-i18n="nouveau.annuler"></a>
+    </div>
+
+    <!-- Le résultat de l'envoi : succès comme échec, une seule zone, annoncée. -->
+    <p class="nou-message caption" data-bind="message" hidden role="status" aria-live="polite"></p>
+  </form>
+
+  <p class="caption muted" data-bind="chargement" data-i18n="nouveau.chargement"></p>
+</main>
+
+<nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
+
+<script src="/shared/i18n/i18n.js"></script>
+<script src="/shared/nav.js"></script>
+<script type="module">
+// ⚠ LA GARDE DE PAGE NON DÉLÉGABLE EN PREMIER, AVANT TOUT RENDU. Elle était
+// déjà la première ligne de l'ancien écran : cette page montre et écrit pour la
+// personne connectée, pas pour le compte sur lequel on travaille.
+import { exigerCompteProprePage } from '/shared/compte-courant.js'
+await exigerCompteProprePage({ nomPage: 'L’ajout d’un logement' })
+
+import { requireAuth } from '/components/auth-guard.js'
+import { initErrorHandler } from '/shared/error-handler.js'
+import { logger } from '/shared/logger.js'
+import { getUser, signOut } from '/shared/supabase.js'
+import { chargerContexte, estTitulaire, peutLire, comptes, compteCourant, basculerVers }
+  from '/shared/compte-courant.js'
+import { api } from '/shared/api-client.js'
+import { valeursDuFormulaire, refusDeSaisie } from '/shared/logement-nouveau.js'
+
+initErrorHandler()
+const t = (k, v) => I18n.t(k, v)
+const $ = (s) => document.querySelector(s)
+
+const session = await requireAuth()
+if (!session) throw new Error('Non authentifié')
+
+// ⚠ `I18n.init()` CHARGE LE DICTIONNAIRE, ET RIEN NE LE FAIT A NOTRE PLACE.
+// Sans lui, `I18n.t` rend la CLE : capture du 22 octobre 2026, la page
+// s'affichait entierement en « nouveau.title », « nouveau.nom »… Et un
+// `I18n.apply(document)` pose au demarrage ne reparait rien — il TAMPONNE les
+// cles brutes par-dessus le texte, puisque le dictionnaire est encore vide.
+// `init()` applique lui-meme a la fin de son chargement ; on n'applique a la
+// main que sur un fragment qu'on vient d'injecter, et cette page n'en injecte
+// aucun.
+await I18n.init()
+// ⚠ AVEC L'IDENTIFIANT, TOUJOURS. Sans lui, `chargerContexte` reinitialisait
+// le contexte et `estTitulaire()` rendait `false` pour tout le monde : l'ecran
+// n'affichait que son refus (releve en review, 22 octobre 2026). Les deux
+// autres pages du lot passent `user.id` ; celle-ci fait pareil.
+const user = await getUser()
+await chargerContexte(user.id)
+
+const form = $('[data-bind="form"]')
+const message = $('[data-bind="message"]')
+const envoyer = $('[data-bind="envoyer"]')
+
+// ⚠ MASQUÉ **ET** GARDÉ PAR LE SERVEUR : voir l'en-tête de la page. Le serveur
+// refuse en 403 un membre non titulaire, et ce masquage ne vaut que parce que
+// `[hidden] { display: none !important }` est en tête de theme.css.
+if (!estTitulaire()) {
+  $('[data-bind="refus"]').hidden = false
+} else {
+  form.hidden = false
+}
+// ⚠ APRES la decision, pas avant : entre les deux, l'ecran ne doit pas etre
+// vide. « Chargement… » reste jusqu'a ce qu'il y ait quelque chose a montrer,
+// et si le contexte echoue il reste affiche plutot que de laisser une page
+// blanche sans explication.
+$('[data-bind="chargement"]').hidden = true
+
+// ⚠ LA NAVIGATION NE SE REND PAS TOUTE SEULE. `shared/nav.js` se termine par
+// `window.HSNav = { render, renderLangSelector, renderMenu }` : charger le
+// script ne remplit rien. Omise, la page perdait les cinq entrées de la barre
+// du haut, le menu — donc la DECONNEXION, la langue et le sélecteur de compte —,
+// les initiales, et laissait au téléphone un bandeau NOIR VIDE collé en bas,
+// pendant que la page réservait 96 px de marge pour lui. L'ancien écran, lui,
+// rendait sa navigation (`renderSidebar`). Relevé en review le 22 octobre 2026.
+const initiales = (user.email || '?').slice(0, 2).toUpperCase()
+const pastille = $('[data-bind="initials"]')
+if (pastille) pastille.textContent = initiales
+
+HSNav.render({ peutLire })
+HSNav.renderMenu({
+  comptes: comptes(), compteActif: compteCourant(),
+  onCompte: id => basculerVers(id), onDeconnexion: () => signOut(),
+  reglages: estTitulaire(), avis: peutLire('avis'),
+  // Mêmes outils que la liste : la section est PROVISOIRE, retirée lot par lot.
+  outils: [
+    peutLire('reservations') && { href: '/apps/yield', key: 'nav.tool_yield', icon: 'i-price' },
+    estTitulaire() && { href: '/apps/serrures', key: 'nav.tool_locks', icon: 'i-key' },
+    estTitulaire() && { href: '/apps/sms', key: 'nav.tool_sms', icon: 'i-send' },
+    estTitulaire() && { href: '/apps/reservation-directe', key: 'nav.tool_direct', icon: 'i-calendar' },
+    estTitulaire() && { href: '/connexions', key: 'nav.tool_connections', icon: 'i-link' },
+    estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
+  ].filter(Boolean)
+})
+
+document.title = `HôteSmart — ${t('nouveau.title')}`
+
+function direMessage (texte, fautif) {
+  message.hidden = false
+  message.textContent = texte
+  message.classList.toggle('nou-message--faute', !!fautif)
+  message.classList.toggle('nou-message--fait', !fautif)
+}
+
+function montrerRefus (refus) {
+  // Les messages de champ d'abord, puis le focus sur le premier fautif : sans
+  // lui, l'hôte doit chercher lui-même lequel des dix champs est en cause.
+  for (const el of form.querySelectorAll('[data-erreur]')) {
+    el.hidden = true
+    el.textContent = ''
+  }
+  for (const el of form.querySelectorAll('input')) el.removeAttribute('aria-invalid')
+  if (!refus) return false
+  const zone = form.querySelector(`[data-erreur="${refus.champ}"]`)
+  const champ = form.querySelector(`#${refus.champ}`)
+  if (zone) { zone.hidden = false; zone.textContent = t(refus.cle) }
+  if (champ) { champ.setAttribute('aria-invalid', 'true'); champ.focus() }
+  return true
+}
+
+let enVol = false
+form.addEventListener('submit', async (e) => {
+  e.preventDefault()
+  if (enVol) return
+  message.hidden = true
+  message.classList.remove('nou-message--faute')
+  message.classList.remove('nou-message--fait')
+
+  // ⚠ LA VALIDATION VIT DANS UN MODULE COMMUN, pas dans la page : c'est la
+  // règle du dépôt (« une règle partagée vit dans un module partagé »), et les
+  // bornes doivent dire la même chose ici et au serveur.
+  const valeurs = valeursDuFormulaire(form)
+  if (montrerRefus(refusDeSaisie(valeurs))) return
+
+  enVol = true
+  envoyer.disabled = true
+  const avant = envoyer.querySelector('span').textContent
+  envoyer.querySelector('span').textContent = t('nouveau.creation')
+  try {
+    const r = await api.channel.createProperty(valeurs)
+    logger.info('logement-nouveau', 'Logement créé', { id: r && r.property && r.property.id })
+    direMessage(t('nouveau.cree'), false)
+    // La redirection laisse le temps de LIRE la confirmation : une bascule
+    // immédiate fait douter que quelque chose ait été enregistré.
+    setTimeout(() => { window.location.href = '/logements' }, 1200)
+  } catch (err) {
+    logger.error('logement-nouveau', err && err.message)
+    // ⚠ LE MESSAGE DU SERVEUR, PAS UN CODE. Les refus de cet endpoint sont
+    // écrits pour l'hôte (« Prix de base requis (>0) », « Seul le titulaire du
+    // compte peut ajouter un logement. ») : les remplacer par un texte générique
+    // perdrait la seule information utile.
+    direMessage(t('nouveau.erreur', { message: (err && err.message) || '' }), true)
+    enVol = false
+    envoyer.disabled = false
+    envoyer.querySelector('span').textContent = avant
+  }
+})
+</script>
+</body>
+</html>

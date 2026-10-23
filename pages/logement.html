@@ -166,6 +166,13 @@
   .fic-dlg::backdrop { background: rgba(0, 0, 0, .45); }
   .fic-dlg__corps { display: flex; flex-direction: column; gap: var(--gap-s); padding: var(--gap-m); margin: 0; }
   .fic-dlg__liste { margin: 0; padding-inline-start: 1.1em; color: var(--muted); }
+  /* ⚠ CE QUI RESTE, ET QUI N'EST PAS UNE PERTE. La note suit la liste des
+     effacements et doit s'en distinguer : alignee sur le texte, pas en puce,
+     et dans la couleur du propos — pas celle de l'alerte. Une classe posee par
+     le script sans etre declaree nulle part donne un texte qu'on ne voit pas
+     comme un texte a part : le depot a deja paye ce defaut sur l'ecran de
+     creation. */
+  .fic-dlg__note { margin: 0; color: var(--muted); }
   .fic-dlg__frappe { display: flex; flex-direction: column; gap: 4px; margin: 0; }
   .fic-dlg__pied { display: flex; justify-content: flex-end; gap: var(--gap-xs); flex-wrap: wrap; }
   .fic-dlg__pied .btn { min-height: 44px; }
@@ -264,7 +271,7 @@ import { chargerContexte, peutLire, peutEcrire, estTitulaire, comptes, compteCou
   from '/shared/compte-courant.js'
 import { api } from '/shared/api-client.js'
 import { ficheHtml, etatHtml, etatDeLaPage, CHAMPS, valeurDeSaisie, canauxDeVente,
-  listeDeSuppression } from '/shared/logement-fiche.js'
+  listeDeSuppression, noteDeSuppression } from '/shared/logement-fiche.js'
 // ⚠ LA PRÉPARATION DE LA PHOTO EST PARTAGÉE avec l'écran d'aujourd'hui : elle
 // porte deux leçons de revue (une image sans dimensions, l'échelle de qualité
 // qui décide « trop lourde ») et une seconde copie les perdrait.
@@ -559,7 +566,7 @@ $('[data-bind="fiche"]').addEventListener('click', (ev) => {
 // ⚠ UNE SEULE FONCTION POUR LES TROIS. Elle rend `true` seulement si l'hôte a
 // validé ; Échap, « Annuler » et un clic à côté rendent `false`. Le défaut
 // sûr est le refus.
-function demander ({ titre, texte, ok, liste = null, frappe = null }) {
+function demander ({ titre, texte, ok, liste = null, note = null, frappe = null }) {
   const dlg = $('[data-bind="dialogue"]')
   if (!dlg || !dlg.showModal) return Promise.resolve(false)
   const part = (nom) => dlg.querySelector(`[data-dlg="${nom}"]`)
@@ -574,6 +581,9 @@ function demander ({ titre, texte, ok, liste = null, frappe = null }) {
     li.textContent = ligne
     ul.appendChild(li)
   }
+  const zoneNote = part('note')
+  zoneNote.hidden = !note
+  zoneNote.textContent = note || ''
   const zoneFrappe = part('frappe')
   const saisie = part('saisie')
   zoneFrappe.hidden = !frappe
@@ -822,6 +832,10 @@ async function supprimerLogement (bouton) {
     titre: t('fiche.supprimer_titre'),
     texte: t('fiche.supprimer_texte'),
     liste: listeDeSuppression(compte, t),
+    // ⚠ CE QUI RESTE, QUAND CE QUI RESTE N'EST PAS EVIDENT. La regle vit dans
+    // le module commun : l'ecran n'a pas a connaitre le partenaire, et un
+    // garde-fou le lui interdit.
+    note: noteDeSuppression(bienCourant, t),
     ok: t('fiche.supprimer_ok'),
     // ⚠ LA FRAPPE DU NOM EST CONSERVÉE (décision de Thierry, étape 2) : c'est
     // la seule garde qui demande de LIRE ce qu'on supprime.

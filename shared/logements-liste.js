@@ -314,6 +314,25 @@ export function etatDeLaPage ({ erreur = null, biens = null } = {}) {
 // que la fiche consomme à l'étape 2, et la réécrire serait la perdre.
 
 export function canauxHtml (bien, { t, esc }) {
+  // ⚠ UN BIEN BEDS24 DE L'HOTE N'A PAS DE LIGNE DE CANAUX — decision de Thierry
+  // du 23 octobre 2026, et elle precede les trois cas ci-dessous parce qu'elle
+  // dit que la QUESTION ne se pose pas.
+  //
+  // Ni « Aucun canal relie » : c'est faux, ses canaux existent, ils passent par
+  // Beds24. Ni « Canaux non verifies » : le releve est celui de l'autre
+  // partenaire, il n'a jamais eu a regarder ce bien, et un compte entierement
+  // Beds24 verrait toutes ses cartes alarmees a vie. On dit d'ou le logement
+  // est pilote, et rien d'autre.
+  //
+  // ⚠ ET LE NOM DE BEDS24 S'ECRIT, lui. La regle « jamais le nom du
+  // partenaire » vise le channel manager en marque blanche, que l'hote n'a pas
+  // choisi et ne doit pas connaitre. Beds24 est le compte DE L'HOTE : il s'y
+  // connecte, il l'a paye, et le taire ne protegerait rien — ca lui cacherait
+  // ou son logement est reellement gere.
+  if (bien.beds24_de_l_hote === true) {
+    return `<span class="caption muted" data-canaux="beds24">${esc(t('logements.gere_beds24'))}</span>`
+  }
+
   const pastilles = pastillesDesCanaux(bien.canaux)
   // ⚠ TROIS CAS, PAS DEUX. `null` = on n'a pas pu lire ; `[]` = lu, et il n'y a
   // aucun canal relié. Les confondre ferait lire « aucun canal » à un hôte qui
@@ -337,13 +356,29 @@ export function canauxHtml (bien, { t, esc }) {
     //
     // ⚠ ET MA PREMISSE ETAIT FAUSSE. J'avais ecrit, en commentaire et dans le
     // message de commit, que « le serveur distingue deja les deux ». Non :
-    // `suppressionPossible` teste `!canaux.length && !vuLe` avec le MEME
-    // `vuLe`, donc sa condition se reduit a `!canaux.length`. Sa branche
-    // `jamais_releve` est degeneree depuis l'etape 0.
+    // `suppressionPossible` testait `!canaux.length && !vuLe` avec le MEME
+    // `vuLe`, donc sa condition se reduisait a `!canaux.length`. Sa branche
+    // `jamais_releve` etait degeneree depuis l'etape 0.
     //
-    // La distinction est un fait de COMPTE (`canaux_releve.vu_le` / `tente_le`)
-    // que l'endpoint ne descend pas. Tant qu'il ne la descend pas, l'ecran n'a
-    // pas la donnee qu'il pretendrait lire. Note en dette.
+    // ⚠ CORRIGE LE 22 OCTOBRE 2026, cote SUPPRESSION seulement (decision de
+    // Thierry) : `suppressionPossible` recoit desormais le fait de COMPTE —
+    // `canaux_releve.vu_le` et l'etat d'echec — et non plus la fraicheur
+    // affichee du bien. Un logement neuf, sur un compte releve, est donc
+    // supprimable ; il etait insupprimable, et la fiche V5 n'a aucun bouton
+    // pour lancer un releve.
+    //
+    // ⚠ ET CETTE CARTE-CI SE CORRIGE LE 23 OCTOBRE 2026, avec la MEME donnee :
+    // `lireListe` descend desormais `canaux_releve_fait`, le fait de COMPTE.
+    // « Aucune ligne de canal » se lisait « aucun canal relie » dans les deux
+    // cas — celui ou on a regarde, et celui ou on n'a jamais regarde.
+    //
+    // ⚠ LES BIENS BEDS24 SONT DEJA SORTIS, EN TETE DE CETTE FONCTION : ils ne
+    // repondent ni « aucun » ni « non verifies », ils disent d'ou ils sont
+    // geres. Ce qui suit ne concerne donc que les biens du canal.
+    if (bien.canaux_releve_fait !== true) {
+      return `<span class="log-pastille log-pastille--indetermine" data-canaux="non-lus">`
+        + `<span class="log-point"></span>${esc(t('logements.canaux_non_lus'))}</span>`
+    }
     return `<span class="caption muted" data-canaux="aucun">${esc(t('logements.aucun_canal'))}</span>`
   }
   // ⚠ L'ETAT SE LIT SANS LA COULEUR NI LE SURVOL (constat de la revue). A 8 px,
