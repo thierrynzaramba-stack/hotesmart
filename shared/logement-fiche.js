@@ -403,6 +403,26 @@ export function venteHtml (fiche, outils, { peutModifier = false } = {}) {
   // propose rien.
   const connecter = connecterHtml(fiche, outils, { peutModifier })
   if (!Array.isArray(fiche.canaux)) return `${nonLu('fiche.canaux_non_lus', outils)}${connecter}`
+  // ⚠ LE MODULE COMMUN ATTEND UN OBJET PLAT, ET LA FICHE EST EN DEUX ETAGES.
+  // `canauxHtml` lit TROIS champs — `beds24_de_l_hote`, `canaux`,
+  // `canaux_releve_fait`. Sur la carte de la liste, les trois vivent cote a
+  // cote dans le bien. Ici, `beds24_de_l_hote` est dans `fiche.bien` (il vient
+  // de `publier()`) et les deux autres a la RACINE : passer `fiche` donnait
+  // `beds24_de_l_hote === undefined`, donc « Canaux non verifies » sur un bien
+  // Beds24 — a vie, puisqu'un bien Beds24 n'a jamais de ligne de releve chez
+  // l'autre partenaire. Mesure du 23 octobre 2026 sur le MEME bien : la carte
+  // disait « Gere depuis votre compte Beds24 », la fiche « Canaux non
+  // verifies ». Les deux phrases que Thierry a declarees fausses.
+  //
+  // ⚠ LES TROIS CHAMPS SONT NOMMES, pas un etalement de `fiche.bien` : c'est
+  // le CONTRAT du module commun, et il doit se lire ici. Un etalement
+  // emporterait aussi ce que `canauxHtml` n'attend pas, et masquerait le jour
+  // ou il apprendra a lire un quatrieme champ.
+  const vueDesCanaux = {
+    beds24_de_l_hote: (fiche.bien || {}).beds24_de_l_hote,
+    canaux: fiche.canaux,
+    canaux_releve_fait: fiche.canaux_releve_fait
+  }
   const f = fraicheurAffichee(fiche)
   const ligne = !f ? ''
     : `<p class="fic-fraicheur caption${f.echec || f.vieux ? ' fic-fraicheur--alerte' : ''}"`
@@ -411,13 +431,13 @@ export function venteHtml (fiche, outils, { peutModifier = false } = {}) {
   // ⚠ « Aucun canal relié » est rendu par `canauxHtml`, le module commun : le
   // redire ici laisserait la CARTE mentir le jour où l'une des deux
   // changerait.
-  if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(fiche, outils)}</p>${ligne}${connecter}`
+  if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(vueDesCanaux, outils)}</p>${ligne}${connecter}`
   // ⚠ `log-canaux`, LA CLASSE DU MODULE COMMUN (revue de 5c0d759). Le bloc
   // utilisait `fic-vente`, qui n'était déclaré NULLE PART : trois pastilles
   // bord à bord, bordures jointives, là où l'en-tête les espaçait. Le correctif
   // du commit précédent n'avait réparé que la moitié du défaut — et l'en-tête,
   // lui, recopiait les quatre propriétés sous un autre nom.
-  return `<div class="log-canaux">${canauxHtml(fiche, outils)}</div>${ligne}${connecter}`
+  return `<div class="log-canaux">${canauxHtml(vueDesCanaux, outils)}</div>${ligne}${connecter}`
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -1658,6 +1658,37 @@ test('LE TEST QUI COMPTE : la fiche recoit le MEME fait de compte que la carte',
   assert.doesNotMatch(jamais, /Aucun canal relié/)
 })
 
+test('LE TEST QUI COMPTE : un bien Beds24 dit la MEME chose sur la fiche et sur la carte', async () => {
+  // ⚠ CONSTAT DE LA REVUE DU 23 OCTOBRE 2026, mesure a l'appui. `canauxHtml`
+  // lit `beds24_de_l_hote`, que `publier()` range dans `fiche.bien` ; la fiche
+  // lui passait l'objet RACINE, ou ce champ n'existe pas. Resultat sur le MEME
+  // bien : la carte « Gere depuis votre compte Beds24 », la fiche « Canaux non
+  // verifies ». Et ce n'etait pas un cas de bord — un bien Beds24 n'a JAMAIS de
+  // ligne de releve chez l'autre partenaire, donc la fiche l'alarmait a vie.
+  //
+  // ⚠ CE TEST COMPARE LES DEUX RENDUS, il ne verifie pas une phrase. Une
+  // assertion sur le texte de la fiche seule repasserait au vert le jour ou la
+  // carte changerait d'avis sans la fiche : c'est exactement le defaut qu'on
+  // repare, et c'est la DIVERGENCE qui doit rougir.
+  const liste = await import('../shared/logements-liste.js')
+  const beds24 = fiche({
+    bien: { ...fiche().bien, beds24_de_l_hote: true },
+    canaux: [], canaux_vu_le: null, canaux_echec: false, canaux_releve_fait: false
+  })
+  const d = doc(M.ficheHtml(beds24, OUTILS(), {}))
+  const surLaCarte = doc(liste.canauxHtml(
+    { beds24_de_l_hote: true, canaux: [], canaux_releve_fait: false }, { t, esc }))
+
+  const marque = (x) => x.querySelector('[data-canaux]').dataset.canaux
+  assert.equal(marque(d), marque(surLaCarte),
+    'la fiche et la carte doivent rendre la MEME marque pour le meme bien')
+  assert.equal(marque(d), 'beds24')
+  assert.match(d.body.textContent, /Géré depuis votre compte Beds24/)
+  // Et surtout : ni l'une ni l'autre des deux phrases fausses.
+  assert.doesNotMatch(d.body.textContent, /Canaux non vérifiés/)
+  assert.doesNotMatch(d.body.textContent, /Aucun canal relié/)
+})
+
 test('LE TEST QUI COMPTE : la confirmation dit ce qui RESTE, pour un bien Beds24', () => {
   // ⚠ DÉCISION DE THIERRY, 23 octobre 2026. Le serveur ne touche à rien chez le
   // partenaire pour ces biens — la garde du `DELETE` au channel manager est

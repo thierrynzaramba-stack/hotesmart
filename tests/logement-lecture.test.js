@@ -942,6 +942,35 @@ test('M2 : une horloge des canaux EN PANNE n est pas « jamais relevee »', asyn
   assert.equal(f.canaux_echec, true, 'mais l echec se DIT — sinon la date vieillit sans que personne sache pourquoi')
 })
 
+test('LE TEST QUI COMPTE : la FICHE descend le fait de compte, dans ses trois etats', async () => {
+  // ⚠ FAUX VERT MESURE LE 23 OCTOBRE 2026 (constat de la revue) : muter
+  // `fiche.canaux_releve_fait = false` dans lib/logement/lecture.js laissait
+  // 139 tests sur 139 au vert. Les quatre assertions qui existaient portaient
+  // sur `lireListe` (`r.biens[].canaux_releve_fait`) ; la FICHE, elle, n'en
+  // avait aucune — et c'est le champ dont `canauxHtml` se sert pour ne pas
+  // confondre « aucun canal relie » avec « jamais releve ».
+  //
+  // Les trois etats, parce qu'ils ne se confondent pas : releve fait, releve
+  // jamais fait (ou en echec), lecture impossible.
+  const fait = await L.lireFiche(ficheComplete(),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(fait.canaux_releve_fait, true, 'horloge posee et `ok` : le compte a bien ete releve')
+
+  const jamais = await L.lireFiche(ficheComplete({ horloge: null }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(jamais.canaux_releve_fait, false, 'aucune ligne de releve : l ecran doit pouvoir le dire')
+
+  const echec = await L.lireFiche(ficheComplete({ enPanne: { canaux_releve: 'timeout' } }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(echec.canaux_releve_fait, false,
+    'un releve en echec n est pas un releve : « aucun canal relie » serait une affirmation sans preuve')
+
+  const illisible = await L.lireFiche(ficheComplete({ enPanne: { canaux_du_bien: 'timeout' } }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(illisible.canaux_releve_fait, null,
+    '`null`, pas `false` : on ne sait pas, et l ecran ne doit pas conclure')
+})
+
 test('M3 : cles illisibles ET droit refuse : le bloc est `refuse`, pas `indisponible`', async () => {
   const f = await L.lireFiche(ficheComplete({ enPanne: { provider_keys_migrated: 'timeout' } }), {
     compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT,
