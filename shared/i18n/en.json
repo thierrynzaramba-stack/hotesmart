@@ -698,7 +698,7 @@
   "fiche.supprimer": "Delete",
   "fiche.supprimer_relie": "Disconnect its channels first.",
   "fiche.supprimer_inconnu": "Its channels cannot be checked right now.",
-  "fiche.supprimer_jamais_releve": "No channel is linked to this property.",
+  "fiche.supprimer_jamais_releve": "We have not been able to check yet where this property is on sale.",
   "fiche.supprimer_aide": "You will confirm by typing its name.",
   "fiche.menage_non_lu": "The cleaning team cannot be read right now.",
   "fiche.menage_vide": "No cleaner on this property.",

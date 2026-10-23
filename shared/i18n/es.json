@@ -698,7 +698,7 @@
   "fiche.supprimer": "Eliminar",
   "fiche.supprimer_relie": "Desconecte primero sus canales.",
   "fiche.supprimer_inconnu": "No se pueden verificar sus canales ahora mismo.",
-  "fiche.supprimer_jamais_releve": "Ningún canal está vinculado a este alojamiento.",
+  "fiche.supprimer_jamais_releve": "Todavía no hemos podido comprobar dónde está en venta este alojamiento.",
   "fiche.supprimer_aide": "Lo confirmará escribiendo su nombre.",
   "fiche.menage_non_lu": "El equipo de limpieza no se puede leer ahora mismo.",
   "fiche.menage_vide": "Ninguna limpiadora en este alojamiento.",

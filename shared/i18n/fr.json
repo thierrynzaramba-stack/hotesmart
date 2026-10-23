@@ -698,7 +698,7 @@
   "fiche.supprimer": "Supprimer",
   "fiche.supprimer_relie": "Déconnectez d’abord ses canaux.",
   "fiche.supprimer_inconnu": "Impossible de vérifier ses canaux pour l’instant.",
-  "fiche.supprimer_jamais_releve": "Aucun canal n’est relié à ce logement.",
+  "fiche.supprimer_jamais_releve": "Nous n’avons pas encore pu vérifier où ce logement est en vente.",
   "fiche.supprimer_aide": "Vous confirmerez en saisissant son nom.",
   "fiche.menage_non_lu": "L’équipe ménage n’est pas lisible pour l’instant.",
   "fiche.menage_vide": "Aucune prestataire sur ce logement.",

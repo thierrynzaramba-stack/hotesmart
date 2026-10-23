@@ -292,7 +292,25 @@ test('LE TEST QUI COMPTE : les motifs sont ceux du SERVEUR, découverts dans son
       `${motif} n est pas dans la table d affichage : il tomberait en silence ` +
       'dans « Impossible de vérifier ses canaux », qui est faux')
     if (motif === 'annonce_reliee') assert.match(r.textContent, /Déconnectez/)
-    if (motif === 'jamais_releve') assert.match(r.textContent, /Aucun canal n’est relié/)
+    // ⚠ CE TEST A FIGÉ UNE PHRASE FAUSSE (constat GRAVE de la revue du
+    // 23 octobre 2026 ; règle 17 de REVIEW.md, « un test peut figer un bug »).
+    // Il exigeait « Aucun canal n'est relié à ce logement » sur une branche
+    // qui, depuis le correctif du 22 octobre, ne se déclenche QUE quand le
+    // relevé du compte n'a jamais abouti ou échoue. Corriger la phrase faisait
+    // rougir la suite : le test protégeait le défaut au lieu du contrat.
+    //
+    // Il garde maintenant la PROPRIÉTÉ, et il la lit dans le dictionnaire
+    // RÉEL, pas dans un littéral de test : la raison a sa propre phrase, et
+    // cette phrase n'AFFIRME RIEN sur les canaux de ce logement — c'est
+    // justement ce que le serveur ignore ici. Reformuler le texte demain ne
+    // touche pas ce test ; y remettre une affirmation, si.
+    if (motif === 'jamais_releve') {
+      assert.equal(r.textContent.trim(), FR['fiche.supprimer_jamais_releve'])
+      assert.notEqual(FR['fiche.supprimer_jamais_releve'], FR['fiche.supprimer_inconnu'],
+        'une panne de lecture et un relevé jamais abouti sont deux causes : deux phrases')
+      assert.doesNotMatch(FR['fiche.supprimer_jamais_releve'], /[Aa]ucun canal/,
+        'le serveur ne sait pas si ce logement est en vente : l écran ne peut pas l affirmer')
+    }
   }
 })
 
