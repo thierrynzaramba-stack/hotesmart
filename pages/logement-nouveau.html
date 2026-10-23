@@ -290,6 +290,12 @@ if (!session) throw new Error('Non authentifié')
 // main que sur un fragment qu'on vient d'injecter, et cette page n'en injecte
 // aucun.
 await I18n.init()
+// ⚠ LE TITRE D'ONGLET SE POSE ICI, PAS A LA FIN DU SCRIPT. Il y etait, apres le
+// rendu de la navigation : toute panne entre les deux le laissait a « HôteSmart »
+// — et c'est ce que la recette du 23 octobre 2026 a vu. Pose juste apres le
+// chargement du dictionnaire, il ne depend plus que de lui.
+document.title = `HôteSmart — ${t('nouveau.title')}`
+
 // ⚠ AVEC L'IDENTIFIANT, TOUJOURS. Sans lui, `chargerContexte` reinitialisait
 // le contexte et `estTitulaire()` rendait `false` pour tout le monde : l'ecran
 // n'affichait que son refus (releve en review, 22 octobre 2026). Les deux
@@ -341,8 +347,6 @@ HSNav.renderMenu({
     estTitulaire() && { href: '/abonnement', key: 'nav.tool_billing', icon: 'i-euro' }
   ].filter(Boolean)
 })
-
-document.title = `HôteSmart — ${t('nouveau.title')}`
 
 function direMessage (texte, fautif) {
   message.hidden = false

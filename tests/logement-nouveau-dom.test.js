@@ -584,3 +584,18 @@ test('aucune saisie restee TEXTE ne passe sur un champ numerique', () => {
     }
   }
 })
+
+test('LE TEST QUI COMPTE : le titre d onglet est posé, et AVANT tout ce qui peut échouer', () => {
+  // ⚠ RECETTE DE THIERRY, 23 octobre 2026 : « le titre d onglet de
+  // /logements/nouveau n est pas traduit ». Il était posé à la FIN du script,
+  // après le rendu de la navigation : toute panne entre les deux laissait
+  // l onglet à « HôteSmart ». Posé juste après `I18n.init()`, il ne dépend plus
+  // que du dictionnaire.
+  const script = sansCommentaires(page.slice(page.indexOf('<script type="module">')))
+  const iInit = script.indexOf('await I18n.init()')
+  const iTitre = script.indexOf('document.title')
+  const iNav = script.indexOf('HSNav.render(')
+  assert.ok(iTitre > iInit, 'le titre vient APRÈS le chargement du dictionnaire')
+  assert.ok(iNav === -1 || iTitre < iNav, 'et AVANT le rendu de la navigation, qui peut échouer')
+  assert.match(script, /document\.title = `HôteSmart — \$\{t\('nouveau\.title'\)\}`/)
+})
