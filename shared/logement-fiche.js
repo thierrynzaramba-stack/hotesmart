@@ -792,6 +792,23 @@ export function listeDeSuppression (compte, t) {
   return lignes
 }
 
+// ⚠ CE QUI RESTE APRÈS LA SUPPRESSION, QUAND CE N'EST PAS ÉVIDENT.
+//
+// Décision de Thierry du 23 octobre 2026. Pour un bien Beds24 de l'hôte, le
+// serveur ne touche à rien chez le partenaire : la garde du `DELETE` au channel
+// manager est réservée aux biens du canal (`api/channel-property.js`, bloc
+// DELETE). Rien ne le disait à l'hôte, qui pouvait croire qu'il efface son
+// annonce en même temps que son logement.
+//
+// ⚠ ET C'EST ICI, PAS DANS LA PAGE. `tests/logement-page-dom.js` interdit à
+// l'écran de nommer un partenaire — garde juste, et c'est le module commun qui
+// porte déjà `beds24_de_l_hote` (shared/logements-liste.js). Écrire la
+// condition dans la page aurait affaibli le garde-fou pour une phrase.
+export function noteDeSuppression (bien, t) {
+  if (!bien || bien.beds24_de_l_hote !== true) return null
+  return t('fiche.supprimer_annonce_reste')
+}
+
 // ─── 5. Ménage ──────────────────────────────────────────────────────────────
 //
 // ⚠ AUCUNE RÈGLE MÉTIER ICI (décision de Thierry, étape 0) : ce qu'est « une
@@ -958,6 +975,13 @@ export function dialogueHtml (outils) {
       <h2 class="h3" id="fic-dlg-titre" data-dlg="titre"></h2>
       <p data-dlg="texte"></p>
       <ul class="fic-dlg__liste" data-dlg="liste" hidden></ul>
+      <!-- ⚠ UNE NOTE, PAS UN ÉLÉMENT DE LA LISTE. La liste énumère ce qui SERA
+           EFFACÉ ; cette phrase dit l'inverse — ce qui RESTE. L'écrire comme un
+           élément de liste parmi les pertes se lirait comme une perte de plus.
+           (Et pas d'accent grave ici : ce commentaire vit DANS un littéral de
+           gabarit, où un accent grave ferme la chaîne — mesuré le 23 octobre
+           2026, dix tests rouges sur « li is not defined ».) -->
+      <p class="fic-dlg__note caption" data-dlg="note" hidden></p>
       <p class="fic-dlg__frappe" data-dlg="frappe" hidden>
         <label class="caption" for="fic-dlg-saisie" data-dlg="frappe-aide"></label>
         <input class="fic-saisie" id="fic-dlg-saisie" data-dlg="saisie" autocomplete="off">

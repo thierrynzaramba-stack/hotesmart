@@ -756,6 +756,7 @@
   "fiche.supprimer_titre": "Supprimer ce logement ?",
   "fiche.supprimer_texte": "Cette suppression est définitive. Seront effacés :",
   "fiche.supprimer_le_bien": "Le logement lui-même, et ses réglages",
+  "fiche.supprimer_annonce_reste": "Votre annonce reste dans votre compte Beds24.",
   "fiche.supprimer_reservations": "{n, plural, one {# réservation} other {# réservations}}",
   "fiche.supprimer_messages": "{n, plural, one {# message} other {# messages}}",
   "fiche.supprimer_menages": "{n, plural, one {# ménage} other {# ménages}}",

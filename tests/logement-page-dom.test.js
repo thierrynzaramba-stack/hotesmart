@@ -853,15 +853,16 @@ test('LE TEST QUI COMPTE : passer en « H\u00f4teSmart envoie mes prix » se con
 
 // \u2500\u2500\u2500 Supprimer, ex\u00e9cut\u00e9 pour de vrai \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 
-function lancerSuppression ({ compte = null, erreurComptage = null, erreurSuppr = null, accepte = true }) {
+function lancerSuppression ({ compte = null, erreurComptage = null, erreurSuppr = null, accepte = true, bien = null }) {
   const demandes = []
   const etats = []
   const appels = []
   const sandbox = {
-    bienCourant: { nom: 'La bulle' },
+    bienCourant: bien || { nom: 'La bulle' },
     idDuBien: 'b1',
     t: (cle, vars) => (vars && vars.n != null) ? `${cle}:${vars.n}` : cle,
     listeDeSuppression: M.listeDeSuppression,
+    noteDeSuppression: M.noteDeSuppression,
     logger: { error: () => {} },
     Number, String,
     $: () => ({}),
@@ -1091,4 +1092,25 @@ test('sans frappe demand\u00e9e, le champ reste cach\u00e9 et ne bloque rien', a
   assert.equal(await p, true)
   assert.match(fonctionDeLaPage('supprimerLogement'), /frappe: nom \?/,
     'la page ne doit pas demander une frappe sans nom \u00e0 frapper')
+})
+
+test('LE TEST QUI COMPTE : la note « votre annonce reste » arrive JUSQU AU dialogue', async () => {
+  // ⚠ UNE FONCTION QUI REND LA BONNE PHRASE NE PROUVE RIEN SI PERSONNE NE
+  // L APPELLE. On exerce le vrai chemin de suppression et on lit ce que la
+  // confirmation a reçu. Décision de Thierry, 23 octobre 2026.
+  const b24 = lancerSuppression({
+    compte: { cle_absente: false, reservations: 0, messages: 0, menages: 0, codes: 0 },
+    bien: { nom: 'La bulle', beds24_de_l_hote: true }
+  })
+  await b24.lancer()
+  assert.equal(b24.demandes[0].note, 'fiche.supprimer_annonce_reste')
+
+  // Et pas pour un bien du canal : là, le serveur SUPPRIME chez le partenaire.
+  const canal = lancerSuppression({
+    compte: { cle_absente: false, reservations: 0, messages: 0, menages: 0, codes: 0 },
+    bien: { nom: 'La bulle', beds24_de_l_hote: false }
+  })
+  await canal.lancer()
+  assert.equal(canal.demandes[0].note, null,
+    'promettre que l annonce reste serait faux pour un bien du canal')
 })

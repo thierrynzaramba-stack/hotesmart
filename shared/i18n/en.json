@@ -756,6 +756,7 @@
   "fiche.supprimer_titre": "Delete this property?",
   "fiche.supprimer_texte": "This deletion is permanent. The following will be erased:",
   "fiche.supprimer_le_bien": "The property itself, and its settings",
+  "fiche.supprimer_annonce_reste": "Your listing stays in your Beds24 account.",
   "fiche.supprimer_reservations": "{n, plural, one {# booking} other {# bookings}}",
   "fiche.supprimer_messages": "{n, plural, one {# message} other {# messages}}",
   "fiche.supprimer_menages": "{n, plural, one {# cleaning} other {# cleanings}}",

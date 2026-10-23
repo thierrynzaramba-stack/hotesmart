@@ -1657,3 +1657,34 @@ test('LE TEST QUI COMPTE : la fiche recoit le MEME fait de compte que la carte',
   assert.match(jamais, /Canaux non vérifiés/)
   assert.doesNotMatch(jamais, /Aucun canal relié/)
 })
+
+test('LE TEST QUI COMPTE : la confirmation dit ce qui RESTE, pour un bien Beds24', () => {
+  // ⚠ DÉCISION DE THIERRY, 23 octobre 2026. Le serveur ne touche à rien chez le
+  // partenaire pour ces biens — la garde du `DELETE` au channel manager est
+  // réservée aux biens du canal — mais rien ne le disait à l'hôte, qui pouvait
+  // croire qu'il efface son annonce en même temps que son logement.
+  const t2 = (k) => k
+  assert.equal(M.noteDeSuppression({ beds24_de_l_hote: true }, t2), 'fiche.supprimer_annonce_reste')
+  assert.equal(M.noteDeSuppression({ beds24_de_l_hote: false }, t2), null)
+  assert.equal(M.noteDeSuppression({}, t2), null)
+  assert.equal(M.noteDeSuppression(null, t2), null)
+})
+
+test('la note est une NOTE, pas un élément de la liste des pertes', () => {
+  // La liste énumère ce qui sera effacé ; cette phrase dit l'inverse. L'écrire
+  // parmi les pertes se lirait comme une perte de plus.
+  const d = doc(M.dialogueHtml(OUTILS()))
+  const note = d.querySelector('[data-dlg="note"]')
+  assert.ok(note, 'le dialogue doit porter une zone de note')
+  assert.ok(note.hasAttribute('hidden'), 'masquée tant qu il n y a rien à dire')
+  assert.equal(note.tagName, 'P', 'un paragraphe, pas un `li`')
+  assert.ok(!d.querySelector('[data-dlg="liste"]').contains(note),
+    'et elle vit HORS de la liste des effacements')
+})
+
+test('la classe de la note est déclarée dans la page', () => {
+  // Même règle que sur l écran de création : une classe posée sans être
+  // déclarée donne un texte qu on ne distingue de rien.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'logement.html'), 'utf8')
+  assert.match(page, /\.fic-dlg__note\s*\{/)
+})
