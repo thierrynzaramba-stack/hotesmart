@@ -80,6 +80,20 @@ if (!jeton) {
         $('b-ok').disabled = true
         try {
           const r = await api.membres.accepter(jeton)
+          // ⚠ LA LISTE DES COMPTES VIENT DE CHANGER, ET LE CACHE NE LE SAIT PAS.
+          // Constat de review : `lireCacheComptes` ne connait que l'expiration
+          // (3 min) et le refus X-Compte. Or « Continuer » renvoie sur l'app
+          // DANS LE MEME ONGLET, donc avec le meme `sessionStorage` : le compte
+          // qu'on vient de rejoindre serait absent du selecteur pendant trois
+          // minutes, juste apres avoir lu « vous avez rejoint le compte de X ».
+          // ⚠ ET PIRE DANS `components/auth-guard.js` : `membreAilleurs` est
+          // calcule sur cette liste perimee, donc faux — un invite peut etre
+          // jete dans l'onboarding « connectez votre logement », en consommant
+          // son forcage a un coup.
+          try {
+            const m = await import('/shared/compte-courant.js')
+            if (m.oublierCacheComptes) m.oublierCacheComptes()
+          } catch { /* module indisponible : le cache expirera seul */ }
           sessionStorage.removeItem('invitation_token')
           afficher(`<div class="ok">Vous avez rejoint le compte de ${esc(r.compte.nom)}.</div>
             <button class="btn" style="margin-top:14px" onclick="location.href='/pages/index.html'">Continuer</button>`)

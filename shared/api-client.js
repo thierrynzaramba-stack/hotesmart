@@ -54,6 +54,29 @@ async function apiCall(endpoint, method = 'GET', body = null) {
       // « vous n'avez pas accès à ce compte ».
       const erreur = new Error(data.error || 'Erreur serveur')
       erreur.status = res.status
+      // ⚠ UN 403 JETTE LE CACHE DE LA LISTE DES COMPTES, et c'est le filet de
+      // sa fenetre de trois minutes. Un acces revoque il y a moins de trois
+      // minutes laisse la personne sur un compte que le serveur refuse : sans
+      // ce geste, elle verrait un ecran casse jusqu'a expiration du cache. On
+      // jette, et le prochain chargement relit la liste pour de vrai.
+      // Import PARESSEUX : `shared/api-client.js` est charge par des pages qui
+      // n'ont pas de contexte de compte, et un import en tete creerait un cycle
+      // (compte-courant importe api-client).
+      // ⚠ SEULEMENT LE REFUS DU COMPTE DEMANDE, ET C'EST UN CONSTAT DE REVIEW.
+      // Ma premiere version jetait le cache sur TOUT 403. Or le depot traite
+      // certains 403 comme un etat NORMAL d'un membre delegue — `properties.js`
+      // (« un refus de droits n'est pas une panne »), `settings.html` (domaine
+      // `equipe` non accorde), `logements-liste.js`, `logement-fiche.js`,
+      // `menages.html`. Un membre sans `reservations` aurait donc vide le cache
+      // a CHAQUE chargement de page : le gain du lot disparaissait pour les
+      // comptes multiples, c'est-a-dire pour la seule population que l'appel
+      // sert. Le refus qui dit vraiment « ta liste de comptes est perimee » est
+      // celui que pose `lib/require-permission.js` sur l'en-tete X-Compte.
+      if (res.status === 403 && data.error === 'Droits insuffisants sur ce compte') {
+        import('/shared/compte-courant.js')
+          .then(m => m.oublierCacheComptes && m.oublierCacheComptes())
+          .catch(() => { /* module indisponible : le cache expirera seul */ })
+      }
       // ⚠ CERTAINS REFUS PORTENT UN CODE DANS `error` ET LA PHRASE DANS
       // `message`. `PATCH /api/channel-property` rend par exemple
       // `{ error: 'plancher_au_dessus_du_prix_de_base', message: 'Le prix
