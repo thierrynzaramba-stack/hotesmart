@@ -9,19 +9,59 @@
 // d'apres-coup qui l'a vu, pas le merge.
 //
 // ⚠ IL APPELLE, IL NE LIT PAS UN MOTIF (regle 20 de REVIEW.md). La decision
-// vit dans `scripts/verifier-numeros-registre.js`, que le chef de file peut
-// lancer a la main avant un merge ; ce test appelle la MEME fonction. Une garde
-// qui reimplementerait le comptage ici mesurerait son propre double.
+// vit dans `scripts/verifier-numeros-registre.js`, que le chef de file lance a
+// la main avant un merge ; ce test appelle la MEME fonction, et il lance AUSSI
+// le script pour lire son CODE DE SORTIE — c'est ce code que `&& git merge`
+// enchaine, et il n'etait couvert par rien (constat GRAVE 2 de la revue du
+// 24 octobre 2026 : trois mutations du CLI laissaient la suite entierement
+// verte, dont une qui imprimait « ECHEC » en sortant 0).
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
+const os = require('node:os')
 const path = require('node:path')
+const { execFileSync } = require('node:child_process')
 
 const V = require('../scripts/verifier-numeros-registre.js')
 
+const SCRIPT = path.join(__dirname, '..', 'scripts', 'verifier-numeros-registre.js')
 const CHEMIN = path.join(__dirname, '..', 'docs', 'kb', 'dettes-v1.md')
 const REGISTRE = fs.readFileSync(CHEMIN, 'utf8')
+
+// Un registre minimal et AUTONOME. Les contre-epreuves du detecteur ne
+// s'epissurent pas dans le registre vivant : un registre sale ferait alors
+// rougir la contre-epreuve EN PLUS du test qui garde le registre, et le lecteur
+// conclurait que le detecteur est casse alors que c'est la donnee (constat
+// MOYEN 2 de la revue du 24 octobre 2026 — mesure : `4 !== 2`, un message qui
+// accuse l'outil).
+const faux = (...rangees) => [
+  '# Registre d essai',
+  '',
+  '| # | Dette | Cout si oubliee | Echeance |',
+  '|---|---|---|---|',
+  ...rangees,
+  '',
+  '## Regle du registre',
+  ''
+].join('\n')
+
+const RANGEE = (n, titre = 'une dette') => `| ${n} | **${titre}** | cout | echeance |`
+
+// Lance le script comme le chef de file le lance, et rend son code de sortie.
+const lancer = (fichier) => {
+  try {
+    execFileSync(process.execPath, [SCRIPT, fichier], { encoding: 'utf8', stdio: 'pipe' })
+    return 0
+  } catch (e) { return e.status }
+}
+
+const dansUnFichier = (contenu, nom = 'registre.md') => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'hs-registre-'))
+  const f = path.join(d, nom)
+  fs.writeFileSync(f, contenu)
+  return f
+}
 
 test('LE TEST QUI COMPTE : aucun numero en double dans le registre des dettes', () => {
   const d = V.doublons(REGISTRE)
@@ -30,53 +70,134 @@ test('LE TEST QUI COMPTE : aucun numero en double dans le registre des dettes', 
     ' — une seule entree par numero, et la plus complete des deux gagne')
 })
 
+test('LE TEST QUI COMPTE : aucune rangee du registre n echappe au comptage', () => {
+  // ⚠ LE CONTROLE QUI MANQUAIT, ET IL VAUT LE DETECTEUR LUI-MEME (constat
+  // GRAVE 1). Un numero gras, barre, indente ou suivi de « bis » n'etait pas
+  // reconnu, donc pas compte, donc jamais en double : le script imprimait
+  // « ok » sur un registre qui portait deux entrees 84. Huit formes sur douze
+  // essayees passaient.
+  const perdues = V.lignesNonComptees(REGISTRE)
+  assert.deepEqual(perdues, [],
+    'rangee(s) non comptee(s) : ' + perdues.map(p => `ligne ${p.ligne} (${p.apercu})`).join(' ; '))
+})
+
 test('un verificateur qui n a rien lu doit ECHOUER, pas rendre vert', () => {
   // ⚠ LA MOITIE QU'ON OUBLIE. Si le registre change de forme — tableau
   // reecrit, colonne deplacee —, un comptage qui lit zero entree rendrait
-  // « aucun doublon » : un vert qui ne mesure rien. Le seuil est volontairement
-  // bas (il y avait 84 entrees le 23 octobre 2026) : il ne surveille pas la
-  // croissance du registre, il refuse une lecture vide ou amputee.
-  assert.ok(V.entreesDuRegistre(REGISTRE).length >= 80,
-    `${V.entreesDuRegistre(REGISTRE).length} entree(s) lue(s) : la forme du registre a change, la garde ne mesure plus rien`)
+  // « aucun doublon » : un vert qui ne mesure rien.
+  // ⚠ ET LE SEUIL N'EST PAS UNE COUVERTURE. Ma premiere version disait qu'il
+  // « refuse une lecture amputee » : c'etait faux, et la revue l'a mesure — a
+  // 82 entrees, en perdre une laisse 81, donc au-dessus du seuil. C'est
+  // `lignesNonComptees` qui refuse l'amputation, pas ce nombre. Le seuil ne
+  // refuse qu'une lecture VIDE ou effondree.
+  const n = V.entreesDuRegistre(REGISTRE).length
+  assert.ok(n >= 80, `${n} entree(s) lue(s) : la forme du registre a change, la garde ne mesure plus rien`)
   assert.deepEqual(V.doublons(''), [], 'un texte vide n a pas de doublon…')
   assert.equal(V.entreesDuRegistre('').length, 0, '…mais il n a aucune entree, et c est CA que le script refuse')
 })
 
 test('LE TEST QUI COMPTE : le cas reel du 23 octobre 2026 — deux entrees 84 — est REFUSE', () => {
-  // La contre-epreuve, gardee dans la suite et pas seulement faite une fois :
-  // on rejoue l'etat exact que le merge avait laisse passer. La ligne ajoutee
-  // est celle de l'autre session, posee AILLEURS dans le fichier — c'est
-  // precisement pour ca que git n'y a vu aucun conflit.
-  const lignes = REGISTRE.split('\n')
-  const i = lignes.findIndex(l => l.startsWith('| 83 '))
-  assert.ok(i > 0, 'le registre doit porter une entree 83 : sinon ce test ne rejoue rien')
-  const avecDoublon = [
-    ...lignes.slice(0, i),
-    '| 84 | **La meme dette, inscrite par l autre session** | cout | echeance |',
-    ...lignes.slice(i),
-    '| 84 | **La meme dette, inscrite par moi** | cout | echeance |'
-  ].join('\n')
-
-  const d = V.doublons(avecDoublon)
+  // Les deux lignes sont posees LOIN l'une de l'autre, comme ce jour-la : c'est
+  // precisement parce qu'elles n'etaient pas au meme endroit du fichier que git
+  // n'y a vu aucun conflit.
+  const d = V.doublons(faux(
+    RANGEE(83), RANGEE(84, 'inscrite par l autre session'),
+    RANGEE(1), RANGEE(2), RANGEE(84, 'inscrite par moi')
+  ))
   assert.equal(d.length, 1, 'un seul numero fautif')
   assert.equal(d[0].numero, 84)
-  assert.equal(d[0].lignes.length, 2, 'et les DEUX lignes sont nommees : sinon il faut les rechercher a la main')
-  assert.notEqual(d[0].lignes[0], d[0].lignes[1])
+  assert.deepEqual(d[0].lignes, [6, 9],
+    'les DEUX lignes sont nommees : sinon il faut rechercher a la main ce que le verificateur vient de trouver')
+})
+
+test('LE TEST QUI COMPTE : les formes qui passaient inapercues sont NOMMEES', () => {
+  // Les quatre formes mesurees par la revue, dont la plus credible : la regle
+  // du registre dit qu'une dette soldee SE BARRE.
+  for (const rangee of [
+    '| **84** | gras | cout | echeance |',
+    '| ~~84~~ | barre | cout | echeance |',
+    '| 84 bis | bis | cout | echeance |',
+    '| #84 | diese | cout | echeance |'
+  ]) {
+    const texte = faux(RANGEE(83), rangee)
+    assert.equal(V.doublons(texte).length, 0, 'ces formes ne sont pas des doublons…')
+    const perdues = V.lignesNonComptees(texte)
+    assert.equal(perdues.length, 1, `…mais ${rangee} doit etre SIGNALEE, pas ignoree`)
+    assert.equal(perdues[0].ligne, 6)
+    assert.equal(lancer(dansUnFichier(texte)), 1, `${rangee} : le script doit sortir en erreur`)
+  }
+  // Et l indentation d UNE espace, licite en Markdown, redevient une entree
+  // ordinaire : elle est comptee, donc elle peut etre en double.
+  const indentee = faux(RANGEE(83), ' | 84 | indentee | cout | echeance |', RANGEE(84))
+  assert.deepEqual(V.lignesNonComptees(indentee), [])
+  assert.equal(V.doublons(indentee).length, 1, 'une rangee indentee compte, et son doublon se voit')
+})
+
+test('la garde ne CRIE PAS sur un bloc de code, une annexe ou un exemple en prose', () => {
+  // ⚠ UNE ALARME QUI SE TROMPE EST UNE ALARME QU'ON APPREND A IGNORER, et
+  // CLAUDE.md ne parle que de ca. Ma premiere version balayait le fichier
+  // entier : un exemple de forme recopie sous « Regle du registre » suffisait a
+  // la faire rougir (constat MOYEN 1).
+  const avecBruit = [
+    '# Registre d essai',
+    '',
+    '| # | Dette | Cout | Echeance |',
+    '|---|---|---|---|',
+    RANGEE(83),
+    RANGEE(84),
+    '',
+    '```',
+    '| 83 | exemple dans un bloc de code | x | y |',
+    '| 84 | exemple dans un bloc de code | x | y |',
+    '```',
+    '',
+    '## Regle du registre',
+    '',
+    'Forme d une entree : `| 84 | **titre** | cout | echeance |`',
+    '',
+    '## Annexe — ordre des lots',
+    '',
+    '| 1 | premier | x | y |',
+    '| 1 | doublon HORS du registre | x | y |',
+    ''
+  ].join('\n')
+  assert.deepEqual(V.doublons(avecBruit), [], 'aucun de ces trois n est un doublon du registre')
+  assert.deepEqual(V.lignesNonComptees(avecBruit), [])
+  assert.deepEqual(V.entreesDuRegistre(avecBruit).map(e => e.numero), [83, 84],
+    'seules les rangees du tableau du registre sont comptees')
+})
+
+test('LE TEST QUI COMPTE : le CODE DE SORTIE du script, sur trois fixtures', () => {
+  // ⚠ C'EST CE CODE QUE `node scripts/… && git merge` ENCHAINE, et il n etait
+  // couvert par rien. Trois mutations du CLI laissaient la suite verte, dont
+  // une qui imprimait « ECHEC numero 84 present 2 fois » et sortait 0.
+  assert.equal(lancer(dansUnFichier(faux(RANGEE(83), RANGEE(84)))), 0,
+    'registre propre : sortie 0, sinon la garde bloque tous les merges')
+  assert.equal(lancer(dansUnFichier(faux(RANGEE(84), RANGEE(1), RANGEE(84)))), 1,
+    'registre a doublon : sortie 1, sinon `&& git merge` passe quand meme')
+  assert.equal(lancer(dansUnFichier('# Rien\n\nPas de tableau ici.\n')), 1,
+    'aucune entree lue : sortie 1 — un verificateur qui n a rien lu doit echouer')
+  assert.equal(lancer(path.join(os.tmpdir(), 'hs-registre-absent-' + Date.now() + '.md')), 1,
+    'fichier illisible : sortie 1')
+  // Et le vrai registre, par le meme chemin que le chef de file.
+  assert.equal(lancer(CHEMIN), 0)
 })
 
 test('le prochain numero libre se CALCULE, et c est max + 1', () => {
-  // ⚠ PAS « nombre d entrees + 1 ». Une dette retiree laisse un trou, et
-  // reutiliser un numero mort ferait pointer deux decisions vers la meme ligne
-  // de journal — l historique est la seule chose qu on ne corrige pas.
+  // ⚠ PAS « nombre d entrees + 1 ». Le registre a un vrai trou — la dette 39 ne
+  // vit que sur une branche non mergee —, donc il compte 82 entrees pour un
+  // maximum de 83. Reutiliser un numero mort ferait pointer deux decisions vers
+  // la meme ligne de journal.
   const n = V.entreesDuRegistre(REGISTRE).map(e => e.numero)
   assert.equal(V.prochainLibre(REGISTRE), Math.max(...n) + 1)
-  assert.equal(V.prochainLibre('| 1 | a | b | c |\n| 7 | a | b | c |'), 8)
+  assert.ok(V.prochainLibre(REGISTRE) > n.length, 'le trou se voit : plus de numeros que d entrees')
+  assert.equal(V.prochainLibre(faux(RANGEE(1), RANGEE(7))), 8)
   assert.equal(V.prochainLibre(''), 1, 'un registre vide commence a 1')
 })
 
 test('l en-tete et le separateur ne sont pas des entrees', () => {
-  // Le jour ou la premiere colonne cesse d etre un nombre, c est cette
-  // assertion qui le dira — pas un doublon fantome.
-  const faux = '| # | Dette | Cout si oubliee | Echeance |\n|---|---|---|---|\n| 12 | vraie | x | y |'
-  assert.deepEqual(V.entreesDuRegistre(faux).map(e => e.numero), [12])
+  const t = faux(RANGEE(12))
+  assert.deepEqual(V.entreesDuRegistre(t).map(e => e.numero), [12])
+  assert.deepEqual(V.lignesNonComptees(t), [],
+    'l en-tete et le separateur ne doivent pas etre signales comme des rangees perdues')
 })
