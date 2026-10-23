@@ -27,7 +27,30 @@
    ============================================================ */
 
 // Les blocs qu'on ne garde JAMAIS. Interdit 2 de la spec.
-const JAMAIS_GARDES = ['etats_arrivee', 'alarmes']
+//
+// ⚠ `taches` A ETE AJOUTE PAR LA REVIEW, ET C'EST LE CONSTAT LE PLUS CHER DE
+// CE LOT. Je gardais `taches` en pensant que c'etait de la charge de travail,
+// pas un état critique. Une tâche d'arrivée PORTE LE CODE D'ACCES EN CLAIR :
+// `lib/cron-arrival-code.js` écrit `summary: "Code d'accès généré pour <nom> :
+// <code> — …"` et `suggested_reply: <le message d'arrivée rendu>`, tous deux en
+// `status: 'pending_validation'`, donc tous deux lus par l'appel d'écran et
+// rendus par la carte. Le code du voyageur partait donc dans le
+// `localStorage` pour 12 h, et se repeignait au premier affichage même si la
+// serrure avait été re-codée depuis — exactement l'interdit que la bannière
+// ci-dessus appelle non négociable, et le motif qu'elle cite : « un code
+// affiché depuis le cache ferait croire à l'hôte qu'un voyageur l'a reçu ».
+//
+// ⚠ ET `arrivees` / `conversations` SORTENT AUSSI, par la §5.1 de la spec, que
+// le même commit a écrite : « Réservations, disponibilités | non » et
+// « Messages, propositions | non | un fil périmé fait répondre deux fois ».
+// `arrivees` portait en plus le snapshot intégral du voyageur (courriel,
+// téléphone, nom, montant) — l'endpoint ne le rend plus du tout.
+//
+// Ce qu'il reste à garder, et c'est l'essentiel du premier affichage : la
+// LISTE DES BIENS avec leurs photos, les notes, et les quatre compteurs de
+// « Fait pour vous », tous à l'échelle de la semaine ou du mois. Rien qui
+// périme en une heure, rien qu'un hôte puisse prendre pour un fait du jour.
+const JAMAIS_GARDES = ['etats_arrivee', 'alarmes', 'taches', 'arrivees', 'conversations']
 
 // Au-delà, on n'affiche plus : une page ouverte depuis la veille montrerait
 // des arrivées d'hier comme celles du jour.

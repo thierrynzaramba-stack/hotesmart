@@ -589,8 +589,19 @@ test('dette 66 : la tuile IA compte la COLONNE seule, au serveur, jamais un faux
   assert.ok(/head: true/.test(blocIa),
     'le compte IA doit etre un COMPTAGE (`head: true`), pas une lecture de lignes')
   assert.ok(/\{ count: 'exact'/.test(blocIa), 'le compte IA ne demande plus de compte exact')
-  assert.ok(/\/origine\/\.test\(error\.message/.test(ecran),
-    'une colonne `origine` absente doit rendre `null` (tuile masquee), jamais 0')
+  // ⚠ PAR LE PREDICAT PARTAGE, PAS PAR SEPT LETTRES DANS UN MESSAGE.
+  // J'avais ecrit `if (!/origine/.test(error.message))`, et ce test en
+  // assertait le LITTERAL. Deux defauts en un : le code classait « colonne
+  // absente, rien a signaler » toute erreur dont le message contient ces sept
+  // lettres — un timeout qui cite la requete, par exemple —, donc la tuile
+  // disparaissait sans rien pousser dans `indisponibles`, l'inverse de ce que
+  // la dette 66 demande ; et le test figeait cette forme, si bien qu'ameliorer
+  // le controle l'aurait fait rougir.
+  // `lib/colonne-absente.js` existe pour ca et teste le code `42703`.
+  assert.ok(/colonneAbsente\(error\)/.test(ecran),
+    'la colonne absente doit se reconnaitre par `colonneAbsente` (code 42703), pas par son message')
+  assert.ok(/require\('\.\.\/\.\.\/lib\/colonne-absente'\)/.test(ecran),
+    'le predicat partage n est pas importe')
   const accueil = lire('pages/aujourdhui.html')
   assert.ok(/f\.messages_ia/.test(accueil) && /d\.n != null/.test(accueil),
     'la tuile se masque quand le compte est indisponible (faits comptes seulement)')

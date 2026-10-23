@@ -33,6 +33,11 @@ const assert = require('node:assert')
 const TITULAIRE = '85e3a0ef-75bd-4c11-a3b7-e2811067dc36'
 const MEMBRE    = '18920ead-f936-4e26-b62e-9a5f52b5e657'
 // La bulle : le bien du membre restreint, sous ses DEUX formes de cle.
+// ⚠ LA REF EST NUMERIQUE EXPRES — C'EST LA FORME BEDS24, et c'est elle qui
+// fait tomber une borne posee sur une colonne `uuid`. Les cinq biens de
+// production sont Channex aujourd'hui, donc leur cle provider est elle-meme un
+// UUID et le defaut y est inerte : un banc qui ne prendrait que des UUID ne
+// verrait jamais rien. Le dual-provider Beds24 est PERMANENT (CLAUDE.md).
 const BULLE_UUID = '091d9abf-ff86-45ce-8123-3425e6f3900f'
 const BULLE_REF  = '209413'
 // Et le bien d'a cote, celui qu'il ne doit jamais voir, sous ses deux formes.
@@ -40,6 +45,21 @@ const AUTRE_UUID = 'cccccccc-1111-4222-8333-444444444444'
 const AUTRE_REF  = '11111'
 
 const TOUS_DOMAINES = ['reservations', 'menages', 'messages', 'avis', 'reglages']
+
+// ⚠ ET LE BANC CONNAIT LE TYPE DES COLONNES, PARCE QUE SON ABSENCE A LAISSE
+// PASSER UN DEFAUT BLOQUANT. Ma premiere version implementait `.in` par une
+// comparaison de CHAINES, sans typage : elle ne pouvait donc pas voir qu'une
+// colonne `uuid` ne compare pas une valeur mal formee — elle la REFUSE, et
+// fait echouer la requete ENTIERE en `22P02`. Le code poussait l'union des
+// deux formes de cle du perimetre dans `.in('id', …)` sur `properties.id`, et
+// ce fichier ASSERTAIT ce comportement comme un contrat (`deepEqual(valeurs,
+// refs.map(String))`) : le test figeait le bug. La review l'a mesure contre la
+// production, et le banc le reproduit maintenant.
+//
+// Colonnes `uuid` mesurees le 23 octobre 2026 (`.in(col, ['209413'])` rend
+// 22P02) ; toutes les autres colonnes de bien de ces tables sont `text`.
+const COLONNES_UUID = new Set(['properties.id', 'price_display_log.property_id'])
+const EST_UUID = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/
 
 // ⚠ LE BANC APPLIQUE LES FILTRES, ET C'EST LE POINT DE TOUT CE FICHIER.
 // Un double qui rend ses lignes sans regarder les filtres ne peut prouver
@@ -85,7 +105,8 @@ function tient (ligne, f) {
 // cloisonnement passe donc par le couple `property_id` + `booking_id`, et c'est
 // precisement ce qu'on veut voir partir en requete.
 function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
-                 methode = 'GET', lignes = {}, pannes = [] } = {}) {
+                 methode = 'GET', lignes = {}, pannes = [], erreurs = {},
+                 instant = null, pages = null, notesLevent = false } = {}) {
   const requetes = []
   const notesVues = []
   const client = {
@@ -102,11 +123,41 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
         gte (c, v) { r.filtres.push(['gte', c, String(v)]); return q },
         lte (c, v) { r.filtres.push(['lte', c, String(v)]); return q },
         order () { return q },
+        range (a, b) { r.plage = [a, b]; return q },
         limit (n) { r.limite = n; return q },
         then (ok, ko) {
+          // La colonne typee `uuid` REFUSE, elle ne compare pas.
+          for (const f of r.filtres) {
+            const col = `${table}.${f[1]}`
+            if (!COLONNES_UUID.has(col)) continue
+            const vals = f[0] === 'in' ? f[2] : [f[2]]
+            const mauvaise = vals.find(v => v != null && !EST_UUID.test(String(v)))
+            if (mauvaise !== undefined) {
+              return Promise.resolve({ data: null, count: null, error: {
+                code: '22P02',
+                message: `invalid input syntax for type uuid: "${mauvaise}"`
+              } }).then(ok, ko)
+            }
+          }
+          if (erreurs[table]) {
+            return Promise.resolve({ data: null, count: null, error: erreurs[table] }).then(ok, ko)
+          }
           if (pannes.includes(table)) {
             return Promise.resolve({ data: null, count: null, error: { message: `panne ${table}` } })
               .then(ok, ko)
+          }
+          // Une base qui rend des PAGES PLEINES : de quoi eprouver la
+          // pagination sans fabriquer mille lignes a la main.
+          // Seules les lectures PAGINEES (celles qui portent un `range`) sont
+          // servies par pages : la preuve de transmission, elle, est bornee par
+          // `.limit`, et la compter ici fausserait la mesure.
+          if (pages && pages[table] && r.plage) {
+            const page = Math.floor(r.plage[0] / 1000)
+            const plein = page < pages[table]
+            const lot = Array.from({ length: plein ? 1000 : 3 },
+              (_, i) => ({ id: `${page}-${i}`, booking_id: `B${page}-${i}`,
+                           property_id: String(BULLE_REF), user_id: TITULAIRE }))
+            return Promise.resolve({ data: lot, count: lot.length, error: null }).then(ok, ko)
           }
           const gardees = (lignes[table] || [])
             .map(l => (l.user_id === undefined ? { ...l, user_id: TITULAIRE } : l))
@@ -127,8 +178,17 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
   // ⚠ LA GARDE EST DOUBLEE EN ENTIER, SINON LE CONTEXTE SERAIT CELUI DU VRAI
   // MODULE. Et elle rend la MEME forme que la vraie : `{ ok, accountUserId,
   // contexte }` — verifiee contre `lib/require-permission.js`.
+  // ⚠ ON CHARGE AVANT DE CAPTURER, ET J'AVAIS FAIT L'INVERSE. Je lisais
+  // `require.cache[...]` AVANT le `require`, donc au premier appel le cache
+  // etait vide, `vraieGarde` valait `null`, et le double ne portait QUE
+  // `contexteDEcran` : `UUID_RE` — que l'endpoint importe du meme module —
+  // devenait `undefined`, et chaque bloc levait `Cannot read properties of
+  // undefined (reading 'test')`. Un double PARTIEL qui perd un export est le
+  // piege que CLAUDE.md decrit, et je venais de le reproduire dans le banc
+  // cense prouver l'isolation.
   const absGarde = require.resolve('../lib/require-permission')
-  const vraieGarde = require.cache[absGarde] ? require.cache[absGarde].exports : null
+  require('../lib/require-permission')
+  const vraieGarde = require.cache[absGarde].exports
   const permissions = refs === null && !titulaire
     ? { property_scope: 'all', property_ids: [], property_refs: [] }
     : { property_scope: 'selected',
@@ -142,7 +202,6 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
         profil: { active: true, accepted_at: '2026-01-01', member_user_id: MEMBRE,
                   account_user_id: TITULAIRE },
         permissions }
-  require('../lib/require-permission')
   require.cache[absGarde].exports = Object.assign({}, vraieGarde, {
     contexteDEcran: async () => ({
       ok: true, userId: contexte.userId, accountUserId: TITULAIRE, contexte
@@ -155,6 +214,9 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
   require.cache[absNotes].exports = Object.assign({}, vraiNotes, {
     notesDuPerimetre: async (sb, opts) => {
       notesVues.push(opts)
+      // ⚠ IL LEVE PAR CONCEPTION (`lib/stats-avis.js` : « `<option>` n'est pas
+      // honore »), et c'est l'option qui eprouve l'enveloppe des blocs.
+      if (notesLevent) throw new TypeError('q.in is not a function')
       return { global: { note_sur_5: 4.7, notes: 42 }, par_bien: {}, periode: '30j' }
     }
   })
@@ -173,10 +235,26 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
     status (c) { this.codes.push(c); return this },
     json (o) { this.corps = o; return this } }
 
+  // ⚠ L'HORLOGE EST FIGEE PAR UNE SOUS-CLASSE DE `Date`, pas par `Date.now`
+  // seul : `jourParis` lit `new Date()`, et stubber l'un sans l'autre fabrique
+  // des echecs qui n'ont rien a voir (lecon de `tests/outils/horloge-decalee.js`).
+  const VraiDate = Date
+  const figer = () => {
+    if (!instant) return
+    const t = new VraiDate(instant).getTime()
+    class DateFigee extends VraiDate {
+      constructor (...a) { super(...(a.length ? a : [t])) }
+      static now () { return t }
+    }
+    globalThis.Date = DateFigee
+  }
+
   const rendre = async () => {
+    figer()
     try {
       await handler({ method: methode, headers: {}, query: {} }, res)
     } finally {
+      globalThis.Date = VraiDate
       require.cache[absSdk].exports.createClient = vraiCreate
       if (vraieGarde) require.cache[absGarde].exports = vraieGarde
       require.cache[absNotes].exports = vraiNotes
@@ -191,6 +269,13 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
 // Les filtres `.in` qui bornent un bien, par requete.
 const bornes = (r) => r.filtres.filter(f => f[0] === 'in'
   && ['id', 'property_id', 'property_id_ref'].includes(f[1]))
+
+// Ce que la borne d'une colonne DOIT contenir : les UUID seuls sur une colonne
+// `uuid`, les deux formes sur une colonne `text`.
+const borneAttendue = (table, colonne, refs) =>
+  (COLONNES_UUID.has(`${table}.${colonne}`)
+    ? refs.map(String).filter(r => EST_UUID.test(r))
+    : refs.map(String))
 
 // ─── 1. LE TITULAIRE ──────────────────────────────────────────────────────────
 
@@ -244,9 +329,12 @@ test('LE TEST QUI COMPTE : CHAQUE lecture du membre restreint est bornee a ses b
     const b = bornes(r)
     assert.ok(b.length >= 1,
       `${r.table} part SANS borne de bien : le membre y verrait tout le compte`)
-    for (const [, , valeurs] of b) {
-      assert.deepEqual(valeurs, refs.map(String),
-        `${r.table} est bornee sur une autre liste que le perimetre du membre`)
+    for (const [, colonne, valeurs] of b) {
+      // ⚠ LA FORME ATTENDUE DEPEND DE LA COLONNE, et l'exiger identique
+      // partout etait la version qui figeait le bug : sur `properties.id`, une
+      // ref provider numerique ne restreint pas la requete, elle la DETRUIT.
+      assert.deepEqual(valeurs, borneAttendue(r.table, colonne, refs),
+        `${r.table}.${colonne} est bornee sur une autre liste que le perimetre du membre`)
     }
   }
 })
@@ -263,11 +351,27 @@ test('les messages des arrivees proches sont bornes aux reservations en main', a
   const msgs = requetes.filter(r => r.table === 'messages')
   assert.ok(msgs.length >= 1, 'aucune lecture de messages')
   for (const r of msgs) {
-    const parBien = bornes(r)
-    const parResa = r.filtres.filter(f => f[0] === 'in' && f[1] === 'booking_id')
-    assert.ok(parBien.length || parResa.length,
-      'une lecture de messages part sans borne, ni par bien ni par reservation')
+    assert.ok(bornes(r).length,
+      'une lecture de messages part sans borne de BIEN : le membre y verrait tout le compte')
   }
+  // ⚠ LA PREUVE DE TRANSMISSION EXIGE LES DEUX BORNES, ET MA PREMIERE VERSION
+  // ACCEPTAIT L'UNE OU L'AUTRE (`parBien.length || parResa.length`) : retirer
+  // la borne de bien de cette lecture ne faisait donc rougir personne — la
+  // contre-epreuve par mutation l'a montre, et c'etait exactement le constat
+  // de la review.
+  // Un identifiant de reservation Beds24 est numerique et n'est unique QUE par
+  // bien : reutilise sur un autre logement du meme compte, il melangeait les
+  // messages sortants de cet autre logement dans le sac de celui-ci. Si l'un
+  // d'eux contenait les chiffres du code bornes par des non-chiffres (un prix,
+  // un autre code de porte), `verdictDuCode` rendait « transmis » pour une
+  // arrivee dont le code n'a jamais ete envoye : l'hote ne fait pas l'envoi
+  // manuel, et le voyageur arrive devant une porte fermee.
+  const preuve = msgs.filter(r => r.filtres.some(f => f[0] === 'in' && f[1] === 'booking_id'))
+  assert.strictEqual(preuve.length, 1, 'la preuve de transmission ne se lit plus')
+  assert.ok(bornes(preuve[0]).length,
+    'la preuve de transmission part sans borne de BIEN')
+  assert.ok(preuve[0].filtres.some(f => f[0] === 'eq' && f[1] === 'direction' && f[2] === 'outbound'),
+    'la preuve de transmission ne se limite plus aux messages SORTANTS')
   const codes = requetes.filter(r => r.table === 'access_codes')
   assert.ok(codes.length >= 1, 'les codes ne sont plus lus')
   for (const r of codes) {
@@ -297,7 +401,11 @@ test('LE TEST QUI COMPTE : un perimetre VIDE rend un ecran vide, jamais l ecran 
   assert.deepEqual(corps.biens, [])
   assert.deepEqual(corps.taches, [])
   assert.deepEqual(corps.alarmes, [])
-  assert.deepEqual(corps.arrivees, [])
+  // ⚠ `arrivees` NE PART PLUS DANS LA REPONSE : elle emportait le snapshot
+  // INTEGRAL du voyageur (courriel, telephone, nom, montant) pour 200
+  // reservations, vers un navigateur qui ne la lisait nulle part. On garde son
+  // COMPTE, et il doit valoir zero.
+  assert.strictEqual(corps.arrivees_nombre, 0)
   assert.deepEqual(corps.conversations, [])
   // Les compteurs valent ZERO — un fait vrai : il n'a aucun bien. Pas `null`,
   // qui dirait « indisponible », et surtout pas le compte du titulaire.
@@ -311,9 +419,18 @@ test('LE TEST QUI COMPTE : un domaine refuse n interroge meme pas sa table', asy
   // Le masquage par droit ne suffit jamais (regle absolue de CLAUDE.md) : la
   // garde SERVEUR est ici, et elle se mesure a ce qui ne part pas en requete.
   const refs = [BULLE_UUID, BULLE_REF]
+  // ⚠ L'ALARME DE SURRESERVATION EST SOUS `reservations`, PAS `reglages` —
+  // ET CE TEST DISAIT L'INVERSE, PARCE QUE L'ENDPOINT LE DISAIT. Le droit de
+  // lecture doit etre celui de l'endpoint qui l'ACQUITTE
+  // (`api/incidents-acquitter.js` : « une surreservation est un conflit de
+  // reservations »), sinon il bouge dans les deux sens : un profil
+  // `proprietaire` (`reservations: read`, `reglages: none`) perdait ses
+  // alarmes alors que la page lui montre le bouton d'acquittement, et un
+  // membre `reglages: read` / `reservations: none` recevait le detail de
+  // l'incident — nom du bien, nuits en conflit, identifiants des reservations.
   const cas = [
     ['messages', ['agent_tasks', 'messages']],
-    ['reglages', ['automation_incidents']],
+    ['reservations', ['automation_incidents']],
     ['avis', []]
   ]
   for (const [domaine, interdites] of cas) {
@@ -327,6 +444,11 @@ test('LE TEST QUI COMPTE : un domaine refuse n interroge meme pas sa table', asy
     if (domaine === 'avis') {
       assert.strictEqual(notesVues.length, 0, 'les notes sont lues sans le droit `avis`')
       assert.strictEqual(corps.notes, null, 'les notes refusees ne valent pas zero')
+    }
+    if (domaine === 'reservations') {
+      assert.strictEqual(corps.alarmes, null, 'les alarmes refusees valent une liste vide')
+      assert.strictEqual(corps.fait_pour_vous.surreservation, null,
+        'le compteur de surreservation se lit sans le droit `reservations`')
     }
     if (domaine === 'messages') {
       assert.strictEqual(corps.taches, null, 'les taches refusees valent une liste vide')
@@ -387,7 +509,16 @@ test('seul GET est accepte, et l en-tete prive est pose AVANT le refus', async (
 
 test('le cout s annonce : `Server-Timing` et le bloc `cout`', async () => {
   const { res, corps } = await banc({ titulaire: true })()
-  assert.match(res.entetes['server-timing'] || '', /db;desc="\d+ req", total;dur=\d+/)
+  // ⚠ `db;dur` ET `calc;dur`, exigees par la spec §7.2 : c'est la coupe qui
+  // attribue une reponse lente a la base ou au JavaScript. Et `desc` annonce
+  // son compte comme un PLANCHER, parce que deux appels ne se comptent pas
+  // exactement (`etatMenage` a son propre client, `notesDuPerimetre` pagine).
+  const st = res.entetes['server-timing'] || ''
+  assert.match(st, /db;dur=\d+/, 'la part BASE manque')
+  assert.match(st, /calc;dur=\d+/, 'la part CALCUL manque')
+  assert.match(st, /total;dur=\d+/)
+  assert.match(st, /desc="\d+ req \(plancher\)"/,
+    'le compte de requetes doit s annoncer comme un plancher, pas comme un exact')
   assert.ok(Number.isInteger(corps.cout.requetes) && corps.cout.requetes > 0)
   assert.ok(typeof corps.calcule_le === 'string' && corps.calcule_le.endsWith('Z'),
     'l heure du calcul est exigee par la regle d architecture')
@@ -411,4 +542,100 @@ test('une liste PLAFONNEE le dit, pour que l ecran puisse afficher « 200+ »', 
   const { corps } = await banc({ titulaire: true, lignes: { agent_tasks: taches } })()
   assert.ok(corps.tronquees.includes('taches'),
     'une liste au plafond passe pour complete : l ecran affiche un compte faux avec aplomb')
+})
+
+// ─── Les correctifs de la review max, chacun avec sa mesure ───────────────────
+
+test("LE TEST QUI COMPTE : le jour et le lendemain ne se confondent JAMAIS, meme au changement d'heure", async () => {
+  // ⚠ CE DEFAUT SE DECLENCHAIT DEUX JOURS APRES LE COMMIT DU LOT.
+  // `jourParis` ajoutait `n * 86400000` ms, alors que son propre commentaire
+  // promettait « jamais un pas de 24 h ». Le 24 octobre 2026 a 22 h 30 UTC
+  // (Paris 25 octobre 00 h 30, jour de 25 heures), `jour` et `demain` valaient
+  // tous deux « 2026-10-25 » : la fenetre des arrivees devenait UN seul jour,
+  // et aucune arrivee du 26 n'avait d'etat de code — donc aucune invite
+  // « Envoyer le code » pour le voyageur du lendemain.
+  // Au printemps, le miroir : le 27 mars 2027, `demain` sautait au 29.
+  for (const [instant, jour, demain] of [
+    ['2026-10-24T22:30:00Z', '2026-10-25', '2026-10-26'],   // recul de l'heure
+    // ⚠ A 22 h 30 UTC le 27 mars 2027, Paris est encore a UTC+1 : la date
+    // civile est le 27, et le lendemain le 28. L'ancien code rendait 27 et
+    // **29** — il SAUTAIT le 28, le jour de 23 heures.
+    ['2027-03-27T22:30:00Z', '2027-03-27', '2027-03-28'],   // avance de l'heure
+    ['2026-12-31T23:30:00Z', '2027-01-01', '2027-01-02']    // passage d'annee
+  ]) {
+    const { corps, requetes } = await banc({ titulaire: true, instant })()
+    assert.strictEqual(corps.jour, jour, `jour faux a ${instant}`)
+    const arr = requetes.find(r => r.table === 'bookings_snapshot')
+    const bornes = arr.filtres.filter(f => f[1] === 'snapshot->>arrival')
+    assert.deepEqual(bornes.map(f => f[2]).sort(), [demain, jour].sort(),
+      `la fenetre des arrivees n est pas [${jour}, ${demain}] a ${instant}`)
+  }
+})
+
+test('LE TEST QUI COMPTE : les fils se lisent en PAGES, parce que PostgREST coupe a 1000', async () => {
+  // ⚠ MESURE DU 23 OCTOBRE 2026 : 1843 lignes `messages` reelles, et
+  // `.limit(5000)` en rendait 1000. `db-max-rows` coupe SANS erreur, donc mon
+  // drapeau `length >= 5000` ne pouvait jamais se lever : la liste etait deja
+  // tronquee ce jour-la, en silence. Consequence a l'ecran : une arrivee dont
+  // les messages tombaient hors des 1000 lus renvoyait vers la fiche du bien
+  // au lieu de sa conversation, differemment a chaque rechargement.
+  // Apres correctif, le titulaire de production passe de 137 a 221 fils.
+  const { requetes, corps } = await banc({ titulaire: true, pages: { messages: 2 } })()
+  const lectures = requetes.filter(r => r.table === 'messages' && r.plage)
+  assert.strictEqual(lectures.length, 3,
+    `${lectures.length} lecture(s) paginees de fils : la pagination ne tourne pas`)
+  assert.deepEqual(lectures.map(r => r.plage), [[0, 999], [1000, 1999], [2000, 2999]],
+    'les pages ne se suivent pas')
+  assert.ok(Array.isArray(corps.conversations) && corps.conversations.length > 1000,
+    `${(corps.conversations || []).length} fils : la deuxieme page n a pas ete lue`)
+  assert.deepEqual(corps.tronquees, [], 'la troncature est annoncee a tort')
+})
+
+test("LE TEST QUI COMPTE : une colonne absente masque la tuile SANS la dire en panne", async () => {
+  // Dette 66. `42703` = la migration n'est pas encore collee : la tuile se
+  // masque, sans bruit. Toute AUTRE erreur est une panne, et doit se nommer.
+  const a = await banc({ titulaire: true,
+    erreurs: { messages: { code: '42703', message: 'column origine does not exist' } } })()
+  assert.strictEqual(a.corps.fait_pour_vous.messages_ia, null, 'un faux zero est affiche')
+  assert.ok(!a.corps.indisponibles.includes('messages_ia'),
+    'une colonne pas encore creee est annoncee comme une panne')
+
+  const b = await banc({ titulaire: true,
+    erreurs: { messages: { code: '57014', message: 'canceling statement: origine' } } })()
+  assert.strictEqual(b.corps.fait_pour_vous.messages_ia, null)
+  assert.ok(b.corps.indisponibles.includes('messages_ia'),
+    'un timeout dont le message cite « origine » passe pour une colonne absente')
+})
+
+test("LE TEST QUI COMPTE : un bloc qui LEVE n'emporte pas les neuf autres", async () => {
+  // Dix blocs dans un `Promise.all` : une seule exception rejetait le handler,
+  // Vercel rendait 500, et la page degradait TOUT d'un coup — y compris
+  // l'alarme de surreservation, qui disparaissait avec le reste. `lireNotes`
+  // appelle un module qui leve PAR CONCEPTION, et il etait le seul appel
+  // etranger non garde du fichier.
+  const { res, corps } = await banc({ titulaire: true, notesLevent: true })()
+  assert.deepEqual(res.codes, [200], 'l ecran entier part en 500 pour un bloc')
+  assert.strictEqual(corps.notes, null)
+  assert.ok(corps.indisponibles.includes('notes'), 'le bloc en echec ne se nomme pas')
+  // Et les autres blocs ont bien repondu : c'est toute la conception
+  // d'`indisponibles` — un bloc absent n'est pas un ecran absent.
+  assert.ok(Array.isArray(corps.biens))
+  assert.strictEqual(corps.fait_pour_vous.jours, 7)
+  assert.ok(Array.isArray(corps.alarmes), 'l alarme de surreservation est partie avec les notes')
+})
+
+test("LE TEST QUI COMPTE : le statut d'une arrivee suit la MEME regle que la messagerie", () => {
+  // `api/messages.js:585` ecrit `status: snap.status || null`, et
+  // `arriveesProches` filtre par `arr && st && …` : un snapshot SANS statut est
+  // donc exclu la-bas. J'avais mis `|| 'confirmed'` ici, donc inclus. Les deux
+  // ecrans auraient dit le contraire l'un de l'autre sur la meme reservation,
+  // le meme jour — et le module promet que le verdict ne bouge pas d'un iota.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const lu = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+  const ici = (lu('api/ecran/aujourdhui.js').match(/status: \(r\.snapshot \|\| \{\}\)\.status \|\| (\w+)/) || [])[1]
+  const ailleurs = (lu('api/messages.js').match(/status:\s*snap\.status\s*\|\|\s*(\w+)/) || [])[1]
+  assert.strictEqual(ici, 'null', 'le defaut du statut n est pas `null`')
+  assert.strictEqual(ici, ailleurs,
+    `les deux appelants de arriveesProches ne construisent pas le meme statut : ${ici} vs ${ailleurs}`)
 })

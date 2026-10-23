@@ -94,6 +94,15 @@ if (!jeton) {
             const m = await import('/shared/compte-courant.js')
             if (m.oublierCacheComptes) m.oublierCacheComptes()
           } catch { /* module indisponible : le cache expirera seul */ }
+          // ⚠ ET LE CACHE D'ECRAN. L'invite arrive sur un compte NEUF dans le
+          // meme navigateur : le premier affichage lui montrerait les chiffres
+          // du compte precedent. La cle porte le compte, donc ce n'est pas une
+          // fuite entre comptes — mais c'est un ecran qui dit faux au moment
+          // ou l'invite decouvre le produit.
+          try {
+            const c = await import('/shared/cache-ecran.js')
+            if (c.oublierTout) c.oublierTout()
+          } catch { /* module indisponible : la peremption de 12 h rattrapera */ }
           sessionStorage.removeItem('invitation_token')
           afficher(`<div class="ok">Vous avez rejoint le compte de ${esc(r.compte.nom)}.</div>
             <button class="btn" style="margin-top:14px" onclick="location.href='/pages/index.html'">Continuer</button>`)

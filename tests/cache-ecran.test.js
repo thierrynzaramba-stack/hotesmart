@@ -54,18 +54,52 @@ function charger ({ horloge = null } = {}) {
   return { ...sandbox.module.exports, magasin }
 }
 
+// ⚠ CETTE FIXTURE PORTE LE CODE D'ACCES DANS `taches`, ET C'EST LE POINT.
+// `lib/cron-arrival-code.js` ecrit litteralement
+//   summary: `Code d'accès généré pour ${guestName} : ${seamCode} — …`
+//   suggested_reply: <le message d'arrivee rendu, code compris>
+// en `status: 'pending_validation'`. Ma premiere version de ce test mettait
+// `taches: [{ id: 1 }]` et ASSERTAIT que `taches` etait garde : elle gravait
+// donc la violation de l'interdit 2 en contrat. Une fixture qui ne ressemble
+// pas a la donnee reelle ne prouve rien.
+const CODE = '483921'
 const ECRAN = {
   jour: '2026-10-23',
   biens: [{ id: 'b1', name: 'La bulle' }],
-  taches: [{ id: 1 }],
-  // Les trois etats critiques, tels que l'endpoint les rend.
+  taches: [{
+    id: 1, book_id: 'B1', status: 'pending_validation', guest_name: 'Camille',
+    summary: `Code d'accès généré pour Camille : ${CODE} — envoi automatique impossible.`,
+    suggested_reply: `Bonjour Camille, votre code d'entrée est le ${CODE}.`
+  }],
+  // Les etats critiques, tels que l'endpoint les rend.
   etats_arrivee: { B1: { menage: 'fait', codeEtat: 'transmis' } },
   alarmes: [{ id: 9, type: 'overbooking', detail: 'deux resas sur la meme nuit' }],
+  conversations: ['B1', 'B2'],
   notes: { global: { note_sur_5: 4.7 } },
   fait_pour_vous: { messages_ia: 10 }
 }
 
 // ─── Interdit 2 : les etats critiques ─────────────────────────────────────────
+
+test("LE TEST QUI COMPTE : le CODE D'ACCES n'atterrit jamais dans le navigateur", () => {
+  // ⚠ LE CONSTAT LE PLUS CHER DE LA REVIEW DU LOT (b). Je retirais
+  // `etats_arrivee` et `alarmes`, en pensant avoir couvert les etats
+  // critiques — et je gardais `taches`, qui PORTE le code d'acces en clair
+  // dans deux champs. Le code du voyageur partait donc sur le disque pour
+  // 12 h, et se repeignait au premier affichage meme si la serrure avait ete
+  // re-codee depuis : « un code affiche depuis le cache ferait croire a l'hote
+  // qu'un voyageur l'a recu », mot pour mot le motif de l'interdit.
+  const c = charger()
+  c.ecrire('aujourdhui', MOI, COMPTE_A, ECRAN)
+  const brut = [...c.magasin.values()][0]
+  assert.ok(!brut.includes(CODE),
+    "LE CODE D'ACCES EST ECRIT SUR LE DISQUE : " + brut.slice(0, 200))
+  assert.ok(!brut.includes('Code d\'accès'), 'le resume de la tache est garde')
+  assert.ok(!brut.includes('code d\'entrée'), 'la reponse proposee est gardee')
+  const relu = copie(c.lire('aujourdhui', MOI, COMPTE_A).donnees)
+  assert.strictEqual(relu.taches, undefined,
+    'les taches sont gardees : elles portent le code, et un fil perime fait repondre deux fois')
+})
 
 test("LE TEST QUI COMPTE : l'etat du code et l'alarme ne sont JAMAIS ecrits", () => {
   // ⚠ RETIRES A L'ECRITURE, PAS FILTRES A LA LECTURE, et la difference est
@@ -85,9 +119,14 @@ test("LE TEST QUI COMPTE : l'etat du code et l'alarme ne sont JAMAIS ecrits", ()
     "l'ecran pourrait afficher un code d'acces depuis le cache : l'hote croirait que le voyageur l'a recu")
   assert.strictEqual(relu.alarmes, undefined,
     'une surreservation acquittee reapparaitrait, ou une nouvelle serait manquee')
-  // Et le reste est bien garde, sinon le cache ne servirait a rien.
+  assert.strictEqual(relu.conversations, undefined,
+    'un fil perime fait repondre deux fois (spec §5.1)')
+  // Et le reste est bien garde, sinon le cache ne servirait a rien : la liste
+  // des biens, les notes et les compteurs de la semaine — rien qui perime en
+  // une heure, rien qu'un hote puisse prendre pour un fait du jour.
   assert.deepEqual(relu.biens, [{ id: 'b1', name: 'La bulle' }])
-  assert.deepEqual(relu.taches, [{ id: 1 }])
+  assert.deepEqual(relu.notes, { global: { note_sur_5: 4.7 } })
+  assert.deepEqual(relu.fait_pour_vous, { messages_ia: 10 })
   assert.strictEqual(relu.jour, '2026-10-23')
 })
 
@@ -97,7 +136,7 @@ test('la liste des blocs jamais gardes couvre les deux etats critiques de cet ec
   // nomme ce qui DOIT y etre ; le fichier d'isolation nomme ce que l'endpoint
   // rend.
   const { _interne } = charger()
-  for (const bloc of ['etats_arrivee', 'alarmes']) {
+  for (const bloc of ['etats_arrivee', 'alarmes', 'taches', 'arrivees', 'conversations']) {
     assert.ok(_interne.JAMAIS_GARDES.includes(bloc), `${bloc} n'est plus protege`)
   }
 })
@@ -203,6 +242,35 @@ test('un localStorage indisponible ne fait pas planter la page', () => {
 })
 
 // ─── Le cablage de la page ────────────────────────────────────────────────────
+
+test("LE TEST QUI COMPTE : les QUATRE sorties effacent le cache, pas seulement la deconnexion", () => {
+  // ⚠ UN SEUL DES QUATRE CHEMINS LE FAISAIT, ET LA REVIEW LES A COMPTES.
+  // Le module a choisi `localStorage` plutot que `sessionStorage` POUR qu'il
+  // survive a l'onglet ; la contrepartie explicite est l'effacement a la
+  // sortie. Il n'etait cable que dans `shared/supabase.js`. Les trois autres :
+  //   · `components/auth-guard.js` — c'est le cas « un AUTRE utilisateur sur ce
+  //     navigateur », exactement celui qu'on veut couvrir. Il nettoyait deux
+  //     cles de `sessionStorage` et appelait `reinitialiser()`, qui ne touche
+  //     ni au `localStorage` ni a ce cache. Le premier affichage de B montrait
+  //     les logements, les notes et les compteurs de A.
+  //   · `pages/compte.html` — la SUPPRESSION DE COMPTE appelle `signOut()` en
+  //     direct : les chiffres de l'hote restaient sur le disque apres la
+  //     suppression de son compte, jusqu'a 12 h — ou indefiniment, puisqu'une
+  //     cle perimee est refusee a la lecture mais n'est pas effacee.
+  //   · `pages/invitation.html` — l'invite arrive sur un compte NEUF dans le
+  //     meme onglet.
+  const chemins = [
+    ['shared/supabase.js', 'la deconnexion'],
+    ['components/auth-guard.js', 'un autre utilisateur sur ce navigateur'],
+    ['pages/compte.html', 'la suppression de compte'],
+    ['pages/invitation.html', 'l arrivee d un invite']
+  ]
+  for (const [f, quand] of chemins) {
+    const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8')
+    assert.match(src, /cache-ecran/, `${f} (${quand}) ne connait pas le cache des ecrans`)
+    assert.match(src, /oublierTout/, `${f} (${quand}) n efface pas le cache des ecrans`)
+  }
+})
 
 test("LE TEST QUI COMPTE : la page efface le cache a la deconnexion", () => {
   // Sans cela, la personne suivante sur le poste retrouve les chiffres du

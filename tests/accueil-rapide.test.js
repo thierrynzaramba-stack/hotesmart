@@ -808,45 +808,37 @@ test('LE TEST QUI COMPTE : chaque bien recoit la meme chose qu avant, zero compr
     'un bien sans cle provider recoit une note alors qu aucun avis ne peut lui etre rattache')
 })
 
-test('une panne de lecture des notes ne fait pas afficher zero avis', async () => {
-  // ⚠ TEST DE NON-REGRESSION (regle 19 de REVIEW.md, point 2) : il est VERT
-  // contre le code d'avant ce lot, parce que l'ancien `chargerNotes` rendait
-  // deja `null` sur echec. Il ne garde pas un correctif, il garde l'invariant
-  // que le passage de N+1 lectures a UNE ne devait pas casser : une panne reste
-  // une panne, elle ne devient pas « 0 avis ».
-  const p = ouvrirAujourdhui({ sansInit: true, fetchLeve: true })
-  p.interne.etat.biens = biensDeTest
-  p.interne.etat.ecran = { notes: p.corpsDonne }
-  await p.interne.chargerNotes()
-  assert.strictEqual(p.interne.etat.noteGlobale, null, 'une panne se lit « 0 avis » sur la tuile')
-  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
-})
+// ⚠ CES TROIS TESTS PASSAIENT PAR VACUITE, ET LA REVIEW L'A VU.
+// Ils reglaient `fetchLeve`, `corpsIllisible` ou `statut: 503` sur le faux
+// `fetch` — alors que `chargerNotes` ne fait plus AUCUN appel reseau depuis le
+// lot (b). Les trois options etaient donc inertes : les tests prouvaient
+// seulement qu'un bloc `notes` vide ne devient pas zero, en decrivant dans
+// leurs commentaires une panne qu'ils ne provoquaient plus.
+// Ce qu'il faut garder est le meme invariant — « une lecture en echec se DIT,
+// elle ne rend pas des compteurs a zero » — mais contre les formes que
+// l'endpoint produit VRAIMENT : `notes: null` (droit refuse ou lecture
+// indisponible), un bloc illisible, et l'appel d'ecran entierement absent.
+const casSansNote = [
+  ['le bloc est `null` : droit `avis` refuse, ou lecture indisponible', { notes: null }],
+  ['le bloc est illisible : ni global, ni par_bien', { notes: { parasite: 1 } }],
+  ["l'appel d'ecran a echoue : aucun bloc du tout", {}],
+  ["l'appel d'ecran a rendu un corps vide", { notes: {} }]
+]
 
-test("LE TEST QUI COMPTE : un 200 au corps ILLISIBLE n'est pas lu comme « zero avis »", async () => {
-  // `appel()` avale un corps non-JSON : `await r.json().catch(() => ({}))`.
-  // La panne existe pour de vrai — la memoire du projet la porte deja sous
-  // « URL sans /api/v1 : 200 + HTML = 0 bien silencieux ». L'objet vide est
-  // VRAI : tester la veracite de la reponse d'un cote et la cle de l'autre
-  // disait « inconnu » au global et « zero avis », un FAIT, a chaque bien.
-  const p = ouvrirAujourdhui({ sansInit: true, corpsIllisible: true })
-  p.interne.etat.biens = biensDeTest
-  p.interne.etat.ecran = { notes: p.corpsDonne }
-  await p.interne.chargerNotes()
-  assert.strictEqual(p.interne.etat.noteGlobale, null)
-  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null,
-    'un corps illisible fait annoncer « 0 avis » bien par bien')
-})
-
-test('un 503 de l endpoint ne fait pas afficher zero avis non plus', async () => {
-  // Le lot a invente ce 503 : une lecture en echec se DIT, elle ne rend pas
-  // des compteurs a zero. Encore faut-il que la page le traite comme un echec.
-  const p = ouvrirAujourdhui({ sansInit: true, statut: 503, corps: { error: 'Notes illisibles' } })
-  p.interne.etat.biens = biensDeTest
-  p.interne.etat.ecran = { notes: p.corpsDonne }
-  await p.interne.chargerNotes()
-  assert.strictEqual(p.interne.etat.noteGlobale, null)
-  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
-})
+for (const [quoi, ecran] of casSansNote) {
+  test(`LE TEST QUI COMPTE : ${quoi} — « 0 avis » n est jamais affirme`, async () => {
+    const p = ouvrirAujourdhui({ sansInit: true, corps: {} })
+    p.interne.etat.biens = biensDeTest
+    p.interne.etat.ecran = ecran
+    await p.interne.chargerNotes()
+    assert.strictEqual(p.interne.etat.noteGlobale, null,
+      'la tuile affiche un nombre d avis alors que rien n a ete lu')
+    assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null,
+      'un bien recoit « 0 avis », un FAIT, alors que rien n a ete lu')
+    assert.deepEqual(p.urls.filter(u => u.includes('/api/')), [],
+      'la page part en reseau pour se rattraper : le 1 + N reviendrait par la porte de service')
+  })
+}
 
 test("LE TEST QUI COMPTE : une cle de bien heritee d'Object ne devient pas une note", async () => {
   // `par_bien` vient de `JSON.parse`. Pour un bien dont la cle provider vaudrait

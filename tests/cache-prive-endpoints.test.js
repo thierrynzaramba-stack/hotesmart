@@ -80,9 +80,23 @@ test('LE TEST QUI COMPTE : les DEUX gardes la posent, et avant tout refus', asyn
 // LE FILET : aucun endpoint ne doit reouvrir ce que la garde ferme
 // ═══════════════════════════════════════════════════════════════════════════
 
-function fichiersApi () {
-  const d = path.join(racine, 'api')
-  return fs.readdirSync(d).filter(f => f.endsWith('.js')).map(f => `api/${f}`)
+// ⚠ RECURSIF, ET IL NE L'ETAIT PAS. Le lot (b) du chantier performance a cree
+// le PREMIER sous-repertoire de `api/` — `api/ecran/`, qui est le domicile
+// declare de tous les endpoints d'ecran des lots (c) et (d). Mesure du
+// 23 octobre 2026 : 58 fichiers a plat, 59 en recursif, et le seul manquant
+// etait `api/ecran/aujourdhui.js`. Il echappait donc a CE filet (l'interdit 1
+// de la spec : aucune donnee d'hote dans un cache partage), aux deux
+// recensements de garde, et au filet des lectures non bornees de
+// `bookings_snapshot` — table qu'il lit.
+// Trois autres fichiers portaient la meme cecite ; ils sont corriges dans le
+// meme commit.
+function fichiersApi (d = path.join(racine, 'api'), prefixe = 'api') {
+  const out = []
+  for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+    if (e.isDirectory()) out.push(...fichiersApi(path.join(d, e.name), `${prefixe}/${e.name}`))
+    else if (e.name.endsWith('.js')) out.push(`${prefixe}/${e.name}`)
+  }
+  return out
 }
 const lire = (f) => fs.readFileSync(path.join(racine, f), 'utf8')
 // Sans les commentaires : une mention dans une explication ne compte pas.
@@ -100,6 +114,30 @@ const PUBLIC_ATTENDU = {
   // desactivee garde son manifeste pendant cinq minutes.
   'api/manifest.js': 'public, max-age=300'
 }
+
+test('LE TEST QUI COMPTE : le recensement voit TOUT api/**/*.js, sous-repertoires compris', () => {
+  // ⚠ CE TEST GARDE LE FILET LUI-MEME. Le lot (b) a cree `api/ecran/`, le
+  // premier sous-repertoire de `api/`, et le balayage A PLAT ne le voyait pas :
+  // 58 fichiers contre 59 (mesure du 23 octobre 2026). L'endpoint d'ecran
+  // echappait donc a l'interdit 1 de la spec (aucune donnee d'hote dans un
+  // cache partage), aux deux recensements de garde, et au filet des lectures
+  // non bornees de `bookings_snapshot` — table qu'il lit.
+  // `api/ecran/` est le domicile DECLARE de tous les endpoints d'ecran des
+  // lots (c) et (d) : un filet aveugle a ce repertoire se vide a mesure que le
+  // chantier avance, sans jamais casser.
+  const attendus = []
+  const descendre = (abs, prefixe) => {
+    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
+      if (e.isDirectory()) descendre(path.join(abs, e.name), `${prefixe}/${e.name}`)
+      else if (e.name.endsWith('.js')) attendus.push(`${prefixe}/${e.name}`)
+    }
+  }
+  descendre(path.join(racine, 'api'), 'api')
+  assert.deepEqual(fichiersApi().sort(), attendus.sort(),
+    'le recensement des endpoints ne descend pas dans les sous-repertoires de api/')
+  assert.ok(attendus.some(f => f.includes('/')),
+    'aucun endpoint en sous-repertoire : ce test ne prouve plus rien')
+})
 
 test('LE TEST QUI COMPTE : aucun endpoint ne pose un cache-control PUBLIC', () => {
   const fautifs = []
@@ -131,7 +169,17 @@ test('RECENSEMENT : tout endpoint a donnee de compte passe par une des deux gard
   // Les endpoints LEGITIMEMENT sans garde sont comptes ici, un par un.
   const SANS_GARDE_ATTENDU = fichiersApi().filter(f => {
     const src = code(lire(f))
-    return !/requirePermission|verifierSession|requirePermissionPourCanal/.test(src)
+    // ⚠ `contexteDEcran` EST UNE TROISIEME GARDE, ET LE DETECTEUR L'IGNORAIT.
+    // C'est la garde des endpoints `/api/ecran/*` : un ecran traverse
+    // plusieurs domaines, donc `requirePermission` — qui verifie UN domaine et
+    // refuse en 403 — ne peut pas lui servir. Elle appelle `verifierSession` et
+    // `posterEnTetesPrives` comme les deux autres.
+    // Sans ce nom, rendre le recensement recursif aurait ajoute
+    // `api/ecran/aujourdhui.js` a la liste des endpoints SANS garde — un FAUX
+    // POSITIF, qui invite a lever le plafond au lieu d'apprendre le nom. C'est
+    // la facon dont un filet se perd : non pas en cassant, mais en criant
+    // faux.
+    return !/requirePermission|verifierSession|requirePermissionPourCanal|contexteDEcran/.test(src)
   })
   // Le compte attendu est mesure, pas suppose : 22 octobre 2026.
   assert.ok(SANS_GARDE_ATTENDU.length <= 12,

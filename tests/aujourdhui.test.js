@@ -437,3 +437,86 @@ test('LE TEST QUI COMPTE (M2) : l etoile de CHAQUE logement affiche la meme note
   vm.runInContext(source, ctx)
   assert.equal(ctx.__etoile, '')
 })
+
+// ─── Les correctifs de la review max du lot (b) ───────────────────────────────
+
+test("LE TEST QUI COMPTE : la banniere de surreservation est RENDUE, pas seulement lue", () => {
+  // ⚠ LE CONSTAT LE PLUS GRAVE DE LA REVIEW. En deplacant la lecture des
+  // alarmes vers l'appel d'ecran, j'ai emporte l'appel de rendu avec elle :
+  // l'ancienne `chargerAlarmes()` finissait par `renderAlarmes(); renderTitre()`.
+  // Mesure : `grep -rn renderAlarmes` ne trouvait QUE sa definition, dans tout
+  // le depot. La banniere ne pouvait donc plus jamais s'afficher — et avec
+  // elle le bouton « Acquitter », que cette page designe comme « le SEUL moyen
+  // d'arreter la reemission des SMS » (spec-reservation-manuelle.md §4).
+  // L'alarme comptait dans le total « a traiter » sans que rien ne la montre,
+  // et l'alerte au fondateur ne pouvait plus etre eteinte.
+  const html = lire('pages/aujourdhui.html')
+  const definitions = (html.match(/function renderAlarmes\s*\(/g) || []).length
+  const appels = (html.match(/renderAlarmes\(\)/g) || []).length
+  assert.strictEqual(definitions, 1, 'renderAlarmes doit etre defini une fois')
+  assert.ok(appels >= 2,
+    `renderAlarmes n'est appele ${appels - 0} fois hors de sa definition : la banniere `
+    + 'de surreservation ne peut pas s afficher, et le bouton d acquittement est injoignable')
+  // Il doit etre dans la liste de rendu du chargement, pas seulement ailleurs.
+  assert.match(html, /renderEvenements\(\);[^\n]*renderAlarmes\(\)/,
+    'renderAlarmes n est pas dans la liste de rendu du chargement')
+})
+
+test("LE TEST QUI COMPTE : l'acquittement retire l'alarme et REND, sans relire le reseau", () => {
+  // `chargerAlarmes()` ne fait plus d'appel reseau depuis ce lot : elle relit
+  // `etat.ecran.alarmes`, la reponse CAPTUREE au chargement, qui contient
+  // encore l'incident qu'on vient d'acquitter — et aucun rendu ne suivait.
+  // L'hote voyait le bouton rester sur « Acquittement… », l'alarme rester a
+  // l'ecran, puis, en recliquant, un ECHEC : le POST est idempotent
+  // (`.is('acquitted_at', null)`), donc le second part en 404 et le bouton
+  // bascule sur « Reessayer ». Un acquittement reussi rapporte comme un echec.
+  const html = lire('pages/aujourdhui.html')
+  const bloc = (html.match(/async function acquitter[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, 'la fonction acquitter a disparu')
+  assert.ok(!/await chargerAlarmes\(\)/.test(bloc),
+    'acquitter relit `etat.ecran.alarmes`, qui contient encore l alarme acquittee')
+  assert.match(bloc, /etat\.alarmes\s*=\s*\(etat\.alarmes \|\| \[\]\)\.filter/,
+    'l alarme acquittee n est pas retiree de l etat')
+  assert.match(bloc, /etat\.ecran\.alarmes\s*=\s*etat\.ecran\.alarmes\.filter/,
+    'la reponse gardee en etat garde l alarme : un rechargement partiel la ferait revenir')
+  assert.match(bloc, /renderAlarmes\(\);\s*renderTitre\(\)/,
+    'rien ne re-rend apres l acquittement')
+})
+
+test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", () => {
+  // ⚠ LE LOT VENDAIT CE PREMIER AFFICHAGE, ET IL AFFICHAIT FAUX. Le cache ne
+  // porte pas les sejours (`/api/menages`, hors de l'appel d'ecran) : a ce
+  // point `etat.bookings` est VIDE. Rendre « A valider », le sous-titre compte
+  // et les cartes de biens depuis cet etat donnait « 0 arrivee · 0 depart ·
+  // 0 a traiter » et « Aucune arrivee prevue » sur chaque bien — des FAITS,
+  // affirmes, puis dementis une seconde plus tard.
+  const html = lire('pages/aujourdhui.html')
+  const bloc = (html.match(/const duCache = CacheEcran\.lire[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'la branche du cache a disparu')
+  assert.ok(!/renderTitre\(\)/.test(bloc),
+    'le premier affichage rend le sous-titre compte : « 0 arrivee · 0 depart » sans avoir lu les sejours')
+  assert.ok(!/renderTaches\(\)/.test(bloc),
+    'le premier affichage rend « A valider » : la regle des taches a besoin des sejours, '
+    + 'et les taches ne sont plus dans le cache (elles portent le code d acces)')
+  assert.match(bloc, /renderCompteurs\(\); renderBiens\(\)/,
+    'le premier affichage ne rend plus rien : le cache ne sert alors a rien')
+  // Et la ligne du bien n'affirme « aucune arrivee » que si on a lu les sejours.
+  assert.match(html, /etat\.menagesOk === true\s*\n?\s*\?\s*\(e\.prochaineArrivee/,
+    'la carte du bien affirme « Aucune arrivee prevue » sans avoir lu les sejours')
+})
+
+test("LE TEST QUI COMPTE : un echec de l'appel d'ecran ne re-date pas le cache", () => {
+  // Sans ce garde, le cache ne perimait JAMAIS : `etat.ecran` garde l'objet
+  // restaure du cache quand l'appel echoue, et la suite le reecrivait avec un
+  // horodatage NEUF. Deux jours de 503 et l'hote lisait les chiffres de lundi,
+  // re-dates a chaque ouverture, le plafond de 12 h hors d'atteinte. Pire cas :
+  // un membre revoque en cours de session recoit 403 de la garde et continue
+  // de voir les chiffres du compte dont il vient d'etre retire.
+  const html = lire('pages/aujourdhui.html')
+  assert.match(html, /chargerEcran\(\)\s*\.then\(\(\) => \{ ecranFrais = true \}\)/,
+    'rien ne distingue une reponse du serveur d un contenu restaure du cache')
+  assert.match(html, /if \(ecranFrais && etat\.ecran\) CacheEcran\.ecrire/,
+    'le cache est reecrit meme quand l appel d ecran a echoue')
+  assert.match(html, /if \(ecranFrais\) etat\.ageCache = null/,
+    'l age repasse a « frais » alors que les donnees viennent du cache')
+})

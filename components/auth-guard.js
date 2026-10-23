@@ -48,6 +48,15 @@ export async function requireAuth() {
       // ici. `chargerContexte` le revaliderait de toute facon, mais le nettoyer
       // tout de suite evite une bascule visible sur un compte etranger.
       reinitialiser()
+      // ⚠ ET LE CACHE D'ECRAN, QUI VIT EN `localStorage` — DONC HORS DE PORTEE
+      // DE `reinitialiser()`, qui ne touche que la memoire et le
+      // `sessionStorage`. C'est ICI le cas « quelqu'un d'autre sur ce poste »,
+      // et il etait le seul des quatre chemins de sortie a ne pas vider ce
+      // cache : le premier affichage de B montrait les logements, les notes et
+      // les compteurs de A. Releve par la review du lot (b).
+      import('/shared/cache-ecran.js')
+        .then(c => c.oublierTout && c.oublierTout())
+        .catch(() => { /* module indisponible : la peremption de 12 h rattrapera */ })
     }
     sessionStorage.setItem(SESSION_USER_KEY, userId)
   } catch (e) {

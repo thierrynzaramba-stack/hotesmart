@@ -22,16 +22,52 @@ Page : `pages/aujourdhui.html`. Règles de comptage : `shared/aujourdhui.js`, de
 
 Aucune lecture provider. Tout vient du cœur, par un endpoint existant ou une table lue sous RLS.
 
+⚠ **DEPUIS LE LOT (b) DU CHANTIER PERFORMANCE (23 octobre 2026), LA PLUPART DE
+CES BLOCS ARRIVENT PAR `GET /api/ecran/aujourdhui`** — un seul appel, dix
+lectures en parallèle côté serveur. Le tableau ci-dessous garde la SOURCE de
+chaque chiffre, qui n'a pas changé ; ce qui a changé est le CHEMIN. Les trois
+appels qui restent, et ce qu'ils portent :
+
+| appel | ce qu'il porte | jusqu'à quand |
+|---|---|---|
+| `GET /api/ecran/aujourdhui` | biens, à valider, alarmes, état du code, fils existants, notes, les 4 compteurs | — |
+| `GET /api/menages?from=&to=+400` | arrivées, départs, occupé ce soir, prochaine arrivée, ménages | lot (d) : devient `/api/ecran/menages` |
+| `GET /api/yield` ×2 par bien | CA 30 j, occupation, min/max mensuels | lot (c) : tables de résumé |
+
+⚠ **LE PÉRIMÈTRE EST APPLIQUÉ EXPLICITEMENT, PARCE QUE LA CLÉ DE SERVICE
+CONTOURNE LA RLS.** La page lisait `properties` et `agent_tasks` en direct,
+sous RLS ; l'endpoint les lit avec `SUPABASE_SERVICE_KEY`, donc aucune des
+28 policies ne s'applique et le cloisonnement est celui qu'on écrit en
+JavaScript. Deux pièges payés ici, et tenus par
+`tests/ecran-aujourdhui-isolation.test.js` (17 tests, 16 mutations attrapées
+sur 16) :
+- **un périmètre vide (`[]`) rend un écran vide**, jamais l'écran complet ;
+- **la forme de la clé se trie par colonne** : `properties.id` et
+  `price_display_log.property_id` sont `uuid`, les colonnes `property_id` des
+  tables enfant sont `text`. Pousser une clé provider numérique dans un `.in`
+  sur une colonne `uuid` ne filtre pas — il fait échouer la requête entière en
+  `22P02`, donc un écran vide affirmé comme un fait.
+
+⚠ **ET UN CACHE D'AFFICHAGE INSTANTANÉ** (`shared/cache-ecran.js`, clé = écran
++ utilisateur + compte, péremption 12 h, effacé sur les quatre chemins de
+sortie). Il ne garde QUE la liste des biens, les notes et les quatre
+compteurs — ce qui ne périme pas en une heure. Sont retirés **à l'écriture** :
+l'état du code d'accès, les alarmes, **les tâches** (elles portent le code
+d'accès en clair dans `summary` et `suggested_reply`), les arrivées et les
+fils. Le premier affichage ne rend donc ni « À valider » ni le sous-titre
+compté : sans les séjours, ils afficheraient « 0 arrivée · 0 départ », un fait
+faux.
+
 | Bloc | Source | Règle |
 |---|---|---|
-| Biens | `properties`, lecture directe (`properties_select` = périmètre) | Pas `/api/channel-property`, qui interroge Beds24 en direct. |
-| Arrivées, départs, occupé ce soir, prochaine arrivée | `GET /api/menages?from=<jour>&to=<jour+400>` | Réservations actives uniquement (annulations et blocages exclus). Nuits = départ − arrivée. Heure = `properties.checkin_time` / `checkout_time` du bien. |
+| Biens | `properties`, **par `/api/ecran/aujourdhui`** (périmètre appliqué explicitement, `properties.id` borné en UUID) | Pas `/api/channel-property`, qui interroge Beds24 en direct. La page ne lit plus aucune table directement, sauf `profiles` pour le prénom (dette connue). |
+| Arrivées, départs, occupé ce soir, prochaine arrivée | `GET /api/menages?from=<jour>&to=<jour+400>` — **le seul appel métier qui reste hors de l'écran**, jusqu'au lot (d) | Réservations actives uniquement (annulations et blocages exclus). Nuits = départ − arrivée. Heure = `properties.checkin_time` / `checkout_time` du bien. |
 | Ménage d'un départ | même réponse : `menages` + `prestataires` (champ `prenom`) | « ménage après le départ de {checkout_time} » ; aucune heure de ménage n'existe. Clé composite bien et réservation. Le tour : `proposee_a` fait foi, `offered_to` seulement pour une ligne d'avant la bascule (même règle que `tourDe` du planning). Une proposition en cours n'est jamais « sans prestataire ». |
-| Code d'accès d'une arrivée | `GET /api/messages`, champ `arrivee.codeEtat` | « envoyé » seulement si un message sortant contient le code (`etatsDArrivee`). Chargé après le premier affichage. La ligne ouvre le fil seulement s'il existe, sinon la fiche du bien. |
-| À valider | `agent_tasks`, statut `pending` ou `pending_validation` | Même population que la messagerie, **restreinte aux séjours À VENIR ou EN COURS** (décision de Thierry du 11 octobre 2026, qui resserre celle du 10 — la clause « dernier message < 7 jours » est retirée : un séjour terminé ne produit plus de « message à traiter », même si l'échange est récent). Le badge Messages compte les seules `pending_validation` ouvertes. |
-| Fait pour vous, 7 jours | comptes `head` sur `menages` (`accepted_at`, hors annulés : « ménages attribués », pas « confirmés par vos prestataires » — une attribution par l'hôte ou d'office pose aussi `accepted_at`), `price_display_log` (`source = 'engine'`), `automation_incidents` (`overbooking`) | Une tuile par source lisible. `price_display_log` n'est lisible que par le titulaire (RLS `auth.uid()`). **Pas de tuile codes d'accès** : dette 62. |
+| Code d'accès d'une arrivée | **`/api/ecran/aujourdhui`**, bloc `etats_arrivee` | Le verdict vit dans `lib/ecran/etat-du-code.js`, **partagé** avec `api/messages.js` — jamais recopié. « envoyé » seulement si un message sortant contient le code. ⚠ L'accueil n'appelle PLUS `/api/messages` : il payait 18 requêtes et 437 212 octets (42 % du poids de la page) pour ce seul champ. La lecture est bornée aux arrivées du jour et du lendemain, et aux **couples bien + réservation** — un identifiant Beds24 est numérique et n'est unique que par bien. Jamais servi depuis le cache (interdit 2). |
+| À valider | `agent_tasks`, statut `pending` ou `pending_validation`, **par `/api/ecran/aujourdhui`** (plafond 200, annoncé dans `tronquees` — le compte de Thierry porte 222 tâches ouvertes, la liste est donc déjà plafonnée) | Même population que la messagerie, **restreinte aux séjours À VENIR ou EN COURS** (décision de Thierry du 11 octobre 2026, qui resserre celle du 10 — la clause « dernier message < 7 jours » est retirée : un séjour terminé ne produit plus de « message à traiter », même si l'échange est récent). Le badge Messages compte les seules `pending_validation` ouvertes. |
+| Fait pour vous, 7 jours | comptes `head` sur `menages` (`accepted_at`, hors annulés : « ménages attribués », pas « confirmés par vos prestataires » — une attribution par l'hôte ou d'office pose aussi `accepted_at`), `price_display_log` (`source = 'engine'`), `automation_incidents` (`overbooking`), `messages` (`origine` IA), **tous par `/api/ecran/aujourdhui`** | Une tuile par source lisible. `price_display_log` n'est lisible que par le titulaire (RLS `auth.uid()`) : le droit se vérifie dans l'endpoint, puisque la clé de service contourne la RLS. La colonne `origine` absente rend `null` — **jamais 0**, qui dirait « l'IA n'a rien écrit cette semaine » (dette 66) ; reconnue par `lib/colonne-absente.js` (code `42703`), pas par son message. **Pas de tuile codes d'accès** : dette 62. |
 | Revenus et occupation sur 30 j | `GET /api/yield?granularite=jour`, 60 jours, par bien, sommés | CA réparti par nuit, au prix voyageur. Variation par rapport aux 30 jours précédents (infobulle). L'occupation varie en points ; son numérateur exclut les nuits vendues un jour en exception (`nuitees_hors_reference`), comme le moteur. Fenêtres calculées sur la date de Paris, jamais par pas de 24 h. |
-| Note sur 30 j | `GET /api/avis?action=notes&periode=30j`, **un seul appel** | `global` et `par_bien` dans la même réponse, comptés par `lib/stats-avis.js` — la même population que la page Avis. ⚠ **La note descend DÉJÀ sur 5, et l'écran ne la convertit plus** (20 octobre 2026) : la conversion et l'unique arrondi vivent dans `lib/avis/echelle.js`, en micro-unités entières. `noteSur5` a été retirée de `shared/aujourdhui.js` — elle divisait une moyenne elle-même arrondie, donc arrondissait deux fois, et Colomiers affichait 4,8 au lieu de 4,7. ⚠ Jusqu'au 20 octobre 2026 c'était `action=cartes`, **une fois en global puis une fois par bien** : 4 appels, 10,7 s puis 3 × 4-5 s en production. Un bien absent de `par_bien` vaut zéro ; le global n'est pas toujours la somme des biens affichés — `property_id_ref` est `not null` mais sans clé étrangère, donc un re-keying ou un bien supprimé laisse des avis dont la référence ne désigne plus aucun bien. Détail : `avis-voyageurs.md` §12 et §15, `performance.md` §4.5. |
+| Note sur 30 j | `notesDuPerimetre` (`lib/stats-avis.js`), appelé **une fois** par `/api/ecran/aujourdhui` — plus aucun appel à `/api/avis` depuis la page | `global` et `par_bien` dans la même réponse, comptés par `lib/stats-avis.js` — la même population que la page Avis. ⚠ **La note descend DÉJÀ sur 5, et l'écran ne la convertit plus** (20 octobre 2026) : la conversion et l'unique arrondi vivent dans `lib/avis/echelle.js`, en micro-unités entières. `noteSur5` a été retirée de `shared/aujourdhui.js` — elle divisait une moyenne elle-même arrondie, donc arrondissait deux fois, et Colomiers affichait 4,8 au lieu de 4,7. ⚠ Jusqu'au 20 octobre 2026 c'était `action=cartes`, **une fois en global puis une fois par bien** : 4 appels, 10,7 s puis 3 × 4-5 s en production. Un bien absent de `par_bien` vaut zéro ; le global n'est pas toujours la somme des biens affichés — `property_id_ref` est `not null` mais sans clé étrangère, donc un re-keying ou un bien supprimé laisse des avis dont la référence ne désigne plus aucun bien. Détail : `avis-voyageurs.md` §12 et §15, `performance.md` §4.5. |
 | Min et max mensuels, par bien | `GET /api/yield?granularite=mois`, les 12 mois complets précédents | Un mois compte **depuis le premier mois vendu**, s'il était ouvert (`jours_ouverts > 0`) et si toutes ses nuits ont un prix. Format court : « ▼ min · ▲ max/mois ». |
 
 **Par bien, jamais en global** (règle de la spec) : CA 30 j, note 30 j, min et max mensuels. Le bloc

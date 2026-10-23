@@ -259,6 +259,17 @@
         btnDeleteFinal.disabled = false; btnDeleteFinal.textContent = 'Supprimer definitivement'
         return
       }
+      // ⚠ LE COMPTE EST SUPPRIME : RIEN NE DOIT RESTER SUR LE DISQUE.
+      // `signOut()` est appele ici en direct, donc il ne passe pas par le
+      // `signOut` de `shared/supabase.js` qui vide le cache d'ecran. Sans ce
+      // nettoyage, les logements, les notes et les compteurs de l'hote
+      // restaient en `localStorage` apres la suppression de son compte —
+      // jusqu'a 12 h, ou indefiniment, puisqu'une cle perimee est refusee a la
+      // lecture mais n'est pas effacee. Releve par la review du lot (b).
+      try {
+        const c = await import('/shared/cache-ecran.js')
+        if (c.oublierTout) c.oublierTout()
+      } catch { /* module indisponible : on continue, la sortie prime */ }
       await supabase.auth.signOut()
       window.location.href = '/pages/login.html?deleted=1'
     } catch (err) {

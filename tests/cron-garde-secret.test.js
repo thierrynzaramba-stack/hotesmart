@@ -132,9 +132,21 @@ for (const endpoint of ENDPOINTS) {
 // commentaire, mort, ou place trop tard ne refuse pas — et se voit.
 test('LE TEST QUI COMPTE : tout endpoint qui lit CRON_SECRET REFUSE quand il est absent', async () => {
   const fs = require('node:fs')
+  // ⚠ RECURSIF : LE LOT (b) A CREE `api/ecran/`, LE PREMIER SOUS-REPERTOIRE DE
+  // `api/`, ET CE BALAYAGE A PLAT NE LE VOYAIT PAS (mesure du 23 octobre 2026 :
+  // 58 fichiers contre 59). `api/ecran/` est le domicile declare des endpoints
+  // d'ecran des lots (c) et (d) : un filet aveugle a ce repertoire se vide a
+  // mesure que le chantier avance.
   const dossier = path.join(__dirname, '..', 'api')
-  const concernes = fs.readdirSync(dossier)
-    .filter(f => f.endsWith('.js'))
+  const tous = []
+  const descendre = (abs, rel) => {
+    for (const e of fs.readdirSync(abs, { withFileTypes: true })) {
+      if (e.isDirectory()) descendre(path.join(abs, e.name), `${rel}${e.name}/`)
+      else if (e.name.endsWith('.js')) tous.push(rel + e.name)
+    }
+  }
+  descendre(dossier, '')
+  const concernes = tous
     .filter(f => /process\.env\.CRON_SECRET/.test(fs.readFileSync(path.join(dossier, f), 'utf8')))
 
   // ⚠ SI LA LISTE SE VIDE, LE TEST NE PROUVE PLUS RIEN. Un renommage de la
