@@ -314,6 +314,25 @@ export function etatDeLaPage ({ erreur = null, biens = null } = {}) {
 // que la fiche consomme à l'étape 2, et la réécrire serait la perdre.
 
 export function canauxHtml (bien, { t, esc }) {
+  // ⚠ UN BIEN BEDS24 DE L'HOTE N'A PAS DE LIGNE DE CANAUX — decision de Thierry
+  // du 23 octobre 2026, et elle precede les trois cas ci-dessous parce qu'elle
+  // dit que la QUESTION ne se pose pas.
+  //
+  // Ni « Aucun canal relie » : c'est faux, ses canaux existent, ils passent par
+  // Beds24. Ni « Canaux non verifies » : le releve est celui de l'autre
+  // partenaire, il n'a jamais eu a regarder ce bien, et un compte entierement
+  // Beds24 verrait toutes ses cartes alarmees a vie. On dit d'ou le logement
+  // est pilote, et rien d'autre.
+  //
+  // ⚠ ET LE NOM DE BEDS24 S'ECRIT, lui. La regle « jamais le nom du
+  // partenaire » vise le channel manager en marque blanche, que l'hote n'a pas
+  // choisi et ne doit pas connaitre. Beds24 est le compte DE L'HOTE : il s'y
+  // connecte, il l'a paye, et le taire ne protegerait rien — ca lui cacherait
+  // ou son logement est reellement gere.
+  if (bien.beds24_de_l_hote === true) {
+    return `<span class="caption muted" data-canaux="beds24">${esc(t('logements.gere_beds24'))}</span>`
+  }
+
   const pastilles = pastillesDesCanaux(bien.canaux)
   // ⚠ TROIS CAS, PAS DEUX. `null` = on n'a pas pu lire ; `[]` = lu, et il n'y a
   // aucun canal relié. Les confondre ferait lire « aucun canal » à un hôte qui
@@ -353,14 +372,10 @@ export function canauxHtml (bien, { t, esc }) {
     // « Aucune ligne de canal » se lisait « aucun canal relie » dans les deux
     // cas — celui ou on a regarde, et celui ou on n'a jamais regarde.
     //
-    // ⚠ MAIS LE RELEVE EST CELUI DU CANAL, ET IL NE DIT RIEN D'UN BIEN BEDS24
-    // DE L'HOTE. Sans cette garde, un compte entierement Beds24 — qui n'a
-    // aucune raison d'avoir un releve Channex — verrait TOUTES ses cartes
-    // annoncer « canaux non verifies », a vie. C'est exactement la forme du
-    // defaut que la re-revue de 3dddb14 avait fait defaire : remplacer un
-    // mensonge par un pire. Pour ces biens-la, « aucun canal relie » reste la
-    // phrase juste.
-    if (bien.beds24_de_l_hote !== true && bien.canaux_releve_fait !== true) {
+    // ⚠ LES BIENS BEDS24 SONT DEJA SORTIS, EN TETE DE CETTE FONCTION : ils ne
+    // repondent ni « aucun » ni « non verifies », ils disent d'ou ils sont
+    // geres. Ce qui suit ne concerne donc que les biens du canal.
+    if (bien.canaux_releve_fait !== true) {
       return `<span class="log-pastille log-pastille--indetermine" data-canaux="non-lus">`
         + `<span class="log-point"></span>${esc(t('logements.canaux_non_lus'))}</span>`
     }

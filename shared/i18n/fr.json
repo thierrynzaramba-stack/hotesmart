@@ -616,6 +616,7 @@
   "logements.vide_aide_membre": "Aucun logement ne vous est confié sur ce compte.",
   "logements.fraicheur": "Canaux vérifiés {quand}",
   "logements.fraicheur_vieille": "Canaux non vérifiés depuis {quand}",
+  "logements.gere_beds24": "Géré depuis votre compte Beds24",
   "logements.avis": "{note} / 5 · {n, plural, one {# avis} other {# avis}}",
   "logements.avis_sans_note": "{n, plural, one {# avis} other {# avis}}",
   "logements.avis_aucun": "Aucun avis",

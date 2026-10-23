@@ -616,6 +616,7 @@
   "logements.vide_aide_membre": "No tiene ningún alojamiento asignado en esta cuenta.",
   "logements.fraicheur": "Canales verificados {quand}",
   "logements.fraicheur_vieille": "Canales sin verificar desde {quand}",
+  "logements.gere_beds24": "Gestionado desde su cuenta de Beds24",
   "logements.avis": "{note} / 5 · {n, plural, one {# reseña} other {# reseñas}}",
   "logements.avis_sans_note": "{n, plural, one {# reseña} other {# reseñas}}",
   "logements.avis_aucun": "Sin reseñas",

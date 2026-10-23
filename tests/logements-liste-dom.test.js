@@ -185,19 +185,36 @@ test('LE TEST QUI COMPTE : « jamais relevé » se distingue, par le fait de COM
   assert.equal(illisible.querySelector('[data-canaux]').dataset.canaux, 'non-lus')
 })
 
-test('LE TEST QUI COMPTE : un bien BEDS24 de l hôte ne dépend pas du relevé du canal', () => {
-  // ⚠ LE PIÈGE QUE CE LOT ÉVITE, et il a déjà été payé une fois : la re-revue
-  // de 3dddb14 avait fait DÉFAIRE un correctif de cette carte parce qu il
-  // « remplaçait un mensonge par un pire, sur un écran DÉJÀ en recette ».
+test('LE TEST QUI COMPTE : un bien BEDS24 dit d où il est géré, et rien d autre', () => {
+  // ⚠ DÉCISION DE THIERRY, 23 octobre 2026. Ni « Aucun canal relié » — c est
+  // FAUX, ses canaux existent et passent par Beds24 — ni « Canaux non
+  // vérifiés » : le relevé est celui de l autre partenaire, il n a jamais eu à
+  // regarder ce bien, et un compte entièrement Beds24 verrait toutes ses cartes
+  // alarmées à vie. C est la forme du défaut que la re-revue de 3dddb14 avait
+  // fait DÉFAIRE : « remplacer un mensonge par un pire ».
   //
-  // Le relevé est celui du CANAL. Un compte entièrement Beds24 n a aucune
-  // raison d en avoir un : sans cette garde, TOUTES ses cartes annonceraient
-  // « canaux non vérifiés », à vie. Pour ces biens-là, « aucun canal relié »
-  // reste la phrase juste.
-  const b24 = doc(M.carteHtml(
-    bien({ canaux: [], canaux_releve_fait: false, beds24_de_l_hote: true }), OUTILS()))
-  assert.equal(b24.querySelector('[data-canaux]').dataset.canaux, 'aucun')
-  assert.equal(b24.querySelector('[data-canaux]').textContent, 'Aucun canal relié')
+  // La question ne se pose pas pour ces biens : on dit d où le logement est
+  // piloté.
+  for (const releve of [true, false, null]) {
+    const d = doc(M.carteHtml(
+      bien({ canaux: [], canaux_releve_fait: releve, beds24_de_l_hote: true }), OUTILS()))
+    const zone = d.querySelector('[data-canaux]')
+    assert.equal(zone.dataset.canaux, 'beds24', `relevé = ${releve}`)
+    assert.equal(zone.textContent, 'Géré depuis votre compte Beds24')
+    assert.doesNotMatch(zone.textContent, /Aucun canal relié|Canaux non vérifiés/)
+  }
+})
+
+test('et la règle Beds24 passe AVANT les trois cas de canaux', () => {
+  // Même avec des canaux lisibles et des pastilles à montrer, un bien Beds24 de
+  // l hôte n en affiche aucune : ces lignes-là viendraient du relevé de l autre
+  // partenaire, et elles ne décrivent pas ce logement.
+  const d = doc(M.carteHtml(bien({
+    canaux: [{ ota: 'airbnb', titre: 'x', actif: true, mappe: true, listing_url: null }],
+    beds24_de_l_hote: true
+  }), OUTILS()))
+  assert.equal(d.querySelector('[data-canaux]').dataset.canaux, 'beds24')
+  assert.equal(d.querySelectorAll('.log-pastille').length, 0)
 })
 
 test('les trois états d un canal sont distincts, `mappe: null` compris', () => {

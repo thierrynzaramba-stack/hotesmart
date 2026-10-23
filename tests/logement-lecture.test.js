@@ -23,6 +23,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const Module = require('node:module')
 const path = require('node:path')
+const fs = require('node:fs')
 
 // ⚠ L'ALARME DU FONDATEUR EST NEUTRALISEE. `clesMigrees` signale une table
 // illisible par `reportIncident`, qui part en vrai appel reseau : le test
@@ -1500,4 +1501,69 @@ test('et des canaux ILLISIBLES rendent `null`, jamais `false`', async () => {
   const r = await L.lireListe(listeDe({ enPanne: { canaux_du_bien: 'timeout' } }),
     { compte: COMPTE, maintenant: MAINTENANT })
   for (const b of r.biens) assert.equal(b.canaux_releve_fait, null)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUPPRIMER UN BIEN BEDS24 : LA REGLE DU SERVEUR, ET CE QUE L ECRAN EN DIT
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠ LA REGLE DU SERVEUR, LUE DANS `api/channel-property.js` (bloc DELETE) :
+//
+//   · le refus 409 « encore relie a une annonce » est garde par
+//     `(prop.provider === 'channex' || prop.provider === 'channel') && providerId
+//     && prop.provider_rate_plan_id`. Un bien Beds24 n'y entre JAMAIS ;
+//   · l'appel `DELETE /properties/<id>` au channel manager est garde par la
+//     meme condition : rien n'est supprime chez le partenaire ;
+//   · la purge des donnees liees, elle, s'applique a tous, sur
+//     `provider_property_id`.
+//
+// Donc, pour un bien Beds24 : le serveur ne refuse jamais a cause des canaux.
+// Il efface le logement dans HoteSmart, purge ce qui s'y rattache, et ne touche
+// a rien chez Beds24 — l'annonce reste dans le compte de l'hote.
+
+test('LE TEST QUI COMPTE : la regle du serveur pour un bien Beds24 est gardee par sa condition', () => {
+  // ⚠ ON VERIFIE LA CONDITION ELLE-MEME, pas la presence d'un mot : c'est elle
+  // qui fait que ces biens ne passent jamais par le refus 409 ni par la
+  // suppression chez le partenaire. Si elle s'elargit un jour aux autres
+  // providers, ce test rougit — et la phrase ci-dessus devient fausse.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-property.js'), 'utf8')
+  const i = src.indexOf("if (req.method === 'DELETE')")
+  assert.ok(i > 0)
+  const bloc = src.slice(i)
+  const gardes = [...bloc.matchAll(/prop\.provider === 'channex' \|\| prop\.provider === 'channel'/g)]
+  assert.ok(gardes.length >= 2,
+    'le refus 409 ET la suppression chez le partenaire sont tous deux gardes par le provider')
+  assert.match(bloc, /encore relié à une annonce Airbnb ou Booking/)
+})
+
+test('LE TEST QUI COMPTE : un bien Beds24 se supprime, quel que soit l etat du releve', () => {
+  // Le releve est celui de l'autre partenaire : il ne decide rien ici, et le
+  // serveur ne le consulte pas.
+  const b24 = bienDe({ provider: 'beds24', provider_rate_plan_id: null })
+  for (const opts of [
+    { releveDuCompte: '2026-10-23T08:00:00Z' },
+    { releveDuCompte: null },
+    { releveDuCompte: '2026-10-23T08:00:00Z', releveEnEchec: true }
+  ]) {
+    const r = L.suppressionPossible(b24, [], opts)
+    assert.equal(r.possible, true, JSON.stringify(opts))
+    assert.equal(r.motif, null)
+  }
+})
+
+test('DEUX CAS OU L ECRAN EST PLUS STRICT QUE LE SERVEUR, et c est ecrit', () => {
+  // ⚠ CE TEST FIXE UNE DIVERGENCE ASSUMEE, pour qu'elle ne se decouvre pas.
+  // Le serveur ne regarde PAS `canaux_du_bien` pour un bien Beds24 ; l'ecran,
+  // lui, s'arrete dans deux cas :
+  //
+  //   1. canaux ILLISIBLES -> on n'ouvre pas l'action la plus destructrice sur
+  //      une lecture ratee. C'est la regle de tout ce lot.
+  //   2. une ligne de canal MAPPEE -> decision de Thierry a la recette du
+  //      22 octobre 2026 : « un canal mappe suffit a refuser, c'est la question
+  //      que l'hote se pose : ce logement est-il en vente ? ». Pour un bien
+  //      Beds24, ce cas ne se rencontre qu'en cours de MIGRATION vers le canal.
+  const b24 = bienDe({ provider: 'beds24', provider_rate_plan_id: null })
+  assert.deepEqual(L.suppressionPossible(b24, null, { releveDuCompte: 'x' }),
+    { possible: null, motif: 'canaux_illisibles' })
+  assert.deepEqual(L.suppressionPossible(b24, [{ ota: 'airbnb', mappe: true }], { releveDuCompte: 'x' }),
+    { possible: false, motif: 'annonce_reliee' })
 })
