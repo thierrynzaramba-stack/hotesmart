@@ -594,7 +594,11 @@ function ouvrirAujourdhui (options = {}) {
   const I18n = {
     appels: 0,
     init () { this.appels++; return new Promise(res => { resoudreI18n = res }) },
-    t: (k) => k, date: () => '', time: () => '', money: () => '', pct: () => '',
+    // ⚠ `date` REND QUELQUE CHOSE. Elle rendait '' : la date du titre, posee a
+    // l'etape 1, s'ecrivait donc vide, et aucun test ne pouvait distinguer
+    // « affichee » de « pas encore ». Un double qui rend du vide ne mesure rien.
+    t: (k) => k, date: () => 'LE-JOUR', time: () => '', money: () => '', pct: () => '',
+    apply () {},
     // Formate reellement : sans cela, rien ne peut asserter la note affichee.
     num: (n) => String(n),
     lang: 'fr', langues: []
@@ -612,18 +616,26 @@ function ouvrirAujourdhui (options = {}) {
       throw new Error('pages/aujourdhui.html appelle R.noteSur5 : la note descend DEJA sur 5, '
         + 'la rediviser arrondit deux fois (lib/avis/echelle.js)')
     }
+    // ⚠ `jourParis` REND UN JOUR, PAS UNE LISTE. Le double rendait `[]` pour
+    // toute clé inconnue : `etat.aujourdHui` valait `[]`, et la date du titre —
+    // posée à l'étape 1, donc AVANT la première lecture — levait
+    // « jour.split is not a function », silencieusement avalé par le
+    // `init().catch`. Un double qui rend la mauvaise FORME ne fait pas échouer
+    // le test qu'il sert : il le fait échouer ailleurs, et plus tard.
+    // Date FIGÉE, parce que le double INJECTE le temps (règle du dépôt).
+    if (cle === 'jourParis') return () => '2026-10-24'
     return cle === 'etatDesBiens' ? (() => new Map()) : (() => [])
   } })
 
   const sorti = new Function(
     'requireAuth', 'supabase', 'signOut', 'initErrorHandler', 'logger', 'esc',
     'compteCourant', 'moi', 'peutLire', 'peutEcrire', 'estTitulaire', 'comptes',
-    'basculerVers', 'enteteCompte', 'R',
+    'basculerVers', 'enteteCompte', 'etatHtml', 'R',
     'I18n', 'HSNav', 'document', 'window', 'location', 'fetch', 'localStorage', 'console',
     batirAujourdhui(options.sansInit)
   )(requireAuth, supabase, rien, rien, { error: rien, warn: rien, info: rien }, String,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
-    rien, () => ({}), R,
+    rien, () => ({}), () => '<h2 data-i18n="logements.vide_titre"></h2>', R,
     I18n, { renderMenu: rien, render: rien }, document_, {}, { search: '', hash: '' },
     fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien })
 
@@ -636,7 +648,7 @@ function ouvrirAujourdhui (options = {}) {
     urls,
     lectures,
     I18n,
-    bonjour: () => document_.querySelector('[data-bind="greeting"]').textContent,
+    date: () => document_.querySelector('[data-bind="date"]').textContent,
     html: (sel) => document_.querySelector(sel).innerHTML,
     ouvrirSession: () => resoudreSession({ user: { id: 'u1', email: 'thierry@exemple.fr', user_metadata: {} } }),
     repondreI18n: () => resoudreI18n('fr'),
@@ -668,7 +680,14 @@ test("LE TEST QUI COMPTE : la page ne lit plus `properties` elle-meme", async ()
   p.ouvrirSession(); p.repondreI18n()
   await tours()
   const tables = p.lectures.map(l => l.table)
-  assert.ok(tables.includes('profiles'), 'le prenom n est jamais demande')
+  // ⚠ ET DEPUIS L'ETAPE 1 DU LOT AUJOURD'HUI V5, LA GARANTIE EST ENTIERE : la
+  // page ne lit AUCUNE table en direct. `profiles` etait la derniere — le
+  // « Bonjour {prenom} » la demandait alors que `/api/membres` l'avait deja
+  // rendue dans `requireAuth` (dette 73), sur un objet de session fige qui
+  // pouvait porter un e-mail perime (dette 72). L'en-tete retire, les deux
+  // dettes sont sans objet ici.
+  assert.ok(!tables.includes('profiles'),
+    'la page relit `profiles` : le bonjour est parti, plus rien ne justifie cette lecture')
   assert.ok(!tables.includes('properties'),
     'la page relit `properties` en direct : le lot (b) l a replie dans l appel d ecran, '
     + 'ou le perimetre est applique explicitement')
@@ -683,24 +702,25 @@ test("LE TEST QUI COMPTE : la page ne lit plus `properties` elle-meme", async ()
   // « jamais ». C'est la SOURCE qui dit « jamais ».
   const src = lire('pages/aujourdhui.html')
   const tablesLues = [...src.matchAll(/supabase\.from\('([^']+)'\)/g)].map(m => m[1])
-  assert.deepEqual(tablesLues, ['profiles'],
+  assert.deepEqual(tablesLues, [],
     'la page lit une table en direct, sous RLS, hors du perimetre applique par '
-    + 'l appel d ecran : ' + tablesLues.join(', ') + '. Seul `profiles` (le prenom, '
-    + 'dette connue) reste autorise ici.')
+    + 'l appel d ecran : ' + tablesLues.join(', ') + '. Depuis l etape 1, AUCUNE '
+    + 'lecture directe n est autorisee sur cet ecran.')
 })
 
-test("LE TEST QUI COMPTE : le bonjour s affiche sans attendre la lecture des biens", async () => {
-  // `properties` est la plus lourde des deux (9 colonnes, toutes les lignes du
-  // compte, sans limite) et le bonjour n'en a aucun besoin. Dans un
-  // `Promise.all` sur les RESULTATS, l'element le plus visible de la page
-  // attendait la requete la plus lente.
+test("LE TEST QUI COMPTE : la DATE s affiche sans attendre aucune lecture", async () => {
+  // ⚠ CE TEST GARDAIT LE BONJOUR, RETIRE A L'ETAPE 1. Ce qu'il protegeait reste
+  // vrai et se deplace : le premier element visible de la page ne doit attendre
+  // AUCUN aller-retour. C'etait un `Promise.all` sur deux resultats qui faisait
+  // attendre au bonjour la lecture `properties` ; c'est aujourd'hui plus simple
+  // encore, la date ne depend que de l'horloge.
   const p = ouvrirAujourdhui()
   p.ouvrirSession(); p.repondreI18n()
   await tours()
-  p.resoudre('profiles', { data: [{ first_name: 'thierry' }] })
-  await tours()
-  assert.notStrictEqual(p.bonjour(), '',
-    'le bonjour attend la lecture des biens pour s afficher')
+  assert.notStrictEqual(p.date(), '',
+    'la date attend une lecture pour s afficher : elle ne depend que de l horloge')
+  assert.strictEqual(p.lectures.length, 0,
+    'la page fait une lecture directe avant son premier affichage : ' + p.lectures.map(l => l.table).join(', '))
 })
 
 test("l accueil ne refait plus d aller-retour pour l utilisateur deja connu", () => {
@@ -872,11 +892,13 @@ test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redi
   p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
 
-  const tuile = p.html('[data-bind="rating"]')
-  assert.ok(tuile.includes('4.7'), `la tuile n affiche pas la note descendue par l endpoint : ${tuile}`)
-  assert.ok(!tuile.includes('2.3') && !tuile.includes('2.4'), `la tuile a redivise la note : ${tuile}`)
-
+  // ⚠ LA TUILE DU BANDEAU « Note · 30 j » A ETE RETIREE A L'ETAPE 1 (24 octobre
+  // 2026) ; la note revient a l'etape 2, en tete du bloc « Derniers avis ».
+  // L'invariant, lui, n'a pas bouge et ce test le tient toujours : la note
+  // descend DEJA sur 5, et l'ecran ne la redivise pas. Il le tient desormais la
+  // ou la note s'affiche encore — l'etoile de chaque logement.
   const liste = p.html('[data-list="properties"]')
+  assert.ok(!liste.includes('2.3') && !liste.includes('2.4'), `l etoile a redivise la note : ${liste}`)
   assert.ok(liste.includes('4.8'), `l etoile du bien n affiche pas la note descendue : ${liste}`)
 })
 

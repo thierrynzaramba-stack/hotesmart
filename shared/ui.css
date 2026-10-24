@@ -1218,6 +1218,16 @@ body.men-cfg-ouvert { overflow: hidden; }
 
    ⚠ COULEURS NEUTRES : les couleurs de canal (--canal-*) restent réservées au
    Calendrier. Trois formes, trois états. */
+/* ⚠ LA ZONE D'ETAT D'UNE LISTE DE LOGEMENTS — ICI, PAS DANS UNE PAGE.
+   `etatHtml` (shared/logements-liste.js) rend « Ajoutez votre premier
+   logement », le refus de droit et la panne. Elle etait declaree dans le
+   `<style>` de pages/logements.html seule ; l'accueil rend la MEME zone depuis
+   l'etape 1 du lot Aujourd'hui V5, et deux copies divergent. Meme deplacement
+   que `.log-canaux` en son temps, pour la meme raison. */
+.log-etat { display: flex; flex-direction: column; gap: var(--gap-m);
+  align-items: flex-start; }
+.log-etat__actions { display: flex; gap: var(--gap-s); flex-wrap: wrap; }
+
 .log-canaux { display: flex; align-items: center; gap: var(--gap-xs); flex-wrap: wrap; }
 .log-pastille { display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border);

@@ -50,16 +50,15 @@
        (spec-reservation-manuelle.md §4). Vide et invisible sans alarme. -->
   <div class="stack" data-list="alarms" hidden></div>
 
-  <!-- 1. Titre -->
-  <div class="row" style="flex-wrap: wrap; align-items: flex-end; gap: var(--gap-m)">
-    <div style="flex: 1 1 300px">
-      <h1 class="h1" data-bind="greeting"></h1>
-      <p class="muted" style="margin-top: 6px; font-size: 16px" data-bind="summary" data-i18n="common.loading"></p>
-    </div>
-    <a class="btn btn--outline btn--lg" href="/logements/nouveau" data-bind="add-property" hidden>
-      <svg class="icon" style="width:16px;height:16px" aria-hidden="true"><use href="/shared/icons.svg#i-plus"/></svg>
-      <span data-i18n="today.add_property"></span>
-    </a>
+  <!-- 1. Titre et date — etape 1 du lot Aujourd'hui V5 (spec-aujourdhui-v5.md §9).
+       L'en-tete « Bonjour {prenom} », la ligne resume comptee et le bouton
+       « Ajouter un logement » sont RETIRES : decision de Thierry du 24 octobre
+       2026. Le titre porte la date, en toutes lettres a droite.
+       ⚠ Le compte des choses a traiter n'est pas perdu avec la ligne resume :
+       il passe a cote du titre « A valider » (Q6). -->
+  <div class="row" style="flex-wrap: wrap; align-items: baseline; gap: var(--gap-m)">
+    <h1 class="h1" id="h-today" style="flex: 1 1 auto" data-i18n="today.title"></h1>
+    <p class="muted" style="font-size: 16px" data-bind="date"></p>
   </div>
 
   <!-- Mobile : « À valider » devient UNE carte sombre en tête (spec §4) -->
@@ -69,12 +68,11 @@
   <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 32px; align-items: start">
 
     <section style="grid-column: span 2; min-width: 0" aria-labelledby="h-today">
-      <h2 class="h2" id="h-today" style="margin-bottom: 8px" data-i18n="today.title"></h2>
       <div data-list="events"><p class="muted" data-i18n="common.loading"></p></div>
     </section>
 
     <section class="stack only-desktop" style="gap: 12px" aria-labelledby="h-validate" data-bind="validate-section" hidden>
-      <h2 class="h2" id="h-validate" data-i18n="validate.title"></h2>
+      <div class="section-head"><h2 class="h2" id="h-validate" data-i18n="validate.title"></h2><span class="muted num" data-bind="validate-count"></span></div>
       <div class="stack" style="gap: 12px" data-list="pending"></div>
       <a class="link small" href="/messages" data-i18n="validate.settings"></a>
     </section>
@@ -86,17 +84,20 @@
     <div class="grid-auto scroll-x" data-list="done"></div>
   </section>
 
-  <!-- 5. 30 jours (totaux du compte) -->
-  <section style="display: flex; flex-wrap: wrap; gap: 48px; padding: 28px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line)" data-bind="kpi-section" hidden>
-    <div class="stack" style="gap: 4px" data-bind="kpi-revenue" hidden><span class="small muted" data-i18n="kpi.revenue"></span><span class="row" style="align-items: baseline; gap: 10px" data-bind="revenue"></span></div>
-    <div class="stack" style="gap: 4px" data-bind="kpi-rating" hidden><span class="small muted" data-i18n="kpi.rating"></span><span class="row" style="align-items: baseline; gap: 10px" data-bind="rating"></span></div>
-    <div class="stack" style="gap: 4px" data-bind="kpi-occupancy" hidden><span class="small muted" data-i18n="kpi.occupancy"></span><span class="row" style="align-items: baseline; gap: 10px" data-bind="occupancy"></span></div>
-  </section>
+  <!-- La bande « Revenus · 30 j / Note · 30 j / Occupation · 30 j » est RETIREE
+       (etape 1). La note revient a l'etape 2, en tete du bloc « Derniers avis » ;
+       les revenus a l'etape 4, en mois de versement. ⚠ L'occupation 30 j et les
+       min/max mensuels partent dans la FICHE DU LOGEMENT, bloc Prix (Q4) : c'est
+       un travail du lot Logements, et rien ne les porte tant qu'il n'est pas fait. -->
 
   <!-- 6. Logements -->
   <section class="stack" style="gap: 20px" aria-labelledby="h-props" data-bind="props-section" hidden>
     <div class="section-head"><h2 class="h2" id="h-props" data-i18n="properties.title"></h2><a class="link small" href="/logements" data-i18n="properties.see_all"></a></div>
     <div class="property-grid scroll-x" data-list="properties"></div>
+    <!-- Aucun logement : le MEME etat que la page Logements, rendu par le MEME
+         module (Q7). Sans lui, l'accueil d'un hote qui debute n'offre plus
+         aucune action, le bouton d'ajout ayant quitte l'en-tete. -->
+    <div class="card log-etat" data-bind="etat-vide" hidden role="status" aria-live="polite"></div>
   </section>
 </main>
 
@@ -115,6 +116,9 @@ import { escapeHtml as esc } from '/shared/properties.js'
 // les lectures Supabase, juste à côté, lisent le compte consulté.
 import { compteCourant, moi, peutLire, peutEcrire, estTitulaire, comptes, basculerVers, enteteCompte }
   from '/shared/compte-courant.js'
+// ⚠ L'ETAT VIDE VIENT DU MODULE COMMUN, il n'est pas recopie ici : la page
+// Logements rend exactement la meme zone, et deux copies divergent.
+import { etatHtml } from '/shared/logements-liste.js'
 import * as R from '/shared/aujourdhui.js'
 import * as CacheEcran from '/shared/cache-ecran.js'
 
@@ -194,39 +198,28 @@ function delta (v, formatte) {
   return `<span class="delta" title="${esc(t('kpi.delta_hint'))}">${esc(t(cle, { v: formatte }))}</span>`
 }
 const deltaPct = v => delta(v, v == null ? '' : I18n.pct(Math.abs(v)))
-const deltaPoints = v => delta(v, v == null ? '' : t('kpi.points', { v: I18n.num(Math.abs(v * 100), { maximumFractionDigits: 0 }) }))
+// ⚠ `deltaPoints` est parti avec la bande « 30 jours » : il ne servait qu'a
+// l'occupation, qui rejoint la fiche du logement. Une fonction que plus
+// personne n'appelle est du code dormant.
 
-// ─── 1. Titre et sous-titre comptés ─────────────────────────────────────────
-function renderTitre () {
-  // ⚠ « 0 arrivée · 0 départ · rien à faire » EST UN FAIT, et il demande
-  // d'avoir lu les séjours. `renderEvenements` et `renderBiens` étaient gardés
-  // par `etat.menagesOk` ; ce sous-titre ne l'était pas. L'hôte lisait donc
-  // « indisponible » dans la liste des événements ET « 0 arrivée · 0 départ »
-  // dans le titre du même écran — et « rien à faire » alors qu'une
-  // surréservation non acquittée pouvait exister. Le KB de cette page
-  // l'interdit nommément.
-  const evts = evenements()
-  const lu = etat.menagesOk === true
-  const todos = (lu ? evts.filter(e => e.action).length : 0)
-    + tachesVisibles().length + etat.alarmes.length
-  const el = $('[data-bind="summary"]')
-  el.removeAttribute('data-i18n')
-  const date = dateDuJour(etat.aujourdHui, { weekday: 'long', day: 'numeric', month: 'long' })
-  el.textContent = lu
-    ? t('today.summary', {
-      date,
-      arrivals: t('today.arrivals', { n: evts.filter(e => e.type === 'arrivee').length }),
-      departures: t('today.departures', { n: evts.filter(e => e.type === 'depart').length }),
-      todos: t('today.todos', { n: todos })
-    })
-    // Sans les séjours : on dit la date, ce qu'on sait compter, et que le
-    // reste manque. Jamais un zéro.
-    : t('today.summary', {
-      date,
-      arrivals: t('today.counts_unavailable'),
-      departures: '',
-      todos: t('today.todos', { n: todos })
-    }).replace(' ·  ·', ' ·')
+// ─── 1. La date, à droite du titre ──────────────────────────────────────────
+// ⚠ CE QUI A DISPARU ICI, ET CE QUI NE DOIT PAS DISPARAITRE AVEC. La ligne
+// résumé comptée — « {date} · N arrivées · N départs · N à traiter » — est
+// retirée (décision de Thierry du 24 octobre 2026). Elle portait DEUX choses :
+// la date, qui passe ici, et le COMPTE DES CHOSES A TRAITER, qui passe à côté
+// du titre « À valider » (`renderTaches`). Le retirer des deux endroits aurait
+// été un retrait par omission, celui que l'inventaire existe pour empêcher.
+//
+// ⚠ ET LE FORMAT COURT N'EST PAS UN CHOIX DE CSS. « samedi 24 octobre » sur un
+// écran de 390 px pousse la date sous le titre ou déborde ; la maquette
+// mobile dit « sam. 24 oct. ». Un texte ne se raccourcit pas en CSS : c'est le
+// rendu qui choisit, sur la largeur réelle.
+function renderDate () {
+  const court = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches
+  const opts = court
+    ? { weekday: 'short', day: 'numeric', month: 'short' }
+    : { weekday: 'long', day: 'numeric', month: 'long' }
+  $('[data-bind="date"]').textContent = dateDuJour(etat.aujourdHui, opts)
 }
 
 // ─── Alarmes de surréservation ──────────────────────────────────────────────
@@ -284,7 +277,7 @@ async function acquitter (b) {
       etat.ecran.alarmes = etat.ecran.alarmes.filter(reste)
     }
     etat.alarmes = (etat.alarmes || []).filter(reste)
-    renderAlarmes(); renderTitre()
+    renderAlarmes()
   } catch (e) {
     b.disabled = false
     b.textContent = t('alarm.retry')
@@ -426,6 +419,18 @@ function renderTaches () {
   section.hidden = false
   const liste = $('[data-list="pending"]')
   const visibles = tachesVisibles()
+  // ⚠ LE COMPTE DES CHOSES A TRAITER, HERITE DE LA LIGNE RESUME RETIREE (Q6).
+  // Il compte ce que CE bloc contient, pas les trois sources de l'ancienne
+  // ligne (tâches + arrivées à traiter + alarmes) : un nombre posé à côté d'un
+  // titre doit décrire la liste qui le suit, sinon il la contredit à chaque
+  // ouverture. Les arrivées portent déjà leur geste dans le bloc du haut, et
+  // l'alarme est un bandeau qu'on ne peut pas manquer.
+  // ⚠ ET LE « + » SURVIT : le serveur plafonne à 200, et le compte de Thierry
+  // est DEJA plafonné (222 tâches ouvertes). Afficher « 200 » serait un nombre
+  // faux avec aplomb.
+  $('[data-bind="validate-count"]').textContent = visibles.length
+    ? (tachesPlafonnees() ? t('validate.count_capped', { n: visibles.length }) : I18n.num(visibles.length))
+    : ''
   if (!visibles.length) {
     liste.innerHTML = `<p class="muted small">${esc(t('validate.empty'))}</p>`
     mobile.hidden = true
@@ -548,49 +553,15 @@ async function chargerNotes () {
     // exactement ce que rendait l'appel par bien qu'on remplace.
     etat.notesParBien.set(b.id, lu ? (sienne || { note_sur_5: null, notes: 0 }) : null)
   }
-  renderKpis()
   renderBiens()
 }
 
-function deviseUnique () {
-  const devises = new Set(etat.biens.map(b => b.currency || 'EUR'))
-  return devises.size === 1 ? [...devises][0] : null
-}
-function renderKpis () {
-  const section = $('[data-bind="kpi-section"]')
-  let visible = false
-  const lignes = etat.biens.map(b => etat.parBien.get(b.id))
-  const tousCharges = peutLire('reservations') && etat.biens.length && lignes.every(Boolean)
-  if (tousCharges) {
-    const tot = R.totaux(lignes)
-    const devise = deviseUnique()
-    const nc = `<span class="small muted">${esc(t('kpi.not_computable'))}</span>`
-    $('[data-bind="revenue"]').innerHTML = tot.ca != null && devise
-      ? `<span class="kpi num">${esc(monnaie(tot.ca, devise))}</span>${deltaPct(tot.caVariation)}` : nc
-    // Occupation non calculable : tuile MASQUÉE, pas de texte (demande de
-    // Thierry du 10 octobre 2026) ; le revenu, lui, dit « non calculable ».
-    if (tot.occupation != null) {
-      $('[data-bind="occupancy"]').innerHTML = `<span class="kpi num">${esc(I18n.pct(tot.occupation))}</span>${deltaPoints(tot.occupationEcart)}`
-      $('[data-bind="kpi-occupancy"]').hidden = false
-    }
-    $('[data-bind="kpi-revenue"]').hidden = false
-    visible = true
-  }
-  if (etat.noteGlobale) {
-    const n = etat.noteGlobale
-    // ⚠ PLUS DE DIVISION ICI. L'endpoint descend `note_sur_5`, deja ramenee sur
-    // 5 et arrondie UNE SEULE FOIS. La version d'avant divisait une moyenne
-    // elle-meme arrondie : deux arrondis, donc Colomiers affichait 4,8 la ou le
-    // calcul juste donne 4,7 (mesure du 20 octobre 2026).
-    $('[data-bind="rating"]').innerHTML = n.note_sur_5 != null
-      ? `<span class="kpi num row" style="gap: 6px">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(n.note_sur_5, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span><span class="small muted">${esc(t('kpi.reviews', { n: n.notes }))}</span>`
-      : `<span class="small muted">${esc(t('kpi.reviews', { n: 0 }))}</span>`
-    $('[data-bind="kpi-rating"]').hidden = false
-    visible = true
-  }
-  section.hidden = !visible
-}
-
+// ⚠ `renderKpis` A ETE RETIREE AVEC LA BANDE « 30 jours » (etape 1). Ce qu'elle
+// rendait ne disparait pas pour autant : la NOTE revient a l'etape 2, en tete du
+// bloc « Derniers avis », avec la meme regle — elle descend deja sur 5 et ne se
+// redivise jamais ; les REVENUS reviennent a l'etape 4, en mois de versement ;
+// l'OCCUPATION et les min/max mensuels partent dans la fiche du logement.
+// `chargerNotes` reste : les etoiles des cartes de logement en vivent.
 function quand (jour) {
   if (jour === etat.aujourdHui) return t('properties.today')
   return dateDuJour(jour, { weekday: 'short', day: 'numeric', month: 'short' })
@@ -601,13 +572,36 @@ function renderBiens () {
   // pu lire : masquer la section revenait à affirmer « cet hôte n'a aucun
   // logement » — avec les notes et les indicateurs disparus, et
   // « + Ajouter un bien » resté visible.
+  const vide = $('[data-bind="etat-vide"]')
   if (etat.biens === null) {
     section.hidden = false
+    vide.hidden = true
     $('[data-list="properties"]').innerHTML =
       `<p class="muted">${esc(t('properties.unavailable'))}</p>`
     return
   }
-  section.hidden = !etat.biens.length
+  // ⚠ « AJOUTEZ VOTRE PREMIER LOGEMENT » NE SE DIT QUE SUR UNE LECTURE REUSSIE,
+  // et c'est la raison d'etre de cette garde. `etat.biens` vaut `[]` aussi
+  // longtemps que l'appel d'ecran n'a pas repondu : l'afficher avant ferait
+  // lire « Ajoutez votre premier logement » a un hote qui en a quatre — et, a
+  // l'onboarding, une reconciliation contre une liste amputee CREE des biens en
+  // double chez le canal. C'est la liste RENDUE PAR LE SERVEUR qui fait foi,
+  // pas la valeur initiale de l'etat.
+  //
+  // ⚠ ET LES ACTIONS SONT GARDEES PAR LE DROIT, dans le module commun : un
+  // membre delegue sans logement confie lit « Aucun logement ne vous est confie
+  // sur ce compte », sans boutons — les deux menent a des pages NON DELEGABLES,
+  // et « on ne montre jamais ce qui mene a un refus ».
+  const listeLue = !!(etat.ecran && Array.isArray(etat.ecran.biens))
+  if (!etat.biens.length) {
+    section.hidden = !listeLue
+    vide.hidden = !listeLue
+    if (listeLue) { vide.innerHTML = etatHtml('vide', { peutAjouter: estTitulaire() }); I18n.apply(vide) }
+    $('[data-list="properties"]').innerHTML = ''
+    return
+  }
+  vide.hidden = true
+  section.hidden = false
   const etats = R.etatDesBiens({ bookings: etat.bookings, biens: etat.biens, aujourdHui: etat.aujourdHui })
   $('[data-list="properties"]').innerHTML = etat.biens.map(b => {
     const href = `/logements/${encodeURIComponent(b.id)}`
@@ -664,21 +658,15 @@ function renderBiens () {
 }
 
 // ─── Démarrage ──────────────────────────────────────────────────────────────
-// Le prénom du profil titulaire ; à sa création il vaut la partie locale de
-// l'e-mail (trigger du schéma initial) : on lui préfère alors le nom saisi à
-// l'inscription.
-async function prenom (user) {
-  const local = String(user?.email || '').split('@')[0]
-  const plein = String(user?.user_metadata?.full_name || '').trim().split(/\s+/)[0] || ''
-  let profil = ''
-  try {
-    const { data } = await supabase.from('profiles').select('first_name')
-      .eq('member_user_id', moi()).eq('is_owner', true).limit(1)
-    profil = (data && data[0] && data[0].first_name) || ''
-  } catch { /* repli ci-dessous */ }
-  if (profil && profil !== local) return profil
-  return plein || profil
-}
+// ⚠ LA PAGE NE LIT PLUS AUCUNE TABLE EN DIRECT, et c'est l'en-tete retire qui
+// le permet. Le « Bonjour {prenom} » etait le dernier lecteur de `profiles` de
+// cet ecran — une requete sous RLS que `/api/membres` avait deja faite dans
+// `requireAuth` (dette 73), sur un objet de session fige qui pouvait porter un
+// e-mail perime (dette 72). Les deux dettes sont sans objet ici.
+//
+// Les INITIALES restent, dans le bouton du menu : elles se lisent de l'e-mail
+// de la session, qui est exactement le repli que `prenom()` appliquait deja
+// quand le profil n'avait pas de prenom.
 
 async function init () {
   // I18n ne dépend pas de la session : les deux partent ENSEMBLE. Le `.catch`
@@ -701,8 +689,8 @@ async function init () {
   // Affichage seul : toute lecture de données passe par RLS, avec un jeton
   // vérifié à chaque requête. Dette 72.
   const user = session.user
-  // La création de bien n'est pas déléguée (cf. pages/biens.html).
-  $('[data-bind="add-property"]').hidden = !estTitulaire()
+  $('[data-bind="initials"]').textContent = String(user?.email || '').slice(0, 2).toUpperCase()
+  renderDate()
 
   HSNav.renderMenu({
     comptes: comptes(), compteActif: compteCourant(),
@@ -722,12 +710,6 @@ async function init () {
     ].filter(Boolean)
   })
 
-  // Le prénom et les biens ne dépendent que du contexte de compte, déjà chargé
-  // par `requireAuth` : les deux requêtes partent ENSEMBLE, elles s'attendaient
-  // l'une l'autre pour rien.
-  //
-  // Les biens : lecture directe sous RLS (`properties_select` = périmètre du
-  // profil). Pas /api/channel-property, qui interroge Beds24 en direct.
   // ⚠ LES BIENS VIENNENT DE L'APPEL D'ÉCRAN, PLUS D'UNE LECTURE DIRECTE.
   // C'était une lecture `properties` sous RLS depuis le navigateur — 9
   // colonnes, toutes les lignes du compte, sans limite. Elle part maintenant
@@ -739,22 +721,11 @@ async function init () {
     return Array.isArray(b) ? b : []
   }
 
-  // ⚠ ILS PARTENT ENSEMBLE, ILS N'ARRIVENT PAS ENSEMBLE. Un `Promise.all` sur
-  // les deux resultats faisait attendre au bonjour et aux initiales — qui ne
-  // dependent que de `prenom()` — la lecture `properties`, la plus lourde des
-  // deux et sans limite de lignes. Dans un lot dont l'objet est le premier
-  // affichage, c'est l'element le plus visible de la page qu'on retardait.
-  // Chacun ecrit donc a SA resolution ; l'attente commune ne sert plus qu'a la
-  // suite, qui a besoin de `etat.biens`.
-  const pNom = prenom(user).then(brut => {
-    // En capitale à l'affichage (demande de Thierry) : le profil porte parfois
-    // la partie locale de l'e-mail, en minuscules.
-    const nom = brut ? brut.charAt(0).toLocaleUpperCase('fr') + brut.slice(1) : ''
-    $('[data-bind="greeting"]').textContent = nom ? t('today.greeting', { name: nom }) : t('today.greeting_anon')
-    $('[data-bind="initials"]').textContent = (nom || user?.email || '').slice(0, 2).toUpperCase()
-  })
-  const pBiens = lireBiens().then(biens => { etat.biens = biens })
-  await Promise.all([pNom, pBiens])
+  // ⚠ IL N'Y A PLUS DEUX LECTURES A ACCORDER. Le lot du 20 octobre 2026 avait
+  // separe la resolution du prenom de celle des biens, pour que le bonjour ne
+  // paie pas la lecture la plus lourde. Le bonjour n'existe plus : il ne reste
+  // que les biens, et ils viennent de l'appel d'ecran.
+  etat.biens = await lireBiens()
   // ⚠ PLUS DE `liens` : l'entrée Calendrier mène à l'écran V5 `/calendrier`,
   // le même depuis toutes les pages. Épingler ici le premier bien donnait à
   // cet onglet deux comportements selon la page d'où on cliquait.
@@ -847,7 +818,7 @@ async function init () {
   // (spec-reservation-manuelle.md §4). L'alarme comptait dans le total « à
   // traiter » sans que rien ne la montre, et l'alerte au fondateur ne pouvait
   // plus être éteinte.
-  renderEvenements(); renderTaches(); renderAlarmes(); renderCompteurs(); renderBiens(); renderTitre()
+  renderEvenements(); renderTaches(); renderAlarmes(); renderCompteurs(); renderBiens()
   // ⚠ ON GARDE CE QU'ON VIENT D'AFFICHER. Le cache ne sert qu'à un premier
   // affichage instantané au prochain chargement ; les cinq blocs critiques ET
   // le compte de surréservation en sont retirés à l'écriture par le module
@@ -856,7 +827,6 @@ async function init () {
 
   if (peutLire('reservations')) {
     await parPaquets(etat.biens.map(b => async () => { await chargerChiffresBien(b); renderBiens() }), 2)
-    renderKpis()
   }
 }
 
