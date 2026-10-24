@@ -124,6 +124,29 @@ ni `staging` ni `main`, et elles ne relaient pas un go prod.
    lots ont ajouté PAR-DESSUS ses fichiers n'existe pas — sans conflit, sans
    avertissement.
 
+10. ⚠ **EN FIN DE JOURNÉE, TOUT TRAVAIL EN COURS EST COMMITÉ ET POUSSÉ SUR SA
+    BRANCHE, MÊME EN WIP. RIEN NE DORT SUR UN DISQUE.** Consigne de Thierry du
+    23 octobre 2026. Un commit de travail n'a pas à être propre : son message
+    dit où on en est et ce qui reste, et il se réécrit ou se regroupe plus tard.
+    Ce qui ne se répare pas, c'est le travail qu'on ne retrouve pas.
+    **Pourquoi c'est une règle de file et pas une habitude personnelle.** Une
+    branche non poussée est invisible de tout le monde : le chef de file ne peut
+    pas la compter dans la file, les autres sessions ne savent pas que ces
+    fichiers sont tenus, et personne ne peut la reprendre. Et dans un clone
+    PARTAGÉ, le risque n'est pas théorique — la section ci-dessus raconte un
+    `git add -A` qui a emporté les correctifs d'une autre session : ce qui n'est
+    pas commité est à la merci du prochain geste de quelqu'un d'autre.
+    **Vécu, mesuré le 23 octobre 2026.** `fix-dette-78` existait à `c66ee09`
+    dans le worktree `/home/thierry/hotesmart-debug`, **absent du distant**
+    (`git ls-remote` : rien) — alors que Thierry avait décidé de corriger la
+    dette 78 le **20 octobre**. Trois jours sur un disque, pour un correctif
+    déjà tranché. C'est ce jour-là qu'il a posé la règle.
+    ⚠ **ET LA POUSSÉE NE VAUT PAS « PRÊT » :** une branche poussée en WIP n'est
+    pas une remise au chef de file. La remise, c'est les cinq éléments de la
+    règle 1 — poussée, review passée, tests verts, fichiers touchés,
+    dépendances. Pousser met le travail à l'abri ; ce sont les cinq éléments qui
+    le mettent dans la file.
+
 **Pourquoi cette section existe.** Le 18 septembre 2026, deux sessions ont
 travaillé dans le même clone et l'une a emporté 220 lignes de correctifs de
 sécurité non relues dans un commit qui annonçait « aucune de code » (voir la
