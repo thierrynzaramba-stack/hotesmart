@@ -17,6 +17,14 @@
 // (lecture ignoree), « le deuxieme appel ne repaie pas » rougit ; contre un
 // client qui juge le budget APRES le fetch, le test du budget rougit (fetch
 // appele). Rejoue dans le scratchpad le 24 septembre 2026.
+//
+// ⚠ ET POUR LA GARDE DE SECURITE (24 octobre 2026) : garde de cle desactivee
+// dans `lib/airroi/fixture-sure.js`, hors de l'arbre — le test rougit, et la
+// sortie porte `fixture ecrite : .../occupation-bagneres-*.json`. Il rougit
+// AUSSI a J+60, donc l'enfant atteint reellement l'ecriture a cette date : le
+// vert n'est pas vacueux. Et le code 6 n'est produit QUE par la branche
+// « cle absente » de `ecrireFixtureSansCle` : `code === 6` implique donc que la
+// garde a tire, donc que le cache a bien servi l'enfant.
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
@@ -450,18 +458,63 @@ test('LE TEST QUI COMPTE (review de f40ee9e) : occupancy — un 200 d erreur ou 
 })
 
 test('LE TEST QUI COMPTE (SECURITE, review de f40ee9e) : sans cle dans l environnement, les scripts de capture n ecrivent AUCUNE fixture, meme servis par le cache', async () => {
-  const { execFileSync } = require('child_process')
+  const { spawnSync } = require('child_process')
   const racine = path.join(__dirname, '..')
   const market = { country: 'France', region: 'Occitania', locality: 'Bagnères-de-Bigorre' }
   const cas = [
     { script: 'scripts/capturer-occupation-airroi.js', prefixe: 'occupation-bagneres-', endpoint: 'POST /markets/metrics/occupancy',
       params: { market, num_months: 60, currency: 'native' }, reponse: '{"results":[{"date":"2026-01-01"}]}' }
   ]
+  // ⚠ LE DECALAGE D'HORLOGE NE TRAVERSE PAS `execFileSync`, ET CE TEST SEME UNE
+  // CLE DE CACHE QUI DEPEND DE LA DATE. Le preexistant : ce test etait le
+  // dernier rouge calendaire du depot (CLAUDE.md, « IL RESTE UN ROUGE A J+60 »,
+  // cause supposee « une fixture sur disque qui ne suit pas » — ce n'etait pas
+  // ça). Mesure du 23 octobre 2026 : a J+60, le test calcule la fenetre du
+  // relief sur l'horloge DECALEE (1er janvier 2027) et seme le cache sur cette
+  // cle, tandis que le processus ENFANT, qui ne recoit pas le prechargement,
+  // calcule 2026-11-01 -> 2028-10-30 sur l'horloge reelle. Cache manque, donc le
+  // script refuse de PAYER (« Rien n est paye : relancer avec --confirmer »),
+  // sort en 0, et l'assertion « refus attendu (code 6) » tombe — sur un script
+  // qui s'est comporte correctement. Le test et le script doivent vivre dans le
+  // MEME temps.
+  //
+  // ⚠ ON NE PROPAGE PAS LE DECALAGE A L'ENFANT : ON LIT L'HORLOGE QU'IL LIT.
+  // Premiere version de ce correctif : passer `--require horloge-decalee.js` a
+  // l'enfant, sous condition `process.env.JOURS`. La review l'a mesure faux
+  // dans les TROIS directions, parce que la variable d'environnement n'est qu'un
+  // PROXY de « mon horloge est decalee » et que les deux sont independants :
+  //   - `JOURS=60` SANS prechargement : l'enfant recevait un decalage que le
+  //     parent n'avait pas. VERT avant mon correctif, ROUGE apres — une vraie
+  //     regression, dont la victime est `npm test` dans un shell ou une
+  //     contre-epreuve precedente a laisse `export JOURS=60`.
+  //   - prechargement SANS `JOURS` : l'outil avançait le parent de dix jours par
+  //     defaut et ma porte restait fermee. Le trou vise restait OUVERT.
+  //   - `JOURS=abc` : truthy pour la porte, `NaN` pour l'outil. L'enfant
+  //     installait une horloge invalide, donc toute entree de cache etait jugee
+  //     perimee — et mon message accusait la cle, qui etait bonne.
+  //
+  // `performance.timeOrigin + performance.now()` rend l'heure REELLE :
+  // `horloge-decalee.js` ne remplace que `globalThis.Date` et le `Date` de la
+  // fenetre jsdom (verifie aussi sur la version de staging, qui ajoute
+  // `HEURES`). Or l'enfant n'est JAMAIS decale, puisqu'il ne recoit aucun
+  // prechargement. Les deux calculent donc la MEME fenetre quoi qu'on pose dans
+  // l'environnement, et il n'y a plus de porte a tenir d'accord avec un outil
+  // qui evolue.
+  const maintenantReel = () => new Date(performance.timeOrigin + performance.now())
   // Le relief : meme fenetre que le script (1er du mois suivant, 730 jours).
+  // ⚠ `FENETRE_JOURS` DUPLIQUE UNE REGLE QUI VIT AILLEURS : le script la
+  // construit et `lib/airroi/client.js` la VALIDE (`JOURS_FACTEURS_MAX = 730`,
+  // non exporte) — trois orthographes pour une regle. Thierry a borne ce lot au
+  // test seul, donc on ne touche pas au client : signale au chef de file pour
+  // qu'il soit numerote au registre a la prochaine ouverture du fichier. Pas de
+  // numero cite ici : une reference a une dette qui n'existe pas encore serait
+  // lue comme un fait, et c'est le defaut que ce lot passe sa journee a fermer.
+  const FENETRE_JOURS = 730
   const { jourLocalParis } = require('../lib/yield/zones-scolaires')
-  const [an, mo] = jourLocalParis(new Date().toISOString()).slice(0, 7).split('-').map(Number)
+  const [an, mo] = jourLocalParis(maintenantReel().toISOString()).slice(0, 7).split('-').map(Number)
   const debut = new Date(Date.UTC(an, mo, 1)).toISOString().slice(0, 10)
-  const fin = new Date(Date.parse(`${debut}T00:00:00Z`) + 729 * 86400000).toISOString().slice(0, 10)
+  const fin = new Date(Date.parse(`${debut}T00:00:00Z`)
+    + (FENETRE_JOURS - 1) * 86400000).toISOString().slice(0, 10)
   const moi = lireJson(lire('moi.json')).location_info
   cas.push({ script: 'scripts/capturer-relief-airroi.js', prefixe: 'relief-bagneres-', endpoint: 'POST /price-recommendation/calendar-prices',
     params: { location: { latitude: moi.latitude, longitude: moi.longitude }, currency: 'EUR', base_price: 100, start_date: debut, end_date: fin },
@@ -487,13 +540,57 @@ test('LE TEST QUI COMPTE (SECURITE, review de f40ee9e) : sans cle dans l environ
     const avant = etat(c.prefixe)
     const env = { ...process.env }
     delete env.AIRROI_API_KEY
-    let code = 0
-    // `--fixtures` isole l'ECRITURE : meme si le script regresse, le depot
-    // n'est pas sali (re-review de 9b47690).
-    try { execFileSync(process.execPath, [path.join(racine, c.script), `--cache=${d}`, `--fixtures=${sortie}`], { env, stdio: 'pipe' }) } catch (e) { code = e.status }
-    assert.equal(code, 6, `${c.script} : refus attendu (code 6)`)
+    // ⚠ `spawnSync`, PAS `execFileSync` — un seul changement ferme quatre
+    // defauts releves en review : les DEUX flux reviennent toujours (en sortie 0,
+    // `execFileSync` ne rendait que stdout, donc deplacer un `console.log` vers
+    // `console.error` desarmait une garde en silence) ; une mort par SIGNAL ne
+    // laisse plus un `status` a `null` muet ; il y a un DELAI, alors que
+    // `node:test` n'en a aucun par defaut et qu'un enfant bloque figeait la
+    // suite entiere sans une ligne de sortie, ni verte ni rouge ; et il n'y a
+    // plus de try/catch dont la branche depend du code de sortie.
+    // ⚠ Ces trois enfants ne sont PAS couverts par la promesse « AUCUN APPEL
+    // REEL » de l'en-tete : ils utilisent le `fetch` global, et leur seul verrou
+    // avant le reseau est `if (!cleApi)` (lib/airroi/client.js:244).
+    // `--fixtures` isole l'ECRITURE : meme si le script regresse, le depot n'est
+    // pas sali (re-review de 9b47690).
+    const r = spawnSync(process.execPath,
+      [path.join(racine, c.script), `--cache=${d}`, `--fixtures=${sortie}`],
+      { env, encoding: 'utf8', timeout: 60000 })
+    const code = r.status ?? `signal:${r.signal}${r.error ? ` (${r.error.code || r.error.message})` : ''}`
+    const dit = String(r.stdout || '') + String(r.stderr || '')
+    const queue = () => dit.trim().split('\n').slice(-3).join(' | ')
+
+    // ⚠ LES DEUX ASSERTIONS DE SECURITE D'ABORD, ET C'EST LE CORRECTIF LE PLUS
+    // IMPORTANT DE CETTE RE-ECRITURE. Ma premiere version avait place son
+    // assertion de DIAGNOSTIC devant elles : mesure de la review, avec deux
+    // mutations plausibles cumulees (un script qui ecrit la fixture avant
+    // d'appeler `ecrireFixtureSansCle`, et une cle semee qui derive d'un
+    // parametre), le seul message rendu etait « le script n a PAS ete servi par
+    // le cache... donc il n a jamais atteint l ecriture de fixture » — alors que
+    // le dossier de sortie contenait bel et bien une fixture ecrite SANS aucun
+    // controle de cle. `assert.ok` levait, les deux lignes suivantes ne
+    // tournaient jamais, et le lecteur corrigeait le semis du cache, revenait au
+    // vert, et laissait la fuite. Un diagnostic de confort ne passe JAMAIS
+    // devant une assertion de securite.
     assert.deepEqual(fs.readdirSync(sortie), [], `${c.script} : rien d ecrit dans le dossier de sortie`)
     assert.deepEqual(etat(c.prefixe), avant, `${c.script} : aucune fixture ecrite ni reecrite`)
+    assert.equal(code, 6, `${c.script} : refus attendu (code 6). Sortie : ${queue()}`)
+
+    // ⚠ ET LA PREUVE EST POSITIVE, PAS UNE LISTE NOIRE DE PROSE. Ce message
+    // n'est imprime que par la branche « cle absente » de
+    // `ecrireFixtureSansCle` : le lire prouve que l'enfant a ATTEINT l'ecriture,
+    // et que c'est bien la garde de securite qui a refuse — pas un refus
+    // anterieur. Ma premiere version faisait l'inverse, une regex negative sur
+    // « Rien n est paye », et elle etait aveugle a `capturer-pacing.js`, qui n'a
+    // aucune porte `--confirmer` et sort en 1 sur un tout autre refus.
+    // ⚠ ET UNE GARDE NEGATIVE SUR « AIRROI_API_KEY absente » AURAIT MORDU SUR LE
+    // CAS SAIN : les deux refus contiennent ces mots — celui du client dit
+    // « absente de l environnement », celui de la garde « absente ou mal formee
+    // — impossible de verifier... ». Seule la seconde moitie discrimine.
+    assert.match(dit, /impossible de verifier que la reponse ne contient pas la cle/,
+      `${c.script} : le refus ne vient pas de la garde de fixture. Soit l enfant n a pas ete`
+      + ' servi par le cache et a refuse de payer avant d atteindre l ecriture, soit il a refuse'
+      + ` plus tot encore, faute de cle. Dans les deux cas ce test ne prouve rien. Sortie : ${queue()}`)
   }
 })
 
