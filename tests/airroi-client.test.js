@@ -710,3 +710,62 @@ test('une erreur HTTP porte son code', async () => {
     assert.equal(e.coutLibere, true)
   })
 })
+
+test("LE TEST QUI COMPTE (dette 91) : la fixture du pacing porte le jour de PARIS, sinon elle ecrase l archive de la veille", () => {
+  // ⚠ CE DEFAUT DETRUIT UNE DONNEE AU LIEU DE ROUGIR UN TEST, et c'est pour ça
+  // que Thierry l'a passe en priorite. `capturer-pacing.js` etait le SEUL des
+  // trois scripts de capture a decouper `recupere_le` en UTC (`slice(0, 10)`)
+  // quand ses deux jumeaux passent par `jourLocalParis`. Entre 00 h et 02 h a
+  // Paris, le jour UTC est encore celui de la VEILLE : la fixture prenait le nom
+  // de l'archive de la veille, et `ecrireFixtureSansCle` finit par une ecriture
+  // NUE — l'archive precedente etait ecrasee, sans un mot, irrecuperable.
+  //
+  // ⚠ ET CE TEST NE TOUCHE PAS A L'HORLOGE. La date du nom vient du CACHE
+  // (`brut.recupere_le`), donc la semer suffit : deterministe, pas de
+  // prechargement, pas de processus enfant decale. C'est la leçon de la nuit
+  // derniere appliquee a l'endroit ou elle coute le moins.
+  const { spawnSync } = require('child_process')
+  const racine = path.join(__dirname, '..')
+  const moiLoc = lireJson(lire('moi.json')).location_info
+  const marche60 = lireJson(lire('marche-60.json')).market
+  const marche = { country: marche60.country, region: marche60.region, locality: marche60.locality }
+  const E_PACING = 'POST /markets/metrics/future/pacing'
+  const P_PACING = { market: marche, currency: 'native' }
+
+  // Deux instants, DANS les deux sens — sinon un correctif qui decalerait tout
+  // d'un jour passerait aussi.
+  const cas = [
+    { recupereLe: '2026-10-24T23:30:00Z', attendu: 'pacing-bagneres-2026-10-25.json',
+      pourquoi: '01 h 30 a Paris le 25 : le jour UTC est encore le 24' },
+    { recupereLe: '2026-10-24T12:00:00Z', attendu: 'pacing-bagneres-2026-10-24.json',
+      pourquoi: '14 h a Paris le 24 : les deux jours coincident' }
+  ]
+
+  for (const c of cas) {
+    const d = dossier()
+    const sortie = dossier()
+    const semer = (endpoint, parametres, reponse) => depotFichier(d).ecrireCache({
+      cle: cleCanonique(endpoint, parametres), endpoint, parametres,
+      reponse, cout: 0.1, recupereLe: c.recupereLe })
+    // Le lookup DOIT rendre le meme marche que marche-60.json, sinon le script
+    // sort en 3 sans rien ecrire (et le test ne prouverait rien).
+    semer('GET /markets/lookup', { lat: moiLoc.latitude, lng: moiLoc.longitude }, JSON.stringify(marche))
+    semer(E_PACING, P_PACING, '{"market":{},"results":[{"date":"2026-11-01","occupancy":0.4}]}')
+
+    const env = { ...process.env, AIRROI_API_KEY: `factice-${crypto.randomUUID()}` }
+    const r = spawnSync(process.execPath,
+      [path.join(racine, 'scripts/capturer-pacing.js'), `--cache=${d}`, `--fixtures=${sortie}`],
+      { env, encoding: 'utf8', timeout: 60000 })
+    const dit = String(r.stdout || '') + String(r.stderr || '')
+    const queue = dit.trim().split('\n').slice(-3).join(' | ')
+
+    // Non-vacuite : le script doit avoir ECRIT, sinon le nom ne prouve rien.
+    assert.equal(r.status, 0, `le script n a pas abouti (code ${r.status}). Sortie : ${queue}`)
+    const ecrits = fs.readdirSync(sortie)
+    assert.equal(ecrits.length, 1,
+      `une seule fixture attendue, ${ecrits.length} ecrite(s) : ${JSON.stringify(ecrits)}. Sortie : ${queue}`)
+    assert.equal(ecrits[0], c.attendu,
+      `fixture nommee ${ecrits[0]} au lieu de ${c.attendu} — ${c.pourquoi}.`
+      + ' Un nom de la veille ECRASE l archive de la veille, et elle ne se recupere pas.')
+  }
+})
