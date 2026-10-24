@@ -303,3 +303,188 @@ laisser l'erreur remonter, jamais rendre une plage vide : chaque jour
 tomberait en « sans ligne », donc **fermé**, et le dénominateur serait faux,
 crédible et muet. C'est la règle que ce module défend depuis l'origine — « un
 dénominateur inventé est pire qu'un trou déclaré ».
+
+## `joursExclus` — le dénominateur suit le numérateur (dette 78, 20 octobre 2026)
+
+**Décision de Thierry : « une nuit fermée n'est pas une nuit invendue. »**
+
+`eclater` retire déjà des nuits de **référence** celles qu'une exception ou une
+fermeture déclarée couvre (`nuitees_hors_reference`), et `calculerIndicateurs`
+fait `nuiteesRef = nuitees − hors_reference` puis divise par `jours_ouverts` —
+sous son propre commentaire « ce qui DIVISE se calcule des deux côtés sur le
+même périmètre ». Les deux moitiés n'étaient pas branchées sur le même
+périmètre : **aucun appelant du dépôt ne passait `joursExclus`**, donc
+`estimesFermes` et `jours_estimes_fermes_par_exception` étaient du code mort à
+l'échelle du dépôt (tous deux renommés depuis — voir plus bas).
+
+⚠ **ET CE COMPTE ÉTAIT IMBRIQUÉ SOUS `estimee`.** `indicateurs.js` ne le rendait
+que si, *par ailleurs*, au moins un jour passé était réputé ouvert par
+convention. Les deux choses n'ont rien à voir : un mois entièrement ligné au
+calendrier, avec dix jours déclarés fermés, retire bien ces dix jours du
+dénominateur et n'en disait **rien**. C'est le seul chiffre qui explique un taux
+d'occupation qui bouge, et il était inatteignable. Il est désormais rendu
+indépendamment, **et sans condition de valeur** : émis seulement s'il était non
+nul, « zéro jour retiré » et « ancienne forme de réponse » se confondaient en
+`undefined`, et le premier lecteur a dû écrire `|| 0` pour se défendre. Un
+compteur qui vaut zéro est une information.
+
+⚠ **ET IL A ÉTÉ RENOMMÉ `jours_retires_par_declaration`** (20 octobre 2026).
+Une première version de cette section gardait le nom en « estimés » au motif
+qu'« il est déjà dans le contrat de la réponse » : c'était un faux argument,
+vérifié par grep — **aucun écran ne le lisait**. L'ancien nom était faux deux
+fois : ces jours sont *déclarés*, pas estimés, et l'ensemble est
+`yield_exceptions` **union** fermetures de l'hôte, pas les seules exceptions.
+Un nom faux conservé par prudence coûte plus cher que le renommage qu'il évite.
+
+⚠ **ET CE COMPTEUR COMPTAIT LES JOURS *COUVERTS*, PAS LES JOURS *RETIRÉS*.**
+Il s'incrémentait pour chaque jour couvert par une déclaration, **avant même
+d'avoir regardé le calendrier**. Or la forme NORMALE d'une fermeture d'hôte —
+`retirerDeLaVente` enregistre la fermeture **et** ferme la nuit dans
+`calendar_inventory` — donne des jours déjà fermés : il annonçait donc N jours
+retirés quand **zéro** l'avait été. C'est le seul chiffre qui explique un taux
+qui bouge ; il mentait sur le cas le plus courant. Une déclaration **convertit**
+désormais une nuit qui *serait ouverte*, et rien d'autre : au-delà de la fenêtre
+glissante la nuit reste « pas encore ouverte » (arbitrage C du §2 ter — la
+confondre avec « fermée » reconstituait la dette 20 par le bas), et une nuit
+déjà fermée au calendrier reste simplement fermée.
+
+⚠ **ET LE DRAPEAU `estimee` BOUGE — dans le bon sens, mais il bouge.** Une
+première version de cette section affirmait le contraire ; c'est faux, et la
+revue l'a mesuré. `estimee` vaut `estimes > 0`, et un jour passé sans ligne que
+l'hôte déclare fermé ne s'incrémente plus dans `estimes` : il part en *retiré
+par déclaration*. Donc un mois dont **tous** les jours estimés ouverts sont
+déclarés fermés passe de `estimee: true` à `estimee: false` — et c'est **juste**,
+puisque le dénominateur qui reste est fait de lignes réelles. Conséquences
+assumées et désormais testées : le badge « Estimé » disparaît, la légende ne
+compte plus la période, et sur l'accueil `chiffresFenetre` passe de « non
+calculable » à un taux **compté** — ce qu'il doit faire quand plus aucun jour du
+dénominateur n'est estimé.
+
+### ⚠ LA FENÊTRE DES EXCLUSIONS VA JUSQU'À LA FIN DE LA DERNIÈRE PÉRIODE
+
+`bornesDePeriode` **dépasse** la fenêtre demandée dès que la granularité est
+« mois » ou « année » : `debut=2026-06-01 fin=2026-06-20` en mois donne une
+borne au 2026-06-30. Or `joursExclus` borne son `Set` à la fenêtre qu'on lui
+donne. Mesuré : avec `fin=2026-06-12` et une exception couvrant tout juin, la
+dernière période rendait `jours_ouverts: 18` et un **TO de 22,2 %** sur des
+jours que l'hôte avait déclarés fermés, `calculable: true`, **sans aucun
+motif** — le défaut d'origine intact, et le compte des jours déclarés (12)
+contredisait la déclaration (30). **Le périmètre du calcul dépendait d'un
+paramètre de requête.** `api/yield.js` avait déjà appris cette leçon pour
+`finContexte` (« le contexte couvre les périodes entières, pas la fenêtre
+demandée ») ; `exclus` n'avait pas eu le même traitement.
+
+### ⚠ DEUX CARTES DE CAPACITÉS — RÉFÉRENCE N'EST PAS VENTE
+
+**C'est le point le plus important du lot, et c'est la même distinction que la
+section « ce qui n'est pas branché » ci-dessous, une fonction plus loin.**
+`joursExclus` répond à « faut-il compter cette nuit dans la **référence** ? ».
+Il ne répond **pas** à « cette nuit était-elle **ouverte à la vente** ? ». Une
+carte unique nourrissait les trois consommateurs : `calculerIndicateurs` (où
+l'exclusion est voulue — c'est la dette 78), `pickup` et `R.projeter` (où elle
+ne l'est pas). Dans **une seule réponse HTTP**, elle produisait :
+
+- `pickup` voyait `jours_ouverts: 0` sur un mois entièrement déclaré et levait
+  `periode_n1_fermee_a_la_vente`, qui **disqualifie tout le N-1** du « à date ».
+  L'écran affichait « +0 % » dans un bloc et « l'an dernier, le logement ne
+  POUVAIT pas vendre » dans l'autre, à propos d'un mois ouvert qui avait vendu
+  400 €. Et l'alerte de haut de page invitait l'hôte à **rouvrir les jours
+  qu'il venait de déclarer fermés**.
+- `R.projeter` recevait un numérateur **brut** (`pk.a_date.nuitees`) sur un
+  dénominateur rétréci : le taux extrapolé montait jusqu'à son plafond et la
+  cellule « Avance / retard » basculait de −1 (rouge) à +6 (vert). C'est
+  littéralement le défaut du lot 3.3 (« 3 nuits vendues dont 2 en exception,
+  1 jour ouvert → 300 % ») rouvert une fonction plus loin.
+
+Les deux cartes sortent de la **même** lecture de calendrier : classer deux fois
+est du calcul en mémoire, pas un aller-retour de plus.
+
+### Où la dette mord, et où elle ne mord pas
+
+Mesuré sur les 4 biens réels (`scripts/verifier-dette-78.js`) : **elle ne mord
+que là où un jour déclaré fermé est *par ailleurs* compté ouvert.**
+
+⚠ **CE QUE CE SCRIPT PROUVE, ET CE QU'IL NE PROUVE PAS.** Il mesure l'**ampleur**
+de la correction sur les données réelles : il appelle `joursOuverts` deux fois,
+avec et sans `joursExclus`, et compare. Il ne prouve **pas** que la production
+passe l'option — retirer `joursExclus: exclus` d'`api/yield.js` le laisserait
+vert. Le **câblage** est prouvé par `tests/api-yield.test.js`. Deux artefacts,
+deux questions : aucun ne remplace l'autre, et ce KB ne doit pas citer le script
+comme « la preuve » du câblage.
+
+| fenêtre | jours retirés | effet |
+|---|---|---|
+| 30 derniers jours | 0 | aucun — rien de déclaré |
+| fermetures à venir (futur) | 0 | aucun — `calendar_inventory` porte déjà une ligne « fermé » |
+| passé ancien sans mémoire d'intention | **17 / 26** | Cœur de vie 23 : **TO 23,1 % → 66,7 %**, RevPAR 21,77 € → 62,88 € |
+
+**Reproduit sur la production le 23 octobre 2026** (recette demandée par
+Thierry), à l'identique : 17 jours retirés sur 26, TO 23,1 % → 66,7 %, RevPAR
+21,77 € → 62,88 €, dénominateur 26 → 9. Les trois autres biens : 0 écart.
+
+⚠ **ET LA FENÊTRE TÉMOIN EST DÉSORMAIS À DATES FIGÉES** — `2025-09-20` →
+`2025-10-15`. C'est la règle du dépôt appliquée dans les deux sens : *dates
+relatives si on lit l'horloge, dates figées si on désigne un fait*. Les deux
+premières fenêtres interrogent un état qui suit l'horloge (passé récent, futur
+proche) : relatives. La troisième désigne une **exception historique** qui ne
+bouge plus. Elle était relative (`auj−395 → auj−370`), donc elle **dérivait d'un
+jour par jour** : lancée le 23 octobre 2026 elle couvrait le 23 septembre au
+18 octobre 2025, soit **trois jours de l'exception hors fenêtre** — le témoin de
+Thierry n'était déjà plus reproductible.
+
+⚠ **ET LE VÉRIFICATEUR EXIGE MAINTENANT UN ÉCART, PAS SEULEMENT UNE
+FERMETURE.** « Au moins une fenêtre porte une fermeture déclarée » ne suffit
+pas : une fermeture que `retirerDeLaVente` a déjà fermée au calendrier donne un
+écart **nul**, légitimement. Les trois fenêtres pouvaient donc toutes porter des
+fermetures et le script conclure « AVANT/APRÈS CONFORME » sans qu'un seul
+chiffre ait bougé. Contre-épreuve du 23 octobre 2026 : le script **d'avant**,
+lancé sur la fenêtre future (2 biens avec fermeture déclarée, 0 écart), sortait
+« CONFORME » en code 0 ; celui d'aujourd'hui échoue — « le témoin ne témoigne
+plus ». Et il échoue aussi si la fenêtre témoin ne porte **aucune** fermeture,
+ce qui dirait que l'exception a disparu de la base.
+
+Dans le futur et le passé récent, la mémoire d'intention existe : le jour est
+déjà hors du dénominateur. C'est dans le **passé ancien**, où la convention
+« un jour passé sans ligne est réputé ouvert » s'applique, que l'écart se creuse
+— et cette fenêtre est précisément le **N-1** auquel `comparerAN1` compare le
+mois courant, donc la comparaison annuelle était flattée.
+`tests/api-yield.test.js` garde les deux.
+
+### ⚠ CE QUI N'EST PAS BRANCHÉ, ET POURQUOI
+
+`joursExclus` est une affaire de **dénominateur**. Sur les **huit** appels à
+`joursOuverts` du dépôt — `api/yield.js` en fait **deux** depuis ce lot, et la
+première version de cette table en annonçait sept en marquant ce fichier d'un
+« oui » unique — voici ce que chacun sert :
+
+| appel | ce que la capacité sert | branché ? |
+|---|---|---|
+| `api/yield.js`, carte de **référence** | dénominateur du TO / RevPAR affichés, et de la projection | **oui** |
+| `api/yield.js`, carte de **vente** | les DRAPEAUX du « à date » (`periode_fermee_a_la_vente`) | **non, et délibérément** |
+| `lib/yield/contexte-du-bien.js:154` (`capacitesMois`) | dénominateur de la **pression**, qui déplace les **prix** | **non — décision produit** |
+| `api/yield-prix.js:218` (`capacite`) | ⚠ **un RevPAR AFFICHÉ** (`pied.a_date.revpar`), le compte de nuits ouvertes affiché, et la capacité passée à `projeter` | **non — dette ouverte** |
+| `api/yield-prix.js:226` (`capaciteRadar`) | l'état « ouverte / fermée à la vente » affiché par nuit | non |
+| `lib/yield/contexte-du-bien.js:183` | l'ensemble des nuits **à tarifer** | non |
+| `lib/pilote-quotidien.js` | les nuits **à tarifer et à pousser** au canal | non |
+
+⚠ **ET LA LIGNE `api/yield-prix.js` ÉTAIT MAL CLASSÉE, CE QUI CACHAIT UNE
+DETTE.** La première version rangeait ses deux appels sous « l'état ouverte /
+fermée affiché par nuit » — vrai de `capaciteRadar`, faux de `capacite`, qui
+nourrit un **RevPAR affiché**. Conséquence mesurée : sur un mois portant une
+exception, le pied de l'écran Prédiction de prix sous-estime le RevPAR du poids
+entier des nuits déclarées — le 21,77 € contre 62,88 € de ce lot — pendant que
+le Réalisé de `/api/yield` montre le chiffre corrigé **pour le même mois**. Deux
+RevPAR, deux écrans, aucun drapeau. C'est pour cela que la dette 78 n'est
+**pas** « soldée pour les indicateurs affichés ».
+
+Y passer les exclusions confondrait **« hors référence »** et **« fermée à la
+vente »** : une nuit en exception peut parfaitement être ouverte et se vendre.
+Pour les trois derniers, la conséquence est une **poussée OTA** — on cesserait
+de tarifer des nuits que l'hôte vend. Et `lib/moteur-prix.js` honore **déjà**
+les fermetures de l'hôte via `nuitsFermees` : seule la moitié `yield_exceptions`
+changerait, dans le sens d'une vente en moins.
+
+Le cas de `capacitesMois` est le plus délicat : c'est bien la même asymétrie, et
+`grilleDuBien` construit bien son numérateur **avec** `joursExclus` — mais son
+dénominateur nourrit la pression, donc les prix recommandés. Le corriger est
+juste **et** change les prix. À trancher séparément.

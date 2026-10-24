@@ -29,6 +29,7 @@ C'est la règle qui traverse tout le module.
 | situation | ce qui est rendu |
 |---|---|
 | zéro jour ouvert (Colomiers, fermé à 100 %) | `taux_occupation: null`, motif `aucun_jour_ouvert` |
+| zéro jour ouvert **parce que tout est déclaré hors référence** | `taux_occupation: null`, motif `tous_les_jours_retires_par_declaration` — ⚠ **jamais `aucun_jour_ouvert`** : l'écran le traduit par « Fermé à la vente », et cette période était ouverte et a vendu |
 | capacité non calculable (mémoire non amorcée) | `null` + la **raison** remontée |
 | aucune nuit à prix connu | `prix_moyen: null`, motif explicite |
 | aucune date de vente fiable | `delai_median: null` |
@@ -137,6 +138,26 @@ entre ses mains.
 **Le drapeau vit dans la donnée**, pas dans l'interface : chaque résultat porte
 `capacite_estimee: true` et `jours_estimes_ouverts`. L'étape 4 ne *peut pas*
 l'afficher comme mesuré.
+
+⚠ **MISE À JOUR DU 24 OCTOBRE 2026 (dette 78), ET CETTE PAGE ÉTAIT EN RETARD
+D'UN COMMIT.** `lib/yield/indicateurs.js` porte en tête
+`DOC : docs/kb/indicateurs-yield.md (modif = MÊME COMMIT)` ; le lot a modifié le
+module et n'a mis à jour que `capacite-yield.md`. Relevé en re-review, et le
+coût n'est pas cosmétique : la prochaine session qui suit l'en-tête lit le
+contrat d'avant.
+
+1. **`jours_retires_par_declaration` n'est plus imbriqué sous `estimee`.** Il
+   était rendu *seulement si* un jour passé était par ailleurs réputé ouvert par
+   convention — deux choses sans rapport. Il est désormais rendu **sans
+   condition de valeur** : « zéro jour retiré » et « ancienne forme de réponse »
+   se confondaient en `undefined`. L'ancien nom
+   (`jours_estimes_fermes_par_exception`) était faux deux fois : ces jours sont
+   *déclarés*, pas estimés, et l'ensemble est `yield_exceptions` **union**
+   fermetures de l'hôte.
+2. **Le drapeau `estimee` peut TOMBER** quand tous les jours estimés ouverts
+   sont déclarés fermés — et c'est juste, le dénominateur restant est fait de
+   lignes réelles. Testé : `tests/capacite-yield.test.js`, « le drapeau
+   `estimee` TOMBE quand tous les jours estimés sont déclarés ».
 
 **Bascule automatique, jour par jour** : dès qu'une ligne réelle existe, elle
 fait foi. L'estimation ne comble que les trous du passé.

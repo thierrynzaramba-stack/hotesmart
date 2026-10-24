@@ -94,7 +94,20 @@ droit de le cacher.
 **Lecture seule intégrale.** Cette page n'écrit rien, nulle part. La saisie des
 exceptions vient au lot 4.3, l'application d'un prix au 4.6.
 
-## 2. Les 41 motifs sont traduits, et le test le garantit
+## 2. Les 42 motifs sont traduits, et le test le garantit
+
+⚠ **LE 42e EST ARRIVÉ AVEC LA DETTE 78, LE 24 OCTOBRE 2026, ET IL EXISTE POUR
+NE PAS MENTIR.** `tous_les_jours_retires_par_declaration` double
+`aucun_jour_ouvert` parce que `jours_ouverts: 0` a désormais **deux** causes :
+un bien fermé à la vente (Colomiers), et un mois **ouvert, qui a vendu**, dont
+l'hôte a déclaré toutes les nuits hors référence. Le chiffre manquant est le
+même, la phrase ne peut pas l'être : « Fermé à la vente — aucune nuit n'était
+ouverte » s'affichait sur une ligne portant 400 € et 4 nuitées. Un motif qui
+dit une cause fausse est pire qu'un tiret, exactement pour la raison que la
+tête de `shared/yield-motifs.js` donne.
+
+Et c'est le **test dérivé** qui l'a imposé : ajouter la constante au moteur sans
+sa traduction a fait rougir `tests/yield-motifs.test.js` tout seul.
 
 `shared/yield-motifs.js` porte une table `code → { titre, quoi }`. Le `titre`
 remplace le chiffre absent ; le `quoi` dit la **cause**, pas la conséquence, et
