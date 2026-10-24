@@ -83,8 +83,11 @@ const CHAMPS_MARCHE = ['country', 'region', 'locality']
   // ⚠ LE JOUR DE PARIS, PAS LE JOUR UTC — DETTE 91, ET CELLE-LA DETRUIT UNE
   // DONNEE AU LIEU DE ROUGIR UN TEST. Ce script etait le SEUL des trois a
   // decouper `recupere_le` en UTC (`slice(0, 10)`) quand ses deux jumeaux
-  // passent par `jourLocalParis` : entre 00 h et 02 h a Paris (01 h et 02 h en
-  // heure d'hiver), le jour UTC est encore CELUI DE LA VEILLE. La fixture
+  // passent par `jourLocalParis`. LA FENETRE DEPEND DE LA SAISON, et la
+  // premiere version de ce commentaire l'enonçait a l'ENVERS : c'est
+  // 00 h - 02 h en heure d'ETE (UTC+2) et 00 h - 01 h en heure d'HIVER (UTC+1).
+  // A 01 h 30 en hiver les deux jours coincident deja : c'est une heure SURE.
+  // Dans cette fenetre, le jour UTC est encore CELUI DE LA VEILLE. La fixture
   // prenait donc le nom de l'archive de la veille, et `ecrireFixtureSansCle`
   // finit par une ecriture NUE : l'archive precedente etait ECRASEE, sans un
   // mot, et elle est irrecuperable — alors que l'en-tete de ce script dit

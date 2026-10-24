@@ -50,7 +50,17 @@ const PLAFOND_USD = 1.20
 const FIX = path.join(__dirname, '..', 'tests', 'fixtures', 'airroi')
 const args = process.argv.slice(2)
 const val = n => { const a = args.find(x => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : null }
-const jour = () => new Date().toISOString().slice(0, 10)
+// ⚠ LE JOUR DE PARIS, COMME LES TROIS AUTRES SCRIPTS DE CAPTURE — DETTE 91.
+// Ce script portait l'expression UTC mot pour mot (`toISOString().slice(0, 10)`)
+// et c'est le plus expose des quatre : il ecrit en DUR dans
+// `tests/fixtures/airroi/` du depot, sans `--fixtures` pour isoler, et par le
+// meme `writeFileSync` nu. Et il a un rendez-vous DATE : la dette 52 programme
+// la seconde capture des calendriers au 5 novembre 2026, en heure d'HIVER.
+// Lancee a 00 h 30 a Paris, elle aurait porte la date de la VEILLE et ecrase
+// l'instantane gratuit pris la veille — avec la mesure payee archivee sous la
+// mauvaise date.
+const { jourLocalParis } = require('../lib/yield/zones-scolaires')
+const jour = () => jourLocalParis(new Date().toISOString())
 const weekEnd = j => [5, 6].includes(new Date(`${j}T00:00:00Z`).getUTCDay()) // NUITS du vendredi et du samedi (dette 30)
 const mediane = xs => { if (!xs.length) return null; const t = [...xs].sort((a, b) => a - b); const m = Math.floor(t.length / 2); return t.length % 2 ? t[m] : (t[m - 1] + t[m]) / 2 }
 
