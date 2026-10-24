@@ -172,24 +172,24 @@ Statuts : **conservée** · **déplacée** · **retirée (motif)** · **⚠ à t
 | # | Fonction | Aujourd'hui | Demain (spec) | Statut |
 |---|---|---|---|---|
 | I1-I2 | Bonjour + initiales | en-tête | en-tête supprimé ; initiales gardées par la barre | **retirée** (forme) — les initiales restent dans la barre haute |
-| I3 | Ligne résumé comptée | sous le titre | remplacée par la date seule, à droite du titre | **retirée (motif à confirmer : Q6)** |
-| I4 | « Ajouter un logement » | en-tête | « reste sur la page Logements » | **déplacée** — ⚠ **Q7** : plus aucun chemin depuis l'accueil pour un hôte à zéro logement |
-| I5 | Alarme de surréservation + Acquitter | haut de page | non mentionnée par la spec | **⚠ À TRANCHER (Q1)** — omission ; c'est le seul moyen d'arrêter les SMS |
+| I3 | Ligne résumé comptée | sous le titre | date seule à droite du titre ; **le compte des choses à traiter passe à côté du titre « À valider »** | **retirée en partie** — le compte survit, déplacé (Q6, tranchée) |
+| I4 | « Ajouter un logement » | en-tête | sur la page Logements ; **et un état « aucun logement » sur l'accueil**, identique à celui de la page Logements (« Ajoutez votre premier logement », Connecter / Ajouter manuellement) | **déplacée**, avec un état vide neuf (Q7, tranchée) |
+| I5 | Alarme de surréservation + Acquitter | haut de page | **haut de page, inchangée** — ajoutée à la spec | **conservée** (Q1, tranchée) |
 | I6-I12 | Arrivées et départs du jour | bloc 1 | « Conservé » (spec §2) | **conservée** — la spec ajoute la photo du bien et le tri par heure |
-| I13-I17 | À valider | bloc 2 | « Conservé tel quel (décision en attente) » | **⚠ À TRANCHER (Q2)** |
-| I18-I21 | Fait pour vous | bloc 3 | « Conservé tel quel (même réserve) » | **⚠ À TRANCHER (Q2)** |
-| I22 | Revenus · 30 j (total compte) | bande | bande supprimée ; bloc Revenus (mois de versement) | **remplacée par une AUTRE mesure** — ⚠ **Q3** |
+| I13-I17 | À valider | bloc 2 | conservé tel quel, **plus le compte des choses à traiter à côté du titre** | **conservée** (Q2, tranchée) |
+| I18-I21 | Fait pour vous | bloc 3 | conservé tel quel | **conservée** (Q2, tranchée) |
+| I22 | Revenus · 30 j (total compte) | bande | bande supprimée ; bloc **Revenus nets** (mois de versement, net si la commission est connue, **brut marqué « brut » sinon**) | **remplacée par une AUTRE mesure**, assumée (Q3, tranchée) |
 | I23 | Note · 30 j (total compte) | bande | en-tête du bloc Derniers avis | **déplacée**, mesure identique |
-| I24 | **Occupation · 30 j** + variation | bande | **nulle part** | **⚠ RETRAIT PAR OMISSION (Q4)** |
+| I24 | **Occupation · 30 j** + variation | bande | **fiche du logement, bloc Prix** | **déplacée** (Q4, tranchée) — ⚠ travail du **lot Logements**, à inscrire à sa spec : rien ne la porte tant qu'il n'est pas fait |
 | I25 | Carte de bien : photo, nom, ville | bloc 4 | cartes « restent sur la page Logements » | **déplacée** — existe déjà |
 | I26-I27 | Occupé ce soir / prochaine arrivée | bloc 4 | idem | **déplacée** — existe déjà (`fait_date` : occupé, libre, arrivée le {date}) |
 | I28 | Note du bien | bloc 4 | idem | **déplacée** — existe déjà (avis TOTAL, pas 30 j : la période change) |
-| I29 | **CA 30 j par bien** + variation | bloc 4 | ligne par bien du bloc Revenus, en **mois de versement** | **remplacée par une AUTRE mesure (Q3)** ; la page Logements ne la porte pas |
-| I30 | **Min et max mensuels sur 12 mois** | bloc 4 | **nulle part** | **⚠ RETRAIT PAR OMISSION (Q4)** |
+| I29 | **CA 30 j par bien** + variation | bloc 4 | ligne par bien du bloc Revenus nets, en **mois de versement** | **remplacée par une AUTRE mesure**, assumée (Q3, tranchée) |
+| I30 | **Min et max mensuels sur 12 mois** | bloc 4 | **fiche du logement, bloc Prix** | **déplacée** (Q4, tranchée) — même réserve que I24 |
 | I31 | Carte « Relier Airbnb ou Booking.com » | bloc 4 | — | **déplacée** — la page Logements dit déjà « aucun canal relié » |
 | I32 | Lien « Voir tout » | bloc 4 | — | **retirée** avec le bloc |
 | I33-I34 | Navigation, délégation | transverse | inchangées | **conservée** |
-| I35 | Cache d'affichage | transverse | « mêmes règles que le lot (b) » (spec §5) | **conservée** — ⚠ **Q8** : avis et revenus sont-ils cachables ? |
+| I35 | Cache d'affichage | transverse | mêmes règles, **plus les revenus par bien** (12 h, purgés à la déconnexion) | **conservée, élargie** (Q8, tranchée) |
 | I36-I38 | Server-Timing, drapeaux, i18n | transverse | inchangés | **conservée** |
 | — | **Derniers avis** (3 commentaires) | — | nouveau bloc | **nouvelle** |
 | — | **Revenus** mois / année / comparables | — | nouveau bloc | **nouvelle** |
@@ -210,11 +210,19 @@ Statuts : **conservée** · **déplacée** · **retirée (motif)** · **⚠ à t
 
 ---
 
-## 6. Questions ouvertes (réponses attendues avant l'étape 1)
+## 6. Les dix questions, et les réponses de Thierry (24 octobre 2026)
 
-Elles sont reprises, numérotées, dans la remise à Thierry. **Q1** alarme de surréservation absente de la
-spec ; **Q2** À valider et Fait pour vous, garder ou retirer ; **Q3** ce que « net » veut dire et ce qu'on
-fait quand la commission est inconnue ; **Q4** occupation 30 j et min/max mensuels, retirés ou déplacés ;
-**Q5** droit « finances » inexistant dans le modèle de droits ; **Q6** la ligne résumé comptée ; **Q7**
-l'hôte à zéro logement ; **Q8** ce que le cache a le droit de garder ; **Q9** ce qui confirme un versement
-Booking.com ; **Q10** le nom du voyageur sur un avis de l'accueil.
+| # | Question | Réponse |
+|---|---|---|
+| Q1 | L'alarme de surréservation n'est pas dans la spec | **Conservée** en haut de page, avec « Acquitter ». Ajoutée à la spec. |
+| Q2 | « À valider » et « Fait pour vous », garder ou retirer | **Conservés tels quels.** |
+| Q3 | Ce que « net » veut dire quand la commission est inconnue | **Net si connue ; sinon brut, marqué « brut » sur la ligne.** Et un séjour compte au mois de son versement — le 31 octobre tombe en novembre : **accepté**. |
+| Q4 | Occupation 30 j et min/max mensuels | **Déplacés dans la fiche du logement, bloc Prix.** |
+| Q5 | Droit du bloc Revenus, « finances » n'existant pas | **Lecture des réservations, borné aux biens du profil** — comme aujourd'hui. |
+| Q6 | La ligne résumé comptée disparaît | **Acceptée** ; le compte des choses à traiter reste, **à côté du titre « À valider »**. |
+| Q7 | L'hôte sans aucun logement | **Même état vide que la page Logements** : « Ajoutez votre premier logement », Connecter / Ajouter manuellement. |
+| Q8 | Ce que le cache a le droit de garder | **Revenus par bien : 12 h, purgés à la déconnexion.** |
+| Q9 | Ce qui confirme un versement Booking.com | **Rien, et on ne fait plus semblant** : pas de « Versement attendu », tous les canaux suivent la règle de date, la note du bloc dit que c'est calculé et non confirmé par la banque. **Dette 91** ouverte pour le rapprochement avec les versements réels. |
+| Q10 | Le nom du voyageur sur un avis de l'accueil | **Prénom + initiale, accepté.** |
+
+**En plus** : le bloc s'appelle **« Revenus nets »**.
