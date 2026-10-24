@@ -67,6 +67,10 @@ const doc = (html) => new JSDOM(`<!doctype html><body><div id="c">${html}</div><
 const bien = (extra = {}) => ({
   id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', nom: 'La bulle', ville: 'Bagnères',
   capacite: 2, photo_url: null, assistant_en_pause: false, canaux_echec: false,
+  // ⚠ LE DEFAUT EST « LE COMPTE A ETE RELEVE » : c'est le cas courant, et c'est
+  // ce que l'endpoint descend depuis le 23 octobre 2026. Les tests qui veulent
+  // l'autre cas le posent explicitement.
+  canaux_releve_fait: true, beds24_de_l_hote: false,
   canaux: [{ ota: 'airbnb', titre: 'x', actif: true, mappe: true, listing_url: null }],
   fait_date: { type: 'libre', du: null, au: null, occupe: false, ferme: false },
   avis: { total: 0, notes: 0, note_sur_5: null },
@@ -138,23 +142,25 @@ test('LE TEST QUI COMPTE : « aucun canal » et « non vérifiés » sont DEUX r
   assert.notEqual(lu.querySelector('[data-canaux]').textContent,
     nonLu.querySelector('[data-canaux]').textContent,
     'lire « aucun canal » quand on en a deux est exactement le défaut que la dette 59 a fermé')
+
+  // ⚠ ET UN TROISIÈME CAS, depuis le 23 octobre 2026 : aucune ligne de canal
+  // ET aucun relevé de compte. On n'a pas regardé, donc on ne dit pas « aucun ».
+  const jamais = doc(M.carteHtml(bien({ canaux: [], canaux_releve_fait: false }), OUTILS()))
+  assert.equal(jamais.querySelector('[data-canaux]').dataset.canaux, 'non-lus')
+  assert.equal(jamais.querySelector('[data-canaux]').textContent, 'Canaux non vérifiés')
 })
 
-test('LE TEST QUI COMPTE : « jamais relevé » N EST PAS DISTINGUABLE ICI, et on le prouve', () => {
-  // ⚠ CE TEST GARDE UNE IMPOSSIBILITÉ, pour qu'on ne refasse pas l'erreur du
-  // 21 octobre 2026. J'avais ajouté un troisième rendu — « ses canaux n'ont
-  // jamais été relevés » — sur la marque `canaux_vu_le == null`, et je l'ai
-  // défait : cette marque ne peut PAS valoir autre chose quand un bien n'a
-  // aucun canal.
+test('LE TEST QUI COMPTE : « jamais relevé » se distingue, par le fait de COMPTE', () => {
+  // ⚠ CE TEST FIGEAIT UN DÉFAUT COMME COMPORTEMENT ATTENDU (REVIEW.md règle 17).
+  // Il s'appelait « N EST PAS DISTINGUABLE ICI, et on le prouve » et gardait une
+  // impossibilité — celle de distinguer « aucun canal relié » de « jamais
+  // relevé » sur la marque `canaux_vu_le`.
   //
-  // `fraicheurDuBien` rend `null` dès qu'un bien n'a aucun canal (décision de
-  // Thierry du 19 octobre : « un bien sans canal ne dit rien du tout »). Une
-  // carte sans pastille a donc TOUJOURS `canaux_vu_le: null`, et distinguer
-  // là-dessus rendait « Aucun canal relié » inatteignable — un bien Beds24,
-  // ou neuf, annonçait une vérification jamais faite alors qu'elle avait eu
-  // lieu dix minutes plus tôt.
-  // `lib/canaux-du-bien` construit son client au chargement : sans ces
-  // variables, le require lève avant la première assertion.
+  // La prémisse restait juste : `fraicheurDuBien` rend `null` dès qu'un bien
+  // n'a aucun canal (décision de Thierry du 19 octobre : « un bien sans canal
+  // ne dit rien du tout »), donc cette marque-là ne pouvait pas trancher. Mais
+  // la conclusion était fausse : il fallait une AUTRE donnée, pas renoncer.
+  // L'endpoint descend désormais le fait de COMPTE.
   process.env.SUPABASE_URL = process.env.SUPABASE_URL || 'http://localhost:54321'
   process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'cle-de-test'
   process.env.CHANNEL_BASE_URL = process.env.CHANNEL_BASE_URL || 'http://localhost:1/api/v1'
@@ -162,17 +168,53 @@ test('LE TEST QUI COMPTE : « jamais relevé » N EST PAS DISTINGUABLE ICI, et o
   const { fraicheurDuBien } = require('../lib/canaux-du-bien')
   const maintenant = new Date().toISOString()
   assert.equal(fraicheurDuBien([], maintenant), null,
-    'si ceci change, la distinction « jamais relevé » devient possible — voir la dette')
-  assert.equal(fraicheurDuBien(null, maintenant), null)
-  // Avec un canal, la fraîcheur existe : c'est bien l'absence de canal qui
-  // efface la date, pas l'horloge.
+    'la fraîcheur du BIEN reste muette sans canal : ce n est pas elle qui tranche')
   assert.equal(fraicheurDuBien([{ vu_le: null }], maintenant), maintenant)
 
-  // La distinction demanderait l'horloge du COMPTE (`canaux_releve`), que
-  // l'endpoint ne descend pas. Tant qu'il ne la descend pas, l'écran n'a pas
-  // la donnée qu'il prétendrait lire.
-  const sansCanal = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null }), OUTILS()))
-  assert.equal(sansCanal.querySelector('[data-canaux]').dataset.canaux, 'aucun')
+  // Ce qui tranche, c est le fait de COMPTE, et il tranche DANS LES DEUX SENS.
+  const releve = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null, canaux_releve_fait: true }), OUTILS()))
+  assert.equal(releve.querySelector('[data-canaux]').dataset.canaux, 'aucun',
+    'on a regardé, et ce logement n est en vente nulle part : c est un fait')
+
+  const jamais = doc(M.carteHtml(bien({ canaux: [], canaux_vu_le: null, canaux_releve_fait: false }), OUTILS()))
+  assert.equal(jamais.querySelector('[data-canaux]').dataset.canaux, 'non-lus',
+    'on n a jamais regardé : on ne dit pas « aucun »')
+
+  // ⚠ ET UN RELEVÉ ILLISIBLE N EST PAS UN RELEVÉ RÉUSSI (`null`, pas `false`).
+  const illisible = doc(M.carteHtml(bien({ canaux: [], canaux_releve_fait: null }), OUTILS()))
+  assert.equal(illisible.querySelector('[data-canaux]').dataset.canaux, 'non-lus')
+})
+
+test('LE TEST QUI COMPTE : un bien BEDS24 dit d où il est géré, et rien d autre', () => {
+  // ⚠ DÉCISION DE THIERRY, 23 octobre 2026. Ni « Aucun canal relié » — c est
+  // FAUX, ses canaux existent et passent par Beds24 — ni « Canaux non
+  // vérifiés » : le relevé est celui de l autre partenaire, il n a jamais eu à
+  // regarder ce bien, et un compte entièrement Beds24 verrait toutes ses cartes
+  // alarmées à vie. C est la forme du défaut que la re-revue de 3dddb14 avait
+  // fait DÉFAIRE : « remplacer un mensonge par un pire ».
+  //
+  // La question ne se pose pas pour ces biens : on dit d où le logement est
+  // piloté.
+  for (const releve of [true, false, null]) {
+    const d = doc(M.carteHtml(
+      bien({ canaux: [], canaux_releve_fait: releve, beds24_de_l_hote: true }), OUTILS()))
+    const zone = d.querySelector('[data-canaux]')
+    assert.equal(zone.dataset.canaux, 'beds24', `relevé = ${releve}`)
+    assert.equal(zone.textContent, 'Géré depuis votre compte Beds24')
+    assert.doesNotMatch(zone.textContent, /Aucun canal relié|Canaux non vérifiés/)
+  }
+})
+
+test('et la règle Beds24 passe AVANT les trois cas de canaux', () => {
+  // Même avec des canaux lisibles et des pastilles à montrer, un bien Beds24 de
+  // l hôte n en affiche aucune : ces lignes-là viendraient du relevé de l autre
+  // partenaire, et elles ne décrivent pas ce logement.
+  const d = doc(M.carteHtml(bien({
+    canaux: [{ ota: 'airbnb', titre: 'x', actif: true, mappe: true, listing_url: null }],
+    beds24_de_l_hote: true
+  }), OUTILS()))
+  assert.equal(d.querySelector('[data-canaux]').dataset.canaux, 'beds24')
+  assert.equal(d.querySelectorAll('.log-pastille').length, 0)
 })
 
 test('les trois états d un canal sont distincts, `mappe: null` compris', () => {
@@ -489,9 +531,14 @@ test('LE TEST QUI COMPTE : l ancienne liste REDIRIGE vers la V5, et la création
   const jFiche = rewrites.findIndex(r => r.source === '/logements/:id')
   assert.ok(jNouveau !== -1 && jNouveau < jFiche, 'la création doit être servie avant la fiche')
 
-  // La création existe toujours : son écran V5 est l étape 4, son URL est déjà V5.
-  assert.ok(rewrites.some(r => r.source === '/logements/nouveau' && r.destination === '/pages/biens-nouveau'))
-  assert.ok(fs.existsSync(path.join(__dirname, '..', 'pages', 'biens-nouveau.html')))
+  // ⚠ L ÉCRAN V5 DE CRÉATION EXISTE DEPUIS L ÉTAPE 4 : l URL était V5 depuis
+  // l étape 3, mais elle servait encore `pages/biens-nouveau.html`. Elle sert
+  // maintenant `pages/logement-nouveau.html`, et plus aucune route ne mène à
+  // l ancien formulaire.
+  assert.ok(rewrites.some(r => r.source === '/logements/nouveau' && r.destination === '/pages/logement-nouveau'))
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'pages', 'logement-nouveau.html')))
+  const versAncien = [...rewrites, ...redirects].filter(r => String(r.destination).includes('biens-nouveau'))
+  assert.deepEqual(versAncien, [], 'plus aucune route ne doit servir l ancien formulaire')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════

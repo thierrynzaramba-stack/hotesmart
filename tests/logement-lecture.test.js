@@ -23,6 +23,7 @@ const test = require('node:test')
 const assert = require('node:assert/strict')
 const Module = require('node:module')
 const path = require('node:path')
+const fs = require('node:fs')
 
 // ⚠ L'ALARME DU FONDATEUR EST NEUTRALISEE. `clesMigrees` signale une table
 // illisible par `reportIncident`, qui part en vrai appel reseau : le test
@@ -251,7 +252,7 @@ test('une annonce encore reliee refuse la suppression, avec son motif', () => {
 })
 
 test('aucune annonce reliee, et le releve a bien eu lieu : la suppression est possible', () => {
-  const vu = { vuLe: '2026-10-19T08:00:00Z' }
+  const vu = { releveDuCompte: '2026-10-19T08:00:00Z' }
   assert.equal(L.suppressionPossible(bienDe(), [{ ota: 'airbnb', mappe: false }], vu).possible, true)
   assert.equal(L.suppressionPossible(bienDe(), [], vu).possible, true)
 })
@@ -260,7 +261,7 @@ test('LE TEST QUI COMPTE (H4) : `mappe === null` ne vaut PAS « pas relie »', (
   // Le writer pose `null` quand il n'a pas pu conclure, et jamais `false` par
   // defaut. Le lire comme « pas relie » ouvrait le bouton Supprimer sur un bien
   // encore en vente sur Airbnb.
-  const r = L.suppressionPossible(bienDe(), [{ ota: 'airbnb', mappe: null }], { vuLe: '2026-10-19T08:00:00Z' })
+  const r = L.suppressionPossible(bienDe(), [{ ota: 'airbnb', mappe: null }], { releveDuCompte: '2026-10-19T08:00:00Z' })
   assert.equal(r.possible, null)
   assert.equal(r.motif, 'mapping_inconnu')
 })
@@ -268,8 +269,51 @@ test('LE TEST QUI COMPTE (H4) : `mappe === null` ne vaut PAS « pas relie »', (
 test('LE TEST QUI COMPTE (M1a) : « jamais releve » ne vaut pas « pas relie »', () => {
   // La dette 59 n'est en prod que depuis le 19 octobre : un compte jamais releve
   // a `canaux = []`, ce qui n'autorise rien.
-  const r = L.suppressionPossible(bienDe(), [], { vuLe: null })
+  const r = L.suppressionPossible(bienDe(), [], { releveDuCompte: null })
   assert.equal(r.possible, null)
+  assert.equal(r.motif, 'jamais_releve')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE RELEVE EST UN FAIT DE COMPTE — decision de Thierry, 22 octobre 2026
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠ CE QUE CES TESTS FERMENT : un logement NEUF etait insupprimable. La
+// fonction recevait `vuLe`, la FRAICHEUR AFFICHEE du bien — et
+// `fraicheurDuBien` rend `null` pour un bien sans aucun canal, VOLONTAIREMENT
+// (« une date qui parle de rien » a l'ecran). La condition `!canaux.length &&
+// !vuLe` se reduisait donc a `!canaux.length` : tout bien sans canal passait
+// pour inconnu, et la fiche V5 n'a aucun bouton pour lancer un releve.
+//
+// La dette etait ECRITE dans shared/logements-liste.js depuis l'etape 0 :
+// « sa branche `jamais_releve` est degeneree ». Elle se ferme ici.
+
+test('LE TEST QUI COMPTE : un logement NEUF se supprime, si le compte a ete releve', () => {
+  // Aucun canal pour ce bien + un releve de COMPTE qui a reussi = « aucun canal
+  // relie ». C'est un FAIT, pas une ignorance.
+  const r = L.suppressionPossible(bienDe(), [], { releveDuCompte: '2026-10-22T08:00:00Z' })
+  assert.equal(r.possible, true, 'un logement qu on vient de creer doit pouvoir etre efface')
+  assert.equal(r.motif, null)
+})
+
+test('LE TEST QUI COMPTE : un releve de compte EN ECHEC ne conclut rien', () => {
+  // « On ne sait pas » reste reserve a deux cas, et a eux seuls : le releve du
+  // compte n'a jamais reussi, ou il a echoue. Un echec silencieux qui
+  // ouvrirait la suppression est exactement ce que la regle interdit.
+  const r = L.suppressionPossible(bienDe(), [], {
+    releveDuCompte: '2026-10-22T08:00:00Z', releveEnEchec: true
+  })
+  assert.equal(r.possible, null)
+  assert.equal(r.motif, 'jamais_releve')
+})
+
+test('la fraicheur AFFICHEE du bien ne decide plus de la suppression', () => {
+  // ⚠ LES DEUX QUESTIONS SE SEPARENT, et c'est tout l'objet du correctif :
+  // « quelle est la fraicheur de CE bien ? » (null pour un bien sans canal,
+  // volontairement) et « un releve a-t-il eu lieu sur ce COMPTE ? ».
+  // Passer l'ancien nom ne doit plus rien autoriser.
+  const r = L.suppressionPossible(bienDe(), [], { vuLe: '2026-10-22T08:00:00Z' })
+  assert.equal(r.possible, null,
+    'l ancienne option ne doit pas suffire : sinon les deux questions restent confondues')
   assert.equal(r.motif, 'jamais_releve')
 })
 
@@ -277,7 +321,7 @@ test('LE TEST QUI COMPTE (M1b) : sans `reglages: write`, on ne PROMET pas une su
   // La garde DELETE exige reglages:write. Rendre `true` a un profil en lecture
   // lui promettrait une action refusee en 403, et la spec §5 veut « aucun bouton
   // d action dans le DOM » pour ce profil.
-  const r = L.suppressionPossible(bienDe(), [{ mappe: false }], { vuLe: 'x', peutSupprimer: false })
+  const r = L.suppressionPossible(bienDe(), [{ mappe: false }], { releveDuCompte: 'x', peutSupprimer: false })
   assert.equal(r.possible, null)
   assert.equal(r.motif, 'droit_refuse')
 })
@@ -309,6 +353,23 @@ test('LE TEST QUI COMPTE : un bien EN VENTE ne se supprime pas, MEME sans plan t
   // Des canaux ILLISIBLES n'ouvrent jamais l'action la plus destructrice,
   // quel que soit le plan tarifaire (constat H4 de l'etape 0).
   assert.equal(L.suppressionPossible(bienDe({ provider_rate_plan_id: null }), null).possible, null)
+
+  // ⚠ ET LA SECONDE MOITIE DU MEME CORRECTIF (constat de la revue du
+  // 23 octobre 2026). Le 22, le refus sur un canal MAPPE est passe au-dessus du
+  // test du plan tarifaire ; la garde du mappage INDETERMINE est restee
+  // dessous. Un bien sans plan tarifaire dont un canal porte `mappe == null`
+  // rendait `possible: true` : la fiche montrait une pastille « indetermine »
+  // et, juste en dessous, un Supprimer ACTIF.
+  const incertain = [{ ota: 'airbnb', mappe: null, actif: true }]
+  for (const bien of [
+    bienDe({ provider_rate_plan_id: null }),
+    bienDe({ provider_property_id: null }),
+    bienDe()
+  ]) {
+    const r = L.suppressionPossible(bien, incertain, { releveDuCompte: '2026-10-19T08:00:00Z' })
+    assert.equal(r.possible, null, `plan ${bien.provider_rate_plan_id} / ref ${bien.provider_property_id}`)
+    assert.equal(r.motif, 'mapping_inconnu')
+  }
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -883,7 +944,7 @@ test('M1 : `reglages: read` ne suffit pas a PROMETTRE une suppression — il fau
   // ⚠ La contre-epreuve par mutation a montre que `peutEcrire → peutLire` sur
   // l endpoint laissait la suite VERTE : le test d avant utilisait
   // `reglages: none`, qui echoue des deux cotes. Il faut le cas intermediaire.
-  const vu = { vuLe: '2026-10-19T08:00:00Z' }
+  const vu = { releveDuCompte: '2026-10-19T08:00:00Z' }
   assert.equal(L.suppressionPossible(bienDe(), [{ mappe: false }], { ...vu, peutSupprimer: true }).possible, true)
   assert.equal(L.suppressionPossible(bienDe(), [{ mappe: false }], { ...vu, peutSupprimer: false }).motif, 'droit_refuse')
 })
@@ -896,6 +957,35 @@ test('M2 : une horloge des canaux EN PANNE n est pas « jamais relevee »', asyn
     { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
   assert.equal(f.canaux.length, 2, 'les pastilles restent servies : l horloge est un ornement')
   assert.equal(f.canaux_echec, true, 'mais l echec se DIT — sinon la date vieillit sans que personne sache pourquoi')
+})
+
+test('LE TEST QUI COMPTE : la FICHE descend le fait de compte, dans ses trois etats', async () => {
+  // ⚠ FAUX VERT MESURE LE 23 OCTOBRE 2026 (constat de la revue) : muter
+  // `fiche.canaux_releve_fait = false` dans lib/logement/lecture.js laissait
+  // 139 tests sur 139 au vert. Les quatre assertions qui existaient portaient
+  // sur `lireListe` (`r.biens[].canaux_releve_fait`) ; la FICHE, elle, n'en
+  // avait aucune — et c'est le champ dont `canauxHtml` se sert pour ne pas
+  // confondre « aucun canal relie » avec « jamais releve ».
+  //
+  // Les trois etats, parce qu'ils ne se confondent pas : releve fait, releve
+  // jamais fait (ou en echec), lecture impossible.
+  const fait = await L.lireFiche(ficheComplete(),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(fait.canaux_releve_fait, true, 'horloge posee et `ok` : le compte a bien ete releve')
+
+  const jamais = await L.lireFiche(ficheComplete({ horloge: null }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(jamais.canaux_releve_fait, false, 'aucune ligne de releve : l ecran doit pouvoir le dire')
+
+  const echec = await L.lireFiche(ficheComplete({ enPanne: { canaux_releve: 'timeout' } }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(echec.canaux_releve_fait, false,
+    'un releve en echec n est pas un releve : « aucun canal relie » serait une affirmation sans preuve')
+
+  const illisible = await L.lireFiche(ficheComplete({ enPanne: { canaux_du_bien: 'timeout' } }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT, droits: TOUS_DROITS })
+  assert.equal(illisible.canaux_releve_fait, null,
+    '`null`, pas `false` : on ne sait pas, et l ecran ne doit pas conclure')
 })
 
 test('M3 : cles illisibles ET droit refuse : le bloc est `refuse`, pas `indisponible`', async () => {
@@ -1378,4 +1468,148 @@ test('LE TEST QUI COMPTE : la fiche DESCEND la r\u00e9ponse de publication', () 
       const f2 = await L.lireFiche(sb2, { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
       assert.deepEqual(f2.publication, { possible: true, motif: null })
     })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// BOUT EN BOUT : un logement NEUF est supprimable (Thierry, 22 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE : la fiche d un logement NEUF autorise la suppression', async () => {
+  // ⚠ LE CAS REEL : on vient de creer le logement. Il est provisionne chez le
+  // partenaire — il a donc `provider_property_id` ET `provider_rate_plan_id` —
+  // mais AUCUNE ligne de `canaux_du_bien` ne le porte, puisqu'il n'est en vente
+  // nulle part. Le releve du COMPTE, lui, a bien eu lieu.
+  //
+  // Avant le correctif, la fiche rendait `possible: null` : le bouton Supprimer
+  // restait en « on ne sait pas », et la fiche V5 n'a aucun bouton pour lancer
+  // un releve. Le logement etait INSUPPRIMABLE depuis l'ecran.
+  const f = await L.lireFiche(ficheComplete({ canaux: [] }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.deepEqual(f.canaux, [], 'aucun canal ne porte ce bien')
+  assert.equal(f.suppression.possible, true, 'aucun canal relie est un FAIT, pas une ignorance')
+  assert.equal(f.suppression.motif, null)
+})
+
+test('LE TEST QUI COMPTE : sans releve de compte, la fiche ne conclut toujours rien', async () => {
+  // La contre-epreuve du test ci-dessus : c'est bien le releve du COMPTE qui
+  // decide. Sans lui, « on ne sait pas » — et c'est le seul cas qui reste.
+  const f = await L.lireFiche(ficheComplete({ canaux: [], horloge: null }),
+    { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f.suppression.possible, null)
+  assert.equal(f.suppression.motif, 'jamais_releve')
+})
+
+test('LE TEST QUI COMPTE : un releve de compte en ECHEC ne conclut rien non plus', async () => {
+  const f = await L.lireFiche(ficheComplete({
+    canaux: [],
+    horloge: { user_id: COMPTE, vu_le: '2026-10-19T08:00:00Z', ok: false, erreur: 'timeout' }
+  }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f.suppression.possible, null)
+  assert.equal(f.suppression.motif, 'jamais_releve')
+})
+
+test('et un releve SUSPENDU n est pas un echec visible par l hote', async () => {
+  // `echecVisibleParLHote` ecarte `suspendu` : un compte sans aucun bien chez
+  // ce partenaire n'est plus releve, et son drapeau resterait allume a vie.
+  const f = await L.lireFiche(ficheComplete({
+    canaux: [],
+    horloge: { user_id: COMPTE, vu_le: '2026-10-19T08:00:00Z', ok: false, erreur: 'suspendu' }
+  }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
+  assert.equal(f.suppression.possible, true)
+})
+
+test('LE TEST QUI COMPTE : la liste DESCEND le fait de compte jusqu a la carte', async () => {
+  // ⚠ SANS CETTE DESCENTE, LA CARTE LIT `undefined`. Et `undefined !== true`
+  // la ferait basculer en « non verifies » pour TOUS les logements : le
+  // correctif se retournerait en mensonge generalise. C'est pour ca que ce
+  // test porte sur l'endpoint, pas sur le rendu.
+  const r = await L.lireListe(listeDe(), { compte: COMPTE, maintenant: MAINTENANT })
+  for (const b of r.biens) {
+    assert.equal(b.canaux_releve_fait, true, `${b.nom} : le releve du compte a bien eu lieu`)
+  }
+})
+
+test('LE TEST QUI COMPTE : sans releve de compte, la liste le dit — elle n invente pas', async () => {
+  const r = await L.lireListe(listeDe({ horloge: null }), { compte: COMPTE, maintenant: MAINTENANT })
+  for (const b of r.biens) assert.equal(b.canaux_releve_fait, false)
+})
+
+test('un releve de compte en ECHEC ne vaut pas un releve', async () => {
+  const r = await L.lireListe(listeDe({
+    horloge: { user_id: COMPTE, vu_le: '2026-10-19T08:00:00Z', ok: false, erreur: 'timeout' }
+  }), { compte: COMPTE, maintenant: MAINTENANT })
+  for (const b of r.biens) assert.equal(b.canaux_releve_fait, false)
+})
+
+test('et des canaux ILLISIBLES rendent `null`, jamais `false`', async () => {
+  // « On n'a pas pu lire » n'est pas « on n'a jamais releve » : la carte montre
+  // deja « non verifies » dans ce cas, et une valeur inventee la contredirait.
+  const r = await L.lireListe(listeDe({ enPanne: { canaux_du_bien: 'timeout' } }),
+    { compte: COMPTE, maintenant: MAINTENANT })
+  for (const b of r.biens) assert.equal(b.canaux_releve_fait, null)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUPPRIMER UN BIEN BEDS24 : LA REGLE DU SERVEUR, ET CE QUE L ECRAN EN DIT
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠ LA REGLE DU SERVEUR, LUE DANS `api/channel-property.js` (bloc DELETE) :
+//
+//   · le refus 409 « encore relie a une annonce » est garde par
+//     `(prop.provider === 'channex' || prop.provider === 'channel') && providerId
+//     && prop.provider_rate_plan_id`. Un bien Beds24 n'y entre JAMAIS ;
+//   · l'appel `DELETE /properties/<id>` au channel manager est garde par la
+//     meme condition : rien n'est supprime chez le partenaire ;
+//   · la purge des donnees liees, elle, s'applique a tous, sur
+//     `provider_property_id`.
+//
+// Donc, pour un bien Beds24 : le serveur ne refuse jamais a cause des canaux.
+// Il efface le logement dans HoteSmart, purge ce qui s'y rattache, et ne touche
+// a rien chez Beds24 — l'annonce reste dans le compte de l'hote.
+
+test('LE TEST QUI COMPTE : la regle du serveur pour un bien Beds24 est gardee par sa condition', () => {
+  // ⚠ ON VERIFIE LA CONDITION ELLE-MEME, pas la presence d'un mot : c'est elle
+  // qui fait que ces biens ne passent jamais par le refus 409 ni par la
+  // suppression chez le partenaire. Si elle s'elargit un jour aux autres
+  // providers, ce test rougit — et la phrase ci-dessus devient fausse.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-property.js'), 'utf8')
+  const i = src.indexOf("if (req.method === 'DELETE')")
+  assert.ok(i > 0)
+  const bloc = src.slice(i)
+  const gardes = [...bloc.matchAll(/prop\.provider === 'channex' \|\| prop\.provider === 'channel'/g)]
+  assert.ok(gardes.length >= 2,
+    'le refus 409 ET la suppression chez le partenaire sont tous deux gardes par le provider')
+  assert.match(bloc, /encore relié à une annonce Airbnb ou Booking/)
+})
+
+test('LE TEST QUI COMPTE : un bien Beds24 se supprime, quel que soit l etat du releve', () => {
+  // Le releve est celui de l'autre partenaire : il ne decide rien ici, et le
+  // serveur ne le consulte pas.
+  const b24 = bienDe({ provider: 'beds24', provider_rate_plan_id: null })
+  for (const opts of [
+    { releveDuCompte: '2026-10-23T08:00:00Z' },
+    { releveDuCompte: null },
+    { releveDuCompte: '2026-10-23T08:00:00Z', releveEnEchec: true }
+  ]) {
+    const r = L.suppressionPossible(b24, [], opts)
+    assert.equal(r.possible, true, JSON.stringify(opts))
+    assert.equal(r.motif, null)
+  }
+})
+
+test('DEUX CAS OU L ECRAN EST PLUS STRICT QUE LE SERVEUR, et c est ecrit', () => {
+  // ⚠ CE TEST FIXE UNE DIVERGENCE ASSUMEE, pour qu'elle ne se decouvre pas.
+  // Le serveur ne regarde PAS `canaux_du_bien` pour un bien Beds24 ; l'ecran,
+  // lui, s'arrete dans deux cas :
+  //
+  //   1. canaux ILLISIBLES -> on n'ouvre pas l'action la plus destructrice sur
+  //      une lecture ratee. C'est la regle de tout ce lot.
+  //   2. une ligne de canal MAPPEE -> decision de Thierry a la recette du
+  //      22 octobre 2026 : « un canal mappe suffit a refuser, c'est la question
+  //      que l'hote se pose : ce logement est-il en vente ? ». Pour un bien
+  //      Beds24, ce cas ne se rencontre qu'en cours de MIGRATION vers le canal.
+  const b24 = bienDe({ provider: 'beds24', provider_rate_plan_id: null })
+  assert.deepEqual(L.suppressionPossible(b24, null, { releveDuCompte: 'x' }),
+    { possible: null, motif: 'canaux_illisibles' })
+  assert.deepEqual(L.suppressionPossible(b24, [{ ota: 'airbnb', mappe: true }], { releveDuCompte: 'x' }),
+    { possible: false, motif: 'annonce_reliee' })
 })

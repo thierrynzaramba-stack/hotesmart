@@ -42,6 +42,9 @@ const NON_DELEGABLES = [
   'pages/abonnement.html',          // facturation — domaine non délégable
   'pages/compte.html',              // identité pure
   'pages/onboarding.html',          // l'onboarding est celui de la personne
+  'pages/logement-nouveau.html',    // création d'un logement (V5, étape 4) :
+                                    // geste de TITULAIRE, refusé en 403 à un
+                                    // membre par api/channel-property.js
   'pages/biens-nouveau.html',       // la création de bien n'est pas déléguée
   'pages/biens-detail.html',        // connexion des annonces — `reglages`
   'apps/serrures/index.html',       // clé Seam

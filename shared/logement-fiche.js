@@ -98,12 +98,23 @@ export const MOTIFS = {
   annonce_reliee: 'fiche.supprimer_relie',       // le bien est encore en vente
   canaux_illisibles: 'fiche.supprimer_inconnu',  // on n'a pas pu lire
   mapping_inconnu: 'fiche.supprimer_inconnu',    // un canal au mappage incertain
-  // ⚠ CE MOTIF S'APPELLE `jamais_releve` MAIS SE DÉCLENCHE SUR « AUCUN
-  // CANAL ». Sa condition serveur — `!canaux.length && !vuLe` — dégénère en
-  // `!canaux.length`, puisque `fraicheurDuBien` rend `null` dès qu'un bien
-  // n'a aucun canal. Le texte dit donc ce qui est VRAI, pas ce que le nom
-  // suggère. Mesuré en re-revue de 3dddb14 ; le nom se corrige côté serveur,
-  // c'est une dette.
+  // ⚠ CE COMMENTAIRE A ÉTÉ VRAI, PUIS FAUX PENDANT UN JOUR — et sa phrase
+  // avec lui (constat GRAVE de la revue du 23 octobre 2026). Il disait que
+  // `jamais_releve` se déclenche sur « aucun canal », parce que la condition
+  // serveur `!canaux.length && !vuLe` dégénérait en `!canaux.length` : c'est
+  // pour ça que le texte affirmait « Aucun canal n'est relié à ce logement ».
+  //
+  // ⚠ LE CORRECTIF DU 22 OCTOBRE A FAIT TOMBER CETTE PRÉMISSE. Depuis,
+  // `suppressionPossible` reçoit le fait de COMPTE (`releveDuCompte`,
+  // `releveEnEchec`) et non plus la fraîcheur affichée du bien : la branche ne
+  // se déclenche plus que quand le relevé du compte n'a JAMAIS abouti, ou
+  // échoue. L'écran affirmait donc un fait là où le serveur ne sait rien — et
+  // c'est l'affirmation la plus dangereuse de ce bloc, puisqu'elle rassure
+  // juste avant le bouton le plus destructeur du produit.
+  //
+  // La phrase dit maintenant l'ignorance. Elle reste DISTINCTE du fourre-tout
+  // `fiche.supprimer_inconnu` : celui-là est une panne de lecture, celle-ci un
+  // relevé qui n'a jamais abouti — deux causes, deux conduites.
   jamais_releve: 'fiche.supprimer_jamais_releve'
 }
 
@@ -350,6 +361,15 @@ export function enTeteHtml (fiche, outils, { peutModifier = false } = {}) {
 // par aucun écran. La spec §1 interdit le code dormant ; la fiche est son
 // appelant.
 export function fraicheurAffichee (fiche, maintenant = Date.now()) {
+  // ⚠ UN BIEN SANS CANAL NE DIT RIEN DU TOUT — décision de Thierry du 19 octobre
+  // 2026, et ce garde-fou la rend vraie PAR CONSTRUCTION. Recette du 23 octobre :
+  // sur un logement neuf, « Canaux non vérifiés depuis … » s'affichait sous
+  // « Aucun canal relié » — deux phrases qui se contredisent, dont l'une parle
+  // d'une vérification qui n'avait pas ce logement à vérifier.
+  //
+  // La règle vaut AVANT l'échec : un relevé en panne ne dit rien non plus d'un
+  // bien qu'il n'avait pas à regarder.
+  if (Array.isArray(fiche && fiche.canaux) && fiche.canaux.length === 0) return null
   if (releveDuCompteEnEchec([fiche])) return { cle: 'fiche.canaux_echec', valeurs: null, echec: true }
   const f = fraicheurDuCompte([fiche], maintenant)
   if (!f) return null
@@ -394,6 +414,26 @@ export function venteHtml (fiche, outils, { peutModifier = false } = {}) {
   // propose rien.
   const connecter = connecterHtml(fiche, outils, { peutModifier })
   if (!Array.isArray(fiche.canaux)) return `${nonLu('fiche.canaux_non_lus', outils)}${connecter}`
+  // ⚠ LE MODULE COMMUN ATTEND UN OBJET PLAT, ET LA FICHE EST EN DEUX ETAGES.
+  // `canauxHtml` lit TROIS champs — `beds24_de_l_hote`, `canaux`,
+  // `canaux_releve_fait`. Sur la carte de la liste, les trois vivent cote a
+  // cote dans le bien. Ici, `beds24_de_l_hote` est dans `fiche.bien` (il vient
+  // de `publier()`) et les deux autres a la RACINE : passer `fiche` donnait
+  // `beds24_de_l_hote === undefined`, donc « Canaux non verifies » sur un bien
+  // Beds24 — a vie, puisqu'un bien Beds24 n'a jamais de ligne de releve chez
+  // l'autre partenaire. Mesure du 23 octobre 2026 sur le MEME bien : la carte
+  // disait « Gere depuis votre compte Beds24 », la fiche « Canaux non
+  // verifies ». Les deux phrases que Thierry a declarees fausses.
+  //
+  // ⚠ LES TROIS CHAMPS SONT NOMMES, pas un etalement de `fiche.bien` : c'est
+  // le CONTRAT du module commun, et il doit se lire ici. Un etalement
+  // emporterait aussi ce que `canauxHtml` n'attend pas, et masquerait le jour
+  // ou il apprendra a lire un quatrieme champ.
+  const vueDesCanaux = {
+    beds24_de_l_hote: (fiche.bien || {}).beds24_de_l_hote,
+    canaux: fiche.canaux,
+    canaux_releve_fait: fiche.canaux_releve_fait
+  }
   const f = fraicheurAffichee(fiche)
   const ligne = !f ? ''
     : `<p class="fic-fraicheur caption${f.echec || f.vieux ? ' fic-fraicheur--alerte' : ''}"`
@@ -402,13 +442,13 @@ export function venteHtml (fiche, outils, { peutModifier = false } = {}) {
   // ⚠ « Aucun canal relié » est rendu par `canauxHtml`, le module commun : le
   // redire ici laisserait la CARTE mentir le jour où l'une des deux
   // changerait.
-  if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(fiche, outils)}</p>${ligne}${connecter}`
+  if (!fiche.canaux.length) return `<p class="fic-vide caption">${canauxHtml(vueDesCanaux, outils)}</p>${ligne}${connecter}`
   // ⚠ `log-canaux`, LA CLASSE DU MODULE COMMUN (revue de 5c0d759). Le bloc
   // utilisait `fic-vente`, qui n'était déclaré NULLE PART : trois pastilles
   // bord à bord, bordures jointives, là où l'en-tête les espaçait. Le correctif
   // du commit précédent n'avait réparé que la moitié du défaut — et l'en-tête,
   // lui, recopiait les quatre propriétés sous un autre nom.
-  return `<div class="log-canaux">${canauxHtml(fiche, outils)}</div>${ligne}${connecter}`
+  return `<div class="log-canaux">${canauxHtml(vueDesCanaux, outils)}</div>${ligne}${connecter}`
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -439,7 +479,13 @@ export const CHAMPS = [
     depuis: (b) => b.code_postal },
   { nom: 'city', bloc: 'logement', cle: 'fiche.champ_ville', type: 'texte', max: 100,
     depuis: (b) => b.ville },
-  { nom: 'country', bloc: 'logement', cle: 'fiche.champ_pays', type: 'texte', max: 2,
+  // ⚠ UN CHOIX, PAS UN CODE A TAPER (recette de Thierry, 23 octobre 2026). La
+  // case affichait « FR » : l'hote lit un code ISO la ou l'ecran de creation lui
+  // propose « France ». Et il devait CONNAITRE le code pour en changer.
+  // Memes six pays que la creation, memes cles.
+  { nom: 'country', bloc: 'logement', cle: 'fiche.champ_pays', type: 'choix', max: 2,
+    choix: [['FR', 'nouveau.pays_fr'], ['BE', 'nouveau.pays_be'], ['CH', 'nouveau.pays_ch'],
+      ['ES', 'nouveau.pays_es'], ['IT', 'nouveau.pays_it'], ['PT', 'nouveau.pays_pt']],
     depuis: (b) => b.pays },
   { nom: 'base_price', bloc: 'prix', cle: 'fiche.prix_base', type: 'montant',
     grille: true, depuis: (b) => b.prix_de_base },
@@ -556,9 +602,19 @@ function ligneSaisieHtml (champ, bien, outils) {
     champ.grille ? 'data-grille="1"' : '',
     champ.euros ? 'data-euros="1"' : ''
   ].filter(Boolean).join(' ')
+  // ⚠ UN CHOIX SE REND EN `select`, ET IL PORTE LES MEMES REPERES QUE L'INPUT
+  // (`data-champ`, `fic-saisie`) : la page ecoute `change` sur `[data-champ]`,
+  // et un `select` emet `change` comme un champ de texte. Le cablage
+  // d'enregistrement ne bouge donc pas.
+  const saisie = champ.type === 'choix'
+    ? `<select id="${id}" name="${esc(champ.nom)}" data-champ="${esc(champ.nom)}" class="fic-saisie">`
+      + champ.choix.map(([code, cle]) =>
+        `<option value="${esc(code)}"${String(val) === code ? ' selected' : ''}>${esc(t(cle))}</option>`).join('')
+      + '</select>'
+    : `<input ${attrs}>`
   return `<div class="fic-ligne fic-ligne--saisie" data-ligne="${esc(champ.nom)}">
     <label class="fic-ligne__cle caption" for="${id}">${esc(t(champ.cle))}</label>
-    <span class="fic-ligne__val"><input ${attrs}></span>
+    <span class="fic-ligne__val">${saisie}</span>
     <span class="fic-sauve caption" data-etat aria-live="polite"></span>
     <p class="fic-erreur caption" data-erreur hidden></p>
   </div>`
@@ -792,6 +848,23 @@ export function listeDeSuppression (compte, t) {
   return lignes
 }
 
+// ⚠ CE QUI RESTE APRÈS LA SUPPRESSION, QUAND CE N'EST PAS ÉVIDENT.
+//
+// Décision de Thierry du 23 octobre 2026. Pour un bien Beds24 de l'hôte, le
+// serveur ne touche à rien chez le partenaire : la garde du `DELETE` au channel
+// manager est réservée aux biens du canal (`api/channel-property.js`, bloc
+// DELETE). Rien ne le disait à l'hôte, qui pouvait croire qu'il efface son
+// annonce en même temps que son logement.
+//
+// ⚠ ET C'EST ICI, PAS DANS LA PAGE. `tests/logement-page-dom.js` interdit à
+// l'écran de nommer un partenaire — garde juste, et c'est le module commun qui
+// porte déjà `beds24_de_l_hote` (shared/logements-liste.js). Écrire la
+// condition dans la page aurait affaibli le garde-fou pour une phrase.
+export function noteDeSuppression (bien, t) {
+  if (!bien || bien.beds24_de_l_hote !== true) return null
+  return t('fiche.supprimer_annonce_reste')
+}
+
 // ─── 5. Ménage ──────────────────────────────────────────────────────────────
 //
 // ⚠ AUCUNE RÈGLE MÉTIER ICI (décision de Thierry, étape 0) : ce qu'est « une
@@ -958,6 +1031,13 @@ export function dialogueHtml (outils) {
       <h2 class="h3" id="fic-dlg-titre" data-dlg="titre"></h2>
       <p data-dlg="texte"></p>
       <ul class="fic-dlg__liste" data-dlg="liste" hidden></ul>
+      <!-- ⚠ UNE NOTE, PAS UN ÉLÉMENT DE LA LISTE. La liste énumère ce qui SERA
+           EFFACÉ ; cette phrase dit l'inverse — ce qui RESTE. L'écrire comme un
+           élément de liste parmi les pertes se lirait comme une perte de plus.
+           (Et pas d'accent grave ici : ce commentaire vit DANS un littéral de
+           gabarit, où un accent grave ferme la chaîne — mesuré le 23 octobre
+           2026, dix tests rouges sur « li is not defined ».) -->
+      <p class="fic-dlg__note caption" data-dlg="note" hidden></p>
       <p class="fic-dlg__frappe" data-dlg="frappe" hidden>
         <label class="caption" for="fic-dlg-saisie" data-dlg="frappe-aide"></label>
         <input class="fic-saisie" id="fic-dlg-saisie" data-dlg="saisie" autocomplete="off">

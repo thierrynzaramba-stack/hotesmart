@@ -141,3 +141,47 @@ test('LE TEST QUI COMPTE : les deux anciennes URL redirigent vers leur équivale
     assert.equal(red(s).permanent, false, `${s} ne doit pas être une redirection permanente`)
   }
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LE REPLI PLEINE PAGE DE LA CONNEXION AIRBNB
+// ═══════════════════════════════════════════════════════════════════════════
+// ⚠ DEFAUT TROUVE EN PREPARANT L'ETAPE 4 (22 octobre 2026), et deja VIVANT :
+// `pages/airbnb-retour.html` renvoyait vers `/logements?airbnb_return=1`, mais
+// `bootstrapAirbnbReturn()` n'etait appele que depuis `pages/biens.html`, que
+// cette URL ne sert plus depuis la bascule. Un hote dont le navigateur bloque
+// les popups revenait donc sur la liste sans assistant et SANS MESSAGE : la
+// connexion etait faite chez le partenaire, et perdue de ce cote-ci.
+//
+// C'est exactement ce que la bascule d'un ecran vers un autre casse en silence :
+// un chemin de retour qui nommait l'ancienne page.
+
+test('LE TEST QUI COMPTE : le retour Airbnb aboutit sur la page qui le REPREND', () => {
+  const retour = fs.readFileSync(path.join(__dirname, '..', 'pages/airbnb-retour.html'), 'utf8')
+
+  // 1. Vers ou le repli pleine page renvoie-t-il ?
+  const m = retour.match(/location\.replace\('([^']*airbnb_return=1[^']*)'\)/)
+  assert.ok(m, 'le repli pleine page doit renvoyer quelque part avec `airbnb_return=1`')
+  const cible = m[1].split('?')[0]
+
+  // 2. Ce chemin designe quel fichier ? (`cleanUrls` : pas de `.html` dans l URL)
+  const fichier = path.join(__dirname, '..', cible.replace(/^\//, '') + '.html')
+  assert.ok(fs.existsSync(fichier), `le retour renvoie vers ${cible}, qui n existe pas`)
+
+  // 3. Et cette page reprend-elle le retour ?
+  const page = fs.readFileSync(fichier, 'utf8')
+  assert.match(page, /import \{[^}]*bootstrapAirbnbReturn[^}]*\} from '\/components\/airbnb-connect\.js'/,
+    `${cible} doit importer bootstrapAirbnbReturn`)
+  assert.match(page, /^\s*bootstrapAirbnbReturn\(\)/m,
+    `${cible} doit APPELER bootstrapAirbnbReturn : l importer sans l appeler ne reprend rien`)
+})
+
+test('la page qui reprend le retour est NON DELEGABLE', () => {
+  // Rouvrir une connexion Airbnb est un geste `reglages`. Poser ce retour sur
+  // la liste des logements — qui est deleguee — le mettrait a portee d un
+  // membre.
+  const retour = fs.readFileSync(path.join(__dirname, '..', 'pages/airbnb-retour.html'), 'utf8')
+  const cible = retour.match(/location\.replace\('([^']*airbnb_return=1[^']*)'\)/)[1].split('?')[0]
+  const page = fs.readFileSync(path.join(__dirname, '..', cible.replace(/^\//, '') + '.html'), 'utf8')
+  assert.match(page, /exigerCompteProprePage/,
+    `${cible} doit porter la garde de page non delegable`)
+})

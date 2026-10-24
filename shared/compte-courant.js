@@ -103,6 +103,24 @@ export function oublierCacheComptes () {
 export async function chargerContexte (userId) {
   if (contexte.charge && contexte.moi === userId) return contexte
 
+  // ⚠ UN APPEL SANS `userId` NE DOIT RIEN EFFACER. Sans cette ligne, il
+  // reinitialisait le contexte avec `moi: undefined` — et `estTitulaire()`,
+  // qui commence par `if (!contexte.charge || !contexte.moi) return false`,
+  // rendait alors `false` POUR TOUT LE MONDE, titulaire compris.
+  //
+  // Mesure du 22 octobre 2026, relevee en review : `pages/logement-nouveau.html`
+  // appelait `chargerContexte()` apres `requireAuth()`, qui l'avait deja
+  // chargee avec le bon identifiant. L'ecran de creation n'affichait donc que
+  // « Seul le titulaire du compte peut ajouter un logement. », pour tout le
+  // monde, et sans jamais montrer son formulaire.
+  //
+  // On rend le contexte EN L'ETAT plutot que de le detruire : un appelant qui
+  // ne sait pas qui il est ne peut rien apprendre, mais il ne doit rien casser.
+  if (userId == null) {
+    logger.error('compte', 'chargerContexte appele sans identifiant : contexte conserve')
+    return contexte
+  }
+
   contexte = { moi: userId, compte: userId, comptes: [], permissions: null, charge: true }
 
   // ⚠ DISTINGUER « liste indisponible » de « acces revoque ».

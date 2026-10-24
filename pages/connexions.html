@@ -333,6 +333,7 @@
   import { supabase } from '/shared/supabase.js'
   import { initErrorHandler } from '/shared/error-handler.js'
   import { openConnexions } from '/components/connexions.js'
+  import { bootstrapAirbnbReturn } from '/components/airbnb-connect.js'
 
   initErrorHandler()
   const session = await requireAuth()
@@ -354,6 +355,16 @@
 
   // Plateformes OTA
   await loadOtaProperties()
+
+  // ⚠ LE REPLI PLEINE PAGE DE LA CONNEXION AIRBNB ABOUTIT ICI. Quand le
+  // navigateur bloque la popup, `pages/airbnb-retour.html` stocke le retour et
+  // renvoie sur cette page avec `?airbnb_return=1` ; `bootstrapAirbnbReturn`
+  // resout le bien PAR LE JETON (resolution serveur, pas la session) et rouvre
+  // l'assistant a l'ecran B. L'appel vivait dans `pages/biens.html` : depuis la
+  // bascule V5, plus aucune page ne le faisait, et le retour se perdait.
+  // Il vient APRES le chargement des biens : l'assistant s'ouvre par-dessus une
+  // page deja peuplee, pas sur un ecran vide.
+  bootstrapAirbnbReturn()
 
   // Brevo SMS (config par hôte)
   await loadBrevoConfig()

@@ -60,6 +60,9 @@ const doc = (html) => new JSDOM(`<!doctype html><body><div id="c">${html}</div><
 
 // Une fiche complète, telle que `GET /api/logement?id=` la rend.
 const fiche = (extra = {}) => ({
+  // Le defaut est « le compte a ete releve » : c'est le cas courant, et c'est
+  // ce que l'endpoint descend depuis le 23 octobre 2026.
+  canaux_releve_fait: true,
   bien: {
     id: 'b1', nom: 'La bulle', ville: 'Bagnères', pays: 'FR', adresse: '1 rue X',
     code_postal: '65200', capacite: 2, photo_url: null, devise: 'EUR',
@@ -247,9 +250,22 @@ test('LE TEST QUI COMPTE : les motifs sont ceux du SERVEUR, découverts dans son
   // serveur sans qu une seule ligne ait l air fausse, et le fourre-tout
   // « Impossible de vérifier ses canaux » absorbe l écart en silence.
   const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'logement', 'lecture.js'), 'utf8')
-  const corps = src.slice(src.indexOf('function suppressionPossible'))
-  const motifs = [...new Set([...corps.slice(0, corps.indexOf('\n}')).matchAll(/motif:\s*'([a-z_]+)'/g)]
-    .map(m => m[1]))]
+  // ⚠ LE CORPS SE DELIMITE PAR APPARIEMENT D ACCOLADES, PAS AU PREMIER `\n}`.
+  // Mesure du 22 octobre 2026 : une signature ecrite sur trois lignes commence
+  // une ligne par `}` — la tranche devenait VIDE, zero motif decouvert, et ce
+  // test rougissait pour une raison qui n avait rien a voir avec ce qu il
+  // garde. Le depot a deja paye ce defaut deux fois (un `slice` coupe au
+  // premier `{`, un autre sur un nombre d octets).
+  const debut = src.indexOf('function suppressionPossible')
+  const ouvre = src.indexOf('{', src.indexOf(')', debut))
+  let prof = 0
+  let fin = ouvre
+  for (; fin < src.length; fin++) {
+    if (src[fin] === '{') prof++
+    else if (src[fin] === '}') { prof--; if (prof === 0) break }
+  }
+  const corps = src.slice(ouvre, fin)
+  const motifs = [...new Set([...corps.matchAll(/motif:\s*'([a-z_]+)'/g)].map(m => m[1]))]
   assert.ok(motifs.length >= 4, `${motifs.length} motif(s) découvert(s) : la découverte a échoué`)
   // ⚠ ET LE CAS GÉNÉRAL, PAS SEULEMENT LES DEUX NOMS EN DUR (re-revue de
   // 3dddb14) : un motif ajouté demain au serveur tomberait en silence dans le
@@ -276,7 +292,25 @@ test('LE TEST QUI COMPTE : les motifs sont ceux du SERVEUR, découverts dans son
       `${motif} n est pas dans la table d affichage : il tomberait en silence ` +
       'dans « Impossible de vérifier ses canaux », qui est faux')
     if (motif === 'annonce_reliee') assert.match(r.textContent, /Déconnectez/)
-    if (motif === 'jamais_releve') assert.match(r.textContent, /Aucun canal n’est relié/)
+    // ⚠ CE TEST A FIGÉ UNE PHRASE FAUSSE (constat GRAVE de la revue du
+    // 23 octobre 2026 ; règle 17 de REVIEW.md, « un test peut figer un bug »).
+    // Il exigeait « Aucun canal n'est relié à ce logement » sur une branche
+    // qui, depuis le correctif du 22 octobre, ne se déclenche QUE quand le
+    // relevé du compte n'a jamais abouti ou échoue. Corriger la phrase faisait
+    // rougir la suite : le test protégeait le défaut au lieu du contrat.
+    //
+    // Il garde maintenant la PROPRIÉTÉ, et il la lit dans le dictionnaire
+    // RÉEL, pas dans un littéral de test : la raison a sa propre phrase, et
+    // cette phrase n'AFFIRME RIEN sur les canaux de ce logement — c'est
+    // justement ce que le serveur ignore ici. Reformuler le texte demain ne
+    // touche pas ce test ; y remettre une affirmation, si.
+    if (motif === 'jamais_releve') {
+      assert.equal(r.textContent.trim(), FR['fiche.supprimer_jamais_releve'])
+      assert.notEqual(FR['fiche.supprimer_jamais_releve'], FR['fiche.supprimer_inconnu'],
+        'une panne de lecture et un relevé jamais abouti sont deux causes : deux phrases')
+      assert.doesNotMatch(FR['fiche.supprimer_jamais_releve'], /[Aa]ucun canal/,
+        'le serveur ne sait pas si ce logement est en vente : l écran ne peut pas l affirmer')
+    }
   }
 })
 
@@ -1622,4 +1656,126 @@ test('sans r\u00e9ponse du serveur, la d\u00e9duction locale reste en REPLI', ()
   assert.ok(d.querySelector('[data-bind="publier"]'))
   assert.deepEqual(M.publierAffiche({ mode_des_prix: 'managed', pilote_tarifaire: 'calendrier' }, null),
     { montre: true, motif: null })
+})
+
+test('LE TEST QUI COMPTE : la fiche recoit le MEME fait de compte que la carte', () => {
+  // ⚠ UNE REGLE PARTAGEE VIT DANS UN MODULE COMMUN — mais elle doit alors
+  // recevoir la meme donnee des DEUX cotes. `canauxHtml` est partage avec la
+  // carte de la liste : le jour ou la carte a appris a distinguer « aucun canal
+  // relie » de « jamais releve » (23 octobre 2026), la fiche a herite du
+  // changement SANS recevoir le fait, et annoncait « canaux non verifies » sur
+  // un logement dont le compte venait d etre releve. C est la suite complete
+  // qui l a vu, pas moi.
+  // ⚠ `document.textContent` vaut `null` par specification : on lit le corps.
+  const texte = (f) => doc(M.ficheHtml(f, OUTILS(), {})).body.textContent
+
+  assert.match(texte(fiche({ canaux: [], canaux_releve_fait: true })), /Aucun canal relié/)
+
+  const jamais = texte(fiche({ canaux: [], canaux_releve_fait: false }))
+  assert.match(jamais, /Canaux non vérifiés/)
+  assert.doesNotMatch(jamais, /Aucun canal relié/)
+})
+
+test('LE TEST QUI COMPTE : un bien Beds24 dit la MEME chose sur la fiche et sur la carte', async () => {
+  // ⚠ CONSTAT DE LA REVUE DU 23 OCTOBRE 2026, mesure a l'appui. `canauxHtml`
+  // lit `beds24_de_l_hote`, que `publier()` range dans `fiche.bien` ; la fiche
+  // lui passait l'objet RACINE, ou ce champ n'existe pas. Resultat sur le MEME
+  // bien : la carte « Gere depuis votre compte Beds24 », la fiche « Canaux non
+  // verifies ». Et ce n'etait pas un cas de bord — un bien Beds24 n'a JAMAIS de
+  // ligne de releve chez l'autre partenaire, donc la fiche l'alarmait a vie.
+  //
+  // ⚠ CE TEST COMPARE LES DEUX RENDUS, il ne verifie pas une phrase. Une
+  // assertion sur le texte de la fiche seule repasserait au vert le jour ou la
+  // carte changerait d'avis sans la fiche : c'est exactement le defaut qu'on
+  // repare, et c'est la DIVERGENCE qui doit rougir.
+  const liste = await import('../shared/logements-liste.js')
+  const beds24 = fiche({
+    bien: { ...fiche().bien, beds24_de_l_hote: true },
+    canaux: [], canaux_vu_le: null, canaux_echec: false, canaux_releve_fait: false
+  })
+  const d = doc(M.ficheHtml(beds24, OUTILS(), {}))
+  const surLaCarte = doc(liste.canauxHtml(
+    { beds24_de_l_hote: true, canaux: [], canaux_releve_fait: false }, { t, esc }))
+
+  const marque = (x) => x.querySelector('[data-canaux]').dataset.canaux
+  assert.equal(marque(d), marque(surLaCarte),
+    'la fiche et la carte doivent rendre la MEME marque pour le meme bien')
+  assert.equal(marque(d), 'beds24')
+  assert.match(d.body.textContent, /Géré depuis votre compte Beds24/)
+  // Et surtout : ni l'une ni l'autre des deux phrases fausses.
+  assert.doesNotMatch(d.body.textContent, /Canaux non vérifiés/)
+  assert.doesNotMatch(d.body.textContent, /Aucun canal relié/)
+})
+
+test('LE TEST QUI COMPTE : la confirmation dit ce qui RESTE, pour un bien Beds24', () => {
+  // ⚠ DÉCISION DE THIERRY, 23 octobre 2026. Le serveur ne touche à rien chez le
+  // partenaire pour ces biens — la garde du `DELETE` au channel manager est
+  // réservée aux biens du canal — mais rien ne le disait à l'hôte, qui pouvait
+  // croire qu'il efface son annonce en même temps que son logement.
+  const t2 = (k) => k
+  assert.equal(M.noteDeSuppression({ beds24_de_l_hote: true }, t2), 'fiche.supprimer_annonce_reste')
+  assert.equal(M.noteDeSuppression({ beds24_de_l_hote: false }, t2), null)
+  assert.equal(M.noteDeSuppression({}, t2), null)
+  assert.equal(M.noteDeSuppression(null, t2), null)
+})
+
+test('la note est une NOTE, pas un élément de la liste des pertes', () => {
+  // La liste énumère ce qui sera effacé ; cette phrase dit l'inverse. L'écrire
+  // parmi les pertes se lirait comme une perte de plus.
+  const d = doc(M.dialogueHtml(OUTILS()))
+  const note = d.querySelector('[data-dlg="note"]')
+  assert.ok(note, 'le dialogue doit porter une zone de note')
+  assert.ok(note.hasAttribute('hidden'), 'masquée tant qu il n y a rien à dire')
+  assert.equal(note.tagName, 'P', 'un paragraphe, pas un `li`')
+  assert.ok(!d.querySelector('[data-dlg="liste"]').contains(note),
+    'et elle vit HORS de la liste des effacements')
+})
+
+test('la classe de la note est déclarée dans la page', () => {
+  // Même règle que sur l écran de création : une classe posée sans être
+  // déclarée donne un texte qu on ne distingue de rien.
+  const page = fs.readFileSync(path.join(__dirname, '..', 'pages', 'logement.html'), 'utf8')
+  assert.match(page, /\.fic-dlg__note\s*\{/)
+})
+
+test('LE TEST QUI COMPTE : le pays se CHOISIT, et s affiche en clair', () => {
+  // ⚠ RECETTE DE THIERRY, 23 octobre 2026 : la case affichait « FR ». L hôte
+  // lisait un code ISO là où l écran de création lui propose « France » — et il
+  // devait CONNAÎTRE le code pour en changer.
+  const d = doc(M.ficheHtml(fiche({ bien: { ...fiche().bien, pays: 'BE' } }), OUTILS(), { peutSupprimer: true }))
+  const sel = d.querySelector('[data-champ="country"]')
+  assert.ok(sel, 'le champ pays doit exister')
+  assert.equal(sel.tagName, 'SELECT', 'un choix, pas une saisie libre')
+  assert.equal(sel.value, 'BE', 'la valeur envoyée reste le CODE : c est ce que le serveur attend')
+  const choisi = [...sel.options].find(o => o.selected)
+  assert.equal(choisi.value, 'BE')
+  assert.equal(choisi.textContent, 'Belgique',
+    'le libellé est le NOM du pays, traduit — pas le code ISO que la case montrait')
+  assert.equal(sel.options.length, 6, 'les six pays de l écran de création')
+  // ⚠ LES MÊMES REPÈRES QUE LES AUTRES CASES : la page écoute `change` sur
+  // `[data-champ]`, et un `select` émet `change`. Le câblage ne bouge pas.
+  assert.ok(sel.classList.contains('fic-saisie'))
+})
+
+test('LE TEST QUI COMPTE : un logement SANS canal ne porte aucune ligne de fraîcheur', () => {
+  // ⚠ RECETTE DE THIERRY, 23 octobre 2026 : sur un logement neuf,
+  // « Canaux non vérifiés depuis … » s affichait sous « Aucun canal relié » —
+  // deux phrases qui se contredisent, dont l une parle d une vérification qui
+  // n avait pas ce logement à vérifier. C est sa décision du 19 octobre, rendue
+  // vraie par construction : « un bien sans canal ne dit rien du tout ».
+  assert.equal(M.fraicheurAffichee({ canaux: [], canaux_vu_le: '2026-10-01T00:00:00Z' }), null)
+  // ⚠ ET LA RÈGLE PASSE AVANT L ÉCHEC : un relevé en panne ne dit rien non plus
+  // d un bien qu il n avait pas à regarder.
+  assert.equal(M.fraicheurAffichee({ canaux: [], canaux_echec: true }), null)
+  // Avec un canal, la ligne revient : c est bien l absence de canal qui l efface.
+  assert.ok(M.fraicheurAffichee({ canaux: [{ ota: 'airbnb' }], canaux_vu_le: '2026-10-01T00:00:00Z' }))
+})
+
+test('et le rendu de la fiche ne montre pas les deux phrases ensemble', () => {
+  const d = doc(M.ficheHtml(
+    fiche({ canaux: [], canaux_vu_le: '2026-10-01T00:00:00Z', canaux_echec: false }), OUTILS(), {}))
+  const texte = d.body.textContent
+  assert.match(texte, /Aucun canal relié/)
+  assert.equal(d.querySelector('.fic-fraicheur'), null,
+    'aucune ligne de fraîcheur sous un logement qui n a aucun canal')
 })
