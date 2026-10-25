@@ -700,9 +700,18 @@ test('regle (d) : le repli sur la phase 1 du marche est dit ; la fiche ne parle 
 
 test('recette du 6 octobre 2026 : sans marche relie, la page le DIT au-dessus des prix ; avec un marche relie, rien', async () => {
   const msg = 'Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables, sans calendrier du marché pour les remplacer si vos comparables changent trop peu de prix.'
-  const sans = await monter(pageAvecPrix({ ...PRIX_CALCULE, marche: { relie: false, message: msg } }))
+  const detail = 'Sans marché relié, les saisons du marché ne peuvent pas prendre le relais quand moins de 2 de vos hôtes changent leurs prix.'
+  const sans = await monter(pageAvecPrix({ ...PRIX_CALCULE, marche: { relie: false, message: msg, detail } }))
   const avert = [...sans.doc.querySelectorAll('#cp-zone-prix .cp-avert')].map(x => x.textContent)
   assert.equal(avert[0], msg)
+  // ⚠ LE DETAIL TECHNIQUE ARRIVE DANS L'INFOBULLE, ET NULLE PART AILLEURS
+  // (recette de Thierry du 25 octobre 2026 : le message reste court). Sans
+  // cette assertion, l'endpoint pourrait rendre `detail` sans que la page le
+  // pose : le texte serait perdu en silence.
+  const pAvert = sans.doc.querySelector('#cp-zone-prix .cp-avert')
+  assert.equal(pAvert.getAttribute('title'), detail, 'le detail n est pas pose en infobulle')
+  assert.doesNotMatch(pAvert.textContent, /saisons du marché|2 de vos hôtes/,
+    'la mecanique est revenue dans le texte visible')
   const avec = await monter(pageAvecPrix({ ...PRIX_CALCULE, marche: { relie: true, localite: 'Bagnères-de-Bigorre' } }))
   assert.doesNotMatch(avec.doc.getElementById('cp-zone-prix').textContent, /Aucun marché/)
   const sous = sans.doc.querySelector('#cp-etape-d .sous').textContent

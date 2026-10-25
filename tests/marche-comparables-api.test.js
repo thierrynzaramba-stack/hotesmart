@@ -770,12 +770,22 @@ test('recette du 6 octobre 2026 : la reponse DIT le marche — relie, d une autr
   assert.deepEqual(relie.marche, { relie: true, localite: 'Bagnères-de-Bigorre' })
   const ailleurs = (await appeler({ tables: tablesPrix({ localite: 'Toulouse' }) })).corps.prix_depart
   assert.equal(ailleurs.marche.relie, false)
-  assert.match(ailleurs.marche.message, /^Le marché relié \(Toulouse\) n’est pas celui de l’adresse de votre logement/)
+  // Recette de Thierry du 25 octobre 2026 : le message est COURT, le detail
+  // technique est dans `detail` (l'infobulle de la page).
+  assert.equal(ailleurs.marche.message,
+    'Le marché relié (Toulouse) ne correspond pas à l’adresse du logement, il n’est pas utilisé : les prix viennent seulement de vos comparables.')
+  assert.match(ailleurs.marche.detail, /les saisons du marché ne peuvent pas prendre le relais/)
+  assert.doesNotMatch(ailleurs.marche.message, /saisons du marché|2 de vos hôtes/,
+    'la mecanique est revenue dans la phrase courte')
   const tb = tablesPrix()
   tb.marche_biens = []
   const aucun = (await appeler({ tables: tb })).corps.prix_depart
   assert.equal(aucun.etat, 'calcule')
-  assert.match(aucun.marche.message, /^Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables/)
+  assert.equal(aucun.marche.message,
+    'Aucun marché n’est relié à ce logement : les prix viennent seulement de vos comparables.')
+  assert.match(aucun.marche.detail, /les saisons du marché ne peuvent pas prendre le relais/)
+  assert.doesNotMatch(aucun.marche.message, /saisons du marché|2 de vos hôtes/,
+    'la mecanique est revenue dans la phrase courte')
   const rien = (await appeler({ tables: { ...tb, airroi_cache: tb.airroi_cache.filter(l => !l.cle.startsWith('GET /listings/live/calendar')) } })).corps.prix_depart
   assert.equal(rien.etat, 'a_capturer')
   assert.equal(rien.marche.relie, false)

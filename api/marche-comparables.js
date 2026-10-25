@@ -226,9 +226,15 @@ async function marcheDuBien (bienId, profil) {
   return { marche: { pays: nfc(m.pays), region: nfc(m.region), localite: nfc(m.localite) }, absent: null }
 }
 // Ce que la page dit du marche relie : son nom, ou pourquoi il n'y en a pas.
+// ⚠ LE MESSAGE EST COURT, LE DETAIL TECHNIQUE PASSE EN INFOBULLE (recette de
+// Thierry, 25 octobre 2026). La premiere version disait la consequence et sa
+// mecanique dans la meme phrase : deux lignes d'avertissement a lire avant de
+// comprendre qu'il n'y a rien a faire d'urgent. La page pose `detail` en
+// `title` sur le paragraphe.
+const DETAIL_RELAIS = 'Sans marché relié, les saisons du marché ne peuvent pas prendre le relais quand moins de 2 de vos hôtes changent leurs prix.'
 const MARCHE_ABSENT = {
-  aucun: 'Aucun marché n’est relié à ce logement : les niveaux viennent de vos seuls comparables, sans les saisons du marché pour prendre le relais si moins de 2 de vos hôtes changent leurs prix.',
-  adresse: l => `Le marché relié (${l}) n’est pas celui de l’adresse de votre logement : il n’est pas utilisé. Les niveaux viennent de vos seuls comparables, sans les saisons du marché pour prendre le relais si moins de 2 de vos hôtes changent leurs prix.`,
+  aucun: { message: 'Aucun marché n’est relié à ce logement : les prix viennent seulement de vos comparables.', detail: DETAIL_RELAIS },
+  adresse: l => ({ message: `Le marché relié (${l}) ne correspond pas à l’adresse du logement, il n’est pas utilisé : les prix viennent seulement de vos comparables.`, detail: DETAIL_RELAIS }),
 }
 
 // ⚠ Une cle du cache contient des guillemets et des virgules ; `.in()` de
@@ -270,7 +276,7 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
   const { marche, absent, localite } = await marcheDuBien(bienId, profil)
   const infoMarche = marche
     ? { relie: true, localite: marche.localite }
-    : { relie: false, message: absent === 'adresse' ? MARCHE_ABSENT.adresse(localite) : MARCHE_ABSENT.aucun }
+    : { relie: false, ...(absent === 'adresse' ? MARCHE_ABSENT.adresse(localite) : MARCHE_ABSENT.aucun) }
   const phase1 = marche ? await phase1DuBien(marche, aujourdhui) : null
   // ⚠ Au plus CALENDRIERS_PAR_BIEN calendriers servent au calcul (decision de
   // Thierry). §22.11 : des HOTES DIFFERENTS d'abord — jamais deux annonces du
