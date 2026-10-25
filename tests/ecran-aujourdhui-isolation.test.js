@@ -30,6 +30,42 @@ process.env.SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY || 'test-key
 const test = require('node:test')
 const assert = require('node:assert')
 
+// ⚠ LE JOUR DE PARIS, PAS LE JOUR UTC — ET C'EST UN ROUGE MESURE, PAS UNE
+// PRECAUTION. Les fixtures de ce fichier posaient leur arrivee a
+// `new Date().toISOString().slice(0, 10)`, c'est-a-dire le jour UTC, alors que
+// l'endpoint borne sa fenetre sur `jourParis(0)` / `jourParis(1)`. Les deux
+// coincident la journee et DIVERGENT chaque nuit entre 22 h UTC et minuit (23 h
+// en heure d'hiver) : l'arrivee tombe hors fenetre, la preuve de transmission
+// n'est plus lue, et trois tests rougissent.
+//
+// Mesure du 23 octobre 2026 a 22 h 45 UTC (Paris +2, heure d'ete) : jour UTC
+// 2026-10-23, jour Paris 2026-10-24 — `ℹ fail 3`. Le MEME arbre, au MEME blob,
+// rendait `fail 0` a 14 h 50 UTC le meme jour. Ce n'est donc pas une regression :
+// c'est une fenetre d'HEURES.
+//
+// ⚠ ET L'OUTIL DE CONTRE-EPREUVE DU DEPOT NE PEUT PAS LE VOIR.
+// `tests/outils/horloge-decalee.js` decale des JOURS : la fixture et le code
+// glissent ensemble, donc `JOURS=-1`, `0` et `1` rendent tous les trois le meme
+// rouge. Une bascule de FUSEAU lui est invisible par construction. La regle du
+// depot — « dates relatives si le test lit l'horloge » — a donc une seconde
+// moitie : **et dans le meme fuseau que le code mesure**.
+//
+// ⚠ PAS UNE QUATRIEME COPIE DE LA REGLE. Trois copies de `jourParis` existent
+// deja (api/ecran/aujourdhui.js, api/messages.js, shared/aujourdhui.js) et un
+// test de ce fichier les tient d'accord ; en ajouter une ici serait exactement
+// ce que ce test surveille. On charge la copie PARTAGEE, la seule importable
+// depuis un test, et c'est elle qui repond.
+const SHARED_AUJOURDHUI = (() => {
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const src = fs.readFileSync(path.join(__dirname, '..', 'shared/aujourdhui.js'), 'utf8')
+  const mod = { exports: {} }
+  new Function('module', src.replace(/^export (function|const)/gm, '$1')
+    + '\n;module.exports = { jourParis, ajouterJours }')(mod)
+  return mod.exports
+})()
+const jourDeParis = (decalage = 0) => SHARED_AUJOURDHUI.jourParis(Date.now(), decalage)
+
 const TITULAIRE = '85e3a0ef-75bd-4c11-a3b7-e2811067dc36'
 const MEMBRE    = '18920ead-f936-4e26-b62e-9a5f52b5e657'
 // La bulle : le bien du membre restreint, sous ses DEUX formes de cle.
@@ -372,7 +408,7 @@ test('les messages des arrivees proches sont bornes aux reservations en main', a
   const refs = [BULLE_UUID, BULLE_REF]
   const { requetes } = await banc({ refs, lignes: {
     bookings_snapshot: [{ booking_id: 'B1', property_id: BULLE_REF,
-      snapshot: { arrival: new Date().toISOString().slice(0, 10), status: 'confirmed' } }]
+      snapshot: { arrival: jourDeParis(), status: 'confirmed' } }]
   } })()
   const msgs = requetes.filter(r => r.table === 'messages')
   assert.ok(msgs.length >= 1, 'aucune lecture de messages')
@@ -506,7 +542,7 @@ test('LE TEST QUI COMPTE : aucune reference hors perimetre dans la reponse', asy
   // quand meme une donnee d'un autre bien (un assemblage en memoire, une
   // jointure a la main). On relit donc la sortie.
   const refs = [BULLE_UUID, BULLE_REF]
-  const jour = new Date().toISOString().slice(0, 10)
+  const jour = jourDeParis()
   const { corps } = await banc({ refs, lignes: {
     // La base rend EXPRES des lignes des deux biens — comme si une borne
     // manquait : si l'endpoint les recopie, le tamis le dira.
@@ -731,7 +767,7 @@ test("LE TEST QUI COMPTE : la preuve « transmis » est cle sur le COUPLE bien +
   // ANCIENS, donc jamais celui qui porte le code.
   const { requetes } = await banc({ titulaire: true, lignes: {
     bookings_snapshot: [{ booking_id: 'B1', property_id: BULLE_REF,
-      snapshot: { arrival: new Date().toISOString().slice(0, 10), status: 'confirmed' } }]
+      snapshot: { arrival: jourDeParis(), status: 'confirmed' } }]
   } })()
   const preuve = requetes.find(r => r.table === 'messages'
     && r.filtres.some(f => f[0] === 'in' && f[1] === 'booking_id'))
@@ -746,7 +782,7 @@ test("LE TEST QUI COMPTE : une lecture de codes en echec ne rend AUCUN verdict",
   // verdict DEFINITIF — pour chaque arrivee du jour. La page ne traduit que
   // « cree » en invite « Envoyer le code » : la pastille et l'invite
   // disparaissaient en silence alors qu'un code existe.
-  const jour = new Date().toISOString().slice(0, 10)
+  const jour = jourDeParis()
   const arrivee = { bookings_snapshot: [{ booking_id: 'R1', property_id: BULLE_REF,
     snapshot: { arrival: jour, status: 'confirmed' } }] }
   for (const table of ['access_codes', 'messages']) {
@@ -794,6 +830,43 @@ test("LE TEST QUI COMPTE : `biens` en echec vaut `null`, jamais une liste vide",
   assert.ok(corps.indisponibles.includes('biens'))
 })
 
+test("LE TEST QUI COMPTE : les fixtures de ce fichier datent en PARIS, comme le code qu'elles mesurent", () => {
+  // ⚠ TROIS ROUGES, MESURES LE 23 OCTOBRE 2026 A 22 H 45 UTC, SUR UN ARBRE
+  // DONT LE MEME BLOB RENDAIT `fail 0` A 14 H 50 LE MEME JOUR. Les fixtures
+  // posaient leur arrivee sur le jour UTC, l'endpoint borne sa fenetre sur le
+  // jour PARIS : les deux coincident la journee et divergent chaque nuit entre
+  // 22 h UTC et minuit. Le test ne disait rien du code — il disait l'heure.
+  //
+  // CE TEST GARDE L'INVARIANT, pas la ligne : a un instant ou les deux jours
+  // DIVERGENT, c'est le jour de Paris que la fixture doit rendre.
+  const nuit = Date.UTC(2026, 9, 23, 22, 45) // 23 oct. 22 h 45 UTC = 24 oct. 00 h 45 a Paris
+  assert.strictEqual(new Date(nuit).toISOString().slice(0, 10), '2026-10-23',
+    'temoin : a cet instant, le jour UTC est bien le 23')
+  assert.strictEqual(SHARED_AUJOURDHUI.jourParis(nuit, 0), '2026-10-24',
+    'et le jour de Paris est le 24 : c est CET ecart qui faisait rougir trois tests')
+  assert.strictEqual(SHARED_AUJOURDHUI.jourParis(nuit, 1), '2026-10-25')
+  // Et le 25 octobre 2026, jour de 25 heures : la fenetre rouge se resserre a
+  // 23 h — minuit, parce que Paris repasse a +1. Les deux instants le disent.
+  assert.strictEqual(SHARED_AUJOURDHUI.jourParis(Date.UTC(2026, 9, 25, 22, 45), 0), '2026-10-25',
+    'a 22 h 45 UTC le 25, Paris est encore le 25 : plus d ecart')
+  assert.strictEqual(SHARED_AUJOURDHUI.jourParis(Date.UTC(2026, 9, 25, 23, 45), 0), '2026-10-26',
+    'a 23 h 45 UTC le 25, Paris est le 26 : l ecart est revenu, une heure plus tard qu en ete')
+
+  // ⚠ ET LE MOTIF TEXTUEL, EN DERNIER RECOURS ET ASSUME (regle 20). Aucun
+  // appel ne peut voir qu'une fixture FUTURE aura ete ecrite en UTC : le defaut
+  // est dans la frappe, pas dans un comportement. C'est la seule garde qui
+  // attrape la recopie du geste d'origine — et c'est exactement par recopie que
+  // les quatre fixtures de ce fichier avaient le meme defaut.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const moi = fs.readFileSync(path.join(__dirname, 'ecran-aujourdhui-isolation.test.js'), 'utf8')
+  const dansLeCode = moi.split('\n')
+    .filter(l => !l.trim().startsWith('//'))
+    .filter(l => /new Date\(\)\.toISOString\(\)\.slice\(0, 10\)/.test(l))
+  assert.deepEqual(dansLeCode, [],
+    'une fixture date en jour UTC : utilisez `jourDeParis()`, sinon elle rougira entre 22 h et minuit UTC')
+})
+
 test("LE TEST QUI COMPTE : les TROIS copies de `jourParis` comptent en jours calendaires", async () => {
   // ⚠ LE PREMIER CORRECTIF N'EN AVAIT TOUCHE QU'UNE. `api/messages.js` est
   // l'AUTRE injecteur du meme `arriveesProches` — tout l'interet de
@@ -816,12 +889,9 @@ test("LE TEST QUI COMPTE : les TROIS copies de `jourParis` comptent en jours cal
       `${f} ne fait pas d arithmetique calendaire`)
   }
 
-  // Et la mesure, sur la copie qui est importable depuis un test.
-  const src = fs.readFileSync(path.join(__dirname, '..', 'shared/aujourdhui.js'), 'utf8')
-  const mod = { exports: {} }
-  const code = src.replace(/^export (function|const)/gm, '$1')
-    + '\n;module.exports = { jourParis, ajouterJours }'
-  new Function('module', code)(mod)
+  // Et la mesure, sur la copie qui est importable depuis un test — celle que
+  // les fixtures de ce fichier utilisent desormais pour poser leurs arrivees.
+  const mod = { exports: SHARED_AUJOURDHUI }
   for (const [instant, jour, demain] of [
     ['2026-10-24T22:30:00Z', '2026-10-25', '2026-10-26'],
     ['2027-03-27T22:30:00Z', '2027-03-27', '2027-03-28'],
