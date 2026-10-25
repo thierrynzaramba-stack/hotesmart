@@ -835,7 +835,14 @@
     // Sans marche relie, la page le DIT (recette de Thierry, 6 octobre 2026),
     // avant tout releve payant : les niveaux ne viennent alors que des
     // comparables, sans repli possible.
-    if (pd.marche && pd.marche.relie === false) zone.append(Object.assign(document.createElement('p'), { className: 'cp-avert', textContent: pd.marche.message }))
+    // Le detail technique vit dans l'infobulle, pas dans la phrase (recette du
+    // 25 octobre 2026) : `title` n'entre pas dans `textContent`, donc le
+    // message reste court a l'ecran et la mecanique reste atteignable.
+    if (pd.marche && pd.marche.relie === false) {
+      const p = Object.assign(document.createElement('p'), { className: 'cp-avert', textContent: pd.marche.message })
+      if (pd.marche.detail) p.title = pd.marche.detail
+      zone.append(p)
+    }
     if (pd.etat === 'a_capturer') {
       const p = document.createElement('p'); p.className = 'cp-meta'
       p.textContent = `Les prix de ${pluriel(pd.a_capturer, 'comparable', 'comparables')} ne sont pas encore relevés.`
