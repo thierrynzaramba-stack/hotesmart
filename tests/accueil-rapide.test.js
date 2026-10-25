@@ -31,6 +31,11 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 
+// Le module REEL du bloc « Derniers avis » : il est injecte dans la page
+// montee par ce banc, pour que `renderDerniersAvis` soit appelable.
+let AVIS = {}
+test.before(async () => { AVIS = await import('../shared/avis-recents.js') })
+
 const racine = path.join(__dirname, '..')
 const lire = p => fs.readFileSync(path.join(racine, p), 'utf8')
 
@@ -538,7 +543,16 @@ function batirAujourdhui (sansInit = false) {
     assert.ok(!/\binit\(\)\.catch\(/.test(corpsUtile),
       "le demarrage `init().catch(...)` n'a pas pu etre retire : sa forme a change")
   }
-  return corpsUtile + '\n;return { chargerNotes, etat }'
+  // ⚠ LES FONCTIONS DE RENDU SORTENT, ET C'EST LA LECON DE LA REVUE DE
+  // L'ETAPE 1. Quatre garde-fous retarges mesuraient une POSITION DANS LE
+  // TEXTE de la page (« le compte s'ecrit apres la garde », « l'etat vide cite
+  // `listeLue` ») : six mutations du code de production sur onze les laissaient
+  // verts, dont deux qui rejouent un incident deja vecu sur cet ecran — « A
+  // valider · Rien a valider » sur une lecture ratee, et « Ajoutez votre
+  // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
+  // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
+  // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderBiens, renderDerniersAvis }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -594,7 +608,11 @@ function ouvrirAujourdhui (options = {}) {
   const I18n = {
     appels: 0,
     init () { this.appels++; return new Promise(res => { resoudreI18n = res }) },
-    t: (k) => k, date: () => '', time: () => '', money: () => '', pct: () => '',
+    // ⚠ `date` REND QUELQUE CHOSE. Elle rendait '' : la date du titre, posee a
+    // l'etape 1, s'ecrivait donc vide, et aucun test ne pouvait distinguer
+    // « affichee » de « pas encore ». Un double qui rend du vide ne mesure rien.
+    t: (k) => k, date: () => 'LE-JOUR', time: () => '', money: () => '', pct: () => '',
+    apply () {},
     // Formate reellement : sans cela, rien ne peut asserter la note affichee.
     num: (n) => String(n),
     lang: 'fr', langues: []
@@ -612,18 +630,43 @@ function ouvrirAujourdhui (options = {}) {
       throw new Error('pages/aujourdhui.html appelle R.noteSur5 : la note descend DEJA sur 5, '
         + 'la rediviser arrondit deux fois (lib/avis/echelle.js)')
     }
+    // ⚠ `jourParis` REND UN JOUR, PAS UNE LISTE. Le double rendait `[]` pour
+    // toute clé inconnue : `etat.aujourdHui` valait `[]`, et la date du titre —
+    // posée à l'étape 1, donc AVANT la première lecture — levait
+    // « jour.split is not a function », silencieusement avalé par le
+    // `init().catch`. Un double qui rend la mauvaise FORME ne fait pas échouer
+    // le test qu'il sert : il le fait échouer ailleurs, et plus tard.
+    // Date FIGÉE, parce que le double INJECTE le temps (règle du dépôt).
+    if (cle === 'jourParis') return () => '2026-10-24'
+    // ⚠ `tachesOuvertes` LAISSE PASSER SA LISTE, au lieu de rendre `[]`. La
+    // REGLE de filtrage (sejours a venir ou en cours) a ses propres tests dans
+    // `tests/aujourdhui.test.js` ; ici c'est le RENDU qu'on juge, et un double
+    // qui vide la liste rend tout compte indistinguable de zero.
+    if (cle === 'tachesOuvertes') return (t) => (Array.isArray(t) ? t : [])
     return cle === 'etatDesBiens' ? (() => new Map()) : (() => [])
   } })
 
   const sorti = new Function(
     'requireAuth', 'supabase', 'signOut', 'initErrorHandler', 'logger', 'esc',
     'compteCourant', 'moi', 'peutLire', 'peutEcrire', 'estTitulaire', 'comptes',
-    'basculerVers', 'enteteCompte', 'R',
+    'basculerVers', 'enteteCompte', 'etatHtml',
+    'vueDesAvis', 'blocAvisHtml', 'enTeteAvisHtml', 'MUETS', 'libelleDuCanal', 'R',
     'I18n', 'HSNav', 'document', 'window', 'location', 'fetch', 'localStorage', 'console',
     batirAujourdhui(options.sansInit)
   )(requireAuth, supabase, rien, rien, { error: rien, warn: rien, info: rien }, String,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
-    rien, () => ({}), R,
+    rien, () => ({}), () => '<h2 data-i18n="logements.vide_titre"></h2>',
+    // ⚠ LE MODULE DES AVIS EST INJECTE POUR DE VRAI, pas double (constat MOYEN 3
+    // de la revue de l'etape 2). `renderDerniersAvis` etait EXPOSE par ce banc
+    // et INAPPELABLE : le `new Function` n'injectait pas `vueDesAvis`, et
+    // l'appeler levait `ReferenceError`. Le commit annoncait « quatre tests qui
+    // APPELLENT remplacent quatre regex » — c'etait vrai pour deux rendus sur
+    // trois. Resultat mesure : onze mutations du code neuf survivaient.
+    // On injecte le MODULE REEL : un double rendrait un test qui mesure son
+    // propre double, et c'est le rendu qu'on veut juger.
+    AVIS.vueDesAvis, AVIS.blocAvisHtml, AVIS.enTeteAvisHtml, AVIS.MUETS,
+    (c) => ({ airbnb: 'Airbnb', booking: 'Booking.com' })[String((c || {}).ota || '')] || null,
+    R,
     I18n, { renderMenu: rien, render: rien }, document_, {}, { search: '', hash: '' },
     fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien })
 
@@ -636,8 +679,11 @@ function ouvrirAujourdhui (options = {}) {
     urls,
     lectures,
     I18n,
-    bonjour: () => document_.querySelector('[data-bind="greeting"]').textContent,
+    date: () => document_.querySelector('[data-bind="date"]').textContent,
     html: (sel) => document_.querySelector(sel).innerHTML,
+    // L'element lui-meme, pour lire `hidden` et `textContent` : le double les
+    // porte, et c'est sur eux que se jugent « masque » et « se tait ».
+    cache: (sel) => document_.querySelector(sel),
     ouvrirSession: () => resoudreSession({ user: { id: 'u1', email: 'thierry@exemple.fr', user_metadata: {} } }),
     repondreI18n: () => resoudreI18n('fr'),
     resoudre: (table, charge) => {
@@ -668,7 +714,14 @@ test("LE TEST QUI COMPTE : la page ne lit plus `properties` elle-meme", async ()
   p.ouvrirSession(); p.repondreI18n()
   await tours()
   const tables = p.lectures.map(l => l.table)
-  assert.ok(tables.includes('profiles'), 'le prenom n est jamais demande')
+  // ⚠ ET DEPUIS L'ETAPE 1 DU LOT AUJOURD'HUI V5, LA GARANTIE EST ENTIERE : la
+  // page ne lit AUCUNE table en direct. `profiles` etait la derniere — le
+  // « Bonjour {prenom} » la demandait alors que `/api/membres` l'avait deja
+  // rendue dans `requireAuth` (dette 73), sur un objet de session fige qui
+  // pouvait porter un e-mail perime (dette 72). L'en-tete retire, les deux
+  // dettes sont sans objet ici.
+  assert.ok(!tables.includes('profiles'),
+    'la page relit `profiles` : le bonjour est parti, plus rien ne justifie cette lecture')
   assert.ok(!tables.includes('properties'),
     'la page relit `properties` en direct : le lot (b) l a replie dans l appel d ecran, '
     + 'ou le perimetre est applique explicitement')
@@ -683,24 +736,25 @@ test("LE TEST QUI COMPTE : la page ne lit plus `properties` elle-meme", async ()
   // « jamais ». C'est la SOURCE qui dit « jamais ».
   const src = lire('pages/aujourdhui.html')
   const tablesLues = [...src.matchAll(/supabase\.from\('([^']+)'\)/g)].map(m => m[1])
-  assert.deepEqual(tablesLues, ['profiles'],
+  assert.deepEqual(tablesLues, [],
     'la page lit une table en direct, sous RLS, hors du perimetre applique par '
-    + 'l appel d ecran : ' + tablesLues.join(', ') + '. Seul `profiles` (le prenom, '
-    + 'dette connue) reste autorise ici.')
+    + 'l appel d ecran : ' + tablesLues.join(', ') + '. Depuis l etape 1, AUCUNE '
+    + 'lecture directe n est autorisee sur cet ecran.')
 })
 
-test("LE TEST QUI COMPTE : le bonjour s affiche sans attendre la lecture des biens", async () => {
-  // `properties` est la plus lourde des deux (9 colonnes, toutes les lignes du
-  // compte, sans limite) et le bonjour n'en a aucun besoin. Dans un
-  // `Promise.all` sur les RESULTATS, l'element le plus visible de la page
-  // attendait la requete la plus lente.
+test("LE TEST QUI COMPTE : la DATE s affiche sans attendre aucune lecture", async () => {
+  // ⚠ CE TEST GARDAIT LE BONJOUR, RETIRE A L'ETAPE 1. Ce qu'il protegeait reste
+  // vrai et se deplace : le premier element visible de la page ne doit attendre
+  // AUCUN aller-retour. C'etait un `Promise.all` sur deux resultats qui faisait
+  // attendre au bonjour la lecture `properties` ; c'est aujourd'hui plus simple
+  // encore, la date ne depend que de l'horloge.
   const p = ouvrirAujourdhui()
   p.ouvrirSession(); p.repondreI18n()
   await tours()
-  p.resoudre('profiles', { data: [{ first_name: 'thierry' }] })
-  await tours()
-  assert.notStrictEqual(p.bonjour(), '',
-    'le bonjour attend la lecture des biens pour s afficher')
+  assert.notStrictEqual(p.date(), '',
+    'la date attend une lecture pour s afficher : elle ne depend que de l horloge')
+  assert.strictEqual(p.lectures.length, 0,
+    'la page fait une lecture directe avant son premier affichage : ' + p.lectures.map(l => l.table).join(', '))
 })
 
 test("l accueil ne refait plus d aller-retour pour l utilisateur deja connu", () => {
@@ -872,11 +926,13 @@ test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redi
   p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
 
-  const tuile = p.html('[data-bind="rating"]')
-  assert.ok(tuile.includes('4.7'), `la tuile n affiche pas la note descendue par l endpoint : ${tuile}`)
-  assert.ok(!tuile.includes('2.3') && !tuile.includes('2.4'), `la tuile a redivise la note : ${tuile}`)
-
+  // ⚠ LA TUILE DU BANDEAU « Note · 30 j » A ETE RETIREE A L'ETAPE 1 (24 octobre
+  // 2026) ; la note revient a l'etape 2, en tete du bloc « Derniers avis ».
+  // L'invariant, lui, n'a pas bouge et ce test le tient toujours : la note
+  // descend DEJA sur 5, et l'ecran ne la redivise pas. Il le tient desormais la
+  // ou la note s'affiche encore — l'etoile de chaque logement.
   const liste = p.html('[data-list="properties"]')
+  assert.ok(!liste.includes('2.3') && !liste.includes('2.4'), `l etoile a redivise la note : ${liste}`)
   assert.ok(liste.includes('4.8'), `l etoile du bien n affiche pas la note descendue : ${liste}`)
 })
 
@@ -897,4 +953,187 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note"
   assert.strictEqual(p.interne.etat.noteGlobale, null,
     'une note calculee sur une fraction est affichee comme un fait')
   assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ce que l'ecran REND vraiment — constat MOYEN 1 de la revue de l'etape 1
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠ CES TESTS APPELLENT, ILS NE RELISENT PAS LA PAGE. Les quatre garde-fous
+// retarges de l'etape 1 mesuraient une position dans le texte source : six
+// mutations sur onze passaient au vert. Chacun des tests ci-dessous est ne
+// d'une de ces mutations, et porte son numero.
+
+// Le banc, prepare pour appeler un rendu : la page est montee sans son
+// demarrage, et l'etat est pose a la main.
+function bancDeRendu (etat = {}) {
+  const p = ouvrirAujourdhui({ sansInit: true })
+  Object.assign(p.interne.etat, etat)
+  return p
+}
+
+test("LE TEST QUI COMPTE (M1b) : des taches ILLISIBLES ne rendent ni liste ni compte", async () => {
+  // Mutation de la revue : la garde `if (!etat.tachesOk)` perd son `return`.
+  // L'hote dont la lecture a echoue lisait alors « A valider · Rien a valider »
+  // — une absence AFFIRMEE sur une donnee qu'on n'a pas pu lire. C'est, mot
+  // pour mot, l'incident que le commentaire de cette fonction raconte.
+  const p = bancDeRendu({ tachesOk: false, taches: [] })
+  p.interne.renderTaches()
+  assert.strictEqual(p.cache('[data-bind="validate-section"]').hidden, true,
+    'la section « A valider » reste visible alors que la lecture a echoue')
+  assert.strictEqual(p.html('[data-list="pending"]'), '',
+    'une liste est rendue alors que les taches sont illisibles')
+  assert.strictEqual(p.cache('[data-bind="validate-count"]').textContent, '',
+    'un compte s affiche alors qu on n a rien pu lire')
+})
+
+test("LE TEST QUI COMPTE (M3) : zero tache a valider ne s'affiche PAS « 0 »", async () => {
+  // Mutation : `: ''` devient `: '0'`. Un zero pose a cote d'un titre se lit
+  // comme un fait, et la liste en dessous dit deja « Rien a valider ».
+  const p = bancDeRendu({ tachesOk: true, taches: [] })
+  p.interne.renderTaches()
+  assert.strictEqual(p.cache('[data-bind="validate-count"]').textContent, '',
+    'le compte affiche un zero au lieu de se taire')
+})
+
+test("LE TEST QUI COMPTE (M8) : une liste PLAFONNEE affiche « N+ », pas un nombre exact", async () => {
+  // Mutation : `tachesPlafonnees()` rend toujours `false`. Le compte de Thierry
+  // porte 222 taches ouvertes pour un plafond serveur de 200 : afficher « 200 »
+  // serait un nombre faux avec aplomb, et `tronquees` existe pour l'eviter.
+  const taches = [1, 2, 3, 4].map(i => ({ id: i, status: 'pending', book_id: 'R' + i, departure: '2099-01-01' }))
+  const franc = bancDeRendu({ tachesOk: true, taches, ecran: { tronquees: [] } })
+  franc.interne.renderTaches()
+  const exact = franc.cache('[data-bind="validate-count"]').textContent
+  assert.ok(/^\d+$/.test(exact), `un compte franc doit etre un nombre nu : ${exact}`)
+
+  const plafonne = bancDeRendu({ tachesOk: true, taches, ecran: { tronquees: ['taches'] } })
+  plafonne.interne.renderTaches()
+  const avecPlus = plafonne.cache('[data-bind="validate-count"]').textContent
+  assert.notStrictEqual(avecPlus, exact,
+    'le compte est identique que la liste soit plafonnee ou non : le « + » ne s applique jamais')
+  // ⚠ LE « + » LUI-MEME VIT DANS LE DICTIONNAIRE, pas dans le code : le double
+  // de `t` rend la cle, pas le texte. On juge donc ici que les deux cas
+  // DIFFERENT — c'est le comportement —, et on lit le texte reel a cote, parce
+  // qu'une cle qui perdrait son « + » rendrait ce test vert pour rien.
+  const fr = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', 'fr.json'), 'utf8'))
+  assert.match(fr['validate.count_capped'], /\+/,
+    'la cle du compte plafonne ne porte plus de « + » : le nombre se lirait exact')
+})
+
+test("LE TEST QUI COMPTE (M2) : l'etat « aucun logement » ne s'affiche QUE sur une liste vraiment lue", async () => {
+  // Mutation : l'etat vide s'affiche sans consulter `listeLue`. L'hote qui a
+  // quatre logements et dont l'appel n'a pas encore repondu lisait « Ajoutez
+  // votre premier logement » — et, a l'onboarding, une reconciliation contre
+  // une liste amputee CREE des biens en double chez le canal.
+  const pasLu = bancDeRendu({ biens: [], ecran: null })
+  pasLu.interne.renderBiens()
+  assert.strictEqual(pasLu.cache('[data-bind="etat-vide"]').hidden, true,
+    'l etat vide s affiche alors que la liste n a pas ete lue')
+  assert.strictEqual(pasLu.cache('[data-bind="props-section"]').hidden, true)
+
+  const lu = bancDeRendu({ biens: [], ecran: { biens: [] } })
+  lu.interne.renderBiens()
+  assert.strictEqual(lu.cache('[data-bind="etat-vide"]').hidden, false,
+    'une liste lue et vide doit proposer d ajouter un logement')
+  assert.match(lu.html('[data-bind="etat-vide"]'), /logements\.vide_titre/)
+
+  // Et une lecture EN ECHEC (`null`) n'est ni une liste vide ni un etat vide.
+  const illisible = bancDeRendu({ biens: null, ecran: { biens: null } })
+  illisible.interne.renderBiens()
+  assert.strictEqual(illisible.cache('[data-bind="etat-vide"]').hidden, true)
+  assert.match(illisible.html('[data-list="properties"]'), /properties\.unavailable/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Le bloc « Derniers avis » TEL QUE L'ECRAN LE REND — constats de la revue
+// de l'etape 2 (25 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠ CES TESTS APPELLENT `renderDerniersAvis`, ce qu'aucun test ne faisait : la
+// fonction etait exposee par ce banc et INAPPELABLE (le module des avis n'etait
+// pas injecte, et l'appeler levait `ReferenceError`). Onze mutations du code
+// neuf survivaient.
+
+const AVIS_SERVEUR = [{
+  id: 'r1', bien_ref: '209413', ota: 'airbnb', recu_le: '2026-10-20T10:00:00Z',
+  note_sur_5: 4.8, texte: 'Sejour parfait, on reviendra.', voyageur: 'Claire B.'
+}]
+const BIENS_SERVEUR = [{ id: 'u1', provider_property_id: '209413', name: 'La bulle', photo_url: null }]
+
+function bancAvis (ecran = {}) {
+  const p = ouvrirAujourdhui({ sansInit: true })
+  p.interne.etat.ecran = ecran
+  p.interne.etat.biens = BIENS_SERVEUR
+  p.interne.etat.noteGlobale = ecran.notes ? ecran.notes.global : null
+  return p
+}
+
+test("LE TEST QUI COMPTE : un droit `avis` refuse n'EFFACE pas seulement, il ne laisse RIEN", async () => {
+  // ⚠ MESURE DE LA REVUE : la section passait a `hidden` et gardait ses trois
+  // cartes et sa moyenne dans le DOM. `hidden` cache, il n'efface pas — et le
+  // cas se produit en deux temps : un premier affichage rend les avis, puis la
+  // reponse du serveur refuse le droit (membre revoque en cours de session).
+  const p = bancAvis({ derniers_avis: AVIS_SERVEUR, notes: { global: { note_sur_5: 4.8, notes: 336 } } })
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.match(p.html('[data-list="reviews"]'), /avis-carte/, 'le rendu normal ne produit rien')
+
+  // Puis le refus arrive.
+  p.interne.etat.ecran = { derniers_avis: null, refuses: ['avis'] }
+  p.interne.etat.noteGlobale = null
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(p.cache('[data-bind="reviews-section"]').hidden, true, 'la section reste visible')
+  assert.strictEqual(p.html('[data-list="reviews"]'), '',
+    'les cartes restent dans le DOM : `hidden` les cache, il ne les efface pas')
+  assert.strictEqual(p.html('[data-bind="reviews-head"]'), '',
+    'la moyenne reste dans le DOM apres un refus de droit')
+})
+
+test("LE TEST QUI COMPTE : « pas encore demande » ne se dit pas « pas lisible »", async () => {
+  // Le cache d'ecran ne porte plus ce bloc (il descend un prenom de voyageur) :
+  // au premier affichage la cle est ABSENTE. La traiter comme `null` afficherait
+  // « Les avis ne sont pas lisibles » a chaque ouverture, pendant un
+  // aller-retour, sur une donnee qui arrive une seconde plus tard.
+  const p = bancAvis({ biens: [], notes: { global: { note_sur_5: 4.8, notes: 12 } } })
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(p.cache('[data-bind="reviews-section"]').hidden, true)
+  assert.strictEqual(p.html('[data-list="reviews"]'), '')
+
+  // Alors qu'une lecture VRAIMENT en echec, elle, se dit.
+  const q = bancAvis({ derniers_avis: null, indisponibles: ['derniers_avis'] })
+  await q.interne.chargerDerniersAvis()
+  q.interne.renderDerniersAvis()
+  assert.strictEqual(q.cache('[data-bind="reviews-section"]').hidden, false)
+  assert.match(q.html('[data-list="reviews"]'), /reviews\.unavailable/)
+})
+
+test("LE TEST QUI COMPTE : un membre SANS AUCUN BIEN ne lit pas « pas encore d'avis »", async () => {
+  // Une phrase qui parle d'absence d'AVIS la ou il y a absence de BIENS. C'est
+  // l'injonction symetrique de « Ajoutez votre premier logement », fermee le
+  // meme jour sur le bloc des logements.
+  const p = bancAvis({ derniers_avis: [], perimetre_vide: true })
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(p.cache('[data-bind="reviews-section"]').hidden, true)
+  assert.strictEqual(p.html('[data-list="reviews"]'), '')
+
+  // Un hote qui a des biens et pas d'avis, lui, lit bien la phrase.
+  const q = bancAvis({ derniers_avis: [], perimetre_vide: false })
+  await q.interne.chargerDerniersAvis()
+  q.interne.renderDerniersAvis()
+  assert.strictEqual(q.cache('[data-bind="reviews-section"]').hidden, false)
+  assert.match(q.html('[data-list="reviews"]'), /reviews\.empty/)
+})
+
+test('le bloc rend les cartes, la moyenne et le compte quand tout va bien', async () => {
+  const p = bancAvis({ derniers_avis: AVIS_SERVEUR, notes: { global: { note_sur_5: 4.8, notes: 336 } } })
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  const liste = p.html('[data-list="reviews"]')
+  assert.match(liste, /Sejour parfait/)
+  assert.match(liste, /Claire B\./)
+  assert.match(liste, /La bulle/, 'le bien est retrouve par sa cle PROVIDER')
+  assert.match(p.html('[data-bind="reviews-head"]'), /reviews\.score/)
 })

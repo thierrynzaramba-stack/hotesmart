@@ -396,27 +396,13 @@ function contexteDeRendu (dom) {
   }
 }
 
-test('LE TEST QUI COMPTE (M2) : le bandeau de l accueil affiche la note TELLE QU ELLE DESCEND', async () => {
-  const dom = new JSDOM('<!doctype html><body><span data-bind="rating"></span><span data-bind="kpi-rating" hidden></span></body>')
-  const ctx = contexteDeRendu(dom)
-  ctx.n = { note_sur_5: 4.7, notes: 69 }
-  ctx.visible = false
-  const vm = require('node:vm')
-  vm.createContext(ctx)
-  vm.runInContext(expressionDeLaPage('$(\'[data-bind="rating"]\').innerHTML = n.', 3), ctx)
-  const zone = dom.window.document.querySelector('[data-bind="rating"]')
-  assert.match(zone.textContent, /4,7/, 'la note descend deja sur 5 : l ecran l affiche sans la diviser')
-  assert.doesNotMatch(zone.textContent, /2,4|9,4/, 'ni redivisee, ni laissee sur 10')
-  assert.match(zone.textContent, /n=69/, 'le nombre d avis notes accompagne la note')
-  assert.ok(zone.querySelector('[data-icone="i-review"]'), 'l etoile est une icone du sprite')
-
-  // Sans note : on ne dit pas « 0 », on dit le compte a zero.
-  ctx.n = { note_sur_5: null, notes: 0 }
-  vm.runInContext(expressionDeLaPage('$(\'[data-bind="rating"]\').innerHTML = n.', 3), ctx)
-  assert.doesNotMatch(zone.textContent, /0,0/)
-  assert.match(zone.textContent, /n=0/)
-})
-
+// ⚠ LE BANDEAU « Note · 30 j » EST RETIRE A L'ETAPE 1, ET SON TEST AVEC LUI.
+// L'invariant qu'il gardait — « la note descend DEJA sur 5, l'ecran ne la
+// redivise pas, sinon Colomiers affiche 4,8 au lieu de 4,7 » — n'est pas perdu :
+// le test suivant le tient sur l'etoile de CHAQUE logement, qui reste a
+// l'ecran, et il reviendra sur l'en-tete du bloc « Derniers avis » a l'etape 2.
+// Le supprimer sans dire ou l'invariant continue de vivre serait exactement le
+// retrait par omission que l'inventaire de ce lot existe pour empecher.
 test('LE TEST QUI COMPTE (M2) : l etoile de CHAQUE logement affiche la meme note, sans la reconvertir', async () => {
   const dom = new JSDOM('<!doctype html><body></body>')
   const ctx = contexteDeRendu(dom)
@@ -491,8 +477,16 @@ test("LE TEST QUI COMPTE : l'acquittement retire l'alarme et REND, sans relire l
     'l alarme acquittee n est pas retiree de l etat')
   assert.match(bloc, /etat\.ecran\.alarmes\s*=\s*etat\.ecran\.alarmes\.filter/,
     'la reponse gardee en etat garde l alarme : un rechargement partiel la ferait revenir')
-  assert.match(bloc, /renderAlarmes\(\);\s*renderTitre\(\)/,
+  // ⚠ `renderTitre()` N'EST PLUS DANS CETTE PAIRE, ET CE N'EST PAS UN OUBLI.
+  // L'ancienne ligne resume comptait l'alarme dans son « N a traiter » : la
+  // retirer de l'etat sans re-rendre le titre laissait un compte faux. Depuis
+  // l'etape 1, le seul compte de l'ecran est celui de « A valider », qui compte
+  // les TACHES — une alarme acquittee ne le change pas. Re-rendre le titre
+  // serait du bruit, et le laisser ici ferait croire a un lien qui n'existe plus.
+  assert.match(bloc, /renderAlarmes\(\)/,
     'rien ne re-rend apres l acquittement')
+  assert.ok(!/renderTitre/.test(bloc),
+    'renderTitre a ete retire a l etape 1 : son appel ici ne peut etre qu un reste')
 })
 
 test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", () => {
@@ -510,8 +504,18 @@ test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", ()
   assert.ok(!/renderTaches\(\)/.test(bloc),
     'le premier affichage rend « A valider » : la regle des taches a besoin des sejours, '
     + 'et les taches ne sont plus dans le cache (elles portent le code d acces)')
-  assert.match(bloc, /renderCompteurs\(\); renderBiens\(\)/,
-    'le premier affichage ne rend plus rien : le cache ne sert alors a rien')
+  // ⚠ LA LISTE, PAS LA SEQUENCE. Ma premiere version exigeait la chaine
+  // « renderCompteurs(); renderBiens() » au caractere : ajouter un rendu
+  // legitime entre les deux — les derniers avis, etape 2 — faisait rougir un
+  // test qui n'avait rien a dire sur cet ajout. Ce qui compte n'est pas
+  // l'ordre des appels, c'est QUELS blocs le cache a le droit de peindre :
+  // ceux dont il porte vraiment les donnees. Un rendu de plus ici doit etre un
+  // choix, et c'est cette assertion qui oblige a le declarer.
+  const rendus = [...bloc.matchAll(/\b(render[A-Za-z]+)\(\)/g)].map(m => m[1]).sort()
+  assert.deepEqual(rendus, ['renderBiens', 'renderCompteurs', 'renderDerniersAvis'],
+    'le premier affichage peint autre chose que ce que le cache porte : ' + rendus.join(', ')
+    + '. Les sejours n y sont pas (ils viennent de /api/menages), les taches et les '
+    + 'alarmes non plus (le cache refuse de les ecrire).')
   // Et la ligne du bien n'affirme « aucune arrivee » que si on a lu les sejours.
   assert.match(html, /etat\.menagesOk === true\s*\n?\s*\?\s*\(e\.prochaineArrivee/,
     'la carte du bien affirme « Aucune arrivee prevue » sans avoir lu les sejours')
@@ -539,27 +543,35 @@ test("LE TEST QUI COMPTE : un echec de l'appel d'ecran ne re-date pas le cache",
     'l age repasse a « frais » alors que les donnees viennent du cache')
 })
 
-test("LE TEST QUI COMPTE : le sous-titre n'affirme « 0 arrivee · 0 depart » qu'apres avoir LU", () => {
-  // ⚠ LE PREMIER CORRECTIF A GARDE LA BRANCHE DU CACHE ET LES CARTES DE BIENS,
-  // ET A OUBLIE LE TITRE. `renderEvenements` etait garde (il affiche
-  // « Lecture impossible »), `renderBiens` l'a ete par ce lot — mais
-  // `renderTitre` comptait toujours sur `etat.bookings`, vide quand
-  // `/api/menages` echoue. L'hote lisait donc « indisponible » dans la liste
-  // des evenements ET « 0 arrivee · 0 depart · rien a faire » dans le titre du
-  // MEME ecran ; et « rien a faire » alors qu'une surreservation non acquittee
-  // pouvait exister. Le KB de cette page, ecrit par ce lot, l'interdit
-  // nommement.
+test("LE TEST QUI COMPTE : le compte de « A valider » ne s'affiche qu'APRES avoir LU", () => {
+  // ⚠ CE TEST A CHANGE DE CIBLE A L'ETAPE 1, ET PAS D'INVARIANT. Il gardait la
+  // ligne resume — « {date} · N arrivees · N departs · N a traiter » —, retiree
+  // le 24 octobre 2026 sur decision de Thierry. Ce qu'elle portait de precieux
+  // n'etait pas la phrase : c'etait la regle « un compte est un FAIT, et il
+  // demande d'avoir lu ». Le compte survit a cote du titre « A valider », donc
+  // la regle le suit.
+  //
+  // L'histoire, gardee parce qu'elle se rejouera : `renderEvenements` etait
+  // garde, `renderBiens` l'a ete ensuite, et `renderTitre` comptait toujours
+  // sur `etat.bookings` — vide quand `/api/menages` echoue. L'hote lisait
+  // « indisponible » dans la liste ET « 0 arrivee · 0 depart » dans le titre du
+  // MEME ecran.
   const html = lire('pages/aujourdhui.html')
-  const bloc = (html.match(/function renderTitre[\s\S]*?\n\}/) || [''])[0]
-  assert.ok(bloc, 'renderTitre a disparu')
-  assert.match(bloc, /etat\.menagesOk === true/,
-    'le sous-titre compte les arrivees sans savoir si les sejours ont ete lus')
-  assert.match(bloc, /today\.counts_unavailable/,
-    'sans les sejours, le sous-titre doit le DIRE, pas afficher zero')
-  // Les taches et les alarmes, elles, ne dependent pas des sejours : elles
-  // restent comptees dans les deux cas.
-  assert.match(bloc, /tachesVisibles\(\)\.length \+ etat\.alarmes\.length/,
-    'les taches et les alarmes ne sont plus comptees quand les sejours manquent')
+  const bloc = (html.match(/function renderTaches[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, 'renderTaches a change de forme')
+  // La garde est en tete de la fonction : sans elle, le compte s'ecrirait
+  // meme quand la lecture des taches a echoue.
+  const iGarde = bloc.indexOf('if (!etat.tachesOk)')
+  const iCompte = bloc.indexOf('validate-count')
+  assert.ok(iGarde >= 0, 'le compte ne verifie plus que les taches ont ete LUES')
+  assert.ok(iCompte > iGarde,
+    'le compte s ecrit avant la garde : une lecture en echec afficherait un nombre invente')
+  assert.match(bloc, /validate\.count_capped/,
+    'le compte ne porte pas le « + » quand le serveur a plafonne la liste')
+  // Et il ne dit RIEN plutot que « 0 » : un zero a cote d'un titre se lit comme
+  // un fait, et la liste en dessous dit deja « rien a valider ».
+  assert.match(bloc, /visibles\.length\s*\n?\s*\?/,
+    'le compte affiche « 0 » au lieu de se taire')
 })
 
 test("LE TEST QUI COMPTE : des biens ILLISIBLES ne s'affichent pas comme « aucun bien »", () => {
@@ -567,11 +579,23 @@ test("LE TEST QUI COMPTE : des biens ILLISIBLES ne s'affichent pas comme « aucu
   // faisait disparaitre la section, les notes et les indicateurs sans
   // explication — en laissant « + Ajouter un bien » visible.
   const html = lire('pages/aujourdhui.html')
-  const bloc = (html.match(/function renderBiens[\s\S]*?\n  section\.hidden = !etat\.biens\.length/) || [''])[0]
+  const bloc = (html.match(/function renderBiens[\s\S]*?\n  section\.hidden = false/) || [''])[0]
   assert.ok(bloc, 'renderBiens a change de forme')
   assert.match(bloc, /etat\.biens === null/,
     'une lecture de biens en echec est traitee comme une liste vide')
   assert.match(bloc, /properties\.unavailable/, 'rien ne dit a l hote que la lecture a echoue')
+
+  // ⚠ ET LE RISQUE JUMEAU, NE A L'ETAPE 1 : « Ajoutez votre premier logement »
+  // sur un compte qui en a quatre. `etat.biens` vaut `[]` tant que l'appel
+  // d'ecran n'a pas repondu ; l'etat vide ne se montre que si la liste a
+  // VRAIMENT ete lue. Le module commun porte la meme garde pour la page
+  // Logements, et pour la meme raison : a l'onboarding, une reconciliation
+  // contre une liste amputee CREE des biens en double chez le canal.
+  assert.match(bloc, /const listeLue = !!\(etat\.ecran && Array\.isArray\(etat\.ecran\.biens\)\)/,
+    'l etat vide ne verifie pas que la liste a ete lue')
+  const iLue = bloc.indexOf('listeLue')
+  const iVide = bloc.indexOf("etatHtml('vide'")
+  assert.ok(iVide > iLue, 'l etat vide s affiche avant de savoir si la liste a ete lue')
 })
 
 test("LE TEST QUI COMPTE : une liste de taches PLAFONNEE s'affiche avec un « + »", () => {

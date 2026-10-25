@@ -41,7 +41,7 @@ const {
   arriveesProches, verdictDuCode, codesParReservation, lireLesCodes
 } = require('../../lib/ecran/etat-du-code')
 const { etatMenage } = require('../../lib/cron-arrival-code')
-const { notesDuPerimetre } = require('../../lib/stats-avis')
+const { notesDuPerimetre, derniersAvis } = require('../../lib/stats-avis')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -424,6 +424,32 @@ module.exports = async (req, res) => {
     return out
   }
 
+  // ⚠ LES TROIS DERNIERS COMMENTAIRES — bloc « Derniers avis » (spec §3).
+  // Meme population et meme perimetre que `lireNotes` : la moyenne affichee en
+  // tete du bloc et les cartes en dessous doivent parler des MEMES avis.
+  //
+  // ⚠ LE NOM DU VOYAGEUR EXIGE `reservations` EN PLUS D'`avis`, et la colonne
+  // n'est pas selectionnee sans ce droit. C'est la regle deja tranchee pour les
+  // dates de sejour (api/avis.js) : le CONTENU de l'avis suit `avis`, ce qu'il
+  // dit du SEJOUR suit `reservations`. Un membre `avis: read` voit donc les
+  // commentaires, sans savoir qui les a ecrits.
+  const lireDerniersAvis = async () => {
+    if (!droits.avis) return null
+    // ⚠ UNE REQUETE, ET ELLE SE COMPTE. `derniersAvis` fait UNE lecture bornee
+    // a trois lignes — pas de pagination, contrairement a `notesDuPerimetre`.
+    // Le compteur de l'en-tete `Server-Timing` est un PLANCHER : l'y oublier le
+    // rendrait faux de un, et c'est ce chiffre qui designe la cause quand une
+    // reponse traine.
+    requetes++
+    const out = await derniersAvis(supabase, {
+      userId: compte, periode: '30j', limite: 3,
+      refs: refs === null ? null : refs.map(String),
+      avecNom: droits.reservations
+    })
+    if (out && out.erreur) { indisponibles.push('derniers_avis'); return null }
+    return out
+  }
+
   // « Fait pour vous », 7 jours : des COMPTAGES, donc `head: true` — aucune
   // ligne ne traverse le reseau.
   const compterSi = async (autorise, table, ajuster, colonneBien, borner = bornerRef) => {
@@ -476,13 +502,14 @@ module.exports = async (req, res) => {
   }
 
   const tDebutLectures = Date.now()
-  const [biens, taches, alarmes, arrivees, notes, conversations, nMenages, nPrix, nSurresa, nIa] =
+  const [biens, taches, alarmes, arrivees, notes, derniers, conversations, nMenages, nPrix, nSurresa, nIa] =
     await Promise.all([
       sur('biens', lireBiens, null),
       sur('taches', lireTaches, null),
       sur('alarmes', lireAlarmes, null),
       sur('arrivees', lireArrivees, []),
       sur('notes', lireNotes, null),
+      sur('derniers_avis', lireDerniersAvis, null),
       sur('conversations', lireConversations, null),
       sur('compteur:menages', () => compterSi(droits.menages, 'menages',
         q => q.gte('accepted_at', depuis7j).neq('status', 'cancelled'), 'property_id'), null),
@@ -649,6 +676,7 @@ module.exports = async (req, res) => {
     conversations,
     etats_arrivee: etatsArrivee,
     notes,
+    derniers_avis: derniers,
     fait_pour_vous: { messages_ia: nIa, menages: nMenages, prix: nPrix, surreservation: nSurresa, jours: JOURS_FAIT_POUR_VOUS },
     droits,
     refuses,

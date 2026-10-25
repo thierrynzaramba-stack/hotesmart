@@ -382,11 +382,20 @@ test('LE TEST QUI COMPTE : « vide » et « panne » ne se confondent pas', () =
 })
 
 test('« Ajoutez votre premier logement » ne s affiche QUE sur une lecture réussie et vide', () => {
-  const cles = (quoi) => [...doc(M.etatHtml(quoi)).querySelectorAll('[data-i18n]')].map(x => x.dataset.i18n)
-  assert.ok(cles('vide').includes('logements.vide_titre'))
+  const cles = (quoi, opts) => [...doc(M.etatHtml(quoi, opts)).querySelectorAll('[data-i18n]')].map(x => x.dataset.i18n)
+  assert.ok(cles('vide', { peutAjouter: true }).includes('logements.vide_titre'))
   assert.ok(!cles('panne').includes('logements.vide_titre'),
     'le dire sur une panne ferait lire « vous n avez aucun logement » à un hôte qui en a quatre')
   assert.ok(!cles('refus').includes('logements.vide_titre'))
+  // ⚠ ET PAS NON PLUS À QUI NE PEUT PAS AJOUTER (constat FAIBLE 6 de la revue
+  // du 25 octobre 2026). Les deux boutons étaient déjà masqués pour un membre
+  // délégué, mais le TITRE disait « Ajoutez votre premier logement » juste
+  // au-dessus de « Aucun logement ne vous est confié sur ce compte » : une
+  // injonction qu'il ne peut pas suivre, suivie de sa propre contradiction.
+  const membre = cles('vide', { peutAjouter: false })
+  assert.ok(!membre.includes('logements.vide_titre'))
+  assert.ok(membre.includes('logements.vide_titre_membre'))
+  assert.ok(membre.includes('logements.vide_aide_membre'))
 })
 
 test('une panne propose de RÉESSAYER ; un refus de droit ne propose rien', () => {

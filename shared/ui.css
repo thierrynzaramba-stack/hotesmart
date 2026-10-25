@@ -77,6 +77,13 @@ h1, h2, h3, p { margin: 0; }
 .row { display: flex; align-items: center; gap: var(--gap-s); }
 .stack { display: flex; flex-direction: column; gap: var(--gap-s); }
 .grid-auto { display: grid; gap: var(--gap-m); grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+/* ⚠ DECLAREE ICI, AVANT LA MEDIA QUERY DU TELEPHONE, ET PAS PLUS BAS AVEC LE
+   RESTE DU BLOC « Derniers avis ». `.scroll-x` et `.grid-avis` ont la MEME
+   specificite : c'est l'ordre de declaration qui tranche, pas la media query.
+   Posee apres, cette regle aurait remis `display: grid` au telephone et le
+   defilement horizontal n'aurait jamais eu lieu. `.grid-auto`, deux lignes
+   plus haut, est a sa place pour exactement la meme raison. */
+.grid-avis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-l); align-items: start; }
 .section-head { display: flex; align-items: baseline; gap: 12px; }
 .section-head .h2 { flex: 1; }
 
@@ -402,6 +409,17 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .scroll-x > * { flex: 0 0 auto; scroll-snap-align: start; }
   .scroll-x .stat { width: 132px; }
   .scroll-x .property { width: 180px; }
+  /* Les avis defilent dans LEUR bloc, jamais la page (spec §8) : la grille de
+     trois colonnes devient une bande qui glisse au doigt. */
+  .scroll-x .avis-carte { width: 268px; }
+  /* ⚠ L'EN-TETE DE SECTION PASSE A LA LIGNE AU TELEPHONE. Mesure du 25 octobre
+     2026 a 390 px : « Derniers avis » + la moyenne + « N avis sur 30 jours » +
+     « Tous les avis » sur une seule rangee coupaient le titre en deux et
+     serraient le lien contre le bord. Le titre garde sa ligne (il est en
+     `flex: 1`), les chiffres passent dessous. */
+  .section-head { flex-wrap: wrap; }
+  .section-head .h2 { flex: 1 0 100%; }
+  .grid-avis { display: flex; }
   /* Barre du bas sur fond noir (retouche charte du 11 octobre 2026) :
      inactifs en --on-ink-muted, actif en --on-ink, badge ambre inchange. */
   .bottombar {
@@ -1218,6 +1236,36 @@ body.men-cfg-ouvert { overflow: hidden; }
 
    ⚠ COULEURS NEUTRES : les couleurs de canal (--canal-*) restent réservées au
    Calendrier. Trois formes, trois états. */
+/* ---------- Bloc « Derniers avis » de l'accueil (shared/avis-recents.js) ----
+   Etape 2 du lot Aujourd'hui V5. La FORME vit ici et pas dans la page, meme
+   regle que `.log-canaux` et `.log-etat` : le rendu est partage, donc sa
+   feuille l'est aussi. */
+.avis-carte { display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  padding: var(--gap-m); background: var(--surface); }
+.avis-tete { display: flex; align-items: center; gap: 10px; }
+.avis-photo { width: 40px; height: 40px; flex: 0 0 auto; overflow: hidden;
+  border-radius: var(--radius-tile); background: var(--surface-2); }
+.avis-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.avis-photo--none { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.avis-ident { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.avis-qui { font-weight: var(--fw-semibold); }
+/* La note ne se coupe jamais : « 4,6 / 5 » sur deux lignes ne se lit plus. */
+.avis-note, .avis-moyenne { white-space: nowrap; font-weight: var(--fw-semibold); }
+.avis-texte { line-height: 1.5; }
+/* Trois lignes au plus (spec §3). `clamp-2` existe deja, pour les propositions. */
+.clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ⚠ LA ZONE D'ETAT D'UNE LISTE DE LOGEMENTS — ICI, PAS DANS UNE PAGE.
+   `etatHtml` (shared/logements-liste.js) rend « Ajoutez votre premier
+   logement », le refus de droit et la panne. Elle etait declaree dans le
+   `<style>` de pages/logements.html seule ; l'accueil rend la MEME zone depuis
+   l'etape 1 du lot Aujourd'hui V5, et deux copies divergent. Meme deplacement
+   que `.log-canaux` en son temps, pour la meme raison. */
+.log-etat { display: flex; flex-direction: column; gap: var(--gap-m);
+  align-items: flex-start; }
+.log-etat__actions { display: flex; gap: var(--gap-s); flex-wrap: wrap; }
+
 .log-canaux { display: flex; align-items: center; gap: var(--gap-xs); flex-wrap: wrap; }
 .log-pastille { display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border);

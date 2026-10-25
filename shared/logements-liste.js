@@ -473,7 +473,14 @@ export function etatHtml (quoi, { peutAjouter = false } = {}) {
     // le refuserait en 403. La regle de Thierry du 20 octobre : « on ne montre
     // jamais ce qui mene a un refus » — et c'est l'argument que ce meme fichier
     // applique deja au bouton « Reessayer » d'un refus de droit.
-    return `<h2 class="h2" data-i18n="logements.vide_titre"></h2>
+    // ⚠ LE TITRE SUIT LE DROIT, LUI AUSSI (constat FAIBLE 6 de la revue du
+    // 25 octobre 2026). Les deux boutons etaient bien masques pour un membre
+    // delegue, mais le titre disait toujours « Ajoutez votre premier
+    // logement » au-dessus de « Aucun logement ne vous est confie sur ce
+    // compte » : une injonction qu'il ne peut pas suivre, suivie de sa propre
+    // contradiction. Prealable sur /logements ; l'accueil le porte depuis
+    // l'etape 1 du lot Aujourd'hui V5, la ou un membre atterrit par defaut.
+    return `<h2 class="h2" data-i18n="${peutAjouter ? 'logements.vide_titre' : 'logements.vide_titre_membre'}"></h2>
       <p class="muted" data-i18n="${peutAjouter ? 'logements.vide_aide' : 'logements.vide_aide_membre'}"></p>
       ${peutAjouter ? `<div class="log-etat__actions">
         <a class="btn btn--primary" href="/pages/connexions" data-i18n="logements.vide_connecter"></a>
