@@ -538,7 +538,16 @@ function batirAujourdhui (sansInit = false) {
     assert.ok(!/\binit\(\)\.catch\(/.test(corpsUtile),
       "le demarrage `init().catch(...)` n'a pas pu etre retire : sa forme a change")
   }
-  return corpsUtile + '\n;return { chargerNotes, etat }'
+  // ⚠ LES FONCTIONS DE RENDU SORTENT, ET C'EST LA LECON DE LA REVUE DE
+  // L'ETAPE 1. Quatre garde-fous retarges mesuraient une POSITION DANS LE
+  // TEXTE de la page (« le compte s'ecrit apres la garde », « l'etat vide cite
+  // `listeLue` ») : six mutations du code de production sur onze les laissaient
+  // verts, dont deux qui rejouent un incident deja vecu sur cet ecran — « A
+  // valider · Rien a valider » sur une lecture ratee, et « Ajoutez votre
+  // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
+  // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
+  // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
+  return corpsUtile + '\n;return { chargerNotes, etat, renderTaches, renderBiens, renderDerniersAvis }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -624,6 +633,11 @@ function ouvrirAujourdhui (options = {}) {
     // le test qu'il sert : il le fait échouer ailleurs, et plus tard.
     // Date FIGÉE, parce que le double INJECTE le temps (règle du dépôt).
     if (cle === 'jourParis') return () => '2026-10-24'
+    // ⚠ `tachesOuvertes` LAISSE PASSER SA LISTE, au lieu de rendre `[]`. La
+    // REGLE de filtrage (sejours a venir ou en cours) a ses propres tests dans
+    // `tests/aujourdhui.test.js` ; ici c'est le RENDU qu'on juge, et un double
+    // qui vide la liste rend tout compte indistinguable de zero.
+    if (cle === 'tachesOuvertes') return (t) => (Array.isArray(t) ? t : [])
     return cle === 'etatDesBiens' ? (() => new Map()) : (() => [])
   } })
 
@@ -650,6 +664,9 @@ function ouvrirAujourdhui (options = {}) {
     I18n,
     date: () => document_.querySelector('[data-bind="date"]').textContent,
     html: (sel) => document_.querySelector(sel).innerHTML,
+    // L'element lui-meme, pour lire `hidden` et `textContent` : le double les
+    // porte, et c'est sur eux que se jugent « masque » et « se tait ».
+    cache: (sel) => document_.querySelector(sel),
     ouvrirSession: () => resoudreSession({ user: { id: 'u1', email: 'thierry@exemple.fr', user_metadata: {} } }),
     repondreI18n: () => resoudreI18n('fr'),
     resoudre: (table, charge) => {
@@ -919,4 +936,93 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note"
   assert.strictEqual(p.interne.etat.noteGlobale, null,
     'une note calculee sur une fraction est affichee comme un fait')
   assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ce que l'ecran REND vraiment — constat MOYEN 1 de la revue de l'etape 1
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠ CES TESTS APPELLENT, ILS NE RELISENT PAS LA PAGE. Les quatre garde-fous
+// retarges de l'etape 1 mesuraient une position dans le texte source : six
+// mutations sur onze passaient au vert. Chacun des tests ci-dessous est ne
+// d'une de ces mutations, et porte son numero.
+
+// Le banc, prepare pour appeler un rendu : la page est montee sans son
+// demarrage, et l'etat est pose a la main.
+function bancDeRendu (etat = {}) {
+  const p = ouvrirAujourdhui({ sansInit: true })
+  Object.assign(p.interne.etat, etat)
+  return p
+}
+
+test("LE TEST QUI COMPTE (M1b) : des taches ILLISIBLES ne rendent ni liste ni compte", async () => {
+  // Mutation de la revue : la garde `if (!etat.tachesOk)` perd son `return`.
+  // L'hote dont la lecture a echoue lisait alors « A valider · Rien a valider »
+  // — une absence AFFIRMEE sur une donnee qu'on n'a pas pu lire. C'est, mot
+  // pour mot, l'incident que le commentaire de cette fonction raconte.
+  const p = bancDeRendu({ tachesOk: false, taches: [] })
+  p.interne.renderTaches()
+  assert.strictEqual(p.cache('[data-bind="validate-section"]').hidden, true,
+    'la section « A valider » reste visible alors que la lecture a echoue')
+  assert.strictEqual(p.html('[data-list="pending"]'), '',
+    'une liste est rendue alors que les taches sont illisibles')
+  assert.strictEqual(p.cache('[data-bind="validate-count"]').textContent, '',
+    'un compte s affiche alors qu on n a rien pu lire')
+})
+
+test("LE TEST QUI COMPTE (M3) : zero tache a valider ne s'affiche PAS « 0 »", async () => {
+  // Mutation : `: ''` devient `: '0'`. Un zero pose a cote d'un titre se lit
+  // comme un fait, et la liste en dessous dit deja « Rien a valider ».
+  const p = bancDeRendu({ tachesOk: true, taches: [] })
+  p.interne.renderTaches()
+  assert.strictEqual(p.cache('[data-bind="validate-count"]').textContent, '',
+    'le compte affiche un zero au lieu de se taire')
+})
+
+test("LE TEST QUI COMPTE (M8) : une liste PLAFONNEE affiche « N+ », pas un nombre exact", async () => {
+  // Mutation : `tachesPlafonnees()` rend toujours `false`. Le compte de Thierry
+  // porte 222 taches ouvertes pour un plafond serveur de 200 : afficher « 200 »
+  // serait un nombre faux avec aplomb, et `tronquees` existe pour l'eviter.
+  const taches = [1, 2, 3, 4].map(i => ({ id: i, status: 'pending', book_id: 'R' + i, departure: '2099-01-01' }))
+  const franc = bancDeRendu({ tachesOk: true, taches, ecran: { tronquees: [] } })
+  franc.interne.renderTaches()
+  const exact = franc.cache('[data-bind="validate-count"]').textContent
+  assert.ok(/^\d+$/.test(exact), `un compte franc doit etre un nombre nu : ${exact}`)
+
+  const plafonne = bancDeRendu({ tachesOk: true, taches, ecran: { tronquees: ['taches'] } })
+  plafonne.interne.renderTaches()
+  const avecPlus = plafonne.cache('[data-bind="validate-count"]').textContent
+  assert.notStrictEqual(avecPlus, exact,
+    'le compte est identique que la liste soit plafonnee ou non : le « + » ne s applique jamais')
+  // ⚠ LE « + » LUI-MEME VIT DANS LE DICTIONNAIRE, pas dans le code : le double
+  // de `t` rend la cle, pas le texte. On juge donc ici que les deux cas
+  // DIFFERENT — c'est le comportement —, et on lit le texte reel a cote, parce
+  // qu'une cle qui perdrait son « + » rendrait ce test vert pour rien.
+  const fr = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', 'fr.json'), 'utf8'))
+  assert.match(fr['validate.count_capped'], /\+/,
+    'la cle du compte plafonne ne porte plus de « + » : le nombre se lirait exact')
+})
+
+test("LE TEST QUI COMPTE (M2) : l'etat « aucun logement » ne s'affiche QUE sur une liste vraiment lue", async () => {
+  // Mutation : l'etat vide s'affiche sans consulter `listeLue`. L'hote qui a
+  // quatre logements et dont l'appel n'a pas encore repondu lisait « Ajoutez
+  // votre premier logement » — et, a l'onboarding, une reconciliation contre
+  // une liste amputee CREE des biens en double chez le canal.
+  const pasLu = bancDeRendu({ biens: [], ecran: null })
+  pasLu.interne.renderBiens()
+  assert.strictEqual(pasLu.cache('[data-bind="etat-vide"]').hidden, true,
+    'l etat vide s affiche alors que la liste n a pas ete lue')
+  assert.strictEqual(pasLu.cache('[data-bind="props-section"]').hidden, true)
+
+  const lu = bancDeRendu({ biens: [], ecran: { biens: [] } })
+  lu.interne.renderBiens()
+  assert.strictEqual(lu.cache('[data-bind="etat-vide"]').hidden, false,
+    'une liste lue et vide doit proposer d ajouter un logement')
+  assert.match(lu.html('[data-bind="etat-vide"]'), /logements\.vide_titre/)
+
+  // Et une lecture EN ECHEC (`null`) n'est ni une liste vide ni un etat vide.
+  const illisible = bancDeRendu({ biens: null, ecran: { biens: null } })
+  illisible.interne.renderBiens()
+  assert.strictEqual(illisible.cache('[data-bind="etat-vide"]').hidden, true)
+  assert.match(illisible.html('[data-list="properties"]'), /properties\.unavailable/)
 })

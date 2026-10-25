@@ -38,6 +38,7 @@ const BORNE_BASSE = /^and\(stay_end\.not\.is\.null,stay_end\.gte\.([^)]+)\),and\
 const A_UNE_DATE = 'stay_end.not.is.null,received_at.not.is.null'
 
 const VOYAGEUR_A_ECRIT = 'overall_score.gt.0,content.neq.,content_public.neq.'
+const TEXTE_SEUL = 'content.neq.,content_public.neq.'
 
 function evaluerOr (ligne, expression) {
   const e = String(expression)
@@ -76,6 +77,17 @@ function evaluerOr (ligne, expression) {
     const nonVide = (v) => v != null && String(v) !== ''
     return (ligne.overall_score != null && Number.isFinite(n) && n > 0) ||
            nonVide(ligne.content) || nonVide(ligne.content_public)
+  }
+
+  // « Le voyageur a ECRIT un commentaire » : un texte, et rien d'autre. C'est la
+  // jumelle du predicat de `derniersAvis` (lib/stats-avis.js), plus STRICT que
+  // `VOYAGEUR_A_ECRIT` ci-dessus : une note seule ne fait pas un commentaire, et
+  // une carte sans texte serait une carte vide.
+  // ⚠ ECRITE TERME A TERME, COMME SA VOISINE : `colonne <> ''` est faux pour la
+  // chaine vide ET pour NULL (`NULL <> ''` vaut NULL, donc pas vrai).
+  if (e === TEXTE_SEUL) {
+    const nonVide = (v) => v != null && String(v) !== ''
+    return nonVide(ligne.content) || nonVide(ligne.content_public)
   }
 
   throw new Error('faux-postgrest : expression or() non modelisee -> ' + e)

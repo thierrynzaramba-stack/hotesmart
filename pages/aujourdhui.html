@@ -84,6 +84,18 @@
     <div class="grid-auto scroll-x" data-list="done"></div>
   </section>
 
+  <!-- 5. Derniers avis (etape 2) — lecture seule, AUCUNE action : ni repondre,
+       ni evaluer. C'est un resume ; le geste vit sur la page Avis (spec §3).
+       Le bloc n'est pas dans le DOM sans le droit `avis` (spec §6). -->
+  <section class="stack" style="gap: var(--gap-m)" aria-labelledby="h-reviews" data-bind="reviews-section" hidden>
+    <div class="section-head">
+      <h2 class="h2" id="h-reviews" data-i18n="reviews.title"></h2>
+      <span class="row" style="align-items: baseline; gap: 8px" data-bind="reviews-head"></span>
+      <a class="link small" href="/avis" data-i18n="reviews.all"></a>
+    </div>
+    <div class="grid-avis scroll-x" data-list="reviews"></div>
+  </section>
+
   <!-- La bande « Revenus · 30 j / Note · 30 j / Occupation · 30 j » est RETIREE
        (etape 1). La note revient a l'etape 2, en tete du bloc « Derniers avis » ;
        les revenus a l'etape 4, en mois de versement. ⚠ L'occupation 30 j et les
@@ -92,7 +104,7 @@
 
   <!-- 6. Logements -->
   <section class="stack" style="gap: 20px" aria-labelledby="h-props" data-bind="props-section" hidden>
-    <div class="section-head"><h2 class="h2" id="h-props" data-i18n="properties.title"></h2><a class="link small" href="/logements" data-i18n="properties.see_all"></a></div>
+    <div class="section-head" data-bind="props-head"><h2 class="h2" id="h-props" data-i18n="properties.title"></h2><a class="link small" href="/logements" data-i18n="properties.see_all"></a></div>
     <div class="property-grid scroll-x" data-list="properties"></div>
     <!-- Aucun logement : le MEME etat que la page Logements, rendu par le MEME
          module (Q7). Sans lui, l'accueil d'un hote qui debute n'offre plus
@@ -118,7 +130,9 @@ import { compteCourant, moi, peutLire, peutEcrire, estTitulaire, comptes, bascul
   from '/shared/compte-courant.js'
 // ⚠ L'ETAT VIDE VIENT DU MODULE COMMUN, il n'est pas recopie ici : la page
 // Logements rend exactement la meme zone, et deux copies divergent.
-import { etatHtml } from '/shared/logements-liste.js'
+import { etatHtml, libelleDuCanal } from '/shared/logements-liste.js'
+// Le bloc « Derniers avis » : vue pure et rendu, hors de la page (etape 2).
+import { vueDesAvis, blocAvisHtml, enTeteAvisHtml } from '/shared/avis-recents.js'
 import * as R from '/shared/aujourdhui.js'
 import * as CacheEcran from '/shared/cache-ecran.js'
 
@@ -135,6 +149,7 @@ const etat = {
   taches: [], tachesOk: null,
   alarmes: [],
   parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
+  derniersAvis: null, avisRefuse: false,
   compteurs: [],
   // La réponse de `/api/ecran/aujourdhui` — un seul appel pour six blocs.
   ecran: null,
@@ -188,6 +203,9 @@ function dateDuJour (jour, opts) {
   return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { ...opts, timeZone: 'UTC' })
 }
 const monnaie = (n, devise) => I18n.money(n, devise || 'EUR')
+// La date d'un avis : un INSTANT (`received_at`), pas un jour calendaire —
+// `dateDuJour` ne vaut que pour les « YYYY-MM-DD » du coeur.
+const dateEnClair = (iso) => I18n.date(new Date(iso), { day: 'numeric', month: 'long' })
 
 // ▲ / ▼ / = + valeur ; jamais la couleur seule (spec §2, statuts).
 function delta (v, formatte) {
@@ -214,12 +232,31 @@ const deltaPct = v => delta(v, v == null ? '' : I18n.pct(Math.abs(v)))
 // écran de 390 px pousse la date sous le titre ou déborde ; la maquette
 // mobile dit « sam. 24 oct. ». Un texte ne se raccourcit pas en CSS : c'est le
 // rendu qui choisit, sur la largeur réelle.
+// ⚠ 720 px, LE POINT DE BASCULE DE LA PAGE — et j'avais ecrit 640 (constat
+// MOYEN 4 de la revue). `shared/ui.css` passe en mise en page telephone a
+// `max-width: 720px` : entre 641 et 720 px, la page etait deja en telephone
+// (carte sombre, `only-desktop` masque) avec la date LONGUE. Un point de
+// bascule propre a un element se desaccorde du reste de l'ecran, et personne
+// ne le voit avant une tablette en portrait.
+const TELEPHONE = '(max-width: 720px)'
 function renderDate () {
-  const court = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 640px)').matches
-  const opts = court
+  const mq = typeof window.matchMedia === 'function' ? window.matchMedia(TELEPHONE) : null
+  const opts = (mq && mq.matches)
     ? { weekday: 'short', day: 'numeric', month: 'short' }
     : { weekday: 'long', day: 'numeric', month: 'long' }
   $('[data-bind="date"]').textContent = dateDuJour(etat.aujourdHui, opts)
+}
+// ⚠ ET LE FORMAT SE RECALCULE, parce qu'un texte ne se raccourcit pas en CSS.
+// Il etait choisi UNE fois au chargement : une rotation de telephone
+// portrait -> paysage gardait « sam. 24 oct. », et une fenetre reduite de 1200 a
+// 500 px gardait « samedi 24 octobre ». Le depot a deja ce geste sur le
+// calendrier. `change` sur la media query, pas `resize` : il ne se declenche
+// qu'au FRANCHISSEMENT, pas a chaque pixel.
+function suivreLaLargeur () {
+  const mq = typeof window.matchMedia === 'function' ? window.matchMedia(TELEPHONE) : null
+  if (!mq) return
+  if (typeof mq.addEventListener === 'function') mq.addEventListener('change', renderDate)
+  else if (typeof mq.addListener === 'function') mq.addListener(renderDate)
 }
 
 // ─── Alarmes de surréservation ──────────────────────────────────────────────
@@ -454,7 +491,9 @@ function renderTaches () {
   mobile.innerHTML = `<span class="caption" style="opacity: .8">${esc(t('validate.title'))}</span>
     <span style="font-weight: var(--fw-bold)">${esc(premiere.titre)}</span>
     ${premiere.texte ? `<span class="small clamp-2">${esc(premiere.texte)}</span>` : ''}
-    ${visibles.length > 1 ? `<span class="caption" style="opacity: .8">${esc(t('validate.more', { n: visibles.length - 1 }))}</span>` : ''}`
+    ${visibles.length > 1 ? `<span class="caption" style="opacity: .8">${esc(
+      tachesPlafonnees() ? t('validate.capped', { n: visibles.length - 1 })
+        : t('validate.more', { n: visibles.length - 1 }))}</span>` : ''}`
 }
 
 // ─── 4. Fait pour vous, 7 jours ─────────────────────────────────────────────
@@ -499,7 +538,38 @@ function renderCompteurs () {
   </div>`).join('')
 }
 
-// ─── 5 et 6. Chiffres 30 jours et logements ─────────────────────────────────
+// ─── 5. Derniers avis ───────────────────────────────────────────────────────
+// ⚠ DEUX SOURCES, UN SEUL BLOC, ET ELLES PEUVENT ECHOUER SEPAREMENT. Les
+// commentaires viennent de `derniers_avis`, la moyenne et le compte de `notes`
+// — deux lectures du meme appel d'ecran. Une moyenne illisible ne doit pas
+// emporter les commentaires, ni l'inverse : la vue tranche les deux.
+async function chargerDerniersAvis () {
+  const e = etat.ecran || {}
+  // ⚠ LE REFUS SE LIT DANS LA REPONSE, PAS DANS LE NAVIGATEUR. `peutLire('avis')`
+  // repond pour le compte courant ; c'est le SERVEUR qui a tranche pour le
+  // compte CONSULTE, et il le dit dans `refuses`. Les deux divergent sur un
+  // compte delegue — exactement le defaut de la classe « masquage par droit ».
+  etat.avisRefuse = Array.isArray(e.refuses) && e.refuses.includes('avis')
+  etat.derniersAvis = Array.isArray(e.derniers_avis) ? e.derniers_avis : null
+}
+
+function renderDerniersAvis () {
+  const section = $('[data-bind="reviews-section"]')
+  const vue = vueDesAvis({
+    derniers: etat.derniersAvis,
+    notes: etat.noteGlobale ? { global: etat.noteGlobale } : null,
+    biens: Array.isArray(etat.biens) ? etat.biens : [],
+    refuse: etat.avisRefuse
+  })
+  // Un bloc refuse ne figure pas dans le DOM — regle absolue du depot.
+  section.hidden = vue.etat === 'refus'
+  if (vue.etat === 'refus') return
+  const outils = { t, esc, icone, nombre: (x, d = 1) => I18n.num(x, { minimumFractionDigits: d, maximumFractionDigits: d }), libelleDuCanal, dateEnClair }
+  $('[data-bind="reviews-head"]').innerHTML = enTeteAvisHtml(vue, outils)
+  $('[data-list="reviews"]').innerHTML = blocAvisHtml(vue, outils)
+}
+
+// ─── 6 et 7. Chiffres 30 jours et logements ─────────────────────────────────
 // Source : /api/yield (CA réparti par nuit, au prix VOYAGEUR — jamais le
 // `amount` des réservations, qui est un net hôte pour Airbnb).
 async function chargerChiffresBien (b) {
@@ -539,6 +609,11 @@ async function chargerNotes () {
   if (r && r.tronque) logger.error('Aujourdhui', 'avis', 'lecture des notes incomplete')
   const lu = r && !r.tronque && r.global && typeof r.global === 'object' ? r : null
   const parBien = (lu && lu.par_bien) || {}
+  // ⚠ LA NOTE GLOBALE RESTE DANS L'ETAT, ET ELLE EST LUE. La revue l'a trouvee
+  // en ecriture seule apres le retrait de la bande « 30 jours » (constat
+  // FAIBLE 1) ; plutot que de la supprimer, l'etape 2 la REBRANCHE : c'est elle
+  // que l'en-tete du bloc « Derniers avis » affiche. Une seule memoire de la
+  // note dans la page, au lieu de deux lectures de `etat.ecran.notes`.
   etat.noteGlobale = lu ? lu.global : null
   for (const b of etat.biens) {
     if (!b.provider_property_id) continue
@@ -592,15 +667,25 @@ function renderBiens () {
   // membre delegue sans logement confie lit « Aucun logement ne vous est confie
   // sur ce compte », sans boutons — les deux menent a des pages NON DELEGABLES,
   // et « on ne montre jamais ce qui mene a un refus ».
-  const listeLue = !!(etat.ecran && Array.isArray(etat.ecran.biens))
+  // ⚠ ET PAS DEPUIS LE CACHE (constat FAIBLE 7 de la revue). Un `biens: []`
+  // garde douze heures satisfait « la liste a ete lue » : l'hote qui vient de
+  // relier un canal rouvrait son accueil sur « Ajoutez votre premier
+  // logement », boutons compris, pendant un aller-retour. C'est la liste rendue
+  // par le serveur MAINTENANT qui fait foi, pas celle d'il y a douze heures.
+  const listeLue = !!(etat.ecran && Array.isArray(etat.ecran.biens)) && etat.ageCache == null
+  const tete = $('[data-bind="props-head"]')
   if (!etat.biens.length) {
     section.hidden = !listeLue
     vide.hidden = !listeLue
+    // L'etat vide porte son propre titre : garder « Vos logements » et un
+    // « Voir tout » vers une page vide ferait deux titres et un lien mort.
+    if (tete) tete.hidden = listeLue
     if (listeLue) { vide.innerHTML = etatHtml('vide', { peutAjouter: estTitulaire() }); I18n.apply(vide) }
     $('[data-list="properties"]').innerHTML = ''
     return
   }
   vide.hidden = true
+  if (tete) tete.hidden = false
   section.hidden = false
   const etats = R.etatDesBiens({ bookings: etat.bookings, biens: etat.biens, aujourdHui: etat.aujourdHui })
   $('[data-list="properties"]').innerHTML = etat.biens.map(b => {
@@ -689,8 +774,16 @@ async function init () {
   // Affichage seul : toute lecture de données passe par RLS, avec un jeton
   // vérifié à chaque requête. Dette 72.
   const user = session.user
-  $('[data-bind="initials"]').textContent = String(user?.email || '').slice(0, 2).toUpperCase()
+  // ⚠ LES INITIALES PREFERENT LE NOM, PUIS L'E-MAIL — et ma premiere version
+  // prenait l'e-mail d'abord (constat FAIBLE 5 de la revue). Une hote « Marie »
+  // dont le compte est `contact@gite-du-lac.fr` voyait sa pastille passer de MA
+  // a CO. `user_metadata.full_name` est dans la session : aucune lecture de
+  // plus, donc la dette 73 reste soldee.
+  const nomSession = String(user?.user_metadata?.full_name || '').trim()
+  $('[data-bind="initials"]').textContent =
+    (nomSession || String(user?.email || '')).slice(0, 2).toLocaleUpperCase('fr')
   renderDate()
+  suivreLaLargeur()
 
   HSNav.renderMenu({
     comptes: comptes(), compteActif: compteCourant(),
@@ -761,8 +854,15 @@ async function init () {
     // étoiles manquaient au premier affichage — celui que ce lot, le KB et la
     // spec promettent tous les trois.
     etat.biens = await lireBiens()
-    await Promise.all([chargerCompteurs(), chargerNotes()])
-    renderCompteurs(); renderBiens()
+    await Promise.all([chargerCompteurs(), chargerNotes(), chargerDerniersAvis()])
+    // ⚠ LES AVIS SONT DANS LE PREMIER AFFICHAGE, ET C'EST UN CHOIX QUI SE DIT.
+    // Ils ne sont pas un etat critique : un commentaire est PUBLIC, publie sur
+    // la plateforme, et le serveur ne descend du voyageur que « Claire B. » —
+    // jamais son nom complet. Ils ne rejoignent donc pas les cinq blocs que le
+    // cache refuse d'ecrire (code d'acces, alarmes, taches, arrivees, fils),
+    // dont la raison est qu'un fait critique vu PERIME trompe l'hote. Un avis
+    // vieux de douze heures reste vrai.
+    renderCompteurs(); renderDerniersAvis(); renderBiens()
   }
 
   const nav = (badge) => HSNav.render({
@@ -800,7 +900,7 @@ async function init () {
     chargerReservations()
   ])
   etat.biens = await lireBiens()
-  await Promise.all([chargerTaches(), chargerAlarmes(), chargerCompteurs(), chargerEtatsArrivee(), chargerNotes()])
+  await Promise.all([chargerTaches(), chargerAlarmes(), chargerCompteurs(), chargerEtatsArrivee(), chargerNotes(), chargerDerniersAvis()])
   // L'âge ne repasse à « rien » que si les données viennent VRAIMENT du serveur.
   if (ecranFrais) etat.ageCache = null
   // ⚠ UN COMPTE PLAFONNE SE DIT. L'endpoint annonce `tronquees: ['taches']` dès
@@ -818,7 +918,7 @@ async function init () {
   // (spec-reservation-manuelle.md §4). L'alarme comptait dans le total « à
   // traiter » sans que rien ne la montre, et l'alerte au fondateur ne pouvait
   // plus être éteinte.
-  renderEvenements(); renderTaches(); renderAlarmes(); renderCompteurs(); renderBiens()
+  renderEvenements(); renderTaches(); renderAlarmes(); renderCompteurs(); renderDerniersAvis(); renderBiens()
   // ⚠ ON GARDE CE QU'ON VIENT D'AFFICHER. Le cache ne sert qu'à un premier
   // affichage instantané au prochain chargement ; les cinq blocs critiques ET
   // le compte de surréservation en sont retirés à l'écriture par le module

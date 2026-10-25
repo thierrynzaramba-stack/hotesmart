@@ -504,8 +504,18 @@ test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", ()
   assert.ok(!/renderTaches\(\)/.test(bloc),
     'le premier affichage rend « A valider » : la regle des taches a besoin des sejours, '
     + 'et les taches ne sont plus dans le cache (elles portent le code d acces)')
-  assert.match(bloc, /renderCompteurs\(\); renderBiens\(\)/,
-    'le premier affichage ne rend plus rien : le cache ne sert alors a rien')
+  // ⚠ LA LISTE, PAS LA SEQUENCE. Ma premiere version exigeait la chaine
+  // « renderCompteurs(); renderBiens() » au caractere : ajouter un rendu
+  // legitime entre les deux — les derniers avis, etape 2 — faisait rougir un
+  // test qui n'avait rien a dire sur cet ajout. Ce qui compte n'est pas
+  // l'ordre des appels, c'est QUELS blocs le cache a le droit de peindre :
+  // ceux dont il porte vraiment les donnees. Un rendu de plus ici doit etre un
+  // choix, et c'est cette assertion qui oblige a le declarer.
+  const rendus = [...bloc.matchAll(/\b(render[A-Za-z]+)\(\)/g)].map(m => m[1]).sort()
+  assert.deepEqual(rendus, ['renderBiens', 'renderCompteurs', 'renderDerniersAvis'],
+    'le premier affichage peint autre chose que ce que le cache porte : ' + rendus.join(', ')
+    + '. Les sejours n y sont pas (ils viennent de /api/menages), les taches et les '
+    + 'alarmes non plus (le cache refuse de les ecrire).')
   // Et la ligne du bien n'affirme « aucune arrivee » que si on a lu les sejours.
   assert.match(html, /etat\.menagesOk === true\s*\n?\s*\?\s*\(e\.prochaineArrivee/,
     'la carte du bien affirme « Aucune arrivee prevue » sans avoir lu les sejours')

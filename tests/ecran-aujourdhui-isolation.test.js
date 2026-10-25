@@ -120,6 +120,16 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
         neq (c, v) { r.filtres.push(['neq', c, String(v)]); return q },
         in (c, v)  { r.filtres.push(['in', c, (v || []).map(String)]); return q },
         is (c, v)  { r.filtres.push(['is', c, v]); return q },
+        // ⚠ `or` MANQUAIT, ET SON ABSENCE NE SE LISAIT PAS COMME UNE ABSENCE.
+        // Un double qui ignore une methode ne rend pas `undefined` : il LEVE,
+        // et l'exception remonte au bloc appelant, qui la nomme « indisponible ».
+        // Mesure du 24 octobre 2026 : la lecture des derniers avis s'arretait
+        // sur ce TypeError AVANT son `.in(...)`, et ce test a conclu « ota_reviews
+        // part SANS borne de bien » — un diagnostic juste sur une cause fausse.
+        // Il est enregistre comme les autres : une condition de texte n'est pas
+        // une borne de perimetre, mais une lecture qui la perdrait changerait de
+        // population sans que rien ne rougisse.
+        or (expr)  { r.filtres.push(['or', expr]); return q },
         not (c, o, v) { r.filtres.push(['not', c, o, v]); return q },
         gt (c, v)  { r.filtres.push(['gt', c, String(v)]); return q },
         gte (c, v) { r.filtres.push(['gte', c, String(v)]); return q },
