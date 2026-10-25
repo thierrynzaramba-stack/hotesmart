@@ -32,6 +32,10 @@ const { creerClient, cleCanonique } = require('../lib/airroi/client')
 const { depotFichier } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
 const { ecrireFixtureSansCle, RefusFixture } = require('../lib/airroi/fixture-sure')
+// ⚠ LE JOUR DE PARIS, COMME SES DEUX JUMEAUX. Voir le nommage de la fixture
+// plus bas : c'est la meme fonction que `capturer-relief-airroi.js` et
+// `capturer-occupation-airroi.js`, pas une quatrieme copie de la regle.
+const { jourLocalParis } = require('../lib/yield/zones-scolaires')
 
 const args = process.argv.slice(2)
 const val = (n, d) => { const a = args.find(x => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : d }
@@ -76,7 +80,21 @@ const CHAMPS_MARCHE = ['country', 'region', 'locality']
   // JSON re-serialise qui pourrait arrondir un nombre).
   const brut = await depot.lireCache(cleCanonique('POST /markets/metrics/future/pacing', { market: marche, currency: 'native' }))
   if (!brut || typeof brut.reponse !== 'string') throw new Error('reponse du pacing introuvable dans le cache')
-  const jour = String(brut.recupere_le || new Date().toISOString()).slice(0, 10)
+  // ⚠ LE JOUR DE PARIS, PAS LE JOUR UTC — DETTE 91, ET CELLE-LA DETRUIT UNE
+  // DONNEE AU LIEU DE ROUGIR UN TEST. Ce script etait le SEUL des trois a
+  // decouper `recupere_le` en UTC (`slice(0, 10)`) quand ses deux jumeaux
+  // passent par `jourLocalParis`. LA FENETRE DEPEND DE LA SAISON, et la
+  // premiere version de ce commentaire l'enonçait a l'ENVERS : c'est
+  // 00 h - 02 h en heure d'ETE (UTC+2) et 00 h - 01 h en heure d'HIVER (UTC+1).
+  // A 01 h 30 en hiver les deux jours coincident deja : c'est une heure SURE.
+  // Dans cette fenetre, le jour UTC est encore CELUI DE LA VEILLE. La fixture
+  // prenait donc le nom de l'archive de la veille, et `ecrireFixtureSansCle`
+  // finit par une ecriture NUE : l'archive precedente etait ECRASEE, sans un
+  // mot, et elle est irrecuperable — alors que l'en-tete de ce script dit
+  // « la date de capture compte ».
+  // La date vient du cache (`recupere_le`), donc elle est deterministe et se
+  // teste sans toucher a l'horloge : `tests/airroi-client.test.js`.
+  const jour = jourLocalParis(String(brut.recupere_le || new Date().toISOString()))
   const fichier = path.join(SORTIE, `pacing-bagneres-${jour}.json`)
   // 5. Aucune trace de la cle, verifiee EN MEMOIRE avant d'ecrire ; sans cle
   // dans l'environnement, refus (review de 9b47690, SECURITE : la version
