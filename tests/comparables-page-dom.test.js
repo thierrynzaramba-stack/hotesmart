@@ -550,8 +550,26 @@ test('LE TEST QUI COMPTE (§22.2) : trois strategies expliquees, le sejour minim
     return s({ methode, corps, url })
   })
   const c = doc.getElementById('cp-etape-c')
-  assert.match(c.textContent, /Agressif[\s\S]*25ᵉ centile[\s\S]*Prix marché[\s\S]*50ᵉ centile[\s\S]*Haut de gamme[\s\S]*75ᵉ centile/)
-  assert.doesNotMatch(c.textContent, /10 %|Prix justes|Qualité</)
+  // ⚠ LES TROIS ETIQUETTES DANS L'ORDRE, ET LEUR DESCRIPTION EN FRANCAIS
+  // D'HOTE. Decision de Thierry du 25 octobre 2026 : « pas de centile a
+  // l'ecran ». Le mot reste dans l'infobulle du bouton (`title`), que
+  // `textContent` ne contient pas — c'est ce qui permet de l'exiger la et de
+  // le refuser ici.
+  assert.match(c.textContent, /Agressif[\s\S]*Prix marché[\s\S]*Haut de gamme/,
+    'les trois etiquettes, dans l ordre')
+  assert.match(c.textContent, /Moins cher que 3 logements sur 4 autour de vous/)
+  assert.match(c.textContent, /Au prix du logement du milieu, autant de logements plus chers que moins chers/)
+  assert.match(c.textContent, /Plus cher que 3 logements sur 4 autour de vous/)
+  // ⚠ ET LE JARGON NE REVIENT PAS : ni « centile », ni les anciens libelles,
+  // ni le ± 10 % qui decrivait une methode que le calcul n'a jamais appliquee.
+  assert.doesNotMatch(c.textContent, /centile|médiane|10 %|Prix justes|Qualité</,
+    'du jargon ou un ancien libelle est revenu sur les boutons de strategie')
+  // La precision reste atteignable : chaque bouton porte sa definition.
+  for (const [v, mot] of [['agressif', '25'], ['juste', '50'], ['qualite', '75']]) {
+    const lab = doc.querySelector(`input[name="strategie"][value="${v}"]`).closest('label')
+    assert.match(lab.getAttribute('title') || '', new RegExp(`${mot}ᵉ centile|médiane`),
+      `l infobulle de « ${v} » ne porte plus sa definition`)
+  }
   assert.equal(doc.querySelector('input[name="strategie"][value="qualite"]').checked, true, 'la strategie enregistree revient')
   assert.equal(doc.getElementById('cp-sejour-min').value, '1')
   assert.equal(doc.getElementById('cp-marche-sejour').textContent, 'Sur 25 biens du marché autour du vôtre : 15 acceptent 1 nuit (60 %), 6 imposent 2 nuits (24 %), 4 en imposent 3 ou plus (16 %).')
