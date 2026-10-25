@@ -75,7 +75,7 @@
   "reviews.title": "Latest reviews",
   "reviews.all": "All reviews",
   "reviews.score": "{n} / 5",
-  "reviews.count_30d": "{n, plural, =0 {no reviews} one {# review} other {# reviews}} over 30 days",
+  "reviews.count_30d": "{n, plural, =0 {no rated reviews} one {# rated review} other {# rated reviews}} over 30 days",
   "reviews.empty": "No reviews in the last 30 days",
   "reviews.unavailable": "Reviews cannot be read right now.",
   "properties.revenue_30": "over 30 d",

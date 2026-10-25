@@ -169,7 +169,9 @@ test("LE TEST QUI COMPTE : la moyenne et le compte parlent de la MÊME populatio
   assert.equal(vue.nombre, 332)
   const d = doc(M.enTeteAvisHtml(vue, OUTILS))
   assert.match(d.body.textContent, /4,7 \/ 5/)
-  assert.match(d.body.textContent, /332 avis sur 30 jours/)
+  // ⚠ « NOTES », ET C'EST LE POINT DU TEST. Le libelle disait « N avis » la ou
+  // il compte les avis NOTES — deux populations sous un seul mot.
+  assert.match(d.body.textContent, /332 avis notés sur 30 jours/)
 })
 
 test("une moyenne illisible n'emporte pas les commentaires", () => {

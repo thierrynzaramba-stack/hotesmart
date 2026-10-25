@@ -76,6 +76,11 @@ const ECRAN = {
   alarmes: [{ id: 9, type: 'overbooking', detail: 'deux resas sur la meme nuit' }],
   conversations: ['B1', 'B2'],
   notes: { global: { note_sur_5: 4.7 } },
+  // ⚠ LA PREMIERE DONNEE NOMINATIVE DE CET ECRAN (etape 2 du lot Aujourd'hui
+  // V5, 25 octobre 2026) : le bloc « Derniers avis » porte le prenom et
+  // l'initiale du voyageur. Le droit qui le gouverne (`reservations`) n'est pas
+  // dans la cle du cache, et aucune purge ne suit une revocation.
+  derniers_avis: [{ id: 'r1', texte: 'Sejour parfait', voyageur: 'Claire B.', note_sur_5: 5 }],
   // ⚠ `surreservation` EST DANS CETTE FIXTURE, et il n'y etait pas : ma
   // premiere version assertait `deepEqual(fait_pour_vous, { messages_ia: 10 })`
   // sur un objet qui ne portait QUE cette cle — elle gravait donc l'omission
@@ -125,6 +130,14 @@ test("LE TEST QUI COMPTE : l'etat du code et l'alarme ne sont JAMAIS ecrits", ()
     'une surreservation acquittee reapparaitrait, ou une nouvelle serait manquee')
   assert.strictEqual(relu.conversations, undefined,
     'un fil perime fait repondre deux fois (spec §5.1)')
+  // ⚠ LE PRENOM DU VOYAGEUR N'EST PAS ECRIT SUR LE DISQUE. La cle du cache
+  // porte l'ecran, l'utilisateur et le compte — jamais les DROITS. Un membre a
+  // qui l'on retire `reservations` relirait sinon les prenoms ecrits quand il
+  // l'avait, pendant douze heures, et `purgerCachesLocaux` n'est appele qu'a la
+  // deconnexion, jamais a une revocation.
+  assert.ok(!brut.includes('Claire B.'), 'le prenom du voyageur est ecrit dans le cache')
+  assert.strictEqual(relu.derniers_avis, undefined,
+    'les derniers avis sont gardes : ils portent un prenom, et le droit qui les gouverne n est pas dans la cle')
   // Et le reste est bien garde, sinon le cache ne servirait a rien : la liste
   // des biens, les notes et les compteurs de la semaine — rien qui perime en
   // une heure, rien qu'un hote puisse prendre pour un fait du jour.
@@ -141,7 +154,8 @@ test('la liste des blocs jamais gardes couvre les deux etats critiques de cet ec
   // nomme ce qui DOIT y etre ; le fichier d'isolation nomme ce que l'endpoint
   // rend.
   const { _interne } = charger()
-  for (const bloc of ['etats_arrivee', 'alarmes', 'taches', 'arrivees', 'conversations']) {
+  for (const bloc of ['etats_arrivee', 'alarmes', 'taches', 'arrivees', 'conversations',
+    'derniers_avis']) {
     assert.ok(_interne.JAMAIS_GARDES.includes(bloc), `${bloc} n'est plus protege`)
   }
   // Et le champ critique a l'interieur d'un bloc garde.

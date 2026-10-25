@@ -132,7 +132,7 @@ import { compteCourant, moi, peutLire, peutEcrire, estTitulaire, comptes, bascul
 // Logements rend exactement la meme zone, et deux copies divergent.
 import { etatHtml, libelleDuCanal } from '/shared/logements-liste.js'
 // Le bloc « Derniers avis » : vue pure et rendu, hors de la page (etape 2).
-import { vueDesAvis, blocAvisHtml, enTeteAvisHtml } from '/shared/avis-recents.js'
+import { vueDesAvis, blocAvisHtml, enTeteAvisHtml, MUETS } from '/shared/avis-recents.js'
 import * as R from '/shared/aujourdhui.js'
 import * as CacheEcran from '/shared/cache-ecran.js'
 
@@ -149,7 +149,7 @@ const etat = {
   taches: [], tachesOk: null,
   alarmes: [],
   parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
-  derniersAvis: null, avisRefuse: false,
+  derniersAvis: null, avisRefuse: false, avisConnu: false,
   compteurs: [],
   // La réponse de `/api/ecran/aujourdhui` — un seul appel pour six blocs.
   ecran: null,
@@ -550,6 +550,11 @@ async function chargerDerniersAvis () {
   // compte CONSULTE, et il le dit dans `refuses`. Les deux divergent sur un
   // compte delegue — exactement le defaut de la classe « masquage par droit ».
   etat.avisRefuse = Array.isArray(e.refuses) && e.refuses.includes('avis')
+  // ⚠ « PAS ENCORE DEMANDE » N'EST PAS « PAS LISIBLE ». Le cache d'ecran ne
+  // porte plus ce bloc (il descend un prenom de voyageur) : au premier
+  // affichage la cle est ABSENTE, et la traiter comme `null` afficherait « Les
+  // avis ne sont pas lisibles » a chaque ouverture, pendant un aller-retour.
+  etat.avisConnu = Object.prototype.hasOwnProperty.call(e, 'derniers_avis')
   etat.derniersAvis = Array.isArray(e.derniers_avis) ? e.derniers_avis : null
 }
 
@@ -559,14 +564,20 @@ function renderDerniersAvis () {
     derniers: etat.derniersAvis,
     notes: etat.noteGlobale ? { global: etat.noteGlobale } : null,
     biens: Array.isArray(etat.biens) ? etat.biens : [],
-    refuse: etat.avisRefuse
+    refuse: etat.avisRefuse,
+    connu: etat.avisConnu,
+    perimetreVide: !!(etat.ecran && etat.ecran.perimetre_vide)
   })
-  // Un bloc refuse ne figure pas dans le DOM — regle absolue du depot.
-  section.hidden = vue.etat === 'refus'
-  if (vue.etat === 'refus') return
   const outils = { t, esc, icone, nombre: (x, d = 1) => I18n.num(x, { minimumFractionDigits: d, maximumFractionDigits: d }), libelleDuCanal, dateEnClair }
+  // ⚠ ON EFFACE, PUIS ON MASQUE — JAMAIS L'INVERSE, ET JAMAIS L'UN SANS
+  // L'AUTRE. `hidden` cache, il n'efface pas : des cartes laissees dans le DOM
+  // restent lisibles dans la source. Le cas reel se produit en deux temps —
+  // un premier affichage rend les avis, puis la reponse du serveur refuse le
+  // droit (membre revoque en cours de session). Le module rend la chaine vide
+  // pour tous les etats muets ; il suffit de l'ecrire.
   $('[data-bind="reviews-head"]').innerHTML = enTeteAvisHtml(vue, outils)
   $('[data-list="reviews"]').innerHTML = blocAvisHtml(vue, outils)
+  section.hidden = MUETS.has(vue.etat)
 }
 
 // ─── 6 et 7. Chiffres 30 jours et logements ─────────────────────────────────

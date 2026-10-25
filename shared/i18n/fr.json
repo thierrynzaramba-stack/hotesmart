@@ -75,7 +75,7 @@
   "reviews.title": "Derniers avis",
   "reviews.all": "Tous les avis",
   "reviews.score": "{n} / 5",
-  "reviews.count_30d": "{n, plural, =0 {aucun avis} one {# avis} other {# avis}} sur 30 jours",
+  "reviews.count_30d": "{n, plural, =0 {aucun avis noté} one {# avis noté} other {# avis notés}} sur 30 jours",
   "reviews.empty": "Pas encore d’avis sur 30 jours",
   "reviews.unavailable": "Les avis ne sont pas lisibles pour l’instant.",
   "properties.revenue_30": "sur 30 j",

@@ -354,6 +354,88 @@ test('LE TEST QUI COMPTE : le compte lu est celui de la GARDE, jamais celui de l
   assert.deepEqual(mauvais.map(r => r.table), [], 'une lecture porte un autre compte')
 })
 
+test("LE TEST QUI COMPTE : le nom du voyageur exige `reservations`, et la colonne n'est pas meme demandee", async () => {
+  // ⚠ LA REGLE EST CELLE DE `api/avis.js`, DEJA TRANCHEE POUR LES DATES DE
+  // SEJOUR : « le CONTENU de l'avis reste sous `avis` ; le SEJOUR qu'il designe
+  // suit `reservations` ». Un nom de voyageur dit QUI occupait le logement.
+  // ⚠ ET LA COLONNE N'EST PAS SELECTIONNEE : une donnee qu'on ne demande pas a
+  // la base ne peut pas fuiter plus tard par un oubli d'affichage. C'est le
+  // CABLAGE de cette garde qu'on mesure ici — la revue du 25 octobre 2026 a
+  // montre que forcer `avecNom: true` dans l'endpoint laissait les 6284 tests
+  // au vert, alors que c'est le seul point ou la garde est posee.
+  // ⚠ `statut` ET `is_hidden` SONT DANS LA FIXTURE, et ce n'est pas du
+  // remplissage : `avisQuiComptent` les pose en `eq`, et le double compare par
+  // egalite stricte — une ligne qui ne les porte pas est ECARTEE, donc le test
+  // passerait sur une liste vide sans rien mesurer.
+  const lignes = { ota_reviews: [{ id: 'r1', property_id_ref: BULLE_REF, ota: 'airbnb',
+    statut: 'confirme', is_hidden: false,
+    content_public: 'Sejour parfait', overall_score: 9.6, received_at: jourDeParis() + 'T10:00:00Z',
+    guest_name: 'Claire Bernard' }] }
+
+  const sans = await banc({ refs: [BULLE_UUID, BULLE_REF], lignes,
+    domaines: TOUS_DOMAINES.filter(d => d !== 'reservations') })()
+  const qSans = sans.requetes.find(r => r.table === 'ota_reviews')
+  assert.ok(qSans, 'les avis ne sont pas lus')
+  // ⚠ UN TEST QUI MESURE UNE LISTE VIDE NE MESURE RIEN : si la fixture ne
+  // traverse pas le double, toutes les assertions qui suivent passent pour de
+  // mauvaises raisons.
+  assert.strictEqual((sans.corps.derniers_avis || []).length, 1,
+    'la fixture ne traverse pas le double : le reste du test ne prouve rien')
+  assert.ok(!/guest_name/.test(qSans.select || ''),
+    'la colonne `guest_name` est demandee sans le droit `reservations`')
+  assert.strictEqual((sans.corps.derniers_avis[0] || {}).voyageur, null,
+    'le nom du voyageur descend sans le droit `reservations`')
+  assert.ok(!JSON.stringify(sans.corps).includes('Bernard'),
+    'le nom COMPLET traverse la reponse')
+
+  const avec = await banc({ refs: [BULLE_UUID, BULLE_REF], lignes })()
+  const qAvec = avec.requetes.find(r => r.table === 'ota_reviews')
+  assert.match(qAvec.select || '', /guest_name/)
+  assert.strictEqual(avec.corps.derniers_avis[0].voyageur, 'Claire B.',
+    'le serveur doit descendre « Claire B. », jamais le nom complet')
+  assert.ok(!JSON.stringify(avec.corps).includes('Bernard'),
+    'le nom COMPLET traverse la reponse meme avec le droit')
+})
+
+test("LE TEST QUI COMPTE : une lecture d'avis EN ECHEC rend `null`, jamais une liste vide", async () => {
+  // ⚠ CONSTAT DE LA REVUE DU 25 OCTOBRE 2026 : le contrat de la VUE etait
+  // garde (elle distingue `null` de `[]`), celui de l'ENDPOINT ne l'etait pas.
+  // Remplacer `return null` par `return []` passait les 6284 tests, et l'hote
+  // lisait « Pas encore d'avis sur 30 jours » la ou la lecture avait plante —
+  // la phrase que le module cite lui-meme comme le defaut a eviter.
+  // ⚠ Et `indisponibles` n'est PAS lu par la page : `derniers_avis: null` est
+  // le seul signal qui lui reste.
+  const { corps } = await banc({ titulaire: true, pannes: ['ota_reviews'] })()
+  assert.strictEqual(corps.derniers_avis, null,
+    'une panne de lecture est rendue comme « aucun avis »')
+  assert.ok(corps.indisponibles.includes('derniers_avis'),
+    'la panne n est pas annoncee')
+})
+
+test('LE TEST QUI COMPTE : sur un compte DELEGUE aussi, le compte lu est celui de la garde', async () => {
+  // ⚠ CE TEST MANQUAIT, ET SON ABSENCE RENDAIT LE PRECEDENT AVEUGLE (constat
+  // GRAVE de la revue de l'etape 2, 25 octobre 2026). Celui du dessus tourne
+  // avec `titulaire: true` : l'appelant EST le compte lu, donc
+  // `contexte.userId` et le compte consulte valent la meme chose, et toute
+  // confusion des deux reste invisible. Mesure de la revue : remplacer
+  // `userId: compte` par `userId: contexte.userId` dans la lecture des avis
+  // laissait les 6284 tests au vert, et la requete partait avec le `user_id`
+  // du MEMBRE — donc la reponse portait les avis d'un autre compte.
+  //
+  // Ici les deux valeurs different par construction, et l'assertion porte sur
+  // TOUTES les tables : le bloc ajoute demain est couvert sans qu'on pense a
+  // le nommer.
+  const { requetes } = await banc({ refs: [BULLE_UUID, BULLE_REF] })()
+  const sansCompte = requetes.filter(r =>
+    r.table !== 'access_codes' && !r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id'))
+  assert.deepEqual(sansCompte.map(r => r.table), [],
+    'une lecture part SANS `user_id` : avec la cle de service, elle lit toute la base')
+  const mauvais = requetes.filter(r =>
+    r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id' && f[2] !== TITULAIRE))
+  assert.deepEqual(mauvais.map(r => r.table), [],
+    'une lecture porte le compte de l APPELANT au lieu du compte CONSULTE')
+})
+
 test('le titulaire n est borne par aucun perimetre, et les notes le savent', async () => {
   const { requetes, notesVues } = await banc({ titulaire: true })()
   for (const r of requetes) {
@@ -490,10 +572,17 @@ test('LE TEST QUI COMPTE : un domaine refuse n interroge meme pas sa table', asy
   // alarmes alors que la page lui montre le bouton d'acquittement, et un
   // membre `reglages: read` / `reservations: none` recevait le detail de
   // l'incident — nom du bien, nuits en conflit, identifiants des reservations.
+  // ⚠ `ota_reviews` A ETE AJOUTEE LE 25 OCTOBRE 2026 (constat GRAVE de la revue
+  // de l'etape 2 du lot Aujourd'hui V5). Le bloc « Derniers avis » lit cette
+  // table DIRECTEMENT, et la liste ci-dessous ne la nommait pas : retirer la
+  // garde `if (!droits.avis) return null` de l'endpoint laissait les 6284 tests
+  // au vert, pendant qu'un membre SANS le droit `avis` recevait les
+  // commentaires ET le prenom du voyageur. Seul le masquage restait — la
+  // classe de defaut que CLAUDE.md enregistre trois fois.
   const cas = [
     ['messages', ['agent_tasks', 'messages']],
     ['reservations', ['automation_incidents']],
-    ['avis', []]
+    ['avis', ['ota_reviews']]
   ]
   for (const [domaine, interdites] of cas) {
     const garde = TOUS_DOMAINES.filter(d => d !== domaine)
@@ -506,6 +595,11 @@ test('LE TEST QUI COMPTE : un domaine refuse n interroge meme pas sa table', asy
     if (domaine === 'avis') {
       assert.strictEqual(notesVues.length, 0, 'les notes sont lues sans le droit `avis`')
       assert.strictEqual(corps.notes, null, 'les notes refusees ne valent pas zero')
+      // ⚠ `null`, PAS `[]`. Une liste vide dirait « cet hote n'a pas d'avis »
+      // a qui n'a pas le droit de le savoir — et l'ecran afficherait « Pas
+      // encore d'avis sur 30 jours » au lieu de ne rien montrer.
+      assert.strictEqual(corps.derniers_avis, null,
+        'les derniers avis refuses ne valent pas une liste vide')
     }
     if (domaine === 'reservations') {
       assert.strictEqual(corps.alarmes, null, 'les alarmes refusees valent une liste vide')

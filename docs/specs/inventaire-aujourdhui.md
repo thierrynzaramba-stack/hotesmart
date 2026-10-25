@@ -222,7 +222,7 @@ Statuts : **conservée** · **déplacée** · **retirée (motif)** · **⚠ à t
 | Q6 | La ligne résumé comptée disparaît | **Acceptée** ; le compte des choses à traiter reste, **à côté du titre « À valider »**. |
 | Q7 | L'hôte sans aucun logement | **Même état vide que la page Logements** : « Ajoutez votre premier logement », Connecter / Ajouter manuellement. |
 | Q8 | Ce que le cache a le droit de garder | **Revenus par bien : 12 h, purgés à la déconnexion.** |
-| Q9 | Ce qui confirme un versement Booking.com | **Rien, et on ne fait plus semblant** : pas de « Versement attendu », tous les canaux suivent la règle de date, la note du bloc dit que c'est calculé et non confirmé par la banque. **Dette 91** ouverte pour le rapprochement avec les versements réels. |
+| Q9 | Ce qui confirme un versement Booking.com | **Rien, et on ne fait plus semblant** : pas de « Versement attendu », tous les canaux suivent la règle de date, la note du bloc dit que c'est calculé et non confirmé par la banque. **Dette 95** ouverte pour le rapprochement avec les versements réels. |
 | Q10 | Le nom du voyageur sur un avis de l'accueil | **Prénom + initiale, accepté.** |
 
 **En plus** : le bloc s'appelle **« Revenus nets »**.

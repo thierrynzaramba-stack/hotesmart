@@ -54,7 +54,22 @@
 // LISTE DES BIENS avec leurs photos, les notes, et les quatre compteurs de
 // « Fait pour vous », tous à l'échelle de la semaine ou du mois. Rien qui
 // périme en une heure, rien qu'un hôte puisse prendre pour un fait du jour.
-const JAMAIS_GARDES = ['etats_arrivee', 'alarmes', 'taches', 'arrivees', 'conversations']
+//
+// ⚠ ET `derniers_avis` SORT AUSSI, DEPUIS LE 25 OCTOBRE 2026 (constat de la
+// revue de l'etape 2 du lot Aujourd'hui V5). Ce bloc est le premier a porter
+// une donnee NOMINATIVE : le prenom et l'initiale du voyageur. La §5 de la
+// spec interdit « code d'acces, montants par voyageur, courriel » et ne le
+// nomme pas — mais deux choses le rangent ici.
+// · Le droit qui le gouverne n'est PAS dans la cle du cache. La cle porte
+//   l'ecran, l'utilisateur et le compte, jamais les droits : un membre a qui
+//   l'on retire `reservations` relirait les prenoms ecrits quand il l'avait,
+//   pendant douze heures, et `purgerCachesLocaux` n'est appele qu'a la
+//   deconnexion — jamais a une revocation.
+// · Le gain est faible : un bloc d'avis n'est pas ce qu'on vient lire en
+//   ouvrant son accueil, et il arrive avec la reponse du serveur.
+// Ce qui n'est pas ecrit ne peut pas fuiter par un lecteur distrait.
+const JAMAIS_GARDES = ['etats_arrivee', 'alarmes', 'taches', 'arrivees', 'conversations',
+  'derniers_avis']
 
 // Au-delà, on n'affiche plus : une page ouverte depuis la veille montrerait
 // des arrivées d'hier comme celles du jour.

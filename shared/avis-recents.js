@@ -12,11 +12,18 @@
    ouvrirait une page que ce lot ne livre pas.
    ========================================================================== */
 
-// Les quatre etats d'un bloc de l'accueil, dans l'ordre ou on les tranche.
-// `refus` n'est PAS un etat rendu : un bloc refuse ne figure pas dans le DOM
-// (regle absolue du depot, et spec §6). Il est ici pour que l'appelant le
-// nomme, pas pour qu'il l'affiche.
-export const ETATS = ['refus', 'illisible', 'vide', 'liste']
+// Les CINQ etats d'un bloc de l'accueil, dans l'ordre ou on les tranche.
+// `refus` et `inconnu` ne sont PAS des etats rendus : dans les deux cas le bloc
+// ne figure pas dans le DOM (regle absolue du depot, et spec §6). Ils sont ici
+// pour que l'appelant les nomme, pas pour qu'il les affiche.
+//
+// ⚠ `inconnu` A ETE AJOUTE LE 25 OCTOBRE 2026 : il distingue « le serveur n'a
+// pas pu lire » (illisible, qui se DIT) de « on n'a pas encore demande » — le
+// premier affichage, qui vient du cache et ne porte plus ce bloc depuis que les
+// avis en sont retires. Les confondre afficherait « Les avis ne sont pas
+// lisibles » a chaque ouverture, pendant un aller-retour, sur une donnee qui
+// arrive une seconde plus tard.
+export const ETATS = ['refus', 'inconnu', 'illisible', 'vide', 'liste']
 
 /**
  * La VUE du bloc, sans une ligne de HTML : ce qu'on sait, et ce qu'on en dit.
@@ -26,18 +33,33 @@ export const ETATS = ['refus', 'illisible', 'vide', 'liste']
  * @param biens     la liste des biens de l'ecran, pour retrouver nom et photo
  * @param refuse    vrai quand le profil n'a pas le droit `avis`
  */
-export function vueDesAvis ({ derniers, notes, biens = [], refuse = false } = {}) {
-  if (refuse) return { etat: 'refus', cartes: [], note_sur_5: null, nombre: null }
+export function vueDesAvis ({ derniers, notes, biens = [], refuse = false,
+                             connu = true, perimetreVide = false } = {}) {
+  const rien = (etat) => ({ etat, cartes: [], note_sur_5: null, nombre: null })
+  if (refuse) return rien('refus')
+  // ⚠ UN PERIMETRE VIDE N'A PAS « PAS ENCORE D'AVIS », IL N'A PAS DE LOGEMENT.
+  // Un membre delegue a qui aucun bien n'est confie lisait « Pas encore d'avis
+  // sur 30 jours » — une phrase qui parle d'absence d'avis la ou il y a absence
+  // de BIENS. C'est l'injonction symetrique de « Ajoutez votre premier
+  // logement », fermee le meme jour sur le bloc des logements.
+  if (perimetreVide) return rien('vide_perimetre')
+  // Rien n'a encore ete demande (premier affichage depuis le cache) : on se
+  // tait. Voir le commentaire d'`ETATS`.
+  if (!connu) return rien('inconnu')
   // ⚠ `null` N'EST PAS `[]`, ET C'EST TOUT L'ECART QUI COMPTE ICI. L'endpoint
   // rend `null` quand il n'a PAS PU lire : afficher « Pas encore d'avis »
   // serait affirmer une absence a un hote qui en a trois cent trente-six.
-  if (!Array.isArray(derniers)) return { etat: 'illisible', cartes: [], note_sur_5: null, nombre: null }
+  if (!Array.isArray(derniers)) return rien('illisible')
 
   // La moyenne et le compte viennent de l'AUTRE lecture (`notes`), qui peut
   // echouer seule : on rend alors les commentaires sans l'en-tete chiffre.
   const g = (notes && notes.global && typeof notes.global === 'object') ? notes.global : null
   const note = g && g.note_sur_5 != null ? g.note_sur_5 : null
-  // ⚠ CE NOMBRE COMPTE LES AVIS **NOTES**, et c'est celui qui va avec la
+  // ⚠ CE NOMBRE COMPTE LES AVIS **NOTES**, ET LE LIBELLE LE DIT DEPUIS LE
+  // 25 OCTOBRE 2026 (constat de la revue). Il disait « N avis sur 30 jours »
+  // la ou il compte les avis NOTES : deux populations sous un seul mot, et
+  // c'est le defaut que `lib/logement/lecture.js` nomme en toutes lettres
+  // (« 336 avis visibles dont 332 notes »). C'est celui qui va avec la
   // moyenne affichee a cote. `notesDuPerimetre` ne rend que ceux-la ; un
   // logement peut porter des avis sans note (une detection dans les messages,
   // une saisie manuelle sans etoile). Afficher le total des avis a cote d'une
@@ -75,6 +97,9 @@ export function vueDesAvis ({ derniers, notes, biens = [], refuse = false } = {}
 
 // La ligne de contexte d'une carte : « La bulle · Airbnb · 12 octobre ».
 // Les morceaux absents disparaissent, le separateur ne reste jamais seul.
+// Les etats qui ne rendent RIEN — ni carte, ni phrase, ni en-tete.
+export const MUETS = new Set(['refus', 'inconnu', 'vide_perimetre'])
+
 export function contexteDeLaCarte (carte, { t, libelleDuCanal, dateEnClair }) {
   const bouts = []
   if (carte.bien) bouts.push(carte.bien)
@@ -116,9 +141,16 @@ export function carteAvisHtml (carte, outils) {
  * Le bloc entier. Rend `''` sur un refus : l'appelant masque la section, et
  * rien de ce qui mene a un refus n'entre dans le DOM.
  */
+// ⚠ LES ETATS MUETS RENDENT LA CHAINE VIDE, ET L'APPELANT DOIT L'ECRIRE.
+// Masquer la section ne suffit pas : `hidden` cache, il n'efface pas, et des
+// cartes laissees dans le DOM restent lisibles dans la source — exactement ce
+// que la regle « on ne montre jamais ce qui mene a un refus » interdit. Le cas
+// reel : un premier affichage rend les cartes, puis la reponse du serveur
+// refuse le droit. Mesure du 25 octobre 2026 : la section passait a `hidden`
+// et portait toujours ses trois cartes et sa moyenne.
 export function blocAvisHtml (vue, outils) {
   const { t, esc, nombre } = outils
-  if (vue.etat === 'refus') return ''
+  if (MUETS.has(vue.etat)) return ''
   if (vue.etat === 'illisible') return `<p class="muted">${esc(t('reviews.unavailable'))}</p>`
   if (vue.etat === 'vide') return `<p class="muted">${esc(t('reviews.empty'))}</p>`
   return vue.cartes.map(c => carteAvisHtml(c, outils)).join('')
@@ -127,7 +159,7 @@ export function blocAvisHtml (vue, outils) {
 /** L'en-tete chiffre : la moyenne et le nombre, ou rien du tout. */
 export function enTeteAvisHtml (vue, outils) {
   const { t, esc, nombre } = outils
-  if (vue.etat === 'refus' || vue.note_sur_5 == null) return ''
+  if (MUETS.has(vue.etat) || vue.note_sur_5 == null) return ''
   const n = vue.nombre == null ? '' : `<span class="muted small">${esc(t('reviews.count_30d', { n: vue.nombre }))}</span>`
   return `<span class="avis-moyenne num">${esc(t('reviews.score', { n: nombre(vue.note_sur_5, 1) }))}</span>${n}`
 }

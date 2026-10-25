@@ -70,7 +70,7 @@ Règles de calcul (décidées par Thierry) :
   autres, alors que **les trois sont des prévisions** : Stripe seul porte une date de versement réelle.
 - **Note de bas de bloc** : elle dit que ces montants sont **calculés selon les délais des plateformes, et
   non confirmés par la banque**. C'est la phrase qui porte l'honnêteté de tout le bloc.
-- ⚠ **DETTE 91 — le rapprochement avec les versements RÉELS n'existe pas.** Un versement retardé, retenu ou
+- ⚠ **DETTE 95 — le rapprochement avec les versements RÉELS n'existe pas.** Un versement retardé, retenu ou
   amputé se lira « reçu », et l'écart ne se verra nulle part. À ouvrir quand une source de versement constaté
   existera par canal, avec la table de délais qui lui donne la prévision à comparer.
 

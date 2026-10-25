@@ -1113,6 +1113,51 @@ test('nomCourtDuVoyageur : prenom + initiale, et rien de plus', () => {
   assert.strictEqual(nomCourtDuVoyageur(undefined), null)
 })
 
+test("LE TEST QUI COMPTE : ce champ vient du PARTENAIRE, il n'a aucune forme garantie", () => {
+  // ⚠ CONSTAT DE LA REVUE DU 25 OCTOBRE 2026. `guest_name` n'est pas un nom :
+  // c'est ce que le canal a bien voulu mettre. Trois formes mesurees, et ce
+  // qu'elles rendaient avant :
+  //   'claire.bernard@gmail.com'      -> rendu TEL QUEL, donc une adresse
+  //                                      electronique descendue dans la reponse
+  //                                      — ce que la §5 de la spec interdit ;
+  //   'Claire Bernard (claire@x.fr)'  -> « Claire (. », une initiale qui est
+  //                                      une parenthese ;
+  //   '(anonyme)'                     -> rendu tel quel.
+  // Aucune n'est observee en base aujourd'hui (le seul writer est
+  // lib/cron-channel-reviews.js, qui lit les attributs Channex) : le cas est
+  // LATENT, et c'est la raison de le fermer maintenant plutot qu'apres.
+  assert.strictEqual(nomCourtDuVoyageur('claire.bernard@gmail.com'), null,
+    'une adresse electronique est descendue comme un prenom')
+  assert.strictEqual(nomCourtDuVoyageur('Claire Bernard (claire@x.fr)'), 'Claire B.',
+    'la parenthese sert d initiale')
+  assert.strictEqual(nomCourtDuVoyageur('(anonyme)'), null,
+    'un libelle sans lettre initiale est rendu tel quel')
+  // Et ce qui RESTE un nom le reste : la garde ne doit pas manger les vrais.
+  assert.strictEqual(nomCourtDuVoyageur('Li Wei'), 'Li W.')
+  assert.strictEqual(nomCourtDuVoyageur('Ana  Ruiz'), 'Ana R.')
+})
+
+test("LE TEST QUI COMPTE : le texte PUBLIC passe avant le texte brut", async () => {
+  // ⚠ CONSTAT DE LA REVUE : inverser les deux termes passait les 6284 tests.
+  // `content` porte parfois la CONCATENATION du public et du prive, et
+  // l'accueil n'etiquette rien « retour prive » — la regle de
+  // docs/specs/spec-prestataires-menage.md §6 existe precisement pour ca.
+  // Un retour prive affiche sans son etiquette est le defaut que ce choix evite.
+  const r = await derniersAvis(fauxClient([AVIS(20, {
+    content_public: 'Sejour parfait.',
+    content: 'Sejour parfait. EN PRIVE : la douche fuit.'
+  })]), { userId: 'moi' })
+  assert.strictEqual(r[0].texte, 'Sejour parfait.',
+    'le texte brut (public + prive concatenes) est affiche sans etiquette')
+  assert.ok(!r[0].texte.includes('EN PRIVE'))
+  // Et quand il n'y a PAS de texte public, le brut sert de repli : se taire
+  // perdrait un commentaire reel.
+  const repli = await derniersAvis(fauxClient([AVIS(21, {
+    content_public: '', content: 'Tres bon accueil.'
+  })]), { userId: 'moi' })
+  assert.strictEqual(repli[0].texte, 'Tres bon accueil.')
+})
+
 test("LE TEST QUI COMPTE : ce sont les DERNIERS, et le tri le dit", async () => {
   // ⚠ SANS TRI DESCENDANT, « les trois derniers avis » rend les trois PLUS
   // ANCIENS — et un hote qui ouvre son accueil lit les commentaires du mois
@@ -1164,6 +1209,30 @@ test("LE TEST QUI COMPTE : le nom du voyageur suit `reservations`, et la colonne
   assert.match(avecNom[0].select || '', /guest_name/)
   assert.strictEqual(out[0].voyageur, 'Claire B.',
     'le serveur doit descendre « Claire B. », jamais le nom complet')
+})
+
+test("LE TEST QUI COMPTE : le texte est exige EN SQL, et la garde JS reste", async () => {
+  // ⚠ DEUX GARDES POUR LA MEME REGLE, ET LA REVUE A MONTRE QU'ELLES SE
+  // MASQUAIENT L'UNE L'AUTRE : retirer le predicat SQL laissait la suite verte
+  // (le filtre JS rattrapait), et retirer le filtre JS aussi (le SQL rattrapait).
+  // Chacune est donc eprouvee pour ce qu'elle fait SEULE.
+  //
+  // Le SQL d'abord : sans lui, la lecture rapatrie des avis sans texte pour
+  // n'en garder que trois — le defaut que tout ce fichier evite.
+  const journal = []
+  await derniersAvis(fauxClient([AVIS(20)], journal), { userId: 'moi' })
+  const q = journal.find(j => j.table === 'ota_reviews')
+  assert.deepEqual(q.ors, ['content.neq.,content_public.neq.'],
+    'le predicat de texte n est plus pose en SQL')
+
+  // Le filtre JS ensuite, sur un cas que le SQL LAISSE PASSER : PostgREST
+  // compare a la chaine vide, donc un texte fait d'espaces est « non vide »
+  // pour lui. La carte, elle, serait vide.
+  const out = await derniersAvis(fauxClient([
+    AVIS(21, { content_public: '   ', content: '  ' }), AVIS(22)
+  ]), { userId: 'moi' })
+  assert.deepEqual(out.map(a => a.id), ['22'],
+    'un avis dont le texte n est que des espaces produit une carte vide')
 })
 
 test("un avis SANS TEXTE n est pas un commentaire", async () => {

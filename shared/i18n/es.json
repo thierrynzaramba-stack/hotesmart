@@ -75,7 +75,7 @@
   "reviews.title": "Últimas opiniones",
   "reviews.all": "Todas las opiniones",
   "reviews.score": "{n} / 5",
-  "reviews.count_30d": "{n, plural, =0 {ninguna opinión} one {# opinión} other {# opiniones}} en 30 días",
+  "reviews.count_30d": "{n, plural, =0 {ninguna opinión puntuada} one {# opinión puntuada} other {# opiniones puntuadas}} en 30 días",
   "reviews.empty": "Aún no hay opiniones en 30 días",
   "reviews.unavailable": "Las opiniones no se pueden leer ahora mismo.",
   "properties.revenue_30": "en 30 d",
