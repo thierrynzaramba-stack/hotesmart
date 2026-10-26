@@ -63,6 +63,40 @@ const FORME_TABLEAU = /^ {0,3}\|/
 // Le separateur : `|---|---|`, avec ou sans deux-points d'alignement.
 const SEPARATEUR = /^ {0,3}\|[\s:|-]+\|\s*$/
 
+// ⚠ LES MARQUEURS D'UN MERGE NON RESOLU. Mesure du 26 octobre 2026 : cette
+// garde rendait « ok », code 0, sur un registre qui portait trois marqueurs de
+// conflit — parce que les deux cotes y avaient mis des numeros DIFFERENTS et
+// CROISSANTS (101 d'un cote, 102 de l'autre). Ni doublon, ni descente : rien a
+// signaler pour elle, et le fichier serait parti en production avec
+// `<<<<<<< HEAD` dedans. Les deux premieres tentatives de mesure ont ete
+// rattrapees par HASARD — un doublon fortuit — ce qui est precisement la facon
+// dont on croit une garde solide.
+// `=======` seul est ambigu (un soulignement de titre Markdown a la meme
+// forme) : on ne le compte QUE s'il est encadre par les deux autres.
+const CONFLIT_DEBUT = /^<{7}(\s|$)/
+const CONFLIT_FIN = /^>{7}(\s|$)/
+const CONFLIT_MILIEU = /^={7}\s*$/
+
+// ⚠ LE COMPTE DE COLONNES, ET MARKDOWN NE COMPTE PAS COMME UN `split('|')`.
+// Un `|` precede d'une barre inverse est du TEXTE, pas un separateur, et le
+// pipe FINAL est optionnel. J'ai signale l'entree 36 comme mal formee avant
+// d'ecrire ceci : faux, son texte porte `\|\|` — deux pipes echappes dans
+// `liste.json?.data \|\| []` — et c'est mon `awk -F'|'` qui les comptait.
+// Une garde qui se trompe dans ce sens-la fait reparer ce qui va bien.
+function cellulesDe (ligneTexte) {
+  const l = String(ligneTexte).trim()
+  if (!l.startsWith('|')) return 0
+  // Les positions des `|` NON echappes.
+  const pos = []
+  for (let i = 0; i < l.length; i++) {
+    if (l[i] === '|' && (i === 0 || l[i - 1] !== '\\')) pos.push(i)
+  }
+  if (!pos.length) return 0
+  // Le premier ouvre la ligne ; le dernier la ferme SI la ligne finit par lui.
+  const ferme = pos[pos.length - 1] === l.length - 1 && pos.length > 1
+  return pos.length - (ferme ? 1 : 0)
+}
+
 // Le tableau du registre va de son EN-TETE a la premiere section suivante. Les
 // lignes vides ne l'interrompent pas : le registre en contient huit, son tableau
 // est en morceaux, et s'arreter a la premiere ligne vide perdrait la moitie des
@@ -169,12 +203,53 @@ function doublons (texte) {
 // registre a un vrai trou (la dette 39 ne vit que sur une branche non mergee),
 // et reutiliser un numero mort ferait pointer deux decisions vers la meme ligne
 // de journal.
+// Les marqueurs d'un merge non resolu, n'importe ou dans le fichier — pas
+// seulement dans les bornes du tableau : un marqueur dans la prose est tout
+// aussi faux, et il n'y a aucune raison de ne le refuser qu'a un endroit.
+function marqueursDeConflit (texte) {
+  const lignes = String(texte).split('\n')
+  const trouves = []
+  let ouvert = false
+  for (let i = 0; i < lignes.length; i++) {
+    const l = lignes[i]
+    if (CONFLIT_DEBUT.test(l)) { ouvert = true; trouves.push({ ligne: i + 1, texte: l.slice(0, 40) }); continue }
+    if (CONFLIT_FIN.test(l)) { ouvert = false; trouves.push({ ligne: i + 1, texte: l.slice(0, 40) }); continue }
+    if (ouvert && CONFLIT_MILIEU.test(l)) trouves.push({ ligne: i + 1, texte: l.slice(0, 40) })
+  }
+  return trouves
+}
+
+// ⚠ LE NOMBRE DE COLONNES EST DERIVE DE L'EN-TETE, PAS ECRIT ICI. Une valeur
+// recopiee serait une seconde source de verite sur la forme du tableau, et
+// c'est la classe de defaut que ce fichier existe pour attraper.
+function colonnesAttendues (texte) {
+  for (const l of String(texte).split('\n')) {
+    if (/^\s*\|\s*#\s*\|/.test(l)) return cellulesDe(l)
+  }
+  return null
+}
+
+// Une entree dont le compte de cellules differe de l'en-tete : Markdown rend
+// alors les cellules en trop HORS du tableau, ou laisse les manquantes vides.
+// Le contenu n'est pas perdu, il est DEPLACE — invisible a l'oeil sur une ligne
+// de 1 500 caracteres, et invisible aux trois autres controles, qui comptent
+// les entrees et pas les colonnes.
+function colonnesHorsNorme (texte) {
+  const attendu = colonnesAttendues(texte)
+  if (!attendu) return []
+  return lignesDuTableau(texte)
+    .filter(l => numeroDe(l.texte) !== null)
+    .map(l => ({ ligne: l.ligne, numero: numeroDe(l.texte), cellules: cellulesDe(l.texte) }))
+    .filter(e => e.cellules !== attendu)
+}
+
 function prochainLibre (texte) {
   const n = entreesDuRegistre(texte).map(e => e.numero)
   return n.length ? Math.max(...n) + 1 : 1
 }
 
-module.exports = { entreesDuRegistre, lignesNonComptees, ruptures, doublons, prochainLibre, PAR_DEFAUT }
+module.exports = { entreesDuRegistre, lignesNonComptees, ruptures, doublons, prochainLibre,
+  marqueursDeConflit, colonnesHorsNorme, colonnesAttendues, cellulesDe, PAR_DEFAUT }
 
 if (require.main === module) {
   const cibles = process.argv.slice(2)
@@ -184,6 +259,21 @@ if (require.main === module) {
     let texte
     try { texte = fs.readFileSync(f, 'utf8') } catch (e) {
       console.error(`ECHEC ${f} : illisible (${e.code})`); echecs++; continue
+    }
+    // ⚠ LE CONFLIT PASSE AVANT TOUT LE RESTE, et il ARRETE. Sur un fichier non
+    // resolu, les trois autres controles mesurent un texte qui n'existe pas :
+    // ils comptent les entrees des DEUX cotes, et leur verdict — « 95 entrees,
+    // suite croissante » — est une phrase vraie sur un fichier faux.
+    const conflits = marqueursDeConflit(texte)
+    if (conflits.length) {
+      console.log(`${f}`)
+      for (const { ligne, texte: t } of conflits) {
+        console.error(`  ECHEC ligne ${ligne} : marqueur de merge non resolu — ${t}`)
+      }
+      console.error('  (ce fichier porte les DEUX cotes d un merge : les autres controles ne sont')
+      console.error('   pas lances, ils mesureraient un texte qui n existe pas)')
+      echecs++
+      continue
     }
     const entrees = entreesDuRegistre(texte)
     console.log(`${f} — ${entrees.length} entree(s)`)
@@ -208,6 +298,17 @@ if (require.main === module) {
       }
       console.error('  (un numero gras, barre, indente ou suivi de « bis » n est PAS compte : il passerait en double sans un mot)')
     }
+    const colonnes = colonnesHorsNorme(texte)
+    if (colonnes.length) {
+      propre = false
+      const attendu = colonnesAttendues(texte)
+      for (const { ligne, numero, cellules } of colonnes) {
+        console.error(`  ECHEC entree ${numero} (ligne ${ligne}) : ${cellules} cellule(s) au lieu de ${attendu}`)
+      }
+      console.error('  (le contenu n est pas perdu, il est DEPLACE : une cellule en trop sort du')
+      console.error('   tableau, une cellule manquante en laisse une vide. Un `|` de texte s echappe')
+      console.error('   en `\\|` ; le pipe final est optionnel, mais le COMPTE, non)')
+    }
     const desordre = ruptures(texte)
     if (desordre.length) {
       propre = false
@@ -217,7 +318,7 @@ if (require.main === module) {
       }
       console.error('  (un TROU est normal — on ne reutilise jamais un numero mort ; une entree rangee au mauvais endroit, non)')
     }
-    if (propre) console.log('  ok    aucun doublon, aucune rangee perdue, suite croissante')
+    if (propre) console.log(`  ok    aucun doublon, aucune rangee perdue, suite croissante, ${colonnesAttendues(texte)} colonnes partout, aucun marqueur de conflit`)
     else echecs++
     console.log(`  prochain numero libre : ${prochainLibre(texte)}`)
   }

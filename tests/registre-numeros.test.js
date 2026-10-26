@@ -227,3 +227,82 @@ test('l en-tete et le separateur ne sont pas des entrees', () => {
   assert.deepEqual(V.lignesNonComptees(t), [],
     'l en-tete et le separateur ne doivent pas etre signales comme des rangees perdues')
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LES DEUX TROUS MESURES LE 26 OCTOBRE 2026
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE : un registre qui porte des MARQUEURS DE CONFLIT est REFUSE', () => {
+  // ⚠ LA GARDE RENDAIT « ok », CODE 0, SUR UN FICHIER NON RESOLU. Mesure du
+  // 26 octobre 2026 : trois marqueurs dans le registre, et « 95 entrees, aucun
+  // doublon, suite croissante ». Le fichier serait parti en production avec
+  // `<<<<<<< HEAD` dedans.
+  //
+  // ⚠ ET LE CAS QUI PASSE N'EST PAS N'IMPORTE LEQUEL — mes DEUX premieres
+  // mesures ont ete rattrapees PAR HASARD. Un conflit dont les deux cotes
+  // portent le MEME numero fait un doublon ; un conflit dont un cote reprend un
+  // numero deja pris aussi. Le cas qui echappe a tout est celui ou les deux
+  // cotes ont des numeros LIBRES et CROISSANTS — exactement ce qu'un merge de
+  // deux branches qui ouvrent chacune leur dette produit.
+  const conflit = faux(
+    RANGEE(1),
+    '<<<<<<< HEAD',
+    RANGEE(101, 'mon entree'),
+    '=======',
+    RANGEE(102, 'son entree'),
+    '>>>>>>> autre-branche'
+  )
+  const vus = V.marqueursDeConflit(conflit)
+  assert.equal(vus.length, 3, 'les trois marqueurs doivent etre vus')
+  assert.equal(lancer(dansUnFichier(conflit)), 1,
+    'un registre non resolu doit faire ECHOUER le script, pas rendre vert')
+  // Et le vrai registre, lui, n'en porte aucun.
+  assert.deepEqual(V.marqueursDeConflit(REGISTRE), [],
+    'le registre vivant porte un marqueur de merge non resolu')
+})
+
+test('`=======` SEUL n est pas un conflit : un soulignement de titre a la meme forme', () => {
+  // ⚠ SANS CETTE DISTINCTION, LA GARDE CRIE FAUX. Markdown souligne un titre
+  // par une ligne de `=`, et une garde qui refuserait toute ligne de sept `=`
+  // refuserait un document parfaitement sain — un faux rouge se fait ignorer,
+  // et c'est ainsi qu'une garde meurt.
+  assert.deepEqual(V.marqueursDeConflit('Un titre\n=======\n\ndu texte'), [],
+    'sept « = » hors d un conflit ne sont pas un marqueur')
+  assert.equal(V.marqueursDeConflit('<<<<<<< a\nx\n=======\ny\n>>>>>>> b').length, 3,
+    'encadre par les deux autres, il en est un')
+})
+
+test('LE TEST QUI COMPTE : une entree dont le COMPTE DE COLONNES differe est REFUSEE', () => {
+  // ⚠ LES TROIS AUTRES CONTROLES COMPTENT LES ENTREES, PAS LES COLONNES, et ils
+  // sont restes verts cinq jours sur l'entree 80 du registre — trois cellules
+  // sur quatre, sans pipe final, donc la note de renumerotation rangee sous
+  // « Cout si oubliee » et l'echeance vide. Le contenu n'est pas perdu, il est
+  // DEPLACE : invisible a l'oeil sur une ligne de 1 500 caracteres.
+  const attendu = V.colonnesAttendues(REGISTRE)
+  assert.equal(attendu, 4, 'le compte vient de l EN-TETE, il n est pas ecrit dans le script')
+  const enTrop = faux(RANGEE(1), '| 2 | **une dette | de plus** | cout | echeance |')
+  assert.equal(V.colonnesHorsNorme(enTrop).length, 1, 'une cellule en trop est vue')
+  assert.equal(lancer(dansUnFichier(enTrop)), 1, 'et elle fait echouer le script')
+  const manquante = faux(RANGEE(1), '| 2 | **une dette** | cout')
+  assert.equal(V.colonnesHorsNorme(manquante).length, 1, 'une cellule manquante aussi')
+  // Le registre vivant, apres la reparation de l'entree 80.
+  assert.deepEqual(V.colonnesHorsNorme(REGISTRE), [],
+    'une entree du registre n a pas le bon nombre de colonnes')
+})
+
+test('LE TEST QUI COMPTE : un `|` ECHAPPE est du texte, et le pipe final est optionnel', () => {
+  // ⚠ C'EST MA PROPRE ERREUR DE MESURE, GARDEE ICI. J'ai signale l'entree 36 du
+  // registre comme mal formee — « six champs » — avant d'ecrire ce controle.
+  // Faux : son texte porte `liste.json?.data \|\| []`, deux pipes ECHAPPES, et
+  // c'est mon `awk -F'|'` qui les comptait comme des separateurs. Une garde qui
+  // se trompe dans ce sens-la fait reparer ce qui va bien.
+  assert.equal(V.cellulesDe('| 36 | `a \\|\\| b` | cout | echeance |'), 4,
+    'deux pipes echappes dans une cellule ne la coupent pas')
+  assert.equal(V.cellulesDe('| 1 | a | b | c |'), 4, 'avec pipe final')
+  assert.equal(V.cellulesDe('| 1 | a | b | c'), 4, 'sans pipe final : meme compte')
+  assert.equal(V.cellulesDe('| 1 | a | b |'), 3, 'une cellule de moins se compte')
+  // Et l'entree 36 du registre vivant, nommement.
+  const l36 = REGISTRE.split('\n').find(l => l.startsWith('| 36 |'))
+  assert.ok(l36, 'l entree 36 a disparu du registre')
+  assert.equal(V.cellulesDe(l36), 4, 'l entree 36 est SAINE : ses pipes sont echappes')
+})

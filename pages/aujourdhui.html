@@ -102,13 +102,56 @@
        min/max mensuels partent dans la FICHE DU LOGEMENT, bloc Prix (Q4) : c'est
        un travail du lot Logements, et rien ne les porte tant qu'il n'est pas fait. -->
 
-  <!-- 6. Logements -->
-  <section class="stack" style="gap: 20px" aria-labelledby="h-props" data-bind="props-section" hidden>
-    <div class="section-head" data-bind="props-head"><h2 class="h2" id="h-props" data-i18n="properties.title"></h2><a class="link small" href="/logements" data-i18n="properties.see_all"></a></div>
-    <div class="property-grid scroll-x" data-list="properties"></div>
+  <!-- 6. Revenus nets (etape 4) -->
+  <!-- ⚠ CE BLOC REMPLACE « Vos logements », qui part en entier : les cartes de
+       bien vivent sur /logements, et l'inventaire de l'etape 0 trace chaque
+       element deplace ou retire AVEC SA RAISON (I25 a I32). Ce qui disparait de
+       l'accueil et n'existe nulle part ailleurs est note en dette 96 —
+       l'occupation 30 j et les min/max mensuels, promis a la fiche du
+       logement. -->
+  <section class="stack" style="gap: 16px" aria-labelledby="h-revenue" data-bind="revenue-section" hidden>
+    <div class="section-head">
+      <h2 class="h2" id="h-revenue" data-i18n="revenue.title"></h2>
+      <!-- Le selecteur Mois / Annee. La vue ANNEE se charge au clic, pas a
+           l'ouverture (spec §5) : l'etape 4 ne livre que le mois, et le bouton
+           Annee reste donc masque jusqu'a l'etape suivante plutot que de
+           promettre un ecran qui n'existe pas. -->
+      <div class="seg" role="group" data-i18n-attr="aria-label:revenue.view">
+        <button type="button" class="seg__btn is-on" data-vue="mois" data-i18n="revenue.month"></button>
+        <button type="button" class="seg__btn" data-vue="annee" data-i18n="revenue.year" hidden></button>
+      </div>
+    </div>
+
+    <!-- Le bandeau : total du mois, recu, a venir. -->
+    <div class="card stack" style="gap: 10px">
+      <div class="row" style="justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap">
+        <strong class="num h1" data-bind="revenue-total"></strong>
+        <span class="muted small" data-bind="revenue-month"></span>
+      </div>
+      <div class="row" style="gap: 20px; flex-wrap: wrap">
+        <span><span class="muted small" data-i18n="revenue.received"></span> <strong class="num" data-bind="revenue-received"></strong></span>
+        <span><span class="muted small" data-i18n="revenue.upcoming"></span> <strong class="num" data-bind="revenue-upcoming"></strong></span>
+      </div>
+      <!-- ⚠ CE QUE LE TOTAL NE DIT PAS, dit juste en dessous. Un sejour dont le
+           montant ou la date n'est pas calculable n'entre pas en silence :
+           « un total auquel il manque une reservation a l'air juste ». -->
+      <p class="caption muted" data-bind="revenue-reserves" hidden></p>
+    </div>
+
+    <!-- Une ligne par bien. -->
+    <div class="stack" style="gap: 8px" data-list="revenue-rows"></div>
+
+    <!-- ⚠ LA NOTE DE BAS DE BLOC PORTE L'HONNETETE DE TOUT CE QUI PRECEDE
+         (spec §4, decision Q9 de Thierry) : ces montants sont CALCULES selon
+         les delais des plateformes, et non confirmes par la banque. Dette 95. -->
+    <p class="caption muted" data-i18n="revenue.note"></p>
+
     <!-- Aucun logement : le MEME etat que la page Logements, rendu par le MEME
          module (Q7). Sans lui, l'accueil d'un hote qui debute n'offre plus
-         aucune action, le bouton d'ajout ayant quitte l'en-tete. -->
+         aucune action, le bouton d'ajout ayant quitte l'en-tete.
+         ⚠ IL A SUIVI LE BLOC LOGEMENTS QUAND CELUI-CI EST PARTI : un hote sans
+         bien n'a pas de revenus non plus, et c'est le dernier bloc de la page,
+         donc le bon endroit pour la seule action qui lui reste. -->
     <div class="card log-etat" data-bind="etat-vide" hidden role="status" aria-live="polite"></div>
   </section>
 </main>
@@ -148,7 +191,10 @@ const etat = {
   menagesOk: null, etatsArrivee: {}, conversations: new Set(),
   taches: [], tachesOk: null,
   alarmes: [],
-  parBien: new Map(), notesParBien: new Map(), noteGlobale: null,
+  // ⚠ `parBien` A DISPARU AVEC LES DEUX APPELS `/api/yield` PAR BIEN : plus
+  // personne ne l'ecrit, et une Map vide que des lecteurs interrogent est une
+  // source de « non calculable » qu'aucun calcul n'explique.
+  noteGlobale: null,
   derniersAvis: null, avisRefuse: false, avisConnu: false,
   compteurs: [],
   // La réponse de `/api/ecran/aujourdhui` — un seul appel pour six blocs.
@@ -207,18 +253,26 @@ const monnaie = (n, devise) => I18n.money(n, devise || 'EUR')
 // `dateDuJour` ne vaut que pour les « YYYY-MM-DD » du coeur.
 const dateEnClair = (iso) => I18n.date(new Date(iso), { day: 'numeric', month: 'long' })
 
-// ▲ / ▼ / = + valeur ; jamais la couleur seule (spec §2, statuts).
-function delta (v, formatte) {
-  if (v == null) return ''
-  // Le sens suit la valeur AFFICHÉE : « ▼ 0 % » pour -0,3 % se contredirait.
-  const arrondi = Math.round(v * 100)
-  const cle = arrondi > 0 ? 'kpi.up' : arrondi < 0 ? 'kpi.down' : 'kpi.same'
-  return `<span class="delta" title="${esc(t('kpi.delta_hint'))}">${esc(t(cle, { v: formatte }))}</span>`
-}
-const deltaPct = v => delta(v, v == null ? '' : I18n.pct(Math.abs(v)))
-// ⚠ `deltaPoints` est parti avec la bande « 30 jours » : il ne servait qu'a
-// l'occupation, qui rejoint la fiche du logement. Une fonction que plus
-// personne n'appelle est du code dormant.
+// ⚠ `delta`, `deltaPct` ET `deltaPoints` SONT TOUS PARTIS, et les deux premiers
+// a l'etape 4 — constat de la review du 26 octobre 2026. `deltaPoints` avait
+// quitte la page avec la bande « 30 jours » ; `delta` et `deltaPct` sont restes
+// parce que la VARIATION du CA par bien les appelait, sur les cartes de
+// logement. Les cartes partent avec le bloc « Vos logements », donc leur dernier
+// appelant avec elles.
+//
+// ⚠ ET ILS MAINTENAIENT QUATRE CLES i18n EN VIE — `kpi.up`, `kpi.down`,
+// `kpi.same`, `kpi.delta_hint`, soit douze entrees sur trois langues, dont ce
+// code mort etait le SEUL lecteur du depot (mesure : `grep -rln` ne rend que ce
+// fichier). C'est mot pour mot le motif pour lequel j'ai retire `quand()` dix
+// lignes plus bas — « une fonction morte qui lit une cle fait croire que la cle
+// est utilisee, et la cle survit au nettoyage » — et je l'ai applique a `quand()`
+// sans regarder ses voisines.
+//
+// La variation contre la periode precedente n'est PAS perdue par omission : le
+// bloc « Revenus nets » ne la porte pas parce que la vue MOIS n'a rien a quoi se
+// comparer ; c'est la vue ANNEE (courbe N contre N-1) qui la rendra, avec son
+// propre formatage. Si elle revient ici, ces deux fonctions sont dans
+// l'historique de ce commit.
 
 // ─── 1. La date, à droite du titre ──────────────────────────────────────────
 // ⚠ CE QUI A DISPARU ICI, ET CE QUI NE DOIT PAS DISPARAITRE AVEC. La ligne
@@ -580,34 +634,34 @@ function renderDerniersAvis () {
   section.hidden = MUETS.has(vue.etat)
 }
 
-// ─── 6 et 7. Chiffres 30 jours et logements ─────────────────────────────────
-// Source : /api/yield (CA réparti par nuit, au prix VOYAGEUR — jamais le
-// `amount` des réservations, qui est un net hôte pour Airbnb).
-async function chargerChiffresBien (b) {
-  if (!b.provider_property_id) { etat.parBien.set(b.id, { nonRaccorde: true }); return }
-  // Bornes calculées sur la DATE de Paris, jamais par pas de 24 h (heure d'été).
-  const j0 = etat.aujourdHui
-  const fin = R.ajouterJours(j0, -1)
-  const debut = R.ajouterJours(j0, -60)
-  const milieu = R.ajouterJours(j0, -30)
-  const avantMilieu = R.ajouterJours(j0, -31)
-  const douze = R.douzeMoisComplets(etat.aujourdHui)
-  const base = `/api/yield?property_id=${encodeURIComponent(b.id)}`
-  try {
-    const j = await appel(`${base}&debut=${debut}&fin=${fin}&granularite=jour`)
-    const actuel = R.chiffresFenetre(j.realise || [], milieu, fin)
-    const precedent = R.chiffresFenetre(j.realise || [], debut, avantMilieu)
-    let mois = null
-    try {
-      const m = await appel(`${base}&debut=${douze.jourDebut}&fin=${douze.jourFin}&granularite=mois`)
-      mois = R.minMaxMensuel(m.realise || [], douze.moisDebut, douze.moisFin)
-    } catch (e) { logger.error('Aujourdhui', 'yield mois', e) }
-    etat.parBien.set(b.id, { actuel, precedent, mois })
-  } catch (e) {
-    if (e.status === 409) etat.parBien.set(b.id, { nonRaccorde: true })
-    else { logger.error('Aujourdhui', 'yield jour', e); etat.parBien.set(b.id, { erreur: true }) }
-  }
-}
+// ─── 6 et 7. LES DEUX APPELS A `/api/yield` PAR BIEN SONT RETIRES ───────────
+//
+// ⚠ C'EST LE GAIN DE PERFORMANCE LE PLUS GROS DE TOUTE LA REFONTE, et il etait
+// chiffre dans CLAUDE.md avant d'etre fait. Mesure du 22 octobre 2026 en
+// production, compte reel a 4 logements : `/api/yield`, appele DEUX FOIS PAR
+// BIEN, portait 72 requetes Supabase et 586 Ko — a lui seul 72 % des requetes
+// de la page, pour du CA et du TO sur 30 jours, c'est-a-dire exactement de la
+// donnee NON URGENTE.
+//
+// `chargerChiffresBien` alimentait trois affichages, et les trois ont trouve
+// leur place :
+//   · le CA 30 j par bien -> remplace par le bloc « Revenus nets », en mois de
+//     VERSEMENT (decision Q3 de Thierry, inventaire I29) ;
+//   · les min/max mensuels sur 12 mois -> deplaces dans la fiche du logement,
+//     bloc Prix (Q4, I30) ;
+//   · le repli « non raccorde » (409) -> la page /logements le dit deja.
+//
+// ⚠ ET LA MOITIE DEPLACEE N'EST PAS ENCORE ARRIVEE : c'est la DETTE 96, et
+// c'est la seule perte reelle de ce retrait. Les min/max par bien quittent la
+// production aujourd'hui et la fiche du logement ne les porte pas encore. La
+// dette nomme le fichier de spec ou les ecrire et les trois fonctions pures de
+// `shared/aujourdhui.js` conservees POUR ce report — `occupation`,
+// `minMaxMensuel`, `totaux`. Elles n'ont plus aucun consommateur de production
+// depuis l'etape 1 ; si le lot Logements tranche autrement, elles se
+// supprimeront avec lui, mais pas en silence.
+//
+// `etat.parBien` disparait avec cet appel.
+
 async function chargerNotes () {
   if (!peutLire('avis')) return
   // ⚠ LA SOURCE CHANGE, LES GARDES RESTENT — et c'est délibéré. Ce bloc venait
@@ -619,27 +673,32 @@ async function chargerNotes () {
   const r = (etat.ecran && etat.ecran.notes) || null
   if (r && r.tronque) logger.error('Aujourdhui', 'avis', 'lecture des notes incomplete')
   const lu = r && !r.tronque && r.global && typeof r.global === 'object' ? r : null
-  const parBien = (lu && lu.par_bien) || {}
   // ⚠ LA NOTE GLOBALE RESTE DANS L'ETAT, ET ELLE EST LUE. La revue l'a trouvee
   // en ecriture seule apres le retrait de la bande « 30 jours » (constat
   // FAIBLE 1) ; plutot que de la supprimer, l'etape 2 la REBRANCHE : c'est elle
   // que l'en-tete du bloc « Derniers avis » affiche. Une seule memoire de la
   // note dans la page, au lieu de deux lectures de `etat.ecran.notes`.
   etat.noteGlobale = lu ? lu.global : null
-  for (const b of etat.biens) {
-    if (!b.provider_property_id) continue
-    const ref = String(b.provider_property_id)
-    // ⚠ `hasOwnProperty`, pas `parBien[ref]`. `par_bien` vient de `JSON.parse` :
-    // pour un bien dont la clé provider vaudrait `constructor`, `toString` ou
-    // `valueOf`, une lecture directe rendrait une FONCTION héritée d'Object —
-    // vraie, donc le repli ne serait jamais pris, et `etat.notesParBien`
-    // porterait une fonction au lieu d'une note.
-    const sienne = Object.prototype.hasOwnProperty.call(parBien, ref) ? parBien[ref] : null
-    // Un bien sans avis sur la période n'a pas de clé : c'est zéro, et c'est
-    // exactement ce que rendait l'appel par bien qu'on remplace.
-    etat.notesParBien.set(b.id, lu ? (sienne || { note_sur_5: null, notes: 0 }) : null)
-  }
-  renderBiens()
+  // ⚠ `notesParBien` A ETE RETIREE A L'ETAPE 4, ET C'EST LA DEUXIEME FOIS QUE
+  // CETTE MEMOIRE SE TROUVE EN ECRITURE SEULE. La revue de l'etape 2 avait fait
+  // le constat pour `noteGlobale` apres le retrait de la bande « 30 jours » ;
+  // celle-ci a survecu parce que l'ETOILE de chaque carte de logement la lisait.
+  // Les cartes partent avec le bloc « Vos logements » (inventaire I28), donc
+  // plus personne ne lit la Map : la garder serait garder du code mort, et un
+  // code mort fait croire qu'une donnee est disponible.
+  //
+  // ⚠ ET LE GARDE-FOU `hasOwnProperty` QU'ELLE PORTAIT NE DISPARAIT PAS : il
+  // protegeait d'un bien dont la cle provider vaudrait `constructor`, `toString`
+  // ou `valueOf` — une lecture directe de `par_bien[ref]` rendrait alors une
+  // FONCTION heritee d'Object, vraie, donc le repli ne serait jamais pris. La
+  // regle vit maintenant la ou `par_bien` est encore lu : cote serveur, dans
+  // `lib/stats-avis.js`. Son test est transpose dans
+  // `tests/accueil-rapide.test.js`, qui verifie que l'accueil n'affiche plus de
+  // note PAR BIEN du tout — ce qui est la seule chose qu'on puisse encore
+  // garder ici.
+  //
+  // La note par bien revient a la fiche du logement : /logements la rend deja.
+  renderRevenus()
 }
 
 // ⚠ `renderKpis` A ETE RETIREE AVEC LA BANDE « 30 jours » (etape 1). Ce qu'elle
@@ -648,109 +707,278 @@ async function chargerNotes () {
 // redivise jamais ; les REVENUS reviennent a l'etape 4, en mois de versement ;
 // l'OCCUPATION et les min/max mensuels partent dans la fiche du logement.
 // `chargerNotes` reste : les etoiles des cartes de logement en vivent.
-function quand (jour) {
-  if (jour === etat.aujourdHui) return t('properties.today')
-  return dateDuJour(jour, { weekday: 'short', day: 'numeric', month: 'short' })
-}
-function renderBiens () {
-  const section = $('[data-bind="props-section"]')
-  // ⚠ `null` N'EST PAS UNE LISTE VIDE. L'endpoint rend `null` quand il n'a PAS
-  // pu lire : masquer la section revenait à affirmer « cet hôte n'a aucun
-  // logement » — avec les notes et les indicateurs disparus, et
-  // « + Ajouter un bien » resté visible.
+// ⚠ `quand()` EST PARTIE AVEC LES CARTES DE LOGEMENT. Elle rendait
+// « aujourd'hui » ou « lun. 3 nov. » pour la prochaine arrivee d'un bien ; cet
+// affichage vit maintenant sur /logements. Une fonction sans appelant qui lit
+// une cle i18n fait croire que la cle est utilisee, et la cle survit au
+// nettoyage — c'est ainsi qu'un dictionnaire grossit de textes que personne ne
+// voit jamais.
+// ─── Le bloc « Revenus nets » (etape 4) ─────────────────────────────────────
+//
+// ⚠ IL REMPLACE `renderBiens`, QUI PEIGNAIT LES CARTES DE LOGEMENT. Ce qui
+// disparait de l'accueil est trace element par element dans
+// docs/specs/inventaire-aujourdhui.md (I25 a I32) : les cartes vivent sur
+// /logements, qui les rend mieux (photo, note, occupation, prochaine arrivee),
+// et le lien « Voir tout » part avec le bloc. L'occupation 30 j et les min/max
+// mensuels sont PROMIS a la fiche du logement et n'y sont pas encore : c'est la
+// dette 96, et c'est la seule perte reelle de ce remplacement.
+//
+// ⚠ ET LE BLOC N'AFFICHE QUE DES FAITS. Un montant non calculable ne vaut pas
+// zero, un BRUT n'est pas un net, et un sejour qu'on ne sait pas ranger est
+// compte a part — jamais saute. Les trois se ressemblent dans une somme et ne
+// disent pas la meme chose.
+
+// Les centimes du coeur, en monnaie de l'hote. ⚠ `null` N'EST PAS ZERO : la
+// fonction rend `null`, et l'appelant decide du texte.
+const euros = (cents, devise) =>
+  (Number.isFinite(cents) ? monnaie(cents / 100, devise) : null)
+
+// La devise du compte : celle du premier bien lu. ⚠ Un compte multidevise
+// afficherait un total melange — le depot n'en a pas, et `/api/yield` fait le
+// meme choix. A revoir le jour ou un hote aura deux devises.
+const deviseDuCompte = () =>
+  ((etat.biens || []).find(b => b && b.currency) || {}).currency || 'EUR'
+
+function renderRevenus () {
+  const section = $('[data-bind="revenue-section"]')
+  if (!section) return
   const vide = $('[data-bind="etat-vide"]')
-  if (etat.biens === null) {
+
+  // ⚠ TROIS ETATS, PAS DEUX, ET C'EST L'ANCIEN BLOC QUI LES AVAIT RAISONNES.
+  // Ma premiere version les ecrasait en un seul test (`biens.length === 0`), et
+  // le garde-fou M2 de `tests/accueil-rapide.test.js` l'a dit tout de suite. Les
+  // trois se transposent ici mot pour mot :
+  //
+  // 1. `etat.biens === null` — la lecture a ECHOUE. Masquer la section
+  //    reviendrait a affirmer « cet hote n'a aucun logement ».
+  // ⚠ LE MOTIF, PAS SEULEMENT L'ABSENCE. La regle du depot dit qu'un `null`
+  // s'affiche « non calculable » AVEC SON MOTIF — et ces deux-la ne demandent
+  // pas la meme chose a l'hote. « non calculable » decrit un defaut : il n'y a
+  // rien a attendre. « Calcul en cours » decrit un etat transitoire, celui des
+  // minutes qui suivent le collage d'une migration ou une nuit de rattrapage :
+  // il faut revenir. Afficher le premier pour le second ferait conclure a une
+  // panne, et c'est exactement ce qu'un hote signale au fondateur.
+  const calculEnCours = () => {
+    const ind = (etat.ecran && etat.ecran.indisponibles) || []
+    return ind.includes('revenus_calcul_en_cours')
+  }
+  const videDuTotal = () => {
+    const n = $('[data-bind="revenue-total"]')
+    if (n) n.textContent = t(calculEnCours() ? 'revenue.computing' : 'revenue.unavailable')
+    for (const sel of ['revenue-received', 'revenue-upcoming', 'revenue-month']) {
+      const x = $(`[data-bind="${sel}"]`); if (x) x.textContent = ''
+    }
+    const liste = $('[data-list="revenue-rows"]'); if (liste) liste.innerHTML = ''
+    const res = $('[data-bind="revenue-reserves"]'); if (res) res.hidden = true
+  }
+  if (!Array.isArray(etat.biens)) {
     section.hidden = false
-    vide.hidden = true
-    $('[data-list="properties"]').innerHTML =
-      `<p class="muted">${esc(t('properties.unavailable'))}</p>`
+    if (vide) vide.hidden = true
+    videDuTotal()
     return
   }
-  // ⚠ « AJOUTEZ VOTRE PREMIER LOGEMENT » NE SE DIT QUE SUR UNE LECTURE REUSSIE,
-  // et c'est la raison d'etre de cette garde. `etat.biens` vaut `[]` aussi
-  // longtemps que l'appel d'ecran n'a pas repondu : l'afficher avant ferait
-  // lire « Ajoutez votre premier logement » a un hote qui en a quatre — et, a
-  // l'onboarding, une reconciliation contre une liste amputee CREE des biens en
-  // double chez le canal. C'est la liste RENDUE PAR LE SERVEUR qui fait foi,
-  // pas la valeur initiale de l'etat.
-  //
-  // ⚠ ET LES ACTIONS SONT GARDEES PAR LE DROIT, dans le module commun : un
-  // membre delegue sans logement confie lit « Aucun logement ne vous est confie
-  // sur ce compte », sans boutons — les deux menent a des pages NON DELEGABLES,
-  // et « on ne montre jamais ce qui mene a un refus ».
-  // ⚠ ET PAS DEPUIS LE CACHE (constat FAIBLE 7 de la revue). Un `biens: []`
-  // garde douze heures satisfait « la liste a ete lue » : l'hote qui vient de
-  // relier un canal rouvrait son accueil sur « Ajoutez votre premier
-  // logement », boutons compris, pendant un aller-retour. C'est la liste rendue
-  // par le serveur MAINTENANT qui fait foi, pas celle d'il y a douze heures.
+
+  // 2. « Ajoutez votre premier logement » NE SE DIT QUE SUR UNE LECTURE REUSSIE,
+  //    ET PAS DEPUIS LE CACHE. `etat.biens` vaut `[]` aussi longtemps que
+  //    l'appel d'ecran n'a pas repondu : l'afficher avant ferait lire « Ajoutez
+  //    votre premier logement » a un hote qui en a quatre — et, a l'onboarding,
+  //    une reconciliation contre une liste amputee CREE des biens en double chez
+  //    le canal. Et un `biens: []` garde douze heures satisfait « la liste a ete
+  //    lue » : l'hote qui vient de relier un canal rouvrait son accueil sur
+  //    l'etat vide, boutons compris, pendant un aller-retour. C'est la liste
+  //    rendue par le serveur MAINTENANT qui fait foi.
   const listeLue = !!(etat.ecran && Array.isArray(etat.ecran.biens)) && etat.ageCache == null
-  const tete = $('[data-bind="props-head"]')
+  const rev = etat.ecran && etat.ecran.revenus
+
+  // 3. Liste lue et VIDE : l'etat vide, par le MEME module que la page
+  //    Logements (Q7). Il a suivi ce bloc quand « Vos logements » est parti —
+  //    un hote sans bien n'a pas de revenus, et c'est la seule action qui lui
+  //    reste ici. Les actions sont gardees par le droit DANS le module : un
+  //    membre delegue sans logement confie lit « Aucun logement ne vous est
+  //    confie sur ce compte », sans boutons, parce que les deux menent a des
+  //    pages NON DELEGABLES et « on ne montre jamais ce qui mene a un refus ».
   if (!etat.biens.length) {
     section.hidden = !listeLue
-    vide.hidden = !listeLue
-    // L'etat vide porte son propre titre : garder « Vos logements » et un
-    // « Voir tout » vers une page vide ferait deux titres et un lien mort.
-    if (tete) tete.hidden = listeLue
-    if (listeLue) { vide.innerHTML = etatHtml('vide', { peutAjouter: estTitulaire() }); I18n.apply(vide) }
-    $('[data-list="properties"]').innerHTML = ''
+    if (vide) {
+      vide.hidden = !listeLue
+      if (listeLue) { vide.innerHTML = etatHtml('vide', { peutAjouter: estTitulaire() }); I18n.apply(vide) }
+    }
+    videDuTotal()
     return
   }
-  vide.hidden = true
-  if (tete) tete.hidden = false
+  if (vide) vide.hidden = true
+
+  // ⚠ PAS DE DROIT, PAS DE BLOC — et le masquage se DOUBLE d'une garde serveur,
+  // qui est dans l'endpoint (`if (!droits.reservations) return null`). Le
+  // masquage est un confort d'interface : il tombe sur une feuille de style
+  // absente. La regle absolue du depot est que les deux existent.
+  const aLeDroit = !etat.ecran || !etat.ecran.droits || etat.ecran.droits.reservations !== false
+  if (!aLeDroit) { section.hidden = true; return }
+
+  // ⚠ `null` N'EST PAS UN MOIS A ZERO. L'endpoint rend `null` quand il n'a PAS
+  // pu lire — table de delais illisible, lecture en erreur. Afficher « 0 € »
+  // dirait « ce mois n'a rien rapporte », ce qui est un FAIT, et faux.
+  //
+  // ⚠ ET UNE LISTE DE BIENS ILLISIBLE COMPTE COMME UNE LECTURE MANQUEE, ce que
+  // ma premiere version ne voyait pas : `etat.biens` a `null` faisait tomber la
+  // boucle des lignes sur `(etat.biens || [])`, donc un bloc avec son total mais
+  // SANS AUCUNE LIGNE — un ecran qui a l'air complet et ne montre rien. Defaut
+  // trouve en relisant le garde-fou « des biens ILLISIBLES ne s'affichent pas
+  // comme aucun bien », qui tenait deja cette regle pour l'ancien bloc.
+  if (!rev || !rev.total) {
+    section.hidden = false
+    videDuTotal()
+    return
+  }
+
   section.hidden = false
-  const etats = R.etatDesBiens({ bookings: etat.bookings, biens: etat.biens, aujourdHui: etat.aujourdHui })
-  $('[data-list="properties"]').innerHTML = etat.biens.map(b => {
-    const href = `/logements/${encodeURIComponent(b.id)}`
-    if (!b.provider_property_id) {
-      // Pas de clé provider = aucun canal relié : un FAIT de la base, contrairement
-      // à `ota_connect_status`, que rien ne rafraîchit (KB aujourdhui.md §3).
-      return `<a class="property" href="${esc(href)}">
-        <span class="property__photo property__photo--empty">${icone('i-link', 'icon icon--lg')}<span class="link caption" style="color: var(--ink)">${esc(t('properties.connect'))}</span></span>
-        <span class="property__name"><span>${esc(b.name)}</span></span>
-        <span class="small muted">${esc(t('properties.no_channel'))}</span>
-      </a>`
+  const devise = deviseDuCompte()
+  const T = rev.total
+
+  // ⚠⚠ LA MEME GARDE QUE LA LIGNE DU BIEN, ET LE BANDEAU NE L'AVAIT PAS.
+  // Constat BLOQUANT de la review du 26 octobre 2026. La ligne d'un logement
+  // dit « non calculable » quand son total vaut zero ET qu'un montant a ete
+  // refuse (plus bas, avec son test) ; le bandeau, lui, ecrivait
+  // `euros(T.total_cents)` sans condition.
+  //
+  // Mesure sur les donnees de staging : `revenus_du_mois(2026-10)` rend
+  // `{sejours: 2, total_cents: 0, sans_montant: 2}`. L'ecran afficherait donc
+  // « 0,00 € · Recu 0,00 € · A venir 0,00 € » au bandeau, « non calculable »
+  // sur la ligne du bien, et « 2 sejour(s) dont le montant n'est pas
+  // calculable » en reserve. Les deux moities du meme ecran se contredisent —
+  // et c'est le bandeau qui porte le chiffre que l'hote retient.
+  //
+  // ⚠ ET AUCUN TEST NE POUVAIT LE VOIR : le banc DOM stube `I18n.money` pour
+  // rendre la chaine vide, donc le texte du bandeau est toujours `''` pour
+  // toute la suite. Le test ajoute avec ce correctif mesure la CLASSE du noeud,
+  // pas son texte.
+  const toutRefuse = T.total_cents === 0 && (T.refuses ? T.refuses.montant : 0) > 0
+  const noeudTotal = $('[data-bind="revenue-total"]')
+  noeudTotal.classList.toggle('muted', toutRefuse)
+  noeudTotal.textContent = toutRefuse
+    ? t('revenue.unavailable')
+    : euros(T.total_cents, devise)
+  $('[data-bind="revenue-received"]').textContent = toutRefuse ? '' : euros(T.recu_cents, devise)
+  $('[data-bind="revenue-upcoming"]').textContent = toutRefuse ? '' : euros(T.a_venir_cents, devise)
+  // Le mois SERVI, pas le mois demande : l'endpoint retombe sur le mois courant
+  // si la valeur recue est hors forme, et l'ecran doit dire ce qu'il montre.
+  $('[data-bind="revenue-month"]').textContent = moisEnClair(rev.mois || (etat.ecran && etat.ecran.mois))
+
+  // ─── Ce que le total ne dit pas ───────────────────────────────────────────
+  // Trois reserves, chacune avec son compte. Elles ne se melangent pas : un
+  // montant manquant se repare dans le payload du provider, une date manquante
+  // dans la table des delais, et un brut attend que la plateforme transmette
+  // sa commission.
+  const reserves = []
+  if (T.bruts > 0) reserves.push(t('revenue.gross_count', { n: T.bruts }))
+  if (T.refuses && T.refuses.montant > 0) reserves.push(t('revenue.no_amount', { n: T.refuses.montant }))
+  // ⚠ « TOUS MOIS CONFONDUS », ET IL FAUT LE DIRE. Un sejour sans date de
+  // versement n'appartient a aucun mois : le compteur agrege donc toutes les
+  // periodes, et un hote qui lit « 1 sejour sans date » en novembre pourrait
+  // croire qu'il s'agit d'un sejour de novembre.
+  if (rev.hors_mois && rev.hors_mois.sejours > 0) {
+    reserves.push(t('revenue.no_date', { n: rev.hors_mois.sejours }))
+  }
+  // ⚠ L'ARGENT QUI N'EST SUR AUCUNE LIGNE SE DIT, et c'est le second constat
+  // GRAVE de la review : 1 000 € d'ecart muet entre le bandeau et la somme des
+  // lignes, mesure. Un `property_id` nul, une cle laissee par un re-keying, un
+  // bien supprime — les trois entrent dans le total et sortent de l'affichage.
+  // Le bandeau reste juste (l'argent a bien ete touche) ; ce qui manquait etait
+  // la phrase qui explique l'ecart.
+  if (rev.hors_biens && rev.hors_biens.sejours > 0) {
+    reserves.push(t('revenue.hors_biens', {
+      n: rev.hors_biens.sejours,
+      montant: euros(rev.hors_biens.total_cents, devise)
+    }))
+  }
+  if (rev.tronque) reserves.push(t('revenue.truncated'))
+  const res = $('[data-bind="revenue-reserves"]')
+  if (res) {
+    res.hidden = reserves.length === 0
+    res.textContent = reserves.join(' · ')
+  }
+
+  // ─── Une ligne par bien ───────────────────────────────────────────────────
+  // ⚠ L'ORDRE SUIT LA LISTE DES BIENS, pas le montant. Un classement par
+  // revenu ferait sauter les lignes d'un mois a l'autre, et l'hote cherche son
+  // logement par son nom.
+  const parBien = rev.par_bien || {}
+  $('[data-list="revenue-rows"]').innerHTML = (etat.biens || []).map(b => {
+    // ⚠ LA CLE EST MAINTENANT L'UUID DU BIEN, ET C'EST UN RENVERSEMENT ASSUME
+    // (27 octobre 2026, architecture decidee par Thierry). Jusqu'ici l'endpoint
+    // groupait par `bookings_snapshot.property_id`, c'est-a-dire la cle
+    // PROVIDER en TEXTE, et cette ligne joignait donc par
+    // `b.provider_property_id`.
+    //
+    // L'agregat SQL groupe desormais par `property_uuid` — la colonne derivee
+    // qui porte l'IDENTITE du bien. C'est tout son objet : la cle provider
+    // change au re-keying et a la bascule, l'UUID non. C'etait la cause racine
+    // des 1 000 EUR d'ecart muet entre le bandeau et les lignes.
+    //
+    // La regle dure du depot n'est pas contredite, elle est HONOREE : on ne
+    // joint jamais un UUID a une cle TEXTE. Les deux cotes sont des UUID, et
+    // c'est le writer qui a fait la resolution une fois, a l'ecriture, en
+    // comparant le COUPLE (compte, cle provider).
+    const d = parBien[String(b.id)]
+    const nom = `<span class="small" style="flex: 1 1 auto; min-width: 0">${esc(b.name)}</span>`
+    if (!d) {
+      // Aucun sejour range ce mois-ci pour ce bien. C'est un FAIT — zero euro
+      // encaisse — et non une absence de donnee : le bien a ete lu, sa ligne
+      // simplement ne porte rien.
+      return `<div class="row" style="justify-content: space-between; gap: 12px; align-items: baseline">
+        ${nom}<span class="caption muted" data-i18n="revenue.none"></span>
+      </div>`
     }
-    const e = etats.get(String(b.provider_property_id)) || {}
-    const chiffres = etat.parBien.get(b.id)
-    const note = etat.notesParBien.get(b.id)
-    // ⚠ « Aucune arrivée prévue » EST UN FAIT, et il demande d'avoir lu les
-    // séjours. `etat.menagesOk` vaut `null` tant que la fenêtre ménage n'a pas
-    // répondu — au premier affichage depuis le cache, par exemple — et la
-    // version précédente affirmait quand même l'absence d'arrivée sur chaque
-    // carte. La puce d'occupation était déjà gardée ; cette ligne ne l'était
-    // pas.
-    const arrivee = etat.menagesOk === true
-      ? (e.prochaineArrivee ? t('properties.next_arrival', { when: quand(e.prochaineArrivee) }) : t('properties.no_arrival'))
-      : null
-    const lieu = [b.city, arrivee].filter(Boolean).join(' · ')
-    let ca = ''
-    if (chiffres && chiffres.actuel) {
-      ca = chiffres.actuel.ca != null
-        ? `<span><strong class="num">${esc(monnaie(chiffres.actuel.ca, b.currency))}</strong> <span class="muted">${esc(t('properties.revenue_30'))}</span> ${deltaPct(R.variation(chiffres.actuel.ca, chiffres.precedent?.ca))}</span>`
-        : `<span class="small muted">${esc(t('properties.revenue_not_computable'))}</span>`
-    } else if (chiffres && chiffres.erreur) {
-      ca = `<span class="small muted">${esc(t('properties.revenue_not_computable'))}</span>`
-    }
-    const mm = chiffres && chiffres.mois
-      ? `<span class="caption muted num">${esc(t('properties.range', { min: monnaie(chiffres.mois.min, b.currency), max: monnaie(chiffres.mois.max, b.currency) }))}</span>`
-      : ''
-    const etoile = note && note.note_sur_5 != null
-      ? `<span class="property__rating">${icone('i-review', 'icon icon--fill')}${esc(I18n.num(note.note_sur_5, { minimumFractionDigits: 1, maximumFractionDigits: 1 }))}</span>` : ''
-    const puce = etat.menagesOk
-      ? `<span class="chip">${esc(t(e.occupeCeSoir ? 'properties.occupied' : 'properties.free'))}</span>` : ''
-    // La photo de couverture (properties.photo_url, lot photos) ; sans elle,
-    // le fond neutre reste.
-    const photo = b.photo_url
-      ? `<span class="property__photo"><img src="${esc(b.photo_url)}" alt="" loading="lazy">${puce}</span>`
-      : `<span class="property__photo property__photo--none">${icone('i-home')}${puce}</span>`
-    return `<a class="property" href="${esc(href)}">
-      ${photo}
-      <span class="property__name"><span>${esc(b.name)}</span>${etoile}</span>
-      <span class="small muted">${esc(lieu)}</span>
-      ${ca}
-      ${mm}
-    </a>`
+    const part = T.total_cents > 0 ? Math.round((d.total_cents / T.total_cents) * 100) : 0
+    // La barre : plein = recu, hachure = a venir. Sa largeur est la PART du
+    // total, pas une valeur absolue — sinon un petit mois donnerait des barres
+    // minuscules et un gros mois des barres saturees.
+    const partRecue = d.total_cents > 0 ? Math.round((d.recu_cents / d.total_cents) * 100) : 0
+
+    // ⚠ CHAQUE LIGNE DIT CE QU'ELLE NE SAIT PAS, ET C'ETAIT LE DEFAUT LE PLUS
+    // COUTEUX DU LOT — constat GRAVE de la review du 26 octobre 2026. Le module
+    // SAIT qu'un montant manque (`d.refuses.montant`, `d.motifs`), et la ligne
+    // ne lisait ni l'un ni l'autre : seule la pastille « brut » existait.
+    //
+    // Mesure : un bien dont le seul sejour a un Host Fee illisible affichait
+    // « 0,00 € » — un FAIT, au niveau du bien, sous un total juste. Et le faux
+    // zero etait PIRE que l'absence : un bien qui n'a vraiment rien touche n'a
+    // pas de cle, donc affiche « aucun versement ce mois-ci » SANS chiffre.
+    // L'ecran avait deux rendus, et c'est le FAUX qui portait le nombre.
+    const refuses = (d.refuses && d.refuses.montant) || 0
+    const marques = []
+    if (d.bruts > 0) marques.push(t('revenue.gross'))
+    if (refuses > 0) marques.push(t('revenue.no_amount_short', { n: refuses }))
+
+    // ⚠ ET LE COMPTE DES SEJOURS PORTE SUR CEUX QUI SONT COMPTES, pas sur tous.
+    // « 2 sejours — 300,00 € » quand le total ne couvre qu'un sejour sur deux
+    // est incoherent EN SOI : les deux nombres de la meme ligne se
+    // contredisent, et rien ne dit lequel croire.
+    const comptes = Math.max(0, d.sejours - refuses)
+    const montant = (d.total_cents === 0 && refuses > 0)
+      // Zero euro ET un montant non calculable : on ne sait pas, on le dit.
+      // Afficher « 0,00 € » ici affirmerait que ce logement n'a rien rapporte.
+      ? `<span class="caption muted">${esc(t('revenue.unavailable'))}</span>`
+      : `<strong class="num small">${esc(euros(d.total_cents, devise))}</strong>`
+
+    return `<div class="row" style="justify-content: space-between; gap: 12px; align-items: baseline">
+      ${nom}
+      <span class="caption muted">${esc(t('revenue.stays', { n: comptes }))}</span>
+      <span class="revenue-bar" style="--part: ${part}%; --recu: ${partRecue}%" aria-hidden="true"></span>
+      ${marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''}
+      ${montant}
+    </div>`
   }).join('')
+  I18n.apply($('[data-list="revenue-rows"]'))
+}
+
+// Le mois, en clair et dans la langue de l'hote. « 2026-11 » -> « novembre 2026 ».
+function moisEnClair (mois) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(mois || ''))) return ''
+  const [an, m] = String(mois).split('-').map(Number)
+  // Le 15 : jamais le 1er ni le 31, pour qu'aucun decalage de fuseau ne fasse
+  // changer de mois a l'affichage.
+  return dateDuJour(`${an}-${String(m).padStart(2, '0')}-15`, { month: 'long', year: 'numeric' })
 }
 
 // ─── Démarrage ──────────────────────────────────────────────────────────────
@@ -873,7 +1101,7 @@ async function init () {
     // cache refuse d'ecrire (code d'acces, alarmes, taches, arrivees, fils),
     // dont la raison est qu'un fait critique vu PERIME trompe l'hote. Un avis
     // vieux de douze heures reste vrai.
-    renderCompteurs(); renderDerniersAvis(); renderBiens()
+    renderCompteurs(); renderDerniersAvis(); renderRevenus()
   }
 
   const nav = (badge) => HSNav.render({
@@ -929,16 +1157,18 @@ async function init () {
   // (spec-reservation-manuelle.md §4). L'alarme comptait dans le total « à
   // traiter » sans que rien ne la montre, et l'alerte au fondateur ne pouvait
   // plus être éteinte.
-  renderEvenements(); renderTaches(); renderAlarmes(); renderCompteurs(); renderDerniersAvis(); renderBiens()
+  renderEvenements(); renderTaches(); renderAlarmes(); renderCompteurs(); renderDerniersAvis(); renderRevenus()
   // ⚠ ON GARDE CE QU'ON VIENT D'AFFICHER. Le cache ne sert qu'à un premier
   // affichage instantané au prochain chargement ; les cinq blocs critiques ET
   // le compte de surréservation en sont retirés à l'écriture par le module
   // lui-même.
   if (ecranFrais && etat.ecran) CacheEcran.ecrire('aujourdhui', moi(), compteCourant(), etat.ecran)
 
-  if (peutLire('reservations')) {
-    await parPaquets(etat.biens.map(b => async () => { await chargerChiffresBien(b); renderBiens() }), 2)
-  }
+  // ⚠ PLUS AUCUN APPEL APRES LE PREMIER RENDU. La boucle qui restait ici
+  // lancait DEUX requetes `/api/yield` par bien, par paquets de deux, APRES
+  // l'affichage — donc la page s'affichait puis continuait a charger pendant
+  // plusieurs secondes sur un compte a quatre logements. Les revenus arrivent
+  // maintenant AVEC la reponse d'ecran, dans la meme requete que tout le reste.
 }
 
 init().catch(e => logger.error('Aujourdhui', e.message, e))

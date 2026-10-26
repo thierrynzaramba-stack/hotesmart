@@ -1282,3 +1282,74 @@ body.men-cfg-ouvert { overflow: hidden; }
 .log-avis { display: flex; align-items: center; gap: 5px; color: var(--ink); }
 .log-avis--muet { color: var(--muted); font-style: italic; }
 .log-avis svg { width: 14px; height: 14px; flex: none; }
+
+/* ── Bloc « Revenus nets » (accueil V5, étape 4) ─────────────────────────────
+   ⚠ CES RÈGLES MANQUAIENT, ET MES COMMENTAIRES DÉCRIVAIENT UN RENDU QUI NE
+   S'AFFICHAIT PAS — constat de la review du 26 octobre 2026. `.revenue-bar`
+   n'existait dans aucune feuille : le `<span>` était vide, sans dimension, et
+   ses variables `--part` / `--recu` n'étaient lues par rien. Le commentaire de
+   `pages/aujourdhui.html` annonçait pourtant « plein = reçu, hachuré = à
+   venir ». Idem `.seg` / `.seg__btn` : le sélecteur sortait en boutons nus.
+   Une affirmation dans un commentaire se lit comme une mesure, et celle-là
+   était fausse pour la seule raison qu'un fichier n'avait pas suivi. */
+
+/* La barre d'une ligne de bien. Sa LARGEUR est la part du total du mois — pas
+   une valeur absolue : un petit mois donnerait des barres minuscules, un gros
+   mois des barres saturées. Le remplissage interne est la part REÇUE. */
+.revenue-bar {
+  flex: 0 0 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+  position: relative;
+}
+.revenue-bar::before,
+.revenue-bar::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  border-radius: 3px;
+}
+/* ⚠ DEUX COUCHES, ET L'ORDRE COMPTE : « à venir » dessine la part TOTALE en
+   hachures, « reçu » la recouvre en plein. L'inverse laisserait les hachures
+   par-dessus le plein. */
+.revenue-bar::before {
+  inline-size: var(--part, 0%);
+  background-image: repeating-linear-gradient(
+    135deg, var(--ok) 0 2px, transparent 2px 4px);
+  opacity: .55;
+}
+.revenue-bar::after {
+  inline-size: calc(var(--part, 0%) * var(--recu, 0) / 100);
+  background: var(--ok);
+}
+/* ⚠ LES HACHURES NE SONT PAS LE SEUL PORTEUR DE SENS : le reçu et l'à-venir
+   sont écrits en chiffres dans le bandeau, et la barre est `aria-hidden`.
+   C'est la règle du dépôt — « jamais la couleur seule ». */
+@media (prefers-reduced-motion: reduce) {
+  .revenue-bar::before { background-image: none; opacity: .3; }
+}
+
+/* Le sélecteur Mois / Année. */
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--line); }
+.seg__btn {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 14px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+/* ⚠ `--surface`, PAS `--bg` : ce jeton n'existe pas dans theme.css, et une
+   variable CSS inconnue rend la declaration INVALIDE — le bouton actif aurait
+   garde la couleur heritee, donc du texte sombre sur un fond sombre. Mesure
+   faite avant de laisser la ligne : `--bg` absent, `--surface` defini aux
+   deux themes (clair l 31, sombre l 132). Un jeton qui n'existe pas ne
+   rougit nulle part : il rend juste l'element illisible. */
+.seg__btn.is-on { background: var(--ink); color: var(--surface); font-weight: 600; }
+.seg__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

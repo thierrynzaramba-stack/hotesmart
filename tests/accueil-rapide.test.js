@@ -552,7 +552,7 @@ function batirAujourdhui (sansInit = false) {
   // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
   // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
   // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
-  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderBiens, renderDerniersAvis }'
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -828,7 +828,6 @@ test('LE TEST QUI COMPTE : l accueil ne demande PLUS les notes lui-meme', async 
   assert.deepEqual(q.urls.filter(u => u.includes('/api/avis')), [],
     'les notes absentes de l appel d ecran declenchent un repli vers /api/avis')
   assert.strictEqual(q.interne.etat.noteGlobale, null, 'un bloc absent s affiche comme un fait')
-  assert.strictEqual(q.interne.etat.notesParBien.get('b1'), null)
 })
 
 test('LE TEST QUI COMPTE : l endpoint d ecran ne lit les notes qu UNE fois', () => {
@@ -853,13 +852,18 @@ test('LE TEST QUI COMPTE : chaque bien recoit la meme chose qu avant, zero compr
   await p.interne.chargerNotes()
 
   assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.7, notes: 42 })
-  assert.deepEqual(p.interne.etat.notesParBien.get('b1'), { note_sur_5: 4.8, notes: 30 })
-  // Un bien absent de la reponse vaut zero, pas `undefined` : c'est ce que
-  // rendait son appel par bien, et `renderBiens` lit `note.moyenne`.
-  assert.deepEqual(p.interne.etat.notesParBien.get('b2'), { note_sur_5: null, notes: 0 })
-  // Un bien sans canal n'etait pas interroge : il n'a toujours pas d'entree.
-  assert.strictEqual(p.interne.etat.notesParBien.has('b3'), false,
-    'un bien sans cle provider recoit une note alors qu aucun avis ne peut lui etre rattache')
+  // ⚠ LES TROIS ASSERTIONS PAR BIEN SONT PARTIES AVEC `etat.notesParBien`
+  // (etape 4), ET IL FAUT DIRE CE QU'ELLES TENAIENT : un bien absent de la
+  // reponse valait zero et non `undefined`, et un bien sans cle provider n'avait
+  // pas d'entree du tout. Ces deux distinctions n'avaient qu'un consommateur,
+  // l'etoile des cartes de logement, et les cartes partent avec le bloc
+  // « Vos logements » (inventaire I28). La note par bien revient a la fiche du
+  // logement, que /logements rend deja avec sa propre lecture.
+  //
+  // Ce qui reste teste ici est la seule chose que l'accueil lit encore : la note
+  // GLOBALE, telle quelle, sans redivision.
+  assert.ok(!('notesParBien' in p.interne.etat),
+    'la Map par bien est revenue : elle n a aucun lecteur, donc elle ferait croire que la donnee est disponible')
 })
 
 // ⚠ CES TROIS TESTS PASSAIENT PAR VACUITE, ET LA REVIEW L'A VU.
@@ -885,31 +889,47 @@ for (const [quoi, ecran] of casSansNote) {
     p.interne.etat.biens = biensDeTest
     p.interne.etat.ecran = ecran
     await p.interne.chargerNotes()
+    // ⚠ L'ASSERTION PAR BIEN EST PARTIE AVEC `etat.notesParBien` (etape 4), ET
+    // L'INVARIANT NE L'EST PAS : elle doublait celle du dessus, qui porte la
+    // meme regle sur la note GLOBALE — « 0 avis » n'est jamais affirme quand
+    // rien n'a ete lu. La Map par bien n'avait qu'un lecteur, l'etoile des
+    // cartes de logement, et les cartes partent avec le bloc « Vos logements ».
     assert.strictEqual(p.interne.etat.noteGlobale, null,
       'la tuile affiche un nombre d avis alors que rien n a ete lu')
-    assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null,
-      'un bien recoit « 0 avis », un FAIT, alors que rien n a ete lu')
     assert.deepEqual(p.urls.filter(u => u.includes('/api/')), [],
       'la page part en reseau pour se rattraper : le 1 + N reviendrait par la porte de service')
   })
 }
 
-test("LE TEST QUI COMPTE : une cle de bien heritee d'Object ne devient pas une note", async () => {
-  // `par_bien` vient de `JSON.parse`. Pour un bien dont la cle provider vaudrait
-  // `constructor`, `toString` ou `valueOf`, une lecture directe rendrait une
-  // FONCTION heritee — vraie, donc le repli `{ moyenne: null, notes: 0 }` ne
-  // serait jamais pris, et `etat.notesParBien` porterait une fonction.
+test("LE TEST QUI COMPTE : une cle de bien piegeuse ne fait plus rien tomber sur l'accueil", async () => {
+  // ⚠ CE TEST GARDAIT `hasOwnProperty` DANS LA PAGE, ET LA REGLE A CHANGE DE
+  // MAISON — elle n'a pas disparu. `par_bien` vient de `JSON.parse` : pour un
+  // bien dont la cle provider vaudrait `constructor`, `toString` ou `valueOf`,
+  // une lecture directe rendrait une FONCTION heritee d'Object, vraie, donc le
+  // repli n'etait jamais pris.
+  //
+  // ⚠ ET ELLE EST TENUE COTE SERVEUR, VERIFIE AVANT D'ECRIRE CETTE LIGNE :
+  // `lib/stats-avis.js:497` construit `par_bien` avec `Object.create(null)`,
+  // donc la table n'a AUCUNE cle heritee a rendre — et c'est teste la-bas,
+  // `tests/stats-avis.test.js` l 770-819 (« le prototype nul ne protege plus :
+  // la cle est avalee », « par_bien a de nouveau un prototype : une reference
+  // `__proto__` l ecrirait »). Retirer ce doublon sans cette verification aurait
+  // ete retirer un garde-fou en croyant le deplacer.
+  //
+  // Ce qui reste a garder ici est que la PAGE ne retombe pas dans le piege : des
+  // cles provider piegeuses ne doivent faire ni lever, ni afficher de note.
   const p = ouvrirAujourdhui({ sansInit: true, corps: { global: { note_sur_5: 4.5, notes: 3 }, par_bien: {} } })
   p.interne.etat.biens = [
     { id: 'bc', name: 'Piege', provider_property_id: 'constructor' },
     { id: 'bt', name: 'Piege 2', provider_property_id: 'toString' },
+    { id: 'bp', name: 'Piege 3', provider_property_id: '__proto__' },
   ]
   p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
-  for (const id of ['bc', 'bt']) {
-    assert.deepEqual(p.interne.etat.notesParBien.get(id), { note_sur_5: null, notes: 0 },
-      `le bien ${id} recoit un membre herite d Object au lieu de sa note`)
-  }
+  assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.5, notes: 3 },
+    'une cle provider piegeuse a fait tomber la note globale')
+  assert.deepEqual(p.urls.filter(u => u.includes('/api/')), [],
+    'la page part en reseau sur une cle piegeuse')
 })
 
 test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redivise pas", async () => {
@@ -926,14 +946,52 @@ test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redi
   p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
 
-  // ⚠ LA TUILE DU BANDEAU « Note · 30 j » A ETE RETIREE A L'ETAPE 1 (24 octobre
-  // 2026) ; la note revient a l'etape 2, en tete du bloc « Derniers avis ».
-  // L'invariant, lui, n'a pas bouge et ce test le tient toujours : la note
-  // descend DEJA sur 5, et l'ecran ne la redivise pas. Il le tient desormais la
-  // ou la note s'affiche encore — l'etoile de chaque logement.
-  const liste = p.html('[data-list="properties"]')
-  assert.ok(!liste.includes('2.3') && !liste.includes('2.4'), `l etoile a redivise la note : ${liste}`)
-  assert.ok(liste.includes('4.8'), `l etoile du bien n affiche pas la note descendue : ${liste}`)
+  // ⚠ CET INVARIANT A CHANGE DE SUPPORT DEUX FOIS, ET IL NE S'AFFAIBLIT PAS.
+  // La tuile du bandeau « Note · 30 j » est partie a l'etape 1 (24 octobre
+  // 2026) ; le test s'est alors appuye sur l'ETOILE de chaque logement. Les
+  // cartes de logement partent a leur tour avec le bloc « Vos logements »
+  // (etape 4, inventaire I28), donc l'etoile par bien n'existe plus sur
+  // l'accueil — mais la note GLOBALE, elle, s'affiche toujours : en tete du
+  // bloc « Derniers avis ». C'est la qu'on le tient maintenant.
+  //
+  // La regle est inchangee depuis le premier jour : l'endpoint descend
+  // `note_sur_5` DEJA ramenee sur 5 et arrondie UNE SEULE fois, et l'ecran ne la
+  // redivise pas. 4,7 sur 10 redivise donnerait 2,3 ou 2,4 — les deux valeurs
+  // qu'on refuse de voir.
+  assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.7, notes: 42 },
+    'la note globale a ete redivisee ou perdue avant l affichage')
+  // ⚠ L'EN-TETE NE S'AFFICHE QUE SUR UN BLOC NON MUET, et c'est une regle du
+  // bloc avis, pas une complication de ce test : `enTeteAvisHtml` rend la chaine
+  // vide quand l'etat est MUET (refus, inconnu, perimetre vide) ou que la note
+  // est `null`. Sans avis a montrer, il n'y a pas d'en-tete ou poser la note —
+  // donc la fixture doit porter un avis, comme la production.
+  p.interne.etat.derniersAvis = [{
+    id: 'r1', bien_ref: 'REF_A', ota: 'airbnb', recu_le: '2026-10-20T10:00:00Z',
+    note_sur_5: 4.9, texte: 'Sejour parfait.', voyageur: 'Claire B.'
+  }]
+  p.interne.etat.avisConnu = true
+  p.interne.renderDerniersAvis()
+  const tete = p.html('[data-bind="reviews-head"]')
+  // ⚠ LE DOUBLE DE `t` DANS CE BANC REND LA CLE, PAS LE TEXTE INTERPOLE :
+  // l'en-tete contient « reviews.score », donc la VALEUR n'est pas lisible dans
+  // le HTML. C'est la meme limite que le test du compte plafonne plus haut, qui
+  // la contourne en lisant `fr.json`. On juge donc ce que le banc peut dire :
+  // l'en-tete EXISTE (la note est passee, elle n'est pas `null`) et il ne porte
+  // aucun nombre redivise.
+  assert.ok(tete.includes('reviews.score'),
+    `l en-tete du bloc avis ne porte pas la note : ${tete}`)
+  assert.ok(!/2[.,][34]/.test(tete), `l en-tete du bloc avis a redivise la note : ${tete}`)
+  // ⚠ ET LA VALEUR PASSEE AU RENDU SE VERIFIE A LA SOURCE, par le module
+  // partage qui construit la vue — lui-meme teste sur ses propres fixtures
+  // dans `tests/avis-recents-dom.test.js`. C'est la seule facon de voir le
+  // NOMBRE : la page ne le formate pas elle-meme, et c'est voulu.
+  const vue = M_AVIS.vueDesAvis({
+    derniers: p.interne.etat.derniersAvis,
+    notes: { global: p.interne.etat.noteGlobale },
+    biens: p.interne.etat.biens, connu: true
+  })
+  assert.strictEqual(vue.note_sur_5, 4.7,
+    'la vue du bloc avis a redivise la note avant de la rendre')
 })
 
 test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note", async () => {
@@ -952,7 +1010,6 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note"
   await p.interne.chargerNotes()
   assert.strictEqual(p.interne.etat.noteGlobale, null,
     'une note calculee sur une fraction est affichee comme un fait')
-  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1025,23 +1082,41 @@ test("LE TEST QUI COMPTE (M2) : l'etat « aucun logement » ne s'affiche QUE sur
   // quatre logements et dont l'appel n'a pas encore repondu lisait « Ajoutez
   // votre premier logement » — et, a l'onboarding, une reconciliation contre
   // une liste amputee CREE des biens en double chez le canal.
+  //
+  // ⚠ CE GARDE-FOU EST TRANSPOSE DU BLOC « Vos logements » AU BLOC « Revenus
+  // nets » (etape 4), ET AUCUNE DES TROIS DISTINCTIONS N'EST PERDUE : pas
+  // encore lu, lu et vide, lu en echec. L'etat vide a suivi le bloc parce qu'un
+  // hote sans bien n'a pas de revenus non plus, et que c'est la seule action qui
+  // lui reste sur cette page.
   const pasLu = bancDeRendu({ biens: [], ecran: null })
-  pasLu.interne.renderBiens()
+  pasLu.interne.renderRevenus()
   assert.strictEqual(pasLu.cache('[data-bind="etat-vide"]').hidden, true,
     'l etat vide s affiche alors que la liste n a pas ete lue')
-  assert.strictEqual(pasLu.cache('[data-bind="props-section"]').hidden, true)
+  assert.strictEqual(pasLu.cache('[data-bind="revenue-section"]').hidden, true)
 
   const lu = bancDeRendu({ biens: [], ecran: { biens: [] } })
-  lu.interne.renderBiens()
+  lu.interne.renderRevenus()
   assert.strictEqual(lu.cache('[data-bind="etat-vide"]').hidden, false,
     'une liste lue et vide doit proposer d ajouter un logement')
   assert.match(lu.html('[data-bind="etat-vide"]'), /logements\.vide_titre/)
 
   // Et une lecture EN ECHEC (`null`) n'est ni une liste vide ni un etat vide.
+  // ⚠ ELLE DOIT LE DIRE, et c'est ce controle qui a trouve un defaut dans mon
+  // rendu neuf : `etat.biens` a `null` faisait tomber la boucle des lignes sur
+  // `(etat.biens || [])`, donc un bloc avec son total mais SANS AUCUNE LIGNE —
+  // un ecran qui a l'air complet et ne montre rien.
   const illisible = bancDeRendu({ biens: null, ecran: { biens: null } })
-  illisible.interne.renderBiens()
+  illisible.interne.renderRevenus()
   assert.strictEqual(illisible.cache('[data-bind="etat-vide"]').hidden, true)
-  assert.match(illisible.html('[data-list="properties"]'), /properties\.unavailable/)
+  assert.match(illisible.cache('[data-bind="revenue-total"]').textContent, /revenue\.unavailable/,
+    'une liste de biens illisible affiche un total comme si tout allait bien')
+
+  // Et avec un total VALIDE mais des biens illisibles : meme refus. C'est le
+  // cas que mon rendu laissait passer.
+  const avecTotal = bancDeRendu({ biens: null, ecran: { biens: null, revenus: { mois: '2026-11', total: { total_cents: 50000, recu_cents: 50000, a_venir_cents: 0, bruts: 0, refuses: { montant: 0, date: 0 }, motifs: {} }, par_bien: {} } } })
+  avecTotal.interne.renderRevenus()
+  assert.match(avecTotal.cache('[data-bind="revenue-total"]').textContent, /revenue\.unavailable/,
+    'un total s affiche sur une liste de biens illisible')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1053,6 +1128,12 @@ test("LE TEST QUI COMPTE (M2) : l'etat « aucun logement » ne s'affiche QUE sur
 // fonction etait exposee par ce banc et INAPPELABLE (le module des avis n'etait
 // pas injecte, et l'appeler levait `ReferenceError`). Onze mutations du code
 // neuf survivaient.
+
+// ⚠ MODULE ES : `import()` ET NON `require`. Node leve
+// ERR_REQUIRE_ESM_RACE_CONDITION sur un `require` de module ES en cours de
+// chargement — meme patron que `tests/avis-recents-dom.test.js`.
+let M_AVIS
+test.before(async () => { M_AVIS = await import('../shared/avis-recents.js') })
 
 const AVIS_SERVEUR = [{
   id: 'r1', bien_ref: '209413', ota: 'airbnb', recu_le: '2026-10-20T10:00:00Z',
@@ -1136,4 +1217,303 @@ test('le bloc rend les cartes, la moyenne et le compte quand tout va bien', asyn
   assert.match(liste, /Claire B\./)
   assert.match(liste, /La bulle/, 'le bien est retrouve par sa cle PROVIDER')
   assert.match(p.html('[data-bind="reviews-head"]'), /reviews\.score/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Le bloc « Revenus nets » TEL QUE L'ECRAN LE REND — constats de la review
+// de l'etape 4 (26 octobre 2026)
+//
+// ⚠ AUCUN TEST N'EXERCAIT CE RENDU AVEC UN `par_bien` NON VIDE, et la review
+// l'a prouve par la mutation la plus simple : remplacer
+// `parBien[String(b.provider_property_id)]` par `parBien[String(b.id)]` — la
+// jointure naive UUID contre cle TEXTE, c'est-a-dire la REGLE DURE n° 3 du
+// depot — survivait a la suite ENTIERE, 6337 tests. Toutes les lignes
+// auraient affiche « aucun versement ce mois-ci » sous un bandeau juste : un
+// ecran qui a l'air complet et ne montre rien.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const REV_BIENS = [
+  { id: 'uuid-1', provider_property_id: '209413', name: 'La bulle', currency: 'EUR' },
+  { id: 'uuid-2', provider_property_id: '307820', name: 'Coeur de vie 23', currency: 'EUR' }
+]
+const parBien = (o) => ({
+  sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0,
+  refuses: { montant: 0, date: 0 }, motifs: {}, ...o
+})
+const bancRevenus = (revenus, biens = REV_BIENS) => bancDeRendu({
+  biens, ageCache: null, ecran: { biens, revenus, droits: { reservations: true } }
+})
+
+test("LE TEST QUI COMPTE : chaque ligne est jointe par l'UUID du bien, et plus par sa cle provider", () => {
+  // ⚠ CE TEST S'EST INVERSE LE 27 OCTOBRE 2026, ET CE N'EST PAS UN RELACHEMENT.
+  // Il gardait « jointe par la cle PROVIDER, jamais par l'UUID », parce que
+  // l'endpoint groupait par `bookings_snapshot.property_id` — du TEXTE.
+  // L'agregat SQL groupe desormais par `property_uuid`, la colonne derivee qui
+  // porte l'IDENTITE du bien.
+  //
+  // La regle dure n° 3 n'est pas contredite, elle est HONOREE : on ne joint
+  // jamais un UUID a une cle TEXTE. Les deux cotes sont des UUID, et c'est le
+  // writer qui a fait la resolution une fois, a l'ecriture, en comparant le
+  // COUPLE (compte, cle provider). La cle provider change au re-keying et a la
+  // bascule ; l'UUID non — c'etait la cause racine des 1 000 EUR d'ecart muet
+  // entre le bandeau et les lignes.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }) },
+    total: parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  assert.match(lignes, /La bulle/, 'le bien n est pas rendu')
+  assert.ok(!lignes.includes('revenue.none') || !/La bulle[\s\S]{0,200}revenue\.none/.test(lignes),
+    'le bien joint par UUID affiche « aucun versement » : la jointure est fausse')
+  // Et le second bien, qui n'a pas de ligne dans `par_bien`, dit « aucun
+  // versement » — un FAIT, puisqu'il a bien ete lu.
+  assert.match(lignes, /Coeur de vie 23[\s\S]{0,200}revenue\.none/,
+    'un bien sans versement ce mois-ci ne dit pas « aucun versement »')
+})
+
+test("LE TEST QUI COMPTE : une ligne dont le MONTANT manque ne dit JAMAIS 0,00 €", () => {
+  // ⚠ CONSTAT GRAVE DE LA REVIEW, MESURE. Le module SAIT qu'un montant manque
+  // (`refuses.montant`), et la ligne ne lisait ni ce compteur ni les motifs :
+  // elle affichait « 0,00 € », un FAIT, au niveau du bien, sous un total juste.
+  // Et le faux zero etait PIRE que l'absence : un bien qui n'a vraiment rien
+  // touche n'a pas de cle, donc dit « aucun versement » SANS chiffre. L'ecran
+  // avait deux rendus, et c'est le FAUX qui portait le nombre.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } })
+    },
+    total: parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  assert.ok(!/0[.,]00/.test(lignes), `la ligne affiche un zero : ${lignes}`)
+  assert.match(lignes, /revenue\.unavailable/, 'la ligne ne dit pas que le montant est non calculable')
+  assert.match(lignes, /revenue\.no_amount_short/, 'la ligne ne porte pas sa marque')
+})
+
+test("LE TEST QUI COMPTE : le compte de sejours d'une ligne ne compte pas les refuses", () => {
+  // « 2 sejours — 300,00 € » quand le total ne couvre qu'un sejour sur deux est
+  // incoherent EN SOI : les deux nombres de la meme ligne se contredisent, et
+  // rien ne dit lequel croire.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 2, total_cents: 30000, recu_cents: 30000, refuses: { montant: 1, date: 0 } })
+    },
+    total: parBien({ sejours: 2, total_cents: 30000, recu_cents: 30000, refuses: { montant: 1, date: 0 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  // ⚠ LE BANC NE MONTRE NI LES NOMBRES NI LES MONTANTS : son double de `t` rend
+  // la CLE (`revenue.stays` au lieu de « 1 séjours »), et son double de
+  // `I18n.money` rend une chaine vide. On juge donc ce qu'il peut dire, et on
+  // verifie le NOMBRE a la source, juste apres.
+  assert.match(lignes, /revenue\.no_amount_short/, 'le refus n est pas marque sur la ligne')
+  // Un montant calculable prend la branche `<strong>`, pas la branche
+  // « non calculable » — c'est la distinction que la ligne doit faire.
+  assert.match(lignes, /<strong class="num small">/,
+    'un montant calculable est rendu comme non calculable')
+  assert.ok(!lignes.includes('revenue.unavailable'),
+    'une ligne qui porte 300 € se dit non calculable')
+
+  // ⚠ ET LE NOMBRE PASSE A `revenue.stays` SE VERIFIE A LA SOURCE, parce que
+  // c'est tout l'objet de ce test. La page calcule
+  // `Math.max(0, d.sejours - refuses)` : 2 sejours dont 1 refuse = 1.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  assert.match(html, /const comptes = Math\.max\(0, d\.sejours - refuses\)/,
+    'le compte des sejours ne retire plus les refuses')
+  assert.match(html, /t\('revenue\.stays', \{ n: comptes \}\)/,
+    '`revenue.stays` ne recoit plus le compte des sejours COMPTES')
+})
+
+test("LE TEST QUI COMPTE : l'argent rattache a AUCUN bien connu se DIT", () => {
+  // ⚠ SECOND CONSTAT GRAVE DE LA REVIEW : 1 000 € d'ecart muet entre le bandeau
+  // et la somme des lignes. `par_bien` est groupe par `property_id` de
+  // `bookings_snapshot` ; l'ecran ne peint que les cles qui correspondent a un
+  // bien. Une cle ORPHELINE — `property_id` nul, re-keying, bien supprime —
+  // entrait dans le total et sortait de l'affichage sans aucune reserve.
+  //
+  // ⚠ CE TEST GARDE L'AFFICHAGE, PAS LE COMPTAGE, et la review du 28 octobre
+  // 2026 a eu raison de le dire : sa fixture n'etait PLUS produisible par
+  // l'endpoint. L'agregat `revenus_hors_mois` ne comptait que les
+  // `property_uuid` NULS, donc une cle `CLE-DISPARUE` (un UUID pendant, bien
+  // supprime) rendait `hors_biens = 0` — l'ecart muet se rouvrait, et ce test
+  // restait vert en peignant une reserve que le serveur n'aurait jamais
+  // envoyee.
+  //
+  // La migration `2026-10-26-revenus-hors-biens.sql` l'a referme : le compteur
+  // demande maintenant « ce bien existe-t-il encore ? » (`not exists` sur
+  // `properties`, borne au compte) et non « l'UUID est-il nul ? ». La fixture
+  // est donc redevenue produisible, et le COMPTAGE est mesure sur des donnees
+  // reelles par `scripts/verifier-parite-revenus.js`, qui compare `hors_biens`
+  // et `hors_biens_cents` a l'oracle — ce qu'il ne faisait pas non plus.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 1, total_cents: 50000, recu_cents: 50000 }),
+      '': parBien({ sejours: 1, total_cents: 50000, recu_cents: 50000 }),
+      'CLE-DISPARUE': parBien({ sejours: 1, total_cents: 50000, recu_cents: 50000 })
+    },
+    total: parBien({ sejours: 3, total_cents: 150000, recu_cents: 150000 }),
+    hors_mois: parBien({}),
+    hors_biens: parBien({ sejours: 2, total_cents: 100000, recu_cents: 100000 })
+  })
+  p.interne.renderRevenus()
+  const res = p.cache('[data-bind="revenue-reserves"]')
+  assert.strictEqual(res.hidden, false, 'la reserve est masquee alors que 1 000 € ne sont sur aucune ligne')
+  assert.match(res.textContent, /revenue\.hors_biens/,
+    'rien ne dit que de l argent du total n est sur aucune ligne')
+})
+
+test("LE TEST QUI COMPTE : les trois reserves s'affichent, et chacune dit sa cause", () => {
+  // Elles ne se melangent pas : un montant manquant se repare dans le payload
+  // du provider, une date manquante dans la table des delais, un brut attend
+  // que la plateforme transmette sa commission.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 3, total_cents: 90000, recu_cents: 90000, bruts: 1, refuses: { montant: 1, date: 0 } }) },
+    total: parBien({ sejours: 3, total_cents: 90000, recu_cents: 90000, bruts: 1, refuses: { montant: 1, date: 0 } }),
+    hors_mois: parBien({ sejours: 2, refuses: { montant: 0, date: 2 }, motifs: { canal_inconnu: 2 } }),
+    hors_biens: parBien({}),
+    tronque: true
+  })
+  p.interne.renderRevenus()
+  const res = p.cache('[data-bind="revenue-reserves"]')
+  assert.strictEqual(res.hidden, false)
+  for (const cle of ['revenue.gross_count', 'revenue.no_amount', 'revenue.no_date', 'revenue.truncated']) {
+    assert.ok(res.textContent.includes(cle), `la reserve ${cle} n est pas dite : ${res.textContent}`)
+  }
+})
+
+test("LE TEST QUI COMPTE : sans le droit `reservations`, le bloc n'est pas dans l'ecran", () => {
+  // ⚠ ET LE MASQUAGE SE DOUBLE D'UNE GARDE SERVEUR, qui est dans l'endpoint —
+  // regle absolue du depot : le masquage tombe sur une feuille de style absente.
+  // Le test de la garde serveur est juste en dessous.
+  const p = bancDeRendu({
+    biens: REV_BIENS, ageCache: null,
+    ecran: { biens: REV_BIENS, revenus: null, droits: { reservations: false } }
+  })
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-section"]').hidden, true,
+    'le bloc revenus s affiche sans le droit `reservations`')
+})
+
+test("LE TEST QUI COMPTE : la garde SERVEUR du droit `reservations` existe, et precede la lecture", () => {
+  // ⚠ LA REVIEW A MONTRE QU'AUCUN TEST NE LA TENAIT : la retirer laissait la
+  // suite au vert. Or le payload part dans le `localStorage` du membre pour
+  // 12 h, et le masquage UI ne protege rien.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'ecran', 'aujourdhui.js'), 'utf8')
+  const bloc = (src.match(/const lireRevenus = async \(\) => \{[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'lireRevenus a change de forme')
+  assert.match(bloc, /if \(!droits\.reservations\) return null/,
+    'la garde serveur du droit `reservations` a disparu de lireRevenus')
+  // ⚠ ELLE PRECEDE TOUT APPEL, et la forme de l'appel a change le 27 octobre
+  // 2026 : ce n'est plus `.from(...)` mais `.rpc(...)`. Un test reste sur
+  // l'ancienne forme serait devenu vert pour rien — il ne trouvait plus de
+  // lecture a comparer, donc `iLecture` valait -1 et la condition tombait.
+  const iGarde = bloc.indexOf('if (!droits.reservations)')
+  const iAppel = Math.min(
+    ...['.rpc(', '.from('].map(x => { const i = bloc.indexOf(x); return i === -1 ? Infinity : i })
+  )
+  assert.ok(Number.isFinite(iAppel), 'aucun appel trouve dans lireRevenus : ce test ne mesure rien')
+  assert.ok(iGarde > -1 && iGarde < iAppel, 'un appel part avant la garde du droit')
+  // ⚠ ET LA TRONCATURE N'EXISTE PLUS : l'agregat ne pagine pas, il groupe. Ce
+  // qui remplace ce garde-fou est la distinction entre une fonction ABSENTE
+  // (migration en attente, donc « non calculable ») et une vraie panne.
+  assert.match(bloc, /indisponibles\.push\('revenus'\)/,
+    'une lecture impossible ne serait plus signalee : l ecran afficherait un mois a zero')
+})
+
+test("LE TEST QUI COMPTE : l'endpoint passe le perimetre en UUID, et l'agregat groupe en UUID", () => {
+  // ⚠ LA REGLE DURE N° 3, DU COTE SERVEUR, ET ELLE A CHANGE DE FORME LE
+  // 27 OCTOBRE 2026. L'endpoint comparait des cles PROVIDER ; il passe
+  // maintenant `refsUuid` — la liste des biens confies a un membre, en UUID —
+  // a une fonction SQL qui groupe par `property_uuid`.
+  //
+  // Les deux cotes sont donc des UUID. Ce qui serait faux aujourd'hui, c'est
+  // l'INVERSE de l'ancienne erreur : passer `refsTexte` a une fonction qui
+  // compare des UUID ne rendrait AUCUNE correspondance — un ecran vide sous un
+  // bandeau vide, pour un membre delegue SEULEMENT, donc invisible en recette.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'ecran', 'aujourdhui.js'), 'utf8')
+  const bloc = (src.match(/const lireRevenus = async \(\) => \{[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'lireRevenus a change de forme')
+
+  assert.match(bloc, /rpc\('revenus_du_mois'/, 'l agregat du mois n est pas appele')
+  assert.match(bloc, /rpc\('revenus_hors_mois'/, 'l agregat hors mois n est pas appele')
+  assert.match(bloc, /p_refs: refsUuid/, 'le perimetre n est plus passe en UUID')
+  assert.ok(!/p_refs: refsTexte/.test(bloc),
+    'le perimetre est passe en cle TEXTE a une fonction qui compare des UUID : aucune correspondance')
+  assert.match(bloc, /p_aujourdhui: jour/, 'le jour de Paris n est plus passe a l agregat')
+
+  // ⚠ ET L'ENDPOINT NE CALCULE PLUS RIEN. C'est tout l'objet de
+  // l'architecture : 3,8 Mo et 569-961 ms retires du chemin critique.
+  const codeEntier = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  for (const interdit of ['revenusDuMois', 'fenetreDeLecture', 'tableDesDelais']) {
+    assert.ok(!codeEntier.includes(interdit),
+      `l endpoint calcule encore les revenus lui-meme (${interdit})`)
+  }
+  assert.ok(!/from\('delais_versement'\)/.test(codeEntier),
+    'l endpoint relit la table des delais : c est le writer qui s en sert')
+})
+
+test("LE TEST QUI COMPTE : le BANDEAU dit « non calculable », il n'affiche pas 0,00 €", () => {
+  // ⚠ CONSTAT BLOQUANT DE LA REVIEW DU 26 OCTOBRE 2026. La ligne d'un logement
+  // porte cette garde depuis le debut — zero euro ET un montant refuse veut
+  // dire « on ne sait pas », pas « ce logement n'a rien rapporte ». Le BANDEAU,
+  // lui, ecrivait son total sans condition.
+  //
+  // Mesure sur les donnees reelles de staging : `revenus_du_mois(2026-10)` rend
+  // `{sejours: 2, total_cents: 0, sans_montant: 2}`. L'ecran affichait donc
+  // « 0,00 € » en grand, « non calculable » sur la ligne juste en dessous, et
+  // « 2 sejour(s) dont le montant n'est pas calculable » en reserve. Les deux
+  // moities du meme ecran se contredisaient, et c'est le bandeau que l'hote
+  // retient.
+  //
+  // ⚠ CE QUI REND CE TEST POSSIBLE, et ce qui a laissé le defaut survivre si
+  // longtemps : le banc stube `I18n.money` pour rendre la chaine VIDE, donc un
+  // montant s'affiche `''`. Un test qui aurait compare le texte a « 0,00 € »
+  // serait donc vert dans les deux cas — c'est l'angle mort.
+  //
+  // Mais `t()` n'est pas stube de la meme facon : il rend la CLEF. Les deux
+  // etats sont donc parfaitement distinguables ici — `'revenue.unavailable'`
+  // contre `''` — et c'est cette distinction qu'on mesure.
+  //
+  // (Premiere version de ce test : j'assertais `classList.contains('muted')`.
+  // Le noeud du banc n'a pas de `classList` reelle, donc l'assertion echouait
+  // alors que la garde fonctionnait. Mesurer ce que le banc ne simule pas, c'est
+  // se fabriquer un rouge et chercher un defaut la ou il n'y en a pas.)
+  const p = bancRevenus({
+    mois: '2026-10',
+    par_bien: { 'uuid-1': parBien({ sejours: 2, total_cents: 0, refuses: { montant: 2, date: 0 } }) },
+    total: parBien({ sejours: 2, total_cents: 0, refuses: { montant: 2, date: 0 } }),
+    hors_mois: parBien({}),
+    hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-total"]').textContent, 'revenue.unavailable',
+    'le bandeau affiche un montant comme un fait alors qu AUCUN sejour du mois n est calculable')
+  assert.strictEqual(p.cache('[data-bind="revenue-received"]').textContent, '',
+    'le bandeau affiche un « recu » alors que rien n est calculable')
+  assert.strictEqual(p.cache('[data-bind="revenue-upcoming"]').textContent, '',
+    'le bandeau affiche un « a venir » alors que rien n est calculable')
+
+  // ⚠ LA CONTRE-EPREUVE : un mois a ZERO EURO REEL — aucun refus — reste un
+  // fait, et doit s'afficher comme tel. Sans elle, une garde qui dirait
+  // toujours « non calculable » passerait le test ci-dessus.
+  const q = bancRevenus({
+    mois: '2026-10',
+    par_bien: { 'uuid-1': parBien({ sejours: 0, total_cents: 0 }) },
+    total: parBien({ sejours: 0, total_cents: 0 }),
+    hors_mois: parBien({}),
+    hors_biens: parBien({})
+  })
+  q.interne.renderRevenus()
+  assert.notStrictEqual(q.cache('[data-bind="revenue-total"]').textContent, 'revenue.unavailable',
+    'un mois sans aucun sejour est annonce « non calculable » alors que zero est la bonne reponse')
 })

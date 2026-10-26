@@ -225,7 +225,14 @@ test('LE TEST QUI COMPTE : l ecran ne convertit plus la note — plus de `noteSu
     'une seconde conversion a l ecran reintroduirait le double arrondi')
   const source = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
   assert.doesNotMatch(source, /noteSur5/, 'la page ne doit plus convertir')
-  assert.match(source, /note_sur_5/, 'elle affiche la note telle qu elle descend')
+  // ⚠ LA PAGE NE NOMME PLUS `note_sur_5` DEPUIS L'ETAPE 4, et ce n'est pas une
+  // perte : elle le nommait pour l'ETOILE de chaque carte de logement, et les
+  // cartes partent avec le bloc « Vos logements » (inventaire I28). La note
+  // s'affiche maintenant par le module partage `shared/avis-recents.js`, qui
+  // lit `note_sur_5` et le rend — teste chez lui, `tests/avis-recents-dom.test.js`.
+  // Ce qui compte ici est l'invariant : AUCUNE conversion a l'ecran.
+  assert.match(source, /avis-recents/,
+    'la page ne passe plus par le module qui rend la note — qui la rend, alors ?')
 })
 
 test('douzeMoisComplets : les 12 mois qui precedent le mois en cours', async () => {
@@ -403,29 +410,31 @@ function contexteDeRendu (dom) {
 // l'ecran, et il reviendra sur l'en-tete du bloc « Derniers avis » a l'etape 2.
 // Le supprimer sans dire ou l'invariant continue de vivre serait exactement le
 // retrait par omission que l'inventaire de ce lot existe pour empecher.
-test('LE TEST QUI COMPTE (M2) : l etoile de CHAQUE logement affiche la meme note, sans la reconvertir', async () => {
-  const dom = new JSDOM('<!doctype html><body></body>')
-  const ctx = contexteDeRendu(dom)
-  const vm = require('node:vm')
-  vm.createContext(ctx)
-  // ⚠ ENVELOPPE DANS UN BLOC : `const` ne se redeclare pas dans un meme
-  // contexte vm, et on execute l expression plusieurs fois.
-  const source = '{ ' + expressionDeLaPage('const etoile = note && note.', 2) + '\n globalThis.__etoile = etoile }'
-  ctx.note = { note_sur_5: 4.9, notes: 332 }
-  vm.runInContext(source, ctx)
-  assert.match(ctx.__etoile, /4,9/)
-  assert.match(ctx.__etoile, /data-icone="i-review"/)
-  // Un bien sans note n affiche pas d etoile — pas une etoile a zero.
-  ctx.note = { note_sur_5: null, notes: 0 }
-  vm.runInContext(source, ctx)
-  assert.equal(ctx.__etoile, '')
-  ctx.note = null
-  vm.runInContext(source, ctx)
-  assert.equal(ctx.__etoile, '')
+test('LE TEST QUI COMPTE (M2) : la page ne FORMATE plus aucune note elle-meme', async () => {
+  // ⚠ CE TEST GARDAIT L'ETOILE DE CHAQUE CARTE DE LOGEMENT, qui n'existe plus :
+  // les cartes partent avec le bloc « Vos logements » a l'etape 4 (inventaire
+  // I28). Il tenait trois choses, et voici ou chacune est passee :
+  //   · « 4,9 et non 2,5 » — la note n'est pas reconvertie : tenu ci-dessus
+  //     (`noteSur5` absente de la page) et par le module partage ;
+  //   · « un bien sans note n'affiche pas d'etoile a zero » — tenu dans
+  //     `shared/avis-recents.js` et teste chez lui ;
+  //   · « data-icone="i-review" » — l'icone de l'etoile, qui vit maintenant
+  //     dans le module.
+  //
+  // Ce qui reste a garder sur la PAGE est l'invariant de frontiere : elle ne
+  // formate aucune note, donc aucun arrondi ne peut y naitre. Un deuxieme
+  // arrondi est exactement ce qui faisait afficher 4,8 a Colomiers la ou le
+  // calcul juste donne 4,7.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const code = source.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('<!--')).join('\n')
+  for (const interdit of [/noteSur5/, /\/\s*10\b/, /toFixed\s*\(\s*1\s*\)/]) {
+    assert.doesNotMatch(code, interdit,
+      `la page formate ou reconvertit une note : ${interdit}`)
+  }
+  // Et la note qu'elle garde en memoire est celle du serveur, telle quelle.
+  assert.match(code, /etat\.noteGlobale = lu \? lu\.global : null/,
+    'la note globale n est plus prise telle quelle du serveur')
 })
-
-// ─── Les correctifs de la review max du lot (b) ───────────────────────────────
-
 test("LE TEST QUI COMPTE : la banniere de surreservation est RENDUE, pas seulement lue", () => {
   // ⚠ LE CONSTAT LE PLUS GRAVE DE LA REVIEW. En deplacant la lecture des
   // alarmes vers l'appel d'ecran, j'ai emporte l'appel de rendu avec elle :
@@ -512,13 +521,52 @@ test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", ()
   // ceux dont il porte vraiment les donnees. Un rendu de plus ici doit etre un
   // choix, et c'est cette assertion qui oblige a le declarer.
   const rendus = [...bloc.matchAll(/\b(render[A-Za-z]+)\(\)/g)].map(m => m[1]).sort()
-  assert.deepEqual(rendus, ['renderBiens', 'renderCompteurs', 'renderDerniersAvis'],
+  assert.deepEqual(rendus, ['renderCompteurs', 'renderDerniersAvis', 'renderRevenus'],
     'le premier affichage peint autre chose que ce que le cache porte : ' + rendus.join(', ')
     + '. Les sejours n y sont pas (ils viennent de /api/menages), les taches et les '
     + 'alarmes non plus (le cache refuse de les ecrire).')
-  // Et la ligne du bien n'affirme « aucune arrivee » que si on a lu les sejours.
-  assert.match(html, /etat\.menagesOk === true\s*\n?\s*\?\s*\(e\.prochaineArrivee/,
-    'la carte du bien affirme « Aucune arrivee prevue » sans avoir lu les sejours')
+  // ⚠ ET LA MEME REGLE, TRANSPOSEE AU BLOC QUI A REMPLACE LES CARTES. L'ancienne
+  // assertion gardait « `etat.menagesOk === true ? (e.prochaineArrivee` » : la
+  // carte d'un bien n'affirmait « Aucune arrivee prevue » qu'apres avoir lu les
+  // sejours. Les cartes partent a l'etape 4 ; la regle, elle, ne part pas —
+  // c'est la meme famille de faux zero, sur une autre donnee.
+  //
+  // Dans « Revenus nets », le faux zero serait un total a 0 € affiche alors que
+  // la lecture a echoue : l'hote lirait « ce mois n'a rien rapporte », un FAIT.
+  // Le bloc doit donc refuser de peindre un total sans `rev.total`.
+  assert.match(html, /if \(!rev \|\| !rev\.total\)/,
+    'le bloc revenus peint un total sans verifier qu il a ete lu')
+  assert.match(html, /revenue\.unavailable/,
+    'une lecture de revenus en echec s afficherait comme un mois a zero euro')
+  // Et l'ordre compte : le refus AVANT toute peinture de chiffre.
+  //
+  // ⚠ L'INVARIANT EST « LE TOTAL N'EST PAS DEREFERENCE AVANT SA GARDE », et
+  // cette assertion a ete reformulee DEUX FOIS le 26 octobre 2026 :
+  //
+  //   · elle cherchait d'abord la chaine
+  //     `$('[data-bind="revenue-total"]').textContent = euros` AU CARACTERE.
+  //     Ajouter la garde « tous les sejours non calculables » a change la forme
+  //     de l'affectation sans toucher a l'invariant, et le test a rougi en
+  //     annoncant « le total est peint avant le refus » — ce qui etait FAUX.
+  //     C'est le defaut que le test voisin declare avoir corrige (« LA LISTE,
+  //     PAS LA SEQUENCE ») : il vivait encore ici.
+  //   · puis j'ai cherche le NŒUD `revenue-total`, et c'etait faux aussi : sa
+  //     premiere occurrence est dans `videDuTotal()`, la fonction de repli que
+  //     le refus APPELLE. Elle est donc definie avant lui, par construction.
+  //
+  // Ce qui ne peut pas se contourner : `rev.total` est lu dans une variable
+  // APRES la garde, et c'est cette variable que le bandeau peint.
+  const blocRevenus = (html.match(/function renderRevenus[\s\S]*?\n\}/) || [''])[0]
+  const iRefus = blocRevenus.indexOf('if (!rev || !rev.total)')
+  const iLecture = blocRevenus.indexOf('const T = rev.total')
+  assert.ok(iRefus > -1, 'le refus a disparu de renderRevenus')
+  assert.ok(iLecture > -1, 'le total n est plus lu dans `T` : ce test ne mesure plus rien')
+  assert.ok(iRefus < iLecture,
+    'le total est dereference avant que le refus ne soit evalue')
+  // Et c'est bien `T` que le bandeau peint, pas `rev.total` en direct.
+  const apres = blocRevenus.slice(iLecture)
+  assert.match(apres, /revenue-total[\s\S]{0,400}euros\(T\./,
+    'le bandeau peint autre chose que le total garde')
 })
 
 test("LE TEST QUI COMPTE : un echec de l'appel d'ecran ne re-date pas le cache", () => {
@@ -578,12 +626,15 @@ test("LE TEST QUI COMPTE : des biens ILLISIBLES ne s'affichent pas comme « aucu
   // L'endpoint rend `null` quand il n'a pas pu lire. `section.hidden = !length`
   // faisait disparaitre la section, les notes et les indicateurs sans
   // explication — en laissant « + Ajouter un bien » visible.
+  // ⚠ TRANSPOSE A `renderRevenus` (etape 4) : le bloc « Vos logements » est
+  // remplace par « Revenus nets », et les TROIS etats que ce test garde sont
+  // repris mot pour mot — lecture en echec, pas encore lue, lue et vide.
   const html = lire('pages/aujourdhui.html')
-  const bloc = (html.match(/function renderBiens[\s\S]*?\n  section\.hidden = false/) || [''])[0]
-  assert.ok(bloc, 'renderBiens a change de forme')
-  assert.match(bloc, /etat\.biens === null/,
+  const bloc = (html.match(/function renderRevenus[\s\S]*?\n  if \(vide\) vide\.hidden = true/) || [''])[0]
+  assert.ok(bloc, 'renderRevenus a change de forme')
+  assert.match(bloc, /!Array\.isArray\(etat\.biens\)/,
     'une lecture de biens en echec est traitee comme une liste vide')
-  assert.match(bloc, /properties\.unavailable/, 'rien ne dit a l hote que la lecture a echoue')
+  assert.match(bloc, /revenue\.unavailable/, 'rien ne dit a l hote que la lecture a echoue')
 
   // ⚠ ET LE RISQUE JUMEAU, NE A L'ETAPE 1 : « Ajoutez votre premier logement »
   // sur un compte qui en a quatre. `etat.biens` vaut `[]` tant que l'appel
@@ -621,4 +672,38 @@ test("LE TEST QUI COMPTE : au premier affichage, les biens arrivent AVANT les no
   assert.ok(iBiens >= 0 && iNotes >= 0, 'la branche du cache a change de forme')
   assert.ok(iBiens < iNotes,
     'les notes sont chargees avant les biens : leur boucle tourne sur une liste vide')
+})
+
+test('le bloc revenus distingue « calcul en cours » de « non calculable »', () => {
+  // ⚠ UN TEST DE FORME, ET JE L'ASSUME. Le bloc des revenus n'a pas de harnais
+  // DOM dans ce fichier — les trois tests voisins lisent deja le code par
+  // `indexOf`. Ce qui est mesure PAR APPEL, dans
+  // tests/ecran-aujourdhui-isolation.test.js, c'est la DECISION : l'endpoint
+  // refuse de rendre un chiffre quand le calcul n'est pas fini. Ici on verifie
+  // seulement que la page ne reduit pas les deux motifs a un seul mot.
+  //
+  // POURQUOI CA COMPTE : « non calculable » decrit un defaut — il n'y a rien a
+  // attendre. « Calcul en cours » decrit un etat transitoire : les minutes qui
+  // suivent le collage d'une migration, ou une nuit de rattrapage. Afficher le
+  // premier pour le second fait conclure a une panne, et c'est ce qu'un hote
+  // signale au fondateur.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.match(code, /revenus_calcul_en_cours/,
+    'la page ne lit plus le motif « calcul en cours » : les deux etats se confondent')
+  assert.match(code, /t\(calculEnCours\(\) \? 'revenue\.computing' : 'revenue\.unavailable'\)/,
+    'le total ne choisit plus son motif')
+  // ⚠ ET LES DEUX CLEFS EXISTENT DANS LES TROIS LANGUES, sinon l'ecran
+  // afficherait la clef brute — le defaut que `scripts/i18n-check.js` garde,
+  // verifie ici parce que cette clef est neuve.
+  for (const langue of ['fr', 'en', 'es']) {
+    const dict = JSON.parse(fs.readFileSync(
+      path.join(__dirname, '..', 'shared', 'i18n', `${langue}.json`), 'utf8'))
+    for (const clef of ['revenue.computing', 'revenue.unavailable']) {
+      assert.ok(dict[clef] && String(dict[clef]).trim(),
+        `${langue}.json n a pas de texte pour ${clef}`)
+    }
+    assert.notStrictEqual(dict['revenue.computing'], dict['revenue.unavailable'],
+      `${langue}.json : les deux motifs disent la meme phrase, donc la distinction est perdue`)
+  }
 })

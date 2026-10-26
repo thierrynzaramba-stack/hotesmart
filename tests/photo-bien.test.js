@@ -112,12 +112,39 @@ test('les cles photo.* existent dans les trois langues', () => {
   }
 })
 
-test('l’accueil affiche photo_url quand elle existe, le fond neutre sinon', () => {
-  const html = sansCommentaires(lire('pages/aujourdhui.html'))
-  assert.ok(html.includes('photo_url'), 'la colonne est lue')
-  assert.ok(/b\.photo_url\s*\?/.test(html), 'photo seulement si presente')
-  assert.ok(html.includes('property__photo--none'), 'le fond neutre reste le repli')
-  assert.ok(/img src="\$\{esc\(b\.photo_url\)\}"/.test(html), 'URL echappee')
+test('la liste et la fiche des logements affichent photo_url, le fond neutre sinon', () => {
+  // ⚠ CE TEST VISAIT L'ACCUEIL, ET LES CARTES DE LOGEMENT L'ONT QUITTE A
+  // L'ETAPE 4 du lot « Aujourd'hui V5 » : le bloc « Vos logements » est
+  // remplace par « Revenus nets », et les cartes vivent sur /logements, qui les
+  // rend mieux (photo, note, occupation, prochaine arrivee). Inventaire I25.
+  //
+  // ⚠ ET LA REGLE N'EST PAS PERDUE, VERIFIE AVANT DE DEPLACER CE TEST : la
+  // photo est rendue par `shared/logements-liste.js` l 431 (la liste) et
+  // `shared/logement-fiche.js` l 313 (la fiche), dans les deux cas avec l'URL
+  // ECHAPPEE et un repli quand elle manque. C'est la que le test la garde
+  // desormais — deplacer un test sans verifier que sa regle a suivi serait
+  // retirer un garde-fou en croyant le ranger.
+  // ⚠ SUR LA SOURCE BRUTE, PAS SUR `sansCommentaires`, ET C'EST MESURE : sur
+  // `shared/logement-fiche.js`, ce nettoyage avale le bloc qui porte le
+  // ternaire (son motif `/\*[\s\S]*?\*\//` traverse le fichier). Le motif
+  // cherche n'apparait dans aucun commentaire du depot, donc le nettoyage
+  // n'apporte rien ici — et il faisait rougir un fichier conforme.
+  for (const f of ['shared/logements-liste.js', 'shared/logement-fiche.js']) {
+    const src = lire(f)
+    assert.ok(src.includes('photo_url'), `${f} : la colonne n est pas lue`)
+    assert.ok(/\.photo_url\s*\n?\s*\?/.test(src), `${f} : photo affichee sans verifier qu elle existe`)
+    assert.ok(/img src="\$\{esc\([a-z]+\.photo_url\)\}"/.test(src),
+      `${f} : l URL de la photo n est pas echappee`)
+  }
+  // Le repli visuel : un fond neutre, pas une image cassee.
+  assert.ok(lire('shared/logements-liste.js').includes('log-photo'),
+    'la liste n a plus de repli visuel pour un bien sans photo')
+
+  // ⚠ ET L'ACCUEIL N'EN PARLE PLUS DU TOUT : si `photo_url` y revenait, ce
+  // serait une carte de logement remise, donc le bloc « Vos logements » qui
+  // repousse — et le lien vers /logements qui fait doublon.
+  assert.ok(!sansCommentaires(lire('pages/aujourdhui.html')).includes('photo_url'),
+    'l accueil lit de nouveau photo_url : une carte de logement y est revenue')
 })
 
 test('channel-property expose photo_url (la liste des biens de /biens)', () => {

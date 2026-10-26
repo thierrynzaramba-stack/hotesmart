@@ -50,3 +50,63 @@ alter table public.delais_versement
 alter table public.delais_versement
   add constraint delais_versement_jours_sense
   check (jours >= 0 and jours <= 180);
+
+-- ╶╶╶ PREUVE, A COLLER JUSTE APRES ╶╶╶
+--
+-- ⚠ CE QUI PRECEDE NE SE VERIFIE PAS AUTREMENT EN
+-- PRODUCTION. `scripts/verifier-migration-delais-
+-- versement.js` eprouve les deux CHECK en tentant
+-- des insertions, donc sous `--ecrit`, et `--ecrit`
+-- REFUSE la production par construction. Au go prod,
+-- le durcissement n'y serait donc prouve que par
+-- PRESENCE du fichier — or la lecon de ce fichier est
+-- justement qu'une instruction peut reussir en
+-- silence sans rien poser. Constat de la session chef
+-- de file, 26 octobre 2026.
+--
+-- ⚠ UNE SEULE REQUETE, ET C'EST VOULU : l'editeur
+-- Supabase n'affiche le resultat que de la DERNIERE
+-- instruction d'un collage. Deux `select` a la suite
+-- rendraient la preuve du `default` et feraient
+-- disparaitre celle des CHECK, sans rien dire.
+--
+-- ATTENDU — TROIS LIGNES, ET PAS DEUX :
+--   check  | delais_versement_base_connue  | CHECK ...
+--   check  | delais_versement_jours_sense  | CHECK ...
+--   defaut | jours                         | (aucun)
+-- Une ligne `check` manquante = la contrainte n'est
+-- pas posee. `defaut` autre que `(aucun)` = le
+-- `drop default` n'a pas pris, et une insertion qui
+-- oublie `jours` entrera en silence a zero jour.
+-- C'est du CATALOGUE : lisible dans l'editeur, et
+-- hors de portee de l'API (dette 32).
+
+-- ⚠ LES TROIS COLONNES SONT CASTEES EN `text`, ET CE
+-- N'EST PAS DU STYLE. Les deux branches de l'union
+-- n'ont pas les memes types : `pg_constraint.conname`
+-- est un `name`, `information_schema.columns.
+-- column_name` un `sql_identifier`, et
+-- `column_default` un `character_data`. Postgres sait
+-- resoudre une union de la categorie String, mais je
+-- n'ai PAS pu eprouver cette requete — aucune base
+-- Postgres locale, et l'API ne prend pas de SQL. Un
+-- cast explicite retire la seule part de pari qui
+-- restait : au go prod, une erreur de type se lirait
+-- comme un echec de la migration.
+
+select 'check'::text as preuve,
+       conname::text as objet,
+       pg_get_constraintdef(oid)::text as detail
+  from pg_constraint
+ where conrelid =
+       'public.delais_versement'::regclass
+   and contype = 'c'
+union all
+select 'defaut'::text,
+       column_name::text,
+       coalesce(column_default::text, '(aucun)')
+  from information_schema.columns
+ where table_schema = 'public'
+   and table_name = 'delais_versement'
+   and column_name = 'jours'
+ order by 1, 2;
