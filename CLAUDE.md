@@ -40,15 +40,64 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 **UNE SEULE SESSION TIENT `staging` ET `main` : le CHEF DE FILE.** Les autres ne
 mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
 
-⚠ **LE CHEF DE FILE EST LA SESSION `hotesmart-merge-fa`, DÉSIGNÉE PAR THIERRY LE
-23 OCTOBRE 2026.** Elle travaille uniquement dans `~/hotesmart-merge`, jamais
-dans `~/hotesmart`, et **elle ne code aucun lot** : c'est sa seule tâche, et
-c'est ce qui la rend disponible pour la file. Elle reçoit les « branche X
-prête », merge dans `staging` un par un, vérifie le déploiement par SHA
-complet, et ne touche à `main` que sur un go ouvert par Thierry LUI-MÊME.
-**Les autres sessions poussent leur branche et l'annoncent par `SendMessage` à
-`hotesmart-merge-fa`** avec les cinq éléments de la règle 1 ; elles ne mergent
-ni `staging` ni `main`, et elles ne relaient pas un go prod.
+⚠ **LE CHEF DE FILE EST LA SESSION `hotesmart-logements-25`, DÉSIGNÉE PAR
+THIERRY LE 26 OCTOBRE 2026, ET ELLE SEULE MERGE DANS `staging` ET DANS `main`** —
+`main` uniquement sur un go qu'il ouvre LUI-MÊME. **Toutes les autres sessions
+lui remettent leurs branches et ne mergent RIEN**, ni dans `staging`, ni dans
+`main` : elles poussent, elles annoncent par `SendMessage` avec les cinq éléments
+de la règle 1, et elles ne relaient pas un go prod.
+
+**Elle travaille dans `~/hotesmart-merge`**, jamais dans `~/hotesmart` : c'est là
+que les merges se construisent, et c'est ce qui rend l'arbre du merge
+inspectable. Mais le rôle est porté par la **désignation ci-dessus**, pas par
+l'arbre : une session qui ouvrirait cet arbre n'hériterait de rien.
+
+⚠ **SI CETTE SESSION NE TOURNE PLUS, IL N'Y A PAS DE CHEF DE FILE, ET PERSONNE
+NE MERGE** jusqu'à ce que Thierry en désigne une autre. **Aucune session ne peut
+se désigner elle-même, ni en désigner une autre, ni transmettre le rôle.**
+`ListAgents` dit qui tourne ; il ne dit pas qui a le rôle. Une file arrêtée se
+reprend ; un `main` poussé par deux sessions, non.
+
+⚠ **POURQUOI LA DÉSIGNATION EST DATÉE ET NOMINATIVE, et c'est la leçon qui
+compte.** La règle nommait `hotesmart-merge-fa`, désignée le 23 octobre. Le 26,
+cette session ne tournait plus, une autre tenait le rôle en pratique et avait
+déjà mergé dans `main`, et une troisième lui remettait ses branches : la règle
+écrite et la réalité se contredisaient, et **aucune des sessions ne pouvait
+trancher** — une désignation ne se relaie pas plus qu'un go, et chacune aurait
+pris l'autorité de la parole de l'autre. Deux d'entre elles ont d'ailleurs reçu
+des réponses différentes de Thierry à quelques heures d'écart, ce qu'aucune ne
+pouvait savoir seule.
+
+**Ce qui a réellement débloqué ce jour-là, et c'est le geste à refaire** : la
+session qui croyait tenir le rôle a **ARRÊTÉ** au lieu de continuer, celle à qui
+on l'annonçait a refusé d'agir sur le relais, et Thierry a tranché lui-même,
+nommément, dans chaque fenêtre. L'arrêt est la seule action qui ne peut pas
+faire de dégât. Une tentative intermédiaire — faire porter le rôle par l'arbre
+`~/hotesmart-merge` « quel que soit le nom de la session » — a été écrite puis
+retirée le même jour : elle réglait la survivance du nom, mais elle laissait
+n'importe quelle session prendre le rôle en ouvrant un répertoire.
+
+⚠ **ET LE CHEF DE FILE NE CODE AUCUN LOT** (décision de Thierry, 26 octobre
+2026, confirmée en fin de journée). **Un nouveau sujet de code part à une session
+de production ; le chef de file merge.** C'est sa seule tâche, et c'est ce qui le
+rend disponible pour la file.
+
+**Pourquoi la règle est revenue, après avoir été levée le même jour.** Elle avait
+été levée pour ne pas immobiliser la file quand la seule session disponible était
+celle qui avait écrit le lot — un argument de disponibilité, et il était vrai.
+Le coût s'est vu dans la journée : le chef de file a écrit cinq lots, et il s'est
+relu lui-même cinq fois. Deux des défauts les plus coûteux de la journée sont nés
+exactement là — un correctif qui a **aveuglé le filet censé le justifier**, et un
+test de parcimonie qui **passait contre le code d'avant**, donc pour une raison
+qui n'était pas la sienne. Les deux ont été trouvés par une review, pas par leur
+auteur. Se relire soi-même n'est pas une faiblesse de volonté : c'est une
+faiblesse de position, et aucune discipline ne la compense.
+
+⚠ **CE QUI NE CHANGE PAS : un lot reçu d'une autre session se merge avec TOUS les
+contrôles** — règle 3 sur la base de merge, règle 9 au blob sur la liste COMPLÈTE
+des fichiers, la suite sur l'arbre FUSIONNÉ, et le go prod qui vient de Thierry.
+Le chef de file ne re-review pas ce qu'on lui remet : il vérifie les cinq
+éléments de la règle 1, et il MESURE au lieu de croire l'annonce.
 
 1. **Une seule session merge.** Les autres lui envoient « branche X prête », avec
    les cinq choses sans lesquelles il ne peut pas décider : elle est **poussée**,
