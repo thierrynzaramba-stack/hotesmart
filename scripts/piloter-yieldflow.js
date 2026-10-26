@@ -21,6 +21,7 @@
 // fenetre est un compte rendu, une lecture en echec est une sortie 1.
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 const { nuitsAOuvrir, PREFIXE_MARQUEUR } = require('../lib/moteur-ouverture')
 const { calculerPrix } = require('../lib/moteur-prix')
 const { piloterLesBiens } = require('../lib/pilote-quotidien')
@@ -43,7 +44,7 @@ const jour = (args.find(a => a.startsWith('--jour=')) || '').slice(7) || null
 // `--go` avec `--jour` est refuse : le marqueur serait pose a la date REELLE
 // pour un travail fait a une date injectee, et le cron sauterait le bien.
 if (GO && jour) { console.error('REFUS : --go et --jour ensemble poseraient un marqueur faux. Le dry-run accepte --jour.'); process.exit(1) }
-if (GO && projet === 'cjmrizpdyhrcurmgyrhs' && !args.includes('--prod')) { console.error('REFUS : --go sur la PRODUCTION exige --prod (le cron y tourne deja).'); process.exit(1) }
+if (GO && nomDeLaBase(URL) === 'PRODUCTION' && !args.includes('--prod')) { console.error('REFUS : --go sur la PRODUCTION exige --prod (le cron y tourne deja).'); process.exit(1) }
 
 // Le client canal : meme fonction que le fullsync et le cron. Sans variables
 // CHANNEL_* (un poste qui n'a que la base), on fournit un client qui REFUSE

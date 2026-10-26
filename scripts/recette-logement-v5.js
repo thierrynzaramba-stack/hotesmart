@@ -31,6 +31,8 @@ for (const ligne of fs.readFileSync(FICHIER_ENV, 'utf8').split('\n')) {
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
 }
 
+const { nomDeLaBase, refDuProjet } = require('./../lib/empreinte-base')
+
 const { SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_KEY, TEST_EMAIL, TEST_PASSWORD } = process.env
 for (const [nom, v] of Object.entries({ SUPABASE_URL, SUPABASE_ANON_KEY, TEST_EMAIL, TEST_PASSWORD })) {
   if (!v) { console.error(`${nom} absente de ${FICHIER_ENV}`); process.exit(1) }
@@ -67,7 +69,18 @@ function controlerFuite (etiquette, json, valeursInterdites) {
 }
 
 ;(async () => {
-  console.log(`base Supabase : ${String(SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]}`)
+  // ⚠ L'EMPREINTE PASSE PAR LE MODULE, ET ELLE REFUSE (26 octobre 2026, constat
+  // GRAVE de la re-review). Ce script lisait la reference par un motif maison
+  // — celui dont `refDuProjet` vient de fermer les trous — et il ne refusait
+  // RIEN : il imprimait la base et continuait. Or il ouvre un client de
+  // SERVICE, qui contourne la RLS. Un resultat de recette qui ne dit pas OU il
+  // a ete obtenu ne prouve rien.
+  const base = nomDeLaBase(SUPABASE_URL)
+  console.log(`base Supabase : ${base} (${refDuProjet(SUPABASE_URL) || 'reference illisible'})`)
+  if (base === 'INCONNUE') {
+    console.error('ECHEC : projet Supabase inconnu — ni la production, ni staging.')
+    process.exit(1)
+  }
   console.log(`preview       : ${BASE}`)
 
   // Les identifiants partenaire a traquer, lus en service key (jamais imprimes).

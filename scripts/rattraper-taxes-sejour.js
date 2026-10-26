@@ -24,6 +24,7 @@
 // Rejouable : upsert sur (user_id, booking_id).
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 const { taxeSejourDe } = require('../lib/taxe-sejour/lecture')
 const { ligneTaxe, ecrireLot, TABLE } = require('../lib/taxe-sejour/writer')
 
@@ -36,7 +37,19 @@ const PAGE = 200
   const projet = String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]
   const { data: biens, error: eB } = await sb.from('properties').select('id, user_id, name, provider_property_id')
   if (eB || !biens) { console.error('ECHEC : biens illisibles', eB ? eB.message : ''); process.exit(1) }
-  console.log(`Projet ${projet} · biens = ${biens.length} (5 = production, 3 = staging) · ${GO ? 'ECRITURE (--go)' : 'A BLANC'}`)
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Base ${base} · biens = ${biens.length} · ${GO ? 'ECRITURE (--go)' : 'A BLANC'}`)
+  // ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, ET ELLE REFUSE (26 octobre 2026).
+  // Ce script imprimait « biens = N (5 = production, 3 = staging) » puis
+  // continuait sur n'importe quelle base designee par l'environnement. Deux
+  // defauts dans une ligne : la legende est FAUSSE depuis que staging porte
+  // quatre biens, et une legende n'est pas une garde — elle se lit apres coup,
+  // dans une sortie que personne ne relit quand tout s'est bien passe.
+  if (base === 'INCONNUE') {
+    console.error(`ECHEC : projet Supabase inconnu — ni la production, ni staging.`)
+    console.error(`Un resultat qui ne dit pas OU il a ete obtenu ne prouve rien.`)
+    process.exit(1)
+  }
   if (GO && PROJET !== projet) { console.error(`REFUS : --projet=${PROJET || '(absent)'} ne designe pas la base ouverte (${projet}). Rien n a ete ecrit.`); process.exit(1) }
 
   const { count: total, error: eC } = await sb.from('bookings_snapshot').select('id', { count: 'exact', head: true })

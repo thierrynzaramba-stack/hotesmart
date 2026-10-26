@@ -16,6 +16,7 @@
 // est separee de celle des periodes de ratio, exprès.
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 
 ;(async () => {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -23,7 +24,19 @@ const { createClient } = require('@supabase/supabase-js')
   if (error || !Number.isInteger(count)) {
     console.error('ECHEC : empreinte illisible', error ? error.message : ''); process.exit(1)
   }
-  console.log(`Projet ${String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]} · biens = ${count} (5 = production, 3 = staging)`)
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Base ${base} · biens = ${count}`)
+  // ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, ET ELLE REFUSE (26 octobre 2026).
+  // Ce script imprimait « biens = N (5 = production, 3 = staging) » puis
+  // continuait sur n'importe quelle base designee par l'environnement. Deux
+  // defauts dans une ligne : la legende est FAUSSE depuis que staging porte
+  // quatre biens, et une legende n'est pas une garde — elle se lit apres coup,
+  // dans une sortie que personne ne relit quand tout s'est bien passe.
+  if (base === 'INCONNUE') {
+    console.error(`ECHEC : projet Supabase inconnu — ni la production, ni staging.`)
+    console.error(`Un resultat qui ne dit pas OU il a ete obtenu ne prouve rien.`)
+    process.exit(1)
+  }
 
   let echecs = 0
   const { error: e1 } = await sb.from('public_tokens').select('pwa_vue_le').limit(0)

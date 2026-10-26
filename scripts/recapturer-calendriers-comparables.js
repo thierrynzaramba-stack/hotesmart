@@ -39,6 +39,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 const { creerClient, cleCanonique } = require('../lib/airroi/client')
 const { depotFichier } = require('../lib/airroi/depot')
 const { lireJson } = require('../lib/airroi/json')
@@ -86,8 +87,14 @@ async function principal () {
   if (error || !Number.isInteger(count)) throw new Error(`empreinte illisible ${error ? error.message : ''}`)
   // ⚠ STAGING SEULEMENT (review de 5876a4b) : le loft de recette n'existe que
   // la. Toute autre empreinte arrete le script.
-  console.log(`Base : ${count} bien(s) — ${count === 3 ? 'STAGING' : 'PAS STAGING'} · lecture seule`)
-  if (count !== 3) { console.error('ECHEC : ce script ne vise que staging (3 biens) — rien n est fait'); process.exit(3) }
+  // ⚠ LE NOMBRE DE BIENS N'EST PLUS UNE GARDE (26 octobre 2026). Il valait
+  // « la base est bien celle que je crois », et staging en porte QUATRE
+  // depuis qu'un bien y a ete cree : cette seconde ceinture refusait donc
+  // toute execution. La reference du PROJET, elle, ne derive pas — c'est
+  // elle qui garde, et le compte reste imprime a titre d'information.
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Base : ${base} — ${count} bien(s) · lecture seule`)
+  if (base !== 'STAGING') { console.error('ECHEC : ce script ne vise que staging — rien n est fait'); process.exit(3) }
   const { data: retenus, error: eR } = await sb.from('comparables_retenus').select('listing_id').eq('property_id', bien).eq('actif', true)
   if (eR) throw new Error(`comparables_retenus : ${eR.message}`)
   const ids = (retenus || []).map(r => String(r.listing_id)).filter(id => /^[0-9]{1,24}$/.test(id))
