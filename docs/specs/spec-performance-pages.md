@@ -1,5 +1,61 @@
 # Spec — Performance des pages
 
+## ⚠ CHANTIER CLOS LE 26 OCTOBRE 2026 — CE QUI RESTE EST UNE RÈGLE, PLUS UN LOT
+
+**Décision de Thierry.** Les lots **(a)** et **(b)** sont livrés. Les lots
+**(c)** et **(d)** ne vivent plus comme des lots : ils deviennent
+**l'application, au fil des lots, de la règle « TOUT LOT QUI TOUCHE LE FRONT
+RESPECTE LE CHARGEMENT RAPIDE »** gravée dans `CLAUDE.md`, avec sa case
+« Performance » obligatoire dans chaque spec.
+
+**Ce document reste la RÉFÉRENCE** : la mesure de chaque écran (§1), la
+catégorie de chaque donnée affichée (§3.1), les tables de résumé et leurs
+déclencheurs (§4), les interdits (§5), le budget et comment il se mesure (§7).
+Ce qui disparaît, c'est la file de lots — pas les mesures ni les règles.
+
+### Ce qui est livré, avec sa mesure
+
+**Lot (a) — contexte de compte et i18n en cache. LIVRÉ.**
+⚠ **Et il n'a JAMAIS eu de tableau avant/après, contrairement au lot (b)** : je
+le dis plutôt que de fabriquer des chiffres à la clôture. Ce qui est vérifiable
+dans le code, à la date de cette clôture : la liste des comptes est gardée en
+`sessionStorage` pendant **3 minutes**, clé **utilisateur + compte**, et elle
+meurt avec l'onglet (`shared/compte-courant.js`) ; les dictionnaires i18n sont
+versionnés (`?v=<empreinte>`) et servis en
+`public, max-age=31536000, immutable` (`vercel.json`). Le gain porte sur **tous**
+les écrans, puisque le contexte de compte est sur le chemin critique de chacun —
+mais sa taille n'a pas été mesurée, et elle ne le sera pas rétroactivement.
+
+**Lot (b) — `Aujourd'hui` en un appel. LIVRÉ**, mesuré le 23 octobre 2026 contre
+la production : **13 appels → 3**, **100 requêtes → 33** dans l'appel d'écran,
+première peinture **immédiate**. Le tableau complet est au §6, sous le lot.
+
+### Ce qui devient une application de la règle
+
+**Lot (c) — les résumés qui suppriment les appels `yield` par bien.**
+⚠ **PREMIÈRE APPLICATION NOMMÉE, et elle est due : la prochaine tâche qui touche
+`Aujourd'hui` ou YieldFlow remplace les appels `yield` par bien par une table de
+résumé.** C'est **72 des 100 requêtes** de l'accueil, 586 Ko sur 1 Mo, et
+~8,6 s des 11,9 s mesurées — pour du CA et du TO sur 30 jours, c'est-à-dire
+exactement de la donnée non urgente. Après, ces 72 requêtes deviennent **une**
+lecture de 4 lignes. Sa décision bloquante est levée depuis le 22 octobre
+(§4.2 : cron, tous les biens, deux fois par jour, writer unique, heure du calcul
+affichée — pas de marquage par le dispatcher). C'est aussi la moitié ouverte de
+la **dette 61**, et c'est inscrit au registre sous la **dette 109**.
+
+**Lot (d) — les autres écrans, un par un.** Plus une file : chaque écran y passe
+quand un lot le touche, par la case « Performance » de sa spec. L'ordre du coût
+mesuré reste écrit au §6 et sert de guide, pas d'engagement.
+
+### Les deux questions qui restaient, et leur sort
+
+1. **Les deux heures du cron** (§4.4) — 04:00 et 16:00 Paris, proposées sur
+   raisonnement. Elles tournent depuis ; la confirmation sur la répartition
+   horaire n'a pas été faite et **ne bloque rien**.
+2. **La métrique du premier affichage perçu** (§7.3) — non tranchée, ne bloque
+   aucun lot. Elle deviendra concrète le jour où un budget sera dépassé.
+
+
 **État : spec seule, aucun code.** Demande de Thierry du 22 octobre 2026.
 Toutes les mesures de ce document ont été prises **le 22 octobre 2026 contre la
 production**, en lecture seule, sur le compte réel (4 logements) — pas sur le
