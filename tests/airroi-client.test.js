@@ -710,3 +710,163 @@ test('une erreur HTTP porte son code', async () => {
     assert.equal(e.coutLibere, true)
   })
 })
+
+test("LE TEST QUI COMPTE (dette 91) : la fixture du pacing porte le jour de PARIS, sinon elle ecrase l archive de la veille", async () => {
+  // ⚠ CE DEFAUT DETRUIT UNE DONNEE AU LIEU DE ROUGIR UN TEST, et c'est pour ça
+  // que Thierry l'a passe en priorite. `capturer-pacing.js` etait le seul des
+  // trois scripts de capture nommes a decouper `recupere_le` en UTC
+  // (`slice(0, 10)`) quand ses deux jumeaux passent par `jourLocalParis`. Quand
+  // le jour UTC est encore celui de la veille, la fixture prenait le nom de
+  // l'archive de la veille, et l'ecriture finale est NUE.
+  //
+  // ⚠ LES INSTANTS SONT RELATIFS, ET LA PREMIERE VERSION DE CE TEST LES AVAIT
+  // FIGES — defaut GRAVE releve en review. Le nom vient bien du cache, mais la
+  // FRAICHEUR, elle, se juge contre l'horloge : `FRAICHEUR_JOURS` vaut 30 jours
+  // pour le pacing (`lib/airroi/cout.js`). Un `recupere_le` fige au
+  // 24 octobre 2026 devenait donc perime le 24 novembre, le cache etait
+  // manque, et l'enfant partait SUR LE RESEAU — mesure de la review : HTTP 403
+  // du vrai serveur AirROI a J+31, avec l'en-tete `x-api-key`. `npm test`
+  // aurait appele une API tierce FACTUREE. C'est exactement la regle du depot
+  // dans son autre moitie : dates relatives si le test lit l'horloge.
+  //
+  // ⚠ ET UNE CEINTURE : `--budget=0.0001`. `jugerAppel` tourne AVANT le
+  // controle de cle et avant le reseau (`lib/airroi/client.js:237`), donc si le
+  // cache etait manque pour une raison qu'on n'a pas prevue, l'enfant REFUSE
+  // au lieu de payer. Et on l'asserte : la sortie doit dire « cache, 0 $ ».
+  const { spawnSync } = require('child_process')
+  const racine = path.join(__dirname, '..')
+  const moiLoc = lireJson(lire('moi.json')).location_info
+  const marche60 = lireJson(lire('marche-60.json')).market
+  const marche = { country: marche60.country, region: marche60.region, locality: marche60.locality }
+  const E_PACING = 'POST /markets/metrics/future/pacing'
+  const P_PACING = { market: marche, currency: 'native' }
+  const REPONSE = '{"market":{},"results":[{"date":"2026-11-01","occupancy":0.4}]}'
+
+  // Le jour civil, calcule ICI et par un autre chemin que le module sous test.
+  const jourParisDe = iso => new Intl.DateTimeFormat('fr-CA', { timeZone: 'Europe/Paris' }).format(new Date(iso))
+  const jourUtcDe = iso => new Date(iso).toISOString().slice(0, 10)
+  const hier = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+
+  // ⚠ ON CHERCHE LA FRONTIERE DE MINUIT, ON NE LA SUPPOSE PAS. Deux instants
+  // figes a 23 h 30 et 12 h 00 UTC auraient ete, par construction, dans la
+  // SAISON DU JOUR : la review a mesure que deux instants d'ete ne prouvent pas
+  // « le fuseau de Paris » mais seulement « un decalage vers l'est », et que
+  // deux correctifs faux restaient verts — `+2 h` puis `slice` (aucun fuseau),
+  // et `Europe/London`, qui EST le defaut d'origine en hiver.
+  // En encadrant minuit a UNE DEMI-HEURE pres, de part et d'autre, tout
+  // correctif qui se trompe d'UNE HEURE — fuseau fige, mauvaise zone, oubli de
+  // l'heure d'ete — tombe forcement du mauvais cote de l'un des deux.
+  const bornes = (() => {
+    for (let h = 23; h >= 20; h--) {
+      const apres = `${hier}T${String(h).padStart(2, '0')}:30:00Z`
+      const avant = `${hier}T${String(h - 1).padStart(2, '0')}:30:00Z`
+      if (jourParisDe(apres) !== jourUtcDe(apres) && jourParisDe(avant) === jourUtcDe(avant)) {
+        return { apres, avant }
+      }
+    }
+    return null
+  })()
+  assert.ok(bornes,
+    'frontiere de minuit introuvable entre 19 h 30 et 23 h 30 UTC : le fuseau de'
+    + ' Paris aurait change de nature, et ce test ne peut plus rien prouver')
+  // ⚠ CE QUE CE TEST NE VOIT PAS, ET IL FAUT LE DIRE (REVIEW.md regle 18 : une
+  // mesure dit sa plage). L'encadrement attrape toute erreur d'UNE HEURE
+  // RELATIVE au decalage reel de l'instant — donc `Europe/London`, un oubli de
+  // l'heure d'ete, un fuseau fige du mauvais cote. Il ne peut PAS attraper un
+  // decalage fige qui se trouve EGAL au decalage reel du jour : mesure du
+  // 25 octobre 2026, la mutation `+ 2 h puis slice` reste verte, parce que les
+  // instants tombent la veille, encore en heure d'ete, ou +2 h est la bonne
+  // reponse. Elle rougira en hiver. C'est le test suivant, sur
+  // `jourLocalParis` lui-meme, qui tient la regle dans les DEUX saisons avec
+  // des instants figes — et il a le droit de les figer, puisqu'il injecte son
+  // instant au lieu de lire l'horloge.
+  const cas = [
+    { recupereLe: bornes.apres, divergent: true,
+      pourquoi: 'une demi-heure APRES minuit a Paris : le jour UTC est encore celui de la veille' },
+    { recupereLe: bornes.avant, divergent: false,
+      pourquoi: 'une demi-heure AVANT minuit a Paris : les deux jours coincident encore' }
+  ]
+
+  // Liste ET dates de modification du VRAI dossier de fixtures : une regression
+  // de `--fixtures` salirait l'arbre du clone PARTAGE (reprise du test frere).
+  const etatDepot = () => fs.readdirSync(FIX).filter(f => f.startsWith('pacing-bagneres-'))
+    .map(f => [f, fs.statSync(path.join(FIX, f)).mtimeMs])
+  const avantDepot = etatDepot()
+
+  for (const c of cas) {
+    const attendu = `pacing-bagneres-${jourParisDe(c.recupereLe)}.json`
+    // ⚠ LA PREMISSE S'ASSERTE, elle ne s'annonce pas en prose (regle 19 §4) :
+    // si l'instant cessait d'etre discriminant, le cas verdirait a vide.
+    if (c.divergent) {
+      assert.notEqual(jourUtcDe(c.recupereLe), jourParisDe(c.recupereLe),
+        `l instant ${c.recupereLe} ne fait plus diverger le jour UTC du jour de Paris :`
+        + ' ce cas ne prouve plus rien')
+    } else {
+      assert.equal(jourUtcDe(c.recupereLe), jourParisDe(c.recupereLe),
+        `l instant ${c.recupereLe} devait faire coincider les deux jours`)
+    }
+
+    const d = dossier()
+    const sortie = dossier()
+    const semer = (endpoint, parametres, reponse) => depotFichier(d).ecrireCache({
+      cle: cleCanonique(endpoint, parametres), endpoint, parametres,
+      reponse, cout: 0.1, recupereLe: c.recupereLe })
+    // `ecrireCache` est `async` par CONTRAT (l'autre depot l'est vraiment) :
+    // l'attendre, sinon le jour ou `depotFichier` passe en asynchrone le cache
+    // est VIDE quand l'enfant le lit, et l'enfant part au reseau.
+    await semer('GET /markets/lookup', { lat: moiLoc.latitude, lng: moiLoc.longitude }, JSON.stringify(marche))
+    await semer(E_PACING, P_PACING, REPONSE)
+
+    const env = { ...process.env, AIRROI_API_KEY: `factice-${crypto.randomUUID()}` }
+    const r = spawnSync(process.execPath,
+      [path.join(racine, 'scripts/capturer-pacing.js'),
+        `--cache=${d}`, `--fixtures=${sortie}`, '--budget=0.0001'],
+      { env, encoding: 'utf8', timeout: 60000 })
+    const dit = String(r.stdout || '') + String(r.stderr || '')
+    const code = r.status ?? `signal:${r.signal}${r.error ? ` (${r.error.code || r.error.message})` : ''}`
+    const queue = dit.trim().split('\n').slice(-4).join(' | ') || '(aucune sortie)'
+    const ecrits = fs.readdirSync(sortie)
+
+    // ⚠ LE NOM D'ABORD : c'est LUI que ce lot corrige. La premiere version
+    // assertait le code de sortie en tete, et `capturer-pacing.js` ECRIT la
+    // fixture avant de pouvoir sortir en 5 : une regression qui nommait la
+    // fixture avec le jour de la veille ET sortait en 5 ne nommait jamais le
+    // mauvais jour. Un diagnostic de confort ne passe jamais devant l assertion
+    // qui porte le defaut.
+    assert.deepEqual(ecrits, [attendu],
+      `fixture(s) ${JSON.stringify(ecrits)} au lieu de [${attendu}] — ${c.pourquoi}.`
+      + ` Un nom de la veille ECRASE l archive de la veille. Code ${code}. Sortie : ${queue}`)
+    // Le CONTENU doit etre la reponse BRUTE du cache : le contrat du script est
+    // « le texte exact d AirROI, pas un JSON re-serialise qui pourrait arrondir
+    // un nombre », et c est le defaut d origine de ce fichier de tests.
+    assert.equal(fs.readFileSync(path.join(sortie, attendu), 'utf8'), REPONSE,
+      `${attendu} ne porte pas le texte exact de la reponse`)
+    assert.equal(code, 0, `le script n a pas abouti. Sortie : ${queue}`)
+    // AUCUN RESEAU : les deux etapes viennent du cache. Si l une avait appele,
+    // le budget de 0,0001 $ l aurait refusee — et on le verrait ici.
+    assert.match(dit, /cache, 0 \$[\s\S]*cache, 0 \$/,
+      `une etape n a pas ete servie par le cache — risque d appel REEL. Sortie : ${queue}`)
+  }
+
+  assert.deepEqual(etatDepot(), avantDepot,
+    'une fixture a ete ecrite ou reecrite dans le VRAI dossier du depot')
+})
+
+test("LE TEST QUI COMPTE (dette 91) : le jour de Paris se distingue de l UTC en hiver COMME en ete", () => {
+  // ⚠ LES DEUX CAS DU TEST CI-DESSUS SONT, PAR CONSTRUCTION, DANS LA SAISON DU
+  // JOUR — releve en review : deux instants d'ete ne prouvent pas « le fuseau de
+  // Paris », seulement « un decalage vers l'est ». Deux correctifs faux
+  // restaient verts : `+2 h` puis `slice` (aucun fuseau), et `Europe/London`,
+  // qui EST le defaut d'origine en hiver.
+  // Ici les instants sont FIGES, et c'est juste : `jourLocalParis` reçoit son
+  // instant en ARGUMENT, il ne lit pas l'horloge (regle du depot, seconde
+  // moitie). Bascule 2026 : heure d'ete jusqu'au 25 octobre.
+  const { jourLocalParis } = require('../lib/yield/zones-scolaires')
+  // ETE (UTC+2) : 23 h 30 UTC est deja le lendemain a Paris.
+  assert.equal(jourLocalParis('2026-07-15T23:30:00Z'), '2026-07-16')
+  assert.equal(jourLocalParis('2026-07-15T21:30:00Z'), '2026-07-15', '23 h 30 a Paris, meme jour')
+  // HIVER (UTC+1) : 23 h 30 UTC est le lendemain, 22 h 30 UTC non — c'est ce
+  // couple qui tue la mutation `Europe/London` et la mutation `+2 h`.
+  assert.equal(jourLocalParis('2026-12-15T23:30:00Z'), '2026-12-16')
+  assert.equal(jourLocalParis('2026-12-15T22:30:00Z'), '2026-12-15', '23 h 30 a Paris, meme jour')
+})

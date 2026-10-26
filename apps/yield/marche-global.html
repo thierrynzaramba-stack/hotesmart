@@ -202,7 +202,7 @@
     try { d = await r.json() } catch (e) { if (j === jeton) { corps('<p class="non-calc">Réponse illisible.</p>'); el('mg-resume-tendance').innerHTML = blocTendance(null) } return }
     if (j !== jeton) return
     if (d.etat !== 'calcule') el('mg-resume-tendance').innerHTML = blocTendance(null)
-    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
+    if (d.etat === 'marche_inconnu') return corps(`<p class="non-calc">Aucun marché n’est relié à ce logement${d.motif ? ` : ${ech(d.motif)}` : ''}.</p>`)
     if (d.etat === 'historique_absent') return corps(`<p class="non-calc">Marché ${ech(d.marche && d.marche.localite)} : ${ech(d.motif)}.</p>`)
     el('mg-meta').innerHTML = `Marché : <b>${ech(d.marche.localite)}</b> (${ech(d.marche.region)}, ${ech(d.marche.pays)}) · historique AirROI lu le ${jourFr(d.recupere_le)}`
     dernier = d
@@ -353,7 +353,7 @@
     let d
     try { d = await r.json() } catch (e) { return ici('<p class="non-calc">Réponse illisible.</p>') }
     if (j !== jeton) return
-    if (d.etat === 'marche_inconnu') return ici(`<p class="non-calc">Aucun marché n’est relié à ce logement : ${ech(d.motif)}.</p>`)
+    if (d.etat === 'marche_inconnu') return ici(`<p class="non-calc">Aucun marché n’est relié à ce logement${d.motif ? ` : ${ech(d.motif)}` : ''}.</p>`)
     if (d.etat === 'capture_absente') return ici(`<p class="non-calc">${ech(d.motif)}.</p>`)
     if (d.etat !== 'calcule' || !Array.isArray(d.jours) || !d.jours.length) return ici('<p class="non-calc">Aucun jour à afficher pour ce marché.</p>')
     el('mg-airroi-meta').innerHTML = `Modèle AirROI calculé le ${jourFr(d.capture_le)}.`

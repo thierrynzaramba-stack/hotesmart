@@ -130,9 +130,10 @@ test('LE TEST QUI COMPTE (securite) : garde du logement, SEUL le marche de ce lo
 test('sans lien : marche inconnu ; sans historique en cache : dit, avec le cout, sans rien payer ; garde refusee : rien n est lu', async () => {
   const inconnu = await appeler({ property_id: 'BIEN-Z' }, TABLES, { ok: true, bien: { id: 'BIEN-Z' } })
   assert.equal(inconnu.corps.etat, 'marche_inconnu')
+  assert.equal(inconnu.corps.motif, undefined, 'la page dit deja « Aucun marche n est relie » : pas de motif qui le repete')
   const vide = await appeler({ property_id: 'BIEN-A' }, { ...TABLES, airroi_cache: [] })
   assert.equal(vide.corps.etat, 'historique_absent')
-  assert.match(vide.corps.motif, /0,50 \$, par un script, jamais depuis cet ecran/)
+  assert.match(vide.corps.motif, /0,50 \$, par un script, jamais depuis cet écran/)
   assert.equal(vide.appelsReseau, 0)
   const refus = await appeler({ property_id: 'BIEN-A' }, TABLES, { ok: false })
   assert.deepEqual(refus.lus, [])
