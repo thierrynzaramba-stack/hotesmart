@@ -321,11 +321,16 @@ test('LE TEST QUI COMPTE : la garde lit l UUID DU BIEN et le COMPTE DU BIEN', as
   //
   //   1. LA CLE. `canaux_du_bien.property_id` est un `uuid not null references
   //      properties(id)` (migration du 19 octobre 2026) — c'est une EXCEPTION
-  //      assumee a la regle dure n. 3 du depot, ou le `property_id` des tables
-  //      enfant porte la cle provider en TEXT. Interroger cette colonne avec
+  //      assumee a la convention du depot (REVIEW.md §10, et les REGLES
+  //      TECHNIQUES DURES du CLAUDE.md : « properties.id = UUID ; property_id
+  //      des tables enfant = TEXT (provider propId) »), ou le `property_id`
+  //      des tables enfant porte la cle provider en TEXT. Interroger cette colonne avec
   //      une cle provider rendrait zero ligne, donc « aucun canal mappe »,
-  //      donc une AUTORISATION DE SUPPRIMER. C'est le piege UUID, et le depot
-  //      l'a paye quatre fois.
+  //      donc une AUTORISATION DE SUPPRIMER. C'est le piege UUID, que le depot
+  //      a deja paye plusieurs fois — et je ne mets pas de nombre ici : les
+  //      quatre endroits qui en portent un n'etaient pas d'accord entre eux
+  //      (« troisieme », « quatrieme », « cinquieme »), ce qui est exactement
+  //      le defaut du chiffre ecrit a la main que personne ne peut recompter.
   //   2. LE CLOISONNEMENT. Sans `user_id`, la garde lirait les canaux de tous
   //      les comptes portant le meme UUID de bien — inerte aujourd'hui (un
   //      UUID est unique) mais c'est la discipline du depot, et c'est la
@@ -350,20 +355,39 @@ test('LE TEST QUI COMPTE : la garde lit l UUID DU BIEN et le COMPTE DU BIEN', as
 
 test('LE TEST QUI COMPTE : la PURGE porte le compte, et ses TROIS exemptions sont comptees', async () => {
   // Une purge qui oublierait le compte effacerait les donnees d'un autre hote
-  // portant la meme cle provider — et le depot dit que ce cas existe : « deux
-  // comptes peuvent porter le meme numero provider ». `property_id` des tables
-  // enfant est du TEXT provider (regle dure n. 3), donc la collision est
-  // possible partout ou le compte ne borne pas.
+  // portant la meme cle provider. Ce cas n'est pas interdit par le schema : la
+  // contrainte d'unicite est `(user_id, provider, provider_property_id)`, donc
+  // deux comptes PEUVENT porter le meme numero. (Je l'avais presente comme une
+  // phrase du depot : elle n'y est pas, c'est une lecture du schema, et la
+  // re-review du 26 octobre a eu raison de me le faire dire autrement.)
+  // `property_id` des tables enfant est du TEXT provider par convention, donc
+  // la collision est possible partout ou le compte ne borne pas.
   //
-  // ⚠ TROIS TABLES N'ONT PAS DE COLONNE `user_id`, et le code les nomme
-  // lui-meme (`tablesNoUser`). Ce n'est pas un oubli, c'est leur schema. Mais
-  // une exemption se COMPTE, elle ne se decrit pas : on les enumere ici pour
-  // qu'une QUATRIEME fasse rougir ce test au lieu de se glisser dans la liste.
+  // ⚠ TROIS TABLES NE SONT PAS BORNEES PAR LE COMPTE, le code les nomme
+  // lui-meme `tablesNoUser` — et mon premier diagnostic de cette liste etait
+  // FAUX SUR DEUX DES TROIS (constat de la re-review du 26 octobre 2026).
+  // J'avais ecrit « elles n'ont pas de colonne user_id, ce n'est pas un oubli
+  // mais leur schema » et « la purge efface les lignes de tout compte portant
+  // la meme cle provider, non corrigible sans migration ». Mesure, schema en
+  // main :
   //
-  // ⚠ ET CE N'EST PAS SANS RISQUE, donc on le laisse ecrit : pour ces trois
-  // tables, la purge d'un bien efface les lignes de TOUT compte portant la
-  // meme cle provider. Hors du perimetre de ce correctif (il ne touche pas la
-  // purge) et non corrigible sans migration — a porter au registre.
+  //   · `access_codes`      : property_id TEXT, **et user_id uuid EXISTE**.
+  //     Elle n'est simplement jamais remplie — c'est le bloquant (d) du
+  //     CLAUDE.md, « user_id dans INSERT serrures ». Aucune migration n'est
+  //     necessaire : il manque une valeur, pas une colonne. Et ses cles sont
+  //     MIXTES (un writer pose la cle provider, l'autre l'UUID), donc la purge
+  //     en manque deja une partie.
+  //   · `calendar_inventory` et `channel_sync_queue` : property_id **uuid**,
+  //     avec `references properties(id) ON DELETE CASCADE`. La purge explicite
+  //     par cle provider ne peut donc RIEN effacer — 22P02, erreur avalee par
+  //     un console.error — et le menage reel vient de la cascade, cloisonnee
+  //     par UUID. Le risque inter-comptes que j'annoncais n'existe pas pour
+  //     elles ; ce qui existe est une purge MORTE dans le fichier qu'on
+  //     reecrit, et c'est le piege UUID une fois de plus.
+  //
+  // Une exemption se COMPTE, elle ne se decrit pas : on les enumere pour
+  // qu'une QUATRIEME fasse rougir au lieu de se glisser dans la liste. Hors
+  // perimetre de ce correctif, qui ne touche pas la purge — au registre.
   const SANS_COLONNE_COMPTE = ['access_codes', 'calendar_inventory', 'channel_sync_queue']
 
   poser({ canaux: [], partenaire: { status: 200, body: { data: {} } } })
@@ -383,6 +407,62 @@ test('LE TEST QUI COMPTE : la PURGE porte le compte, et ses TROIS exemptions son
     const filtres = new Map(l.filtres)
     assert.equal(filtres.get('user_id'), TITULAIRE, `purge ${l.table} : mauvais compte`)
   }
+
+  // ⚠ ET CHAQUE PURGE DESIGNE **CE** BIEN. C'est le trou le plus couteux
+  // trouve par la re-review du 26 octobre 2026 : retirer
+  // `.eq('property_id', propKey)` de la boucle des quatorze tables fait
+  // effacer TOUT `bookings_snapshot`, `messages`, `menage_events`,
+  // `public_tokens`, `sms_logs`... du compte en supprimant UN bien — et la
+  // suite entiere restait verte (6283/6283). Le test ne regardait que le
+  // compte, qui lui restait juste : la mutation effacait les bonnes lignes
+  // d'un point de vue du cloisonnement, et toutes les autres en plus.
+  const DESIGNE_LE_BIEN = ['property_id', 'provider_property_id', 'id', 'booking_id']
+  const sansBien = purges.filter(l => !l.filtres.some(([c]) => DESIGNE_LE_BIEN.includes(c)))
+  assert.deepEqual([...new Set(sansBien.map(l => l.table))], [],
+    `des purges ne designent AUCUN bien : ${[...new Set(sansBien.map(l => l.table))].join(', ')}`
+    + ' — elles effaceraient tout le compte')
+  for (const l of purges) {
+    const filtres = new Map(l.filtres)
+    if (filtres.has('property_id')) {
+      // `propKey` est la cle PROVIDER (regle de convention du depot), sauf pour
+      // `properties` elle-meme qui se purge par son UUID.
+      const attendu = l.table === 'properties' ? BIEN : 'PROP-1'
+      assert.equal(String(filtres.get('property_id')), attendu,
+        `purge ${l.table} : property_id vise ${filtres.get('property_id')} au lieu de ${attendu}`)
+    }
+    if (filtres.has('provider_property_id')) {
+      assert.equal(String(filtres.get('provider_property_id')), 'PROP-1',
+        `purge ${l.table} : mauvaise reference partenaire`)
+    }
+  }
+})
+
+test('LE TEST QUI COMPTE : les DEUX lectures de la garde sont bornees au compte du bien', async () => {
+  // ⚠ DEUX AUTRES TROUS DU MEME DOUBLE, trouves par la re-review du 26 octobre
+  // 2026 : retirer `.eq('user_id', compteBien)` de la lecture de `properties`
+  // OU de celle de `canaux_releve` laissait la suite entiere verte
+  // (6283/6283 les deux fois).
+  //
+  // Ce que chacune permettrait :
+  //   · `properties` sans compte -> la garde statuerait, et le handler
+  //     supprimerait, sur un bien d'un AUTRE compte designe par son UUID.
+  //     `requirePermission` le borne en amont, mais rien ne le MESURE : c'est
+  //     exactement la situation qui a produit la garde morte qu'on repare ici.
+  //   · `canaux_releve` sans compte -> la garde deciderait sur l'horloge d'un
+  //     autre compte, donc sur un releve qui ne parle pas de ce bien.
+  poser({ canaux: [], partenaire: { status: 200, body: { data: {} } } })
+  await appeler()
+
+  for (const table of ['properties', 'canaux_releve']) {
+    const lecture = trace.lectures.find(l => l.table === table && !l.suppression)
+    assert.ok(lecture, `${table} n a pas ete lu : le chemin de la garde a change`)
+    const filtres = new Map(lecture.filtres)
+    assert.equal(filtres.get('user_id'), TITULAIRE,
+      `la lecture de ${table} n est plus bornee au compte du bien`)
+  }
+  // Et `properties` est bien designe par son UUID, pas par une cle provider.
+  const lp = new Map(trace.lectures.find(l => l.table === 'properties' && !l.suppression).filtres)
+  assert.equal(lp.get('id'), BIEN, 'le bien est relu par autre chose que son UUID')
 })
 
 test('l ecran et le serveur passent la MEME VALEUR a la regle partagee', () => {
