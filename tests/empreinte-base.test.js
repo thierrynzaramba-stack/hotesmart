@@ -116,6 +116,31 @@ test("LE TEST QUI COMPTE : une URL qui ne POINTE pas sur le projet est INCONNUE"
   }
 })
 
+test("LE TEST QUI COMPTE : un schéma qui n est pas HTTP(S) rend INCONNUE", () => {
+  // ⚠ RELÂCHEMENT QUE J AVAIS INTRODUIT SANS LE DIRE, et que ma contre-épreuve
+  // par mutation ne voyait pas non plus — aucun cas de schéma dans ce fichier.
+  // En passant du motif ancré à `new URL`, j ai gagné l analyse du domaine et
+  // PERDU la vérification du schéma : `ftp://`, `file://`, `ws://` et surtout
+  // `postgres://u:p@<ref>.supabase.co:5432/db` rendaient PRODUCTION en toute
+  // confiance. Un `DATABASE_URL` collé dans `SUPABASE_URL` est exactement la
+  // faute de frappe que ce module existe pour attraper.
+  for (const url of [
+    'ftp://cjmrizpdyhrcurmgyrhs.supabase.co/',
+    'file://cjmrizpdyhrcurmgyrhs.supabase.co/x',
+    'postgres://u:p@cjmrizpdyhrcurmgyrhs.supabase.co:5432/db',
+    'ws://cjmrizpdyhrcurmgyrhs.supabase.co',
+    'wss://ortyofzzdsthlhqmzsnq.supabase.co',
+    'unknownscheme://cjmrizpdyhrcurmgyrhs.supabase.co/'
+  ]) {
+    assert.equal(E.nomDeLaBase(url), 'INCONNUE', `${url} est reconnue à tort`)
+    assert.equal(E.estLaProduction(url), false, `${url} passe pour la production`)
+  }
+  // Et les deux schémas légitimes passent, `http` compris : une base locale ou
+  // un proxy en clair reste notre projet si l hôte l est.
+  assert.equal(E.nomDeLaBase('http://cjmrizpdyhrcurmgyrhs.supabase.co'), 'PRODUCTION')
+  assert.equal(E.nomDeLaBase('HTTPS://cjmrizpdyhrcurmgyrhs.supabase.co'), 'PRODUCTION')
+})
+
 test('la référence du projet se lit, et ne s invente pas', () => {
   assert.equal(E.refDuProjet('https://abcdef.supabase.co'), 'abcdef')
   assert.equal(E.refDuProjet('https://ABCdef.supabase.co'), 'abcdef')
@@ -167,10 +192,20 @@ test('LE TEST QUI COMPTE : plus aucun script ne reconnaît la base à son nombre
 
 test("LE TEST QUI COMPTE : la légende « 5 = production, 3 = staging » ne s IMPRIME plus", () => {
   // ⚠ UN NOMBRE ÉCRIT À LA MAIN EST LU COMME UNE MESURE ET NE ROUGIT JAMAIS —
-  // règle du dépôt. Cette légende partait dans la sortie console de DOUZE
+  // règle du dépôt. Cette légende partait dans la sortie console de DIX-NEUF
   // scripts, donc dans les comptes rendus de recette, comme un fait. Elle est
   // FAUSSE pour staging depuis le 26 octobre 2026, et le lot qui l a mesurée ne
   // pouvait pas la laisser derrière lui.
+  //
+  // ⚠ J AVAIS ÉCRIT « DOUZE », ICI MÊME, DANS LE TEST QUI POSE CETTE RÈGLE.
+  // Mesure de la re-review :
+  //   git grep -n "5 = production, 3 = staging" e1a1843 -- scripts/ \
+  //     | grep "console\." | cut -d: -f1 | sort -u | wc -l   ->  19
+  // Douze était le nombre de scripts que j avais PATCHÉS dans une passe ; sept
+  // autres portaient la même ligne et ont été fermés dans une autre. Le travail
+  // était plus large que ce que je lui prêtais — le bon sens de l erreur, mais
+  // une mesure fausse quand même, et dans le fichier le moins bien placé pour
+  // en porter une.
   //
   // ⚠ ON NE CHERCHE QUE DANS CE QUI S IMPRIME, ET C EST RAISONNÉ. Ma première
   // version balayait le fichier entier, donc elle rougissait sur les
@@ -229,15 +264,62 @@ test("LE TEST QUI COMPTE : aucun script ne recopie une référence de projet", (
 
 // Les scripts qui touchent une base Supabase. On ne liste pas à la main : une
 // liste se périme, et c est ainsi que cinq scripts sont devenus vingt-trois.
-const TOUCHENT = SCRIPTS.filter(f => /process\.env\.SUPABASE_URL/.test(codeSeul(lire(f))))
+//
+// ⚠ ET L INVENTAIRE NE CHERCHE PLUS `process.env.SUPABASE_URL` MAIS `SUPABASE_URL`
+// TOUT COURT — correction de SÉCURITÉ du 26 octobre 2026, constat GRAVE de la
+// re-review. Ma version précédente exigeait les deux mots collés, donc elle ne
+// voyait PAS la destructuration :
+//     const { SUPABASE_URL, SUPABASE_ANON_KEY } = process.env
+// qui est la forme la plus naturelle quand on lit trois variables d affilée.
+// Deux scripts s en servent, et l un des deux — `scripts/test-droits.js` —
+// ÉCRIT (update, insert, delete) en pointant `.env.local`, c est-à-dire la
+// PRODUCTION, sans aucune garde de base. Il n était ni gardé, ni exempté, ni
+// compté dans la dette 98 : **il ne rougissait pas, il disparaissait**.
+//
+// C est le trou le plus grave que ce lot ait eu, et il est de la même famille
+// que tous les autres : un motif ne voit que la forme qu il connaît. La leçon
+// tient en une phrase — un inventaire doit chercher le CONCEPT (le nom de la
+// variable d environnement), jamais une façon de l écrire.
+const TOUCHENT = SCRIPTS.filter(f => {
+  const c = codeSeul(lire(f))
+  return /\bSUPABASE_URL\b/.test(c) && /createClient\s*\(/.test(c)
+})
 
 // Un script ÉCRIT s il appelle une mutation PostgREST ou le stockage.
 const ECRITURE = /\.(insert|upsert|update|delete)\s*\(|storage[\s\S]{0,80}\.(createBucket|updateBucket|upload|remove)\s*\(/
 
-// Une garde = une comparaison à l une des TROIS VALEURS DU CONTRAT, ou un appel
-// au module, suivie de PRÈS d une sortie. « De près » = 400 caractères, la même
-// fenêtre que la garde des lecteurs.
-const GARDE = /((===|!==)\s*'(INCONNUE|STAGING|PRODUCTION)'|'(INCONNUE|STAGING|PRODUCTION)'\s*(===|!==)|estLaProduction\s*\(|nomDeLaBase\s*\([^)]*\)\s*(===|!==))[\s\S]{0,400}?process\.exit\s*\(/
+// Une garde = une comparaison à l une des TROIS VALEURS DU CONTRAT, DANS UN
+// `if`, et la sortie DANS LE MÊME `if`.
+//
+// ⚠ MA VERSION PRÉCÉDENTE CHERCHAIT « une comparaison, puis un `process.exit`
+// dans les 400 caractères », ET C ÉTAIT UN FAUX VERT VIVANT — pas théorique :
+// ma propre contre-épreuve par mutation l a montré. En retirant la garde de
+// `scripts/test-droits.js`, la suite restait au VERT (`fail 0`), parce que le
+// fichier contient
+//     console.log(`Base : ${base}${base === 'PRODUCTION' ? ' ⚠ …' : ''}`)
+// — une comparaison d AFFICHAGE — et un `process.exit(1)` plus bas, pour une
+// raison qui n a rien à voir. Le motif voyait les deux et concluait « gardé ».
+//
+// La review l avait nommé en dette (« la comparaison utilisée comme étiquette
+// d affichage », « le `process.exit` qui n a rien à voir ») et proposé de
+// l accepter ; la mutation a tranché autrement : ce n est pas une dette, c est
+// un trou ouvert sur le seul script du lot qui écrit en production.
+//
+// Ce que le resserrement ne couvre toujours PAS, et c est dit : la DIRECTION
+// (`if (base === 'PRODUCTION') { await insert() }` reste vu comme une garde) et
+// l ORDRE (une garde placée après la première écriture). Un motif textuel n a
+// ni notion de direction ni notion d ordre. Les deux sont mesurés comme
+// non réalisés aujourd hui ; le jour où ils le seront, il faudra autre chose
+// qu un motif — et la vraie réponse est le passage à blanc obligatoire, noté à
+// la dette 98.
+//
+// ⚠ ET LE `[\s\S]` PLUTÔT QUE `[^)]` ENTRE LE `if` ET LA COMPARAISON : ma
+// première tentative de resserrement écrivait `if\s*\([^)]{0,120}`, qui butait
+// sur la parenthèse de `nomDeLaBase(URL)` et refusait donc QUATORZE gardes
+// parfaitement valides. Une garde qui crie à tort est une garde qu on
+// désactive — c est écrit plus haut dans ce fichier, et je viens de le
+// refaire.
+const GARDE = /if\s*\([\s\S]{0,140}?(===|!==)\s*'(INCONNUE|STAGING|PRODUCTION)'[\s\S]{0,300}?process\.exit\s*\(|if\s*\([\s\S]{0,140}?estLaProduction\s*\([^)]*\)[\s\S]{0,300}?process\.exit\s*\(/
 
 const ECRIVAINS = TOUCHENT.filter(f => ECRITURE.test(codeSeul(lire(f))))
 const LECTEURS = TOUCHENT.filter(f => !ECRITURE.test(codeSeul(lire(f))))
@@ -268,12 +350,9 @@ const ECRIVAINS_SANS_GARDE = [
   'supprimer-resa-figee.js', 'supprimer-residu-beds24.js',
   'supprimer-residus-phase0.js', 'templates-test-colomiers.js',
   'test-acceptation-price-log.js', 'transferer-bien-vers-fiche-neuve.js',
-  'verifier-migration-canaux-du-bien.js',
-  'verifier-migration-canaux-echec.js', 'verifier-migration-cron-stats.js',
-  'verifier-migration-reponses-partenaire.js', 'verifier-migration-units.js',
-  'verifier-price-log.js', 'verifier-yield-evenements.js',
-  'verifier-yield-events.js', 'verifier-yield-exceptions.js',
-  'verifier-yield-reglages.js'
+  'verifier-migration-units.js', 'verifier-price-log.js',
+  'verifier-yield-evenements.js', 'verifier-yield-events.js',
+  'verifier-yield-exceptions.js', 'verifier-yield-reglages.js'
 ]
 const LECTEURS_SANS_REFUS = [
   'amorcer-price-log.js', 'audit-prix-voyageur.js', 'audit-stop-sell.js',
@@ -365,6 +444,44 @@ test("LE TEST QUI COMPTE : les NEUF scripts fermés après la review ont leur ga
     // Et l option `--biens` n existe plus : l opérateur annonce la BASE.
     assert.ok(!/val\(\s*['"]biens['"]\s*\)/.test(codeSeul(lire(f))),
       `${f} compare encore un nombre de biens annoncé`)
+  }
+})
+
+test("LE TEST QUI COMPTE : les SIX scripts fermés après la RE-review gardent par le projet", () => {
+  // ⚠ DEUX CONSTATS GRAVES, ET LES DEUX ETAIENT DES CONTOURNEMENTS REELS.
+  //
+  // Les QUATRE premiers gardaient la bonne REGLE avec la mauvaise LECTURE :
+  // `const PROJET = (URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1]` en position
+  // décidante. Ce motif n est ni ancré, ni insensible à la casse, et n accepte
+  // que `https:` — il rend donc une chaîne VIDE sur `http://`, sur `HTTPS://`
+  // et sur une URL à identifiants, et la comparaison à la référence de
+  // production devient fausse. Mesure de la re-review, bout en bout avec un
+  // client factice : 6, 6, 3 et 6 ÉCRITURES TENTÉES, avec `http://` au lieu de
+  // `https://`. Et la ligne imprimée annonçait « (production refusée) » au
+  // moment où elle ne l était pas.
+  //
+  // Les DEUX derniers étaient invisibles à l inventaire : ils lisent l URL par
+  // DESTRUCTURATION (`const { SUPABASE_URL } = process.env`), que l ancien
+  // `TOUCHENT` ne voyait pas. `test-droits.js` ÉCRIT (update, insert, delete)
+  // en pointant `.env.local`, c est-à-dire la PRODUCTION, sans aucune garde —
+  // et il n était ni gardé, ni exempté, ni compté dans la dette 98.
+  const APRES_RE_REVIEW = ['verifier-migration-canaux-du-bien.js',
+    'verifier-migration-canaux-echec.js', 'verifier-migration-cron-stats.js',
+    'verifier-migration-reponses-partenaire.js',
+    'test-droits.js', 'recette-logement-v5.js']
+  assert.equal(APRES_RE_REVIEW.length, 6)
+  for (const f of APRES_RE_REVIEW) {
+    const code = codeSeul(lire(f))
+    assert.ok(!ECRIVAINS_SANS_GARDE.includes(f) && !LECTEURS_SANS_REFUS.includes(f),
+      `${f} est exempté alors que la re-review l a fermé`)
+    assert.ok(GARDE.test(code), `${f} n a pas de garde reconnaissable`)
+    assert.ok(TOUCHENT.includes(f), `${f} n est plus vu par l inventaire`)
+    // ⚠ ET L ANCIENNE EXTRACTION NE DÉCIDE PLUS. C est elle qui était le trou :
+    // garder la bonne règle avec une lecture qui rend une chaîne vide, c est
+    // n avoir aucune garde. On refuse donc le motif lui-même, en position
+    // décidante comme en position d étiquette.
+    assert.ok(!/(if|&&|\|\||\?)[^\n]*\bPROJET\b\s*(===|!==)\s*PROD\b/.test(code),
+      `${f} décide encore par une référence extraite à la main`)
   }
 })
 

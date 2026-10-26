@@ -26,7 +26,7 @@
 
 require('dotenv').config({ path: process.env.ENV_FILE || '.env.staging' })
 const { createClient } = require('@supabase/supabase-js')
-const { REF_PRODUCTION } = require('../lib/empreinte-base')
+const { REF_PRODUCTION, nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
@@ -34,7 +34,20 @@ if (!URL || !KEY) {
   console.error('SUPABASE_URL et SUPABASE_SERVICE_KEY sont requis.')
   process.exit(2)
 }
-const PROJET = (URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''
+// ⚠ LA REFERENCE SE LIT PAR LE MODULE, PAS PAR UN MOTIF A LA MAIN — et c'est
+// une CORRECTION DE SECURITE du 26 octobre 2026 (constat GRAVE de la re-review).
+// Ce fichier lisait la reference par un motif maison, EN POSITION DECIDANTE.
+// Le motif n'etait ni ancre, ni insensible a la casse, et n'acceptait que
+// `https:` — donc il rendait une chaine VIDE sur `http://`, sur `HTTPS://` et
+// sur une URL a identifiants, et la comparaison a la reference de production
+// devenait fausse : LA GARDE DE PRODUCTION LAISSAIT PASSER.
+// Mesure de la re-review, bout en bout avec un client factice : 6, 6, 3 et 6
+// ECRITURES TENTEES sur les quatre scripts concernes, avec `http://` au lieu de
+// `https://` dans le fichier d'environnement. Et la ligne imprimee annoncait
+// « (production refusee) » au moment ou elle ne l'etait pas.
+// Le modele de menace n'est pas un attaquant : c'est une faute de frappe dans
+// un `.env`.
+const PROJET = refDuProjet(URL) || ''
 // ⚠ LA REFERENCE DE LA PRODUCTION VIENT DU MODULE COMMUN, elle ne se recopie
 // plus (constat MINEUR de la review du 26 octobre 2026 : elle etait en dur
 // dans 21 fichiers hors du module qui s'annonce « regle partagee »).
@@ -55,13 +68,13 @@ const PROD = REF_PRODUCTION
 // table n'a pas de cle etrangere), trois `update` sur cette seule ligne, puis
 // son `delete` — suivi d'une relecture qui verifie qu'elle est partie.
 const CONFIRME = String(process.env.CONFIRMER_PROD || '').trim() === PROD
-if (PROJET === PROD && !CONFIRME) {
+if (nomDeLaBase(URL) === 'PRODUCTION' && !CONFIRME) {
   console.error(`REFUS : ${PROJET} est la PRODUCTION. Ce script ecrit — staging seulement.`)
   console.error('Pour un passage unique et assume, relancer avec '
                 + `CONFIRMER_PROD=${PROD} (le nom du projet, pas un drapeau).`)
   process.exit(2)
 }
-if (PROJET === PROD) {
+if (nomDeLaBase(URL) === 'PRODUCTION') {
   console.log('⚠ PASSAGE EN PRODUCTION ASSUME — ' + new Date().toISOString())
   console.log('  confirme par CONFIRMER_PROD, et journalise ici.')
   console.log('  ecrit : 1 ligne d essai dans canaux_releve (user_id hors de tout compte),')

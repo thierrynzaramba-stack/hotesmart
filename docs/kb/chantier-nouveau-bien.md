@@ -1749,7 +1749,12 @@ prouve rien.
 **On ne colle que la migration.** La vérification passe UNIQUEMENT par le
 script (`scripts/verifier-migration-marche.js`), qui affiche l'empreinte en
 tête : **la référence du projet**, et le nombre de biens à titre
-d'information — `Base STAGING · biens = 4`, `Base PRODUCTION · biens = 5`.
+d'information — `Base STAGING · biens = N`, `Base PRODUCTION · biens = N`.
+⚠ **Aucun nombre n'est écrit ici, et c'est délibéré** : une première version de
+ce paragraphe donnait « biens = 4 » et « biens = 5 ». Ce sont les deux chiffres
+de l'ancienne convention, remis dans la règle qui vient de les retirer — et ils
+se périment au prochain logement créé. Le compte se **lit dans la sortie**, il
+ne se prévoit pas.
 ⚠ Jusqu'au 26 octobre 2026, c'était le NOMBRE qui identifiait la base
 (« 3 = staging, 5 = production ») : staging en a gagné un, et les scripts ont
 refusé de travailler sur une base parfaitement identifiable. Les quatre
