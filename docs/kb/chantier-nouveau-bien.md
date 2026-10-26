@@ -857,7 +857,8 @@ clé `AIRROI_KEY` n'était visible dans aucun shell de la session (ni `-c`, ni
   `properties.latitude/longitude/coords_source/airbnb_listing_id` ; tables
   `airroi_cache`, `airroi_appels`, `comparables_retenus`, `grille_controle`,
   RLS actives. Preuve contre la base visée : `scripts/verifier-migration-marche.js`
-  (empreinte biens = 5 prod / 3 staging).
+  (empreinte : la **référence du projet**, `lib/empreinte-base.js` — plus le
+  nombre de biens, qui dérive avec la donnée ; corrigé le 26 octobre 2026).
 - **Client AirROI** `lib/airroi/` : `client.js` (seul point de contact, serveur
   seulement, cache d'abord, garde-fous avant le réseau, clé lue au moment de
   l'appel, jamais écrite), `cout.js` (tarifs, fraîcheurs, garde-fous),
@@ -1036,8 +1037,9 @@ Corrigé sans nouvelle review (règle : deux reviews sans constat de sécurité)
 ### Migrations appliquées et prouvées — 24 septembre 2026
 
 `2026-09-24-marche-airroi.sql` puis `2026-09-24-controle-airbnb.sql`, collées
-par Thierry en staging et en production. SQL à empreinte : `biens = 3` et
-`biens = 5`, `colonnes_airbnb = 2`, CHECK du statut sans `attente_dette_26`,
+par Thierry en staging et en production. SQL à empreinte — **relevé du
+24 septembre 2026, pas une règle** : `biens = 3` et `biens = 5`,
+`colonnes_airbnb = 2`, CHECK du statut sans `attente_dette_26`,
 `releves = 0`. **Prouvées contre chaque base** par
 `scripts/verifier-migration-marche.js` (`.env.staging` : projet
 ortyofzzdsthlhqmzsnq ; `.env.local` : projet cjmrizpdyhrcurmgyrhs) — quatre
@@ -1346,8 +1348,11 @@ L'écart lointain repose sur peu de nuits de week-end.
   sont REQUIS (une ligne sans l'au-delà occuperait la clé d'unicité et
   bloquerait le bon calcul) ; `calcule_le` n'est envoyé que s'il est fourni
   (un NULL explicite cassait l'insertion) ; la date de capture est le premier
-  jour LISIBLE du pacing, dans les deux branches ; `--go` exige `--biens=N` et
-  s'arrête si la base visée n'en compte pas N ; la séquence de la table est
+  jour LISIBLE du pacing, dans les deux branches ; `--go` exige
+  `--base=STAGING|PRODUCTION` et s'arrête si la base visée n'est pas celle-là
+  (⚠ **jusqu'au 26 octobre 2026 c'était `--biens=N`, comparé au compte réel** :
+  staging a gagné un bien et l'aide disait encore « 3 staging », donc le script
+  refusait la BONNE base) ; la séquence de la table est
   révoquée elle aussi ; la vérification sonde tous les droits client
   (`acces_client`) ; l'index redondant est retiré. Le test de migration est
   une LISTE BLANCHE, instruction par instruction (la liste noire laissait
@@ -1519,7 +1524,7 @@ premier venu sous « le marché de votre commune ».
   `2026-09-24-marche-biens.sql`, additive, sans clé étrangère, serveur seul,
   vérification à empreinte ET à forme) ; writer unique
   `scripts/lier-bien-marche.js` (saisie du fondateur, aucun appel AirROI,
-  `--go --biens=N`, ajout seul). Troisième table V2 lue par l'écran ; aucun
+  `--go --base=STAGING|PRODUCTION`, ajout seul). Troisième table V2 lue par l'écran ; aucun
   contact de plus avec l'existant.
 - **La vue exige un logement**, sous la garde habituelle du logement (lecture
   des réservations, bien requis : le bien désigne le compte), et ne rend QUE
@@ -1552,7 +1557,8 @@ n'existe pas en staging (trois logements de recette seulement) — décision à
 Thierry.
 **Lien écrit en staging (décision de Thierry, même jour)** : « Recette — Loft
 Pilotable » (992d1ebe…) → Bagnères-de-Bigorre, lien FICTIF sur le banc de
-test ; calcul à blanc lu, puis écriture séparée (`--go --biens=3`), relu :
+test ; calcul à blanc lu, puis écriture séparée (`--go --biens=3` **à
+l'époque ; l'option est devenue `--base=STAGING` le 26 octobre 2026**), relu :
 `marche_biens` id 1. La vue rendrait pour ce logement la ligne de calendrier
 id 2 (capture du 24 septembre, méthode `v2.3-2026-09-24`).
 
@@ -1742,8 +1748,16 @@ prouve rien.
 
 **On ne colle que la migration.** La vérification passe UNIQUEMENT par le
 script (`scripts/verifier-migration-marche.js`), qui affiche l'empreinte en
-tête : projet et nombre de biens (`ortyofzzdsthlhqmzsnq · biens = 3` =
-staging ; `cjmrizpdyhrcurmgyrhs · biens = 5` = production). Les quatre
+tête : **la référence du projet**, et le nombre de biens à titre
+d'information — `Base STAGING · biens = N`, `Base PRODUCTION · biens = N`.
+⚠ **Aucun nombre n'est écrit ici, et c'est délibéré** : une première version de
+ce paragraphe donnait « biens = 4 » et « biens = 5 ». Ce sont les deux chiffres
+de l'ancienne convention, remis dans la règle qui vient de les retirer — et ils
+se périment au prochain logement créé. Le compte se **lit dans la sortie**, il
+ne se prévoit pas.
+⚠ Jusqu'au 26 octobre 2026, c'était le NOMBRE qui identifiait la base
+(« 3 = staging, 5 = production ») : staging en a gagné un, et les scripts ont
+refusé de travailler sur une base parfaitement identifiable. Les quatre
 migrations V2 ne portent plus de requête de vérification (retirée le
 25 septembre ; lignes toutes < 60 caractères). Le test de la migration de
 `marche_calendrier` refuse désormais tout `select` dans le fichier collé.
@@ -2113,8 +2127,9 @@ seulement, comme `marche_calendrier`.
 
 **Writer unique** : `lib/marche/temperature-airroi.js` (`enregistrerTemperature`),
 lancé par `scripts/enregistrer-temperature-airroi.js --relief=<capture>
-[--go --biens=N]` (empreinte 3 = staging, 5 = production ; sans `--go`, rien
-n'est écrit). Aucun appel AirROI dans ce script : il lit une capture.
+[--go --base=STAGING|PRODUCTION]` (empreinte : la **référence du projet**,
+`lib/empreinte-base.js` — plus le nombre de biens, qui dérive avec la donnée ;
+sans `--go`, rien n'est écrit). Aucun appel AirROI dans ce script : il lit une capture.
 
 ⚠ **Aucun prix n'est stocké en euros.** Les valeurs sont des facteurs en base 100.
 
@@ -3392,7 +3407,8 @@ vérifier leur cohérence et leur comportement sur tous les biens.
      bloc marché et comparables, 11 réponses 200 sur les 3 biens.
 2. **Les migrations, dans l'ordre**, chacune rejouable (`if not exists`,
    `or replace`, `drop … if exists`) et vérifiée par un script **contre la
-   production** après collage. L'empreinte attendue est de 5 biens.
+   production** après collage. L'empreinte attendue est **`Base PRODUCTION`** —
+   la référence du projet, plus un nombre de biens (26 octobre 2026).
 3. **Rien n'écrit dans le calendrier, rien ne pousse de prix** :
    `tests/v2-marche-aucune-ecriture-calendrier.test.js`. La contre-épreuve
    (une écriture dans `calendar_inventory` et un appel à Channex injectés

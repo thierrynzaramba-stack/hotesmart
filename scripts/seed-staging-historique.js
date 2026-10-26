@@ -21,10 +21,15 @@
 //   node --env-file=.env.staging scripts/seed-staging-historique.js --bien=<uuid> --purge
 
 const { createClient } = require('@supabase/supabase-js')
+// ⚠ LA TABLE DES PROJETS NE SE RECOPIE PAS (constat MINEUR de la review du
+// 26 octobre 2026). Ce script gardait par la BONNE regle — la reference du
+// projet — mais avec sa propre copie des deux references. Une copie ne se
+// corrige pas quand l'original change.
+const { nomDeLaBase } = require('../lib/empreinte-base')
 const URL = process.env.SUPABASE_URL, KEY = process.env.SUPABASE_SERVICE_KEY
 if (!URL || !KEY) { console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY absents.'); process.exit(1) }
 const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
-if (projet === 'cjmrizpdyhrcurmgyrhs') { console.error('REFUS : ce script ne tourne JAMAIS sur la production.'); process.exit(1) }
+if (nomDeLaBase(URL) === 'PRODUCTION') { console.error('REFUS : ce script ne tourne JAMAIS sur la production.'); process.exit(1) }
 const args = process.argv.slice(2)
 const GO = args.includes('--go'), PURGE = args.includes('--purge')
 const bienId = (args.find(a => a.startsWith('--bien=')) || '').slice(7)

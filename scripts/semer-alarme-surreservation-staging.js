@@ -26,19 +26,22 @@
 
 require('dotenv').config({ path: process.env.ENV_FILE || '/home/thierry/hotesmart/.env.staging' })
 const { createClient } = require('@supabase/supabase-js')
+// ⚠ LA TABLE DES PROJETS NE SE RECOPIE PAS (constat MINEUR de la review du
+// 26 octobre 2026). Ce script gardait par la BONNE regle — la reference du
+// projet — mais avec sa propre copie des deux references. Une copie ne se
+// corrige pas quand l'original change.
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 
-const PROD = 'cjmrizpdyhrcurmgyrhs'
-const STAGING = 'ortyofzzdsthlhqmzsnq'
 const MARQUEUR = 'RECETTE-LOT-B'
 
-const ref = (process.env.SUPABASE_URL || '').match(/\/\/([a-z0-9]+)\./)
-const projet = ref && ref[1]
-if (projet === PROD) {
+const projet = refDuProjet(process.env.SUPABASE_URL)
+const base = nomDeLaBase(process.env.SUPABASE_URL)
+if (base === 'PRODUCTION') {
   console.error('REFUSE : ce script ecrit une donnee de RECETTE, et SUPABASE_URL pointe la PRODUCTION.')
   process.exit(1)
 }
-if (projet !== STAGING) {
-  console.error(`REFUSE : projet inattendu « ${projet} ». Attendu ${STAGING} (staging).`)
+if (base !== 'STAGING') {
+  console.error(`REFUSE : projet inattendu « ${projet} » (${base}). Attendu STAGING.`)
   process.exit(1)
 }
 
