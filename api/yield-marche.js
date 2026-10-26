@@ -16,12 +16,19 @@
 // soustraction. Il dit seulement qu'un releve existe, sa date et son statut.
 
 const { createClient } = require('@supabase/supabase-js')
-const { requirePermission } = require('../lib/require-permission')
+const { requirePermission, posterEnTetesPrives } = require('../lib/require-permission')
 const { relevesLisibles } = require('../lib/marche/critere')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
 module.exports = async (req, res) => {
+  // ⚠ DETTE 90 : AVANT LE PREMIER REFUS, pas seulement avant la garde. Les refus
+  // qui precedent `requirePermission` — methode, bien absent — partaient avec le
+  // defaut de Vercel, `public, max-age=0, must-revalidate`. Le pourquoi et les
+  // trois garde-fous : `tests/cache-prive-endpoints.test.js`, section dette 90.
+  posterEnTetesPrives(res)
+  // Le sous-handler `calendriersDuMarche` n'est atteint QUE par ici : une seule
+  // pose suffit, et une seconde serait une deuxieme copie de la meme regle.
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET')
     return res.status(405).json({ error: 'methode_non_supportee' })

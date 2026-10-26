@@ -286,8 +286,16 @@ test('RECENSEMENT : la surface des reponses precoces est CHIFFREE', () => {
   // c'est CE motif-ci qui fait foi, et c'est par un motif plus etroit que
   // `api/yield.js` avait echappe au recensement alors que la production le
   // montrait en `public`.
-  assert.ok(avant.length >= 35 && avant.length <= 48,
-    `${avant.length} endpoints repondent avant leur garde (41 le 22 octobre 2026).\n` +
+  // ⚠ RE-ANCRE LE 26 OCTOBRE 2026, ET LE PLANCHER EST BAISSE EXPRES. La dette
+  // 90 pose l'en-tete en tete de CINQ handlers, donc ils sortent de ce
+  // comptage : 40 avant le correctif, 35 apres, mesure faite des deux cotes.
+  // Le plancher etait a 35 — le correctif tombait pile dessus, et la
+  // correction du SIXIEME endpoint aurait rougi ce test. Ce qu'il surveille
+  // n'est pas la taille de la surface, c'est que le MOTIF voie encore quelque
+  // chose : un recensement casse rend 0, pas 30.
+  assert.ok(avant.length >= 28 && avant.length <= 48,
+    `${avant.length} endpoints repondent avant leur garde (41 le 22 octobre 2026, ` +
+    '35 le 26 apres la dette 90).\n' +
     'Si ce compte s effondre, ce n est pas la surface qui a disparu, c est le ' +
     'recensement.')
 })
@@ -326,4 +334,100 @@ test('RECENSEMENT : les endpoints qui ouvrent CORS a tous les sites sont COMPTES
   ].sort(),
     'un de plus : justifiez pourquoi ce endpoint accorde une permission croisee.\n' +
     'un de moins : il a ete ferme, retirez-le pour qu il soit protege.')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DETTE 90 : UN 400 PORTE L'EN-TETE COMME UN 401
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠ CE QUE CES CINQ ENDPOINTS FAISAIENT, ET QUE LE FILET CI-DESSUS NE VOYAIT
+// PAS. Les tests du dessus tiennent un invariant plus faible — « ce qui repond
+// AVANT la garde ne porte aucune donnee de compte » — et ils le tiennent par
+// LECTURE DE LA SOURCE. Ils etaient verts sur les cinq : les corps sont bien
+// des libelles generiques (`bien_requis`, `methode_non_supportee`).
+//
+// Mesure du 26 octobre 2026, en appelant les handlers : ONZE reponses de refus,
+// ZERO en-tete. `api/yield.js:123` (dette 90, relevee le 24 octobre sur staging
+// ET sur la production `720d5f8`), et les quatre endpoints du marche entres en
+// production le 26 octobre avec `6ecff8f` — `api/marche-comparables.js`,
+// `api/marche-global.js`, `api/marche-temperature.js`, `api/yield-marche.js`
+// (deux fois : le handler et la vue calendrier).
+//
+// ⚠ ET CE TEST APPELLE LE HANDLER, IL NE LIT PAS LA SOURCE. Un recensement par
+// motif ne voit pas ce qu'un `res` recoit : c'est par un motif trop etroit que
+// `api/yield.js` avait echappe au comptage du 22 octobre alors que la
+// production le montrait en `public`. Le seul temoin qui ne mente pas est
+// l'en-tete pose sur une vraie reponse.
+//
+// ⚠ POURQUOI CE N'EST PAS LE CORRECTIF DEFAIT DU 22 OCTOBRE. Ce jour-la, poser
+// l'en-tete en tete des 29 handlers concernes avait rendu 27 rouges : les
+// doubles PARTIELS de `lib/require-permission` n'exportent pas la fonction.
+// Mesure refaite ici, endpoint par endpoint : les six fichiers de test qui
+// doublent la garde pour ces cinq-la font tous `{ ...vraie, requirePermission }`
+// — ils gardent donc `posterEnTetesPrives`. CINQ handlers, pas 29, et le cout
+// est mesure au lieu d'etre suppose.
+
+const CINQ_ENDPOINTS = [
+  ['api/yield.js', 'yield', { property_id: '' }],
+  ['api/marche-comparables.js', 'marche-comparables', {}],
+  ['api/marche-global.js', 'marche-global', {}],
+  ['api/marche-temperature.js', 'marche-temperature', {}],
+  ['api/yield-marche.js', 'yield-marche', {}],
+  // La vue calendrier de `yield-marche` est un SECOND refus, dans un
+  // sous-handler : il n'est atteint que par le handler principal, donc une
+  // seule pose le couvre — mais c'est ici qu'on le prouve, pas par lecture.
+  ['api/yield-marche.js (vue=calendrier)', 'yield-marche', { vue: 'calendrier' }]
+]
+
+function appeler (nom, req) {
+  const api = require(path.join(racine, 'api', `${nom}.js`))
+  const res = fausseReponse()
+  return Promise.resolve(api(req, res)).then(() => res)
+}
+
+test('LE TEST QUI COMPTE (dette 90) : le 400 « bien absent » porte private, no-store', async () => {
+  for (const [libelle, nom, query] of CINQ_ENDPOINTS) {
+    const res = await appeler(nom, { method: 'GET', headers: {}, query })
+    assert.equal(res.code, 400, `${libelle} : sans bien, le refus attendu est 400`)
+    assert.equal(res.entetes['cache-control'], 'private, no-store',
+      `${libelle} : ce refus precede la garde, donc il partait en ` +
+      '`public, max-age=0, must-revalidate` — posez `posterEnTetesPrives(res)` ' +
+      'en tete du handler')
+    assert.equal(res.entetes.vary, 'authorization, x-compte',
+      `${libelle} : sans vary, un cache qui garderait quand meme la reponse la ` +
+      'servirait au compte suivant')
+  }
+})
+
+test('LE TEST QUI COMPTE (dette 90) : le 405 « methode » le porte aussi', async () => {
+  // ⚠ LA DETTE 90 NE NOMMAIT QUE LE 400, et le 405 est le MEME defaut : il
+  // precede la garde lui aussi. Le correctif qui se contenterait de deplacer
+  // le 400 sous les en-tetes laisserait cette moitie ouverte.
+  for (const [libelle, nom] of CINQ_ENDPOINTS) {
+    const res = await appeler(nom, { method: 'DELETE', headers: {}, query: {} })
+    assert.equal(res.code, 405, `${libelle} : une methode non prevue rend 405`)
+    assert.equal(res.entetes['cache-control'], 'private, no-store',
+      `${libelle} : le refus de methode precede la garde comme le 400`)
+  }
+})
+
+test('LE TEST QUI COMPTE (dette 90) : le 401 et le 400 portent le MEME en-tete', async () => {
+  // ⚠ C'EST L'INVARIANT DEMANDE : « private, no-store sur un 400 comme sur un
+  // 401 ». Les deux refus sont mesures sur LE MEME endpoint et dans la MEME
+  // suite, parce que c'est leur DIVERGENCE qui etait le defaut — le 401 (pose
+  // par la garde) l'a toujours porte, le 400 (pose avant elle) jamais.
+  // Aucun reseau : `requirePermission` rend 401 des l'absence de jeton, avant
+  // tout appel Auth.
+  for (const [libelle, nom, query] of CINQ_ENDPOINTS) {
+    const sansBien = await appeler(nom, { method: 'GET', headers: {}, query })
+    const sansJeton = await appeler(nom, { method: 'GET', headers: {},
+      query: { ...query, property_id: 'un-bien-quelconque' } })
+    assert.equal(sansBien.code, 400, `${libelle} : refus de validation`)
+    assert.equal(sansJeton.code, 401, `${libelle} : refus de garde`)
+    assert.equal(sansBien.entetes['cache-control'], sansJeton.entetes['cache-control'],
+      `${libelle} : le refus de validation et le refus de garde doivent porter ` +
+      'le meme en-tete de cache — leur divergence EST la dette 90')
+    assert.equal(sansBien.entetes.vary, sansJeton.entetes.vary,
+      `${libelle} : et le meme vary`)
+  }
 })
