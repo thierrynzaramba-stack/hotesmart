@@ -196,8 +196,26 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
     for (const [c, n] of [...parColonne].sort((x, y) => y[1] - x[1])) {
       console.log(`     ${c} : ${n}`)
     }
+  } else if (comparees === 0) {
+    // ⚠ LE FAUX VERT DE L'ETAGE 1, trouve par la review du lot. « Aucun ecart »
+    // s'imprimait meme quand ZERO ligne avait ete comparee — une affirmation
+    // forte sur une mesure vide. Et c'etait ATTEIGNABLE avec un vert global :
+    // sur une base dont le rattrapage n'a pas tourne, toutes les lignes tombent
+    // dans « perimees » (une version anterieure), l'etage 1 compare 0 ligne, et
+    // l'etage 2 passe si les colonnes v1 sont encore justes. Le script
+    // concluait « PARITE ETABLIE » sans avoir rien verifie.
+    //
+    // Il avait la garde pour les lignes LUES et pour les mois NON VIDES — pas
+    // pour les lignes COMPAREES. C'est le defaut que l'etage 1 existe pour
+    // empecher, a l'etage 1 lui-meme.
+    console.error('\nECHEC : ZERO ligne comparee a l\'etage 1.')
+    console.error(`${jamaisDerivees} jamais derivee(s), ${perimees} a une autre version.`)
+    console.error('Les colonnes n\'ont donc PAS ete verifiees : lancez le remplissage')
+    console.error('ou attendez le rattrapage de 04:00, puis relancez.')
+    process.exit(1)
   } else {
-    console.log('  aucun ecart : les colonnes disent ce que le module calculerait aujourd\'hui.')
+    console.log(`  aucun ecart sur ${comparees} ligne(s) : les colonnes disent ce que le `
+      + 'module calculerait aujourd\'hui.')
   }
   // ⚠ ET LE RATTRAPAGE DE 04:00 EST CE QUI REFERME LES DEUX PREMIERS COMPTEURS.
   // Des lignes « jamais derivees » ou « a une autre version » ne sont pas un
@@ -241,6 +259,7 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
   let sejoursVus = 0
   let moisAvecSejours = 0
   let appels = 0
+  let bornesProbantes = 0
 
   for (const compte of comptes) {
     // Les lignes du compte, au format de l'oracle, BLOCAGES EXCLUS — parce que
@@ -260,15 +279,18 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
       })
     }
 
-    const { data: hors, error: eH } = await sb.rpc('revenus_hors_mois', {
-      p_user_id: compte, p_refs: null
-    })
+    // ⚠ `revenus_hors_mois` A PRIS UN `p_mois` LE 28 OCTOBRE 2026 (constat
+    // GRAVE 3 de la review : ses compteurs d'orphelins sommaient toutes les
+    // periodes sous un bandeau mensuel). On l'appelle donc PAR MOIS, dans la
+    // boucle ci-dessous, et plus une fois par compte.
+    //
+    // ⚠ ET `sans_date`, LUI, RESTE TOUS MOIS CONFONDUS — c'est dans la
+    // fonction, pas ici : une ligne sans date de versement n'a pas de mois. La
+    // comparaison avec l'oracle porte donc sur le premier mois balaye, et sa
+    // valeur ne depend pas du mois demande. Si elle en dependait, ce serait
+    // l'ecart a trouver.
+    let sansDateSql = null
     appels++
-    if (eH) {
-      console.error(`\nECHEC : revenus_hors_mois a refuse pour ${compte} — ${eH.message}`)
-      process.exit(1)
-    }
-    const sansDateSql = Number((hors && hors[0] && hors[0].sans_date) || 0)
 
     for (const mois of moisAComparer) {
       const oracle = revenusDuMois(pourOracle, delais, mois, jour, null)
@@ -280,6 +302,17 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
         p_user_id: compte, p_mois: mois, p_aujourdhui: jour, p_refs: null
       })
       appels++
+      const { data: hors, error: eH } = await sb.rpc('revenus_hors_mois', {
+        p_user_id: compte, p_mois: mois, p_refs: null
+      })
+      appels++
+      if (eH) {
+        console.error(`\nECHEC : revenus_hors_mois a refuse (${compte}, ${mois}) — ${eH.message}`)
+        process.exit(1)
+      }
+      if (sansDateSql === null) {
+        sansDateSql = Number((hors && hors[0] && hors[0].sans_date) || 0)
+      }
       if (eM) {
         console.error(`\nECHEC : revenus_du_mois a refuse (${compte}, ${mois}) — ${eM.message}`)
         process.exit(1)
@@ -314,6 +347,31 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
       dit('bruts', tSql.bruts, o.bruts)
       dit('sans_montant', tSql.sans_montant, o.refuses.montant)
 
+      // ⚠ LES DEUX COMPTEURS D'ORPHELINS, QUI N'ETAIENT PAS COMPARES DU TOUT
+      // (constat de la review du lot). Ce sont precisement les deux champs dont
+      // la semantique a divergé — l'un comptait « UUID nul » au lieu de « bien
+      // inexistant », l'autre sommait toutes les periodes — et le verificateur
+      // ne pouvait pas les voir : il annoncait « PARITE ETABLIE » en les
+      // ignorant.
+      //
+      // ⚠ ET IL FAUT PASSER `refsConnues` A L'ORACLE POUR QU'IL REPONDE. Avec
+      // `null`, `lib/revenus/mois.js` traite la liste comme « je ne sais pas »
+      // et laisse son compteur a ZERO par construction : la comparaison aurait
+      // ete vide des deux cotes, donc verte, donc inutile. On lui donne la
+      // liste des cles provider CONNUES du compte — celles qui ont encore un
+      // bien dans `properties`.
+      const clesConnues = [...uuidParCle.keys()]
+        .filter(k => k.startsWith(`${compte}|`))
+        .map(k => k.slice(compte.length + 1))
+      const oracleOrphelins = revenusDuMois(pourOracle, delais, mois, jour, clesConnues)
+      const nHors = (v) => { const x = Number(v); return Number.isFinite(x) ? x : 0 }
+      const horsSql = {
+        sejours: nHors(hors && hors[0] && hors[0].hors_biens),
+        cents: nHors(hors && hors[0] && hors[0].hors_biens_cents)
+      }
+      dit('hors_biens', horsSql.sejours, oracleOrphelins.hors_biens.sejours)
+      dit('hors_biens_cents', horsSql.cents, oracleOrphelins.hors_biens.total_cents)
+
       // Par bien : l'oracle groupe par cle PROVIDER, le SQL par UUID. On
       // traduit l'oracle avec la MEME table que le writer, et une cle
       // irresoluble se compare a la ligne `property_uuid is null`.
@@ -333,6 +391,53 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
           recu_cents: n(r.recu_cents), a_venir_cents: n(r.a_venir_cents)
         })
       }
+      // ⚠⚠ LE PERIMETRE D'UN MEMBRE DELEGUE, ET IL N'ETAIT EXERCE PAR RIEN
+      // (constat de la review du lot). `p_refs` valait TOUJOURS `null` dans ce
+      // script, donc la branche `property_uuid = any(p_refs)` des deux
+      // fonctions n'etait jamais executee — ni ici, ni par un test.
+      //
+      // C'est la SEULE garde de cloisonnement de ces fonctions : elles tournent
+      // avec la cle de service, qui contourne la RLS, et elles sont
+      // `security invoker`. Une erreur dans cette branche ne se verrait que
+      // chez un membre delegue — jamais chez le titulaire, donc jamais en
+      // recette.
+      //
+      // On prend un SOUS-ENSEMBLE STRICT des biens (le premier), et on compare
+      // au meme calcul fait par l'oracle sur les seules lignes de ces biens.
+      const uuidDuCompte = [...new Set(brutes
+        .map(l => uuidParCle.get(`${compte}|${String(l.property_id)}`))
+        .filter(Boolean))]
+      if (uuidDuCompte.length >= 2) {
+        const perimetre = [uuidDuCompte[0]]
+        const { data: borne, error: eB } = await sb.rpc('revenus_du_mois', {
+          p_user_id: compte, p_mois: mois, p_aujourdhui: jour, p_refs: perimetre
+        })
+        appels++
+        if (eB) {
+          console.error(`\nECHEC : revenus_du_mois a refuse un perimetre borne — ${eB.message}`)
+          process.exit(1)
+        }
+        const lignesDuPerimetre = pourOracle.filter(l =>
+          perimetre.includes(uuidParCle.get(`${compte}|${String(l.property_id)}`)))
+        const attendu = revenusDuMois(lignesDuPerimetre, delais, mois, jour, null)
+        const bSql = (borne || []).reduce((a, r) => ({
+          sejours: a.sejours + n(r.sejours),
+          total_cents: a.total_cents + n(r.total_cents)
+        }), { sejours: 0, total_cents: 0 })
+        for (const champ of ['sejours', 'total_cents']) {
+          if (bSql[champ] !== attendu.total[champ]) {
+            ecarts.push(`${mois} · PERIMETRE BORNE (1 bien sur ${uuidDuCompte.length}) · `
+              + `${champ} : SQL ${bSql[champ]} / oracle ${attendu.total[champ]}`)
+          }
+        }
+        // ⚠ ET LE PERIMETRE DOIT RETIRER QUELQUE CHOSE. Si le bien choisi porte
+        // tout le mois, la comparaison est vraie sans rien prouver du
+        // cloisonnement — elle vaudrait « tout = tout ». On ne peut pas
+        // l'exiger a chaque mois (un mois peut n'avoir qu'un bien vendu), mais
+        // on le COMPTE pour le dire a la fin.
+        if (bSql.sejours < tSql.sejours) bornesProbantes++
+      }
+
       for (const u of new Set([...oParUuid.keys(), ...sParUuid.keys()])) {
         const a = sParUuid.get(u) || { sejours: 0, total_cents: 0, recu_cents: 0, a_venir_cents: 0 }
         const b = oParUuid.get(u) || { sejours: 0, total_cents: 0, recu_cents: 0, a_venir_cents: 0 }
@@ -345,10 +450,23 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
     }
 
     // Hors mois : tous mois confondus, donc une seule comparaison par compte.
-    if (sansDateSql !== revenusDuMois(pourOracle, delais, moisAComparer[0], jour, null)
-      .hors_mois.refuses.date) {
+    //
+    // ⚠ ET ON REFUSE DE COMPARER UN `null`. `sansDateSql` est affecte DANS la
+    // boucle des mois depuis que `revenus_hors_mois` prend un `p_mois` : s'il
+    // valait encore `null` ici, c'est que la boucle n'a rien lu — et
+    // `null !== 0` fabriquerait un ECART qui n'existe pas, donc un faux rouge
+    // sur une mesure absente. C'est la meme discipline que « zero ligne lue
+    // fait echouer » : on ne conclut pas sur ce qu'on n'a pas mesure.
+    if (sansDateSql === null) {
+      console.error(`\nECHEC : aucun mois n'a rendu les reserves pour ${compte}.`)
+      console.error('La comparaison « sans date de versement » n\'a pas eu lieu.')
+      process.exit(1)
+    }
+    const attenduSansDate = revenusDuMois(pourOracle, delais, moisAComparer[0], jour, null)
+      .hors_mois.refuses.date
+    if (sansDateSql !== attenduSansDate) {
       ecarts.push(`compte ${compte} · sans date de versement : `
-        + `SQL ${sansDateSql} / oracle ${revenusDuMois(pourOracle, delais, moisAComparer[0], jour, null).hors_mois.refuses.date}`)
+        + `SQL ${sansDateSql} / oracle ${attenduSansDate}`)
     }
     if (blocagesExclus) {
       console.log(`  compte ${compte} : ${blocagesExclus} blocage(s) exclu(s) des deux cotes`)
@@ -357,6 +475,18 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
 
   console.log(`  ${appels} appel(s) SQL, ${sejoursVus} sejour(s) vus par l'oracle, `
     + `${moisAvecSejours} mois/compte non vide(s)`)
+  // ⚠ LE CLOISONNEMENT SE DIT, MEME QUAND IL N'A PAS PU ETRE EPROUVE. Sur une
+  // base a un seul bien, ou dont tous les sejours d'un mois portent le meme
+  // bien, la comparaison bornee est vraie sans rien prouver. Le taire laisserait
+  // croire que `p_refs` a ete verifie.
+  if (bornesProbantes > 0) {
+    console.log(`  perimetre borne EPROUVE sur ${bornesProbantes} mois/compte `
+      + '(le sous-ensemble retirait bien des sejours)')
+  } else {
+    console.log('  ⚠ perimetre borne NON EPROUVE : aucun sous-ensemble n\'a retire de sejour')
+    console.log('    (base a un seul bien, ou un seul bien vendu par mois).')
+    console.log('    La branche `p_refs` des deux fonctions reste donc NON MESUREE ici.')
+  }
 
   // ⚠ ET UN BALAYAGE QUI N'A CROISE AUCUN SEJOUR N'EST PAS UNE PARITE. C'est
   // le meme defaut que zero ligne lue, un etage plus haut.

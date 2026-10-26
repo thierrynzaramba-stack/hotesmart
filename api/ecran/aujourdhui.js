@@ -490,30 +490,25 @@ module.exports = async (req, res) => {
   // droit ne voit pas le bloc, et la garde est ICI parce que la cle de service
   // contourne la RLS.
   //
-  // ⚠ DONNEE NON URGENTE CALCULEE A LA LECTURE, ET C'EST UNE DETTE ASSUMEE.
-  // La regle d'architecture de CLAUDE.md veut un resume calcule par le cron pour
-  // toute donnee non urgente, et des revenus mensuels en sont. La spec du lot
-  // l'affecte au LOT (c), qui attend une decision de Thierry : aucune table de
-  // resume n'existe, et `tests/ecran-ne-calcule-pas.test.js` non plus.
+  // ⚠ DONNEE NON URGENTE, ET ELLE N'EST PLUS CALCULEE A LA LECTURE. Tout ce
+  // paragraphe disait le contraire jusqu'au 26 octobre 2026, et c'est la review
+  // du lot qui l'a releve : il decrivait l'implementation d'AVANT — « dette
+  // assumee », « aucune table de resume n'existe », « avec `raw`, 3,8 Mo et
+  // 569-961 ms », « TROIS appels PostgREST ». Plus un seul de ces faits n'etait
+  // vrai apres le commit qui les laissait en place, et c'est le premier texte
+  // qu'un lecteur rencontre. Le depot a paye six fois cette erreur les 23-24
+  // octobre : une affirmation ecrite a la main est lue comme une mesure, et
+  // elle ne rougit jamais.
   //
-  // ⚠ ET LE COUT AJOUTE SE DIT DANS L'UNITE QUE LE DEPOT MESURE — j'avais ecrit
-  // « DEUX requetes, pas les 72 de /api/yield », et la review a montre que ce
-  // chiffre compare deux choses differentes :
-  //   · les 586 Ko retires sont du poids NAVIGATEUR, apres le premier
-  //     affichage (les appels `/api/yield` partaient une fois la page peinte) ;
-  //   · ce qu'on ajoute est un transfert Supabase -> fonction, DANS le
-  //     `Promise.all` du seul appel que l'ecran attend, donc sur le chemin
-  //     critique du premier rendu.
-  //   Mesure du depot pour cette lecture exacte (docs/kb/performance.md
-  //   l 479-480) : avec `raw`, 3,8 Mo et 569-961 ms ; sans `raw`, 0,6 Mo et
-  //   260-309 ms.
-  //   · et ce sont TROIS appels PostgREST, pas deux : `bookings_snapshot` porte
-  //     1 436 lignes (docs/kb/reservation-directe.md l 255), donc la pagination
-  //     en fait deux, plus celui des delais.
+  // L'etat reel : le payload provider n'est lu qu'UNE FOIS, a l'ECRITURE de la
+  // reservation (`lib/revenus/derive.js`, appele par le writer unique), qui pose
+  // dix colonnes derivees. Cet endpoint ne fait plus que LIRE trois agregats
+  // SQL — aucun `raw`, aucun `delais_versement`, aucune pagination.
   //
-  // Le bilan du lot reste largement positif — le cout par bien disparait — mais
-  // le levier suivant est nomme : ne selectionner de `raw` que les champs
-  // utiles (dette 61) profite maintenant a l'accueil lui-meme.
+  // C'est l'architecture decidee par Thierry le 27 octobre 2026, et elle est la
+  // forme generale de la regle de CLAUDE.md : une page non urgente lit des
+  // donnees preparees a l'ecriture ou par le serveur, jamais un calcul sur les
+  // donnees brutes a l'ouverture.
   const lireRevenus = async () => {
     // ⚠ GARDE SERVEUR DU DROIT, ET ELLE PRECEDE TOUTE LECTURE. Decision Q5 de
     // Thierry : « comme aujourd'hui, lecture des reservations, limite aux biens
@@ -521,6 +516,24 @@ module.exports = async (req, res) => {
     // Le payload part dans le `localStorage` du membre pour 12 h.
     if (!droits.reservations) return null
     if (perimetreVide) return null
+    // ⚠ UN PERIMETRE SANS CLE UUID NE REND PAS ZERO EURO, IL REND « JE NE SAIS
+    // PAS » (constat de la review du lot). `uuidIntrouvable` est le cas d'un
+    // membre dont la delegation n'est exprimee qu'en cles provider : `refsUuid`
+    // vaut `[]` alors que le perimetre n'est pas vide. `lireBiens` le consulte
+    // deja et pousse `indisponibles` ; ce bloc ne le faisait pas, donc il
+    // passait `p_refs: []` — et `property_uuid = any('{}')` est FAUX POUR TOUT
+    // LE MONDE. Zero ligne, total a zero, `revenus` absent de `indisponibles`,
+    // et cet objet partait dans le `localStorage` du membre pour 12 h comme un
+    // resultat valide.
+    //
+    // L'ecran etait sauve par coincidence : `lireBiens` rendant `null`, la
+    // section se masquait. La coherence tenait a un AUTRE bloc — et le payload,
+    // lui, affirmait « 0 € » la ou la bonne reponse est « non calculable ».
+    if (uuidIntrouvable) {
+      console.error('[ecran/aujourdhui]', 'revenus : perimetre sans cle UUID', { refs: refsTexte })
+      indisponibles.push('revenus')
+      return null
+    }
 
     // ─── DEUX AGREGATS SQL, ET PLUS AUCUNE LECTURE DU PAYLOAD ─────────────
     //
@@ -550,38 +563,106 @@ module.exports = async (req, res) => {
     // confies a un membre delegue ; `null` veut dire titulaire, donc tout le
     // compte. C'est la fonction SQL qui applique la borne, et elle traite
     // `null` comme « aucune borne » — pas comme « aucun bien ».
-    requetes++
-    const { data: parBien, error: eMois } = await supabase.rpc('revenus_du_mois', {
-      p_user_id: compte,
-      p_mois: moisDemande,
-      p_aujourdhui: jour,
-      p_refs: refsUuid === null ? null : refsUuid
-    })
-    if (eMois) {
-      // ⚠ UNE FONCTION QUI N'EXISTE PAS ENCORE EST UNE ATTENTE, PAS UNE PANNE.
-      // Une migration se colle A LA MAIN dans ce depot : entre le push et le go
-      // de Thierry, la base n'a ni les colonnes ni les agregats. L'ecran dit
-      // alors « non calculable », ce qui est vrai — et ne crie pas au loup.
-      const texte = `${eMois.code || ''} ${eMois.message || ''}`.toLowerCase()
-      const absente = texte.includes('pgrst202') ||
-        texte.includes('revenus_du_mois') ||
+    // ⚠ LES TROIS APPELS PARTENT ENSEMBLE. Sequentiels, ils coutaient trois
+    // allers-retours sur le chemin critique du premier rendu ; en parallele, la
+    // latence est celle du plus lent. C'est le seul endroit de ce bloc ou la
+    // forme du code change le temps d'affichage.
+    requetes += 3
+    const [
+      { data: parBien, error: eMois },
+      { data: hors, error: eHors },
+      { data: sonde, error: eSonde }
+    ] = await Promise.all([
+      supabase.rpc('revenus_du_mois', {
+        p_user_id: compte,
+        p_mois: moisDemande,
+        p_aujourdhui: jour,
+        p_refs: refsUuid === null ? null : refsUuid
+      }),
+      // ⚠ LE MOIS EST PASSE AUX RESERVES AUSSI, et il ne l'etait pas (constat
+      // GRAVE 3 de la review du lot). La fonction n'avait AUCUNE borne de
+      // mois : elle sommait les sejours orphelins de TOUTES les periodes, et
+      // l'ecran affichait ce total sous un bandeau strictement mensuel. Mesure
+      // du scenario : 4 sejours orphelins, un verse en novembre (500 €) et
+      // trois en 2025 (2 500 €) — l'hote lisait un ecart de 500 € et, juste en
+      // dessous, « 4 sejours rattaches a aucun de vos logements : 3 000,00 € ».
+      // Le chiffre de la reserve additionnait de l'argent qui n'est PAS dans le
+      // total qu'elle pretend expliquer.
+      supabase.rpc('revenus_hors_mois', {
+        p_user_id: compte,
+        p_mois: moisDemande,
+        p_refs: refsUuid === null ? null : refsUuid
+      }),
+      supabase.rpc('revenus_calcul_incomplet', {
+        p_user_id: compte,
+        p_refs: refsUuid === null ? null : refsUuid
+      })
+    ])
+
+    // ⚠ UNE FONCTION QUI N'EXISTE PAS ENCORE EST UNE ATTENTE, PAS UNE PANNE.
+    // Une migration se colle A LA MAIN dans ce depot : entre le push et le go
+    // de Thierry, la base n'a ni les colonnes ni les agregats. L'ecran dit
+    // alors « non calculable », ce qui est vrai — et ne crie pas au loup.
+    //
+    // ⚠ MAIS LA DETECTION AVALAIT UNE ERREUR DE DROITS, et c'est un constat de
+    // la review du lot. Elle testait `texte.includes('revenus_du_mois')`, qui
+    // attrape TOUT message nommant la fonction — donc aussi
+    // « 42501 permission denied for function revenus_du_mois ». Un `grant`
+    // oublie, ou des privileges non reportes par `create or replace`, auraient
+    // vide le bloc pour TOUS les hotes sans une ligne dans les journaux. Le
+    // code PostgREST `PGRST202` suffit a couvrir le cas « migration en
+    // attente » ; on garde `does not exist` pour un appel direct hors
+    // PostgREST, et c'est tout.
+    const estAbsente = (e) => {
+      const texte = `${(e && e.code) || ''} ${(e && e.message) || ''}`.toLowerCase()
+      return texte.includes('pgrst202') ||
         (texte.includes('function') && texte.includes('does not exist'))
-      if (!absente) {
+    }
+
+    if (eMois) {
+      if (!estAbsente(eMois)) {
         console.error('[ecran/aujourdhui] revenus_du_mois echec:', eMois.message)
       }
       indisponibles.push('revenus')
       return null
     }
 
-    requetes++
-    const { data: hors, error: eHors } = await supabase.rpc('revenus_hors_mois', {
-      p_user_id: compte,
-      p_refs: refsUuid === null ? null : refsUuid
-    })
-    // ⚠ UN ECHEC ICI N'EFFACE PAS LE MOIS. Les reserves sont un complement :
-    // sans elles, l'ecran affiche des totaux justes et DIT qu'il ne sait pas
-    // compter ce qui en sort. Rendre `null` pour tout le bloc serait perdre des
-    // chiffres corrects a cause d'un compteur.
+    // ⚠⚠ LA SONDE DECIDE SI LE CHIFFRE A LE DROIT D'ETRE AFFICHE, et c'est le
+    // constat GRAVE 1 de la review du lot. Les deux agregats filtrent sur
+    // `statut_canonique = 'confirmed'` — une colonne NEUVE, qui vaut NULL tant
+    // que le remplissage n'a pas passe. `NULL = 'confirmed'` rend NULL, donc
+    // TOUTES les lignes sortent des deux agregats, et l'ecran affichait
+    // « 0,00 € · Recu 0,00 € · A venir 0,00 € » AVEC L'APLOMB D'UN FAIT : pas
+    // de reserve, pas de « non calculable », un mois vendu indistinguable d'un
+    // mois vide. Et pire en remplissage PARTIEL — un total plausible mais
+    // ampute, le script ayant une limite et le cron un plafond de 2 000 lignes.
+    //
+    // ⚠ SON ABSENCE REFUSE AUSSI, et ce n'est pas un exces de prudence : si la
+    // migration de la sonde n'est pas collee, on ne peut PAS savoir si le
+    // calcul est fini. Afficher le total serait reprendre exactement le pari
+    // qu'on vient de perdre. L'ecran dit « non calculable », et l'ordre de
+    // collage est donc contraint : la sonde AVANT que cet endpoint ne serve.
+    if (eSonde) {
+      if (!estAbsente(eSonde)) {
+        console.error('[ecran/aujourdhui] revenus_calcul_incomplet echec:', eSonde.message)
+      }
+      indisponibles.push('revenus')
+      return null
+    }
+    const ligneSonde = Array.isArray(sonde) ? sonde[0] : sonde
+    if (!ligneSonde || ligneSonde.incomplet !== false) {
+      // ⚠ `!== false` ET NON `=== true`. Une reponse vide, un champ absent ou
+      // un `null` doivent refuser : la seule valeur qui autorise l'affichage
+      // est un `false` explicite. L'inverse — autoriser sauf si `true` — fait
+      // d'une reponse malformee un feu vert.
+      indisponibles.push('revenus_calcul_en_cours')
+      return null
+    }
+
+    // ⚠ UN ECHEC DES RESERVES N'EFFACE PAS LE MOIS. Les reserves sont un
+    // complement : sans elles, l'ecran affiche des totaux justes et DIT qu'il
+    // ne sait pas compter ce qui en sort. Rendre `null` pour tout le bloc
+    // serait perdre des chiffres corrects a cause d'un compteur.
     if (eHors) {
       console.error('[ecran/aujourdhui] revenus_hors_mois echec:', eHors.message)
       indisponibles.push('revenus_reserves')

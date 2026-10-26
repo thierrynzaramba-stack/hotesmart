@@ -765,6 +765,7 @@
   "revenue.no_amount": "{n} stay(s) with no computable amount",
   "revenue.no_date": "{n} stay(s) with no payout date, across all months",
   "revenue.truncated": "incomplete read: the total is understated",
+  "revenue.computing": "computing",
   "revenue.unavailable": "not computable",
   "revenue.note": "Amounts computed from platform payout delays, not confirmed by your bank.",
   "revenue.no_amount_short": "{n} with no amount",

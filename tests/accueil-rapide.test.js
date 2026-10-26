@@ -1338,6 +1338,21 @@ test("LE TEST QUI COMPTE : l'argent rattache a AUCUN bien connu se DIT", () => {
   // `bookings_snapshot` ; l'ecran ne peint que les cles qui correspondent a un
   // bien. Une cle ORPHELINE — `property_id` nul, re-keying, bien supprime —
   // entrait dans le total et sortait de l'affichage sans aucune reserve.
+  //
+  // ⚠ CE TEST GARDE L'AFFICHAGE, PAS LE COMPTAGE, et la review du 28 octobre
+  // 2026 a eu raison de le dire : sa fixture n'etait PLUS produisible par
+  // l'endpoint. L'agregat `revenus_hors_mois` ne comptait que les
+  // `property_uuid` NULS, donc une cle `CLE-DISPARUE` (un UUID pendant, bien
+  // supprime) rendait `hors_biens = 0` — l'ecart muet se rouvrait, et ce test
+  // restait vert en peignant une reserve que le serveur n'aurait jamais
+  // envoyee.
+  //
+  // La migration `2026-10-26-revenus-hors-biens.sql` l'a referme : le compteur
+  // demande maintenant « ce bien existe-t-il encore ? » (`not exists` sur
+  // `properties`, borne au compte) et non « l'UUID est-il nul ? ». La fixture
+  // est donc redevenue produisible, et le COMPTAGE est mesure sur des donnees
+  // reelles par `scripts/verifier-parite-revenus.js`, qui compare `hors_biens`
+  // et `hors_biens_cents` a l'oracle — ce qu'il ne faisait pas non plus.
   const p = bancRevenus({
     mois: '2026-11',
     par_bien: {

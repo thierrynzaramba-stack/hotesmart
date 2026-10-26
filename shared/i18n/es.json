@@ -765,6 +765,7 @@
   "revenue.no_amount": "{n} estancia(s) con importe no calculable",
   "revenue.no_date": "{n} estancia(s) sin fecha de pago, todos los meses juntos",
   "revenue.truncated": "lectura incompleta: el total está subestimado",
+  "revenue.computing": "calculando",
   "revenue.unavailable": "no calculable",
   "revenue.note": "Importes calculados según los plazos de pago de las plataformas, no confirmados por el banco.",
   "revenue.no_amount_short": "{n} sin importe",

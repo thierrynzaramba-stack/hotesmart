@@ -765,6 +765,7 @@
   "revenue.no_amount": "{n} séjour(s) dont le montant n’est pas calculable",
   "revenue.no_date": "{n} séjour(s) sans date de versement, tous mois confondus",
   "revenue.truncated": "lecture incomplète : le total est sous-estimé",
+  "revenue.computing": "calcul en cours",
   "revenue.unavailable": "non calculable",
   "revenue.note": "Montants calculés selon les délais de versement des plateformes, et non confirmés par la banque.",
   "revenue.no_amount_short": "{n} sans montant",

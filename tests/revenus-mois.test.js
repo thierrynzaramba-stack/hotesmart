@@ -438,3 +438,72 @@ test("LE TEST QUI COMPTE : un LONG sejour ne sort pas de la fenetre, meme bornee
   assert.ok(long.snapshot.arrival < f.debut,
     'ce sejour ne sort plus de la fenetre : en choisir un plus long pour que ce test mesure')
 })
+
+test('LE TEST QUI COMPTE : un BLOCAGE n est pas un sejour, et l oracle le sait tout seul', () => {
+  // ⚠ CONSTAT DE LA REVIEW DU LOT REVENUS, 26 octobre 2026. Ce module ne
+  // connaissait pas `est_blocage` : c'est `scripts/verifier-parite-revenus.js`
+  // qui retirait les blocages AVANT de l'appeler. L'oracle n'etait donc fidele
+  // que grace a un pre-filtre vivant chez son appelant — et tout AUTRE appelant
+  // comptait les 66 blocages mesures en production comme des sejours sans
+  // montant. La vue ANNEE annoncee au reste du lot est exactement cet
+  // appelant-la : elle n'aurait ete d'accord ni avec l'ecran ni avec le SQL.
+  //
+  // La regle (decision de Thierry, 27 octobre) : aucun nom de voyageur ET
+  // `price` a ZERO — pas nul, zero — ET aucun montant calculable. Beds24 envoie
+  // ses blocages comme des reservations confirmees a prix nul.
+  const blocage = {
+    booking_id: 'BLOC-1',
+    property_id: 'P1',
+    snapshot: { provider: 'beds24', source: 'direct', status: 'new',
+                arrival: '2026-11-10', departure: '2026-11-12' },
+    raw: { price: 0, bookingTime: '2026-11-01T10:00:00Z' }
+  }
+  const vide = revenusDuMois([blocage], DELAIS, '2026-11', AUJOURDHUI)
+  assert.strictEqual(vide.total.sejours, 0,
+    'un blocage est compte comme un sejour : l ecran annoncerait un sejour sans montant')
+  assert.strictEqual(vide.total.refuses.montant, 0,
+    'un blocage entre dans le compteur « montant non calculable »')
+  assert.deepEqual(vide.par_bien, {}, 'un blocage cree une ligne de bien')
+
+  // ⚠ ET LA CONTRE-EPREUVE : UN VRAI SEJOUR OFFERT RESTE UN SEJOUR. Un geste
+  // commercial existe (prix zero, mais un voyageur nomme) : l'ecarter serait
+  // perdre une nuit vendue. Les trois indices sont CUMULES, jamais seuls.
+  const offert = {
+    booking_id: 'OFFERT-1',
+    property_id: 'P1',
+    snapshot: { provider: 'beds24', source: 'direct', status: 'new',
+                arrival: '2026-11-10', departure: '2026-11-12',
+                guest_name: 'Camille Durand' },
+    raw: { price: 0, bookingTime: '2026-11-01T10:00:00Z' }
+  }
+  const avec = revenusDuMois([offert], DELAIS, '2026-11', AUJOURDHUI)
+  assert.strictEqual(avec.total.sejours, 1,
+    'un sejour OFFERT a un voyageur nomme est pris pour un blocage : une nuit vendue disparait')
+
+  // ⚠⚠ ET LA TROISIEME CONDITION : UN BLOCAGE N'A PAS DE REVENU. Elle est
+  // gardee dans tests/revenus-derive.test.js pour `estUnBlocage` elle-meme ;
+  // ce qui ne l'etait PAR RIEN, c'est que cet appelant lui passe la bonne
+  // valeur. Mesure : remplacer `s.montant.valeur != null` par `false` dans ce
+  // module ne faisait rougir aucun test, sur aucun des trois fichiers du
+  // domaine.
+  //
+  // Le cas reel, mesure en production : CINQ des lignes qui portaient les deux
+  // premiers indices avaient quand meme un MONTANT — `netDuSejour` somme les
+  // `invoiceItems` quand `price` est nul, donc une saisie directe a zero avec
+  // des charges facturees a un vrai prix. Les exclure ferait disparaitre leur
+  // revenu du total.
+  const charge = {
+    booking_id: 'CHARGE-1',
+    property_id: 'P1',
+    snapshot: { provider: 'beds24', source: 'direct', status: 'new',
+                arrival: '2026-11-10', departure: '2026-11-12' },
+    raw: { price: 0, commission: 0, bookingTime: '2026-11-01T10:00:00Z',
+           invoiceItems: [{ type: 'charge', lineTotal: 320 }] }
+  }
+  const avecCharge = revenusDuMois([charge], DELAIS, '2026-11', AUJOURDHUI)
+  assert.strictEqual(avecCharge.total.sejours, 1,
+    'une ligne sans nom et a `price` zero MAIS qui a rapporte 320 EUR est classee blocage : '
+    + 'son revenu disparait du total')
+  assert.strictEqual(avecCharge.total.total_cents, 32000,
+    'le revenu de cette ligne n entre pas dans le total')
+})

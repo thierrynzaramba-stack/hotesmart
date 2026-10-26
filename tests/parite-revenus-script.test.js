@@ -41,16 +41,40 @@ test('LE TEST QUI COMPTE : zero ligne lue fait ECHOUER, pas passer', () => {
   // ⚠ LE FAUX VERT LE PLUS FACILE A FABRIQUER. Zero ligne rend zero ecart,
   // donc « PARITE ETABLIE » — l'exact contraire de ce qu'il faut annoncer.
   // Vecu dans le depot : un script qui n'avait rien lu rendait vert.
-  assert.match(code, /if \(!lignes\.length\)/,
-    'la garde de vacuite des lignes a disparu')
-  assert.match(code, /if \(!moisAvecSejours\)/,
-    'la garde « aucun mois non vide » a disparu : un balayage de mois vides rendrait vert')
-  assert.match(code, /if \(!comptes\.length\)/,
-    'la garde « aucun compte » a disparu')
-  // Chaque garde sort en ECHEC, et il faut le verifier : un `console.error`
-  // suivi d'un `process.exit(0)` imprimerait ECHEC en rendant vert a l'appelant.
+  // ⚠ CHAQUE GARDE EST SUIVIE DE SA SORTIE, ET C'EST CE QU'ON MESURE — pas sa
+  // presence. La version d'avant faisait `assert.match(code, /if \(!lignes\.length\)/)`
+  // et comptait les `process.exit` : la review du lot a montre qu'on pouvait
+  // VIDER le corps de la garde — `if (!lignes.length) { console.log('vide') }` —
+  // sans faire rougir un seul test. Le script rendait alors « PARITE ETABLIE »
+  // sur zero ligne. Et le seuil « au moins 6 sorties » portait sur un fichier
+  // qui en contient dix-huit : il n'empechait rien.
+  //
+  // On lit donc le BLOC de chaque garde, et on exige qu'il sorte en 1.
+  const blocApres = (motif) => {
+    const i = code.indexOf(motif)
+    assert.ok(i > -1, `la garde ${motif} a disparu`)
+    // Du motif jusqu'a la fermeture de son bloc, accolades comptees.
+    let profondeur = 0
+    let j = code.indexOf('{', i)
+    assert.ok(j > -1, `la garde ${motif} n'ouvre pas de bloc`)
+    for (let k = j; k < code.length; k++) {
+      if (code[k] === '{') profondeur++
+      else if (code[k] === '}') { profondeur--; if (profondeur === 0) return code.slice(j, k + 1) }
+    }
+    assert.fail(`bloc non ferme pour ${motif}`)
+  }
+  for (const [motif, raison] of [
+    ['if (!lignes.length)', 'zero ligne lue'],
+    ['if (!moisAvecSejours)', 'aucun mois non vide'],
+    ['if (!comptes.length)', 'aucun compte'],
+    ['if (comparees === 0)', 'zero ligne comparee a l etage 1']
+  ]) {
+    const bloc = blocApres(motif)
+    assert.match(bloc, /process\.exit\(1\)/,
+      `la garde « ${raison} » n'ECHOUE plus : son bloc ne sort pas en 1, `
+      + `donc le script conclurait « PARITE ETABLIE » sur une mesure absente`)
+  }
   const sorties = code.match(/process\.exit\((\d)\)/g) || []
-  assert.ok(sorties.length >= 6, `seulement ${sorties.length} sortie(s) : les gardes ne sortent plus`)
   assert.ok(!sorties.includes('process.exit(0)'),
     'une garde sort en 0 : elle imprime un echec et rend un succes')
 })
@@ -60,10 +84,22 @@ test('LE TEST QUI COMPTE : la base se nomme par sa reference de projet', () => {
   // BIENS. Un verificateur qui mesure une autre base que celle annoncee rend
   // un vert qui ne veut rien dire.
   assert.match(code, /refDuProjet/, 'la reference du projet n\'est plus lue')
-  assert.ok(!/properties.*length.*===\s*4|=== 4.*bien/i.test(code),
-    'la base est reconnue au nombre de biens')
   assert.match(code, /annoncee !== base/,
     'la base annoncee n\'est plus confrontee a celle de l\'URL')
+  // ⚠ L'ASSERTION QUI CHERCHAIT « === 4 » ETAIT DECORATIVE, et la review du lot
+  // l'a mesure : les deux mutations REALISTES de ce defaut —
+  // `if (uuidParCle.size === 4)` et `biens.length === 4 ? 'STAGING' : 'PROD'` —
+  // passaient toutes les deux, parce que son expression exigeait deux jalons
+  // sur la MEME ligne dans cet ordre exact.
+  //
+  // Ce qui mord vraiment : aucun nombre litteral ne doit servir a decider de la
+  // base. On cherche donc toute comparaison d'un compte a un entier dans le
+  // voisinage du choix de base, et on exige qu'il n'y en ait aucune.
+  const lignesDeBase = code.split('\n')
+    .filter(l => /base|projet|STAGING|PRODUCTION/i.test(l))
+  const parLeNombre = lignesDeBase.filter(l => /\b(length|size|count)\b\s*[=!<>]=*\s*\d/.test(l))
+  assert.deepEqual(parLeNombre, [],
+    'la base est reconnue a un NOMBRE (de biens, de lignes) et non a sa reference de projet')
 })
 
 test('l\'oracle est compare sur ses propres colonnes, sauf l\'horodatage', () => {
@@ -75,7 +111,16 @@ test('l\'oracle est compare sur ses propres colonnes, sauf l\'horodatage', () =>
     'la liste des colonnes comparees est recopiee a la main ou derive_le est compare')
   const { COLONNES } = require('../lib/revenus/derive')
   assert.ok(COLONNES.includes('derive_le'), 'derive_le a quitte COLONNES : le filtre ne filtre plus rien')
-  assert.ok(COLONNES.length >= 10, `COLONNES n'a que ${COLONNES.length} entree(s)`)
+  // ⚠ ONZE, PAS DIX, et le nombre se LIT au lieu d'etre ecrit. `est_blocage`
+  // est entree dans `COLONNES` le 27 octobre ; l'en-tete du module, le message
+  // de commit et ce test disaient encore « dix ». Sans consequence
+  // fonctionnelle — `COMPAREES` en garde bien dix apres le retrait de
+  // `derive_le` — mais c'est un nombre ecrit a la main, donc un nombre qui ne
+  // rougira jamais. On exige la coherence entre les deux listes, pas un total.
+  assert.strictEqual(COLONNES.filter(c => c !== 'derive_le').length, COLONNES.length - 1,
+    'derive_le n est plus exactement une entree de COLONNES')
+  assert.ok(COLONNES.length >= 11,
+    `COLONNES n'a que ${COLONNES.length} entree(s) : une colonne derivee a disparu`)
 })
 
 test('les blocages sont exclus par le MODULE, jamais en lisant la colonne', () => {

@@ -751,9 +751,20 @@ function renderRevenus () {
   //
   // 1. `etat.biens === null` — la lecture a ECHOUE. Masquer la section
   //    reviendrait a affirmer « cet hote n'a aucun logement ».
+  // ⚠ LE MOTIF, PAS SEULEMENT L'ABSENCE. La regle du depot dit qu'un `null`
+  // s'affiche « non calculable » AVEC SON MOTIF — et ces deux-la ne demandent
+  // pas la meme chose a l'hote. « non calculable » decrit un defaut : il n'y a
+  // rien a attendre. « Calcul en cours » decrit un etat transitoire, celui des
+  // minutes qui suivent le collage d'une migration ou une nuit de rattrapage :
+  // il faut revenir. Afficher le premier pour le second ferait conclure a une
+  // panne, et c'est exactement ce qu'un hote signale au fondateur.
+  const calculEnCours = () => {
+    const ind = (etat.ecran && etat.ecran.indisponibles) || []
+    return ind.includes('revenus_calcul_en_cours')
+  }
   const videDuTotal = () => {
     const n = $('[data-bind="revenue-total"]')
-    if (n) n.textContent = t('revenue.unavailable')
+    if (n) n.textContent = t(calculEnCours() ? 'revenue.computing' : 'revenue.unavailable')
     for (const sel of ['revenue-received', 'revenue-upcoming', 'revenue-month']) {
       const x = $(`[data-bind="${sel}"]`); if (x) x.textContent = ''
     }

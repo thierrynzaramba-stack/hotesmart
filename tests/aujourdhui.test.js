@@ -650,3 +650,37 @@ test("LE TEST QUI COMPTE : au premier affichage, les biens arrivent AVANT les no
   assert.ok(iBiens < iNotes,
     'les notes sont chargees avant les biens : leur boucle tourne sur une liste vide')
 })
+
+test('le bloc revenus distingue « calcul en cours » de « non calculable »', () => {
+  // ⚠ UN TEST DE FORME, ET JE L'ASSUME. Le bloc des revenus n'a pas de harnais
+  // DOM dans ce fichier — les trois tests voisins lisent deja le code par
+  // `indexOf`. Ce qui est mesure PAR APPEL, dans
+  // tests/ecran-aujourdhui-isolation.test.js, c'est la DECISION : l'endpoint
+  // refuse de rendre un chiffre quand le calcul n'est pas fini. Ici on verifie
+  // seulement que la page ne reduit pas les deux motifs a un seul mot.
+  //
+  // POURQUOI CA COMPTE : « non calculable » decrit un defaut — il n'y a rien a
+  // attendre. « Calcul en cours » decrit un etat transitoire : les minutes qui
+  // suivent le collage d'une migration, ou une nuit de rattrapage. Afficher le
+  // premier pour le second fait conclure a une panne, et c'est ce qu'un hote
+  // signale au fondateur.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.match(code, /revenus_calcul_en_cours/,
+    'la page ne lit plus le motif « calcul en cours » : les deux etats se confondent')
+  assert.match(code, /t\(calculEnCours\(\) \? 'revenue\.computing' : 'revenue\.unavailable'\)/,
+    'le total ne choisit plus son motif')
+  // ⚠ ET LES DEUX CLEFS EXISTENT DANS LES TROIS LANGUES, sinon l'ecran
+  // afficherait la clef brute — le defaut que `scripts/i18n-check.js` garde,
+  // verifie ici parce que cette clef est neuve.
+  for (const langue of ['fr', 'en', 'es']) {
+    const dict = JSON.parse(fs.readFileSync(
+      path.join(__dirname, '..', 'shared', 'i18n', `${langue}.json`), 'utf8'))
+    for (const clef of ['revenue.computing', 'revenue.unavailable']) {
+      assert.ok(dict[clef] && String(dict[clef]).trim(),
+        `${langue}.json n a pas de texte pour ${clef}`)
+    }
+    assert.notStrictEqual(dict['revenue.computing'], dict['revenue.unavailable'],
+      `${langue}.json : les deux motifs disent la meme phrase, donc la distinction est perdue`)
+  }
+})
