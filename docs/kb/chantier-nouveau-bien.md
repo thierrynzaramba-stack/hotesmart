@@ -1348,8 +1348,11 @@ L'écart lointain repose sur peu de nuits de week-end.
   sont REQUIS (une ligne sans l'au-delà occuperait la clé d'unicité et
   bloquerait le bon calcul) ; `calcule_le` n'est envoyé que s'il est fourni
   (un NULL explicite cassait l'insertion) ; la date de capture est le premier
-  jour LISIBLE du pacing, dans les deux branches ; `--go` exige `--biens=N` et
-  s'arrête si la base visée n'en compte pas N ; la séquence de la table est
+  jour LISIBLE du pacing, dans les deux branches ; `--go` exige
+  `--base=STAGING|PRODUCTION` et s'arrête si la base visée n'est pas celle-là
+  (⚠ **jusqu'au 26 octobre 2026 c'était `--biens=N`, comparé au compte réel** :
+  staging a gagné un bien et l'aide disait encore « 3 staging », donc le script
+  refusait la BONNE base) ; la séquence de la table est
   révoquée elle aussi ; la vérification sonde tous les droits client
   (`acces_client`) ; l'index redondant est retiré. Le test de migration est
   une LISTE BLANCHE, instruction par instruction (la liste noire laissait
@@ -1521,7 +1524,7 @@ premier venu sous « le marché de votre commune ».
   `2026-09-24-marche-biens.sql`, additive, sans clé étrangère, serveur seul,
   vérification à empreinte ET à forme) ; writer unique
   `scripts/lier-bien-marche.js` (saisie du fondateur, aucun appel AirROI,
-  `--go --biens=N`, ajout seul). Troisième table V2 lue par l'écran ; aucun
+  `--go --base=STAGING|PRODUCTION`, ajout seul). Troisième table V2 lue par l'écran ; aucun
   contact de plus avec l'existant.
 - **La vue exige un logement**, sous la garde habituelle du logement (lecture
   des réservations, bien requis : le bien désigne le compte), et ne rend QUE
@@ -1554,7 +1557,8 @@ n'existe pas en staging (trois logements de recette seulement) — décision à
 Thierry.
 **Lien écrit en staging (décision de Thierry, même jour)** : « Recette — Loft
 Pilotable » (992d1ebe…) → Bagnères-de-Bigorre, lien FICTIF sur le banc de
-test ; calcul à blanc lu, puis écriture séparée (`--go --biens=3`), relu :
+test ; calcul à blanc lu, puis écriture séparée (`--go --biens=3` **à
+l'époque ; l'option est devenue `--base=STAGING` le 26 octobre 2026**), relu :
 `marche_biens` id 1. La vue rendrait pour ce logement la ligne de calendrier
 id 2 (capture du 24 septembre, méthode `v2.3-2026-09-24`).
 
@@ -2118,8 +2122,9 @@ seulement, comme `marche_calendrier`.
 
 **Writer unique** : `lib/marche/temperature-airroi.js` (`enregistrerTemperature`),
 lancé par `scripts/enregistrer-temperature-airroi.js --relief=<capture>
-[--go --biens=N]` (empreinte 3 = staging, 5 = production ; sans `--go`, rien
-n'est écrit). Aucun appel AirROI dans ce script : il lit une capture.
+[--go --base=STAGING|PRODUCTION]` (empreinte : la **référence du projet**,
+`lib/empreinte-base.js` — plus le nombre de biens, qui dérive avec la donnée ;
+sans `--go`, rien n'est écrit). Aucun appel AirROI dans ce script : il lit une capture.
 
 ⚠ **Aucun prix n'est stocké en euros.** Les valeurs sont des facteurs en base 100.
 
