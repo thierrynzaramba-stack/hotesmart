@@ -629,7 +629,7 @@ test('la cle de MIGRATION est celle qu on interroge quand elle existe', async ()
 // ─── LE BIEN EN BASCULE, ET LE CABLAGE QU'AUCUN TEST N'EPROUVAIT ──────────────
 //
 // ⚠ CES TESTS VIENNENT D'UNE REVIEW QUI A TROUVE UN BLOQUANT ET TROIS MUTATIONS
-// RESTEES VERTES SUR LA SUITE ENTIERE (28 octobre 2026). Ce que le double
+// RESTEES VERTES SUR LA SUITE ENTIERE (26 octobre 2026). Ce que le double
 // masquait n'etait plus sa mecanique — il projette les colonnes et asserte les
 // filtres — mais des CHEMINS JAMAIS APPELES :
 //
@@ -758,4 +758,92 @@ test('LE TEST QUI COMPTE : une reponse 200 MALFORMEE ou TRONQUEE du partenaire r
     assert.equal(r.corps.motif, 'partenaire_illisible', nom)
     assert.deepEqual(trace.deletes, [], nom)
   }
+})
+
+test('LE TEST QUI COMPTE : le coeur dit « pas mappe » ET le partenaire dit « en vente » -> 409', async () => {
+  // ⚠⚠ LA FENETRE QUI JUSTIFIE TOUT LE CROISEMENT, ET MON MESSAGE DE COMMIT
+  // L'ANNONCAIT COUVERTE ALORS QU'ELLE NE L'ETAIT PAS (constat de la re-review
+  // du 26 octobre 2026). Les quatre tests qui simulent le partenaire posaient
+  // tous `canaux: []` — un coeur VIDE. La mutation « croisement conditionne a :
+  // le coeur n'a aucune ligne » restait donc verte sur la suite entiere, et
+  // j'avais ecrit qu'elle etait fermee.
+  //
+  // C'est pourtant l'etat exact que le croisement existe pour attraper :
+  // `canaux_du_bien` est rafraichi au mieux une fois par heure et par compte,
+  // aucun chemin de mappage ne le rafraichit, donc apres une connexion a Airbnb
+  // le coeur porte encore une ligne `mappe = false` — « ce canal existe, il
+  // n'est pas relie a ce bien » — pendant que l'annonce EST en vente.
+  //
+  // Sans le croisement, cette ligne laisse passer la suppression : elle ne
+  // declenche ni `annonce_reliee` (elle dit false), ni `mapping_inconnu` (elle
+  // n'est pas nulle), ni `jamais_releve` (il y a une ligne).
+  poser({
+    canaux: [{ ota: 'airbnb', titre: 'Annonce', actif: true, mappe_pour_ce_bien: false }],
+    canauxVivants: canalVivant('airbnb')
+  })
+  const r = await appeler()
+  assert.equal(r.code, 409,
+    `le serveur a repondu ${r.code} : le coeur etait perime et l annonce vendait`)
+  assert.equal(r.corps.source, 'partenaire',
+    'le refus ne vient pas du partenaire : c est le coeur perime qui a tranche')
+  assert.deepEqual(trace.deletes, [], `des donnees ont ete purgees : ${trace.deletes.join(', ')}`)
+  assert.ok(!trace.fetchs.some(f => f.startsWith('DELETE')),
+    'un DELETE est parti au partenaire sur un bien en vente')
+})
+
+test('LE TEST QUI COMPTE : un `provider` NUL ne contourne pas la garde', async () => {
+  // ⚠ UNE REGRESSION QUE J'AI INTRODUITE, trouvee par la re-review. En
+  // remplacant `estDuCanal` — qui portait `|| bien.provider == null` — par le
+  // resolveur partage, j'ai retire le `provider` nul du perimetre de la garde.
+  // Mesure sur l'arbre d'avant contre le mien : horloge absente, en echec ou
+  // illisible rendaient 409 ; apres mon commit, 200 et 19 tables purgees.
+  //
+  // Le depot traite un `provider` nul comme channex en cinq endroits. Pour une
+  // garde DESTRUCTRICE, le defaut prudent est d'inclure — l'inverse de
+  // `publicationPossible`, qui l'exclut a dessein dans le meme fichier.
+  for (const horloge of [
+    { nom: 'absente', monde: { releve: null } },
+    { nom: 'en echec', monde: { releve: { vu_le: '2026-10-26T08:00:00Z', ok: false, erreur: 'timeout' } } },
+    { nom: 'illisible', monde: { erreurReleve: true } }
+  ]) {
+    poser({
+      bien: { id: BIEN, name: 'Provider nul', provider: null,
+              provider_property_id: 'SRC', provider_rate_plan_id: null,
+              migration_target_property_id: null },
+      canaux: [],
+      ...horloge.monde
+    })
+    const r = await appeler()
+    assert.equal(r.code, 409,
+      `horloge ${horloge.nom} : un bien a provider nul s est supprime (${r.code})`)
+    assert.deepEqual(trace.deletes, [], `horloge ${horloge.nom} : des donnees ont ete purgees`)
+  }
+
+  // ⚠ ET IL RESTE SUPPRIMABLE QUAND LE RELEVE EST SAIN : le refus porte sur
+  // l'ignorance, pas sur la valeur nulle.
+  poser({
+    bien: { id: BIEN, name: 'Provider nul', provider: null,
+            provider_property_id: 'SRC', provider_rate_plan_id: null,
+            migration_target_property_id: null },
+    canaux: [], canauxVivants: { status: 200, body: { data: [] } },
+    partenaire: { status: 200, body: { data: {} } }
+  })
+  const ok = await appeler()
+  assert.equal(ok.code, 200, `un provider nul au releve sain est bloque : ${JSON.stringify(ok.corps)}`)
+})
+
+test('la limite de page est DEMANDEE au partenaire', async () => {
+  // ⚠ SANS ELLE, LA GARDE DE TRONCATURE MORD TOUJOURS. Le plafond par defaut
+  // du partenaire est 10 ; un bien portant 12 canaux rendait donc
+  // `meta.total > data.length`, donc un refus `partenaire_illisible`
+  // PERMANENT — avec un message « reessayez dans quelques minutes » qui ne
+  // changerait jamais rien. Mesure de la re-review : 10 rendus / total 12 ->
+  // 409 ; 12 rendus / total 12 -> 200.
+  poser({ canaux: [], canauxVivants: { status: 200, body: { data: [] } },
+          partenaire: { status: 200, body: { data: {} } } })
+  await appeler()
+  const lecture = trace.fetchs.find(f => f.includes('/channels'))
+  assert.ok(lecture, 'le partenaire n a pas ete interroge')
+  assert.match(lecture, /pagination\[limit\]=\d+/,
+    'aucune limite de page demandee : un bien a plus de 10 canaux serait insupprimable a vie')
 })

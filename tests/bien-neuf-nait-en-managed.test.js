@@ -102,7 +102,7 @@ test('une lecture des canaux en echec ne vaut PAS « aucun canal »', () => {
   assert.match(bloc, /canauxActifs === null/)
   assert.match(bloc, /res\.status\(502\)/)
   // ⚠ LA TRANCHE VA JUSQU'A LA FIN DE LA FONCTION, PAS A 900 OCTETS — et ce
-  // test a rougi pour cette raison le 28 octobre 2026, quand un commentaire
+  // test a rougi pour cette raison le 26 octobre 2026, quand un commentaire
   // s'est ajoute en tete de `canauxActifsDuBien`. C'est le defaut EXACT que le
   // test suivant dit avoir corrige le 22 octobre : « pas jusqu'a un nombre
   // d'octets ». Il vivait encore ici.
@@ -122,7 +122,7 @@ test('la garde lit `migration_target_property_id`, donc elle le SELECTIONNE', ()
   // Une garde qui juge sur une colonne non selectionnee est une garde ouverte.
   // Un bien en cours de bascule porte ses canaux sous sa cle CIBLE.
   //
-  // ⚠ CE TEST ETAIT UN FAUX VERT, et la review du 28 octobre 2026 l'a mesure :
+  // ⚠ CE TEST ETAIT UN FAUX VERT, et la review du 26 octobre 2026 l'a mesure :
   // il cherchait la CHAINE `migration_target_property_id` dans les 400 premiers
   // caracteres de `canauxActifsDuBien`, donc il passait sur un COMMENTAIRE —
   // pendant que le code, lui, lisait `provider_property_id ||
@@ -136,7 +136,7 @@ test('la garde lit `migration_target_property_id`, donc elle le SELECTIONNE', ()
   const f = src.indexOf('async function canauxActifsDuBien')
   const sansCommentaires = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
   const g = sansCommentaires.indexOf('async function canauxActifsDuBien')
-  assert.match(sansCommentaires.slice(g, g + 400), /proprieteChezLeProvider\(prop\)/,
+  assert.match(sansCommentaires.slice(g, g + 400), /proprieteChezLePartenaire\(prop\)/,
     'la resolution de cle ne passe plus par le resolveur canonique')
   assert.ok(!/provider_property_id \|\| prop\.migration_target_property_id/.test(sansCommentaires),
     'la resolution prend la cle SOURCE d abord : un bien en bascule serait juge sur la mauvaise cle')

@@ -12,7 +12,11 @@ const { peutCouperLaPousseeDesPrix } = require('../lib/pilote-tarifaire')
 const { requirePermission, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
 // ⚠ LA RESOLUTION DE LA CLE PARTENAIRE N'EST PAS RECOPIEE : `rate-sync` la
 // tient pour tout le depot, migration comprise.
-const { proprieteChezLeProvider } = require('../lib/rate-sync')
+// ⚠ PAS `proprieteChezLeProvider` DIRECTEMENT : un `provider` NUL compte comme
+// channex pour une garde destructrice, et le resolveur partage ne le traite pas
+// (il sert aussi aux publications, ou le defaut prudent est l'inverse). Le point
+// unique vit dans lib/logement/lecture.js, avec la regle de la garde.
+const { proprieteChezLePartenaire } = require('../lib/logement/lecture')
 const { refusPlancher, valeurEffective } = require('../lib/plancher-vs-base')
 const { refsDuPerimetre } = require('../lib/permissions')
 const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
@@ -121,7 +125,7 @@ function buildRatePlanOptions(basePrice, incGuests, extraFee, cap) {
 // personne pour le tarifer.
 async function canauxActifsDuBien (prop) {
   // ⚠⚠ LA CLE VIENT DU RESOLVEUR CANONIQUE, ET ELLE NE VENAIT PAS DE LUI.
-  // Constat BLOQUANT de la review du 28 octobre 2026.
+  // Constat BLOQUANT de la review du 26 octobre 2026.
   //
   // Cette ligne faisait `provider_property_id || migration_target_property_id` :
   // la cle SOURCE d'abord, la cible seulement en repli. Or pendant une bascule
@@ -133,7 +137,10 @@ async function canauxActifsDuBien (prop) {
   // cle existe et dont le canal Airbnb est actif sur la CIBLE se supprimait —
   // le croisement interrogeait l'ancienne cle (liste vide), le
   // `DELETE /properties/<ancienne>` rendait 404 lu comme un succes, et les 19
-  // tables partaient. Reservations, messages et menages effaces, pendant que la
+  // tables partaient. Reservations, messages et EVENEMENTS DE MENAGE effaces
+  // (`menage_events`, `menage_comments`, `menage_done` — la table `menages`
+  // elle-meme n'est PAS purgee : elle n'a pas de FK et ne cascade pas, c'est
+  // une dette du registre), pendant que la
   // propriete cible garde ses canaux et continue de vendre. Irreversible.
   //
   // `proprieteChezLeProvider` (lib/rate-sync.js) tranche deja cette question
@@ -141,10 +148,18 @@ async function canauxActifsDuBien (prop) {
   // qu'elle vaut « pour TOUT ce qu'on lui adresse ». Une quatrieme regle de
   // resolution de cle dans ce fichier, c'est la divergence garantie — le defaut
   // meme que ce lot repare entre l'ecran et le serveur.
-  const cle = proprieteChezLeProvider(prop)
+  const cle = proprieteChezLePartenaire(prop)
   if (!cle) return []
   try {
-    const r = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(cle)}`)
+    // ⚠ LA LIMITE EST EXPLICITE, SINON LA GARDE DE TRONCATURE MORD TOUJOURS.
+    // Constat de la re-review : le plafond de page du partenaire est 10
+    // (mesure du 19 octobre 2026, citee dans lib/canaux-du-bien.js), donc un
+    // bien portant 12 canaux rendait `meta.total > data.length` — refus
+    // `partenaire_illisible` PERMANENT, avec un message « reessayez dans
+    // quelques minutes » qui ne changerait jamais rien. La garde etait juste ;
+    // son entree etait tronquee par construction.
+    const r = await channelCall('GET',
+      `/channels?filter[property_id]=${encodeURIComponent(cle)}&pagination[limit]=100`)
     if (!r || !r.ok) return null
     // ⚠ UNE REPONSE 200 SANS LISTE N'EST PAS « AUCUN CANAL » (constat MAJEUR de
     // la meme review). `{data:{id:'c1'}}` — un objet au lieu d'un tableau — et
@@ -804,7 +819,8 @@ module.exports = async function handler(req, res) {
     // Resultat mesure dans le code : un bien channex relie a une annonce Airbnb
     // par son plan derive se supprimait SANS 409 — `DELETE /properties/{id}`
     // chez le partenaire, puis purge de `bookings_snapshot`, `messages`,
-    // `menages` et `message_sent_log`, l'annonce restant en vente. Irreversible.
+    // `menage_events` et `message_sent_log`, l'annonce restant en vente —
+    // irreversible. (Pas `menages` : cette table n'est pas dans la purge.)
     //
     // ⚠ ET C'EST LA CLASSE DE DEFAUT GRAVEE AU CLAUDE.md : « UN MASQUAGE PAR
     // DROIT NE SUFFIT JAMAIS ». L'ecran avait ete durci deux fois (recette du
@@ -866,7 +882,7 @@ module.exports = async function handler(req, res) {
         // menent au meme refus prudent ici : `releveDuCompte` reste `null`.
         if (eH) {
           // ⚠ UNE HORLOGE ILLISIBLE EST UN RELEVE EN ECHEC, et elle ne l'etait
-          // pas ici — constat MAJEUR de la review du 28 octobre 2026.
+          // pas ici — constat MAJEUR de la review du 26 octobre 2026.
           //
           // `lireCanaux`, cote ecran, calcule
           // `horlogeEnPanne || echecVisibleParLHote(...)` ; ce bloc ne gardait
@@ -969,7 +985,7 @@ module.exports = async function handler(req, res) {
     // handler, il se supprimait en 200 avec 19 tables purgees et ZERO appel au
     // partenaire — ni croisement, ni suppression de la propriete cible, qui
     // reste donc en vente.
-    if (proprieteChezLeProvider(prop)) {
+    if (proprieteChezLePartenaire(prop)) {
       const canauxVivants = await canauxActifsDuBien(prop)
       if (canauxVivants === null) {
         console.error('[channel-property] DELETE : canaux du partenaire illisibles')
@@ -1007,7 +1023,8 @@ module.exports = async function handler(req, res) {
     // Ce raisonnement produit le pire des deux etats : la propriete reste chez
     // le partenaire — donc l'annonce reste en vente et continue de recevoir des
     // reservations — pendant que HoteSmart a efface les reservations, les
-    // messages et les menages qui lui permettraient de les traiter. L'hote se
+    // messages et les evenements de menage qui lui permettraient de les
+    // traiter. L'hote se
     // retrouve avec un bien qui vend et un systeme aveugle, et rien ne le lui
     // dit : la reponse portait un simple drapeau.
     //
@@ -1022,7 +1039,7 @@ module.exports = async function handler(req, res) {
     // CIBLE — celle qui porte les canaux et qui vend — rester intacte, pendant
     // que HoteSmart purgeait tout.
     let channelDeleted = null
-    const cleChezLePartenaire = proprieteChezLeProvider(prop)
+    const cleChezLePartenaire = proprieteChezLePartenaire(prop)
     if (cleChezLePartenaire) {
       const r = await channelCall('DELETE', `/properties/${cleChezLePartenaire}`)
       channelDeleted = r.ok || r.status === 404

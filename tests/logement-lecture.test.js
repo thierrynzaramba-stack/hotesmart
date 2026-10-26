@@ -1632,8 +1632,8 @@ test('LE TEST QUI COMPTE : AUCUNE garde par provider ne precede le refus du coeu
   // ⚠ CE TEST A CHANGE D'INVARIANT DEUX FOIS, ET CHAQUE FOIS IL AVAIT RAISON DE
   // CRIER. Il comptait les gardes `prop.provider === 'channex'` et exigeait 1 ;
   // puis il a mesure leur PLACE quand le croisement en a ajoute une seconde ;
-  // le 28 octobre 2026 elles ont DISPARU toutes les deux, remplacees par
-  // `proprieteChezLeProvider(prop)` — parce qu'un bien encore
+  // le 26 octobre 2026 elles ont DISPARU toutes les deux, remplacees par
+  // `proprieteChezLePartenaire(prop)` — parce qu'un bien encore
   // `provider = 'beds24'` dont la bascule a provisionne la cible EST chez le
   // partenaire, et que le test du `provider` ne le voyait pas.
   //
@@ -1645,7 +1645,7 @@ test('LE TEST QUI COMPTE : AUCUNE garde par provider ne precede le refus du coeu
 
   const conditions = [
     ...bloc.matchAll(/prop\.provider === '(?:channex|channel)'/g),
-    ...bloc.matchAll(/proprieteChezLeProvider\(prop\)/g)
+    ...bloc.matchAll(/proprieteChezLePartenaire\(prop\)/g)
   ]
   assert.ok(conditions.length >= 1,
     'plus aucune condition ne garde les appels au partenaire : un bien Beds24 l appellerait')
