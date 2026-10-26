@@ -299,11 +299,36 @@ test('LE TEST QUI COMPTE : un releve de compte EN ECHEC ne conclut rien', () => 
   // « On ne sait pas » reste reserve a deux cas, et a eux seuls : le releve du
   // compte n'a jamais reussi, ou il a echoue. Un echec silencieux qui
   // ouvrirait la suppression est exactement ce que la regle interdit.
+  //
+  // ⚠ LE MOTIF A CHANGE LE 26 OCTOBRE 2026, LE REFUS NON. Il valait
+  // `jamais_releve` parce que l'echec n'etait consulte que dans la branche
+  // « aucune ligne de canal » — celle qui porte ce motif. Le refus sur echec
+  // est desormais tranche AVANT, pour toutes les formes de canaux (decision de
+  // Thierry : « si le releve est en echec, on refuse. Securite d'abord »), et
+  // son motif est `canaux_illisibles` : pour l'hote, « le releve a echoue » et
+  // « je n'ai pas pu lire les canaux » sont la meme chose, et le meme geste.
   const r = L.suppressionPossible(bienDe(), [], {
     releveDuCompte: '2026-10-22T08:00:00Z', releveEnEchec: true
   })
   assert.equal(r.possible, null)
-  assert.equal(r.motif, 'jamais_releve')
+  assert.equal(r.motif, 'canaux_illisibles')
+
+  // ⚠ ET IL REFUSE MAINTENANT MEME AVEC DES LIGNES, ce qui est tout l'objet du
+  // durcissement : une ligne `mappe = false` lue avant la panne est une ligne
+  // PERIMEE, et c'est par elle que la suppression passait.
+  const avecLigne = L.suppressionPossible(bienDe(), [{ ota: 'airbnb', mappe: false }], {
+    releveDuCompte: '2026-10-22T08:00:00Z', releveEnEchec: true
+  })
+  assert.equal(avecLigne.possible, null)
+  assert.equal(avecLigne.motif, 'canaux_illisibles')
+
+  // ⚠ MAIS PAS UN BIEN BEDS24 SANS LIGNE : le releve en echec est celui de
+  // l'AUTRE partenaire, il ne dit rien de ce bien. Sans cette borne, une panne
+  // Channex rendrait insupprimable tout le parc Beds24.
+  const b24 = L.suppressionPossible(bienDe({ provider: 'beds24' }), [], {
+    releveDuCompte: '2026-10-22T08:00:00Z', releveEnEchec: true
+  })
+  assert.equal(b24.possible, true, 'une panne Channex bloque un bien Beds24')
 })
 
 test('la fraicheur AFFICHEE du bien ne decide plus de la suppression', () => {
@@ -1516,7 +1541,10 @@ test('LE TEST QUI COMPTE : un releve de compte en ECHEC ne conclut rien non plus
     horloge: { user_id: COMPTE, vu_le: '2026-10-19T08:00:00Z', ok: false, erreur: 'timeout' }
   }), { compte: COMPTE, bienId: BIEN, maintenant: MAINTENANT })
   assert.equal(f.suppression.possible, null)
-  assert.equal(f.suppression.motif, 'jamais_releve')
+  // Motif change le 26 octobre 2026 (le refus, lui, est le meme) : l'echec du
+  // releve est tranche avant la branche « aucune ligne », donc il porte
+  // desormais `canaux_illisibles`.
+  assert.equal(f.suppression.motif, 'canaux_illisibles')
 })
 
 test('et un releve SUSPENDU n est pas un echec visible par l hote', async () => {
@@ -1577,7 +1605,7 @@ test('et des canaux ILLISIBLES rendent `null`, jamais `false`', async () => {
 // Il efface le logement dans HoteSmart, purge ce qui s'y rattache, et ne touche
 // a rien chez Beds24 — l'annonce reste dans le compte de l'hote.
 
-test('LE TEST QUI COMPTE : seul l APPEL AU PARTENAIRE est garde par le provider, plus le refus', () => {
+test('LE TEST QUI COMPTE : AUCUNE garde par provider ne precede le refus du coeur', () => {
   // ⚠ CE TEST A ETE RETOURNE LE 26 OCTOBRE 2026, ET C'EST LE SENS DU
   // CORRECTIF. Il exigeait DEUX gardes `provider === 'channex'` dans le bloc
   // DELETE — une pour l'appel au partenaire, une pour le refus 409 — et il
@@ -1601,19 +1629,39 @@ test('LE TEST QUI COMPTE : seul l APPEL AU PARTENAIRE est garde par le provider,
   const finDuBloc = src.indexOf("if (req.method === 'POST')", i)
   assert.ok(finDuBloc > i, 'le POST ne suit plus le DELETE : la borne du bloc est a revoir')
   const bloc = src.slice(i, finDuBloc)
-  const gardes = [...bloc.matchAll(/prop\.provider === 'channex' \|\| prop\.provider === 'channel'/g)]
-  assert.equal(gardes.length, 1,
-    `${gardes.length} garde(s) par provider dans le DELETE : une seule est attendue, `
-    + 'celle de l appel au partenaire. Si le refus 409 en a retrouve une, il est '
-    + 'redevenu aveugle aux biens Beds24 en cours de migration.')
-  assert.match(bloc, /encore relié à une annonce Airbnb ou Booking/)
-  // ⚠ ET LA GARDE RESTANTE EST BIEN CELLE DE L'APPEL, PAS CELLE DU REFUS :
-  // elle se tient APRES le refus dans le fichier. Sans ce controle d'ordre, le
-  // compte de 1 serait satisfait par l'inverse exact de ce qu'on veut.
+  // ⚠ CE TEST A CHANGE D'INVARIANT DEUX FOIS, ET CHAQUE FOIS IL AVAIT RAISON DE
+  // CRIER. Il comptait les gardes `prop.provider === 'channex'` et exigeait 1 ;
+  // puis il a mesure leur PLACE quand le croisement en a ajoute une seconde ;
+  // le 26 octobre 2026 elles ont DISPARU toutes les deux, remplacees par
+  // `proprieteChezLePartenaire(prop)` — parce qu'un bien encore
+  // `provider = 'beds24'` dont la bascule a provisionne la cible EST chez le
+  // partenaire, et que le test du `provider` ne le voyait pas.
+  //
+  // CE QUI NE DOIT JAMAIS CHANGER, et c'est le defaut d'origine : le REFUS DU
+  // COEUR ne depend d'AUCUNE condition de provider ni de cle. Tout ce qui
+  // decide « ce bien est-il chez le partenaire ? » vient APRES lui.
   const iRefus = bloc.indexOf('suppressionPossible(prop, canaux,')
   assert.ok(iRefus > 0, 'la regle partagee n est plus appelee dans le DELETE')
-  assert.ok(gardes[0].index > iRefus,
-    'la garde par provider precede le refus : le refus est redevenu conditionnel au provider')
+
+  const conditions = [
+    ...bloc.matchAll(/prop\.provider === '(?:channex|channel)'/g),
+    ...bloc.matchAll(/proprieteChezLePartenaire\(prop\)/g)
+  ]
+  assert.ok(conditions.length >= 1,
+    'plus aucune condition ne garde les appels au partenaire : un bien Beds24 l appellerait')
+  const avantLeRefus = conditions.filter(g => g.index < iRefus)
+  assert.deepEqual(avantLeRefus.map(g => g.index), [],
+    `${avantLeRefus.length} condition(s) de cle ou de provider PRECEDE(NT) le refus du `
+    + 'coeur : il est redevenu conditionnel, donc aveugle aux biens en cours de '
+    + 'migration. C est le defaut d origine.')
+
+  // ⚠ ET LA RESOLUTION DE CLE N'EST PAS RECOPIEE. Le `||` qui prenait la cle
+  // SOURCE d'abord a laisse supprimer un bien en bascule dont la propriete
+  // CIBLE vendait encore : une quatrieme regle de resolution dans ce fichier,
+  // c'est la divergence garantie.
+  assert.ok(!/provider_property_id \|\| prop\.migration_target_property_id/.test(bloc),
+    'la resolution de cle est recopiee dans le DELETE, et elle prend la cle SOURCE d abord')
+  assert.match(bloc, /encore relié à une annonce/)
 })
 
 test('LE TEST QUI COMPTE : un bien Beds24 se supprime, quel que soit l etat du releve', () => {
@@ -1649,13 +1697,15 @@ test('LE TEST QUI COMPTE : un bien DU CANAL sans plan tarifaire ne se supprime P
   // C'est le profil exact du bien de la recette de Thierry du 22 octobre :
   // « un bien sans plan de base », Airbnb en vente, 77 reservations.
   const sansPlan = bienDe({ provider: 'channex', provider_rate_plan_id: null })
-  for (const opts of [
-    { releveDuCompte: null },
-    { releveDuCompte: '2026-10-23T08:00:00Z', releveEnEchec: true }
-  ]) {
-    assert.deepEqual(L.suppressionPossible(sansPlan, [], opts),
-      { possible: null, motif: 'jamais_releve' }, JSON.stringify(opts))
-  }
+  // ⚠ DEUX MOTIFS, ET LA DISTINCTION EST VENUE LE 26 OCTOBRE 2026 : le releve
+  // qui n'a JAMAIS abouti porte `jamais_releve`, celui qui ECHOUE porte
+  // `canaux_illisibles` — tranche plus haut dans la fonction, pour toutes les
+  // formes de canaux. Les deux refusent, et c'est ce qui compte ici.
+  assert.deepEqual(L.suppressionPossible(sansPlan, [], { releveDuCompte: null }),
+    { possible: null, motif: 'jamais_releve' })
+  assert.deepEqual(L.suppressionPossible(sansPlan, [],
+    { releveDuCompte: '2026-10-23T08:00:00Z', releveEnEchec: true }),
+    { possible: null, motif: 'canaux_illisibles' })
   // ⚠ ET IL SE SUPPRIME DES QUE LE RELEVE A PARLE : le refus porte sur
   // l'ignorance, pas sur le bien. Sans cette moitie, un durcissement qui
   // rendrait le bien insupprimable passerait pour un correctif.

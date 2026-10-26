@@ -101,17 +101,45 @@ test('une lecture des canaux en echec ne vaut PAS « aucun canal »', () => {
   const bloc = src.slice(i, i + 2400)
   assert.match(bloc, /canauxActifs === null/)
   assert.match(bloc, /res\.status\(502\)/)
+  // ⚠ LA TRANCHE VA JUSQU'A LA FIN DE LA FONCTION, PAS A 900 OCTETS — et ce
+  // test a rougi pour cette raison le 26 octobre 2026, quand un commentaire
+  // s'est ajoute en tete de `canauxActifsDuBien`. C'est le defaut EXACT que le
+  // test suivant dit avoir corrige le 22 octobre : « pas jusqu'a un nombre
+  // d'octets ». Il vivait encore ici.
   const f = src.indexOf('async function canauxActifsDuBien')
   assert.ok(f > 0)
-  assert.match(src.slice(f, f + 900), /if \(!r \|\| !r\.ok\) return null/)
-  assert.match(src.slice(f, f + 900), /catch \(e\) \{[\s\S]*?return null/)
+  const fin = src.indexOf('\nmodule.exports', f)
+  const g = src.indexOf('\nasync function ', f + 10)
+  const h = src.indexOf('\nmodule.exports = async function handler', f)
+  const bornes = [fin, g, h].filter(x => x > f)
+  const corps = src.slice(f, bornes.length ? Math.min(...bornes) : src.length)
+  assert.ok(corps.length > 200, 'le corps de la fonction n a pas ete trouve')
+  assert.match(corps, /if \(!r \|\| !r\.ok\) return null/)
+  assert.match(corps, /catch \(e\) \{[\s\S]*?return null/)
 })
 
 test('la garde lit `migration_target_property_id`, donc elle le SELECTIONNE', () => {
   // Une garde qui juge sur une colonne non selectionnee est une garde ouverte.
   // Un bien en cours de bascule porte ses canaux sous sa cle CIBLE.
+  //
+  // ⚠ CE TEST ETAIT UN FAUX VERT, et la review du 26 octobre 2026 l'a mesure :
+  // il cherchait la CHAINE `migration_target_property_id` dans les 400 premiers
+  // caracteres de `canauxActifsDuBien`, donc il passait sur un COMMENTAIRE —
+  // pendant que le code, lui, lisait `provider_property_id ||
+  // migration_target_property_id`, c'est-a-dire la cle SOURCE d'abord. Son
+  // commentaire affirmait « sous sa cle CIBLE » et le code faisait l'inverse.
+  //
+  // La resolution passe desormais par `proprieteChezLeProvider` (lib/rate-sync),
+  // qui rend la cible quand le bien est en migration. On verifie donc le
+  // CHEMIN, sur le code prive de ses commentaires — et non une chaine qui peut
+  // vivre dans une phrase.
   const f = src.indexOf('async function canauxActifsDuBien')
-  assert.match(src.slice(f, f + 400), /migration_target_property_id/)
+  const sansCommentaires = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  const g = sansCommentaires.indexOf('async function canauxActifsDuBien')
+  assert.match(sansCommentaires.slice(g, g + 400), /proprieteChezLePartenaire\(prop\)/,
+    'la resolution de cle ne passe plus par le resolveur canonique')
+  assert.ok(!/provider_property_id \|\| prop\.migration_target_property_id/.test(sansCommentaires),
+    'la resolution prend la cle SOURCE d abord : un bien en bascule serait juge sur la mauvaise cle')
   // ⚠ LA TRANCHE VA JUSQU'AU BLOC SUIVANT, pas jusqu'a un nombre d'octets
   // (corrige le 22 octobre 2026) : `src.slice(i, i + 2200)` rougissait des
   // qu'un commentaire s'ajoutait au-dessus du `select`, pour une raison qui n'a
