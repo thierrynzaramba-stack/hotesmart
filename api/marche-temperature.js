@@ -19,7 +19,7 @@
 // ⚠ AUCUN APPEL AIRROI, aucune ecriture.
 
 const { createClient } = require('@supabase/supabase-js')
-const { requirePermission } = require('../lib/require-permission')
+const { requirePermission, posterEnTetesPrives } = require('../lib/require-permission')
 const { lireDerniereCapture, pourLEcran } = require('../lib/marche/temperature-airroi')
 const { lireVacances, etendueSource } = require('../lib/yield/vacances')
 
@@ -30,6 +30,11 @@ const moisDeParis = (maintenant = new Date()) => maintenant.toLocaleDateString('
 const absente = (error, t) => error && new RegExp(t).test(error.message || '') && /(does not exist|schema cache)/i.test(error.message || '')
 
 module.exports = async (req, res) => {
+  // ⚠ DETTE 90 : AVANT LE PREMIER REFUS, pas seulement avant la garde. Les refus
+  // qui precedent `requirePermission` — methode, bien absent — partaient avec le
+  // defaut de Vercel, `public, max-age=0, must-revalidate`. Le pourquoi et les
+  // trois garde-fous : `tests/cache-prive-endpoints.test.js`, section dette 90.
+  posterEnTetesPrives(res)
   if (req.method !== 'GET') {
     res.setHeader('Allow', 'GET')
     return res.status(405).json({ error: 'methode_non_supportee' })
