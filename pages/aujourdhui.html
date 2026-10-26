@@ -116,6 +116,23 @@
            l'ouverture (spec §5) : l'etape 4 ne livre que le mois, et le bouton
            Annee reste donc masque jusqu'a l'etape suivante plutot que de
            promettre un ecran qui n'existe pas. -->
+      <!-- ⚠ LA NAVIGATION DE MOIS, demandee par Thierry a la recette du
+           27 octobre 2026 : « sans ca, le 1er du mois le bloc est vide et on
+           ne peut pas recetter un vrai total ». L'endpoint acceptait deja
+           `?mois=`, et rien ne le lui passait — je lui avais meme repondu
+           qu'il n'y avait pas de navigation a brancher. Il y en a une
+           maintenant. -->
+      <div class="rev-nav" role="group" data-i18n-attr="aria-label:revenue.pick_month">
+        <button type="button" class="rev-nav__btn" data-mois="prec"
+                data-i18n-attr="aria-label:revenue.prev_month">
+          <svg class="icon cal-chevron-g" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+        </button>
+        <strong class="rev-nav__label" data-bind="revenue-month-nav" aria-live="polite"></strong>
+        <button type="button" class="rev-nav__btn" data-mois="suiv"
+                data-i18n-attr="aria-label:revenue.next_month">
+          <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
+        </button>
+      </div>
       <div class="seg" role="group" data-i18n-attr="aria-label:revenue.view">
         <button type="button" class="seg__btn is-on" data-vue="mois" data-i18n="revenue.month"></button>
         <button type="button" class="seg__btn" data-vue="annee" data-i18n="revenue.year" hidden></button>
@@ -128,9 +145,19 @@
         <strong class="num h1" data-bind="revenue-total"></strong>
         <span class="muted small" data-bind="revenue-month"></span>
       </div>
-      <div class="row" style="gap: 20px; flex-wrap: wrap">
-        <span><span class="muted small" data-i18n="revenue.received"></span> <strong class="num" data-bind="revenue-received"></strong></span>
-        <span><span class="muted small" data-i18n="revenue.upcoming"></span> <strong class="num" data-bind="revenue-upcoming"></strong></span>
+      <!-- ⚠ RECU ET A VENIR EN GROS CHIFFRES (maquette Aujourdhui-v5, demande
+           de Thierry du 27 octobre). Ils portaient `class="num"` sous un
+           libelle `small` : a l'ecran, le total ecrasait les deux autres alors
+           que la maquette les montre comme trois chiffres de meme rang. -->
+      <div class="rev-chiffres">
+        <span class="rev-chiffre">
+          <span class="muted small" data-i18n="revenue.received"></span>
+          <strong class="num h2" data-bind="revenue-received"></strong>
+        </span>
+        <span class="rev-chiffre">
+          <span class="muted small" data-i18n="revenue.upcoming"></span>
+          <strong class="num h2" data-bind="revenue-upcoming"></strong>
+        </span>
       </div>
       <!-- ⚠ CE QUE LE TOTAL NE DIT PAS, dit juste en dessous. Un sejour dont le
            montant ou la date n'est pas calculable n'entre pas en silence :
@@ -138,8 +165,27 @@
       <p class="caption muted" data-bind="revenue-reserves" hidden></p>
     </div>
 
-    <!-- Une ligne par bien. -->
-    <div class="stack" style="gap: 8px" data-list="revenue-rows"></div>
+    <!-- ⚠ UN TABLEAU, PAS UNE LISTE DE `div` (maquette Aujourdhui-v5 : « photo,
+         nom, nombre de sejours, barre, recu, a venir, total »). Trois colonnes
+         de chiffres alignees se lisent, trois nombres pousses en bout de
+         ligne par un `space-between` ne s'alignent pas — et c'est le reproche
+         de Thierry a la recette du 27 octobre.
+         ⚠ ET C'EST UN VRAI `<table>` : des colonnes de chiffres portent un
+         en-tete, et un lecteur d'ecran doit pouvoir dire « A venir, 300 € »
+         sur la bonne cellule. Les `div` ne le permettent pas. -->
+    <div class="rev-tbl-wrap">
+      <table class="rev-tbl">
+        <thead>
+          <tr>
+            <th scope="col" data-i18n="revenue.col_property"></th>
+            <th scope="col" class="rev-tbl__num" data-i18n="revenue.col_received"></th>
+            <th scope="col" class="rev-tbl__num" data-i18n="revenue.col_upcoming"></th>
+            <th scope="col" class="rev-tbl__num" data-i18n="revenue.col_total"></th>
+          </tr>
+        </thead>
+        <tbody data-list="revenue-rows"></tbody>
+      </table>
+    </div>
 
     <!-- ⚠ LA NOTE DE BAS DE BLOC PORTE L'HONNETETE DE TOUT CE QUI PRECEDE
          (spec §4, decision Q9 de Thierry) : ces montants sont CALCULES selon
@@ -162,7 +208,10 @@
 <script src="/shared/nav.js"></script>
 <script type="module">
 import { requireAuth } from '/components/auth-guard.js'
-import { supabase, signOut } from '/shared/supabase.js'
+// ⚠ `purgerCachesLocaux` EST LE GESTE PARTAGE DES CINQ CHEMINS DE SORTIE : il
+// reinitialise le compte courant ET vide le cache d'ecran. On ne recopie pas
+// l'un des deux ici — c'est lui qui sait ce qu'il faut oublier.
+import { supabase, signOut, purgerCachesLocaux } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
@@ -187,6 +236,9 @@ const icone = (id, cls = 'icon') => `<svg class="${cls}" aria-hidden="true"><use
 // ─── État de la page : chaque lecture le complète, chaque rendu le relit ────
 const etat = {
   aujourdHui: R.jourParis(),
+  // Le mois demande au serveur pour le bloc Revenus. `null` = celui qu'il
+  // choisit, c'est-a-dire le mois courant a Paris.
+  moisRevenus: null,
   biens: [], bookings: [], menages: [], prestataires: [],
   menagesOk: null, etatsArrivee: {}, conversations: new Set(),
   taches: [], tachesOk: null,
@@ -219,17 +271,102 @@ const etat = {
 // 400 jours, domaine ménage, repliée au lot (d)) et `/api/yield` (le CA et le
 // TO, remplacés par des tables de résumé au lot (c)).
 async function chargerEcran () {
-  etat.ecran = await appel('/api/ecran/aujourdhui')
+  // ⚠ LE MOIS DEMANDE VA DANS L'URL, et rien ne le passait jusqu'au
+  // 27 octobre 2026 : l'endpoint acceptait `?mois=` depuis le debut, et l'ecran
+  // retombait donc toujours sur le mois courant. Consequence relevee par
+  // Thierry a la recette : « le 1er du mois le bloc est vide et on ne peut pas
+  // recetter un vrai total ».
+  //
+  // `null` veut dire « celui que le serveur choisit » — le mois courant a
+  // Paris. On ne met pas le mois courant en dur dans l'URL : l'horloge du
+  // navigateur et celle du serveur peuvent differer d'un jour en fin de mois,
+  // et c'est le serveur qui doit trancher.
+  const q = etat.moisRevenus ? `?mois=${encodeURIComponent(etat.moisRevenus)}` : ''
+  etat.ecran = await appel('/api/ecran/aujourdhui' + q)
   return etat.ecran
 }
 
+// Le mois voisin. « 2026-10 » + 1 -> « 2026-11 », et le passage d'annee marche.
+function moisDecale (mois, pas) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(mois || ''))) return null
+  const [an, m] = String(mois).split('-').map(Number)
+  // ⚠ EN UTC, ET LE 1er DU MOIS : `new Date(an, m - 1 + pas, 1)` en heure
+  // locale suffirait, mais un decalage de fuseau sur le 1er a minuit ferait
+  // reculer d'un mois. Le depot a deja paye ce defaut sur les dates de sejour.
+  const d = new Date(Date.UTC(an, m - 1 + pas, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
+// ⚠ LA NAVIGATION RECHARGE L'ECRAN ENTIER, et c'est voulu : l'endpoint est
+// unique, il rend les six blocs d'un coup. Les autres blocs ne dependent pas du
+// mois, donc ils se repeignent a l'identique — et le cache local, lui, n'accepte
+// le bloc revenus que s'il porte le mois COURANT, donc naviguer dans le passe ne
+// le pollue pas.
+let navEnCours = false
+async function allerAuMois (pas) {
+  if (navEnCours) return
+  // Le mois SERVI fait foi ; a defaut, celui du jour de reference (Paris).
+  const actuel = (etat.ecran && etat.ecran.mois) || String(etat.aujourdHui).slice(0, 7)
+  const cible = moisDecale(actuel, pas)
+  if (!cible) return
+  navEnCours = true
+  for (const b of document.querySelectorAll('.rev-nav__btn')) b.disabled = true
+  etat.moisRevenus = cible
+  try {
+    await chargerEcran()
+    renderRevenus()
+  } catch (e) {
+    // ⚠ UN ECHEC NE LAISSE PAS L'ECRAN SUR UN MOIS QU'IL N'A PAS LU. On
+    // revient au mois precedemment affiche, sinon les fleches et les chiffres
+    // ne parlent plus de la meme periode.
+    console.error('[aujourdhui] navigation de mois', e && e.message)
+    etat.moisRevenus = actuel
+    renderRevenus()
+  } finally {
+    navEnCours = false
+    for (const b of document.querySelectorAll('.rev-nav__btn')) b.disabled = false
+  }
+}
+
 // fetch d'un endpoint, avec la session et le compte consulté.
+// ⚠ UNE SESSION PERDUE RENVOIE A LA CONNEXION, ELLE NE LAISSE PAS L'ECRAN
+// AFFICHER LE CACHE. Constat de la recette de Thierry du 27 octobre 2026 :
+// « l'ecran affiche "Lecture impossible" mais "Fait pour vous" montre des 0
+// comme des faits ».
+//
+// La cause n'etait pas les compteurs — `chargerCompteurs` filtre deja les
+// `null`, donc un ecran jamais lu masque la tuile. C'etait le CACHE LOCAL : la
+// page peint d'abord ce qu'elle a garde (12 h), puis l'appel rejette en 401, et
+// les chiffres de la session precedente RESTENT a l'ecran. Un hote dont le
+// jeton a expire lisait donc des compteurs de la veille comme des faits du
+// jour, a cote d'un bloc qui annoncait une panne.
+//
+// Aucun bloc ne peut se rattraper seul : ce n'est pas une donnee qui manque,
+// c'est la session. On va donc la refaire, comme `requireAuth` le fait quand il
+// n'y a pas de session du tout — meme destination, meme geste.
+let sessionPerdue = false
 async function appel (chemin) {
   const { data: { session } } = await supabase.auth.getSession()
   const r = await fetch(chemin, {
     headers: { Authorization: 'Bearer ' + session.access_token, ...enteteCompte() }
   })
   const corps = await r.json().catch(() => ({}))
+  if (r.status === 401) {
+    // ⚠ UNE SEULE FOIS : six blocs partent en parallele, et six `replace()`
+    // empileraient autant d'entrees dans l'historique.
+    if (!sessionPerdue) {
+      sessionPerdue = true
+      // Les caches partent AVANT la redirection : sans ca, le prochain
+      // affichage repeindrait les memes chiffres perimes avant son premier
+      // appel. C'est le geste partage, celui des cinq chemins de sortie.
+      try { await purgerCachesLocaux() } catch (e) { /* un stockage ferme ne doit pas bloquer la sortie */ }
+      window.location.replace('/pages/login.html')
+    }
+    // ⚠ ET ON LEVE QUAND MEME. `replace()` ne stoppe pas l'execution : sans
+    // cette levee, les blocs continueraient de se peindre pendant la
+    // navigation, avec exactement les donnees perimees qu'on vient de purger.
+    const e = new Error('session expiree'); e.status = 401; throw e
+  }
   if (!r.ok) { const e = new Error(corps.error || `HTTP ${r.status}`); e.status = r.status; throw e }
   return corps
 }
@@ -769,6 +906,7 @@ function renderRevenus () {
       const x = $(`[data-bind="${sel}"]`); if (x) x.textContent = ''
     }
     const liste = $('[data-list="revenue-rows"]'); if (liste) liste.innerHTML = ''
+    const w = document.querySelector('.rev-tbl-wrap'); if (w) w.hidden = true
     const res = $('[data-bind="revenue-reserves"]'); if (res) res.hidden = true
   }
   if (!Array.isArray(etat.biens)) {
@@ -863,6 +1001,12 @@ function renderRevenus () {
   // Le mois SERVI, pas le mois demande : l'endpoint retombe sur le mois courant
   // si la valeur recue est hors forme, et l'ecran doit dire ce qu'il montre.
   $('[data-bind="revenue-month"]').textContent = moisEnClair(rev.mois || (etat.ecran && etat.ecran.mois))
+  // ⚠ LE LIBELLE DE LA NAVIGATION DIT LE MOIS SERVI, pas le mois demande. Si le
+  // serveur retombe sur le mois courant — un `?mois=` malforme, par exemple —
+  // les fleches et le chiffre doivent parler de la MEME periode, sinon l'hote
+  // navigue a l'aveugle.
+  const labelNav = $('[data-bind="revenue-month-nav"]')
+  if (labelNav) labelNav.textContent = moisEnClair(rev.mois || (etat.ecran && etat.ecran.mois))
 
   // ─── Ce que le total ne dit pas ───────────────────────────────────────────
   // Trois reserves, chacune avec son compte. Elles ne se melangent pas : un
@@ -925,9 +1069,15 @@ function renderRevenus () {
       // Aucun sejour range ce mois-ci pour ce bien. C'est un FAIT — zero euro
       // encaisse — et non une absence de donnee : le bien a ete lu, sa ligne
       // simplement ne porte rien.
-      return `<div class="row" style="justify-content: space-between; gap: 12px; align-items: baseline">
-        ${nom}<span class="caption muted" data-i18n="revenue.none"></span>
-      </div>`
+      return `<tr>
+        <th scope="row" class="rev-tbl__bien">
+          <span class="rev-tbl__nom">${nom}</span>
+          <span class="caption muted" data-i18n="revenue.none"></span>
+        </th>
+        <td class="rev-tbl__num"><span class="caption muted">—</span></td>
+        <td class="rev-tbl__num"><span class="caption muted">—</span></td>
+        <td class="rev-tbl__num"><span class="caption muted">—</span></td>
+      </tr>`
     }
     const part = T.total_cents > 0 ? Math.round((d.total_cents / T.total_cents) * 100) : 0
     // La barre : plein = recu, hachure = a venir. Sa largeur est la PART du
@@ -950,26 +1100,62 @@ function renderRevenus () {
     if (d.bruts > 0) marques.push(t('revenue.gross'))
     if (refuses > 0) marques.push(t('revenue.no_amount_short', { n: refuses }))
 
-    // ⚠ ET LE COMPTE DES SEJOURS PORTE SUR CEUX QUI SONT COMPTES, pas sur tous.
-    // « 2 sejours — 300,00 € » quand le total ne couvre qu'un sejour sur deux
-    // est incoherent EN SOI : les deux nombres de la meme ligne se
-    // contredisent, et rien ne dit lequel croire.
-    const comptes = Math.max(0, d.sejours - refuses)
-    const montant = (d.total_cents === 0 && refuses > 0)
-      // Zero euro ET un montant non calculable : on ne sait pas, on le dit.
+    // ⚠ LE COMPTE DES SEJOURS EST CELUI DE TOUS LES SEJOURS, et ma version
+    // precedente le soustrayait — ce que Thierry a releve a la recette du
+    // 27 octobre 2026 : « 0 sejours · 2 sans montant se contredit ».
+    //
+    // J'avais ecrit l'inverse en commentaire : que soustraire EVITAIT la
+    // contradiction. C'etait faux. « 0 sejours » est un FAIT faux — il y a bien
+    // deux sejours ce mois-ci sur ce logement — et il entrait en conflit avec
+    // le « 2 sans montant » de la ligne suivante. Deux nombres qui se
+    // contredisent, et c'est le mien qui mentait.
+    //
+    // La forme juste est celle que Thierry a dictee : le NOMBRE REEL de
+    // sejours, et le montant qui dit qu'il n'est pas calculable.
+    const toutRefuse = refuses > 0 && d.total_cents === 0
+    const montant = toutRefuse
+      // Zero euro ET aucun montant calculable : on ne sait pas, on le dit.
       // Afficher « 0,00 € » ici affirmerait que ce logement n'a rien rapporte.
       ? `<span class="caption muted">${esc(t('revenue.unavailable'))}</span>`
       : `<strong class="num small">${esc(euros(d.total_cents, devise))}</strong>`
+    // ⚠ LA MARQUE « N SANS MONTANT » RESTE, MEME QUAND LE TOTAL DIT DEJA
+    // « non calculable ». Ma premiere version la retirait dans ce cas, au motif
+    // qu'elle serait redondante — et un test existant l'a refuse, avec raison :
+    // `total_cents === 0 && refuses > 0` ne veut PAS dire « tous les sejours
+    // sont refuses ». Deux sejours dont un refuse et l'autre a zero euro reel
+    // donnent le meme etat, et la marque est alors la seule chose qui dit
+    // COMBIEN manquent. Un compte n'est jamais redondant avec un etat.
 
-    return `<div class="row" style="justify-content: space-between; gap: 12px; align-items: baseline">
-      ${nom}
-      <span class="caption muted">${esc(t('revenue.stays', { n: comptes }))}</span>
-      <span class="revenue-bar" style="--part: ${part}%; --recu: ${partRecue}%" aria-hidden="true"></span>
-      ${marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''}
-      ${montant}
-    </div>`
+    const cellule = (cents, refuse) => refuse
+      ? `<span class="caption muted">—</span>`
+      : `<span class="num small">${esc(euros(cents, devise))}</span>`
+
+    return `<tr>
+      <th scope="row" class="rev-tbl__bien">
+        <span class="rev-tbl__nom">${nom}</span>
+        <span class="caption muted">${esc(t('revenue.stays', { n: d.sejours }))}</span>
+        <span class="revenue-bar" style="--part: ${part}%; --recu: ${partRecue}%" aria-hidden="true"></span>
+        ${marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''}
+      </th>
+      <td class="rev-tbl__num">${cellule(d.recu_cents, toutRefuse)}</td>
+      <td class="rev-tbl__num">${cellule(d.a_venir_cents, toutRefuse)}</td>
+      <td class="rev-tbl__num">${montant}</td>
+    </tr>`
   }).join('')
   I18n.apply($('[data-list="revenue-rows"]'))
+  // ⚠ UN `thead` SANS RANGEE AFFICHERAIT QUATRE COLONNES VIDES. Le tableau se
+  // masque donc avec son contenu — ce que la liste de `div` n'avait pas besoin
+  // de faire, et qui est le prix de la forme tabulaire.
+  //
+  // ⚠ ET LE COMPTE VIENT DE L'ETAT, PAS DU DOM. Ma premiere version lisait
+  // `$('[data-list="revenue-rows"]').children.length` : le banc de
+  // `tests/accueil-rapide.test.js` ne simule pas `children`, donc les six tests
+  // du bloc levaient un TypeError. C'est la DEUXIEME fois aujourd'hui que je
+  // mesure ce que le banc ne fournit pas — la premiere, c'etait `classList` sur
+  // le bandeau. La regle est la meme : si l'information est deja dans l'etat,
+  // on la lit la, et le rendu ne depend plus de ce que le double imite.
+  const wrap = document.querySelector('.rev-tbl-wrap')
+  if (wrap) wrap.hidden = !(etat.biens || []).length
 }
 
 // Le mois, en clair et dans la langue de l'hote. « 2026-11 » -> « novembre 2026 ».
@@ -1023,6 +1209,14 @@ async function init () {
     (nomSession || String(user?.email || '')).slice(0, 2).toLocaleUpperCase('fr')
   renderDate()
   suivreLaLargeur()
+  // ⚠ LES DEUX FLECHES SE CABLENT UNE SEULE FOIS, A L'INIT, et pas dans
+  // `renderRevenus` : ce rendu est rappele a chaque navigation, donc y poser
+  // les ecouteurs les empilerait — un clic finirait par declencher autant
+  // d'appels que de mois deja visites. Les boutons sont dans le HTML statique,
+  // ils ne sont jamais remplaces : un seul branchement suffit.
+  for (const b of document.querySelectorAll('.rev-nav__btn')) {
+    b.addEventListener('click', () => allerAuMois(b.dataset.mois === 'prec' ? -1 : 1))
+  }
 
   HSNav.renderMenu({
     comptes: comptes(), compteActif: compteCourant(),

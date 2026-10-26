@@ -1296,10 +1296,20 @@ test("LE TEST QUI COMPTE : une ligne dont le MONTANT manque ne dit JAMAIS 0,00 �
   assert.match(lignes, /revenue\.no_amount_short/, 'la ligne ne porte pas sa marque')
 })
 
-test("LE TEST QUI COMPTE : le compte de sejours d'une ligne ne compte pas les refuses", () => {
-  // « 2 sejours — 300,00 € » quand le total ne couvre qu'un sejour sur deux est
-  // incoherent EN SOI : les deux nombres de la meme ligne se contredisent, et
-  // rien ne dit lequel croire.
+test("LE TEST QUI COMPTE : le compte de sejours d'une ligne porte TOUS les sejours", () => {
+  // ⚠ CE TEST A ETE RETOURNE A LA RECETTE DE THIERRY DU 27 OCTOBRE 2026. Il
+  // figeait l'inverse — « le compte de sejours ne compte pas les refuses » — et
+  // il justifiait la soustraction par la coherence : « deux nombres de la meme
+  // ligne se contredisent ».
+  //
+  // C'est la soustraction qui produisait la contradiction. Sur staging, la
+  // ligne du Studio Centre affichait « 0 sejours · 2 sans montant » : « 0 » est
+  // un FAIT FAUX — il y a bien deux sejours ce mois-ci — et il contredisait le
+  // « 2 » de la mention suivante. Thierry a dicte la forme juste : « 2 sejours ·
+  // montant non calculable ».
+  //
+  // Le compte porte donc TOUS les sejours du mois pour ce bien, et c'est la
+  // colonne Total qui dit que le montant n'est pas calculable.
   const p = bancRevenus({
     mois: '2026-11',
     par_bien: {
@@ -1323,13 +1333,14 @@ test("LE TEST QUI COMPTE : le compte de sejours d'une ligne ne compte pas les re
     'une ligne qui porte 300 € se dit non calculable')
 
   // ⚠ ET LE NOMBRE PASSE A `revenue.stays` SE VERIFIE A LA SOURCE, parce que
-  // c'est tout l'objet de ce test. La page calcule
-  // `Math.max(0, d.sejours - refuses)` : 2 sejours dont 1 refuse = 1.
+  // c'est tout l'objet de ce test : le banc ne montre pas les nombres.
+  // La page passe `d.sejours` — TOUS les sejours du mois pour ce bien — et non
+  // une soustraction.
   const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
-  assert.match(html, /const comptes = Math\.max\(0, d\.sejours - refuses\)/,
-    'le compte des sejours ne retire plus les refuses')
-  assert.match(html, /t\('revenue\.stays', \{ n: comptes \}\)/,
-    '`revenue.stays` ne recoit plus le compte des sejours COMPTES')
+  assert.match(html, /t\('revenue\.stays', \{ n: d\.sejours \}\)/,
+    '`revenue.stays` ne recoit plus TOUS les sejours du bien')
+  assert.ok(!/d\.sejours - refuses/.test(html),
+    'la soustraction est revenue : « 0 sejours · 2 sans montant » contredit ses propres nombres')
 })
 
 test("LE TEST QUI COMPTE : l'argent rattache a AUCUN bien connu se DIT", () => {

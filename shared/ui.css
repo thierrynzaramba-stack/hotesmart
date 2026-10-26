@@ -1296,6 +1296,51 @@ body.men-cfg-ouvert { overflow: hidden; }
 /* La barre d'une ligne de bien. Sa LARGEUR est la part du total du mois — pas
    une valeur absolue : un petit mois donnerait des barres minuscules, un gros
    mois des barres saturées. Le remplissage interne est la part REÇUE. */
+/* ─── Le bloc Revenus : navigation de mois et tableau par logement ─────────
+   Maquette Aujourdhui-v5, demande de Thierry a la recette du 27 octobre 2026.
+   Trois nombres pousses en bout de ligne par un `space-between` ne s'alignent
+   pas d'une ligne a l'autre ; des colonnes, si. */
+
+.rev-nav { display: inline-flex; align-items: center; gap: 4px; }
+.rev-nav__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--ink); cursor: pointer;
+}
+.rev-nav__btn:hover:not(:disabled) { background: var(--line); }
+.rev-nav__btn:disabled { opacity: .5; cursor: default; }
+.rev-nav__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* Le libelle ne doit pas sauter d'une largeur a l'autre quand le mois change :
+   « mai 2026 » et « septembre 2026 » n'ont pas la meme longueur, et les deux
+   fleches se deplaceraient sous le curseur entre deux clics. */
+.rev-nav__label { min-width: 9.5em; text-align: center; font-size: .95rem; }
+
+/* Les trois chiffres du bandeau, de meme rang. */
+.rev-chiffres { display: flex; flex-wrap: wrap; gap: var(--gap-l, 20px); }
+.rev-chiffre { display: flex; flex-direction: column; gap: 2px; }
+
+/* Le tableau par logement. `-wrap` porte le defilement horizontal : sur un
+   telephone de 390 px, quatre colonnes ne tiennent pas, et c'est le tableau
+   qui doit glisser — pas la page. */
+.rev-tbl-wrap { overflow-x: auto; }
+.rev-tbl { width: 100%; border-collapse: collapse; }
+.rev-tbl th, .rev-tbl td {
+  padding: 8px 10px; text-align: left; vertical-align: baseline;
+  border-bottom: 1px solid var(--line);
+}
+.rev-tbl thead th {
+  font-size: .8rem; font-weight: 600; color: var(--muted);
+  text-transform: none; white-space: nowrap;
+}
+.rev-tbl tbody tr:last-child th, .rev-tbl tbody tr:last-child td { border-bottom: 0; }
+.rev-tbl__num { text-align: right; white-space: nowrap; }
+.rev-tbl__bien { font-weight: 400; }
+/* Le nom, le compte de sejours, la barre et les pastilles sur une seule
+   colonne : c'est la cellule la plus large, et elle respire. */
+.rev-tbl__bien { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rev-tbl__nom { flex: 1 1 10em; min-width: 0; }
+
 .revenue-bar {
   flex: 0 0 72px;
   height: 6px;
