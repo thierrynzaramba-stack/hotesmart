@@ -163,6 +163,63 @@ test('LE TEST QUI COMPTE : au plus 3 appels par fil sur 24 h — au-dela, aucun 
   assert.match(visibles[0].summary, /L’agent IA s’est arrêté sur ce fil/)
 })
 
+test('LE TEST QUI COMPTE (vecu du 26 octobre, Ofuro Futari) : au plafond, un bien EN PAUSE n est pas signale — mais le plafond et la tache restent', async () => {
+  // ⚠ L'ALERTE DISAIT A L'HOTE CE QU'IL FAIT DEJA. « Il s'arrete sur ce fil,
+  // repondez au voyageur a la main » : en pause volontaire, le kill switch
+  // coupe TOUT l'automatique sortant, donc l'hote repond a la main a chaque
+  // message, par definition. L'incident ne lui apprenait rien et le reveillait
+  // sur un bien qu'il avait fait taire exprès — Ofuro Futari, en pause depuis
+  // le 6 octobre 2026.
+  const t = tables()
+  for (const m of [300, 200, 100]) t.guestflow_appels_ia.push({ user_id: U, booking_id: B, ok: true, created_at: recent(m) })
+  const r = await deuxCycles({ tables: t, messages: fil(5), mode: 'auto', pause: true,
+    reponse: { type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] } })
+  // Ce qui NE change pas : le plafond mord (aucun 4e appel)…
+  assert.deepStrictEqual([r.premier, r.second], [0, 0], 'le plafond s applique en pause comme ailleurs')
+  // …et le message reste VISIBLE pour l'hote. Un message de voyageur ne
+  // disparait jamais parce qu'un bien est en pause.
+  const visibles = r.t.agent_tasks.filter(x => x.status === 'pending')
+  assert.strictEqual(visibles.length, 1)
+  assert.match(visibles[0].summary, /L’agent IA s’est arrêté sur ce fil/)
+  // Ce qui change : plus de reveil.
+  assert.deepStrictEqual(r.incidents.map(i => i.type), [],
+    'un bien en pause volontaire ne doit plus declencher d incident de plafond')
+})
+
+test('LA LECTURE DE LA PAUSE EST PARESSEUSE : rien n est lu quand le plafond n est pas atteint', async () => {
+  // ⚠ `isAutomationPaused` fait une lecture Supabase par appel, sans cache. La
+  // consulter a chaque cycle pour chaque fil ajouterait une requete par fil
+  // pour une information qui ne sert QU'AU moment de signaler. Le parametre est
+  // donc une fonction, et ce test garde ce contrat — sinon la prochaine main
+  // passera un booleen, et la requete reviendra sans que rien ne le dise.
+  // ⚠ ET CE TEST A D'ABORD ETE UN FAUX VERT, garde ici parce que la forme se
+  // rejouera : sa premiere version n'asserait que « 0 lecture sous le plafond »,
+  // et elle passait contre le code d'AVANT — ou le parametre n'existait pas,
+  // donc le compteur restait a zero pour une raison qui n'etait pas la sienne.
+  // Un test de parcimonie doit prouver les DEUX moities : qu'on ne lit pas
+  // quand il ne faut pas, ET qu'on lit quand il faut.
+  const { peutAppeler } = require('../lib/guestflow-garde')
+  const journal = (lignes) => ({ from: () => { const q = { select: () => q, eq: () => q, gte: () => q, order: () => q, limit: () => Promise.resolve({ data: lignes, error: null }) }; return q } })
+  const trois = [300, 200, 100].map(m => ({ ok: true, created_at: recent(m) }))
+
+  // Moitie 1 — sous le plafond : aucune lecture.
+  let sous = 0
+  const a = await peutAppeler(journal([]), { userId: U, propertyId: P, bookingId: B,
+    signaler: async () => {}, enPause: async () => { sous++; return true } })
+  assert.strictEqual(a.ok, true, 'journal vide : l appel est permis')
+  assert.strictEqual(sous, 0, 'la pause ne doit PAS etre lue quand le plafond n est pas atteint')
+
+  // Moitie 2 — AU plafond : lue, et une seule fois. C'est elle qui rougit
+  // contre le code d'avant.
+  let au = 0
+  const b = await peutAppeler(journal(trois), { userId: U, propertyId: P, bookingId: B,
+    signaler: async () => { assert.fail('un bien en pause ne doit pas etre signale') },
+    enPause: async () => { au++; return true } })
+  assert.strictEqual(b.ok, false, 'au plafond, aucun appel')
+  assert.strictEqual(b.motif, 'plafond')
+  assert.strictEqual(au, 1, 'au plafond, la pause est lue — exactement une fois')
+})
+
 test('le journal dit le modele REELLEMENT utilise', async () => {
   const r = await deuxCycles({ messages: fil(), reponse: { type: 'info_unknown', reason: 'x', auto_reply: null, sub_tasks: [] } })
   assert.deepStrictEqual(r.t.guestflow_appels_ia.map(x => [x.ok, x.modele]), [[true, 'claude-sonnet-5-5']])
