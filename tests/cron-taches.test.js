@@ -30,7 +30,15 @@ const TACHES = [
   'refresh_tokens', 'biens_channel', 'file_sync_ari', 'backfill_messages',
   'poll_channel_feed', 'sonde_batteries', 'sonde_volume_messages',
   'sonde_evenements', 'sonde_croissance', 'sonde_surreservation',
-  'poll_avis_channel', 'poll_avis_beds24', 'classification_avis',
+  'poll_avis_channel',
+  // ⚠ AJOUTEE LE 27 OCTOBRE 2026 : le rattrapage des colonnes derivees des
+  // revenus, a 04:00 heure de PARIS. Placee la pour la meme raison que ses
+  // voisines — apres les sondes, avant le dispatch — et avec les memes
+  // garde-fous : marqueur pose AVANT le travail, budget mur, plafond de lignes
+  // par passage. L'ORDRE compte dans ce tableau : il est compare a la sequence
+  // reelle des appels, pas a un ensemble.
+  'revenus_derives',
+  'poll_avis_beds24', 'classification_avis',
   'detection_messages', 'rattacher_menages', 'sync_menages', 'expirer_offres',
   'propositions_dues', 'relance_validation', 'tentatives_bloquees',
   'purge_tentatives', 'pilote_yieldflow', 'naissances_avis', 'relances_avis',

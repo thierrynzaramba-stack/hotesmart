@@ -105,6 +105,7 @@ const { processArrivalCodes } = require('../lib/cron-arrival-code')
 const { fetchBookings } = require('../lib/cron-beds24')
 const { pollChannelFeed } = require('../lib/cron-channel-feed')
 const { pollChannelReviews } = require('../lib/cron-channel-reviews')
+const { rattraperRevenusDerives } = require('../lib/cron-revenus-derives')
 const { pollBeds24Reviews } = require('../lib/cron-beds24-reviews')
 const { classerAvis } = require('../lib/cron-reviews-classify')
 const { classerMessages } = require('../lib/cron-messages-classify')
@@ -406,6 +407,28 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur poll avis Channex:', err.message)
       results.errors.push({ context: 'channel_reviews', error: err.message })
+    }
+
+    // 4sexies. Rattrapage des colonnes DERIVEES des revenus (architecture
+    // decidee par Thierry le 27 octobre 2026 : le payload provider n'est lu
+    // qu'UNE FOIS, a l'ecriture, et l'ecran lit un agregat SQL).
+    //
+    // ⚠ A 04:00 HEURE DE PARIS, et le fuseau est le point : le cron tourne en
+    // UTC toutes les 5 minutes, donc « 04:00 » n'existe pas pour lui. 04:00
+    // Paris vaut 03:00 UTC en hiver et 02:00 UTC en ete — une garde ecrite en
+    // UTC se decalerait d'une heure deux fois par an.
+    //
+    // ⚠ CE N'EST PAS LE REMPLISSAGE INITIAL. Les 1 436 lignes de l'existant se
+    // reprennent par `scripts/remplir-revenus-derives.js`, a blanc puis --go.
+    // Ce module rattrape le FLUX : les lignes que le writer n'a pas pu deriver
+    // faute de payload, celles qu'un changement de delai a invalidees (le
+    // trigger SQL met `derive_le` a nul sans effacer), et celles d'une version
+    // de regle anterieure. Plafond par passage, budget mur, marqueur pose AVANT
+    // le travail — un rattrapage qui deborderait repartirait a chaque tick.
+    try { await chrono.mesure('revenus_derives', () => rattraperRevenusDerives(results, { supabase })) }
+    catch (err) {
+      console.error('[Cron] Erreur rattrapage revenus derives:', err.message)
+      results.errors.push({ context: 'revenus_derives', error: err.message })
     }
 
     // 4quinquies bis. Avis Booking.com des biens Beds24 -> ota_reviews.
