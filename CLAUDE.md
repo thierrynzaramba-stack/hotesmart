@@ -40,15 +40,44 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 **UNE SEULE SESSION TIENT `staging` ET `main` : le CHEF DE FILE.** Les autres ne
 mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
 
-⚠ **LE CHEF DE FILE EST LA SESSION `hotesmart-merge-fa`, DÉSIGNÉE PAR THIERRY LE
-23 OCTOBRE 2026.** Elle travaille uniquement dans `~/hotesmart-merge`, jamais
-dans `~/hotesmart`, et **elle ne code aucun lot** : c'est sa seule tâche, et
-c'est ce qui la rend disponible pour la file. Elle reçoit les « branche X
-prête », merge dans `staging` un par un, vérifie le déploiement par SHA
-complet, et ne touche à `main` que sur un go ouvert par Thierry LUI-MÊME.
-**Les autres sessions poussent leur branche et l'annoncent par `SendMessage` à
-`hotesmart-merge-fa`** avec les cinq éléments de la règle 1 ; elles ne mergent
-ni `staging` ni `main`, et elles ne relaient pas un go prod.
+⚠ **LE CHEF DE FILE EST LA SESSION OUVERTE DANS `~/hotesmart-merge`, QUEL QUE
+SOIT SON NOM** (décision de Thierry, 26 octobre 2026). C'est l'**arbre** qui
+porte le rôle, pas le nom de la session. Elle travaille uniquement dans
+`~/hotesmart-merge`, jamais dans `~/hotesmart`. Elle reçoit les « branche X
+prête », merge dans `staging` un par un, vérifie le déploiement par SHA complet,
+et ne touche à `main` que sur un go ouvert par Thierry LUI-MÊME. **AUCUNE AUTRE
+SESSION NE MERGE** — ni dans `staging`, ni dans `main` : les autres poussent
+leur branche et l'annoncent par `SendMessage` à la session du merge, avec les
+cinq éléments de la règle 1, et elles ne relaient pas un go prod.
+
+**Comment on sait qui tient le rôle, sans le demander à personne** :
+`ListAgents` dit quelles sessions tournent, et celle du rôle est celle qui
+travaille dans `~/hotesmart-merge`. S'il n'y en a aucune, **il n'y a pas de chef
+de file, et personne ne merge** jusqu'à ce que Thierry en ouvre une. Une file
+arrêtée se reprend ; un `main` poussé par deux sessions, non.
+
+⚠ **POURQUOI LA RÈGLE A CHANGÉ DE FORME, et c'est la leçon qui compte.** Elle
+nommait une session — `hotesmart-merge-fa`, désignée le 23 octobre. Le 26
+octobre, cette session ne tournait plus, une autre tenait le rôle en pratique et
+avait déjà mergé dans `main`, et une troisième lui remettait ses branches : la
+règle écrite et la réalité se contredisaient, et **aucune des deux sessions ne
+pouvait trancher** — une désignation ne se relaie pas plus qu'un go, et chacune
+aurait pris l'autorité de la parole de l'autre. Un nom de session est un
+identifiant qui meurt avec elle ; un chemin de travail, non. Le même jour, une
+session a diffusé une « priorité de Thierry » sur un défaut qu'elle n'avait pas
+mesuré, et l'autre a refusé d'agir sur ce relais : les deux incidents ont la
+même racine — une autorité qu'on croit tenir d'un intermédiaire.
+
+⚠ **ET LE CHEF DE FILE PEUT CODER UN LOT.** La version précédente l'interdisait :
+« elle ne code aucun lot : c'est sa seule tâche, et c'est ce qui la rend
+disponible pour la file ». La disponibilité reste une bonne raison, mais elle ne
+vaut pas d'immobiliser la file quand la seule session disponible est celle qui a
+écrit le lot. Ce qui ne se négocie pas, en revanche : **une branche qu'on a
+écrite soi-même se merge avec les MÊMES contrôles qu'une branche reçue** —
+règle 3 sur la base de merge, règle 9 au blob sur la liste COMPLÈTE des
+fichiers, la suite sur l'arbre FUSIONNÉ, et le go prod qui vient de Thierry. Se
+relire soi-même est le point faible connu de ce montage : on le compense par la
+mesure, pas par la confiance.
 
 1. **Une seule session merge.** Les autres lui envoient « branche X prête », avec
    les cinq choses sans lesquelles il ne peut pas décider : elle est **poussée**,
