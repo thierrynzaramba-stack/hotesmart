@@ -347,8 +347,19 @@ test('LE TEST QUI COMPTE : un bien EN VENTE ne se supprime pas, MEME sans plan t
   }
 
   // Et sans canal relie, le bouton reste actif : il n'y a rien a casser.
-  assert.equal(L.suppressionPossible(bienDe({ provider_rate_plan_id: null }), []).possible, true)
-  assert.equal(L.suppressionPossible(bienDe({ provider: 'beds24' }), []).possible, true)
+  //
+  // ⚠ A CONDITION QUE LE RELEVE AIT ABOUTI, et cette precision est le
+  // correctif du 26 octobre 2026. Ce test appelait `suppressionPossible` SANS
+  // options, donc avec `releveDuCompte = null` — ce qui ne veut pas dire « ce
+  // bien n'a pas de canal » mais « on n'a jamais reussi a le savoir ». Les deux
+  // etaient confondus, et c'est ce qui laissait passer le defaut mesure en
+  // review : un bien du canal sans plan de base, dont le coeur ne disait rien,
+  // s'effacait sans refus. Le cas « coeur muet » a desormais son test a lui,
+  // juste apres celui du bien Beds24.
+  const releveFait = { releveDuCompte: '2026-10-26T08:00:00Z' }
+  assert.equal(L.suppressionPossible(bienDe({ provider_rate_plan_id: null }), [], releveFait).possible, true)
+  assert.equal(L.suppressionPossible(bienDe({ provider: 'beds24' }), []).possible, true,
+    'un bien Beds24 ne depend pas du releve de l autre partenaire')
 
   // Des canaux ILLISIBLES n'ouvrent jamais l'action la plus destructrice,
   // quel que soit le plan tarifaire (constat H4 de l'etape 0).
@@ -1582,7 +1593,14 @@ test('LE TEST QUI COMPTE : seul l APPEL AU PARTENAIRE est garde par le provider,
   const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-property.js'), 'utf8')
   const i = src.indexOf("if (req.method === 'DELETE')")
   assert.ok(i > 0)
-  const bloc = src.slice(i)
+  // ⚠ LE BLOC S'ARRETE AU POST. `src.slice(i)` allait jusqu'a la fin du
+  // fichier : l'assertion sur le NOMBRE de gardes par provider contraignait
+  // donc aussi la creation, et le jour ou le POST en gagne une, ce test
+  // rougirait avec un message parlant du refus 409 — un rouge qui envoie
+  // chercher au mauvais endroit.
+  const finDuBloc = src.indexOf("if (req.method === 'POST')", i)
+  assert.ok(finDuBloc > i, 'le POST ne suit plus le DELETE : la borne du bloc est a revoir')
+  const bloc = src.slice(i, finDuBloc)
   const gardes = [...bloc.matchAll(/prop\.provider === 'channex' \|\| prop\.provider === 'channel'/g)]
   assert.equal(gardes.length, 1,
     `${gardes.length} garde(s) par provider dans le DELETE : une seule est attendue, `
@@ -1599,9 +1617,16 @@ test('LE TEST QUI COMPTE : seul l APPEL AU PARTENAIRE est garde par le provider,
 })
 
 test('LE TEST QUI COMPTE : un bien Beds24 se supprime, quel que soit l etat du releve', () => {
-  // Le releve est celui de l'autre partenaire : il ne decide rien ici, et le
-  // serveur ne le consulte pas.
-  const b24 = bienDe({ provider: 'beds24', provider_rate_plan_id: null })
+  // Le releve est celui de l'AUTRE partenaire : il ne dit rien de ce bien-la.
+  //
+  // ⚠ LE BIEN DE TEST PORTE UN PLAN TARIFAIRE, ET C'EST LE CORRECTIF DU
+  // 26 OCTOBRE 2026. Il portait `provider_rate_plan_id: null` en plus de
+  // `provider: 'beds24'` : les deux suffisaient seuls a rendre `possible: true`,
+  // donc le test ne disait pas lequel agissait — et il VERDISSAIT le defaut
+  // trouve en review ce jour-la (un bien du CANAL sans plan de base se
+  // supprimait sans refus, meme sans aucun releve). Un test qui passe pour deux
+  // raisons dont une est un bug ne garde rien.
+  const b24 = bienDe({ provider: 'beds24', provider_rate_plan_id: 'PLAN-BEDS24' })
   for (const opts of [
     { releveDuCompte: '2026-10-23T08:00:00Z' },
     { releveDuCompte: null },
@@ -1611,6 +1636,38 @@ test('LE TEST QUI COMPTE : un bien Beds24 se supprime, quel que soit l etat du r
     assert.equal(r.possible, true, JSON.stringify(opts))
     assert.equal(r.motif, null)
   }
+})
+
+test('LE TEST QUI COMPTE : un bien DU CANAL sans plan tarifaire ne se supprime PAS sans releve', () => {
+  // ⚠ LE CAS SYMETRIQUE DU PRECEDENT, ET LE DEFAUT MESURE EN REVIEW LE
+  // 26 OCTOBRE 2026. `jamais_releve` vivait SOUS le retour qui exige
+  // `provider_rate_plan_id` : un bien channex sans plan de base, sans ligne de
+  // canal et sans releve rendait `possible: true`. La seule difference entre un
+  // refus et un effacement irreversible etait ce plan — qui ne sert qu'au
+  // chemin de verification chez le partenaire.
+  //
+  // C'est le profil exact du bien de la recette de Thierry du 22 octobre :
+  // « un bien sans plan de base », Airbnb en vente, 77 reservations.
+  const sansPlan = bienDe({ provider: 'channex', provider_rate_plan_id: null })
+  for (const opts of [
+    { releveDuCompte: null },
+    { releveDuCompte: '2026-10-23T08:00:00Z', releveEnEchec: true }
+  ]) {
+    assert.deepEqual(L.suppressionPossible(sansPlan, [], opts),
+      { possible: null, motif: 'jamais_releve' }, JSON.stringify(opts))
+  }
+  // ⚠ ET IL SE SUPPRIME DES QUE LE RELEVE A PARLE : le refus porte sur
+  // l'ignorance, pas sur le bien. Sans cette moitie, un durcissement qui
+  // rendrait le bien insupprimable passerait pour un correctif.
+  assert.deepEqual(L.suppressionPossible(sansPlan, [], { releveDuCompte: '2026-10-26T08:00:00Z' }),
+    { possible: true, motif: null })
+  // ⚠ ET UN BIEN SANS REFERENCE PARTENAIRE RESTE SUPPRIMABLE : il n'a aucune
+  // propriete chez le partenaire, donc aucune annonce possible. Le refuser
+  // serait un refus sans objet, et il bloquerait un bien dont la creation
+  // s'est arretee en route.
+  assert.deepEqual(L.suppressionPossible(
+    bienDe({ provider: 'channex', provider_property_id: null, provider_rate_plan_id: null }),
+    [], { releveDuCompte: null }), { possible: true, motif: null })
 })
 
 test('LE TEST QUI COMPTE : L ECRAN ET LE SERVEUR N ONT PLUS QU UNE SEULE REGLE', () => {

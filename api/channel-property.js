@@ -823,7 +823,17 @@ module.exports = async function handler(req, res) {
         // menent au meme refus prudent ici : `releveDuCompte` reste `null`.
         if (eH) console.error('[channel-property] DELETE : canaux_releve illisible', eH.message)
         else {
-          releveDuCompte = h || null
+          // ⚠ `vu_le`, PAS LA LIGNE. C'est la valeur que l'ecran passe
+          // (lib/logement/lecture.js : `horloge: horlogeLigne ? horlogeLigne.vu_le : null`),
+          // et ce handler annonce « memes entrees ». Passer la ligne entiere la
+          // rend toujours truthy : une ligne existante SANS `vu_le` — l'etat
+          // d'un releve qui n'a jamais rien ecrit, puisque `noterLeReleve` ne
+          // pose `vu_le` que si `bilan.ok || bilan.ecrits > 0` — serait lue
+          // « releve abouti » ici et « jamais releve » a l'ecran. Aujourd'hui
+          // l'autre moitie de la condition (`releveEnEchec`) rattrape ce cas,
+          // donc l'ecart est inerte ; une divergence inerte reste une
+          // divergence, et c'est elle qui a coute la garde morte.
+          releveDuCompte = h ? (h.vu_le || null) : null
           releveEnEchec = echecVisibleParLHote(h)
         }
       }
@@ -842,12 +852,21 @@ module.exports = async function handler(req, res) {
           canaux_illisibles: 'Nous n\'avons pas pu lire les annonces de ce logement. Rien n\'a '
             + 'été supprimé. Réessayez dans quelques minutes.',
           jamais_releve: 'Les annonces de ce compte n\'ont encore jamais été relevées : nous ne '
-            + 'pouvons pas affirmer que ce logement n\'est plus en vente. Rien n\'a été supprimé.',
-          droit_refuse: 'Vous n\'avez pas le droit de supprimer ce logement.'
+            + 'pouvons pas affirmer que ce logement n\'est plus en vente. Rien n\'a été supprimé.'
+          // ⚠ PAS DE `droit_refuse` ICI, ET C'EST VOLONTAIRE. `suppressionPossible`
+          // le rend quand `peutSupprimer` est faux ; on lui passe `true`, parce
+          // que le DROIT a deja ete tranche en amont par `requirePermission`,
+          // qui refuse en 403. Porter ce motif dans cette table ferait rendre
+          // 409 a un refus de droit — or le depot a une regle explicite : « le
+          // test qui tranche : si on retire le masquage et qu'on clique, le
+          // serveur refuse-t-il ? Si la reponse n'est pas "oui, en 403", il n'y
+          // a pas de garde. » Un 409 ici brouillerait cette mesure.
         }
-        // ⚠ UN MOTIF INCONNU REFUSE AUSSI. Si `suppressionPossible` gagne un
-        // cinquieme motif, le defaut de ce handler doit etre le REFUS, pas le
-        // passage : une suppression irreversible ne se decide pas par omission.
+        // ⚠ UN MOTIF INCONNU REFUSE AUSSI. `suppressionPossible` en rend cinq
+        // aujourd'hui — quatre arrivent ici, `droit_refuse` etant tranche en
+        // amont. Si elle en gagne un sixieme, le defaut de ce handler doit
+        // etre le REFUS, pas le passage : une suppression irreversible ne se
+        // decide pas par omission.
         return res.status(409).json({
           error: MESSAGES[verdict.motif]
             || 'La suppression de ce logement est refusée : son état n\'a pas pu être établi. '

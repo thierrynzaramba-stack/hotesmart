@@ -41,7 +41,7 @@ const BIEN = '33333333-3333-3333-3333-333333333333'
 // L'etat que la base simulee rendra : pilote par chaque test.
 const monde = {}
 // Ce que le handler a fait : mesure, pas devine.
-const trace = { deletes: [], fetchs: [] }
+const trace = { deletes: [], fetchs: [], lectures: [] }
 
 const CHEMIN_PERM = path.join(__dirname, '..', 'lib', 'require-permission.js')
 const vraiPermission = require(CHEMIN_PERM)
@@ -55,8 +55,19 @@ const vraiPermission = require(CHEMIN_PERM)
 const fabriqueBase = () => ({
   auth: { getUser: async () => ({ data: { user: { id: TITULAIRE } }, error: null }) },
   from (table) {
-    const ctx = { table, suppression: false }
+    const ctx = { table, suppression: false, filtres: [] }
     const repondre = (forme) => {
+      // ⚠ LES FILTRES SONT ENREGISTRES, PAS SEULEMENT LES TABLES. C'est le
+      // constat de la review du 26 octobre 2026, et il etait grave : le double
+      // rendait `api` sur `eq()` sans rien retenir, donc une mutation qui
+      // remplacait
+      //     .eq('user_id', compteBien).eq('property_id', String(bienPid))
+      // par
+      //     .eq('property_id', String(providerId))
+      // — soit la cle provider TEXT au lieu de l'UUID, « le piege UUID »,
+      // PLUS la perte du cloisonnement par compte — laissait la suite ENTIERE
+      // au vert (10/10 et 109/109). Deux defauts de securite invisibles.
+      trace.lectures.push({ table, suppression: ctx.suppression, filtres: ctx.filtres.slice() })
       if (ctx.suppression) {
         trace.deletes.push(table)
         return { data: null, error: null }
@@ -74,7 +85,7 @@ const fabriqueBase = () => ({
       // quand la suppression est autorisee.
       if (table === 'bookings_snapshot') return { data: [], error: null }
       if (['menages', 'messages', 'message_sent_log', 'conversation_flags',
-           'menage_events', 'property_channel_rate_plans', 'canaux_releve'].includes(table)) {
+           'menage_events', 'property_channel_rate_plans'].includes(table)) {
         return { data: [], error: null }
       }
       if (monde.tablesTolerees && monde.tablesTolerees.includes(table)) return { data: [], error: null }
@@ -82,13 +93,13 @@ const fabriqueBase = () => ({
     }
     const api = {
       select () { return api },
-      eq () { return api },
+      eq (col, val) { ctx.filtres.push([String(col), val]); return api },
       neq () { return api },
-      is () { return api },
+      is (col, val) { ctx.filtres.push([`is:${col}`, val]); return api },
       in () { return api },
       not () { return api },
       order () { return api },
-      limit () { return api },
+      limit (n) { ctx.filtres.push(['limit', n]); return api },
       delete () { ctx.suppression = true; return api },
       update () { ctx.suppression = true; return api },
       range: async () => repondre('range'),
@@ -154,6 +165,7 @@ const poser = (etat) => {
   for (const k of Object.keys(monde)) delete monde[k]
   trace.deletes.length = 0
   trace.fetchs.length = 0
+  trace.lectures.length = 0
   monde.bien = {
     id: BIEN, name: 'Bien de test', provider: 'channex',
     provider_property_id: 'PROP-1', provider_rate_plan_id: 'PLAN-BASE'
@@ -295,4 +307,107 @@ test('la garde du serveur et celle de l ecran sont LA MEME FONCTION', async () =
     'le match sur le plan de base est revenu : il n aboutit jamais (channel-mapping.js le dit)')
   const { suppressionPossible } = require('../lib/logement/lecture')
   assert.equal(typeof suppressionPossible, 'function')
+})
+
+test('LE TEST QUI COMPTE : la garde lit l UUID DU BIEN et le COMPTE DU BIEN', async () => {
+  // ⚠ CE TEST FERME UN FAUX VERT MESURE PAR LA REVIEW DU 26 OCTOBRE 2026. Le
+  // double de base rendait `api` sur chaque `eq()` sans rien retenir : une
+  // mutation remplacant
+  //     .eq('user_id', compteBien).eq('property_id', String(bienPid))
+  // par
+  //     .eq('property_id', String(providerId))
+  // laissait la suite ENTIERE au vert — 10/10 ici et 109/109 dans
+  // logement-lecture. Deux defauts de securite d'un coup, invisibles :
+  //
+  //   1. LA CLE. `canaux_du_bien.property_id` est un `uuid not null references
+  //      properties(id)` (migration du 19 octobre 2026) — c'est une EXCEPTION
+  //      assumee a la regle dure n. 3 du depot, ou le `property_id` des tables
+  //      enfant porte la cle provider en TEXT. Interroger cette colonne avec
+  //      une cle provider rendrait zero ligne, donc « aucun canal mappe »,
+  //      donc une AUTORISATION DE SUPPRIMER. C'est le piege UUID, et le depot
+  //      l'a paye quatre fois.
+  //   2. LE CLOISONNEMENT. Sans `user_id`, la garde lirait les canaux de tous
+  //      les comptes portant le meme UUID de bien — inerte aujourd'hui (un
+  //      UUID est unique) mais c'est la discipline du depot, et c'est la
+  //      colonne que la RLS de cette table exige.
+  poser({ canaux: [], partenaire: { status: 200, body: { data: {} } } })
+  await appeler()
+
+  const lecture = trace.lectures.find(l => l.table === 'canaux_du_bien' && !l.suppression)
+  assert.ok(lecture, 'canaux_du_bien n a pas ete lu du tout : la garde ne consulte plus le coeur')
+  const filtres = new Map(lecture.filtres)
+
+  assert.equal(filtres.get('property_id'), BIEN,
+    `la garde interroge property_id = ${JSON.stringify(filtres.get('property_id'))} au lieu de `
+    + `l UUID du bien (${BIEN}). Une cle provider rendrait zero ligne, donc une autorisation.`)
+  assert.equal(filtres.get('user_id'), TITULAIRE,
+    'la garde ne filtre plus sur le compte du bien')
+  assert.equal(filtres.get('is:disparu_le'), null,
+    'la garde ne filtre plus les canaux disparus, ou elle les filtre autrement')
+  assert.equal(filtres.get('limit'), 200,
+    'la borne de prudence a change : le test de troncature ne mesure plus la bonne limite')
+})
+
+test('LE TEST QUI COMPTE : la PURGE porte le compte, et ses TROIS exemptions sont comptees', async () => {
+  // Une purge qui oublierait le compte effacerait les donnees d'un autre hote
+  // portant la meme cle provider — et le depot dit que ce cas existe : « deux
+  // comptes peuvent porter le meme numero provider ». `property_id` des tables
+  // enfant est du TEXT provider (regle dure n. 3), donc la collision est
+  // possible partout ou le compte ne borne pas.
+  //
+  // ⚠ TROIS TABLES N'ONT PAS DE COLONNE `user_id`, et le code les nomme
+  // lui-meme (`tablesNoUser`). Ce n'est pas un oubli, c'est leur schema. Mais
+  // une exemption se COMPTE, elle ne se decrit pas : on les enumere ici pour
+  // qu'une QUATRIEME fasse rougir ce test au lieu de se glisser dans la liste.
+  //
+  // ⚠ ET CE N'EST PAS SANS RISQUE, donc on le laisse ecrit : pour ces trois
+  // tables, la purge d'un bien efface les lignes de TOUT compte portant la
+  // meme cle provider. Hors du perimetre de ce correctif (il ne touche pas la
+  // purge) et non corrigible sans migration — a porter au registre.
+  const SANS_COLONNE_COMPTE = ['access_codes', 'calendar_inventory', 'channel_sync_queue']
+
+  poser({ canaux: [], partenaire: { status: 200, body: { data: {} } } })
+  await appeler()
+
+  const purges = trace.lectures.filter(l => l.suppression)
+  assert.ok(purges.length > 0, 'aucune purge tracee : la suppression n a rien efface')
+  const sansCompte = [...new Set(purges
+    .filter(l => !l.filtres.some(([c]) => c === 'user_id'))
+    .map(l => l.table))].sort()
+  assert.deepEqual(sansCompte, [...SANS_COLONNE_COMPTE].sort(),
+    'l inventaire des purges non bornees par le compte a change : '
+    + `mesure ${JSON.stringify(sansCompte)}. Une table de plus doit etre nommee ICI, `
+    + 'avec la raison — ou bornee par le compte.')
+  // Et toutes les autres portent bien le compte DU BIEN, pas celui de l appelant.
+  for (const l of purges.filter(x => !SANS_COLONNE_COMPTE.includes(x.table))) {
+    const filtres = new Map(l.filtres)
+    assert.equal(filtres.get('user_id'), TITULAIRE, `purge ${l.table} : mauvais compte`)
+  }
+})
+
+test('l ecran et le serveur passent la MEME VALEUR a la regle partagee', () => {
+  // ⚠ UN TEST DE FORME, ET JE L'ASSUME COMME TEL — le depot dit qu'un controle
+  // de securite verifie un comportement, jamais une forme. Celui-ci ne garde
+  // pas une garde : il garde un CONTRAT entre deux appelants.
+  //
+  // L'ecran passe `releveDuCompte = horlogeLigne.vu_le` ; le handler passait la
+  // LIGNE entiere, toujours truthy. Une ligne existante sans `vu_le` aurait
+  // donc ete lue « releve abouti » cote serveur et « jamais releve » cote
+  // ecran — la divergence meme qui a produit la garde morte.
+  //
+  // ⚠ ET CET ETAT N'EST PAS ATTEIGNABLE AUJOURD'HUI, donc aucun appel du
+  // handler ne peut le mesurer : `noterLeReleve` pose `vu_le` des que le
+  // releve a ecrit quelque chose, et une ligne sans `vu_le` porte `ok: false`,
+  // donc `echecVisibleParLHote` la rattrape par l'autre moitie de la
+  // condition. C'est pourquoi la contre-epreuve par mutation de cette ligne ne
+  // rougit sur AUCUN test de comportement — mesure faite, `fail 0`. Un test de
+  // forme est ici le seul filet possible, et il vaut mieux que rien : le jour
+  // ou `noterLeReleve` changera, c'est lui qui rappellera le contrat.
+  const fs = require('node:fs')
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'channel-property.js'), 'utf8')
+  const i = src.indexOf("if (req.method === 'DELETE')")
+  const fin = src.indexOf("if (req.method === 'POST')", i)
+  const bloc = src.slice(i, fin).split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.match(bloc, /releveDuCompte = h \? \(h\.vu_le \|\| null\) : null/,
+    'le handler ne passe plus `vu_le` : il diverge de l ecran sur l entree de la regle partagee')
 })
