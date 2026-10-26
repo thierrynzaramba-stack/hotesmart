@@ -57,6 +57,11 @@
 // (5 minutes), comme a une activation.
 
 const { createClient } = require('@supabase/supabase-js')
+// ⚠ LA TABLE DES PROJETS NE SE RECOPIE PAS (constat MINEUR de la review du
+// 26 octobre 2026). Ce script gardait par la BONNE regle — la reference du
+// projet — mais avec sa propre copie des deux references. Une copie ne se
+// corrige pas quand l'original change.
+const { nomDeLaBase, REF_PRODUCTION } = require('../lib/empreinte-base')
 const { finDeFenetre, pilotParYield } = require('../lib/pilote-tarifaire')
 const { fermeturesDuBien, nuitsFermees } = require('../lib/fermetures')
 const { nuitsVendues, relireMemoire } = require('../lib/nuits-du-moteur')
@@ -69,7 +74,10 @@ const KEY = process.env.SUPABASE_SERVICE_KEY
 if (!URL || !KEY) { console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY absents.'); process.exit(1) }
 const sb = createClient(URL, KEY)
 const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
-const PROD = 'cjmrizpdyhrcurmgyrhs'
+// ⚠ LA REFERENCE DE LA PRODUCTION VIENT DU MODULE COMMUN, elle ne se recopie
+// plus (constat MINEUR de la review du 26 octobre 2026 : elle etait en dur
+// dans 21 fichiers hors du module qui s'annonce « regle partagee »).
+const PROD = REF_PRODUCTION
 
 const args = process.argv.slice(2)
 const val = n => { const a = args.find(x => x.startsWith(`--${n}=`)); return a ? a.slice(n.length + 3) : null }
@@ -81,7 +89,8 @@ const SIMULER = args.includes('--simuler-pilote')
 if (!/^[0-9a-f-]{36}$/i.test(String(bienId || '')) || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(String(lot || ''))) {
   console.error('Usage : --bien=<uuid> --lot=YYYY-MM-DDTHH:MM [--attendu=N] [--simuler-pilote] [--go --prod]'); process.exit(1)
 }
-if (GO && projet === PROD && !args.includes('--prod')) { console.error('REFUS : --go sur la PRODUCTION exige --prod.'); process.exit(1) }
+if (nomDeLaBase(URL) === 'INCONNUE') { console.error(`REFUS : projet Supabase inconnu — ni la production, ni staging.`); process.exit(1) }
+if (GO && nomDeLaBase(URL) === 'PRODUCTION' && !args.includes('--prod')) { console.error('REFUS : --go sur la PRODUCTION exige --prod.'); process.exit(1) }
 if (GO && !Number.isInteger(attendu)) { console.error('REFUS : --go exige --attendu=<compte exact>, lu au passage a blanc.'); process.exit(1) }
 
 const jourParis = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(d)

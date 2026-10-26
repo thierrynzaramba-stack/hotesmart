@@ -29,6 +29,7 @@
 
 require('dotenv').config({ path: process.env.ENV_FILE || '.env.staging' })
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
@@ -39,17 +40,33 @@ if (!URL || !KEY) {
 }
 // ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, PAS LE NOMBRE DE BIENS — et c'est
 // une correction du 26 octobre 2026, mesuree. Les verificateurs du depot
-// identifient la base par « 5 biens = production, 3 = staging » ; staging en
-// porte QUATRE depuis qu'un bien y a ete cree, et ce script a refuse de
-// travailler sur une base parfaitement identifiable. Une empreinte qui derive
-// avec la donnee n'est pas une empreinte : la reference du projet, elle, ne
-// bouge pas. Le compte des biens reste imprime — il situe la base d'un coup
-// d'oeil — mais il ne decide plus.
-const PROJET = (URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''
-const PROD = 'cjmrizpdyhrcurmgyrhs'
-const STAGING = 'ortyofzzdsthlhqmzsnq'
+// identifiaient la base par son nombre de logements ; staging en porte QUATRE
+// depuis qu'un bien y a ete cree, et ce script a refuse de travailler sur une
+// base parfaitement identifiable. Une empreinte qui derive avec la donnee n'est
+// pas une empreinte : la reference du projet, elle, ne bouge pas. Le compte des
+// biens reste imprime — il situe la base d'un coup d'oeil — mais il ne decide
+// plus.
+//
+// ⚠ ET LA REGLE VIENT DU MODULE COMMUN, elle n'est plus recopiee ici. Ce
+// fichier portait sa PROPRE copie des deux references et sa propre extraction
+// d'URL — une divergence que je savais et que j'avais annoncee comme « sans
+// consequence sur le merge ». C'ETAIT FAUX, et c'est le test du lot
+// `fix-empreinte-par-projet` qui l'a dit : sur l'arbre fusionne, 6332 tests,
+// 6331 verts, UN rouge — « aucun script ne recopie une reference de projet ».
+// Deux fichiers differents, aucun conflit git, un invariant casse : le defaut
+// que ce test existe pour attraper, et il m'a attrape moi.
+//
+// ⚠⚠ ET LA COPIE N'ETAIT PAS QU'UNE REDONDANCE, C'ETAIT LE MEME TROU DE
+// SECURITE que la re-review a trouve dans quatre autres scripts. L'extraction
+// maison `(URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1]` n'est ni ancree, ni
+// insensible a la casse, et n'accepte que `https:` : sur `http://`, sur
+// `HTTPS://` ou avec des identifiants, elle rend une chaine VIDE, donc
+// `PROJET === PROD` devient faux — ET `--ecrit` AURAIT ECRIT EN PRODUCTION.
+// C'est le script qui pose des lignes temoins dans `delais_versement` : il
+// aurait insere et supprime sur la base de production, en annoncant staging.
+const PROJET = refDuProjet(URL) || ''
 const ECRIT = process.argv.includes('--ecrit')
-if (ECRIT && PROJET === PROD) {
+if (ECRIT && nomDeLaBase(URL) === 'PRODUCTION') {
   console.error(`REFUS : ${PROJET} est la PRODUCTION. --ecrit est reserve a staging.`)
   process.exit(2)
 }
@@ -72,11 +89,12 @@ const ATTENDU = {
 
 ;(async () => {
   // ⚠ L'EMPREINTE EN TETE : un resultat qui ne dit pas OU il a ete obtenu ne
-  // prouve rien. 5 biens = production, 3 = staging.
+  // prouve rien. C'est la REFERENCE DU PROJET qui la donne, et le nombre de
+  // biens est imprime a cote, a titre d'information.
   const { count: biens, error: eB } = await sb.from('properties')
     .select('*', { count: 'exact', head: true })
   if (eB) { console.error('Empreinte illisible :', eB.message); process.exit(1) }
-  const nom = PROJET === PROD ? 'PRODUCTION' : PROJET === STAGING ? 'STAGING' : 'INCONNUE'
+  const nom = nomDeLaBase(URL)
   console.log(`Base : ${PROJET} — ${nom} — ${biens} bien(s)\n`)
   if (nom === 'INCONNUE') {
     console.error(`Projet inconnu (${PROJET}) : arret. Un resultat qui ne dit pas OU`)

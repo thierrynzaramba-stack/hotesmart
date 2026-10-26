@@ -5,10 +5,19 @@
 // invalide, dont on attend le REFUS).
 // Usage : node --env-file=<.env> scripts/verifier-migration-messages-origine.js
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 async function main () {
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
   const { count } = await supabase.from('properties').select('*', { count: 'exact', head: true })
-  console.log(`Projet ${String(process.env.SUPABASE_URL).match(/\/\/([^.]+)/)[1]} · biens = ${count} (5 = production, 3 = staging)`)
+  console.log(`Base ${base} · biens = ${count}`)
+  // ⚠ CE SCRIPT INSERE UNE LIGNE FACTICE pour prouver que la contrainte la
+  // refuse, et il n'avait AUCUNE garde de base (constat de la review du
+  // 26 octobre 2026) : sur une base non reconnue, il aurait sonde en silence.
+  if (base === 'INCONNUE') {
+    console.error(`ECHEC : projet Supabase inconnu — ni la production, ni staging. Aucune sonde.`)
+    process.exit(1)
+  }
   const { error: eL } = await supabase.from('messages').select('origine').limit(1)
   if (eL) { console.error('✗ colonne origine illisible :', eL.message); process.exit(1) }
   console.log('  ✔ messages.origine lisible par son nom')

@@ -44,6 +44,7 @@ const eclAvant = fs.readFileSync(path.join(avant, 'lib', 'yield', 'eclatement.js
 if (/taxeSejourDe/.test(eclAvant)) { console.error(`REFUS : ${avant} porte deja le prix hors taxe — ce n est pas le code d avant.`); process.exit(1) }
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 const APRES = require('../lib/yield/contexte-du-bien')
 const AVANT = require(path.join(avant, 'lib', 'yield', 'contexte-du-bien'))
 const { calculerPrix } = require('../lib/moteur-prix')
@@ -93,7 +94,19 @@ function rapport (titre, { comparees, changes }) {
   console.log(`Projet Supabase : ${projet} — LECTURE SEULE — avant = ${avant}\n`)
   const { data: biens, error } = await sb.from('properties').select('*').order('name')
   if (error || !biens) { console.error('ECHEC : biens illisibles', error ? error.message : ''); process.exit(1) }
-  console.log(`biens = ${biens.length} (5 = production, 3 = staging)\n`)
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Base ${base} · biens = ${biens.length}\n`)
+  // ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, ET ELLE REFUSE (26 octobre 2026).
+  // Ce script imprimait « biens = N (5 = production, 3 = staging) » puis
+  // continuait sur n'importe quelle base designee par l'environnement. Deux
+  // defauts dans une ligne : la legende est FAUSSE depuis que staging porte
+  // quatre biens, et une legende n'est pas une garde — elle se lit apres coup,
+  // dans une sortie que personne ne relit quand tout s'est bien passe.
+  if (base === 'INCONNUE') {
+    console.error(`ECHEC : projet Supabase inconnu — ni la production, ni staging.`)
+    console.error(`Un resultat qui ne dit pas OU il a ete obtenu ne prouve rien.`)
+    process.exit(1)
+  }
   const auj = jourParis()
   const finEcran = decaler(auj, jours - 1)
   let total = 0, totalChanges = 0, totalPilote = 0, changesPilote = 0, taxeRetiree = 0, echec = false
