@@ -7,12 +7,13 @@
 //
 //   node --env-file=<.env de la base visee> scripts/verifier-migration-comparables.js
 //
-// LECTURE SEULE. ⚠ EMPREINTE en tete (5 biens = production, 3 = staging).
+// LECTURE SEULE. ⚠ EMPREINTE en tete : la REFERENCE DU PROJET (lib/empreinte-base.js).
 // ⚠ Les fonctions de quota ne sont appelees qu'avec un parametre NUL : elles
 // refusent avant le verrou et n'ecrivent rien. Cela prouve leur SIGNATURE
 // (celle de -nature.sql) ; l'ancienne, sans p_nature, doit avoir disparu.
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
@@ -28,9 +29,15 @@ const FORMES = {
 ;(async () => {
   const { count: biens, error: eB } = await sb.from('properties').select('*', { count: 'exact', head: true })
   if (eB) { console.error('Empreinte illisible :', eB.message); process.exit(1) }
-  const nom = biens === 5 ? 'PRODUCTION' : biens === 3 ? 'STAGING' : 'INCONNUE'
-  console.log(`Base : ${biens} bien(s) — ${nom}\n`)
-  if (nom === 'INCONNUE') { console.error('Empreinte inconnue : arret.'); process.exit(1) }
+  // ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, PAS LE NOMBRE DE BIENS
+  // (26 octobre 2026). Staging porte QUATRE biens depuis qu'un logement y a
+  // ete cree : l'ancienne regle « 5 = production, 3 = staging » refusait une
+  // base parfaitement identifiable, et aurait dit « staging » sur la
+  // PRODUCTION le jour ou elle tomberait a 3 biens. Le compte reste imprime,
+  // il ne decide plus. Regle partagee : lib/empreinte-base.js.
+  const nom = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Base : ${refDuProjet(process.env.SUPABASE_URL)} — ${nom} — ${biens} bien(s)\n`)
+  if (nom === 'INCONNUE') { console.error('Projet inconnu : arret.'); process.exit(1) }
   let echecs = 0
   for (const [table, colonnes] of Object.entries(FORMES)) {
     const { error } = await sb.from(table).select(colonnes).limit(1)

@@ -22,7 +22,8 @@
 // Meme logique pour la LECTURE : seules comptent les lignes du compte cible. Un
 // testeur voit toujours ses propres donnees, c'est normal et sans interet ici.
 
-require('dotenv').config({ path: '.env.local' })
+require('dotenv').config({ path: process.env.ENV_FILE || '.env.local' })
+const { nomDeLaBase } = require('./../lib/empreinte-base')
 const { createClient } = require('@supabase/supabase-js')
 
 const LOT_COURANT = 1
@@ -95,6 +96,32 @@ function verdict(condition, libelle, detail) {
 async function main() {
   const { SUPABASE_URL, SUPABASE_ANON_KEY, TEST_EMAIL, TEST_PASSWORD } = process.env
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) { console.error('SUPABASE_URL / SUPABASE_ANON_KEY absents de .env.local'); process.exit(1) }
+
+  // ⚠ CE SCRIPT ECRIT SUR LA BASE — `update` l. 207, `insert` l. 222,
+  // `delete` l. 231 — ET IL N'AVAIT AUCUNE GARDE DE BASE. Correction de
+  // SECURITE du 26 octobre 2026, constat GRAVE de la re-review du lot
+  // `fix-empreinte-par-projet`.
+  //
+  // ⚠ ET IL ETAIT INVISIBLE A L'INVENTAIRE QUI DEVAIT L'ATTRAPER. Le test
+  // `tests/empreinte-base.test.js` cherchait `process.env.SUPABASE_URL` : ici
+  // l'URL est lue par DESTRUCTURATION, juste au-dessus, donc le script
+  // n'apparaissait ni dans les gardes, ni dans les exemptions, ni dans la
+  // dette. Il ne rougissait pas — il disparaissait.
+  //
+  // ⚠ ET IL POINTE `.env.local`, C'EST-A-DIRE LA PRODUCTION, PAR DEFAUT.
+  // L'empreinte est donc imprimee AVANT toute ecriture, et la base inconnue
+  // refusee. On ne REFUSE PAS la production ici : ce script existe pour
+  // eprouver la RLS telle qu'un navigateur la voit, et c'est en production que
+  // la question compte. Mais l'hote doit lire OU il eprouve, et ses sondes
+  // (`insert` suivi de `delete`) ne doivent pas partir sur une base dont
+  // personne ne sait le nom. `ENV_FILE` permet de viser staging.
+  const base = nomDeLaBase(SUPABASE_URL)
+  console.log(`Base : ${base}${base === 'PRODUCTION' ? ' ⚠ les sondes ecrivent EN PRODUCTION' : ''}`)
+  if (base === 'INCONNUE') {
+    console.error('ECHEC : projet Supabase inconnu — ni la production, ni staging.')
+    console.error('Ce script ECRIT (sondes insert/delete) : il ne part pas sur une base anonyme.')
+    process.exit(1)
+  }
   if (!TEST_EMAIL || !TEST_PASSWORD) {
     console.error('TEST_EMAIL / TEST_PASSWORD absents de .env.local.')
     console.error('Ajoutez-les (le fichier est deja ignore par git) :')

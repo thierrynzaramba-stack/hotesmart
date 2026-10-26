@@ -3,7 +3,7 @@
 // (migrations/2026-09-30-grille-hote.sql) est-elle appliquee, et sous la bonne
 // forme ? Regle du 25 septembre 2026 : on ne colle que la migration, la
 // verification passe par un script qui affiche l'empreinte en tete (projet et
-// nombre de biens : 5 = production, 3 = staging).
+// la reference du projet.
 //
 //   node --env-file=<.env de la base visee> scripts/verifier-migration-grille-hote.js
 //
@@ -16,6 +16,7 @@
 // relecture du fichier de migration les couvre.
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 
 const ATTENDU = {
   grille_hote: ['id', 'user_id', 'property_id', 'niveau', 'rate_cents', 'recommended_rate_cents', 'created_at', 'updated_at'],
@@ -27,7 +28,19 @@ const ATTENDU = {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
   const { count, error } = await sb.from('properties').select('id', { count: 'exact', head: true })
   if (error || !Number.isInteger(count)) { console.error('ECHEC : empreinte illisible', error ? error.message : ''); process.exit(1) }
-  console.log(`Projet ${String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]} · biens = ${count} (5 = production, 3 = staging)`)
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Base ${base} · biens = ${count}`)
+  // ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, ET ELLE REFUSE (26 octobre 2026).
+  // Ce script imprimait « biens = N (5 = production, 3 = staging) » puis
+  // continuait sur n'importe quelle base designee par l'environnement. Deux
+  // defauts dans une ligne : la legende est FAUSSE depuis que staging porte
+  // quatre biens, et une legende n'est pas une garde — elle se lit apres coup,
+  // dans une sortie que personne ne relit quand tout s'est bien passe.
+  if (base === 'INCONNUE') {
+    console.error(`ECHEC : projet Supabase inconnu — ni la production, ni staging.`)
+    console.error(`Un resultat qui ne dit pas OU il a ete obtenu ne prouve rien.`)
+    process.exit(1)
+  }
   let echecs = 0
   for (const [table, colonnes] of Object.entries(ATTENDU)) {
     for (const c of colonnes) {

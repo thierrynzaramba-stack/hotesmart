@@ -9,10 +9,11 @@
 // Usage : node --env-file=.env.local   scripts/verifier-avis-evaluation.js
 //         node --env-file=.env.staging scripts/verifier-avis-evaluation.js
 //
-// ⚠ EMPREINTE DE LA BASE, EN TETE ET SANS QUOI RIEN NE COMPTE. 5 biens en
-// production, 3 en staging (regle du depot). Un resultat sans elle ne dit pas
-// OU il a ete obtenu, et « c'est applique » sur la mauvaise base est pire que
-// rien.
+// ⚠ EMPREINTE DE LA BASE, EN TETE ET SANS QUOI RIEN NE COMPTE. C'est la
+// REFERENCE DU PROJET Supabase qui la donne (lib/empreinte-base.js), pas le
+// nombre de biens : celui-la derive des qu'un logement est cree. Un resultat
+// sans empreinte ne dit pas OU il a ete obtenu, et « c'est applique » sur la
+// mauvaise base est pire que rien.
 //
 // ⚠ UN VERIFICATEUR QUI N'A RIEN LU DOIT ECHOUER. Zero evaluation est normal
 // (aucun lot ne les ecrit encore) ; une table ABSENTE, une colonne manquante,
@@ -31,6 +32,7 @@
 // collage lui-meme : si l'editeur n'a pas rendu d'erreur, ils sont la. Le
 // script le RAPPELLE en fin de course au lieu de laisser croire le contraire.
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
@@ -85,10 +87,15 @@ async function colonnes (nom, liste) {
     console.error('ECHEC : `properties` illisible — mauvaise base ou cle invalide.')
     process.exit(1)
   }
-  const attendu = biens.lignes === 5 ? 'PRODUCTION' : biens.lignes === 3 ? 'STAGING' : 'INCONNUE'
-  console.log(`Empreinte : ${biens.lignes} bien(s) → base ${attendu}\n`)
+  // ⚠ LE NOMBRE DE BIENS N'EST PLUS UNE GARDE (26 octobre 2026). Il valait
+  // « la base est bien celle que je crois », et staging en porte QUATRE
+  // depuis qu'un bien y a ete cree : cette seconde ceinture refusait donc
+  // toute execution. La reference du PROJET, elle, ne derive pas — c'est
+  // elle qui garde, et le compte reste imprime a titre d'information.
+  const attendu = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Empreinte : base ${attendu} — ${biens.lignes} bien(s)\n`)
   if (attendu === 'INCONNUE') {
-    console.error('ECHEC : empreinte inattendue (5 en prod, 3 en staging).')
+    console.error('ECHEC : projet Supabase inconnu — ni la production, ni staging.')
     console.error('Verifier la base visee avant de conclure quoi que ce soit.')
     process.exit(1)
   }
