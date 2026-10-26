@@ -32,8 +32,7 @@ const { validerProfil, validerStrategie, geocoder, lireProfil, enregistrerProfil
 const { reunirEtTrier, cartesDansLOrdre, repartitionSejourMin } = require('../lib/marche/pertinence')
 const { seulementActives } = require('../lib/marche/activite')
 const { gestionnaires } = require('../lib/marche/grille-marche')
-const { prixDeDepart } = require('../lib/marche/prix-depart')
-const { lireDerniereCapture } = require('../lib/marche/temperature-airroi')
+const { prixDeDepart, phase1DuMarche } = require('../lib/marche/prix-depart')
 const { rechercheDuProfil, validerChoix, enregistrerChoix, corpsRechercheActifs, PAGE, PAGES_INITIALES, PAGES_MAX, COUTS, QUOTA, MESSAGE_QUOTA, CALENDRIERS_PAR_BIEN } = require('../lib/marche/choix-comparables')
 const { FRAICHEUR_JOURS } = require('../lib/airroi/cout')
 const { comparablesRetenus } = require('../lib/marche/etude')
@@ -191,13 +190,51 @@ async function rendreRecherche ({ bienId, cout, nature = 'recherche' }) {
 // figurer EN MOTS ENTIERS dans l'adresse trouvee (review de f37b7da : « Pau »
 // n'est pas dans « Saint-Paul »). Sinon, aucun calcul, aucun paiement.
 const enMots = v => ` ${String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()} `
+// La PHASE 1 du marche relie (regle d) : ses saisons et son ecart semaine /
+// week-end (`marche_calendrier`, derniere capture), et les prix affiches du
+// marche jour par jour (le pacing AirROI, en cache — jamais paye d'ici).
+// Absente : null, et le repli le dira.
+const ENDPOINT_PACING = 'POST /markets/metrics/future/pacing'
+async function phase1DuBien (marche, aujourdhui) {
+  // La derniere capture CALCULEE : une recapture non calculable ne masque pas
+  // la precedente (review de 279eb85).
+  const { data, error } = await supabase.from('marche_calendrier').select('localite, capture_le, saisons, ecart_semaine_week_end')
+    .eq('pays', marche.pays).eq('region', marche.region).eq('localite', marche.localite).eq('statut', 'calcule')
+    .order('capture_le', { ascending: false }).order('calcule_le', { ascending: false }).limit(1)
+  if (error) throw new Error(`marche_calendrier : ${error.message}`)
+  const ligne = (data || [])[0]
+  if (!ligne) return null
+  const cle = cleCanonique(ENDPOINT_PACING, { market: { country: marche.pays, region: marche.region, locality: marche.localite }, currency: 'native' })
+  const c = await supabase.from('airroi_cache').select('reponse').eq('cle', cle).limit(1)
+  if (c.error) throw new Error(`airroi_cache : ${c.error.message}`)
+  let pacing = []
+  if ((c.data || [])[0]) { try { pacing = (lireJson(c.data[0].reponse) || {}).results || [] } catch (e) { pacing = [] } }
+  return phase1DuMarche({ localite: marche.localite, saisons: ligne.saisons, pacing, ecarts: ligne.ecart_semaine_week_end, aujourdhui })
+}
+
+// Rend { marche, absent } : `absent` dit POURQUOI il n'y a pas de marche
+// ('aucun' lien, ou une 'adresse' qui ne nomme pas sa commune), pour que la
+// page le dise au lieu de calculer en silence (recette de Thierry, 6 octobre
+// 2026).
 async function marcheDuBien (bienId, profil) {
   const { data, error } = await supabase.from('marche_biens').select('pays, region, localite').eq('property_id', bienId).limit(1)
   if (error) throw new Error(`marche_biens : ${error.message}`)
   const m = (data || [])[0]
-  if (!m || !String(m.localite || '').trim() || !enMots(profil.adresse_trouvee).includes(enMots(m.localite))) return null
   const nfc = v => String(v || '').normalize('NFC')
-  return { pays: nfc(m.pays), region: nfc(m.region), localite: nfc(m.localite) }
+  if (!m || !String(m.localite || '').trim()) return { marche: null, absent: 'aucun' }
+  if (!enMots(profil.adresse_trouvee).includes(enMots(m.localite))) return { marche: null, absent: 'adresse', localite: nfc(m.localite) }
+  return { marche: { pays: nfc(m.pays), region: nfc(m.region), localite: nfc(m.localite) }, absent: null }
+}
+// Ce que la page dit du marche relie : son nom, ou pourquoi il n'y en a pas.
+// ⚠ LE MESSAGE EST COURT, LE DETAIL TECHNIQUE PASSE EN INFOBULLE (recette de
+// Thierry, 25 octobre 2026). La premiere version disait la consequence et sa
+// mecanique dans la meme phrase : deux lignes d'avertissement a lire avant de
+// comprendre qu'il n'y a rien a faire d'urgent. La page pose `detail` en
+// `title` sur le paragraphe.
+const DETAIL_RELAIS = 'Sans marché relié, les saisons du marché ne peuvent pas prendre le relais quand moins de 2 de vos hôtes changent leurs prix.'
+const MARCHE_ABSENT = {
+  aucun: { message: 'Aucun marché n’est relié à ce logement : les prix viennent seulement de vos comparables.', detail: DETAIL_RELAIS },
+  adresse: l => ({ message: `Le marché relié (${l}) ne correspond pas à l’adresse du logement, il n’est pas utilisé : les prix viennent seulement de vos comparables.`, detail: DETAIL_RELAIS }),
 }
 
 // ⚠ Une cle du cache contient des guillemets et des virgules ; `.in()` de
@@ -232,16 +269,15 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
   if (!profil || !profil.strategie) return { etat: 'strategie_absente', message: 'Choisissez d’abord votre stratégie de prix.' }
   const { lignes, hoteDe } = await retenusProposes(bienId, profil)
   if (lignes.filter(l => l.retenu_par !== 'fondateur').length < 3) return { etat: 'comparables_insuffisants', message: 'Choisissez d’abord au moins 3 comparables.' }
-  // §22.11 : les niveaux viennent des comparables ; le marche de l'adresse ne
-  // sert qu'au REPLI (segment trop plat). Son absence n'empeche rien d'emblee.
+  // §22.11 et regle (d) : la forme vient des comparables qui bougent leurs prix ;
+  // le marche de l'adresse (sa phase 1) ne sert qu'au REPLI. Son absence
+  // n'empeche rien d'emblee.
   const aujourdhui = jourParis()
-  const marche = await marcheDuBien(bienId, profil)
-  let jours = []
-  if (marche) {
-    const capture = await lireDerniereCapture(supabase, marche)
-    if (capture.erreur) throw new Error(`temperature : ${capture.erreur}`)
-    jours = capture.jours.filter(j => j.jour >= aujourdhui)
-  }
+  const { marche, absent, localite } = await marcheDuBien(bienId, profil)
+  const infoMarche = marche
+    ? { relie: true, localite: marche.localite }
+    : { relie: false, ...(absent === 'adresse' ? MARCHE_ABSENT.adresse(localite) : MARCHE_ABSENT.aucun) }
+  const phase1 = marche ? await phase1DuBien(marche, aujourdhui) : null
   // ⚠ Au plus CALENDRIERS_PAR_BIEN calendriers servent au calcul (decision de
   // Thierry). §22.11 : des HOTES DIFFERENTS d'abord — jamais deux annonces du
   // meme hote tant qu'il manque des hotes independants ; dans un hote, l'annonce
@@ -315,11 +351,11 @@ async function calculerPrix ({ bienId, compte, profil, payer }) {
     jours: cache.get(String(l.listing_id)).filter(n => n && String(n.date) >= aujourdhui),
   }))
   // Rien en cache et rien paye : il faut relever.
-  if (!calendriers.length) return { etat: 'a_capturer', a_capturer: manquants.length, note: refus }
+  if (!calendriers.length) return { etat: 'a_capturer', a_capturer: manquants.length, note: refus, marche: infoMarche }
   // Avec ce qui est disponible, on calcule ; les manquants se proposent a cote
   // (review de f37b7da, C4 : le GET et le POST disent la meme chose).
-  const prix = prixDeDepart({ calendriers, marche: jours, strategie: profil.strategie, aujourdhui })
-  return { etat: 'calcule', prix, a_capturer: manquants.length,
+  const prix = prixDeDepart({ calendriers, phase1, strategie: profil.strategie, aujourdhui })
+  return { etat: 'calcule', prix, a_capturer: manquants.length, marche: infoMarche,
     note: refus || (manquants.length ? `Les prix de ${manquants.length} comparable${manquants.length > 1 ? 's' : ''} ne sont pas encore relevés.` : null) }
 }
 

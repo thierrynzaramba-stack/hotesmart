@@ -74,27 +74,27 @@ module.exports = async (req, res) => {
   if (!garde.ok) return
   try {
     const lien = await supabase.from('marche_biens').select('pays, region, localite').eq('property_id', garde.bien.id).limit(1)
-    if (absente(lien.error, 'marche_biens')) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu', motif: 'le lien entre logements et marches n existe pas encore' })
+    if (absente(lien.error, 'marche_biens')) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu', motif: 'le lien entre logements et marchés n’existe pas encore' })
     if (lien.error) throw new Error(`marche_biens : ${lien.error.message}`)
     const brutLien = (lien.data || [])[0]
     // La cle depend des octets : le marche se lit en forme NFC, comme a
     // l'ecriture (review : un « Bagnères » decompose ne trouverait rien).
     const nfc = v => String(v || '').normalize('NFC')
     const m = brutLien ? { pays: nfc(brutLien.pays), region: nfc(brutLien.region), localite: nfc(brutLien.localite) } : null
-    if (!m) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu', motif: 'aucun marche relie a ce logement' })
+    if (!m) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu' })
     // La cle que le client AirROI calcule pour les 60 mois de ce marche.
     const cle = cleCanonique('POST /markets/metrics/all', { market: { country: m.pays, region: m.region, locality: m.localite }, num_months: 60, currency: 'native' })
     const c = await supabase.from('airroi_cache').select('reponse, recupere_le').eq('cle', cle).limit(1)
-    if (absente(c.error, 'airroi_cache')) return res.status(200).json({ source: 'marche', etat: 'historique_absent', marche: m, motif: 'le cache AirROI n existe pas encore' })
+    if (absente(c.error, 'airroi_cache')) return res.status(200).json({ source: 'marche', etat: 'historique_absent', marche: m, motif: 'le cache AirROI n’existe pas encore' })
     if (c.error) throw new Error(`airroi_cache : ${c.error.message}`)
     const ligne = (c.data || [])[0]
     if (!ligne) {
       return res.status(200).json({ source: 'marche', etat: 'historique_absent', marche: m,
-        motif: 'les 60 mois de ce marche ne sont pas encore etudies (0,50 $, par un script, jamais depuis cet ecran)' })
+        motif: 'ses 60 mois d’historique ne sont pas encore relevés (0,50 $, par un script, jamais depuis cet écran)' })
     }
     let donnees
     try { donnees = lireJson(ligne.reponse) } catch (e) {
-      return res.status(200).json({ source: 'marche', etat: 'historique_absent', marche: m, motif: 'l historique en cache est illisible' })
+      return res.status(200).json({ source: 'marche', etat: 'historique_absent', marche: m, motif: 'l’historique en cache est illisible' })
     }
     return res.status(200).json({ source: 'marche', etat: 'calcule', marche: m, recupere_le: ligne.recupere_le,
       adr_occupation: adrOccupationMensuel(donnees), revpar: revparMensuel(donnees), progression: progression(donnees), calendrier: await calendrier(donnees) })

@@ -78,10 +78,10 @@ async function calendriersDuMarche (req, res) {
   const absente = (error, t) => error && new RegExp(t).test(error.message || '') && /(does not exist|schema cache)/i.test(error.message || '')
   try {
     const lien = await supabase.from('marche_biens').select('pays, region, localite').eq('property_id', garde.bien.id).limit(1)
-    if (absente(lien.error, 'marche_biens')) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu', motif: 'le lien entre logements et marches n existe pas encore' })
+    if (absente(lien.error, 'marche_biens')) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu', motif: 'le lien entre logements et marchés n’existe pas encore' })
     if (lien.error) throw new Error(`marche_biens : ${lien.error.message}`)
     const m = (lien.data || [])[0]
-    if (!m) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu', motif: 'aucun marche relie a ce logement' })
+    if (!m) return res.status(200).json({ source: 'marche', etat: 'marche_inconnu' })
     const { data, error } = await supabase.from('marche_calendrier')
       .select('pays, region, localite, capture_le, calcule_le, source, statut, motif, fenetre_debut, fenetre_fin, horizon_fin, regimes, saisons, ruptures, au_dela, pics, evenements_possibles, ecart_semaine_week_end, couverture_calendrier, limites, methode')
       .eq('pays', m.pays).eq('region', m.region).eq('localite', m.localite)
