@@ -77,16 +77,27 @@ faire de dégât. Une tentative intermédiaire — faire porter le rôle par l'a
 retirée le même jour : elle réglait la survivance du nom, mais elle laissait
 n'importe quelle session prendre le rôle en ouvrant un répertoire.
 
-⚠ **ET LE CHEF DE FILE PEUT CODER UN LOT.** La version précédente l'interdisait :
-« elle ne code aucun lot : c'est sa seule tâche, et c'est ce qui la rend
-disponible pour la file ». La disponibilité reste une bonne raison, mais elle ne
-vaut pas d'immobiliser la file quand la seule session disponible est celle qui a
-écrit le lot. Ce qui ne se négocie pas, en revanche : **une branche qu'on a
-écrite soi-même se merge avec les MÊMES contrôles qu'une branche reçue** —
-règle 3 sur la base de merge, règle 9 au blob sur la liste COMPLÈTE des
-fichiers, la suite sur l'arbre FUSIONNÉ, et le go prod qui vient de Thierry. Se
-relire soi-même est le point faible connu de ce montage : on le compense par la
-mesure, pas par la confiance.
+⚠ **ET LE CHEF DE FILE NE CODE AUCUN LOT** (décision de Thierry, 26 octobre
+2026, confirmée en fin de journée). **Un nouveau sujet de code part à une session
+de production ; le chef de file merge.** C'est sa seule tâche, et c'est ce qui le
+rend disponible pour la file.
+
+**Pourquoi la règle est revenue, après avoir été levée le même jour.** Elle avait
+été levée pour ne pas immobiliser la file quand la seule session disponible était
+celle qui avait écrit le lot — un argument de disponibilité, et il était vrai.
+Le coût s'est vu dans la journée : le chef de file a écrit cinq lots, et il s'est
+relu lui-même cinq fois. Deux des défauts les plus coûteux de la journée sont nés
+exactement là — un correctif qui a **aveuglé le filet censé le justifier**, et un
+test de parcimonie qui **passait contre le code d'avant**, donc pour une raison
+qui n'était pas la sienne. Les deux ont été trouvés par une review, pas par leur
+auteur. Se relire soi-même n'est pas une faiblesse de volonté : c'est une
+faiblesse de position, et aucune discipline ne la compense.
+
+⚠ **CE QUI NE CHANGE PAS : un lot reçu d'une autre session se merge avec TOUS les
+contrôles** — règle 3 sur la base de merge, règle 9 au blob sur la liste COMPLÈTE
+des fichiers, la suite sur l'arbre FUSIONNÉ, et le go prod qui vient de Thierry.
+Le chef de file ne re-review pas ce qu'on lui remet : il vérifie les cinq
+éléments de la règle 1, et il MESURE au lieu de croire l'annonce.
 
 1. **Une seule session merge.** Les autres lui envoient « branche X prête », avec
    les cinq choses sans lesquelles il ne peut pas décider : elle est **poussée**,
