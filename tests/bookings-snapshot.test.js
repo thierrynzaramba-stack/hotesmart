@@ -453,7 +453,89 @@ test('saveBookingSnapshots : UNE relecture pour N bookings', async () => {
   })
   assert.strictEqual(res.saved, 3)
   assert.strictEqual(stats.upserts, 3)
-  assert.strictEqual(stats.selects, 1, `attendu 1 select, obtenu ${stats.selects}`)
+  // ⚠ TROIS SELECTS, ET CHACUN SE JUSTIFIE — le compte a change le 27 octobre
+  // 2026 avec les colonnes derivees des revenus :
+  //   1. la relecture groupee des snapshots existants (ce que ce test garde) ;
+  //   2. la table `delais_versement` ;
+  //   3. l'UUID du bien derriere sa cle provider.
+  // Ce qui compte n'a PAS change : les trois sont PAR LOT, aucun par
+  // reservation. Trois bookings donnent trois selects, et trois cents aussi.
+  assert.strictEqual(stats.selects, 3, `attendu 3 selects, obtenu ${stats.selects}`)
+})
+
+test('saveBookingSnapshots : les lectures de revenus se FOURNISSENT, et retombent a 1', async () => {
+  // ⚠ LA TABLE DES DELAIS EST LA MEME POUR TOUS LES BIENS D'UN CYCLE. La relire
+  // par lot ferait quatre lectures identiques par passage a quatre logements,
+  // soit 1 152 par jour pour trois lignes qui changent une fois par an. Le cron
+  // la lit une fois et la passe ; ce test garde cette possibilite, parce qu'un
+  // appelant qui l'oublie ne verra rien — juste des requetes de plus.
+  const { client, stats } = fakeBatchSupabase({ rows: [] })
+  const res = await saveBookingSnapshots(client, {
+    userId: 'u1', propertyId: '12345', provider: 'beds24',
+    delaisVersement: { airbnb: { base: 'arrivee', jours: 1 } },
+    uuidDuBien: '11111111-2222-4333-8444-555555555555',
+    bookings: [
+      { id: 1, status: 'new' },
+      { id: 2, status: 'confirmed' },
+      { id: 3, status: 'black' }
+    ]
+  })
+  assert.strictEqual(res.saved, 3)
+  assert.strictEqual(stats.selects, 1,
+    `les deux lectures de revenus n ont pas ete evitees : ${stats.selects} selects`)
+})
+
+test("LE TEST QUI COMPTE : sans payload brut, les colonnes derivees NE SONT PAS ECRITES", async () => {
+  // ⚠ UN ENRICHISSEMENT NE DOIT JAMAIS POUVOIR APPAUVRIR. Un appelant qui mappe
+  // lui-meme sans transmettre la source n'a pas de quoi deriver : ecrire les dix
+  // colonnes a `null` avec un motif EFFACERAIT des montants justes poses au
+  // passage precedent. C'est le contrat que `raw` s'applique deja — « une cle
+  // absente de l'objet upserte laisse la colonne intacte cote Postgres ».
+  //
+  // ⚠ ET CE TEST A D'ABORD ETE FAUX, PAS LE CODE. Ma premiere version passait
+  // par `saveBookingSnapshots`, qui transmet TOUJOURS le booking comme payload
+  // (`rawEntrant = booking`) : la derivation y est donc legitime, et le test
+  // accusait un comportement juste. Le cas reel est celui d'un appelant qui
+  // fournit `snapshot` SANS `booking` — et il passe par le writer unitaire.
+  const { client, stats } = fakeBatchSupabase({ rows: [] })
+  const res = await saveBookingSnapshot(client, {
+    userId: 'u1', bookingId: '1', propertyId: '12345', provider: 'channex',
+    snapshot: { provider: 'channex', source: 'airbnb', status: 'new', arrival: '2026-11-05', departure: '2026-11-08' },
+    existing: null, existingPropertyId: null, existingRawHash: null,
+    delaisVersement: { airbnb: { base: 'arrivee', jours: 1 } },
+    uuidDuBien: '11111111-2222-4333-8444-555555555555'
+  })
+  assert.strictEqual(res.ok, true, 'le writer doit ecrire le snapshot meme sans payload')
+  const ecrite = stats.upsertedRows[stats.upsertedRows.length - 1]
+  for (const c of ['montant_net_cents', 'date_versement', 'canal', 'derive_le',
+    'property_uuid', 'statut_canonique', 'montant_est_brut', 'commission_cents',
+    'motif_non_calculable', 'derive_version']) {
+    assert.ok(!(c in ecrite),
+      `${c} est ecrite sans payload : elle ecraserait une valeur juste`)
+  }
+  // Et le snapshot, lui, est bien ecrit : on degrade l'enrichissement, pas le coeur.
+  assert.ok(ecrite.snapshot, 'le snapshot normalise n a pas ete ecrit')
+})
+
+test('LE TEST QUI COMPTE : AVEC un payload, les dix colonnes sont ecrites', async () => {
+  // La contre-epreuve du test precedent : si les colonnes ne partaient JAMAIS,
+  // il serait vert pour rien. C'est le faux vert de cette famille.
+  const { client, stats } = fakeBatchSupabase({ rows: [] })
+  await saveBookingSnapshots(client, {
+    userId: 'u1', propertyId: '12345', provider: 'channex',
+    delaisVersement: { airbnb: { base: 'arrivee', jours: 1 } },
+    uuidDuBien: '11111111-2222-4333-8444-555555555555',
+    bookings: [{
+      id: 1, status: 'new', provider: 'channex', source: 'airbnb',
+      arrival: '2026-11-05', departure: '2026-11-08',
+      amount: '400.00', meta: { amount_type: 'Payout Amount' },
+      notes: 'Listing Cancellation Host Fee: 12.00\n'
+    }]
+  })
+  const ecrite = stats.upsertedRows[stats.upsertedRows.length - 1]
+  assert.ok('derive_le' in ecrite, 'les colonnes derivees ne partent jamais : le test precedent ne mesure rien')
+  assert.strictEqual(ecrite.derive_version, 1)
+  assert.strictEqual(ecrite.property_uuid, '11111111-2222-4333-8444-555555555555')
 })
 
 test('saveBookingSnapshots : le merge non destructif est conserve', async () => {
@@ -487,8 +569,19 @@ test('saveBookingSnapshots : relecture groupee en echec -> repli unitaire, pas d
     bookings: [{ id: 1, status: 'new' }, { id: 2, status: 'new' }]
   })
   assert.strictEqual(res.saved, 2)
-  // 1 select groupe en echec + 1 relecture unitaire par booking
-  assert.strictEqual(stats.selects, 3)
+  // 1 select groupe en echec + 1 relecture unitaire par booking,
+  // + les 2 lectures du contexte de revenus, qui echouent aussi ici.
+  // ⚠ ET C'EST CE QUI COMPTE DANS CE TEST : leur echec ne change RIEN au
+  // resultat. Les 2 reservations sont sauvees, aucun snapshot n'est ecrase.
+  // Les colonnes derivees sont du confort ; faire echouer l'upsert d'une
+  // reservation pour une colonne de confort serait couper le coeur pour
+  // l'ecran — la lecon de `lib/colonne-absente.js`, appliquee en amont.
+  assert.strictEqual(stats.selects, 5)
+  // Et les colonnes ne sont PAS ecrites : sans delais, on ne derive pas.
+  for (const r of stats.upsertedRows) {
+    assert.ok(!('derive_le' in r),
+      'des colonnes derivees sont ecrites alors que les delais sont illisibles')
+  }
 })
 
 test('saveBookingSnapshots : lot vide ou cles manquantes -> aucune ecriture', async () => {
