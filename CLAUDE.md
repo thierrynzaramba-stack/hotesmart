@@ -124,6 +124,43 @@ ni `staging` ni `main`, et elles ne relaient pas un go prod.
    lots ont ajouté PAR-DESSUS ses fichiers n'existe pas — sans conflit, sans
    avertissement.
 
+   ⚠ **ET L'ABSENCE DE CONFLIT N'EST PAS UNE MESURE : GIT SE TAIT SUR LES
+   REGIONS DISJOINTES.** Il ne conflicte que sur des regions qui se
+   **chevauchent**. Deux cotes qui ecrivent a des endroits **differents** du
+   meme fichier sont fusionnes en silence, avec « Auto-merging » et aucun
+   avertissement — **meme quand le resultat est faux**. Mesure cinq fois en deux
+   jours sur `docs/kb/dettes-v1.md`, sous trois formes : **duplication** (deux
+   entrees « 84 », deux sessions documentant la meme dette a des endroits
+   differents), **deplacement** (l'entree 90 rangee entre la 83 et la 84, parce
+   que la branche partait d'un `main` dont le registre s'arretait a 83), et
+   **conflit franc** — le seul qui se signale — quand les deux cotes ajoutaient
+   en fin de table, donc au meme endroit.
+   ⚠ **Le cas « deplacement » ne produit AUCUN doublon** : un controle
+   d'unicite seul sort 0 sur un fichier faux. Il faut l'unicite **et** la
+   croissance. C'est ce que fait `scripts/verifier-numeros-registre.js` : il
+   refuse doublon, desordre et rangee perdue, nomme les lignes, donne le
+   prochain numero libre, et sort 1 — donc il s'enchaine par `&&` avant un
+   merge. Il a refuse DEUX merges vers `main` dans l'heure qui a suivi sa mise
+   en production, dont un que la veille personne n'avait vu.
+   ⚠ **UNION N'EST PAS LA REGLE, C'EST UN CAS PARTICULIER.** Sur un conflit
+   i18n, la regle est **on preserve l'INTENTION de chaque cote** : l'union ne
+   vaut que si les deux cotes AJOUTENT. Un cote qui RETIRE des cles mortes
+   serait annule en silence par une union mecanique — et
+   `scripts/i18n-check.js` ne verrait rien, puisqu'il ne compare que l'egalite
+   des trois langues : **une perte symetrique y reste verte**. La `VERSION` ne
+   se reprend jamais d'un cote : elle se LIT dans le message d'echec de
+   `tests/i18n-version.test.js` sur l'arbre FUSIONNE.
+   ⚠ **ET UN LOT QUI REPARE UN DOUBLE DE TEST PARTAGE NE SE VERIFIE PAS PAR UNE
+   SUITE VERTE** — une suite verte est exactement ce qu'un double faux produit.
+   On compare le compte de CHAQUE fichier qui l'utilise avant et apres, et on
+   cherche les tests qui **devraient rougir et ne rougissent pas**. Vecu le
+   25 octobre 2026, deux doubles, deux familles : **un double qui LEVE se
+   signale tot et mal** (celui d'isolation ignorait `or()` : le test a crie,
+   avec un diagnostic faux) ; **un double qui rend la mauvaise VALEUR ne se
+   signale jamais** (celui des avis ignorait le sens du tri — « les trois
+   derniers » rendait les trois PREMIERS, et le test restait vert). Le premier
+   se corrige quand il crie, le second ne se trouve qu'en allant le chercher.
+
 10. ⚠ **EN FIN DE JOURNÉE, TOUT TRAVAIL EN COURS EST COMMITÉ ET POUSSÉ SUR SA
     BRANCHE, MÊME EN WIP. RIEN NE DORT SUR UN DISQUE.** Consigne de Thierry du
     23 octobre 2026. Un commit de travail n'a pas à être propre : son message
@@ -722,11 +759,55 @@ lundis calcules. Eprouve a J+15, 45, 60, 75, 120, 200 et 400 : zero rouge.
 Et la contre-epreuve a horloge decalee n'est plus un outil de diagnostic, c'est
 la seule facon de savoir si un test neuf tiendra dans deux mois.
 
-⚠ **IL RESTE UN ROUGE A J+60**, hors du domaine menage :
-`tests/airroi-client.test.js` — « LE TEST QUI COMPTE (SECURITE, review de
-f40ee9e) ». Il calcule pourtant sa fenetre relativement : la cause est
-ailleurs, probablement dans une fixture sur disque qui ne suit pas. C'est le
-chantier marche, donc YieldFlow : a reprendre avec le go de Thierry.
+✅ **LE DERNIER ROUGE CALENDAIRE EST SOLDE** (24 octobre 2026, `3f6ac71`, en
+production par `c1e7cbc`). `tests/airroi-client.test.js` — « LE TEST QUI COMPTE
+(SECURITE, review de f40ee9e) » — est vert a J+1, 8, 30, 60, 90, 200 et 400.
+
+⚠ **ET LA CAUSE QUI ETAIT ECRITE ICI ETAIT FAUSSE : ce n'etait pas « une fixture
+sur disque qui ne suit pas ».** Le decalage d'horloge **ne traverse pas
+`execFileSync`** : le test semait sa cle de cache sur l'horloge decalee pendant
+que le script enfant demandait la sienne sur l'horloge reelle. Cache manque, le
+script refusait de payer, sortait en 0, et l'assertion « code 6 » tombait sur un
+script parfaitement correct. Le correctif ne propage plus rien a l'enfant : il
+lit l'horloge que l'enfant lit. **Une cause ecrite au conditionnel et jamais
+re-mesuree a envoye chercher du cote du disque pendant six jours.**
+
+⚠ **DEUX LIMITES DE `tests/outils/horloge-decalee.js`, mesurees les 23 et
+24 octobre 2026, a connaitre avant de s'en servir comme preuve.**
+1. **Un processus enfant est un TROISIEME realm.** L'outil decale l'horloge de
+   Node ET celle de la fenetre jsdom, et il CRIE quand jsdom manque — mais il
+   reste MUET sur un `execFileSync`. C'est ce silence qui coute.
+2. **Il ne decalait que des JOURS, donc une bascule de FUSEAU lui etait
+   invisible par construction** : fixture et code glissent ensemble, et
+   `JOURS=-1`, `0`, `1` rendaient les trois memes rouges. Il accepte `HEURES`
+   depuis le 24 octobre 2026, et sa trace imprime l'instant obtenu avec le jour
+   UTC et le jour Paris — sans quoi une contre-epreuve ne se rejoue pas, le meme
+   `HEURES` ne tombant pas sur la meme heure le lendemain.
+
+⚠ **ET LA VARIABLE NE SUFFIT PAS : C'EST LE PRECHARGEMENT QUI DECALE L'HORLOGE.**
+`HEURES=2 npm test` ne decale RIEN — `npm test` ne precharge pas l'outil, donc la
+variable est ignoree et le chiffre obtenu ne fait que repeter la mesure a
+l'horloge reelle. La mesure s'ecrit en entier :
+`HEURES=2 node --require ./tests/outils/horloge-decalee.js --test tests/*.test.js`.
+Vecu deux fois dans la meme journee, par la meme session, dont une sur un arbre
+dont l'outil ne connaissait pas encore `HEURES`. **Une mesure d'horloge qui ne
+cite pas son prechargement n'est pas une mesure.**
+
+⚠ **LA REGLE DU DEPOT AVAIT UNE MOITIE MANQUANTE.** Elle disait : *dates
+relatives si le test lit l'horloge, dates figees s'il injecte le temps.* Il y
+manque : **ET DANS LE MEME FUSEAU QUE LE CODE MESURE.** Vecu le 23 octobre 2026 :
+trois tests du lot (b) rougissaient en PRODUCTION entre 22 h UTC et minuit, et
+seulement la — les fixtures datant au jour UTC
+(`new Date().toISOString().slice(0, 10)`) pendant que l'ecran borne sa fenetre
+sur des jours PARIS (`jourParis`). Deux des trois etaient des « TEST QUI
+COMPTE ». Le defaut n'est pas UTC : c'est le MELANGE. Deux cotes en UTC ne
+peuvent pas diverger, deux cotes en Paris non plus.
+⚠ **Et un rouge qui ne mord que deux heures par nuit est pire qu'un rouge
+permanent** : il se repare tout seul a minuit, donc une suite lancee a 1 h du
+matin rend un vert qui ment. **Quand un defaut a une fenetre, la mesure se prend
+DANS la fenetre, et elle dit son heure.** La fenetre suit l'heure legale : 22 h
+-> minuit UTC en ete, 23 h -> minuit en hiver — verifie des deux cotes de la
+bascule du 25 octobre 2026.
 
 ## CE QUI SUIT EST L'HISTOIRE DE CETTE DETTE, gardee pour la lecon
 
