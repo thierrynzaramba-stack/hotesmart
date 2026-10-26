@@ -145,7 +145,43 @@ test("LE TEST QUI COMPTE : l'accueil n'a PLUS AUCUN appel par bien", () => {
   // iteration sur `etat.biens`. Un endpoint different appele par bien couterait
   // exactement la meme chose — ce test ne doit pas garder un NOM d'endpoint,
   // mais la FORME du 1 + N.
-  const enBoucle = code.match(/etat\.biens\s*\.map\([^)]*=>[\s\S]{0,200}?await appel\(/)
-  assert.strictEqual(enBoucle, null,
-    `un appel reseau part dans une boucle sur les biens : ${enBoucle && enBoucle[0]}`)
+  //
+  // ⚠ MA PREMIERE VERSION NE MORDAIT PAS, ET LA REVIEW L'A PROUVE PAR MUTATION.
+  // Elle cherchait `etat\.biens\s*\.map\(`, et la page ecrit
+  // `(etat.biens || []).map(b => {` — la parenthese de garde suffisait a lui
+  // echapper. Mesure : un vrai 1 + N plante dans la boucle REELLE laissait la
+  // suite a `fail 0`. Donc seuls les deux `doesNotMatch` ci-dessus mordaient,
+  // c'est-a-dire des NOMS — exactement ce que ce commentaire dit vouloir
+  // eviter.
+  //
+  // Le motif ne presume plus de la forme : il cherche `etat.biens` suivi d'un
+  // iterateur OU un `for..of` dessus, puis un appel reseau dans la portee qui
+  // suit. Les quatre formes sont couvertes, y compris celle de la page.
+  const FORMES = [
+    /etat\.biens[^\n]{0,30}\.(map|forEach|flatMap|reduce)\s*\([\s\S]{0,400}?await appel\(/,
+    /for\s*\([^)]{0,60}\bof\b[^)]{0,60}etat\.biens[\s\S]{0,400}?await appel\(/,
+    /etat\.biens[^\n]{0,30}\.(map|forEach|flatMap)\s*\([\s\S]{0,400}?fetch\s*\(/
+  ]
+  for (const f of FORMES) {
+    const m = code.match(f)
+    assert.strictEqual(m, null,
+      `un appel reseau part dans une boucle sur les biens : ${m && m[0].slice(0, 120)}`)
+  }
+
+  // ⚠ ET LE MOTIF SE PROUVE SUR DES FORMES FABRIQUEES, parce qu'un motif qui ne
+  // reconnait rien passe au vert sans rien mesurer — c'est le faux vert que je
+  // viens de payer. Quatre formes doivent etre VUES, et le code reel ne doit
+  // pas l'etre.
+  const DOIVENT_MORDRE = [
+    'etat.biens.map(b => { await appel("/api/x") })',
+    '(etat.biens || []).map(b => { await appel("/api/x") })',
+    'for (const b of etat.biens) { await appel("/api/x") }',
+    'for (const b of (etat.biens || [])) { await appel("/api/x") }'
+  ]
+  for (const faux of DOIVENT_MORDRE) {
+    assert.ok(FORMES.some(f => f.test(faux)),
+      `la garde ne reconnait pas cette forme de 1 + N : ${faux}`)
+  }
+  assert.ok(!FORMES.some(f => f.test('etat.biens.map(b => b.name).join(", ")')),
+    'la garde crie sur une boucle qui ne part pas en reseau')
 })

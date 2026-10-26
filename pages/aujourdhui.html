@@ -253,18 +253,26 @@ const monnaie = (n, devise) => I18n.money(n, devise || 'EUR')
 // `dateDuJour` ne vaut que pour les « YYYY-MM-DD » du coeur.
 const dateEnClair = (iso) => I18n.date(new Date(iso), { day: 'numeric', month: 'long' })
 
-// ▲ / ▼ / = + valeur ; jamais la couleur seule (spec §2, statuts).
-function delta (v, formatte) {
-  if (v == null) return ''
-  // Le sens suit la valeur AFFICHÉE : « ▼ 0 % » pour -0,3 % se contredirait.
-  const arrondi = Math.round(v * 100)
-  const cle = arrondi > 0 ? 'kpi.up' : arrondi < 0 ? 'kpi.down' : 'kpi.same'
-  return `<span class="delta" title="${esc(t('kpi.delta_hint'))}">${esc(t(cle, { v: formatte }))}</span>`
-}
-const deltaPct = v => delta(v, v == null ? '' : I18n.pct(Math.abs(v)))
-// ⚠ `deltaPoints` est parti avec la bande « 30 jours » : il ne servait qu'a
-// l'occupation, qui rejoint la fiche du logement. Une fonction que plus
-// personne n'appelle est du code dormant.
+// ⚠ `delta`, `deltaPct` ET `deltaPoints` SONT TOUS PARTIS, et les deux premiers
+// a l'etape 4 — constat de la review du 26 octobre 2026. `deltaPoints` avait
+// quitte la page avec la bande « 30 jours » ; `delta` et `deltaPct` sont restes
+// parce que la VARIATION du CA par bien les appelait, sur les cartes de
+// logement. Les cartes partent avec le bloc « Vos logements », donc leur dernier
+// appelant avec elles.
+//
+// ⚠ ET ILS MAINTENAIENT QUATRE CLES i18n EN VIE — `kpi.up`, `kpi.down`,
+// `kpi.same`, `kpi.delta_hint`, soit douze entrees sur trois langues, dont ce
+// code mort etait le SEUL lecteur du depot (mesure : `grep -rln` ne rend que ce
+// fichier). C'est mot pour mot le motif pour lequel j'ai retire `quand()` dix
+// lignes plus bas — « une fonction morte qui lit une cle fait croire que la cle
+// est utilisee, et la cle survit au nettoyage » — et je l'ai applique a `quand()`
+// sans regarder ses voisines.
+//
+// La variation contre la periode precedente n'est PAS perdue par omission : le
+// bloc « Revenus nets » ne la porte pas parce que la vue MOIS n'a rien a quoi se
+// comparer ; c'est la vue ANNEE (courbe N contre N-1) qui la rendra, avec son
+// propre formatage. Si elle revient ici, ces deux fonctions sont dans
+// l'historique de ce commit.
 
 // ─── 1. La date, à droite du titre ──────────────────────────────────────────
 // ⚠ CE QUI A DISPARU ICI, ET CE QUI NE DOIT PAS DISPARAITRE AVEC. La ligne
@@ -838,6 +846,18 @@ function renderRevenus () {
   if (rev.hors_mois && rev.hors_mois.sejours > 0) {
     reserves.push(t('revenue.no_date', { n: rev.hors_mois.sejours }))
   }
+  // ⚠ L'ARGENT QUI N'EST SUR AUCUNE LIGNE SE DIT, et c'est le second constat
+  // GRAVE de la review : 1 000 € d'ecart muet entre le bandeau et la somme des
+  // lignes, mesure. Un `property_id` nul, une cle laissee par un re-keying, un
+  // bien supprime — les trois entrent dans le total et sortent de l'affichage.
+  // Le bandeau reste juste (l'argent a bien ete touche) ; ce qui manquait etait
+  // la phrase qui explique l'ecart.
+  if (rev.hors_biens && rev.hors_biens.sejours > 0) {
+    reserves.push(t('revenue.hors_biens', {
+      n: rev.hors_biens.sejours,
+      montant: euros(rev.hors_biens.total_cents, devise)
+    }))
+  }
   if (rev.tronque) reserves.push(t('revenue.truncated'))
   const res = $('[data-bind="revenue-reserves"]')
   if (res) {
@@ -870,14 +890,39 @@ function renderRevenus () {
     // total, pas une valeur absolue — sinon un petit mois donnerait des barres
     // minuscules et un gros mois des barres saturees.
     const partRecue = d.total_cents > 0 ? Math.round((d.recu_cents / d.total_cents) * 100) : 0
+
+    // ⚠ CHAQUE LIGNE DIT CE QU'ELLE NE SAIT PAS, ET C'ETAIT LE DEFAUT LE PLUS
+    // COUTEUX DU LOT — constat GRAVE de la review du 26 octobre 2026. Le module
+    // SAIT qu'un montant manque (`d.refuses.montant`, `d.motifs`), et la ligne
+    // ne lisait ni l'un ni l'autre : seule la pastille « brut » existait.
+    //
+    // Mesure : un bien dont le seul sejour a un Host Fee illisible affichait
+    // « 0,00 € » — un FAIT, au niveau du bien, sous un total juste. Et le faux
+    // zero etait PIRE que l'absence : un bien qui n'a vraiment rien touche n'a
+    // pas de cle, donc affiche « aucun versement ce mois-ci » SANS chiffre.
+    // L'ecran avait deux rendus, et c'est le FAUX qui portait le nombre.
+    const refuses = (d.refuses && d.refuses.montant) || 0
     const marques = []
     if (d.bruts > 0) marques.push(t('revenue.gross'))
+    if (refuses > 0) marques.push(t('revenue.no_amount_short', { n: refuses }))
+
+    // ⚠ ET LE COMPTE DES SEJOURS PORTE SUR CEUX QUI SONT COMPTES, pas sur tous.
+    // « 2 sejours — 300,00 € » quand le total ne couvre qu'un sejour sur deux
+    // est incoherent EN SOI : les deux nombres de la meme ligne se
+    // contredisent, et rien ne dit lequel croire.
+    const comptes = Math.max(0, d.sejours - refuses)
+    const montant = (d.total_cents === 0 && refuses > 0)
+      // Zero euro ET un montant non calculable : on ne sait pas, on le dit.
+      // Afficher « 0,00 € » ici affirmerait que ce logement n'a rien rapporte.
+      ? `<span class="caption muted">${esc(t('revenue.unavailable'))}</span>`
+      : `<strong class="num small">${esc(euros(d.total_cents, devise))}</strong>`
+
     return `<div class="row" style="justify-content: space-between; gap: 12px; align-items: baseline">
       ${nom}
-      <span class="caption muted">${esc(t('revenue.stays', { n: d.sejours }))}</span>
+      <span class="caption muted">${esc(t('revenue.stays', { n: comptes }))}</span>
       <span class="revenue-bar" style="--part: ${part}%; --recu: ${partRecue}%" aria-hidden="true"></span>
       ${marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''}
-      <strong class="num small">${esc(euros(d.total_cents, devise))}</strong>
+      ${montant}
     </div>`
   }).join('')
   I18n.apply($('[data-list="revenue-rows"]'))

@@ -257,3 +257,34 @@ test('aucun appel ne leve, quelle que soit la forme du payload', () => {
     assert.ok('valeur' in out && 'net' in out && 'commission' in out && 'motif' in out)
   }
 })
+
+test("LE TEST QUI COMPTE : une commission qui n'est ni un nombre ni une chaine est REFUSEE", () => {
+  // ⚠ `Number(true)` VAUT 1, ET CE MODULE L'ACCEPTAIT — constat de la review du
+  // 26 octobre 2026, et un trou que ma contre-epreuve par mutation a confirme :
+  // retirer la garde laissait la suite au VERT, parce qu'aucun test ne passait
+  // de commission piegeuse.
+  //
+  // Mesure, sur un `price: 200` Beds24, AVANT le correctif :
+  //   commission true    -> net 199, com 1,  etiquete `net: true`
+  //   commission ["30"]  -> net 170, com 30, etiquete `net: true`
+  //   commission {}      -> net 170 si l'objet porte un `valueOf`
+  // Un net qui n'est pas le net, et AUCUN drapeau pour le dire.
+  //
+  // Le module frere `lib/revenus/versement.js` ferme exactement ce trou sur dix
+  // lignes de commentaire (« un booleen devenait un jour ») : les deux modules
+  // du meme lot ne se tenaient pas au meme standard.
+  const PIEGES = [true, false, ['30'], [30], [], {}, { valueOf: () => 30 }, () => 30, Symbol, new Date()]
+  for (const c of PIEGES) {
+    const r = beds24(200, c)
+    assert.equal(r.net, false, `commission ${String(c)} est acceptee comme un net`)
+    assert.equal(r.commission, null, `commission ${String(c)} donne un montant de commission`)
+    assert.equal(r.valeur, 200, 'le prix voyageur a ete ampute par une commission inventee')
+    assert.equal(r.motif, MOTIFS.commission_inconnue)
+  }
+  // Et les formes LEGITIMES passent toujours : un nombre, une chaine numerique.
+  assert.equal(beds24(200, 30).valeur, 170)
+  assert.equal(beds24(200, '30').valeur, 170)
+  assert.equal(beds24(200, '30.50').valeur, 169.5)
+  // Une chaine a virgule n'est pas un nombre : on refuse plutot que de deviner.
+  assert.equal(beds24(200, '30,50').net, false)
+})

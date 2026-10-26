@@ -60,10 +60,6 @@
   "done.cleanings": "{n, plural, one {limpieza asignada} other {limpiezas asignadas}}",
   "done.prices": "{n, plural, one {precio fijado por YieldFlow} other {precios fijados por YieldFlow}}",
   "done.overbooking": "{n, plural, one {sobreventa detectada} other {sobreventas detectadas}}",
-  "kpi.up": "▲ {v}",
-  "kpi.down": "▼ {v}",
-  "kpi.same": "= {v}",
-  "kpi.delta_hint": "En comparación con los 30 días anteriores",
   "reviews.title": "Últimas opiniones",
   "reviews.all": "Todas las opiniones",
   "reviews.score": "{n} / 5",
@@ -770,5 +766,7 @@
   "revenue.no_date": "{n} estancia(s) sin fecha de pago, todos los meses juntos",
   "revenue.truncated": "lectura incompleta: el total está subestimado",
   "revenue.unavailable": "no calculable",
-  "revenue.note": "Importes calculados según los plazos de pago de las plataformas, no confirmados por el banco."
+  "revenue.note": "Importes calculados según los plazos de pago de las plataformas, no confirmados por el banco.",
+  "revenue.no_amount_short": "{n} sin importe",
+  "revenue.hors_biens": "{n} estancia(s) sin ninguno de sus alojamientos: {montant} en el total, en ninguna línea"
 }

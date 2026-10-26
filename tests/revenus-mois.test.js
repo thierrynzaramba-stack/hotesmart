@@ -288,11 +288,29 @@ test("LE TEST QUI COMPTE : la fenetre DECLARE qu elle ne suffit pas pour la base
   // un defaut.
   const avecResa = fenetreDeLecture('2026-11', DELAIS)
   assert.equal(avecResa.bornable, false)
-  assert.match(String(avecResa.motif), /RESERVATION/)
+  // Le motif NOMME les bases fautives, pour qu'on sache laquelle retirer.
+  assert.match(String(avecResa.motif), /depart ou reservation|reservation ou depart/)
 
-  const sansResa = fenetreDeLecture('2026-11', {
+  // ⚠ ET `depart` NE BORNE PAS DAVANTAGE — correction d'un constat de la review.
+  // Ma premiere version ne refusait que `reservation`, en margeant de 31 jours
+  // pour couvrir le depart. Mesure : un sejour Booking de 45 nuits (arrivee le
+  // 20 septembre, depart le 4 novembre) se verse le 5 novembre, compte en
+  // novembre, et son `arrival` tombe HORS de la fenetre — 4 500 € hors de toute
+  // requete et de tout compteur. Aucune marge ne ferme ce trou : rien ne borne
+  // la duree d'un sejour.
+  const surDepart = fenetreDeLecture('2026-11', {
     airbnb: { base: 'arrivee', jours: 1 },
     booking: { base: 'depart', jours: 1 }
+  })
+  assert.equal(surDepart.bornable, false,
+    'une base `depart` est declaree bornable : un long sejour sortirait de la fenetre')
+  assert.match(String(surDepart.motif), /depart/)
+
+  // Bornable seulement quand TOUS les canaux se versent sur l'ARRIVEE, qui est
+  // la colonne qu'on borne : le decalage est alors le delai lui-meme.
+  const sansResa = fenetreDeLecture('2026-11', {
+    airbnb: { base: 'arrivee', jours: 1 },
+    autre: { base: 'arrivee', jours: 5 }
   })
   assert.equal(sansResa.bornable, true)
   assert.equal(sansResa.motif, null)
@@ -328,4 +346,95 @@ test('la fenetre tient sur les mois courts et les bascules d annee', () => {
   for (const x of ['pas un mois', '2026-13', '2026', '', null, undefined, '2026-1']) {
     assert.equal(fenetreDeLecture(x, DELAIS), null, `${String(x)} rend une fenetre`)
   }
+})
+
+test("LE TEST QUI COMPTE : l'argent d'un bien INCONNU est compte a part, jamais perdu", () => {
+  // ⚠ CONSTAT GRAVE DE LA REVIEW DU 26 OCTOBRE 2026, mesure : 1 000 € d'ecart
+  // MUET entre le bandeau et la somme des lignes affichees. `par_bien` est
+  // groupe par `bookings_snapshot.property_id` ; l'ecran ne peint que les cles
+  // qui correspondent a un `provider_property_id` de la liste des biens. Une
+  // cle ORPHELINE entrait dans `total` et sortait de l'affichage SANS AUCUNE
+  // RESERVE — alors que les montants et les dates non calculables ont chacun
+  // leur compteur.
+  //
+  // Trois sources, toutes atteignables : `property_id` est NULLABLE dans le
+  // schema, un re-keying ou une bascule de provider laisse l'historique sur
+  // l'ancienne cle (cause racine deja au registre), et un bien supprime laisse
+  // ses reservations.
+  const connu = airbnb('A', '209413', '2026-11-05', '2026-11-08', '500.00', '15.00')
+  const nul = airbnb('B', null, '2026-11-06', '2026-11-09', '500.00', '15.00')
+  const disparu = airbnb('C', 'CLE-DISPARUE', '2026-11-07', '2026-11-10', '500.00', '15.00')
+
+  const r = revenusDuMois([connu, nul, disparu], DELAIS, '2026-11', AUJOURDHUI, ['209413'])
+  assert.equal(r.total.total_cents, 150000, 'le total doit porter TOUT l argent touche')
+  assert.equal(r.hors_biens.sejours, 2, 'les sejours orphelins ne sont pas comptes')
+  assert.equal(r.hors_biens.total_cents, 100000,
+    'le montant hors biens connus n est pas chiffre : l ecart resterait muet')
+  // Et l'invariant : total = ce qui est affichable + ce qui est hors biens.
+  const affichable = r.par_bien['209413'].total_cents
+  assert.equal(affichable + r.hors_biens.total_cents, r.total.total_cents,
+    'un euro n est ni sur une ligne ni dans le compteur hors biens')
+})
+
+test("LE TEST QUI COMPTE : `refsConnues` a `null` veut dire « je ne sais pas », pas « aucune »", () => {
+  // ⚠ UN APPELANT QUI NE PASSE PAS LA LISTE NE DOIT PAS VOIR TOUS SES REVENUS
+  // DECLARES ORPHELINS. Le repli inverse — tout compter hors biens — ferait
+  // afficher « 3 séjours rattachés à aucun de vos logements » sur un compte
+  // parfaitement sain, et l'hote appellerait.
+  const lignes = [airbnb('A', '209413', '2026-11-05', '2026-11-08', '500.00', '15.00')]
+  for (const refs of [null, undefined, 'pas un tableau', 42]) {
+    const r = revenusDuMois(lignes, DELAIS, '2026-11', AUJOURDHUI, refs)
+    assert.equal(r.hors_biens.sejours, 0, `refs=${String(refs)} declare des orphelins a tort`)
+    assert.equal(r.hors_biens.total_cents, 0)
+  }
+  // Et une liste VIDE est une information : aucun bien connu, donc tout est
+  // orphelin. C'est different de `null`.
+  const vide = revenusDuMois(lignes, DELAIS, '2026-11', AUJOURDHUI, [])
+  assert.equal(vide.hors_biens.sejours, 1, 'une liste vide de biens connus ne compte rien hors biens')
+})
+
+test("LE TEST QUI COMPTE : un `aujourdHui` qui n'est pas un jour civil est REFUSE", () => {
+  // ⚠ LA SOMME SE PERDAIT DES DEUX COTES (constat de la review). `estRecu` rend
+  // `null` sur une date illisible, donc ni `recu_cents` ni `a_venir_cents`
+  // n'etaient alimentes : l'ecran affichait « 229,88 € » en bandeau et
+  // « Reçu 0,00 € · À venir 0,00 € ». Et mon commentaire jurait que la branche
+  // `recu === null` existait « pour que la somme ne puisse pas se perdre ».
+  //
+  // Inerte depuis l'endpoint (`jourParis(0)` est toujours valide), mais la vue
+  // ANNEE annoncee au reste du lot est exactement l'appelant futur que ce
+  // commentaire pretendait couvrir.
+  const lignes = [airbnb('A', 'P1', '2026-11-05', '2026-11-08', '229.88', '6.00')]
+  for (const mauvais of [undefined, null, '', '15/11/2026', '2026-11', '2026-13-01', '2026-11-32', 42, {}]) {
+    assert.equal(revenusDuMois(lignes, DELAIS, '2026-11', mauvais), null,
+      `un aujourdHui ${JSON.stringify(mauvais)} rend un resultat au lieu de refuser`)
+  }
+  // Et avec un jour valide, l'invariant tient.
+  const r = revenusDuMois(lignes, DELAIS, '2026-11', AUJOURDHUI)
+  assert.equal(r.recu_cents, undefined)
+  assert.equal(r.total.recu_cents + r.total.a_venir_cents, r.total.total_cents,
+    'un euro qui n est ni recu ni a venir est un euro perdu')
+})
+
+test("LE TEST QUI COMPTE : un LONG sejour ne sort pas de la fenetre, meme bornee", () => {
+  // ⚠ LE CAS QUE LA REVIEW A FABRIQUE, ET QUI COUTAIT 4 500 €. Un sejour
+  // Booking de 45 nuits : arrivee le 20 septembre, depart le 4 novembre, verse
+  // le 5 novembre. Il compte en novembre — et si la fenetre etait bornee sur
+  // `arrival` avec 31 jours de marge, la requete ne l'aurait JAMAIS lu.
+  const long = {
+    booking_id: 'L', property_id: 'P1',
+    snapshot: { provider: 'channex', source: 'bookingcom', status: 'new', arrival: '2026-09-20', departure: '2026-11-04' },
+    raw: { rooms: [{ meta: { price_details: { guest_view: { total: { amount: 450000, decimal_places: 2 } } } } }], inserted_at: '2026-08-01T10:00:00Z' }
+  }
+  const r = revenusDuMois([long], DELAIS, '2026-11', AUJOURDHUI)
+  assert.equal(r.total.sejours, 1, 'le sejour long ne compte pas au mois de son versement')
+  assert.equal(r.total.total_cents, 450000)
+
+  // ET LA GARDE : la fenetre refuse de se declarer bornable des qu'un canal se
+  // verse sur le depart, donc l'appelant lit sans borne de date et le sejour
+  // arrive jusqu'ici. C'est cette ligne qui empeche la perte.
+  const f = fenetreDeLecture('2026-11', DELAIS)
+  assert.equal(f.bornable, false)
+  // Contre-epreuve : si elle se declarait bornable, l'arrivee serait exclue.
+  assert.ok(long.snapshot.arrival < f.debut,
+    'ce sejour ne sort plus de la fenetre : en choisir un plus long pour que ce test mesure')
 })

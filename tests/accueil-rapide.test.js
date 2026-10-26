@@ -1218,3 +1218,217 @@ test('le bloc rend les cartes, la moyenne et le compte quand tout va bien', asyn
   assert.match(liste, /La bulle/, 'le bien est retrouve par sa cle PROVIDER')
   assert.match(p.html('[data-bind="reviews-head"]'), /reviews\.score/)
 })
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Le bloc « Revenus nets » TEL QUE L'ECRAN LE REND — constats de la review
+// de l'etape 4 (26 octobre 2026)
+//
+// ⚠ AUCUN TEST N'EXERCAIT CE RENDU AVEC UN `par_bien` NON VIDE, et la review
+// l'a prouve par la mutation la plus simple : remplacer
+// `parBien[String(b.provider_property_id)]` par `parBien[String(b.id)]` — la
+// jointure naive UUID contre cle TEXTE, c'est-a-dire la REGLE DURE n° 3 du
+// depot — survivait a la suite ENTIERE, 6337 tests. Toutes les lignes
+// auraient affiche « aucun versement ce mois-ci » sous un bandeau juste : un
+// ecran qui a l'air complet et ne montre rien.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const REV_BIENS = [
+  { id: 'uuid-1', provider_property_id: '209413', name: 'La bulle', currency: 'EUR' },
+  { id: 'uuid-2', provider_property_id: '307820', name: 'Coeur de vie 23', currency: 'EUR' }
+]
+const parBien = (o) => ({
+  sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0,
+  refuses: { montant: 0, date: 0 }, motifs: {}, ...o
+})
+const bancRevenus = (revenus, biens = REV_BIENS) => bancDeRendu({
+  biens, ageCache: null, ecran: { biens, revenus, droits: { reservations: true } }
+})
+
+test("LE TEST QUI COMPTE : chaque ligne est jointe par la CLE PROVIDER, jamais par l'UUID", () => {
+  // La regle dure n° 3 : `properties.id` est un UUID, `property_id` des tables
+  // enfant est du TEXTE (la cle provider). `revenusDuMois` groupe par la
+  // seconde ; joindre par la premiere ne rend AUCUNE correspondance.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 209413: parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }) },
+    total: parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  assert.match(lignes, /La bulle/, 'le bien n est pas rendu')
+  assert.ok(!lignes.includes('revenue.none') || !/La bulle[\s\S]{0,200}revenue\.none/.test(lignes),
+    'le bien joint par cle provider affiche « aucun versement » : la jointure est fausse')
+  // Et le second bien, qui n'a pas de ligne dans `par_bien`, dit « aucun
+  // versement » — un FAIT, puisqu'il a bien ete lu.
+  assert.match(lignes, /Coeur de vie 23[\s\S]{0,200}revenue\.none/,
+    'un bien sans versement ce mois-ci ne dit pas « aucun versement »')
+})
+
+test("LE TEST QUI COMPTE : une ligne dont le MONTANT manque ne dit JAMAIS 0,00 €", () => {
+  // ⚠ CONSTAT GRAVE DE LA REVIEW, MESURE. Le module SAIT qu'un montant manque
+  // (`refuses.montant`), et la ligne ne lisait ni ce compteur ni les motifs :
+  // elle affichait « 0,00 € », un FAIT, au niveau du bien, sous un total juste.
+  // Et le faux zero etait PIRE que l'absence : un bien qui n'a vraiment rien
+  // touche n'a pas de cle, donc dit « aucun versement » SANS chiffre. L'ecran
+  // avait deux rendus, et c'est le FAUX qui portait le nombre.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      209413: parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } })
+    },
+    total: parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  assert.ok(!/0[.,]00/.test(lignes), `la ligne affiche un zero : ${lignes}`)
+  assert.match(lignes, /revenue\.unavailable/, 'la ligne ne dit pas que le montant est non calculable')
+  assert.match(lignes, /revenue\.no_amount_short/, 'la ligne ne porte pas sa marque')
+})
+
+test("LE TEST QUI COMPTE : le compte de sejours d'une ligne ne compte pas les refuses", () => {
+  // « 2 sejours — 300,00 € » quand le total ne couvre qu'un sejour sur deux est
+  // incoherent EN SOI : les deux nombres de la meme ligne se contredisent, et
+  // rien ne dit lequel croire.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      209413: parBien({ sejours: 2, total_cents: 30000, recu_cents: 30000, refuses: { montant: 1, date: 0 } })
+    },
+    total: parBien({ sejours: 2, total_cents: 30000, recu_cents: 30000, refuses: { montant: 1, date: 0 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  // ⚠ LE BANC NE MONTRE NI LES NOMBRES NI LES MONTANTS : son double de `t` rend
+  // la CLE (`revenue.stays` au lieu de « 1 séjours »), et son double de
+  // `I18n.money` rend une chaine vide. On juge donc ce qu'il peut dire, et on
+  // verifie le NOMBRE a la source, juste apres.
+  assert.match(lignes, /revenue\.no_amount_short/, 'le refus n est pas marque sur la ligne')
+  // Un montant calculable prend la branche `<strong>`, pas la branche
+  // « non calculable » — c'est la distinction que la ligne doit faire.
+  assert.match(lignes, /<strong class="num small">/,
+    'un montant calculable est rendu comme non calculable')
+  assert.ok(!lignes.includes('revenue.unavailable'),
+    'une ligne qui porte 300 € se dit non calculable')
+
+  // ⚠ ET LE NOMBRE PASSE A `revenue.stays` SE VERIFIE A LA SOURCE, parce que
+  // c'est tout l'objet de ce test. La page calcule
+  // `Math.max(0, d.sejours - refuses)` : 2 sejours dont 1 refuse = 1.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  assert.match(html, /const comptes = Math\.max\(0, d\.sejours - refuses\)/,
+    'le compte des sejours ne retire plus les refuses')
+  assert.match(html, /t\('revenue\.stays', \{ n: comptes \}\)/,
+    '`revenue.stays` ne recoit plus le compte des sejours COMPTES')
+})
+
+test("LE TEST QUI COMPTE : l'argent rattache a AUCUN bien connu se DIT", () => {
+  // ⚠ SECOND CONSTAT GRAVE DE LA REVIEW : 1 000 € d'ecart muet entre le bandeau
+  // et la somme des lignes. `par_bien` est groupe par `property_id` de
+  // `bookings_snapshot` ; l'ecran ne peint que les cles qui correspondent a un
+  // bien. Une cle ORPHELINE — `property_id` nul, re-keying, bien supprime —
+  // entrait dans le total et sortait de l'affichage sans aucune reserve.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      209413: parBien({ sejours: 1, total_cents: 50000, recu_cents: 50000 }),
+      '': parBien({ sejours: 1, total_cents: 50000, recu_cents: 50000 }),
+      'CLE-DISPARUE': parBien({ sejours: 1, total_cents: 50000, recu_cents: 50000 })
+    },
+    total: parBien({ sejours: 3, total_cents: 150000, recu_cents: 150000 }),
+    hors_mois: parBien({}),
+    hors_biens: parBien({ sejours: 2, total_cents: 100000, recu_cents: 100000 })
+  })
+  p.interne.renderRevenus()
+  const res = p.cache('[data-bind="revenue-reserves"]')
+  assert.strictEqual(res.hidden, false, 'la reserve est masquee alors que 1 000 € ne sont sur aucune ligne')
+  assert.match(res.textContent, /revenue\.hors_biens/,
+    'rien ne dit que de l argent du total n est sur aucune ligne')
+})
+
+test("LE TEST QUI COMPTE : les trois reserves s'affichent, et chacune dit sa cause", () => {
+  // Elles ne se melangent pas : un montant manquant se repare dans le payload
+  // du provider, une date manquante dans la table des delais, un brut attend
+  // que la plateforme transmette sa commission.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 209413: parBien({ sejours: 3, total_cents: 90000, recu_cents: 90000, bruts: 1, refuses: { montant: 1, date: 0 } }) },
+    total: parBien({ sejours: 3, total_cents: 90000, recu_cents: 90000, bruts: 1, refuses: { montant: 1, date: 0 } }),
+    hors_mois: parBien({ sejours: 2, refuses: { montant: 0, date: 2 }, motifs: { canal_inconnu: 2 } }),
+    hors_biens: parBien({}),
+    tronque: true
+  })
+  p.interne.renderRevenus()
+  const res = p.cache('[data-bind="revenue-reserves"]')
+  assert.strictEqual(res.hidden, false)
+  for (const cle of ['revenue.gross_count', 'revenue.no_amount', 'revenue.no_date', 'revenue.truncated']) {
+    assert.ok(res.textContent.includes(cle), `la reserve ${cle} n est pas dite : ${res.textContent}`)
+  }
+})
+
+test("LE TEST QUI COMPTE : sans le droit `reservations`, le bloc n'est pas dans l'ecran", () => {
+  // ⚠ ET LE MASQUAGE SE DOUBLE D'UNE GARDE SERVEUR, qui est dans l'endpoint —
+  // regle absolue du depot : le masquage tombe sur une feuille de style absente.
+  // Le test de la garde serveur est juste en dessous.
+  const p = bancDeRendu({
+    biens: REV_BIENS, ageCache: null,
+    ecran: { biens: REV_BIENS, revenus: null, droits: { reservations: false } }
+  })
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-section"]').hidden, true,
+    'le bloc revenus s affiche sans le droit `reservations`')
+})
+
+test("LE TEST QUI COMPTE : la garde SERVEUR du droit `reservations` existe, et precede la lecture", () => {
+  // ⚠ LA REVIEW A MONTRE QU'AUCUN TEST NE LA TENAIT : la retirer laissait la
+  // suite au vert. Or le payload part dans le `localStorage` du membre pour
+  // 12 h, et le masquage UI ne protege rien.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'ecran', 'aujourdhui.js'), 'utf8')
+  const bloc = (src.match(/const lireRevenus = async \(\) => \{[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'lireRevenus a change de forme')
+  assert.match(bloc, /if \(!droits\.reservations\) return null/,
+    'la garde serveur du droit `reservations` a disparu de lireRevenus')
+  const iGarde = bloc.indexOf('if (!droits.reservations)')
+  const iLecture = bloc.indexOf('.from(')
+  assert.ok(iGarde > -1 && iLecture > -1 && iGarde < iLecture,
+    'une lecture part avant la garde du droit')
+  // Et la troncature se dit.
+  assert.match(bloc, /if \(tronque\) tronquees\.push\('revenus'\)/,
+    'une lecture tronquee ne serait plus signalee : le total serait sous-estime en silence')
+})
+
+test("LE TEST QUI COMPTE : l'endpoint compare les biens par leur CLE PROVIDER, pas par leur UUID", () => {
+  // ⚠ LA REGLE DURE N° 3 DU DEPOT, DU COTE SERVEUR, ET UN TROU QUE MA
+  // CONTRE-EPREUVE A TROUVE : passer `b.id` (UUID) au lieu de
+  // `b.provider_property_id` (TEXTE) laissait la suite au VERT.
+  //
+  // La consequence serait pire que le defaut d'origine : `par_bien` est groupe
+  // par la cle provider, donc AUCUNE cle ne correspondrait, donc TOUT serait
+  // compte hors biens — l'ecran dirait « N séjours rattachés à aucun de vos
+  // logements : <tout le total> » sur un compte parfaitement sain, et l'hote
+  // appellerait.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'ecran', 'aujourdhui.js'), 'utf8')
+  const bloc = (src.match(/const lireRevenus = async \(\) => \{[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'lireRevenus a change de forme')
+  assert.match(bloc, /provider_property_id/,
+    'les refs comparees ne viennent plus de la cle provider')
+  assert.ok(!/lus\.map\(b => b && b\.id\)/.test(bloc),
+    'les refs comparees sont des UUID : tout serait declare hors biens')
+
+  // ⚠ ET L'INVARIANT SE VERIFIE PAR LE MODULE, pas seulement par la forme : une
+  // comparaison du mauvais cote rend TOUT orphelin, et c'est mesurable.
+  const M = require('../lib/revenus/mois')
+  const ligne = {
+    booking_id: 'A', property_id: '209413',
+    snapshot: { provider: 'channex', source: 'offline', status: 'new', arrival: '2026-11-05', departure: '2026-11-08' },
+    raw: { amount: '500.00', inserted_at: '2026-11-01T10:00:00Z' }
+  }
+  const D = { direct: { base: 'reservation', jours: 3 } }
+  const justes = M.revenusDuMois([ligne], D, '2026-11', '2026-11-15', ['209413'])
+  assert.equal(justes.hors_biens.sejours, 0, 'une cle provider juste est declaree orpheline')
+  const faux = M.revenusDuMois([ligne], D, '2026-11', '2026-11-15', ['uuid-1'])
+  assert.equal(faux.hors_biens.sejours, 1,
+    'comparer des UUID a des cles provider ne declare rien orphelin : le compteur ne mesure rien')
+  assert.equal(faux.hors_biens.total_cents, 50000)
+})

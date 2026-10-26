@@ -60,10 +60,6 @@
   "done.cleanings": "{n, plural, one {cleaning assigned} other {cleanings assigned}}",
   "done.prices": "{n, plural, one {price set by YieldFlow} other {prices set by YieldFlow}}",
   "done.overbooking": "{n, plural, one {overbooking detected} other {overbookings detected}}",
-  "kpi.up": "▲ {v}",
-  "kpi.down": "▼ {v}",
-  "kpi.same": "= {v}",
-  "kpi.delta_hint": "Compared with the previous 30 days",
   "reviews.title": "Latest reviews",
   "reviews.all": "All reviews",
   "reviews.score": "{n} / 5",
@@ -770,5 +766,7 @@
   "revenue.no_date": "{n} stay(s) with no payout date, across all months",
   "revenue.truncated": "incomplete read: the total is understated",
   "revenue.unavailable": "not computable",
-  "revenue.note": "Amounts computed from platform payout delays, not confirmed by your bank."
+  "revenue.note": "Amounts computed from platform payout delays, not confirmed by your bank.",
+  "revenue.no_amount_short": "{n} with no amount",
+  "revenue.hors_biens": "{n} stay(s) tied to none of your properties: {montant} in the total, on no line"
 }

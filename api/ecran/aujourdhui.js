@@ -484,9 +484,26 @@ module.exports = async (req, res) => {
   // La regle d'architecture de CLAUDE.md veut un resume calcule par le cron pour
   // toute donnee non urgente, et des revenus mensuels en sont. La spec du lot
   // l'affecte au LOT (c), qui attend une decision de Thierry : aucune table de
-  // resume n'existe, et `tests/ecran-ne-calcule-pas.test.js` non plus. Le cout
-  // ajoute est borne et mesure — DEUX requetes (les delais, puis les sejours),
-  // pas les 72 de `/api/yield`.
+  // resume n'existe, et `tests/ecran-ne-calcule-pas.test.js` non plus.
+  //
+  // ⚠ ET LE COUT AJOUTE SE DIT DANS L'UNITE QUE LE DEPOT MESURE — j'avais ecrit
+  // « DEUX requetes, pas les 72 de /api/yield », et la review a montre que ce
+  // chiffre compare deux choses differentes :
+  //   · les 586 Ko retires sont du poids NAVIGATEUR, apres le premier
+  //     affichage (les appels `/api/yield` partaient une fois la page peinte) ;
+  //   · ce qu'on ajoute est un transfert Supabase -> fonction, DANS le
+  //     `Promise.all` du seul appel que l'ecran attend, donc sur le chemin
+  //     critique du premier rendu.
+  //   Mesure du depot pour cette lecture exacte (docs/kb/performance.md
+  //   l 479-480) : avec `raw`, 3,8 Mo et 569-961 ms ; sans `raw`, 0,6 Mo et
+  //   260-309 ms.
+  //   · et ce sont TROIS appels PostgREST, pas deux : `bookings_snapshot` porte
+  //     1 436 lignes (docs/kb/reservation-directe.md l 255), donc la pagination
+  //     en fait deux, plus celui des delais.
+  //
+  // Le bilan du lot reste largement positif — le cout par bien disparait — mais
+  // le levier suivant est nomme : ne selectionner de `raw` que les champs
+  // utiles (dette 61) profite maintenant a l'accueil lui-meme.
   const lireRevenus = async () => {
     if (!droits.reservations) return null
     if (perimetreVide) return null
@@ -544,7 +561,23 @@ module.exports = async (req, res) => {
     // chiffre plutot qu'en afficher un faux.
     if (tronque) tronquees.push('revenus')
 
-    const out = revenusDuMois(lignes, delais, moisDemande, jour)
+    // ⚠ LES REFS CONNUES SONT PASSEES AU MODULE, pour qu'il puisse compter
+    // l'argent qui n'atterrira sur AUCUNE ligne de l'ecran (constat GRAVE de la
+    // review du 26 octobre 2026, mesure : 1 000 € d'ecart muet entre le bandeau
+    // et la somme des lignes). Un `property_id` nul, une cle laissee par un
+    // re-keying, un bien supprime : les trois entrent dans le total et sortent
+    // de l'affichage. L'endpoint est le seul endroit qui connaisse les DEUX
+    // cotes.
+    //
+    // ⚠ EN CLE TEXTE, PAS EN UUID. `bookings_snapshot.property_id` porte la cle
+    // PROVIDER ; `biens[].id` est un UUID. C'est la regle dure du depot, et la
+    // comparer du mauvais cote declarerait TOUS les revenus orphelins.
+    const lus = await pBiens
+    const refsDesBiens = Array.isArray(lus)
+      ? lus.map(b => b && b.provider_property_id).filter(x => x != null).map(String)
+      : null
+    const out = revenusDuMois(lignes, delais, moisDemande, jour, refsDesBiens)
+    if (!out) { indisponibles.push('revenus'); return null }
     return {
       ...out,
       // Ce que l'ecran a besoin de savoir pour etre honnete sur ce qu'il montre.
@@ -606,9 +639,24 @@ module.exports = async (req, res) => {
   }
 
   const tDebutLectures = Date.now()
+  // ⚠ LA PROMESSE DES BIENS EST CAPTUREE, PAS ATTENDUE, et c'est ce qui permet
+  // a `lireRevenus` d'en dependre SANS serialiser les deux lectures. Il a
+  // besoin des cles provider pour compter l'argent qui n'atterrira sur aucune
+  // ligne — mais seulement A LA FIN, pour la comparaison : les deux requetes
+  // qui coutent (les delais, puis les sejours) ne dependent pas des biens et
+  // partent en parallele.
+  //
+  // ⚠ ET C'EST UN DEFAUT QUE J'AI INTRODUIT PUIS RATTRAPE DANS LA MEME HEURE :
+  // ma premiere version lisait la variable `biens` depuis la closure, alors
+  // qu'elle n'est affectee qu'APRES le `Promise.all` — elle valait donc
+  // `undefined` a l'execution, `refsDesBiens` tombait a `null`, et le compteur
+  // `hors_biens` restait muet. Le correctif d'un constat grave aurait ete
+  // inerte, et aucun test ne l'aurait dit : `null` veut dire « je ne sais pas »,
+  // donc le module ne compte rien et ne se plaint pas.
+  const pBiens = sur('biens', lireBiens, null)
   const [biens, taches, alarmes, arrivees, notes, derniers, revenus, conversations, nMenages, nPrix, nSurresa, nIa] =
     await Promise.all([
-      sur('biens', lireBiens, null),
+      pBiens,
       sur('taches', lireTaches, null),
       sur('alarmes', lireAlarmes, null),
       sur('arrivees', lireArrivees, []),
