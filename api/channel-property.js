@@ -745,32 +745,151 @@ module.exports = async function handler(req, res) {
 
     const providerId = prop.provider_property_id
 
-    // GARDE-FOU : refuser la suppression d'un bien channex ENCORE relie a une annonce OTA
-    // (sinon on casserait un canal actif). L'hote doit "Deconnecter" d'abord (assistant).
-    if ((prop.provider === 'channex' || prop.provider === 'channel') && providerId && prop.provider_rate_plan_id) {
-      const list = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(providerId)}`)
-      const chans = Array.isArray(list.json?.data) ? list.json.data : []
-      for (const c of chans) {
-        const mp = await channelCall('GET', `/channels/${c.id}/mappings`)
-        const rows = Array.isArray(mp.json?.data) ? mp.json.data : []
-        const stillMapped = rows.some(m => String(m.attributes?.rate_plan_id) === String(prop.provider_rate_plan_id))
-        if (stillMapped) {
-          return res.status(409).json({
-            error: 'Ce logement est encore relié à une annonce Airbnb ou Booking. Déconnectez-le d\'abord (bouton « Déconnecter cette annonce » dans l\'assistant de connexion), puis vous pourrez le supprimer.'
-          })
+    // ⚠⚠ GARDE-FOU DE LA SUPPRESSION : C'EST LA MEME FONCTION QUE L'ECRAN, ET
+    // ELLE LIT LE COEUR. Correctif du 26 octobre 2026, apres une review qui a
+    // trouve la garde precedente MORTE DE DEUX FACONS INDEPENDANTES.
+    //
+    // La version d'avant interrogeait le partenaire et comparait le
+    // `rate_plan_id` de chaque mapping a `prop.provider_rate_plan_id`, c'est-a-dire
+    // au plan de BASE. Or `api/channel-mapping.js` ecrit lui-meme, depuis le
+    // correctif du 10 septembre 2026, que tous les mappings pointent le plan
+    // DERIVE du canal et que « ce match n'aboutit PLUS JAMAIS ». Le refus etait
+    // donc inatteignable. Et le bloc entier etait de surcroit conditionne par
+    // `prop.provider_rate_plan_id` : un bien sans plan de base ne le traversait
+    // meme pas.
+    //
+    // Resultat mesure dans le code : un bien channex relie a une annonce Airbnb
+    // par son plan derive se supprimait SANS 409 — `DELETE /properties/{id}`
+    // chez le partenaire, puis purge de `bookings_snapshot`, `messages`,
+    // `menages` et `message_sent_log`, l'annonce restant en vente. Irreversible.
+    //
+    // ⚠ ET C'EST LA CLASSE DE DEFAUT GRAVEE AU CLAUDE.md : « UN MASQUAGE PAR
+    // DROIT NE SUFFIT JAMAIS ». L'ecran avait ete durci deux fois (recette du
+    // 22 octobre, revue du 23) pour desactiver « Supprimer » sur un mappage
+    // relie ou indetermine. Le serveur, lui, ne refusait rien — et le masquage
+    // ne tombe jamais devant une requete faite a la main.
+    //
+    // ⚠ ON N'ECRIT PAS LA REGLE UNE SECONDE FOIS. `suppressionPossible` est
+    // exportee par lib/logement/lecture.js « pour qu'une regle ne soit ecrite
+    // qu'une fois » — ce sont ses mots. Deux copies divergent : c'est
+    // exactement ce qui vient de se produire entre l'ecran et ce handler. On
+    // appelle donc LA fonction, avec les memes entrees, et le refus porte le
+    // motif qu'elle rend.
+    {
+      const { suppressionPossible } = require('../lib/logement/lecture')
+      const { echecVisibleParLHote, COLONNES_HORLOGE_ECRAN } = require('../lib/canaux-du-bien')
+
+      // ⚠ LA LIMITE EST UNE BORNE DE PRUDENCE, PAS UNE TRONCATURE ACCEPTEE.
+      // Une lecture tronquee rendrait une liste de canaux INCOMPLETE, donc un
+      // « aucun canal mappe » qui ne veut rien dire — le defaut des 1000 lignes
+      // silencieuses du depot. Si la limite est atteinte, on ne conclut pas :
+      // on refuse en indetermine.
+      const LIGNES_MAX = 200
+      const { data: lignes, error: eCanaux } = await supabase
+        .from('canaux_du_bien')
+        .select('ota, titre, actif, mappe_pour_ce_bien')
+        .eq('user_id', compteBien)
+        .eq('property_id', String(bienPid))
+        .is('disparu_le', null)
+        .limit(LIGNES_MAX)
+
+      // ⚠ `null` ET `[]` NE SE CONFONDENT PAS, et c'est tout le sujet :
+      // `suppressionPossible` rend `canaux_illisibles` sur `null` (on ne sait
+      // pas) et poursuit sur `[]` (ce bien n'est en vente nulle part). Passer
+      // un tableau vide sur une erreur de lecture transformerait une panne en
+      // autorisation.
+      let canaux = null
+      if (eCanaux) {
+        console.error('[channel-property] DELETE : canaux_du_bien illisible', eCanaux.message)
+      } else if ((lignes || []).length >= LIGNES_MAX) {
+        console.error('[channel-property] DELETE : canaux_du_bien tronque a', LIGNES_MAX)
+      } else {
+        canaux = (lignes || []).map(l => ({
+          ota: l.ota, titre: l.titre, actif: l.actif === true, mappe: l.mappe_pour_ce_bien
+        }))
+      }
+
+      // L'horloge du releve, pour le cas `jamais_releve` : l'ecran refuse quand
+      // AUCUNE ligne de canal n'existe et que le releve n'a jamais abouti —
+      // parce qu'alors l'absence de canal ne prouve rien.
+      let releveDuCompte = null
+      let releveEnEchec = false
+      {
+        const { data: h, error: eH } = await supabase.from('canaux_releve')
+          .select(COLONNES_HORLOGE_ECRAN)
+          .eq('user_id', compteBien)
+          .maybeSingle()
+        // ⚠ UNE HORLOGE ILLISIBLE N'EST PAS UNE HORLOGE ABSENTE, mais les deux
+        // menent au meme refus prudent ici : `releveDuCompte` reste `null`.
+        if (eH) console.error('[channel-property] DELETE : canaux_releve illisible', eH.message)
+        else {
+          releveDuCompte = h || null
+          releveEnEchec = echecVisibleParLHote(h)
         }
+      }
+
+      const verdict = suppressionPossible(prop, canaux, {
+        releveDuCompte, releveEnEchec, peutSupprimer: true
+      })
+      if (verdict.possible !== true) {
+        const MESSAGES = {
+          annonce_reliee: 'Ce logement est encore relié à une annonce Airbnb ou Booking. '
+            + 'Déconnectez-le d\'abord (bouton « Déconnecter cette annonce » dans l\'assistant '
+            + 'de connexion), puis vous pourrez le supprimer.',
+          mapping_inconnu: 'Nous n\'avons pas pu établir si ce logement est encore relié à une '
+            + 'annonce. Rien n\'a été supprimé. Réessayez dans quelques minutes, ou déconnectez '
+            + 'l\'annonce depuis l\'assistant de connexion.',
+          canaux_illisibles: 'Nous n\'avons pas pu lire les annonces de ce logement. Rien n\'a '
+            + 'été supprimé. Réessayez dans quelques minutes.',
+          jamais_releve: 'Les annonces de ce compte n\'ont encore jamais été relevées : nous ne '
+            + 'pouvons pas affirmer que ce logement n\'est plus en vente. Rien n\'a été supprimé.',
+          droit_refuse: 'Vous n\'avez pas le droit de supprimer ce logement.'
+        }
+        // ⚠ UN MOTIF INCONNU REFUSE AUSSI. Si `suppressionPossible` gagne un
+        // cinquieme motif, le defaut de ce handler doit etre le REFUS, pas le
+        // passage : une suppression irreversible ne se decide pas par omission.
+        return res.status(409).json({
+          error: MESSAGES[verdict.motif]
+            || 'La suppression de ce logement est refusée : son état n\'a pas pu être établi. '
+               + 'Rien n\'a été supprimé.',
+          motif: verdict.motif || 'refus_sans_motif'
+        })
       }
     }
 
-    // 1. Suppression cote channel manager (best effort : un 404 = deja absent, on continue)
+    // 1. Suppression cote channel manager
+    //
+    // ⚠ UN REFUS DU PARTENAIRE ARRETE TOUT, ET LA PURGE N'A PAS LIEU
+    // (decision de Thierry, 26 octobre 2026). La version d'avant journalisait
+    // l'echec et purgeait quand meme, avec ce commentaire : « On n'avorte pas :
+    // l'utilisateur veut supprimer son bien. »
+    //
+    // Ce raisonnement produit le pire des deux etats : la propriete reste chez
+    // le partenaire — donc l'annonce reste en vente et continue de recevoir des
+    // reservations — pendant que HoteSmart a efface les reservations, les
+    // messages et les menages qui lui permettraient de les traiter. L'hote se
+    // retrouve avec un bien qui vend et un systeme aveugle, et rien ne le lui
+    // dit : la reponse portait un simple drapeau.
+    //
+    // Un bien non supprime se re-supprime ; des reservations purgees ne
+    // reviennent pas.
+    //
+    // ⚠ UN 404 RESTE UN SUCCES, et ce n'est pas une indulgence : il veut dire
+    // que la propriete n'est DEJA plus chez le partenaire. Refuser la purge
+    // dans ce cas rendrait le bien definitivement insupprimable.
     let channelDeleted = null
     if ((prop.provider === 'channex' || prop.provider === 'channel') && providerId) {
       const r = await channelCall('DELETE', `/properties/${providerId}`)
       channelDeleted = r.ok || r.status === 404
       if (!channelDeleted) {
         console.error('[channel-property] DELETE channel echec', r.status, r.json)
-        // On n'avorte pas : l'utilisateur veut supprimer son bien. On purge quand
-        // meme cote HoteSmart et on signale l'etat dans la reponse.
+        return res.status(409).json({
+          error: 'Le gestionnaire de canaux a refusé de supprimer ce logement. '
+            + 'Rien n\'a été supprimé chez HôteSmart : vos réservations, messages et '
+            + 'ménages sont intacts. Réessayez dans quelques minutes.',
+          motif: 'partenaire_refuse',
+          statut_partenaire: r.status
+        })
       }
     }
 
