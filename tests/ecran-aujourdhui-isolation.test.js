@@ -141,6 +141,34 @@ function tient (ligne, f) {
 // (d) de CLAUDE.md : 50 des 65 codes de La bulle n'ont pas de `user_id`) : son
 // cloisonnement passe donc par le couple `property_id` + `booking_id`, et c'est
 // precisement ce qu'on veut voir partir en requete.
+// ─── LES TABLES QUI NE SE CLOISONNENT PAS PAR COMPTE, ET POURQUOI ───────────
+//
+// ⚠ DEUX, ET EXACTEMENT DEUX. Une exemption se COMPTE, elle ne se decrit pas
+// (discipline du depot : `ATTENDU` de bookings-snapshot-troncature, exemptions
+// de cache-prive-endpoints). Elle etait ecrite en ligne — `r.table !==
+// 'access_codes'` repete trois fois — donc invisible et non chiffree : la
+// troisieme occurrence pouvait deriver des deux autres sans que rien ne le
+// dise, et une table ajoutee demain s'y glissait d'un caractere.
+//
+// · `access_codes` : ses lignes sont souvent SANS compte (bloquant (d) de
+//   CLAUDE.md : 50 des 65 codes de La bulle n'ont pas de `user_id`). Son
+//   cloisonnement passe par le couple `property_id` + `booking_id`, et ses
+//   reservations viennent deja d'une lecture bornee.
+// · `delais_versement` : table de REFERENCE, ajoutee a l'etape 4 du lot
+//   « Aujourd'hui V5 ». Elle porte les delais de versement des plateformes —
+//   `canal`, `base`, `jours`, `libelle`, `maj_le` — et AUCUNE colonne de
+//   compte : verifie dans `migrations/2026-10-25-delais-versement.sql`. Sa
+//   policy est `for select to authenticated using (true)`, parce que « ces
+//   valeurs ne sont la donnee de personne » : tous les hotes lisent les memes
+//   trois lignes. La borner par `user_id` ne protegerait rien et rendrait zero
+//   ligne, donc tous les sejours en « delai absent » — un bloc de revenus a
+//   zero euro qui aurait l'air d'un mois sans revenu.
+//
+// ⚠ ET CE TEST A EU RAISON DE CRIER. Il a attrape cette lecture le jour meme
+// ou elle a ete ecrite, avant tout merge : c'est l'exemption qui est nouvelle,
+// pas la regle. Toute table qui arrive ici doit arriver avec sa raison.
+const TABLES_SANS_COMPTE = new Set(['access_codes', 'delais_versement'])
+
 function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
                  methode = 'GET', lignes = {}, pannes = [], erreurs = {},
                  instant = null, pages = null, notesLevent = false } = {}) {
@@ -346,7 +374,7 @@ test('LE TEST QUI COMPTE : le compte lu est celui de la GARDE, jamais celui de l
   // C'est la forme exacte de plusieurs des dix fuites du chantier droits.
   const { requetes } = await banc({ titulaire: true })()
   const sansCompte = requetes.filter(r =>
-    r.table !== 'access_codes' && !r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id'))
+    !TABLES_SANS_COMPTE.has(r.table) && !r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id'))
   assert.deepEqual(sansCompte.map(r => r.table), [],
     'une lecture part SANS `user_id` : avec la cle de service, elle lit toute la base')
   const mauvais = requetes.filter(r =>
@@ -427,7 +455,7 @@ test('LE TEST QUI COMPTE : sur un compte DELEGUE aussi, le compte lu est celui d
   // le nommer.
   const { requetes } = await banc({ refs: [BULLE_UUID, BULLE_REF] })()
   const sansCompte = requetes.filter(r =>
-    r.table !== 'access_codes' && !r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id'))
+    !TABLES_SANS_COMPTE.has(r.table) && !r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id'))
   assert.deepEqual(sansCompte.map(r => r.table), [],
     'une lecture part SANS `user_id` : avec la cle de service, elle lit toute la base')
   const mauvais = requetes.filter(r =>
@@ -467,7 +495,7 @@ test('LE TEST QUI COMPTE : CHAQUE lecture du membre restreint est bornee a ses b
   assert.strictEqual(notesVues[0].userId, TITULAIRE, 'les notes sont lues sur un autre compte')
   // `access_codes` est borne par le couple bien + reservation, pas par le
   // perimetre : ses reservations viennent deja d'une lecture bornee.
-  const aExaminer = requetes.filter(r => r.table !== 'access_codes')
+  const aExaminer = requetes.filter(r => !TABLES_SANS_COMPTE.has(r.table))
   assert.ok(aExaminer.length >= 8, `seulement ${aExaminer.length} lectures observees`)
   for (const r of aExaminer) {
     const b = bornes(r)

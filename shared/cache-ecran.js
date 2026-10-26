@@ -94,11 +94,48 @@ function cle (ecran, moi, compte) {
 // CHAMP. Et mon propre test gravait l'omission en contrat.
 const CHAMPS_JAMAIS_GARDES = { fait_pour_vous: ['surreservation'] }
 
+// ⚠ LES REVENUS SONT GARDES 12 h — DECISION Q8 DE THIERRY du 24 octobre 2026 —
+// MAIS SEULEMENT POUR LE MOIS COURANT, et ce n'est pas une precaution de
+// confidentialite : c'est une question de JUSTESSE. La cle du cache porte
+// l'ecran, l'utilisateur et le compte, JAMAIS le mois. Un hote qui consulte
+// octobre, puis revient le lendemain sur son accueil, verrait donc les chiffres
+// d'OCTOBRE repeints instantanement sous l'etiquette du mois courant — un total
+// faux, affiche avec l'aplomb des vrais, et pendant douze heures.
+//
+// C'est la meme famille que `fait_pour_vous.surreservation` juste au-dessus :
+// un bloc entier n'est pas la bonne maille. Ici la condition ne porte pas sur un
+// champ a retirer mais sur la VALEUR d'un autre champ — le `mois` que
+// l'endpoint renvoie justement pour qu'on puisse le verifier.
+//
+// Ce que le bloc contient est bien cachable par ailleurs : des totaux par
+// LOGEMENT en centimes, aucun nom, aucun montant par voyageur, aucun
+// identifiant de reservation.
+function moisCourantLocal () {
+  // Le mois de l'horloge du NAVIGATEUR, qui est celui de l'hote. L'endpoint
+  // calcule le sien a Paris ; un ecart d'un jour en fin de mois ferait
+  // simplement ne pas garder le bloc, ce qui est le repli sur.
+  //
+  // ⚠ `new Date(Date.now())` ET NON `new Date()`, pour que l'horloge soit
+  // INJECTABLE. Le banc de `tests/cache-ecran.test.js` remplace `Date.now` par
+  // un proxy ; un `new Date()` nu lui echapperait, et le test devrait alors
+  // construire ses fixtures sur le mois reel — donc rougir un jour par mois,
+  // au changement de mois, pour une raison que personne ne retrouverait.
+  // C'est la regle du depot, prise par le bon bout : le code se laisse
+  // injecter le temps, et le test le lui donne.
+  const d = new Date(Date.now())
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
 function sansLesCritiques (donnees) {
   if (!donnees || typeof donnees !== 'object') return donnees
   const out = {}
   for (const [k, v] of Object.entries(donnees)) {
     if (JAMAIS_GARDES.includes(k)) continue
+    // Le bloc revenus ne se garde que s'il porte le mois courant.
+    if (k === 'revenus') {
+      if (v && typeof v === 'object' && v.mois === moisCourantLocal()) out[k] = v
+      continue
+    }
     const champs = CHAMPS_JAMAIS_GARDES[k]
     if (champs && v && typeof v === 'object' && !Array.isArray(v)) {
       const bloc = {}

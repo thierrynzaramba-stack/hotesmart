@@ -74,12 +74,22 @@ const ATTENDU = {
     // Le premier affichage : trois endpoints, c'est le contrat du lot (b).
     '/api/ecran/aujourdhui': 1,          // l'ecran en un appel
     '/api/menages': 1,                   // la fenetre de 400 jours — lot (d)
-    // ⚠ UN SEUL LITTERAL, MAIS DEUX ALLERS-RETOURS PAR BIEN : le chemin est
-    // assemble une fois dans `const base` puis joint deux fois. C'est le
-    // troisieme test de ce fichier qui compte les allers-retours ; celui-ci
-    // compte les ENDPOINTS JOINTS. Les deux comptes sont necessaires, et les
-    // confondre etait ma premiere version.
-    '/api/yield': 1,                     // CA et TO, par bien — lot (c)
+    // ⚠ `/api/yield` A DISPARU DE CET INVENTAIRE A L'ETAPE 4, ET C'EST LE PLUS
+    // GROS GAIN DE LA REFONTE. Il etait appele DEUX FOIS PAR BIEN, apres le
+    // premier affichage : mesure du 22 octobre 2026 en production, compte reel a
+    // 4 logements, 72 requetes Supabase et 586 Ko — a lui seul 72 % des requetes
+    // de la page, pour du CA et du TO sur 30 jours, c'est-a-dire exactement de
+    // la donnee NON URGENTE.
+    //
+    // Ses trois consommateurs ont trouve leur place : le CA 30 j par bien est
+    // remplace par le bloc « Revenus nets » (en mois de VERSEMENT, decision Q3,
+    // inventaire I29), les min/max mensuels partent dans la fiche du logement
+    // (Q4, I30, dette 96), et le repli « non raccorde » vit deja sur /logements.
+    //
+    // ⚠ SA LIGNE EST RETIREE, PAS COMMENTEE, parce que le message de ce test le
+    // demande : « UN DE MOINS : il a ete replie, retirez sa ligne pour que le
+    // gain soit garde. » Le jour ou un appel par bien revient sur cet ecran, ce
+    // test rougira — et c'est tout l'objet.
     // Et une ACTION, qui ne part que sur un clic de l'hote.
     '/api/incidents-acquitter': 1
   }
@@ -111,21 +121,31 @@ test("LE TEST QUI COMPTE : l'accueil n'appelle pas l'endpoint d'un AUTRE ecran",
   }
 })
 
-test("LE TEST QUI COMPTE : les appels par BIEN sont comptes a part", () => {
-  // Le seul cout de l'accueil qui croit avec le nombre de logements est
-  // `/api/yield`, DEUX fois par bien (CA de la periode et de la precedente).
-  // Mesure du 22 octobre 2026 : 72 requetes et 586 Ko a 4 biens. C'est la
-  // moitie du lot (c), et il faut que ce soit VISIBLE ici — un appel par bien
-  // de plus multiplie par le nombre de logements.
+test("LE TEST QUI COMPTE : l'accueil n'a PLUS AUCUN appel par bien", () => {
+  // ⚠ CE TEST A CHANGE DE SENS A L'ETAPE 4, ET C'EST UNE VICTOIRE, PAS UNE
+  // PERTE. Il comptait les deux appels `/api/yield` par bien pour que le cout
+  // reste VISIBLE — « un appel par bien de plus multiplie par le nombre de
+  // logements ». Mesure du 22 octobre 2026 : 72 requetes et 586 Ko a 4 biens.
+  // Ces appels sont retires ; il garde donc maintenant leur ABSENCE.
+  //
+  // C'est le seul cout de l'accueil qui croissait avec le nombre de logements.
+  // Les revenus arrivent desormais AVEC la reponse d'ecran, dans la meme
+  // requete que tout le reste — l'endpoint fait deux lectures Supabase (les
+  // delais, puis les sejours, paginee), quel que soit le nombre de biens.
   const src = lire('pages/aujourdhui.html')
-  const bloc = (src.match(/async function chargerChiffresBien[\s\S]*?\n\}/) || [''])[0]
-  assert.ok(bloc, 'chargerChiffresBien a disparu : le compte par bien n est plus mesurable')
-  // ⚠ SUR LES APPELS, PAS SUR LES LITTERAUX. `chargerChiffresBien` assemble
-  // `const base = '/api/yield?...'` UNE fois et le joint DEUX fois : compter
-  // les chaines `/api/` donnerait 1, et le lot (c) croirait n'avoir qu'un
-  // appel par bien a replier.
-  const parBien = (bloc.match(/await appel\(/g) || []).length
-  assert.strictEqual(parBien, 2,
-    `${parBien} appels par bien au lieu de 2 : a 4 logements cela fait ${parBien * 4} appels, `
-    + 'et le lot (c) doit les ramener a une lecture de table de resume')
+  const code = src.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('<!--')).join('\n')
+
+  // Aucune boucle sur les biens qui part en reseau.
+  assert.doesNotMatch(code, /chargerChiffresBien/,
+    'la fonction qui appelait /api/yield par bien est revenue')
+  assert.doesNotMatch(code, /\/api\/yield/,
+    "l'accueil joint /api/yield : c'est le cout qui croit avec le nombre de logements")
+
+  // ⚠ ET LE CONTROLE QUI COMPTE VRAIMENT : aucun `await appel(` dans une
+  // iteration sur `etat.biens`. Un endpoint different appele par bien couterait
+  // exactement la meme chose — ce test ne doit pas garder un NOM d'endpoint,
+  // mais la FORME du 1 + N.
+  const enBoucle = code.match(/etat\.biens\s*\.map\([^)]*=>[\s\S]{0,200}?await appel\(/)
+  assert.strictEqual(enBoucle, null,
+    `un appel reseau part dans une boucle sur les biens : ${enBoucle && enBoucle[0]}`)
 })

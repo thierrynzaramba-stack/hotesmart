@@ -42,6 +42,13 @@ const {
 } = require('../../lib/ecran/etat-du-code')
 const { etatMenage } = require('../../lib/cron-arrival-code')
 const { notesDuPerimetre, derniersAvis } = require('../../lib/stats-avis')
+// ⚠ TROIS MODULES, AUCUN CALCUL ICI. Le bloc « Revenus nets » compose des
+// regles qui vivent toutes dans `lib/` : le net hote par canal, la date de
+// versement par canal, et l'agregation par mois. Recopier l'une des trois ici
+// ferait deux implementations qui divergent au premier correctif — la dette 17
+// que le depot a deja soldee une fois.
+const { revenusDuMois, fenetreDeLecture } = require('../../lib/revenus/mois')
+const { tableDesDelais } = require('../../lib/revenus/versement')
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -190,6 +197,21 @@ module.exports = async (req, res) => {
 
   const jour = jourParis(0)
   const demain = jourParis(1)
+
+  // ⚠ LE MOIS DEMANDE SE VALIDE, IL NE SE PREND PAS TEL QUEL. Le selecteur de
+  // l'ecran envoie `?mois=YYYY-MM` ; par defaut, le mois courant A PARIS — le
+  // meme fuseau que `jour`, et pas celui du serveur. Une valeur hors forme
+  // retombe sur le mois courant plutot que de refuser l'ecran entier : le bloc
+  // Revenus n'est pas la page.
+  //
+  // ⚠ ET LA VALIDATION REFUSE « 2026-13 », QUI PASSE LA FORME. `^\d{4}-\d{2}$`
+  // l'accepte, et `Date.UTC(2026, 12, 1)` ROULE sur janvier 2027 : l'ecran
+  // aurait servi les revenus de janvier sous l'etiquette « mois 13 ». Meme
+  // garde que `fenetreDeLecture` et `moisDe` dans lib/revenus/mois.js — les
+  // trois doivent s'accorder sur ce qu'est un mois.
+  const moisDemande = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(req.query && req.query.mois || ''))
+    ? String(req.query.mois)
+    : jour.slice(0, 7)
   const depuis7j = new Date(Date.now() - JOURS_FAIT_POUR_VOUS * 86400000).toISOString()
 
   // `indisponibles` : ce qu'on n'a PAS pu lire. Un bloc absent de la reponse
@@ -450,6 +472,88 @@ module.exports = async (req, res) => {
     return out
   }
 
+  // ─── Les revenus du MOIS, par bien (spec §4, etape 4) ─────────────────────
+  //
+  // ⚠ DROIT `reservations`, DECISION Q5 DE THIERRY du 24 octobre 2026 : « comme
+  // aujourd'hui, lecture des reservations, limite aux biens du profil ». Le
+  // montant d'un sejour EST une donnee de reservation ; un membre qui n'a pas ce
+  // droit ne voit pas le bloc, et la garde est ICI parce que la cle de service
+  // contourne la RLS.
+  //
+  // ⚠ DONNEE NON URGENTE CALCULEE A LA LECTURE, ET C'EST UNE DETTE ASSUMEE.
+  // La regle d'architecture de CLAUDE.md veut un resume calcule par le cron pour
+  // toute donnee non urgente, et des revenus mensuels en sont. La spec du lot
+  // l'affecte au LOT (c), qui attend une decision de Thierry : aucune table de
+  // resume n'existe, et `tests/ecran-ne-calcule-pas.test.js` non plus. Le cout
+  // ajoute est borne et mesure — DEUX requetes (les delais, puis les sejours),
+  // pas les 72 de `/api/yield`.
+  const lireRevenus = async () => {
+    if (!droits.reservations) return null
+    if (perimetreVide) return null
+
+    // Les delais, lus en base : ce sont des usages de plateforme, ils changent
+    // sans nous prevenir et la spec interdit de les ecrire en dur.
+    requetes++
+    const { data: lignesDelais, error: eD } = await supabase
+      .from('delais_versement').select('canal, base, jours, libelle')
+    if (eD) {
+      // ⚠ SANS LES DELAIS, ON NE RANGE RIEN — et on le DIT. Calculer avec une
+      // table vide mettrait tous les sejours en « delai absent », donc un bloc
+      // a zero euro qui aurait l'air d'un mois sans revenu.
+      indisponibles.push('revenus')
+      return null
+    }
+    const delais = tableDesDelais(lignesDelais || [])
+
+    const fenetre = fenetreDeLecture(moisDemande, delais)
+    if (!fenetre) { indisponibles.push('revenus'); return null }
+
+    // ⚠ LECTURE PAGINEE, ET LA BORNE DE DATE NE S'APPLIQUE QUE SI LA FENETRE SE
+    // DECLARE BORNABLE. Un canal qui se verse sur la RESERVATION casse toute
+    // borne sur `arrival` : une reservation precede son sejour de n'importe
+    // quelle duree, donc un sejour reserve le 29 octobre pour une arrivee en
+    // juillet suivant se verse en novembre et doit etre lu. `fenetreDeLecture`
+    // le declare (`bornable: false`), et c'est le seul endroit ou la decision se
+    // prend.
+    //
+    // ⚠ ET LA PAGINATION N'EST PAS UNE PRECAUTION : une lecture sans borne est
+    // TRONQUEE A 1000 LIGNES SANS ERREUR. Le depot l'a paye une fois — une
+    // lecture de `bookings_snapshot` ajoutee sans borne dans un script neuf. Un
+    // mois ampute de ses dernieres reservations a l'air juste.
+    const PAGE = 1000
+    const PAGES_MAX = 20
+    let lignes = []
+    let tronque = false
+    for (let i = 0; i < PAGES_MAX; i++) {
+      let q = supabase.from('bookings_snapshot')
+        .select('booking_id, property_id, snapshot, raw')
+        .eq('user_id', compte)
+      if (fenetre.bornable) {
+        q = q.gte('snapshot->>arrival', fenetre.debut).lte('snapshot->>arrival', fenetre.fin)
+      }
+      q = bornerRef(q, 'property_id')
+      requetes++
+      const { data, error } = await q.order('booking_id').range(i * PAGE, (i + 1) * PAGE - 1)
+      if (error) { indisponibles.push('revenus'); return null }
+      lignes = lignes.concat(data || [])
+      if (!data || data.length < PAGE) break
+      if (i === PAGES_MAX - 1) tronque = true
+    }
+    // ⚠ UNE TRONCATURE SE DIT, elle ne se devine pas. Au-dela de 20 000 sejours
+    // le total serait incomplet : l'ecran doit pouvoir refuser d'afficher un
+    // chiffre plutot qu'en afficher un faux.
+    if (tronque) tronquees.push('revenus')
+
+    const out = revenusDuMois(lignes, delais, moisDemande, jour)
+    return {
+      ...out,
+      // Ce que l'ecran a besoin de savoir pour etre honnete sur ce qu'il montre.
+      delais_connus: Object.keys(delais).length,
+      fenetre: { debut: fenetre.debut, fin: fenetre.fin, bornable: fenetre.bornable },
+      tronque
+    }
+  }
+
   // « Fait pour vous », 7 jours : des COMPTAGES, donc `head: true` — aucune
   // ligne ne traverse le reseau.
   const compterSi = async (autorise, table, ajuster, colonneBien, borner = bornerRef) => {
@@ -502,7 +606,7 @@ module.exports = async (req, res) => {
   }
 
   const tDebutLectures = Date.now()
-  const [biens, taches, alarmes, arrivees, notes, derniers, conversations, nMenages, nPrix, nSurresa, nIa] =
+  const [biens, taches, alarmes, arrivees, notes, derniers, revenus, conversations, nMenages, nPrix, nSurresa, nIa] =
     await Promise.all([
       sur('biens', lireBiens, null),
       sur('taches', lireTaches, null),
@@ -510,6 +614,7 @@ module.exports = async (req, res) => {
       sur('arrivees', lireArrivees, []),
       sur('notes', lireNotes, null),
       sur('derniers_avis', lireDerniersAvis, null),
+      sur('revenus', lireRevenus, null),
       sur('conversations', lireConversations, null),
       sur('compteur:menages', () => compterSi(droits.menages, 'menages',
         q => q.gte('accepted_at', depuis7j).neq('status', 'cancelled'), 'property_id'), null),
@@ -677,6 +782,12 @@ module.exports = async (req, res) => {
     etats_arrivee: etatsArrivee,
     notes,
     derniers_avis: derniers,
+    // ⚠ LE MOIS SERVI EST RENVOYE, et ce n'est pas une redondance : l'ecran a
+    // demande un mois, il doit pouvoir verifier lequel il a REELLEMENT recu.
+    // Une valeur hors forme retombe sur le mois courant — sans ce champ,
+    // l'ecran afficherait « novembre » sur les chiffres d'octobre.
+    mois: moisDemande,
+    revenus,
     fait_pour_vous: { messages_ia: nIa, menages: nMenages, prix: nPrix, surreservation: nSurresa, jours: JOURS_FAIT_POUR_VOUS },
     droits,
     refuses,

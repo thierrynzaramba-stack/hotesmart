@@ -552,7 +552,7 @@ function batirAujourdhui (sansInit = false) {
   // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
   // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
   // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
-  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderBiens, renderDerniersAvis }'
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -828,7 +828,6 @@ test('LE TEST QUI COMPTE : l accueil ne demande PLUS les notes lui-meme', async 
   assert.deepEqual(q.urls.filter(u => u.includes('/api/avis')), [],
     'les notes absentes de l appel d ecran declenchent un repli vers /api/avis')
   assert.strictEqual(q.interne.etat.noteGlobale, null, 'un bloc absent s affiche comme un fait')
-  assert.strictEqual(q.interne.etat.notesParBien.get('b1'), null)
 })
 
 test('LE TEST QUI COMPTE : l endpoint d ecran ne lit les notes qu UNE fois', () => {
@@ -853,13 +852,18 @@ test('LE TEST QUI COMPTE : chaque bien recoit la meme chose qu avant, zero compr
   await p.interne.chargerNotes()
 
   assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.7, notes: 42 })
-  assert.deepEqual(p.interne.etat.notesParBien.get('b1'), { note_sur_5: 4.8, notes: 30 })
-  // Un bien absent de la reponse vaut zero, pas `undefined` : c'est ce que
-  // rendait son appel par bien, et `renderBiens` lit `note.moyenne`.
-  assert.deepEqual(p.interne.etat.notesParBien.get('b2'), { note_sur_5: null, notes: 0 })
-  // Un bien sans canal n'etait pas interroge : il n'a toujours pas d'entree.
-  assert.strictEqual(p.interne.etat.notesParBien.has('b3'), false,
-    'un bien sans cle provider recoit une note alors qu aucun avis ne peut lui etre rattache')
+  // ⚠ LES TROIS ASSERTIONS PAR BIEN SONT PARTIES AVEC `etat.notesParBien`
+  // (etape 4), ET IL FAUT DIRE CE QU'ELLES TENAIENT : un bien absent de la
+  // reponse valait zero et non `undefined`, et un bien sans cle provider n'avait
+  // pas d'entree du tout. Ces deux distinctions n'avaient qu'un consommateur,
+  // l'etoile des cartes de logement, et les cartes partent avec le bloc
+  // « Vos logements » (inventaire I28). La note par bien revient a la fiche du
+  // logement, que /logements rend deja avec sa propre lecture.
+  //
+  // Ce qui reste teste ici est la seule chose que l'accueil lit encore : la note
+  // GLOBALE, telle quelle, sans redivision.
+  assert.ok(!('notesParBien' in p.interne.etat),
+    'la Map par bien est revenue : elle n a aucun lecteur, donc elle ferait croire que la donnee est disponible')
 })
 
 // ⚠ CES TROIS TESTS PASSAIENT PAR VACUITE, ET LA REVIEW L'A VU.
@@ -885,31 +889,47 @@ for (const [quoi, ecran] of casSansNote) {
     p.interne.etat.biens = biensDeTest
     p.interne.etat.ecran = ecran
     await p.interne.chargerNotes()
+    // ⚠ L'ASSERTION PAR BIEN EST PARTIE AVEC `etat.notesParBien` (etape 4), ET
+    // L'INVARIANT NE L'EST PAS : elle doublait celle du dessus, qui porte la
+    // meme regle sur la note GLOBALE — « 0 avis » n'est jamais affirme quand
+    // rien n'a ete lu. La Map par bien n'avait qu'un lecteur, l'etoile des
+    // cartes de logement, et les cartes partent avec le bloc « Vos logements ».
     assert.strictEqual(p.interne.etat.noteGlobale, null,
       'la tuile affiche un nombre d avis alors que rien n a ete lu')
-    assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null,
-      'un bien recoit « 0 avis », un FAIT, alors que rien n a ete lu')
     assert.deepEqual(p.urls.filter(u => u.includes('/api/')), [],
       'la page part en reseau pour se rattraper : le 1 + N reviendrait par la porte de service')
   })
 }
 
-test("LE TEST QUI COMPTE : une cle de bien heritee d'Object ne devient pas une note", async () => {
-  // `par_bien` vient de `JSON.parse`. Pour un bien dont la cle provider vaudrait
-  // `constructor`, `toString` ou `valueOf`, une lecture directe rendrait une
-  // FONCTION heritee — vraie, donc le repli `{ moyenne: null, notes: 0 }` ne
-  // serait jamais pris, et `etat.notesParBien` porterait une fonction.
+test("LE TEST QUI COMPTE : une cle de bien piegeuse ne fait plus rien tomber sur l'accueil", async () => {
+  // ⚠ CE TEST GARDAIT `hasOwnProperty` DANS LA PAGE, ET LA REGLE A CHANGE DE
+  // MAISON — elle n'a pas disparu. `par_bien` vient de `JSON.parse` : pour un
+  // bien dont la cle provider vaudrait `constructor`, `toString` ou `valueOf`,
+  // une lecture directe rendrait une FONCTION heritee d'Object, vraie, donc le
+  // repli n'etait jamais pris.
+  //
+  // ⚠ ET ELLE EST TENUE COTE SERVEUR, VERIFIE AVANT D'ECRIRE CETTE LIGNE :
+  // `lib/stats-avis.js:497` construit `par_bien` avec `Object.create(null)`,
+  // donc la table n'a AUCUNE cle heritee a rendre — et c'est teste la-bas,
+  // `tests/stats-avis.test.js` l 770-819 (« le prototype nul ne protege plus :
+  // la cle est avalee », « par_bien a de nouveau un prototype : une reference
+  // `__proto__` l ecrirait »). Retirer ce doublon sans cette verification aurait
+  // ete retirer un garde-fou en croyant le deplacer.
+  //
+  // Ce qui reste a garder ici est que la PAGE ne retombe pas dans le piege : des
+  // cles provider piegeuses ne doivent faire ni lever, ni afficher de note.
   const p = ouvrirAujourdhui({ sansInit: true, corps: { global: { note_sur_5: 4.5, notes: 3 }, par_bien: {} } })
   p.interne.etat.biens = [
     { id: 'bc', name: 'Piege', provider_property_id: 'constructor' },
     { id: 'bt', name: 'Piege 2', provider_property_id: 'toString' },
+    { id: 'bp', name: 'Piege 3', provider_property_id: '__proto__' },
   ]
   p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
-  for (const id of ['bc', 'bt']) {
-    assert.deepEqual(p.interne.etat.notesParBien.get(id), { note_sur_5: null, notes: 0 },
-      `le bien ${id} recoit un membre herite d Object au lieu de sa note`)
-  }
+  assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.5, notes: 3 },
+    'une cle provider piegeuse a fait tomber la note globale')
+  assert.deepEqual(p.urls.filter(u => u.includes('/api/')), [],
+    'la page part en reseau sur une cle piegeuse')
 })
 
 test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redivise pas", async () => {
@@ -926,14 +946,52 @@ test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redi
   p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
 
-  // ⚠ LA TUILE DU BANDEAU « Note · 30 j » A ETE RETIREE A L'ETAPE 1 (24 octobre
-  // 2026) ; la note revient a l'etape 2, en tete du bloc « Derniers avis ».
-  // L'invariant, lui, n'a pas bouge et ce test le tient toujours : la note
-  // descend DEJA sur 5, et l'ecran ne la redivise pas. Il le tient desormais la
-  // ou la note s'affiche encore — l'etoile de chaque logement.
-  const liste = p.html('[data-list="properties"]')
-  assert.ok(!liste.includes('2.3') && !liste.includes('2.4'), `l etoile a redivise la note : ${liste}`)
-  assert.ok(liste.includes('4.8'), `l etoile du bien n affiche pas la note descendue : ${liste}`)
+  // ⚠ CET INVARIANT A CHANGE DE SUPPORT DEUX FOIS, ET IL NE S'AFFAIBLIT PAS.
+  // La tuile du bandeau « Note · 30 j » est partie a l'etape 1 (24 octobre
+  // 2026) ; le test s'est alors appuye sur l'ETOILE de chaque logement. Les
+  // cartes de logement partent a leur tour avec le bloc « Vos logements »
+  // (etape 4, inventaire I28), donc l'etoile par bien n'existe plus sur
+  // l'accueil — mais la note GLOBALE, elle, s'affiche toujours : en tete du
+  // bloc « Derniers avis ». C'est la qu'on le tient maintenant.
+  //
+  // La regle est inchangee depuis le premier jour : l'endpoint descend
+  // `note_sur_5` DEJA ramenee sur 5 et arrondie UNE SEULE fois, et l'ecran ne la
+  // redivise pas. 4,7 sur 10 redivise donnerait 2,3 ou 2,4 — les deux valeurs
+  // qu'on refuse de voir.
+  assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.7, notes: 42 },
+    'la note globale a ete redivisee ou perdue avant l affichage')
+  // ⚠ L'EN-TETE NE S'AFFICHE QUE SUR UN BLOC NON MUET, et c'est une regle du
+  // bloc avis, pas une complication de ce test : `enTeteAvisHtml` rend la chaine
+  // vide quand l'etat est MUET (refus, inconnu, perimetre vide) ou que la note
+  // est `null`. Sans avis a montrer, il n'y a pas d'en-tete ou poser la note —
+  // donc la fixture doit porter un avis, comme la production.
+  p.interne.etat.derniersAvis = [{
+    id: 'r1', bien_ref: 'REF_A', ota: 'airbnb', recu_le: '2026-10-20T10:00:00Z',
+    note_sur_5: 4.9, texte: 'Sejour parfait.', voyageur: 'Claire B.'
+  }]
+  p.interne.etat.avisConnu = true
+  p.interne.renderDerniersAvis()
+  const tete = p.html('[data-bind="reviews-head"]')
+  // ⚠ LE DOUBLE DE `t` DANS CE BANC REND LA CLE, PAS LE TEXTE INTERPOLE :
+  // l'en-tete contient « reviews.score », donc la VALEUR n'est pas lisible dans
+  // le HTML. C'est la meme limite que le test du compte plafonne plus haut, qui
+  // la contourne en lisant `fr.json`. On juge donc ce que le banc peut dire :
+  // l'en-tete EXISTE (la note est passee, elle n'est pas `null`) et il ne porte
+  // aucun nombre redivise.
+  assert.ok(tete.includes('reviews.score'),
+    `l en-tete du bloc avis ne porte pas la note : ${tete}`)
+  assert.ok(!/2[.,][34]/.test(tete), `l en-tete du bloc avis a redivise la note : ${tete}`)
+  // ⚠ ET LA VALEUR PASSEE AU RENDU SE VERIFIE A LA SOURCE, par le module
+  // partage qui construit la vue — lui-meme teste sur ses propres fixtures
+  // dans `tests/avis-recents-dom.test.js`. C'est la seule facon de voir le
+  // NOMBRE : la page ne le formate pas elle-meme, et c'est voulu.
+  const vue = M_AVIS.vueDesAvis({
+    derniers: p.interne.etat.derniersAvis,
+    notes: { global: p.interne.etat.noteGlobale },
+    biens: p.interne.etat.biens, connu: true
+  })
+  assert.strictEqual(vue.note_sur_5, 4.7,
+    'la vue du bloc avis a redivise la note avant de la rendre')
 })
 
 test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note", async () => {
@@ -952,7 +1010,6 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note"
   await p.interne.chargerNotes()
   assert.strictEqual(p.interne.etat.noteGlobale, null,
     'une note calculee sur une fraction est affichee comme un fait')
-  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1025,23 +1082,41 @@ test("LE TEST QUI COMPTE (M2) : l'etat « aucun logement » ne s'affiche QUE sur
   // quatre logements et dont l'appel n'a pas encore repondu lisait « Ajoutez
   // votre premier logement » — et, a l'onboarding, une reconciliation contre
   // une liste amputee CREE des biens en double chez le canal.
+  //
+  // ⚠ CE GARDE-FOU EST TRANSPOSE DU BLOC « Vos logements » AU BLOC « Revenus
+  // nets » (etape 4), ET AUCUNE DES TROIS DISTINCTIONS N'EST PERDUE : pas
+  // encore lu, lu et vide, lu en echec. L'etat vide a suivi le bloc parce qu'un
+  // hote sans bien n'a pas de revenus non plus, et que c'est la seule action qui
+  // lui reste sur cette page.
   const pasLu = bancDeRendu({ biens: [], ecran: null })
-  pasLu.interne.renderBiens()
+  pasLu.interne.renderRevenus()
   assert.strictEqual(pasLu.cache('[data-bind="etat-vide"]').hidden, true,
     'l etat vide s affiche alors que la liste n a pas ete lue')
-  assert.strictEqual(pasLu.cache('[data-bind="props-section"]').hidden, true)
+  assert.strictEqual(pasLu.cache('[data-bind="revenue-section"]').hidden, true)
 
   const lu = bancDeRendu({ biens: [], ecran: { biens: [] } })
-  lu.interne.renderBiens()
+  lu.interne.renderRevenus()
   assert.strictEqual(lu.cache('[data-bind="etat-vide"]').hidden, false,
     'une liste lue et vide doit proposer d ajouter un logement')
   assert.match(lu.html('[data-bind="etat-vide"]'), /logements\.vide_titre/)
 
   // Et une lecture EN ECHEC (`null`) n'est ni une liste vide ni un etat vide.
+  // ⚠ ELLE DOIT LE DIRE, et c'est ce controle qui a trouve un defaut dans mon
+  // rendu neuf : `etat.biens` a `null` faisait tomber la boucle des lignes sur
+  // `(etat.biens || [])`, donc un bloc avec son total mais SANS AUCUNE LIGNE —
+  // un ecran qui a l'air complet et ne montre rien.
   const illisible = bancDeRendu({ biens: null, ecran: { biens: null } })
-  illisible.interne.renderBiens()
+  illisible.interne.renderRevenus()
   assert.strictEqual(illisible.cache('[data-bind="etat-vide"]').hidden, true)
-  assert.match(illisible.html('[data-list="properties"]'), /properties\.unavailable/)
+  assert.match(illisible.cache('[data-bind="revenue-total"]').textContent, /revenue\.unavailable/,
+    'une liste de biens illisible affiche un total comme si tout allait bien')
+
+  // Et avec un total VALIDE mais des biens illisibles : meme refus. C'est le
+  // cas que mon rendu laissait passer.
+  const avecTotal = bancDeRendu({ biens: null, ecran: { biens: null, revenus: { mois: '2026-11', total: { total_cents: 50000, recu_cents: 50000, a_venir_cents: 0, bruts: 0, refuses: { montant: 0, date: 0 }, motifs: {} }, par_bien: {} } } })
+  avecTotal.interne.renderRevenus()
+  assert.match(avecTotal.cache('[data-bind="revenue-total"]').textContent, /revenue\.unavailable/,
+    'un total s affiche sur une liste de biens illisible')
 })
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1053,6 +1128,12 @@ test("LE TEST QUI COMPTE (M2) : l'etat « aucun logement » ne s'affiche QUE sur
 // fonction etait exposee par ce banc et INAPPELABLE (le module des avis n'etait
 // pas injecte, et l'appeler levait `ReferenceError`). Onze mutations du code
 // neuf survivaient.
+
+// ⚠ MODULE ES : `import()` ET NON `require`. Node leve
+// ERR_REQUIRE_ESM_RACE_CONDITION sur un `require` de module ES en cours de
+// chargement — meme patron que `tests/avis-recents-dom.test.js`.
+let M_AVIS
+test.before(async () => { M_AVIS = await import('../shared/avis-recents.js') })
 
 const AVIS_SERVEUR = [{
   id: 'r1', bien_ref: '209413', ota: 'airbnb', recu_le: '2026-10-20T10:00:00Z',

@@ -35,6 +35,15 @@ const COMPTE_B = 'bbbb0000-1111-4222-8333-444444444444'
 
 const copie = (x) => JSON.parse(JSON.stringify(x))
 
+// ⚠ LE MOIS COURANT SE CALCULE, IL NE S'ECRIT PAS. Regle du depot : dates
+// relatives si le test lit l'horloge, dates figees s'il injecte le temps. Ici
+// `charger()` sans `horloge` laisse le module lire l'horloge reelle, donc la
+// fixture doit la suivre — un « 2026-10 » fige rougirait le 1er novembre.
+const moisDeLHorloge = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
+
 function charger ({ horloge = null } = {}) {
   const magasin = new Map()
   const localStorage = {
@@ -343,4 +352,53 @@ test("LE TEST QUI COMPTE : l'accueil n'ecrit au cache que ce qu'il vient d'affic
     "l'accueil n'ecrit pas le cache avec la cle utilisateur + compte")
   // ⚠ ET L'AGE EST GARDE EN ETAT, parce que l'ecran doit pouvoir le montrer.
   assert.match(page, /ageCache/, "l'age du cache n'est pas garde : l'ecran ne peut pas le dire")
+})
+
+// ─── Les revenus : gardes 12 h, mais SEULEMENT pour le mois courant ──────────
+
+test("LE TEST QUI COMPTE : le bloc revenus se garde pour le mois COURANT", () => {
+  // Decision Q8 de Thierry du 24 octobre 2026 : « Cache des revenus par bien :
+  // autorise 12 h, purge a la deconnexion. » Ce sont des totaux par LOGEMENT,
+  // pas des montants par voyageur — donc cachables, contrairement aux cinq
+  // blocs critiques.
+  const { ecrire, lire } = charger()
+  const mois = moisDeLHorloge()
+  const avecRevenus = { ...ECRAN, mois, revenus: { mois, total: { total_cents: 123400 } } }
+  ecrire('aujourdhui', MOI, COMPTE_A, avecRevenus)
+  // ⚠ `lire` rend une ENVELOPPE `{ donnees, age_ms }`, pas les donnees nues.
+  // Ma premiere version lisait `.revenus` a la racine et rougissait en
+  // accusant le module : le test etait faux, pas le code.
+  const relu = copie(lire('aujourdhui', MOI, COMPTE_A)).donnees
+  assert.ok(relu.revenus, 'le bloc revenus du mois courant doit etre garde')
+  assert.strictEqual(relu.revenus.total.total_cents, 123400)
+})
+
+test("LE TEST QUI COMPTE : un AUTRE mois n est PAS garde — sinon il se repeindrait a la place du bon", () => {
+  // ⚠ LA CLE DU CACHE PORTE L'ECRAN, L'UTILISATEUR ET LE COMPTE, JAMAIS LE MOIS.
+  // Un hote qui consulte octobre, puis revient le lendemain sur son accueil,
+  // verrait donc les chiffres d'OCTOBRE repeints instantanement sous l'etiquette
+  // du mois courant — un total faux, affiche avec l'aplomb des vrais, pendant
+  // douze heures. Ce n'est pas un defaut de confidentialite : c'est un defaut de
+  // JUSTESSE, et il est de la meme famille que
+  // `fait_pour_vous.surreservation` — la donnee critique vit dans la VALEUR d'un
+  // champ, pas dans le bloc.
+  const { ecrire, lire } = charger()
+  const autre = '2024-03'
+  ecrire('aujourdhui', MOI, COMPTE_A, { ...ECRAN, mois: autre, revenus: { mois: autre, total: { total_cents: 999900 } } })
+  const relu = copie(lire('aujourdhui', MOI, COMPTE_A)).donnees
+  assert.strictEqual(relu.revenus, undefined,
+    'les revenus d un autre mois sont gardes : ils s afficheront a la place du mois courant')
+  // Le reste de l'ecran reste garde : on retire un bloc, pas la page.
+  assert.ok(relu.biens, 'le reste de l ecran a disparu avec le bloc revenus')
+})
+
+test('un bloc revenus sans mois, ou malforme, n est pas garde', () => {
+  // Un bloc dont on ne peut pas VERIFIER le mois ne se garde pas : le repli sur
+  // est de ne rien afficher instantanement, pas d afficher peut-etre faux.
+  const { ecrire, lire } = charger()
+  for (const revenus of [{ total: { total_cents: 1 } }, {}, null, 'x', 42, [], { mois: null }, { mois: '2026-13' }]) {
+    ecrire('aujourdhui', MOI, COMPTE_A, { ...ECRAN, revenus })
+    const relu = copie(lire('aujourdhui', MOI, COMPTE_A)).donnees
+    assert.strictEqual(relu.revenus, undefined, `garde a tort : ${JSON.stringify(revenus)}`)
+  }
 })
