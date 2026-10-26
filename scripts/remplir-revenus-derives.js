@@ -2,7 +2,7 @@
 // scripts/remplir-revenus-derives.js — LE REMPLISSAGE INITIAL des colonnes
 // derivees des revenus (architecture decidee par Thierry, 27 octobre 2026).
 //
-// Le writer pose les dix colonnes sur toute reservation qu'il ECRIT. Les
+// Le writer pose les colonnes derivees sur toute reservation qu'il ECRIT. Les
 // reservations deja en base — 1 436 lignes en production — n'ont jamais ete
 // reecrites depuis : elles n'ont donc aucune colonne derivee, et l'ecran les
 // verrait comme « non calculable ». Ce script les reprend, UNE FOIS.
@@ -18,7 +18,7 @@
 // verifie la REFERENCE DU PROJET (lib/empreinte-base.js). Le nombre de biens
 // ne decide plus — il derive avec la donnee (26 octobre 2026).
 //
-// ⚠ IL NE TOUCHE QUE LES DIX COLONNES DERIVEES. Ni `snapshot`, ni `raw`, ni
+// ⚠ IL NE TOUCHE QUE LES COLONNES DERIVEES. Ni `snapshot`, ni `raw`, ni
 // `property_id` : la cle provider reste la verite du coeur, et `property_uuid`
 // vient a cote d'elle. Un script de rattrapage qui reecrit le snapshot
 // rouvrirait la detection de changement et renverrait des messages aux
@@ -189,7 +189,7 @@ const PAGES_MAX = 100
       }
 
       if (!GO) continue
-      // ⚠ ON ECRIT PAR `id`, LA CLE PRIMAIRE, ET SEULEMENT LES DIX COLONNES.
+      // ⚠ ON ECRIT PAR `id`, LA CLE PRIMAIRE, ET SEULEMENT LES COLONNES DERIVEES.
       // Un upsert sur (user_id, booking_id) reecrirait la ligne entiere et
       // pourrait toucher `snapshot` — donc rouvrir la detection de changement.
       const { error: eU } = await sb.from('bookings_snapshot')

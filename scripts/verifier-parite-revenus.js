@@ -6,7 +6,7 @@
 //     scripts/verifier-parite-revenus.js [--base=STAGING|PRODUCTION] [--mois=YYYY-MM]
 //
 // ⚠ POURQUOI CE SCRIPT EXISTE. L'architecture decidee par Thierry deplace le
-// calcul des revenus de l'ECRAN vers l'ECRITURE : le writer pose dix colonnes
+// calcul des revenus de l'ECRAN vers l'ECRITURE : le writer pose colonnes derivees
 // derivees, et deux fonctions SQL les somment. `lib/revenus/mois.js` ne sert
 // plus l'ecran — il reste au depot comme ORACLE, et ce script est ce qui rend
 // ce mot vrai. Sans lui, « l'oracle » serait un commentaire : du code que plus
@@ -260,6 +260,7 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
   let moisAvecSejours = 0
   let appels = 0
   let bornesProbantes = 0
+  let bornesHorsMois = 0
 
   for (const compte of comptes) {
     // Les lignes du compte, au format de l'oracle, BLOCAGES EXCLUS — parce que
@@ -430,6 +431,29 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
               + `${champ} : SQL ${bSql[champ]} / oracle ${attendu.total[champ]}`)
           }
         }
+        // ⚠ ET LES RESERVES SE BORNENT AUSSI, ce qui n'etait exerce par RIEN
+        // (constat de la review). `revenus_hors_mois` partait avec
+        // `p_refs: null` partout, alors que c'est la fonction dont Thierry a
+        // fait changer la semantique membre le 27 octobre : « un membre
+        // delegue ne doit voir ni le compte ni le montant des sejours sans
+        // bien ». Cette branche-la est la seule garde de cloisonnement de ces
+        // fonctions, puisque la cle de service contourne la RLS.
+        const { data: horsBorne, error: eHB } = await sb.rpc('revenus_hors_mois', {
+          p_user_id: compte, p_mois: mois, p_refs: perimetre
+        })
+        appels++
+        if (eHB) {
+          console.error(`\nECHEC : revenus_hors_mois a refuse un perimetre borne — ${eHB.message}`)
+          process.exit(1)
+        }
+        const hb = (horsBorne && horsBorne[0]) || {}
+        // Un membre ne voit NI le compte NI le montant des sejours sans bien.
+        if (n(hb.hors_biens) !== 0 || n(hb.hors_biens_cents) !== 0) {
+          ecarts.push(`${mois} · PERIMETRE BORNE · les sejours sans bien FUITENT vers un membre : `
+            + `${n(hb.hors_biens)} sejour(s), ${CENT(n(hb.hors_biens_cents))}`)
+        }
+        bornesHorsMois++
+
         // ⚠ ET LE PERIMETRE DOIT RETIRER QUELQUE CHOSE. Si le bien choisi porte
         // tout le mois, la comparaison est vraie sans rien prouver du
         // cloisonnement — elle vaudrait « tout = tout ». On ne peut pas
@@ -479,6 +503,13 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
   // base a un seul bien, ou dont tous les sejours d'un mois portent le meme
   // bien, la comparaison bornee est vraie sans rien prouver. Le taire laisserait
   // croire que `p_refs` a ete verifie.
+  // ⚠ ET LE CLOISONNEMENT DES RESERVES SE DIT, LUI AUSSI.
+  if (bornesHorsMois > 0) {
+    console.log(`  reserves bornees EPROUVEES sur ${bornesHorsMois} mois/compte `
+      + '(un membre ne voit ni le compte ni le montant des sejours sans bien)')
+  } else {
+    console.log('  ⚠ reserves bornees NON EPROUVEES : aucun compte a deux biens ou plus.')
+  }
   if (bornesProbantes > 0) {
     console.log(`  perimetre borne EPROUVE sur ${bornesProbantes} mois/compte `
       + '(le sous-ensemble retirait bien des sejours)')

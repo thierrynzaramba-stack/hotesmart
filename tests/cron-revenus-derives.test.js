@@ -177,7 +177,7 @@ test("LE TEST QUI COMPTE : un marqueur NON ECRIT arrete tout", async () => {
 })
 
 test("LE TEST QUI COMPTE : sans delais lisibles, il n'ecrit RIEN", async () => {
-  // ⚠ DERIVER AVEC UNE TABLE VIDE POSERAIT DIX COLONNES A `null` sur des
+  // ⚠ DERIVER AVEC UNE TABLE VIDE POSERAIT COLONNES DERIVEES A `null` sur des
   // lignes qui en portaient de justes : un rattrapage qui APPAUVRIT. La
   // distinction entre « je n'ai pas pu lire » et « il n'y a rien » est celle
   // que tout cet ecran passe son temps a tenir.

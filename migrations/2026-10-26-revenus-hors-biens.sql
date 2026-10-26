@@ -194,10 +194,11 @@ grant execute on function
 
 -- ╶╶╶ PREUVE, A COLLER JUSTE APRES ╶╶╶
 --
--- ATTENDU — TROIS LIGNES, ET TROIS EXACTEMENT :
+-- ATTENDU — TROIS LIGNES, ET TROIS EXACTEMENT
+-- (ordre alphabetique, chacune nommee dans `objet`) :
+--   droit     revenus_hors_mois -> public ne peut pas
 --   fonction  revenus_hors_mois -> 3 arguments
 --   surcharge revenus_hors_mois -> 1 seule version
---   droit     revenus_hors_mois -> public ne peut pas
 --
 -- ⚠ LA LIGNE « surcharge » EST CELLE QUI COMPTE. Si
 -- elle dit 2, l'ancienne fonction a deux arguments
@@ -233,11 +234,23 @@ select 'droit',
     on n.oid = p.pronamespace
  where n.nspname = 'public'
    and p.proname = 'revenus_hors_mois'
--- ⚠ L'ORDRE EST CELUI DE L'ANNONCE, PAS L'ALPHABET.
--- `order by 1, 2` rendait droit / fonction / surcharge,
--- alors que le texte annonce fonction / surcharge /
--- droit : on lisait la premiere ligne en croyant lire
--- l'autre.
- order by case objet when 'fonction' then 1
-                     when 'surcharge' then 2
-                     else 3 end;
+-- ⚠⚠ `order by 1`, ET SURTOUT PAS UNE EXPRESSION.
+-- COLLE EN ECHEC SUR STAGING LE 26 OCTOBRE 2026 :
+-- PostgreSQL REFUSE une expression dans un ORDER BY
+-- qui suit un UNION (code 0A000) — seuls un numero de
+-- colonne ou un nom de colonne de sortie sont permis.
+-- Thierry l'a corrige en `order by 1` pour collar.
+--
+-- ⚠ ET J'AVAIS CASSE UNE FORME QUI MARCHAIT. Le
+-- `order by 1, 2` d'origine etait valide ; je l'ai
+-- remplace par ce `case` pour satisfaire un constat de
+-- review COSMETIQUE — l'ordre d'affichage des trois
+-- lignes — sans aucun moyen de l'executer. Les quatre
+-- autres migrations du lot utilisent `order by 1, 2`
+-- et sont toutes collees.
+--
+-- Les lignes sortent donc dans l'ordre alphabetique :
+-- droit, fonction, surcharge. C'est moins lisible que
+-- l'ordre annonce, et ca n'a aucune importance : les
+-- trois portent leur nom dans la colonne `objet`.
+ order by 1;

@@ -502,7 +502,7 @@ module.exports = async (req, res) => {
   //
   // L'etat reel : le payload provider n'est lu qu'UNE FOIS, a l'ECRITURE de la
   // reservation (`lib/revenus/derive.js`, appele par le writer unique), qui pose
-  // dix colonnes derivees. Cet endpoint ne fait plus que LIRE trois agregats
+  // colonnes derivees. Cet endpoint ne fait plus que LIRE trois agregats
   // SQL — aucun `raw`, aucun `delais_versement`, aucune pagination.
   //
   // C'est l'architecture decidee par Thierry le 27 octobre 2026, et elle est la
@@ -649,6 +649,17 @@ module.exports = async (req, res) => {
       indisponibles.push('revenus')
       return null
     }
+    // ⚠ UNE REPONSE SANS ERREUR MAIS SANS DONNEE REFUSE AUSSI (constat de la
+    // review). La doctrine du lot — « seul un `false` explicite autorise » —
+    // etait appliquee a la sonde mais pas a la FORME des agregats : un `data`
+    // nul sans `error` donnait un total a zero presente comme un fait. Peu
+    // atteignable via PostgREST, mais c'est exactement l'asymetrie qu'on vient
+    // de payer deux fois dans ce lot.
+    if (!Array.isArray(parBien)) {
+      console.error('[ecran/aujourdhui] revenus_du_mois : reponse sans donnee')
+      indisponibles.push('revenus')
+      return null
+    }
     const ligneSonde = Array.isArray(sonde) ? sonde[0] : sonde
     if (!ligneSonde || ligneSonde.incomplet !== false) {
       // ⚠ `!== false` ET NON `=== true`. Une reponse vide, un champ absent ou
@@ -692,9 +703,20 @@ module.exports = async (req, res) => {
 
     // ─── La mise en forme, et elle ne CALCULE rien ────────────────────────
     //
-    // ⚠ LES SOMMES VIENNENT DE POSTGRES, EN `bigint`, DONC EN CHAINES. Un
-    // `+` sur deux chaines les CONCATENE : « 40000 » + « 30000 » donnerait
-    // « 4000030000 ». `Number()` sur chacune, une fois, a l'entree.
+    // ⚠ UN GARDE-FOU DE CONVERSION, ET SON MOTIF ETAIT FAUX. J'avais ecrit
+    // « LES SOMMES VIENNENT DE POSTGRES, EN `bigint`, DONC EN CHAINES » :
+    // mesure sur staging, la reponse reelle est `{"sejours":2,"recu_cents":0}`
+    // — des NOMBRES JSON. PostgREST sait rendre un `bigint` en nombre quand il
+    // tient dans un double, et nos centimes y tiennent largement.
+    //
+    // Le garde-fou reste, parce qu'il protege de deux choses REELLES : un
+    // `bigint` au-dela de 2^53 que PostgREST serialiserait alors en chaine, et
+    // un `null` rendu par un agregat vide. Un `+` sur deux chaines les
+    // CONCATENE — « 40000 » + « 30000 » donnerait « 4000030000 » — et
+    // `Number(null)` vaut 0, pas NaN.
+    //
+    // Ce qui change : ce n'est plus « les sommes SONT des chaines », c'est
+    // « elles peuvent l'etre, et on ne veut pas le savoir ici ».
     const n = (v) => {
       const x = Number(v)
       return Number.isFinite(x) ? x : 0

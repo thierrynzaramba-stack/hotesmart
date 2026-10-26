@@ -135,45 +135,43 @@ grant execute on function
 
 -- ╶╶╶ PREUVE, A COLLER JUSTE APRES ╶╶╶
 --
--- ATTENDU — DEUX LIGNES, ET DEUX EXACTEMENT.
+-- ⚠⚠ DEUX REQUETES SEPAREES, SANS UNION ET SANS
+-- ORDER BY, ET C'EST LA LECON DU 26 OCTOBRE 2026. La
+-- preuve de la migration precedente a ECHOUE au collage
+-- (code 0A000) : j'y avais mis une EXPRESSION dans un
+-- ORDER BY suivant un UNION, ce que PostgreSQL refuse.
+-- J'avais casse une forme qui marchait, pour un motif
+-- cosmetique, sans pouvoir l'executer.
 --
--- ⚠ ET C'EST LE COMPTE QUI TRANCHE, PAS LE TEXTE D'UNE
--- LIGNE (constat de review). J'avais ecrit « si la
--- premiere dit ABSENTE » : aucune branche ne produit ce
--- mot. Si la fonction manque, la branche `fonction`
--- rend ZERO ligne et la branche `droit` rend
--- « ok : public ne peut pas » — parce que `bool_or` sur
--- un ensemble vide rend NULL, donc le `else`. On
--- lisait donc UNE ligne rassurante sur une migration
--- qui n'avait pas pris.
+-- Je n'ai pas de serveur PostgreSQL : je ne peux donc
+-- pas eprouver une preuve avant de la donner. La
+-- reponse n'est pas d'ecrire une construction plus
+-- savante — c'est de n'en ecrire AUCUNE. Ces deux
+-- requetes n'emploient que `select`, `join`, `where`,
+-- `count(*)` et `has_function_privilege`, toutes
+-- presentes dans des migrations DEJA collees de ce lot.
 --
--- La requete compte donc elle-meme, et le dit :
---   fonction revenus_calcul_incomplet -> 1 version(s)
---   droit    revenus_calcul_incomplet -> public ne
---            peut pas
+-- ATTENDU, REQUETE A : une ligne, `versions = 1`.
+--   « 0 » = le `create` n'a pas pris. Ne pas
+--   poursuivre, et ne pas lire la requete B : sans
+--   fonction, elle ne rend AUCUNE ligne, ce qui n'est
+--   pas rassurant mais muet.
 --
--- « 0 version(s) » = le `create` n'a pas pris : ne pas
--- poursuivre, et surtout ne pas se fier a la ligne
--- « droit ».
+-- ATTENDU, REQUETE B : une ligne, `public_peut = false`.
+--   « true » = il faut rejouer le `revoke` ci-dessus.
 
-select 'fonction'::text as objet,
-       'revenus_calcul_incomplet'::text as nom,
-       count(*)::text || ' version(s)' as detail
+select count(*) as versions
   from pg_proc p
   join pg_namespace n
     on n.oid = p.pronamespace
  where n.nspname = 'public'
-   and p.proname = 'revenus_calcul_incomplet'
-union all
-select 'droit',
-       'revenus_calcul_incomplet',
-       case when bool_or(has_function_privilege(
-              'public', p.oid, 'EXECUTE'))
-            then 'DANGER : public peut EXECUTE'
-            else 'ok : public ne peut pas' end
+   and p.proname = 'revenus_calcul_incomplet';
+
+
+select has_function_privilege(
+         'public', p.oid, 'EXECUTE') as public_peut
   from pg_proc p
   join pg_namespace n
     on n.oid = p.pronamespace
  where n.nspname = 'public'
-   and p.proname = 'revenus_calcul_incomplet'
- order by 1, 2;
+   and p.proname = 'revenus_calcul_incomplet';
