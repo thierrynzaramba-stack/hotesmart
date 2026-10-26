@@ -57,8 +57,13 @@ async function appeler (handler, req) { const res = reponse(); await handler(req
   console.log(`Base : ${projet}`)
   const { count: biens } = await sb.from('properties').select('*', { count: 'exact', head: true })
   console.log(`Empreinte : ${biens} bien(s)\n`)
-  if (projet !== PROJET_STAGING || biens !== 3) {
-    console.error(`ECHEC : ce script ECRIT. Base STAGING attendue (${PROJET_STAGING}, 3 biens).`)
+    // ⚠ LE NOMBRE DE BIENS N'EST PLUS UNE GARDE (26 octobre 2026). Il valait
+    // « la base est bien celle que je crois », et staging en porte QUATRE
+    // depuis qu'un bien y a ete cree : cette seconde ceinture refusait donc
+    // toute execution. La reference du PROJET, elle, ne derive pas — c'est
+    // elle qui garde, et le compte reste imprime a titre d'information.
+  if (projet !== PROJET_STAGING) {
+    console.error(`ECHEC : ce script ECRIT. Base STAGING attendue (${PROJET_STAGING}).`)
     process.exit(1)
   }
 

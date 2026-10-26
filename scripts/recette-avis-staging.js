@@ -26,6 +26,7 @@
 //   node --env-file=.env.staging scripts/recette-avis-staging.js --role=prestataire
 //   node --env-file=.env.staging scripts/recette-avis-staging.js --nettoyer
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 const crypto = require('node:crypto')
 
 const URL = process.env.SUPABASE_URL
@@ -54,10 +55,12 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
     console.error(`ECHEC : ce script ECRIT. Il ne tourne que sur STAGING (${PROJET_STAGING}).`)
     process.exit(1)
   }
-  if (biens !== 3) {
-    console.error('ECHEC : projet de staging reconnu, mais 3 biens attendus. La base a change.')
-    process.exit(1)
-  }
+    // ⚠ LE NOMBRE DE BIENS N'EST PLUS UNE GARDE (26 octobre 2026). Il valait
+    // « la base est bien celle que je crois », et staging en porte QUATRE
+    // depuis qu'un bien y a ete cree : cette seconde ceinture refusait donc
+    // toute execution. La reference du PROJET, elle, ne derive pas — c'est
+    // elle qui garde, et le compte reste imprime a titre d'information.
+    console.log(`Empreinte : ${biens} bien(s) sur STAGING.`)
 
   const { data: props } = await sb.from('properties')
     .select('id, user_id, name, provider_property_id, provider').order('created_at').limit(2)

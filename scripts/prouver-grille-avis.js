@@ -12,13 +12,16 @@
 //
 // Usage : node --env-file=.env.staging scripts/prouver-grille-avis.js
 //
-// ⚠ STAGING UNIQUEMENT, ET IL LE VERIFIE (empreinte 3 biens). Il ECRIT, puis
+// ⚠ STAGING UNIQUEMENT, ET IL LE VERIFIE PAR LA REFERENCE DU PROJET
+// (lib/empreinte-base.js, 26 octobre 2026 — l'empreinte n'est PLUS le nombre
+// de biens, qui derive avec la donnee). Il ECRIT, puis
 // NETTOIE dans un `finally`, et RELIT pour le prouver.
 //
 // ⚠ UN REFUS DOIT PORTER LE BON CODE. Une insertion refusee parce qu'une
 // colonne obligatoire manque (23502) ne prouve rien sur la contrainte qu'on
 // teste : on exige 23514 (check) ou 23503 (cle etrangere), et on nomme le reste.
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
@@ -44,7 +47,12 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
     console.error(`ECHEC : ce script ECRIT. Il ne tourne que sur STAGING (${PROJET_STAGING}), et SUPABASE_URL pointe sur « ${projet} ».`)
     process.exit(1)
   }
-  if (biens !== 3) { console.error('ECHEC : projet de staging reconnu, mais 3 biens attendus. La base a change : relis la garde avant de forcer.'); process.exit(1) }
+    // ⚠ LE NOMBRE DE BIENS N'EST PLUS UNE GARDE (26 octobre 2026). Il valait
+    // « la base est bien celle que je crois », et staging en porte QUATRE
+    // depuis qu'un bien y a ete cree : cette seconde ceinture refusait donc
+    // toute execution. La reference du PROJET, elle, ne derive pas — c'est
+    // elle qui garde, et le compte reste imprime a titre d'information.
+    console.log(`Empreinte : ${biens} bien(s) sur STAGING.`)
 
   const aNettoyer = []
   try {
