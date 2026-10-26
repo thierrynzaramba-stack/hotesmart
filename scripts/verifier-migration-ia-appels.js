@@ -2,13 +2,14 @@
 // scripts/verifier-migration-ia-appels.js — la migration du journal des appels
 // IA (migrations/2026-10-09-ia-appels.sql) est-elle appliquee, et sous la bonne
 // forme ? Meme methode que verifier-migration-grille-hote.js : empreinte en
-// tete (5 biens = production, 3 = staging), colonnes lues par leur NOM.
+// tete (la reference du projet), colonnes lues par leur NOM.
 //
 //   node --env-file=<.env de la base visee> scripts/verifier-migration-ia-appels.js
 //
 // ⚠ LECTURE SEULE. Limite connue (dette 32) : ni policies ni index prouves ici.
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 
 const COLONNES = ['id', 'created_at', 'fonction', 'user_id', 'property_id', 'booking_id', 'modele',
   'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'cout_usd',
@@ -18,7 +19,19 @@ const COLONNES = ['id', 'created_at', 'fonction', 'user_id', 'property_id', 'boo
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
   const { count, error } = await sb.from('properties').select('id', { count: 'exact', head: true })
   if (error || !Number.isInteger(count)) { console.error('ECHEC : empreinte illisible', error ? error.message : ''); process.exit(1) }
-  console.log(`Projet ${String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]} · biens = ${count} (5 = production, 3 = staging)`)
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Base ${base} · biens = ${count}`)
+  // ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, ET ELLE REFUSE (26 octobre 2026).
+  // Ce script imprimait « biens = N (5 = production, 3 = staging) » puis
+  // continuait sur n'importe quelle base designee par l'environnement. Deux
+  // defauts dans une ligne : la legende est FAUSSE depuis que staging porte
+  // quatre biens, et une legende n'est pas une garde — elle se lit apres coup,
+  // dans une sortie que personne ne relit quand tout s'est bien passe.
+  if (base === 'INCONNUE') {
+    console.error(`ECHEC : projet Supabase inconnu — ni la production, ni staging.`)
+    console.error(`Un resultat qui ne dit pas OU il a ete obtenu ne prouve rien.`)
+    process.exit(1)
+  }
   let echecs = 0
   for (const c of COLONNES) {
     const { error: e } = await sb.from('ia_appels').select(c).limit(0)
