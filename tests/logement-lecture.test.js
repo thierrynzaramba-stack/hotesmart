@@ -1629,26 +1629,38 @@ test('LE TEST QUI COMPTE : AUCUNE garde par provider ne precede le refus du coeu
   const finDuBloc = src.indexOf("if (req.method === 'POST')", i)
   assert.ok(finDuBloc > i, 'le POST ne suit plus le DELETE : la borne du bloc est a revoir')
   const bloc = src.slice(i, finDuBloc)
-  const gardes = [...bloc.matchAll(/prop\.provider === 'channex' \|\| prop\.provider === 'channel'/g)]
-  // ⚠ CE TEST COMPTAIT LES GARDES ; IL MESURE MAINTENANT LEUR PLACE, et c'est
-  // lui qui m'a arrete le 26 octobre 2026 quand le croisement avec le
-  // partenaire en a ajoute une deuxieme. Compter etait le mauvais invariant :
-  // le nombre de gardes par provider est libre — il y en a deux aujourd'hui,
-  // le croisement en direct et l'appel de suppression, et les deux sont
-  // legitimes puisque ni l'un ni l'autre n'a de sens pour un bien Beds24.
+  // ⚠ CE TEST A CHANGE D'INVARIANT DEUX FOIS, ET CHAQUE FOIS IL AVAIT RAISON DE
+  // CRIER. Il comptait les gardes `prop.provider === 'channex'` et exigeait 1 ;
+  // puis il a mesure leur PLACE quand le croisement en a ajoute une seconde ;
+  // le 28 octobre 2026 elles ont DISPARU toutes les deux, remplacees par
+  // `proprieteChezLeProvider(prop)` — parce qu'un bien encore
+  // `provider = 'beds24'` dont la bascule a provisionne la cible EST chez le
+  // partenaire, et que le test du `provider` ne le voyait pas.
   //
-  // CE QUI NE DOIT JAMAIS CHANGER est que le REFUS DU COEUR ne depende pas du
-  // provider : c'est le defaut d'origine, celui qui rendait la garde morte pour
-  // un bien en cours de migration. Aucune garde par provider ne doit donc
-  // preceder l'appel a `suppressionPossible`.
+  // CE QUI NE DOIT JAMAIS CHANGER, et c'est le defaut d'origine : le REFUS DU
+  // COEUR ne depend d'AUCUNE condition de provider ni de cle. Tout ce qui
+  // decide « ce bien est-il chez le partenaire ? » vient APRES lui.
   const iRefus = bloc.indexOf('suppressionPossible(prop, canaux,')
   assert.ok(iRefus > 0, 'la regle partagee n est plus appelee dans le DELETE')
-  assert.ok(gardes.length >= 1, 'plus aucune garde par provider : un bien Beds24 appellerait Channex')
-  const avantLeRefus = gardes.filter(g => g.index < iRefus)
+
+  const conditions = [
+    ...bloc.matchAll(/prop\.provider === '(?:channex|channel)'/g),
+    ...bloc.matchAll(/proprieteChezLeProvider\(prop\)/g)
+  ]
+  assert.ok(conditions.length >= 1,
+    'plus aucune condition ne garde les appels au partenaire : un bien Beds24 l appellerait')
+  const avantLeRefus = conditions.filter(g => g.index < iRefus)
   assert.deepEqual(avantLeRefus.map(g => g.index), [],
-    `${avantLeRefus.length} garde(s) par provider PRECEDE(NT) le refus du coeur : `
-    + 'il est redevenu conditionnel au provider, donc aveugle aux biens en cours '
-    + 'de migration. C est le defaut d origine.')
+    `${avantLeRefus.length} condition(s) de cle ou de provider PRECEDE(NT) le refus du `
+    + 'coeur : il est redevenu conditionnel, donc aveugle aux biens en cours de '
+    + 'migration. C est le defaut d origine.')
+
+  // ⚠ ET LA RESOLUTION DE CLE N'EST PAS RECOPIEE. Le `||` qui prenait la cle
+  // SOURCE d'abord a laisse supprimer un bien en bascule dont la propriete
+  // CIBLE vendait encore : une quatrieme regle de resolution dans ce fichier,
+  // c'est la divergence garantie.
+  assert.ok(!/provider_property_id \|\| prop\.migration_target_property_id/.test(bloc),
+    'la resolution de cle est recopiee dans le DELETE, et elle prend la cle SOURCE d abord')
   assert.match(bloc, /encore relié à une annonce/)
 })
 

@@ -10,6 +10,9 @@
 const { createClient } = require('@supabase/supabase-js')
 const { peutCouperLaPousseeDesPrix } = require('../lib/pilote-tarifaire')
 const { requirePermission, UUID_RE, REF_SURE_RE } = require('../lib/require-permission')
+// ⚠ LA RESOLUTION DE LA CLE PARTENAIRE N'EST PAS RECOPIEE : `rate-sync` la
+// tient pour tout le depot, migration comprise.
+const { proprieteChezLeProvider } = require('../lib/rate-sync')
 const { refusPlancher, valeurEffective } = require('../lib/plancher-vs-base')
 const { refsDuPerimetre } = require('../lib/permissions')
 const { poserDerivesParDefaut } = require('../lib/rate-plans-derives')
@@ -117,12 +120,45 @@ function buildRatePlanOptions(basePrice, incGuests, extraFee, cap) {
 // et le refus existe precisement pour empecher un logement de se retrouver sans
 // personne pour le tarifer.
 async function canauxActifsDuBien (prop) {
-  const cle = prop && (prop.provider_property_id || prop.migration_target_property_id)
+  // ⚠⚠ LA CLE VIENT DU RESOLVEUR CANONIQUE, ET ELLE NE VENAIT PAS DE LUI.
+  // Constat BLOQUANT de la review du 28 octobre 2026.
+  //
+  // Cette ligne faisait `provider_property_id || migration_target_property_id` :
+  // la cle SOURCE d'abord, la cible seulement en repli. Or pendant une bascule
+  // c'est la CIBLE qui porte les canaux — c'est ce que dit le coeur de donnees,
+  // et seul le re-keying promeut la cle. Le repli ne servait donc JAMAIS au cas
+  // de migration : il ne jouait que quand la source etait vide.
+  //
+  // Mesure en appelant le handler : un bien `provider='channex'` dont l'ancienne
+  // cle existe et dont le canal Airbnb est actif sur la CIBLE se supprimait —
+  // le croisement interrogeait l'ancienne cle (liste vide), le
+  // `DELETE /properties/<ancienne>` rendait 404 lu comme un succes, et les 19
+  // tables partaient. Reservations, messages et menages effaces, pendant que la
+  // propriete cible garde ses canaux et continue de vendre. Irreversible.
+  //
+  // `proprieteChezLeProvider` (lib/rate-sync.js) tranche deja cette question
+  // pour l'ARI, les prix, les mappings et les activations ; son en-tete dit
+  // qu'elle vaut « pour TOUT ce qu'on lui adresse ». Une quatrieme regle de
+  // resolution de cle dans ce fichier, c'est la divergence garantie — le defaut
+  // meme que ce lot repare entre l'ecran et le serveur.
+  const cle = proprieteChezLeProvider(prop)
   if (!cle) return []
   try {
     const r = await channelCall('GET', `/channels?filter[property_id]=${encodeURIComponent(cle)}`)
     if (!r || !r.ok) return null
-    const rows = Array.isArray(r.json?.data) ? r.json.data : []
+    // ⚠ UNE REPONSE 200 SANS LISTE N'EST PAS « AUCUN CANAL » (constat MAJEUR de
+    // la meme review). `{data:{id:'c1'}}` — un objet au lieu d'un tableau — et
+    // `{meta:{total:3}}` — le partenaire annonce trois canaux et n'en rend
+    // aucun — passaient tous deux pour une liste VIDE, donc pour une
+    // autorisation de supprimer. Mesure : 200 et purge dans les deux cas.
+    //
+    // `lib/canaux-du-bien.js` refuse explicitement ces deux formes
+    // (`reponse_invalide`, `tronquee`) sur le MEME endpoint. Ici, l'inconnu doit
+    // refuser comme partout ailleurs dans ce chemin : on rend `null`.
+    if (!Array.isArray(r.json?.data)) return null
+    const annonces = Number(r.json?.meta?.total)
+    if (Number.isFinite(annonces) && annonces > r.json.data.length) return null
+    const rows = r.json.data
     return rows
       .filter(c => c.attributes?.is_active === true)
       .map(c => String(c.attributes?.channel || c.attributes?.ota_name || 'canal'))
@@ -828,8 +864,23 @@ module.exports = async function handler(req, res) {
           .maybeSingle()
         // ⚠ UNE HORLOGE ILLISIBLE N'EST PAS UNE HORLOGE ABSENTE, mais les deux
         // menent au meme refus prudent ici : `releveDuCompte` reste `null`.
-        if (eH) console.error('[channel-property] DELETE : canaux_releve illisible', eH.message)
-        else {
+        if (eH) {
+          // ⚠ UNE HORLOGE ILLISIBLE EST UN RELEVE EN ECHEC, et elle ne l'etait
+          // pas ici — constat MAJEUR de la review du 28 octobre 2026.
+          //
+          // `lireCanaux`, cote ecran, calcule
+          // `horlogeEnPanne || echecVisibleParLHote(...)` ; ce bloc ne gardait
+          // que la seconde moitie et laissait `releveEnEchec` a `false`.
+          // Mesure en appelant le handler : `canaux_releve` illisible + une
+          // ligne `mappe = false` perimee -> 200, 19 purges, DELETE parti au
+          // partenaire, alors que la FICHE affichait « Supprimer » desactive.
+          //
+          // Le serveur etait donc MOINS strict que l'ecran, l'inverse exact de
+          // l'invariant que ce lot annonce — et c'est la forme meme du defaut
+          // qu'il repare : un masquage d'interface sans garde derriere.
+          console.error('[channel-property] DELETE : canaux_releve illisible', eH.message)
+          releveEnEchec = true
+        } else {
           // ⚠ `vu_le`, PAS LA LIGNE. C'est la valeur que l'ecran passe
           // (lib/logement/lecture.js : `horloge: horlogeLigne ? horlogeLigne.vu_le : null`),
           // et ce handler annonce « memes entrees ». Passer la ligne entiere la
@@ -911,7 +962,14 @@ module.exports = async function handler(req, res) {
     // partenaire deux lignes plus bas. On ne paie pas un aller-retour de plus
     // dans le cas qui aboutit — on le paie dans le cas qu'on refuse, c'est-a-dire
     // celui ou on vient d'eviter un effacement irreversible.
-    if (prop.provider === 'channex' || prop.provider === 'channel') {
+    // ⚠ LA PORTE EST « CE BIEN A-T-IL UNE PROPRIETE CHEZ LE PARTENAIRE ? », PAS
+    // « SON `provider` DIT-IL CHANNEX ? » — seconde porte du constat BLOQUANT.
+    // Un bien encore `provider='beds24'` mais dont la bascule a provisionne la
+    // cible EST chez le partenaire, avec ses canaux : mesure en appelant le
+    // handler, il se supprimait en 200 avec 19 tables purgees et ZERO appel au
+    // partenaire — ni croisement, ni suppression de la propriete cible, qui
+    // reste donc en vente.
+    if (proprieteChezLeProvider(prop)) {
       const canauxVivants = await canauxActifsDuBien(prop)
       if (canauxVivants === null) {
         console.error('[channel-property] DELETE : canaux du partenaire illisibles')
@@ -959,9 +1017,14 @@ module.exports = async function handler(req, res) {
     // ⚠ UN 404 RESTE UN SUCCES, et ce n'est pas une indulgence : il veut dire
     // que la propriete n'est DEJA plus chez le partenaire. Refuser la purge
     // dans ce cas rendrait le bien definitivement insupprimable.
+    // ⚠ ET LA SUPPRESSION SUIT LA MEME RESOLUTION. Sans elle, un bien en bascule
+    // voyait son ANCIENNE propriete supprimee (404, lu comme un succes) et la
+    // CIBLE — celle qui porte les canaux et qui vend — rester intacte, pendant
+    // que HoteSmart purgeait tout.
     let channelDeleted = null
-    if ((prop.provider === 'channex' || prop.provider === 'channel') && providerId) {
-      const r = await channelCall('DELETE', `/properties/${providerId}`)
+    const cleChezLePartenaire = proprieteChezLeProvider(prop)
+    if (cleChezLePartenaire) {
+      const r = await channelCall('DELETE', `/properties/${cleChezLePartenaire}`)
       channelDeleted = r.ok || r.status === 404
       if (!channelDeleted) {
         console.error('[channel-property] DELETE channel echec', r.status, r.json)

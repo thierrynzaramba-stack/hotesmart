@@ -625,3 +625,137 @@ test('la cle de MIGRATION est celle qu on interroge quand elle existe', async ()
   assert.ok(trace.fetchs.some(f => f.includes('CIBLE-9')),
     `le partenaire n a pas ete interroge sur la cle cible : ${trace.fetchs.join(' | ')}`)
 })
+
+// ─── LE BIEN EN BASCULE, ET LE CABLAGE QU'AUCUN TEST N'EPROUVAIT ──────────────
+//
+// ⚠ CES TESTS VIENNENT D'UNE REVIEW QUI A TROUVE UN BLOQUANT ET TROIS MUTATIONS
+// RESTEES VERTES SUR LA SUITE ENTIERE (28 octobre 2026). Ce que le double
+// masquait n'etait plus sa mecanique — il projette les colonnes et asserte les
+// filtres — mais des CHEMINS JAMAIS APPELES :
+//
+//   · `releveEnEchec = false` en dur dans le handler -> 6289 verts. La decision
+//     n. 1 de Thierry (« si le releve est en echec, on refuse ») n'etait
+//     eprouvee qu'au niveau de `suppressionPossible`. Le CABLAGE pouvait mourir
+//     en silence, exactement comme la garde morte qu'on repare.
+//   · le croisement conditionne a « le coeur n'a AUCUNE ligne » -> 6289 verts.
+//     Tous les tests du croisement posaient `canaux: []`, donc la fenetre qui
+//     JUSTIFIE le croisement — une ligne perimee pendant que l'annonce vend —
+//     n'etait couverte par rien.
+//   · le repli de cle inverse -> 6289 verts. Rien ne figeait QUELLE cle est
+//     interrogee quand les deux existent, et mon test « la cle de MIGRATION est
+//     celle qu'on interroge » posait `provider_property_id: null` : il mesurait
+//     le repli, pas la precedence, et son titre promettait le contraire.
+
+test('LE TEST QUI COMPTE : un bien EN BASCULE, encore Beds24, est protege par sa cle CIBLE', async () => {
+  // ⚠ LE BLOQUANT. Pendant une bascule, la propriete du partenaire est la CIBLE
+  // et le bien porte encore `provider = 'beds24'` jusqu'au re-keying. Les deux
+  // portes du handler testaient `prop.provider === 'channex'` : ce bien ne les
+  // franchissait pas, donc ni croisement ni suppression chez le partenaire —
+  // 200, 19 tables purgees, et la propriete cible garde ses canaux et continue
+  // de vendre. Irreversible.
+  poser({
+    bien: { id: BIEN, name: 'Bien en bascule', provider: 'beds24',
+            provider_property_id: 'ANCIENNE', provider_rate_plan_id: null,
+            migration_target_property_id: 'CIBLE-9' },
+    canaux: [],
+    canauxVivants: canalVivant('airbnb')
+  })
+  const r = await appeler()
+  assert.equal(r.code, 409,
+    `un bien en bascule s est supprime (${r.code}) : sa propriete cible vendait encore`)
+  assert.equal(r.corps.source, 'partenaire')
+  assert.deepEqual(trace.deletes, [], `des donnees ont ete purgees : ${trace.deletes.join(', ')}`)
+  // ⚠ ET C'EST BIEN LA CLE CIBLE QUI A ETE INTERROGEE.
+  assert.ok(trace.fetchs.some(f => f.includes('CIBLE-9')),
+    `le partenaire a ete interroge sur la mauvaise cle : ${trace.fetchs.join(' | ')}`)
+  assert.ok(!trace.fetchs.some(f => f.includes('ANCIENNE')),
+    'la cle SOURCE a ete interrogee alors que la bascule met les canaux sur la CIBLE')
+})
+
+test('LE TEST QUI COMPTE : quand les DEUX cles existent, c est la CIBLE qu on interroge', async () => {
+  // La PRECEDENCE, pas le repli. `provider_property_id || migration_target` —
+  // la forme d'avant — prenait la source d'abord, donc le repli ne servait
+  // JAMAIS au cas de migration. Une mutation qui inverse le repli restait verte.
+  poser({
+    bien: { id: BIEN, name: 'Deux cles', provider: 'channex',
+            provider_property_id: 'ANCIENNE', provider_rate_plan_id: 'PLAN',
+            migration_target_property_id: 'CIBLE-9' },
+    canaux: [], canauxVivants: { status: 200, body: { data: [] } },
+    partenaire: { status: 200, body: { data: {} } }
+  })
+  await appeler()
+  const interroges = trace.fetchs.join(' | ')
+  assert.ok(interroges.includes('CIBLE-9'), `la cible n a pas ete interrogee : ${interroges}`)
+  assert.ok(!interroges.includes('ANCIENNE'),
+    `la cle SOURCE a ete utilisee alors que la cible existe : ${interroges}`)
+})
+
+test('LE TEST QUI COMPTE : le CABLAGE du refus sur releve en echec, mesure sur le handler', async () => {
+  // ⚠ LA DECISION N. 1 DE THIERRY, EPROUVEE LA OU ELLE AGIT. Elle ne l'etait
+  // qu'au niveau de `suppressionPossible` : mettre `releveEnEchec = false` en
+  // dur dans le handler laissait la suite ENTIERE verte.
+  poser({
+    canaux: [{ ota: 'airbnb', titre: 'A', actif: true, mappe_pour_ce_bien: false }],
+    releve: { vu_le: '2026-10-26T08:00:00Z', ok: false, erreur: 'timeout' }
+  })
+  const r = await appeler()
+  assert.equal(r.code, 409, `le releve en echec n a pas refuse (${r.code})`)
+  assert.equal(r.corps.motif, 'canaux_illisibles')
+  assert.deepEqual(trace.deletes, [])
+  assert.deepEqual(trace.fetchs, [], 'le partenaire a ete appele malgre le refus')
+})
+
+test('LE TEST QUI COMPTE : une horloge ILLISIBLE refuse aussi, comme a l ecran', async () => {
+  // Le serveur etait MOINS strict que l'ecran : `lireCanaux` calcule
+  // `horlogeEnPanne || echecVisibleParLHote`, le handler ne gardait que la
+  // seconde moitie. Mesure : horloge illisible + ligne perimee -> 200, purges,
+  // DELETE parti, pendant que la fiche affichait « Supprimer » desactive.
+  poser({
+    canaux: [{ ota: 'airbnb', titre: 'A', actif: true, mappe_pour_ce_bien: false }],
+    erreurReleve: true
+  })
+  const r = await appeler()
+  assert.equal(r.code, 409, `une horloge illisible a laisse supprimer (${r.code})`)
+  assert.equal(r.corps.motif, 'canaux_illisibles')
+  assert.deepEqual(trace.deletes, [])
+})
+
+test('un bien du canal SANS reference partenaire reste supprimable, meme en panne de releve', async () => {
+  // ⚠ LA CONTRE-EPREUVE DU DURCISSEMENT. Une creation arretee en route n'a
+  // aucune propriete chez le partenaire, donc aucune annonce possible : refuser
+  // serait un refus sans objet, et l hote n aurait RIEN a deconnecter. Ma
+  // premiere version du durcissement le refusait — le « davantage » que la
+  // decision de Thierry ne couvrait pas.
+  poser({
+    bien: { id: BIEN, name: 'Creation arretee', provider: 'channex',
+            provider_property_id: null, provider_rate_plan_id: null,
+            migration_target_property_id: null },
+    canaux: [], releve: { vu_le: '2026-10-26T08:00:00Z', ok: false, erreur: 'timeout' }
+  })
+  const r = await appeler()
+  assert.equal(r.code, 200,
+    `un bien sans reference partenaire a ete bloque par une panne de releve : ${JSON.stringify(r.corps)}`)
+  assert.ok(!trace.fetchs.some(f => f.includes('/channels')),
+    'le partenaire a ete interroge pour un bien qui n y existe pas')
+})
+
+test('LE TEST QUI COMPTE : une reponse 200 MALFORMEE ou TRONQUEE du partenaire refuse', async () => {
+  // ⚠ `null` N'EST PAS « AUCUN », ET LA SOURCE LE CASSAIT. Deux corps mesures
+  // passaient pour une liste VIDE, donc pour une autorisation de supprimer :
+  // `{data:{id:'c1'}}` (un objet au lieu d'un tableau) et `{meta:{total:3}}`
+  // (le partenaire annonce trois canaux et n'en rend aucun). Le module frere
+  // refuse explicitement ces deux formes sur le MEME endpoint
+  // (`reponse_invalide`, `tronquee`), et le handler applique deja ce
+  // raisonnement a sa propre borne de 200 lignes.
+  for (const [nom, corps] of [
+    ['un objet au lieu d un tableau', { data: { id: 'c1' } }],
+    ['aucune donnee', {}],
+    ['tronquee : meta.total superieur a la liste', { data: [], meta: { total: 3 } }]
+  ]) {
+    poser({ canaux: [], canauxVivants: { status: 200, body: corps } })
+    const r = await appeler()
+    assert.equal(r.code, 409, `${nom} : le serveur a repondu ${r.code} et supprime`)
+    assert.equal(r.corps.motif, 'partenaire_illisible', nom)
+    assert.deepEqual(trace.deletes, [], nom)
+  }
+})
