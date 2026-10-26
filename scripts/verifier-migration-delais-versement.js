@@ -37,8 +37,17 @@ if (!URL || !KEY) {
   console.error('SUPABASE_URL et SUPABASE_SERVICE_KEY sont requis.')
   process.exit(2)
 }
+// ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, PAS LE NOMBRE DE BIENS — et c'est
+// une correction du 26 octobre 2026, mesuree. Les verificateurs du depot
+// identifient la base par « 5 biens = production, 3 = staging » ; staging en
+// porte QUATRE depuis qu'un bien y a ete cree, et ce script a refuse de
+// travailler sur une base parfaitement identifiable. Une empreinte qui derive
+// avec la donnee n'est pas une empreinte : la reference du projet, elle, ne
+// bouge pas. Le compte des biens reste imprime — il situe la base d'un coup
+// d'oeil — mais il ne decide plus.
 const PROJET = (URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''
 const PROD = 'cjmrizpdyhrcurmgyrhs'
+const STAGING = 'ortyofzzdsthlhqmzsnq'
 const ECRIT = process.argv.includes('--ecrit')
 if (ECRIT && PROJET === PROD) {
   console.error(`REFUS : ${PROJET} est la PRODUCTION. --ecrit est reserve a staging.`)
@@ -67,9 +76,13 @@ const ATTENDU = {
   const { count: biens, error: eB } = await sb.from('properties')
     .select('*', { count: 'exact', head: true })
   if (eB) { console.error('Empreinte illisible :', eB.message); process.exit(1) }
-  const nom = biens === 5 ? 'PRODUCTION' : biens === 3 ? 'STAGING' : 'INCONNUE'
-  console.log(`Base : ${PROJET} — ${biens} bien(s) — ${nom}\n`)
-  if (nom === 'INCONNUE') { console.error('Empreinte inconnue : arret.'); process.exit(1) }
+  const nom = PROJET === PROD ? 'PRODUCTION' : PROJET === STAGING ? 'STAGING' : 'INCONNUE'
+  console.log(`Base : ${PROJET} — ${nom} — ${biens} bien(s)\n`)
+  if (nom === 'INCONNUE') {
+    console.error(`Projet inconnu (${PROJET}) : arret. Un resultat qui ne dit pas OU`)
+    console.error('il a ete obtenu ne prouve rien.')
+    process.exit(1)
+  }
 
   // 1 et 2 : la table, sa forme, et ses trois lignes.
   const { data, error } = await sb.from('delais_versement')
@@ -105,26 +118,76 @@ const ATTENDU = {
 
   // 3 : les deux CHECK mordent. On ECRIT pour le savoir, donc staging seulement.
   if (ECRIT) {
-    const refus = async (ligne, quoi) => {
+    // ⚠ UN REFUS NE PROUVE RIEN S'IL NE DIT PAS POURQUOI (constat de la revue
+    // du 26 octobre 2026). Ma premiere version comptait TOUT refus comme la
+    // preuve du CHECK : une ligne temoin restee d'un passage interrompu
+    // (violation de cle primaire), ou n'importe quelle contrainte ajoutee plus
+    // tard, rendait les trois sondes vertes SANS que le CHECK ait ete exerce
+    // une seule fois. On exige donc que le message NOMME la contrainte.
+    const refus = async (ligne, quoi, contrainte) => {
       const { error: e } = await sb.from('delais_versement').insert(ligne)
-      if (e) ok(`${quoi} : refuse par la base`)
-      else {
+      if (!e) {
         ko(`${quoi} : ACCEPTE par la base`)
         await sb.from('delais_versement').delete().eq('canal', ligne.canal)
+        return
       }
+      const dit = String(e.message || '') + ' ' + String(e.details || '')
+      if (dit.includes(contrainte)) ok(`${quoi} : refuse par ${contrainte}`)
+      else ko(`${quoi} : refuse, mais pas par ${contrainte} — ${e.message}`)
     }
-    await refus({ canal: '_temoin_base', base: 'au depart', jours: 1 }, 'base inconnue')
-    await refus({ canal: '_temoin_jours', base: 'depart', jours: -1 }, 'delai negatif')
-    await refus({ canal: '_temoin_plafond', base: 'depart', jours: 999 }, 'delai hors plafond')
+    // Chaque temoin porte un canal qui lui est propre : deux sondes sur le meme
+    // canal se refuseraient l'une l'autre par la cle primaire, et c'est
+    // precisement le faux refus qu'on vient de fermer.
+    await refus({ canal: '_temoin_base', base: 'au depart', jours: 1 },
+      'base inconnue', 'delais_versement_base_connue')
+    await refus({ canal: '_temoin_jours', base: 'depart', jours: -1 },
+      'delai negatif', 'delais_versement_jours_sense')
+    await refus({ canal: '_temoin_plafond', base: 'depart', jours: 999 },
+      'delai hors plafond', 'delais_versement_jours_sense')
+    // ⚠ ET LE `default 0` RETIRE (migration du 26 octobre) : une insertion qui
+    // OUBLIE la colonne doit etre refusee, pas completee par une supposition.
+    const { error: eD } = await sb.from('delais_versement')
+      .insert({ canal: '_temoin_defaut', base: 'depart' })
+    if (eD) ok('colonne `jours` omise : refusee (pas de valeur par defaut)')
+    else {
+      ko('colonne `jours` omise : ACCEPTEE — un canal a zero jour entre en silence')
+      await sb.from('delais_versement').delete().eq('canal', '_temoin_defaut')
+    }
   } else {
     console.log('  (les CHECK ne sont pas eprouves : --ecrit, sur staging seulement)')
   }
 
   // 4 : la RLS. Lecture ouverte, ecriture fermee.
   if (pub) {
-    const { data: lu, error: eL } = await pub.from('delais_versement').select('canal')
-    if (eL) ko(`la cle publique ne LIT pas : ${eL.message} — l ecran ne saurait pas ranger`)
-    else ok(`la cle publique lit ${(lu || []).length} ligne(s), comme prevu`)
+    // ⚠ `anon` N'EST PAS `authenticated`, ET MA PREMIERE VERSION CONFONDAIT LES
+    // DEUX (mesure du 26 octobre 2026). La policy vise le role `authenticated` :
+    // la cle publique SEULE lit donc zero ligne, ce qui est correct — et ne
+    // prouve RIEN sur le cas reel, un hote connecte qui ouvre son accueil.
+    // J'affichais « 0 ligne(s), comme prevu » : vrai, et hors sujet.
+    const { data: anon, error: eA } = await pub.from('delais_versement').select('canal')
+    if (eA) ko(`lecture anonyme en erreur : ${eA.message}`)
+    else if ((anon || []).length) ko(`la cle PUBLIQUE lit ${anon.length} ligne(s) : la policy vise `
+      + '`authenticated`, pas tout le monde')
+    else ok('la cle publique (role `anon`) ne lit rien — la policy vise `authenticated`')
+
+    // LE CAS REEL : un hote CONNECTE. Sans ce point, « lecture ouverte » n'est
+    // qu'une intention lue dans le SQL.
+    const email = process.env.TEST_EMAIL
+    const mdp = process.env.TEST_PASSWORD
+    if (email && mdp) {
+      const { data: session, error: eS } = await pub.auth.signInWithPassword({ email, password: mdp })
+      if (eS || !session || !session.session) {
+        ko(`connexion du compte de test impossible : ${(eS && eS.message) || 'pas de session'}`)
+      } else {
+        const { data: luCo, error: eC } = await pub.from('delais_versement').select('canal, base, jours')
+        if (eC) ko(`un hote CONNECTE ne lit pas la table : ${eC.message} — l ecran ne saurait pas ranger`)
+        else if (!(luCo || []).length) ko('un hote connecte lit ZERO ligne : la policy ne mord pas comme annonce')
+        else ok(`un hote connecte lit ${luCo.length} ligne(s)`)
+        await pub.auth.signOut()
+      }
+    } else {
+      console.log('  (lecture connectee non eprouvee : TEST_EMAIL / TEST_PASSWORD absents)')
+    }
     const { error: eE } = await pub.from('delais_versement')
       .insert({ canal: '_temoin_rls', base: 'depart', jours: 1 })
     if (eE) ok('la cle publique n ECRIT pas')
