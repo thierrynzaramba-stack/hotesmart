@@ -216,6 +216,12 @@ test('LE TEST QUI COMPTE : la garde de CANAL pose l en-tete avant ses quatre ref
   assert.equal(res.code, 400, 'et c est bien le premier refus, avant toute lecture')
 })
 
+// Les endpoints qui portent leur PROPRE autorisation, sans passer par une des
+// gardes partagees. La valeur dit OU elle est posee : c'est ce qu'on relit.
+const AUTORISE_LUI_MEME = {
+  'api/sms.js': 'resout `user` par supabase.auth.getUser, borne par user_id, et chaque reponse a donnee de compte est derriere `if (!user) return 401`'
+}
+
 test('LE TEST QUI COMPTE : ce qui repond AVANT la garde ne porte aucune donnee de compte', () => {
   // ⚠ L'INVARIANT EXACT, ET POURQUOI CE N'EST PAS « tous les endpoints posent
   // l'en-tete ».
@@ -248,7 +254,20 @@ test('LE TEST QUI COMPTE : ce qui repond AVANT la garde ne porte aucune donnee d
   for (const f of fichiersApi()) {
     const src = code(lire(f))
     const h = src.search(/module\.exports\s*=\s*(?:async\s+)?(?:function\s*\w*\s*)?\(\s*\w+\s*,\s*\w+\s*\)\s*(?:=>\s*)?\{/)
-    const g = src.search(/posterEnTetesPrives\(|await (requirePermission|verifierSession|requirePermissionPourCanal)\(/)
+    // ⚠ LA SONDE VISE LA GARDE SEULE, ET PAS `posterEnTetesPrives` — constat de
+    // la review du 26 octobre 2026, sur le correctif de la dette 90 lui-meme.
+    // Le recensement du dessous accepte les deux formes, parce que sortir du
+    // COMPTAGE est justement ce qu'on attend d'un endpoint corrige. Ici c'est
+    // l'inverse : si `g` tombe sur l'en-tete, la tranche `[h, g]` ne contient
+    // plus aucun `res.status(...)`, l'endpoint quitte CET audit, et l'invariant
+    // que tout ce fichier invoque pour ne PAS poser l'en-tete partout cesse de
+    // le couvrir. Mesure : les cinq endpoints de la dette 90 en sortaient, donc
+    // les fichiers hors audit passaient de 1 (`api/sms.js`) a 6 — et une
+    // injection le prouve, pas une lecture : un `res.status(400).json({ error:
+    // 'sonde', bien })` glisse avant la garde d'`api/yield.js` laissait la
+    // suite a 14 verts. Ce n'est plus une question de cache a ce moment-la,
+    // c'est une divulgation sans authentification.
+    const g = src.search(/await (requirePermission|verifierSession|requirePermissionPourCanal)\(|contexteDEcran\(/)
     if (h < 0 || g < 0 || h > g) continue
     const entre = src.slice(h, g)
     // Chaque reponse emise avant la garde : son corps doit etre un libelle
@@ -262,11 +281,31 @@ test('LE TEST QUI COMPTE : ce qui repond AVANT la garde ne porte aucune donnee d
       }
     }
   }
-  assert.deepEqual(fautifs, [],
-    'ces reponses partent AVANT la garde, donc avec le defaut Vercel `public`,\n' +
-    'et leur corps n est pas un libelle generique : il peut porter une donnee de\n' +
-    'compte. Posez `posterEnTetesPrives(res)` en tete de ce handler — et ajoutez\n' +
-    'la fonction aux doubles de test de `lib/require-permission` qui la cassent.')
+  // ⚠ UNE EXEMPTION SE COMPTE, ELLE NE SE DECRIT PAS — et celle-ci est apparue
+  // en recentrant la sonde sur la garde. `api/sms.js` ne passe par AUCUNE des
+  // gardes partagees : il resout `user` lui-meme (`supabase.auth.getUser`),
+  // borne chaque requete par `user_id`, et chacune de ses reponses a donnee de
+  // compte est derriere un `if (!user) return 401` (l.197, 227, 254, 273).
+  // L'autorisation est donc bien la, avant la donnee — c'est l'en-tete qui
+  // manquait, et il est pose a la main en tete du handler depuis le 22 octobre.
+  // ⚠ ON NE L'EXEMPTE PAS EN ELARGISSANT LA SONDE A `auth.getUser(`, et c'est
+  // le choix qui compte : ce motif exempterait AUSSI, en silence, un futur
+  // endpoint qui appellerait `getUser` sans rien faire de son resultat. Une
+  // liste nommee se relit ; un motif plus large ne se relit pas.
+  const exempte = (x) => Object.keys(AUTORISE_LUI_MEME).some(f => x.startsWith(`${f} :`))
+  assert.deepEqual(fautifs.filter(x => !exempte(x)), [],
+    'ces reponses partent AVANT toute verification d autorisation, et leur corps\n' +
+    'n est pas un libelle generique : il peut porter une donnee de compte — ce\n' +
+    'n est plus une question de cache a ce moment-la, c est une divulgation sans\n' +
+    'authentification. Deplacez la reponse SOUS la garde. UN DE PLUS que\n' +
+    'AUTORISE_LUI_MEME : nommez son autorisation propre avant de l ajouter.')
+  // Et l'exemption doit SERVIR. Le jour ou `api/sms.js` passe par une garde
+  // partagee, cette liste devient un trou qui ne protege plus rien.
+  for (const f of Object.keys(AUTORISE_LUI_MEME)) {
+    assert.ok(fautifs.some(x => x.startsWith(`${f} :`)),
+      `${f} n apparait plus dans cet audit : son exemption ne sert plus, retirez-la ` +
+      'de AUTORISE_LUI_MEME pour qu il soit protege comme les autres.')
+  }
 })
 
 test('RECENSEMENT : la surface des reponses precoces est CHIFFREE', () => {
