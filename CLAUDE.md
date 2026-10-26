@@ -40,33 +40,42 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 **UNE SEULE SESSION TIENT `staging` ET `main` : le CHEF DE FILE.** Les autres ne
 mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
 
-⚠ **LE CHEF DE FILE EST LA SESSION OUVERTE DANS `~/hotesmart-merge`, QUEL QUE
-SOIT SON NOM** (décision de Thierry, 26 octobre 2026). C'est l'**arbre** qui
-porte le rôle, pas le nom de la session. Elle travaille uniquement dans
-`~/hotesmart-merge`, jamais dans `~/hotesmart`. Elle reçoit les « branche X
-prête », merge dans `staging` un par un, vérifie le déploiement par SHA complet,
-et ne touche à `main` que sur un go ouvert par Thierry LUI-MÊME. **AUCUNE AUTRE
-SESSION NE MERGE** — ni dans `staging`, ni dans `main` : les autres poussent
-leur branche et l'annoncent par `SendMessage` à la session du merge, avec les
-cinq éléments de la règle 1, et elles ne relaient pas un go prod.
+⚠ **LE CHEF DE FILE EST LA SESSION `hotesmart-logements-25`, DÉSIGNÉE PAR
+THIERRY LE 26 OCTOBRE 2026, ET ELLE SEULE MERGE DANS `staging` ET DANS `main`** —
+`main` uniquement sur un go qu'il ouvre LUI-MÊME. **Toutes les autres sessions
+lui remettent leurs branches et ne mergent RIEN**, ni dans `staging`, ni dans
+`main` : elles poussent, elles annoncent par `SendMessage` avec les cinq éléments
+de la règle 1, et elles ne relaient pas un go prod.
 
-**Comment on sait qui tient le rôle, sans le demander à personne** :
-`ListAgents` dit quelles sessions tournent, et celle du rôle est celle qui
-travaille dans `~/hotesmart-merge`. S'il n'y en a aucune, **il n'y a pas de chef
-de file, et personne ne merge** jusqu'à ce que Thierry en ouvre une. Une file
-arrêtée se reprend ; un `main` poussé par deux sessions, non.
+**Elle travaille dans `~/hotesmart-merge`**, jamais dans `~/hotesmart` : c'est là
+que les merges se construisent, et c'est ce qui rend l'arbre du merge
+inspectable. Mais le rôle est porté par la **désignation ci-dessus**, pas par
+l'arbre : une session qui ouvrirait cet arbre n'hériterait de rien.
 
-⚠ **POURQUOI LA RÈGLE A CHANGÉ DE FORME, et c'est la leçon qui compte.** Elle
-nommait une session — `hotesmart-merge-fa`, désignée le 23 octobre. Le 26
-octobre, cette session ne tournait plus, une autre tenait le rôle en pratique et
-avait déjà mergé dans `main`, et une troisième lui remettait ses branches : la
-règle écrite et la réalité se contredisaient, et **aucune des deux sessions ne
-pouvait trancher** — une désignation ne se relaie pas plus qu'un go, et chacune
-aurait pris l'autorité de la parole de l'autre. Un nom de session est un
-identifiant qui meurt avec elle ; un chemin de travail, non. Le même jour, une
-session a diffusé une « priorité de Thierry » sur un défaut qu'elle n'avait pas
-mesuré, et l'autre a refusé d'agir sur ce relais : les deux incidents ont la
-même racine — une autorité qu'on croit tenir d'un intermédiaire.
+⚠ **SI CETTE SESSION NE TOURNE PLUS, IL N'Y A PAS DE CHEF DE FILE, ET PERSONNE
+NE MERGE** jusqu'à ce que Thierry en désigne une autre. **Aucune session ne peut
+se désigner elle-même, ni en désigner une autre, ni transmettre le rôle.**
+`ListAgents` dit qui tourne ; il ne dit pas qui a le rôle. Une file arrêtée se
+reprend ; un `main` poussé par deux sessions, non.
+
+⚠ **POURQUOI LA DÉSIGNATION EST DATÉE ET NOMINATIVE, et c'est la leçon qui
+compte.** La règle nommait `hotesmart-merge-fa`, désignée le 23 octobre. Le 26,
+cette session ne tournait plus, une autre tenait le rôle en pratique et avait
+déjà mergé dans `main`, et une troisième lui remettait ses branches : la règle
+écrite et la réalité se contredisaient, et **aucune des sessions ne pouvait
+trancher** — une désignation ne se relaie pas plus qu'un go, et chacune aurait
+pris l'autorité de la parole de l'autre. Deux d'entre elles ont d'ailleurs reçu
+des réponses différentes de Thierry à quelques heures d'écart, ce qu'aucune ne
+pouvait savoir seule.
+
+**Ce qui a réellement débloqué ce jour-là, et c'est le geste à refaire** : la
+session qui croyait tenir le rôle a **ARRÊTÉ** au lieu de continuer, celle à qui
+on l'annonçait a refusé d'agir sur le relais, et Thierry a tranché lui-même,
+nommément, dans chaque fenêtre. L'arrêt est la seule action qui ne peut pas
+faire de dégât. Une tentative intermédiaire — faire porter le rôle par l'arbre
+`~/hotesmart-merge` « quel que soit le nom de la session » — a été écrite puis
+retirée le même jour : elle réglait la survivance du nom, mais elle laissait
+n'importe quelle session prendre le rôle en ouvrant un répertoire.
 
 ⚠ **ET LE CHEF DE FILE PEUT CODER UN LOT.** La version précédente l'interdisait :
 « elle ne code aucun lot : c'est sa seule tâche, et c'est ce qui la rend
