@@ -47,8 +47,18 @@ const { notesDuPerimetre, derniersAvis } = require('../../lib/stats-avis')
 // versement par canal, et l'agregation par mois. Recopier l'une des trois ici
 // ferait deux implementations qui divergent au premier correctif — la dette 17
 // que le depot a deja soldee une fois.
-const { revenusDuMois, fenetreDeLecture } = require('../../lib/revenus/mois')
-const { tableDesDelais } = require('../../lib/revenus/versement')
+// ⚠ LES TROIS IMPORTS DE CALCUL SONT PARTIS, ET C'EST LA MESURE DU CHANGEMENT.
+// Cet endpoint composait `revenusDuMois`, `fenetreDeLecture` et
+// `tableDesDelais` sur 1 436 payloads a chaque ouverture de l'accueil. Il ne
+// calcule plus rien : deux appels d'agregat SQL, et la mise en forme de ce
+// qu'ils rendent. C'est la regle d'architecture de CLAUDE.md prise au mot — un
+// endpoint d'ecran ne lit que des donnees preparees.
+//
+// `lib/revenus/mois.js` reste au depot : il devient l'ORACLE du SQL. C'est lui
+// que `scripts/verifier-parite-revenus.js` fait tourner sur les donnees reelles
+// pour prouver que l'agregat dit la meme chose — un calcul remplace par un
+// autre doit pouvoir etre compare, sinon la migration des chiffres se fait sur
+// parole.
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
 
@@ -505,85 +515,139 @@ module.exports = async (req, res) => {
   // le levier suivant est nomme : ne selectionner de `raw` que les champs
   // utiles (dette 61) profite maintenant a l'accueil lui-meme.
   const lireRevenus = async () => {
+    // ⚠ GARDE SERVEUR DU DROIT, ET ELLE PRECEDE TOUTE LECTURE. Decision Q5 de
+    // Thierry : « comme aujourd'hui, lecture des reservations, limite aux biens
+    // du profil ». Le masquage de l'ecran est un confort ; celui-ci protege.
+    // Le payload part dans le `localStorage` du membre pour 12 h.
     if (!droits.reservations) return null
     if (perimetreVide) return null
 
-    // Les delais, lus en base : ce sont des usages de plateforme, ils changent
-    // sans nous prevenir et la spec interdit de les ecrire en dur.
+    // ─── DEUX AGREGATS SQL, ET PLUS AUCUNE LECTURE DU PAYLOAD ─────────────
+    //
+    // ⚠ C'EST LE CŒUR DE L'ARCHITECTURE DECIDEE PAR THIERRY LE 27 OCTOBRE 2026.
+    // Ce bloc lisait `bookings_snapshot.raw` — le payload provider INTEGRAL —
+    // a chaque ouverture de l'accueil, pour en deduire le canal, le montant net
+    // et la date de versement. Mesure du depot pour cette lecture exacte :
+    // 3,8 Mo et 569-961 ms (docs/kb/performance.md), sur le chemin critique du
+    // premier rendu. Et elle grossissait avec l'historique.
+    //
+    // Le payload n'est plus lu qu'UNE FOIS, a l'ECRITURE de la reservation
+    // (`lib/revenus/derive.js`, appele par le writer unique). Ici, deux appels
+    // qui rendent une ligne par logement : mesure sur staging, 0,1 Ko contre
+    // 40,6 Ko pour la lecture qu'ils remplacent.
+    //
+    // ⚠ ET CE N'EST PAS UNE SOMME STOCKEE. Les totaux sont CALCULES, par un
+    // agregat sur un index partiel — pas par du JavaScript sur 1 436 payloads.
+    // Une somme maintenue a la main derive au premier correctif, et personne ne
+    // le voit.
+
+    // ⚠ LE JOUR DE REFERENCE EST CELUI DE PARIS, PASSE EN PARAMETRE. « Recu »
+    // se compare a ce jour, et `current_date` cote Postgres est en UTC : une
+    // comparaison faite en base se decalerait d'un jour chaque soir entre
+    // minuit et 2 heures. Le depot a deja paye ce decalage.
+    //
+    // ⚠ ET LE PERIMETRE EST PASSE EN UUID. `refsUuid` est la liste des biens
+    // confies a un membre delegue ; `null` veut dire titulaire, donc tout le
+    // compte. C'est la fonction SQL qui applique la borne, et elle traite
+    // `null` comme « aucune borne » — pas comme « aucun bien ».
     requetes++
-    const { data: lignesDelais, error: eD } = await supabase
-      .from('delais_versement').select('canal, base, jours, libelle')
-    if (eD) {
-      // ⚠ SANS LES DELAIS, ON NE RANGE RIEN — et on le DIT. Calculer avec une
-      // table vide mettrait tous les sejours en « delai absent », donc un bloc
-      // a zero euro qui aurait l'air d'un mois sans revenu.
+    const { data: parBien, error: eMois } = await supabase.rpc('revenus_du_mois', {
+      p_user_id: compte,
+      p_mois: moisDemande,
+      p_aujourdhui: jour,
+      p_refs: refsUuid === null ? null : refsUuid
+    })
+    if (eMois) {
+      // ⚠ UNE FONCTION QUI N'EXISTE PAS ENCORE EST UNE ATTENTE, PAS UNE PANNE.
+      // Une migration se colle A LA MAIN dans ce depot : entre le push et le go
+      // de Thierry, la base n'a ni les colonnes ni les agregats. L'ecran dit
+      // alors « non calculable », ce qui est vrai — et ne crie pas au loup.
+      const texte = `${eMois.code || ''} ${eMois.message || ''}`.toLowerCase()
+      const absente = texte.includes('pgrst202') ||
+        texte.includes('revenus_du_mois') ||
+        (texte.includes('function') && texte.includes('does not exist'))
+      if (!absente) {
+        console.error('[ecran/aujourdhui] revenus_du_mois echec:', eMois.message)
+      }
       indisponibles.push('revenus')
       return null
     }
-    const delais = tableDesDelais(lignesDelais || [])
 
-    const fenetre = fenetreDeLecture(moisDemande, delais)
-    if (!fenetre) { indisponibles.push('revenus'); return null }
-
-    // ⚠ LECTURE PAGINEE, ET LA BORNE DE DATE NE S'APPLIQUE QUE SI LA FENETRE SE
-    // DECLARE BORNABLE. Un canal qui se verse sur la RESERVATION casse toute
-    // borne sur `arrival` : une reservation precede son sejour de n'importe
-    // quelle duree, donc un sejour reserve le 29 octobre pour une arrivee en
-    // juillet suivant se verse en novembre et doit etre lu. `fenetreDeLecture`
-    // le declare (`bornable: false`), et c'est le seul endroit ou la decision se
-    // prend.
-    //
-    // ⚠ ET LA PAGINATION N'EST PAS UNE PRECAUTION : une lecture sans borne est
-    // TRONQUEE A 1000 LIGNES SANS ERREUR. Le depot l'a paye une fois — une
-    // lecture de `bookings_snapshot` ajoutee sans borne dans un script neuf. Un
-    // mois ampute de ses dernieres reservations a l'air juste.
-    const PAGE = 1000
-    const PAGES_MAX = 20
-    let lignes = []
-    let tronque = false
-    for (let i = 0; i < PAGES_MAX; i++) {
-      let q = supabase.from('bookings_snapshot')
-        .select('booking_id, property_id, snapshot, raw')
-        .eq('user_id', compte)
-      if (fenetre.bornable) {
-        q = q.gte('snapshot->>arrival', fenetre.debut).lte('snapshot->>arrival', fenetre.fin)
-      }
-      q = bornerRef(q, 'property_id')
-      requetes++
-      const { data, error } = await q.order('booking_id').range(i * PAGE, (i + 1) * PAGE - 1)
-      if (error) { indisponibles.push('revenus'); return null }
-      lignes = lignes.concat(data || [])
-      if (!data || data.length < PAGE) break
-      if (i === PAGES_MAX - 1) tronque = true
+    requetes++
+    const { data: hors, error: eHors } = await supabase.rpc('revenus_hors_mois', {
+      p_user_id: compte,
+      p_refs: refsUuid === null ? null : refsUuid
+    })
+    // ⚠ UN ECHEC ICI N'EFFACE PAS LE MOIS. Les reserves sont un complement :
+    // sans elles, l'ecran affiche des totaux justes et DIT qu'il ne sait pas
+    // compter ce qui en sort. Rendre `null` pour tout le bloc serait perdre des
+    // chiffres corrects a cause d'un compteur.
+    if (eHors) {
+      console.error('[ecran/aujourdhui] revenus_hors_mois echec:', eHors.message)
+      indisponibles.push('revenus_reserves')
     }
-    // ⚠ UNE TRONCATURE SE DIT, elle ne se devine pas. Au-dela de 20 000 sejours
-    // le total serait incomplet : l'ecran doit pouvoir refuser d'afficher un
-    // chiffre plutot qu'en afficher un faux.
-    if (tronque) tronquees.push('revenus')
 
-    // ⚠ LES REFS CONNUES SONT PASSEES AU MODULE, pour qu'il puisse compter
-    // l'argent qui n'atterrira sur AUCUNE ligne de l'ecran (constat GRAVE de la
-    // review du 26 octobre 2026, mesure : 1 000 € d'ecart muet entre le bandeau
-    // et la somme des lignes). Un `property_id` nul, une cle laissee par un
-    // re-keying, un bien supprime : les trois entrent dans le total et sortent
-    // de l'affichage. L'endpoint est le seul endroit qui connaisse les DEUX
-    // cotes.
+    // ─── La mise en forme, et elle ne CALCULE rien ────────────────────────
     //
-    // ⚠ EN CLE TEXTE, PAS EN UUID. `bookings_snapshot.property_id` porte la cle
-    // PROVIDER ; `biens[].id` est un UUID. C'est la regle dure du depot, et la
-    // comparer du mauvais cote declarerait TOUS les revenus orphelins.
-    const lus = await pBiens
-    const refsDesBiens = Array.isArray(lus)
-      ? lus.map(b => b && b.provider_property_id).filter(x => x != null).map(String)
-      : null
-    const out = revenusDuMois(lignes, delais, moisDemande, jour, refsDesBiens)
-    if (!out) { indisponibles.push('revenus'); return null }
+    // ⚠ LES SOMMES VIENNENT DE POSTGRES, EN `bigint`, DONC EN CHAINES. Un
+    // `+` sur deux chaines les CONCATENE : « 40000 » + « 30000 » donnerait
+    // « 4000030000 ». `Number()` sur chacune, une fois, a l'entree.
+    const n = (v) => {
+      const x = Number(v)
+      return Number.isFinite(x) ? x : 0
+    }
+    const vide = () => ({
+      sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0,
+      bruts: 0, refuses: { montant: 0, date: 0 }, motifs: {}
+    })
+    const total = vide()
+    const lignes = {}
+    for (const r of parBien || []) {
+      const l = {
+        sejours: n(r.sejours),
+        recu_cents: n(r.recu_cents),
+        a_venir_cents: n(r.a_venir_cents),
+        total_cents: n(r.total_cents),
+        bruts: n(r.bruts),
+        // ⚠ LE MOTIF N'EST PLUS DETAILLE PAR BIEN, et c'est assume : l'agregat
+        // compte les refus, il ne les nomme pas. Le motif precis vit dans
+        // `bookings_snapshot.motif_non_calculable`, ligne par ligne, pour qui
+        // diagnostique. L'ecran, lui, a besoin du COMPTE — « 2 sans montant » —
+        // et c'est ce que la ligne porte.
+        refuses: { montant: n(r.sans_montant), date: 0 },
+        motifs: {}
+      }
+      // ⚠ LA CLE EST L'UUID DU BIEN, PLUS LA CLE PROVIDER. C'est tout l'objet de
+      // la colonne `property_uuid` : joindre par l'IDENTITE du bien et non par
+      // le numero du provider, qu'un re-keying ou une bascule laisse derriere.
+      // L'ecran joint donc desormais par `b.id`.
+      lignes[String(r.property_uuid == null ? '' : r.property_uuid)] = l
+      for (const c of ['sejours', 'recu_cents', 'a_venir_cents', 'total_cents', 'bruts']) {
+        total[c] += l[c]
+      }
+      total.refuses.montant += l.refuses.montant
+    }
+
+    const h = (hors || [])[0] || {}
     return {
-      ...out,
-      // Ce que l'ecran a besoin de savoir pour etre honnete sur ce qu'il montre.
-      delais_connus: Object.keys(delais).length,
-      fenetre: { debut: fenetre.debut, fin: fenetre.fin, bornable: fenetre.bornable },
-      tronque
+      mois: moisDemande,
+      calcule_le: jour,
+      par_bien: lignes,
+      total,
+      // Les sejours sans date de versement : tous mois confondus, par
+      // construction — sans date, il n'y a pas de mois a leur attribuer.
+      hors_mois: { ...vide(), sejours: n(h.sans_date), refuses: { montant: 0, date: n(h.sans_date) } },
+      // ⚠ ET L'ARGENT RATTACHE A AUCUN BIEN CONNU, qui valait 1 000 EUR d'ecart
+      // MUET entre le bandeau et les lignes avant d'avoir un compteur. Un
+      // membre delegue n'en voit rien : la fonction SQL rend zero des que
+      // `p_refs` est pose, parce que ces reservations ne lui sont pas
+      // attribuables — elles ne sont rattachees a aucun bien.
+      hors_biens: { ...vide(), sejours: n(h.hors_biens), total_cents: n(h.hors_biens_cents) },
+      // ⚠ PLUS DE TRONCATURE POSSIBLE : l'agregat ne pagine pas, il groupe. Le
+      // champ reste a `false` pour que l'ecran n'ait pas a distinguer deux
+      // formes de reponse — et le jour ou un plafond revient, il aura sa place.
+      tronque: false,
+      source: 'agregat_sql'
     }
   }
 

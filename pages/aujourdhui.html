@@ -871,11 +871,22 @@ function renderRevenus () {
   // logement par son nom.
   const parBien = rev.par_bien || {}
   $('[data-list="revenue-rows"]').innerHTML = (etat.biens || []).map(b => {
-    // ⚠ LA CLE EST CELLE QUE L'ENDPOINT A UTILISEE : `property_id` de
-    // `bookings_snapshot`, c'est-a-dire la cle PROVIDER en TEXTE — jamais
-    // l'UUID. C'est la regle dure du depot : « properties.id = UUID ;
-    // property_id des tables enfant = TEXT. Ne JAMAIS joindre naivement. »
-    const d = parBien[String(b.provider_property_id)]
+    // ⚠ LA CLE EST MAINTENANT L'UUID DU BIEN, ET C'EST UN RENVERSEMENT ASSUME
+    // (27 octobre 2026, architecture decidee par Thierry). Jusqu'ici l'endpoint
+    // groupait par `bookings_snapshot.property_id`, c'est-a-dire la cle
+    // PROVIDER en TEXTE, et cette ligne joignait donc par
+    // `b.provider_property_id`.
+    //
+    // L'agregat SQL groupe desormais par `property_uuid` — la colonne derivee
+    // qui porte l'IDENTITE du bien. C'est tout son objet : la cle provider
+    // change au re-keying et a la bascule, l'UUID non. C'etait la cause racine
+    // des 1 000 EUR d'ecart muet entre le bandeau et les lignes.
+    //
+    // La regle dure du depot n'est pas contredite, elle est HONOREE : on ne
+    // joint jamais un UUID a une cle TEXTE. Les deux cotes sont des UUID, et
+    // c'est le writer qui a fait la resolution une fois, a l'ecriture, en
+    // comparant le COUPLE (compte, cle provider).
+    const d = parBien[String(b.id)]
     const nom = `<span class="small" style="flex: 1 1 auto; min-width: 0">${esc(b.name)}</span>`
     if (!d) {
       // Aucun sejour range ce mois-ci pour ce bien. C'est un FAIT — zero euro

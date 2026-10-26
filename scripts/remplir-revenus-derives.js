@@ -132,7 +132,7 @@ const PAGES_MAX = 100
   // ─── 3. Les reservations, par pages ─────────────────────────────────────
   const bilan = {
     lues: 0, aDeriver: 0, ecrites: 0, echecs: 0,
-    sansUuid: 0, sansMontant: 0, sansDate: 0, bruts: 0,
+    sansUuid: 0, sansMontant: 0, sansDate: 0, bruts: 0, blocages: 0,
     parStatut: new Map(), parMotif: new Map(), parDetail: new Map(),
     exemples: []
   }
@@ -164,6 +164,7 @@ const PAGES_MAX = 100
       if (d.montant_net_cents == null) bilan.sansMontant++
       if (d.date_versement == null) bilan.sansDate++
       if (d.montant_est_brut === true) bilan.bruts++
+      if (d.est_blocage === true) bilan.blocages++
       compte(bilan.parStatut, d.statut_canonique || '(aucun)')
       if (d.motif_non_calculable) {
         compte(bilan.parMotif, d.motif_non_calculable)
@@ -223,6 +224,26 @@ const PAGES_MAX = 100
   console.log(`  sans montant calculable    : ${bilan.sansMontant}`)
   console.log(`  sans date de versement     : ${bilan.sansDate}`)
   console.log(`  montants BRUTS (commission inconnue) : ${bilan.bruts}`)
+  // ⚠ LES BLOCAGES SE COMPTENT, parce que c'est une EXCLUSION. Une regle qui
+  // retire des lignes d'un total doit dire combien elle en retire : sans ce
+  // chiffre, on ne peut pas distinguer « l'heuristique a bien travaille » de
+  // « l'heuristique n'a rien reconnu » — et les deux donnent un ecran propre.
+  console.log(`  BLOCAGES (exclus du total et du compte) : ${bilan.blocages}`)
+  // ⚠ ET UN BLOCAGE EST TOUJOURS UN SEJOUR SANS MONTANT, par construction :
+  // `estUnBlocage` exige que le montant ne soit pas calculable. Le reste est
+  // donc une soustraction qui ne peut pas passer sous zero — et si elle y
+  // passe, c'est la regle qui a change sans que ce script le sache. On le dit,
+  // on ne le rattrape pas : un compteur qui se corrige tout seul est un
+  // compteur qui mentira le jour ou il compte faux.
+  const nonCalculables = bilan.sansMontant - bilan.blocages
+  if (nonCalculables < 0) {
+    console.log(`  ⚠ INCOHERENT : ${bilan.blocages} blocage(s) pour seulement `
+      + `${bilan.sansMontant} sejour(s) sans montant. Un blocage sans montant`)
+    console.log('    manquant veut dire que estUnBlocage a change de regle :')
+    console.log('    lib/revenus/derive.js et ce compteur ne sont plus d\'accord.')
+  } else {
+    console.log(`  dont le montant reste « non calculable » : ${nonCalculables} apres exclusion`)
+  }
   console.log('\n  par statut :')
   for (const [s, n] of [...bilan.parStatut.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`    ${String(s).padEnd(14)} ${n}`)
