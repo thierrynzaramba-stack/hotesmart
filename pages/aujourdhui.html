@@ -208,10 +208,12 @@
 <script src="/shared/nav.js"></script>
 <script type="module">
 import { requireAuth } from '/components/auth-guard.js'
-// ⚠ `purgerCachesLocaux` EST LE GESTE PARTAGE DES CINQ CHEMINS DE SORTIE : il
-// reinitialise le compte courant ET vide le cache d'ecran. On ne recopie pas
-// l'un des deux ici — c'est lui qui sait ce qu'il faut oublier.
-import { supabase, signOut, purgerCachesLocaux } from '/shared/supabase.js'
+// ⚠ `signOut` EST LE GESTE COMPLET : purge des caches, fermeture de la session,
+// puis le formulaire. On n'appelle pas ses moities separement — c'est ce que ma
+// premiere version du 401 avait fait, et il en resultait une boucle de
+// redirection, `login` renvoyant vers l'accueil tant que la session locale
+// existait.
+import { supabase, signOut } from '/shared/supabase.js'
 import { initErrorHandler } from '/shared/error-handler.js'
 import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
@@ -270,6 +272,11 @@ const etat = {
 // ⚠ CE QU'IL NE REMPLACE PAS, ET C'EST ASSUMÉ : `/api/menages` (la fenêtre de
 // 400 jours, domaine ménage, repliée au lot (d)) et `/api/yield` (le CA et le
 // TO, remplacés par des tables de résumé au lot (c)).
+// Le numero du chargement en cours : une reponse plus ancienne ne doit pas
+// ecraser une plus recente. Declare AVANT la fonction qui le lit — un `let`
+// place apres marcherait (la fonction n'est appelee que plus tard) mais se
+// relirait mal.
+let sequenceEcran = 0
 async function chargerEcran () {
   // ⚠ LE MOIS DEMANDE VA DANS L'URL, et rien ne le passait jusqu'au
   // 27 octobre 2026 : l'endpoint acceptait `?mois=` depuis le debut, et l'ecran
@@ -282,7 +289,20 @@ async function chargerEcran () {
   // navigateur et celle du serveur peuvent differer d'un jour en fin de mois,
   // et c'est le serveur qui doit trancher.
   const q = etat.moisRevenus ? `?mois=${encodeURIComponent(etat.moisRevenus)}` : ''
-  etat.ecran = await appel('/api/ecran/aujourdhui' + q)
+  // ⚠ UN NUMERO DE SEQUENCE, PARCE QUE DEUX CHARGEMENTS PEUVENT SE CROISER.
+  // Constat d'une review du 27 octobre 2026 : les fleches sont cablees dans
+  // `init()` AVANT la phase reseau, et sur cache chaud la section est deja
+  // visible — donc cliquables pendant tout le chargement. `navEnCours` ne
+  // protegeait que deux navigations entre elles, pas une navigation contre le
+  // chargement initial. Les deux ecrivent `etat.ecran`, et le dernier RESOLU
+  // gagnait : soit le mois choisi par l'hote etait defait sous ses yeux, soit
+  // `init()` ecrivait le cache avec le `mois` d'une periode passee.
+  const monTour = ++sequenceEcran
+  const recu = await appel('/api/ecran/aujourdhui' + q)
+  // Une reponse arrivee apres une plus recente ne s'ecrit pas : elle est
+  // perimee, et ce n'est pas une erreur — c'est une course qu'on a perdue.
+  if (monTour !== sequenceEcran) return etat.ecran
+  etat.ecran = recu
   return etat.ecran
 }
 
@@ -310,7 +330,11 @@ async function allerAuMois (pas) {
   const cible = moisDecale(actuel, pas)
   if (!cible) return
   navEnCours = true
-  for (const b of document.querySelectorAll('.rev-nav__btn')) b.disabled = true
+  // ⚠ `aria-disabled` ET NON `disabled` : desactiver un bouton qui a le focus le
+  // fait perdre au `<body>`, donc un hote au clavier devrait re-tabuler depuis
+  // le haut de la page a chaque mois. Le refus effectif est le `navEnCours`
+  // ci-dessus, qui sort avant tout travail.
+  for (const b of document.querySelectorAll('.rev-nav__btn')) b.setAttribute('aria-disabled', 'true')
   etat.moisRevenus = cible
   try {
     await chargerEcran()
@@ -324,7 +348,7 @@ async function allerAuMois (pas) {
     renderRevenus()
   } finally {
     navEnCours = false
-    for (const b of document.querySelectorAll('.rev-nav__btn')) b.disabled = false
+    for (const b of document.querySelectorAll('.rev-nav__btn')) b.removeAttribute('aria-disabled')
   }
 }
 
@@ -345,30 +369,55 @@ async function allerAuMois (pas) {
 // c'est la session. On va donc la refaire, comme `requireAuth` le fait quand il
 // n'y a pas de session du tout — meme destination, meme geste.
 let sessionPerdue = false
+// ⚠ UNE SESSION PERDUE SE REFERME, ELLE NE SE CONTOURNE PAS. Et ma premiere
+// version faisait les deux erreurs qu'une review a mesurees le 27 octobre 2026 :
+//
+//   · elle purgeait les caches puis faisait `replace('/pages/login.html')` SANS
+//     fermer la session Supabase. Or `pages/login.html` renvoie vers l'accueil
+//     des qu'il trouve une session locale : aujourdhui -> purge -> login ->
+//     session trouvee -> aujourdhui -> 401 -> ... Une BOUCLE infinie de
+//     navigations JS, qu'aucun garde-fou de navigateur n'arrete, et chaque tour
+//     detruisait le compte courant d'un membre delegue.
+//     J'avais ecrit « c'est le geste partage, celui des cinq chemins de
+//     sortie » : seule la MOITIE l'etait. Le geste complet est
+//     `purgerCachesLocaux()` PUIS `auth.signOut()` PUIS la navigation, et c'est
+//     exactement `signOut()` — deja importe dans cette page pour le menu.
+//
+//   · et elle ne gardait pas `session === null`. `getSession()` rafraichit
+//     lui-meme un jeton expire ; quand le rafraichissement ECHOUE — jeton de
+//     rafraichissement perime, rotation deja consommee par un autre onglet — il
+//     rend `{ data: { session: null } }`. On levait alors un TypeError sur
+//     `session.access_token` AVANT d'atteindre la branche 401 : aucune purge,
+//     aucune redirection, et les chiffres du cache restaient a l'ecran. C'est
+//     la forme DOMINANTE de « session expiree », et c'est le constat n. 1 de
+//     Thierry qui se reproduisait a l'identique.
+//     `pages/messages.html` a deja la bonne ligne ; on la copie.
 async function appel (chemin) {
   const { data: { session } } = await supabase.auth.getSession()
+  if (!session || !session.access_token) return refermerLaSession()
   const r = await fetch(chemin, {
     headers: { Authorization: 'Bearer ' + session.access_token, ...enteteCompte() }
   })
   const corps = await r.json().catch(() => ({}))
-  if (r.status === 401) {
-    // ⚠ UNE SEULE FOIS : six blocs partent en parallele, et six `replace()`
-    // empileraient autant d'entrees dans l'historique.
-    if (!sessionPerdue) {
-      sessionPerdue = true
-      // Les caches partent AVANT la redirection : sans ca, le prochain
-      // affichage repeindrait les memes chiffres perimes avant son premier
-      // appel. C'est le geste partage, celui des cinq chemins de sortie.
-      try { await purgerCachesLocaux() } catch (e) { /* un stockage ferme ne doit pas bloquer la sortie */ }
-      window.location.replace('/pages/login.html')
-    }
-    // ⚠ ET ON LEVE QUAND MEME. `replace()` ne stoppe pas l'execution : sans
-    // cette levee, les blocs continueraient de se peindre pendant la
-    // navigation, avec exactement les donnees perimees qu'on vient de purger.
-    const e = new Error('session expiree'); e.status = 401; throw e
-  }
+  if (r.status === 401) return refermerLaSession()
   if (!r.ok) { const e = new Error(corps.error || `HTTP ${r.status}`); e.status = r.status; throw e }
   return corps
+}
+
+// ⚠ UN SEUL CHEMIN DE SORTIE, ET IL LEVE TOUJOURS. `signOut()` navigue, mais
+// une navigation ne stoppe pas l'execution : sans la levee, les six blocs
+// continueraient de se peindre avec les donnees perimees qu'on vient de purger.
+function refermerLaSession () {
+  // Une seule fois : six blocs partent en parallele, et six sorties
+  // empileraient autant d'entrees dans l'historique.
+  if (!sessionPerdue) {
+    sessionPerdue = true
+    // `signOut` purge les caches, ferme la session, puis va au formulaire.
+    // Son echec ne doit pas laisser la page sur des chiffres perimes : on leve
+    // de toute facon, juste apres.
+    Promise.resolve(signOut()).catch(e => console.error('[aujourdhui] sortie de session', e && e.message))
+  }
+  const e = new Error('session expiree'); e.status = 401; throw e
 }
 
 // Exécute des tâches asynchrones par paquets : /api/yield lit tout l'historique
@@ -900,6 +949,21 @@ function renderRevenus () {
     return ind.includes('revenus_calcul_en_cours')
   }
   const videDuTotal = () => {
+    // ⚠⚠ LE LIBELLE DES FLECHES SE MET A JOUR MEME QUAND LE BLOC NE DIT RIEN.
+    // Constat BLOQUANT d'une review du 27 octobre 2026, et c'est le premier clic
+    // de la recette qui le rencontrait : sur un mois dont les colonnes derivees
+    // ne sont pas remplies, l'endpoint rend `revenus: null`, ce rendu-ci efface
+    // `revenue-month`… et le libelle entre les fleches gardait le mois
+    // PRECEDENT. L'hote ne savait plus quel mois il regardait, le clic suivant
+    // repartait du mois servi et semblait sauter deux mois, et `aria-live`
+    // n'annoncait rien puisque le texte n'avait pas change.
+    //
+    // Le mois SERVI est toujours dans le payload, meme quand `revenus` est
+    // `null` : c'est lui qui fait foi ici. Mon commentaire plus bas disait deja
+    // « les fleches et le chiffre doivent parler de la MEME periode » — il ne
+    // couvrait que le chemin ou il y a un chiffre.
+    const nav = $('[data-bind="revenue-month-nav"]')
+    if (nav) nav.textContent = moisEnClair(etat.ecran && etat.ecran.mois)
     const n = $('[data-bind="revenue-total"]')
     if (n) n.textContent = t(calculEnCours() ? 'revenue.computing' : 'revenue.unavailable')
     for (const sel of ['revenue-received', 'revenue-upcoming', 'revenue-month']) {
@@ -1064,19 +1128,35 @@ function renderRevenus () {
     // c'est le writer qui a fait la resolution une fois, a l'ecriture, en
     // comparant le COUPLE (compte, cle provider).
     const d = parBien[String(b.id)]
-    const nom = `<span class="small" style="flex: 1 1 auto; min-width: 0">${esc(b.name)}</span>`
+    // ⚠ LA PHOTO, EXIGEE PAR LA SPEC §4 (« une ligne par bien : photo, nom,
+    // nombre de sejours, barre, recu, a venir, total ») — et mon commentaire
+    // citait cette enumeration mot pour mot en n'en rendant aucune. La regle du
+    // depot veut qu'un element de la maquette soit « conserve, deplace ou
+    // retire AVEC RAISON » : retire par omission sous un commentaire qui le
+    // cite, c'est exactement ce que cette regle nomme.
+    //
+    // ⚠ ET SON ABSENCE N'EST PAS UN TROU : un bien sans photo rend une pastille
+    // portant son initiale, comme la liste des logements. Un `<img>` sans `src`
+    // afficherait l'icone de fichier casse du navigateur.
+    const photo = b.photo_url
+      ? `<img class="rev-tbl__photo" src="${esc(b.photo_url)}" alt="" loading="lazy" decoding="async">`
+      : `<span class="rev-tbl__photo rev-tbl__photo--vide" aria-hidden="true">${esc(String(b.name || '?').slice(0, 1).toLocaleUpperCase('fr'))}</span>`
+    const nom = `<span class="small" style="min-width: 0">${esc(b.name)}</span>`
     if (!d) {
       // Aucun sejour range ce mois-ci pour ce bien. C'est un FAIT — zero euro
       // encaisse — et non une absence de donnee : le bien a ete lu, sa ligne
       // simplement ne porte rien.
       return `<tr>
         <th scope="row" class="rev-tbl__bien">
-          <span class="rev-tbl__nom">${nom}</span>
-          <span class="caption muted" data-i18n="revenue.none"></span>
+          <span class="rev-tbl__bien-int">
+            ${photo}
+            <span class="rev-tbl__nom">${nom}</span>
+            <span class="caption muted" data-i18n="revenue.none"></span>
+          </span>
         </th>
-        <td class="rev-tbl__num"><span class="caption muted">—</span></td>
-        <td class="rev-tbl__num"><span class="caption muted">—</span></td>
-        <td class="rev-tbl__num"><span class="caption muted">—</span></td>
+        <td class="rev-tbl__num"><span class="num small">${esc(euros(0, devise))}</span></td>
+        <td class="rev-tbl__num"><span class="num small">${esc(euros(0, devise))}</span></td>
+        <td class="rev-tbl__num"><span class="num small">${esc(euros(0, devise))}</span></td>
       </tr>`
     }
     const part = T.total_cents > 0 ? Math.round((d.total_cents / T.total_cents) * 100) : 0
@@ -1126,16 +1206,34 @@ function renderRevenus () {
     // donnent le meme etat, et la marque est alors la seule chose qui dit
     // COMBIEN manquent. Un compte n'est jamais redondant avec un etat.
 
+    // ⚠ JAMAIS DE TIRET MUET, et mes cinq cellules en etaient. La regle du
+    // depot est nommee : « un indicateur `null` s'affiche "non calculable" AVEC
+    // SON MOTIF EN CLAIR, jamais 0, jamais un tiret muet »
+    // (docs/kb/restitution-yield.md, cite par CLAUDE.md).
+    //
+    // ⚠ ET MON SIGNE ETAIT INVERSE ENTRE LES DEUX CAS, ce qui est pire que le
+    // tiret lui-meme :
+    //   · un bien SANS sejour affichait `—`, alors que le commentaire juste
+    //     au-dessus dit « C'est un FAIT — zero euro encaisse ». Un fait rendu
+    //     avec le signe d'une absence. Il affiche donc 0,00 €.
+    //   · et sur `toutRefuse`, la colonne Total disait « non calculable »
+    //     (juste) pendant que les deux autres disaient `—` (muet) : la meme
+    //     inconnue, rendue de deux facons dans la MEME ligne. C'est la famille
+    //     du constat n. 2 de Thierry — deux cellules d'une ligne qui ne
+    //     racontent pas la meme chose.
     const cellule = (cents, refuse) => refuse
-      ? `<span class="caption muted">—</span>`
+      ? `<span class="caption muted">${esc(t('revenue.unavailable'))}</span>`
       : `<span class="num small">${esc(euros(cents, devise))}</span>`
 
     return `<tr>
       <th scope="row" class="rev-tbl__bien">
-        <span class="rev-tbl__nom">${nom}</span>
-        <span class="caption muted">${esc(t('revenue.stays', { n: d.sejours }))}</span>
-        <span class="revenue-bar" style="--part: ${part}%; --recu: ${partRecue}%" aria-hidden="true"></span>
-        ${marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''}
+        <span class="rev-tbl__bien-int">
+          ${photo}
+          <span class="rev-tbl__nom">${nom}</span>
+          <span class="caption muted">${esc(t('revenue.stays', { n: d.sejours }))}</span>
+          <span class="revenue-bar" style="--part: ${part}%; --recu: ${partRecue}%" aria-hidden="true"></span>
+          ${marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''}
+        </span>
       </th>
       <td class="rev-tbl__num">${cellule(d.recu_cents, toutRefuse)}</td>
       <td class="rev-tbl__num">${cellule(d.a_venir_cents, toutRefuse)}</td>

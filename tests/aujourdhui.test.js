@@ -707,3 +707,140 @@ test('le bloc revenus distingue « calcul en cours » de « non calculable »', 
       `${langue}.json : les deux motifs disent la meme phrase, donc la distinction est perdue`)
   }
 })
+
+test('LE TEST QUI COMPTE : le decalage de mois tient aux passages d annee', () => {
+  // ⚠ CE TEST EXISTE PARCE QUE JE L'AVAIS DECLARE FAIT SANS L'ECRIRE. Le message
+  // de commit du 27 octobre 2026 annoncait « le decalage est eprouve sur les
+  // passages d'annee dans les deux sens » : il l'etait a la main, dans un
+  // terminal, et rien ne le gardait. Une review l'a releve — c'est le motif
+  // exact du feedback « une affirmation dans un commentaire se lit comme une
+  // mesure et ne rougit jamais ».
+  //
+  // La fonction est pure et fait six lignes : trois assertions la rendent vraie
+  // par la machine. On l'extrait de la page plutot que de la recopier — une
+  // copie divergerait.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const bloc = (html.match(/function moisDecale \(mois, pas\) \{[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, 'moisDecale a disparu de la page')
+  // eslint-disable-next-line no-new-func
+  const moisDecale = new Function(`${bloc}; return moisDecale`)()
+
+  assert.strictEqual(moisDecale('2026-10', -1), '2026-09')
+  assert.strictEqual(moisDecale('2026-10', 1), '2026-11')
+  // Les deux passages d'annee, dans les deux sens.
+  assert.strictEqual(moisDecale('2026-01', -1), '2025-12', 'janvier -1 ne recule pas d une annee')
+  assert.strictEqual(moisDecale('2026-12', 1), '2027-01', 'decembre +1 n avance pas d une annee')
+  // Un saut de plus de douze mois.
+  assert.strictEqual(moisDecale('2026-03', -14), '2025-01')
+  // ⚠ ET UNE ENTREE HORS FORME REND `null`, elle n'invente pas un mois : la
+  // navigation sort alors sans rien faire, au lieu de demander « NaN-NaN » au
+  // serveur.
+  for (const mauvais of ['', null, undefined, '2026-13', '2026-00', 'octobre', '2026-1', 42]) {
+    assert.strictEqual(moisDecale(mauvais, 1), null, `${JSON.stringify(mauvais)} rend un mois`)
+  }
+})
+
+test('LE TEST QUI COMPTE : une session perdue referme la session, elle ne boucle pas', () => {
+  // ⚠ DEUX CONSTATS BLOQUANTS D'UNE REVIEW DU 27 OCTOBRE 2026, et les deux
+  // venaient de ma correction du point 1 de la recette.
+  //
+  //   · ma version purgeait les caches puis faisait `replace('/pages/login.html')`
+  //     SANS fermer la session Supabase. Or login renvoie vers l'accueil des
+  //     qu'il trouve une session locale : aujourdhui -> login -> aujourdhui ->
+  //     401 -> ... une BOUCLE infinie de navigations JS.
+  //   · et elle ne gardait pas `session === null`, qui est la forme DOMINANTE
+  //     d'une session expiree : `getSession()` rend `{ session: null }` quand le
+  //     rafraichissement echoue, et on levait un TypeError AVANT la branche 401
+  //     — donc sans purge et sans sortie, avec les chiffres du cache a l'ecran.
+  //
+  // Ce test garde la FORME du chemin de sortie. Le comportement complet
+  // demanderait un banc qui simule `location` et le client Supabase ; ce qui se
+  // verifie ici est ce qui a casse : l'appel au geste COMPLET, la garde de
+  // session nulle, et l'absence de redirection a la main.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const code = html.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+
+  assert.match(code, /if \(!session \|\| !session\.access_token\) return refermerLaSession\(\)/,
+    'une session nulle n est plus gardee : un TypeError passerait avant la branche 401')
+  assert.match(code, /if \(r\.status === 401\) return refermerLaSession\(\)/,
+    'un 401 ne referme plus la session')
+  // ⚠ LE GESTE COMPLET, PAS SA MOITIE : `signOut` purge, ferme la session, puis
+  // navigue. Appeler `purgerCachesLocaux` seul laisse la session ouverte, et
+  // c'est elle qui faisait rebondir login.
+  const sortie = (code.match(/function refermerLaSession \(\)[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(sortie, 'refermerLaSession a disparu')
+  assert.match(sortie, /signOut\(\)/, 'la sortie n appelle plus le geste complet')
+  assert.ok(!/location\.(replace|href)/.test(sortie),
+    'la sortie navigue a la main : `signOut` le fait, et c est lui qui ferme la session')
+  assert.match(sortie, /throw e/,
+    'la sortie ne leve plus : les blocs se peindraient avec les donnees qu on vient de purger')
+  assert.ok(!/purgerCachesLocaux/.test(code),
+    'la moitie du geste de sortie est appelee directement : c est ce qui a fait boucler login')
+})
+
+test('LE TEST QUI COMPTE : une reponse d ecran PERIMEE ne peut pas ecraser une plus recente', () => {
+  // ⚠ CONSTAT D'UNE REVIEW DU 27 OCTOBRE 2026. Les fleches de mois sont cablees
+  // dans `init()` AVANT la phase reseau, et sur cache chaud la section est deja
+  // visible : elles sont donc cliquables pendant tout le chargement. `navEnCours`
+  // ne protegeait que deux navigations entre elles, pas une navigation contre le
+  // chargement initial — les deux ecrivent `etat.ecran`, et le dernier RESOLU
+  // gagnait. Soit le mois choisi par l'hote etait defait sous ses yeux, soit le
+  // cache etait ecrit avec le mois d'une periode passee.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const bloc = (html.match(/async function chargerEcran \(\)[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, 'chargerEcran a disparu')
+  assert.match(bloc, /const monTour = \+\+sequenceEcran/,
+    'le chargement ne prend plus de numero de sequence')
+  assert.match(bloc, /if \(monTour !== sequenceEcran\) return/,
+    'une reponse perimee peut de nouveau ecraser une plus recente')
+  // Et l'ecriture de `etat.ecran` vient APRES la comparaison, sinon la garde
+  // ne garde rien.
+  const iGarde = bloc.indexOf('monTour !== sequenceEcran')
+  const iEcrit = bloc.indexOf('etat.ecran = recu')
+  assert.ok(iGarde > -1 && iEcrit > iGarde,
+    'l etat est ecrit avant que la sequence ne soit verifiee')
+})
+
+test('LE TEST QUI COMPTE : le libelle des fleches suit le mois SERVI, meme sans chiffres', () => {
+  // ⚠ CONSTAT BLOQUANT D'UNE REVIEW DU 27 OCTOBRE 2026, et c'etait le premier
+  // clic de la recette qui le rencontrait. Sur un mois dont les colonnes
+  // derivees ne sont pas remplies, l'endpoint rend `revenus: null` : le rendu
+  // tombe dans `videDuTotal()`, qui effacait le petit libelle du mois… et
+  // laissait le GRAND libelle, celui entre les fleches, sur le mois precedent.
+  //
+  // L'hote ne savait plus quel mois il regardait ; le clic suivant repartait du
+  // mois servi et semblait sauter deux mois ; et `aria-live` n'annoncait rien,
+  // le texte n'ayant pas change.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const bloc = (html.match(/const videDuTotal = \(\) => \{[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'videDuTotal a disparu')
+  assert.match(bloc, /revenue-month-nav/,
+    'le libelle des fleches n est plus mis a jour quand le bloc ne dit rien : il gardera le mois precedent')
+  assert.match(bloc, /moisEnClair\(etat\.ecran && etat\.ecran\.mois\)/,
+    'le libelle ne vient plus du mois SERVI par le serveur')
+})
+
+test('les fleches de mois respectent la taille minimale d une cible tactile', () => {
+  // ⚠ LA CHARTE DU LOT EXIGE « zones de clic >= 44 px » (spec §8), et
+  // `shared/theme.css` definit `--control: 44px` pour cette raison. Ma premiere
+  // version mettait 32 px : deux cibles sous la norme, sur un ecran dont la
+  // recette se fait au telephone.
+  //
+  // ⚠ ET AUCUN TEST DU DEPOT NE GARDAIT CETTE REGLE — mesure : la mutation
+  // « 32px » ne faisait rougir personne. Le precedent du depot pour exactement
+  // ce geste (les chevrons de mois du calendrier) passe par `btn btn--icon`,
+  // qui vaut `var(--control)` ; ici les boutons sont dessines a part, donc la
+  // regle doit etre tenue a part.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const bloc = (css.match(/\.rev-nav__btn \{[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, '.rev-nav__btn a disparu de la feuille')
+  assert.match(bloc, /width:\s*var\(--control\)/,
+    'les fleches de mois ne font plus la largeur minimale d une cible tactile')
+  assert.match(bloc, /height:\s*var\(--control\)/,
+    'les fleches de mois ne font plus la hauteur minimale d une cible tactile')
+  // ⚠ ET LE JETON VAUT BIEN 44 px : sans ce controle, redefinir `--control` a
+  // 32 px ailleurs rendrait ce test vert pour rien.
+  const theme = fs.readFileSync(path.join(__dirname, '..', 'shared', 'theme.css'), 'utf8')
+  assert.match(theme, /--control:\s*44px/,
+    '`--control` ne vaut plus 44px : la charte des zones de clic a change de valeur')
+})

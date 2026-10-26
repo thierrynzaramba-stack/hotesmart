@@ -1304,7 +1304,12 @@ body.men-cfg-ouvert { overflow: hidden; }
 .rev-nav { display: inline-flex; align-items: center; gap: 4px; }
 .rev-nav__btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px; padding: 0;
+  /* ⚠ 44 px, PAS 32 : la charte du lot exige « zones de clic >= 44 px » et
+     `shared/theme.css` definit `--control: 44px` pour ca. Le precedent du depot
+     pour exactement ce geste — les chevrons de mois du calendrier — utilise
+     `btn btn--icon`, qui vaut `var(--control)`. La recette se fait au
+     telephone : deux cibles sous la norme s'y voient tout de suite. */
+  width: var(--control); height: var(--control); padding: 0;
   border: 1px solid var(--line); border-radius: 999px;
   background: var(--surface); color: var(--ink); cursor: pointer;
 }
@@ -1335,11 +1340,32 @@ body.men-cfg-ouvert { overflow: hidden; }
 }
 .rev-tbl tbody tr:last-child th, .rev-tbl tbody tr:last-child td { border-bottom: 0; }
 .rev-tbl__num { text-align: right; white-space: nowrap; }
+/* ⚠ PAS DE `display: flex` SUR LE `<th>` LUI-MEME, et ma premiere version en
+   mettait un. Constat MAJEUR d'une review du 27 octobre 2026 : changer le
+   `display` d'un element de tableau le retire de l'arbre d'accessibilite comme
+   cellule — le `<th>` cesse d'etre un `rowheader`, donc `scope="row"` devient
+   inerte, et le lecteur d'ecran n'annonce plus « <logement>, A venir, 480 € ».
+   C'est-a-dire exactement l'accessibilite que ce tableau existe pour obtenir,
+   et que mon message de commit invoquait pour justifier la forme tabulaire.
+
+   Le flex vit donc sur un enfant. Meme rendu, semantique preservee. (Premier
+   `scope="row"` du depot : aucun precedent ne couvrait ce piege.) */
 .rev-tbl__bien { font-weight: 400; }
 /* Le nom, le compte de sejours, la barre et les pastilles sur une seule
    colonne : c'est la cellule la plus large, et elle respire. */
-.rev-tbl__bien { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rev-tbl__bien-int { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .rev-tbl__nom { flex: 1 1 10em; min-width: 0; }
+/* La vignette du logement. Carree, petite, et elle ne retrecit jamais : c'est
+   le repere visuel de la ligne. */
+.rev-tbl__photo {
+  flex: 0 0 28px; width: 28px; height: 28px;
+  border-radius: 6px; object-fit: cover; background: var(--line);
+}
+/* Sans photo : l'initiale, comme la liste des logements. */
+.rev-tbl__photo--vide {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: .75rem; font-weight: 600; color: var(--muted);
+}
 
 .revenue-bar {
   flex: 0 0 72px;
