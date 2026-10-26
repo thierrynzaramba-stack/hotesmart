@@ -10,6 +10,7 @@
 // ECHEC, jamais « 0 ligne ».
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
@@ -20,9 +21,15 @@ const COLONNES = 'id, pays, region, localite, capture_le, jour, prix_base100, sa
 ;(async () => {
   const { count: biens, error: eB } = await sb.from('properties').select('*', { count: 'exact', head: true })
   if (eB) { console.error('Empreinte illisible :', eB.message); process.exit(1) }
-  const nom = biens === 5 ? 'PRODUCTION' : biens === 3 ? 'STAGING' : 'INCONNUE'
-  console.log(`Base : ${String(URL).replace(/^https?:\/\//, '').split('.')[0]} — ${biens} bien(s) — ${nom}\n`)
-  if (nom === 'INCONNUE') { console.error('Empreinte inconnue : arret.'); process.exit(1) }
+  // ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, PAS LE NOMBRE DE BIENS
+  // (26 octobre 2026). Staging porte QUATRE biens depuis qu'un logement y a
+  // ete cree : l'ancienne regle « 5 = production, 3 = staging » refusait une
+  // base parfaitement identifiable, et aurait dit « staging » sur la
+  // PRODUCTION le jour ou elle tomberait a 3 biens. Le compte reste imprime,
+  // il ne decide plus. Regle partagee : lib/empreinte-base.js.
+  const nom = nomDeLaBase(URL)
+  console.log(`Base : ${refDuProjet(URL)} — ${nom} — ${biens} bien(s)\n`)
+  if (nom === 'INCONNUE') { console.error('Projet inconnu : arret.'); process.exit(1) }
 
   const { data, error } = await sb.from('marche_temperature_airroi').select(COLONNES)
     .order('capture_le', { ascending: false }).limit(1)
