@@ -216,11 +216,36 @@ test('LE TEST QUI COMPTE : la garde de CANAL pose l en-tete avant ses quatre ref
   assert.equal(res.code, 400, 'et c est bien le premier refus, avant toute lecture')
 })
 
-// Les endpoints qui portent leur PROPRE autorisation, sans passer par une des
-// gardes partagees. La valeur dit OU elle est posee : c'est ce qu'on relit.
-const AUTORISE_LUI_MEME = {
-  'api/sms.js': 'resout `user` par supabase.auth.getUser, borne par user_id, et chaque reponse a donnee de compte est derriere `if (!user) return 401`'
-}
+// ⚠ LA LISTE EST PAR REPONSE, PAS PAR FICHIER — et la premiere version de cette
+// exemption etait par FICHIER, ce qui faisait du seul endpoint portant sa propre
+// autorisation le seul que l'audit ne protegeait plus. Constat de la re-review,
+// prouve par injection : un `select('*')` sur `api_keys` rendu en 200 AU-DESSUS
+// du `if (!user) return 401` d'`api/sms.js` — donc la cle Brevo de tous les
+// hotes, sans authentification — laissait la suite a 14 verts.
+//
+// `api/sms.js` ne passe par AUCUNE garde partagee : il resout `user` lui-meme
+// (`supabase.auth.getUser`), borne chaque requete par `user_id`, et chacune de
+// ses reponses a donnee de compte est derriere un `if (!user) return 401`
+// (l.197, 227, 254, 273). L'autorisation est donc bien la, AVANT la donnee —
+// c'est l'en-tete prive qui manquait, et il est pose a la main en tete du
+// handler depuis le 22 octobre 2026.
+//
+// ⚠ ON NE L'EXEMPTE PAS EN ELARGISSANT LA SONDE A `auth.getUser(` : ce motif
+// exempterait AUSSI, en silence, un futur endpoint qui appellerait `getUser`
+// sans rien faire de son resultat. Une liste de REPONSES se relit ; un motif
+// plus large ne se relit pas.
+//
+// Ces deux-la sont les SEULES reponses a donnee de compte emises avant une
+// garde partagee, dans tout `api/`. Une de plus : un endpoint parle avant
+// d'avoir verifie quoi que ce soit. Une de moins : `api/sms.js` a ete nettoye
+// ou range sous une garde, et il faut la retirer d'ici pour qu'il soit protege
+// comme les autres.
+const AVANT_GARDE_ATTENDU = [
+  // GET ?action=config — la configuration Brevo du proprietaire, derriere le 401 de la l.197.
+  'api/sms.js : configured: !!data?.brevo_api_key,\n        enabled:    data?.brevo_ena',
+  // GET — l'historique sms_logs, derriere le 401 de la l.254.
+  'api/sms.js : logs: data'
+]
 
 test('LE TEST QUI COMPTE : ce qui repond AVANT la garde ne porte aucune donnee de compte', () => {
   // ⚠ L'INVARIANT EXACT, ET POURQUOI CE N'EST PAS « tous les endpoints posent
@@ -267,15 +292,32 @@ test('LE TEST QUI COMPTE : ce qui repond AVANT la garde ne porte aucune donnee d
     // 'sonde', bien })` glisse avant la garde d'`api/yield.js` laissait la
     // suite a 14 verts. Ce n'est plus une question de cache a ce moment-la,
     // c'est une divulgation sans authentification.
-    const g = src.search(/await (requirePermission|verifierSession|requirePermissionPourCanal)\(|contexteDEcran\(/)
-    if (h < 0 || g < 0 || h > g) continue
-    const entre = src.slice(h, g)
+    if (h < 0) continue
+    // ⚠ ON CHERCHE A PARTIR DE `h`, PAS DANS TOUT LE FICHIER — constat de la
+    // re-review, prouve par injection. Un appel de garde ecrit AVANT
+    // `module.exports` (une fonction auxiliaire posee plus haut) donnait
+    // `g < h`, donc `h > g`, donc `continue` : l'endpoint quittait l'audit SANS
+    // UN MOT. Mesure : `api/messages.js` (garde l.196, handler l.377) et
+    // `api/stripe.js` (garde l.285, handler l.438) en sortaient tous les deux —
+    // et c'est exactement le defaut que ce commit existe pour fermer.
+    const rel = src.slice(h).search(/await (requirePermission|verifierSession|requirePermissionPourCanal)\(|contexteDEcran\(/)
+    if (rel < 0) continue
+    const entre = src.slice(h, h + rel)
     // Chaque reponse emise avant la garde : son corps doit etre un libelle
     // generique, jamais une variable ni une lecture.
     for (const m of entre.matchAll(/res\s*\.status\(\s*\d+\s*\)\s*\.json\(\s*\{([^}]*)\}/g)) {
       const corps = m[1]
       // Un corps generique ne contient que des chaines litterales et des clefs.
-      const sansChaines = corps.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""').replace(/`[^`]*`/g, '``')
+      // ⚠ LES ECHAPPEMENTS COMPTENT — constat de la re-review. `/'[^']*'/`
+      // s'arrete a l'apostrophe echappee : `error: 'Connectez d\'abord votre
+      // compte Brevo'` devenait `''abord votre compte Brevo'`, et « compte »
+      // survivait. Consequence double : l'audit criait au loup sur trois
+      // libelles francais parfaitement generiques, ET la liste d'exemption
+      // etait tenue pour utile par ces faux positifs.
+      const sansChaines = corps
+        .replace(/'(?:\\.|[^'\\])*'/g, "''")
+        .replace(/"(?:\\.|[^"\\])*"/g, '""')
+        .replace(/`(?:\\.|[^`\\])*`/g, '``')
       if (/\b(data|rows|bien|booking|compte|user|profil|perms|snapshot|liste)\b/.test(sansChaines)) {
         fautifs.push(`${f} : ${corps.trim().slice(0, 70)}`)
       }
@@ -292,20 +334,15 @@ test('LE TEST QUI COMPTE : ce qui repond AVANT la garde ne porte aucune donnee d
   // le choix qui compte : ce motif exempterait AUSSI, en silence, un futur
   // endpoint qui appellerait `getUser` sans rien faire de son resultat. Une
   // liste nommee se relit ; un motif plus large ne se relit pas.
-  const exempte = (x) => Object.keys(AUTORISE_LUI_MEME).some(f => x.startsWith(`${f} :`))
-  assert.deepEqual(fautifs.filter(x => !exempte(x)), [],
-    'ces reponses partent AVANT toute verification d autorisation, et leur corps\n' +
-    'n est pas un libelle generique : il peut porter une donnee de compte — ce\n' +
-    'n est plus une question de cache a ce moment-la, c est une divulgation sans\n' +
-    'authentification. Deplacez la reponse SOUS la garde. UN DE PLUS que\n' +
-    'AUTORISE_LUI_MEME : nommez son autorisation propre avant de l ajouter.')
-  // Et l'exemption doit SERVIR. Le jour ou `api/sms.js` passe par une garde
-  // partagee, cette liste devient un trou qui ne protege plus rien.
-  for (const f of Object.keys(AUTORISE_LUI_MEME)) {
-    assert.ok(fautifs.some(x => x.startsWith(`${f} :`)),
-      `${f} n apparait plus dans cet audit : son exemption ne sert plus, retirez-la ` +
-      'de AUTORISE_LUI_MEME pour qu il soit protege comme les autres.')
-  }
+  assert.deepEqual(fautifs.slice().sort(), AVANT_GARDE_ATTENDU.slice().sort(),
+    'une reponse part AVANT toute verification d autorisation et son corps n est\n' +
+    'pas un libelle generique : il peut porter une donnee de compte. Ce n est plus\n' +
+    'une question de cache a ce moment-la, c est une DIVULGATION SANS\n' +
+    'AUTHENTIFICATION. Deplacez la reponse SOUS la garde.\n' +
+    'UNE DE PLUS que AVANT_GARDE_ATTENDU : nommez l autorisation qui la precede,\n' +
+    'et ce qu on accepte en l exemptant, avant de l ajouter.\n' +
+    'UNE DE MOINS : elle a ete corrigee — retirez-la de la liste pour que son\n' +
+    'endpoint soit protege comme les autres.')
 })
 
 test('RECENSEMENT : la surface des reponses precoces est CHIFFREE', () => {
@@ -316,9 +353,11 @@ test('RECENSEMENT : la surface des reponses precoces est CHIFFREE', () => {
   for (const f of fichiersApi()) {
     const src = code(lire(f))
     const h = src.search(/module\.exports\s*=\s*(?:async\s+)?(?:function\s*\w*\s*)?\(\s*\w+\s*,\s*\w+\s*\)\s*(?:=>\s*)?\{/)
-    const g = src.search(/posterEnTetesPrives\(|await (requirePermission|verifierSession|requirePermissionPourCanal)\(/)
-    if (h < 0 || g < 0 || h > g) continue
-    if (/res\s*\.status\(/.test(src.slice(h, g))) avant.push(f)
+    if (h < 0) continue
+    // Meme correction que l'audit du dessus : on cherche a partir de `h`.
+    const rel = src.slice(h).search(/posterEnTetesPrives\(|await (requirePermission|verifierSession|requirePermissionPourCanal)\(/)
+    if (rel < 0) continue
+    if (/res\s*\.status\(/.test(src.slice(h, h + rel))) avant.push(f)
   }
   // Mesure du 22 octobre 2026 : 41 endpoints, les deux formes de handler
   // confondues. ⚠ Un balayage au `grep` n'en voyait que 27, et un autre 30 :
