@@ -14,9 +14,23 @@
 --   2. 2026-10-26-delais-versement-durcissement.sql
 --   3. 2026-10-27-revenus-derives.sql
 --   4. 2026-10-27-est-blocage.sql
---   5. 2026-10-26-revenus-calcul-incomplet.sql
---   6. 2026-10-26-revenus-hors-biens.sql  <- remplace
+--   5. 2026-10-26-revenus-hors-biens.sql  <- remplace
 --      une fonction creee en 3 et modifiee en 4
+--   6. 2026-10-26-revenus-calcul-incomplet.sql
+--
+-- ⚠ CET ORDRE A ETE INVERSE LE 26 OCTOBRE 2026, apres un
+-- constat BLOQUANT de review. La sonde d'abord creait
+-- une fenetre : elle repondait, et `revenus_hors_mois`
+-- etait encore en deux arguments, donc PGRST202 — les
+-- totaux s'affichaient et les reserves restaient
+-- muettes, ce qui est exactement l'ecart MUET que ce
+-- lot repare.
+--
+-- Les deux migrations sont INDEPENDANTES (celle des
+-- reserves depend de la 4, celle de la sonde de la 3,
+-- et les deux sont deja collees), donc l'ordre inverse
+-- n'a aucun etat intermediaire dangereux : tant que la
+-- sonde manque, l'ecran refuse tout le bloc.
 --
 -- Revenus nets : l'ecran doit savoir que le calcul
 -- n'est PAS FINI (26 octobre 2026, constat GRAVE 1
@@ -121,17 +135,30 @@ grant execute on function
 
 -- ╶╶╶ PREUVE, A COLLER JUSTE APRES ╶╶╶
 --
--- ATTENDU — DEUX LIGNES, ET DEUX EXACTEMENT :
---   fonction revenus_calcul_incomplet -> existe
+-- ATTENDU — DEUX LIGNES, ET DEUX EXACTEMENT.
+--
+-- ⚠ ET C'EST LE COMPTE QUI TRANCHE, PAS LE TEXTE D'UNE
+-- LIGNE (constat de review). J'avais ecrit « si la
+-- premiere dit ABSENTE » : aucune branche ne produit ce
+-- mot. Si la fonction manque, la branche `fonction`
+-- rend ZERO ligne et la branche `droit` rend
+-- « ok : public ne peut pas » — parce que `bool_or` sur
+-- un ensemble vide rend NULL, donc le `else`. On
+-- lisait donc UNE ligne rassurante sur une migration
+-- qui n'avait pas pris.
+--
+-- La requete compte donc elle-meme, et le dit :
+--   fonction revenus_calcul_incomplet -> 1 version(s)
 --   droit    revenus_calcul_incomplet -> public ne
 --            peut pas
 --
--- Si la premiere dit « ABSENTE », le `create` n'a pas
--- pris : ne pas poursuivre.
+-- « 0 version(s) » = le `create` n'a pas pris : ne pas
+-- poursuivre, et surtout ne pas se fier a la ligne
+-- « droit ».
 
 select 'fonction'::text as objet,
-       p.proname::text as nom,
-       'existe'::text as detail
+       'revenus_calcul_incomplet'::text as nom,
+       count(*)::text || ' version(s)' as detail
   from pg_proc p
   join pg_namespace n
     on n.oid = p.pronamespace

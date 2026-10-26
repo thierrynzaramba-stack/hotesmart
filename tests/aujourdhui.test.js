@@ -539,11 +539,34 @@ test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", ()
   assert.match(html, /revenue\.unavailable/,
     'une lecture de revenus en echec s afficherait comme un mois a zero euro')
   // Et l'ordre compte : le refus AVANT toute peinture de chiffre.
+  //
+  // ⚠ L'INVARIANT EST « LE TOTAL N'EST PAS DEREFERENCE AVANT SA GARDE », et
+  // cette assertion a ete reformulee DEUX FOIS le 26 octobre 2026 :
+  //
+  //   · elle cherchait d'abord la chaine
+  //     `$('[data-bind="revenue-total"]').textContent = euros` AU CARACTERE.
+  //     Ajouter la garde « tous les sejours non calculables » a change la forme
+  //     de l'affectation sans toucher a l'invariant, et le test a rougi en
+  //     annoncant « le total est peint avant le refus » — ce qui etait FAUX.
+  //     C'est le defaut que le test voisin declare avoir corrige (« LA LISTE,
+  //     PAS LA SEQUENCE ») : il vivait encore ici.
+  //   · puis j'ai cherche le NŒUD `revenue-total`, et c'etait faux aussi : sa
+  //     premiere occurrence est dans `videDuTotal()`, la fonction de repli que
+  //     le refus APPELLE. Elle est donc definie avant lui, par construction.
+  //
+  // Ce qui ne peut pas se contourner : `rev.total` est lu dans une variable
+  // APRES la garde, et c'est cette variable que le bandeau peint.
   const blocRevenus = (html.match(/function renderRevenus[\s\S]*?\n\}/) || [''])[0]
   const iRefus = blocRevenus.indexOf('if (!rev || !rev.total)')
-  const iPeint = blocRevenus.indexOf("$('[data-bind=\"revenue-total\"]').textContent = euros")
-  assert.ok(iRefus > -1 && iPeint > -1 && iRefus < iPeint,
-    'le total est peint avant que le refus ne soit evalue')
+  const iLecture = blocRevenus.indexOf('const T = rev.total')
+  assert.ok(iRefus > -1, 'le refus a disparu de renderRevenus')
+  assert.ok(iLecture > -1, 'le total n est plus lu dans `T` : ce test ne mesure plus rien')
+  assert.ok(iRefus < iLecture,
+    'le total est dereference avant que le refus ne soit evalue')
+  // Et c'est bien `T` que le bandeau peint, pas `rev.total` en direct.
+  const apres = blocRevenus.slice(iLecture)
+  assert.match(apres, /revenue-total[\s\S]{0,400}euros\(T\./,
+    'le bandeau peint autre chose que le total garde')
 })
 
 test("LE TEST QUI COMPTE : un echec de l'appel d'ecran ne re-date pas le cache", () => {

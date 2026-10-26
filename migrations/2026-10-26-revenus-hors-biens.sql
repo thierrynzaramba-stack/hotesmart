@@ -14,9 +14,23 @@
 --   2. 2026-10-26-delais-versement-durcissement.sql
 --   3. 2026-10-27-revenus-derives.sql
 --   4. 2026-10-27-est-blocage.sql
---   5. 2026-10-26-revenus-calcul-incomplet.sql
---   6. 2026-10-26-revenus-hors-biens.sql  <- remplace
+--   5. 2026-10-26-revenus-hors-biens.sql  <- remplace
 --      une fonction creee en 3 et modifiee en 4
+--   6. 2026-10-26-revenus-calcul-incomplet.sql
+--
+-- ⚠ CET ORDRE A ETE INVERSE LE 26 OCTOBRE 2026, apres un
+-- constat BLOQUANT de review. La sonde d'abord creait
+-- une fenetre : elle repondait, et `revenus_hors_mois`
+-- etait encore en deux arguments, donc PGRST202 — les
+-- totaux s'affichaient et les reserves restaient
+-- muettes, ce qui est exactement l'ecart MUET que ce
+-- lot repare.
+--
+-- Les deux migrations sont INDEPENDANTES (celle des
+-- reserves depend de la 4, celle de la sonde de la 3,
+-- et les deux sont deja collees), donc l'ordre inverse
+-- n'a aucun etat intermediaire dangereux : tant que la
+-- sonde manque, l'ecran refuse tout le bloc.
 --
 -- Revenus nets : l'ecart MUET se rouvrait par le bien
 -- SUPPRIME, et les reserves parlaient d'un autre mois
@@ -93,8 +107,18 @@
 -- les reverifie.
 
 
+-- ⚠ LES DEUX SIGNATURES SONT SUPPRIMEES, POUR QUE CE
+-- FICHIER SOIT REJOUABLE (constat de review). Le seul
+-- `drop` de l'ancienne laissait un second collage
+-- echouer sur « function already exists » : le `drop`
+-- ne visait pas la version a TROIS arguments, celle que
+-- ce fichier cree. Une migration qu'on ne peut pas
+-- recoller est une migration qu'on n'ose pas verifier.
 drop function if exists
   public.revenus_hors_mois(uuid, uuid[]);
+
+drop function if exists
+  public.revenus_hors_mois(uuid, text, uuid[]);
 
 create function public.revenus_hors_mois(
   p_user_id uuid,
@@ -209,4 +233,11 @@ select 'droit',
     on n.oid = p.pronamespace
  where n.nspname = 'public'
    and p.proname = 'revenus_hors_mois'
- order by 1, 2;
+-- ⚠ L'ORDRE EST CELUI DE L'ANNONCE, PAS L'ALPHABET.
+-- `order by 1, 2` rendait droit / fonction / surcharge,
+-- alors que le texte annonce fonction / surcharge /
+-- droit : on lisait la premiere ligne en croyant lire
+-- l'autre.
+ order by case objet when 'fonction' then 1
+                     when 'surcharge' then 2
+                     else 3 end;

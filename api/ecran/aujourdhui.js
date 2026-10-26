@@ -659,13 +659,35 @@ module.exports = async (req, res) => {
       return null
     }
 
-    // ⚠ UN ECHEC DES RESERVES N'EFFACE PAS LE MOIS. Les reserves sont un
-    // complement : sans elles, l'ecran affiche des totaux justes et DIT qu'il
-    // ne sait pas compter ce qui en sort. Rendre `null` pour tout le bloc
-    // serait perdre des chiffres corrects a cause d'un compteur.
+    // ⚠⚠ UN ECHEC DES RESERVES REFUSE LE BLOC ENTIER, et mon commentaire
+    // precedent affirmait le contraire — « l'ecran affiche des totaux justes et
+    // DIT qu'il ne sait pas compter ce qui en sort ». IL NE LE DISAIT PAS.
+    // Constat BLOQUANT de la review du 26 octobre 2026 : `revenus_reserves`
+    // n'etait lu par PERSONNE — une seule occurrence dans tout le depot, la
+    // ligne qui l'ecrivait. Ni la page, ni un test.
+    //
+    // Consequence mesuree au banc DOM : les trois compteurs tombaient a zero,
+    // les trois `if (… > 0)` de la page ne poussaient rien, et
+    // `revenue-reserves` restait masque. Le bandeau affichait son total, aucune
+    // ligne ne portait l'argent orphelin, et aucune reserve ne l'expliquait :
+    // c'est mot pour mot G2 + G3, les deux constats que ce lot declare
+    // refermes.
+    //
+    // ⚠ ET L'ORDRE DE COLLAGE QUE J'AVAIS ANNONCE CREAIT LA FENETRE : entre la
+    // migration de la sonde et celle de `revenus_hors_mois`, la sonde repond et
+    // les reserves rendent PGRST202. L'ordre est inverse dans les deux
+    // en-tetes ; ce refus est la seconde ligne, pour le jour ou un `grant` sera
+    // oublie apres le `drop`.
+    //
+    // Un total qu'on ne peut pas EXPLIQUER ne s'affiche pas. C'est plus strict
+    // que mon intention d'origine, et c'est la seule version qui tient la
+    // promesse du lot.
     if (eHors) {
-      console.error('[ecran/aujourdhui] revenus_hors_mois echec:', eHors.message)
-      indisponibles.push('revenus_reserves')
+      if (!estAbsente(eHors)) {
+        console.error('[ecran/aujourdhui] revenus_hors_mois echec:', eHors.message)
+      }
+      indisponibles.push('revenus')
+      return null
     }
 
     // ─── La mise en forme, et elle ne CALCULE rien ────────────────────────

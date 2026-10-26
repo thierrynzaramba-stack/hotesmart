@@ -1338,3 +1338,70 @@ test('LE TEST QUI COMPTE : un perimetre SANS cle UUID ne rend pas zero euro', as
   assert.deepEqual(requetes.filter(r => r.rpc).map(r => r.rpc), [],
     'un agregat part avec un perimetre vide de cles UUID')
 })
+
+test('LE TEST QUI COMPTE : des RESERVES illisibles refusent le bloc, elles ne le laissent pas muet', async () => {
+  // ⚠ CONSTAT BLOQUANT DE LA REVIEW DU 26 OCTOBRE 2026, et mon commentaire
+  // affirmait le contraire : « l'ecran affiche des totaux justes et DIT qu'il ne
+  // sait pas compter ce qui en sort ». IL NE LE DISAIT PAS.
+  //
+  // L'endpoint poussait `revenus_reserves` dans `indisponibles` — un motif que
+  // PERSONNE ne lisait : une seule occurrence dans tout le depot, la ligne qui
+  // l'ecrivait. Ni la page, ni un test. Les trois compteurs tombaient a zero,
+  // les trois `if (… > 0)` de la page ne poussaient rien, et la reserve restait
+  // masquee. Le bandeau affichait son total, aucune ligne ne portait l'argent
+  // orphelin, et rien ne l'expliquait : c'est mot pour mot l'ecart MUET que ce
+  // lot declare referme.
+  //
+  // Un total qu'on ne peut pas EXPLIQUER ne s'affiche pas.
+  const { corps } = await banc({
+    titulaire: true,
+    erreurs: { 'rpc:revenus_hors_mois': { code: '42501', message: 'permission denied for function revenus_hors_mois' } },
+    lignes: { 'rpc:revenus_du_mois': [{ property_uuid: BULLE_UUID, sejours: 2, recu_cents: 40000,
+      a_venir_cents: 30000, total_cents: 70000, bruts: 0, sans_montant: 0 }] }
+  })()
+  assert.strictEqual(corps.revenus, null,
+    'le bloc affiche un total alors que ses reserves sont illisibles : l ecart redevient muet')
+  assert.ok((corps.indisponibles || []).includes('revenus'),
+    `le bloc n est pas signale indisponible (indisponibles : ${JSON.stringify(corps.indisponibles)})`)
+  // ⚠ ET LE MOTIF MORT N'EST PLUS POUSSE : s'il revenait, il faudrait que la
+  // page le lise. Un motif que personne ne lit est un silence avec un nom.
+  assert.ok(!(corps.indisponibles || []).includes('revenus_reserves'),
+    'le motif `revenus_reserves` est de retour : verifiez que la PAGE le lit avant de le garder')
+})
+
+test('LE TEST QUI COMPTE : les trois compteurs de reserve traversent l endpoint sans se perdre', async () => {
+  // ⚠ LE CINQUIEME FAUX VERT DU LOT, mesure par la review : trois mutations
+  // restaient VERTES sur la suite entiere — supprimer le motif des reserves,
+  // figer `hors_biens` a zero, figer `hors_mois` a zero. Les tests existants
+  // injectaient ces compteurs DIRECTEMENT dans le peintre, et testaient
+  // l'oracle de leur cote : le segment « ce que l'agregat rend -> ce que le
+  // payload porte » n'etait couvert par rien.
+  //
+  // Et c'est precisement ce segment qui porte la correction G2 : sans lui,
+  // elle n'avait AUCUNE verification executee — ni test, ni script (l'etage 2
+  // du verificateur de parite ne tourne pas tant que les migrations ne sont
+  // pas collees).
+  const { corps } = await banc({
+    titulaire: true,
+    lignes: {
+      'rpc:revenus_du_mois': [{ property_uuid: BULLE_UUID, sejours: 3, recu_cents: 50000,
+        a_venir_cents: 0, total_cents: 50000, bruts: 1, sans_montant: 1 }],
+      'rpc:revenus_hors_mois': [{ sans_date: 4, hors_biens: 2, hors_biens_cents: 150000 }]
+    }
+  })()
+  assert.ok(corps.revenus, 'le bloc est absent')
+  // Les deux compteurs d'orphelins, et leur montant.
+  assert.strictEqual(corps.revenus.hors_biens.sejours, 2,
+    'le compte des sejours rattaches a aucun bien ne traverse pas l endpoint')
+  assert.strictEqual(corps.revenus.hors_biens.total_cents, 150000,
+    'le MONTANT de l argent orphelin ne traverse pas l endpoint : l ecart redevient muet')
+  // Et les sejours sans date, qui sont tous mois confondus.
+  assert.strictEqual(corps.revenus.hors_mois.sejours, 4,
+    'le compte des sejours sans date de versement ne traverse pas l endpoint')
+  assert.strictEqual(corps.revenus.hors_mois.refuses.date, 4,
+    'le motif des sejours sans date est perdu')
+  // ⚠ ET LE BRUT ET LE NON CALCULABLE AUSSI, qui viennent de l autre agregat.
+  assert.strictEqual(corps.revenus.total.bruts, 1, 'le compte des montants BRUTS est perdu')
+  assert.strictEqual(corps.revenus.total.refuses.montant, 1,
+    'le compte des montants non calculables est perdu : la reserve ne s afficherait pas')
+})

@@ -1461,3 +1461,59 @@ test("LE TEST QUI COMPTE : l'endpoint passe le perimetre en UUID, et l'agregat g
   assert.ok(!/from\('delais_versement'\)/.test(codeEntier),
     'l endpoint relit la table des delais : c est le writer qui s en sert')
 })
+
+test("LE TEST QUI COMPTE : le BANDEAU dit « non calculable », il n'affiche pas 0,00 €", () => {
+  // ⚠ CONSTAT BLOQUANT DE LA REVIEW DU 26 OCTOBRE 2026. La ligne d'un logement
+  // porte cette garde depuis le debut — zero euro ET un montant refuse veut
+  // dire « on ne sait pas », pas « ce logement n'a rien rapporte ». Le BANDEAU,
+  // lui, ecrivait son total sans condition.
+  //
+  // Mesure sur les donnees reelles de staging : `revenus_du_mois(2026-10)` rend
+  // `{sejours: 2, total_cents: 0, sans_montant: 2}`. L'ecran affichait donc
+  // « 0,00 € » en grand, « non calculable » sur la ligne juste en dessous, et
+  // « 2 sejour(s) dont le montant n'est pas calculable » en reserve. Les deux
+  // moities du meme ecran se contredisaient, et c'est le bandeau que l'hote
+  // retient.
+  //
+  // ⚠ CE QUI REND CE TEST POSSIBLE, et ce qui a laissé le defaut survivre si
+  // longtemps : le banc stube `I18n.money` pour rendre la chaine VIDE, donc un
+  // montant s'affiche `''`. Un test qui aurait compare le texte a « 0,00 € »
+  // serait donc vert dans les deux cas — c'est l'angle mort.
+  //
+  // Mais `t()` n'est pas stube de la meme facon : il rend la CLEF. Les deux
+  // etats sont donc parfaitement distinguables ici — `'revenue.unavailable'`
+  // contre `''` — et c'est cette distinction qu'on mesure.
+  //
+  // (Premiere version de ce test : j'assertais `classList.contains('muted')`.
+  // Le noeud du banc n'a pas de `classList` reelle, donc l'assertion echouait
+  // alors que la garde fonctionnait. Mesurer ce que le banc ne simule pas, c'est
+  // se fabriquer un rouge et chercher un defaut la ou il n'y en a pas.)
+  const p = bancRevenus({
+    mois: '2026-10',
+    par_bien: { 'uuid-1': parBien({ sejours: 2, total_cents: 0, refuses: { montant: 2, date: 0 } }) },
+    total: parBien({ sejours: 2, total_cents: 0, refuses: { montant: 2, date: 0 } }),
+    hors_mois: parBien({}),
+    hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-total"]').textContent, 'revenue.unavailable',
+    'le bandeau affiche un montant comme un fait alors qu AUCUN sejour du mois n est calculable')
+  assert.strictEqual(p.cache('[data-bind="revenue-received"]').textContent, '',
+    'le bandeau affiche un « recu » alors que rien n est calculable')
+  assert.strictEqual(p.cache('[data-bind="revenue-upcoming"]').textContent, '',
+    'le bandeau affiche un « a venir » alors que rien n est calculable')
+
+  // ⚠ LA CONTRE-EPREUVE : un mois a ZERO EURO REEL — aucun refus — reste un
+  // fait, et doit s'afficher comme tel. Sans elle, une garde qui dirait
+  // toujours « non calculable » passerait le test ci-dessus.
+  const q = bancRevenus({
+    mois: '2026-10',
+    par_bien: { 'uuid-1': parBien({ sejours: 0, total_cents: 0 }) },
+    total: parBien({ sejours: 0, total_cents: 0 }),
+    hors_mois: parBien({}),
+    hors_biens: parBien({})
+  })
+  q.interne.renderRevenus()
+  assert.notStrictEqual(q.cache('[data-bind="revenue-total"]').textContent, 'revenue.unavailable',
+    'un mois sans aucun sejour est annonce « non calculable » alors que zero est la bonne reponse')
+})

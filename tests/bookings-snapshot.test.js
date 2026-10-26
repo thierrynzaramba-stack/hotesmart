@@ -1049,3 +1049,132 @@ test('ANNULATION Beds24 : le passage a cancelled produit bien un evenement cance
   assert.strictEqual((capture.events || []).length, 1, 'l\'evenement part vers le dispatcher')
   assert.strictEqual(capture.events[0].type, 'cancelled')
 })
+
+// ─── LE WRITER UNITAIRE DERIVE LES REVENUS, ET IL NE LE FAISAIT PAS ──────────
+//
+// ⚠ DEUX CONSTATS BLOQUANTS DE LA REVIEW DU LOT REVENUS (26 octobre 2026), de
+// la MEME cause : `contexteDesRevenus` n'etait appelee que par le writer PAR
+// LOT, alors que son commentaire affirme que « le writer reste autonome pour
+// tous les autres appelants ». Or `api/channel-webhook.js` et
+// `lib/cron-channel-feed.js` — le chemin NOMINAL d'une reservation Channex —
+// appellent la version unitaire sans delais.
+//
+// Ce que ca produisait :
+//   · toute reservation Channex neuve sortait avec `derive_le` NULL, et la sonde
+//     du bloc Revenus est a l'echelle du COMPTE ENTIER : une seule ligne non
+//     derivee eteignait le bandeau et toutes les lignes, pour le titulaire
+//     comme pour les membres. Sur staging, ou aucun cron n'est planifie, c'etait
+//     DEFINITIF — et la premiere reservation de test de la recette le
+//     declenchait.
+//   · une ligne DEJA derivee qui change — annulation, prix, dates — ne
+//     repassait jamais : l'upsert ne cite pas les colonnes derivees, donc
+//     `ON CONFLICT DO UPDATE` les laisse intactes, et `aDeriver` rend `false`.
+//     Les deux requetes du rattrapage de 04:00 la manquaient toutes les deux.
+//     Une annulation gardait son argent dans le total du mois, POUR TOUJOURS.
+//
+// ⚠ ET AUCUN DOUBLE DE CE FICHIER NE POUVAIT LE VOIR : `fakeSupabase` rend la
+// meme chose a toutes les tables, donc la lecture des delais echouait et le
+// writer ne derivait pas — les 70 tests passaient sur le chemin ou la
+// derivation n'a pas lieu. D'ou ce double-ci, qui repond PAR TABLE.
+function fakeSupabaseAvecRevenus ({ existing = null, captureRef = {}, existingPropId = '12345',
+                                    delais = null, bienId = 'uuid-bien-1' } = {}) {
+  const LIGNES_DELAIS = delais || [
+    { canal: 'airbnb', base: 'arrivee', jours: 1, libelle: 'Airbnb' },
+    { canal: 'booking', base: 'depart', jours: 1, libelle: 'Booking' },
+    { canal: 'direct', base: 'reservation', jours: 3, libelle: 'Direct' }
+  ]
+  return {
+    from (table) {
+      const q = {
+        _table: table,
+        select () { return q },
+        eq () { return q },
+        maybeSingle: async () => {
+          if (table === 'properties') return { data: bienId ? { id: bienId } : null, error: null }
+          return { data: existing
+            ? { snapshot: existing, property_id: existingPropId, raw_hash: empreinte(null) }
+            : null, error: null }
+        },
+        upsert: async (row) => { captureRef.row = row; return { error: null } },
+        insert: async (row) => { (captureRef.events = captureRef.events || []).push(row); return { error: null } },
+        update (patch) { q._patch = patch; return q },
+        then (resoudre) {
+          if (q._patch) { (captureRef.updates = captureRef.updates || []).push(q._patch); q._patch = null }
+          // ⚠ C'EST ICI QUE LE DOUBLE D'AVANT ECHOUAIT : il rendait `{error:null}`
+          // sans `data`, donc `Array.isArray(data)` etait faux et les delais
+          // restaient inconnus.
+          if (table === 'delais_versement') {
+            return Promise.resolve({ data: LIGNES_DELAIS, error: null }).then(resoudre)
+          }
+          return Promise.resolve({ data: null, error: null }).then(resoudre)
+        }
+      }
+      return q
+    }
+  }
+}
+
+test('LE TEST QUI COMPTE : le writer UNITAIRE derive les revenus sans qu on lui donne les delais', async () => {
+  const capture = {}
+  const sb = fakeSupabaseAvecRevenus({ captureRef: capture })
+  const r = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 'B-NEUF', propertyId: '12345', provider: 'channex',
+    snapshot: { provider: 'channex', source: 'airbnb', status: 'new',
+                arrival: '2026-11-10', departure: '2026-11-12', guest_name: 'C. Durand' },
+    booking: { id: 'B-NEUF', amount: '300.00', meta: { amount_type: 'net' } }
+  })
+  assert.strictEqual(r.ok, true)
+  const ligne = capture.row
+  assert.ok(ligne, 'aucun upsert')
+  // Les colonnes derivees SONT ecrites, sans que l'appelant ait fourni quoi que ce soit.
+  assert.ok('derive_le' in ligne && ligne.derive_le,
+    'le writer unitaire n a pas derive : la sonde du bloc Revenus eteindra l ecran du compte entier')
+  assert.strictEqual(ligne.statut_canonique, 'confirmed')
+  assert.strictEqual(ligne.property_uuid, 'uuid-bien-1',
+    'l UUID du bien n a pas ete resolu')
+  assert.ok(ligne.date_versement, 'la date de versement n a pas ete calculee')
+})
+
+test('LE TEST QUI COMPTE : une ANNULATION met a jour le statut derive, elle ne le laisse pas a `confirmed`', async () => {
+  // ⚠ C'EST LE CHIFFRE FAUX, PAS L'ABSENCE. Une ligne deja derivee que le
+  // webhook reecrit en `cancelled` gardait `statut_canonique = 'confirmed'`,
+  // donc `revenus_du_mois` comptait son argent — chaque mois, pour toujours,
+  // sans que rien ne la reprenne.
+  const capture = {}
+  const sb = fakeSupabaseAvecRevenus({
+    captureRef: capture,
+    existing: { provider: 'channex', source: 'airbnb', status: 'new',
+                arrival: '2026-11-10', departure: '2026-11-12', guest_name: 'C. Durand' }
+  })
+  const r = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 'B-ANNUL', propertyId: '12345', provider: 'channex',
+    snapshot: { provider: 'channex', source: 'airbnb', status: 'cancelled',
+                arrival: '2026-11-10', departure: '2026-11-12', guest_name: 'C. Durand' },
+    booking: { id: 'B-ANNUL', amount: '300.00', meta: { amount_type: 'net' } }
+  })
+  assert.strictEqual(r.ok, true)
+  assert.ok(capture.row, 'aucun upsert sur une annulation')
+  assert.strictEqual(capture.row.statut_canonique, 'cancelled',
+    'le statut derive reste `confirmed` sur une annulation : son argent restera dans le total du mois')
+})
+
+test('sans delais LISIBLES, le writer unitaire n ecrit AUCUNE colonne derivee', async () => {
+  // ⚠ LA CONTRE-EPREUVE. Les colonnes derivees sont du confort : faire echouer
+  // l'upsert d'une reservation pour elles serait couper le coeur pour l'ecran.
+  // On ne derive donc pas — et on n'ecrit SURTOUT pas des colonnes a moitie
+  // calculees, qui seraient prises pour un fait par les agregats.
+  const capture = {}
+  const sb = fakeSupabaseAvecRevenus({ captureRef: capture, delais: [] })
+  const r = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 'B-SANS', propertyId: '12345', provider: 'channex',
+    snapshot: { provider: 'channex', source: 'airbnb', status: 'new',
+                arrival: '2026-11-10', departure: '2026-11-12' },
+    booking: { id: 'B-SANS', amount: '300.00', meta: { amount_type: 'net' } }
+  })
+  assert.strictEqual(r.ok, true)
+  // `tableDesDelais([])` rend un objet VIDE, pas `undefined` : la lecture a
+  // REUSSI et la table est vide. On derive donc, mais sans date de versement.
+  assert.ok(capture.row, 'aucun upsert')
+  assert.strictEqual(capture.row.date_versement, null,
+    'une date de versement est calculee alors qu aucun canal n a de delai')
+})

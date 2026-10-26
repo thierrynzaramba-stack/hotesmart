@@ -835,9 +835,31 @@ function renderRevenus () {
   const devise = deviseDuCompte()
   const T = rev.total
 
-  $('[data-bind="revenue-total"]').textContent = euros(T.total_cents, devise)
-  $('[data-bind="revenue-received"]').textContent = euros(T.recu_cents, devise)
-  $('[data-bind="revenue-upcoming"]').textContent = euros(T.a_venir_cents, devise)
+  // ⚠⚠ LA MEME GARDE QUE LA LIGNE DU BIEN, ET LE BANDEAU NE L'AVAIT PAS.
+  // Constat BLOQUANT de la review du 26 octobre 2026. La ligne d'un logement
+  // dit « non calculable » quand son total vaut zero ET qu'un montant a ete
+  // refuse (plus bas, avec son test) ; le bandeau, lui, ecrivait
+  // `euros(T.total_cents)` sans condition.
+  //
+  // Mesure sur les donnees de staging : `revenus_du_mois(2026-10)` rend
+  // `{sejours: 2, total_cents: 0, sans_montant: 2}`. L'ecran afficherait donc
+  // « 0,00 € · Recu 0,00 € · A venir 0,00 € » au bandeau, « non calculable »
+  // sur la ligne du bien, et « 2 sejour(s) dont le montant n'est pas
+  // calculable » en reserve. Les deux moities du meme ecran se contredisent —
+  // et c'est le bandeau qui porte le chiffre que l'hote retient.
+  //
+  // ⚠ ET AUCUN TEST NE POUVAIT LE VOIR : le banc DOM stube `I18n.money` pour
+  // rendre la chaine vide, donc le texte du bandeau est toujours `''` pour
+  // toute la suite. Le test ajoute avec ce correctif mesure la CLASSE du noeud,
+  // pas son texte.
+  const toutRefuse = T.total_cents === 0 && (T.refuses ? T.refuses.montant : 0) > 0
+  const noeudTotal = $('[data-bind="revenue-total"]')
+  noeudTotal.classList.toggle('muted', toutRefuse)
+  noeudTotal.textContent = toutRefuse
+    ? t('revenue.unavailable')
+    : euros(T.total_cents, devise)
+  $('[data-bind="revenue-received"]').textContent = toutRefuse ? '' : euros(T.recu_cents, devise)
+  $('[data-bind="revenue-upcoming"]').textContent = toutRefuse ? '' : euros(T.a_venir_cents, devise)
   // Le mois SERVI, pas le mois demande : l'endpoint retombe sur le mois courant
   // si la valeur recue est hors forme, et l'ecran doit dire ce qu'il montre.
   $('[data-bind="revenue-month"]').textContent = moisEnClair(rev.mois || (etat.ecran && etat.ecran.mois))
