@@ -517,7 +517,7 @@ test("LE TEST QUI COMPTE : sans payload brut, les colonnes derivees NE SONT PAS 
   assert.ok(ecrite.snapshot, 'le snapshot normalise n a pas ete ecrit')
 })
 
-test('LE TEST QUI COMPTE : AVEC un payload, les dix colonnes sont ecrites', async () => {
+test('LE TEST QUI COMPTE : AVEC un payload, les ONZE colonnes sont ecrites', async () => {
   // La contre-epreuve du test precedent : si les colonnes ne partaient JAMAIS,
   // il serait vert pour rien. C'est le faux vert de cette famille.
   const { client, stats } = fakeBatchSupabase({ rows: [] })
@@ -534,7 +534,15 @@ test('LE TEST QUI COMPTE : AVEC un payload, les dix colonnes sont ecrites', asyn
   })
   const ecrite = stats.upsertedRows[stats.upsertedRows.length - 1]
   assert.ok('derive_le' in ecrite, 'les colonnes derivees ne partent jamais : le test precedent ne mesure rien')
-  assert.strictEqual(ecrite.derive_version, 1)
+  // ⚠ LA VERSION SE LIT DU MODULE, ELLE NE SE FIGE PAS ICI. Mon « 1 » en dur a
+  // rougi le jour ou la regle est passee en version 2 — et le test accusait un
+  // comportement juste. Un numero de version recopie dans un test est une
+  // mesure ecrite a la main, exactement ce que ce depot refuse ailleurs.
+  const { VERSION, COLONNES } = require('../lib/revenus/derive')
+  assert.strictEqual(ecrite.derive_version, VERSION)
+  for (const c of COLONNES) {
+    assert.ok(c in ecrite, `${c} n est pas ecrite alors que le payload est la`)
+  }
   assert.strictEqual(ecrite.property_uuid, '11111111-2222-4333-8444-555555555555')
 })
 

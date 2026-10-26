@@ -36,7 +36,7 @@ const booking = (centimes, extra = {}) => deriverRevenus(
   { rooms: [{ meta: { price_details: { guest_view: { total: { amount: centimes, decimal_places: 2 } } } } }], inserted_at: '2026-09-01T10:00:00Z' },
   { delais: DELAIS, uuidDuBien: 'uuid-2', maintenant: T })
 
-test('LE TEST QUI COMPTE : les DIX colonnes sont posees, et exactement les dix', () => {
+test('LE TEST QUI COMPTE : les ONZE colonnes sont posees, et exactement les onze', () => {
   // ⚠ LA LISTE EST LA SOURCE UNIQUE. Le writer, le script de remplissage, le
   // rattrapage et la migration la nomment tous : une colonne ajoutee a la
   // fonction sans l'etre a la liste serait posee par le writer et ignoree par
@@ -44,7 +44,10 @@ test('LE TEST QUI COMPTE : les DIX colonnes sont posees, et exactement les dix',
   // anciennes, ce qui est le pire des deux mondes.
   const d = airbnb('400.00', '12.00')
   assert.deepEqual(Object.keys(d).sort(), [...COLONNES].sort())
-  assert.equal(COLONNES.length, 10)
+  // ⚠ ONZE DEPUIS LE 27 OCTOBRE 2026 : `est_blocage` s'est ajoutee, et la
+  // VERSION de la regle a monte avec elle pour que le rattrapage reprenne les
+  // lignes derivees avant.
+  assert.equal(COLONNES.length, 11)
   // Et chacune est posee — pas une seule `undefined`, qui laisserait la colonne
   // intacte cote Postgres au lieu de l'ecrire.
   for (const c of COLONNES) {
@@ -210,4 +213,100 @@ test('deux appels sur la meme entree rendent la MEME chose', () => {
   const a = airbnb('333.33', '10.01')
   const b = airbnb('333.33', '10.01')
   assert.deepEqual(a, b)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// `est_blocage` — un blocage n'est pas un sejour (decision de Thierry du
+// 27 octobre 2026, apres mesure en production)
+// ═══════════════════════════════════════════════════════════════════════════
+
+test('LE TEST QUI COMPTE : les TROIS conditions sont cumulees', () => {
+  // ⚠ MESURE EN PRODUCTION, 1 564 lignes : 74 sejours confirmes sans prix
+  // voyageur, dont 66 portant « aucun nom » ET « price a zero ». Beds24 envoie
+  // ses blocages comme des reservations confirmees a prix nul.
+  //
+  // Thierry en avait decide DEUX. La mesure a exige la troisieme : un blocage
+  // n'a PAS de revenu. Voir le test suivant.
+  const { estUnBlocage } = require('../lib/revenus/derive')
+  // Les trois reunies : c'est un blocage.
+  assert.equal(estUnBlocage({}, { price: 0 }, false), true)
+  assert.equal(estUnBlocage({}, { price: '0' }, false), true)
+  assert.equal(estUnBlocage({ guest_name: '   ' }, { price: '0.00' }, false), true)
+  // Chacune qui manque suffit a en faire un sejour.
+  assert.equal(estUnBlocage({ guest_name: 'C. B.' }, { price: 0 }, false), false,
+    'un sejour OFFERT a un nom : ce n est pas un blocage')
+  assert.equal(estUnBlocage({}, { price: 250 }, false), false,
+    'un prix non nul n est pas un blocage, meme sans nom transmis')
+  assert.equal(estUnBlocage({}, { price: 0 }, true), false,
+    'un montant calculable interdit de classer blocage')
+})
+
+test("LE TEST QUI COMPTE : un montant CALCULABLE interdit le classement blocage", () => {
+  // ⚠ CINQ LIGNES REELLES, trouvees en eprouvant l heuristique contre la
+  // production : classees blocage par les deux premiers indices, ET portant un
+  // montant. Leur revenu aurait disparu du total, sans motif et sans compteur.
+  //
+  // La cause est un repli de `eclatement.js` : pour une saisie DIRECTE sans
+  // commission, il somme les `invoiceItems` quand `price` est nul. Une saisie
+  // directe a `price = 0`, sans nom, mais avec des charges facturees, porte
+  // donc un vrai prix.
+  const { estUnBlocage } = require('../lib/revenus/derive')
+  assert.equal(estUnBlocage({}, { price: 0 }, true), false)
+  // Et le chemin complet : une saisie directe Beds24 avec charges.
+  const d = deriverRevenus(
+    { provider: 'beds24', source: 'direct', status: 'confirmed', arrival: '2026-11-05', departure: '2026-11-08' },
+    { price: 0, commission: 0, invoiceItems: [{ type: 'charge', lineTotal: 320 }] },
+    { delais: DELAIS, uuidDuBien: 'uuid-1', maintenant: T })
+  assert.equal(d.montant_net_cents, 32000, 'le repli sur les charges doit donner un montant')
+  assert.equal(d.est_blocage, false,
+    'une ligne qui a rapporte 320 EUR est classee blocage : son revenu disparait du total')
+})
+
+test("LE TEST QUI COMPTE : `price` VIDE n'est pas `price` ZERO", () => {
+  // ⚠ `Number('')` VAUT 0, et ce serait le defaut le plus couteux de cette
+  // fonction : une chaine vide — « aucun prix transmis » — deviendrait « prix
+  // zero », donc un blocage, donc une ligne exclue du total. Un revenu reel qui
+  // disparait parce qu'un champ etait vide.
+  //
+  // « Prix zero » est un FAIT que le provider affirme ; « prix absent » est une
+  // absence. Meme regle que `delaiEnJours` dans le module frere.
+  const { estUnBlocage } = require('../lib/revenus/derive')
+  for (const prix of ['', '   ', null, undefined, true, false, [], {}, NaN]) {
+    assert.equal(estUnBlocage({}, { price: prix }, false), false,
+      `price=${JSON.stringify(prix)} est pris pour un zero affirme`)
+  }
+  assert.equal(estUnBlocage({}, {}, false), false, 'price absent n est pas un zero')
+  // Et un zero AFFIRME, lui, compte.
+  for (const prix of [0, '0', '0.00', '0.0']) {
+    assert.equal(estUnBlocage({}, { price: prix }, false), true,
+      `price=${JSON.stringify(prix)} est un zero affirme`)
+  }
+})
+
+test("LE TEST QUI COMPTE : `est_blocage` ne touche PAS `statut_canonique`", () => {
+  // Decision explicite de Thierry. Requalifier une ligne `confirmed` en
+  // `blocked` sur une heuristique changerait un comportement qui n'a rien a
+  // voir avec les revenus : ce statut gouverne aussi le menage.
+  const d = deriverRevenus(
+    { provider: 'beds24', source: 'direct', status: 'confirmed', arrival: '2026-11-05', departure: '2026-11-08' },
+    { price: 0 },
+    { delais: DELAIS, uuidDuBien: 'uuid-1', maintenant: T })
+  assert.equal(d.est_blocage, true)
+  assert.equal(d.statut_canonique, 'confirmed',
+    'le statut a ete requalifie : le menage de ce sejour changerait de comportement')
+})
+
+test("LE TEST QUI COMPTE : la VERSION a monte, donc le rattrapage reprend tout", () => {
+  // ⚠ PREMIER USAGE REEL DU NUMERO DE VERSION. Toute ligne derivee en version 1
+  // ne porte pas `est_blocage` — elle vaut donc `null`, et les agregats la
+  // comptent comme un sejour. Sans ce numero, la nouvelle regle ne vaudrait que
+  // pour les reservations ecrites apres elle, et les 1 436 anciennes garderaient
+  // leur classement d'avant.
+  const { aDeriver, VERSION, COLONNES } = require('../lib/revenus/derive')
+  assert.ok(VERSION >= 2, 'la version n a pas monte avec la nouvelle regle')
+  assert.equal(COLONNES.length, 11, 'la onzieme colonne n est pas dans la liste')
+  assert.ok(COLONNES.includes('est_blocage'))
+  // Une ligne de la version precedente est reprise.
+  assert.equal(aDeriver({ derive_le: T, derive_version: VERSION - 1 }), true)
+  assert.equal(aDeriver({ derive_le: T, derive_version: VERSION }), false)
 })
