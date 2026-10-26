@@ -5,7 +5,7 @@
 //
 //   node --env-file=<.env de la base visee> scripts/verifier-temperature-airroi.js
 //
-// LECTURE SEULE. ⚠ EMPREINTE en tete (5 biens = production, 3 = staging).
+// LECTURE SEULE. ⚠ EMPREINTE en tete : la REFERENCE DU PROJET (lib/empreinte-base.js).
 // ⚠ Un verificateur qui n'a rien lu doit echouer : une colonne absente est un
 // ECHEC, jamais « 0 ligne ».
 

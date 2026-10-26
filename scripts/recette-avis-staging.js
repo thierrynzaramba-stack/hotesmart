@@ -4,8 +4,9 @@
 // PREPARE LE DECOR DE RECETTE HUMAINE DU CHANTIER « EVALUATION DU VOYAGEUR »,
 // et bascule le rôle du compte de test.
 //
-// ⚠ STAGING UNIQUEMENT, deux empreintes le verifient : la reference du projet et
-// le nombre de biens. Il ECRIT (une ligne ota_reviews, une evaluation, et le
+// ⚠ STAGING UNIQUEMENT, et c'est la REFERENCE DU PROJET qui le verifie — le
+// nombre de biens est imprime, il ne decide plus (26 octobre 2026).
+// Il ECRIT (une ligne ota_reviews, une evaluation, et le
 // profil du compte de test) et il refuse de demarrer ailleurs.
 //
 // ⚠ AUCUNE PUBLICATION REELLE N'EST POSSIBLE PENDANT LA RECETTE, a condition que
@@ -26,18 +27,17 @@
 //   node --env-file=.env.staging scripts/recette-avis-staging.js --role=prestataire
 //   node --env-file=.env.staging scripts/recette-avis-staging.js --nettoyer
 const { createClient } = require('@supabase/supabase-js')
-const { nomDeLaBase } = require('../lib/empreinte-base')
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 const crypto = require('node:crypto')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
 if (!URL || !KEY) { console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY requis.'); process.exit(1) }
 const MEMBRE_EMAIL = process.env.MEMBRE_TEST_EMAIL
-const PROJET_STAGING = 'ortyofzzdsthlhqmzsnq'
 const MARQUE = 'RECETTE-AVIS'
 
 const sb = createClient(URL, KEY, { auth: { persistSession: false } })
-const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
+const projet = refDuProjet(URL)
 
 const args = process.argv.slice(2)
 const a = (n) => args.find(x => x === `--${n}` || x.startsWith(`--${n}=`))
@@ -51,8 +51,8 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
   console.log(`Projet Supabase : ${projet}`)
   const { count: biens } = await sb.from('properties').select('*', { count: 'exact', head: true })
   console.log(`Empreinte : ${biens} bien(s)\n`)
-  if (projet !== PROJET_STAGING) {
-    console.error(`ECHEC : ce script ECRIT. Il ne tourne que sur STAGING (${PROJET_STAGING}).`)
+  if (nomDeLaBase(URL) !== 'STAGING') {
+    console.error(`ECHEC : ce script ECRIT. Il ne tourne que sur STAGING, et SUPABASE_URL pointe sur « ${projet} » (${nomDeLaBase(URL)}).`)
     process.exit(1)
   }
     // ⚠ LE NOMBRE DE BIENS N'EST PLUS UNE GARDE (26 octobre 2026). Il valait

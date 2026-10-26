@@ -8,7 +8,7 @@
 //
 // LECTURE SEULE. Il ne lit que `profiles` (deux colonnes) et compte.
 //
-// ⚠ EMPREINTE EN TETE (5 biens = production, 3 = staging) : un resultat qui ne
+// ⚠ EMPREINTE EN TETE — la REFERENCE DU PROJET (lib/empreinte-base.js) : un resultat qui ne
 // dit pas OU il a ete obtenu ne prouve rien.
 //
 // ⚠ CE QU'IL PROUVE, ET CE QU'IL NE VOIT PAS. PostgREST n'expose pas
@@ -27,7 +27,7 @@ const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
 if (!URL || !KEY) { console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY absents.'); process.exit(1) }
 const sb = createClient(URL, KEY, { auth: { persistSession: false } })
-const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
+const projet = refDuProjet(URL)
 
 let echecs = 0
 const ok = (m) => console.log(`  ok    ${m}`)

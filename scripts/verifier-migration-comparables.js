@@ -7,7 +7,7 @@
 //
 //   node --env-file=<.env de la base visee> scripts/verifier-migration-comparables.js
 //
-// LECTURE SEULE. ⚠ EMPREINTE en tete (5 biens = production, 3 = staging).
+// LECTURE SEULE. ⚠ EMPREINTE en tete : la REFERENCE DU PROJET (lib/empreinte-base.js).
 // ⚠ Les fonctions de quota ne sont appelees qu'avec un parametre NUL : elles
 // refusent avant le verrou et n'ecrivent rien. Cela prouve leur SIGNATURE
 // (celle de -nature.sql) ; l'ancienne, sans p_nature, doit avoir disparu.

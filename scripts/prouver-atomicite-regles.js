@@ -25,6 +25,11 @@
 
 require('dotenv').config({ path: process.env.ENV_FILE || '.env.staging' })
 const { createClient } = require('@supabase/supabase-js')
+// ⚠ LA TABLE DES PROJETS NE SE RECOPIE PAS (constat MINEUR de la review du
+// 26 octobre 2026). Ce script gardait par la BONNE regle — la reference du
+// projet — mais avec sa propre copie des deux references. Une copie ne se
+// corrige pas quand l'original change.
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 const crypto = require('node:crypto')
 
 const URL = process.env.SUPABASE_URL
@@ -36,9 +41,8 @@ if (!URL || !KEY) {
 
 // ⚠ LE PROJET DE PRODUCTION EST NOMME, ET REFUSE. Lire la liste des projets
 // autorises serait plus souple ; nommer celui qu'on s'interdit est plus sur.
-const PROJET = (URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''
-const PROD = 'cjmrizpdyhrcurmgyrhs'
-if (PROJET === PROD) {
+const PROJET = refDuProjet(URL) || ''
+if (nomDeLaBase(URL) === 'PRODUCTION') {
   console.error(`REFUS : ${PROJET} est la PRODUCTION. Ce script ecrit — staging seulement.`)
   process.exit(2)
 }

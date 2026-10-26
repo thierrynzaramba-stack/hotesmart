@@ -17,28 +17,29 @@
 // ⚠ IL APPELLE LES HANDLERS EN LOCAL (require), pas le deploiement : le code de
 // la nuit du 2 octobre n'etait pas deploye sur staging.
 //
-// ⚠ STAGING UNIQUEMENT, verifie par deux empreintes (reference du projet, 3
-// biens). Il ECRIT, puis NETTOIE dans un `finally`, et le nettoyage se verifie.
+// ⚠ STAGING UNIQUEMENT, verifie par la REFERENCE DU PROJET — le nombre de
+// biens est imprime, il ne decide plus (26 octobre 2026). Il ECRIT, puis
+// NETTOIE dans un `finally`, et le nettoyage se verifie.
 //
 // ⚠ RIEN NE PART : aucun appel provider (pas de publication), et les alertes
 // SMS / e-mail n'ont ni configuration ni cle sur staging (verifie avant
 // d'ecrire ce script). La tache, elle, est ecrite puis supprimee.
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
 const ANON = process.env.SUPABASE_ANON_KEY
 const EMAIL = process.env.TEST_EMAIL
 const MDP = process.env.TEST_PASSWORD
-const PROJET_STAGING = 'ortyofzzdsthlhqmzsnq'
 for (const [n, v] of [['SUPABASE_URL', URL], ['SUPABASE_SERVICE_KEY', KEY], ['SUPABASE_ANON_KEY', ANON], ['TEST_EMAIL', EMAIL], ['TEST_PASSWORD', MDP]]) {
   if (!v) { console.error(`${n} requis.`); process.exit(1) }
 }
 process.env.CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || 'inutile-ici'
 
 const sb = createClient(URL, KEY, { auth: { persistSession: false } })
-const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
+const projet = refDuProjet(URL)
 let echecs = 0
 const ok = (m) => console.log(`  ok    ${m}`)
 const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 1 }
@@ -62,8 +63,8 @@ async function appeler (handler, req) { const res = reponse(); await handler(req
     // depuis qu'un bien y a ete cree : cette seconde ceinture refusait donc
     // toute execution. La reference du PROJET, elle, ne derive pas — c'est
     // elle qui garde, et le compte reste imprime a titre d'information.
-  if (projet !== PROJET_STAGING) {
-    console.error(`ECHEC : ce script ECRIT. Base STAGING attendue (${PROJET_STAGING}).`)
+  if (nomDeLaBase(URL) !== 'STAGING') {
+    console.error(`ECHEC : ce script ECRIT. Base STAGING attendue, et SUPABASE_URL pointe sur « ${projet} » (${nomDeLaBase(URL)}).`)
     process.exit(1)
   }
 

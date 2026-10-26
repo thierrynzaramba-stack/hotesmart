@@ -8,8 +8,9 @@
 // titulaire voit tout par construction, et lui faire passer ce controle rendrait
 // des « ok » qui ne prouvent rien.
 //
-// ⚠ STAGING UNIQUEMENT, ET DEUX EMPREINTES LE VERIFIENT : la reference du projet
-// et le nombre de biens. Ce script CREE UN COMPTE dans l'authentification d'une
+// ⚠ STAGING UNIQUEMENT, ET C'EST LA REFERENCE DU PROJET QUI LE VERIFIE — le
+// nombre de biens est imprime, il ne decide plus (26 octobre 2026).
+// Ce script CREE UN COMPTE dans l'authentification d'une
 // base reelle — en production, ce serait un compte de plus dans la vraie liste
 // des utilisateurs. Il refuse de demarrer ailleurs.
 //
@@ -23,7 +24,7 @@
 //
 // Usage : node --env-file=.env.staging scripts/creer-membre-test-staging.js
 const { createClient } = require('@supabase/supabase-js')
-const { nomDeLaBase } = require('../lib/empreinte-base')
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 
@@ -33,10 +34,9 @@ if (!URL || !KEY) { console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY requis.')
 
 const EMAIL = 'thierrylapoule31+membre@gmail.com'
 const FICHIER_ENV = process.env.FICHIER_ENV || '/home/thierry/hotesmart/.env.staging'
-const PROJET_STAGING = 'ortyofzzdsthlhqmzsnq'
 
 const sb = createClient(URL, KEY, { auth: { persistSession: false } })
-const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
+const projet = refDuProjet(URL)
 
 let echecs = 0
 const ok = (m) => console.log(`  ok    ${m}`)
@@ -76,8 +76,8 @@ function poserDansEnv (fichier, cles) {
   console.log(`Projet Supabase : ${projet}`)
   const { count: biens } = await sb.from('properties').select('*', { count: 'exact', head: true })
   console.log(`Empreinte : ${biens} bien(s)\n`)
-  if (projet !== PROJET_STAGING) {
-    console.error(`ECHEC : ce script CREE UN COMPTE. Il ne tourne que sur STAGING (${PROJET_STAGING}),`)
+  if (nomDeLaBase(URL) !== 'STAGING') {
+    console.error(`ECHEC : ce script CREE UN COMPTE. Il ne tourne que sur STAGING, et SUPABASE_URL pointe sur « ${projet} » (${nomDeLaBase(URL)}),`)
     console.error(`        et SUPABASE_URL pointe sur « ${projet} ».`)
     process.exit(1)
   }

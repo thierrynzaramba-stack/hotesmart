@@ -8,7 +8,7 @@
 // de Thierry : le retirer (prestataire non renseigne) et passer en « expiree »
 // les evaluations hors delai de ces sejours.
 //
-//   node --env-file=<.env de la base visee> scripts/nettoyer-profil-test-colomiers.js [--go --biens=5 --statut=completed|unassigned]
+//   node --env-file=<.env de la base visee> scripts/nettoyer-profil-test-colomiers.js [--go --base=PRODUCTION --statut=completed|unassigned]
 //
 // ⚠ UN MENAGE `accepted` DOIT AVOIR UN PORTEUR (contrainte
 // menages_accepted_a_un_porteur, revue de ed445b2) : retirer la prestataire
@@ -17,7 +17,7 @@
 //   unassigned — le menage n'a jamais ete attribue.
 //
 // Sans --go : AUCUNE ecriture, la liste exacte de ce qui serait ecrit.
-// ⚠ --go EXIGE --biens=N, le nombre de biens de la base visee (5 production) :
+// ⚠ --go EXIGE --base=PRODUCTION (l'identite du projet, pas un nombre) :
 //   l'empreinte arrete une ecriture sur la mauvaise base.
 // ⚠ BORNE : seuls les menages DE CE PROFIL, PASSES (depart avant aujourd'hui)
 //   et non annules ; seules les evaluations `a_remplir` de CES sejours dont
@@ -26,6 +26,7 @@
 // ⚠ Chaque menage modifie laisse sa trace dans `menage_assignment_log`.
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 
 const PROFIL_TEST = '6ed13b3c-c893-4ebd-987b-6a5c1e9e3490'
 const ATTENDU = { menages: 13, evaluations: 2 }
@@ -34,15 +35,29 @@ const val = n => { const a = args.find(x => x.startsWith(`--${n}=`)); return a ?
 const go = args.includes('--go')
 
 ;(async () => {
-  if (go && !/^\d+$/.test(String(val('biens') || ''))) { console.error('ECHEC : --go exige --biens=<N> (5 production)'); process.exit(1) }
+  if (go && !['STAGING', 'PRODUCTION'].includes(String(val('base') || '').toUpperCase())) { console.error('ECHEC : --go exige --base=STAGING ou --base=PRODUCTION'); process.exit(1) }
   const statut = val('statut')
   if (go && !['completed', 'unassigned'].includes(statut)) { console.error('ECHEC : --go exige --statut=completed ou --statut=unassigned (un menage accepte doit avoir un porteur)'); process.exit(1) }
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, { auth: { persistSession: false } })
   const { count, error: eC } = await sb.from('properties').select('id', { count: 'exact', head: true })
   if (eC || !Number.isInteger(count)) throw new Error(`empreinte illisible ${eC ? eC.message : ''}`)
-  const projet = String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]
-  console.log(`Projet ${projet} · biens = ${count} · ${go ? 'ECRITURE' : 'sans --go : AUCUNE ecriture'}`)
-  if (go && Number(val('biens')) !== count) { console.error(`ECHEC : --biens=${val('biens')} annonce, la base en compte ${count}`); process.exit(3) }
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Base ${base} · biens = ${count} · ${go ? 'ECRITURE' : 'sans --go : AUCUNE ecriture'}`)
+  // ⚠ L'OPERATEUR ANNONCE LA BASE, ET LE SCRIPT VERIFIE L'IDENTITE DU PROJET
+  // — PLUS SON NOMBRE DE BIENS (26 octobre 2026, constat GRAVE de la review du
+  // lot `fix-empreinte-par-projet`). L'accuse de reception humain GARDE sa
+  // vertu : c'est lui qui protege d'un `--env-file` confondu, et il reste
+  // exige. Ce qui change est ce qu'il annonce.
+  //
+  // Le compte de biens ne pouvait pas tenir ce role : staging en porte QUATRE
+  // depuis qu'un bien y a ete cree, alors que l'aide de ce script disait
+  // « 3 staging ». Un operateur qui suivait l'aide obtenait « mauvaise base »
+  // SUR LA BONNE BASE — et le jour ou les deux bases porteraient le meme
+  // nombre, il n'y aurait plus rien derriere : un `--env-file` confondu
+  // ecrirait sur la mauvaise base en silence. La reference du projet, elle, ne
+  // derive pas avec la donnee.
+  if (base === 'INCONNUE') { console.error(`ECHEC : projet Supabase inconnu — ni la production, ni staging. Rien n'est ecrit.`); process.exit(3) }
+  if (go && String(val('base')).toUpperCase() !== base) { console.error(`ECHEC : --base=${val('base')} annonce, la base est ${base} — mauvaise base, rien n'est ecrit`); process.exit(3) }
 
   const { data: p, error: eP } = await sb.from('profiles').select('id, account_user_id, first_name, last_name, active, access_mode').eq('id', PROFIL_TEST).maybeSingle()
   if (eP || !p) throw new Error(`profil ${PROFIL_TEST} introuvable dans cette base`)

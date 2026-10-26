@@ -857,7 +857,8 @@ clé `AIRROI_KEY` n'était visible dans aucun shell de la session (ni `-c`, ni
   `properties.latitude/longitude/coords_source/airbnb_listing_id` ; tables
   `airroi_cache`, `airroi_appels`, `comparables_retenus`, `grille_controle`,
   RLS actives. Preuve contre la base visée : `scripts/verifier-migration-marche.js`
-  (empreinte biens = 5 prod / 3 staging).
+  (empreinte : la **référence du projet**, `lib/empreinte-base.js` — plus le
+  nombre de biens, qui dérive avec la donnée ; corrigé le 26 octobre 2026).
 - **Client AirROI** `lib/airroi/` : `client.js` (seul point de contact, serveur
   seulement, cache d'abord, garde-fous avant le réseau, clé lue au moment de
   l'appel, jamais écrite), `cout.js` (tarifs, fraîcheurs, garde-fous),
@@ -1036,8 +1037,9 @@ Corrigé sans nouvelle review (règle : deux reviews sans constat de sécurité)
 ### Migrations appliquées et prouvées — 24 septembre 2026
 
 `2026-09-24-marche-airroi.sql` puis `2026-09-24-controle-airbnb.sql`, collées
-par Thierry en staging et en production. SQL à empreinte : `biens = 3` et
-`biens = 5`, `colonnes_airbnb = 2`, CHECK du statut sans `attente_dette_26`,
+par Thierry en staging et en production. SQL à empreinte — **relevé du
+24 septembre 2026, pas une règle** : `biens = 3` et `biens = 5`,
+`colonnes_airbnb = 2`, CHECK du statut sans `attente_dette_26`,
 `releves = 0`. **Prouvées contre chaque base** par
 `scripts/verifier-migration-marche.js` (`.env.staging` : projet
 ortyofzzdsthlhqmzsnq ; `.env.local` : projet cjmrizpdyhrcurmgyrhs) — quatre
@@ -1742,8 +1744,11 @@ prouve rien.
 
 **On ne colle que la migration.** La vérification passe UNIQUEMENT par le
 script (`scripts/verifier-migration-marche.js`), qui affiche l'empreinte en
-tête : projet et nombre de biens (`ortyofzzdsthlhqmzsnq · biens = 3` =
-staging ; `cjmrizpdyhrcurmgyrhs · biens = 5` = production). Les quatre
+tête : **la référence du projet**, et le nombre de biens à titre
+d'information — `Base STAGING · biens = 4`, `Base PRODUCTION · biens = 5`.
+⚠ Jusqu'au 26 octobre 2026, c'était le NOMBRE qui identifiait la base
+(« 3 = staging, 5 = production ») : staging en a gagné un, et les scripts ont
+refusé de travailler sur une base parfaitement identifiable. Les quatre
 migrations V2 ne portent plus de requête de vérification (retirée le
 25 septembre ; lignes toutes < 60 caractères). Le test de la migration de
 `marche_calendrier` refuse désormais tout `select` dans le fichier collé.
@@ -3390,7 +3395,8 @@ vérifier leur cohérence et leur comportement sur tous les biens.
      bloc marché et comparables, 11 réponses 200 sur les 3 biens.
 2. **Les migrations, dans l'ordre**, chacune rejouable (`if not exists`,
    `or replace`, `drop … if exists`) et vérifiée par un script **contre la
-   production** après collage. L'empreinte attendue est de 5 biens.
+   production** après collage. L'empreinte attendue est **`Base PRODUCTION`** —
+   la référence du projet, plus un nombre de biens (26 octobre 2026).
 3. **Rien n'écrit dans le calendrier, rien ne pousse de prix** :
    `tests/v2-marche-aucune-ecriture-calendrier.test.js`. La contre-épreuve
    (une écriture dans `calendar_inventory` et un appel à Channex injectés

@@ -21,6 +21,7 @@
 //
 // Usage : node --env-file=.env.staging scripts/prouver-simulation-avis.js
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
@@ -28,7 +29,6 @@ const ANON = process.env.SUPABASE_ANON_KEY
 const EMAIL = process.env.MEMBRE_TEST_EMAIL
 const MDP = process.env.MEMBRE_TEST_PASSWORD
 const SITE = process.env.SITE_URL || 'https://hotesmart-staging.vercel.app'
-const PROJET_STAGING = 'ortyofzzdsthlhqmzsnq'
 
 for (const [nom, v] of [['SUPABASE_URL', URL], ['SUPABASE_SERVICE_KEY', KEY],
   ['SUPABASE_ANON_KEY', ANON], ['MEMBRE_TEST_EMAIL', EMAIL], ['MEMBRE_TEST_PASSWORD', MDP]]) {
@@ -36,7 +36,7 @@ for (const [nom, v] of [['SUPABASE_URL', URL], ['SUPABASE_SERVICE_KEY', KEY],
 }
 
 const sb = createClient(URL, KEY, { auth: { persistSession: false } })
-const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
+const projet = refDuProjet(URL)
 
 let echecs = 0
 const ok = (m) => console.log(`  ok    ${m}`)
@@ -46,13 +46,17 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
   console.log(`Base    : ${projet}`)
   console.log(`Site    : ${SITE}\n`)
   const { count: biens } = await sb.from('properties').select('*', { count: 'exact', head: true })
-    // ⚠ LE NOMBRE DE BIENS N'EST PLUS UNE GARDE (26 octobre 2026). Il valait
-    // « la base est bien celle que je crois », et staging en porte QUATRE
-    // depuis qu'un bien y a ete cree : cette seconde ceinture refusait donc
-    // toute execution. La reference du PROJET, elle, ne derive pas — c'est
-    // elle qui garde, et le compte reste imprime a titre d'information.
-  if (projet !== PROJET_STAGING) {
-    console.error(`ECHEC : ce script ECRIT. Base STAGING attendue (${PROJET_STAGING}).`)
+  // ⚠ LE NOMBRE DE BIENS N'EST PLUS UNE GARDE (26 octobre 2026). Il valait
+  // « la base est bien celle que je crois », et staging en porte QUATRE depuis
+  // qu'un bien y a ete cree : cette seconde ceinture refusait donc toute
+  // execution. La reference du PROJET, elle, ne derive pas — c'est elle qui
+  // garde, et le compte reste imprime a titre d'information.
+  // ⚠ ET IL FAUT L'IMPRIMER POUR QUE CETTE PHRASE SOIT VRAIE : la review du
+  // 26 octobre a mesure que ce script-la le LISAIT sans jamais l'afficher. Une
+  // requete morte, et un commentaire qui affirmait le contraire du code.
+  console.log(`Biens   : ${biens}`)
+  if (nomDeLaBase(URL) !== 'STAGING') {
+    console.error(`ECHEC : ce script ECRIT. Base STAGING attendue, et SUPABASE_URL pointe sur « ${projet} » (${nomDeLaBase(URL)}).`)
     process.exit(1)
   }
   // ⚠ LE MEME MOTIF ANCRE QUE shared/config.js. « contient staging » laisserait

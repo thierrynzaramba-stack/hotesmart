@@ -61,7 +61,8 @@ sont autorisées par défaut). Puis la recette (`recette-avis-complete.md`).
 ## 2. Le jeu de migrations de production — vérifié contre la production
 
 État réel de la production, sondé en lecture seule la nuit du 2 octobre
-(`select … limit 1` par table et colonne, empreinte 5 biens) :
+(`select … limit 1` par table et colonne, empreinte `Base PRODUCTION` —
+5 biens ce jour-là, un relevé et non la règle d'identification) :
 
 | Fichier | Production |
 |---|---|

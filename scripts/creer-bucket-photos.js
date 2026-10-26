@@ -13,13 +13,24 @@
 // Applique le 10 octobre 2026 sur staging et production.
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 
 const REGLAGES = { public: true, fileSizeLimit: 2 * 1024 * 1024, allowedMimeTypes: ['image/jpeg'] }
 
 ;(async () => {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
   const { count } = await sb.from('properties').select('id', { count: 'exact', head: true })
-  console.log(`Projet ${String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]} · biens = ${count} (5 = production, 3 = staging)`)
+  console.log(`Base ${base} · biens = ${count}`)
+  // ⚠ CE SCRIPT N'AVAIT AUCUNE GARDE DE BASE — il imprimait la legende
+  // « 5 = production, 3 = staging » et continuait sur n'importe quelle base
+  // designee par l'environnement (constat de la review du 26 octobre 2026).
+  // Une legende n'est pas une garde : elle se lit apres coup, dans une sortie
+  // que personne ne relit quand tout s'est bien passe.
+  if (base === 'INCONNUE') {
+    console.error(`ECHEC : projet Supabase inconnu — ni la production, ni staging. Rien n'est touche.`)
+    process.exit(1)
+  }
   const { data: existant } = await sb.storage.getBucket('property-photos')
   if (!existant) {
     const { error } = await sb.storage.createBucket('property-photos', REGLAGES)

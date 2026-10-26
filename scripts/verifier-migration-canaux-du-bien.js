@@ -23,6 +23,7 @@
 
 require('dotenv').config({ path: process.env.ENV_FILE || '.env.staging' })
 const { createClient } = require('@supabase/supabase-js')
+const { REF_PRODUCTION } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
@@ -32,7 +33,10 @@ if (!URL || !KEY) {
   process.exit(2)
 }
 const PROJET = (URL.match(/https:\/\/([a-z0-9]+)\./) || [])[1] || ''
-const PROD = 'cjmrizpdyhrcurmgyrhs'
+// ⚠ LA REFERENCE DE LA PRODUCTION VIENT DU MODULE COMMUN, elle ne se recopie
+// plus (constat MINEUR de la review du 26 octobre 2026 : elle etait en dur
+// dans 21 fichiers hors du module qui s'annonce « regle partagee »).
+const PROD = REF_PRODUCTION
 if (PROJET === PROD) {
   console.error(`REFUS : ${PROJET} est la PRODUCTION. Ce script ecrit — staging seulement.`)
   process.exit(2)

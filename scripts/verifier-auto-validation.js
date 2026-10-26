@@ -10,7 +10,7 @@
 // du cron qui en dependent (la file de l'auto-validation, les departs du jour)
 // avec leurs filtres exacts.
 //
-// ⚠ EMPREINTE EN TETE (5 biens = production, 3 = staging).
+// ⚠ EMPREINTE EN TETE : la REFERENCE DU PROJET Supabase (lib/empreinte-base.js).
 //
 // ⚠ CE QU'IL NE VOIT PAS. PostgREST n'expose pas pg_catalog : ni la contrainte
 // `avis_config_auto_validation_check`, ni les index `guest_evaluations_auto_publier_idx`
@@ -28,7 +28,7 @@ const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
 if (!URL || !KEY) { console.error('SUPABASE_URL / SUPABASE_SERVICE_KEY absents.'); process.exit(1) }
 const sb = createClient(URL, KEY, { auth: { persistSession: false } })
-const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
+const projet = refDuProjet(URL)
 
 let echecs = 0
 const ok = (m) => console.log(`  ok    ${m}`)

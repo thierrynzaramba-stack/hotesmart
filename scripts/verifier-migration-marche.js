@@ -14,13 +14,26 @@
 // Code de sortie : 0 = tout est la ; 3 = il manque quelque chose ; 1 = lecture impossible.
 
 const { createClient } = require('@supabase/supabase-js')
+const { nomDeLaBase } = require('../lib/empreinte-base')
 
 ;(async () => {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
   const projet = String(process.env.SUPABASE_URL).replace(/^https?:\/\//, '').split('.')[0]
   const { count, error } = await sb.from('properties').select('id', { count: 'exact', head: true })
   if (error || !Number.isInteger(count)) { console.error(`ECHEC : empreinte illisible ${error ? error.message : ''}`); process.exit(1) }
-  console.log(`Projet ${projet} · biens = ${count} (5 = production, 3 = staging)`)
+  const base = nomDeLaBase(process.env.SUPABASE_URL)
+  console.log(`Base ${base} · biens = ${count}`)
+  // ⚠ L'EMPREINTE EST LA REFERENCE DU PROJET, ET ELLE REFUSE (26 octobre 2026).
+  // Ce script imprimait « biens = N (5 = production, 3 = staging) » puis
+  // continuait sur n'importe quelle base designee par l'environnement. Deux
+  // defauts dans une ligne : la legende est FAUSSE depuis que staging porte
+  // quatre biens, et une legende n'est pas une garde — elle se lit apres coup,
+  // dans une sortie que personne ne relit quand tout s'est bien passe.
+  if (base === 'INCONNUE') {
+    console.error(`ECHEC : projet Supabase inconnu — ni la production, ni staging.`)
+    console.error(`Un resultat qui ne dit pas OU il a ete obtenu ne prouve rien.`)
+    process.exit(1)
+  }
   const manques = []
   const c = await sb.from('properties').select('latitude, longitude, coords_source, airbnb_listing_id').limit(1)
   console.log(`properties : colonnes ${c.error ? `ABSENTES (${c.error.message})` : 'presentes'}`)

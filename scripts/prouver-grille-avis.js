@@ -21,7 +21,7 @@
 // colonne obligatoire manque (23502) ne prouve rien sur la contrainte qu'on
 // teste : on exige 23514 (check) ou 23503 (cle etrangere), et on nomme le reste.
 const { createClient } = require('@supabase/supabase-js')
-const { nomDeLaBase } = require('../lib/empreinte-base')
+const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 
 const URL = process.env.SUPABASE_URL
 const KEY = process.env.SUPABASE_SERVICE_KEY
@@ -34,17 +34,19 @@ const ko = (m) => { console.error(`  ECHEC ${m}`); echecs++; process.exitCode = 
 
 ;(async () => {
   const { count: biens } = await sb.from('properties').select('*', { count: 'exact', head: true })
-  const projet = String(URL).replace(/^https?:\/\//, '').split('.')[0]
+  const projet = refDuProjet(URL)
   console.log(`Projet : ${projet}`)
   console.log(`Empreinte : ${biens} bien(s)\n`)
-  // ⚠ DEUX EMPREINTES, PAS UNE. Le nombre de biens est une donnee metier
-  // MUTABLE : le jour ou staging en gagne un quatrieme, un comptage seul
-  // bloquerait le script legitime, et le jour ou une autre base en compte
-  // trois, il ecrirait dedans. La reference du projet, elle, ne bouge pas.
+  // ⚠ UNE SEULE EMPREINTE, ET C'EST LA REFERENCE DU PROJET. Le nombre de biens
+  // est une donnee metier MUTABLE : staging en a gagne un quatrieme le
+  // 26 octobre 2026, et le comptage bloquait alors ce script sur la base
+  // legitime. Le jour ou une autre base en compterait trois, il aurait ecrit
+  // dedans. La reference du projet, elle, ne bouge pas — ce commentaire
+  // promettait une seconde ceinture qui venait d'etre retiree (constat de la
+  // review du 26 octobre 2026).
   // Constat de review.
-  const PROJET_STAGING = 'ortyofzzdsthlhqmzsnq'
-  if (projet !== PROJET_STAGING) {
-    console.error(`ECHEC : ce script ECRIT. Il ne tourne que sur STAGING (${PROJET_STAGING}), et SUPABASE_URL pointe sur « ${projet} ».`)
+  if (nomDeLaBase(URL) !== 'STAGING') {
+    console.error(`ECHEC : ce script ECRIT. Il ne tourne que sur STAGING, et SUPABASE_URL pointe sur « ${projet} » (${nomDeLaBase(URL)}).`)
     process.exit(1)
   }
     // ⚠ LE NOMBRE DE BIENS N'EST PLUS UNE GARDE (26 octobre 2026). Il valait
