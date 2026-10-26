@@ -55,7 +55,7 @@ const vraiPermission = require(CHEMIN_PERM)
 const fabriqueBase = () => ({
   auth: { getUser: async () => ({ data: { user: { id: TITULAIRE } }, error: null }) },
   from (table) {
-    const ctx = { table, suppression: false, filtres: [] }
+    const ctx = { table, suppression: false, filtres: [], colonnes: null }
     const repondre = (forme) => {
       // ⚠ LES FILTRES SONT ENREGISTRES, PAS SEULEMENT LES TABLES. C'est le
       // constat de la review du 26 octobre 2026, et il etait grave : le double
@@ -68,18 +68,26 @@ const fabriqueBase = () => ({
       // PLUS la perte du cloisonnement par compte — laissait la suite ENTIERE
       // au vert (10/10 et 109/109). Deux defauts de securite invisibles.
       trace.lectures.push({ table, suppression: ctx.suppression, filtres: ctx.filtres.slice() })
+      // Le filtrage des colonnes s'applique a la SORTIE, comme PostgREST.
+      const projeter = (valeur) => {
+        if (!ctx.colonnes || valeur == null || typeof valeur !== 'object') return valeur
+        if (Array.isArray(valeur)) return valeur.map(projeter)
+        const sortie = {}
+        for (const c of ctx.colonnes) if (c in valeur) sortie[c] = valeur[c]
+        return sortie
+      }
       if (ctx.suppression) {
         trace.deletes.push(table)
         return { data: null, error: null }
       }
-      if (table === 'properties') return { data: monde.bien, error: monde.erreurBien || null }
+      if (table === 'properties') return { data: projeter(monde.bien), error: monde.erreurBien || null }
       if (table === 'canaux_du_bien') {
         if (monde.erreurCanaux) return { data: null, error: { message: 'panne simulee' } }
-        return { data: monde.canaux || [], error: null }
+        return { data: projeter(monde.canaux || []), error: null }
       }
       if (table === 'canaux_releve') {
         if (monde.erreurReleve) return { data: null, error: { message: 'panne simulee' } }
-        return { data: monde.releve === undefined ? { vu_le: '2026-10-26T08:00:00Z', ok: true, erreur: null } : monde.releve, error: null }
+        return { data: projeter(monde.releve === undefined ? { vu_le: '2026-10-26T08:00:00Z', ok: true, erreur: null } : monde.releve), error: null }
       }
       // Tables purgees apres la garde : elles ne doivent etre atteintes que
       // quand la suppression est autorisee.
@@ -92,7 +100,26 @@ const fabriqueBase = () => ({
       throw new Error(`table non apprise au double : ${table} (forme ${forme})`)
     }
     const api = {
-      select () { return api },
+      // ⚠ LE `select` EST APPLIQUE, et il ne l'etait pas. Troisieme faux vert du
+      // meme double, trouve par contre-epreuve le 26 octobre 2026 : retirer
+      // `migration_target_property_id` du SELECT du handler ne faisait rougir
+      // AUCUN test, parce que le double rendait `monde.bien` en entier quelles
+      // que soient les colonnes demandees. Le test de la cle de migration
+      // mesurait donc la fixture, pas le code.
+      //
+      // En production, une colonne absente du select est `undefined` : ici
+      // `canauxActifsDuBien` serait retombee sur `undefined`, aurait rendu
+      // « aucun canal » et autorise la suppression d'un bien en bascule EN
+      // VENTE. Le double doit donc oublier ce que le code n'a pas demande.
+      select (cols) {
+        const liste = String(cols || '')
+        // Seules les enumerations simples sont filtrees : une projection avec
+        // des parenthees (jointure PostgREST) est rendue telle quelle.
+        if (liste && !liste.includes('(')) {
+          ctx.colonnes = liste.split(',').map(c => c.trim()).filter(Boolean)
+        }
+        return api
+      },
       eq (col, val) { ctx.filtres.push([String(col), val]); return api },
       neq () { return api },
       is (col, val) { ctx.filtres.push([`is:${col}`, val]); return api },
@@ -129,10 +156,20 @@ Module._load = function (demande) {
   return origine.apply(this, arguments)
 }
 
-// Le partenaire : pilote par `monde.partenaire`, et tout appel est trace.
+// Le partenaire. DEUX appels distincts, et il a fallu les separer : le
+// croisement en direct fait `GET /channels?filter[property_id]=...`, la
+// suppression fait `DELETE /properties/...`. Repondre la meme chose aux deux
+// faisait echouer le croisement des qu'on simulait un refus de suppression,
+// donc deux tests mesuraient autre chose que leur titre.
+//   · `monde.canauxVivants` : ce que le GET /channels rend (defaut : aucun).
+//   · `monde.partenaire`    : ce que le DELETE /properties rend.
 global.fetch = async (url, opts) => {
-  trace.fetchs.push(`${(opts && opts.method) || 'GET'} ${String(url)}`)
-  const r = monde.partenaire || { status: 200, body: { data: {} } }
+  const methode = (opts && opts.method) || 'GET'
+  trace.fetchs.push(`${methode} ${String(url)}`)
+  const estLectureCanaux = methode === 'GET' && String(url).includes('/channels')
+  const r = estLectureCanaux
+    ? (monde.canauxVivants || { status: 200, body: { data: [] } })
+    : (monde.partenaire || { status: 200, body: { data: {} } })
   return {
     ok: r.status >= 200 && r.status < 300,
     status: r.status,
@@ -141,6 +178,12 @@ global.fetch = async (url, opts) => {
     json: async () => r.body || {}
   }
 }
+
+// Un canal ACTIF chez le partenaire, dans la forme que `canauxActifsDuBien` lit.
+const canalVivant = (ota) => ({
+  status: 200,
+  body: { data: [{ id: 'ch-1', attributes: { is_active: true, channel: ota } }] }
+})
 
 const handler = require('../api/channel-property.js')
 
@@ -490,4 +533,95 @@ test('l ecran et le serveur passent la MEME VALEUR a la regle partagee', () => {
   const bloc = src.slice(i, fin).split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
   assert.match(bloc, /releveDuCompte = h \? \(h\.vu_le \|\| null\) : null/,
     'le handler ne passe plus `vu_le` : il diverge de l ecran sur l entree de la regle partagee')
+})
+
+test('LE TEST QUI COMPTE : le PARTENAIRE dit « encore relie » alors que le coeur dit non -> 409', async () => {
+  // ⚠ DECISION DE THIERRY, 26 octobre 2026 : croiser le coeur avec le
+  // partenaire en direct. C'est la reponse au seul risque que la re-review
+  // laissait ouvert — le coeur n'est pas une source vivante.
+  //
+  // `canaux_du_bien` est rafraichi par le cron, au mieux une fois par heure et
+  // par compte, et AUCUN chemin de mappage ne le rafraichit. Dans la fenetre
+  // qui suit une connexion a Airbnb, le coeur dit encore « aucun canal » — ou
+  // « mappe = false » — pendant que l'annonce est EN VENTE. Le correctif
+  // precedent avait remplace une source vivante par ce cache : sa comparaison
+  // etait morte, mais sa fraicheur etait reelle.
+  poser({ canaux: [], canauxVivants: canalVivant('airbnb') })
+  const r = await appeler()
+  assert.equal(r.code, 409, `le serveur a repondu ${r.code} sur un bien en vente chez le partenaire`)
+  assert.equal(r.corps.motif, 'annonce_reliee')
+  // ⚠ LA SOURCE EST NOMMEE : le meme motif peut venir du coeur ou du
+  // partenaire, et quand ils divergent c'est le retard du coeur qu'on regarde.
+  assert.equal(r.corps.source, 'partenaire')
+  assert.deepEqual(r.corps.canaux, ['airbnb'])
+  // Et rien n'a ete touche : aucune purge, et AUCUN DELETE envoye.
+  assert.deepEqual(trace.deletes, [], `des donnees ont ete purgees : ${trace.deletes.join(', ')}`)
+  assert.ok(!trace.fetchs.some(f => f.startsWith('DELETE')),
+    `un DELETE est parti au partenaire : ${trace.fetchs.join(' | ')}`)
+})
+
+test('LE TEST QUI COMPTE : le partenaire ILLISIBLE refuse, il n autorise pas', async () => {
+  // `canauxActifsDuBien` rend `null` quand elle n'a pas pu savoir, et son
+  // en-tete le dit : « `null` N'EST PAS "AUCUN" ». Prendre une panne de lecture
+  // pour « ce bien n'est connecte nulle part » est exactement le defaut que le
+  // croisement existe pour empecher.
+  poser({ canaux: [], canauxVivants: { status: 503, body: {} } })
+  const r = await appeler()
+  assert.equal(r.code, 409)
+  assert.equal(r.corps.motif, 'partenaire_illisible')
+  assert.match(r.corps.error, /[Rr]ien n'a été supprimé/)
+  assert.deepEqual(trace.deletes, [])
+  assert.ok(!trace.fetchs.some(f => f.startsWith('DELETE')))
+})
+
+test('un canal INACTIF chez le partenaire n empeche rien', async () => {
+  // ⚠ LA CONTRE-EPREUVE DU CROISEMENT. Sans elle, un croisement qui refuserait
+  // sur TOUT canal — actif ou non — passerait les deux tests ci-dessus et
+  // rendrait insupprimable tout bien ayant connu une annonce un jour.
+  // `canauxActifsDuBien` filtre sur `is_active === true`.
+  poser({
+    canaux: [],
+    canauxVivants: { status: 200, body: { data: [{ id: 'ch-1', attributes: { is_active: false, channel: 'airbnb' } }] } },
+    partenaire: { status: 200, body: { data: {} } }
+  })
+  const r = await appeler()
+  assert.equal(r.code, 200, `un canal inactif a bloque la suppression : ${JSON.stringify(r.corps)}`)
+  assert.ok(trace.deletes.length > 0)
+})
+
+test('un bien BEDS24 n interroge pas le partenaire du canal', async () => {
+  // Le croisement est borne au provider du canal : interroger Channex avec une
+  // cle Beds24 n'aurait aucun sens, et une reponse non vide sur une cle qui
+  // n'est pas la sienne rendrait le bien insupprimable sans raison.
+  poser({
+    bien: { id: BIEN, name: 'Bien Beds24', provider: 'beds24',
+            provider_property_id: 'PROP-1', provider_rate_plan_id: 'PLAN' },
+    canaux: [],
+    canauxVivants: canalVivant('airbnb')
+  })
+  const r = await appeler()
+  assert.equal(r.code, 200, `un bien Beds24 a ete bloque par le partenaire du canal : ${JSON.stringify(r.corps)}`)
+  assert.ok(!trace.fetchs.some(f => f.includes('/channels')),
+    `le partenaire du canal a ete interroge pour un bien Beds24 : ${trace.fetchs.join(' | ')}`)
+})
+
+test('la cle de MIGRATION est celle qu on interroge quand elle existe', async () => {
+  // ⚠ UN BIEN EN BASCULE PORTE SES CANAUX SUR LA CLE CIBLE. `canauxActifsDuBien`
+  // lit `provider_property_id || migration_target_property_id` — mais le SELECT
+  // du handler ne ramenait pas cette colonne, donc pour un bien dont l'ancienne
+  // cle est nulle, le croisement aurait interroge `undefined` et conclu
+  // « aucun canal » sur un bien en vente. Une garde qui regarde ailleurs se
+  // croit vivante.
+  poser({
+    bien: { id: BIEN, name: 'Bien en bascule', provider: 'channex',
+            provider_property_id: null, provider_rate_plan_id: null,
+            migration_target_property_id: 'CIBLE-9' },
+    canaux: [], releve: { vu_le: '2026-10-26T08:00:00Z', ok: true, erreur: null },
+    canauxVivants: canalVivant('booking')
+  })
+  const r = await appeler()
+  assert.equal(r.code, 409, `la cle de migration n a pas ete interrogee : ${JSON.stringify(r.corps)}`)
+  assert.equal(r.corps.source, 'partenaire')
+  assert.ok(trace.fetchs.some(f => f.includes('CIBLE-9')),
+    `le partenaire n a pas ete interroge sur la cle cible : ${trace.fetchs.join(' | ')}`)
 })

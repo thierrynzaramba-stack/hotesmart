@@ -735,9 +735,16 @@ module.exports = async function handler(req, res) {
     // rendait 404 sur un bien bien present (le piege UUID, quatrieme passage).
     const bienPid = gardeDelete.bien ? gardeDelete.bien.id : pid
 
+    // ⚠ `migration_target_property_id` EST DANS LE SELECT, et il n'y etait pas.
+    // `canauxActifsDuBien` le lit en repli de `provider_property_id` : un bien
+    // EN BASCULE porte ses canaux sur la cle CIBLE, pas sur l'ancienne. Sans
+    // cette colonne, le croisement ci-dessous aurait interroge le partenaire
+    // sur la mauvaise cle — donc « aucun canal actif » sur un bien en vente,
+    // et une garde qui se croit vivante en regardant ailleurs.
     const { data: prop, error: propErr } = await supabase
       .from('properties')
-      .select('id, name, provider, provider_property_id, provider_rate_plan_id')
+      .select('id, name, provider, provider_property_id, provider_rate_plan_id, '
+        + 'migration_target_property_id')
       .eq('id', bienPid)
       .eq('user_id', compteBien)
       .single()
@@ -872,6 +879,62 @@ module.exports = async function handler(req, res) {
             || 'La suppression de ce logement est refusée : son état n\'a pas pu être établi. '
                + 'Rien n\'a été supprimé.',
           motif: verdict.motif || 'refus_sans_motif'
+        })
+      }
+    }
+
+    // ⚠⚠ ET ON CROISE AVEC LE PARTENAIRE EN DIRECT (decision de Thierry,
+    // 26 octobre 2026 : « oui, croise aussi avec le partenaire en direct :
+    // refuser si canauxActifsDuBien rend une liste non vide ou illisible »).
+    //
+    // POURQUOI, alors que la garde ci-dessus lit deja le coeur. Parce que le
+    // coeur n'est pas une source VIVANTE : `canaux_du_bien` est rafraichi par
+    // le cron, au mieux une fois par heure et par compte (`AGE_MAX_MS`), et
+    // AUCUN chemin de mappage ne le rafraichit. Entre le moment ou l'hote
+    // connecte son logement a Airbnb et celui ou la garde le voit, il s'ecoule
+    // donc une fenetre — et la version precedente de ce correctif avait
+    // REMPLACE une source vivante (l'ancienne garde interrogeait le partenaire)
+    // par un cache. Sa comparaison etait morte, mais sa fraicheur etait reelle.
+    //
+    // ⚠ CE N'EST PAS UNE SECONDE REGLE, et la distinction compte : la REGLE
+    // reste `suppressionPossible`, partagee avec l'ecran. Ceci est une
+    // VERIFICATION de plus, que l'ecran ne peut pas faire (il n'appelle pas le
+    // partenaire). Le serveur est donc plus strict que l'ecran — ce qui est le
+    // bon sens de l'ecart : un masquage d'interface peut etre plus permissif
+    // qu'une garde serveur, jamais l'inverse.
+    //
+    // ⚠ `null` N'EST PAS « AUCUN » : la fonction le dit dans son propre
+    // en-tete, et c'est tout l'interet de la reutiliser plutot que de refaire
+    // l'appel ici. Une panne de lecture refuse.
+    //
+    // ⚠ ET L'APPEL EST GRATUIT EN PRATIQUE : le DELETE parle de toute facon au
+    // partenaire deux lignes plus bas. On ne paie pas un aller-retour de plus
+    // dans le cas qui aboutit — on le paie dans le cas qu'on refuse, c'est-a-dire
+    // celui ou on vient d'eviter un effacement irreversible.
+    if (prop.provider === 'channex' || prop.provider === 'channel') {
+      const canauxVivants = await canauxActifsDuBien(prop)
+      if (canauxVivants === null) {
+        console.error('[channel-property] DELETE : canaux du partenaire illisibles')
+        return res.status(409).json({
+          error: 'Nous n\'avons pas pu vérifier auprès du gestionnaire de canaux si ce '
+            + 'logement est encore en vente. Rien n\'a été supprimé. Réessayez dans '
+            + 'quelques minutes.',
+          motif: 'partenaire_illisible'
+        })
+      }
+      if (canauxVivants.length) {
+        return res.status(409).json({
+          error: 'Ce logement est encore relié à une annonce '
+            + `(${canauxVivants.join(', ')}). Déconnectez-la d'abord (bouton `
+            + '« Déconnecter cette annonce » dans l\'assistant de connexion), puis vous '
+            + 'pourrez le supprimer.',
+          motif: 'annonce_reliee',
+          // ⚠ LA SOURCE EST NOMMEE. Le meme motif peut venir du coeur ou du
+          // partenaire ; quand les deux ne disent pas la meme chose, c'est le
+          // retard du coeur qu'on regarde, et il faut pouvoir le distinguer
+          // dans les journaux sans relire le code.
+          source: 'partenaire',
+          canaux: canauxVivants
         })
       }
     }
