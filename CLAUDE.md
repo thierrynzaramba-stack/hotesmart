@@ -286,6 +286,51 @@ docs/specs/spec-performance-pages.md.
 répond « non calculable » transforme une absence en fait, et l'écran l'affiche
 avec l'aplomb des vrais chiffres (docs/kb/restitution-yield.md).
 
+## RÈGLE — TOUT LOT QUI TOUCHE LE FRONT RESPECTE LE CHARGEMENT RAPIDE
+
+**Le chantier performance est CLOS** (26 octobre 2026, décision de Thierry). Ses
+lots (a) et (b) sont livrés ; ce qui restait — (c) et (d) — ne vit plus comme un
+chantier séparé mais comme **cette règle, appliquée au fil des lots**. Détail et
+mesures : docs/specs/spec-performance-pages.md.
+
+⚠ **TOUTE SPEC DE LOT QUI TOUCHE LE FRONT PORTE UNE CASE « PERFORMANCE », ET
+ELLE EST OBLIGATOIRE.** Un lot sans cette case n'est pas prêt à être codé. Les
+huit points ci-dessous y sont répondus un par un — « sans objet » est une
+réponse valable, « on verra » n'en est pas une.
+
+1. **Un écran = UN endpoint d'écran** (`/api/ecran/<page>`), garde unique
+   `contexteDEcran`, et les lectures **en parallèle côté serveur**. Pas treize
+   appels depuis le navigateur pour peindre une page.
+2. **Donnée non urgente = résumé PRÉ-CALCULÉ une à deux fois par jour**, jamais
+   calculée à la lecture, et **l'heure du calcul est affichée**. Un résumé sans
+   son heure est un chiffre dont personne ne sait l'âge.
+3. **Affichage instantané** : cache navigateur **à clé utilisateur + compte**,
+   **vidé à la déconnexion**. ⚠ Et JAMAIS de code d'accès, de paiement, de
+   surréservation, ni d'une tâche qui en porte un : ces états se relisent, ils
+   ne s'affichent pas depuis un cache.
+4. **Toute donnée de compte en `private, no-store`**, et l'en-tête est posé
+   **AVANT le premier refus** — pas avant la garde : avant le PREMIER refus, le
+   405 de méthode compris (dette 90).
+5. **Fichiers statiques versionnés et en cache longue durée** (`?v=<empreinte>`
+   + `max-age` long, `immutable`). Un fichier sans version ne peut pas être mis
+   en cache longtemps sans risquer de servir du vieux.
+6. **Jamais de lecture tronquée en silence à 1000 lignes.** PostgREST rend 1000
+   lignes SANS erreur : toute lecture qui peut dépasser se pagine **par
+   curseur**. C'est la famille de défauts la plus silencieuse du dépôt.
+7. **Budget par écran : premier affichage < 1 s, écran complet < 2 s.** Il se
+   tient par un **test qui compte les appels de l'écran**, et par
+   `Server-Timing` portant **le nombre de requêtes** — un budget sans test est
+   un vœu.
+8. **Mesure AVANT / APRÈS dans la spec du lot** : appels, requêtes, octets.
+   Trois nombres, mesurés, pas estimés.
+
+**Pourquoi une règle plutôt qu'un chantier.** Un chantier se termine ; un écran
+neuf, non. La mesure du 22 octobre 2026 — accueil à **13 appels, 100 requêtes,
+1 047 556 octets** sur un compte de quatre logements — n'a pas été produite par
+une négligence, mais par treize décisions raisonnables prises chacune sans
+regarder la page entière. Une case dans la spec force ce regard au moment où il
+coûte le moins : avant d'écrire la première ligne.
+
 ## RÈGLE — LE MOBILE SUIT L'ORDINATEUR
 - **Toute spec livrée sur la version ordinateur d'un écran est reportée sur sa
   version mobile — ou le report est PROPOSÉ à Thierry en fin de chantier.**
