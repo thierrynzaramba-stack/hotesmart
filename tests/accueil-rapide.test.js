@@ -552,7 +552,7 @@ function batirAujourdhui (sansInit = false) {
   // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
   // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
   // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
-  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran }'
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran, repartirEnEuros }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -1905,4 +1905,62 @@ test("LE TEST QUI COMPTE : les lignes affichees SOMMENT au chiffre affiche du ba
   const bTotal = Number(p.cache('[data-bind="revenue-total"]').textContent)
   assert.strictEqual(bRecu + bandeau, bTotal,
     `le bandeau dit ${bRecu} + ${bandeau} mais ${bTotal} en total`)
+})
+
+test("LE TEST QUI COMPTE : la repartition tient l INVARIANT, pas une liste de valeurs", () => {
+  // ⚠ CE TEST VIENT D'UNE EPREUVE FAITE PAR LA SESSION CHEF DE FILE, dans son
+  // bac a sable : 20 008 jeux, aucun ecart. Il vaut mieux dans le depot, pour
+  // la meme raison qu'elle m'a donnee ce matin a propos d'un autre recensement —
+  // un garde-fou qui vit ailleurs ne protege personne du prochain remaniement.
+  //
+  // ⚠ ET IL MESURE L'INVARIANT, PAS DES VALEURS ATTENDUES. La meme session a
+  // failli me remonter un faux constat sur de l'argent en ecrivant « 49 €
+  // attendus » pour un total de 49,50 € — `Math.round(49.5)` vaut 50. L'attendu
+  // etait faux, pas la fonction. Une valeur ecrite a la main se trompe ; un
+  // invariant, non.
+  const p = ouvrirAujourdhui({ sansInit: true, corps: {} })
+  const repartir = p.interne.repartirEnEuros
+  assert.strictEqual(typeof repartir, 'function', 'la repartition n est plus exposee par le banc')
+
+  // ⚠ TIRAGE DETERMINISTE. Un test aleatoire qui rougit une fois sur mille et
+  // qu'on ne peut pas rejouer est pire qu'aucun test : on le relance, il passe,
+  // et on classe l'incident. La graine est fixe, donc l'echec se reproduit.
+  let graine = 20261027
+  const alea = () => { graine = (graine * 1103515245 + 12345) % 2147483648; return graine / 2147483648 }
+  const entre = (a, b) => Math.floor(alea() * (b - a + 1)) + a
+
+  const cas = [
+    [[16768, 15954, 60804]],            // les chiffres de la production, 27 octobre 2026
+    [[]],                               // aucun bien
+    [[0, 0, 0]],                        // trois biens a zero
+    [[93526]],                          // un seul bien
+    [[-16768, 15954, 60804]],           // un remboursement : reste NEGATIF
+    [[4950]],                           // 49,50 € — `Math.round` arrondit a 50, pas 49
+    [[50, 50, 50, 50]],                 // quatre fois un demi-euro
+    [[1, 1, 1]]                         // des centimes qui ne font pas un euro
+  ]
+  for (let i = 0; i < 2000; i++) {
+    const n = entre(1, 30)
+    cas.push([Array.from({ length: n }, () => entre(-50000, 500000))])
+  }
+
+  let verifies = 0
+  for (const [liste] of cas) {
+    const total = liste.reduce((a, b) => a + b, 0)
+    const r = repartir(liste, total)
+    const cible = Math.round(total / 100)
+    assert.strictEqual(r.reduce((a, b) => a + b, 0), cible,
+      `[${liste}] rend ${r} = ${r.reduce((a, b) => a + b, 0)}, cible ${cible}`)
+    assert.strictEqual(r.length, liste.length, 'une ligne a disparu de la repartition')
+    // Aucune ligne ne s'eloigne de plus d'un euro de son propre arrondi : c'est
+    // le COUT annonce de la methode, et il doit rester borne.
+    for (let k = 0; k < liste.length; k++) {
+      assert.ok(Math.abs(r[k] - Math.round(liste[k] / 100)) <= 1,
+        `la ligne ${k} de [${liste}] s ecarte de ${r[k] - Math.round(liste[k] / 100)} euros`)
+    }
+    // Deterministe : deux rendus de la meme donnee ne peuvent pas differer.
+    assert.deepEqual(repartir(liste, total), r, 'la repartition n est pas deterministe')
+    verifies++
+  }
+  assert.ok(verifies >= 2000, `${verifies} jeu(x) verifie(s) : le tirage n a rien produit`)
 })
