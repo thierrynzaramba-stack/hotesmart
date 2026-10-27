@@ -28,7 +28,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
-const { deriverRevenus, estUnBlocage, COLONNES, VERSION } = require('../lib/revenus/derive')
+const { deriverRevenus, aDeriver, estUnBlocage, COLONNES, VERSION } = require('../lib/revenus/derive')
 const { tableDesDelais } = require('../lib/revenus/versement')
 const { revenusDuMois } = require('../lib/revenus/mois')
 const { netDuSejour } = require('../lib/revenus/net-hote')
@@ -135,7 +135,8 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
   const lignes = []
   for (let i = 0; i < PAGES_MAX; i++) {
     const { data, error } = await sb.from('bookings_snapshot')
-      .select(`id, user_id, booking_id, property_id, snapshot, raw, ${COLONNES.join(', ')}`)
+      .select(`id, user_id, booking_id, property_id, snapshot, raw, raw_hash, `
+        + `${COLONNES.join(', ')}`)
       .order('id').range(i * PAGE, (i + 1) * PAGE - 1)
     if (error) {
       console.error('ECHEC lecture bookings_snapshot :', error.message)
@@ -166,19 +167,62 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
   console.log('── Etage 1 : les colonnes derivees contre lib/revenus/derive.js ──')
   let jamaisDerivees = 0
   let perimees = 0
+  let perimeesPayload = 0
   let comparees = 0
   const parColonne = new Map()
+  // ⚠ LA COUVERTURE PAR COLONNE, et elle manquait. « Aucun ecart » sur une
+  // colonne qui vaut `null` des DEUX cotes partout n'est pas une verification :
+  // c'est une colonne decoree. Mesure du 27 octobre 2026 : `derive_raw_hash`
+  // etait dans ce cas sur 87 lignes, et l'etage 1 concluait quand meme que « les
+  // colonnes disent ce que le module calculerait ». On compte donc, pour chaque
+  // colonne, combien de lignes l'ont EPROUVEE — c'est-a-dire ont eu une valeur
+  // non nulle d'au moins un cote.
+  const eprouvee = new Map()
   for (const l of lignes) {
-    if (l.derive_le == null) { jamaisDerivees++; continue }
-    if (Number(l.derive_version) !== VERSION) { perimees++; continue }
+    // ⚠ TROIS MOTIFS DE NE PAS COMPARER, ET LE TROISIEME EST NEUF (dette 112) :
+    // une ligne dont le `raw` a change depuis la derivation porte des colonnes
+    // PERIMEES. Les comparer au module rendrait un ecart par colonne — un
+    // rouge qui dirait vrai sur la donnee et faux sur le code : ce n'est pas
+    // une divergence entre la base et le module, c'est une ligne que le
+    // rattrapage n'a pas encore reprise.
+    const doitReprendre = aDeriver(l)
+    let motif = null
+    if (l.derive_le == null) motif = 'jamais'
+    else if (Number(l.derive_version) !== VERSION) motif = 'version'
+    else if (l.raw_hash != null && l.derive_raw_hash !== l.raw_hash) motif = 'payload'
+
+    // ⚠ ET LA CLASSIFICATION DU VERIFICATEUR DOIT DIRE EXACTEMENT CE QUE DIT
+    // `aDeriver`. Les deux repondent a la meme question — « cette ligne est-elle
+    // a jour ? » — et le jour ou la regle du module gagne un cinquieme cas, ce
+    // script ne le saura pas : il recopierait une regle d'argent, ce que la
+    // dette 17 a deja coute une fois (l'ecran et le moteur calculaient le prix
+    // chacun de leur cote). On ne recopie donc pas la regle pour DECIDER, on la
+    // recopie pour NOMMER le motif, et on exige que les deux concordent.
+    if (doitReprendre !== (motif !== null)) {
+      ecarts.push(`ligne ${l.id} · CLASSIFICATION : aDeriver dit `
+        + `« ${doitReprendre ? 'a reprendre' : 'a jour'} », ce script dit `
+        + `« ${motif || 'a jour'} » — la regle de peremption a change`)
+    }
+
+    if (motif === 'jamais') { jamaisDerivees++; continue }
+    if (motif === 'version') { perimees++; continue }
+    if (motif === 'payload') { perimeesPayload++; continue }
     comparees++
     const uuid = uuidParCle.get(`${l.user_id}|${String(l.property_id)}`) || null
+    // ⚠ `empreinteDuRaw` EST OBLIGATOIRE ICI, ET SON ABSENCE A PRODUIT UN FAUX
+    // VERT MESURE LE 27 OCTOBRE 2026 : la base portait 87 `derive_raw_hash` a
+    // `null`, le module sans cette option en rendait `null` aussi, et l'etage 1
+    // annoncait « aucun ecart » sur une colonne qu'il comparait a elle-meme.
+    // Une colonne de la liste `COLONNES` qui ne peut PAS differer n'est pas
+    // verifiee : elle est decoree.
     const attendu = deriverRevenus(l.snapshot, l.raw, {
-      delais, uuidDuBien: uuid, provider: null, maintenant
+      delais, uuidDuBien: uuid, provider: null, maintenant,
+      empreinteDuRaw: l.raw_hash
     })
     for (const col of COMPAREES) {
       const a = attendu[col] === undefined ? null : attendu[col]
       const b = l[col] === undefined ? null : l[col]
+      if (a !== null || b !== null) eprouvee.set(col, (eprouvee.get(col) || 0) + 1)
       // `date_versement` revient en « YYYY-MM-DD » des deux cotes, les cents en
       // nombre ; on compare en chaine pour ne pas se faire piper par 0 == '0'.
       if (String(a) !== String(b)) {
@@ -209,20 +253,38 @@ const COMPAREES = COLONNES.filter(c => c !== 'derive_le')
     // pour les lignes COMPAREES. C'est le defaut que l'etage 1 existe pour
     // empecher, a l'etage 1 lui-meme.
     console.error('\nECHEC : ZERO ligne comparee a l\'etage 1.')
-    console.error(`${jamaisDerivees} jamais derivee(s), ${perimees} a une autre version.`)
+    console.error(`${jamaisDerivees} jamais derivee(s), ${perimees} a une autre `
+      + `version, ${perimeesPayload} dont le payload a change depuis le calcul.`)
     console.error('Les colonnes n\'ont donc PAS ete verifiees : lancez le remplissage')
     console.error('ou attendez le rattrapage de 04:00, puis relancez.')
     process.exit(1)
   } else {
-    console.log(`  aucun ecart sur ${comparees} ligne(s) : les colonnes disent ce que le `
-      + 'module calculerait aujourd\'hui.')
+    const muettes = COMPAREES.filter(c => !eprouvee.get(c))
+    console.log(`  aucun ecart sur ${comparees} ligne(s) et `
+      + `${COMPAREES.length - muettes.length}/${COMPAREES.length} colonne(s) eprouvee(s) : `
+      + 'les colonnes disent ce que le module calculerait aujourd\'hui.')
+    if (muettes.length) {
+      // ⚠ UN AVERTISSEMENT, PAS UN ECHEC, et c'est raisonne : sur une petite
+      // base, une colonne peut legitimement etre nulle partout (aucun sejour
+      // non calculable, aucun blocage). Mais on la NOMME, pour qu'un « aucun
+      // ecart » ne se lise pas comme « tout verifie ».
+      console.log(`  ⚠ ${muettes.length} colonne(s) NULLES des deux cotes partout, `
+        + 'donc non eprouvees : ' + muettes.join(', '))
+    }
   }
-  // ⚠ ET LE RATTRAPAGE DE 04:00 EST CE QUI REFERME LES DEUX PREMIERS COMPTEURS.
-  // Des lignes « jamais derivees » ou « a une autre version » ne sont pas un
-  // ecart : ce sont des lignes que l'agregat ne voit pas encore. Mais si elles
-  // persistent d'un jour sur l'autre, le rattrapage ne tourne pas.
-  if (jamaisDerivees || perimees) {
-    console.log(`  → ${jamaisDerivees + perimees} ligne(s) attendent le rattrapage de 04:00.`)
+  // ⚠ ET LE RATTRAPAGE DE 04:00 EST CE QUI REFERME LES TROIS COMPTEURS. Des
+  // lignes « jamais derivees », « a une autre version » ou « payload change »
+  // ne sont pas un ecart : ce sont des lignes que l'agregat ne voit pas encore.
+  // Mais si elles persistent d'un jour sur l'autre, le rattrapage ne tourne
+  // pas. ⚠ Et le troisieme compteur vaut TOUTES LES LIGNES juste apres la
+  // migration du 27 octobre 2026 : `derive_raw_hash` y nait a `null`, donc
+  // chaque ligne est a reprendre une fois. C'est voulu, et c'est pour cela que
+  // ce script ECHOUE tant que le rattrapage n'a pas tourne : il refuse de dire
+  // « parite etablie » sur zero ligne comparee.
+  if (jamaisDerivees || perimees || perimeesPayload) {
+    const attente = jamaisDerivees + perimees + perimeesPayload
+    console.log(`  → ${attente} ligne(s) attendent le rattrapage de 04:00 `
+      + `(${jamaisDerivees} jamais, ${perimees} version, ${perimeesPayload} payload).`)
     console.log('    Si ce nombre ne baisse pas demain, c\'est le cron qu\'il faut regarder.')
   }
 

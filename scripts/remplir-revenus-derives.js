@@ -141,7 +141,14 @@ const PAGES_MAX = 100
 
   for (let i = 0; i < PAGES_MAX; i++) {
     const { data, error } = await sb.from('bookings_snapshot')
-      .select('id, user_id, booking_id, property_id, snapshot, raw, derive_le, derive_version')
+      // ⚠ `raw_hash` ET `derive_raw_hash` SONT LUS, et leur absence rendait
+      // `aDeriver` AVEUGLE a son quatrieme cas (dette 112) : la garde
+      // `ligne.raw_hash != null` est fausse sur un champ `undefined`, donc ce
+      // script ne reprenait AUCUNE ligne dont le payload avait change. Un
+      // `select` incomplet ne fait pas echouer `aDeriver` : il le fait repondre
+      // « a jour » — le plus mauvais des deux resultats.
+      .select('id, user_id, booking_id, property_id, snapshot, raw, '
+        + 'derive_le, derive_version, raw_hash, derive_raw_hash')
       .order('id').range(i * PAGE, (i + 1) * PAGE - 1)
     if (error) {
       console.error('ECHEC lecture bookings_snapshot :', error.message)
@@ -157,8 +164,13 @@ const PAGES_MAX = 100
       if (!aDeriver(l)) continue
       bilan.aDeriver++
       const uuid = uuidParCle.get(`${l.user_id}|${String(l.property_id)}`) || null
+      // ⚠ L'EMPREINTE EST POSEE ICI AUSSI. Sans elle, le remplissage initial —
+      // le chemin du PREMIER passage, celui que Thierry lance juste apres la
+      // migration — ecrivait `derive_raw_hash = null` sur les 1 436 lignes, et
+      // le rattrapage les reprenait ensuite chaque nuit sans jamais converger.
       const d = deriverRevenus(l.snapshot, l.raw, {
-        delais, uuidDuBien: uuid, provider: null, maintenant
+        delais, uuidDuBien: uuid, provider: null, maintenant,
+        empreinteDuRaw: l.raw_hash
       })
       if (!d.property_uuid) bilan.sansUuid++
       if (d.montant_net_cents == null) bilan.sansMontant++

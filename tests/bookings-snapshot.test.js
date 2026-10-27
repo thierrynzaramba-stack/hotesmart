@@ -1078,7 +1078,7 @@ test('ANNULATION Beds24 : le passage a cancelled produit bien un evenement cance
 // derivation n'a pas lieu. D'ou ce double-ci, qui repond PAR TABLE.
 function fakeSupabaseAvecRevenus ({ existing = null, captureRef = {}, existingPropId = '12345',
                                     delais = null, bienId = 'uuid-bien-1' } = {}) {
-  const LIGNES_DELAIS = delais || [
+  const LIGNES_DELAIS = (delais && delais !== 'echec') ? delais : [
     { canal: 'airbnb', base: 'arrivee', jours: 1, libelle: 'Airbnb' },
     { canal: 'booking', base: 'depart', jours: 1, libelle: 'Booking' },
     { canal: 'direct', base: 'reservation', jours: 3, libelle: 'Direct' }
@@ -1090,7 +1090,14 @@ function fakeSupabaseAvecRevenus ({ existing = null, captureRef = {}, existingPr
         select () { return q },
         eq () { return q },
         maybeSingle: async () => {
-          if (table === 'properties') return { data: bienId ? { id: bienId } : null, error: null }
+          // ⚠ `bienId: 'echec'` = LA LECTURE DES BIENS EST EN PANNE, et ce n'est
+          // pas la meme chose que `bienId: null` (le bien est inconnu). Le
+          // double ne savait pas dire la difference, donc aucun test ne pouvait
+          // exiger que le writer la tienne.
+          if (table === 'properties') {
+            if (bienId === 'echec') return { data: null, error: { message: 'properties en panne' } }
+            return { data: bienId ? { id: bienId } : null, error: null }
+          }
           return { data: existing
             ? { snapshot: existing, property_id: existingPropId, raw_hash: empreinte(null) }
             : null, error: null }
@@ -1104,6 +1111,12 @@ function fakeSupabaseAvecRevenus ({ existing = null, captureRef = {}, existingPr
           // sans `data`, donc `Array.isArray(data)` etait faux et les delais
           // restaient inconnus.
           if (table === 'delais_versement') {
+            // `delais: 'echec'` simule une lecture en panne : le writer ne doit
+            // alors RIEN deriver, plutot que d'ecrire des colonnes a moitie
+            // calculees par-dessus des colonnes justes.
+            if (delais === 'echec') {
+              return Promise.resolve({ data: null, error: { message: 'panne simulee' } }).then(resoudre)
+            }
             return Promise.resolve({ data: LIGNES_DELAIS, error: null }).then(resoudre)
           }
           return Promise.resolve({ data: null, error: null }).then(resoudre)
@@ -1158,11 +1171,27 @@ test('LE TEST QUI COMPTE : une ANNULATION met a jour le statut derive, elle ne l
     'le statut derive reste `confirmed` sur une annulation : son argent restera dans le total du mois')
 })
 
-test('sans delais LISIBLES, le writer unitaire n ecrit AUCUNE colonne derivee', async () => {
+test('une table de delais VIDE n autorise pas a deriver (writer unitaire)', async () => {
   // ⚠ LA CONTRE-EPREUVE. Les colonnes derivees sont du confort : faire echouer
   // l'upsert d'une reservation pour elles serait couper le coeur pour l'ecran.
   // On ne derive donc pas — et on n'ecrit SURTOUT pas des colonnes a moitie
   // calculees, qui seraient prises pour un fait par les agregats.
+  //
+  // ⚠ CE TEST AFFIRMAIT L'INVERSE JUSQU'AU 27 OCTOBRE 2026, et son titre disait
+  // deja le contraire de son assertion — releve par la review. Il raisonnait
+  // ainsi : « `tableDesDelais([])` rend un objet VIDE, pas `undefined` : la
+  // lecture a REUSSI et la table est vide, on derive donc, mais sans date de
+  // versement. » Le raisonnement se tenait ; il etait FAUX SUR LES FAITS.
+  //
+  // Mesure, table vide, reservation a 300 € en `Payout Amount` :
+  //   date_versement = null | montant_net_cents = NULL | motif = prix_non_calculable
+  // Ce n'est donc pas « la date manque » : le MONTANT disparait aussi, et
+  // l'ecran accuse le PRIX de n'etre pas calculable alors qu'il l'est. Une
+  // ligne de configuration absente faisait mentir l'ecran sur la cause.
+  //
+  // Et le rattrapage de 04:00 refusait DEJA ce cas (`skipped: 'aucun_delai'`).
+  // Les deux chemins tiennent maintenant la meme regle, `delaisUtilisables`,
+  // ecrite une seule fois.
   const capture = {}
   const sb = fakeSupabaseAvecRevenus({ captureRef: capture, delais: [] })
   const r = await saveBookingSnapshot(sb, {
@@ -1172,9 +1201,108 @@ test('sans delais LISIBLES, le writer unitaire n ecrit AUCUNE colonne derivee', 
     booking: { id: 'B-SANS', amount: '300.00', meta: { amount_type: 'net' } }
   })
   assert.strictEqual(r.ok, true)
-  // `tableDesDelais([])` rend un objet VIDE, pas `undefined` : la lecture a
-  // REUSSI et la table est vide. On derive donc, mais sans date de versement.
+  assert.ok(capture.row, 'aucun upsert : le coeur doit ecrire meme sans delais')
+  // ⚠ AUCUNE colonne derivee, et on l'exige par la LISTE du module, pas par un
+  // echantillon : une colonne ajoutee demain serait couverte sans y penser.
+  const { COLONNES } = require('../lib/revenus/derive')
+  const posees = COLONNES.filter(c => Object.prototype.hasOwnProperty.call(capture.row, c))
+  assert.deepStrictEqual(posees, [],
+    'des colonnes derivees sont ecrites alors qu aucun canal n a de delai : ' + posees.join(', '))
+})
+
+test('LE TEST QUI COMPTE : un payload qui change SEUL fait recalculer les colonnes derivees', async () => {
+  // ⚠ DETTE 112, TROUVEE EN PREPARANT LA RECETTE SUR STAGING ET MESUREE.
+  // `saveBookingSnapshot` compare le snapshot NORMALISE : s'il est identique,
+  // il met `raw` a jour par un UPDATE cible et ne fait AUCUN upsert — donc
+  // `deriverRevenus` ne tournait pas.
+  //
+  // Mesure d'origine : j'ai corrige deux fois le `raw` d'une ligne de test
+  // (`amount_type`, puis le Host Fee manquant) et `montant_net_cents` comme
+  // `derive_le` sont restes identiques AU CENTIME ET A LA MILLISECONDE. Il a
+  // fallu un nouveau `booking_id` pour obtenir une ligne juste.
+  //
+  // C'est le chemin par lequel un provider corrige un prix, une commission ou
+  // une taxe sans toucher aux quatorze champs normalises : l'ecran affichait
+  // alors un montant faux, sans reserve, et ni le rattrapage de 04:00
+  // (`derive_le is null` / `derive_version < VERSION`) ni rien d'autre ne
+  // reprenait la ligne.
+  const SNAP = {
+    provider: 'channex', source: 'airbnb', status: 'new',
+    arrival: '2026-11-10', departure: '2026-11-12', guest_name: 'C. Durand'
+  }
+  const capture = {}
+  // Le snapshot en base est IDENTIQUE a celui qu'on envoie : seul `raw` change.
+  const sb = fakeSupabaseAvecRevenus({ captureRef: capture, existing: SNAP })
+  const r = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 'B-RAW', propertyId: '12345', provider: 'channex',
+    snapshot: SNAP,
+    // Un payload CORRIGE : le Host Fee arrive, donc le net devient calculable.
+    booking: {
+      id: 'B-RAW', amount: '400.00', meta: { amount_type: 'Payout Amount' },
+      notes: 'Listing Cancellation Host Fee: 24.00\n'
+    }
+  })
+  assert.strictEqual(r.ok, true)
+  // ⚠ AUCUN UPSERT : le contenu normalise n'a pas bouge, et c'est bien le
+  // chemin qu'on veut eprouver. Si un upsert avait lieu, la detection de
+  // changement se rouvrirait et un message partirait au voyageur.
+  assert.ok(!capture.row, 'un upsert a eu lieu : le snapshot normalise aurait change')
+  const patch = (capture.updates || [])[0]
+  assert.ok(patch, 'aucune mise a jour du payload')
+  assert.ok('raw' in patch && 'raw_hash' in patch, 'le payload n est plus mis a jour')
+  // Et les colonnes derivees SUIVENT.
+  assert.ok('derive_le' in patch,
+    'les colonnes derivees ne suivent pas un payload qui change seul : le montant restera fige')
+  assert.strictEqual(patch.montant_net_cents, 40000,
+    'le montant n a pas ete recalcule depuis le payload corrige')
+  assert.strictEqual(patch.derive_raw_hash, patch.raw_hash,
+    'l empreinte de derivation ne correspond pas au payload derive : la peremption redeviendrait indetectable')
+})
+
+test('un payload qui change SANS delais lisibles ne reecrit pas les colonnes', async () => {
+  // ⚠ LA CONTRE-EPREUVE. Ecraser des colonnes JUSTES par des colonnes a moitie
+  // calculees serait pire que de les laisser perimees : le rattrapage, lui,
+  // reprendra la ligne par son empreinte. On met donc `raw` a jour, et rien
+  // d'autre.
+  const SNAP = { provider: 'channex', source: 'airbnb', status: 'new',
+                 arrival: '2026-11-10', departure: '2026-11-12' }
+  const capture = {}
+  const sb = fakeSupabaseAvecRevenus({ captureRef: capture, existing: SNAP, delais: 'echec' })
+  const r = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 'B-RAW-2', propertyId: '12345', provider: 'channex',
+    snapshot: SNAP, booking: { id: 'B-RAW-2', amount: '400.00', meta: { amount_type: 'Payout Amount' } }
+  })
+  assert.strictEqual(r.ok, true)
+  const patch = (capture.updates || [])[0]
+  assert.ok(patch, 'aucune mise a jour du payload')
+  assert.ok('raw' in patch, 'le payload n est pas mis a jour')
+  assert.ok(!('derive_le' in patch),
+    'des colonnes derivees sont ecrites alors que les delais sont illisibles')
+})
+
+test('LE TEST QUI COMPTE : une lecture des BIENS en panne n autorise pas a deriver', async () => {
+  // ⚠ RELEVE PAR LA REVIEW DU 27 OCTOBRE 2026. `contexteDesRevenus` ne lisait
+  // PAS `error` sur `properties` : une lecture EN PANNE et un bien INCONNU
+  // rendaient tous deux `uuid = null`. La derivation posait alors
+  // `property_uuid: null` SANS MOTIF par-dessus un UUID juste.
+  //
+  // ⚠ ET DEPUIS LA DETTE 112, C'ETAIT DEVENU DEFINITIF : la meme ecriture pose
+  // une empreinte qui CONCORDE avec le payload, donc `aDeriver` repond « a
+  // jour » et le rattrapage ne reprend plus jamais la ligne. L'argent du sejour
+  // sortait du total du bien, en silence, pour toujours. Scenario reel du
+  // depot : une bascule de cle provider, puis un payload qui bouge.
+  const capture = {}
+  const sb = fakeSupabaseAvecRevenus({ captureRef: capture, bienId: 'echec' })
+  const r = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 'B-PANNE', propertyId: '12345', provider: 'channex',
+    snapshot: { provider: 'channex', source: 'airbnb', status: 'new',
+                arrival: '2026-11-10', departure: '2026-11-12' },
+    booking: { id: 'B-PANNE', amount: '300.00', meta: { amount_type: 'Payout Amount' } }
+  })
+  assert.strictEqual(r.ok, true, 'le coeur doit ecrire meme quand les biens sont illisibles')
   assert.ok(capture.row, 'aucun upsert')
-  assert.strictEqual(capture.row.date_versement, null,
-    'une date de versement est calculee alors qu aucun canal n a de delai')
+  const { COLONNES } = require('../lib/revenus/derive')
+  const posees = COLONNES.filter(c => Object.prototype.hasOwnProperty.call(capture.row, c))
+  assert.deepStrictEqual(posees, [],
+    'des colonnes derivees sont ecrites alors que la lecture des biens a echoue : ' + posees.join(', '))
 })
