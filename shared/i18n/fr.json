@@ -731,6 +731,7 @@
   "revenue.annee_periode_entiere": "Année {annee}",
   "revenue.annee_reserve": "déjà réservé",
   "revenue.annee_sans_ligne": "{n, plural, one {# logement sans aucun séjour sur ces deux années} other {# logements sans aucun séjour sur ces deux années}} : {noms}",
+  "revenue.annee_sans_n1": "Aucun séjour en {annee} : il n’y a rien à comparer.",
   "revenue.annee_vide": "Aucun séjour sur ces deux années.",
   "revenue.col_property": "Logement",
   "revenue.col_received": "Reçu",

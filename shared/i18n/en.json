@@ -731,6 +731,7 @@
   "revenue.annee_periode_entiere": "Year {annee}",
   "revenue.annee_reserve": "already booked",
   "revenue.annee_sans_ligne": "{n, plural, one {# property with no stay over these two years} other {# properties with no stay over these two years}}: {noms}",
+  "revenue.annee_sans_n1": "No stays in {annee}: there is nothing to compare with.",
   "revenue.annee_vide": "No stays over these two years.",
   "revenue.col_property": "Property",
   "revenue.col_received": "Received",

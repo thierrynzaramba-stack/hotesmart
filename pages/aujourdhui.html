@@ -1672,13 +1672,22 @@ function renderRevenus () {
   // le bandeau. La regle est la meme : si l'information est deja dans l'etat,
   // on la lit la, et le rendu ne depend plus de ce que le double imite.
   const sansBien = !(etat.biens || []).length
-  const wrap = document.querySelector('.rev-tbl-wrap')
-  if (wrap) wrap.hidden = sansBien
+  // ⚠ LA VUE COMPTE AUTANT QUE L'ABSENCE DE BIENS, et c'est le constat 1 de la
+  // recette du 28 octobre : `renderAnnee()` est appele AU MILIEU de cette
+  // fonction (plus haut), il masque le tableau du mois — et ces trois lignes,
+  // qui viennent APRES, le reaffichaient. L'hote voyait donc, sous la courbe
+  // de l'annee, les lignes « aucun versement ce mois-ci » du mois courant.
+  // ⚠ ET LE SELECTEUR DOIT EXCLURE LE TABLEAU DE L'ANNEE : `.rev-tbl-wrap` nu
+  // prend le PREMIER du document. Il tombe sur celui du mois aujourd'hui, mais
+  // c'est un accident d'ordre dans le balisage, pas une garantie.
+  const enAnneeMaintenant = etat.vueRevenus === 'annee'
+  const wrap = document.querySelector('.rev-tbl-wrap:not(.rev-an-tbl)')
+  if (wrap) wrap.hidden = sansBien || enAnneeMaintenant
   // ⚠ LES DEUX FORMES SE MASQUENT ENSEMBLE. C'est la media query qui choisit
   // laquelle s'affiche ; `hidden` dit s'il y a quelque chose a afficher. Les
   // confondre laisserait la liste du telephone visible sur un compte sans
   // logement, la ou le tableau disparait.
-  if (carteList) carteList.hidden = sansBien
+  if (carteList) carteList.hidden = sansBien || enAnneeMaintenant
 }
 
 // ─── LA VUE ANNEE ──────────────────────────────────────────────────────────
@@ -1718,16 +1727,27 @@ const refuseTout = (c) => !!c && Number(c.sans_montant || 0) > 0 && Number(c.tot
 // parce que `0` tout seul ne distingue pas « rien encaisse » de « rien de
 // calculable » — et que c'est exactement la confusion que l'ecran doit refuser.
 const bilanPeriode = (parMois, an, champ, jusquAu = 12) => {
-  let total = 0, sansMontant = 0, mesures = 0
+  let total = 0, sansMontant = 0, mesures = 0, lignes = 0
   for (let m = 1; m <= jusquAu; m++) {
     const c = parMois && parMois[`${an}-${String(m).padStart(2, '0')}`]
     if (!c) continue
+    lignes++
     sansMontant += Number(c.sans_montant || 0)
     if (refuseTout(c)) continue
     total += Number(c[champ] || 0)
     mesures++
   }
-  return { total, sansMontant, mesures, refuse: mesures === 0 && sansMontant > 0 }
+  // ⚠ TROIS ETATS, ET « 0 € » N'EN EST QU'UN. `absente` = l'annee ne porte
+  // AUCUNE ligne pour ce perimetre : le logement n'existait pas, ou n'a rien
+  // vendu du tout. Ce n'est pas « il a encaisse zero euro » — constat 2 de la
+  // recette du 28 octobre, « Studio Centre : colonne 2025 = 0 € alors qu'il n'a
+  // aucun sejour en 2025 ». L'endpoint ne rend que les mois qui portent quelque
+  // chose, donc l'absence de cle EST l'information.
+  return {
+    total, sansMontant, mesures, lignes,
+    refuse: mesures === 0 && sansMontant > 0,
+    absente: lignes === 0
+  }
 }
 
 // La somme d'une TRANCHE de mois. ⚠ ELLE N'EST PAS TOUJOURS L'ANNEE ENTIERE, et
@@ -1861,9 +1881,17 @@ function renderAnnee () {
   // ⚠ UN TOTAL QUI NE SAIT RIEN NE S'ECRIT PAS « 0 € ». Si aucun mois de la
   // tranche n'est calculable et que des sejours sont sans montant, le chiffre
   // n'existe pas : on le DIT. La vue Mois fait exactement cela (`toutRefuse`).
-  const montantOuRefus = (bilan) => bilan.refuse
-    ? t('revenue.unavailable')
-    : monnaie(Math.round(bilan.total / 100), devise)
+  // ⚠ « — » POUR UNE ABSENCE, « non calculable » POUR UN REFUS, le montant
+  // sinon. Les trois disent des choses differentes et ne se remplacent pas :
+  // « 0 € » affirme un encaissement nul, le tiret dit qu'il n'y a rien a
+  // montrer, « non calculable » dit que le coeur ne sait pas. Le motif du
+  // tiret vit a cote — colonne « Ecart » sur une ligne, reserve sous le bloc
+  // pour l'en-tete (decision de Thierry, recette du 28 octobre : « — avec
+  // motif, ou pas comparable »).
+  const TIRET = '—'
+  const montantOuRefus = (bilan) => bilan.absente
+    ? TIRET
+    : (bilan.refuse ? t('revenue.unavailable') : monnaie(Math.round(bilan.total / 100), devise))
   $('[data-bind="revenue-annee-periode"]').textContent = enCours
     ? t('revenue.annee_periode_cours', {
       mois: moisSeul(`${an}-${String(moisCourant).padStart(2, '0')}`), annee: String(an)
@@ -1913,17 +1941,36 @@ function renderAnnee () {
   // trou la ou il n'y en a pas. Le pointille dit « deja reserve », pas
   // « prevision » — la note de bas de bloc le repete en mots.
   const parMois = choisi ? (a.par_bien[String(choisi.id)] || {}) : a.total
+  // ⚠ LA FRONTIERE SUIT LA DONNEE, PAS LE CALENDRIER — constat 3 de la recette
+  // du 28 octobre : « octobre (0 € recu, 480 € a venir) se trace en plein ».
+  // Ma premiere version coupait au MOIS COURANT : le mois courant entrait donc
+  // dans le trait plein, et l'ecran affirmait « encaisse » un argent qui n'est
+  // que reserve. Or un mois n'est pas realise parce qu'il a commence — il l'est
+  // quand il a encaisse.
+  //
+  // On cherche donc le DERNIER mois qui a reellement recu quelque chose, et
+  // c'est la que le plein s'arrete. Octobre a 0 € recu bascule du bon cote
+  // tout seul ; un novembre a 300 € recu resterait plein, lui.
+  // ⚠ LES DEUX TRAITS SE REJOIGNENT SUR CE MOIS-LA (`de: dernierRecu`), sinon
+  // la courbe aurait un trou la ou il n'y en a pas.
+  let dernierRecu = 0
+  for (let m = 1; m <= jusquAu; m++) {
+    const c = parMois && parMois[`${an}-${String(m).padStart(2, '0')}`]
+    if (c && !refuseTout(c) && Number(c.recu_cents || 0) > 0) dernierRecu = m
+  }
   const series = [
     { nom: String(an - 1), couleur: 'var(--muted)', epaisseur: 2,
       valeurs: douzeMois(parMois, an - 1, 'total_cents') },
     { nom: String(an), couleur: 'var(--ink)', epaisseur: 2.5,
-      valeurs: douzeMois(parMois, an, 'total_cents', 1, jusquAu) }
+      valeurs: douzeMois(parMois, an, 'total_cents', 1, dernierRecu) }
   ]
-  const aDuReserve = enCours && jusquAu < 12
-    && douzeMois(parMois, an, 'total_cents', jusquAu + 1, 12).some(v => Number.isFinite(v))
+  // Y a-t-il quelque chose APRES le dernier mois encaisse ? C'est ca, le deja
+  // reserve — et il n'existe que sur l'annee en cours.
+  const aDuReserve = enCours
+    && douzeMois(parMois, an, 'total_cents', dernierRecu + 1, 12).some(v => Number.isFinite(v))
   if (aDuReserve) {
     series.push({ nom: t('revenue.annee_reserve'), couleur: 'var(--ink)', epaisseur: 2,
-      pointille: true, valeurs: douzeMois(parMois, an, 'total_cents', jusquAu, 12) })
+      pointille: true, valeurs: douzeMois(parMois, an, 'total_cents', Math.max(1, dernierRecu), 12) })
   }
   const PALIERS = 3
   // ⚠ RIEN A TRACER NE SE TRACE PAS. Avec un perimetre vide — le cas reel du
@@ -2005,8 +2052,11 @@ function renderAnnee () {
         : t('revenue.annee_nouveau', { annee: String(an) }))}</span>`
     return {
       b,
-      tN: brutsN[i].refuse ? t('revenue.unavailable') : monnaie(eurosN[i], devise),
-      tN1: brutsN1[i].refuse ? t('revenue.unavailable') : monnaie(eurosN1[i], devise),
+      // ⚠ MEME REGLE QUE L'EN-TETE, et c'est le constat 2 : une annee sans
+      // AUCUNE ligne rend « — », pas « 0 € ». Le motif est sur la meme ligne,
+      // dans la colonne « Ecart » : « nouveau en {annee} ».
+      tN: brutsN[i].absente ? TIRET : (brutsN[i].refuse ? t('revenue.unavailable') : monnaie(eurosN[i], devise)),
+      tN1: brutsN1[i].absente ? TIRET : (brutsN1[i].refuse ? t('revenue.unavailable') : monnaie(eurosN1[i], devise)),
       ecart
     }
   })
@@ -2045,6 +2095,12 @@ function renderAnnee () {
   // constat GRAVE deja paye sur la vue Mois (« 1 000 € d'ecart muet entre le
   // bandeau et la somme des lignes »).
   const reserves = []
+
+  // 0. L'an dernier n'existe pas du tout. ⚠ L'EN-TETE REND ALORS « — », et le
+  //    tiret seul ne dit pas POURQUOI : contrairement aux lignes du tableau, il
+  //    n'a pas de colonne « Ecart » a cote de lui pour porter le motif. C'est
+  //    cette phrase qui le porte (decision de Thierry : « — avec motif »).
+  if (bilanN1.absente) reserves.push(t('revenue.annee_sans_n1', { annee: String(an - 1) }))
 
   // 1. Les sejours dont le montant n'est pas calculable. ⚠ SUR LES DEUX
   //    ANNEES : un refus en N-1 fausse l'ecart en % de la meme facon qu'un
