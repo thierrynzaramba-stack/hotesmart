@@ -1330,8 +1330,15 @@ body.men-cfg-ouvert { overflow: hidden; }
    qui doit glisser — pas la page. */
 .rev-tbl-wrap { overflow-x: auto; }
 .rev-tbl { width: 100%; border-collapse: collapse; }
+/* ⚠ `vertical-align: top` ET NON `baseline` — constat 3 de la recette du
+   27 octobre 2026 : « ligne avec photo (Loft) : montants decales vers le bas
+   par rapport aux autres lignes ». Avec `baseline`, la vignette de 28 px
+   repousse la ligne de base de la cellule du nom, et les trois cellules de
+   chiffres s'alignent sur CETTE base — donc elles descendent, mais seulement
+   sur les lignes qui portent une photo. Le decalage n'etait pas dans les
+   nombres, il etait dans la reference. */
 .rev-tbl th, .rev-tbl td {
-  padding: 8px 10px; text-align: left; vertical-align: baseline;
+  padding: 8px 10px; text-align: left; vertical-align: top;
   border-bottom: 1px solid var(--line);
 }
 .rev-tbl thead th {
@@ -1386,16 +1393,67 @@ body.men-cfg-ouvert { overflow: hidden; }
 /* ⚠ DEUX COUCHES, ET L'ORDRE COMPTE : « à venir » dessine la part TOTALE en
    hachures, « reçu » la recouvre en plein. L'inverse laisserait les hachures
    par-dessus le plein. */
+/* ⚠ HACHURE GRISE POUR « A VENIR », PLEIN NOIR POUR « RECU » (recette du
+   27 octobre 2026, constat 2). Les deux couches etaient en `var(--ok)`, le
+   vert : un mois entierement recu s'affichait donc en vert hachure, c'est-a-dire
+   de la couleur de l'encaisse ET du motif de l'attente.
+   ⚠ ET LA COUCHE PLEINE N'AVAIT JAMAIS DE LARGEUR : `--recu` lui arrivait avec
+   un `%`, donc `calc(50% * 100% / 100)` multipliait deux pourcentages —
+   invalide en CSS, declaration abandonnee en silence. Corrige a la source, dans
+   `pages/aujourdhui.html` : `--recu` est desormais un nombre nu. Les deux
+   defauts se cumulaient, et le second cachait le premier. */
 .revenue-bar::before {
   inline-size: var(--part, 0%);
   background-image: repeating-linear-gradient(
-    135deg, var(--ok) 0 2px, transparent 2px 4px);
+    135deg, var(--muted) 0 2px, transparent 2px 4px);
   opacity: .55;
 }
 .revenue-bar::after {
   inline-size: calc(var(--part, 0%) * var(--recu, 0) / 100);
-  background: var(--ok);
+  background: var(--ink);
 }
+/* ─── La forme TELEPHONE du tableau : une liste de cartes ──────────────────
+   Recette du 27 octobre 2026, constat 1 : a 390 px le tableau en demandait
+   425, la colonne Total etait coupee et les noms se cassaient mot par mot.
+   Le `overflow-x` du conteneur faisait son travail — il rendait le tableau
+   glissant — mais un tableau qu'il faut faire glisser pour lire son total
+   n'est pas lisible, il est atteignable.
+
+   ⚠ POURQUOI DEUX BALISAGES ET PAS UNE BASCULE CSS. Passer un `<table>` en
+   liste demande `display: block` sur ses `<tr>`, `<th>` et `<td>` : la cellule
+   quitte alors l'arbre d'accessibilite, `scope="row"` devient inerte, et le
+   lecteur d'ecran n'annonce plus « <logement>, A venir, 480 € ».
+   `tests/masquage-hidden.test.js` refuse d'ailleurs toute classe de cellule qui
+   touche a `display`. Les deux formes coexistent donc dans le DOM, rendues par
+   la MEME boucle a partir des memes valeurs. */
+.rev-liste { display: none; list-style: none; margin: 0; padding: 0; }
+@media (max-width: 560px) {
+  .rev-tbl-wrap { display: none; }
+  .rev-liste { display: grid; gap: 2px; }
+}
+.rev-carte {
+  display: grid; gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.rev-liste > .rev-carte:last-child { border-bottom: 0; }
+/* Le nom a gauche, le total a droite, sur UNE ligne — et le total ne se laisse
+   jamais pousser hors du cadre : c'est le chiffre que l'hote vient lire. */
+.rev-carte__tete {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.rev-carte__bien { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rev-carte__total { flex: 0 0 auto; white-space: nowrap; }
+/* ⚠ LA BARRE PREND TOUTE LA LARGEUR ICI, la ou le tableau lui donne 72 px
+   fixes : dans une carte, elle n'est plus une colonne parmi d'autres, elle est
+   la seule representation visuelle de la repartition. */
+.rev-carte .revenue-bar { flex: none; inline-size: 100%; }
+/* ⚠ ET LE NOM SE COUPE PAR CARACTERES PLUTOT QUE MOT PAR MOT. « Loft Jean
+   Jaures centre » sur 390 px se cassait a chaque espace, donnant quatre lignes
+   d'un mot. `min-width: 0` autorise le retrecissement dans un flex, et
+   `overflow-wrap` ne coupe un mot que s'il ne tient pas seul. */
+.rev-carte__bien .rev-tbl__nom { min-width: 0; overflow-wrap: anywhere; }
+
 /* ⚠ LES HACHURES NE SONT PAS LE SEUL PORTEUR DE SENS : le reçu et l'à-venir
    sont écrits en chiffres dans le bandeau, et la barre est `aria-hidden`.
    C'est la règle du dépôt — « jamais la couleur seule ». */
