@@ -116,7 +116,15 @@ async function main() {
       if (APPLY) {
         const { error: upErr } = await supabase
           .from('bookings_snapshot')
-          .update({ snapshot: nouveau })
+          // ⚠ `derive_le: null` INVALIDE LES COLONNES DERIVEES, et sans lui ce
+          // geste serait sans effet sur l'argent. Les colonnes de revenus sont
+          // calculees a l'ECRITURE ; `aDeriver` les juge a jour tant que
+          // `derive_le` est pose, que la version est la bonne et que l'empreinte
+          // du payload correspond — et reecrire `snapshot` ne touche a aucun des
+          // trois. Mesure du 27 octobre 2026 : apres cette mise a jour,
+          // `aDeriver` repondait FALSE, donc le rattrapage de 04:00 ne reprenait
+          // JAMAIS la ligne. Le statut change, l'argent ne suit pas.
+          .update({ snapshot: nouveau, derive_le: null })
           .eq('user_id', row.user_id)
           .eq('booking_id', row.booking_id)
         if (upErr) { stats.echecs++; console.error('echec', row.booking_id, upErr.message) }

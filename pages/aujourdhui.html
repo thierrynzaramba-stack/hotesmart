@@ -958,6 +958,48 @@ async function chargerNotes () {
 const euros = (cents, devise) =>
   (Number.isFinite(cents) ? monnaie(cents / 100, devise) : null)
 
+/**
+ * Repartir des centimes en EUROS ENTIERS dont la somme vaut l'arrondi du total.
+ *
+ * ⚠ RECETTE DE THIERRY, 27 octobre 2026 : « A venir octobre affiche 935 €
+ * alors que les lignes font 168 + 160 + 608 = 936 ». Ce n'est pas un calcul
+ * faux, c'est de l'arithmetique : `I18n.money` arrondit a l'euro
+ * (`maximumFractionDigits: 0`), et arrondir chacun puis sommer ne donne pas
+ * arrondir la somme. Mesure du jour :
+ *   167,68 + 159,54 + 608,04 = 935,26
+ *   arrondis un par un : 168 + 160 + 608 = 936
+ *   arrondi de la somme :                  935
+ *
+ * METHODE DU PLUS FORT RESTE. On arrondit chacun VERS LE BAS, puis on
+ * distribue les euros manquants aux lignes dont la partie decimale est la plus
+ * grande, jusqu'a atteindre la cible. Ici : 167 + 159 + 608 = 934, il manque 1,
+ * et la plus forte decimale est ,68 — donc 168, 159, 608 = 935.
+ *
+ * ⚠ CE QUE CA COUTE, ET IL FAUT LE DIRE : une ligne peut afficher 1 € de moins
+ * que son propre arrondi (159 pour 159,54). C'est le prix de la concordance, et
+ * c'est le choix de Thierry — « arrondir de facon que les lignes et le total
+ * concordent a l'euro ». L'alternative serait d'afficher les centimes partout,
+ * ou le probleme n'existe pas.
+ *
+ * ⚠ ET LES MONTANTS NEGATIFS SONT PREVUS (un remboursement en porterait) : le
+ * reste a distribuer peut etre negatif, et on le retire alors aux plus FAIBLES
+ * decimales. Sans cette moitie, la somme ne tomberait pas juste.
+ */
+function repartirEnEuros (listeCents, totalCents) {
+  const cible = Math.round((Number(totalCents) || 0) / 100)
+  const euro = listeCents.map(c => (Number(c) || 0) / 100)
+  const bas = euro.map(e => Math.floor(e))
+  let reste = cible - bas.reduce((a, b) => a + b, 0)
+  // Par decimale decroissante ; a egalite, l'ordre d'affichage tranche, pour
+  // que deux rendus de la meme donnee ne different jamais.
+  const ordre = euro
+    .map((e, i) => ({ i, frac: e - Math.floor(e) }))
+    .sort((a, b) => (b.frac - a.frac) || (a.i - b.i))
+  for (let k = 0; k < ordre.length && reste > 0; k++) { bas[ordre[k].i]++; reste-- }
+  for (let k = ordre.length - 1; k >= 0 && reste < 0; k--) { bas[ordre[k].i]--; reste++ }
+  return bas
+}
+
 // La devise du compte : celle du premier bien lu. ⚠ Un compte multidevise
 // afficherait un total melange — le depot n'en a pas, et `/api/yield` fait le
 // meme choix. A revoir le jour ou un hote aura deux devises.
@@ -1097,11 +1139,19 @@ function renderRevenus () {
   const toutRefuse = T.total_cents === 0 && (T.refuses ? T.refuses.montant : 0) > 0
   const noeudTotal = $('[data-bind="revenue-total"]')
   noeudTotal.classList.toggle('muted', toutRefuse)
+  // ⚠ LE GRAND TOTAL EST LA SOMME DES DEUX CHIFFRES AFFICHES, pas l'arrondi du
+  // total exact — et les deux peuvent differer d'un euro. Le bandeau montre
+  // trois nombres cote a cote : si « Total » n'est pas « Recu » plus
+  // « A venir » SOUS LES YEUX de l'hote, c'est l'incoherence la plus visible de
+  // l'ecran. On prefere donc un total qui s'additionne a l'ecran a un total
+  // exact qui ne s'additionne pas. Ecart maximal : 1 €.
+  const recuE = Math.round((Number(T.recu_cents) || 0) / 100)
+  const avenirE = Math.round((Number(T.a_venir_cents) || 0) / 100)
   noeudTotal.textContent = toutRefuse
     ? t('revenue.unavailable')
-    : euros(T.total_cents, devise)
-  $('[data-bind="revenue-received"]').textContent = toutRefuse ? '' : euros(T.recu_cents, devise)
-  $('[data-bind="revenue-upcoming"]').textContent = toutRefuse ? '' : euros(T.a_venir_cents, devise)
+    : monnaie(recuE + avenirE, devise)
+  $('[data-bind="revenue-received"]').textContent = toutRefuse ? '' : monnaie(recuE, devise)
+  $('[data-bind="revenue-upcoming"]').textContent = toutRefuse ? '' : monnaie(avenirE, devise)
   // Le mois SERVI, pas le mois demande : l'endpoint retombe sur le mois courant
   // si la valeur recue est hors forme, et l'ecran doit dire ce qu'il montre.
   // ⚠ LE LIBELLE DE LA NAVIGATION DIT LE MOIS SERVI, pas le mois demande. Si le
@@ -1150,7 +1200,18 @@ function renderRevenus () {
   // revenu ferait sauter les lignes d'un mois a l'autre, et l'hote cherche son
   // logement par son nom.
   const parBien = rev.par_bien || {}
-  const lignesRev = (etat.biens || []).map(b => {
+  // ⚠ LES DEUX COLONNES SONT REPARTIES AVANT LE RENDU, pour que la somme des
+  // lignes AFFICHEES vaille le chiffre AFFICHE du bandeau — constat de la
+  // recette de Thierry du 27 octobre 2026. On repartit `recu` et `a venir`, et
+  // le total de chaque ligne est la SOMME de ses deux valeurs affichees : les
+  // trois colonnes concordent alors dans les deux sens, en ligne et en colonne.
+  //
+  // ⚠ ET ON NE REPARTIT PAS LA COLONNE « Total » SEPAREMENT : elle tomberait
+  // juste en colonne et faux en ligne — un bien afficherait 159 + 0 = 160.
+  const donnees = (etat.biens || []).map(b => parBien[String(b.id)] || null)
+  const recusParBien = repartirEnEuros(donnees.map(d => (d ? d.recu_cents : 0)), T.recu_cents)
+  const avenirParBien = repartirEnEuros(donnees.map(d => (d ? d.a_venir_cents : 0)), T.a_venir_cents)
+  const lignesRev = (etat.biens || []).map((b, idx) => {
     // ⚠ LA CLE EST MAINTENANT L'UUID DU BIEN, ET C'EST UN RENVERSEMENT ASSUME
     // (27 octobre 2026, architecture decidee par Thierry). Jusqu'ici l'endpoint
     // groupait par `bookings_snapshot.property_id`, c'est-a-dire la cle
@@ -1247,7 +1308,7 @@ function renderRevenus () {
       // Zero euro ET aucun montant calculable : on ne sait pas, on le dit.
       // Afficher « 0,00 € » ici affirmerait que ce logement n'a rien rapporte.
       ? `<span class="caption muted">${esc(t('revenue.unavailable'))}</span>`
-      : `<strong class="num small">${esc(euros(d.total_cents, devise))}</strong>`
+      : `<strong class="num small">${esc(monnaie(recusParBien[idx] + avenirParBien[idx], devise))}</strong>`
     // ⚠ LA MARQUE « N SANS MONTANT » RESTE, MEME QUAND LE TOTAL DIT DEJA
     // « non calculable ». Ma premiere version la retirait dans ce cas, au motif
     // qu'elle serait redondante — et un test existant l'a refuse, avec raison :
@@ -1271,9 +1332,11 @@ function renderRevenus () {
     //     inconnue, rendue de deux facons dans la MEME ligne. C'est la famille
     //     du constat n. 2 de Thierry — deux cellules d'une ligne qui ne
     //     racontent pas la meme chose.
-    const cellule = (cents, refuse) => refuse
+    // ⚠ ELLE RECOIT DES EUROS DEJA REPARTIS, plus des centimes : arrondir ici
+    // reintroduirait l'ecart que la repartition vient de fermer.
+    const cellule = (eur, refuse) => refuse
       ? `<span class="caption muted">${esc(t('revenue.unavailable'))}</span>`
-      : `<span class="num small">${esc(euros(cents, devise))}</span>`
+      : `<span class="num small">${esc(monnaie(eur, devise))}</span>`
 
     // ⚠ `--recu` EST UN NOMBRE NU, PAS UN POURCENTAGE, et c'est LA cause du
     // constat 2 de Thierry (« un mois entierement recu s'affiche hachure »).
@@ -1301,7 +1364,7 @@ function renderRevenus () {
     const detail = toutRefuse
       ? ''
       : ' · ' + esc(t('revenue.split', {
-        recu: euros(d.recu_cents, devise), avenir: euros(d.a_venir_cents, devise)
+        recu: monnaie(recusParBien[idx], devise), avenir: monnaie(avenirParBien[idx], devise)
       }))
     const chips = marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''
     return {
@@ -1315,8 +1378,8 @@ function renderRevenus () {
         </span>
       </th>
       <td class="rev-tbl__barre">${barre}</td>
-      <td class="rev-tbl__num">${cellule(d.recu_cents, toutRefuse)}</td>
-      <td class="rev-tbl__num">${cellule(d.a_venir_cents, toutRefuse)}</td>
+      <td class="rev-tbl__num">${cellule(recusParBien[idx], toutRefuse)}</td>
+      <td class="rev-tbl__num">${cellule(avenirParBien[idx], toutRefuse)}</td>
       <td class="rev-tbl__num">${montant}</td>
     </tr>`,
       // ⚠ LA CARTE GARDE LE COMPTE DE SEJOURS, que la demande de Thierry ne

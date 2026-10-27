@@ -408,3 +408,100 @@ test('RECENSEMENT : tout appel a deriverRevenus passe l empreinte du payload', (
     + 'du rattrapage, a vie, et l empreinte du writer sera ecrasee.\n'
     + sansEmpreinte.join('\n'))
 })
+
+// ─── LE DOUBLON NEUTRALISE QU'UNE SYNCHRO AVAIT RESSUSCITE ──────────────────
+
+const SEJOUR_SEPT = {
+  provider: 'beds24', source: 'airbnb', status: 'confirmed', statusRaw: 'new',
+  arrival: '2026-09-16', departure: '2026-09-20', firstName: 'Christophe'
+}
+const DELAIS_SEPT = { airbnb: { base: 'arrivee', jours: 1 } }
+const derive = (snap) => deriverRevenus(snap, { amount: '394.78' }, {
+  delais: DELAIS_SEPT, uuidDuBien: 'uuid-1', provider: 'beds24',
+  maintenant: '2026-10-27T10:00:00.000Z', empreinteDuRaw: 'h'
+})
+
+test("LE TEST QUI COMPTE : un doublon designant la ligne CONSERVEE est lu `demapped`", () => {
+  // ⚠ MESURE EN PRODUCTION, 27 octobre 2026. La reservation Airbnb HMEA8PYCPM
+  // (394,78 €) etait neutralisee depuis le 11 septembre — son payload porte
+  // encore son marqueur — et elle etait pourtant comptee `confirmed` dans les
+  // revenus de septembre. Le dedoublonnage avait bien pose `status = demapped` ;
+  // une synchro Beds24 est repassee, et le merge du writer est NON DESTRUCTIF :
+  // il a garde le marqueur et reecrit `status` avec la valeur fraiche du
+  // provider. Septembre comptait 394,78 € DEUX FOIS.
+  const d = derive({
+    ...SEJOUR_SEPT,
+    demappage: {
+      raison: 'doublon_de_remapping', code_ota: 'HMEA8PYCPM',
+      conserve_sous: '99af35d0-472c-4779-af83-544a74f015b5',
+      statut_avant: 'demapped', neutralise_le: '2026-09-11T18:27:14.608Z'
+    }
+  })
+  assert.strictEqual(d.statut_canonique, 'demapped',
+    'un doublon neutralise redevient un sejour des qu une synchro repasse')
+})
+
+test("LE TEST QUI COMPTE : un marqueur SANS `conserve_sous` laisse le statut parler", () => {
+  // ⚠ C'EST LA MOITIE QUI PROTEGE UN AUTRE OUTIL. `lib/migration-purge-futur.js`
+  // pose `demappage: { neutralise_le, statut_avant }` SANS `conserve_sous`, et
+  // son annulation consiste precisement A REMETTRE LE STATUT. Si cette regle
+  // honorait le marqueur entier, ce defaire serait inoperant : la ligne
+  // resterait `demapped` pour toujours, et personne ne verrait pourquoi.
+  const d = derive({
+    ...SEJOUR_SEPT,
+    demappage: { neutralise_le: '2026-09-11T18:27:14.608Z', statut_avant: 'confirmed' }
+  })
+  assert.strictEqual(d.statut_canonique, 'confirmed',
+    'le marqueur de la purge est honore : son annulation par le statut devient inoperante')
+})
+
+test("LE TEST QUI COMPTE : sans marqueur, rien ne change", () => {
+  assert.strictEqual(derive(SEJOUR_SEPT).statut_canonique, 'confirmed')
+})
+
+test("LE TEST QUI COMPTE : la regle DIVERGE de `readStatus`, et c'est l invariant", () => {
+  // ⚠ MA PREMIERE VERSION ASSERTAIT `VERSION === 3`, EN LITTERAL, sous le
+  // message « la regle a change sans que VERSION suive ». L'assertion ne pouvait
+  // pas detecter cela : elle epinglait le numero courant, et la prochaine montee
+  // LEGITIME vers 4 l'aurait rendue rouge sans aucun defaut. C'est la regle du
+  // depot — tester l'INVARIANT plutot que la ligne — et la review l'a relevee.
+  //
+  // L'invariant est celui-ci : sur un snapshot marque, la derivation ne dit PAS
+  // ce que `readStatus` dit. Si quelqu'un retire la regle, les deux se
+  // rejoignent et ce test rougit, quel que soit le numero de version.
+  const { readStatus } = require('../lib/bookings-snapshot-status')
+  const marque = {
+    ...SEJOUR_SEPT,
+    demappage: { raison: 'doublon_de_remapping', conserve_sous: '99af35d0-472c-4779-af83-544a74f015b5' }
+  }
+  assert.strictEqual(readStatus(marque, 'beds24'), 'confirmed',
+    'le snapshot du temoin n est plus lu `confirmed` : il ne prouve plus rien')
+  assert.notStrictEqual(derive(marque).statut_canonique, readStatus(marque, 'beds24'),
+    'la derivation suit `readStatus` sur un doublon neutralise : la regle v3 a disparu')
+
+  // Et sans marqueur, les deux disent la MEME chose : la regle ne deborde pas.
+  assert.strictEqual(derive(SEJOUR_SEPT).statut_canonique, readStatus(SEJOUR_SEPT, 'beds24'),
+    'la derivation s ecarte de `readStatus` sur une ligne ordinaire')
+})
+
+test("RECENSEMENT : les formes limites de `conserve_sous` ne font rien lever", () => {
+  // ⚠ ONZE CAS MESURES EN REVIEW, AUCUN COUVERT PAR UN TEST. L'ecrivain reel
+  // produit toujours un UUID de 36 caracteres, donc aucun cas faux n'est
+  // atteignable aujourd'hui — mais un passage ulterieur a
+  // `'conserve_sous' in s.demappage` passerait la suite sans que rien ne crie.
+  const cas = [
+    [undefined, 'confirmed'], [null, 'confirmed'], ['', 'confirmed'],
+    [0, 'confirmed'], [false, 'confirmed'],
+    ['99af35d0-472c-4779-af83-544a74f015b5', 'demapped']
+  ]
+  for (const [valeur, attendu] of cas) {
+    const d = derive({ ...SEJOUR_SEPT, demappage: { conserve_sous: valeur } })
+    assert.strictEqual(d.statut_canonique, attendu,
+      `conserve_sous = ${JSON.stringify(valeur)} rend ${d.statut_canonique}`)
+  }
+  // Un `demappage` qui n'est pas un objet ne doit pas lever.
+  for (const forme of ['demapped', 42, true, [], {}]) {
+    assert.doesNotThrow(() => derive({ ...SEJOUR_SEPT, demappage: forme }),
+      `demappage = ${JSON.stringify(forme)} fait lever la derivation`)
+  }
+})

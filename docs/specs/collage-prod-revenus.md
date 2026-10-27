@@ -33,7 +33,7 @@ faux.** La seule référence est le tableau ci-dessous.
 |---|---|---|---|---|
 | 1 | `2026-10-25-delais-versement.sql` | la table des délais de versement et ses 3 lignes (airbnb arrivée+1, booking départ+1, direct réservation+3) | ⚠ **pas de requête** : `scripts/verifier-migration-delais-versement.js` | le script sort en 0 |
 | 2 | `2026-10-26-delais-versement-durcissement.sql` | les deux `CHECK` que la 1 n'avait pas posés, et la RLS | dans le fichier | voir le fichier |
-| 3 | `2026-10-27-revenus-derives.sql` | les **10 colonnes dérivées** de `bookings_snapshot`, 2 index, 3 fonctions, 1 trigger, et les droits | dans le fichier | 19 lignes, 10 colonnes, 2 index, 3 fonctions, 1 trigger |
+| 3 | `2026-10-27-revenus-derives.sql` | les **10 colonnes dérivées** de `bookings_snapshot`, 2 index, 3 fonctions, 1 trigger, et les droits | dans le fichier | **16 lignes, et 16 exactement** : 10 colonnes + 2 index + 3 fonctions + 1 trigger. ⚠ J'avais ecrit « 19 » ici le 27 octobre 2026, recopie d'un compte rendu sans refaire l'addition — mesure en production : 16. |
 | 4 | `2026-10-27-est-blocage.sql` | la colonne `est_blocage`, et les 2 agrégats qui l'excluent | dans le fichier | **5 lignes, et 5 exactement** |
 | 5 | `2026-10-26-revenus-hors-biens.sql` | `revenus_hors_mois` **à trois arguments**, et la fin de l'ancienne à deux | dans le fichier | droit ok, 3 arguments, 1 version |
 | 6 | `2026-10-26-revenus-calcul-incomplet.sql` | la sonde `revenus_calcul_incomplet` | dans le fichier | versions = 1, `public_peut` = false |
