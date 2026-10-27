@@ -959,7 +959,34 @@ const euros = (cents, devise) =>
   (Number.isFinite(cents) ? monnaie(cents / 100, devise) : null)
 
 /**
- * Repartir des centimes en EUROS ENTIERS dont la somme vaut l'arrondi du total.
+ * Repartir des centimes en EUROS ENTIERS dont la somme vaut l'arrondi de LEUR
+ * PROPRE somme.
+ *
+ * ⚠ ELLE NE PREND PLUS DE TOTAL EN PARAMETRE, ET C'EST UN CORRECTIF (releve par
+ * la session chef de file le 27 octobre 2026). Ma premiere version recevait
+ * `T.recu_cents` — l'agregat de TOUT le compte — alors que la liste ne porte
+ * que les biens AFFICHES. Les deux ne coincident pas toujours :
+ * `revenus_du_mois` groupe par `property_uuid` sans jointure sur `properties`,
+ * donc un sejour d'un logement SUPPRIME garde son uuid, entre dans le total, et
+ * n'a aucune ligne a l'ecran.
+ *
+ * Consequences mesurees : l'invariant tombait des que l'ecart depassait le
+ * nombre de lignes (la boucle n'ajoute qu'un euro par ligne), et surtout les
+ * euros manquants se posaient sur les lignes des biens VIVANTS — une ligne
+ * portait de l'argent qui n'est pas le sien.
+ *
+ * En calculant sa cible elle-meme, la fonction rend ce mesusage IMPOSSIBLE.
+ *
+ * ⚠ ET CE QUI RESTE EST DIT A L'HOTE, contrairement a ce que j'avais ecrit ici.
+ * J'avais recopie « la reserve `hors_biens` ne compte que les `property_uuid`
+ * NULS » — c'etait vrai de la migration 3, REMPLACEE depuis. La migration 5
+ * (`2026-10-26-revenus-hors-biens.sql`), celle qui est deployee, compte aussi
+ * les uuid dont `not exists (select 1 from properties …)`, donc les logements
+ * supprimes. L'ecran rend alors la reserve : « N sejours rattaches a aucun de
+ * vos logements : X € dans le total, SUR AUCUNE LIGNE ». Le bandeau peut donc
+ * depasser la somme des lignes, et la phrase qui l'explique est juste dessous.
+ * Verifie contre la production le 27 octobre 2026 : zero uuid orphelin
+ * aujourd'hui, et le filtre `not exists` est bien dans la fonction deployee.
  *
  * ⚠ RECETTE DE THIERRY, 27 octobre 2026 : « A venir octobre affiche 935 €
  * alors que les lignes font 168 + 160 + 608 = 936 ». Ce n'est pas un calcul
@@ -981,22 +1008,35 @@ const euros = (cents, devise) =>
  * concordent a l'euro ». L'alternative serait d'afficher les centimes partout,
  * ou le probleme n'existe pas.
  *
- * ⚠ ET LES MONTANTS NEGATIFS SONT PREVUS (un remboursement en porterait) : le
- * reste a distribuer peut etre negatif, et on le retire alors aux plus FAIBLES
- * decimales. Sans cette moitie, la somme ne tomberait pas juste.
+ * ⚠ LES MONTANTS NEGATIFS PASSENT (un remboursement en porterait), ET LE RESTE,
+ * LUI, N'EST JAMAIS NEGATIF. Ma premiere version portait une seconde boucle
+ * pour ce cas, et mon message de commit affirmait l'avoir eprouvee — le test
+ * passait en realite par le chemin positif. Deux mesures l'ont montre : une
+ * mutation qui retirait la boucle ne faisait rougir aucun test, puis 300 000
+ * tirages de -6 000 a +6 000 € n'ont jamais produit un reste negatif.
+ *
+ * L'algebre le dit aussi : `floor(e) <= e` donc `Somme(floor) <= Somme(e)`, et
+ * `round(S) >= S - 0,5` ; donc `reste >= -0,5`, et comme il est ENTIER,
+ * `reste >= 0`. La boucle etait du code mort deguise en precaution — la forme
+ * la plus couteuse, parce qu'elle se lit comme une garantie.
  */
-function repartirEnEuros (listeCents, totalCents) {
-  const cible = Math.round((Number(totalCents) || 0) / 100)
+function repartirEnEuros (listeCents) {
+  const somme = listeCents.reduce((a, c) => a + (Number(c) || 0), 0)
+  const cible = Math.round(somme / 100)
   const euro = listeCents.map(c => (Number(c) || 0) / 100)
   const bas = euro.map(e => Math.floor(e))
   let reste = cible - bas.reduce((a, b) => a + b, 0)
-  // Par decimale decroissante ; a egalite, l'ordre d'affichage tranche, pour
-  // que deux rendus de la meme donnee ne different jamais.
+  // Par decimale decroissante ; a egalite, l'ordre d'affichage tranche.
+  // ⚠ CE DEPARTAGE EST UNE CEINTURE, PAS UNE BRETELLE : `Array.sort` est STABLE
+  // depuis ES2019, donc deux lignes de meme decimale gardent deja leur ordre, et
+  // AUCUN test ne peut distinguer sa presence de son absence (mesure : la
+  // mutation qui le retire ne fait rougir personne). On le garde parce qu'il
+  // rend la regle LISIBLE au lieu de la faire reposer sur une garantie
+  // implicite du langage — mais il ne faut pas le croire teste.
   const ordre = euro
     .map((e, i) => ({ i, frac: e - Math.floor(e) }))
     .sort((a, b) => (b.frac - a.frac) || (a.i - b.i))
   for (let k = 0; k < ordre.length && reste > 0; k++) { bas[ordre[k].i]++; reste-- }
-  for (let k = ordre.length - 1; k >= 0 && reste < 0; k--) { bas[ordre[k].i]--; reste++ }
   return bas
 }
 
@@ -1209,8 +1249,8 @@ function renderRevenus () {
   // ⚠ ET ON NE REPARTIT PAS LA COLONNE « Total » SEPAREMENT : elle tomberait
   // juste en colonne et faux en ligne — un bien afficherait 159 + 0 = 160.
   const donnees = (etat.biens || []).map(b => parBien[String(b.id)] || null)
-  const recusParBien = repartirEnEuros(donnees.map(d => (d ? d.recu_cents : 0)), T.recu_cents)
-  const avenirParBien = repartirEnEuros(donnees.map(d => (d ? d.a_venir_cents : 0)), T.a_venir_cents)
+  const recusParBien = repartirEnEuros(donnees.map(d => (d ? d.recu_cents : 0)))
+  const avenirParBien = repartirEnEuros(donnees.map(d => (d ? d.a_venir_cents : 0)))
   const lignesRev = (etat.biens || []).map((b, idx) => {
     // ⚠ LA CLE EST MAINTENANT L'UUID DU BIEN, ET C'EST UN RENVERSEMENT ASSUME
     // (27 octobre 2026, architecture decidee par Thierry). Jusqu'ici l'endpoint

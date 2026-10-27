@@ -552,7 +552,7 @@ function batirAujourdhui (sansInit = false) {
   // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
   // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
   // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
-  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran }'
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran, repartirEnEuros }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -1905,4 +1905,125 @@ test("LE TEST QUI COMPTE : les lignes affichees SOMMENT au chiffre affiche du ba
   const bTotal = Number(p.cache('[data-bind="revenue-total"]').textContent)
   assert.strictEqual(bRecu + bandeau, bTotal,
     `le bandeau dit ${bRecu} + ${bandeau} mais ${bTotal} en total`)
+})
+
+test("LE TEST QUI COMPTE : la repartition tient l INVARIANT, pas une liste de valeurs", () => {
+  // ⚠ CE TEST VIENT D'UNE EPREUVE FAITE PAR LA SESSION CHEF DE FILE, dans son
+  // bac a sable : 20 008 jeux, aucun ecart. Il vaut mieux dans le depot, pour
+  // la meme raison qu'elle m'a donnee ce matin a propos d'un autre recensement —
+  // un garde-fou qui vit ailleurs ne protege personne du prochain remaniement.
+  //
+  // ⚠ ET IL MESURE L'INVARIANT, PAS DES VALEURS ATTENDUES. La meme session a
+  // failli me remonter un faux constat sur de l'argent en ecrivant « 49 €
+  // attendus » pour un total de 49,50 € — `Math.round(49.5)` vaut 50. L'attendu
+  // etait faux, pas la fonction. Une valeur ecrite a la main se trompe ; un
+  // invariant, non.
+  const p = ouvrirAujourdhui({ sansInit: true, corps: {} })
+  const repartir = p.interne.repartirEnEuros
+  assert.strictEqual(typeof repartir, 'function', 'la repartition n est plus exposee par le banc')
+
+  // ⚠ TIRAGE DETERMINISTE. Un test aleatoire qui rougit une fois sur mille et
+  // qu'on ne peut pas rejouer est pire qu'aucun test : on le relance, il passe,
+  // et on classe l'incident. La graine est fixe, donc l'echec se reproduit.
+  let graine = 20261027
+  const alea = () => { graine = (graine * 1103515245 + 12345) % 2147483648; return graine / 2147483648 }
+  const entre = (a, b) => Math.floor(alea() * (b - a + 1)) + a
+
+  const cas = [
+    [[16768, 15954, 60804]],            // les chiffres de la production, 27 octobre 2026
+    [[]],                               // aucun bien
+    [[0, 0, 0]],                        // trois biens a zero
+    [[93526]],                          // un seul bien
+    [[-16768, 15954, 60804]],           // un remboursement : reste NEGATIF
+    [[4950]],                           // 49,50 € — `Math.round` arrondit a 50, pas 49
+    [[50, 50, 50, 50]],                 // quatre fois un demi-euro
+    [[1, 1, 1]]                         // des centimes qui ne font pas un euro
+  ]
+  for (let i = 0; i < 2000; i++) {
+    const n = entre(1, 30)
+    cas.push([Array.from({ length: n }, () => entre(-50000, 500000))])
+  }
+
+  let verifies = 0
+  for (const [liste] of cas) {
+    const total = liste.reduce((a, b) => a + b, 0)
+    const r = repartir(liste)
+    const cible = Math.round(total / 100)
+    assert.strictEqual(r.reduce((a, b) => a + b, 0), cible,
+      `[${liste}] rend ${r} = ${r.reduce((a, b) => a + b, 0)}, cible ${cible}`)
+    assert.strictEqual(r.length, liste.length, 'une ligne a disparu de la repartition')
+    // Aucune ligne ne s'eloigne de plus d'un euro de son propre arrondi : c'est
+    // le COUT annonce de la methode, et il doit rester borne.
+    for (let k = 0; k < liste.length; k++) {
+      assert.ok(Math.abs(r[k] - Math.round(liste[k] / 100)) <= 1,
+        `la ligne ${k} de [${liste}] s ecarte de ${r[k] - Math.round(liste[k] / 100)} euros`)
+    }
+    // Deterministe : deux rendus de la meme donnee ne peuvent pas differer.
+    assert.deepEqual(repartir(liste), r, 'la repartition n est pas deterministe')
+    verifies++
+  }
+  assert.ok(verifies >= 2000, `${verifies} jeu(x) verifie(s) : le tirage n a rien produit`)
+})
+
+test("LE TEST QUI COMPTE : l argent d un logement SUPPRIME ne se pose pas sur les lignes vivantes", () => {
+  // ⚠ RELEVE PAR LA SESSION CHEF DE FILE, 27 octobre 2026, sur ma propre
+  // repartition. `revenus_du_mois` groupe par `property_uuid` SANS jointure sur
+  // `properties` : un sejour d'un logement supprime garde son uuid, entre donc
+  // dans le total du compte, et n'a AUCUNE ligne a l'ecran — `etat.biens` ne le
+  // contient plus. Ma premiere version passait `T.recu_cents` comme cible alors
+  // que la liste ne porte que les biens AFFICHES : les euros manquants se
+  // posaient sur les lignes des biens VIVANTS, +1 € chacune. Une ligne portait
+  // de l'argent qui n'est pas le sien.
+  //
+  // La fonction calcule desormais sa cible elle-meme, ce qui rend ce mesusage
+  // impossible. Ce test garde le RESULTAT a l'ecran : deux biens vivants a
+  // 167,68 et 159,54, plus 100 € sur un logement disparu du compte.
+  const biens = [
+    { id: 'uuid-1', provider_property_id: '1', name: 'Vivant A', currency: 'EUR' },
+    { id: 'uuid-2', provider_property_id: '2', name: 'Vivant B', currency: 'EUR' }
+  ]
+  const p = bancRevenus({
+    mois: '2026-10',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 1, recu_cents: 16768, total_cents: 16768 }),
+      'uuid-2': parBien({ sejours: 1, recu_cents: 15954, total_cents: 15954 }),
+      // Le logement supprime : present dans l'agregat, absent de `etat.biens`.
+      'uuid-DISPARU': parBien({ sejours: 1, recu_cents: 10000, total_cents: 10000 })
+    },
+    total: parBien({ sejours: 3, recu_cents: 42722, total_cents: 42722 }),
+    hors_mois: parBien({}),
+    // ⚠ LA RESERVE PORTE CE SEJOUR, ET C'EST LE POINT. Ma premiere version
+    // mettait `hors_biens` a zero et assertait un ecart « MUET » — elle
+    // modelisait un etat IMPOSSIBLE. La fonction SQL deployee
+    // (`2026-10-26-revenus-hors-biens.sql`) compte les uuid dont
+    // `not exists (select 1 from properties …)`, donc un logement supprime
+    // entre dans la reserve. J'avais recopie « elle ne compte que les NULS »
+    // d'une analyse portant sur la migration 3, remplacee depuis.
+    hors_biens: parBien({ sejours: 1, total_cents: 10000 })
+  }, biens)
+  p.interne.renderRevenus()
+
+  const nombres = (h) => (h.match(/>(-?\d+)</g) || []).map(x => Number(x.slice(1, -1)))
+  const rangees = p.html('[data-list="revenue-rows"]').split('<tr>').slice(1)
+  assert.strictEqual(rangees.length, 2, 'le logement supprime ne doit pas fabriquer une ligne')
+  const recus = rangees.map(r => nombres((r.match(/<td class="rev-tbl__num">[\s\S]*?<\/td>/g) || [])[0])[0])
+  // 167,68 et 159,54 : chacun a son propre arrondi au plus fort reste SUR LEUR
+  // SOMME (327,22 -> 327), et AUCUN euro venu du logement disparu.
+  assert.deepEqual(recus, [168, 159],
+    `les lignes portent ${recus.join(' + ')} : un euro orphelin s y est pose`)
+  assert.strictEqual(recus.reduce((a, b) => a + b, 0), 327,
+    'la somme des lignes n est plus l arrondi de leur propre somme')
+
+  // ⚠ L'ECART AVEC LE BANDEAU RESTE — il est REEL, le total du compte contient
+  // cet argent — MAIS IL EST DIT. La reserve le nomme en toutes lettres :
+  // « N sejours rattaches a aucun de vos logements : X € dans le total, sur
+  // AUCUNE LIGNE ». C'est precisement la phrase que ce cas appelle.
+  const bandeau = Number(p.cache('[data-bind="revenue-received"]').textContent)
+  assert.strictEqual(bandeau, 427, 'le bandeau ne compte plus le logement supprime')
+  const ecart = bandeau - recus.reduce((a, b) => a + b, 0)
+  assert.strictEqual(ecart, 100, 'l ecart entre le bandeau et les lignes a change de valeur')
+  const reserve = p.cache('[data-bind="revenue-reserves"]')
+  assert.strictEqual(reserve.hidden, false, 'la reserve est masquee : l ecart serait MUET')
+  assert.match(reserve.textContent, /revenue\.hors_biens/,
+    'la reserve ne dit pas les sejours rattaches a aucun logement')
 })
