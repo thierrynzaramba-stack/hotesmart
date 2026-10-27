@@ -30,7 +30,7 @@ function faux ({ marker = null, delais = [{ canal: 'airbnb', base: 'arrivee', jo
       vu.selects.push(table)
       const q = {
         _table: table, _filtres: [],
-        select () { return q },
+        select () { q._selectFait = true; return q },
         eq (c, v) { q._filtres.push(['eq', c, v]); return q },
         is (c, v) { q._filtres.push(['is', c, v]); return q },
         not (c, op, v) { q._filtres.push(['not', c, op, v]); return q },
@@ -116,7 +116,31 @@ function faux ({ marker = null, delais = [{ canal: 'airbnb', base: 'arrivee', jo
         }
         return { data: [], error: null }
       }
-      return q
+      // ⚠ LE DOUBLE REFUSE CE QUE LE VRAI CLIENT REFUSE, et cette garde vient
+      // d'un defaut REEL trouve le 27 octobre 2026 en lancant le rattrapage
+      // pour de vrai sur staging. J'avais ecrit
+      // `sb.from(...).limit(PAGE).select(...)` pour rapprocher la borne du
+      // `from()` — ce que le recensement des lectures non bornees demande. Le
+      // double, lui, exposait TOUT des le `from()` : il a dit oui. Le vrai
+      // client PostgREST n'expose `.limit()`, `.eq()` et les autres QUE sur le
+      // constructeur rendu par `.select()`, et il leve
+      // « sb.from(...).limit is not a function ».
+      //
+      // Le rattrapage aurait donc plante A CHAQUE PASSAGE en production, avec
+      // une suite entierement verte. Un double plus permissif que la chose
+      // qu'il double ne protege de rien : il valide du code qui ne peut pas
+      // tourner.
+      const avantSelect = new Set(['select', 'update', 'upsert', 'then'])
+      return new Proxy(q, {
+        get (cible, prop) {
+          if (typeof prop === 'string' && !cible._selectFait && !avantSelect.has(prop)
+              && !prop.startsWith('_') && typeof cible[prop] === 'function') {
+            throw new TypeError(`sb.from(...).${prop} is not a function `
+              + '(le vrai client ne l expose qu APRES .select())')
+          }
+          return cible[prop]
+        }
+      })
     }
   }
   return { client, vu }

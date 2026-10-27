@@ -777,5 +777,6 @@
   "validate.settings": "Régler ce qu’il valide seul",
   "validate.task": "À traiter",
   "validate.title": "À valider",
-  "validate.view": "Voir"
+  "validate.view": "Voir",
+  "revenue.col_split": "Répartition"
 }

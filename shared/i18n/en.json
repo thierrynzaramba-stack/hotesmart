@@ -777,5 +777,6 @@
   "validate.settings": "Choose what it handles alone",
   "validate.task": "To handle",
   "validate.title": "To approve",
-  "validate.view": "View"
+  "validate.view": "View",
+  "revenue.col_split": "Split"
 }
