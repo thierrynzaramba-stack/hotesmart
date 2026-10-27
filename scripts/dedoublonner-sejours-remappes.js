@@ -201,7 +201,15 @@ async function main () {
       conserve_sous: String(p.garde.booking_id)
     }
     const { error } = await supabase.from('bookings_snapshot')
-      .update({ snapshot: s, updated_at: maintenant })
+      // ⚠ `derive_le: null` INVALIDE LES COLONNES DERIVEES, et sans lui ce
+      // geste serait sans effet sur l'argent. Les colonnes de revenus sont
+      // calculees a l'ECRITURE ; `aDeriver` les juge a jour tant que
+      // `derive_le` est pose, que la version est la bonne et que l'empreinte
+      // du payload correspond — et reecrire `snapshot` ne touche a aucun des
+      // trois. Mesure du 27 octobre 2026 : apres cette mise a jour,
+      // `aDeriver` repondait FALSE, donc le rattrapage de 04:00 ne reprenait
+      // JAMAIS la ligne. Le statut change, l'argent ne suit pas.
+      .update({ snapshot: s, updated_at: maintenant, derive_le: null })
       .eq('property_id', C.cle).eq('booking_id', String(p.neutralise.booking_id))
     console.log(`   ${p.code} : ${error ? 'ECHEC ' + error.message : `${avant} -> demapped (initialImport)`}`)
   }
