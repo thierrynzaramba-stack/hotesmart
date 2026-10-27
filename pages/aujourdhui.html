@@ -975,11 +975,18 @@ const euros = (cents, devise) =>
  * euros manquants se posaient sur les lignes des biens VIVANTS — une ligne
  * portait de l'argent qui n'est pas le sien.
  *
- * En calculant sa cible elle-meme, la fonction rend ce mesusage IMPOSSIBLE. Ce
- * qui reste — le bandeau peut depasser la somme des lignes quand un logement
- * supprime porte de l'argent — est un defaut ANTERIEUR et plus large (la
- * reserve `hors_biens` ne compte que les `property_uuid` NULS). Il est au
- * registre, dette 118 ; au moins il ne se repand plus sur des lignes justes.
+ * En calculant sa cible elle-meme, la fonction rend ce mesusage IMPOSSIBLE.
+ *
+ * ⚠ ET CE QUI RESTE EST DIT A L'HOTE, contrairement a ce que j'avais ecrit ici.
+ * J'avais recopie « la reserve `hors_biens` ne compte que les `property_uuid`
+ * NULS » — c'etait vrai de la migration 3, REMPLACEE depuis. La migration 5
+ * (`2026-10-26-revenus-hors-biens.sql`), celle qui est deployee, compte aussi
+ * les uuid dont `not exists (select 1 from properties …)`, donc les logements
+ * supprimes. L'ecran rend alors la reserve : « N sejours rattaches a aucun de
+ * vos logements : X € dans le total, SUR AUCUNE LIGNE ». Le bandeau peut donc
+ * depasser la somme des lignes, et la phrase qui l'explique est juste dessous.
+ * Verifie contre la production le 27 octobre 2026 : zero uuid orphelin
+ * aujourd'hui, et le filtre `not exists` est bien dans la fonction deployee.
  *
  * ⚠ RECETTE DE THIERRY, 27 octobre 2026 : « A venir octobre affiche 935 €
  * alors que les lignes font 168 + 160 + 608 = 936 ». Ce n'est pas un calcul

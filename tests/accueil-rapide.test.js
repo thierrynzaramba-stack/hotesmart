@@ -1991,7 +1991,15 @@ test("LE TEST QUI COMPTE : l argent d un logement SUPPRIME ne se pose pas sur le
       'uuid-DISPARU': parBien({ sejours: 1, recu_cents: 10000, total_cents: 10000 })
     },
     total: parBien({ sejours: 3, recu_cents: 42722, total_cents: 42722 }),
-    hors_mois: parBien({}), hors_biens: parBien({})
+    hors_mois: parBien({}),
+    // ⚠ LA RESERVE PORTE CE SEJOUR, ET C'EST LE POINT. Ma premiere version
+    // mettait `hors_biens` a zero et assertait un ecart « MUET » — elle
+    // modelisait un etat IMPOSSIBLE. La fonction SQL deployee
+    // (`2026-10-26-revenus-hors-biens.sql`) compte les uuid dont
+    // `not exists (select 1 from properties …)`, donc un logement supprime
+    // entre dans la reserve. J'avais recopie « elle ne compte que les NULS »
+    // d'une analyse portant sur la migration 3, remplacee depuis.
+    hors_biens: parBien({ sejours: 1, total_cents: 10000 })
   }, biens)
   p.interne.renderRevenus()
 
@@ -2006,12 +2014,16 @@ test("LE TEST QUI COMPTE : l argent d un logement SUPPRIME ne se pose pas sur le
   assert.strictEqual(recus.reduce((a, b) => a + b, 0), 327,
     'la somme des lignes n est plus l arrondi de leur propre somme')
 
-  // ⚠ ET L'ECART AVEC LE BANDEAU RESTE, VISIBLE : c'est un defaut ANTERIEUR et
-  // plus large — la reserve `hors_biens` ne compte que les `property_uuid`
-  // NULS, pas les uuid orphelins (dette 118). Ce test fige l'etat connu pour
-  // qu'une correction future le fasse rougir plutot que de passer inapercue.
+  // ⚠ L'ECART AVEC LE BANDEAU RESTE — il est REEL, le total du compte contient
+  // cet argent — MAIS IL EST DIT. La reserve le nomme en toutes lettres :
+  // « N sejours rattaches a aucun de vos logements : X € dans le total, sur
+  // AUCUNE LIGNE ». C'est precisement la phrase que ce cas appelle.
   const bandeau = Number(p.cache('[data-bind="revenue-received"]').textContent)
   assert.strictEqual(bandeau, 427, 'le bandeau ne compte plus le logement supprime')
-  assert.strictEqual(bandeau - recus.reduce((a, b) => a + b, 0), 100,
-    'l ecart muet a change de valeur : la dette 118 a bouge, ce test doit suivre')
+  const ecart = bandeau - recus.reduce((a, b) => a + b, 0)
+  assert.strictEqual(ecart, 100, 'l ecart entre le bandeau et les lignes a change de valeur')
+  const reserve = p.cache('[data-bind="revenue-reserves"]')
+  assert.strictEqual(reserve.hidden, false, 'la reserve est masquee : l ecart serait MUET')
+  assert.match(reserve.textContent, /revenue\.hors_biens/,
+    'la reserve ne dit pas les sejours rattaches a aucun logement')
 })
