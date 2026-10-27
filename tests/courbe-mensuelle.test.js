@@ -97,3 +97,65 @@ test('RECENSEMENT : la geometrie reste coherente', () => {
   // « rien a montrer », un SVG absent se lit « la page est cassee ».
   assert.match(svg, /cm-axe/, 'une courbe sans serie ne rend pas son cadre')
 })
+
+test("LE TEST QUI COMPTE : un seul NaN ne vide pas TOUT le graphique", () => {
+  // ⚠ RELEVE PAR LA REVIEW, MESURE. `typeof NaN === 'number'` : le filtre le
+  // laissait passer, `Math.max(1, NaN)` rendait `NaN`, et TOUTES les
+  // coordonnees de TOUTES les series devenaient `NaN` — pas seulement le mois
+  // fautif. Le navigateur n'affiche alors rien, sans rien dire : exactement la
+  // panne que le commentaire du module disait prevenir.
+  const svg = courbeMensuelle({
+    series: [
+      { nom: 'A', couleur: '#000', valeurs: douze(k => (k === 3 ? NaN : 100)) },
+      { nom: 'B', couleur: '#111', valeurs: douze(() => 50) }
+    ],
+    resume: 'essai'
+  })
+  assert.ok(!/NaN/.test(svg), 'un NaN d entree a vide le trace')
+  // Et il se comporte comme une ABSENCE : le trait se coupe, la serie voisine
+  // est intacte.
+  const [a, b] = chemins(svg)
+  assert.strictEqual((a.match(/M/g) || []).length, 2, 'le NaN n a pas coupe le trait')
+  assert.strictEqual(segments(b), 'MLLLLLLLLLLL', 'la serie voisine a souffert du NaN de l autre')
+})
+
+test("LE TEST QUI COMPTE : `Infinity` ne fabrique pas une courbe plate et muette", () => {
+  const svg = courbeMensuelle({
+    series: [{ nom: 'A', couleur: '#000', valeurs: douze(k => (k === 0 ? Infinity : 10)) }],
+    resume: 'essai'
+  })
+  assert.ok(!/NaN|Infinity/.test(svg), 'une valeur infinie est passee dans le trace')
+  // Le maximum reste celui des valeurs FINIES : la courbe garde son relief.
+  assert.match(svg, /cm-grad/, 'les graduations ont disparu')
+})
+
+test("LE TEST QUI COMPTE : une couleur ne peut pas sortir de son attribut", () => {
+  // Demontre en review : `couleur: 'red" onclick="alert(1)'` faisait sortir un
+  // gestionnaire d'evenement du module. Les bulles et le resume etaient
+  // echappes, ces deux-la non.
+  const svg = courbeMensuelle({
+    series: [{ nom: 'A', couleur: 'red" onclick="alert(1)', epaisseur: '2" onmouseover="x()', valeurs: douze(() => 1) }],
+    resume: 'essai'
+  })
+  assert.ok(!/onclick|onmouseover/.test(svg), `un gestionnaire d evenement est sorti : ${svg.slice(0, 300)}`)
+  // Une forme refusee retombe sur le jeton du theme : on dessine quand meme.
+  assert.match(svg, /stroke="var\(--ink\)"/, 'une couleur refusee ne retombe pas sur le theme')
+  // Et les formes LEGITIMES passent.
+  for (const bonne of ['#fff', '#0a0a0a', 'var(--ok)', 'black']) {
+    const s2 = courbeMensuelle({ series: [{ nom: 'A', couleur: bonne, valeurs: douze(() => 1) }], resume: 'e' })
+    assert.ok(s2.includes(`stroke="${bonne}"`), `la couleur legitime ${bonne} est refusee`)
+  }
+})
+
+test("LE TEST QUI COMPTE : plus de douze valeurs ne sortent pas du cadre", () => {
+  // Avec vingt-quatre entrees, l'abscisse montait a 1 348 pour un `viewBox`
+  // large de 680 : la moitie du trace sortait du cadre, sans message.
+  const { L } = _interne
+  const svg = courbeMensuelle({
+    series: [{ nom: 'A', couleur: '#000', valeurs: Array.from({ length: 24 }, () => 10) }],
+    resume: 'essai'
+  })
+  const xs = [...svg.matchAll(/cx="([\d.]+)"/g)].map(m => Number(m[1]))
+  assert.ok(xs.length > 0, 'aucun point rendu')
+  assert.ok(Math.max(...xs) <= L, `un point est a ${Math.max(...xs)} pour un cadre de ${L}`)
+})

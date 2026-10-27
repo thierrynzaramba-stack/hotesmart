@@ -31,6 +31,18 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 const ANNEE_MIN = 2000
 const ANNEE_MAX = 2100
 
+// ⚠ LE PLAFOND DE LA LISTE DES BIENS, ET IL SE SIGNALE. Un compte au-dela
+// verrait ses biens manquants traites comme SUPPRIMES : leurs sejours
+// tomberaient dans la reserve « rattaches a aucun de vos logements » alors que
+// les logements sont vivants. Le total resterait juste, les lignes fausses, et
+// rien ne le dirait.
+//
+// C'est la classe exacte que ce depot a deja payee — `CONVERSATIONS_MAX = 5000`
+// contre un plafond serveur de 1 000, ou le drapeau de troncature ne pouvait
+// jamais se lever. On demande donc UNE ligne de plus que le plafond : si elle
+// revient, c'est qu'il y en a davantage, et on le DIT au lieu de deviner.
+const BIENS_MAX = 500
+
 // Le jour de PARIS, et pas celui du serveur : « recu » se compare a lui, et
 // `current_date` cote Postgres est en UTC. Le depot a deja paye ce decalage
 // d'un jour chaque soir entre minuit et 2 heures.
@@ -90,13 +102,29 @@ module.exports = async (req, res) => {
   let requetes = 0
   const indisponibles = []
 
-  // Le perimetre vide et l'uuid introuvable ne sont pas des erreurs : ce sont
-  // des reponses. On les dit, et on ne lit rien.
-  if (perimetreVide || uuidIntrouvable) {
-    if (uuidIntrouvable) indisponibles.push('revenus')
+  // ⚠ LES DEUX CAS SE RESSEMBLAIENT ET NE DISENT PAS LA MEME CHOSE, et la
+  // review l'a releve avant que l'ecran n'existe. Un perimetre VIDE est un
+  // FAIT : ce membre ne voit aucun bien, donc zero euro est la bonne reponse,
+  // et `{}` la porte. Un perimetre dont aucune cle n'est un UUID est une
+  // IGNORANCE : on ne sait pas exprimer sa borne, donc on ne sait pas ce qu'il
+  // a gagne.
+  //
+  // Les deux rendaient `{}`, et le seul discriminant etait `indisponibles`.
+  // L'ecran a venir testerait `par_bien === null` — le reflexe que les deux
+  // branches d'echec plus bas lui enseignent — et afficherait 0 € a un membre
+  // dont on ignore tout. C'est la regle gravee du depot prise a l'envers : un
+  // resume qui ecrit 0 la ou le calcul n'a rien lu transforme une absence en
+  // fait. « Je ne sais pas » prend donc la MEME forme que les echecs : `null`.
+  if (uuidIntrouvable) {
+    indisponibles.push('revenus')
+    return rendre(res, t0, requetes, {
+      annee, jour, par_bien: null, hors_biens: null, total: null, indisponibles
+    })
+  }
+  if (perimetreVide) {
     return rendre(res, t0, requetes, {
       annee, jour, par_bien: {}, hors_biens: {}, total: {},
-      perimetre_vide: perimetreVide, indisponibles
+      perimetre_vide: true, indisponibles
     })
   }
 
@@ -123,8 +151,8 @@ module.exports = async (req, res) => {
     }),
     // Borne explicite : les biens du COMPTE, et du perimetre s'il y en a un.
     (refsUuid === null
-      ? supabase.from('properties').select('id').eq('user_id', compte).limit(500)
-      : supabase.from('properties').select('id').eq('user_id', compte).in('id', refsUuid).limit(500))
+      ? supabase.from('properties').select('id').eq('user_id', compte).limit(BIENS_MAX + 1)
+      : supabase.from('properties').select('id').eq('user_id', compte).in('id', refsUuid).limit(BIENS_MAX + 1))
   ])
 
   if (eAnnee) {
@@ -153,6 +181,16 @@ module.exports = async (req, res) => {
   // janvier veut dire « il n'existait pas ». C'est la decision de Thierry du
   // 27 octobre, et elle vit jusqu'ici : si l'endpoint remplissait les mois
   // manquants de zeros, l'ecran ne pourrait plus faire la difference.
+  // ⚠ LA LISTE EST-ELLE COMPLETE ? On a demande `BIENS_MAX + 1` : si on les
+  // recoit tous, il en existe au moins un de plus, et le partage
+  // vivant / supprime ne peut plus etre affirme.
+  if ((biens || []).length > BIENS_MAX) {
+    console.error(`[ecran/revenus-annee] plus de ${BIENS_MAX} biens : partage impossible`)
+    return rendre(res, t0, requetes, {
+      annee, jour, par_bien: null, hors_biens: null, total: null,
+      indisponibles: ['revenus']
+    })
+  }
   const connus = new Set((biens || []).map(b => String(b.id)))
   const vide = () => ({
     sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0,

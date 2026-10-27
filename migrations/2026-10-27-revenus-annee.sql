@@ -121,7 +121,15 @@ ne decide pas a sa place.
 entrent dans le total du compte et sur aucune ligne,
 exactement comme dans la vue Mois. L''ecran les nomme
 par sa reserve ; les taire ferait un total qu''aucune
-ligne n''explique.';
+ligne n''explique.
+⚠ SAUF POUR UN MEMBRE DELEGUE, et c''est voulu :
+`property_uuid = any(p_refs)` rend NULL sur un uuid nul,
+donc ces sejours SORTENT de son perimetre. C''est la
+decision de Thierry du 27 octobre — « un membre delegue
+ne voit ni le compte ni le montant des sejours sans
+bien ». La phrase ci-dessus etait ecrite sans cette
+reserve, et dans ce depot un commentaire se lit comme
+une mesure.';
 
 
 -- ─── LES DROITS ────────────────────────────────────
@@ -159,6 +167,13 @@ grant execute on function
 
 select count(*)::text as versions,
        max(p.pronargs)::text as arguments,
+       -- ⚠ UN COLLAGE MANUEL PEUT PERDRE UNE LIGNE, et
+       -- `set search_path = public` est celle qui
+       -- compte : sans elle, la fonction resout ses
+       -- tables selon le chemin de l''appelant.
+       bool_or(p.prosecdef)::text as definer,
+       coalesce(max(array_to_string(
+         p.proconfig, ',')), '(aucun)') as reglages,
        bool_or(has_function_privilege(
          'anon', p.oid, 'EXECUTE'))::text as anon_peut,
        bool_or(has_function_privilege(

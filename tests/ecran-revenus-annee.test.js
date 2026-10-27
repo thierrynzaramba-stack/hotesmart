@@ -68,8 +68,16 @@ async function appeler ({
     : { userId: MEMBRE, accountUserId: TITULAIRE,
         profil: { active: true, accepted_at: '2026-01-01', member_user_id: MEMBRE, account_user_id: TITULAIRE },
         permissions }
+  // ⚠ LE DOUBLE POSE L'EN-TETE PRIVE, COMME LA VRAIE GARDE. Sans lui, le test
+  // « l'en-tete precede le refus de methode » ne peut PAS echouer : il
+  // n'assertait que le 405 et le `Allow`, que l'ordre inverse satisfait aussi.
+  // Mesure de la review : deplacer `contexteDEcran` APRES le refus de methode —
+  // la regression exacte de la dette 90 — rendait `fail 0`.
   require.cache[absGarde].exports = Object.assign({}, vraieGarde, {
-    contexteDEcran: async () => ({ ok: true, userId: contexte.userId, accountUserId: TITULAIRE, contexte })
+    contexteDEcran: async (rq, rs) => {
+      if (rs && typeof rs.setHeader === 'function') rs.setHeader('cache-control', 'private, no-store')
+      return { ok: true, userId: contexte.userId, accountUserId: TITULAIRE, contexte }
+    }
   })
 
   const absEndpoint = require.resolve('../api/ecran/revenus-annee')
@@ -82,18 +90,30 @@ async function appeler ({
     status (s) { rep.statut = s; return res },
     json (c) { rep.charge = c; return res }
   }
-  await endpoint({ method: methode, query }, res)
-
-  require.cache[absSdk].exports.createClient = vraiCreate
-  require.cache[absGarde].exports = vraieGarde
-  delete require.cache[absEndpoint]
+  // ⚠ LA RESTAURATION PASSE PAR UN `finally`. Sans lui, une assertion qui leve
+  // laisse le faux `createClient` et la fausse garde en place pour les tests
+  // SUIVANTS du meme fichier : des rouges en cascade dont le premier seul est
+  // vrai. Ce depot compte ses rouges, et un compte fausse coute une enquete.
+  try {
+    await endpoint({ method: methode, query }, res)
+  } finally {
+    require.cache[absSdk].exports.createClient = vraiCreate
+    require.cache[absGarde].exports = vraieGarde
+    delete require.cache[absEndpoint]
+  }
   return { ...rep, vu }
 }
 
+// ⚠ DES MONTANTS DISTINCTS PAR DEFAUT, ET C'EST UN CORRECTIF. Ma fixture
+// mettait tout a zero, et le seul test qui posait des euros donnait
+// `recu_cents` EGAL a `total_cents`. Trois mutations mesurees par la review
+// rendaient donc `fail 0` : recu et a-venir permutes, le total prive de
+// l'a-venir, et le jour de reference remplace par une date morte. Un jeu
+// d'essai ou les grandeurs ne se distinguent pas ne distingue rien.
 const ligne = (uuid, annee, mois, o = {}) => ({
   property_uuid: uuid, annee, mois,
-  sejours: 1, recu_cents: 0, a_venir_cents: 0, total_cents: 0,
-  bruts: 0, sans_montant: 0, ...o
+  sejours: 3, recu_cents: 700, a_venir_cents: 1300, total_cents: 2000,
+  bruts: 1, sans_montant: 2, ...o
 })
 
 test("LE TEST QUI COMPTE : sans le droit `reservations`, la fonction n'est PAS appelee", async () => {
@@ -121,8 +141,22 @@ test("LE TEST QUI COMPTE : un titulaire ne porte AUCUNE borne, un membre en port
   const m = await appeler({ titulaire: false, refs: [BIEN_A] })
   assert.deepEqual(m.vu.rpc[0].args.p_refs, [BIEN_A],
     'le membre delegue lit SANS borne : c est une fuite inter-biens')
-  assert.strictEqual(m.vu.rpc[0].args.p_user_id, TITULAIRE,
-    'le compte interroge doit rester celui de la garde, jamais celui de la requete')
+
+  // ⚠ ET LA REQUETE ESSAIE DE DESIGNER UN AUTRE COMPTE. Mon assertion
+  // precedente verifiait bien `p_user_id === TITULAIRE`, mais AUCUN scenario ne
+  // passait de compte dans la requete : la borne n'etait jamais mise a
+  // l'epreuve. Mesure de la review : la mutation
+  // `p_user_id: req.query.compte || compte` rendait `fail 0`. Un garde-fou qui
+  // ne peut pas echouer n'en est pas un.
+  const AUTRE = '99999999-9999-4999-8999-999999999999'
+  const vole = await appeler({
+    titulaire: false, refs: [BIEN_A],
+    query: { annee: '2026', compte: AUTRE, user_id: AUTRE, p_user_id: AUTRE, accountUserId: AUTRE }
+  })
+  assert.strictEqual(vole.vu.rpc[0].args.p_user_id, TITULAIRE,
+    'le compte interroge vient de la REQUETE : un hote lirait le compte d un autre')
+  assert.deepEqual(vole.vu.rpc[0].args.p_refs, [BIEN_A],
+    'le perimetre vient de la requete : le membre sortirait de ses biens')
 })
 
 test("LE TEST QUI COMPTE : un perimetre VIDE rend un ecran vide, jamais le compte entier", async () => {
@@ -145,6 +179,18 @@ test("LE TEST QUI COMPTE : un perimetre sans UUID dit « je ne sais pas », pas 
   assert.deepEqual(r.vu.rpc, [], 'on a lu avec un perimetre qu on ne sait pas exprimer')
   assert.ok((r.charge.indisponibles || []).includes('revenus'),
     'l ecran croira que ces revenus valent zero')
+  // ⚠ ET LA FORME COMPTE AUTANT QUE LE DRAPEAU. « Je ne sais pas » rendait le
+  // MEME objet vide qu'un perimetre legitimement vide, et le seul discriminant
+  // etait `indisponibles`. L'ecran testerait `par_bien === null` — le reflexe
+  // que les branches d'echec lui enseignent — et afficherait 0 €.
+  assert.strictEqual(r.charge.par_bien, null,
+    'un perimetre qu on ne sait pas exprimer rend un objet VIDE : l ecran y lira zero euro')
+  assert.strictEqual(r.charge.total, null)
+  // Et le perimetre VIDE, lui, garde sa forme : c est un FAIT, pas une
+  // ignorance — ce membre ne voit aucun bien, donc zero est la bonne reponse.
+  const vide = await appeler({ titulaire: false, refs: [] })
+  assert.deepEqual(vide.charge.par_bien, {},
+    'un perimetre vide est devenu « je ne sais pas » : les deux ne se distinguent plus')
 })
 
 test("LE TEST QUI COMPTE : une annee hors bornes est REFUSEE, pas remplacee en silence", async () => {
@@ -221,4 +267,82 @@ test("LE TEST QUI COMPTE : l'en-tete prive est pose AVANT le refus de methode", 
   assert.strictEqual(r.statut, 405)
   assert.strictEqual(r.entetes.Allow, 'GET')
   assert.deepEqual(r.vu.rpc, [], 'un POST a declenche une lecture')
+  // ⚠ ET C'EST CETTE LIGNE QUI MORD. Les deux precedentes sont vraies que la
+  // garde passe avant ou apres : un refus de methode rend 405 et `Allow` dans
+  // les deux cas. Seule la presence de l'en-tete PRIVE sur la reponse 405
+  // distingue les deux ordres — et c'est la dette 90.
+  assert.strictEqual(r.entetes['cache-control'], 'private, no-store',
+    'le refus de methode a repondu SANS en-tete prive : la garde passe apres lui')
+})
+
+test("LE TEST QUI COMPTE : recu, a-venir et total ne se confondent JAMAIS", async () => {
+  // ⚠ TROIS MUTATIONS RENDAIENT `fail 0` AVANT CE TEST (mesure de la review) :
+  // recu et a-venir permutes, le total prive de l'a-venir, et `p_aujourdhui`
+  // remplace par une date morte. Aucune assertion du fichier ne nommait
+  // `recu_cents`, `a_venir_cents`, `bruts` ni `sans_montant`.
+  //
+  // Ce partage n'est pas decoratif : la decision 3 de Thierry — recu en trait
+  // plein, a venir en pointille — repose entierement dessus, et `p_aujourdhui`
+  // en est le SEUL arbitre.
+  const r = await appeler({
+    biens: [BIEN_A],
+    lignes: [ligne(BIEN_A, 2026, 5, { recu_cents: 700, a_venir_cents: 1300, total_cents: 2000, bruts: 1, sans_montant: 2 })]
+  })
+  const m = r.charge.par_bien[BIEN_A]['2026-05']
+  assert.strictEqual(m.recu_cents, 700, 'le recu a pris une autre valeur')
+  assert.strictEqual(m.a_venir_cents, 1300, 'l a-venir a pris une autre valeur')
+  assert.strictEqual(m.total_cents, 2000, 'le total n est pas celui de la base')
+  // Les deux compteurs d'honnetete voyagent aussi : sans eux, l'ecran ne peut
+  // pas dire qu'un montant est brut ou non calculable.
+  assert.strictEqual(m.bruts, 1, 'le compte des montants bruts est perdu')
+  assert.strictEqual(m.sans_montant, 2, 'le compte des montants non calculables est perdu')
+  // Et le total du compte porte les memes.
+  assert.strictEqual(r.charge.total['2026-05'].a_venir_cents, 1300)
+
+  // ⚠ LE JOUR DE REFERENCE EST CELUI DE PARIS, et c'est lui qui tranche entre
+  // recu et a venir. `current_date` cote Postgres est en UTC : une comparaison
+  // faite en base se decalerait d'un jour chaque soir entre minuit et 2 heures,
+  // et ce depot a deja paye ce decalage.
+  const parisAujourdhui = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date())
+  assert.strictEqual(r.vu.rpc[0].args.p_aujourdhui, parisAujourdhui,
+    'le jour passe a la base n est pas celui de Paris')
+})
+
+test("LE TEST QUI COMPTE : la lecture des biens est bornee au COMPTE", async () => {
+  // ⚠ `vu.filtres` etait collecte et JAMAIS asserte : retirer
+  // `.eq('user_id', compte)` de la lecture de `properties` ne faisait rougir
+  // personne (mesure de la review). Un filtre de cloisonnement qu'on peut
+  // supprimer sans rouge est un filtre qui disparaitra dans une refonte.
+  const t = await appeler({ titulaire: true })
+  assert.ok(t.vu.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id' && f[2] === TITULAIRE),
+    'la liste des biens n est pas bornee au compte : 500 places pour TOUS les comptes')
+
+  const m = await appeler({ titulaire: false, refs: [BIEN_A] })
+  assert.ok(m.vu.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id' && f[2] === TITULAIRE),
+    'la lecture du membre n est pas bornee au compte')
+  assert.ok(m.vu.filtres.some(f => f[0] === 'in' && f[1] === 'id'),
+    'la lecture du membre n est pas bornee a son perimetre')
+})
+
+test("LE TEST QUI COMPTE : une liste de biens TRONQUEE refuse le partage", async () => {
+  // ⚠ RELEVE PAR LA REVIEW. Au-dela du plafond, les biens manquants seraient
+  // traites comme SUPPRIMES : leurs sejours tomberaient dans la reserve
+  // « rattaches a aucun de vos logements » alors que les logements sont
+  // vivants. Le total resterait juste, les lignes fausses, et rien ne le
+  // dirait — la classe exacte que ce depot a deja payee avec un plafond de
+  // conversations dont le drapeau ne pouvait jamais se lever.
+  const beaucoup = Array.from({ length: 501 }, (_, i) =>
+    `aaaaaaaa-1111-4111-8111-${String(i).padStart(12, '0')}`)
+  const r = await appeler({ biens: beaucoup, lignes: [ligne(beaucoup[0], 2026, 4)] })
+  assert.strictEqual(r.charge.par_bien, null,
+    'le partage est affirme alors que la liste des biens est incomplete')
+  assert.ok((r.charge.indisponibles || []).includes('revenus'),
+    'la troncature ne se dit pas : les lignes seraient fausses en silence')
+
+  // Et juste en dessous du plafond, rien ne change.
+  const sous = Array.from({ length: 500 }, (_, i) =>
+    `aaaaaaaa-1111-4111-8111-${String(i).padStart(12, '0')}`)
+  const ok = await appeler({ biens: sous, lignes: [ligne(sous[0], 2026, 4)] })
+  assert.ok(ok.charge.par_bien && ok.charge.par_bien[sous[0]],
+    'le plafond mord un cran trop tot')
 })
