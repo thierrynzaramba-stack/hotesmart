@@ -1528,3 +1528,132 @@ test("LE TEST QUI COMPTE : le BANDEAU dit « non calculable », il n'affiche pas
   assert.notStrictEqual(q.cache('[data-bind="revenue-total"]').textContent, 'revenue.unavailable',
     'un mois sans aucun sejour est annonce « non calculable » alors que zero est la bonne reponse')
 })
+
+// ─── LES CINQ CONSTATS DE LA RECETTE DU 27 OCTOBRE 2026 (Thierry) ────────────
+
+test("LE TEST QUI COMPTE : `--recu` est un NOMBRE NU, jamais un pourcentage", () => {
+  // ⚠ CONSTAT 2 DE LA RECETTE : « un mois entierement recu (aout, Loft)
+  // s'affiche hachure ». La cause n'etait pas la couleur, c'etait une unite.
+  // La couche pleine de la barre fait
+  // `inline-size: calc(var(--part) * var(--recu) / 100)`. Avec `--recu: 100%`,
+  // cela donne `calc(50% * 100% / 100)` — un POURCENTAGE MULTIPLIE PAR UN
+  // POURCENTAGE, invalide en CSS. La declaration tombe EN SILENCE, la couche
+  // pleine n'a jamais eu de largeur, et seules les hachures s'affichaient : sur
+  // tous les biens, tous les mois, depuis la livraison du bloc.
+  //
+  // ⚠ ET RIEN NE POUVAIT LE VOIR : le pourcentage s'ecrivait « correctement »
+  // dans l'attribut, aucune assertion ne lit une largeur calculee, et jsdom ne
+  // resout pas `calc()`. Seul l'oeil de Thierry sur un vrai telephone l'a pris.
+  // D'ou ce test, qui garde la FORME de la valeur plutot que son effet.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 2, total_cents: 70000, recu_cents: 70000, a_venir_cents: 0 }) },
+    total: parBien({ sejours: 2, total_cents: 70000, recu_cents: 70000, a_venir_cents: 0 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  assert.match(lignes, /--recu:\s*\d/, 'la barre ne porte pas `--recu`')
+  assert.ok(!/--recu:\s*[\d.]+%/.test(lignes),
+    '`--recu` est un pourcentage : `calc(% * %)` est invalide, la part RECUE ne s affichera pas')
+  // Et `--part`, lui, EST un pourcentage : c'est une largeur.
+  assert.match(lignes, /--part:\s*\d+%/, '`--part` doit rester un pourcentage : c est une largeur')
+})
+
+test("LE TEST QUI COMPTE : le telephone recoit une LISTE, rendue par la meme boucle", () => {
+  // ⚠ CONSTAT 1 DE LA RECETTE : a 390 px le tableau en demandait 425, la colonne
+  // Total etait coupee et les noms se cassaient mot par mot. La forme telephone
+  // est un SECOND BALISAGE, parce qu'on ne peut pas basculer un `<table>` en
+  // liste par CSS sans retirer ses cellules de l'arbre d'accessibilite.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }) },
+    total: parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const cartes = p.html('[data-list="revenue-cards"]')
+  assert.match(cartes, /La bulle/, 'la liste du telephone ne porte pas le bien')
+  assert.match(cartes, /rev-carte__total/, 'la carte ne porte pas le total sur la ligne du nom')
+  assert.match(cartes, /revenue-bar/, 'la carte ne porte pas la barre')
+  assert.match(cartes, /revenue\.split/, 'la carte ne dit pas « x recus · y a venir »')
+  // ⚠ ET LE COMPTE DE SEJOURS Y EST AUSSI, que la demande ne mentionnait pas :
+  // regle « LE MOBILE SUIT L'ORDINATEUR », le tableau le porte.
+  assert.match(cartes, /revenue\.stays/, 'le compte de sejours est perdu au telephone')
+  // Les DEUX formes sortent des MEMES valeurs : un bien dans l'une est dans
+  // l'autre. Deux boucles divergeraient au premier correctif applique a une
+  // seule.
+  const lignes = p.html('[data-list="revenue-rows"]')
+  for (const nom of ['La bulle', 'Coeur de vie 23']) {
+    assert.ok(lignes.includes(nom) && cartes.includes(nom),
+      `${nom} n est pas dans les DEUX formes : les deux boucles ont divergé`)
+  }
+})
+
+test("LE TEST QUI COMPTE : un montant non calculable le reste au telephone", () => {
+  // La carte ne doit pas rattraper en « 0,00 € » ce que la ligne refuse de dire.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } })
+    },
+    total: parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const cartes = p.html('[data-list="revenue-cards"]')
+  assert.match(cartes, /revenue\.unavailable/, 'la carte ne dit pas que le montant est non calculable')
+  assert.ok(!/0[.,]00/.test(cartes), `la carte affiche un zero la ou la ligne refuse : ${cartes}`)
+})
+
+test("RECENSEMENT : le mois ne s'affiche qu'UNE fois, et le selecteur Mois/Annee est parti", () => {
+  // ⚠ CONSTATS 4 ET 5 DE LA RECETTE. « octobre 2026 » etait ecrit a DEUX
+  // endroits — entre les fleches et a droite du total — et le selecteur de vue
+  // n'avait qu'un bouton visible, de 30 px, la ou la charte exige 44.
+  const src = lire('pages/aujourdhui.html')
+  const bindings = (src.match(/data-bind="revenue-month(?!-nav)"/g) || [])
+  assert.deepEqual(bindings, [],
+    'le mois est encore affiche a cote du total : il y est deux fois a l ecran')
+  assert.match(src, /data-bind="revenue-month-nav"/, 'le mois des fleches a disparu aussi')
+  assert.ok(!/data-vue="mois"/.test(src),
+    'le selecteur Mois/Annee est encore la : un seul bouton visible, et sous 44 px')
+})
+
+test("RECENSEMENT : la barre dit le RECU en plein noir et l A VENIR en hachure grise", () => {
+  // ⚠ CONSTAT 2, seconde moitie. Les deux couches etaient en `var(--ok)` — le
+  // vert : un mois entierement recu s'affichait de la couleur de l'encaisse ET
+  // du motif de l'attente, donc la barre ne distinguait plus rien.
+  const css = lire('shared/ui.css')
+  // ⚠ CHACUN DES DEUX SELECTEURS APPARAIT DEUX FOIS : une regle COMMUNE pose
+  // `content` et la position, une regle propre pose la largeur et la couleur.
+  // Ma premiere version prenait la PREMIERE occurrence, donc la regle commune,
+  // qui n'a pas de `background` — le test rougissait sur un code juste. Un test
+  // qui lit le mauvais bloc peut aussi PASSER pour une raison fausse, et c'est
+  // le sens de ce commentaire : on designe la regle par ce qu'elle CONTIENT.
+  const blocs = (sel) => (css.match(new RegExp('\\' + sel + '\\s*\\{[^}]*\\}', 'g')) || [])
+  // ⚠ ET « contient background » NE SUFFIT PAS NON PLUS : la regle
+  // `prefers-reduced-motion` retire les hachures par `background-image: none`,
+  // donc DEUX regles peignent legitimement l'« a venir ». On designe donc
+  // chaque couche par ce qui la caracterise — le motif pour l'une, un fond
+  // plein pour l'autre. Deuxieme resserrage de ce test, et les deux fois c'est
+  // mon assertion qui etait trop large, pas le CSS qui etait faux.
+  const avenirs = blocs('.revenue-bar::before').filter(b => /repeating-linear-gradient/.test(b))
+  const recus = blocs('.revenue-bar::after').filter(b => /background:\s*var\(/.test(b))
+  assert.equal(avenirs.length, 1, `une seule regle doit peindre l « a venir » : ${avenirs.length}`)
+  assert.equal(recus.length, 1, `une seule regle doit peindre le « recu » : ${recus.length}`)
+  const avenir = avenirs
+  const recu = recus
+  assert.match(avenir[0], /repeating-linear-gradient/, 'l « a venir » n est plus hachure')
+  assert.match(avenir[0], /var\(--muted\)/, 'les hachures ne sont pas grises')
+  assert.match(recu[0], /background:\s*var\(--ink\)/, 'le « recu » n est pas en plein noir')
+  assert.ok(!/var\(--ok\)/.test(avenir[0] + recu[0]),
+    'la barre utilise encore le vert : les deux couches se confondent')
+  // ⚠ CONSTAT 3 : les cellules s'alignent par le HAUT. Avec `baseline`, la
+  // vignette de 28 px repoussait la ligne de base de la cellule du nom, et les
+  // trois cellules de chiffres descendaient — mais SEULEMENT sur les lignes qui
+  // portent une photo.
+  const cellules = css.match(/\.rev-tbl th,\s*\.rev-tbl td\s*\{[^}]*\}/)
+  assert.ok(cellules, 'la regle des cellules du tableau a disparu')
+  assert.match(cellules[0], /vertical-align:\s*top/,
+    'les cellules s alignent encore par la baseline : une ligne a photo decale ses montants')
+})

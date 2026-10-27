@@ -133,17 +133,27 @@
           <svg class="icon" aria-hidden="true"><use href="/shared/icons.svg#i-chevron"/></svg>
         </button>
       </div>
-      <div class="seg" role="group" data-i18n-attr="aria-label:revenue.view">
-        <button type="button" class="seg__btn is-on" data-vue="mois" data-i18n="revenue.month"></button>
-        <button type="button" class="seg__btn" data-vue="annee" data-i18n="revenue.year" hidden></button>
-      </div>
+      <!-- ⚠ LE SELECTEUR MOIS / ANNEE EST RETIRE (recette de Thierry du
+           27 octobre 2026, constat 5). Il ne portait qu'UN bouton visible —
+           « Mois » — l'autre etant `hidden` tant que la vue Annee n'existe
+           pas : un selecteur a un seul choix ne selectionne rien, et sa cible
+           de clic faisait 30 px la ou la charte du lot exige 44. Thierry
+           laissait le choix entre agrandir et retirer ; retirer est le seul
+           des deux qui ne laisse pas un bouton sans effet sous le doigt.
+           Il revient avec la vue Annee, et ses trois cles i18n
+           (`revenue.view`, `revenue.month`, `revenue.year`) restent en place
+           pour ce jour-la. -->
     </div>
 
     <!-- Le bandeau : total du mois, recu, a venir. -->
     <div class="card stack" style="gap: 10px">
       <div class="row" style="justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap">
         <strong class="num h1" data-bind="revenue-total"></strong>
-        <span class="muted small" data-bind="revenue-month"></span>
+        <!-- ⚠ LE MOIS NE S'AFFICHE PLUS ICI (recette, constat 4) : il etait
+             ecrit DEUX FOIS a l'ecran, entre les fleches de navigation et a
+             droite du total. Celui des fleches reste : c'est lui qu'on
+             manipule, et le repeter a deux endroits laisse croire qu'ils
+             peuvent differer. -->
       </div>
       <!-- ⚠ RECU ET A VENIR EN GROS CHIFFRES (maquette Aujourdhui-v5, demande
            de Thierry du 27 octobre). Ils portaient `class="num"` sous un
@@ -186,6 +196,20 @@
         <tbody data-list="revenue-rows"></tbody>
       </table>
     </div>
+
+    <!-- ⚠ LA FORME TELEPHONE EST UNE LISTE, ET C'EST UN SECOND BALISAGE, PAS LE
+         TABLEAU RESTYLE (recette de Thierry du 27 octobre 2026, constat 1 :
+         « le tableau (425 px) deborde a 390 px, colonne Total coupee, noms
+         casses mot par mot »).
+         ⚠ ON NE PEUT PAS basculer le tableau en liste par CSS : changer le
+         `display` d'un `<th>` ou d'un `<td>` retire la cellule de l'arbre
+         d'accessibilite, donc `scope="row"` devient inerte — et
+         `tests/masquage-hidden.test.js` refuse desormais toute classe de
+         cellule qui touche a `display`. Les deux formes coexistent donc, une
+         seule s'affiche, et les DEUX sont rendues par la meme boucle a partir
+         des memes valeurs : c'est la regle du depot (« une regle partagee par
+         les deux versions vit dans un module commun », jamais deux copies). -->
+    <ul class="rev-liste" data-list="revenue-cards"></ul>
 
     <!-- ⚠ LA NOTE DE BAS DE BLOC PORTE L'HONNETETE DE TOUT CE QUI PRECEDE
          (spec §4, decision Q9 de Thierry) : ces montants sont CALCULES selon
@@ -966,10 +990,11 @@ function renderRevenus () {
     if (nav) nav.textContent = moisEnClair(etat.ecran && etat.ecran.mois)
     const n = $('[data-bind="revenue-total"]')
     if (n) n.textContent = t(calculEnCours() ? 'revenue.computing' : 'revenue.unavailable')
-    for (const sel of ['revenue-received', 'revenue-upcoming', 'revenue-month']) {
+    for (const sel of ['revenue-received', 'revenue-upcoming']) {
       const x = $(`[data-bind="${sel}"]`); if (x) x.textContent = ''
     }
     const liste = $('[data-list="revenue-rows"]'); if (liste) liste.innerHTML = ''
+    const cartes = $('[data-list="revenue-cards"]'); if (cartes) cartes.innerHTML = ''
     const w = document.querySelector('.rev-tbl-wrap'); if (w) w.hidden = true
     const res = $('[data-bind="revenue-reserves"]'); if (res) res.hidden = true
   }
@@ -1064,7 +1089,6 @@ function renderRevenus () {
   $('[data-bind="revenue-upcoming"]').textContent = toutRefuse ? '' : euros(T.a_venir_cents, devise)
   // Le mois SERVI, pas le mois demande : l'endpoint retombe sur le mois courant
   // si la valeur recue est hors forme, et l'ecran doit dire ce qu'il montre.
-  $('[data-bind="revenue-month"]').textContent = moisEnClair(rev.mois || (etat.ecran && etat.ecran.mois))
   // ⚠ LE LIBELLE DE LA NAVIGATION DIT LE MOIS SERVI, pas le mois demande. Si le
   // serveur retombe sur le mois courant — un `?mois=` malforme, par exemple —
   // les fleches et le chiffre doivent parler de la MEME periode, sinon l'hote
@@ -1111,7 +1135,7 @@ function renderRevenus () {
   // revenu ferait sauter les lignes d'un mois a l'autre, et l'hote cherche son
   // logement par son nom.
   const parBien = rev.par_bien || {}
-  $('[data-list="revenue-rows"]').innerHTML = (etat.biens || []).map(b => {
+  const lignesRev = (etat.biens || []).map(b => {
     // ⚠ LA CLE EST MAINTENANT L'UUID DU BIEN, ET C'EST UN RENVERSEMENT ASSUME
     // (27 octobre 2026, architecture decidee par Thierry). Jusqu'ici l'endpoint
     // groupait par `bookings_snapshot.property_id`, c'est-a-dire la cle
@@ -1146,7 +1170,9 @@ function renderRevenus () {
       // Aucun sejour range ce mois-ci pour ce bien. C'est un FAIT — zero euro
       // encaisse — et non une absence de donnee : le bien a ete lu, sa ligne
       // simplement ne porte rien.
-      return `<tr>
+      const zero = `<span class="num small">${esc(euros(0, devise))}</span>`
+      return {
+        tr: `<tr>
         <th scope="row" class="rev-tbl__bien">
           <span class="rev-tbl__bien-int">
             ${photo}
@@ -1154,10 +1180,18 @@ function renderRevenus () {
             <span class="caption muted" data-i18n="revenue.none"></span>
           </span>
         </th>
-        <td class="rev-tbl__num"><span class="num small">${esc(euros(0, devise))}</span></td>
-        <td class="rev-tbl__num"><span class="num small">${esc(euros(0, devise))}</span></td>
-        <td class="rev-tbl__num"><span class="num small">${esc(euros(0, devise))}</span></td>
-      </tr>`
+        <td class="rev-tbl__num">${zero}</td>
+        <td class="rev-tbl__num">${zero}</td>
+        <td class="rev-tbl__num">${zero}</td>
+      </tr>`,
+        carte: `<li class="rev-carte">
+        <div class="rev-carte__tete">
+          <span class="rev-carte__bien">${photo}<span class="rev-tbl__nom">${nom}</span></span>
+          <strong class="num rev-carte__total">${esc(euros(0, devise))}</strong>
+        </div>
+        <p class="caption muted" data-i18n="revenue.none"></p>
+      </li>`
+      }
     }
     const part = T.total_cents > 0 ? Math.round((d.total_cents / T.total_cents) * 100) : 0
     // La barre : plein = recu, hachure = a venir. Sa largeur est la PART du
@@ -1225,22 +1259,59 @@ function renderRevenus () {
       ? `<span class="caption muted">${esc(t('revenue.unavailable'))}</span>`
       : `<span class="num small">${esc(euros(cents, devise))}</span>`
 
-    return `<tr>
+    // ⚠ `--recu` EST UN NOMBRE NU, PAS UN POURCENTAGE, et c'est LA cause du
+    // constat 2 de Thierry (« un mois entierement recu s'affiche hachure »).
+    // La couche pleine fait
+    // `inline-size: calc(var(--part) * var(--recu) / 100)` : avec `--recu: 100%`
+    // cela donne `calc(50% * 100% / 100)`, c'est-a-dire un POURCENTAGE MULTIPLIE
+    // PAR UN POURCENTAGE — invalide en CSS. La declaration tombe en silence, la
+    // couche pleine n'a jamais eu de largeur, et SEULES LES HACHURES
+    // s'affichaient, sur tous les mois et tous les biens depuis la livraison.
+    // Rien ne pouvait le voir : aucune assertion ne lit une largeur calculee,
+    // et le pourcentage s'ecrivait « correctement » dans l'attribut.
+    const barre = `<span class="revenue-bar" style="--part: ${part}%; --recu: ${partRecue}" aria-hidden="true"></span>`
+    const detail = toutRefuse
+      ? esc(t('revenue.unavailable'))
+      : esc(t('revenue.split', {
+        recu: euros(d.recu_cents, devise), avenir: euros(d.a_venir_cents, devise)
+      }))
+    const chips = marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''
+    return {
+      tr: `<tr>
       <th scope="row" class="rev-tbl__bien">
         <span class="rev-tbl__bien-int">
           ${photo}
           <span class="rev-tbl__nom">${nom}</span>
           <span class="caption muted">${esc(t('revenue.stays', { n: d.sejours }))}</span>
-          <span class="revenue-bar" style="--part: ${part}%; --recu: ${partRecue}%" aria-hidden="true"></span>
-          ${marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''}
+          ${barre}
+          ${chips}
         </span>
       </th>
       <td class="rev-tbl__num">${cellule(d.recu_cents, toutRefuse)}</td>
       <td class="rev-tbl__num">${cellule(d.a_venir_cents, toutRefuse)}</td>
       <td class="rev-tbl__num">${montant}</td>
-    </tr>`
-  }).join('')
+    </tr>`,
+      // ⚠ LA CARTE GARDE LE COMPTE DE SEJOURS, que la demande de Thierry ne
+      // mentionnait pas (« nom + total sur une ligne, barre, x recus · y a
+      // venir »). C'est la regle « LE MOBILE SUIT L'ORDINATEUR » : le tableau
+      // le porte, et le retirer au telephone serait une fonction perdue par
+      // omission. Il tient sur la meme ligne que le detail, en legende.
+      carte: `<li class="rev-carte">
+      <div class="rev-carte__tete">
+        <span class="rev-carte__bien">${photo}<span class="rev-tbl__nom">${nom}</span></span>
+        <strong class="num rev-carte__total">${montant}</strong>
+      </div>
+      ${barre}
+      <p class="caption muted">${esc(t('revenue.stays', { n: d.sejours }))} · ${detail}</p>
+      ${chips}
+    </li>`
+    }
+  })
+  $('[data-list="revenue-rows"]').innerHTML = lignesRev.map(l => l.tr).join('')
+  const carteList = $('[data-list="revenue-cards"]')
+  if (carteList) carteList.innerHTML = lignesRev.map(l => l.carte).join('')
   I18n.apply($('[data-list="revenue-rows"]'))
+  if (carteList) I18n.apply(carteList)
   // ⚠ UN `thead` SANS RANGEE AFFICHERAIT QUATRE COLONNES VIDES. Le tableau se
   // masque donc avec son contenu — ce que la liste de `div` n'avait pas besoin
   // de faire, et qui est le prix de la forme tabulaire.
@@ -1252,8 +1323,14 @@ function renderRevenus () {
   // mesure ce que le banc ne fournit pas — la premiere, c'etait `classList` sur
   // le bandeau. La regle est la meme : si l'information est deja dans l'etat,
   // on la lit la, et le rendu ne depend plus de ce que le double imite.
+  const sansBien = !(etat.biens || []).length
   const wrap = document.querySelector('.rev-tbl-wrap')
-  if (wrap) wrap.hidden = !(etat.biens || []).length
+  if (wrap) wrap.hidden = sansBien
+  // ⚠ LES DEUX FORMES SE MASQUENT ENSEMBLE. C'est la media query qui choisit
+  // laquelle s'affiche ; `hidden` dit s'il y a quelque chose a afficher. Les
+  // confondre laisserait la liste du telephone visible sur un compte sans
+  // logement, la ou le tableau disparait.
+  if (carteList) carteList.hidden = sansBien
 }
 
 // Le mois, en clair et dans la langue de l'hote. « 2026-11 » -> « novembre 2026 ».
