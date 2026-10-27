@@ -82,7 +82,7 @@ create index if not exists
 -- collees dans ce depot.
 --
 -- ATTENDU, REQUETE A : une ligne, `colonnes = 1`.
--- ATTENDU, REQUETE B : une ligne, `index = 1`.
+-- ATTENDU, REQUETE B : une ligne, `index_pose = 1`.
 -- Un 0 des deux cotes = le collage n'a pas pris.
 
 select count(*) as colonnes
@@ -92,7 +92,7 @@ select count(*) as colonnes
    and column_name = 'derive_raw_hash';
 
 
-select count(*) as index
+select count(*) as index_pose
   from pg_indexes
  where schemaname = 'public'
    and indexname = 'bookings_snapshot_derive_hash_idx';
