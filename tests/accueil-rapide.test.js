@@ -611,7 +611,16 @@ function ouvrirAujourdhui (options = {}) {
     // ⚠ `date` REND QUELQUE CHOSE. Elle rendait '' : la date du titre, posee a
     // l'etape 1, s'ecrivait donc vide, et aucun test ne pouvait distinguer
     // « affichee » de « pas encore ». Un double qui rend du vide ne mesure rien.
-    t: (k) => k, date: () => 'LE-JOUR', time: () => '', money: () => '', pct: () => '',
+    // ⚠ `money` REND LE NOMBRE, ET PLUS LA CHAINE VIDE. Ce fichier nommait
+    // lui-meme l'angle mort : « un test qui aurait compare le texte a 0,00 €
+    // serait vert dans les deux cas ». Tant que le double rendait `''`, aucune
+    // assertion ne pouvait juger un MONTANT — et la recette du 27 octobre 2026
+    // a trouve a l'oeil ce qu'aucun test ne pouvait voir : des lignes qui
+    // sommaient a 936 sous un bandeau disant 935.
+    // On rend le nombre NU plutot qu'un montant formate : le format appartient
+    // a `Intl`, qu'on ne teste pas ici, et un nombre s'additionne.
+    t: (k) => k, date: () => 'LE-JOUR', time: () => '', pct: () => '',
+    money: (n) => String(n),
     apply () {},
     // Formate reellement : sans cela, rien ne peut asserter la note affichee.
     num: (n) => String(n),
@@ -1835,4 +1844,65 @@ test("LE TEST QUI COMPTE : la carte ne dit pas DEUX FOIS que le montant est inco
   chiffree.interne.renderRevenus()
   const c2 = chiffree.html('[data-list="revenue-cards"]').split('</li>')[0]
   assert.ok(!/<strong[^>]*>\s*<strong/.test(c2), `un strong est imbrique dans un strong : ${c2}`)
+})
+
+test("LE TEST QUI COMPTE : les lignes affichees SOMMENT au chiffre affiche du bandeau", () => {
+  // ⚠ RECETTE DE THIERRY EN PRODUCTION, 27 octobre 2026 : « A venir octobre
+  // affiche 935 € alors que les lignes font 168 + 160 + 608 = 936 ». Ce n'etait
+  // pas un calcul faux, c'etait de l'arithmetique : `I18n.money` arrondit a
+  // l'euro, et arrondir chacun puis sommer ne donne pas arrondir la somme.
+  //   167,68 + 159,54 + 608,04 = 935,26
+  //   arrondis un par un : 168 + 160 + 608 = 936
+  //   arrondi de la somme :                  935
+  // Les chiffres ci-dessous sont EXACTEMENT ceux de la production ce jour-la.
+  const biens = [
+    { id: 'uuid-1', provider_property_id: '1', name: 'Coeur de vie 23', currency: 'EUR' },
+    { id: 'uuid-2', provider_property_id: '2', name: 'La bulle', currency: 'EUR' },
+    { id: 'uuid-3', provider_property_id: '3', name: 'Ofuro Futari', currency: 'EUR' }
+  ]
+  const p = bancRevenus({
+    mois: '2026-10',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 1, a_venir_cents: 16768, total_cents: 16768 }),
+      'uuid-2': parBien({ sejours: 1, a_venir_cents: 15954, total_cents: 15954 }),
+      'uuid-3': parBien({ sejours: 1, a_venir_cents: 60804, total_cents: 60804 })
+    },
+    total: parBien({ sejours: 3, a_venir_cents: 93526, total_cents: 93526 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  }, biens)
+  p.interne.renderRevenus()
+
+  // Le double de `I18n.money` rend le NOMBRE : on peut donc l'additionner.
+  const nombres = (html) => (html.match(/>(-?\d+)</g) || []).map(x => Number(x.slice(1, -1)))
+  const lignes = p.html('[data-list="revenue-rows"]')
+  // Colonne « A venir » : la deuxieme cellule de chiffres de chaque rangee.
+  const parRangee = lignes.split('<tr>').slice(1)
+  assert.strictEqual(parRangee.length, 3, 'trois rangees attendues')
+  const aVenir = parRangee.map(r => {
+    const cells = r.match(/<td class="rev-tbl__num">[\s\S]*?<\/td>/g) || []
+    return nombres(cells[1])[0]
+  })
+  const bandeau = Number(p.cache('[data-bind="revenue-upcoming"]').textContent)
+  assert.strictEqual(aVenir.reduce((a, b) => a + b, 0), bandeau,
+    `les lignes font ${aVenir.join(' + ')} = ${aVenir.reduce((a, b) => a + b, 0)} `
+    + `et le bandeau dit ${bandeau} : l hote ne peut pas recouper son propre ecran`)
+  assert.strictEqual(bandeau, 935, 'le bandeau ne dit plus l arrondi du total exact')
+  assert.deepEqual(aVenir, [168, 159, 608],
+    'la repartition au plus fort reste ne donne plus l euro manquant a la plus forte decimale')
+
+  // ⚠ ET DANS L'AUTRE SENS : le total de chaque ligne est la somme de ses deux
+  // colonnes AFFICHEES. Repartir la colonne « Total » separement la ferait
+  // tomber juste en colonne et faux en ligne — un bien afficherait 159 + 0 = 160.
+  for (const r of parRangee) {
+    const cells = r.match(/<td class="rev-tbl__num">[\s\S]*?<\/td>/g) || []
+    const [recu, venir, total] = cells.map(c => nombres(c)[0])
+    assert.strictEqual(recu + venir, total,
+      `une rangee dit ${recu} + ${venir} mais ${total} en total`)
+  }
+
+  // Et le bandeau s'additionne aussi : Total = Recu + A venir, sous les yeux.
+  const bRecu = Number(p.cache('[data-bind="revenue-received"]').textContent)
+  const bTotal = Number(p.cache('[data-bind="revenue-total"]').textContent)
+  assert.strictEqual(bRecu + bandeau, bTotal,
+    `le bandeau dit ${bRecu} + ${bandeau} mais ${bTotal} en total`)
 })

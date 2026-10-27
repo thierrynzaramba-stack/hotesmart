@@ -564,9 +564,26 @@ test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", ()
   assert.ok(iRefus < iLecture,
     'le total est dereference avant que le refus ne soit evalue')
   // Et c'est bien `T` que le bandeau peint, pas `rev.total` en direct.
+  //
+  // ⚠ CETTE ASSERTION CHERCHAIT LITTERALEMENT `euros(T.`, ET LE CORRECTIF
+  // D'ARRONDI DU 27 OCTOBRE 2026 L'A FAIT ROUGIR SUR UN CODE JUSTE : le bandeau
+  // peint desormais `monnaie(recuE + avenirE)`, ou les deux valeurs sont
+  // calculees depuis `T.recu_cents` et `T.a_venir_cents` deux lignes plus haut.
+  // Un test qui epingle la FORME d'un appel se casse au premier remaniement et
+  // ne dit rien de l'intention. On garde donc l'intention, et on l'exige DANS
+  // LES DEUX SENS — ce qui est plus strict que la version d'avant :
+  //   · quelque chose issu de `T` est peint pres du bandeau ;
+  //   · et `rev.total` n'est PLUS relu apres la garde, nulle part.
   const apres = blocRevenus.slice(iLecture)
-  assert.match(apres, /revenue-total[\s\S]{0,400}euros\(T\./,
+  assert.match(apres, /revenue-total[\s\S]{0,600}\bT\./,
     'le bandeau peint autre chose que le total garde')
+  // ⚠ ON SAUTE LA DECLARATION ELLE-MEME : `apres` commence par
+  // `const T = rev.total`, donc la chercher dedans la trouve toujours. Ma
+  // premiere version rougissait sur cette seule occurrence — l'assertion etait
+  // fausse, pas le code.
+  const corps = apres.slice('const T = rev.total'.length)
+  assert.ok(!/\brev\.total\b/.test(corps),
+    'le total est relu depuis `rev` APRES la garde : celle-ci ne protege plus le bandeau')
 })
 
 test("LE TEST QUI COMPTE : un echec de l'appel d'ecran ne re-date pas le cache", () => {
