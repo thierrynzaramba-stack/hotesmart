@@ -2510,3 +2510,106 @@ test("LE TEST QUI COMPTE : le mois courant garde sa COULEUR, pas seulement sa gr
   assert.ok(compose || iFort > iBase,
     'la regle du mois courant est simple ET declaree avant la regle de base : son `fill` perd en silence')
 })
+
+// ─── LES TROIS CONSTATS DE LA RECETTE DU 28 OCTOBRE 2026 ───────────────────
+
+test("LE TEST QUI COMPTE : en vue Annee, le tableau du MOIS est masque", () => {
+  // ⚠ `renderAnnee()` est appele AU MILIEU de `renderRevenus`, et la fin de
+  // `renderRevenus` reaffichait le tableau du mois derriere lui. Thierry voyait
+  // donc, sous la courbe de l'annee, les lignes « aucun versement ce mois-ci ».
+  // Le test APPELLE `renderRevenus` en entier : un test qui n'appellerait que
+  // `renderAnnee` ne verrait jamais le defaut, puisqu'il vient de l'APRES.
+  const p = bancRevenus({
+    mois: '2026-10',
+    par_bien: { 'uuid-1': parBien({ sejours: 0, total_cents: 0, recu_cents: 0, a_venir_cents: 0 }) },
+    total: parBien({ sejours: 0, total_cents: 0, recu_cents: 0, a_venir_cents: 0 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.etat.vueRevenus = 'annee'
+  p.interne.etat.anneeRevenus = 2026
+  p.interne.etat.anneeEtat = 'ok'
+  p.interne.etat.aujourdHui = '2026-10-15'
+  p.interne.etat.annee = { total: { '2026-05': mo(10000) }, par_bien: {}, hors_biens: {} }
+  p.interne.renderRevenus()
+  // ⚠ LES DEUX FORMES, et c'est la regle « le mobile suit l'ordinateur » : la
+  // liste de cartes EST le tableau du mois a moins de 561 px. Ma premiere
+  // version ne jugeait que le `<table>` — mesure : la mutation qui laissait la
+  // liste telephone visible passait au VERT. Le telephone aurait garde sous la
+  // courbe de l'annee les cartes « aucun versement ce mois-ci ».
+  // ⚠ ON INTERROGE LES SELECTEURS QUE LA PAGE UTILISE, PAS DES EQUIVALENTS. Le
+  // banc cle ses doubles sur la CHAINE du selecteur : `.rev-liste:not(…)` et
+  // `[data-list="revenue-cards"]` designent le meme element dans un navigateur,
+  // mais rendent deux doubles DIFFERENTS ici. Ma premiere version lisait le
+  // mauvais — mesure : la mutation qui laissait la liste telephone visible
+  // passait au vert.
+  const formesDuMois = ['.rev-tbl-wrap:not(.rev-an-tbl)', '[data-list="revenue-cards"]']
+  for (const sel of formesDuMois) {
+    assert.strictEqual(p.cache(sel).hidden, true,
+      `${sel} reste affiche sous la courbe de l annee`)
+  }
+  // Et les deux reviennent quand on repasse au mois.
+  p.interne.etat.vueRevenus = 'mois'
+  p.interne.renderRevenus()
+  for (const sel of formesDuMois) {
+    assert.strictEqual(p.cache(sel).hidden, false,
+      `${sel} ne revient pas quand on repasse en vue Mois`)
+  }
+})
+
+test("LE TEST QUI COMPTE : une annee SANS AUCUNE ligne rend « — », pas « 0 € »", () => {
+  // ⚠ CONSTAT 2 DE LA RECETTE : « Studio Centre : colonne 2025 = 0 € alors
+  // qu il n a aucun sejour en 2025. » L endpoint ne rend que les mois qui
+  // portent quelque chose : l ABSENCE DE CLE est l information. « 0 € »
+  // affirme un encaissement nul ; le logement n existait pas.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'Studio Centre' }],
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    }
+  })
+  const lignes = p.cache('[data-list="revenue-annee-lignes"]').innerHTML
+  const cellules = [...lignes.matchAll(/<td class="rev-tbl__num[^"]*">([^<]*)</g)].map(m => m[1])
+  assert.ok(cellules.length >= 2, `pas assez de cellules rendues : ${lignes.slice(0, 200)}`)
+  assert.ok(!/0/.test(cellules[1]),
+    `la colonne N-1 affiche « ${cellules[1] }» : un faux zero pour une annee sans aucune ligne`)
+  assert.match(cellules[1], /—/,
+    `la colonne N-1 affiche « ${cellules[1]} » au lieu d un tiret`)
+  // ⚠ ET LE MOTIF EST A COTE, sur la meme ligne : un tiret seul ne dit rien.
+  assert.match(lignes, /revenue\.annee_nouveau/,
+    'le tiret de la colonne N-1 n est explique par aucun motif sur sa ligne')
+  // Au niveau du COMPTE, le motif ne peut pas vivre dans une colonne : il
+  // descend dans les reserves.
+  assert.match(p.cache('[data-bind="revenue-annee-reserves"]').textContent, /revenue\.annee_sans_n1/,
+    'l en-tete rend « — » sans qu aucune reserve ne dise pourquoi')
+})
+
+test("LE TEST QUI COMPTE : un mois SANS RIEN D ENCAISSE se trace en POINTILLE", () => {
+  // ⚠ CONSTAT 3 DE LA RECETTE : « octobre (0 € recu, 480 € a venir) se trace
+  // en plein ». Ma premiere version coupait le trait au MOIS COURANT, donc le
+  // mois courant entrait dans le plein — l ecran affirmait « encaisse » un
+  // argent qui n est que reserve. La frontiere suit la DONNEE : le plein
+  // s arrete au dernier mois qui a vraiment recu quelque chose.
+  const recu = (t) => ({ sejours: 1, total_cents: t, recu_cents: t, a_venir_cents: 0, bruts: 0, sans_montant: 0 })
+  const aVenir = (t) => ({ sejours: 1, total_cents: t, recu_cents: 0, a_venir_cents: t, bruts: 0, sans_montant: 0 })
+  const p = bancAnnee({
+    aujourdHui: '2026-10-15',
+    annee: {
+      total: { '2026-09': recu(30000), '2026-10': aVenir(48000), '2026-11': aVenir(20000) },
+      par_bien: {}, hors_biens: {}
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const plein = (svg.match(/<path d="([^"]*)"[^>]*stroke="var\(--ink\)"[^>]*stroke-width="2\.5"/) || [])[1] || ''
+  const pointille = (svg.match(/<path d="([^"]*)"[^>]*stroke-dasharray/) || [])[1] || ''
+  assert.ok(pointille, 'aucun trait pointille : le deja reserve ne se distingue pas')
+  // Le plein s arrete a septembre : il porte UN point, pas trois.
+  const ptsPlein = (plein.match(/[ML]/g) || []).length
+  assert.strictEqual(ptsPlein, 1,
+    `le trait plein porte ${ptsPlein} points : octobre (0 € recu) y est entre alors qu il n est que reserve`)
+  // Le pointille part de septembre et couvre octobre et novembre : trois points.
+  const ptsPointille = (pointille.match(/[ML]/g) || []).length
+  assert.strictEqual(ptsPointille, 3,
+    `le trait pointille porte ${ptsPointille} points : il ne rejoint pas le dernier mois encaisse`)
+})
