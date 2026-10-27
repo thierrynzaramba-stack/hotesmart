@@ -434,3 +434,41 @@ test('LE TEST QUI COMPTE : le plafond atteint est ANNONCE, pas tu', async () => 
   assert.ok(errors.some(e => /plafond/.test(e.error || '')),
     'le plafond atteint ne remonte pas dans results.errors')
 })
+
+test('LE TEST QUI COMPTE : l attente d une migration se LIT dans le bilan', async () => {
+  // ⚠ CE TEST MANQUAIT, ET SON ABSENCE A LAISSE PASSER UNE AFFIRMATION FAUSSE.
+  // Le commentaire du module disait « `skipped` remonte dans le bilan du cron ».
+  // Il ne remontait nulle part : `api/cron.js` appelle
+  // `await chrono.mesure('revenus_derives', () => rattraperRevenusDerives(...))`
+  // SANS AFFECTATION, donc la valeur rendue est jetee, et `lib/metriques-cron.js`
+  // annonce lui-meme « OBSERVATION SEULE ». Seule une ligne de `console.error`
+  // subsistait. Releve par la session chef de file avant le merge vers main.
+  //
+  // L'attente ne doit PAS reveiller le fondateur (ce cron passe toutes les
+  // 5 minutes), mais elle doit se LIRE. D'ou les deux assertions ensemble :
+  // rien dans `errors`, quelque chose dans le bilan.
+  const results = { errors: [] }
+  const { client } = faux({
+    lignes: [SEJOUR()],
+    erreurLecture: { code: '42703', message: 'column bookings_snapshot.derive_raw_hash does not exist' }
+  })
+  const r = await rattraperRevenusDerives(results, { supabase: client, now: () => QUATRE_H_HIVER })
+  assert.equal(r.skipped, 'migration_absente')
+  assert.deepEqual(results.errors, [], 'une migration en attente reveille le fondateur')
+  assert.equal(results.revenusDerivesEnAttente, 'migration_absente',
+    'l attente ne laisse AUCUNE trace dans le bilan : seule une ligne de log, donc invisible')
+})
+
+test("RECENSEMENT : api/cron.js passe `results` au rattrapage ET rend `results`", () => {
+  // ⚠ LE TEST CI-DESSUS NE TIENT QUE SI DEUX CHOSES RESTENT VRAIES CHEZ
+  // L'APPELANT, et c'est precisement l'appelant que ma contre-epreuve d'hier
+  // n'a pas mute. On ne l'EXECUTE pas — `api/cron.js` ouvre des clients et
+  // appelle vingt taches — on lit sa SOURCE, ce qui suffit pour les deux faits.
+  const fs = require('node:fs')
+  const path = require('node:path')
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'cron.js'), 'utf8')
+  assert.match(src, /rattraperRevenusDerives\(results\b/,
+    'le rattrapage ne recoit plus `results` : il n a plus ou ecrire son attente')
+  assert.match(src, /res\.json\(results\)/,
+    'le bilan n est plus rendu en entier : la cle de l attente n arriverait nulle part')
+})
