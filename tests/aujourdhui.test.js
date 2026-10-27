@@ -225,7 +225,14 @@ test('LE TEST QUI COMPTE : l ecran ne convertit plus la note — plus de `noteSu
     'une seconde conversion a l ecran reintroduirait le double arrondi')
   const source = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
   assert.doesNotMatch(source, /noteSur5/, 'la page ne doit plus convertir')
-  assert.match(source, /note_sur_5/, 'elle affiche la note telle qu elle descend')
+  // ⚠ LA PAGE NE NOMME PLUS `note_sur_5` DEPUIS L'ETAPE 4, et ce n'est pas une
+  // perte : elle le nommait pour l'ETOILE de chaque carte de logement, et les
+  // cartes partent avec le bloc « Vos logements » (inventaire I28). La note
+  // s'affiche maintenant par le module partage `shared/avis-recents.js`, qui
+  // lit `note_sur_5` et le rend — teste chez lui, `tests/avis-recents-dom.test.js`.
+  // Ce qui compte ici est l'invariant : AUCUNE conversion a l'ecran.
+  assert.match(source, /avis-recents/,
+    'la page ne passe plus par le module qui rend la note — qui la rend, alors ?')
 })
 
 test('douzeMoisComplets : les 12 mois qui precedent le mois en cours', async () => {
@@ -396,50 +403,38 @@ function contexteDeRendu (dom) {
   }
 }
 
-test('LE TEST QUI COMPTE (M2) : le bandeau de l accueil affiche la note TELLE QU ELLE DESCEND', async () => {
-  const dom = new JSDOM('<!doctype html><body><span data-bind="rating"></span><span data-bind="kpi-rating" hidden></span></body>')
-  const ctx = contexteDeRendu(dom)
-  ctx.n = { note_sur_5: 4.7, notes: 69 }
-  ctx.visible = false
-  const vm = require('node:vm')
-  vm.createContext(ctx)
-  vm.runInContext(expressionDeLaPage('$(\'[data-bind="rating"]\').innerHTML = n.', 3), ctx)
-  const zone = dom.window.document.querySelector('[data-bind="rating"]')
-  assert.match(zone.textContent, /4,7/, 'la note descend deja sur 5 : l ecran l affiche sans la diviser')
-  assert.doesNotMatch(zone.textContent, /2,4|9,4/, 'ni redivisee, ni laissee sur 10')
-  assert.match(zone.textContent, /n=69/, 'le nombre d avis notes accompagne la note')
-  assert.ok(zone.querySelector('[data-icone="i-review"]'), 'l etoile est une icone du sprite')
-
-  // Sans note : on ne dit pas « 0 », on dit le compte a zero.
-  ctx.n = { note_sur_5: null, notes: 0 }
-  vm.runInContext(expressionDeLaPage('$(\'[data-bind="rating"]\').innerHTML = n.', 3), ctx)
-  assert.doesNotMatch(zone.textContent, /0,0/)
-  assert.match(zone.textContent, /n=0/)
+// ⚠ LE BANDEAU « Note · 30 j » EST RETIRE A L'ETAPE 1, ET SON TEST AVEC LUI.
+// L'invariant qu'il gardait — « la note descend DEJA sur 5, l'ecran ne la
+// redivise pas, sinon Colomiers affiche 4,8 au lieu de 4,7 » — n'est pas perdu :
+// le test suivant le tient sur l'etoile de CHAQUE logement, qui reste a
+// l'ecran, et il reviendra sur l'en-tete du bloc « Derniers avis » a l'etape 2.
+// Le supprimer sans dire ou l'invariant continue de vivre serait exactement le
+// retrait par omission que l'inventaire de ce lot existe pour empecher.
+test('LE TEST QUI COMPTE (M2) : la page ne FORMATE plus aucune note elle-meme', async () => {
+  // ⚠ CE TEST GARDAIT L'ETOILE DE CHAQUE CARTE DE LOGEMENT, qui n'existe plus :
+  // les cartes partent avec le bloc « Vos logements » a l'etape 4 (inventaire
+  // I28). Il tenait trois choses, et voici ou chacune est passee :
+  //   · « 4,9 et non 2,5 » — la note n'est pas reconvertie : tenu ci-dessus
+  //     (`noteSur5` absente de la page) et par le module partage ;
+  //   · « un bien sans note n'affiche pas d'etoile a zero » — tenu dans
+  //     `shared/avis-recents.js` et teste chez lui ;
+  //   · « data-icone="i-review" » — l'icone de l'etoile, qui vit maintenant
+  //     dans le module.
+  //
+  // Ce qui reste a garder sur la PAGE est l'invariant de frontiere : elle ne
+  // formate aucune note, donc aucun arrondi ne peut y naitre. Un deuxieme
+  // arrondi est exactement ce qui faisait afficher 4,8 a Colomiers la ou le
+  // calcul juste donne 4,7.
+  const source = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const code = source.split('\n').filter(l => !l.trim().startsWith('//') && !l.trim().startsWith('<!--')).join('\n')
+  for (const interdit of [/noteSur5/, /\/\s*10\b/, /toFixed\s*\(\s*1\s*\)/]) {
+    assert.doesNotMatch(code, interdit,
+      `la page formate ou reconvertit une note : ${interdit}`)
+  }
+  // Et la note qu'elle garde en memoire est celle du serveur, telle quelle.
+  assert.match(code, /etat\.noteGlobale = lu \? lu\.global : null/,
+    'la note globale n est plus prise telle quelle du serveur')
 })
-
-test('LE TEST QUI COMPTE (M2) : l etoile de CHAQUE logement affiche la meme note, sans la reconvertir', async () => {
-  const dom = new JSDOM('<!doctype html><body></body>')
-  const ctx = contexteDeRendu(dom)
-  const vm = require('node:vm')
-  vm.createContext(ctx)
-  // ⚠ ENVELOPPE DANS UN BLOC : `const` ne se redeclare pas dans un meme
-  // contexte vm, et on execute l expression plusieurs fois.
-  const source = '{ ' + expressionDeLaPage('const etoile = note && note.', 2) + '\n globalThis.__etoile = etoile }'
-  ctx.note = { note_sur_5: 4.9, notes: 332 }
-  vm.runInContext(source, ctx)
-  assert.match(ctx.__etoile, /4,9/)
-  assert.match(ctx.__etoile, /data-icone="i-review"/)
-  // Un bien sans note n affiche pas d etoile — pas une etoile a zero.
-  ctx.note = { note_sur_5: null, notes: 0 }
-  vm.runInContext(source, ctx)
-  assert.equal(ctx.__etoile, '')
-  ctx.note = null
-  vm.runInContext(source, ctx)
-  assert.equal(ctx.__etoile, '')
-})
-
-// ─── Les correctifs de la review max du lot (b) ───────────────────────────────
-
 test("LE TEST QUI COMPTE : la banniere de surreservation est RENDUE, pas seulement lue", () => {
   // ⚠ LE CONSTAT LE PLUS GRAVE DE LA REVIEW. En deplacant la lecture des
   // alarmes vers l'appel d'ecran, j'ai emporte l'appel de rendu avec elle :
@@ -491,8 +486,16 @@ test("LE TEST QUI COMPTE : l'acquittement retire l'alarme et REND, sans relire l
     'l alarme acquittee n est pas retiree de l etat')
   assert.match(bloc, /etat\.ecran\.alarmes\s*=\s*etat\.ecran\.alarmes\.filter/,
     'la reponse gardee en etat garde l alarme : un rechargement partiel la ferait revenir')
-  assert.match(bloc, /renderAlarmes\(\);\s*renderTitre\(\)/,
+  // ⚠ `renderTitre()` N'EST PLUS DANS CETTE PAIRE, ET CE N'EST PAS UN OUBLI.
+  // L'ancienne ligne resume comptait l'alarme dans son « N a traiter » : la
+  // retirer de l'etat sans re-rendre le titre laissait un compte faux. Depuis
+  // l'etape 1, le seul compte de l'ecran est celui de « A valider », qui compte
+  // les TACHES — une alarme acquittee ne le change pas. Re-rendre le titre
+  // serait du bruit, et le laisser ici ferait croire a un lien qui n'existe plus.
+  assert.match(bloc, /renderAlarmes\(\)/,
     'rien ne re-rend apres l acquittement')
+  assert.ok(!/renderTitre/.test(bloc),
+    'renderTitre a ete retire a l etape 1 : son appel ici ne peut etre qu un reste')
 })
 
 test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", () => {
@@ -510,11 +513,60 @@ test("LE TEST QUI COMPTE : l'affichage instantane n'affirme aucun faux zero", ()
   assert.ok(!/renderTaches\(\)/.test(bloc),
     'le premier affichage rend « A valider » : la regle des taches a besoin des sejours, '
     + 'et les taches ne sont plus dans le cache (elles portent le code d acces)')
-  assert.match(bloc, /renderCompteurs\(\); renderBiens\(\)/,
-    'le premier affichage ne rend plus rien : le cache ne sert alors a rien')
-  // Et la ligne du bien n'affirme « aucune arrivee » que si on a lu les sejours.
-  assert.match(html, /etat\.menagesOk === true\s*\n?\s*\?\s*\(e\.prochaineArrivee/,
-    'la carte du bien affirme « Aucune arrivee prevue » sans avoir lu les sejours')
+  // ⚠ LA LISTE, PAS LA SEQUENCE. Ma premiere version exigeait la chaine
+  // « renderCompteurs(); renderBiens() » au caractere : ajouter un rendu
+  // legitime entre les deux — les derniers avis, etape 2 — faisait rougir un
+  // test qui n'avait rien a dire sur cet ajout. Ce qui compte n'est pas
+  // l'ordre des appels, c'est QUELS blocs le cache a le droit de peindre :
+  // ceux dont il porte vraiment les donnees. Un rendu de plus ici doit etre un
+  // choix, et c'est cette assertion qui oblige a le declarer.
+  const rendus = [...bloc.matchAll(/\b(render[A-Za-z]+)\(\)/g)].map(m => m[1]).sort()
+  assert.deepEqual(rendus, ['renderCompteurs', 'renderDerniersAvis', 'renderRevenus'],
+    'le premier affichage peint autre chose que ce que le cache porte : ' + rendus.join(', ')
+    + '. Les sejours n y sont pas (ils viennent de /api/menages), les taches et les '
+    + 'alarmes non plus (le cache refuse de les ecrire).')
+  // ⚠ ET LA MEME REGLE, TRANSPOSEE AU BLOC QUI A REMPLACE LES CARTES. L'ancienne
+  // assertion gardait « `etat.menagesOk === true ? (e.prochaineArrivee` » : la
+  // carte d'un bien n'affirmait « Aucune arrivee prevue » qu'apres avoir lu les
+  // sejours. Les cartes partent a l'etape 4 ; la regle, elle, ne part pas —
+  // c'est la meme famille de faux zero, sur une autre donnee.
+  //
+  // Dans « Revenus nets », le faux zero serait un total a 0 € affiche alors que
+  // la lecture a echoue : l'hote lirait « ce mois n'a rien rapporte », un FAIT.
+  // Le bloc doit donc refuser de peindre un total sans `rev.total`.
+  assert.match(html, /if \(!rev \|\| !rev\.total\)/,
+    'le bloc revenus peint un total sans verifier qu il a ete lu')
+  assert.match(html, /revenue\.unavailable/,
+    'une lecture de revenus en echec s afficherait comme un mois a zero euro')
+  // Et l'ordre compte : le refus AVANT toute peinture de chiffre.
+  //
+  // ⚠ L'INVARIANT EST « LE TOTAL N'EST PAS DEREFERENCE AVANT SA GARDE », et
+  // cette assertion a ete reformulee DEUX FOIS le 26 octobre 2026 :
+  //
+  //   · elle cherchait d'abord la chaine
+  //     `$('[data-bind="revenue-total"]').textContent = euros` AU CARACTERE.
+  //     Ajouter la garde « tous les sejours non calculables » a change la forme
+  //     de l'affectation sans toucher a l'invariant, et le test a rougi en
+  //     annoncant « le total est peint avant le refus » — ce qui etait FAUX.
+  //     C'est le defaut que le test voisin declare avoir corrige (« LA LISTE,
+  //     PAS LA SEQUENCE ») : il vivait encore ici.
+  //   · puis j'ai cherche le NŒUD `revenue-total`, et c'etait faux aussi : sa
+  //     premiere occurrence est dans `videDuTotal()`, la fonction de repli que
+  //     le refus APPELLE. Elle est donc definie avant lui, par construction.
+  //
+  // Ce qui ne peut pas se contourner : `rev.total` est lu dans une variable
+  // APRES la garde, et c'est cette variable que le bandeau peint.
+  const blocRevenus = (html.match(/function renderRevenus[\s\S]*?\n\}/) || [''])[0]
+  const iRefus = blocRevenus.indexOf('if (!rev || !rev.total)')
+  const iLecture = blocRevenus.indexOf('const T = rev.total')
+  assert.ok(iRefus > -1, 'le refus a disparu de renderRevenus')
+  assert.ok(iLecture > -1, 'le total n est plus lu dans `T` : ce test ne mesure plus rien')
+  assert.ok(iRefus < iLecture,
+    'le total est dereference avant que le refus ne soit evalue')
+  // Et c'est bien `T` que le bandeau peint, pas `rev.total` en direct.
+  const apres = blocRevenus.slice(iLecture)
+  assert.match(apres, /revenue-total[\s\S]{0,400}euros\(T\./,
+    'le bandeau peint autre chose que le total garde')
 })
 
 test("LE TEST QUI COMPTE : un echec de l'appel d'ecran ne re-date pas le cache", () => {
@@ -539,39 +591,62 @@ test("LE TEST QUI COMPTE : un echec de l'appel d'ecran ne re-date pas le cache",
     'l age repasse a « frais » alors que les donnees viennent du cache')
 })
 
-test("LE TEST QUI COMPTE : le sous-titre n'affirme « 0 arrivee · 0 depart » qu'apres avoir LU", () => {
-  // ⚠ LE PREMIER CORRECTIF A GARDE LA BRANCHE DU CACHE ET LES CARTES DE BIENS,
-  // ET A OUBLIE LE TITRE. `renderEvenements` etait garde (il affiche
-  // « Lecture impossible »), `renderBiens` l'a ete par ce lot — mais
-  // `renderTitre` comptait toujours sur `etat.bookings`, vide quand
-  // `/api/menages` echoue. L'hote lisait donc « indisponible » dans la liste
-  // des evenements ET « 0 arrivee · 0 depart · rien a faire » dans le titre du
-  // MEME ecran ; et « rien a faire » alors qu'une surreservation non acquittee
-  // pouvait exister. Le KB de cette page, ecrit par ce lot, l'interdit
-  // nommement.
+test("LE TEST QUI COMPTE : le compte de « A valider » ne s'affiche qu'APRES avoir LU", () => {
+  // ⚠ CE TEST A CHANGE DE CIBLE A L'ETAPE 1, ET PAS D'INVARIANT. Il gardait la
+  // ligne resume — « {date} · N arrivees · N departs · N a traiter » —, retiree
+  // le 24 octobre 2026 sur decision de Thierry. Ce qu'elle portait de precieux
+  // n'etait pas la phrase : c'etait la regle « un compte est un FAIT, et il
+  // demande d'avoir lu ». Le compte survit a cote du titre « A valider », donc
+  // la regle le suit.
+  //
+  // L'histoire, gardee parce qu'elle se rejouera : `renderEvenements` etait
+  // garde, `renderBiens` l'a ete ensuite, et `renderTitre` comptait toujours
+  // sur `etat.bookings` — vide quand `/api/menages` echoue. L'hote lisait
+  // « indisponible » dans la liste ET « 0 arrivee · 0 depart » dans le titre du
+  // MEME ecran.
   const html = lire('pages/aujourdhui.html')
-  const bloc = (html.match(/function renderTitre[\s\S]*?\n\}/) || [''])[0]
-  assert.ok(bloc, 'renderTitre a disparu')
-  assert.match(bloc, /etat\.menagesOk === true/,
-    'le sous-titre compte les arrivees sans savoir si les sejours ont ete lus')
-  assert.match(bloc, /today\.counts_unavailable/,
-    'sans les sejours, le sous-titre doit le DIRE, pas afficher zero')
-  // Les taches et les alarmes, elles, ne dependent pas des sejours : elles
-  // restent comptees dans les deux cas.
-  assert.match(bloc, /tachesVisibles\(\)\.length \+ etat\.alarmes\.length/,
-    'les taches et les alarmes ne sont plus comptees quand les sejours manquent')
+  const bloc = (html.match(/function renderTaches[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, 'renderTaches a change de forme')
+  // La garde est en tete de la fonction : sans elle, le compte s'ecrirait
+  // meme quand la lecture des taches a echoue.
+  const iGarde = bloc.indexOf('if (!etat.tachesOk)')
+  const iCompte = bloc.indexOf('validate-count')
+  assert.ok(iGarde >= 0, 'le compte ne verifie plus que les taches ont ete LUES')
+  assert.ok(iCompte > iGarde,
+    'le compte s ecrit avant la garde : une lecture en echec afficherait un nombre invente')
+  assert.match(bloc, /validate\.count_capped/,
+    'le compte ne porte pas le « + » quand le serveur a plafonne la liste')
+  // Et il ne dit RIEN plutot que « 0 » : un zero a cote d'un titre se lit comme
+  // un fait, et la liste en dessous dit deja « rien a valider ».
+  assert.match(bloc, /visibles\.length\s*\n?\s*\?/,
+    'le compte affiche « 0 » au lieu de se taire')
 })
 
 test("LE TEST QUI COMPTE : des biens ILLISIBLES ne s'affichent pas comme « aucun bien »", () => {
   // L'endpoint rend `null` quand il n'a pas pu lire. `section.hidden = !length`
   // faisait disparaitre la section, les notes et les indicateurs sans
   // explication — en laissant « + Ajouter un bien » visible.
+  // ⚠ TRANSPOSE A `renderRevenus` (etape 4) : le bloc « Vos logements » est
+  // remplace par « Revenus nets », et les TROIS etats que ce test garde sont
+  // repris mot pour mot — lecture en echec, pas encore lue, lue et vide.
   const html = lire('pages/aujourdhui.html')
-  const bloc = (html.match(/function renderBiens[\s\S]*?\n  section\.hidden = !etat\.biens\.length/) || [''])[0]
-  assert.ok(bloc, 'renderBiens a change de forme')
-  assert.match(bloc, /etat\.biens === null/,
+  const bloc = (html.match(/function renderRevenus[\s\S]*?\n  if \(vide\) vide\.hidden = true/) || [''])[0]
+  assert.ok(bloc, 'renderRevenus a change de forme')
+  assert.match(bloc, /!Array\.isArray\(etat\.biens\)/,
     'une lecture de biens en echec est traitee comme une liste vide')
-  assert.match(bloc, /properties\.unavailable/, 'rien ne dit a l hote que la lecture a echoue')
+  assert.match(bloc, /revenue\.unavailable/, 'rien ne dit a l hote que la lecture a echoue')
+
+  // ⚠ ET LE RISQUE JUMEAU, NE A L'ETAPE 1 : « Ajoutez votre premier logement »
+  // sur un compte qui en a quatre. `etat.biens` vaut `[]` tant que l'appel
+  // d'ecran n'a pas repondu ; l'etat vide ne se montre que si la liste a
+  // VRAIMENT ete lue. Le module commun porte la meme garde pour la page
+  // Logements, et pour la meme raison : a l'onboarding, une reconciliation
+  // contre une liste amputee CREE des biens en double chez le canal.
+  assert.match(bloc, /const listeLue = !!\(etat\.ecran && Array\.isArray\(etat\.ecran\.biens\)\)/,
+    'l etat vide ne verifie pas que la liste a ete lue')
+  const iLue = bloc.indexOf('listeLue')
+  const iVide = bloc.indexOf("etatHtml('vide'")
+  assert.ok(iVide > iLue, 'l etat vide s affiche avant de savoir si la liste a ete lue')
 })
 
 test("LE TEST QUI COMPTE : une liste de taches PLAFONNEE s'affiche avec un « + »", () => {
@@ -597,4 +672,175 @@ test("LE TEST QUI COMPTE : au premier affichage, les biens arrivent AVANT les no
   assert.ok(iBiens >= 0 && iNotes >= 0, 'la branche du cache a change de forme')
   assert.ok(iBiens < iNotes,
     'les notes sont chargees avant les biens : leur boucle tourne sur une liste vide')
+})
+
+test('le bloc revenus distingue « calcul en cours » de « non calculable »', () => {
+  // ⚠ UN TEST DE FORME, ET JE L'ASSUME. Le bloc des revenus n'a pas de harnais
+  // DOM dans ce fichier — les trois tests voisins lisent deja le code par
+  // `indexOf`. Ce qui est mesure PAR APPEL, dans
+  // tests/ecran-aujourdhui-isolation.test.js, c'est la DECISION : l'endpoint
+  // refuse de rendre un chiffre quand le calcul n'est pas fini. Ici on verifie
+  // seulement que la page ne reduit pas les deux motifs a un seul mot.
+  //
+  // POURQUOI CA COMPTE : « non calculable » decrit un defaut — il n'y a rien a
+  // attendre. « Calcul en cours » decrit un etat transitoire : les minutes qui
+  // suivent le collage d'une migration, ou une nuit de rattrapage. Afficher le
+  // premier pour le second fait conclure a une panne, et c'est ce qu'un hote
+  // signale au fondateur.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const code = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  assert.match(code, /revenus_calcul_en_cours/,
+    'la page ne lit plus le motif « calcul en cours » : les deux etats se confondent')
+  assert.match(code, /t\(calculEnCours\(\) \? 'revenue\.computing' : 'revenue\.unavailable'\)/,
+    'le total ne choisit plus son motif')
+  // ⚠ ET LES DEUX CLEFS EXISTENT DANS LES TROIS LANGUES, sinon l'ecran
+  // afficherait la clef brute — le defaut que `scripts/i18n-check.js` garde,
+  // verifie ici parce que cette clef est neuve.
+  for (const langue of ['fr', 'en', 'es']) {
+    const dict = JSON.parse(fs.readFileSync(
+      path.join(__dirname, '..', 'shared', 'i18n', `${langue}.json`), 'utf8'))
+    for (const clef of ['revenue.computing', 'revenue.unavailable']) {
+      assert.ok(dict[clef] && String(dict[clef]).trim(),
+        `${langue}.json n a pas de texte pour ${clef}`)
+    }
+    assert.notStrictEqual(dict['revenue.computing'], dict['revenue.unavailable'],
+      `${langue}.json : les deux motifs disent la meme phrase, donc la distinction est perdue`)
+  }
+})
+
+test('LE TEST QUI COMPTE : le decalage de mois tient aux passages d annee', () => {
+  // ⚠ CE TEST EXISTE PARCE QUE JE L'AVAIS DECLARE FAIT SANS L'ECRIRE. Le message
+  // de commit du 27 octobre 2026 annoncait « le decalage est eprouve sur les
+  // passages d'annee dans les deux sens » : il l'etait a la main, dans un
+  // terminal, et rien ne le gardait. Une review l'a releve — c'est le motif
+  // exact du feedback « une affirmation dans un commentaire se lit comme une
+  // mesure et ne rougit jamais ».
+  //
+  // La fonction est pure et fait six lignes : trois assertions la rendent vraie
+  // par la machine. On l'extrait de la page plutot que de la recopier — une
+  // copie divergerait.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const bloc = (html.match(/function moisDecale \(mois, pas\) \{[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, 'moisDecale a disparu de la page')
+  // eslint-disable-next-line no-new-func
+  const moisDecale = new Function(`${bloc}; return moisDecale`)()
+
+  assert.strictEqual(moisDecale('2026-10', -1), '2026-09')
+  assert.strictEqual(moisDecale('2026-10', 1), '2026-11')
+  // Les deux passages d'annee, dans les deux sens.
+  assert.strictEqual(moisDecale('2026-01', -1), '2025-12', 'janvier -1 ne recule pas d une annee')
+  assert.strictEqual(moisDecale('2026-12', 1), '2027-01', 'decembre +1 n avance pas d une annee')
+  // Un saut de plus de douze mois.
+  assert.strictEqual(moisDecale('2026-03', -14), '2025-01')
+  // ⚠ ET UNE ENTREE HORS FORME REND `null`, elle n'invente pas un mois : la
+  // navigation sort alors sans rien faire, au lieu de demander « NaN-NaN » au
+  // serveur.
+  for (const mauvais of ['', null, undefined, '2026-13', '2026-00', 'octobre', '2026-1', 42]) {
+    assert.strictEqual(moisDecale(mauvais, 1), null, `${JSON.stringify(mauvais)} rend un mois`)
+  }
+})
+
+test('LE TEST QUI COMPTE : une session perdue referme la session, elle ne boucle pas', () => {
+  // ⚠ DEUX CONSTATS BLOQUANTS D'UNE REVIEW DU 27 OCTOBRE 2026, et les deux
+  // venaient de ma correction du point 1 de la recette.
+  //
+  //   · ma version purgeait les caches puis faisait `replace('/pages/login.html')`
+  //     SANS fermer la session Supabase. Or login renvoie vers l'accueil des
+  //     qu'il trouve une session locale : aujourdhui -> login -> aujourdhui ->
+  //     401 -> ... une BOUCLE infinie de navigations JS.
+  //   · et elle ne gardait pas `session === null`, qui est la forme DOMINANTE
+  //     d'une session expiree : `getSession()` rend `{ session: null }` quand le
+  //     rafraichissement echoue, et on levait un TypeError AVANT la branche 401
+  //     — donc sans purge et sans sortie, avec les chiffres du cache a l'ecran.
+  //
+  // Ce test garde la FORME du chemin de sortie. Le comportement complet
+  // demanderait un banc qui simule `location` et le client Supabase ; ce qui se
+  // verifie ici est ce qui a casse : l'appel au geste COMPLET, la garde de
+  // session nulle, et l'absence de redirection a la main.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const code = html.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+
+  assert.match(code, /if \(!session \|\| !session\.access_token\) return refermerLaSession\(\)/,
+    'une session nulle n est plus gardee : un TypeError passerait avant la branche 401')
+  assert.match(code, /if \(r\.status === 401\) return refermerLaSession\(\)/,
+    'un 401 ne referme plus la session')
+  // ⚠ LE GESTE COMPLET, PAS SA MOITIE : `signOut` purge, ferme la session, puis
+  // navigue. Appeler `purgerCachesLocaux` seul laisse la session ouverte, et
+  // c'est elle qui faisait rebondir login.
+  const sortie = (code.match(/function refermerLaSession \(\)[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(sortie, 'refermerLaSession a disparu')
+  assert.match(sortie, /signOut\(\)/, 'la sortie n appelle plus le geste complet')
+  assert.ok(!/location\.(replace|href)/.test(sortie),
+    'la sortie navigue a la main : `signOut` le fait, et c est lui qui ferme la session')
+  assert.match(sortie, /throw e/,
+    'la sortie ne leve plus : les blocs se peindraient avec les donnees qu on vient de purger')
+  assert.ok(!/purgerCachesLocaux/.test(code),
+    'la moitie du geste de sortie est appelee directement : c est ce qui a fait boucler login')
+})
+
+test('LE TEST QUI COMPTE : une reponse d ecran PERIMEE ne peut pas ecraser une plus recente', () => {
+  // ⚠ CONSTAT D'UNE REVIEW DU 27 OCTOBRE 2026. Les fleches de mois sont cablees
+  // dans `init()` AVANT la phase reseau, et sur cache chaud la section est deja
+  // visible : elles sont donc cliquables pendant tout le chargement. `navEnCours`
+  // ne protegeait que deux navigations entre elles, pas une navigation contre le
+  // chargement initial — les deux ecrivent `etat.ecran`, et le dernier RESOLU
+  // gagnait. Soit le mois choisi par l'hote etait defait sous ses yeux, soit le
+  // cache etait ecrit avec le mois d'une periode passee.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const bloc = (html.match(/async function chargerEcran \(\)[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, 'chargerEcran a disparu')
+  assert.match(bloc, /const monTour = \+\+sequenceEcran/,
+    'le chargement ne prend plus de numero de sequence')
+  assert.match(bloc, /if \(monTour !== sequenceEcran\) return/,
+    'une reponse perimee peut de nouveau ecraser une plus recente')
+  // Et l'ecriture de `etat.ecran` vient APRES la comparaison, sinon la garde
+  // ne garde rien.
+  const iGarde = bloc.indexOf('monTour !== sequenceEcran')
+  const iEcrit = bloc.indexOf('etat.ecran = recu')
+  assert.ok(iGarde > -1 && iEcrit > iGarde,
+    'l etat est ecrit avant que la sequence ne soit verifiee')
+})
+
+test('LE TEST QUI COMPTE : le libelle des fleches suit le mois SERVI, meme sans chiffres', () => {
+  // ⚠ CONSTAT BLOQUANT D'UNE REVIEW DU 27 OCTOBRE 2026, et c'etait le premier
+  // clic de la recette qui le rencontrait. Sur un mois dont les colonnes
+  // derivees ne sont pas remplies, l'endpoint rend `revenus: null` : le rendu
+  // tombe dans `videDuTotal()`, qui effacait le petit libelle du mois… et
+  // laissait le GRAND libelle, celui entre les fleches, sur le mois precedent.
+  //
+  // L'hote ne savait plus quel mois il regardait ; le clic suivant repartait du
+  // mois servi et semblait sauter deux mois ; et `aria-live` n'annoncait rien,
+  // le texte n'ayant pas change.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  const bloc = (html.match(/const videDuTotal = \(\) => \{[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'videDuTotal a disparu')
+  assert.match(bloc, /revenue-month-nav/,
+    'le libelle des fleches n est plus mis a jour quand le bloc ne dit rien : il gardera le mois precedent')
+  assert.match(bloc, /moisEnClair\(etat\.ecran && etat\.ecran\.mois\)/,
+    'le libelle ne vient plus du mois SERVI par le serveur')
+})
+
+test('les fleches de mois respectent la taille minimale d une cible tactile', () => {
+  // ⚠ LA CHARTE DU LOT EXIGE « zones de clic >= 44 px » (spec §8), et
+  // `shared/theme.css` definit `--control: 44px` pour cette raison. Ma premiere
+  // version mettait 32 px : deux cibles sous la norme, sur un ecran dont la
+  // recette se fait au telephone.
+  //
+  // ⚠ ET AUCUN TEST DU DEPOT NE GARDAIT CETTE REGLE — mesure : la mutation
+  // « 32px » ne faisait rougir personne. Le precedent du depot pour exactement
+  // ce geste (les chevrons de mois du calendrier) passe par `btn btn--icon`,
+  // qui vaut `var(--control)` ; ici les boutons sont dessines a part, donc la
+  // regle doit etre tenue a part.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const bloc = (css.match(/\.rev-nav__btn \{[\s\S]*?\n\}/) || [''])[0]
+  assert.ok(bloc, '.rev-nav__btn a disparu de la feuille')
+  assert.match(bloc, /width:\s*var\(--control\)/,
+    'les fleches de mois ne font plus la largeur minimale d une cible tactile')
+  assert.match(bloc, /height:\s*var\(--control\)/,
+    'les fleches de mois ne font plus la hauteur minimale d une cible tactile')
+  // ⚠ ET LE JETON VAUT BIEN 44 px : sans ce controle, redefinir `--control` a
+  // 32 px ailleurs rendrait ce test vert pour rien.
+  const theme = fs.readFileSync(path.join(__dirname, '..', 'shared', 'theme.css'), 'utf8')
+  assert.match(theme, /--control:\s*44px/,
+    '`--control` ne vaut plus 44px : la charte des zones de clic a change de valeur')
 })

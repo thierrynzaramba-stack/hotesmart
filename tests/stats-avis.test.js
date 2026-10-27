@@ -6,7 +6,7 @@
 
 const test = require('node:test')
 const assert = require('node:assert')
-const { ratioProprete, noteMoyenne, notesDuPerimetre, borneDepuis, PERIODES } = require('../lib/stats-avis')
+const { ratioProprete, noteMoyenne, notesDuPerimetre, derniersAvis, nomCourtDuVoyageur, borneDepuis, PERIODES } = require('../lib/stats-avis')
 // La semantique PostgREST que ce double doit honorer — une seule implementation
 // pour les trois fichiers qui montent un double d'`ota_reviews`.
 const FAUX = require('./faux-postgrest')
@@ -66,7 +66,19 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
       // sur une liste non triee ne partitionne rien.
       const retenues = () => {
         const out = lignes.filter(retenir).filter(l => (appel.nonNuls || []).every(c => l[c] != null))
-        if (appel.tri) out.sort((a, b) => cmp(a[appel.tri], b[appel.tri]))
+        if (appel.tris) {
+          out.sort((x, y) => {
+            for (const [c, asc] of appel.tris) {
+              // Une valeur absente est la DERNIERE en tri descendant, comme
+              // `nullsFirst: false` : « pas de date » n'est pas « la plus recente ».
+              const a = x[c] == null ? '' : x[c]
+              const b = y[c] == null ? '' : y[c]
+              const d = cmp(a, b)
+              if (d) return asc ? d : -d
+            }
+            return 0
+          })
+        } else if (appel.tri) out.sort((a, b) => cmp(a[appel.tri], b[appel.tri]))
         return out
       }
       const chain = {
@@ -86,7 +98,16 @@ function fauxClient (lignes = [], journal = [], erreur = null) {
         gt (c, v) { (appel.gts = appel.gts || []).push({ colonne: c, valeur: v }); return chain },
         in (c, v) { appel.ins.push({ colonne: c, valeurs: (v || []).map(String) }); return chain },
         not (c, op, v) { if (op === 'is' && v === null) (appel.nonNuls = appel.nonNuls || []).push(c); return chain },
-        order (c) { appel.tri = c; return chain },
+        // ⚠ LE DOUBLE TRIE VRAIMENT, ET IL GARDE LE SENS. Il ne retenait que la
+        // DERNIERE colonne et ignorait `ascending` : une lecture « les trois
+        // derniers » (recu_le DESC, puis id) rendait les trois PREMIERS, et
+        // aucun test ne pouvait le voir. C'est la meme lecon que le double de
+        // `tests/ecran-aujourdhui-isolation.test.js` a apprise le 23 octobre.
+        order (c, opts) {
+          appel.tri = c
+          ;(appel.tris = appel.tris || []).push([c, !(opts && opts.ascending === false)])
+          return chain
+        },
         // La moyenne lit par pages : `range` resout comme `limit`.
         // ⚠ ET IL HONORE `erreur`, comme `then`. Jusqu'au 20 octobre 2026 il
         // resolvait toujours sans erreur : les deux fonctions qui lisent par
@@ -1069,4 +1090,172 @@ test('LE TEST QUI COMPTE : la regle SQL et la regle JS disent la MEME chose', as
     const parJs = voyageurAEcrit({ is_hidden: false, overall_score: c.overall_score, content: c.content || c.content_public })
     assert.strictEqual(parSql, parJs, `desaccord sur ${JSON.stringify(c)} : SQL ${parSql}, JS ${parJs}`)
   }
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Les derniers COMMENTAIRES — bloc « Derniers avis » de l'accueil (etape 2)
+// ═══════════════════════════════════════════════════════════════════════════
+
+const AVIS = (n, extra = {}) => ({
+  id: n, user_id: 'moi', statut: 'confirme', is_hidden: false,
+  property_id_ref: '209413', ota: 'airbnb', overall_score: 9.6,
+  content_public: `commentaire ${n}`, received_at: `2026-10-${String(n).padStart(2, '0')}T10:00:00Z`,
+  guest_name: 'Claire Bernard', ...extra
+})
+
+test('nomCourtDuVoyageur : prenom + initiale, et rien de plus', () => {
+  assert.strictEqual(nomCourtDuVoyageur('Claire Bernard'), 'Claire B.')
+  assert.strictEqual(nomCourtDuVoyageur('Jean-Luc De La Tour'), 'Jean-Luc T.')
+  assert.strictEqual(nomCourtDuVoyageur('Marion'), 'Marion',
+    'un prenom seul reste tel quel : inventer une initiale serait inventer un nom')
+  assert.strictEqual(nomCourtDuVoyageur('  '), null)
+  assert.strictEqual(nomCourtDuVoyageur(null), null)
+  assert.strictEqual(nomCourtDuVoyageur(undefined), null)
+})
+
+test("LE TEST QUI COMPTE : ce champ vient du PARTENAIRE, il n'a aucune forme garantie", () => {
+  // ⚠ CONSTAT DE LA REVUE DU 25 OCTOBRE 2026. `guest_name` n'est pas un nom :
+  // c'est ce que le canal a bien voulu mettre. Trois formes mesurees, et ce
+  // qu'elles rendaient avant :
+  //   'claire.bernard@gmail.com'      -> rendu TEL QUEL, donc une adresse
+  //                                      electronique descendue dans la reponse
+  //                                      — ce que la §5 de la spec interdit ;
+  //   'Claire Bernard (claire@x.fr)'  -> « Claire (. », une initiale qui est
+  //                                      une parenthese ;
+  //   '(anonyme)'                     -> rendu tel quel.
+  // Aucune n'est observee en base aujourd'hui (le seul writer est
+  // lib/cron-channel-reviews.js, qui lit les attributs Channex) : le cas est
+  // LATENT, et c'est la raison de le fermer maintenant plutot qu'apres.
+  assert.strictEqual(nomCourtDuVoyageur('claire.bernard@gmail.com'), null,
+    'une adresse electronique est descendue comme un prenom')
+  assert.strictEqual(nomCourtDuVoyageur('Claire Bernard (claire@x.fr)'), 'Claire B.',
+    'la parenthese sert d initiale')
+  assert.strictEqual(nomCourtDuVoyageur('(anonyme)'), null,
+    'un libelle sans lettre initiale est rendu tel quel')
+  // Et ce qui RESTE un nom le reste : la garde ne doit pas manger les vrais.
+  assert.strictEqual(nomCourtDuVoyageur('Li Wei'), 'Li W.')
+  assert.strictEqual(nomCourtDuVoyageur('Ana  Ruiz'), 'Ana R.')
+})
+
+test("LE TEST QUI COMPTE : le texte PUBLIC passe avant le texte brut", async () => {
+  // ⚠ CONSTAT DE LA REVUE : inverser les deux termes passait les 6284 tests.
+  // `content` porte parfois la CONCATENATION du public et du prive, et
+  // l'accueil n'etiquette rien « retour prive » — la regle de
+  // docs/specs/spec-prestataires-menage.md §6 existe precisement pour ca.
+  // Un retour prive affiche sans son etiquette est le defaut que ce choix evite.
+  const r = await derniersAvis(fauxClient([AVIS(20, {
+    content_public: 'Sejour parfait.',
+    content: 'Sejour parfait. EN PRIVE : la douche fuit.'
+  })]), { userId: 'moi' })
+  assert.strictEqual(r[0].texte, 'Sejour parfait.',
+    'le texte brut (public + prive concatenes) est affiche sans etiquette')
+  assert.ok(!r[0].texte.includes('EN PRIVE'))
+  // Et quand il n'y a PAS de texte public, le brut sert de repli : se taire
+  // perdrait un commentaire reel.
+  const repli = await derniersAvis(fauxClient([AVIS(21, {
+    content_public: '', content: 'Tres bon accueil.'
+  })]), { userId: 'moi' })
+  assert.strictEqual(repli[0].texte, 'Tres bon accueil.')
+})
+
+test("LE TEST QUI COMPTE : ce sont les DERNIERS, et le tri le dit", async () => {
+  // ⚠ SANS TRI DESCENDANT, « les trois derniers avis » rend les trois PLUS
+  // ANCIENS — et un hote qui ouvre son accueil lit les commentaires du mois
+  // dernier en croyant lire ceux d'hier. Le double trie vraiment depuis ce lot.
+  const journal = []
+  const sb = fauxClient([AVIS(20), AVIS(22), AVIS(18), AVIS(24), AVIS(16)], journal)
+  const out = await derniersAvis(sb, { userId: 'moi', maintenant: Date.parse('2026-10-25T10:00:00Z') })
+  assert.strictEqual(out.length, 3, 'la limite de trois n est pas posee')
+  assert.deepEqual(out.map(a => a.id), ['24', '22', '20'], 'les derniers, pas les premiers')
+  const q = journal.find(j => j.table === 'ota_reviews')
+  assert.deepEqual(q.tris, [['received_at', false], ['id', false]],
+    'le tri doit etre descendant ET departage : deux avis du meme instant '
+    + 's echangeraient d un chargement a l autre, et le troisieme disparaitrait')
+})
+
+test("LE TEST QUI COMPTE : un perimetre VIDE rend zero avis, jamais tout le compte", async () => {
+  // ⚠ `.in('x', [])` NE FILTRE PAS CHEZ POSTGREST. C'est la forme de fuite que
+  // le chantier profils et droits a fermee dix fois : une liste vide doit etre
+  // tranchee AVANT la requete, sinon elle ne borne rien.
+  const journal = []
+  const sb = fauxClient([AVIS(20), AVIS(21)], journal)
+  const out = await derniersAvis(sb, { userId: 'moi', refs: [] })
+  assert.deepEqual(out, [])
+  assert.strictEqual(journal.length, 0, 'une requete est partie malgre un perimetre vide')
+})
+
+test('le perimetre borne la lecture, et le compte aussi', async () => {
+  const journal = []
+  const sb = fauxClient([AVIS(20), AVIS(21, { property_id_ref: 'autre' })], journal)
+  const out = await derniersAvis(sb, { userId: 'moi', refs: ['209413'] })
+  assert.deepEqual(out.map(a => a.bien_ref), ['209413'])
+  const q = journal.find(j => j.table === 'ota_reviews')
+  assert.ok(q.ins.some(f => f.colonne === 'property_id_ref'), 'la borne de bien manque')
+  assert.strictEqual(q.filtres.user_id, 'moi', 'la lecture n est pas bornee au compte')
+})
+
+test("LE TEST QUI COMPTE : le nom du voyageur suit `reservations`, et la colonne n est pas meme demandee", async () => {
+  // La regle deja tranchee pour les dates de sejour (api/avis.js) : le CONTENU
+  // de l'avis suit `avis`, ce qu'il dit du SEJOUR suit `reservations`. Une
+  // donnee qu'on ne demande pas a la base ne peut pas fuiter plus tard par un
+  // oubli d'affichage.
+  const sansNom = []
+  await derniersAvis(fauxClient([AVIS(20)], sansNom), { userId: 'moi' })
+  assert.ok(!/guest_name/.test(sansNom[0].select || ''),
+    'la colonne guest_name est demandee sans le droit `reservations`')
+
+  const avecNom = []
+  const out = await derniersAvis(fauxClient([AVIS(20)], avecNom), { userId: 'moi', avecNom: true })
+  assert.match(avecNom[0].select || '', /guest_name/)
+  assert.strictEqual(out[0].voyageur, 'Claire B.',
+    'le serveur doit descendre « Claire B. », jamais le nom complet')
+})
+
+test("LE TEST QUI COMPTE : le texte est exige EN SQL, et la garde JS reste", async () => {
+  // ⚠ DEUX GARDES POUR LA MEME REGLE, ET LA REVUE A MONTRE QU'ELLES SE
+  // MASQUAIENT L'UNE L'AUTRE : retirer le predicat SQL laissait la suite verte
+  // (le filtre JS rattrapait), et retirer le filtre JS aussi (le SQL rattrapait).
+  // Chacune est donc eprouvee pour ce qu'elle fait SEULE.
+  //
+  // Le SQL d'abord : sans lui, la lecture rapatrie des avis sans texte pour
+  // n'en garder que trois — le defaut que tout ce fichier evite.
+  const journal = []
+  await derniersAvis(fauxClient([AVIS(20)], journal), { userId: 'moi' })
+  const q = journal.find(j => j.table === 'ota_reviews')
+  assert.deepEqual(q.ors, ['content.neq.,content_public.neq.'],
+    'le predicat de texte n est plus pose en SQL')
+
+  // Le filtre JS ensuite, sur un cas que le SQL LAISSE PASSER : PostgREST
+  // compare a la chaine vide, donc un texte fait d'espaces est « non vide »
+  // pour lui. La carte, elle, serait vide.
+  const out = await derniersAvis(fauxClient([
+    AVIS(21, { content_public: '   ', content: '  ' }), AVIS(22)
+  ]), { userId: 'moi' })
+  assert.deepEqual(out.map(a => a.id), ['22'],
+    'un avis dont le texte n est que des espaces produit une carte vide')
+})
+
+test("un avis SANS TEXTE n est pas un commentaire", async () => {
+  // La carte affiche un texte : une ligne qui n en porte pas rendrait une carte
+  // vide. `notesDuPerimetre` les garde — elles comptent dans la moyenne —, ce
+  // bloc non, et c'est la seule difference entre les deux populations.
+  const out = await derniersAvis(
+    fauxClient([AVIS(20, { content_public: '', content: '' }), AVIS(21)]), { userId: 'moi' })
+  assert.deepEqual(out.map(a => a.id), ['21'])
+})
+
+test('la note descend deja sur 5, convertie une seule fois', async () => {
+  const out = await derniersAvis(fauxClient([AVIS(20, { overall_score: 9.6, ota: 'airbnb' })]), { userId: 'moi' })
+  assert.strictEqual(out[0].note_sur_5, 4.8, '9,6 sur 10 vaut 4,8 sur 5')
+  // Une source dont l echelle est inconnue ne se convertit pas (dette 76).
+  const inconnue = await derniersAvis(fauxClient([AVIS(21, { ota: 'canal-inconnu' })]), { userId: 'moi' })
+  assert.strictEqual(inconnue[0].note_sur_5, null,
+    'une echelle inconnue doit rendre `null`, jamais une note supposee')
+})
+
+test("une erreur de lecture se DIT, elle ne devient pas une liste vide", async () => {
+  const sb = fauxClient([AVIS(20)], [], { message: 'boom' })
+  const out = await derniersAvis(sb, { userId: 'moi' })
+  assert.deepEqual(out, { erreur: true },
+    'une panne rendue comme `[]` ferait afficher « Pas encore d avis » a un hote qui en a')
 })

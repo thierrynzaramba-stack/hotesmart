@@ -872,6 +872,14 @@ test('LE TEST QUI COMPTE : la FORME des rendus partagés vit dans shared/ui.css,
   // point d'état, sans gouttière. Deux copies divergent ; une seule, non.
   const ui = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
   const PARTAGEES = ['.log-canaux', '.log-pastille', '.log-point',
+    // ⚠ LA ZONE D'ETAT, AJOUTEE LE 25 OCTOBRE 2026 (constat MOYEN 2 de la revue
+    // de l'etape 1 du lot Aujourd'hui V5). `etatHtml` est rendue par DEUX
+    // ecrans depuis que l'accueil porte « Ajoutez votre premier logement », et
+    // sa forme a quitte le `<style>` de pages/logements.html pour shared/ui.css
+    // — mais cette liste ne le savait pas : mesure de la revue, supprimer les
+    // deux regles de `ui.css` laissait 229 tests sur 229 au vert, et l'etat
+    // vide des deux ecrans perdait sa colonne et ses gouttieres sans un rouge.
+    '.log-etat', '.log-etat__actions',
     '.log-pastille--vente', '.log-pastille--pas-ce-bien', '.log-pastille--indetermine',
     '.log-avis', '.log-avis--muet',
     // La famille du compteur de propreté, partagée avec l'écran Ménages depuis

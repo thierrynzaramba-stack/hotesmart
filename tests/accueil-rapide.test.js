@@ -31,6 +31,11 @@ const assert = require('node:assert/strict')
 const fs = require('fs')
 const path = require('path')
 
+// Le module REEL du bloc « Derniers avis » : il est injecte dans la page
+// montee par ce banc, pour que `renderDerniersAvis` soit appelable.
+let AVIS = {}
+test.before(async () => { AVIS = await import('../shared/avis-recents.js') })
+
 const racine = path.join(__dirname, '..')
 const lire = p => fs.readFileSync(path.join(racine, p), 'utf8')
 
@@ -538,7 +543,16 @@ function batirAujourdhui (sansInit = false) {
     assert.ok(!/\binit\(\)\.catch\(/.test(corpsUtile),
       "le demarrage `init().catch(...)` n'a pas pu etre retire : sa forme a change")
   }
-  return corpsUtile + '\n;return { chargerNotes, etat }'
+  // ⚠ LES FONCTIONS DE RENDU SORTENT, ET C'EST LA LECON DE LA REVUE DE
+  // L'ETAPE 1. Quatre garde-fous retarges mesuraient une POSITION DANS LE
+  // TEXTE de la page (« le compte s'ecrit apres la garde », « l'etat vide cite
+  // `listeLue` ») : six mutations du code de production sur onze les laissaient
+  // verts, dont deux qui rejouent un incident deja vecu sur cet ecran — « A
+  // valider · Rien a valider » sur une lecture ratee, et « Ajoutez votre
+  // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
+  // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
+  // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -594,7 +608,11 @@ function ouvrirAujourdhui (options = {}) {
   const I18n = {
     appels: 0,
     init () { this.appels++; return new Promise(res => { resoudreI18n = res }) },
-    t: (k) => k, date: () => '', time: () => '', money: () => '', pct: () => '',
+    // ⚠ `date` REND QUELQUE CHOSE. Elle rendait '' : la date du titre, posee a
+    // l'etape 1, s'ecrivait donc vide, et aucun test ne pouvait distinguer
+    // « affichee » de « pas encore ». Un double qui rend du vide ne mesure rien.
+    t: (k) => k, date: () => 'LE-JOUR', time: () => '', money: () => '', pct: () => '',
+    apply () {},
     // Formate reellement : sans cela, rien ne peut asserter la note affichee.
     num: (n) => String(n),
     lang: 'fr', langues: []
@@ -612,32 +630,84 @@ function ouvrirAujourdhui (options = {}) {
       throw new Error('pages/aujourdhui.html appelle R.noteSur5 : la note descend DEJA sur 5, '
         + 'la rediviser arrondit deux fois (lib/avis/echelle.js)')
     }
+    // ⚠ `jourParis` REND UN JOUR, PAS UNE LISTE. Le double rendait `[]` pour
+    // toute clé inconnue : `etat.aujourdHui` valait `[]`, et la date du titre —
+    // posée à l'étape 1, donc AVANT la première lecture — levait
+    // « jour.split is not a function », silencieusement avalé par le
+    // `init().catch`. Un double qui rend la mauvaise FORME ne fait pas échouer
+    // le test qu'il sert : il le fait échouer ailleurs, et plus tard.
+    // Date FIGÉE, parce que le double INJECTE le temps (règle du dépôt).
+    if (cle === 'jourParis') return () => '2026-10-24'
+    // ⚠ `tachesOuvertes` LAISSE PASSER SA LISTE, au lieu de rendre `[]`. La
+    // REGLE de filtrage (sejours a venir ou en cours) a ses propres tests dans
+    // `tests/aujourdhui.test.js` ; ici c'est le RENDU qu'on juge, et un double
+    // qui vide la liste rend tout compte indistinguable de zero.
+    if (cle === 'tachesOuvertes') return (t) => (Array.isArray(t) ? t : [])
     return cle === 'etatDesBiens' ? (() => new Map()) : (() => [])
   } })
+
+  // ⚠ LE BANC GARDE LES ERREURS AU LIEU DE LES AVALER. Le `logger` injecte
+  // etait `{ error: rien }`, et la derniere ligne de la page est
+  // `init().catch(e => logger.error(...))` : une panne du DEMARRAGE ne laissait
+  // donc aucune trace. Mesure du 27 octobre 2026 : apres un chargement complet,
+  // `p.urls` et `p.lectures` sont VIDES — `init()` n'arrive jamais a sa phase
+  // reseau, et les tests qui chargent la page entiere affirmaient des choses
+  // d'un ecran qui ne s'etait jamais construit. C'est la famille « erreur
+  // avalee » que ce depot a deja payee 24 heures sur un cron rendant 200.
+  const erreurs = []
+  const journal = { error: (...a) => erreurs.push(a.map(String).join(' ')), warn: rien, info: rien }
 
   const sorti = new Function(
     'requireAuth', 'supabase', 'signOut', 'initErrorHandler', 'logger', 'esc',
     'compteCourant', 'moi', 'peutLire', 'peutEcrire', 'estTitulaire', 'comptes',
-    'basculerVers', 'enteteCompte', 'R',
+    'basculerVers', 'enteteCompte', 'etatHtml',
+    'vueDesAvis', 'blocAvisHtml', 'enTeteAvisHtml', 'MUETS', 'libelleDuCanal', 'R',
     'I18n', 'HSNav', 'document', 'window', 'location', 'fetch', 'localStorage', 'console',
+    // ⚠ `CacheEcran` MANQUAIT, ET C'EST CE QUI TUAIT LE DEMARRAGE. La page fait
+    // `import * as CacheEcran from '/shared/cache-ecran.js'` et s'en sert des
+    // sa phase de cache ; le nom n'etant pas injecte ici, `init()` levait
+    // `CacheEcran is not defined` A CHAQUE CHARGEMENT, et son `.catch` le
+    // donnait a un `logger.error` qui ne gardait rien.
+    // ⚠ ON INJECTE LE VRAI MODULE, pas un double — meme regle que pour le
+    // module des avis. Un double de cache qui ne cache rien masquerait la
+    // moitie du chemin qu'on croit eprouver, y compris la purge et la
+    // peremption. Il ecrit dans le `localStorage` du banc, qui est deja faux.
+    'CacheEcran',
     batirAujourdhui(options.sansInit)
-  )(requireAuth, supabase, rien, rien, { error: rien, warn: rien, info: rien }, String,
+  )(requireAuth, supabase, rien, rien, journal, String,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
-    rien, () => ({}), R,
+    rien, () => ({}), () => '<h2 data-i18n="logements.vide_titre"></h2>',
+    // ⚠ LE MODULE DES AVIS EST INJECTE POUR DE VRAI, pas double (constat MOYEN 3
+    // de la revue de l'etape 2). `renderDerniersAvis` etait EXPOSE par ce banc
+    // et INAPPELABLE : le `new Function` n'injectait pas `vueDesAvis`, et
+    // l'appeler levait `ReferenceError`. Le commit annoncait « quatre tests qui
+    // APPELLENT remplacent quatre regex » — c'etait vrai pour deux rendus sur
+    // trois. Resultat mesure : onze mutations du code neuf survivaient.
+    // On injecte le MODULE REEL : un double rendrait un test qui mesure son
+    // propre double, et c'est le rendu qu'on veut juger.
+    AVIS.vueDesAvis, AVIS.blocAvisHtml, AVIS.enTeteAvisHtml, AVIS.MUETS,
+    (c) => ({ airbnb: 'Airbnb', booking: 'Booking.com' })[String((c || {}).ota || '')] || null,
+    R,
     I18n, { renderMenu: rien, render: rien }, document_, {}, { search: '', hash: '' },
-    fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien })
+    fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien },
+    require('../shared/cache-ecran.js'))
 
   return {
     // Le corps que le test a fourni. Depuis le lot (b), les tests nourrissent
     // `etat.ecran` avec lui au lieu de compter sur le faux `fetch` : la page ne
     // fait plus l'appel, l'endpoint d'ecran le fait pour elle.
     corpsDonne: options.corps || {},
+    // Ce que le demarrage a journalise. Vide = il est alle au bout.
+    erreurs,
     interne: sorti,
     urls,
     lectures,
     I18n,
-    bonjour: () => document_.querySelector('[data-bind="greeting"]').textContent,
+    date: () => document_.querySelector('[data-bind="date"]').textContent,
     html: (sel) => document_.querySelector(sel).innerHTML,
+    // L'element lui-meme, pour lire `hidden` et `textContent` : le double les
+    // porte, et c'est sur eux que se jugent « masque » et « se tait ».
+    cache: (sel) => document_.querySelector(sel),
     ouvrirSession: () => resoudreSession({ user: { id: 'u1', email: 'thierry@exemple.fr', user_metadata: {} } }),
     repondreI18n: () => resoudreI18n('fr'),
     resoudre: (table, charge) => {
@@ -668,7 +738,14 @@ test("LE TEST QUI COMPTE : la page ne lit plus `properties` elle-meme", async ()
   p.ouvrirSession(); p.repondreI18n()
   await tours()
   const tables = p.lectures.map(l => l.table)
-  assert.ok(tables.includes('profiles'), 'le prenom n est jamais demande')
+  // ⚠ ET DEPUIS L'ETAPE 1 DU LOT AUJOURD'HUI V5, LA GARANTIE EST ENTIERE : la
+  // page ne lit AUCUNE table en direct. `profiles` etait la derniere — le
+  // « Bonjour {prenom} » la demandait alors que `/api/membres` l'avait deja
+  // rendue dans `requireAuth` (dette 73), sur un objet de session fige qui
+  // pouvait porter un e-mail perime (dette 72). L'en-tete retire, les deux
+  // dettes sont sans objet ici.
+  assert.ok(!tables.includes('profiles'),
+    'la page relit `profiles` : le bonjour est parti, plus rien ne justifie cette lecture')
   assert.ok(!tables.includes('properties'),
     'la page relit `properties` en direct : le lot (b) l a replie dans l appel d ecran, '
     + 'ou le perimetre est applique explicitement')
@@ -683,24 +760,25 @@ test("LE TEST QUI COMPTE : la page ne lit plus `properties` elle-meme", async ()
   // « jamais ». C'est la SOURCE qui dit « jamais ».
   const src = lire('pages/aujourdhui.html')
   const tablesLues = [...src.matchAll(/supabase\.from\('([^']+)'\)/g)].map(m => m[1])
-  assert.deepEqual(tablesLues, ['profiles'],
+  assert.deepEqual(tablesLues, [],
     'la page lit une table en direct, sous RLS, hors du perimetre applique par '
-    + 'l appel d ecran : ' + tablesLues.join(', ') + '. Seul `profiles` (le prenom, '
-    + 'dette connue) reste autorise ici.')
+    + 'l appel d ecran : ' + tablesLues.join(', ') + '. Depuis l etape 1, AUCUNE '
+    + 'lecture directe n est autorisee sur cet ecran.')
 })
 
-test("LE TEST QUI COMPTE : le bonjour s affiche sans attendre la lecture des biens", async () => {
-  // `properties` est la plus lourde des deux (9 colonnes, toutes les lignes du
-  // compte, sans limite) et le bonjour n'en a aucun besoin. Dans un
-  // `Promise.all` sur les RESULTATS, l'element le plus visible de la page
-  // attendait la requete la plus lente.
+test("LE TEST QUI COMPTE : la DATE s affiche sans attendre aucune lecture", async () => {
+  // ⚠ CE TEST GARDAIT LE BONJOUR, RETIRE A L'ETAPE 1. Ce qu'il protegeait reste
+  // vrai et se deplace : le premier element visible de la page ne doit attendre
+  // AUCUN aller-retour. C'etait un `Promise.all` sur deux resultats qui faisait
+  // attendre au bonjour la lecture `properties` ; c'est aujourd'hui plus simple
+  // encore, la date ne depend que de l'horloge.
   const p = ouvrirAujourdhui()
   p.ouvrirSession(); p.repondreI18n()
   await tours()
-  p.resoudre('profiles', { data: [{ first_name: 'thierry' }] })
-  await tours()
-  assert.notStrictEqual(p.bonjour(), '',
-    'le bonjour attend la lecture des biens pour s afficher')
+  assert.notStrictEqual(p.date(), '',
+    'la date attend une lecture pour s afficher : elle ne depend que de l horloge')
+  assert.strictEqual(p.lectures.length, 0,
+    'la page fait une lecture directe avant son premier affichage : ' + p.lectures.map(l => l.table).join(', '))
 })
 
 test("l accueil ne refait plus d aller-retour pour l utilisateur deja connu", () => {
@@ -774,7 +852,6 @@ test('LE TEST QUI COMPTE : l accueil ne demande PLUS les notes lui-meme', async 
   assert.deepEqual(q.urls.filter(u => u.includes('/api/avis')), [],
     'les notes absentes de l appel d ecran declenchent un repli vers /api/avis')
   assert.strictEqual(q.interne.etat.noteGlobale, null, 'un bloc absent s affiche comme un fait')
-  assert.strictEqual(q.interne.etat.notesParBien.get('b1'), null)
 })
 
 test('LE TEST QUI COMPTE : l endpoint d ecran ne lit les notes qu UNE fois', () => {
@@ -799,13 +876,18 @@ test('LE TEST QUI COMPTE : chaque bien recoit la meme chose qu avant, zero compr
   await p.interne.chargerNotes()
 
   assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.7, notes: 42 })
-  assert.deepEqual(p.interne.etat.notesParBien.get('b1'), { note_sur_5: 4.8, notes: 30 })
-  // Un bien absent de la reponse vaut zero, pas `undefined` : c'est ce que
-  // rendait son appel par bien, et `renderBiens` lit `note.moyenne`.
-  assert.deepEqual(p.interne.etat.notesParBien.get('b2'), { note_sur_5: null, notes: 0 })
-  // Un bien sans canal n'etait pas interroge : il n'a toujours pas d'entree.
-  assert.strictEqual(p.interne.etat.notesParBien.has('b3'), false,
-    'un bien sans cle provider recoit une note alors qu aucun avis ne peut lui etre rattache')
+  // ⚠ LES TROIS ASSERTIONS PAR BIEN SONT PARTIES AVEC `etat.notesParBien`
+  // (etape 4), ET IL FAUT DIRE CE QU'ELLES TENAIENT : un bien absent de la
+  // reponse valait zero et non `undefined`, et un bien sans cle provider n'avait
+  // pas d'entree du tout. Ces deux distinctions n'avaient qu'un consommateur,
+  // l'etoile des cartes de logement, et les cartes partent avec le bloc
+  // « Vos logements » (inventaire I28). La note par bien revient a la fiche du
+  // logement, que /logements rend deja avec sa propre lecture.
+  //
+  // Ce qui reste teste ici est la seule chose que l'accueil lit encore : la note
+  // GLOBALE, telle quelle, sans redivision.
+  assert.ok(!('notesParBien' in p.interne.etat),
+    'la Map par bien est revenue : elle n a aucun lecteur, donc elle ferait croire que la donnee est disponible')
 })
 
 // ⚠ CES TROIS TESTS PASSAIENT PAR VACUITE, ET LA REVIEW L'A VU.
@@ -831,31 +913,47 @@ for (const [quoi, ecran] of casSansNote) {
     p.interne.etat.biens = biensDeTest
     p.interne.etat.ecran = ecran
     await p.interne.chargerNotes()
+    // ⚠ L'ASSERTION PAR BIEN EST PARTIE AVEC `etat.notesParBien` (etape 4), ET
+    // L'INVARIANT NE L'EST PAS : elle doublait celle du dessus, qui porte la
+    // meme regle sur la note GLOBALE — « 0 avis » n'est jamais affirme quand
+    // rien n'a ete lu. La Map par bien n'avait qu'un lecteur, l'etoile des
+    // cartes de logement, et les cartes partent avec le bloc « Vos logements ».
     assert.strictEqual(p.interne.etat.noteGlobale, null,
       'la tuile affiche un nombre d avis alors que rien n a ete lu')
-    assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null,
-      'un bien recoit « 0 avis », un FAIT, alors que rien n a ete lu')
     assert.deepEqual(p.urls.filter(u => u.includes('/api/')), [],
       'la page part en reseau pour se rattraper : le 1 + N reviendrait par la porte de service')
   })
 }
 
-test("LE TEST QUI COMPTE : une cle de bien heritee d'Object ne devient pas une note", async () => {
-  // `par_bien` vient de `JSON.parse`. Pour un bien dont la cle provider vaudrait
-  // `constructor`, `toString` ou `valueOf`, une lecture directe rendrait une
-  // FONCTION heritee — vraie, donc le repli `{ moyenne: null, notes: 0 }` ne
-  // serait jamais pris, et `etat.notesParBien` porterait une fonction.
+test("LE TEST QUI COMPTE : une cle de bien piegeuse ne fait plus rien tomber sur l'accueil", async () => {
+  // ⚠ CE TEST GARDAIT `hasOwnProperty` DANS LA PAGE, ET LA REGLE A CHANGE DE
+  // MAISON — elle n'a pas disparu. `par_bien` vient de `JSON.parse` : pour un
+  // bien dont la cle provider vaudrait `constructor`, `toString` ou `valueOf`,
+  // une lecture directe rendrait une FONCTION heritee d'Object, vraie, donc le
+  // repli n'etait jamais pris.
+  //
+  // ⚠ ET ELLE EST TENUE COTE SERVEUR, VERIFIE AVANT D'ECRIRE CETTE LIGNE :
+  // `lib/stats-avis.js:497` construit `par_bien` avec `Object.create(null)`,
+  // donc la table n'a AUCUNE cle heritee a rendre — et c'est teste la-bas,
+  // `tests/stats-avis.test.js` l 770-819 (« le prototype nul ne protege plus :
+  // la cle est avalee », « par_bien a de nouveau un prototype : une reference
+  // `__proto__` l ecrirait »). Retirer ce doublon sans cette verification aurait
+  // ete retirer un garde-fou en croyant le deplacer.
+  //
+  // Ce qui reste a garder ici est que la PAGE ne retombe pas dans le piege : des
+  // cles provider piegeuses ne doivent faire ni lever, ni afficher de note.
   const p = ouvrirAujourdhui({ sansInit: true, corps: { global: { note_sur_5: 4.5, notes: 3 }, par_bien: {} } })
   p.interne.etat.biens = [
     { id: 'bc', name: 'Piege', provider_property_id: 'constructor' },
     { id: 'bt', name: 'Piege 2', provider_property_id: 'toString' },
+    { id: 'bp', name: 'Piege 3', provider_property_id: '__proto__' },
   ]
   p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
-  for (const id of ['bc', 'bt']) {
-    assert.deepEqual(p.interne.etat.notesParBien.get(id), { note_sur_5: null, notes: 0 },
-      `le bien ${id} recoit un membre herite d Object au lieu de sa note`)
-  }
+  assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.5, notes: 3 },
+    'une cle provider piegeuse a fait tomber la note globale')
+  assert.deepEqual(p.urls.filter(u => u.includes('/api/')), [],
+    'la page part en reseau sur une cle piegeuse')
 })
 
 test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redivise pas", async () => {
@@ -872,12 +970,52 @@ test("LE TEST QUI COMPTE : la page affiche la note telle quelle, elle ne la redi
   p.interne.etat.ecran = { notes: p.corpsDonne }
   await p.interne.chargerNotes()
 
-  const tuile = p.html('[data-bind="rating"]')
-  assert.ok(tuile.includes('4.7'), `la tuile n affiche pas la note descendue par l endpoint : ${tuile}`)
-  assert.ok(!tuile.includes('2.3') && !tuile.includes('2.4'), `la tuile a redivise la note : ${tuile}`)
-
-  const liste = p.html('[data-list="properties"]')
-  assert.ok(liste.includes('4.8'), `l etoile du bien n affiche pas la note descendue : ${liste}`)
+  // ⚠ CET INVARIANT A CHANGE DE SUPPORT DEUX FOIS, ET IL NE S'AFFAIBLIT PAS.
+  // La tuile du bandeau « Note · 30 j » est partie a l'etape 1 (24 octobre
+  // 2026) ; le test s'est alors appuye sur l'ETOILE de chaque logement. Les
+  // cartes de logement partent a leur tour avec le bloc « Vos logements »
+  // (etape 4, inventaire I28), donc l'etoile par bien n'existe plus sur
+  // l'accueil — mais la note GLOBALE, elle, s'affiche toujours : en tete du
+  // bloc « Derniers avis ». C'est la qu'on le tient maintenant.
+  //
+  // La regle est inchangee depuis le premier jour : l'endpoint descend
+  // `note_sur_5` DEJA ramenee sur 5 et arrondie UNE SEULE fois, et l'ecran ne la
+  // redivise pas. 4,7 sur 10 redivise donnerait 2,3 ou 2,4 — les deux valeurs
+  // qu'on refuse de voir.
+  assert.deepEqual(p.interne.etat.noteGlobale, { note_sur_5: 4.7, notes: 42 },
+    'la note globale a ete redivisee ou perdue avant l affichage')
+  // ⚠ L'EN-TETE NE S'AFFICHE QUE SUR UN BLOC NON MUET, et c'est une regle du
+  // bloc avis, pas une complication de ce test : `enTeteAvisHtml` rend la chaine
+  // vide quand l'etat est MUET (refus, inconnu, perimetre vide) ou que la note
+  // est `null`. Sans avis a montrer, il n'y a pas d'en-tete ou poser la note —
+  // donc la fixture doit porter un avis, comme la production.
+  p.interne.etat.derniersAvis = [{
+    id: 'r1', bien_ref: 'REF_A', ota: 'airbnb', recu_le: '2026-10-20T10:00:00Z',
+    note_sur_5: 4.9, texte: 'Sejour parfait.', voyageur: 'Claire B.'
+  }]
+  p.interne.etat.avisConnu = true
+  p.interne.renderDerniersAvis()
+  const tete = p.html('[data-bind="reviews-head"]')
+  // ⚠ LE DOUBLE DE `t` DANS CE BANC REND LA CLE, PAS LE TEXTE INTERPOLE :
+  // l'en-tete contient « reviews.score », donc la VALEUR n'est pas lisible dans
+  // le HTML. C'est la meme limite que le test du compte plafonne plus haut, qui
+  // la contourne en lisant `fr.json`. On juge donc ce que le banc peut dire :
+  // l'en-tete EXISTE (la note est passee, elle n'est pas `null`) et il ne porte
+  // aucun nombre redivise.
+  assert.ok(tete.includes('reviews.score'),
+    `l en-tete du bloc avis ne porte pas la note : ${tete}`)
+  assert.ok(!/2[.,][34]/.test(tete), `l en-tete du bloc avis a redivise la note : ${tete}`)
+  // ⚠ ET LA VALEUR PASSEE AU RENDU SE VERIFIE A LA SOURCE, par le module
+  // partage qui construit la vue — lui-meme teste sur ses propres fixtures
+  // dans `tests/avis-recents-dom.test.js`. C'est la seule facon de voir le
+  // NOMBRE : la page ne le formate pas elle-meme, et c'est voulu.
+  const vue = M_AVIS.vueDesAvis({
+    derniers: p.interne.etat.derniersAvis,
+    notes: { global: p.interne.etat.noteGlobale },
+    biens: p.interne.etat.biens, connu: true
+  })
+  assert.strictEqual(vue.note_sur_5, 4.7,
+    'la vue du bloc avis a redivise la note avant de la rendre')
 })
 
 test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note", async () => {
@@ -896,5 +1034,805 @@ test("LE TEST QUI COMPTE : une lecture ROGNEE n'est pas affichee comme une note"
   await p.interne.chargerNotes()
   assert.strictEqual(p.interne.etat.noteGlobale, null,
     'une note calculee sur une fraction est affichee comme un fait')
-  assert.strictEqual(p.interne.etat.notesParBien.get('b1'), null)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ce que l'ecran REND vraiment — constat MOYEN 1 de la revue de l'etape 1
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠ CES TESTS APPELLENT, ILS NE RELISENT PAS LA PAGE. Les quatre garde-fous
+// retarges de l'etape 1 mesuraient une position dans le texte source : six
+// mutations sur onze passaient au vert. Chacun des tests ci-dessous est ne
+// d'une de ces mutations, et porte son numero.
+
+// Le banc, prepare pour appeler un rendu : la page est montee sans son
+// demarrage, et l'etat est pose a la main.
+function bancDeRendu (etat = {}) {
+  const p = ouvrirAujourdhui({ sansInit: true })
+  Object.assign(p.interne.etat, etat)
+  return p
+}
+
+test("LE TEST QUI COMPTE (M1b) : des taches ILLISIBLES ne rendent ni liste ni compte", async () => {
+  // Mutation de la revue : la garde `if (!etat.tachesOk)` perd son `return`.
+  // L'hote dont la lecture a echoue lisait alors « A valider · Rien a valider »
+  // — une absence AFFIRMEE sur une donnee qu'on n'a pas pu lire. C'est, mot
+  // pour mot, l'incident que le commentaire de cette fonction raconte.
+  const p = bancDeRendu({ tachesOk: false, taches: [] })
+  p.interne.renderTaches()
+  assert.strictEqual(p.cache('[data-bind="validate-section"]').hidden, true,
+    'la section « A valider » reste visible alors que la lecture a echoue')
+  assert.strictEqual(p.html('[data-list="pending"]'), '',
+    'une liste est rendue alors que les taches sont illisibles')
+  assert.strictEqual(p.cache('[data-bind="validate-count"]').textContent, '',
+    'un compte s affiche alors qu on n a rien pu lire')
+})
+
+test("LE TEST QUI COMPTE (M3) : zero tache a valider ne s'affiche PAS « 0 »", async () => {
+  // Mutation : `: ''` devient `: '0'`. Un zero pose a cote d'un titre se lit
+  // comme un fait, et la liste en dessous dit deja « Rien a valider ».
+  const p = bancDeRendu({ tachesOk: true, taches: [] })
+  p.interne.renderTaches()
+  assert.strictEqual(p.cache('[data-bind="validate-count"]').textContent, '',
+    'le compte affiche un zero au lieu de se taire')
+})
+
+test("LE TEST QUI COMPTE (M8) : une liste PLAFONNEE affiche « N+ », pas un nombre exact", async () => {
+  // Mutation : `tachesPlafonnees()` rend toujours `false`. Le compte de Thierry
+  // porte 222 taches ouvertes pour un plafond serveur de 200 : afficher « 200 »
+  // serait un nombre faux avec aplomb, et `tronquees` existe pour l'eviter.
+  const taches = [1, 2, 3, 4].map(i => ({ id: i, status: 'pending', book_id: 'R' + i, departure: '2099-01-01' }))
+  const franc = bancDeRendu({ tachesOk: true, taches, ecran: { tronquees: [] } })
+  franc.interne.renderTaches()
+  const exact = franc.cache('[data-bind="validate-count"]').textContent
+  assert.ok(/^\d+$/.test(exact), `un compte franc doit etre un nombre nu : ${exact}`)
+
+  const plafonne = bancDeRendu({ tachesOk: true, taches, ecran: { tronquees: ['taches'] } })
+  plafonne.interne.renderTaches()
+  const avecPlus = plafonne.cache('[data-bind="validate-count"]').textContent
+  assert.notStrictEqual(avecPlus, exact,
+    'le compte est identique que la liste soit plafonnee ou non : le « + » ne s applique jamais')
+  // ⚠ LE « + » LUI-MEME VIT DANS LE DICTIONNAIRE, pas dans le code : le double
+  // de `t` rend la cle, pas le texte. On juge donc ici que les deux cas
+  // DIFFERENT — c'est le comportement —, et on lit le texte reel a cote, parce
+  // qu'une cle qui perdrait son « + » rendrait ce test vert pour rien.
+  const fr = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'shared', 'i18n', 'fr.json'), 'utf8'))
+  assert.match(fr['validate.count_capped'], /\+/,
+    'la cle du compte plafonne ne porte plus de « + » : le nombre se lirait exact')
+})
+
+test("LE TEST QUI COMPTE (M2) : l'etat « aucun logement » ne s'affiche QUE sur une liste vraiment lue", async () => {
+  // Mutation : l'etat vide s'affiche sans consulter `listeLue`. L'hote qui a
+  // quatre logements et dont l'appel n'a pas encore repondu lisait « Ajoutez
+  // votre premier logement » — et, a l'onboarding, une reconciliation contre
+  // une liste amputee CREE des biens en double chez le canal.
+  //
+  // ⚠ CE GARDE-FOU EST TRANSPOSE DU BLOC « Vos logements » AU BLOC « Revenus
+  // nets » (etape 4), ET AUCUNE DES TROIS DISTINCTIONS N'EST PERDUE : pas
+  // encore lu, lu et vide, lu en echec. L'etat vide a suivi le bloc parce qu'un
+  // hote sans bien n'a pas de revenus non plus, et que c'est la seule action qui
+  // lui reste sur cette page.
+  const pasLu = bancDeRendu({ biens: [], ecran: null })
+  pasLu.interne.renderRevenus()
+  assert.strictEqual(pasLu.cache('[data-bind="etat-vide"]').hidden, true,
+    'l etat vide s affiche alors que la liste n a pas ete lue')
+  assert.strictEqual(pasLu.cache('[data-bind="revenue-section"]').hidden, true)
+
+  const lu = bancDeRendu({ biens: [], ecran: { biens: [] } })
+  lu.interne.renderRevenus()
+  assert.strictEqual(lu.cache('[data-bind="etat-vide"]').hidden, false,
+    'une liste lue et vide doit proposer d ajouter un logement')
+  assert.match(lu.html('[data-bind="etat-vide"]'), /logements\.vide_titre/)
+
+  // Et une lecture EN ECHEC (`null`) n'est ni une liste vide ni un etat vide.
+  // ⚠ ELLE DOIT LE DIRE, et c'est ce controle qui a trouve un defaut dans mon
+  // rendu neuf : `etat.biens` a `null` faisait tomber la boucle des lignes sur
+  // `(etat.biens || [])`, donc un bloc avec son total mais SANS AUCUNE LIGNE —
+  // un ecran qui a l'air complet et ne montre rien.
+  const illisible = bancDeRendu({ biens: null, ecran: { biens: null } })
+  illisible.interne.renderRevenus()
+  assert.strictEqual(illisible.cache('[data-bind="etat-vide"]').hidden, true)
+  assert.match(illisible.cache('[data-bind="revenue-total"]').textContent, /revenue\.unavailable/,
+    'une liste de biens illisible affiche un total comme si tout allait bien')
+
+  // Et avec un total VALIDE mais des biens illisibles : meme refus. C'est le
+  // cas que mon rendu laissait passer.
+  const avecTotal = bancDeRendu({ biens: null, ecran: { biens: null, revenus: { mois: '2026-11', total: { total_cents: 50000, recu_cents: 50000, a_venir_cents: 0, bruts: 0, refuses: { montant: 0, date: 0 }, motifs: {} }, par_bien: {} } } })
+  avecTotal.interne.renderRevenus()
+  assert.match(avecTotal.cache('[data-bind="revenue-total"]').textContent, /revenue\.unavailable/,
+    'un total s affiche sur une liste de biens illisible')
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Le bloc « Derniers avis » TEL QUE L'ECRAN LE REND — constats de la revue
+// de l'etape 2 (25 octobre 2026)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⚠ CES TESTS APPELLENT `renderDerniersAvis`, ce qu'aucun test ne faisait : la
+// fonction etait exposee par ce banc et INAPPELABLE (le module des avis n'etait
+// pas injecte, et l'appeler levait `ReferenceError`). Onze mutations du code
+// neuf survivaient.
+
+// ⚠ MODULE ES : `import()` ET NON `require`. Node leve
+// ERR_REQUIRE_ESM_RACE_CONDITION sur un `require` de module ES en cours de
+// chargement — meme patron que `tests/avis-recents-dom.test.js`.
+let M_AVIS
+test.before(async () => { M_AVIS = await import('../shared/avis-recents.js') })
+
+const AVIS_SERVEUR = [{
+  id: 'r1', bien_ref: '209413', ota: 'airbnb', recu_le: '2026-10-20T10:00:00Z',
+  note_sur_5: 4.8, texte: 'Sejour parfait, on reviendra.', voyageur: 'Claire B.'
+}]
+const BIENS_SERVEUR = [{ id: 'u1', provider_property_id: '209413', name: 'La bulle', photo_url: null }]
+
+function bancAvis (ecran = {}) {
+  const p = ouvrirAujourdhui({ sansInit: true })
+  p.interne.etat.ecran = ecran
+  p.interne.etat.biens = BIENS_SERVEUR
+  p.interne.etat.noteGlobale = ecran.notes ? ecran.notes.global : null
+  return p
+}
+
+test("LE TEST QUI COMPTE : un droit `avis` refuse n'EFFACE pas seulement, il ne laisse RIEN", async () => {
+  // ⚠ MESURE DE LA REVUE : la section passait a `hidden` et gardait ses trois
+  // cartes et sa moyenne dans le DOM. `hidden` cache, il n'efface pas — et le
+  // cas se produit en deux temps : un premier affichage rend les avis, puis la
+  // reponse du serveur refuse le droit (membre revoque en cours de session).
+  const p = bancAvis({ derniers_avis: AVIS_SERVEUR, notes: { global: { note_sur_5: 4.8, notes: 336 } } })
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.match(p.html('[data-list="reviews"]'), /avis-carte/, 'le rendu normal ne produit rien')
+
+  // Puis le refus arrive.
+  p.interne.etat.ecran = { derniers_avis: null, refuses: ['avis'] }
+  p.interne.etat.noteGlobale = null
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(p.cache('[data-bind="reviews-section"]').hidden, true, 'la section reste visible')
+  assert.strictEqual(p.html('[data-list="reviews"]'), '',
+    'les cartes restent dans le DOM : `hidden` les cache, il ne les efface pas')
+  assert.strictEqual(p.html('[data-bind="reviews-head"]'), '',
+    'la moyenne reste dans le DOM apres un refus de droit')
+})
+
+test("LE TEST QUI COMPTE : « pas encore demande » ne se dit pas « pas lisible »", async () => {
+  // Le cache d'ecran ne porte plus ce bloc (il descend un prenom de voyageur) :
+  // au premier affichage la cle est ABSENTE. La traiter comme `null` afficherait
+  // « Les avis ne sont pas lisibles » a chaque ouverture, pendant un
+  // aller-retour, sur une donnee qui arrive une seconde plus tard.
+  const p = bancAvis({ biens: [], notes: { global: { note_sur_5: 4.8, notes: 12 } } })
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(p.cache('[data-bind="reviews-section"]').hidden, true)
+  assert.strictEqual(p.html('[data-list="reviews"]'), '')
+
+  // Alors qu'une lecture VRAIMENT en echec, elle, se dit.
+  const q = bancAvis({ derniers_avis: null, indisponibles: ['derniers_avis'] })
+  await q.interne.chargerDerniersAvis()
+  q.interne.renderDerniersAvis()
+  assert.strictEqual(q.cache('[data-bind="reviews-section"]').hidden, false)
+  assert.match(q.html('[data-list="reviews"]'), /reviews\.unavailable/)
+})
+
+test("LE TEST QUI COMPTE : un membre SANS AUCUN BIEN ne lit pas « pas encore d'avis »", async () => {
+  // Une phrase qui parle d'absence d'AVIS la ou il y a absence de BIENS. C'est
+  // l'injonction symetrique de « Ajoutez votre premier logement », fermee le
+  // meme jour sur le bloc des logements.
+  const p = bancAvis({ derniers_avis: [], perimetre_vide: true })
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(p.cache('[data-bind="reviews-section"]').hidden, true)
+  assert.strictEqual(p.html('[data-list="reviews"]'), '')
+
+  // Un hote qui a des biens et pas d'avis, lui, lit bien la phrase.
+  const q = bancAvis({ derniers_avis: [], perimetre_vide: false })
+  await q.interne.chargerDerniersAvis()
+  q.interne.renderDerniersAvis()
+  assert.strictEqual(q.cache('[data-bind="reviews-section"]').hidden, false)
+  assert.match(q.html('[data-list="reviews"]'), /reviews\.empty/)
+})
+
+test('le bloc rend les cartes, la moyenne et le compte quand tout va bien', async () => {
+  const p = bancAvis({ derniers_avis: AVIS_SERVEUR, notes: { global: { note_sur_5: 4.8, notes: 336 } } })
+  await p.interne.chargerDerniersAvis()
+  p.interne.renderDerniersAvis()
+  const liste = p.html('[data-list="reviews"]')
+  assert.match(liste, /Sejour parfait/)
+  assert.match(liste, /Claire B\./)
+  assert.match(liste, /La bulle/, 'le bien est retrouve par sa cle PROVIDER')
+  assert.match(p.html('[data-bind="reviews-head"]'), /reviews\.score/)
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Le bloc « Revenus nets » TEL QUE L'ECRAN LE REND — constats de la review
+// de l'etape 4 (26 octobre 2026)
+//
+// ⚠ AUCUN TEST N'EXERCAIT CE RENDU AVEC UN `par_bien` NON VIDE, et la review
+// l'a prouve par la mutation la plus simple : remplacer
+// `parBien[String(b.provider_property_id)]` par `parBien[String(b.id)]` — la
+// jointure naive UUID contre cle TEXTE, c'est-a-dire la REGLE DURE n° 3 du
+// depot — survivait a la suite ENTIERE, 6337 tests. Toutes les lignes
+// auraient affiche « aucun versement ce mois-ci » sous un bandeau juste : un
+// ecran qui a l'air complet et ne montre rien.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const REV_BIENS = [
+  { id: 'uuid-1', provider_property_id: '209413', name: 'La bulle', currency: 'EUR' },
+  { id: 'uuid-2', provider_property_id: '307820', name: 'Coeur de vie 23', currency: 'EUR' }
+]
+const parBien = (o) => ({
+  sejours: 0, recu_cents: 0, a_venir_cents: 0, total_cents: 0, bruts: 0,
+  refuses: { montant: 0, date: 0 }, motifs: {}, ...o
+})
+const bancRevenus = (revenus, biens = REV_BIENS) => bancDeRendu({
+  biens, ageCache: null, ecran: { biens, revenus, droits: { reservations: true } }
+})
+
+test("LE TEST QUI COMPTE : chaque ligne est jointe par l'UUID du bien, et plus par sa cle provider", () => {
+  // ⚠ CE TEST S'EST INVERSE LE 27 OCTOBRE 2026, ET CE N'EST PAS UN RELACHEMENT.
+  // Il gardait « jointe par la cle PROVIDER, jamais par l'UUID », parce que
+  // l'endpoint groupait par `bookings_snapshot.property_id` — du TEXTE.
+  // L'agregat SQL groupe desormais par `property_uuid`, la colonne derivee qui
+  // porte l'IDENTITE du bien.
+  //
+  // La regle dure n° 3 n'est pas contredite, elle est HONOREE : on ne joint
+  // jamais un UUID a une cle TEXTE. Les deux cotes sont des UUID, et c'est le
+  // writer qui a fait la resolution une fois, a l'ecriture, en comparant le
+  // COUPLE (compte, cle provider). La cle provider change au re-keying et a la
+  // bascule ; l'UUID non — c'etait la cause racine des 1 000 EUR d'ecart muet
+  // entre le bandeau et les lignes.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }) },
+    total: parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  assert.match(lignes, /La bulle/, 'le bien n est pas rendu')
+  assert.ok(!lignes.includes('revenue.none') || !/La bulle[\s\S]{0,200}revenue\.none/.test(lignes),
+    'le bien joint par UUID affiche « aucun versement » : la jointure est fausse')
+  // Et le second bien, qui n'a pas de ligne dans `par_bien`, dit « aucun
+  // versement » — un FAIT, puisqu'il a bien ete lu.
+  assert.match(lignes, /Coeur de vie 23[\s\S]{0,200}revenue\.none/,
+    'un bien sans versement ce mois-ci ne dit pas « aucun versement »')
+})
+
+test("LE TEST QUI COMPTE : une ligne dont le MONTANT manque ne dit JAMAIS 0,00 €", () => {
+  // ⚠ CONSTAT GRAVE DE LA REVIEW, MESURE. Le module SAIT qu'un montant manque
+  // (`refuses.montant`), et la ligne ne lisait ni ce compteur ni les motifs :
+  // elle affichait « 0,00 € », un FAIT, au niveau du bien, sous un total juste.
+  // Et le faux zero etait PIRE que l'absence : un bien qui n'a vraiment rien
+  // touche n'a pas de cle, donc dit « aucun versement » SANS chiffre. L'ecran
+  // avait deux rendus, et c'est le FAUX qui portait le nombre.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } })
+    },
+    total: parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  assert.ok(!/0[.,]00/.test(lignes), `la ligne affiche un zero : ${lignes}`)
+  assert.match(lignes, /revenue\.unavailable/, 'la ligne ne dit pas que le montant est non calculable')
+  assert.match(lignes, /revenue\.no_amount_short/, 'la ligne ne porte pas sa marque')
+})
+
+test("LE TEST QUI COMPTE : le compte de sejours d'une ligne porte TOUS les sejours", () => {
+  // ⚠ CE TEST A ETE RETOURNE A LA RECETTE DE THIERRY DU 27 OCTOBRE 2026. Il
+  // figeait l'inverse — « le compte de sejours ne compte pas les refuses » — et
+  // il justifiait la soustraction par la coherence : « deux nombres de la meme
+  // ligne se contredisent ».
+  //
+  // C'est la soustraction qui produisait la contradiction. Sur staging, la
+  // ligne du Studio Centre affichait « 0 sejours · 2 sans montant » : « 0 » est
+  // un FAIT FAUX — il y a bien deux sejours ce mois-ci — et il contredisait le
+  // « 2 » de la mention suivante. Thierry a dicte la forme juste : « 2 sejours ·
+  // montant non calculable ».
+  //
+  // Le compte porte donc TOUS les sejours du mois pour ce bien, et c'est la
+  // colonne Total qui dit que le montant n'est pas calculable.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 2, total_cents: 30000, recu_cents: 30000, refuses: { montant: 1, date: 0 } })
+    },
+    total: parBien({ sejours: 2, total_cents: 30000, recu_cents: 30000, refuses: { montant: 1, date: 0 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  // ⚠ LE BANC NE MONTRE NI LES NOMBRES NI LES MONTANTS : son double de `t` rend
+  // la CLE (`revenue.stays` au lieu de « 1 séjours »), et son double de
+  // `I18n.money` rend une chaine vide. On juge donc ce qu'il peut dire, et on
+  // verifie le NOMBRE a la source, juste apres.
+  assert.match(lignes, /revenue\.no_amount_short/, 'le refus n est pas marque sur la ligne')
+  // Un montant calculable prend la branche `<strong>`, pas la branche
+  // « non calculable » — c'est la distinction que la ligne doit faire.
+  assert.match(lignes, /<strong class="num small">/,
+    'un montant calculable est rendu comme non calculable')
+  assert.ok(!lignes.includes('revenue.unavailable'),
+    'une ligne qui porte 300 € se dit non calculable')
+
+  // ⚠ ET LE NOMBRE PASSE A `revenue.stays` SE VERIFIE A LA SOURCE, parce que
+  // c'est tout l'objet de ce test : le banc ne montre pas les nombres.
+  // La page passe `d.sejours` — TOUS les sejours du mois pour ce bien — et non
+  // une soustraction.
+  const html = fs.readFileSync(path.join(__dirname, '..', 'pages', 'aujourdhui.html'), 'utf8')
+  assert.match(html, /t\('revenue\.stays', \{ n: d\.sejours \}\)/,
+    '`revenue.stays` ne recoit plus TOUS les sejours du bien')
+  assert.ok(!/d\.sejours - refuses/.test(html),
+    'la soustraction est revenue : « 0 sejours · 2 sans montant » contredit ses propres nombres')
+})
+
+test("LE TEST QUI COMPTE : l'argent rattache a AUCUN bien connu se DIT", () => {
+  // ⚠ SECOND CONSTAT GRAVE DE LA REVIEW : 1 000 € d'ecart muet entre le bandeau
+  // et la somme des lignes. `par_bien` est groupe par `property_id` de
+  // `bookings_snapshot` ; l'ecran ne peint que les cles qui correspondent a un
+  // bien. Une cle ORPHELINE — `property_id` nul, re-keying, bien supprime —
+  // entrait dans le total et sortait de l'affichage sans aucune reserve.
+  //
+  // ⚠ CE TEST GARDE L'AFFICHAGE, PAS LE COMPTAGE, et la review du 28 octobre
+  // 2026 a eu raison de le dire : sa fixture n'etait PLUS produisible par
+  // l'endpoint. L'agregat `revenus_hors_mois` ne comptait que les
+  // `property_uuid` NULS, donc une cle `CLE-DISPARUE` (un UUID pendant, bien
+  // supprime) rendait `hors_biens = 0` — l'ecart muet se rouvrait, et ce test
+  // restait vert en peignant une reserve que le serveur n'aurait jamais
+  // envoyee.
+  //
+  // La migration `2026-10-26-revenus-hors-biens.sql` l'a referme : le compteur
+  // demande maintenant « ce bien existe-t-il encore ? » (`not exists` sur
+  // `properties`, borne au compte) et non « l'UUID est-il nul ? ». La fixture
+  // est donc redevenue produisible, et le COMPTAGE est mesure sur des donnees
+  // reelles par `scripts/verifier-parite-revenus.js`, qui compare `hors_biens`
+  // et `hors_biens_cents` a l'oracle — ce qu'il ne faisait pas non plus.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 1, total_cents: 50000, recu_cents: 50000 }),
+      '': parBien({ sejours: 1, total_cents: 50000, recu_cents: 50000 }),
+      'CLE-DISPARUE': parBien({ sejours: 1, total_cents: 50000, recu_cents: 50000 })
+    },
+    total: parBien({ sejours: 3, total_cents: 150000, recu_cents: 150000 }),
+    hors_mois: parBien({}),
+    hors_biens: parBien({ sejours: 2, total_cents: 100000, recu_cents: 100000 })
+  })
+  p.interne.renderRevenus()
+  const res = p.cache('[data-bind="revenue-reserves"]')
+  assert.strictEqual(res.hidden, false, 'la reserve est masquee alors que 1 000 € ne sont sur aucune ligne')
+  assert.match(res.textContent, /revenue\.hors_biens/,
+    'rien ne dit que de l argent du total n est sur aucune ligne')
+})
+
+test("LE TEST QUI COMPTE : les trois reserves s'affichent, et chacune dit sa cause", () => {
+  // Elles ne se melangent pas : un montant manquant se repare dans le payload
+  // du provider, une date manquante dans la table des delais, un brut attend
+  // que la plateforme transmette sa commission.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 3, total_cents: 90000, recu_cents: 90000, bruts: 1, refuses: { montant: 1, date: 0 } }) },
+    total: parBien({ sejours: 3, total_cents: 90000, recu_cents: 90000, bruts: 1, refuses: { montant: 1, date: 0 } }),
+    hors_mois: parBien({ sejours: 2, refuses: { montant: 0, date: 2 }, motifs: { canal_inconnu: 2 } }),
+    hors_biens: parBien({}),
+    tronque: true
+  })
+  p.interne.renderRevenus()
+  const res = p.cache('[data-bind="revenue-reserves"]')
+  assert.strictEqual(res.hidden, false)
+  for (const cle of ['revenue.gross_count', 'revenue.no_amount', 'revenue.no_date', 'revenue.truncated']) {
+    assert.ok(res.textContent.includes(cle), `la reserve ${cle} n est pas dite : ${res.textContent}`)
+  }
+})
+
+test("LE TEST QUI COMPTE : sans le droit `reservations`, le bloc n'est pas dans l'ecran", () => {
+  // ⚠ ET LE MASQUAGE SE DOUBLE D'UNE GARDE SERVEUR, qui est dans l'endpoint —
+  // regle absolue du depot : le masquage tombe sur une feuille de style absente.
+  // Le test de la garde serveur est juste en dessous.
+  const p = bancDeRendu({
+    biens: REV_BIENS, ageCache: null,
+    ecran: { biens: REV_BIENS, revenus: null, droits: { reservations: false } }
+  })
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-section"]').hidden, true,
+    'le bloc revenus s affiche sans le droit `reservations`')
+})
+
+test("LE TEST QUI COMPTE : la garde SERVEUR du droit `reservations` existe, et precede la lecture", () => {
+  // ⚠ LA REVIEW A MONTRE QU'AUCUN TEST NE LA TENAIT : la retirer laissait la
+  // suite au vert. Or le payload part dans le `localStorage` du membre pour
+  // 12 h, et le masquage UI ne protege rien.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'ecran', 'aujourdhui.js'), 'utf8')
+  const bloc = (src.match(/const lireRevenus = async \(\) => \{[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'lireRevenus a change de forme')
+  assert.match(bloc, /if \(!droits\.reservations\) return null/,
+    'la garde serveur du droit `reservations` a disparu de lireRevenus')
+  // ⚠ ELLE PRECEDE TOUT APPEL, et la forme de l'appel a change le 27 octobre
+  // 2026 : ce n'est plus `.from(...)` mais `.rpc(...)`. Un test reste sur
+  // l'ancienne forme serait devenu vert pour rien — il ne trouvait plus de
+  // lecture a comparer, donc `iLecture` valait -1 et la condition tombait.
+  const iGarde = bloc.indexOf('if (!droits.reservations)')
+  const iAppel = Math.min(
+    ...['.rpc(', '.from('].map(x => { const i = bloc.indexOf(x); return i === -1 ? Infinity : i })
+  )
+  assert.ok(Number.isFinite(iAppel), 'aucun appel trouve dans lireRevenus : ce test ne mesure rien')
+  assert.ok(iGarde > -1 && iGarde < iAppel, 'un appel part avant la garde du droit')
+  // ⚠ ET LA TRONCATURE N'EXISTE PLUS : l'agregat ne pagine pas, il groupe. Ce
+  // qui remplace ce garde-fou est la distinction entre une fonction ABSENTE
+  // (migration en attente, donc « non calculable ») et une vraie panne.
+  assert.match(bloc, /indisponibles\.push\('revenus'\)/,
+    'une lecture impossible ne serait plus signalee : l ecran afficherait un mois a zero')
+})
+
+test("LE TEST QUI COMPTE : l'endpoint passe le perimetre en UUID, et l'agregat groupe en UUID", () => {
+  // ⚠ LA REGLE DURE N° 3, DU COTE SERVEUR, ET ELLE A CHANGE DE FORME LE
+  // 27 OCTOBRE 2026. L'endpoint comparait des cles PROVIDER ; il passe
+  // maintenant `refsUuid` — la liste des biens confies a un membre, en UUID —
+  // a une fonction SQL qui groupe par `property_uuid`.
+  //
+  // Les deux cotes sont donc des UUID. Ce qui serait faux aujourd'hui, c'est
+  // l'INVERSE de l'ancienne erreur : passer `refsTexte` a une fonction qui
+  // compare des UUID ne rendrait AUCUNE correspondance — un ecran vide sous un
+  // bandeau vide, pour un membre delegue SEULEMENT, donc invisible en recette.
+  const src = fs.readFileSync(path.join(__dirname, '..', 'api', 'ecran', 'aujourdhui.js'), 'utf8')
+  const bloc = (src.match(/const lireRevenus = async \(\) => \{[\s\S]*?\n  \}/) || [''])[0]
+  assert.ok(bloc, 'lireRevenus a change de forme')
+
+  assert.match(bloc, /rpc\('revenus_du_mois'/, 'l agregat du mois n est pas appele')
+  assert.match(bloc, /rpc\('revenus_hors_mois'/, 'l agregat hors mois n est pas appele')
+  assert.match(bloc, /p_refs: refsUuid/, 'le perimetre n est plus passe en UUID')
+  assert.ok(!/p_refs: refsTexte/.test(bloc),
+    'le perimetre est passe en cle TEXTE a une fonction qui compare des UUID : aucune correspondance')
+  assert.match(bloc, /p_aujourdhui: jour/, 'le jour de Paris n est plus passe a l agregat')
+
+  // ⚠ ET L'ENDPOINT NE CALCULE PLUS RIEN. C'est tout l'objet de
+  // l'architecture : 3,8 Mo et 569-961 ms retires du chemin critique.
+  const codeEntier = src.split('\n').filter(l => !l.trim().startsWith('//')).join('\n')
+  for (const interdit of ['revenusDuMois', 'fenetreDeLecture', 'tableDesDelais']) {
+    assert.ok(!codeEntier.includes(interdit),
+      `l endpoint calcule encore les revenus lui-meme (${interdit})`)
+  }
+  assert.ok(!/from\('delais_versement'\)/.test(codeEntier),
+    'l endpoint relit la table des delais : c est le writer qui s en sert')
+})
+
+test("LE TEST QUI COMPTE : le BANDEAU dit « non calculable », il n'affiche pas 0,00 €", () => {
+  // ⚠ CONSTAT BLOQUANT DE LA REVIEW DU 26 OCTOBRE 2026. La ligne d'un logement
+  // porte cette garde depuis le debut — zero euro ET un montant refuse veut
+  // dire « on ne sait pas », pas « ce logement n'a rien rapporte ». Le BANDEAU,
+  // lui, ecrivait son total sans condition.
+  //
+  // Mesure sur les donnees reelles de staging : `revenus_du_mois(2026-10)` rend
+  // `{sejours: 2, total_cents: 0, sans_montant: 2}`. L'ecran affichait donc
+  // « 0,00 € » en grand, « non calculable » sur la ligne juste en dessous, et
+  // « 2 sejour(s) dont le montant n'est pas calculable » en reserve. Les deux
+  // moities du meme ecran se contredisaient, et c'est le bandeau que l'hote
+  // retient.
+  //
+  // ⚠ CE QUI REND CE TEST POSSIBLE, et ce qui a laissé le defaut survivre si
+  // longtemps : le banc stube `I18n.money` pour rendre la chaine VIDE, donc un
+  // montant s'affiche `''`. Un test qui aurait compare le texte a « 0,00 € »
+  // serait donc vert dans les deux cas — c'est l'angle mort.
+  //
+  // Mais `t()` n'est pas stube de la meme facon : il rend la CLEF. Les deux
+  // etats sont donc parfaitement distinguables ici — `'revenue.unavailable'`
+  // contre `''` — et c'est cette distinction qu'on mesure.
+  //
+  // (Premiere version de ce test : j'assertais `classList.contains('muted')`.
+  // Le noeud du banc n'a pas de `classList` reelle, donc l'assertion echouait
+  // alors que la garde fonctionnait. Mesurer ce que le banc ne simule pas, c'est
+  // se fabriquer un rouge et chercher un defaut la ou il n'y en a pas.)
+  const p = bancRevenus({
+    mois: '2026-10',
+    par_bien: { 'uuid-1': parBien({ sejours: 2, total_cents: 0, refuses: { montant: 2, date: 0 } }) },
+    total: parBien({ sejours: 2, total_cents: 0, refuses: { montant: 2, date: 0 } }),
+    hors_mois: parBien({}),
+    hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  assert.strictEqual(p.cache('[data-bind="revenue-total"]').textContent, 'revenue.unavailable',
+    'le bandeau affiche un montant comme un fait alors qu AUCUN sejour du mois n est calculable')
+  assert.strictEqual(p.cache('[data-bind="revenue-received"]').textContent, '',
+    'le bandeau affiche un « recu » alors que rien n est calculable')
+  assert.strictEqual(p.cache('[data-bind="revenue-upcoming"]').textContent, '',
+    'le bandeau affiche un « a venir » alors que rien n est calculable')
+
+  // ⚠ LA CONTRE-EPREUVE : un mois a ZERO EURO REEL — aucun refus — reste un
+  // fait, et doit s'afficher comme tel. Sans elle, une garde qui dirait
+  // toujours « non calculable » passerait le test ci-dessus.
+  const q = bancRevenus({
+    mois: '2026-10',
+    par_bien: { 'uuid-1': parBien({ sejours: 0, total_cents: 0 }) },
+    total: parBien({ sejours: 0, total_cents: 0 }),
+    hors_mois: parBien({}),
+    hors_biens: parBien({})
+  })
+  q.interne.renderRevenus()
+  assert.notStrictEqual(q.cache('[data-bind="revenue-total"]').textContent, 'revenue.unavailable',
+    'un mois sans aucun sejour est annonce « non calculable » alors que zero est la bonne reponse')
+})
+
+// ─── LES CINQ CONSTATS DE LA RECETTE DU 27 OCTOBRE 2026 (Thierry) ────────────
+
+test("LE TEST QUI COMPTE : `--recu` est un NOMBRE NU, jamais un pourcentage", () => {
+  // ⚠ CONSTAT 2 DE LA RECETTE : « un mois entierement recu (aout, Loft)
+  // s'affiche hachure ». La cause n'etait pas la couleur, c'etait une unite.
+  // La couche pleine de la barre fait
+  // `inline-size: calc(var(--part) * var(--recu) / 100)`. Avec `--recu: 100%`,
+  // cela donne `calc(50% * 100% / 100)` — un POURCENTAGE MULTIPLIE PAR UN
+  // POURCENTAGE, invalide en CSS. La declaration tombe EN SILENCE, la couche
+  // pleine n'a jamais eu de largeur, et seules les hachures s'affichaient : sur
+  // tous les biens, tous les mois, depuis la livraison du bloc.
+  //
+  // ⚠ ET RIEN NE POUVAIT LE VOIR : le pourcentage s'ecrivait « correctement »
+  // dans l'attribut, aucune assertion ne lit une largeur calculee, et jsdom ne
+  // resout pas `calc()`. Seul l'oeil de Thierry sur un vrai telephone l'a pris.
+  // D'ou ce test, qui garde la FORME de la valeur plutot que son effet.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 2, total_cents: 70000, recu_cents: 70000, a_venir_cents: 0 }) },
+    total: parBien({ sejours: 2, total_cents: 70000, recu_cents: 70000, a_venir_cents: 0 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  assert.match(lignes, /--recu:\s*\d/, 'la barre ne porte pas `--recu`')
+  assert.ok(!/--recu:\s*[\d.]+%/.test(lignes),
+    '`--recu` est un pourcentage : `calc(% * %)` est invalide, la part RECUE ne s affichera pas')
+  // Et `--part`, lui, EST un pourcentage : c'est une largeur.
+  assert.match(lignes, /--part:\s*\d+%/, '`--part` doit rester un pourcentage : c est une largeur')
+})
+
+test("LE TEST QUI COMPTE : le telephone recoit une LISTE, rendue par la meme boucle", () => {
+  // ⚠ CONSTAT 1 DE LA RECETTE : a 390 px le tableau en demandait 425, la colonne
+  // Total etait coupee et les noms se cassaient mot par mot. La forme telephone
+  // est un SECOND BALISAGE, parce qu'on ne peut pas basculer un `<table>` en
+  // liste par CSS sans retirer ses cellules de l'arbre d'accessibilite.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }) },
+    total: parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const cartes = p.html('[data-list="revenue-cards"]')
+  assert.match(cartes, /La bulle/, 'la liste du telephone ne porte pas le bien')
+  assert.match(cartes, /rev-carte__total/, 'la carte ne porte pas le total sur la ligne du nom')
+  assert.match(cartes, /revenue-bar/, 'la carte ne porte pas la barre')
+  assert.match(cartes, /revenue\.split/, 'la carte ne dit pas « x recus · y a venir »')
+  // ⚠ ET LE COMPTE DE SEJOURS Y EST AUSSI, que la demande ne mentionnait pas :
+  // regle « LE MOBILE SUIT L'ORDINATEUR », le tableau le porte.
+  assert.match(cartes, /revenue\.stays/, 'le compte de sejours est perdu au telephone')
+  // Les DEUX formes sortent des MEMES valeurs : un bien dans l'une est dans
+  // l'autre. Deux boucles divergeraient au premier correctif applique a une
+  // seule.
+  const lignes = p.html('[data-list="revenue-rows"]')
+  for (const nom of ['La bulle', 'Coeur de vie 23']) {
+    assert.ok(lignes.includes(nom) && cartes.includes(nom),
+      `${nom} n est pas dans les DEUX formes : les deux boucles ont divergé`)
+  }
+})
+
+test("LE TEST QUI COMPTE : un montant non calculable le reste au telephone", () => {
+  // La carte ne doit pas rattraper en « 0,00 € » ce que la ligne refuse de dire.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } })
+    },
+    total: parBien({ sejours: 1, refuses: { montant: 1, date: 0 }, motifs: { prix_non_calculable: 1 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const cartes = p.html('[data-list="revenue-cards"]')
+  assert.match(cartes, /revenue\.unavailable/, 'la carte ne dit pas que le montant est non calculable')
+  assert.ok(!/0[.,]00/.test(cartes), `la carte affiche un zero la ou la ligne refuse : ${cartes}`)
+})
+
+test("RECENSEMENT : le mois ne s'affiche qu'UNE fois, et le selecteur Mois/Annee est parti", () => {
+  // ⚠ CONSTATS 4 ET 5 DE LA RECETTE. « octobre 2026 » etait ecrit a DEUX
+  // endroits — entre les fleches et a droite du total — et le selecteur de vue
+  // n'avait qu'un bouton visible, de 30 px, la ou la charte exige 44.
+  const src = lire('pages/aujourdhui.html')
+  const bindings = (src.match(/data-bind="revenue-month(?!-nav)"/g) || [])
+  assert.deepEqual(bindings, [],
+    'le mois est encore affiche a cote du total : il y est deux fois a l ecran')
+  assert.match(src, /data-bind="revenue-month-nav"/, 'le mois des fleches a disparu aussi')
+  assert.ok(!/data-vue="mois"/.test(src),
+    'le selecteur Mois/Annee est encore la : un seul bouton visible, et sous 44 px')
+})
+
+test("RECENSEMENT : la barre dit le RECU en plein noir et l A VENIR en hachure grise", () => {
+  // ⚠ CONSTAT 2, seconde moitie. Les deux couches etaient en `var(--ok)` — le
+  // vert : un mois entierement recu s'affichait de la couleur de l'encaisse ET
+  // du motif de l'attente, donc la barre ne distinguait plus rien.
+  const css = lire('shared/ui.css')
+  // ⚠ CHACUN DES DEUX SELECTEURS APPARAIT DEUX FOIS : une regle COMMUNE pose
+  // `content` et la position, une regle propre pose la largeur et la couleur.
+  // Ma premiere version prenait la PREMIERE occurrence, donc la regle commune,
+  // qui n'a pas de `background` — le test rougissait sur un code juste. Un test
+  // qui lit le mauvais bloc peut aussi PASSER pour une raison fausse, et c'est
+  // le sens de ce commentaire : on designe la regle par ce qu'elle CONTIENT.
+  const blocs = (sel) => (css.match(new RegExp('\\' + sel + '\\s*\\{[^}]*\\}', 'g')) || [])
+  // ⚠ ET « contient background » NE SUFFIT PAS NON PLUS : la regle
+  // `prefers-reduced-motion` retire les hachures par `background-image: none`,
+  // donc DEUX regles peignent legitimement l'« a venir ». On designe donc
+  // chaque couche par ce qui la caracterise — le motif pour l'une, un fond
+  // plein pour l'autre. Deuxieme resserrage de ce test, et les deux fois c'est
+  // mon assertion qui etait trop large, pas le CSS qui etait faux.
+  const avenirs = blocs('.revenue-bar::before').filter(b => /repeating-linear-gradient/.test(b))
+  const recus = blocs('.revenue-bar::after').filter(b => /background:\s*var\(/.test(b))
+  assert.equal(avenirs.length, 1, `une seule regle doit peindre l « a venir » : ${avenirs.length}`)
+  assert.equal(recus.length, 1, `une seule regle doit peindre le « recu » : ${recus.length}`)
+  const avenir = avenirs
+  const recu = recus
+  assert.match(avenir[0], /repeating-linear-gradient/, 'l « a venir » n est plus hachure')
+  assert.match(avenir[0], /var\(--muted\)/, 'les hachures ne sont pas grises')
+  assert.match(recu[0], /background:\s*var\(--ink\)/, 'le « recu » n est pas en plein noir')
+  assert.ok(!/var\(--ok\)/.test(avenir[0] + recu[0]),
+    'la barre utilise encore le vert : les deux couches se confondent')
+  // ⚠ CONSTAT 3 : les cellules s'alignent par le HAUT. Avec `baseline`, la
+  // vignette de 28 px repoussait la ligne de base de la cellule du nom, et les
+  // trois cellules de chiffres descendaient — mais SEULEMENT sur les lignes qui
+  // portent une photo.
+  const cellules = css.match(/\.rev-tbl th,\s*\.rev-tbl td\s*\{[^}]*\}/)
+  assert.ok(cellules, 'la regle des cellules du tableau a disparu')
+  assert.match(cellules[0], /vertical-align:\s*top/,
+    'les cellules s alignent encore par la baseline : une ligne a photo decale ses montants')
+})
+
+// ─── LE BUDGET DE L'ECRAN (spec §5, regle gravee de CLAUDE.md) ───────────────
+
+test("LE TEST QUI COMPTE : l'accueil coute DEUX appels, et ce compte NE CROIT PAS avec les biens", async () => {
+  // ⚠ CE TEST MANQUAIT, ET C'EST LA SESSION CHEF DE FILE QUI L'A VU avant le
+  // merge vers `main` : la spec du lot porte une case « Performance », et trois
+  // de ses huit points n'etaient ni traites ni declares « sans objet » — celui
+  // qui demande un test comptant les appels etait du nombre.
+  //
+  // ⚠ CE QU'IL GARDE N'EST PAS UN NOMBRE, C'EST UNE PENTE. Un ecran qui coute
+  // 2 appels a 1 bien et 2 a douze est borne ; celui qui coute 2 puis 13 est un
+  // « 1 + N » qu'on ne voit pas en developpement — on a tous deux ou trois
+  // biens — et qui se voit chez l'hote qui en a trente. C'est la mesure du
+  // 22 octobre 2026 en production : 13 appels HTTP et 1 047 556 octets pour
+  // QUATRE logements, dont `/api/yield` appele DEUX FOIS PAR BIEN.
+  //
+  // ⚠ ET LE COMPTE EST DEUX, PAS UN. L'en-tete de la page le dit depuis le lot
+  // (b) : `/api/menages` n'est PAS remplace par l'appel d'ecran, et c'est
+  // assume. Ecrire « un seul appel » ici serait plus joli et faux ; le test
+  // garde ce qui est vrai, et le nomme.
+  const appels = async (nBiens) => {
+    const biens = Array.from({ length: nBiens }, (_, i) => ({
+      id: `uuid-${i}`, provider_property_id: String(200000 + i), name: `Bien ${i}`, currency: 'EUR'
+    }))
+    const p = ouvrirAujourdhui({ corps: { biens, droits: { reservations: true, menage: true } } })
+    p.ouvrirSession(); p.repondreI18n()
+    await tours()
+    // ⚠ UNE ERREUR DE DEMARRAGE INVALIDE LA MESURE. Sans cette garde, un
+    // `init()` qui leve rend zero appel — et « zero » se lirait « aucun appel
+    // superflu », c'est-a-dire le meilleur resultat possible. C'est exactement
+    // ce qui se passait avant le 27 octobre 2026 : `CacheEcran` n'etait pas
+    // injecte, le demarrage levait a chaque chargement, et son `.catch` donnait
+    // l'erreur a un `logger` qui ne gardait rien.
+    assert.deepEqual(p.erreurs, [], `le demarrage a echoue : ${p.erreurs.join(' / ')}`)
+    return p.urls.filter(u => u.includes('/api/'))
+  }
+  const un = await appels(1)
+  const douze = await appels(12)
+  assert.strictEqual(douze.length, un.length,
+    `le nombre d appels CROIT avec les biens : ${un.length} a 1 bien, ${douze.length} a 12. `
+    + 'C est un « 1 + N » : invisible a quatre logements, ruineux a trente.')
+  assert.strictEqual(un.length, 2, `l accueil fait ${un.length} appels : ${un.join(', ')}`)
+  assert.match(un[0], /\/api\/ecran\/aujourdhui/, `le premier appel n est pas celui de l ecran : ${un[0]}`)
+  assert.match(un[1], /\/api\/menages/,
+    `le second appel n est plus celui des menages : ${un[1]} — si un appel s ajoute, `
+    + 'il doit etre DECLARE dans la spec avant d etre tolere ici')
+  // ⚠ ET AUCUN APPEL NE PORTE UNE CLE DE BIEN. Un endpoint appele une fois par
+  // bien se verrait deja dans la pente ci-dessus ; un appel UNIQUE portant
+  // `?bien=` serait le premier pas vers la boucle, et c est le moment de le
+  // refuser, pas quand il y en aura trente.
+  for (const u of un) {
+    assert.ok(!/[?&](bien|property|property_id)=/.test(u), `un appel porte une cle de bien : ${u}`)
+  }
+})
+
+test("LE TEST QUI COMPTE : la barre a sa PROPRE colonne, elle ne suit plus le nom", () => {
+  // ⚠ DEMANDE DE THIERRY, 27 octobre 2026 : « aligne-les verticalement sur
+  // ordinateur, comme la maquette (colonne de largeur fixe) ». La barre vivait
+  // dans la cellule du nom, APRES le nom, le compte de sejours et une pastille
+  // eventuelle : sa position horizontale suivait donc la longueur du texte, et
+  // deux barres de deux lignes voisines ne commencaient jamais au meme endroit.
+  // Une barre qui ne s'aligne pas avec sa voisine ne se compare pas d'un coup
+  // d'oeil — ce pour quoi elle existe.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }),
+      'uuid-2': parBien({ sejours: 1, total_cents: 30000, recu_cents: 30000, a_venir_cents: 0 })
+    },
+    total: parBien({ sejours: 3, total_cents: 100000, recu_cents: 70000, a_venir_cents: 30000 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  // La barre est dans une cellule a elle, et PLUS dans celle du nom.
+  assert.match(lignes, /<td class="rev-tbl__barre">\s*<span class="revenue-bar"/,
+    'la barre n est pas dans sa propre cellule')
+  // ⚠ ON INSPECTE CHAQUE CELLULE, PAS LE TEXTE ENTIER. Ma premiere version
+  // cherchait `bien-int … revenue-bar … </th>` dans tout le rendu : les
+  // quantificateurs paresseux TRAVERSENT la frontiere des rangees, donc le
+  // `</th>` trouve etait celui de la ligne SUIVANTE, et le test rougissait sur
+  // un code juste. Une expression reguliere sur du balisage doit etre bornee a
+  // l'element qu'elle juge.
+  const cellulesDuNom = lignes.match(/<th scope="row"[\s\S]*?<\/th>/g) || []
+  assert.ok(cellulesDuNom.length > 0, 'aucune cellule de nom rendue')
+  for (const c of cellulesDuNom) {
+    assert.ok(!/revenue-bar/.test(c),
+      'la barre est restee dans la cellule du nom : sa position suivra la longueur du texte')
+  }
+  // ⚠ ET CHAQUE RANGEE A LE MEME NOMBRE DE CELLULES QUE L'EN-TETE. Une colonne
+  // ajoutee a l'en-tete sans l'etre aux rangees decale TOUS les chiffres d'une
+  // colonne vers la gauche, en silence — le tableau reste valide, il ment.
+  const src = lire('pages/aujourdhui.html')
+  const enTete = (src.match(/<th scope="col"/g) || []).length
+  const parRangee = (lignes.match(/<tr>/g) || []).map((_, i) =>
+    (lignes.split('<tr>')[i + 1] || '').match(/<t[hd][ >]/g) || [])
+  for (const cells of parRangee) {
+    assert.strictEqual(cells.length, enTete,
+      `une rangee porte ${cells.length} cellules pour ${enTete} colonnes : les chiffres sont decales`)
+  }
+  // Le libelle de la colonne existe pour qui ecoute, sans s'afficher.
+  assert.match(src, /<th scope="col" class="rev-tbl__barre">\s*<span class="sr-only" data-i18n="revenue\.col_split">/,
+    'la colonne de la barre n a pas de libelle lu : un lecteur d ecran annonce une cellule vide')
+  // ⚠ ET `sr-only` N'EST PAS SUR LE `<th>` : une cellule en `position: absolute`
+  // quitte la grille du tableau, donc decale toutes les suivantes.
+  assert.ok(!/<th[^>]*class="[^"]*sr-only/.test(src),
+    'une cellule de tableau porte `sr-only` : elle sort de la grille')
+  // La largeur est FIXE : c est ce qui met les barres en colonne.
+  const css = lire('shared/ui.css')
+  assert.match(css, /\.rev-tbl__barre\s*\{[^}]*width:\s*\d+px/,
+    'la colonne de la barre n a pas de largeur fixe : les barres ne s aligneront pas')
+})
+
+test("LE TEST QUI COMPTE : la carte ne dit pas DEUX FOIS que le montant est inconnu", () => {
+  // ⚠ RECETTE DE THIERRY, 27 octobre 2026 : « corrige le doublon mobile ».
+  // Quand tout est refuse, la carte ecrivait « non calculable » DEUX FOIS — en
+  // total et en legende — plus la pastille « 2 sans montant » : trois
+  // affirmations du meme fait sur trois lignes de 390 px, dont deux identiques
+  // au caractere.
+  //
+  // Ce qu'on garde est ce qui APPORTE quelque chose : le total dit l'etat, la
+  // pastille dit le COMBIEN — « un compte n'est jamais redondant avec un
+  // etat » — et la legende ne garde que le nombre de sejours.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 2, refuses: { montant: 2, date: 0 }, motifs: { prix_non_calculable: 2 } })
+    },
+    total: parBien({ sejours: 2, refuses: { montant: 2, date: 0 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const carte = p.html('[data-list="revenue-cards"]').split('</li>')[0]
+  const fois = (carte.match(/revenue\.unavailable/g) || []).length
+  assert.strictEqual(fois, 1,
+    `« non calculable » est ecrit ${fois} fois sur la meme carte`)
+  // Le COMBIEN reste : il n'est pas redondant avec l'etat.
+  assert.match(carte, /revenue\.no_amount_short/,
+    'la pastille qui dit COMBIEN de sejours manquent a disparu avec le doublon')
+  assert.match(carte, /revenue\.stays/, 'le compte de sejours a disparu')
+
+  // ⚠ ET LE TOTAL N'EST PLUS UN `<strong>` IMBRIQUE. La variable `montant`
+  // apporte son propre element — `<strong>` pour un chiffre, `<span>` discret
+  // pour « non calculable » : l'envelopper donnait un gras sur un gras, et une
+  // mention discrete promue en fort.
+  const chiffree = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 1, total_cents: 30000, recu_cents: 30000 }) },
+    total: parBien({ sejours: 1, total_cents: 30000, recu_cents: 30000 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  chiffree.interne.renderRevenus()
+  const c2 = chiffree.html('[data-list="revenue-cards"]').split('</li>')[0]
+  assert.ok(!/<strong[^>]*>\s*<strong/.test(c2), `un strong est imbrique dans un strong : ${c2}`)
 })

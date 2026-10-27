@@ -77,6 +77,13 @@ h1, h2, h3, p { margin: 0; }
 .row { display: flex; align-items: center; gap: var(--gap-s); }
 .stack { display: flex; flex-direction: column; gap: var(--gap-s); }
 .grid-auto { display: grid; gap: var(--gap-m); grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+/* ⚠ DECLAREE ICI, AVANT LA MEDIA QUERY DU TELEPHONE, ET PAS PLUS BAS AVEC LE
+   RESTE DU BLOC « Derniers avis ». `.scroll-x` et `.grid-avis` ont la MEME
+   specificite : c'est l'ordre de declaration qui tranche, pas la media query.
+   Posee apres, cette regle aurait remis `display: grid` au telephone et le
+   defilement horizontal n'aurait jamais eu lieu. `.grid-auto`, deux lignes
+   plus haut, est a sa place pour exactement la meme raison. */
+.grid-avis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap-l); align-items: start; }
 .section-head { display: flex; align-items: baseline; gap: 12px; }
 .section-head .h2 { flex: 1; }
 
@@ -402,6 +409,17 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .scroll-x > * { flex: 0 0 auto; scroll-snap-align: start; }
   .scroll-x .stat { width: 132px; }
   .scroll-x .property { width: 180px; }
+  /* Les avis defilent dans LEUR bloc, jamais la page (spec §8) : la grille de
+     trois colonnes devient une bande qui glisse au doigt. */
+  .scroll-x .avis-carte { width: 268px; }
+  /* ⚠ L'EN-TETE DE SECTION PASSE A LA LIGNE AU TELEPHONE. Mesure du 25 octobre
+     2026 a 390 px : « Derniers avis » + la moyenne + « N avis sur 30 jours » +
+     « Tous les avis » sur une seule rangee coupaient le titre en deux et
+     serraient le lien contre le bord. Le titre garde sa ligne (il est en
+     `flex: 1`), les chiffres passent dessous. */
+  .section-head { flex-wrap: wrap; }
+  .section-head .h2 { flex: 1 0 100%; }
+  .grid-avis { display: flex; }
   /* Barre du bas sur fond noir (retouche charte du 11 octobre 2026) :
      inactifs en --on-ink-muted, actif en --on-ink, badge ambre inchange. */
   .bottombar {
@@ -1218,6 +1236,36 @@ body.men-cfg-ouvert { overflow: hidden; }
 
    ⚠ COULEURS NEUTRES : les couleurs de canal (--canal-*) restent réservées au
    Calendrier. Trois formes, trois états. */
+/* ---------- Bloc « Derniers avis » de l'accueil (shared/avis-recents.js) ----
+   Etape 2 du lot Aujourd'hui V5. La FORME vit ici et pas dans la page, meme
+   regle que `.log-canaux` et `.log-etat` : le rendu est partage, donc sa
+   feuille l'est aussi. */
+.avis-carte { display: flex; flex-direction: column; gap: 10px; min-width: 0;
+  border: 1px solid var(--border); border-radius: var(--radius-card);
+  padding: var(--gap-m); background: var(--surface); }
+.avis-tete { display: flex; align-items: center; gap: 10px; }
+.avis-photo { width: 40px; height: 40px; flex: 0 0 auto; overflow: hidden;
+  border-radius: var(--radius-tile); background: var(--surface-2); }
+.avis-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.avis-photo--none { display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.avis-ident { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.avis-qui { font-weight: var(--fw-semibold); }
+/* La note ne se coupe jamais : « 4,6 / 5 » sur deux lignes ne se lit plus. */
+.avis-note, .avis-moyenne { white-space: nowrap; font-weight: var(--fw-semibold); }
+.avis-texte { line-height: 1.5; }
+/* Trois lignes au plus (spec §3). `clamp-2` existe deja, pour les propositions. */
+.clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ⚠ LA ZONE D'ETAT D'UNE LISTE DE LOGEMENTS — ICI, PAS DANS UNE PAGE.
+   `etatHtml` (shared/logements-liste.js) rend « Ajoutez votre premier
+   logement », le refus de droit et la panne. Elle etait declaree dans le
+   `<style>` de pages/logements.html seule ; l'accueil rend la MEME zone depuis
+   l'etape 1 du lot Aujourd'hui V5, et deux copies divergent. Meme deplacement
+   que `.log-canaux` en son temps, pour la meme raison. */
+.log-etat { display: flex; flex-direction: column; gap: var(--gap-m);
+  align-items: flex-start; }
+.log-etat__actions { display: flex; gap: var(--gap-s); flex-wrap: wrap; }
+
 .log-canaux { display: flex; align-items: center; gap: var(--gap-xs); flex-wrap: wrap; }
 .log-pastille { display: inline-flex; align-items: center; gap: 4px;
   padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border);
@@ -1234,3 +1282,214 @@ body.men-cfg-ouvert { overflow: hidden; }
 .log-avis { display: flex; align-items: center; gap: 5px; color: var(--ink); }
 .log-avis--muet { color: var(--muted); font-style: italic; }
 .log-avis svg { width: 14px; height: 14px; flex: none; }
+
+/* ── Bloc « Revenus nets » (accueil V5, étape 4) ─────────────────────────────
+   ⚠ CES RÈGLES MANQUAIENT, ET MES COMMENTAIRES DÉCRIVAIENT UN RENDU QUI NE
+   S'AFFICHAIT PAS — constat de la review du 26 octobre 2026. `.revenue-bar`
+   n'existait dans aucune feuille : le `<span>` était vide, sans dimension, et
+   ses variables `--part` / `--recu` n'étaient lues par rien. Le commentaire de
+   `pages/aujourdhui.html` annonçait pourtant « plein = reçu, hachuré = à
+   venir ». Idem `.seg` / `.seg__btn` : le sélecteur sortait en boutons nus.
+   Une affirmation dans un commentaire se lit comme une mesure, et celle-là
+   était fausse pour la seule raison qu'un fichier n'avait pas suivi. */
+
+/* La barre d'une ligne de bien. Sa LARGEUR est la part du total du mois — pas
+   une valeur absolue : un petit mois donnerait des barres minuscules, un gros
+   mois des barres saturées. Le remplissage interne est la part REÇUE. */
+/* ─── Le bloc Revenus : navigation de mois et tableau par logement ─────────
+   Maquette Aujourdhui-v5, demande de Thierry a la recette du 27 octobre 2026.
+   Trois nombres pousses en bout de ligne par un `space-between` ne s'alignent
+   pas d'une ligne a l'autre ; des colonnes, si. */
+
+.rev-nav { display: inline-flex; align-items: center; gap: 4px; }
+.rev-nav__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  /* ⚠ 44 px, PAS 32 : la charte du lot exige « zones de clic >= 44 px » et
+     `shared/theme.css` definit `--control: 44px` pour ca. Le precedent du depot
+     pour exactement ce geste — les chevrons de mois du calendrier — utilise
+     `btn btn--icon`, qui vaut `var(--control)`. La recette se fait au
+     telephone : deux cibles sous la norme s'y voient tout de suite. */
+  width: var(--control); height: var(--control); padding: 0;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--ink); cursor: pointer;
+}
+.rev-nav__btn:hover:not(:disabled) { background: var(--line); }
+.rev-nav__btn:disabled { opacity: .5; cursor: default; }
+.rev-nav__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* Le libelle ne doit pas sauter d'une largeur a l'autre quand le mois change :
+   « mai 2026 » et « septembre 2026 » n'ont pas la meme longueur, et les deux
+   fleches se deplaceraient sous le curseur entre deux clics. */
+.rev-nav__label { min-width: 9.5em; text-align: center; font-size: .95rem; }
+
+/* Les trois chiffres du bandeau, de meme rang. */
+.rev-chiffres { display: flex; flex-wrap: wrap; gap: var(--gap-l, 20px); }
+.rev-chiffre { display: flex; flex-direction: column; gap: 2px; }
+
+/* Le tableau par logement. `-wrap` porte le defilement horizontal : sur un
+   telephone de 390 px, quatre colonnes ne tiennent pas, et c'est le tableau
+   qui doit glisser — pas la page. */
+.rev-tbl-wrap { overflow-x: auto; }
+.rev-tbl { width: 100%; border-collapse: collapse; }
+/* ⚠ `vertical-align: top` ET NON `baseline` — constat 3 de la recette du
+   27 octobre 2026 : « ligne avec photo (Loft) : montants decales vers le bas
+   par rapport aux autres lignes ». Avec `baseline`, la vignette de 28 px
+   repousse la ligne de base de la cellule du nom, et les trois cellules de
+   chiffres s'alignent sur CETTE base — donc elles descendent, mais seulement
+   sur les lignes qui portent une photo. Le decalage n'etait pas dans les
+   nombres, il etait dans la reference. */
+.rev-tbl th, .rev-tbl td {
+  padding: 8px 10px; text-align: left; vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+.rev-tbl thead th {
+  font-size: .8rem; font-weight: 600; color: var(--muted);
+  text-transform: none; white-space: nowrap;
+}
+.rev-tbl tbody tr:last-child th, .rev-tbl tbody tr:last-child td { border-bottom: 0; }
+.rev-tbl__num { text-align: right; white-space: nowrap; }
+/* ⚠ LA COLONNE DE LA BARRE EST DE LARGEUR FIXE, et c'est tout l'objet de la
+   demande de Thierry du 27 octobre 2026. La barre vivait dans la cellule du
+   nom, a la suite du nom, du compte de sejours et d'une pastille eventuelle :
+   sa position horizontale suivait donc la longueur du texte, et deux barres de
+   deux lignes voisines ne commencaient jamais au meme endroit. Une largeur
+   fixe les met en colonne, et c'est la seule facon de comparer deux barres
+   d'un coup d'oeil — ce pour quoi elles existent. */
+.rev-tbl__barre { width: 88px; padding-right: 0; }
+.rev-tbl__barre .revenue-bar { flex: none; inline-size: 72px; display: block; }
+/* ⚠ PAS DE `display: flex` SUR LE `<th>` LUI-MEME, et ma premiere version en
+   mettait un. Constat MAJEUR d'une review du 27 octobre 2026 : changer le
+   `display` d'un element de tableau le retire de l'arbre d'accessibilite comme
+   cellule — le `<th>` cesse d'etre un `rowheader`, donc `scope="row"` devient
+   inerte, et le lecteur d'ecran n'annonce plus « <logement>, A venir, 480 € ».
+   C'est-a-dire exactement l'accessibilite que ce tableau existe pour obtenir,
+   et que mon message de commit invoquait pour justifier la forme tabulaire.
+
+   Le flex vit donc sur un enfant. Meme rendu, semantique preservee. (Premier
+   `scope="row"` du depot : aucun precedent ne couvrait ce piege.) */
+.rev-tbl__bien { font-weight: 400; }
+/* Le nom, le compte de sejours, la barre et les pastilles sur une seule
+   colonne : c'est la cellule la plus large, et elle respire. */
+.rev-tbl__bien-int { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rev-tbl__nom { flex: 1 1 10em; min-width: 0; }
+/* La vignette du logement. Carree, petite, et elle ne retrecit jamais : c'est
+   le repere visuel de la ligne. */
+.rev-tbl__photo {
+  flex: 0 0 28px; width: 28px; height: 28px;
+  border-radius: 6px; object-fit: cover; background: var(--line);
+}
+/* Sans photo : l'initiale, comme la liste des logements. */
+.rev-tbl__photo--vide {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: .75rem; font-weight: 600; color: var(--muted);
+}
+
+.revenue-bar {
+  flex: 0 0 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+  position: relative;
+}
+.revenue-bar::before,
+.revenue-bar::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  border-radius: 3px;
+}
+/* ⚠ DEUX COUCHES, ET L'ORDRE COMPTE : « à venir » dessine la part TOTALE en
+   hachures, « reçu » la recouvre en plein. L'inverse laisserait les hachures
+   par-dessus le plein. */
+/* ⚠ HACHURE GRISE POUR « A VENIR », PLEIN NOIR POUR « RECU » (recette du
+   27 octobre 2026, constat 2). Les deux couches etaient en `var(--ok)`, le
+   vert : un mois entierement recu s'affichait donc en vert hachure, c'est-a-dire
+   de la couleur de l'encaisse ET du motif de l'attente.
+   ⚠ ET LA COUCHE PLEINE N'AVAIT JAMAIS DE LARGEUR : `--recu` lui arrivait avec
+   un `%`, donc `calc(50% * 100% / 100)` multipliait deux pourcentages —
+   invalide en CSS, declaration abandonnee en silence. Corrige a la source, dans
+   `pages/aujourdhui.html` : `--recu` est desormais un nombre nu. Les deux
+   defauts se cumulaient, et le second cachait le premier. */
+.revenue-bar::before {
+  inline-size: var(--part, 0%);
+  background-image: repeating-linear-gradient(
+    135deg, var(--muted) 0 2px, transparent 2px 4px);
+  opacity: .55;
+}
+.revenue-bar::after {
+  inline-size: calc(var(--part, 0%) * var(--recu, 0) / 100);
+  background: var(--ink);
+}
+/* ─── La forme TELEPHONE du tableau : une liste de cartes ──────────────────
+   Recette du 27 octobre 2026, constat 1 : a 390 px le tableau en demandait
+   425, la colonne Total etait coupee et les noms se cassaient mot par mot.
+   Le `overflow-x` du conteneur faisait son travail — il rendait le tableau
+   glissant — mais un tableau qu'il faut faire glisser pour lire son total
+   n'est pas lisible, il est atteignable.
+
+   ⚠ POURQUOI DEUX BALISAGES ET PAS UNE BASCULE CSS. Passer un `<table>` en
+   liste demande `display: block` sur ses `<tr>`, `<th>` et `<td>` : la cellule
+   quitte alors l'arbre d'accessibilite, `scope="row"` devient inerte, et le
+   lecteur d'ecran n'annonce plus « <logement>, A venir, 480 € ».
+   `tests/masquage-hidden.test.js` refuse d'ailleurs toute classe de cellule qui
+   touche a `display`. Les deux formes coexistent donc dans le DOM, rendues par
+   la MEME boucle a partir des memes valeurs. */
+.rev-liste { display: none; list-style: none; margin: 0; padding: 0; }
+@media (max-width: 560px) {
+  .rev-tbl-wrap { display: none; }
+  .rev-liste { display: grid; gap: 2px; }
+}
+.rev-carte {
+  display: grid; gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.rev-liste > .rev-carte:last-child { border-bottom: 0; }
+/* Le nom a gauche, le total a droite, sur UNE ligne — et le total ne se laisse
+   jamais pousser hors du cadre : c'est le chiffre que l'hote vient lire. */
+.rev-carte__tete {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+}
+.rev-carte__bien { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Le total garde son rang visuel sans imposer un `<strong>` : c'est `montant`
+   qui apporte son element, chiffre en gras ou mention discrete. */
+.rev-carte__total { flex: 0 0 auto; white-space: nowrap; font-weight: 600; }
+/* ⚠ LA BARRE PREND TOUTE LA LARGEUR ICI, la ou le tableau lui donne 72 px
+   fixes : dans une carte, elle n'est plus une colonne parmi d'autres, elle est
+   la seule representation visuelle de la repartition. */
+.rev-carte .revenue-bar { flex: none; inline-size: 100%; }
+/* ⚠ ET LE NOM SE COUPE PAR CARACTERES PLUTOT QUE MOT PAR MOT. « Loft Jean
+   Jaures centre » sur 390 px se cassait a chaque espace, donnant quatre lignes
+   d'un mot. `min-width: 0` autorise le retrecissement dans un flex, et
+   `overflow-wrap` ne coupe un mot que s'il ne tient pas seul. */
+.rev-carte__bien .rev-tbl__nom { min-width: 0; overflow-wrap: anywhere; }
+
+/* ⚠ LES HACHURES NE SONT PAS LE SEUL PORTEUR DE SENS : le reçu et l'à-venir
+   sont écrits en chiffres dans le bandeau, et la barre est `aria-hidden`.
+   C'est la règle du dépôt — « jamais la couleur seule ». */
+@media (prefers-reduced-motion: reduce) {
+  .revenue-bar::before { background-image: none; opacity: .3; }
+}
+
+/* Le sélecteur Mois / Année. */
+.seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--line); }
+.seg__btn {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 5px 14px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+/* ⚠ `--surface`, PAS `--bg` : ce jeton n'existe pas dans theme.css, et une
+   variable CSS inconnue rend la declaration INVALIDE — le bouton actif aurait
+   garde la couleur heritee, donc du texte sombre sur un fond sombre. Mesure
+   faite avant de laisser la ligne : `--bg` absent, `--surface` defini aux
+   deux themes (clair l 31, sombre l 132). Un jeton qui n'existe pas ne
+   rougit nulle part : il rend juste l'element illisible. */
+.seg__btn.is-on { background: var(--ink); color: var(--surface); font-weight: 600; }
+.seg__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

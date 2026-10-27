@@ -112,12 +112,63 @@ test('les cles photo.* existent dans les trois langues', () => {
   }
 })
 
-test('l’accueil affiche photo_url quand elle existe, le fond neutre sinon', () => {
-  const html = sansCommentaires(lire('pages/aujourdhui.html'))
-  assert.ok(html.includes('photo_url'), 'la colonne est lue')
-  assert.ok(/b\.photo_url\s*\?/.test(html), 'photo seulement si presente')
-  assert.ok(html.includes('property__photo--none'), 'le fond neutre reste le repli')
-  assert.ok(/img src="\$\{esc\(b\.photo_url\)\}"/.test(html), 'URL echappee')
+test('la liste et la fiche des logements affichent photo_url, le fond neutre sinon', () => {
+  // ⚠ CE TEST VISAIT L'ACCUEIL, ET LES CARTES DE LOGEMENT L'ONT QUITTE A
+  // L'ETAPE 4 du lot « Aujourd'hui V5 » : le bloc « Vos logements » est
+  // remplace par « Revenus nets », et les cartes vivent sur /logements, qui les
+  // rend mieux (photo, note, occupation, prochaine arrivee). Inventaire I25.
+  //
+  // ⚠ ET LA REGLE N'EST PAS PERDUE, VERIFIE AVANT DE DEPLACER CE TEST : la
+  // photo est rendue par `shared/logements-liste.js` l 431 (la liste) et
+  // `shared/logement-fiche.js` l 313 (la fiche), dans les deux cas avec l'URL
+  // ECHAPPEE et un repli quand elle manque. C'est la que le test la garde
+  // desormais — deplacer un test sans verifier que sa regle a suivi serait
+  // retirer un garde-fou en croyant le ranger.
+  // ⚠ SUR LA SOURCE BRUTE, PAS SUR `sansCommentaires`, ET C'EST MESURE : sur
+  // `shared/logement-fiche.js`, ce nettoyage avale le bloc qui porte le
+  // ternaire (son motif `/\*[\s\S]*?\*\//` traverse le fichier). Le motif
+  // cherche n'apparait dans aucun commentaire du depot, donc le nettoyage
+  // n'apporte rien ici — et il faisait rougir un fichier conforme.
+  for (const f of ['shared/logements-liste.js', 'shared/logement-fiche.js']) {
+    const src = lire(f)
+    assert.ok(src.includes('photo_url'), `${f} : la colonne n est pas lue`)
+    assert.ok(/\.photo_url\s*\n?\s*\?/.test(src), `${f} : photo affichee sans verifier qu elle existe`)
+    assert.ok(/img src="\$\{esc\([a-z]+\.photo_url\)\}"/.test(src),
+      `${f} : l URL de la photo n est pas echappee`)
+  }
+  // Le repli visuel : un fond neutre, pas une image cassee.
+  assert.ok(lire('shared/logements-liste.js').includes('log-photo'),
+    'la liste n a plus de repli visuel pour un bien sans photo')
+
+  // ⚠ L'ACCUEIL EN REPARLE DEPUIS LE 27 OCTOBRE 2026, ET CE N'EST PAS UNE CARTE
+  // QUI REVIENT. Cette assertion interdisait `photo_url` dans l'accueil, au
+  // motif qu'il n'y signifierait qu'une chose : le retour du bloc « Vos
+  // logements ». C'etait vrai a l'etape 4 — et faux depuis que le bloc Revenus
+  // porte un TABLEAU par logement, dont la spec §4 exige la photo (« une ligne
+  // par bien : photo, nom, nombre de sejours, barre, recu, a venir, total »).
+  //
+  // La difference n'est pas cosmetique : une CARTE porte la note, l'occupation
+  // et la prochaine arrivee — c'est elle qui ferait doublon avec /logements. Une
+  // VIGNETTE de 28 px dans une ligne de tableau est un repere visuel, et elle ne
+  // reproduit rien.
+  //
+  // Ce que ce test garde donc desormais, c'est la REGLE et non l'absence : si
+  // l'accueil affiche une photo, il l'echappe et il a un repli. Interdire la
+  // colonne tout court aurait fait retirer un element de la maquette pour
+  // satisfaire un test — l'inverse de ce que ce test existe pour proteger.
+  const accueil = lire('pages/aujourdhui.html')
+  if (sansCommentaires(accueil).includes('photo_url')) {
+    assert.ok(/\.photo_url\s*\n?\s*\?/.test(accueil),
+      'l accueil affiche une photo sans verifier qu elle existe')
+    assert.ok(/img class="[^"]*" src="\$\{esc\([a-z]+\.photo_url\)\}"/.test(accueil),
+      'l URL de la photo n est pas echappee dans l accueil')
+    assert.ok(/rev-tbl__photo--vide/.test(accueil),
+      'l accueil n a pas de repli visuel pour un bien sans photo')
+    // ⚠ ET PAS DE CARTE : c'est la classe des cartes de /logements qui est
+    // interdite ici, pas la colonne. Si elle revient, le doublon revient.
+    assert.ok(!/log-photo|log-carte/.test(sansCommentaires(accueil)),
+      'une CARTE de logement est revenue dans l accueil : le doublon avec /logements aussi')
+  }
 })
 
 test('channel-property expose photo_url (la liste des biens de /biens)', () => {

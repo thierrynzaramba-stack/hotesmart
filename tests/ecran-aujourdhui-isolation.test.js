@@ -141,12 +141,78 @@ function tient (ligne, f) {
 // (d) de CLAUDE.md : 50 des 65 codes de La bulle n'ont pas de `user_id`) : son
 // cloisonnement passe donc par le couple `property_id` + `booking_id`, et c'est
 // precisement ce qu'on veut voir partir en requete.
+// ─── LES TABLES QUI NE SE CLOISONNENT PAS PAR COMPTE, ET POURQUOI ───────────
+//
+// ⚠ DEUX, ET EXACTEMENT DEUX. Une exemption se COMPTE, elle ne se decrit pas
+// (discipline du depot : `ATTENDU` de bookings-snapshot-troncature, exemptions
+// de cache-prive-endpoints). Elle etait ecrite en ligne — `r.table !==
+// 'access_codes'` repete trois fois — donc invisible et non chiffree : la
+// troisieme occurrence pouvait deriver des deux autres sans que rien ne le
+// dise, et une table ajoutee demain s'y glissait d'un caractere.
+//
+// · `access_codes` : ses lignes sont souvent SANS compte (bloquant (d) de
+//   CLAUDE.md : 50 des 65 codes de La bulle n'ont pas de `user_id`). Son
+//   cloisonnement passe par le couple `property_id` + `booking_id`, et ses
+//   reservations viennent deja d'une lecture bornee.
+// · `delais_versement` : table de REFERENCE, ajoutee a l'etape 4 du lot
+//   « Aujourd'hui V5 ». Elle porte les delais de versement des plateformes —
+//   `canal`, `base`, `jours`, `libelle`, `maj_le` — et AUCUNE colonne de
+//   compte : verifie dans `migrations/2026-10-25-delais-versement.sql`. Sa
+//   policy est `for select to authenticated using (true)`, parce que « ces
+//   valeurs ne sont la donnee de personne » : tous les hotes lisent les memes
+//   trois lignes. La borner par `user_id` ne protegerait rien et rendrait zero
+//   ligne, donc tous les sejours en « delai absent » — un bloc de revenus a
+//   zero euro qui aurait l'air d'un mois sans revenu.
+//
+// ⚠ ET CE TEST A EU RAISON DE CRIER. Il a attrape cette lecture le jour meme
+// ou elle a ete ecrite, avant tout merge : c'est l'exemption qui est nouvelle,
+// pas la regle. Toute table qui arrive ici doit arriver avec sa raison.
+const TABLES_SANS_COMPTE = new Set(['access_codes', 'delais_versement'])
+
+// ⚠ CE QUE LES TROIS AGREGATS RENDENT PAR DEFAUT, et pourquoi ce bloc existe.
+// Depuis que le bloc des revenus lit des FONCTIONS SQL (27 octobre 2026), le
+// double ne connaissait plus la methode qu'il appelle : `supabase.rpc` etait
+// `undefined`, donc `lireRevenus` LEVAIT, et l'enveloppe `sur()` nommait le
+// bloc « indisponible ». Resultat : les tests de ce fichier passaient tous en
+// n'exercant PLUS DU TOUT le bloc des revenus — son cloisonnement n'etait
+// garde que par des expressions regulieres dans un autre fichier.
+//
+// C'est exactement le piege que ce fichier documente deja pour `or` : « un
+// double qui ignore une methode ne rend pas `undefined` : il LEVE, et
+// l'exception remonte au bloc appelant, qui la nomme indisponible ». La lecon
+// s'applique aux `rpc` comme aux `from`.
+//
+// Les defauts rendent donc un calcul COMPLET et un mois vide : l'etat normal,
+// celui ou le bloc s'affiche. Chaque test qui veut autre chose le dit.
+const DEFAUTS_RPC = {
+  revenus_du_mois: [],
+  revenus_hors_mois: [{ sans_date: 0, hors_biens: 0, hors_biens_cents: 0 }],
+  revenus_calcul_incomplet: [{ incomplet: false, non_derives: 0 }]
+}
+
 function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
                  methode = 'GET', lignes = {}, pannes = [], erreurs = {},
                  instant = null, pages = null, notesLevent = false } = {}) {
   const requetes = []
   const notesVues = []
   const client = {
+    // ⚠ LES APPELS DE FONCTION SQL SONT ENREGISTRES COMME LES LECTURES, avec
+    // leurs PARAMETRES. C'est la seule facon de verifier le cloisonnement d'un
+    // agregat : il ne porte pas de `.eq('user_id', ...)` mais un `p_user_id`,
+    // et une fonction appelee avec le mauvais compte rendrait les revenus d'un
+    // autre hote sans qu'aucun filtre ne manque.
+    rpc (nom, params) {
+      const r = { rpc: nom, params: params || {}, table: `rpc:${nom}`, filtres: [] }
+      requetes.push(r)
+      const reponse = () => {
+        const cle = `rpc:${nom}`
+        if (erreurs[cle]) return { data: null, error: erreurs[cle] }
+        if (pannes.includes(cle)) return { data: null, error: { message: `panne ${nom}` } }
+        if (lignes[cle] !== undefined) return { data: lignes[cle], error: null }
+        return { data: DEFAUTS_RPC[nom] === undefined ? [] : DEFAUTS_RPC[nom], error: null }
+      }
+      return { then: (ok, ko) => Promise.resolve(reponse()).then(ok, ko) }
+    },
     from (table) {
       const r = { table, filtres: [], select: null, options: null }
       requetes.push(r)
@@ -156,6 +222,16 @@ function banc ({ refs = null, domaines = TOUS_DOMAINES, titulaire = false,
         neq (c, v) { r.filtres.push(['neq', c, String(v)]); return q },
         in (c, v)  { r.filtres.push(['in', c, (v || []).map(String)]); return q },
         is (c, v)  { r.filtres.push(['is', c, v]); return q },
+        // ⚠ `or` MANQUAIT, ET SON ABSENCE NE SE LISAIT PAS COMME UNE ABSENCE.
+        // Un double qui ignore une methode ne rend pas `undefined` : il LEVE,
+        // et l'exception remonte au bloc appelant, qui la nomme « indisponible ».
+        // Mesure du 24 octobre 2026 : la lecture des derniers avis s'arretait
+        // sur ce TypeError AVANT son `.in(...)`, et ce test a conclu « ota_reviews
+        // part SANS borne de bien » — un diagnostic juste sur une cause fausse.
+        // Il est enregistre comme les autres : une condition de texte n'est pas
+        // une borne de perimetre, mais une lecture qui la perdrait changerait de
+        // population sans que rien ne rougisse.
+        or (expr)  { r.filtres.push(['or', expr]); return q },
         not (c, o, v) { r.filtres.push(['not', c, o, v]); return q },
         gt (c, v)  { r.filtres.push(['gt', c, String(v)]); return q },
         gte (c, v) { r.filtres.push(['gte', c, String(v)]); return q },
@@ -331,17 +407,166 @@ const borneAttendue = (table, colonne, refs) =>
 
 // ─── 1. LE TITULAIRE ──────────────────────────────────────────────────────────
 
+// ⚠ UN AGREGAT NE PORTE PAS DE FILTRE, IL PORTE DES PARAMETRES. Les controles
+// de cloisonnement de ce fichier cherchaient `.eq('user_id', ...)` ; un
+// `rpc('revenus_du_mois', { p_user_id })` n'en a pas, donc ils le voyaient
+// comme une lecture SANS compte — et ils ont rouge des que le double a connu
+// `rpc`, ce qui etait le bon reflexe.
+//
+// Le cloisonnement d'une fonction SQL est le MEME enjeu, et il est plus serre :
+// la cle de service contourne la RLS, la fonction est `security invoker`, donc
+// `p_user_id` est sa SEULE borne. Une fonction appelee avec le mauvais compte
+// rend les revenus d'un autre hote sans qu'un seul filtre ne manque.
+const comptesDesRpc = (requetes) => requetes
+  .filter(r => r.rpc)
+  .map(r => ({ nom: r.rpc, compte: r.params.p_user_id }))
+
+const rpcSansCompte = (requetes) =>
+  comptesDesRpc(requetes).filter(x => !x.compte).map(x => x.nom)
+
+const rpcAutreCompte = (requetes, attendu) =>
+  comptesDesRpc(requetes).filter(x => x.compte && x.compte !== attendu).map(x => x.nom)
+
+// ⚠ ET IL FAUT QU'IL Y EN AIT EU. Sans ce controle, les deux ci-dessus sont
+// vraies sur une liste VIDE — c'est-a-dire sur le cas ou le bloc des revenus
+// n'a pas tourne du tout, qui est precisement l'etat ou ce fichier ne mesurait
+// plus rien pendant que tous ses tests etaient verts.
+// ⚠ LE MOIS EST UN PARAMETRE DE CLOISONNEMENT TEMPOREL, et son absence ne
+// ressemble pas a une erreur : la fonction repond, avec les chiffres d'une
+// AUTRE periode. Deux des trois agregats en ont besoin — le troisieme, la
+// sonde, est hors du temps (« ai-je fini de compter ? »).
+const MOIS_ATTENDU = /^\d{4}-(0[1-9]|1[0-2])$/
+const exigerLeMois = (requetes) => {
+  for (const r of requetes.filter(x => ['revenus_du_mois', 'revenus_hors_mois'].includes(x.rpc))) {
+    assert.match(String(r.params.p_mois || ''), MOIS_ATTENDU,
+      `${r.rpc} part avec p_mois = ${JSON.stringify(r.params.p_mois)} : ses chiffres `
+      + 'porteraient sur une autre periode que le bandeau')
+  }
+  const sonde = requetes.find(x => x.rpc === 'revenus_calcul_incomplet')
+  if (sonde) {
+    assert.strictEqual(sonde.params.p_mois, undefined,
+      'la sonde recoit un mois : elle repond « ai-je fini de compter », une question hors du temps')
+  }
+}
+
+const exigerLesTroisAgregats = (requetes) => {
+  const vus = comptesDesRpc(requetes).map(x => x.nom)
+  for (const attendu of ['revenus_du_mois', 'revenus_hors_mois', 'revenus_calcul_incomplet']) {
+    assert.ok(vus.includes(attendu),
+      `${attendu} n'a pas ete appele : le bloc des revenus n'a pas tourne, `
+      + `donc les controles de cloisonnement portent sur une liste vide (vus : ${vus.join(', ') || 'aucun'})`)
+  }
+}
+
 test('LE TEST QUI COMPTE : le compte lu est celui de la GARDE, jamais celui de la requete', async () => {
   // Une fuite d'une ligne : `req.query.compte` au lieu de `garde.accountUserId`.
   // C'est la forme exacte de plusieurs des dix fuites du chantier droits.
   const { requetes } = await banc({ titulaire: true })()
   const sansCompte = requetes.filter(r =>
-    r.table !== 'access_codes' && !r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id'))
+    !r.rpc && !TABLES_SANS_COMPTE.has(r.table) &&
+    !r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id'))
   assert.deepEqual(sansCompte.map(r => r.table), [],
     'une lecture part SANS `user_id` : avec la cle de service, elle lit toute la base')
   const mauvais = requetes.filter(r =>
     r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id' && f[2] !== TITULAIRE))
   assert.deepEqual(mauvais.map(r => r.table), [], 'une lecture porte un autre compte')
+  // Les agregats, par leurs parametres.
+  exigerLesTroisAgregats(requetes)
+  exigerLeMois(requetes)
+  assert.deepEqual(rpcSansCompte(requetes), [],
+    'un agregat part SANS `p_user_id` : c est sa SEULE borne, la cle de service contourne la RLS')
+  assert.deepEqual(rpcAutreCompte(requetes, TITULAIRE), [],
+    'un agregat porte un autre compte que celui de la garde')
+})
+
+test("LE TEST QUI COMPTE : le nom du voyageur exige `reservations`, et la colonne n'est pas meme demandee", async () => {
+  // ⚠ LA REGLE EST CELLE DE `api/avis.js`, DEJA TRANCHEE POUR LES DATES DE
+  // SEJOUR : « le CONTENU de l'avis reste sous `avis` ; le SEJOUR qu'il designe
+  // suit `reservations` ». Un nom de voyageur dit QUI occupait le logement.
+  // ⚠ ET LA COLONNE N'EST PAS SELECTIONNEE : une donnee qu'on ne demande pas a
+  // la base ne peut pas fuiter plus tard par un oubli d'affichage. C'est le
+  // CABLAGE de cette garde qu'on mesure ici — la revue du 25 octobre 2026 a
+  // montre que forcer `avecNom: true` dans l'endpoint laissait les 6284 tests
+  // au vert, alors que c'est le seul point ou la garde est posee.
+  // ⚠ `statut` ET `is_hidden` SONT DANS LA FIXTURE, et ce n'est pas du
+  // remplissage : `avisQuiComptent` les pose en `eq`, et le double compare par
+  // egalite stricte — une ligne qui ne les porte pas est ECARTEE, donc le test
+  // passerait sur une liste vide sans rien mesurer.
+  const lignes = { ota_reviews: [{ id: 'r1', property_id_ref: BULLE_REF, ota: 'airbnb',
+    statut: 'confirme', is_hidden: false,
+    content_public: 'Sejour parfait', overall_score: 9.6, received_at: jourDeParis() + 'T10:00:00Z',
+    guest_name: 'Claire Bernard' }] }
+
+  const sans = await banc({ refs: [BULLE_UUID, BULLE_REF], lignes,
+    domaines: TOUS_DOMAINES.filter(d => d !== 'reservations') })()
+  const qSans = sans.requetes.find(r => r.table === 'ota_reviews')
+  assert.ok(qSans, 'les avis ne sont pas lus')
+  // ⚠ UN TEST QUI MESURE UNE LISTE VIDE NE MESURE RIEN : si la fixture ne
+  // traverse pas le double, toutes les assertions qui suivent passent pour de
+  // mauvaises raisons.
+  assert.strictEqual((sans.corps.derniers_avis || []).length, 1,
+    'la fixture ne traverse pas le double : le reste du test ne prouve rien')
+  assert.ok(!/guest_name/.test(qSans.select || ''),
+    'la colonne `guest_name` est demandee sans le droit `reservations`')
+  assert.strictEqual((sans.corps.derniers_avis[0] || {}).voyageur, null,
+    'le nom du voyageur descend sans le droit `reservations`')
+  assert.ok(!JSON.stringify(sans.corps).includes('Bernard'),
+    'le nom COMPLET traverse la reponse')
+
+  const avec = await banc({ refs: [BULLE_UUID, BULLE_REF], lignes })()
+  const qAvec = avec.requetes.find(r => r.table === 'ota_reviews')
+  assert.match(qAvec.select || '', /guest_name/)
+  assert.strictEqual(avec.corps.derniers_avis[0].voyageur, 'Claire B.',
+    'le serveur doit descendre « Claire B. », jamais le nom complet')
+  assert.ok(!JSON.stringify(avec.corps).includes('Bernard'),
+    'le nom COMPLET traverse la reponse meme avec le droit')
+})
+
+test("LE TEST QUI COMPTE : une lecture d'avis EN ECHEC rend `null`, jamais une liste vide", async () => {
+  // ⚠ CONSTAT DE LA REVUE DU 25 OCTOBRE 2026 : le contrat de la VUE etait
+  // garde (elle distingue `null` de `[]`), celui de l'ENDPOINT ne l'etait pas.
+  // Remplacer `return null` par `return []` passait les 6284 tests, et l'hote
+  // lisait « Pas encore d'avis sur 30 jours » la ou la lecture avait plante —
+  // la phrase que le module cite lui-meme comme le defaut a eviter.
+  // ⚠ Et `indisponibles` n'est PAS lu par la page : `derniers_avis: null` est
+  // le seul signal qui lui reste.
+  const { corps } = await banc({ titulaire: true, pannes: ['ota_reviews'] })()
+  assert.strictEqual(corps.derniers_avis, null,
+    'une panne de lecture est rendue comme « aucun avis »')
+  assert.ok(corps.indisponibles.includes('derniers_avis'),
+    'la panne n est pas annoncee')
+})
+
+test('LE TEST QUI COMPTE : sur un compte DELEGUE aussi, le compte lu est celui de la garde', async () => {
+  // ⚠ CE TEST MANQUAIT, ET SON ABSENCE RENDAIT LE PRECEDENT AVEUGLE (constat
+  // GRAVE de la revue de l'etape 2, 25 octobre 2026). Celui du dessus tourne
+  // avec `titulaire: true` : l'appelant EST le compte lu, donc
+  // `contexte.userId` et le compte consulte valent la meme chose, et toute
+  // confusion des deux reste invisible. Mesure de la revue : remplacer
+  // `userId: compte` par `userId: contexte.userId` dans la lecture des avis
+  // laissait les 6284 tests au vert, et la requete partait avec le `user_id`
+  // du MEMBRE — donc la reponse portait les avis d'un autre compte.
+  //
+  // Ici les deux valeurs different par construction, et l'assertion porte sur
+  // TOUTES les tables : le bloc ajoute demain est couvert sans qu'on pense a
+  // le nommer.
+  const { requetes } = await banc({ refs: [BULLE_UUID, BULLE_REF] })()
+  const sansCompte = requetes.filter(r =>
+    !r.rpc && !TABLES_SANS_COMPTE.has(r.table) &&
+    !r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id'))
+  assert.deepEqual(sansCompte.map(r => r.table), [],
+    'une lecture part SANS `user_id` : avec la cle de service, elle lit toute la base')
+  const mauvais = requetes.filter(r =>
+    r.filtres.some(f => f[0] === 'eq' && f[1] === 'user_id' && f[2] !== TITULAIRE))
+  assert.deepEqual(mauvais.map(r => r.table), [],
+    'une lecture porte le compte de l APPELANT au lieu du compte CONSULTE')
+  // Les agregats, par leurs parametres.
+  exigerLesTroisAgregats(requetes)
+  exigerLeMois(requetes)
+  assert.deepEqual(rpcSansCompte(requetes), [],
+    'un agregat part SANS `p_user_id` : c est sa SEULE borne, la cle de service contourne la RLS')
+  assert.deepEqual(rpcAutreCompte(requetes, TITULAIRE), [],
+    'un agregat porte un autre compte que celui de la garde')
 })
 
 test('le titulaire n est borne par aucun perimetre, et les notes le savent', async () => {
@@ -375,7 +600,30 @@ test('LE TEST QUI COMPTE : CHAQUE lecture du membre restreint est bornee a ses b
   assert.strictEqual(notesVues[0].userId, TITULAIRE, 'les notes sont lues sur un autre compte')
   // `access_codes` est borne par le couple bien + reservation, pas par le
   // perimetre : ses reservations viennent deja d'une lecture bornee.
-  const aExaminer = requetes.filter(r => r.table !== 'access_codes')
+  // ⚠ LES AGREGATS SE CONTROLENT A PART, PAR LEUR PARAMETRE `p_refs`. La borne
+  // d'une fonction SQL n'est pas un `.in(colonne, ...)` : c'est un tableau
+  // d'UUID passe en argument, et la fonction fait le `= any(p_refs)` en base.
+  // Le chercher par `bornes()` rendait « part SANS borne de bien » sur les
+  // trois agregats — un rouge juste sur une cause fausse, exactement ce que ce
+  // fichier raconte deja pour la lecture des avis.
+  //
+  // ⚠ ET C'EST DU TEXTE CONTRE DE L'UUID QU'IL FAUT SE GARDER ICI. Le
+  // perimetre existe sous deux formes — `refsUuid` et `refsTexte` — et les
+  // fonctions comparent des `uuid`. Passer les cles PROVIDER ne rendrait pas
+  // une erreur : `property_uuid = any('{...texte...}')` ne correspondrait a
+  // AUCUNE ligne, donc un ecran a zero euro pour le membre delegue SEULEMENT.
+  // Invisible en recette sur un compte titulaire.
+  exigerLesTroisAgregats(requetes)
+  const UUID_SEUL = refs.filter(x => EST_UUID.test(String(x))).map(String)
+  for (const r of requetes.filter(x => x.rpc)) {
+    const passe = r.params.p_refs
+    assert.ok(Array.isArray(passe),
+      `${r.rpc} part avec p_refs = ${JSON.stringify(passe)} : le membre y verrait tout le compte`)
+    assert.deepEqual(passe.map(String), UUID_SEUL,
+      `${r.rpc} est borne sur une autre liste que le perimetre du membre, en UUID`)
+  }
+
+  const aExaminer = requetes.filter(r => !r.rpc && !TABLES_SANS_COMPTE.has(r.table))
   assert.ok(aExaminer.length >= 8, `seulement ${aExaminer.length} lectures observees`)
   for (const r of aExaminer) {
     const b = bornes(r)
@@ -480,10 +728,17 @@ test('LE TEST QUI COMPTE : un domaine refuse n interroge meme pas sa table', asy
   // alarmes alors que la page lui montre le bouton d'acquittement, et un
   // membre `reglages: read` / `reservations: none` recevait le detail de
   // l'incident — nom du bien, nuits en conflit, identifiants des reservations.
+  // ⚠ `ota_reviews` A ETE AJOUTEE LE 25 OCTOBRE 2026 (constat GRAVE de la revue
+  // de l'etape 2 du lot Aujourd'hui V5). Le bloc « Derniers avis » lit cette
+  // table DIRECTEMENT, et la liste ci-dessous ne la nommait pas : retirer la
+  // garde `if (!droits.avis) return null` de l'endpoint laissait les 6284 tests
+  // au vert, pendant qu'un membre SANS le droit `avis` recevait les
+  // commentaires ET le prenom du voyageur. Seul le masquage restait — la
+  // classe de defaut que CLAUDE.md enregistre trois fois.
   const cas = [
     ['messages', ['agent_tasks', 'messages']],
     ['reservations', ['automation_incidents']],
-    ['avis', []]
+    ['avis', ['ota_reviews']]
   ]
   for (const [domaine, interdites] of cas) {
     const garde = TOUS_DOMAINES.filter(d => d !== domaine)
@@ -496,6 +751,11 @@ test('LE TEST QUI COMPTE : un domaine refuse n interroge meme pas sa table', asy
     if (domaine === 'avis') {
       assert.strictEqual(notesVues.length, 0, 'les notes sont lues sans le droit `avis`')
       assert.strictEqual(corps.notes, null, 'les notes refusees ne valent pas zero')
+      // ⚠ `null`, PAS `[]`. Une liste vide dirait « cet hote n'a pas d'avis »
+      // a qui n'a pas le droit de le savoir — et l'ecran afficherait « Pas
+      // encore d'avis sur 30 jours » au lieu de ne rien montrer.
+      assert.strictEqual(corps.derniers_avis, null,
+        'les derniers avis refuses ne valent pas une liste vide')
     }
     if (domaine === 'reservations') {
       assert.strictEqual(corps.alarmes, null, 'les alarmes refusees valent une liste vide')
@@ -932,4 +1192,216 @@ test("LE TEST QUI COMPTE : `db;dur` couvre la GARDE, qui fait jusqu'a trois lect
   assert.match(src, /const msDb = tFinLectures - t0/,
     'la part BASE exclut la garde, dont les lectures sont les plus lentes du chemin')
   assert.ok(!/const msDb = tFinLectures - tDebutLectures/.test(src))
+})
+
+// ─── 6. LE CALCUL QUI N'EST PAS FINI ──────────────────────────────────────────
+//
+// ⚠ POURQUOI CES TESTS EXISTENT, et c'est le constat GRAVE 1 de la review du
+// lot Revenus. Les deux agregats filtrent sur `statut_canonique = 'confirmed'`,
+// une colonne NEUVE qui vaut NULL tant que le remplissage n'a pas passe. Or
+// `NULL = 'confirmed'` rend NULL : la ligne sort des DEUX agregats. Au collage
+// de la migration en production — le deroule prevu — l'ecran affichait donc
+// « 0,00 € · Recu 0,00 € · A venir 0,00 € » AVEC L'APLOMB D'UN FAIT sur un
+// mois vendu, sans reserve ni « non calculable ».
+//
+// C'est la regle du depot, mot pour mot : un `null` ne s'affiche jamais 0
+// (docs/kb/restitution-yield.md). Un resume qui ecrit 0 la ou le calcul n'a pas
+// eu lieu transforme une absence en fait.
+
+test('LE TEST QUI COMPTE : un calcul NON FINI ne rend aucun chiffre', async () => {
+  const { corps } = await banc({
+    titulaire: true,
+    lignes: { 'rpc:revenus_calcul_incomplet': [{ incomplet: true, non_derives: 1436 }] }
+  })()
+  // ⚠ PAS DE BLOC, ET SURTOUT PAS UN BLOC A ZERO. Un `revenus: null` se lit
+  // « non calculable » a l'ecran ; un `revenus: { total_cents: 0 }` se lit
+  // « ce mois n'a rien rapporte ».
+  assert.strictEqual(corps.revenus, null,
+    'un calcul non fini rend quand meme un objet : l ecran y lira des zeros comme des faits')
+  assert.ok((corps.indisponibles || []).includes('revenus_calcul_en_cours'),
+    `l ecran n est pas prevenu que le calcul tourne (indisponibles : ${JSON.stringify(corps.indisponibles)})`)
+})
+
+test('LE TEST QUI COMPTE : la sonde ABSENTE refuse, elle ne suppose pas que tout va bien', async () => {
+  // La migration de la sonde se colle A LA MAIN, comme les autres. Entre le
+  // deploiement de cet endpoint et ce collage, on ne peut PAS savoir si le
+  // remplissage est fini — afficher le total serait reprendre exactement le
+  // pari qu'on vient de perdre. L'ordre de collage est donc contraint, et c'est
+  // ce test qui le rend vrai.
+  const { corps } = await banc({
+    titulaire: true,
+    erreurs: { 'rpc:revenus_calcul_incomplet': { code: 'PGRST202', message: 'Could not find the function' } }
+  })()
+  assert.strictEqual(corps.revenus, null, 'sans la sonde, l ecran affiche quand meme des chiffres')
+  assert.ok((corps.indisponibles || []).includes('revenus'),
+    'une sonde absente ne se signale pas')
+})
+
+test('LE TEST QUI COMPTE : une sonde MALFORMEE refuse (seul un `false` explicite autorise)', async () => {
+  // ⚠ `!== false` ET NON `=== true`. Trois formes de reponse degradee, et
+  // chacune doit refuser : une liste vide, un champ absent, un `null`.
+  // Autoriser sauf si `true` ferait d'une reponse malformee un feu vert — et
+  // c'est la forme que prend une fonction SQL dont la signature a change.
+  for (const sonde of [[], [{}], [{ incomplet: null }], null]) {
+    const { corps } = await banc({
+      titulaire: true,
+      lignes: { 'rpc:revenus_calcul_incomplet': sonde }
+    })()
+    assert.strictEqual(corps.revenus, null,
+      `sonde ${JSON.stringify(sonde)} : l ecran affiche des chiffres sur une reponse malformee`)
+  }
+})
+
+test('un calcul FINI laisse passer les chiffres : la sonde ne bloque pas tout', async () => {
+  // ⚠ LA CONTRE-EPREUVE INDISPENSABLE. Une sonde qui refuserait TOUJOURS
+  // passerait les trois tests ci-dessus, et le bloc des revenus n'existerait
+  // plus jamais. C'est le seul test qui distingue « la sonde marche » de « la
+  // sonde est fermee ».
+  const { corps } = await banc({
+    titulaire: true,
+    lignes: {
+      'rpc:revenus_calcul_incomplet': [{ incomplet: false, non_derives: 0 }],
+      'rpc:revenus_du_mois': [{ property_uuid: BULLE_UUID, sejours: 2, recu_cents: 40000,
+        a_venir_cents: 30000, total_cents: 70000, bruts: 0, sans_montant: 0 }]
+    }
+  })()
+  assert.ok(corps.revenus, 'le bloc des revenus est absent alors que le calcul est fini')
+  assert.strictEqual(corps.revenus.total.total_cents, 70000,
+    'le total ne vient pas de l agregat')
+  assert.ok(!(corps.indisponibles || []).includes('revenus_calcul_en_cours'),
+    'un calcul fini se signale encore comme en cours')
+})
+
+test('LE TEST QUI COMPTE : une erreur de DROITS sur un agregat n est pas prise pour une migration en attente', async () => {
+  // ⚠ CONSTAT DE LA REVIEW DU LOT. La detection « fonction absente » testait
+  // `texte.includes('revenus_du_mois')`, qui attrape TOUT message nommant la
+  // fonction — donc aussi « 42501 permission denied for function
+  // revenus_du_mois ». Un `grant` oublie, ou des privileges non reportes par
+  // `create or replace`, auraient vide le bloc pour TOUS les hotes sans une
+  // seule ligne dans les journaux de Vercel.
+  //
+  // Les deux cas rendent le meme ecran — « non calculable », ce qui est juste
+  // dans les deux cas — mais pas la meme TRACE. C'est la trace qu'on mesure.
+  const vraiErreur = console.error
+  const dits = []
+  console.error = (...a) => { dits.push(a.map(String).join(' ')) }
+  try {
+    const { corps } = await banc({
+      titulaire: true,
+      erreurs: { 'rpc:revenus_du_mois': { code: '42501', message: 'permission denied for function revenus_du_mois' } }
+    })()
+    assert.strictEqual(corps.revenus, null)
+    assert.ok(dits.some(d => d.includes('permission denied')),
+      `un refus de DROITS est passe sous silence (journal : ${JSON.stringify(dits)})`)
+  } finally {
+    console.error = vraiErreur
+  }
+})
+
+test('une MIGRATION EN ATTENTE, elle, ne crie pas au loup', async () => {
+  // L'autre moitie du test precedent : `PGRST202` est l'etat normal entre le
+  // push et le collage, et il ne doit pas remplir les journaux.
+  const vraiErreur = console.error
+  const dits = []
+  console.error = (...a) => { dits.push(a.map(String).join(' ')) }
+  try {
+    await banc({
+      titulaire: true,
+      erreurs: { 'rpc:revenus_du_mois': { code: 'PGRST202', message: 'Could not find the function public.revenus_du_mois' } }
+    })()
+    assert.ok(!dits.some(d => d.includes('revenus_du_mois echec')),
+      `une migration en attente a ete journalisee comme une panne : ${JSON.stringify(dits)}`)
+  } finally {
+    console.error = vraiErreur
+  }
+})
+
+test('LE TEST QUI COMPTE : un perimetre SANS cle UUID ne rend pas zero euro', async () => {
+  // ⚠ CONSTAT DE LA REVIEW DU LOT. `uuidIntrouvable` est le cas d'un membre
+  // dont la delegation n'est exprimee qu'en cles PROVIDER : `refsUuid` vaut
+  // `[]` alors que le perimetre n'est pas vide. `lireBiens` le consultait deja
+  // et poussait `indisponibles` ; le bloc des revenus ne le faisait pas, donc
+  // il passait `p_refs: []` — et `property_uuid = any('{}')` est FAUX POUR
+  // TOUT LE MONDE.
+  //
+  // Zero ligne, total a zero, `revenus` absent de `indisponibles`, et cet
+  // objet partait dans le `localStorage` du membre pour douze heures comme un
+  // resultat valide. L'ecran etait sauve par coincidence — `lireBiens` rendant
+  // `null`, la section se masquait — donc la coherence tenait a un AUTRE bloc.
+  const { corps, requetes } = await banc({ refs: [BULLE_REF] })()
+  assert.strictEqual(corps.revenus, null,
+    'un perimetre sans cle UUID rend un bloc de revenus : ses chiffres seraient des zeros')
+  assert.ok((corps.indisponibles || []).includes('revenus'),
+    `le bloc n est pas signale indisponible (indisponibles : ${JSON.stringify(corps.indisponibles)})`)
+  // ⚠ ET AUCUN AGREGAT NE PART : un appel avec `p_refs: []` est une depense
+  // pour une reponse qu'on sait fausse.
+  assert.deepEqual(requetes.filter(r => r.rpc).map(r => r.rpc), [],
+    'un agregat part avec un perimetre vide de cles UUID')
+})
+
+test('LE TEST QUI COMPTE : des RESERVES illisibles refusent le bloc, elles ne le laissent pas muet', async () => {
+  // ⚠ CONSTAT BLOQUANT DE LA REVIEW DU 26 OCTOBRE 2026, et mon commentaire
+  // affirmait le contraire : « l'ecran affiche des totaux justes et DIT qu'il ne
+  // sait pas compter ce qui en sort ». IL NE LE DISAIT PAS.
+  //
+  // L'endpoint poussait `revenus_reserves` dans `indisponibles` — un motif que
+  // PERSONNE ne lisait : une seule occurrence dans tout le depot, la ligne qui
+  // l'ecrivait. Ni la page, ni un test. Les trois compteurs tombaient a zero,
+  // les trois `if (… > 0)` de la page ne poussaient rien, et la reserve restait
+  // masquee. Le bandeau affichait son total, aucune ligne ne portait l'argent
+  // orphelin, et rien ne l'expliquait : c'est mot pour mot l'ecart MUET que ce
+  // lot declare referme.
+  //
+  // Un total qu'on ne peut pas EXPLIQUER ne s'affiche pas.
+  const { corps } = await banc({
+    titulaire: true,
+    erreurs: { 'rpc:revenus_hors_mois': { code: '42501', message: 'permission denied for function revenus_hors_mois' } },
+    lignes: { 'rpc:revenus_du_mois': [{ property_uuid: BULLE_UUID, sejours: 2, recu_cents: 40000,
+      a_venir_cents: 30000, total_cents: 70000, bruts: 0, sans_montant: 0 }] }
+  })()
+  assert.strictEqual(corps.revenus, null,
+    'le bloc affiche un total alors que ses reserves sont illisibles : l ecart redevient muet')
+  assert.ok((corps.indisponibles || []).includes('revenus'),
+    `le bloc n est pas signale indisponible (indisponibles : ${JSON.stringify(corps.indisponibles)})`)
+  // ⚠ ET LE MOTIF MORT N'EST PLUS POUSSE : s'il revenait, il faudrait que la
+  // page le lise. Un motif que personne ne lit est un silence avec un nom.
+  assert.ok(!(corps.indisponibles || []).includes('revenus_reserves'),
+    'le motif `revenus_reserves` est de retour : verifiez que la PAGE le lit avant de le garder')
+})
+
+test('LE TEST QUI COMPTE : les trois compteurs de reserve traversent l endpoint sans se perdre', async () => {
+  // ⚠ LE CINQUIEME FAUX VERT DU LOT, mesure par la review : trois mutations
+  // restaient VERTES sur la suite entiere — supprimer le motif des reserves,
+  // figer `hors_biens` a zero, figer `hors_mois` a zero. Les tests existants
+  // injectaient ces compteurs DIRECTEMENT dans le peintre, et testaient
+  // l'oracle de leur cote : le segment « ce que l'agregat rend -> ce que le
+  // payload porte » n'etait couvert par rien.
+  //
+  // Et c'est precisement ce segment qui porte la correction G2 : sans lui,
+  // elle n'avait AUCUNE verification executee — ni test, ni script (l'etage 2
+  // du verificateur de parite ne tourne pas tant que les migrations ne sont
+  // pas collees).
+  const { corps } = await banc({
+    titulaire: true,
+    lignes: {
+      'rpc:revenus_du_mois': [{ property_uuid: BULLE_UUID, sejours: 3, recu_cents: 50000,
+        a_venir_cents: 0, total_cents: 50000, bruts: 1, sans_montant: 1 }],
+      'rpc:revenus_hors_mois': [{ sans_date: 4, hors_biens: 2, hors_biens_cents: 150000 }]
+    }
+  })()
+  assert.ok(corps.revenus, 'le bloc est absent')
+  // Les deux compteurs d'orphelins, et leur montant.
+  assert.strictEqual(corps.revenus.hors_biens.sejours, 2,
+    'le compte des sejours rattaches a aucun bien ne traverse pas l endpoint')
+  assert.strictEqual(corps.revenus.hors_biens.total_cents, 150000,
+    'le MONTANT de l argent orphelin ne traverse pas l endpoint : l ecart redevient muet')
+  // Et les sejours sans date, qui sont tous mois confondus.
+  assert.strictEqual(corps.revenus.hors_mois.sejours, 4,
+    'le compte des sejours sans date de versement ne traverse pas l endpoint')
+  assert.strictEqual(corps.revenus.hors_mois.refuses.date, 4,
+    'le motif des sejours sans date est perdu')
+  // ⚠ ET LE BRUT ET LE NON CALCULABLE AUSSI, qui viennent de l autre agregat.
+  assert.strictEqual(corps.revenus.total.bruts, 1, 'le compte des montants BRUTS est perdu')
+  assert.strictEqual(corps.revenus.total.refuses.montant, 1,
+    'le compte des montants non calculables est perdu : la reserve ne s afficherait pas')
 })
