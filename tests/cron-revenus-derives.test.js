@@ -35,6 +35,18 @@ function faux ({ marker = null, delais = [{ canal: 'airbnb', base: 'arrivee', jo
         is (c, v) { q._filtres.push(['is', c, v]); return q },
         not (c, op, v) { q._filtres.push(['not', c, op, v]); return q },
         lt (c, v) { q._filtres.push(['lt', c, v]); return q },
+        // ⚠ `gte` ET `gt` ONT ETE AJOUTES LE 27 OCTOBRE 2026, et leur absence
+        // s'est fait voir immediatement : le troisieme motif du rattrapage (une
+        // ligne dont le payload a change depuis le calcul, dette 112) les
+        // appelle, et un double qui ignore une methode ne rend pas `undefined`
+        // — il LEVE. Sept tests ont rougi d'un coup sur
+        // « q.not(...).gte is not a function ».
+        //
+        // C'est le piege que ce fichier et son voisin documentent deja pour
+        // `or` et pour `rpc`. Ici il a joue du bon cote : le test a crie au lieu
+        // de passer en silence.
+        gte (c, v) { q._filtres.push(['gte', c, v]); return q },
+        gt (c, v) { q._filtres.push(['gt', c, v]); return q },
         order () { return q },
         limit () { return Promise.resolve(reponse()) },
         maybeSingle () { return Promise.resolve(reponse()) },

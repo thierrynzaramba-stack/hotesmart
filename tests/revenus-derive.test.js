@@ -36,7 +36,7 @@ const booking = (centimes, extra = {}) => deriverRevenus(
   { rooms: [{ meta: { price_details: { guest_view: { total: { amount: centimes, decimal_places: 2 } } } } }], inserted_at: '2026-09-01T10:00:00Z' },
   { delais: DELAIS, uuidDuBien: 'uuid-2', maintenant: T })
 
-test('LE TEST QUI COMPTE : les ONZE colonnes sont posees, et exactement les onze', () => {
+test('LE TEST QUI COMPTE : les colonnes posees sont EXACTEMENT celles de la liste', () => {
   // ⚠ LA LISTE EST LA SOURCE UNIQUE. Le writer, le script de remplissage, le
   // rattrapage et la migration la nomment tous : une colonne ajoutee a la
   // fonction sans l'etre a la liste serait posee par le writer et ignoree par
@@ -44,10 +44,17 @@ test('LE TEST QUI COMPTE : les ONZE colonnes sont posees, et exactement les onze
   // anciennes, ce qui est le pire des deux mondes.
   const d = airbnb('400.00', '12.00')
   assert.deepEqual(Object.keys(d).sort(), [...COLONNES].sort())
-  // ⚠ ONZE DEPUIS LE 27 OCTOBRE 2026 : `est_blocage` s'est ajoutee, et la
-  // VERSION de la regle a monte avec elle pour que le rattrapage reprenne les
-  // lignes derivees avant.
-  assert.equal(COLONNES.length, 11)
+  // ⚠ LE COMPTE NE S'ECRIT PLUS DANS LE TITRE, ET C'EST VOLONTAIRE. Ce test
+  // s'appelait « les ONZE colonnes », et il a fallu le renommer deux jours de
+  // suite — `est_blocage` le 27 octobre, `derive_raw_hash` le meme jour. Un
+  // nombre dans un nom de test est un nombre a maintenir, pour une information
+  // que `COLONNES.length` porte deja.
+  //
+  // Ce qui compte n'est pas le compte : c'est que la fonction pose EXACTEMENT
+  // les colonnes de la liste, ni plus ni moins — l'assertion `deepEqual`
+  // ci-dessus. On garde quand meme un plancher, pour qu'une liste videe par
+  // accident ne rende pas ce test vert.
+  assert.ok(COLONNES.length >= 12, `COLONNES n'a que ${COLONNES.length} entree(s)`)
   // Et chacune est posee — pas une seule `undefined`, qui laisserait la colonne
   // intacte cote Postgres au lieu de l'ecrire.
   for (const c of COLONNES) {
@@ -304,9 +311,46 @@ test("LE TEST QUI COMPTE : la VERSION a monte, donc le rattrapage reprend tout",
   // leur classement d'avant.
   const { aDeriver, VERSION, COLONNES } = require('../lib/revenus/derive')
   assert.ok(VERSION >= 2, 'la version n a pas monte avec la nouvelle regle')
-  assert.equal(COLONNES.length, 11, 'la onzieme colonne n est pas dans la liste')
+  // ⚠ LE COMPTE SUIT LA LISTE, il ne la decrit pas. Douze depuis que
+  // `derive_raw_hash` s'est ajoutee (dette 112, 27 octobre 2026).
+  assert.equal(COLONNES.length, 12, 'une colonne derivee a disparu de la liste')
   assert.ok(COLONNES.includes('est_blocage'))
+  assert.ok(COLONNES.includes('derive_raw_hash'))
   // Une ligne de la version precedente est reprise.
   assert.equal(aDeriver({ derive_le: T, derive_version: VERSION - 1 }), true)
+  // ⚠ ET UNE LIGNE A JOUR NE L'EST PAS — a condition que son empreinte
+  // corresponde. Sans `raw_hash`, la question de la peremption ne se pose pas.
   assert.equal(aDeriver({ derive_le: T, derive_version: VERSION }), false)
+  assert.equal(aDeriver({ derive_le: T, derive_version: VERSION, raw_hash: 'a', derive_raw_hash: 'a' }), false)
+})
+
+test('LE TEST QUI COMPTE : une ligne dont le PAYLOAD a change est reprise', () => {
+  // ⚠ DETTE 112. `aDeriver` avait trois cas — jamais derivee, version perimee,
+  // version illisible — et il en manquait un quatrieme : le payload a change
+  // DEPUIS le calcul. Une telle ligne garde `derive_le` non nul et sa version a
+  // jour, donc elle echappait aux deux requetes du rattrapage, et rien ne la
+  // reprenait jamais.
+  //
+  // Mesure d'origine sur staging : j'ai corrige deux fois le `raw` d'une ligne,
+  // et `montant_net_cents` comme `derive_le` sont restes identiques au centime
+  // et a la milliseconde.
+  const { aDeriver, VERSION } = require('../lib/revenus/derive')
+  const base = { derive_le: T, derive_version: VERSION }
+
+  // Les deux empreintes concordent : rien a faire.
+  assert.equal(aDeriver({ ...base, raw_hash: 'aaa', derive_raw_hash: 'aaa' }), false)
+  // Le payload a change depuis le calcul : a reprendre.
+  assert.equal(aDeriver({ ...base, raw_hash: 'bbb', derive_raw_hash: 'aaa' }), true,
+    'une ligne dont le payload a change n est pas reprise : son montant restera fige')
+  // ⚠ ET UNE EMPREINTE DE REFERENCE ABSENTE EST AUSSI UNE RAISON DE REPRENDRE :
+  // c'est l'etat de toute ligne derivee AVANT la migration du 27 octobre 2026.
+  // Sans ce cas, la peremption de ces lignes-la resterait indetectable a vie, et
+  // la dette ne serait fermee que pour l'avenir. Le cout est borne et unique —
+  // le rattrapage plafonne a 2 000 lignes par nuit, la production en porte 1 436.
+  assert.equal(aDeriver({ ...base, raw_hash: 'aaa', derive_raw_hash: null }), true,
+    'une ligne sans empreinte de reference n est pas reprise : sa peremption restera invisible')
+  // ⚠ MAIS SANS `raw_hash`, LA QUESTION NE SE POSE PAS : il n'y a pas de
+  // payload a comparer, donc rien a reprendre de ce chef.
+  assert.equal(aDeriver({ ...base, raw_hash: null, derive_raw_hash: null }), false)
+  assert.equal(aDeriver({ ...base }), false, 'une ligne sans empreinte du tout est reprise a tort')
 })
