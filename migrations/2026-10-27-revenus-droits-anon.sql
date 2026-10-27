@@ -10,13 +10,30 @@
 -- ⚠ ET CE N'EST PAS UNE FUITE DE DONNEE. Mesure faite
 -- avec un compte reel qui porte 795 € : la cle de
 -- service rend deux biens et leurs montants, la cle
--- publique rend `[]`. Les fonctions sont
+-- publique rend un ensemble VIDE pour
+-- `revenus_du_mois`. Les fonctions sont
 -- `security invoker`, donc la RLS s'applique a
 -- l'appelant — et la cle publique ne voit aucune ligne
 -- de `bookings_snapshot`, ni aucune de `properties`
 -- (verifie : 0). Ce qui tombe est la garde de DEFENSE EN
 -- PROFONDEUR decidee pour ce lot : seul `service_role`
 -- execute. Elle ne filtrait rien, pour personne.
+--
+-- ⚠ ET « VIDE » N'EST PAS CE QUE LES DEUX AUTRES
+-- RENDAIENT, precision de la session chef de file qui
+-- a sonde des DEUX cotes du collage. `revenus_hors_mois`
+-- rendait a la cle publique UNE LIGNE DE ZEROS
+-- (`sans_date: 0`) la ou la cle de service rendait
+-- `sans_date: 4`, et `revenus_calcul_incomplet` rendait
+-- `{incomplet: false, non_derives: 0}` — c'est-a-dire
+-- « tout va bien » a un appelant qui n'a RIEN VU.
+--
+-- C'est la regle gravee du depot, celle de
+-- docs/kb/restitution-yield.md : un resume qui ecrit 0
+-- la ou le calcul n'a rien pu lire transforme une
+-- ABSENCE en FAIT. La garde tombee valait donc plus que
+-- son nom : sans fuite de montant, un appelant non
+-- autorise repartait avec une affirmation fausse.
 --
 -- ⚠ POURQUOI LES TROIS MIGRATIONS PRECEDENTES ONT ECHOUE
 -- A LA POSER, alors que chacune porte le bon

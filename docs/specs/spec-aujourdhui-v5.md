@@ -118,3 +118,46 @@ Chaque étape : ordinateur + mobile, i18n-check, review, preview staging, recett
 | # inventaire | Fonction | Aujourd'hui | Demain | Statut |
 |---|---|---|---|---|
 | … | … | … | … | conservée / déplacée / retirée (motif) |
+
+## 11. Bloc Revenus nets — qui peut appeler les trois agrégats, et ce qui cloisonne
+
+**Écrit ici le 27 octobre 2026, à la demande de la session chef de file, parce
+que c'était déduit et non dit.** Trois fonctions SQL servent le bloc :
+`revenus_du_mois`, `revenus_hors_mois`, `revenus_calcul_incomplet`.
+
+**Seul `service_role` les exécute.** Les migrations 3, 5 et 6 du lot
+révoquaient `from public`, ce qui était juste mais **insuffisant** : Supabase
+pose des privilèges *par défaut* qui accordent `EXECUTE` directement à `anon` et
+`authenticated` à la **création** de chaque fonction, et ce droit-là appartient
+à ces rôles — le révoquer de `PUBLIC` ne l'enlève pas. La huitième migration
+(`2026-10-27-revenus-droits-anon.sql`) révoque `from anon, authenticated`, et sa
+preuve interroge **les trois rôles ensemble** : `public_peut = false` seul était
+déjà vrai avant, et c'est ce qui a fait croire la garde posée.
+
+⚠ **CE QUE LA CLÉ PUBLIQUE OBTENAIT AVANT, ET POURQUOI ÇA COMPTAIT.** Aucun
+montant ne fuyait : les fonctions sont `security invoker`, donc la RLS
+s'applique à l'appelant, et la clé publique ne voit aucune ligne de
+`bookings_snapshot`. Mais `revenus_hors_mois` lui rendait **une ligne de
+zéros** (`sans_date: 0` là où la clé de service rendait `sans_date: 4`) et
+`revenus_calcul_incomplet` lui rendait `{incomplet: false, non_derives: 0}` —
+c'est-à-dire « tout va bien » à un appelant qui n'avait rien vu. C'est la règle
+de `docs/kb/restitution-yield.md` : un résumé qui écrit 0 là où le calcul n'a
+rien pu lire transforme une **absence** en **fait**.
+
+⚠ **ET C'EST `p_user_id` QUI CLOISONNE, SEUL.** L'endpoint appelle avec
+`SUPABASE_SERVICE_KEY` (`api/ecran/aujourdhui.js`), donc **la RLS ne filtre
+plus rien** : tout le cloisonnement entre comptes repose sur l'argument
+`p_user_id`, et le périmètre d'un membre délégué sur `p_refs`. Les deux doivent
+venir de `contexteDEcran(req, res)` — `accountUserId` et les UUID résolus du
+périmètre — et **jamais** de `req.query`. Un jour où quelqu'un passera un
+identifiant de compte venu de la requête, il n'y aura pas de seconde ligne de
+défense.
+
+⚠ **UN FICHIER FRONT NOMME CES FONCTIONS SANS LES APPELER.**
+`pages/aujourdhui.html` porte un **commentaire** qui cite
+`revenus_du_mois(2026-10)` et son résultat mesuré sur staging. Ce n'est pas un
+appel, et il n'y a aucun chemin front vers ces fonctions — vérifié par
+recensement sur `api/`, `lib/`, `pages/`, `apps/`, `shared/` et `scripts/` :
+l'unique appelant est `api/ecran/aujourdhui.js`. Le jour où ce commentaire
+devient un appel, la révocation d'`authenticated` casse le bloc, et personne ne
+reliera les deux : c'est pour ça que la phrase est ici.
