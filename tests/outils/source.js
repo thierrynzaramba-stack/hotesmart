@@ -38,6 +38,56 @@ function sansCommentaires (src) {
     .join('\n')
 }
 
+// Le code, sans le CONTENU des litteraux de chaine : les guillemets restent,
+// ce qu'ils entourent devient des espaces, et les sauts de ligne sont gardes
+// pour que les numeros de ligne tiennent.
+//
+// ⚠ POURQUOI C'EST NECESSAIRE, ET MESURE DEUX FOIS LE 27 OCTOBRE 2026. Deux
+// recensements ecrits ce jour-la se sont denonces eux-memes : leurs TEMOINS
+// portent la forme fautive dans une chaine, et le balayage la comptait. Et
+// `tests/price-log.test.js` a ete signale a tort, parce qu'il asserte qu'un
+// AUTRE fichier contient un `require('./price-log')` — la chaine est la preuve,
+// pas le defaut.
+//
+// Du code dans une chaine n'est pas du code execute. Exempter le FICHIER aurait
+// ete le mauvais geste : ce depot a deja mesure qu'une exemption par fichier
+// rend invisible tout ce qu'on y ajoutera ensuite.
+function sansLitteraux (src) {
+  let out = ''
+  let i = 0
+  const s = String(src)
+  while (i < s.length) {
+    const c = s[i]
+    if (c === '"' || c === "'" || c === '`') {
+      let j = i + 1
+      while (j < s.length) {
+        if (s[j] === '\\') { j += 2; continue }
+        if (s[j] === c) break
+        j++
+      }
+      out += c + s.slice(i + 1, j).replace(/[^\n]/g, ' ') + c
+      i = j + 1
+      continue
+    }
+    out += c
+    i++
+  }
+  return out
+}
+
+// Le code NU : ni commentaires de ligne, ni contenu de chaine.
+const codeNu = (src) => sansLitteraux(sansCommentaires(src))
+
+// ⚠ IL Y A EU ICI UN `plagesDeChaines`, ET IL ETAIT FAUX. Il rendait les
+// bornes des litteraux de chaine pour decider si une occurrence y etait
+// imbriquee. Mesure du 27 octobre 2026 : un LITTERAL D'EXPRESSION REGULIERE
+// contenant des guillemets — `/require\(['"]…/` — lui faisait ouvrir une
+// chaine fantome, et TOUT ce qui suivait dans le fichier etait mal juge.
+// Distinguer une expression reguliere d'une division demande un analyseur ;
+// sans lui, l'outil repond avec aplomb sur un decoupage faux.
+// `tests/require-se-resout.test.js` juge donc LIGNE PAR LIGNE, ou une
+// desynchronisation ne peut pas se propager.
+
 // Les occurrences d'un motif dans le CODE, jamais dans les commentaires.
 function compterDansLeCode (src, motif) {
   const re = motif instanceof RegExp
@@ -59,4 +109,4 @@ function fichiersJs (dossier, prefixe = null) {
   return out
 }
 
-module.exports = { sansCommentaires, compterDansLeCode, fichiersJs }
+module.exports = { sansCommentaires, sansLitteraux, codeNu, compterDansLeCode, fichiersJs }
