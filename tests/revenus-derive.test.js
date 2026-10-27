@@ -354,3 +354,57 @@ test('LE TEST QUI COMPTE : une ligne dont le PAYLOAD a change est reprise', () =
   assert.equal(aDeriver({ ...base, raw_hash: null, derive_raw_hash: null }), false)
   assert.equal(aDeriver({ ...base }), false, 'une ligne sans empreinte du tout est reprise a tort')
 })
+
+// ─── L'INVARIANT, PLUTOT QU'UN TEST PAR APPELANT ────────────────────────────
+
+test('RECENSEMENT : tout appel a deriverRevenus passe l empreinte du payload', () => {
+  // ⚠ CE TEST EXISTE PARCE QUE DEUX APPELANTS SUR QUATRE L'OUBLIAIENT, et que
+  // l'oubli ne casse rien de visible : `deriverRevenus` fait
+  // `derive_raw_hash: options.empreinteDuRaw ?? null`, donc il ecrit `null`
+  // dans la colonne qui sert a detecter la peremption. La ligne reste candidate
+  // apres avoir ete derivee, le rattrapage la reprend chaque nuit, a vie, et il
+  // ECRASE l'empreinte que le writer avait posee.
+  //
+  // Le writer, lui, avait son test. Le rattrapage et le script de remplissage
+  // n'en avaient aucun — et le script de remplissage n'est couvert par AUCUN
+  // test du depot, c'est un programme en ligne de commande. Un test par
+  // appelant aurait laisse le prochain a decouvert : on garde l'INVARIANT.
+  const path = require('node:path')
+  const fs = require('node:fs')
+  const racine = path.join(__dirname, '..')
+  const { fichiersJs } = require('./outils/source')
+  const fichiers = []
+  for (const dossier of ['api', 'lib', 'scripts']) {
+    const abs = path.join(racine, dossier)
+    if (fs.existsSync(abs)) fichiers.push(...fichiersJs(abs, dossier))
+  }
+
+  const sansEmpreinte = []
+  for (const f of fichiers) {
+    const src = fs.readFileSync(path.join(racine, f), 'utf8')
+    let i = src.indexOf('deriverRevenus(')
+    while (i !== -1) {
+      // On decoupe sur les parentheses APPARIEES : s'arreter au premier `)`
+      // couperait l'appel au milieu de son objet d'options, et le test
+      // declarerait un manque la ou l'option est presente.
+      let p = 0
+      let j = src.indexOf('(', i)
+      const debut = j
+      for (; j < src.length; j++) {
+        if (src[j] === '(') p++
+        else if (src[j] === ')') { p--; if (p === 0) break }
+      }
+      const appel = src.slice(debut, j + 1)
+      // Une ligne d'import ou de re-export n'est pas un appel.
+      if (appel.length > 2 && !appel.startsWith('()') && !appel.includes('empreinteDuRaw')) {
+        sansEmpreinte.push(`${f} (position ${i})`)
+      }
+      i = src.indexOf('deriverRevenus(', i + 1)
+    }
+  }
+  assert.deepStrictEqual(sansEmpreinte, [],
+    'ces appels a deriverRevenus n ont pas d empreinteDuRaw : ils ecriront null\n'
+    + 'dans derive_raw_hash, donc leurs lignes seront reprises a chaque passage\n'
+    + 'du rattrapage, a vie, et l empreinte du writer sera ecrasee.\n'
+    + sansEmpreinte.join('\n'))
+})

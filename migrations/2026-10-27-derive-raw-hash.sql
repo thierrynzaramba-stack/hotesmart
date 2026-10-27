@@ -60,11 +60,28 @@ portera son empreinte. C''est voulu — on ne devine pas
 une empreinte qu''on n''a pas calculee.';
 
 
--- ⚠ L'INDEX NE PORTE QUE LES LIGNES A REPRENDRE, et il
--- ne peut pas etre partiel sur une comparaison de deux
--- colonnes (PostgreSQL l'interdit dans un predicat
--- d'index). On indexe donc le couple, et le rattrapage
--- filtre dessus.
+-- ⚠ CE QUE CET INDEX FAIT, ET CE QU'IL NE FAIT PAS.
+-- Il ne peut pas etre partiel sur une comparaison de
+-- deux colonnes : PostgreSQL l'interdit dans un
+-- predicat d'index. On indexe donc le couple.
+--
+-- ⚠ ET IL NE SERT PAS LA REQUETE DU RATTRAPAGE (releve
+-- en review, corrige ici le 27 octobre 2026). Une
+-- premiere version de ce commentaire affirmait qu'il
+-- « ne porte que les lignes a reprendre » et que « le
+-- rattrapage filtre dessus ». Les deux etaient faux :
+-- le predicat `derive_le is not null` couvre la
+-- QUASI-TOTALITE de la table, et la requete du
+-- rattrapage ne filtre pas sur `user_id` tout en triant
+-- par `id` — le planificateur ne choisira donc pas un
+-- index dont `user_id` est la colonne de tete.
+-- Il reste pose : il ne coute presque rien sur 1 436
+-- lignes, et il sert les lectures par compte. L'index
+-- utile a la requete du rattrapage serait
+-- `(id) where derive_le is not null and
+-- derive_raw_hash is null` — note au registre, pas
+-- refait ici pour ne pas ajouter une huitieme
+-- migration a coller pour un gain nul a cette taille.
 create index if not exists
   bookings_snapshot_derive_hash_idx
   on public.bookings_snapshot (user_id, derive_raw_hash)

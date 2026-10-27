@@ -1090,7 +1090,14 @@ function fakeSupabaseAvecRevenus ({ existing = null, captureRef = {}, existingPr
         select () { return q },
         eq () { return q },
         maybeSingle: async () => {
-          if (table === 'properties') return { data: bienId ? { id: bienId } : null, error: null }
+          // ⚠ `bienId: 'echec'` = LA LECTURE DES BIENS EST EN PANNE, et ce n'est
+          // pas la meme chose que `bienId: null` (le bien est inconnu). Le
+          // double ne savait pas dire la difference, donc aucun test ne pouvait
+          // exiger que le writer la tienne.
+          if (table === 'properties') {
+            if (bienId === 'echec') return { data: null, error: { message: 'properties en panne' } }
+            return { data: bienId ? { id: bienId } : null, error: null }
+          }
           return { data: existing
             ? { snapshot: existing, property_id: existingPropId, raw_hash: empreinte(null) }
             : null, error: null }
@@ -1164,11 +1171,27 @@ test('LE TEST QUI COMPTE : une ANNULATION met a jour le statut derive, elle ne l
     'le statut derive reste `confirmed` sur une annulation : son argent restera dans le total du mois')
 })
 
-test('sans delais LISIBLES, le writer unitaire n ecrit AUCUNE colonne derivee', async () => {
+test('une table de delais VIDE n autorise pas a deriver (writer unitaire)', async () => {
   // ⚠ LA CONTRE-EPREUVE. Les colonnes derivees sont du confort : faire echouer
   // l'upsert d'une reservation pour elles serait couper le coeur pour l'ecran.
   // On ne derive donc pas — et on n'ecrit SURTOUT pas des colonnes a moitie
   // calculees, qui seraient prises pour un fait par les agregats.
+  //
+  // ⚠ CE TEST AFFIRMAIT L'INVERSE JUSQU'AU 27 OCTOBRE 2026, et son titre disait
+  // deja le contraire de son assertion — releve par la review. Il raisonnait
+  // ainsi : « `tableDesDelais([])` rend un objet VIDE, pas `undefined` : la
+  // lecture a REUSSI et la table est vide, on derive donc, mais sans date de
+  // versement. » Le raisonnement se tenait ; il etait FAUX SUR LES FAITS.
+  //
+  // Mesure, table vide, reservation a 300 € en `Payout Amount` :
+  //   date_versement = null | montant_net_cents = NULL | motif = prix_non_calculable
+  // Ce n'est donc pas « la date manque » : le MONTANT disparait aussi, et
+  // l'ecran accuse le PRIX de n'etre pas calculable alors qu'il l'est. Une
+  // ligne de configuration absente faisait mentir l'ecran sur la cause.
+  //
+  // Et le rattrapage de 04:00 refusait DEJA ce cas (`skipped: 'aucun_delai'`).
+  // Les deux chemins tiennent maintenant la meme regle, `delaisUtilisables`,
+  // ecrite une seule fois.
   const capture = {}
   const sb = fakeSupabaseAvecRevenus({ captureRef: capture, delais: [] })
   const r = await saveBookingSnapshot(sb, {
@@ -1178,11 +1201,13 @@ test('sans delais LISIBLES, le writer unitaire n ecrit AUCUNE colonne derivee', 
     booking: { id: 'B-SANS', amount: '300.00', meta: { amount_type: 'net' } }
   })
   assert.strictEqual(r.ok, true)
-  // `tableDesDelais([])` rend un objet VIDE, pas `undefined` : la lecture a
-  // REUSSI et la table est vide. On derive donc, mais sans date de versement.
-  assert.ok(capture.row, 'aucun upsert')
-  assert.strictEqual(capture.row.date_versement, null,
-    'une date de versement est calculee alors qu aucun canal n a de delai')
+  assert.ok(capture.row, 'aucun upsert : le coeur doit ecrire meme sans delais')
+  // ⚠ AUCUNE colonne derivee, et on l'exige par la LISTE du module, pas par un
+  // echantillon : une colonne ajoutee demain serait couverte sans y penser.
+  const { COLONNES } = require('../lib/revenus/derive')
+  const posees = COLONNES.filter(c => Object.prototype.hasOwnProperty.call(capture.row, c))
+  assert.deepStrictEqual(posees, [],
+    'des colonnes derivees sont ecrites alors qu aucun canal n a de delai : ' + posees.join(', '))
 })
 
 test('LE TEST QUI COMPTE : un payload qui change SEUL fait recalculer les colonnes derivees', async () => {
@@ -1253,4 +1278,31 @@ test('un payload qui change SANS delais lisibles ne reecrit pas les colonnes', a
   assert.ok('raw' in patch, 'le payload n est pas mis a jour')
   assert.ok(!('derive_le' in patch),
     'des colonnes derivees sont ecrites alors que les delais sont illisibles')
+})
+
+test('LE TEST QUI COMPTE : une lecture des BIENS en panne n autorise pas a deriver', async () => {
+  // ⚠ RELEVE PAR LA REVIEW DU 27 OCTOBRE 2026. `contexteDesRevenus` ne lisait
+  // PAS `error` sur `properties` : une lecture EN PANNE et un bien INCONNU
+  // rendaient tous deux `uuid = null`. La derivation posait alors
+  // `property_uuid: null` SANS MOTIF par-dessus un UUID juste.
+  //
+  // ⚠ ET DEPUIS LA DETTE 112, C'ETAIT DEVENU DEFINITIF : la meme ecriture pose
+  // une empreinte qui CONCORDE avec le payload, donc `aDeriver` repond « a
+  // jour » et le rattrapage ne reprend plus jamais la ligne. L'argent du sejour
+  // sortait du total du bien, en silence, pour toujours. Scenario reel du
+  // depot : une bascule de cle provider, puis un payload qui bouge.
+  const capture = {}
+  const sb = fakeSupabaseAvecRevenus({ captureRef: capture, bienId: 'echec' })
+  const r = await saveBookingSnapshot(sb, {
+    userId: 'u1', bookingId: 'B-PANNE', propertyId: '12345', provider: 'channex',
+    snapshot: { provider: 'channex', source: 'airbnb', status: 'new',
+                arrival: '2026-11-10', departure: '2026-11-12' },
+    booking: { id: 'B-PANNE', amount: '300.00', meta: { amount_type: 'Payout Amount' } }
+  })
+  assert.strictEqual(r.ok, true, 'le coeur doit ecrire meme quand les biens sont illisibles')
+  assert.ok(capture.row, 'aucun upsert')
+  const { COLONNES } = require('../lib/revenus/derive')
+  const posees = COLONNES.filter(c => Object.prototype.hasOwnProperty.call(capture.row, c))
+  assert.deepStrictEqual(posees, [],
+    'des colonnes derivees sont ecrites alors que la lecture des biens a echoue : ' + posees.join(', '))
 })

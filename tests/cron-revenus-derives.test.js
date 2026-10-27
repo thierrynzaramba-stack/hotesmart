@@ -48,12 +48,28 @@ function faux ({ marker = null, delais = [{ canal: 'airbnb', base: 'arrivee', jo
         gte (c, v) { q._filtres.push(['gte', c, v]); return q },
         gt (c, v) { q._filtres.push(['gt', c, v]); return q },
         order () { return q },
-        limit () { return Promise.resolve(reponse()) },
+        // ⚠ `limit` ET `range` SONT CHAINABLES, et ce n'est pas un detail de
+        // confort : `limit` rendait une PROMESSE, donc deplacer la borne juste
+        // apres `from()` — ce que le recensement des lectures non bornees
+        // demande — faisait appeler `.select()` SUR UNE PROMESSE. Un double qui
+        // n'accepte la borne qu'en DERNIERE position dicte la forme du code de
+        // production.
+        limit (n) { q._limit = n; return q },
+        range (a, b) { q._range = [a, b]; return q },
         maybeSingle () { return Promise.resolve(reponse()) },
         update (valeurs) {
           return {
             eq: (c, v) => {
               vu.updates.push({ valeurs, par: [c, v] })
+              // ⚠ L'ECRITURE MODIFIE LA FIXTURE, et c'est ce qui manquait au
+              // double. Sans cela, une relecture rendait l'etat d'AVANT :
+              // le rattrapage pouvait deriver deux fois la meme ligne dans le
+              // meme passage, ou ecrire `null` dans la colonne qui sert a
+              // detecter la peremption, sans qu'aucun test ne le voie. C'est
+              // exactement par ce trou que le defaut du 27 octobre est passe.
+              if (!echouerUpdate) {
+                for (const l of lignes) if (String(l[c]) === String(v)) Object.assign(l, valeurs)
+              }
               return Promise.resolve({ error: echouerUpdate ? { message: 'refus' } : null })
             }
           }
@@ -67,14 +83,36 @@ function faux ({ marker = null, delais = [{ canal: 'airbnb', base: 'arrivee', jo
       function reponse () {
         if (table === 'cron_logs') return { data: marker, error: null }
         if (table === 'delais_versement') return { data: delais, error: null }
-        if (table === 'properties') return { data: biens, error: null }
+        if (table === 'properties') {
+          // La pagination est honoree : une lecture sans borne est tronquee a
+          // 1 000 lignes en vrai, et un double qui rend tout cache le defaut.
+          const r = q._range
+          return { data: r ? biens.slice(r[0], r[1] + 1) : biens, error: null }
+        }
         if (table === 'bookings_snapshot') {
           if (erreurLecture) return { data: null, error: erreurLecture }
-          // La requete « jamais derivee » (`is derive_le null`) rend les lignes ;
-          // celle de la version perimee rend vide, sauf si les fixtures en ont.
-          const estJamais = q._filtres.some(f => f[0] === 'is' && f[1] === 'derive_le')
-          return { data: estJamais ? lignes.filter(l => l.derive_le == null)
-            : lignes.filter(l => l.derive_le != null), error: null }
+          // ⚠ LE DOUBLE APPLIQUE LES FILTRES AU LIEU DE DEVINER LE MOTIF.
+          // Il rendait `lignes.filter(l => l.derive_le != null)` pour TOUTE
+          // requete non-« jamais » : une fixture fraichement derivee ressortait
+          // d'un ensemble vide au motif « payload », alors qu'en vrai elle y est
+          // candidate. La double ecriture etait donc invisible. Et `limit`
+          // comme le curseur etaient ignores, donc les retirer du code de
+          // production ne faisait rougir aucun test.
+          let rows = lignes.slice()
+          for (const f of q._filtres) {
+            const [op, col] = f
+            if (op === 'is' && col === 'derive_le') rows = rows.filter(l => l.derive_le == null)
+            else if (op === 'not' && col === 'derive_le') rows = rows.filter(l => l.derive_le != null)
+            else if (op === 'is' && col === 'derive_raw_hash') rows = rows.filter(l => l.derive_raw_hash == null)
+            else if (op === 'not' && col === 'derive_raw_hash') rows = rows.filter(l => l.derive_raw_hash != null)
+            else if (op === 'lt' && col === 'derive_version') rows = rows.filter(l => Number(l.derive_version) < f[2])
+            else if (op === 'gte' && col === 'derive_version') rows = rows.filter(l => Number(l.derive_version) >= f[2])
+            else if (op === 'eq' && col === 'derive_version') rows = rows.filter(l => Number(l.derive_version) === f[2])
+            else if (op === 'gt' && col === 'id') rows = rows.filter(l => String(l.id) > String(f[2]))
+          }
+          rows.sort((a, b) => String(a.id) < String(b.id) ? -1 : 1)
+          if (q._limit) rows = rows.slice(0, q._limit)
+          return { data: rows, error: null }
         }
         return { data: [], error: null }
       }
@@ -304,4 +342,95 @@ test('`forcer` passe la fenetre ET la cadence — pour la recette', async () => 
   })
   assert.equal(r.ecrites, 1)
   assert.equal(vu.updates.length, 1)
+})
+
+// ─── L'EMPREINTE DU PAYLOAD (dette 112) ─────────────────────────────────────
+//
+// ⚠ CES CINQ TESTS N'EXISTAIENT PAS, ET C'EST PAR LEUR ABSENCE QUE LE DEFAUT
+// EST PASSE. Le correctif de la dette 112 avait son test du cote du WRITER,
+// aucun du cote du rattrapage : celui-ci appelait `deriverRevenus` SANS
+// `empreinteDuRaw`, donc il ecrivait `derive_raw_hash = null` dans la colonne
+// qui sert justement a detecter la peremption. Il se reprenait lui-meme chaque
+// nuit, a vie, et ecrasait l'empreinte posee par le writer. Trouve par la
+// review, verifie par execution, jamais par la suite.
+
+const PERIME = (extra = {}) => SEJOUR({
+  derive_le: '2026-10-20T04:00:00.000Z', derive_version: VERSION,
+  raw_hash: 'empreinte-neuve', derive_raw_hash: 'empreinte-d-avant', ...extra
+})
+
+test('LE TEST QUI COMPTE : le rattrapage POSE l empreinte du payload', async () => {
+  const { client, vu } = faux({ lignes: [SEJOUR()] })
+  await rattraperRevenusDerives({ errors: [] }, { supabase: client, now: () => QUATRE_H_HIVER })
+  assert.equal(vu.updates.length, 1)
+  // La fixture n'a pas de `raw_hash` : l'empreinte posee doit valoir `null`,
+  // pas une valeur inventee.
+  assert.ok('derive_raw_hash' in vu.updates[0].valeurs,
+    'la colonne de l empreinte n est pas ecrite du tout')
+
+  const { client: c2, vu: v2 } = faux({ lignes: [SEJOUR({ raw_hash: 'h-1' })] })
+  await rattraperRevenusDerives({ errors: [] }, { supabase: c2, now: () => QUATRE_H_HIVER })
+  assert.equal(v2.updates.length, 1)
+  assert.equal(v2.updates[0].valeurs.derive_raw_hash, 'h-1',
+    'le rattrapage ecrit null dans l empreinte : il se reprendra chaque nuit, a vie')
+})
+
+test('LE TEST QUI COMPTE : une ligne dont l empreinte DIFFERE est reprise', async () => {
+  const { client, vu } = faux({ lignes: [PERIME()] })
+  await rattraperRevenusDerives({ errors: [] }, { supabase: client, now: () => QUATRE_H_HIVER })
+  assert.equal(vu.updates.length, 1, 'une ligne perimee par son payload n est pas reprise')
+  assert.equal(vu.updates[0].valeurs.derive_raw_hash, 'empreinte-neuve')
+})
+
+test('LE TEST QUI COMPTE : le rattrapage CONVERGE — une ligne a jour n est pas reprise', async () => {
+  // ⚠ C'EST LA CONTRE-EPREUVE DU DEFAUT. Si l'empreinte n'est pas posee, cette
+  // ligne reste candidate APRES avoir ete derivee : le meme passage la reprend
+  // une seconde fois. Le double applique les ecritures sur ses fixtures, donc
+  // il peut le voir — avant le 27 octobre 2026, il ne pouvait pas.
+  const { client, vu } = faux({
+    lignes: [SEJOUR({ raw_hash: 'h-1' }), PERIME({ id: 'row-2', booking_id: 'B2' })]
+  })
+  await rattraperRevenusDerives({ errors: [] }, { supabase: client, now: () => QUATRE_H_HIVER })
+  const parLigne = new Map()
+  for (const u of vu.updates) parLigne.set(String(u.par[1]), (parLigne.get(String(u.par[1])) || 0) + 1)
+  assert.deepEqual([...parLigne.entries()].sort(), [['row-1', 1], ['row-2', 1]],
+    'une ligne est derivee deux fois dans le meme passage')
+})
+
+test('LE TEST QUI COMPTE : le curseur fait depasser la PREMIERE page', async () => {
+  // ⚠ SANS CURSEUR, le motif « payload » relirait la meme page a chaque tour :
+  // ses lignes restent candidates en SQL (derivees, a jour en version,
+  // empreinte presente), c'est `aDeriver` qui tranche en memoire. La derniere
+  // ligne ne serait jamais atteinte. Le double honore maintenant `limit` et
+  // `gt('id', …)`, donc retirer le curseur du code de production fait rougir
+  // ce test — avant, il ne faisait rien rougir.
+  const lignes = []
+  for (let i = 0; i <= 200; i++) {
+    lignes.push(PERIME({ id: `row-${String(i).padStart(4, '0')}`, booking_id: `B${i}` }))
+  }
+  const { client, vu } = faux({ lignes })
+  await rattraperRevenusDerives({ errors: [] }, { supabase: client, now: () => QUATRE_H_HIVER })
+  assert.equal(vu.updates.length, 201,
+    `${vu.updates.length} lignes ecrites sur 201 : le balayage ne depasse pas la premiere page`)
+  assert.ok(vu.updates.some(u => u.par[1] === 'row-0200'),
+    'la ligne au-dela de la premiere page n est jamais reprise')
+})
+
+test('LE TEST QUI COMPTE : le plafond atteint est ANNONCE, pas tu', async () => {
+  // ⚠ Le motif « payload » BALAYE la table (le filtre est en JavaScript, car
+  // PostgREST ne compare pas deux colonnes). Au-dela de LIGNES_MAX, la queue de
+  // la table n'est pas « reportee a demain » : le curseur repart de zero chaque
+  // nuit et l'ordre des `id` est stable, donc elle n'est JAMAIS examinee.
+  // 1 436 lignes en production au 27 octobre 2026 pour un plafond de 2 000 : le
+  // cas n'est pas atteint, et `bookings_snapshot` ne decroit pas.
+  const lignes = []
+  for (let i = 0; i < 2000; i++) {
+    lignes.push(PERIME({ id: `row-${String(i).padStart(5, '0')}`, booking_id: `B${i}` }))
+  }
+  const errors = []
+  const { client } = faux({ lignes })
+  const bilan = await rattraperRevenusDerives({ errors }, { supabase: client, now: () => QUATRE_H_HIVER })
+  assert.ok(bilan.tronque, 'le plafond est atteint sans que le bilan le dise')
+  assert.ok(errors.some(e => /plafond/.test(e.error || '')),
+    'le plafond atteint ne remonte pas dans results.errors')
 })
