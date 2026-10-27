@@ -28,7 +28,18 @@ const INITIALES = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D']
 // Géométrie, en unités du `viewBox` : le SVG se met à l'échelle en CSS.
 const L = 680
 const H = 220
-const MARGE_G = 44
+// ⚠ LA MARGE GAUCHE DEPEND DU PLUS LONG LIBELLE, et elle était FIXE — mesure au
+// navigateur le 27 octobre 2026 : avec « 8 994 € », le bord gauche du texte
+// tombait à **−3 px**, donc hors du cadre, et le premier chiffre était coupé.
+// L'écran affichait « 994 € » là où la graduation dit 8 994 €.
+//
+// ⚠ C'EST UNE ESTIMATION, ET ELLE S'ANNONCE : on ne peut pas mesurer un texte
+// en générant une chaîne. 6,5 px par caractère à 11 px est une majoration
+// prudente — le « 8 994 € » mesuré faisait 41 px pour 7 caractères, soit
+// 5,9 px. Le plancher garde une marge lisible quand les libellés sont courts.
+const MARGE_G_MIN = 44
+const LARGEUR_CARACTERE = 6.5
+const ECART_AXE = 6
 const MARGE_D = 12
 const MARGE_HAUT = 12
 const MARGE_BAS = 26
@@ -71,14 +82,21 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
   // est la vérité.
   const max = Math.max(1, ...toutes)
 
+  // Les cinq libellés d'abord : c'est leur longueur qui dicte la marge.
+  const paliers = [0, 0.25, 0.5, 0.75, 1].map(f => ({
+    f, texte: String(graduation ? graduation(max * f) : Math.round(max * f))
+  }))
+  const plusLong = Math.max(0, ...paliers.map(p => p.texte.length))
+  const MARGE_G = Math.max(MARGE_G_MIN, Math.ceil(plusLong * LARGEUR_CARACTERE) + ECART_AXE)
+
   const x = (k) => MARGE_G + (L - MARGE_G - MARGE_D) * k / 11
   const y = (v) => MARGE_HAUT + (H - MARGE_HAUT - MARGE_BAS) * (1 - v / max)
 
-  const grille = [0, 0.25, 0.5, 0.75, 1].map(f =>
+  const grille = paliers.map(({ f, texte }) =>
     `<line class="cm-grille" x1="${MARGE_G}" x2="${L - MARGE_D}" `
     + `y1="${y(max * f).toFixed(1)}" y2="${y(max * f).toFixed(1)}"/>`
-    + `<text class="cm-grad" x="${MARGE_G - 6}" y="${(y(max * f) + 4).toFixed(1)}" `
-    + `text-anchor="end">${ech(graduation ? graduation(max * f) : Math.round(max * f))}</text>`
+    + `<text class="cm-grad" x="${MARGE_G - ECART_AXE}" y="${(y(max * f) + 4).toFixed(1)}" `
+    + `text-anchor="end">${ech(texte)}</text>`
   ).join('')
 
   const abscisse = mois.map((n, k) =>
@@ -158,4 +176,10 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
 }
 
 // Pour les tests, qui lisent la géométrie plutôt que de la recopier.
-export const _interne = { L, H, MARGE_G, MARGE_D, MARGE_HAUT, MARGE_BAS, INITIALES }
+// ⚠ `MARGE_G` N'EST PLUS UNE CONSTANTE : elle se calcule par appel, puisqu'elle
+// depend des libelles. Les tests lisent donc la regle, pas une valeur figee.
+export const _interne = {
+  L, H, MARGE_G_MIN, LARGEUR_CARACTERE, ECART_AXE, MARGE_D, MARGE_HAUT, MARGE_BAS, INITIALES,
+  margeGauche: (textes) =>
+    Math.max(MARGE_G_MIN, Math.ceil(Math.max(0, ...textes.map(t => String(t).length)) * LARGEUR_CARACTERE) + ECART_AXE)
+}

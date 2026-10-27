@@ -91,7 +91,21 @@ const ATTENDU = {
     // gain soit garde. » Le jour ou un appel par bien revient sur cet ecran, ce
     // test rougira — et c'est tout l'objet.
     // Et une ACTION, qui ne part que sur un clic de l'hote.
-    '/api/incidents-acquitter': 1
+    '/api/incidents-acquitter': 1,
+    // ⚠ LA VUE ANNEE, ET ELLE NE PART QUE SUR UN CLIC (27 octobre 2026).
+    // Ce test demande de nommer a quoi sert un appel de plus et pourquoi il ne
+    // pouvait pas entrer dans l'appel d'ecran. Les deux raisons :
+    //   · ce qu'il sert — douze mois de DEUX annees, par logement, pour la
+    //     courbe de la vue Annee ;
+    //   · pourquoi il n'entre pas dans l'appel d'ouverture — parce qu'il serait
+    //     alors paye par CHAQUE hote a CHAQUE visite, pour un ecran que
+    //     beaucoup n'ouvriront jamais. Le budget du PREMIER AFFICHAGE reste
+    //     donc a deux appels : celui-ci n'y figure pas, il arrive au clic.
+    //
+    // ⚠ ET IL NE CROIT PAS AVEC LE NOMBRE DE LOGEMENTS : un seul appel rend
+    // les douze mois des deux annees pour TOUS les biens. C'est ce que le test
+    // « l'accueil n'a PLUS AUCUN appel par bien » garde juste en dessous.
+    '/api/ecran/revenus-annee': 1
   }
 }
 

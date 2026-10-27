@@ -1474,11 +1474,18 @@ body.men-cfg-ouvert { overflow: hidden; }
 
 /* Le sélecteur Mois / Année. */
 .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--line); }
+/* ⚠ 44 px DE HAUT, ET C'EST LE CONSTAT 5 DE LA RECETTE DU 27 OCTOBRE 2026.
+   Thierry avait mesuré 30 px sur ce bouton : `padding: 5px 14px` sur du 14 px
+   donne environ 27 px de haut, bien sous les 44 que la charte du lot exige et
+   que `--control` porte. Le sélecteur avait alors été RETIRÉ faute d'un second
+   choix ; il revient avec la vue Année, donc sa cible doit être réglée, pas
+   seulement son utilité. */
 .seg__btn {
   appearance: none;
   border: 0;
   border-radius: 999px;
-  padding: 5px 14px;
+  min-height: var(--control);
+  padding: 0 16px;
   font: inherit;
   font-size: 14px;
   color: var(--muted);
@@ -1493,3 +1500,20 @@ body.men-cfg-ouvert { overflow: hidden; }
    rougit nulle part : il rend juste l'element illisible. */
 .seg__btn.is-on { background: var(--ink); color: var(--surface); font-weight: 600; }
 .seg__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* ─── La vue ANNEE du bloc Revenus ────────────────────────────────────────
+   Les cartes par logement reprennent `.rev-carte` de la vue Mois : même
+   gabarit, même gouttière, pour que passer d'une vue à l'autre ne déplace
+   rien sous l'œil. */
+.rev-liste--annee { display: grid; gap: 2px; }
+/* ⚠ ELLE S'AFFICHE SUR LES DEUX FORMATS, contrairement à `.rev-liste` du mois
+   qui est la forme TÉLÉPHONE d'un tableau. Ici il n'y a pas de tableau : une
+   courbe par logement ne se met pas en colonnes. */
+@media (min-width: 561px) {
+  .rev-liste--annee { gap: 6px; }
+}
+/* La courbe prend la largeur de sa carte et garde ses proportions. */
+.cm { display: block; width: 100%; height: auto; }
+.cm-grille { stroke: var(--line); stroke-width: 1; }
+.cm-axe { stroke: var(--line); stroke-width: 1.5; }
+.cm-grad, .cm-mois { font-size: 11px; fill: var(--muted); }

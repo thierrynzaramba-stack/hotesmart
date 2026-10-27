@@ -778,5 +778,11 @@
   "validate.task": "Por atender",
   "validate.title": "Por validar",
   "validate.view": "Ver",
-  "revenue.col_split": "Reparto"
+  "revenue.col_split": "Reparto",
+  "revenue.cumul_a_date": "Del 1 de enero a {mois}: {n}, frente a {n1} el año pasado en el mismo periodo",
+  "revenue.courbe_resume": "Ingresos mensuales de {n}, superpuestos a {n1}",
+  "revenue.courbe_legende": "Línea continua: cobrado. Punteada: por cobrar. La línea oscura es {n}, la gris {n1}.",
+  "revenue.courbe_bien_resume": "Ingresos mensuales de {bien} en {n}, superpuestos a {n1}",
+  "revenue.sans_comparaison": "no hay año anterior con el que comparar",
+  "revenue.annee_perimetre": "Los dos años no incluyen los mismos alojamientos: los totales no se comparan directamente."
 }

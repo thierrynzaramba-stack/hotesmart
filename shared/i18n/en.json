@@ -778,5 +778,11 @@
   "validate.task": "To handle",
   "validate.title": "To approve",
   "validate.view": "View",
-  "revenue.col_split": "Split"
+  "revenue.col_split": "Split",
+  "revenue.cumul_a_date": "From 1 January to {mois}: {n}, against {n1} last year over the same period",
+  "revenue.courbe_resume": "Monthly revenue for {n}, overlaid with {n1}",
+  "revenue.courbe_legende": "Solid line: received. Dotted: upcoming. The dark line is {n}, the grey one {n1}.",
+  "revenue.courbe_bien_resume": "Monthly revenue for {bien} in {n}, overlaid with {n1}",
+  "revenue.sans_comparaison": "no previous year to compare",
+  "revenue.annee_perimetre": "The two years do not cover the same properties: the totals are not directly comparable."
 }

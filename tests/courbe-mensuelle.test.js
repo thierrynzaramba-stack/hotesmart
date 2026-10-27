@@ -88,9 +88,9 @@ test("LE TEST QUI COMPTE : la courbe DIT ce qu'elle montre, et le texte est echa
 
 test('RECENSEMENT : la geometrie reste coherente', () => {
   // Le module expose sa geometrie plutot que de la faire recopier par les tests.
-  const { L, H, MARGE_G, MARGE_D, INITIALES } = _interne
+  const { L, H, MARGE_G_MIN, MARGE_D, INITIALES } = _interne
   assert.strictEqual(INITIALES.length, 12, 'douze mois, pas un de plus')
-  assert.ok(L > MARGE_G + MARGE_D, 'la largeur utile est negative')
+  assert.ok(L > MARGE_G_MIN + MARGE_D, 'la largeur utile est negative')
   const svg = courbeMensuelle({ series: [], resume: 'vide' })
   assert.match(svg, new RegExp(`viewBox="0 0 ${L} ${H}"`))
   // ⚠ UNE SERIE VIDE REND QUAND MEME LA GRILLE ET L'AXE : un cadre vide se lit
@@ -158,4 +158,35 @@ test("LE TEST QUI COMPTE : plus de douze valeurs ne sortent pas du cadre", () =>
   const xs = [...svg.matchAll(/cx="([\d.]+)"/g)].map(m => Number(m[1]))
   assert.ok(xs.length > 0, 'aucun point rendu')
   assert.ok(Math.max(...xs) <= L, `un point est a ${Math.max(...xs)} pour un cadre de ${L}`)
+})
+
+test("LE TEST QUI COMPTE : les graduations ne sortent pas du cadre a gauche", () => {
+  // ⚠ MESURE AU NAVIGATEUR LE 27 OCTOBRE 2026, sur le banc visuel : avec
+  // « 8 994 € », le bord gauche du texte tombait a -3 px, donc HORS du cadre,
+  // et le premier chiffre etait coupe. L'ecran affichait « 994 € » la ou la
+  // graduation dit 8 994 €. La marge etait FIXE alors que le libelle depend de
+  // son contenu — et un chiffre d'argent ampute est pire qu'un chiffre absent.
+  const { margeGauche, ECART_AXE, LARGEUR_CARACTERE, MARGE_G_MIN } = _interne
+  const eur = (n) => new Intl.NumberFormat('fr', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n)
+
+  for (const max of [100, 8994, 55115, 1234567]) {
+    const svg = courbeMensuelle({
+      series: [{ nom: 'A', couleur: '#000', valeurs: douze(() => max) }],
+      graduation: (v) => eur(Math.round(v)),
+      resume: 'essai'
+    })
+    const textes = [...svg.matchAll(/class="cm-grad"[^>]*>([^<]*)</g)].map(m => m[1])
+    const ancre = Number((svg.match(/class="cm-grad" x="([\d.]+)"/) || [])[1])
+    const plusLong = Math.max(...textes.map(t => t.length))
+    // Le texte est ancre a DROITE : son bord gauche est `ancre - largeur`.
+    const bordGauche = ancre - plusLong * LARGEUR_CARACTERE
+    assert.ok(bordGauche >= 0,
+      `pour un maximum de ${max}, le libelle « ${textes[textes.length - 1]} » commence a ${bordGauche.toFixed(1)} px`)
+  }
+
+  // La regle elle-meme, pour qu'un remaniement ne la perde pas.
+  assert.strictEqual(margeGauche(['0 €']), MARGE_G_MIN, 'le plancher a disparu')
+  assert.ok(margeGauche(['1 234 567 €']) > margeGauche(['9 €']),
+    'la marge ne suit plus la longueur du libelle')
+  assert.strictEqual(margeGauche([]), MARGE_G_MIN, 'aucune graduation fait tomber la marge')
 })
