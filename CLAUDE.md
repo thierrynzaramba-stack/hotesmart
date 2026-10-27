@@ -1106,6 +1106,43 @@ Boucler jusqu'à deux minutes, puis conclure.
 `[]` **en silence** : on lit « webhook perdu » là où le déploiement existe.
 Mesuré le 19 octobre 2026, sur un déploiement bien présent.
 
+⚠ **ET LA SORTIE NON VIDE N'EST PAS DAVANTAGE UNE PREUVE : ON ATTEND
+L'ENVIRONNEMENT PAR SON NOM.** Un push sur `staging` produit **deux**
+déploiements, et ils n'arrivent pas ensemble — la `Preview – hotesmart` (projet
+de PRODUCTION, qui construit toutes les branches) devance le
+`Production – hotesmart-staging`. Une boucle qui sort dès que la commande rend
+une sortie **non vide** s'arrête donc sur le mauvais déploiement, et conclut
+« il manque » pour celui qu'on attend. La règle ci-dessus — « sortie vide =
+webhook perdu » — ne couvre pas ce cas, et c'est ce qui le rend coûteux : on
+croit l'avoir appliquée.
+
+```bash
+SHA=$(git rev-parse <branche>)      # le SHA COMPLET, toujours
+for i in $(seq 1 14); do
+  OUT=$(gh api "repos/thierrynzaramba-stack/hotesmart/deployments?sha=$SHA" \
+        --jq '.[].environment')
+  echo "$OUT" | grep -q "hotesmart-staging" && break   # le NOM, pas la non-vacuité
+  sleep 10
+done
+```
+
+**Vécu le 27 octobre 2026**, push de `160fea7b` sur `staging` :
+`Preview – hotesmart` créée à 09:40:25Z, `Production – hotesmart-staging` à
+09:40:44Z — **19 secondes d'écart**. La première sonde, sortie à 30 secondes sur
+la preview seule, a fait annoncer un webhook perdu et dire au product owner de
+ne pas commencer sa recette ; la seconde, ancrée sur le nom, a trouvé les deux à
+10 secondes. **Les deux pages d'état étaient au vert, et c'était le bon indice
+que la cause était chez nous** — on lit la page pour savoir s'il faut chercher
+chez nous, le chronomètre pour savoir si on peut avancer.
+
+**Et la sonde qui tranche reste la production elle-même.** Avant le second
+déploiement, `/pages/aujourdhui` rendait 84 635 octets — l'ANCIENNE page, en
+200, sans rien qui le signale — et le `fr.json` servi n'avait pas la clé que le
+lot venait d'ajouter. Après : 88 850 octets, et la page identique à l'octet à
+l'arbre fusionné. **Comparer l'empreinte de ce qui est SERVI à celle de l'arbre
+qu'on a poussé coûte une seconde et ne se trompe jamais** ; le compte de
+déploiements, lui, dit seulement qu'un build a eu lieu.
+
 **Vécu (19 octobre 2026).** Le push de `ddeb7cf` sur `staging` n'a produit
 **aucun** déploiement, sur aucun des deux projets : zéro déploiement, zéro
 statut, zéro check-run. Les quatre pushes précédents de `staging` avaient
