@@ -241,31 +241,56 @@
     <div data-bind="revenue-annee" hidden>
       <p class="caption muted" data-bind="revenue-annee-etat" hidden></p>
 
-      <!-- Le total du compte, N et N-1 cote a cote. ⚠ SANS POURCENTAGE : le
-           perimetre des deux annees n'est pas le meme (decision 1 de Thierry
-           du 27 octobre). En 2026 ce compte porte quatre logements, en 2025 il
-           en portait deux : un « +X % » comparerait deux perimetres et
-           afficherait une croissance qui n'est que l'arrivee de nouveaux
-           biens. L'ecart en % vit donc sur les LIGNES, ou il a un sens. -->
-      <div class="card stack" style="gap: 10px">
-        <div class="rev-chiffres">
-          <span class="rev-chiffre">
-            <span class="muted small" data-bind="revenue-annee-n-label"></span>
-            <strong class="num h1" data-bind="revenue-annee-n"></strong>
-          </span>
-          <span class="rev-chiffre">
-            <span class="muted small" data-bind="revenue-annee-n1-label"></span>
-            <strong class="num h2 muted" data-bind="revenue-annee-n1"></strong>
-          </span>
+      <!-- ⚠ LA PERIODE EST NOMMEE AVANT LE CHIFFRE (maquette
+           `Accueil-revenus-annee-v5`) : « Janvier → octobre 2026 » dit ce que
+           le total recouvre. Un grand nombre sans sa periode se lit comme
+           l'annee entiere, et l'hote conclurait a une chute en janvier. -->
+      <div class="rev-an-tete">
+        <div>
+          <span class="caption muted" data-bind="revenue-annee-periode"></span>
+          <strong class="num rev-an-total" data-bind="revenue-annee-n"></strong>
         </div>
-        <p class="caption muted" data-bind="revenue-annee-cumul" hidden></p>
-        <div data-bind="revenue-annee-courbe"></div>
-        <p class="caption muted" data-bind="revenue-annee-legende"></p>
+        <!-- ⚠ LE TOTAL N-1 EST COTE A COTE, SANS POURCENTAGE. La maquette en
+             portait un (« +14 % vs meme periode 2025 »), et c'etait une erreur
+             qu'elle demontrait elle-meme : ses quatre lignes donnent 57 590 €
+             dont 7 190 € pour un logement « nouveau en 2026 ». Sans lui,
+             50 400 € contre 50 300 € — soit +0,2 %. Le « +14 % » etait donc
+             presque entierement l'arrivee d'un bien, pas une meilleure annee.
+             Decision de Thierry du 27 octobre, confirmee apres la maquette :
+             l'ecart vit sur les LIGNES, ou les deux annees parlent du meme
+             logement. -->
+        <div class="rev-an-n1">
+          <span class="caption muted" data-bind="revenue-annee-n1-label"></span>
+          <span class="num" data-bind="revenue-annee-n1"></span>
+        </div>
       </div>
 
-      <!-- Une carte par logement : sa courbe, son cumul, son ecart. -->
-      <ul class="rev-liste rev-liste--annee" data-list="revenue-annee-biens"></ul>
+      <!-- Les pastilles de filtre : « Tous », puis un logement. -->
+      <div class="rev-an-filtres" role="group" data-list="revenue-annee-filtres"
+           data-i18n-attr="aria-label:revenue.annee_filtre_aria"></div>
 
+      <div class="rev-an-legende" data-bind="revenue-annee-legende" aria-hidden="true"></div>
+      <div data-bind="revenue-annee-courbe"></div>
+
+      <!-- ⚠ UN VRAI TABLEAU : trois colonnes de chiffres alignees se lisent,
+           et un lecteur d'ecran doit pouvoir dire « La bulle, 2025, 19 800 € ».
+           Meme raison que le tableau de la vue Mois. -->
+      <div class="rev-tbl-wrap rev-an-tbl">
+        <table class="rev-tbl rev-tbl--annee">
+          <thead><tr>
+            <th scope="col" data-i18n="revenue.col_property"></th>
+            <th scope="col" class="rev-tbl__num" data-bind="revenue-annee-col-n"></th>
+            <th scope="col" class="rev-tbl__num" data-bind="revenue-annee-col-n1"></th>
+            <th scope="col" class="rev-tbl__num" data-i18n="revenue.annee_col_ecart"></th>
+          </tr></thead>
+          <tbody data-list="revenue-annee-lignes"></tbody>
+        </table>
+      </div>
+      <!-- La forme telephone du meme tableau, pour la meme raison que la vue
+           Mois : a 390 px, quatre colonnes ne tiennent pas. -->
+      <ul class="rev-liste rev-liste--annee" data-list="revenue-annee-cartes"></ul>
+
+      <p class="caption muted" data-bind="revenue-annee-note"></p>
       <p class="caption muted" data-bind="revenue-annee-reserves" hidden></p>
     </div>
 
@@ -332,6 +357,10 @@ const etat = {
   anneeRevenus: null,
   annee: null,
   anneeEtat: 'vide',
+  // Le logement dont la COURBE est tracee, ou `null` pour le compte entier.
+  // ⚠ IL NE FILTRE QUE LA COURBE : le total de l'en-tete et le tableau restent
+  // ceux du compte. Voir le commentaire de `renderAnnee`.
+  filtreAnnee: null,
   biens: [], bookings: [], menages: [], prestataires: [],
   menagesOk: null, etatsArrivee: {}, conversations: new Set(),
   taches: [], tachesOk: null,
@@ -590,6 +619,49 @@ function dateDuJour (jour, opts) {
   return I18n.date(new Date(Date.UTC(a, m - 1, d, 12)), { ...opts, timeZone: 'UTC' })
 }
 const monnaie = (n, devise) => I18n.money(n, devise || 'EUR')
+
+// La vignette d'un logement : sa photo, ou son initiale a defaut.
+// ⚠ ELLE VIT ICI PARCE QUE DEUX VUES L'AFFICHENT — le tableau du mois et celui
+// de l'annee. La regle du depot est nommee : *une regle partagee par deux
+// versions vit dans un module commun, jamais recopiee dans chaque page* ; deux
+// copies divergent, et c'est exactement ce qui a fait afficher une reservation
+// Booking en rouge Airbnb sur le calendrier du telephone.
+// ⚠ ET SON ABSENCE N'EST PAS UN TROU : un bien sans photo rend une pastille
+// portant son initiale. Un `<img>` sans `src` afficherait l'icone de fichier
+// casse du navigateur.
+const vignetteDuBien = (b) => b && b.photo_url
+  ? `<img class="rev-tbl__photo" src="${esc(b.photo_url)}" alt="" loading="lazy" decoding="async">`
+  : `<span class="rev-tbl__photo rev-tbl__photo--vide" aria-hidden="true">`
+    + `${esc(String((b && b.name) || '?').slice(0, 1).toLocaleUpperCase(I18n.lang))}</span>`
+
+// Les douze initiales de mois, DANS LA LANGUE DE L'HOTE.
+// ⚠ LE REPLI DU MODULE DE COURBE EST FRANCAIS, et l'espagnol ne le partage pas :
+// janvier y est « E » (Enero), pas « J ». `scripts/i18n-check.js` ne lit que les
+// fichiers de locale — un « J » en dur dans un module ne lui aurait rien dit.
+// `month: 'narrow'` les fait rendre par `Intl`, donc pour toute langue a venir.
+const initialesDesMois = () => Array.from({ length: 12 }, (_, m) =>
+  dateDuJour(`2026-${String(m + 1).padStart(2, '0')}-15`, { month: 'narrow' }))
+
+// ⚠ LE REPERE DE LA COURBE SUIT LA LARGEUR DE L'ECRAN, et c'est une question de
+// LISIBILITE, pas de gout. Le `viewBox` est mis a l'echelle de son cadre, donc
+// les textes aussi : a 390 px, un repere de 680 unites affiche ses libelles a
+// 5,8 px. Mesure au banc le 27 octobre 2026 — graduations et initiales de mois
+// illisibles, sans qu'aucun test ni aucun avertissement ne le dise.
+// Le seuil est celui de `shared/ui.css` (`min-width: 561px`) : une seule
+// frontiere pour toute la page.
+// ⚠ `matchMedia` PEUT MANQUER, et son absence ne doit pas vider l'ecran. Elle
+// est evaluee au CHARGEMENT du module : une exception ici n'ampute pas la
+// courbe, elle empeche la page entiere de se construire — et le `.catch` du
+// demarrage l'ecrirait dans un journal que personne ne lit. Mesure du
+// 27 octobre 2026 : 36 tests rouges, tous sur `window.matchMedia is not a
+// function`. Sans repere connu, on rend le repere LARGE, qui est le defaut du
+// module.
+const ECRAN_ETROIT = typeof window.matchMedia === 'function'
+  ? window.matchMedia('(max-width: 560px)')
+  : null
+const repereDeCourbe = () => (ECRAN_ETROIT && ECRAN_ETROIT.matches)
+  ? { largeur: 360, hauteur: 200 }
+  : { largeur: 680, hauteur: 220 }
 // La date d'un avis : un INSTANT (`received_at`), pas un jour calendaire —
 // `dateDuJour` ne vaut que pour les « YYYY-MM-DD » du coeur.
 const dateEnClair = (iso) => I18n.date(new Date(iso), { day: 'numeric', month: 'long' })
@@ -1322,6 +1394,17 @@ function renderRevenus () {
       ? String(etat.anneeRevenus || '')
       : moisEnClair(rev.mois || (etat.ecran && etat.ecran.mois))
   }
+  // ⚠ LE SELECTEUR GARDE « Mois | Annee », ET NON LES PERIODES DE LA MAQUETTE.
+  // Celle-ci montre « Octobre | 2026 » — essaye, mesure au banc le 27 octobre
+  // 2026, puis ECARTE : le libelle des fleches, juste a cote, dit deja la
+  // periode servie, et l'ecran affichait alors « ‹ 2026 › [Octobre | 2026] ».
+  // C'est exactement le constat de Thierry que `tests/accueil-rapide.test.js`
+  // garde depuis — « le mois est encore affiche a cote du total : il y est deux
+  // fois a l'ecran ».
+  // ⚠ ET LA MAQUETTE N'A PAS DE FLECHES : elle peut mettre la periode dans le
+  // selecteur parce que rien d'autre ne la porte. Ici la decision 5 de Thierry
+  // demande des fleches, donc un libelle de periode ; le selecteur retrouve sa
+  // fonction, qui est de nommer les deux VUES.
   for (const b of document.querySelectorAll('.seg__btn[data-vue]')) {
     const actif = b.dataset.vue === etat.vueRevenus
     b.classList.toggle('is-on', actif)
@@ -1406,9 +1489,7 @@ function renderRevenus () {
     // ⚠ ET SON ABSENCE N'EST PAS UN TROU : un bien sans photo rend une pastille
     // portant son initiale, comme la liste des logements. Un `<img>` sans `src`
     // afficherait l'icone de fichier casse du navigateur.
-    const photo = b.photo_url
-      ? `<img class="rev-tbl__photo" src="${esc(b.photo_url)}" alt="" loading="lazy" decoding="async">`
-      : `<span class="rev-tbl__photo rev-tbl__photo--vide" aria-hidden="true">${esc(String(b.name || '?').slice(0, 1).toLocaleUpperCase('fr'))}</span>`
+    const photo = vignetteDuBien(b)
     const nom = `<span class="small" style="min-width: 0">${esc(b.name)}</span>`
     if (!d) {
       // Aucun sejour range ce mois-ci pour ce bien. C'est un FAIT — zero euro
@@ -1607,36 +1688,58 @@ function renderRevenus () {
 // janvier veut dire « il n'existait pas ». L'endpoint ne comble aucun trou
 // precisement pour que cette distinction arrive jusqu'ici, et la courbe coupe
 // son trait sur un `null`.
-function douzeMois (parMois, an, champ) {
+//
+// `de` et `a` bornent la tranche de mois rendue (1 a 12, inclus) : c'est ce qui
+// permet de tracer le REALISE et le DEJA RESERVE comme deux traits d'une meme
+// serie, qui se rejoignent sur le mois courant.
+function douzeMois (parMois, an, champ, de = 1, a = 12) {
   const out = []
   for (let m = 1; m <= 12; m++) {
     const c = parMois && parMois[`${an}-${String(m).padStart(2, '0')}`]
-    out.push(c ? Number(c[champ] || 0) / 100 : null)
+    // ⚠ UN MOIS DONT AUCUN MONTANT N'EST CALCULABLE REND `null`, PAS 0 — et
+    // c'est le defaut que la vue Mois a ferme en trois endroits le 27 octobre
+    // (« le faux zero etait PIRE que l'absence »). Sans cette ligne, un mois a
+    // `{sejours: 2, total_cents: 0, sans_montant: 2}` dessinait un POINT PLEIN
+    // POSE SUR L'AXE : la courbe affirmait « ce mois-la, zero euro » la ou le
+    // coeur dit « je ne sais pas ». Le module coupe le trait sur un `null`,
+    // c'est deja son contrat.
+    out.push((m >= de && m <= a && c && !refuseTout(c)) ? Number(c[champ] || 0) / 100 : null)
   }
   return out
 }
 
-const sommeDe = (parMois, an, champ) => {
-  let t = 0
-  for (let m = 1; m <= 12; m++) {
+// ⚠ « NON CALCULABLE » N'EST JAMAIS ZERO. Un mois ne refuse QUE si son total
+// est nul ET qu'il porte des sejours sans montant : un mois a 3 sejours dont 1
+// sans montant garde son total partiel — c'est une verite incomplete, et la
+// reserve le dit en chiffres. Meme regle que `toutRefuse` de la vue Mois.
+const refuseTout = (c) => !!c && Number(c.sans_montant || 0) > 0 && Number(c.total_cents || 0) === 0
+
+// Le total d'une tranche, ET ce qu'il ne sait pas dire. ⚠ LES DEUX ENSEMBLE,
+// parce que `0` tout seul ne distingue pas « rien encaisse » de « rien de
+// calculable » — et que c'est exactement la confusion que l'ecran doit refuser.
+const bilanPeriode = (parMois, an, champ, jusquAu = 12) => {
+  let total = 0, sansMontant = 0, mesures = 0
+  for (let m = 1; m <= jusquAu; m++) {
     const c = parMois && parMois[`${an}-${String(m).padStart(2, '0')}`]
-    if (c) t += Number(c[champ] || 0)
+    if (!c) continue
+    sansMontant += Number(c.sans_montant || 0)
+    if (refuseTout(c)) continue
+    total += Number(c[champ] || 0)
+    mesures++
   }
-  return t
+  return { total, sansMontant, mesures, refuse: mesures === 0 && sansMontant > 0 }
 }
 
-// Le cumul A DATE : du 1er janvier au mois courant inclus. ⚠ IL NE VAUT QUE
-// POUR L'ANNEE EN COURS (decision 2 de Thierry) : une annee passee se compare
-// en ENTIER a l'annee precedente entiere. Comparer dix mois de 2024 a douze de
-// 2023 serait une baisse inventee.
-function cumulADate (parMois, an, jusquAuMois) {
-  let t = 0
-  for (let m = 1; m <= jusquAuMois; m++) {
-    const c = parMois && parMois[`${an}-${String(m).padStart(2, '0')}`]
-    if (c) t += Number(c.total_cents || 0)
-  }
-  return t
-}
+// La somme d'une TRANCHE de mois. ⚠ ELLE N'EST PAS TOUJOURS L'ANNEE ENTIERE, et
+// c'est la decision 2 de Thierry : l'annee EN COURS se compare a date — janvier
+// au mois courant, des deux cotes —, une annee PASSEE se compare en entier.
+// Comparer dix mois de 2026 a douze de 2025 serait une baisse inventee.
+const sommePeriode = (parMois, an, champ, jusquAu = 12) =>
+  bilanPeriode(parMois, an, champ, jusquAu).total
+
+// Les sejours sans montant d'une tranche, pour la reserve qui les compte.
+const sansMontantDe = (parMois, an, jusquAu = 12) =>
+  bilanPeriode(parMois, an, 'total_cents', jusquAu).sansMontant
 
 // ⚠ L'ECART EN % N'EXISTE QUE SI LA BASE DE COMPARAISON EXISTE. Sans N-1, on
 // ne rend pas « +100 % » ni « 0 % » : on rend `null`, et l'ecran le dit.
@@ -1647,13 +1750,45 @@ function ecartPourcent (n, n1) {
   return Math.round(((n - n1) / n1) * 100)
 }
 
+// Le nom du mois SEUL, sans son annee : « Janvier → octobre 2026 » porte
+// l'annee une fois, a la fin. ⚠ `moisEnClair` ne convient pas ici — il rend
+// « octobre 2026 », et la periode s'ecrirait « Janvier → octobre 2026 2026 ».
+function moisSeul (mois) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(mois || ''))) return ''
+  const [an, m] = String(mois).split('-').map(Number)
+  return dateDuJour(`${an}-${String(m).padStart(2, '0')}-15`, { month: 'long' })
+}
+
+// La graduation de l'axe, en forme COURTE : « 10 k € » plutot que « 10 000 € ».
+// ⚠ PAS DE « k » EN DUR : `notation: 'compact'` le fait dire par `Intl`, dans la
+// langue et la devise du compte. Un « k€ » ecrit a la main serait faux en
+// espagnol comme pour une devise non euro, et `scripts/i18n-check.js` ne lit
+// que les fichiers de locale — il ne l'aurait jamais vu.
+const monnaieCourte = (n, devise) => new Intl.NumberFormat(I18n.lang, {
+  style: 'currency', currency: devise || 'EUR', notation: 'compact', maximumFractionDigits: 1
+}).format(n)
+
+// ⚠ J'AI ECRIT ICI UN REPLI QUI NE SERVAIT JAMAIS, ET JE L'AI RETIRE. Il
+// comparait les libelles courts entre eux et retombait sur le montant plein si
+// deux se repetaient — « une graduation qui se repete ne gradue plus rien ».
+// Le raisonnement etait juste, la prudence inutile : depuis que le haut de
+// l'axe est RELEVE a un palier rond, les paliers valent 0, p et 2p, et deux
+// multiples distincts d'un meme pas ne s'ecrivent pas pareil.
+// BALAYAGE de 1 € a 2 000 000 €, 27 octobre 2026 : **zero collision**.
+// ⚠ CE QUE LA MESURE NE COUVRE PAS : elle a ete faite en francais et en euros.
+// Une devise sans forme compacte dans une locale donnee rendrait des libelles
+// plus longs — la marge gauche de la courbe s'y adapte deja — mais pas des
+// libelles identiques. Un repli qu'aucun test ne peut faire rougir est une
+// branche morte qui affirme qu'elle sert : c'est la lecon du reste negatif de
+// la repartition, retire pour la meme raison.
+
 function renderAnnee () {
   const bloc = $('[data-bind="revenue-annee"]')
   if (!bloc) return
   const enAnnee = etat.vueRevenus === 'annee'
   bloc.hidden = !enAnnee
   // Le bandeau et les listes du mois cedent la place, et reviennent au retour.
-  for (const sel of ['.rev-tbl-wrap', '.rev-liste:not(.rev-liste--annee)']) {
+  for (const sel of ['.rev-tbl-wrap:not(.rev-an-tbl)', '.rev-liste:not(.rev-liste--annee)']) {
     const n = document.querySelector(sel)
     if (n) n.hidden = enAnnee || !(etat.biens || []).length
   }
@@ -1675,116 +1810,295 @@ function renderAnnee () {
   // montrer » ne se confondent pas : le deuxieme est une panne, le troisieme un
   // fait. Les ecraser en un seul ferait lire « aucun revenu » sur une lecture
   // ratee.
-  const vides = ['revenue-annee-courbe', 'revenue-annee-legende', 'revenue-annee-cumul']
-  if (etat.anneeEtat === 'chargement') {
-    dire('revenue.computing')
-    for (const b of vides) { const n = $(`[data-bind="${b}"]`); if (n) n.innerHTML = '' }
-    $('[data-list="revenue-annee-biens"]').innerHTML = ''
-    return
+  const vide = (s) => { const n = document.querySelector(s); if (n) n.innerHTML = '' }
+  const videTout = () => {
+    for (const b of ['revenue-annee-courbe', 'revenue-annee-legende']) vide(`[data-bind="${b}"]`)
+    for (const l of ['revenue-annee-filtres', 'revenue-annee-lignes', 'revenue-annee-cartes']) vide(`[data-list="${l}"]`)
+    // ⚠ LES EN-TETES DE COLONNE AUSSI. Sans elles, « Lecture impossible »
+    // s'affichait au-dessus d'un tableau vide dont l'en-tete annoncait encore
+    // « 2026 | 2025 | Ecart » : un cadre qui promet des chiffres qu'on n'a pas.
+    for (const b of ['revenue-annee-periode', 'revenue-annee-n', 'revenue-annee-n1',
+      'revenue-annee-n1-label', 'revenue-annee-note',
+      'revenue-annee-col-n', 'revenue-annee-col-n1']) {
+      const n = document.querySelector(`[data-bind="${b}"]`); if (n) n.textContent = ''
+    }
+    for (const sel of ['.rev-an-tbl', '.rev-liste--annee']) {
+      const n = document.querySelector(sel); if (n) n.hidden = true
+    }
+    const r = $('[data-bind="revenue-annee-reserves"]'); if (r) { r.hidden = true; r.textContent = '' }
   }
-  if (etat.anneeEtat === 'echec' || !etat.annee || etat.annee.total === null) {
-    dire('revenue.unavailable')
-    for (const b of vides) { const n = $(`[data-bind="${b}"]`); if (n) n.innerHTML = '' }
-    $('[data-list="revenue-annee-biens"]').innerHTML = ''
-    return
+  if (etat.anneeEtat === 'chargement') { dire('revenue.computing'); videTout(); return }
+  // ⚠ `!etat.annee.total` ET NON `=== null` : la vue Mois ecrit la forme lache
+  // (l. 1340) et son commentaire dit pourquoi. Mesure de la review : avec un
+  // `total` ABSENT mais un `par_bien` peuplé, la garde stricte laissait passer
+  // — en-tete a « 0 € » au-dessus d'une ligne a « 1 234 € », sans message.
+  if (etat.anneeEtat === 'echec' || !etat.annee || !etat.annee.total) {
+    dire('revenue.unavailable'); videTout(); return
   }
   dire(null)
 
   const a = etat.annee
-  const totalN = sommeDe(a.total, an, 'total_cents')
-  const totalN1 = sommeDe(a.total, an - 1, 'total_cents')
-  $('[data-bind="revenue-annee-n-label"]').textContent = String(an)
-  $('[data-bind="revenue-annee-n1-label"]').textContent = String(an - 1)
-  $('[data-bind="revenue-annee-n"]').textContent = monnaie(Math.round(totalN / 100), devise)
-  $('[data-bind="revenue-annee-n1"]').textContent = monnaie(Math.round(totalN1 / 100), devise)
-
-  // ⚠ AUCUN POURCENTAGE ICI, ET C'EST LA DECISION 1 DE THIERRY. Le perimetre
-  // des deux annees n'est pas le meme : ce compte porte quatre logements en
-  // 2026 et en portait deux en 2025. Un « +X % » comparerait deux perimetres et
-  // afficherait une croissance qui n'est que l'arrivee de nouveaux biens.
-  // L'ecart vit sur les LIGNES, ou les deux annees parlent du meme logement.
-
-  // Le cumul a date, pour l'annee EN COURS seulement.
+  // La tranche comparee : a date pour l'annee en cours, entiere sinon.
   const anneeCourante = Number(String(etat.aujourdHui).slice(0, 4))
   const moisCourant = Number(String(etat.aujourdHui).slice(5, 7))
-  const noeudCumul = $('[data-bind="revenue-annee-cumul"]')
-  if (noeudCumul) {
-    if (an === anneeCourante) {
-      const cN = cumulADate(a.total, an, moisCourant)
-      const cN1 = cumulADate(a.total, an - 1, moisCourant)
-      noeudCumul.hidden = false
-      noeudCumul.textContent = t('revenue.cumul_a_date', {
-        mois: moisEnClair(`${an}-${String(moisCourant).padStart(2, '0')}`),
-        n: monnaie(Math.round(cN / 100), devise),
-        n1: monnaie(Math.round(cN1 / 100), devise)
-      })
-    } else {
-      noeudCumul.hidden = true
-      noeudCumul.textContent = ''
-    }
-  }
+  const enCours = an === anneeCourante
+  const jusquAu = enCours ? moisCourant : 12
 
-  // ⚠ DEUX COURBES PAR ANNEE : le RECU en trait plein, l'A VENIR en pointille
-  // (decision 3). La couleur ne distingue pas les deux — c'est la regle du
-  // depot, jamais la couleur seule — et les chiffres sont ecrits au-dessus.
-  const serie = (annee, couleur, epaisseur) => ([
-    { nom: `${annee}`, couleur, epaisseur, valeurs: douzeMois(a.total, annee, 'recu_cents') },
-    { nom: `${annee} a venir`, couleur, epaisseur, pointille: true,
-      valeurs: douzeMois(a.total, annee, 'a_venir_cents') }
-  ])
+  // ─── L'en-tete : la periode nommee, le total, et N-1 a cote ─────────────
+  // ⚠ LE TOTAL DE L'EN-TETE EST CELUI DU COMPTE, et il ne suit PAS la pastille
+  // de filtre : les pastilles sont posees sur la ligne de la legende parce
+  // qu'elles filtrent LA COURBE. Un grand chiffre qui changerait sous une
+  // pastille serait ambigu — on ne saurait plus s'il parle du compte ou d'un
+  // bien —, et le tableau en dessous donne deja le total de chaque logement.
+  // Le tableau redevient visible apres un echec precedent.
+  for (const sel of ['.rev-an-tbl', '.rev-liste--annee']) {
+    const n = document.querySelector(sel); if (n) n.hidden = false
+  }
+  const bilanN = bilanPeriode(a.total, an, 'total_cents', jusquAu)
+  const bilanN1 = bilanPeriode(a.total, an - 1, 'total_cents', jusquAu)
+  const totalN = bilanN.total
+  const totalN1 = bilanN1.total
+  // ⚠ UN TOTAL QUI NE SAIT RIEN NE S'ECRIT PAS « 0 € ». Si aucun mois de la
+  // tranche n'est calculable et que des sejours sont sans montant, le chiffre
+  // n'existe pas : on le DIT. La vue Mois fait exactement cela (`toutRefuse`).
+  const montantOuRefus = (bilan) => bilan.refuse
+    ? t('revenue.unavailable')
+    : monnaie(Math.round(bilan.total / 100), devise)
+  $('[data-bind="revenue-annee-periode"]').textContent = enCours
+    ? t('revenue.annee_periode_cours', {
+      mois: moisSeul(`${an}-${String(moisCourant).padStart(2, '0')}`), annee: String(an)
+    })
+    : t('revenue.annee_periode_entiere', { annee: String(an) })
+  $('[data-bind="revenue-annee-n"]').textContent = montantOuRefus(bilanN)
+  $('[data-bind="revenue-annee-n1-label"]').textContent = String(an - 1)
+  $('[data-bind="revenue-annee-n1"]').textContent = montantOuRefus(bilanN1)
+  // ⚠ AUCUN POURCENTAGE ICI, ET C'EST LA DECISION 1 DE THIERRY, CONFIRMEE LE
+  // 27 OCTOBRE APRES LA MAQUETTE. Le perimetre des deux annees n'est pas le
+  // meme : un logement arrive en cours d'annee gonfle N sans rien devoir a
+  // l'exploitation. La maquette le demontrait elle-meme — son « +14 % » devient
+  // +0,2 % sans le bien « nouveau en 2026 ». L'ecart vit sur les LIGNES.
+
+  // ─── Les pastilles de filtre ────────────────────────────────────────────
+  // Seuls les logements qui portent quelque chose sur l'une des deux annees :
+  // une pastille qui ne tracerait rien n'est pas un filtre, c'est un cul-de-sac.
+  const avecDonnees = (etat.biens || []).filter(b => {
+    const pm = a.par_bien && a.par_bien[String(b.id)]
+    return pm && Object.keys(pm).length > 0
+  })
+  // Une pastille retiree ne laisse pas un filtre orphelin : le bien choisi peut
+  // disparaitre d'un rechargement (retire du compte, ou hors du perimetre d'un
+  // membre), et la selection perimee s'oublie.
+  // ⚠ J'AVAIS ECRIT ICI « sans ce repli, la courbe se viderait sans un mot ».
+  // C'est faux, et la review l'a mesure : sans lui, `find` rend `undefined`,
+  // donc `!choisi` est vrai, donc la pastille « Tous » s'allume et la courbe
+  // montre le compte — rien ne se vide. Le seul effet reel est d'oublier la
+  // selection en memoire. La ligne reste, son ⚠ non : un repli qui affirme
+  // fermer un defaut qu'il ne ferme pas est la meme faute que la branche morte
+  // retiree plus bas.
+  if (etat.filtreAnnee && !avecDonnees.some(b => String(b.id) === etat.filtreAnnee)) {
+    etat.filtreAnnee = null
+  }
+  const choisi = etat.filtreAnnee ? avecDonnees.find(b => String(b.id) === etat.filtreAnnee) : null
+  const puce = (val, texte, actif) =>
+    `<button type="button" class="rev-an-puce${actif ? ' is-on' : ''}" data-filtre="${esc(val)}" `
+    + `aria-pressed="${actif ? 'true' : 'false'}">${esc(texte)}</button>`
+  $('[data-list="revenue-annee-filtres"]').innerHTML =
+    puce('', t('revenue.annee_filtre_tous'), !choisi)
+    + avecDonnees.map(b => puce(String(b.id), String(b.name || ''), choisi && String(b.id) === String(choisi.id))).join('')
+
+  // ─── La courbe, une seule, filtree par la pastille ──────────────────────
+  // ⚠ LE REALISE ET LE DEJA RESERVE SONT DEUX TRAITS D'UNE MEME SERIE, qui se
+  // REJOIGNENT sur le mois courant (`de: jusquAu`) : sans ce chevauchement d'un
+  // mois, le trait se couperait au changement de style et la courbe aurait un
+  // trou la ou il n'y en a pas. Le pointille dit « deja reserve », pas
+  // « prevision » — la note de bas de bloc le repete en mots.
+  const parMois = choisi ? (a.par_bien[String(choisi.id)] || {}) : a.total
+  const series = [
+    { nom: String(an - 1), couleur: 'var(--muted)', epaisseur: 2,
+      valeurs: douzeMois(parMois, an - 1, 'total_cents') },
+    { nom: String(an), couleur: 'var(--ink)', epaisseur: 2.5,
+      valeurs: douzeMois(parMois, an, 'total_cents', 1, jusquAu) }
+  ]
+  const aDuReserve = enCours && jusquAu < 12
+    && douzeMois(parMois, an, 'total_cents', jusquAu + 1, 12).some(v => Number.isFinite(v))
+  if (aDuReserve) {
+    series.push({ nom: t('revenue.annee_reserve'), couleur: 'var(--ink)', epaisseur: 2,
+      pointille: true, valeurs: douzeMois(parMois, an, 'total_cents', jusquAu, 12) })
+  }
+  const PALIERS = 3
+  // ⚠ RIEN A TRACER NE SE TRACE PAS. Avec un perimetre vide — le cas reel du
+  // membre delegue sans bien —, le plancher `Math.max(1, …)` du module faisait
+  // un axe « 0 € / 0,50 € / 1 € » sous un total de 0 € : un repere gradue en
+  // centimes pour une courbe qui n'existe pas. On le dit en mots.
+  const riendDuTout = !series.some(se => se.valeurs.some(v => Number.isFinite(v)))
   const noeudCourbe = $('[data-bind="revenue-annee-courbe"]')
-  if (noeudCourbe) {
+  if (noeudCourbe && riendDuTout) {
+    noeudCourbe.innerHTML = `<p class="caption muted">${esc(t('revenue.annee_vide'))}</p>`
+  } else if (noeudCourbe) {
     noeudCourbe.innerHTML = courbeMensuelle({
-      series: [...serie(an - 1, 'var(--muted)', 2), ...serie(an, 'var(--ink)', 2.5)],
-      graduation: (v) => monnaie(Math.round(v), devise),
+      series,
+      ...repereDeCourbe(),
+      graduations: PALIERS,
+      // ⚠ L'AXE SE RELEVE A UN PALIER ROND : sans cela, trois paliers calcules
+      // sur le maximum reel ecrivaient « 0 € / 6,3 k € / 12,6 k € » (banc du
+      // 27 octobre). Un axe sert a situer, et 6,3 k ne situe rien.
+      arrondir: true,
+      // ⚠ LE MOIS COURANT EN GRAS, et seulement pour l'annee EN COURS : sur une
+      // annee passee, aucun mois n'est « maintenant ».
+      moisFort: enCours ? moisCourant - 1 : undefined,
+      graduation: (v) => monnaieCourte(v, devise),
       bulle: (v, k, s) => `${s.nom} · ${monnaie(Math.round(v), devise)}`,
-      resume: t('revenue.courbe_resume', { n: String(an), n1: String(an - 1) })
+      initiales: initialesDesMois(),
+      resume: choisi
+        ? t('revenue.courbe_bien_resume', { bien: String(choisi.name || ''), n: String(an), n1: String(an - 1) })
+        : t('revenue.courbe_resume', { n: String(an), n1: String(an - 1) })
     })
   }
+  // La legende : trois marques au plus, et la troisieme n'apparait que si le
+  // trait pointille existe vraiment.
   const noeudLeg = $('[data-bind="revenue-annee-legende"]')
-  if (noeudLeg) noeudLeg.textContent = t('revenue.courbe_legende', { n: String(an), n1: String(an - 1) })
+  if (noeudLeg && riendDuTout) {
+    noeudLeg.innerHTML = ''
+  } else if (noeudLeg) {
+    const marque = (classe, texte) =>
+      `<span><i class="rev-an-marque rev-an-marque--${classe}"></i>${esc(texte)}</span>`
+    noeudLeg.innerHTML = marque('plein', String(an))
+      + (aDuReserve ? marque('pointille', t('revenue.annee_reserve')) : '')
+      + marque('n1', String(an - 1))
+  }
 
-  // ─── Une carte par logement ─────────────────────────────────────────────
-  const cartes = (etat.biens || []).map(b => {
-    const parMois = a.par_bien && a.par_bien[String(b.id)]
-    if (!parMois) return ''
-    const tN = sommeDe(parMois, an, 'total_cents')
-    const tN1 = sommeDe(parMois, an - 1, 'total_cents')
-    const pct = ecartPourcent(tN, tN1)
-    // ⚠ « PAS COMPARABLE » N'EST PAS « +0 % ». Sans N-1 — un logement ouvert
-    // cette annee — on le DIT au lieu d'inventer une progression.
-    const ecart = pct === null
-      ? `<span class="caption muted">${esc(t('revenue.sans_comparaison'))}</span>`
-      : `<span class="chip caption">${esc((pct > 0 ? '+' : '') + pct + ' %')}</span>`
-    const svg = courbeMensuelle({
-      series: [
-        { nom: `${an - 1}`, couleur: 'var(--muted)', epaisseur: 2, valeurs: douzeMois(parMois, an - 1, 'total_cents') },
-        { nom: `${an}`, couleur: 'var(--ink)', epaisseur: 2.5, valeurs: douzeMois(parMois, an, 'total_cents') }
-      ],
-      graduation: (v) => monnaie(Math.round(v), devise),
-      bulle: (v, k, s) => `${s.nom} · ${monnaie(Math.round(v), devise)}`,
-      resume: t('revenue.courbe_bien_resume', { bien: String(b.name || ''), n: String(an), n1: String(an - 1) })
-    })
-    return `<li class="rev-carte">
+  // ─── Le tableau par logement ────────────────────────────────────────────
+  // ⚠ LES MONTANTS AFFICHES SONT REPARTIS, PAS ARRONDIS UN PAR UN, et c'est le
+  // constat de recette de Thierry du 27 octobre sur la vue Mois : deux biens a
+  // 100,50 € donnaient « 201 € » en tete et « 101 € + 101 € » en lignes. Ici le
+  // grand total et les lignes sont dans le MEME bloc, donc l'incoherence est
+  // encore plus visible. `repartirEnEuros` est la regle du depot, et elle etait
+  // deja ecrite a dix lignes d'ici.
+  const brutsN = avecDonnees.map(b => bilanPeriode(a.par_bien[String(b.id)] || {}, an, 'total_cents', jusquAu))
+  const brutsN1 = avecDonnees.map(b => bilanPeriode(a.par_bien[String(b.id)] || {}, an - 1, 'total_cents', jusquAu))
+  const eurosN = repartirEnEuros(brutsN.map(x => x.total))
+  const eurosN1 = repartirEnEuros(brutsN1.map(x => x.total))
+  const lignes = avecDonnees.map((b, i) => {
+    const pm = a.par_bien[String(b.id)] || {}
+    const pct = ecartPourcent(brutsN[i].total, brutsN1[i].total)
+    // ⚠ « NOUVEAU EN 2026 » EST UN FAIT, ET IL SE VERIFIE SUR L'ANNEE ENTIERE,
+    // PAS SUR LA FENETRE COMPAREE. Mesure de la review : un bien qui a vendu en
+    // DECEMBRE 2025 et qui a du deja-reserve en NOVEMBRE 2026 n'a rien entre
+    // janvier et octobre des deux cotes — il etait donc annonce « nouveau en
+    // 2026 », alors qu'il exploite depuis l'an dernier. Un fait faux.
+    //
+    // Trois cas distincts, trois phrases distinctes :
+    //   · aucune ligne en N-1 du tout        -> « nouveau en {annee} »
+    //   · des lignes en N-1, mais pas dans la fenetre -> « pas comparable »
+    //   · N-1 chiffre                        -> l'ecart
+    // ⚠ Et la deuxieme phrase avait ete SUPPRIMEE par ce lot : ce diff retirait
+    // `revenue.sans_comparaison` (« pas d'annee precedente a comparer ») pour la
+    // remplacer par la seule affirmation. On troquait une absence declaree
+    // contre un fait invente ; la clef revient, avec un texte qui nomme la
+    // fenetre.
+    const existeEnN1 = Object.keys(pm).some(k => k.startsWith(`${an - 1}-`))
+    const ecart = pct !== null
+      ? `<span class="rev-tbl__ecart${pct < 0 ? ' rev-tbl__ecart--bas' : ''}">`
+        + `${esc((pct > 0 ? '+' : '') + pct + ' %')}</span>`
+      : `<span class="muted">${esc(existeEnN1
+        ? t('revenue.sans_comparaison')
+        : t('revenue.annee_nouveau', { annee: String(an) }))}</span>`
+    return {
+      b,
+      tN: brutsN[i].refuse ? t('revenue.unavailable') : monnaie(eurosN[i], devise),
+      tN1: brutsN1[i].refuse ? t('revenue.unavailable') : monnaie(eurosN1[i], devise),
+      ecart
+    }
+  })
+  $('[data-bind="revenue-annee-col-n"]').textContent = String(an)
+  $('[data-bind="revenue-annee-col-n1"]').textContent = String(an - 1)
+  $('[data-list="revenue-annee-lignes"]').innerHTML = lignes.map(l => `<tr>
+      <th scope="row" class="rev-tbl__bien"><span class="rev-tbl__bien-int">
+        ${vignetteDuBien(l.b)}<span class="rev-tbl__nom">${esc(l.b.name)}</span>
+      </span></th>
+      <td class="rev-tbl__num">${esc(l.tN)}</td>
+      <td class="rev-tbl__num muted">${esc(l.tN1)}</td>
+      <td class="rev-tbl__num caption">${l.ecart}</td>
+    </tr>`).join('')
+  $('[data-list="revenue-annee-cartes"]').innerHTML = lignes.map(l => `<li class="rev-carte">
       <div class="rev-carte__tete">
-        <span class="rev-carte__bien"><span class="rev-tbl__nom"><span class="small">${esc(b.name)}</span></span></span>
-        <span class="rev-carte__total">${esc(monnaie(Math.round(tN / 100), devise))}</span>
+        <span class="rev-carte__bien">${vignetteDuBien(l.b)}<span class="rev-tbl__nom"><span class="small">${esc(l.b.name)}</span></span></span>
+        <span class="rev-carte__total">${esc(l.tN)}</span>
       </div>
-      <p class="caption muted">${esc(String(an - 1))} · ${esc(monnaie(Math.round(tN1 / 100), devise))} ${ecart}</p>
-      ${svg}
-    </li>`
-  }).join('')
-  $('[data-list="revenue-annee-biens"]').innerHTML = cartes
+      <p class="caption muted">${esc(String(an - 1))} · ${esc(l.tN1)} ${l.ecart}</p>
+    </li>`).join('')
 
-  // La reserve : l'argent qui est dans le total et sur aucune ligne.
-  const horsN = sommeDe(a.hors_biens, an, 'total_cents')
+  // ─── La note de bas de bloc, et les reserves ────────────────────────────
+  // ⚠ LA NOTE DIT AUSSI CE QUE LE TRAIT GRIS COUVRE. La serie N-1 trace les
+  // DOUZE mois (c'est la maquette : on voit la saison entiere de l'an dernier),
+  // alors que le total, le tableau et l'ecart s'arretent au mois courant. Sans
+  // cette phrase, l'hote lit la fin du trait gris et la colonne N-1 du tableau
+  // et trouve deux chiffres differents pour la meme annee.
+  $('[data-bind="revenue-annee-note"]').textContent = enCours
+    ? t('revenue.annee_note_cours', {
+      mois: moisSeul(`${an}-${String(moisCourant).padStart(2, '0')}`), annee: String(an - 1)
+    })
+    : t('revenue.annee_note_entiere')
+
+  // ⚠ CINQ RESERVES, ET CHACUNE EST UN FAIT MESURE, pas une precaution de
+  // style. Les taire ferait un total qu'aucune ligne n'explique — c'est le
+  // constat GRAVE deja paye sur la vue Mois (« 1 000 € d'ecart muet entre le
+  // bandeau et la somme des lignes »).
+  const reserves = []
+
+  // 1. Les sejours dont le montant n'est pas calculable. ⚠ SUR LES DEUX
+  //    ANNEES : un refus en N-1 fausse l'ecart en % de la meme facon qu'un
+  //    refus en N fausse le total.
+  const refusN = sansMontantDe(a.total, an, jusquAu)
+  const refusN1 = sansMontantDe(a.total, an - 1, jusquAu)
+  if (refusN + refusN1 > 0) reserves.push(t('revenue.no_amount', { n: refusN + refusN1 }))
+
+  // 2. Les montants BRUTS : la commission n'a pas ete transmise, donc ils
+  //    entrent dans le total comme s'ils etaient nets. ⚠ LA VUE MOIS LE DIT
+  //    DEUX FOIS et la vue Annee ne le disait pas du tout — un retrait de fond
+  //    par omission de forme, ce que la regle de refonte interdit nommement.
+  const brutsAn = sommePeriode(a.total, an, 'bruts', jusquAu)
+    + sommePeriode(a.total, an - 1, 'bruts', jusquAu)
+  if (brutsAn > 0) reserves.push(t('revenue.gross_count', { n: brutsAn }))
+
+  // 3. L'argent qui est dans le total et sur aucune ligne. ⚠ SUR LES DEUX
+  //    ANNEES AUSSI, et c'est le second constat GRAVE : un bien SUPPRIME qui
+  //    avait encaisse en N-1 mettait son montant dans le grand chiffre de N-1
+  //    et sur aucune ligne, SANS UN MOT. Le libelle nomme l'annee, sinon deux
+  //    reserves identiques se suivent sans qu'on sache laquelle parle de quoi.
+  for (const annee of [an, an - 1]) {
+    const n = sommePeriode(a.hors_biens, annee, 'sejours', jusquAu)
+    if (n <= 0) continue
+    reserves.push(t('revenue.annee_hors_biens', {
+      annee: String(annee),
+      n,
+      montant: monnaie(Math.round(sommePeriode(a.hors_biens, annee, 'total_cents', jusquAu) / 100), devise)
+    }))
+  }
+
+  // 4. Les logements qui n'ont aucune ligne du tout.
+  const sansLigne = (etat.biens || []).filter(b => !avecDonnees.some(x => String(x.id) === String(b.id)))
+  if (sansLigne.length) {
+    reserves.push(t('revenue.annee_sans_ligne', {
+      n: sansLigne.length, noms: sansLigne.map(b => String(b.name || '')).join(', ')
+    }))
+  }
+
+  // 5. Le perimetre : un logement present d'un cote et absent de l'autre suffit
+  //    a rendre les deux totaux non comparables. C'est exactement le cas que le
+  //    « +14 % » de la maquette masquait.
+  const perimetreBouge = avecDonnees.some(b => {
+    const pm = a.par_bien[String(b.id)] || {}
+    const n = sommePeriode(pm, an, 'sejours', jusquAu)
+    const n1 = sommePeriode(pm, an - 1, 'sejours', jusquAu)
+    return (n > 0) !== (n1 > 0)
+  })
+  if (perimetreBouge) reserves.push(t('revenue.annee_perimetre'))
+
   const noeudRes = $('[data-bind="revenue-annee-reserves"]')
   if (noeudRes) {
-    const sejours = sommeDe(a.hors_biens, an, 'sejours')
-    noeudRes.hidden = !(sejours > 0)
-    noeudRes.textContent = sejours > 0
-      ? t('revenue.hors_biens', { n: sejours, montant: monnaie(Math.round(horsN / 100), devise) })
-      : ''
+    noeudRes.hidden = reserves.length === 0
+    noeudRes.textContent = reserves.join(' · ')
   }
 }
 
@@ -1850,6 +2164,27 @@ async function init () {
   // Le selecteur Mois / Annee, branche une seule fois lui aussi.
   for (const b of document.querySelectorAll('.seg__btn[data-vue]')) {
     b.addEventListener('click', () => allerALaVue(b.dataset.vue))
+  }
+  // ⚠ LES PASTILLES DE FILTRE SE DELEGUENT, parce qu'elles sont RECONSTRUITES a
+  // chaque rendu : un ecouteur pose sur chaque bouton serait perdu au rendu
+  // suivant, et un ecouteur pose a chaque rendu s'empilerait. Un seul ecouteur
+  // sur le conteneur, qui lui ne bouge pas, repond aux deux problemes.
+  // ⚠ ET IL NE RECHARGE RIEN : l'annee est deja en memoire, filtrer la courbe
+  // est un rendu local. Un appel reseau par pastille serait un appel pour une
+  // donnee qu'on tient deja.
+  // ⚠ ET LE FRANCHISSEMENT DU SEUIL REDESSINE. Sans cela, un telephone tourne
+  // en paysage — ou une fenetre qu'on elargit — garderait le repere etroit,
+  // donc une courbe dessinee pour 360 unites etiree sur 1 200 px. Le rendu est
+  // local : il ne redemande rien au serveur.
+  if (ECRAN_ETROIT) ECRAN_ETROIT.addEventListener('change', () => renderAnnee())
+  const filtres = $('[data-list="revenue-annee-filtres"]')
+  if (filtres) {
+    filtres.addEventListener('click', (e) => {
+      const b = e.target.closest('.rev-an-puce')
+      if (!b || !filtres.contains(b)) return
+      etat.filtreAnnee = b.dataset.filtre || null
+      renderAnnee()
+    })
   }
 
   HSNav.renderMenu({
