@@ -1286,9 +1286,21 @@ function renderRevenus () {
     // Rien ne pouvait le voir : aucune assertion ne lit une largeur calculee,
     // et le pourcentage s'ecrivait « correctement » dans l'attribut.
     const barre = `<span class="revenue-bar" style="--part: ${part}%; --recu: ${partRecue}" aria-hidden="true"></span>`
+    // ⚠ LA LEGENDE DE LA CARTE NE REPETE PAS CE QUE LE TOTAL DIT DEJA
+    // (recette de Thierry, 27 octobre 2026 : « corrige le doublon mobile »).
+    // Quand tout est refuse, la carte ecrivait « non calculable » DEUX FOIS —
+    // en total et en legende — plus la pastille « 2 sans montant » : trois
+    // affirmations du meme fait sur trois lignes de 390 px, dont deux
+    // identiques au caractere.
+    //
+    // Ce qu'on garde est ce qui APPORTE : le total dit l'etat, la pastille dit
+    // le COMBIEN (« un compte n'est jamais redondant avec un etat », regle du
+    // depot), et la legende ne garde que le nombre de sejours. L'ordinateur
+    // n'avait pas le defaut : ses trois colonnes de chiffres portent l'etat, et
+    // la cellule du nom ne le repete pas.
     const detail = toutRefuse
-      ? esc(t('revenue.unavailable'))
-      : esc(t('revenue.split', {
+      ? ''
+      : ' · ' + esc(t('revenue.split', {
         recu: euros(d.recu_cents, devise), avenir: euros(d.a_venir_cents, devise)
       }))
     const chips = marques.length ? `<span class="chip caption">${esc(marques.join(' · '))}</span>` : ''
@@ -1315,10 +1327,18 @@ function renderRevenus () {
       carte: `<li class="rev-carte">
       <div class="rev-carte__tete">
         <span class="rev-carte__bien">${photo}<span class="rev-tbl__nom">${nom}</span></span>
-        <strong class="num rev-carte__total">${montant}</strong>
+        <!-- ⚠ PAS DE strong ICI : la variable montant apporte deja son
+             propre element — un strong.num.small pour un chiffre, un
+             span.caption.muted pour « non calculable ». L'envelopper donnait
+             un strong DANS un strong, donc un gras sur un gras, et une
+             mention discrete promue en fort.
+             ⚠ Et ce commentaire n'a PAS d'accents graves : il vit DANS un
+             gabarit de chaine, et le premier en fermerait la chaine. Mesure :
+             32 tests en SyntaxError « Unexpected identifier montant ». -->
+        <span class="rev-carte__total">${montant}</span>
       </div>
       ${barre}
-      <p class="caption muted">${esc(t('revenue.stays', { n: d.sejours }))} · ${detail}</p>
+      <p class="caption muted">${esc(t('revenue.stays', { n: d.sejours }))}${detail}</p>
       ${chips}
     </li>`
     }

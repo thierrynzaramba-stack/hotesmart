@@ -1452,7 +1452,9 @@ body.men-cfg-ouvert { overflow: hidden; }
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
 }
 .rev-carte__bien { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.rev-carte__total { flex: 0 0 auto; white-space: nowrap; }
+/* Le total garde son rang visuel sans imposer un `<strong>` : c'est `montant`
+   qui apporte son element, chiffre en gras ou mention discrete. */
+.rev-carte__total { flex: 0 0 auto; white-space: nowrap; font-weight: 600; }
 /* ⚠ LA BARRE PREND TOUTE LA LARGEUR ICI, la ou le tableau lui donne 72 px
    fixes : dans une carte, elle n'est plus une colonne parmi d'autres, elle est
    la seule representation visuelle de la repartition. */

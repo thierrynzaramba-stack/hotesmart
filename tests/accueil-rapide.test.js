@@ -1793,3 +1793,46 @@ test("LE TEST QUI COMPTE : la barre a sa PROPRE colonne, elle ne suit plus le no
   assert.match(css, /\.rev-tbl__barre\s*\{[^}]*width:\s*\d+px/,
     'la colonne de la barre n a pas de largeur fixe : les barres ne s aligneront pas')
 })
+
+test("LE TEST QUI COMPTE : la carte ne dit pas DEUX FOIS que le montant est inconnu", () => {
+  // ⚠ RECETTE DE THIERRY, 27 octobre 2026 : « corrige le doublon mobile ».
+  // Quand tout est refuse, la carte ecrivait « non calculable » DEUX FOIS — en
+  // total et en legende — plus la pastille « 2 sans montant » : trois
+  // affirmations du meme fait sur trois lignes de 390 px, dont deux identiques
+  // au caractere.
+  //
+  // Ce qu'on garde est ce qui APPORTE quelque chose : le total dit l'etat, la
+  // pastille dit le COMBIEN — « un compte n'est jamais redondant avec un
+  // etat » — et la legende ne garde que le nombre de sejours.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 2, refuses: { montant: 2, date: 0 }, motifs: { prix_non_calculable: 2 } })
+    },
+    total: parBien({ sejours: 2, refuses: { montant: 2, date: 0 } }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const carte = p.html('[data-list="revenue-cards"]').split('</li>')[0]
+  const fois = (carte.match(/revenue\.unavailable/g) || []).length
+  assert.strictEqual(fois, 1,
+    `« non calculable » est ecrit ${fois} fois sur la meme carte`)
+  // Le COMBIEN reste : il n'est pas redondant avec l'etat.
+  assert.match(carte, /revenue\.no_amount_short/,
+    'la pastille qui dit COMBIEN de sejours manquent a disparu avec le doublon')
+  assert.match(carte, /revenue\.stays/, 'le compte de sejours a disparu')
+
+  // ⚠ ET LE TOTAL N'EST PLUS UN `<strong>` IMBRIQUE. La variable `montant`
+  // apporte son propre element — `<strong>` pour un chiffre, `<span>` discret
+  // pour « non calculable » : l'envelopper donnait un gras sur un gras, et une
+  // mention discrete promue en fort.
+  const chiffree = bancRevenus({
+    mois: '2026-11',
+    par_bien: { 'uuid-1': parBien({ sejours: 1, total_cents: 30000, recu_cents: 30000 }) },
+    total: parBien({ sejours: 1, total_cents: 30000, recu_cents: 30000 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  chiffree.interne.renderRevenus()
+  const c2 = chiffree.html('[data-list="revenue-cards"]').split('</li>')[0]
+  assert.ok(!/<strong[^>]*>\s*<strong/.test(c2), `un strong est imbrique dans un strong : ${c2}`)
+})
