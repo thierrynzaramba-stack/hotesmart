@@ -981,22 +981,34 @@ const euros = (cents, devise) =>
  * concordent a l'euro ». L'alternative serait d'afficher les centimes partout,
  * ou le probleme n'existe pas.
  *
- * ⚠ ET LES MONTANTS NEGATIFS SONT PREVUS (un remboursement en porterait) : le
- * reste a distribuer peut etre negatif, et on le retire alors aux plus FAIBLES
- * decimales. Sans cette moitie, la somme ne tomberait pas juste.
+ * ⚠ LES MONTANTS NEGATIFS PASSENT (un remboursement en porterait), ET LE RESTE,
+ * LUI, N'EST JAMAIS NEGATIF. Ma premiere version portait une seconde boucle
+ * pour ce cas, et mon message de commit affirmait l'avoir eprouvee — le test
+ * passait en realite par le chemin positif. Deux mesures l'ont montre : une
+ * mutation qui retirait la boucle ne faisait rougir aucun test, puis 300 000
+ * tirages de -6 000 a +6 000 € n'ont jamais produit un reste negatif.
+ *
+ * L'algebre le dit aussi : `floor(e) <= e` donc `Somme(floor) <= Somme(e)`, et
+ * `round(S) >= S - 0,5` ; donc `reste >= -0,5`, et comme il est ENTIER,
+ * `reste >= 0`. La boucle etait du code mort deguise en precaution — la forme
+ * la plus couteuse, parce qu'elle se lit comme une garantie.
  */
 function repartirEnEuros (listeCents, totalCents) {
   const cible = Math.round((Number(totalCents) || 0) / 100)
   const euro = listeCents.map(c => (Number(c) || 0) / 100)
   const bas = euro.map(e => Math.floor(e))
   let reste = cible - bas.reduce((a, b) => a + b, 0)
-  // Par decimale decroissante ; a egalite, l'ordre d'affichage tranche, pour
-  // que deux rendus de la meme donnee ne different jamais.
+  // Par decimale decroissante ; a egalite, l'ordre d'affichage tranche.
+  // ⚠ CE DEPARTAGE EST UNE CEINTURE, PAS UNE BRETELLE : `Array.sort` est STABLE
+  // depuis ES2019, donc deux lignes de meme decimale gardent deja leur ordre, et
+  // AUCUN test ne peut distinguer sa presence de son absence (mesure : la
+  // mutation qui le retire ne fait rougir personne). On le garde parce qu'il
+  // rend la regle LISIBLE au lieu de la faire reposer sur une garantie
+  // implicite du langage — mais il ne faut pas le croire teste.
   const ordre = euro
     .map((e, i) => ({ i, frac: e - Math.floor(e) }))
     .sort((a, b) => (b.frac - a.frac) || (a.i - b.i))
   for (let k = 0; k < ordre.length && reste > 0; k++) { bas[ordre[k].i]++; reste-- }
-  for (let k = ordre.length - 1; k >= 0 && reste < 0; k--) { bas[ordre[k].i]--; reste++ }
   return bas
 }
 
