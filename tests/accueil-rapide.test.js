@@ -1735,3 +1735,61 @@ test("LE TEST QUI COMPTE : l'accueil coute DEUX appels, et ce compte NE CROIT PA
     assert.ok(!/[?&](bien|property|property_id)=/.test(u), `un appel porte une cle de bien : ${u}`)
   }
 })
+
+test("LE TEST QUI COMPTE : la barre a sa PROPRE colonne, elle ne suit plus le nom", () => {
+  // ⚠ DEMANDE DE THIERRY, 27 octobre 2026 : « aligne-les verticalement sur
+  // ordinateur, comme la maquette (colonne de largeur fixe) ». La barre vivait
+  // dans la cellule du nom, APRES le nom, le compte de sejours et une pastille
+  // eventuelle : sa position horizontale suivait donc la longueur du texte, et
+  // deux barres de deux lignes voisines ne commencaient jamais au meme endroit.
+  // Une barre qui ne s'aligne pas avec sa voisine ne se compare pas d'un coup
+  // d'oeil — ce pour quoi elle existe.
+  const p = bancRevenus({
+    mois: '2026-11',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 2, total_cents: 70000, recu_cents: 40000, a_venir_cents: 30000 }),
+      'uuid-2': parBien({ sejours: 1, total_cents: 30000, recu_cents: 30000, a_venir_cents: 0 })
+    },
+    total: parBien({ sejours: 3, total_cents: 100000, recu_cents: 70000, a_venir_cents: 30000 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  })
+  p.interne.renderRevenus()
+  const lignes = p.html('[data-list="revenue-rows"]')
+  // La barre est dans une cellule a elle, et PLUS dans celle du nom.
+  assert.match(lignes, /<td class="rev-tbl__barre">\s*<span class="revenue-bar"/,
+    'la barre n est pas dans sa propre cellule')
+  // ⚠ ON INSPECTE CHAQUE CELLULE, PAS LE TEXTE ENTIER. Ma premiere version
+  // cherchait `bien-int … revenue-bar … </th>` dans tout le rendu : les
+  // quantificateurs paresseux TRAVERSENT la frontiere des rangees, donc le
+  // `</th>` trouve etait celui de la ligne SUIVANTE, et le test rougissait sur
+  // un code juste. Une expression reguliere sur du balisage doit etre bornee a
+  // l'element qu'elle juge.
+  const cellulesDuNom = lignes.match(/<th scope="row"[\s\S]*?<\/th>/g) || []
+  assert.ok(cellulesDuNom.length > 0, 'aucune cellule de nom rendue')
+  for (const c of cellulesDuNom) {
+    assert.ok(!/revenue-bar/.test(c),
+      'la barre est restee dans la cellule du nom : sa position suivra la longueur du texte')
+  }
+  // ⚠ ET CHAQUE RANGEE A LE MEME NOMBRE DE CELLULES QUE L'EN-TETE. Une colonne
+  // ajoutee a l'en-tete sans l'etre aux rangees decale TOUS les chiffres d'une
+  // colonne vers la gauche, en silence — le tableau reste valide, il ment.
+  const src = lire('pages/aujourdhui.html')
+  const enTete = (src.match(/<th scope="col"/g) || []).length
+  const parRangee = (lignes.match(/<tr>/g) || []).map((_, i) =>
+    (lignes.split('<tr>')[i + 1] || '').match(/<t[hd][ >]/g) || [])
+  for (const cells of parRangee) {
+    assert.strictEqual(cells.length, enTete,
+      `une rangee porte ${cells.length} cellules pour ${enTete} colonnes : les chiffres sont decales`)
+  }
+  // Le libelle de la colonne existe pour qui ecoute, sans s'afficher.
+  assert.match(src, /<th scope="col" class="rev-tbl__barre">\s*<span class="sr-only" data-i18n="revenue\.col_split">/,
+    'la colonne de la barre n a pas de libelle lu : un lecteur d ecran annonce une cellule vide')
+  // ⚠ ET `sr-only` N'EST PAS SUR LE `<th>` : une cellule en `position: absolute`
+  // quitte la grille du tableau, donc decale toutes les suivantes.
+  assert.ok(!/<th[^>]*class="[^"]*sr-only/.test(src),
+    'une cellule de tableau porte `sr-only` : elle sort de la grille')
+  // La largeur est FIXE : c est ce qui met les barres en colonne.
+  const css = lire('shared/ui.css')
+  assert.match(css, /\.rev-tbl__barre\s*\{[^}]*width:\s*\d+px/,
+    'la colonne de la barre n a pas de largeur fixe : les barres ne s aligneront pas')
+})

@@ -188,6 +188,21 @@
         <thead>
           <tr>
             <th scope="col" data-i18n="revenue.col_property"></th>
+            <!-- ⚠ LA BARRE A SA PROPRE COLONNE DEPUIS LE 27 OCTOBRE 2026
+                 (demande de Thierry : « aligne-les verticalement, comme la
+                 maquette, colonne de largeur fixe »). Elle vivait dans la
+                 cellule du nom, a la suite du nom et du compte de sejours :
+                 sa position horizontale suivait donc la longueur du nom et la
+                 presence d'une pastille, et aucune barre n'etait alignee avec
+                 la suivante.
+                 ⚠ SON LIBELLE EXISTE, il n'est simplement pas AFFICHE. Une
+                 colonne sans en-tete laisse le lecteur d'ecran annoncer une
+                 cellule vide ; `sr-only` est sur le `<span>`, jamais sur le
+                 `<th>` — une cellule mise en `position: absolute` quitte la
+                 grille du tableau. -->
+            <th scope="col" class="rev-tbl__barre">
+              <span class="sr-only" data-i18n="revenue.col_split"></span>
+            </th>
             <th scope="col" class="rev-tbl__num" data-i18n="revenue.col_received"></th>
             <th scope="col" class="rev-tbl__num" data-i18n="revenue.col_upcoming"></th>
             <th scope="col" class="rev-tbl__num" data-i18n="revenue.col_total"></th>
@@ -1180,6 +1195,7 @@ function renderRevenus () {
             <span class="caption muted" data-i18n="revenue.none"></span>
           </span>
         </th>
+        <td class="rev-tbl__barre"></td>
         <td class="rev-tbl__num">${zero}</td>
         <td class="rev-tbl__num">${zero}</td>
         <td class="rev-tbl__num">${zero}</td>
@@ -1283,10 +1299,10 @@ function renderRevenus () {
           ${photo}
           <span class="rev-tbl__nom">${nom}</span>
           <span class="caption muted">${esc(t('revenue.stays', { n: d.sejours }))}</span>
-          ${barre}
           ${chips}
         </span>
       </th>
+      <td class="rev-tbl__barre">${barre}</td>
       <td class="rev-tbl__num">${cellule(d.recu_cents, toutRefuse)}</td>
       <td class="rev-tbl__num">${cellule(d.a_venir_cents, toutRefuse)}</td>
       <td class="rev-tbl__num">${montant}</td>

@@ -777,5 +777,6 @@
   "validate.settings": "Elegir lo que valida solo",
   "validate.task": "Por atender",
   "validate.title": "Por validar",
-  "validate.view": "Ver"
+  "validate.view": "Ver",
+  "revenue.col_split": "Reparto"
 }

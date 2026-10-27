@@ -1347,6 +1347,15 @@ body.men-cfg-ouvert { overflow: hidden; }
 }
 .rev-tbl tbody tr:last-child th, .rev-tbl tbody tr:last-child td { border-bottom: 0; }
 .rev-tbl__num { text-align: right; white-space: nowrap; }
+/* ⚠ LA COLONNE DE LA BARRE EST DE LARGEUR FIXE, et c'est tout l'objet de la
+   demande de Thierry du 27 octobre 2026. La barre vivait dans la cellule du
+   nom, a la suite du nom, du compte de sejours et d'une pastille eventuelle :
+   sa position horizontale suivait donc la longueur du texte, et deux barres de
+   deux lignes voisines ne commencaient jamais au meme endroit. Une largeur
+   fixe les met en colonne, et c'est la seule facon de comparer deux barres
+   d'un coup d'oeil — ce pour quoi elles existent. */
+.rev-tbl__barre { width: 88px; padding-right: 0; }
+.rev-tbl__barre .revenue-bar { flex: none; inline-size: 72px; display: block; }
 /* ⚠ PAS DE `display: flex` SUR LE `<th>` LUI-MEME, et ma premiere version en
    mettait un. Constat MAJEUR d'une review du 27 octobre 2026 : changer le
    `display` d'un element de tableau le retire de l'arbre d'accessibilite comme
