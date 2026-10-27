@@ -552,7 +552,7 @@ function batirAujourdhui (sansInit = false) {
   // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
   // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
   // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
-  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis }'
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -646,14 +646,35 @@ function ouvrirAujourdhui (options = {}) {
     return cle === 'etatDesBiens' ? (() => new Map()) : (() => [])
   } })
 
+  // ⚠ LE BANC GARDE LES ERREURS AU LIEU DE LES AVALER. Le `logger` injecte
+  // etait `{ error: rien }`, et la derniere ligne de la page est
+  // `init().catch(e => logger.error(...))` : une panne du DEMARRAGE ne laissait
+  // donc aucune trace. Mesure du 27 octobre 2026 : apres un chargement complet,
+  // `p.urls` et `p.lectures` sont VIDES — `init()` n'arrive jamais a sa phase
+  // reseau, et les tests qui chargent la page entiere affirmaient des choses
+  // d'un ecran qui ne s'etait jamais construit. C'est la famille « erreur
+  // avalee » que ce depot a deja payee 24 heures sur un cron rendant 200.
+  const erreurs = []
+  const journal = { error: (...a) => erreurs.push(a.map(String).join(' ')), warn: rien, info: rien }
+
   const sorti = new Function(
     'requireAuth', 'supabase', 'signOut', 'initErrorHandler', 'logger', 'esc',
     'compteCourant', 'moi', 'peutLire', 'peutEcrire', 'estTitulaire', 'comptes',
     'basculerVers', 'enteteCompte', 'etatHtml',
     'vueDesAvis', 'blocAvisHtml', 'enTeteAvisHtml', 'MUETS', 'libelleDuCanal', 'R',
     'I18n', 'HSNav', 'document', 'window', 'location', 'fetch', 'localStorage', 'console',
+    // ⚠ `CacheEcran` MANQUAIT, ET C'EST CE QUI TUAIT LE DEMARRAGE. La page fait
+    // `import * as CacheEcran from '/shared/cache-ecran.js'` et s'en sert des
+    // sa phase de cache ; le nom n'etant pas injecte ici, `init()` levait
+    // `CacheEcran is not defined` A CHAQUE CHARGEMENT, et son `.catch` le
+    // donnait a un `logger.error` qui ne gardait rien.
+    // ⚠ ON INJECTE LE VRAI MODULE, pas un double — meme regle que pour le
+    // module des avis. Un double de cache qui ne cache rien masquerait la
+    // moitie du chemin qu'on croit eprouver, y compris la purge et la
+    // peremption. Il ecrit dans le `localStorage` du banc, qui est deja faux.
+    'CacheEcran',
     batirAujourdhui(options.sansInit)
-  )(requireAuth, supabase, rien, rien, { error: rien, warn: rien, info: rien }, String,
+  )(requireAuth, supabase, rien, rien, journal, String,
     () => 'u1', () => 'u1', () => true, () => true, () => true, () => [],
     rien, () => ({}), () => '<h2 data-i18n="logements.vide_titre"></h2>',
     // ⚠ LE MODULE DES AVIS EST INJECTE POUR DE VRAI, pas double (constat MOYEN 3
@@ -668,13 +689,16 @@ function ouvrirAujourdhui (options = {}) {
     (c) => ({ airbnb: 'Airbnb', booking: 'Booking.com' })[String((c || {}).ota || '')] || null,
     R,
     I18n, { renderMenu: rien, render: rien }, document_, {}, { search: '', hash: '' },
-    fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien })
+    fetchFaux, faireStockage(), { error: rien, warn: rien, log: rien },
+    require('../shared/cache-ecran.js'))
 
   return {
     // Le corps que le test a fourni. Depuis le lot (b), les tests nourrissent
     // `etat.ecran` avec lui au lieu de compter sur le faux `fetch` : la page ne
     // fait plus l'appel, l'endpoint d'ecran le fait pour elle.
     corpsDonne: options.corps || {},
+    // Ce que le demarrage a journalise. Vide = il est alle au bout.
+    erreurs,
     interne: sorti,
     urls,
     lectures,
@@ -1656,4 +1680,58 @@ test("RECENSEMENT : la barre dit le RECU en plein noir et l A VENIR en hachure g
   assert.ok(cellules, 'la regle des cellules du tableau a disparu')
   assert.match(cellules[0], /vertical-align:\s*top/,
     'les cellules s alignent encore par la baseline : une ligne a photo decale ses montants')
+})
+
+// ─── LE BUDGET DE L'ECRAN (spec §5, regle gravee de CLAUDE.md) ───────────────
+
+test("LE TEST QUI COMPTE : l'accueil coute DEUX appels, et ce compte NE CROIT PAS avec les biens", async () => {
+  // ⚠ CE TEST MANQUAIT, ET C'EST LA SESSION CHEF DE FILE QUI L'A VU avant le
+  // merge vers `main` : la spec du lot porte une case « Performance », et trois
+  // de ses huit points n'etaient ni traites ni declares « sans objet » — celui
+  // qui demande un test comptant les appels etait du nombre.
+  //
+  // ⚠ CE QU'IL GARDE N'EST PAS UN NOMBRE, C'EST UNE PENTE. Un ecran qui coute
+  // 2 appels a 1 bien et 2 a douze est borne ; celui qui coute 2 puis 13 est un
+  // « 1 + N » qu'on ne voit pas en developpement — on a tous deux ou trois
+  // biens — et qui se voit chez l'hote qui en a trente. C'est la mesure du
+  // 22 octobre 2026 en production : 13 appels HTTP et 1 047 556 octets pour
+  // QUATRE logements, dont `/api/yield` appele DEUX FOIS PAR BIEN.
+  //
+  // ⚠ ET LE COMPTE EST DEUX, PAS UN. L'en-tete de la page le dit depuis le lot
+  // (b) : `/api/menages` n'est PAS remplace par l'appel d'ecran, et c'est
+  // assume. Ecrire « un seul appel » ici serait plus joli et faux ; le test
+  // garde ce qui est vrai, et le nomme.
+  const appels = async (nBiens) => {
+    const biens = Array.from({ length: nBiens }, (_, i) => ({
+      id: `uuid-${i}`, provider_property_id: String(200000 + i), name: `Bien ${i}`, currency: 'EUR'
+    }))
+    const p = ouvrirAujourdhui({ corps: { biens, droits: { reservations: true, menage: true } } })
+    p.ouvrirSession(); p.repondreI18n()
+    await tours()
+    // ⚠ UNE ERREUR DE DEMARRAGE INVALIDE LA MESURE. Sans cette garde, un
+    // `init()` qui leve rend zero appel — et « zero » se lirait « aucun appel
+    // superflu », c'est-a-dire le meilleur resultat possible. C'est exactement
+    // ce qui se passait avant le 27 octobre 2026 : `CacheEcran` n'etait pas
+    // injecte, le demarrage levait a chaque chargement, et son `.catch` donnait
+    // l'erreur a un `logger` qui ne gardait rien.
+    assert.deepEqual(p.erreurs, [], `le demarrage a echoue : ${p.erreurs.join(' / ')}`)
+    return p.urls.filter(u => u.includes('/api/'))
+  }
+  const un = await appels(1)
+  const douze = await appels(12)
+  assert.strictEqual(douze.length, un.length,
+    `le nombre d appels CROIT avec les biens : ${un.length} a 1 bien, ${douze.length} a 12. `
+    + 'C est un « 1 + N » : invisible a quatre logements, ruineux a trente.')
+  assert.strictEqual(un.length, 2, `l accueil fait ${un.length} appels : ${un.join(', ')}`)
+  assert.match(un[0], /\/api\/ecran\/aujourdhui/, `le premier appel n est pas celui de l ecran : ${un[0]}`)
+  assert.match(un[1], /\/api\/menages/,
+    `le second appel n est plus celui des menages : ${un[1]} — si un appel s ajoute, `
+    + 'il doit etre DECLARE dans la spec avant d etre tolere ici')
+  // ⚠ ET AUCUN APPEL NE PORTE UNE CLE DE BIEN. Un endpoint appele une fois par
+  // bien se verrait deja dans la pente ci-dessus ; un appel UNIQUE portant
+  // `?bien=` serait le premier pas vers la boucle, et c est le moment de le
+  // refuser, pas quand il y en aura trente.
+  for (const u of un) {
+    assert.ok(!/[?&](bien|property|property_id)=/.test(u), `un appel porte une cle de bien : ${u}`)
+  }
 })

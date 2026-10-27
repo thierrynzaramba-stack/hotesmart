@@ -85,6 +85,65 @@ Règles de calcul (décidées par Thierry) :
   les quatre compteurs ; les cinq blocs critiques restent interdits d'écriture, et la purge passe par le geste
   partagé `purgerCachesLocaux`, sur les cinq chemins de sortie.
 
+### 5 bis. Le budget de l'écran — les trois points qui manquaient
+
+**Relevé par la session chef de file le 27 octobre 2026, avant le merge vers
+`main` :** la case Performance portait cinq de ses huit points, et trois
+n'étaient ni traités ni déclarés « sans objet ». « Sans objet » est une réponse
+valable ; « on verra » n'en est pas une. Les voici, traités.
+
+**1. Le budget en appels — MESURÉ, et c'est DEUX, pas un.**
+
+| | |
+|---|---|
+| appels HTTP au chargement | **2**, et le compte NE BOUGE PAS : mesuré à 0, 1, 4 et 12 logements |
+| requêtes Supabase | annoncées par l'écran lui-même (voir le point 3) |
+| poids de la page servie | 88 850 octets (staging, 27 octobre 2026) |
+
+Les deux appels sont `/api/ecran/aujourdhui` et `/api/menages`. **Le second est
+une exception assumée et déjà déclarée** en tête de `pages/aujourdhui.html` :
+l'appel d'écran ne remplace pas la fenêtre de ménage. Écrire « un seul appel »
+serait plus joli et faux.
+
+⚠ **Ce qui compte n'est pas le nombre, c'est la PENTE.** Deux appels à un
+logement et deux à douze, c'est borné. Deux puis treize, c'est un « 1 + N » :
+invisible en développement — on a tous deux ou trois biens — et ruineux chez
+l'hôte qui en a trente. C'est exactement la mesure du 22 octobre 2026 en
+production : 13 appels HTTP et 1 047 556 octets pour **quatre** logements, dont
+`/api/yield` appelé **deux fois par bien**.
+
+**2. Le test qui compte les appels — IL EXISTE**, et il garde la pente :
+`tests/accueil-rapide.test.js`, « l'accueil coûte DEUX appels, et ce compte NE
+CROÎT PAS avec les biens ». Il charge la page pour de vrai à 1 puis 12
+logements, exige le même compte, nomme les deux appels attendus, et refuse
+qu'un appel porte une clé de bien — le premier pas vers la boucle se refuse
+maintenant, pas quand il y en aura trente.
+
+⚠ **Et il commence par exiger que le démarrage n'ait rien journalisé.** Sans
+cette garde, un `init()` qui lève rend **zéro** appel, et « zéro » se lirait
+« aucun appel superflu », c'est-à-dire le meilleur résultat possible. Ce n'est
+pas une précaution théorique : jusqu'au 27 octobre 2026, le banc n'injectait pas
+`CacheEcran`, le démarrage levait `CacheEcran is not defined` **à chaque
+chargement**, et son `.catch` donnait l'erreur à un `logger` qui ne gardait
+rien. Tous les tests chargeant la page entière mesuraient donc un écran qui ne
+s'était jamais construit.
+
+**3. `Server-Timing` — IL EST ÉMIS**, par `api/ecran/aujourdhui.js` :
+`db;dur=… desc="N req (ordre de grandeur)", calc;dur=…, total;dur=…`. La phase
+de lecture commence **à la garde**, pas après elle — sinon les un à trois
+allers-retours de `contexteDEcran` tombaient dans `calc`, et la requête la plus
+lente du produit, celle d'un membre délégué, se lisait « JavaScript lent ».
+Le compte de requêtes est un **plancher** annoncé comme tel : deux appels ne se
+comptent pas exactement (`etatMenage` a son propre client, `notesDuPerimetre`
+pagine et compte pour 1). Un instrument posé pour désigner la **cause** qui se
+donnerait pour exact serait pire que pas d'instrument.
+
+⚠ **CE QUI N'EST PAS MESURÉ, ET QUI RESTE DÛ.** Les cibles de la règle —
+premier affichage sous 1 s, écran complet sous 2 s — sont des **durées
+perçues**, sur un vrai téléphone et un vrai réseau. Rien ici ne les mesure :
+les deux appels et la pente sont des bornes de coût, pas des temps. Les
+déclarer tenues serait une affirmation sans mesure. **Dette 116.**
+
 ## 6. Droits (règle absolue)
 
 Chaque bloc garde sa garde serveur. Revenus nets : **droit `reservations` en lecture, borné aux biens du profil** (Q5, 24 octobre 2026). ⚠ **Le droit « finances » n'existe pas** — les domaines sont `reservations`, `menages`, `prestataires`, `messages`, `avis`, `reglages`, `facturation`, `equipe`, et `facturation` n'est **pas délégable**. Le brancher là aurait retiré à un co-propriétaire (profil type « propriétaire », `reservations: read`) le chiffre d'affaires de ses propres biens, qu'il voit aujourd'hui. Sinon le bloc n'est pas dans le DOM. Avis : lecture pour tout profil qui voit les biens. Test : retirer le masquage → le serveur répond 403.
