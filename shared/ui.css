@@ -1296,6 +1296,77 @@ body.men-cfg-ouvert { overflow: hidden; }
 /* La barre d'une ligne de bien. Sa LARGEUR est la part du total du mois — pas
    une valeur absolue : un petit mois donnerait des barres minuscules, un gros
    mois des barres saturées. Le remplissage interne est la part REÇUE. */
+/* ─── Le bloc Revenus : navigation de mois et tableau par logement ─────────
+   Maquette Aujourdhui-v5, demande de Thierry a la recette du 27 octobre 2026.
+   Trois nombres pousses en bout de ligne par un `space-between` ne s'alignent
+   pas d'une ligne a l'autre ; des colonnes, si. */
+
+.rev-nav { display: inline-flex; align-items: center; gap: 4px; }
+.rev-nav__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  /* ⚠ 44 px, PAS 32 : la charte du lot exige « zones de clic >= 44 px » et
+     `shared/theme.css` definit `--control: 44px` pour ca. Le precedent du depot
+     pour exactement ce geste — les chevrons de mois du calendrier — utilise
+     `btn btn--icon`, qui vaut `var(--control)`. La recette se fait au
+     telephone : deux cibles sous la norme s'y voient tout de suite. */
+  width: var(--control); height: var(--control); padding: 0;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); color: var(--ink); cursor: pointer;
+}
+.rev-nav__btn:hover:not(:disabled) { background: var(--line); }
+.rev-nav__btn:disabled { opacity: .5; cursor: default; }
+.rev-nav__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+/* Le libelle ne doit pas sauter d'une largeur a l'autre quand le mois change :
+   « mai 2026 » et « septembre 2026 » n'ont pas la meme longueur, et les deux
+   fleches se deplaceraient sous le curseur entre deux clics. */
+.rev-nav__label { min-width: 9.5em; text-align: center; font-size: .95rem; }
+
+/* Les trois chiffres du bandeau, de meme rang. */
+.rev-chiffres { display: flex; flex-wrap: wrap; gap: var(--gap-l, 20px); }
+.rev-chiffre { display: flex; flex-direction: column; gap: 2px; }
+
+/* Le tableau par logement. `-wrap` porte le defilement horizontal : sur un
+   telephone de 390 px, quatre colonnes ne tiennent pas, et c'est le tableau
+   qui doit glisser — pas la page. */
+.rev-tbl-wrap { overflow-x: auto; }
+.rev-tbl { width: 100%; border-collapse: collapse; }
+.rev-tbl th, .rev-tbl td {
+  padding: 8px 10px; text-align: left; vertical-align: baseline;
+  border-bottom: 1px solid var(--line);
+}
+.rev-tbl thead th {
+  font-size: .8rem; font-weight: 600; color: var(--muted);
+  text-transform: none; white-space: nowrap;
+}
+.rev-tbl tbody tr:last-child th, .rev-tbl tbody tr:last-child td { border-bottom: 0; }
+.rev-tbl__num { text-align: right; white-space: nowrap; }
+/* ⚠ PAS DE `display: flex` SUR LE `<th>` LUI-MEME, et ma premiere version en
+   mettait un. Constat MAJEUR d'une review du 27 octobre 2026 : changer le
+   `display` d'un element de tableau le retire de l'arbre d'accessibilite comme
+   cellule — le `<th>` cesse d'etre un `rowheader`, donc `scope="row"` devient
+   inerte, et le lecteur d'ecran n'annonce plus « <logement>, A venir, 480 € ».
+   C'est-a-dire exactement l'accessibilite que ce tableau existe pour obtenir,
+   et que mon message de commit invoquait pour justifier la forme tabulaire.
+
+   Le flex vit donc sur un enfant. Meme rendu, semantique preservee. (Premier
+   `scope="row"` du depot : aucun precedent ne couvrait ce piege.) */
+.rev-tbl__bien { font-weight: 400; }
+/* Le nom, le compte de sejours, la barre et les pastilles sur une seule
+   colonne : c'est la cellule la plus large, et elle respire. */
+.rev-tbl__bien-int { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rev-tbl__nom { flex: 1 1 10em; min-width: 0; }
+/* La vignette du logement. Carree, petite, et elle ne retrecit jamais : c'est
+   le repere visuel de la ligne. */
+.rev-tbl__photo {
+  flex: 0 0 28px; width: 28px; height: 28px;
+  border-radius: 6px; object-fit: cover; background: var(--line);
+}
+/* Sans photo : l'initiale, comme la liste des logements. */
+.rev-tbl__photo--vide {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: .75rem; font-weight: 600; color: var(--muted);
+}
+
 .revenue-bar {
   flex: 0 0 72px;
   height: 6px;
