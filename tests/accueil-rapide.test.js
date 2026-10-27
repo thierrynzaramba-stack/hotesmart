@@ -1648,8 +1648,20 @@ test("RECENSEMENT : le mois ne s'affiche qu'UNE fois, et le selecteur Mois/Annee
   assert.deepEqual(bindings, [],
     'le mois est encore affiche a cote du total : il y est deux fois a l ecran')
   assert.match(src, /data-bind="revenue-month-nav"/, 'le mois des fleches a disparu aussi')
-  assert.ok(!/data-vue="mois"/.test(src),
-    'le selecteur Mois/Annee est encore la : un seul bouton visible, et sous 44 px')
+  // ⚠ CETTE ASSERTION EXIGEAIT LA DISPARITION DU SELECTEUR, et elle avait
+  // raison tant que la vue Annee n'existait pas : un selecteur a un seul choix
+  // ne selectionne rien. La vue Annee existe depuis le 27 octobre 2026, et la
+  // decision 5 de Thierry la ramene. Ce que son constat exigeait VRAIMENT, et
+  // qui reste vrai, c'est DEUX choix visibles et une cible de 44 px.
+  const vues = (src.match(/data-vue="(mois|annee)"/g) || [])
+  assert.deepEqual(vues.sort(), ['data-vue="annee"', 'data-vue="mois"'],
+    'le selecteur ne porte plus exactement DEUX choix : un selecteur a un seul bouton ne selectionne rien')
+  assert.ok(!/data-vue="[^"]*"[^>]*\bhidden\b/.test(src),
+    'un des deux choix est masque : on retombe sur le bouton sans effet de la recette')
+  const css = lire('shared/ui.css')
+  const bouton = (css.match(/\.seg__btn\s*\{[^}]*\}/) || [''])[0]
+  assert.match(bouton, /min-height:\s*var\(--control\)/,
+    'la cible du selecteur n est plus reglee sur --control : Thierry avait mesure 30 px')
 })
 
 test("RECENSEMENT : la barre dit le RECU en plein noir et l A VENIR en hachure grise", () => {

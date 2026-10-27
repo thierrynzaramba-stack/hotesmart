@@ -778,5 +778,11 @@
   "validate.task": "À traiter",
   "validate.title": "À valider",
   "validate.view": "Voir",
-  "revenue.col_split": "Répartition"
+  "revenue.col_split": "Répartition",
+  "revenue.cumul_a_date": "Du 1er janvier à {mois} : {n}, contre {n1} l’an dernier sur la même période",
+  "revenue.courbe_resume": "Revenus mensuels de {n}, superposés à {n1}",
+  "revenue.courbe_legende": "Trait plein : encaissé. Pointillé : à venir. Le trait foncé est {n}, le gris {n1}.",
+  "revenue.courbe_bien_resume": "Revenus mensuels de {bien} en {n}, superposés à {n1}",
+  "revenue.sans_comparaison": "pas d’année précédente à comparer",
+  "revenue.annee_perimetre": "Les deux années ne portent pas les mêmes logements : les totaux ne se comparent pas directement."
 }
