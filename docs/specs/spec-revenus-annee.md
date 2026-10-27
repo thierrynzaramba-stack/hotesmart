@@ -123,6 +123,85 @@ lieu à l'écriture. Ce qui doit rester vrai, et qu'un test gardera :
 
 ---
 
-## 7. Questions ouvertes — elles changent le travail
+## 7. Décisions de Thierry, 27 octobre 2026
 
-Listées dans l'ordre où elles bloquent.
+| # | question | décision |
+|---|---|---|
+| 1 | l'écart N-1 compare deux périmètres | **pas de % au niveau du compte** : seulement par logement. Les totaux N et N-1 du compte restent affichés, **sans pourcentage**. Raisons données : les indicateurs sont par bien, pas en global ; et « à périmètre constant » n'est pas compréhensible pour un hôte grand public |
+| 2 | « cumul à date » sur une année passée | une année passée se compare **en entier** à l'année N-1 entière. Le cumul à date ne vaut que pour l'année **en cours** |
+| 3 | les mois à venir | **tracés** : reçu en trait plein, à venir distingué (pointillé ou estompé), comme la barre du bloc Mois. Idem pour 2027 |
+| 4 | un mois avant l'ouverture d'un bien | **pas de zéro** : la courbe d'un logement commence à son premier mois d'activité |
+| 5 | le bouton Année | un sélecteur **Mois \| Année** à côté des flèches, qui avancent alors d'un mois ou d'une année |
+| 6 | les maquettes | le **fond** se code maintenant (fonction SQL + endpoint) ; Thierry colle les maquettes pour la forme |
+| 7 | le module de courbe partagé | **extrait**, et utilisé par Revenus **uniquement**. YieldFlow n'y bascule pas maintenant : il le fera quand il sera intégré au Calendrier |
+
+⚠ **La décision 1 porte plus loin qu'elle n'en a l'air.** Elle évite d'afficher
+un pourcentage qui comparerait 4 logements à 2 — et elle le fait sans ajouter
+de phrase à l'écran. C'est la réponse la moins bavarde au problème le plus
+coûteux de ce lot.
+
+⚠ **Et la décision 4 impose la forme de la fonction SQL** : elle ne doit pas
+combler les trous. Un mois sans ligne n'est pas un mois à zéro, et seule
+l'absence de ligne permet à l'écran de distinguer « rien vendu » de « le bien
+n'existait pas ».
+
+---
+
+## 8. Le coût, mesuré avant d'être décidé
+
+Thierry a rappelé la règle : une donnée non urgente se pré-calcule. **Elle l'est
+déjà** — à l'écriture, par le lot Mois. Restait à savoir si l'agrégat annuel
+justifiait en plus une table de résumé. Mesure en production, 1 565 lignes,
+médiane de 12 appels :
+
+| | |
+|---|---|
+| plancher réseau (1 ligne de `properties`) | **74 ms** |
+| `revenus_du_mois` (agrégat d'un mois) | **65 ms** |
+| `revenus_calcul_incomplet` (balaie les 1 565 lignes) | **66 ms** |
+| lecture **brute** des 1 565 lignes | **487 ms** |
+
+**L'agrégat ne coûte rien de mesurable au-dessus du réseau.** Une table de
+résumé économiserait zéro milliseconde, contre un cron, un crochet
+d'invalidation à chaque réservation, et une classe de péremptions. Et le
+contraste valide le lot Mois : la lecture brute coûte **sept fois** l'agrégat.
+
+⚠ **Ce que cette mesure ne dit pas** : elle porte sur **4 logements et
+1 565 lignes**. Le jour où un compte en portera trente, elle est à refaire — et
+si la fonction s'écarte du plancher réseau, la table de résumé redevient la
+bonne réponse. Le `Server-Timing` de l'endpoint porte déjà le compte de
+requêtes pour le voir venir.
+
+---
+
+## 9. La fonction SQL — contrat
+
+`migrations/2026-10-27-revenus-annee.sql`, **neuvième du domaine Revenus**.
+
+```
+revenus_annee(p_user_id uuid, p_annee integer,
+              p_aujourdhui date, p_refs uuid[] default null)
+  -> (property_uuid, annee, mois, sejours,
+      recu_cents, a_venir_cents, total_cents,
+      bruts, sans_montant)
+```
+
+- **les deux années en un appel** — c'est le réseau qu'on économise, pas le SQL ;
+- **aucun trou comblé** (décision 4) ;
+- **les séjours sans logement connu sont rendus aussi**, comme dans la vue
+  Mois : ils entrent dans le total et sur aucune ligne, et c'est la réserve qui
+  les nomme. Les taire ferait un total qu'aucune ligne n'explique ;
+- bornée par des **dates** et non par `extract(year …)`, qui interdirait
+  l'index ;
+- `security invoker`, `revoke … from public, anon, authenticated`,
+  `grant … to service_role`, et une preuve qui interroge **les trois rôles**.
+
+---
+
+## 10. Reste à faire
+
+1. l'endpoint (chargé au clic, pas à l'ouverture) ;
+2. le module de courbe partagé, extrait de `apps/yield/marche-global.html` ;
+3. l'écran, **à la réception des maquettes** ;
+4. l'extension du test de budget : le clic ajoute **un** appel, et ce compte ne
+   croît pas avec le nombre de logements.
