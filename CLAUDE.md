@@ -40,12 +40,25 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 **UNE SEULE SESSION TIENT `staging` ET `main` : le CHEF DE FILE.** Les autres ne
 mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
 
-⚠ **LE CHEF DE FILE EST LA SESSION `hotesmart-logements-25`, DÉSIGNÉE PAR
-THIERRY LE 26 OCTOBRE 2026, ET ELLE SEULE MERGE DANS `staging` ET DANS `main`** —
+⚠ **LE CHEF DE FILE EST LA SESSION `hotesmart-merge-82`, DÉSIGNÉE PAR THIERRY
+LE 28 OCTOBRE 2026, ET ELLE SEULE MERGE DANS `staging` ET DANS `main`** —
 `main` uniquement sur un go qu'il ouvre LUI-MÊME. **Toutes les autres sessions
 lui remettent leurs branches et ne mergent RIEN**, ni dans `staging`, ni dans
 `main` : elles poussent, elles annoncent par `SendMessage` avec les cinq éléments
 de la règle 1, et elles ne relaient pas un go prod.
+
+⚠ **ET UNE VACANCE N'EST PAS UNE DÉSIGNATION. Vécu le 28 octobre 2026, et ça a
+produit un merge sans titre.** `hotesmart-logements-25`, la titulaire nommée la
+veille, a cessé de tourner : absente de `ListAgents` chez les trois sessions
+survivantes, et un `SendMessage` vers elle refusé faute de destinataire. Une
+session a lu cette absence **plus** une phrase de Thierry tirée d'un autre
+contexte comme une nomination, et a mergé dans `staging`. Une heure plus tard,
+une session pair rapportait que Thierry lui avait dit l'inverse le même jour.
+**L'absence du titulaire ouvre un vide, elle ne promeut personne** — c'est ce
+que dit le paragraphe ci-dessous, et c'est exactement ce qui a été déduit à
+l'envers. Le geste juste quand on a déjà mergé : **déclarer** ce qu'on a fait,
+ne pas le défaire de sa propre initiative — défaire est une seconde décision non
+autorisée par-dessus la première — et s'arrêter.
 
 **Elle travaille dans `~/hotesmart-merge`**, jamais dans `~/hotesmart` : c'est là
 que les merges se construisent, et c'est ce qui rend l'arbre du merge
@@ -824,12 +837,25 @@ chantier marche, donc YieldFlow : a reprendre avec le go de Thierry.
 
 ## CE QUI SUIT EST L'HISTOIRE DE CETTE DETTE, gardee pour la lecon
 
-## DETTE DATEE — 28 TESTS ROUGES PERMANENTS (soldee le 17 octobre 2026)
+## HISTOIRE D'UNE DETTE SOLDEE — les 28 rouges permanents (closes le 17 octobre 2026)
 
-⚠ **LE COMPTE ATTENDU EST ZERO. MISE A JOUR DU 19 OCTOBRE 2026, DEMANDEE PAR
-THIERRY.** Le titre disait « soldee » depuis le 17 octobre, mais la regle de
-comptage, plus bas, disait encore « 28, et exactement 28 ». Les deux ne pouvaient
-pas etre vrais, et c'est la version haute que tout le monde lit en premier.
+⚠⚠ **LE COMPTE ATTENDU EST ZERO. MESURE DU 28 OCTOBRE 2026 SUR LA TETE DE
+`main` (`8aae0f5f`) : 6477 tests, 6477 verts, `ℹ fail 0`.** Tout ce qui suit est
+de l'HISTOIRE, gardee pour la lecon ; **aucun nombre de cette section n'est un
+compte attendu**. Les « 28, et exactement 28 » qu'on va lire plus bas sont cites
+au passe, et ils ne valent plus rien comme barriere.
+
+**Pourquoi le titre a change.** Il disait « DETTE DATEE — 28 TESTS ROUGES
+PERMANENTS », donc un lecteur pressé y lisait une dette EN COURS et un compte
+attendu de 28. Corrige sur demande de Thierry le 28 octobre 2026, apres qu'il
+ait relevé pour la deuxieme fois que le document annonce 28 la ou la mesure
+rend 0 : **un chiffre perime dans un document fait plus de degats qu'un chiffre
+absent**, parce qu'il se lit comme une mesure et qu'il ne rougit jamais.
+
+**Rappel de la mise a jour du 19 octobre 2026, demandee par Thierry.** Le titre
+disait « soldee » depuis le 17 octobre, mais la regle de comptage, plus bas,
+disait encore « 28, et exactement 28 ». Les deux ne pouvaient pas etre vrais, et
+c'est la version haute que tout le monde lit en premier.
 
 **Mesure du jour**, sur `dette-59-canaux-coeur` (qui contient `main`) : suite
 complete a **5346 tests, 5346 verts, zero rouge** ; et les quatre fichiers des
@@ -908,8 +934,9 @@ garde-fou : l'actualiser n'est qu'un sursis.
 **REGLE DE COMPTAGE, POSEE LE 14 SEPTEMBRE 2026 (demande de Thierry).**
 ⚠ **UNE CINQUIEME FAMILLE A EXISTE LE 1er OCTOBRE 2026, ET ELLE A ETE REFERMEE
 LE JOUR MEME** — deux tests de `tests/pwa-mes-jours-dom.test.js` qui tapaient
-`dans(-3)`, hors du calendrier rendu les 1er, 2 et 3 du mois. Le compte est
-redevenu **28, et exactement 28**. Ce qu'il faut en retenir : un compte a
+`dans(-3)`, hors du calendrier rendu les 1er, 2 et 3 du mois. Le compte etait
+alors redevenu « 28, et exactement 28 » — *chiffre d'epoque, perime depuis le
+17 octobre 2026 ; le compte attendu est ZERO*. Ce qu'il faut en retenir : un compte a
 geometrie variable est une barriere affaiblie. Le jour ou une vraie regression
 apporte deux rouges un 2 du mois, un compte attendu de « 30 ces jours-la » ne
 fait arreter personne. **Documenter un rouge calendaire est le dernier recours ;
@@ -924,10 +951,11 @@ echecs qui n'ont rien a voir avec le calendrier : mesure du 1er octobre 2026,
 8 et 10 rouges contre 132/132 par l'outil. Il a fallu deux sessions comparant
 leurs mesures pour le voir.
 
-Le nombre attendu **a ete** 28, et exactement 28 (8 + 6 + 10 + 4, au
-29 septembre 2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28), jusqu'a
-ce que `70f805d` solde les quatre familles. ⚠ **IL EST MAINTENANT ZERO** (voir
-l'encadre en tete de cette section). Avant tout push : lire le compte, pas la
+⚠ **LE NOMBRE ATTENDU EST ZERO.** Il **a ete** 28, et exactement 28 (8 + 6 + 10
++ 4, au 29 septembre 2026 — il etait 8 jusqu'au 18, 21 le 20, 25 du 21 au 28),
+jusqu'a ce que `70f805d` solde les quatre familles. Ces chiffres sont cites au
+PASSE et ne sont plus une barriere : la mesure du 28 octobre 2026 sur la tete de
+`main` (`8aae0f5f`) rend **6477 verts, `ℹ fail 0`**. Avant tout push : lire le compte, pas la
 couleur. **Un rouge = une regression, on ne pousse pas** tant qu'on ne l'a pas
 nommee ; et si une famille calendaire reapparait un jour, on remet son compte
 ici pour qu'elle reste protegee. Et un compte qui MONTE sur un commit inchange
