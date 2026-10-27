@@ -92,6 +92,29 @@ const ATTENDU = {
     // test rougira — et c'est tout l'objet.
     // Et une ACTION, qui ne part que sur un clic de l'hote.
     '/api/incidents-acquitter': 1
+  },
+  // ⚠ LE CALENDRIER ENTRE DANS CE TEST LE 28 OCTOBRE 2026, avec le lot
+  // « acces YieldFlow ». Il n'y etait pas : son inventaire d'appels pouvait
+  // donc grossir sans que rien ne parle, et le lot y ajoutait justement un
+  // endpoint. Mesure du jour, sur l'arbre du lot.
+  //
+  // ⚠ CET ECRAN N'EST PAS ENCORE UN « UN ECRAN = UN ENDPOINT » : il lit le
+  // coeur par `/api/calendar`, et `/api/yield-pilote` part UNE FOIS PAR BIEN
+  // PILOTE au chargement (la fenetre du 4e etat, dette 20). C'est un 1 + N
+  // ANTERIEUR a ce lot, et il est nomme ici pour qu'il cesse d'etre invisible
+  // — il se replie au lot (d), quand le calendrier aura son endpoint d'ecran.
+  'pages/calendrier.html': {
+    '/api/calendar': 3,              // GET l'ecran, POST save, POST fermetures
+    '/api/messages': 1,              // la fiche d'une resa : le fil du sejour
+    '/api/reservation-directe': 3,   // creer, modifier, annuler — des ACTIONS
+    '/api/yield-pilote': 1,          // la fenetre du pilote, par bien pilote
+    // ⚠ ET CELUI-CI NE PART QUE SUR UN GESTE. C'est toute la condition de
+    // l'exception datee du 28 octobre 2026 (spec-yf-bouton-calendrier §6 bis) :
+    // le menu YieldFlow compte au CLIC, pour un seul bien. Le jour ou il
+    // partirait avec la page, ce serait le defaut mesure le 22 octobre sur
+    // l'accueil — un appel par bien, 72 requetes, 586 Ko. Un test d'execution
+    // le garde en plus de celui-ci : tests/yf-bouton-calendrier.test.js.
+    '/api/yield-menu': 1
   }
 }
 

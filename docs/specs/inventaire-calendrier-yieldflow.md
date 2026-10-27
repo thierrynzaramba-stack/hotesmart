@@ -186,6 +186,16 @@ borne 800 jours / 200 périodes). Seule écriture : /api/yield-exceptions.
 | Bloc Périodes hors référence | SEULE ÉCRITURE : formulaire Du/Au/Motif (bornes historique→veille), suppression avec confirm ; rechargement = preuve (« les chiffres sont ceux d'AVANT » sur échec) ; garde bien affiché ≠ sélecteur ; refus traduits (« le passé uniquement ») | POST/DELETE /api/yield-exceptions → writer lib/yield/exceptions.js ; écriture `reglages`, lecture `reservations` (arbitrage 12/09/2026) | capacite-yield.md §8 |
 | Règle transverse | `cell()` : null → motif, jamais vide ni 0 ; motif inconnu = code brut AFFICHÉ ; N-1 zéro → écart en € ; ±0,4 % à une décimale | shared/yield-motifs.js | restitution-yield.md ; règle 13 |
 
+⚠ **MISE A JOUR DU 28 OCTOBRE 2026 — LES TROIS PAGES AU MENU LISENT `?bien=`.**
+`prix.html`, `marche-global.html` et `comparables.html` presélectionnent le
+logement demandé par l'URL, avec la garde `data.some(...)` : un identifiant
+inconnu ou hors du compte laisse le sélecteur où il est, et sans le paramètre
+rien ne change. `prix.html` lit en plus `?activer=1`, qui **OUVRE** le parcours
+d'activation existant avec sa confirmation comptée serveur — il n'active jamais
+rien seul, et la demande se consomme dès que l'état du pilote est lu, pour ne
+jamais s'ouvrir sur un autre bien. Posé par le menu YieldFlow du calendrier :
+`docs/specs/spec-yf-bouton-calendrier.md` §4 bis.
+
 ## B.2 `prix.html` — Prédiction de prix (2085 l.)
 
 Lectures : /api/yield-prix (1 ligne/nuit + radar 12 mois dans la MÊME

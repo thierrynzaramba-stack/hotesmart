@@ -32,7 +32,7 @@ omission.
 | Entrée de navigation « Tarification dynamique » (sidebar, `nav.js`) | **CONSERVÉE** | décision de Thierry du 28/10 : elle se retire au lot suivant, après sa recette |
 | Lien « Tarification » du menu ⋯ du calendrier (`cal.link_pricing` → `/apps/yield/prix`) | **CONSERVÉ** | même décision ; il mène au bien courant, le nouveau bouton mène au bien de SA ligne |
 | Les 5 actions de la barre flottante, la popup, les fiches, les formulaires | **INTACTS** | hors périmètre |
-| Les 6 écrans YieldFlow | **INTACTS** | « aucune refonte de ces pages » |
+| Les 6 écrans YieldFlow | **INTACTS dans leur fond** | « aucune refonte de ces pages ». Trois d'entre eux gagnent la lecture de `?bien=` (et `?activer=1` pour `prix.html`) : 35 lignes au total, commentaires compris, **additives** — voir §4 bis |
 
 Rien n'est retiré par ce lot.
 
@@ -94,6 +94,45 @@ du 28/10) : `apps/yield/evenements.html` est une **redirection** vers
 pop-up DANS la Prédiction de prix, pas une page. Et « Données marché » vise
 `marche-global.html`, la seule des trois pages marché qui soit au menu ;
 `marche.html` et `marche-temperature.html` restent hors menu, assumé.
+
+### 4 bis. ⚠ LES TROIS PAGES NE SAVAIENT PAS QUEL BIEN ON VENAIT DE CLIQUER
+
+**Constat du 28 octobre 2026, avant d'écrire une ligne de menu.** `prix.html`,
+`marche-global.html` et `comparables.html` remplissent un `<select>` de biens et
+ouvrent sur le **premier par ordre alphabétique**. Aucune ne lisait de
+paramètre d'URL — seul `?evenements=1` l'était, dans `prix.html`. Un clic sur le
+bouton de « Cœur de vie 23 » aurait ouvert la Prédiction de prix de « La
+bulle » : le menu aurait tenu sa promesse de navigation et trahi celle du
+**bien**.
+
+**Décision de Thierry du 28 octobre 2026** : les trois pages lisent `?bien=`,
+et `prix.html` lit `?activer=1`. Ce n'est pas une refonte — c'est deux lignes
+par page, au même endroit, juste après le remplissage du `<select>` :
+
+```js
+const voulu = new URLSearchParams(location.search).get('bien')
+if (voulu && data.some(b => b.id === voulu)) el('<id>').value = voulu
+```
+
+⚠ **La garde `data.some(...)` est le point, pas la commodité.** Un identifiant
+inconnu — ou le bien d'un AUTRE compte — poserait sinon une valeur que le
+`<select>` ne porte pas : le sélecteur resterait vide et l'écran chargerait pour
+personne. Avec la garde, un bien hors du périmètre laisse la page exactement
+dans l'état qu'elle avait avant ce lot. **Sans le paramètre, rien ne change.**
+
+⚠ **`?activer=1` N'ACTIVE RIEN.** Il ouvre le parcours d'activation EXISTANT,
+avec sa confirmation « N nuits ont déjà un prix au calendrier », **comptée
+serveur**. Jamais de bascule en un clic — décision du 22 septembre 2026, et
+elle vaut quelle que soit la porte par laquelle on entre sur l'écran. Trois
+gardes dans la page :
+
+1. la demande se **consomme dès que l'état du pilote est lu**, dans tous les
+   cas. Sans cela elle resterait armée et s'ouvrirait plus tard sur un AUTRE
+   bien — celui que l'hôte aurait choisi au sélecteur entre-temps ;
+2. **bien déjà piloté** → rien ne s'ouvre, il n'y a rien à activer ;
+3. **bascule refusée** (`peut_basculer` faux) → rien ne s'ouvre : le bouton
+   d'état porte déjà la raison, et ouvrir un parcours qui finira en refus est
+   une impasse.
 
 **Un repère ne s'affiche que s'il est servi sans calcul, et sinon il se tait** —
 pas de « — », pas de 0. L'entrée reste cliquable : le repère est un confort,
@@ -252,6 +291,7 @@ Aucun texte en dur, aucun emoji, aucun hexa hors `shared/theme.css`.
 | idem | le menu **n'appelle jamais** `POST /api/yield-pilote` ni `/api/calendar` : pas de bascule en un clic |
 | idem | `N = 0` et `N` illisible → la ligne ambre est absente, jamais « 0 » |
 | `tests/yield-menu-endpoint.test.js` | lecture seule (405 sur POST), `no-store` posé **avant le premier refus**, garde par bien, `null` sur lecture en échec, `head: true` sur les trois comptages |
+| `tests/yf-bien-demande.test.js` | les trois pages lisent `?bien=` **avec** la garde `data.some(...)` : un bien inconnu ou hors du compte laisse le sélecteur inchangé ; `?activer=1` ouvre la confirmation et **n'écrit rien** sans clic |
 | `tests/budget-ecran.test.js` | l'inventaire d'appels de `pages/calendrier.html`, chiffré |
 | `tests/masquage-hidden.test.js` | déjà en place — la page est dans son périmètre |
 
@@ -265,15 +305,36 @@ requêtes Supabase comptées dans le handler, octets mesurés sur la réponse r�
 | Chargement du calendrier — sites d'appel | 8 (`/api/calendar` ×3, `/api/reservation-directe` ×3, `/api/messages` ×1, `/api/yield-pilote` ×1) | **8 — inchangé** |
 | Ouverture du menu — appels | — | 1 |
 | Ouverture du menu — requêtes Supabase | — | 5 |
-| Ouverture du menu — octets | — | *à mesurer sur staging* |
+| Ouverture du menu — octets | — | **178** (bien non piloté) à **210** (bien piloté) |
 
-**AVANT mesuré le 28 octobre 2026** sur `pages/calendrier.html` à `8aae0f5f`.
+**AVANT mesuré le 28 octobre 2026** sur `pages/calendrier.html` à `8aae0f5f`,
+par le même comptage de sites d'appel que `tests/budget-ecran.test.js`.
+
+**APRÈS mesuré le même jour**, et les trois nombres viennent de trois endroits
+différents, aucun n'est estimé :
+- les **appels** sont comptés sur le code, et le compte du calendrier est
+  désormais **gardé par `tests/budget-ecran.test.js`** — il ne pouvait pas
+  grossir sans qu'on le sache, il le peut encore moins maintenant ;
+- les **requêtes** sont comptées dans le handler et annoncées dans
+  `Server-Timing` ; un test vérifie que le nombre annoncé est le nombre réel
+  (5 sur un bien piloté, 4 sinon) ;
+- les **octets** sont la taille du corps JSON, mesurée **sur staging**, sur les
+  sept logements de recette : 178 octets sur un bien en prix manuels, 210 sur
+  le bien piloté. Hors en-têtes HTTP.
+
+⚠ **Et le chiffre qui compte n'est aucun des trois : c'est le ZÉRO de la
+première ligne.** Le chargement du calendrier ne paie rien de ce lot. Ce qui
+coûte ne part que sur un geste, et un test l'exécute pour le prouver
+(`tests/yf-bouton-calendrier.test.js`).
 
 ## 12. Décisions de Thierry portées par ce lot (28 octobre 2026)
 
 1. **Voie A** : comptage au clic, sur le seul bien cliqué (§6 bis).
 2. **Événements** → `/apps/yield/prix?evenements=1`.
 3. **Données marché** → `marche-global.html`.
+   3 bis. **Les trois pages lisent `?bien=`**, avec la garde `data.some(...)`,
+   et `prix.html` lit `?activer=1` — qui **ouvre** le parcours d'activation et
+   n'active jamais rien seul (§4 bis).
 4. **Lien « Tarification » du menu ⋯ et entrée de navigation** : les deux
    restent ; leur retrait est un lot suivant, après recette.
 5. L'index passe **sur staging d'abord**, et Thierry le colle lui-même.

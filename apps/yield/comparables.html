@@ -338,6 +338,11 @@
     const { data, error } = await q
     if (error || !data || !data.length) { dire('cp-message-a', error ? 'Impossible de lire la liste des logements.' : 'Aucun logement accessible sur ce compte.', 'cp-erreur'); return }
     for (const b of data) { const o = document.createElement('option'); o.value = b.id; o.textContent = b.name; el('cp-bien').append(o) }
+    // Le bien demande par l'URL (?bien=<uuid>), pose par le menu YieldFlow du
+    // calendrier. La garde `data.some(...)` : un identifiant inconnu ou d'un
+    // autre compte laisse le selecteur ou il est.
+    const voulu = new URLSearchParams(location.search).get('bien')
+    if (voulu && data.some(b => b.id === voulu)) el('cp-bien').value = voulu
     el('cp-bien').addEventListener('change', charger)
     el('cp-valider-a').addEventListener('click', validerProfil)
     el('cp-valider-b').addEventListener('click', retenir)
