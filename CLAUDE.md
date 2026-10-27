@@ -385,6 +385,39 @@ coûte le moins : avant d'écrire la première ligne.
 - Corollaire : `npm test` au vert n'autorise pas à pousser. Les tests disent que
   ce qu'on a pensé à vérifier fonctionne, pas que le code est correct.
 
+### ⚠ UNE REVIEW SE LANCE EN NOMMANT L'ARBRE ET LE SHA — JAMAIS DEPUIS LE CLONE PRINCIPAL
+
+- **Le brief d'une review nomme TROIS choses, en toutes lettres** : le **chemin
+  absolu du worktree**, la **branche**, et la **plage exacte** à relire
+  (`git diff` non commité, ou `<base>..<sha>` avec des SHA complets). Et il dit
+  explicitement de ne pas sortir de cet arbre.
+- **On ne compte JAMAIS sur le répertoire courant de la session.** Une review
+  hérite du répertoire de travail, pas de l'endroit où le chantier vit. Dans un
+  dépôt qui porte plusieurs worktrees, ce répertoire est le clone principal —
+  donc **le lot d'une AUTRE session**.
+- **Le contrôle qui tranche, et il coûte une commande** : la review doit dire
+  quel arbre et quel SHA elle a lus, et **chaque fichier qu'elle cite doit
+  figurer dans votre propre `git diff --name-only`**. Un seul fichier hors de
+  cette liste : on ne lit pas les constats, on relance.
+
+**Pourquoi ça ne se rattrape pas à la lecture.** Une review qui s'est trompée
+d'arbre ne rend pas une erreur : elle rend des constats **justes, précis et bien
+écrits**, sur du code réel. Rien dans sa forme ne dit qu'ils parlent d'autre
+chose. Les deux dégâts sont symétriques et arrivent ensemble : on **relaie le
+travail d'un autre comme le sien**, et surtout on **croit son propre diff relu
+alors qu'il ne l'a jamais été** — donc on pousse derrière une review qui n'a pas
+eu lieu, ce que la règle ci-dessus interdit précisément.
+
+**Vécu le 27 octobre 2026.** Une review lancée pour le lot « vue Année » du bloc
+Revenus (worktree de la branche `aujourdhui-v5-etapes-0-2`) a lu le clone
+principal, qui était sur `logements-v5-etape-4`. Elle est revenue avec six
+constats sur `shared/logement-fiche.js`, `pages/connexions.html` et
+`shared/logement-nouveau.js` — **aucun de ces fichiers n'était dans le diff du
+lot**, et la review du lot, elle, n'avait pas eu lieu. **Thierry : c'est la
+troisième fois cette semaine.** Les constats ont été passés à la session qui
+tient ce lot, en disant qu'ils n'avaient pas été re-mesurés, et la review a été
+relancée sur le bon arbre.
+
 ## RÈGLE ABSOLUE — LIRE AVANT D'ÉCRASER
 - **Un fichier existant se lit avant d'être réécrit.** `ls` / `git log -- <chemin>`
   d'abord ; si le fichier existe, on l'ouvre EN ENTIER, et on édite de façon

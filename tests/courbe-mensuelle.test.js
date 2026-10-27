@@ -88,7 +88,11 @@ test("LE TEST QUI COMPTE : la courbe DIT ce qu'elle montre, et le texte est echa
 
 test('RECENSEMENT : la geometrie reste coherente', () => {
   // Le module expose sa geometrie plutot que de la faire recopier par les tests.
-  const { L, H, MARGE_G_MIN, MARGE_D, INITIALES } = _interne
+  // ⚠ `L_DEFAUT` / `H_DEFAUT` : la geometrie est REGLABLE depuis le 27 octobre
+  // 2026 (le telephone dessine dans un repere plus etroit, sinon ses libelles
+  // tombent a 5,8 px). Le module n'expose donc plus « la » geometrie, mais la
+  // geometrie PAR DEFAUT — celle que ce rendu sans option doit rendre.
+  const { L_DEFAUT: L, H_DEFAUT: H, MARGE_G_MIN, MARGE_D, INITIALES } = _interne
   assert.strictEqual(INITIALES.length, 12, 'douze mois, pas un de plus')
   assert.ok(L > MARGE_G_MIN + MARGE_D, 'la largeur utile est negative')
   const svg = courbeMensuelle({ series: [], resume: 'vide' })
@@ -150,7 +154,7 @@ test("LE TEST QUI COMPTE : une couleur ne peut pas sortir de son attribut", () =
 test("LE TEST QUI COMPTE : plus de douze valeurs ne sortent pas du cadre", () => {
   // Avec vingt-quatre entrees, l'abscisse montait a 1 348 pour un `viewBox`
   // large de 680 : la moitie du trace sortait du cadre, sans message.
-  const { L } = _interne
+  const { L_DEFAUT: L } = _interne
   const svg = courbeMensuelle({
     series: [{ nom: 'A', couleur: '#000', valeurs: Array.from({ length: 24 }, () => 10) }],
     resume: 'essai'
@@ -189,4 +193,47 @@ test("LE TEST QUI COMPTE : les graduations ne sortent pas du cadre a gauche", ()
   assert.ok(margeGauche(['1 234 567 €']) > margeGauche(['9 €']),
     'la marge ne suit plus la longueur du libelle')
   assert.strictEqual(margeGauche([]), MARGE_G_MIN, 'aucune graduation fait tomber la marge')
+})
+
+test("LE TEST QUI COMPTE : le haut de l axe est rond, et la courbe garde sa place", () => {
+  // ⚠ DEUX EXIGENCES QUI TIRENT EN SENS INVERSE. Un axe rond se lit (« 0 / 8 k
+  // / 16 k ») ; un axe trop releve ecrase la courbe en bas du cadre. Le pas se
+  // choisit donc dans une liste DENSE, et ce test mesure ce que cette densite
+  // garantit vraiment — pas ce que j'ai deduit en la regardant : j'avais ecrit
+  // 83 % en lisant l'ecart 1 -> 1,2, alors que le pire saut est 1,5 -> 2.
+  const { hautRond } = _interne
+  let pire = 2, cas = null
+  for (let v = 1; v <= 60000; v++) {
+    for (const n of [2, 3, 4, 5, 6]) {
+      const max = hautRond(v, n)
+      assert.ok(max >= v, `le haut de l axe (${max}) passe SOUS le maximum (${v}) : la courbe sortirait du cadre`)
+      const occupation = v / max
+      if (occupation < pire) { pire = occupation; cas = [v, n, max] }
+    }
+  }
+  assert.ok(pire >= 0.75,
+    `la courbe ne remplit que ${(pire * 100).toFixed(1)} % du cadre (cas ${JSON.stringify(cas)}) : la liste des pas s est appauvrie`)
+})
+
+test("LE TEST QUI COMPTE : un maximum nul ne rend pas un haut d axe NUL", () => {
+  // ⚠ MA PREMIERE VERSION DE CE TEST EXIGEAIT « pas de NaN », ET ELLE NE
+  // MORDAIT PAS : la mutation qui retire le plancher du logarithme la laissait
+  // VERTE. `Math.log10(0)` vaut `-Infinity`, mais `Math.pow(10, -Infinity)`
+  // vaut **0**, pas `NaN` — donc `hautRond(0, n)` rendait 0, un nombre
+  // parfaitement fini. Ce qu'il fallait exiger est que le haut d'axe soit
+  // STRICTEMENT POSITIF : c'est lui qui divise dans `y()`.
+  const { hautRond } = _interne
+  for (const v of [0, 0.0001, 1e-12]) {
+    for (const n of [2, 3, 5]) {
+      const max = hautRond(v, n)
+      assert.ok(Number.isFinite(max) && max > 0,
+        `hautRond(${v}, ${n}) rend ${max} : y() divisera par zero, et tout le SVG sortira a NaN`)
+    }
+  }
+  // Et le rendu complet ne porte aucun NaN.
+  const svg = courbeMensuelle({
+    series: [{ nom: 'A', couleur: '#000', valeurs: [0, 0, 0, null, null, null, null, null, null, null, null, null] }],
+    graduations: 3, arrondir: true, resume: 'plat'
+  })
+  assert.ok(!/NaN/.test(svg), 'le SVG porte un NaN : il ne s affichera pas, et rien ne le dira')
 })
