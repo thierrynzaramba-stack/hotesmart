@@ -9,6 +9,7 @@
 //   5. 2026-10-26-revenus-hors-biens.sql     la signature a TROIS arguments
 //   6. 2026-10-26-revenus-calcul-incomplet.sql  la sonde, et son droit
 //   7. 2026-10-27-derive-raw-hash.sql        l'empreinte du payload
+//   9. 2026-10-27-revenus-annee.sql          la vue Annee
 //
 // ⚠ POURQUOI IL EXISTE. La regle du depot est qu'une migration se prouve en
 // lancant un verificateur CONTRE LA BASE, pas a l'oeil : la table `fermetures`
@@ -49,7 +50,7 @@ if (!URL || !SERVICE) {
 // ⚠ UN VERIFICATEUR QUI CONTINUE SUR UNE BASE INCONNUE REND UN RESULTAT DONT
 // PERSONNE NE POURRA DIRE D'OU IL VIENT. Et la menace n'est pas un attaquant :
 // c'est un `.env` mal colle, ou `ENV_FILE` oublie — auquel cas ce script dirait
-// « LES CINQ MIGRATIONS SONT APPLIQUEES » d'une base que personne n'a voulu
+// « LES SIX MIGRATIONS SONT APPLIQUEES » d'une base que personne n'a voulu
 // interroger. `tests/empreinte-base.test.js` tient cette regle pour TOUS les
 // scripts qui mesurent, et il a refuse celui-ci a sa premiere version.
 const projet = refDuProjet(URL)
@@ -154,6 +155,20 @@ async function main () {
       error ? (fonctionIntrouvable(error) ? 'fonction introuvable avec CETTE signature' : error.message) : '')
   }
 
+  // ─── Migration 9 : la vue ANNEE ──────────────────────────────────────────
+  //
+  // ⚠ AUCUN VERIFICATEUR NE LA CONNAISSAIT (releve en review). « Deja collee
+  // sur staging » restait une affirmation de message de commit, alors que la
+  // regle du depot est qu'une migration se prouve en lancant un verificateur
+  // CONTRE LA BASE.
+  {
+    const { error } = await sb.rpc('revenus_annee', {
+      p_user_id: UUID_NUL, p_annee: 2026, p_aujourdhui: '2026-10-27', p_refs: null
+    })
+    dire('migration 9', 'revenus_annee(4 arguments) repond', !error,
+      error ? (fonctionIntrouvable(error) ? 'fonction introuvable avec CETTE signature' : error.message) : '')
+  }
+
   // ─── Migration 7 : l'empreinte du payload ────────────────────────────────
   await colonnesLisibles('migration 7', ['derive_raw_hash', 'raw_hash'])
 
@@ -167,7 +182,8 @@ async function main () {
     for (const [fn, args] of [
       ['revenus_du_mois', { p_user_id: UUID_NUL, p_mois: '2026-10', p_aujourdhui: '2026-10-27', p_refs: null }],
       ['revenus_hors_mois', { p_user_id: UUID_NUL, p_mois: '2026-10', p_refs: null }],
-      ['revenus_calcul_incomplet', { p_user_id: UUID_NUL, p_refs: null }]
+      ['revenus_calcul_incomplet', { p_user_id: UUID_NUL, p_refs: null }],
+      ['revenus_annee', { p_user_id: UUID_NUL, p_annee: 2026, p_aujourdhui: '2026-10-27', p_refs: null }]
     ]) {
       const { error } = await pub.rpc(fn, args)
       // ⚠ CE QU'UN ECHEC ICI VEUT DIRE, ET CE QU'IL NE VEUT PAS DIRE. Les trois
@@ -207,7 +223,7 @@ async function main () {
   // ⚠ UN SCRIPT QUI N'A RIEN SONDE DOIT ECHOUER. Zero controle rend zero
   // echec, donc un vert — c est le faux vert le plus facile a fabriquer, et le
   // depot l a deja paye.
-  const attendus = pub ? 9 : 6
+  const attendus = pub ? 12 : 8
   if (resultats.length < attendus) {
     console.error(`ECHEC : ${resultats.length} controle(s) effectue(s), ${attendus} attendu(s).`)
     console.error('Le script n a pas tout sonde : son vert ne vaudrait rien.')
@@ -219,7 +235,7 @@ async function main () {
     console.error('Les migrations du lot Revenus ne sont PAS toutes appliquees sur cette base.')
     process.exit(1)
   }
-  console.log(`LES CINQ MIGRATIONS SONT APPLIQUEES sur ${base} (${projet}) :`)
+  console.log(`LES SIX MIGRATIONS SONT APPLIQUEES sur ${base} (${projet}) :`)
   console.log(`${resultats.length} controle(s), 0 echec.`)
 }
 
