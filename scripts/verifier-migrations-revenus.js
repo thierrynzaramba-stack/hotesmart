@@ -44,6 +44,23 @@ if (!URL || !SERVICE) {
   process.exit(2)
 }
 
+// ─── LA BASE SE NOMME PAR SA REFERENCE DE PROJET, JAMAIS PAR SON CONTENU ───
+//
+// ⚠ UN VERIFICATEUR QUI CONTINUE SUR UNE BASE INCONNUE REND UN RESULTAT DONT
+// PERSONNE NE POURRA DIRE D'OU IL VIENT. Et la menace n'est pas un attaquant :
+// c'est un `.env` mal colle, ou `ENV_FILE` oublie — auquel cas ce script dirait
+// « LES CINQ MIGRATIONS SONT APPLIQUEES » d'une base que personne n'a voulu
+// interroger. `tests/empreinte-base.test.js` tient cette regle pour TOUS les
+// scripts qui mesurent, et il a refuse celui-ci a sa premiere version.
+const projet = refDuProjet(URL)
+const base = nomDeLaBase(URL)
+if (base === 'INCONNUE') {
+  console.error(`ECHEC : projet « ${projet} » inconnu de lib/empreinte-base.js.`)
+  console.error('Aucune mesure ne sera faite : un resultat sans base nommee ne')
+  console.error('vaut rien. Verifiez ENV_FILE et SUPABASE_URL.')
+  process.exit(2)
+}
+
 const sb = createClient(URL, SERVICE, { auth: { persistSession: false } })
 const pub = ANON ? createClient(URL, ANON, { auth: { persistSession: false } }) : null
 
@@ -88,8 +105,7 @@ async function colonnesLisibles (migration, colonnes) {
 }
 
 async function main () {
-  const ref = refDuProjet(URL)
-  console.log(`Base : ${nomDeLaBase(URL)} (${ref})`)
+  console.log(`Base : ${base} (${projet})`)
   console.log('Lecture seule. Aucune ecriture, aucun `--go`.\n')
   if (!pub) {
     console.log('⚠ SUPABASE_ANON_KEY absente : les DROITS ne seront pas eprouves.')
@@ -203,7 +219,7 @@ async function main () {
     console.error('Les migrations du lot Revenus ne sont PAS toutes appliquees sur cette base.')
     process.exit(1)
   }
-  console.log(`LES CINQ MIGRATIONS SONT APPLIQUEES sur ${nomDeLaBase(URL)} (${ref}) :`)
+  console.log(`LES CINQ MIGRATIONS SONT APPLIQUEES sur ${base} (${projet}) :`)
   console.log(`${resultats.length} controle(s), 0 echec.`)
 }
 
