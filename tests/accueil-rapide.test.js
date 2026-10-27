@@ -1947,7 +1947,7 @@ test("LE TEST QUI COMPTE : la repartition tient l INVARIANT, pas une liste de va
   let verifies = 0
   for (const [liste] of cas) {
     const total = liste.reduce((a, b) => a + b, 0)
-    const r = repartir(liste, total)
+    const r = repartir(liste)
     const cible = Math.round(total / 100)
     assert.strictEqual(r.reduce((a, b) => a + b, 0), cible,
       `[${liste}] rend ${r} = ${r.reduce((a, b) => a + b, 0)}, cible ${cible}`)
@@ -1959,8 +1959,59 @@ test("LE TEST QUI COMPTE : la repartition tient l INVARIANT, pas une liste de va
         `la ligne ${k} de [${liste}] s ecarte de ${r[k] - Math.round(liste[k] / 100)} euros`)
     }
     // Deterministe : deux rendus de la meme donnee ne peuvent pas differer.
-    assert.deepEqual(repartir(liste, total), r, 'la repartition n est pas deterministe')
+    assert.deepEqual(repartir(liste), r, 'la repartition n est pas deterministe')
     verifies++
   }
   assert.ok(verifies >= 2000, `${verifies} jeu(x) verifie(s) : le tirage n a rien produit`)
+})
+
+test("LE TEST QUI COMPTE : l argent d un logement SUPPRIME ne se pose pas sur les lignes vivantes", () => {
+  // ⚠ RELEVE PAR LA SESSION CHEF DE FILE, 27 octobre 2026, sur ma propre
+  // repartition. `revenus_du_mois` groupe par `property_uuid` SANS jointure sur
+  // `properties` : un sejour d'un logement supprime garde son uuid, entre donc
+  // dans le total du compte, et n'a AUCUNE ligne a l'ecran — `etat.biens` ne le
+  // contient plus. Ma premiere version passait `T.recu_cents` comme cible alors
+  // que la liste ne porte que les biens AFFICHES : les euros manquants se
+  // posaient sur les lignes des biens VIVANTS, +1 € chacune. Une ligne portait
+  // de l'argent qui n'est pas le sien.
+  //
+  // La fonction calcule desormais sa cible elle-meme, ce qui rend ce mesusage
+  // impossible. Ce test garde le RESULTAT a l'ecran : deux biens vivants a
+  // 167,68 et 159,54, plus 100 € sur un logement disparu du compte.
+  const biens = [
+    { id: 'uuid-1', provider_property_id: '1', name: 'Vivant A', currency: 'EUR' },
+    { id: 'uuid-2', provider_property_id: '2', name: 'Vivant B', currency: 'EUR' }
+  ]
+  const p = bancRevenus({
+    mois: '2026-10',
+    par_bien: {
+      'uuid-1': parBien({ sejours: 1, recu_cents: 16768, total_cents: 16768 }),
+      'uuid-2': parBien({ sejours: 1, recu_cents: 15954, total_cents: 15954 }),
+      // Le logement supprime : present dans l'agregat, absent de `etat.biens`.
+      'uuid-DISPARU': parBien({ sejours: 1, recu_cents: 10000, total_cents: 10000 })
+    },
+    total: parBien({ sejours: 3, recu_cents: 42722, total_cents: 42722 }),
+    hors_mois: parBien({}), hors_biens: parBien({})
+  }, biens)
+  p.interne.renderRevenus()
+
+  const nombres = (h) => (h.match(/>(-?\d+)</g) || []).map(x => Number(x.slice(1, -1)))
+  const rangees = p.html('[data-list="revenue-rows"]').split('<tr>').slice(1)
+  assert.strictEqual(rangees.length, 2, 'le logement supprime ne doit pas fabriquer une ligne')
+  const recus = rangees.map(r => nombres((r.match(/<td class="rev-tbl__num">[\s\S]*?<\/td>/g) || [])[0])[0])
+  // 167,68 et 159,54 : chacun a son propre arrondi au plus fort reste SUR LEUR
+  // SOMME (327,22 -> 327), et AUCUN euro venu du logement disparu.
+  assert.deepEqual(recus, [168, 159],
+    `les lignes portent ${recus.join(' + ')} : un euro orphelin s y est pose`)
+  assert.strictEqual(recus.reduce((a, b) => a + b, 0), 327,
+    'la somme des lignes n est plus l arrondi de leur propre somme')
+
+  // ⚠ ET L'ECART AVEC LE BANDEAU RESTE, VISIBLE : c'est un defaut ANTERIEUR et
+  // plus large — la reserve `hors_biens` ne compte que les `property_uuid`
+  // NULS, pas les uuid orphelins (dette 118). Ce test fige l'etat connu pour
+  // qu'une correction future le fasse rougir plutot que de passer inapercue.
+  const bandeau = Number(p.cache('[data-bind="revenue-received"]').textContent)
+  assert.strictEqual(bandeau, 427, 'le bandeau ne compte plus le logement supprime')
+  assert.strictEqual(bandeau - recus.reduce((a, b) => a + b, 0), 100,
+    'l ecart muet a change de valeur : la dette 118 a bouge, ce test doit suivre')
 })
