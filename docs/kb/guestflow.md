@@ -770,3 +770,244 @@ Corrigé :
   sa tâche ouverte. **À la reprise sans nouveau message**, l'agent ne répond pas
   aux messages reçus en pause : il le fera au prochain message du voyageur, et
   la tâche reste ouverte d'ici là (ou jusqu'à la réponse de l'hôte).
+
+## Délai de réponse IA — le socle (lot 1, 27 octobre 2026)
+
+Spec complète : `docs/specs/spec-delai-reponse-ia.md`. Ce lot **ne change aucun
+comportement** : il pose le schéma, le writer de réglages et la dérivation du
+mode. Le différé lui-même arrive au lot 2.
+
+**Ce que le chantier remplace.** L'interrupteur binaire Mode Test / Mode Auto
+(`agent_alert_config.config[<ref>].mode`) devient le cas limite d'un délai :
+`0` = immédiat (l'ancien Auto), `null` = validation manuelle (l'ancien Test),
+`N` minutes = le brouillon attend N minutes puis part de lui-même. Le gain
+n'est pas le réglage, c'est le **parachute** : aujourd'hui, en Mode Test, un
+hôte qui oublie une proposition laisse le voyageur sans réponse indéfiniment.
+
+**Où vivent les réglages** — dans le blob d'app, pas dans `/settings` (test qui
+tranche : ce réglage n'a pas de sens si l'app n'existe pas) :
+
+```
+agent_alert_config.config[<ref>].delais = {
+  reponse_ia:  null | <minutes 0..1440>,   // null = validation manuelle
+  alerte_info: <minutes 0..1440>,
+  sourdine:    { active: false, debut: '22:00', fin: '08:00' }
+}
+```
+
+**Quatre colonnes sur `agent_tasks`**, toutes nullables, toutes nulles au lot 1
+(`migrations/2026-10-27-delai-reponse-ia.sql`) : `send_after` (échéance du
+brouillon), `alert_after` (échéance de l'alerte info manquante), `suspendu_le`
+(l'hôte a ouvert le brouillon), `modifie_le` (l'hôte a écrit dedans — la
+reprise doit l'alerter). **`NULL` est le repli SÛR** : pas d'échéance = rien ne
+part tout seul. Un défaut non nul aurait armé un envoi automatique sur **tout
+l'historique des tâches**, sans que personne l'ait examiné.
+
+⚠ Une première version de ces trois en-têtes chiffrait cet historique à
+« 1436 lignes ». **1436 est la mesure de `bookings_snapshot`** (backfill
+214 → 1436, CLAUDE.md), pas d'`agent_tasks`, que rien dans ce lot n'a mesurée —
+constat de la revue du 27 octobre 2026. Un nombre écrit à la main se lit comme
+une mesure et ne rougit jamais : le vérificateur imprime le vrai compte en
+tête, et c'est lui qui fait foi.
+
+Deux index **partiels** (`status` + échéance non nulle) : la règle des 30 000
+comptes. Le cron lit les tâches **échues**, jamais les tâches — sans eux la
+passe dégénère en scan toutes les 5 minutes. ⚠ Le vérificateur
+(`scripts/verifier-migration-delai-ia.js`) **ne peut pas les prouver** :
+PostgREST n'expose pas le catalogue (même limite que la grille, dette 32). Il
+prouve que le filtre RÉPOND, pas qu'il est INDEXÉ. La relecture du fichier de
+migration couvre les index, et rien d'autre.
+
+**`getPropertyMode` garde sa signature, et DÉRIVE** (`lib/cron-shared.js`) :
+`reponse_ia === null` → `'test'`, sinon → `'auto'`. Trois des quatre appelants
+ne changent pas d'une ligne — les modèles programmés (`cron-messages` ×2) et le
+code d'accès (`cron-arrival-code`) restent binaires. **Un délai de réponse IA
+ne retarde pas un modèle programmé** : les messages d'arrivée et les codes
+partent à leur heure. Le repli sur `mode` reste jusqu'au lot 4.
+
+Nouvelle fonction `lireReglagesDuBien(userId, propertyId)` → `{ mode, delais }` :
+**une seule lecture pour les deux usages**, parce que ce chemin fait déjà une
+requête de trop (une par bien et par passe, alors que le blob est unique par
+compte — dette inoffensive à quatre biens, condamnée à 30 000).
+
+### ⚠ Deux surprises de l'état des lieux, à ne pas réapprendre
+
+1. **`info_unknown` et `intervention` ne lisaient PAS le mode du tout.**
+   L'alerte partait dans le tour, Mode Test ou Auto. Le réglage
+   `alerte_info` ne retarde donc pas un chemin déjà réglable : il crée le
+   premier réglage de ce chemin. Conséquence sur la migration : `alerte_info = 0`
+   **partout**, pour ne rien changer ; 15 min est le défaut des biens NEUFS
+   seulement.
+2. **La course cron/clic n'était pas fermée.** `cloreProposition`
+   (`api/messages.js`) a un claim atomique, mais l'écran **envoie d'abord et
+   claime ensuite**. Inoffensif tant que seul un humain envoie ; dès qu'un cron
+   peut envoyer la même tâche, c'est le double envoi. Le lot 2 **inverse
+   l'ordre** et ajoute un statut `sending`.
+
+### Le POST legacy de `/api/agent-config` merge, il n'écrase plus
+
+Il reste ouvert parce qu'un appelant réel l'utilise : `seedAlertConfig`
+(`pages/onboarding.html`), qui fait GET du blob, merge côté client, POST du
+tout. Entre son GET et son POST, une autre session peut écrire — et le POST
+passait par-dessus. Le serveur **relit et merge bien par bien** :
+une clé absente de la charge est préservée, jamais effacée. Conséquence voulue :
+ce chemin ne peut plus **supprimer** une entrée, et c'est ce qui le rend sûr.
+
+### Le plafond d'appels IA précède tout ce que ce chantier pose
+
+`lib/guestflow-garde.js` : `PLAFOND_JOUR = 3` appels IA **réussis** par fil sur
+24 h glissantes, plus le délai croissant après échec (5, 10, 20, 40 min…
+plafonné à 6 h). **Une revalidation de brouillon consomme un de ces 3 appels.**
+D'où la règle gravée du lot 2 : à l'échéance, **plafond atteint → aucun appel,
+le brouillon part tel quel**. Le texte est déjà écrit, l'envoyer ne coûte rien ;
+la revalidation est un bonus qui s'efface devant la garde, jamais une condition
+de l'envoi.
+
+### Le modèle n'est pas un levier de coût
+
+`GUESTFLOW_MODEL` est sur **Sonnet 5.5** depuis le 2 octobre 2026, et c'est un
+choix de Thierry maintenu le 27 : **Haiku annonçait des codes d'accès non
+envoyés**. Haiku 5.5 coûterait dix fois moins que le défaut du code
+(`claude-haiku-4-5`), mais la raison du passage à Sonnet est la qualité sur un
+chemin qui parle au voyageur. Chiffrage d'une revalidation, sur Sonnet :
+**0,8 à 1,1 ct $** (2 500-4 000 tokens d'entrée, ~300 de sortie — estimation
+par taille de chaînes, **pas** une mesure `count_tokens`).
+
+### Dettes relevées pendant l'état des lieux, hors périmètre
+
+- `lib/alert-notify.js` — `PROPERTY_NAMES` code en dur `169567` et `209413` :
+  tout autre bien s'annonce « Logement <id> » dans le SMS et dans l'objet de
+  l'e-mail. Un hôte qui reçoit l'alerte d'un troisième bien lit un numéro.
+- `lib/cron-shared.js` — `parseDelay` n'a aucun appelant de production, mais il
+  est exporté et stubé par `tests/garde-portee-au-point-d-usage.test.js` : le
+  retirer casse ce test. Vestige d'un délai antérieur, à ne pas réutiliser —
+  son unité (minutes depuis des libellés `'5min'…'24h'`) n'est pas celle de ce
+  chantier.
+
+### Les constats de la revue du lot 1 (27 octobre 2026) — 11, dont deux graves
+
+**1. ⚠ `delais` gouverne, mais deux lecteurs lisaient encore `mode`.**
+`getPropertyMode` fait gagner `delais` quand il existe ; or `modesDe`
+(`pages/messages.html`, l'interrupteur Test/Auto — qui **relit après écriture**
+et confirmait donc une valeur qui ne gouverne plus) et la garde de
+`scripts/templates-test-colomiers.js` lisent `mode`. Scénario : après la
+migration des données, l'hôte bascule un bien en Test, le POST écrit
+`mode:'test'`, **l'écran affiche Test, et GuestFlow continue d'envoyer tout
+seul** ; le script, lui, imprime « mode : test — jamais un envoi » puis arme un
+message sur un séjour en cours. Un interrupteur qui ment est pire qu'un
+interrupteur absent.
+**Correctif** : tant que la clé `mode` existe (elle part au lot 4), **chaque
+écriture pose les deux, dans les deux sens** — cible `delais` → `mode` dérivé ;
+cible `mode` → `delais.reponse_ia` aligné (`test` = `null`, `auto` = `0`).
+`auto` vaut **0 et pas 15** : c'est le sens exact du Mode Auto d'avant, et un
+toggle ne doit pas inventer un délai. Éprouvé par cinq tests d'appel.
+
+**2. ⚠ Un `delais` non validé rendait `'auto'`** — le sens NON sûr. Toute forme
+avec `reponse_ia` non nul (`"15"`, `15.5`, `99999`, `{}`, `true`) donnait « ça
+part tout seul », et débloquait aussi les modèles programmés et le code
+d'accès. **Le POST legacy n'appelle pas `delaisPropres`**, et c'est précisément
+le writer des défauts des biens neufs : une forme fautive peut donc arriver en
+lecture sans avoir croisé un validateur.
+**Correctif** : la validation est **au point de lecture** — `null` → `test`,
+entier 0..1440 → `auto`, **tout le reste → repli sur `mode`, et on le dit**.
+Le repli est `mode` et non `'test'` inconditionnel : une donnée malformée ne
+doit pas *retenir* les messages d'un bien que l'hôte a mis en Auto.
+
+**3. Le merge legacy ne ferme pas tout, et le commentaire affirmait le
+contraire.** Il est à **un niveau** : il protège les clés **absentes** de la
+charge. Or `seedAlertConfig` n'omet rien — il **repose le blob entier** qu'il a
+lu. Chaque clé qu'il réémet (`mode`, `intervention`, `info_unknown`) écrase donc
+toujours ce qu'une cible concurrente a écrit entre son GET et son POST.
+**Ce qui est fermé** : la disparition d'une clé qu'il ne connaît pas.
+**Ce qui reste ouvert** : la péremption d'une clé qu'il connaît.
+**Correctif partiel, sur ce qui compte** : `delais` est **réservée aux cibles**
+et écartée de toute charge legacy — la valeur en base gagne toujours. Un
+réglage d'envoi ne se change que par sa cible.
+⚠ **DETTE** : le seeder d'onboarding devrait passer par des cibles (une requête
+par bien). Tant qu'il reposte le blob, les alertes restent exposées à cette
+course.
+
+**4. Omettre `sourdine` la réinitialisait en silence.** Le bloc `delais` est
+remplacé en entier, donc une charge sans `sourdine` y substituait le défaut
+inactif : l'hôte qui enregistrait ses deux délais **perdait sa plage de nuit**,
+en 200 et sans un mot. Correctif : sourdine absente de la charge → celle de la
+base est gardée.
+
+**5. Le legacy jetait les entrées invalides en silence avec un 200
+`{ok:true}`** (elles étaient persistées avant ce lot). Correctif : **400**, et
+la réponse **nomme** ce qui a été refusé.
+
+**6. Le vérificateur comptait « aucune ligne » comme « RLS fermée ».** Sur une
+table vide, la clé anon rend zéro ligne quelle que soit la policy : la sonde
+affichait ✔ sur une table potentiellement grande ouverte. Correctif : si le
+comptage service-key vaut 0, **la sonde s'abstient et le dit**. Un vérificateur
+qui n'a rien lu ne doit pas rassurer.
+
+**7. « 1436 lignes d'historique » était un chiffre emprunté.** Voir plus haut.
+
+**8, 9.** Spec : titre « trois colonnes et un index » pour quatre et deux ; et
+le critère de remise fixé à « 28 rouges » alors que la suite est à `fail 0`.
+
+**10.** `package-lock.json` : `"name"` changé par npm dans le worktree, sans
+rapport avec le chantier — **non commité**.
+
+**11. Deux tests existants grepaient une expression source exacte**, et l'un
+des deux était *ma propre correction* du premier. `tests/messages-v5.test.js`
+vérifiait la règle « une cible par requête » par la chaîne
+`viseMode && viseAlertes`, et le merge du mode par
+`? { ...(blob[ref] || {}), mode }` : les deux ont rougi sur du code **plus
+correct** que celui qu'ils protégeaient. Correctif : ces tests ne lisent plus le
+source de l'endpoint ; ils gardent les invariants stables (l'écriture est
+ciblée, le serveur relit avant d'écrire) et **la règle est éprouvée par appel**
+dans `tests/delai-reponse-ia-lot1.test.js`. Leçon, déjà au REVIEW.md : un test
+qui fige une expression protège une formulation, pas un comportement.
+
+### Les constats de la SECONDE revue (27 octobre 2026) — 9, aucun de sécurité
+
+Appliquée la règle de CLAUDE.md : deux reviews sans constat de sécurité = on
+corrige sans nouvelle review, puis on pousse.
+
+- **`delais` écarté d'une charge legacy en silence** — dans la fonction même qui
+  pose « un rejet se dit » : `delete` + `200 {ok:true}`. Désormais **400 nommé**.
+- **Mon commentaire justifiait la garde de lecture par un chemin inexistant.**
+  Il affirmait que le POST legacy « n'appelle pas `delaisPropres` » et qu'il est
+  « le writer des défauts 15/15 des biens neufs » : les deux sont démentis par
+  le code du même lot (`CLES_RESERVEES_AUX_CIBLES` écarte `delais` du legacy, et
+  `seedAlertConfig` n'écrit ni `delais` ni 15/15). **Le motif réel, et il
+  suffit** : cette fonction est le passage de tous les lecteurs, et le blob est
+  un JSONB qu'aucune contrainte de base ne borne — un script, une migration ou
+  une correction en console peuvent y poser n'importe quelle forme. Une garde à
+  la lecture ne dépend d'aucun inventaire des écrivains, et c'est ce qui la rend
+  vraie quand l'inventaire change.
+- **`delaisAlignes` étalait `blob[ref].delais` sans vérifier sa forme** :
+  `{...[]}` donnait `{reponse_ia: 0}` — plus d'`alerte_info`, plus de
+  `sourdine`. Le serveur écrivait lui-même un bloc que son validateur
+  refuserait, et le lot 2 aurait lu « pas d'échéance d'alerte » sans le voir.
+- **⚠ Basculer Test puis Auto détruisait le délai réglé par l'hôte**, en 200 et
+  sans un mot : 30 min → `0`, envoi immédiat. La dernière valeur non nulle est
+  mémorisée (`reponse_ia_rappel`) et restituée.
+- **Le 400 du legacy pouvait casser l'onboarding définitivement** : comme
+  `seedAlertConfig` réémet le blob qu'il a lu, une entrée fautive déjà stockée
+  aurait fait échouer **tout** POST legacy futur — et l'onboarding ne teste pas
+  `r.ok`. On refuse donc ce que l'appelant **apporte**, pas ce qu'il recopie.
+- **La borne 0..1440 était recopiée** au point de lecture. Nouveau module
+  `lib/guestflow/delais-contrat.js` : une dérive aurait rendu « hors contrat » à
+  la lecture une valeur acceptée et stockée à l'écriture — un réglage qui cesse
+  de gouverner sans que rien ne rougisse.
+- **Le vérificateur aurait crié au loup dès le lot 2** : son contrôle « aucune
+  colonne armée » devient faux quand `cron-classify` pose légitimement
+  `send_after`. Informatif par défaut, strict sur `AUCUN_ARMEMENT_ATTENDU=1`.
+- **`.is('suspendu_le', null)` était appliqué aussi à la requête des alertes** :
+  une suspension de brouillon aurait masqué l'alerte `info_unknown` du même
+  séjour. Et l'en-tête annonçait « la requête du cron rejouée telle quelle »
+  alors que `lib/guestflow/brouillons-dus.js` n'existe pas — « attendue du
+  lot 2 » est le mot juste.
+- **⚠ Et pour la troisième fois, un test de `messages-v5` grepait le source —
+  mes deux corrections comprises.** La deuxième assertait « le serveur RELIT le
+  blob avant d'écrire » par un motif que le handler **GET** satisfait : la revue
+  a supprimé les deux relectures du POST et la regex matchait toujours. **Un
+  test qui reste vert quand la garde disparaît est pire qu'absent : il occupe la
+  place.** Ce test ne lit plus le source de l'endpoint du tout ; ce qui relève
+  de l'endpoint est éprouvé par appel. Leçon : trois corrections fausses d'affilée
+  sur le même grep signifient qu'il faut arrêter de greper, pas chercher un
+  meilleur motif.

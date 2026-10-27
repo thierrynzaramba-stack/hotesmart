@@ -320,10 +320,28 @@ test('messages etape 4 : passer en Auto exige une confirmation, et l\'etat est R
     'la pause affichee vient de la base relue')
   // L'ecriture est un POST CIBLE : le MERGE du seul mode vit au SERVEUR
   // (deux onglets s'ecrasaient des configs d'alertes, releve en review).
-  const api = lire('api/agent-config.js')
-  assert.ok(/mode_ref/.test(api) && /\? \{ \.\.\.\(blob\[ref\] \|\| \{\}\), mode \}/.test(api),
-    'agent-config merge le seul mode du bien dans le blob relu en base')
-  assert.ok(/mode !== 'test' && mode !== 'auto'/.test(api), 'mode borne a test|auto')
+  //
+  // ⚠ CE TEST GREPAIT LA FORME EXACTE DU MERGE
+  // (`? { ...(blob[ref] || {}), mode }`). Il a rougi des que l'ecriture du mode
+  // a du aligner aussi `delais.reponse_ia` — un correctif de la revue du
+  // 27 octobre 2026 (sans lui, l'interrupteur affichait Test pendant que
+  // GuestFlow envoyait tout seul). Un test qui fige une EXPRESSION rougit sur
+  // un code plus correct que celui qu'il protege.
+  //
+  // ⚠ TROISIEME CORRECTION DE CES LIGNES, ET LES DEUX PREMIERES ETAIENT FAUSSES
+  // AUSSI — c'est le signe qu'il faut arreter de greper, pas chercher un
+  // meilleur motif. La deuxieme version assertait « le serveur RELIT le blob
+  // avant d'ecrire » par un motif que le handler GET satisfait : la revue a
+  // fait la contre-epreuve en supprimant les DEUX relectures du POST, et la
+  // regex matchait toujours. Un test qui reste vert quand la garde disparait
+  // est pire qu'absent : il occupe la place.
+  //
+  // Ce test ne lit donc plus le source de l'endpoint du tout. Ce qui relevait
+  // de l'endpoint est eprouve PAR APPEL dans tests/delai-reponse-ia-lot1.test.js
+  // (ecriture ciblee, relecture avant ecriture, bornes du mode, une cible par
+  // requete). Ici on ne garde que ce qui est VRAIMENT de l'ecran : il poste une
+  // cible et il relit l'etat.
+  assert.ok(/mode_ref: ref, mode: nouveau/.test(src), 'l ecran poste une CIBLE, pas le blob entier')
 })
 
 test('messages etape 4 : les reglages IA sont reserves au TITULAIRE (dette 68)', () => {
@@ -464,7 +482,29 @@ test('tiroir : une lecture echouee FERME le volet, elle ne montre jamais un faux
   // Le test refuse une edition non enregistree (il partirait a l'ANCIEN destinataire).
   assert.ok(/ecran\.value\.trim\(\) !== lignes\.trim\(\)/.test(src), 'tester exige l\'ecran = la base')
   // Et le serveur refuse un POST a double cible.
-  assert.ok(/viseMode && viseAlertes/.test(lire('api/agent-config.js')), 'une cible par requete')
+  //
+  // ⚠ CE TEST GARDAIT LA FORMULATION, PAS LA REGLE (27 octobre 2026). Il
+  // cherchait la chaine `viseMode && viseAlertes` dans le source : le jour ou
+  // une TROISIEME cible est arrivee (`delais`, chantier du delai de reponse
+  // IA), la regle a du passer au COMPTE — parce que tester `A && B` laisse
+  // passer `A && C` et `B && C` — et ce test a rougi sur un code plus correct
+  // que celui qu'il protegeait.
+  //
+  // On garde donc l'INTENTION : plus d'une cible dans la meme requete est
+  // refusee. Le comportement, lui, est eprouve par les trois paires de
+  // tests/delai-reponse-ia-lot1.test.js, qui appellent l'endpoint au lieu de
+  // lire son texte.
+  //
+  // ⚠ ET LE REMPLACEMENT GREPAIT ENCORE UNE EXPRESSION SOURCE EXACTE
+  // (`[viseMode, viseAlertes, viseDelais].filter(...)`) : il aurait rougi au
+  // jour d'une QUATRIEME cible — le defaut meme que le paragraphe ci-dessus
+  // documente, reproduit dans sa correction. Constat de la revue du 27 octobre
+  // 2026, et il est juste.
+  //
+  // Ce test ne lit donc plus le source de l'endpoint du tout. La regle est
+  // eprouvee par APPEL, dans tests/delai-reponse-ia-lot1.test.js (trois paires
+  // de cibles, charges valides des deux cotes, motif du 400 verifie) — un test
+  // qui appelle survit a toute reecriture qui garde le comportement.
 })
 
 // ─── Recette 2 : volet « Messages programmes » (inventaire §12 bis B) ────────

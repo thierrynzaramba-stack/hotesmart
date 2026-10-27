@@ -392,3 +392,64 @@ marque du partenaire.
 `tests/reponse-partenaire-detection.test.js` : ils sont lancés à la main, leur
 sortie est lue par un humain au moment où il les lance, et aucun n'est déployé.
 Le même test refuse qu'un fichier de `api/` ou `lib/` soit exempté.
+
+## Délai d'alerte « info manquante » — le socle (lot 1, 27 octobre 2026)
+
+Spec : `docs/specs/spec-delai-reponse-ia.md`. Détail du chantier et des
+réglages : `docs/kb/guestflow.md`, section « Délai de réponse IA ».
+**Ce lot ne change aucun comportement** — le différé arrive au lot 3.
+
+### ⚠ Le constat qui compte : l'alerte n'a JAMAIS été réglable
+
+`lib/cron-classify.js` insère la tâche `info_unknown` ou `intervention`, puis
+appelle `sendAlertNotifications` **dans le même tour, inconditionnellement** —
+et **sans lire le mode du bien**. En Mode Test comme en Mode Auto, l'alerte
+d'info manquante part tout de suite.
+
+Donc le réglage `delais.alerte_info` ne retarde pas un chemin déjà réglable :
+**il crée le premier réglage de ce chemin.** L'intuition « c'était déjà en
+test » est fausse ici, et c'est pour ça que la migration pose `alerte_info = 0`
+**partout** : mettre 15 min aurait changé le comportement de biens en
+production sous couvert de migration. Les 15 min sont le défaut des biens
+**neufs**, à l'onboarding.
+
+### Ce qui restera inchangé au lot 3
+
+**`intervention` ne sera jamais retardée, jamais mise en sourdine.** L'urgence
+part dans le tour, `alert_after` reste nul pour ce type. Seule `info_unknown`
+porte une échéance.
+
+### La sourdine de nuit (lot 3)
+
+Activable par bien, plage réglable, **désactivée par défaut**. Une alerte dont
+l'échéance tombe dans la plage est repoussée à la fin de la plage. Plage qui
+enjambe minuit (22 h → 8 h) traitée explicitement : c'est le cas normal, pas le
+cas limite.
+
+⚠ **Le fuseau en v1 est `Europe/Paris` pour tous les biens**, dans une
+constante unique (`FUSEAU_V1`, `lib/guestflow/sourdine.js`) — décision de
+Thierry du 27 octobre 2026. `properties.timezone` **existe** déjà
+(`migrations/2026-09-08-fiche-unifiee.sql`), et on ne la lit volontairement
+pas tant qu'aucun bien n'est hors de France. La constante porte son motif :
+sans lui, la session qui lira « Paris en dur » dans six mois y verra un oubli
+et « corrigera » une décision. Ce qui reste interdit : calculer une sourdine en
+UTC en silence — la famille de bugs qui a dupliqué 83 messages le 14 septembre
+2026.
+
+### ⚠ Question ouverte au 27 octobre 2026 : la sourdine et l'alerte de reprise
+
+Le lot 2 ajoute une alerte quand le compte à rebours d'un brouillon **modifié
+par l'hôte** reprend, pour le prévenir avant qu'un texte peut-être inachevé
+parte. Thierry l'a demandée « même canal et même sourdine que l'info
+manquante ». **Les deux moitiés ne tiennent pas ensemble** : avec la sourdine,
+une reprise à 2 h du matin donne une alerte à 8 h, soit **après** le départ du
+brouillon — l'alerte n'avertit plus, elle raconte. Trois issues au §9 de la
+spec ; recommandation retenue en attente : la sourdine retarde **l'alerte ET
+l'envoi**, pour que l'avertissement précède toujours le texte.
+
+### Dette relevée en passant
+
+`lib/alert-notify.js` — `PROPERTY_NAMES` code en dur `169567` (« Cœur de vie
+23 ») et `209413` (« La bulle »). Tout autre bien s'annonce « Logement <id> »
+dans le SMS **et** dans l'objet de l'e-mail : l'hôte d'un troisième bien reçoit
+une alerte qui lui parle d'un numéro.
