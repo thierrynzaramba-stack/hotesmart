@@ -27,7 +27,15 @@ la RLS (spec-aujourdhui-v5 §11).
 
 ---
 
-## 2. Ce que l'écran montre
+## 2. Ce que l'écran montre — ÉTAT DU 27 OCTOBRE, AVANT LES MAQUETTES
+
+⚠ **CETTE SECTION EST PÉRIMÉE, ET ELLE RESTE.** Elle décrit la forme que
+j'avais DÉDUITE faute de maquette : une carte et une courbe par logement, un
+cumul à date avec son écart en %. Les maquettes reçues le 27 au soir disent
+autre chose, et la recette du 28 a corrigé trois défauts de plus. **La forme
+livrée est au §11.** On garde celle-ci parce qu'elle explique pourquoi certains
+noms de clés i18n et certaines structures existent.
+
 
 | élément | contenu |
 |---|---|
@@ -198,10 +206,60 @@ revenus_annee(p_user_id uuid, p_annee integer,
 
 ---
 
-## 10. Reste à faire
+## 10. Reste à faire — SOLDÉ
 
-1. l'endpoint (chargé au clic, pas à l'ouverture) ;
-2. le module de courbe partagé, extrait de `apps/yield/marche-global.html` ;
-3. l'écran, **à la réception des maquettes** ;
-4. l'extension du test de budget : le clic ajoute **un** appel, et ce compte ne
-   croît pas avec le nombre de logements.
+1. ~~l'endpoint~~ **fait** (`api/ecran/revenus-annee.js`, chargé au clic) ;
+2. ~~le module de courbe partagé~~ **fait** (`shared/courbe-mensuelle.js`) ;
+3. ~~l'écran~~ **fait**, voir §11 ;
+4. ~~l'extension du test de budget~~ **faite**.
+
+Reste ouvert : la **bande des comparables** (3ᵉ maquette), explicitement
+repoussée par Thierry — « elle viendra dans un second temps, ne la fais pas
+maintenant ».
+
+---
+
+## 11. LA FORME LIVRÉE — ce qui est en service
+
+Reprise des maquettes `Accueil-revenus-annee-v5` (ordinateur) et
+`-mobile-v5` (téléphone). **Elle remplace le §2.**
+
+| élément | contenu |
+|---|---|
+| période nommée | « Janvier → octobre 2026 » pour l'année en cours, « Année 2025 » pour une année passée |
+| total | grand chiffre, et le total N-1 **à côté, sans pourcentage** (décision 1) |
+| pastilles de filtre | « Tous » + un logement ; elles filtrent **la courbe seule** |
+| courbe | **une seule** : N-1 en gris, N en trait plein, déjà réservé en pointillé |
+| axe | 3 paliers, relevés à un palier **rond**, en forme courte (« 8 k € ») |
+| tableau | une ligne par logement : vignette, nom, total N, total N-1, écart |
+| note de bas de bloc | les mois à venir sont des séjours réservés, pas une prévision ; et le trait gris couvre N-1 en entier |
+| réserves | cinq, chacune comptée : pas d'historique N-1, montants non calculables, montants bruts, argent hors biens (**des deux années**), logements sans ligne, périmètre changé |
+
+### 11.1 Les écarts assumés avec la maquette
+
+| point | maquette | livré | pourquoi |
+|---|---|---|---|
+| le sélecteur | « Octobre \| 2026 » | « Mois \| Année » | la maquette n'a pas de flèches ; la décision 5 en demande, et le libellé des flèches dit déjà la période. Essayé, mesuré au banc : l'écran rendait « ‹ 2026 › [Octobre \| 2026] » — le constat de Thierry que `tests/accueil-rapide.test.js` garde depuis (« il y est deux fois à l'écran ») |
+| l'écart au niveau du compte | « +14 % vs même période 2025 » | **rien** | décision 1, confirmée après la maquette. Celle-ci se contredisait : ses quatre lignes donnent 57 590 € dont 7 190 € pour un bien « nouveau en 2026 » — sans lui, +0,2 % et non +14 % |
+| la hauteur des pastilles | 36 px | `var(--control)` = 44 px | constat 5 de Thierry sur les cibles tactiles |
+
+### 11.2 Ce que la RECETTE du 28 octobre a corrigé
+
+| # | constat de Thierry | cause | règle qui en sort |
+|---|---|---|---|
+| 1 | le tableau du **mois** restait sous la courbe de l'année | `renderAnnee()` est appelé **au milieu** de `renderRevenus`, dont la fin réaffichait le tableau | un rendu qui masque doit l'être **après** tout ce qui réaffiche — et le test APPELLE `renderRevenus` en entier, sinon il ne voit rien |
+| 2 | « 0 € » sur une année sans aucun séjour | l'endpoint ne rend que les mois qui portent quelque chose : **l'absence de clé EST l'information** | trois états, et aucun ne remplace l'autre : **« — »** pour une absence, **« non calculable »** pour un refus, le montant sinon — chacun avec son motif à côté |
+| 3 | le déjà réservé tracé **en plein** | je coupais le trait au **mois courant** | un mois n'est pas réalisé parce qu'il a commencé, il l'est quand il a **encaissé** : la frontière suit la donnée (dernier mois à `recu_cents > 0`), pas le calendrier |
+
+### 11.3 Ce que la REVIEW avait trouvé avant elle
+
+Trois constats graves, tous du même genre — **l'écran affirmait un fait que la
+donnée ne portait pas** : un montant non calculable affiché « 0 € » (y compris
+en point plein sur la courbe) ; l'argent hors-biens de N-1 muet ; et
+« nouveau en {annee} » déduit de la fenêtre comparée au lieu de l'année, qui
+avait au passage **supprimé** la formulation honnête `revenue.sans_comparaison`.
+
+⚠ **Et le banc de tests n'exécutait pas cet écran** : `ouvrirAujourdhui`
+n'injectait ni `courbeMensuelle` ni le vrai `escapeHtml` (il passait `String`,
+donc aucun test d'échappement de ce fichier n'était valable). Les deux sont
+réparés ; c'est la même leçon que `CacheEcran`.
