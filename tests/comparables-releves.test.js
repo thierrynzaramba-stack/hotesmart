@@ -360,22 +360,41 @@ test("LE TEST QUI COMPTE : le compte rendu dit ce que la BASE a accepte", async 
 const { PLAFOND_RELEVE_MOIS_USD, PLAFOND_RELEVE_90J_USD } = require('../lib/marche/comparables-releves')
 
 // Une base qui porte un journal d'appels AirROI reglable.
-function baseAvecDepense (usd, { retenus = [RETENU] } = {}) {
-  const vu = { upserts: [], filtresAppels: [] }
+// ⚠ LA DEPENSE SE COMPTE SUR `comparables_releves`, PAS SUR `airroi_appels`.
+// Ma premiere version lisait le journal des appels AirROI — qui ne dit pas QUI
+// a appele : la depense de l'ecran des comparables bloquait le tout premier
+// releve du bien. Mesure reelle sur staging : 1,80 $ depenses les 4-6 octobre
+// par l'ecran, `comparables_releves` VIDE, et le releve refuse. Le plafond
+// comptait l'etude au lieu d'en etre separe.
+// `annoncesDejaRelevees` = le nombre d'annonces que LE RELEVE a ecrites ce
+// mois-ci pour ce bien ; chacune vaut un comparable paye.
+function baseAvecDepense (annoncesDejaRelevees, { retenus = [RETENU] } = {}) {
+  const vu = { upserts: [], filtresReleves: [] }
   const client = {
     from (table) {
+      const estReleves = table === 'comparables_releves'
       const q = {
-        select () { return q },
-        eq (c, v) { if (table === 'airroi_appels') vu.filtresAppels.push(['eq', c, v]); return q },
-        in (c, v) { if (table === 'airroi_appels') vu.filtresAppels.push(['in', c, v]); return q },
-        gte (c, v) { if (table === 'airroi_appels') vu.filtresAppels.push(['gte', c, v]); return q },
+        select (cols) { q._cols = cols; return q },
+        eq (c, v) { if (estReleves) vu.filtresReleves.push(['eq', c, v]); return q },
+        in (c, v) { if (estReleves) vu.filtresReleves.push(['in', c, v]); return q },
+        gte (c, v) { if (estReleves) vu.filtresReleves.push(['gte', c, v]); return q },
         limit () { return Promise.resolve(rep()) },
         upsert (lignes) { vu.upserts.push(lignes); return { select: () => Promise.resolve({ data: lignes.map((_, i) => ({ id: i })), error: null }) } },
         then (r) { return Promise.resolve(rep()).then(r) }
       }
       const rep = () => {
         if (table === 'comparables_retenus') return { data: retenus, error: null }
-        if (table === 'airroi_appels') return { data: [{ cout_usd: usd }], error: null }
+        if (estReleves) {
+          // ⚠ Deux lectures distinctes sur la MEME table : « quels biens sont
+          // deja faits » (colonne `property_id`) et « combien d'annonces
+          // relevees » (colonne `listing_id`). Le double repond selon ce qui a
+          // ete demande, sinon le filtre « deja fait » sauterait le bien et le
+          // test du plafond ne s'executerait jamais.
+          if (String(q._cols || '').includes('listing_id')) {
+            return { data: Array.from({ length: annoncesDejaRelevees }, (_, i) => ({ listing_id: `L${i}` })), error: null }
+          }
+          return { data: [], error: null }
+        }
         return { data: [], error: null }
       }
       return q
@@ -385,9 +404,13 @@ function baseAvecDepense (usd, { retenus = [RETENU] } = {}) {
 }
 
 test("LE TEST QUI COMPTE : le plafond du RELEVE refuse, et le dit", async () => {
-  // 1,90 $ deja depenses ce mois-ci sur ce bien : un passage a 1,00 $ (5
-  // comparables) depasserait les 2 $.
-  const { client, vu } = baseAvecDepense(1.9)
+  // ⚠ IL FAUT UN VRAI DEPASSEMENT, PAS UNE EGALITE. Ma premiere version
+  // donnait 9 annonces deja relevees (1,80 $) a un bien d'UN comparable
+  // (0,20 $) : total 2,00 $, et le test est `> 2` — donc le passage continuait,
+  // a juste titre. Deux comparables font 0,40 $, donc 2,20 $, et la regle mord.
+  const { client, vu } = baseAvecDepense(9, {
+    retenus: [RETENU, { property_id: 'bien-A', listing_id: '222', user_id: 'u1' }]
+  })
   const resultats = { errors: [] }
   const r = await releverSiDu(resultats, {
     supabase: client, client: faireClient(), forcer: true,
@@ -399,15 +422,16 @@ test("LE TEST QUI COMPTE : le plafond du RELEVE refuse, et le dit", async () => 
   // ne peut pas expliquer se reproduit.
   const ligne = resultats.errors.map(e => e.error).join(' ')
   assert.match(ligne, /plafond du RELEVE/i, `le refus ne nomme pas le plafond du releve : « ${ligne} »`)
-  assert.match(ligne, /1\.90/, 'la ligne ne dit pas ce qui est deja depense')
-  assert.match(ligne, /2\.00/, 'la ligne ne dit pas le plafond')
+  assert.match(ligne, /1\.80 \$ deja depenses/, 'la ligne ne dit pas ce qui est deja depense')
+  assert.match(ligne, /0\.40 \$ demandes/, 'la ligne ne dit pas ce qui est demande')
+  assert.match(ligne, /> 2\.00 \$/, 'la ligne ne dit pas le plafond')
   assert.match(ligne, /etude/i, 'la ligne ne dit pas que l etude de marche n est pas en cause')
 })
 
 test("LE TEST QUI COMPTE : sous le plafond, le releve passe", async () => {
   // La contre-epreuve : sans elle, un refus pose en dur passerait le test
   // precedent.
-  const { client, vu } = baseAvecDepense(0.2)
+  const { client, vu } = baseAvecDepense(1)
   const r = await releverSiDu({ errors: [] }, {
     supabase: client, client: faireClient(), forcer: true,
     now: () => new Date('2026-10-28T03:00:00Z').getTime()
@@ -419,17 +443,15 @@ test("LE TEST QUI COMPTE : sous le plafond, le releve passe", async () => {
 test("LE TEST QUI COMPTE : la depense se compte sur LE MOIS et sur CE BIEN", async () => {
   // Un plafond mensuel qui lirait toute l histoire du bien refuserait au bout
   // d un an ; un plafond qui ne filtrerait pas le bien compterait le parc.
-  const { client, vu } = baseAvecDepense(0.1)
+  const { client, vu } = baseAvecDepense(0)
   await releverSiDu({ errors: [] }, {
     supabase: client, client: faireClient(), forcer: true,
     now: () => new Date('2026-10-28T03:00:00Z').getTime()
   })
-  const f = vu.filtresAppels
+  const f = vu.filtresReleves
   assert.ok(f.some(x => x[0] === 'eq' && x[1] === 'property_id'), 'la depense n est pas filtree par bien')
   assert.ok(f.some(x => x[0] === 'gte' && x[1] === 'created_at' && String(x[2]).startsWith('2026-10')),
     `la depense n est pas bornee au mois courant : ${JSON.stringify(f)}`)
-  assert.ok(f.some(x => x[0] === 'in' && x[1] === 'endpoint'),
-    'la depense n est pas limitee aux points d appel du releve')
 })
 
 test("RECENSEMENT : le plafond de 90 jours suit le plafond mensuel", () => {
