@@ -552,9 +552,31 @@ function menuYfHtml (bien, d) {
   // Ici on ne fait qu'ouvrir une page : un masquage suffit a ne pas proposer
   // un geste impossible, il ne protege rien et n'a pas a le faire.
   const peutRegler = !etat.lectureSeule && peutEcrire('reglages')
-  const pied = !peutRegler ? '' : on
-    ? `<div class="cal-yf-menu__pied"><a class="link cal-yf-menu__lien" href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a></div>`
-    : `<div class="cal-yf-menu__pied"><a class="cal-yf-menu__activer" href="${esc(urlYf('prix', bien.id, { activer: '1' }))}">${esc(t('cal.yf_activate'))}</a></div>`
+  // ⚠ ON NE PROPOSE PAS UNE ACTIVATION QU'ON NE PEUT PAS TENIR — recette de
+  // Thierry du 28 octobre 2026, point 6. Un bien regle en « Je garde mes
+  // prix » n'est pas basculable : le parcours d'activation refuse de s'ouvrir,
+  // et c'est juste. Mais le pied affichait quand meme le bouton, qui ne
+  // faisait RIEN au clic — une promesse muette, le pire des deux mondes.
+  // Trois etats, donc, et non deux :
+  //   · pilote            -> le lien vers ses reglages ;
+  //   · basculable        -> le bouton d'activation ;
+  //   · NON basculable    -> la RAISON, telle que la regle la donne, et
+  //                          aucun bouton.
+  // ⚠ ET TANT QU'ON NE SAIT PAS (`d` absent, premier rendu), ON NE PROPOSE
+  // RIEN sur un bien non pilote : afficher le bouton puis le retirer ferait
+  // clignoter une promesse. Le menu porte deja sa ligne « Chargement… ».
+  const sait = !!(d && typeof d.peut_basculer === 'boolean')
+  let pied = ''
+  if (peutRegler && on) {
+    pied = `<div class="cal-yf-menu__pied"><a class="link cal-yf-menu__lien" href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a></div>`
+  } else if (peutRegler && sait && d.peut_basculer) {
+    pied = `<div class="cal-yf-menu__pied"><a class="cal-yf-menu__activer" href="${esc(urlYf('prix', bien.id, { activer: '1' }))}">${esc(t('cal.yf_activate'))}</a></div>`
+  } else if (peutRegler && sait && d.raison) {
+    // Le verdict du moteur s'AFFICHE, il ne se recopie pas (REVIEW.md regle 13) :
+    // la phrase vient de `lib/pilote-tarifaire.js`, elle dit ce qui est refuse,
+    // pourquoi, et quel geste le debloque.
+    pied = `<div class="cal-yf-menu__pied"><p class="cal-yf-menu__refus">${esc(d.raison)}</p></div>`
+  }
   return `<div class="cal-yf-menu__entete">
       <span class="cal-yf-menu__titre" id="h-yf">${esc(t('cal.yf_title'))}</span>
       <span class="cal-yf-menu__bien">${esc(bien.name || '')}</span>
@@ -610,7 +632,13 @@ function fermerMenuYf ({ rendreLeFocus = false } = {}) {
   menuYf.bouton = null
 }
 
-async function ouvrirMenuYf (bienId, bouton) {
+// ⚠ `clavier` : le menu ne DEPLACE le focus que s'il a ete ouvert au clavier.
+// Ouvert au doigt ou a la souris, `focus()` peint un anneau que l'hote n'a pas
+// demande — releve sur l'apercu du 28 octobre 2026, ou la premiere entree
+// portait un cadre noir au telephone. La page distingue deja les deux par
+// `detail === 0` (un clic synthetique du clavier n'a pas de compte de clics) :
+// c'est la meme regle qu'au telephone pour la saisie d'un prix.
+async function ouvrirMenuYf (bienId, bouton, { clavier = false } = {}) {
   const bien = etat.biens.find(b => b.id === bienId)
   if (!bien) return
   const dejaOuvert = menuYf.bien === bienId && !$('[data-bind="yf-menu"]').hidden
@@ -631,7 +659,7 @@ async function ouvrirMenuYf (bienId, bouton) {
   menu.hidden = false
   voile.hidden = estLarge()   // le voile n'est qu'au telephone
   placerMenuYf(bouton)
-  menu.querySelector('.cal-yf-menu__entree')?.focus()
+  if (clavier) menu.querySelector('.cal-yf-menu__entree')?.focus()
   let faits = null
   try {
     faits = await appel(`/api/yield-menu?bien=${encodeURIComponent(bienId)}`)
@@ -657,7 +685,10 @@ async function ouvrirMenuYf (bienId, bouton) {
 
 function brancherYf (zone) {
   zone.querySelectorAll('[data-yf]').forEach(b =>
-    b.addEventListener('click', (e) => { e.stopPropagation(); ouvrirMenuYf(b.dataset.yf, b) }))
+    b.addEventListener('click', (e) => {
+      e.stopPropagation()
+      ouvrirMenuYf(b.dataset.yf, b, { clavier: e.detail === 0 })
+    }))
 }
 // Fermetures : le voile, la touche d'echappement, un clic dehors, et tout
 // defilement — le popover est place en coordonnees FIXES, donc il se

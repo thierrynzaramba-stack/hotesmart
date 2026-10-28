@@ -42,7 +42,7 @@ function doubles ({ bien = {}, lignes = {}, erreurs = {} } = {}) {
       const q = { table, filtres: {}, gte: null, head: false, count: null }
       vues.push(q)
       const chain = {
-        select (_cols, opts = {}) { q.head = !!opts.head; q.count = opts.count || null; return chain },
+        select (cols, opts = {}) { q.colonnes = String(cols || ''); q.head = !!opts.head; q.count = opts.count || null; return chain },
         eq (c, v) { q.filtres[c] = v; return chain },
         gte (c, v) { q.gte = [c, v]; return chain },
         order () { return chain },
@@ -117,8 +117,12 @@ const appeler = async (req = {}) => {
   await require('../api/yield-menu')({ method: 'GET', query: { bien: BIEN }, headers: {}, ...req }, res)
   return res
 }
-const PILOTE = { id: BIEN, name: 'La bulle', pilote_tarifaire: 'yieldflow', pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 120 }
-const MANUEL = { id: BIEN, name: 'Ofuro Futari', pilote_tarifaire: 'calendrier', pilote_fenetre_type: null, pilote_fenetre_valeur: null }
+const PILOTE = { id: BIEN, name: 'La bulle', pilote_tarifaire: 'yieldflow', rate_sync_mode: 'managed', pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 120 }
+const MANUEL = { id: BIEN, name: 'Ofuro Futari', pilote_tarifaire: 'calendrier', rate_sync_mode: 'managed', pilote_fenetre_type: null, pilote_fenetre_valeur: null }
+// « Je garde mes prix » : HoteSmart ne pousse aucun tarif, donc YieldFlow ne
+// peut rien piloter. Mesure sur staging le 28 octobre 2026 : « Recette —
+// Maison Jardin » est exactement dans cet etat.
+const KEEP = { ...MANUEL, name: 'Maison Jardin', rate_sync_mode: 'keep' }
 const PLEIN = {
   price_display_log: [{ id: 1, property_id: BIEN }, { id: 2, property_id: BIEN }, { id: 3, property_id: BIEN }],
   yield_events: [{ id: 'e1', property_id: BIEN }, { id: 'e2', property_id: BIEN }],
@@ -350,6 +354,41 @@ test('LE TEST QUI COMPTE : un fait illisible rend null, et les autres sont servi
       if (t !== table) assert.ok(Number.isInteger(res.corps[c]), `${c} a disparu avec ${table}`)
     }
   }
+})
+
+test('LE TEST QUI COMPTE : le verdict de bascule est servi AVEC sa raison', async () => {
+  // Recette de Thierry du 28 octobre 2026, point 6 : le menu proposait
+  // « Activer le pilote automatique » sur un bien qui ne peut pas basculer.
+  // L'ecran ne peut le savoir que si l'endpoint le DIT.
+  doubles({ bien: MANUEL, lignes: PLEIN })
+  let res = await appeler()
+  assert.equal(res.corps.peut_basculer, true, 'un bien en « managed » est basculable')
+  assert.equal(res.corps.raison, null, 'pas de raison quand il n y a pas de refus')
+
+  doubles({ bien: KEEP, lignes: PLEIN })
+  res = await appeler()
+  assert.equal(res.corps.peut_basculer, false, 'un bien en « keep » ne peut pas basculer')
+  assert.match(String(res.corps.raison), /garde mes prix/,
+    'la raison vient de la regle, et elle dit QUEL GESTE debloque')
+  // ⚠ L'APOSTROPHE DE LA REGLE EST DROITE, PAS TYPOGRAPHIQUE : mon premier
+  // motif portait « ’ » et ne mordait pas sur un texte parfaitement correct.
+  // Le motif accepte les deux formes plutot que d'imposer la mienne.
+  assert.match(String(res.corps.raison), /Activez d['’]abord l['’]envoi des prix/,
+    'un refus muet renverrait l hote a l ecran sans qu il sache quoi faire')
+})
+
+test('LE TEST QUI COMPTE : la colonne que lit la regle est SELECTIONNEE', async () => {
+  // ⚠ UNE GARDE QUI JUGE SUR UNE COLONNE NON SELECTIONNEE EST UNE GARDE QUI
+  // MENT — la lecon est gravee dans `yield-pilote.js` et
+  // `channel-property.js`. `peutPasserEnYieldflow` ne lit QUE
+  // `rate_sync_mode` : absente du select, elle vaudrait `undefined`, donc
+  // « ne pousse pas ses prix », donc « basculable = false » POUR TOUS LES
+  // BIENS. Le menu dirait a chaque hote que son activation est impossible.
+  const vues = doubles({ bien: PILOTE, lignes: PLEIN })
+  await appeler()
+  const q = vues.find(v => v.table === 'properties')
+  assert.ok(q.colonnes.includes('rate_sync_mode'),
+    `le select des biens ne porte pas rate_sync_mode : ${q.colonnes}`)
 })
 
 test('le bien illisible, lui, est un 503 : on ne sert pas un menu sur un etat invente', async () => {

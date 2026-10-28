@@ -30,7 +30,7 @@
 
 const { createClient } = require('@supabase/supabase-js')
 const { requirePermission } = require('../lib/require-permission')
-const { piloteDuBien, fenetreDuBien, finDeFenetre } = require('../lib/pilote-tarifaire')
+const { piloteDuBien, fenetreDuBien, finDeFenetre, peutPasserEnYieldflow } = require('../lib/pilote-tarifaire')
 const { jourParis } = require('../lib/ouverture-marqueur')
 const {
   JOURS_COMPTEUR, compterPrixAjustes, compterEvenementsAVenir,
@@ -71,7 +71,14 @@ module.exports = async (req, res) => {
   // de la fenetre. Juger sur `garde.bien` rendrait TOUT bien « non pilote »,
   // en silence — le bouton serait gris pour tout le monde.
   const { data: bien, error: eBien } = await supabase.from('properties')
-    .select('id, name, pilote_tarifaire, pilote_fenetre_type, pilote_fenetre_valeur')
+    // ⚠ `rate_sync_mode` EST DANS CE SELECT POUR UNE RAISON DE SURETE : c'est
+    // la SEULE colonne que lit `peutPasserEnYieldflow`. Absente, la regle
+    // jugerait sur `undefined`, donc « ne pousse pas ses prix », donc
+    // « basculable = false » POUR TOUS — le menu dirait a chaque hote que son
+    // activation est impossible. C'est le piege grave dans `yield-pilote.js`
+    // et `channel-property.js` : une garde qui juge sur une colonne non
+    // selectionnee est une garde qui ment.
+    .select('id, name, pilote_tarifaire, rate_sync_mode, pilote_fenetre_type, pilote_fenetre_valeur')
     .eq('id', garde.bien.id).eq('user_id', compte).maybeSingle()
   if (eBien) {
     console.error('[yield-menu] lecture bien', eBien.message)
@@ -81,6 +88,18 @@ module.exports = async (req, res) => {
 
   const aujourdHui = jourParis(new Date())
   const pilote = piloteDuBien(bien)
+  // ⚠ CE QUE LE MENU DOIT SAVOIR AVANT DE PROPOSER UN GESTE — recette de
+  // Thierry du 28 octobre 2026, point 6. Le pied proposait « Activer le pilote
+  // automatique » a TOUS les biens non pilotes. Sur un bien regle en « Je
+  // garde mes prix » (`rate_sync_mode = 'keep'`), le parcours d'activation ne
+  // s'ouvre pas — et c'est juste, puisque YieldFlow proposerait des prix que
+  // rien ne pousse aux plateformes. Mais l'hote, lui, voyait un bouton qui
+  // promettait une activation et ne faisait RIEN.
+  // On rend donc le verdict et SA RAISON, tels que la regle les donne
+  // (`lib/pilote-tarifaire.js`) : l'ecran ne recopie aucun verdict du moteur,
+  // il l'affiche. Aucune requete de plus — la regle ne lit qu'une colonne
+  // qu'on vient de lire.
+  const possible = peutPasserEnYieldflow(bien)
 
   // ⚠ LES QUATRE LECTURES EN PARALLELE, ET AUCUNE NE PEUT FAIRE TOMBER LES
   // AUTRES : chaque fait rend `null` quand il est illisible, et l'ecran se
@@ -119,6 +138,8 @@ module.exports = async (req, res) => {
   return res.status(200).json({
     bien: bien.id,
     pilote,
+    peut_basculer: possible.ok,
+    raison: possible.ok ? null : (possible.error || null),
     // La fenetre telle qu'elle est reglee, et sa FIN calculee par la regle du
     // moteur (`finDeFenetre`, jour de Paris) : une approximation client
     // (mois x 30, date locale) divergeait de 5 jours sur 12 mois, relevee en

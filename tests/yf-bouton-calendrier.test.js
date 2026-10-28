@@ -38,7 +38,7 @@ const BEDS24 = {
 
 // La reponse du menu, telle que `api/yield-menu.js` la rend.
 const FAITS = (o = {}) => ({
-  bien: PILOTE.id, pilote: 'yieldflow',
+  bien: PILOTE.id, pilote: 'yieldflow', peut_basculer: true, raison: null,
   fenetre: { type: 'jours', valeur: 120 }, fenetre_fin: '2027-02-25',
   marche: 'Bagnères-de-Bigorre', evenements: 3, comparables: 7,
   prix_ajustes: 12, jours: 7, ...o
@@ -170,8 +170,11 @@ test("LE TEST QUI COMPTE : ouvrir le menu n'ecrit RIEN — jamais de bascule en 
 // 3. LE MENU
 // ═══════════════════════════════════════════════════════════════════════════
 
-async function ouvrir (b, bien) {
-  geste(b, bouton(b, bien), 'click')
+// `clavier: true` = un clic sans geste de pointeur (`detail === 0`), ce que le
+// navigateur envoie sur Entree ou Espace. C'est ce qui decide si le menu
+// deplace le focus.
+async function ouvrir (b, bien, { clavier = false } = {}) {
+  geste(b, bouton(b, bien), 'click', clavier ? { detail: 0 } : {})
   await new Promise(r => setTimeout(r, 0))
   return menu(b)
 }
@@ -358,6 +361,62 @@ test('la touche d echappement ferme, et un seul menu est ouvert a la fois', asyn
   b.fermer()
 })
 
+test("LE TEST QUI COMPTE : on ne propose pas une activation qu'on ne peut pas tenir", async () => {
+  // ⚠ RECETTE DE THIERRY DU 28 OCTOBRE 2026, POINT 6, SUR STAGING. Il clique
+  // « Activer le pilote automatique » sur « Maison Jardin » : la page s'ouvre
+  // sur le bon bien, et RIEN ne se passe — ni parcours, ni confirmation.
+  //
+  // Mesure du jour sur staging : ce bien est en `rate_sync_mode = 'keep'`
+  // (« Je garde mes prix »), donc `peut_basculer = false`, code
+  // `pilote_refuse_keep`. Ce n'etait PAS l'absence de grille, et ce n'etait
+  // pas un bug du parcours : le refus est JUSTE — YieldFlow proposerait des
+  // prix que rien ne pousse aux plateformes.
+  //
+  // Le defaut est en amont : le menu PROMETTAIT un geste impossible. Un bouton
+  // qui ne fait rien au clic est le pire des deux mondes — l'hote ne sait ni
+  // que c'est refuse, ni pourquoi, ni quoi faire.
+  const RAISON = 'Ce logement est réglé sur « Je garde mes prix » : activez d’abord l’envoi des prix.'
+  const refuse = banc({ biens: [MANUEL], faits: FAITS({ pilote: 'calendrier', peut_basculer: false, raison: RAISON }) })
+  const m = await ouvrir(refuse, MANUEL)
+  const pied = m.querySelector('.cal-yf-menu__pied')
+  assert.ok(pied, 'le pied doit exister pour porter la raison')
+  assert.equal(pied.querySelector('.cal-yf-menu__activer'), null,
+    'aucun bouton d activation sur un bien qui ne peut pas basculer')
+  assert.equal(pied.textContent.trim(), RAISON,
+    'la raison de la regle doit etre AFFICHEE, pas remplacee par un texte a nous')
+  // Et les quatre entrees de lecture restent : elles, rien ne les empeche.
+  assert.equal(m.querySelectorAll('.cal-yf-menu__entree').length, 4)
+  refuse.fermer()
+
+  // Le bien basculable, lui, garde son bouton.
+  const ok = banc({ biens: [MANUEL], faits: FAITS({ pilote: 'calendrier', peut_basculer: true }) })
+  const mo = await ouvrir(ok, MANUEL)
+  assert.ok(mo.querySelector('.cal-yf-menu__activer'), 'un bien basculable garde son bouton')
+  assert.equal(mo.querySelector('.cal-yf-menu__refus'), null)
+  ok.fermer()
+})
+
+test("tant qu'on ne SAIT pas, on ne promet rien : aucun bouton au premier rendu", async () => {
+  // ⚠ LE CLIGNOTEMENT EST UNE PROMESSE AUSSI. Le menu s'ouvre avant la
+  // reponse ; afficher le bouton d'activation puis le retirer ferait voir a
+  // l'hote un geste qui lui est ensuite repris. Sur un bien NON pilote, le
+  // pied attend de savoir.
+  let resoudre
+  const b = monter({ appel: () => new Promise(r => { resoudre = r }) })
+  peupler(b, { biens: [MANUEL], jours: 1 })
+  geste(b, bouton(b, MANUEL), 'click')
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(menu(b).hidden, false, 'le menu doit s ouvrir tout de suite')
+  assert.equal(menu(b).querySelector('.cal-yf-menu__activer'), null,
+    'le bouton d activation ne doit pas apparaitre avant qu on sache s il est possible')
+  assert.ok(menu(b).querySelector('.cal-yf-menu__attente'), 'la ligne d attente doit etre la')
+  // La reponse arrive : le bouton apparait, une seule fois.
+  resoudre(FAITS({ pilote: 'calendrier', peut_basculer: true }))
+  await new Promise(r => setTimeout(r, 0))
+  assert.ok(menu(b).querySelector('.cal-yf-menu__activer'))
+  b.fermer()
+})
+
 test("LE TEST QUI COMPTE : l'etat vient de la REPONSE, pas de la page chargee il y a une heure", async () => {
   // ⚠ CONSTAT DE LA RE-REVIEW DU 28 OCTOBRE 2026. `bien.pilote_tarifaire` date
   // du CHARGEMENT du calendrier. L'hote active le pilote dans un autre onglet,
@@ -395,12 +454,21 @@ test("LE TEST QUI COMPTE : le focus survit a l'arrivee des reperes", async () =>
   // detruit, le focus retombe sur `body` : l'hote au clavier voit sa
   // tabulation repartir du haut du document, menu ouvert, fleches inertes.
   const b = banc()
-  const m = await ouvrir(b, PILOTE)
+  const m = await ouvrir(b, PILOTE, { clavier: true })
   assert.ok(m.contains(b.doc.activeElement),
     'apres l arrivee des reperes, le focus doit etre reste DANS le menu')
   assert.ok(b.doc.activeElement.classList.contains('cal-yf-menu__entree'),
     `le focus est sur ${b.doc.activeElement.tagName}.${b.doc.activeElement.className}`)
   b.fermer()
+
+  // ⚠ ET AU DOIGT, ON NE DEPLACE RIEN. `focus()` peindrait un anneau que
+  // l'hote n'a pas demande — vu sur l'apercu du 28 octobre 2026, un cadre noir
+  // sur la premiere entree au telephone.
+  const tactile = banc()
+  const mt = await ouvrir(tactile, PILOTE)
+  assert.ok(!mt.contains(tactile.doc.activeElement),
+    'un menu ouvert au doigt ne doit pas prendre le focus')
+  tactile.fermer()
 })
 
 test('la fenetre au singulier dit « 1 jour », jamais « 1 jours »', async () => {
@@ -453,7 +521,7 @@ test('LE TEST QUI COMPTE : le focus ne revient au bouton que sur une fermeture D
 
   // 3. ECHAPPEMENT : fermeture DEMANDEE, le focus revient — c'est ce qu'on
   //    attend quand la main est au clavier.
-  await ouvrir(b, PILOTE)
+  await ouvrir(b, PILOTE, { clavier: true })
   b.doc.dispatchEvent(new b.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   assert.equal(menu(b).hidden, true)
   assert.equal(b.doc.activeElement, btn,

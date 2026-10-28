@@ -138,14 +138,38 @@ gardes dans la page :
 pas de « — », pas de 0. L'entrée reste cliquable : le repère est un confort,
 jamais la raison d'être de la ligne.
 
-**Pied du menu** :
-- bien piloté → lien « Réglages du pilote » → `/apps/yield/prix?bien=<uuid>`
-  (le bandeau de cette page porte l'état du pilote, la fenêtre et sa
-  réduction) ;
-- bien non piloté → bouton « Activer le pilote automatique » → **la même page**,
-  avec `?bien=<uuid>&activer=1`, qui ouvre le **parcours d'activation existant**
-  et sa confirmation « N nuits ont déjà un prix au calendrier », comptée
-  serveur.
+**Pied du menu — TROIS états, et non deux** (recette du 28 octobre 2026,
+point 6) :
+- bien piloté → lien « Réglages du pilote » → `/apps/yield/prix?bien=<uuid>` ;
+- bien non piloté **et basculable** → bouton « Activer le pilote automatique »
+  → **la même page**, avec `?bien=<uuid>&activer=1`, qui ouvre le **parcours
+  d'activation existant** et sa confirmation « N nuits ont déjà un prix au
+  calendrier », comptée serveur ;
+- bien non piloté et **NON basculable** → la **raison**, telle que
+  `lib/pilote-tarifaire.js` la donne, et **aucun bouton**.
+
+⚠ **LE TROISIÈME ÉTAT EST NÉ D'UNE RECETTE, ET C'EST LE DÉFAUT LE PLUS
+INSTRUCTIF DU LOT.** Thierry clique « Activer le pilote automatique » sur
+« Maison Jardin » : la page s'ouvre sur le bon bien, et **rien ne se passe**.
+Mesuré sur staging le jour même : ce bien est en `rate_sync_mode = 'keep'`
+(« Je garde mes prix »), donc `peut_basculer = false`, code
+`pilote_refuse_keep`. **Ce n'était pas l'absence de grille**, et le refus était
+**juste** — YieldFlow proposerait des prix que rien ne pousse aux plateformes.
+Le défaut était en amont : le menu **promettait** un geste impossible. Un
+bouton qui ne fait rien au clic est le pire des deux mondes — l'hôte ne sait ni
+que c'est refusé, ni pourquoi, ni quel geste le débloque.
+
+⚠ **ET TANT QU'ON NE SAIT PAS, ON NE PROMET RIEN.** Le menu s'ouvre avant la
+réponse ; sur un bien non piloté, le pied reste **vide** jusqu'à ce que le
+verdict arrive. Afficher le bouton puis le retirer ferait voir un geste qu'on
+reprend ensuite.
+
+⚠ **LA COLONNE QUE LA RÈGLE LIT EST DANS LE SELECT.**
+`peutPasserEnYieldflow` ne lit que `rate_sync_mode` : absente, elle jugerait
+sur `undefined`, donc « ne pousse pas ses prix », donc **« non basculable »
+pour TOUS les biens**. C'est le piège gravé dans `yield-pilote.js` et
+`channel-property.js` — une garde qui juge sur une colonne non sélectionnée est
+une garde qui ment. Un test l'exige.
 
 ⚠ **Jamais de bascule en un clic.** Le calendrier **n'appelle pas**
 `POST /api/yield-pilote`. Il ouvre le parcours, et c'est le parcours qui
@@ -158,7 +182,8 @@ Un seul appel, **à l'ouverture du menu**, pour **le seul bien cliqué** :
 
 | Fait | Source | Calcul ? |
 |---|---|---|
-| état du pilote | `properties.pilote_tarifaire` | aucun — déjà dans la page |
+| état du pilote | `properties.pilote_tarifaire` | aucun — déjà dans la page, mais la réponse fait foi dès qu'elle arrive |
+| bascule possible, et sa raison | `peutPasserEnYieldflow()` sur `rate_sync_mode` | aucun — la règle lit une colonne déjà lue |
 | fenêtre | `properties.pilote_fenetre_type/valeur`, et la fin par `finDeFenetre()` — **la règle du moteur**, jamais une approximation client (une approximation mois × 30 divergeait de 5 jours sur 12 mois, relevé en review de `c8e7dff`) | aucun |
 | marché relié | `marche_biens.localite` — une ligne par bien (`unique (property_id)`) | aucun |
 | événements à venir | `yield_events`, `date_fin >= aujourd'hui (Paris)` | un `count` sur une table de quelques lignes par bien |
