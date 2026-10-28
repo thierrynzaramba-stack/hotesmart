@@ -65,9 +65,9 @@
   <a class="card card--dark only-mobile" data-bind="validate-mobile" hidden></a>
 
   <!-- 2 + 3. Aujourd'hui / À valider -->
-  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 32px; align-items: start">
+  <div class="auj-duo" data-bind="today-duo">
 
-    <section style="grid-column: span 2; min-width: 0" aria-labelledby="h-today">
+    <section class="auj-duo__jour" aria-labelledby="h-today">
       <div data-list="events"><p class="muted" data-i18n="common.loading"></p></div>
     </section>
 
@@ -362,7 +362,7 @@ import { compteCourant, moi, peutLire, peutEcrire, estTitulaire, comptes, bascul
 // Logements rend exactement la meme zone, et deux copies divergent.
 import { etatHtml, libelleDuCanal } from '/shared/logements-liste.js'
 // Le bloc « Derniers avis » : vue pure et rendu, hors de la page (etape 2).
-import { vueDesAvis, blocAvisHtml, enTeteAvisHtml, MUETS } from '/shared/avis-recents.js'
+import { vueDesAvis, blocAvisHtml, enTeteAvisHtml, carteAvisHtml, MUETS } from '/shared/avis-recents.js'
 import * as R from '/shared/aujourdhui.js'
 import * as CacheEcran from '/shared/cache-ecran.js'
 
@@ -868,11 +868,26 @@ function phraseMenage (m, heure) {
   else if (s === 'unassigned' || s === 'orphaned') parts.push(t('today.cleaning_unassigned'))
   return parts.join(', ')
 }
+// ⚠ LA GRILLE SE MET A PLAT QUAND LE JOUR N'A QU'UNE LIGNE A DIRE, et la
+// bascule vit ICI parce que c'est le seul endroit qui sait dans quel etat le
+// bloc est rendu. Mesure au banc, a 1280 px, avant correctif : bloc gauche
+// 21 px, bloc droit 716 px, et 695 px de BLANC a gauche — la ligne de grille
+// fait la hauteur de sa colonne la plus haute. Le bloc ne s'etirait pas (c'est
+// ce que `align-items: start` garantit deja) ; c'est la PLACE RESERVEE qui
+// etait vide. A plat, « A valider » prend la largeur et le blanc disparait.
+// ⚠ LES DEUX ETATS D'UNE LIGNE Y PASSENT, pas seulement « rien aujourd'hui » :
+// « les menages ne sont pas lisibles » fait exactement la meme hauteur, et
+// laisserait exactement le meme blanc.
+const aPlat = (oui) => {
+  const duo = $('[data-bind="today-duo"]')
+  if (duo) duo.classList.toggle('auj-duo--plat', !!oui)
+}
 function renderEvenements () {
   const zone = $('[data-list="events"]')
-  if (etat.menagesOk === false) { zone.innerHTML = `<p class="muted">${esc(t('today.unavailable'))}</p>`; return }
+  if (etat.menagesOk === false) { aPlat(true); zone.innerHTML = `<p class="muted">${esc(t('today.unavailable'))}</p>`; return }
   const evts = evenements()
-  if (!evts.length) { zone.innerHTML = `<p class="muted">${esc(t('today.empty'))}</p>`; return }
+  if (!evts.length) { aPlat(true); zone.innerHTML = `<p class="muted">${esc(t('today.empty'))}</p>`; return }
+  aPlat(false)
   zone.innerHTML = evts.map(e => {
     const arrivee = e.type === 'arrivee'
     const libelle = t(arrivee ? 'today.arrival' : 'today.departure')
@@ -1103,6 +1118,169 @@ function renderDerniersAvis () {
   $('[data-bind="reviews-head"]').innerHTML = enTeteAvisHtml(vue, outils)
   $('[data-list="reviews"]').innerHTML = blocAvisHtml(vue, outils)
   section.hidden = MUETS.has(vue.etat)
+  // ⚠ LA SUITE SE RE-ARME A CHAQUE RENDU, parce que ce rendu REMPLACE le
+  // contenu : la sentinelle d'avant a disparu avec, et l'observateur d'avant
+  // pointerait un noeud detache. Un rendu arrive aussi quand la moyenne
+  // arrive apres les cartes, ou au changement de compte.
+  armerLaSuiteDesAvis(vue, outils)
+}
+
+// ─── LA SUITE DES AVIS, AU DEFILEMENT ───────────────────────────────────────
+//
+// ⚠ TROIS AU DEPART, PUIS TROIS PAR TROIS, ET SEULEMENT SUR 30 JOURS.
+// Decision de Thierry du 29 octobre 2026, option 3 : « 30 jours, puis un lien
+// vers /avis ». Mesure en production le meme jour : 16 avis avec texte sur
+// 30 jours contre 645 au total — paginer jusqu'au premier avis aurait fait de
+// l'accueil un second /avis, et rendu FAUX le compte de son propre en-tete
+// (« N avis notes sur 30 jours »).
+//
+// ⚠ UN SEUL MECANISME POUR LES DEUX ECRANS, et c'est ce qui le rend juste :
+// `IntersectionObserver` avec la FENETRE pour racine. A l'ordinateur,
+// `.grid-avis` est une grille de trois colonnes qui s'allonge vers le bas, et
+// la sentinelle entre dans la fenetre quand la PAGE defile. Au telephone,
+// c'est un rail horizontal (`.scroll-x`, `overflow-x: auto`) : la sentinelle
+// est alors hors de la zone visible de ce rail, et le navigateur tient compte
+// du rognage des ancetres — elle n'intersecte donc la fenetre qu'une fois le
+// rail defile jusqu'a elle. Deux gestes differents, une seule regle.
+//
+// ⚠ ET LE BLOC RESTE EN LECTURE SEULE (spec §3) : aucune action n'est ajoutee,
+// la derniere carte est un LIEN vers /avis.
+let sentinelleAvis = null
+// ⚠ ON N'OBSERVE QU'APRES LE PREMIER DEFILEMENT, ET C'EST UNE MESURE QUI L'A
+// DECIDE. Le vrai `IntersectionObserver` appelle son rappel DES LA PREMIERE
+// OBSERVATION si la cible est dans la fenetre — il ne demande aucun geste.
+// Mesure au banc chrome-headless le 29 octobre 2026, sur le BALISAGE REEL de
+// cette page, dans le cas « journee vide » (celui que la retouche 3 raccourcit
+// le plus, donc le pire) :
+//   ordinateur 1280x900 : haut de la sentinelle a 1077 px, fenetre 900 px,
+//     `rootMargin` 200 px -> 1077 < 1100, DONC ELLE INTERSECTE AU CHARGEMENT ;
+//   telephone   390x844 : bord gauche a 858 px, hors de 390 + 200 -> non.
+// Sans cette garde, l'accueil partait donc a TROIS appels au chargement sur
+// ordinateur, alors que son budget est de DEUX et qu'un test le garde. Et
+// « quand on fait defiler on charge » sont les mots de la demande : le geste
+// fait partie du contrat, ce n'est pas un garde-fou de performance ajoute
+// par-dessus.
+// ⚠ `capture: true` ATTRAPE AUSSI LE DEFILEMENT DU RAIL. Un evenement `scroll`
+// ne remonte pas (il ne bouillonne pas) : sans la phase de capture, defiler le
+// rail des avis au telephone — le seul geste possible la-bas — n'armerait
+// jamais rien.
+let aDefile = false
+const auPremierDefilement = []
+if (typeof window.addEventListener === 'function') {
+  window.addEventListener('scroll', () => {
+    aDefile = true
+    while (auPremierDefilement.length) auPremierDefilement.pop()()
+  }, { capture: true, passive: true, once: true })
+}
+
+function armerLaSuiteDesAvis (vue, outils) {
+  if (sentinelleAvis) { sentinelleAvis.disconnect(); sentinelleAvis = null }
+  const zone = $('[data-list="reviews"]')
+  if (!zone || vue.etat !== 'liste') return
+  // Le curseur part de la DERNIERE carte rendue — la plus ancienne des trois.
+  const der = vue.cartes[vue.cartes.length - 1]
+  if (!der || !der.recu_le || der.id == null) return
+  let curseur = { recu_le: String(der.recu_le), id: String(der.id) }
+  let enCours = false
+
+  // ⚠ `IntersectionObserver` N'EXISTE PAS PARTOUT, et son absence ne doit pas
+  // retirer les trois premieres cartes. Sans lui, le bloc reste ce qu'il
+  // etait : trois avis et le lien de l'en-tete.
+  if (typeof window.IntersectionObserver !== 'function') return
+
+  const marque = document.createElement('div')
+  marque.setAttribute('data-bind', 'reviews-sentinelle')
+  marque.className = 'avis-suite'
+  zone.appendChild(marque)
+
+  // ⚠ CHAQUE ARMEMENT GARDE **SON** OBSERVATEUR DANS UNE LOCALE, et tout ce qui
+  // suit verifie qu'il est encore celui du module. C'est le constat GRAVE de la
+  // review du 29 octobre 2026, et il cassait la fonction dans le chemin NORMAL :
+  // `renderDerniersAvis()` est appele DEUX FOIS a chaque chargement (l. 2851
+  // depuis le cache, l. 2907 apres la lecture serveur). Le vrai
+  // `IntersectionObserver` appelle son rappel DES LA PREMIERE OBSERVATION si la
+  // cible est dans la fenetre — donc un chargement pouvait partir au rendu 1,
+  // le rendu 2 remplacait `zone.innerHTML` (DETACHANT la sentinelle 1), puis la
+  // promesse du rendu 1 se resolvait et : (a) `insertAdjacentHTML('beforebegin')`
+  // sur un noeud sans parent LEVE en navigateur, (b) son `finir()` lisait le
+  // `sentinelleAvis` de MODULE — devenu celui du rendu 2 — et le coupait. Plus
+  // aucun chargement pour le reste de la session, sans rien a l'ecran.
+  // ⚠ ET `enCours` NE SUFFISAIT PAS : il est par-closure, il serialise un
+  // observateur avec lui-meme, jamais deux rendus entre eux.
+  const mien = () => sentinelleAvis === mon && marque.parentNode
+  let mon = null
+
+  // La derniere carte du rail : le geste vers l'historique complet.
+  const finir = () => {
+    if (!mien()) return
+    mon.disconnect()
+    sentinelleAvis = null
+    marque.innerHTML = `<a class="link small" href="/avis">${esc(t('reviews.all'))}</a>`
+  }
+
+  const suivante = async () => {
+    if (enCours || !mien()) return
+    enCours = true
+    try {
+      const r = await appel('/api/ecran/avis-recents'
+        + `?depuis=${encodeURIComponent(curseur.recu_le)}`
+        + `&apres_id=${encodeURIComponent(curseur.id)}`)
+      // ⚠ `null` N'EST PAS `[]` ICI NON PLUS : une lecture qui a ECHOUE ne dit
+      // pas « plus rien ». On arrete sans affirmer la fin, et le lien vers
+      // /avis reste le chemin.
+      // ⚠ ET AUCUN TEST NE DISTINGUE CETTE GARDE, mesure par mutation : la
+      // retirer laisse la suite verte, parce que `vueDesAvis` rend lui aussi
+      // l'etat « illisible » sur un `derniers` qui n'est pas un tableau, donc
+      // zero carte et la meme sortie. Elle reste parce qu'elle dit le contrat a
+      // l'endroit du choix — pas parce qu'elle change quelque chose aujourd'hui.
+      // ⚠ ON REVERIFIE APRES L'ATTENTE. Un rendu a pu passer pendant l'appel :
+      // ecrire dans une sentinelle detachee leve, et couper l'observateur
+      // courant au nom d'un rendu perime est exactement le defaut d'avant.
+      if (!mien()) return
+      if (!r || !Array.isArray(r.avis)) { finir(); return }
+      const vueSuite = vueDesAvis({
+        derniers: r.avis,
+        notes: null,
+        biens: Array.isArray(etat.biens) ? etat.biens : [],
+        connu: true
+      })
+      for (const c of vueSuite.cartes) {
+        marque.insertAdjacentHTML('beforebegin', carteAvisHtml(c, outils))
+      }
+      const dernier = vueSuite.cartes[vueSuite.cartes.length - 1]
+      if (r.fin || !dernier || !dernier.recu_le || dernier.id == null) { finir(); return }
+      // ⚠ ET LE CURSEUR DOIT AVANCER. S'il ne bouge pas — un serveur qui rend
+      // trois fois la meme ligne —, le defilement redemanderait la MEME page
+      // indefiniment et empilerait les doublons sans borne. On s'arrete, et le
+      // lien vers /avis reste le chemin. Constat de la review du 29 octobre.
+      const neuf = { recu_le: String(dernier.recu_le), id: String(dernier.id) }
+      if (neuf.recu_le === curseur.recu_le && neuf.id === curseur.id) { finir(); return }
+      curseur = neuf
+    } catch (e) {
+      logger.error('Aujourdhui', 'avis-suite', e)
+      finir()
+    } finally {
+      enCours = false
+    }
+  }
+
+
+  // `rootMargin` : on charge AVANT que la sentinelle soit vraiment visible,
+  // pour que le defilement ne s'arrete pas sur un trou.
+  // ⚠ LE RAPPEL **REND** SA PROMESSE. Le navigateur ignore cette valeur ; un
+  // test, lui, ne peut pas attendre autrement — et sans l'attendre il asserte
+  // AVANT le premier `await` interne d'`appel()`, donc avant que la requete
+  // soit partie. C'est le faux vert « un test qui n'attend pas sa promesse »,
+  // deja paye dans ce depot ; ici il s'est manifeste a l'envers, en faux
+  // ROUGE, ce qui est la chance de l'histoire.
+  mon = new window.IntersectionObserver((entrees) => {
+    if (entrees.some(x => x.isIntersecting)) return suivante()
+  }, { rootMargin: '200px' })
+  sentinelleAvis = mon
+  // Le geste d'abord, l'observation ensuite. Si l'hote a deja defile une fois
+  // dans la session, on observe tout de suite.
+  if (aDefile) mon.observe(marque)
+  else auPremierDefilement.push(() => { if (mien()) mon.observe(marque) })
 }
 
 // ─── 6 et 7. LES DEUX APPELS A `/api/yield` PAR BIEN SONT RETIRES ───────────
@@ -2166,7 +2344,18 @@ function renderAnnee () {
     // n'est pas une couleur vive — ce sont deux OPACITES du meme `--muted`,
     // qui restent grises, tiennent en mode sombre, et se distinguent d'un coup
     // d'oeil parce que c'est la DENSITE qui change, pas la teinte.
-    for (const [nature, opacite] of [['clos', 0.34], ['futur', 0.11]]) {
+    // ⚠ ET ELLES SONT BEAUCOUP PLUS CLAIRES DEPUIS LA RECETTE DU 29 OCTOBRE
+    // 2026 (Thierry, en production) : « le gris est trop fonce, l'adoucir
+    // beaucoup, elle doit rester un fond discret derriere les courbes ».
+    // Elles etaient a 0,34 et 0,11 — la premiere posait un gris franc
+    // PAR-DESSUS lequel les deux courbes devaient se lire. Une bande de
+    // comparaison est un DECOR : si l'oeil la voit avant la courbe de l'hote,
+    // le rapport est inverse.
+    // ⚠ LE RAPPORT DE DEUX TIENT, et il est garde par un test : les deux
+    // bandes doivent rester distinguables (constat de la recette du 28) ET
+    // discretes (constat du 29). Baisser la seule foncee aurait referme le
+    // premier defaut en ouvrant le second.
+    for (const [nature, opacite] of [['clos', 0.15], ['futur', 0.07]]) {
       const min = douze(nature, 'min_cents')
       const max = douze(nature, 'max_cents')
       if (min.some(v => Number.isFinite(v))) bandes.push({ nature, min, max, couleur: 'var(--muted)', opacite })
