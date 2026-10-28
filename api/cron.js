@@ -121,6 +121,7 @@ const { dispatchBookingChanges } = require('../lib/booking-changes-dispatch')
 const { purgerSiDue } = require('../lib/cron-purge-tentatives')
 const { rattraperBloquees } = require('../lib/moteur-creation')
 const { piloterLesBiens } = require('../lib/pilote-quotidien')
+const { releverSiDu: releverComparables } = require('../lib/marche/comparables-releves')
 const { channelCall } = require('../lib/channel-fullsync')
 const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
@@ -203,6 +204,7 @@ module.exports = async function handler(req, res) {
     totalReviewsClassified: 0,
     totalMessagesClassified: 0,
     totalMenagesRattaches: 0,
+    totalComparablesReleves: 0,
     totalMenagesCrees: 0,
     totalBeds24Materialized: 0,
     totalTentativesAnonymisees: 0,
@@ -623,6 +625,53 @@ module.exports = async function handler(req, res) {
     catch (err) {
       console.error('[Cron] Erreur pilote YieldFlow:', err.message)
       results.errors.push({ context: 'pilote_yieldflow', error: err.message })
+    }
+
+    // 4quindecies. RELEVÉ MENSUEL DES COMPARABLES (spec-revenus-comparables).
+    // ⚠ UN LOGEMENT PAR PASSAGE, et seulement s'il n'a pas déjà été relevé ce
+    // mois-ci : chaque comparable coûte 0,10 $ par point d'appel AirROI, et un
+    // passage qui traiterait tout le parc d'un coup dépasserait les garde-fous
+    // au milieu — laissant la moitié du travail fait sans qu'on sache laquelle.
+    // ⚠ La cadence se lit sur le MOIS, pas sur une durée en millisecondes : un
+    // « >= 30 jours » finirait par sauter un mois une fois par an.
+    // ⚠ LE CLIENT EST UNE FABRIQUE, PAS UNE INSTANCE, et c'est une correction :
+    // j'avais écrit qu'il n'était « construit QUE si la tâche est due », alors
+    // qu'il était évalué comme ARGUMENT, donc à chacun des 288 ticks du jour.
+    // Sans conséquence de coût, mais c'était l'inverse de ce qui était écrit.
+    // Le module ne l'appelle que s'il a vraiment un bien à relever.
+    try {
+      await chrono.mesure('comparables_releves', async () => {
+        const { creerClient } = require('../lib/airroi/client')
+        const { depotSupabase } = require('../lib/airroi/depot')
+        // ⚠ LE MARQUEUR EST FOURNI PAR LE CRON, et c'est la frontiere V2 qui
+        // l'impose : `cron_logs` n'est pas une table du marche, et un module
+        // de `lib/marche/` n'a pas le droit de la nommer
+        // (tests/explication-marche.test.js). Le marche calcule, le cron
+        // cadence.
+        const MARQ = 'comparables_releves'
+        const bilanComp = await releverComparables(results, {
+          supabase,
+          client: () => creerClient({ depot: depotSupabase(supabase) }),
+          marqueur: {
+            lire: async () => {
+              const { data } = await supabase.from('cron_logs')
+                .select('last_run').eq('id', MARQ).maybeSingle()
+              return data && data.last_run
+            },
+            ecrire: async (iso, ecrites) => {
+              await supabase.from('cron_logs').upsert({
+                id: MARQ, last_run: iso, total_messages: ecrites || 0,
+                total_replies: 0, errors: []
+              }, { onConflict: 'id' })
+            }
+          }
+        })
+        results.totalComparablesReleves = bilanComp?.ecrites || 0
+      })
+    }
+    catch (err) {
+      console.error('[Cron] Erreur relevé comparables:', err.message)
+      results.errors.push({ context: 'comparables_releves', error: err.message })
     }
 
     // 4quaterdecies bis. NAISSANCE DES ÉVALUATIONS AU JOUR DU DÉPART (spec §9 bis).
