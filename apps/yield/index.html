@@ -338,6 +338,25 @@
     for (const id of ['yf-debut', 'yf-fin', 'yf-granularite']) {
       el(id).addEventListener('change', verifierEtendue)
     }
+    // ⚠ LE SELECTEUR DE LOGEMENT N'AVAIT AUCUN ECOUTEUR — constat de recette
+    // de Thierry du 28 octobre 2026, sur staging. Changer de logement ne
+    // declenchait RIEN, et l'ecran continuait d'afficher le premier bien de
+    // la liste.
+    //
+    // ⚠ CE QUI RENDAIT LE DEFAUT TOTAL, ET PAS SEULEMENT GENANT : le bouton
+    // « Charger » est MASQUE hors de la vue Exploration
+    // (`appliquerVue` : `el('yf-charger').hidden = vue !== 'exploration'`), et
+    // la vue par defaut est Pilotage. Il n'existait donc, sur l'ecran tel
+    // qu'il s'ouvre, AUCUN moyen de demander un autre logement : la seule
+    // requete jamais partie etait celle du chargement initial.
+    // Mesure du jour sur staging : `GET /api/yield` partait toujours avec le
+    // meme `property_id`, celui du premier bien par ordre alphabetique.
+    //
+    // ⚠ ET C'ETAIT LE SEUL DES SIX ECRANS YIELDFLOW A L'OUBLIER : prix,
+    // comparables, marche, marche-global et marche-temperature le posent
+    // tous. Un oubli isole, pas une famille — verifie ecran par ecran avant
+    // de corriger celui-ci.
+    el('yf-bien').addEventListener('change', charger)
     el('yf-annee').addEventListener('change', charger)
     verifierEtendue()
     if (ok && el('yf-bien').value) charger()
