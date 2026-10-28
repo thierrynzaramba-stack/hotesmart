@@ -1296,11 +1296,16 @@ réécrivant `ecrireConsigne` vers une table inexistante et des maillons qui
 n'existent pas, les 14 tests restaient verts — **y compris les assertions sur
 la note**, qui dépend de l'étape 3 du panneau, donc de supabase. Le double
 refuse désormais ce que le vrai refuse (deux listes tirées du fichier mesuré),
-et un test peut faire **échouer** ou **lever** une table nommée. La distinction
-compte : plusieurs lectures de la page font `if (error) return`, donc un
-`{ error }` y est avalé — c'est un **lever** qui remonte au `catch` de
-l'appelant, et ma première version du test du constat 6 ne forçait rien du tout
-(mutation rejouée : 0 rouge).
+et un test peut faire **échouer** une table nommée (`__echecTable`).
+
+⚠ **Ce paragraphe disait aussi « ou *lever* une table nommée », et c'était faux
+dans le commit même qui le périmait** (constat 6 de la revue suivante).
+`__leveTable` a été supprimé : **postgrest-js ne lève jamais** sans
+`.throwOnError()`. Il n'existe donc aucun moyen, pour un test, de faire remonter
+une erreur de lecture au `catch` d'un appelant — et une lecture qui fait
+`if (error) return`, comme `rechargerTaches`, l'avale définitivement. Le seul
+levier est `__echecTable`, et ce qu'il permet de mesurer, c'est ce que la page
+fait d'un `{ error }`, pas ce qu'elle fait d'une exception.
 
 **Constat 10 — l'en-tête du banc promettait plus que le banc ne tenait.** En
 coupant `init()`, aucun écouteur d'en-tête n'existait : ni le sélecteur de bien,
@@ -1399,6 +1404,58 @@ Le second programmait son geste de rupture dans un `setTimeout` — une
 **macrotâche** — alors que les doubles du banc résolvent en microtâches : le
 geste tombait après la fin de l'enregistrement. Les deux portent désormais une
 assertion qui vérifie que **le geste a mordu** avant de lire son résultat.
+
+### La troisième revue : quatre fois le même défaut, fermé d'un seul côté
+
+C'est la dernière que la règle autorise sur ce lot. Six constats, aucun de
+sécurité — et le fil conducteur est net : **quatre de mes correctifs fermaient
+un chemin et laissaient le chemin jumeau ouvert.**
+
+**L'en-tête du tiroir n'était gelée qu'à moitié.** Mon correctif du constat 7
+désarmait le sélecteur de bien pendant un enregistrement. Mais les deux boutons
+de volet vivent **aussi** hors de `tiroir-corps`, et restaient vivants : mesuré,
+un clic sur « Messages programmés » en cours d'écriture faisait atterrir le
+« Enregistré » **vert sous le volet Programmes**, dont rien n'avait été
+enregistré. Exactement le défaut que le constat 7 nomme, fermé pour un contrôle
+et laissé ouvert à côté. Les deux passent maintenant par un seul geste,
+`gelerEnTete()`.
+
+**Et il le gelait avec le mauvais drapeau.** `etat.modeEnCours` est posé par
+`basculerPause` **et** par les quatre écritures du volet Programmes. Or changer
+de bien ou de volet n'écrit rien : c'est de l'état local et un re-rendu. Le
+geler là rouvrait, pour ces contrôles, la famille de défaut que les points 1 et
+3 de la recette venaient de fermer pour les pilules et la sourdine. C'est
+`panneauEnCours`.
+
+**Le filet rendait les drapeaux et ne disait rien.** Même symptôme que le
+constat 3, de l'autre côté : sur le chemin d'**entrée**, un lever du premier
+`renderTiroir()` libérait bien les deux drapeaux, mais ne posait **aucune
+note** — l'hôte cliquait « Enregistrer » et ne lisait ni succès ni échec. Et la
+promesse rejetait sans consommateur. Le filet sur-annonce maintenant un échec,
+ce qui est la doctrine du dépôt à cet endroit (« sur-annoncer un échec fait
+réenregistrer, c'est idempotent ; le taire laisse un compte à rebours courir »),
+et le clic porte son `.catch`.
+
+**Et `geler(corps, false)` ne pouvait pas dégeler ce que le commit venait de
+geler** : il ne balaie que le corps, et `renderTiroir` touche le titre, le corps
+et le sélecteur **avant** la ligne qui remet l'en-tête à vif. Un lever dans ces
+lignes laissait le sélecteur et les boutons de volet désarmés sans aucun chemin
+de retour — alors que le commentaire d'à côté affirmait que ce dégel marchait
+« quand `renderTiroir` ne peut pas peindre ».
+
+⚠ **Un `catch` reste NON COUVERT, et c'est écrit à côté de lui** : celui du
+filet de l'enveloppe. Pour l'atteindre il faudrait que le premier re-rendu
+réussisse, qu'une exception **non rattrapée** passe ensuite — or les quatre
+étapes du corps ont chacune leur `try` — et que le re-rendu du filet lève à son
+tour. Je n'ai pas construit cet état. Il reste comme filet de second ordre, pas
+comme garantie mesurée.
+
+**Deux affirmations fausses de plus.** Le garde-fou d'`amorcer()` dans le banc
+prétendait détecter qu'`init()` ne branche plus le sélecteur : il ne vérifiait
+que la présence d'un nœud **statique** du squelette, et retirer l'écouteur le
+laissait vert. Et ce document lui-même disait, dans la section d'au-dessus,
+qu'un test peut faire « lever » une table — dans le commit qui supprimait ce
+levier. Les deux sont corrigées.
 
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 

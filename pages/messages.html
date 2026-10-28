@@ -1257,16 +1257,7 @@ function renderTiroir () {
   if (!etat.tiroirBien || !etat.biens.has(etat.tiroirBien)) etat.tiroirBien = refs[0] || null
   sel.innerHTML = refs.map(r =>
     `<option value="${esc(r)}" ${r === etat.tiroirBien ? 'selected' : ''}>${esc(etat.biens.get(r).name || r)}</option>`).join('')
-  // ⚠ LE SELECTEUR VIT HORS DE `tiroir-corps` (constat 7 de la revue du
-  // 28 octobre 2026) : ni `geler(corps, …)`, qui ne balaie que les descendants
-  // du corps, ni `off` / `offEdition`, qui ne vivent que dans le balisage de
-  // `voletIA`, ne l'atteignaient. Il restait donc vivant pendant les SIX
-  // allers-retours reseau d'un enregistrement — et changer de bien en cours de
-  // route faisait atterrir le « Enregistré » VERT sous un logement dont rien
-  // n'avait ete enregistre. C'est le defaut que la review du matin vient de
-  // fermer dans l'autre sens : vider la note au changement de bien ne suffit
-  // pas, puisqu'elle est REPOSEE a la fin de l'ecriture.
-  sel.disabled = etat.modeEnCours === true
+  gelerEnTete(etat.panneauEnCours === true)
   const ref = etat.tiroirBien
   if (!ref) { corps.innerHTML = `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`; return }
   if (etat.tiroirVolet === 'programmes') {
@@ -1863,7 +1854,11 @@ function brancherTiroir (corps, ref) {
   // il n'attend pas un « Enregistrer ».
   corps.querySelector('[data-tiroir-pause]')?.addEventListener('change', (e) =>
     basculerPause(ref, e.target.checked))
-  corps.querySelector('[data-panneau-save]')?.addEventListener('click', () => enregistrerPanneau(corps, ref))
+  // ⚠ LA PROMESSE A UN CONSOMMATEUR (constat 2 de la seconde revue) : sans ce
+  // `.catch`, un lever dans l'enregistrement remontait en `unhandledRejection`.
+  // Le filet a deja pose la note et degele le panneau ; ici on journalise.
+  corps.querySelector('[data-panneau-save]')?.addEventListener('click', () =>
+    enregistrerPanneau(corps, ref).catch(err => logger.error('Messages', 'enregistrement', err)))
   corps.querySelectorAll('[data-tester]').forEach(x => x.addEventListener('click', () => {
     const [type, canal] = x.dataset.tester.split('|')
     testerCanal(corps, ref, type, canal)
@@ -1938,12 +1933,33 @@ async function enregistrerPanneau (corps, ref) {
       // Le re-rendu DEFAIT le gel ; s'il leve a son tour, `geler(corps, false)`
       // relache les noeuds en place. Sans ce second filet, un panneau dont le
       // rendu casse reste desarme pour le reste de la session.
+      // ⚠ CE `catch` N'EST COUVERT PAR AUCUN TEST, ET JE LE DIS PLUTOT QUE DE
+      // LAISSER CROIRE LE CONTRAIRE. J'ai cherche un etat qui l'atteigne et je
+      // n'en ai pas construit : pour y arriver il faudrait que le PREMIER
+      // re-rendu reussisse (donc que l'en-tete soit gelee), qu'une exception
+      // NON RATTRAPEE passe ensuite — or les quatre etapes du corps ont chacune
+      // leur `try`, et `rechargerTaches` aussi — et que le re-rendu de ce filet
+      // leve a son tour. Il reste comme filet de second ordre pour le jour ou
+      // une etape non gardee entrera dans le corps ; ce n'est pas une garantie
+      // mesuree. Le `catch` du corps, lui, est tenu par mutation.
       try {
         renderTiroir()
       } catch (err) {
         logger.error('Messages', 'panneau degel', err)
-        try { geler(corps, false) } catch (e) { logger.error('Messages', 'panneau degel 2', e) }
+        try { geler(corps, false); gelerEnTete(false) } catch (e) { logger.error('Messages', 'panneau degel 2', e) }
       }
+      // ⚠ ET LE FILET DIT QUELQUE CHOSE (constat 2 de la seconde revue, mesure
+      // a l'appui). Il rendait les drapeaux et repeignait, mais ne posait
+      // AUCUNE note : l'hote cliquait « Enregistrer », une exception passait, et
+      // il ne lisait RIEN — ni succes, ni echec. C'est le symptome litteral du
+      // constat qu'on venait de fermer sur le chemin de sortie, laisse ouvert
+      // sur le chemin d'entree.
+      //
+      // Le filet ne sait pas ce qui est passe : il SUR-ANNONCE, et c'est la
+      // doctrine du depot a cet endroit — « sur-annoncer un echec fait
+      // reenregistrer (idempotent), le taire laisse un compte a rebours
+      // courir ». Le panneau est relu juste apres, l'hote y voit l'etat reel.
+      try { noteReglage(t('messages.mode_error')) } catch (e) { logger.error('Messages', 'panneau note', e) }
     }
   }
 }
@@ -2207,7 +2223,13 @@ async function enregistrerLePanneau (corps, ref) {
     renderTiroir()
   } catch (err) {
     logger.error('Messages', 'panneau re-rendu', err)
-    try { geler(corps, false) } catch (e) { logger.error('Messages', 'panneau degel', e) }
+    // ⚠ `geler(corps, false)` NE SUFFIT PAS (constat 3 de la seconde revue) :
+    // il ne balaie que le corps, et `renderTiroir` touche le titre, le corps et
+    // le selecteur AVANT la ligne qui remet l'en-tete a vif. Un lever dans ces
+    // lignes laissait le selecteur et les boutons de volet desarmes sans aucun
+    // chemin de retour, alors que le commentaire d'a cote affirmait que ce
+    // degel-la marchait « quand `renderTiroir` ne peut pas peindre ».
+    try { geler(corps, false); gelerEnTete(false) } catch (e) { logger.error('Messages', 'panneau degel', e) }
   }
   // ⚠ DEUX CLES, PAS UN « Enregistre » + '.' EN JAVASCRIPT. La ponctuation
   // appartient au texte traduit ; une phrase assemblee a coups d'operateurs se
@@ -2246,6 +2268,36 @@ async function ecrireConsigne (uid, propertyId, texte) {
 // POST serait silencieusement ecartee par le re-render (releve en review).
 function geler (corps, fige) {
   corps.querySelectorAll('textarea, input, button, select').forEach(x => { x.disabled = fige })
+}
+
+// ⚠ L'EN-TETE DU TIROIR VIT HORS DE `tiroir-corps`, DONC HORS DE TOUT GEL.
+// `geler(corps, …)` ne balaie que les descendants du corps, et `off` /
+// `offEdition` ne vivent que dans le balisage de `voletIA` : le selecteur de
+// bien ET les deux boutons de volet restaient vivants pendant les SIX
+// allers-retours reseau d'un enregistrement.
+//
+// Les deux defauts sont le MEME, et la premiere correction n'en avait ferme
+// qu'un (constats 7 puis 1 de deux revues successives) : changer de bien, ou
+// changer de volet, en cours d'ecriture faisait atterrir le « Enregistré »
+// VERT sous un logement — ou sous un volet — dont rien n'avait ete enregistre.
+// Mesure de la seconde revue : titre « Messages programmés », note « Enregistré »
+// en vert, sous le volet Programmes.
+//
+// ⚠ `panneauEnCours`, PAS `modeEnCours` (constat 4 de la seconde revue).
+// Changer de bien ou de volet n'ECRIT rien : c'est de l'etat local et un
+// re-rendu. Le geler pendant une ecriture de PAUSE rouvrirait, pour ces
+// contrôles, exactement la famille de defaut que les points 1 et 3 de la
+// recette viennent de fermer pour les pilules et la sourdine.
+//
+// ⚠ ET LE BOUTON DE FERMETURE RESTE VIVANT, DELIBEREMENT. Fermer pendant une
+// ecriture est une echappatoire legitime : le re-rendu final sort alors sans
+// peindre (tiroir cache) et `noteReglage` pose la note sous la saisie, la ou
+// l'hote la lit. Mesure de la revue : le panneau se retablit de lui-meme a la
+// reouverture.
+function gelerEnTete (fige) {
+  const sel = $('[data-bind="tiroir-bien"]')
+  if (sel) sel.disabled = fige === true
+  document.querySelectorAll('[data-ouvre-volet]').forEach(b => { b.disabled = fige === true })
 }
 
 

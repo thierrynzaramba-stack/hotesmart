@@ -417,6 +417,20 @@ test('LE TEST QUI COMPTE : bienDuFilOuvert refuse un bien hors du compte, par LU
   b.fermer()
 })
 
+test('LE TEST QUI COMPTE : une ecriture de pause ne gele PAS l en-tete du tiroir', async () => {
+  // Constat 4 de la seconde revue : le premier correctif avait pose
+  // `sel.disabled = etat.modeEnCours`, or `modeEnCours` est aussi pose par
+  // `basculerPause` et par les quatre ecritures du volet Programmes. Changer de
+  // bien ou de volet n ECRIT rien — c est de l etat local et un re-rendu — donc
+  // le geler la rouvrait, pour ces contrôles, la famille de defaut que les
+  // points 1 et 3 de la recette viennent de fermer.
+  await pendantLEcriturePause(async (b) => {
+    assert.equal(B.selBien(b).disabled, false, 'le selecteur n ecrit rien')
+    assert.equal(B.boutonVolet(b, 'programmes').disabled, false, 'les volets non plus')
+    assert.equal(B.casePause(b).disabled, true, 'la case de pause, elle, ecrit')
+  }, { delai: 15 })
+})
+
 test('LE TEST QUI COMPTE : la sourdine aussi reste editable pendant l ecriture de la pause', async () => {
   // Constat 3 : le comportement etait juste, mais AUCUN test ne le tenait —
   // remettre les trois controles de sourdine sous le gel de la pause laissait
@@ -468,10 +482,18 @@ test('LE TEST QUI COMPTE : le selecteur de bien est gele pendant l enregistremen
   const promesse = b.msg.enregistrerPanneau(B.corps(b), REF)
   await new Promise(r => setTimeout(r, 0))
   assert.equal(B.selBien(b).disabled, true, 'on ne change pas de logement pendant une ecriture')
+  // ⚠ ET LES DEUX BOUTONS DE VOLET AUSSI (constat 1 de la seconde revue, qui a
+  // mesure que le premier correctif n'avait ferme qu'un des deux chemins) :
+  // basculer de volet en cours d'ecriture faisait atterrir le « Enregistré »
+  // VERT sous le volet Programmes, dont rien n'avait ete enregistre.
+  assert.equal(B.boutonVolet(b, 'programmes').disabled, true, 'ni de volet')
+  assert.equal(B.boutonVolet(b, 'ia').disabled, true)
   debloquer()
   await promesse
   assert.equal(b.msg.etat.tiroirBien, REF, 'la note tombe sous le bien enregistre')
-  assert.equal(B.selBien(b).disabled, false, 'et le selecteur redevient vivant')
+  assert.equal(b.msg.etat.tiroirVolet, 'ia', 'et sous le volet enregistre')
+  assert.equal(B.selBien(b).disabled, false, 'et l en-tete redevient vivante')
+  assert.equal(B.boutonVolet(b, 'programmes').disabled, false)
   b.fermer()
 })
 
@@ -509,11 +531,24 @@ test('LE TEST QUI COMPTE : un lever pendant l enregistrement rend les deux drape
     biens: [{ ref: REF, nom: 'Loft Pilotable' }],
     config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } }
   })
-  // On retire du squelette une ancre dont `renderTiroir` a besoin : il leve.
+  // On retire du squelette une ancre dont `renderTiroir` a besoin : il leve, et
+  // c'est le PREMIER re-rendu — celui du chemin d'entree.
+  const volet = B.boutonVolet(b, 'programmes')
   B.selBien(b).remove()
   await assert.rejects(() => b.msg.enregistrerPanneau(B.corps(b), REF))
   assert.equal(b.msg.etat.panneauEnCours, false, 'le filet a rendu le drapeau du panneau')
   assert.equal(b.msg.etat.modeEnCours, false, 'et celui des ecritures')
+  // ⚠ ET IL DIT QUELQUE CHOSE (constat 2 de la seconde revue) : il rendait les
+  // drapeaux sans poser AUCUNE note — l'hote cliquait « Enregistrer » et ne
+  // lisait rien, ni succes ni echec. Le filet ne sait pas ce qui est passe,
+  // donc il sur-annonce : c'est la doctrine du depot a cet endroit.
+  assert.equal(b.note(), FR['messages.mode_error'], 'l hote lit quelque chose')
+  assert.equal(b.noteOk(), false)
+  // ⚠ ET L EN-TETE EST RENDUE A VIF (constat 3) : `geler(corps, false)` ne
+  // balaie que le corps, et le lever est tombe AVANT la ligne qui degele
+  // l en-tete. Sans ce second geste, les boutons de volet restaient desarmes
+  // sans aucun chemin de retour.
+  assert.equal(volet.disabled, false, 'les boutons de volet sont rendus')
   b.fermer()
 })
 
@@ -630,5 +665,11 @@ test('LE TEST QUI COMPTE : un lever du DERNIER re-rendu laisse quand meme la not
   assert.equal(corps.querySelector('[data-panneau-save]').disabled, false,
     'le panneau est utilisable sans dependre d un rendu : l hote peut reessayer')
   assert.equal(B.pilule(b, 60).disabled, false, 'et ses pilules aussi')
+  // ⚠ ET L EN-TETE AUSSI (constat 3 de la seconde revue). Ici le premier
+  // re-rendu a REUSSI, donc il a gele le selecteur et les boutons de volet ;
+  // c est le dernier qui leve, et `geler(corps, false)` ne les atteint pas —
+  // ils vivent hors du corps. Sans `gelerEnTete(false)` dans ce `catch`, ils
+  // restaient desarmes sans aucun chemin de retour.
+  assert.equal(B.boutonVolet(b, 'programmes').disabled, false, 'les boutons de volet sont rendus')
   b.fermer()
 })

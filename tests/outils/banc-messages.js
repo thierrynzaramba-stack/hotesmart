@@ -300,10 +300,18 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
 // passer, `peupler` ouvre le panneau directement.
 async function amorcer (banc) {
   await banc.window.__msg.init()
+  // ⚠ CE GARDE-FOU NE VERIFIE QUE LE SQUELETTE, ET SON COMMENTAIRE DISAIT LE
+  // CONTRAIRE (constat 5 de la seconde revue). Il affirmait « si `init()`
+  // cessait de brancher le selecteur, les tests passeraient au vert » — faux :
+  // `[data-bind="tiroir-bien"]` est un noeud STATIQUE de pages/messages.html,
+  // qu'`init()` ne cree pas. Retirer l'`addEventListener('change', …)` le
+  // laissait vert. Il ne sert donc qu'a dire « l'ancre existe encore ».
+  // Ce qui exerce VRAIMENT l'ecouteur, c'est le test « un aller-retour entre
+  // volets ne reprend pas le bien du fil » de
+  // tests/messages-panneau-ia-dom.test.js : il change de bien au selecteur et
+  // affirme que `etat.tiroirBien` a suivi.
   const sel = banc.doc.querySelector('[data-bind="tiroir-bien"]')
-  // Garde-fou : si `init()` cessait un jour de brancher le selecteur, les
-  // tests qui en dependent passeraient au vert en ne mesurant plus rien.
-  if (!sel) throw new Error('banc : le selecteur de bien a disparu du squelette')
+  if (!sel) throw new Error('banc : l ancre du selecteur de bien a disparu du squelette')
   banc.window.__amorce = true
   return banc
 }

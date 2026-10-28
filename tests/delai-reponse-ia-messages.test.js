@@ -499,11 +499,15 @@ test('⚠ RECETTE 4 : la note du tiroir est VISIBLE, pas au fond d un panneau qu
   // echec de la propagation). Ce qui reste ici est la seule chose qu un grep
   // mesure mieux qu un clic : que le drapeau vert soit decide par l ABSENCE
   // d echec, et par rien d autre.
-  // L ancre est le verrou de fin d enregistrement, pas « la derniere note du
-  // fichier » : `testerCanal` vient apres et en pose une aussi.
+  // L ancre est le verrou de fin du CORPS de l enregistrement. Ni « la derniere
+  // note du fichier » (`testerCanal` vient apres et en pose une aussi), ni la
+  // premiere apres le premier `panneauEnCours = false` : le FILET de
+  // l enveloppe en pose une lui aussi, et il est declare AVANT le corps.
   const sans = sansCommR(page)
-  const iFin = sans.indexOf('etat.panneauEnCours = false')
-  assert.ok(iFin > 0, 'le verrou du panneau se retire a la fin de l enregistrement')
+  const iCorps = sans.indexOf('async function enregistrerLePanneau')
+  assert.ok(iCorps > 0, 'le corps de l enregistrement existe')
+  const iFin = sans.indexOf('etat.panneauEnCours = false', iCorps)
+  assert.ok(iFin > iCorps, 'le verrou du panneau se retire a la fin du corps')
   const iDerniere = sans.indexOf('noteReglage(', iFin)
   assert.ok(iDerniere > iFin, 'et la note suit')
   const appel = sans.slice(iDerniere, iDerniere + 500)
