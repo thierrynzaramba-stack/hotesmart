@@ -356,24 +356,53 @@
     // comparables, marche, marche-global et marche-temperature le posent
     // tous. Un oubli isole, pas une famille — verifie ecran par ecran avant
     // de corriger celui-ci.
-    el('yf-bien').addEventListener('change', charger)
-    el('yf-annee').addEventListener('change', charger)
+    //
+    // ⚠ ET LES DEUX PASSENT PAR `chargerSiPossible`, JAMAIS PAR `charger`
+    // DIRECTEMENT — constat C1 de la review du 28 octobre 2026. Le pourquoi
+    // est sur la fonction elle-meme. `yf-annee` portait l'appel NU avant ce
+    // lot : le corriger ici aussi n'elargit pas le lot, c'est le meme defaut
+    // a son second declencheur.
+    el('yf-bien').addEventListener('change', chargerSiPossible)
+    el('yf-annee').addEventListener('change', chargerSiPossible)
     verifierEtendue()
     if (ok && el('yf-bien').value) charger()
+  }
+
+  // ⚠ LES TROIS GESTES QUI REDEMANDENT UNE LECTURE PASSENT PAR ICI — changer
+  // de logement, changer d'année, changer de vue. Deux gardes, et elles ne
+  // valent QUE si les trois points d'appel les appliquent : une seule qui
+  // appelle `charger()` directement les désarme pour tout l'écran.
+  //
+  // 1. AUCUN LOGEMENT SÉLECTIONNÉ — `charger()` partirait avec un
+  //    `property_id` vide, et son erreur technique écraserait le message
+  //    honnête « Aucun logement accessible sur ce compte. »
+  // 2. BOUTON « Afficher » GRISÉ — c'est `verifierEtendue` qui l'a grisé,
+  //    parce que la fenêtre demandée dépasse ce que l'endpoint rend (400).
+  //
+  // ⚠ ET LA SECONDE GARDE NE PROTÈGE PAS QUE LA REQUÊTE : elle protège
+  // l'AVERTISSEMENT. `charger()` remet `yf-charger.disabled = false` à la fin,
+  // alors que `verifierEtendue` ne repasse QUE sur changement de date, de
+  // détail ou de vue. Un appel non gardé réarmait donc le bouton
+  // DURABLEMENT — pas le temps d'un rendu — et l'hôte pouvait recliquer
+  // « Afficher » sur une fenêtre que le serveur refuse.
+  //
+  // ⚠ LE DÉFAUT ÉTAIT ANTÉRIEUR AU LOT QUI L'A RÉVÉLÉ (constat C1 de la
+  // review du 28 octobre 2026). `yf-annee` portait déjà
+  // `addEventListener('change', charger)` sans garde avant ce lot ; le
+  // sélecteur de logement n'a fait qu'ajouter un second déclencheur. Corriger
+  // le seul `yf-bien` aurait laissé la moitié du défaut vivante tout en
+  // écrivant qu'on l'avait fermé.
+  function chargerSiPossible () {
+    if (!el('yf-bien').value) return
+    if (el('yf-charger').disabled) return
+    charger()
   }
 
   function changerVue (nouvelle) {
     if (!nouvelle || nouvelle === vue) return
     vue = nouvelle
     appliquerVue()
-    // ⚠ LES MEMES GARDES QU'AU PREMIER CHARGEMENT — relevé en review.
-    // `charger()` inconditionnel court-circuitait l'avertissement d'étendue
-    // (revenir en Exploration avec une fenêtre trop large repartait en 400) et
-    // écrasait le message honnête « aucun logement accessible » par une erreur
-    // technique.
-    if (!el('yf-bien').value) return
-    if (el('yf-charger').disabled) return
-    charger()
+    chargerSiPossible()
   }
 
   function appliquerVue () {
