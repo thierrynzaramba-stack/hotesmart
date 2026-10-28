@@ -1889,15 +1889,115 @@ async function enregistrerPanneau (corps, ref) {
   const echoues = []
 
   // 1. Les delais (cible `delais`).
+  // ⚠ ET LES BROUILLONS DEJA EN ATTENTE SUIVENT (decision de Thierry du
+  // 28 octobre 2026). L'endpoint les reprend lui-meme — writer unique
+  // `lib/guestflow/appliquer-delai.js` — et rend son bilan dans `brouillons`.
+  // Trois issues, et les trois se DISENT :
+  //   · bilan absent ou `ok: false` -> le reglage est pris, les propositions
+  //     deja en attente ne l'ont pas suivi. C'est une partie non enregistree,
+  //     DISTINCTE des delais eux-memes : l'hote doit savoir que son ancien
+  //     compte a rebours court toujours ;
+  //   · `deja_prises` -> l'envoi avait DEJA pris ces taches : elles peuvent
+  //     partir avec le reglage d'avant, et c'est le seul cas ou « Enregistre »
+  //     serait un mensonge sur le chemin du voyageur (constat 2 de la revue) ;
+  //   · quelque chose a bouge -> on RELIT les taches, sinon le fil garde a
+  //     l'ecran l'echeance d'avant et l'ecran mentirait a nouveau.
+  const chargeDelais = {
+    reponse_ia: d.reponse_ia === null ? null : Math.max(0, Math.min(1440, d.reponse_ia)),
+    alerte_info: Math.max(0, Math.min(1440, d.alerte_info)),
+    sourdine: { active: d.sourdine.active === true, debut: d.sourdine.debut, fin: d.sourdine.fin }
+  }
+  let brouillonsRepris = 0
   try {
-    await appel('/api/agent-config', { delais_ref: ref, delais: {
-      reponse_ia: d.reponse_ia === null ? null : Math.max(0, Math.min(1440, d.reponse_ia)),
-      alerte_info: Math.max(0, Math.min(1440, d.alerte_info)),
-      sourdine: { active: d.sourdine.active === true, debut: d.sourdine.debut, fin: d.sourdine.fin }
-    } })
+    // ⚠ LE NOMBRE AVANT LE GESTE (constat 1 de la revue, et c'est une regle
+    // gravee du depot : 4.6.6 « exige leur nombre et leurs bornes », grille
+    // « N nuits vont changer de prix »). Sous « Je valide chaque reponse » les
+    // brouillons s'accumulent SANS echeance — ils attendent parce que l'hote ne
+    // les a pas valides, et il peut y en avoir un par (reservation x type),
+    // vieux de plusieurs jours. En sortir les rearme a `created_at + N` : tout
+    // ce qui a plus de N d'age est ECHU et part dans les cinq minutes, quel que
+    // soit N. Un hote qui choisit 24 h POUR ETRE PRUDENT verrait partir tout son
+    // arriere de plus de 24 h, et la confirmation lui a promis « apres le delai
+    // choisi ». Ici la cible est le telephone d'un voyageur : on compte d'abord.
+    // ⚠ REFUSER NE DOIT PAS COUTER LE RESTE DU PANNEAU (constat 2 de la
+    // derniere revue, et c'etait un vrai defaut de mon correctif). `delais`
+    // porte TROIS reglages : le delai de reponse, l'echeance d'alerte et la
+    // sourdine. Mon premier jet n'envoyait pas le POST du tout quand l'hote
+    // refusait de liberer son arriere — sa plage de sourdine etait perdue, et
+    // il n'avait aucun moyen de l'enregistrer sans accepter la liberation.
+    // On enregistre donc toujours, avec `propager: false` : les brouillons deja
+    // en attente gardent leur echeance (le comportement d'avant ce lot, et
+    // exactement ce que l'hote a choisi), et le reglage gouverne les suivants.
+    let propager = true
+    // Sur un bien qu'on SAIT en pause, aucune question : rien ne peut partir
+    // (`brouillons-dus.js` refuse des l'entree), donc annoncer un envoi serait
+    // le mensonge que ce chantier passe son temps a corriger. Si la carte des
+    // pauses n'est pas fiable, on demande — on ne suppose pas l'absence.
+    const enPauseSure = pausesFiables() && etat.pauses[String(ref)] === true
+    if (chargeDelais.reponse_ia !== null && !enPauseSure) {
+      const a = await appel('/api/agent-config',
+        { delais_ref: ref, apercu: true, delais: chargeDelais })
+      // ⚠ UN MARQUEUR POSITIF, PAS UNE ABSENCE (constat 5). `appel()` fait
+      // `r.json().catch(() => ({}))` : TOUT 200 dont le corps n'est pas du JSON
+      // — page HTML d'un proxy, d'un edge, d'une protection de deploiement —
+      // arrivait ici comme « endpoint plus ancien », donc feu vert sans
+      // garde-fou. Le seul filet de ce constat se refermait sur une reponse
+      // malformee.
+      const aRepondu = !!a && typeof a === 'object'
+      const ap = aRepondu && 'apercu' in a ? a.apercu : undefined
+      if (ap === undefined) {
+        if (aRepondu && a.delais_ref === ref) {
+          // Endpoint plus ancien que l'ecran (fenetre de deploiement) : il a
+          // IGNORE `apercu`, donc il vient d'enregistrer — et il n'a aucune
+          // propagation, donc rien ne part. Le POST qui suit est idempotent.
+          logger.error('Messages', 'apercu brouillons', 'endpoint sans apercu')
+        } else {
+          logger.error('Messages', 'apercu brouillons', 'reponse illisible')
+          propager = false
+        }
+      } else if (!ap || ap.ok !== true) {
+        // ⚠ NE PAS SAVOIR COMBIEN POURRAIENT PARTIR N'AUTORISE PAS A LES
+        // LIBERER. C'est la discipline de 4.6.6 — mais elle ne vaut que pour la
+        // LIBERATION, pas pour la sourdine : le reglage, lui, s'enregistre.
+        logger.error('Messages', 'apercu brouillons', (ap && ap.motif) || 'apercu absent')
+        propager = false
+      } else if (ap.echues > 0
+        && !window.confirm(t('messages.delai_arriere_confirm', { n: ap.echues }))) {
+        propager = false
+      }
+    }
+
+    const r = await appel('/api/agent-config',
+      { delais_ref: ref, delais: chargeDelais, propager })
+    const b = r && r.brouillons
+    if (!propager) {
+      // L'hote a refuse, ou l'ecran n'a pas pu compter : ses reglages sont
+      // enregistres, ses propositions deja en attente gardent leur echeance.
+      echoues.push(t('messages.partie_brouillons'))
+    } else if (!b || b.ok !== true) {
+      logger.error('Messages', 'brouillons en attente', (b && b.motif) || 'bilan absent')
+      echoues.push(t('messages.partie_brouillons'))
+    } else if (Number(b.deja_prises) > 0) {
+      echoues.push(t('messages.partie_deja_prises', { n: Number(b.deja_prises) }))
+    }
+    // ⚠ UN BILAN ABSENT NE VAUT PAS « RIEN N'A BOUGE ». Le chemin d'exception de
+    // l'endpoint remet les compteurs a zero alors que des `send_after` ont pu
+    // etre reecrits avant la coupure : on relit dans le doute, parce qu'un fil
+    // qui garde l'echeance d'avant est le defaut meme que ce lot ferme.
+    brouillonsRepris = (!b || b.ok !== true)
+      ? 1
+      : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0)
   } catch (err) {
     logger.error('Messages', 'delais', err)
+    // ⚠ UN APPEL QUI N'A PAS REPONDU NE DIT PAS CE QUI A ETE PRIS (constat 5).
+    // Le reglage est enregistre AVANT la propagation cote serveur : sur un
+    // depassement de duree, les delais peuvent etre ecrits et les brouillons
+    // non. On nomme donc les DEUX parties — sur-annoncer un echec fait
+    // reenregistrer (idempotent), le taire laisse un compte a rebours courir.
+    // Le panneau, lui, est RELU juste apres : l'hote y voit l'etat reel.
     echoues.push(t('messages.partie_delais'))
+    echoues.push(t('messages.partie_brouillons'))
+    brouillonsRepris = 1
   }
 
   // 2. Les alertes (cible `alertes`) — memes champs qu'avant.
@@ -1935,6 +2035,22 @@ async function enregistrerPanneau (corps, ref) {
   // L'etat d'edition repart de la base : ce qui n'est pas passe redevient
   // visible tel qu'il est enregistre, et l'hote voit ce qu'il doit refaire.
   etat.delaisEdit = null
+  // Les echeances ont bouge en base : le fil doit les relire, sinon il garde
+  // a l'ecran le compte a rebours d'avant — le defaut meme que ce lot corrige.
+  // ⚠ DANS SON PROPRE `try`, ET AVANT DE RENDRE LA MAIN (constat 8). Un lever
+  // dans `renderFil` sautait `renderTiroir()` et `noteReglage()` : la note
+  // disparaissait et le panneau restait FIGE (le `geler` d'entree ne se defait
+  // que par un re-rendu). Et `modeEnCours` passait a false AVANT l'await, donc
+  // la reentrance etait ouverte sur toute la duree du rechargement.
+  if (brouillonsRepris > 0) {
+    try {
+      await rechargerTaches()
+      renderFiltres(); renderListe(); renderFil()
+    } catch (err) {
+      logger.error('Messages', 'fil apres enregistrement', err)
+      echoues.push(t('messages.partie_brouillons'))
+    }
+  }
   etat.modeEnCours = false
   renderTiroir()
   noteReglage(echoues.length
