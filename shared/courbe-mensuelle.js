@@ -208,11 +208,34 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
     // ⚠ UNE OPACITE PAR BANDE, BORNEE. Deux enveloppes de GRIS VOISINS ne se
     // distinguent pas (recette du 28 octobre : « trop proches »), et le remede
     // n'est pas une couleur vive — c'est le MEME gris a deux densites. Bornee
-    // comme `epaisseur`, et non echappee mais NUMERIQUE : elle entre dans un
-    // attribut.
+    // comme `epaisseur`, et non echappee mais NUMERIQUE.
+    //
+    // ⚠⚠ ELLE PART EN STYLE **EN LIGNE**, PAS EN ATTRIBUT, ET C'EST TOUT CE QUI
+    // COMPTE ICI. Un attribut de presentation (`opacity="0.15"`) a la priorite
+    // la PLUS BASSE de la cascade : toute regle d'auteur l'emporte sur lui. Or
+    // `shared/ui.css` pose `.cm-bande { opacity: .85 }` et
+    // `.cm-bande-trait { opacity: .85 }` — donc l'attribut n'a JAMAIS rien
+    // applique. Mesure de Thierry en recette sur staging, puis reproduite au
+    // banc chrome le 28 octobre 2026 :
+    //   attribut demande  : 0.15 et 0.07
+    //   opacite CALCULEE  : 0.85 et 0.85
+    //   les deux bandes se distinguent : NON
+    // Deux consequences, et la seconde est la pire : l'adoucissement demande
+    // n'avait aucun effet, ET le constat « bandes trop proches » du 28 octobre
+    // n'avait jamais ete reellement corrige — les deux densites ne s'appliquaient
+    // pas. Un style en ligne, lui, bat une regle de classe.
+    //
+    // ⚠ ET ON NE RETIRE PAS LA REGLE CSS : `apps/yield/marche-temperature.html`
+    // et `apps/yield/prix.html` passent des bandes SANS opacite et comptent sur
+    // le 0,85 par defaut. La retirer les eclaircirait tous les deux.
+    //
+    // ⚠ MES DEUX TESTS LISAIENT L'ATTRIBUT, donc mon intention, jamais le rendu.
+    // C'est pourquoi le test de ce lot lit le style CALCULE dans un vrai
+    // navigateur (`tests/courbe-bande-rendu.test.js`).
     const opacite = Number.isFinite(Number(b.opacite)) && Number(b.opacite) > 0
       ? Math.min(1, Number(b.opacite))
       : null
+    const styleOpacite = opacite === null ? '' : ` style="opacity:${opacite}"`
     return morceaux.map(ks => {
       // ⚠ UN MOIS SEUL NE FAIT PAS UN POLYGONE : trois points confondus en
       // dessinent un de surface nulle, donc invisible. On lui donne un TRAIT
@@ -221,12 +244,12 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
         const k = ks[0]
         return `<line class="cm-bande-trait" x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" `
           + `y1="${y(mx[k]).toFixed(1)}" y2="${y(mn[k]).toFixed(1)}" stroke="${couleur}"`
-          + `${opacite === null ? '' : ` opacity="${opacite}"`}/>`
+          + `${styleOpacite}/>`
       }
       const haut = ks.map(k => `${x(k).toFixed(1)},${y(mx[k]).toFixed(1)}`)
       const bas = [...ks].reverse().map(k => `${x(k).toFixed(1)},${y(mn[k]).toFixed(1)}`)
       return `<polygon class="cm-bande" points="${haut.concat(bas).join(' ')}" fill="${couleur}"`
-        + `${opacite === null ? '' : ` opacity="${opacite}"`}/>`
+        + `${styleOpacite}/>`
     }).join('')
   }).join('')
 

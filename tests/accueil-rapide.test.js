@@ -2925,8 +2925,21 @@ test("LE TEST QUI COMPTE : les deux bandes se DISTINGUENT a l oeil", () => {
     }
   })
   const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
-  const op = [...svg.matchAll(/<polygon class="cm-bande"[^>]*opacity="([\d.]+)"/g)].map(m => Number(m[1]))
+  // ⚠ ON LIT LE `style`, PAS L'ATTRIBUT `opacity`, ET CE N'EST PAS UN DETAIL DE
+  // FORME. Un attribut de presentation a la priorite la PLUS BASSE de la
+  // cascade : `shared/ui.css` porte `.cm-bande { opacity: .85 }`, donc
+  // l'attribut n'appliquait RIEN. Mesure de Thierry en recette sur staging le
+  // 28 octobre 2026, puis au banc chrome : attribut 0,15 et 0,07, opacite
+  // CALCULEE 0,85 et 0,85 — les deux bandes identiques.
+  // ⚠ ET CE TEST ETAIT VERT PENDANT TOUT CE TEMPS, deux lots de suite : il
+  // lisait ce que le code ECRIT, donc mon intention, jamais ce que l'hote VOIT.
+  // Il garde desormais ce que le module CONTROLE — la valeur qu'il pose —, et
+  // la CASCADE est mesuree dans un vrai navigateur par
+  // `tests/courbe-bande-rendu.test.js`, le seul endroit du depot qui le fasse.
+  const op = [...svg.matchAll(/<polygon class="cm-bande"[^>]*style="opacity:([\d.]+)"/g)].map(m => Number(m[1]))
   assert.strictEqual(op.length, 2, `${op.length} bandes tracees au lieu de deux : ${svg.slice(0, 200)}`)
+  assert.strictEqual(/<polygon class="cm-bande"[^>]*\sopacity="/.test(svg), false,
+    'l opacite repart en ATTRIBUT : la regle `.cm-bande` de shared/ui.css l ecrasera')
   const [a, b] = op.slice().sort((x, y) => y - x)
   assert.ok(a / b >= 2,
     `les deux bandes sont a ${a} et ${b} d opacite : moins du double, elles ne se distinguent pas`)
