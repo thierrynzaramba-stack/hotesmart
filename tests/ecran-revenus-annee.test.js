@@ -386,6 +386,30 @@ test("LE TEST QUI COMPTE : une liste de biens TRONQUEE refuse le partage", async
 // mutations y survivaient, dont la SUPPRESSION DE LA GARDE 403. Le depot a
 // deja paye trois fois la classe « masquage sans garde serveur ».
 
+// ⚠ L'ANNEE ET LE MOIS VIENNENT DE L'HORLOGE, PAS D'UNE CONSTANTE, et c'est
+// la regle du depot : *dates relatives si le test lit l'horloge, dates figees
+// s'il injecte le temps.* Cet endpoint LIT l'horloge — `jourDeParis()` — et ne
+// prend aucun « aujourd'hui » en parametre : les fixtures doivent donc suivre.
+// ⚠ ET DANS LE MEME FUSEAU QUE LE CODE MESURE : `Europe/Paris`, comme
+// `jourDeParis()`. Mesurer en UTC ferait diverger un soir entre minuit et 2 h.
+//
+// ⚠ CE QUE CES AIDES ONT REPARE, mesure le 28 octobre 2026 : ces tests
+// portaient `annee: '2026'` en dur. L'endpoint ne calcule « reserve a date »
+// que pour l'annee EN COURS, donc a horloge decalee de 200 jours — en 2027 —
+// l'annee demandee devenait PASSEE, l'agregat n'etait plus appele, et QUATRE
+// tests rougissaient. De meme pour les releves de comparables, dates en
+// `2026-11` : a J+60 ces mois sont clos, et le filtre « futur sur un mois
+// clos » les ecartait. Six rouges au total, invisibles a l'heure reelle.
+const jourDeParis = () =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris' }).format(new Date())
+const AN = () => Number(jourDeParis().slice(0, 4))
+// Le mois « YYYY-MM » decale de `n` mois par rapport au mois courant.
+const moisDecale = (n) => {
+  const [a, m] = jourDeParis().split('-').map(Number)
+  const d = new Date(Date.UTC(a, m - 1 + n, 1))
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
+}
+
 const releve = (o = {}) => ({
   listing_id: '111', mois: '2026-05-01', nature: 'clos',
   montant_estime_cents: 500000, montant_affiche_cents: null,
@@ -416,7 +440,7 @@ test("LE TEST QUI COMPTE : un uuid malforme rend 400, pas une lecture", async ()
 
 test("LE TEST QUI COMPTE : sans `?bien=`, la table n est pas lue du tout", async () => {
   // Le budget de l ecran : la bande ne coute rien a qui ne la demande pas.
-  const r = await appeler({ query: { annee: '2026' }, releves: [releve()] })
+  const r = await appeler({ query: { annee: String(AN()) }, releves: [releve()] })
   assert.equal(r.statut, 200)
   assert.ok(!r.vu.selects.includes('comparables_releves'),
     'la table des comparables est lue sans logement designe')
@@ -427,16 +451,17 @@ test("LE TEST QUI COMPTE : un `futur` sur un mois DEJA CLOS est ecarte", async (
   // Il vient de drapeaux `available` releves AVANT la fin du mois. L ecran le
   // libellerait « occupe chez les comparables » — sur un mois termine.
   const r = await appeler({
-    query: { annee: '2026', bien: BIEN_A },
+    query: { annee: String(AN()), bien: BIEN_A },
     releves: [
-      releve({ mois: '2026-01-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 300000, nuits_mesurees: 31 }),
-      releve({ mois: '2026-05-01', nature: 'clos' })
+      // Un `futur` sur un mois DEJA PASSE : c'est le cas que ce test juge.
+      releve({ mois: `${moisDecale(-3)}-01`, nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 300000, nuits_mesurees: 31 }),
+      releve({ mois: `${moisDecale(-2)}-01`, nature: 'clos' })
     ]
   })
   assert.equal(r.statut, 200)
   const mois = r.charge.comparables.mois
-  assert.ok(!mois['2026-01'], 'un mois clos est trace dans la bande du futur, a partir de donnees perimees')
-  assert.ok(mois['2026-05'], 'le mois clos legitime a disparu : le test ne demontre rien')
+  assert.ok(!mois[moisDecale(-3)], 'un mois clos est trace dans la bande du futur, a partir de donnees perimees')
+  assert.ok(mois[moisDecale(-2)], 'le mois clos legitime a disparu : le test ne demontre rien')
 })
 
 test("LE TEST QUI COMPTE : un mois dont la COUVERTURE est partielle est ecarte", async () => {
@@ -444,22 +469,26 @@ test("LE TEST QUI COMPTE : un mois dont la COUVERTURE est partielle est ecarte",
   // tronque. Trace a cote d une courbe qui porte le mois entier, il s ecrase au
   // ras de l axe et l hote lit « mes comparables font dix fois moins que moi ».
   const r = await appeler({
-    query: { annee: '2026', bien: BIEN_A },
+    query: { annee: String(AN()), bien: BIEN_A },
     releves: [
-      releve({ mois: '2026-12-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 9380, nuits_mesurees: 4 }),
-      releve({ mois: '2026-11-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 300000, nuits_mesurees: 30 })
+      // Deux mois A VENIR : le second est entier, le premier tronque.
+      // ⚠ `nuits_mesurees: 4` CONTRE UN MOIS DE 28 A 31 JOURS : la valeur
+      // reste sous le plus court des mois, donc le test juge la meme chose en
+      // fevrier qu'en juillet.
+      releve({ mois: `${moisDecale(2)}-01`, nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 9380, nuits_mesurees: 4 }),
+      releve({ mois: `${moisDecale(1)}-01`, nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 300000, nuits_mesurees: 31 })
     ]
   })
   const mois = r.charge.comparables.mois
-  assert.ok(!mois['2026-12'], 'un mois couvert sur 4 nuits sur 31 est trace comme un mois entier')
-  assert.ok(mois['2026-11'], 'le mois complet a disparu : le test ne demontre rien')
+  assert.ok(!mois[moisDecale(2)], 'un mois couvert sur 4 nuits est trace comme un mois entier')
+  assert.ok(mois[moisDecale(1)], 'le mois complet a disparu : le test ne demontre rien')
   // ⚠ ET IL SE NOMME, au lieu d'etre perdu en silence. Demande de Thierry du
   // 28 octobre 2026, en recette : il avait vu « un trou entre septembre et
   // novembre » sans explication. Le motif existe deja en base, pose a
   // l'ecriture ; l'endpoint le jetait. Il part desormais dans `partiels`, et
   // l'ecran le met dans l'info-bulle du mois — pas en phrase sous la bande, le
   // texte y est deja trop long (dette 121).
-  assert.deepStrictEqual(r.charge.comparables.partiels, ['2026-12'],
+  assert.deepStrictEqual(r.charge.comparables.partiels, [moisDecale(2)],
     `les mois ecartes pour couverture partielle ne sont pas nommes : ${JSON.stringify(r.charge.comparables.partiels)}`)
 })
 
@@ -469,18 +498,18 @@ test("LE TEST QUI COMPTE : un mois QUI A SA BANDE n est jamais annonce partiel",
   // tronque : le tronque sort, la bande existe avec un comparable de moins —
   // ce que la note dit deja —, et le mois n'est PAS partiel.
   const r = await appeler({
-    query: { annee: '2026', bien: BIEN_A },
+    query: { annee: String(AN()), bien: BIEN_A },
     releves: [
       // Deux annonces sur le MEME mois : l'une entiere, l'autre tronquee.
-      releve({ listing_id: '111', mois: '2026-11-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 300000, nuits_mesurees: 30 }),
-      releve({ listing_id: '222', mois: '2026-11-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 9380, nuits_mesurees: 3 }),
+      releve({ listing_id: '111', mois: `${moisDecale(1)}-01`, nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 300000, nuits_mesurees: 31 }),
+      releve({ listing_id: '222', mois: `${moisDecale(1)}-01`, nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 9380, nuits_mesurees: 3 }),
       // Et un mois dont TOUTES les annonces sont tronquees : lui est partiel.
-      releve({ listing_id: '111', mois: '2026-12-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 9380, nuits_mesurees: 4 })
+      releve({ listing_id: '111', mois: `${moisDecale(2)}-01`, nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 9380, nuits_mesurees: 4 })
     ]
   })
-  assert.ok(r.charge.comparables.mois['2026-11'], 'le mois a perdu sa bande')
-  assert.deepStrictEqual(r.charge.comparables.partiels, ['2026-12'],
-    `novembre a une bande et se dit partiel : ${JSON.stringify(r.charge.comparables.partiels)}`)
+  assert.ok(r.charge.comparables.mois[moisDecale(1)], 'le mois a perdu sa bande')
+  assert.deepStrictEqual(r.charge.comparables.partiels, [moisDecale(2)],
+    `le mois a une bande et se dit partiel : ${JSON.stringify(r.charge.comparables.partiels)}`)
 })
 
 test("LE TEST QUI COMPTE : deux PHOTOS DE DATES DIFFERENTES ne se melangent pas", async () => {
@@ -488,7 +517,7 @@ test("LE TEST QUI COMPTE : deux PHOTOS DE DATES DIFFERENTES ne se melangent pas"
   // pourrait venir d une photo de juillet et le max d une d octobre, sous une
   // seule date affichee.
   const r = await appeler({
-    query: { annee: '2026', bien: BIEN_A },
+    query: { annee: String(AN()), bien: BIEN_A },
     releves: [
       releve({ listing_id: '111', mois: '2026-05-01', montant_estime_cents: 100000, releve_le: '2026-07-01' }),
       releve({ listing_id: '222', mois: '2026-05-01', montant_estime_cents: 900000, releve_le: '2026-10-06' }),
@@ -509,7 +538,7 @@ test("LE TEST QUI COMPTE : les deux grandeurs ne se min/maxent JAMAIS ensemble",
   // la meme grandeur. Les fondre ferait un min et un max qui ne parlent pas de
   // la meme chose — ce que la migration dit explicitement d eviter.
   const r = await appeler({
-    query: { annee: '2026', bien: BIEN_A },
+    query: { annee: String(AN()), bien: BIEN_A },
     releves: [
       releve({ listing_id: '111', mois: '2026-11-01', nature: 'clos', montant_estime_cents: 800000 }),
       releve({ listing_id: '222', mois: '2026-11-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 1000, nuits_mesurees: 30 })
@@ -527,7 +556,7 @@ test("LE TEST QUI COMPTE : une lecture ratee rend `null`, pas une bande vide", a
   // `null` veut dire « on n a pas pu lire ». Une bande vide dirait « ce
   // logement n a pas de comparables » — un fait, et il serait faux.
   const r = await appeler({
-    query: { annee: '2026', bien: BIEN_A },
+    query: { annee: String(AN()), bien: BIEN_A },
     erreurReleves: { message: 'panne' }
   })
   assert.equal(r.statut, 200)
@@ -546,7 +575,7 @@ test("LE TEST QUI COMPTE : d un MEME comparable, seule la photo la plus recente 
   // tri : c est a la fixture de le refleter, sinon le test mesurerait l ordre
   // du double et non la regle.
   const r = await appeler({
-    query: { annee: '2026', bien: BIEN_A },
+    query: { annee: String(AN()), bien: BIEN_A },
     releves: [
       releve({ listing_id: '111', mois: '2026-06-01', montant_estime_cents: 500000, releve_le: '2026-10-06' }),
       releve({ listing_id: '111', mois: '2026-06-01', montant_estime_cents: 100000, releve_le: '2026-07-01' })
@@ -566,7 +595,7 @@ test("LE TEST QUI COMPTE : un comparable SANS ACTIVITE ne tire pas le minimum a 
   // gagne zero », c est « il n etait pas sur le marche ». Le garder faisait
   // lire a l hote l effondrement d un comparable.
   const r = await appeler({
-    query: { annee: '2026', bien: BIEN_A },
+    query: { annee: String(AN()), bien: BIEN_A },
     releves: [
       releve({ listing_id: '111', mois: '2026-06-01', montant_estime_cents: 400000 }),
       releve({ listing_id: '222', mois: '2026-06-01', montant_estime_cents: 900000 }),
@@ -586,7 +615,7 @@ test("LE TEST QUI COMPTE : un comparable SANS ACTIVITE ne tire pas le minimum a 
 test("LE TEST QUI COMPTE : un mois dont TOUS les comparables sont fermes n a pas de bande", async () => {
   // Et ce n est PAS une bande a zero : il n y a rien a comparer.
   const r = await appeler({
-    query: { annee: '2026', bien: BIEN_A },
+    query: { annee: String(AN()), bien: BIEN_A },
     releves: [
       releve({ listing_id: '111', mois: '2026-07-01', montant_estime_cents: 0 }),
       releve({ listing_id: '222', mois: '2026-07-01', montant_estime_cents: 0 }),
@@ -605,10 +634,10 @@ test("LE TEST QUI COMPTE : le pivot est le MEME JOUR un an plus tot", async () =
   // 3 reservations la ou il y en a 15, et j en avais conclu que le signal etait
   // trop faible pour etre trace. Un pivot faux ne rend pas un resultat faux :
   // il rend une CONCLUSION fausse.
-  const r = await appeler({ query: { annee: '2026' } })
+  const r = await appeler({ query: { annee: String(AN()) } })
   const appelRad = r.vu.rpc.find(a => a.nom === 'revenus_reserve_a_date')
   assert.ok(appelRad, 'l agregat « reserve a date » n est pas appele')
-  assert.strictEqual(appelRad.args.p_annee, 2025, 'l agregat ne porte pas sur l annee precedente')
+  assert.strictEqual(appelRad.args.p_annee, AN() - 1, 'l agregat ne porte pas sur l annee precedente')
   const [an, mois, jour] = String(appelRad.args.p_pivot).split('-')
   const auj = String(r.charge.jour).split('-')
   assert.strictEqual(Number(an), Number(auj[0]) - 1, `le pivot est en ${an}, pas un an avant ${auj[0]}`)
@@ -622,19 +651,19 @@ test("LE TEST QUI COMPTE : sous le SEUIL, le montant n est pas rendu", async () 
   // etre trace par accident. Taire les deux laisserait l ecran muet sur un
   // refus qu il doit nommer.
   const r = await appeler({
-    query: { annee: '2026' },
+    query: { annee: String(AN()) },
     lignesRad: [
       { property_uuid: BIEN_A, mois: 11, sejours: 2, total_cents: 50000, sans_date_annulation: 0, non_fiables: 0 },
       { property_uuid: BIEN_A, mois: 12, sejours: 9, total_cents: 210000, sans_date_annulation: 0, non_fiables: 0 }
     ]
   })
   const m = r.charge.reserve_a_date.mois
-  assert.strictEqual(m['2025-11'].sous_seuil, true, 'un mois a 2 ventes passe le seuil')
-  assert.strictEqual(m['2025-11'].sejours, 2, 'le compte ne sort pas : le refus ne peut pas etre explique')
-  assert.strictEqual(m['2025-11'].total_cents, undefined,
+  assert.strictEqual(m[`${AN() - 1}-11`].sous_seuil, true, 'un mois a 2 ventes passe le seuil')
+  assert.strictEqual(m[`${AN() - 1}-11`].sejours, 2, 'le compte ne sort pas : le refus ne peut pas etre explique')
+  assert.strictEqual(m[`${AN() - 1}-11`].total_cents, undefined,
     'le montant sort alors que le mois est sous le seuil : il pourrait etre trace')
-  assert.strictEqual(m['2025-12'].sous_seuil, false, 'un mois a 9 ventes est refuse a tort')
-  assert.strictEqual(m['2025-12'].total_cents, 210000)
+  assert.strictEqual(m[`${AN() - 1}-12`].sous_seuil, false, 'un mois a 9 ventes est refuse a tort')
+  assert.strictEqual(m[`${AN() - 1}-12`].total_cents, 210000)
 })
 
 test("LE TEST QUI COMPTE : sur une annee PASSEE, aucun « reserve a date »", async () => {
@@ -651,12 +680,12 @@ test("LE TEST QUI COMPTE : les reserves de l agregat REMONTENT a l ecran", async
   // `sans_date_annulation` et `non_fiables` existent pour etre DITS. Channex ne
   // fournit aucune date d annulation : leur part grandira avec la bascule.
   const r = await appeler({
-    query: { annee: '2026' },
+    query: { annee: String(AN()) },
     lignesRad: [
       { property_uuid: BIEN_A, mois: 11, sejours: 8, total_cents: 90000, sans_date_annulation: 3, non_fiables: 2 }
     ]
   })
-  const m = r.charge.reserve_a_date.mois['2025-11']
+  const m = r.charge.reserve_a_date.mois[`${AN() - 1}-11`]
   assert.strictEqual(m.sans_date_annulation, 3, 'les annulations sans date ne remontent pas')
   assert.strictEqual(m.non_fiables, 2, 'les dates de vente non fiables ne remontent pas')
 })
@@ -668,7 +697,7 @@ test("LE TEST QUI COMPTE : le seuil s applique A CHAQUE PERIMETRE, pas au seul c
   // une comparaison que ses trois ventes ne portent pas — et le montant
   // sortirait, donc il serait tracable.
   const r = await appeler({
-    query: { annee: '2026' },
+    query: { annee: String(AN()) },
     lignesRad: [
       { property_uuid: BIEN_A, mois: 11, sejours: 3, total_cents: 60000, sans_date_annulation: 0, non_fiables: 0 },
       { property_uuid: BIEN_B, mois: 11, sejours: 7, total_cents: 140000, sans_date_annulation: 0, non_fiables: 0 }
@@ -676,14 +705,14 @@ test("LE TEST QUI COMPTE : le seuil s applique A CHAQUE PERIMETRE, pas au seul c
   })
   const rad = r.charge.reserve_a_date
   // Le COMPTE additionne 3 + 7 = 10 : il passe.
-  assert.strictEqual(rad.mois['2025-11'].sous_seuil, false, 'le compte est refuse alors qu il totalise 10 ventes')
-  assert.strictEqual(rad.mois['2025-11'].total_cents, 200000)
+  assert.strictEqual(rad.mois[`${AN() - 1}-11`].sous_seuil, false, 'le compte est refuse alors qu il totalise 10 ventes')
+  assert.strictEqual(rad.mois[`${AN() - 1}-11`].total_cents, 200000)
   // BIEN_A, lui, n en a que 3 : il est refuse, et son montant ne sort pas.
-  assert.strictEqual(rad.par_bien[BIEN_A]['2025-11'].sous_seuil, true,
+  assert.strictEqual(rad.par_bien[BIEN_A][`${AN() - 1}-11`].sous_seuil, true,
     'un bien a 3 ventes passe le seuil parce que le COMPTE le passe')
-  assert.strictEqual(rad.par_bien[BIEN_A]['2025-11'].total_cents, undefined,
+  assert.strictEqual(rad.par_bien[BIEN_A][`${AN() - 1}-11`].total_cents, undefined,
     'le montant d un bien sous le seuil sort quand meme : il pourrait etre trace')
   // BIEN_B en a 7 : il passe.
-  assert.strictEqual(rad.par_bien[BIEN_B]['2025-11'].sous_seuil, false)
-  assert.strictEqual(rad.par_bien[BIEN_B]['2025-11'].total_cents, 140000)
+  assert.strictEqual(rad.par_bien[BIEN_B][`${AN() - 1}-11`].sous_seuil, false)
+  assert.strictEqual(rad.par_bien[BIEN_B][`${AN() - 1}-11`].total_cents, 140000)
 })
