@@ -113,7 +113,17 @@ revoke all on sequence
 -- ATTENDU — UNE LIGNE :
 --   colonnes      14
 --   contraintes    3   (nature, listing_id, unicite)
---   index          3   (pk + les deux poses)
+--   index          4   (pk, l'unicite, + les deux poses)
+--
+-- ⚠ J'AVAIS ECRIT 3, ET C'ETAIT FAUX. Une contrainte
+-- `unique` est PORTEE PAR SON PROPRE INDEX, que
+-- PostgreSQL cree sans qu'on le demande : il s'ajoute
+-- a celui de la cle primaire et aux deux poses ici.
+-- Mesure du collage sur staging, 28 octobre 2026 : 4.
+-- La base avait raison, l'attendu avait tort — et un
+-- attendu faux fait chercher un defaut qui n'existe
+-- pas, ce qui est exactement ce que cette preuve est
+-- censee eviter.
 --   rls          true
 --   anon_peut    false
 --   authent_peut false

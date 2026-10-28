@@ -41,7 +41,12 @@ const TACHES = [
   'poll_avis_beds24', 'classification_avis',
   'detection_messages', 'rattacher_menages', 'sync_menages', 'expirer_offres',
   'propositions_dues', 'relance_validation', 'tentatives_bloquees',
-  'purge_tentatives', 'pilote_yieldflow', 'naissances_avis', 'relances_avis',
+  'purge_tentatives', 'pilote_yieldflow',
+  // 28 octobre 2026 — le releve mensuel des comparables
+  // (spec-revenus-comparables). Place APRES le pilote, comme lui une tache
+  // a cadence lente qui ne traite qu'UN bien par passage.
+  'comparables_releves',
+  'naissances_avis', 'relances_avis',
   'auto_validation_avis', 'dispatch_changements',
   // Dette 59, 19 octobre 2026 — la seule entree neuve de ce lot.
   'releve_canaux'
