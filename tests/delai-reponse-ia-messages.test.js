@@ -556,3 +556,224 @@ test('⚠ RECETTE 6 : a instant EGAL, l ordre du fil ne depend pas de l arrivee'
   assert.ok(/\.order\('created_at', \{ ascending: false \}\)\.order\('id', \{ ascending: true \}\)/
     .test(sans), 'la lecture des taches a un second ordre sur `id`')
 })
+
+// ─── LA RECETTE DU 28 OCTOBRE 2026, SECONDE PASSE ────────────────────────────
+// Controles A et B conformes ; un defaut, et une decision produit.
+
+test('⚠ RECETTE 7 : sur un bien en PAUSE, le bandeau ne promet aucun envoi', () => {
+  const page = lireR('pages/messages.html')
+  const sans = sansCommR(page)
+
+  // On EXECUTE le juge des quatre etats : une forme greppee ne dit pas lequel
+  // gagne quand deux conditions sont vraies en meme temps.
+  const mJuge = sans.match(/function etatEcheance \(x, pauses, fiables\) \{[\s\S]*?\n\}/)
+  assert.ok(mJuge, 'un seul juge decide les etats du bandeau')
+  const valide = (iso) => iso != null && Number.isFinite(new Date(iso).getTime())
+  const juge = new Function('valide', `${mJuge[0]}; return etatEcheance`)(valide)
+  // La carte est FIABLE dans la plupart des cas ci-dessous : son defaut a son
+  // propre jeu d assertions, plus bas.
+  const etatEcheance = (x, pauses) => juge(x, pauses, true)
+
+  const DUE = new Date(Date.now() - 4 * 60000).toISOString()
+  const AVENIR = new Date(Date.now() + 50 * 60000).toISOString()
+  const EN_PAUSE = { STG3: true }
+
+  // Le defaut releve par Thierry : echue, bien en pause, « Part d'un instant a
+  // l'autre » — alors que `brouillons-dus.js` refuse la tache des l'entree.
+  assert.equal(etatEcheance({ send_after: DUE, property_id: 'STG3' }, EN_PAUSE), 'pause',
+    'une echeance DEPASSEE sur un bien en pause ne dit pas qu elle part')
+  // « Meme chose avant l'echeance : pas de compte a rebours sur un bien en pause. »
+  assert.equal(etatEcheance({ send_after: AVENIR, property_id: 'STG3' }, EN_PAUSE), 'pause',
+    'et pas de compte a rebours avant l echeance non plus')
+  // La pause passe avant la suspension : c'est la seule des deux phrases qui
+  // explique pourquoi le compte a rebours ne reprendra pas.
+  assert.equal(etatEcheance({ send_after: AVENIR, property_id: 'STG3', suspendu_le: DUE }, EN_PAUSE),
+    'pause', 'la pause passe avant « vous modifiez »')
+  // Et rien n'a bouge pour les biens qui ne sont PAS en pause.
+  assert.equal(etatEcheance({ send_after: AVENIR, property_id: 'AUTRE' }, EN_PAUSE), 'compte')
+  assert.equal(etatEcheance({ send_after: AVENIR, property_id: 'AUTRE', suspendu_le: DUE }, EN_PAUSE),
+    'suspendu')
+  assert.equal(etatEcheance({ send_after: null, property_id: 'STG3' }, EN_PAUSE), 'aucun',
+    'sans echeance (validation manuelle) il n y a rien a dire, pause ou pas')
+  // Un bien absent de la carte, et une carte absente : jamais une exception.
+  assert.equal(etatEcheance({ send_after: AVENIR, property_id: 'STG3' }, {}), 'compte')
+  assert.equal(etatEcheance({ send_after: AVENIR }, undefined), 'compte')
+
+  // L'etat « pause » est GRIS et porte la phrase de Thierry : l'ambre dit
+  // « c'est en cours », et rien n'est en cours.
+  const mBandeau = sans.match(/function bandeauEcheance \(x\) \{[\s\S]*?\n\}/)
+  assert.ok(mBandeau, 'bandeauEcheance existe')
+  // La branche SEULE : du test de l etat jusqu a celui de l etat suivant. Un
+  // grep sur toute la fonction serait vert par la branche « suspendu », qui
+  // porte deja le gris.
+  const iP = mBandeau[0].indexOf("if (e === 'pause')")
+  const iS = mBandeau[0].indexOf("if (e === 'suspendu')")
+  assert.ok(iP > 0 && iS > iP, 'la pause est testee, et AVANT la suspension')
+  const brPause = mBandeau[0].slice(iP, iS)
+  assert.ok(/bulle__echeance--suspendu/.test(brPause),
+    'la pause reutilise le gris, jamais l ambre')
+  assert.ok(!/bulle__echeance">/.test(brPause), 'donc jamais le bandeau ambre nu')
+  assert.ok(/messages\.en_pause_pas_seule/.test(brPause),
+    'et elle porte sa propre phrase, pas « vous modifiez »')
+  assert.ok(!/etiquetteEcheance/.test(brPause),
+    'et aucun compte a rebours : c est le defaut de la recette')
+  for (const f of ['fr', 'en', 'es']) {
+    const dict = JSON.parse(lireR(`shared/i18n/${f}.json`))
+    const phrase = dict['messages.en_pause_pas_seule']
+    assert.ok(typeof phrase === 'string' && phrase.trim().length > 5,
+      `${f} traduit la phrase de la pause`)
+    assert.ok(!/\{/.test(phrase), `${f} : la phrase ne prend aucun parametre`)
+  }
+
+  // ⚠ « Envoyer dans X » EST un compte a rebours : il ARME une echeance que le
+  // serveur refusera, donc il disparait aussi.
+  // ⚠ ET ON L EXECUTE, parce que la premiere version de ce test greppait la
+  // forme : la revue l a mis en defaut en sortant l expression dans une variable
+  // MORTE — le bouton revenait sur un bien en pause, et rien ne rougissait.
+  const mReste = sans.match(/const REPRISE_MIN_MS_ECRAN = [^\n]+\n/)
+  const mCalc = sans.match(/function resteALaReprise \(x\) \{[\s\S]*?\n\}/)
+  const mPeut = sans.match(/function peutReprendre \(x, pauses, fiables\) \{[\s\S]*?\n\}/)
+  assert.ok(mReste && mCalc && mPeut, 'la condition du bouton de reprise est une fonction PURE')
+  const peutReprendre = new Function('valide',
+    `${mReste[0]}${mJuge[0]}\n${mCalc[0]}\n${mPeut[0]}; return peutReprendre`)(valide)
+
+  const suspenduIlYa = (min) => new Date(Date.now() - min * 60000).toISOString()
+  assert.equal(peutReprendre(
+    { send_after: AVENIR, property_id: 'AUTRE', suspendu_le: suspenduIlYa(5) }, EN_PAUSE, true),
+  true, 'hors pause, une tache suspendue garde son « Envoyer dans X »')
+  assert.equal(peutReprendre(
+    { send_after: AVENIR, property_id: 'STG3', suspendu_le: suspenduIlYa(5) }, EN_PAUSE, true),
+  false, 'sur un bien EN PAUSE, le bouton disparait')
+  assert.equal(peutReprendre(
+    { send_after: AVENIR, property_id: 'AUTRE', suspendu_le: suspenduIlYa(5) }, EN_PAUSE, false),
+  false, 'et carte non fiable, il ne promet rien non plus')
+  assert.equal(peutReprendre({ send_after: AVENIR, property_id: 'AUTRE' }, EN_PAUSE, true),
+    false, 'sans suspension, il n y a rien a reprendre')
+  assert.equal(peutReprendre({ send_after: null, property_id: 'AUTRE', suspendu_le: suspenduIlYa(5) },
+    EN_PAUSE, true), false, 'et sans echeance non plus')
+  // Le pied s en sert, et plus rien d autre ne decide a sa place.
+  const mPied = sans.match(/function piedEcheance \(x\) \{[\s\S]*?\n\}/)
+  assert.ok(mPied, 'piedEcheance existe')
+  assert.ok(/peutReprendre\(x, etat\.pauses, pausesFiables\(\)\)/.test(mPied[0]),
+    'le pied appelle la fonction pure')
+  assert.ok(!/suspendu_le &&/.test(mPied[0]),
+    'et il ne garde aucune copie de la condition')
+  // « Ne pas envoyer » reste TOUJOURS : c est la main que l hote garde.
+  assert.ok(/data-rejeter="\$\{id\}"/.test(mPied[0]) && !/rejeter[\s\S]{0,40}\?/.test(mPied[0]),
+    'l abandon n est jamais conditionne')
+
+  // ⚠ LES DEUX PLACES SONT COMPTEES, PAS SUPPOSEES — constat 1 de la revue du
+  // 28 octobre 2026, mesure par mutation : remettre la cascade dans la BULLE
+  // laissait ce test vert, donc le defaut exact releve par Thierry pouvait
+  // revenir avec la suite entiere au vert. Le perimetre est donc le meme que
+  // celui de RECETTE 5 : toute occurrence de la classe, et chacune verifiee.
+  const places = [...sans.matchAll(/class="bulle__echeance/g)]
+  assert.ok(places.length >= 1, 'la classe du bandeau existe')
+  const mBandeauBrut = page.match(/function bandeauEcheance \(x\) \{[\s\S]*?\n\}/)
+  assert.ok(mBandeauBrut, 'bandeauEcheance existe dans le fichier brut')
+  for (const m of [...page.matchAll(/class="bulle__echeance/g)]) {
+    assert.ok(m.index >= mBandeauBrut.index
+      && m.index < mBandeauBrut.index + mBandeauBrut[0].length,
+      `la classe du bandeau n est ecrite QUE dans bandeauEcheance (trouvee a ${m.index})`)
+  }
+  // Et les DEUX appelants l appellent : la bulle de proposition du fil...
+  const mBulle = sans.match(/morceaux\.push\(`<div class="bulle bulle--proposition[\s\S]*?\n/)
+  assert.ok(mBulle, 'le gabarit de la bulle de proposition existe')
+  assert.ok(/bandeauEcheance\(x\)/.test(mBulle[0]),
+    'la BULLE appelle bandeauEcheance — c est la place ou Thierry a vu le defaut')
+  // ...et le bandeau au-dessus de la saisie.
+  const mSaisie = sans.match(/function peindreEcheanceSaisie \(\) \{[\s\S]*?\n\}/)
+  assert.ok(mSaisie, 'peindreEcheanceSaisie existe')
+  assert.ok(/bandeauEcheance\(x\)/.test(mSaisie[0]),
+    'la SAISIE appelle le MEME bandeau que la bulle')
+
+  // ⚠ ET QUAND L ECRAN NE SAIT PAS, IL NE PROMET RIEN (constats 4 et 5). La
+  // carte des pauses peut etre illisible, et sur un compte DELEGUE elle ne parle
+  // pas des biens affiches : /api/property-automation n honore pas `X-Compte`.
+  assert.equal(juge({ send_after: AVENIR, property_id: 'AUTRE' }, EN_PAUSE, false), 'inconnu',
+    'carte non fiable : aucun compte a rebours')
+  assert.equal(juge({ send_after: AVENIR, property_id: 'AUTRE', suspendu_le: DUE }, EN_PAUSE, false),
+    'inconnu', 'et pas davantage « vous modifiez », qui ouvrirait la reprise')
+  assert.equal(juge({ send_after: DUE, property_id: 'STG3' }, EN_PAUSE, false), 'pause',
+    'une pause CONNUE reste dite, meme si la carte est par ailleurs douteuse')
+  assert.equal(juge({ send_after: AVENIR, property_id: 'A' }, { A: false }, undefined), 'inconnu',
+    'la fiabilite doit etre VRAIE, pas seulement non fausse')
+  const mInconnu = sans.match(/function bandeauEcheance \(x\) \{[\s\S]*?\n\}/)
+  assert.ok(/=== 'aucun' \|\| e === 'inconnu'\) return ''/.test(mInconnu[0]),
+    'et « inconnu » ne peint rien du tout')
+  assert.ok(/const pausesFiables = \(\) => etat\.pausesLues === true && estTitulaire\(\)/.test(sans),
+    'la fiabilite = lecture reussie ET compte de l appelant')
+  assert.ok(/etat\.pausesLues = true/.test(sans) && /etat\.pausesLues = false/.test(sans),
+    'les deux ecritures de la carte posent le drapeau')
+})
+
+test('⚠ RECETTE 8 : quitter la validation manuelle ne pose plus « Tout de suite »', () => {
+  const page = lireR('pages/messages.html')
+  const sans = sansCommR(page)
+
+  const mFn = sans.match(/const DELAI_SORTIE_MANUEL = \d+\s*\nfunction delaiDeSortieManuelle \(d\) \{[\s\S]*?\n\}/)
+  assert.ok(mFn, 'le delai de sortie est nomme, pas ecrit en litteral dans le geste')
+  const sortie = new Function(`${mFn[0]}; return delaiDeSortieManuelle`)()
+
+  // La decision de Thierry : la confirmation dit « apres le delai choisi », donc
+  // la sortie pose un delai, jamais l envoi immediat.
+  assert.equal(sortie({ reponse_ia: null, reponse_ia_rappel: null }), 15,
+    'sans souvenir, la sortie pose 15 min')
+  assert.notEqual(sortie({ reponse_ia: null, reponse_ia_rappel: null }), 0,
+    'et surtout pas 0 : « Tout de suite » est un envoi sans relecture')
+  // Le souvenir du serveur passe avant le defaut.
+  assert.equal(sortie({ reponse_ia: null, reponse_ia_rappel: 30 }), 30,
+    'les 30 min reglees avant le passage en manuel sont RESTITUEES')
+  assert.equal(sortie({ reponse_ia: null, reponse_ia_rappel: 1440 }), 1440, 'la borne haute passe')
+  // Un souvenir hors contrat ne gouverne pas : le blob est un JSONB qu aucune
+  // contrainte de base ne borne.
+  for (const r of [0, -5, 1441, 12.5, '30', null, undefined, {}]) {
+    assert.equal(sortie({ reponse_ia: null, reponse_ia_rappel: r }), 15,
+      `un rappel ${JSON.stringify(r)} retombe sur le defaut`)
+  }
+  assert.equal(sortie(null), 15, 'et sans bloc du tout, pas d exception')
+
+  // ⚠ ET L ENTREE EN VALIDATION MANUELLE CAPTURE LA VALEUR COURANTE — constat 6
+  // de la revue. On EXECUTE la bascule : sans capture, l hote qui tape 30 min,
+  // passe en manuel puis revient retombe a 15, et sa valeur est perdue sans un
+  // mot. C est l asymetrie que api/agent-config.js a deja corrigee de son cote.
+  const mBasc = sans.match(/function basculerValidationManuelle \(d\) \{[\s\S]*?\n\}/)
+  assert.ok(mBasc, 'la bascule est une fonction, pas deux ternaires dans un ecouteur')
+  const basculer = new Function(
+    `${mFn[0]}\n${mBasc[0]}; return basculerValidationManuelle`)()
+  const d = { reponse_ia: 30 }
+  basculer(d)
+  assert.equal(d.reponse_ia, null, 'entree en validation manuelle')
+  assert.equal(d.reponse_ia_rappel, 30, 'les 30 min tapees sont CAPTUREES dans l etat d edition')
+  basculer(d)
+  assert.equal(d.reponse_ia, 30, 'et restituees au retour, pas remplacees par le defaut')
+  // « Tout de suite » ne se memorise pas : ce n est pas un delai.
+  const z = { reponse_ia: 0 }
+  basculer(z); basculer(z)
+  assert.equal(z.reponse_ia, 15, 'un 0 ne devient pas un souvenir')
+  // Et le geste de l ecran passe par la, sans refaire le calcul a cote.
+  const mEcouteur = sans.match(/\[data-delai-manuel\]'\)\?\.addEventListener\([\s\S]*?\n  \}\)/)
+  assert.ok(mEcouteur, 'l ecouteur existe')
+  assert.ok(/basculerValidationManuelle\(d\)/.test(mEcouteur[0]), 'et il appelle la bascule')
+  assert.ok(!/\? 0 :/.test(mEcouteur[0]), '« Tout de suite » n est plus la sortie par defaut')
+
+  // Le souvenir est LU par l ecran — sinon /api/agent-config le rangeait pour
+  // personne — et JAMAIS reecrit par lui : l endpoint en est le writer unique.
+  assert.ok(/reponse_ia_rappel: ok && Number\.isInteger\(d\.reponse_ia_rappel\)/.test(sans),
+    'delaisDuBien descend le souvenir')
+  // La charge postee, delimitee par ses propres accolades plutot que par
+  // l indentation : un reformatage ne doit pas rougir pour une raison qui n est
+  // pas la sienne (c est deja arrive quatre fois dans ce fichier).
+  const iEnvoi = sans.indexOf('delais_ref: ref, delais: {')
+  assert.ok(iEnvoi > 0, 'l envoi des delais existe')
+  let prof = 0, fin = iEnvoi
+  for (let i = sans.indexOf('{', iEnvoi); i < sans.length; i++) {
+    if (sans[i] === '{') prof++
+    else if (sans[i] === '}') { prof--; if (prof === 0) { fin = i + 1; break } }
+  }
+  const envoi = sans.slice(iEnvoi, fin)
+  assert.ok(/reponse_ia:/.test(envoi) && /sourdine:/.test(envoi), 'la charge est bien delimitee')
+  assert.ok(!/reponse_ia_rappel/.test(envoi),
+    'l ecran n ECRIT jamais le souvenir : /api/agent-config en est le writer unique')
+  assert.ok(!/\.\.\.d\b/.test(envoi), 'et aucun etalement de l etat d edition ne le ferait passer')
+})

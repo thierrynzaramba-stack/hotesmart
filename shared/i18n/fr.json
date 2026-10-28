@@ -598,6 +598,7 @@
   "messages.duree_h_min": "{h} h {m}",
   "messages.duree_min": "{n} min",
   "messages.empty": "Aucune conversation",
+  "messages.en_pause_pas_seule": "En pause : ne partira pas seule",
   "messages.envoyer": "Envoyer",
   "messages.envoyer_dans": "Envoyer dans {duree}",
   "messages.ev_arrival": "Arrivée",
