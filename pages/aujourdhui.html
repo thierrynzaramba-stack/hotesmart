@@ -296,6 +296,27 @@
       <ul class="rev-liste rev-liste--annee" data-list="revenue-annee-cartes"></ul>
 
       <p class="caption muted" data-bind="revenue-annee-note"></p>
+      <!-- ⚠ LE TABLEAU DOUBLE LA LIGNE POINTILLEE, IL NE LA REMPLACE PAS.
+           Au niveau du compte, l'axe est tire par le pic d'ete : deux
+           pointilles a 2 k € sur un axe a 16 k € se tassent au ras de l'axe,
+           et l'ecart qui est le SUJET ne se lit pas. Mesure au banc le
+           28 octobre 2026. Une ligne qu'on ne peut pas lire gagne a etre
+           doublee d'un nombre (decision de Thierry). -->
+      <div class="rev-rad" data-bind="revenue-annee-rad" hidden>
+        <h3 class="caption rev-rad__titre" data-i18n="revenue.annee_rad_titre"></h3>
+        <div class="rev-tbl-wrap rev-rad-tbl">
+          <table class="rev-tbl">
+            <thead><tr>
+              <th scope="col" data-i18n="revenue.annee_rad_col_mois"></th>
+              <th scope="col" class="rev-tbl__num" data-i18n="revenue.annee_rad_col_auj"></th>
+              <th scope="col" class="rev-tbl__num" data-bind="revenue-annee-rad-col-n1"></th>
+              <th scope="col" class="rev-tbl__num" data-i18n="revenue.annee_col_ecart"></th>
+            </tr></thead>
+            <tbody data-list="revenue-annee-rad-lignes"></tbody>
+          </table>
+        </div>
+        <ul class="rev-liste rev-rad-liste" data-list="revenue-annee-rad-cartes"></ul>
+      </div>
       <p class="caption muted" data-bind="revenue-annee-comparables-tous" hidden></p>
       <p class="caption muted" data-bind="revenue-annee-comparables" hidden></p>
       <p class="caption muted" data-bind="revenue-annee-reserves" hidden></p>
@@ -2269,6 +2290,73 @@ function renderAnnee () {
   // alors que le total, le tableau et l'ecart s'arretent au mois courant. Sans
   // cette phrase, l'hote lit la fin du trait gris et la colonne N-1 du tableau
   // et trouve deux chiffres differents pour la meme annee.
+  // ─── LE TABLEAU « RESERVE A DATE » ──────────────────────────────────────
+  // ⚠ IL SUIT LA PASTILLE, comme la ligne : `radPerimetre` est deja le
+  // perimetre choisi. Un tableau qui montrerait le compte sous une courbe
+  // filtree serait la meme superposition de perimetres que la ligne evitait.
+  const noeudRad = $('[data-bind="revenue-annee-rad"]')
+  if (noeudRad) {
+    const lignesRad = []
+    for (let m = 1; m <= 12; m++) {
+      // Les mois A VENIR seulement : ailleurs, le revenu final est connu.
+      if (!enCours || m <= dernierRecu) continue
+      const cleM = `${an}-${String(m).padStart(2, '0')}`
+      const auj = parMois && parMois[cleM]
+      const lan = radPerimetre && radPerimetre[`${an - 1}-${String(m).padStart(2, '0')}`]
+      // Rien ni d'un cote ni de l'autre : le mois n'a pas de ligne.
+      if (!auj && !lan) continue
+      lignesRad.push({ m, cleM, auj, lan })
+    }
+    noeudRad.hidden = lignesRad.length === 0
+    $('[data-bind="revenue-annee-rad-col-n1"]').textContent =
+      t('revenue.annee_rad_col_n1', { date: rad ? dateDuJour(String(rad.pivot), { day: 'numeric', month: 'short' }) : '' })
+
+    const cellules = (l) => {
+      const nAuj = l.auj ? Number(l.auj.total_cents || 0) : 0
+      const sAuj = l.auj ? Number(l.auj.sejours || 0) : 0
+      const montantAuj = `${esc(monnaie(Math.round(nAuj / 100), devise))} <span class="muted">${esc(t('revenue.stays', { n: sAuj }))}</span>`
+      // ⚠ SOUS LE SEUIL, LA LIGNE LE DIT A LA PLACE DU CHIFFRE. L'endpoint ne
+      // rend meme pas le montant : il ne PEUT pas etre affiche par accident.
+      if (!l.lan || l.lan.sous_seuil) {
+        return {
+          n1: `<span class="muted">${esc(t('revenue.annee_rad_sous_seuil_court'))}</span>`,
+          ecart: '<span class="muted">—</span>', montantAuj
+        }
+      }
+      const nLan = Number(l.lan.total_cents || 0)
+      const pct = ecartPourcent(nAuj, nLan)
+      // ⚠ LE SIGNE PORTE LE SENS AUTANT QUE LA COULEUR : un hote qui ne
+      // distingue pas le vert du rouge lit « +12 % » et « -68 % » (le trait d'union que rend `String(-68)`, pas un signe moins typographique).
+      const classe = pct === null ? '' : (pct < 0 ? ' rev-tbl__ecart--retard' : '')
+      return {
+        montantAuj,
+        n1: `${esc(monnaie(Math.round(nLan / 100), devise))} <span class="muted">${esc(t('revenue.stays', { n: Number(l.lan.sejours || 0) }))}</span>`,
+        ecart: pct === null
+          ? '<span class="muted">—</span>'
+          : `<span class="rev-tbl__ecart${classe}">${esc((pct > 0 ? '+' : '') + pct + ' %')}</span>`
+      }
+    }
+    $('[data-list="revenue-annee-rad-lignes"]').innerHTML = lignesRad.map(l => {
+      const c = cellules(l)
+      return `<tr>
+        <th scope="row" class="rev-tbl__bien">${esc(moisSeul(l.cleM))}</th>
+        <td class="rev-tbl__num">${c.montantAuj}</td>
+        <td class="rev-tbl__num">${c.n1}</td>
+        <td class="rev-tbl__num caption">${c.ecart}</td>
+      </tr>`
+    }).join('')
+    $('[data-list="revenue-annee-rad-cartes"]').innerHTML = lignesRad.map(l => {
+      const c = cellules(l)
+      return `<li class="rev-carte">
+        <div class="rev-carte__tete">
+          <span class="rev-carte__bien"><span class="small">${esc(moisSeul(l.cleM))}</span></span>
+          <span class="rev-carte__total">${c.montantAuj}</span>
+        </div>
+        <p class="caption muted">${esc(t('revenue.annee_rad_mobile_n1'))} ${c.n1} ${c.ecart}</p>
+      </li>`
+    }).join('')
+  }
+
   // ⚠ LA NOTE DES COMPARABLES DIT TROIS CHOSES, et aucune n'est decorative :
   // d'ou vient la bande, qu'elle est une ESTIMATION a partir des prix
   // affiches, et A QUELLE DATE elle a ete relevee. Sans la date, l'hote
