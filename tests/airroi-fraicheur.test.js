@@ -125,13 +125,41 @@ test("LE TEST QUI COMPTE : une fraicheur en CHAINE est lue comme un nombre", () 
   })
 })
 
-test("LE TEST QUI COMPTE : une option ABSURDE retombe sur le defaut, elle ne casse pas", () => {
-  for (const mauvais of [null, undefined, NaN, 'trente', -5, {}]) {
+test("LE TEST QUI COMPTE : une valeur NON NUMERIQUE retombe sur le defaut", async () => {
+  // ⚠ CE TEST N'ASSERTAIT RIEN, ET IL AFFIRMAIT LE CONTRAIRE DE LA REALITE.
+  // Il n'attendait PAS la promesse : `vu.reseau` etait lu avant le premier
+  // `await` interne, donc toujours 0 — vrai quoi qu'il arrive. Et mesure a la
+  // resolution : avec `null`, un appel PAYANT partait bel et bien, parce que
+  // `Number(null)` vaut 0 et desactivait le cache. Le test disait « retombe
+  // sur le defaut » d'une valeur qui faisait exactement l'inverse.
+  // ⚠ UN TEST QUI N'ATTEND PAS SA PROMESSE EST UN TEST QUI NE S'EXECUTE PAS.
+  for (const mauvais of [null, '', false, [], {}, NaN, 'trente', -5, undefined]) {
     const { vu, client } = monter(40)
-    client.metriquesAnnonce('111', { userId: 'u1', propertyId: 'b1', fraicheurMaxJours: mauvais })
+    await client.metriquesAnnonce('111', { userId: 'u1', propertyId: 'b1', fraicheurMaxJours: mauvais })
     assert.equal(vu.reseau, 0,
-      `fraicheurMaxJours = ${String(mauvais)} a fait partir un appel : une valeur illisible doit retomber sur le defaut`)
+      `fraicheurMaxJours = ${JSON.stringify(mauvais)} a fait partir un appel PAYANT : une valeur illisible doit retomber sur le defaut, pas valoir zero`)
   }
+})
+
+test("LE TEST QUI COMPTE : un ZERO explicite desactive bien le cache", async () => {
+  // La contre-epreuve du test precedent : `0` est un NOMBRE, donc une
+  // fraicheur de zero jour — le cache ne sert plus. Sans ce test, on pourrait
+  // « corriger » le precedent en refusant tous les zeros, et l'option perdrait
+  // sa borne la plus serree sans que rien ne rougisse.
+  const { vu, client } = monter(40)
+  await client.metriquesAnnonce('111', { userId: 'u1', propertyId: 'b1', fraicheurMaxJours: 0 })
+  assert.equal(vu.reseau, 1, 'une fraicheur de 0 jour a quand meme servi le cache')
+})
+
+test("LE TEST QUI COMPTE : un NEGATIF retombe sur le defaut, il ne desactive pas le cache", async () => {
+  // ⚠ LA MUTATION QUI SURVIVAIT : retirer `d >= 0` laissait la suite verte.
+  // Une borne negative desactive le cache EN PERMANENCE — de l'argent brule a
+  // chaque passage, sans un mot. Un appelant qui calcule sa fraicheur
+  // (`joursDepuis - 1`, un reglage mal saisi) tombe dessus.
+  const { vu, client } = monter(40)
+  await client.metriquesAnnonce('111', { userId: 'u1', propertyId: 'b1', fraicheurMaxJours: -5 })
+  assert.equal(vu.reseau, 0,
+    'une fraicheur negative a fait partir un appel : elle desactive le cache au lieu de retomber sur le defaut')
 })
 
 test("LE TEST QUI COMPTE : l ESTIMATION suit la meme borne que l appel", () => {

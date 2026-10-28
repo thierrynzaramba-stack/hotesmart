@@ -121,7 +121,7 @@ const { dispatchBookingChanges } = require('../lib/booking-changes-dispatch')
 const { purgerSiDue } = require('../lib/cron-purge-tentatives')
 const { rattraperBloquees } = require('../lib/moteur-creation')
 const { piloterLesBiens } = require('../lib/pilote-quotidien')
-const { releverSiDu: releverComparables } = require('../lib/marche/comparables-releves')
+const { releverSiDu: releverComparables, PLAFOND_RELEVE_90J_USD } = require('../lib/marche/comparables-releves')
 const { channelCall } = require('../lib/channel-fullsync')
 const { relancerEvaluations } = require('../lib/avis/notifications')
 const { naitreAuDepart } = require('../lib/avis/naissance')
@@ -651,7 +651,16 @@ module.exports = async function handler(req, res) {
         const MARQ = 'comparables_releves'
         const bilanComp = await releverComparables(results, {
           supabase,
-          client: () => creerClient({ depot: depotSupabase(supabase) }),
+          // ⚠ LE CLIENT DU RELEVE PORTE SON PROPRE PLAFOND PAR BIEN, et c'est
+          // la decision de Thierry du 28 octobre : le relevé mensuel est
+          // SEPARE de l'étude de marché. Le défaut (5 $ / 90 j) est partagé
+          // avec l'étude, qui en consomme déjà 3,50 à 4,50 — la série
+          // mensuelle s'y serait arrêtée au 4ᵉ mois. L'étude, elle, garde le
+          // défaut : elle construit son propre client.
+          client: () => creerClient({
+            depot: depotSupabase(supabase),
+            gardes: { plafondBien90jUsd: PLAFOND_RELEVE_90J_USD }
+          }),
           marqueur: {
             lire: async () => {
               const { data } = await supabase.from('cron_logs')
