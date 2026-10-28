@@ -694,6 +694,75 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
   .cal-flottante { bottom: calc(86px + env(safe-area-inset-bottom)); width: calc(100vw - 20px); }
 }
 
+/* ─── Accès YieldFlow depuis le calendrier (lot du 28 octobre 2026) ────────
+   DEUX éléments ajoutés, et rien de repris : un bouton sur la ligne du bien,
+   un menu au clic. Popover à l'ordinateur, volet du bas au téléphone — le
+   MÊME balisage, placé par deux jeux de règles.
+   Spec : docs/specs/spec-yf-bouton-calendrier.md §3-§4. */
+.cal-yf { width: 28px; height: 28px; border-radius: var(--radius-pill); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; padding: 0; }
+.cal-yf .icon { width: 15px; height: 15px; }
+/* Piloté : bleu plein, icône blanche, ombre légère. */
+.cal-yf--on { border: 0; background: var(--info); color: var(--on-ink); box-shadow: var(--shadow-dot); }
+/* Pilote calendrier : contour gris, icône grise. */
+.cal-yf--off { border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
+.cal-yf--off:hover { color: var(--ink); background: var(--surface-2); }
+.cal-yf[aria-expanded="true"] { outline: 2px solid var(--info); outline-offset: 2px; }
+
+/* Le menu. `position: fixed` et non `absolute` : le planning défile
+   horizontalement dans un conteneur à `overflow`, et un popover absolu y
+   serait ROGNÉ. Les coordonnées viennent du bouton, posées par le script. */
+.cal-yf-menu { position: fixed; z-index: 55; width: min(320px, calc(100vw - 2 * var(--page-pad))); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-card); box-shadow: var(--shadow-hover); padding: 6px; display: flex; flex-direction: column; max-height: min(520px, 80vh); overflow-y: auto; }
+.cal-yf-menu__entete { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px 10px; border-bottom: 1px solid var(--line); }
+.cal-yf-menu__titre { font-size: var(--fs-small); font-weight: var(--fw-bold); }
+.cal-yf-menu__bien { font-size: var(--fs-caption); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.cal-yf-menu__pastille { font-size: var(--fs-caption); font-weight: var(--fw-semibold); border-radius: var(--radius-pill); padding: 2px 9px; margin-inline-start: auto; white-space: nowrap; }
+/* ⚠ LA PASTILLE N'EST PAS CLIQUABLE, DONC ELLE N'EST PAS BLEUE (demande de
+   Thierry, 28 octobre 2026) : dans la charte, le bleu dit « on peut cliquer ».
+   « Pilote auto » est donc une pastille NEUTRE avec un point vert — l'etat se
+   lit a la pastille, l'action se lit au pied du menu. « Prix manuels » reste
+   gris : c'est une absence d'etat, pas un etat. */
+.cal-yf-menu__pastille--on { background: var(--surface-2); color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
+.cal-yf-menu__pastille--on::before { content: ""; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--ok); flex: none; }
+.cal-yf-menu__pastille--off { background: var(--surface-2); color: var(--muted); }
+/* La ligne ambre : masquée à 0 et masquée si le compte est illisible —
+   jamais un « 0 » posé à la place d'une absence. */
+.cal-yf-menu__ajuste { display: flex; align-items: center; gap: 8px; margin: 8px 4px 2px; padding: 8px 10px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); font-size: var(--fs-caption); font-weight: var(--fw-semibold); }
+.cal-yf-menu__ajuste .icon { width: 14px; height: 14px; flex: none; }
+.cal-yf-menu__entree { display: flex; align-items: center; gap: 10px; padding: 11px 10px; border-radius: 10px; color: var(--ink); text-decoration: none; font-size: var(--fs-body); font-weight: var(--fw-semibold); }
+.cal-yf-menu__entree:hover { background: var(--surface-2); }
+.cal-yf-menu__entree .icon { width: 16px; height: 16px; color: var(--muted); flex: none; }
+/* Le libelle tient sur UNE ligne : c'est le REPERE qui cede, jamais le nom de
+   l'entree. « Donnees marche » passait sur deux lignes des que le repere etait
+   long (« Bagneres-de-Bigorre »), et une entree sur deux lignes casse le
+   rythme de la liste — releve sur l'apercu du 28 octobre 2026. */
+.cal-yf-menu__nom { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-yf-menu__repere { flex: 0 1 auto; margin-inline-start: auto; padding-inline-start: 8px; font-size: var(--fs-caption); font-weight: var(--fw-regular); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42%; }
+.cal-yf-menu__pied { border-top: 1px solid var(--line); margin-top: 6px; padding: 10px 4px 4px; }
+.cal-yf-menu__pied .btn { width: 100%; justify-content: center; }
+/* « Reglages du pilote » : BLEU, parce que c'est un lien. Le bleu de la charte
+   (`--info`, celui du bouton + du calendrier) dit « on peut cliquer », et un
+   lien en noir ne le disait pas. */
+.cal-yf-menu__lien { display: block; padding: 6px; font-size: var(--fs-small); font-weight: var(--fw-semibold); color: var(--info); }
+/* « Activer le pilote automatique » : bleu PLEIN, texte blanc centre — les
+   memes jetons que le bouton + du calendrier (`.cal-btn-plus`), et la charte
+   n'est pas touchee. Pourquoi une classe a part plutot que `.cal-btn-plus`
+   elle-meme : ce bouton-la est rond et fait 34 px de large, il ne peut pas
+   porter une phrase. */
+.cal-yf-menu__activer { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 10px 14px; border-radius: var(--radius-pill); background: var(--info); color: var(--on-ink); font-size: var(--fs-small); font-weight: var(--fw-semibold); text-align: center; text-decoration: none; }
+.cal-yf-menu__activer:hover { box-shadow: var(--shadow-hover); }
+.cal-yf-menu__attente { padding: 14px 10px; font-size: var(--fs-caption); color: var(--muted); }
+.cal-yf-voile { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 54; }
+
+@media (max-width: 899px) {
+  /* 44 px tactiles : la règle du produit pour tout ce qui se touche. */
+  .cal-yf { width: 44px; height: 44px; }
+  .cal-yf .icon { width: 18px; height: 18px; }
+  /* Volet du bas : le script ne pose plus de coordonnées, ces règles gagnent
+     par `!important` — sinon le style en ligne du popover resterait. */
+  .cal-yf-menu { inset-inline: 0 !important; inset-block: auto 0 !important; width: auto !important; max-width: none; max-height: 82vh; border-radius: var(--radius-card) var(--radius-card) 0 0; border-inline: 0; border-block-end: 0; box-shadow: var(--shadow-sheet); padding: 6px 10px calc(10px + env(safe-area-inset-bottom)); }
+  .cal-yf-menu__entree { padding: 14px 10px; min-height: 44px; }
+}
+
 /* ============================================================
    Page « Ménages » (lot 4, étape 1 : lecture seule)
    LE GABARIT DU CALENDRIER (recette du 13 octobre) : mêmes largeurs
@@ -1507,11 +1576,18 @@ body.men-cfg-ouvert { overflow: hidden; }
 
 /* Le sélecteur Mois / Année. */
 .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--line); }
+/* ⚠ 44 px DE HAUT, ET C'EST LE CONSTAT 5 DE LA RECETTE DU 27 OCTOBRE 2026.
+   Thierry avait mesuré 30 px sur ce bouton : `padding: 5px 14px` sur du 14 px
+   donne environ 27 px de haut, bien sous les 44 que la charte du lot exige et
+   que `--control` porte. Le sélecteur avait alors été RETIRÉ faute d'un second
+   choix ; il revient avec la vue Année, donc sa cible doit être réglée, pas
+   seulement son utilité. */
 .seg__btn {
   appearance: none;
   border: 0;
   border-radius: 999px;
-  padding: 5px 14px;
+  min-height: var(--control);
+  padding: 0 16px;
   font: inherit;
   font-size: 14px;
   color: var(--muted);
@@ -1526,3 +1602,82 @@ body.men-cfg-ouvert { overflow: hidden; }
    rougit nulle part : il rend juste l'element illisible. */
 .seg__btn.is-on { background: var(--ink); color: var(--surface); font-weight: 600; }
 .seg__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* ─── La vue ANNEE du bloc Revenus ────────────────────────────────────────
+   Forme reprise des maquettes `Accueil-revenus-annee-v5` (ordinateur) et
+   `-mobile-v5` (téléphone) : une période nommée, un grand total, les
+   pastilles de filtre, UNE courbe, puis le tableau par logement. */
+
+/* La période au-dessus du chiffre, et le total de N-1 à côté — SANS
+   pourcentage : voir le commentaire du balisage. `align-items: flex-end`
+   aligne le petit texte sur la ligne de base du grand nombre. */
+.rev-an-tete {
+  display: flex; align-items: flex-end; gap: 20px;
+  flex-wrap: wrap; margin: 16px 0 14px;
+}
+.rev-an-total {
+  display: block; font-size: 2rem; font-weight: 800;
+  letter-spacing: -0.03em; line-height: 1.1;
+}
+@media (min-width: 561px) {
+  .rev-an-total { font-size: 2.5rem; }
+}
+.rev-an-n1 { padding-bottom: 6px; display: flex; align-items: baseline; gap: 6px; }
+
+/* Les pastilles de filtre. ⚠ `min-height: var(--control)` — LA MAQUETTE DIT
+   36 px, ET ON NE LA SUIT PAS ICI : c'est le constat 5 de Thierry à la recette
+   du 27 octobre, une cible cliquable fait 44 px. La forme (pilule, bordure,
+   actif en plein) est celle de la maquette ; la hauteur est celle du dépôt. */
+.rev-an-filtres { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.rev-an-puce {
+  min-height: var(--control); padding: 0 14px;
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-size: .8125rem; font-weight: 600; cursor: pointer;
+}
+.rev-an-puce.is-on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.rev-an-puce:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* La légende : trois marques, et ce sont les MARQUES qui portent le sens, pas
+   la couleur. Le plein et le pointillé se distinguent en noir et blanc. */
+.rev-an-legende {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  margin-bottom: 6px; font-size: .75rem; color: var(--muted);
+}
+.rev-an-legende > span { display: inline-flex; align-items: center; gap: 6px; }
+.rev-an-marque { width: 16px; flex: 0 0 16px; }
+.rev-an-marque--plein { height: 2.5px; background: var(--ink); }
+.rev-an-marque--pointille { height: 0; border-top: 2px dashed var(--ink); }
+.rev-an-marque--n1 { height: 2px; background: var(--muted); }
+
+/* ⚠ LE MOIS COURANT EN GRAS SUR L'AXE : il marque où s'arrête le réalisé.
+   Il double le passage au pointillé, il ne le remplace pas. */
+/* ⚠ SELECTEUR COMPOSE, ET CE N'EST PAS DU STYLE : `.cm-mois--fort` et
+   `.cm-mois` ont la MEME specificite (0,1,0), et `.cm-grad, .cm-mois` est
+   declaree APRES, plus bas dans ce fichier. La regle simple perdait donc son
+   `fill` en silence — le gras s'appliquait, la couleur non. C'est mot pour mot
+   la classe de defaut que CLAUDE.md decrit pour `[hidden]`, et aucun test ne
+   lit une valeur calculee. Mesure de la review du 28 octobre 2026. */
+.cm-mois.cm-mois--fort { font-weight: 700; fill: var(--ink); }
+
+/* Le tableau de l'année : trois colonnes de chiffres, largeurs fixes pour que
+   les montants s'alignent d'une ligne à l'autre (maquette : 120 px chacune). */
+.rev-tbl--annee .rev-tbl__num { width: 110px; }
+/* ⚠ PAS DE PREFIXE `.rev-tbl--annee` : la forme TELEPHONE de ce tableau est
+   une liste de cartes, hors du `<table>`, et elle reutilise le meme balisage
+   d'ecart. Prefixees, ces deux regles laissaient le telephone sans gras ni
+   couleur — « le mobile suit l'ordinateur ». */
+.rev-tbl__ecart { font-weight: 700; color: var(--ok); }
+.rev-tbl__ecart--bas { color: var(--ink); }
+
+/* ⚠ LA LISTE DE L'ANNEE EST LA FORME TELEPHONE DU TABLEAU, et elle ne porte
+   donc AUCUNE regle d'affichage : elle suit `.rev-liste` — cachee au-dessus de
+   561 px, en grille en dessous. Sa premiere version la forcait a
+   `display: grid`, heritage de la forme en cartes empilees : l'ordinateur
+   aurait affiche le tableau ET les cartes, l'un sous l'autre. La classe ne sert
+   plus qu'a distinguer les deux listes quand la vue Mois cache la sienne. */
+/* La courbe prend la largeur de sa carte et garde ses proportions. */
+.cm { display: block; width: 100%; height: auto; }
+.cm-grille { stroke: var(--line); stroke-width: 1; }
+.cm-axe { stroke: var(--line); stroke-width: 1.5; }
+.cm-grad, .cm-mois { font-size: 11px; fill: var(--muted); }
