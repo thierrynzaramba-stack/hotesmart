@@ -1547,6 +1547,13 @@ body.men-cfg-ouvert { overflow: hidden; }
 .rev-an-marque--plein { height: 2.5px; background: var(--ink); }
 .rev-an-marque--pointille { height: 0; border-top: 2px dashed var(--ink); }
 .rev-an-marque--n1 { height: 2px; background: var(--muted); }
+/* La bande des comparables : un PAVE plein, pas un trait — elle couvre une
+   surface, et sa marque doit le dire. */
+.rev-an-marque--bande { height: 10px; background: var(--line); border-radius: 2px; }
+/* Le fond de la bande. ⚠ Aucun hexa : les deux jetons existent deja au theme,
+   et un hexa en dur ici ne suivrait pas le mode sombre. */
+.cm-bande { opacity: .85; }
+.cm-bande-trait { stroke-width: 6; opacity: .85; }
 
 /* ⚠ LE MOIS COURANT EN GRAS SUR L'AXE : il marque où s'arrête le réalisé.
    Il double le passage au pointillé, il ne le remplace pas. */

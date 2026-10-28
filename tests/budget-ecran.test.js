@@ -105,7 +105,25 @@ const ATTENDU = {
     // ⚠ ET IL NE CROIT PAS AVEC LE NOMBRE DE LOGEMENTS : un seul appel rend
     // les douze mois des deux annees pour TOUS les biens. C'est ce que le test
     // « l'accueil n'a PLUS AUCUN appel par bien » garde juste en dessous.
-    '/api/ecran/revenus-annee': 1
+    //
+    // ⚠ DEUX SITES D'APPEL DEPUIS LE 28 OCTOBRE 2026, et le second se justifie
+    // ici parce que ce test l'exige avant de l'inscrire :
+    //   1. `chargerAnnee` — les douze mois des deux annees, au clic sur
+    //      « Annee ».
+    //   2. `chargerComparables` — la BANDE DES COMPARABLES d'UN logement, au
+    //      clic sur SA PASTILLE.
+    // Pourquoi le second ne pouvait pas entrer dans le premier : au moment du
+    // clic sur « Annee », AUCUN logement n'est choisi — la pastille est un
+    // geste humain qui vient apres. Charger d'avance les bandes de tous les
+    // biens multiplierait la lecture par leur nombre, pour une donnee que
+    // personne n'a demandee, et ferait exactement ce que ce test interdit :
+    // un cout qui croit avec le parc.
+    // ⚠ ET IL NE S'APPELLE QU'UNE FOIS PAR BIEN : `etat.comparablesParBien`
+    // garde la reponse, cle posee AVANT l'appel pour que deux clics rapides
+    // n'en lancent pas deux. Revenir sur une pastille deja vue ne coute rien.
+    // ⚠ NI L'UN NI L'AUTRE N'EST DANS LE BUDGET DU PREMIER AFFICHAGE : il
+    // reste a DEUX appels, et c'est ce que le test du chargement garde.
+    '/api/ecran/revenus-annee': 2
   }
 }
 

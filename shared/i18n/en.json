@@ -720,6 +720,8 @@
   "photo.sending": "Uploading the photo…",
   "photo.too_big": "Image too heavy, even compressed (2 MB max)",
   "revenue.annee_col_ecart": "Change",
+  "revenue.annee_comparables_legende": "comparables (min – max)",
+  "revenue.annee_comparables_note": "Grey band: the lowest and highest month among your {n} comparable properties, recorded on {date}. An estimate based on displayed prices, not on their accounts — coming months show what is OCCUPIED there, which is not the same as booked.",
   "revenue.annee_filtre_aria": "Filter the chart by property",
   "revenue.annee_filtre_tous": "All",
   "revenue.annee_hors_biens": "{annee}: {n, plural, one {# stay linked to none of your properties} other {# stays linked to none of your properties}}, {montant} in the total and on no row",

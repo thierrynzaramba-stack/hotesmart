@@ -720,6 +720,8 @@
   "photo.sending": "Envoi de la photo…",
   "photo.too_big": "Image trop lourde, même compressée (2 Mo max)",
   "revenue.annee_col_ecart": "Écart",
+  "revenue.annee_comparables_legende": "comparables (min – max)",
+  "revenue.annee_comparables_note": "Bande grise : le mois le plus bas et le plus haut parmi vos {n} logements comparables, relevés au {date}. Estimation à partir des prix affichés, pas des comptes de ces logements — les mois à venir montrent ce qui est OCCUPÉ chez eux, ce qui n’est pas la même chose que réservé.",
   "revenue.annee_filtre_aria": "Filtrer la courbe par logement",
   "revenue.annee_filtre_tous": "Tous",
   "revenue.annee_hors_biens": "{annee} : {n, plural, one {# séjour rattaché à aucun de vos logements} other {# séjours rattachés à aucun de vos logements}}, {montant} dans le total et sur aucune ligne",

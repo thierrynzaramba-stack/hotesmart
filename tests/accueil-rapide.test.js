@@ -2136,6 +2136,8 @@ function bancAnnee (options = {}) {
     { id: 'uuid-1', name: 'La bulle' }, { id: 'uuid-2', name: 'Colomiers' }
   ]
   p.interne.etat.filtreAnnee = options.filtre || null
+  // Les bandes deja chargees, comme si le clic sur la pastille avait rendu.
+  p.interne.etat.comparablesParBien = options.comparables || {}
   p.interne.etat.annee = options.annee
   p.interne.renderAnnee()
   return p
@@ -2199,19 +2201,41 @@ test("LE TEST QUI COMPTE : aucun pourcentage au niveau du COMPTE", () => {
   }
 })
 
-test("LE TEST QUI COMPTE : la pastille filtre la COURBE, pas le total", () => {
-  // Les pastilles sont posees sur la ligne de la legende : elles appartiennent
-  // au graphique. Un grand chiffre qui changerait sous une pastille serait
-  // ambigu — on ne saurait plus s il parle du compte ou d un bien.
+test("LE TEST QUI COMPTE : la pastille pilote l EN-TETE, et l en-tete se NOMME", () => {
+  // ⚠ CE TEST A CHANGE DE REGLE LE 28 OCTOBRE 2026, ET CE N EST PAS UN
+  // REVIREMENT. Il exigeait que l en-tete NE suive PAS la pastille, et il avait
+  // raison tant que rien ne disait de quoi le grand chiffre parlait : « un
+  // chiffre qui change sous une pastille est ambigu ».
+  // La decision Q1 de Thierry leve l ambiguite autrement, et mieux : l en-tete
+  // suit la pastille ET SE NOMME (« La bulle · janvier -> octobre 2026 »). Ce
+  // que l ancien test protegeait — on sait toujours de quoi parle le chiffre —
+  // reste donc garde, par le prefixe au lieu de l immobilite.
   const annee = {
-    total: { '2026-05': mo(50000) },
-    par_bien: { 'uuid-1': { '2026-05': mo(20000) }, 'uuid-2': { '2026-05': mo(30000) } },
+    total: { '2026-05': mo(50000), '2025-05': mo(40000) },
+    par_bien: {
+      'uuid-1': { '2026-05': mo(20000), '2025-05': mo(10000) },
+      'uuid-2': { '2026-05': mo(30000), '2025-05': mo(30000) }
+    },
     hors_biens: {}
   }
-  const tous = bancAnnee({ annee }).cache('[data-bind="revenue-annee-n"]').textContent
-  const filtre = bancAnnee({ annee, filtre: 'uuid-1' })
-  assert.strictEqual(filtre.cache('[data-bind="revenue-annee-n"]').textContent, tous,
-    'le total de l en-tete a suivi la pastille : il ne dit plus de quoi il parle')
+  const biens = [{ id: 'uuid-1', name: 'A' }, { id: 'uuid-2', name: 'B' }]
+  const sansFiltre = bancAnnee({ annee, biens })
+  const tous = sansFiltre.cache('[data-bind="revenue-annee-n"]').textContent
+  const filtre = bancAnnee({ annee, biens, filtre: 'uuid-1' })
+  const duBien = filtre.cache('[data-bind="revenue-annee-n"]').textContent
+  assert.notStrictEqual(duBien, tous,
+    `l en-tete affiche « ${duBien} » comme sans filtre : la pastille ne le pilote pas`)
+  assert.strictEqual(euros(duBien), 200,
+    `l en-tete vaut ${euros(duBien)} € au lieu des 200 € du bien choisi`)
+  // ⚠ ET IL SE NOMME : sans le prefixe, le chiffre changerait sans qu on sache
+  // de quoi il parle — c est ce que l ancienne regle evitait en l immobilisant.
+  assert.match(filtre.cache('[data-bind="revenue-annee-periode"]').textContent, /^A ·/,
+    'l en-tete filtre ne nomme pas le logement : le chiffre change sans se declarer')
+  // Le compte, lui, n a toujours AUCUN pourcentage (decision 1, inchangee).
+  assert.strictEqual(sansFiltre.cache('[data-bind="revenue-annee-ecart"]').hidden, true,
+    'un pourcentage est apparu au niveau du compte')
+  assert.strictEqual(filtre.cache('[data-bind="revenue-annee-ecart"]').hidden, false,
+    'le logement choisi n affiche pas son ecart, alors que les deux annees parlent du meme bien')
   // ⚠ ET LA COURBE, ELLE, A CHANGE DE SERIE — mesure par le NOMBRE du palier
   // haut, pas par une sous-chaine. Ma premiere version cherchait `/50\s?000|500,0/`
   // dans le SVG : avec 500 €, le SVG non filtre ecrit « 500 € » et « · 500 »,
@@ -2224,7 +2248,7 @@ test("LE TEST QUI COMPTE : la pastille filtre la COURBE, pas le total", () => {
     const grads = [...svg.matchAll(/class="cm-grad"[^>]*>([^<]*)</g)].map(m => m[1])
     return euros(grads[grads.length - 1])
   }
-  const hautTous = hautDeLAxe(bancAnnee({ annee }))
+  const hautTous = hautDeLAxe(bancAnnee({ annee, biens }))
   const hautFiltre = hautDeLAxe(filtre)
   assert.ok(hautFiltre < hautTous,
     `le haut de l axe vaut ${hautFiltre} filtre contre ${hautTous} pour le compte : la pastille ne filtre pas la courbe`)
@@ -2612,4 +2636,112 @@ test("LE TEST QUI COMPTE : un mois SANS RIEN D ENCAISSE se trace en POINTILLE", 
   const ptsPointille = (pointille.match(/[ML]/g) || []).length
   assert.strictEqual(ptsPointille, 3,
     `le trait pointille porte ${ptsPointille} points : il ne rejoint pas le dernier mois encaisse`)
+})
+
+// ─── LA BANDE DES COMPARABLES (28 octobre 2026) ────────────────────────────
+
+test("LE TEST QUI COMPTE : sans logement choisi, AUCUNE bande n est tracee", () => {
+  // Un min-max de comparables n a aucun sens pour un compte entier, dont les
+  // logements ont chacun les leurs (decision Q2 de Thierry). Et sans bande,
+  // pas de marque de bande dans la legende : une legende qui nomme un trait
+  // absent est un mensonge de plus.
+  // ⚠ LA BANDE EST EN MEMOIRE, ET POURTANT RIEN NE DOIT SE TRACER. Ma premiere
+  // version ne fournissait aucune bande : le test passait meme avec un code
+  // qui ignorait la pastille, puisqu il n y avait rien a dessiner. Un test ne
+  // demontre une regle que si sa violation produirait quelque chose.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'A' }],
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    },
+    comparables: {
+      'uuid-1': {
+        releve_le: '2026-10-06',
+        mois: {
+          '2026-04': { nature: 'clos', min_cents: 500000, max_cents: 900000, comparables: 8, releve_le: '2026-10-06' },
+          '2026-05': { nature: 'clos', min_cents: 600000, max_cents: 950000, comparables: 8, releve_le: '2026-10-06' }
+        }
+      }
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  assert.ok(!/<polygon/.test(svg), 'une bande est tracee sans logement choisi')
+  assert.ok(!/rev-an-marque--bande/.test(p.cache('[data-bind="revenue-annee-legende"]').innerHTML),
+    'la legende nomme une bande qui n existe pas')
+  assert.strictEqual(p.cache('[data-bind="revenue-annee-comparables"]').hidden, true,
+    'la note des comparables s affiche sans comparables')
+})
+
+test("LE TEST QUI COMPTE : la bande se trace, et sa note DATE le releve", () => {
+  // ⚠ SANS LA DATE, l hote compare son mois en cours a une photo dont il
+  // ignore l age. Et les mots sont ceux de Thierry : « occupe », jamais
+  // « reserve », avec la mention de l estimation.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'A' }],
+    filtre: 'uuid-1',
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    },
+    comparables: {
+      'uuid-1': {
+        releve_le: '2026-10-06',
+        mois: {
+          '2026-04': { nature: 'clos', min_cents: 500000, max_cents: 900000, comparables: 8, releve_le: '2026-10-06' },
+          '2026-05': { nature: 'clos', min_cents: 600000, max_cents: 950000, comparables: 8, releve_le: '2026-10-06' }
+        }
+      }
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  assert.match(svg, /<polygon class="cm-bande"/, 'la bande des comparables n est pas tracee')
+  assert.match(p.cache('[data-bind="revenue-annee-legende"]').innerHTML, /rev-an-marque--bande/,
+    'la legende ne nomme pas la bande')
+  const note = p.cache('[data-bind="revenue-annee-comparables"]')
+  assert.strictEqual(note.hidden, false, 'la note des comparables est masquee alors que la bande existe')
+  assert.match(note.textContent, /revenue\.annee_comparables_note/,
+    `la note ne porte pas la phrase des comparables : « ${note.textContent} »`)
+})
+
+test("LE TEST QUI COMPTE : la bande ne DEPASSE jamais le haut de l axe", () => {
+  // Un comparable qui gagne deux fois plus que l hote aurait son plafond trace
+  // au-dessus de la zone dessinee, donc invisible — et l ecran montrerait une
+  // bande tronquee en affirmant qu elle est complete.
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'A' }],
+    filtre: 'uuid-1',
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    },
+    comparables: {
+      'uuid-1': {
+        releve_le: '2026-10-06',
+        // ⚠ DEUX MOIS, et c'est necessaire : un mois SEUL ne fait pas un
+        // polygone — le module lui donne un TRAIT vertical, ce qui est la
+        // bonne reponse (un intervalle), mais ce test juge un polygone.
+        mois: {
+          '2026-04': { nature: 'clos', min_cents: 20000, max_cents: 4000000, comparables: 3, releve_le: '2026-10-06' },
+          '2026-05': { nature: 'clos', min_cents: 10000, max_cents: 5000000, comparables: 3, releve_le: '2026-10-06' }
+        }
+      }
+    }
+  })
+  // ⚠ ON JUGE LA GEOMETRIE, PAS LE LIBELLE. Ma premiere version lisait le
+  // palier haut avec `euros()`, qui retire tout ce qui n est pas un chiffre :
+  // « 50 k € » y devenait **50**, et le test rougissait sur un code juste.
+  // Un libelle en notation compacte ne se compare pas comme un montant — et
+  // ce que ce test veut vraiment dire est « la bande tient dans le cadre ».
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const poly = (svg.match(/<polygon class="cm-bande" points="([^"]*)"/) || [])[1]
+  assert.ok(poly, 'aucune bande tracee : le test ne demontre rien')
+  const ys = poly.split(' ').map(pt => Number(pt.split(',')[1])).filter(Number.isFinite)
+  assert.ok(ys.length, 'les points de la bande sont illisibles')
+  const plusHaut = Math.min(...ys)
+  assert.ok(plusHaut >= 0,
+    `le sommet de la bande est a y=${plusHaut}, donc HORS du cadre : l axe ne la couvre pas`)
 })

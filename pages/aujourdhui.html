@@ -262,6 +262,11 @@
         <div class="rev-an-n1">
           <span class="caption muted" data-bind="revenue-annee-n1-label"></span>
           <span class="num" data-bind="revenue-annee-n1"></span>
+          <!-- ⚠ L'ECART N'APPARAIT QUE POUR UN LOGEMENT DESIGNE. Au niveau du
+               compte il reste absent (decision 1) : les deux annees n'y portent
+               pas les memes logements. Au niveau d'un bien, elles parlent du
+               meme, et l'ecart est comparable (decision Q1 du 28 octobre). -->
+          <span class="caption" data-bind="revenue-annee-ecart" hidden></span>
         </div>
       </div>
 
@@ -291,6 +296,7 @@
       <ul class="rev-liste rev-liste--annee" data-list="revenue-annee-cartes"></ul>
 
       <p class="caption muted" data-bind="revenue-annee-note"></p>
+      <p class="caption muted" data-bind="revenue-annee-comparables" hidden></p>
       <p class="caption muted" data-bind="revenue-annee-reserves" hidden></p>
     </div>
 
@@ -357,6 +363,10 @@ const etat = {
   anneeRevenus: null,
   annee: null,
   anneeEtat: 'vide',
+  // Les bandes de comparables deja chargees, par bien. ⚠ UN CACHE, pour qu'une
+  // pastille deja vue ne rappelle pas le reseau : revenir sur « La bulle » apres
+  // un detour par « Colomiers » ne doit rien couter.
+  comparablesParBien: {},
   // Le logement dont la COURBE est tracee, ou `null` pour le compte entier.
   // ⚠ IL NE FILTRE QUE LA COURBE : le total de l'en-tete et le tableau restent
   // ceux du compte. Voir le commentaire de `renderAnnee`.
@@ -511,6 +521,28 @@ async function chargerAnnee (an) {
 }
 
 // Changer de vue. ⚠ Aucun appel reseau pour revenir au mois : il est deja la.
+// La bande des comparables d'UN logement. ⚠ ELLE NE SE CHARGE QU'AU CLIC SUR SA
+// PASTILLE, jamais a l'ouverture : le budget de l'ecran est de deux appels au
+// chargement, et une bande que personne n'a demandee n'en vaut pas un troisieme.
+async function chargerComparables (bienId) {
+  const cle = String(bienId || '')
+  if (!cle || Object.prototype.hasOwnProperty.call(etat.comparablesParBien, cle)) return
+  // ⚠ ON POSE LA CLE AVANT L'APPEL : deux clics rapides sur la meme pastille ne
+  // doivent pas partir deux fois. `undefined` pendant le vol, la valeur apres.
+  etat.comparablesParBien[cle] = undefined
+  try {
+    const recu = await appel(`/api/ecran/revenus-annee?annee=${encodeURIComponent(etat.anneeRevenus)}&bien=${encodeURIComponent(cle)}`)
+    // ⚠ `null` EST UNE REPONSE, ET IL VEUT DIRE « lecture ratee ». On le garde
+    // tel quel : l'ecran dira « non calculable », pas « aucun comparable ».
+    etat.comparablesParBien[cle] = recu && Object.prototype.hasOwnProperty.call(recu, 'comparables')
+      ? recu.comparables
+      : null
+  } catch (e) {
+    etat.comparablesParBien[cle] = null
+  }
+  renderAnnee()
+}
+
 async function allerALaVue (vue) {
   if (vue !== 'mois' && vue !== 'annee') return
   etat.vueRevenus = vue
@@ -1874,8 +1906,32 @@ function renderAnnee () {
   for (const sel of ['.rev-an-tbl', '.rev-liste--annee']) {
     const n = document.querySelector(sel); if (n) n.hidden = false
   }
-  const bilanN = bilanPeriode(a.total, an, 'total_cents', jusquAu)
-  const bilanN1 = bilanPeriode(a.total, an - 1, 'total_cents', jusquAu)
+  // ⚠ LA PASTILLE SE RESOUT AVANT L'EN-TETE, et c'est l'ordre qui a change le
+  // 28 octobre : l'en-tete en depend desormais. Seuls les logements qui portent
+  // quelque chose sur l'une des deux annees — une pastille qui ne tracerait
+  // rien n'est pas un filtre, c'est un cul-de-sac.
+  const avecDonnees = (etat.biens || []).filter(b => {
+    const pm = a.par_bien && a.par_bien[String(b.id)]
+    return pm && Object.keys(pm).length > 0
+  })
+  // Une pastille retiree ne laisse pas un filtre orphelin : le bien choisi peut
+  // disparaitre d'un rechargement, et la selection perimee s'oublie. Son seul
+  // effet reel est la : sans elle, `find` rend `undefined`, « Tous » se rallume
+  // et la courbe montre le compte — rien ne se vide.
+  if (etat.filtreAnnee && !avecDonnees.some(b => String(b.id) === etat.filtreAnnee)) {
+    etat.filtreAnnee = null
+  }
+  const choisi = etat.filtreAnnee ? avecDonnees.find(b => String(b.id) === etat.filtreAnnee) : null
+
+  // ⚠ L'EN-TETE SUIT LA PASTILLE DEPUIS LE 28 OCTOBRE (decision Q1 de Thierry),
+  // et avec SON POURCENTAGE. Ce n'est pas un revirement sur la decision 1 :
+  // celle-ci interdisait l'ecart au niveau du COMPTE, ou les deux annees ne
+  // portent pas les memes logements. Au niveau d'un BIEN, elles parlent du
+  // meme — l'ecart y est comparable, et c'est ce que la maquette des
+  // comparables montre (« La bulle · janvier -> octobre 2026 », « +8 % »).
+  const perimetreEntete = choisi ? (a.par_bien[String(choisi.id)] || {}) : a.total
+  const bilanN = bilanPeriode(perimetreEntete, an, 'total_cents', jusquAu)
+  const bilanN1 = bilanPeriode(perimetreEntete, an - 1, 'total_cents', jusquAu)
   const totalN = bilanN.total
   const totalN1 = bilanN1.total
   // ⚠ UN TOTAL QUI NE SAIT RIEN NE S'ECRIT PAS « 0 € ». Si aucun mois de la
@@ -1892,14 +1948,27 @@ function renderAnnee () {
   const montantOuRefus = (bilan) => bilan.absente
     ? TIRET
     : (bilan.refuse ? t('revenue.unavailable') : monnaie(Math.round(bilan.total / 100), devise))
-  $('[data-bind="revenue-annee-periode"]').textContent = enCours
+  // ⚠ LA PERIODE NOMME LE LOGEMENT quand il y en a un : « La bulle · janvier ->
+  // octobre 2026 ». Sans cela, le grand chiffre change sous la pastille sans
+  // que rien ne dise de quoi il parle — exactement l'ambiguite que je
+  // redoutais quand l'en-tete ne suivait pas.
+  const prefixeBien = choisi ? `${String(choisi.name || '')} · ` : ''
+  $('[data-bind="revenue-annee-periode"]').textContent = prefixeBien + (enCours
     ? t('revenue.annee_periode_cours', {
       mois: moisSeul(`${an}-${String(moisCourant).padStart(2, '0')}`), annee: String(an)
     })
-    : t('revenue.annee_periode_entiere', { annee: String(an) })
+    : t('revenue.annee_periode_entiere', { annee: String(an) }))
   $('[data-bind="revenue-annee-n"]').textContent = montantOuRefus(bilanN)
   $('[data-bind="revenue-annee-n1-label"]').textContent = String(an - 1)
   $('[data-bind="revenue-annee-n1"]').textContent = montantOuRefus(bilanN1)
+  // L'ecart de l'en-tete : pour un BIEN seulement, jamais pour le compte.
+  const noeudEcart = $('[data-bind="revenue-annee-ecart"]')
+  if (noeudEcart) {
+    const pctEntete = choisi ? ecartPourcent(bilanN.total, bilanN1.total) : null
+    noeudEcart.hidden = pctEntete === null
+    noeudEcart.className = `caption rev-tbl__ecart${pctEntete !== null && pctEntete < 0 ? ' rev-tbl__ecart--bas' : ''}`
+    noeudEcart.textContent = pctEntete === null ? '' : (pctEntete > 0 ? '+' : '') + pctEntete + ' %'
+  }
   // ⚠ AUCUN POURCENTAGE ICI, ET C'EST LA DECISION 1 DE THIERRY, CONFIRMEE LE
   // 27 OCTOBRE APRES LA MAQUETTE. Le perimetre des deux annees n'est pas le
   // meme : un logement arrive en cours d'annee gonfle N sans rien devoir a
@@ -1907,26 +1976,6 @@ function renderAnnee () {
   // +0,2 % sans le bien « nouveau en 2026 ». L'ecart vit sur les LIGNES.
 
   // ─── Les pastilles de filtre ────────────────────────────────────────────
-  // Seuls les logements qui portent quelque chose sur l'une des deux annees :
-  // une pastille qui ne tracerait rien n'est pas un filtre, c'est un cul-de-sac.
-  const avecDonnees = (etat.biens || []).filter(b => {
-    const pm = a.par_bien && a.par_bien[String(b.id)]
-    return pm && Object.keys(pm).length > 0
-  })
-  // Une pastille retiree ne laisse pas un filtre orphelin : le bien choisi peut
-  // disparaitre d'un rechargement (retire du compte, ou hors du perimetre d'un
-  // membre), et la selection perimee s'oublie.
-  // ⚠ J'AVAIS ECRIT ICI « sans ce repli, la courbe se viderait sans un mot ».
-  // C'est faux, et la review l'a mesure : sans lui, `find` rend `undefined`,
-  // donc `!choisi` est vrai, donc la pastille « Tous » s'allume et la courbe
-  // montre le compte — rien ne se vide. Le seul effet reel est d'oublier la
-  // selection en memoire. La ligne reste, son ⚠ non : un repli qui affirme
-  // fermer un defaut qu'il ne ferme pas est la meme faute que la branche morte
-  // retiree plus bas.
-  if (etat.filtreAnnee && !avecDonnees.some(b => String(b.id) === etat.filtreAnnee)) {
-    etat.filtreAnnee = null
-  }
-  const choisi = etat.filtreAnnee ? avecDonnees.find(b => String(b.id) === etat.filtreAnnee) : null
   const puce = (val, texte, actif) =>
     `<button type="button" class="rev-an-puce${actif ? ' is-on' : ''}" data-filtre="${esc(val)}" `
     + `aria-pressed="${actif ? 'true' : 'false'}">${esc(texte)}</button>`
@@ -1978,12 +2027,48 @@ function renderAnnee () {
   // un axe « 0 € / 0,50 € / 1 € » sous un total de 0 € : un repere gradue en
   // centimes pour une courbe qui n'existe pas. On le dit en mots.
   const riendDuTout = !series.some(se => se.valeurs.some(v => Number.isFinite(v)))
+  // ─── LA BANDE DES COMPARABLES ───────────────────────────────────────────
+  // ⚠ DEUX BANDES, PAS UNE, et elles ne disent pas la meme chose :
+  //   `clos`  = l'estimation AirROI du revenu de chaque comparable ;
+  //   `futur` = la somme des PRIX AFFICHES de ses nuits indisponibles.
+  // La seconde n'est pas du « deja reserve » — `available = false` confond une
+  // nuit vendue, une nuit que l'hote a fermee et une nuit invendable par
+  // sejour minimum. Les mots de l'ecran le disent (decision de Thierry) :
+  // « occupe chez les comparables », jamais « reserve ».
+  const comp = choisi ? etat.comparablesParBien[String(choisi.id)] : null
+  const bandes = []
+  let compDate = null
+  let compNb = 0
+  if (comp && comp.mois) {
+    const douze = (nature, champ) => {
+      const out = []
+      for (let m = 1; m <= 12; m++) {
+        const c = comp.mois[`${an}-${String(m).padStart(2, '0')}`]
+        out.push(c && c.nature === nature && Number.isFinite(Number(c[champ])) ? Number(c[champ]) / 100 : null)
+      }
+      return out
+    }
+    // ⚠ J'AVAIS ECRIT `var(--bg-sub)`, QUI N'EXISTE PAS dans `shared/theme.css`.
+    // Une couleur inventee ne rougit nulle part : le module la refuse par sa
+    // liste blanche et retombe sur `var(--ink)` — donc une bande NOIRE, pleine,
+    // par-dessus la courbe. C'est la meme famille que le `[hidden]` sans
+    // `!important` : le defaut ne casse rien, il rend juste l'ecran faux.
+    // Les deux jetons ci-dessous existent, et ils suivent le mode sombre.
+    for (const [nature, jeton] of [['clos', 'var(--line)'], ['futur', 'var(--amber-soft)']]) {
+      const min = douze(nature, 'min_cents')
+      const max = douze(nature, 'max_cents')
+      if (min.some(v => Number.isFinite(v))) bandes.push({ min, max, couleur: jeton })
+    }
+    compDate = comp.releve_le || null
+    for (const k of Object.keys(comp.mois)) compNb = Math.max(compNb, Number(comp.mois[k].comparables) || 0)
+  }
   const noeudCourbe = $('[data-bind="revenue-annee-courbe"]')
   if (noeudCourbe && riendDuTout) {
     noeudCourbe.innerHTML = `<p class="caption muted">${esc(t('revenue.annee_vide'))}</p>`
   } else if (noeudCourbe) {
     noeudCourbe.innerHTML = courbeMensuelle({
       series,
+      bandes,
       ...repereDeCourbe(),
       graduations: PALIERS,
       // ⚠ L'AXE SE RELEVE A UN PALIER ROND : sans cela, trois paliers calcules
@@ -2012,6 +2097,9 @@ function renderAnnee () {
     noeudLeg.innerHTML = marque('plein', String(an))
       + (aDuReserve ? marque('pointille', t('revenue.annee_reserve')) : '')
       + marque('n1', String(an - 1))
+      // ⚠ LA MARQUE DE LA BANDE N'APPARAIT QUE SI LA BANDE EXISTE : une
+      // legende qui nomme un trait absent est un mensonge de plus.
+      + (bandes.length ? marque('bande', t('revenue.annee_comparables_legende')) : '')
   }
 
   // ─── Le tableau par logement ────────────────────────────────────────────
@@ -2084,6 +2172,20 @@ function renderAnnee () {
   // alors que le total, le tableau et l'ecart s'arretent au mois courant. Sans
   // cette phrase, l'hote lit la fin du trait gris et la colonne N-1 du tableau
   // et trouve deux chiffres differents pour la meme annee.
+  // ⚠ LA NOTE DES COMPARABLES DIT TROIS CHOSES, et aucune n'est decorative :
+  // d'ou vient la bande, qu'elle est une ESTIMATION a partir des prix
+  // affiches, et A QUELLE DATE elle a ete relevee. Sans la date, l'hote
+  // compare son mois en cours a une photo dont il ignore l'age.
+  const noteComp = $('[data-bind="revenue-annee-comparables"]')
+  if (noteComp) {
+    const dire = bandes.length && compDate
+    noteComp.hidden = !dire
+    noteComp.textContent = dire
+      ? t('revenue.annee_comparables_note', {
+        n: compNb, date: dateDuJour(String(compDate), { day: 'numeric', month: 'long', year: 'numeric' })
+      })
+      : ''
+  }
   $('[data-bind="revenue-annee-note"]').textContent = enCours
     ? t('revenue.annee_note_cours', {
       mois: moisSeul(`${an}-${String(moisCourant).padStart(2, '0')}`), annee: String(an - 1)
@@ -2240,6 +2342,9 @@ async function init () {
       if (!b || !filtres.contains(b)) return
       etat.filtreAnnee = b.dataset.filtre || null
       renderAnnee()
+      // La bande suit la pastille, et elle arrive apres : le rendu ci-dessus
+      // montre deja la courbe du bien, celui du chargeur ajoutera la bande.
+      if (etat.filtreAnnee) chargerComparables(etat.filtreAnnee)
     })
   }
 

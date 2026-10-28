@@ -226,9 +226,90 @@ module.exports = async (req, res) => {
     }
   }
 
+  // ─── LA BANDE DES COMPARABLES ───────────────────────────────────────────
+  // ⚠ ELLE N'EXISTE QUE POUR UN LOGEMENT DESIGNE, et c'est la decision de
+  // Thierry : un min-max de comparables n'a aucun sens pour un compte entier,
+  // dont les logements ont chacun les leurs. Sans `?bien=`, rien n'est lu —
+  // donc aucune requete de plus sur le chemin normal.
+  // ⚠ ET L'ECRAN NE LIT QUE LA TABLE : aucun appel AirROI ici. C'est le cron
+  // qui releve, une fois par mois, par un writer unique.
+  let comparables = null
+  const bienDemande = String((req.query && req.query.bien) || '')
+  if (bienDemande) {
+    if (!UUID_RE.test(bienDemande)) {
+      return res.status(400).json({ error: 'Logement invalide' })
+    }
+    // ⚠ LE PERIMETRE S'APPLIQUE A LA BANDE AUSSI. Un membre delegue qui
+    // demanderait un bien hors de son perimetre lirait les comparables d'un
+    // logement qu'il n'a pas le droit de voir — un masquage d'ecran ne protege
+    // rien, c'est la garde serveur qui refuse.
+    if (!connus.has(bienDemande)) {
+      return res.status(403).json({ error: 'Logement hors de votre périmètre' })
+    }
+    comparables = await bandeDesComparables(supabase, bienDemande, annee, jour)
+    requetes++
+    if (comparables === null) indisponibles.push('comparables')
+  }
+
   return rendre(res, t0, requetes, {
-    annee, jour, par_bien: parBien, hors_biens: horsBiens, total, indisponibles
+    annee, jour, par_bien: parBien, hors_biens: horsBiens, total, indisponibles,
+    comparables
   })
+}
+
+// Le min et le max, mois par mois, parmi les comparables d'un logement.
+//
+// ⚠ ON NE REND QUE CE QUI A ETE MESURE. Un mois dont aucun comparable n'a de
+// montant n'entre PAS dans la reponse : l'ecran distingue alors « pas de bande
+// ici » de « bande a zero ». C'est la meme regle que la vue Annee, et c'est
+// celle que sa recette a fait corriger trois fois.
+//
+// ⚠ UN SEUL RELEVE PAR (comparable, mois) : LE PLUS RECENT. La table garde
+// toutes les photos — c'est son role —, mais la bande d'aujourd'hui se lit sur
+// la derniere. Melanger deux photos du meme comparable ferait un min et un max
+// qui ne parlent pas du meme instant.
+async function bandeDesComparables (supabase, bienId, annee, jour) {
+  const debut = `${annee - 1}-01-01`
+  const fin = `${annee + 1}-01-01`
+  const { data, error } = await supabase
+    .from('comparables_releves')
+    .select('listing_id, mois, nature, montant_estime_cents, montant_affiche_cents, nuits_indisponibles, nuits_mesurees, releve_le')
+    .eq('property_id', bienId)
+    .gte('mois', debut)
+    .lt('mois', fin)
+    .order('releve_le', { ascending: false })
+    .limit(5000)
+  if (error) {
+    console.error('[ecran/revenus-annee] comparables :', error.message)
+    return null
+  }
+  // La photo la plus recente de chaque (comparable, mois). `order` est
+  // decroissant, donc la PREMIERE vue est la bonne.
+  const vues = new Set()
+  const parMois = new Map()
+  let releveLe = null
+  for (const l of data || []) {
+    const cleLigne = `${l.listing_id}|${l.mois}`
+    if (vues.has(cleLigne)) continue
+    vues.add(cleLigne)
+    const montant = l.nature === 'clos' ? l.montant_estime_cents : l.montant_affiche_cents
+    if (montant === null || montant === undefined) continue
+    const cle = String(l.mois).slice(0, 7)
+    if (!parMois.has(cle)) parMois.set(cle, { nature: l.nature, min: montant, max: montant, comparables: 0, releve_le: l.releve_le })
+    const b = parMois.get(cle)
+    b.min = Math.min(b.min, montant)
+    b.max = Math.max(b.max, montant)
+    b.comparables++
+    if (!releveLe || String(l.releve_le) > releveLe) releveLe = String(l.releve_le)
+  }
+  const mois = {}
+  for (const [cle, b] of parMois) {
+    mois[cle] = {
+      nature: b.nature, min_cents: b.min, max_cents: b.max,
+      comparables: b.comparables, releve_le: b.releve_le
+    }
+  }
+  return { mois, releve_le: releveLe, jour }
 }
 
 // ⚠ `Server-Timing` PORTE LE COMPTE DE REQUETES, et c'est un PLANCHER annonce

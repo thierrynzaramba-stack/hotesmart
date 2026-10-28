@@ -720,6 +720,8 @@
   "photo.sending": "Enviando la foto…",
   "photo.too_big": "Imagen demasiado pesada, incluso comprimida (2 MB máx.)",
   "revenue.annee_col_ecart": "Variación",
+  "revenue.annee_comparables_legende": "comparables (mín – máx)",
+  "revenue.annee_comparables_note": "Banda gris: el mes más bajo y el más alto entre sus {n} alojamientos comparables, registrados el {date}. Estimación a partir de los precios mostrados, no de sus cuentas — los meses próximos muestran lo que está OCUPADO en ellos, que no es lo mismo que reservado.",
   "revenue.annee_filtre_aria": "Filtrar la curva por alojamiento",
   "revenue.annee_filtre_tous": "Todos",
   "revenue.annee_hors_biens": "{annee}: {n, plural, one {# estancia sin vínculo con ninguno de sus alojamientos} other {# estancias sin vínculo con ninguno de sus alojamientos}}, {montant} en el total y en ninguna fila",
