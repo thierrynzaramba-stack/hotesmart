@@ -261,19 +261,28 @@ module.exports = async (req, res) => {
 //
 // ⚠ ON NE REND QUE CE QUI A ETE MESURE. Un mois dont aucun comparable n'a de
 // montant n'entre PAS dans la reponse : l'ecran distingue alors « pas de bande
-// ici » de « bande a zero ». C'est la meme regle que la vue Annee, et c'est
-// celle que sa recette a fait corriger trois fois.
+// ici » de « bande a zero ». C'est la regle du depot, et c'est celle que la
+// recette de la vue Annee a fait corriger trois fois.
 //
-// ⚠ UN SEUL RELEVE PAR (comparable, mois) : LE PLUS RECENT. La table garde
-// toutes les photos — c'est son role —, mais la bande d'aujourd'hui se lit sur
-// la derniere. Melanger deux photos du meme comparable ferait un min et un max
-// qui ne parlent pas du meme instant.
+// TROIS FILTRES, ET CHACUN FERME UN DEFAUT MESURE PAR LA REVIEW :
+//   · un mois dont la COUVERTURE est partielle est ecarte — le calendrier
+//     AirROI commence a sa date de capture, donc son premier mois est tronque
+//     (mesure : octobre couvert sur 4 nuits sur 31, trace au ras de l'axe a
+//     cote d'une courbe qui porte le mois entier) ;
+//   · une ligne `futur` sur un mois DEJA CLOS est perimee, pas une mesure :
+//     elle vient de drapeaux `available` releves AVANT que le mois ne se
+//     termine, et l'ecran la libellerait « occupe chez les comparables » ;
+//   · un mois dont les comparables ne partagent pas la MEME nature ou la MEME
+//     date de photo ne se trace pas. Min et max doivent parler de la meme
+//     grandeur et du meme instant — sinon on min/maxe une estimation de
+//     revenu AirROI contre une somme de prix affiches, ce que la migration dit
+//     explicitement d'eviter.
 async function bandeDesComparables (supabase, bienId, annee, jour) {
   const debut = `${annee - 1}-01-01`
   const fin = `${annee + 1}-01-01`
   const { data, error } = await supabase
     .from('comparables_releves')
-    .select('listing_id, mois, nature, montant_estime_cents, montant_affiche_cents, nuits_indisponibles, nuits_mesurees, releve_le')
+    .select('listing_id, mois, nature, montant_estime_cents, montant_affiche_cents, nuits_indisponibles, nuits_mesurees, motif, releve_le')
     .eq('property_id', bienId)
     .gte('mois', debut)
     .lt('mois', fin)
@@ -283,33 +292,59 @@ async function bandeDesComparables (supabase, bienId, annee, jour) {
     console.error('[ecran/revenus-annee] comparables :', error.message)
     return null
   }
-  // La photo la plus recente de chaque (comparable, mois). `order` est
+  const moisCourant = String(jour).slice(0, 7)
+  // La photo la plus recente de chaque (comparable, mois, nature). `order` est
   // decroissant, donc la PREMIERE vue est la bonne.
   const vues = new Set()
-  const parMois = new Map()
-  let releveLe = null
+  const parCle = new Map()
   for (const l of data || []) {
-    const cleLigne = `${l.listing_id}|${l.mois}`
+    const cleLigne = `${l.listing_id}|${l.mois}|${l.nature}`
     if (vues.has(cleLigne)) continue
     vues.add(cleLigne)
+    const mois = String(l.mois).slice(0, 7)
+    // Un `futur` sur un mois clos est une donnee perimee.
+    if (l.nature === 'futur' && mois < moisCourant) continue
+    // Une couverture partielle ne se trace pas : le mois le DIT par son motif,
+    // pose a l'ecriture par le writer.
+    if (l.nature === 'futur' && Number.isFinite(Number(l.nuits_mesurees))
+        && Number(l.nuits_mesurees) < joursDuMois(mois)) continue
     const montant = l.nature === 'clos' ? l.montant_estime_cents : l.montant_affiche_cents
     if (montant === null || montant === undefined) continue
-    const cle = String(l.mois).slice(0, 7)
-    if (!parMois.has(cle)) parMois.set(cle, { nature: l.nature, min: montant, max: montant, comparables: 0, releve_le: l.releve_le })
-    const b = parMois.get(cle)
+    const cle = `${mois}|${l.nature}`
+    if (!parCle.has(cle)) {
+      parCle.set(cle, { mois, nature: l.nature, min: montant, max: montant, comparables: 0, dates: new Set() })
+    }
+    const b = parCle.get(cle)
     b.min = Math.min(b.min, montant)
     b.max = Math.max(b.max, montant)
     b.comparables++
-    if (!releveLe || String(l.releve_le) > releveLe) releveLe = String(l.releve_le)
+    b.dates.add(String(l.releve_le))
   }
   const mois = {}
-  for (const [cle, b] of parMois) {
-    mois[cle] = {
+  for (const b of parCle.values()) {
+    // ⚠ UNE SEULE DATE DE PHOTO PAR MOIS. `releve_le` vient du cache AirROI,
+    // propre a chaque annonce : le min pourrait venir d'une photo de juillet et
+    // le max d'une d'octobre, et l'ecran afficherait une seule date pour les
+    // deux. Un mois dont les photos divergent ne se trace pas — il se tait, ce
+    // qui est la seule reponse qui n'invente rien.
+    if (b.dates.size !== 1) continue
+    // ⚠ ET UN MOIS DEJA PRIS PAR SA NATURE `clos` NE SE FAIT PAS DOUBLER par
+    // une ligne `futur` : le realise prime sur l'occupe.
+    if (mois[b.mois] && mois[b.mois].nature === 'clos') continue
+    mois[b.mois] = {
       nature: b.nature, min_cents: b.min, max_cents: b.max,
-      comparables: b.comparables, releve_le: b.releve_le
+      comparables: b.comparables, releve_le: [...b.dates][0]
     }
   }
-  return { mois, releve_le: releveLe, jour }
+  return { mois, jour }
+}
+
+// Le nombre de jours d'un mois « YYYY-MM ». ⚠ `Date.UTC(an, m, 0)` rend le
+// DERNIER jour du mois precedent, donc le compte du mois `m`.
+function joursDuMois (mois) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(mois || ''))) return 0
+  const [an, m] = String(mois).split('-').map(Number)
+  return new Date(Date.UTC(an, m, 0)).getUTCDate()
 }
 
 // ⚠ `Server-Timing` PORTE LE COMPTE DE REQUETES, et c'est un PLANCHER annonce

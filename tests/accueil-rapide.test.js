@@ -2137,7 +2137,10 @@ function bancAnnee (options = {}) {
   ]
   p.interne.etat.filtreAnnee = options.filtre || null
   // Les bandes deja chargees, comme si le clic sur la pastille avait rendu.
-  p.interne.etat.comparablesParBien = options.comparables || {}
+  // ⚠ LA CLE DU CACHE EST « annee|bien » depuis la review : une bande ne vaut
+  // que pour la fenetre d'annees qu'elle couvre.
+  p.interne.etat.comparablesParBien = Object.fromEntries(
+    Object.entries(options.comparables || {}).map(([b, v]) => [`${options.an || 2026}|${b}`, v]))
   p.interne.etat.annee = options.annee
   p.interne.renderAnnee()
   return p

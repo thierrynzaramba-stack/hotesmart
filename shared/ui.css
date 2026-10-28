@@ -1549,7 +1549,10 @@ body.men-cfg-ouvert { overflow: hidden; }
 .rev-an-marque--n1 { height: 2px; background: var(--muted); }
 /* La bande des comparables : un PAVE plein, pas un trait — elle couvre une
    surface, et sa marque doit le dire. */
-.rev-an-marque--bande { height: 10px; background: var(--line); border-radius: 2px; }
+.rev-an-marque--bande { height: 10px; background: var(--border); border-radius: 2px; }
+/* La bande du futur est la PLUS CLAIRE des deux (decision E) : l'occupe chez
+   les comparables se distingue de leur realise sans changer de forme. */
+.rev-an-marque--bande-futur { height: 10px; background: var(--line); border-radius: 2px; }
 /* Le fond de la bande. ⚠ Aucun hexa : les deux jetons existent deja au theme,
    et un hexa en dur ici ne suivrait pas le mode sombre. */
 .cm-bande { opacity: .85; }

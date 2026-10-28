@@ -59,7 +59,13 @@ Relevé dans `lib/airroi/cout.js` :
 |---|---|---|
 | `GET /listings/metrics/all` | **0,10 $** | **90 jours** |
 
-Donc, pour un logement à 8 comparables : **0,80 $**, une fois tous les 90 jours.
+⚠ **ET LE LOT LIVRÉ FAIT DEUX APPELS PAR COMPARABLE**, pas un : les mois clos
+(`listings/metrics/all`) ET le calendrier (`listings/live/calendar`), 0,10 $
+chacun. Donc pour un logement à 8 comparables : **1,60 $**, et non les 0,80 $
+que cette section annonçait avant le §4 ter. C'est le chiffre qu'on relira, et
+il compte : le plafond par bien est de **5 $ sur 90 jours**, **partagé** avec
+l'étude de marché, qui coûte déjà 3,50 à 4,50 $ par bien. Le writer juge donc
+la marge AVANT de payer, et REPORTE plutôt que de relever à moitié.
 Les trois garde-fous existants encadrent déjà cela : 5 $ par bien sur 90 jours,
 25 $ par compte sur 30 jours, 25 $ par mois.
 

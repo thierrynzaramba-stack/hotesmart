@@ -634,8 +634,11 @@ module.exports = async function handler(req, res) {
     // au milieu — laissant la moitié du travail fait sans qu'on sache laquelle.
     // ⚠ La cadence se lit sur le MOIS, pas sur une durée en millisecondes : un
     // « >= 30 jours » finirait par sauter un mois une fois par an.
-    // ⚠ Le client AirROI n'est construit QUE si la tâche est due : le module
-    // rend `{skipped:'cadence'}` sans rien instancier le reste du mois.
+    // ⚠ LE CLIENT EST UNE FABRIQUE, PAS UNE INSTANCE, et c'est une correction :
+    // j'avais écrit qu'il n'était « construit QUE si la tâche est due », alors
+    // qu'il était évalué comme ARGUMENT, donc à chacun des 288 ticks du jour.
+    // Sans conséquence de coût, mais c'était l'inverse de ce qui était écrit.
+    // Le module ne l'appelle que s'il a vraiment un bien à relever.
     try {
       await chrono.mesure('comparables_releves', async () => {
         const { creerClient } = require('../lib/airroi/client')
@@ -648,7 +651,7 @@ module.exports = async function handler(req, res) {
         const MARQ = 'comparables_releves'
         const bilanComp = await releverComparables(results, {
           supabase,
-          client: creerClient({ depot: depotSupabase(supabase) }),
+          client: () => creerClient({ depot: depotSupabase(supabase) }),
           marqueur: {
             lire: async () => {
               const { data } = await supabase.from('cron_logs')

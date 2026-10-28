@@ -525,13 +525,17 @@ async function chargerAnnee (an) {
 // PASTILLE, jamais a l'ouverture : le budget de l'ecran est de deux appels au
 // chargement, et une bande que personne n'a demandee n'en vaut pas un troisieme.
 async function chargerComparables (bienId) {
-  const cle = String(bienId || '')
-  if (!cle || Object.prototype.hasOwnProperty.call(etat.comparablesParBien, cle)) return
+  // ⚠ LA CLE PORTE L'ANNEE, et elle ne la portait pas. La reponse ne couvre que
+  // [annee-1, annee+1) : une pastille cliquee en 2026 puis une fleche vers 2024
+  // laissait le cache repondre pour la mauvaise fenetre — plus de bande, plus
+  // de note, aucune explication, et aucun appel ne l'aurait jamais rechargee.
+  const cle = `${etat.anneeRevenus}|${String(bienId || '')}`
+  if (!bienId || Object.prototype.hasOwnProperty.call(etat.comparablesParBien, cle)) return
   // ⚠ ON POSE LA CLE AVANT L'APPEL : deux clics rapides sur la meme pastille ne
   // doivent pas partir deux fois. `undefined` pendant le vol, la valeur apres.
   etat.comparablesParBien[cle] = undefined
   try {
-    const recu = await appel(`/api/ecran/revenus-annee?annee=${encodeURIComponent(etat.anneeRevenus)}&bien=${encodeURIComponent(cle)}`)
+    const recu = await appel(`/api/ecran/revenus-annee?annee=${encodeURIComponent(etat.anneeRevenus)}&bien=${encodeURIComponent(bienId)}`)
     // ⚠ `null` EST UNE REPONSE, ET IL VEUT DIRE « lecture ratee ». On le garde
     // tel quel : l'ecran dira « non calculable », pas « aucun comparable ».
     etat.comparablesParBien[cle] = recu && Object.prototype.hasOwnProperty.call(recu, 'comparables')
@@ -1964,7 +1968,13 @@ function renderAnnee () {
   // L'ecart de l'en-tete : pour un BIEN seulement, jamais pour le compte.
   const noeudEcart = $('[data-bind="revenue-annee-ecart"]')
   if (noeudEcart) {
-    const pctEntete = choisi ? ecartPourcent(bilanN.total, bilanN1.total) : null
+    // ⚠ `ecartPourcent` PROTEGE LE DENOMINATEUR, PAS LE NUMERATEUR. Mesure de
+    // la review : un bien qui n'a de lignes qu'en 2025 affichait « — » comme
+    // montant N et « −100 % » comme ecart, cote a cote — « je ne sais pas » et
+    // une chute inventee dans la meme phrase. Les trois etats de `bilanPeriode`
+    // existent pour eviter exactement cela ; l'en-tete ne les lisait pas.
+    const comparable = !bilanN.absente && !bilanN.refuse && !bilanN1.absente && !bilanN1.refuse
+    const pctEntete = choisi && comparable ? ecartPourcent(bilanN.total, bilanN1.total) : null
     noeudEcart.hidden = pctEntete === null
     noeudEcart.className = `caption rev-tbl__ecart${pctEntete !== null && pctEntete < 0 ? ' rev-tbl__ecart--bas' : ''}`
     noeudEcart.textContent = pctEntete === null ? '' : (pctEntete > 0 ? '+' : '') + pctEntete + ' %'
@@ -2035,10 +2045,17 @@ function renderAnnee () {
   // nuit vendue, une nuit que l'hote a fermee et une nuit invendable par
   // sejour minimum. Les mots de l'ecran le disent (decision de Thierry) :
   // « occupe chez les comparables », jamais « reserve ».
-  const comp = choisi ? etat.comparablesParBien[String(choisi.id)] : null
+  const comp = choisi ? etat.comparablesParBien[`${an}|${String(choisi.id)}`] : null
+  // ⚠ UNE LECTURE RATEE SE DIT. `null` veut dire « on n'a pas pu lire », et
+  // mon commentaire du chargeur affirmait que l'ecran dirait « non
+  // calculable » — il ne disait rien du tout, et l'hote concluait qu'il n'a
+  // pas de comparables. C'est le renversement exact de la regle du depot.
+  const compEchoue = choisi && comp === null
+  const compEnVol = choisi && comp === undefined
   const bandes = []
   let compDate = null
-  let compNb = 0
+  let compNb = null
+  let compPlusieursDates = false
   if (comp && comp.mois) {
     const douze = (nature, champ) => {
       const out = []
@@ -2054,13 +2071,36 @@ function renderAnnee () {
     // par-dessus la courbe. C'est la meme famille que le `[hidden]` sans
     // `!important` : le defaut ne casse rien, il rend juste l'ecran faux.
     // Les deux jetons ci-dessous existent, et ils suivent le mode sombre.
-    for (const [nature, jeton] of [['clos', 'var(--line)'], ['futur', 'var(--amber-soft)']]) {
+    // ⚠ DEUX JETONS, ET LE FUTUR EST LE PLUS CLAIR (decision E de Thierry).
+    // `--border` pour le realise, `--line` pour l'occupe : les deux existent au
+    // theme, `--line` y est plus clair que `--border`, et tous deux suivent le
+    // mode sombre. J'avais mis `--amber-soft` pour le futur — quasi invisible
+    // sur fond blanc.
+    // ⚠ ET AUCUNE VALEUR HEXA ICI, MEME EN COMMENTAIRE : le garde-fou
+    // « aucun hexa hors de shared/theme.css » les compte aussi, et il a raison
+    // — une couleur ecrite a la main dans un commentaire devient la reference
+    // de qui le lit, puis se recopie dans du code.
+    for (const [nature, jeton] of [['clos', 'var(--border)'], ['futur', 'var(--line)']]) {
       const min = douze(nature, 'min_cents')
       const max = douze(nature, 'max_cents')
-      if (min.some(v => Number.isFinite(v))) bandes.push({ min, max, couleur: jeton })
+      if (min.some(v => Number.isFinite(v))) bandes.push({ nature, min, max, couleur: jeton })
     }
-    compDate = comp.releve_le || null
-    for (const k of Object.keys(comp.mois)) compNb = Math.max(compNb, Number(comp.mois[k].comparables) || 0)
+    // ⚠ LE COMPTE ET LA DATE SE TIRENT DES MOIS REELLEMENT TRACES, pas de tout
+    // ce que l'endpoint a rendu. Il couvre TROIS annees (N-1 a N+1) : mon
+    // premier jet prenait le MAXIMUM de comparables et la date la plus RECENTE,
+    // tous mois confondus — la note annoncait donc « parmi vos 8 logements »
+    // pour une bande dont un mois n'en porte que 2, et une date qui pouvait
+    // venir d'un mois non affiche.
+    const tracés = []
+    for (let m = 1; m <= 12; m++) {
+      const c = comp.mois[`${an}-${String(m).padStart(2, '0')}`]
+      if (c) tracés.push(c)
+    }
+    const nbs = tracés.map(c => Number(c.comparables) || 0).filter(n => n > 0)
+    compNb = nbs.length ? { min: Math.min(...nbs), max: Math.max(...nbs) } : null
+    const dates = [...new Set(tracés.map(c => String(c.releve_le)).filter(Boolean))].sort()
+    compDate = dates.length ? dates[dates.length - 1] : null
+    compPlusieursDates = dates.length > 1
   }
   const noeudCourbe = $('[data-bind="revenue-annee-courbe"]')
   if (noeudCourbe && riendDuTout) {
@@ -2099,7 +2139,13 @@ function renderAnnee () {
       + marque('n1', String(an - 1))
       // ⚠ LA MARQUE DE LA BANDE N'APPARAIT QUE SI LA BANDE EXISTE : une
       // legende qui nomme un trait absent est un mensonge de plus.
-      + (bandes.length ? marque('bande', t('revenue.annee_comparables_legende')) : '')
+      // ⚠ UNE MARQUE PAR BANDE, chacune nommee. Deux polygones de couleurs
+      // differentes sous une seule etiquette laissaient l'hote devant une
+      // bande que rien ne nommait, et une note qui attribuait tout a l'autre.
+      + bandes.map(b => marque(
+        b.nature === 'clos' ? 'bande' : 'bande-futur',
+        t(b.nature === 'clos' ? 'revenue.annee_comparables_legende' : 'revenue.annee_comparables_legende_futur')
+      )).join('')
   }
 
   // ─── Le tableau par logement ────────────────────────────────────────────
@@ -2178,12 +2224,15 @@ function renderAnnee () {
   // compare son mois en cours a une photo dont il ignore l'age.
   const noteComp = $('[data-bind="revenue-annee-comparables"]')
   if (noteComp) {
-    const dire = bandes.length && compDate
-    noteComp.hidden = !dire
-    noteComp.textContent = dire
+    const dire = bandes.length && compDate && compNb
+    noteComp.hidden = !dire && !compEchoue && !compEnVol
+    if (compEchoue) noteComp.textContent = t('revenue.annee_comparables_echec')
+    else if (compEnVol) noteComp.textContent = t('revenue.computing')
+    else noteComp.textContent = dire
       ? t('revenue.annee_comparables_note', {
-        n: compNb, date: dateDuJour(String(compDate), { day: 'numeric', month: 'long', year: 'numeric' })
-      })
+        n: compNb && compNb.min === compNb.max ? String(compNb.min) : `${compNb.min}–${compNb.max}`,
+        date: dateDuJour(String(compDate), { day: 'numeric', month: 'long', year: 'numeric' })
+      }) + (compPlusieursDates ? ' ' + t('revenue.annee_comparables_dates') : '')
       : ''
   }
   $('[data-bind="revenue-annee-note"]').textContent = enCours

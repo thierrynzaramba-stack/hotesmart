@@ -81,10 +81,13 @@ test('LE TEST QUI COMPTE : un mois TRONQUE se declare par sa couverture', () => 
 
 test('LE TEST QUI COMPTE : zero nuit indisponible est un FAIT, pas une absence', () => {
   // C est le seul `0` legitime du module : le mois a ete mesure, il est vide.
-  const out = lignesFutures({
-    listingId: '1', aujourdhui: AUJ,
-    jours: [jour('2026-12-01', true, 100), jour('2026-12-02', true, 100)]
-  })
+  // ⚠ UN MOIS ENTIER, ET C'EST NECESSAIRE DEPUIS LA REVIEW : un mois
+  // PARTIELLEMENT couvert porte desormais un motif qui le dit. Ma premiere
+  // version ne fournissait que deux jours de decembre — le motif « couvert sur
+  // 2 nuits sur 31 » etait donc juste, et c'est le test qui avait tort.
+  const decembre = Array.from({ length: 31 }, (_, i) => jour(`2026-12-${String(i + 1).padStart(2, '0')}`, true, 100))
+  const out = lignesFutures({ listingId: '1', aujourdhui: AUJ, jours: decembre })
+  assert.strictEqual(out[0].nuits_mesurees, 31, 'le mois fourni n est pas complet : le test ne demontre rien')
   assert.strictEqual(out[0].montant_affiche_cents, 0)
   assert.strictEqual(out[0].nuits_indisponibles, 0)
   assert.strictEqual(out[0].motif, null, 'un mois mesure et vide porte un motif : ce n est pas une absence')
@@ -135,4 +138,201 @@ test('RECENSEMENT : la profondeur borne les mois clos', () => {
   const out = lignesCloses({ listingId: '1', aujourdhui: AUJ, mensuel: vieux })
   assert.strictEqual(out.length, _interne.PROFONDEUR_MOIS,
     `${out.length} mois rendus pour une profondeur de ${_interne.PROFONDEUR_MOIS}`)
+})
+
+// ─── L'ORCHESTRATEUR ───────────────────────────────────────────────────────
+// ⚠ `releverSiDu` N'ETAIT APPELE PAR AUCUN TEST, et la review a mesure que
+// quatre mutations y survivaient — dont « une photo ecrase la precedente » et
+// « la date du releve devient le jour du cron », qui est la decision la plus
+// importante du module.
+
+const { releverSiDu } = require('../lib/marche/comparables-releves')
+
+// Un double de Supabase qui repond par TABLE et retient ce qu'on lui ecrit.
+function faireBase ({ retenus = [], dejaFaits = [], erreurUpsert = null } = {}) {
+  const vu = { upserts: [], tables: [], filtres: [] }
+  const client = {
+    from (table) {
+      vu.tables.push(table)
+      const rep = () => table === 'comparables_retenus'
+        ? { data: retenus, error: null }
+        : { data: dejaFaits, error: null }
+      const q = {
+        select (cols) { q._cols = cols; return q },
+        eq (c, v) { vu.filtres.push(['eq', c, v]); return q },
+        gte (c, v) { vu.filtres.push(['gte', c, v]); return q },
+        limit () { return Promise.resolve(rep()) },
+        upsert (lignes, opts) {
+          vu.upserts.push({ table, lignes, opts })
+          return {
+            select: () => Promise.resolve({
+              data: erreurUpsert ? null : lignes.map((_, i) => ({ id: i + 1 })),
+              error: erreurUpsert
+            })
+          }
+        },
+        then (r) { return Promise.resolve(rep()).then(r) }
+      }
+      return q
+    }
+  }
+  return { client, vu }
+}
+
+// Un client AirROI qui rend des reponses REELLES de forme, datees du cache.
+function faireClient ({ recupereLe = '2026-10-06' } = {}) {
+  return {
+    estimer: async () => 1.6,
+    marge: async () => 5,
+    metriquesAnnonce: async () => ({
+      recupereLe: `${recupereLe}T10:00:00Z`,
+      // ⚠ LA FORME D'AIRROI : `YYYY-MM`, pas `YYYY-MM-DD`.
+      donnees: { results: [{ date: '2026-09', revenue: 4006 }, { date: '2026-08', revenue: 3000 }] }
+    }),
+    calendrierAnnonce: async () => ({
+      recupereLe: `${recupereLe}T10:00:00Z`,
+      donnees: { results: [{ date: '2026-11-01', available: false, rate: 100, min_nights: 2 }] }
+    })
+  }
+}
+
+const RETENU = { property_id: 'bien-A', listing_id: '111', user_id: 'u1' }
+
+test("LE TEST QUI COMPTE : `releve_le` est la date de la CAPTURE, pas du cron", async () => {
+  // ⚠ LA DECISION LA PLUS IMPORTANTE DU MODULE. Le cache AirROI dure 90 jours
+  // et ne se contourne pas : dater du jour du cron ecrirait trois photos
+  // differentes portant la MEME donnee, vieille de 0, 30 et 60 jours — et la
+  // comparaison « a delai egal » reposerait sur des dates fausses.
+  const { client, vu } = faireBase({ retenus: [RETENU] })
+  const r = await releverSiDu({ errors: [] }, {
+    supabase: client, client: faireClient({ recupereLe: '2026-10-06' }),
+    now: () => new Date('2026-10-28T03:00:00Z').getTime(), forcer: true
+  })
+  assert.ok(r.ecrites > 0, `aucune ligne ecrite : ${JSON.stringify(r)}`)
+  const lignes = vu.upserts[0].lignes
+  for (const l of lignes) {
+    assert.strictEqual(l.releve_le, '2026-10-06',
+      `la ligne est datee du ${l.releve_le} — le jour du cron, pas celui de la capture`)
+  }
+})
+
+test("LE TEST QUI COMPTE : la cle d unicite porte `releve_le`", async () => {
+  // Sans lui, une photo ECRASE la precedente — et toute la raison d etre de la
+  // table (« on garde tout ») disparait.
+  const { client, vu } = faireBase({ retenus: [RETENU] })
+  await releverSiDu({ errors: [] }, {
+    supabase: client, client: faireClient(),
+    now: () => new Date('2026-10-28T03:00:00Z').getTime(), forcer: true
+  })
+  const opts = vu.upserts[0].opts
+  assert.match(String(opts.onConflict), /releve_le/,
+    `la cle de conflit est « ${opts.onConflict} » : une photo ecrasera la precedente`)
+  assert.strictEqual(opts.ignoreDuplicates, true,
+    'un relevé deja en base leverait au lieu d etre ignore')
+})
+
+test("LE TEST QUI COMPTE : un bien DEJA RELEVE ce mois-ci est saute", async () => {
+  // ⚠ LE CONSTAT n°2 DE LA REVIEW : avec un verrou mensuel GLOBAL, le premier
+  // bien traite bloquait tout le mois, et le mois suivant le MEME bien
+  // repassait en tete — un seul bien releve, les autres JAMAIS.
+  const { client } = faireBase({
+    retenus: [RETENU, { property_id: 'bien-B', listing_id: '222', user_id: 'u1' }],
+    dejaFaits: [{ property_id: 'bien-A' }]
+  })
+  const r = await releverSiDu({ errors: [] }, {
+    supabase: client, client: faireClient(),
+    now: () => new Date('2026-10-28T03:00:00Z').getTime(), forcer: true
+  })
+  assert.strictEqual(r.bien, 'bien-B',
+    `le passage a repris ${r.bien} alors qu il etait deja releve ce mois-ci`)
+})
+
+test("LE TEST QUI COMPTE : le temoin du « deja fait » est la date d ECRITURE", async () => {
+  // `releve_le` peut avoir 90 jours a cause du cache : s en servir ferait
+  // repasser le meme bien a chaque tick, et les autres jamais.
+  const { client, vu } = faireBase({ retenus: [RETENU] })
+  await releverSiDu({ errors: [] }, {
+    supabase: client, client: faireClient(),
+    now: () => new Date('2026-10-28T03:00:00Z').getTime(), forcer: true
+  })
+  const gte = vu.filtres.find(f => f[0] === 'gte')
+  assert.ok(gte, 'aucun filtre de mois sur les releves deja faits')
+  assert.strictEqual(gte[1], 'created_at',
+    `le temoin est « ${gte[1] }» : une capture vieille de 90 jours ferait repasser le meme bien sans fin`)
+})
+
+test("LE TEST QUI COMPTE : le marqueur n est PAS pose quand tout a echoue", async () => {
+  // Sinon le mois passe pour releve, et il faut attendre le suivant.
+  const { client } = faireBase({ retenus: [RETENU] })
+  const pannes = {
+    estimer: async () => 1.6, marge: async () => 5,
+    metriquesAnnonce: async () => { throw new Error('AirROI en panne') },
+    calendrierAnnonce: async () => { throw new Error('AirROI en panne') }
+  }
+  let marque = false
+  const r = await releverSiDu({ errors: [] }, {
+    supabase: client, client: pannes, forcer: true,
+    now: () => new Date('2026-10-28T03:00:00Z').getTime(),
+    marqueur: { lire: async () => null, ecrire: async () => { marque = true } }
+  })
+  assert.strictEqual(r.ecrites, 0)
+  assert.strictEqual(marque, false,
+    'le mois est declare releve alors que tous les appels ont echoue')
+})
+
+test("LE TEST QUI COMPTE : un budget insuffisant REPORTE, il ne releve pas a moitie", async () => {
+  // Le plafond par bien (5 $ / 90 jours) est PARTAGE avec l etude de marche.
+  // Un refus au milieu de la boucle ecrirait les comparables d avant le refus
+  // et marquerait le mois fait : le min/max reposerait sur 2 annonces sur 8.
+  const { client, vu } = faireBase({ retenus: [RETENU] })
+  let marque = false
+  const r = await releverSiDu({ errors: [] }, {
+    supabase: client, forcer: true,
+    client: { ...faireClient(), estimer: async () => 1.6, marge: async () => 0.2 },
+    now: () => new Date('2026-10-28T03:00:00Z').getTime(),
+    marqueur: { lire: async () => null, ecrire: async () => { marque = true } }
+  })
+  assert.strictEqual(r.skipped, 'budget_insuffisant', `le passage a continue : ${JSON.stringify(r)}`)
+  assert.strictEqual(vu.upserts.length, 0, 'des lignes ont ete ecrites malgre le refus de budget')
+  assert.strictEqual(marque, false, 'le mois est marque releve alors qu il est seulement reporte')
+})
+
+test("LE TEST QUI COMPTE : le compte rendu dit ce que la BASE a accepte", async () => {
+  // ⚠ AVEC `ignoreDuplicates`, REJOUER UNE PHOTO INSERE ZERO LIGNE. Annoncer
+  // `lignes.length` serait un nombre ecrit a la main, qui ne rougit jamais —
+  // la famille deja nommee au registre (« une affirmation dans un
+  // commentaire »). La base doit avoir le dernier mot.
+  //
+  // ⚠ ET MA PREMIERE VERSION DE CE TEST NE MORDAIT PAS : elle assertait
+  // `ecrites >= 1` et portait du code mort. Un test qui n exerce pas le cas
+  // qu il nomme est pire qu absent — il rassure.
+  const vu = { upserts: [] }
+  const base = {
+    from (table) {
+      const rep = () => table === 'comparables_retenus'
+        ? { data: [RETENU], error: null }
+        : { data: [], error: null }
+      const q = {
+        select () { return q },
+        eq () { return q },
+        gte () { return q },
+        limit () { return Promise.resolve(rep()) },
+        upsert (lignes) {
+          vu.upserts.push(lignes)
+          // La base n accepte RIEN : tout etait deja en place.
+          return { select: () => Promise.resolve({ data: [], error: null }) }
+        },
+        then (r) { return Promise.resolve(rep()).then(r) }
+      }
+      return q
+    }
+  }
+  const r = await releverSiDu({ errors: [] }, {
+    supabase: base, client: faireClient(),
+    now: () => new Date('2026-10-28T03:00:00Z').getTime(), forcer: true
+  })
+  assert.ok(vu.upserts.length === 1 && vu.upserts[0].length > 0,
+    'rien n a ete envoye : le test ne demontre rien')
+  assert.strictEqual(r.ecrites, 0,
+    `le compte rendu annonce ${r.ecrites} lignes ecrites alors que la base n en a accepte aucune`)
 })

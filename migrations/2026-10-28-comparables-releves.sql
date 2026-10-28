@@ -66,12 +66,19 @@ create index if not exists
   on public.comparables_releves
   (property_id, mois);
 
--- La lecture du writer : « ai-je deja releve ce mois
--- pour cette annonce ? »
+-- La lecture du writer : « quels biens ont deja ete
+-- releves ce mois-ci ? ».
+-- ⚠ J'AVAIS ANNONCE CET INDEX POUR « ai-je deja releve
+-- ce mois pour cette annonce ? » — une requete que le
+-- writer ne fait JAMAIS. Il interroge par date
+-- d'ECRITURE, et la colonne de tete de l'index d'alors
+-- (`listing_id`) etait absente du predicat : l'index
+-- n'avait aucun lecteur, et la vraie requete n'avait
+-- aucun index. Corrige sur la requete reelle.
 create index if not exists
-  comparables_releves_annonce_idx
+  comparables_releves_ecrit_idx
   on public.comparables_releves
-  (listing_id, mois, releve_le);
+  (created_at, property_id);
 
 comment on table public.comparables_releves is
 'Les relevés mensuels des comparables d''un logement.
