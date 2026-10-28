@@ -47,6 +47,7 @@ const supabase = createClient(
 // en avait sa propre copie. Une derive entre les deux rendrait « hors contrat »
 // a la lecture une valeur que l'endpoint a acceptee et stockee.
 const { minutesValides, formeExploitable } = require('../lib/guestflow/delais-contrat');
+const { appliquerDelaiAuxBrouillons } = require('../lib/guestflow/appliquer-delai');
 const HEURE = /^([01][0-9]|2[0-3]):[0-5][0-9]$/
 
 /**
@@ -241,6 +242,30 @@ module.exports = async (req, res) => {
         delaisValides = delaisPropres(delais);
         if (!delaisValides) return res.status(400).json({ error: 'Payload invalide' });
       }
+
+      // ⚠ L'APERCU : COMPTER CE QUI PARTIRAIT, SANS RIEN ECRIRE (constat 1 de la
+      // revue du 28 octobre 2026). Sous « Je valide chaque reponse » les
+      // brouillons s'accumulent sans echeance — ils attendent parce que l'hote
+      // ne les a pas valides. En sortir les rearme a `created_at + N`, donc
+      // tout ce qui a plus de N d'age part dans les cinq minutes, quel que soit
+      // N : un hote qui choisit 24 h POUR ETRE PRUDENT verrait partir tout son
+      // arriere de plus de 24 h. Le depot exige le NOMBRE avant un geste de
+      // masse vers l'exterieur, et ici la cible est le telephone d'un voyageur.
+      //
+      // Ce mode est en LECTURE SEULE : il passe la meme garde `reglages:write`
+      // (c'est bien une ecriture qu'on prepare), il valide le meme payload, et
+      // il sort AVANT l'upsert du blob.
+      if (cible === 'delais' && (req.body || {}).apercu === true) {
+        let apercu;
+        try {
+          apercu = await appliquerDelaiAuxBrouillons(supabase, {
+            userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now(), apercu: true
+          });
+        } catch (e) {
+          apercu = { ok: false, motif: 'exception', erreur: String(e && e.message || e) };
+        }
+        return res.status(200).json({ ok: true, delais_ref: ref, apercu });
+      }
       // La reprise de la sourdine existante se fait plus bas, une fois le blob
       // relu : sans elle, un enregistrement partiel DESACTIVE une sourdine
       // active et perd sa plage, en 200 et sans un mot (constat de la revue du
@@ -397,10 +422,39 @@ module.exports = async (req, res) => {
         console.error('[agent-config] POST cible error:', eW);
         return res.status(500).json({ error: eW.message });
       }
+
+      // ⚠ LE NOUVEAU REGLAGE GOUVERNE AUSSI LES BROUILLONS DEJA EN ATTENTE
+      // (decision de Thierry, 28 octobre 2026 : « mon dernier reglage gouverne
+      // toujours »). Sans ce passage, le reglage ne valait que pour les
+      // brouillons A VENIR : `lib/cron-classify.js` lit le delai en CREANT la
+      // tache, et plus rien ne la relit — un brouillon arme a +60 min survivait
+      // au retour en validation manuelle, et l'ecran annoncait « Part dans
+      // 59 min » pendant une heure.
+      //
+      // ⚠ APRES L'UPSERT, PAS AVANT, ET L'ORDRE COMPTE. Le reglage gouverne les
+      // brouillons a venir : s'il echoue, il n'y a rien a propager. Et s'il est
+      // ecrit mais que la propagation echoue, on NE PEUT PAS rendre un 500 — le
+      // reglage, lui, est bien enregistre, et un 500 ferait croire l'inverse.
+      // L'ecran recoit donc `brouillons` et le DIT : « Enregistre en partie ».
+      let brouillons = null;
+      if (cible === 'delais') {
+        try {
+          brouillons = await appliquerDelaiAuxBrouillons(supabase, {
+            userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now()
+          });
+        } catch (e) {
+          brouillons = { ok: false, motif: 'exception', erreur: String(e && e.message || e),
+            desarmes: 0, rearmes: 0, inchanges: 0, sans_creation: 0 };
+        }
+        if (!brouillons.ok) {
+          console.error('[agent-config] delais -> brouillons:', brouillons.motif, brouillons.erreur || '');
+        }
+      }
+
       return res.status(200).json(cible === 'mode'
         ? { ok: true, mode_ref: ref, mode }
         : cible === 'delais'
-          ? { ok: true, delais_ref: ref, delais: delaisValides }
+          ? { ok: true, delais_ref: ref, delais: delaisValides, brouillons }
           : { ok: true, alertes_ref: ref, alertes: alertesPropres });
     }
 

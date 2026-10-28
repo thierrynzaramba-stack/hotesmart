@@ -1,0 +1,58 @@
+-- Chantier DELAI DE REPONSE IA (GuestFlow).
+-- Spec : docs/specs/spec-delai-reponse-ia.md
+-- Decision de Thierry, 28 octobre 2026 : « a
+-- l'enregistrement, les brouillons en attente du bien
+-- suivent le nouveau reglage ».
+-- Writer de la lecture servie ici :
+-- lib/guestflow/appliquer-delai.js
+--
+-- ⚠ LIGNES COURTES VOLONTAIRES (< 60 caracteres) : ce
+-- SQL se colle a la main dans l'editeur Supabase.
+-- ⚠ AUCUNE REQUETE DE VERIFICATION ICI (regle du
+-- 25 septembre 2026) : on ne colle que la migration.
+--
+-- ⚠ ET AUCUN SCRIPT DE VERIFICATION N'ACCOMPAGNE CELLE-CI,
+-- VOLONTAIREMENT. PostgREST n'expose pas pg_indexes :
+-- scripts/verifier-migration-delai-ia.js le dit lui-meme
+-- de ses deux index (« une lecture reussie prouve que la
+-- COLONNE repond ; elle ne prouve pas qu'il est INDEXE »).
+-- Un script qui ne peut rien lire et qui sort vert est
+-- pire qu'un script absent : il se cite comme preuve.
+-- La preuve de cet index est le plan de la requete, lu
+-- dans l'editeur SQL Supabase :
+--   explain analyze select id from public.agent_tasks
+--   where user_id = '<uuid>' and property_id = '<ref>'
+--     and status = 'pending_validation'
+--   order by id limit 500;
+-- On doit y lire un Index Scan sur
+-- idx_agent_tasks_bien_en_attente, pas un Seq Scan.
+--
+-- ADDITIVE : UN index, aucune colonne, aucune ligne
+-- touchee. Sans lui le code marche — plus lentement.
+--
+-- ⚠ POURQUOI (constat 6 de la revue du 28 octobre 2026).
+-- La nouvelle lecture est :
+--   user_id = ? and property_id = ?
+--   and status = 'pending_validation'
+--   order by id limit 500
+-- et AUCUN index ne la servait. agent_tasks ne porte que
+-- idx_agent_tasks_created_at, idx_agent_tasks_lock_battery
+-- et les deux index PARTIELS du lot 1 — lesquels exigent
+-- en plus `send_after is not null`, condition que ce
+-- module ne pose pas, puisque son objet est justement de
+-- rearmer aussi les taches desarmees.
+-- C'etait donc un scan filtre de TOUT l'historique des
+-- taches de TOUS les comptes, plus un tri, a chaque
+-- enregistrement du panneau d'un bien.
+--
+-- ⚠ PARTIEL, ET SUR `id` EN QUEUE. Partiel parce que seules
+-- les lignes en attente sont lues : quelques dizaines par
+-- bien, pas l'historique. `id` en derniere colonne parce
+-- que la lecture est paginee par CURSEUR sur `id`
+-- (`order by id` + `.gt('id', …)`) : sans lui, Postgres
+-- trie le resultat a chaque page.
+
+create index if not exists
+  idx_agent_tasks_bien_en_attente
+  on public.agent_tasks (user_id, property_id, id)
+  where status = 'pending_validation';

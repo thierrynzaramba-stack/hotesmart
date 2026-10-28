@@ -842,24 +842,193 @@ Le bandeau dit donc **« En pause : ne partira pas seule », en gris** — l'amb
 est réservé à ce qui est en cours — et **aucun compte à rebours ne s'affiche
 sur un bien en pause**, avant comme après l'échéance.
 
-⚠ **ET LA PORTÉE EST LE MOTIF `automation_paused`, PAS « LA VÉRITÉ » EN
-GÉNÉRAL.** `encoreLegitime` (`lib/guestflow/brouillons-dus.js`) refuse un
-brouillon pour **neuf** motifs ; celui-ci en traite un. Le plus atteignable des
-autres reste ouvert, et il produit exactement la phrase que Thierry a fait
-corriger — **défaut nommé, non corrigé, à arbitrer avec lui** :
+⚠ **ET LA PORTÉE EST LE MOTIF `automation_paused`.** `encoreLegitime`
+(`lib/guestflow/brouillons-dus.js`) refuse un brouillon pour **neuf** motifs ;
+le bandeau n'en **dit** qu'un : celui-là. Le changement de réglage, traité par
+la section suivante, ne se dit pas — il **désarme**, donc le compte à rebours
+disparaît au lieu d'être expliqué. Les sept autres motifs sont en **dette**,
+plus bas.
 
-> Un brouillon est armé à +60 min ; dans le même tiroir l'hôte choisit « Je
-> valide chaque réponse » et enregistre. Rien ne désarme les tâches déjà en
-> cours — `api/agent-config.js` ne touche ni `agent_tasks` ni `send_after` —
-> donc la bulle affiche « Part dans 59 min » en ambre pendant une heure, puis
-> « Part d'un instant à l'autre », et à l'échéance le cron rend
-> `repasse_en_validation_manuelle`.
+### Le dernier réglage gouverne aussi les brouillons déjà en attente
 
-Deux autres portes de la même famille : `bien_introuvable` (clé migrée — la
-tâche porte une référence que `properties.provider_property_id` ne porte plus)
-et `reservation_annulee`. Les trois demandent une décision : désarmer les
-tâches à l'enregistrement, ou faire lire au bandeau un second réglage — et pour
-un compte délégué l'écran n'a pas la donnée (dette 68).
+**Constat, même recette.** Le réglage ne valait que pour les brouillons **à
+venir** : `lib/cron-classify.js` lit le délai au moment de **créer** la tâche,
+et plus rien ne la relit. Donc un brouillon armé à +60 min survivait au retour
+en validation manuelle — « Part dans 59 min » en ambre pendant une heure, puis
+« Part d'un instant à l'autre », et à l'échéance le cron le refusait avec
+`repasse_en_validation_manuelle`. La même phrase que pour la pause, par une
+autre porte.
+
+**Décision de Thierry (28 octobre 2026), mot pour mot** : « à l'enregistrement,
+les brouillons en attente du bien suivent le nouveau réglage. Validation
+manuelle → désarmés, plus de compte à rebours. Autre délai → échéance
+recalculée depuis la création du brouillon (si elle est déjà passée, il part au
+prochain passage, c'est ce que l'hôte a demandé). **Mon dernier réglage
+gouverne toujours.** »
+
+| réglage enregistré | ce que deviennent les brouillons en attente du bien |
+|---|---|
+| `reponse_ia = null` | `send_after = null` **et** `suspendu_le = null` — plus de compte à rebours |
+| `reponse_ia = N` | `send_after = created_at + N min` |
+| `reponse_ia = 0` | `send_after = created_at`, donc échu — il part au prochain passage |
+| `created_at` illisible | `send_after = maintenant + N` — le repli le plus **tardif**, compté à part (`sans_creation`) |
+| hors contrat | **désarmement** — un blob illisible ne fait rien partir |
+
+⚠ **ET L'ARRIÉRÉ DE LA VALIDATION MANUELLE SE COMPTE AVANT LE GESTE.** C'est la
+moitié que la table ci-dessus, écrite au singulier, ne disait pas, et elle a
+été relevée en revue.
+
+Sous « Je valide chaque réponse », les brouillons s'accumulent **sans
+échéance** : ils attendent parce que l'hôte ne les a pas validés, et il peut y
+en avoir un par (réservation × type), vieux de plusieurs jours. En sortir les
+réarme à `created_at + N`, donc **tout ce qui a plus de N d'âge est échu et
+part dans les cinq minutes, quel que soit N**. Un hôte qui choisit 24 h *pour
+être prudent* verrait partir tout son arriéré de plus de 24 h — et la
+confirmation qu'il vient de lire lui a promis « après le délai choisi ».
+
+Le dépôt a déjà gradué la règle pour les gestes de masse vers l'extérieur —
+4.6.6 « exige leur **nombre** et leurs **bornes** », grille « N nuits vont
+changer de prix ». Ici la cible est le téléphone d'un voyageur, donc :
+
+- `/api/agent-config` accepte **`apercu: true`** sur la cible `delais` : même
+  garde, même validation du payload, et il **sort avant l'upsert** — il ne
+  compte que, sans rien écrire ;
+- l'écran le demande **avant** d'enregistrer, et si `echues > 0` il annonce le
+  nombre : « Propositions déjà en attente qui partiront au prochain passage,
+  dans les 5 minutes : N. » ;
+- **ne pas savoir combien n'autorise pas à le faire** : un aperçu illisible
+  bloque l'enregistrement des délais et le dit, comme 4.6.6 rétablit l'état
+  d'avant quand il ne peut pas compter ;
+- `0` n'est pas un cas à part : il rend tout l'arriéré échu, et le nombre
+  s'affiche comme pour les autres.
+
+**Ce que ça ne change pas** : la décision reste la sienne. L'aperçu ne refuse
+rien, il chiffre.
+
+**Writer unique : `lib/guestflow/appliquer-delai.js`**, appelé par
+`/api/agent-config` **après** l'upsert du blob. Six choses qui ne se devinent
+pas :
+
+- **Le délai se compte depuis le message du voyageur, pas depuis le clic.** Un
+  brouillon né à 14 h avec 60 min part à 15 h, que l'hôte ait réglé à 14 h 01
+  ou à 14 h 50. Sans ça, chaque passage dans le tiroir repousserait l'envoi.
+- **Une échéance déjà passée est posée telle quelle**, sans plancher : c'est
+  littéralement ce qu'il a demandé, et la passe la prendra au tour suivant.
+- **Au désarmement, `suspendu_le` tombe aussi.** C'est le constat 5 de la
+  seconde revue du lot 2, rejoué : désarmer en laissant la suspension donne un
+  état **sans issue** — « vous modifiez » pour toujours, sans lien de reprise
+  (le pied exige une échéance) et sans reprise automatique possible.
+- **Au réarmement, `suspendu_le` est GARDÉ.** La suspension protège le brouillon
+  **ouvert dans la saisie** : l'effacer armerait un compte à rebours sur un
+  texte en train d'être écrit. Elle ne contredit pas le réglage, elle le
+  **diffère** — `send_after` suit bien le nouveau réglage.
+- **Le périmètre est le bien, le compte et `pending_validation`.** L'update est
+  conditionné sur le statut : une tâche que le cron a claimée en `sending`
+  entre la lecture et l'écriture n'est pas ressuscitée.
+- **Et ce cas-là a son propre compteur, `deja_prises`.** Zéro ligne mise à jour
+  n'est pas « rien à faire » : la tâche était à valider quand on l'a lue, elle
+  ne l'est plus. Le cron lit `agent_alert_config` **une fois par lot, hors de sa
+  boucle** — son propre commentaire chiffre la fenêtre à « jusqu'à vingt
+  secondes » — donc `encoreLegitime` peut relire un blob périmé et le message
+  part **avec le réglage d'avant**. C'est le seul cas où « Enregistré » serait
+  un mensonge sur le chemin du voyageur, et l'écran le nomme. La fenêtre
+  elle-même est préexistante ; ce lot ne la ferme pas, il cesse de la taire.
+- **`updated_at` n'est pas touché sur une tâche suspendue.**
+  `reprendreSuspensionsDormantes` lit ce champ comme une mesure d'**inactivité
+  de l'hôte sur ce brouillon** (son parachute de 30 min, décision 4). Or
+  enregistrer le panneau est un geste sur le **bien** : le réécrire repoussait
+  le parachute de 30 minutes à chaque sauvegarde, et rendait
+  `send_after − suspendu_le` — « ce qui restait quand l'hôte a ouvert » —
+  arbitraire. La direction était tardive, donc sans danger pour le voyageur ;
+  elle affaiblissait quand même une garde de l'hôte.
+- **Une `data` qui n'est pas un tableau est refusée** (`lecture_illisible`).
+  PostgREST en rend toujours un sur un select : `undefined` sans erreur est une
+  réponse que le vrai client ne peut pas produire. La lire comme « aucune
+  ligne » avait rendu **vert** un double de test non thenable — donc muter la
+  référence du bien ou le compte passés par l'endpoint ne rougissait nulle part.
+- **La lecture est paginée par curseur sur `id`**, et une troncature se **dit**
+  (`motif: 'trop_de_brouillons'`) au lieu de passer pour un succès. Une panne de
+  lecture ne vaut pas « aucun brouillon ».
+
+**Et l'échec se dit à l'hôte.** Le réglage est enregistré **avant** la
+propagation — c'est lui qui gouverne les brouillons à venir, il n'y aurait rien
+à propager s'il échouait. Si la propagation échoue, l'endpoint **ne rend pas
+500** : le réglage, lui, est pris. Il redescend un bilan `brouillons`, et
+l'écran en fait une partie non enregistrée **distincte** des délais —
+« Enregistré en partie. Non enregistré : les propositions déjà en attente. »
+L'hôte doit savoir que son ancien compte à rebours court toujours. Un bilan
+**absent** compte comme un échec : un endpoint plus vieux que l'écran ne doit
+pas faire croire que les brouillons ont suivi. Et quand des échéances ont
+bougé, l'écran **relit les tâches** — sinon le fil garderait à l'écran le
+compte à rebours d'avant, c'est-à-dire le défaut même qu'on corrige.
+
+### Dettes du chantier, datées du 28 octobre 2026 (décisions de Thierry)
+
+**D1 — rendre la lecture des pauses délégable.** `/api/property-automation` GET
+n'honore pas `X-Compte` (il n'est pas `compteDelegue`), alors que les tâches
+sont lues sur `compteCourant()`. Conséquence **acceptée** par Thierry : sur un
+compte délégué, aucun bandeau d'échéance ne s'affiche, parce que l'écran ne
+peut pas savoir si le bien est en pause et a cessé d'affirmer. Lever la dette
+demande de rendre ce GET délégable — donc de toucher une garde, avec la
+discipline qui va avec. Les deux boutons « Proposer une réponse » lisent la
+même carte sans le drapeau de fiabilité : ils restent cliquables et le serveur
+refuse (409 `en_pause`, `api/guestflow-proposer.js`), ce qui est acceptable — un
+bouton propose, il ne promet pas.
+
+⚠ **À RÉGLER EN MÊME TEMPS QUE D1, et c'est une conséquence qui ne se devine
+pas.** Le jour où `/api/agent-config` devient `compteDelegue`, `accountUserId`
+désignera le **titulaire**, et `appliquerDelaiAuxBrouillons` deviendra le chemin
+par lequel un membre `reglages: write` **désarme ou libère les réponses
+voyageur du titulaire**. C'est cohérent avec la garde, mais personne ne l'a
+décidé : à trancher avant de lever la dette, pas en la levant. Aujourd'hui la
+garde est sans `compteDelegue`, donc le writer n'écrit que les tâches de
+l'appelant — et pour un membre délégué, son réglage ne fait rien.
+
+**D2 — les sept autres motifs de refus de `encoreLegitime`.** Le bandeau dit la
+vérité pour `automation_paused`, et le désarmement fait disparaître le compte à
+rebours quand l'hôte repasse en validation manuelle ; les sept autres motifs
+restent. Les
+deux plus atteignables :
+
+- `bien_introuvable` — clé migrée : la tâche porte une référence que
+  `properties.provider_property_id` ne porte plus (même famille que
+  « identité du bien vs clé provider ») ;
+- `reservation_annulee` — la réservation a été annulée depuis la création du
+  brouillon.
+
+Dans les deux cas le compte à rebours continue de courir à l'écran et le cron
+refuse à l'échéance. La voie probable est de faire lire au bandeau le **motif
+de refus** calculé côté serveur plutôt que de recopier neuf règles dans la page
+— ce qui suppose de descendre ce motif avec la tâche, et donc un passage par le
+cœur. À cadrer avant d'être codé.
+
+**D3 — un update par tâche, en série, dans un handler HTTP.**
+`appliquerDelaiAuxBrouillons` lit une page puis écrit ligne à ligne. Le pire cas
+est borné par le module lui-même (`PAGE × MAX_PAGES` = 20 000 aller-retours), et
+`api/agent-config.js` n'a pas de `maxDuration` dans `vercel.json`.
+
+**C'est un choix, pas un oubli** : la branche « validation manuelle » tiendrait
+en **un** seul statement sans lecture préalable, mais c'est précisément la
+lecture-puis-update-conditionnel qui permet de voir qu'une tâche nous a échappé
+(`deja_prises`, ci-dessus) — et ce fait-là est sur le chemin de l'envoi au
+voyageur. Le taire coûte plus cher que les aller-retours, au volume d'un bien.
+À reprendre si un compte accumule des centaines de propositions en attente sur
+un même bien : la voie est de grouper les réarmements par `created_at` identique
+et de garder le chemin conditionnel pour le reste.
+
+**Ce qui est fait dès maintenant, parce que ça ne pouvait pas attendre** : la
+lecture `user_id + property_id + status` n'était servie par **aucun index** —
+`agent_tasks` ne portait que `created_at`, `lock_battery` et les deux index
+**partiels** du lot 1, lesquels exigent `send_after is not null`, condition que
+ce module ne pose pas (son objet est de réarmer aussi les tâches désarmées).
+C'était donc un scan filtré de tout l'historique des tâches de tous les
+comptes, à chaque enregistrement de panneau.
+**Migration `migrations/2026-10-28-brouillons-du-bien.sql`** — un index partiel
+`(user_id, property_id, id) where status = 'pending_validation'`. Elle n'a
+**aucun script de vérification, volontairement** : PostgREST n'expose pas
+`pg_indexes`, et un script qui ne peut rien lire et sort vert se cite ensuite
+comme preuve. La preuve est le plan de la requête, et l'en-tête du fichier
+porte l'`explain analyze` à coller.
 
 Trois conséquences qui ne se devinent pas :
 - **La pause passe avant « vous modifiez ».** Les deux états sont gris et

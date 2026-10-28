@@ -764,8 +764,12 @@ test('⚠ RECETTE 8 : quitter la validation manuelle ne pose plus « Tout de sui
   // La charge postee, delimitee par ses propres accolades plutot que par
   // l indentation : un reformatage ne doit pas rougir pour une raison qui n est
   // pas la sienne (c est deja arrive quatre fois dans ce fichier).
-  const iEnvoi = sans.indexOf('delais_ref: ref, delais: {')
-  assert.ok(iEnvoi > 0, 'l envoi des delais existe')
+  // ⚠ ET ELLE S ANCRE SUR LE NOM DE LA CHARGE, PAS SUR LE CORPS DE L APPEL : la
+  // charge a ete sortie dans `chargeDelais` pour servir aussi a l apercu, et
+  // cette assertion a rougi — une cinquieme fois dans ce fichier — pour une
+  // raison qui n etait pas la sienne.
+  const iEnvoi = sans.indexOf('const chargeDelais = {')
+  assert.ok(iEnvoi > 0, 'la charge des delais existe')
   let prof = 0, fin = iEnvoi
   for (let i = sans.indexOf('{', iEnvoi); i < sans.length; i++) {
     if (sans[i] === '{') prof++
@@ -776,4 +780,9 @@ test('⚠ RECETTE 8 : quitter la validation manuelle ne pose plus « Tout de sui
   assert.ok(!/reponse_ia_rappel/.test(envoi),
     'l ecran n ECRIT jamais le souvenir : /api/agent-config en est le writer unique')
   assert.ok(!/\.\.\.d\b/.test(envoi), 'et aucun etalement de l etat d edition ne le ferait passer')
+  // Et c est bien CETTE charge qui part, aux deux appels (apercu et vrai POST).
+  assert.ok(/delais_ref: ref, apercu: true, delais: chargeDelais/.test(sans),
+    'l apercu envoie la MEME charge que l enregistrement')
+  assert.ok(/\{ delais_ref: ref, delais: chargeDelais \}/.test(sans),
+    'et l enregistrement aussi')
 })

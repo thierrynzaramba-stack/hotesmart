@@ -25,17 +25,56 @@ const BIEN = '0544fd9a'
 // `config` = le blob tel qu'il est EN BASE. `etat.ecritures` recoit les upserts,
 // ce qui permet de lire ce que le serveur a REELLEMENT voulu ecrire — pas ce
 // qu'on suppose qu'il a ecrit.
-function preparer ({ config = null, lectureEnPanne = false } = {}) {
-  const etat = { ecritures: [] }
+// ⚠ CE DOUBLE A ETE PRIS EN DEFAUT LE 28 OCTOBRE 2026, ET C'EST MESURE. Il
+// n'etait pas THENABLE : `await q` rendait l'objet builder lui-meme, donc
+// `const { data, error } = await q` se destructurait en `undefined`/`undefined`.
+// `lib/guestflow/appliquer-delai.js`, appele par cet endpoint, lisait alors
+// `data || []` comme « aucune ligne » et rendait `ok: true` : muter la
+// reference du bien ou le compte qu'il recoit restait VERT sur toute la suite,
+// sur le chemin de l'envoi au voyageur. C'est la famille « un double plus
+// permissif que le vrai » : il VALIDE du code qui ne peut pas tourner.
+// Deux bouts corriges : le module refuse desormais une `data` qui n'est pas un
+// tableau (PostgREST en rend toujours un sur un select), et ce double rend la
+// forme du vrai client — thenable, avec `update` et `gt`.
+function preparer ({ config = null, lectureEnPanne = false, taches = [], tachesIllisibles = false } = {}) {
+  const etat = { ecritures: [], majTaches: [], lecturesTaches: [] }
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: COMPTE } }, error: null }) },
     from (nom) {
       const q = {
         _f: {},
         select () { return q }, eq (c, v) { q._f[c] = v; return q },
+        gt (c, v) { q._f['>' + c] = v; return q },
         limit () { return q }, order () { return q }, not () { return q }, is () { return q },
+        update (patch) { q._maj = patch; return q },
         upsert (r) { etat.ecritures.push({ table: nom, row: r }); return Promise.resolve({ error: null }) },
-        single: async () => rep(nom), maybeSingle: async () => rep(nom)
+        single: async () => rep(nom), maybeSingle: async () => rep(nom),
+        // Thenable, comme le vrai client : un `await` rend `{ data, error }`.
+        then (ok, ko) {
+          try { return Promise.resolve(tableau(nom)).then(ok, ko) }
+          catch (e) { return Promise.resolve({ data: null, error: { message: e.message } }).then(ok, ko) }
+        }
+      }
+      function tableau (nom) {
+        if (nom === 'agent_tasks') {
+          if (tachesIllisibles) return { data: null, error: { message: 'panne taches' } }
+          if (q._maj) {
+            const touchees = taches.filter(t => t.status === 'pending_validation'
+              && String(t.id) === String(q._f.id))
+            for (const t of touchees) Object.assign(t, q._maj)
+            etat.majTaches.push({ filtre: { ...q._f }, patch: { ...q._maj } })
+            return { data: touchees.map(t => ({ id: t.id })), error: null }
+          }
+          etat.lecturesTaches.push({ ...q._f })
+          const vus = taches.filter(t =>
+            String(t.user_id) === String(q._f.user_id)
+            && String(t.property_id) === String(q._f.property_id)
+            && String(t.status) === String(q._f.status)
+            && (q._f['>id'] === undefined || String(t.id) > String(q._f['>id'])))
+          return { data: vus.map(t => ({ ...t })), error: null }
+        }
+        const r = rep(nom)
+        return { data: r.data === null ? [] : [r.data], error: r.error }
       }
       function rep (nom) {
         if (nom === 'agent_alert_config') {
@@ -574,4 +613,132 @@ test('⚠ la migration pose alerte_info = 0, JAMAIS 15 (decision de Thierry)', (
   assert.ok(/dejaFaits\+\+/.test(src), 'idempotence comptee')
   // L empreinte refuse une base inconnue.
   assert.ok(/base === 'INCONNUE'[\s\S]{0,200}process\.exit\(1\)/.test(src), 'refus sur base inconnue')
+})
+
+// ════════════════════════════════════════════════════════════════════════════
+// L'ENDPOINT PROPAGE AUX BROUILLONS DEJA EN ATTENTE — execute, pas greppe
+// ════════════════════════════════════════════════════════════════════════════
+// ⚠ POURQUOI CES TESTS EXISTENT (constat 8 de la revue du 28 octobre 2026).
+// Le seul garde-fou du cablage etait un `indexOf('appliquerDelaiAuxBrouillons(')`
+// dans la source : muter `propertyRef: ref` en autre chose, ou `userId` en
+// `garde.userId`, restait VERT sur toute la suite. Ici l'endpoint est EXECUTE et
+// on regarde les TACHES : si l'un des trois arguments est faux, la tache n'est
+// pas trouvee et le compte tombe a zero.
+
+const tachesEnAttente = (p = {}) => ([{
+  id: 'tache-1', user_id: COMPTE, property_id: BIEN,
+  status: 'pending_validation', created_at: '2026-11-11T10:00:00Z',
+  send_after: '2026-11-11T12:00:00Z', suspendu_le: null, ...p
+}])
+
+test('⚠ POST delais (validation manuelle) DESARME les brouillons du bien', async () => {
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches }
+  )
+  assert.equal(res.code, 200)
+  assert.equal(taches[0].send_after, null, 'la tache est desarmee EN BASE')
+  assert.equal(taches[0].suspendu_le, null)
+  assert.ok(res.body.brouillons, 'le bilan redescend')
+  assert.equal(res.body.brouillons.ok, true)
+  assert.equal(res.body.brouillons.desarmes, 1)
+  assert.equal(res.body.brouillons.motif, 'validation_manuelle')
+})
+
+test('⚠ POST delais (un delai) REARME depuis la creation du brouillon', async () => {
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches }
+  )
+  assert.equal(res.code, 200)
+  assert.equal(taches[0].send_after, '2026-11-11T11:00:00.000Z',
+    'creation (10 h) + 60 min, et non l heure du clic')
+  assert.equal(res.body.brouillons.rearmes, 1)
+})
+
+test('⚠ et les trois ARGUMENTS sont les bons : un autre bien, un autre compte, intacts', async () => {
+  // C est le test que la revue reclamait : si `propertyRef` ou `userId` etait
+  // faux, le compte tomberait a zero ici.
+  const taches = [
+    ...tachesEnAttente({ id: 'a' }),
+    ...tachesEnAttente({ id: 'b', property_id: 'autre-bien' }),
+    ...tachesEnAttente({ id: 'c', user_id: 'compte-voisin' }),
+    ...tachesEnAttente({ id: 'd', status: 'sending' })
+  ]
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches }
+  )
+  assert.equal(res.body.brouillons.desarmes, 1, 'une seule tache touchee')
+  assert.equal(taches.find(t => t.id === 'a').send_after, null)
+  for (const id of ['b', 'c', 'd']) {
+    assert.equal(taches.find(t => t.id === id).send_after, '2026-11-11T12:00:00Z',
+      `${id} est intacte`)
+  }
+})
+
+// ⚠ DATES RELATIVES DANS CES DEUX TESTS, ET C'EST LA REGLE DU DEPOT : `echues`
+// se compare a `Date.now()`, lu par l'endpoint, qu'un test ne peut pas injecter
+// ici. Des dates figees en novembre 2026 rendaient `echues: 0` — vert ou rouge
+// selon le jour ou la suite tourne, ce qui ne mesure rien.
+const ilYa = (ms) => new Date(Date.now() - ms).toISOString()
+
+test('⚠ l APERCU n ecrit RIEN : ni le blob, ni les taches', async () => {
+  const taches = tachesEnAttente({ created_at: ilYa(2 * 60 * 60 * 1000) })
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, apercu: true, delais: { reponse_ia: 60, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches }
+  )
+  assert.equal(res.code, 200)
+  assert.equal(etat.ecritures.length, 0, 'aucun upsert du blob')
+  assert.equal(etat.majTaches.length, 0, 'aucune ecriture de tache')
+  assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z', 'la tache est intacte')
+  assert.ok(res.body.apercu, 'l apercu est rendu')
+  assert.equal(res.body.apercu.ok, true)
+  assert.equal(res.body.apercu.rearmes, 1, 'il COMPTE ce qui bougerait')
+  assert.equal(res.body.apercu.echues, 1,
+    'et il compte ce qui partirait au prochain passage : ne il y a 2 h, +60 min, deja echu')
+  assert.equal(res.body.brouillons, undefined, 'un apercu n est pas un enregistrement')
+})
+
+test('l apercu ne compte comme echu que ce qui l est vraiment', async () => {
+  const taches = tachesEnAttente({ created_at: ilYa(0) })
+  const { res } = await postConfig(
+    { delais_ref: BIEN, apercu: true, delais: { reponse_ia: 1440, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches }
+  )
+  assert.equal(res.body.apercu.rearmes, 1)
+  assert.equal(res.body.apercu.echues, 0, 'creation + 24 h est dans le futur')
+})
+
+test('⚠ les cibles `mode` et `alertes` ne touchent AUCUNE tache', async () => {
+  for (const corps of [
+    { mode_ref: BIEN, mode: 'auto' },
+    { alertes_ref: BIEN, alertes: { intervention: { sms_enabled: false }, info_unknown: { sms_enabled: false } } }
+  ]) {
+    const taches = tachesEnAttente()
+    const { res, etat } = await postConfig(corps, { config: { [BIEN]: { mode: 'test' } }, taches })
+    assert.equal(res.code, 200, JSON.stringify(corps))
+    assert.equal(etat.majTaches.length, 0, 'aucune tache touchee')
+    assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z')
+    assert.equal(res.body.brouillons, undefined)
+  }
+})
+
+test('⚠ la propagation est APRES l upsert, et un echec ne fait pas mentir le 200', async () => {
+  // Le reglage gouverne les brouillons a venir : il doit etre ecrit meme si la
+  // propagation echoue. Ici la lecture des taches echoue (double en panne).
+  const taches = tachesEnAttente()
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches, tachesIllisibles: true }
+  )
+  assert.equal(res.code, 200, 'le reglage EST enregistre, donc pas de 500')
+  const ecrit = etat.ecritures.find(e => e.table === 'agent_alert_config')
+  assert.ok(ecrit, 'l upsert du blob est bien parti')
+  assert.equal(ecrit.row.config[BIEN].delais.reponse_ia, null)
+  assert.equal(res.body.brouillons.ok, false, 'et l echec de propagation se DIT')
+  assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z', 'la tache n a pas bouge')
 })
