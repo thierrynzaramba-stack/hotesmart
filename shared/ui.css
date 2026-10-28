@@ -1715,6 +1715,16 @@ body.men-cfg-ouvert { overflow: hidden; }
    un hote qui ne distingue pas le vert du rouge lit « +12 % » et « -68 % » (le trait d'union que rend `String(-68)`, pas un signe moins typographique).
    La couleur n'est jamais seule porteuse — regle du depot. */
 .rev-tbl__ecart--retard { color: var(--danger-ink); }
+/* ⚠ ZERO N'EST NI UNE AVANCE NI UN RETARD. Le vert s'etendait jusqu'a 0 % par
+   le seul fait que la condition testait `< 0` ; gris neutre, dans les DEUX
+   tableaux du bloc (decision de Thierry du 28 octobre 2026). */
+.rev-tbl__ecart--nul { color: var(--muted); font-weight: var(--fw-semibold); }
+/* ⚠ ET LE NEGATIF, LUI, DIFFERE ENTRE LES DEUX TABLEAUX, EXPRES : `--bas`
+   (encre) dans le tableau des biens, `--retard` (rouge) dans « Reserve a
+   date ». Un bien qui a moins vendu que l'an dernier est un FAIT, pas une
+   alarme ; un mois a venir en retard de rythme est une alarme, parce qu'il
+   reste du temps pour agir. Le zero, lui, est neutre des deux cotes : il
+   n'est ni un fait remarquable ni une alarme. */
 
 /* ─── Le tableau « Reserve a date » ───────────────────────────────────────
    Il DOUBLE la ligne pointillee, il ne la remplace pas : au niveau du compte,

@@ -790,6 +790,7 @@
   "revenue.annee_rad_sous_seuil": "{n, plural, one {# mes no se compara} other {# meses no se comparan}}: menos de {seuil} ventas en esa fecha el año pasado, no bastan para comparar.",
   "revenue.annee_rad_indispo": "No se ha podido calcular la comparación con el año pasado.",
   "revenue.annee_rad_sous_seuil_court": "no hay bastantes ventas en esa fecha el año pasado",
+  "revenue.annee_rad_sejours_partiel": "{n, plural, one {# estancia} other {# estancias}} (+ {k} sin importe)",
   "revenue.annee_rad_titre": "Reservado a la fecha",
   "revenue.annee_reserve": "ya reservado",
   "revenue.annee_sans_ligne": "{n, plural, one {# alojamiento sin ninguna estancia en estos dos años} other {# alojamientos sin ninguna estancia en estos dos años}}: {noms}",
