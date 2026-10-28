@@ -157,6 +157,13 @@ const etat = {
   filtre: 'tous', recherche: '', anciennes: false,
   hasMore: false, nextBefore: null, nextBeforeId: null,   // pagination SERVEUR (etape 2)
   pauses: {},                          // provider_property_id -> kill switch
+  // ⚠ LA CARTE DES PAUSES EST-ELLE UTILISABLE ? Deux fois non, et l'ecran
+  // l'affirmait quand meme (constats 4 et 5 de la revue du 28 octobre 2026) :
+  // la lecture peut ECHOUER (`.catch` -> carte vide), et elle ne couvre QUE les
+  // biens de l'appelant — /api/property-automation n'honore pas `X-Compte`.
+  // Sur un compte DELEGUE, la carte est donc vide pour une autre raison que
+  // « rien n'est en pause ».
+  pausesLues: false,
   envois: new Map(),                   // bookId -> [{ texte, etatEnvoi }] en cours / echoues
   enEdition: null,         // { tacheId, bookId } : proposition descendue dans la saisie (etape 3)
   modes: null,             // provider_property_id -> 'test' | 'auto' (etape 4) ; null = illisible
@@ -212,8 +219,9 @@ async function charger () {
       etat.chargementOk = true
     })
       .catch(e => { logger.error('Messages', 'conversations', e); etat.chargementOk = false }),
-    appel('/api/property-automation').then(r => { etat.pauses = r.paused || {} })
-      .catch(() => { etat.pauses = {} }),
+    appel('/api/property-automation')
+      .then(r => { etat.pauses = r.paused || {}; etat.pausesLues = true })
+      .catch(() => { etat.pauses = {}; etat.pausesLues = false }),
     // Le mode Test/Auto par bien (etape 4) : agent_alert_config, domaine
     // reglages — un profil sans ce droit n'a ni interrupteur ni tiroir.
     ...(reglagesIci() ? [
@@ -1003,12 +1011,12 @@ function peindreEcheanceSaisie () {
   const x = ed && String(ed.bookId) === String(etat.ouverte) ? tacheParId(ed.tacheId) : null
   // Pas d'edition, ou une proposition SANS echeance (validation manuelle) :
   // rien a dire, et un bandeau vide serait du bruit.
-  if (!x || !valide(x.send_after)) { zone.hidden = true; zone.innerHTML = ''; return }
+  // ⚠ LE MEME `bandeauEcheance` QUE LA BULLE, et plus une seconde cascade de
+  // ternaires sur les memes champs : c'est le meme objet, seule sa place change.
+  const bandeau = x ? bandeauEcheance(x) : ''
+  if (!bandeau) { zone.hidden = true; zone.innerHTML = ''; return }
   zone.hidden = false
-  zone.innerHTML = `<span class="bulle__echeance${x.suspendu_le ? ' bulle__echeance--suspendu' : ''}">`
-    + (x.suspendu_le ? icone('i-pause') + esc(t('messages.vous_modifiez'))
-      : icone('i-today') + esc(etiquetteEcheance(x)))
-    + `</span>` + piedEcheance(x)
+  zone.innerHTML = bandeau + piedEcheance(x)
   zone.querySelectorAll('[data-reprendre]').forEach(b =>
     b.addEventListener('click', () => reprendreEcheance(b.dataset.reprendre)))
   zone.querySelectorAll('[data-rejeter]').forEach(b =>
@@ -1039,19 +1047,77 @@ function dureeCourte (ms) {
 // cinq minutes : une echeance peut etre passee de quatre minutes sans que rien
 // ne soit casse. « Part d'un instant a l'autre » est la seule phrase vraie dans
 // cet intervalle.
-function bandeauEcheance (x) {
-  // ⚠ L'ECHEANCE D'ABORD, LA SUSPENSION ENSUITE (constat 5 de la seconde
-  // revue). Je testais `suspendu_le` AVANT `send_after` : une tache suspendue
-  // SANS echeance affichait « En attente : vous modifiez » pour toujours, sans
-  // lien de reprise (le pied exige une echeance) et sans que le cron la reprenne
-  // (`reprendreSuspensionsDormantes` exige `send_after` non nul). Un etat sans
-  // issue, et il etait atteignable : `relacher` desarme la tache en laissant
-  // `suspendu_le`.
-  // Les deux bouts sont corriges — `relacher` efface aussi la suspension — et
-  // cette garde est la seconde ceinture, pour toute tache deja dans cet etat.
+//
+// ⚠ LES QUATRE ETATS SONT DECIDES ICI, PAS DANS LE GABARIT, et c'est un
+// constat de la recette du 28 octobre 2026. La bulle et le bandeau de la saisie
+// portaient chacun leur propre cascade de ternaires sur les memes champs : le
+// defaut « un bien en pause annonce un envoi » etait donc a corriger DEUX fois,
+// et rien n'aurait rougi si j'avais oublie le second. `pauses` entre en
+// argument plutot que d'etre lu dans `etat` : la regle se teste alors sans
+// monter l'ecran.
+//
+// ⚠ L'ECHEANCE D'ABORD, LE RESTE ENSUITE (constat 5 de la seconde revue). Je
+// testais `suspendu_le` AVANT `send_after` : une tache suspendue SANS echeance
+// affichait « En attente : vous modifiez » pour toujours, sans lien de reprise
+// (le pied exige une echeance) et sans que le cron la reprenne
+// (`reprendreSuspensionsDormantes` exige `send_after` non nul). Un etat sans
+// issue, et il etait atteignable : `relacher` desarme la tache en laissant
+// `suspendu_le`.
+// Les deux bouts sont corriges — `relacher` efface aussi la suspension — et
+// cette garde est la seconde ceinture, pour toute tache deja dans cet etat.
+//
+// ⚠ ET LA PAUSE PASSE AVANT LA SUSPENSION. Les deux sont grises et vraies,
+// mais elles ne portent pas la meme nouvelle : « vous modifiez » dit que le
+// compte a rebours attend, la pause dit que rien ne partira, meme a l'echeance.
+// C'est la seule des deux phrases qui explique pourquoi l'hote ne voit aucun
+// delai. (En base, `reprendreSuspensionsDormantes` REARME bien `send_after` sur
+// un bien en pause — elle ne lit pas `automation_paused`. Ce qui n'arrive
+// jamais, c'est l'ENVOI.)
+//
+// ⚠ ET QUAND L'ECRAN NE SAIT PAS, IL NE PROMET RIEN (constats 4 et 5 de la
+// revue). `brouillons-dus.js` tient la regle dans ce sens-la — « une panne de
+// lecture empeche l'envoi, elle ne l'autorise pas » — et l'ecran tenait
+// l'inverse : carte des pauses illisible, ou compte DELEGUE dont la carte ne
+// parle pas, et il affichait « Part dans 12 min » en ambre. Un « je ne sais
+// pas » ne se peint pas comme un fait.
+function etatEcheance (x, pauses, fiables) {
   const quand = valide(x.send_after) ? Date.parse(x.send_after) : NaN
-  if (!Number.isFinite(quand)) return ''
-  if (x.suspendu_le) {
+  if (!Number.isFinite(quand)) return 'aucun'
+  if ((pauses || {})[String(x.property_id)] === true) return 'pause'
+  if (fiables !== true) return 'inconnu'
+  if (x.suspendu_le) return 'suspendu'
+  return 'compte'
+}
+
+// La carte ne vaut que pour les biens de l'APPELANT : `estTitulaire()` est donc
+// la seconde moitie de la condition, et elle se relit a chaque rendu parce que
+// le selecteur de compte de cette page peut changer d'avis entre deux peintures.
+const pausesFiables = () => etat.pausesLues === true && estTitulaire()
+
+// ⚠ LE BOUTON DE REPRISE A SA PROPRE FONCTION, ET ELLE EST PURE — constat 2 de
+// la revue. La condition vivait dans `piedEcheance`, que le test ne pouvait pas
+// executer : il en greppait la forme, et la mutation l'a prouve faux-vert —
+// sortir l'expression dans une variable MORTE rendait le bouton a un bien en
+// pause sans qu'un seul test rougisse.
+function peutReprendre (x, pauses, fiables) {
+  return etatEcheance(x, pauses, fiables) === 'suspendu'
+    && Number.isFinite(resteALaReprise(x))
+}
+
+function bandeauEcheance (x) {
+  const e = etatEcheance(x, etat.pauses, pausesFiables())
+  // `inconnu` : rien. Pas de compte a rebours — on ne sait pas s'il court — et
+  // pas de phrase inventee pour un etat que l'hote n'a jamais demande a voir.
+  if (e === 'aucun' || e === 'inconnu') return ''
+  // ⚠ « PART D'UN INSTANT A L'AUTRE » SUR UN BIEN EN PAUSE EST UN MENSONGE,
+  // releve par Thierry en recette le 28 octobre 2026. `brouillons-dus.js` refuse
+  // la tache des l'entree (`motif: 'automatisation_en_pause'`) : rien ne partira,
+  // ni a l'echeance, ni apres. Donc pas d'ambre — l'ambre dit « c'est en cours »
+  // — et pas de compte a rebours, qui compterait vers un envoi qui n'aura pas lieu.
+  if (e === 'pause') {
+    return `<span class="bulle__echeance bulle__echeance--suspendu">${icone('i-pause')}${esc(t('messages.en_pause_pas_seule'))}</span>`
+  }
+  if (e === 'suspendu') {
     return `<span class="bulle__echeance bulle__echeance--suspendu">${icone('i-pause')}${esc(t('messages.vous_modifiez'))}</span>`
   }
   return `<span class="bulle__echeance">${icone('i-today')}${esc(etiquetteEcheance(x))}</span>`
@@ -1093,7 +1159,16 @@ function piedEcheance (x) {
   if (!peutEcrireMessages()) return ''
   const id = esc(String(x.id))
   const reste = resteALaReprise(x)
-  const reprise = x.suspendu_le && Number.isFinite(reste)
+  // ⚠ « ENVOYER DANS X » EST UN COMPTE A REBOURS, ET IL DISPARAIT AUSSI EN
+  // PAUSE. Thierry a nomme le bandeau ; le bouton de reprise porte le meme
+  // mensonge, a deux lignes de la. Il ARME une echeance que `brouillons-dus.js`
+  // refusera : l'hote lirait « Envoyer dans 12 min » et rien ne partirait.
+  // Ce qu'il perd n'est pas un moyen d'envoyer — le bouton Envoyer de la saisie
+  // reste, et un envoi A LA MAIN n'est pas coupe par la pause (ni
+  // api/channel-message.js ni api/beds24.js ne lisent `automation_paused`) —
+  // c'est la seule promesse d'envoi AUTOMATIQUE de cette carte.
+  // « Ne pas envoyer », lui, reste toujours : l'hote garde la main.
+  const reprise = peutReprendre(x, etat.pauses, pausesFiables())
     ? `<button type="button" class="link" data-reprendre="${id}">${icone('i-today')}${esc(
         t('messages.envoyer_dans', { duree: dureeCourte(reste) }))}</button>`
     : ''
@@ -1125,7 +1200,13 @@ async function basculerPause (ref, paused) {
   try {
     const relu = await appel('/api/property-automation')
     etat.pauses = relu.paused || {}
-  } catch (err) { logger.error('Messages', 'pause relecture', err) }
+    etat.pausesLues = true
+  } catch (err) {
+    // La carte reste celle d'avant — perimee. Le bandeau cesse donc d'affirmer,
+    // et la note d'erreur ci-dessous dit a l'hote que son geste n'est pas sur.
+    etat.pausesLues = false
+    logger.error('Messages', 'pause relecture', err)
+  }
   etat.modeEnCours = false
   // Un kill switch qui n'a pas pris DOIT se dire : croire l'IA en pause
   // pendant qu'elle envoie est le pire des silences (releve en review).
@@ -1430,6 +1511,47 @@ const PILULES = [
 ]
 const VALEURS_PILULES = PILULES.map(p => p.v)
 
+// ⚠ QUITTER « JE VALIDE CHAQUE REPONSE » NE POSE PLUS « TOUT DE SUITE »
+// (decision de Thierry, 28 octobre 2026). La confirmation qu'il a dictee dit
+// « partiront seules APRES LE DELAI CHOISI » ; le geste posait `0`, c'est-a-dire
+// l'envoi immediat. L'ecran montrait bien la pilule « Tout de suite » cerclee,
+// donc qui regardait n'etait pas trompe — mais qui confirmait puis enregistrait
+// sans regarder armait des envois sans relecture, et la phrase etait fausse.
+//
+// ⚠ ET LE SOUVENIR DU SERVEUR PASSE AVANT CE DEFAUT. /api/agent-config MEMORISE
+// la derniere valeur non nulle (`reponse_ia_rappel`) au passage en validation
+// manuelle — c'est la spec du chantier, § « Le reglage de l'hote survit au
+// toggle ». Mais plus aucun ECRAN ne la RESTITUAIT depuis la disparition de
+// l'interrupteur Test/Auto : la branche `cible === 'mode'` de l'endpoint la rend
+// toujours, et plus une seule page ne poste `mode_ref`. Le souvenir etait range
+// pour l'onboarding et les scripts, jamais pour l'hote. Un hote qui reglait
+// 30 min, passait en validation manuelle, puis en ressortait, retombait a 15 au
+// lieu de ses 30.
+//
+// La borne 1440 est celle de `lib/guestflow/delais-contrat.js` (`DELAI_MAX_MIN`),
+// recopiee faute de pouvoir l'importer dans le navigateur — comme aux deux
+// autres points de ce fichier. Si elle monte la-bas, un souvenir legitime
+// retomberait ici sur le defaut, en silence.
+const DELAI_SORTIE_MANUEL = 15
+function delaiDeSortieManuelle (d) {
+  const r = d && d.reponse_ia_rappel
+  return Number.isInteger(r) && r > 0 && r <= 1440 ? r : DELAI_SORTIE_MANUEL
+}
+
+// ⚠ ENTRER EN VALIDATION MANUELLE CAPTURE LA VALEUR COURANTE — constat 6 de la
+// revue, et c'est l'asymetrie que `api/agent-config.js` a deja du corriger de
+// son cote (son constat 4 : « je ne lisais que l'ancien rappel, jamais le
+// `reponse_ia` COURANT »). L'hote tape 30 min, clique « Je valide chaque
+// reponse », revient : sans cette capture il retombait a 15, et sa valeur
+// affichee deux secondes plus tot etait perdue sans un mot. Le souvenir vit
+// dans l'etat d'EDITION ; l'ecran ne le poste jamais — /api/agent-config en
+// reste le writer unique, et il fait sa propre capture a l'enregistrement.
+function basculerValidationManuelle (d) {
+  if (d.reponse_ia === null) { d.reponse_ia = delaiDeSortieManuelle(d); return }
+  if (Number.isInteger(d.reponse_ia) && d.reponse_ia > 0) d.reponse_ia_rappel = d.reponse_ia
+  d.reponse_ia = null
+}
+
 // L'etat d'edition des delais : une SEULE source, le DOM ne fait que la
 // refleter. Melanger « la pilule dans l'etat, les heures dans le DOM » produit
 // exactement les pertes de saisie que ce fichier a deja corrigees deux fois
@@ -1446,6 +1568,9 @@ function delaisDuBien (ref) {
     reponse_ia: ok && 'reponse_ia' in d && (d.reponse_ia === null || Number.isInteger(d.reponse_ia))
       ? d.reponse_ia
       : ((etat.modes && etat.modes[ref]) === 'auto' ? 0 : null),
+    // Le souvenir, LU et jamais reecrit par l'ecran : /api/agent-config en est
+    // le writer unique, et il le capture a l'enregistrement.
+    reponse_ia_rappel: ok && Number.isInteger(d.reponse_ia_rappel) ? d.reponse_ia_rappel : null,
     alerte_info: ok && Number.isInteger(d.alerte_info) ? d.alerte_info : 0,
     sourdine: { active: s.active === true, debut: heure(s.debut, '22:00'), fin: heure(s.fin, '08:00') }
   }
@@ -1660,7 +1785,7 @@ function brancherTiroir (corps, ref) {
   // en mode manuel. Une seule place a garder.
   corps.querySelector('[data-delai-manuel]')?.addEventListener('click', () => {
     if (d.reponse_ia === null && !window.confirm(t('messages.mode_confirm_auto'))) return
-    d.reponse_ia = d.reponse_ia === null ? 0 : null
+    basculerValidationManuelle(d)
     renderTiroir()
   })
   // Les champs h/min : l'etat suit la frappe, mais on ne RE-REND pas (le

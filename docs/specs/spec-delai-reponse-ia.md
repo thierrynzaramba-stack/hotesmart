@@ -804,6 +804,112 @@ immédiat, sans trace. La dernière valeur non nulle est donc **mémorisée**
 Auto. Sans rappel, Auto vaut `0` — le sens exact du Mode Auto d'avant. Un
 champ transitoire, qui disparaît avec la clé `mode` au lot 4.
 
+⚠ **CORRIGÉ LE 28 OCTOBRE 2026, EN DEUX POINTS — recette de Thierry.**
+
+1. **Sans rappel, la sortie de la validation manuelle vaut `15`, plus `0`.**
+   La confirmation qu'il a dictée dit « les réponses de l'IA partiront seules
+   **après le délai choisi** » ; le geste posait `0`, c'est-à-dire l'envoi
+   immédiat. L'écran montrait bien la pilule « Tout de suite » cerclée, donc qui
+   regardait n'était pas trompé — mais qui confirmait puis enregistrait sans
+   regarder armait des envois sans relecture. `0` reste atteignable, par un clic
+   sur sa pilule : c'est alors un choix, plus un défaut.
+2. **Et le rappel n'était plus restitué à l'hôte.** « Restitué au retour en
+   Auto » décrivait l'interrupteur Test/Auto, disparu de l'écran au lot 2. Le
+   lecteur existe toujours côté serveur — la branche `cible === 'mode'` de
+   `api/agent-config.js` le rend — mais **plus aucun écran ne poste `mode_ref`** :
+   le souvenir était rangé pour l'onboarding et les scripts, jamais pour l'hôte.
+   Le geste équivalent — quitter « Je valide chaque réponse » — le lit désormais
+   (`delaiDeSortieManuelle`, `pages/messages.html`), et un souvenir hors contrat
+   retombe sur les 15 minutes.
+3. **L'entrée en validation manuelle capture la valeur courante**
+   (`basculerValidationManuelle`), parce que l'état d'édition vit avant
+   l'enregistrement : l'hôte tape 30 min, clique « Je valide chaque réponse »,
+   revient — sans cette capture il retombait à 15 et sa valeur, affichée deux
+   secondes plus tôt, était perdue sans un mot. C'est la même asymétrie que
+   `api/agent-config.js` a dû corriger de son côté (son constat 4 : « je ne lisais
+   que l'ancien rappel, jamais le `reponse_ia` COURANT »). L'écran ne **poste**
+   jamais ce champ : l'endpoint en reste le writer unique.
+
+### Un bien en pause ne promet aucun envoi (recette du 28 octobre 2026)
+
+**Constat de Thierry** : sur un bien en « Automatisation en pause », une
+proposition échue affichait « Part d'un instant à l'autre » en ambre — alors
+que `lib/guestflow/brouillons-dus.js` refuse la tâche dès l'entrée
+(`motif: 'automatisation_en_pause'`). Rien ne partira, ni à l'échéance, ni
+après.
+
+Le bandeau dit donc **« En pause : ne partira pas seule », en gris** — l'ambre
+est réservé à ce qui est en cours — et **aucun compte à rebours ne s'affiche
+sur un bien en pause**, avant comme après l'échéance.
+
+⚠ **ET LA PORTÉE EST LE MOTIF `automation_paused`, PAS « LA VÉRITÉ » EN
+GÉNÉRAL.** `encoreLegitime` (`lib/guestflow/brouillons-dus.js`) refuse un
+brouillon pour **neuf** motifs ; celui-ci en traite un. Le plus atteignable des
+autres reste ouvert, et il produit exactement la phrase que Thierry a fait
+corriger — **défaut nommé, non corrigé, à arbitrer avec lui** :
+
+> Un brouillon est armé à +60 min ; dans le même tiroir l'hôte choisit « Je
+> valide chaque réponse » et enregistre. Rien ne désarme les tâches déjà en
+> cours — `api/agent-config.js` ne touche ni `agent_tasks` ni `send_after` —
+> donc la bulle affiche « Part dans 59 min » en ambre pendant une heure, puis
+> « Part d'un instant à l'autre », et à l'échéance le cron rend
+> `repasse_en_validation_manuelle`.
+
+Deux autres portes de la même famille : `bien_introuvable` (clé migrée — la
+tâche porte une référence que `properties.provider_property_id` ne porte plus)
+et `reservation_annulee`. Les trois demandent une décision : désarmer les
+tâches à l'enregistrement, ou faire lire au bandeau un second réglage — et pour
+un compte délégué l'écran n'a pas la donnée (dette 68).
+
+Trois conséquences qui ne se devinent pas :
+- **La pause passe avant « vous modifiez ».** Les deux états sont gris et
+  vrais, mais la suspension dit que le compte à rebours *attend* ; la pause dit
+  qu'il n'y en a plus. Sur un bien en pause, il ne reprendra jamais.
+- **« Envoyer dans X » disparaît aussi**, parce que c'est un compte à rebours :
+  il **arme** une échéance que le serveur refusera. Ce qui reste à l'hôte n'est
+  pas diminué — le bouton Envoyer de la saisie est là, et un envoi à la main
+  n'est pas coupé par la pause.
+- **Une seule cascade pour les deux places.** La bulle et le bandeau de la
+  saisie décidaient chacun de leur côté : le défaut était à corriger deux fois,
+  et rien n'aurait rougi si j'avais oublié le second. Les cinq états sont
+  désormais jugés par `etatEcheance(x, pauses, fiables)`, et la carte des pauses
+  entre en argument pour que la règle se teste sans monter l'écran. Le test
+  **compte** son périmètre : `class="bulle__echeance"` ne s'écrit nulle part
+  ailleurs que dans cette fonction, et les deux appelants l'appellent.
+
+### Quand l'écran ne sait pas, il ne promet rien
+
+Deux fois la carte des pauses ne dit pas ce que le bandeau en tirait :
+
+- **La lecture peut échouer.** `/api/property-automation` en 503, en panne
+  réseau, ou sa relecture après une bascule : le repli posait une carte **vide**,
+  donc « aucun bien n'est en pause », donc le compte à rebours ambre.
+- **Elle ne couvre que les biens de l'appelant.** Ce GET n'honore pas `X-Compte`
+  (il n'est pas `compteDelegue`), alors que les tâches sont lues sur
+  `compteCourant()`. Sur un compte **délégué**, la carte est vide pour une tout
+  autre raison que l'absence de pause — et un bien en pause y affichait
+  « Part dans X ».
+
+`brouillons-dus.js` tient la règle dans le bon sens et son commentaire la
+nomme : **« une panne de lecture empêche l'envoi, elle ne l'autorise pas »**
+(replis `reglages_illisibles` / `biens_illisibles`). L'écran tenait l'inverse.
+
+Il y a donc un cinquième état, `inconnu` — lecture ratée **ou** compte qui
+n'est pas celui de l'appelant — et **il ne peint rien** : ni compte à rebours,
+ni « Envoyer dans X ». Une pause **connue** reste dite, elle.
+
+⚠ **Ce que ça coûte, et c'est assumé faute de décision** : sur un compte
+délégué, plus aucun bandeau d'échéance ne s'affiche. Retirer une phrase qui
+peut être fausse va de soi ; écrire à la place un « on ne sait pas » avec son
+motif — ce que le dépôt fait pour un `null` non calculable — est une phrase
+neuve à l'écran, donc une décision de Thierry. L'autre voie, plus propre,
+est de rendre ce GET délégable, ce qui touche une garde.
+
+Les deux boutons « Proposer une réponse » (`pages/messages.html`) lisent la
+même carte **sans** ce drapeau : ils restent cliquables quand elle est inconnue,
+et le serveur refuse. Inchangé par ce lot, noté ici parce que c'est le même
+défaut sous une forme qui n'affirme rien — un bouton propose, il ne promet pas.
+
 ⚠ **L'ÉCRAN DE RÉGLAGE EST PASSÉ DU LOT 1 AU LOT 2, ET C'EST UNE CORRECTION DE
 CETTE SPEC.** Je l'avais placé au lot 1. Un écran qui propose « délai de
 réponse : 15 min » alors que le moteur du lot 2 n'est pas livré **promet à
