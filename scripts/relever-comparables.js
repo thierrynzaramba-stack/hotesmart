@@ -93,18 +93,26 @@ const { releverSiDu } = require(path.join('..', 'lib', 'marche', 'comparables-re
     // exactement ce qui finit par mentir le jour où le tarif change.
     const { tarif } = require(path.join('..', 'lib', 'airroi', 'cout'))
     const parComparable = tarif('GET /listings/metrics/all') + tarif('GET /listings/live/calendar')
+    const { PLAFOND_RELEVE_MOIS_USD } = require(path.join('..', 'lib', 'marche', 'comparables-releves'))
     console.log(`  coût maximal estimé : ${(listings.length * parComparable).toFixed(2)} $`)
+    console.log(`  plafond du relevé   : ${PLAFOND_RELEVE_MOIS_USD.toFixed(2)} $ par logement et par mois`)
     console.log('\nRelancer avec --go pour l écrire.')
     return
   }
 
   const { creerClient } = require(path.join('..', 'lib', 'airroi', 'client'))
   const { depotSupabase } = require(path.join('..', 'lib', 'airroi', 'depot'))
+  const { PLAFOND_RELEVE_90J_USD } = require(path.join('..', 'lib', 'marche', 'comparables-releves'))
   const MARQ = 'comparables_releves'
   const resultats = { errors: [] }
   const bilan = await releverSiDu(resultats, {
     supabase,
-    client: () => creerClient({ depot: depotSupabase(supabase) }),
+    // Le même plafond que le cron : le script ne doit pas pouvoir dépenser
+    // ce que le cron ne dépenserait pas.
+    client: () => creerClient({
+      depot: depotSupabase(supabase),
+      gardes: { plafondBien90jUsd: PLAFOND_RELEVE_90J_USD }
+    }),
     // ⚠ CE QUI EMPÊCHE DE REPAYER, C'EST LE FILTRE PAR BIEN, pas un drapeau.
     // J'avais passé `forcer: true` et un `marqueur.lire` : le module ne lit ni
     // l'un ni l'autre depuis que la cadence est par bien. Deux clés mortes et

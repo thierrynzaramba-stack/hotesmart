@@ -149,17 +149,25 @@ test('RECENSEMENT : la profondeur borne les mois clos', () => {
 const { releverSiDu } = require('../lib/marche/comparables-releves')
 
 // Un double de Supabase qui repond par TABLE et retient ce qu'on lui ecrit.
-function faireBase ({ retenus = [], dejaFaits = [], erreurUpsert = null } = {}) {
+function faireBase ({ retenus = [], dejaFaits = [], erreurUpsert = null, depenseUsd = 0 } = {}) {
   const vu = { upserts: [], tables: [], filtres: [] }
   const client = {
     from (table) {
       vu.tables.push(table)
-      const rep = () => table === 'comparables_retenus'
-        ? { data: retenus, error: null }
-        : { data: dejaFaits, error: null }
+      // ⚠ LE DOUBLE REPOND POUR LES TROIS TABLES QUE LE MODULE LIT. Il en
+      // ignorait une (`airroi_appels`, le journal des depenses) : la lecture
+      // levait, et TOUT passage etait refuse par le garde de plafond. Quatre
+      // tests qui n'ont rien a voir avec le budget rougissaient pour cette
+      // raison — un double incomplet fait echouer pour la mauvaise cause.
+      const rep = () => {
+        if (table === 'comparables_retenus') return { data: retenus, error: null }
+        if (table === 'airroi_appels') return { data: [{ cout_usd: depenseUsd }], error: null }
+        return { data: dejaFaits, error: null }
+      }
       const q = {
         select (cols) { q._cols = cols; return q },
         eq (c, v) { vu.filtres.push(['eq', c, v]); return q },
+        in (c, v) { vu.filtres.push(['in', c, v]); return q },
         gte (c, v) { vu.filtres.push(['gte', c, v]); return q },
         limit () { return Promise.resolve(rep()) },
         upsert (lignes, opts) {
@@ -309,12 +317,17 @@ test("LE TEST QUI COMPTE : le compte rendu dit ce que la BASE a accepte", async 
   const vu = { upserts: [] }
   const base = {
     from (table) {
-      const rep = () => table === 'comparables_retenus'
-        ? { data: [RETENU], error: null }
-        : { data: [], error: null }
+      // Le journal des depenses doit repondre, sinon le garde de plafond
+      // refuse le passage et ce test ne mesure plus rien.
+      const rep = () => {
+        if (table === 'comparables_retenus') return { data: [RETENU], error: null }
+        if (table === 'airroi_appels') return { data: [{ cout_usd: 0 }], error: null }
+        return { data: [], error: null }
+      }
       const q = {
         select () { return q },
         eq () { return q },
+        in () { return q },
         gte () { return q },
         limit () { return Promise.resolve(rep()) },
         upsert (lignes) {
@@ -335,4 +348,96 @@ test("LE TEST QUI COMPTE : le compte rendu dit ce que la BASE a accepte", async 
     'rien n a ete envoye : le test ne demontre rien')
   assert.strictEqual(r.ecrites, 0,
     `le compte rendu annonce ${r.ecrites} lignes ecrites alors que la base n en a accepte aucune`)
+})
+
+// ─── LE PLAFOND PROPRE AU RELEVE (28 octobre 2026) ─────────────────────────
+// ⚠ DECISION DE THIERRY : « le releve mensuel a son propre plafond, separe de
+// l'etude de marche : 2 $ par logement et par mois ». Sans lui, le plafond
+// PARTAGE (5 $ / 90 jours glissants) arretait la serie mensuelle au 4e mois —
+// trois passages a 1,60 $ font 4,80 $ — et ne la laissait jamais demarrer sur
+// un bien deja etudie, l'etude en consommant 3,50 a 4,50.
+
+const { PLAFOND_RELEVE_MOIS_USD, PLAFOND_RELEVE_90J_USD } = require('../lib/marche/comparables-releves')
+
+// Une base qui porte un journal d'appels AirROI reglable.
+function baseAvecDepense (usd, { retenus = [RETENU] } = {}) {
+  const vu = { upserts: [], filtresAppels: [] }
+  const client = {
+    from (table) {
+      const q = {
+        select () { return q },
+        eq (c, v) { if (table === 'airroi_appels') vu.filtresAppels.push(['eq', c, v]); return q },
+        in (c, v) { if (table === 'airroi_appels') vu.filtresAppels.push(['in', c, v]); return q },
+        gte (c, v) { if (table === 'airroi_appels') vu.filtresAppels.push(['gte', c, v]); return q },
+        limit () { return Promise.resolve(rep()) },
+        upsert (lignes) { vu.upserts.push(lignes); return { select: () => Promise.resolve({ data: lignes.map((_, i) => ({ id: i })), error: null }) } },
+        then (r) { return Promise.resolve(rep()).then(r) }
+      }
+      const rep = () => {
+        if (table === 'comparables_retenus') return { data: retenus, error: null }
+        if (table === 'airroi_appels') return { data: [{ cout_usd: usd }], error: null }
+        return { data: [], error: null }
+      }
+      return q
+    }
+  }
+  return { client, vu }
+}
+
+test("LE TEST QUI COMPTE : le plafond du RELEVE refuse, et le dit", async () => {
+  // 1,90 $ deja depenses ce mois-ci sur ce bien : un passage a 1,00 $ (5
+  // comparables) depasserait les 2 $.
+  const { client, vu } = baseAvecDepense(1.9)
+  const resultats = { errors: [] }
+  const r = await releverSiDu(resultats, {
+    supabase: client, client: faireClient(), forcer: true,
+    now: () => new Date('2026-10-28T03:00:00Z').getTime()
+  })
+  assert.strictEqual(r.skipped, 'plafond_releve', `le passage a continue : ${JSON.stringify(r)}`)
+  assert.strictEqual(vu.upserts.length, 0, 'des lignes ont ete ecrites malgre le refus')
+  // ⚠ LA LIGNE DE JOURNAL EST DEMANDEE NOMMEMENT PAR THIERRY. Un refus qu'on
+  // ne peut pas expliquer se reproduit.
+  const ligne = resultats.errors.map(e => e.error).join(' ')
+  assert.match(ligne, /plafond du RELEVE/i, `le refus ne nomme pas le plafond du releve : « ${ligne} »`)
+  assert.match(ligne, /1\.90/, 'la ligne ne dit pas ce qui est deja depense')
+  assert.match(ligne, /2\.00/, 'la ligne ne dit pas le plafond')
+  assert.match(ligne, /etude/i, 'la ligne ne dit pas que l etude de marche n est pas en cause')
+})
+
+test("LE TEST QUI COMPTE : sous le plafond, le releve passe", async () => {
+  // La contre-epreuve : sans elle, un refus pose en dur passerait le test
+  // precedent.
+  const { client, vu } = baseAvecDepense(0.2)
+  const r = await releverSiDu({ errors: [] }, {
+    supabase: client, client: faireClient(), forcer: true,
+    now: () => new Date('2026-10-28T03:00:00Z').getTime()
+  })
+  assert.ok(!r.skipped, `le releve a ete refuse sous le plafond : ${JSON.stringify(r)}`)
+  assert.ok(vu.upserts.length === 1, 'rien n a ete ecrit alors que le budget le permettait')
+})
+
+test("LE TEST QUI COMPTE : la depense se compte sur LE MOIS et sur CE BIEN", async () => {
+  // Un plafond mensuel qui lirait toute l histoire du bien refuserait au bout
+  // d un an ; un plafond qui ne filtrerait pas le bien compterait le parc.
+  const { client, vu } = baseAvecDepense(0.1)
+  await releverSiDu({ errors: [] }, {
+    supabase: client, client: faireClient(), forcer: true,
+    now: () => new Date('2026-10-28T03:00:00Z').getTime()
+  })
+  const f = vu.filtresAppels
+  assert.ok(f.some(x => x[0] === 'eq' && x[1] === 'property_id'), 'la depense n est pas filtree par bien')
+  assert.ok(f.some(x => x[0] === 'gte' && x[1] === 'created_at' && String(x[2]).startsWith('2026-10')),
+    `la depense n est pas bornee au mois courant : ${JSON.stringify(f)}`)
+  assert.ok(f.some(x => x[0] === 'in' && x[1] === 'endpoint'),
+    'la depense n est pas limitee aux points d appel du releve')
+})
+
+test("RECENSEMENT : le plafond de 90 jours suit le plafond mensuel", () => {
+  // ⚠ LES DEUX DOIVENT RESTER COHERENTS : le garde-fou general du client
+  // raisonne sur 90 jours, la regle de Thierry sur le mois. Si l un bouge sans
+  // l autre, soit la serie s arrete malgre le plafond mensuel, soit le
+  // garde-fou general ne borne plus rien.
+  assert.strictEqual(PLAFOND_RELEVE_90J_USD, PLAFOND_RELEVE_MOIS_USD * 3,
+    'le plafond 90 jours ne vaut plus trois mois du plafond mensuel')
+  assert.strictEqual(PLAFOND_RELEVE_MOIS_USD, 2, 'le plafond mensuel a change sans decision')
 })
