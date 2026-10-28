@@ -392,6 +392,29 @@
   // sélecteur de logement n'a fait qu'ajouter un second déclencheur. Corriger
   // le seul `yf-bien` aurait laissé la moitié du défaut vivante tout en
   // écrivant qu'on l'avait fermé.
+  // ⚠ ET LE PREMIER CHARGEMENT, LUI, NE PASSE PAS PAR ICI — releve en review
+  // du correctif C1, et dit ici pour que la garde ne se lise pas comme
+  // universelle. `init()` finit par `if (ok && el('yf-bien').value) charger()`,
+  // sans la seconde garde.
+  //
+  // Pourquoi c'est sans consequence aujourd'hui, et ce n'est PAS parce que la
+  // vue serait Pilotage — `verifierEtendue` ne regarde pas la vue, elle lit
+  // `yf-debut`, `yf-fin` et `yf-granularite` directement, et elle tourne APRES
+  // `appliquerVue()`. La raison est arithmetique : `init()` pose la fenetre de
+  // `fenetrePilotage()`, soit 365 jours, et `yf-granularite` vaut `mois` par
+  // defaut, donc `ceil(365 / 28) = 14` periodes contre un plafond de
+  // `PERIODES_LISIBLES = 100`. `trop` est faux, rien n'est grise, l'appel non
+  // garde ne desarme rien. Mesure du 28 octobre 2026.
+  //
+  // ⚠ LE CHEMIN OU CA MORDRAIT, nomme sans etre corrige (hors du perimetre
+  // tranche par Thierry) : un navigateur qui RESTAURE l'etat des formulaires a
+  // un rechargement souple (Firefox le fait) peut ramener
+  // `yf-granularite = jour` avant `init()`. Alors 365 > 100, le bouton est
+  // grise AVEC son avertissement, et le `charger()` non garde le rearme —
+  // l'avertissement clignote puis disparait. Ca se repare des l'entree en
+  // Exploration, qui rappelle `verifierEtendue`. Si ce chemin doit se fermer,
+  // c'est le premier chargement qui passe par cette garde, pas une quatrieme
+  // copie des deux tests.
   function chargerSiPossible () {
     if (!el('yf-bien').value) return
     if (el('yf-charger').disabled) return
