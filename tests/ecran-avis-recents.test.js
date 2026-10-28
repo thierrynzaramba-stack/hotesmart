@@ -259,7 +259,7 @@ test("LE TEST QUI COMPTE : « encore » se compte sur les lignes LUES, pas sur l
 })
 
 test("LE TEST QUI COMPTE : il reste dans les 30 JOURS, comme le bloc l annonce", async () => {
-  // Decision de Thierry du 29 octobre 2026, option 3. Mesure en production le
+  // Decision de Thierry du 28 octobre 2026, option 3. Mesure en production le
   // meme jour : 16 avis avec texte sur 30 jours contre 645 au total. Sans cette
   // borne, l accueil deviendrait un second /avis — et le compte de son propre
   // en-tete (« N avis notes sur 30 jours ») deviendrait faux.
