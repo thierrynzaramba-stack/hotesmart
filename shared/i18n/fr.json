@@ -743,6 +743,7 @@
   "revenue.annee_rad_mobile_n1": "l’an dernier à la même date :",
   "revenue.annee_rad_reserve": "{n, plural, one {# séjour de l’an dernier n’a pas pu être situé} other {# séjours de l’an dernier n’ont pas pu être situés}} à cette date : annulation sans date connue, ou date de vente non fiable.",
   "revenue.annee_rad_sous_seuil": "{n, plural, one {# mois n’est pas comparé} other {# mois ne sont pas comparés}} : moins de {seuil} ventes à cette date l’an dernier, pas assez pour comparer.",
+  "revenue.annee_rad_indispo": "La comparaison avec l’an dernier n’a pas pu être calculée.",
   "revenue.annee_rad_sous_seuil_court": "pas assez de ventes à cette date l’an dernier",
   "revenue.annee_rad_titre": "Réservé à date",
   "revenue.annee_reserve": "déjà réservé",
