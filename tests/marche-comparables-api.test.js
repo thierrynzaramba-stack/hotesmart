@@ -141,7 +141,14 @@ async function appeler ({ method = 'GET', query = { property_id: 'REF-42' }, bod
 const TABLES = () => ({
   bien_profil: [{ ...PROFIL, property_id: 'BIEN-A' }],
   comparables_retenus: [{ property_id: 'BIEN-A', listing_id: String(COMPS[0].listing_info.listing_id), actif: true }],
-  airroi_cache: [{ cle: CLE, reponse: COMPS_BRUT, recupere_le: '2026-10-05T10:00:00Z' }],
+  // ⚠ UNE DATE RELATIVE, ET C'EST LA CONVENTION QUE CE FICHIER SUIT DEJA
+  // PARTOUT AILLEURS (`new Date().toISOString()`, douze fois). Celle-ci etait
+  // figee au 5 octobre 2026, alors que le cache AirROI a une FENETRE DE
+  // FRAICHEUR de 90 jours lue sur l'horloge : passe J+70, l'entree devenait
+  // perimee, le code refetchait, et les quinze tests qui verifient « une liste
+  // FRAICHE ne reserve rien et le client AirROI n'est meme pas appele »
+  // tombaient. Mesure du 28 octobre 2026 : 0 rouge a J+65, 15 a J+70.
+  airroi_cache: [{ cle: CLE, reponse: COMPS_BRUT, recupere_le: new Date().toISOString() }],
 })
 
 // Une carte ne porte AUCUNE cle d'argent, a aucun niveau, ni de montant dans un texte.
@@ -346,7 +353,12 @@ test('GET : les retenus du FONDATEUR sont dits a part', async () => {
 })
 
 test('REVIEW : une liste en cache PERIMEE (plus de 90 jours) n est plus proposee ni ne valide un choix', async () => {
-  const vieux = { ...TABLES(), airroi_cache: [{ ...TABLES().airroi_cache[0], recupere_le: '2026-01-01T00:00:00Z' }] }
+  // ⚠ CELLE-CI DOIT RESTER PERIMEE, donc elle se date relativement AUSSI — en
+  // arriere. Une date figee au 1er janvier 2026 reste vieille tant que
+  // l'horloge avance, mais elle ne le DIT pas : `Date.now() - 200 jours`
+  // enonce l'intention, et tient dans les deux sens. Meme forme que la ligne
+  // « 91 jours » plus bas, la seule du fichier a l'avoir fait juste.
+  const vieux = { ...TABLES(), airroi_cache: [{ ...TABLES().airroi_cache[0], recupere_le: new Date(Date.now() - 200 * 86400000).toISOString() }] }
   const g = await appeler({ tables: vieux })
   assert.equal(g.corps.comparables, null)
   const r = await appeler({ method: 'POST', body: { action: 'retenir', choix: (IDS).map(listing_id => ({ listing_id, position: 'equivalent' })) }, tables: vieux })
