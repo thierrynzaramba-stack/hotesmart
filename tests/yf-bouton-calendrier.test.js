@@ -208,8 +208,21 @@ test('LE TEST QUI COMPTE : la ligne ambre est un FAIT — masquee a 0 et masquee
   let m = await ouvrir(avec, PILOTE)
   const ligne = m.querySelector('.cal-yf-menu__ajuste')
   assert.ok(ligne, 'la ligne ambre manque alors que 12 prix ont ete ajustes')
-  assert.equal(ligne.textContent.trim(), FR['cal.yf_adjusted'].replace('{n}', '12'))
+  // ⚠ LE TEXTE QUE L'HOTE LIT, PAS LA CLE NI LA CHAINE ICU. Comparer a
+  // `FR['cal.yf_adjusted']` compare la chaine a elle-meme : vert meme si le
+  // pluriel ne s'applique pas. Ici on exige le francais rendu.
+  assert.equal(ligne.textContent.trim(), '12 prix ajustés cette semaine')
   avec.fermer()
+
+  // ⚠ ET LE SINGULIER, parce que « 1 prix ajusté(s) » est exactement ce que
+  // Thierry a refuse le 28 octobre 2026. Le dictionnaire porte un pluriel
+  // ICU ; ce test est ce qui empeche qu'on le remplace par un « (s) ».
+  const un = banc({ faits: FAITS({ prix_ajustes: 1 }) })
+  const mUn = await ouvrir(un, PILOTE)
+  assert.equal(mUn.querySelector('.cal-yf-menu__ajuste').textContent.trim(),
+    '1 prix ajusté cette semaine')
+  assert.ok(!/\(s\)/.test(mUn.textContent), 'aucun « (s) » dans le menu')
+  un.fermer()
 
   for (const [quoi, n] of [['zero', 0], ['illisible', null]]) {
     const b = banc({ faits: FAITS({ prix_ajustes: n }) })
@@ -233,13 +246,18 @@ test('les reperes s affichent quand ils sont servis, et SE TAISENT sinon', async
   const avec = banc()
   let m = await ouvrir(avec, PILOTE)
   let reperes = [...m.querySelectorAll('.cal-yf-menu__repere')].map(e => e.textContent)
-  assert.deepEqual(reperes, [
-    FR['cal.yf_window_days'].replace('{n}', '120'),
-    'Bagnères-de-Bigorre',
-    FR['cal.yf_events_count'].replace('{n}', '3'),
-    FR['cal.yf_comparables_count'].replace('{n}', '7')
-  ])
+  assert.deepEqual(reperes, ['120 jours', 'Bagnères-de-Bigorre', '3 à venir', '7 retenus'])
   avec.fermer()
+
+  // ⚠ ZERO COMPARABLE DIT « A CHOISIR », PAS « 0 RETENUS » (demande de
+  // Thierry, 28 octobre 2026) : un zero mesure appelle un geste, il n'annonce
+  // pas un echec. Et il reste DISTINCT de l'illisible, qui n'affiche rien.
+  const zero = banc({ faits: FAITS({ comparables: 0 }) })
+  m = await ouvrir(zero, PILOTE)
+  const r0 = [...m.querySelectorAll('.cal-yf-menu__repere')].map(e => e.textContent)
+  assert.ok(r0.includes('À choisir'), `repere a zero : ${JSON.stringify(r0)}`)
+  assert.ok(!r0.some(x => /^0\b/.test(x)), 'un « 0 » brut est affiche')
+  zero.fermer()
 
   // Tout illisible : les quatre entrees restent CLIQUABLES, et aucun repere
   // n'est invente. Une panne de confort ne ferme pas le menu.

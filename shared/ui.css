@@ -683,7 +683,13 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-yf-menu__titre { font-size: var(--fs-small); font-weight: var(--fw-bold); }
 .cal-yf-menu__bien { font-size: var(--fs-caption); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .cal-yf-menu__pastille { font-size: var(--fs-caption); font-weight: var(--fw-semibold); border-radius: var(--radius-pill); padding: 2px 9px; margin-inline-start: auto; white-space: nowrap; }
-.cal-yf-menu__pastille--on { background: var(--info); color: var(--on-ink); }
+/* ⚠ LA PASTILLE N'EST PAS CLIQUABLE, DONC ELLE N'EST PAS BLEUE (demande de
+   Thierry, 28 octobre 2026) : dans la charte, le bleu dit « on peut cliquer ».
+   « Pilote auto » est donc une pastille NEUTRE avec un point vert — l'etat se
+   lit a la pastille, l'action se lit au pied du menu. « Prix manuels » reste
+   gris : c'est une absence d'etat, pas un etat. */
+.cal-yf-menu__pastille--on { background: var(--surface-2); color: var(--ink); display: inline-flex; align-items: center; gap: 6px; }
+.cal-yf-menu__pastille--on::before { content: ""; width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--ok); flex: none; }
 .cal-yf-menu__pastille--off { background: var(--surface-2); color: var(--muted); }
 /* La ligne ambre : masquée à 0 et masquée si le compte est illisible —
    jamais un « 0 » posé à la place d'une absence. */
@@ -700,7 +706,17 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-yf-menu__repere { flex: 0 1 auto; margin-inline-start: auto; padding-inline-start: 8px; font-size: var(--fs-caption); font-weight: var(--fw-regular); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42%; }
 .cal-yf-menu__pied { border-top: 1px solid var(--line); margin-top: 6px; padding: 10px 4px 4px; }
 .cal-yf-menu__pied .btn { width: 100%; justify-content: center; }
-.cal-yf-menu__pied a { display: block; padding: 6px 6px; font-size: var(--fs-small); font-weight: var(--fw-semibold); color: var(--ink); }
+/* « Reglages du pilote » : BLEU, parce que c'est un lien. Le bleu de la charte
+   (`--info`, celui du bouton + du calendrier) dit « on peut cliquer », et un
+   lien en noir ne le disait pas. */
+.cal-yf-menu__lien { display: block; padding: 6px; font-size: var(--fs-small); font-weight: var(--fw-semibold); color: var(--info); }
+/* « Activer le pilote automatique » : bleu PLEIN, texte blanc centre — les
+   memes jetons que le bouton + du calendrier (`.cal-btn-plus`), et la charte
+   n'est pas touchee. Pourquoi une classe a part plutot que `.cal-btn-plus`
+   elle-meme : ce bouton-la est rond et fait 34 px de large, il ne peut pas
+   porter une phrase. */
+.cal-yf-menu__activer { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 10px 14px; border-radius: var(--radius-pill); background: var(--info); color: var(--on-ink); font-size: var(--fs-small); font-weight: var(--fw-semibold); text-align: center; text-decoration: none; }
+.cal-yf-menu__activer:hover { box-shadow: var(--shadow-hover); }
 .cal-yf-menu__attente { padding: 14px 10px; font-size: var(--fs-caption); color: var(--muted); }
 .cal-yf-voile { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 54; }
 

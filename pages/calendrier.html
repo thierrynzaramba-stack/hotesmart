@@ -511,7 +511,14 @@ function repereYf (quoi, d) {
   }
   if (quoi === 'marche') return d.marche || ''
   if (quoi === 'evenements') return Number.isInteger(d.evenements) ? t('cal.yf_events_count', { n: d.evenements }) : ''
-  if (quoi === 'comparables') return Number.isInteger(d.comparables) ? t('cal.yf_comparables_count', { n: d.comparables }) : ''
+  // ⚠ ZERO COMPARABLE EST UN FAIT, ET IL APPELLE UN GESTE (demande de Thierry,
+  // 28 octobre 2026). « 0 retenus » se lit comme un echec ; « A choisir » dit
+  // ce qu'il reste a faire. La distinction avec l'ILLISIBLE tient toujours :
+  // `null` ne rend rien du tout.
+  if (quoi === 'comparables') {
+    if (!Number.isInteger(d.comparables)) return ''
+    return d.comparables === 0 ? t('cal.yf_comparables_none') : t('cal.yf_comparables_count', { n: d.comparables })
+  }
   return ''
 }
 
@@ -536,8 +543,8 @@ function menuYfHtml (bien, d) {
   // un geste impossible, il ne protege rien et n'a pas a le faire.
   const peutRegler = !etat.lectureSeule && peutEcrire('reglages')
   const pied = !peutRegler ? '' : on
-    ? `<div class="cal-yf-menu__pied"><a href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a></div>`
-    : `<div class="cal-yf-menu__pied"><a class="btn btn--primary" href="${esc(urlYf('prix', bien.id, { activer: '1' }))}">${esc(t('cal.yf_activate'))}</a></div>`
+    ? `<div class="cal-yf-menu__pied"><a class="link cal-yf-menu__lien" href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a></div>`
+    : `<div class="cal-yf-menu__pied"><a class="cal-yf-menu__activer" href="${esc(urlYf('prix', bien.id, { activer: '1' }))}">${esc(t('cal.yf_activate'))}</a></div>`
   return `<div class="cal-yf-menu__entete">
       <span class="cal-yf-menu__titre" id="h-yf">${esc(t('cal.yf_title'))}</span>
       <span class="cal-yf-menu__bien">${esc(bien.name || '')}</span>

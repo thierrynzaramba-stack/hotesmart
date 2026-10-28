@@ -58,10 +58,20 @@ function doubles ({ bien = {}, lignes = {}, erreurs = {} } = {}) {
         },
         then (ok, ko) { return Promise.resolve(reponse()).then(ok, ko) }
       }
+      // ⚠ LE DOUBLE APPLIQUE SES FILTRES, IL NE SE CONTENTE PAS DE LES NOTER.
+      // Sans ca, un endpoint qui oublierait `.eq('property_id', …)` rendrait
+      // les lignes de TOUS les biens et la suite resterait verte : le test du
+      // marche de chaque bien (demande de Thierry, 28 octobre 2026) serait un
+      // faux vert, et le defaut se verrait chez l'hote, pas ici.
+      const garde = (l) => Object.entries(q.filtres)
+        .every(([c, v]) => !(c in l) || String(l[c]) === String(v))
       function reponse () {
         if (erreurs[table]) return { data: null, count: null, error: { message: erreurs[table] } }
-        if (table === 'properties') return { data: bien, count: null, error: null }
-        const tout = lignes[table] || []
+        if (table === 'properties') {
+          const tous = (Array.isArray(bien) ? bien : bien ? [bien] : []).filter(garde)
+          return { data: tous[0] || null, count: null, error: null }
+        }
+        const tout = (lignes[table] || []).filter(garde)
         return { data: q.head ? null : tout, count: q.count === 'exact' ? tout.length : null, error: null }
       }
       return chain
@@ -80,7 +90,7 @@ function doubles ({ bien = {}, lignes = {}, erreurs = {} } = {}) {
   g.exports = {
     requirePermission: async (req, res, o) => {
       vues.push({ table: '__garde', filtres: { domaine: o.domaine, niveau: o.niveau, bien: o.bien, bienRequis: o.bienRequis } })
-      return { ok: true, accountUserId: COMPTE, bien: { id: BIEN } }
+      return { ok: true, accountUserId: COMPTE, bien: { id: o.bien } }
     },
     UUID_RE: /^[0-9a-f-]{36}$/i,
     posterEnTetesPrives: () => {}
@@ -110,10 +120,10 @@ const appeler = async (req = {}) => {
 const PILOTE = { id: BIEN, name: 'La bulle', pilote_tarifaire: 'yieldflow', pilote_fenetre_type: 'jours', pilote_fenetre_valeur: 120 }
 const MANUEL = { id: BIEN, name: 'Ofuro Futari', pilote_tarifaire: 'calendrier', pilote_fenetre_type: null, pilote_fenetre_valeur: null }
 const PLEIN = {
-  price_display_log: [{ id: 1 }, { id: 2 }, { id: 3 }],
-  yield_events: [{ id: 'e1' }, { id: 'e2' }],
-  comparables_retenus: [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }],
-  marche_biens: [{ localite: 'Bagnères-de-Bigorre' }]
+  price_display_log: [{ id: 1, property_id: BIEN }, { id: 2, property_id: BIEN }, { id: 3, property_id: BIEN }],
+  yield_events: [{ id: 'e1', property_id: BIEN }, { id: 'e2', property_id: BIEN }],
+  comparables_retenus: [{ id: 1, property_id: BIEN }, { id: 2, property_id: BIEN }, { id: 3, property_id: BIEN }, { id: 4, property_id: BIEN }],
+  marche_biens: [{ property_id: BIEN, localite: 'Bagnères-de-Bigorre' }]
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -229,6 +239,57 @@ test('LE TEST QUI COMPTE : un bien NON pilote ne paie pas le comptage du moteur'
     'une requete dont on jettera le resultat est une requete de trop')
   assert.equal(res.corps.fenetre, null)
   assert.equal(res.corps.fenetre_fin, null)
+})
+
+test('LE TEST QUI COMPTE : chaque bien lit SON marche, ses evenements, ses comparables', async () => {
+  // ⚠ DEMANDE DE THIERRY, 28 OCTOBRE 2026, NEE D'UN DOUTE SUR L'APERCU : les
+  // deux logements y affichaient le MEME marche relie. C'etait un artefact du
+  // banc a stubs — mais « c'est surement le stub » n'est pas une reponse, et
+  // la seule qui vaille est un test qui le prouve sur le vrai code.
+  //
+  // Le defaut qu'il empeche est de ceux qui ne se voient pas : un
+  // `.eq('property_id', …)` oublie sur UNE des quatre lectures ferait lire a
+  // un bien les donnees d'un AUTRE — tous du meme compte, donc aucune fuite,
+  // mais un hote a qui l'on montre le marche du voisin et qui tarife dessus.
+  const AUTRE = '22222222-2222-4222-8222-222222222222'
+  const deuxBiens = [
+    { ...PILOTE, id: BIEN, name: 'La bulle' },
+    { ...MANUEL, id: AUTRE, name: 'Ofuro Futari' }
+  ]
+  const lignes = {
+    marche_biens: [
+      { property_id: BIEN, localite: 'Bagneres-de-Bigorre' },
+      { property_id: AUTRE, localite: 'Colomiers' }
+    ],
+    yield_events: [
+      { id: 'e1', property_id: BIEN }, { id: 'e2', property_id: BIEN }, { id: 'e3', property_id: BIEN },
+      { id: 'e4', property_id: AUTRE }
+    ],
+    comparables_retenus: [
+      { id: 1, property_id: BIEN }, { id: 2, property_id: BIEN },
+      { id: 3, property_id: AUTRE }, { id: 4, property_id: AUTRE }, { id: 5, property_id: AUTRE }
+    ],
+    price_display_log: [{ id: 1, property_id: BIEN }]
+  }
+  const attendu = {
+    [BIEN]: { marche: 'Bagneres-de-Bigorre', evenements: 3, comparables: 2, prix_ajustes: 1 },
+    [AUTRE]: { marche: 'Colomiers', evenements: 1, comparables: 3, prix_ajustes: null }
+  }
+  for (const id of [BIEN, AUTRE]) {
+    doubles({ bien: deuxBiens, lignes })
+    const res = await appeler({ query: { bien: id } })
+    assert.equal(res.code, 200)
+    assert.equal(res.corps.bien, id, 'la reponse ne parle pas du bien demande')
+    for (const [champ, valeur] of Object.entries(attendu[id])) {
+      assert.equal(res.corps[champ], valeur,
+        `${id} : ${champ} vaut ${res.corps[champ]} au lieu de ${valeur} — une lecture n est pas cloisonnee par le bien`)
+    }
+  }
+  // Le contre-controle qui empeche la tautologie : si les deux biens avaient
+  // les memes valeurs, ce test ne separerait rien et serait vert pour rien.
+  assert.notEqual(attendu[BIEN].marche, attendu[AUTRE].marche)
+  assert.notEqual(attendu[BIEN].evenements, attendu[AUTRE].evenements)
+  assert.notEqual(attendu[BIEN].comparables, attendu[AUTRE].comparables)
 })
 
 test('le nombre de requetes annonce dans Server-Timing est le vrai', async () => {
