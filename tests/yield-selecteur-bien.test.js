@@ -100,9 +100,11 @@ const { sansCommentaires } = require('./outils/source')
 
 const tick = () => new Promise(r => setTimeout(r, 0))
 
+const REFUS = { ok: false, status: 400, json: async () => ({ error: 'banc de test' }) }
 let banc = null
 let tmp = null
 let envois = []
+let retenues = null
 
 test.before(async () => {
   const page = lire('apps/yield/index.html')
@@ -123,27 +125,32 @@ test.before(async () => {
   // sans traverser tout le rendu, et sans promesse rejetee en suspens.
   global.fetch = async (url) => {
     envois.push(String(url))
-    return { ok: false, status: 400, json: async () => ({ error: 'banc de test' }) }
+    // ⚠ LE BANC SAIT RETENIR UNE REPONSE EN L'AIR. Sans ca, impossible de
+    // mesurer le cas le plus ordinaire de l'ecran : l'hote choisit son
+    // logement PENDANT que la lecture d'ouverture est encore en vol.
+    if (retenues) return new Promise(r => retenues.push(() => r(REFUS)))
+    return REFUS
   }
 
   tmp = path.join(os.tmpdir(), `yf-garde-${process.pid}.mjs`)
   fs.writeFileSync(tmp, script
     + '\nexport const _garde = typeof chargerSiPossible === "function" ? chargerSiPossible : null\n'
-    + 'export function _poserSession (s) { session = s }\n')
+    + 'export function _poserSession (s) { session = s }\n'
+    + 'export function _choisirVue (v) { vue = v }\n')
   banc = await import(`file://${tmp}`)
   banc._poserSession({ access_token: 'jeton-de-banc' })
 })
 test.after(() => { if (tmp) { try { fs.unlinkSync(tmp) } catch {} } })
 
 // L'etat de l'ecran AVANT le geste, pose comme la page le pose vraiment.
-function poser ({ bien = 'b-choisi', grise = false }) {
+function poser ({ bien = 'b-choisi' } = {}) {
   envois = []
+  retenues = null
   const sel = document.getElementById('yf-bien')
   sel.innerHTML = bien ? `<option value="${bien}">Un bien</option>` : ''
   sel.value = bien || ''
-  // C'est exactement ce que fait `verifierEtendue` quand la fenetre est trop
-  // large : elle grise le bouton et ecrit l'avertissement.
-  document.getElementById('yf-charger').disabled = grise
+  document.getElementById('yf-charger').disabled = false
+  banc._choisirVue('pilotage')   // la vue par defaut de l'ecran
 }
 
 test('LE TEST QUI COMPTE : la garde partagee existe', () => {
@@ -154,21 +161,35 @@ test('LE TEST QUI COMPTE : la garde partagee existe', () => {
 })
 
 test("LE TEST QUI COMPTE : fenetre trop large, changer de logement ne part PAS", async () => {
-  poser({ grise: true })
+  // \u26a0 ON POSE LA VRAIE CONDITION, PAS SON REFLET. Une premiere version de
+  // ce test grisait `yf-charger` pour simuler l'avertissement — donc il
+  // mesurait un drapeau d'affichage, et il est reste vert quand ce drapeau a
+  // cesse d'etre la bonne question. Ici : vue Exploration, fenetre d'un an au
+  // detail « jour » = 365 periodes contre un plafond de 100.
+  poser({ bien: 'b-choisi' })
+  banc._choisirVue('exploration')
+  document.getElementById('yf-debut').value = '2026-01-01'
+  document.getElementById('yf-fin').value = '2026-12-31'
+  document.getElementById('yf-granularite').value = 'jour'
   banc._garde()
   await tick(); await tick()
   assert.deepEqual(envois, [],
-    'le bouton etait grise par `verifierEtendue` (fenetre trop large) : la '
-    + 'requete ne doit pas partir. Sinon elle repart en 400, son erreur '
-    + 'ecrase l avertissement, et `charger()` REARME le bouton durablement.')
-  // ⚠ LA MOITIE QU'ON OUBLIE : le bouton doit rester grise. C'est lui qui
-  // porte l avertissement jusqu au prochain changement de date.
-  assert.equal(document.getElementById('yf-charger').disabled, true,
-    'le bouton doit rester grise : l avertissement tient par lui')
+    'la fenetre demandee depasse ce que l endpoint rend : la lecture ne doit '
+    + 'pas partir, sinon elle repart en 400 et son erreur ecrase l avertissement.')
+
+  // \u26a0 LE CONTRE-CONTROLE EST DANS LE MEME TEST : la MEME fenetre, au detail
+  // « mois », fait 13 periodes et doit passer. Sans lui, une garde qui refuse
+  // toute Exploration serait verte.
+  document.getElementById('yf-granularite').value = 'mois'
+  banc._garde()
+  await tick(); await tick()
+  assert.equal(envois.length, 1,
+    'la meme fenetre au detail « mois » tient sous le plafond : elle doit partir')
+  banc._choisirVue('pilotage')
 })
 
 test("LE TEST QUI COMPTE : aucun logement selectionne, rien ne part", async () => {
-  poser({ bien: '', grise: false })
+  poser({ bien: '' })
   banc._garde()
   await tick(); await tick()
   assert.deepEqual(envois, [],
@@ -179,7 +200,7 @@ test("LE TEST QUI COMPTE : aucun logement selectionne, rien ne part", async () =
 // ⚠ LE CONTRE-CONTROLE, SANS LUI LES DEUX TESTS CI-DESSUS SERAIENT VERTS POUR
 // UNE GARDE QUI REFUSE TOUT (regle 22).
 test('LE CONTRE-CONTROLE : fenetre normale et logement choisi, la lecture part bien', async () => {
-  poser({ bien: 'b-choisi', grise: false })
+  poser({ bien: 'b-choisi' })
   banc._garde()
   await tick(); await tick()
   assert.equal(envois.length, 1, 'une requete, et une seule, doit partir')
@@ -204,4 +225,52 @@ test('LE TEST QUI COMPTE : les trois gestes passent par la garde, aucun n appell
     'changerVue doit appeler la garde partagee')
   assert.doesNotMatch(vue, /el\('yf-charger'\)\.disabled\) return/,
     'changerVue ne doit plus porter sa propre copie des gardes : deux copies divergent')
+})
+// ⚠ LE CAS QUI A FAIT RENVERSER LE PREMIER CORRECTIF — releve par la review
+// independante du 28 octobre 2026, APRES un premier verdict favorable.
+//
+// `yf-charger.disabled` porte DEUX sens, pas un : l'avertissement d'etendue
+// (`verifierEtendue`), la liste vide (`chargerBiens`), ET le verrou de
+// requete EN VOL pose par `charger()` lui-meme. Une garde qui lit ce drapeau
+// sans distinguer les trois AVALE le changement de logement pendant toute la
+// duree du `fetch` — et `/api/yield` est documente comme lent.
+//
+// ⚠ ET C'EST EXACTEMENT LE DEFAUT DE RECETTE QUE CE LOT FERME : l'ecran se
+// peint avec le premier bien par ordre alphabetique pendant que le selecteur
+// affiche celui que l'hote a choisi. Le premier correctif rouvrait donc, dans
+// cette fenetre, le defaut qu'il corrigeait ailleurs.
+//
+// ⚠ ET AVANT CE LOT, CE CAS MARCHAIT : `charger()` nu incrementait `enCours`,
+// et la reponse obsolete etait ecartee par le jeton de sequence. C'est le
+// genre de regression qu'un test de non-regression ne voit pas, parce qu'elle
+// naît du CORRECTIF.
+test("LE TEST QUI COMPTE : une lecture EN VOL n avale pas le changement de logement", async () => {
+  poser({ bien: 'bien-A' })
+  retenues = []            // a partir d ici, les reponses restent en l air
+  banc._garde()
+  await tick(); await tick()
+  assert.equal(envois.length, 1, 'la lecture du bien A doit etre partie')
+  // ⚠ LE VERROU DE REQUETE EST POSE : c est `charger()` qui l a mis, pas
+  // `verifierEtendue`. Le mesurer ici, sinon le test ne prouve pas qu il
+  // exerce bien le cas en vol.
+  assert.equal(document.getElementById('yf-charger').disabled, true,
+    'charger() pose le verrou de requete le temps du fetch')
+
+  // L hote choisit un autre logement pendant que A repond encore.
+  const sel = document.getElementById('yf-bien')
+  sel.innerHTML = '<option value="bien-A">A</option><option value="bien-B">B</option>'
+  sel.value = 'bien-B'
+  banc._garde()
+  await tick(); await tick()
+
+  assert.equal(envois.length, 2,
+    'le changement de logement doit partir MEME si une lecture est en vol. '
+    + 'Sinon l ecran se peint avec le bien A pendant que le selecteur dit B — '
+    + 'le defaut de recette que ce lot ferme, rouvert par sa propre garde.')
+  assert.match(envois[1], /property_id=bien-B/,
+    'et la seconde lecture doit porter le bien CHOISI')
+
+  retenues.forEach(f => f())
+  retenues = null
+  await tick(); await tick()
 })
