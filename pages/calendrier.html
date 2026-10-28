@@ -475,9 +475,22 @@ function brancherBulles (zone) {
 // bascule en un clic depuis le calendrier.
 const yfPilote = (bien) => bien.pilote_tarifaire === 'yieldflow'
 function boutonYfHtml (bien) {
-  // Beds24 : YieldFlow ne pilote que Channex (`peutPasserEnYieldflow`). Un
-  // bouton qui ouvrirait un menu sans issue est pire qu'une absence — et les
-  // biens Beds24 sont deja grises et non cochables partout ailleurs ici.
+  // Beds24 : un bouton qui ouvrirait un menu sans issue est pire qu'une
+  // absence — et les biens Beds24 sont deja grises et non cochables partout
+  // ailleurs dans cet ecran.
+  //
+  // ⚠ ET CE FILTRE EST LE SEUL, CE QUI N'EST PAS CE QUE CE COMMENTAIRE DISAIT
+  // (review du 28 octobre 2026). Il attribuait la restriction a
+  // `peutPasserEnYieldflow` ; or cette regle ne lit QUE `rate_sync_mode`,
+  // jamais `provider` (lib/pilote-tarifaire.js). Un bien Beds24 en
+  // `managed` — cas joignable pendant une migration — obtient donc
+  // `peut_basculer: true` de `/api/yield-menu` comme de `/api/yield-pilote`.
+  // Rien de confidentiel n'en sort : ce sont les memes faits que
+  // `/api/marche-global` sert sous le meme domaine.
+  // ⚠ ON NE CORRIGE PAS ICI EN AJOUTANT UNE REGLE QUE L'AUTRE ENDPOINT N'A
+  // PAS : deux verdicts pour la meme question, c'est ainsi qu'un ecran finit
+  // par contredire l'autre. Si la restriction doit devenir une regle, elle va
+  // dans `lib/pilote-tarifaire.js`, pour les deux a la fois.
   if (bien.provider === 'beds24') return ''
   const on = yfPilote(bien)
   const label = t(on ? 'cal.yf_open_on' : 'cal.yf_open_off', { nom: bien.name || '' })
@@ -494,7 +507,14 @@ function boutonYfHtml (bien) {
 const ENTREES_YF = [
   { cle: 'cal.yf_prediction',  icone: 'i-price',    page: 'prix',          repere: 'fenetre' },
   { cle: 'cal.yf_market',      icone: 'i-globe',    page: 'marche-global', repere: 'marche' },
-  { cle: 'cal.yf_events',      icone: 'i-calendar', page: 'prix',          repere: 'evenements', params: { evenements: '1' } },
+  // ⚠ SANS REPERE, ET C'EST UNE CORRECTION D'HONNETETE (recette du 28 octobre
+  // 2026). Il affichait « N a venir » en comptant les seules dates AJOUTEES
+  // PAR L'HOTE, a cote d'un ecran qui montre AUSSI les vacances scolaires,
+  // les feries, les ponts et les fetes du calendrier. Sur un logement sans
+  // date propre, le menu annoncait « 0 a venir » pour un ecran qui en liste
+  // 35. Le vrai compte n'est pas servi sans calcul (mesure du jour) : la
+  // regle du lot dit alors de ne rien afficher.
+  { cle: 'cal.yf_events',      icone: 'i-calendar', page: 'prix',          repere: null, params: { evenements: '1' } },
   { cle: 'cal.yf_comparables', icone: 'i-home',     page: 'comparables',   repere: 'comparables' }
 ]
 const urlYf = (page, bienId, params) =>
@@ -503,14 +523,13 @@ const urlYf = (page, bienId, params) =>
 // Le repere d'une entree. ⚠ IL NE S'AFFICHE QUE S'IL EST SERVI : `null` =
 // illisible, et on se tait. Un entier, lui, est un fait — 0 compris.
 function repereYf (quoi, d) {
-  if (!d) return ''
+  if (!quoi || !d) return ''
   if (quoi === 'fenetre') {
     const f = d.fenetre
     if (!f || !Number.isFinite(Number(f.valeur))) return ''
     return t(f.type === 'mois' ? 'cal.yf_window_months' : 'cal.yf_window_days', { n: f.valeur })
   }
   if (quoi === 'marche') return d.marche || ''
-  if (quoi === 'evenements') return Number.isInteger(d.evenements) ? t('cal.yf_events_count', { n: d.evenements }) : ''
   // ⚠ ZERO COMPARABLE EST UN FAIT, ET IL APPELLE UN GESTE (demande de Thierry,
   // 28 octobre 2026). « 0 retenus » se lit comme un echec ; « A choisir » dit
   // ce qu'il reste a faire. La distinction avec l'ILLISIBLE tient toujours :
@@ -571,10 +590,21 @@ function menuYfHtml (bien, d) {
     pied = `<div class="cal-yf-menu__pied"><a class="link cal-yf-menu__lien" href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a></div>`
   } else if (peutRegler && sait && d.peut_basculer) {
     pied = `<div class="cal-yf-menu__pied"><a class="cal-yf-menu__activer" href="${esc(urlYf('prix', bien.id, { activer: '1' }))}">${esc(t('cal.yf_activate'))}</a></div>`
+  } else if (peutRegler && sait && d.raison_code === 'pilote_refuse_keep') {
+    // ⚠ LE REFUS CONNU PORTE UN GESTE, PAS UN PARAGRAPHE (recette du
+    // 28 octobre 2026). La phrase du moteur disait la meme chose en cinq
+    // lignes, et laissait l'hote sans rien a faire : « Je garde mes prix »
+    // se change sur la fiche du logement, et c'est a un clic.
+    // ⚠ ON RECONNAIT LE REFUS PAR SON CODE, jamais par ses mots : un ecran
+    // qui lit la phrase se tromperait au premier reformulage.
+    pied = `<div class="cal-yf-menu__pied">
+      <p class="cal-yf-menu__refus">${esc(t('cal.yf_prices_outside'))}</p>
+      <a class="link cal-yf-menu__lien" href="/logements/${esc(bien.id)}">${esc(t('cal.yf_send_prices'))}</a>
+    </div>`
   } else if (peutRegler && sait && d.raison) {
-    // Le verdict du moteur s'AFFICHE, il ne se recopie pas (REVIEW.md regle 13) :
-    // la phrase vient de `lib/pilote-tarifaire.js`, elle dit ce qui est refuse,
-    // pourquoi, et quel geste le debloque.
+    // Tout autre refus : le verdict du moteur s'AFFICHE, il ne se recopie pas
+    // (REVIEW.md regle 13). On ne sait pas quel geste le debloque, donc on
+    // n'en propose aucun — plutot que d'en inventer un.
     pied = `<div class="cal-yf-menu__pied"><p class="cal-yf-menu__refus">${esc(d.raison)}</p></div>`
   }
   return `<div class="cal-yf-menu__entete">

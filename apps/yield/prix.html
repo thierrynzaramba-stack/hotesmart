@@ -644,6 +644,20 @@
     // Pendant la lecture, le bouton ne repond pas : il porte encore l'etat du
     // bien precedent (releve en relecture).
     etat.disabled = true
+    // ⚠ LA DEMANDE SE CONSOMME ICI, ET PAS PLUS BAS — constat de la review du
+    // 28 octobre 2026, et mon commentaire affirmait deja « dans tous les
+    // cas » alors que DEUX chemins l'esquivaient : le retour sur bien absent
+    // (juste en dessous) et le `catch` du « reglage illisible ».
+    // Le scenario coutait cher : l'hote clique « Activer le pilote
+    // automatique » depuis le calendrier, `/api/yield-pilote` repond 503,
+    // l'ecran dit « reglage illisible » — et la demande restait ARMEE. En
+    // choisissant ce meme logement au selecteur plus tard, la confirmation
+    // d'activation s'ouvrait TOUTE SEULE, sur un `change` et non sur son
+    // clic.
+    // On la prend et on l'eteint des qu'on sait de quel bien il s'agit ; la
+    // suite travaille sur la copie locale.
+    const activerCeBien = activerDemande
+    activerDemande = false
     if (!bien) { bloc.hidden = true; etat.hidden = true; return }
     let d
     try {
@@ -688,8 +702,7 @@
     // ⚠ LA DEMANDE SE CONSOMME DES QUE L'ETAT EST LU, dans tous les cas. Sans
     // cela, elle resterait armee et s'ouvrirait plus tard sur un AUTRE bien,
     // celui que l'hote aurait choisi au selecteur entre-temps.
-    if (activerDemande) {
-      activerDemande = false
+    if (activerCeBien) {
       // ⚠⚠ ET L'OUVERTURE N'A LIEU QUE SI LE BIEN AFFICHE EST BIEN CELUI QU'ON
       // A DEMANDE — constat de la review du 28 octobre 2026, et c'est le plus
       // grave du lot. La garde de `chargerBiens` protege le SELECTEUR : un

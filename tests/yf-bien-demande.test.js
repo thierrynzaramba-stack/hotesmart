@@ -163,9 +163,9 @@ test("LE TEST QUI COMPTE : ?activer=1 ouvre la CONFIRMATION, il n'ecrit rien", (
     'le parametre n est pas lu')
 
   // Le bloc qui consomme la demande, isole pour etre juge sur SON contenu.
-  const i = src.indexOf('if (activerDemande) {')
+  const i = src.indexOf('if (activerCeBien) {')
   assert.ok(i > 0, 'le bloc qui consomme la demande est introuvable')
-  const bloc = extraire(src.slice(i), 'if (activerDemande) {')
+  const bloc = extraire(src.slice(i), 'if (activerCeBien) {')
 
   // ⚠ IL APPELLE LA CONFIRMATION, PAS LA BASCULE. `confirmerBascule` ouvre le
   // parcours — fenetre obligatoire, compte des nuits releu SERVEUR, bouton
@@ -178,13 +178,34 @@ test("LE TEST QUI COMPTE : ?activer=1 ouvre la CONFIRMATION, il n'ecrit rien", (
   assert.doesNotMatch(bloc, /fetch\(|appel\(/,
     'aucun appel reseau ne part de la lecture du parametre')
 
-  // ⚠ LA DEMANDE SE CONSOMME AVANT D'OUVRIR, ET DANS TOUS LES CAS. Sans cela
-  // elle resterait armee et s'ouvrirait plus tard sur un AUTRE bien — celui
-  // que l'hote aurait choisi au selecteur entre-temps.
-  const iFaux = bloc.indexOf('activerDemande = false')
-  const iOuvre = bloc.indexOf('confirmerBascule')
-  assert.ok(iFaux > 0 && iFaux < iOuvre,
-    'la demande doit etre consommee AVANT d ouvrir le parcours')
+  // ⚠ LA DEMANDE SE CONSOMME HORS DE CE BLOC — correctif de la review du
+  // 28 octobre 2026. Elle etait eteinte DANS le `if`, donc DEUX chemins
+  // l'esquivaient : le retour sur bien absent, et le `catch` du « reglage
+  // illisible ». Un 503 laissait la demande ARMEE, et la confirmation
+  // d'activation s'ouvrait plus tard TOUTE SEULE, sur un `change` du
+  // selecteur — pas sur un clic de l'hote.
+  // ⚠ ET MON TEST NE POUVAIT PAS LE VOIR : le banc n'evalue que le bloc
+  // INTERIEUR, avec la demande posee a la main. Il etait structurellement
+  // aveugle aux retours exterieurs — exactement la forme decrite par la
+  // regle 22 de REVIEW.md, prise en defaut dans le lot qui l'a ecrite.
+  // On garde donc la PLACE de l'extinction, au niveau de la fonction.
+  assert.doesNotMatch(bloc, /activerDemande = false/,
+    'l extinction ne doit plus vivre dans ce bloc : deux chemins l esquivaient')
+  const fn = src.slice(src.indexOf('async function chargerPilote'), src.indexOf('function confirmerBascule'))
+  const iPrise = fn.indexOf('const activerCeBien = activerDemande')
+  const iEteint = fn.indexOf('activerDemande = false')
+  const iRetour = fn.indexOf('if (!bien) {')
+  const iCatch = fn.indexOf('catch')
+  assert.ok(iPrise > 0 && iEteint > iPrise, 'la demande se prend, puis s eteint')
+  assert.ok(iRetour > 0 && iEteint < iRetour, 'AVANT le retour sur bien absent')
+  assert.ok(iCatch > 0 && iEteint < iCatch, 'et AVANT le catch du « reglage illisible »')
+  // ⚠ ET INCONDITIONNELLEMENT — une mutation l'a montre : ma premiere version
+  // ne gardait que la PLACE, donc `if (!bien) activerDemande = false` passait
+  // au vert tout en reouvrant exactement le defaut (la demande survivait au
+  // 503). Le geste doit etre nu : une affectation seule sur sa ligne, juste
+  // apres la prise.
+  assert.match(fn, /const activerCeBien = activerDemande\s*\n\s*activerDemande = false\s*\n/,
+    'l extinction doit suivre la prise, seule sur sa ligne et sans condition')
 
   // Les QUATRE refus. Le comportement est eprouve par le test suivant, qui
   // execute le bloc ; ici on garde que la condition les porte tous les quatre,
@@ -209,7 +230,7 @@ test("LE TEST QUI COMPTE : ?activer=1 n'ouvre RIEN si le bien affiche n'est pas 
   //
   // ON EXECUTE LE VRAI BLOC, extrait de la page par equilibre des accolades.
   const src = sansCommentaires(lire('apps/yield/prix.html'))
-  const bloc = extraire(src, 'if (activerDemande) {')
+  const bloc = extraire(src, 'if (activerCeBien) {')
 
   const essai = ({ recherche, affiche, yf = false, bloque = false }) => {
     const dom = new JSDOM(`<select id="yp-bien"><option value="${BIENS[0].id}">A</option><option value="${BIENS[1].id}">B</option></select>`,
@@ -223,7 +244,7 @@ test("LE TEST QUI COMPTE : ?activer=1 n'ouvre RIEN si le bien affiche n'est pas 
       yf, bloque
     }
     window.eval('const { el, confirmerBascule, yf, bloque } = window.__ctx\n'
-      + 'let activerDemande = true\n' + bloc + '\nwindow.__vu = activerDemande')
+      + 'const activerCeBien = true\n' + bloc + '\nwindow.__vu = false')
     const consommee = window.__vu === false
     window.close()
     return { ouvertures: vu, consommee }
