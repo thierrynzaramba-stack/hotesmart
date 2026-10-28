@@ -208,8 +208,19 @@ h1, h2, h3, p { margin: 0; }
 .msg-liste__outils { display: flex; flex-direction: column; gap: 10px; padding: 14px 14px 10px; }
 .msg-recherche { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); }
 .msg-recherche input { flex: 1; border: 0; outline: 0; background: none; font-size: var(--fs-small); color: var(--ink); }
-.msg-filtres { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
-.msg-filtres::-webkit-scrollbar { display: none; }
+/* ⚠ `.msg-pilules` SE GREFFE ICI, elle ne se recopie pas (chantier « delai de
+   reponse IA », lot 2). Les pilules de delai du volet « Reponse IA » demandent
+   exactement ce que les filtres font deja : defilement horizontal possible,
+   barre MASQUEE sur telephone. Ecrire une seconde regle identique, c'est
+   accepter qu'elles divergent — la regle du depot sur les modules communs vaut
+   aussi a l'interieur d'un fichier. */
+.msg-filtres, .msg-pilules { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
+.msg-filtres::-webkit-scrollbar, .msg-pilules::-webkit-scrollbar { display: none; }
+/* Les pilules du volet : meme hauteur de cible que les filtres, et `flex: none`
+   pour qu'elles ne se compriment pas au lieu de defiler. */
+.msg-pilules .tab { height: 36px; padding: 0 12px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; color: var(--info); font-weight: var(--fw-semibold); }
+.msg-pilules .tab[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); font-weight: var(--fw-bold); background: var(--surface); }
+@media (max-width: 720px) { .msg-pilules .tab { height: 44px; padding: 0 14px; } }
 .msg-filtres .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; }
 .msg-filtres .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
 .msg-deroule { overflow-y: auto; flex: 1; }
@@ -250,6 +261,28 @@ h1, h2, h3, p { margin: 0; }
 .bulle--hote { align-self: flex-end; background: var(--surface-2); color: var(--ink); border-end-end-radius: 4px; }
 .bulle--proposition { align-self: flex-end; background: var(--surface); border: 1.5px dashed var(--ink); border-end-end-radius: 4px; }
 .bulle__entete { display: flex; align-items: center; gap: 6px; font-size: var(--fs-caption); font-weight: var(--fw-semibold); margin-bottom: 4px; }
+/* ⚠ L'ECHEANCE D'UN BROUILLON DIFFERE, ET C'EST LE SEUL AMBRE DE L'ECRAN
+   (chantier « delai de reponse IA », lot 2). `theme.css` reserve `--amber` a
+   « ce qu'HoteSmart a fait / attend », un seul moment par ecran : un brouillon
+   qui va partir tout seul est exactement cela. Rien d'autre dans ce fil ne doit
+   le porter.
+   La VARIANTE suspendue est GRISE : quand l'hote a ouvert le brouillon, plus
+   rien n'attend — c'est lui qui tient la main, donc l'ambre n'a plus d'objet. */
+.bulle__echeance { display: flex; align-items: center; gap: 6px; margin: -2px -6px 8px; padding: 7px 10px; border-radius: var(--radius-card); background: var(--amber-soft); color: var(--amber-text); font-size: var(--fs-small); font-weight: var(--fw-semibold); white-space: normal; }
+.bulle__echeance--suspendu { background: var(--surface-2); color: var(--muted); }
+.bulle__echeance .icon { width: 16px; height: 16px; flex: none; }
+/* Les gestes sous un brouillon differe : ce qui se passera sans rien faire, et
+   l'abandon. Bleu = cliquable, et le pied ne porte aucun bouton plein. */
+.bulle__pied { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 14px; margin-top: 6px; }
+.bulle__pied .link { display: inline-flex; align-items: center; gap: 5px; min-height: 36px; background: none; border: 0; padding: 0; color: var(--info); font-size: var(--fs-small); font-weight: var(--fw-semibold); cursor: pointer; }
+.bulle__pied .icon { width: 15px; height: 15px; }
+/* Le meme bandeau, au-dessus de la SAISIE : le mecanisme d'edition existant
+   descend la proposition hors du fil, donc sa bulle disparait avec son compte
+   a rebours. Les elements sont identiques — c'est le meme objet, seule sa
+   place change. */
+.msg-saisie__echeance { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 8px 20px 0; }
+.msg-saisie__echeance .bulle__echeance { margin: 0; }
+.msg-saisie__echeance .bulle__pied { margin: 0; }
 .bulle-meta { align-self: flex-end; display: flex; align-items: center; gap: 5px; font-size: var(--fs-caption); color: var(--muted); margin: 2px 4px 8px; }
 .bulle-meta--voyageur { align-self: flex-start; }
 .bulle-meta .icon { width: 13px; height: 13px; }

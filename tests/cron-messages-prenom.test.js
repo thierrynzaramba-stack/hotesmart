@@ -15,7 +15,7 @@ function charger (ia) {
   stub('../lib/cron-shared', {
     supabase: { from: () => ({}) },
     anthropic: { messages: { create: async () => { appels.push(1); if (ia instanceof Error) throw ia; return { content: [{ text: ia }] } } } },
-    getPropertyMode: async () => 'auto', isAutomationPaused: async () => false,
+    getPropertyMode: async () => 'auto', lireReglagesDuBien: async () => ({ mode: 'auto', delais: null }), isAutomationPaused: async () => false,
     formatDate: d => String(d || ''),
   })
   stub('../lib/founder-notify', { reportIncident: async (type, o) => { incidents.push({ type, ...o }) } })

@@ -54,7 +54,7 @@ function charger({ snapshots = [], tokens = [], profils = null, statut = null,
   }
   const abs = require.resolve(path.join(__dirname, '..', 'lib/cron-shared.js'))
   const m = new Module(abs)
-  m.exports = { supabase: { from: table }, getPropertyMode: async () => 'auto', isAutomationPaused: async () => false }
+  m.exports = { supabase: { from: table }, getPropertyMode: async () => 'auto', lireReglagesDuBien: async () => ({ mode: 'auto', delais: null }), isAutomationPaused: async () => false }
   m.loaded = true
   require.cache[abs] = m
 

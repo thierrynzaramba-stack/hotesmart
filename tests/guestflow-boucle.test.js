@@ -73,7 +73,7 @@ function charger ({ tables, messages, reponse, mode = 'test', pause = false, env
     return { model: 'claude-sonnet-5-5', content: [{ type: 'text', text: JSON.stringify(reponse) }] }
   } } }
   const stubs = {
-    '../lib/cron-shared': { supabase: fakeSupabase(tables), anthropic, getPropertyMode: async () => mode,
+    '../lib/cron-shared': { supabase: fakeSupabase(tables), anthropic, getPropertyMode: async () => mode, lireReglagesDuBien: async () => ({ mode: mode, delais: null }),
       isAutomationPaused: async () => pause, getSignatureForKey: () => '', SENDVIABEDS24_ENABLED: false },
     '../lib/cron-beds24': { fetchMessages: async () => [], fetchBookingsHistory: async () => [] },
     '../lib/alert-notify': { sendAlertNotifications: async (a) => { alertes.push(a) } },

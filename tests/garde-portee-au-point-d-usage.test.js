@@ -68,7 +68,7 @@ function poser (chemin, exports) {
 poser('../lib/cron-shared', {
   supabase: fauxSupabase(),
   anthropic: { messages: { create: async () => ({ content: [{ text: '{}' }] }) } },
-  getPropertyMode: async () => 'test',
+  getPropertyMode: async () => 'test', lireReglagesDuBien: async () => ({ mode: 'test', delais: null }),
   // ⚠ LE TEMOIN. C'est le PREMIER appel apres la garde : s'il se declenche,
   // c'est que la garde a laisse passer. S'il ne se declenche pas, elle a
   // suspendu le bien — le defaut du 14 septembre.

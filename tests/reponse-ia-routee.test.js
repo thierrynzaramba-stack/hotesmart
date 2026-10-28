@@ -75,8 +75,17 @@ test('un echec de reponse IA REMONTE : erreurs de cycle et incident', () => {
 })
 
 test('`messages` porte le canal REELLEMENT emprunte', () => {
-  const bloc = src.split('const envoi = await sendGuestMessage')[1]
-  assert.ok(/canal:\s+envoi\.canal === 'email' \? 'email' : 'ota'/.test(bloc))
+  // ⚠ LES QUATRE ECRITURES DU CŒUR ONT DEMENAGE dans
+  // lib/guestflow/journal-envoi-ia.js (constat 1, grave, de la revue du
+  // 27 octobre 2026 : le chemin DIFFERE du lot 2 ne les faisait pas du tout).
+  // Une seule copie desormais, donc le test regarde le module — et verifie que
+  // le chemin immediat lui passe bien le canal REEL, pas le provider du bien.
+  const journal = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib/guestflow/journal-envoi-ia.js'), 'utf8')
+  assert.ok(/canal:\s+canal === 'email' \? 'email' : 'ota'/.test(journal),
+    'le journal pose le canal reellement emprunte')
+  assert.ok(/canal: envoi\.canal/.test(src),
+    'et cron-classify lui passe le canal de l envoi, pas le provider du bien')
 })
 
 test('les deux chemins fournissent le booking', () => {

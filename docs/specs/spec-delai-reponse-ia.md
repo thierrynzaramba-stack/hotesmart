@@ -644,6 +644,40 @@ voyageur. Il s'éprouve en staging, ou sur un double qui crie. En prod, (b) se
 vérifie par la **trace** (un seul `message_sent_log`, un 409 journalisé), pas en
 provoquant la course.
 
+### Deux pièces ajoutées par Thierry le 27 octobre 2026
+
+- **(d) un envoi différé sur une réservation DIRECTE (`Offline`) part bien par
+  e-mail, et la réponse apparaît dans le fil.** C'est la recette du constat 2
+  **et** du constat 1 d'un seul geste : si l'objet de la réservation ne traverse
+  pas jusqu'à l'envoi, le message part vers la messagerie OTA et Channex rend
+  422 ; et si le journal du cœur n'est pas écrit, le fil reste muet alors que le
+  voyageur a reçu. Les deux défauts se voient sur le même écran.
+  **À vérifier dans cet ordre** : le voyageur reçoit l'e-mail ; la bulle de
+  réponse apparaît dans le fil de `/messages` ; `messages` porte une ligne
+  `outbound / sender: ai / canal: email / origine: ia_differee` ;
+  `conversations` porte sa ligne.
+- **(e) un envoi IMMÉDIAT Airbnb se comporte comme avant le merge.** C'est la
+  contre-épreuve du module partagé : les quatre écritures du cœur ont déménagé
+  dans `lib/guestflow/journal-envoi-ia.js`, donc le chemin immédiat — **en
+  production depuis des semaines** — a été touché. Un envoi Airbnb immédiat doit
+  produire exactement ce qu'il produisait : même bulle, même ligne `messages`
+  (`origine: 'ia_auto'`, pas `ia_differee`), même ligne `conversations`, même
+  fermeture d'une tâche « reçu pendant la pause » s'il y en a une.
+
+### L'activation en production se fait par UN bien (décision de Thierry)
+
+**`La bulle` d'abord, et elle seule.** Les autres biens restent sur leur réglage
+actuel — c'est-à-dire, après la migration, `reponse_ia: 0` (immédiat) ou `null`
+(validation manuelle), donc **le comportement qu'ils ont aujourd'hui**. Aucun
+autre bien ne reçoit de délai avant que Thierry ait vu **un vrai envoi différé
+passer de bout en bout**.
+
+Ce que cela veut dire concrètement : la migration des données tourne sur tous
+les biens (elle ne change aucun comportement, c'est son cahier des charges),
+puis **Thierry seul** pose un délai sur `La bulle` depuis l'écran. Le parachute
+ne protège donc qu'un bien jusqu'à son go — et c'est la bonne façon d'éprouver
+un mécanisme qui envoie au voyageur sans qu'un humain relise.
+
 ⚠ **Staging n'a aucun cron** (`docs/STAGING.md:276`) : la passe se lance à la main
 par `scripts/piloter-brouillons-dus.js` (à blanc, puis `--go`), sur le modèle de
 `scripts/piloter-yieldflow.js`.

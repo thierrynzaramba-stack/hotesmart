@@ -1011,3 +1011,275 @@ corrige sans nouvelle review, puis on pousse.
   de l'endpoint est éprouvé par appel. Leçon : trois corrections fausses d'affilée
   sur le même grep signifient qu'il faut arrêter de greper, pas chercher un
   meilleur motif.
+
+## Délai de réponse IA — le lot 2 : le différé existe (27 octobre 2026)
+
+Spec : `docs/specs/spec-delai-reponse-ia.md`. Le lot 1 posait le socle ; celui-ci
+fait partir les brouillons.
+
+### Le chemin complet d'un brouillon différé
+
+1. **`lib/cron-classify.js`** classe le message. Trois cas, dont **deux sont les
+   comportements d'avant, octet pour octet** : `reponse_ia = null` → tâche sans
+   échéance (l'ancien Mode Test) ; `= 0` → envoi dans le tour (l'ancien Mode
+   Auto) ; `= N` → tâche avec `send_after = maintenant + N`.
+   ⚠ **Un délai différé emprunte la branche « tâche », pas la branche « envoi ».**
+   Mon premier jet écrivait `delai.manuel ? 'test' : 'auto'` : un délai de
+   15 minutes rendait donc `'auto'` et **le message partait tout de suite**,
+   l'échéance n'étant jamais atteinte puisqu'aucune tâche n'était posée. Ce sont
+   ses propres tests qui l'ont trouvé.
+2. **`lib/guestflow/brouillons-dus.js`** (passe `brouillons_dus` du cron) lit les
+   tâches **échues** par deux index partiels, **claime** (statut `sending`),
+   revérifie tout, envoie, écrit le statut.
+3. **`api/messages.js`** porte les gestes de l'hôte : `reserver` (le claim),
+   `relacher`, `brouillon` (son texte), `reprendre`, et `proposition` (la
+   clôture, qui **désarme** `send_after`).
+
+### ⚠ L'ordre claim/envoi est inversé, côté écran comme côté cron
+
+`envoyerProposition` relisait le statut **puis** envoyait. Une atténuation, pas
+un verrou : elle suffisait tant que **seul un humain** envoyait. Depuis que le
+cron peut envoyer la même proposition à son échéance, la fenêtre entre la
+relecture et l'envoi produit le **double message au voyageur**. L'écran passe
+donc par `reserver` — un UPDATE conditionnel qui **dit** si quelqu'un d'autre a
+pris la tâche. Un 409 n'est pas une erreur à réessayer : c'est « cette réponse
+vient de partir », et rien ne part.
+
+Et **une réservation se relâche** : sans ça, un envoi raté laisserait la tâche
+en `sending` jusqu'à la reprise des orphelines, soit dix minutes d'attente.
+
+### La suspension, et pourquoi elle reprend
+
+Ouvrir un brouillon pose `suspendu_le` : le cron ne l'enverra pas. L'écrire pose
+`modifie_le` **en plus** — et la distinction compte : ouvrir, lire et refermer
+n'est pas modifier, sinon un simple coup d'œil déclencherait l'alerte de reprise
+et la sourdine de nuit.
+
+⚠ **La suspension REPREND**, décision de Thierry contre ma spec : j'avais écrit
+qu'elle serait définitive, et son argument tranche — *il suffirait d'ouvrir un
+brouillon pour que l'oubli redevienne possible*, exactement ce que le différé
+existe pour empêcher. Deux chemins : l'hôte clique « Envoyer dans X min », ou
+le cron reprend après **30 minutes sans modification** (`updated_at` mesure
+l'inactivité, pas l'ancienneté).
+
+⚠ **L'échéance repart avec le temps QUI RESTAIT, 5 minutes au minimum**, et ce
+temps se **calcule** : `send_after - suspendu_le`. Sans ce recalcul, deux
+défauts opposés — laisser `send_after` tel quel ferait partir sous les doigts un
+brouillon ouvert vingt minutes ; repartir du délai plein laisserait l'hôte
+repousser l'envoi de quinze minutes à chaque coup d'œil.
+**Dette** : cette règle est écrite **deux fois** (`api/messages.js` et
+`lib/guestflow/brouillons-dus.js`). Le jour où le plancher change, il change aux
+deux endroits.
+
+### Le budget mur, parce que cette passe ENVOIE
+
+Plafond de 30 brouillons par cycle **et** budget de 20 s. Sans le budget, trente
+envois lents mangeaient les 60 s de `maxDuration` et **affamaient le dispatch
+des changements de réservation**, qui tourne après et qui est déjà le poste le
+plus coûteux. On ne **commence** pas un envoi sous le seuil ; **un envoi déjà
+commencé n'est jamais coupé** — entre le claim et l'écriture du statut se trouve
+le seul endroit où le voyageur peut recevoir un message sans que la tâche le
+dise.
+
+### ⚠ Une tâche `sending` abandonnée est rendue DÉSARMÉE
+
+Mon premier jet la rendait armée : la passe la relisait comme échue **dans le
+même cycle** et la renvoyait. Or une tâche restée `sending` est précisément
+celle dont on **ne sait pas** si l'envoi est parti. La renvoyer automatiquement,
+c'est choisir le double message plutôt que l'attente. Elle revient donc à l'hôte
+avec le doute écrit dans son résumé, et lui seul tranche.
+
+### L'écran : le volet « Réponse IA », et un seul « Enregistrer »
+
+Les trois réglages prennent **la place exacte** de l'ancien bloc Test/Auto, en
+haut du volet ; tout ce qui suivait reste dans son ordre (pause, consignes,
+coupe-circuit, alertes). Aucun onglet ajouté. Le mobile n'est **pas** un autre
+écran : `ui.css` donne au tiroir `width: min(360px, 100vw)`.
+
+**Un seul bouton pour trois écritures** (demande de Thierry), et elles ne
+peuvent pas voyager ensemble : délais et alertes sont deux **cibles** de
+`/api/agent-config`, qui refuse par 400 une requête portant les deux ; les
+consignes vivent dans `agent_prompting`. Donc trois requêtes séquentielles et un
+**échec partiel nommé** — « Non enregistré : les alertes. » Un « erreur » global
+ferait relancer les trois à l'aveugle, et re-poster des délais déjà enregistrés
+n'est pas anodin : ils gouvernent les envois.
+
+⚠ **La pause reste hors du bouton** : couper l'automatique est un geste
+d'urgence. Un kill switch qui attend un « Enregistrer » n'est pas un kill switch.
+
+### ⚠ Deux gardes que le remplacement de l'écran avait emportées
+
+1. **La confirmation de Thierry**, demandée le 11 octobre : « passer en Auto est
+   un geste lourd, tout ce que l'IA sait part sans validation ». Le toggle a
+   disparu, **et la confirmation avec lui**. Le geste existe toujours : quitter
+   « Je valide chaque réponse » autorise des envois sans relecture. Elle est donc
+   sur ce bouton — seul chemin pour en sortir, les pilules n'étant pas rendues en
+   mode manuel. **Un test existant l'a attrapée, pas moi.**
+2. **Le repli des SMS sans clé Brevo.** Les champs SMS n'existent pas à l'écran
+   sans Brevo ; mon `lireType` écrivait donc `sms_enabled: false`, et enregistrer
+   le panneau aurait **désactivé les SMS d'alerte** d'un hôte sans Brevo, sans
+   qu'il touche à ce réglage. Le repli sur la valeur enregistrée existait dans
+   l'ancien chemin. **Attrapé par un test aussi.**
+
+Leçon commune : un écran qu'on remplace emporte des gardes produit en silence.
+Les tests d'écran de ce dépôt — y compris ceux qui grepent — sont ce qui les
+rattrape.
+
+### Le libellé qui ne s'accorde pas
+
+« Non enregistré : {parties}. » remplace « {parties} n'ont pas été
+enregistrés. » parce que **l'accord dépend de la variable** : « les alertes » et
+« les consignes » sont féminins, « les délais » masculin. Accorder au féminin
+aurait été juste deux fois sur trois. Une formulation invariable est juste dans
+les trois cas, et le restera à la quatrième partie.
+
+### La migration des données
+
+`scripts/migrer-modes-vers-delais.js` — **à blanc par défaut**, `--go` pour
+écrire, idempotent, refus sur une base non reconnue.
+`mode:'auto'` → `reponse_ia: 0` ; `mode:'test'` → `null` ; **`alerte_info: 0`
+partout**, et c'est une décision de Thierry contre mon premier réflexe : poser
+15 minutes aurait changé le comportement de biens en production sous couvert de
+migration, puisque l'alerte d'info manquante partait **déjà** dans le tour. Les
+15 minutes sont le défaut des biens **neufs**.
+
+### Divergence maquette / code, acceptée par Thierry
+
+La maquette montrait un textarea **dans la bulle** pour l'état « vous
+modifiez ». Le mécanisme existant **descend** le texte dans la zone de saisie et
+filtre la bulle du fil. Décision : garder le mécanisme, et porter les trois
+informations près de la saisie (`.msg-saisie__echeance`) — l'état, ce qui se
+passera, l'abandon. L'étiquette du compte à rebours a **une seule source**
+(`etiquetteEcheance`), parce que la bulle et le bandeau l'affichent tous les
+deux.
+
+### Les 15 constats de la revue du lot 2 — trois graves, et tous justes
+
+**La leçon d'ensemble, avant le détail** : les trois constats graves disent la
+même chose sous trois formes. J'ai écrit un **second chemin d'envoi** et je ne
+lui ai pas donné ce que le premier avait appris en dix-huit mois de reviews.
+
+**1. ⚠ GRAVE — l'envoi différé n'écrivait RIEN dans le cœur.** Le chemin
+immédiat fait quatre écritures après un envoi réussi (`conversations`,
+`recordMessage` dans `messages`, `fermerTachesPause`, le compteur) ;
+`brouillons-dus.js` posait `status: 'done'` et s'arrêtait là. Le voyageur
+recevait la réponse et **elle n'existait nulle part** : l'hôte voyait un fil
+sans réponse, le journal était muet, et au message suivant `preparerLot` ne
+voyait aucune réponse côté hôte — **l'IA pouvait répondre une seconde fois à la
+même question.** C'est exactement ce que « provider → cœur → apps » interdit.
+**Correctif** : les quatre écritures vivent dans `lib/guestflow/journal-envoi-ia.js`,
+appelé par les **deux** chemins. Une seule copie, et `origine: 'ia_differee'`
+distingue ce qui part à l'échéance — la seule trace qui dira, dans six mois,
+combien de réponses le parachute a réellement envoyées.
+
+**2. ⚠ GRAVE — l'envoi recevait l'identifiant nu, pas la réservation.**
+`sendGuestMessage` pose alors `{ canal: OTA }` sans consulter `canalPour`.
+L'avertissement est écrit dans le dépôt depuis des mois : « `booking` : l'objet
+de la RÉSERVATION, pas seulement son identifiant. C'est lui qui porte `source`
+et `guestEmail`, donc le CANAL de sortie. » Une réservation directe ou
+`Offline` dont la réponse était différée partait vers la messagerie OTA → 422
+`not_supported`, **la dette 3 rouverte pour tout le chemin différé**.
+**Correctif** : `chargerLesReservations` lit `bookings_snapshot` groupé, et
+l'objet traverse jusqu'à l'envoi.
+
+**3. ⚠ GRAVE — le claim ne couvrait qu'un des deux chemins d'envoi.** Je
+l'avais posé sur `envoyerProposition` (le bouton de la bulle) mais pas sur
+« Modifier puis Envoyer », qui passe par `lancerEnvoi`. Sa seule protection
+était `suspendu_le` — que la reprise automatique **efface** après 30 minutes
+d'inactivité, et `updated_at` ne bouge qu'au `blur`, pas à la frappe. Scénario
+entièrement réaliste : brouillon à 60 min, l'hôte ouvre et tape sans quitter le
+champ ; à T+30 le cron reprend la suspension puis envoie ; l'hôte clique
+« Envoyer » → **deuxième message au voyageur**. Un seul verrou, le même pour les
+deux chemins.
+
+**4. `sending` n'est cloturable que pour un ENVOI.** L'accepter pour un rejet
+rouvrait la course : le cron claime, l'hôte clique « Ne pas envoyer », la tâche
+passe à `ignored` — et le cron finit d'envoyer. **Et son UPDATE final n'avait
+pas de `.select()`** : zéro ligne touchée, et `bilan.envoyes++` montait quand
+même. Le voyageur avait reçu le message, l'hôte lisait « rejetée », rien ne le
+disait. Désormais : rejet refusé sur `sending`, `.select()` vérifié, et un
+incident au fondateur si le statut ne suit pas un envoi parti.
+
+**5. Une panne de lecture AUTORISAIT l'envoi.** `reglages` vide → `d`
+`undefined` → la garde « repassé en validation manuelle » **sautée**. Mon repli
+était l'inverse du contrat : `lireReglagesDuBien` rend `{mode:'test'}` en cas de
+panne, `delaiDeReponse` en déduit `manuel`. Tout le reste du chantier refuse
+quand il ne sait pas. Même trou pour une entrée disparue du blob : `undefined`
+n'est pas une permission.
+
+**6. Un réglage sans lecteur mentait à l'hôte.** Le bloc « Info manquante : me
+prévenir après » s'enregistrait, mais `sendAlertNotifications` part toujours
+dans le tour : un hôte réglant « 4 h » recevait ses alertes immédiatement.
+C'est l'« interrupteur qui mente » que ce chantier a déjà corrigé une fois.
+**Retiré de l'écran jusqu'au lot 3** — la maquette validée le portait, mais le
+livrer inerte est pire que le livrer une semaine plus tard. Le réglage, les clés
+i18n et la règle de sourdine restent : le lot 3 n'aura que le branchement.
+
+**7. Mon commentaire promettait une garde d'annulation qui n'existait pas.**
+Rien d'autre ne purge `agent_tasks` à l'annulation : un voyageur qui annulait
+pendant la fenêtre recevait la réponse (« à bientôt », un code d'accès…).
+`estAnnulationVoyageur` est maintenant lu.
+
+**13. ⚠ Une fuite entre comptes.** Mes `Map` étaient clées sur le seul
+`provider_property_id`, et aucune lecture n'était filtrée par compte : dès que
+deux comptes partagent une ref provider — bien en bascule, bien re-provisionné,
+ref non UUID —, **le réglage et le `automation_paused` d'un autre compte
+gouvernaient l'envoi**. Un bien en pause aurait pu envoyer. Clé `user_id|ref`
+partout, et `.in('user_id', …)` sur les trois lectures. Le précédent du dépôt le
+faisait déjà (`sync-menages-entite.js`) ; je ne l'avais pas suivi.
+⚠ **Et j'avais corrigé `encoreLegitime` en oubliant le bloc de la sourdine** —
+ce sont ses tests qui l'ont montré.
+
+**8, 12, 14, 15** : la restitution du rappel ignorait la valeur courante (un
+délai de 30 min détruit par un POST `mode`) ; la migration lisait sans
+`.range()` (PostgREST tronque à 1000 **sans erreur**, et l'idempotence aurait
+masqué le manque) ; `relacher` rendait la tâche **armée** alors que
+`reprendreOrphelines` refuse délibérément de renvoyer dans le même doute ; la
+suspension à l'ouverture était un appel non attendu dont l'échec ne faisait
+qu'un `logger.error` — l'écran affichait « vous modifiez » alors qu'en base rien
+n'était suspendu.
+
+**9, 10, 11 — trois commentaires qui affirmaient faux.** L'en-tête disait « pas
+encore branchée dans api/cron.js » alors qu'elle l'était ; un autre promettait
+une alerte qui n'existe pas (elle est au lot 3, et les 15 minutes de grâce ne
+protègent donc rien aujourd'hui) ; un troisième justifiait l'ordre des passes
+par un effet **impossible par construction**. Aucun de ces trois ne rougirait
+jamais. C'est la même famille que « un nombre écrit à la main est lu comme une
+mesure ».
+
+### ⚠ Une TROISIÈME review, par exception décidée par Thierry (27 octobre 2026)
+
+CLAUDE.md dit : **une review par commit**, et une seule re-review quand la
+première trouve un constat de sécurité. Son vécu est documenté — neuf reviews
+enchaînées sur un même groupe d'endpoints, dont six n'ont plus trouvé que du
+durcissement, et **deux régressions introduites par les correctifs eux-mêmes**.
+La règle existe pour arrêter cette spirale.
+
+**Thierry a décidé une exception pour ce lot, et l'a encadrée** : portée limitée
+au diff des correctifs, **dernière** review quoi qu'elle trouve, motif écrit.
+
+**Le motif, en deux faits mesurés :**
+
+1. **Le chemin d'envoi par défaut n'était traversé par AUCUN test.** Tous les
+   tests de la passe injectent `opts.envoyer`, donc `envoyerParDefaut` n'était
+   jamais exécuté. Il passait le snapshot brut au provider — qui n'a pas d'`id`
+   — et **tous les envois différés réels ciblaient la réservation
+   « undefined »**. Le lot ne fonctionnait pas, et la suite était verte.
+2. **La seconde review a trouvé des défauts créés par les correctifs de la
+   première.** Le correctif du constat 1 (journaliser dans le cœur) introduisait
+   le constat 2 de la seconde : je passais `properties.id`, c'est-à-dire l'UUID,
+   là où le cœur attend la ref provider — donc la ligne ne matchait jamais la
+   garde anti-double-réponse, et **le défaut que le correctif devait fermer était
+   rouvert par la clé**.
+
+**Ce que ces deux faits disent ensemble** : sur ce lot, ni la suite de tests ni
+une relecture n'ont suffi à elles seules. Le vert ne couvrait pas le chemin réel,
+et les correctifs ont déplacé le défaut au lieu de le fermer. C'est exactement la
+situation que la règle des deux reviews ne prévoit pas — d'où l'exception, et
+d'où le fait qu'elle soit **encadrée et nommée**, plutôt que prise en silence.
+
+**Et la limite assumée de la portée** : « le diff des 10 correctifs » n'était pas
+isolable — ils vivent dans le même arbre de travail que le lot. La review a donc
+porté sur les **quatre fichiers de production** qu'ils touchent
+(`lib/guestflow/brouillons-dus.js`, `api/messages.js`, `api/agent-config.js`,
+`pages/messages.html`) : plus large que demandé, donc pas moins sûr.

@@ -104,6 +104,12 @@ Le chef de file ne re-review pas ce qu'on lui remet : il vérifie les cinq
    la **review** est passée, les **tests sont verts** (le compte attendu est
    zéro), les **fichiers touchés**, et ses **dépendances** — de quelle branche
    elle part, et laquelle doit passer avant elle.
+   ⚠ **Un lot qui touche l'ENVOI AU VOYAGEUR a droit à une review de plus**,
+   limitée au diff des correctifs, et c'est la dernière (exception décidée par
+   Thierry le 27 octobre 2026 ; motif et portée dans « UNE REVIEW PAR COMMIT »).
+   Le chef de file compte donc jusqu'à **trois** reviews sur un tel lot, et deux
+   partout ailleurs. Au-delà, il refuse : la spirale des neuf reviews est ce que
+   la règle existe pour fermer.
 2. **Le chef de file merge UN PAR UN, dans l'ordre des dépendances.** Entre deux
    merges : il vérifie le déploiement pour le **SHA complet** (voir la section
    dédiée plus bas) et **observe un cycle de cron**. Un cycle, c'est 5 minutes :
@@ -488,6 +494,30 @@ nom et la longueur.
   que du durcissement, chaque correctif ouvrant le prétexte d'une review de plus.
   Le coût dépassait le gain, et deux régressions ont été introduites par les
   correctifs eux-mêmes.
+
+**EXCEPTION, ET UNE SEULE (décision de Thierry, 27 octobre 2026) : tout lot qui
+touche l'ENVOI AU VOYAGEUR a droit à une review de plus, limitée au diff des
+correctifs, et c'est la dernière.** Ce qu'elle trouve se corrige sans nouvelle
+review, quoi qu'elle trouve.
+
+**Pourquoi cette exception existe, en deux faits mesurés** (chantier délai de
+réponse IA, lot 2) :
+- **Le chemin d'envoi par défaut n'était traversé par AUCUN test.** Tous les
+  tests de la passe injectaient le double d'envoi, donc `envoyerParDefaut` ne
+  s'exécutait jamais : il passait au provider une réservation sans `id`, et
+  **tous les envois différés ciblaient la réservation « undefined »**. Le lot ne
+  fonctionnait pas, et la suite était à 6637 verts.
+- **Chaque review a trouvé des défauts créés par les correctifs de la
+  précédente.** Le correctif « journaliser dans le cœur » écrivait l'UUID du
+  bien là où le cœur attend la réf provider — donc la garde anti-double-réponse
+  ne matchait plus, et le défaut que ce correctif fermait était rouvert par la
+  clé. La troisième review, elle, a trouvé qu'un clic sur « Ne pas envoyer »
+  effaçait la bulle **et laissait le message partir**.
+
+**La limite, et elle est le prix de l'exception** : elle ne vaut QUE pour
+l'envoi au voyageur, et la portée est le diff des correctifs — pas le lot. Une
+review de plus sur tout le lot rouvre la spirale que la règle ci-dessus existe
+pour fermer.
 
 ## RÈGLES TECHNIQUES DURES (non négociables)
 - api/grok.js : NE JAMAIS RENOMMER/SUPPRIMER (wrapper Haiku, legacy Lisa). Utilisé par agent-ai/index.html, messages.html, analyze.html, messagerie.html, extract-kb.js.
