@@ -1474,11 +1474,18 @@ body.men-cfg-ouvert { overflow: hidden; }
 
 /* Le sélecteur Mois / Année. */
 .seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 999px; background: var(--line); }
+/* ⚠ 44 px DE HAUT, ET C'EST LE CONSTAT 5 DE LA RECETTE DU 27 OCTOBRE 2026.
+   Thierry avait mesuré 30 px sur ce bouton : `padding: 5px 14px` sur du 14 px
+   donne environ 27 px de haut, bien sous les 44 que la charte du lot exige et
+   que `--control` porte. Le sélecteur avait alors été RETIRÉ faute d'un second
+   choix ; il revient avec la vue Année, donc sa cible doit être réglée, pas
+   seulement son utilité. */
 .seg__btn {
   appearance: none;
   border: 0;
   border-radius: 999px;
-  padding: 5px 14px;
+  min-height: var(--control);
+  padding: 0 16px;
   font: inherit;
   font-size: 14px;
   color: var(--muted);
@@ -1493,3 +1500,82 @@ body.men-cfg-ouvert { overflow: hidden; }
    rougit nulle part : il rend juste l'element illisible. */
 .seg__btn.is-on { background: var(--ink); color: var(--surface); font-weight: 600; }
 .seg__btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* ─── La vue ANNEE du bloc Revenus ────────────────────────────────────────
+   Forme reprise des maquettes `Accueil-revenus-annee-v5` (ordinateur) et
+   `-mobile-v5` (téléphone) : une période nommée, un grand total, les
+   pastilles de filtre, UNE courbe, puis le tableau par logement. */
+
+/* La période au-dessus du chiffre, et le total de N-1 à côté — SANS
+   pourcentage : voir le commentaire du balisage. `align-items: flex-end`
+   aligne le petit texte sur la ligne de base du grand nombre. */
+.rev-an-tete {
+  display: flex; align-items: flex-end; gap: 20px;
+  flex-wrap: wrap; margin: 16px 0 14px;
+}
+.rev-an-total {
+  display: block; font-size: 2rem; font-weight: 800;
+  letter-spacing: -0.03em; line-height: 1.1;
+}
+@media (min-width: 561px) {
+  .rev-an-total { font-size: 2.5rem; }
+}
+.rev-an-n1 { padding-bottom: 6px; display: flex; align-items: baseline; gap: 6px; }
+
+/* Les pastilles de filtre. ⚠ `min-height: var(--control)` — LA MAQUETTE DIT
+   36 px, ET ON NE LA SUIT PAS ICI : c'est le constat 5 de Thierry à la recette
+   du 27 octobre, une cible cliquable fait 44 px. La forme (pilule, bordure,
+   actif en plein) est celle de la maquette ; la hauteur est celle du dépôt. */
+.rev-an-filtres { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.rev-an-puce {
+  min-height: var(--control); padding: 0 14px;
+  border: 1px solid var(--line); border-radius: var(--radius-pill);
+  background: var(--surface); color: var(--ink);
+  font: inherit; font-size: .8125rem; font-weight: 600; cursor: pointer;
+}
+.rev-an-puce.is-on { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.rev-an-puce:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+/* La légende : trois marques, et ce sont les MARQUES qui portent le sens, pas
+   la couleur. Le plein et le pointillé se distinguent en noir et blanc. */
+.rev-an-legende {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  margin-bottom: 6px; font-size: .75rem; color: var(--muted);
+}
+.rev-an-legende > span { display: inline-flex; align-items: center; gap: 6px; }
+.rev-an-marque { width: 16px; flex: 0 0 16px; }
+.rev-an-marque--plein { height: 2.5px; background: var(--ink); }
+.rev-an-marque--pointille { height: 0; border-top: 2px dashed var(--ink); }
+.rev-an-marque--n1 { height: 2px; background: var(--muted); }
+
+/* ⚠ LE MOIS COURANT EN GRAS SUR L'AXE : il marque où s'arrête le réalisé.
+   Il double le passage au pointillé, il ne le remplace pas. */
+/* ⚠ SELECTEUR COMPOSE, ET CE N'EST PAS DU STYLE : `.cm-mois--fort` et
+   `.cm-mois` ont la MEME specificite (0,1,0), et `.cm-grad, .cm-mois` est
+   declaree APRES, plus bas dans ce fichier. La regle simple perdait donc son
+   `fill` en silence — le gras s'appliquait, la couleur non. C'est mot pour mot
+   la classe de defaut que CLAUDE.md decrit pour `[hidden]`, et aucun test ne
+   lit une valeur calculee. Mesure de la review du 28 octobre 2026. */
+.cm-mois.cm-mois--fort { font-weight: 700; fill: var(--ink); }
+
+/* Le tableau de l'année : trois colonnes de chiffres, largeurs fixes pour que
+   les montants s'alignent d'une ligne à l'autre (maquette : 120 px chacune). */
+.rev-tbl--annee .rev-tbl__num { width: 110px; }
+/* ⚠ PAS DE PREFIXE `.rev-tbl--annee` : la forme TELEPHONE de ce tableau est
+   une liste de cartes, hors du `<table>`, et elle reutilise le meme balisage
+   d'ecart. Prefixees, ces deux regles laissaient le telephone sans gras ni
+   couleur — « le mobile suit l'ordinateur ». */
+.rev-tbl__ecart { font-weight: 700; color: var(--ok); }
+.rev-tbl__ecart--bas { color: var(--ink); }
+
+/* ⚠ LA LISTE DE L'ANNEE EST LA FORME TELEPHONE DU TABLEAU, et elle ne porte
+   donc AUCUNE regle d'affichage : elle suit `.rev-liste` — cachee au-dessus de
+   561 px, en grille en dessous. Sa premiere version la forcait a
+   `display: grid`, heritage de la forme en cartes empilees : l'ordinateur
+   aurait affiche le tableau ET les cartes, l'un sous l'autre. La classe ne sert
+   plus qu'a distinguer les deux listes quand la vue Mois cache la sienne. */
+/* La courbe prend la largeur de sa carte et garde ses proportions. */
+.cm { display: block; width: 100%; height: auto; }
+.cm-grille { stroke: var(--line); stroke-width: 1; }
+.cm-axe { stroke: var(--line); stroke-width: 1.5; }
+.cm-grad, .cm-mois { font-size: 11px; fill: var(--muted); }
