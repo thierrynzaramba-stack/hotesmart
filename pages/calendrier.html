@@ -524,7 +524,17 @@ function repereYf (quoi, d) {
 
 const menuYf = { bien: null, bouton: null }
 function menuYfHtml (bien, d) {
-  const on = yfPilote(bien)
+  // ⚠ L'ETAT VIENT DE LA REPONSE DES QU'ELLE EST LA, PAS DE LA PAGE — constat
+  // de la re-review du 28 octobre 2026. `bien.pilote_tarifaire` date du
+  // CHARGEMENT du calendrier ; l'hote a pu activer le pilote dans un autre
+  // onglet entre-temps. Le menu annoncait alors « Prix manuels » et proposait
+  // « Activer le pilote automatique » sur un bien DEJA pilote — et ce clic ne
+  // menait nulle part, puisque la page d'arrivee refuse d'ouvrir un parcours
+  // sur un bien pilote. Un cul-de-sac que la valeur fraiche, deja en main,
+  // suffit a fermer.
+  // Au premier rendu (`d` absent), on n'a que la valeur de la page : c'est
+  // elle qui colore le bouton, et elle est juste dans le cas courant.
+  const on = d && d.pilote ? d.pilote === 'yieldflow' : yfPilote(bien)
   // La ligne ambre : bien pilote SEULEMENT, et masquee a 0 — comme elle est
   // masquee quand le compte est illisible (`null`). On n'ecrit jamais « 0 »
   // a la place d'une absence : un 0 de remplacement transforme une absence en
@@ -573,7 +583,20 @@ function placerMenuYf (bouton) {
   }
 }
 
-function fermerMenuYf () {
+// ⚠ LE FOCUS NE SE REPREND QUE SUR UNE FERMETURE DEMANDEE — constat de la
+// review du 28 octobre 2026. Le rendre a chaque chemin de fermeture faisait
+// deux degats, tous deux invisibles au developpeur :
+//   · l'hote ouvre le menu, puis clique une case de prix pour taper un
+//     montant. La case est `tabIndex = 0` et sa saisie vit dans un `keydown` :
+//     le clic dehors fermait le menu ET ramenait le focus sur le bouton, donc
+//     le chiffre tape ensuite tombait sur le bouton. Aucun prix saisi, et rien
+//     a l'ecran pour dire pourquoi.
+//   · un defilement ferme le menu : `focus()` ramenait alors le bandeau du
+//     bien dans la vue, donc DEFAISAIT le defilement de l'hote.
+// Escape et le second clic sur le bouton sont des fermetures DEMANDEES : la
+// main est au clavier, et lui rendre le focus est ce qu'on attend. Un clic
+// ailleurs, un defilement, un redimensionnement ne le sont pas.
+function fermerMenuYf ({ rendreLeFocus = false } = {}) {
   const menu = $('[data-bind="yf-menu"]')
   const voile = $('[data-bind="yf-voile"]')
   if (menu.hidden) return
@@ -581,7 +604,7 @@ function fermerMenuYf () {
   voile.hidden = true
   if (menuYf.bouton && document.contains(menuYf.bouton)) {
     menuYf.bouton.setAttribute('aria-expanded', 'false')
-    menuYf.bouton.focus()
+    if (rendreLeFocus) menuYf.bouton.focus()
   }
   menuYf.bien = null
   menuYf.bouton = null
@@ -591,8 +614,11 @@ async function ouvrirMenuYf (bienId, bouton) {
   const bien = etat.biens.find(b => b.id === bienId)
   if (!bien) return
   const dejaOuvert = menuYf.bien === bienId && !$('[data-bind="yf-menu"]').hidden
-  fermerMenuYf()
-  if (dejaOuvert) return   // second clic sur le meme bouton = on referme
+  // Second clic sur le MEME bouton : fermeture demandee, le focus lui revient.
+  // Clic sur un AUTRE bouton : on ferme le premier sans lui rendre le focus,
+  // sinon il reprendrait celui que le nouveau menu s'apprete a recevoir.
+  fermerMenuYf({ rendreLeFocus: dejaOuvert })
+  if (dejaOuvert) return
   const menu = $('[data-bind="yf-menu"]')
   const voile = $('[data-bind="yf-voile"]')
   menuYf.bien = bienId
@@ -617,7 +643,15 @@ async function ouvrirMenuYf (bienId, bouton) {
   }
   // L'hote a pu refermer, ou ouvrir un autre bien, pendant l'appel.
   if (menuYf.bien !== bienId || menu.hidden) return
+  // ⚠ LE FOCUS NE SURVIT PAS A `innerHTML` — constat de la re-review du
+  // 28 octobre 2026. Le noeud focalise est DETRUIT par le remplacement, et le
+  // focus retombe sur `body` : un hote au clavier ouvre le menu, les reperes
+  // arrivent cent millisecondes plus tard, et sa tabulation repart du haut du
+  // document alors que le menu est ouvert. On ne le rend que s'il etait
+  // DEDANS — sinon on le volerait a l'endroit ou l'hote l'a mis entre-temps.
+  const focusDedans = menu.contains(document.activeElement)
   menu.innerHTML = menuYfHtml(bien, faits)
+  if (focusDedans) menu.querySelector('.cal-yf-menu__entree')?.focus()
   placerMenuYf(bouton)
 }
 
@@ -628,14 +662,19 @@ function brancherYf (zone) {
 // Fermetures : le voile, la touche d'echappement, un clic dehors, et tout
 // defilement — le popover est place en coordonnees FIXES, donc il se
 // decrocherait de son bouton. Meme regle que le menu de l'angle de la bande.
-$('[data-bind="yf-voile"]').addEventListener('click', fermerMenuYf)
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fermerMenuYf() })
+$('[data-bind="yf-voile"]').addEventListener('click', () => fermerMenuYf())
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fermerMenuYf({ rendreLeFocus: true }) })
 document.addEventListener('click', (e) => {
   if (menuYf.bien && !e.target.closest('[data-bind="yf-menu"]') && !e.target.closest('[data-yf]')) fermerMenuYf()
 })
-window.addEventListener('scroll', fermerMenuYf, { passive: true })
-$('[data-bind="planning"]').addEventListener('scroll', fermerMenuYf, { passive: true })
-window.addEventListener('resize', fermerMenuYf)
+// ⚠ `() => fermerMenuYf()` ET NON `fermerMenuYf` : passee directement, la
+// fonction recevrait l'EVENEMENT comme premier argument, et `rendreLeFocus`
+// serait lu dessus. Il vaut `undefined` aujourd'hui, donc le defaut serait
+// inerte — et il cesserait de l'etre le jour ou un objet d'options porterait
+// un nom present sur un evenement.
+window.addEventListener('scroll', () => fermerMenuYf(), { passive: true })
+$('[data-bind="planning"]').addEventListener('scroll', () => fermerMenuYf(), { passive: true })
+window.addEventListener('resize', () => fermerMenuYf())
 
 // ─── L'ORDRE des biens : la liste etat.choisis, persistee et COMMUNE aux
 //     deux ecrans. On attrape un bloc par la POIGNEE de son bandeau ; au

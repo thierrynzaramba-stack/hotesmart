@@ -52,11 +52,24 @@ const INDEX = 'price_display_log_source_idx'
   // ─── 1. LE CONTRAT DE REQUETE, SUR DE VRAIS BIENS ───────────────────────
   // ⚠ UN SCRIPT QUI N'A RIEN LU DOIT ECHOUER. Zero bien, zero comptage : il
   // n'y a rien a conclure, et surtout pas « tout va bien ».
-  const { data: biens, error: eBiens } = await sb.from('properties')
-    .select('id, user_id, name, pilote_tarifaire').order('id')
-  if (eBiens) {
-    console.error('ECHEC : lecture des biens impossible —', eBiens.message)
-    process.exit(1)
+  // ⚠ PAGINE PAR CURSEUR — constat de la review du 28 octobre 2026.
+  // PostgREST rend 1000 lignes SANS erreur. Un verificateur qui lit sans
+  // borne annoncerait « contrat de requete tenu » sur un echantillon tronque
+  // en silence — dans un script dont tout l'objet est de REFUSER un faux
+  // vert. Inerte aujourd'hui (7 biens sur staging), mais c'est la seule
+  // lecture du lot qui croit avec le produit.
+  const PAGE = 500
+  const biens = []
+  for (let depuis = 0; ; depuis += PAGE) {
+    const { data, error } = await sb.from('properties')
+      .select('id, user_id, name, pilote_tarifaire').order('id')
+      .range(depuis, depuis + PAGE - 1)
+    if (error) {
+      console.error('ECHEC : lecture des biens impossible —', error.message)
+      process.exit(1)
+    }
+    biens.push(...(data || []))
+    if (!data || data.length < PAGE) break
   }
   if (!biens || !biens.length) {
     console.error('ECHEC : aucun bien sur cette base, le comptage n’a rien pu couvrir.')

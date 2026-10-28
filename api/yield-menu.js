@@ -91,7 +91,7 @@ module.exports = async (req, res) => {
   // pilote calendrier, la ligne ambre n'existe pas (spec §4), et une requete
   // dont on jettera le resultat est une requete de trop.
   const [marche, evenements, comparables, prixAjustes] = await Promise.all([
-    lireMarcheRelie(supabase, { propertyId: bien.id, userId: compte }),
+    lireMarcheRelie(supabase, { propertyId: bien.id }),
     compterEvenementsAVenir(supabase, { propertyId: bien.id, userId: compte, aujourdHui }),
     compterComparables(supabase, { propertyId: bien.id, userId: compte }),
     pilote === 'yieldflow'
@@ -101,11 +101,20 @@ module.exports = async (req, res) => {
 
   // ⚠ LE COMPTE DE REQUETES, PAS SEULEMENT LA DUREE (regle 7 du chargement
   // rapide) : la duree designe une reponse lente, le nombre designe la CAUSE.
-  // Il est EXACT ici — une requete par lecture, aucune pagination, aucune
-  // boucle — a la difference du plancher de `api/ecran/aujourdhui.js`.
+  //
+  // ⚠ ET C'EST UN PLANCHER, PAS UN COMPTE EXACT — constat de la re-review du
+  // 28 octobre 2026. Ce commentaire affirmait « il est EXACT ici », et c'etait
+  // faux : `requirePermission` fait ses propres lectures avant nous —
+  // `resoudreBien` TOUJOURS, et `chargerProfil` pour un membre delegue — donc
+  // une a deux requetes de plus, invisibles d'ici. Le chiffre servi au
+  // navigateur sous-estimait d'autant.
+  // Une affirmation d'exactitude ecrite a la main se lit comme une mesure et
+  // ne rougit jamais : on annonce donc ce qu'on sait compter, et on DIT ce
+  // qu'on ne compte pas. Meme forme que `api/ecran/aujourdhui.js`.
   const requetes = 4 + (pilote === 'yieldflow' ? 1 : 0)
   const total = Date.now() - t0
-  res.setHeader('Server-Timing', `db;dur=${total};desc="${requetes} req", total;dur=${total}`)
+  res.setHeader('Server-Timing',
+    `db;dur=${total};desc="${requetes} req + garde (plancher)", total;dur=${total}`)
 
   return res.status(200).json({
     bien: bien.id,

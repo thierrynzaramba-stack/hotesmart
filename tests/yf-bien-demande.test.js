@@ -186,9 +186,71 @@ test("LE TEST QUI COMPTE : ?activer=1 ouvre la CONFIRMATION, il n'ecrit rien", (
   assert.ok(iFaux > 0 && iFaux < iOuvre,
     'la demande doit etre consommee AVANT d ouvrir le parcours')
 
-  // Les deux refus : deja pilote, et bascule impossible.
-  assert.match(bloc, /if \(!yf && !bloque\)/,
-    'un bien deja pilote, ou dont la bascule est refusee, n ouvre aucun parcours')
+  // Les QUATRE refus. Le comportement est eprouve par le test suivant, qui
+  // execute le bloc ; ici on garde que la condition les porte tous les quatre,
+  // dans le meme `if` — les separer en deux laisserait un chemin ouvert.
+  assert.match(bloc, /if \(voulu && voulu === affiche && !yf && !bloque\)/,
+    'la condition doit exiger : un bien DESIGNE, qui soit celui AFFICHE, non pilote, et basculable')
+})
+
+test("LE TEST QUI COMPTE : ?activer=1 n'ouvre RIEN si le bien affiche n'est pas celui demande", async () => {
+  // ⚠ CONSTAT DE LA REVIEW DU 28 OCTOBRE 2026, ET C'EST LE PLUS GRAVE DU LOT.
+  // La garde de `chargerBiens` protege le SELECTEUR : un `?bien=` inconnu le
+  // laisse sur le PREMIER logement. Elle ne protegeait pas l'ACTIVATION, qui
+  // s'ouvrait quand meme — sur ce premier logement.
+  //
+  // Le scenario : l'hote clique « Activer le pilote automatique » dans le menu
+  // du calendrier pour « La bulle » ; entre-temps le bien a quitte le compte,
+  // ou l'URL est un favori perime. prix.html garde « Coeur de vie 23 »
+  // selectionne et ouvre la confirmation d'activation pour CELUI-LA. Un clic
+  // de plus — `basculerPilote` poste `el('yp-bien').value` — et c'est le
+  // mauvais logement qui passe sous YieldFlow, et qui se met a pousser des
+  // prix au canal.
+  //
+  // ON EXECUTE LE VRAI BLOC, extrait de la page par equilibre des accolades.
+  const src = sansCommentaires(lire('apps/yield/prix.html'))
+  const bloc = extraire(src, 'if (activerDemande) {')
+
+  const essai = ({ recherche, affiche, yf = false, bloque = false }) => {
+    const dom = new JSDOM(`<select id="yp-bien"><option value="${BIENS[0].id}">A</option><option value="${BIENS[1].id}">B</option></select>`,
+      { runScripts: 'outside-only', url: 'https://exemple.test/apps/yield/prix' + recherche })
+    const { window } = dom
+    window.document.getElementById('yp-bien').value = affiche
+    const vu = []
+    window.__ctx = {
+      el: (id) => window.document.getElementById(id),
+      confirmerBascule: (v) => vu.push(v),
+      yf, bloque
+    }
+    window.eval('const { el, confirmerBascule, yf, bloque } = window.__ctx\n'
+      + 'let activerDemande = true\n' + bloc + '\nwindow.__vu = activerDemande')
+    const consommee = window.__vu === false
+    window.close()
+    return { ouvertures: vu, consommee }
+  }
+
+  // Le cas normal : le bien demande EST celui affiche -> le parcours s'ouvre.
+  const bon = essai({ recherche: '?bien=' + BIENS[1].id + '&activer=1', affiche: BIENS[1].id })
+  assert.deepEqual(bon.ouvertures, ['yieldflow'], 'le parcours doit s ouvrir sur le bien demande')
+
+  // ⚠ LES QUATRE CAS QUI NE DOIVENT RIEN OUVRIR.
+  const refus = [
+    ['bien inconnu, le selecteur est reste sur le premier',
+      { recherche: '?bien=cccccccc-cccc-4ccc-8ccc-cccccccccccc&activer=1', affiche: BIENS[0].id }],
+    ['aucun bien designe',
+      { recherche: '?activer=1', affiche: BIENS[0].id }],
+    ['bien deja pilote',
+      { recherche: '?bien=' + BIENS[1].id + '&activer=1', affiche: BIENS[1].id, yf: true }],
+    ['bascule refusee par le serveur',
+      { recherche: '?bien=' + BIENS[1].id + '&activer=1', affiche: BIENS[1].id, bloque: true }]
+  ]
+  for (const [quoi, cas] of refus) {
+    const r = essai(cas)
+    assert.deepEqual(r.ouvertures, [], `${quoi} : un parcours d activation s est ouvert`)
+    // ⚠ ET LA DEMANDE EST CONSOMMEE DANS TOUS LES CAS : armee, elle
+    // s'ouvrirait plus tard sur le bien que l'hote choisirait au selecteur.
+    assert.equal(r.consommee, true, `${quoi} : la demande est restee armee`)
+  }
 })
 
 test("le parcours d'activation garde ses deux confirmations, quelle que soit la porte", () => {

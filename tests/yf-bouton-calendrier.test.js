@@ -358,6 +358,116 @@ test('la touche d echappement ferme, et un seul menu est ouvert a la fois', asyn
   b.fermer()
 })
 
+test("LE TEST QUI COMPTE : l'etat vient de la REPONSE, pas de la page chargee il y a une heure", async () => {
+  // ⚠ CONSTAT DE LA RE-REVIEW DU 28 OCTOBRE 2026. `bien.pilote_tarifaire` date
+  // du CHARGEMENT du calendrier. L'hote active le pilote dans un autre onglet,
+  // revient sur le calendrier reste ouvert, clique le bouton : le menu
+  // annoncait « Prix manuels » et proposait « Activer le pilote automatique »
+  // sur un bien DEJA pilote — et ce clic ne menait nulle part, puisque la page
+  // d'arrivee refuse d'ouvrir un parcours sur un bien pilote. Un cul-de-sac,
+  // alors que la valeur fraiche etait dans la reponse qu'on venait de lire.
+  const b = banc({ biens: [MANUEL], faits: FAITS({ pilote: 'yieldflow', prix_ajustes: 4 }) })
+  const m = await ouvrir(b, MANUEL)
+  assert.equal(m.querySelector('.cal-yf-menu__pastille').textContent, FR['cal.yf_state_on'],
+    'la pastille doit suivre la reponse du serveur')
+  assert.ok(m.querySelector('.cal-yf-menu__ajuste'),
+    'la ligne ambre existe des que le serveur dit que le bien est pilote')
+  assert.equal(m.querySelector('.cal-yf-menu__pied').textContent.trim(), FR['cal.yf_settings'],
+    'le pied ne doit plus proposer d activer un bien deja pilote')
+  assert.ok(!m.querySelector('.cal-yf-menu__pied a').getAttribute('href').includes('activer=1'),
+    'le lien menerait a un parcours que la page d arrivee refuserait d ouvrir')
+  b.fermer()
+
+  // Et l'inverse : le serveur dit « calendrier » sur un bien que la page
+  // croyait pilote.
+  const inverse = banc({ biens: [PILOTE], faits: FAITS({ pilote: 'calendrier', prix_ajustes: 9 }) })
+  const mi = await ouvrir(inverse, PILOTE)
+  assert.equal(mi.querySelector('.cal-yf-menu__pastille').textContent, FR['cal.yf_state_off'])
+  assert.equal(mi.querySelector('.cal-yf-menu__ajuste'), null,
+    'aucun prix ajuste a annoncer sur un bien que le serveur dit en prix manuels')
+  inverse.fermer()
+})
+
+test("LE TEST QUI COMPTE : le focus survit a l'arrivee des reperes", async () => {
+  // ⚠ CONSTAT DE LA RE-REVIEW DU 28 OCTOBRE 2026. Le menu s'ouvre tout de
+  // suite et focalise sa premiere entree ; les reperes arrivent cent
+  // millisecondes plus tard et REMPLACENT le contenu. Le noeud focalise est
+  // detruit, le focus retombe sur `body` : l'hote au clavier voit sa
+  // tabulation repartir du haut du document, menu ouvert, fleches inertes.
+  const b = banc()
+  const m = await ouvrir(b, PILOTE)
+  assert.ok(m.contains(b.doc.activeElement),
+    'apres l arrivee des reperes, le focus doit etre reste DANS le menu')
+  assert.ok(b.doc.activeElement.classList.contains('cal-yf-menu__entree'),
+    `le focus est sur ${b.doc.activeElement.tagName}.${b.doc.activeElement.className}`)
+  b.fermer()
+})
+
+test('la fenetre au singulier dit « 1 jour », jamais « 1 jours »', async () => {
+  // ⚠ CONSTAT DE LA RE-REVIEW : ces deux cles etaient restees en
+  // substitution simple quand les trois autres passaient au pluriel ICU. Et
+  // une fenetre d'UN jour est atteignable — le formulaire d'activation offre
+  // un `min="1"`. En espagnol, « 1 meses » pour une fenetre d'un mois.
+  for (const [fenetre, attendu] of [
+    [{ type: 'jours', valeur: 1 }, '1 jour'],
+    [{ type: 'jours', valeur: 120 }, '120 jours'],
+    [{ type: 'mois', valeur: 1 }, '1 mois'],
+    [{ type: 'mois', valeur: 6 }, '6 mois']
+  ]) {
+    const b = banc({ faits: FAITS({ fenetre }) })
+    const m = await ouvrir(b, PILOTE)
+    const r = m.querySelector('.cal-yf-menu__repere').textContent
+    assert.equal(r, attendu, `fenetre ${fenetre.valeur} ${fenetre.type}`)
+    b.fermer()
+  }
+})
+
+test('LE TEST QUI COMPTE : le focus ne revient au bouton que sur une fermeture DEMANDEE', async () => {
+  // ⚠ CONSTAT DE LA REVIEW DU 28 OCTOBRE 2026. Reprendre le focus a CHAQUE
+  // chemin de fermeture faisait deux degats, tous deux invisibles au
+  // developpeur et bien visibles chez l'hote :
+  //   · il ouvre le menu, puis clique une case de prix pour taper un montant.
+  //     La case est `tabIndex = 0` et sa saisie vit dans un `keydown` : le clic
+  //     dehors fermait le menu ET ramenait le focus sur le bouton, donc le
+  //     chiffre tombait sur le bouton. Aucun prix saisi, rien pour dire
+  //     pourquoi.
+  //   · un defilement ferme le menu : `focus()` ramenait le bandeau du bien
+  //     dans la vue, donc DEFAISAIT le defilement.
+  const b = banc()
+  const btn = bouton(b, PILOTE)
+
+  // 1. Clic DEHORS : le menu se ferme, et le focus NE revient PAS au bouton.
+  await ouvrir(b, PILOTE)
+  const cible = b.doc.querySelector('[data-bind="grilles"]') || b.doc.body
+  cible.dispatchEvent(new b.window.MouseEvent('click', { bubbles: true, view: b.window }))
+  assert.equal(menu(b).hidden, true, 'un clic dehors doit fermer le menu')
+  assert.notEqual(b.doc.activeElement, btn,
+    'le focus est revenu au bouton apres un clic ailleurs : la frappe suivante y tombera')
+
+  // 2. DEFILEMENT : meme regle.
+  await ouvrir(b, PILOTE)
+  b.window.dispatchEvent(new b.window.Event('scroll'))
+  assert.equal(menu(b).hidden, true, 'un defilement doit fermer le menu')
+  assert.notEqual(b.doc.activeElement, btn,
+    'le focus est revenu au bouton apres un defilement : il defait le geste de l hote')
+
+  // 3. ECHAPPEMENT : fermeture DEMANDEE, le focus revient — c'est ce qu'on
+  //    attend quand la main est au clavier.
+  await ouvrir(b, PILOTE)
+  b.doc.dispatchEvent(new b.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  assert.equal(menu(b).hidden, true)
+  assert.equal(b.doc.activeElement, btn,
+    'apres Echappement, le focus doit revenir au bouton qui a ouvert le menu')
+
+  // 4. SECOND CLIC sur le meme bouton : fermeture demandee aussi.
+  await ouvrir(b, PILOTE)
+  b.doc.body.focus()
+  await ouvrir(b, PILOTE)
+  assert.equal(menu(b).hidden, true)
+  assert.equal(b.doc.activeElement, btn, 'un second clic sur le bouton lui rend le focus')
+  b.fermer()
+})
+
 test('le voile n existe qu au telephone', async () => {
   const grand = banc({ large: true })
   await ouvrir(grand, PILOTE)

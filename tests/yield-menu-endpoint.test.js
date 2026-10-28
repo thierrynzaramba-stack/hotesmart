@@ -210,13 +210,27 @@ test('LE TEST QUI COMPTE : les trois comptages ne rapatrient RIEN (head: true)',
 test('LE TEST QUI COMPTE : chaque lecture est cloisonnee par le COMPTE et par le bien', async () => {
   const vues = doubles({ bien: PILOTE, lignes: PLEIN })
   await appeler()
-  for (const table of ['price_display_log', 'yield_events', 'comparables_retenus', 'marche_biens']) {
+  // Les trois tables que NOUS ecrivons portent le compte ET le bien.
+  for (const table of ['price_display_log', 'yield_events', 'comparables_retenus']) {
     const q = vues.find(v => v.table === table)
     assert.equal(q.filtres.user_id, COMPTE, `${table} : pas de filtre de compte`)
     assert.equal(q.filtres.property_id, BIEN, `${table} : pas de filtre de bien`)
   }
+  // ⚠ `marche_biens` SE LIT SUR LE BIEN SEUL, et c'est un choix, pas un oubli
+  // (review du 28 octobre 2026). Les QUATRE lecteurs existants de cette table
+  // font pareil ; son `user_id` est une copie figee a la liaison, et filtrer
+  // dessus ferait taire ce menu le jour ou elle divergerait, pendant que « Le
+  // marche global » afficherait toujours le marche.
+  const marche = vues.find(v => v.table === 'marche_biens')
+  assert.equal(marche.filtres.property_id, BIEN, 'marche_biens : pas de filtre de bien')
+  assert.equal(marche.filtres.user_id, undefined,
+    'marche_biens ne doit pas filtrer sur user_id : les quatre autres lecteurs ne le font pas')
+  // Le cloisonnement ne repose donc PAS sur ce filtre, mais sur le bien
+  // lui-meme : il est lu sur `id` ET `user_id`, et un bien d'un autre compte
+  // rend 404 avant toute autre lecture.
   const bien = vues.find(v => v.table === 'properties')
   assert.equal(bien.filtres.user_id, COMPTE, 'le bien lui-meme se lit sur le compte')
+  assert.equal(bien.filtres.id, BIEN, 'et sur son identifiant')
 })
 
 test('LE TEST QUI COMPTE : le comptage du moteur porte la SOURCE et SEPT jours', async () => {
@@ -292,14 +306,28 @@ test('LE TEST QUI COMPTE : chaque bien lit SON marche, ses evenements, ses compa
   assert.notEqual(attendu[BIEN].comparables, attendu[AUTRE].comparables)
 })
 
-test('le nombre de requetes annonce dans Server-Timing est le vrai', async () => {
-  for (const [bien, attendu] of [[PILOTE, 5], [MANUEL, 4]]) {
+test('Server-Timing annonce un PLANCHER, et il le dit', async () => {
+  // ⚠ CE TEST A CHANGE DE SENS A LA RE-REVIEW DU 28 OCTOBRE 2026, et c'est le
+  // point. Il affirmait que le compte etait EXACT, en filtrant `__garde` —
+  // c'est-a-dire en excluant les requetes de `requirePermission` des deux
+  // cotes de l'egalite. Il etait donc d'accord avec le CODE, pas avec la
+  // requete reelle : la garde fait une a deux lectures de plus (resoudreBien
+  // toujours, chargerProfil pour un membre delegue), et le navigateur
+  // recevait un nombre sous-estime.
+  // Un test qui exclut la meme chose des deux cotes ne mesure rien.
+  for (const [bien, lectures] of [[PILOTE, 5], [MANUEL, 4]]) {
     const vues = doubles({ bien, lignes: PLEIN })
     const res = await appeler()
-    const reelles = vues.filter(v => v.table !== '__garde').length
-    assert.equal(reelles, attendu, `${bien.pilote_tarifaire} : ${reelles} requetes au lieu de ${attendu}`)
-    assert.match(res.entetes['server-timing'], new RegExp(`desc="${attendu} req"`),
-      `Server-Timing doit annoncer ${attendu}`)
+    const propres = vues.filter(v => v.table !== '__garde').length
+    assert.equal(propres, lectures, `${bien.pilote_tarifaire} : ${propres} lectures au lieu de ${lectures}`)
+    // Le nombre annonce est celui des lectures du handler...
+    assert.match(res.entetes['server-timing'], new RegExp(`desc="${lectures} req`),
+      `Server-Timing doit annoncer ${lectures}`)
+    // ...et l'en-tete DIT qu'il ne compte pas tout.
+    assert.match(res.entetes['server-timing'], /plancher/,
+      'un compte qui exclut la garde doit s annoncer comme un plancher, pas comme un total')
+    assert.match(res.entetes['server-timing'], /garde/,
+      'et il doit nommer ce qu il ne compte pas')
   }
 })
 
