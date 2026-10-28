@@ -2269,8 +2269,11 @@ function renderAnnee () {
     // contre un fait invente ; la clef revient, avec un texte qui nomme la
     // fenetre.
     const existeEnN1 = Object.keys(pm).some(k => k.startsWith(`${an - 1}-`))
+    // ⚠ MEME DECISION ICI : 0 % en gris neutre. Les deux tableaux de ce bloc
+    // se lisent l'un sous l'autre ; un zero vert dans l'un et gris dans
+    // l'autre serait une difference que rien ne justifie.
     const ecart = pct !== null
-      ? `<span class="rev-tbl__ecart${pct < 0 ? ' rev-tbl__ecart--bas' : ''}">`
+      ? `<span class="rev-tbl__ecart${pct < 0 ? ' rev-tbl__ecart--bas' : (pct === 0 ? ' rev-tbl__ecart--nul' : '')}">`
         + `${esc((pct > 0 ? '+' : '') + pct + ' %')}</span>`
       : `<span class="muted">${esc(existeEnN1
         ? t('revenue.sans_comparaison')
@@ -2340,6 +2343,24 @@ function renderAnnee () {
       ? t('revenue.annee_rad_col_n1', { date: dateDuJour(String(rad.pivot), { day: 'numeric', month: 'short' }) })
       : ''
 
+    // ⚠ UN MOIS PARTIELLEMENT MESURE LE DIT DANS SON COMPTE DE SEJOURS —
+    // MAIS SEULEMENT DANS LA COLONNE DU JOUR, et c'est une restriction, pas un
+    // oubli : l'agregat « reserve a date » ne rend AUCUN `sans_montant` (la RPC
+    // compte par `count(*)` et somme par `sum()`, qui ignore les NULL), donc
+    // `sejoursDuMois` est inerte sur `l.lan`. Dette 123 du registre.
+    // « 480 € · 3 sejours » avec deux sejours sans montant presente le total de
+    // UN sejour comme celui de trois : le chiffre est juste, la phrase est
+    // fausse. `refuseTout` ne mord pas ici — le mois garde son total partiel,
+    // c'est une verite INCOMPLETE — donc c'est le compte qui doit le dire
+    // (recette de Thierry du 28 octobre 2026).
+    const sejoursDuMois = (c) => {
+      const n = Number((c && c.sejours) || 0)
+      const k = Number((c && c.sans_montant) || 0)
+      return k > 0
+        ? t('revenue.annee_rad_sejours_partiel', { n: Math.max(0, n - k), k })
+        : t('revenue.stays', { n })
+    }
+
     const cellules = (l) => {
       // ⚠ TROIS ETATS, COMME PARTOUT DANS CE BLOC, et « 0 € » n'en est qu'un.
       // Ma premiere version lisait `total_cents` brut : un mois a venir ne
@@ -2357,7 +2378,7 @@ function renderAnnee () {
         ? `<span class="muted">${esc(TIRET)}</span>`
         : (refuseAuj
             ? `<span class="muted">${esc(t('revenue.unavailable'))}</span>`
-            : `${esc(monnaie(Math.round(nAuj / 100), devise))} <span class="muted">${esc(t('revenue.stays', { n: Number(l.auj.sejours || 0) }))}</span>`)
+            : `${esc(monnaie(Math.round(nAuj / 100), devise))} <span class="muted">${esc(sejoursDuMois(l.auj))}</span>`)
       // ⚠ SOUS LE SEUIL, LA LIGNE LE DIT A LA PLACE DU CHIFFRE. L'endpoint ne
       // rend meme pas le montant : il ne PEUT pas etre affiche par accident.
       // ⚠ `!l.lan` DIT BIEN LE SEUIL, ET C'EST VRAI : l'agregat ne rend que
@@ -2367,6 +2388,13 @@ function renderAnnee () {
       // haut, par un tableau qui se tait.
       if (!l.lan || l.lan.sous_seuil) {
         return {
+          // ⚠ `sousSeuil` EXISTE POUR LA CARTE, PAS POUR LE TABLEAU. Au
+          // telephone, la phrase etait precedee de « l'an dernier a la meme
+          // date : » et suivie d'un « — » : trois formulations du meme refus
+          // sur une ligne (recette de Thierry du 28 octobre 2026). La carte
+          // rend la phrase SEULE ; le tableau, lui, a ses en-tetes de colonne
+          // pour dire de quoi on parle.
+          sousSeuil: true,
           n1: `<span class="muted">${esc(t('revenue.annee_rad_sous_seuil_court'))}</span>`,
           ecart: '<span class="muted">—</span>', montantAuj
         }
@@ -2375,7 +2403,11 @@ function renderAnnee () {
       const pct = ecartPourcent(nAuj, nLan)
       // ⚠ LE SIGNE PORTE LE SENS AUTANT QUE LA COULEUR : un hote qui ne
       // distingue pas le vert du rouge lit « +12 % » et « -68 % » (le trait d'union que rend `String(-68)`, pas un signe moins typographique).
-      const classe = pct === null ? '' : (pct < 0 ? ' rev-tbl__ecart--retard' : '')
+      // ⚠ ZERO N'EST NI UNE AVANCE NI UN RETARD, donc ni vert ni rouge : gris
+      // neutre (decision de Thierry du 28 octobre 2026). Le vert s'etendait
+      // jusqu'a 0 % par le seul fait que la condition testait `< 0`.
+      const classe = pct === null ? ''
+        : (pct < 0 ? ' rev-tbl__ecart--retard' : (pct === 0 ? ' rev-tbl__ecart--nul' : ''))
       return {
         montantAuj,
         n1: `${esc(monnaie(Math.round(nLan / 100), devise))} <span class="muted">${esc(t('revenue.stays', { n: Number(l.lan.sejours || 0) }))}</span>`,
@@ -2400,7 +2432,9 @@ function renderAnnee () {
           <span class="rev-carte__bien"><span class="small">${esc(moisSeul(l.cleM))}</span></span>
           <span class="rev-carte__total">${c.montantAuj}</span>
         </div>
-        <p class="caption muted">${esc(t('revenue.annee_rad_mobile_n1'))} ${c.n1} ${c.ecart}</p>
+        <p class="caption muted">${c.sousSeuil
+          ? esc(t('revenue.annee_rad_sous_seuil_court'))
+          : `${esc(t('revenue.annee_rad_mobile_n1'))} ${c.n1} ${c.ecart}`}</p>
       </li>`
     }).join('')
   }

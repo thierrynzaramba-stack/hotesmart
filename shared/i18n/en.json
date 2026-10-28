@@ -745,6 +745,7 @@
   "revenue.annee_rad_sous_seuil": "{n, plural, one {# month is not compared} other {# months are not compared}}: fewer than {seuil} sales at that date last year, not enough to compare.",
   "revenue.annee_rad_indispo": "Last year’s comparison could not be computed.",
   "revenue.annee_rad_sous_seuil_court": "not enough sales at that date last year",
+  "revenue.annee_rad_sejours_partiel": "{n, plural, one {# stay} other {# stays}} (+ {k} with no amount)",
   "revenue.annee_rad_titre": "Booked to date",
   "revenue.annee_reserve": "already booked",
   "revenue.annee_sans_ligne": "{n, plural, one {# property with no stay over these two years} other {# properties with no stay over these two years}}: {noms}",

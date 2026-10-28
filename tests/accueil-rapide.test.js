@@ -3179,3 +3179,114 @@ test("LE TEST QUI COMPTE : sans agregat, le tableau SE TAIT et la panne se NOMME
   assert.match(res.textContent, /revenue\.annee_rad_indispo/,
     `la reserve dit « ${res.textContent} » au lieu de nommer la panne`)
 })
+
+// ─── LES TROIS CONSTATS DE LA RECETTE DU 28 OCTOBRE 2026 ───────────────────
+
+test("LE TEST QUI COMPTE : au telephone, le refus du seuil se dit UNE FOIS", () => {
+  // ⚠ CONSTAT DE RECETTE. La carte rendait « l'an dernier a la meme date :
+  // pas assez de ventes a cette date l'an dernier — » : trois formulations du
+  // meme refus sur une ligne. Le tableau, lui, a ses en-tetes de colonne pour
+  // dire de quoi on parle ; la carte n'en a pas, donc elle porte la phrase
+  // SEULE.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { sejours: 2, sous_seuil: true } })
+    }
+  })
+  const c = cartesDuTableauRad(p)
+  assert.strictEqual(c.length, 1, `${c.length} carte(s) au lieu d une`)
+  const phrase = sansBalises(c[0].html.replace(/[\s\S]*<p[^>]*>/, '').replace(/<\/p>[\s\S]*/, ''))
+  assert.strictEqual(phrase, 'revenue.annee_rad_sous_seuil_court',
+    `la carte dit « ${phrase} » : le refus y est formule plusieurs fois`)
+
+  // ⚠ ET LE CAS NORMAL GARDE SES TROIS MORCEAUX. Constat de la review : le
+  // test ne gardait que la branche du seuil, et trois mutations sur la MEME
+  // ligne — retirer le libelle, le montant N-1, l'ecart — laissaient la suite
+  // a 6599 verts. C'est ainsi que le libelle double est arrive jusqu'a la
+  // recette : la carte n'etait lue par aucune assertion de contenu.
+  const n = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(150000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 100000, sejours: 7 } })
+    }
+  })
+  const carte = cartesDuTableauRad(n)[0]
+  const bas = sansBalises(carte.html.replace(/[\s\S]*<p[^>]*>/, '').replace(/<\/p>[\s\S]*/, ''))
+  assert.match(bas, /^revenue\.annee_rad_mobile_n1\b/,
+    `la carte a perdu son libelle : « ${bas} »`)
+  assert.deepStrictEqual(montantEtSejours(bas.replace(/^revenue\.annee_rad_mobile_n1\s*/, '').replace(/\s*\+50 %$/, '')),
+    { euros: 1000, sejours: 7 }, `la carte a perdu le montant N-1 : « ${bas} »`)
+  assert.match(bas, /\+50 %$/, `la carte a perdu son ecart : « ${bas} »`)
+})
+
+test("LE TEST QUI COMPTE : un mois PARTIELLEMENT mesure dit ce que son total couvre", () => {
+  // ⚠ CONSTAT DE RECETTE : « 480 € · 3 sejours » avec deux sejours sans
+  // montant presente le total de UN sejour comme celui de trois. Le chiffre
+  // est juste, la phrase est fausse. `refuseTout` ne mord pas — le mois garde
+  // son total partiel, c'est une verite INCOMPLETE — donc c'est le COMPTE qui
+  // doit le dire.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: {
+        '2026-09': recuDe(30000),
+        '2026-11': { sejours: 3, total_cents: 48000, recu_cents: 0, a_venir_cents: 48000, bruts: 0, sans_montant: 2 }
+      },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 48000 } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.match(l.textes[0], /revenue\.annee_rad_sejours_partiel\{n=1,k=2\}/,
+    `la colonne du jour dit « ${l.textes[0]} » au lieu de 1 sejour et 2 sans montant`)
+  assert.strictEqual(/revenue\.stays/.test(l.textes[0]), false,
+    `le compte simple subsiste : « ${l.textes[0]} »`)
+  assert.strictEqual(euros(l.textes[0].replace(/revenue\.[\s\S]*/, '')), 480,
+    `le montant a change : « ${l.textes[0]} »`)
+  // Et un mois ENTIEREMENT mesure garde le compte simple.
+  const sain = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': { ...aVenirDe(48000), sejours: 3 } },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 48000 } })
+    }
+  })
+  assert.match(lignesDuTableauRad(sain)[0].textes[0], /revenue\.stays\{n=3\}/,
+    'un mois sans sejour non mesure a perdu son compte simple')
+})
+
+test("LE TEST QUI COMPTE : « 0 % » est GRIS NEUTRE dans les DEUX tableaux", () => {
+  // ⚠ CONSTAT DE RECETTE : le vert s'etendait jusqu'a 0 % par le seul fait que
+  // la condition testait `< 0`. Zero n'est ni une avance ni un retard. Et les
+  // deux tableaux du bloc se lisent l'un sous l'autre : un zero vert dans l'un
+  // et gris dans l'autre serait une difference que rien ne justifie.
+  const egal = { sejours: 9, total_cents: 48000, sans_date_annulation: 0, non_fiables: 0, sous_seuil: false, seuil: 5 }
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    biens: [{ id: 'uuid-1', name: 'A' }],
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      // Le bien fait le MEME chiffre sur la fenetre comparee des deux annees :
+      // l'ecart du tableau des biens vaut donc 0 % lui aussi.
+      par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2025-09': recuDe(30000) } },
+      hors_biens: {},
+      reserve_a_date: { ...rad({}), mois: { '2025-11': egal } }
+    }
+  })
+  const rad_ = lignesDuTableauRad(p)[0]
+  assert.match(rad_.textes[2], /^0 %$/, `l ecart « reserve a date » vaut « ${rad_.textes[2]} »`)
+  assert.match(rad_.cellules[2], /rev-tbl__ecart--nul/,
+    'le 0 % de « reserve a date » n est pas neutre : il reste vert')
+  assert.strictEqual(/--retard/.test(rad_.cellules[2]), false, 'le 0 % est signale en retard')
+
+  const biens = String(p.cache('[data-list="revenue-annee-lignes"]').innerHTML)
+  const cel = (biens.match(/<span class="rev-tbl__ecart[^"]*">0 %<\/span>/) || [''])[0]
+  assert.notStrictEqual(cel, '', `aucune cellule a « 0 % » dans le tableau des biens : ${biens.slice(0, 300)}`)
+  assert.match(cel, /rev-tbl__ecart--nul/, 'le 0 % du tableau des biens reste vert')
+})
