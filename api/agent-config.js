@@ -47,7 +47,7 @@ const supabase = createClient(
 // en avait sa propre copie. Une derive entre les deux rendrait « hors contrat »
 // a la lecture une valeur que l'endpoint a acceptee et stockee.
 const { minutesValides, formeExploitable } = require('../lib/guestflow/delais-contrat');
-const { appliquerDelaiAuxBrouillons } = require('../lib/guestflow/appliquer-delai');
+const { appliquerDelaiAuxBrouillons, bilanVide } = require('../lib/guestflow/appliquer-delai');
 const HEURE = /^([01][0-9]|2[0-3]):[0-5][0-9]$/
 
 /**
@@ -262,7 +262,16 @@ module.exports = async (req, res) => {
             userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now(), apercu: true
           });
         } catch (e) {
-          apercu = { ok: false, motif: 'exception', erreur: String(e && e.message || e) };
+          apercu = bilanVide({ motif: 'exception', erreur: String(e && e.message || e) });
+        }
+        // ⚠ UN APERCU EN ECHEC BLOQUE L'HOTE, DONC IL DOIT LAISSER UNE TRACE
+        // COTE SERVEUR (constat 3 de la revue). `logger.error` de l'ecran n'ecrit
+        // que la console du NAVIGATEUR : `lecture_impossible`,
+        // `lecture_illisible` et `trop_de_brouillons` n'existaient dans aucun
+        // log Vercel, et ce sont precisement les etats qui empechent
+        // l'enregistrement. Symetrique de la ligne du chemin reel.
+        if (!apercu.ok) {
+          console.error('[agent-config] delais -> apercu:', apercu.motif, apercu.erreur || '');
         }
         return res.status(200).json({ ok: true, delais_ref: ref, apercu });
       }
@@ -436,18 +445,35 @@ module.exports = async (req, res) => {
       // ecrit mais que la propagation echoue, on NE PEUT PAS rendre un 500 — le
       // reglage, lui, est bien enregistre, et un 500 ferait croire l'inverse.
       // L'ecran recoit donc `brouillons` et le DIT : « Enregistre en partie ».
+      // ⚠ ET LA PROPAGATION PEUT ETRE REFUSEE SANS PERDRE LE RESTE DU PANNEAU
+      // (constat 2 de la revue, et c'etait un vrai defaut de mon correctif).
+      // `delais` porte TROIS reglages — le delai de reponse, l'echeance d'alerte
+      // et la sourdine. Mon premier jet, quand l'hote refusait de liberer son
+      // arriere, n'envoyait PAS le POST du tout : sa plage de sourdine etait
+      // perdue, et la note ne parlait que « des delais ». Il n'avait aucun moyen
+      // d'enregistrer une sourdine sans accepter de liberer l'arriere.
+      // « Ne pas savoir combien n'autorise pas a le faire » vaut pour
+      // `reponse_ia` ; je l'avais applique au bloc entier.
+      //
+      // Donc : `propager: false` enregistre le blob et SAUTE la reprise des
+      // brouillons. Les deja-en-attente gardent leur echeance — c'est le
+      // comportement d'avant ce lot, et c'est exactement ce que l'hote a choisi
+      // en refusant — tandis que le reglage gouverne les brouillons A VENIR.
       let brouillons = null;
       if (cible === 'delais') {
-        try {
-          brouillons = await appliquerDelaiAuxBrouillons(supabase, {
-            userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now()
-          });
-        } catch (e) {
-          brouillons = { ok: false, motif: 'exception', erreur: String(e && e.message || e),
-            desarmes: 0, rearmes: 0, inchanges: 0, sans_creation: 0 };
-        }
-        if (!brouillons.ok) {
-          console.error('[agent-config] delais -> brouillons:', brouillons.motif, brouillons.erreur || '');
+        if ((req.body || {}).propager === false) {
+          brouillons = bilanVide({ ok: true, motif: 'propagation_non_demandee' });
+        } else {
+          try {
+            brouillons = await appliquerDelaiAuxBrouillons(supabase, {
+              userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now()
+            });
+          } catch (e) {
+            brouillons = bilanVide({ motif: 'exception', erreur: String(e && e.message || e) });
+          }
+          if (!brouillons.ok) {
+            console.error('[agent-config] delais -> brouillons:', brouillons.motif, brouillons.erreur || '');
+          }
         }
       }
 

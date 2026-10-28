@@ -584,7 +584,7 @@
   "messages.code_sent": "código enviado",
   "messages.deja_partie": "Esa respuesta acaba de salir.",
   "messages.delai_aide": "En el siguiente paso, comprobado cada 5 minutos.",
-  "messages.delai_arriere_confirm": "Propuestas ya en espera que saldrán en el próximo paso, en menos de 5 minutos: {n}. Son más antiguas que el plazo elegido. ¿Continuar?",
+  "messages.delai_arriere_confirm": "Propuestas ya en espera que podrían salir en el próximo paso: {n}. Son más antiguas que el plazo elegido. ¿Continuar?",
   "messages.delai_autre": "Otro…",
   "messages.delai_h": "horas",
   "messages.delai_manuel": "Valido cada respuesta",

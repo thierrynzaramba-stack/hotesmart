@@ -584,7 +584,7 @@
   "messages.code_sent": "code envoyé",
   "messages.deja_partie": "Cette réponse vient de partir.",
   "messages.delai_aide": "Au premier passage suivant, vérifié toutes les 5 minutes.",
-  "messages.delai_arriere_confirm": "Propositions déjà en attente qui partiront au prochain passage, dans les 5 minutes : {n}. Elles sont plus vieilles que le délai choisi. Continuer ?",
+  "messages.delai_arriere_confirm": "Propositions déjà en attente qui pourraient partir dès le prochain passage : {n}. Elles sont plus vieilles que le délai choisi. Continuer ?",
   "messages.delai_autre": "Autre…",
   "messages.delai_h": "heures",
   "messages.delai_manuel": "Je valide chaque réponse",

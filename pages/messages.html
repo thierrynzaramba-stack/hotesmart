@@ -1919,47 +1919,74 @@ async function enregistrerPanneau (corps, ref) {
     // soit N. Un hote qui choisit 24 h POUR ETRE PRUDENT verrait partir tout son
     // arriere de plus de 24 h, et la confirmation lui a promis « apres le delai
     // choisi ». Ici la cible est le telephone d'un voyageur : on compte d'abord.
-    let feuVert = true
-    if (chargeDelais.reponse_ia !== null) {
+    // ⚠ REFUSER NE DOIT PAS COUTER LE RESTE DU PANNEAU (constat 2 de la
+    // derniere revue, et c'etait un vrai defaut de mon correctif). `delais`
+    // porte TROIS reglages : le delai de reponse, l'echeance d'alerte et la
+    // sourdine. Mon premier jet n'envoyait pas le POST du tout quand l'hote
+    // refusait de liberer son arriere — sa plage de sourdine etait perdue, et
+    // il n'avait aucun moyen de l'enregistrer sans accepter la liberation.
+    // On enregistre donc toujours, avec `propager: false` : les brouillons deja
+    // en attente gardent leur echeance (le comportement d'avant ce lot, et
+    // exactement ce que l'hote a choisi), et le reglage gouverne les suivants.
+    let propager = true
+    // Sur un bien qu'on SAIT en pause, aucune question : rien ne peut partir
+    // (`brouillons-dus.js` refuse des l'entree), donc annoncer un envoi serait
+    // le mensonge que ce chantier passe son temps a corriger. Si la carte des
+    // pauses n'est pas fiable, on demande — on ne suppose pas l'absence.
+    const enPauseSure = pausesFiables() && etat.pauses[String(ref)] === true
+    if (chargeDelais.reponse_ia !== null && !enPauseSure) {
       const a = await appel('/api/agent-config',
         { delais_ref: ref, apercu: true, delais: chargeDelais })
-      const ap = a ? a.apercu : undefined
+      // ⚠ UN MARQUEUR POSITIF, PAS UNE ABSENCE (constat 5). `appel()` fait
+      // `r.json().catch(() => ({}))` : TOUT 200 dont le corps n'est pas du JSON
+      // — page HTML d'un proxy, d'un edge, d'une protection de deploiement —
+      // arrivait ici comme « endpoint plus ancien », donc feu vert sans
+      // garde-fou. Le seul filet de ce constat se refermait sur une reponse
+      // malformee.
+      const aRepondu = !!a && typeof a === 'object'
+      const ap = aRepondu && 'apercu' in a ? a.apercu : undefined
       if (ap === undefined) {
-        // Endpoint plus ancien que l'ecran (fenetre de deploiement) : il a
-        // IGNORE `apercu`, donc il vient d'enregistrer pour de vrai. Il n'y a
-        // plus rien a confirmer, et le POST qui suit est idempotent.
-        logger.error('Messages', 'apercu brouillons', 'endpoint sans apercu')
+        if (aRepondu && a.delais_ref === ref) {
+          // Endpoint plus ancien que l'ecran (fenetre de deploiement) : il a
+          // IGNORE `apercu`, donc il vient d'enregistrer — et il n'a aucune
+          // propagation, donc rien ne part. Le POST qui suit est idempotent.
+          logger.error('Messages', 'apercu brouillons', 'endpoint sans apercu')
+        } else {
+          logger.error('Messages', 'apercu brouillons', 'reponse illisible')
+          propager = false
+        }
       } else if (!ap || ap.ok !== true) {
-        // ⚠ NE PAS SAVOIR COMBIEN PARTIRAIENT N'AUTORISE PAS A LE FAIRE. C'est
-        // la discipline de 4.6.6 : sans le nombre, on retablit l'etat d'avant.
+        // ⚠ NE PAS SAVOIR COMBIEN POURRAIENT PARTIR N'AUTORISE PAS A LES
+        // LIBERER. C'est la discipline de 4.6.6 — mais elle ne vaut que pour la
+        // LIBERATION, pas pour la sourdine : le reglage, lui, s'enregistre.
         logger.error('Messages', 'apercu brouillons', (ap && ap.motif) || 'apercu absent')
-        feuVert = false
-        echoues.push(t('messages.partie_delais'))
+        propager = false
       } else if (ap.echues > 0
         && !window.confirm(t('messages.delai_arriere_confirm', { n: ap.echues }))) {
-        feuVert = false
-        echoues.push(t('messages.partie_delais'))
+        propager = false
       }
     }
 
-    if (feuVert) {
-      const r = await appel('/api/agent-config', { delais_ref: ref, delais: chargeDelais })
-      const b = r && r.brouillons
-      if (!b || b.ok !== true) {
-        logger.error('Messages', 'brouillons en attente', (b && b.motif) || 'bilan absent')
-        echoues.push(t('messages.partie_brouillons'))
-      } else if (Number(b.deja_prises) > 0) {
-        echoues.push(t('messages.partie_deja_prises', { n: Number(b.deja_prises) }))
-      }
-      // ⚠ UN BILAN ABSENT NE VAUT PAS « RIEN N'A BOUGE » (constat 4). Le chemin
-      // d'exception de l'endpoint remet les compteurs a zero alors que des
-      // `send_after` ont pu etre reecrits avant la coupure : on relit dans le
-      // doute, parce qu'un fil qui garde l'echeance d'avant est le defaut meme
-      // que ce lot ferme.
-      brouillonsRepris = (!b || b.ok !== true)
-        ? 1
-        : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0)
+    const r = await appel('/api/agent-config',
+      { delais_ref: ref, delais: chargeDelais, propager })
+    const b = r && r.brouillons
+    if (!propager) {
+      // L'hote a refuse, ou l'ecran n'a pas pu compter : ses reglages sont
+      // enregistres, ses propositions deja en attente gardent leur echeance.
+      echoues.push(t('messages.partie_brouillons'))
+    } else if (!b || b.ok !== true) {
+      logger.error('Messages', 'brouillons en attente', (b && b.motif) || 'bilan absent')
+      echoues.push(t('messages.partie_brouillons'))
+    } else if (Number(b.deja_prises) > 0) {
+      echoues.push(t('messages.partie_deja_prises', { n: Number(b.deja_prises) }))
     }
+    // ⚠ UN BILAN ABSENT NE VAUT PAS « RIEN N'A BOUGE ». Le chemin d'exception de
+    // l'endpoint remet les compteurs a zero alors que des `send_after` ont pu
+    // etre reecrits avant la coupure : on relit dans le doute, parce qu'un fil
+    // qui garde l'echeance d'avant est le defaut meme que ce lot ferme.
+    brouillonsRepris = (!b || b.ok !== true)
+      ? 1
+      : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0)
   } catch (err) {
     logger.error('Messages', 'delais', err)
     // ⚠ UN APPEL QUI N'A PAS REPONDU NE DIT PAS CE QUI A ETE PRIS (constat 5).
@@ -2008,13 +2035,23 @@ async function enregistrerPanneau (corps, ref) {
   // L'etat d'edition repart de la base : ce qui n'est pas passe redevient
   // visible tel qu'il est enregistre, et l'hote voit ce qu'il doit refaire.
   etat.delaisEdit = null
-  etat.modeEnCours = false
   // Les echeances ont bouge en base : le fil doit les relire, sinon il garde
   // a l'ecran le compte a rebours d'avant — le defaut meme que ce lot corrige.
+  // ⚠ DANS SON PROPRE `try`, ET AVANT DE RENDRE LA MAIN (constat 8). Un lever
+  // dans `renderFil` sautait `renderTiroir()` et `noteReglage()` : la note
+  // disparaissait et le panneau restait FIGE (le `geler` d'entree ne se defait
+  // que par un re-rendu). Et `modeEnCours` passait a false AVANT l'await, donc
+  // la reentrance etait ouverte sur toute la duree du rechargement.
   if (brouillonsRepris > 0) {
-    await rechargerTaches()
-    renderFiltres(); renderListe(); renderFil()
+    try {
+      await rechargerTaches()
+      renderFiltres(); renderListe(); renderFil()
+    } catch (err) {
+      logger.error('Messages', 'fil apres enregistrement', err)
+      echoues.push(t('messages.partie_brouillons'))
+    }
   }
+  etat.modeEnCours = false
   renderTiroir()
   noteReglage(echoues.length
     ? t('messages.panneau_partiel', { parties: echoues.join(', ') })

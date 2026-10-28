@@ -12,20 +12,29 @@
 -- 25 septembre 2026) : on ne colle que la migration.
 --
 -- ⚠ ET AUCUN SCRIPT DE VERIFICATION N'ACCOMPAGNE CELLE-CI,
--- VOLONTAIREMENT. PostgREST n'expose pas pg_indexes :
+-- VOLONTAIREMENT. Nos scripts passent par PostgREST, qui
+-- n'expose pas pg_indexes :
 -- scripts/verifier-migration-delai-ia.js le dit lui-meme
 -- de ses deux index (« une lecture reussie prouve que la
 -- COLONNE repond ; elle ne prouve pas qu'il est INDEXE »).
 -- Un script qui ne peut rien lire et qui sort vert est
 -- pire qu'un script absent : il se cite comme preuve.
--- La preuve de cet index est le plan de la requete, lu
--- dans l'editeur SQL Supabase :
---   explain analyze select id from public.agent_tasks
---   where user_id = '<uuid>' and property_id = '<ref>'
---     and status = 'pending_validation'
---   order by id limit 500;
--- On doit y lire un Index Scan sur
--- idx_agent_tasks_bien_en_attente, pas un Seq Scan.
+--
+-- LA PREUVE SE LIT DANS L'EDITEUR SQL, qui est une
+-- connexion Postgres directe et voit donc le catalogue :
+--   select indexname, indexdef from pg_indexes
+--   where tablename = 'agent_tasks' order by indexname;
+-- On doit y lire idx_agent_tasks_bien_en_attente avec
+-- (user_id, property_id, id) et
+-- WHERE (status = 'pending_validation'::text).
+--
+-- ⚠ LIRE LA DEFINITION, PAS SEULEMENT LE NOM :
+-- `create index if not exists` reussit EN SILENCE si un
+-- index de ce nom existe avec une autre definition.
+-- ⚠ ET NE PAS SE FIER A UN `explain analyze` : sur une
+-- table de recette presque vide, le planificateur prefere
+-- legitimement un Seq Scan. Un Seq Scan ne prouve pas que
+-- l'index manque, et un Index Scan ne prouve pas sa forme.
 --
 -- ADDITIVE : UN index, aucune colonne, aucune ligne
 -- touchee. Sans lui le code marche — plus lentement.

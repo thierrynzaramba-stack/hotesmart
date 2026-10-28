@@ -113,6 +113,39 @@ function banc ({ taches = [], panneLecture = false, panneEcriture = false } = {}
   return { etat, client }
 }
 
+test('⚠ `echues` EXCLUT les taches suspendues : elles ne peuvent pas partir', async () => {
+  // Constat 1 de la derniere revue. `lireLesDues` ecarte les suspendues
+  // (`.is('suspendu_le', null)`) et ce module les garde suspendues expres au
+  // rearmement : les compter annoncait un envoi impossible.
+  const vieux = '2026-11-11T08:00:00Z'   // +60 min -> 9 h, donc echu a T0 (11 h)
+  const b = banc({ taches: [
+    tache({ id: 'libre', created_at: vieux, send_after: null }),
+    tache({ id: 'sus', created_at: vieux, send_after: null,
+      suspendu_le: new Date(T0 - 5 * MINUTE).toISOString() })
+  ] })
+  const r = await lancer(b, DANS_60, { apercu: true })
+  assert.equal(r.rearmes, 2, 'les deux seraient rearmees')
+  assert.equal(r.echues, 1, 'mais une seule pourrait partir')
+})
+
+test('bilanVide rend les SIX compteurs, et c est le contrat du module', () => {
+  const { bilanVide } = require('../lib/guestflow/appliquer-delai')
+  const v = bilanVide()
+  for (const c of ['desarmes', 'rearmes', 'inchanges', 'deja_prises', 'echues', 'sans_creation']) {
+    assert.equal(v[c], 0, `${c} est present et a zero`)
+  }
+  assert.equal(v.ok, false, 'et il refuse par defaut')
+  assert.equal(bilanVide({ ok: true, motif: 'x' }).motif, 'x', 'les champs se surchargent')
+  // ⚠ IL EXISTE PARCE QUE DEUX COPIES ONT DIVERGE : le chemin d exception de
+  // l endpoint listait QUATRE compteurs a la main, et les deux ajoutes ensuite
+  // (`deja_prises`, `echues`) y manquaient, alors que le JSDoc les promettait.
+  const src = sansComm(lire('api/agent-config.js'))
+  assert.ok(!/desarmes: 0, rearmes: 0, inchanges: 0, sans_creation: 0/.test(src),
+    'l endpoint ne recopie plus la liste des compteurs')
+  assert.equal((src.match(/bilanVide\(/g) || []).length, 3,
+    'il passe par bilanVide aux trois endroits qui en fabriquent un')
+})
+
 const lancer = (b, delais, opts = {}) => appliquerDelaiAuxBrouillons(b.client, {
   userId: COMPTE, propertyRef: REF, delais, maintenant: T0, ...opts
 })
@@ -540,6 +573,18 @@ test('⚠ /api/agent-config appelle le writer APRES l upsert, et jamais pour une
   // Et l apercu est en LECTURE SEULE : il repond AVANT l upsert du blob.
   assert.ok(iApercu < iUpsert, 'l apercu repond avant l upsert, donc il n ecrit rien')
   assert.ok(/apercu === true/.test(src), 'et il faut le demander explicitement')
+  // ⚠ UN APERCU EN ECHEC BLOQUE LA PROPAGATION, DONC IL LAISSE UNE TRACE COTE
+  // SERVEUR (constat 3). `logger.error` de l ecran n ecrit que la console du
+  // NAVIGATEUR : les motifs qui bloquent n existaient dans aucun log Vercel.
+  assert.ok(/\[agent-config\] delais -> apercu:/.test(src),
+    'l echec de l apercu est journalise cote serveur')
+  assert.ok(/\[agent-config\] delais -> brouillons:/.test(src),
+    'comme celui du chemin reel')
+  // Et la propagation peut etre refusee sans perdre le blob.
+  assert.ok(/\.propager === false/.test(src), 'le drapeau de propagation est lu')
+  const iPropag = src.indexOf('.propager === false')
+  assert.ok(iPropag > iUpsert,
+    'le refus de propager saute la reprise, PAS l enregistrement du blob')
   // Il sort par un `return`, il ne retombe pas dans le chemin d ecriture.
   assert.ok(/return res\.status\(200\)\.json\(\{ ok: true, delais_ref: ref, apercu \}\)/.test(src),
     'l apercu rend sa reponse et s arrete la')
@@ -556,12 +601,29 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   // a le faire (discipline de 4.6.6).
   assert.ok(/apercu: true/.test(page), 'l ecran demande l apercu avant d enregistrer')
   assert.ok(/messages\.delai_arriere_confirm/.test(page), 'et il annonce le NOMBRE')
-  const iFeu = page.indexOf('let feuVert = true')
-  assert.ok(iFeu > 0, 'le feu vert existe')
-  const bloc = page.slice(iFeu, page.indexOf('if (feuVert)', iFeu))
-  assert.ok(/feuVert = false/.test(bloc), 'un apercu manquant ou refuse bloque l enregistrement')
-  assert.equal((bloc.match(/feuVert = false/g) || []).length, 2,
-    'deux raisons de ne pas enregistrer : apercu illisible, et refus de l hote')
+  // ⚠ REFUSER NE COUTE PAS LE RESTE DU PANNEAU (constat 2 de la derniere
+  // revue). `delais` porte TROIS reglages : un refus doit enregistrer la
+  // sourdine et l echeance d alerte, et seulement SAUTER la propagation.
+  const iProp = page.indexOf('let propager = true')
+  assert.ok(iProp > 0, 'le drapeau de propagation existe')
+  const bloc = page.slice(iProp, page.indexOf('const r = await appel', iProp))
+  assert.equal((bloc.match(/propager = false/g) || []).length, 3,
+    'trois raisons de ne pas propager : reponse illisible, apercu en echec, refus de l hote')
+  assert.ok(!/feuVert/.test(page),
+    'et plus aucun chemin ne saute l enregistrement entier')
+  assert.ok(/delais: chargeDelais, propager \}/.test(page),
+    'le POST part toujours, avec son drapeau')
+  // Sur un bien qu on SAIT en pause, aucune question : rien ne peut partir.
+  assert.ok(/const enPauseSure = pausesFiables\(\) && etat\.pauses\[String\(ref\)\] === true/
+    .test(page), 'un bien connu en pause ne declenche pas la question')
+  assert.ok(/reponse_ia !== null && !enPauseSure/.test(page),
+    'et la question ne se pose que si un envoi est possible')
+  // ⚠ UN MARQUEUR POSITIF, PAS UNE ABSENCE (constat 5) : `appel()` rend `{}` sur
+  // tout 200 non-JSON, et ce cas passait pour « endpoint plus ancien », donc
+  // feu vert sans garde-fou.
+  assert.ok(/'apercu' in a/.test(page), 'la presence du champ est testee, pas sa valeur')
+  assert.ok(/a\.delais_ref === ref/.test(page),
+    'et un endpoint plus ancien se reconnait a sa propre reponse, pas a un silence')
   // Et `deja_prises` se dit : c est le seul cas ou un message peut partir avec
   // le reglage d avant.
   assert.ok(/messages\.partie_deja_prises/.test(page),
@@ -573,8 +635,16 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   assert.ok(/!b \|\|/.test(page.slice(i, i + 200)), 'bilan absent = echec, pas succes')
   // Et le fil se relit quand des echeances ont bouge, sinon il garde a l ecran
   // le compte a rebours d avant.
-  assert.ok(/if \(brouillonsRepris > 0\) \{\s*await rechargerTaches\(\)/.test(page),
-    'le fil relit les taches quand des echeances ont change')
+  assert.ok(/if \(brouillonsRepris > 0\) \{\s*try \{\s*await rechargerTaches\(\)/.test(page),
+    'le fil relit les taches quand des echeances ont change, dans son propre try')
+  // ⚠ ET LE VERROU SE REND APRES (constat 8) : un lever dans `renderFil`
+  // sautait `renderTiroir()` et `noteReglage()`, donc la note disparaissait et
+  // le panneau restait FIGE — `geler` ne se defait que par un re-rendu.
+  const iRech = page.indexOf('if (brouillonsRepris > 0)')
+  const iVerrou = page.indexOf('etat.modeEnCours = false', iRech)
+  assert.ok(iVerrou > iRech, 'modeEnCours ne tombe qu apres le rechargement')
+  assert.ok(iVerrou < page.indexOf('noteReglage(echoues.length'),
+    'mais avant le re-rendu et la note')
   for (const f of ['fr', 'en', 'es']) {
     const dict = JSON.parse(lire(`shared/i18n/${f}.json`))
     const phrase = dict['messages.partie_brouillons']

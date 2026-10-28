@@ -584,7 +584,7 @@
   "messages.code_sent": "code sent",
   "messages.deja_partie": "That reply has just gone out.",
   "messages.delai_aide": "At the next pass, checked every 5 minutes.",
-  "messages.delai_arriere_confirm": "Proposals already waiting that will go out on the next pass, within 5 minutes: {n}. They are older than the delay you chose. Continue?",
+  "messages.delai_arriere_confirm": "Proposals already waiting that could go out as soon as the next pass: {n}. They are older than the delay you chose. Continue?",
   "messages.delai_autre": "Other…",
   "messages.delai_h": "hours",
   "messages.delai_manuel": "I approve every reply",

@@ -36,11 +36,25 @@ const BIEN = '0544fd9a'
 // Deux bouts corriges : le module refuse desormais une `data` qui n'est pas un
 // tableau (PostgREST en rend toujours un sur un select), et ce double rend la
 // forme du vrai client — thenable, avec `update` et `gt`.
-function preparer ({ config = null, lectureEnPanne = false, taches = [], tachesIllisibles = false } = {}) {
+//
+// ⚠ CE QU'IL NE MESURE PAS, ET QU'IL NE FAUT JAMAIS LUI FAIRE DIRE : il
+// n'applique ni `limit` ni `order`, donc la PAGINATION PAR CURSEUR n'est pas
+// exercee ici. Ce double sert a prouver le CABLAGE des trois arguments
+// (`supabase`, `userId`, `propertyRef`) en executant l'endpoint. Le claim, la
+// pagination et les replis sont eprouves par
+// `tests/guestflow-appliquer-delai.test.js`, dont le double applique vraiment
+// `eq`, `gt`, `order` et `limit`.
+function preparer ({ config = null, lectureEnPanne = false, taches = [],
+  tachesIllisibles = false, tachesLevent = false } = {}) {
   const etat = { ecritures: [], majTaches: [], lecturesTaches: [] }
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: COMPTE } }, error: null }) },
     from (nom) {
+      // ⚠ LA LEVEE S'ECHAPPE ICI, PAS DANS `then` : le `then` du double
+      // convertit toute exception en `{ error }` — comme PostgREST — donc une
+      // levee posee plus bas prenait le chemin `lecture_impossible` au lieu du
+      // `catch` de l'endpoint. C'est la difference que le constat 4 visait.
+      if (tachesLevent && nom === 'agent_tasks') throw new Error('le client a leve')
       const q = {
         _f: {},
         select () { return q }, eq (c, v) { q._f[c] = v; return q },
@@ -57,10 +71,22 @@ function preparer ({ config = null, lectureEnPanne = false, taches = [], tachesI
       }
       function tableau (nom) {
         if (nom === 'agent_tasks') {
+          // ⚠ DEUX PANNES DISTINCTES, ET ELLES NE PRENNENT PAS LE MEME CHEMIN :
+          // PostgREST rend `{ error }` (le module le lit et rend
+          // `lecture_impossible`), tandis qu'une exception — reseau coupe, client
+          // casse — remonte jusqu'au `catch` de l'endpoint. C'est ce second
+          // chemin que le constat 4 visait, et mon premier test ne l'atteignait
+          // pas : il portait son nom sans y aller.
           if (tachesIllisibles) return { data: null, error: { message: 'panne taches' } }
           if (q._maj) {
-            const touchees = taches.filter(t => t.status === 'pending_validation'
-              && String(t.id) === String(q._f.id))
+            // ⚠ LE STATUT VIENT DU FILTRE, PAS D'UN LITTERAL (constat 6 de la
+            // derniere revue). Je testais `t.status === 'pending_validation'` en
+            // dur : retirer `.eq('status', EN_ATTENTE)` de l'update du module
+            // laissait donc ce fichier VERT, alors que c'est ce claim qui ferme
+            // la course avec le cron.
+            const touchees = taches.filter(t =>
+              String(t.id) === String(q._f.id)
+              && (q._f.status === undefined || String(t.status) === String(q._f.status)))
             for (const t of touchees) Object.assign(t, q._maj)
             etat.majTaches.push({ filtre: { ...q._f }, patch: { ...q._maj } })
             return { data: touchees.map(t => ({ id: t.id })), error: null }
@@ -741,4 +767,87 @@ test('⚠ la propagation est APRES l upsert, et un echec ne fait pas mentir le 2
   assert.equal(ecrit.row.config[BIEN].delais.reponse_ia, null)
   assert.equal(res.body.brouillons.ok, false, 'et l echec de propagation se DIT')
   assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z', 'la tache n a pas bouge')
+})
+
+test('⚠ `propager: false` enregistre le blob et SAUTE la reprise des brouillons', async () => {
+  // Constat 2 de la derniere revue : `delais` porte TROIS reglages. Refuser de
+  // liberer l arriere ne doit pas couter la sourdine ni l echeance d alerte.
+  const taches = tachesEnAttente()
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, propager: false, delais: { reponse_ia: 60, alerte_info: 30, sourdine: { active: true, debut: '23:00', fin: '07:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches }
+  )
+  assert.equal(res.code, 200)
+  // Le blob EST enregistre, avec les trois reglages.
+  const ecrit = etat.ecritures.find(e => e.table === 'agent_alert_config')
+  assert.ok(ecrit, 'l upsert est bien parti')
+  assert.equal(ecrit.row.config[BIEN].delais.reponse_ia, 60)
+  assert.equal(ecrit.row.config[BIEN].delais.alerte_info, 30)
+  assert.deepEqual(ecrit.row.config[BIEN].delais.sourdine,
+    { active: true, debut: '23:00', fin: '07:00' }, 'la sourdine survit au refus')
+  // Et les brouillons gardent leur echeance : le comportement d avant ce lot.
+  assert.equal(etat.majTaches.length, 0, 'aucune tache touchee')
+  assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z')
+  assert.equal(res.body.brouillons.ok, true, 'ce n est pas un echec')
+  assert.equal(res.body.brouillons.motif, 'propagation_non_demandee')
+  for (const c of ['desarmes', 'rearmes', 'inchanges', 'deja_prises', 'echues', 'sans_creation']) {
+    assert.equal(res.body.brouillons[c], 0, `${c} est present et a zero`)
+  }
+})
+
+test('sans le drapeau, la propagation a lieu (le defaut n est pas « ne rien faire »)', async () => {
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches }
+  )
+  assert.equal(res.body.brouillons.motif, 'validation_manuelle')
+  assert.equal(taches[0].send_after, null)
+})
+
+test('⚠ le bilan d EXCEPTION de l endpoint porte les six compteurs, pas quatre', async () => {
+  // Constat 4 : `deja_prises` et `echues` manquaient a la liste que l endpoint
+  // recopiait A LA MAIN dans son `catch`, alors que le JSDoc du module les
+  // promet tous les six. Il faut donc LEVER pour y arriver — une panne
+  // PostgREST, elle, passe par le module et son bilan etait deja complet.
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches, tachesLevent: true }
+  )
+  assert.equal(res.code, 200, 'le reglage est enregistre malgre la levee')
+  assert.equal(res.body.brouillons.ok, false)
+  assert.equal(res.body.brouillons.motif, 'exception')
+  for (const c of ['desarmes', 'rearmes', 'inchanges', 'deja_prises', 'echues', 'sans_creation']) {
+    assert.equal(typeof res.body.brouillons[c], 'number', `${c} est un nombre, pas undefined`)
+  }
+})
+
+test('une panne PostgREST, elle, passe par le module et rend lecture_impossible', async () => {
+  const taches = tachesEnAttente()
+  const { res } = await postConfig(
+    { delais_ref: BIEN, delais: { reponse_ia: null, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'auto' } }, taches, tachesIllisibles: true }
+  )
+  assert.equal(res.body.brouillons.ok, false)
+  assert.equal(res.body.brouillons.motif, 'lecture_impossible')
+  assert.equal(taches[0].send_after, '2026-11-11T12:00:00Z', 'rien n a bouge')
+})
+
+// ⚠ CE TEST NE ROUGIT PAS CONTRE LE COMMIT D'AVANT, ET C'EST NORMAL : il couvre
+// un comportement que l'apercu avait deja. Il est la pour qu'une regression
+// future se voie, pas comme preuve d'un correctif — qu'on ne le cite donc pas
+// comme tel.
+test('l APERCU ne touche rien non plus quand la lecture des taches echoue', async () => {
+  const taches = tachesEnAttente()
+  const { res, etat } = await postConfig(
+    { delais_ref: BIEN, apercu: true, delais: { reponse_ia: 60, alerte_info: 0, sourdine: { active: false, debut: '22:00', fin: '08:00' } } },
+    { config: { [BIEN]: { mode: 'test' } }, taches, tachesIllisibles: true }
+  )
+  assert.equal(res.code, 200)
+  assert.equal(etat.ecritures.length, 0, 'un apercu en echec n ecrit pas le blob non plus')
+  assert.equal(res.body.apercu.ok, false)
+  assert.equal(res.body.apercu.motif, 'lecture_impossible')
+  // L ecran s en servira pour ne PAS propager, tout en enregistrant.
+  assert.equal(typeof res.body.apercu.echues, 'number')
 })

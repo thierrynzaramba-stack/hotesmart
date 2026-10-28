@@ -783,6 +783,6 @@ test('⚠ RECETTE 8 : quitter la validation manuelle ne pose plus « Tout de sui
   // Et c est bien CETTE charge qui part, aux deux appels (apercu et vrai POST).
   assert.ok(/delais_ref: ref, apercu: true, delais: chargeDelais/.test(sans),
     'l apercu envoie la MEME charge que l enregistrement')
-  assert.ok(/\{ delais_ref: ref, delais: chargeDelais \}/.test(sans),
-    'et l enregistrement aussi')
+  assert.ok(/\{ delais_ref: ref, delais: chargeDelais, propager \}/.test(sans),
+    'et l enregistrement aussi, avec son drapeau de propagation')
 })

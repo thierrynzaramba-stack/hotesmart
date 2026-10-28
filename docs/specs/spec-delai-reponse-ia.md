@@ -842,9 +842,19 @@ Le bandeau dit donc **« En pause : ne partira pas seule », en gris** — l'amb
 est réservé à ce qui est en cours — et **aucun compte à rebours ne s'affiche
 sur un bien en pause**, avant comme après l'échéance.
 
-⚠ **ET LA PORTÉE EST LE MOTIF `automation_paused`.** `encoreLegitime`
-(`lib/guestflow/brouillons-dus.js`) refuse un brouillon pour **neuf** motifs ;
-le bandeau n'en **dit** qu'un : celui-là. Le changement de réglage, traité par
+⚠ **ET LA PORTÉE EST LE MOTIF `automatisation_en_pause`.** `encoreLegitime`
+(`lib/guestflow/brouillons-dus.js`) refuse un brouillon pour **onze** motifs
+distincts — `reglages_illisibles`, `biens_illisibles`, `bien_introuvable`,
+`automatisation_en_pause`, `reglage_introuvable`,
+`repasse_en_validation_manuelle`, `reglage_hors_contrat`,
+`reservations_illisibles`, `reservation_introuvable`, `reservation_annulee`,
+`sejour_termine` — dont deux sont des **pannes de lecture**, pas des états de
+la donnée. Le bandeau n'en **dit** qu'un : celui-là.
+*(Deux chiffres faux ont vécu ici, « neuf » et « les sept autres » : ils ne
+tombaient juste qu'en excluant en silence les deux pannes de lecture puis les
+deux motifs traités. Relevé en revue — c'est la famille que le correctif 7 de
+ce même commit existe pour fermer, et je l'avais rejouée dans la phrase qui
+l'annonçait.)* Le changement de réglage, traité par
 la section suivante, ne se dit pas — il **désarme**, donc le compte à rebours
 disparaît au lieu d'être expliqué. Les sept autres motifs sont en **dette**,
 plus bas.
@@ -894,16 +904,35 @@ changer de prix ». Ici la cible est le téléphone d'un voyageur, donc :
   garde, même validation du payload, et il **sort avant l'upsert** — il ne
   compte que, sans rien écrire ;
 - l'écran le demande **avant** d'enregistrer, et si `echues > 0` il annonce le
-  nombre : « Propositions déjà en attente qui partiront au prochain passage,
-  dans les 5 minutes : N. » ;
-- **ne pas savoir combien n'autorise pas à le faire** : un aperçu illisible
-  bloque l'enregistrement des délais et le dit, comme 4.6.6 rétablit l'état
+  nombre ;
+- **ne pas savoir combien n'autorise pas à les libérer** : un aperçu illisible
+  enregistre les réglages mais **ne propage pas**, comme 4.6.6 rétablit l'état
   d'avant quand il ne peut pas compter ;
 - `0` n'est pas un cas à part : il rend tout l'arriéré échu, et le nombre
   s'affiche comme pour les autres.
 
+⚠ **`echues` EST UNE BORNE HAUTE, ET LA PHRASE AFFICHÉE LE DIT** — ma première
+version l'annonçait comme un fait (« partiront »), et c'était faux. Deux
+filtres de plus vivent **en aval** : `lireLesDues` écarte les tâches
+**suspendues** (`.is('suspendu_le', null)`) — or ce lot les garde suspendues
+exprès au réarmement — et `encoreLegitime` rejoue onze motifs à l'échéance,
+dont trois durables que le writer ne peut pas connaître sans lire d'autres
+tables. Un bien **en pause** accumule des brouillons échus que le cron refuse à
+chaque passage : ils comptaient, et aucun ne partirait. Donc :
+
+- les tâches suspendues sont **exclues** du compte ;
+- l'écran **ne pose pas la question** sur un bien qu'il *sait* en pause (si la
+  carte des pauses n'est pas fiable, il demande — il ne suppose pas l'absence) ;
+- la phrase dit « **pourraient** partir dès le prochain passage ».
+
+La direction reste conservatrice : on sur-compte, jamais l'inverse.
+
 **Ce que ça ne change pas** : la décision reste la sienne. L'aperçu ne refuse
-rien, il chiffre.
+rien, il chiffre. Et **refuser ne coûte pas le reste du panneau** : `delais`
+porte trois réglages, donc un refus envoie `propager: false` — le blob est
+enregistré, la sourdine et l'échéance d'alerte avec, et les brouillons déjà en
+attente gardent leur échéance. C'est le comportement d'avant ce lot, et c'est
+exactement ce que l'hôte a choisi en refusant.
 
 **Writer unique : `lib/guestflow/appliquer-delai.js`**, appelé par
 `/api/agent-config` **après** l'upsert du blob. Six choses qui ne se devinent
@@ -984,11 +1013,19 @@ décidé : à trancher avant de lever la dette, pas en la levant. Aujourd'hui la
 garde est sans `compteDelegue`, donc le writer n'écrit que les tâches de
 l'appelant — et pour un membre délégué, son réglage ne fait rien.
 
-**D2 — les sept autres motifs de refus de `encoreLegitime`.** Le bandeau dit la
-vérité pour `automation_paused`, et le désarmement fait disparaître le compte à
-rebours quand l'hôte repasse en validation manuelle ; les sept autres motifs
-restent. Les
-deux plus atteignables :
+⚠ **ET LA PROPAGATION RAPPORTE UN SUCCÈS SUR UN PÉRIMÈTRE QUI N'EST PAS CELUI
+AFFICHÉ**, ce que la première version de cette dette ne disait pas. Sur un
+compte délégué : l'aperçu rend `echues: 0`, l'enregistrement rend
+`brouillons.ok: true` avec `desarmes: 0, rearmes: 0`, et l'écran affiche
+« Enregistré » sans réserve. Les zéros sont vrais pour le compte de l'appelant
+et faux pour le bien qu'il regarde. À fermer avec D1, par la même correction.
+
+**D2 — les motifs de refus que le bandeau ne dit pas.** Sur les **onze** de
+`encoreLegitime`, deux sont traités : `automatisation_en_pause` (le bandeau le
+dit) et `repasse_en_validation_manuelle` (le désarmement fait disparaître le
+compte à rebours). Deux autres sont des pannes de lecture, qui n'ont rien à
+afficher. Restent **sept états de la donnée**, dont les deux plus
+atteignables :
 
 - `bien_introuvable` — clé migrée : la tâche porte une référence que
   `properties.provider_property_id` ne porte plus (même famille que
