@@ -245,12 +245,27 @@ test('messages : l\'ouverture directe ?conv= exige que le fil existe', () => {
 // ─── Etape 3 : propositions dans le fil (Envoyer / Modifier / Rejeter) ───────
 test('messages etape 3 : Envoyer suit le chemin de l\'ancienne page, jamais un second chemin', () => {
   const src = sansCommentaires(html())
-  // posterMessage d'abord (routage par source), la cloture ensuite — et le
-  // statut RELU juste avant (deux onglets = pas de double message, revue).
-  assert.ok(/async function envoyerProposition[\s\S]*?pending_validation[\s\S]*?await posterMessage\(c, texte, 'ia_validee'\)[\s\S]*?await cloreTache\(x, 'done'/.test(src),
-    'statut relu, envoi par posterMessage PUIS cloture — la sequence de messagerie.html')
+  // posterMessage d'abord (routage par source), la cloture ensuite — et un
+  // VERROU juste avant (deux onglets, et depuis le lot 2 le cron : pas de
+  // double message).
+  //
+  // ⚠ CE TEST EXIGEAIT UNE RELECTURE DE STATUT (`pending_validation` dans la
+  // sequence). Le lot 2 du chantier « delai de reponse IA » l'a remplacee par
+  // une RESERVATION (`action: 'reserver'`), qui est strictement plus forte :
+  // la relecture laissait une fenetre entre le SELECT et l'envoi, et elle
+  // suffisait tant que seul un humain envoyait. Ce qui compte n'est pas
+  // LAQUELLE des deux, c'est qu'il y ait un verrou AVANT `posterMessage`.
+  assert.ok(/async function envoyerProposition[\s\S]*?action: 'reserver'[\s\S]*?await posterMessage\(c, texte, 'ia_validee'\)[\s\S]*?await cloreTache\(x, 'done'/.test(src),
+    'verrou pose, PUIS posterMessage, PUIS cloture')
+  // Et la reservation se relache si l'envoi echoue : sans ca, la tache reste
+  // « sending » jusqu'a la reprise des orphelines du cron (dix minutes).
+  assert.ok(/action: 'relacher'/.test(src), 'une reservation abandonnee est relachee')
   assert.ok(/if \(!texte\) return/.test(src), 'jamais un message vide (revue de 06e6d50)')
-  assert.ok(/\$\{texteProp \? `<button/.test(src), 'sans texte propose : ni Envoyer ni Modifier')
+  // Sans texte propose, ni Envoyer ni Modifier : un clic posterait un message
+  // VIDE au voyageur. `texteProp` est passe DANS la garde au lot 2 (la bulle
+  // garde son pied : l'abandon reste possible sans texte).
+  assert.ok(/&& texteProp\s*$/m.test(src) || /&& texteProp\b/.test(src),
+    'sans texte propose : ni Envoyer ni Modifier')
   assert.ok(src.includes("action: 'proposition'"), 'la cloture passe par /api/messages')
   // L'echec d'envoi laisse la proposition en attente avec Reessayer.
   assert.ok(/envoi proposition[\s\S]*?x\.etatEnvoi = 'echec'/.test(src), 'echec = proposition conservee')
@@ -271,11 +286,28 @@ test('messages etape 3 : Modifier descend le texte, et l\'envoi porte l\'avatar 
   assert.ok(!/kind: 'auto'/.test(src), 'la page ne fabrique jamais une bulle robot (le coeur ecrit kind message)')
 })
 
-test('messages etape 3 : Rejeter vit dans le menu, et les boutons disparaissent sans droit d\'ecriture', () => {
+test('messages etape 3 : « Ne pas envoyer » est a plat, et les boutons disparaissent sans droit d\'ecriture', () => {
   const src = sansCommentaires(html())
-  assert.ok(/<details class="bulle-menu">[\s\S]*?data-rejeter/.test(src), 'Rejeter dans le menu (spec §3.3)')
-  assert.ok(/peutEcrireMessages\(\) && !enCoursEnvoi \? `<span class="bulle__actions">/.test(src),
+  // ⚠ « REJETER DANS LE MENU » N'EST PLUS LA REGLE (maquette validee par
+  // Thierry le 27 octobre 2026, chantier « delai de reponse IA »). Le
+  // `<details>` ne contenait QUE cette action : un menu pour un seul item
+  // cachait le geste d'abandon derriere un clic de plus — sur une bulle qui,
+  // desormais, peut partir TOUTE SEULE a son echeance. C'est precisement le
+  // geste qui doit etre a portee immediate. La spec §3.3 est remplacee ici.
+  // ⚠ ET LE MOTIF VISE LE MENU DE LA BULLE, PAS TOUT MENU : mon premier jet
+  // interdisait `<details class="bulle-menu">` partout, et il rougissait sur le
+  // menu du FIL (`menuFil`), que ce lot ne touche pas. Un grep trop large est
+  // le meme defaut qu'un grep trop etroit.
+  assert.ok(!/bulle-menu__liste"><button type="button" data-rejeter/.test(src),
+    'l abandon n est plus cache dans le menu de la bulle')
+  assert.ok(/bulle__pied[\s\S]*?data-rejeter/.test(src),
+    'il est dans le pied, a portee immediate')
+  // La garde de DROIT, elle, ne bouge pas : rien dans le DOM sans ecriture.
+  // Elle couvre les boutons ET le pied (echeance, abandon).
+  assert.ok(/peutEcrireMessages\(\) && !enCoursEnvoi && texteProp/.test(src),
     'profil en lecture : AUCUN bouton dans le DOM (spec §9)')
+  assert.ok(/function piedEcheance \(x\) \{\s*if \(!peutEcrireMessages\(\)\) return ''/.test(src),
+    'le pied est garde par le MEME droit que les boutons')
   assert.ok(/async function rejeterProposition[\s\S]*?cloreTache\(x, 'ignored'/.test(src),
     'rejet = statut ignored, celui de l\'ancienne page')
   assert.ok(/statut === 'ignored'[\s\S]*?messages\.reject_failed/.test(src),
@@ -297,8 +329,22 @@ test('api/messages action=proposition : garde write, perimetre, statuts de l\'an
   assert.ok(/refsDuPerimetre[\s\S]*?status\(404\)/.test(bloc), 'hors perimetre = 404, jamais 403')
   assert.ok(bloc.includes("'done'") && bloc.includes("'ignored'") && !bloc.includes("'rejected'"),
     'les statuts de l\'ancienne page, pas une seconde famille')
-  assert.ok(/\.update\(\{ status: statut \}\)[\s\S]*?\.eq\('status', 'pending_validation'\)/.test(bloc),
-    'l\'UPDATE conditionne par le statut ferme la course entre deux clics')
+  // ⚠ LE GREP DE LA FORME DE L'UPDATE EST RETIRE — QUATRIEME RECIDIVE DANS CE
+  // FICHIER. Il exigeait `.update({ status: statut })` suivi de
+  // `.eq('status', 'pending_validation')`. Les deux moities ont du bouger au
+  // lot 2 du chantier « delai de reponse IA » : l'UPDATE desarme aussi
+  // l'echeance (`send_after: null`, sans quoi le cron relit la tache comme
+  // due), et la condition porte sur le statut LU, parce qu'une tache RESERVEE
+  // par l'ecran avant son envoi est `sending` et doit pouvoir etre close.
+  // Le test a donc rougi sur un code plus correct — et il serait reste vert si
+  // la condition avait disparu en gardant la forme.
+  //
+  // LA COURSE EST DESORMAIS EPROUVEE PAR APPEL, dans
+  // tests/delai-reponse-ia-messages.test.js : deux clotures concurrentes (la
+  // seconde recoit 409), deux reservations concurrentes, et le desarmement de
+  // l'echeance lu sur la ligne ecrite. Ce que ce fichier garde ici, ce sont les
+  // invariants qui ne dependent pas d'une ecriture precise.
+  assert.ok(/deja_close/.test(bloc), 'une course perdue se dit, elle ne se re-ecrit pas')
   assert.ok(/deja_close/.test(bloc), 'une tache deja close se dit, ne se re-ecrit pas')
   // Le journal de l'ancienne page, memes colonnes.
   assert.ok(/from\('conversations'\)\.insert\(\{[\s\S]*?guest_message: tache\.guest_message, agent_reply: texte, book_id: String\(tache\.book_id\)/.test(bloc),
@@ -310,12 +356,20 @@ test('api/messages action=proposition : garde write, perimetre, statuts de l\'an
 // ─── Etape 4 : Test/Auto, tiroir reglages, redirections ──────────────────────
 test('messages etape 4 : passer en Auto exige une confirmation, et l\'etat est RELU apres l\'ecriture', () => {
   const src = sansCommentaires(html())
-  assert.ok(/nouveau === 'auto' && !window\.confirm\(t\('messages\.mode_confirm_auto'\)\)/.test(src),
-    'Auto est un geste lourd : confirmation explicite avant (demande de Thierry)')
+  // ⚠ LA REGLE TIENT, LE GESTE A CHANGE. L'interrupteur Test/Auto a disparu au
+  // lot 2 du chantier « delai de reponse IA » ; le geste lourd, lui, existe
+  // toujours : quitter « Je valide chaque reponse » autorise des envois sans
+  // relecture. La confirmation est donc sur CE bouton. Ce test l'avait
+  // attrapee : elle avait disparu avec le toggle.
+  assert.ok(/d\.reponse_ia === null && !window\.confirm\(t\('messages\.mode_confirm_auto'\)\)/.test(src),
+    'quitter la validation manuelle est un geste lourd : confirmation explicite (demande de Thierry)')
   // Apres le POST : un GET de relecture nourrit l'interrupteur — jamais
   // l'etat suppose. Idem pour la pause.
-  assert.ok(/await appel\('\/api\/agent-config', \{ mode_ref: ref, mode: nouveau \}\)[\s\S]*?await appel\('\/api\/agent-config'\)[\s\S]*?etat\.modes = modesDe\(relu\.config\)/.test(src),
-    'le mode affiche vient de la base relue')
+  // ⚠ L'ECRITURE DU MODE A DISPARU DE L'ECRAN (le serveur le derive des delais
+  // depuis le lot 1), mais la RELECTURE reste l'invariant : apres chaque
+  // enregistrement, l'ecran repart de la base, jamais de l'etat suppose.
+  assert.ok(/const relu = await appel\('\/api\/agent-config'\)[\s\S]{0,200}etat\.modes = modesDe\(relu\.config\)/.test(src),
+    'l etat affiche vient de la base relue')
   assert.ok(/await appel\('\/api\/property-automation', \{ provider_property_id[\s\S]*?await appel\('\/api\/property-automation'\)[\s\S]*?etat\.pauses = relu\.paused/.test(src),
     'la pause affichee vient de la base relue')
   // L'ecriture est un POST CIBLE : le MERGE du seul mode vit au SERVEUR
@@ -341,7 +395,11 @@ test('messages etape 4 : passer en Auto exige une confirmation, et l\'etat est R
   // (ecriture ciblee, relecture avant ecriture, bornes du mode, une cible par
   // requete). Ici on ne garde que ce qui est VRAIMENT de l'ecran : il poste une
   // cible et il relit l'etat.
-  assert.ok(/mode_ref: ref, mode: nouveau/.test(src), 'l ecran poste une CIBLE, pas le blob entier')
+  // La cible n'est plus `mode` (derive par le serveur depuis le lot 1) mais
+  // `delais` : l'invariant est le meme — l'ecran poste une CIBLE, le merge vit
+  // au serveur, et jamais le blob entier depuis deux onglets.
+  assert.ok(/delais_ref: ref, delais:/.test(src), 'l ecran poste une CIBLE, pas le blob entier')
+  assert.ok(/alertes_ref: ref,/.test(src), 'les alertes aussi, et dans leur propre requete')
 })
 
 test('messages etape 4 : les reglages IA sont reserves au TITULAIRE (dette 68)', () => {
@@ -354,7 +412,11 @@ test('messages etape 4 : les reglages IA sont reserves au TITULAIRE (dette 68)',
   assert.ok(/reglagesIci\(\) \? \[\s*appel\('\/api\/agent-config'\)/.test(src),
     'la config IA n\'est pas demandee autrement')
   assert.ok(/b\.hidden = !reglagesIci\(\)/.test(src), 'les deux boutons d\'en-tete disparaissent sans titulaire')
-  assert.ok(/mode !== null \?/.test(src), 'le volet IA ne montre pas un mode illisible')
+  // ⚠ PLUS DE « MODE » A MONTRER : l'interrupteur a disparu. Ce qui reste, et
+  // qui compte autant, c'est qu'un BLOB illisible FERME le volet au lieu
+  // d'afficher des reglages vides qu'un « Enregistrer » ecraserait.
+  assert.ok(/function voletIA[\s\S]{0,260}etat\.configIA === null[\s\S]{0,140}load_error/.test(src),
+    'le volet IA ne montre pas des reglages illisibles')
   // Et l'echec d'une bascule de pause SE DIT (dans le tiroir sur mobile).
   assert.ok(/function noteReglage/.test(src) && /\(etat\.pauses\[ref\] === true\) !== paused/.test(src),
     'un kill switch qui n\'a pas pris s\'affiche, jamais silencieux')
@@ -404,18 +466,27 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
   // Demande de Thierry (12 octobre) : ce test NOMME chaque champ manquant.
   const src = html()
   const CHAMPS = {
-    'mode Test/Auto par bien': 'data-tiroir-mode',
+    // ⚠ RETIRES PAR DECISION DE THIERRY (27 octobre 2026, chantier « delai de
+    // reponse IA ») : l'interrupteur Test/Auto devient un DELAI, et les deux
+    // boutons « Enregistrer » des sous-blocs sont remplaces par UN SEUL en bas
+    // du panneau. Les remplacants sont listes juste apres.
+    'delai de reponse (pilules)': 'data-delai=',
+    'validation manuelle (ancien Mode Test)': 'data-delai-manuel',
+    // ⚠ « delai d alerte info manquante » RETIRE DE CET INVENTAIRE : le reglage
+    // existait sans lecteur (constat 6 de la revue), donc il MENTAIT a l'hote.
+    // Il revient au lot 3 avec la passe qui consomme `alert_after`.
+    'sourdine de nuit (actif)': 'data-sourdine-active',
+    'sourdine de nuit (plage)': 'data-sourdine-debut',
+    'enregistrer TOUT le panneau': 'data-panneau-save',
     'kill switch (pause) par bien': 'data-tiroir-pause',
     'consignes generales de l\'IA': 'data-consignes="global"',
     'consignes du logement': 'data-consignes="bien"',
-    'enregistrer les consignes': 'data-consignes-save',
     'intervention / SMS actif': 'data-alerte="${k}|sms_enabled"',
     'intervention / destinataires SMS': 'data-alerte="${k}|sms_lines"',
     'intervention / e-mail actif': 'data-alerte="${k}|email_enabled"',
     'intervention / destinataires e-mail': 'data-alerte="${k}|email_lines"',
     'les DEUX types d\'alerte': "[['intervention', 'messages.alert_intervention'], ['info_unknown', 'messages.alert_info']]",
     'bouton Tester par canal': 'data-tester',
-    'enregistrer les alertes': 'data-alertes-save',
     'porte SMS sans cle Brevo (lien /connexions)': 'messages.sms_needs_brevo',
     'garde des appels IA (circuit breaker, en etat)': 'messages.breaker_desc',
     'ce qu\'il valide seul (Auto)': 'messages.auto_scope',

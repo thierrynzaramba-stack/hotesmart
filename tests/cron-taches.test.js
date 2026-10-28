@@ -47,7 +47,15 @@ const TACHES = [
   // a cadence lente qui ne traite qu'UN bien par passage.
   'comparables_releves',
   'naissances_avis', 'relances_avis',
-  'auto_validation_avis', 'dispatch_changements',
+  'auto_validation_avis',
+  // ⚠ AJOUTEE LE 27 OCTOBRE 2026 (chantier « delai de reponse IA », lot 2) :
+  // les brouillons de reponse IA echus partent. Placee ICI, juste avant le
+  // dispatch, pour la raison qui gouverne tout ce tableau — elle ENVOIE (un
+  // appel provider par brouillon), et le dispatch est le poste le plus couteux
+  // du cycle. Elle porte son propre budget mur de 20 s et un plafond de 30 par
+  // cycle : le reliquat part au cycle suivant, avec son echeance intacte.
+  'brouillons_dus',
+  'dispatch_changements',
   // Dette 59, 19 octobre 2026 — la seule entree neuve de ce lot.
   'releve_canaux'
 ]

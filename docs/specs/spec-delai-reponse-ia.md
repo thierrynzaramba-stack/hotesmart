@@ -644,6 +644,40 @@ voyageur. Il s'éprouve en staging, ou sur un double qui crie. En prod, (b) se
 vérifie par la **trace** (un seul `message_sent_log`, un 409 journalisé), pas en
 provoquant la course.
 
+### Deux pièces ajoutées par Thierry le 27 octobre 2026
+
+- **(d) un envoi différé sur une réservation DIRECTE (`Offline`) part bien par
+  e-mail, et la réponse apparaît dans le fil.** C'est la recette du constat 2
+  **et** du constat 1 d'un seul geste : si l'objet de la réservation ne traverse
+  pas jusqu'à l'envoi, le message part vers la messagerie OTA et Channex rend
+  422 ; et si le journal du cœur n'est pas écrit, le fil reste muet alors que le
+  voyageur a reçu. Les deux défauts se voient sur le même écran.
+  **À vérifier dans cet ordre** : le voyageur reçoit l'e-mail ; la bulle de
+  réponse apparaît dans le fil de `/messages` ; `messages` porte une ligne
+  `outbound / sender: ai / canal: email / origine: ia_differee` ;
+  `conversations` porte sa ligne.
+- **(e) un envoi IMMÉDIAT Airbnb se comporte comme avant le merge.** C'est la
+  contre-épreuve du module partagé : les quatre écritures du cœur ont déménagé
+  dans `lib/guestflow/journal-envoi-ia.js`, donc le chemin immédiat — **en
+  production depuis des semaines** — a été touché. Un envoi Airbnb immédiat doit
+  produire exactement ce qu'il produisait : même bulle, même ligne `messages`
+  (`origine: 'ia_auto'`, pas `ia_differee`), même ligne `conversations`, même
+  fermeture d'une tâche « reçu pendant la pause » s'il y en a une.
+
+### L'activation en production se fait par UN bien (décision de Thierry)
+
+**`La bulle` d'abord, et elle seule.** Les autres biens restent sur leur réglage
+actuel — c'est-à-dire, après la migration, `reponse_ia: 0` (immédiat) ou `null`
+(validation manuelle), donc **le comportement qu'ils ont aujourd'hui**. Aucun
+autre bien ne reçoit de délai avant que Thierry ait vu **un vrai envoi différé
+passer de bout en bout**.
+
+Ce que cela veut dire concrètement : la migration des données tourne sur tous
+les biens (elle ne change aucun comportement, c'est son cahier des charges),
+puis **Thierry seul** pose un délai sur `La bulle` depuis l'écran. Le parachute
+ne protège donc qu'un bien jusqu'à son go — et c'est la bonne façon d'éprouver
+un mécanisme qui envoie au voyageur sans qu'un humain relise.
+
 ⚠ **Staging n'a aucun cron** (`docs/STAGING.md:276`) : la passe se lance à la main
 par `scripts/piloter-brouillons-dus.js` (à blanc, puis `--go`), sur le modèle de
 `scripts/piloter-yieldflow.js`.
@@ -703,24 +737,44 @@ au moment de la reprise **si** le brouillon a été modifié ; rien pour un
 brouillon jamais touché. Détail au §4.2. Conséquence sur le schéma : une
 quatrième colonne `modifie_le` (§3.2).
 
-### Reste ouvert — une question, née du garde-fou de la décision 6
+### Décision 7 (27 octobre 2026) — la nuit, un brouillon MODIFIÉ ne part pas
 
-7. **L'alerte de reprise doit-elle respecter la sourdine ?** Les deux moitiés
-   de la décision 6 ne tiennent pas ensemble (§4.2) : avec la sourdine, une
-   reprise nocturne donne une alerte **après** le départ du brouillon.
-   - **Ma recommandation (a)** : la sourdine retarde **l'alerte ET l'envoi**.
-     La nuit, un texte que l'hôte a touché sans finir ne part pas ; l'alerte
-     part à 8 h, puis le brouillon. Le prix est quelques heures de retard, sur
-     un cas rare (brouillon modifié **et** abandonné **et** la nuit) — et le
-     voyageur dort aussi. C'est la seule option où l'alerte avertit vraiment.
-   - **(b)** l'alerte échappe à la sourdine, comme `intervention` : elle sonne
-     à 2 h du matin, le brouillon part à l'heure. L'avertissement est réel mais
-     le téléphone sonne la nuit — ce que la sourdine existe pour éviter.
-   - **(c)** garder la sourdine et changer le texte de l'alerte : « ce texte
-     est parti » au lieu de « va partir ». Honnête, mais ce n'est plus un
-     garde-fou.
+Thierry a tranché, et sa réponse ajoute **deux règles que ma recommandation
+n'avait pas** :
 
-   ⚠ **Ne bloque que le lot 2.** Les lots 1 et 3 n'en dépendent pas.
+1. **La sourdine retarde l'alerte ET l'envoi** — mais **seulement pour un
+   brouillon que l'hôte a modifié** (`modifie_le` non nul). Un brouillon
+   **jamais touché n'est pas concerné par la sourdine** : il part la nuit comme
+   en journée. La sourdine protège le texte incertain, pas la réponse de l'IA.
+2. **Un délai de grâce de 15 minutes entre l'alerte et l'envoi** : l'alerte part
+   à la fin de la sourdine, et le brouillon **au plus tôt 15 minutes après
+   l'alerte**.
+
+**Pourquoi la règle 2 change tout, et pourquoi je ne l'avais pas vue** : sans
+elle, l'alerte et l'envoi tombent au même instant, et l'alerte « avertit »
+d'une chose déjà faite. Quinze minutes, c'est le temps de lire le SMS et de
+cliquer « Ne pas envoyer ».
+
+⚠ **UNE LECTURE QUE JE PRENDS ET QUE THIERRY DOIT CORRIGER SI ELLE EST
+FAUSSE** : j'applique le délai de grâce de 15 minutes à **tout** brouillon
+modifié dont la reprise déclenche une alerte, pas seulement à ceux qui sortent
+d'une sourdine. Un brouillon modifié dont l'échéance tombe à 14 h déclenche donc
+l'alerte à 14 h et l'envoi à 14 h 15. Sans ça, l'alerte de journée serait
+simultanée à l'envoi — exactement le défaut que la décision 7 corrige pour la
+nuit.
+
+**La chronologie complète d'un brouillon MODIFIÉ, sourdine 22 h–8 h :**
+
+| moment | ce qui se passe |
+|---|---|
+| 21 h 50 | l'hôte ouvre le brouillon, le corrige, quitte sans envoyer → `suspendu_le` et `modifie_le` posés, son texte est enregistré |
+| 22 h 20 | reprise (30 min sans modification) → échéance = temps restant, minimum 5 min |
+| dans la sourdine | ni alerte ni envoi |
+| 8 h 00 | **l'alerte part** (SMS/e-mail, canal de l'info manquante) |
+| 8 h 15 | **le brouillon part**, si l'hôte n'a rien fait entre-temps |
+
+Un brouillon **jamais touché** ignore tout ce tableau : il part à son échéance,
+nuit comprise, sans alerte.
 
 ---
 

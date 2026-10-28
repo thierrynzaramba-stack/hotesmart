@@ -453,3 +453,52 @@ l'envoi**, pour que l'avertissement précède toujours le texte.
 23 ») et `209413` (« La bulle »). Tout autre bien s'annonce « Logement <id> »
 dans le SMS **et** dans l'objet de l'e-mail : l'hôte d'un troisième bien reçoit
 une alerte qui lui parle d'un numéro.
+
+## Le délai d'alerte et la sourdine — l'état au lot 2 (27 octobre 2026)
+
+Le lot 2 a livré le **réglage** (`delais.alerte_info`, `delais.sourdine` dans
+`agent_alert_config.config[<ref>]`) et la **règle de calcul**
+(`lib/guestflow/sourdine.js`). Ce qui **n'est pas** encore branché : le report
+effectif de l'alerte « info manquante », qui est le **lot 3**.
+
+Donc aujourd'hui, et il faut le savoir : **le réglage existe à l'écran, et
+l'alerte part toujours dans le tour.** La migration pose `alerte_info = 0`
+partout, donc le réglage affiché dit la vérité pour tous les biens existants —
+mais un hôte qui le passerait à 15 minutes ne verrait rien changer avant le
+lot 3. ⚠ C'est une dette assumée du découpage, pas un oubli.
+
+### Ce que `lib/guestflow/sourdine.js` garantit déjà
+
+- Plage **`[début, fin[`** : sans cette convention, une échéance repoussée à
+  8 h 00 retomberait dans la plage et serait repoussée à nouveau. Un test le
+  vérifie explicitement.
+- **Les deux changements d'heure sont éprouvés.** La fin reste 8 h de Paris
+  quand la nuit dure 23 heures (29 mars 2027) ou 25 (25 octobre 2026). Et une
+  mesure qui surprend : le report du 24 octobre dure **10 h 30 réelles** pour
+  9 h 30 de cadran — l'heure rendue s'y ajoute. Ma première assertion disait
+  11 h 30 et elle était **fausse** ; le module avait raison. Le calcul est posé
+  en entier dans le test, pour que personne ne refasse l'erreur. **Une durée de
+  sourdine se calcule sur des INSTANTS, jamais sur la différence des heures
+  affichées.**
+- **Chaque refus a son motif** (`sourdine_absente`, `sourdine_inactive`,
+  `plage_illisible`, `plage_vide`, `hors_plage`, `instant_illisible`) — jamais
+  un « non » silencieux.
+- **Aucune horloge lue** : tout instant est injecté, un test le vérifie par
+  grep sur `Date.now()`.
+
+### Le fuseau, et pourquoi il est en dur
+
+`FUSEAU_V1 = 'Europe/Paris'` pour tous les biens, décision de Thierry du
+27 octobre 2026. `properties.timezone` **existe** et n'est volontairement pas
+lue tant qu'aucun bien n'est hors de France. La constante porte son motif :
+sans lui, la session qui lira « Paris en dur » dans six mois y verra un oubli et
+« corrigera » une décision.
+
+### Décision 7 : la nuit, un brouillon MODIFIÉ ne part pas
+
+Et **seulement** modifié : un brouillon jamais touché part la nuit comme en
+journée. La sourdine protège le texte incertain de l'hôte, pas la réponse de
+l'IA. L'alerte part à la fin de la plage, puis le brouillon **15 minutes plus
+tard** — sans ce délai de grâce, l'alerte « avertirait » d'une chose déjà faite.
+Le report est en place dans la passe (`reportes` au bilan) ; **l'alerte
+elle-même est au lot 3**.

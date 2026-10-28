@@ -510,3 +510,68 @@ test('le contrat des delais est PARTAGE, pas recopie (constat 7)', () => {
     assert.ok(!/<= *1440/.test(src), `${f} ne recopie pas la borne`)
   }
 })
+
+// ════════════════════════════════════════════════════════════════════════════
+// F. La derivation du delai (lib/guestflow/delais-contrat.js), lot 2
+// ════════════════════════════════════════════════════════════════════════════
+
+test('delaiDeReponse : les trois cas, et leurs motifs', () => {
+  const { delaiDeReponse } = require('../lib/guestflow/delais-contrat')
+  const cas = [
+    [{ mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } },
+     { differe: false, manuel: true, motif: 'validation_manuelle' }],
+    [{ mode: 'auto', delais: { reponse_ia: 0, alerte_info: 0 } },
+     { differe: false, manuel: false, motif: 'immediat' }],
+    [{ mode: 'auto', delais: { reponse_ia: 15, alerte_info: 15 } },
+     { differe: true, manuel: false, motif: 'differe' }],
+    // Sans bloc : le binaire d avant gouverne encore (bascule en cours).
+    [{ mode: 'auto', delais: null }, { differe: false, manuel: false, motif: 'sans_delai' }],
+    [{ mode: 'test', delais: null }, { differe: false, manuel: true, motif: 'sans_delai' }],
+    // Hors contrat : repli sur le mode, et le motif le DIT.
+    [{ mode: 'auto', delais: { reponse_ia: '15' } }, { differe: false, manuel: false, motif: 'hors_contrat' }],
+    [{ mode: 'test', delais: { reponse_ia: 99999 } }, { differe: false, manuel: true, motif: 'hors_contrat' }],
+  ]
+  for (const [reglages, attendu] of cas) {
+    const r = delaiDeReponse(reglages)
+    assert.equal(r.differe, attendu.differe, JSON.stringify(reglages))
+    assert.equal(r.manuel, attendu.manuel, JSON.stringify(reglages))
+    assert.equal(r.motif, attendu.motif, JSON.stringify(reglages))
+  }
+})
+
+test('delaiDeReponse : le delai differe porte ses minutes', () => {
+  const { delaiDeReponse } = require('../lib/guestflow/delais-contrat')
+  assert.equal(delaiDeReponse({ mode: 'auto', delais: { reponse_ia: 240 } }).minutes, 240)
+  assert.equal(delaiDeReponse({ mode: 'auto', delais: { reponse_ia: 1440 } }).minutes, 1440)
+})
+
+test('echeanceDeReponse : l horloge est TOUJOURS injectee', () => {
+  const { echeanceDeReponse } = require('../lib/guestflow/delais-contrat')
+  const T = Date.parse('2026-11-11T12:00:00.000Z')
+  assert.equal(echeanceDeReponse(15, T), '2026-11-11T12:15:00.000Z')
+  assert.equal(echeanceDeReponse(0, T), '2026-11-11T12:00:00.000Z')
+  // Le module ne lit pas l heure : sans cela, aucun test a dates figees.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'lib/guestflow/delais-contrat.js'), 'utf8')
+  assert.ok(!/Date\.now\(\)/.test(src), 'aucune lecture de l horloge dans le contrat')
+})
+
+// ─── La migration des donnees : son contrat, lu dans le script ─────────────
+
+test('⚠ la migration pose alerte_info = 0, JAMAIS 15 (decision de Thierry)', () => {
+  // L alerte « info manquante » n a jamais ete reglable : cron-classify appelle
+  // sendAlertNotifications dans le tour, sans lire le mode. Poser 15 minutes
+  // aurait CHANGE le comportement de biens en production sous couvert de
+  // migration. Les 15 minutes sont le defaut des biens NEUFS.
+  const src = require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'scripts/migrer-modes-vers-delais.js'), 'utf8')
+  assert.ok(/alerte_info: 0/.test(src), 'alerte_info = 0')
+  assert.ok(!/alerte_info: 15/.test(src), 'jamais 15 dans la migration')
+  // A blanc par defaut : ce script touche le reglage qui gouverne les envois.
+  assert.ok(/const GO = process\.argv\.includes\('--go'\)/.test(src), 'a blanc par defaut')
+  assert.ok(/if \(!GO\) continue/.test(src), 'rien ne s ecrit sans --go')
+  // Idempotent : un bloc deja conforme n est pas touche.
+  assert.ok(/dejaFaits\+\+/.test(src), 'idempotence comptee')
+  // L empreinte refuse une base inconnue.
+  assert.ok(/base === 'INCONNUE'[\s\S]{0,200}process\.exit\(1\)/.test(src), 'refus sur base inconnue')
+})

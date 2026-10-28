@@ -142,15 +142,31 @@ function fusionnerBlobLegacy (existant, entrant) {
     }
     const propre = { ...valeur }
     // ⚠ ET L'ECART SE DIT, DANS LA FONCTION MEME QUI POSE « UN REJET SE DIT »
-    // (constat de la revue du 27 octobre 2026). `delete` silencieux + 200
-    // { ok: true } : un writer qui enverrait `delais` le verrait disparaitre en
-    // croyant l'avoir pose. Un reglage d'envoi absent se lit comme « pas de
-    // reglage », et le bien retombe sur `mode` sans que personne soit prevenu.
+    // (constat de la premiere revue). `delete` silencieux + 200 { ok: true } :
+    // un writer qui enverrait `delais` le verrait disparaitre en croyant
+    // l'avoir pose.
+    //
+    // ⚠ MAIS L'EXEMPTION `dejaEnBase` VAUT ICI AUSSI, et son absence cassait
+    // l'onboarding (constat 3 de la troisieme revue). `seedAlertConfig` fait
+    // GET(blob) -> merge -> POST(blob) : il REEMET ce qu'il a lu. Des qu'un
+    // bien du compte porte `delais` — ce que la nouvelle UI ecrit au premier
+    // enregistrement —, `reservees` etait non vide, l'endpoint rendait 400 sans
+    // rien ecrire, et `pages/onboarding.html` ne teste pas `r.ok` : le seed des
+    // alertes echouait EN SILENCE pour ce compte. Meme classe de defaut que
+    // celui que `dejaEnBase` ferme, par la porte d'a cote.
+    //
+    // On refuse donc ce que l'appelant APPORTE sur une cle reservee, pas ce
+    // qu'il recopie. Et dans les deux cas la valeur en base gagne.
     const reservees = CLES_RESERVEES_AUX_CIBLES.filter(cle => cle in propre)
-    if (reservees.length) {
-      rejets.push(`${ref}.${reservees.join('+')} (réservé à sa cible)`)
+    const apportees = reservees.filter(cle => {
+      const enBase = base[ref] && base[ref][cle]
+      return JSON.stringify(enBase) !== JSON.stringify(propre[cle])
+    })
+    if (apportees.length) {
+      rejets.push(`${ref}.${apportees.join('+')} (réservé à sa cible)`)
       continue
     }
+    for (const cle of reservees) delete propre[cle]
     // Les champs entrants se superposent sur l'entree existante ; l'entree
     // n'est jamais remplacee, et les cles reservees restent celles de la base.
     sortie[ref] = { ...(sortie[ref] || {}), ...propre }
@@ -261,6 +277,35 @@ module.exports = async (req, res) => {
           delaisValides = { ...delaisValides, sourdine: ancienne };
         }
       }
+      // ⚠ LE RAPPEL SURVIT AU REMPLACEMENT DU BLOC (constat 9 de la seconde
+      // revue). `delaisPropres` ne rend que { reponse_ia, alerte_info,
+      // sourdine }, et le bloc est remplace en entier : un hote qui reglait
+      // 30 minutes puis enregistrait « Je valide chaque reponse » perdait le
+      // souvenir des 30 — et un POST `mode: 'auto'` ulterieur (onboarding,
+      // script) retombait sur 0, donc l'envoi immediat. Meme classe de defaut
+      // que le constat 8, par la porte qui restait.
+      if (cible === 'delais') {
+        const ancien = (blob[ref] && blob[ref].delais) || {};
+        // ⚠ LE SOUVENIR SE CAPTURE, PAS SEULEMENT SE GARDE (constat 4 de la
+        // troisieme revue). Je ne lisais que l'ancien `reponse_ia_rappel`,
+        // jamais le `reponse_ia` COURANT. Deroule reel : l'hote regle 30 min
+        // (aucun rappel n'existe encore), puis choisit « Je valide chaque
+        // reponse » — l'ancien rappel etait `undefined`, donc le 30 etait
+        // PERDU, et un POST `mode: 'auto'` ulterieur retombait sur 0, donc
+        // l'envoi immediat. La branche `cible === 'mode'` faisait deja le bon
+        // geste ; il manquait la symetrie.
+        const aCapturer = minutesValides(ancien.reponse_ia) && ancien.reponse_ia > 0
+          ? ancien.reponse_ia
+          : (minutesValides(ancien.reponse_ia_rappel) ? ancien.reponse_ia_rappel : null);
+        // Un reglage EXPLICITE a une valeur non nulle n'a pas besoin de
+        // souvenir : c'est lui, desormais, qui sera capture au prochain passage
+        // en validation manuelle.
+        const aGarder = minutesValides(delaisValides.reponse_ia) && delaisValides.reponse_ia > 0
+          ? null : aCapturer;
+        if (aGarder !== null) {
+          delaisValides = { ...delaisValides, reponse_ia_rappel: aGarder };
+        }
+      }
       // ⚠ LES DEUX CLES RESTENT D'ACCORD, ET C'EST UN CONSTAT GRAVE DE LA REVUE
       // DU 27 OCTOBRE 2026. `getPropertyMode` fait gouverner `delais` quand il
       // existe — mais DEUX lecteurs lisent encore `mode` et personne ne les
@@ -316,7 +361,18 @@ module.exports = async (req, res) => {
           delaisAlignes = { ...ancienDelais, reponse_ia: null,
             ...(aRetenir === undefined ? {} : { reponse_ia_rappel: aRetenir }) }
         } else {
-          const rappel = minutesValides(ancienDelais.reponse_ia_rappel) ? ancienDelais.reponse_ia_rappel : 0
+          // ⚠ LA VALEUR COURANTE D'ABORD (constat 8 de la revue du 27 octobre
+          // 2026). Ce bloc ne regardait que `reponse_ia_rappel` : un POST
+          // `mode: 'auto'` sur un bien dont `reponse_ia` valait DEJA 30, sans
+          // rappel, ecrivait 0 — envoi immediat, delai detruit. C'est exactement
+          // le defaut que ce bloc existe pour corriger, par l'autre porte.
+          // Plus aucun ecran ne poste `mode_ref` (le toggle a disparu), donc le
+          // chemin est atteignable par un script ou l'onboarding, pas par un
+          // clic — ce qui le rend plus silencieux, pas moins reel.
+          const dejaRegle = minutesValides(ancienDelais.reponse_ia) && ancienDelais.reponse_ia > 0
+            ? ancienDelais.reponse_ia : null
+          const rappel = dejaRegle !== null ? dejaRegle
+            : (minutesValides(ancienDelais.reponse_ia_rappel) ? ancienDelais.reponse_ia_rappel : 0)
           delaisAlignes = { ...ancienDelais, reponse_ia: rappel }
         }
       }

@@ -87,6 +87,13 @@
       <svg class="icon" style="width:36px;height:36px" aria-hidden="true"><use href="/shared/icons.svg#i-message"/></svg>
       <span data-i18n="messages.select"></span>
     </div>
+    <!-- ⚠ L'ETAT D'UN BROUILLON DIFFERE DESCENDU DANS LA SAISIE. Le mecanisme
+         d'edition existant sort la proposition du fil pour la mettre ici : sa
+         bulle n'est donc plus visible, et avec elle son compte a rebours. Sans
+         ce bandeau, l'hote corrigerait un texte sans voir qu'il est suspendu,
+         ni quand il partira, ni comment y renoncer — exactement les trois
+         informations de la maquette. -->
+    <div class="msg-saisie__echeance" data-bind="saisie-echeance" hidden></div>
     <div class="msg-saisie" data-bind="saisie" hidden>
       <textarea rows="1" data-bind="texte" data-i18n-attr="placeholder:messages.write;aria-label:messages.write"></textarea>
       <button type="button" class="btn btn--secondary btn--icon" data-bind="proposer" data-i18n-attr="aria-label:messages.propose;title:messages.propose">
@@ -180,7 +187,17 @@ async function appel (chemin, corpsPost) {
     ...(corpsPost ? { body: JSON.stringify(corpsPost) } : {})
   })
   const corps = await r.json().catch(() => ({}))
-  if (!r.ok) { const e = new Error(corps.message || corps.error || `HTTP ${r.status}`); e.status = r.status; e.code = corps.error; throw e }
+  // ⚠ `e.body` EXPOSE LE CORPS, ET SON ABSENCE RENDAIT UN CORRECTIF INERTE.
+  // Le serveur rend des 409 qui ne veulent PAS dire la meme chose — « fermee
+  // ailleurs » et « le cron est en train de l'envoyer » — et il distingue les
+  // deux par `statut` dans le corps. Sans `e.body`, l'appelant ne voyait que
+  // `status: 409` et traitait les deux pareil : la bulle d'une reponse qui part
+  // disparaissait comme si l'hote l'avait annulee.
+  if (!r.ok) {
+    const e = new Error(corps.message || corps.error || `HTTP ${r.status}`)
+    e.status = r.status; e.code = corps.error; e.body = corps
+    throw e
+  }
   return corps
 }
 
@@ -229,7 +246,7 @@ async function charger () {
         for (const b of data || []) if (b.provider_property_id) etat.biens.set(String(b.provider_property_id), { uuid: b.id, name: b.name, photo: b.photo_url || null })
       }),
     supabase.from('agent_tasks')
-      .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
+      .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, send_after, suspendu_le, modifie_le')
       .in('status', ['pending_validation']).eq('user_id', compteCourant())
       .order('created_at', { ascending: false }).limit(200)
       .then(({ data, error }) => { if (error) logger.error('Messages', 'taches', error); else etat.taches = data || [] })
@@ -444,7 +461,18 @@ function jourDe (iso) { return jourParis(new Date(iso).getTime()) }
 function renderFil () {
   const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
   const entete = $('[data-bind="fil-entete"]'), deroule = $('[data-list="fil"]'), vide = $('[data-bind="fil-vide"]')
-  if (!c) { entete.hidden = true; deroule.hidden = true; vide.hidden = false; delete document.body.dataset.fil; return }
+  if (!c) {
+    entete.hidden = true; deroule.hidden = true; vide.hidden = false
+    delete document.body.dataset.fil
+    // ⚠ LE BANDEAU D'ECHEANCE SE VIDE AUSSI (constat 7 de la troisieme revue) :
+    // il rendait la main AVANT `peindreEcheanceSaisie()`, donc quitter un fil
+    // pendant un « Modifier » laissait « Envoyer dans X min » et « Ne pas
+    // envoyer » visibles et BRANCHES au-dessus du composeur, sur l'ecran
+    // « selectionnez une conversation ». Invisible sur telephone, visible sur
+    // ordinateur.
+    peindreEcheanceSaisie()
+    return
+  }
   document.body.dataset.fil = '1'
   entete.hidden = false; deroule.hidden = false; vide.hidden = true
   $('[data-bind="fil-avatar"]').innerHTML = avatarConv(c)
@@ -464,6 +492,7 @@ function renderFil () {
   ].filter(Boolean).join('')
   const resa = $('[data-bind="fil-resa"]')
   if (bien) { resa.hidden = false; resa.href = `/calendrier?bien=${encodeURIComponent(bien.uuid)}` } else resa.hidden = true
+  peindreEcheanceSaisie()
 
   // Le menu du fil (etape 4) : epingler et archiver, PORTES de l'ancienne
   // page — writers /api/messages (actions epingler/archiver), jamais le RLS
@@ -505,16 +534,19 @@ function renderFil () {
       // Modifier : un clic posterait un message VIDE au voyageur (releve en
       // review — api/beds24 sendMessage n'a aucune garde). Rejeter reste.
       const texteProp = String(x.suggested_reply || '').trim()
-      const boutons = peutEcrireMessages() && !enCoursEnvoi ? `<span class="bulle__actions">
-          <details class="bulle-menu">
-            <summary aria-label="${esc(t('messages.more_actions'))}" title="${esc(t('messages.more_actions'))}">${icone('i-more')}</summary>
-            <div class="bulle-menu__liste"><button type="button" data-rejeter="${esc(String(x.id))}">${esc(t('messages.proposal_reject'))}</button></div>
-          </details>
-          ${texteProp ? `<button type="button" class="btn btn--secondary" data-modifier="${esc(String(x.id))}">${esc(t('messages.proposal_edit'))}</button>
-          <button type="button" class="btn btn--primary" data-envoyer-prop="${esc(String(x.id))}">${icone('i-send')}${esc(t('messages.send'))}</button>` : ''}
+      // ⚠ « NE PAS ENVOYER » SORT DU MENU, et le menu disparait avec lui
+      // (maquette validee par Thierry). Il n'y contenait QUE cette action :
+      // un `details` pour un seul item cachait le geste d'abandon derriere un
+      // clic de plus, sur une bulle qui, desormais, peut partir toute seule.
+      // C'est precisement le geste qui doit etre a portee immediate.
+      const boutons = peutEcrireMessages() && !enCoursEnvoi && texteProp
+        ? `<span class="bulle__actions">
+          <button type="button" class="btn btn--secondary" data-modifier="${esc(String(x.id))}">${esc(t('messages.proposal_edit'))}</button>
+          <button type="button" class="btn btn--primary" data-envoyer-prop="${esc(String(x.id))}">${icone('i-send')}${esc(t('messages.send'))}</button>
         </span>` : ''
+      // Sans texte propose, il reste l'abandon — et le pied le porte.
       morceaux.push(`<div class="bulle bulle--proposition${x.etatEnvoi === 'echec' ? ' bulle--echec' : ''}">
-        <span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.proposal'))}</span>${esc(x.suggested_reply || x.summary || '')}${boutons}</div>
+        ${enCoursEnvoi ? '' : bandeauEcheance(x)}<span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.proposal'))}</span>${esc(x.suggested_reply || x.summary || '')}${boutons}${enCoursEnvoi ? '' : piedEcheance(x)}</div>
         <span class="bulle-meta">${enCoursEnvoi ? esc(t('messages.sending'))
           : x.etatEnvoi === 'echec' ? `<span class="msg-echec">${esc(t('messages.not_sent'))}</span> · <button type="button" class="link caption msg-reessayer" data-envoyer-prop="${esc(String(x.id))}">${esc(t('messages.retry'))}</button>` : ''}</span>`)
     } else {
@@ -541,6 +573,8 @@ function renderFil () {
     b.addEventListener('click', () => modifierProposition(b.dataset.modifier)))
   deroule.querySelectorAll('[data-rejeter]').forEach(b =>
     b.addEventListener('click', () => rejeterProposition(b.dataset.rejeter)))
+  deroule.querySelectorAll('[data-reprendre]').forEach(b =>
+    b.addEventListener('click', () => reprendreEcheance(b.dataset.reprendre)))
   // Dette 67 : au sejour TERMINE, la proposition « Evaluer {prenom} ? » en
   // fin de fil — par le BUS du coeur seulement (meme writer que la fiche
   // resa : la fenetre standard avis.evaluer et ses boutons a niveaux).
@@ -581,6 +615,57 @@ function envoisDe (bookId) {
 async function lancerEnvoi (c, entree) {
   entree.etatEnvoi = 'en_cours'
   renderFil()
+  // ⚠ LE CLAIM MANQUAIT SUR CE CHEMIN, ET C'ETAIT UN CONSTAT GRAVE DE LA REVUE
+  // (constat 3, 27 octobre 2026). Je ne l'avais pose que sur
+  // `envoyerProposition` — le bouton « Envoyer » de la bulle. Mais « Modifier
+  // puis Envoyer » passe par ICI, et n'avait pour protection que
+  // `suspendu_le` — que la reprise automatique du cron EFFACE apres 30 minutes
+  // d'inactivite (et `updated_at` ne bouge qu'au `blur`, pas a la frappe).
+  //
+  // Le scenario, entierement realiste : brouillon differe a 60 minutes, l'hote
+  // ouvre a T et tape sans quitter le champ ; a T+30 le cron reprend la
+  // suspension, puis envoie a l'echeance ; l'hote clique « Envoyer » →
+  // DEUXIEME message au voyageur.
+  //
+  // Un seul verrou, le meme pour les deux chemins.
+  if (entree.valideTache) {
+    const x = tacheParId(entree.valideTache)
+    if (x && valide(x.send_after)) {
+      // ⚠ LA SAUVEGARDE DU BROUILLON D'ABORD, ET C'EST UNE COURSE QUE J'AVAIS
+      // CREEE (constat 5 de la troisieme revue). Cliquer « Envoyer » declenche
+      // d'abord le `blur` du champ, donc un POST `brouillon` NON ATTENDU ; le
+      // `click` enchaine sur `reserver`. Les deux partaient en meme temps.
+      //
+      // Si `reserver` arrivait le premier, `brouillon` recevait 409 et son
+      // gestionnaire appelait `retirerTache` : de retour ici, la tache
+      // n'existait plus, `cloreTache` n'etait JAMAIS appelee. Le message etait
+      // parti, la tache restait `sending` dix minutes, puis revenait a l'hote
+      // avec « impossible de savoir si le message est parti » et un incident au
+      // fondateur — et un second clic dupliquait le message chez le voyageur.
+      //
+      // `enregistrerBrouillonEnCours` est idempotent et ne fait rien si le
+      // texte n'a pas bouge : l'attendre ne coute rien dans le cas courant.
+      await enregistrerBrouillonEnCours()
+      try {
+        await appel('/api/messages', { action: 'reserver', task_id: String(x.id) })
+        entree.reservee = true
+      } catch (err) {
+        if (err.status === 409) {
+          noteReglage(t('messages.deja_partie'))
+          const liste = envoisDe(c.bookId)
+          liste.splice(liste.indexOf(entree), 1)
+          retirerTache(x)
+          etat.enEdition = null
+          renderFil()
+          return
+        }
+        logger.error('Messages', 'reservation avant envoi', err)
+        entree.etatEnvoi = 'echec'
+        renderFil()
+        return
+      }
+    }
+  }
   try {
     const origine = entree.valideTache ? 'ia_modifiee' : 'hote'
     await posterMessage(c, entree.texte, origine)
@@ -602,6 +687,13 @@ async function lancerEnvoi (c, entree) {
     renderFil(); renderListe()
   } catch (err) {
     logger.error('Messages', 'envoi', err)
+    // Une reservation posee ici se relache : sinon la tache reste « sending »
+    // jusqu'a la reprise des orphelines du cron (dix minutes).
+    if (entree.reservee && entree.valideTache) {
+      entree.reservee = false
+      try { await appel('/api/messages', { action: 'relacher', task_id: String(entree.valideTache) }) }
+      catch (e2) { logger.error('Messages', 'relachement', e2) }
+    }
     entree.etatEnvoi = 'echec'
     renderFil()
   }
@@ -640,19 +732,37 @@ async function envoyerProposition (id) {
   if (!texte) return
   x.etatEnvoi = 'en_cours'
   renderFil()
+  let reserve = false
   try {
-    // Deux onglets, ou la V5 et l'ancienne page : la tache a pu etre validee
-    // ailleurs APRES notre chargement. Le verrou serveur ne ferme que la
-    // double CLOTURE — relire le statut ici evite le double MESSAGE au
-    // voyageur (releve en review). Lecture illisible = pas d'envoi (Reessayer).
-    const { data: frais, error } = await supabase.from('agent_tasks')
-      .select('status').eq('id', x.id).eq('user_id', compteCourant()).maybeSingle()
-    if (error) throw new Error(error.message)
-    if (!frais || frais.status !== 'pending_validation') { retirerTache(x); return }
+    // ⚠ ON RESERVE AVANT D'ENVOYER, ET C'EST LE CORRECTIF DU DEFAUT CENTRAL DU
+    // CHANTIER. Ces lignes relisaient le statut puis envoyaient : une
+    // atténuation, pas un verrou. Elle suffisait tant que SEUL un humain
+    // envoyait — deux onglets se soldaient par un 409 apres coup. Depuis que
+    // le CRON peut envoyer la meme proposition a son echeance, la fenetre
+    // entre la relecture et l'envoi produit le DOUBLE MESSAGE au voyageur.
+    //
+    // `reserver` fait les deux d'un coup : il claime la tache (`sending`) par
+    // un UPDATE conditionnel, donc il DIT si quelqu'un d'autre l'a prise. Un
+    // 409 n'est pas une erreur a reessayer : c'est « cette reponse vient de
+    // partir », et on n'envoie rien.
+    await appel('/api/messages', { action: 'reserver', task_id: String(x.id) })
+    reserve = true
     await posterMessage(c, texte, 'ia_validee')
     await cloreTache(x, 'done', texte, c)
   } catch (err) {
+    if (err.status === 409) {
+      noteReglage(t('messages.deja_partie'))
+      retirerTache(x)
+      return
+    }
     logger.error('Messages', 'envoi proposition', err)
+    // ⚠ UNE RESERVATION SE RELACHE. Sans ca, un envoi rate laisserait la tache
+    // en « sending » jusqu'a la reprise des orphelines du cron — dix minutes
+    // pendant lesquelles le voyageur attend et l'hote ne peut rien faire.
+    if (reserve) {
+      try { await appel('/api/messages', { action: 'relacher', task_id: String(x.id) }) }
+      catch (e2) { logger.error('Messages', 'relachement', e2) }
+    }
     x.etatEnvoi = 'echec'
     renderFil()
   }
@@ -668,8 +778,66 @@ function modifierProposition (id) {
   zone.value = x.suggested_reply || ''
   ajusterHauteur(zone)
   etat.enEdition = { tacheId: x.id, bookId: String(etat.ouverte) }
+  // ⚠ OUVRIR SUSPEND L'ECHEANCE (regle 2 du chantier). Sans ca, l'hote
+  // corrigerait un texte qui part sous ses doigts. L'appel est optimiste :
+  // l'ecran n'attend pas, mais la suspension est posee en base — c'est elle
+  // que le cron lit, pas l'ecran.
+  //
+  // ⚠ `ouverture: true` NE POSE PAS `modifie_le` : ouvrir, lire et refermer
+  // n'est pas modifier. Sans cette distinction, un simple coup d'oeil
+  // declencherait l'alerte de reprise et la sourdine de nuit (decision 7).
+  if (valide(x.send_after) && peutEcrireMessages()) {
+    // ⚠ L'ECHEC DE LA SUSPENSION SE VOIT, ET LE COMMENTAIRE NE PROMET PLUS UN
+    // `await` QUI N'EXISTE PAS (constat 8 de la seconde revue : j'avais ecrit
+    // « LA SUSPENSION EST ATTENDUE » au-dessus d'un appel toujours lance sans
+    // `await`).
+    //
+    // Ce qui est reellement fait, et pourquoi c'est le bon compromis : l'ecran
+    // pose `suspendu_le` de facon OPTIMISTE pour que l'editeur s'ouvre sans
+    // attente, et le DEFAIT si l'appel echoue — l'hote voit alors que le compte
+    // a rebours court toujours, avant de s'etre mis a ecrire. Attendre
+    // l'aller-retour bloquerait l'ouverture de l'editeur sur chaque clic
+    // « Modifier », y compris pour les propositions sans echeance.
+    x.suspendu_le = new Date().toISOString()
+    appel('/api/messages', { action: 'brouillon', task_id: String(x.id), ouverture: true })
+      .catch(e => {
+        logger.error('Messages', 'suspension brouillon', e)
+        // L'ecran revient a l'etat REEL : le compte a rebours court toujours,
+        // et l'hote doit le savoir avant de se mettre a ecrire.
+        x.suspendu_le = null
+        renderFil()
+        noteReglage(t('messages.mode_error'))
+      })
+  }
   renderFil()
   zone.focus()
+}
+
+// ⚠ « ENVOYER DANS X » EST LA REPRISE, et son libelle dit l'EFFET plutot que le
+// mecanisme (demande de Thierry) : un hote ne reprend pas un compte a rebours,
+// il choisit que sa reponse partira dans douze minutes.
+async function reprendreEcheance (id) {
+  const x = tacheParId(id)
+  if (!x || !x.suspendu_le || x.etatEnvoi === 'en_cours') return
+  const avant = x.suspendu_le
+  x.suspendu_le = null
+  renderFil()
+  try {
+    // ⚠ LE `send_after` DU SERVEUR FAIT FOI (constat 6). Je n'effacais que
+    // `suspendu_le` : la bulle recalculait donc son compte a rebours sur
+    // l'ANCIENNE echeance, et l'hote lisait « Part bientot » juste apres avoir
+    // clique « Envoyer dans 12 min ».
+    const r = await appel('/api/messages', { action: 'reprendre', task_id: String(x.id) })
+    if (r && r.send_after) { x.send_after = r.send_after; renderFil() }
+  } catch (err) {
+    if (err.status === 409) { retirerTache(x); return }
+    logger.error('Messages', 'reprise echeance', err)
+    // L'ecran revient a l'etat REEL : une echeance qu'on croit reprise alors
+    // qu'elle est toujours suspendue ferait attendre l'hote pour rien.
+    x.suspendu_le = avant
+    renderFil()
+    noteReglage(t('messages.mode_error'))
+  }
 }
 async function rejeterProposition (id) {
   const x = tacheParId(id)
@@ -688,6 +856,24 @@ async function cloreTache (x, statut, texte, c, origine = 'ia_validee') {
   try {
     await appel('/api/messages', { action: 'proposition', task_id: String(x.id), statut, ...(texte ? { texte } : {}) })
   } catch (err) {
+    // ⚠ UN 409 N'A PLUS UN SEUL SENS, ET LE CONFONDRE FAIT DISPARAITRE LA BULLE
+    // D'UNE REPONSE QUI PART — constat GRAVE de la troisieme revue.
+    //
+    // Ce lot a restreint `CLOTURABLES` cote serveur : un rejet sur une tache
+    // que le CRON a claimee (`sending`) repond desormais
+    // `409 { error: 'deja_close', statut: 'sending' }`. Ce chemin traitait tout
+    // 409 comme « fermee ailleurs » et appelait `retirerTache` sans un mot :
+    // l'hote cliquait « Ne pas envoyer », la bulle s'effacait, il croyait avoir
+    // annule — ET LE MESSAGE PARTAIT.
+    //
+    // Le serveur rend le `statut` dans le corps : on s'en sert.
+    if (err.status === 409 && err.body && err.body.statut === 'sending' && statut === 'ignored') {
+      noteReglage(t('messages.trop_tard'))
+      // La bulle RESTE : le cron finit son envoi, et elle disparaitra au
+      // rechargement quand la tache sera `done`. L'effacer ici affirmerait une
+      // annulation qui n'a pas eu lieu.
+      return
+    }
     // 409 deja_close : fermee ailleurs (ancienne page, autre onglet) — meme sortie.
     if (err.status !== 409) {
       logger.error('Messages', 'cloture proposition', err)
@@ -743,7 +929,7 @@ async function proposer () {
 }
 async function rechargerTaches () {
   const { data, error } = await supabase.from('agent_tasks')
-    .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at')
+    .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, send_after, suspendu_le, modifie_le')
     .in('status', ['pending_validation']).eq('user_id', compteCourant())
     .order('created_at', { ascending: false }).limit(200)
   if (error) return
@@ -753,6 +939,141 @@ async function rechargerTaches () {
   etat.taches = tachesOuvertes(data || [], { bookings: sejours, aujourdHui: etat.aujourdHui })
   indexerTaches()
   majBadge()
+}
+
+// ⚠ CE QUE L'HOTE A ECRIT PART EN BASE, SINON C'EST LE TEXTE DE L'IA QUI PART
+// (decision 6). Appelee au `blur` de la saisie et au changement de fil : les
+// deux facons de quitter l'editeur.
+//
+// Elle ne fait rien si le texte n'a pas bouge — un `blur` par clic ailleurs
+// n'est pas une modification, et poser `modifie_le` pour rien declencherait
+// l'alerte de reprise et la sourdine de nuit (decision 7).
+async function enregistrerBrouillonEnCours () {
+  const ed = etat.enEdition
+  if (!ed || !peutEcrireMessages()) return
+  const x = tacheParId(ed.tacheId)
+  if (!x || !valide(x.send_after)) return
+  const zone = $('[data-bind="texte"]')
+  const texte = String(zone.value || '').trim()
+  if (!texte || texte === String(x.suggested_reply || '').trim()) return
+  // L'ecran suit tout de suite : ce qui partira est ce qu'il montre.
+  x.suggested_reply = texte
+  x.modifie_le = new Date().toISOString()
+  try {
+    await appel('/api/messages', { action: 'brouillon', task_id: String(x.id), texte })
+  } catch (err) {
+    if (err.status === 409) { retirerTache(x); return }
+    logger.error('Messages', 'brouillon', err)
+    // ⚠ L'ECHEC SE DIT. Un brouillon que l'hote croit enregistre et qui ne
+    // l'est pas, c'est le texte de l'IA qui partira a sa place.
+    noteReglage(t('messages.mode_error'))
+  }
+}
+
+// Le bandeau au-dessus de la saisie, quand une proposition DIFFEREE y est
+// descendue. Memes elements que dans la bulle — l'etat, ce qui se passera, et
+// l'abandon — parce que c'est le meme objet : seule sa place change.
+function peindreEcheanceSaisie () {
+  const zone = $('[data-bind="saisie-echeance"]')
+  const ed = etat.enEdition
+  const x = ed && String(ed.bookId) === String(etat.ouverte) ? tacheParId(ed.tacheId) : null
+  // Pas d'edition, ou une proposition SANS echeance (validation manuelle) :
+  // rien a dire, et un bandeau vide serait du bruit.
+  if (!x || !valide(x.send_after)) { zone.hidden = true; zone.innerHTML = ''; return }
+  zone.hidden = false
+  zone.innerHTML = `<span class="bulle__echeance${x.suspendu_le ? ' bulle__echeance--suspendu' : ''}">`
+    + (x.suspendu_le ? icone('i-pause') + esc(t('messages.vous_modifiez'))
+      : icone('i-today') + esc(etiquetteEcheance(x)))
+    + `</span>` + piedEcheance(x)
+  zone.querySelectorAll('[data-reprendre]').forEach(b =>
+    b.addEventListener('click', () => reprendreEcheance(b.dataset.reprendre)))
+  zone.querySelectorAll('[data-rejeter]').forEach(b =>
+    b.addEventListener('click', () => rejeterProposition(b.dataset.rejeter)))
+}
+
+// ─── L'ECHEANCE D'UN BROUILLON DIFFERE (chantier « delai de reponse IA ») ────
+//
+// ⚠ LE COMPTE A REBOURS EST CALCULE ICI, PAS DEMANDE AU SERVEUR, et il ne se
+// rafraichit PAS tout seul. L'echeance (`send_after`) arrive avec la tache,
+// dans la meme requete : afficher « Part dans 12 min » ne coute donc aucun
+// appel. Un rafraichissement periodique aurait fait tourner un minuteur sur
+// chaque fil ouvert pour une precision que le cron ne tient pas de toute facon
+// — il passe toutes les cinq minutes.
+function dureeCourte (ms) {
+  // Jamais « 0 min » : sous la minute, on arrondit a 1. Un compte a rebours qui
+  // affiche zero pendant quarante secondes a l'air casse.
+  const min = Math.max(1, Math.round(ms / 60000))
+  if (min < 60) return t('messages.duree_min', { n: min })
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  return m ? t('messages.duree_h_min', { h, m: t('messages.duree_min', { n: m }) })
+    : t('messages.duree_h', { n: h })
+}
+
+// Le bandeau de la bulle : ambre quand ca part, gris quand l'hote tient la main.
+// ⚠ UNE ECHEANCE DEPASSEE NE S'AFFICHE PAS EN NEGATIF. Le cron passe toutes les
+// cinq minutes : une echeance peut etre passee de quatre minutes sans que rien
+// ne soit casse. « Part d'un instant a l'autre » est la seule phrase vraie dans
+// cet intervalle.
+function bandeauEcheance (x) {
+  // ⚠ L'ECHEANCE D'ABORD, LA SUSPENSION ENSUITE (constat 5 de la seconde
+  // revue). Je testais `suspendu_le` AVANT `send_after` : une tache suspendue
+  // SANS echeance affichait « En attente : vous modifiez » pour toujours, sans
+  // lien de reprise (le pied exige une echeance) et sans que le cron la reprenne
+  // (`reprendreSuspensionsDormantes` exige `send_after` non nul). Un etat sans
+  // issue, et il etait atteignable : `relacher` desarme la tache en laissant
+  // `suspendu_le`.
+  // Les deux bouts sont corriges — `relacher` efface aussi la suspension — et
+  // cette garde est la seconde ceinture, pour toute tache deja dans cet etat.
+  const quand = valide(x.send_after) ? Date.parse(x.send_after) : NaN
+  if (!Number.isFinite(quand)) return ''
+  if (x.suspendu_le) {
+    return `<span class="bulle__echeance bulle__echeance--suspendu">${icone('i-pause')}${esc(t('messages.vous_modifiez'))}</span>`
+  }
+  return `<span class="bulle__echeance">${icone('i-today')}${esc(etiquetteEcheance(x))}</span>`
+}
+
+// ⚠ UNE SEULE SOURCE POUR CETTE PHRASE : la bulle et le bandeau de la saisie
+// l'affichent tous les deux. Deux copies divergent — c'est la regle du depot,
+// et elle vaut pour un libelle comme pour une regle de calcul.
+function etiquetteEcheance (x) {
+  const quand = valide(x.send_after) ? Date.parse(x.send_after) : NaN
+  if (!Number.isFinite(quand)) return ''
+  const reste = quand - Date.now()
+  return reste > 0 ? t('messages.part_dans', { duree: dureeCourte(reste) })
+    : t('messages.part_bientot')
+}
+
+// Le pied : ce qui se passera sans rien faire, et l'abandon.
+// ⚠ « Envoyer dans X » EST l'action de reprise, et son libelle dit l'EFFET
+// plutot que le mecanisme (demande de Thierry) : un hote ne reprend pas un
+// compte a rebours, il choisit que sa reponse partira dans douze minutes.
+// ⚠ CE QUE LE BOUTON PROMET DOIT ETRE CE QUE LE SERVEUR FERA (constat 4 de la
+// seconde revue). J'affichais `send_after - maintenant`, qui DECROIT pendant la
+// suspension ; le serveur, lui, recalcule `max(5 min, send_after - suspendu_le)`
+// — fige au moment ou l'hote a ouvert le brouillon. Un brouillon a 30 minutes
+// laisse ouvert vingt minutes affichait « Envoyer dans 10 min » et repartait
+// pour 30 ; passe l'echeance il affichait « Part bientot » et repartait pour 5.
+//
+// La MEME formule des deux cotes. Elle est ecrite ici et dans api/messages.js
+// (`REPRISE_MIN_MS`) : c'est la dette de duplication deja notee au KB.
+const REPRISE_MIN_MS_ECRAN = 5 * 60 * 1000
+function resteALaReprise (x) {
+  const quand = valide(x.send_after) ? Date.parse(x.send_after) : NaN
+  const suspendu = valide(x.suspendu_le) ? Date.parse(x.suspendu_le) : NaN
+  if (!Number.isFinite(quand) || !Number.isFinite(suspendu)) return NaN
+  return Math.max(REPRISE_MIN_MS_ECRAN, quand - suspendu)
+}
+
+function piedEcheance (x) {
+  if (!peutEcrireMessages()) return ''
+  const id = esc(String(x.id))
+  const reste = resteALaReprise(x)
+  const reprise = x.suspendu_le && Number.isFinite(reste)
+    ? `<button type="button" class="link" data-reprendre="${id}">${icone('i-today')}${esc(
+        t('messages.envoyer_dans', { duree: dureeCourte(reste) }))}</button>`
+    : ''
+  return `<span class="bulle__pied">${reprise}<button type="button" class="link" data-rejeter="${id}">${icone('i-close')}${esc(t('messages.ne_pas_envoyer'))}</button></span>`
 }
 
 // ─── Test / Auto et tiroir reglages (etape 4) ────────────────────────────────
@@ -765,35 +1086,6 @@ function modesDe (config) {
   const modes = {}
   for (const [k, v] of Object.entries(config || {})) modes[k] = (v && v.mode === 'auto') ? 'auto' : 'test'
   return modes
-}
-async function basculerMode (ref, nouveau) {
-  if (etat.modeEnCours || etat.modes === null) return
-  const actuel = etat.modes[ref] || 'test'
-  if (nouveau === actuel) return
-  // Passer en Auto est un geste LOURD : tout ce que l'IA sait part sans
-  // validation. Confirmation explicite ; le retour en Test n'en demande pas.
-  if (nouveau === 'auto' && !window.confirm(t('messages.mode_confirm_auto'))) return
-  etat.modeEnCours = true
-  renderTiroir()
-  let ecritureOk = false
-  try {
-    // POST CIBLE : le serveur merge le seul mode de CE bien dans le blob
-    // relu en base — jamais le blob entier depuis l'ecran, deux onglets
-    // s'ecrasaient des configs d'alertes (releve en review).
-    await appel('/api/agent-config', { mode_ref: ref, mode: nouveau })
-    ecritureOk = true
-  } catch (err) {
-    logger.error('Messages', 'mode', err)
-  }
-  try {
-    const relu = await appel('/api/agent-config')
-    etat.modes = modesDe(relu.config)
-  } catch (err) { logger.error('Messages', 'mode relecture', err) }
-  etat.modeEnCours = false
-  if (!ecritureOk || (etat.modes && (etat.modes[ref] || 'test') !== nouveau)) {
-    noteReglage(t('messages.mode_error'))
-  }
-  renderTiroir()
 }
 // Le kill switch par bien : writer existant /api/property-automation, puis
 // relecture — meme discipline que le mode.
@@ -1098,29 +1390,145 @@ async function apercuProgramme (corps, id) {
 }
 
 // ── Volet « Reponses de l'IA » : mode, pause, consignes, garde, connaissances.
+// ─── LES DELAIS DU BIEN (chantier « delai de reponse IA », lot 2) ───────────
+//
+// ⚠ L'INTERRUPTEUR Test/Auto A DISPARU D'ICI, remplace par un DELAI. Les deux
+// cas extremes sont les comportements d'avant, octet pour octet : « Tout de
+// suite » est l'ancien Mode Auto, « Je valide chaque reponse » l'ancien Mode
+// Test. Entre les deux, le brouillon attend et part seul — le parachute de
+// l'oubli. La cle `mode` reste ecrite en base par le serveur tant que la
+// bascule n'est pas finie (lot 4) : l'ecran n'a pas a la connaitre.
+const PILULES = [
+  { v: 0,   cle: 'messages.delai_now' },
+  { v: 15,  min: true },
+  { v: 60,  heure: true },
+  { v: 240, heure: true }
+]
+const VALEURS_PILULES = PILULES.map(p => p.v)
+
+// L'etat d'edition des delais : une SEULE source, le DOM ne fait que la
+// refleter. Melanger « la pilule dans l'etat, les heures dans le DOM » produit
+// exactement les pertes de saisie que ce fichier a deja corrigees deux fois
+// (brouillons de programmes, textes de consignes).
+function delaisDuBien (ref) {
+  const d = (etat.configIA && etat.configIA[ref] && etat.configIA[ref].delais) || null
+  const ok = d && typeof d === 'object' && !Array.isArray(d)
+  const s = ok && d.sourdine && typeof d.sourdine === 'object' && !Array.isArray(d.sourdine) ? d.sourdine : {}
+  const heure = (v, repli) => /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(String(v)) ? String(v) : repli
+  return {
+    ref,
+    // Sans bloc `delais`, on DERIVE du mode : un bien pas encore bascule
+    // s'affiche juste, au lieu de montrer un reglage vide.
+    reponse_ia: ok && 'reponse_ia' in d && (d.reponse_ia === null || Number.isInteger(d.reponse_ia))
+      ? d.reponse_ia
+      : ((etat.modes && etat.modes[ref]) === 'auto' ? 0 : null),
+    alerte_info: ok && Number.isInteger(d.alerte_info) ? d.alerte_info : 0,
+    sourdine: { active: s.active === true, debut: heure(s.debut, '22:00'), fin: heure(s.fin, '08:00') }
+  }
+}
+
+function delaisEnCours (ref) {
+  if (!etat.delaisEdit || etat.delaisEdit.ref !== ref) etat.delaisEdit = delaisDuBien(ref)
+  return etat.delaisEdit
+}
+
+function libellePilule (p) {
+  if (p.cle) return t(p.cle)
+  if (p.min) return t('messages.duree_min', { n: p.v })
+  return t('messages.duree_h', { n: p.v / 60 })
+}
+
+// Une rangee de pilules + « Autre… ». `champ` dit laquelle des deux echeances.
+// ⚠ `.msg-pilules` est la classe des FILTRES de la liste, greffee dans ui.css :
+// defilement horizontal possible, barre masquee sur telephone. Une seconde
+// regle identique aurait divergé.
+function rangeePilules (champ, valeur, surMesure) {
+  const off = etat.modeEnCours ? 'disabled' : ''
+  const pilules = PILULES.map(p =>
+    '<button type="button" class="tab" data-delai="' + champ + '|' + p.v + '" aria-pressed="'
+    + (valeur === p.v) + '" ' + off + '>' + esc(libellePilule(p)) + '</button>').join('')
+  const champs = surMesure
+    ? '<span class="row" style="gap: 8px; align-items: center">'
+      + '<input type="number" min="0" max="24" step="1" inputmode="numeric" data-delai-h="' + champ
+      + '" value="' + Math.floor((valeur || 0) / 60) + '" aria-label="' + esc(t('messages.delai_h'))
+      + '" style="width: 68px" ' + off + '>'
+      + '<span class="caption muted">' + esc(t('messages.delai_h')) + '</span>'
+      + '<input type="number" min="0" max="59" step="5" inputmode="numeric" data-delai-m="' + champ
+      + '" value="' + ((valeur || 0) % 60) + '" aria-label="' + esc(t('messages.delai_min'))
+      + '" style="width: 68px" ' + off + '>'
+      + '<span class="caption muted">' + esc(t('messages.delai_min')) + '</span></span>'
+    : ''
+  return '<span class="msg-pilules" role="group">' + pilules
+    + '<button type="button" class="tab" data-delai="' + champ + '|autre" aria-pressed="' + surMesure
+    + '" ' + off + '>' + esc(t('messages.delai_autre')) + '</button></span>' + champs
+}
+
 function voletIA (ref) {
-  const mode = etat.modes ? (etat.modes[ref] || 'test') : null
   const enPause = etat.pauses[ref] === true
-  return `<div class="msg-tiroir__bloc">
-      <span class="msg-tiroir__nom">${esc(t('messages.mode_label'))}</span>
-      ${mode !== null ? `<span class="msg-mode" role="group" aria-label="${esc(t('messages.mode_label'))}">
-        <button type="button" class="tab" data-tiroir-mode="test" aria-pressed="${mode === 'test'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_test'))}</button>
-        <button type="button" class="tab" data-tiroir-mode="auto" aria-pressed="${mode === 'auto'}" ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.mode_auto'))}</button>
-      </span>` : `<span class="caption muted">${esc(t('messages.load_error'))}</span>`}
-      <p class="caption muted">${esc(t('messages.auto_scope'))}</p>
-      <label class="row caption" style="gap: 6px">
-        <input type="checkbox" data-tiroir-pause ${enPause ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''}>
-        ${esc(t('messages.pause_label'))}
-      </label>
-    </div>
-    <div class="msg-tiroir__bloc">
+  if (etat.configIA === null) {
+    return '<p class="caption muted" style="padding: 14px 18px">' + esc(t('messages.load_error')) + '</p>'
+  }
+  const off = etat.modeEnCours ? 'disabled' : ''
+  const d = delaisEnCours(ref)
+  const manuel = d.reponse_ia === null
+  const surMesureR = !manuel && !VALEURS_PILULES.includes(d.reponse_ia)
+  return '<div class="msg-tiroir__bloc">'
+      + '<span class="msg-tiroir__nom">' + icone('i-ai') + esc(t('messages.delai_titre')) + '</span>'
+      + (manuel ? '' : rangeePilules('reponse', d.reponse_ia, surMesureR))
+      + (manuel ? '' : '<p class="caption muted">' + esc(t('messages.delai_aide')) + '</p>')
+      + '<button type="button" class="btn ' + (manuel ? 'btn--primary' : 'btn--secondary')
+      + '" data-delai-manuel aria-pressed="' + manuel + '" ' + off + '>'
+      + icone('i-check') + esc(t('messages.delai_manuel')) + '</button>'
+      + '<p class="caption muted">' + esc(t('messages.auto_scope')) + '</p>'
+    + '</div>'
+    // ⚠ LE BLOC « INFO MANQUANTE : ME PREVENIR APRES » EST RETIRE DE CE LOT, ET
+    // CE N'EST PAS UN OUBLI — constat 6 de la revue du 27 octobre 2026.
+    //
+    // Le reglage s'enregistrait bien dans `delais.alerte_info`, mais AUCUN
+    // lecteur n'existe : `lib/cron-classify.js` appelle toujours
+    // `sendAlertNotifications` dans le tour. Un hote qui reglait « 4 h »
+    // recevait ses alertes immediatement — exactement l'« interrupteur qui
+    // mente » que le commentaire d'api/agent-config.js condamne, et que ce
+    // chantier a deja corrige une fois (l'ecran affichait « Test » pendant que
+    // GuestFlow envoyait).
+    //
+    // La maquette validee par Thierry le portait ; le livrer INERTE serait pire
+    // que le livrer une semaine plus tard. Il revient au LOT 3, avec la passe
+    // qui consomme `alert_after` — et le reglage, les cles i18n et la regle de
+    // sourdine sont deja la, donc ce sera le branchement, pas l'ecran.
+    //
+    //  + '<div class="msg-tiroir__bloc">'
+    //    + '<span class="msg-tiroir__nom">' + icone('i-alert') + esc(t('messages.alerte_titre')) + '</span>'
+    //    + rangeePilules('alerte', d.alerte_info, surMesureA)
+    //    + '<p class="caption muted">' + esc(t('messages.alerte_aide')) + '</p>'
+    //  + '</div>'
+    + '<div class="msg-tiroir__bloc">'
+      + '<label class="row caption" style="gap: 10px; font-weight: 600">' + icone('i-today')
+      + '<span style="flex: 1">' + esc(t('messages.sourdine_titre')) + '</span>'
+      + '<input type="checkbox" data-sourdine-active ' + (d.sourdine.active ? 'checked' : '') + ' ' + off
+      + ' style="accent-color: var(--info); width: 20px; height: 20px"></label>'
+      + '<span class="row" style="gap: 8px; align-items: center">'
+      + '<input type="time" data-sourdine-debut value="' + esc(d.sourdine.debut) + '" aria-label="'
+      + esc(t('messages.sourdine_debut')) + '" ' + off + '>' + icone('i-chevron')
+      + '<input type="time" data-sourdine-fin value="' + esc(d.sourdine.fin) + '" aria-label="'
+      + esc(t('messages.sourdine_fin')) + '" ' + off + '></span>'
+      + '<p class="caption muted">' + esc(t('messages.sourdine_aide')) + '</p>'
+    + '</div>'
+    + '<div class="msg-tiroir__bloc">'
+      + '<label class="row caption" style="gap: 6px">'
+      + '<input type="checkbox" data-tiroir-pause ' + (enPause ? 'checked' : '') + ' ' + off + '>'
+      + esc(t('messages.pause_label')) + '</label>'
+    + '</div>'
+    // ⚠ CE QUI SUIT EST L'EXISTANT, DANS SON ORDRE, ET IL NE BOUGE PAS
+    // (demande de Thierry : toute la configuration de l'IA vit dans ce volet).
+    // Seul le bloc Test/Auto a ete remplace, en tete.
+    + `<div class="msg-tiroir__bloc">
       <span class="msg-tiroir__nom">${esc(t('messages.prompting_title'))}</span>
       ${etat.prompting === null ? `<p class="caption muted">${esc(t('messages.load_error'))}</p>` : `
       <label class="caption muted">${esc(t('messages.prompting_global'))}</label>
       <textarea rows="5" data-consignes="global" ${etat.modeEnCours ? 'disabled' : ''}>${esc(etat.prompting.global)}</textarea>
       <label class="caption muted">${esc(t('messages.prompting_property'))}</label>
-      <textarea rows="4" data-consignes="bien" ${etat.modeEnCours ? 'disabled' : ''}>${esc(etat.prompting.overrides[ref] || '')}</textarea>
-      <button type="button" class="btn btn--primary" data-consignes-save ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.prompting_save'))}</button>`}
+      <textarea rows="4" data-consignes="bien" ${etat.modeEnCours ? 'disabled' : ''}>${esc(etat.prompting.overrides[ref] || '')}</textarea>`}
     </div>
     <div class="msg-tiroir__bloc">
       <span class="msg-tiroir__nom">${esc(t('messages.breaker_title'))}</span>
@@ -1128,6 +1536,24 @@ function voletIA (ref) {
       <a class="link small" href="/apps/agent-ai/knowledge">${esc(t('messages.knowledge'))}</a>
     </div>
     <h3 class="msg-tiroir__section">${esc(t('messages.tab_alerts'))}</h3>` + voletAlertes(ref)
+    // ⚠ UN SEUL « ENREGISTRER » POUR TOUT LE PANNEAU (demande de Thierry).
+    // Il couvre TROIS ecritures qui ne peuvent pas voyager ensemble : les
+    // delais et les alertes sont deux CIBLES de /api/agent-config, et
+    // « une cible par requete » est une garde posee en review (un POST du blob
+    // entier depuis deux onglets s'ecrasait) ; les consignes vivent dans une
+    // autre table, sous RLS. Donc trois requetes sequentielles, et un echec
+    // PARTIEL possible — c'est pourquoi `enregistrerPanneau` dit laquelle des
+    // trois n'est pas passee, au lieu d'un « erreur » global qui laisserait
+    // l'hote relancer les trois a l'aveugle.
+    //
+    // ⚠ LA PAUSE N'EST PAS DANS CE BOUTON, ET C'EST VOLONTAIRE : couper
+    // l'automatique est un geste d'URGENCE. Il part a la seconde ou la case
+    // change, comme avant. Un kill switch qui attend un « Enregistrer » n'est
+    // pas un kill switch.
+    + `<div class="msg-tiroir__bloc" style="border-bottom: 0">
+      <button type="button" class="btn btn--primary btn--block" data-panneau-save ${etat.modeEnCours ? 'disabled' : ''}>${icone('i-check')}${esc(t('messages.panneau_save'))}</button>
+      <p class="caption muted" style="margin: 0">${esc(t('messages.alerts_hint'))}</p>
+    </div>`
 }
 
 // ── Volet « Alertes » : 2 types x 2 canaux, porte Brevo, test apres
@@ -1154,30 +1580,206 @@ function voletAlertes (ref) {
       </div>
       <div class="msg-tiroir__canal">
         <label class="row caption" style="gap: 6px">
-          <input type="checkbox" data-alerte="${k}|email_enabled" ${a.email_enabled !== false ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''}>
+          <input type="checkbox" data-alerte="${k}|email_enabled" ${a.email_enabled !== false ? 'checked' : ''} ${etat.modeEnCours ? 'disabled' : ''} style="accent-color: var(--info)">
           ${esc(t('messages.channel_email'))}
         </label>
         <textarea rows="2" data-alerte="${k}|email_lines" ${etat.modeEnCours ? 'disabled' : ''} placeholder="${esc(t('messages.recipients_email_ph'))}">${esc(a.email_lines || '')}</textarea>
         <button type="button" class="link caption" data-tester="${k}|email">${esc(t('messages.test_send'))}</button>
       </div>
     </div>`
-  }).join('') + `<div class="msg-tiroir__bloc" style="border-bottom: 0">
-    <button type="button" class="btn btn--primary" data-alertes-save ${etat.modeEnCours ? 'disabled' : ''}>${esc(t('messages.alerts_save'))}</button>
-    <p class="caption muted" style="margin: 0">${esc(t('messages.alerts_hint'))}</p>
-  </div>`
+  }).join('')
+  // Le bouton des alertes a disparu : un seul « Enregistrer » couvre le
+  // panneau (voir la note en fin de voletIA).
 }
 
 function brancherTiroir (corps, ref) {
-  corps.querySelectorAll('[data-tiroir-mode]').forEach(x =>
-    x.addEventListener('click', () => basculerMode(ref, x.dataset.tiroirMode)))
+  const d = delaisEnCours(ref)
+  // Les pilules : un clic POSE la valeur dans l'etat d'edition, et re-rend.
+  // Rien ne part au serveur avant « Enregistrer » (demande de Thierry : un
+  // seul bouton pour tout le panneau).
+  corps.querySelectorAll('[data-delai]').forEach(x =>
+    x.addEventListener('click', () => {
+      const [champ, val] = x.dataset.delai.split('|')
+      const cle = champ === 'reponse' ? 'reponse_ia' : 'alerte_info'
+      if (val === 'autre') {
+        // « Autre… » ouvre les deux champs sans changer la valeur, SAUF si la
+        // valeur courante est une pilule : on part alors d'un pas qui n'est
+        // aucune des pilules, pour que les champs apparaissent vraiment.
+        if (VALEURS_PILULES.includes(d[cle]) || d[cle] === null) d[cle] = 30
+      } else {
+        d[cle] = Number(val)
+      }
+      renderTiroir()
+    }))
+  // « Je valide chaque reponse » : l'ancien Mode Test, dit par son effet.
+  //
+  // ⚠ LA CONFIRMATION DE THIERRY SURVIT AU CHANGEMENT D'INTERRUPTEUR, et je
+  // l'avais perdue en route. L'ancien ecran demandait confirmation pour passer
+  // en Auto, « parce que tout ce que l'IA sait part sans validation » — c'est
+  // sa demande du 11 octobre 2026. Le toggle a disparu ; LE GESTE, lui, est
+  // toujours la : quitter « Je valide chaque reponse » autorise des envois
+  // sans relecture. Un remplacement d'ecran ne doit pas emporter une garde
+  // produit en silence.
+  //
+  // Et c'est le SEUL chemin pour en sortir : les pilules ne sont pas rendues
+  // en mode manuel. Une seule place a garder.
+  corps.querySelector('[data-delai-manuel]')?.addEventListener('click', () => {
+    if (d.reponse_ia === null && !window.confirm(t('messages.mode_confirm_auto'))) return
+    d.reponse_ia = d.reponse_ia === null ? 0 : null
+    renderTiroir()
+  })
+  // Les champs h/min : l'etat suit la frappe, mais on ne RE-REND pas (le
+  // re-render replacerait le curseur au debut a chaque touche).
+  const lireSurMesure = (champ) => {
+    const cle = champ === 'reponse' ? 'reponse_ia' : 'alerte_info'
+    const h = Number(corps.querySelector('[data-delai-h="' + champ + '"]')?.value || 0)
+    const m = Number(corps.querySelector('[data-delai-m="' + champ + '"]')?.value || 0)
+    const total = (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0)
+    // Bornes du contrat serveur (lib/guestflow/delais-contrat.js) : 0 a 1440.
+    d[cle] = Math.max(0, Math.min(1440, total))
+  }
+  corps.querySelectorAll('[data-delai-h]').forEach(x =>
+    x.addEventListener('input', () => lireSurMesure(x.dataset.delaiH)))
+  corps.querySelectorAll('[data-delai-m]').forEach(x =>
+    x.addEventListener('input', () => lireSurMesure(x.dataset.delaiM)))
+  // La sourdine : la case re-rend (elle ouvre/ferme rien, mais l'etat doit
+  // suivre), les heures non.
+  corps.querySelector('[data-sourdine-active]')?.addEventListener('change', (e) => {
+    d.sourdine.active = e.target.checked === true
+  })
+  corps.querySelector('[data-sourdine-debut]')?.addEventListener('change', (e) => {
+    d.sourdine.debut = e.target.value || '22:00'
+  })
+  corps.querySelector('[data-sourdine-fin]')?.addEventListener('change', (e) => {
+    d.sourdine.fin = e.target.value || '08:00'
+  })
+  // ⚠ LA PAUSE RESTE IMMEDIATE : couper l'automatique est un geste d'urgence,
+  // il n'attend pas un « Enregistrer ».
   corps.querySelector('[data-tiroir-pause]')?.addEventListener('change', (e) =>
     basculerPause(ref, e.target.checked))
-  corps.querySelector('[data-consignes-save]')?.addEventListener('click', () => enregistrerConsignes(corps, ref))
-  corps.querySelector('[data-alertes-save]')?.addEventListener('click', () => enregistrerAlertes(corps, ref))
+  corps.querySelector('[data-panneau-save]')?.addEventListener('click', () => enregistrerPanneau(corps, ref))
   corps.querySelectorAll('[data-tester]').forEach(x => x.addEventListener('click', () => {
     const [type, canal] = x.dataset.tester.split('|')
     testerCanal(corps, ref, type, canal)
   }))
+}
+
+// Lire TOUT le panneau, en une fois, AVANT que quoi que ce soit ne re-rende.
+// C'est la seule facon de ne rien perdre : le conteneur est reconstruit a
+// chaque `renderTiroir()`, et ce qui n'a pas ete lu avant est perdu.
+function lireLePanneau (corps, ref) {
+  // ⚠ SANS CLE BREVO, LES CHAMPS SMS N'EXISTENT PAS A L'ECRAN — ET LES LIRE
+  // QUAND MEME LES EFFACE. `sms_enabled: etat.brevo && …checked` donnait
+  // `false` chez un hote sans Brevo : enregistrer le panneau aurait DESACTIVE
+  // ses SMS d'alerte sans qu'il touche a ce reglage. Le repli sur la valeur
+  // enregistree est la garde de l'ancien chemin.
+  const avant = (etat.configIA && etat.configIA[ref]) || {}
+  const lireType = (k) => ({
+    sms_enabled: etat.brevo
+      ? corps.querySelector('[data-alerte="' + k + '|sms_enabled"]')?.checked === true
+      : (avant[k] && avant[k].sms_enabled === true),
+    sms_lines: etat.brevo
+      ? (corps.querySelector('[data-alerte="' + k + '|sms_lines"]')?.value || '')
+      : ((avant[k] && avant[k].sms_lines) || ''),
+    email_enabled: corps.querySelector('[data-alerte="' + k + '|email_enabled"]')?.checked === true,
+    email_lines: corps.querySelector('[data-alerte="' + k + '|email_lines"]')?.value || ''
+  })
+  return {
+    alertes: { intervention: lireType('intervention'), info_unknown: lireType('info_unknown') },
+    consignes: {
+      global: (corps.querySelector('[data-consignes="global"]')?.value || '').trim(),
+      bien: (corps.querySelector('[data-consignes="bien"]')?.value || '').trim()
+    }
+  }
+}
+
+// ─── UN SEUL « ENREGISTRER », TROIS ECRITURES ───────────────────────────────
+//
+// ⚠ ELLES NE PEUVENT PAS VOYAGER ENSEMBLE, et ce n'est pas un choix : les
+// delais et les alertes sont deux CIBLES de /api/agent-config, et l'endpoint
+// refuse par 400 une requete qui en porte deux (garde posee en review — un
+// POST du blob entier depuis deux onglets s'ecrasait). Les consignes, elles,
+// vivent dans `agent_prompting`, sous RLS.
+//
+// ⚠ DONC L'ECHEC EST PARTIEL, ET IL SE DIT PARTIE PAR PARTIE. Un « erreur »
+// global laisserait l'hote relancer les trois a l'aveugle, sans savoir
+// laquelle est passee — et re-poster les delais qui ont deja reussi n'est pas
+// anodin : ils gouvernent les envois.
+async function enregistrerPanneau (corps, ref) {
+  if (etat.modeEnCours) return
+
+  // ⚠ LE FORMULAIRE SE LIT AVANT TOUT RE-RENDU, ET C'EST UN CONSTAT GRAVE DE LA
+  // SECONDE REVUE. J'appelais `renderTiroir()` d'abord : il fait
+  // `corps.innerHTML = voletIA(ref)` sur le MEME conteneur, donc il reconstruit
+  // les champs depuis `etat.configIA` et `etat.prompting` — c'est-a-dire depuis
+  // la BASE. Un hote qui tapait un nouveau destinataire d'alerte puis cliquait
+  // « Enregistrer » envoyait les ANCIENNES valeurs, et lisait « enregistré ».
+  // Une perte de saisie silencieuse, sur le bouton qui existe pour enregistrer.
+  //
+  // Les deux fonctions que ce bouton remplace (`enregistrerAlertes`,
+  // `enregistrerConsignes`) lisaient le DOM SANS re-rendre : la regression est
+  // entree avec la fusion en un seul bouton. Seuls les delais survivaient,
+  // parce qu'ils vivent dans `etat.delaisEdit`.
+  const d = delaisEnCours(ref)
+  const saisi = lireLePanneau(corps, ref)
+
+  etat.modeEnCours = true
+  geler(corps, true)
+  renderTiroir()
+  const echoues = []
+
+  // 1. Les delais (cible `delais`).
+  try {
+    await appel('/api/agent-config', { delais_ref: ref, delais: {
+      reponse_ia: d.reponse_ia === null ? null : Math.max(0, Math.min(1440, d.reponse_ia)),
+      alerte_info: Math.max(0, Math.min(1440, d.alerte_info)),
+      sourdine: { active: d.sourdine.active === true, debut: d.sourdine.debut, fin: d.sourdine.fin }
+    } })
+  } catch (err) {
+    logger.error('Messages', 'delais', err)
+    echoues.push(t('messages.partie_delais'))
+  }
+
+  // 2. Les alertes (cible `alertes`) — memes champs qu'avant.
+  try {
+    await appel('/api/agent-config', { alertes_ref: ref, alertes: saisi.alertes })
+  } catch (err) {
+    logger.error('Messages', 'alertes', err)
+    echoues.push(t('messages.partie_alertes'))
+  }
+
+  // 3. Les consignes (table `agent_prompting`, RLS).
+  if (etat.prompting !== null) {
+    try {
+      await ecrireConsigne(compteCourant(), null, saisi.consignes.global)
+      await ecrireConsigne(compteCourant(), ref, saisi.consignes.bien)
+      etat.prompting.global = saisi.consignes.global
+      etat.prompting.overrides[ref] = saisi.consignes.bien
+    } catch (err) {
+      logger.error('Messages', 'consignes', err)
+      echoues.push(t('messages.partie_consignes'))
+    }
+  }
+
+  // ⚠ LE BLOB EST RELU, TOUJOURS : l'ecran montre l'etat REEL en base, jamais
+  // l'etat suppose (demande de Thierry du 11 octobre 2026). Une relecture
+  // echouee ferme le volet plutot que de montrer un faux vide.
+  try {
+    const relu = await appel('/api/agent-config')
+    etat.configIA = relu.config || {}
+    etat.modes = modesDe(relu.config)
+  } catch (err) {
+    logger.error('Messages', 'panneau relecture', err)
+    etat.configIA = null
+  }
+  // L'etat d'edition repart de la base : ce qui n'est pas passe redevient
+  // visible tel qu'il est enregistre, et l'hote voit ce qu'il doit refaire.
+  etat.delaisEdit = null
+  etat.modeEnCours = false
+  renderTiroir()
+  noteReglage(echoues.length
+    ? t('messages.panneau_partiel', { parties: echoues.join(', ') })
+    : t('messages.panneau_saved'), echoues.length === 0)
 }
 
 // Les consignes : meme table, meme RLS que l'ancienne page, mais INSERT
@@ -1198,69 +1800,12 @@ async function ecrireConsigne (uid, propertyId, texte) {
     if (eD) throw eD
   }
 }
-async function enregistrerConsignes (corps, ref) {
-  if (etat.modeEnCours || etat.prompting === null) return
-  etat.modeEnCours = true
-  geler(corps, true)
-  const g = (corps.querySelector('[data-consignes="global"]')?.value || '').trim()
-  const o = (corps.querySelector('[data-consignes="bien"]')?.value || '').trim()
-  const uid = compteCourant()
-  try {
-    await ecrireConsigne(uid, null, g)
-    await ecrireConsigne(uid, ref, o)
-    etat.prompting.global = g
-    if (o) etat.prompting.overrides[ref] = o
-    else delete etat.prompting.overrides[ref]
-    noteReglage(t('messages.saved'), true)
-  } catch (err) {
-    logger.error('Messages', 'consignes', err)
-    noteReglage(t('messages.mode_error'))
-  }
-  etat.modeEnCours = false
-  renderTiroir()
-}
 // Pendant une ecriture, les champs du volet gelent : une frappe pendant le
 // POST serait silencieusement ecartee par le re-render (releve en review).
 function geler (corps, fige) {
   corps.querySelectorAll('textarea, input, button, select').forEach(x => { x.disabled = fige })
 }
 
-// Les alertes : POST CIBLE (merge serveur des deux types de CE bien), puis
-// RELECTURE — l'ecran montre la base, jamais l'etat suppose.
-async function enregistrerAlertes (corps, ref) {
-  if (etat.modeEnCours || etat.configIA === null) return
-  etat.modeEnCours = true
-  geler(corps, true)
-  const avant = etat.configIA[ref] || {}
-  const lireType = (k) => ({
-    // Sans cle Brevo, les champs SMS n'existent pas a l'ecran : on PRESERVE
-    // ce qui est en base, on n'ecrase pas un reglage qu'on ne montre pas.
-    sms_enabled: etat.brevo
-      ? corps.querySelector(`[data-alerte="${k}|sms_enabled"]`)?.checked === true
-      : (avant[k] && avant[k].sms_enabled) === true,
-    sms_lines: etat.brevo
-      ? (corps.querySelector(`[data-alerte="${k}|sms_lines"]`)?.value || '')
-      : ((avant[k] && avant[k].sms_lines) || ''),
-    email_enabled: corps.querySelector(`[data-alerte="${k}|email_enabled"]`)?.checked === true,
-    email_lines: corps.querySelector(`[data-alerte="${k}|email_lines"]`)?.value || ''
-  })
-  let ecritureOk = false
-  try {
-    await appel('/api/agent-config', {
-      alertes_ref: ref,
-      alertes: { intervention: lireType('intervention'), info_unknown: lireType('info_unknown') }
-    })
-    ecritureOk = true
-  } catch (err) { logger.error('Messages', 'alertes', err) }
-  try {
-    const relu = await appel('/api/agent-config')
-    etat.modes = modesDe(relu.config)
-    etat.configIA = relu.config || {}
-  } catch (err) { logger.error('Messages', 'alertes relecture', err); etat.configIA = null }
-  etat.modeEnCours = false
-  noteReglage(ecritureOk ? t('messages.saved') : t('messages.mode_error'), ecritureOk)
-  renderTiroir()
-}
 
 // Le test part au premier destinataire EN BASE (api/alert-test n'accepte que
 // ceux-la — piege documente par l'ancienne page). Si l'ecran porte une
@@ -1405,6 +1950,8 @@ function ouvrir (bookId) {
   // releve en review) ; un texte RETOUCHE reste dans la saisie (on ne jette
   // jamais ce que l'hote a tape), mais l'envoyer ailleurs ne validera rien.
   if (etat.enEdition && String(etat.enEdition.bookId) !== String(bookId)) {
+    // Quitter le fil, c'est quitter l'editeur : le texte part en base d'abord.
+    enregistrerBrouillonEnCours()
     const zone = $('[data-bind="texte"]')
     const xEd = tacheParId(etat.enEdition.tacheId)
     if (xEd && zone.value.trim() === String(xEd.suggested_reply || '').trim()) {
@@ -1481,6 +2028,14 @@ async function init () {
   // Saisie (etape 2) : Ctrl/⌘+Entree envoie, Entree = retour a la ligne.
   const zoneTexte = $('[data-bind="texte"]')
   zoneTexte.addEventListener('input', () => ajusterHauteur(zoneTexte))
+  // ⚠ LE BROUILLON DE L'HOTE S'ENREGISTRE QUAND IL QUITTE L'EDITEUR
+  // (decision 6 de Thierry, 27 octobre 2026). Sans ca, la reprise du compte a
+  // rebours enverrait le texte de l'IA — la version que l'hote avait
+  // justement commence a corriger.
+  //
+  // ⚠ AU `blur`, PAS A LA FRAPPE : aucun appel pendant qu'il ecrit. C'est la
+  // consigne, et c'est aussi ce qui evite une requete par touche.
+  zoneTexte.addEventListener('blur', () => enregistrerBrouillonEnCours())
   zoneTexte.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); envoyer() }
   })

@@ -93,7 +93,7 @@ function charger ({ tables, journal, messagesChannex, reponseIA }) {
   const stubs = {
     '../lib/cron-shared': {
       supabase: fakeSupabase(tables, journal), anthropic,
-      getPropertyMode: async () => 'test', isAutomationPaused: async () => false,
+      getPropertyMode: async () => 'test', lireReglagesDuBien: async () => ({ mode: 'test', delais: null }), isAutomationPaused: async () => false,
       getSignatureForKey: () => '', SENDVIABEDS24_ENABLED: false
     },
     '../lib/cron-beds24': { fetchMessages: async () => [], fetchBookingsHistory: async () => [] },
