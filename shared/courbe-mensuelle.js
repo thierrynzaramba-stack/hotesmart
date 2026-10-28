@@ -205,6 +205,14 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
     const couleur = /^#[0-9a-fA-F]{3,8}$|^var\(--[\w-]+\)$|^[a-z]{3,20}$/.test(String(b.couleur || ''))
       ? String(b.couleur)
       : 'var(--line)'
+    // ⚠ UNE OPACITE PAR BANDE, BORNEE. Deux enveloppes de GRIS VOISINS ne se
+    // distinguent pas (recette du 28 octobre : « trop proches »), et le remede
+    // n'est pas une couleur vive — c'est le MEME gris a deux densites. Bornee
+    // comme `epaisseur`, et non echappee mais NUMERIQUE : elle entre dans un
+    // attribut.
+    const opacite = Number.isFinite(Number(b.opacite)) && Number(b.opacite) > 0
+      ? Math.min(1, Number(b.opacite))
+      : null
     return morceaux.map(ks => {
       // ⚠ UN MOIS SEUL NE FAIT PAS UN POLYGONE : trois points confondus en
       // dessinent un de surface nulle, donc invisible. On lui donne un TRAIT
@@ -212,11 +220,13 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
       if (ks.length === 1) {
         const k = ks[0]
         return `<line class="cm-bande-trait" x1="${x(k).toFixed(1)}" x2="${x(k).toFixed(1)}" `
-          + `y1="${y(mx[k]).toFixed(1)}" y2="${y(mn[k]).toFixed(1)}" stroke="${couleur}"/>`
+          + `y1="${y(mx[k]).toFixed(1)}" y2="${y(mn[k]).toFixed(1)}" stroke="${couleur}"`
+          + `${opacite === null ? '' : ` opacity="${opacite}"`}/>`
       }
       const haut = ks.map(k => `${x(k).toFixed(1)},${y(mx[k]).toFixed(1)}`)
       const bas = [...ks].reverse().map(k => `${x(k).toFixed(1)},${y(mn[k]).toFixed(1)}`)
-      return `<polygon class="cm-bande" points="${haut.concat(bas).join(' ')}" fill="${couleur}"/>`
+      return `<polygon class="cm-bande" points="${haut.concat(bas).join(' ')}" fill="${couleur}"`
+        + `${opacite === null ? '' : ` opacity="${opacite}"`}/>`
     }).join('')
   }).join('')
 

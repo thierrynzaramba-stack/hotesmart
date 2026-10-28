@@ -312,11 +312,20 @@ async function bandeDesComparables (supabase, bienId, annee, jour) {
     if (montant === null || montant === undefined) continue
     const cle = `${mois}|${l.nature}`
     if (!parCle.has(cle)) {
-      parCle.set(cle, { mois, nature: l.nature, min: montant, max: montant, comparables: 0, dates: new Set() })
+      parCle.set(cle, { mois, nature: l.nature, min: null, max: null, comparables: 0, sansActivite: 0, dates: new Set() })
     }
     const b = parCle.get(cle)
-    b.min = Math.min(b.min, montant)
-    b.max = Math.max(b.max, montant)
+    // ⚠ UN COMPARABLE SANS AUCUNE ACTIVITE CE MOIS-LA NE COMPTE PAS DANS LE
+    // MIN. Constat de recette du 28 octobre : « juin, le bas de la bande
+    // descend a 0 € ». Un logement FERME un mois rend 0 — ce n'est pas « il a
+    // gagne zero », c'est « il n'etait pas sur le marche ». Le garder tirait le
+    // plancher de la bande a zero, et l'hote y lisait l'effondrement d'un
+    // comparable.
+    // ⚠ ET IL SE COMPTE, pour que la note puisse le dire : un comparable
+    // ecarte en silence est un comparable qu'on a perdu sans le savoir.
+    if (montant === 0) { b.sansActivite++; b.dates.add(String(l.releve_le)); continue }
+    b.min = b.min === null ? montant : Math.min(b.min, montant)
+    b.max = b.max === null ? montant : Math.max(b.max, montant)
     b.comparables++
     b.dates.add(String(l.releve_le))
   }
@@ -327,13 +336,19 @@ async function bandeDesComparables (supabase, bienId, annee, jour) {
     // le max d'une d'octobre, et l'ecran afficherait une seule date pour les
     // deux. Un mois dont les photos divergent ne se trace pas — il se tait, ce
     // qui est la seule reponse qui n'invente rien.
+    // ⚠ PLUS AUCUN COMPARABLE ACTIF : le mois n'a pas de bande, et ce n'est
+    // PAS une bande a zero. Ce garde remplace celui qui ecartait les mois
+    // futurs a zero : un mois dont tous les comparables sont fermes sort
+    // desormais par la meme regle, et il n'y en a plus qu'une.
+    if (!b.comparables) continue
     if (b.dates.size !== 1) continue
     // ⚠ ET UN MOIS DEJA PRIS PAR SA NATURE `clos` NE SE FAIT PAS DOUBLER par
     // une ligne `futur` : le realise prime sur l'occupe.
     if (mois[b.mois] && mois[b.mois].nature === 'clos') continue
     mois[b.mois] = {
       nature: b.nature, min_cents: b.min, max_cents: b.max,
-      comparables: b.comparables, releve_le: [...b.dates][0]
+      comparables: b.comparables, sans_activite: b.sansActivite,
+      releve_le: [...b.dates][0]
     }
   }
   return { mois, jour }
