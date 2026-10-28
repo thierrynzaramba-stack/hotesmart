@@ -2116,6 +2116,11 @@ test("LE TEST QUI COMPTE : l argent d un logement SUPPRIME ne se pose pas sur le
 // comparaison de texte echouerait sans que rien ne soit visible a l'oeil.
 const euros = (texte) => Number(String(texte).replace(/[^\d]/g, ''))
 
+// Un mois ENCAISSE, et un mois seulement RESERVE : le partage recu/a venir
+// decide ou s'arrete le trait plein, donc quels mois sont « a venir ».
+const recuDe = (t) => ({ sejours: 1, total_cents: t, recu_cents: t, a_venir_cents: 0, bruts: 0, sans_montant: 0 })
+const aVenirDe = (t) => ({ sejours: 1, total_cents: t, recu_cents: 0, a_venir_cents: t, bruts: 0, sans_montant: 0 })
+
 // Un mois de l'annee, au format que l'endpoint rend.
 const mo = (total, sejours = 1) => ({
   sejours, total_cents: total, recu_cents: total, a_venir_cents: 0, bruts: 0, sans_montant: 0
@@ -2801,4 +2806,86 @@ test("LE TEST QUI COMPTE : sous « Tous », l ecran DIT pourquoi il n y a pas de
   const choisi = bancAnnee({ biens, annee, filtre: 'uuid-1' })
   assert.strictEqual(choisi.cache('[data-bind="revenue-annee-comparables-tous"]').hidden, true,
     'la phrase de « Tous » reste affichee alors qu un logement est choisi')
+})
+
+// ─── « RESERVE A DATE » A L'ECRAN (28 octobre 2026) ────────────────────────
+
+const rad = (mois, o = {}) => ({
+  pivot: '2025-10-28', seuil: 5,
+  mois: Object.fromEntries(Object.entries(mois).map(([m, v]) => [m, {
+    sejours: 9, total_cents: 200000, sans_date_annulation: 0, non_fiables: 0,
+    sous_seuil: false, seuil: 5, ...v
+  }])),
+  par_bien: o.par_bien || {}
+})
+
+test("LE TEST QUI COMPTE : « reserve a date » ne couvre QUE les mois a venir", () => {
+  // ⚠ SUR UN MOIS DEJA CLOS DE N-1, LE REVENU FINAL EST CONNU, et c'est lui
+  // qui vaut. Comparer un etat intermediaire a un resultat final serait
+  // comparer deux choses differentes — et c'est precisement ce que ce lot
+  // existe pour eviter.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-05': {}, '2025-11': {}, '2025-12': {} })
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const gris = [...svg.matchAll(/<path d="([^"]*)"[^>]*stroke="var\(--muted\)"[^>]*stroke-dasharray/g)].map(m => m[1])
+  assert.strictEqual(gris.length, 1, 'le trait « reserve a date » n est pas trace')
+  const points = (gris[0].match(/[ML]/g) || []).length
+  assert.strictEqual(points, 2,
+    `${points} points sur le trait : mai 2025, deja clos, y est entre alors que son revenu FINAL est connu`)
+})
+
+test("LE TEST QUI COMPTE : un mois SOUS LE SEUIL n est pas trace, et se DIT", () => {
+  // Sans la phrase, l hote voit un trait qui s arrete et croit a un trou dans
+  // la donnee, alors que c est un refus raisonne.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({
+        '2025-11': { sejours: 2, sous_seuil: true },
+        '2025-12': {}
+      })
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const gris = (svg.match(/stroke="var\(--muted\)"[^>]*stroke-dasharray/g) || []).length
+  assert.strictEqual(gris, 1, 'le trait a disparu alors qu un mois sur deux passe le seuil')
+  assert.match(p.cache('[data-bind="revenue-annee-reserves"]').textContent, /revenue\.annee_rad_sous_seuil/,
+    'le mois refuse par le seuil n est explique nulle part')
+})
+
+test("LE TEST QUI COMPTE : la pastille pilote AUSSI « reserve a date »", () => {
+  // ⚠ SINON L'ECRAN SUPERPOSE DEUX PERIMETRES. Ma premiere version de
+  // l'endpoint agregeait sur le seul mois : la ligne aurait montre le COMPTE
+  // pendant que la courbe montrait un bien, sans le dire.
+  const annee = {
+    total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+    par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) } },
+    hors_biens: {},
+    reserve_a_date: {
+      ...rad({ '2025-11': { total_cents: 900000 }, '2025-12': { total_cents: 900000 } }),
+      par_bien: {
+        'uuid-1': {
+          '2025-11': { sejours: 9, total_cents: 100000, sans_date_annulation: 0, non_fiables: 0, sous_seuil: false, seuil: 5 },
+          '2025-12': { sejours: 9, total_cents: 100000, sans_date_annulation: 0, non_fiables: 0, sous_seuil: false, seuil: 5 }
+        }
+      }
+    }
+  }
+  const biens = [{ id: 'uuid-1', name: 'A' }]
+  const svgTous = bancAnnee({ aujourdHui: '2026-10-28', biens, annee }).cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const svgBien = bancAnnee({ aujourdHui: '2026-10-28', biens, annee, filtre: 'uuid-1' }).cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const haut = (svg) => {
+    const g = [...svg.matchAll(/class="cm-grad"[^>]*>([^<]*)</g)].map(m => m[1])
+    return g[g.length - 1]
+  }
+  assert.notStrictEqual(haut(svgBien), haut(svgTous),
+    'le haut de l axe est identique avec et sans pastille : la ligne « reserve a date » ne suit pas le filtre')
 })

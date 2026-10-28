@@ -1653,6 +1653,9 @@ body.men-cfg-ouvert { overflow: hidden; }
 .rev-an-marque--plein { height: 2.5px; background: var(--ink); }
 .rev-an-marque--pointille { height: 0; border-top: 2px dashed var(--ink); }
 .rev-an-marque--n1 { height: 2px; background: var(--muted); }
+/* « N-1 reserve au … » : gris comme l'an dernier, pointille comme un ETAT a
+   une date — et non un resultat. Les deux marques grises coexistent. */
+.rev-an-marque--n1-pointille { height: 0; border-top: 2px dashed var(--muted); }
 /* La bande des comparables : un PAVE plein, pas un trait — elle couvre une
    surface, et sa marque doit le dire. */
 .rev-an-marque--bande { height: 10px; background: var(--border); border-radius: 2px; }

@@ -251,10 +251,103 @@ module.exports = async (req, res) => {
     if (comparables === null) indisponibles.push('comparables')
   }
 
+  // ─── « RESERVE A DATE » ─────────────────────────────────────────────────
+  // ⚠ IL N'A DE SENS QUE POUR L'ANNEE EN COURS. Comparer « deja reserve
+  // aujourd'hui » a « reserve a la meme date l'an dernier » suppose un
+  // aujourd'hui : sur une annee passee, les deux annees sont finies et c'est
+  // le revenu FINAL qui se compare, pas un etat intermediaire.
+  let reserveADate = null
+  if (annee === Number(jour.slice(0, 4))) {
+    reserveADate = await reserveALaMemeDate(supabase, compte, annee - 1, jour, refsUuid)
+    requetes++
+    if (reserveADate === null) indisponibles.push('reserve_a_date')
+  }
+
   return rendre(res, t0, requetes, {
     annee, jour, par_bien: parBien, hors_biens: horsBiens, total, indisponibles,
-    comparables
+    comparables, reserve_a_date: reserveADate
   })
+}
+
+// ⚠ LE SEUIL : EN DESSOUS, ON NE COMPARE PAS, ET ON LE DIT.
+// Decision de Thierry du 28 octobre 2026 (option 2). Une comparaison portee
+// par deux ou trois reservations ne dit rien du marche : elle dit le hasard de
+// deux voyageurs. Mesure de la fenetre reelle : novembre 2025 portait 15
+// reservations au pivot, decembre 9 — les deux passent largement. Cinq est
+// assez bas pour les laisser passer, assez haut pour refuser une comparaison
+// qu'une seule annulation ferait basculer.
+const SEUIL_RESERVE_A_DATE = 5
+
+// Le meme jour, un an plus tot.
+// ⚠ LE 29 FEVRIER N'EXISTE PAS TOUS LES ANS : `new Date` le decalerait au
+// 1er mars sans un mot, et le pivot sauterait un jour une annee sur quatre.
+// On retombe sur le 28, qui est le dernier jour comparable.
+function memeJourAnneePrecedente (jour) {
+  const [an, m, j] = String(jour).split('-')
+  if (m === '02' && j === '29') return `${Number(an) - 1}-02-28`
+  return `${Number(an) - 1}-${m}-${j}`
+}
+
+/**
+ * Ce qui etait VENDU pour chaque mois de `annee`, au meme jour l'an dernier.
+ *
+ * ⚠ ON REND LE COMPTE MEME SOUS LE SEUIL, MAIS PAS LE MONTANT. Le compte sert
+ * a EXPLIQUER le refus (« 2 ventes a cette date l'an dernier ») ; le montant,
+ * lui, ne doit pas pouvoir etre trace par accident. Taire les deux laisserait
+ * l'ecran muet sur un refus qu'il doit nommer.
+ */
+async function reserveALaMemeDate (supabase, userId, annee, jour, refsUuid) {
+  const pivot = memeJourAnneePrecedente(jour)
+  const { data, error } = await supabase.rpc('revenus_reserve_a_date', {
+    p_user_id: userId,
+    p_annee: annee,
+    p_pivot: pivot,
+    p_refs: Array.isArray(refsUuid) ? refsUuid : null
+  })
+  if (error) {
+    console.error('[ecran/revenus-annee] reserve a date :', error.message)
+    return null
+  }
+  // ⚠ LE DETAIL PAR LOGEMENT EST GARDE, et c'est necessaire : la pastille de
+  // filtre doit pouvoir piloter cette ligne comme elle pilote les autres. Ma
+  // premiere version agregeait sur le seul mois — la ligne « reserve a date »
+  // aurait montre le COMPTE entier pendant que la courbe montrait un bien, et
+  // l'ecran aurait superpose deux perimetres differents sans le dire.
+  const vide = () => ({ sejours: 0, total_cents: 0, sans_date_annulation: 0, non_fiables: 0 })
+  const ajouter = (c, l) => {
+    c.sejours += n(l.sejours)
+    c.total_cents += n(l.total_cents)
+    c.sans_date_annulation += n(l.sans_date_annulation)
+    c.non_fiables += n(l.non_fiables)
+    return c
+  }
+  const brutTotal = {}
+  const brutParBien = {}
+  for (const l of data || []) {
+    const cle = `${annee}-${String(n(l.mois)).padStart(2, '0')}`
+    brutTotal[cle] = ajouter(brutTotal[cle] || vide(), l)
+    const uuid = l.property_uuid == null ? null : String(l.property_uuid)
+    if (uuid === null) continue
+    brutParBien[uuid] = brutParBien[uuid] || {}
+    brutParBien[uuid][cle] = ajouter(brutParBien[uuid][cle] || vide(), l)
+  }
+  // ⚠ LE SEUIL S'APPLIQUE A CHAQUE PERIMETRE SEPAREMENT. Un mois qui passe le
+  // seuil pour le compte peut ne pas le passer pour UN bien : c'est le bien
+  // qu'on trace quand la pastille le designe, donc c'est son compte a lui qui
+  // decide. Appliquer le seuil du compte a la courbe d'un bien tracerait une
+  // comparaison que ses trois ventes ne portent pas.
+  const seuiller = (brut) => {
+    const out = {}
+    for (const [cle, b] of Object.entries(brut)) {
+      out[cle] = b.sejours < SEUIL_RESERVE_A_DATE
+        ? { sejours: b.sejours, sous_seuil: true, seuil: SEUIL_RESERVE_A_DATE }
+        : { ...b, sous_seuil: false, seuil: SEUIL_RESERVE_A_DATE }
+    }
+    return out
+  }
+  const parBien = {}
+  for (const [uuid, m] of Object.entries(brutParBien)) parBien[uuid] = seuiller(m)
+  return { pivot, seuil: SEUIL_RESERVE_A_DATE, mois: seuiller(brutTotal), par_bien: parBien }
 }
 
 // Le min et le max, mois par mois, parmi les comparables d'un logement.

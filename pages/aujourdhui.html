@@ -2018,6 +2018,34 @@ function renderAnnee () {
     const c = parMois && parMois[`${an}-${String(m).padStart(2, '0')}`]
     if (c && !refuseTout(c) && Number(c.recu_cents || 0) > 0) dernierRecu = m
   }
+  // ─── « RESERVE A DATE » ─────────────────────────────────────────────────
+  // ⚠ ELLE NE COUVRE QUE LES MOIS A VENIR. Sur un mois deja clos de N-1, le
+  // revenu FINAL est connu et c'est lui qui vaut : comparer un etat
+  // intermediaire a un resultat final serait comparer deux choses
+  // differentes. Le trait gris plein, lui, reste sur les douze mois.
+  const rad = a.reserve_a_date
+  const radPerimetre = rad && (choisi
+    ? (rad.par_bien && rad.par_bien[String(choisi.id)]) || {}
+    : rad.mois)
+  let radSousSeuil = 0
+  let radReserves = 0
+  const radValeurs = []
+  for (let m = 1; m <= 12; m++) {
+    const c = radPerimetre && radPerimetre[`${an - 1}-${String(m).padStart(2, '0')}`]
+    // Un mois deja encaisse n'a pas de « reserve a date » a montrer.
+    if (!c || !enCours || m <= dernierRecu) { radValeurs.push(null); continue }
+    if (c.sous_seuil) {
+      // ⚠ SOUS LE SEUIL, PAS DE POINT — ET UN COMPTE. L'endpoint ne rend
+      // meme pas le montant : on ne peut pas le tracer par accident.
+      radSousSeuil++
+      radValeurs.push(null)
+      continue
+    }
+    radReserves += Number(c.sans_date_annulation || 0) + Number(c.non_fiables || 0)
+    radValeurs.push(Number(c.total_cents || 0) / 100)
+  }
+  const aDuReserveADate = radValeurs.some(v => Number.isFinite(v))
+
   const series = [
     { nom: String(an - 1), couleur: 'var(--muted)', epaisseur: 2,
       valeurs: douzeMois(parMois, an - 1, 'total_cents') },
@@ -2031,6 +2059,16 @@ function renderAnnee () {
   if (aDuReserve) {
     series.push({ nom: t('revenue.annee_reserve'), couleur: 'var(--ink)', epaisseur: 2,
       pointille: true, valeurs: douzeMois(parMois, an, 'total_cents', Math.max(1, dernierRecu), 12) })
+  }
+  // ⚠ GRIS ET POINTILLE : gris parce que c'est l'an dernier, pointille parce
+  // que c'est un ETAT A UNE DATE et non un resultat. Les deux traits gris
+  // coexistent, et c'est voulu — le plein dit ce que N-1 a FINI par faire, le
+  // pointille ce qu'il avait VENDU au meme jour.
+  if (aDuReserveADate) {
+    series.push({
+      nom: t('revenue.annee_rad_legende', { date: dateDuJour(String(rad.pivot), { day: 'numeric', month: 'short' }) }),
+      couleur: 'var(--muted)', epaisseur: 2, pointille: true, valeurs: radValeurs
+    })
   }
   const PALIERS = 3
   // ⚠ RIEN A TRACER NE SE TRACE PAS. Avec un perimetre vide — le cas reel du
@@ -2152,6 +2190,9 @@ function renderAnnee () {
       // ⚠ UNE MARQUE PAR BANDE, chacune nommee. Deux polygones de couleurs
       // differentes sous une seule etiquette laissaient l'hote devant une
       // bande que rien ne nommait, et une note qui attribuait tout a l'autre.
+      + (aDuReserveADate ? marque('n1-pointille', t('revenue.annee_rad_legende', {
+        date: dateDuJour(String(rad.pivot), { day: 'numeric', month: 'short' })
+      })) : '')
       + bandes.map(b => marque(
         b.nature === 'clos' ? 'bande' : 'bande-futur',
         t(b.nature === 'clos' ? 'revenue.annee_comparables_legende' : 'revenue.annee_comparables_legende_futur')
@@ -2321,6 +2362,17 @@ function renderAnnee () {
     return (n > 0) !== (n1 > 0)
   })
   if (perimetreBouge) reserves.push(t('revenue.annee_perimetre'))
+
+  // ⚠ UN MOIS REFUSE PAR LE SEUIL SE DIT. Sans cette phrase, l'hote voit un
+  // trait qui s'arrete et croit a un trou dans la donnee, alors que c'est un
+  // refus raisonne : trop peu de ventes a cette date l'an dernier pour que la
+  // comparaison veuille dire quelque chose.
+  if (radSousSeuil > 0) {
+    reserves.push(t('revenue.annee_rad_sous_seuil', { n: radSousSeuil, seuil: (rad && rad.seuil) || 0 }))
+  }
+  // Et ce que l'agregat n'a pas su juger : annulations sans date (Channex n'en
+  // fournit aucune) et dates de vente non fiables.
+  if (radReserves > 0) reserves.push(t('revenue.annee_rad_reserve', { n: radReserves }))
 
   const noeudRes = $('[data-bind="revenue-annee-reserves"]')
   if (noeudRes) {
