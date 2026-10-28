@@ -296,6 +296,7 @@
       <ul class="rev-liste rev-liste--annee" data-list="revenue-annee-cartes"></ul>
 
       <p class="caption muted" data-bind="revenue-annee-note"></p>
+      <p class="caption muted" data-bind="revenue-annee-comparables-tous" hidden></p>
       <p class="caption muted" data-bind="revenue-annee-comparables" hidden></p>
       <p class="caption muted" data-bind="revenue-annee-reserves" hidden></p>
     </div>
@@ -2056,6 +2057,7 @@ function renderAnnee () {
   let compDate = null
   let compNb = null
   let compPlusieursDates = false
+  let compEcartes = 0
   if (comp && comp.mois) {
     const douze = (nature, champ) => {
       const out = []
@@ -2080,10 +2082,16 @@ function renderAnnee () {
     // « aucun hexa hors de shared/theme.css » les compte aussi, et il a raison
     // — une couleur ecrite a la main dans un commentaire devient la reference
     // de qui le lit, puis se recopie dans du code.
-    for (const [nature, jeton] of [['clos', 'var(--border)'], ['futur', 'var(--line)']]) {
+    // ⚠ LE MEME GRIS A DEUX DENSITES, et non deux gris voisins. `--border` et
+    // `--line` ne different que de quatorze points de luminosite : a l'ecran,
+    // Thierry les a vues « trop proches » (recette du 28 octobre). Le remede
+    // n'est pas une couleur vive — ce sont deux OPACITES du meme `--muted`,
+    // qui restent grises, tiennent en mode sombre, et se distinguent d'un coup
+    // d'oeil parce que c'est la DENSITE qui change, pas la teinte.
+    for (const [nature, opacite] of [['clos', 0.34], ['futur', 0.11]]) {
       const min = douze(nature, 'min_cents')
       const max = douze(nature, 'max_cents')
-      if (min.some(v => Number.isFinite(v))) bandes.push({ nature, min, max, couleur: jeton })
+      if (min.some(v => Number.isFinite(v))) bandes.push({ nature, min, max, couleur: 'var(--muted)', opacite })
     }
     // ⚠ LE COMPTE ET LA DATE SE TIRENT DES MOIS REELLEMENT TRACES, pas de tout
     // ce que l'endpoint a rendu. Il couvre TROIS annees (N-1 a N+1) : mon
@@ -2096,6 +2104,8 @@ function renderAnnee () {
       const c = comp.mois[`${an}-${String(m).padStart(2, '0')}`]
       if (c) tracés.push(c)
     }
+    // Les comparables ECARTES faute d'activite, sur les mois traces.
+    compEcartes = tracés.reduce((t, c) => Math.max(t, Number(c.sans_activite) || 0), 0)
     const nbs = tracés.map(c => Number(c.comparables) || 0).filter(n => n > 0)
     compNb = nbs.length ? { min: Math.min(...nbs), max: Math.max(...nbs) } : null
     const dates = [...new Set(tracés.map(c => String(c.releve_le)).filter(Boolean))].sort()
@@ -2222,6 +2232,15 @@ function renderAnnee () {
   // d'ou vient la bande, qu'elle est une ESTIMATION a partir des prix
   // affiches, et A QUELLE DATE elle a ete relevee. Sans la date, l'hote
   // compare son mois en cours a une photo dont il ignore l'age.
+  // ⚠ SOUS « TOUS », ON DIT POURQUOI IL N'Y A PAS DE BANDE. Ne rien afficher
+  // etait juste — un min/max de comparables n'a aucun sens pour un compte,
+  // chaque logement ayant les siens — mais un silence se lit comme une panne.
+  // Constat 1 de la recette du 28 octobre.
+  const noteSansBien = $('[data-bind="revenue-annee-comparables-tous"]')
+  if (noteSansBien) {
+    noteSansBien.hidden = !!choisi
+    noteSansBien.textContent = choisi ? '' : t('revenue.annee_comparables_tous')
+  }
   const noteComp = $('[data-bind="revenue-annee-comparables"]')
   if (noteComp) {
     const dire = bandes.length && compDate && compNb
@@ -2233,6 +2252,7 @@ function renderAnnee () {
         n: compNb && compNb.min === compNb.max ? String(compNb.min) : `${compNb.min}–${compNb.max}`,
         date: dateDuJour(String(compDate), { day: 'numeric', month: 'long', year: 'numeric' })
       }) + (compPlusieursDates ? ' ' + t('revenue.annee_comparables_dates') : '')
+        + (compEcartes > 0 ? ' ' + t('revenue.annee_comparables_fermes', { n: compEcartes }) : '')
       : ''
   }
   $('[data-bind="revenue-annee-note"]').textContent = enCours

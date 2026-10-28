@@ -509,3 +509,41 @@ test("LE TEST QUI COMPTE : d un MEME comparable, seule la photo la plus recente 
   assert.equal(m.max_cents, 500000)
   assert.equal(m.releve_le, '2026-10-06', 'la date affichee n est pas celle de la photo retenue')
 })
+
+test("LE TEST QUI COMPTE : un comparable SANS ACTIVITE ne tire pas le minimum a zero", async () => {
+  // ⚠ CONSTAT 3 DE LA RECETTE DU 28 OCTOBRE : « juin, le bas de la bande
+  // descend a 0 € ». Un logement FERME un mois rend 0 — ce n est pas « il a
+  // gagne zero », c est « il n etait pas sur le marche ». Le garder faisait
+  // lire a l hote l effondrement d un comparable.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      releve({ listing_id: '111', mois: '2026-06-01', montant_estime_cents: 400000 }),
+      releve({ listing_id: '222', mois: '2026-06-01', montant_estime_cents: 900000 }),
+      releve({ listing_id: '333', mois: '2026-06-01', montant_estime_cents: 0 })
+    ]
+  })
+  const m = r.charge.comparables.mois['2026-06']
+  assert.ok(m, 'le mois a disparu')
+  assert.equal(m.min_cents, 400000, `le minimum vaut ${m.min_cents} : un comparable ferme y est entre`)
+  assert.equal(m.max_cents, 900000)
+  assert.equal(m.comparables, 2, 'le comparable ferme est compte comme actif')
+  // ⚠ ET IL SE DECLARE : un comparable ecarte en silence est un comparable
+  // qu on a perdu sans le savoir.
+  assert.equal(m.sans_activite, 1, 'le comparable ecarte n est pas compte dans la reserve')
+})
+
+test("LE TEST QUI COMPTE : un mois dont TOUS les comparables sont fermes n a pas de bande", async () => {
+  // Et ce n est PAS une bande a zero : il n y a rien a comparer.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      releve({ listing_id: '111', mois: '2026-07-01', montant_estime_cents: 0 }),
+      releve({ listing_id: '222', mois: '2026-07-01', montant_estime_cents: 0 }),
+      releve({ listing_id: '111', mois: '2026-08-01', montant_estime_cents: 500000 })
+    ]
+  })
+  const mois = r.charge.comparables.mois
+  assert.ok(!mois['2026-07'], 'un mois sans aucun comparable actif est trace comme une bande a zero')
+  assert.ok(mois['2026-08'], 'le mois actif a disparu : le test ne demontre rien')
+})

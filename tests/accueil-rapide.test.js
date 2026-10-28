@@ -2748,3 +2748,57 @@ test("LE TEST QUI COMPTE : la bande ne DEPASSE jamais le haut de l axe", () => {
   assert.ok(plusHaut >= 0,
     `le sommet de la bande est a y=${plusHaut}, donc HORS du cadre : l axe ne la couvre pas`)
 })
+
+test("LE TEST QUI COMPTE : les deux bandes se DISTINGUENT a l oeil", () => {
+  // ⚠ CONSTAT 2 DE LA RECETTE DU 28 OCTOBRE : « bande foncee et claire trop
+  // proches ». Elles etaient `--border` et `--line`, deux gris voisins a
+  // quatorze points de luminosite. Le remede n est pas une couleur vive —
+  // c est le MEME gris a deux DENSITES, qui tient aussi en mode sombre.
+  const comparables = {
+    'uuid-1': {
+      releve_le: '2026-10-06',
+      mois: {
+        '2026-04': { nature: 'clos', min_cents: 500000, max_cents: 900000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' },
+        '2026-05': { nature: 'clos', min_cents: 600000, max_cents: 950000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' },
+        '2026-11': { nature: 'futur', min_cents: 100000, max_cents: 300000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' },
+        '2026-12': { nature: 'futur', min_cents: 120000, max_cents: 320000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' }
+      }
+    }
+  }
+  const p = bancAnnee({
+    biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1', comparables,
+    annee: {
+      total: { '2026-05': mo(10000) },
+      par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+      hors_biens: {}
+    }
+  })
+  const svg = p.cache('[data-bind="revenue-annee-courbe"]').innerHTML
+  const op = [...svg.matchAll(/<polygon class="cm-bande"[^>]*opacity="([\d.]+)"/g)].map(m => Number(m[1]))
+  assert.strictEqual(op.length, 2, `${op.length} bandes tracees au lieu de deux : ${svg.slice(0, 200)}`)
+  const [a, b] = op.slice().sort((x, y) => y - x)
+  assert.ok(a / b >= 2,
+    `les deux bandes sont a ${a} et ${b} d opacite : moins du double, elles ne se distinguent pas`)
+})
+
+test("LE TEST QUI COMPTE : sous « Tous », l ecran DIT pourquoi il n y a pas de bande", () => {
+  // ⚠ CONSTAT 1 DE LA RECETTE : ne rien afficher etait juste — un min/max de
+  // comparables n a pas de sens pour un compte — mais un silence se lit comme
+  // une panne. L ecran explique, et la phrase disparait des qu un logement est
+  // choisi.
+  const annee = {
+    total: { '2026-05': mo(10000) },
+    par_bien: { 'uuid-1': { '2026-05': mo(10000) } },
+    hors_biens: {}
+  }
+  const biens = [{ id: 'uuid-1', name: 'A' }]
+  const tous = bancAnnee({ biens, annee })
+  const phrase = tous.cache('[data-bind="revenue-annee-comparables-tous"]')
+  assert.strictEqual(phrase.hidden, false, 'aucune phrase sous « Tous » : le silence se lit comme une panne')
+  assert.match(phrase.textContent, /revenue\.annee_comparables_tous/,
+    `la phrase attendue n est pas rendue : « ${phrase.textContent} »`)
+  // Et elle s efface des qu un logement est choisi.
+  const choisi = bancAnnee({ biens, annee, filtre: 'uuid-1' })
+  assert.strictEqual(choisi.cache('[data-bind="revenue-annee-comparables-tous"]').hidden, true,
+    'la phrase de « Tous » reste affichee alors qu un logement est choisi')
+})
