@@ -27,13 +27,21 @@ async function appeler ({
   domaines = TOUS_DOMAINES, lignes = [], biens = [BIEN_A, BIEN_B],
   erreurRpc = null, erreurBiens = null,
   // Les lignes de `comparables_releves`, et une erreur de lecture au besoin.
-  releves = [], erreurReleves = null
+  releves = [], erreurReleves = null,
+  // Les lignes de `revenus_reserve_a_date`.
+  lignesRad = [], erreurRad = null
 } = {}) {
   const vu = { rpc: [], selects: [], filtres: [] }
 
   const client = {
     rpc (nom, args) {
       vu.rpc.push({ nom, args })
+      // ⚠ LE DOUBLE REPOND PAR FONCTION. Une seule reponse pour les deux
+      // agregats ferait passer les lignes de l'annee pour du « reserve a
+      // date » — et les tests mesureraient autre chose que ce qu'ils croient.
+      if (nom === 'revenus_reserve_a_date') {
+        return Promise.resolve({ data: erreurRad ? null : lignesRad, error: erreurRad })
+      }
       return Promise.resolve({ data: erreurRpc ? null : lignes, error: erreurRpc })
     },
     from (table) {
@@ -144,13 +152,27 @@ test("LE TEST QUI COMPTE : sans le droit `reservations`, la fonction n'est PAS a
 
 test("LE TEST QUI COMPTE : un titulaire ne porte AUCUNE borne, un membre en porte une", async () => {
   const t = await appeler({ titulaire: true })
-  assert.strictEqual(t.vu.rpc.length, 1)
+  // ⚠ DEUX APPELS DEPUIS LE 28 OCTOBRE 2026 : l'agregat de l'annee, et
+  // « reserve a date » pour l'annee precedente. ⚠ ET LES DEUX DOIVENT PORTER
+  // LA MEME BORNE : c'est tout l'objet de ce test. Un second agregat ajoute
+  // sans sa borne serait une fuite entre comptes, et le compte d'appels
+  // n'aurait rien dit — c'est la borne qu'on verifie, pas leur nombre.
+  assert.strictEqual(t.vu.rpc.length, 2, 'le nombre d agregats a change : verifiez que le nouveau porte sa borne')
+  for (const appel of t.vu.rpc) {
+    assert.strictEqual(appel.args.p_user_id, TITULAIRE, `${appel.nom} ne borne pas sur le compte`)
+    assert.strictEqual(appel.args.p_refs, null, `${appel.nom} borne un titulaire, qui ne doit pas l etre`)
+  }
   assert.strictEqual(t.vu.rpc[0].args.p_user_id, TITULAIRE,
     'le compte interroge n est pas celui de la garde')
   assert.strictEqual(t.vu.rpc[0].args.p_refs, null,
     'un titulaire recoit une borne : il verrait MOINS que son compte')
 
   const m = await appeler({ titulaire: false, refs: [BIEN_A] })
+  // ⚠ TOUS les agregats, pas seulement le premier : un membre delegue dont le
+  // second agregat ne serait pas borne lirait le parc entier.
+  for (const appel of m.vu.rpc) {
+    assert.deepEqual(appel.args.p_refs, [BIEN_A], `${appel.nom} ne borne pas le perimetre du membre`)
+  }
   assert.deepEqual(m.vu.rpc[0].args.p_refs, [BIEN_A],
     'le membre delegue lit SANS borne : c est une fuite inter-biens')
 
@@ -546,4 +568,67 @@ test("LE TEST QUI COMPTE : un mois dont TOUS les comparables sont fermes n a pas
   const mois = r.charge.comparables.mois
   assert.ok(!mois['2026-07'], 'un mois sans aucun comparable actif est trace comme une bande a zero')
   assert.ok(mois['2026-08'], 'le mois actif a disparu : le test ne demontre rien')
+})
+
+// ─── « RESERVE A DATE » (28 octobre 2026) ──────────────────────────────────
+
+test("LE TEST QUI COMPTE : le pivot est le MEME JOUR un an plus tot", async () => {
+  // ⚠ UN AN, PAS DEUX. Ma premiere mesure comparait a deux ans — elle trouvait
+  // 3 reservations la ou il y en a 15, et j en avais conclu que le signal etait
+  // trop faible pour etre trace. Un pivot faux ne rend pas un resultat faux :
+  // il rend une CONCLUSION fausse.
+  const r = await appeler({ query: { annee: '2026' } })
+  const appelRad = r.vu.rpc.find(a => a.nom === 'revenus_reserve_a_date')
+  assert.ok(appelRad, 'l agregat « reserve a date » n est pas appele')
+  assert.strictEqual(appelRad.args.p_annee, 2025, 'l agregat ne porte pas sur l annee precedente')
+  const [an, mois, jour] = String(appelRad.args.p_pivot).split('-')
+  const auj = String(r.charge.jour).split('-')
+  assert.strictEqual(Number(an), Number(auj[0]) - 1, `le pivot est en ${an}, pas un an avant ${auj[0]}`)
+  assert.strictEqual(mois, auj[1], 'le pivot n est pas le meme mois')
+  assert.strictEqual(jour, auj[2], 'le pivot n est pas le meme jour')
+})
+
+test("LE TEST QUI COMPTE : sous le SEUIL, le montant n est pas rendu", async () => {
+  // ⚠ LE COMPTE SORT, LE MONTANT NON. Le compte sert a EXPLIQUER le refus
+  // (« 2 ventes a cette date l an dernier ») ; le montant ne doit pas pouvoir
+  // etre trace par accident. Taire les deux laisserait l ecran muet sur un
+  // refus qu il doit nommer.
+  const r = await appeler({
+    query: { annee: '2026' },
+    lignesRad: [
+      { property_uuid: BIEN_A, mois: 11, sejours: 2, total_cents: 50000, sans_date_annulation: 0, non_fiables: 0 },
+      { property_uuid: BIEN_A, mois: 12, sejours: 9, total_cents: 210000, sans_date_annulation: 0, non_fiables: 0 }
+    ]
+  })
+  const m = r.charge.reserve_a_date.mois
+  assert.strictEqual(m['2025-11'].sous_seuil, true, 'un mois a 2 ventes passe le seuil')
+  assert.strictEqual(m['2025-11'].sejours, 2, 'le compte ne sort pas : le refus ne peut pas etre explique')
+  assert.strictEqual(m['2025-11'].total_cents, undefined,
+    'le montant sort alors que le mois est sous le seuil : il pourrait etre trace')
+  assert.strictEqual(m['2025-12'].sous_seuil, false, 'un mois a 9 ventes est refuse a tort')
+  assert.strictEqual(m['2025-12'].total_cents, 210000)
+})
+
+test("LE TEST QUI COMPTE : sur une annee PASSEE, aucun « reserve a date »", async () => {
+  // Comparer « deja reserve aujourd hui » a « reserve a la meme date l an
+  // dernier » suppose un aujourd hui. Sur une annee finie, c est le revenu
+  // FINAL qui se compare — et l appel serait paye pour rien.
+  const r = await appeler({ query: { annee: '2024' } })
+  assert.strictEqual(r.charge.reserve_a_date, null, 'une annee passee rend un « reserve a date »')
+  assert.ok(!r.vu.rpc.some(a => a.nom === 'revenus_reserve_a_date'),
+    'l agregat est appele sur une annee passee')
+})
+
+test("LE TEST QUI COMPTE : les reserves de l agregat REMONTENT a l ecran", async () => {
+  // `sans_date_annulation` et `non_fiables` existent pour etre DITS. Channex ne
+  // fournit aucune date d annulation : leur part grandira avec la bascule.
+  const r = await appeler({
+    query: { annee: '2026' },
+    lignesRad: [
+      { property_uuid: BIEN_A, mois: 11, sejours: 8, total_cents: 90000, sans_date_annulation: 3, non_fiables: 2 }
+    ]
+  })
+  const m = r.charge.reserve_a_date.mois['2025-11']
+  assert.strictEqual(m.sans_date_annulation, 3, 'les annulations sans date ne remontent pas')
+  assert.strictEqual(m.non_fiables, 2, 'les dates de vente non fiables ne remontent pas')
 })
