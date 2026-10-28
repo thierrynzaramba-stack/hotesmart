@@ -22,6 +22,21 @@ const fs = require('fs')
 const path = require('path')
 
 const racine = path.join(__dirname, '..')
+
+// ⚠ LE PLANCHER DE NON-VACUITE, ET C'EST UN NOMBRE MESURE. Si la lecture des
+// appels casse, ce test n'aurait plus rien a verifier et resterait VERT — le
+// faux vert que ce depot a deja paye plusieurs fois. Mon premier plancher etait
+// a 30, un nombre rond : releve par la session chef de file le 28 octobre 2026,
+// `fr.json` porte 100 clefs avec au moins un `{parametre}` et le front 160
+// appels `t('…',` avec arguments. Un parseur qui aurait perdu LES TROIS QUARTS
+// de sa portee restait donc vert.
+// ⚠ IL SE RELEVE QUAND LE FRONT GRANDIT, et jamais l'inverse : si ce test
+// rougit en annoncant moins d'appels verifies, c'est le PARSEUR qu'on corrige.
+// Mesure du 28 octobre 2026 sur cette branche : **82** appels parametres
+// verifies, hors objets construits ailleurs. Plancher pose a 75 — le compte du
+// jour moins une petite marge, pour qu'un lot qui retire un appel ne rougisse
+// pas, mais qu'une perte de portee du parseur, elle, rougisse.
+const PLANCHER = 75
 const fr = JSON.parse(fs.readFileSync(path.join(racine, 'shared/i18n/fr.json'), 'utf8'))
 
 // Les `{parametre}` d'un texte. ⚠ `{n, plural, …}` EN FAIT PARTIE : sa variable
@@ -157,8 +172,17 @@ test("LE TEST QUI COMPTE : chaque `{parametre}` d'un texte est passe par son app
   // ⚠ LA NON-VACUITE D'ABORD : si la lecture des appels casse, ce test
   // n'aurait plus rien a verifier et resterait VERT. C'est le faux vert que ce
   // depot a paye plusieurs fois.
-  assert.ok(verifies >= 30,
-    `${verifies} appels parametres verifies : la lecture des appels ne mesure plus rien`)
+  // ⚠ LE PLANCHER EST UN NOMBRE MESURE, PAS UN NOMBRE ROND. Releve par la
+  // session chef de file sur l'arbre fusionne le 28 octobre 2026 : `fr.json`
+  // porte 100 clefs avec au moins un `{parametre}`, et le front contient
+  // 160 appels `t('…',` avec arguments. Mon premier plancher etait a 30 : un
+  // parseur qui aurait perdu LES TROIS QUARTS de sa portee serait reste vert.
+  // Pose au compte du jour moins une marge, et il MONTE quand le front grandit
+  // — un plancher qu'on ne releve jamais finit par ne plus rien tenir.
+  if (process.env.COMPTER) console.log(`appels parametres verifies : ${verifies}`)
+  assert.ok(verifies >= PLANCHER,
+    `${verifies} appels parametres verifies, plancher ${PLANCHER} : la lecture des`
+    + ' appels a perdu de sa portee — corrigez le parseur, ne baissez pas le plancher')
   assert.deepStrictEqual(manques, [],
     `${manques.length} appel(s) laisseraient une accolade dans le texte rendu :\n  ${manques.join('\n  ')}`)
 })

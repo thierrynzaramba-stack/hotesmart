@@ -2321,6 +2321,13 @@ function renderAnnee () {
   const compEchoue = choisi && comp === null
   const compEnVol = choisi && comp === undefined
   const bandes = []
+  // ⚠ LES MOIS QUE L'ENDPOINT A ECARTES POUR COUVERTURE PARTIELLE. Ils ne font
+  // pas de bande — et c'est juste —, mais leur motif existe : il part dans
+  // l'info-bulle du mois (demande de Thierry du 28 octobre 2026). Sans
+  // logement choisi il n'y a pas de bande du tout, donc pas de partiel non
+  // plus : l'ensemble reste vide.
+  const partielsComparables = new Set(
+    (comp && Array.isArray(comp.partiels)) ? comp.partiels : [])
   let compDate = null
   let compNb = null
   let compPlusieursDates = false
@@ -2407,7 +2414,25 @@ function renderAnnee () {
       // annee passee, aucun mois n'est « maintenant ».
       moisFort: enCours ? moisCourant - 1 : undefined,
       graduation: (v) => monnaieCourte(v, devise),
-      bulle: (v, k, s) => `${s.nom} · ${monnaie(Math.round(v), devise)}`,
+      // ⚠ L'INFO-BULLE PORTE LE MOTIF DU MOIS ECARTE, et c'est la demande de
+      // Thierry du 28 octobre 2026 : « pas de phrase en plus sous la bande (le
+      // texte est deja trop long, c'est en dette), mets le motif dans
+      // l'info-bulle du mois en cours, au survol / au toucher ». Court, sans
+      // chiffre de nuits.
+      // ⚠ DEUX FORMULATIONS, PARCE QUE DEUX CAS. « mois en cours » est vrai du
+      // mois courant — le calendrier AirROI commence a sa date de capture, donc
+      // ce mois-la est toujours tronque. Mais le DERNIER mois de la fenetre
+      // l'est aussi (le calendrier porte ~360 jours), et lui n'est pas « en
+      // cours » : il prend la phrase sans ces deux mots. Une seule formulation
+      // aurait fini par dire « mois en cours » d'un mois de 2027.
+      bulle: (v, k, s) => {
+        const base = `${s.nom} · ${monnaie(Math.round(v), devise)}`
+        const cleM = `${an}-${String(k + 1).padStart(2, '0')}`
+        if (!partielsComparables.has(cleM)) return base
+        return `${base} — ${t(enCours && k + 1 === moisCourant
+          ? 'revenue.annee_comparables_partiel'
+          : 'revenue.annee_comparables_partiel_autre')}`
+      },
       initiales: initialesDesMois(),
       resume: choisi
         ? t('revenue.courbe_bien_resume', { bien: String(choisi.name || ''), n: String(an), n1: String(an - 1) })
