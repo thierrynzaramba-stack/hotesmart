@@ -538,12 +538,15 @@
       <button id="yp-suiv" aria-label="Mois suivant">›</button>
     </div>
     <span id="yp-ca"></span>
-    <button class="yp-btn-ev" id="yp-ouvrir-ev" title="Le calendrier du mois, avec ce qui pilote vos prix : vacances, fériés, dates commerciales, vos événements.">Événements</button>
+    <button class="yp-btn-ev" id="yp-ouvrir-ev" title="Les douze prochains mois : quand vos prix montent ou baissent, et pourquoi — vacances, jours fériés, fêtes du calendrier, vos propres périodes.">Quand vos prix bougent</button>
   </div>
 
-  <!-- LA POP-UP DES ÉVÉNEMENTS (remplace l'ancienne page « Ce qui pilote vos
-       prix », decision de Thierry du 22 septembre 2026). Rendue par le JS. -->
-  <div class="yp-ov" id="yp-ov-ev" role="dialog" aria-modal="true" aria-label="Événements">
+  <!-- « QUAND VOS PRIX BOUGENT » — les douze prochains mois (refonte du
+       28 octobre 2026 ; remplace l'ancienne page « Ce qui pilote vos prix »,
+       decision du 22 septembre 2026). Rendue par le JS.
+       ⚠ L'ETIQUETTE SUIT LE TITRE RENDU : un lecteur d'ecran annoncait
+       « Evenements » alors que la fenetre s'appelle autrement (review). -->
+  <div class="yp-ov" id="yp-ov-ev" role="dialog" aria-modal="true" aria-label="Quand vos prix bougent">
     <div class="yp-pop" id="yp-pop-ev"></div>
   </div>
 
@@ -2085,6 +2088,28 @@
   // ne portent ni le meme mot, ni la meme couleur.
   const effetClasse = (c) => c == null ? 'inconnu' : (c > 0 ? 'monte' : (c < 0 ? 'baisse' : 'normal'))
   const effetMot = (c) => c == null ? 'Automatique' : (EFFET_MOT[c] || EFFET_MOT[Math.sign(c) * 2])
+  // ⚠ LE NOM AFFICHE D'UNE PERIODE, EN UN SEUL ENDROIT. La frise et la ligne
+  // le lisent toutes deux : deux copies diraient un jour deux noms pour la
+  // meme bande et la meme ligne.
+  const nomAffiche = (e) => e.ferie_voisin ? `Week-end du ${e.ferie_voisin}` : e.nom
+  // Ce que l'hote a commence a taper dans le formulaire d'ajout. Il survit a
+  // un refus, et seulement a lui : un ajout reussi le vide.
+  let brouillonAjout = { ouvert: false, nom: '', debut: '', fin: '', rec: '', parent: '' }
+  // ⚠ UN `null` DIT POURQUOI (docs/kb/restitution-yield.md) — constat de la
+  // review du 28 octobre 2026. « Automatique » reste le mot de l'etat
+  // (decision de Thierry), mais il ne doit pas faire croire que le pilote
+  // s'en occupe quand la verite est qu'on n'a RIEN PU MESURER. Le serveur
+  // sert le motif depuis `lib/yield/calendrier-pilotage.js` ; personne ne le
+  // lisait.
+  // Le plus couteux des quatre : `grille_indisponible`. L'endpoint journalise
+  // « grille indisponible » et repond 200 — les 35 periodes reviennent alors
+  // avec `crans: null`, et l'ecran annoncait « Automatique » sur TOUTES.
+  const NON_CALCULABLE = {
+    grille_indisponible: 'la grille de ce logement n’a pas pu être lue',
+    reference_ordinaire_mince: 'trop peu de nuits ordinaires pour comparer',
+    pas_d_historique_propre: 'pas encore d’historique sur ce type de période',
+    date_desactivee: 'vous n’en tenez pas compte'
+  }
   const ORIGINE_MOT = {
     officiel: 'vacances et jours fériés',
     calendrier: 'fêtes du calendrier',
@@ -2107,7 +2132,10 @@
   }
   const moisDe = (iso) => iso.slice(0, 7)
   const moisSuivant = (m) => { const [a, x] = m.split('-').map(Number); return `${x === 12 ? a + 1 : a}-${String(x === 12 ? 1 : x + 1).padStart(2, '0')}` }
-  const moisLong = (m) => { const [a, x] = m.split('-').map(Number); return `${MOIS_COURT[x - 1]} ${a}` }
+  // ⚠ IL RENDAIT LE MOIS COURT malgre son nom — releve en review. Un nom qui
+  // annonce le contraire de ce que la fonction fait fera ecrire faux au
+  // prochain appelant.
+  const moisLong = (m) => { const [a, x] = m.split('-').map(Number); return `${MOIS_LONG[x - 1]} ${a}` }
 
   async function rendrePopup (message = '') {
     if (!popupOuverte) return
@@ -2136,11 +2164,17 @@
     // ⚠ Elle porte LA MEME couleur d'effet que la liste en dessous, et un
     // clic amene a la ligne. C'est la demande de Thierry : voir d'abord QUAND
     // ca bouge, puis descendre au detail.
-    const frise = moisListe.map(m => {
-      const finMois = `${m}-31`
+    const frise = moisListe.map((m, k) => {
+      const dernier = k === moisListe.length - 1
+      // ⚠ La DERNIERE colonne porte aussi ce qui commence au-dela : sinon une
+      // bande manquerait a la frise pour une ligne qui, elle, existe.
+      const finMois = dernier ? '9999-12-31' : `${m}-31`
       const dedans = entrees.map((e, i) => ({ e, i })).filter(({ e }) => e.debut <= finMois && e.fin >= `${m}-01`)
-      const bandes = dedans.map(({ e, i }) => `<button type="button" class="qpb-bande e-${effetClasse(e.crans)}" data-vers="${i}"
-        title="${ech(`${e.nom} — ${effetMot(e.crans)}`)}" aria-label="${ech(`${e.nom}, ${effetMot(e.crans)}`)}"></button>`).join('')
+      const bandes = dedans.map(({ e, i }) => {
+        const n = nomAffiche(e)
+        return `<button type="button" class="qpb-bande e-${effetClasse(e.crans)}" data-vers="${i}"
+          title="${ech(`${n} — ${effetMot(e.crans)}`)}" aria-label="${ech(`${n}, ${effetMot(e.crans)}`)}"></button>`
+      }).join('')
       return `<div class="qpb-col"><span class="qpb-col-nom">${ech(MOIS_COURT[Number(m.slice(5, 7)) - 1])}</span>
         <div class="qpb-col-bandes">${bandes || '<span class="qpb-vide"></span>'}</div></div>`
     }).join('')
@@ -2161,11 +2195,33 @@
       : `<div class="qpb-rec"><b>${ech(r.nom)}</b><span>Revient l’an prochain ? ${r.non_calculable === 'date_absente_l_annee_suivante' ? 'Cette date n’existe pas l’an prochain' : 'Cette position n’existe pas l’an prochain'} — ajoutez-la avec ses dates.</span></div>`).join('')
 
     // ── LA LISTE, groupee par mois ─────────────────────────────────────────
+    // ⚠ AUCUNE PERIODE NE SE PERD, ET C'EST LE CONSTAT LE PLUS GRAVE DE LA
+    // REVIEW DU 28 OCTOBRE 2026. La frise a douze colonnes, mais la fenetre
+    // du serveur va d'aujourd'hui a aujourd'hui + 1 an : elle TOUCHE un
+    // treizieme mois. Une periode qui y commence tombait dans aucun groupe et
+    // DISPARAISSAIT — ni reglable, ni supprimable, alors qu'elle pese sur les
+    // prix.
+    // Le cas qui coutait le plus cher : une date commerciale COUPEE tombant
+    // la. `api/yield-evenements.js` la repousse explicitement dans la liste
+    // « parce que les retirer aurait rendu la desactivation irreversible
+    // depuis l'interface » — et ce filtre le refaisait.
+    // On SERRE donc aux deux bouts, symetriquement : ce qui commence avant la
+    // fenetre va au premier mois, ce qui commence apres va au dernier.
+    const premierMois = moisListe[0]
+    const dernierMois = moisListe[moisListe.length - 1]
+    const moisDeLaLigne = (e) => {
+      const m = moisDe(e.debut)
+      if (m < premierMois) return premierMois
+      if (m > dernierMois) return dernierMois
+      return m
+    }
     const parMois = new Map(moisListe.map(m => [m, []]))
-    entrees.forEach((e, i) => {
-      const m = moisDe(e.debut) < moisListe[0] ? moisListe[0] : moisDe(e.debut)
-      if (parMois.has(m)) parMois.get(m).push({ e, i })
-    })
+    entrees.forEach((e, i) => parMois.get(moisDeLaLigne(e)).push({ e, i }))
+    // Le compte doit retomber sur ses pieds : aucune entree perdue en route.
+    const posees = [...parMois.values()].reduce((n, l) => n + l.length, 0)
+    if (posees !== entrees.length) {
+      console.error('[periodes] %d periode(s) perdue(s) a l affichage', entrees.length - posees)
+    }
     const sections = moisListe.map(m => {
       const lignes = parMois.get(m) || []
       if (!lignes.length) return ''
@@ -2173,14 +2229,21 @@
     }).join('')
 
     // ── L'ajout : UN BOUTON, pas un formulaire deplie ───────────────────────
-    const ajout = lecture ? '' : `<details class="qpb-ajout" id="qpb-ajout">
+    // ⚠ UN REFUS N'EFFACE PAS CE QUE L'HOTE A TAPE — constat de la review du
+    // 28 octobre 2026. `rendrePopup(message)` reconstruit toute la fenetre,
+    // donc recreait le formulaire FERME et VIDE : l'hote tapait « Festival de
+    // jazz », oubliait une date, et perdait son texte avec le refus. C'est le
+    // meme principe que « le texte n'est jamais perdu » de la messagerie.
+    // Le brouillon est garde en memoire de page, releve a chaque geste.
+    const b = brouillonAjout
+    const ajout = lecture ? '' : `<details class="qpb-ajout" id="qpb-ajout"${b.ouvert ? ' open' : ''}>
         <summary>+ Ajouter une période</summary>
         <div class="qpb-form">
-          <label style="grid-column: span 2">Son nom<input id="ev-nom" maxlength="${ev.limites ? ev.limites.nom_max : 80}" placeholder="Festival, salon, saison thermale…"></label>
-          <label>Première nuit<input id="ev-debut" type="date" value="${ech(auj)}"></label>
-          <label>Dernière nuit<input id="ev-fin" type="date" value="${ech(auj)}"></label>
-          <label>Revient-elle ?<select id="ev-rec">${(ev.recurrences || []).map(r => `<option value="${ech(r)}">${ech(RECURRENCE_NOM[r] || r)}</option>`).join('')}</select></label>
-          <label>Ressemble à<select id="ev-parent"><option value="">— au choix de HôteSmart —</option>${(ev.parents || []).map(x => `<option value="${ech(x)}">${ech(x)}</option>`).join('')}</select></label>
+          <label style="grid-column: span 2">Son nom<input id="ev-nom" maxlength="${ev.limites ? ev.limites.nom_max : 80}" value="${ech(b.nom || '')}" placeholder="Festival, salon, saison thermale…"></label>
+          <label>Première nuit<input id="ev-debut" type="date" value="${ech(b.debut || auj)}"></label>
+          <label>Dernière nuit<input id="ev-fin" type="date" value="${ech(b.fin || auj)}"></label>
+          <label>Revient-elle ?<select id="ev-rec">${(ev.recurrences || []).map(r => `<option value="${ech(r)}" ${r === b.rec ? 'selected' : ''}>${ech(RECURRENCE_NOM[r] || r)}</option>`).join('')}</select></label>
+          <label>Ressemble à<select id="ev-parent"><option value="">— au choix de HôteSmart —</option>${(ev.parents || []).map(x => `<option value="${ech(x)}" ${x === b.parent ? 'selected' : ''}>${ech(x)}</option>`).join('')}</select></label>
           <button class="qpb-btn-plein" id="ev-ajouter">Ajouter</button>
         </div>
       </details>`
@@ -2231,11 +2294,21 @@
     const c = e.crans
     const quand = periodeEnLettres(e.debut, e.fin)
     const nuits = e.nuits ? ` · ${e.nuits} nuit${e.nuits > 1 ? 's' : ''}` : ''
-    // ⚠ « week-end du 11 novembre » REMPLACE « eclaire par » (demande de
-    // Thierry). Le PONT, lui, est une periode a part dont le nom commence
-    // deja par « pont » : il n'a rien a recevoir ici.
-    const colle = e.ferie_voisin ? ` · week-end du ${ech(e.ferie_voisin)}` : ''
+    // ⚠ UN WEEK-END PROLONGE PORTE SON NOM REEL, ET UNE SEULE FOIS (demande
+    // de Thierry, 28 octobre 2026). Le serveur le nomme « week-end prolongé
+    // (11 novembre) » — un libelle du MOTEUR — et l'ecran redisait « week-end
+    // du 11 novembre » dans le detail : le meme fait, deux fois, dont une en
+    // vocabulaire interne. Le titre devient « Week-end du 11 novembre », et
+    // le detail se tait.
+    // Le PONT, lui, est une periode a part dont le nom commence deja par
+    // « pont » : il n'a rien a recevoir ici.
+    const nom = nomAffiche(e)
     const coupe = e.actif === false
+    // Le motif ne s'affiche QUE sur un `null` : une periode reglee ou mesuree
+    // n'a rien a expliquer. ⚠ APRES `coupe` : le lire avant sa declaration
+    // aurait leve a l'execution (zone morte temporelle), et la pop-up se
+    // serait ouverte vide — un defaut que `node --check` ne voit pas.
+    const motif = (c == null && !coupe) ? (NON_CALCULABLE[e.influence_non_calculable] || null) : null
     const auto = c == null
     // ⚠ « AUTOMATIQUE » N'APPARAIT QUE SI LA LIGNE A ETE REGLEE A LA MAIN
     // (demande de Thierry). Le critere est `crans_ajustes`, PAS `crans` :
@@ -2246,23 +2319,25 @@
     // ⚠ DEUX FLECHES, ET LA PASTILLE DIT L'ETAT. Les libelles « − moins fort /
     // + plus fort » repetaient en mots ce que la pastille disait deja mieux.
     const gestes = lecture ? '' : `<div class="qpb-regl">
-        <button type="button" class="qpb-pas" data-ev-pas="-1" data-segment="${ech(e.cle)}" data-actuel="${c == null ? 0 : c}" ${c != null && c <= -max ? 'disabled' : ''} aria-label="Baisser le prix : ${ech(e.nom)}" title="Baisser le prix">▼</button>
-        <button type="button" class="qpb-pas" data-ev-pas="1" data-segment="${ech(e.cle)}" data-actuel="${c == null ? 0 : c}" ${c != null && c >= max ? 'disabled' : ''} aria-label="Monter le prix : ${ech(e.nom)}" title="Monter le prix">▲</button>
+        <button type="button" class="qpb-pas" data-ev-pas="-1" data-segment="${ech(e.cle)}" data-actuel="${c == null ? 0 : c}" ${c != null && c <= -max ? 'disabled' : ''} aria-label="Baisser le prix : ${ech(nom)}" title="Baisser le prix">▼</button>
+        <button type="button" class="qpb-pas" data-ev-pas="1" data-segment="${ech(e.cle)}" data-actuel="${c == null ? 0 : c}" ${c != null && c >= max ? 'disabled' : ''} aria-label="Monter le prix : ${ech(nom)}" title="Monter le prix">▲</button>
       </div>
       ${regleALaMain ? `<button type="button" class="qpb-auto" data-ev-auto="${ech(e.cle)}">remettre en automatique</button>` : ''}`
     const menu = lecture || !((e.droits && e.droits.desactivable) || (e.droits && e.droits.supprimable && e.id)) ? '' : `<details class="qpb-plus">
-        <summary aria-label="Autres gestes sur ${ech(e.nom)}">⋯</summary>
+        <summary aria-label="Autres gestes sur ${ech(nom)}">⋯</summary>
         <div class="qpb-plus-liste">
           ${e.droits.desactivable ? `<button type="button" data-ev-actif="${ech(e.cle)}" data-vers2="${coupe ? '1' : '0'}">${coupe ? 'Reprendre en compte' : 'Ne plus en tenir compte'}</button>` : ''}
-          ${e.droits.supprimable && e.id ? `<button type="button" class="qpb-sup" data-ev-sup="${ech(e.id)}" data-nom="${ech(e.nom)}">Supprimer</button>` : ''}
+          ${e.droits.supprimable && e.id ? `<button type="button" class="qpb-sup" data-ev-sup="${ech(e.id)}" data-nom="${ech(nom)}">Supprimer</button>` : ''}
         </div></details>`
     return `<div class="qpb-l${coupe ? ' coupee' : ''}" id="qpb-l-${i}">
       <span class="qpb-pt e-${effetClasse(c)}" aria-hidden="true"></span>
       <div class="qpb-l-txt">
-        <b>${ech(e.nom)}</b>
-        <span class="qpb-quand">${ech(quand)}${nuits}${colle} · ${ech(ORIGINE_MOT[e.origine] || e.origine)}</span>
+        <b>${ech(nom)}</b>
+        <span class="qpb-quand">${ech(quand)}${nuits} · ${ech(ORIGINE_MOT[e.origine] || e.origine)}</span>
       </div>
-      <span class="qpb-effet e-${effetClasse(c)}">${ech(coupe ? 'Pas prise en compte' : effetMot(c))}${auto && e.crans_mesures != null ? ` <i>(${e.crans_mesures > 0 ? '+' : ''}${e.crans_mesures} aujourd’hui)</i>` : ''}</span>
+      <span class="qpb-effet e-${effetClasse(c)}" ${motif ? `title="${ech(motif)}"` : ''}>${ech(coupe ? 'Pas prise en compte' : effetMot(c))}${
+        !regleALaMain && e.crans_mesures != null ? ` <i>(${e.crans_mesures > 0 ? '+' : ''}${e.crans_mesures} aujourd’hui)</i>`
+        : (motif ? ` <i>${ech(motif)}</i>` : '')}</span>
       <div class="qpb-actions">${gestes}${menu}</div>
     </div>`
   }
@@ -2274,10 +2349,13 @@
   }
   async function ajouterEvenement () {
     const corps = { nom: el('ev-nom').value.trim(), debut: el('ev-debut').value, fin: el('ev-fin').value, recurrence: el('ev-rec').value, parent_segment: el('ev-parent').value || null }
+    // On releve AVANT d'envoyer : si le serveur refuse, l'hote retrouve tout.
+    brouillonAjout = { ouvert: true, nom: corps.nom, debut: corps.debut, fin: corps.fin, rec: corps.recurrence, parent: corps.parent_segment || '' }
     if (!corps.nom || !corps.debut || !corps.fin) return rendrePopup('Il manque le nom ou les dates.')
     let r
     try { r = await apiEv('POST', corps) } catch (e) { return rendrePopup(`Échec : ${e.message}`) }
     if (!r.ok) return rendrePopup(refus(r.data && r.data.error) || (r.data && (r.data.detail || r.data.error)) || 'Refusé.')
+    brouillonAjout = { ouvert: false, nom: '', debut: '', fin: '', rec: '', parent: '' }
     rechargerEvenements(`✓ « ${corps.nom} » ajouté.`)
   }
   async function reconduireEvenement (i) {
