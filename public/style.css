@@ -27,6 +27,25 @@
   --green-bg: #E1F5EE;
   --amber: #BA7517;
   --amber-bg: #FAEEDA;
+  /* ⚠ DEUX TEINTES AJOUTEES LE 28 OCTOBRE 2026, et TROIS couleurs reservees.
+     Decisions de Thierry, dans l'ordre ou elles ont ete posees :
+       · le NOIR est reserve a la NAVIGATION ;
+       · l'AMBRE est reserve a « ce que HoteSmart a fait pour vous » ;
+       · le BLEU est reserve a CE QUI EST CLIQUABLE.
+     D'ou les deux jetons ci-dessous, et leur partage du travail.
+
+     --blue : les ACTIONS, et elles seules. Un bouton, un lien.
+
+     --prune : l'ETAT « moins chers ». Il lui fallait une couleur propre —
+     pas l'ambre (ce n'est pas une action du produit), pas le bleu (ce n'est
+     pas cliquable), pas une nuance de vert (ce serait le contraire de ce
+     qu'il dit). Le prune est en outre nettement plus SOMBRE que --green
+     (#1D9E75) : les deux etats se distinguent par la CLARTE autant que par
+     la teinte, donc un lecteur daltonien lit la difference. */
+  --blue: #2563EB;
+  --blue-bg: #E8EFFD;
+  --prune: #5B2A86;
+  --prune-bg: #F0E9F6;
   --radius: 8px;
   --radius-lg: 12px;
   --sidebar-width: 210px;

@@ -177,7 +177,7 @@
   "cal.yf_adjusted": "{n, plural, one {# prix ajusté cette semaine} other {# prix ajustés cette semaine}}",
   "cal.yf_prediction": "Prédiction des prix",
   "cal.yf_market": "Données marché",
-  "cal.yf_events": "Événements",
+  "cal.yf_events": "Quand vos prix bougent",
   "cal.yf_comparables": "Comparables",
   "cal.yf_settings": "Réglages du pilote",
   "cal.yf_activate": "Activer le pilote automatique",

@@ -378,53 +378,118 @@
        teintes que les lignes) ; un evenement est un CONTOUR unifie sur ses
        cases — deux teintes dedans (semaine / week-end) restent un seul
        evenement. Semaine et week-end ne sont jamais des evenements. */
+    /* ⚠ AU-DESSUS DU ☰ DE LA BARRE LATERALE — recette du 28 octobre 2026.
+       `components/sidebar.js` pose son bouton ☰ en `position: fixed` avec un
+       `z-index: 1000` EN LIGNE ; cette fenetre etait a 60, donc le ☰ passait
+       PAR-DESSUS elle au telephone et mangeait le debut de son titre.
+       On monte la fenetre plutot que de baisser le ☰ : ce bouton est partage
+       par vingt pages, et l'abaisser le ferait passer sous le contenu de
+       toutes les autres. Une fenetre modale, elle, doit etre au-dessus de la
+       chrome de la page — c'est sa definition. */
     .yp-ov { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: none;
-             align-items: flex-start; justify-content: center; z-index: 60; padding: 24px 12px; overflow-y: auto; }
+             align-items: flex-start; justify-content: center; z-index: 1001; padding: 24px 12px; overflow-y: auto; }
     .yp-ov.visible { display: flex; }
     .yp-pop { background: var(--bg); border-radius: var(--radius-lg); width: 100%; max-width: 760px;
               box-shadow: 0 12px 40px rgba(0,0,0,.25); padding: 16px 18px 18px; }
     .yp-pop-tete { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
     .yp-pop-tete h2 { font-size: 15px; margin: 0; }
     .yp-pop-tete .yp-nav { margin-left: auto; }
+    /* ── « Quand vos prix bougent » (28 octobre 2026) ──────────────────────
+       UN SEUL CODE COULEUR : l'effet sur les prix. L'origine est un MOT.
+       Les quatre teintes viennent de public/style.css — aucun hexa pose ici. */
+    .qpb-tete { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 10px; }
+    .qpb-tete h2 { grid-column: 1; }
+    .qpb-fermer { grid-column: 2; grid-row: 1; justify-self: end; min-width: 32px; min-height: 32px; }
+    .qpb-sous { grid-column: 1; font-size: 12.5px; color: var(--text2); }
+    .qpb-msg { margin: 8px 0; padding: 8px 12px; border-radius: var(--radius); font-size: 13px; }
+    .qpb-msg.ok { background: var(--green-bg); color: var(--green); }
+    .qpb-msg.ko { background: var(--amber-bg); color: var(--amber); }
+    /* La frise : douze colonnes, une bande par periode, meme couleur que la liste. */
+    .qpb-frise { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; margin: 10px 0 6px; }
+    .qpb-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .qpb-col-nom { font-size: 9.5px; color: var(--text3); text-align: center; white-space: nowrap; overflow: hidden; }
+    .qpb-col-bandes { display: flex; flex-direction: column; gap: 2px; min-height: 26px; }
+    .qpb-bande { height: 7px; border: 0; border-radius: 3px; padding: 0; cursor: pointer; width: 100%; }
+    .qpb-bande:hover, .qpb-bande:focus-visible { outline: 2px solid var(--text); outline-offset: 1px; }
+    .qpb-vide { height: 7px; border-radius: 3px; background: var(--bg3); display: block; }
+    /* La pastille et la bande partagent les memes quatre etats. */
+    .qpb-pt { width: 10px; height: 10px; border-radius: 3px; flex: none; display: inline-block; }
+    .e-monte, .qpb-bande.e-monte { background: var(--green); }
+    /* ⚠ NI AMBRE NI BLEU : l'ambre est reserve a « ce que HoteSmart a fait
+       pour vous », le bleu a ce qui est CLIQUABLE. Un prix qui baisse est un
+       ETAT, et il a son jeton propre. */
+    .e-baisse, .qpb-bande.e-baisse { background: var(--prune); }
+    .e-normal, .qpb-bande.e-normal { background: var(--text3); }
+    .e-inconnu, .qpb-bande.e-inconnu { background: var(--bg3); border: 1px dashed var(--border2); }
+    .qpb-effet.e-monte { color: var(--green); background: var(--green-bg); }
+    .qpb-effet.e-baisse { color: var(--prune); background: var(--prune-bg); }
+    .qpb-effet.e-normal { color: var(--text2); background: var(--bg3); }
+    .qpb-effet.e-inconnu { color: var(--text2); background: transparent; border: 1px dashed var(--border2); }
+    .qpb-effet { font-size: 12px; font-weight: 600; border-radius: var(--radius); padding: 3px 9px; white-space: nowrap; }
+    .qpb-effet i { font-weight: 400; font-style: normal; opacity: .75; }
+    /* La liste, groupee par mois. */
+    .qpb-mois { margin-top: 14px; }
+    .qpb-mois h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text3); margin-bottom: 6px; }
+    .qpb-l { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px; background: var(--bg); }
+    .qpb-l.vise { outline: 2px solid var(--text); outline-offset: 2px; }
+    .qpb-l.coupee { opacity: .55; }
+    .qpb-l-txt { display: flex; flex-direction: column; min-width: 0; flex: 1 1 200px; }
+    .qpb-l-txt b { font-size: 13.5px; }
+    .qpb-quand { font-size: 11.5px; color: var(--text2); }
+    .qpb-actions { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+    .qpb-regl { display: flex; gap: 6px; flex-wrap: wrap; }
+    .qpb-regl button { border: 1px solid var(--border2); background: var(--bg); border-radius: var(--radius); width: 36px; min-height: 32px; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+    .qpb-auto { border: 0; background: none; color: var(--blue); font-size: 11.5px; cursor: pointer; padding: 4px 6px; text-decoration: underline; white-space: nowrap; }
+    .qpb-regl button:hover:not(:disabled) { background: var(--bg3); }
+    .qpb-regl button:disabled { opacity: .4; cursor: not-allowed; }
+    .qpb-plus { position: relative; flex: none; }
+    .qpb-plus summary { list-style: none; cursor: pointer; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius); color: var(--text2); }
+    .qpb-plus summary::-webkit-details-marker { display: none; }
+    .qpb-plus summary:hover { background: var(--bg3); }
+    .qpb-plus-liste { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 4px; min-width: 190px; box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+    .qpb-plus-liste button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 8px 10px; border-radius: 6px; font-size: 12.5px; cursor: pointer; }
+    .qpb-plus-liste button:hover { background: var(--bg3); }
+    .qpb-plus-liste .qpb-sup { color: var(--amber); }
+    /* Ce qui se dit avant la liste. */
+    .qpb-dit { font-size: 12.5px; color: var(--text2); background: var(--bg3); border-radius: var(--radius); padding: 8px 12px; margin-bottom: 8px; }
+    .qpb-i { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; border-radius: 50%; border: 1px solid var(--border2); font-size: 10px; margin-left: 4px; cursor: help; }
+    .qpb-rec { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px dashed var(--border2); border-radius: var(--radius); margin-bottom: 6px; }
+    .qpb-rec b { font-size: 13.5px; }
+    .qpb-rec span { font-size: 12px; color: var(--text2); }
+    .qpb-rec input { border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; font-size: 12.5px; font-family: inherit; }
+    /* L'ajout : UN BOUTON, et le formulaire derriere. */
+    .qpb-ajout { margin-top: 16px; }
+    .qpb-ajout summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: var(--radius); background: var(--blue); color: #fff; font-size: 13px; font-weight: 600; }
+    .qpb-ajout summary::-webkit-details-marker { display: none; }
+    .qpb-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); }
+    .qpb-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text2); }
+    .qpb-form input, .qpb-form select { border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; font-size: 13px; font-family: inherit; }
+    /* ⚠ LE NOIR EST RESERVE A LA NAVIGATION (decision de Thierry) : les
+       actions sont BLEUES. */
+    .qpb-btn-plein { border: 0; border-radius: var(--radius); background: var(--blue); color: #fff; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 40px; }
+    .qpb-btn-plein:hover { filter: brightness(1.08); }
+    /* ⚠ LE TELEPHONE SUIT L'ORDINATEUR, et la frise de douze colonnes n'y
+       tient pas : elle DEFILE plutot que de se tasser a 25 px par mois. */
+    @media (max-width: 720px) {
+      .qpb-frise { grid-template-columns: repeat(12, 46px); overflow-x: auto; padding-bottom: 4px; }
+      .qpb-l { align-items: flex-start; }
+      .qpb-actions { width: 100%; margin-left: 0; gap: 8px; }
+      .qpb-regl { flex: none; }
+      /* ⚠ LES FLECHES NE S'ETIRENT PAS. Elles heritaient du `flex: 1 1 auto`
+         pose quand elles portaient encore « − moins fort / + plus fort » : une
+         fleche large comme la moitie de l'ecran ne designe plus rien. 44 px,
+         la cible tactile du produit, et pas un pixel de plus. */
+      .qpb-regl button { width: 44px; height: 44px; flex: none; }
+      .qpb-plus summary { width: 44px; height: 44px; }
+      .qpb-form { grid-template-columns: 1fr; }
+      .qpb-ajout summary { min-height: 44px; width: 100%; justify-content: center; }
+    }
     .yp-pop-fermer { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text3); }
-    .yp-cal { width: 100%; border-collapse: separate; border-spacing: 3px; table-layout: fixed; }
-    .yp-cal th { font-size: 10px; text-transform: uppercase; color: var(--text3); font-weight: 600; padding: 2px 0; }
-    .yp-cal td { height: 54px; vertical-align: top; border-radius: 6px; padding: 3px 4px; font-size: 11px;
                  background: var(--bg2); position: relative; border: 2px solid transparent; }
-    .yp-cal td.vide { background: transparent; }
-    .yp-cal td .j { font-weight: 600; font-variant-numeric: tabular-nums; }
-    .yp-cal td .p { font-size: 10.5px; color: var(--text2); display: block; margin-top: 2px; }
-    .yp-cal td .n { font-size: 9px; text-transform: uppercase; color: var(--text3); display: block; }
-    .yp-cal td.n-base, .yp-cal td.n-moyen, .yp-cal td.n-haut, .yp-cal td.n-tres-haut, .yp-cal td.n-exceptionnel { box-shadow: none; }
     /* Le contour d'un evenement : bordures haut/bas sur toutes ses cases,
        gauche sur la premiere, droite sur la derniere ; en rejoignant les
        cases voisines (espacement negatif), il se lit d'un seul trait. */
-    .yp-cal td.ev { border-top-color: var(--ev); border-bottom-color: var(--ev); border-radius: 0; }
-    .yp-cal td.ev.ev-g { border-left-color: var(--ev); border-radius: 6px 0 0 6px; }
-    .yp-cal td.ev.ev-d { border-right-color: var(--ev); border-radius: 0 6px 6px 0; }
-    .yp-cal td.ev.ev-g.ev-d { border-radius: 6px; }
-    .yp-cal td .ev-nom { position: absolute; left: 4px; top: 3px; right: 22px; font-size: 9px; font-weight: 600;
                          color: var(--ev); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
-    /* Une barre par evenement au bas de la case : les chevauchements se voient,
-       et chaque barre court d'un bout a l'autre de son evenement. */
-    .yp-cal td .ev-barres { position: absolute; left: -2px; right: -2px; bottom: 0; display: flex; flex-direction: column; gap: 1px; }
-    .yp-cal td .ev-barre { display: block; height: 3px; }
-    .yp-cal td .ev-barre.g { margin-left: 4px; border-radius: 2px 0 0 2px; }
-    .yp-cal td .ev-barre.d { margin-right: 4px; border-radius: 0 2px 2px 0; }
-    .yp-ev-liste { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
-    .yp-ev-l { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px;
-               padding: 6px 8px; border-radius: var(--radius); background: var(--bg2); border-left: 4px solid var(--ev); }
-    .yp-ev-l .o { font-size: 9.5px; text-transform: uppercase; color: var(--text3); }
-    .yp-ev-l select { font-size: 11.5px; padding: 2px 4px; border: 0.5px solid var(--border); border-radius: 4px; background: var(--bg); }
-    .yp-ev-l button { font-size: 11px; background: none; border: 0.5px solid var(--border); border-radius: 4px; cursor: pointer; color: var(--text3); padding: 2px 7px; }
-    .yp-ev-l button:hover { color: #B02A37; border-color: #F5C2C7; }
-    .yp-ev-form { margin-top: 14px; padding-top: 12px; border-top: 0.5px solid var(--border);
-                  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; align-items: end; }
-    .yp-ev-form label { display: flex; flex-direction: column; gap: 3px; font-size: 10.5px; color: var(--text3); }
-    .yp-ev-form input, .yp-ev-form select { padding: 6px 8px; border: 0.5px solid var(--border); border-radius: var(--radius); font-size: 12.5px; background: var(--bg); color: var(--text); }
-    .yp-ev-form button { padding: 7px 12px; border: none; border-radius: var(--radius); background: var(--text); color: var(--bg); cursor: pointer; font-size: 12.5px; }
-    .yp-ev-msg { grid-column: 1 / -1; font-size: 12px; }
-    .yp-ev-msg.ko { color: #B02A37; } .yp-ev-msg.ok { color: #1F6F45; }
     .yp-btn-ev { padding: 6px 10px; border: 0.5px solid var(--border); border-radius: var(--radius);
                  background: var(--bg); cursor: pointer; font-size: 12.5px; color: var(--text); }
     .yp-btn-ev:hover { background: var(--bg2); }
@@ -1943,8 +2008,6 @@
   // Un calendrier en tableau du mois affiche : la teinte des cases est le
   // NIVEAU de la nuit (les memes cinq teintes que les lignes), les evenements
   // sont des CONTOURS unifies, « Ajouter un evenement » declare le votre.
-  const EV_COULEUR = { officiel: '#2A5E86', calendrier: '#7A3E9A', declare: '#1F6F45' }
-  const EV_NOM = { officiel: 'officiel', calendrier: 'date commerciale', declare: 'déclaré' }
   const RECURRENCE_NOM = { unique: 'une seule fois', annuelle: 'chaque année, mêmes dates', annuelle_mobile: 'chaque année, dates à confirmer' }
   const apiEv = async (methode, corps = null, params = {}) => {
     const q = new URLSearchParams({ property_id: el('yp-bien').value, ...params })
@@ -1959,12 +2022,20 @@
   // l'endpoint sert [aujourd'hui, +12 mois], donc ni le passe du mois courant
   // ni les mois hors de cette fenetre. On lit la fenetre de la grille.
   let evenementsMois = null
+  // ⚠ DOUZE MOIS, EN UN SEUL APPEL — demande de Thierry du 28 octobre 2026 :
+  // « l'ecran montre d'abord QUAND les prix montent ou baissent sur 12 mois ».
+  // On ne passe NI `debut` NI `fin` : la fenetre par defaut de
+  // `/api/yield-evenements` est deja prospective sur douze mois
+  // (`f1 = aujourd'hui`, `f2 = +1 an`). L'ancien ecran la BRIDAIT au mois
+  // affiche, et rechargeait donc a chaque fleche.
+  // Mesure du 28 octobre 2026 sur staging : 35 periodes sur la fenetre
+  // (21 vacances des trois zones, 11 feries, 3 dates commerciales), hors
+  // ponts et hors evenements de l'hote. Une liste groupee par mois tient ;
+  // on est tres loin des 1000 lignes ou PostgREST tronque en silence.
   async function lireEvenements () {
-    const [a, m] = mois.split('-').map(Number)
-    const fin = `${mois}-${String(new Date(Date.UTC(a, m, 0)).getUTCDate()).padStart(2, '0')}`
-    const r = await apiEv('GET', null, { debut: `${mois}-01`, fin })
+    const r = await apiEv('GET')
     if (!r.ok) throw new Error(refus(r.data && r.data.error) || 'Lecture impossible.')
-    evenements = r.data; evenementsMois = mois
+    evenements = r.data; evenementsMois = '12m'
   }
   async function ouvrirPopup () {
     popupOuverte = true
@@ -1974,113 +2045,228 @@
     rendrePopup()
   }
   function fermerPopup () { popupOuverte = false; el('yp-ov-ev').classList.remove('visible') }
+  // ─── « QUAND VOS PRIX BOUGENT » ────────────────────────────────────────────
+  // Refonte du 28 octobre 2026. Spec : docs/specs/spec-yf-ecran-periodes.md.
+  //
+  // ⚠ CE QUE CET ECRAN A CESSE D'ETRE, ET POURQUOI. Il montrait un calendrier
+  // du MOIS dont chaque case de 54 px portait CINQ informations (le jour, le
+  // prix, le niveau en 9 px, le nom de l'evenement pose par-dessus, et une
+  // barre par evenement), avec DEUX codes couleur superposes : le fond disait
+  // le niveau de prix, le contour disait l'origine. Rien ne disait qu'il y en
+  // avait deux.
+  // Ce calendrier est retire — et on ne perd rien : la page qui ouvre cette
+  // fenetre porte DEJA le tableau du mois, nuit par nuit, avec les prix, les
+  // niveaux, le « ~ » des projections et le « ✎ » des prix de l'hote. C'etait
+  // une seconde verite, plus pauvre.
+  //
+  // ⚠ UN SEUL CODE COULEUR : L'EFFET. L'origine n'est plus une couleur, c'est
+  // un MOT. Un lecteur daltonien n'avait aucun moyen de distinguer le bleu
+  // « officiel » du vert « declare ».
+  // Et les quatre teintes viennent des variables de `public/style.css` :
+  // aucun hexa n'est pose par ce lot.
+  //
+  // ⚠ AUCUN MOT DU MOTEUR. « crans », « laisser mesurer », « sans effet »,
+  // « se comporte comme », « eclaire par », « reconduire » ne sortent plus a
+  // l'ecran. Le MODELE, lui, ne change pas : le serveur recoit et borne
+  // toujours des crans — c'est une decision gravee (« +1 cran » pousse la
+  // structure du bien en gardant ses reliefs, la ou un niveau a plat
+  // ecraserait la semaine sur le week-end).
+
+  // L'effet d'une periode, en mots. ⚠ L'AMPLITUDE DU MOTEUR S'ARRETE A DEUX
+  // (`AMPLITUDE_MAX = 2`) : il n'y a donc que cinq etats, et pas neuf. Un
+  // troisieme cran serait refuse par le serveur.
+  const EFFET_MOT = {
+    '-2': 'nettement moins chers', '-1': 'un peu moins chers',
+    0: 'prix normaux',
+    1: 'un peu plus chers', 2: 'nettement plus chers'
+  }
+  // ⚠ `null` N'EST PAS 0. « Automatique » veut dire que l'hote laisse le
+  // moteur decider ; « prix normaux » est un reglage qu'il a pose. Les deux
+  // ne portent ni le meme mot, ni la meme couleur.
+  const effetClasse = (c) => c == null ? 'inconnu' : (c > 0 ? 'monte' : (c < 0 ? 'baisse' : 'normal'))
+  const effetMot = (c) => c == null ? 'Automatique' : (EFFET_MOT[c] || EFFET_MOT[Math.sign(c) * 2])
+  const ORIGINE_MOT = {
+    officiel: 'vacances et jours fériés',
+    calendrier: 'fêtes du calendrier',
+    declare: 'ajouté par vous'
+  }
+  const MOIS_COURT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.']
+  // ⚠ LES DATES SE DISENT EN TOUTES LETTRES (demande de Thierry, 28 octobre
+  // 2026). « 16/05/2026 → 17/05/2026 » obligeait a relire deux fois pour voir
+  // deux nuits ; « 16 → 17 mai 2026 » se lit d'un coup. Le mois et l'annee ne
+  // se repetent QUE s'ils changent.
+  const MOIS_LONG = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre']
+  const jourDe = (iso) => Number(iso.slice(8, 10))
+  const moisNom = (iso) => MOIS_LONG[Number(iso.slice(5, 7)) - 1]
+  const anDe = (iso) => iso.slice(0, 4)
+  function periodeEnLettres (debut, fin) {
+    if (!fin || fin === debut) return `${jourDe(debut)} ${moisNom(debut)} ${anDe(debut)}`
+    if (anDe(debut) !== anDe(fin)) return `${jourDe(debut)} ${moisNom(debut)} ${anDe(debut)} → ${jourDe(fin)} ${moisNom(fin)} ${anDe(fin)}`
+    if (moisNom(debut) !== moisNom(fin)) return `${jourDe(debut)} ${moisNom(debut)} → ${jourDe(fin)} ${moisNom(fin)} ${anDe(fin)}`
+    return `${jourDe(debut)} → ${jourDe(fin)} ${moisNom(fin)} ${anDe(fin)}`
+  }
+  const moisDe = (iso) => iso.slice(0, 7)
+  const moisSuivant = (m) => { const [a, x] = m.split('-').map(Number); return `${x === 12 ? a + 1 : a}-${String(x === 12 ? 1 : x + 1).padStart(2, '0')}` }
+  const moisLong = (m) => { const [a, x] = m.split('-').map(Number); return `${MOIS_COURT[x - 1]} ${a}` }
+
   async function rendrePopup (message = '') {
-    if (!popupOuverte || !donnees) return
-    if (evenementsMois !== mois) { try { await lireEvenements() } catch (e) { el('yp-pop-ev').innerHTML = `<p class="yp-rien">${ech(e.message)}</p>`; return } }
-    const d = donnees, ev = evenements || {}
-    const [a, m] = mois.split('-').map(Number)
-    const premier = new Date(Date.UTC(a, m - 1, 1)), nbJours = new Date(Date.UTC(a, m, 0)).getUTCDate()
-    const decalage = (premier.getUTCDay() + 6) % 7   // lundi = 0
-    const debutMois = `${mois}-01`, finMois = `${mois}-${String(nbJours).padStart(2, '0')}`
-    const parDate = new Map((d.nuits || []).map(n => [n.date, n]))
-    // Les evenements qui touchent le mois, dans l'ordre du calendrier ; la
-    // semaine et le week-end n'y sont pas : ce sont des couches, pas des periodes.
-    const entrees = (ev.calendrier || []).filter(e => e.debut <= finMois && e.fin >= debutMois)
-    // ⚠ PLUSIEURS EVENEMENTS PAR JOUR (releve en review : un Salon dans les
-    // vacances de Toussaint ecrasait la Toussaint). Chaque jour porte la liste
-    // de ses evenements ; le CONTOUR est celui du plus long (le cadre), et une
-    // barre par evenement, au bas de la case, montre les autres.
-    const parJour = new Map()
-    entrees.forEach((e, i) => {
-      for (let j = e.debut < debutMois ? debutMois : e.debut; j <= (e.fin > finMois ? finMois : e.fin); j = decalerJour(j, 1)) {
-        if (!parJour.has(j)) parJour.set(j, [])
-        parJour.get(j).push(i)
-      }
-    })
-    const duree = e => Math.round((Date.parse(e.fin) - Date.parse(e.debut)) / 86400000)
-    let cases = ''
-    for (let k = 0; k < decalage; k++) cases += '<td class="vide"></td>'
-    for (let jour = 1; jour <= nbJours; jour++) {
-      const iso = `${mois}-${String(jour).padStart(2, '0')}`
-      const n = parDate.get(iso)
-      const niveau = n && n.suggestion != null && (n.ouverte === true || n.projection) && !n.vendue ? (CLASSES[n.niveau] || '') : ''
-      const ids = parJour.get(iso) || []
-      const cadre = ids.length ? entrees[ids.slice().sort((x, y) => duree(entrees[y]) - duree(entrees[x]))[0]] : null
-      const e = cadre
-      const premierDuEv = e && (iso === e.debut || iso === debutMois)
-      const dernierDuEv = e && (iso === e.fin || iso === finMois)
-      // ⚠ UNE NUIT PROJETEE MONTRE SON PRIX PREVU, avec « ~ », meme si elle
-      // garde un prix au calendrier (une nuit fermee le garde souvent) —
-      // review : la case montrait l'ancien prix teinte du niveau prevu.
-      const projete = !!(n && n.projection && n.suggestion != null)
-      const prix = n ? (projete ? n.suggestion : (n.prix_actuel != null ? n.prix_actuel : n.suggestion)) : null
-      const barres = ids.map(k => { const x = entrees[k]; return `<i class="ev-barre ${iso === x.debut ? 'g' : ''} ${iso === x.fin ? 'd' : ''}" style="background:${EV_COULEUR[x.origine] || '#555'}" title="${ech(x.nom)}"></i>` }).join('')
-      cases += `<td class="${niveau} ${e ? 'ev' : ''} ${premierDuEv ? 'ev-g' : ''} ${dernierDuEv ? 'ev-d' : ''}" ${e ? `style="--ev:${EV_COULEUR[e.origine] || '#555'}"` : ''} title="${ech([dateFr(iso), n && n.etiquette ? `niveau ${n.etiquette}` : '', n && (n.prime_exceptionnel || n.releve_n1) ? (n.prime_exceptionnel || n.releve_n1).resume : '', projete ? (TEXTES_PROJECTION[n.projection_motif] || TEXTES_PROJECTION.fenetre).case : '', ...ids.map(k => entrees[k].nom)].filter(Boolean).join(' · '))}">
-        <span class="j">${jour}</span>
-        ${prix != null ? `<span class="p">${projete ? '~' : ''}${euros(prix)}${n && n.prix_hote != null ? ' ✎' : ''}</span>` : ''}
-        ${n && n.etiquette ? `<span class="n">${ech(n.etiquette)}</span>` : ''}
-        ${e && (premierDuEv || (premier.getUTCDay() + 6 + jour - 1) % 7 === 0) ? `<span class="ev-nom">${ech(e.nom)}</span>` : ''}
-        ${barres ? `<span class="ev-barres">${barres}</span>` : ''}
-      </td>`
-      if ((decalage + jour) % 7 === 0 && jour < nbJours) cases += '</tr><tr>'
-    }
-    const reste = (decalage + nbJours) % 7
-    if (reste) for (let k = reste; k < 7; k++) cases += '<td class="vide"></td>'
+    if (!popupOuverte) return
+    if (evenementsMois !== '12m') { try { await lireEvenements() } catch (e) { el('yp-pop-ev').innerHTML = `<p class="yp-rien">${ech(e.message)}</p>`; return } }
+    const ev = evenements || {}
     const lecture = ev.droits_ecriture === false
-    const crans = v => v == null ? '—' : (v === 0 ? 'sans effet' : `${v > 0 ? '+' : ''}${v} cran${Math.abs(v) > 1 ? 's' : ''}`)
+    const fenetre = ev.fenetre || {}
+    const auj = ev.aujourdhui || new Date().toISOString().slice(0, 10)
+    const debutF = fenetre.debut || auj
+    const finF = fenetre.fin || debutF
+
+    // Les douze mois de la fenetre, du mois courant au douzieme.
+    const moisListe = []
+    // ⚠ DOUZE, ET PAS TREIZE. La fenetre du serveur va d'aujourd'hui a
+    // aujourd'hui + 1 an : elle TOUCHE donc un treizieme mois, celui qui
+    // porte la date de fin. La frise a douze colonnes — le treizieme passait
+    // a la ligne, et on lisait « oct. » deux fois (vu sur l'apercu).
+    for (let m = moisDe(debutF); m <= moisDe(finF) && moisListe.length < 12; m = moisSuivant(m)) moisListe.push(m)
+
+    // Les periodes, dans l'ordre du calendrier. Une periode qui chevauche
+    // deux mois apparait dans la frise de chacun, et UNE SEULE FOIS dans la
+    // liste — sous le mois ou elle commence.
+    const entrees = (ev.calendrier || []).slice().sort((x, y) => x.debut < y.debut ? -1 : (x.debut > y.debut ? 1 : 0))
+
+    // ── LA FRISE : douze colonnes, une bande par periode ────────────────────
+    // ⚠ Elle porte LA MEME couleur d'effet que la liste en dessous, et un
+    // clic amene a la ligne. C'est la demande de Thierry : voir d'abord QUAND
+    // ca bouge, puis descendre au detail.
+    const frise = moisListe.map(m => {
+      const finMois = `${m}-31`
+      const dedans = entrees.map((e, i) => ({ e, i })).filter(({ e }) => e.debut <= finMois && e.fin >= `${m}-01`)
+      const bandes = dedans.map(({ e, i }) => `<button type="button" class="qpb-bande e-${effetClasse(e.crans)}" data-vers="${i}"
+        title="${ech(`${e.nom} — ${effetMot(e.crans)}`)}" aria-label="${ech(`${e.nom}, ${effetMot(e.crans)}`)}"></button>`).join('')
+      return `<div class="qpb-col"><span class="qpb-col-nom">${ech(MOIS_COURT[Number(m.slice(5, 7)) - 1])}</span>
+        <div class="qpb-col-bandes">${bandes || '<span class="qpb-vide"></span>'}</div></div>`
+    }).join('')
+
+    // ── Ce qui se dit en haut : l'horizon scolaire, puis les reconductions ──
     const sv = ev.source_vacances || {}
-    const horizon = sv.incertain_apres && sv.incertain_apres <= finMois
-      ? `<div class="yp-ev-l" style="--ev:#B8860B"><strong>Calendrier scolaire publié jusqu’au ${dateFr(sv.incertain_apres)}.</strong><span class="o">Au-delà, les vacances ne sont pas encore connues : les nuits sont comptées ordinaires tant que le ministère n’a pas publié. Les fériés, eux, restent calculés.</span></div>`
+    // ⚠ UNE SEULE LIGNE, le reste en infobulle (demande de Thierry). Le fond
+    // ne se perd pas — il se range : un bandeau de quatre lignes en tete d'un
+    // ecran se saute, une ligne se lit.
+    const horizon = sv.incertain_apres
+      ? `<p class="qpb-dit" title="Au-delà de cette date, les vacances ne sont pas encore connues : ces nuits comptent comme ordinaires tant que le ministère n’a rien publié. Les jours fériés, eux, restent calculés.">Vacances connues jusqu’au ${ech(periodeEnLettres(sv.incertain_apres))} <span class="qpb-i" aria-hidden="true">?</span></p>`
       : ''
-    const liste = entrees.map((e, i) => `<div class="yp-ev-l" style="--ev:${EV_COULEUR[e.origine] || '#555'}">
-        <strong>${ech(e.nom)}</strong>
-        <span>${dateFr(e.debut)}${e.fin !== e.debut ? ` → ${dateFr(e.fin)}` : ''}</span>
-        <span class="o">${ech(EV_NOM[e.origine] || e.origine)}</span>
-        ${e.ferie_voisin ? `<span class="o" title="Ces nuits de week-end touchent un jour férié, directement ou par un pont.">éclairé par ${ech(e.ferie_voisin)}</span>` : ''}
-        ${lecture ? `<span class="o">${ech(crans(e.crans))}</span>`
-          : `<select data-ev-reglage="${ech(e.cle)}" title="De combien de crans cette période pousse vos prix. Semaine et week-end montent du même cran.">
-              <option value="">${ech(e.crans_mesures != null ? `laisser mesurer (${crans(e.crans_mesures)})` : 'à mesurer')}</option>
-              ${Array.from({ length: (ev.crans_max || 4) * 2 + 1 }, (_, k) => k - (ev.crans_max || 4)).map(v => `<option value="${v}" ${v === e.crans_ajustes ? 'selected' : ''}>${ech(crans(v))}</option>`).join('')}
-            </select>`}
-        ${!lecture && e.droits && e.droits.desactivable ? `<button data-ev-actif="${ech(e.cle)}" data-vers="${e.actif === false ? '1' : '0'}">${e.actif === false ? 'réactiver' : 'couper'}</button>` : ''}
-        ${!lecture && e.droits && e.droits.supprimable && e.id ? `<button data-ev-sup="${ech(e.id)}" data-nom="${ech(e.nom)}">supprimer</button>` : ''}
-      </div>`).join('')
-    const formulaire = lecture ? '' : `<div class="yp-ev-form" id="yp-ev-form">
-        <label style="grid-column: span 2">Nom<input id="ev-nom" maxlength="${ev.limites ? ev.limites.nom_max : 80}" placeholder="Festival, salon, saison…"></label>
-        <label>Du<input id="ev-debut" type="date" value="${debutMois}"></label>
-        <label>Au (inclus)<input id="ev-fin" type="date" value="${debutMois}"></label>
-        <label>Revient-il ?<select id="ev-rec">${(ev.recurrences || []).map(r => `<option value="${ech(r)}">${ech(RECURRENCE_NOM[r] || r)}</option>`).join('')}</select></label>
-        <label>Se comporte comme<select id="ev-parent"><option value="">— à déterminer —</option>${(ev.parents || []).map(p => `<option value="${ech(p)}">${ech(p)}</option>`).join('')}</select></label>
-        <button id="ev-ajouter">Ajouter un événement</button>
-        ${message ? `<div class="yp-ev-msg ${message.startsWith('✓') ? 'ok' : 'ko'}">${ech(message)}</div>` : ''}
-      </div>`
-    // ⚠ LES RECONDUCTIONS RESTENT (elles vivaient sur l'ancienne page) : un
-    // evenement recurrent dont l'edition approche est PROPOSE, jamais
-    // enregistre sans confirmation, dates corrigeables.
     const reconductions = (ev.reconductions || []).map((r, i) => r.debut
-      ? `<div class="yp-ev-l" style="--ev:#2A5E86"><strong>${ech(r.nom)}</strong><span class="o">à reconduire — l’an dernier du ${dateFr(r.depuis.debut)} au ${dateFr(r.depuis.fin)}</span>
-          <input type="date" id="rd-${i}" value="${ech(r.debut)}" aria-label="Début proposé"><input type="date" id="rf-${i}" value="${ech(r.fin)}" aria-label="Fin proposée">
-          <button data-reconduire="${i}">Confirmer</button></div>`
-      : `<div class="yp-ev-l" style="--ev:#B8860B"><strong>${ech(r.nom)}</strong><span class="o">à reconduire — ${r.non_calculable === 'date_absente_l_annee_suivante' ? 'cette date n’existe pas l’an prochain' : 'cette position n’existe pas l’an prochain'} : saisissez les dates ci-dessous.</span></div>`).join('')
-    el('yp-pop-ev').innerHTML = `<div class="yp-pop-tete">
-        <h2>Événements — ${ech(nomMois(mois))}</h2>
-        <div class="yp-nav"><button id="ev-prec" aria-label="Mois précédent">‹</button><button id="ev-suiv" aria-label="Mois suivant">›</button></div>
-        <button class="yp-pop-fermer" id="ev-fermer" aria-label="Fermer">×</button>
+      ? `<div class="qpb-rec"><b>${ech(r.nom)}</b>
+          <span>Revient l’an prochain ? L’an dernier : ${ech(periodeEnLettres(r.depuis.debut, r.depuis.fin))}.</span>
+          <span class="qpb-rec-dates"><input type="date" id="rd-${i}" value="${ech(r.debut)}" aria-label="Première nuit"> <input type="date" id="rf-${i}" value="${ech(r.fin)}" aria-label="Dernière nuit"></span>
+          ${lecture ? '' : `<button class="qpb-btn-plein" data-reconduire="${i}">Oui, la remettre</button>`}</div>`
+      : `<div class="qpb-rec"><b>${ech(r.nom)}</b><span>Revient l’an prochain ? ${r.non_calculable === 'date_absente_l_annee_suivante' ? 'Cette date n’existe pas l’an prochain' : 'Cette position n’existe pas l’an prochain'} — ajoutez-la avec ses dates.</span></div>`).join('')
+
+    // ── LA LISTE, groupee par mois ─────────────────────────────────────────
+    const parMois = new Map(moisListe.map(m => [m, []]))
+    entrees.forEach((e, i) => {
+      const m = moisDe(e.debut) < moisListe[0] ? moisListe[0] : moisDe(e.debut)
+      if (parMois.has(m)) parMois.get(m).push({ e, i })
+    })
+    const sections = moisListe.map(m => {
+      const lignes = parMois.get(m) || []
+      if (!lignes.length) return ''
+      return `<section class="qpb-mois"><h3>${ech(moisLong(m))}</h3>${lignes.map(({ e, i }) => ligneHtml(e, i, lecture, ev)).join('')}</section>`
+    }).join('')
+
+    // ── L'ajout : UN BOUTON, pas un formulaire deplie ───────────────────────
+    const ajout = lecture ? '' : `<details class="qpb-ajout" id="qpb-ajout">
+        <summary>+ Ajouter une période</summary>
+        <div class="qpb-form">
+          <label style="grid-column: span 2">Son nom<input id="ev-nom" maxlength="${ev.limites ? ev.limites.nom_max : 80}" placeholder="Festival, salon, saison thermale…"></label>
+          <label>Première nuit<input id="ev-debut" type="date" value="${ech(auj)}"></label>
+          <label>Dernière nuit<input id="ev-fin" type="date" value="${ech(auj)}"></label>
+          <label>Revient-elle ?<select id="ev-rec">${(ev.recurrences || []).map(r => `<option value="${ech(r)}">${ech(RECURRENCE_NOM[r] || r)}</option>`).join('')}</select></label>
+          <label>Ressemble à<select id="ev-parent"><option value="">— au choix de HôteSmart —</option>${(ev.parents || []).map(x => `<option value="${ech(x)}">${ech(x)}</option>`).join('')}</select></label>
+          <button class="qpb-btn-plein" id="ev-ajouter">Ajouter</button>
+        </div>
+      </details>`
+
+    el('yp-pop-ev').innerHTML = `<div class="yp-pop-tete qpb-tete">
+        <h2>Quand vos prix bougent</h2>
+        <button class="yp-pop-fermer qpb-fermer" id="ev-fermer" aria-label="Fermer">×</button>
+        <span class="qpb-sous">les 12 prochains mois</span>
       </div>
-      <table class="yp-cal"><thead><tr>${['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'].map(j => `<th>${j}</th>`).join('')}</tr></thead>
-        <tbody><tr>${cases}</tr></tbody></table>
-      <div class="yp-ev-liste">${horizon}${reconductions}${liste || '<div class="yp-ev-l" style="--ev:#ccc">Aucun événement ce mois-ci.</div>'}</div>
-      ${formulaire}`
+      ${message ? `<div class="qpb-msg ${message.startsWith('✓') ? 'ok' : 'ko'}">${ech(message)}</div>` : ''}
+      <div class="qpb-frise" role="group" aria-label="Les douze prochains mois">${frise}</div>
+      ${horizon}${reconductions}
+      ${sections || '<p class="qpb-dit">Aucune période sur les douze prochains mois.</p>'}
+      ${ajout}`
+
     el('ev-fermer').addEventListener('click', fermerPopup)
-    el('ev-prec').addEventListener('click', () => { mois = decalerMois(mois, -1); charger() })
-    el('ev-suiv').addEventListener('click', () => { mois = decalerMois(mois, 1); charger() })
     const aj = el('ev-ajouter'); if (aj) aj.addEventListener('click', ajouterEvenement)
+    for (const b of document.querySelectorAll('[data-vers]')) {
+      b.addEventListener('click', () => {
+        const l = document.getElementById(`qpb-l-${b.dataset.vers}`)
+        if (!l) return
+        l.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        l.classList.add('vise'); setTimeout(() => l.classList.remove('vise'), 1400)
+      })
+    }
     for (const b of document.querySelectorAll('[data-ev-sup]')) b.addEventListener('click', () => supprimerEvenement(b.dataset.evSup, b.dataset.nom))
     for (const b of document.querySelectorAll('[data-reconduire]')) b.addEventListener('click', () => reconduireEvenement(Number(b.dataset.reconduire)))
-    for (const sel of document.querySelectorAll('[data-ev-reglage]')) sel.addEventListener('change', () => reglerEvenement(sel.dataset.evReglage, { crans: sel.value === '' ? null : Number(sel.value) }))
-    for (const b of document.querySelectorAll('[data-ev-actif]')) b.addEventListener('click', () => reglerEvenement(b.dataset.evActif, { actif: b.dataset.vers === '1' }))
+    for (const b of document.querySelectorAll('[data-ev-actif]')) b.addEventListener('click', () => reglerEvenement(b.dataset.evActif, { actif: b.dataset.vers2 === '1' }))
+    // ⚠ « plus fort » / « moins fort » DEPLACENT D'UN CRAN et BORNENT a ce que
+    // le serveur accepte. Un bouton qui enverrait une valeur refusee serait un
+    // bouton qui ment : on le desactive a la borne plutot que d'essuyer un 400.
+    for (const b of document.querySelectorAll('[data-ev-pas]')) {
+      b.addEventListener('click', () => {
+        const max = ev.crans_max || 2
+        const actuel = Number(b.dataset.actuel || 0)
+        const voulu = Math.max(-max, Math.min(max, actuel + Number(b.dataset.evPas)))
+        if (voulu === actuel) return
+        reglerEvenement(b.dataset.segment, { crans: voulu })
+      })
+    }
+    for (const b of document.querySelectorAll('[data-ev-auto]')) b.addEventListener('click', () => reglerEvenement(b.dataset.evAuto, { crans: null }))
   }
-  function decalerJour (iso, n) { const d = new Date(`${iso}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10) }
+
+  // UNE ligne de la liste. Elle porte, dans cet ordre : ce que c'est, quand,
+  // d'ou ca vient, l'effet sur les prix, et les gestes.
+  function ligneHtml (e, i, lecture, ev) {
+    const max = ev.crans_max || 2
+    const c = e.crans
+    const quand = periodeEnLettres(e.debut, e.fin)
+    const nuits = e.nuits ? ` · ${e.nuits} nuit${e.nuits > 1 ? 's' : ''}` : ''
+    // ⚠ « week-end du 11 novembre » REMPLACE « eclaire par » (demande de
+    // Thierry). Le PONT, lui, est une periode a part dont le nom commence
+    // deja par « pont » : il n'a rien a recevoir ici.
+    const colle = e.ferie_voisin ? ` · week-end du ${ech(e.ferie_voisin)}` : ''
+    const coupe = e.actif === false
+    const auto = c == null
+    // ⚠ « AUTOMATIQUE » N'APPARAIT QUE SI LA LIGNE A ETE REGLEE A LA MAIN
+    // (demande de Thierry). Le critere est `crans_ajustes`, PAS `crans` :
+    // `crans` vaut la mesure du moteur quand l'hote n'a rien pose, et un
+    // bouton « remettre en automatique » sur une ligne deja automatique ne
+    // ferait rien — un bouton qui ne fait rien est un bouton qui ment.
+    const regleALaMain = e.crans_ajustes != null
+    // ⚠ DEUX FLECHES, ET LA PASTILLE DIT L'ETAT. Les libelles « − moins fort /
+    // + plus fort » repetaient en mots ce que la pastille disait deja mieux.
+    const gestes = lecture ? '' : `<div class="qpb-regl">
+        <button type="button" class="qpb-pas" data-ev-pas="-1" data-segment="${ech(e.cle)}" data-actuel="${c == null ? 0 : c}" ${c != null && c <= -max ? 'disabled' : ''} aria-label="Baisser le prix : ${ech(e.nom)}" title="Baisser le prix">▼</button>
+        <button type="button" class="qpb-pas" data-ev-pas="1" data-segment="${ech(e.cle)}" data-actuel="${c == null ? 0 : c}" ${c != null && c >= max ? 'disabled' : ''} aria-label="Monter le prix : ${ech(e.nom)}" title="Monter le prix">▲</button>
+      </div>
+      ${regleALaMain ? `<button type="button" class="qpb-auto" data-ev-auto="${ech(e.cle)}">remettre en automatique</button>` : ''}`
+    const menu = lecture || !((e.droits && e.droits.desactivable) || (e.droits && e.droits.supprimable && e.id)) ? '' : `<details class="qpb-plus">
+        <summary aria-label="Autres gestes sur ${ech(e.nom)}">⋯</summary>
+        <div class="qpb-plus-liste">
+          ${e.droits.desactivable ? `<button type="button" data-ev-actif="${ech(e.cle)}" data-vers2="${coupe ? '1' : '0'}">${coupe ? 'Reprendre en compte' : 'Ne plus en tenir compte'}</button>` : ''}
+          ${e.droits.supprimable && e.id ? `<button type="button" class="qpb-sup" data-ev-sup="${ech(e.id)}" data-nom="${ech(e.nom)}">Supprimer</button>` : ''}
+        </div></details>`
+    return `<div class="qpb-l${coupe ? ' coupee' : ''}" id="qpb-l-${i}">
+      <span class="qpb-pt e-${effetClasse(c)}" aria-hidden="true"></span>
+      <div class="qpb-l-txt">
+        <b>${ech(e.nom)}</b>
+        <span class="qpb-quand">${ech(quand)}${nuits}${colle} · ${ech(ORIGINE_MOT[e.origine] || e.origine)}</span>
+      </div>
+      <span class="qpb-effet e-${effetClasse(c)}">${ech(coupe ? 'Pas prise en compte' : effetMot(c))}${auto && e.crans_mesures != null ? ` <i>(${e.crans_mesures > 0 ? '+' : ''}${e.crans_mesures} aujourd’hui)</i>` : ''}</span>
+      <div class="qpb-actions">${gestes}${menu}</div>
+    </div>`
+  }
+
   async function rechargerEvenements (message) {
     try { const r = await apiEv('GET'); if (r.ok) evenements = r.data } catch (e) {}
     await charger()
