@@ -747,6 +747,88 @@ vérificateur qui n'a rien lu doit échouer.*
 
 ---
 
+## 22. Un double de test qui ENREGISTRE un filtre sans l'APPLIQUER rend tout vert
+
+**Vécu le 28 octobre 2026, lot « accès YieldFlow depuis le Calendrier ».**
+Thierry voit l'aperçu et doute : les deux logements y affichent le **même**
+marché relié. C'était bien un artefact du banc à stubs — mais il demande un
+test. En l'écrivant, le défaut apparaît : il n'aurait rien prouvé.
+
+Le double de Supabase du fichier de tests notait consciencieusement chaque
+`.eq(colonne, valeur)` dans un objet `filtres`, et les **tests lisaient cet
+objet** pour affirmer « la lecture est cloisonnée par le bien ». Mais la
+réponse du double, elle, rendait **toutes** les lignes de la table, quels que
+soient les filtres. Donc un endpoint qui aurait oublié un
+`.eq('property_id', …)` aurait rendu les lignes de **tous** les biens du
+compte — et la suite serait restée **entièrement verte**, y compris le test
+écrit exprès pour ça.
+
+### La règle
+
+**Un double applique ses filtres.** S'il sait les enregistrer, il sait les
+appliquer : la différence est une ligne, et c'est elle qui sépare un test qui
+mesure d'un test qui récite.
+
+**Et un test de cloisonnement porte son CONTRE-CONTRÔLE** : les valeurs
+attendues des deux côtés doivent être **différentes**, et le test l'affirme.
+Deux biens dont on attend le même marché, le même nombre d'événements et le
+même nombre de comparables ne séparent rien — ils passeraient aussi bien si
+toutes les lectures lisaient le même bien.
+
+```js
+// Le double FILTRE (une ligne), au lieu de seulement noter.
+const garde = (l) => Object.entries(q.filtres)
+  .every(([c, v]) => !(c in l) || String(l[c]) === String(v))
+
+// Et le test refuse d'être une tautologie.
+assert.notEqual(attendu[BIEN].marche, attendu[AUTRE].marche)
+```
+
+**Contre-épreuve, et elle est obligatoire ici** : retirer le filtre dans le
+code de production doit faire rougir. Mesuré ce jour-là, hors de l'arbre, sur
+les trois lectures du menu — marché, événements, comparables : chacune fait
+rougir deux tests quand son `property_id` disparaît.
+
+⚠ **Ce que ce défaut coûte n'est pas toujours une fuite.** Ici tout
+appartenait au même compte : aucune donnée ne franchissait de frontière. Le
+coût réel était un hôte à qui l'on montre le marché du voisin, et **qui
+tarife dessus**. Un test de cloisonnement ne garde pas que la sécurité.
+
+### Le même défaut, l'autre moitié : un test qui affirme la CLÉ, pas le TEXTE
+
+Le même jour, le même lot, la même forme. Le dictionnaire porte des chaînes
+ICU — `{n, plural, one {# prix ajusté} other {# prix ajustés}}` — et le double
+d'`I18n` du banc ne faisait que remplacer `{n}` : il rendait **la chaîne ICU
+telle quelle**. Un test qui compare le DOM à `FR['cal.yf_adjusted']` compare
+donc la chaîne à elle-même. Vert, pour un texte que l'hôte ne verra jamais.
+
+**Un test affirme le texte RENDU, jamais la clé.**
+
+```js
+assert.equal(ligne.textContent.trim(), '12 prix ajustés cette semaine')
+// et pas : FR['cal.yf_adjusted'].replace('{n}', '12')
+```
+
+**Et le double de traduction exécute la VRAIE fonction**, extraite du module
+de production (par équilibre des accolades, pas par une regex qui s'arrête au
+premier `}`), avec un garde-fou qui refuse de monter le banc si l'extraction
+rend une fonction inerte. Une copie écrite à la main diverge le jour où la
+production change — et elle diverge en silence, puisque c'est elle que le test
+interroge.
+
+**Pourquoi les deux tiennent dans la même règle.** Dans les deux cas, le
+double est **plus permissif que le vrai**, et le test l'interroge LUI au lieu
+d'interroger le code. Le vert ne dit alors rien du produit : il dit que le
+double est d'accord avec lui-même. C'est la famille de faux verts la plus
+coûteuse, parce qu'elle vise exactement les tests qu'on écrit quand on a un
+doute — donc ceux sur lesquels on se repose le plus.
+
+Voir aussi la règle 16 (*un vérificateur qui n'a rien lu doit échouer*) et la
+règle 19 (*tout nouveau test rougit contre le code d'avant*) : trois formes du
+même principe — **un test doit pouvoir échouer pour la bonne raison.**
+
+---
+
 ## Réflexes transverses
 
 - `npm test` avant tout commit (`node --test`, sans dépendance externe).
