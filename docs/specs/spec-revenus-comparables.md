@@ -87,7 +87,99 @@ multiplierait les appels par le nombre d'ouvertures.
 
 ---
 
-## 5. MES QUESTIONS — elles changent le travail, je ne les tranche pas seul
+## 4 bis. DÉCISIONS DE THIERRY, 28 octobre 2026
+
+| # | décision |
+|---|---|
+| A | **ce qui compte, ce sont les chiffres RÉALISÉS**, enregistrés à date. Les réservations à venir des comparables « ne disent pas grand-chose » — mais voir D |
+| B | **une table d'HISTORIQUE** : une ligne par comparable × mois clos, avec le revenu et **la date du relevé**. On garde tout, on ne dépend pas du cache 90 jours |
+| C | **relevé une fois par mois**, après la clôture du mois, par cron, **écrivain unique**. Au premier passage, on remplit les mois passés disponibles |
+| D | **on veut aussi la vision du futur** : à chaque relevé, enregistrer le déjà-réservé des comparables pour les mois à venir, **avec la date du relevé — photo à date, jamais écrasée** |
+| E | **la bande du réalisé ne couvre que les mois clos** ; les mois futurs portent une bande **plus claire**, libellée « déjà réservé chez les comparables au \<date du relevé\> » |
+| F | plus tard, ces photos permettront de **comparer à délai égal** (moi vs comparables, X jours avant le mois) |
+| G | **l'écran ne lit que cette table.** Aucun appel AirROI à l'affichage |
+| 1-4 | pastille = en-tête avec %, rien sous « Tous », les comparables choisis suffisent, **go sur `lib/marche`** |
+
+⚠ **LA DÉCISION B EST LA PLUS STRUCTURANTE, ET ELLE EST JUSTE.** Le cache AirROI
+dure 90 jours : sans table d'historique, un mois clos il y a quatre mois devient
+irrécupérable, et il faudrait le racheter. Une table qui garde tout rend le
+relevé mensuel définitif.
+
+---
+
+## 4 ter. VÉRIFICATION DEMANDÉE — le déjà-réservé futur par annonce
+
+**Question de Thierry : AirROI le fournit-il, et à quel coût ? Si non, le dire
+avant de coder.**
+
+**RÉPONSE : OUI.** Mesuré le 28 octobre 2026 sur une réponse **réelle déjà en
+cache** en production — donc sans dépenser un centime, et sans supposer la
+forme.
+
+`GET /listings/live/calendar`, relevé du 6 octobre 2026, **360 journées** rendues
+pour une annonce. Les champs d'une journée :
+
+```
+["date", "available", "rate", "min_nights"]
+{"date":"2026-10-06","available":false,"rate":96,"min_nights":5}
+{"date":"2026-11-15","available":false,"rate":94.2,"min_nights":5}
+```
+
+| | |
+|---|---|
+| **coût** | **0,10 $** par annonce (`lib/airroi/cout.js`) |
+| **cache** | 90 jours |
+| **portée** | ~360 jours à venir, jour par jour |
+| **champ clé** | `available` — un booléen, qui n'était lu **nulle part** dans le dépôt jusqu'ici |
+
+⚠ **MAIS `available: false` N'EST PAS « RÉSERVÉ », ET C'EST LA RÉSERVE À
+GRAVER.** Le booléen dit « pas réservable », ce qui confond trois choses :
+
+1. une nuit **vendue** à un voyageur ;
+2. une nuit que l'hôte a **fermée** lui-même (usage personnel, travaux) ;
+3. une nuit rendue invendable par une **contrainte de séjour minimum** ou un
+   trou trop court entre deux réservations.
+
+C'est exactement la classe d'erreur que le dépôt a déjà payée et nommée :
+*« fermé à la vente » n'est pas « n'a rien vendu », des DEUX côtés*
+(`docs/kb/pickup-yield.md`). AirROI ne distingue pas les trois, et nous ne le
+pouvons pas davantage depuis l'extérieur.
+
+⚠ **ET LE MONTANT EST UNE ESTIMATION D'ESTIMATION.** `rate` est le prix
+**affiché**, pas le prix auquel la nuit s'est vendue. Un revenu futur
+reconstruit vaut donc « prix affiché × nuits non réservables », et pas un
+chiffre d'affaires.
+
+**Ce que j'en propose**, et qui ne coûte rien de plus — appeler la chose par son
+nom dans la donnée comme à l'écran : **« nuits non disponibles »**, et non
+« déjà réservé ». La colonne de la table se nomme `nuits_indisponibles` et
+`montant_affiche_cents`, jamais `revenu`. À l'écran, la bande claire se libelle
+« **occupé chez les comparables au \<date\>** » plutôt que « déjà réservé ».
+→ **Décision de Thierry attendue (Q5).** La forme est la sienne ; ce que je ne
+peux pas faire, c'est écrire « réservé » sur une donnée qui dit « indisponible ».
+
+⚠ **UNE CONSÉQUENCE SUR LA DÉCISION C.** Un relevé **mensuel** suffit pour le
+réalisé (un mois clos ne bouge plus). Il ne suffit pas pour le futur : une photo
+par mois donne 12 points de remplissage par mois cible, là où la comparaison
+« à délai égal » du point F en voudrait davantage. Je propose de garder le
+rythme mensuel pour la V1 — c'est déjà ce qu'aucun écran ne montre aujourd'hui —
+et de noter le pas plus fin comme une dette, mesurable quand le besoin sera réel.
+
+---
+
+## 5. MES QUESTIONS — Q1 à Q4 TRANCHÉES le 28 octobre, Q5 ouverte
+
+⚠ **Q1 à Q4 ont leur réponse** (voir §4 bis) : la pastille pilote l'en-tête avec
+son pourcentage, rien sous « Tous », les comparables choisis suffisent — le
+pilote YieldFlow n'est pas exigé —, et le go sur `lib/marche` est donné. Elles
+restent écrites ci-dessous parce que la raison d'une décision vaut plus
+longtemps que la décision.
+
+⚠ **Q5 EST OUVERTE, ET ELLE BLOQUE LE LIBELLÉ** : voir §4 ter — appeler la
+donnée « déjà réservé » alors qu'elle dit « indisponible » est une affirmation
+que la mesure ne porte pas.
+
+### Les quatre questions d'origine
 
 **Q1 — La pastille doit-elle désormais piloter l'EN-TÊTE ?**
 La maquette comparables écrit « **La bulle** · janvier → octobre 2026 »,
