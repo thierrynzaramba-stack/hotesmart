@@ -658,7 +658,7 @@ function ouvrirAujourdhui (options = {}) {
     // sommaient a 936 sous un bandeau disant 935.
     // On rend le nombre NU plutot qu'un montant formate : le format appartient
     // a `Intl`, qu'on ne teste pas ici, et un nombre s'additionne.
-    t: (k) => k, date: () => 'LE-JOUR', time: () => '', pct: () => '',
+    t: (k, p) => (p ? `${k}{${Object.entries(p).map(([a2, b2]) => `${a2}=${b2}`).join(',')}}` : k), date: () => 'LE-JOUR', time: () => '', pct: () => '',
     money: (n) => String(n),
     apply () {},
     // Formate reellement : sans cela, rien ne peut asserter la note affichee.
@@ -2574,7 +2574,11 @@ test("LE TEST QUI COMPTE : en vue Annee, le tableau du MOIS est masque", () => {
   // mais rendent deux doubles DIFFERENTS ici. Ma premiere version lisait le
   // mauvais — mesure : la mutation qui laissait la liste telephone visible
   // passait au vert.
-  const formesDuMois = ['.rev-tbl-wrap:not(.rev-an-tbl)', '[data-list="revenue-cards"]']
+  // ⚠ ET LA CHAINE SUIT LA PAGE QUAND LA PAGE CHANGE : le tableau « Reserve a
+  // date » a ajoute un 3e `.rev-tbl-wrap`, donc la negation nomme desormais
+  // les deux formes de l'annee. Ce test a rougi a ce changement — c'est son
+  // role, et c'est pourquoi il cite la chaine exacte plutot qu'un equivalent.
+  const formesDuMois = ['.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl)', '[data-list="revenue-cards"]']
   for (const sel of formesDuMois) {
     assert.strictEqual(p.cache(sel).hidden, true,
       `${sel} reste affiche sous la courbe de l annee`)
@@ -2888,4 +2892,290 @@ test("LE TEST QUI COMPTE : la pastille pilote AUSSI « reserve a date »", () =>
   }
   assert.notStrictEqual(haut(svgBien), haut(svgTous),
     'le haut de l axe est identique avec et sans pastille : la ligne « reserve a date » ne suit pas le filtre')
+})
+
+// ─── LE TABLEAU « RESERVE A DATE » (decision de Thierry, 28 octobre 2026) ───
+// ⚠ IL DOUBLE LA LIGNE POINTILLEE, IL NE LA REMPLACE PAS, et c'est une mesure
+// qui l'a decide : au banc, au niveau du compte, l'axe est tire par le pic
+// d'ete et les deux pointilles a 2 k € sur un axe a 16 k € se tassent au ras
+// de l'axe. La ligne dit la FORME, le tableau dit les NOMBRES.
+
+// Les cellules d'une ligne du tableau, dans l'ordre du balisage :
+// mois, reserve aujourd'hui, meme date l'an dernier, ecart.
+// ⚠ ON LIT `innerHTML`, PAS UN DOM. Le banc rend des noeuds STUB dont
+// `querySelectorAll` rend toujours `[]` : ma premiere version de cette aide
+// interrogeait le DOM, et les cinq tests comparaient donc zero ligne a zero
+// ligne. Trois ont rougi par chance (0 !== 2) ; celui du telephone, qui
+// comparait deux longueurs, etait VERT sur deux listes vides.
+const sansBalises = (h) => String(h).replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()
+const lignesDuTableauRad = (p) => {
+  const html = String(p.cache('[data-list="revenue-annee-rad-lignes"]').innerHTML)
+  return [...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].map(m => {
+    const cellules = [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(c => c[1])
+    return {
+      mois: sansBalises((m[1].match(/<th[^>]*>([\s\S]*?)<\/th>/) || ['', ''])[1]),
+      cellules,
+      textes: cellules.map(sansBalises)
+    }
+  })
+}
+
+// ⚠ LE MONTANT ET LE COMPTE DE SEJOURS, SEPAREMENT. `euros()` ratisse tous
+// les chiffres de la chaine : depuis que le double d'`I18n.t` rend ses
+// PARAMETRES, il ramasserait aussi le `n=4` de `revenue.stays`. Et c'est bien
+// pour cela que le double les rend : tant qu'il les jetait, le nombre de
+// sejours n'etait observable par AUCUNE assertion — la mutation « sAuj + 9 »
+// restait verte (constat de la review du 28 octobre 2026).
+const montantEtSejours = (txt) => {
+  const m = String(txt).match(/^(\S+)\s+revenue\.stays\{n=(\d+)\}$/)
+  return m ? { euros: Number(m[1]), sejours: Number(m[2]) } : { euros: null, sejours: null }
+}
+
+const cartesDuTableauRad = (p) => {
+  const html = String(p.cache('[data-list="revenue-annee-rad-cartes"]').innerHTML)
+  return [...html.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g)].map(m => ({
+    mois: sansBalises((m[1].match(/class="rev-carte__bien"[^>]*>([\s\S]*?)<\/span>\s*<\/span>/)
+      || m[1].match(/class="rev-carte__bien"[^>]*>([\s\S]*?)<\/span>/) || ['', ''])[1]),
+    html: m[1]
+  }))
+}
+
+test("LE TEST QUI COMPTE : le tableau « reserve a date » ne porte QUE les mois a venir", () => {
+  // Meme raison que pour la ligne : sur un mois clos, le revenu FINAL est
+  // connu, et comparer un etat intermediaire a un resultat final serait
+  // comparer deux choses differentes.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-05': recuDe(90000), '2026-09': recuDe(30000), '2026-11': aVenirDe(48000), '2026-12': aVenirDe(20000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-05': {}, '2025-09': {}, '2025-11': {}, '2025-12': {} })
+    }
+  })
+  const mois = lignesDuTableauRad(p).map(l => l.mois)
+  assert.strictEqual(mois.length, 2,
+    `${mois.length} lignes au tableau (${mois.join(', ')}) : un mois deja clos y est entre`)
+})
+
+test("LE TEST QUI COMPTE : le tableau SUIT LA PASTILLE, comme la ligne", () => {
+  // ⚠ SINON L'ECRAN SUPERPOSE DEUX PERIMETRES : la colonne N-1 dirait le
+  // COMPTE pendant que le reste de l'ecran dit un bien, sans le signaler.
+  const annee = {
+    total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+    par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) } },
+    hors_biens: {},
+    reserve_a_date: {
+      ...rad({ '2025-11': { total_cents: 900000, sejours: 31 } }),
+      par_bien: {
+        'uuid-1': {
+          '2025-11': { sejours: 7, total_cents: 100000, sans_date_annulation: 0, non_fiables: 0, sous_seuil: false, seuil: 5 }
+        }
+      }
+    }
+  }
+  const biens = [{ id: 'uuid-1', name: 'A' }]
+  const n1De = (o) => montantEtSejours(
+    lignesDuTableauRad(bancAnnee({ aujourdHui: '2026-10-28', biens, annee, ...o }))[0].textes[1])
+  assert.deepStrictEqual(n1De({}), { euros: 9000, sejours: 31 },
+    'la colonne N-1 sous « Tous » ne vaut pas le total du compte')
+  assert.deepStrictEqual(n1De({ filtre: 'uuid-1' }), { euros: 1000, sejours: 7 },
+    'la colonne N-1 ne change pas quand un logement est choisi : le tableau ignore la pastille')
+})
+
+test("LE TEST QUI COMPTE : sous le seuil, la ligne le DIT et ne montre AUCUN montant", () => {
+  // ⚠ UN MONTANT SOUS LE SEUIL SERAIT UNE AFFIRMATION QU'ON A REFUSE DE FAIRE.
+  // L'endpoint ne le rend meme pas — ce test garde l'ecran, qui ne doit pas
+  // non plus inventer un « 0 € » a sa place.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { sejours: 2, sous_seuil: true, total_cents: undefined } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.match(l.textes[1], /revenue\.annee_rad_sous_seuil_court/,
+    `la colonne N-1 dit « ${l.textes[1]} » au lieu de nommer le refus du seuil`)
+  assert.strictEqual(/\d/.test(l.textes[1]), false,
+    `un chiffre apparait sous le seuil : « ${l.textes[1]} »`)
+  assert.strictEqual(l.textes[2], '—',
+    `l ecart vaut « ${l.textes[2]} » alors qu il n y a pas de base de comparaison`)
+})
+
+test("LE TEST QUI COMPTE : l ecart porte son SIGNE, et le retard est rouge", () => {
+  // ⚠ LE SIGNE AVANT LA COULEUR. Un hote qui ne distingue pas le vert du rouge
+  // lit « +12 % » et « -68 % » (le trait d'union que rend `String(-68)`, pas un signe moins typographique) ; la couleur n'est jamais seule porteuse.
+  // ⚠ ET LE ROUGE EST PROPRE A CE TABLEAU : celui des biens emploie
+  // `rev-tbl__ecart--bas` (neutre), parce qu'un bien moins vendu que l'an
+  // dernier n'est pas une alarme. Ici, Thierry a demande « vert si en avance,
+  // rouge si en retard » — ne pas « harmoniser » les deux.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(150000), '2026-12': aVenirDe(50000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({
+        '2025-11': { total_cents: 100000 },   // 1 500 € contre 1 000 € : en avance
+        '2025-12': { total_cents: 100000 }    //   500 € contre 1 000 € : en retard
+      })
+    }
+  })
+  const [avance, retard] = lignesDuTableauRad(p)
+  assert.match(avance.textes[2], /^\+50 %$/, `le mois en avance dit « ${avance.textes[2]} »`)
+  assert.strictEqual(/--retard/.test(avance.cellules[2]), false,
+    'le mois en AVANCE porte la classe du retard')
+  assert.match(retard.textes[2], /^-50 %$/, `le mois en retard dit « ${retard.textes[2]} »`)
+  assert.match(retard.cellules[2], /rev-tbl__ecart--retard/,
+    'le mois en RETARD ne porte pas la classe rouge demandee')
+})
+
+test("LE TEST QUI COMPTE : au telephone, UNE LIGNE PAR MOIS, les memes que le tableau", () => {
+  // La forme telephone n'est pas un resume : c'est le meme contenu, en cartes.
+  // Deux listes qui divergent, c'est la regle « le mobile suit l'ordinateur »
+  // qui tombe — et elle est tombee une fois sur les couleurs du calendrier.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(48000), '2026-12': aVenirDe(20000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': {}, '2025-12': {} })
+    }
+  })
+  const tbl = lignesDuTableauRad(p).map(l => l.mois)
+  // ⚠ LA NON-VACUITE D'ABORD. Comparer deux longueurs egales est vrai aussi
+  // quand les deux listes sont vides, et c'est exactement le faux vert qu'a
+  // produit ma premiere version de ce test.
+  assert.strictEqual(tbl.length, 2, `${tbl.length} lignes au tableau au lieu de 2`)
+  const cartes = cartesDuTableauRad(p)
+  assert.strictEqual(cartes.length, tbl.length,
+    `${cartes.length} cartes au telephone contre ${tbl.length} lignes au tableau`)
+  assert.deepStrictEqual(cartes.map(c => c.mois), tbl,
+    'les cartes du telephone ne portent pas les memes mois que le tableau')
+  // ⚠ ET LE BLOC DISPARAIT QUAND IL N'A RIEN A DIRE : un titre seul au-dessus
+  // d'un tableau vide se lit comme une panne.
+  const vide = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: { total: { '2026-09': recuDe(30000) }, par_bien: {}, hors_biens: {} }
+  })
+  assert.strictEqual(vide.cache('[data-bind="revenue-annee-rad"]').hidden, true,
+    'le bloc « reserve a date » reste affiche alors qu aucun mois a venir ne porte quoi que ce soit')
+})
+
+// ─── LES CINQ CONSTATS DE LA REVIEW DU 28 OCTOBRE 2026 ─────────────────────
+
+test("LE TEST QUI COMPTE : la colonne du JOUR dit son montant ET ses sejours", () => {
+  // ⚠ CONSTAT DE LA REVIEW : mes cinq premiers tests ne lisaient que la colonne
+  // N-1 et l'ecart. La mutation « Math.round(nAuj / 100) + 777 » — un montant
+  // faux sur TOUTES les lignes et toutes les cartes — passait au VERT. C'est
+  // la moitie des nombres du tableau, et celle qui porte les deux autres
+  // constats graves.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': { ...aVenirDe(150000), sejours: 4 } },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 100000 } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.deepStrictEqual(montantEtSejours(l.textes[0]), { euros: 1500, sejours: 4 },
+    `la colonne du jour dit « ${l.textes[0]} » au lieu de 1 500 € et 4 sejours`)
+})
+
+test("LE TEST QUI COMPTE : un mois NON CALCULABLE ne devient pas « 0 € · -100 % »", () => {
+  // ⚠ CONSTAT GRAVE DE LA REVIEW. Un mois a venir ne portant qu'un sejour SANS
+  // MONTANT (blocage saisi en resa, canal sans prix) : `refuseTout` le refuse,
+  // la courbe coupe son trait, la reserve dit « sans montant ». Le tableau
+  // affirmait « 0 € reserve » et « -100 % » EN ROUGE. Une absence transformee
+  // en fait — et le meme ecran avait deja corrige ce defaut en trois endroits.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: {
+        '2026-09': recuDe(30000),
+        '2026-11': { sejours: 2, total_cents: 0, recu_cents: 0, a_venir_cents: 0, bruts: 0, sans_montant: 2 }
+      },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 200000 } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.match(l.textes[0], /revenue\.unavailable/,
+    `le mois refuse dit « ${l.textes[0]} » au lieu de nommer son motif`)
+  assert.strictEqual(/\d/.test(l.textes[0]), false, `un chiffre subsiste : « ${l.textes[0]} »`)
+  assert.strictEqual(l.textes[2], '—',
+    `l ecart vaut « ${l.textes[2]} » : il est calcule sur un 0 € qui n existe pas`)
+  assert.strictEqual(/--retard/.test(l.cellules[2]), false,
+    'un mois NON CALCULABLE est signale en rouge comme un retard')
+})
+
+test("LE TEST QUI COMPTE : un mois present en N-1 SEUL ne s affiche pas en retard", () => {
+  // Aucune ligne cote 2026 : « 0 € » serait arithmetiquement vrai, mais le
+  // « -100 % » rouge donnerait la meme alarme a « rien vendu » et a « ce mois
+  // n est pas encore ouvert a la vente » — une decision de l hote signalee
+  // comme un defaut.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 200000 } })
+    }
+  })
+  const l = lignesDuTableauRad(p)[0]
+  assert.strictEqual(l.textes[0], '—', `la colonne du jour dit « ${l.textes[0]} » au lieu de « — »`)
+  assert.strictEqual(l.textes[2], '—', `l ecart vaut « ${l.textes[2]} » au lieu de « — »`)
+  assert.strictEqual(/--retard/.test(l.cellules[2]), false, 'le mois est signale en rouge')
+})
+
+test("LE TEST QUI COMPTE : un echec de lecture n emporte PAS le tableau de l annee d avant", () => {
+  // ⚠ CONSTAT GRAVE DE LA REVIEW. `renderAnnee` sort par `return` AVANT le code
+  // du tableau quand l etat est « chargement » ou « echec », et `videTout` ne
+  // connaissait pas le bloc neuf. L hote cliquait « ← 2025 » et lisait
+  // « Lecture impossible » au-dessus d un tableau peuple des pourcentages de
+  // 2026. C est la garantie que `chargerAnnee` enonce lui-meme.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(150000) },
+      par_bien: {}, hors_biens: {},
+      reserve_a_date: rad({ '2025-11': { total_cents: 100000 } })
+    }
+  })
+  assert.strictEqual(lignesDuTableauRad(p).length, 1, 'le tableau n a pas rendu au depart')
+  for (const etat of ['chargement', 'echec']) {
+    p.interne.etat.anneeEtat = etat
+    p.interne.renderAnnee()
+    assert.strictEqual(p.cache('[data-bind="revenue-annee-rad"]').hidden, true,
+      `le bloc « reserve a date » reste affiche sous l etat « ${etat} »`)
+    assert.strictEqual(lignesDuTableauRad(p).length, 0,
+      `les lignes du tableau survivent a l etat « ${etat} »`)
+    assert.strictEqual(cartesDuTableauRad(p).length, 0,
+      `les cartes du telephone survivent a l etat « ${etat} »`)
+  }
+})
+
+test("LE TEST QUI COMPTE : sans agregat, le tableau SE TAIT et la panne se NOMME", () => {
+  // ⚠ CONSTAT DE LA REVIEW. `reserve_a_date` est `null` quand la RPC a echoue.
+  // Tous les `l.lan` etant absents, chaque ligne affirmait « pas assez de
+  // ventes a cette date l an dernier » sur une annee qui avait bien vendu — un
+  // fait que l ecran n a AUCUN moyen de connaitre — et l en-tete rendait
+  // « Meme date l an dernier () ».
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-11': aVenirDe(150000) },
+      par_bien: {}, hors_biens: {}, indisponibles: ['reserve_a_date']
+    }
+  })
+  assert.strictEqual(p.cache('[data-bind="revenue-annee-rad"]').hidden, true,
+    'le tableau s affiche alors que l agregat manque')
+  assert.strictEqual(lignesDuTableauRad(p).length, 0, 'des lignes sont rendues sans agregat')
+  assert.strictEqual(p.cache('[data-bind="revenue-annee-rad-col-n1"]').textContent, '',
+    'l en-tete N-1 affiche sa parenthese vide')
+  const res = p.cache('[data-bind="revenue-annee-reserves"]')
+  assert.strictEqual(res.hidden, false, 'aucune reserve : le silence se lit comme « rien vendu l an dernier »')
+  assert.match(res.textContent, /revenue\.annee_rad_indispo/,
+    `la reserve dit « ${res.textContent} » au lieu de nommer la panne`)
 })

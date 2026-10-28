@@ -296,6 +296,27 @@
       <ul class="rev-liste rev-liste--annee" data-list="revenue-annee-cartes"></ul>
 
       <p class="caption muted" data-bind="revenue-annee-note"></p>
+      <!-- ⚠ LE TABLEAU DOUBLE LA LIGNE POINTILLEE, IL NE LA REMPLACE PAS.
+           Au niveau du compte, l'axe est tire par le pic d'ete : deux
+           pointilles a 2 k € sur un axe a 16 k € se tassent au ras de l'axe,
+           et l'ecart qui est le SUJET ne se lit pas. Mesure au banc le
+           28 octobre 2026. Une ligne qu'on ne peut pas lire gagne a etre
+           doublee d'un nombre (decision de Thierry). -->
+      <div class="rev-rad" data-bind="revenue-annee-rad" hidden>
+        <h3 class="caption rev-rad__titre" data-i18n="revenue.annee_rad_titre"></h3>
+        <div class="rev-tbl-wrap rev-rad-tbl">
+          <table class="rev-tbl">
+            <thead><tr>
+              <th scope="col" data-i18n="revenue.annee_rad_col_mois"></th>
+              <th scope="col" class="rev-tbl__num" data-i18n="revenue.annee_rad_col_auj"></th>
+              <th scope="col" class="rev-tbl__num" data-bind="revenue-annee-rad-col-n1"></th>
+              <th scope="col" class="rev-tbl__num" data-i18n="revenue.annee_col_ecart"></th>
+            </tr></thead>
+            <tbody data-list="revenue-annee-rad-lignes"></tbody>
+          </table>
+        </div>
+        <ul class="rev-liste rev-rad-liste" data-list="revenue-annee-rad-cartes"></ul>
+      </div>
       <p class="caption muted" data-bind="revenue-annee-comparables-tous" hidden></p>
       <p class="caption muted" data-bind="revenue-annee-comparables" hidden></p>
       <p class="caption muted" data-bind="revenue-annee-reserves" hidden></p>
@@ -1718,7 +1739,7 @@ function renderRevenus () {
   // prend le PREMIER du document. Il tombe sur celui du mois aujourd'hui, mais
   // c'est un accident d'ordre dans le balisage, pas une garantie.
   const enAnneeMaintenant = etat.vueRevenus === 'annee'
-  const wrap = document.querySelector('.rev-tbl-wrap:not(.rev-an-tbl)')
+  const wrap = document.querySelector('.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl)')
   if (wrap) wrap.hidden = sansBien || enAnneeMaintenant
   // ⚠ LES DEUX FORMES SE MASQUENT ENSEMBLE. C'est la media query qui choisit
   // laquelle s'affiche ; `hidden` dit s'il y a quelque chose a afficher. Les
@@ -1845,7 +1866,13 @@ function renderAnnee () {
   const enAnnee = etat.vueRevenus === 'annee'
   bloc.hidden = !enAnnee
   // Le bandeau et les listes du mois cedent la place, et reviennent au retour.
-  for (const sel of ['.rev-tbl-wrap:not(.rev-an-tbl)', '.rev-liste:not(.rev-liste--annee)']) {
+  // ⚠ LES NEGATIONS NOMMENT TOUTES LES FORMES DE L'ANNEE, pas seulement la
+  // premiere. Le tableau « Reserve a date » a ajoute un 3e `.rev-tbl-wrap` et
+  // une 2e `.rev-liste` : ces selecteurs les attrapaient, et ne rendaient juste
+  // que parce que `querySelector` prend le PREMIER du document — « un accident
+  // d'ordre dans le balisage, pas une garantie », dit le commentaire d'a cote.
+  for (const sel of ['.rev-tbl-wrap:not(.rev-an-tbl):not(.rev-rad-tbl)',
+    '.rev-liste:not(.rev-liste--annee):not(.rev-rad-liste)']) {
     const n = document.querySelector(sel)
     if (n) n.hidden = enAnnee || !(etat.biens || []).length
   }
@@ -1870,7 +1897,17 @@ function renderAnnee () {
   const vide = (s) => { const n = document.querySelector(s); if (n) n.innerHTML = '' }
   const videTout = () => {
     for (const b of ['revenue-annee-courbe', 'revenue-annee-legende']) vide(`[data-bind="${b}"]`)
-    for (const l of ['revenue-annee-filtres', 'revenue-annee-lignes', 'revenue-annee-cartes']) vide(`[data-list="${l}"]`)
+    // ⚠ LES DEUX LISTES DU TABLEAU « RESERVE A DATE » EN SONT, et elles y
+    // manquaient : constat GRAVE de la review du 28 octobre 2026. `renderAnnee`
+    // sort par `return` AVANT le code du tableau quand l'etat est
+    // « chargement » ou « echec » — donc le bloc gardait ses lignes. Mesure :
+    // apres un rendu de 2026 puis un echec, l'ecran disait « Lecture
+    // impossible » au-dessus d'un tableau peuplé des pourcentages de l'annee
+    // qu'on venait de quitter. C'est la garantie que `chargerAnnee` enonce :
+    // « un echec se dit, il ne laisse pas l'annee precedente a l'ecran sous un
+    // libelle qui en annonce une autre. »
+    for (const l of ['revenue-annee-filtres', 'revenue-annee-lignes', 'revenue-annee-cartes',
+      'revenue-annee-rad-lignes', 'revenue-annee-rad-cartes']) vide(`[data-list="${l}"]`)
     // ⚠ LES EN-TETES DE COLONNE AUSSI. Sans elles, « Lecture impossible »
     // s'affichait au-dessus d'un tableau vide dont l'en-tete annoncait encore
     // « 2026 | 2025 | Ecart » : un cadre qui promet des chiffres qu'on n'a pas.
@@ -1882,6 +1919,9 @@ function renderAnnee () {
     for (const sel of ['.rev-an-tbl', '.rev-liste--annee']) {
       const n = document.querySelector(sel); if (n) n.hidden = true
     }
+    // ⚠ ET LE BLOC LUI-MEME, pas seulement ses lignes : son TITRE et son
+    // en-tete de colonnes resteraient sinon au-dessus d'un tableau vide.
+    const rad_ = $('[data-bind="revenue-annee-rad"]'); if (rad_) rad_.hidden = true
     const r = $('[data-bind="revenue-annee-reserves"]'); if (r) { r.hidden = true; r.textContent = '' }
   }
   if (etat.anneeEtat === 'chargement') { dire('revenue.computing'); videTout(); return }
@@ -2269,6 +2309,102 @@ function renderAnnee () {
   // alors que le total, le tableau et l'ecart s'arretent au mois courant. Sans
   // cette phrase, l'hote lit la fin du trait gris et la colonne N-1 du tableau
   // et trouve deux chiffres differents pour la meme annee.
+  // ─── LE TABLEAU « RESERVE A DATE » ──────────────────────────────────────
+  // ⚠ IL SUIT LA PASTILLE, comme la ligne : `radPerimetre` est deja le
+  // perimetre choisi. Un tableau qui montrerait le compte sous une courbe
+  // filtree serait la meme superposition de perimetres que la ligne evitait.
+  const noeudRad = $('[data-bind="revenue-annee-rad"]')
+  if (noeudRad) {
+    const lignesRad = []
+    // ⚠ SANS AGREGAT, LE TABLEAU NE DIT RIEN — IL N'INVENTE PAS UN MOTIF.
+    // `reserve_a_date` est `null` quand la RPC a echoue (l'endpoint pousse
+    // alors `reserve_a_date` dans `indisponibles`). Ma premiere version
+    // confondait ce cas avec le refus du seuil : tous les `l.lan` etant
+    // absents, chaque ligne affirmait « pas assez de ventes a cette date l'an
+    // dernier » sur une annee qui avait pourtant bien vendu — un fait que
+    // l'ecran n'a AUCUN moyen de connaitre — et l'en-tete rendait
+    // « Meme date l'an dernier () ». Constat de la review du 28 octobre 2026.
+    // La panne se nomme plus bas, dans les reserves du bloc.
+    for (let m = 1; rad && m <= 12; m++) {
+      // Les mois A VENIR seulement : ailleurs, le revenu final est connu.
+      if (!enCours || m <= dernierRecu) continue
+      const cleM = `${an}-${String(m).padStart(2, '0')}`
+      const auj = parMois && parMois[cleM]
+      const lan = radPerimetre && radPerimetre[`${an - 1}-${String(m).padStart(2, '0')}`]
+      // Rien ni d'un cote ni de l'autre : le mois n'a pas de ligne.
+      if (!auj && !lan) continue
+      lignesRad.push({ m, cleM, auj, lan })
+    }
+    noeudRad.hidden = lignesRad.length === 0
+    $('[data-bind="revenue-annee-rad-col-n1"]').textContent = rad
+      ? t('revenue.annee_rad_col_n1', { date: dateDuJour(String(rad.pivot), { day: 'numeric', month: 'short' }) })
+      : ''
+
+    const cellules = (l) => {
+      // ⚠ TROIS ETATS, COMME PARTOUT DANS CE BLOC, et « 0 € » n'en est qu'un.
+      // Ma premiere version lisait `total_cents` brut : un mois a venir ne
+      // portant qu'un sejour SANS MONTANT (blocage saisi en resa, canal sans
+      // prix) affichait « 0 € » et un « -100 % » EN ROUGE, alors que la courbe
+      // coupe son trait et que la reserve dit « 1 sejour sans montant ». Une
+      // absence transformee en fait — mesure de la review du 28 octobre 2026,
+      // et c'est le defaut que ce meme ecran avait deja corrige en trois
+      // endroits le 27. `refuseTout` tranche, exactement comme `bilanPeriode`.
+      const refuseAuj = refuseTout(l.auj)
+      // `null` et non `0` : `ecartPourcent` protege son DENOMINATEUR, pas son
+      // numerateur, et rend `null` sur un numerateur non fini — donc « — ».
+      const nAuj = (!l.auj || refuseAuj) ? null : Number(l.auj.total_cents || 0)
+      const montantAuj = !l.auj
+        ? `<span class="muted">${esc(TIRET)}</span>`
+        : (refuseAuj
+            ? `<span class="muted">${esc(t('revenue.unavailable'))}</span>`
+            : `${esc(monnaie(Math.round(nAuj / 100), devise))} <span class="muted">${esc(t('revenue.stays', { n: Number(l.auj.sejours || 0) }))}</span>`)
+      // ⚠ SOUS LE SEUIL, LA LIGNE LE DIT A LA PLACE DU CHIFFRE. L'endpoint ne
+      // rend meme pas le montant : il ne PEUT pas etre affiche par accident.
+      // ⚠ `!l.lan` DIT BIEN LE SEUIL, ET C'EST VRAI : l'agregat ne rend que
+      // les mois qui portent une vente, donc une ligne absente vaut ZERO vente
+      // a cette date — et zero est sous le seuil de 5. Le cas qu'il ne fallait
+      // PAS ranger ici est l'agregat entierement absent ; il est traite plus
+      // haut, par un tableau qui se tait.
+      if (!l.lan || l.lan.sous_seuil) {
+        return {
+          n1: `<span class="muted">${esc(t('revenue.annee_rad_sous_seuil_court'))}</span>`,
+          ecart: '<span class="muted">—</span>', montantAuj
+        }
+      }
+      const nLan = Number(l.lan.total_cents || 0)
+      const pct = ecartPourcent(nAuj, nLan)
+      // ⚠ LE SIGNE PORTE LE SENS AUTANT QUE LA COULEUR : un hote qui ne
+      // distingue pas le vert du rouge lit « +12 % » et « -68 % » (le trait d'union que rend `String(-68)`, pas un signe moins typographique).
+      const classe = pct === null ? '' : (pct < 0 ? ' rev-tbl__ecart--retard' : '')
+      return {
+        montantAuj,
+        n1: `${esc(monnaie(Math.round(nLan / 100), devise))} <span class="muted">${esc(t('revenue.stays', { n: Number(l.lan.sejours || 0) }))}</span>`,
+        ecart: pct === null
+          ? '<span class="muted">—</span>'
+          : `<span class="rev-tbl__ecart${classe}">${esc((pct > 0 ? '+' : '') + pct + ' %')}</span>`
+      }
+    }
+    $('[data-list="revenue-annee-rad-lignes"]').innerHTML = lignesRad.map(l => {
+      const c = cellules(l)
+      return `<tr>
+        <th scope="row" class="rev-tbl__bien">${esc(moisSeul(l.cleM))}</th>
+        <td class="rev-tbl__num">${c.montantAuj}</td>
+        <td class="rev-tbl__num">${c.n1}</td>
+        <td class="rev-tbl__num caption">${c.ecart}</td>
+      </tr>`
+    }).join('')
+    $('[data-list="revenue-annee-rad-cartes"]').innerHTML = lignesRad.map(l => {
+      const c = cellules(l)
+      return `<li class="rev-carte">
+        <div class="rev-carte__tete">
+          <span class="rev-carte__bien"><span class="small">${esc(moisSeul(l.cleM))}</span></span>
+          <span class="rev-carte__total">${c.montantAuj}</span>
+        </div>
+        <p class="caption muted">${esc(t('revenue.annee_rad_mobile_n1'))} ${c.n1} ${c.ecart}</p>
+      </li>`
+    }).join('')
+  }
+
   // ⚠ LA NOTE DES COMPARABLES DIT TROIS CHOSES, et aucune n'est decorative :
   // d'ou vient la bande, qu'elle est une ESTIMATION a partir des prix
   // affiches, et A QUELLE DATE elle a ete relevee. Sans la date, l'hote
@@ -2373,6 +2509,10 @@ function renderAnnee () {
   // Et ce que l'agregat n'a pas su juger : annulations sans date (Channex n'en
   // fournit aucune) et dates de vente non fiables.
   if (radReserves > 0) reserves.push(t('revenue.annee_rad_reserve', { n: radReserves }))
+  // ⚠ ET SI L'AGREGAT LUI-MEME MANQUE, ON LE DIT. Le tableau et la ligne se
+  // taisent alors (voir plus haut) : sans cette phrase, leur silence se lirait
+  // comme « l'an dernier n'a rien vendu ».
+  if (enCours && !rad) reserves.push(t('revenue.annee_rad_indispo'))
 
   const noeudRes = $('[data-bind="revenue-annee-reserves"]')
   if (noeudRes) {
