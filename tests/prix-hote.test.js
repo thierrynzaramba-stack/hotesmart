@@ -104,31 +104,77 @@ test('LE TEST QUI COMPTE : sur un bien pilote, le prix se modifie sur la ligne, 
   assert.match(PAGE, /retirerPrixHote: \(propertyId, dates\)/.test(lire('shared/api-client.js')) ? /apiClient\.calendar\.retirerPrixHote/ : /jamais/, 'le retrait passe par le client API')
 })
 
-test('LE TEST QUI COMPTE : la pop-up Evenements — un calendrier en tableau, la teinte du niveau sur les cases, un CONTOUR unifie par evenement, et jamais la semaine / le week-end comme evenement', () => {
+test('LE TEST QUI COMPTE : l ecran « Quand vos prix bougent » — ce qui RESTE de la pop-up Evenements', () => {
+  // ⚠ CE TEST A CHANGE LE 28 OCTOBRE 2026, ET IL DIT CE QU'IL A PERDU.
+  // Il gardait le calendrier du MOIS de la pop-up : un tableau, la teinte du
+  // niveau sur chaque case, un contour unifie par evenement. Ce calendrier a
+  // ete RETIRE, sur demande de Thierry (« la page evenement est inbuvable
+  // […] incomprehensible »).
+  //
+  // ⚠ ET CE N'EST PAS UNE PERTE DE FOND, c'est la fin d'un doublon : la page
+  // qui ouvre cette fenetre porte DEJA le tableau du mois, nuit par nuit,
+  // avec les prix, les niveaux, le « ~ » des projections et le « ✎ » des prix
+  // de l'hote. La grille de 54 px en etait une seconde verite, plus pauvre —
+  // cinq informations par case et DEUX codes couleur superposes.
+  // Inventaire complet : docs/specs/spec-yf-ecran-periodes.md §2.
+  //
+  // Ce qui suit est ce qui SURVIT, et qui doit survivre.
   assert.match(PAGE, /id="yp-ouvrir-ev"/); assert.match(PAGE, /id="yp-ov-ev" role="dialog"/)
-  const pop = PAGE.slice(PAGE.indexOf('function rendrePopup (message = \'\')'), PAGE.indexOf('function decalerJour (iso, n)'))
-  assert.ok(pop.includes('<table class="yp-cal">'), 'un tableau')
-  assert.ok(pop.includes("const niveau = n && n.suggestion != null && (n.ouverte === true || n.projection) && !n.vendue ? (CLASSES[n.niveau] || '') : ''"), 'la case porte le niveau — aussi pour une nuit projetee')
-  assert.ok(pop.includes("(ev.calendrier || []).filter(e => e.debut <= finMois && e.fin >= debutMois)"), 'les evenements viennent du calendrier de pilotage (segments), pas des couches jour de semaine')
-  assert.ok(pop.includes("premierDuEv ? 'ev-g' : ''") && pop.includes("dernierDuEv ? 'ev-d' : ''"), 'contour : premiere et derniere case')
-  assert.match(PAGE, /\.yp-cal td\.ev \{ border-top-color: var\(--ev\); border-bottom-color: var\(--ev\)/, 'haut et bas sur toutes les cases : un seul trait')
-  assert.ok(pop.includes('id="ev-ajouter">Ajouter un événement'), 'le bouton')
-  assert.ok(!/weekend|week-end/i.test(pop.slice(0, pop.indexOf('const entrees'))), 'aucune notion de week-end avant les entrees : ce n est pas un evenement')
-  // L'ancienne page redirige vers la pop-up, et la barre laterale aussi.
+  const pop = PAGE.slice(PAGE.indexOf('async function rendrePopup'), PAGE.indexOf('function ligneHtml'))
+
+  // FOND CONSERVE 1 : les periodes viennent du calendrier de PILOTAGE
+  // (segments), jamais des couches « jour de semaine ». La semaine et le
+  // week-end sont des couches, pas des periodes — s'ils entraient dans cette
+  // liste, l'hote croirait pouvoir les regler ici.
+  assert.ok(pop.includes('(ev.calendrier || [])'), 'les periodes viennent du calendrier de pilotage')
+  assert.ok(!/weekend/i.test(pop.slice(0, pop.indexOf('const entrees'))),
+    'aucune couche jour-de-semaine avant les entrees : ce n est pas une periode')
+
+  // FOND CONSERVE 2 : on peut toujours ajouter une periode.
+  assert.ok(pop.includes("id=\"ev-ajouter\"") && PAGE.includes('+ Ajouter une période'),
+    'le geste d ajout existe toujours — derriere un bouton desormais')
+
+  // FOND CONSERVE 3 : les deux portes d'entree historiques.
   assert.match(lire('apps/yield/evenements.html'), /location\.replace\('\/apps\/yield\/prix\?evenements=1'\)/)
   assert.match(lire('components/sidebar.js'), /href="\/apps\/yield\/prix\?evenements=1"/)
+
+  // FOND RETIRE, ET IL NE DOIT PAS REVENIR PAR INADVERTANCE : deux codes
+  // couleur dans la meme case etaient le defaut principal de l'ancien ecran.
+  assert.ok(!PAGE.includes('yp-cal'), 'le calendrier du mois de la pop-up ne doit pas revenir')
+  assert.ok(!PAGE.includes('EV_COULEUR'), 'ni le second code couleur, par origine')
 })
 
-test('correctifs de review : prix REEL affiche et ecart marque, clavier sans propagation, evenements du MOIS, plusieurs evenements par jour', () => {
+test('correctifs de review : prix REEL affiche et ecart marque, clavier sans propagation, et les DOUZE mois', () => {
   const ligne = PAGE.slice(PAGE.indexOf('function ligne (n, barA, barN1)'), PAGE.indexOf('function pourquoi (n)'))
   assert.ok(ligne.includes('const ecart = n.prix_actuel != null && Math.round(n.prix_actuel * 100) !== Math.round(n.prix_hote * 100)'), 'l ecart memoire / calendrier se voit')
   assert.ok(ligne.includes('euros(n.prix_actuel != null ? n.prix_actuel : n.prix_hote)'), 'le prix affiche est celui du calendrier')
   const editer = PAGE.slice(PAGE.indexOf('function editerPrix (date, bouton)'), PAGE.indexOf('async function retirerPrix'))
   assert.ok(editer.includes("input.addEventListener('keydown', e => { e.stopPropagation();"), 'Entree ne deplie pas la ligne')
-  const pop = PAGE.slice(PAGE.indexOf('async function lireEvenements'), PAGE.indexOf('function decalerJour (iso, n)'))
-  assert.ok(pop.includes("apiEv('GET', null, { debut: `${mois}-01`, fin })"), 'la fenetre du mois affiche, pas les 12 mois a venir')
-  assert.ok(pop.includes('if (!parJour.has(j)) parJour.set(j, [])'), 'plusieurs evenements par jour')
-  assert.ok(pop.includes('sv.incertain_apres'), 'l horizon du calendrier scolaire se dit')
+  const pop = PAGE.slice(PAGE.indexOf('async function lireEvenements'), PAGE.indexOf('function ligneHtml'))
+
+  // ⚠ CETTE LIGNE A ETE INVERSEE LE 28 OCTOBRE 2026, SUR DECISION DE THIERRY,
+  // et c'est une decision de PRODUIT, pas une regression.
+  // Elle exigeait « la fenetre du mois affiche, PAS les 12 mois a venir ».
+  // La demande est maintenant l'inverse : « l'ecran montre d'abord QUAND les
+  // prix montent ou baissent sur 12 mois ». La fenetre par defaut du serveur
+  // etait DEJA prospective sur douze mois ; c'est l'ecran qui la bridait, et
+  // qui rechargeait donc a chaque fleche — douze mois coutaient vingt-quatre
+  // appels (un par mois pour les evenements, un par mois pour les prix).
+  assert.ok(pop.includes("apiEv('GET')"), 'les DOUZE mois, en un seul appel')
+  assert.ok(!/debut: `\$\{mois\}-01`/.test(pop), 'plus aucune borne au mois affiche')
+
+  // ⚠ « PLUSIEURS EVENEMENTS PAR JOUR » ETAIT UN CORRECTIF DE REVIEW, ET SON
+  // DEFAUT N'EXISTE PLUS. Il repondait a : « un Salon dans les vacances de
+  // Toussaint ECRASAIT la Toussaint » — parce qu'une case de calendrier ne
+  // peut montrer qu'un contour. Dans une liste, deux periodes qui se
+  // chevauchent sont DEUX LIGNES : le probleme disparait avec la forme qui le
+  // causait. On garde donc l'INVARIANT, pas son ancien moyen — aucune periode
+  // ne doit etre perdue a l'affichage.
+  assert.ok(pop.includes('const entrees = (ev.calendrier || []).slice()'),
+    'toutes les periodes de la fenetre sont rendues, sans filtre ni dedoublonnage')
+  assert.ok(!pop.includes('parJour'), 'le regroupement par jour n a plus lieu d etre')
+
+  assert.ok(pop.includes('sv.incertain_apres'), 'l horizon du calendrier scolaire se dit toujours')
   assert.match(lire('scripts/piloter-yieldflow.js'), /prixHote = await prixHoteDuBien\(sb, bien\.id, auj, fin\)/, 'le dry-run voit la main')
 })
 
@@ -148,10 +194,17 @@ test('une nuit NON OUVERTE montre les memes informations qu une nuit ouverte : l
   assert.ok(ligne.includes('s’ouvrira') && ligne.includes('TEXTES_PROJECTION[n.projection_motif]'), 'et dit quand, ou a quelle condition (table des textes)')
   assert.ok(PAGE.includes("ligne: 'fermée · si vous l’ouvrez'") && PAGE.includes("ligne: 'indisponible · si vous la libérez'"), 'fermee et indisponible disent chacune leur condition')
   assert.ok(ligne.includes("${n.ouverte === false ? '<span class=\"yp-attente\""), 'une nuit fermee qui porte votre prix le dit')
-  // La projection se DIT partout ou elle s'affiche : ligne, depliant, pop-up.
+  // La projection se DIT partout ou elle s'affiche : la ligne et le depliant.
   assert.ok(PAGE.includes("const proj = n.projection && n.ouverte !== true"), 'le depliant « pourquoi » la dit')
-  assert.ok(PAGE.includes('const projete = !!(n && n.projection && n.suggestion != null)'), 'la case de la pop-up montre le prix prevu, meme avec un prix au calendrier')
-  assert.ok(PAGE.includes("projete ? (TEXTES_PROJECTION[n.projection_motif] || TEXTES_PROJECTION.fenetre).case : ''"), 'et le dit')
+  // ⚠ LA TROISIEME PLACE A DISPARU LE 28 OCTOBRE 2026, ET LE FOND NE SE PERD
+  // PAS. Ces deux lignes gardaient la CASE du calendrier de la pop-up, qui
+  // montrait le prix prevu d'une nuit. Ce calendrier est retire : la fenetre
+  // ne parle plus de NUITS, elle parle de PERIODES. Une projection n'a donc
+  // plus d'endroit ou se dire la — et elle continue de se dire aux deux
+  // endroits ou les nuits vivent, la ligne et le depliant, tous deux
+  // affirmes juste au-dessus.
+  assert.ok(!PAGE.includes('const projete = !!(n && n.projection'),
+    'la case de la pop-up n existe plus : sa garde non plus')
 })
 
 test('le bandeau du mois porte le CA vendu a ce jour et le N-1 au meme delai, lus dans le pied — sans requete de plus', () => {

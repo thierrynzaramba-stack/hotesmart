@@ -62,6 +62,15 @@ function decalerAns (iso, n) {
 }
 
 module.exports = async (req, res) => {
+  // ⚠ AVANT LE PREMIER REFUS, PAS AVANT LA GARDE (dette 90) — constat de la
+  // review du 28 octobre 2026, et la spec du lot s'y etait engagee. Cette
+  // reponse porte DOUZE MOIS de reglages tarifaires d'un compte en un seul
+  // appel depuis que l'ecran lit la fenetre entiere : la laisser partir sur
+  // le defaut de Vercel (`public, max-age=0, must-revalidate`) AUTORISE un
+  // cache partage a la stocker. Un refus parle du compte appelant, lui aussi.
+  res.setHeader('cache-control', 'private, no-store')
+  res.setHeader('vary', 'authorization, x-compte')
+
   const body = req.body || {}
   const brut = (v) => (Array.isArray(v) ? v[0] : v)
   // ⚠ DEUX NOMS POUR LA MEME CHOSE — le defaut qui avait tue le lot 4.3 entier.
