@@ -395,3 +395,164 @@ test('⚠ CONSTAT 1 : le panneau lit le formulaire AVANT tout re-rendu', () => {
   assert.ok(posLecture < posRender,
     'la LECTURE doit preceder le re-rendu, sinon la saisie non enregistree est perdue')
 })
+
+// ─── LES SIX CORRECTIONS DE LA RECETTE DU 28 OCTOBRE 2026 ────────────────────
+// Thierry a recette le lot 2 sur staging : « tout fonctionne », et six defauts
+// d'AFFICHAGE. Aucun n'etait couvert par un test — ils sont tous dans le rendu,
+// la ou les tests de ce chantier regardaient l'endpoint. Ces six-la rougissent
+// contre le code d'avant (contre-epreuve faite par `git archive`).
+const fsR = require('node:fs')
+const pathR = require('node:path')
+const lireR = (f) => fsR.readFileSync(pathR.join(__dirname, '..', f), 'utf8')
+// ⚠ SANS LES COMMENTAIRES : un test structurel ne doit pouvoir etre ni
+// satisfait ni contrarie par une explication (lecon de tests/i18n-version).
+const sansCommR = (s) => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+
+test('⚠ RECETTE 1 : « Je valide chaque reponse » est une PILULE, bleue quand inactive', () => {
+  const page = lireR('pages/messages.html')
+  const css = lireR('shared/ui.css')
+  // On ne regarde QUE voletIA : le bouton « Enregistrer » du meme volet est,
+  // lui, legitimement un `btn--primary`.
+  const bloc = sansCommR(page.slice(page.indexOf('function voletIA'),
+    page.indexOf('function voletAlertes')))
+  const i = bloc.indexOf('data-delai-manuel')
+  assert.ok(i > 0, 'le geste de validation manuelle existe toujours')
+  const avant = bloc.slice(Math.max(0, i - 300), i)
+  assert.ok(/msg-pilules/.test(avant),
+    'il vit dans une rangee de pilules, donc il herite de leur regle')
+  assert.ok(/class="tab"/.test(avant), 'et il porte la classe des pilules')
+  assert.ok(!/btn--(primary|secondary)/.test(avant),
+    'plus de variante de bouton : btn--secondary garde le texte en --ink, '
+    + 'donc il avait l air arme meme inactif (constat de recette)')
+  // La regle qui donne le sens : bleu = cliquable, bord --ink = etat courant.
+  assert.ok(/\.msg-pilules \.tab \{[^}]*color: var\(--info\)/.test(css),
+    'une pilule inactive est BLEUE')
+  assert.ok(/\.msg-pilules \.tab\[aria-pressed="true"\] \{[^}]*border-color: var\(--ink\)/.test(css),
+    'et seule la pilule ACTIVE porte le bord --ink')
+})
+
+test('⚠ RECETTE 2 : plus aucun « Auto » dans les textes de l ecran', () => {
+  const MORTES = ['messages.auto_scope', 'messages.mode_auto',
+    'messages.mode_test', 'messages.mode_label']
+  for (const langue of ['fr', 'en', 'es']) {
+    const dict = JSON.parse(lireR(`shared/i18n/${langue}.json`))
+    for (const cle of MORTES) {
+      assert.ok(!(cle in dict), `${langue} : ${cle} doit disparaitre du dictionnaire, `
+        + 'pas seulement de l ecran — une traduction orpheline se fait rebrancher')
+    }
+    assert.ok(!/\bAuto\b/.test(dict['messages.mode_confirm_auto']),
+      `${langue} : la confirmation ne nomme plus un mode qui n existe plus`)
+  }
+  // ⚠ LA PHRASE N EST PAS FIGEE ICI, ET C EST UN CONSTAT DE LA REVIEW. Ma
+  // premiere version greppait trois fragments du texte francais : Thierry
+  // reformule une confirmation quand il veut, et la suite serait passee au
+  // rouge pour une virgule, sans qu aucun defaut n existe. Ce qui doit tenir,
+  // c est la PROPRIETE : la confirmation existe encore, elle ne nomme plus un
+  // mode disparu, et elle AVERTIT que des reponses partiront sans relecture.
+  const fr = JSON.parse(lireR('shared/i18n/fr.json'))['messages.mode_confirm_auto']
+  assert.ok(typeof fr === 'string' && fr.trim().length > 20,
+    'quitter la validation manuelle reste un geste CONFIRME : sans texte, '
+    + 'window.confirm afficherait une boite vide')
+  assert.match(fr, /validation/i,
+    'elle dit ce qu on perd — la relecture avant envoi au voyageur')
+  // Et l ecran ne l affiche plus.
+  assert.ok(!/messages\.auto_scope/.test(sansCommR(lireR('pages/messages.html'))),
+    'la phrase de portee « En Auto, l IA n envoie seule… » est retiree du volet')
+})
+
+test('⚠ RECETTE 3 : sur ordinateur les pilules passent a la ligne, les filtres non', () => {
+  const css = lireR('shared/ui.css')
+  const m = css.match(/@media \(min-width: 721px\) \{\s*\.msg-pilules \{([^}]*)\}/)
+  assert.ok(m, 'une regle propre aux pilules, au-dela du telephone')
+  assert.match(m[1], /flex-wrap: wrap/,
+    '« Autre… » etait coupe a droite : une rangee qui defile cache une option')
+  assert.match(m[1], /overflow-x: visible/,
+    'et le defilement horizontal ne doit plus rien masquer sur ordinateur')
+  // La greffe sur `.msg-filtres` s arrete ICI : les filtres de la liste
+  // restent sur une seule ligne, c est leur comportement voulu.
+  assert.ok(!/\.msg-filtres[^{]*\{[^}]*flex-wrap: wrap/.test(css),
+    'les filtres de la liste ne doivent PAS heriter du retour a la ligne')
+  // Le telephone garde le defilement, barre masquee (retouche du 15 octobre).
+  assert.ok(/\.msg-filtres, \.msg-pilules \{[^}]*overflow-x: auto/.test(css))
+  assert.ok(/\.msg-pilules::-webkit-scrollbar \{ display: none; \}/.test(css))
+})
+
+test('⚠ RECETTE 4 : la note du tiroir est VISIBLE, pas au fond d un panneau qui defile', () => {
+  const css = lireR('shared/ui.css')
+  const page = lireR('pages/messages.html')
+  const m = css.match(/\.msg-tiroir__note \{([^}]*)\}/)
+  assert.ok(m, 'la note existe')
+  assert.match(m[1], /position: sticky/,
+    'elle etait ecrite mais atterrissait hors de l ecran : l hote lisait un '
+    + 'silence la ou le code repondait')
+  assert.match(m[1], /bottom: 0/)
+  assert.match(m[1], /background: var\(--surface\)/,
+    'fond opaque, sinon le panneau defile sous le texte')
+  // Et c est bien « Enregistré » qui part, avec son drapeau de reussite.
+  assert.ok(/noteReglage\(echoues\.length[\s\S]{0,200}messages\.panneau_saved[\s\S]{0,120}echoues\.length === 0\)/
+    .test(sansCommR(page)), 'un enregistrement complet dit « Enregistré », en vert')
+})
+
+test('⚠ RECETTE 5 : aucun gabarit de bulle ne porte de retour à la ligne', () => {
+  const page = lireR('pages/messages.html')
+  const css = lireR('shared/ui.css')
+  // C est `pre-wrap` qui rend le blanc du gabarit VISIBLE : sans lui, le
+  // defaut n existerait pas, et ce test n aurait pas de sens.
+  assert.ok(/\.bulle \{[^}]*white-space: pre-wrap/.test(css),
+    'le blanc se voit parce que .bulle est en pre-wrap')
+  // ⚠ TOUT LE GABARIT, PAS SON PREMIER CARACTERE — constat de la review du
+  // 28 octobre 2026. Ma premiere version n inspectait que le caractere suivant
+  // l ouverture du <div> : elle etait donc VERTE sur le blanc restant dans la
+  // bulle d evaluation (entre l entete et les actions, puis avant la
+  // fermeture), c est-a-dire sur la majorite des formes que le defaut peut
+  // reprendre. Entre deux enfants en `display: flex`, un retour a la ligne
+  // engendre une boite de bloc anonyme qui SE REND.
+  const re = /<div class="bulle(?=[ $"])[^>]*">/g
+  let m, vus = 0
+  while ((m = re.exec(page)) !== null) {
+    vus++
+    const debut = m.index + m[0].length
+    const fin = page.indexOf('</div>', debut)
+    assert.ok(fin > debut, `bulle a l offset ${m.index} : fermeture introuvable`)
+    const gabarit = page.slice(debut, fin)
+    assert.ok(!/\n/.test(gabarit),
+      `bulle a l offset ${m.index} : le gabarit porte un retour a la ligne — `
+      + 'il SE REND (`pre-wrap`), en bande vide. Le gabarit d une bulle tient '
+      + `sur une seule ligne. Extrait : ${JSON.stringify(gabarit.slice(0, 120))}`)
+  }
+  // ⚠ ET LE PERIMETRE SE COMPTE, il ne se suppose pas : le motif ci-dessus
+  // greppe UNE forme (`<div class="bulle`). Une bulle ecrite en apostrophes
+  // simples, ou avec une classe calculee, en sortirait sans que `vus` ne
+  // bronche. On compare donc a toutes les occurrences de `class="bulle` qui ne
+  // sont pas `class="bulle-...`, et on refuse les apostrophes simples.
+  const toutes = (page.match(/class="bulle(?![-\w])/g) || []).length
+  assert.equal(vus, toutes,
+    `${vus} gabarit(s) inspecte(s) pour ${toutes} occurrence(s) de class="bulle : `
+    + 'une bulle echappe au motif')
+  assert.ok(!/class='bulle/.test(page),
+    'les bulles s ecrivent en guillemets doubles, pour que ce test les voie')
+  assert.ok(vus >= 4, `${vus} gabarit(s) de bulle inspecte(s), au moins 4 attendus`)
+})
+
+test('⚠ RECETTE 6 : a instant EGAL, l ordre du fil ne depend pas de l arrivee', () => {
+  const page = lireR('pages/messages.html')
+  const sans = sansCommR(page)
+  const m = sans.match(/const rangAInstantEgal = \(e\) => [^\n]+/)
+  assert.ok(m, 'un departage deterministe existe')
+  // On l EXECUTE : une forme greppee ne dit pas si l ordre est le bon.
+  const rang = new Function(`${m[0]}; return rangAInstantEgal`)()
+  const message = { type: 'message' }
+  const prop1 = { type: 'proposition', x: { id: '111' } }
+  const prop2 = { type: 'proposition', x: { id: '222' } }
+  assert.ok(rang(message) < rang(prop1),
+    'le message passe avant la proposition qui lui REPOND')
+  assert.ok(rang(prop1) < rang(prop2), 'et deux propositions se rangent par id')
+  assert.equal(rang(prop1), rang({ type: 'proposition', x: { id: '111' } }),
+    'le rang ne depend que de la donnee, jamais de l ordre de lecture')
+  assert.ok(/rangAInstantEgal\(a\)\.localeCompare\(rangAInstantEgal\(b\)\)/.test(sans),
+    'et le tri du fil s en sert')
+  // La base aussi : deux taches nees du meme `insert` portent le meme
+  // `created_at` a la microseconde, et PostgREST ne garantit alors aucun ordre.
+  assert.ok(/\.order\('created_at', \{ ascending: false \}\)\.order\('id', \{ ascending: true \}\)/
+    .test(sans), 'la lecture des taches a un second ordre sur `id`')
+})

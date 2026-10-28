@@ -489,7 +489,12 @@ test('tiroir : l\'inventaire §12 bis (volets IA + Alertes) est couvert, champ p
     'bouton Tester par canal': 'data-tester',
     'porte SMS sans cle Brevo (lien /connexions)': 'messages.sms_needs_brevo',
     'garde des appels IA (circuit breaker, en etat)': 'messages.breaker_desc',
-    'ce qu\'il valide seul (Auto)': 'messages.auto_scope',
+    // ⚠ « CE QU'IL VALIDE SEUL (AUTO) » EST SORTI DE L'INVENTAIRE, ET C'EST UN
+    // RETRAIT DÉCIDÉ, pas une omission : Thierry a demandé le 28 octobre 2026
+    // qu'aucun « Auto » ne subsiste à l'écran. Il n'y a plus de mode à
+    // expliquer, il y a un délai — que la pilule et son aide disent déjà. La
+    // clé `messages.auto_scope` est supprimée des trois dictionnaires, donc
+    // cette ligne ne pourrait plus être satisfaite.
     'lien Connaissances': 'agent-ai/knowledge',
     'choix du logement en tete du panneau': 'data-bind="tiroir-bien"',
     'bouton Messages programmes (en-tete)': 'data-ouvre-volet="programmes"',
