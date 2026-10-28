@@ -40,7 +40,7 @@ const BEDS24 = {
 const FAITS = (o = {}) => ({
   bien: PILOTE.id, pilote: 'yieldflow', peut_basculer: true, raison: null,
   fenetre: { type: 'jours', valeur: 120 }, fenetre_fin: '2027-02-25',
-  marche: 'Bagnères-de-Bigorre', evenements: 3, comparables: 7,
+  marche: 'Bagnères-de-Bigorre', comparables: 7,
   prix_ajustes: 12, jours: 7, ...o
 })
 
@@ -249,7 +249,12 @@ test('les reperes s affichent quand ils sont servis, et SE TAISENT sinon', async
   const avec = banc()
   let m = await ouvrir(avec, PILOTE)
   let reperes = [...m.querySelectorAll('.cal-yf-menu__repere')].map(e => e.textContent)
-  assert.deepEqual(reperes, ['120 jours', 'Bagnères-de-Bigorre', '3 à venir', '7 retenus'])
+  // ⚠ TROIS REPERES, ET PAS QUATRE. Celui de « Quand vos prix bougent » a ete
+  // retire le 28 octobre 2026 en recette : il comptait les seules dates
+  // AJOUTEES PAR L'HOTE et affichait « 0 à venir » sur un logement qui a
+  // forcement des vacances. Le vrai compte n'est pas servi sans calcul, et la
+  // regle du lot dit alors de ne rien afficher — jamais un chiffre faux.
+  assert.deepEqual(reperes, ['120 jours', 'Bagnères-de-Bigorre', '7 retenus'])
   avec.fermer()
 
   // ⚠ ZERO COMPARABLE DIT « A CHOISIR », PAS « 0 RETENUS » (demande de
@@ -264,7 +269,7 @@ test('les reperes s affichent quand ils sont servis, et SE TAISENT sinon', async
 
   // Tout illisible : les quatre entrees restent CLIQUABLES, et aucun repere
   // n'est invente. Une panne de confort ne ferme pas le menu.
-  const sans = banc({ faits: FAITS({ fenetre: null, marche: null, evenements: null, comparables: null }) })
+  const sans = banc({ faits: FAITS({ fenetre: null, marche: null, comparables: null }) })
   m = await ouvrir(sans, PILOTE)
   assert.equal(m.querySelectorAll('.cal-yf-menu__repere').length, 0, 'un repere a ete invente')
   assert.equal(m.querySelectorAll('.cal-yf-menu__entree').length, 4, 'les entrees doivent rester')
@@ -488,6 +493,60 @@ test('la fenetre au singulier dit « 1 jour », jamais « 1 jours »', async () 
     assert.equal(r, attendu, `fenetre ${fenetre.valeur} ${fenetre.type}`)
     b.fermer()
   }
+})
+
+test('LE TEST QUI COMPTE : « Quand vos prix bougent » n affiche AUCUN repere', async () => {
+  // ⚠ RECETTE DE THIERRY DU 28 OCTOBRE 2026. Le repere disait « N à venir » en
+  // comptant `yield_events` — les seules dates ajoutees par l hote — a cote
+  // d un ecran qui montre AUSSI les vacances scolaires, les jours feries, les
+  // ponts et les fetes du calendrier. Sur « Maison Jardin », sans date propre,
+  // il annoncait « 0 à venir » pour un ecran qui en liste 35.
+  // Le vrai compte n est PAS servi sans calcul (il demande le contexte jour
+  // par jour sur la fenetre historique), et la regle du lot dit alors de ne
+  // rien afficher. Mieux vaut pas de chiffre qu un chiffre faux.
+  const b = banc()
+  const m = await ouvrir(b, PILOTE)
+  const entrees = [...m.querySelectorAll('.cal-yf-menu__entree')]
+  const ev = entrees.find(a => a.textContent.includes(FR['cal.yf_events']))
+  assert.ok(ev, 'l entree existe toujours')
+  assert.equal(ev.querySelector('.cal-yf-menu__repere'), null,
+    'elle ne doit porter AUCUN repere')
+  assert.ok(!/à venir/.test(m.textContent), 'et plus aucun « à venir » nulle part')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : « Je garde mes prix » propose un GESTE, pas un paragraphe', async () => {
+  // ⚠ RECETTE DE THIERRY. Le refus affichait la phrase du moteur en cinq
+  // lignes et laissait l hote sans rien a faire. « Je garde mes prix » se
+  // change sur la fiche du logement, et c est a un clic.
+  const b = banc({ biens: [MANUEL], faits: FAITS({
+    pilote: 'calendrier', peut_basculer: false, raison_code: 'pilote_refuse_keep',
+    raison: 'Ce logement est réglé sur « Je garde mes prix » : HôteSmart n’envoie aucun tarif…'
+  }) })
+  const m = await ouvrir(b, MANUEL)
+  const pied = m.querySelector('.cal-yf-menu__pied')
+  assert.equal(pied.querySelector('p').textContent, FR['cal.yf_prices_outside'],
+    'une LIGNE, pas le paragraphe du moteur')
+  const lien = pied.querySelector('a')
+  assert.ok(lien, 'le geste doit exister')
+  assert.equal(lien.textContent, FR['cal.yf_send_prices'])
+  assert.equal(lien.getAttribute('href'), `/logements/${MANUEL.id}`,
+    'le lien ouvre la fiche de CE logement, la ou le reglage vit')
+  assert.ok(lien.classList.contains('link'), 'un lien bleu : le bleu est reserve au cliquable')
+  b.fermer()
+
+  // ⚠ ET UN REFUS INCONNU N AFFICHE PAS CE GESTE : on ne sait pas s il le
+  // debloquerait. On montre alors le verdict du moteur, tel quel.
+  const autre = banc({ biens: [MANUEL], faits: FAITS({
+    pilote: 'calendrier', peut_basculer: false, raison_code: 'autre_chose',
+    raison: 'Un motif que l écran ne connaît pas.'
+  }) })
+  const m2 = await ouvrir(autre, MANUEL)
+  assert.equal(m2.querySelector('.cal-yf-menu__pied a'), null,
+    'aucun geste propose sur un refus inconnu')
+  assert.equal(m2.querySelector('.cal-yf-menu__refus').textContent,
+    'Un motif que l écran ne connaît pas.', 'le verdict du moteur s affiche tel quel')
+  autre.fermer()
 })
 
 test('LE TEST QUI COMPTE : le focus ne revient au bouton que sur une fermeture DEMANDEE', async () => {

@@ -63,8 +63,14 @@ function doubles ({ bien = {}, lignes = {}, erreurs = {} } = {}) {
       // les lignes de TOUS les biens et la suite resterait verte : le test du
       // marche de chaque bien (demande de Thierry, 28 octobre 2026) serait un
       // faux vert, et le defaut se verrait chez l'hote, pas ici.
+      // ⚠ IL NOTAIT LE `.gte()` SANS L'APPLIQUER — releve en review le
+      // 28 octobre 2026, et c'est la regle 22 de REVIEW.md que cette branche
+      // vient d'ecrire, prise en defaut dans son propre fichier. Un test qui
+      // poserait une ligne ancienne et une recente pour verifier la fenetre
+      // de 7 jours passait quelle que soit la borne — y compris sans borne.
       const garde = (l) => Object.entries(q.filtres)
         .every(([c, v]) => !(c in l) || String(l[c]) === String(v))
+        && (!q.gte || !(q.gte[0] in l) || String(l[q.gte[0]]) >= String(q.gte[1]))
       function reponse () {
         if (erreurs[table]) return { data: null, count: null, error: { message: erreurs[table] } }
         if (table === 'properties') {
@@ -183,7 +189,14 @@ test('la garde demandee est « reservations » en LECTURE, et le bien est requis
 // 2. CE QUE L'ENDPOINT REND
 // ═══════════════════════════════════════════════════════════════════════════
 
-test('un bien pilote : les cinq faits, et la fenetre calculee par la regle du moteur', async () => {
+test('un bien pilote : les faits rendus, et la fenetre calculee par la regle du moteur', async () => {
+  // ⚠ IL Y EN AVAIT CINQ. Le compte des evenements a ete retire le 28 octobre
+  // 2026 en recette : il comptait les seules dates AJOUTEES PAR L'HOTE et
+  // s'affichait « N a venir » a cote d'un ecran qui montre aussi les
+  // vacances, les feries, les ponts et les fetes. Le vrai compte n'est pas
+  // servi sans calcul, donc on n'affiche rien.
+  // ⚠ ET LE CHAMP NE DOIT PAS REVENIR A MOITIE : s'il revient, c'est avec le
+  // compte JUSTE, pas avec celui qui trompait.
   doubles({ bien: PILOTE, lignes: PLEIN })
   const res = await appeler()
   assert.equal(res.code, 200)
@@ -192,30 +205,33 @@ test('un bien pilote : les cinq faits, et la fenetre calculee par la regle du mo
   assert.deepEqual(d.fenetre, { type: 'jours', valeur: 120 })
   assert.match(String(d.fenetre_fin), /^\d{4}-\d{2}-\d{2}$/, 'la fin de fenetre doit etre une date')
   assert.equal(d.marche, 'Bagnères-de-Bigorre')
-  assert.equal(d.evenements, 2)
   assert.equal(d.comparables, 4)
   assert.equal(d.prix_ajustes, 3)
   assert.equal(d.jours, 7)
 })
 
-test('LE TEST QUI COMPTE : les trois comptages ne rapatrient RIEN (head: true)', async () => {
+test('LE TEST QUI COMPTE : les comptages ne rapatrient RIEN (head: true)', async () => {
   // PostgREST rend 1000 lignes SANS erreur. Un comptage qui rapatrie se
   // tronque en silence des qu'un bien pilote depuis un an est regarde.
   const vues = doubles({ bien: PILOTE, lignes: PLEIN })
   await appeler()
-  for (const table of ['price_display_log', 'yield_events', 'comparables_retenus']) {
+  for (const table of ['price_display_log', 'comparables_retenus']) {
     const q = vues.find(v => v.table === table)
     assert.ok(q, `aucune lecture de ${table}`)
     assert.equal(q.head, true, `${table} : le comptage rapatrie des lignes`)
     assert.equal(q.count, 'exact', `${table} : le compte doit etre exact`)
   }
+  // ⚠ ET `yield_events` N'EST PLUS LU DU TOUT : une requete dont on jetterait
+  // le resultat est une requete de trop.
+  assert.equal(vues.filter(v => v.table === 'yield_events').length, 0,
+    'le compte des evenements a ete retire : sa lecture aussi')
 })
 
 test('LE TEST QUI COMPTE : chaque lecture est cloisonnee par le COMPTE et par le bien', async () => {
   const vues = doubles({ bien: PILOTE, lignes: PLEIN })
   await appeler()
   // Les trois tables que NOUS ecrivons portent le compte ET le bien.
-  for (const table of ['price_display_log', 'yield_events', 'comparables_retenus']) {
+  for (const table of ['price_display_log', 'comparables_retenus']) {
     const q = vues.find(v => v.table === table)
     assert.equal(q.filtres.user_id, COMPTE, `${table} : pas de filtre de compte`)
     assert.equal(q.filtres.property_id, BIEN, `${table} : pas de filtre de bien`)
@@ -235,6 +251,22 @@ test('LE TEST QUI COMPTE : chaque lecture est cloisonnee par le COMPTE et par le
   const bien = vues.find(v => v.table === 'properties')
   assert.equal(bien.filtres.user_id, COMPTE, 'le bien lui-meme se lit sur le compte')
   assert.equal(bien.filtres.id, BIEN, 'et sur son identifiant')
+})
+
+test('LE TEST QUI COMPTE : la fenetre de 7 jours EXCLUT vraiment une ligne ancienne', async () => {
+  // ⚠ CE TEST MANQUAIT, ET LA REVIEW L'A MONTRE : la fenetre n'etait gardee
+  // que par l'inspection du `.gte()` enregistre — de la recitation, pas une
+  // mesure. Depuis que le double APPLIQUE ses filtres, on peut la mesurer.
+  const recent = new Date(Date.now() - 2 * 864e5).toISOString()
+  const vieux = new Date(Date.now() - 40 * 864e5).toISOString()
+  doubles({ bien: PILOTE, lignes: { ...PLEIN, price_display_log: [
+    { id: 1, property_id: BIEN, user_id: COMPTE, source: 'engine', created_at: recent },
+    { id: 2, property_id: BIEN, user_id: COMPTE, source: 'engine', created_at: recent },
+    { id: 3, property_id: BIEN, user_id: COMPTE, source: 'engine', created_at: vieux }
+  ] } })
+  const res = await appeler()
+  assert.equal(res.corps.prix_ajustes, 2,
+    'la ligne de 40 jours doit sortir du compte : « cette semaine » veut dire sept jours')
 })
 
 test('LE TEST QUI COMPTE : le comptage du moteur porte la SOURCE et SEPT jours', async () => {
@@ -259,7 +291,7 @@ test('LE TEST QUI COMPTE : un bien NON pilote ne paie pas le comptage du moteur'
   assert.equal(res.corps.fenetre_fin, null)
 })
 
-test('LE TEST QUI COMPTE : chaque bien lit SON marche, ses evenements, ses comparables', async () => {
+test('LE TEST QUI COMPTE : chaque bien lit SON marche et SES comparables', async () => {
   // ⚠ DEMANDE DE THIERRY, 28 OCTOBRE 2026, NEE D'UN DOUTE SUR L'APERCU : les
   // deux logements y affichaient le MEME marche relie. C'etait un artefact du
   // banc a stubs — mais « c'est surement le stub » n'est pas une reponse, et
@@ -279,10 +311,6 @@ test('LE TEST QUI COMPTE : chaque bien lit SON marche, ses evenements, ses compa
       { property_id: BIEN, localite: 'Bagneres-de-Bigorre' },
       { property_id: AUTRE, localite: 'Colomiers' }
     ],
-    yield_events: [
-      { id: 'e1', property_id: BIEN }, { id: 'e2', property_id: BIEN }, { id: 'e3', property_id: BIEN },
-      { id: 'e4', property_id: AUTRE }
-    ],
     comparables_retenus: [
       { id: 1, property_id: BIEN }, { id: 2, property_id: BIEN },
       { id: 3, property_id: AUTRE }, { id: 4, property_id: AUTRE }, { id: 5, property_id: AUTRE }
@@ -290,8 +318,8 @@ test('LE TEST QUI COMPTE : chaque bien lit SON marche, ses evenements, ses compa
     price_display_log: [{ id: 1, property_id: BIEN }]
   }
   const attendu = {
-    [BIEN]: { marche: 'Bagneres-de-Bigorre', evenements: 3, comparables: 2, prix_ajustes: 1 },
-    [AUTRE]: { marche: 'Colomiers', evenements: 1, comparables: 3, prix_ajustes: null }
+    [BIEN]: { marche: 'Bagneres-de-Bigorre', comparables: 2, prix_ajustes: 1 },
+    [AUTRE]: { marche: 'Colomiers', comparables: 3, prix_ajustes: null }
   }
   for (const id of [BIEN, AUTRE]) {
     doubles({ bien: deuxBiens, lignes })
@@ -306,7 +334,6 @@ test('LE TEST QUI COMPTE : chaque bien lit SON marche, ses evenements, ses compa
   // Le contre-controle qui empeche la tautologie : si les deux biens avaient
   // les memes valeurs, ce test ne separerait rien et serait vert pour rien.
   assert.notEqual(attendu[BIEN].marche, attendu[AUTRE].marche)
-  assert.notEqual(attendu[BIEN].evenements, attendu[AUTRE].evenements)
   assert.notEqual(attendu[BIEN].comparables, attendu[AUTRE].comparables)
 })
 
@@ -319,7 +346,8 @@ test('Server-Timing annonce un PLANCHER, et il le dit', async () => {
   // toujours, chargerProfil pour un membre delegue), et le navigateur
   // recevait un nombre sous-estime.
   // Un test qui exclut la meme chose des deux cotes ne mesure rien.
-  for (const [bien, lectures] of [[PILOTE, 5], [MANUEL, 4]]) {
+  // ⚠ UNE LECTURE DE MOINS depuis le retrait du compte des evenements.
+  for (const [bien, lectures] of [[PILOTE, 4], [MANUEL, 3]]) {
     const vues = doubles({ bien, lignes: PLEIN })
     const res = await appeler()
     const propres = vues.filter(v => v.table !== '__garde').length
@@ -342,15 +370,15 @@ test('Server-Timing annonce un PLANCHER, et il le dit', async () => {
 test('LE TEST QUI COMPTE : un fait illisible rend null, et les autres sont servis', async () => {
   // ⚠ ET LE MENU REPOND QUAND MEME 200. Une panne sur un repere de confort ne
   // doit pas fermer un menu dont les quatre entrees savent se charger seules.
-  for (const table of ['price_display_log', 'yield_events', 'comparables_retenus', 'marche_biens']) {
+  for (const table of ['price_display_log', 'comparables_retenus', 'marche_biens']) {
     doubles({ bien: PILOTE, lignes: PLEIN, erreurs: { [table]: 'colonne absente' } })
     const res = await appeler()
     assert.equal(res.code, 200, `${table} illisible ferme le menu`)
-    const champ = { price_display_log: 'prix_ajustes', yield_events: 'evenements', comparables_retenus: 'comparables', marche_biens: 'marche' }[table]
+    const champ = { price_display_log: 'prix_ajustes', comparables_retenus: 'comparables', marche_biens: 'marche' }[table]
     assert.equal(res.corps[champ], null, `${table} illisible doit rendre null`)
     assert.notEqual(res.corps[champ], 0, 'un 0 de remplacement transforme une absence en fait')
     // Les autres faits, eux, sont toujours la.
-    for (const [t, c] of Object.entries({ yield_events: 'evenements', comparables_retenus: 'comparables' })) {
+    for (const [t, c] of Object.entries({ comparables_retenus: 'comparables' })) {
       if (t !== table) assert.ok(Number.isInteger(res.corps[c]), `${c} a disparu avec ${table}`)
     }
   }
@@ -364,10 +392,22 @@ test('LE TEST QUI COMPTE : le verdict de bascule est servi AVEC sa raison', asyn
   let res = await appeler()
   assert.equal(res.corps.peut_basculer, true, 'un bien en « managed » est basculable')
   assert.equal(res.corps.raison, null, 'pas de raison quand il n y a pas de refus')
+  assert.equal(res.corps.raison_code, null, 'ni de code')
 
   doubles({ bien: KEEP, lignes: PLEIN })
   res = await appeler()
   assert.equal(res.corps.peut_basculer, false, 'un bien en « keep » ne peut pas basculer')
+  // ⚠ LE CODE, ET PAS SEULEMENT LA PHRASE — et ce test manquait : une mutation
+  // du 28 octobre 2026 a montre que supprimer `raison_code` ne faisait rougir
+  // AUCUN test. L'ecran s'en sert pour proposer le bon geste (« Envoyer mes
+  // prix depuis HoteSmart ») ; sans le code il retomberait en silence sur le
+  // paragraphe du moteur, et personne ne le saurait.
+  // Il vient de la REGLE (`lib/pilote-tarifaire.js`), il n'est pas recopie ici.
+  assert.equal(res.corps.raison_code, 'pilote_refuse_keep',
+    'le code du refus doit etre servi : l ecran reconnait un refus a son CODE, jamais a ses mots')
+  const regle = lire('lib/pilote-tarifaire.js')
+  assert.match(regle, /code: 'pilote_refuse_keep'/,
+    'si la regle renomme ce code, ce test et l ecran sont a revoir ensemble')
   assert.match(String(res.corps.raison), /garde mes prix/,
     'la raison vient de la regle, et elle dit QUEL GESTE debloque')
   // ⚠ L'APOSTROPHE DE LA REGLE EST DROITE, PAS TYPOGRAPHIQUE : mon premier
