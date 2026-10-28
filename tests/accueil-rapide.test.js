@@ -334,7 +334,39 @@ function faireStockage () {
 // l'abonnement, donc le meme defaut un cran plus loin.
 function fenetreDuBanc (options = {}) {
   const etroit = options.etroit === true
+  // ⚠ UN `IntersectionObserver` QUI RETIENT SON RAPPEL ET SA CIBLE. Sans lui,
+  // la page sort tout de suite (`typeof window.IntersectionObserver !==
+  // 'function'`) et le chargement au defilement n'est atteignable par AUCUN
+  // test. `options.observateurs` est la liste que le test declenche ensuite :
+  // c'est elle qui joue le geste de l'hote.
+  const observateurs = options.observateurs
+  // ⚠ LA FENETRE N'AVAIT AUCUNE PLOMBERIE D'EVENEMENTS, et la page en a besoin :
+  // elle n'observe la sentinelle qu'au PREMIER DEFILEMENT (mesure au banc reel :
+  // sans ca, la sentinelle intersecte des le chargement a 1280x900, donc un
+  // troisieme appel au chargement). `options.ecouteurs` garde ce qui a ete
+  // enregistre, et le test joue le geste.
+  const ecouteurs = options.ecouteurs
   return {
+    addEventListener (type, fn, reglages) {
+      if (Array.isArray(ecouteurs)) ecouteurs.push({ type: String(type), fn, reglages: reglages || {} })
+    },
+    removeEventListener () {},
+    IntersectionObserver: options.sansObservateur === true ? undefined : class {
+      constructor (rappel, reglages) {
+        this.rappel = rappel
+        this.reglages = reglages || {}
+        this.cibles = []
+        this.coupe = false
+        if (Array.isArray(observateurs)) observateurs.push(this)
+      }
+      observe (n) { this.cibles.push(n) }
+      unobserve (n) { this.cibles = this.cibles.filter(x => x !== n) }
+      disconnect () { this.coupe = true; this.cibles = [] }
+      // Le geste : « la sentinelle entre dans la fenetre ».
+      declencher () {
+        return this.rappel(this.cibles.map(c => ({ isIntersecting: true, target: c })), this)
+      }
+    },
     matchMedia: (requete) => ({
       media: String(requete),
       matches: etroit && /max-width/.test(String(requete)),
@@ -591,7 +623,7 @@ function batirAujourdhui (sansInit = false) {
   // premier logement » a un hote qui en a quatre. Un test qui lit du texte ne
   // dit rien de l'execution (REVIEW.md regle 20) ; celui de la date, lui,
   // APPELLE, et sa mutation rougit. On rend donc les deux rendus appelables.
-  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran, repartirEnEuros, renderAnnee }'
+  return corpsUtile + '\n;return { chargerNotes, etat, chargerDerniersAvis, renderTaches, renderRevenus, renderDerniersAvis, chargerEcran, repartirEnEuros, renderAnnee, renderEvenements }'
 }
 
 function ouvrirAujourdhui (options = {}) {
@@ -606,15 +638,108 @@ function ouvrirAujourdhui (options = {}) {
       ok: statut >= 200 && statut < 300,
       status: statut,
       // Un corps illisible : c'est `appel()` qui le transforme en `{}`.
-      json: async () => { if (options.corpsIllisible) throw new SyntaxError('<'); return options.corps || {} }
+      // ⚠ LE CORPS PEUT DEPENDRE DE L'URL. Un corps unique ne sait pas rendre
+      // deux PAGES differentes : la pagination au defilement demande la suite,
+      // et un double qui redonne la premiere page la ferait boucler.
+      json: async () => {
+        if (options.corpsIllisible) throw new SyntaxError('<')
+        return (typeof options.corps === 'function'
+          ? options.corps(String(url))
+          : options.corps) || {}
+      }
     })
   }
   const stubs = new Map()
   const elem = () => ({
-    hidden: false, textContent: '', innerHTML: '', value: '', style: {}, dataset: {},
-    classList: { add () {}, remove () {}, toggle () {}, contains: () => false },
-    addEventListener () {}, removeAttribute () {}, setAttribute () {}, remove () {},
-    appendChild () {}, closest: () => null, querySelector: () => null, querySelectorAll: () => []
+    hidden: false, textContent: '', value: '', style: {}, dataset: {},
+    // ⚠ ECRIRE `innerHTML` **DETACHE** LES ENFANTS, comme dans un vrai DOM.
+    // C'etait la derniere permissivite du banc, et elle cachait la moitie du
+    // constat GRAVE du 29 octobre 2026 : apres `zone.innerHTML = …`, la
+    // sentinelle du rendu PRECEDENT gardait son `parentNode`, donc la garde
+    // `marque.parentNode` ne pouvait pas mordre et la mutation qui la retirait
+    // restait verte. Un double plus permissif que le vrai VALIDE du code qui ne
+    // peut pas tourner.
+    _html: '',
+    get innerHTML () { return this._html },
+    set innerHTML (v) {
+      for (const n of this.enfants) n.parentNode = null
+      this.enfants = []
+      this._html = String(v)
+    },
+    // ⚠ UNE `classList` QUI RETIENT CE QU'ON LUI DIT. Elle etait faite de
+    // quatre fonctions vides et d'un `contains` qui rendait toujours `false` :
+    // aucune assertion ne pouvait juger une classe, donc aucune bascule de
+    // classe n'etait mesurable — et ce fichier le notait lui-meme plus bas
+    // (« le noeud du banc n'a pas de classList reelle »). Meme famille que le
+    // double d'`I18n.t` qui jetait ses parametres.
+    // `className` reste la source : la liste la lit et l'ecrit, pour qu'une
+    // affectation directe (`n.className = '…'`) et un `toggle` parlent du meme
+    // etat.
+    get classList () {
+      const n = this
+      const lire = () => String(n.className || '').split(/\s+/).filter(Boolean)
+      const ecrire = (l) => { n.className = l.join(' ') }
+      return {
+        add (...c) { const l = lire(); for (const x of c) if (!l.includes(x)) l.push(x); ecrire(l) },
+        remove (...c) { ecrire(lire().filter(x => !c.includes(x))) },
+        toggle (c, force) {
+          const a = force === undefined ? !lire().includes(c) : !!force
+          return a ? (this.add(c), true) : (this.remove(c), false)
+        },
+        contains: (c) => lire().includes(c)
+      }
+    },
+    addEventListener () {}, removeAttribute () {}, remove () {},
+    // ⚠ UN NOEUD CREE QUI SE DECLARE DEVIENT TROUVABLE. Le banc cle ses
+    // doubles sur la CHAINE du selecteur ; un noeud fabrique par
+    // `document.createElement` n'y etait donc pas, et `cache('[data-bind="…"]')`
+    // rendait un stub VIDE au lieu du noeud fabrique — une assertion qui lisait
+    // le vide et le prenait pour « rien n'a ete ajoute ». On enregistre le
+    // noeud sous son selecteur, comme un vrai DOM le rend trouvable des qu'il
+    // est attache.
+    // ⚠ `setAttribute` RANGE, IL N'ATTACHE PAS. Il remplissait la table des
+    // selecteurs, donc un noeud non attache y etait trouvable (voir
+    // `appendChild`). Et il n'ecrit dans `dataset` que pour les attributs
+    // `data-*` : un vrai DOM ne met pas `aria-pressed` dans `dataset`.
+    setAttribute (nom, val) {
+      if (/^data-/.test(String(nom))) this.dataset[String(nom).slice(5)] = val
+    },
+    // ⚠ CES TROIS-LA RETIENNENT, au lieu de ne rien faire. `appendChild` et
+    // `insertAdjacentHTML` etaient des fonctions vides : une page qui AJOUTE
+    // des cartes (la suite des avis au defilement) n'ecrivait donc nulle part,
+    // et aucune assertion ne pouvait juger ce qu'elle avait ajoute. Meme
+    // famille que la `classList` muette et que le double d'`I18n.t` qui jetait
+    // ses parametres.
+    enfants: [],
+    avant: '',
+    parentNode: null,
+    // ⚠ `appendChild` ATTACHE POUR DE VRAI : il pose `parentNode` **et** c'est
+    // LUI qui rend le noeud trouvable par son selecteur. Constat de la review
+    // du 29 octobre 2026 : quand c'etait `setAttribute` qui l'enregistrait, un
+    // noeud JAMAIS attache restait trouvable — le banc validait donc une page
+    // dont la sentinelle n'entrait pas dans le document, et la mutation qui
+    // retirait l'`appendChild` restait VERTE alors qu'elle rendait la fonction
+    // entierement morte en navigateur. Un double plus permissif que le vrai
+    // VALIDE du code qui ne peut pas tourner.
+    appendChild (n) {
+      this.enfants.push(n)
+      n.parentNode = this
+      const cle = n.dataset && n.dataset.bind
+      if (cle) stubs.set(`[data-bind="${cle}"]`, n)
+      return n
+    },
+    // ⚠ `beforebegin` EXIGE UN PARENT, comme dans un navigateur : sur un noeud
+    // detache, un vrai DOM LEVE une `DOMException`. Le double l'acceptait, et
+    // c'est ce qui cachait le constat GRAVE du second rendu.
+    insertAdjacentHTML (ou, html) {
+      if (String(ou) === 'beforebegin') {
+        if (!this.parentNode) {
+          throw new Error("insertAdjacentHTML('beforebegin') sur un noeud sans parent")
+        }
+        this.avant += String(html)
+      } else this.innerHTML += String(html)
+    },
+    closest: () => null, querySelector: () => null, querySelectorAll: () => []
   })
   const document_ = {
     documentElement: elem(),
@@ -691,6 +816,15 @@ function ouvrirAujourdhui (options = {}) {
     // `tests/aujourdhui.test.js` ; ici c'est le RENDU qu'on juge, et un double
     // qui vide la liste rend tout compte indistinguable de zero.
     if (cle === 'tachesOuvertes') return (t) => (Array.isArray(t) ? t : [])
+    // ⚠ `evenementsDuJour` PEUT RENDRE QUELQUE CHOSE. Le double rendait `[]`
+    // pour toute clef inconnue, donc le bloc du jour etait TOUJOURS a l'etat
+    // vide dans le banc : l'etat « il y a une arrivee » n'etait atteignable par
+    // aucun test, et la bascule qui en depend n'etait mesurable que dans un
+    // sens. La REGLE de composition d'un evenement a ses tests dans
+    // `tests/aujourdhui.test.js` ; ici c'est le RENDU qu'on juge.
+    if (cle === 'evenementsDuJour') {
+      return () => (Array.isArray(options.evenements) ? options.evenements : [])
+    }
     return cle === 'etatDesBiens' ? (() => new Map()) : (() => [])
   } })
 
@@ -709,7 +843,7 @@ function ouvrirAujourdhui (options = {}) {
     'requireAuth', 'supabase', 'signOut', 'initErrorHandler', 'logger', 'esc',
     'compteCourant', 'moi', 'peutLire', 'peutEcrire', 'estTitulaire', 'comptes',
     'basculerVers', 'enteteCompte', 'etatHtml',
-    'vueDesAvis', 'blocAvisHtml', 'enTeteAvisHtml', 'MUETS', 'libelleDuCanal', 'R',
+    'vueDesAvis', 'blocAvisHtml', 'enTeteAvisHtml', 'carteAvisHtml', 'MUETS', 'libelleDuCanal', 'R',
     'I18n', 'HSNav', 'document', 'window', 'location', 'fetch', 'localStorage', 'console',
     // ⚠ `CacheEcran` MANQUAIT, ET C'EST CE QUI TUAIT LE DEMARRAGE. La page fait
     // `import * as CacheEcran from '/shared/cache-ecran.js'` et s'en sert des
@@ -742,7 +876,7 @@ function ouvrirAujourdhui (options = {}) {
     // trois. Resultat mesure : onze mutations du code neuf survivaient.
     // On injecte le MODULE REEL : un double rendrait un test qui mesure son
     // propre double, et c'est le rendu qu'on veut juger.
-    AVIS.vueDesAvis, AVIS.blocAvisHtml, AVIS.enTeteAvisHtml, AVIS.MUETS,
+    AVIS.vueDesAvis, AVIS.blocAvisHtml, AVIS.enTeteAvisHtml, AVIS.carteAvisHtml, AVIS.MUETS,
     (c) => ({ airbnb: 'Airbnb', booking: 'Booking.com' })[String((c || {}).ota || '')] || null,
     R,
     // ⚠ LA FENETRE PORTE `matchMedia`, et ce n'est pas un bouchon de confort :
@@ -772,6 +906,11 @@ function ouvrirAujourdhui (options = {}) {
     // L'element lui-meme, pour lire `hidden` et `textContent` : le double les
     // porte, et c'est sur eux que se jugent « masque » et « se tait ».
     cache: (sel) => document_.querySelector(sel),
+    // Le geste de l'hote : « je fais defiler ». C'est lui qui arme
+    // l'observation de la sentinelle (voir `armerLaSuiteDesAvis`).
+    defiler: () => {
+      for (const e of (options.ecouteurs || [])) if (e.type === 'scroll') e.fn({ type: 'scroll' })
+    },
     ouvrirSession: () => resoudreSession({ user: { id: 'u1', email: 'thierry@exemple.fr', user_metadata: {} } }),
     repondreI18n: () => resoudreI18n('fr'),
     resoudre: (table, charge) => {
@@ -1584,7 +1723,10 @@ test("LE TEST QUI COMPTE : le BANDEAU dit « non calculable », il n'affiche pas
   // contre `''` — et c'est cette distinction qu'on mesure.
   //
   // (Premiere version de ce test : j'assertais `classList.contains('muted')`.
-  // Le noeud du banc n'a pas de `classList` reelle, donc l'assertion echouait
+  // ⚠ CE COMMENTAIRE EST PERIME DEPUIS LE 29 OCTOBRE 2026 : le banc porte
+  // maintenant une `classList` REELLE, adossee a `className`. Il est garde pour
+  // l'histoire, pas comme une description de l'etat du banc.
+  // Le noeud du banc n'avait pas de `classList` reelle, donc l'assertion echouait
   // alors que la garde fonctionnait. Mesurer ce que le banc ne simule pas, c'est
   // se fabriquer un rouge et chercher un defaut la ou il n'y en a pas.)
   const p = bancRevenus({
@@ -2788,6 +2930,23 @@ test("LE TEST QUI COMPTE : les deux bandes se DISTINGUENT a l oeil", () => {
   const [a, b] = op.slice().sort((x, y) => y - x)
   assert.ok(a / b >= 2,
     `les deux bandes sont a ${a} et ${b} d opacite : moins du double, elles ne se distinguent pas`)
+  // ⚠ ET DISCRETES — CONSTAT DE LA RECETTE DU 29 OCTOBRE 2026 : « le gris est
+  // trop fonce, l'adoucir beaucoup, elle doit rester un fond discret derriere
+  // les courbes ». Les deux bornes tiennent ENSEMBLE, et c'est tout l'interet
+  // de les asserter au meme endroit : baisser la seule foncee aurait referme ce
+  // constat-ci en ouvrant celui du 28 (« bandes trop proches »), et remonter la
+  // claire pour les ecarter rouvrirait celui-ci. Le plafond vaut pour la plus
+  // FONCEE des deux ; la claire suit par le rapport.
+  assert.ok(a <= 0.2,
+    `la bande la plus foncee est a ${a} d opacite : ce n est plus un fond discret`)
+  // ⚠ ET UN PLANCHER, parce que les deux bornes d'au-dessus se satisfont aussi
+  // de `[0.002, 0.001]` : rapport de deux, plafond tenu, et DEUX BANDES
+  // INVISIBLES. Constat de la review du 29 octobre 2026. Une bande qu'on ne
+  // voit pas n'est pas « discrete », c'est une donnee qu'on a cessee d'afficher
+  // sans le dire.
+  const [, bas] = op.slice().sort((x, y) => y - x)
+  assert.ok(bas >= 0.05,
+    `la bande la plus claire est a ${bas} d opacite : elle n est plus visible`)
 })
 
 test("LE TEST QUI COMPTE : sous « Tous », l ecran DIT pourquoi il n y a pas de bande", () => {
@@ -3289,4 +3448,383 @@ test("LE TEST QUI COMPTE : « 0 % » est GRIS NEUTRE dans les DEUX tableaux", ()
   const cel = (biens.match(/<span class="rev-tbl__ecart[^"]*">0 %<\/span>/) || [''])[0]
   assert.notStrictEqual(cel, '', `aucune cellule a « 0 % » dans le tableau des biens : ${biens.slice(0, 300)}`)
   assert.match(cel, /rev-tbl__ecart--nul/, 'le 0 % du tableau des biens reste vert')
+})
+
+// ─── LE BLOC DU JOUR QUI N'A RIEN A DIRE (recette du 29 octobre 2026) ──────
+
+const blocDuJour = (o = {}) => {
+  const p = ouvrirAujourdhui({ sansInit: true, evenements: o.evenements })
+  p.interne.etat.aujourdHui = '2026-10-29'
+  p.interne.etat.menagesOk = o.menagesOk === undefined ? true : o.menagesOk
+  p.interne.renderEvenements()
+  return p
+}
+const grilleAPlat = (p) =>
+  p.cache('[data-bind="today-duo"]').classList.contains('auj-duo--plat')
+
+test("LE TEST QUI COMPTE : un jour SANS arrivee ni depart met la grille A PLAT", () => {
+  // ⚠ CONSTAT DE RECETTE : « quand A valider est plein et que le bloc
+  // Aujourd'hui n'a ni arrivee ni depart, la page montre un grand vide ».
+  // Mesure au banc reel (chrome, 1280 px) AVANT correctif : le bloc du jour
+  // fait 21 px de haut sur 821 px de large, « A valider » 716 px — la ligne de
+  // grille fait la hauteur de sa colonne la plus haute, donc le bloc du jour
+  // laissait 821 x 695 px de BLANC. Il ne s'etirait pas (`align-items: start`
+  // l'empeche deja) : c'est la PLACE RESERVEE qui etait vide. APRES : les deux
+  // blocs sont empiles, blanc mesure a ZERO, et la ligne tombe de 716 a 643 px
+  // parce que les cartes de « A valider » se replient moins sur toute la
+  // largeur.
+  const vide = blocDuJour({ evenements: [] })
+  assert.strictEqual(grilleAPlat(vide), true,
+    'la grille reste en deux colonnes alors que le jour n a qu une ligne a dire')
+  assert.match(vide.cache('[data-list="events"]').innerHTML, /today\.empty/,
+    'le bloc du jour ne dit pas qu il n y a rien')
+})
+
+test("LE TEST QUI COMPTE : « les menages ne sont pas lisibles » met AUSSI a plat", () => {
+  // La ligne « indisponible » fait exactement la meme hauteur qu'un « rien
+  // aujourd'hui », donc elle laisse exactement le meme blanc. Un correctif qui
+  // n'aurait ferme que l'etat vide aurait laisse la moitie du defaut — et
+  // c'est l'etat qu'un hote voit quand une lecture echoue, donc le pire moment
+  // pour lui montrer une page qui a l'air cassee.
+  const ko = blocDuJour({ menagesOk: false })
+  assert.strictEqual(grilleAPlat(ko), true,
+    'la grille reste en deux colonnes sur l etat « indisponible »')
+  assert.match(ko.cache('[data-list="events"]').innerHTML, /today\.unavailable/,
+    'le bloc ne dit pas que les menages sont illisibles')
+})
+
+test("LE TEST QUI COMPTE : des QU IL Y A une arrivee, la grille reprend ses deux colonnes", () => {
+  // ⚠ ET C'EST LA MOITIE QUI SE PERD. Une bascule qui ne remonte jamais laisse
+  // la page a plat pour le reste de la session : il suffit que le premier rendu
+  // tombe sur un jour vide — le cache, par exemple — pour que l'hote ne
+  // retrouve plus ses deux colonnes sans recharger.
+  // ⚠ ET ON MESURE SUR LE MEME BANC, APRES L'ETAT VIDE. Ma premiere version
+  // ouvrait un banc NEUF : la classe n'y avait jamais ete posee, donc
+  // l'assertion « pas a plat » etait vraie sans que `aPlat(false)` existe —
+  // mesure par mutation, elle restait VERTE en retirant la remontee. C'est la
+  // sequence reelle : le cache affiche un jour vide, puis la lecture arrive.
+  // ⚠ `options` EST LE MEME OBJET que celui passe au banc : le changer entre
+  // deux rendus suffit, et ca evite d'ajouter une poignee au banc pour un seul
+  // test.
+  const opts = { sansInit: true, evenements: [] }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.aujourdHui = '2026-10-29'
+  p.interne.etat.menagesOk = true
+  p.interne.renderEvenements()
+  assert.strictEqual(grilleAPlat(p), true, 'la grille n est pas passee a plat au premier rendu')
+
+  opts.evenements = [{
+    type: 'arrivee', heure: '15:00', bien: 'La bulle', bienId: 'uuid-1',
+    bookingId: 'B1', voyageur: 'Chloe', nuits: 3, codeEtat: 'transmis'
+  }]
+  p.interne.renderEvenements()
+  assert.strictEqual(grilleAPlat(p), false,
+    'la grille reste a plat alors que le jour porte une arrivee')
+  assert.match(p.cache('[data-list="events"]').innerHTML, /today\.arrival/,
+    'l arrivee n est pas rendue')
+})
+
+test("LE TEST QUI COMPTE : la classe « a plat » FAIT une seule colonne", () => {
+  // ⚠ LA BASCULE SANS SA REGLE NE FAIT RIEN, et aucun test du rendu ne le voit :
+  // mesure par mutation, vider `.auj-duo--plat` laissait les 112 tests VERTS.
+  // Le DOM du banc n'a pas de moteur de style, donc c'est la FEUILLE qu'on lit
+  // — meme methode que `tests/masquage-hidden.test.js`.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const regle = (sel) => {
+    const i = css.indexOf(sel + ' {')
+    assert.notStrictEqual(i, -1, `la regle « ${sel} » n existe pas dans shared/ui.css`)
+    return css.slice(i + sel.length + 2, css.indexOf('}', i))
+  }
+  // L'etat normal : deux colonnes au moins, et aucun etirement.
+  const duo = regle('.auj-duo')
+  assert.match(duo, /grid-template-columns:\s*repeat\(auto-fit/,
+    `.auj-duo ne pose plus ses colonnes : « ${duo.trim()} »`)
+  assert.match(duo, /align-items:\s*start/,
+    'sans `align-items: start`, le bloc du jour s etirerait vraiment a la hauteur de « A valider »')
+  // L'etat a plat : UNE colonne, et le bloc du jour ne s etend plus sur deux.
+  const plat = regle('.auj-duo--plat')
+  assert.match(plat, /grid-template-columns:\s*1fr/,
+    `.auj-duo--plat ne ramene pas a une colonne : « ${plat.trim()} »`)
+  const jour = regle('.auj-duo--plat > .auj-duo__jour')
+  assert.match(jour, /grid-column:\s*auto/,
+    `a plat, le bloc du jour garde son « span 2 » : « ${jour.trim()} »`)
+})
+
+// ─── LA SUITE DES AVIS AU DEFILEMENT (recette du 29 octobre 2026) ──────────
+
+const avisDeTest = (n, jour) => ({
+  id: String(n), bien_ref: 'P1', ota: 'airbnb',
+  recu_le: `2026-10-${String(jour).padStart(2, '0')}T10:00:00Z`,
+  note_sur_5: 4.6, texte: `Commentaire numero ${n}`, voyageur: 'Chloe'
+})
+
+// Le banc du bloc des avis : trois cartes rendues, l'observateur arme, et les
+// pages suivantes servies par URL.
+function bancSuiteAvis (pages = []) {
+  const observateurs = []
+  const ecouteurs = []
+  let appelees = 0
+  const options = {
+    sansInit: true,
+    observateurs,
+    ecouteurs,
+    corps: (url) => {
+      if (!url.includes('/api/ecran/avis-recents')) return {}
+      const page = pages[appelees++]
+      return page || { avis: [], fin: true }
+    }
+  }
+  const p = ouvrirAujourdhui(options)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.avisRefuse = false
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  // ⚠ LE GESTE FAIT PARTIE DU BANC, parce qu'il fait partie du contrat : la
+  // page n'observe la sentinelle qu'au premier defilement. Un banc qui armait
+  // sans geste mesurait un comportement que le navigateur n'a pas.
+  p.defiler()
+  return { p, observateurs, urls: p.urls, pagesDemandees: () => appelees }
+}
+const sentinelle = (p) => p.cache('[data-bind="reviews-sentinelle"]')
+
+test("LE TEST QUI COMPTE : trois avis au depart, et un observateur arme sur la sentinelle", () => {
+  // ⚠ TROIS AU DEPART, ET AUCUN APPEL DE PLUS AU CHARGEMENT. Le budget de cet
+  // ecran est de DEUX appels a l'ouverture : la suite ne doit partir qu'au
+  // GESTE de l'hote, jamais au rendu.
+  const b = bancSuiteAvis()
+  assert.strictEqual(b.observateurs.length, 1,
+    `${b.observateurs.length} observateur(s) : la sentinelle n est pas armee`)
+  assert.strictEqual(b.pagesDemandees(), 0,
+    'une page de suite est demandee des le rendu, sans que personne ait defile')
+  assert.strictEqual(b.observateurs[0].cibles.length, 1, 'l observateur n observe rien')
+})
+
+test("LE TEST QUI COMPTE : le defilement demande les plus ANCIENS, par le curseur des DEUX cles", async () => {
+  // ⚠ LE CURSEUR PORTE LA DATE **ET** L'IDENTIFIANT. Le tri est
+  // `(received_at desc, id desc)` : deux avis recus au meme instant ne se
+  // departagent que par `id`, et un curseur sur la seule date les sauterait
+  // tous les deux ou les rendrait deux fois.
+  const b = bancSuiteAvis([{ avis: [avisDeTest(4, 25), avisDeTest(5, 24), avisDeTest(6, 23)], fin: false }])
+  // ⚠ ON **ATTEND** LE GESTE. Sans `await`, l'assertion tombe avant le premier
+  // `await` interne d'`appel()` — donc avant que la requete soit partie : un
+  // faux rouge ici, et le meme defaut donnerait un faux VERT dans l'autre sens.
+  await b.observateurs[0].declencher()
+  const url = b.urls.find(x => x.includes('/api/ecran/avis-recents'))
+  assert.ok(url, `aucun appel a la suite des avis : ${b.urls.join(' | ')}`
+    + ` / erreurs du banc : ${b.p.erreurs.join(' / ')}`)
+  // Le curseur part de la TROISIEME carte — la plus ancienne des trois.
+  assert.match(url, /depuis=2026-10-26T10%3A00%3A00Z/, `l URL ne porte pas la date du curseur : ${url}`)
+  assert.match(url, /apres_id=3/, `l URL ne porte pas l identifiant du curseur : ${url}`)
+})
+
+test("LE TEST QUI COMPTE : les avis charges s AJOUTENT, ils ne remplacent pas", async () => {
+  // ⚠ ILS S'INSERENT AVANT LA SENTINELLE, et c'est ce qui garde l'ordre : une
+  // insertion a la fin mettrait les plus anciens APRES le marqueur, donc apres
+  // le lien « tous les avis ». Et on n'ecrase pas la zone : reconstruire le
+  // bloc entier ferait sauter la position de defilement au doigt.
+  const b = bancSuiteAvis([{ avis: [avisDeTest(4, 25), avisDeTest(5, 24), avisDeTest(6, 23)], fin: false }])
+  await b.observateurs[0].declencher()
+  const ajoute = sentinelle(b.p).avant
+  for (const n of [4, 5, 6]) {
+    assert.ok(ajoute.includes(`Commentaire numero ${n}`),
+      `l avis ${n} n a pas ete ajoute : « ${ajoute.slice(0, 200)} »`)
+  }
+  assert.strictEqual(/Commentaire numero 1/.test(ajoute), false,
+    'les trois premiers avis ont ete re-rendus : la zone a ete ecrasee')
+})
+
+test("LE TEST QUI COMPTE : au bout des 30 jours, le lien vers /avis — et plus un appel", async () => {
+  // ⚠ DECISION DE THIERRY, OPTION 3 : « 30 jours, puis un lien vers /avis ».
+  // Mesure en production le 29 octobre 2026 : 16 avis avec texte sur 30 jours
+  // contre 645 au total. Paginer jusqu'au premier aurait fait de l'accueil un
+  // second /avis, et rendu FAUX le compte de son propre en-tete.
+  // ⚠ ET L'OBSERVATEUR SE COUPE. Sans cela, chaque defilement de plus
+  // redemanderait la meme page vide — un appel par geste, pour rien.
+  const b = bancSuiteAvis([{ avis: [avisDeTest(4, 25)], fin: true }])
+  await b.observateurs[0].declencher()
+  assert.strictEqual(b.pagesDemandees(), 1, 'la page de fin n a pas ete demandee')
+  const fin = sentinelle(b.p)
+  assert.match(fin.innerHTML, /href="\/avis"/, `la sentinelle ne porte pas le lien : « ${fin.innerHTML} »`)
+  assert.match(fin.innerHTML, /reviews\.all/, 'le lien n est pas libelle')
+  assert.strictEqual(b.observateurs[0].coupe, true, 'l observateur continue d observer apres la fin')
+  await b.observateurs[0].declencher()
+  assert.strictEqual(b.pagesDemandees(), 1,
+    'un second defilement redemande une page alors que la fin est atteinte')
+})
+
+test("LE TEST QUI COMPTE : une lecture qui ECHOUE n affirme pas « plus rien »", async () => {
+  // ⚠ `null` N'EST PAS `[]`. L'endpoint rend `{ avis: null, indisponible: true }`
+  // quand il n'a PAS PU lire : traiter ca comme une fin de liste serait
+  // affirmer une absence. On s arrete, le lien vers /avis reste le chemin, et
+  // aucune carte n est inventee.
+  const b = bancSuiteAvis([{ avis: null, fin: true, indisponible: true }])
+  await b.observateurs[0].declencher()
+  const fin = sentinelle(b.p)
+  assert.match(fin.innerHTML, /href="\/avis"/, 'le chemin vers /avis a disparu sur un echec')
+  assert.strictEqual(fin.avant, '', `des cartes ont ete ajoutees sur un echec : « ${fin.avant} »`)
+})
+
+test("LE TEST QUI COMPTE : sans IntersectionObserver, les trois premiers avis RESTENT", () => {
+  // Un navigateur sans observateur ne doit pas perdre le bloc : il garde ses
+  // trois cartes et le lien de l en-tete. C est la degradation, pas la panne.
+  const p = ouvrirAujourdhui({ sansInit: true, sansObservateur: true })
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  const zone = p.cache('[data-list="reviews"]')
+  assert.match(zone.innerHTML, /Commentaire numero 1/, 'les avis ont disparu sans observateur')
+  assert.strictEqual(p.cache('[data-bind="reviews-section"]').hidden, false,
+    'la section est masquee alors qu elle a trois avis')
+})
+
+// ─── LES CINQ TROUS QUE LA REVIEW DU 29 OCTOBRE 2026 A MESURES VERTS ───────
+
+test("LE TEST QUI COMPTE : un SECOND rendu n emporte pas la suite au defilement", async () => {
+  // ⚠ CONSTAT GRAVE, ET IL CASSAIT LA FONCTION DANS LE CHEMIN NORMAL.
+  // `renderDerniersAvis()` est appele DEUX FOIS a chaque chargement — une fois
+  // depuis le cache, une fois apres la lecture serveur. Le vrai
+  // `IntersectionObserver` appelle son rappel DES LA PREMIERE OBSERVATION si la
+  // cible est dans la fenetre : un chargement pouvait donc partir au rendu 1,
+  // le rendu 2 remplacait la zone (DETACHANT la sentinelle 1), puis la promesse
+  // du rendu 1 se resolvait et coupait l'observateur du rendu 2 — plus aucun
+  // chargement pour le reste de la session, sans rien a l'ecran.
+  const opts = {
+    sansInit: true,
+    observateurs: [],
+    ecouteurs: [],
+    corps: (url) => url.includes('/api/ecran/avis-recents')
+      ? { avis: [avisDeTest(4, 25)], fin: false }
+      : {}
+  }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+
+  p.interne.renderDerniersAvis()          // rendu 1 (le cache)
+  p.defiler()                             // l hote a defile : on observe
+  const o1 = opts.observateurs[0]
+  const promesse = o1.declencher()        // l'observateur du rendu 1 part
+  p.interne.renderDerniersAvis()          // rendu 2 (la lecture serveur) arrive
+  const o2 = opts.observateurs[1]
+  await promesse                          // puis la promesse du rendu 1 se resout
+
+  assert.strictEqual(o1.coupe, true, 'l observateur du rendu 1 n a pas ete coupe')
+  assert.strictEqual(o2.coupe, false,
+    'le rendu 1, perime, a coupe l observateur du rendu 2 : plus aucun chargement de la session')
+  assert.deepStrictEqual(p.erreurs, [],
+    `ecrire depuis un rendu perime a leve : ${p.erreurs.join(' / ')}`)
+  // Et le rendu 2 marche toujours.
+  await o2.declencher()
+  assert.match(sentinelle(p).avant, /Commentaire numero 4/,
+    'le rendu courant ne charge plus rien')
+})
+
+test("LE TEST QUI COMPTE : la sentinelle est ATTACHEE, sinon rien ne peut la voir", () => {
+  // ⚠ CONSTAT DE LA REVIEW : la mutation qui retirait `zone.appendChild(marque)`
+  // laissait 119 tests verts, alors qu'en navigateur la fonction est
+  // ENTIEREMENT MORTE — un noeud detache n'intersecte jamais rien, et
+  // `insertAdjacentHTML('beforebegin')` y leve. Le double enregistrait alors le
+  // noeud dans la table des selecteurs des `setAttribute` ; c'est `appendChild`
+  // qui le fait maintenant, comme un vrai DOM.
+  const b = bancSuiteAvis()
+  const s = sentinelle(b.p)
+  assert.ok(s.parentNode, 'la sentinelle n est pas attachee a la zone des avis')
+  assert.strictEqual(b.observateurs[0].cibles[0], s,
+    'l observateur n observe pas la sentinelle attachee')
+})
+
+test("LE TEST QUI COMPTE : un curseur qui N AVANCE PAS arrete la suite", async () => {
+  // ⚠ CONSTAT DE LA REVIEW : la mutation qui figeait le curseur restait verte.
+  // Un serveur qui rend trois fois la meme ligne ferait redemander la MEME page
+  // indefiniment, en empilant les doublons sans borne.
+  const memeLigne = { avis: [avisDeTest(3, 26)], fin: false }
+  const b = bancSuiteAvis([memeLigne, memeLigne, memeLigne])
+  await b.observateurs[0].declencher()
+  assert.strictEqual(b.pagesDemandees(), 1, 'la premiere page n a pas ete demandee')
+  const fin = sentinelle(b.p)
+  assert.match(fin.innerHTML, /href="\/avis"/,
+    'la suite continue alors que le curseur ne bouge plus')
+  assert.strictEqual(b.observateurs[0].coupe, true, 'l observateur tourne encore')
+})
+
+test("LE TEST QUI COMPTE : l armement d avant est COUPE, jamais laisse vivant", () => {
+  // ⚠ CONSTAT DE LA REVIEW : retirer le `disconnect` d'entree laissait la suite
+  // verte. Deux rendus laisseraient deux observateurs vivants, donc deux
+  // chargements concurrents, chacun avec son propre `enCours`.
+  const opts = { sansInit: true, observateurs: [], ecouteurs: [], corps: () => ({}) }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+  p.defiler()
+  p.interne.renderDerniersAvis()
+  p.interne.renderDerniersAvis()
+  assert.strictEqual(opts.observateurs.length, 3, 'les trois rendus n ont pas arme')
+  const vivants = opts.observateurs.filter(o => !o.coupe)
+  assert.strictEqual(vivants.length, 1,
+    `${vivants.length} observateurs vivants : les rendus d avant n ont pas ete coupes`)
+})
+
+test("LE TEST QUI COMPTE : la sentinelle OCCUPE une place, et au bon seuil", () => {
+  // ⚠ LA REGLE EST FONCTIONNELLE, PAS DECORATIVE : sans hauteur ni largeur, la
+  // sentinelle reste collee a la derniere carte et le defilement ne l atteint
+  // jamais. La mutation qui vidait la regle laissait 127 tests verts.
+  // ⚠ ET LE SEUIL EST CELUI DU RAIL (720 px), pas celui de `.rev-liste`
+  // (560 px) : entre les deux, le bloc est deja un rail.
+  const css = fs.readFileSync(path.join(__dirname, '..', 'shared', 'ui.css'), 'utf8')
+  const regle = (sel) => {
+    const i = css.indexOf(sel + ' {')
+    assert.notStrictEqual(i, -1, `la regle « ${sel} » n existe pas`)
+    return css.slice(i + sel.length + 2, css.indexOf('}', i))
+  }
+  assert.match(regle('.avis-suite'), /min-height:\s*\d+px/,
+    'la sentinelle n a pas de hauteur : a l ordinateur, rien ne la separe de la derniere carte')
+  // La largeur du rail : dans le media du RAIL, et egale a celle d une carte.
+  const seuilRail = css.indexOf('@media (max-width: 720px)', css.indexOf('.avis-suite {'))
+  assert.notStrictEqual(seuilRail, -1, 'la largeur du rail n est pas posee au seuil du rail (720 px)')
+  const bloc = css.slice(seuilRail, css.indexOf('\n}', seuilRail))
+  assert.match(bloc, /\.avis-suite\s*\{[^}]*width:\s*268px/,
+    `la sentinelle ne fait pas la largeur d une carte dans le rail : ${bloc.slice(0, 160)}`)
+  const carte = regle('.scroll-x .avis-carte')
+  assert.match(carte, /width:\s*268px/,
+    `une carte du rail ne fait plus 268 px (${carte.trim()}) : la sentinelle ne lui correspond plus`)
+})
+
+test("LE TEST QUI COMPTE : AUCUNE observation avant le premier defilement", () => {
+  // ⚠ MESURE AU BANC REEL (chrome-headless, balisage REEL de la page, cas
+  // « journee vide » — celui que la retouche 3 raccourcit le plus) : a
+  // 1280x900, le haut de la sentinelle est a 1077 px et le `rootMargin` vaut
+  // 200 px, donc 1077 < 1100 : LE VRAI `IntersectionObserver` AURAIT TIRE DES
+  // LE CHARGEMENT. L'accueil serait passe a TROIS appels au chargement, alors
+  // que son budget est de DEUX et qu'un test le garde. Au telephone (390x844),
+  // le bord gauche est a 858 px, hors de portee : le defaut n'existait que sur
+  // ordinateur, et seul le banc navigateur pouvait le voir.
+  // ⚠ ET C'EST AUSSI LE CONTRAT : « quand on fait defiler on charge » sont les
+  // mots de la demande. Le geste n'est pas un garde-fou ajoute par-dessus.
+  const opts = { sansInit: true, observateurs: [], ecouteurs: [], corps: () => ({}) }
+  const p = ouvrirAujourdhui(opts)
+  p.interne.etat.biens = [{ id: 'uuid-1', name: 'La bulle', provider_property_id: 'P1' }]
+  p.interne.etat.avisConnu = true
+  p.interne.etat.derniersAvis = [avisDeTest(1, 28), avisDeTest(2, 27), avisDeTest(3, 26)]
+  p.interne.renderDerniersAvis()
+
+  assert.strictEqual(opts.observateurs.length, 1, 'l observateur n est pas cree')
+  assert.strictEqual(opts.observateurs[0].cibles.length, 0,
+    'la sentinelle est observee AVANT tout defilement : un troisieme appel part au chargement')
+  // ⚠ ET L'ECOUTEUR ATTRAPE LE RAIL : un `scroll` ne bouillonne pas, donc sans
+  // la phase de CAPTURE, defiler le rail des avis au telephone — le seul geste
+  // possible la-bas — n armerait jamais rien.
+  const ecoute = opts.ecouteurs.find(e => e.type === 'scroll')
+  assert.ok(ecoute, `aucun ecouteur de defilement : ${JSON.stringify(opts.ecouteurs.map(e => e.type))}`)
+  assert.strictEqual(ecoute.reglages.capture, true,
+    'l ecouteur de defilement n est pas en phase de capture : le rail du telephone ne l atteint pas')
+
+  // Le geste, puis l observation.
+  p.defiler()
+  assert.strictEqual(opts.observateurs[0].cibles.length, 1,
+    'apres le defilement, la sentinelle n est toujours pas observee')
 })
