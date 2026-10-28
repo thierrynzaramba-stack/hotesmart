@@ -1251,6 +1251,16 @@ function renderTiroir () {
   if (!etat.tiroirBien || !etat.biens.has(etat.tiroirBien)) etat.tiroirBien = refs[0] || null
   sel.innerHTML = refs.map(r =>
     `<option value="${esc(r)}" ${r === etat.tiroirBien ? 'selected' : ''}>${esc(etat.biens.get(r).name || r)}</option>`).join('')
+  // ⚠ LE SELECTEUR VIT HORS DE `tiroir-corps` (constat 7 de la revue du
+  // 28 octobre 2026) : ni `geler(corps, …)`, qui ne balaie que les descendants
+  // du corps, ni `off` / `offEdition`, qui ne vivent que dans le balisage de
+  // `voletIA`, ne l'atteignaient. Il restait donc vivant pendant les SIX
+  // allers-retours reseau d'un enregistrement — et changer de bien en cours de
+  // route faisait atterrir le « Enregistré » VERT sous un logement dont rien
+  // n'avait ete enregistre. C'est le defaut que la review du matin vient de
+  // fermer dans l'autre sens : vider la note au changement de bien ne suffit
+  // pas, puisqu'elle est REPOSEE a la fin de l'ecriture.
+  sel.disabled = etat.modeEnCours === true
   const ref = etat.tiroirBien
   if (!ref) { corps.innerHTML = `<p class="muted small" style="padding: 0 18px">${esc(t('messages.empty'))}</p>`; return }
   if (etat.tiroirVolet === 'programmes') {
@@ -1895,9 +1905,38 @@ function lireLePanneau (corps, ref) {
 // global laisserait l'hote relancer les trois a l'aveugle, sans savoir
 // laquelle est passee — et re-poster les delais qui ont deja reussi n'est pas
 // anodin : ils gouvernent les envois.
+// ⚠ LE FILET, ET C'EST LE CONSTAT 5 DE LA REVUE DU 28 OCTOBRE 2026. Les deux
+// drapeaux etaient poses, puis `geler()` et `renderTiroir()` tournaient HORS de
+// tout `try`. Un lever de `renderTiroir` — une ancre du squelette qui
+// disparait, un gabarit qui casse — laissait `panneauEnCours` colle a vrai :
+// pilules, sourdine et « Je valide chaque reponse » desarmes pour le reste de
+// la session, aucune note posee, et `enregistrerPanneau` mort par son propre
+// `if (etat.modeEnCours) return`. C'est la famille exacte du constat 8 de la
+// revue precedente, et mon commentaire d'etat affirmait que les deux drapeaux
+// « ne peuvent pas diverger » : il le dit maintenant parce qu'un `finally` le
+// tient, pas parce que le chemin heureux y mene.
+//
+// Le filet est INERTE sur le chemin heureux : le corps retire les drapeaux
+// lui-meme, donc le `if` ci-dessous ne mord que si une exception est passee.
+// C'est pour ca que l'ordre « re-rendu puis note » reste celui du corps.
 async function enregistrerPanneau (corps, ref) {
   if (etat.modeEnCours) return
+  etat.modeEnCours = true
+  etat.panneauEnCours = true
+  try {
+    await enregistrerLePanneau(corps, ref)
+  } finally {
+    if (etat.panneauEnCours) {
+      etat.modeEnCours = false
+      etat.panneauEnCours = false
+      // Le re-rendu DEFAIT le gel : sans lui le panneau reste desarme a
+      // l'ecran meme si les drapeaux sont retombes.
+      try { renderTiroir() } catch (err) { logger.error('Messages', 'panneau degel', err) }
+    }
+  }
+}
 
+async function enregistrerLePanneau (corps, ref) {
   // ⚠ LE FORMULAIRE SE LIT AVANT TOUT RE-RENDU, ET C'EST UN CONSTAT GRAVE DE LA
   // SECONDE REVUE. J'appelais `renderTiroir()` d'abord : il fait
   // `corps.innerHTML = voletIA(ref)` sur le MEME conteneur, donc il reconstruit
@@ -1913,8 +1952,13 @@ async function enregistrerPanneau (corps, ref) {
   const d = delaisEnCours(ref)
   const saisi = lireLePanneau(corps, ref)
 
-  etat.modeEnCours = true
-  etat.panneauEnCours = true
+  // ⚠ `geler()` NE PROTEGE RIEN, ET DEUX TEXTES L'AFFIRMAIENT (constat 8 de la
+  // revue). Il pose `disabled` sur les noeuds EXISTANTS, et `renderTiroir()` la
+  // ligne suivante remplace tout le sous-arbre : le gel effectif pendant
+  // l'enregistrement vient de `off` / `offEdition` dans le balisage, lui seul.
+  // Retirer cet appel ne rougit aucun test — mesure de la revue. Il reste comme
+  // filet du seul cas ou `renderTiroir` sort sans rien peindre (tiroir cache),
+  // et c'est tout ce qu'on peut en dire.
   geler(corps, true)
   renderTiroir()
   const echoues = []
@@ -2035,9 +2079,19 @@ async function enregistrerPanneau (corps, ref) {
     // l'endpoint remet les compteurs a zero alors que des `send_after` ont pu
     // etre reecrits avant la coupure : on relit dans le doute, parce qu'un fil
     // qui garde l'echeance d'avant est le defaut meme que ce lot ferme.
-    brouillonsRepris = (!b || b.ok !== true)
-      ? 1
-      : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0)
+    // ⚠ ET UN REFUS NE RECHARGE RIEN (constat 6 de la revue du 28 octobre
+    // 2026). Avec `propager: false`, le serveur n'a RIEN propage — c'est ce
+    // qu'on lui a demande — donc un bilan absent est normal, et forcer le
+    // rechargement du fil ouvrait un chemin ou son echec poussait
+    // `partie_brouillons`. La note disait alors, sur le MEME sujet et dans la
+    // meme phrase : « Non enregistré : les propositions déjà en attente. Les
+    // propositions déjà en attente gardent leur échéance. » Deux moities qui se
+    // contredisent valent moins que pas de note du tout.
+    brouillonsRepris = !propager
+      ? 0
+      : (!b || b.ok !== true)
+          ? 1
+          : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0)
   } catch (err) {
     logger.error('Messages', 'delais', err)
     // ⚠ UN APPEL QUI N'A PAS REPONDU NE DIT PAS CE QUI A ETE PRIS (constat 5).
@@ -2181,6 +2235,14 @@ function bienDuFilOuvert () {
 
 function ouvrirTiroir (ouvert) {
   const tiroir = $('[data-bind="tiroir"]')
+  // ⚠ « DEJA OUVERT » N'EST PAS UNE OUVERTURE (constat 1 de la revue du
+  // 28 octobre 2026, et c'est mon propre correctif qui l'avait ouvert). Les
+  // deux boutons d'en-tete rappellent `ouvrirTiroir(true)` a CHAQUE bascule de
+  // volet, panneau deja ouvert : presellectionner la, c'est ecraser le bien que
+  // l'hote vient de choisir au selecteur — et comme `delaisEnCours` remet
+  // `etat.delaisEdit` a zero des que la reference change, son edition non
+  // enregistree partait avec, sans un mot.
+  const etaitFerme = tiroir.hidden === true
   tiroir.hidden = !ouvert
   $('[data-bind="tiroir-note"]').hidden = true
   // L'etat ouvert/ferme s'ANNONCE (les onglets retires portaient
@@ -2199,8 +2261,10 @@ function ouvrirTiroir (ouvert) {
   // l'hote vient de choisir a la main, au premier re-rendu venu (un clic de
   // pilule en declenche un).
   if (ouvert) {
-    const duFil = bienDuFilOuvert()
-    if (duFil) etat.tiroirBien = duFil
+    if (etaitFerme) {
+      const duFil = bienDuFilOuvert()
+      if (duFil) etat.tiroirBien = duFil
+    }
     renderTiroir()
   }
 }

@@ -386,8 +386,12 @@ test('⚠ CONSTAT 1 : le panneau lit le formulaire AVANT tout re-rendu', () => {
   const sansCommentaires = page
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/^[ \t]*\/\/.*$/gm, ' ')
-  const bloc = sansCommentaires.slice(sansCommentaires.indexOf('async function enregistrerPanneau'))
-    .slice(0, 900)
+  // ⚠ L ANCRE EST `enregistrerLePanneau`, LE CORPS — pas `enregistrerPanneau`,
+  // qui n est plus qu un filet (`try/finally` sur les deux drapeaux, constat 5
+  // de la revue du 28 octobre 2026). C est le corps qui lit le formulaire.
+  const iCorps = sansCommentaires.indexOf('async function enregistrerLePanneau')
+  assert.ok(iCorps > 0, 'le corps de l enregistrement existe')
+  const bloc = sansCommentaires.slice(iCorps).slice(0, 900)
   const posLecture = bloc.indexOf('lireLePanneau(corps, ref)')
   const posRender = bloc.indexOf('renderTiroir()')
   assert.ok(posLecture > 0, 'le panneau est lu par lireLePanneau')

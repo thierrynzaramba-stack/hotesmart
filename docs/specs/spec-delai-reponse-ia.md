@@ -1167,13 +1167,17 @@ gelé.** Deux drapeaux, et un seul endroit où ils se posent :
 | `etat.modeEnCours` | toute écriture de réglage | la réentrance, la case de pause, « Enregistrer », les tests de canal, le volet Programmes |
 | `etat.panneauEnCours` | `enregistrerPanneau` **seul** | ce qui ne vit que dans `etat.delaisEdit` : pilules de délai, « Autre… » et ses champs h/min, « Je valide chaque réponse », sourdine |
 
-`panneauEnCours` se pose et se retire sur les lignes **voisines** de
-`modeEnCours`, et nulle part ailleurs : il implique donc `modeEnCours`, et les
-deux ne peuvent pas diverger. Un test le tient
-(`tests/guestflow-appliquer-delai.test.js`). Le gel du panneau pendant
-**l'enregistrement**, lui, reste entier et c'est voulu :
-`enregistrerPanneau` a **déjà lu** le formulaire, et une valeur changée après
-sa lecture ferait mentir l'écran.
+`panneauEnCours` se pose une seule fois, après la garde de réentrance, et
+chaque pose comme chaque retrait est **collé** à celui de `modeEnCours` : il
+implique donc `modeEnCours`. Et ce n'est pas le chemin heureux qui le tient,
+c'est un `try/finally` — voir le constat 5 ci-dessous. Deux assertions de
+`tests/guestflow-appliquer-delai.test.js` mesurent l'invariant **dans les deux
+sens** (`Math.abs`, pas une soustraction), et le comportement se mesure en
+levant pour de vrai dans `tests/messages-panneau-ia-dom.test.js`.
+
+Le gel du panneau pendant **l'enregistrement**, lui, reste entier et c'est
+voulu : `enregistrerPanneau` a **déjà lu** le formulaire, et une valeur changée
+après sa lecture ferait mentir l'écran.
 
 **Point 2 — le panneau s'ouvrait sur le mauvais logement.** `renderTiroir`
 retombait sur `refs[0]`, le premier bien du compte. L'hôte réglait donc le délai
@@ -1222,6 +1226,89 @@ dépôt l'a payé une fois — donc **aucun test de ce banc n'affirme quoi que c
 soit sur une requête supabase** : ce qui s'y mesure est le panneau. Les
 requêtes du writer sont éprouvées par leur propre double, strict, dans
 `tests/guestflow-appliquer-delai.test.js`.
+
+### Les six constats de la revue de ce lot — dont deux ouverts par mon correctif
+
+Aucun de sécurité. Trois défauts de comportement, trois faux verts.
+
+**Constat 1 — mon correctif du point 2 écrasait le bien choisi à la main.** Mon
+commentaire affirmait « à l'ouverture seulement, pas à chaque rendu », et la
+protection était au bon endroit **au mauvais grain** : les deux boutons
+d'en-tête rappellent `ouvrirTiroir(true)` à **chaque bascule de volet**,
+panneau déjà ouvert. Un aller-retour IA ↔ Programmes reprenait donc le bien du
+fil — et comme `delaisEnCours` remet `etat.delaisEdit` à zéro dès que la
+référence change, **l'édition non enregistrée partait avec, sans un mot.**
+`ouvrirTiroir` ne présélectionne plus que si le tiroir était **fermé**.
+
+**Constat 7 — le sélecteur de bien n'était gelé par rien.** Il vit **hors** de
+`tiroir-corps` : ni `geler(corps, …)`, qui ne balaie que les descendants du
+corps, ni `off` / `offEdition`, qui ne vivent que dans le balisage de `voletIA`,
+ne l'atteignaient. Il restait donc vivant pendant les **six** allers-retours
+réseau d'un enregistrement, et changer de logement en cours de route faisait
+atterrir le « Enregistré » **vert** sous un bien dont rien n'avait été
+enregistré. C'est le défaut que la review du matin venait de fermer dans
+l'autre sens — vider la note au changement de bien ne suffit pas, puisqu'elle
+est **reposée** à la fin de l'écriture.
+
+**Constat 6 — la note se contredisait sur le même sujet.** Avec
+`propager: false`, le serveur n'a **rien** propagé : un bilan absent est donc
+normal, et forcer `brouillonsRepris = 1` ouvrait un chemin où l'échec du
+rechargement poussait `partie_brouillons`. La note disait alors, dans la même
+phrase : « Non enregistré : les propositions déjà en attente. Les propositions
+déjà en attente gardent leur échéance. » Deux moitiés qui se contredisent
+valent moins que pas de note du tout. Un refus ne recharge plus le fil.
+
+**Constat 5 — les deux drapeaux n'étaient tenus par aucun `finally`.** Ils
+étaient posés, puis `geler()` et `renderTiroir()` tournaient hors de tout
+`try` : un lever laissait `panneauEnCours` collé à vrai, donc pilules, sourdine
+et « Je valide chaque réponse » désarmés **pour le reste de la session**, aucune
+note posée, et `enregistrerPanneau` mort par sa propre garde de réentrance.
+`enregistrerPanneau` est maintenant une enveloppe qui tient les drapeaux par un
+`try/finally` et délègue le travail à `enregistrerLePanneau` ; le filet est
+inerte sur le chemin heureux, donc l'ordre « re-rendu puis note » reste celui du
+corps.
+
+**Constats 2, 3, 4, 8 — quatre faux verts, et c'est la part qui compte.** Le
+code était juste ; ce sont mes **affirmations** qui annonçaient une couverture
+inexistante. Mesuré par la revue, mutation par mutation, sur la suite complète :
+
+| affirmation | mutation | ce qui rougissait |
+|---|---|---|
+| la garde de compte de `bienDuFilOuvert` est testée | retirer `etat.biens.has(ref)` | **rien** — l'assertion était satisfaite par le repli de `renderTiroir`, pas par la garde qu'elle nommait |
+| « sourdine » dans le tableau des deux drapeaux, « un test le tient » | remettre les trois contrôles sous `off` | **rien** |
+| `panneauEnCours` « ne peut pas diverger », assertion jumelle | déplacer la pose **avant** la garde de réentrance | **rien** — mon assertion écrivait `A - B < 60` au lieu de `Math.abs(A - B) < 60`, donc toute pose plus haut passait |
+| « `geler` ne se défait que par un re-rendu » (commentaire **et** assertion) | supprimer l'appel `geler(corps, true)` | **rien** — `renderTiroir()` remplace tout le sous-arbre la ligne suivante : `geler` est un filet pour le seul cas où `renderTiroir` sort sans peindre, et rien d'autre |
+
+Les quatre sont maintenant tenus par un test qui **exécute** la garde (et non
+par un voisin qui la masque), et les quatre affirmations sont corrigées à la
+lettre.
+
+**Constat 9 — le double supabase du banc était plus permissif que le vrai.** Il
+acceptait n'importe quel nom de maillon et n'importe quelle table : en
+réécrivant `ecrireConsigne` vers une table inexistante et des maillons qui
+n'existent pas, les 14 tests restaient verts — **y compris les assertions sur
+la note**, qui dépend de l'étape 3 du panneau, donc de supabase. Le double
+refuse désormais ce que le vrai refuse (deux listes tirées du fichier mesuré),
+et un test peut faire **échouer** ou **lever** une table nommée. La distinction
+compte : plusieurs lectures de la page font `if (error) return`, donc un
+`{ error }` y est avalé — c'est un **lever** qui remonte au `catch` de
+l'appelant, et ma première version du test du constat 6 ne forçait rien du tout
+(mutation rejouée : 0 rouge).
+
+**Constat 10 — l'en-tête du banc promettait plus que le banc ne tenait.** En
+coupant `init()`, aucun écouteur d'en-tête n'existait : ni le sélecteur de bien,
+ni les deux boutons de volet. C'est exactement ce qui avait rendu les constats 1
+et 7 invisibles. Le banc a maintenant deux niveaux, dits dans son en-tête, et
+`amorcer()` lance la vraie `init()` avec les doubles en place. Accessoirement,
+sa fonction de traduction substituait les variables en boucle là où le vrai
+`t()` fait une **passe unique** : corrigé, sinon une valeur contenant `{autre}`
+se comporterait différemment du banc à la production.
+
+⚠ **Et un piège du banc lui-même, qui coûte un rouge sans nom** : ouvrir le
+volet « Messages programmés » lance un chargement **asynchrone**. Si le test
+finit et ferme la fenêtre avant, le code de la page retombe sur un document
+mort et node:test rend un `unhandledRejection` qui fait échouer le **fichier** —
+22 verts et un rouge anonyme. D'où `reposer(banc)`, à appeler avant de fermer.
 
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 

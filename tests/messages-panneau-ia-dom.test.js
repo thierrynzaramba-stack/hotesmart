@@ -316,3 +316,230 @@ test('sans arriere, la note reste le simple « Enregistre »', async () => {
   assert.equal(b.noteOk(), true)
   b.fermer()
 })
+
+// ── Les six constats de la revue de ce commit ─────────────────────────────
+// ⚠ CES TESTS N'EXISTAIENT PAS, ET C'EST LE VRAI CONSTAT DE LA REVUE : cinq
+// affirmations de la spec et des commentaires annonçaient une couverture qui
+// n'existait pas. Chacun ci-dessous a ete MESURE rouge contre `c0d1ec0d`.
+
+// L'amorce lance la VRAIE `init()` : sans elle, le selecteur de bien et les
+// deux boutons de volet ne sont pas branches, et c'est exactement ce qui avait
+// rendu les constats 1 et 7 invisibles au banc.
+async function bancAmorce ({ ouverte = 'B-LOFT' } = {}) {
+  const b = B.monter({ appel: async () => ({}) })
+  await B.amorcer(b)
+  B.peupler(b, {
+    biens: [{ ref: AUTRE, nom: 'Maison Jardin' }, { ref: REF, nom: 'Loft Pilotable' }],
+    config: {
+      [AUTRE]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } },
+      [REF]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } }
+    },
+    conversations: [
+      { bookId: 'B-JARDIN', propertyId: AUTRE, guestName: 'A' },
+      { bookId: 'B-LOFT', propertyId: REF, guestName: 'B' }
+    ],
+    ouverte
+  })
+  return b
+}
+
+test('LE TEST QUI COMPTE : un aller-retour entre volets ne reprend pas le bien du fil', async () => {
+  // Constat 1 : `ouvrirTiroir(true)` est rappele a CHAQUE bascule de volet,
+  // panneau deja ouvert. Presellectionner la ecrasait le bien choisi a la
+  // main — et `delaisEnCours` remet `etat.delaisEdit` a zero des que la
+  // reference change, donc l edition non enregistree partait avec.
+  const b = await bancAmorce()
+  assert.equal(b.msg.etat.tiroirBien, REF, 'a l ouverture, le bien du fil')
+  // L hote choisit l autre logement et y pose 4 h.
+  B.changer(b, B.selBien(b), AUTRE)
+  assert.equal(b.msg.etat.tiroirBien, AUTRE, 'le selecteur de init() est bien branche')
+  B.clic(b, B.pilule(b, 240))
+  assert.equal(b.msg.delaisEnCours(AUTRE).reponse_ia, 240)
+  // Il va voir les messages programmes, puis revient.
+  B.clic(b, B.boutonVolet(b, 'programmes'))
+  assert.equal(B.tiroirOuvert(b), true, 'le panneau reste ouvert, il change de volet')
+  await B.reposer(b)
+  B.clic(b, B.boutonVolet(b, 'ia'))
+  assert.equal(b.msg.etat.tiroirBien, AUTRE, 'son logement n a pas ete repris par le fil')
+  assert.equal(b.msg.delaisEnCours(AUTRE).reponse_ia, 240, 'et son edition est toujours la')
+  await B.reposer(b)
+  b.fermer()
+})
+
+test('fermer puis reouvrir le panneau, EN REVANCHE, revient au bien du fil', async () => {
+  // La contrepartie : une vraie ouverture doit suivre le fil, sinon le point 2
+  // de la recette serait referme a moitie.
+  const b = await bancAmorce()
+  B.changer(b, B.selBien(b), AUTRE)
+  assert.equal(b.msg.etat.tiroirBien, AUTRE)
+  b.msg.ouvrirTiroir(false)
+  b.msg.ouvrirTiroir(true)
+  assert.equal(b.msg.etat.tiroirBien, REF, 'une ouverture, elle, suit le fil ouvert')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : bienDuFilOuvert refuse un bien hors du compte, par LUI-MEME', async () => {
+  // Constat 2 : l assertion d avant etait satisfaite par le repli de
+  // `renderTiroir` (`!etat.biens.has(...) -> refs[0]`), pas par la garde
+  // qu elle nommait. Mutation mesuree par la revue : retirer la garde de
+  // `bienDuFilOuvert` laissait les 6813 tests verts. On l execute donc.
+  const b = B.monter()
+  B.peupler(b, {
+    biens: [{ ref: AUTRE, nom: 'Maison Jardin' }],
+    config: { [AUTRE]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } },
+    conversations: [
+      { bookId: 'B-X', propertyId: 'BIEN-D-UN-AUTRE-COMPTE', guestName: 'X' },
+      { bookId: 'B-OK', propertyId: AUTRE, guestName: 'Y' }
+    ],
+    ouverte: 'B-X'
+  })
+  assert.equal(b.msg.bienDuFilOuvert(), null,
+    'un bien absent de etat.biens — donc du compte courant — ne designe rien')
+  b.msg.etat.ouverte = 'B-OK'
+  assert.equal(b.msg.bienDuFilOuvert(), AUTRE, 'un bien du compte, lui, est designe')
+  b.msg.etat.ouverte = null
+  assert.equal(b.msg.bienDuFilOuvert(), null, 'et sans fil ouvert, rien')
+  b.msg.etat.ouverte = 'B-INCONNU'
+  assert.equal(b.msg.bienDuFilOuvert(), null, 'ni pour une conversation introuvable')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : la sourdine aussi reste editable pendant l ecriture de la pause', async () => {
+  // Constat 3 : le comportement etait juste, mais AUCUN test ne le tenait —
+  // remettre les trois controles de sourdine sous le gel de la pause laissait
+  // les 6813 tests verts, et la spec affirmait « un test le tient ».
+  await pendantLEcriturePause(async (b) => {
+    const c = B.corps(b)
+    const active = c.querySelector('[data-sourdine-active]')
+    const debut = c.querySelector('[data-sourdine-debut]')
+    const fin = c.querySelector('[data-sourdine-fin]')
+    assert.equal(active.disabled, false, 'la case de sourdine n ecrit rien')
+    assert.equal(debut.disabled, false)
+    assert.equal(fin.disabled, false)
+    B.changer(b, active, true)
+    B.changer(b, debut, '23:30')
+    // ⚠ CHAMP PAR CHAMP, PAS `deepEqual` : l objet vient du realm de la
+    // fenetre jsdom, donc son prototype n est pas celui du test et un
+    // `deepEqual` strict rougit sur deux objets identiques (lecon deja payee
+    // par le depot, tests/outils/banc-calendrier.js la porte aussi).
+    const sd = b.msg.delaisEnCours(REF).sourdine
+    assert.equal(sd.active, true)
+    assert.equal(sd.debut, '23:30')
+    assert.equal(sd.fin, '08:00')
+  }, { delai: 15 })
+})
+
+test('LE TEST QUI COMPTE : le selecteur de bien est gele pendant l enregistrement', async () => {
+  // Constat 7 : il vit HORS de `tiroir-corps`, donc ni `geler(corps, …)` ni
+  // `off`/`offEdition` ne l atteignaient. Changer de bien pendant les six
+  // allers-retours d un enregistrement faisait atterrir le « Enregistré » VERT
+  // sous un logement dont rien n avait ete enregistre.
+  let debloquer = null
+  const enregistre = { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } }
+  const b = B.monter({
+    appel: async (chemin, corps) => {
+      if (corps && corps.apercu === true) {
+        await new Promise(r => { debloquer = r })
+        return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 0 } }
+      }
+      if (!corps) return { config: enregistre }
+      return { ok: true }
+    }
+  })
+  await B.amorcer(b)
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }, { ref: AUTRE, nom: 'Maison Jardin' }],
+    config: { ...enregistre, [AUTRE]: { mode: 'test', delais: { reponse_ia: 60, alerte_info: 0 } } },
+    bien: REF
+  })
+  const promesse = b.msg.enregistrerPanneau(B.corps(b), REF)
+  await new Promise(r => setTimeout(r, 0))
+  assert.equal(B.selBien(b).disabled, true, 'on ne change pas de logement pendant une ecriture')
+  debloquer()
+  await promesse
+  assert.equal(b.msg.etat.tiroirBien, REF, 'la note tombe sous le bien enregistre')
+  assert.equal(B.selBien(b).disabled, false, 'et le selecteur redevient vivant')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un echec des consignes rend la note partielle', async () => {
+  // Constat 9 : le double supabase du banc acceptait n importe quelle table et
+  // n importe quel maillon, donc l etape 3 du panneau ne pouvait PAS echouer —
+  // et toutes les assertions de note etaient inconditionnelles. La revue l a
+  // mesure en reecrivant `ecrireConsigne` vers une table inexistante : 14 verts.
+  const { b } = bancEnregistrement({ echues: 0 })
+  b.window.__echecTable = 'agent_prompting'
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.match(b.note(), /Non enregistré/)
+  assert.match(b.note(), new RegExp(FR['messages.partie_consignes']))
+  assert.equal(b.noteOk(), false)
+  b.fermer()
+})
+
+test('le banc REFUSE une table ou un maillon que la page n a pas', async () => {
+  // Le double doit refuser ce que le vrai refuse : sans ca il valide du code
+  // qui ne pourrait pas tourner en production.
+  const b = B.monter()
+  assert.throws(() => b.window.__table('table_inexistante'), /table inconnue/)
+  assert.throws(() => b.window.__table('agent_prompting').maillonInvente(),
+    /maillon inconnu/)
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un lever pendant l enregistrement rend les deux drapeaux', async () => {
+  // Constat 5 : les drapeaux etaient poses hors de tout `try`. Un lever de
+  // `renderTiroir` laissait `panneauEnCours` colle a vrai — panneau desarme
+  // pour le reste de la session, et `enregistrerPanneau` mort par sa propre
+  // garde de reentrance.
+  const b = B.monter({ appel: async () => ({}) })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } }
+  })
+  // On retire du squelette une ancre dont `renderTiroir` a besoin : il leve.
+  B.selBien(b).remove()
+  await assert.rejects(() => b.msg.enregistrerPanneau(B.corps(b), REF))
+  assert.equal(b.msg.etat.panneauEnCours, false, 'le filet a rendu le drapeau du panneau')
+  assert.equal(b.msg.etat.modeEnCours, false, 'et celui des ecritures')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un refus ne fabrique pas une note qui se contredit', async () => {
+  // Constat 6 : avec `propager: false` le serveur n a RIEN propage — c est ce
+  // qu on lui a demande — donc un bilan absent est normal. Forcer le
+  // rechargement du fil ouvrait un chemin ou son echec poussait
+  // `partie_brouillons`, et la note disait sur le MEME sujet, dans la meme
+  // phrase : « Non enregistré : les propositions déjà en attente. Les
+  // propositions déjà en attente gardent leur échéance. »
+  let taches = 0
+  const b = B.monter({
+    confirme: (texte) => texte === FR['messages.mode_confirm_auto'],
+    appel: async (chemin, corps) => {
+      if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 7 } }
+      // Le serveur repond SANS bilan `brouillons` : il n a rien propage.
+      if (corps && corps.delais_ref) return { ok: true, delais_ref: REF }
+      if (!corps) return { config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } } }
+      return { ok: true }
+    }
+  })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } } }
+  })
+  // ⚠ ET LA RELECTURE DES TACHES LEVE, pas « rend une erreur » : ma premiere
+  // version posait `__echecTable`, et `rechargerTaches` fait `if (error)
+  // return` — l echec etait avale, le chemin que ce test pretend eprouver
+  // n etait jamais pris, et la mutation du correctif restait VERTE. Mesure
+  // faite : 0 rouge. C est un lever qui atteint le `catch` de l appelant,
+  // lequel pousse `partie_brouillons`.
+  b.window.__leveTable = 'agent_tasks'
+  B.clic(b, B.pilManuel(b))
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  taches = b.note()
+  assert.equal(taches, FR['messages.echeances_gardees_ok'],
+    'son choix, dit une seule fois, et en vert')
+  assert.ok(!taches.includes(FR['messages.partie_brouillons']),
+    'la note ne se contredit pas sur le meme sujet')
+  assert.equal(b.noteOk(), true)
+  b.fermer()
+})

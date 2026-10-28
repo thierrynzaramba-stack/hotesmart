@@ -1,8 +1,19 @@
 // tests/outils/banc-messages.js
 // LE BANC DE LA PAGE MESSAGES : il execute le VRAI module de
 // `pages/messages.html` dans un vrai DOM, pour qu'un test puisse rejouer un
-// geste de l'hote — ouvrir le panneau, cliquer une pilule, decocher la pause,
-// enregistrer — et observer ce qui part au serveur ET ce qui s'affiche.
+// geste de l'hote — cliquer une pilule, decocher la pause, enregistrer — et
+// observer ce qui part au serveur ET ce qui s'affiche.
+//
+// ⚠ DEUX NIVEAUX, ET IL FAUT SAVOIR LEQUEL ON MONTE (constat 10 de la revue du
+// 28 octobre 2026 : l'en-tete promettait plus que le banc ne tenait).
+//   · `monter()` + `peupler()` : seuls les ecouteurs de `brancherTiroir` —
+//     donc du CORPS du volet — sont vivants. Le selecteur de bien et les deux
+//     boutons de volet, branches par `init()`, ne sont PAS cliquables.
+//   · `monter()` + `await amorcer()` + `peupler()` : `init()` tourne pour de
+//     vrai, avec les doubles en place, et TOUS les gestes sont rejouables.
+// Le premier niveau a laisse passer deux defauts (l'aller-retour entre volets
+// ecrasait le bien choisi a la main ; le selecteur restait vivant pendant un
+// enregistrement) : un test qui touche a l'en-tete du tiroir amorce.
 //
 // ⚠ POURQUOI CE BANC EXISTE, ET C'EST LA LEÇON DE LA RECETTE DU 28 OCTOBRE
 // 2026. La confirmation de sortie de « Je valide chaque reponse » etait
@@ -35,6 +46,13 @@ const scriptPartage = (nom) => lire('shared', nom + '.js')
   .replace(/^export default /gm, 'const __defaut_' + nom.replace(/-/g, '_') + ' = ')
   .replace(/^export /gm, '')
 
+// ⚠ SEULE LA LIGNE `init().catch(…)` EST COUPEE, PAS LA FONCTION. `init()` est
+// exportee dans la queue et `amorcer()` l'appelle : c'est elle qui branche le
+// SELECTEUR DE BIEN et les DEUX BOUTONS DE VOLET. Sans elle, ces deux gestes
+// n'etaient pas rejouables — et c'est precisement ce qui avait rendu deux
+// defauts invisibles au banc (constats 1 et 7 de la revue du 28 octobre 2026 :
+// l'aller-retour entre volets ecrasait le bien choisi a la main, et le
+// selecteur restait vivant pendant un enregistrement).
 function corpsDeLaPage () {
   const html = lire('pages', 'messages.html')
   const m = /<script type="module">([\s\S]*?)<\/script>/.exec(html)
@@ -42,7 +60,8 @@ function corpsDeLaPage () {
   const sansImports = m[1].replace(/^import\s[\s\S]*?from\s*'[^']*'\s*$/gm, '')
   const sansAmorce = sansImports.replace(/^init\(\)\.catch\([\s\S]*?\)\s*$/m, '')
   if (/^\s*import\s/m.test(sansAmorce)) throw new Error('banc : un import a survecu')
-  if (/^init\(\)/m.test(sansAmorce)) throw new Error('banc : l amorce init() a survecu')
+  if (/^init\(\)\.catch/m.test(sansAmorce)) throw new Error('banc : l amorce init() a survecu')
+  if (!/^async function init \(/m.test(sansAmorce)) throw new Error('banc : init() a disparu du module')
   return sansAmorce
 }
 
@@ -116,11 +135,17 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
     return typeof r === 'function' ? r(String(texte)) : r !== false
   }
   window.__plural = fabriquerPlural(window)
+  // ⚠ UNE PASSE UNIQUE, COMME LE VRAI `t()` (constat 10 de la revue). Ma
+  // premiere version substituait variable par variable (`split`/`join` en
+  // boucle) : une valeur contenant `{autre}` aurait ete RE-substituee ici et
+  // pas en production. `shared/i18n/i18n.js` fait
+  // `s.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '{' + k + '}')` — une seule
+  // passe, et un parametre absent reste visible tel quel.
   const traduire = (k, v) => {
-    let s = Object.prototype.hasOwnProperty.call(FR, k) ? FR[k] : k
-    s = window.__plural(s, v || {})
-    if (v) for (const [a, b] of Object.entries(v)) s = s.split('{' + a + '}').join(String(b))
-    return s
+    const s = Object.prototype.hasOwnProperty.call(FR, k) ? FR[k] : k
+    const vars = v || {}
+    return window.__plural(s, vars)
+      .replace(/\{(\w+)\}/g, (_, c) => (vars[c] ?? '{' + c + '}'))
   }
   window.I18n = {
     lang: 'fr', t: traduire, init: async () => {}, apply: () => {},
@@ -140,7 +165,7 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
     const api = { get: async () => ({}), post: async () => ({}) }
     const supabase = {
       auth: { getSession: async () => ({ data: { session: { access_token: 'jeton' } } }) },
-      from: () => window.__table()
+      from: (nom) => window.__table(nom)
     }
     const compteCourant = () => 'U1'
     const peutLire = () => true
@@ -157,28 +182,52 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       etat, renderTiroir, ouvrirTiroir, renderListe, renderFil, renderFiltres,
       enregistrerPanneau, basculerPause, delaisEnCours, delaisDuBien,
       bandeauEcheance, etatEcheance, peutReprendre, pausesFiables, voletIA,
-      noteReglage, PILULES
+      noteReglage, bienDuFilOuvert, init, PILULES
     }
   `
   window.__journal = []
   window.__domaines = []
-  // Les lectures et ecritures qui passent par supabase — consignes, relecture
-  // des taches — ne sont pas le sujet de ce banc : un double inerte suffit.
-  // ⚠ ET IL EST DELIBEREMENT PERMISSIF : il accepte n'importe quel maillon de
-  // chaine (`.eq`, `.in`, `.order`, `.limit`…) et rend toujours « aucune
-  // ligne, aucune erreur ». Un double permissif VALIDE du code qui ne pourrait
-  // pas tourner (le depot l'a paye une fois), donc aucun test de ce banc ne
-  // doit affirmer quoi que ce soit sur une requete supabase : ce qui se mesure
-  // ici, c'est le PANNEAU. Les requetes du module `appliquer-delai` sont
-  // eprouvees par leur propre double, strict, dans
-  // tests/guestflow-appliquer-delai.test.js.
-  window.__table = () => {
-    const resultat = () => ({ data: [], error: null })
+  // ⚠ LE DOUBLE SUPABASE REFUSE CE QUE LE VRAI REFUSE (constat 9 de la revue
+  // du 28 octobre 2026, et c'est un faux vert qu'il a MESURE). Sa premiere
+  // version acceptait n'importe quel nom de maillon et n'importe quelle
+  // table : en reecrivant `ecrireConsigne` vers une table inexistante et des
+  // maillons qui n'existent pas, les 14 tests restaient verts — y compris les
+  // assertions sur la NOTE, qui depend de l'etape 3 du panneau, donc de
+  // supabase. Un double plus permissif que le vrai VALIDE du code qui ne peut
+  // pas tourner ; le depot l'a deja paye une fois.
+  // Les deux listes viennent du fichier mesure : `supabase.from('…')` de
+  // pages/messages.html, et les maillons qu'il enchaine.
+  const TABLES = new Set(['agent_prompting', 'agent_tasks', 'message_templates',
+    'properties', 'property_locks'])
+  const MAILLONS = new Set(['select', 'insert', 'update', 'delete', 'eq', 'neq', 'is',
+    'in', 'order', 'limit', 'filter'])
+  const FINS = new Set(['single', 'maybeSingle'])
+  // `window.__echecTable` permet a un test de faire ECHOUER une table : sans
+  // ca, aucune assertion de note n'est conditionnelle a cette etape.
+  window.__echecTable = null
+  // ⚠ ET UNE TABLE QUI LEVE N'EST PAS UNE TABLE QUI REND UNE ERREUR. Plusieurs
+  // lectures de la page font `if (error) return` : un `{ error }` y est AVALE,
+  // et un test qui croit forcer un echec ne force rien. Un vrai client peut
+  // lever (reseau coupe, jeton refuse), et c'est ce chemin-la qui remonte
+  // jusqu'au `catch` de l'appelant.
+  window.__leveTable = null
+  window.__table = (nom) => {
+    if (!TABLES.has(nom)) throw new Error('banc : table inconnue de la page — ' + nom)
+    if (window.__leveTable === nom) {
+      return new Proxy({}, { get () { throw new Error('banc : lever demande sur ' + nom) } })
+    }
+    const resultat = () => (window.__echecTable === nom
+      ? { data: null, error: { message: 'banc : echec demande sur ' + nom } }
+      : { data: [], error: null })
+    const unitaire = () => (window.__echecTable === nom
+      ? { data: null, error: { message: 'banc : echec demande sur ' + nom } }
+      : { data: { id: 'C1' }, error: null })
     const q = new Proxy({}, {
-      get (_, nom) {
-        if (nom === 'then') return (f, r) => Promise.resolve(resultat()).then(f, r)
-        if (nom === 'single' || nom === 'maybeSingle') return async () => ({ data: { id: 'C1' }, error: null })
-        return () => q
+      get (_, cle) {
+        if (cle === 'then') return (f, r) => Promise.resolve(resultat()).then(f, r)
+        if (FINS.has(cle)) return async () => unitaire()
+        if (MAILLONS.has(cle)) return () => q
+        throw new Error('banc : maillon inconnu de la page — .' + String(cle) + '() sur ' + nom)
       }
     })
     return q
@@ -213,6 +262,20 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
       .classList.contains('msg-tiroir__note--ok'),
     fermer: () => { try { window.close() } catch {} }
   }
+}
+
+// ─── Amorcer : la VRAIE `init()` de la page, avec les doubles en place ─────
+// C'est elle qui branche le selecteur de bien et les deux boutons de volet.
+// Un test qui veut rejouer CES gestes amorce d'abord ; les autres peuvent s'en
+// passer, `peupler` ouvre le panneau directement.
+async function amorcer (banc) {
+  await banc.window.__msg.init()
+  const sel = banc.doc.querySelector('[data-bind="tiroir-bien"]')
+  // Garde-fou : si `init()` cessait un jour de brancher le selecteur, les
+  // tests qui en dependent passeraient au vert en ne mesurant plus rien.
+  if (!sel) throw new Error('banc : le selecteur de bien a disparu du squelette')
+  banc.window.__amorce = true
+  return banc
 }
 
 // ─── Peupler : l'etat du panneau, puis le rendu par le code de la PAGE ─────
@@ -259,5 +322,22 @@ const casePause = (banc) => corps(banc).querySelector('[data-tiroir-pause]')
 const boutonSave = (banc) => corps(banc).querySelector('[data-panneau-save]')
 const selBien = (banc) => banc.doc.querySelector('[data-bind="tiroir-bien"]')
 
-module.exports = { monter, peupler, clic, changer, corps, pilules, pilule, pilManuel,
-  casePause, boutonSave, selBien, FR }
+// ⚠ LAISSER RETOMBER CE QU'UN GESTE A LANCE, AVANT DE FERMER LA FENETRE.
+// Ouvrir le volet « Messages programmes » declenche `chargerProgrammes(ref)`,
+// qui est ASYNCHRONE : si le test finit et ferme la fenetre avant, le code de
+// la page retombe sur un document mort et node:test rend un
+// `unhandledRejection` qui fait echouer le FICHIER — 22 verts et un rouge sans
+// nom. Ce n'est pas un defaut de la page : c'est le banc qui coupe le sol.
+const reposer = async (banc, tours = 3) => {
+  for (let i = 0; i < tours; i++) await new Promise(r => setTimeout(r, 0))
+  return banc
+}
+
+// Le bouton d'en-tete qui ouvre un volet : le geste reel, celui qui bascule.
+// Il n'existe qu'apres `amorcer()` — sans elle, son ecouteur n'est pas branche.
+const boutonVolet = (banc, nom) =>
+  banc.doc.querySelector('[data-ouvre-volet="' + nom + '"]')
+const tiroirOuvert = (banc) => !banc.doc.querySelector('[data-bind="tiroir"]').hidden
+
+module.exports = { monter, amorcer, peupler, clic, changer, reposer, corps, pilules,
+  pilule, pilManuel, casePause, boutonSave, selBien, boutonVolet, tiroirOuvert, FR }
