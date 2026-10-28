@@ -106,6 +106,13 @@
   <p class="caption msg-tiroir__note" data-bind="feuille-note" hidden></p>
 </aside>
 
+<!-- ACCES YIELDFLOW (lot du 28 octobre 2026) : UN menu pour toute la page —
+     popover a l'ordinateur, volet du bas au telephone, meme balisage. Il vit
+     ici, hors du planning : le planning defile dans un conteneur a overflow,
+     et un popover place dedans serait rogne. -->
+<div class="cal-yf-voile" data-bind="yf-voile" hidden></div>
+<div class="cal-yf-menu" data-bind="yf-menu" hidden role="dialog" aria-labelledby="h-yf"></div>
+
 <div class="cal-toasts" data-bind="toasts" aria-live="polite"></div>
 
 <nav class="bottombar" data-i18n-attr="aria-label:nav.menu"><!-- nav.js --></nav>
@@ -348,6 +355,7 @@ function identiteBien (bien, { mobile = false } = {}) {
       <span class="cal-poigne" data-poigne title="${esc(t('cal.drag_hint'))}" aria-label="${esc(t('cal.drag_hint'))}">${icone('i-menu')}</span>
       <span class="cal-photo cal-bien__photo">${photoBien(bien)}</span>
       <b class="cal-bien__nom">${esc(bien.name || '')}</b>
+      ${boutonYfHtml(bien)}
       ${mobile ? '' : `<span class="caption muted">${esc(t('cal.capacity', { n: bien.capacity || '—' }))}</span>`}
       ${mobile && peut ? `<button type="button" class="cal-btn-plus" data-plus="${esc(bien.id)}" title="${esc(t('cal.add_title'))}" aria-label="${esc(t('cal.add_title'))}">${icone('i-plus')}</button>` : ''}
       <button type="button" class="cal-bien__reduire" data-reduire="${esc(bien.id)}"
@@ -449,6 +457,225 @@ function brancherBulles (zone) {
     viderSelection(); ecrirePrefs(); charger()
   }))
 }
+// ─── ACCES YIELDFLOW : le bouton de la ligne du bien, et son menu ──────────
+// Lot du 28 octobre 2026. Spec : docs/specs/spec-yf-bouton-calendrier.md.
+//
+// ⚠ RIEN DE NEUF N'EST CALCULE AU CHARGEMENT DU CALENDRIER. La couleur du
+// bouton se lit dans `pilote_tarifaire`, deja servi par /api/channel-property
+// avec la liste des biens. Les faits du menu — le compteur et les quatre
+// reperes — partent sur le CLIC, pour le SEUL bien clique. C'est l'exception
+// datee du 28 octobre 2026 a la regle « donnee non urgente = resume
+// pre-calcule » (spec §6 bis) : elle ne tient QUE parce que le comptage suit
+// un geste. Le jour ou l'un de ces chiffres s'affiche sans clic, il faut la
+// table de resume, le cron, et l'heure du calcul affichee.
+//
+// ⚠ ET LE MENU N'ECRIT RIEN. Il ouvre des pages. La bascule du pilote reste
+// le parcours d'activation de `apps/yield/prix`, avec sa confirmation
+// « N nuits ont deja un prix au calendrier » comptee SERVEUR : jamais de
+// bascule en un clic depuis le calendrier.
+const yfPilote = (bien) => bien.pilote_tarifaire === 'yieldflow'
+function boutonYfHtml (bien) {
+  // Beds24 : YieldFlow ne pilote que Channex (`peutPasserEnYieldflow`). Un
+  // bouton qui ouvrirait un menu sans issue est pire qu'une absence — et les
+  // biens Beds24 sont deja grises et non cochables partout ailleurs ici.
+  if (bien.provider === 'beds24') return ''
+  const on = yfPilote(bien)
+  const label = t(on ? 'cal.yf_open_on' : 'cal.yf_open_off', { nom: bien.name || '' })
+  return `<button type="button" class="cal-yf ${on ? 'cal-yf--on' : 'cal-yf--off'}"
+    data-yf="${esc(bien.id)}" aria-haspopup="dialog" aria-expanded="false"
+    title="${esc(label)}" aria-label="${esc(label)}">${icone('i-chart')}</button>`
+}
+
+// Les quatre entrees, dans l'ordre de la spec §4. `evenements=1` et non une
+// page a part : `apps/yield/evenements.html` est une REDIRECTION vers
+// `prix?evenements=1` depuis le 22 septembre 2026 — l'ecran Evenements est une
+// pop-up DANS la Prediction de prix. Et « Donnees marche » vise
+// `marche-global`, la seule des trois pages marche qui soit au menu.
+const ENTREES_YF = [
+  { cle: 'cal.yf_prediction',  icone: 'i-price',    page: 'prix',          repere: 'fenetre' },
+  { cle: 'cal.yf_market',      icone: 'i-globe',    page: 'marche-global', repere: 'marche' },
+  { cle: 'cal.yf_events',      icone: 'i-calendar', page: 'prix',          repere: 'evenements', params: { evenements: '1' } },
+  { cle: 'cal.yf_comparables', icone: 'i-home',     page: 'comparables',   repere: 'comparables' }
+]
+const urlYf = (page, bienId, params) =>
+  `/apps/yield/${page}?` + new URLSearchParams({ bien: bienId, ...(params || {}) })
+
+// Le repere d'une entree. ⚠ IL NE S'AFFICHE QUE S'IL EST SERVI : `null` =
+// illisible, et on se tait. Un entier, lui, est un fait — 0 compris.
+function repereYf (quoi, d) {
+  if (!d) return ''
+  if (quoi === 'fenetre') {
+    const f = d.fenetre
+    if (!f || !Number.isFinite(Number(f.valeur))) return ''
+    return t(f.type === 'mois' ? 'cal.yf_window_months' : 'cal.yf_window_days', { n: f.valeur })
+  }
+  if (quoi === 'marche') return d.marche || ''
+  if (quoi === 'evenements') return Number.isInteger(d.evenements) ? t('cal.yf_events_count', { n: d.evenements }) : ''
+  // ⚠ ZERO COMPARABLE EST UN FAIT, ET IL APPELLE UN GESTE (demande de Thierry,
+  // 28 octobre 2026). « 0 retenus » se lit comme un echec ; « A choisir » dit
+  // ce qu'il reste a faire. La distinction avec l'ILLISIBLE tient toujours :
+  // `null` ne rend rien du tout.
+  if (quoi === 'comparables') {
+    if (!Number.isInteger(d.comparables)) return ''
+    return d.comparables === 0 ? t('cal.yf_comparables_none') : t('cal.yf_comparables_count', { n: d.comparables })
+  }
+  return ''
+}
+
+const menuYf = { bien: null, bouton: null }
+function menuYfHtml (bien, d) {
+  // ⚠ L'ETAT VIENT DE LA REPONSE DES QU'ELLE EST LA, PAS DE LA PAGE — constat
+  // de la re-review du 28 octobre 2026. `bien.pilote_tarifaire` date du
+  // CHARGEMENT du calendrier ; l'hote a pu activer le pilote dans un autre
+  // onglet entre-temps. Le menu annoncait alors « Prix manuels » et proposait
+  // « Activer le pilote automatique » sur un bien DEJA pilote — et ce clic ne
+  // menait nulle part, puisque la page d'arrivee refuse d'ouvrir un parcours
+  // sur un bien pilote. Un cul-de-sac que la valeur fraiche, deja en main,
+  // suffit a fermer.
+  // Au premier rendu (`d` absent), on n'a que la valeur de la page : c'est
+  // elle qui colore le bouton, et elle est juste dans le cas courant.
+  const on = d && d.pilote ? d.pilote === 'yieldflow' : yfPilote(bien)
+  // La ligne ambre : bien pilote SEULEMENT, et masquee a 0 — comme elle est
+  // masquee quand le compte est illisible (`null`). On n'ecrit jamais « 0 »
+  // a la place d'une absence : un 0 de remplacement transforme une absence en
+  // fait, et l'ecran l'affiche avec l'aplomb des vrais chiffres.
+  const n = d && d.prix_ajustes
+  const ajuste = (on && Number.isInteger(n) && n > 0)
+    ? `<p class="cal-yf-menu__ajuste">${icone('i-alert')}<span>${esc(t('cal.yf_adjusted', { n }))}</span></p>` : ''
+  const entrees = ENTREES_YF.map(e => `<a class="cal-yf-menu__entree" href="${esc(urlYf(e.page, bien.id, e.params))}">
+      ${icone(e.icone)}<span class="cal-yf-menu__nom">${esc(t(e.cle))}</span>
+      ${(r => r ? `<span class="cal-yf-menu__repere">${esc(r)}</span>` : '')(repereYf(e.repere, d))}
+    </a>`).join('')
+  // Le pied. Les deux gestes touchent au reglage tarifaire : masques sans le
+  // droit `reglages` en ecriture — et la garde REELLE reste le serveur, qui
+  // refuse la bascule a qui ne l'a pas (`/api/yield-pilote`, reglages write).
+  // Ici on ne fait qu'ouvrir une page : un masquage suffit a ne pas proposer
+  // un geste impossible, il ne protege rien et n'a pas a le faire.
+  const peutRegler = !etat.lectureSeule && peutEcrire('reglages')
+  const pied = !peutRegler ? '' : on
+    ? `<div class="cal-yf-menu__pied"><a class="link cal-yf-menu__lien" href="${esc(urlYf('prix', bien.id))}">${esc(t('cal.yf_settings'))}</a></div>`
+    : `<div class="cal-yf-menu__pied"><a class="cal-yf-menu__activer" href="${esc(urlYf('prix', bien.id, { activer: '1' }))}">${esc(t('cal.yf_activate'))}</a></div>`
+  return `<div class="cal-yf-menu__entete">
+      <span class="cal-yf-menu__titre" id="h-yf">${esc(t('cal.yf_title'))}</span>
+      <span class="cal-yf-menu__bien">${esc(bien.name || '')}</span>
+      <span class="cal-yf-menu__pastille cal-yf-menu__pastille--${on ? 'on' : 'off'}">${esc(t(on ? 'cal.yf_state_on' : 'cal.yf_state_off'))}</span>
+    </div>
+    ${ajuste}${entrees}${pied}`
+}
+
+function placerMenuYf (bouton) {
+  const menu = $('[data-bind="yf-menu"]')
+  // Au telephone, le volet du bas est pose par la feuille de style : on EFFACE
+  // les coordonnees du popover, sinon le style en ligne les garderait d'une
+  // ouverture a l'autre quand on tourne l'appareil.
+  if (!estLarge()) { menu.style.top = ''; menu.style.insetInlineStart = ''; return }
+  const r = bouton.getBoundingClientRect()
+  const large = menu.offsetWidth || 320
+  const gauche = Math.min(Math.max(8, r.left), window.innerWidth - large - 8)
+  const place = window.innerHeight - r.bottom
+  menu.style.insetInlineStart = gauche + 'px'
+  // Sous le bouton s'il y a la place, au-dessus sinon — un menu qui deborde
+  // en bas de la fenetre est un menu qu'on ne lit pas.
+  if (place < (menu.offsetHeight || 260) + 12 && r.top > place) {
+    menu.style.top = Math.max(8, r.top - (menu.offsetHeight || 260) - 6) + 'px'
+  } else {
+    menu.style.top = (r.bottom + 6) + 'px'
+  }
+}
+
+// ⚠ LE FOCUS NE SE REPREND QUE SUR UNE FERMETURE DEMANDEE — constat de la
+// review du 28 octobre 2026. Le rendre a chaque chemin de fermeture faisait
+// deux degats, tous deux invisibles au developpeur :
+//   · l'hote ouvre le menu, puis clique une case de prix pour taper un
+//     montant. La case est `tabIndex = 0` et sa saisie vit dans un `keydown` :
+//     le clic dehors fermait le menu ET ramenait le focus sur le bouton, donc
+//     le chiffre tape ensuite tombait sur le bouton. Aucun prix saisi, et rien
+//     a l'ecran pour dire pourquoi.
+//   · un defilement ferme le menu : `focus()` ramenait alors le bandeau du
+//     bien dans la vue, donc DEFAISAIT le defilement de l'hote.
+// Escape et le second clic sur le bouton sont des fermetures DEMANDEES : la
+// main est au clavier, et lui rendre le focus est ce qu'on attend. Un clic
+// ailleurs, un defilement, un redimensionnement ne le sont pas.
+function fermerMenuYf ({ rendreLeFocus = false } = {}) {
+  const menu = $('[data-bind="yf-menu"]')
+  const voile = $('[data-bind="yf-voile"]')
+  if (menu.hidden) return
+  menu.hidden = true
+  voile.hidden = true
+  if (menuYf.bouton && document.contains(menuYf.bouton)) {
+    menuYf.bouton.setAttribute('aria-expanded', 'false')
+    if (rendreLeFocus) menuYf.bouton.focus()
+  }
+  menuYf.bien = null
+  menuYf.bouton = null
+}
+
+async function ouvrirMenuYf (bienId, bouton) {
+  const bien = etat.biens.find(b => b.id === bienId)
+  if (!bien) return
+  const dejaOuvert = menuYf.bien === bienId && !$('[data-bind="yf-menu"]').hidden
+  // Second clic sur le MEME bouton : fermeture demandee, le focus lui revient.
+  // Clic sur un AUTRE bouton : on ferme le premier sans lui rendre le focus,
+  // sinon il reprendrait celui que le nouveau menu s'apprete a recevoir.
+  fermerMenuYf({ rendreLeFocus: dejaOuvert })
+  if (dejaOuvert) return
+  const menu = $('[data-bind="yf-menu"]')
+  const voile = $('[data-bind="yf-voile"]')
+  menuYf.bien = bienId
+  menuYf.bouton = bouton
+  bouton.setAttribute('aria-expanded', 'true')
+  // Le menu s'ouvre TOUT DE SUITE avec ce qu'on sait deja (l'etat du pilote,
+  // le nom), et les reperes arrivent apres : un menu qui attend le reseau pour
+  // s'afficher donne un ecran qui ne repond pas au doigt.
+  menu.innerHTML = menuYfHtml(bien, null) + `<p class="cal-yf-menu__attente">${esc(t('common.loading'))}</p>`
+  menu.hidden = false
+  voile.hidden = estLarge()   // le voile n'est qu'au telephone
+  placerMenuYf(bouton)
+  menu.querySelector('.cal-yf-menu__entree')?.focus()
+  let faits = null
+  try {
+    faits = await appel(`/api/yield-menu?bien=${encodeURIComponent(bienId)}`)
+  } catch (e) {
+    // ⚠ UNE PANNE DE REPERES NE FERME PAS LE MENU. Les quatre entrees mènent
+    // a des pages qui savent se charger seules ; se taire sur les reperes est
+    // exactement ce que la spec demande, et c'est tout ce qu'on perd.
+    logger.error('Calendrier', 'menu yieldflow', e)
+  }
+  // L'hote a pu refermer, ou ouvrir un autre bien, pendant l'appel.
+  if (menuYf.bien !== bienId || menu.hidden) return
+  // ⚠ LE FOCUS NE SURVIT PAS A `innerHTML` — constat de la re-review du
+  // 28 octobre 2026. Le noeud focalise est DETRUIT par le remplacement, et le
+  // focus retombe sur `body` : un hote au clavier ouvre le menu, les reperes
+  // arrivent cent millisecondes plus tard, et sa tabulation repart du haut du
+  // document alors que le menu est ouvert. On ne le rend que s'il etait
+  // DEDANS — sinon on le volerait a l'endroit ou l'hote l'a mis entre-temps.
+  const focusDedans = menu.contains(document.activeElement)
+  menu.innerHTML = menuYfHtml(bien, faits)
+  if (focusDedans) menu.querySelector('.cal-yf-menu__entree')?.focus()
+  placerMenuYf(bouton)
+}
+
+function brancherYf (zone) {
+  zone.querySelectorAll('[data-yf]').forEach(b =>
+    b.addEventListener('click', (e) => { e.stopPropagation(); ouvrirMenuYf(b.dataset.yf, b) }))
+}
+// Fermetures : le voile, la touche d'echappement, un clic dehors, et tout
+// defilement — le popover est place en coordonnees FIXES, donc il se
+// decrocherait de son bouton. Meme regle que le menu de l'angle de la bande.
+$('[data-bind="yf-voile"]').addEventListener('click', () => fermerMenuYf())
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') fermerMenuYf({ rendreLeFocus: true }) })
+document.addEventListener('click', (e) => {
+  if (menuYf.bien && !e.target.closest('[data-bind="yf-menu"]') && !e.target.closest('[data-yf]')) fermerMenuYf()
+})
+// ⚠ `() => fermerMenuYf()` ET NON `fermerMenuYf` : passee directement, la
+// fonction recevrait l'EVENEMENT comme premier argument, et `rendreLeFocus`
+// serait lu dessus. Il vaut `undefined` aujourd'hui, donc le defaut serait
+// inerte — et il cesserait de l'etre le jour ou un objet d'options porterait
+// un nom present sur un evenement.
+window.addEventListener('scroll', () => fermerMenuYf(), { passive: true })
+$('[data-bind="planning"]').addEventListener('scroll', () => fermerMenuYf(), { passive: true })
+window.addEventListener('resize', () => fermerMenuYf())
+
 // ─── L'ORDRE des biens : la liste etat.choisis, persistee et COMMUNE aux
 //     deux ecrans. On attrape un bloc par la POIGNEE de son bandeau ; au
 //     doigt, la section sous le doigt devient la cible.
@@ -1036,6 +1263,7 @@ function brancherPlanning () {
   zone.querySelectorAll('[data-reduire]').forEach(b => b.addEventListener('click', () => reduireBien(b.dataset.reduire)))
   zone.querySelectorAll('[data-resa]').forEach(b => b.addEventListener('click', () => ouvrirFicheResa(b.dataset.bien, b.dataset.resa)))
   zone.querySelectorAll('[data-blocage]').forEach(b => b.addEventListener('click', () => ouvrirFicheBlocage(b.dataset.bien, b.dataset.blocage)))
+  brancherYf(zone)
   brancherDrag(zone)
 }
 // La navigation de mois (telephone) : UNE regle, sens 0 = retour au mois
@@ -1174,6 +1402,7 @@ function brancherMobile () {
   // laissait la barre d'actions AFFICHEE, annoncant deux nuits, avec tous ses
   // boutons inertes — le defaut exact que le point 6 dit fermer ailleurs.
   zone.querySelectorAll('[data-plus]').forEach(b => b.addEventListener('click', () => { viderSelection(); ouvrirFormulaire('reservation', [AUJOURDHUI], b.dataset.plus) }))
+  brancherYf(zone)
   brancherDrag(zone)
 }
 

@@ -170,6 +170,11 @@
     if (error) return corps('<p class="non-calc">Impossible de lire la liste des logements.</p>')
     if (!data || !data.length) return corps('<p class="non-calc">Aucun logement accessible sur ce compte.</p>')
     el('mg-bien').innerHTML = data.map(b => `<option value="${ech(b.id)}">${ech(b.name)}</option>`).join('')
+    // Le bien demande par l'URL (?bien=<uuid>), pose par le menu YieldFlow du
+    // calendrier. La garde `data.some(...)` : un identifiant inconnu ou d'un
+    // autre compte laisse le selecteur ou il est.
+    const voulu = new URLSearchParams(location.search).get('bien')
+    if (voulu && data.some(b => b.id === voulu)) el('mg-bien').value = voulu
     el('mg-bien').addEventListener('change', charger)
     charger()
   }

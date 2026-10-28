@@ -566,9 +566,17 @@
     return d.toISOString().slice(0, 7)
   }
 
+  // ?activer=1 — pose par le menu YieldFlow du calendrier.
+  // ⚠ IL N'ACTIVE RIEN. Il OUVRE le parcours d'activation existant, avec sa
+  // confirmation « N nuits ont deja un prix au calendrier », comptee SERVEUR.
+  // Jamais de bascule en un clic : c'est la decision du 22 septembre 2026, et
+  // elle vaut quelle que soit la porte par laquelle on entre sur cet ecran.
+  let activerDemande = false
+
   async function init () {
     session = await requireAuth()
     if (!session) return
+    activerDemande = new URLSearchParams(location.search).get('activer') === '1'
     renderSidebar('yield-prix').catch(e => console.error('[yield-prix] sidebar', e))
     mois = new Date().toISOString().slice(0, 7)
     const ok = await chargerBiens()
@@ -594,6 +602,13 @@
     }
     el('yp-bien').innerHTML = data
       .map(b => `<option value="${ech(b.id)}">${ech(b.name)}</option>`).join('')
+    // Le bien demande par l'URL (?bien=<uuid>), pose par le menu YieldFlow du
+    // calendrier. ⚠ LA GARDE `data.some(...)` EST LE POINT : un identifiant
+    // inconnu, ou le bien d'un AUTRE compte, laisserait sinon le selecteur sur
+    // une valeur vide et l'ecran chargerait pour personne. Absent ou inconnu :
+    // le selecteur ne bouge pas, et la page se comporte comme avant ce lot.
+    const voulu = new URLSearchParams(location.search).get('bien')
+    if (voulu && data.some(b => b.id === voulu)) el('yp-bien').value = voulu
     return true
   }
 
@@ -670,6 +685,32 @@
         ? 'Prédiction de prix activée : YieldFlow ouvre les dates de la fenêtre et entretient leurs prix chaque jour. Vos indisponibilités ne sont jamais touchées. Cliquez pour désactiver.'
         : 'Prédiction de prix désactivée : vous saisissez vos prix à la main dans le calendrier. Cliquez pour activer.')
     etat.onclick = () => confirmerBascule(yf ? 'calendrier' : 'yieldflow')
+    // ⚠ LA DEMANDE SE CONSOMME DES QUE L'ETAT EST LU, dans tous les cas. Sans
+    // cela, elle resterait armee et s'ouvrirait plus tard sur un AUTRE bien,
+    // celui que l'hote aurait choisi au selecteur entre-temps.
+    if (activerDemande) {
+      activerDemande = false
+      // ⚠⚠ ET L'OUVERTURE N'A LIEU QUE SI LE BIEN AFFICHE EST BIEN CELUI QU'ON
+      // A DEMANDE — constat de la review du 28 octobre 2026, et c'est le plus
+      // grave du lot. La garde de `chargerBiens` protege le SELECTEUR : un
+      // `?bien=` inconnu le laisse sur le PREMIER logement. Elle ne protegeait
+      // pas l'ACTIVATION, qui s'ouvrait quand meme — sur ce premier logement.
+      //
+      // Le scenario coute cher et n'a rien d'exotique : l'hote clique
+      // « Activer le pilote automatique » depuis le menu du calendrier pour
+      // « La bulle » ; entre-temps le bien a quitte le compte, ou l'URL est un
+      // favori perimé. prix.html ne retrouve pas l'uuid, garde « Coeur de
+      // vie 23 » selectionne, et ouvre la confirmation d'activation pour
+      // CELUI-LA. Un clic de plus — et `basculerPilote` poste
+      // `el('yp-bien').value` — mettait le mauvais logement sous YieldFlow,
+      // qui se met alors a pousser des prix au canal.
+      //
+      // La regle est donc : on n'ouvre que sur le bien DESIGNE, et seulement
+      // s'il est celui qui est affiche. Pas de bien designe = pas d'ouverture.
+      const voulu = new URLSearchParams(location.search).get('bien')
+      const affiche = el('yp-bien').value
+      if (voulu && voulu === affiche && !yf && !bloque) confirmerBascule('yieldflow')
+    }
     if (!yf) { bloc.hidden = true; bloc.innerHTML = ''; return }
     bloc.hidden = false
     // ⚠ CE QUE LE MODE N'EMPORTE PAS SE DIT AUSSI. Sans cette phrase, l'hote
