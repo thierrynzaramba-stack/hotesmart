@@ -212,6 +212,69 @@ ligne de ces modules avant votre réponse.
 
 ---
 
+## 5 bis. Q5 TRANCHÉE — 28 octobre 2026
+
+Thierry : *« Données nommées `nuits_indisponibles` et `montant_affiche_cents`,
+jamais "revenu". À l'écran : "occupé chez les comparables au \<date\>", jamais
+"réservé", et la mention "estimation à partir des prix affichés". Relevé mensuel
+en V1, le pas plus fin en dette. »*
+
+⚠ **ET J'AJOUTE UNE DISTINCTION QU'IL FAUT TENIR, parce que les deux chiffres
+ne sont pas la même grandeur.** Sa règle vise la donnée du FUTUR, reconstruite
+depuis `available` et `rate`. Le chiffre des mois CLOS, lui, vient d'ailleurs :
+c'est le champ `revenue` de `GET /listings/metrics/all`, l'estimation d'AirROI
+elle-même. L'appeler `montant_affiche_cents` serait faux — il ne vient d'aucun
+prix affiché.
+
+**Deux colonnes, donc, et jamais une seule :**
+
+| colonne | nature | d'où elle vient |
+|---|---|---|
+| `montant_estime_cents` | `clos` | `revenue` mensuel d'AirROI pour l'annonce |
+| `montant_affiche_cents` | `futur` | Σ `rate` des nuits `available = false` du mois |
+
+Aucune ne s'appelle « revenu », conformément à sa règle. Les fondre en une
+seule colonne serait exactement la confusion que ce dépôt paie à répétition :
+deux grandeurs différentes sous un même nom finissent additionnées.
+
+---
+
+## 5 ter. LE SCHÉMA
+
+`comparables_releves` — **un relevé, pas un état.** Une ligne par
+(logement, comparable, mois, date de relevé). On garde tout : c'est ce qui rend
+la comparaison « à délai égal » possible plus tard, et c'est ce qui affranchit
+du cache 90 jours.
+
+| colonne | type | rôle |
+|---|---|---|
+| `user_id` | uuid | le compte, pour le cloisonnement |
+| `property_id` | uuid → `properties(id)` on delete cascade | le logement dont c'est un comparable |
+| `listing_id` | text, `~ '^[0-9]{1,24}$'` | l'annonce, même forme que `comparables_retenus` |
+| `mois` | date | le **premier jour** du mois. Une date, pas « YYYY-MM » : un index sur une date se sert |
+| `nature` | text, `in ('clos','futur')` | ce que la ligne mesure |
+| `montant_estime_cents` | bigint, nullable | voir §5 bis |
+| `montant_affiche_cents` | bigint, nullable | voir §5 bis |
+| `nuits_indisponibles` | integer, nullable | nuits `available = false` du mois |
+| `nuits_mesurees` | integer, nullable | combien de jours du mois le relevé couvrait réellement |
+| `motif` | text, nullable | **pourquoi** le montant est nul, quand il l'est |
+| `releve_le` | date | la date de la photo. ⚠ Dans la clé d'unicité : une photo n'écrase jamais la précédente |
+| `source` | text | l'appel d'où vient la ligne |
+
+**Unicité** : `(property_id, listing_id, mois, releve_le)`.
+
+⚠ **`nuits_mesurees` N'EST PAS DÉCORATIF.** Le calendrier porte ~360 jours : le
+dernier mois de la fenêtre est **tronqué**. Sans ce compte, un mois couvert sur
+9 jours se lirait comme un mois creux — le même défaut que la fenêtre de
+relecture plus petite que la fenêtre écrite, déjà payé sur la bascule Channex.
+L'écran refuse un mois dont la couverture est partielle, et le **dit**.
+
+⚠ **UN `null` PORTE TOUJOURS SON `motif`.** Jamais un 0 pour une absence :
+c'est la règle du dépôt, et c'est le défaut que la recette de la vue Année
+vient de corriger trois fois.
+
+---
+
 ## 6. Ce que je ne ferai PAS sans une décision explicite
 
 - aucun appel AirROI **nouveau** depuis un écran ;
