@@ -3828,3 +3828,95 @@ test("LE TEST QUI COMPTE : AUCUNE observation avant le premier defilement", () =
   assert.strictEqual(opts.observateurs[0].cibles.length, 1,
     'apres le defilement, la sentinelle n est toujours pas observee')
 })
+
+// ─── LE MOTIF DU MOIS ECARTE, DANS L'INFO-BULLE (recette du 28 octobre) ────
+
+// Une bande dont OCTOBRE est ecarte pour couverture partielle : l'endpoint le
+// dit par `partiels`, et aucun mois d'octobre n'est dans `mois`.
+const compAvecPartiel = (partiels = ['2026-10']) => ({
+  'uuid-1': {
+    releve_le: '2026-10-06',
+    partiels,
+    mois: {
+      '2026-09': { nature: 'clos', min_cents: 500000, max_cents: 900000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' },
+      '2026-11': { nature: 'futur', min_cents: 100000, max_cents: 300000, comparables: 8, sans_activite: 0, releve_le: '2026-10-06' }
+    }
+  }
+})
+
+// Les `<title>` de la courbe, dans l'ordre du balisage.
+const bullesDeLaCourbe = (p) =>
+  [...String(p.cache('[data-bind="revenue-annee-courbe"]').innerHTML)
+    .matchAll(/<title>([\s\S]*?)<\/title>/g)].map(m => m[1])
+
+test("LE TEST QUI COMPTE : le mois ECARTE dit son motif dans l info-bulle", () => {
+  // ⚠ DEMANDE DE THIERRY, MOT POUR MOT : « pas de phrase en plus sous la bande
+  // (le texte est deja trop long, c'est en dette), mets le motif dans
+  // l'info-bulle du mois en cours, au survol / au toucher ». Le motif existe
+  // deja en base, pose a l'ecriture ; l'ecran le jetait, et l'hote voyait « un
+  // trou entre septembre et novembre » sans explication.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1',
+    comparables: compAvecPartiel(),
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-10': recuDe(40000) },
+      par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-10': recuDe(40000) } },
+      hors_biens: {}
+    }
+  })
+  const bulles = bullesDeLaCourbe(p)
+  assert.ok(bulles.length >= 2, `${bulles.length} info-bulle(s) : la courbe ne trace plus de points`)
+  const oct = bulles.filter(b => /annee_comparables_partiel/.test(b))
+  assert.ok(oct.length >= 1, `aucune info-bulle ne porte le motif : ${bulles.join(' | ')}`)
+  // ⚠ ET C'EST LA FORMULATION DU MOIS EN COURS, pas l'autre.
+  assert.ok(oct.every(b => /annee_comparables_partiel(?!_autre)/.test(b)),
+    `octobre 2026 est le mois en cours, et l info-bulle dit : ${oct.join(' | ')}`)
+  // Septembre, qui a sa bande, ne dit rien.
+  const sept = bulles.filter(b => !/annee_comparables_partiel/.test(b))
+  assert.ok(sept.length >= 1,
+    'tous les mois portent le motif : il ne vise plus le mois ecarte')
+})
+
+test("LE TEST QUI COMPTE : un mois partiel qui n est PAS le mois en cours ne dit pas « en cours »", () => {
+  // ⚠ LE DERNIER MOIS DE LA FENETRE EST TRONQUE AUSSI — le calendrier AirROI
+  // porte ~360 jours. Une seule formulation aurait fini par annoncer « mois en
+  // cours » d'un mois de l'annee suivante. Deux cas, deux phrases.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1',
+    comparables: compAvecPartiel(['2026-12']),
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-12': aVenirDe(40000) },
+      par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-12': aVenirDe(40000) } },
+      hors_biens: {}
+    }
+  })
+  const porteuses = bullesDeLaCourbe(p).filter(b => /annee_comparables_partiel/.test(b))
+  assert.ok(porteuses.length >= 1, 'le mois partiel ne dit rien')
+  assert.ok(porteuses.every(b => /annee_comparables_partiel_autre/.test(b)),
+    `decembre n est pas le mois en cours, et l info-bulle dit : ${porteuses.join(' | ')}`)
+})
+
+test("LE TEST QUI COMPTE : AUCUNE phrase de plus sous la bande", () => {
+  // ⚠ C'EST L'AUTRE MOITIE DE LA DEMANDE, et la seule que le tableau ne montre
+  // pas : « pas de phrase en plus sous la bande ». Les trois paragraphes qui
+  // suivent la courbe sont deja une dette (121) ; le motif du mois partiel ne
+  // doit pas en faire un quatrieme.
+  const p = bancAnnee({
+    aujourdHui: '2026-10-28',
+    biens: [{ id: 'uuid-1', name: 'A' }], filtre: 'uuid-1',
+    comparables: compAvecPartiel(),
+    annee: {
+      total: { '2026-09': recuDe(30000), '2026-10': recuDe(40000) },
+      par_bien: { 'uuid-1': { '2026-09': recuDe(30000), '2026-10': recuDe(40000) } },
+      hors_biens: {}
+    }
+  })
+  for (const sel of ['[data-bind="revenue-annee-note"]', '[data-bind="revenue-annee-comparables"]',
+    '[data-bind="revenue-annee-comparables-tous"]', '[data-bind="revenue-annee-reserves"]']) {
+    const n = p.cache(sel)
+    assert.strictEqual(/annee_comparables_partiel/.test(String(n.textContent || '')), false,
+      `${sel} porte le motif du mois partiel : c est une phrase de plus sous la bande`)
+  }
+})

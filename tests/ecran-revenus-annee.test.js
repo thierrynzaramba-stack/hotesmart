@@ -453,6 +453,34 @@ test("LE TEST QUI COMPTE : un mois dont la COUVERTURE est partielle est ecarte",
   const mois = r.charge.comparables.mois
   assert.ok(!mois['2026-12'], 'un mois couvert sur 4 nuits sur 31 est trace comme un mois entier')
   assert.ok(mois['2026-11'], 'le mois complet a disparu : le test ne demontre rien')
+  // ⚠ ET IL SE NOMME, au lieu d'etre perdu en silence. Demande de Thierry du
+  // 28 octobre 2026, en recette : il avait vu « un trou entre septembre et
+  // novembre » sans explication. Le motif existe deja en base, pose a
+  // l'ecriture ; l'endpoint le jetait. Il part desormais dans `partiels`, et
+  // l'ecran le met dans l'info-bulle du mois — pas en phrase sous la bande, le
+  // texte y est deja trop long (dette 121).
+  assert.deepStrictEqual(r.charge.comparables.partiels, ['2026-12'],
+    `les mois ecartes pour couverture partielle ne sont pas nommes : ${JSON.stringify(r.charge.comparables.partiels)}`)
+})
+
+test("LE TEST QUI COMPTE : un mois QUI A SA BANDE n est jamais annonce partiel", async () => {
+  // ⚠ UNE BANDE ENTIERE QU'ON ANNONCERAIT « releve partiel » FERAIT DOUTER
+  // D'UNE MESURE JUSTE. Un mois peut porter deux comparables dont un seul est
+  // tronque : le tronque sort, la bande existe avec un comparable de moins —
+  // ce que la note dit deja —, et le mois n'est PAS partiel.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      // Deux annonces sur le MEME mois : l'une entiere, l'autre tronquee.
+      releve({ listing_id: '111', mois: '2026-11-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 300000, nuits_mesurees: 30 }),
+      releve({ listing_id: '222', mois: '2026-11-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 9380, nuits_mesurees: 3 }),
+      // Et un mois dont TOUTES les annonces sont tronquees : lui est partiel.
+      releve({ listing_id: '111', mois: '2026-12-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 9380, nuits_mesurees: 4 })
+    ]
+  })
+  assert.ok(r.charge.comparables.mois['2026-11'], 'le mois a perdu sa bande')
+  assert.deepStrictEqual(r.charge.comparables.partiels, ['2026-12'],
+    `novembre a une bande et se dit partiel : ${JSON.stringify(r.charge.comparables.partiels)}`)
 })
 
 test("LE TEST QUI COMPTE : deux PHOTOS DE DATES DIFFERENTES ne se melangent pas", async () => {

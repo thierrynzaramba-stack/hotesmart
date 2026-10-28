@@ -742,6 +742,8 @@
   "revenue.annee_comparables_fermes": "{n, plural, one {# comparable sin actividad} other {# comparables sin actividad}} en algunos meses: excluidos del mínimo y del máximo, porque un alojamiento cerrado no ganó cero — no estaba en el mercado.",
   "revenue.annee_comparables_legende": "comparables (mín – máx)",
   "revenue.annee_comparables_legende_futur": "ocupado en los comparables",
+  "revenue.annee_comparables_partiel": "comparables: mes en curso, muestra parcial",
+  "revenue.annee_comparables_partiel_autre": "comparables: muestra parcial",
   "revenue.annee_comparables_note": "Bandas: el mes más bajo y el más alto entre sus {n} alojamientos comparables, registrados el {date}. La banda oscura es su ingreso estimado en los meses cerrados; la clara es lo que está OCUPADO en ellos en los meses próximos — estimación a partir de los precios mostrados, y ocupado no es reservado.",
   "revenue.annee_comparables_tous": "Cada alojamiento tiene sus propios comparables: elija uno para ver su banda.",
   "revenue.annee_filtre_aria": "Filtrar la curva por alojamiento",
