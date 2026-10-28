@@ -176,6 +176,17 @@ const etat = {
   serrures: [],            // serrures du bien choisi (property_locks -> locks)
   evaluations: new Map(),  // bookId -> 'evaluable' | 'publiee' | 'rien' (dette 67, via le BUS)
   modeEnCours: false,      // une bascule a la fois
+  // ⚠ DEUX DRAPEAUX, PARCE QUE TOUTES LES ECRITURES NE GELENT PAS LA MEME
+  // CHOSE (recette du 28 octobre 2026, points 1 et 3 — UNE seule cause).
+  // `modeEnCours` dit « une ecriture de reglage est en cours » : il garde la
+  // reentrance et les contrôles qui ENVOIENT. `panneauEnCours` dit « c'est
+  // l'enregistrement du panneau » : lui seul gele ce qui n'edite que
+  // `etat.delaisEdit`, parce que `enregistrerPanneau` a DEJA lu le formulaire
+  // et qu'une valeur changee apres sa lecture ferait mentir l'ecran.
+  // Il est pose et retire sur les MEMES lignes que `modeEnCours` dans
+  // `enregistrerPanneau`, et nulle part ailleurs : `panneauEnCours` vrai
+  // implique donc `modeEnCours` vrai, et les deux ne peuvent pas diverger.
+  panneauEnCours: false,   // l'enregistrement du panneau, lui seul
   ouverte: null            // bookId de la conversation ouverte
 }
 const peutEcrireMessages = () => { try { return peutEcrire('messages') } catch { return false } }
@@ -1592,7 +1603,14 @@ function libellePilule (p) {
 // defilement horizontal possible, barre masquee sur telephone. Une seconde
 // regle identique aurait divergé.
 function rangeePilules (champ, valeur, surMesure) {
-  const off = etat.modeEnCours ? 'disabled' : ''
+  // ⚠ GELE PAR L'ENREGISTREMENT, PAS PAR LA PAUSE (recette du 28 octobre
+  // 2026, point 3 : « juste apres le decochage de la pause, le premier clic
+  // sur une pilule est perdu »). Un clic de pilule n'ecrit rien : il pose une
+  // valeur dans `etat.delaisEdit`, que le re-rendu de fin de `basculerPause`
+  // relit. Le desarmer pendant une ecriture qui ne le concerne pas rendait le
+  // geste muet — et le navigateur avale un clic sur un bouton `disabled`,
+  // donc l'hote n'avait meme pas un message.
+  const off = etat.panneauEnCours ? 'disabled' : ''
   const pilules = PILULES.map(p =>
     '<button type="button" class="tab" data-delai="' + champ + '|' + p.v + '" aria-pressed="'
     + (valeur === p.v) + '" ' + off + '>' + esc(libellePilule(p)) + '</button>').join('')
@@ -1617,7 +1635,11 @@ function voletIA (ref) {
   if (etat.configIA === null) {
     return '<p class="caption muted" style="padding: 14px 18px">' + esc(t('messages.load_error')) + '</p>'
   }
+  // `off` gele ce qui ENVOIE (la pause, l'enregistrement, les tests) ;
+  // `offEdition` ne gele que pendant l'enregistrement du panneau, pour ce qui
+  // vit dans `etat.delaisEdit` et survit donc a un re-rendu.
   const off = etat.modeEnCours ? 'disabled' : ''
+  const offEdition = etat.panneauEnCours ? 'disabled' : ''
   const d = delaisEnCours(ref)
   const manuel = d.reponse_ia === null
   const surMesureR = !manuel && !VALEURS_PILULES.includes(d.reponse_ia)
@@ -1633,7 +1655,15 @@ function voletIA (ref) {
       // bien une pilule ici. On réutilise leur règle au lieu d'inventer une
       // variante de bouton pour un seul endroit.
       + '<span class="msg-pilules" role="group">'
-      + '<button type="button" class="tab" data-delai-manuel aria-pressed="' + manuel + '" ' + off + '>'
+      // ⚠ `offEdition`, PAS `off` — ET C'EST LE POINT 1 DE LA RECETTE DU
+      // 28 OCTOBRE 2026, « aucune confirmation n'apparait ». Le gestionnaire
+      // etait bien branche et la confirmation bien ecrite : le bouton etait
+      // `disabled`, parce qu'une ecriture de pause etait en vol. Un navigateur
+      // n'envoie AUCUN `click` sur un bouton desarme — donc pas de dialogue,
+      // pas de bascule, et rien a l'ecran. La garde produit de Thierry
+      // tombait par un `disabled`, pas par une ligne manquante : c'est
+      // pourquoi le test qui GREPAIT la ligne restait vert.
+      + '<button type="button" class="tab" data-delai-manuel aria-pressed="' + manuel + '" ' + offEdition + '>'
       + icone('i-check') + esc(t('messages.delai_manuel')) + '</button></span>'
       // ⚠ « EN AUTO, L'IA N'ENVOIE SEULE… » EST RETIRÉ (demande de Thierry,
       // 28 octobre 2026) : plus aucun « Auto » à l'écran. Le mot ne décrit plus
@@ -1665,13 +1695,13 @@ function voletIA (ref) {
     + '<div class="msg-tiroir__bloc">'
       + '<label class="row caption" style="gap: 10px; font-weight: 600">' + icone('i-today')
       + '<span style="flex: 1">' + esc(t('messages.sourdine_titre')) + '</span>'
-      + '<input type="checkbox" data-sourdine-active ' + (d.sourdine.active ? 'checked' : '') + ' ' + off
+      + '<input type="checkbox" data-sourdine-active ' + (d.sourdine.active ? 'checked' : '') + ' ' + offEdition
       + ' style="accent-color: var(--info); width: 20px; height: 20px"></label>'
       + '<span class="row" style="gap: 8px; align-items: center">'
       + '<input type="time" data-sourdine-debut value="' + esc(d.sourdine.debut) + '" aria-label="'
-      + esc(t('messages.sourdine_debut')) + '" ' + off + '>' + icone('i-chevron')
+      + esc(t('messages.sourdine_debut')) + '" ' + offEdition + '>' + icone('i-chevron')
       + '<input type="time" data-sourdine-fin value="' + esc(d.sourdine.fin) + '" aria-label="'
-      + esc(t('messages.sourdine_fin')) + '" ' + off + '></span>'
+      + esc(t('messages.sourdine_fin')) + '" ' + offEdition + '></span>'
       + '<p class="caption muted">' + esc(t('messages.sourdine_aide')) + '</p>'
     + '</div>'
     + '<div class="msg-tiroir__bloc">'
@@ -1884,9 +1914,13 @@ async function enregistrerPanneau (corps, ref) {
   const saisi = lireLePanneau(corps, ref)
 
   etat.modeEnCours = true
+  etat.panneauEnCours = true
   geler(corps, true)
   renderTiroir()
   const echoues = []
+  // Pas un echec : un choix de l'hote, qui se dit quand meme — il doit savoir
+  // que son ancien compte a rebours court toujours sur ces propositions.
+  let echeancesGardees = false
 
   // 1. Les delais (cible `delais`).
   // ⚠ ET LES BROUILLONS DEJA EN ATTENTE SUIVENT (decision de Thierry du
@@ -1929,6 +1963,18 @@ async function enregistrerPanneau (corps, ref) {
     // en attente gardent leur echeance (le comportement d'avant ce lot, et
     // exactement ce que l'hote a choisi), et le reglage gouverne les suivants.
     let propager = true
+    // ⚠ REFUSER N'EST PAS ECHOUER (recette du 28 octobre 2026, point 4 :
+    // « Enregistre en partie. Non enregistre : les propositions deja en
+    // attente » fait croire a un echec). Quand l'hote repond NON a la
+    // question, tout ce qu'il a demande est fait : le reglage est enregistre
+    // et ses propositions en attente gardent leur echeance — c'est
+    // exactement son choix. Le dire comme une partie non enregistree lui fait
+    // relancer un geste qui a reussi, et usera la confiance qu'on a dans les
+    // notes de cet ecran.
+    // Les DEUX autres chemins qui posent `propager = false` restent des
+    // echecs, eux : l'hote n'a rien choisi, et ses propositions en attente
+    // n'ont pas suivi son reglage sans qu'il l'ait voulu.
+    let refusHote = false
     // Sur un bien qu'on SAIT en pause, aucune question : rien ne peut partir
     // (`brouillons-dus.js` refuse des l'entree), donc annoncer un envoi serait
     // le mensonge que ce chantier passe son temps a corriger. Si la carte des
@@ -1964,15 +2010,20 @@ async function enregistrerPanneau (corps, ref) {
       } else if (ap.echues > 0
         && !window.confirm(t('messages.delai_arriere_confirm', { n: ap.echues }))) {
         propager = false
+        refusHote = true
       }
     }
 
     const r = await appel('/api/agent-config',
       { delais_ref: ref, delais: chargeDelais, propager })
     const b = r && r.brouillons
-    if (!propager) {
-      // L'hote a refuse, ou l'ecran n'a pas pu compter : ses reglages sont
-      // enregistres, ses propositions deja en attente gardent leur echeance.
+    if (refusHote) {
+      // Son choix, pris : la note le dira en vert, pas en rouge.
+      echeancesGardees = true
+    } else if (!propager) {
+      // L'ecran n'a pas pu compter : les reglages sont enregistres, mais les
+      // propositions deja en attente n'ont pas suivi, et l'hote ne l'a pas
+      // choisi. Celui-la reste un echec partiel.
       echoues.push(t('messages.partie_brouillons'))
     } else if (!b || b.ok !== true) {
       logger.error('Messages', 'brouillons en attente', (b && b.motif) || 'bilan absent')
@@ -2052,10 +2103,21 @@ async function enregistrerPanneau (corps, ref) {
     }
   }
   etat.modeEnCours = false
+  etat.panneauEnCours = false
   renderTiroir()
-  noteReglage(echoues.length
-    ? t('messages.panneau_partiel', { parties: echoues.join(', ') })
-    : t('messages.panneau_saved'), echoues.length === 0)
+  // ⚠ DEUX CLES, PAS UN « Enregistre » + '.' EN JAVASCRIPT. La ponctuation
+  // appartient au texte traduit ; une phrase assemblee a coups d'operateurs se
+  // traduit mal. D'ou `echeances_gardees_ok`, qui porte la phrase ENTIERE que
+  // Thierry a dictee, et `echeances_gardees`, qui porte la seule seconde
+  // moitie — parce que quand une partie a vraiment echoue, elle s'AJOUTE a
+  // l'echec : l'hote doit lire les deux faits, celui qu'il a choisi et celui
+  // qui a rate.
+  noteReglage(
+    echoues.length
+      ? t('messages.panneau_partiel', { parties: echoues.join(', ') })
+        + (echeancesGardees ? ' ' + t('messages.echeances_gardees') : '')
+      : (echeancesGardees ? t('messages.echeances_gardees_ok') : t('messages.panneau_saved')),
+    echoues.length === 0)
 }
 
 // Les consignes : meme table, meme RLS que l'ancienne page, mais INSERT
@@ -2106,6 +2168,17 @@ async function testerCanal (corps, ref, type, canal) {
   }
 }
 
+// Le bien du fil ouvert, s'il y en a un ET qu'on le connait. `propertyId`
+// d'une conversation est la REFERENCE PROVIDER — la meme cle que `etat.biens`,
+// `etat.pauses` et le selecteur du tiroir (properties.id est un UUID, et ne
+// se joint jamais naivement a ces tables-la).
+function bienDuFilOuvert () {
+  if (etat.ouverte === null) return null
+  const c = etat.conversations.find(x => String(x.bookId) === String(etat.ouverte))
+  const ref = c ? String(c.propertyId) : ''
+  return etat.biens.has(ref) ? ref : null
+}
+
 function ouvrirTiroir (ouvert) {
   const tiroir = $('[data-bind="tiroir"]')
   tiroir.hidden = !ouvert
@@ -2114,7 +2187,22 @@ function ouvrirTiroir (ouvert) {
   // aria-pressed ; les boutons portent aria-expanded — releve en review).
   document.querySelectorAll('[data-ouvre-volet]').forEach(b =>
     b.setAttribute('aria-expanded', String(ouvert && etat.tiroirVolet === b.dataset.ouvreVolet)))
-  if (ouvert) renderTiroir()
+  // ⚠ LE PANNEAU S'OUVRE SUR LE BIEN DU FIL OUVERT (recette du 28 octobre
+  // 2026, point 2 : « il s'ouvre sur Maison Jardin alors que le fil ouvert est
+  // Loft Pilotable »). Sans ca, `renderTiroir` retombait sur `refs[0]` — le
+  // premier bien du compte — et l'hote reglait le delai d'un AUTRE logement
+  // que celui qu'il regardait, sans qu'aucun ecran ne le contredise : le
+  // selecteur disait vrai, c'est le regard de l'hote qui etait ailleurs.
+  //
+  // ⚠ A L'OUVERTURE SEULEMENT, PAS A CHAQUE RENDU. Un choix fait au selecteur
+  // doit tenir : si `renderTiroir` le recalculait, il ecraserait le bien que
+  // l'hote vient de choisir a la main, au premier re-rendu venu (un clic de
+  // pilule en declenche un).
+  if (ouvert) {
+    const duFil = bienDuFilOuvert()
+    if (duFil) etat.tiroirBien = duFil
+    renderTiroir()
+  }
 }
 
 // ─── Epingle et archivage manuel (etape 4, portes de l'ancienne page) ──────

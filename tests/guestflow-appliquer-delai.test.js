@@ -643,8 +643,22 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   const iRech = page.indexOf('if (brouillonsRepris > 0)')
   const iVerrou = page.indexOf('etat.modeEnCours = false', iRech)
   assert.ok(iVerrou > iRech, 'modeEnCours ne tombe qu apres le rechargement')
-  assert.ok(iVerrou < page.indexOf('noteReglage(echoues.length'),
-    'mais avant le re-rendu et la note')
+  const iNote = page.indexOf('noteReglage(', iVerrou)
+  assert.ok(iNote > iVerrou, 'mais avant le re-rendu et la note')
+  assert.ok(page.indexOf('renderTiroir()', iVerrou) < iNote,
+    'et le re-rendu precede la note : `geler` ne se defait que par un re-rendu')
+  // ⚠ ET LE SECOND DRAPEAU TOMBE AVEC LE PREMIER (recette du 28 octobre 2026).
+  // `panneauEnCours` gele ce qui n edite que `etat.delaisEdit` ; `modeEnCours`
+  // garde ce qui ecrit. S ils divergeaient, le panneau resterait desarme apres
+  // un enregistrement — exactement le defaut que ce lot ferme, a l envers.
+  const poses = [...page.matchAll(/etat\.panneauEnCours = (true|false)/g)].map(m => m[1])
+  assert.deepEqual(poses, ['true', 'false'],
+    'panneauEnCours se pose et se retire une seule fois, dans enregistrerPanneau')
+  assert.ok(Math.abs(page.indexOf('etat.panneauEnCours = false') - iVerrou) < 60,
+    'et il tombe sur la ligne voisine de modeEnCours, pas ailleurs')
+  assert.ok(page.indexOf('etat.panneauEnCours = true')
+    - page.indexOf('etat.modeEnCours = true', page.indexOf('async function enregistrerPanneau')) < 60,
+    'pose de meme, juste a cote')
   for (const f of ['fr', 'en', 'es']) {
     const dict = JSON.parse(lire(`shared/i18n/${f}.json`))
     const phrase = dict['messages.partie_brouillons']

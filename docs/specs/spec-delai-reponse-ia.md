@@ -1135,6 +1135,131 @@ Chaque lot : `npm test` avec le **compte** de rouges lu (`ℹ fail N`, attendu
 locale, KB `guestflow.md` + `alertes.md` dans le **même commit**, puis remise au
 chef de file avec les cinq éléments.
 
+### Les quatre points de la recette du 28 octobre 2026
+
+Quatre défauts relevés par Thierry sur staging, corrigés en un commit. **Les
+points 1 et 3 n'étaient qu'un seul défaut**, et c'est la partie qui vaut d'être
+retenue.
+
+**Points 1 et 3 — une écriture gelait des contrôles qui n'écrivent pas.**
+Symptômes rapportés : « en sortant de *Je valide chaque réponse*, aucune
+confirmation n'apparaît » et « juste après le décochage de la pause, le premier
+clic sur une pilule est perdu ». Même cause : `basculerPause` pose
+`etat.modeEnCours = true` pendant ses **deux** appels réseau (écriture puis
+relecture), et tout le panneau se rendait `disabled` — y compris la pilule
+« Je valide chaque réponse » et les pilules de délai, **qui n'écrivent rien** :
+elles posent une valeur dans `etat.delaisEdit`, que le re-rendu de fin de
+`basculerPause` relit. Un navigateur n'envoie **aucun** `click` sur un bouton
+désarmé : pas de dialogue, pas de bascule, rien à l'écran.
+
+⚠ **Et c'est pour ça que le test qui gardait la confirmation restait vert.**
+`tests/messages-v5.test.js` cherchait la LIGNE `window.confirm(t('messages.
+mode_confirm_auto'))` dans la source. La ligne y était, le gestionnaire était
+branché, le texte était traduit dans les trois langues — et la garde produit du
+11 octobre 2026 tombait quand même, par un attribut HTML. **Un grep prouve
+qu'un texte existe ; il ne prouve pas qu'un geste le traverse.**
+
+La règle posée : **pendant une écriture de réglage, seul ce qui ENVOIE est
+gelé.** Deux drapeaux, et un seul endroit où ils se posent :
+
+| drapeau | posé par | gèle |
+|---|---|---|
+| `etat.modeEnCours` | toute écriture de réglage | la réentrance, la case de pause, « Enregistrer », les tests de canal, le volet Programmes |
+| `etat.panneauEnCours` | `enregistrerPanneau` **seul** | ce qui ne vit que dans `etat.delaisEdit` : pilules de délai, « Autre… » et ses champs h/min, « Je valide chaque réponse », sourdine |
+
+`panneauEnCours` se pose et se retire sur les lignes **voisines** de
+`modeEnCours`, et nulle part ailleurs : il implique donc `modeEnCours`, et les
+deux ne peuvent pas diverger. Un test le tient
+(`tests/guestflow-appliquer-delai.test.js`). Le gel du panneau pendant
+**l'enregistrement**, lui, reste entier et c'est voulu :
+`enregistrerPanneau` a **déjà lu** le formulaire, et une valeur changée après
+sa lecture ferait mentir l'écran.
+
+**Point 2 — le panneau s'ouvrait sur le mauvais logement.** `renderTiroir`
+retombait sur `refs[0]`, le premier bien du compte. L'hôte réglait donc le délai
+d'un **autre** logement que celui qu'il regardait, sans qu'aucun écran ne le
+contredise : le sélecteur disait vrai, c'est le regard qui était ailleurs.
+`ouvrirTiroir(true)` présélectionne désormais le bien du fil ouvert
+(`bienDuFilOuvert()`, sur la **référence provider** — la clé de `etat.biens`,
+`etat.pauses` et du sélecteur ; `properties.id` est un UUID et ne s'y joint
+jamais). **À l'ouverture seulement** : recalculé à chaque rendu, il écraserait
+le bien que l'hôte vient de choisir à la main, au premier clic de pilule.
+
+**Point 4 — refuser n'est pas échouer.** Répondre NON à la question du nombre
+affichait « Enregistré en partie. Non enregistré : les propositions déjà en
+attente », ce qui fait croire à un échec et fait relancer un geste qui a réussi.
+Or tout ce que l'hôte a demandé est fait : le réglage est enregistré
+(`propager: false`) et ses propositions en attente gardent leur échéance —
+exactement son choix. La note dit maintenant, en **vert** :
+« Enregistré. Les propositions déjà en attente gardent leur échéance. »
+
+⚠ **Les deux autres chemins qui posent `propager = false` restent des échecs**,
+et la distinction est portée par un drapeau séparé (`refusHote`) : quand
+l'écran n'a **pas pu compter**, l'hôte n'a rien choisi et ses propositions en
+attente n'ont pas suivi son réglage sans qu'il l'ait voulu. Les deux cas
+écrivaient le même message ; le refus était le seul à ne pas être un défaut.
+
+### Le banc qui exécute la page
+
+`tests/outils/banc-messages.js` évalue le **vrai** module de
+`pages/messages.html` dans un DOM jsdom — imports retirés, amorce `init()`
+coupée, modules partagés évalués pour de vrai dans la **même** fenêtre, et pour
+seuls doubles l'authentification, le réseau, les droits et le journal. Les
+`window.confirm` y sont gardés **avec leur texte**, donc un test affirme la
+phrase que l'hôte lit.
+
+`tests/messages-panneau-ia-dom.test.js` y rejoue les quatre points en
+cliquant : 14 tests, dont **4 rouges** contre `9fa9ec13` (contre-épreuve par
+`git archive` hors de l'arbre). Les 10 autres décrivent du comportement déjà
+correct, et c'est le constat : **le code de la confirmation était juste depuis
+le début.** Deux mutations rejouées pour s'en assurer — retirer la confirmation
+(2 rouges), et remettre le bouton sous le gel de la pause (1 rouge).
+
+⚠ **Le double supabase de ce banc est délibérément permissif** (il accepte
+n'importe quel maillon de chaîne et rend toujours « aucune ligne, aucune
+erreur »). Un double permissif valide du code qui ne pourrait pas tourner — le
+dépôt l'a payé une fois — donc **aucun test de ce banc n'affirme quoi que ce
+soit sur une requête supabase** : ce qui s'y mesure est le panneau. Les
+requêtes du writer sont éprouvées par leur propre double, strict, dans
+`tests/guestflow-appliquer-delai.test.js`.
+
+### D4 — une bascule de pause efface la saisie non enregistrée du panneau
+
+**Trouvé en corrigeant les quatre points, mesuré, NON corrigé dans ce commit.**
+
+`basculerPause` appelle `renderTiroir()`, qui reconstruit `corps.innerHTML`
+depuis `etat.prompting` et `etat.configIA`, c'est-à-dire **depuis la base**.
+Tout ce qui n'a pas de source dans l'état y est perdu, **sans un mot** :
+
+```
+consigne tapée : « je tape une consigne toute neuve »  →  « ancien »
+destinataire tapé : « nouveau@exemple.test »            →  « »
+```
+
+Les délais et la sourdine y survivent — ils vivent dans `etat.delaisEdit`. Les
+**consignes de l'IA** et les **destinataires d'alerte** n'y survivent pas :
+ils ne vivent que dans le DOM, et `lireLePanneau` ne les lit qu'au moment
+d'« Enregistrer ».
+
+C'est la même famille que le constat grave de la seconde revue de ce chantier
+(« le formulaire se lit avant tout re-rendu ») — et le dépôt porte déjà le
+geste juste à côté : `sauverTextesProgrammes()`, appelé en tête de
+`renderTiroir` pour le volet Programmes.
+
+**Pourquoi ce n'est pas corrigé ici.** Le correctif propre est une **source
+unique** pour la saisie du volet IA, comme `etat.delaisEdit` l'est pour les
+délais — pas une écriture des textes tapés dans `etat.prompting` /
+`etat.configIA`, qui sont censés porter l'état **enregistré** et servent de
+repli à `lireLePanneau` (sans clé Brevo, les destinataires SMS en viennent).
+Écrire du non-enregistré dedans ferait partir des valeurs fantômes. C'est donc
+un petit lot de modèle d'état, pas une retouche, et Thierry a demandé **un**
+commit pour les quatre points.
+
+⚠ **Ce qu'il faut savoir pendant la recette** : taper une consigne ou un
+destinataire **puis** toucher la case de pause perd le texte. La pause est un
+geste d'urgence, immédiat par décision — c'est ce qui rend la collision
+possible.
+
 ---
 
 ## 11. Hors périmètre, relevé pendant l'étape 0

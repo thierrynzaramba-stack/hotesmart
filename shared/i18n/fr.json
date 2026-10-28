@@ -586,6 +586,8 @@
   "messages.delai_aide": "Au premier passage suivant, vérifié toutes les 5 minutes.",
   "messages.delai_arriere_confirm": "Propositions déjà en attente qui pourraient partir dès le prochain passage : {n}. Elles sont plus vieilles que le délai choisi. Continuer ?",
   "messages.delai_autre": "Autre…",
+  "messages.echeances_gardees_ok": "Enregistré. Les propositions déjà en attente gardent leur échéance.",
+  "messages.echeances_gardees": "Les propositions déjà en attente gardent leur échéance.",
   "messages.delai_h": "heures",
   "messages.delai_manuel": "Je valide chaque réponse",
   "messages.delai_min": "minutes",

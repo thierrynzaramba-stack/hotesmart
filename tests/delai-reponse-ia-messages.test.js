@@ -489,8 +489,22 @@ test('⚠ RECETTE 4 : la note du tiroir est VISIBLE, pas au fond d un panneau qu
   assert.match(m[1], /background: var\(--surface\)/,
     'fond opaque, sinon le panneau defile sous le texte')
   // Et c est bien « Enregistré » qui part, avec son drapeau de reussite.
-  assert.ok(/noteReglage\(echoues\.length[\s\S]{0,200}messages\.panneau_saved[\s\S]{0,120}echoues\.length === 0\)/
-    .test(sansCommR(page)), 'un enregistrement complet dit « Enregistré », en vert')
+  // ⚠ LE TEXTE DE LA NOTE SE MESURE DESORMAIS EN CLIQUANT, pas en grepant :
+  // `tests/messages-panneau-ia-dom.test.js` enregistre pour de vrai et lit la
+  // note dans le DOM, dans ses trois cas (succes, refus de la liberation,
+  // echec de la propagation). Ce qui reste ici est la seule chose qu un grep
+  // mesure mieux qu un clic : que le drapeau vert soit decide par l ABSENCE
+  // d echec, et par rien d autre.
+  // L ancre est le verrou de fin d enregistrement, pas « la derniere note du
+  // fichier » : `testerCanal` vient apres et en pose une aussi.
+  const sans = sansCommR(page)
+  const iFin = sans.indexOf('etat.panneauEnCours = false')
+  assert.ok(iFin > 0, 'le verrou du panneau se retire a la fin de l enregistrement')
+  const iDerniere = sans.indexOf('noteReglage(', iFin)
+  assert.ok(iDerniere > iFin, 'et la note suit')
+  const appel = sans.slice(iDerniere, iDerniere + 500)
+  assert.ok(/messages\.panneau_saved/.test(appel), 'un enregistrement complet dit « Enregistré »')
+  assert.ok(/echoues\.length === 0\)/.test(appel), 'et le vert se decide sur l absence d echec')
 })
 
 test('⚠ RECETTE 5 : aucun gabarit de bulle ne porte de retour à la ligne', () => {
