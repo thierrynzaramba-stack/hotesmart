@@ -356,24 +356,72 @@
     // comparables, marche, marche-global et marche-temperature le posent
     // tous. Un oubli isole, pas une famille — verifie ecran par ecran avant
     // de corriger celui-ci.
-    el('yf-bien').addEventListener('change', charger)
-    el('yf-annee').addEventListener('change', charger)
+    //
+    // ⚠ ET LES DEUX PASSENT PAR `chargerSiPossible`, JAMAIS PAR `charger`
+    // DIRECTEMENT — constat C1 de la review du 28 octobre 2026. Le pourquoi
+    // est sur la fonction elle-meme. `yf-annee` portait l'appel NU avant ce
+    // lot : le corriger ici aussi n'elargit pas le lot, c'est le meme defaut
+    // a son second declencheur.
+    el('yf-bien').addEventListener('change', chargerSiPossible)
+    el('yf-annee').addEventListener('change', chargerSiPossible)
     verifierEtendue()
     if (ok && el('yf-bien').value) charger()
+  }
+
+  // ⚠ LES TROIS GESTES QUI REDEMANDENT UNE LECTURE PASSENT PAR ICI — changer
+  // de logement, changer d'année, changer de vue. Deux refus, et ils ne valent
+  // QUE si les trois points d'appel les appliquent : un seul qui appelle
+  // `charger()` directement les désarme pour tout l'écran.
+  //
+  // 1. AUCUN LOGEMENT SÉLECTIONNÉ — `charger()` partirait avec un
+  //    `property_id` vide, et son erreur technique écraserait le message
+  //    honnête « Aucun logement accessible sur ce compte. »
+  // 2. FENÊTRE TROP LARGE — l'endpoint refuserait (400). On compte les
+  //    périodes de `fenetreCourante()`, c'est-à-dire de la fenêtre QU'ON VA
+  //    DEMANDER, pas de celle des champs de dates : hors Exploration, la vue
+  //    ne les demande pas.
+  //
+  // ⚠ ET CETTE GARDE NE LIT PAS `yf-charger.disabled`, C'EST TOUT LE POINT.
+  // Ce drapeau porte TROIS sens écrits à trois endroits : `verifierEtendue`
+  // (l'avertissement d'étendue), `chargerBiens` (liste vide), et `charger()`
+  // lui-même, qui le pose le temps du `fetch` comme VERROU DE REQUÊTE EN VOL.
+  // Une garde qui lit le drapeau sans distinguer les trois avale le changement
+  // de logement pendant toute la durée de la lecture — et l'écran se peint
+  // alors avec le premier bien par ordre alphabétique pendant que le sélecteur
+  // affiche celui que l'hôte a choisi. C'est MOT POUR MOT le défaut de recette
+  // que ce lot ferme.
+  //
+  // ⚠ ET C'EST UNE RÉGRESSION QUE LE PREMIER CORRECTIF AVAIT INTRODUITE, pas
+  // un défaut d'origine : avant lui, `charger()` nu incrémentait `enCours` et
+  // le jeton de séquence écartait la réponse obsolète. Relevé par une review
+  // indépendante le 28 octobre 2026, APRÈS un premier verdict favorable.
+  // Le séquencement reste donc le travail de `enCours`, pas celui d'une garde.
+  //
+  // ⚠ LE DÉFAUT ÉTAIT ANTÉRIEUR AU LOT QUI L'A RÉVÉLÉ (constat C1 de la
+  // review du 28 octobre 2026). `yf-annee` portait déjà
+  // `addEventListener('change', charger)` sans garde avant ce lot ; le
+  // sélecteur de logement n'a fait qu'ajouter un second déclencheur. Corriger
+  // le seul `yf-bien` aurait laissé la moitié du défaut vivante tout en
+  // écrivant qu'on l'avait fermé.
+  //
+  // ⚠ ET LE PREMIER CHARGEMENT, LUI, NE PASSE PAS PAR ICI : `init()` finit
+  // par `if (ok && el('yf-bien').value) charger()`. Sans conséquence mesurée
+  // — `fenetrePilotage()` rend 365 jours et le détail vaut `mois` par défaut,
+  // soit `ceil(365 / 28) = 14` périodes contre un plafond de 100. Si ce chemin
+  // doit se fermer un jour, c'est le premier chargement qui passe par cette
+  // garde, pas une quatrième copie des deux refus.
+  function chargerSiPossible () {
+    if (!el('yf-bien').value) return
+    const periodes = periodesDemandees(fenetreCourante())
+    if (periodes !== null && periodes > PERIODES_LISIBLES) return
+    charger()
   }
 
   function changerVue (nouvelle) {
     if (!nouvelle || nouvelle === vue) return
     vue = nouvelle
     appliquerVue()
-    // ⚠ LES MEMES GARDES QU'AU PREMIER CHARGEMENT — relevé en review.
-    // `charger()` inconditionnel court-circuitait l'avertissement d'étendue
-    // (revenir en Exploration avec une fenêtre trop large repartait en 400) et
-    // écrasait le message honnête « aucun logement accessible » par une erreur
-    // technique.
-    if (!el('yf-bien').value) return
-    if (el('yf-charger').disabled) return
-    charger()
+    chargerSiPossible()
   }
 
   function appliquerVue () {
@@ -405,12 +453,24 @@
 
   // Au plus 200 périodes côté serveur, N-1 compris : on prévient à 100.
   const PERIODES_LISIBLES = 100
+  // ⚠ UN SEUL COMPTAGE, PARTAGÉ PAR L'AVERTISSEMENT ET PAR LA GARDE. Deux
+  // copies divergent, et c'est ce que la garde a payé : elle jugeait par un
+  // drapeau d'affichage au lieu de compter la fenêtre qu'elle demandait.
+  // `null` quand la fenêtre n'est pas lisible — une saisie en cours ne décide
+  // de rien.
+  function periodesDemandees (f) {
+    if (!f || !f.debut || !f.fin || f.fin < f.debut) return null
+    const jours = Math.round((Date.parse(f.fin) - Date.parse(f.debut)) / 86400000) + 1
+    if (f.granularite === 'jour') return jours
+    return f.granularite === 'mois' ? Math.ceil(jours / 28) : Math.ceil(jours / 365)
+  }
+
   function verifierEtendue () {
-    const d = el('yf-debut').value, f = el('yf-fin').value
-    const g = el('yf-granularite').value
-    if (!d || !f || f < d) return
-    const jours = Math.round((Date.parse(f) - Date.parse(d)) / 86400000) + 1
-    const periodes = g === 'jour' ? jours : (g === 'mois' ? Math.ceil(jours / 28) : Math.ceil(jours / 365))
+    const periodes = periodesDemandees({
+      debut: el('yf-debut').value, fin: el('yf-fin').value,
+      granularite: el('yf-granularite').value
+    })
+    if (periodes === null) return
     const trop = periodes > PERIODES_LISIBLES
     el('yf-charger').disabled = trop
     if (trop) {
