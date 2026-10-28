@@ -221,6 +221,19 @@ h1, h2, h3, p { margin: 0; }
 .msg-pilules .tab { height: 36px; padding: 0 12px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; color: var(--info); font-weight: var(--fw-semibold); }
 .msg-pilules .tab[aria-pressed="true"] { border-color: var(--ink); color: var(--ink); font-weight: var(--fw-bold); background: var(--surface); }
 @media (max-width: 720px) { .msg-pilules .tab { height: 44px; padding: 0 14px; } }
+/* ⚠ ET C'EST ICI QUE LA GREFFE S'ARRÊTE — recette du 28 octobre 2026 :
+   « Autre… » était coupé à droite sur ordinateur. La maquette validée portait
+   `flex-wrap: wrap` ; le défilement horizontal n'a de sens qu'au téléphone, où
+   la barre est masquée et le pouce fait le travail. Sur ordinateur, une rangée
+   qui défile cache une option sans le dire. Règle propre aux PILULES : les
+   filtres de la liste, eux, doivent rester sur une seule ligne. */
+@media (min-width: 721px) {
+  .msg-pilules { flex-wrap: wrap; overflow-x: visible; }
+}
+/* Un bouton `.btn` désactivé se grisait (`.btn:disabled`), une pilule non : le
+   gel du panneau pendant l'enregistrement ne se voyait pas. */
+.msg-pilules .tab:disabled { opacity: .5; cursor: not-allowed; }
+.msg-pilules .tab:disabled:hover { background: none; }
 .msg-filtres .tab { height: 36px; padding: 0 14px; font-size: var(--fs-small); border: 1px solid var(--border); flex: none; }
 .msg-filtres .tab[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
 .msg-deroule { overflow-y: auto; flex: 1; }
@@ -341,7 +354,19 @@ h1, h2, h3, p { margin: 0; }
 .prog-carte [data-prog-suppr] { background: none; border: 0; padding: 4px; cursor: pointer; color: var(--muted); }
 .prog-carte [data-prog-suppr]:hover { color: var(--danger); }
 .prog-carte [data-prog-suppr] .icon { width: 15px; height: 15px; }
-.msg-tiroir__note { margin: 10px 18px 0; color: var(--danger); font-weight: var(--fw-semibold); }
+/* ⚠ COLLÉE EN BAS DU TIROIR, et c'est un constat de recette (28 octobre 2026 :
+   « après Enregistrer, aucun retour visible »). La note ÉTAIT bien écrite —
+   `noteReglage` la remplit — mais elle est le DERNIER enfant d'un panneau qui
+   défile en entier (`.msg-tiroir` est en `overflow-y: auto`), donc elle
+   atterrissait hors de l'écran : l'hôte lisait un silence là où le code
+   répondait. `position: sticky` la garde en vue tant qu'elle est affichée, sans
+   lutter contre le défilement de l'hôte — ce qu'un `scrollIntoView` aurait
+   fait. Le fond est opaque : sans lui, le texte du panneau défile dessous. */
+/* `env(safe-area-inset-bottom)` comme `.msg-saisie` : le tiroir est en
+   `inset-block: 0`, donc la dernière ligne d'une note épinglée passait sous
+   l'indicateur d'accueil de l'iPhone — le retour que ce correctif existe pour
+   rendre visible (constat de la review). */
+.msg-tiroir__note { position: sticky; bottom: 0; margin: 10px 0 0; padding: 10px 18px calc(14px + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); color: var(--danger); font-weight: var(--fw-semibold); }
 .msg-tiroir__note--ok { color: var(--ok); }
 @media (max-width: 899px) {
   .msg-retour { display: inline-flex; }

@@ -27,11 +27,56 @@
 // retarderait des alertes que l'hote recoit aujourd'hui tout de suite.
 
 const { createClient } = require('@supabase/supabase-js')
-const { nomDeLaBase } = require('../lib/empreinte-base')
+const { REF_PRODUCTION, nomDeLaBase, refDuProjet } = require('../lib/empreinte-base')
 const { reponseIaValide, formeExploitable } = require('../lib/guestflow/delais-contrat')
 
 const GO = process.argv.includes('--go')
 const SOURDINE_PAR_DEFAUT = { active: false, debut: '22:00', fin: '08:00' }
+
+// ⚠ LA PRODUCTION EST REFUSEE PAR DEFAUT, ET LA MAIN DE THIERRY N'EST PAS LA
+// SEULE SURETE (sa condition, 28 octobre 2026). Ce script ecrit le reglage qui
+// GOUVERNE LES ENVOIS au voyageur : un `--go` tape dans le mauvais terminal
+// changerait le comportement de tous les biens d'un compte reel.
+//
+// ⚠ ET C'EST UNE VARIABLE QUI NOMME LE PROJET, PAS UN DRAPEAU. Thierry a
+// demande `--confirmer-prod` ; le motif eprouve du depot
+// (scripts/verifier-migration-canaux-echec.js) est plus fort, et je l'ai suivi :
+// un drapeau s'ajoute par reflexe au bout d'une ligne de commande, tandis que
+// nommer soi-meme la reference du projet ne se fait pas par accident — « une
+// variable a 1, true ou oui ne suffit pas, et une faute de frappe referme la
+// porte ».
+//
+// Code de sortie 3, comme demande (le script cite en exemple refuse en 2 ; je
+// garde le 3 pour que ce refus-ci se distingue des autres sorties du script :
+// 1 = lecture impossible ou base inconnue, 2 = ecritures en erreur).
+const URL = process.env.SUPABASE_URL
+const PROJET = refDuProjet(URL) || ''
+const CONFIRME = String(process.env.CONFIRMER_PROD || '').trim() === REF_PRODUCTION
+
+// ⚠ LE REFUS PASSE AVANT TOUTE CONNEXION, et c'est un defaut que j'ai corrige
+// en l'eprouvant : je l'avais place apres la lecture des configs. Un script qui
+// refuse la production APRES s'y etre connecte et avoir lu ses donnees fait
+// deux choses de trop — et il devient intestable sans acces reel, puisqu'une
+// fausse cle le fait echouer en LECTURE (code 1) avant d'atteindre son refus
+// (code 3). Le refus ne depend que de `SUPABASE_URL` : il n'a aucune raison
+// d'attendre.
+//
+// L'empreinte, elle, reste imprimee avant tout RESULTAT de mesure — « un
+// resultat qui ne dit pas ou il a ete obtenu ne prouve rien ». Refuser n'est
+// pas mesurer : le refus NOMME la base dans son propre message.
+if (GO && nomDeLaBase(process.env.SUPABASE_URL) === 'PRODUCTION'
+  && String(process.env.CONFIRMER_PROD || '').trim() !== REF_PRODUCTION) {
+  console.error(`REFUS : ${PROJET} est la PRODUCTION, et ce script ecrit le reglage`)
+  console.error('        qui gouverne les envois au voyageur. Staging par defaut.')
+  console.error('')
+  console.error('Pour un passage unique et assume, relancer avec')
+  console.error(`        CONFIRMER_PROD=${REF_PRODUCTION}`)
+  console.error('        (la reference du projet, pas un drapeau : « 1 », « true »')
+  console.error('         ou « oui » ne suffisent pas, et une faute de frappe referme.)')
+  console.error('')
+  console.error('A blanc (sans --go), la production se lit sans aucune ecriture.')
+  process.exit(3)
+}
 
 ;(async () => {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
@@ -59,6 +104,13 @@ const SOURDINE_PAR_DEFAUT = { active: false, debut: '22:00', fin: '08:00' }
     console.error('ECHEC : projet Supabase inconnu — ni la production, ni staging.')
     console.error("Un resultat qui ne dit pas OU il a ete obtenu ne prouve rien.")
     process.exit(1)
+  }
+  if (GO && base === 'PRODUCTION') {
+    console.log('\n⚠ PASSAGE EN PRODUCTION ASSUME — ' + new Date().toISOString())
+    console.log('  confirme par CONFIRMER_PROD, et journalise ici.')
+    console.log('  ecrit : la cle `delais` de chaque bien qui n\'en a pas encore,')
+    console.log('          derivee de son `mode` actuel — aucun changement de comportement.')
+    console.log('  ne touche : aucun bien deja migre, aucune autre cle du blob.\n')
   }
   console.log(GO ? '→ MODE ECRITURE (--go)' : '→ a blanc : rien ne sera ecrit')
 

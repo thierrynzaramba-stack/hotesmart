@@ -248,7 +248,9 @@ async function charger () {
     supabase.from('agent_tasks')
       .select('id, book_id, property_id, guest_name, task_type, summary, suggested_reply, status, created_at, send_after, suspendu_le, modifie_le')
       .in('status', ['pending_validation']).eq('user_id', compteCourant())
-      .order('created_at', { ascending: false }).limit(200)
+      // `id` en second ordre : à `created_at` égal, PostgREST ne garantit rien
+      // (voir le départage du fil, plus bas).
+      .order('created_at', { ascending: false }).order('id', { ascending: true }).limit(200)
       .then(({ data, error }) => { if (error) logger.error('Messages', 'taches', error); else etat.taches = data || [] })
   ]
   await Promise.all(lectures)
@@ -516,12 +518,29 @@ function renderFil () {
   // La proposition sans `created_at` prend la place du dernier message, un
   // message sans date va en fin de fil.
   const dernierInstant = c.lastTime && valide(c.lastTime) ? c.lastTime : new Date().toISOString()
+  // Le départage À INSTANT ÉGAL, et lui seul : le message passe avant la
+  // proposition, et deux propositions se rangent par `id`.
+  // ⚠ ET SA PORTÉE EXACTE, parce que la première version de ce commentaire
+  // promettait plus : deux MESSAGES au même instant retombent, eux, sur l'ordre
+  // du tableau rendu par l'endpoint. Ils n'ont pas de clé secondaire ici parce
+  // que l'API ne descend pas l'`id` d'un message. C'est le cas que ce
+  // départage NE ferme pas, et il est écrit pour qu'on ne le croie pas fermé.
+  const rangAInstantEgal = (e) => e.type === 'message' ? '0' : '1' + String(e.x.id)
   const entrees = [
     ...c.messages.map(m => ({ quand: valide(m.sent_at) ? m.sent_at : dernierInstant, type: 'message', m })),
     ...tachesDe(c)
       .filter(x => !(etat.enEdition && String(etat.enEdition.tacheId) === String(x.id)))
       .map(x => ({ quand: valide(x.created_at) ? x.created_at : dernierInstant, type: 'proposition', x }))
-  ].sort((a, b) => new Date(a.quand) - new Date(b.quand))
+  // ⚠ UN DÉPARTAGE DÉTERMINISTE, ET C'EST UN CONSTAT DE RECETTE (28 octobre
+  // 2026 : « après F5, une proposition modifiée change de place »). Deux tâches
+  // nées du même `insert` portent le même `created_at` À LA MICROSECONDE
+  // (mesuré : 11:07:58.499367 pour les deux). PostgREST n'a alors aucun ordre
+  // garanti, et un tri sur la seule date laissait l'ordre d'ARRIVÉE décider :
+  // deux lectures de la même base rendaient deux ordres. À instant égal : le
+  // message d'abord (une proposition RÉPOND à un message), puis les
+  // propositions par `id`, qui ne bouge jamais.
+  ].sort((a, b) => new Date(a.quand) - new Date(b.quand)
+    || rangAInstantEgal(a).localeCompare(rangAInstantEgal(b)))
   let jour = null
   deroule.innerHTML = entrees.map(e => {
     const morceaux = []
@@ -545,8 +564,13 @@ function renderFil () {
           <button type="button" class="btn btn--primary" data-envoyer-prop="${esc(String(x.id))}">${icone('i-send')}${esc(t('messages.send'))}</button>
         </span>` : ''
       // Sans texte propose, il reste l'abandon — et le pied le porte.
-      morceaux.push(`<div class="bulle bulle--proposition${x.etatEnvoi === 'echec' ? ' bulle--echec' : ''}">
-        ${enCoursEnvoi ? '' : bandeauEcheance(x)}<span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.proposal'))}</span>${esc(x.suggested_reply || x.summary || '')}${boutons}${enCoursEnvoi ? '' : piedEcheance(x)}</div>
+      // ⚠ AUCUN BLANC ENTRE LE <div> ET SON PREMIER ENFANT. `.bulle` est en
+      // `white-space: pre-wrap`, donc le retour à la ligne et l'indentation du
+      // gabarit SE VOIENT : c'est la bande vide d'environ 50 px au-dessus du
+      // bandeau ambre, relevée en recette le 28 octobre 2026. Le gabarit du
+      // message voyageur/hôte, lui, était déjà collé — d'où un défaut visible
+      // sur les seules cartes de proposition.
+      morceaux.push(`<div class="bulle bulle--proposition${x.etatEnvoi === 'echec' ? ' bulle--echec' : ''}">${enCoursEnvoi ? '' : bandeauEcheance(x)}<span class="bulle__entete">${icone('i-ai', 'icon icon--robot')}${esc(t('messages.proposal'))}</span>${esc(x.suggested_reply || x.summary || '')}${boutons}${enCoursEnvoi ? '' : piedEcheance(x)}</div>
         <span class="bulle-meta">${enCoursEnvoi ? esc(t('messages.sending'))
           : x.etatEnvoi === 'echec' ? `<span class="msg-echec">${esc(t('messages.not_sent'))}</span> · <button type="button" class="link caption msg-reessayer" data-envoyer-prop="${esc(String(x.id))}">${esc(t('messages.retry'))}</button>` : ''}</span>`)
     } else {
@@ -1476,10 +1500,21 @@ function voletIA (ref) {
       + '<span class="msg-tiroir__nom">' + icone('i-ai') + esc(t('messages.delai_titre')) + '</span>'
       + (manuel ? '' : rangeePilules('reponse', d.reponse_ia, surMesureR))
       + (manuel ? '' : '<p class="caption muted">' + esc(t('messages.delai_aide')) + '</p>')
-      + '<button type="button" class="btn ' + (manuel ? 'btn--primary' : 'btn--secondary')
-      + '" data-delai-manuel aria-pressed="' + manuel + '" ' + off + '>'
-      + icone('i-check') + esc(t('messages.delai_manuel')) + '</button>'
-      + '<p class="caption muted">' + esc(t('messages.auto_scope')) + '</p>'
+      // ⚠ UNE PILULE, PAS UN BOUTON — recette du 28 octobre 2026 : « il a l'air
+      // actif même quand il ne l'est pas ». `btn--secondary` garde le texte en
+      // --ink et un bord gris : à l'œil, c'est un bouton armé. Les pilules de
+      // délai juste au-dessus disent déjà la bonne chose — bleu = cliquable,
+      // bord --ink = l'état courant — et c'est la maquette validée, qui portait
+      // bien une pilule ici. On réutilise leur règle au lieu d'inventer une
+      // variante de bouton pour un seul endroit.
+      + '<span class="msg-pilules" role="group">'
+      + '<button type="button" class="tab" data-delai-manuel aria-pressed="' + manuel + '" ' + off + '>'
+      + icone('i-check') + esc(t('messages.delai_manuel')) + '</button></span>'
+      // ⚠ « EN AUTO, L'IA N'ENVOIE SEULE… » EST RETIRÉ (demande de Thierry,
+      // 28 octobre 2026) : plus aucun « Auto » à l'écran. Le mot ne décrit plus
+      // rien — il n'y a plus de mode, il y a un délai. La clé `messages.auto_scope`
+      // est supprimée des TROIS dictionnaires, pas seulement décrochée ici : une
+      // traduction orpheline se fait rebrancher un jour par mégarde.
     + '</div>'
     // ⚠ LE BLOC « INFO MANQUANTE : ME PREVENIR APRES » EST RETIRE DE CE LOT, ET
     // CE N'EST PAS UN OUBLI — constat 6 de la revue du 27 octobre 2026.
@@ -1909,12 +1944,17 @@ function peindreEtatEvaluation (c, cible, statut) {
   }
   const prenom = String(c.guestName || '').trim().split(/\s+/)[0] || t('messages.guest')
   const parent = cible.parentElement
-  cible.outerHTML = `<div class="bulle bulle--proposition">
-      <span class="bulle__entete">${icone('i-review', 'icon icon--robot')}${esc(t('messages.review_ask', { name: prenom }))}</span>
-      <span class="bulle__actions">
-        <button type="button" class="btn btn--primary" data-evaluer>${esc(t('messages.review_open'))}</button>
-      </span>
-    </div>`
+  // Même blanc de gabarit que les cartes de proposition (`pre-wrap` le rend
+  // visible) : collé ici aussi, c'est la même classe et le même défaut.
+  // ⚠ LE GABARIT TIENT SUR UNE LIGNE, ET C'EST LA CONTRAINTE DE `pre-wrap`.
+  // Mon premier correctif n'avait colle que le blanc de TETE ; la review a
+  // trouve les deux autres — entre l'entete et les actions, et avant la
+  // fermeture. Entre deux enfants en `display: flex`, un retour à la ligne du
+  // gabarit engendre une boîte de bloc anonyme qui SE REND : deux bandes vides
+  // de plus dans la carte. Lisibilite perdue, defaut ferme — et
+  // `tests/delai-reponse-ia-messages.test.js` interdit desormais TOUT retour à
+  // la ligne dans un gabarit de bulle, pas seulement le premier caractere.
+  cible.outerHTML = `<div class="bulle bulle--proposition"><span class="bulle__entete">${icone('i-review', 'icon icon--robot')}${esc(t('messages.review_ask', { name: prenom }))}</span><span class="bulle__actions"><button type="button" class="btn btn--primary" data-evaluer>${esc(t('messages.review_open'))}</button></span></div>`
   // Dans le DEROULE seulement : le premier [data-evaluer] du document
   // pourrait etre ailleurs (revue de 658d758).
   parent?.querySelector('[data-evaluer]')?.addEventListener('click', () => ouvrirEvaluation(c))
@@ -2016,6 +2056,14 @@ async function init () {
   })
   $('[data-bind="tiroir-fermer"]').addEventListener('click', () => ouvrirTiroir(false))
   $('[data-bind="tiroir-bien"]').addEventListener('change', (e) => {
+    // ⚠ LA NOTE APPARTIENT AU BIEN QU'ON VENAIT D'ENREGISTRER — constat de la
+    // review du 28 octobre 2026. `ouvrirTiroir` la remet à `hidden`, le
+    // changement de bien ne passait pas par là : un « Enregistré » vert
+    // restait affiché sous les réglages NON enregistrés du bien suivant. Tant
+    // que la note dormait au fond d'un panneau qui défile, personne ne la
+    // voyait ; en la rendant visible (`position: sticky`) je l'ai rendue
+    // menteuse. Même chose pour un échec partiel rouge.
+    $('[data-bind="tiroir-note"]').hidden = true
     etat.tiroirBien = e.target.value
     renderTiroir()
   })

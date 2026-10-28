@@ -1283,3 +1283,61 @@ isolable — ils vivent dans le même arbre de travail que le lot. La review a d
 porté sur les **quatre fichiers de production** qu'ils touchent
 (`lib/guestflow/brouillons-dus.js`, `api/messages.js`, `api/agent-config.js`,
 `pages/messages.html`) : plus large que demandé, donc pas moins sûr.
+
+### La migration des données refuse la production, et elle est prouvée sur staging
+
+**Condition de Thierry du 28 octobre 2026 : « ma main ne doit pas être la seule
+sûreté ».** Ce script écrit le réglage qui **gouverne les envois au voyageur** :
+un `--go` tapé dans le mauvais terminal changerait le comportement de tous les
+biens d'un compte réel.
+
+**⚠ C'est une variable qui NOMME le projet, pas un drapeau.** Thierry avait
+demandé `--confirmer-prod` ; le motif éprouvé du dépôt
+(`scripts/verifier-migration-canaux-echec.js`) est plus fort et je l'ai suivi :
+`CONFIRMER_PROD=<référence du projet>`. Un drapeau s'ajoute par réflexe au bout
+d'une ligne de commande ; nommer soi-même la référence ne se fait pas par
+accident. Code de sortie **3** (1 = lecture impossible ou base inconnue,
+2 = écritures en erreur).
+
+**⚠ Et le refus passe AVANT toute connexion** — défaut que j'ai corrigé **en
+l'éprouvant**. Je l'avais placé après la lecture des configs : un script qui
+refuse la production après s'y être connecté et avoir lu ses données fait deux
+choses de trop, **et il devient intestable sans accès réel** (une fausse clé le
+fait échouer en lecture, code 1, avant d'atteindre son refus, code 3). Le refus
+ne dépend que de `SUPABASE_URL`.
+
+**Ce qui ne passe pas**, éprouvé un par un avec une clé bidon donc aucun accès :
+`1`, `true`, `oui`, la référence en majuscules, tronquée d'un caractère, avec un
+caractère en trop, la référence de **staging**, la chaîne vide, et les drapeaux
+`--confirmer-prod` / `--confirmer` / `--force` / `--prod`. La menace testée est
+**la faute de frappe, pas l'attaquant**.
+
+**⚠ Ce qui PASSE, et c'est assumé : un espace avant ou après la valeur.** Le
+`.trim()` l'absorbe, comme dans le motif existant. C'est voulu — un
+copier-coller avec un espace a une intention claire (la personne a tapé la
+référence complète), alors qu'une troncature ou une autre référence signalent
+une erreur réelle. Nommé ici plutôt que découvert un jour comme une surprise.
+`tests/migration-modes-refuse-prod.test.js`, 7 tests.
+
+**La preuve sur staging (28 octobre 2026).** Staging n'avait **aucun** bien à
+migrer — zéro ligne d'`agent_alert_config`. Deux biens ont donc été semés à
+l'ancien format, puis mesurés :
+
+| bien | semé | `getPropertyMode` avant | après | `delais` écrit |
+|---|---|---|---|---|
+| `STG-BIEN-1` | `mode: 'test'` | `test` | **`test`** | `reponse_ia: null` |
+| `STG-BIEN-2` | `mode: 'auto'` | `auto` | **`auto`** | `reponse_ia: 0` |
+
+`alerte_info: 0` sur les deux, sourdine inactive. Le passage **à blanc n'a rien
+écrit** (vérifié par une mesure entre les deux), et un second `--go` rend « 0 à
+migrer, 2 déjà migrés ».
+
+**Le seul écart, et il est attendu** : le *motif* de `delaiDeReponse` passe de
+`sans_delai` à `validation_manuelle` / `immediat`. C'est la **provenance** qui
+change — avant, le binaire était dérivé de `mode` ; après, il est lu dans le
+bloc. Le résultat, lui, est identique, et c'est tout le cahier des charges.
+
+⚠ **Les deux biens semés restent sur staging** : ils donnent à la recette un
+bien en validation manuelle et un en immédiat, ce qui est exactement ce qu'il
+faut pour vérifier l'écran. Pour les retirer, vider leur entrée du blob
+`agent_alert_config` du compte `6c413095`.
