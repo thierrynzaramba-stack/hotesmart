@@ -386,8 +386,12 @@ test('⚠ CONSTAT 1 : le panneau lit le formulaire AVANT tout re-rendu', () => {
   const sansCommentaires = page
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/^[ \t]*\/\/.*$/gm, ' ')
-  const bloc = sansCommentaires.slice(sansCommentaires.indexOf('async function enregistrerPanneau'))
-    .slice(0, 900)
+  // ⚠ L ANCRE EST `enregistrerLePanneau`, LE CORPS — pas `enregistrerPanneau`,
+  // qui n est plus qu un filet (`try/finally` sur les deux drapeaux, constat 5
+  // de la revue du 28 octobre 2026). C est le corps qui lit le formulaire.
+  const iCorps = sansCommentaires.indexOf('async function enregistrerLePanneau')
+  assert.ok(iCorps > 0, 'le corps de l enregistrement existe')
+  const bloc = sansCommentaires.slice(iCorps).slice(0, 900)
   const posLecture = bloc.indexOf('lireLePanneau(corps, ref)')
   const posRender = bloc.indexOf('renderTiroir()')
   assert.ok(posLecture > 0, 'le panneau est lu par lireLePanneau')
@@ -489,8 +493,26 @@ test('⚠ RECETTE 4 : la note du tiroir est VISIBLE, pas au fond d un panneau qu
   assert.match(m[1], /background: var\(--surface\)/,
     'fond opaque, sinon le panneau defile sous le texte')
   // Et c est bien « Enregistré » qui part, avec son drapeau de reussite.
-  assert.ok(/noteReglage\(echoues\.length[\s\S]{0,200}messages\.panneau_saved[\s\S]{0,120}echoues\.length === 0\)/
-    .test(sansCommR(page)), 'un enregistrement complet dit « Enregistré », en vert')
+  // ⚠ LE TEXTE DE LA NOTE SE MESURE DESORMAIS EN CLIQUANT, pas en grepant :
+  // `tests/messages-panneau-ia-dom.test.js` enregistre pour de vrai et lit la
+  // note dans le DOM, dans ses trois cas (succes, refus de la liberation,
+  // echec de la propagation). Ce qui reste ici est la seule chose qu un grep
+  // mesure mieux qu un clic : que le drapeau vert soit decide par l ABSENCE
+  // d echec, et par rien d autre.
+  // L ancre est le verrou de fin du CORPS de l enregistrement. Ni « la derniere
+  // note du fichier » (`testerCanal` vient apres et en pose une aussi), ni la
+  // premiere apres le premier `panneauEnCours = false` : le FILET de
+  // l enveloppe en pose une lui aussi, et il est declare AVANT le corps.
+  const sans = sansCommR(page)
+  const iCorps = sans.indexOf('async function enregistrerLePanneau')
+  assert.ok(iCorps > 0, 'le corps de l enregistrement existe')
+  const iFin = sans.indexOf('etat.panneauEnCours = false', iCorps)
+  assert.ok(iFin > iCorps, 'le verrou du panneau se retire a la fin du corps')
+  const iDerniere = sans.indexOf('noteReglage(', iFin)
+  assert.ok(iDerniere > iFin, 'et la note suit')
+  const appel = sans.slice(iDerniere, iDerniere + 500)
+  assert.ok(/messages\.panneau_saved/.test(appel), 'un enregistrement complet dit « Enregistré »')
+  assert.ok(/echoues\.length === 0\)/.test(appel), 'et le vert se decide sur l absence d echec')
 })
 
 test('⚠ RECETTE 5 : aucun gabarit de bulle ne porte de retour à la ligne', () => {

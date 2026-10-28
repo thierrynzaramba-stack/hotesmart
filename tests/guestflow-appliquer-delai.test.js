@@ -643,8 +643,50 @@ test('⚠ l ecran DIT quand les propositions en attente n ont pas suivi', async 
   const iRech = page.indexOf('if (brouillonsRepris > 0)')
   const iVerrou = page.indexOf('etat.modeEnCours = false', iRech)
   assert.ok(iVerrou > iRech, 'modeEnCours ne tombe qu apres le rechargement')
-  assert.ok(iVerrou < page.indexOf('noteReglage(echoues.length'),
-    'mais avant le re-rendu et la note')
+  const iNote = page.indexOf('noteReglage(', iVerrou)
+  assert.ok(iNote > iVerrou, 'mais avant le re-rendu et la note')
+  assert.ok(page.indexOf('renderTiroir()', iVerrou) < iNote,
+    'et le re-rendu precede la note : `geler` ne se defait que par un re-rendu')
+  // ⚠ ET LE SECOND DRAPEAU TOMBE AVEC LE PREMIER (recette du 28 octobre 2026).
+  // `panneauEnCours` gele ce qui n edite que `etat.delaisEdit` ; `modeEnCours`
+  // garde ce qui ecrit. S ils divergeaient, le panneau resterait desarme apres
+  // un enregistrement — exactement le defaut que ce lot ferme, a l envers.
+  // ⚠ L INVARIANT SE MESURE DANS LES DEUX SENS, ET C ETAIT LE CONSTAT 4 DE LA
+  // REVUE : ma premiere version ecrivait `A - B < 60` au lieu de
+  // `Math.abs(A - B) < 60`, donc toute pose PLUS HAUT dans le fichier passait.
+  // La revue l a mesure en deplacant la pose AVANT le `if (etat.modeEnCours)
+  // return` : un appel reentrant sortait par ce return et laissait le drapeau
+  // colle a vrai — pilules, sourdine et « Je valide chaque reponse » desarmes
+  // pour le reste de la session — et 80 tests restaient verts.
+  const poses = [...page.matchAll(/etat\.panneauEnCours = (true|false)/g)].map(m => m[1])
+  assert.equal(poses.filter(x => x === 'true').length, 1,
+    'panneauEnCours se pose une seule fois')
+  // Deux retraits : celui du corps (chemin heureux) et celui du filet
+  // `try/finally` de l enveloppe (constat 5). Chacun doit etre COLLE a un
+  // retrait de modeEnCours, sinon les deux drapeaux divergent.
+  assert.ok(poses.filter(x => x === 'false').length >= 1, 'et il se retire')
+  const voisin = (motif, cible) => {
+    for (const m of page.matchAll(motif)) {
+      const proches = [...page.matchAll(cible)].some(c => Math.abs(c.index - m.index) < 80)
+      if (!proches) return false
+    }
+    return true
+  }
+  assert.ok(voisin(/etat\.panneauEnCours = true/g, /etat\.modeEnCours = true/g),
+    'chaque pose de panneauEnCours est collee a une pose de modeEnCours')
+  assert.ok(voisin(/etat\.panneauEnCours = false/g, /etat\.modeEnCours = false/g),
+    'chaque retrait de panneauEnCours est colle a un retrait de modeEnCours')
+  // Et la pose vient APRES la garde de reentrance : posee avant, un appel
+  // reentrant sortirait par le `return` en laissant le drapeau colle.
+  const iEnv = page.indexOf('async function enregistrerPanneau (corps, ref) {')
+  assert.ok(iEnv > 0)
+  const iGarde = page.indexOf('if (etat.modeEnCours) return', iEnv)
+  assert.ok(iGarde > iEnv && page.indexOf('etat.panneauEnCours = true', iEnv) > iGarde,
+    'la pose suit la garde de reentrance')
+  // ⚠ ET LE FILET EXISTE (constat 5) : un lever n importe ou doit rendre les
+  // deux drapeaux. Mesure du comportement : tests/messages-panneau-ia-dom.test.js.
+  assert.match(page.slice(iEnv, iGarde + 1200), /\} finally \{/,
+    'l enveloppe tient les drapeaux par un finally, pas par le chemin heureux')
   for (const f of ['fr', 'en', 'es']) {
     const dict = JSON.parse(lire(`shared/i18n/${f}.json`))
     const phrase = dict['messages.partie_brouillons']
