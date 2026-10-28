@@ -654,7 +654,7 @@ function ouvrirAujourdhui (options = {}) {
     hidden: false, textContent: '', value: '', style: {}, dataset: {},
     // ⚠ ECRIRE `innerHTML` **DETACHE** LES ENFANTS, comme dans un vrai DOM.
     // C'etait la derniere permissivite du banc, et elle cachait la moitie du
-    // constat GRAVE du 29 octobre 2026 : apres `zone.innerHTML = …`, la
+    // constat GRAVE du 28 octobre 2026 : apres `zone.innerHTML = …`, la
     // sentinelle du rendu PRECEDENT gardait son `parentNode`, donc la garde
     // `marque.parentNode` ne pouvait pas mordre et la mutation qui la retirait
     // restait verte. Un double plus permissif que le vrai VALIDE du code qui ne
@@ -715,7 +715,7 @@ function ouvrirAujourdhui (options = {}) {
     parentNode: null,
     // ⚠ `appendChild` ATTACHE POUR DE VRAI : il pose `parentNode` **et** c'est
     // LUI qui rend le noeud trouvable par son selecteur. Constat de la review
-    // du 29 octobre 2026 : quand c'etait `setAttribute` qui l'enregistrait, un
+    // du 28 octobre 2026 : quand c'etait `setAttribute` qui l'enregistrait, un
     // noeud JAMAIS attache restait trouvable — le banc validait donc une page
     // dont la sentinelle n'entrait pas dans le document, et la mutation qui
     // retirait l'`appendChild` restait VERTE alors qu'elle rendait la fonction
@@ -2941,7 +2941,7 @@ test("LE TEST QUI COMPTE : les deux bandes se DISTINGUENT a l oeil", () => {
     `la bande la plus foncee est a ${a} d opacite : ce n est plus un fond discret`)
   // ⚠ ET UN PLANCHER, parce que les deux bornes d'au-dessus se satisfont aussi
   // de `[0.002, 0.001]` : rapport de deux, plafond tenu, et DEUX BANDES
-  // INVISIBLES. Constat de la review du 29 octobre 2026. Une bande qu'on ne
+  // INVISIBLES. Constat de la review du 28 octobre 2026. Une bande qu'on ne
   // voit pas n'est pas « discrete », c'est une donnee qu'on a cessee d'afficher
   // sans le dire.
   const [, bas] = op.slice().sort((x, y) => y - x)
@@ -3450,7 +3450,7 @@ test("LE TEST QUI COMPTE : « 0 % » est GRIS NEUTRE dans les DEUX tableaux", ()
   assert.match(cel, /rev-tbl__ecart--nul/, 'le 0 % du tableau des biens reste vert')
 })
 
-// ─── LE BLOC DU JOUR QUI N'A RIEN A DIRE (recette du 29 octobre 2026) ──────
+// ─── LE BLOC DU JOUR QUI N'A RIEN A DIRE (recette du 28 octobre 2026) ──────
 
 const blocDuJour = (o = {}) => {
   const p = ouvrirAujourdhui({ sansInit: true, evenements: o.evenements })
@@ -3550,7 +3550,7 @@ test("LE TEST QUI COMPTE : la classe « a plat » FAIT une seule colonne", () =>
     `a plat, le bloc du jour garde son « span 2 » : « ${jour.trim()} »`)
 })
 
-// ─── LA SUITE DES AVIS AU DEFILEMENT (recette du 29 octobre 2026) ──────────
+// ─── LA SUITE DES AVIS AU DEFILEMENT (recette du 28 octobre 2026) ──────────
 
 const avisDeTest = (n, jour) => ({
   id: String(n), bien_ref: 'P1', ota: 'airbnb',
@@ -3636,7 +3636,7 @@ test("LE TEST QUI COMPTE : les avis charges s AJOUTENT, ils ne remplacent pas", 
 
 test("LE TEST QUI COMPTE : au bout des 30 jours, le lien vers /avis — et plus un appel", async () => {
   // ⚠ DECISION DE THIERRY, OPTION 3 : « 30 jours, puis un lien vers /avis ».
-  // Mesure en production le 29 octobre 2026 : 16 avis avec texte sur 30 jours
+  // Mesure en production le 28 octobre 2026 : 16 avis avec texte sur 30 jours
   // contre 645 au total. Paginer jusqu'au premier aurait fait de l'accueil un
   // second /avis, et rendu FAUX le compte de son propre en-tete.
   // ⚠ ET L'OBSERVATEUR SE COUPE. Sans cela, chaque defilement de plus

@@ -8,7 +8,7 @@
 // pas ne le paie jamais.
 //
 // ⚠ ET IL S'ARRETE AUX 30 JOURS, comme le bloc l'annonce. Decision de Thierry
-// du 29 octobre 2026, option 3 : « 30 jours, puis un lien vers /avis ». Mesure
+// du 28 octobre 2026, option 3 : « 30 jours, puis un lien vers /avis ». Mesure
 // en production le meme jour : 16 avis avec texte sur 30 jours (5 pages de 3)
 // contre 645 au total. Paginer jusqu'au premier avis aurait fait de l'accueil
 // un second /avis — 215 pages — et rendu FAUX le compte de son propre en-tete
@@ -71,7 +71,7 @@ module.exports = async (req, res) => {
     return res.status(400).json({ error: 'Curseur incomplet' })
   }
   // ⚠ LA DATE EST VALIDEE SUR SA **FORME**, PAS SUR `Date.parse`. Mesure de la
-  // review du 29 octobre 2026 : `Date.parse('Oct 26 2026 (",or(id.gte.0)")')`
+  // review du 28 octobre 2026 : `Date.parse('Oct 26 2026 (",or(id.gte.0)")')`
   // rend une date FINIE — le parseur de secours de V8 traite les parentheses
   // comme un commentaire et tolere les caracteres epars. Et c'est la chaine
   // BRUTE du client qui entrait ensuite dans le filtre PostgREST. Ce qui

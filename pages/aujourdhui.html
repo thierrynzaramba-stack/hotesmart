@@ -1128,7 +1128,7 @@ function renderDerniersAvis () {
 // ─── LA SUITE DES AVIS, AU DEFILEMENT ───────────────────────────────────────
 //
 // ⚠ TROIS AU DEPART, PUIS TROIS PAR TROIS, ET SEULEMENT SUR 30 JOURS.
-// Decision de Thierry du 29 octobre 2026, option 3 : « 30 jours, puis un lien
+// Decision de Thierry du 28 octobre 2026, option 3 : « 30 jours, puis un lien
 // vers /avis ». Mesure en production le meme jour : 16 avis avec texte sur
 // 30 jours contre 645 au total — paginer jusqu'au premier avis aurait fait de
 // l'accueil un second /avis, et rendu FAUX le compte de son propre en-tete
@@ -1149,7 +1149,7 @@ let sentinelleAvis = null
 // ⚠ ON N'OBSERVE QU'APRES LE PREMIER DEFILEMENT, ET C'EST UNE MESURE QUI L'A
 // DECIDE. Le vrai `IntersectionObserver` appelle son rappel DES LA PREMIERE
 // OBSERVATION si la cible est dans la fenetre — il ne demande aucun geste.
-// Mesure au banc chrome-headless le 29 octobre 2026, sur le BALISAGE REEL de
+// Mesure au banc chrome-headless le 28 octobre 2026, sur le BALISAGE REEL de
 // cette page, dans le cas « journee vide » (celui que la retouche 3 raccourcit
 // le plus, donc le pire) :
 //   ordinateur 1280x900 : haut de la sentinelle a 1077 px, fenetre 900 px,
@@ -1195,7 +1195,7 @@ function armerLaSuiteDesAvis (vue, outils) {
 
   // ⚠ CHAQUE ARMEMENT GARDE **SON** OBSERVATEUR DANS UNE LOCALE, et tout ce qui
   // suit verifie qu'il est encore celui du module. C'est le constat GRAVE de la
-  // review du 29 octobre 2026, et il cassait la fonction dans le chemin NORMAL :
+  // review du 28 octobre 2026, et il cassait la fonction dans le chemin NORMAL :
   // `renderDerniersAvis()` est appele DEUX FOIS a chaque chargement (l. 2851
   // depuis le cache, l. 2907 apres la lecture serveur). Le vrai
   // `IntersectionObserver` appelle son rappel DES LA PREMIERE OBSERVATION si la
