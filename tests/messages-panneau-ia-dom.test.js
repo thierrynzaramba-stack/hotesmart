@@ -317,10 +317,17 @@ test('sans arriere, la note reste le simple « Enregistre »', async () => {
   b.fermer()
 })
 
-// ── Les six constats de la revue de ce commit ─────────────────────────────
-// ⚠ CES TESTS N'EXISTAIENT PAS, ET C'EST LE VRAI CONSTAT DE LA REVUE : cinq
-// affirmations de la spec et des commentaires annonçaient une couverture qui
-// n'existait pas. Chacun ci-dessous a ete MESURE rouge contre `c0d1ec0d`.
+// ── Les constats des deux revues de ce lot ────────────────────────────────
+// ⚠ L'EN-TETE DISAIT « les six constats », ET C'ETAIT FAUX : la revue en a
+// rendu DIX (constat 5 de la revue suivante — un chiffre perime se lit comme
+// une mesure et ne rougit jamais).
+//
+// ⚠ ET ELLE DISAIT « chacun ci-dessous a ete MESURE rouge contre c0d1ec0d », ce
+// qui etait faux aussi. Mesure refaite, tests et banc d'aujourd'hui contre le
+// `pages/messages.html` de `c0d1ec0d` : 4 rouges sur 9 — les constats 1, 7, 5
+// et 6. Les cinq autres sont VERTS contre ce commit, et c'est normal : ils
+// ferment des faux verts, c'est-a-dire du code deja juste que rien ne tenait.
+// Leur preuve est une MUTATION, pas une contre-epreuve, et chacun dit laquelle.
 
 // L'amorce lance la VRAIE `init()` : sans elle, le selecteur de bien et les
 // deux boutons de volet ne sont pas branches, et c'est exactement ce qui avait
@@ -397,6 +404,12 @@ test('LE TEST QUI COMPTE : bienDuFilOuvert refuse un bien hors du compte, par LU
     'un bien absent de etat.biens — donc du compte courant — ne designe rien')
   b.msg.etat.ouverte = 'B-OK'
   assert.equal(b.msg.bienDuFilOuvert(), AUTRE, 'un bien du compte, lui, est designe')
+  // ⚠ LES DEUX ASSERTIONS QUI SUIVENT DECRIVENT LE CONTRAT, ELLES NE LE
+  // MESURENT PAS — et c est un constat de la derniere revue, mesure : retirer
+  // le `if (etat.ouverte === null) return null` de `bienDuFilOuvert` laisse ce
+  // fichier a 25/25, parce que `etat.biens.has('')` rend deja false. La garde
+  // qui MORD est celle du compte, eprouvee juste au-dessus par mutation. On les
+  // garde parce qu elles disent l intention, pas parce qu elles la prouvent.
   b.msg.etat.ouverte = null
   assert.equal(b.msg.bienDuFilOuvert(), null, 'et sans fil ouvert, rien')
   b.msg.etat.ouverte = 'B-INCONNU'
@@ -504,20 +517,27 @@ test('LE TEST QUI COMPTE : un lever pendant l enregistrement rend les deux drape
   b.fermer()
 })
 
-test('LE TEST QUI COMPTE : un refus ne fabrique pas une note qui se contredit', async () => {
-  // Constat 6 : avec `propager: false` le serveur n a RIEN propage — c est ce
-  // qu on lui a demande — donc un bilan absent est normal. Forcer le
-  // rechargement du fil ouvrait un chemin ou son echec poussait
-  // `partie_brouillons`, et la note disait sur le MEME sujet, dans la meme
-  // phrase : « Non enregistré : les propositions déjà en attente. Les
-  // propositions déjà en attente gardent leur échéance. »
-  let taches = 0
+test('LE TEST QUI COMPTE : un refus, avec la VRAIE reponse du serveur, dit une seule chose', async () => {
+  // ⚠ CE TEST A ETE REFAIT, ET SA PREMIERE VERSION PROUVAIT DEUX FAUX
+  // (constats 1 et 4 de la derniere revue). Elle faisait repondre au serveur
+  // un `{ ok: true, delais_ref }` SANS bilan `brouillons` — une forme que
+  // `api/agent-config.js` ne produit jamais : avec `propager: false` il rend
+  // toujours `bilanVide({ ok: true, motif: 'propagation_non_demandee' })`. Et
+  // elle atteignait le `catch` du rechargement par un `__leveTable` que le vrai
+  // client supabase ne produit pas non plus. Un test bati sur deux formes
+  // inatteignables mesure le double, pas la page.
+  //
+  // Ce qui EST vrai et atteignable : avec la vraie reponse, le refus dit une
+  // seule chose, en vert, et le fil n'est pas relu — rien n'a bouge en base.
+  const brouillons = {
+    ok: true, motif: 'propagation_non_demandee',
+    desarmes: 0, rearmes: 0, inchanges: 0, deja_prises: 0, echues: 0, sans_creation: 0
+  }
   const b = B.monter({
     confirme: (texte) => texte === FR['messages.mode_confirm_auto'],
     appel: async (chemin, corps) => {
       if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 7 } }
-      // Le serveur repond SANS bilan `brouillons` : il n a rien propage.
-      if (corps && corps.delais_ref) return { ok: true, delais_ref: REF }
+      if (corps && corps.delais_ref) return { ok: true, delais_ref: REF, delais: corps.delais, brouillons }
       if (!corps) return { config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } } }
       return { ok: true }
     }
@@ -526,20 +546,89 @@ test('LE TEST QUI COMPTE : un refus ne fabrique pas une note qui se contredit', 
     biens: [{ ref: REF, nom: 'Loft Pilotable' }],
     config: { [REF]: { mode: 'test', delais: { reponse_ia: null, alerte_info: 0 } } }
   })
-  // ⚠ ET LA RELECTURE DES TACHES LEVE, pas « rend une erreur » : ma premiere
-  // version posait `__echecTable`, et `rechargerTaches` fait `if (error)
-  // return` — l echec etait avale, le chemin que ce test pretend eprouver
-  // n etait jamais pris, et la mutation du correctif restait VERTE. Mesure
-  // faite : 0 rouge. C est un lever qui atteint le `catch` de l appelant,
-  // lequel pousse `partie_brouillons`.
-  b.window.__leveTable = 'agent_tasks'
   B.clic(b, B.pilManuel(b))
+  const avant = b.tables.filter(x => x === 'agent_tasks').length
   await b.msg.enregistrerPanneau(B.corps(b), REF)
-  taches = b.note()
-  assert.equal(taches, FR['messages.echeances_gardees_ok'],
-    'son choix, dit une seule fois, et en vert')
-  assert.ok(!taches.includes(FR['messages.partie_brouillons']),
-    'la note ne se contredit pas sur le meme sujet')
+  assert.equal(b.note(), FR['messages.echeances_gardees_ok'], 'son choix, dit une fois, en vert')
   assert.equal(b.noteOk(), true)
+  assert.ok(!b.note().includes(FR['messages.partie_brouillons']),
+    'et la note ne se contredit pas sur le meme sujet')
+  // Rien n'a bouge en base : le fil n'a aucune raison d'etre relu.
+  assert.equal(b.tables.filter(x => x === 'agent_tasks').length, avant,
+    'un refus ne declenche pas de relecture des taches')
+  b.fermer()
+})
+
+test('un bilan ABSENT, lui, fait relire le fil — c est la fenetre de deploiement', async () => {
+  // ⚠ ET C EST LE CONSTAT 2 DE LA DERNIERE REVUE, a l envers. J avais ecrit
+  // `brouillonsRepris = !propager ? 0 : …`, ce qui retirait le rechargement
+  // dans la SEULE fenetre ou il servait : un endpoint anterieur a `apercu`
+  // aurait enregistre ET PROPAGE des l appel d apercu, puis ignore
+  // `propager: false` — et il ne rend pas de `brouillons`. Sans relecture, le
+  // fil gardait a l ecran une echeance perimee.
+  // ⚠ LA BRANCHE VISEE EST « REPONSE ILLISIBLE », ET MA PREMIERE VERSION VISAIT
+  // A COTE : elle faisait repondre un `{ ok: true, delais_ref: REF }`, que
+  // l ecran reconnait comme un endpoint ancien — et la, `propager` reste VRAI,
+  // donc la mutation du correctif ne changeait rien (mesure : 0 rouge). Pour
+  // poser `propager = false`, la reponse d apercu doit etre ILLISIBLE : ni
+  // `apercu`, ni `delais_ref` qui corresponde. C est la forme d un 200 non-JSON
+  // — page HTML d un proxy, d un edge, d une protection de deploiement — que
+  // `appel()` convertit en `{}`.
+  const b = B.monter({
+    appel: async (chemin, corps) => {
+      if (corps && corps.apercu === true) return {}
+      // Et l endpoint qui repond ensuite est ANCIEN : il ignore `propager` et
+      // ne rend aucun bilan. C est la fenetre de deploiement.
+      if (corps && corps.delais_ref) return { ok: true, delais_ref: REF, delais: corps.delais }
+      if (!corps) return { config: { [REF]: { mode: 'test', delais: { reponse_ia: 60, alerte_info: 0 } } } }
+      return { ok: true }
+    }
+  })
+  B.peupler(b, {
+    biens: [{ ref: REF, nom: 'Loft Pilotable' }],
+    config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } }
+  })
+  const avant = b.tables.filter(x => x === 'agent_tasks').length
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.ok(b.tables.filter(x => x === 'agent_tasks').length > avant,
+    'bilan absent = on relit dans le doute, sinon l ecran garde une echeance perimee')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : un lever du DERNIER re-rendu laisse quand meme la note et un panneau utilisable', async () => {
+  // ⚠ CONSTAT 3 DE LA DERNIERE REVUE, mesure par sonde : le filet de
+  // l enveloppe ne couvre pas CE lever-la (les drapeaux sont deja retombes,
+  // donc son `if` est faux). Resultat mesure avant correctif : panneau
+  // entierement `disabled`, note vide, « Enregistrer » desarme — l hote a
+  // clique, tout est passe cote serveur, il ne lit rien et ne peut pas
+  // reessayer.
+  const enregistre = { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } }
+  // ⚠ LE RETRAIT SE FAIT DANS LE DOUBLE, PAS DANS UN `setTimeout` : mes doubles
+  // resolvent en MICROTACHES, donc une macrotache programmee avant l appel
+  // tombait APRES la fin de l enregistrement — et la mutation restait verte
+  // (mesure : 0 rouge). En le faisant pendant l appel d apercu, l ordre est
+  // deterministe : le premier re-rendu a deja eu lieu (le panneau est gele),
+  // c est le DERNIER qui va lever.
+  const casser = { fait: false, cible: null }
+  const b = B.monter({
+    appel: async (chemin, corps) => {
+      if (corps && corps.apercu === true) {
+        if (!casser.fait && casser.cible) { casser.cible.remove(); casser.fait = true }
+        return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 0 } }
+      }
+      if (!corps) return { config: enregistre }
+      return { ok: true, delais_ref: REF, brouillons: { ok: true, desarmes: 0, rearmes: 0, deja_prises: 0 } }
+    }
+  })
+  B.peupler(b, { biens: [{ ref: REF, nom: 'Loft Pilotable' }], config: enregistre })
+  const corps = B.corps(b)
+  casser.cible = B.selBien(b)
+  await b.msg.enregistrerPanneau(corps, REF).catch(() => {})
+  assert.equal(casser.fait, true, 'le geste a MORDU : sans ca le test ne mesure rien')
+  assert.equal(b.msg.etat.panneauEnCours, false, 'les drapeaux sont rendus')
+  assert.equal(b.msg.etat.modeEnCours, false)
+  assert.equal(corps.querySelector('[data-panneau-save]').disabled, false,
+    'le panneau est utilisable sans dependre d un rendu : l hote peut reessayer')
+  assert.equal(B.pilule(b, 60).disabled, false, 'et ses pilules aussi')
   b.fermer()
 })

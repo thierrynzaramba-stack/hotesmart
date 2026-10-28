@@ -183,9 +183,15 @@ const etat = {
   // l'enregistrement du panneau » : lui seul gele ce qui n'edite que
   // `etat.delaisEdit`, parce que `enregistrerPanneau` a DEJA lu le formulaire
   // et qu'une valeur changee apres sa lecture ferait mentir l'ecran.
-  // Il est pose et retire sur les MEMES lignes que `modeEnCours` dans
-  // `enregistrerPanneau`, et nulle part ailleurs : `panneauEnCours` vrai
-  // implique donc `modeEnCours` vrai, et les deux ne peuvent pas diverger.
+  // ⚠ CE COMMENTAIRE A ETE CORRIGE (constat 8 de la derniere revue) : il
+  // affirmait « pose et retire sur les MEMES lignes […] et nulle part
+  // ailleurs », ce qui n'etait plus vrai depuis la scission en enveloppe et
+  // corps — et il justifiait l'invariant par le chemin heureux.
+  // La verite mesurable : `panneauEnCours` est pose UNE fois, dans l'enveloppe
+  // `enregistrerPanneau` et APRES sa garde de reentrance ; il est retire a
+  // DEUX endroits — la fin du corps `enregistrerLePanneau`, et le `finally` de
+  // l'enveloppe — et chaque retrait est colle a celui de `modeEnCours`. C'est
+  // ce `finally` qui tient l'invariant, pas l'ordre des lignes.
   panneauEnCours: false,   // l'enregistrement du panneau, lui seul
   ouverte: null            // bookId de la conversation ouverte
 }
@@ -1929,9 +1935,15 @@ async function enregistrerPanneau (corps, ref) {
     if (etat.panneauEnCours) {
       etat.modeEnCours = false
       etat.panneauEnCours = false
-      // Le re-rendu DEFAIT le gel : sans lui le panneau reste desarme a
-      // l'ecran meme si les drapeaux sont retombes.
-      try { renderTiroir() } catch (err) { logger.error('Messages', 'panneau degel', err) }
+      // Le re-rendu DEFAIT le gel ; s'il leve a son tour, `geler(corps, false)`
+      // relache les noeuds en place. Sans ce second filet, un panneau dont le
+      // rendu casse reste desarme pour le reste de la session.
+      try {
+        renderTiroir()
+      } catch (err) {
+        logger.error('Messages', 'panneau degel', err)
+        try { geler(corps, false) } catch (e) { logger.error('Messages', 'panneau degel 2', e) }
+      }
     }
   }
 }
@@ -2079,19 +2091,34 @@ async function enregistrerLePanneau (corps, ref) {
     // l'endpoint remet les compteurs a zero alors que des `send_after` ont pu
     // etre reecrits avant la coupure : on relit dans le doute, parce qu'un fil
     // qui garde l'echeance d'avant est le defaut meme que ce lot ferme.
-    // ⚠ ET UN REFUS NE RECHARGE RIEN (constat 6 de la revue du 28 octobre
-    // 2026). Avec `propager: false`, le serveur n'a RIEN propage — c'est ce
-    // qu'on lui a demande — donc un bilan absent est normal, et forcer le
-    // rechargement du fil ouvrait un chemin ou son echec poussait
-    // `partie_brouillons`. La note disait alors, sur le MEME sujet et dans la
-    // meme phrase : « Non enregistré : les propositions déjà en attente. Les
-    // propositions déjà en attente gardent leur échéance. » Deux moities qui se
-    // contredisent valent moins que pas de note du tout.
-    brouillonsRepris = !propager
-      ? 0
-      : (!b || b.ok !== true)
-          ? 1
-          : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0)
+    // ⚠ CE COURT-CIRCUIT A ETE RETIRE, ET C'EST UN CORRECTIF DE MON PROPRE
+    // CORRECTIF (constats 1 et 2 de la derniere revue, tous deux mesures).
+    // J'avais ecrit `!propager ? 0 : …` pour fermer une note qui se
+    // contredisait. Deux choses etaient fausses :
+    //
+    //   · il etait INERTE contre l'endpoint livre. `api/agent-config.js` rend
+    //     TOUJOURS un `brouillons`, et avec `propager: false` c'est
+    //     `bilanVide({ ok: true, motif: 'propagation_non_demandee' })`, donc
+    //     `desarmes + rearmes = 0`. L'expression d'avant rendait deja 0. La
+    //     note contradictoire n'etait atteignable qu'avec une reponse que le
+    //     serveur ne produit pas (mesure de la revue : avec la vraie reponse,
+    //     l'ancien code rend 0 et la note est juste).
+    //   · il RETIRAIT le rechargement dans la seule fenetre ou il servait. Le
+    //     chemin « reponse illisible » est pris quand on ne sait PAS quelle
+    //     version d'endpoint a repondu. Un endpoint anterieur a `apercu` aurait
+    //     enregistre ET PROPAGE des l'appel d'apercu, puis ignore
+    //     `propager: false` — et il ne rend pas de `brouillons`, donc `!b` fait
+    //     bien 1 ici, et le fil est relu. Avec mon court-circuit : 0, et le fil
+    //     gardait a l'ecran une echeance perimee. C'est exactement le defaut
+    //     que ce lot existe pour fermer.
+    //
+    // Un bilan ABSENT ne vaut donc pas « rien n'a bouge » : on relit dans le
+    // doute. Et le refus de l'hote, lui, ne peut pas produire la note
+    // contradictoire : il exige une reponse d'apercu, qu'un endpoint ancien ne
+    // rend pas.
+    brouillonsRepris = (!b || b.ok !== true)
+      ? 1
+      : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0)
   } catch (err) {
     logger.error('Messages', 'delais', err)
     // ⚠ UN APPEL QUI N'A PAS REPONDU NE DIT PAS CE QUI A ETE PRIS (constat 5).
@@ -2142,11 +2169,18 @@ async function enregistrerLePanneau (corps, ref) {
   etat.delaisEdit = null
   // Les echeances ont bouge en base : le fil doit les relire, sinon il garde
   // a l'ecran le compte a rebours d'avant — le defaut meme que ce lot corrige.
-  // ⚠ DANS SON PROPRE `try`, ET AVANT DE RENDRE LA MAIN (constat 8). Un lever
-  // dans `renderFil` sautait `renderTiroir()` et `noteReglage()` : la note
-  // disparaissait et le panneau restait FIGE (le `geler` d'entree ne se defait
-  // que par un re-rendu). Et `modeEnCours` passait a false AVANT l'await, donc
-  // la reentrance etait ouverte sur toute la duree du rechargement.
+  // ⚠ DANS SON PROPRE `try`, ET AVANT DE RENDRE LA MAIN (constat 8 d'une revue
+  // precedente). Un lever dans `renderFil` sautait `renderTiroir()` et
+  // `noteReglage()` : la note disparaissait et le panneau restait FIGE. Et
+  // `modeEnCours` passait a false AVANT l'await, donc la reentrance etait
+  // ouverte sur toute la duree du rechargement.
+  //
+  // ⚠ CETTE PHRASE DISAIT « le `geler` d'entree ne se defait que par un
+  // re-rendu », ET C'ETAIT FAUX (constat 7 de la derniere revue, mesure :
+  // supprimer l'appel `geler` ne rougit aucun test). `geler` posait `disabled`
+  // sur des noeuds que `renderTiroir` remplacait la ligne suivante. Depuis le
+  // correctif du constat 3, `geler(corps, false)` est le degel qui ne depend
+  // pas d'un rendu — il sert donc enfin a quelque chose, et seulement a ca.
   if (brouillonsRepris > 0) {
     try {
       await rechargerTaches()
@@ -2158,7 +2192,23 @@ async function enregistrerLePanneau (corps, ref) {
   }
   etat.modeEnCours = false
   etat.panneauEnCours = false
-  renderTiroir()
+  // ⚠ LE RE-RENDU PEUT LEVER, ET LA NOTE DOIT PARTIR QUAND MEME (constat 3 de
+  // la derniere revue, mesure par sonde). Le filet de l'enveloppe ne couvre pas
+  // CE lever-la : les drapeaux sont deja retombes, donc son `if` est faux.
+  // Mesure : panneau entierement `disabled`, note vide, « Enregistrer »
+  // desarme — l'hote a clique, tout est passe cote serveur, il ne lit rien et
+  // ne peut meme pas reessayer.
+  //
+  // ⚠ ET LE DEGEL NE PASSE PLUS PAR LE RENDU. `geler(corps, false)` relache les
+  // noeuds EN PLACE : c'est le seul chemin qui marche quand `renderTiroir` ne
+  // peut pas peindre. C'est aussi ce qui donne enfin un role a `geler`, dont la
+  // revue precedente avait mesure qu'il ne servait a rien.
+  try {
+    renderTiroir()
+  } catch (err) {
+    logger.error('Messages', 'panneau re-rendu', err)
+    try { geler(corps, false) } catch (e) { logger.error('Messages', 'panneau degel', e) }
+  }
   // ⚠ DEUX CLES, PAS UN « Enregistre » + '.' EN JAVASCRIPT. La ponctuation
   // appartient au texte traduit ; une phrase assemblee a coups d'operateurs se
   // traduit mal. D'ou `echeances_gardees_ok`, qui porte la phrase ENTIERE que
@@ -2485,6 +2535,18 @@ async function init () {
 
   // Filtre demandé par l'URL (lien « n de plus » de l'accueil, étape 4).
   const params = new URLSearchParams(location.search)
+  // Ouverture directe `?conv=` (liens de l'accueil) : seulement si
+  // le fil existe — jamais un écran « introuvable » depuis un lien interne.
+  //
+  // ⚠ AVANT LE `?volet=`, ET C'EST UN CONSTAT MINEUR DE LA DERNIERE REVUE.
+  // `ouvrirTiroir(true)` presellectionne le bien du FIL OUVERT ; ouvrir le
+  // panneau avant que `?conv=` ait pose `etat.ouverte` le faisait retomber sur
+  // le premier bien du compte — et depuis le correctif du constat 1, une
+  // bascule de volet ne resynchronise plus. Un lien `?volet=ia&conv=X` reglait
+  // donc le delai d'un autre logement que celui qu'il venait d'ouvrir : le
+  // point 2 de la recette, rouvert par la porte des liens profonds.
+  const demandee = params.get('conv')
+  if (demandee && etat.conversations.some(x => String(x.bookId) === String(demandee))) ouvrir(String(demandee))
   // Volet demandé par les redirections de l'ancienne app (?volet=ia ou
   // programmes) : le panneau s'ouvre à l'arrivée — titulaire seulement,
   // comme les boutons qui y mènent.
@@ -2498,10 +2560,6 @@ async function init () {
     etat.filtre = filtreDemande
     renderFiltres(); renderListe()
   }
-  // Ouverture directe `?conv=` (liens de l'accueil) : seulement si
-  // le fil existe — jamais un écran « introuvable » depuis un lien interne.
-  const demandee = params.get('conv')
-  if (demandee && etat.conversations.some(x => String(x.bookId) === String(demandee))) ouvrir(String(demandee))
 }
 
 init().catch(e => logger.error('Messages', e.message, e))

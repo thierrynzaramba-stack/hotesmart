@@ -1165,7 +1165,7 @@ gelé.** Deux drapeaux, et un seul endroit où ils se posent :
 | drapeau | posé par | gèle |
 |---|---|---|
 | `etat.modeEnCours` | toute écriture de réglage | la réentrance, la case de pause, « Enregistrer », les tests de canal, le volet Programmes |
-| `etat.panneauEnCours` | `enregistrerPanneau` **seul** | ce qui ne vit que dans `etat.delaisEdit` : pilules de délai, « Autre… » et ses champs h/min, « Je valide chaque réponse », sourdine |
+| `etat.panneauEnCours` | l'enregistrement du panneau **seul** — posé par l'enveloppe `enregistrerPanneau` après sa garde de réentrance, retiré à deux endroits (la fin du corps `enregistrerLePanneau`, et le `finally` de l'enveloppe) | ce qui ne vit que dans `etat.delaisEdit` : pilules de délai, « Autre… » et ses champs h/min, « Je valide chaque réponse », sourdine |
 
 `panneauEnCours` se pose une seule fois, après la garde de réentrance, et
 chaque pose comme chaque retrait est **collé** à celui de `modeEnCours` : il
@@ -1227,9 +1227,16 @@ soit sur une requête supabase** : ce qui s'y mesure est le panneau. Les
 requêtes du writer sont éprouvées par leur propre double, strict, dans
 `tests/guestflow-appliquer-delai.test.js`.
 
-### Les six constats de la revue de ce lot — dont deux ouverts par mon correctif
+### Les dix constats de la revue de ce lot — dont deux ouverts par mon correctif
 
-Aucun de sécurité. Trois défauts de comportement, trois faux verts.
+Aucun de sécurité. **Quatre** défauts de comportement (1, 7, 6, 5), **quatre**
+faux verts (2, 3, 4, 8), plus le double du banc (9) et l'en-tête du banc (10).
+
+⚠ **Ce titre disait « les six constats », et la ligne suivante « trois défauts,
+trois faux verts ».** Les deux étaient faux, et la section elle-même en
+énumérait dix — comme le message du commit. Relevé par la revue suivante
+(son constat 5) : c'est, en titre, exactement le défaut que `CLAUDE.md` nomme,
+un chiffre périmé qui se lit comme une mesure et ne rougit jamais.
 
 **Constat 1 — mon correctif du point 2 écrasait le bien choisi à la main.** Mon
 commentaire affirmait « à l'ouverture seulement, pas à chaque rendu », et la
@@ -1277,7 +1284,7 @@ inexistante. Mesuré par la revue, mutation par mutation, sur la suite complète
 | la garde de compte de `bienDuFilOuvert` est testée | retirer `etat.biens.has(ref)` | **rien** — l'assertion était satisfaite par le repli de `renderTiroir`, pas par la garde qu'elle nommait |
 | « sourdine » dans le tableau des deux drapeaux, « un test le tient » | remettre les trois contrôles sous `off` | **rien** |
 | `panneauEnCours` « ne peut pas diverger », assertion jumelle | déplacer la pose **avant** la garde de réentrance | **rien** — mon assertion écrivait `A - B < 60` au lieu de `Math.abs(A - B) < 60`, donc toute pose plus haut passait |
-| « `geler` ne se défait que par un re-rendu » (commentaire **et** assertion) | supprimer l'appel `geler(corps, true)` | **rien** — `renderTiroir()` remplace tout le sous-arbre la ligne suivante : `geler` est un filet pour le seul cas où `renderTiroir` sort sans peindre, et rien d'autre |
+| « `geler` ne se défait que par un re-rendu » (commentaire **et** assertion) | supprimer l'appel `geler(corps, true)` | **rien** — `renderTiroir()` remplace tout le sous-arbre la ligne suivante. ⚠ Et la phrase a **survécu** hors du diff, une ligne plus bas : relevée par la revue suivante (constat 7), corrigée depuis. `geler` a désormais un rôle, mais à l'autre bout : `geler(corps, false)` est le **dégel qui ne dépend pas d'un rendu** (constat 3 ci-dessous) |
 
 Les quatre sont maintenant tenus par un test qui **exécute** la garde (et non
 par un voisin qui la masque), et les quatre affirmations sont corrigées à la
@@ -1309,6 +1316,89 @@ volet « Messages programmés » lance un chargement **asynchrone**. Si le test
 finit et ferme la fenêtre avant, le code de la page retombe sur un document
 mort et node:test rend un `unhandledRejection` qui fait échouer le **fichier** —
 22 verts et un rouge anonyme. D'où `reposer(banc)`, à appeler avant de fermer.
+
+### La revue des correctifs : huit constats, et trois de mes correctifs étaient faux
+
+Aucun de sécurité non plus. Ce qu'elle a trouvé de plus utile, c'est que **trois
+de mes correctifs ne corrigeaient pas ce qu'ils annonçaient** — et un retirait
+une protection qui servait.
+
+**Le court-circuit du constat 6 était inerte, et nuisible.** J'avais écrit
+`brouillonsRepris = !propager ? 0 : …` pour fermer une note qui se contredisait.
+Deux choses étaient fausses, les deux mesurées :
+
+- **Inerte contre l'endpoint livré.** `api/agent-config.js` rend **toujours** un
+  `brouillons`, et avec `propager: false` c'est
+  `bilanVide({ ok: true, motif: 'propagation_non_demandee' })` — donc
+  `desarmes + rearmes = 0`. L'expression d'avant rendait déjà 0. La note
+  contradictoire n'était atteignable qu'avec une réponse que le serveur ne
+  produit pas ; **c'était la fixture de mon propre test.**
+- **Et il retirait le rechargement dans la seule fenêtre où il servait.** Le
+  chemin « réponse illisible » est pris quand on ne sait **pas** quelle version
+  d'endpoint a répondu. Un endpoint antérieur à `apercu` aurait enregistré **et
+  propagé** dès l'appel d'aperçu, puis ignoré `propager: false` — et il ne rend
+  pas de `brouillons`, donc `!b` valait 1 et le fil était relu. Avec mon
+  court-circuit : 0, et l'écran gardait une échéance périmée. **Le défaut même
+  que ce lot existe pour fermer.**
+
+Le court-circuit est retiré ; la distinction `refusHote` de la recette, elle,
+reste — c'est elle qui porte le point 4 de Thierry.
+
+**Le filet du constat 5 ne couvrait pas le lever qu'il nommait.** Si le
+**dernier** `renderTiroir()` lève, les drapeaux sont déjà retombés, donc le `if`
+du `finally` est faux : pas de dégel, et `noteReglage`, qui vient après, ne
+tourne pas. Mesure de la revue, par sonde, tous les appels serveur réussis :
+panneau entièrement `disabled`, note vide, « Enregistrer » désarmé. **L'hôte a
+cliqué, tout est passé côté serveur, il ne lit rien et ne peut même pas
+réessayer.** Le re-rendu final est maintenant dans son propre `try`, la note
+part toujours, et `geler(corps, false)` relâche les nœuds **en place** — le seul
+dégel qui marche quand le rendu ne peut pas peindre.
+
+**Et mon double de base de données inventait une panne.** `__leveTable` faisait
+lever une table pour atteindre le `catch` d'un appelant. Or **postgrest-js ne
+lève jamais** sans `.throwOnError()` : il convertit même une panne réseau en
+`{ data: null, error }`. Ce n'est pas une découverte de cette revue — le dépôt
+l'avait écrit dans `api/book-webhook.js`, comme constat de review *vérifié par
+exécution*, et je ne l'ai pas relu. Un double qui **invente** une forme de panne
+est aussi faux qu'un double qui en **avale** une : il valide un chemin
+inatteignable. `__leveTable` est supprimé, et le test qui s'en servait est refait
+sur la vraie réponse du serveur.
+
+**Conséquence à retenir pour tout test de cet écran** : une erreur de lecture se
+lit dans `error`, et une lecture qui fait `if (error) return` — `rechargerTaches`
+en est une — l'**avale**. Aucun test ne peut la faire remonter plus haut.
+
+**Trois affirmations fausses de plus, dont deux en titre**, toutes corrigées :
+le titre « les six constats » (dix), « chacun a été mesuré rouge contre
+`c0d1ec0d` » (**4 rouges sur 9** — les cinq autres ferment des faux verts, leur
+preuve est une mutation), et le commentaire d'état de `etat.panneauEnCours`, qui
+donnait toujours la justification périmée (« posé et retiré sur les mêmes
+lignes, et nulle part ailleurs ») alors que le commit annonçait l'avoir
+corrigée. Le message du commit `1d86ae19` porte lui aussi deux de ces erreurs —
+« 3 rouges » là où la mesure rend 4, et « cinq mutations » suivies de quatre :
+**l'historique ne se corrige pas, il se complète**, donc c'est dit ici.
+
+**Deux correctifs mineurs venus de la même revue** : les listes `MAILLONS` et
+`FINS` du banc portaient `filter` et `maybeSingle`, que la page n'utilise pas —
+alors que le commentaire affirmait qu'elles venaient du fichier mesuré ;
+recomptées. Et le garde-fou d'amorce du banc avait été rétréci à
+`/^init\(\)\.catch/`, donc une amorce écrite `init()` tout court n'était ni
+coupée ni détectée : rétabli à `/^init\(\)/`.
+
+**Un résidu du point 2 de la recette, par la porte des liens profonds.**
+`init()` ouvrait le panneau sur `?volet=ia` **avant** que `?conv=` ait posé le
+fil ouvert — donc un lien `?volet=ia&conv=X` réglait le délai du premier bien du
+compte, pas celui qu'il venait d'ouvrir. Et depuis le correctif du constat 1,
+une bascule de volet ne resynchronise plus. Les deux paramètres sont désormais
+lus dans l'ordre inverse.
+
+⚠ **Et deux de mes trois tests neufs ne mesuraient rien, trouvés par mutation
+avant de les livrer.** Le premier visait la branche « endpoint sans aperçu », où
+`propager` reste **vrai** : la mutation du correctif ne pouvait rien y changer.
+Le second programmait son geste de rupture dans un `setTimeout` — une
+**macrotâche** — alors que les doubles du banc résolvent en microtâches : le
+geste tombait après la fin de l'enregistrement. Les deux portent désormais une
+assertion qui vérifie que **le geste a mordu** avant de lire son résultat.
 
 ### D4 — une bascule de pause efface la saisie non enregistrée du panneau
 

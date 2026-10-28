@@ -60,7 +60,12 @@ function corpsDeLaPage () {
   const sansImports = m[1].replace(/^import\s[\s\S]*?from\s*'[^']*'\s*$/gm, '')
   const sansAmorce = sansImports.replace(/^init\(\)\.catch\([\s\S]*?\)\s*$/m, '')
   if (/^\s*import\s/m.test(sansAmorce)) throw new Error('banc : un import a survecu')
-  if (/^init\(\)\.catch/m.test(sansAmorce)) throw new Error('banc : l amorce init() a survecu')
+  // ⚠ LE GARDE-FOU VISE `init()` EN DEBUT DE LIGNE, PAS SEULEMENT
+  // `init().catch(` (constat mineur de la derniere revue : je l'avais rétréci).
+  // Une amorce ecrite `init()` tout court n'etait alors ni coupee ni detectee,
+  // et le banc partait au reseau en rendant trois echecs sans rapport apparent
+  // au lieu d'un message clair.
+  if (/^init\(\)/m.test(sansAmorce)) throw new Error('banc : l amorce init() a survecu')
   if (!/^async function init \(/m.test(sansAmorce)) throw new Error('banc : init() a disparu du module')
   return sansAmorce
 }
@@ -199,29 +204,53 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
   // pages/messages.html, et les maillons qu'il enchaine.
   const TABLES = new Set(['agent_prompting', 'agent_tasks', 'message_templates',
     'properties', 'property_locks'])
+  // ⚠ RECOMPTE A LA MAIN SUR LE FICHIER (constat mineur de la derniere revue) :
+  // ma premiere version portait `filter` et `maybeSingle`, que la page
+  // n'utilise PAS — les `.filter(` de pages/messages.html sont tous des
+  // `Array.prototype.filter`. Le commentaire disait « les deux listes viennent
+  // du fichier mesure » ; elles en viennent maintenant pour de vrai. Un maillon
+  // que la page se met a utiliser fera LEVER le banc, et c'est le but : on
+  // l'ajoute ici en connaissance de cause.
   const MAILLONS = new Set(['select', 'insert', 'update', 'delete', 'eq', 'neq', 'is',
-    'in', 'order', 'limit', 'filter'])
-  const FINS = new Set(['single', 'maybeSingle'])
+    'in', 'order', 'limit'])
+  const FINS = new Set(['single'])
   // `window.__echecTable` permet a un test de faire ECHOUER une table : sans
   // ca, aucune assertion de note n'est conditionnelle a cette etape.
   window.__echecTable = null
-  // ⚠ ET UNE TABLE QUI LEVE N'EST PAS UNE TABLE QUI REND UNE ERREUR. Plusieurs
-  // lectures de la page font `if (error) return` : un `{ error }` y est AVALE,
-  // et un test qui croit forcer un echec ne force rien. Un vrai client peut
-  // lever (reseau coupe, jeton refuse), et c'est ce chemin-la qui remonte
-  // jusqu'au `catch` de l'appelant.
-  window.__leveTable = null
+  // ⚠ IL N'Y A PAS DE `__leveTable`, ET C'EST MESURE — constat 4 de la derniere
+  // revue, et le depot l'avait DEJA ecrit : « postgrest-js NE LEVE JAMAIS sans
+  // `.throwOnError()` — il convertit meme une panne fetch en
+  // `{ data: null, error }` » (api/book-webhook.js, constat de review verifie
+  // par execution ; postgrest-js 2.102.1, et aucun `.throwOnError()` dans ce
+  // depot). J'avais ajoute un `__leveTable` pour atteindre le `catch` d'un
+  // appelant : il modelisait une panne que le vrai client ne produit pas, donc
+  // il VALIDAIT un chemin inatteignable. Un double qui invente une forme de
+  // panne est aussi faux qu'un double qui en avale une.
+  // Consequence a retenir pour les tests : une erreur de lecture se lit dans
+  // `error`, et une lecture qui fait `if (error) return` l'AVALE. Il n'y a pas
+  // de chemin par lequel un test puisse la faire remonter plus haut.
+  //
+  // Ce que les tables ont ete appelees, pour qu'un test puisse affirmer qu'une
+  // lecture n'a PAS eu lieu.
+  window.__tables = []
+  // ⚠ CE QUE `single()` REND EST UNE LIGNE MINIMALE, ET C'EST UNE LIMITE DU
+  // BANC, PAS UN CONTRAT (constat mineur de la derniere revue). La page fait
+  // `.update(…).select().single()` sur `message_templates` et reinjecte la
+  // ligne rendue dans `etat.templates` : un `{ id }` nu y entre comme un
+  // modele AMPUTE, ce que le vrai serveur ne renverrait jamais. Aucun test de
+  // ce banc ne touche au volet Programmes ; celui qui le fera devra poser
+  // `__ligneUnitaire` avec une ligne complete, sinon il mesurera une page
+  // nourrie de faux.
+  window.__ligneUnitaire = null
   window.__table = (nom) => {
     if (!TABLES.has(nom)) throw new Error('banc : table inconnue de la page — ' + nom)
-    if (window.__leveTable === nom) {
-      return new Proxy({}, { get () { throw new Error('banc : lever demande sur ' + nom) } })
-    }
+    window.__tables.push(nom)
     const resultat = () => (window.__echecTable === nom
       ? { data: null, error: { message: 'banc : echec demande sur ' + nom } }
       : { data: [], error: null })
     const unitaire = () => (window.__echecTable === nom
       ? { data: null, error: { message: 'banc : echec demande sur ' + nom } }
-      : { data: { id: 'C1' }, error: null })
+      : { data: window.__ligneUnitaire || { id: 'C1' }, error: null })
     const q = new Proxy({}, {
       get (_, cle) {
         if (cle === 'then') return (f, r) => Promise.resolve(resultat()).then(f, r)
@@ -253,6 +282,7 @@ function monter ({ appel = async () => ({}), titulaire = true, ecriture = true, 
     dom, window, doc: window.document, msg, envois,
     journal: window.__journal, domaines: window.__domaines,
     confirmations: window.__confirmations,
+    tables: window.__tables,
     repondreConfirm: (v) => { window.__reponseConfirm = v },
     note: () => {
       const n = window.document.querySelector('[data-bind="tiroir-note"]')
