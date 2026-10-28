@@ -2284,7 +2284,18 @@ function renderAnnee () {
   // pointille ce qu'il avait VENDU au meme jour.
   if (aDuReserveADate) {
     series.push({
-      nom: t('revenue.annee_rad_legende', { date: dateDuJour(String(rad.pivot), { day: 'numeric', month: 'short' }) }),
+      // ⚠ LES DEUX PARAMETRES, ET C'EST LE DEFAUT DE RECETTE DU 28 OCTOBRE
+      // 2026 (Thierry, en PRODUCTION) : `revenue.annee_rad_legende` vaut
+      // « {annee} réservé au {date} », et seul `date` etait passe. `I18n.t`
+      // laisse alors l'accolade TELLE QUELLE — c'est son repli explicite quand
+      // une variable manque (`shared/i18n/i18n.js`, fonction `t`) —, donc la
+      // legende affichait litteralement « {annee} réservé au 28 oct. » — et
+      // l'info-bulle la reprenait. Aucun test ne pouvait le voir : le double
+      // d'`I18n.t` du banc rend la CLEF, il ne substitue rien.
+      nom: t('revenue.annee_rad_legende', {
+        annee: String(an - 1),
+        date: dateDuJour(String(rad.pivot), { day: 'numeric', month: 'short' })
+      }),
       couleur: 'var(--muted)', epaisseur: 2, pointille: true, valeurs: radValeurs
     })
   }
@@ -2420,6 +2431,7 @@ function renderAnnee () {
       // differentes sous une seule etiquette laissaient l'hote devant une
       // bande que rien ne nommait, et une note qui attribuait tout a l'autre.
       + (aDuReserveADate ? marque('n1-pointille', t('revenue.annee_rad_legende', {
+        annee: String(an - 1),
         date: dateDuJour(String(rad.pivot), { day: 'numeric', month: 'short' })
       })) : '')
       + bandes.map(b => marque(
