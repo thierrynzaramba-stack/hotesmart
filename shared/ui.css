@@ -718,6 +718,10 @@ a.menu__item:hover, button.menu__item:hover { background: var(--surface-2); }
 .cal-yf-menu__activer { display: flex; align-items: center; justify-content: center; min-height: 40px; padding: 10px 14px; border-radius: var(--radius-pill); background: var(--info); color: var(--on-ink); font-size: var(--fs-small); font-weight: var(--fw-semibold); text-align: center; text-decoration: none; }
 .cal-yf-menu__activer:hover { box-shadow: var(--shadow-hover); }
 .cal-yf-menu__attente { padding: 14px 10px; font-size: var(--fs-caption); color: var(--muted); }
+/* Le refus de bascule : la phrase de la regle, lisible, SANS bouton. Un hote
+   qui lit pourquoi c'est impossible et quel geste le debloque est mieux servi
+   qu'un bouton qui ne fait rien. */
+.cal-yf-menu__refus { margin: 0; padding: 2px 6px 4px; font-size: var(--fs-caption); color: var(--muted); line-height: 1.45; }
 .cal-yf-voile { position: fixed; inset: 0; background: rgba(0, 0, 0, .35); z-index: 54; }
 
 @media (max-width: 899px) {
