@@ -1616,6 +1616,19 @@ body.men-cfg-ouvert { overflow: hidden; }
 .rev-an-marque--plein { height: 2.5px; background: var(--ink); }
 .rev-an-marque--pointille { height: 0; border-top: 2px dashed var(--ink); }
 .rev-an-marque--n1 { height: 2px; background: var(--muted); }
+/* « N-1 reserve au … » : gris comme l'an dernier, pointille comme un ETAT a
+   une date — et non un resultat. Les deux marques grises coexistent. */
+.rev-an-marque--n1-pointille { height: 0; border-top: 2px dashed var(--muted); }
+/* La bande des comparables : un PAVE plein, pas un trait — elle couvre une
+   surface, et sa marque doit le dire. */
+.rev-an-marque--bande { height: 10px; background: var(--border); border-radius: 2px; }
+/* La bande du futur est la PLUS CLAIRE des deux (decision E) : l'occupe chez
+   les comparables se distingue de leur realise sans changer de forme. */
+.rev-an-marque--bande-futur { height: 10px; background: var(--line); border-radius: 2px; }
+/* Le fond de la bande. ⚠ Aucun hexa : les deux jetons existent deja au theme,
+   et un hexa en dur ici ne suivrait pas le mode sombre. */
+.cm-bande { opacity: .85; }
+.cm-bande-trait { stroke-width: 6; opacity: .85; }
 
 /* ⚠ LE MOIS COURANT EN GRAS SUR L'AXE : il marque où s'arrête le réalisé.
    Il double le passage au pointillé, il ne le remplace pas. */
@@ -1634,12 +1647,34 @@ body.men-cfg-ouvert { overflow: hidden; }
    une liste de cartes, hors du `<table>`, et elle reutilise le meme balisage
    d'ecart. Prefixees, ces deux regles laissaient le telephone sans gras ni
    couleur — « le mobile suit l'ordinateur ». */
-.rev-tbl__ecart { font-weight: 700; color: var(--ok); }
+.rev-tbl__ecart { font-weight: 700; color: var(--ok-ink); }
 .rev-tbl__ecart--bas { color: var(--ink); }
+/* ⚠ ROUGE POUR UN RETARD, et le SIGNE porte le sens autant que la couleur :
+   un hote qui ne distingue pas le vert du rouge lit « +12 % » et « -68 % » (le trait d'union que rend `String(-68)`, pas un signe moins typographique).
+   La couleur n'est jamais seule porteuse — regle du depot. */
+.rev-tbl__ecart--retard { color: var(--danger-ink); }
+/* ⚠ ZERO N'EST NI UNE AVANCE NI UN RETARD. Le vert s'etendait jusqu'a 0 % par
+   le seul fait que la condition testait `< 0` ; gris neutre, dans les DEUX
+   tableaux du bloc (decision de Thierry du 28 octobre 2026). */
+.rev-tbl__ecart--nul { color: var(--muted); font-weight: var(--fw-semibold); }
+/* ⚠ ET LE NEGATIF, LUI, DIFFERE ENTRE LES DEUX TABLEAUX, EXPRES : `--bas`
+   (encre) dans le tableau des biens, `--retard` (rouge) dans « Reserve a
+   date ». Un bien qui a moins vendu que l'an dernier est un FAIT, pas une
+   alarme ; un mois a venir en retard de rythme est une alarme, parce qu'il
+   reste du temps pour agir. Le zero, lui, est neutre des deux cotes : il
+   n'est ni un fait remarquable ni une alarme. */
 
-/* ⚠ LA LISTE DE L'ANNEE EST LA FORME TELEPHONE DU TABLEAU, et elle ne porte
-   donc AUCUNE regle d'affichage : elle suit `.rev-liste` — cachee au-dessus de
-   561 px, en grille en dessous. Sa premiere version la forcait a
+/* ─── Le tableau « Reserve a date » ───────────────────────────────────────
+   Il DOUBLE la ligne pointillee, il ne la remplace pas : au niveau du compte,
+   l'axe est tire par le pic d'ete et deux pointilles a 2 k € sur un axe a
+   16 k € se tassent au ras de l'axe. */
+.rev-rad { margin-top: 18px; }
+.rev-rad__titre { margin: 0 0 6px; font-weight: 700; color: var(--ink); }
+
+/* ⚠ LES LISTES DE L'ANNEE — celle des biens et celle de « Reserve a date » —
+   SONT LA FORME TELEPHONE DES TABLEAUX, et elles ne portent donc AUCUNE regle
+   d'affichage : elles suivent `.rev-liste` — cachees au-dessus de
+   561 px, en grille en dessous. La premiere version de celle des biens la forcait a
    `display: grid`, heritage de la forme en cartes empilees : l'ordinateur
    aurait affiche le tableau ET les cartes, l'un sous l'autre. La classe ne sert
    plus qu'a distinguer les deux listes quand la vue Mois cache la sienne. */

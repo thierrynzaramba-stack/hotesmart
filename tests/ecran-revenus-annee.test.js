@@ -25,23 +25,43 @@ const TOUS_DOMAINES = ['reservations', 'menages', 'messages', 'avis', 'reglages'
 async function appeler ({
   query = {}, methode = 'GET', titulaire = true, refs = null,
   domaines = TOUS_DOMAINES, lignes = [], biens = [BIEN_A, BIEN_B],
-  erreurRpc = null, erreurBiens = null
+  erreurRpc = null, erreurBiens = null,
+  // Les lignes de `comparables_releves`, et une erreur de lecture au besoin.
+  releves = [], erreurReleves = null,
+  // Les lignes de `revenus_reserve_a_date`.
+  lignesRad = [], erreurRad = null
 } = {}) {
   const vu = { rpc: [], selects: [], filtres: [] }
 
   const client = {
     rpc (nom, args) {
       vu.rpc.push({ nom, args })
+      // ⚠ LE DOUBLE REPOND PAR FONCTION. Une seule reponse pour les deux
+      // agregats ferait passer les lignes de l'annee pour du « reserve a
+      // date » — et les tests mesureraient autre chose que ce qu'ils croient.
+      if (nom === 'revenus_reserve_a_date') {
+        return Promise.resolve({ data: erreurRad ? null : lignesRad, error: erreurRad })
+      }
       return Promise.resolve({ data: erreurRpc ? null : lignes, error: erreurRpc })
     },
     from (table) {
       vu.selects.push(table)
+      // ⚠ LE DOUBLE REPOND PAR TABLE. Une seule reponse pour toutes les tables
+      // ferait passer la lecture des comparables pour une liste de biens, et
+      // les tests de la bande mesureraient autre chose que ce qu'ils croient.
+      const comparables = table === 'comparables_releves'
+      const reponse = () => comparables
+        ? { data: erreurReleves ? null : releves, error: erreurReleves }
+        : { data: erreurBiens ? null : biens.map(id => ({ id })), error: erreurBiens }
       const q = {
         select () { return q },
         eq (c, v) { vu.filtres.push(['eq', c, v]); return q },
         in (c, v) { vu.filtres.push(['in', c, v]); return q },
-        limit () { return Promise.resolve({ data: erreurBiens ? null : biens.map(id => ({ id })), error: erreurBiens }) },
-        then (r) { return Promise.resolve({ data: erreurBiens ? null : biens.map(id => ({ id })), error: erreurBiens }).then(r) }
+        gte (c, v) { vu.filtres.push(['gte', c, v]); return q },
+        lt (c, v) { vu.filtres.push(['lt', c, v]); return q },
+        order (c, o) { vu.filtres.push(['order', c, (o || {}).ascending]); return q },
+        limit () { return Promise.resolve(reponse()) },
+        then (r) { return Promise.resolve(reponse()).then(r) }
       }
       return q
     }
@@ -132,13 +152,27 @@ test("LE TEST QUI COMPTE : sans le droit `reservations`, la fonction n'est PAS a
 
 test("LE TEST QUI COMPTE : un titulaire ne porte AUCUNE borne, un membre en porte une", async () => {
   const t = await appeler({ titulaire: true })
-  assert.strictEqual(t.vu.rpc.length, 1)
+  // ⚠ DEUX APPELS DEPUIS LE 28 OCTOBRE 2026 : l'agregat de l'annee, et
+  // « reserve a date » pour l'annee precedente. ⚠ ET LES DEUX DOIVENT PORTER
+  // LA MEME BORNE : c'est tout l'objet de ce test. Un second agregat ajoute
+  // sans sa borne serait une fuite entre comptes, et le compte d'appels
+  // n'aurait rien dit — c'est la borne qu'on verifie, pas leur nombre.
+  assert.strictEqual(t.vu.rpc.length, 2, 'le nombre d agregats a change : verifiez que le nouveau porte sa borne')
+  for (const appel of t.vu.rpc) {
+    assert.strictEqual(appel.args.p_user_id, TITULAIRE, `${appel.nom} ne borne pas sur le compte`)
+    assert.strictEqual(appel.args.p_refs, null, `${appel.nom} borne un titulaire, qui ne doit pas l etre`)
+  }
   assert.strictEqual(t.vu.rpc[0].args.p_user_id, TITULAIRE,
     'le compte interroge n est pas celui de la garde')
   assert.strictEqual(t.vu.rpc[0].args.p_refs, null,
     'un titulaire recoit une borne : il verrait MOINS que son compte')
 
   const m = await appeler({ titulaire: false, refs: [BIEN_A] })
+  // ⚠ TOUS les agregats, pas seulement le premier : un membre delegue dont le
+  // second agregat ne serait pas borne lirait le parc entier.
+  for (const appel of m.vu.rpc) {
+    assert.deepEqual(appel.args.p_refs, [BIEN_A], `${appel.nom} ne borne pas le perimetre du membre`)
+  }
   assert.deepEqual(m.vu.rpc[0].args.p_refs, [BIEN_A],
     'le membre delegue lit SANS borne : c est une fuite inter-biens')
 
@@ -345,4 +379,283 @@ test("LE TEST QUI COMPTE : une liste de biens TRONQUEE refuse le partage", async
   const ok = await appeler({ biens: sous, lignes: [ligne(sous[0], 2026, 4)] })
   assert.ok(ok.charge.par_bien && ok.charge.par_bien[sous[0]],
     'le plafond mord un cran trop tot')
+})
+
+// ─── LA BANDE DES COMPARABLES (28 octobre 2026) ────────────────────────────
+// ⚠ CE CHEMIN ETAIT A ZERO COUVERTURE, et la review l'a mesure : cinq
+// mutations y survivaient, dont la SUPPRESSION DE LA GARDE 403. Le depot a
+// deja paye trois fois la classe « masquage sans garde serveur ».
+
+const releve = (o = {}) => ({
+  listing_id: '111', mois: '2026-05-01', nature: 'clos',
+  montant_estime_cents: 500000, montant_affiche_cents: null,
+  nuits_indisponibles: null, nuits_mesurees: null, motif: null,
+  releve_le: '2026-10-06', ...o
+})
+
+test("LE TEST QUI COMPTE (SECURITE) : un bien HORS PERIMETRE rend 403", async () => {
+  // Un membre delegue dont le perimetre ne porte que BIEN_A demande la bande de
+  // BIEN_B. Un masquage d'ecran ne protege rien : c'est le serveur qui refuse.
+  const r = await appeler({
+    titulaire: false, refs: [BIEN_A], biens: [BIEN_A],
+    query: { annee: '2026', bien: BIEN_B },
+    releves: [releve({ mois: '2026-05-01' })]
+  })
+  assert.equal(r.statut, 403,
+    `un bien hors perimetre rend ${r.statut} au lieu de 403 : les comparables d un logement interdit sont lisibles`)
+  // ⚠ ET LE REFUS TOMBE AVANT TOUTE LECTURE : rien n a ete lu de la table.
+  assert.ok(!r.vu.selects.includes('comparables_releves'),
+    'la table des comparables a ete lue AVANT le refus')
+})
+
+test("LE TEST QUI COMPTE : un uuid malforme rend 400, pas une lecture", async () => {
+  const r = await appeler({ query: { annee: '2026', bien: 'pas-un-uuid' } })
+  assert.equal(r.statut, 400, `un uuid malforme rend ${r.statut}`)
+  assert.ok(!r.vu.selects.includes('comparables_releves'), 'la table a ete lue sur un uuid malforme')
+})
+
+test("LE TEST QUI COMPTE : sans `?bien=`, la table n est pas lue du tout", async () => {
+  // Le budget de l ecran : la bande ne coute rien a qui ne la demande pas.
+  const r = await appeler({ query: { annee: '2026' }, releves: [releve()] })
+  assert.equal(r.statut, 200)
+  assert.ok(!r.vu.selects.includes('comparables_releves'),
+    'la table des comparables est lue sans logement designe')
+  assert.equal(r.charge.comparables, null, 'une bande est rendue sans logement designe')
+})
+
+test("LE TEST QUI COMPTE : un `futur` sur un mois DEJA CLOS est ecarte", async () => {
+  // Il vient de drapeaux `available` releves AVANT la fin du mois. L ecran le
+  // libellerait « occupe chez les comparables » — sur un mois termine.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      releve({ mois: '2026-01-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 300000, nuits_mesurees: 31 }),
+      releve({ mois: '2026-05-01', nature: 'clos' })
+    ]
+  })
+  assert.equal(r.statut, 200)
+  const mois = r.charge.comparables.mois
+  assert.ok(!mois['2026-01'], 'un mois clos est trace dans la bande du futur, a partir de donnees perimees')
+  assert.ok(mois['2026-05'], 'le mois clos legitime a disparu : le test ne demontre rien')
+})
+
+test("LE TEST QUI COMPTE : un mois dont la COUVERTURE est partielle est ecarte", async () => {
+  // Le calendrier AirROI commence a sa date de capture : son premier mois est
+  // tronque. Trace a cote d une courbe qui porte le mois entier, il s ecrase au
+  // ras de l axe et l hote lit « mes comparables font dix fois moins que moi ».
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      releve({ mois: '2026-12-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 9380, nuits_mesurees: 4 }),
+      releve({ mois: '2026-11-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 300000, nuits_mesurees: 30 })
+    ]
+  })
+  const mois = r.charge.comparables.mois
+  assert.ok(!mois['2026-12'], 'un mois couvert sur 4 nuits sur 31 est trace comme un mois entier')
+  assert.ok(mois['2026-11'], 'le mois complet a disparu : le test ne demontre rien')
+})
+
+test("LE TEST QUI COMPTE : deux PHOTOS DE DATES DIFFERENTES ne se melangent pas", async () => {
+  // `releve_le` vient du cache AirROI, propre a chaque annonce : le min
+  // pourrait venir d une photo de juillet et le max d une d octobre, sous une
+  // seule date affichee.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      releve({ listing_id: '111', mois: '2026-05-01', montant_estime_cents: 100000, releve_le: '2026-07-01' }),
+      releve({ listing_id: '222', mois: '2026-05-01', montant_estime_cents: 900000, releve_le: '2026-10-06' }),
+      releve({ listing_id: '111', mois: '2026-06-01', montant_estime_cents: 200000, releve_le: '2026-10-06' }),
+      releve({ listing_id: '222', mois: '2026-06-01', montant_estime_cents: 400000, releve_le: '2026-10-06' })
+    ]
+  })
+  const mois = r.charge.comparables.mois
+  assert.ok(!mois['2026-05'], 'un mois dont les photos ont deux dates est trace quand meme')
+  assert.ok(mois['2026-06'], 'le mois a photo unique a disparu : le test ne demontre rien')
+  assert.equal(mois['2026-06'].min_cents, 200000)
+  assert.equal(mois['2026-06'].max_cents, 400000)
+  assert.equal(mois['2026-06'].comparables, 2)
+})
+
+test("LE TEST QUI COMPTE : les deux grandeurs ne se min/maxent JAMAIS ensemble", async () => {
+  // Une estimation de revenu AirROI et une somme de prix affiches ne sont pas
+  // la meme grandeur. Les fondre ferait un min et un max qui ne parlent pas de
+  // la meme chose — ce que la migration dit explicitement d eviter.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      releve({ listing_id: '111', mois: '2026-11-01', nature: 'clos', montant_estime_cents: 800000 }),
+      releve({ listing_id: '222', mois: '2026-11-01', nature: 'futur', montant_estime_cents: null, montant_affiche_cents: 1000, nuits_mesurees: 30 })
+    ]
+  })
+  const m = r.charge.comparables.mois['2026-11']
+  assert.ok(m, 'le mois a disparu')
+  assert.equal(m.nature, 'clos', 'le realise ne prime pas sur l occupe')
+  assert.equal(m.min_cents, 800000, 'le min vient d une autre grandeur que le max')
+  assert.equal(m.max_cents, 800000)
+  assert.equal(m.comparables, 1, 'deux grandeurs ont ete comptees comme deux comparables du meme mois')
+})
+
+test("LE TEST QUI COMPTE : une lecture ratee rend `null`, pas une bande vide", async () => {
+  // `null` veut dire « on n a pas pu lire ». Une bande vide dirait « ce
+  // logement n a pas de comparables » — un fait, et il serait faux.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    erreurReleves: { message: 'panne' }
+  })
+  assert.equal(r.statut, 200)
+  assert.equal(r.charge.comparables, null, 'une lecture ratee rend une bande vide au lieu de `null`')
+  assert.ok((r.charge.indisponibles || []).includes('comparables'),
+    'une lecture ratee des comparables n est pas declaree dans `indisponibles`')
+})
+
+test("LE TEST QUI COMPTE : d un MEME comparable, seule la photo la plus recente compte", async () => {
+  // La table garde toutes les photos — c est son role. Mais la bande
+  // d aujourd hui se lit sur la derniere : garder les deux ferait un min et un
+  // max du meme logement a deux instants, et le mois serait meme ecarte pour
+  // « photos de dates differentes » alors qu il n y a qu un comparable.
+  // ⚠ LES LIGNES ARRIVENT DEJA TRIEES decroissant, comme la base les rend
+  // (`order('releve_le', { ascending: false })`). Le double n applique pas le
+  // tri : c est a la fixture de le refleter, sinon le test mesurerait l ordre
+  // du double et non la regle.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      releve({ listing_id: '111', mois: '2026-06-01', montant_estime_cents: 500000, releve_le: '2026-10-06' }),
+      releve({ listing_id: '111', mois: '2026-06-01', montant_estime_cents: 100000, releve_le: '2026-07-01' })
+    ]
+  })
+  const m = r.charge.comparables.mois['2026-06']
+  assert.ok(m, 'le mois a disparu : les deux photos du meme comparable ont ete prises pour deux dates')
+  assert.equal(m.comparables, 1, `${m.comparables} comparables comptes pour une seule annonce`)
+  assert.equal(m.min_cents, 500000, 'une photo perimee est entree dans le min')
+  assert.equal(m.max_cents, 500000)
+  assert.equal(m.releve_le, '2026-10-06', 'la date affichee n est pas celle de la photo retenue')
+})
+
+test("LE TEST QUI COMPTE : un comparable SANS ACTIVITE ne tire pas le minimum a zero", async () => {
+  // ⚠ CONSTAT 3 DE LA RECETTE DU 28 OCTOBRE : « juin, le bas de la bande
+  // descend a 0 € ». Un logement FERME un mois rend 0 — ce n est pas « il a
+  // gagne zero », c est « il n etait pas sur le marche ». Le garder faisait
+  // lire a l hote l effondrement d un comparable.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      releve({ listing_id: '111', mois: '2026-06-01', montant_estime_cents: 400000 }),
+      releve({ listing_id: '222', mois: '2026-06-01', montant_estime_cents: 900000 }),
+      releve({ listing_id: '333', mois: '2026-06-01', montant_estime_cents: 0 })
+    ]
+  })
+  const m = r.charge.comparables.mois['2026-06']
+  assert.ok(m, 'le mois a disparu')
+  assert.equal(m.min_cents, 400000, `le minimum vaut ${m.min_cents} : un comparable ferme y est entre`)
+  assert.equal(m.max_cents, 900000)
+  assert.equal(m.comparables, 2, 'le comparable ferme est compte comme actif')
+  // ⚠ ET IL SE DECLARE : un comparable ecarte en silence est un comparable
+  // qu on a perdu sans le savoir.
+  assert.equal(m.sans_activite, 1, 'le comparable ecarte n est pas compte dans la reserve')
+})
+
+test("LE TEST QUI COMPTE : un mois dont TOUS les comparables sont fermes n a pas de bande", async () => {
+  // Et ce n est PAS une bande a zero : il n y a rien a comparer.
+  const r = await appeler({
+    query: { annee: '2026', bien: BIEN_A },
+    releves: [
+      releve({ listing_id: '111', mois: '2026-07-01', montant_estime_cents: 0 }),
+      releve({ listing_id: '222', mois: '2026-07-01', montant_estime_cents: 0 }),
+      releve({ listing_id: '111', mois: '2026-08-01', montant_estime_cents: 500000 })
+    ]
+  })
+  const mois = r.charge.comparables.mois
+  assert.ok(!mois['2026-07'], 'un mois sans aucun comparable actif est trace comme une bande a zero')
+  assert.ok(mois['2026-08'], 'le mois actif a disparu : le test ne demontre rien')
+})
+
+// ─── « RESERVE A DATE » (28 octobre 2026) ──────────────────────────────────
+
+test("LE TEST QUI COMPTE : le pivot est le MEME JOUR un an plus tot", async () => {
+  // ⚠ UN AN, PAS DEUX. Ma premiere mesure comparait a deux ans — elle trouvait
+  // 3 reservations la ou il y en a 15, et j en avais conclu que le signal etait
+  // trop faible pour etre trace. Un pivot faux ne rend pas un resultat faux :
+  // il rend une CONCLUSION fausse.
+  const r = await appeler({ query: { annee: '2026' } })
+  const appelRad = r.vu.rpc.find(a => a.nom === 'revenus_reserve_a_date')
+  assert.ok(appelRad, 'l agregat « reserve a date » n est pas appele')
+  assert.strictEqual(appelRad.args.p_annee, 2025, 'l agregat ne porte pas sur l annee precedente')
+  const [an, mois, jour] = String(appelRad.args.p_pivot).split('-')
+  const auj = String(r.charge.jour).split('-')
+  assert.strictEqual(Number(an), Number(auj[0]) - 1, `le pivot est en ${an}, pas un an avant ${auj[0]}`)
+  assert.strictEqual(mois, auj[1], 'le pivot n est pas le meme mois')
+  assert.strictEqual(jour, auj[2], 'le pivot n est pas le meme jour')
+})
+
+test("LE TEST QUI COMPTE : sous le SEUIL, le montant n est pas rendu", async () => {
+  // ⚠ LE COMPTE SORT, LE MONTANT NON. Le compte sert a EXPLIQUER le refus
+  // (« 2 ventes a cette date l an dernier ») ; le montant ne doit pas pouvoir
+  // etre trace par accident. Taire les deux laisserait l ecran muet sur un
+  // refus qu il doit nommer.
+  const r = await appeler({
+    query: { annee: '2026' },
+    lignesRad: [
+      { property_uuid: BIEN_A, mois: 11, sejours: 2, total_cents: 50000, sans_date_annulation: 0, non_fiables: 0 },
+      { property_uuid: BIEN_A, mois: 12, sejours: 9, total_cents: 210000, sans_date_annulation: 0, non_fiables: 0 }
+    ]
+  })
+  const m = r.charge.reserve_a_date.mois
+  assert.strictEqual(m['2025-11'].sous_seuil, true, 'un mois a 2 ventes passe le seuil')
+  assert.strictEqual(m['2025-11'].sejours, 2, 'le compte ne sort pas : le refus ne peut pas etre explique')
+  assert.strictEqual(m['2025-11'].total_cents, undefined,
+    'le montant sort alors que le mois est sous le seuil : il pourrait etre trace')
+  assert.strictEqual(m['2025-12'].sous_seuil, false, 'un mois a 9 ventes est refuse a tort')
+  assert.strictEqual(m['2025-12'].total_cents, 210000)
+})
+
+test("LE TEST QUI COMPTE : sur une annee PASSEE, aucun « reserve a date »", async () => {
+  // Comparer « deja reserve aujourd hui » a « reserve a la meme date l an
+  // dernier » suppose un aujourd hui. Sur une annee finie, c est le revenu
+  // FINAL qui se compare — et l appel serait paye pour rien.
+  const r = await appeler({ query: { annee: '2024' } })
+  assert.strictEqual(r.charge.reserve_a_date, null, 'une annee passee rend un « reserve a date »')
+  assert.ok(!r.vu.rpc.some(a => a.nom === 'revenus_reserve_a_date'),
+    'l agregat est appele sur une annee passee')
+})
+
+test("LE TEST QUI COMPTE : les reserves de l agregat REMONTENT a l ecran", async () => {
+  // `sans_date_annulation` et `non_fiables` existent pour etre DITS. Channex ne
+  // fournit aucune date d annulation : leur part grandira avec la bascule.
+  const r = await appeler({
+    query: { annee: '2026' },
+    lignesRad: [
+      { property_uuid: BIEN_A, mois: 11, sejours: 8, total_cents: 90000, sans_date_annulation: 3, non_fiables: 2 }
+    ]
+  })
+  const m = r.charge.reserve_a_date.mois['2025-11']
+  assert.strictEqual(m.sans_date_annulation, 3, 'les annulations sans date ne remontent pas')
+  assert.strictEqual(m.non_fiables, 2, 'les dates de vente non fiables ne remontent pas')
+})
+
+test("LE TEST QUI COMPTE : le seuil s applique A CHAQUE PERIMETRE, pas au seul compte", async () => {
+  // ⚠ UN MOIS PEUT PASSER LE SEUIL POUR LE COMPTE ET PAS POUR UN BIEN. C est
+  // le BIEN qu on trace quand la pastille le designe, donc c est SON compte
+  // qui decide. Appliquer le seuil du compte a la courbe d un bien tracerait
+  // une comparaison que ses trois ventes ne portent pas — et le montant
+  // sortirait, donc il serait tracable.
+  const r = await appeler({
+    query: { annee: '2026' },
+    lignesRad: [
+      { property_uuid: BIEN_A, mois: 11, sejours: 3, total_cents: 60000, sans_date_annulation: 0, non_fiables: 0 },
+      { property_uuid: BIEN_B, mois: 11, sejours: 7, total_cents: 140000, sans_date_annulation: 0, non_fiables: 0 }
+    ]
+  })
+  const rad = r.charge.reserve_a_date
+  // Le COMPTE additionne 3 + 7 = 10 : il passe.
+  assert.strictEqual(rad.mois['2025-11'].sous_seuil, false, 'le compte est refuse alors qu il totalise 10 ventes')
+  assert.strictEqual(rad.mois['2025-11'].total_cents, 200000)
+  // BIEN_A, lui, n en a que 3 : il est refuse, et son montant ne sort pas.
+  assert.strictEqual(rad.par_bien[BIEN_A]['2025-11'].sous_seuil, true,
+    'un bien a 3 ventes passe le seuil parce que le COMPTE le passe')
+  assert.strictEqual(rad.par_bien[BIEN_A]['2025-11'].total_cents, undefined,
+    'le montant d un bien sous le seuil sort quand meme : il pourrait etre trace')
+  // BIEN_B en a 7 : il passe.
+  assert.strictEqual(rad.par_bien[BIEN_B]['2025-11'].sous_seuil, false)
+  assert.strictEqual(rad.par_bien[BIEN_B]['2025-11'].total_cents, 140000)
 })

@@ -73,6 +73,15 @@
   --warn-soft: #FFF4E0;
   --danger: #B42318;
   --danger-soft: #FEF0EE;
+  /* ⚠ DEUX JETONS DE TEXTE, distincts de --ok / --danger, parce que ces
+     deux-la servent AUSSI de fond (.cal-toast--erreur, .men-mk--alerte) :
+     les eclaircir pour le mode sombre retournerait ces fonds. Mesure du
+     28 octobre 2026, sur --surface sombre (#141414) : --danger 2,80:1 et
+     --ok 3,44:1, tous deux SOUS le 4,5:1 d'un texte. Avec les jetons
+     ci-dessous : 6,66:1 et 10,57:1. En clair ils ne changent rien
+     (6,57:1 et 5,36:1 sur blanc, deja conformes). */
+  --ok-ink: #0F7A4F;
+  --danger-ink: #B42318;
 
   /* Typographie */
   --font: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -136,6 +145,8 @@
   --ok-soft: #10301F;
   --warn-soft: #3A2A0A;
   --danger-soft: #3A1512;
+  --ok-ink: #4ADE80;       /* 10,57:1 sur #141414 */
+  --danger-ink: #F87171;   /* 6,66:1 sur #141414 */
   --shadow-hover: 0 6px 20px rgba(0, 0, 0, .5);
   --shadow-sheet: 0 -8px 32px rgba(0, 0, 0, .6);
   --scrim: rgba(0, 0, 0, .6);

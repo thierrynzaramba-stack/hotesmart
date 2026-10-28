@@ -311,11 +311,21 @@ test("LE TEST QUI COMPTE : la VERSION a monte, donc le rattrapage reprend tout",
   // leur classement d'avant.
   const { aDeriver, VERSION, COLONNES } = require('../lib/revenus/derive')
   assert.ok(VERSION >= 2, 'la version n a pas monte avec la nouvelle regle')
-  // ⚠ LE COMPTE SUIT LA LISTE, il ne la decrit pas. Douze depuis que
-  // `derive_raw_hash` s'est ajoutee (dette 112, 27 octobre 2026).
-  assert.equal(COLONNES.length, 12, 'une colonne derivee a disparu de la liste')
-  assert.ok(COLONNES.includes('est_blocage'))
-  assert.ok(COLONNES.includes('derive_raw_hash'))
+  // ⚠ ON ASSERTE LA LISTE, PAS SON COMPTE. Un nombre ecrit a la main attrape
+  // une colonne qui DISPARAIT, mais pas une colonne RENOMMEE — et il faut le
+  // relire a chaque ajout sans savoir ce qui a bouge. La liste exacte dit les
+  // deux, et le message d'echec montre l'ecart.
+  // Seize depuis que les quatre colonnes de « reserve a date » se sont
+  // ajoutees (28 octobre 2026) ; douze auparavant, avec `derive_raw_hash`
+  // (dette 112, 27 octobre).
+  assert.deepEqual(COLONNES, [
+    'property_uuid', 'canal', 'statut_canonique', 'montant_net_cents',
+    'montant_est_brut', 'commission_cents', 'date_versement',
+    'motif_non_calculable', 'est_blocage', 'derive_raw_hash',
+    'date_vente', 'date_vente_fiable', 'date_vente_motif',
+    'date_annulation', 'date_annulation_source',
+    'derive_le', 'derive_version'
+  ], 'la liste des colonnes derivees a change : une disparue, une renommee, ou une ajoutee sans decision')
   // Une ligne de la version precedente est reprise.
   assert.equal(aDeriver({ derive_le: T, derive_version: VERSION - 1 }), true)
   // ⚠ ET UNE LIGNE A JOUR NE L'EST PAS — a condition que son empreinte
@@ -504,4 +514,66 @@ test("RECENSEMENT : les formes limites de `conserve_sous` ne font rien lever", (
     assert.doesNotThrow(() => derive({ ...SEJOUR_SEPT, demappage: forme }),
       `demappage = ${JSON.stringify(forme)} fait lever la derivation`)
   }
+})
+
+// ─── LA DATE D'ANNULATION (28 octobre 2026) ────────────────────────────────
+// ⚠ Decision de Thierry : comme Channex ne la fournit pas, le writer la pose
+// lui-meme quand il VOIT une reservation passer de confirmee a annulee — date
+// du changement observe, marquee « observee » et non « fournie ». Elle ne se
+// reecrit jamais, et le passe ne se rattrape pas.
+
+const ANNULE_CH = { provider: 'channex', arrival: '2026-11-10', departure: '2026-11-12', source: 'airbnb', status: 'cancelled' }
+const ANNULE_B24 = { provider: 'beds24', arrival: '2026-11-10', departure: '2026-11-12', source: 'airbnb', status: 'cancelled' }
+const INSTANT = '2026-10-28T09:00:00Z'
+
+test("LE TEST QUI COMPTE : une date deja posee NE SE REECRIT JAMAIS", () => {
+  // ⚠ LA REGLE LA PLUS IMPORTANTE DES TROIS. Le writer repasse sur chaque
+  // ligne a chaque montee de version : sans elle, une date OBSERVEE serait
+  // effacee au passage suivant puis re-observee a la date de CE passage — et
+  // elle glisserait a chaque fois, en silence. Une date d annulation qui
+  // avance toute seule rend la comparaison « a delai egal » fausse sans que
+  // rien ne rougisse.
+  const { deriverRevenus } = require('../lib/revenus/derive')
+  const d = deriverRevenus(ANNULE_CH, { inserted_at: '2026-09-01T00:00:00Z' }, {
+    maintenant: INSTANT, provider: null,
+    ancienStatut: 'confirmed', ancienneDateAnnulation: '2026-10-02'
+  })
+  assert.equal(d.date_annulation, '2026-10-02',
+    `la date a ete reecrite en ${d.date_annulation} : elle glissera a chaque passage du cron`)
+})
+
+test("LE TEST QUI COMPTE : une transition confirmee -> annulee est OBSERVEE", () => {
+  const { deriverRevenus } = require('../lib/revenus/derive')
+  const d = deriverRevenus(ANNULE_CH, { inserted_at: '2026-09-01T00:00:00Z' }, {
+    maintenant: INSTANT, provider: null, ancienStatut: 'confirmed'
+  })
+  assert.equal(d.date_annulation, '2026-10-28', 'le changement n est pas date')
+  assert.equal(d.date_annulation_source, 'observee',
+    'la date est presentee comme FOURNIE alors que nous l avons seulement constatee')
+})
+
+test("LE TEST QUI COMPTE : AUCUN RATTRAPAGE DU PASSE", () => {
+  // Une ligne deja annulee avant cette regle n a pas de date, et n en aura
+  // pas : on ne devine pas. Elle reste dans la reserve que l agregat compte.
+  const { deriverRevenus } = require('../lib/revenus/derive')
+  const d = deriverRevenus(ANNULE_CH, { inserted_at: '2026-09-01T00:00:00Z' }, {
+    maintenant: INSTANT, provider: null, ancienStatut: 'cancelled'
+  })
+  assert.equal(d.date_annulation, null,
+    `une annulation anterieure a recu la date du jour (${d.date_annulation}) : c est une date inventee`)
+  assert.equal(d.date_annulation_source, null)
+})
+
+test("LE TEST QUI COMPTE : la date FOURNIE par le provider prime, meme sans `options.provider`", () => {
+  // ⚠ LE CRON PASSE `provider: null`. Ma premiere version ne lisait que
+  // `options.provider` : la branche Beds24 n etait JAMAIS atteinte, et les 141
+  // dates que Beds24 fournit auraient toutes ete remplacees par des dates
+  // « observees ». Le provider se lit d abord dans le SNAPSHOT.
+  const { deriverRevenus } = require('../lib/revenus/derive')
+  const d = deriverRevenus(ANNULE_B24, {
+    bookingTime: '2026-09-01 10:00:00', cancelTime: '2026-10-15T08:00:00Z'
+  }, { maintenant: INSTANT, provider: null, ancienStatut: 'confirmed' })
+  assert.equal(d.date_annulation, '2026-10-15',
+    `la date fournie par Beds24 est ignoree (${d.date_annulation}) : le provider n est pas lu dans le snapshot`)
+  assert.equal(d.date_annulation_source, 'fournie')
 })
