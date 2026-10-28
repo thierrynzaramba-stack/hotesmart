@@ -308,25 +308,46 @@ async function reserveALaMemeDate (supabase, userId, annee, jour, refsUuid) {
     console.error('[ecran/revenus-annee] reserve a date :', error.message)
     return null
   }
-  const parMois = {}
+  // ⚠ LE DETAIL PAR LOGEMENT EST GARDE, et c'est necessaire : la pastille de
+  // filtre doit pouvoir piloter cette ligne comme elle pilote les autres. Ma
+  // premiere version agregeait sur le seul mois — la ligne « reserve a date »
+  // aurait montre le COMPTE entier pendant que la courbe montrait un bien, et
+  // l'ecran aurait superpose deux perimetres differents sans le dire.
+  const vide = () => ({ sejours: 0, total_cents: 0, sans_date_annulation: 0, non_fiables: 0 })
+  const ajouter = (c, l) => {
+    c.sejours += n(l.sejours)
+    c.total_cents += n(l.total_cents)
+    c.sans_date_annulation += n(l.sans_date_annulation)
+    c.non_fiables += n(l.non_fiables)
+    return c
+  }
+  const brutTotal = {}
+  const brutParBien = {}
   for (const l of data || []) {
     const cle = `${annee}-${String(n(l.mois)).padStart(2, '0')}`
-    const b = parMois[cle] || (parMois[cle] = {
-      sejours: 0, total_cents: 0, sans_date_annulation: 0, non_fiables: 0
-    })
-    b.sejours += n(l.sejours)
-    b.total_cents += n(l.total_cents)
-    b.sans_date_annulation += n(l.sans_date_annulation)
-    b.non_fiables += n(l.non_fiables)
+    brutTotal[cle] = ajouter(brutTotal[cle] || vide(), l)
+    const uuid = l.property_uuid == null ? null : String(l.property_uuid)
+    if (uuid === null) continue
+    brutParBien[uuid] = brutParBien[uuid] || {}
+    brutParBien[uuid][cle] = ajouter(brutParBien[uuid][cle] || vide(), l)
   }
-  const mois = {}
-  for (const [cle, b] of Object.entries(parMois)) {
-    const souSeuil = b.sejours < SEUIL_RESERVE_A_DATE
-    mois[cle] = souSeuil
-      ? { sejours: b.sejours, sous_seuil: true, seuil: SEUIL_RESERVE_A_DATE }
-      : { ...b, sous_seuil: false, seuil: SEUIL_RESERVE_A_DATE }
+  // ⚠ LE SEUIL S'APPLIQUE A CHAQUE PERIMETRE SEPAREMENT. Un mois qui passe le
+  // seuil pour le compte peut ne pas le passer pour UN bien : c'est le bien
+  // qu'on trace quand la pastille le designe, donc c'est son compte a lui qui
+  // decide. Appliquer le seuil du compte a la courbe d'un bien tracerait une
+  // comparaison que ses trois ventes ne portent pas.
+  const seuiller = (brut) => {
+    const out = {}
+    for (const [cle, b] of Object.entries(brut)) {
+      out[cle] = b.sejours < SEUIL_RESERVE_A_DATE
+        ? { sejours: b.sejours, sous_seuil: true, seuil: SEUIL_RESERVE_A_DATE }
+        : { ...b, sous_seuil: false, seuil: SEUIL_RESERVE_A_DATE }
+    }
+    return out
   }
-  return { pivot, seuil: SEUIL_RESERVE_A_DATE, mois }
+  const parBien = {}
+  for (const [uuid, m] of Object.entries(brutParBien)) parBien[uuid] = seuiller(m)
+  return { pivot, seuil: SEUIL_RESERVE_A_DATE, mois: seuiller(brutTotal), par_bien: parBien }
 }
 
 // Le min et le max, mois par mois, parmi les comparables d'un logement.

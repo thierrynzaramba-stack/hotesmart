@@ -632,3 +632,30 @@ test("LE TEST QUI COMPTE : les reserves de l agregat REMONTENT a l ecran", async
   assert.strictEqual(m.sans_date_annulation, 3, 'les annulations sans date ne remontent pas')
   assert.strictEqual(m.non_fiables, 2, 'les dates de vente non fiables ne remontent pas')
 })
+
+test("LE TEST QUI COMPTE : le seuil s applique A CHAQUE PERIMETRE, pas au seul compte", async () => {
+  // ⚠ UN MOIS PEUT PASSER LE SEUIL POUR LE COMPTE ET PAS POUR UN BIEN. C est
+  // le BIEN qu on trace quand la pastille le designe, donc c est SON compte
+  // qui decide. Appliquer le seuil du compte a la courbe d un bien tracerait
+  // une comparaison que ses trois ventes ne portent pas — et le montant
+  // sortirait, donc il serait tracable.
+  const r = await appeler({
+    query: { annee: '2026' },
+    lignesRad: [
+      { property_uuid: BIEN_A, mois: 11, sejours: 3, total_cents: 60000, sans_date_annulation: 0, non_fiables: 0 },
+      { property_uuid: BIEN_B, mois: 11, sejours: 7, total_cents: 140000, sans_date_annulation: 0, non_fiables: 0 }
+    ]
+  })
+  const rad = r.charge.reserve_a_date
+  // Le COMPTE additionne 3 + 7 = 10 : il passe.
+  assert.strictEqual(rad.mois['2025-11'].sous_seuil, false, 'le compte est refuse alors qu il totalise 10 ventes')
+  assert.strictEqual(rad.mois['2025-11'].total_cents, 200000)
+  // BIEN_A, lui, n en a que 3 : il est refuse, et son montant ne sort pas.
+  assert.strictEqual(rad.par_bien[BIEN_A]['2025-11'].sous_seuil, true,
+    'un bien a 3 ventes passe le seuil parce que le COMPTE le passe')
+  assert.strictEqual(rad.par_bien[BIEN_A]['2025-11'].total_cents, undefined,
+    'le montant d un bien sous le seuil sort quand meme : il pourrait etre trace')
+  // BIEN_B en a 7 : il passe.
+  assert.strictEqual(rad.par_bien[BIEN_B]['2025-11'].sous_seuil, false)
+  assert.strictEqual(rad.par_bien[BIEN_B]['2025-11'].total_cents, 140000)
+})
