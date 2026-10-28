@@ -34,13 +34,15 @@ const { nomDeLaBase, estLaProduction } = require(path.join('..', 'lib', 'emprein
 const url = process.env.SUPABASE_URL || ''
 const nom = nomDeLaBase(url)
 
-if (estLaProduction(url)) {
-  console.error(`REFUS : la base visée est la PRODUCTION (${nom}).`)
-  console.error('Ce script dépense de l argent et écrit en base. Il ne tourne que sur staging.')
-  console.error('Si vous vouliez vraiment la production, ce n est pas ce script qu il faut :')
-  console.error('c est le cron, qui a sa cadence et ses garde-fous.')
-  process.exit(3)
-}
+// ⚠ LE REFUS EST COLLÉ AU TEST, et `tests/empreinte-base.test.js` l'exige :
+// la garde doit se lire d'un coup d'œil, sans que quatre lignes de message
+// séparent la condition de la sortie. Le détail s'imprime AVANT.
+const POURQUOI = [
+  'Ce script dépense de l argent et écrit en base : il ne tourne que sur staging.',
+  'Pour la production, ce n est pas ce script — c est le cron, qui a sa cadence',
+  'et ses garde-fous.'
+]
+if (estLaProduction(url)) { console.error(`REFUS : base de PRODUCTION (${nom}).`, '\n' + POURQUOI.join('\n')); process.exit(3) }
 if (!nom || nom === 'inconnue') {
   console.error(`REFUS : base « ${nom} » inconnue de lib/empreinte-base.js.`)
   console.error('Aucun relevé ne sera fait : un résultat sans base nommée ne vaut rien.')
