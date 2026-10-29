@@ -225,9 +225,24 @@ export function courbeMensuelle ({ series = [], graduation, bulle, resume, initi
     // n'avait jamais ete reellement corrige — les deux densites ne s'appliquaient
     // pas. Un style en ligne, lui, bat une regle de classe.
     //
-    // ⚠ ET ON NE RETIRE PAS LA REGLE CSS : `apps/yield/marche-temperature.html`
-    // et `apps/yield/prix.html` passent des bandes SANS opacite et comptent sur
-    // le 0,85 par defaut. La retirer les eclaircirait tous les deux.
+    // ⚠ ET ON NE RETIRE PAS LA REGLE CSS, MAIS PAS POUR LA RAISON QUE J'AVAIS
+    // ECRITE. Je justifiais de la garder par « `marche-temperature.html` et
+    // `prix.html` passent des bandes SANS opacite » : les deux etaient FAUX,
+    // releve par la session chef de file et remesure ici —
+    // `class="cm-bande"` n'est emis que par les deux lignes de CE module,
+    // `pages/aujourdhui.html` en est le SEUL importateur,
+    // `marche-temperature.html` dessine ses propres `<rect>` sans cette classe
+    // (son attribut `opacity` marche, justement parce qu'aucune regle de classe
+    // ne le combat), et les « bandes » de `prix.html` sont des `div` en flex.
+    // Mon avertissement sur le rayon d'explosion etait donc large de trois
+    // ecrans.
+    // La VRAIE raison de garder la regle : elle est le DEFAUT quand aucune
+    // opacite n'est demandee, et `tests/courbe-bande-rendu.test.js` le mesure
+    // (0,85 calcule). La retirer rendrait les bandes opaques a 1 pour tout
+    // appelant futur qui ne precise rien.
+    // ⚠ Et dans ce depot un commentaire se lit comme une mesure : une decision
+    // juste adossee a un fait faux se propage, parce que personne ne reverifie
+    // ce qui est deja ecrit.
     //
     // ⚠ MES DEUX TESTS LISAIENT L'ATTRIBUT, donc mon intention, jamais le rendu.
     // C'est pourquoi le test de ce lot lit le style CALCULE dans un vrai
