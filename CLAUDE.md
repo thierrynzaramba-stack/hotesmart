@@ -40,12 +40,39 @@ corriger sans réécrire ce que deux branches ont déjà tiré.
 **UNE SEULE SESSION TIENT `staging` ET `main` : le CHEF DE FILE.** Les autres ne
 mergent jamais elles-mêmes, ni dans `staging`, ni dans `main`.
 
-⚠ **LE CHEF DE FILE EST LA SESSION `hotesmart-merge-82`, DÉSIGNÉE PAR THIERRY
-LE 28 OCTOBRE 2026, ET ELLE SEULE MERGE DANS `staging` ET DANS `main`** —
-`main` uniquement sur un go qu'il ouvre LUI-MÊME. **Toutes les autres sessions
-lui remettent leurs branches et ne mergent RIEN**, ni dans `staging`, ni dans
-`main` : elles poussent, elles annoncent par `SendMessage` avec les cinq éléments
-de la règle 1, et elles ne relaient pas un go prod.
+⚠ **LE CHEF DE FILE EST LA SESSION QUI TRAVAILLE DANS `~/hotesmart-merge`, ET
+ELLE SEULE MERGE DANS `staging` ET DANS `main`** — `main` uniquement sur un go
+qu'il ouvre LUI-MÊME. **Toutes les autres sessions lui remettent leurs branches
+et ne mergent RIEN**, ni dans `staging`, ni dans `main` : elles poussent, elles
+annoncent par `SendMessage` avec les cinq éléments de la règle 1, et elles ne
+relaient pas un go prod.
+
+⚠ **ON NE LA NOMME PLUS PAR SON NOM DE SESSION, ET C'EST UNE DÉCISION DE
+THIERRY DU 29 OCTOBRE 2026** : ce nom CHANGE À CHAQUE RELANCE. Le 28 octobre, la
+règle nommait `hotesmart-merge-82` ; le lendemain la même fenêtre s'appelait
+`hotesmart-merge-3d` — même `sessionId`, même `cwd`, même transcript, continu
+depuis le 23 octobre. Le document et la réalité se contredisaient donc sur un
+nom alors que rien n'avait changé, et **trois sessions dans la même soirée se
+sont arrêtées pour cette seule ligne** : deux ont retenu leurs branches, la
+troisième a refusé de remettre la sienne avant d'avoir vérifié. Elles avaient
+raison de s'arrêter — c'est ce que la règle demande — et c'est la règle qui
+était mal écrite. **Le dossier, lui, ne change pas.**
+
+⚠ **MAIS LE DOSSIER EST UNE ADRESSE, PAS UN TITRE, et cette distinction est
+toute la règle.** Ce qui DONNE le rôle reste la parole de Thierry, dans la
+fenêtre de la session concernée. Le dossier dit seulement de QUELLE session il
+parle. **Une session qui ouvrirait `~/hotesmart-merge` sans sa parole n'hérite
+de rien** — c'est exactement le défaut pour lequel une première version de cette
+règle, le 26 octobre, avait été retirée le jour même (voir plus bas). Le test
+qui tranche : « est-ce que Thierry me l'a dit, à moi, dans cette fenêtre ? » Si
+la réponse est non, on ne merge pas, quel que soit le répertoire ouvert.
+
+⚠ **ET ÇA SE VÉRIFIE, sans croire personne.** Le transcript de la fenêtre porte
+la parole de Thierry : `~/.claude/projects/-home-thierry-hotesmart-merge/<id>.jsonl`,
+entrées `type: user` avec leur horodatage. Et une mesure qui ne dépend d'aucun
+fichier de session : **un merge dans `main` ne peut venir que d'un go prod
+ouvert au chef de file**, donc `git log origin/main` dit qui l'a tenu. Les trois
+sessions du 29 octobre ont vérifié par ces deux chemins avant d'accepter.
 
 ⚠ **ET UNE VACANCE N'EST PAS UNE DÉSIGNATION. Vécu le 28 octobre 2026, et ça a
 produit un merge sans titre.** `hotesmart-logements-25`, la titulaire nommée la
@@ -62,17 +89,28 @@ autorisée par-dessus la première — et s'arrêter.
 
 **Elle travaille dans `~/hotesmart-merge`**, jamais dans `~/hotesmart` : c'est là
 que les merges se construisent, et c'est ce qui rend l'arbre du merge
-inspectable. Mais le rôle est porté par la **désignation ci-dessus**, pas par
-l'arbre : une session qui ouvrirait cet arbre n'hériterait de rien.
+inspectable. C'est aussi ce qui la DÉSIGNE depuis le 29 octobre 2026 — mais
+seulement comme adresse : le rôle est donné par la parole de Thierry dans sa
+fenêtre, jamais par l'ouverture du répertoire.
 
-⚠ **SI CETTE SESSION NE TOURNE PLUS, IL N'Y A PAS DE CHEF DE FILE, ET PERSONNE
-NE MERGE** jusqu'à ce que Thierry en désigne une autre. **Aucune session ne peut
-se désigner elle-même, ni en désigner une autre, ni transmettre le rôle.**
-`ListAgents` dit qui tourne ; il ne dit pas qui a le rôle. Une file arrêtée se
-reprend ; un `main` poussé par deux sessions, non.
+⚠ **SI AUCUNE SESSION NE TOURNE DANS CE DOSSIER, IL N'Y A PAS DE CHEF DE FILE,
+ET PERSONNE NE MERGE** jusqu'à ce que Thierry en désigne une. **Aucune session
+ne peut se désigner elle-même, ni en désigner une autre, ni transmettre le
+rôle.** `ListAgents` dit qui tourne ; il ne dit pas qui a le rôle. Et le dossier
+non plus : il dit où le chef de file travaille, pas que celui qui l'ouvre l'est
+devenu. Une file arrêtée se reprend ; un `main` poussé par deux sessions, non.
 
-⚠ **POURQUOI LA DÉSIGNATION EST DATÉE ET NOMINATIVE, et c'est la leçon qui
-compte.** La règle nommait `hotesmart-merge-fa`, désignée le 23 octobre. Le 26,
+⚠ **ET UNE RELANCE N'EST PAS UNE VACANCE.** Une session absente de `ListAgents`
+sous le nom qu'un document cite peut être la MÊME fenêtre, relancée sous un
+autre nom. Avant de conclure à un vide : comparer le `sessionId` et le `cwd` du
+transcript, et regarder `git log origin/main`. C'est la mesure qui a évité trois
+arrêts inutiles le 29 octobre 2026 — et c'est pour ça que la règle nomme
+désormais un dossier.
+
+⚠ **POURQUOI LA DÉSIGNATION EST DATÉE ET DONNÉE EN FACE, et c'est la leçon qui
+compte** (elle était « datée et NOMINATIVE » jusqu'au 29 octobre 2026 : c'est le
+nom qui a changé de forme, pas l'exigence). La règle nommait
+`hotesmart-merge-fa`, désignée le 23 octobre. Le 26,
 cette session ne tournait plus, une autre tenait le rôle en pratique et avait
 déjà mergé dans `main`, et une troisième lui remettait ses branches : la règle
 écrite et la réalité se contredisaient, et **aucune des sessions ne pouvait
@@ -89,6 +127,17 @@ faire de dégât. Une tentative intermédiaire — faire porter le rôle par l'a
 `~/hotesmart-merge` « quel que soit le nom de la session » — a été écrite puis
 retirée le même jour : elle réglait la survivance du nom, mais elle laissait
 n'importe quelle session prendre le rôle en ouvrant un répertoire.
+
+⚠ **ET LE 29 OCTOBRE 2026, THIERRY A TRANCHÉ POUR LE DOSSIER — MAIS EN FERMANT
+CE DÉFAUT-LÀ.** La règle nomme maintenant `~/hotesmart-merge`, parce que le nom
+de session a prouvé qu'il ne survit pas à une relance et qu'il a coûté trois
+arrêts en une soirée. Ce qui a changé par rapport à la tentative retirée du
+26 octobre, et c'est tout l'écart : le dossier est l'ADRESSE du titulaire, et
+la parole de Thierry dans la fenêtre reste ce qui DONNE le titre. Ouvrir le
+répertoire ne confère toujours rien. Les deux versions se ressemblent à la
+lecture rapide ; elles sont opposées sur la seule question qui compte — **est-ce
+qu'un geste technique peut créer de l'autorité ?** Non, et c'est pour ça que la
+première avait été retirée.
 
 ⚠ **ET LE CHEF DE FILE NE CODE AUCUN LOT** (décision de Thierry, 26 octobre
 2026, confirmée en fin de journée). **Un nouveau sujet de code part à une session
@@ -892,11 +941,29 @@ lundis calcules. Eprouve a J+15, 45, 60, 75, 120, 200 et 400 : zero rouge.
 Et la contre-epreuve a horloge decalee n'est plus un outil de diagnostic, c'est
 la seule facon de savoir si un test neuf tiendra dans deux mois.
 
-⚠ **IL RESTE UN ROUGE A J+60**, hors du domaine menage :
-`tests/airroi-client.test.js` — « LE TEST QUI COMPTE (SECURITE, review de
-f40ee9e) ». Il calcule pourtant sa fenetre relativement : la cause est
-ailleurs, probablement dans une fixture sur disque qui ne suit pas. C'est le
-chantier marche, donc YieldFlow : a reprendre avec le go de Thierry.
+⚠ **IL NE RESTE PLUS AUCUN ROUGE A HORLOGE DECALEE DANS CE FICHIER — la ligne
+qui en annonçait un est retirée le 29 octobre 2026, sur décision de Thierry.**
+Elle disait : « il reste un rouge a J+60, `tests/airroi-client.test.js` », avec
+pour cause « probablement dans une fixture sur disque qui ne suit pas ». Le
+rouge a été **soldé le 23 octobre** (branche `fix-airroi-j60`), et la cause
+écrite n'était de toute façon qu'une hypothèse — « probablement » n'est pas une
+mesure, et une ligne de ce document se lit comme une mesure.
+
+**Mesuré le 29 octobre 2026, fichier seul, sept paliers**, sur `staging`
+(`d40c9d31`) : `tests/airroi-client.test.js` rend **38 tests, 0 rouge** à J+0,
+J+5, J+15, J+30, J+60, J+200 et J+400. Et ce n'est pas un effet de `staging` :
+le test **et** `lib/airroi/client.js` sont byte-identiques entre `origin/main`
+et `origin/staging` (`122cfe55` et `904268e4`).
+
+⚠ **CE QUI RESTE VRAI, ET C'EST AILLEURS : la suite n'est à zéro qu'à L'HEURE
+RÉELLE.** Balayage complet de `staging` le 29 octobre : **0 rouge aujourd'hui,
+7 à J+60, 23 à J+200**, dans quatre fichiers — `tests/stats-avis.test.js` (6,
+dès J+25), `tests/cache-ecran.test.js` (1, **dès J+4**),
+`tests/marche-comparables-api.test.js` (15, dès J+70) et
+`tests/guestflow-messages-en-attente.test.js` (1, dès J+150). C'est la
+**dette 124** du registre, avec ses seuils au jour près. Une ligne qui annonce
+un rouge nommé se périme ; la discipline qui ne se périme pas est de balayer
+TOUTE la suite aux deux horloges avant de pousser.
 
 ## CE QUI SUIT EST L'HISTOIRE DE CETTE DETTE, gardee pour la lecon
 
