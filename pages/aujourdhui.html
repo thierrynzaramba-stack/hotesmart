@@ -93,7 +93,21 @@
       <span class="row" style="align-items: baseline; gap: 8px" data-bind="reviews-head"></span>
       <a class="link small" href="/avis" data-i18n="reviews.all"></a>
     </div>
-    <div class="grid-avis scroll-x" data-list="reviews"></div>
+    <!-- ⚠ LES DEUX FLECHES SONT HORS DU RAIL, et ce n'est pas un detail de
+         mise en page : `renderDerniersAvis` remplace l'`innerHTML` du rail a
+         chaque rendu (deux fois par chargement), donc des boutons places
+         DEDANS seraient detruits avec leurs ecouteurs. Ici ils survivent, et
+         le module se rebranche sans les recreer.
+         Constat de Thierry en recette de production du 29 octobre 2026 : a la
+         souris, le rail etait inatteignable — barre de defilement masquee,
+         molette non laterale, donc aucun declencheur pour la suite des avis. -->
+    <div class="rail-wrap">
+      <button type="button" class="rail-fleche rail-fleche--prec" data-rail="prec"
+              data-i18n-attr="aria-label:reviews.rail_prec" aria-controls="rail-avis">‹</button>
+      <div class="grid-avis scroll-x" id="rail-avis" data-list="reviews"></div>
+      <button type="button" class="rail-fleche rail-fleche--suiv" data-rail="suiv"
+              data-i18n-attr="aria-label:reviews.rail_suiv" aria-controls="rail-avis">›</button>
+    </div>
   </section>
 
   <!-- La bande « Revenus · 30 j / Note · 30 j / Occupation · 30 j » est RETIREE
@@ -419,6 +433,7 @@ import { logger } from '/shared/logger.js'
 import { escapeHtml as esc } from '/shared/properties.js'
 import { courbeMensuelle } from '/shared/courbe-mensuelle.js'
 import { brancherInfoBulles } from '/shared/ibulle.js'
+import { brancherFleches } from '/shared/rail-fleches.js'
 // ⚠ `enteteCompte()` sur chaque fetch : les endpoints lus ici honorent X-Compte
 // (compteDelegue) ; sans l'en-tête, un membre verrait SON compte pendant que
 // les lectures Supabase, juste à côté, lisent le compte consulté.
@@ -1285,6 +1300,7 @@ function armerLaSuiteDesAvis (vue, outils) {
   // observateur avec lui-meme, jamais deux rendus entre eux.
   const mien = () => sentinelleAvis === mon && marque.parentNode
   let mon = null
+  let fleches = null
 
   // La derniere carte du rail : le geste vers l'historique complet.
   const finir = () => {
@@ -1292,6 +1308,9 @@ function armerLaSuiteDesAvis (vue, outils) {
     mon.disconnect()
     sentinelleAvis = null
     marque.innerHTML = `<a class="link small" href="/avis">${esc(t('reviews.all'))}</a>`
+    // ⚠ ET LA FLECHE DE DROITE SE GRISE POUR DE BON. Tant que la suite existe
+    // elle reste cliquable au bout du rail — sinon l'hote clique dans le vide.
+    if (fleches) fleches.fin()
   }
 
   const suivante = async () => {
@@ -1323,6 +1342,8 @@ function armerLaSuiteDesAvis (vue, outils) {
       for (const c of vueSuite.cartes) {
         marque.insertAdjacentHTML('beforebegin', carteAvisHtml(c, outils))
       }
+      // Trois cartes de plus : le rail s'allonge, la fleche de droite revit.
+      if (fleches) fleches.maj()
       const dernier = vueSuite.cartes[vueSuite.cartes.length - 1]
       if (r.fin || !dernier || !dernier.recu_le || dernier.id == null) { finir(); return }
       // ⚠ ET LE CURSEUR DOIT AVANCER. S'il ne bouge pas — un serveur qui rend
@@ -1340,6 +1361,20 @@ function armerLaSuiteDesAvis (vue, outils) {
     }
   }
 
+
+  // ⚠ LES FLECHES SE BRANCHENT ICI, et pas au demarrage : leur clic doit
+  // appeler `suivante` — la fonction de CE rendu, avec SON curseur et sa garde
+  // `mien()`. Branchees une fois pour toutes au chargement, elles auraient
+  // garde le `suivante` du premier rendu, dont la sentinelle est detachee :
+  // c'est exactement le defaut que la review du 28 octobre a trouve sur
+  // l'observateur. Le module est idempotent et remplace seulement le rappel.
+  fleches = brancherFleches({
+    rail: zone,
+    prec: $('[data-rail="prec"]'),
+    suiv: $('[data-rail="suiv"]'),
+    charger: suivante
+  })
+  fleches.maj()
 
   // `rootMargin` : on charge AVANT que la sentinelle soit vraiment visible,
   // pour que le defilement ne s'arrete pas sur un trou.
