@@ -632,6 +632,7 @@
   "messages.partie_brouillons": "the proposals already waiting",
   "messages.partie_consignes": "the instructions",
   "messages.partie_deja_prises": "{n} proposal(s) already being sent",
+  "messages.partie_envolees": "{n} announced proposition(s) were no longer waiting: the sending had already taken them",
   "messages.partie_delais": "the delays",
   "messages.pause_label": "Automation paused",
   "messages.paused": "Automation paused on this listing",

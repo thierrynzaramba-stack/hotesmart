@@ -930,3 +930,30 @@ test('LE TEST QUI COMPTE : aucune borne de temps ne vient du corps de la requete
   assert.equal(res.body.brouillons.desarmes, 1,
     'et elle est gardee : le corps de la requete ne decide pas de ce qui part')
 })
+
+test('LE TEST QUI COMPTE : le bilan est INVARIANT a toute cle de temps du corps', async () => {
+  // ⚠ CONSTAT 2 DE LA RE-REVUE : mes garde-fous grepaient le NOM `cutoff`. La
+  // revue a reintroduit le mecanisme exact sous `instantApercu` et tout restait
+  // vert. On mesure donc l INVARIANCE : meme etat serveur, meme bilan, quelles
+  // que soient les cles de temps que le corps transporte.
+  const ne = new Date(Date.now() - 65 * 60 * 1000).toISOString()
+  const etatServeur = () => ({
+    config: { [BIEN]: { delais: { reponse_ia: null, alerte_info: 0 } } },
+    taches: [{ ...ECHUE(), created_at: ne, send_after: ne }]
+  })
+  const base = { delais_ref: BIEN, delais: { reponse_ia: 60, alerte_info: 0 }, propager: true, garder: true }
+  const { res: nu } = await postConfig({ ...base }, etatServeur())
+  const temoin = { desarmes: nu.body.brouillons.desarmes, echues: nu.body.brouillons.echues }
+  assert.equal(temoin.desarmes, 1, 'le temoin desarme bien la proposition echue')
+  const vieux = Date.now() - 9 * 60 * 1000
+  for (const parasite of [
+    { cutoff: vieux }, { instantApercu: vieux }, { borne: vieux }, { instant: vieux },
+    { now: vieux }, { maintenant: vieux }, { apercu_instant: vieux }
+  ]) {
+    const { res } = await postConfig({ ...base, ...parasite }, etatServeur())
+    assert.equal(res.body.brouillons.desarmes, temoin.desarmes,
+      `${Object.keys(parasite)[0]} ne change pas ce qui est garde`)
+    assert.equal(res.body.brouillons.echues, temoin.echues,
+      `${Object.keys(parasite)[0]} ne change pas ce qui est compte`)
+  }
+})

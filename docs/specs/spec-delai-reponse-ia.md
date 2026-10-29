@@ -1605,7 +1605,7 @@ partait au prochain passage — alors que l'hôte venait de choisir « garder »
 
 | erreur | coût |
 |---|---|
-| désarmer un brouillon **non** annoncé | inoffensif — il reste dans la file, l'hôte clique Envoyer |
+| désarmer un brouillon **non** annoncé | il reste dans la file, l'hôte clique Envoyer — **sous la réserve de la dette D5**, qui en limite la fenêtre au séjour |
 | laisser partir un brouillon que l'hôte croit gardé | irréversible, et c'est le téléphone d'un voyageur |
 
 Donc en cas de doute on **désarme**, exactement comme « une panne de lecture
@@ -1670,7 +1670,9 @@ validation manuelle, là où le serveur aurait rendu 0. C'est la forme la plus
 coûteuse de faux vert — un test qui prouve un comportement dans un état
 impossible.
 
-**Neuf mutations de code vivant restaient vertes**, dont le claim de statut qui
+**Toutes les mutations que la revue a vues survivre** — je ne reprends pas son
+compte, que la re-revue a recompté différemment selon qu'on énumère les lignes
+ou les variantes d'une même ligne depuis supprimée — dont le claim de statut qui
 ferme la course avec le cron, l'erreur d'écriture avalée, et les cinq lignes du
 endpoint — où forcer la fonctionnalité à **inerte** *comme* à **toujours
 désarmer** laissait toute la suite verte. Toutes rougissent, et l'endpoint est
@@ -1678,30 +1680,65 @@ désormais éprouvé **par exécution**, pas par grep.
 
 ⚠ **Et `suspendu_le = null` était gardé par une fixture complice** : l'assertion
 avait l'air de le mesurer, mais `tache()` pose ce champ à `null` par défaut.
-C'est la **quatrième** fois que ce fichier paie ce piège, et il porte déjà
-l'avertissement à l'endroit même. Un test part maintenant d'une tâche
+`tests/guestflow-appliquer-delai.test.js` porte **trois** avertissements sur ce
+piège, dont un à l'endroit même — et la re-revue en a trouvé une quatrième
+occurrence, dans l'autre fichier de tests. Un test part maintenant d'une tâche
 réellement suspendue.
 
-### D5 — une proposition gardée devient inatteignable après le départ
+### La re-revue : les deux constats de sécurité sont fermés, et mon garde-fou mesurait un NOM
 
-**Conséquence produit, relevée en revue, à trancher par Thierry.**
+**Le retrait du `cutoff` est complet et suffisant**, mesuré : zéro occurrence
+hors commentaires dans les trois fichiers, le prédicat est bien l'horloge du
+serveur, et le périmètre tient (autre compte, autre bien, `sending`, `done`, non
+échue, `created_at` illisible, références avec joker → zéro désarmé, zéro
+écriture). Les six constats de couverture de la revue précédente sont fermés
+aussi, chacun par une mutation qui rougit maintenant.
 
-L'écran ne charge que les conversations dont le séjour est à venir ou en cours,
-et `lireLesDues` exige une échéance. Une proposition **gardée pour validation**
-n'a plus d'échéance : après le départ du voyageur, elle n'est donc **ni affichée
-ni envoyée**. « Rien n'est supprimé » reste littéralement vrai ; « elles restent
-dans la file » n'est vrai que **pendant le séjour**.
+⚠ **MON GARDE-FOU ANTI-BORNE GREPAIT LE MOT `cutoff`.** La re-revue a
+réintroduit le mécanisme **exact** sous un autre nom — `borneApercu` au writer,
+`instantApercu` au endpoint, même fenêtre de 10 minutes — et les trois fichiers
+restaient **verts**. Mon test s'appelait « aucune borne de temps ne vient du
+corps de la requête » ; ce qu'il mesurait était « aucune clé nommée `cutoff` ».
+C'est le piège du *périmètre mesuré sur une seule forme*, déplacé du
+365-jours vers le nom, dans le test même qui cite ce piège.
 
-Sous « Laisser partir », la proposition part dans les minutes qui suivent, donc
-cet état orphelin est créé par la branche neuve. Pour un arriéré sur un voyageur
-qui part le lendemain, la fenêtre pour cliquer « Envoyer » est de quelques
-heures. Les deux voies possibles — une liste des propositions gardées hors du
-fil, ou une alerte avant le départ — sont des décisions d'écran, pas un
-correctif.
+Deux gardes le remplacent, et aucune ne dépend d'un nom : la **signature** du
+writer est épinglée (aucun paramètre hors `userId, propertyRef, delais,
+maintenant, apercu, garderEchues`), et un test d'**invariance** au endpoint
+vérifie que le bilan est identique quelles que soient les clés de temps que le
+corps transporte — sept noms essayés, avec la valeur que l'ancien code
+acceptait.
+
+⚠ **ET LA NOTE POUVAIT ÊTRE VERTE ET MUETTE** (constat 1, mesuré au banc).
+L'aperçu annonce 4 propositions, le serveur rend `desarmes: 0, deja_prises: 0`,
+et l'écran affichait « Enregistré » en vert — sans un mot — **et ne relisait
+même pas le fil**, qui gardait à l'écran le compte à rebours de propositions
+déjà parties.
+
+Le mécanisme est la **course large** : `deja_prises` ne capte que l'intervalle
+lecture → écriture, quelques millisecondes. Mais `window.confirm` **bloque**
+pendant tout le temps que l'hôte met à lire, et le cron passe toutes les
+5 minutes. Une tâche qu'il a claimée entre-temps n'est plus en
+`pending_validation` : elle n'est donc plus **lue du tout**, ni désarmée, ni
+comptée déjà prise. L'écart entre le nombre **annoncé** et le réalisé se dit
+maintenant, il emporte le vert, et un choix de garde relit **toujours** le fil.
+
+**Trois affirmations de plus corrigées** : l'aperçu **écrivait** sous
+`garderEchues` (la garde générale vit en aval de cette branche, donc elle ne la
+couvrait pas — inatteignable par l'endpoint, mais le module est exporté et son
+contrat disait le contraire) ; « `desarmes` dit *finit désarmée* » n'était vrai
+que dans cette branche ; et « seul un booléen traverse » en oubliait un second,
+`propager`. Plus une phrase réfutée restée dans un test juste au-dessus de son
+propre démenti, et une fixture complice qui avait **resservi** — la cinquième
+occurrence de ce piège sur ce lot.
 
 ### La troisième revue : quatre fois le même défaut, fermé d'un seul côté
 
-C'est la dernière que la règle autorise sur ce lot. Six constats, aucun de
+⚠ **Cette phrase disait « c'est la dernière que la règle autorise sur ce lot »,
+et elle a cessé d'être vraie** : la recette du 29 octobre a ouvert de nouveaux
+commits, chacun avec sa propre review, et un constat de sécurité a ouvert une
+re-review. Relevé en re-revue — un document qui garde « la dernière » trois
+sections sous deux reviews plus récentes se lit comme une mesure. Six constats, aucun de
 sécurité — et le fil conducteur est net : **quatre de mes correctifs fermaient
 un chemin et laissaient le chemin jumeau ouvert.**
 
@@ -1789,6 +1826,23 @@ geste d'urgence, immédiat par décision — c'est ce qui rend la collision
 possible.
 
 ---
+
+### D5 — une proposition gardée devient inatteignable après le départ
+
+**Conséquence produit, relevée en revue, à trancher par Thierry.**
+
+L'écran ne charge que les conversations dont le séjour est à venir ou en cours,
+et `lireLesDues` exige une échéance. Une proposition **gardée pour validation**
+n'a plus d'échéance : après le départ du voyageur, elle n'est donc **ni affichée
+ni envoyée**. « Rien n'est supprimé » reste littéralement vrai ; « elles restent
+dans la file » n'est vrai que **pendant le séjour**.
+
+Sous « Laisser partir », la proposition part dans les minutes qui suivent, donc
+cet état orphelin est créé par la branche neuve. Pour un arriéré sur un voyageur
+qui part le lendemain, la fenêtre pour cliquer « Envoyer » est de quelques
+heures. Les deux voies possibles — une liste des propositions gardées hors du
+fil, ou une alerte avant le départ — sont des décisions d'écran, pas un
+correctif.
 
 ## 11. Hors périmètre, relevé pendant l'étape 0
 

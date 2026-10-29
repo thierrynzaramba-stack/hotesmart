@@ -632,6 +632,7 @@
   "messages.partie_brouillons": "les propositions déjà en attente",
   "messages.partie_consignes": "les consignes",
   "messages.partie_deja_prises": "{n} proposition(s) déjà prise(s) par l’envoi",
+  "messages.partie_envolees": "{n} proposition(s) annoncée(s) n’étaient plus en attente : l’envoi les avait prises",
   "messages.partie_delais": "les délais",
   "messages.pause_label": "Automatisation en pause",
   "messages.paused": "Automatisation en pause sur ce logement",

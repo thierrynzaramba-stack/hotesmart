@@ -583,7 +583,11 @@ test('LE TEST QUI COMPTE : ANNULER ecrit, et le fil est relu', async () => {
     confirme: (texte) => texte === FR['messages.mode_confirm_auto'],
     appel: async (chemin, corps) => {
       if (corps) envoyes.push(corps)
-      if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 3 } }
+      // ⚠ `echues` ET `desarmes` DIFFERENT ICI AUSSI (constat 5 de la
+      // re-revue : la fixture complice avait resservi, cinquieme fois). Le
+      // serveur en desarme 3 la ou l apercu en annoncait 5 ; les 2 manquantes
+      // ont quitte la file pendant que l hote lisait le dialogue.
+      if (corps && corps.apercu === true) return { ok: true, delais_ref: REF, apercu: { ok: true, echues: 5 } }
       if (corps && corps.delais_ref) return { ok: true, delais_ref: REF, delais: corps.delais, brouillons }
       if (!corps) return { config: { [REF]: { mode: 'test', delais: { reponse_ia: 15, alerte_info: 0 } } } }
       return { ok: true }
@@ -600,15 +604,22 @@ test('LE TEST QUI COMPTE : ANNULER ecrit, et le fil est relu', async () => {
   assert.equal(reel.length, 1)
   assert.equal(reel[0].garder, true, 'l ordre de desarmer part')
   assert.equal(reel[0].propager, true, 'et le reglage est enregistre quand meme')
-  // ⚠ L'INSTANT DE L'APERCU EST REPASSE : sans lui, l ensemble desarme ne
-  // serait pas l ensemble annonce, et la difference partirait au voyageur.
-  // ⚠ ET AUCUN INSTANT NE REPART AU SERVEUR (constat 1 d une revue, de
-  // securite) : une borne venue du navigateur ne peut que REDUIRE l ensemble
-  // desarme, donc laisser partir un brouillon que l hote croit garde.
+  // ⚠ AUCUN INSTANT NE REPART AU SERVEUR (constat 1 d une revue, de SECURITE) :
+  // une borne venue du navigateur ne peut que REDUIRE l ensemble desarme, donc
+  // laisser partir un brouillon que l hote croit garde.
+  //
+  // ⚠ CE BLOC PORTAIT ENCORE, JUSTE AU-DESSUS, LA PHRASE INVERSE — « l instant
+  // de l apercu est repasse : sans lui la difference partirait au voyageur ».
+  // C est celle que la revue a mesuree fausse en trois copies ; les deux autres
+  // avaient ete reecrites, celle-ci etait restee au-dessus de son propre
+  // dementi (releve en re-revue).
   assert.equal('cutoff' in reel[0], false, 'aucune borne ne part du navigateur')
   // Le NOMBRE affiche est celui du SERVEUR, pas celui compte avant.
-  assert.match(b.note(), /^Enregistré\. 3 proposition\(s\) déjà en attente sont gardées pour votre validation/)
-  assert.equal(b.noteOk(), true)
+  assert.match(b.note(), /3 proposition\(s\) déjà en attente sont gardées pour votre validation/,
+    'le nombre du SERVEUR, pas celui de l apercu')
+  assert.match(b.note(), /2 proposition\(s\) annoncée\(s\) n’étaient plus en attente/,
+    'et l ecart avec l annonce se dit : elles sont parties au voyageur')
+  assert.equal(b.noteOk(), false, 'donc la note n est pas verte')
   assert.ok(b.tables.filter(x => x === 'agent_tasks').length > avant,
     'le fil est relu : des echeances ont disparu')
   b.fermer()
@@ -881,5 +892,46 @@ test('LE TEST QUI COMPTE : sous « garder », `deja_prises` se dit AUSSI', async
   assert.match(b.note(), /8 proposition/)
   assert.match(b.note(), /gardées pour votre validation/, 'et la garde se dit aussi')
   assert.equal(b.noteOk(), false, 'la note n est pas verte : des messages peuvent partir')
+  b.fermer()
+})
+
+test('LE TEST QUI COMPTE : si les propositions annoncees ont QUITTE la file, la note le dit', async () => {
+  // ⚠ CONSTAT 1 DE LA RE-REVUE, mesure au banc : l apercu annonce 4 echues, et
+  // le serveur rend `ok:true desarmes:0 deja_prises:0`. La note disait
+  // « Enregistré », VERTE, sans un mot — et le fil n etait meme pas relu, donc
+  // il gardait a l ecran le compte a rebours de propositions deja PARTIES.
+  //
+  // Mecanisme : `deja_prises` ne capte que la course LECTURE -> UPDATE, quelques
+  // millisecondes. La course LARGE — tout le temps pendant lequel
+  // `window.confirm` bloque l hote — fait sortir la tache de
+  // `pending_validation` : elle n est alors plus LUE DU TOUT, donc ni desarmee
+  // ni « deja prise ». Le cron passe toutes les 5 minutes.
+  const { b } = bancEnregistrement({
+    echues: 4, confirme: false,
+    brouillons: { ok: true, desarmes: 0, rearmes: 0, inchanges: 0, deja_prises: 0 }
+  })
+  b.msg.delaisEnCours(REF).reponse_ia = 15
+  const avant = b.tables.filter(x => x === 'agent_tasks').length
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.match(b.note(), /4 proposition\(s\) annoncée\(s\) n’étaient plus en attente/,
+    'les 4 annoncees ont disparu, et ca se dit')
+  assert.equal(b.noteOk(), false, 'la note n est pas verte : des messages sont partis')
+  assert.ok(!/^Enregistré$/.test(b.note()))
+  assert.ok(b.tables.filter(x => x === 'agent_tasks').length > avant,
+    'et le fil est relu : il gardait des comptes a rebours perimes')
+  b.fermer()
+})
+
+test('aucun ecart annonce/realise : la note reste simple et verte', async () => {
+  // La borne de l autre cote : sans ecart, aucune phrase de plus.
+  const { b } = bancEnregistrement({
+    echues: 2, confirme: false,
+    brouillons: { ok: true, desarmes: 2, rearmes: 0, inchanges: 0, deja_prises: 0 }
+  })
+  b.msg.delaisEnCours(REF).reponse_ia = 15
+  await b.msg.enregistrerPanneau(B.corps(b), REF)
+  assert.match(b.note(), /^Enregistré\. 2 proposition\(s\) déjà en attente sont gardées/)
+  assert.ok(!/plus en attente/.test(b.note()), 'aucune phrase d ecart')
+  assert.equal(b.noteOk(), true)
   b.fermer()
 })

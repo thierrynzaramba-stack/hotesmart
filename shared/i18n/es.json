@@ -632,6 +632,7 @@
   "messages.partie_brouillons": "las propuestas ya en espera",
   "messages.partie_consignes": "las instrucciones",
   "messages.partie_deja_prises": "{n} propuesta(s) ya en envío",
+  "messages.partie_envolees": "{n} propuesta(s) anunciada(s) ya no estaban en espera: el envío ya las había tomado",
   "messages.partie_delais": "los plazos",
   "messages.pause_label": "Automatización en pausa",
   "messages.paused": "Automatización en pausa en este alojamiento",

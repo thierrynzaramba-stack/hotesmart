@@ -477,7 +477,11 @@ module.exports = async (req, res) => {
             // qui franchissait son echeance pendant que l'hote lisait le
             // dialogue partait quand meme. Le predicat est l'horloge du
             // serveur, et le nombre annonce est un PLANCHER de ce qui sera
-            // garde. Seul un booleen traverse.
+            // garde. Seuls DEUX booleens du corps decident du sort des
+            // brouillons — `garder` ici et `propager` plus haut —, et les deux
+            // sont lus en comparaison STRICTE : une chaine, un nombre ou un
+            // objet ne desarme ni ne libere rien. (Ma phrase disait « seul un
+            // booleen traverse » : trop etroite, relevee en revue.)
             const garderEchues = (req.body || {}).garder === true;
             brouillons = await appliquerDelaiAuxBrouillons(supabase, {
               userId, propertyRef: ref, delais: delaisValides, maintenant: Date.now(),

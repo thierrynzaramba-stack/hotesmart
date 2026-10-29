@@ -2051,6 +2051,9 @@ async function enregistrerLePanneau (corps, ref) {
   // l'etape 1 — sinon la note lit un identifiant hors de portee, et le banc
   // rend `ReferenceError: gardees is not defined` sur onze tests.
   let gardees = 0
+  // Combien de propositions la confirmation a ANNONCEES. Compare au bilan du
+  // serveur, elle dit si l'arriere a bouge entre les deux appels.
+  let annoncees = 0
 
   // 1. Les delais (cible `delais`).
   // ⚠ ET LES BROUILLONS DEJA EN ATTENTE SUIVENT (decision de Thierry du
@@ -2169,6 +2172,7 @@ async function enregistrerLePanneau (corps, ref) {
         // SERVEUR, apres l'ecriture. Le poser des la question faisait dire
         // « 4 propositions sont gardees » alors que l'ecriture avait echoue et
         // qu'aucune ne l'etait.
+        annoncees = Number(ap.echues) || 0
         garder = !window.confirm(t('messages.delai_arriere_confirm', { n: ap.echues }))
       }
     }
@@ -2189,8 +2193,22 @@ async function enregistrerLePanneau (corps, ref) {
         // serveur pouvait rendre « 1 gardee, 8 deja prises » et l'ecran
         // affichait une note VERTE qui ne parlait que de la premiere. C'est le
         // seul cas ou un message peut partir avec le reglage d'avant.
-        if (Number(b.deja_prises) > 0) {
-          echoues.push(t('messages.partie_deja_prises', { n: Number(b.deja_prises) }))
+        const prises = Number(b.deja_prises) || 0
+        if (prises > 0) {
+          echoues.push(t('messages.partie_deja_prises', { n: prises }))
+        }
+        // ⚠ ET CE QUI A DISPARU DE LA FILE SE DIT AUSSI (constat 1 de la
+        // derniere revue, mesure au banc). `deja_prises` ne capte que la course
+        // LECTURE -> UPDATE, quelques millisecondes. La course LARGE — tout le
+        // temps pendant lequel `window.confirm` bloque l'hote — fait sortir la
+        // tache de `pending_validation` : elle n'est alors plus LUE DU TOUT,
+        // donc ni desarmee ni « deja prise ». Le bilan rendait 0 et 0, et
+        // l'ecran affichait « Enregistré » en VERT, sans un mot sur les
+        // propositions annoncees — qui etaient parties au voyageur. Le cron
+        // passe toutes les 5 minutes : la fenetre est celle de sa lecture.
+        const manquantes = Math.max(0, annoncees - gardees - prises)
+        if (manquantes > 0) {
+          echoues.push(t('messages.partie_envolees', { n: manquantes }))
         }
       } else {
         logger.error('Messages', 'garder brouillons', (b && b.motif) || 'bilan absent')
@@ -2236,9 +2254,20 @@ async function enregistrerLePanneau (corps, ref) {
     // doute. Et le refus de l'hote, lui, ne peut pas produire la note
     // contradictoire : il exige une reponse d'apercu, qu'un endpoint ancien ne
     // rend pas.
+    // ⚠ `deja_prises` COMPTE DANS CE TOTAL : ces taches ont change de statut,
+    // donc le fil doit les relire. Avec `0 + 0` il ne se rechargeait pas, et il
+    // gardait a l'ecran le compte a rebours de propositions deja parties
+    // (constat 1 de la derniere revue).
     brouillonsRepris = (!b || b.ok !== true)
       ? 1
-      : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0)
+      : (Number(b.desarmes) || 0) + (Number(b.rearmes) || 0) + (Number(b.deja_prises) || 0)
+        // ⚠ ET UN CHOIX DE GARDE RELIT TOUJOURS LE FIL (constat 1 de la
+        // derniere revue). Les propositions annoncees ont forcement bouge : soit
+        // elles sont desarmees — leur compte a rebours doit disparaitre de la
+        // bulle —, soit elles ont quitte la file pendant que l'hote lisait le
+        // dialogue, et la bulle affiche encore une echeance perimee. Avec
+        // `0 + 0 + 0` le fil n'etait pas relu, et il mentait dans les deux cas.
+        + (garder ? annoncees : 0)
   } catch (err) {
     logger.error('Messages', 'delais', err)
     // ⚠ UN APPEL QUI N'A PAS REPONDU NE DIT PAS CE QUI A ETE PRIS (constat 5).

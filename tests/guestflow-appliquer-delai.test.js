@@ -1006,3 +1006,37 @@ test('LE TEST QUI COMPTE : une panne d ecriture sous garder REFUSE, elle ne s av
   assert.equal(r.motif, 'ecriture_impossible')
   assert.equal(r.desarmes, 0, 'et il ne pretend rien avoir garde')
 })
+
+test('LE TEST QUI COMPTE : l apercu n ecrit RIEN, meme sous `garderEchues`', async () => {
+  // ⚠ CONSTAT 3 DE LA RE-REVUE, mesure : j avais retire cette garde en la
+  // croyant morte — le endpoint ne transmet jamais `garderEchues` sur son
+  // chemin d apercu. Mais ce module est EXPORTE, et son contrat dit
+  // « `apercu` : ne RIEN ecrire, seulement compter ». La garde generale vit en
+  // AVAL de la branche « garder », donc elle ne la couvrait pas : un appelant
+  // qui passe les deux ECRIVAIT, et deux affirmations du module etaient fausses.
+  const b = banc({ taches: [tache({
+    id: 'echue', created_at: new Date(T0 - 5 * 60 * MINUTE).toISOString(),
+    send_after: new Date(T0 - 3 * 60 * MINUTE).toISOString()
+  })] })
+  const r = await lancer(b, DANS_60, { garderEchues: true, apercu: true })
+  assert.equal(r.echues, 1)
+  assert.equal(r.desarmes, 1, 'il dit ce qu il ferait')
+  assert.equal(b.etat.updates.length, 0, 'et il n ecrit RIEN')
+  assert.notEqual(par(b, 'echue').send_after, null, 'la tache est intacte')
+})
+
+test('LE TEST QUI COMPTE : la SIGNATURE du writer ne porte aucune borne de temps hors `maintenant`', async () => {
+  // ⚠ CONSTAT 2 DE LA RE-REVUE, ET C EST UN FAUX VERT DE MON FAIT. Mes
+  // garde-fous grepaient le NOM `cutoff` : la revue a reintroduit le mecanisme
+  // EXACT sous un autre nom (`borneApercu`, `instantApercu`) et les trois
+  // fichiers restaient VERTS. Un grep sur un nom mesure un nom ; ce qui compte
+  // est qu AUCUN parametre de temps autre que `maintenant` n entre dans ce
+  // module — parce qu une borne ancienne desarme MOINS, donc elle fait partir
+  // ce que l hote croit garde.
+  const src = lire('lib/guestflow/appliquer-delai.js')
+  const m = /async function appliquerDelaiAuxBrouillons \(sb, \{([^}]*)\}\)/.exec(src)
+  assert.ok(m, 'la signature est lisible')
+  const cles = m[1].split(',').map(x => x.trim()).filter(Boolean)
+  assert.deepEqual(cles, ['userId', 'propertyRef', 'delais', 'maintenant', 'apercu', 'garderEchues'],
+    'un parametre de plus doit etre un choix conscient, pas une borne qui se glisse')
+})
