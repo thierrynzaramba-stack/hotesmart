@@ -1096,6 +1096,17 @@ test('LE TEST QUI COMPTE : la regle SQL et la regle JS disent la MEME chose', as
 // Les derniers COMMENTAIRES — bloc « Derniers avis » de l'accueil (etape 2)
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ⚠ L'INSTANT DE REFERENCE DE CETTE SECTION, ET POURQUOI IL EXISTE.
+// `derniersAvis` ACCEPTE `maintenant` : la regle du depot dit alors « dates
+// figees », et c'est le bon choix — les fixtures ci-dessous portent leur date
+// dans leur numero (`AVIS(20)` est le 20 octobre), et cet ordre est ce que
+// plusieurs tests mesurent. Mais TREIZE appels sur treize OUBLIAIENT de
+// l'injecter : ils retombaient sur `Date.now()`, donc sur une fenetre de
+// 30 jours qui glisse, et les fixtures d'octobre en sortaient. Mesure du
+// 28 octobre 2026 : SIX rouges a partir de J+30, zero a l'heure reelle. Un
+// test a dates figees qui n'injecte pas le temps est un test a retardement.
+const T_AVIS = Date.parse('2026-10-25T10:00:00Z')
+
 const AVIS = (n, extra = {}) => ({
   id: n, user_id: 'moi', statut: 'confirme', is_hidden: false,
   property_id_ref: '209413', ota: 'airbnb', overall_score: 9.6,
@@ -1146,7 +1157,7 @@ test("LE TEST QUI COMPTE : le texte PUBLIC passe avant le texte brut", async () 
   const r = await derniersAvis(fauxClient([AVIS(20, {
     content_public: 'Sejour parfait.',
     content: 'Sejour parfait. EN PRIVE : la douche fuit.'
-  })]), { userId: 'moi' })
+  })]), { userId: 'moi', maintenant: T_AVIS })
   assert.strictEqual(r[0].texte, 'Sejour parfait.',
     'le texte brut (public + prive concatenes) est affiche sans etiquette')
   assert.ok(!r[0].texte.includes('EN PRIVE'))
@@ -1154,7 +1165,7 @@ test("LE TEST QUI COMPTE : le texte PUBLIC passe avant le texte brut", async () 
   // perdrait un commentaire reel.
   const repli = await derniersAvis(fauxClient([AVIS(21, {
     content_public: '', content: 'Tres bon accueil.'
-  })]), { userId: 'moi' })
+  })]), { userId: 'moi', maintenant: T_AVIS })
   assert.strictEqual(repli[0].texte, 'Tres bon accueil.')
 })
 
@@ -1164,7 +1175,7 @@ test("LE TEST QUI COMPTE : ce sont les DERNIERS, et le tri le dit", async () => 
   // dernier en croyant lire ceux d'hier. Le double trie vraiment depuis ce lot.
   const journal = []
   const sb = fauxClient([AVIS(20), AVIS(22), AVIS(18), AVIS(24), AVIS(16)], journal)
-  const out = await derniersAvis(sb, { userId: 'moi', maintenant: Date.parse('2026-10-25T10:00:00Z') })
+  const out = await derniersAvis(sb, { userId: 'moi', maintenant: T_AVIS })
   assert.strictEqual(out.length, 3, 'la limite de trois n est pas posee')
   assert.deepEqual(out.map(a => a.id), ['24', '22', '20'], 'les derniers, pas les premiers')
   const q = journal.find(j => j.table === 'ota_reviews')
@@ -1179,7 +1190,7 @@ test("LE TEST QUI COMPTE : un perimetre VIDE rend zero avis, jamais tout le comp
   // tranchee AVANT la requete, sinon elle ne borne rien.
   const journal = []
   const sb = fauxClient([AVIS(20), AVIS(21)], journal)
-  const out = await derniersAvis(sb, { userId: 'moi', refs: [] })
+  const out = await derniersAvis(sb, { userId: 'moi', maintenant: T_AVIS, refs: [] })
   assert.deepEqual(out, [])
   assert.strictEqual(journal.length, 0, 'une requete est partie malgre un perimetre vide')
 })
@@ -1187,7 +1198,7 @@ test("LE TEST QUI COMPTE : un perimetre VIDE rend zero avis, jamais tout le comp
 test('le perimetre borne la lecture, et le compte aussi', async () => {
   const journal = []
   const sb = fauxClient([AVIS(20), AVIS(21, { property_id_ref: 'autre' })], journal)
-  const out = await derniersAvis(sb, { userId: 'moi', refs: ['209413'] })
+  const out = await derniersAvis(sb, { userId: 'moi', maintenant: T_AVIS, refs: ['209413'] })
   assert.deepEqual(out.map(a => a.bien_ref), ['209413'])
   const q = journal.find(j => j.table === 'ota_reviews')
   assert.ok(q.ins.some(f => f.colonne === 'property_id_ref'), 'la borne de bien manque')
@@ -1200,12 +1211,12 @@ test("LE TEST QUI COMPTE : le nom du voyageur suit `reservations`, et la colonne
   // donnee qu'on ne demande pas a la base ne peut pas fuiter plus tard par un
   // oubli d'affichage.
   const sansNom = []
-  await derniersAvis(fauxClient([AVIS(20)], sansNom), { userId: 'moi' })
+  await derniersAvis(fauxClient([AVIS(20)], sansNom), { userId: 'moi', maintenant: T_AVIS })
   assert.ok(!/guest_name/.test(sansNom[0].select || ''),
     'la colonne guest_name est demandee sans le droit `reservations`')
 
   const avecNom = []
-  const out = await derniersAvis(fauxClient([AVIS(20)], avecNom), { userId: 'moi', avecNom: true })
+  const out = await derniersAvis(fauxClient([AVIS(20)], avecNom), { userId: 'moi', maintenant: T_AVIS, avecNom: true })
   assert.match(avecNom[0].select || '', /guest_name/)
   assert.strictEqual(out[0].voyageur, 'Claire B.',
     'le serveur doit descendre « Claire B. », jamais le nom complet')
@@ -1220,7 +1231,7 @@ test("LE TEST QUI COMPTE : le texte est exige EN SQL, et la garde JS reste", asy
   // Le SQL d'abord : sans lui, la lecture rapatrie des avis sans texte pour
   // n'en garder que trois — le defaut que tout ce fichier evite.
   const journal = []
-  await derniersAvis(fauxClient([AVIS(20)], journal), { userId: 'moi' })
+  await derniersAvis(fauxClient([AVIS(20)], journal), { userId: 'moi', maintenant: T_AVIS })
   const q = journal.find(j => j.table === 'ota_reviews')
   assert.deepEqual(q.ors, ['content.neq.,content_public.neq.'],
     'le predicat de texte n est plus pose en SQL')
@@ -1230,7 +1241,7 @@ test("LE TEST QUI COMPTE : le texte est exige EN SQL, et la garde JS reste", asy
   // pour lui. La carte, elle, serait vide.
   const out = await derniersAvis(fauxClient([
     AVIS(21, { content_public: '   ', content: '  ' }), AVIS(22)
-  ]), { userId: 'moi' })
+  ]), { userId: 'moi', maintenant: T_AVIS })
   assert.deepEqual(out.map(a => a.id), ['22'],
     'un avis dont le texte n est que des espaces produit une carte vide')
 })
@@ -1240,22 +1251,22 @@ test("un avis SANS TEXTE n est pas un commentaire", async () => {
   // vide. `notesDuPerimetre` les garde — elles comptent dans la moyenne —, ce
   // bloc non, et c'est la seule difference entre les deux populations.
   const out = await derniersAvis(
-    fauxClient([AVIS(20, { content_public: '', content: '' }), AVIS(21)]), { userId: 'moi' })
+    fauxClient([AVIS(20, { content_public: '', content: '' }), AVIS(21)]), { userId: 'moi', maintenant: T_AVIS })
   assert.deepEqual(out.map(a => a.id), ['21'])
 })
 
 test('la note descend deja sur 5, convertie une seule fois', async () => {
-  const out = await derniersAvis(fauxClient([AVIS(20, { overall_score: 9.6, ota: 'airbnb' })]), { userId: 'moi' })
+  const out = await derniersAvis(fauxClient([AVIS(20, { overall_score: 9.6, ota: 'airbnb' })]), { userId: 'moi', maintenant: T_AVIS })
   assert.strictEqual(out[0].note_sur_5, 4.8, '9,6 sur 10 vaut 4,8 sur 5')
   // Une source dont l echelle est inconnue ne se convertit pas (dette 76).
-  const inconnue = await derniersAvis(fauxClient([AVIS(21, { ota: 'canal-inconnu' })]), { userId: 'moi' })
+  const inconnue = await derniersAvis(fauxClient([AVIS(21, { ota: 'canal-inconnu' })]), { userId: 'moi', maintenant: T_AVIS })
   assert.strictEqual(inconnue[0].note_sur_5, null,
     'une echelle inconnue doit rendre `null`, jamais une note supposee')
 })
 
 test("une erreur de lecture se DIT, elle ne devient pas une liste vide", async () => {
   const sb = fauxClient([AVIS(20)], [], { message: 'boom' })
-  const out = await derniersAvis(sb, { userId: 'moi' })
+  const out = await derniersAvis(sb, { userId: 'moi', maintenant: T_AVIS })
   assert.deepEqual(out, { erreur: true },
     'une panne rendue comme `[]` ferait afficher « Pas encore d avis » a un hote qui en a')
 })
